@@ -38,7 +38,7 @@
 - (원래 4615행) 스토리지 소비 전력(v2.667) — 경로 표는 `storage/power.js POWER_PATHS` 하나이고, 못 읽은 장비는 사유별로 센다
 - (원래 5142행) v2.635 — 베어메탈 스토리지 디스크 사용량 12시간 이력. 새 수집이 아니라 '최신 결과를 떼어 적재' 한다
 - (v2.749) 게스트 파티션 사용률 경보 — 원천은 게스트 디스크 수집의 part_latest · 경로 모양으로 OS · 정규식 없는 패턴 · 메일은 아이실론 코어
-- (v2.788) 스토리지 사용량 보고서(일간·주간·월간 표 · LUN·파일시스템 · CSV · 법인/종류 비교 · 예약 메일)
+- (v2.789) 스토리지 사용량 보고서(일간·주간·월간 표 · LUN·파일시스템 · CSV · 법인/종류 비교 · 예약 메일)
 
 ## 본문
 
@@ -715,9 +715,9 @@
     · 추이는 kind 없이 **한 번** 조회해 세 보기(전체 합계·그룹별 합산·전체 서버)를 그린다 — 보기·단위·강조는 다시 부르지 않는다. 7일 응답은 `onSeven` 으로 맨 위 요약·주의 카드가 같이 쓴다(따로 부르지 말 것). 폴링 금지는 그대로.
     · 90% 도달은 7일 온전한 점의 **선형 추정**이고 증가가 0 이하·점 2개 미만이면 null(말하지 않는다). 부분 합 점은 변화 계산에서 뺀다. 그룹 색은 이름 가나다 자리로 정한다(사용량 순위가 바뀌어도 색이 바뀌지 않게).
     · 셸(← 특수 기능 · 제목)은 SpecialTools 가 그린다 — 시안의 breadcrumb·h1 은 넣지 않았다.
-- ⚠⚠ **v2.788 — 스토리지 사용량 보고서(도구 키 `storage-usage`). 표·합계는 `storage/usageReport.js`(순수), 조회는 `usageData.js` 하나(화면·메일 공용), 하위 항목 계약은 `storage/resources.js`**
+- ⚠⚠ **v2.789 — 스토리지 사용량 보고서(도구 키 `storage-usage`). 표·합계는 `storage/usageReport.js`(순수), 조회는 `usageData.js` 하나(화면·메일 공용), 하위 항목 계약은 `storage/resources.js`**
   (사용자 요청 "스토리지 사용량을 일간/주간 별로 이렇게 정리"(엑셀 캡처) · "표 형식 기본 · CSV export · 법인별/같은 종류 스토리지별 비교" · 선택 "LUN·파일시스템까지 · 새 메뉴 · 표준 검증" +
-  "사용자가 지정한 시간에 전체 사용량을 이메일로". 회귀 `server/test/storageUsage2788.test.js`·`storageResources2788.test.js` + 웹 `storageUsageText.test.js`(서버 사본 대조)):
+  "사용자가 지정한 시간에 전체 사용량을 이메일로". 회귀 `server/test/storageUsage2789.test.js`·`storageResources2789.test.js` + 웹 `storageUsageText.test.js`(서버 사본 대조)):
   · 기간은 '그 날 기준 값' — 일간은 그 날 관측만(앞날 값을 끌어오지 않는다), 주간은 기준 요일(기본 월 — 캡처 날짜) + 직전 6일, 월간은 그 달 마지막 날(이번 달은 오늘). 기준일이 아니면 `exact:false` 와 관측일('≈').
   · 합계는 크기·사용량을 **둘 다** 읽은 장비만 · 빠진 장비는 `partial`(값 있음 N/M대) · 이력이 늦게 시작한 장비·꺼진 장비는 그 기간에 기대하지 않는다(`expectedIn`). 직전 대비·범위 변화는
     양쪽이 완전한 합계일 때만, 추이 차트는 부분 합 점을 끊는다. 웹 `storageUsageText.js` 의 `aggregateCells`·`deltaOf`·`expectedIn` 은 사본이다 — **한쪽만 고치지 말 것**(웹 테스트가 대조).
@@ -727,7 +727,7 @@
   · Unity SSH 는 `uemcli /stor/prov/luns/lun show -detail`·`/stor/prov/fs show -detail` 을 **맨 뒤 lowPriority**(전원 뒤 · 시한 25초)로 돈다 — 앞 항목(용량·상태·버전·전원)을 밀어내지 않고
     예산 산수(`unitySshBudget2528`)에 들지 않는다. REST 는 `lun`(sizeTotal·sizeAllocated)·`filesystem`(sizeTotal·sizeUsed)을 따로 조회한다(실패가 다른 섹션을 깨지 않게).
     LUN '사용' 은 풀 할당량(Current allocation)이고 호스트가 본 사용량이 아니다 — 화면·메일이 그렇게 적는다.
-  · ⚠ 정직 기록: **이 장비의 LUN·파일시스템 출력(uemcli·REST)은 본 적이 없다** — 키는 Dell CLI·REST 문서 기준이고 픽스처(`uemcli-{lun,fs}-detail-2788.txt`)는 합성이다(값은 사용자 캡처의 GB 를 바이트로).
+  · ⚠ 정직 기록: **이 장비의 LUN·파일시스템 출력(uemcli·REST)은 본 적이 없다** — 키는 Dell CLI·REST 문서 기준이고 픽스처(`uemcli-{lun,fs}-detail-2789.txt`)는 합성이다(값은 사용자 캡처의 GB 를 바이트로).
     첫 실수집에서 'unparsed'·'failed' 가 보이면 상세의 CLI 원문으로 키를 좁힐 것. VMware 데이터스토어(`/stor/prov/vmware/*`)로 만든 LUN·NFS 가 위 두 목록에 나오는지도 확인하지 못했다.
   · 화면 `web/src/views/tools/StorageUsageTool.jsx`(탭: 날짜별 표(엑셀형 — 머리 3줄 법인 › 장비 › 지표, 첫 열 고정) · 장비별 표(+ LUN·파일시스템 · 최근 수집 상태) · 법인별 비교 · 종류별 비교 · 메일 발송(관리자)).
     법인·종류 필터는 `DeviceFacetBar`(다른 스토리지 화면과 같은 메뉴)이고 거른 뒤 묶는다 — KPI·합계·차트·CSV 가 전부 그 부분집합이다. 폴링하지 않는다(마운트 + 조건 변경 + 새로고침).

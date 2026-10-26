@@ -214,7 +214,7 @@ test('풀 합계와 시스템 전체가 다르면 교차 경고를 낸다', () =
  * 사용자가 그 출력을 직접 제공했다(모델 `Unity 480F` · 버전 · 시리얼). `-s spinfo` 는 그대로 안 부른다.
  */
 test('★ 용량·상태 명령은 3개 그대로이고 CSV 후보가 없다', () => {
-  // v2.788: lowPriority 항목(전원·LUN·파일시스템)은 예산이 남을 때만 맨 뒤에서 돈다 — 용량·상태 경로가 아니다
+  // v2.789: lowPriority 항목(전원·LUN·파일시스템)은 예산이 남을 때만 맨 뒤에서 돈다 — 용량·상태 경로가 아니다
   //   (그 성질은 unitySshBudget2528.test.js 가 고정한다). 예전 조건 `key !== 'power'` 를 성질로 바꿨다.
   const core = SPECS.filter((s) => s.key !== 'version' && !s.lowPriority);
   assert.equal(core.length, 3, `용량·상태 명령이 ${core.length}개다 — 늘리려면 예산 산수를 먼저 할 것`);
@@ -228,7 +228,7 @@ test('★ 용량·상태 명령은 3개 그대로이고 CSV 후보가 없다', (
   // v2.664: 사용자 선택("Unity 부터 수집 추가")으로 전원 항목 하나만 spinfo 를 부른다 — lowPriority·맨 뒤·required 아님.
   const spinfo = SPECS.filter((s) => s.cmds.some((c) => /svc_diag\s+-s/.test(c)));
   assert.deepEqual(spinfo.map((s) => s.key), ['power'], 'svc_diag -s spinfo 는 전원 항목에서만 부른다');
-  // v2.788: 맨 뒤 lowPriority 묶음에 LUN·파일시스템이 더해졌다 — 전원은 그 묶음의 **첫 자리**(기존 기능 우선순위 유지)이고
+  // v2.789: 맨 뒤 lowPriority 묶음에 LUN·파일시스템이 더해졌다 — 전원은 그 묶음의 **첫 자리**(기존 기능 우선순위 유지)이고
   //   뒤에는 lowPriority 만 온다(앞 항목을 밀어내지 못한다는 원래 의도는 그대로).
   const pi = SPECS.indexOf(spinfo[0]);
   assert.ok(spinfo[0].lowPriority && !spinfo[0].required && SPECS.slice(pi).every((s) => s.lowPriority)

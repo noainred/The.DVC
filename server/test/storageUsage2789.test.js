@@ -1,5 +1,5 @@
 /**
- * storageUsage2788.test.js — 스토리지 사용량 보고서(일간·주간·월간 표 · 비교 · 예약 메일) 회귀(v2.788).
+ * storageUsage2789.test.js — 스토리지 사용량 보고서(일간·주간·월간 표 · 비교 · 예약 메일) 회귀(v2.789).
  *
  * 사용자 요청(2026-10-26): "스토리지 사용량을 일간/주간 별로 이렇게 정리해서 보는 기능"(엑셀 캡처) · "표 형식 기본 · CSV export ·
  *   법인별/같은 종류 스토리지별 비교" + "사용자가 지정한 시간에 전체 사용량을 이메일로".
@@ -21,7 +21,7 @@ import net from 'node:net';
 import http from 'node:http';
 import express from 'express';
 
-const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'storageusage2788-'));
+const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'storageusage2789-'));
 Object.assign(process.env, { CONFIG_DIR: TMP, DATA_SOURCE: 'live', AUTH_ENABLED: 'false' });
 delete process.env.CENTRAL_URL;
 delete process.env.CENTRAL_TOKEN;

@@ -1,5 +1,5 @@
 /**
- * storage/usageData.js — 스토리지 사용량 보고표의 **조회**(v2.788). 화면 라우트(`/tools/storage-usage`)와 예약 메일(`usageMail.js`)이
+ * storage/usageData.js — 스토리지 사용량 보고표의 **조회**(v2.789). 화면 라우트(`/tools/storage-usage`)와 예약 메일(`usageMail.js`)이
  * 이 함수 하나를 쓴다 — 두 벌이면 메일의 숫자와 화면의 숫자가 갈라진다. 판정·계산은 `usageReport.js`(순수)가 한다.
  *
  * ⚠ 장비 왕복 0 — 일 롤업(capacity_daily·resource_daily)과 최신 스냅샷만 읽는다. 그래도 장비 × 기간의 행을 읽으므로

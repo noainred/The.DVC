@@ -22,7 +22,7 @@ import { numOrNull } from '../util/numOrNull.js';
 import { chunkedDelete, createPruneFlight } from '../util/chunkedPrune.js';
 import { createYielder } from '../util/timeSlice.js';   // v2.743 DB-01: 합계 추이 조각 사이 양보(시간 기준)
 import { pushAll } from '../util/pushAll.js';
-import { normalizeResourceList, resourceKey } from './resources.js';   // v2.788 하위 항목
+import { normalizeResourceList, resourceKey } from './resources.js';   // v2.789 하위 항목
 
 // DB 저장 경로 설정(v2.379)을 따른다 — dbLocation 이 지정한 dbDir 아래, 없으면 configDir.
 // (vmperf/vmtrack 과 동일 규약. MIGRATABLE 에 이 파일이 있어 미적용 시 마이그레이션 후
@@ -140,7 +140,7 @@ async function openInner() {
          용량 이력은 '측정 기준' 이 바뀌면 이전 값과 이어 붙일 수 없다. 그 사실을 남기지
          않으면 화면의 '관측 N일' 이 이유 없이 1일로 줄어 사용자가 수집 장애로 오해한다. */
       CREATE TABLE IF NOT EXISTS storage_meta (k TEXT PRIMARY KEY, v TEXT NOT NULL);
-      /* 하위 항목(LUN·파일시스템) 일 롤업(v2.788) — 사용자 요청 "스토리지 사용량을 일간/주간 별로" + 선택 "LUN·파일시스템까지".
+      /* 하위 항목(LUN·파일시스템) 일 롤업(v2.789) — 사용자 요청 "스토리지 사용량을 일간/주간 별로" + 선택 "LUN·파일시스템까지".
          capacity_daily 와 같은 규칙: 하루 1행 · 그 날의 마지막 관측 · 더 늦은 관측만 갱신 · samples 누적 · 보존은 일 롤업 보존일.
          rkey = storage/resources.js resourceKey(종류 + 장비 id, 없으면 이름) — 이름을 바꿔도 이력이 이어진다. name 은 그 날의 이름.
          크기를 못 읽은 항목은 행을 만들지 않는다(0 을 지어내지 않는다). */
@@ -259,7 +259,7 @@ async function openInner() {
       prune1: conn.prepare('DELETE FROM api_history WHERE rowid IN (SELECT rowid FROM api_history WHERE ts < ? LIMIT ?)'),
       prune2: conn.prepare('DELETE FROM capacity_history WHERE rowid IN (SELECT rowid FROM capacity_history WHERE ts < ? LIMIT ?)'),
       prune3: conn.prepare('DELETE FROM capacity_daily WHERE day < ?'),
-      // v2.788 하위 항목 일 롤업 — capacity_daily 와 같은 upsert 규칙(더 늦은 관측만 갱신).
+      // v2.789 하위 항목 일 롤업 — capacity_daily 와 같은 upsert 규칙(더 늦은 관측만 갱신).
       upRes: conn.prepare(`INSERT INTO resource_daily
           (device_id, rkey, day, last_ts, kind, name, pool, total_bytes, used_bytes, samples)
         VALUES (?,?,?,?,?,?,?,?,?,1)
@@ -350,7 +350,7 @@ function runPrune(db) {
     const a = await chunkedDelete(db.prune1, [key.cut], { label: 'storage api_history' });
     const c = await chunkedDelete(db.prune2, [key.cut], { label: 'storage capacity_history' });
     const d = Number(db.prune3.run(key.dayCut)?.changes || 0);
-    // v2.788: 하위 항목 일 롤업도 같은 보존일(청크 — 아래 prune4 주석).
+    // v2.789: 하위 항목 일 롤업도 같은 보존일(청크 — 아래 prune4 주석).
     const r = await chunkedDelete(db.prune4, [key.dayCut], { label: 'storage resource_daily' });
     return { apiHistory: a.deleted, capacityHistory: c.deleted, capacityDaily: d, resourceDaily: r.deleted, done: a.done && c.done && r.done };
   });
@@ -447,7 +447,7 @@ export async function saveCapacityPoint(snap) {
 }
 
 /**
- * v2.788 — 하위 항목(LUN·파일시스템) 일 롤업 적재. 장비 점이 적재될 때만 부른다(같은 중복·적격 가드를 공유한다).
+ * v2.789 — 하위 항목(LUN·파일시스템) 일 롤업 적재. 장비 점이 적재될 때만 부른다(같은 중복·적격 가드를 공유한다).
  * ⚠ 한 스냅샷에 수십~수백 행이므로 **트랜잭션 하나**로 묶는다(CLAUDE.md '대량 SQLite write 는 트랜잭션' — 무트랜잭션
  *   6천 행 25초 블로킹 사고). 안에 await 가 없어 다른 트랜잭션과 겹치지 않는다.
  * ⚠ 크기를 못 읽은 항목은 행을 만들지 않는다 · 사용량을 못 읽으면 null 로 둔다(0 이 아니다).
@@ -474,7 +474,7 @@ function saveResourceRows(db, snap, day, ts) {
 }
 
 /**
- * v2.788 — 하위 항목 일 롤업 조회 [fromDay, toDay]. **일 구간 조각**(기본 31일)으로 나눠 읽고 조각 사이에 양보한다
+ * v2.789 — 하위 항목 일 롤업 조회 [fromDay, toDay]. **일 구간 조각**(기본 31일)으로 나눠 읽고 조각 사이에 양보한다
  * (요청 경로의 큰 조회 — perf-db 규약 '조각 + 시간 기준 양보'). deviceIds 가 있으면 그 장비만 돌려준다.
  * @returns {Promise<{device_id:string,rkey:string,day:number,kind:string,name:string,pool:string|null,total_bytes:number,used_bytes:number|null}[]>}
  */
@@ -721,7 +721,7 @@ export async function resetCapacityHistory(deviceIds, { reason = '측정 기준 
     for (const id of ids) {
       const a = db.delCapDev.run(id);
       const b = db.delDailyDev.run(id);
-      const c = db.delResDev.run(id);   // v2.788 — 하위 항목 이력도 같은 기준 재시작
+      const c = db.delResDev.run(id);   // v2.789 — 하위 항목 이력도 같은 기준 재시작
       const n = Number(a?.changes || 0) + Number(b?.changes || 0) + Number(c?.changes || 0);
       rows += n;
       if (n > 0) devices += 1;

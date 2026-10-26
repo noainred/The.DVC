@@ -144,7 +144,7 @@ export function demoStorageSnapshot(dev, t = Date.now(), now = t) {
       snap.media = { hdd: { totalBytes: total - ssdT, usedBytes: used - ssdU, pct: r2((used - ssdU) / (total - ssdT) * 100) }, ssd: { totalBytes: ssdT, usedBytes: ssdU, pct: r2(ssdU / ssdT * 100) } };
     }
     if (spec.type === 'unity480') {
-      // v2.788 — 하위 항목(LUN·파일시스템) 데모. 사용자 캡처의 모양(SAN 큰 LUN 1개 + NAS 파일시스템 여럿)을 흉내 낸다.
+      // v2.789 — 하위 항목(LUN·파일시스템) 데모. 사용자 캡처의 모양(SAN 큰 LUN 1개 + NAS 파일시스템 여럿)을 흉내 낸다.
       //   이름·크기는 합성이다. 사용량은 장비 사용률을 따라 완만히 늘어난다(증감 열이 비지 않게).
       const GiB = 1024 ** 3;
       const pctNow = usedPctAt(spec, t, now) / 100;

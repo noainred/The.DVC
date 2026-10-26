@@ -1,13 +1,13 @@
 /**
- * storageResources2788.test.js — 스토리지 하위 항목(LUN·파일시스템) 수집·정제 회귀(v2.788).
+ * storageResources2789.test.js — 스토리지 하위 항목(LUN·파일시스템) 수집·정제 회귀(v2.789).
  *
  * 사용자 요청(2026-10-26): 엑셀 캡처처럼 Unity480 아래 `SAN Davinci_01` · `NAS sandbox` 행을 일간/주간으로 보기 —
  * 선택 "LUN·파일시스템까지".
  *
- * ⚠ 픽스처 `uemcli-{lun,fs}-detail-2788.txt` 는 **합성**이다 — 이 장비의 두 출력은 본 적이 없고, 형식은 Unisphere CLI
+ * ⚠ 픽스처 `uemcli-{lun,fs}-detail-2789.txt` 는 **합성**이다 — 이 장비의 두 출력은 본 적이 없고, 형식은 Unisphere CLI
  *   가이드 예시 + 실장비로 확인된 풀 출력 규칙(` = ` · `N:` · 앞의 정수 바이트)을 따랐다. 크기·사용량 값은 사용자 캡처의
  *   GB 값을 바이트로 옮긴 것이다(122880.0 GB → 131941395333120). 실출력을 받으면 픽스처를 그것으로 바꿀 것.
- *   프롬프트가 첫 레코드에 붙는 형태(`uemcli-fs-prompt-inline-2788.txt`)도 함께 둔다(v2.544 규약).
+ *   프롬프트가 첫 레코드에 붙는 형태(`uemcli-fs-prompt-inline-2789.txt`)도 함께 둔다(v2.544 규약).
  */
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -26,7 +26,7 @@ const fx = (n) => fs.readFileSync(path.join(here, 'fixtures', n), 'utf8');
 const G = 1024 ** 3;
 
 test('LUN 파서 — 크기와 할당량(Current allocation)을 앞의 정수 바이트로 읽는다', () => {
-  const luns = parseLuns(stripUemcliBanner(fx('uemcli-lun-detail-2788.txt')));
+  const luns = parseLuns(stripUemcliBanner(fx('uemcli-lun-detail-2789.txt')));
   assert.equal(luns.length, 2);
   const d = luns[0];
   assert.equal(d.name, 'Davinci_01');
@@ -39,7 +39,7 @@ test('LUN 파서 — 크기와 할당량(Current allocation)을 앞의 정수 �
 });
 
 test('파일시스템 파서 — Size·Size used, 이력 키는 리소스 ID(res_N)', () => {
-  const list = parseFilesystems(stripUemcliBanner(fx('uemcli-fs-detail-2788.txt')));
+  const list = parseFilesystems(stripUemcliBanner(fx('uemcli-fs-detail-2789.txt')));
   assert.deepEqual(list.map((x) => x.name), ['temp_share', 'spitforebackup', 'sandbox', 'repo', 'dvc_portal', 'dvc_datakey']);
   const sb = list.find((x) => x.name === 'sandbox');
   assert.equal(sb.id, 'res_3');
@@ -50,7 +50,7 @@ test('파일시스템 파서 — Size·Size used, 이력 키는 리소스 ID(res
 });
 
 test('프롬프트가 첫 레코드에 붙은 출력도 첫 항목을 잃지 않는다(v2.544 규약)', () => {
-  const list = parseFilesystems(stripUemcliBanner(fx('uemcli-fs-prompt-inline-2788.txt')));
+  const list = parseFilesystems(stripUemcliBanner(fx('uemcli-fs-prompt-inline-2789.txt')));
   assert.deepEqual(list.map((x) => x.name), ['temp_share', 'sandbox']);
 });
 
@@ -75,7 +75,7 @@ test('수집 명령 — LUN·파일시스템은 맨 뒤 lowPriority(앞 항목�
 
 test('SSH 결과 표지 — ok/0개 · 예산 건너뜀 · 실패 · 형식 불명을 구분한다', () => {
   const ok = {};
-  applyUnitySshResources(ok, { out: { luns: stripUemcliBanner(fx('uemcli-lun-detail-2788.txt')), filesystems: stripUemcliBanner(fx('uemcli-fs-detail-2788.txt')) } });
+  applyUnitySshResources(ok, { out: { luns: stripUemcliBanner(fx('uemcli-lun-detail-2789.txt')), filesystems: stripUemcliBanner(fx('uemcli-fs-detail-2789.txt')) } });
   assert.equal(ok.resources.length, 8);
   assert.deepEqual(ok.resourcesProbe.lun, { state: 'ok', source: 'uemcli /stor/prov/luns/lun show -detail', count: 2 });
   assert.equal(ok.resourcesProbe.fs.count, 6);

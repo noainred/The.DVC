@@ -292,7 +292,7 @@ export function checkSpaceIdentity({ totalBytes, usedBytes, freeBytes, prealloca
 }
 
 /**
- * v2.788 — `uemcli /stor/prov/luns/lun show -detail` → LUN 배열(하위 항목 — 사용자 요청 "LUN·파일시스템까지").
+ * v2.789 — `uemcli /stor/prov/luns/lun show -detail` → LUN 배열(하위 항목 — 사용자 요청 "LUN·파일시스템까지").
  *
  * ⚠⚠ **이 장비의 이 출력은 본 적이 없다**(정직 기록). 키 이름은 Dell Unity Unisphere CLI 사용자 가이드의 예시
  *   (`Size = 2199023255552 (2T)` · `Current allocation = …`)를 근거로 했고, 형식 규칙(` = ` 구분 · `N:` 레코드 경계 ·
@@ -322,7 +322,7 @@ export function parseLuns(text) {
 }
 
 /**
- * v2.788 — `uemcli /stor/prov/fs show -detail` → 파일시스템 배열.
+ * v2.789 — `uemcli /stor/prov/fs show -detail` → 파일시스템 배열.
  * ⚠⚠ 위 `parseLuns` 와 같은 한계 — 이 장비의 출력을 본 적이 없다. 키는 가이드 예시(`Size` · `Size used`)가 근거다.
  * '사용량' 은 파일시스템이 보고한 사용량(`Size used`)이다(usedSource 'fs').
  * @param {string} text

@@ -99,7 +99,7 @@ export const TOOL_PATH_KEYS = Object.freeze({
   // v2.531: 스토리지 증가량은 **전용 엔드포인트**다(/tools/storage-growth*) — 'storage' 와
   // 묶으면 증가량만 막고 싶을 때 모니터링 화면까지 같이 막힌다(반대도 마찬가지).
   'storage-growth': 'storage-growth',
-  // v2.788: 스토리지 사용량 보고서(일간·주간·월간 표 · 비교 · 예약 메일) — 증가량과 따로 막을 수 있게 전용 키.
+  // v2.789: 스토리지 사용량 보고서(일간·주간·월간 표 · 비교 · 예약 메일) — 증가량과 따로 막을 수 있게 전용 키.
   'storage-usage': 'storage-usage',
   'thin-vms': 'thinvms',
   threats: 'threats',

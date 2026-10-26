@@ -267,8 +267,8 @@ function parserInputs(name, rnd) {
     out.push(parts.join(rnd() < 0.3 ? '\r\n' : '\n'));
   }
   if (name === 'ue.parseUemcli') {
-    // v2.788: 입력은 **감사 기준 시점의 픽스처**로 고정한다 — 그 뒤에 더한 픽스처(uemcli-{lun,fs}-*-2788.txt)는 파서가 아니라 입력을 바꿔
-    //   해시가 달라진다(파서 동작은 그대로). 새 픽스처의 결과는 그 기능의 테스트(storageResources2788)가 고정한다.
+    // v2.789: 입력은 **감사 기준 시점의 픽스처**로 고정한다 — 그 뒤에 더한 픽스처(uemcli-{lun,fs}-*-2789.txt)는 파서가 아니라 입력을 바꿔
+    //   해시가 달라진다(파서 동작은 그대로). 새 픽스처의 결과는 그 기능의 테스트(storageResources2789)가 고정한다.
     const BASELINE = new Set(['uemcli-pool-detail-2542.txt', 'uemcli-pool-detail-2pool-2546.txt', 'uemcli-pool-detail.txt',
       'uemcli-pool-show-2542.txt', 'uemcli-prompt-inline-2544.txt', 'uemcli-system-show-2542.txt']);
     for (const f of fs.readdirSync(path.join(HERE, 'fixtures')).filter((x) => /^uemcli-.*\.txt$/.test(x) && BASELINE.has(x)).sort()) {

@@ -50,7 +50,7 @@ export function applyUnityPower(extra, raw) {
 }
 
 /**
- * v2.788 — 하위 항목(LUN·파일시스템) REST 경로. 사용자 선택 "LUN·파일시스템까지".
+ * v2.789 — 하위 항목(LUN·파일시스템) REST 경로. 사용자 선택 "LUN·파일시스템까지".
  * ⚠ 필드 이름(lun `sizeTotal`·`sizeAllocated` / filesystem `sizeTotal`·`sizeUsed`)은 Unisphere REST 문서 지식 기반이고
  *   **실장비 응답으로 확인하지 못했다**(이 파일 머리말과 같은 한계). LUN 의 사용량은 풀 할당량(`sizeAllocated`)이다.
  */
@@ -150,7 +150,7 @@ export function normalizeUnity(device, raw) {
     snap.sections.alerts = 'ok';
   }
   applyUnityPower(snap.extra, raw);
-  applyUnityResources(snap.extra, raw);   // v2.788
+  applyUnityResources(snap.extra, raw);   // v2.789
   snap.extra.collectMethod = 'api';
   snap.ok = snap.sections.config === 'ok' || snap.sections.capacity === 'ok';
   if (!snap.ok && !snap.error) snap.error = '수집 실패(섹션 오류 참조)';
@@ -183,7 +183,7 @@ export async function collect(device, { signal = null } = {}) {
     // v2.667 — 전원. 다른 섹션과 따로 조회한다(필드가 없는 버전이 오류를 내도 system 조회를 깨지 않게).
     try { raw.power = await get(UNITY_POWER_PATH); }
     catch (e) { if (isCredReject(e)) throw e; raw.powerErr = String(e.message || e).slice(0, 200); }
-    // v2.788 — LUN·파일시스템(하위 항목). 전원과 같이 따로 조회한다(이 경로가 없는 버전이 다른 섹션을 깨지 않게).
+    // v2.789 — LUN·파일시스템(하위 항목). 전원과 같이 따로 조회한다(이 경로가 없는 버전이 다른 섹션을 깨지 않게).
     try { raw.luns = await get(UNITY_LUN_PATH); }
     catch (e) { if (isCredReject(e)) throw e; raw.lunsErr = String(e.message || e).slice(0, 200); }
     try { raw.fs = await get(UNITY_FS_PATH); }
