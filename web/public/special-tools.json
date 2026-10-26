@@ -1,6 +1,6 @@
 {
-  "generatedAt": "2026-10-24T12:36:55.251Z",
-  "count": 112,
+  "generatedAt": "2026-10-26T04:44:21.547Z",
+  "count": 113,
   "tools": [
     {
       "k": "service-hub",
@@ -84,6 +84,14 @@
     },
     {
       "k": "storage-growth",
+      "adminOnly": true,
+      "perm": null,
+      "external": null,
+      "topTab": false,
+      "comingSoon": false
+    },
+    {
+      "k": "storage-usage",
       "adminOnly": true,
       "perm": null,
       "external": null,
