@@ -305,6 +305,10 @@
     손상 보존 → 쓰기 503 · 쓰기 게이트 data.csv + 관리자·운영자 · 칸에서 온 기본값(`def.from`)은 그 칸과 같이 바뀐다.
   · 파일 시스템 종류: `soapParse.parseGuestDisks` 가 `filesystemType` 을 읽고(`util/fsType.js fsTypeOf` — 영숫자·._- 32자, 그 밖은 버림) 엣지 정제(`sanitizeGuestDiskVms`)도 같은 함수 · `part_latest.fs` 열(ALTER — 없을 때만).
     ⚠ vSphere 7.0 이상이 주는 값으로 **추정**(실물 미확인) — 옛 판·엣지가 이 판 전이면 빈칸.
+  · ⚠⚠ v2.799.1(사용자 보고 — Excel '내용에 문제가 있습니다 · 복구하시겠습니까?'): v2.792 부터 VM 목록 엑셀은 **매번** 손상 판정이었다. 'VM 목록(폴더 트리)' 시트가
+    fitToPage(폭 한 장 인쇄)와 outlineProperties(개요 단추 위치)를 함께 쓰는데 exceljs 4.4.0 이 `<sheetPr>` 안에 pageSetUpPr 를 outlinePr **앞**에 쓴다(스키마는
+    tabColor → outlinePr → pageSetUpPr). 바로잡기는 `util/xlsxSheetPrOrder.js`(exceljs 렌더 함수 하나를 스키마 순서판으로 — 워커가 불러오는 모듈이 import 해야 워커에도 걸린다).
+    LibreOffice·openpyxl·exceljs 로 다시 읽기는 순서를 보지 않아 통과한다 — **엑셀 검증은 생성 XML 의 요소 순서를 직접 본다**(회귀 `server/test/xlsxSheetPr2799.test.js` — 인라인·워커, 변이 2/2).
 - **v2.798 — EM 백업 서버 목록 보강 + 매핑 줄에서 '포탈에 B&R 로 등록'** (사용자 보고 'EM 에 등록된 서버가 많은데 전체 리스트를 못 가져온다 — 표에도 일부만' · 선택 '바로 등록' · 표준. 회귀 `server/test/veeamEmBs2798.test.js`(변이 4/4) + 웹 `backupEmText.test.js`):
   · `veeam/em/client.js completeBackupServers` — 목록(`/api/backupServers`)이 개요(`overview.backupServers`)보다 적을 때만 질의 서비스 `type=BackupServer` 로 다시 읽어 이름(대소문자 무시)으로 합친다.
     개요 수를 모르면 그대로(지어내지 않는다) · 질의 실패는 목록 유지 + 사유 · 인증 실패는 위로. 결과 `backupServersMeta`(개요·목록·합친 수) → 매핑 화면 `counts` 가 모자란 EM 을 경고로 밝힌다.
@@ -323,12 +327,11 @@
     엑셀은 워커(`util/xlsxWorkerRun.js` — 새 엑셀은 이 공용 실행기를 쓴다; ipam·storage·veeam 의 기존 실행기 이전은 별건).
   · 저장값 `vcenter/vmExportPrefs.js` = `util/exportPrefs.js` 공장(파일 `vm-export-prefs.json`) — 규칙은 v2.798 `veeam/vmListPrefs.js` 와 같다(그쪽 이전은 별건).
   · 라우트는 `routes/api/vmExport.js`(ipamExport.js 에서 옮김) — 전부 data.csv + tools · 범위 밖 404 · 저장값 쓰기는 역할 게이트 먼저.
-- **v2.800 — 엑셀 시트에 '접기(outlineProperties)' 와 '한 페이지 폭 맞춤(fitToPage)' 을 함께 쓰지 말 것 + 내보내기 화면 분리(vCenter = 전체 VM · 백업 현황 = 백업)**
-  (사용자 보고 "엑셀 다운 받으면 데이터가 안나와"(폴더 트리 시트가 A1 부터 빈칸 · 열 너비 기본 · 틀 고정 없음) + "export 는 여기(백업 현황 Detail)의 CSV 로" + "vCenter 는 전체 VM, 여기는 백업 — 분리" ·
-  결정: 화면별 전용 창 · vCenter 쪽은 v2.799 VM 전체 정보 내보내기 재사용 · 표준 검증. 회귀 `server/test/vmListXlsx2800.test.js`(수정 전 코드에서 실패 확인) · `vmListSelect2798.test.js` 갱신):
-  · 원인: exceljs 는 `<sheetPr>` 안에 `pageSetUpPr` 를 `outlinePr` **앞에** 쓴다 — OOXML 순서(tabColor → outlinePr → pageSetUpPr) 위반. exceljs·xmllint·LibreOffice 는 읽어서
-    v2.792 테스트(exceljs 로 다시 읽기)가 못 잡았고, Excel 은 그 시트를 버린 것으로 본다(⚠ Excel 실물 재현은 못 함 — 추정). 폴더 트리 시트만 폭 맞춤을 뺐다(`PRINT_NOFIT`).
-    새 엑셀 시트가 접기를 쓰면 폭 맞춤을 빼고, `vmListXlsx2800.test.js` 의 `sheetPrIssues` 같은 '풀어서 순서 보기' 검사를 붙일 것 — exceljs 로 다시 읽는 테스트는 이 결함을 못 잡는다.
+- **v2.800 — 내보내기 화면 분리(vCenter = 전체 VM · 백업 현황 = 백업)**
+  (사용자 보고 "엑셀 다운 받으면 데이터가 안나와"(폴더 트리 시트가 Protected View 에서 빈 화면) + "export 는 여기(백업 현황 Detail)의 CSV 로" + "vCenter 는 전체 VM, 여기는 백업 — 분리" ·
+  결정: 화면별 전용 창 · vCenter 쪽은 v2.799 VM 전체 정보 내보내기 재사용 · 표준 검증. 회귀 `vmListSelect2798.test.js` 갱신 · 웹 `vmListExportText`·`vcdVmList`·`audit2785e` 테스트):
+  · 빈 시트의 원인(<sheetPr> 의 pageSetUpPr/outlinePr 순서)은 같은 날 다른 세션이 **v2.799.1 `util/xlsxSheetPrOrder.js`**(exceljs 렌더 순서 교정 — 위 항목)로 먼저 고쳤다.
+    이 세션은 처음에 폴더 트리 시트에서 fitToPage 를 빼는 쪽으로 고쳤다가, main 병합 때 v2.799.1 로 통일하고 되돌렸다(폭 맞춤 인쇄 유지 · 수정 한 벌).
   · 화면 분리: vCenter › VM 및 폴더의 버튼은 ‘⤓ VM 전체 정보 내보내기…’(창 안에 `tools/VmExport.jsx` 를 그 vCenter 로 — 도구 권한 `toolAllowed('vm-export')`) ·
     백업 현황 › Detail 의 ‘CSV · 엑셀…’ = `VmListExportDialog`(백업 내보내기 — 대상: 화면에 보이는 VM(보기·검색 반영, `backupScreenRequest`, view `detail` → 파일 꼬리 `backup`) 또는 폴더).
     예전 `GET /tools/backup-detail.csv` 는 창 안 ‘예전 CSV(화면 열 그대로)’ 로 남겼다(외부 스크립트 호환).
