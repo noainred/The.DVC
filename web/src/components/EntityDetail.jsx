@@ -40,7 +40,7 @@ import { vmTagLine } from '../views/tags/vmTagsText.js'; // v2.703
 import { vmContentionFindings, CONTENTION_TEXT, avgMaxText, msText } from '../views/contention/contentionText.js'; // v2.706(C2·C3)
 import { CLUSTER_TEXT, clusterDetailRows, vmRulesText, findingDetail as clusterFindingDetail, ageText as clusterAgeText, clusterOfParams, clusterMissLine } from '../views/clustercfg/clusterCfgText.js'; // v2.701 · v2.742(VC-05) 조회 인자·빈 사유
 
-function DRow({ label, children, full = false, nowrap = false }) {
+export function DRow({ label, children, full = false, nowrap = false }) {
   return (
     <div className="flex between" style={{ padding: '8px 0', borderBottom: '1px solid rgba(36,48,73,.4)', gap: 16, gridColumn: full ? '1 / -1' : 'auto' }}>
       <span className="muted" style={{ whiteSpace: 'nowrap' }}>{label}</span>
@@ -494,7 +494,7 @@ function VmCfgSection({ vm }) {
  * v2.706(C2·C3): CPU 경합·디스크 지연 — 수집 서버가 실시간 통계(최근 창)를 나눠 읽은 값(vm.perfc·host.perfc).
  * 화면이 vCenter 에 따로 묻지 않는다(왕복 0). 값이 없으면 '측정하지 않음' 이지 '경합 없음' 이 아니다.
  */
-function PerfcSection({ item, isVm }) {
+export function PerfcSection({ item, isVm }) {
   const p = item?.perfc;
   const off = isVm && item?.powerState && item.powerState !== 'POWERED_ON';
   const findings = isVm ? vmContentionFindings(item) : [];
@@ -551,6 +551,77 @@ function PerfcSection({ item, isVm }) {
   );
 }
 
+/**
+ * 호스트 기본 행 17개(v2.805 — 호스트 상세 모달과 전체 페이지 views/HostDetail.jsx 가 같은 것을 그린다. 복제하지 말 것).
+ * onShowVms: 'VM n대 보기' 버튼 — 호출부가 HostVmsModal 을 연다.
+ */
+export function HostBasicRows({ item, onShowVms }) {
+  return (
+    <>
+      <DRow label="이름">
+        <span style={{ display: 'inline-flex', flexWrap: 'wrap', alignItems: 'baseline', gap: 6 }}>
+          <b className="cell-link" style={{ cursor: 'pointer', wordBreak: 'break-all' }} title="이 호스트의 VM 목록 보기" onClick={onShowVms}>{item.name}</b>
+          {/* 저대비 텍스트 링크 → 버튼형 배지(테두리+배경)로 가독성 강화 */}
+          <button type="button" title="이 호스트의 VM 목록 보기" onClick={onShowVms}
+            style={{ fontSize: 12, fontWeight: 700, cursor: 'pointer', whiteSpace: 'nowrap', padding: '3px 10px', borderRadius: 999,
+              color: '#7dd3fc', background: 'rgba(56,189,248,.12)', border: '1px solid rgba(56,189,248,.45)', lineHeight: 1.4 }}>
+            🖥️ VM {item.vmCount ?? 0}대 보기 ›
+          </button>
+        </span>
+      </DRow>
+      <DRow label="상태"><StateBadge state={item.connectionState} /></DRow>
+      <DRow label="vCenter">{item.vcenterId}</DRow>
+      <DRow label="클러스터">{item.cluster || '—'}</DRow>
+      <DRow label="전원">{item.powerState === 'POWERED_ON' ? 'On' : (item.powerState ? 'Off' : '—')}</DRow>
+      <DRow label="제조사 / 모델">{[item.vendor, item.model].filter(Boolean).join(' / ') || '—'}</DRow>
+      {/* 장비 서비스 태그(Dell Service Tag 등) — vCenter 가 수집한 하드웨어 식별자
+          (summary.hardware.otherIdentifyingInfo). 서버 교체·A/S·자산 대조용. 없으면 '—'. */}
+      <DRow label="서비스 태그">{item.serviceTag ? <b style={{ letterSpacing: 0.5 }}>{item.serviceTag}</b> : '—'}</DRow>
+      <DRow label="ESXi 버전">{item.version ? `${item.version}${item.build ? ` (build ${item.build})` : ''}` : '—'}</DRow>
+      <DRow label="CPU">{item.cpuCores}코어{item.cpuThreads ? ` / ${item.cpuThreads}스레드` : ''}{item.cpuTotalMhz ? ` · ${(item.cpuTotalMhz / 1000).toFixed(1)}GHz` : ''}</DRow>
+      {/* v2.556(사용자 요청): CPU 모델명. 원문이 40자 안팎이라 2열 칸에 넣으면 옆 칸을
+          밀어내므로 **한 줄 전체**를 쓴다. 다듬은 값 옆에 원문을 툴팁으로 남기고(정리가
+          다른 벤더에서 빗나갈 수 있다), 값이 없으면 '—' + 이유를 말한다. */}
+      <DRow label="CPU 모델" full nowrap>
+        {(() => { const c = cpuModelCell(item.cpuModel); return <span title={c.title || undefined}>{c.text}</span>; })()}
+      </DRow>
+      <DRow label="CPU 사용률"><UsageCell pct={hostUsagePct(item, 'cpuUsagePct')} /></DRow>
+      <DRow label="메모리">{gb(item.memTotalMB)}{item.memUsageMB ? ` · 사용 ${gb(item.memUsageMB)}` : ''}</DRow>
+      <DRow label="메모리 사용률"><UsageCell pct={hostUsagePct(item, 'memUsagePct')} /></DRow>
+      {item.powerWatts > 0 && <DRow label="소비전력" full nowrap>{(item.powerWatts / 1000).toFixed(2)} kW ({item.powerWatts} W){item.powerSource === 'idrac' ? ' · iDRAC' : (item.idracBacked ? ' · vCenter 추정' : '')}</DRow>}
+      {item.idracBacked && item.powerWattsIdrac > 0 && <DRow label="iDRAC 실측" full nowrap>{(item.powerWattsIdrac / 1000).toFixed(2)} kW ({item.powerWattsIdrac} W) <span className="muted" style={{ fontSize: 11 }}>· iDRAC 서버 등록 메뉴 집계</span></DRow>}
+      <DRow label="VM 수">{item.vmCount}</DRow>
+      <DRow label="HBA / GPU">{(item.hbas?.length || 0)}개 / {(item.gpus?.length || 0)}개</DRow>
+    </>
+  );
+}
+
+/** 스토리지 어댑터(HBA) 표 — 모달·전체 페이지 공용(v2.805). */
+export function HostHbaTable({ item }) {
+  if (!(item?.hbas?.length > 0)) return null;
+  return (
+    <div style={{ marginTop: 14 }}>
+      <div className="muted" style={{ fontSize: 12, marginBottom: 6 }}>스토리지 어댑터 (HBA) — {item.hbas.length}</div>
+      <div className="table-wrap" style={{ maxHeight: '28vh' }}>
+        <STable>
+          <thead><tr><th>어댑터</th><th>유형</th><th>모델</th><th style={{ textAlign: 'right' }}>속도</th><th>WWN</th></tr></thead>
+          <tbody>
+            {item.hbas.map((h, i) => (
+              <tr key={i}>
+                <td><b>{h.name || '—'}</b></td>
+                <td><span className="badge blue">{h.type}</span></td>
+                <td className="muted" style={{ fontSize: 12 }}>{h.model || '—'}</td>
+                <td style={{ textAlign: 'right' }}>{h.speedGbps ? `${h.speedGbps} Gb` : '—'}</td>
+                <td className="muted" style={{ fontSize: 11 }}>{h.wwn || '—'}</td>
+              </tr>
+            ))}
+          </tbody>
+        </STable>
+      </div>
+    </div>
+  );
+}
+
 export function EntityDetail({ type, item, onClose }) {
   const titles = { vm: 'VM', host: '호스트', datastore: '데이터스토어' };
   const [showHostVms, setShowHostVms] = useState(false);
@@ -591,44 +662,7 @@ export function EntityDetail({ type, item, onClose }) {
             <DRow label="메모">{item.notes || '—'}</DRow>
           </>
         )}
-        {type === 'host' && (
-          <>
-            <DRow label="이름">
-              <span style={{ display: 'inline-flex', flexWrap: 'wrap', alignItems: 'baseline', gap: 6 }}>
-                <b className="cell-link" style={{ cursor: 'pointer', wordBreak: 'break-all' }} title="이 호스트의 VM 목록 보기" onClick={() => setShowHostVms(true)}>{item.name}</b>
-                {/* 저대비 텍스트 링크 → 버튼형 배지(테두리+배경)로 가독성 강화 */}
-                <button type="button" title="이 호스트의 VM 목록 보기" onClick={() => setShowHostVms(true)}
-                  style={{ fontSize: 12, fontWeight: 700, cursor: 'pointer', whiteSpace: 'nowrap', padding: '3px 10px', borderRadius: 999,
-                    color: '#7dd3fc', background: 'rgba(56,189,248,.12)', border: '1px solid rgba(56,189,248,.45)', lineHeight: 1.4 }}>
-                  🖥️ VM {item.vmCount ?? 0}대 보기 ›
-                </button>
-              </span>
-            </DRow>
-            <DRow label="상태"><StateBadge state={item.connectionState} /></DRow>
-            <DRow label="vCenter">{item.vcenterId}</DRow>
-            <DRow label="클러스터">{item.cluster || '—'}</DRow>
-            <DRow label="전원">{item.powerState === 'POWERED_ON' ? 'On' : (item.powerState ? 'Off' : '—')}</DRow>
-            <DRow label="제조사 / 모델">{[item.vendor, item.model].filter(Boolean).join(' / ') || '—'}</DRow>
-            {/* 장비 서비스 태그(Dell Service Tag 등) — vCenter 가 수집한 하드웨어 식별자
-                (summary.hardware.otherIdentifyingInfo). 서버 교체·A/S·자산 대조용. 없으면 '—'. */}
-            <DRow label="서비스 태그">{item.serviceTag ? <b style={{ letterSpacing: 0.5 }}>{item.serviceTag}</b> : '—'}</DRow>
-            <DRow label="ESXi 버전">{item.version ? `${item.version}${item.build ? ` (build ${item.build})` : ''}` : '—'}</DRow>
-            <DRow label="CPU">{item.cpuCores}코어{item.cpuThreads ? ` / ${item.cpuThreads}스레드` : ''}{item.cpuTotalMhz ? ` · ${(item.cpuTotalMhz / 1000).toFixed(1)}GHz` : ''}</DRow>
-            {/* v2.556(사용자 요청): CPU 모델명. 원문이 40자 안팎이라 2열 칸에 넣으면 옆 칸을
-                밀어내므로 **한 줄 전체**를 쓴다. 다듬은 값 옆에 원문을 툴팁으로 남기고(정리가
-                다른 벤더에서 빗나갈 수 있다), 값이 없으면 '—' + 이유를 말한다. */}
-            <DRow label="CPU 모델" full nowrap>
-              {(() => { const c = cpuModelCell(item.cpuModel); return <span title={c.title || undefined}>{c.text}</span>; })()}
-            </DRow>
-            <DRow label="CPU 사용률"><UsageCell pct={hostUsagePct(item, 'cpuUsagePct')} /></DRow>
-            <DRow label="메모리">{gb(item.memTotalMB)}{item.memUsageMB ? ` · 사용 ${gb(item.memUsageMB)}` : ''}</DRow>
-            <DRow label="메모리 사용률"><UsageCell pct={hostUsagePct(item, 'memUsagePct')} /></DRow>
-            {item.powerWatts > 0 && <DRow label="소비전력" full nowrap>{(item.powerWatts / 1000).toFixed(2)} kW ({item.powerWatts} W){item.powerSource === 'idrac' ? ' · iDRAC' : (item.idracBacked ? ' · vCenter 추정' : '')}</DRow>}
-            {item.idracBacked && item.powerWattsIdrac > 0 && <DRow label="iDRAC 실측" full nowrap>{(item.powerWattsIdrac / 1000).toFixed(2)} kW ({item.powerWattsIdrac} W) <span className="muted" style={{ fontSize: 11 }}>· iDRAC 서버 등록 메뉴 집계</span></DRow>}
-            <DRow label="VM 수">{item.vmCount}</DRow>
-            <DRow label="HBA / GPU">{(item.hbas?.length || 0)}개 / {(item.gpus?.length || 0)}개</DRow>
-          </>
-        )}
+        {type === 'host' && <HostBasicRows item={item} onShowVms={() => setShowHostVms(true)} />}
         {type === 'datastore' && (
           <>
             <DRow label="이름"><b>{item.name}</b></DRow>
@@ -651,27 +685,7 @@ export function EntityDetail({ type, item, onClose }) {
       {type === 'vm' && <VmTagsSection vm={item} />}
       {type === 'vm' && <VmChangesSection vm={item} />}
       {type === 'datastore' && <DsBrowseSection item={item} />}
-      {type === 'host' && item.hbas?.length > 0 && (
-        <div style={{ marginTop: 14 }}>
-          <div className="muted" style={{ fontSize: 12, marginBottom: 6 }}>스토리지 어댑터 (HBA) — {item.hbas.length}</div>
-          <div className="table-wrap" style={{ maxHeight: '28vh' }}>
-            <STable>
-              <thead><tr><th>어댑터</th><th>유형</th><th>모델</th><th style={{ textAlign: 'right' }}>속도</th><th>WWN</th></tr></thead>
-              <tbody>
-                {item.hbas.map((h, i) => (
-                  <tr key={i}>
-                    <td><b>{h.name || '—'}</b></td>
-                    <td><span className="badge blue">{h.type}</span></td>
-                    <td className="muted" style={{ fontSize: 12 }}>{h.model || '—'}</td>
-                    <td style={{ textAlign: 'right' }}>{h.speedGbps ? `${h.speedGbps} Gb` : '—'}</td>
-                    <td className="muted" style={{ fontSize: 11 }}>{h.wwn || '—'}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </STable>
-          </div>
-        </div>
-      )}
+      {type === 'host' && <HostHbaTable item={item} />}
       {type === 'host' && item.gpus?.length > 0 && (
         <div style={{ marginTop: 12 }}>
           <div className="muted" style={{ fontSize: 12, marginBottom: 6 }}>GPU — {item.gpus.length}</div>
@@ -720,7 +734,7 @@ export function EntityDetail({ type, item, onClose }) {
  * 값은 수집 서버가 오래된 호스트부터 나눠 읽은 캐시(host.hcfg). 판정은 hostCfgText.hostCfgFindings(서버와 같은 규칙 — 테스트 대조).
  * 클러스터 드리프트는 여러 호스트를 비교해야 하므로 여기서는 하지 않는다(특수 기능 'ESXi 호스트 구성 점검').
  */
-function HostCfgSection({ host }) {
+export function HostCfgSection({ host }) {
   const view = hostCfgRows(host);
   const findings = hostCfgFindings(host);
   return (
@@ -764,7 +778,7 @@ function HostCfgSection({ host }) {
  * v2.701(A6): 이 VM·호스트가 속한 클러스터의 HA·DRS·EVC·유효 호스트 + (VM 이면) 그 VM 이 들어 있는 선호도 규칙.
  * 열 때 1회 조회(폴링 없음) · 도구 권한이 없으면 부르지 않는다(403 을 만들지 않게) · 늦게 온 응답은 버린다.
  */
-function ClusterCfgSection({ item, isVm }) {
+export function ClusterCfgSection({ item, isVm }) {
   const allowed = toolAllowed('cluster-check');
   const cluster = item?.cluster;
   const [st, setSt] = useState({ data: null, error: null });
