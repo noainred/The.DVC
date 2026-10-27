@@ -1,4 +1,4 @@
-import { notCollectedWhyText } from './eventCoverageText.js'; // v2.733(C1-01)
+import { notCollectedWhyText, laggingItems, lagDurText } from './eventCoverageText.js'; // v2.733(C1-01) · v2.772(Z4-1)
 
 /**
  * 백업 없음 리포트 — 버린 패턴 안내(v2.607, 감사 WEB2607-07). 서버(reports/unprotected.js)는 상한(개수·길이)을 넘은
@@ -20,6 +20,8 @@ const UNDETERMINED_REASON = {
   'severity-filter': '로그 최소 심각도가 info 보다 높아 스냅샷 이벤트를 저장하지 않음',
   'no-events': '조회 기간에 저장된 이벤트가 0건인 vCenter(엣지 위임·수집 실패)',
   'not-collected': '이 포탈이 지금 직접 수집하지 않는 vCenter(비활성·점검중·엣지 위임) — 남은 옛 이벤트로는 판정하지 않음',
+  // v2.772(Z4-1): 수집은 하지만 뒤처진 vCenter — 수집이 끝난 시각 뒤에 한 백업은 아직 받지 못했다(백업 흔적이 보인 VM 은 그대로 보호).
+  'collect-lag': '이벤트 수집이 뒤처진 vCenter(따라잡는 중 포함) — 수집이 끝난 시각 뒤의 백업은 아직 모름',
 };
 
 /**
@@ -38,5 +40,8 @@ export function undeterminedNote(summary) {
   // v2.733(점검 3회차 C1-01): 지금 수집하지 않아 판정하지 않은 vCenter — 사유(엣지 위임·비활성·점검중)와 함께 밝힌다(서버 notCollectedVcenters).
   const nc = Array.isArray(s.notCollectedVcenters) ? s.notCollectedVcenters.filter((x) => x && typeof x.vcenterId === 'string') : [];
   const ncTxt = nc.length ? ` 지금 수집하지 않는 vCenter: ${nc.slice(0, 8).map((x) => `${x.vcenterId}(${x.why ? notCollectedWhyText(x.why) : '사유 미상'})`).join(', ')}${nc.length > 8 ? ` 외 ${nc.length - 8}곳` : ''}.` : '';
-  return `가동 VM ${n}대는 백업 이벤트를 확인할 근거가 없어 판정하지 않았습니다(미보호로 세지 않음 — 보호됐다는 뜻도 아닙니다). 사유: ${parts.join(' · ') || '미상'}.${vcTxt}${ncTxt}`;
+  // v2.772(Z4-1): 수집이 뒤처져 판정하지 않은 vCenter — 지연 길이와 함께(서버 laggingVcenters).
+  const lg = laggingItems(s.laggingVcenters);
+  const lgTxt = lg.length ? ` 수집이 뒤처진 vCenter: ${lg.slice(0, 8).map((x) => { const d = lagDurText(x.lagMs); return `${x.vcenterId}${d ? `(${d} 뒤처짐)` : ''}`; }).join(', ')}${lg.length > 8 ? ` 외 ${lg.length - 8}곳` : ''}.` : '';
+  return `가동 VM ${n}대는 백업 이벤트를 확인할 근거가 없어 판정하지 않았습니다(미보호로 세지 않음 — 보호됐다는 뜻도 아닙니다). 사유: ${parts.join(' · ') || '미상'}.${vcTxt}${ncTxt}${lgTxt}`;
 }

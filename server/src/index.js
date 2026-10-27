@@ -1,4 +1,5 @@
 import './logbuffer.js'; // first: capture console output into the ring buffer
+import './backup/stagedRestoreBoot.js'; // v2.768(점검 R3-C5-02): 예약된 백업 복원을 캐시 로드 전에 적용 — 이 줄을 아래로 옮기지 말 것
 import { createStaticGzip } from './util/staticGzip.js';
 import { pushLog } from './logbuffer.js';
 
@@ -105,6 +106,8 @@ import { startDbSizeSampler } from './insights/portalDb.js';
 import { startCertMonitor } from './security/certMonitor.js';
 import { startDailyReport } from './reports/dailyReport.js';
 import { startVmCloneScheduler } from './vmclone/scheduler.js'; // VM 복제(백업식) 스케줄러(v2.299)
+import { startVmBackupMail } from './vmclone/notify.js'; // VM 백업 실패 메일(v2.794) — 중앙 전용 · 메일 설정이 꺼져 있으면 기준만 옮긴다
+import { startVmCloneWorker } from './agent/vmCloneWorker.js'; // VM 백업 법인 위임 — 엣지 동기화·보고(v2.793). CENTRAL_URL 미설정이면 자기기동 안 함
 import { startStoragePoller } from './storage/poller.js';        // 스토리지 수집(v2.302)
 import { applyGrowthSettings } from './storage/growthSettings.js'; // 사용량 보존 기간(v2.531)
 import { runCapacityBasisMigration } from './storage/capacityBasisMigration.js'; // 용량 기준 변경 1회 정리(v2.534)
@@ -142,10 +145,19 @@ import { startBmUsagePoller } from './bmusage/poller.js';       // 베어메탈 
 import { startLinkCheckPoller } from './linkcheck/poller.js';   // 통신 점검(v2.552) — 기본 꺼짐(opt-in)
 import { startIsiduPoller } from './isidu/poller.js';
 import { startIsiduDigest } from './isidu/digest.js';   // v2.742 아이실론 종합 메일(정한 요일·시각) — 중앙 전용 · 기본 꺼짐
+import { startGuestPartMail } from './guestpart/notify.js';   // v2.749 게스트 파티션 사용률 메일(통합·vCenter 별·95% 즉시·실패) — 중앙 전용 · 기본 꺼짐
+import { startStorageUsageMail } from './storage/usageMail.js';   // v2.789 스토리지 사용량 예약 메일(정한 요일·시각) — 중앙 전용 · 기본 꺼짐
 import { startIsiduTargetMail } from './isidu/notify.js';   // v2.745 대상별 결과 메일 정기 발송(보내는 때 '정한 요일·시각') — 중앙 전용 · 30초 틱
 import { scheduleScanResumes } from './util/scanJournal.js';    // v2.737: 업그레이드·재시작으로 중단된 스캔을 기동 2분 뒤 자동 재개           // 아이실론 디렉터리 사용량(v2.736) — 중앙·엣지 공용(자기 몫 대상만)
 import { startIsiduPush } from './isidu/push.js';               // 〃 엣지→중앙 결과 push(gzip·커서 — CENTRAL_URL 없으면 자기기동 안 함)
 import { startIsiduConfigPull } from './agent/isiduConfigPull.js'; // 〃 중앙→엣지 대상 pull(비밀 없음)
+import { startVeeamPoller } from './veeam/poller.js';               // Veeam 백업 상태(v2.751) — 중앙 직접 + 엣지 위임
+import { startEmPoller } from './veeam/em/poller.js';             // Veeam Enterprise Manager(v2.788) — 중앙 전용
+import { startLicenseWatch } from './veeam/licenseWatch.js';       // Veeam 라이선스 이력·만료 알림(v2.788) — 중앙 전용
+import { startVeeamPush } from './veeam/push.js';                   // 〃 엣지→중앙 결과 push(gzip — CENTRAL_URL 없으면 자기기동 안 함)
+import { startVeeamConfigPull } from './agent/veeamConfigPull.js'; // 〃 중앙→엣지 서버 배정 pull(자격증명 포함)
+import { startVeeamSnapWarmup } from './veeam/snapWarm.js';          // 〃 스냅샷 전용 DB(v2.759) — 엣지 요약 복원 + 로그에서 백필
+import { startVeeamSnapCollector } from './veeam/snapCollector.js';  // 〃 Veeam 계정 이벤트 전용 수집(v2.765) — 로그 폴러가 밀려도 백업 시도는 최신
 import { startXferSpeedPoller } from './xferspeed/poller.js';   // 법인 간 전송 속도(v2.735) — 중앙 전용 · 기본 꺼짐(opt-in)
 import { startLinkCheckWorker } from './agent/linkCheckWorker.js'; // 엣지가 재는 링크(엣지→중앙·엣지↔엣지)
 import { startPowerOffPoller } from './tools/powerOffPoller.js';     // 전원 꺼짐 점검(v2.484)
@@ -224,6 +236,10 @@ const INTRO_CSP = [
   "frame-ancestors 'none'",
 ].join('; ');
 const CSP_HEADER = process.env.CSP === 'off' ? '' : (process.env.CSP || DEFAULT_CSP);
+// v2.767(점검 R2-B4-3): '/intro 경로인가' 판정은 하나 — CSP 완화 분기와 아래 SPA 폴백의 404 가 같은 함수를 쓴다.
+//   예전에는 확장자 없는 /intro/<아무거나> 가 SPA 폴백으로 **메인 포탈 index.html** 을 받으면서 경로만 보고 INTRO_CSP
+//   ('unsafe-eval')를 달았다 — 위 ⚠ 가 금지한 '완화 정책을 앱 전체로 넓히기' 가 URL 하나로 성립했다.
+const isIntroPath = (p) => p === '/intro' || p.startsWith('/intro/');
 app.use((req, res, next) => {
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('X-Frame-Options', 'DENY');            // 웹에 iframe 없음 → 클릭재킹 차단
@@ -233,8 +249,7 @@ app.use((req, res, next) => {
     res.setHeader('Strict-Transport-Security', 'max-age=15552000; includeSubDomains'); // 실제 HTTPS일 때만
   }
   if (CSP_HEADER) {
-    const isIntro = req.path === '/intro' || req.path.startsWith('/intro/');
-    res.setHeader('Content-Security-Policy', isIntro && !process.env.CSP ? INTRO_CSP : CSP_HEADER);
+    res.setHeader('Content-Security-Policy', isIntroPath(req.path) && !process.env.CSP ? INTRO_CSP : CSP_HEADER);
   }
   next();
 });
@@ -357,6 +372,7 @@ app.use('/api/central/rma-result', BIG_JSON);   // v2.591 PR-9: RMA 명령 출�
 // v2.590 D2: svcmon 엣지 보고 — 행 2,000 + 메타(경로·호스트·점검명)가 한 청크에 실리면 1mb 기본을 넘는다(실측 5,000항목 1.09MB → 413).
 // 엣지가 메타를 청크마다 나누고 413 이면 청크를 줄여 다시 나누지만, 한도를 넉넉히 두는 것이 1차 방어다.
 app.use('/api/central/svcmon-report', BIG_JSON);
+app.use('/api/central/vm-clone-report', BIG_JSON); // VM 백업 위임 보고(v2.793) — 위임 잡 200개 × 이력 30·원장 30 이면 1mb 기본을 넘을 수 있다(413 = 조용한 소실)
 app.use('/api/central/pdu-data', BIG_JSON);
 // v2.517: SAN 스위치 push 가 **전체 포트**로 바뀌었다(`sanswitch/push.js` 머리말 — gzip 실측 근거).
 // 엣지는 700KB 청크 + gzip 으로 보내지만 express.json 의 limit 은 **해제 후 길이**라 기본 1MB 로는
@@ -373,6 +389,7 @@ app.use('/api/central/sanswitch-test-result', BIG_JSON);
 // v2.608: CVP push — 장비 레코드(포트 구성·부품·BGP)와 원시 표본이 청크 700KB 로 오지만 해제 후 1MB 를 넘을 수 있다(413 = 조용한 소실).
 app.use('/api/central/cvp-data', BIG_JSON);
 app.use('/api/central/isidu-data', BIG_JSON);   // v2.736 — 사용자 폴더 수천 개 × 스캔 여러 건(해제 후 1MB 를 넘는다 — 413 은 조용한 소실)
+app.use('/api/central/veeam-data', BIG_JSON);   // v2.751 — Veeam 서버별 VM 표(5,850 VM 규모면 해제 후 1MB 를 넘을 수 있다 — 413 은 조용한 소실)
 // '현재 사용자' push(v2.520) — 레코드에 계정명 목록이 붙어 대상이 많은 법인은 1MB 기본을 넘을 수
 // 있다. express.json 의 limit 은 **gzip 해제 후 길이**라 gzip 만으로는 413 이 해결되지 않는다.
 app.use('/api/central/curuser', BIG_JSON);
@@ -468,6 +485,8 @@ if (fs.existsSync(config.webDist)) {
   }));
   app.get('*', (req, res, next) => {
     if (req.path.startsWith('/api')) return next();
+    // v2.767(점검 R2-B4-3): /intro 아래에서 정적 파일이 없으면 메인 SPA 를 주지 않는다(INTRO_CSP 가 붙은 채 메인 앱이 뜬다).
+    if (isIntroPath(req.path)) return res.status(404).end();
     // A missing file with an extension (e.g. a stale asset hash) must 404 — never
     // return index.html for it, or the browser executes HTML as JS and shows a blank page.
     if (path.extname(req.path)) return res.status(404).end();
@@ -559,6 +578,8 @@ const stagger = [
   // 둘 다 재진입 가드가 있고, 조건(CENTRAL_URL·토큰) 미충족이면 스스로 기동하지 않는다.
   startSvcmonPush, startSvcmonConfigPull, startSvcmonSilenceWatch,
   startVmCloneScheduler, // VM 복제(백업식) — 60초 틱, 재진입 가드 + 전역 직렬 실행 큐(runner)
+  startVmBackupMail,     // 〃 실패 메일(v2.794) — 1분 틱, 엣지는 기동하지 않는다
+  startVmCloneWorker,    // 〃 법인 위임(v2.793) — 엣지가 담당 vCenter 의 잡 정의·작업을 당기고 상태를 올린다. 재진입 가드, CENTRAL_URL 미설정이면 자기기동 안 함
   startStoragePoller, startStoragePush, startStorageConfigPull, // 스토리지 모니터링(v2.302) — 전부 재진입 가드, push/pull 은 CENTRAL_URL 미설정 시 자기기동 안 함
   startSanSwitchPoller, startSanSwitchPush, startSanSwitchConfigPull, // SAN 스위치(v2.410) — 동일 규약(재진입 가드 + 적응형 타이머)
   startPduPoller, startPduPush, startPduConfigPull, // PDU(v2.424) — 동일 규약(자동 센서 탐지 + 재진입 가드 + 적응형 타이머)
@@ -591,7 +612,10 @@ const stagger = [
   startLinkCheckPoller,
   startLinkCheckWorker,
   startIsiduPoller, startIsiduPush, startIsiduConfigPull, startIsiduDigest, startIsiduTargetMail, // 아이실론 디렉터리 사용량(v2.736) — 대상이 없으면 틱만 돈다 · push/pull 은 CENTRAL_URL 미설정이면 자기기동 안 함
+  startGuestPartMail, // 게스트 파티션 사용률 메일(v2.749) — 엣지는 기동하지 않는다 · 메일 설정이 꺼져 있으면 틱만 돈다
+  startVeeamPoller, startVeeamPush, startVeeamConfigPull, startVeeamSnapWarmup, startVeeamSnapCollector, startEmPoller, startLicenseWatch, // Veeam 백업 상태(v2.751) — 서버 0대면 틱만 돈다 · push/pull 은 CENTRAL_URL 미설정이면 자기기동 안 함 · 전용 수집기(v2.765)는 로그 수집 주기로 Veeam 계정 이벤트만
   startXferSpeedPoller, // 법인 간 전송 속도(v2.735) — 적응형 타이머(기본 30분) + 재진입 가드 + 주기 예산. 중앙 전용·opt-in
+  startStorageUsageMail, // 스토리지 사용량 예약 메일(v2.789) — 30초 틱 · 중앙 전용 · 기본 꺼짐(켜지 않으면 할 일 없음)
 ];
 /*
  * v2.613 RUNTIME2613-06: 간격 1.5초 × 74개 = 마지막 폴러가 부팅 110초 뒤에 켜지고, 그 위에 각 모듈의 firstDelayMs(45~90초)가

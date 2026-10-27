@@ -36,6 +36,9 @@ export function defaultMenu() {
   };
 }
 
+/** v2.787: 기본 메뉴에서 빠진 그룹 id — 예전에 저장한 내 메뉴·배포 메뉴가 그 id 를 들고 있으면 '새 그룹' 대신 이 이름으로 보인다. */
+export const LEGACY_GROUP_LABELS = Object.freeze({ backup: 'Veeam 백업' });
+
 /** 기본 메뉴 색인 — 그룹 라벨 · 항목 키 → 항목(그룹 id 포함). */
 export function defaultIndex() {
   const groupLabel = new Map();
@@ -73,7 +76,7 @@ export function resolveMenu({ mine = null, distributed = null, catalog = null, o
     if (!g || typeof g !== 'object' || !g.id) continue;
     const id = String(g.id);
     const custom = !groupLabel.has(id);
-    const label = String(g.label || '').trim() || groupLabel.get(id) || (custom ? CUSTOM_GROUP_LABEL : id);
+    const label = String(g.label || '').trim() || groupLabel.get(id) || LEGACY_GROUP_LABELS[id] || (custom ? CUSTOM_GROUP_LABEL : id);
     if (g.tab) {
       const key = `tab:${g.tab}`;
       const d = items.get(key);

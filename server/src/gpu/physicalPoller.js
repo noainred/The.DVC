@@ -56,6 +56,8 @@ export async function pollPhysicalOnce({ manual = false } = {}) {
         setPhysicalGpu(sv.id, {
           id: sv.id, name: sv.name, host: sv.host, vcenterId: sv.vcenterId || '',
           count: r.count, utilPct: r.utilPct, utilNA: !!r.utilNA, memUsedPct: r.memUsedPct, memUsedMB: r.memUsedMB ?? null, memTotalMB: r.memTotalMB ?? null, tempC: r.tempC ?? null, gpus: r.gpus || [], error: null,
+          // v2.769(점검 R4-D5-3): 일부 GPU 응답 없음(장수) — 예전에는 버려져 죽은 GPU 가 개수에서 조용히 빠졌다.
+          gpuErrors: Number.isFinite(r.gpuErrors) && r.gpuErrors > 0 ? Math.floor(r.gpuErrors) : 0,
         });
         // GPU 모델명이 없으면(수동 등록) 1회 감지해 등록부에 백필 → 서버 분석 GPU 찾기에 모델별 합산.
         if (!(sv.gpuModels && sv.gpuModels.length)) {

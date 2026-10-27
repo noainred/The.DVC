@@ -15,7 +15,7 @@ import { csvLine, CSV_BOM } from '../../util/csv.js';
 import { fileStamp } from '../../util/dayKey.js';
 import { getLogsDb } from '../../logs/db.js';
 import { loadLogSettings } from '../../logs/settings.js';
-import { eventNotCollectedMap, notCollectedList } from '../../logs/coverage.js'; // v2.733(C1-01): 지금 이벤트를 수집하지 않는 vCenter
+import { eventNotCollectedMap, notCollectedList, eventLagForView, eventCoverageIsMock } from '../../logs/coverage.js'; // v2.733(C1-01): 지금 이벤트를 수집하지 않는 vCenter
 import { analyzeMoves, analyzeChanges, vmHistory } from '../../vmchanges/analyze.js';
 import { MOVE_TYPES, RECONFIG_TYPES, PERM_TYPES } from '../../vmchanges/eventDetail.js';
 
@@ -76,7 +76,13 @@ export function registerVmChanges(api) {
       const rows = db.trackedEvents({ vcenterIds: [vm.vcenterId], since: Date.now() - days * DAY, entity: vm.name, types: [...MOVE_TYPES, ...RECONFIG_TYPES] }, 200);
       // v2.733(C1-01): 이 VM 의 vCenter 를 이 포탈이 지금 이벤트로 수집하지 않으면 그 사유(아니면 null) — 화면이 '변경 없음' 대신 말한다.
       const notCollected = eventNotCollectedMap().get(String(vm.vcenterId)) || null;
-      res.json({ ok: true, days, items: vmHistory(rows, 20), more: Math.max(0, rows.length - 20), logs: { enabled: loadLogSettings().enabled }, lastTs: db.lastTs(vm.vcenterId) || null, notCollected });
+      // v2.772(Z4-2): 수집은 하지만 뒤처진 vCenter 면 그 지연(서버 판정 — 가용성과 같은 코어). 판정 실패는 null(웹이 lastTs 로 대신 판단).
+      // v2.785(GV D-B2): 판정했는데 지연이 없으면 false — 예전에는 [] 도 null 로 보내 웹이 '마지막 이벤트 2일' 기준으로 대신 판단했고,
+      //   조용한 vCenter(수집 정상 · 이벤트 드묾)의 모든 VM 에 거짓 '수집 지연·정지' 가 떴다. mock 은 판정 대상이 없어 빈 목록이 오므로 null(모름) 그대로.
+      //   수집하지 않는 vCenter 는 notCollected 가 말한다(웹이 그것을 먼저 본다).
+      const lagList = notCollected ? [] : await eventLagForView({ db, now: Date.now(), only: [String(vm.vcenterId)] });
+      const lagging = Array.isArray(lagList) ? (lagList[0] ?? (eventCoverageIsMock() ? null : false)) : null;
+      res.json({ ok: true, days, items: vmHistory(rows, 20), more: Math.max(0, rows.length - 20), logs: { enabled: loadLogSettings().enabled }, lastTs: db.lastTs(vm.vcenterId) || null, notCollected, lagging });
     } catch (e) {
       if (!res.headersSent) res.status(500).json({ ok: false, reason: String(e?.message || e).slice(0, 300) });
     }

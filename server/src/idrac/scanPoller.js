@@ -150,13 +150,14 @@ async function scanOneDatacenter(e, onProgress, trigger = 'periodic') {
   const effectiveMode = (e.mode === 'replace-datacenter' && !partial) ? 'replace-datacenter' : 'merge';
   if (partial) console.warn(`[idrac-scan] ${e.datacenterId}: 부분 결과라 법인 교체(replace-datacenter) 대신 병합(merge)으로 등록합니다 — ${partialReasons.join(' · ')}`);
   let registerError = null; // v2.744(감사 EDGE-03)
+  let removed = 0, removedIps = []; // v2.770(점검 R5-E4-01): 교체로 지운 등록(결과·스캔 로그에 남긴다 — 감사 로그는 registerScanned 가)
   if (r.found.length) {
     // v2.742(감사 DEV-01): 엔트리 id·대역을 넘긴다 — 교체(replace-datacenter)는 **이 엔트리가 등록한 서버만** 지운다(같은 법인의 다른
     //   서비스 엔트리 등록·수동 등록은 남긴다). 예전에는 법인 전체를 지워 엔트리 둘이 서로의 등록을 매 주기 지웠다.
     // v2.744(감사 EDGE-03): 스캔 등록은 자동 경로(auto)다 — '지금 스캔' 도 사람이 고른 것은 스캔이지 손상 등록부 덮어쓰기가 아니다.
     //   이 노드의 iDRAC 등록부를 읽지 못했으면 저장하지 않고 '최근 결과'·로그에 사유를 남긴다.
     const reg = registerScanned(r.found, e.username, e.password, effectiveMode, '', e.datacenterId, { ilo, scanRangeId: e.id || '', scanRanges: e.ranges, auto: true });
-    if (reg.ok) registered = (reg.added || 0) + (reg.updated || 0);
+    if (reg.ok) { registered = (reg.added || 0) + (reg.updated || 0); removed = reg.removed || 0; removedIps = Array.isArray(reg.removedIds) ? reg.removedIds : []; }
     else if (reg.code === 'registry-unreadable') { registerError = reg.reason; console.warn(`[idrac-scan] ${e.datacenterId}: 발견한 iDRAC ${r.found.length}대를 등록하지 않았습니다 — ${reg.reason}`); }
   }
   // v2.591(감사 C5): 무응답·인증실패·소요를 싣는다 — 위임 회신(central/idracScanJobs.js)과 같은 모양. 예전에는 빠져
@@ -170,6 +171,9 @@ async function scanOneDatacenter(e, onProgress, trigger = 'periodic') {
     // v2.610: 벤더별 — iLO 계정이 있는 대역만 hpe 값이 의미를 갖는다(없으면 iloEnabled:false).
     iloEnabled: !!r.iloEnabled, dellFound: r.dellFound ?? r.found.length, hpeFound: r.hpeFound || 0, hpeDetected: r.hpeDetected || 0, hpeAuthFailed: r.hpeAuthFailed || 0, noCreds: r.noCreds || 0,
     noCredsIps: Array.isArray(r.noCredsIps) ? r.noCredsIps : [], noCredsTruncated: !!r.noCredsTruncated,
+    // v2.770(점검 R5-E4-01): 인증서 미신뢰(무응답의 부분집합 — replace 강등 사유) · 교체로 지운 등록.
+    tlsUntrusted: r.tlsUntrusted || 0, tlsUntrustedIps: Array.isArray(r.tlsUntrustedIps) ? r.tlsUntrustedIps : [],
+    ...(removed ? { removed, removedIps } : {}),
     durationMs: Date.now() - started,
   };
 }
@@ -272,7 +276,9 @@ export async function runIdracScanOnce(opts = {}) {
           dispatch: r.delegated ? (r.dispatch || e.dispatch) : '', reqId: r.reqId || '',
           scanned: r.scanned ?? null, found: r.found ?? null, registered: r.registered ?? null,
           durationMs: r.delegated ? null : Date.now() - entryStart, error: r.error || r.registerError || null, stopped: r.aborted,
-          ...(r.delegated ? {} : { unreachable: r.unreachable ?? null, authFailed: r.authFailed ?? null, authSkipped: r.authSkipped || 0, noCreds: r.held ? null : (r.noCreds || 0) }),
+          ...(r.delegated ? {} : { unreachable: r.unreachable ?? null, authFailed: r.authFailed ?? null, authSkipped: r.authSkipped || 0, noCreds: r.held ? null : (r.noCreds || 0),
+            // v2.770(점검 R5-E4-01): 인증서 미신뢰 대수 · 교체로 지운 등록(IP) — '왜 등록이 사라졌나' 를 이력에서 찾게 한다.
+            ...(r.held ? {} : { tlsUntrusted: r.tlsUntrusted || 0, ...(r.removed ? { removed: r.removed, removedIps: r.removedIps || [] } : {}) }) }),
           ...(r.held ? { error: r.heldReason || '위임 보류' } : {}),
         });
         if (!r.delegated && (r.authSkipped || 0) > 0) console.warn(`[idrac-scan] ${e.datacenterId}: 인증 실패 정지로 ${r.authSkipped}개 IP 를 건너뛰었습니다(주기 스캔 — 계정을 고치거나 '지금 스캔' 으로 확인)`);

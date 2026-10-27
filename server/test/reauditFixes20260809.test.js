@@ -101,7 +101,10 @@ test('M-R3: PUT /tools/ipam/ip/:ip 가 기존 레코드 소유권을 body 값보
   const fn = src.slice(src.indexOf('function ipOverrideWriteVerdict'), src.indexOf('function ipOverrideWriteVerdict') + 900);
   assert.match(fn, /const existing = getOverride\(ip\)/);
   assert.match(fn, /existing && !ipInWriteScope\(allowed, owners, ip, prevClaim\)/);
-  assert.ok(fn.indexOf('prevClaim)) return') < fn.indexOf('bodyClaim ||'), '기존 claim 판정이 body claim 보다 먼저');
+  // v2.771(R6-F2-2): 새 claim 은 '본문에 키가 있으면 그 값(빈 값 포함), 없으면 기존' — `bodyClaim ||` 는 빈 값을 기존 claim 으로 읽어 지웠다.
+  const bodyAt = fn.indexOf('bodyClaim === undefined ? prevClaim');
+  assert.ok(bodyAt > 0, '새 claim 판정은 키 유무(undefined)로');
+  assert.ok(fn.indexOf('prevClaim)) return') < bodyAt, '기존 claim 판정이 body claim 보다 먼저');
 });
 
 test('L-R2: CSV export 가 guardCell(수식 인젝션 방어)을 적용', () => {

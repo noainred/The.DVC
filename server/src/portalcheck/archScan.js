@@ -132,6 +132,14 @@ export const ROUTE_GATE_ALLOW = Object.freeze({
   'POST /api/tools/vm-clone/jobs': 'inUserWriteScope — 대상 vCenter 쓰기 범위(v2.369)',
   'DELETE /api/tools/vm-clone/jobs/:id': 'scopedVcenterIds — 작업의 vCenter 범위 판정',
   'POST /api/tools/vm-clone/jobs/:id/run': 'scopedVcenterIds — 작업의 vCenter 범위 판정',
+  // v2.793 VM 백업 센터 — routes/api/vmClone.js cloneJobDenied(잡)·accessOf(vCenter): 조회 밖 404 → 쓰기 밖 403
+  'POST /api/tools/vm-clone/jobs/:id/verify': 'cloneJobDenied — 잡 vCenter 조회 404 · 쓰기 403(v2.793)',
+  'POST /api/tools/vm-clone/jobs/:id/restore': 'cloneJobDenied — 잡 vCenter 조회 404 · 쓰기 403(v2.793)',
+  'POST /api/tools/vm-clone/nfs-datastores': 'accessOf — 대상 vCenter 조회 404 · 쓰기 403(v2.793)',
+  'POST /api/tools/vm-clone/nfs-datastores/:id/attach': 'accessOf — 정의의 vCenter 조회 404 · 쓰기 403(v2.793)',
+  'DELETE /api/tools/vm-clone/nfs-datastores/:id': 'accessOf — 정의의 vCenter 조회 404 · 쓰기 403(v2.793)',
+  'POST /api/tools/vm-clone/nfs-datastores/:id/detach': 'accessOf — 정의의 vCenter 조회 404 · 쓰기 403(v2.794)',
+  'PUT /api/tools/vm-clone/corps/mounts': 'scopedVcenterIds·inUserWriteScope — 법인 vCenter 조회 404 · 전부 쓰기 아니면 403(v2.794)',
 });
 
 /**
@@ -187,6 +195,9 @@ export const KNOWN_CONFIG_FILES = Object.freeze({
   'user-menus.json': '계정별 좌측 메뉴(내 메뉴)·슈퍼 관리자 배포 메뉴(usermenu/store.js — 사용자가 손으로 만든 값, 원자 쓰기·손상 보존, v2.726)',
   // v2.727(감사 B-07): 사용자 데이터(설정도 상태 파일도 아님) — 백업 번들에는 들어가고 변경 감시 지문에서만 뺀다(backup/service.js CHANGE_WATCH_EXCLUDE)
   'notices.json': '접속 공지(팝업) 목록(bulletin/store.js — 전체 범위 관리자가 쓰는 사용자 데이터, 디바운스 비동기 쓰기·손상 보존, v2.722)',
+  // v2.785(검토 R-B1): v2.784 백업 표시 — 미분류 경고(config-file-unclassified)가 파일이 생기는 순간부터 떴다.
+  'backup-marks.json': 'VM 별 백업 표시 — 업무 중요도·백업 필요·메모(veeam/backupMarks.js — 사용자 데이터, 원자 쓰기·손상 보존, v2.784). 백업 번들에는 들어가고 변경 감시 지문에서는 뺀다',
+  'vm-export-prefs.json': 'VM 전체 정보 내보내기 \'내 저장값\'(계정별 기본값 · 1~5칸 — vcenter/vmExportPrefs.js · util/exportPrefs.js, 원자 쓰기·손상 보존 503, 비밀 없음, v2.799)',
   'board.json': '게시판 글·댓글·공감(bulletin/store.js — 로그인 사용자가 쓰는 사용자 데이터, 디바운스 비동기 쓰기·손상 보존·합계 상한 BOARD_MAX_BYTES, v2.722)',
 });
 

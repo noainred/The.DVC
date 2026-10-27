@@ -25,15 +25,20 @@
 
 import { config } from '../config.js';
 import { buildHostIndex } from '../idrac/attribution.js';
-import { allMeasuredPower, vcPowerSkipReason, vcPowerSkippedOf } from '../idrac/service.js';
+import { allMeasuredPower, vcPowerSkipReason, vcPowerSkippedOf, vcPowerKey } from '../idrac/service.js';
 import { unreadVcenterReasons } from '../metrics/unreadVcenters.js'; // v2.733(C2-02): 지표 샘플러와 같은 vCenter 판정
 import { usageReadable } from '../store.js';                         // v2.733(C2-02): 사용률과 같은 호스트 판정
-import { loadRegistry, matchKeys } from '../idrac/registry.js';
-import { allOmeDevices, dbKey } from '../idrac/omeCache.js';
+import { loadRegistry, matchKeys, registryLoadError } from '../idrac/registry.js';
+import { allOmeDevices, dbKey, getOmeEntry } from '../idrac/omeCache.js';
 import { getInventory } from '../idrac/invCache.js';
 import { loadFleetTags } from './fleetTags.js';
 import { loadFleetAssign } from './fleetAssign.js';
-import { getEdgeFleetServers } from '../central/fleet.js';
+import { getEdgeFleetServers, listEdgeFleet, UNREADABLE_HOLD_MS } from '../central/fleet.js';
+// v2.783(점검 Q2 P-B3): 유령 키 판정이 보는 원격 수집(collector pull) 출처 — 인벤토리·전력·수집 서버 등록부·수신 상태.
+import { remotePowerEntries, getCollectorStatus } from '../collector/state.js';
+import { allRemoteServers } from '../collector/remoteInventory.js';
+import { loadCollectors, registryLoadError as collectorsLoadError } from '../collector/registry.js';
+import { summarizeRegistryError, REGISTRY_ERROR_LABEL } from '../util/registryCore.js';
 
 const norm = (s) => String(s || '').trim().toLowerCase();
 const round = (n) => (Number.isFinite(n) ? Math.round(n) : null);
@@ -314,38 +319,144 @@ async function buildServerUniverse(hosts, vcSkip = {}) {
   return [...measured, ...extras];
 }
 
-/**
- * prune 전용 'live 키' 집합 — 전력 DB를 거치지 않고 레지스트리(등록된 모든 서버) + OME 캐시 + 호스트에서
- * 직접 키를 모은다. 전원오프·전력미보고라도 '등록된' 서버는 보호되어 prune이 정상 키를 지우지 않게 한다.
+/*
+ * ⚠⚠ v2.783(점검 Q2 P-B3 — 데이터 손실): 유령 키 판정의 **코어는 이 파일의 fleetKeySources 하나**다. 화면 요약(summary.ghostKeys)과
+ *   POST /insights/fleet/prune(미리보기·실제 삭제)이 같은 함수(fleetGhostReport)를 쓴다.
+ *   예전에는 둘이 서로 다른 live 집합을 썼다 — 화면은 classifyFleet 의 liveKeys(전력이 신선한 원격 서버만), prune 은 fleetLiveKeys
+ *   (원격 수집 서버가 아예 없음). 다른 진짜 유령이 1개라도 있으면 버튼 한 번에 **살아 있는 원격 베어메탈**의 법인 귀속·강제
+ *   baremetal 태그가 함께 지워졌고(재현: 확인창 '1개' · 실제 3건 삭제), fleet-assign 은 bmusage 법인 귀속의 입력이라 그 법인 통계에서 빠졌다.
+ *   규칙:
+ *    ① live 는 classifyFleet 이 행을 만드는 출처 **전부의 합집합**이다 — 등록부(전원오프·비활성 포함) · OME 캐시 · 원격 인벤토리
+ *       (allRemoteServers — 전력 신선도와 무관) · 원격 전력 항목 전부 · 스냅샷 호스트(+vCenter 추정 전력 키) · 엣지 push.
+ *       새 출처를 classifyFleet 에 넣으면 여기에도 넣는다(server/test/audit2783b.test.js 가 '분류 liveKeys ⊆ 이 집합' 을 대조한다).
+ *    ② **못 읽은 출처는 '없음' 이 아니다**(numOrNull 규약의 키 판본). 등록부 손상 · 이 기동에서 아직 장비 목록을 받지 못한 OME 연결 ·
+ *       인벤토리를 받은 적 없는(또는 꺼진) 수집 서버 · 호스트 목록을 모르는 vCenter · 보류·일부·만료된 엣지 보고가 하나라도 있으면
+ *       unreadable 에 사유를 싣고, prune 은 지우지 않는다(라우트가 409/503). 사유에 원문 오류(파일 조각)는 싣지 않는다.
  */
-export function fleetLiveKeys(snap) {
+
+/** 엣지 push 가 보이다가 사라진(TTL 만료) 에이전트 — 사라진 뒤 UNREADABLE_HOLD_MS 동안 '못 읽음' 으로 본다(보류에는 시한). */
+const _edgeSeen = new Map(); // agent -> 마지막으로 살아 있던 시각(ms)
+
+/** 호스트 목록을 모르는 vCenter — 연결 전·실패·점검중인데 스냅샷에 그 vCenter 의 호스트가 하나도 없다(직전 값 이월이 없다). */
+function hostListUnknownVcenters(snap) {
+  const withHosts = new Set((snap?.hosts || []).map((h) => h && h.vcenterId).filter(Boolean));
+  const out = [];
+  for (const vc of snap?.vcenters || []) {
+    if (!vc || vc.id == null) continue;
+    if (vc.status === 'connected' || withHosts.has(vc.id)) continue; // 연결돼 호스트 0 은 '비어 있음' 을 읽은 것이다
+    out.push({ id: String(vc.id), name: String(vc.name || vc.id), status: String(vc.status || '') });
+  }
+  return out;
+}
+
+const addKey = (set, v) => { const k = norm(v); if (k) set.add(k); };
+
+/**
+ * 유령 키 판정 입력 — { live:Set<소문자 키>, unreadable:[{source, id?, reason, registry?}] }.
+ * @param {object} snap  store.get() 스냅샷
+ * @param {{now?:number}} [o]
+ */
+export function fleetKeySources(snap, { now = Date.now() } = {}) {
   const live = new Set();
-  for (const s of loadRegistry()) {
-    const id = norm(s.id); if (id) live.add(id);
-    const t = norm(s.serviceTag); if (t) live.add(t);
-    const invTag = norm(getInventory(s.id)?.system?.serviceTag); if (invTag) live.add(invTag);
-    for (const n of (s.hostNames || [])) { const k = norm(n); if (k) live.add(k); }
+  const unreadable = [];
+  if (!snap || typeof snap !== 'object') unreadable.push({ source: 'snapshot', reason: '인벤토리 스냅샷이 아직 없습니다(기동 직후)' });
+
+  // 1) iDRAC/OME 등록부 — 전원오프·비활성·전력 미보고라도 '등록된' 서버는 보호한다.
+  const regErr = registryLoadError();
+  if (regErr) {
+    const code = summarizeRegistryError(regErr)?.code;
+    unreadable.push({ source: 'idrac-registry', registry: true, reason: `iDRAC 등록부(idrac.json)를 읽지 못했습니다(${REGISTRY_ERROR_LABEL[code] || REGISTRY_ERROR_LABEL['read-error']})` });
+  }
+  const registry = loadRegistry();
+  for (const s of registry) {
+    addKey(live, s.id); addKey(live, s.serviceTag); addKey(live, s.host);
+    addKey(live, getInventory(s.id)?.system?.serviceTag);
+    for (const k of matchKeys(s)) addKey(live, k);
+    // OME 연결: 이 기동에서 장비 목록을 받은 적이 없으면(재시작 직후·연결 실패·비활성) 그 장비 키를 모른다.
+    if (s.type === 'ome' && !getOmeEntry(s.id)) {
+      unreadable.push({ source: 'ome', id: String(s.id), reason: s.enabled === false
+        ? `OME 연결 '${s.name || s.id}' 이(가) 비활성이라 장비 목록을 받지 않았습니다(다시 켜서 한 번 수집되거나, 연결을 삭제하면 정리할 수 있습니다)`
+        : `OME 연결 '${s.name || s.id}' 의 장비 목록을 이 기동에서 아직 받지 못했습니다(재시작 직후이거나 OME 연결 실패)` });
+    }
   }
   for (const { entryId, device } of allOmeDevices()) {
-    live.add(norm(dbKey(entryId, device)));
-    const t = norm(device.serviceTag); if (t) live.add(t);
-    const n = norm(device.name); if (n) live.add(n);
+    addKey(live, dbKey(entryId, device)); addKey(live, device.serviceTag); addKey(live, device.name);
   }
+
+  // 2) 원격 수집(collector pull) — 전력 항목 전부(신선도 무관) + 인벤토리 전부. classifyFleet 의 원격 행 키는 remote:<수집기>:<서버>.
+  for (const r of remotePowerEntries()) {
+    addKey(live, `remote:${r.collectorId}:${r.serverId != null ? r.serverId : r.host}`);
+    addKey(live, r.serviceTag); addKey(live, r.host); addKey(live, r.serverName);
+  }
+  for (const s of allRemoteServers()) {
+    addKey(live, `remote:${s.collectorId}:${s.id}`);
+    addKey(live, s.serviceTag); addKey(live, s.inv?.system?.serviceTag); addKey(live, s.name); addKey(live, s.host); addKey(live, s.hostName);
+    for (const n of (Array.isArray(s.hostNames) ? s.hostNames : [])) addKey(live, n);
+  }
+  if (collectorsLoadError()) unreadable.push({ source: 'collector-registry', registry: true, reason: '수집 서버 등록부(collectors.json)를 읽지 못했습니다' });
+  for (const c of loadCollectors()) {
+    if (!c || !c.id || !c.url) continue; // URL 이 없는 항목은 당기지 않는다(받은 적도 없다)
+    if (c.enabled === false) {
+      unreadable.push({ source: 'collector', id: String(c.id), reason: `수집 서버 '${c.name || c.id}' 이(가) 비활성이라 그 현장 서버 목록을 모릅니다(다시 켜서 한 번 수집되거나, 수집 서버를 삭제하면 정리할 수 있습니다)` });
+    } else if (!Number.isFinite(getCollectorStatus(c.id)?.hosts)) {
+      // pull 성공 경로만 hosts 를 채운다(collector/puller.js statusFromPull) — 이 기동에서 한 번도 받지 못했다.
+      unreadable.push({ source: 'collector', id: String(c.id), reason: `수집 서버 '${c.name || c.id}' 에서 이 기동 뒤 서버 목록을 아직 받지 못했습니다` });
+    }
+  }
+
+  // 3) 스냅샷 호스트(+ vCenter 추정 전력 행 키 — classifyFleet 의 servers 에 serverId 로 들어간다).
   for (const h of (snap?.hosts || [])) {
-    const t = norm(h.serviceTag); if (t) live.add(t);
-    const n = norm(h.name); if (n) live.add(n);
+    addKey(live, h.serviceTag); addKey(live, h.name);
+    if (h.name) addKey(live, vcPowerKey(h.vcenterId, h.name));
   }
-  // 엣지 보고 베어메탈의 키도 보호(중앙에서 단 태그/소속이 유령으로 오삭제되지 않게).
+  for (const v of hostListUnknownVcenters(snap)) {
+    unreadable.push({ source: 'vcenter', id: v.id, reason: v.status === 'disabled'
+      ? `vCenter '${v.name}' 이(가) 비활성이라 호스트 목록을 모릅니다(다시 켜서 한 번 수집되거나, 등록을 삭제하면 정리할 수 있습니다)`
+      : `vCenter '${v.name}' 의 호스트 목록을 아직 읽지 못했습니다(상태 ${v.status || '미상'})` });
+  }
+
+  // 4) 엣지 push 베어메탈(중앙일 때만 — getFleetInventory 의 병합 조건과 같다).
   if (config.central?.token && !config.agent?.centralUrl) {
     try {
       for (const e of getEdgeFleetServers()) {
-        const id = norm(e.serverId); if (id) live.add(id);
-        const t = norm(e.serviceTag); if (t) live.add(t);
-        const n = norm(e.serverName); if (n) live.add(n);
+        addKey(live, e.serverId); addKey(live, e.serviceTag); addKey(live, e.serverName);
+        for (const n of (e.hostNames || [])) addKey(live, n);
       }
-    } catch { /* */ }
+      const listed = listEdgeFleet();
+      const alive = new Set();
+      for (const x of listed) {
+        alive.add(x.agent); _edgeSeen.set(x.agent, now);
+        if (x.registryUnreadable) unreadable.push({ source: 'edge', id: x.agent, reason: `엣지 '${x.agent}' 가 iDRAC 등록부를 읽지 못해 직전 목록을 유지 중입니다` });
+        else if (x.partial && x.withheldItems !== 0) unreadable.push({ source: 'edge', id: x.agent, reason: `엣지 '${x.agent}' 가 목록 일부를 빼고 보냈습니다(못 읽은 vCenter)` });
+      }
+      for (const [a, t] of [..._edgeSeen]) {
+        if (alive.has(a)) continue;
+        if (now - t > UNREADABLE_HOLD_MS) { _edgeSeen.delete(a); continue; } // 보류에는 시한
+        unreadable.push({ source: 'edge', id: a, reason: `엣지 '${a}' 의 베어메탈 보고가 만료됐습니다(무보고 — 다시 보고하면 정리할 수 있습니다)` });
+      }
+    } catch {
+      unreadable.push({ source: 'edge', reason: '엣지 베어메탈 보고를 읽지 못했습니다' });
+    }
   }
-  return live;
+  return { live, unreadable };
+}
+
+/** 하위 호환 — live 키 집합만(판정은 fleetGhostReport 를 쓸 것). */
+export function fleetLiveKeys(snap) {
+  return fleetKeySources(snap).live;
+}
+
+/**
+ * v2.783(점검 Q2 P-B3): 유령 키 보고 — 화면 요약과 prune(미리보기·실제)이 함께 쓰는 단일 판정.
+ * ghostKeys 는 tags ∪ assign 의 **고유 키 수**(화면 숫자와 미리보기 숫자가 같은 단위), tags·assign 은 저장소별 키 목록.
+ * @returns {{ ghostKeys:number, keys:string[], tags:string[], assign:string[], unreadable:object[], blocked:boolean }}
+ */
+export function fleetGhostReport(snap, { tags = loadFleetTags(), assign = loadFleetAssign(), now = Date.now() } = {}) {
+  const { live, unreadable } = fleetKeySources(snap, { now });
+  const tagKeys = Object.keys(tags || {}).filter((k) => !live.has(k)).sort();
+  const assignKeys = Object.keys(assign || {}).filter((k) => !live.has(k)).sort();
+  const keys = [...new Set([...tagKeys, ...assignKeys])].sort();
+  return { ghostKeys: keys.length, keys, tags: tagKeys, assign: assignKeys, unreadable, blocked: unreadable.length > 0 };
 }
 
 /** 이 인스턴스 역할: 중앙(central) / 엣지(edge=중앙에 push하는 에이전트) / 단독(standalone). */
@@ -389,6 +500,13 @@ export async function getFleetInventory(snap) {
     tags: loadFleetTags(), assign: loadFleetAssign(),
   });
   result.summary.vcPowerSkipped = vcPowerSkippedOf(hostsIn, vcSkip); // v2.733(C2-02)
+  // v2.783(점검 Q2 P-B3): 화면의 유령 키 수는 prune 미리보기와 **같은 판정**(fleetGhostReport)이다 — classifyFleet 의 ghostKeys 는
+  //   순수 함수 입력(servers)만 보므로 여기서 덮는다. 못 읽은 출처가 있으면 그 종류만 싣는다(이름·사유는 관리자 미리보기에서).
+  try {
+    const g = fleetGhostReport(snap);
+    result.summary.ghostKeys = g.ghostKeys;
+    result.summary.ghostBlocked = [...new Set(g.unreadable.map((u) => u.source))];
+  } catch { result.summary.ghostBlocked = ['error']; }
   const edgeAgents = new Set(result.bareMetal.filter((b) => b.remoteAgent).map((b) => b.remoteAgent));
   result.summary.edgeReported = result.bareMetal.filter((b) => b.remoteAgent).length;
   result.summary.edgeAgents = edgeAgents.size;

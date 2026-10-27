@@ -277,12 +277,23 @@ export function sanitizeAuthDeny(d) {
  * export 응답 전체를 pull 이 쓰는 필드만으로 좁힌다(순수). version·agent·hostname 은 64자 글자,
  * power.byHost 원소는 평범한 객체만, servers 는 sanitizeRemoteServers.
  */
+/**
+ * v2.771(점검 R6-F4-1): export `power.byHost` 원소 개수 상한. 엣지 collector/agent.js buildExport 는 서버 1대당 한 행(serverId 중복 제거)을
+ *   내보내므로 servers 와 같은 상한(REMOTE_SERVERS_MAX)이 기본이다. 예전에는 상한이 응답 바이트(64MB)뿐이라 약 29바이트 원소 200만 개가
+ *   지나갔고 puller 의 원소별 setRemoteHost·db.latest + insertMany 한 트랜잭션이 이벤트 루프를 동기로 멈췄다(10만 건 약 1초 · 100만 건 8초 재현).
+ */
+export const REMOTE_BYHOST_MAX = Math.max(100, Number(process.env.COLLECTOR_REMOTE_BYHOST_MAX) || REMOTE_SERVERS_MAX);
+
 export function sanitizeEdgeExport(data) {
   const d = isPlainObj(data) ? data : {};
   const byHost = [];
   const power = isPlainObj(d.power) ? d.power : {};
+  // v2.771(R6-F4-1): 버린 원소는 serversDropped 와 같은 규약으로 센다(조용히 빼지 않는다). byHost 배열이 없으면 null.
+  const byHostDropped = Array.isArray(power.byHost) ? { notObject: 0, overCount: 0 } : null;
   for (const h of Array.isArray(power.byHost) ? power.byHost : []) {
-    if (!isPlainObj(h)) continue;
+    if (!isPlainObj(h)) { byHostDropped.notObject += 1; continue; }
+    // 상한에 닿으면 나머지는 글자 하나 만들지 않고 센다(길이만 — 남은 원소를 훑지 않는다).
+    if (byHost.length >= REMOTE_BYHOST_MAX) { byHostDropped.overCount = power.byHost.length - byHost.length - byHostDropped.notObject; break; }
     const sid = (typeof h.serverId === 'number' && Number.isFinite(h.serverId)) ? h.serverId : (edgeId(h.serverId) || null);
     byHost.push({
       host: remoteStr(h.host) ?? '', watts: typeof h.watts === 'number' || typeof h.watts === 'string' ? numOrNull(h.watts) : null,
@@ -298,7 +309,7 @@ export function sanitizeEdgeExport(data) {
     version: remoteStr(d.version, 64) ?? '', agent: remoteStr(d.agent, 64) ?? '', hostname: remoteStr(d.hostname, 64) ?? '',
     datacenter: remoteStr(d.datacenter, 128) ?? '', mock: d.mock === true,
     authDeny: sanitizeAuthDeny(d.authDeny),
-    power: { byHost },
+    power: { byHost }, byHostDropped,
     servers: sv ? sv.servers : null, // null = 구버전 엣지(필드 없음) — 빈 배열로 교체한다
     serversDropped: sv ? sv.dropped : null, serversCoerced: sv ? sv.coerced : 0,
   };

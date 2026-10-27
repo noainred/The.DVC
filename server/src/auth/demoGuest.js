@@ -33,7 +33,7 @@ export const READ_DENY = [
   '/api/admin/packages', '/api/admin/data-source', '/api/admin/log-analysis', '/api/admin/perf', '/api/admin/memtrack',
   '/api/admin/codex-check', '/api/admin/nfs-mounts', '/api/admin/edge-users', '/api/admin/gpu-guest', '/api/admin/gpu-physical',
   '/api/admin/portal-db', '/api/admin/status', '/api/admin/emergency-stop', '/api/admin/net', '/api/admin/dir-usage',
-  '/api/admin/os-scan', '/api/admin/idrac/scan-ranges', '/api/admin/report', '/api/admin/logs',
+  '/api/admin/os-scan', '/api/admin/idrac/scan-ranges', '/api/admin/veeam', '/api/admin/report', '/api/admin/logs',
   '/api/auth/ad-config', '/api/upgrade', '/api/tools/credentials', '/api/remote',
   // v2.719(감사 R1-08): /api/tools 아래 보안 화면 — 설정 파일 평문 비밀 개수·탐지 위치(secret-scan)와
   //   전 엣지 주소·토큰 지문·길이(portal-check/tokens). 접두가 /api/admin/security 뿐이라 빠져 있었다.

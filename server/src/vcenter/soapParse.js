@@ -3,6 +3,7 @@
  * soapClient.js에서 분리했다. 여기에는 config/DB/네트워크 등 부수효과 있는 import를 절대
  * 추가하지 말 것(워커가 로드할 때 부수효과가 워커 스레드에서 실행되면 안 됨).
  */
+import { fsTypeOf } from '../util/fsType.js';   // v2.798 파일 시스템 종류(순수 — 부수효과 없음)
 
 const XML_ENT_RE = /&(amp|lt|gt|quot|apos|#(\d+)|#x([0-9a-fA-F]+));/g;
 const XML_ENT_MAP = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'" };
@@ -38,8 +39,11 @@ export function layoutFileBlocks(xml) {
  * VM 'snapshot'(VirtualMachineSnapshotInfo) + 'layoutEx.file' XML → 스냅샷 요약.
  * 개수·근사 크기에 더해 생성일(가장 오래된/최신)과 이름 목록을 파싱한다 — 커뮤니티 표준
  * 점검 항목인 "N일 이상 된 스냅샷" 탐지에 필요(추가 SOAP 왕복 없음, 이미 수집된 XML 재사용).
- * 반환: { snapshotCount, snapshotSizeGB, snapshotOldestTs, snapshotNewestTs, snapshotNames }.
+ * 반환: { snapshotCount, snapshotSizeGB, snapshotOldestTs, snapshotNewestTs, snapshotNames, [veeamSnaps, veeamSnapTs] }.
  */
+/** Veeam 백업 임시 스냅샷 이름(Veeam KB1790 — 'VEEAM BACKUP TEMPORARY SNAPSHOT'). 대문자 비교. */
+export const VEEAM_SNAP_NAME = 'VEEAM BACKUP TEMPORARY SNAPSHOT';
+
 export function snapshotInfo(snapXml, layoutXml) {
   let snapshotCount = 0;
   if (snapXml) snapshotCount = (snapXml.match(/<snapshot type="VirtualMachineSnapshot">/g) || []).length
@@ -64,6 +68,7 @@ export function snapshotInfo(snapXml, layoutXml) {
   // 트리 내 모든 <createTime>(중첩 child 포함)에서 가장 오래된/최신 생성일을 뽑는다.
   let oldest = null; let newest = null;
   const names = [];
+  let veeamSnaps = 0; let veeamSnapTs = null;
   if (snapshotCount > 0 && snapXml) {
     const ctRe = /<createTime>([^<]+)<\/createTime>/g;
     let m;
@@ -75,9 +80,20 @@ export function snapshotInfo(snapXml, layoutXml) {
     }
     // 스냅샷 이름 — currentSnapshot 참조 등에는 <name>이 없고 트리 노드에만 있다.
     const nameRe = /<name>([^<]*)<\/name>/g;
-    while ((m = nameRe.exec(snapXml)) && names.length < 5) {
+    while ((m = nameRe.exec(snapXml))) {
       const n = xmlUnescape(m[1]).trim();
-      if (n) names.push(n);
+      if (n && names.length < 5) names.push(n);
+      // v2.753: Veeam 이 백업하는 동안 만드는 임시 스냅샷(이름 고정 — Veeam KB1790). 생성 시각은 트리 노드에서 이름 뒤의
+      //   첫 <createTime> 이다(VirtualMachineSnapshotTree 원소 순서: name → description → id → createTime → … → childSnapshotList).
+      //   이름 목록(5개 상한)과 따로 끝까지 본다 — 6번째 이후에 있어도 놓치지 않게.
+      if (n.toUpperCase() === VEEAM_SNAP_NAME) {
+        const ctRe2 = /<createTime>([^<]+)<\/createTime>/g;
+        ctRe2.lastIndex = nameRe.lastIndex;
+        const c = ctRe2.exec(snapXml);
+        const ts = c ? Date.parse(c[1]) : NaN;
+        veeamSnaps++;
+        if (Number.isFinite(ts) && (veeamSnapTs == null || ts < veeamSnapTs)) veeamSnapTs = ts;
+      }
     }
   }
   // v2.698(A3): 스냅샷이 0개인데 델타 체인 파일(-NNNNNN.vmdk · -delta · -sesparse)이 남아 있으면 '유령 스냅샷' 후보다
@@ -99,6 +115,8 @@ export function snapshotInfo(snapXml, layoutXml) {
     snapshotOldestTs: oldest,
     snapshotNewestTs: newest,
     snapshotNames: names,
+    // Veeam 임시 스냅샷이 있을 때만 싣는다(없는 VM 의 응답 모양은 예전 그대로). 시각을 못 읽었으면 veeamSnapTs 는 null.
+    ...(veeamSnaps ? { veeamSnaps, veeamSnapTs } : {}),
   };
 }
 
@@ -189,13 +207,16 @@ export function parseGuestDisks(guestDiskXml) {
     const freeM = /<freeSpace>(\d+)<\/freeSpace>/.exec(blk);
     if (!path && !cap) continue;
     const gb = (n) => Math.round((n / 1024 ** 3) * 10) / 10;
+    // v2.798 파일 시스템 종류(GuestDiskInfo.filesystemType — vSphere 7.0 이상이 준다고 **추정**, 실물 미확인). 없거나 형식이 아니면 넣지 않는다(모름).
+    const fs = fsTypeOf(xmlUnescape(/<filesystemType>([^<]{0,64})<\/filesystemType>/.exec(blk)?.[1] || ''));
+    const fsOf = fs ? { fs } : {};
     // v2.600(감사 LO2600-07): freeSpace 가 없으면 예전에는 여유 0 · 사용 = 용량(100%)으로 읽혔다(지어낸 값).
     //   여유·사용은 **모른다**(null)이고 `freeUnknown` 으로 밝힌다. 소비처(guestdisk/analyze.vmSummary·
     //   sanitizeGuestDiskVms · vmExport)는 이 파티션을 할당·사용 합계 **양쪽에서** 빼고 개수를 밝힌다 —
     //   한쪽(사용)만 빼면 '전부 비었다'(회수 후보 과대)가 된다.
-    if (!freeM) { out.push({ path, capacityGB: gb(cap), freeGB: null, usedGB: null, freeUnknown: true }); continue; }
+    if (!freeM) { out.push({ path, capacityGB: gb(cap), freeGB: null, usedGB: null, freeUnknown: true, ...fsOf }); continue; }
     const free = Number(freeM[1]);
-    out.push({ path, capacityGB: gb(cap), freeGB: gb(free), usedGB: gb(Math.max(0, cap - free)) });
+    out.push({ path, capacityGB: gb(cap), freeGB: gb(free), usedGB: gb(Math.max(0, cap - free)), ...fsOf });
   }
   return out;
 }

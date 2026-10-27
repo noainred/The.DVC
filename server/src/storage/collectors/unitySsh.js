@@ -40,7 +40,9 @@ import { stripUemcliBanner } from '../../proxy/sshExec.js';
 import { versionAttemptsOf } from './cliSsh.js'; // v2.585 — 실패 스냅샷(cliSsh)도 같은 요약을 싣는다. ⚠ import+export(재수출 전용 문법은 이 파일 안에서 이름을 만들지 않는다 — v2.575)
 export { versionAttemptsOf };
 import { emptySnapshot } from '../types.js';
-import { parsePools, parseSystemSpace, checkSpaceIdentity, parseUemcli } from './uemcliParse.js';
+import { parsePools, parseSystemSpace, checkSpaceIdentity, parseUemcli, parseLuns, parseFilesystems } from './uemcliParse.js';
+import { normalizeResourceList, resourceProbe } from '../resources.js';
+import { pushAll } from '../../util/pushAll.js';
 import { versionFromUemcli, versionFromSvcDiag, mergeVersionInfo } from './unityVersion.js';
 import { parseSpinfo } from './svcDiag.js'; // v2.664 전원(입력 전력 W)
 
@@ -112,6 +114,18 @@ export const SPECS = [
    */
   { key: 'power', answered: true, rules: ['pager', 'certAccept'], lowPriority: true, timeoutMs: 25_000,
     cmds: ['svc_diag -s spinfo'] },
+  /*
+   * v2.789 — 하위 항목(LUN·파일시스템) 용량. 사용자 요청 "스토리지 사용량을 일간/주간 별로 이렇게 정리" + 선택 "LUN·파일시스템까지"
+   * (엑셀 캡처의 `SAN Davinci_01` · `NAS sandbox` 행). 파서는 `uemcliParse.parseLuns`·`parseFilesystems`.
+   * ⚠ **맨 뒤 · lowPriority**(전원과 같은 자리) — 세션 예산이 남을 때만 돈다. 앞 항목(용량·상태·버전·전원)을 밀어내지 않고,
+   *   `unitySshBudget2528.test.js` 의 '필수 최악 합 ≤ 예산' · '비-lowPriority 최악 합 ≤ 예산 × 1.25' 산수에 들지 않는다.
+   *   전원 뒤에 둔 것은 기존 기능의 우선순위를 바꾸지 않기 위해서다. 건너뛰면 `extra.resourcesProbe` 가 사유를 말한다.
+   * ⚠ **이 장비의 두 출력은 본 적이 없다** — 키는 Unisphere CLI 가이드 예시가 근거다(파서 머리말). 첫 실수집의 CLI 원문으로 좁힐 것.
+   */
+  { key: 'luns', answered: true, rules: ['pager', 'certAccept'], lowPriority: true, timeoutMs: 25_000,
+    cmds: ['uemcli /stor/prov/luns/lun show -detail'] },
+  { key: 'filesystems', answered: true, rules: ['pager', 'certAccept'], lowPriority: true, timeoutMs: 25_000,
+    cmds: ['uemcli /stor/prov/fs show -detail'] },
 ];
 
 /**
@@ -279,7 +293,7 @@ export function buildSnapshot(device, out = {}, { errors = {}, usedCmds = {} } =
   snap.accounts = [];
   snap.alerts = { unresolved: null };
   snap.extra.notCollected = ['nodes', 'accounts', 'alerts'];
-  snap.extra.scopeNote = '이 수집 방식은 **풀·시스템 용량 + 모델·버전**만 조회합니다 '
+  snap.extra.scopeNote = '이 수집 방식은 **풀·시스템 용량 + 모델·버전 + LUN·파일시스템 용량**만 조회합니다 '
     + '— 노드·계정·경보는 조회하지 않으므로 0 이 아니라 빈 값입니다.';
 
   snap.ok = snap.sections.pools === 'ok' || snap.sections.capacity === 'ok';
@@ -353,6 +367,46 @@ export function applyUnitySshPower(extra, r) {
   extra.powerProbe = powerProbe('no-field', { source, detail: sp.truncated ? '출력이 잘렸습니다' : '전원공급장치 입력 전력 줄이 없습니다' });
 }
 
+/**
+ * v2.789 — LUN·파일시스템 → `extra.resources` + 종류별 `extra.resourcesProbe`(순수 — extra 변경). r = runCliSession 결과.
+ * ⚠ **'0개' 와 '못 읽음' 을 구분한다** — 명령이 성공했고 레코드가 없으면 ok·0개, 성공했는데 인식한 항목이 없고 출력이
+ *   비어 있지 않으면 'unparsed'(형식 문제), 실패는 'failed', 예산으로 시작하지 않았으면 'skipped'. 못 읽은 종류는
+ *   목록에 넣지 않는다(이전 값을 지어내지 않는다 — 일 롤업은 그 날 그 항목의 행을 만들지 않는다).
+ */
+export function applyUnitySshResources(extra, r) {
+  const items = [];
+  const probe = {};
+  const specs = [['lun', 'luns', parseLuns, 'uemcli /stor/prov/luns/lun show -detail'],
+    ['fs', 'filesystems', parseFilesystems, 'uemcli /stor/prov/fs show -detail']];
+  for (const [kind, key, parse, source] of specs) {
+    const text = r?.out?.[key];
+    if (text == null) {
+      if ((r?.skipped || []).includes(key)) probe[kind] = resourceProbe('skipped', { source, detail: '수집 시간 예산이 모자라 이번 주기에는 실행하지 않았습니다' });
+      else {
+        // 빈 출력은 cliLooksError 가 실패로 본다 — 항목이 정말 0개인 장비일 수도 있으므로 단정하지 않고 둘 다 말한다.
+        const err = r?.errors?.[key];
+        probe[kind] = resourceProbe('failed', { source,
+          detail: err === '빈 출력' ? '빈 출력 — 항목이 없는 장비이거나 명령이 아무것도 내지 않았습니다' : (err || '명령을 실행하지 못했습니다') });
+      }
+      continue;
+    }
+    let list = [];
+    try { list = parse(text); } catch (e) { probe[kind] = resourceProbe('unparsed', { source, detail: String(e?.message || e) }); continue; }
+    // 레코드가 하나라도 있는데 크기를 하나도 못 읽었으면 형식이 다른 것이다 — 빈 값들을 '항목' 이라 하지 않는다.
+    const sized = list.filter((x) => x.totalBytes != null);
+    if (!sized.length && (list.length || parseUemcli(text).length)) {
+      probe[kind] = resourceProbe('unparsed', { source, detail: `레코드 ${parseUemcli(text).length}건에서 크기(Size)를 읽지 못했습니다 — CLI 원문 확인` });
+      continue;
+    }
+    probe[kind] = resourceProbe('ok', { source, count: sized.length });
+    pushAll(items, sized);   // 전개 push 금지(인벤토리 규모 배열 — util/pushAll.js)
+  }
+  const { list, dropped } = normalizeResourceList(items);
+  extra.resources = list;
+  if (dropped) extra.resourcesDropped = dropped;
+  extra.resourcesProbe = probe;
+}
+
 export async function collectViaSsh(device) {
   let raw = [];
   try {
@@ -379,6 +433,7 @@ export async function collectViaSsh(device) {
     // v2.667: 못 읽은 이유를 `extra.powerProbe` 로 싣는다(예산 초과로 건너뜀 / 명령 실패 / 출력에 값 없음) —
     //   전체 소비 전력 화면이 '못 읽음 N' 을 사유별로 말한다. 요약 구획이 없으면 FRU 상태줄(`ps0: OK 330`)의 숫자로 대신한다.
     applyUnitySshPower(snap.extra, r);
+    applyUnitySshResources(snap.extra, r);   // v2.789 — LUN·파일시스템(하위 항목). 못 읽은 사유는 resourcesProbe
     // v2.586 — 버전은 못 읽었지만 어느 후보가 모델을 줬다면 버리지 않는다(accept 가 버전만 성공으로 본다).
     if (!snap.extra.model) {
       for (const x of raw) {

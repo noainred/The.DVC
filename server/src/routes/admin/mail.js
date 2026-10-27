@@ -8,16 +8,31 @@
 import { requireRole } from '../../auth/auth.js';
 import { logAudit } from '../../audit.js';
 import { requireSettingsOwner } from './shared.js';
-import { load as loadMail, save as saveMail, redact, validate, smtpIssue, unknownKinds } from '../../mail/settings.js';
+import { load as loadMail, save as saveMail, redact, validate, smtpIssue, unknownKinds, nextSmtpPassword } from '../../mail/settings.js';
 import { sendPortalMail, mailStatus } from '../../mail/service.js';
 import { KINDS } from '../../mail/kinds.js';
+import { store } from '../../store.js';
+import { scopedVcenterIds } from '../../auth/scope.js';
 
 const adminOnly = requireRole('admin');
 
+/**
+ * v2.768(점검 R3-C2-1): 발송 이력(제목·수신자)과 최근 오류는 **전 법인 알림 메일**의 기록이다 — 제목에 다른 법인의 vCenter·
+ *   호스트·DS·VM 이름이 실린다. 형제 GET /admin/alerts 는 scopeAlertStatus 로 범위 vCenter 만 주는데 같은 알림의 제목이 이
+ *   경로로는 그대로 나갔다. 이력에는 vCenter 귀속이 없어 나눌 축이 없다(v2.525 규약) → 범위 계정에는 싣지 않고 뺀 사실을 밝힌다
+ *   (화면이 '기록 없음' 과 구분한다). 집계 수·인증 정지 표지는 법인 정보가 아니라 그대로 둔다.
+ * @param {object} st mailStatus() 결과 · @param {Set<string>|null} allowed scopedVcenterIds 결과(null = 전체 범위)
+ */
+export function scopeMailStatus(st, allowed) {
+  if (!allowed || !st) return st;
+  const n = Array.isArray(st.history) ? st.history.length : 0;
+  return { ...st, history: [], lastError: null, scoped: true, omittedOutOfScope: { history: n, lastError: !!st.lastError } };
+}
+
 export function registerMail(adminRouter) {
 
-  adminRouter.get('/mail', adminOnly, (_req, res) => {
-    res.json({ settings: redact(), status: mailStatus(), kinds: KINDS });
+  adminRouter.get('/mail', adminOnly, (req, res) => {
+    res.json({ settings: redact(), status: scopeMailStatus(mailStatus(), scopedVcenterIds(req.user, store.get())), kinds: KINDS });
   });
 
   adminRouter.put('/mail', adminOnly, requireSettingsOwner, (req, res) => {
@@ -25,12 +40,16 @@ export function registerMail(adminRouter) {
     const bad = unknownKinds(body.kinds);
     if (bad.length) return res.status(400).json({ ok: false, reason: `알 수 없는 발송 종류: ${bad.join(', ')}` });
     // 검증은 '저장 후 상태' 기준이어야 한다 — 비밀번호를 비워 보낸 경우(기존 유지)를 오탐하지 않게.
+    // v2.768(점검 R3-C5-04): 비밀번호는 save 와 **같은 승계식**(nextSmtpPassword — 호스트 변경·clearPassword 면 빈 값)으로 채운다.
+    //   예전 `body.password || cur.password` 는 save 가 버릴 비밀번호로 검증해 '계정 있음 + 비밀번호 없음' 을 200 으로 저장했다.
     const cur = loadMail();
+    const hasSmtp = body.smtp && typeof body.smtp === 'object';
+    const pw = hasSmtp ? nextSmtpPassword(body.smtp, cur.smtp) : { password: cur.smtp.password, dropped: null };
     const merged = {
       ...cur, ...body,
-      smtp: { ...cur.smtp, ...(body.smtp || {}), password: body.smtp?.password || cur.smtp.password },
+      smtp: { ...cur.smtp, ...(hasSmtp ? body.smtp : {}), password: pw.password },
     };
-    const errs = validate(merged);
+    const errs = validate(merged, pw.dropped);
     if (errs.length) return res.status(400).json({ ok: false, reason: errs[0], errors: errs });
     const saved = saveMail(body);
     logAudit({

@@ -27,12 +27,23 @@ export function demoBackupEvents(vcId, vms, sinceTs, now = Date.now()) {
     if (!demoBackedUp(vm)) continue;
     const h = demoHash(`bkt|${vm.id}`);
     const acct = ACCOUNTS[h % ACCOUNTS.length];
+    // v2.763(V4-1): 실제 vCenter 는 스냅샷 생성·제거를 TaskEvent 로 남기고 문구에 계정이 없다(영어 또는 한국어 — vCenter 기본 언어).
+    //   데모가 VmSnapshotCreatedEvent 만 내면 그 모양만 보는 판정의 결함을 가린다 — VM 마다 세 모양 중 하나로 낸다(결정적).
+    const shape = Math.floor(h / 7) % 3;   // 0 = 옛 데모 종류 · 1 = TaskEvent 영어 · 2 = TaskEvent 한국어
+    const mk = (kind, ts) => {
+      const k = `mock-bk${kind === 'remove' ? 'd' : ''}-${vcId}-${vm.id}-${ts}`;
+      if (shape === 1) return { key: k, ts, type: 'TaskEvent', severity: 'info', user: acct, entity: vm.name, message: kind === 'remove' ? 'Task: Remove snapshot' : 'Task: Create virtual machine snapshot', detail: null };
+      if (shape === 2) return { key: k, ts, type: 'TaskEvent', severity: 'info', user: acct, entity: vm.name, message: kind === 'remove' ? '작업: 스냅샷 제거' : '작업: 가상 시스템 스냅샷 생성', detail: null };
+      return kind === 'remove'
+        ? { key: k, ts, type: 'VmSnapshotRemovedEvent', severity: 'info', user: acct, entity: vm.name, message: `Task: Remove snapshot (${acct} backup job)`, detail: null }
+        : { key: k, ts, type: 'VmSnapshotCreatedEvent', severity: 'info', user: acct, entity: vm.name, message: `Task: Create virtual machine snapshot (${acct} backup job)`, detail: null };
+    };
     for (let d = firstDay; d <= now; d += DAY) {
       const ts = d + (h % 20) * HOUR + (h % 50) * 60_000;
       if (ts < sinceTs || ts > now) continue;
-      out.push({ key: `mock-bk-${vcId}-${vm.id}-${ts}`, ts, type: 'VmSnapshotCreatedEvent', severity: 'info', user: acct, entity: vm.name, message: `Task: Create virtual machine snapshot (${acct} backup job)`, detail: null });
+      out.push(mk('create', ts));
       const ts2 = ts + 20 * 60_000;
-      if (ts2 <= now) out.push({ key: `mock-bkd-${vcId}-${vm.id}-${ts2}`, ts: ts2, type: 'VmSnapshotRemovedEvent', severity: 'info', user: acct, entity: vm.name, message: `Task: Remove snapshot (${acct} backup job)`, detail: null });
+      if (ts2 <= now) out.push(mk('remove', ts2));
     }
   }
   return out;

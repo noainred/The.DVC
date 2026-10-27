@@ -37,6 +37,7 @@ const CodexCheck = React.lazy(() => import('./CodexCheck.jsx'));
 const VmCloneTool = React.lazy(() => import('./tools/VmCloneTool.jsx'));
 const StorageMonTool = React.lazy(() => import('./tools/StorageMonTool.jsx'));
 const StorageGrowthTool = React.lazy(() => import('./tools/StorageGrowthTool.jsx'));
+const StorageUsageTool = React.lazy(() => import('./tools/StorageUsageTool.jsx')); // v2.789 스토리지 사용량 보고서
 const PartFaults = React.lazy(() => import('./tools/PartFaults.jsx'));   // 파트 장애(v2.547)
 const EdgeLog = React.lazy(() => import('./tools/EdgeLog.jsx'));         // 엣지 로그·진행상태(v2.549)
 const BmUsage = React.lazy(() => import('./tools/BmUsage.jsx'));         // 베어메탈 사용률(v2.550)
@@ -60,6 +61,9 @@ const VmChangesTool = React.lazy(() => import('./tools/VmChangesTool.jsx')); // 
 const VmLifecycleTool = React.lazy(() => import('./tools/VmLifecycleTool.jsx')); // VM 생성·삭제 이력(v2.706 C5)
 const ContentionTool = React.lazy(() => import('./tools/ContentionTool.jsx')); // CPU 경합·디스크 지연(v2.706 C2·C3)
 const VmAvailabilityTool = React.lazy(() => import('./tools/VmAvailabilityTool.jsx')); // VM 가용성 SLA(v2.707 C6)
+const BackupSummaryTool = React.lazy(() => import('./tools/BackupSummaryTool.jsx')); // 백업 서머리(v2.779 백업 메뉴)
+const BackupDetailTool = React.lazy(() => import('./tools/BackupDetailTool.jsx')); // 백업 세부내용(v2.779 백업 메뉴)
+const BackupEmTool = React.lazy(() => import('./tools/BackupEmTool.jsx')); // Veeam 백업 현황 · EM(v2.788)
 const CostShowbackTool = React.lazy(() => import('./tools/CostShowbackTool.jsx')); // 비용 배분(v2.707 C11)
 const MigrationReadinessTool = React.lazy(() => import('./tools/MigrationReadinessTool.jsx')); // VM 이전 준비도(v2.707 C7)
 const CoreLicenseTool = React.lazy(() => import('./tools/CoreLicenseTool.jsx')); // 코어 라이선스 산정(v2.703)
@@ -74,6 +78,7 @@ const RelayTopoTool = React.lazy(() => import('./tools/RelayTopoTool.jsx'));
 const SerialLookup = React.lazy(() => import('./tools/SerialLookup.jsx'));
 const VmTrackTool = React.lazy(() => import('./tools/VmTrackTool.jsx'));
 const GuestDiskReport = React.lazy(() => import('./tools/GuestDiskReport.jsx'));
+const GuestPartTool = React.lazy(() => import('./tools/GuestPartTool.jsx'));   // v2.749 게스트 파티션 사용률 경보
 const StorageTrackTool = React.lazy(() => import('./tools/StorageTrackTool.jsx'));
 const ServiceCheck = React.lazy(() => import('./DavinciChecks.jsx').then((m) => ({ default: m.ServiceCheck })));
 const NetworkCheck = React.lazy(() => import('./DavinciChecks.jsx').then((m) => ({ default: m.NetworkCheck })));
@@ -616,6 +621,7 @@ function ToolPanel({ tool, onBack, isAdmin, defaultScope = '', cfg = null }) {
       {tool === 'vm-clone' && <VmCloneTool />}
       {tool === 'storage-mon' && <StorageMonTool />}
       {tool === 'storage-growth' && <StorageGrowthTool />}
+      {tool === 'storage-usage' && <StorageUsageTool isAdmin={isAdmin} />}
       {tool === 'part-faults' && <PartFaults />}
       {tool === 'edge-log' && <EdgeLog />}
       {tool === 'bm-usage' && <BmUsage />}
@@ -640,6 +646,7 @@ function ToolPanel({ tool, onBack, isAdmin, defaultScope = '', cfg = null }) {
       {tool === 'serial-lookup' && <SerialLookup />}
       {tool === 'vm-track' && <VmTrackTool />}
       {tool === 'guest-disk' && <GuestDiskReport scope={scope} />}
+      {tool === 'guest-partition' && <GuestPartTool />}
       {tool === 'storage-track' && <StorageTrackTool />}
       {tool === 'vmfinder' && <VmFinder />}
       {tool === 'capacity' && <Capacity scope={scope} />}
@@ -658,6 +665,9 @@ function ToolPanel({ tool, onBack, isAdmin, defaultScope = '', cfg = null }) {
       {tool === 'vm-lifecycle' && <VmLifecycleTool scope={scope} />}
       {tool === 'contention' && <ContentionTool scope={scope} />}
       {tool === 'vm-availability' && <VmAvailabilityTool scope={scope} />}
+      {tool === 'backup-summary' && <BackupSummaryTool />}
+      {tool === 'backup-detail' && <BackupDetailTool scope={scope} />}
+      {tool === 'backup-em' && <BackupEmTool />}
       {tool === 'cost-showback' && <CostShowbackTool scope={scope} />}
       {tool === 'migration-readiness' && <MigrationReadinessTool scope={scope} />}
       {tool === 'core-license' && <CoreLicenseTool scope={scope} />}

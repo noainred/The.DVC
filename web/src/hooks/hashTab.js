@@ -59,3 +59,24 @@ export function movedTabHash(hash) {
   if (!to || !Object.hasOwn(MOVED_TABS, segs[0])) return null;
   return `#/${[...to, ...segs.slice(1)].join('/')}`;
 }
+
+/**
+ * 지운 셸(V3·V4·V5·V6)의 옛 주소 → 기본 화면 주소(v2.747). 셸 코드는 지웠지만 북마크·공유 링크는 남아 있으므로
+ * 빈 화면이나 엉뚱한 랜딩 탭으로 떨어지지 않게 옮긴다. 해당 없으면 null.
+ *   '#/v5' · '#/v6'                → '#/overview'
+ *   '#/v5/vms' · '#/v6/tools/gpu'  → '#/vms' · '#/tools/gpu'  (V5·V6 는 기존 주소 위의 틀이었다 — 뒤 주소가 곧 기존 화면)
+ *   '#/v6/m/…' · '#/m/…'          → '#/overview'              (V6 메뉴 페이지 — 기본 화면에 대응하는 주소가 없다)
+ *   '#/v3/…' · '#/v4/…'           → '#/overview'              (V4 자체 화면 — 기본 화면과 1:1 대응이 없다)
+ */
+export function legacyShellHash(hash) {
+  const segs = hashSegments(hash);
+  const head = segs[0];
+  if (head === 'v3' || head === 'v4' || head === 'm') return '#/overview';
+  if (head !== 'v5' && head !== 'v6') return null;
+  const rest = segs.slice(1);
+  if (!rest.length || rest[0] === 'm' || /^v[3-6]$/.test(rest[0])) return '#/overview';
+  return `#/${rest.join('/')}`;
+}
+
+/** 지운 V5·V6 셸이 브라우저에 남긴 셸 플래그 키(v2.616~v2.746). 기동 시 지운다 — 남겨 둘 이유가 없다. */
+export const LEGACY_SHELL_KEY = 'ui.shell';

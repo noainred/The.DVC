@@ -4,6 +4,7 @@
  * 에 보관(SSH 자격증명 포함, 0600). 중앙 직접 실행(사설망은 향후 에이전트 위임 확장).
  */
 
+import { randomBytes } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
@@ -101,7 +102,9 @@ function posOr(v, min, max, def) {
 
 export function saveMonitor(body = {}) {
   load();
-  const id = body.id || `mon_${Date.now().toString(36)}`;
+  // v2.783: 새 id 는 시각만으로 만들지 않는다 — 같은 밀리초에 두 개를 만들면 id 가 겹쳐 새 항목이 기존 항목의 '수정' 이 되고 이전 값을 물려받았다
+  //   (CI 빠른 러너에서 audit2600e LO2600-0x 가 [1440,…] 을 받은 원인). 시각 + 임의 6자리.
+  const id = body.id || `mon_${Date.now().toString(36)}${randomBytes(3).toString('hex')}`;
   // v2.600 LO2600-03: 수정 저장의 빈 숫자 칸은 **이전 값 유지**(새 항목만 기본값). 예전 `Number('') || 10` 은 기존
   // 1440분 주기를 10분으로 되돌려 SSH 캡처가 144배가 됐다(adminOnly API 직접 호출 경로 — v2.596 규약).
   const was = cache.find((x) => x.id === id) || {};

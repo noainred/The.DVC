@@ -134,7 +134,10 @@ jobs:
   pyportal:
     timeout-minutes: 20
     name: 서비스 허브 테스트 (Python)
-    runs-on: ubuntu-latest
+    # v2.783: ubuntu-latest 가 26.04 로 바뀐 뒤 setup-python 이 3.9 를 받지 못해("The version '3.9' with architecture 'x64'
+    #   was not found for Ubuntu 26.04") 이 작업이 코드와 무관하게 실패했다. 아래 '3.9 는 빼지 말 것' 을 지키려면 3.9 가 있는
+    #   러너에 고정한다. 24.04 의 3.9 지원이 끝나면 이 줄을 다시 볼 것(그때도 3.9 를 빼지 말고 러너·설치 방식을 바꾼다).
+    runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
       matrix:

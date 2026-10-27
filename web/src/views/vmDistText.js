@@ -281,19 +281,51 @@ export function distNote(p) {
   return parts.join(' · ');
 }
 
-/** 패널 상태 — missing(서버가 안 줌) · none(구동 VM 0) · unread(구동 VM 은 있는데 사용률을 하나도 못 읽음) · ok. */
-export function panelState(p) {
+/**
+ * v2.783(점검 Q1 J-I1): 이 패널 **밖**의 선택이 있는가 — 각 패널의 개수는 다른 패널 선택만 반영하므로(서버 계약),
+ *   패널이 비었을 때 그 원인이 '구동 VM 이 없음' 인지 '다른 선택과의 교집합이 0' 인지는 이것으로 가른다.
+ *   own 은 그 패널의 선택 키(cpuBin·memBin). GPU 선택(gpuOnly·gpuType)도 다른 패널 선택이다.
+ */
+export function otherSelections(own, facets, gpu) {
+  const p = facetParams(facets);
+  if (Object.keys(p).some((k) => k !== own)) return true;
+  const g = gpu && typeof gpu === 'object' ? gpu : {};
+  return !!(g.gpuOnly || GPU_KEYS.includes(g.gpuType));
+}
+
+/**
+ * 패널 상태 — missing(서버가 안 줌) · none(구동 VM 0) · filtered(다른 패널 선택과 겹치는 구동 VM 0 — opts.others 일 때만) ·
+ * unread(구동 VM 은 있는데 사용률을 하나도 못 읽음) · ok.
+ * v2.783(점검 Q1 J-I1): 예전에는 교집합 0 도 none 이라 구동 VM 이 있는데 '구동 중인 VM 이 없다' 고 말했다.
+ * @param {object} p 서버 패널(dist.cpu·dist.mem)
+ * @param {{others?: boolean}} [opts] others — otherSelections(...) 결과
+ */
+export function panelState(p, opts) {
   if (!p || typeof p !== 'object') return 'missing';
   const read = normBins(p.bins).reduce((a, b) => a + b, 0);
-  if (read + cnt(p.na) === 0) return 'none';
+  if (read + cnt(p.na) === 0) return opts && opts.others ? 'filtered' : 'none';
   if (read === 0) return 'unread';
   return 'ok';
 }
 export const EMPTY_PANEL_TEXT = {
   none: '구동 중인 VM 이 없어 분포가 없습니다',
+  filtered: '다른 패널에서 고른 조건과 겹치는 구동 VM 이 없습니다 — 위 선택 칩에서 조건을 풀어 보세요',
   unread: '구동 중인 VM 의 사용률을 하나도 읽지 못했습니다',
   missing: '이 패널의 집계가 응답에 없습니다',
 };
+/**
+ * v2.783(점검 Q1 J-I1): 막대·90%↑ 버튼이 사라진 패널(ok 가 아닌 상태)에서 이 패널 자신의 구간 선택을 푸는 버튼.
+ *   예전에는 막대가 사라지면 자기 선택을 위 칩으로만 풀 수 있었다. 'na' 선택은 각주의 미수집 버튼이 이미 남으므로 null.
+ * @returns {{label:string, text:string, title:string}|null}
+ */
+export function panelClearButton(what, selStr, state) {
+  if (state === 'ok') return null;
+  const sel = parseBinSel(selStr);
+  if (!sel || sel.na) return null;
+  const range = selLabel(selStr);
+  return { label: `${what} ${range} 선택 해제`, text: `${range} 선택 해제`, title: `이 패널에서 고른 ${range} 구간을 풉니다` };
+}
+
 /** 응답에 dist 가 없을 때(구버전 서버·집계 실패) — 패널 대신 이 한 줄. 표와 필터는 그대로 동작한다. */
 export const NO_DIST_TEXT = '분포 집계가 응답에 없습니다(서버가 이 기능보다 오래된 버전일 수 있습니다) — 아래 표와 필터는 그대로 쓸 수 있습니다.';
 

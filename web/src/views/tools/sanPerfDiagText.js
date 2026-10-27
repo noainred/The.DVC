@@ -2,7 +2,7 @@
  * views/tools/sanPerfDiagText.js — '사용량 데이터가 없습니다' 의 **문구**(v2.517, 순수 모듈).
  *
  * 판정은 서버(`server/src/sanswitch/perfDiag.js`)가 `kind` 로 내려준다 — 판정 한 곳, 문구 한 곳
- * (`components/accessDeniedText.js`·`version_4/loadState.js` 와 같은 관례. 웹 테스트가 node 환경
+ * (`components/accessDeniedText.js`·`components/loadState.js` 와 같은 관례. 웹 테스트가 node 환경
  * 이라 컴포넌트 렌더 테스트가 불가하므로 문구는 여기서 회귀로 고정한다).
  *
  * ⚠ 핵심 규칙 — **'기다리면 되는지' 를 반드시 말한다**(v2.509 규칙과 같은 이유). v2.516 까지는

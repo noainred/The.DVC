@@ -28,25 +28,40 @@ public sealed class AlarmEngine
 {
     private readonly Dictionary<long, AlarmItem> _items = new();
 
+    // v2.760(점검 B-05): 결과가 오래돼(절전·점검 지연) 사라진 알람이 '확인됨' 이었으면 그 등급을 기억한다. 정상을 거치지 않고
+    // 같은 등급 이하로 다시 나타나면 확인된 채로 되살린다 — 예전에는 새 알람으로 다시 울려 '정상을 거쳐 재발할 때만 다시 울린다'
+    // 규칙을 어겼다. 최신 결과가 알람 등급 아래(정상)거나 대상이 비활성·삭제되면 잊는다.
+    private readonly Dictionary<long, HealthStatus> _ackedWhileStale = new();
+
     public HealthStatus MinLevel { get; set; } = HealthStatus.Warn;
 
     /// <summary>점검 결과를 알람으로 보지 않는 최소 유예. 실제로는 max(이 값, 점검 주기 × 3).</summary>
-    public TimeSpan MinStale { get; set; } = TimeSpan.FromSeconds(180);
+    public TimeSpan MinStale { get; set; } = MonitorRules.DefaultMinStale;
 
     public IReadOnlyList<AlarmEvent> Update(IEnumerable<EndpointStatus> snapshot, DateTime nowUtc)
     {
         var events = new List<AlarmEvent>();
         var seen = new HashSet<long>();
+        var staleIds = new HashSet<long>();   // 알람 등급이지만 결과가 오래돼 지금은 알람이 아닌 대상
+        var present = new HashSet<long>();
         foreach (var es in snapshot)
         {
             var ep = es.Endpoint;
-            if (!IsAlarming(es, nowUtc)) continue;
+            present.Add(ep.Id);
+            if (!IsAlarming(es, nowUtc))
+            {
+                if (ep.Enabled && es.Latest != null && es.Status >= MinLevel && es.Status != HealthStatus.Unknown) staleIds.Add(ep.Id);
+                else _ackedWhileStale.Remove(ep.Id);   // 정상·점검 전·비활성 — '정상을 거쳤다'
+                continue;
+            }
             seen.Add(ep.Id);
             var st = es.Status;
             var detail = es.Latest?.Error;
             if (!_items.TryGetValue(ep.Id, out var cur))
             {
-                var item = new AlarmItem(ep.Id, ep.Name, ep.Datacenter, st, detail, nowUtc, false);
+                var acked = _ackedWhileStale.TryGetValue(ep.Id, out var ackSt) && st <= ackSt;
+                _ackedWhileStale.Remove(ep.Id);
+                var item = new AlarmItem(ep.Id, ep.Name, ep.Datacenter, st, detail, nowUtc, acked);
                 _items[ep.Id] = item;
                 events.Add(new AlarmEvent(AlarmEventKind.Raised, item));
             }
@@ -64,9 +79,12 @@ public sealed class AlarmEngine
         }
         foreach (var id in _items.Keys.Where(k => !seen.Contains(k)).ToList())
         {
-            events.Add(new AlarmEvent(AlarmEventKind.Cleared, _items[id]));
+            var it = _items[id];
+            if (it.Acknowledged && staleIds.Contains(id)) _ackedWhileStale[id] = it.Status;
+            events.Add(new AlarmEvent(AlarmEventKind.Cleared, it));
             _items.Remove(id);
         }
+        foreach (var id in _ackedWhileStale.Keys.Where(k => !present.Contains(k)).ToList()) _ackedWhileStale.Remove(id); // 삭제된 대상
         return events;
     }
 
@@ -75,8 +93,7 @@ public sealed class AlarmEngine
         var ep = es.Endpoint;
         if (!ep.Enabled || es.Latest == null) return false;
         if (es.Status < MinLevel || es.Status == HealthStatus.Unknown) return false;
-        var stale = TimeSpan.FromSeconds(Math.Max(MinStale.TotalSeconds, 3.0 * Math.Max(1, ep.IntervalSec)));
-        return nowUtc - es.Latest.TimestampUtc <= stale;
+        return MonitorRules.IsFresh(es, nowUtc, MinStale); // v2.767(R2-B5-1): 트레이·머리말 집계와 같은 '오래됨' 판정
     }
 
     /// <summary>알람 상태인 대상 전부(위험 먼저, 이름순).</summary>
@@ -100,7 +117,7 @@ public sealed class AlarmEngine
         return events;
     }
 
-    public void Reset() => _items.Clear();
+    public void Reset() { _items.Clear(); _ackedWhileStale.Clear(); }
 
     private int? _generation;
 

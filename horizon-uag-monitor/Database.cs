@@ -270,15 +270,36 @@ public sealed class Database : IDisposable
         cmd.ExecuteNonQuery();
     }
 
+    private long _connEpoch;
+
+    /// <summary>
+    /// v2.767(점검 R2-B5-2): 변경 표지 — (연결 세대, 이 연결의 누적 변경 수 total_changes()). 이 앱의 쓰기는 전부 이 연결로 가므로
+    /// 값이 같으면 대상·샘플·설정이 그대로다. 연결을 바꾸면(폴더 이동·전환) 세대가 올라 예전 표지와 겹치지 않는다.
+    /// 화면·트레이가 같은 스냅샷을 나눠 쓰는 데 쓴다(<see cref="MonitorService.Snapshot"/>).
+    /// </summary>
+    public (long Conn, long Changes) ChangeStamp()
+    {
+        lock (_gate)
+        {
+            using var cmd = _conn.CreateCommand();
+            cmd.CommandText = "SELECT total_changes()";
+            return (_connEpoch, Convert.ToInt64(cmd.ExecuteScalar(), CultureInfo.InvariantCulture));
+        }
+    }
+
     public Dictionary<long, Sample> LatestByEndpoint()
     {
         lock (_gate)
         {
             var map = new Dictionary<long, Sample>();
             using var cmd = _conn.CreateCommand();
+            // v2.767(점검 R2-B5-2): 'GROUP BY endpoint_id + MAX(ts)' 는 SQLite 가 (endpoint_id, ts) 인덱스를 전부 훑는다
+            //   (1년 630만 행에서 약 0.5초 — 이 조회는 잠금을 쥔 채 UI 스레드에서 매초 돈다). 등록된 대상마다 인덱스로
+            //   'ORDER BY ts DESC LIMIT 1' 한 행만 집는다(EXPLAIN: SEARCH ... USING COVERING INDEX idx_samples_ep_ts).
+            //   같은 ts 가 둘이면 나중에 저장한 행(id 큰 쪽) — 예전 JOIN 도 마지막에 읽은 행이 남았다.
             cmd.CommandText = @"SELECT s.endpoint_id, s.ts, s.status, s.tcp_ok, s.connect_ms, s.tls_ok, s.http_status, s.response_ms, s.cert_expiry_days, s.error
-                FROM samples s JOIN (SELECT endpoint_id, MAX(ts) mt FROM samples GROUP BY endpoint_id) m
-                ON s.endpoint_id=m.endpoint_id AND s.ts=m.mt";
+                FROM endpoints e
+                JOIN samples s ON s.id = (SELECT x.id FROM samples x WHERE x.endpoint_id = e.id ORDER BY x.ts DESC, x.id DESC LIMIT 1)";
             using var r = cmd.ExecuteReader();
             while (r.Read()) { var s = ReadSample(r, epIdCol: 0, tsCol: 1, baseCol: 2); map[s.EndpointId] = s; }
             return map;
@@ -548,6 +569,7 @@ public sealed class Database : IDisposable
 
             var old = _conn;
             _conn = next;
+            _connEpoch++;
             DbPath = finalFile;
             try { old.Dispose(); } catch { /* ignore */ }
             SqliteConnection.ClearAllPools();
@@ -576,6 +598,7 @@ public sealed class Database : IDisposable
                 try { next.Dispose(); } catch { /* ignore */ }
                 throw;
             }
+            _connEpoch++;
             Interlocked.Increment(ref _generation); // 대상 id 의 뜻이 바뀌었다 — 진행 중 점검·알람 판정을 버리게 한다.
             try { old.Dispose(); } catch { /* ignore */ }
             SqliteConnection.ClearAllPools();

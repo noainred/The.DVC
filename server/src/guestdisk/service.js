@@ -11,7 +11,7 @@ import { store } from '../store.js';
 import { config, loadVcenterConfig } from '../config.js';
 import { collectDetails } from '../vcenter/vmExport.js';
 import { parseGuestDisks } from '../vcenter/soapParse.js';
-import { vmSummary, rankReclaim, usageTrend, reclaimAdvice, normUsageFactor, sanitizeGuestDiskVms } from './analyze.js';
+import { vmSummary, rankReclaim, usageTrend, reclaimAdvice, normUsageFactor, sanitizeGuestDiskVms, vmOwnerByPrefix } from './analyze.js';
 import { commitCollection, listLatest, vmSeries, partSeries, latestOne, coverageByVcenter, currentPartPaths, lastCollectTs, latestHoldMs, pruneOrphanVcenters } from './db.js';
 import { datacenterOfVcenter, listDatacenters } from '../datacenter/store.js';
 import { csvLine } from '../util/csv.js';
@@ -70,7 +70,7 @@ export async function collectVcenterGuestDisk(vcenterId) {
     raw.push({
       vmId: vm.id, vmName: vm.name || vm.id,
       allocGB: s.allocGB, usedGB: s.usedGB, freeGB: s.freeGB, ratioPct: s.ratioPct, partCount: s.partCount,
-      parts: parts.map((p) => ({ path: p.path, capGB: p.capacityGB, usedGB: p.usedGB })),
+      parts: parts.map((p) => ({ path: p.path, capGB: p.capacityGB, usedGB: p.usedGB, ...(p.fs ? { fs: p.fs } : {}) })),   // v2.798 파일 시스템 종류
     });
   }
   // ⚠ v2.601(감사 RECENT2601-01): 중앙 수신 경로(routes/central.js /guest-disk)와 **같은 정제**를 거친다. 예전에는
@@ -162,12 +162,22 @@ export async function reclaimReport({ allowed = null, minReclaimGB = 5, maxRatio
   let ids = allowed ? [...allowed] : null;
   // 특정 vCenter 선택 — scope 우선: 허용 목록 안일 때만 좁힌다(범위 밖이면 빈 결과).
   if (vcenterId) ids = (allowed && !allowed.has(vcenterId)) ? [] : [vcenterId];
-  const rows0 = await listLatest(ids);
+  // v2.767(점검 R2-B2-02): 범위 계정에는 id 가 그 행의 vCenter 네임스페이스(`${vcenterId}:`)인 행만 — 수신 차단(central.js) 이전에 남의 VM id 로
+  //   덮인 행이 남아 있어도(그 vCenter 의 다음 수집이 PK 로 되돌릴 때까지) 덮은 쪽 범위 목록·CSV 에 싣지 않는다.
+  const rowsIn = await listLatest(ids);
+  const known = knownVcenterIds();
+  const knownArr = known ? [...known] : [];
+  const ownRow = (r) => {
+    const vc = String(r.vcenterId ?? ''); const id = String(r.vmId || '');
+    if (!vc || !id.startsWith(`${vc}:`)) return false;
+    const b = vmOwnerByPrefix(id, knownArr);   // 더 긴 등록 id 가 접두를 가로채면 그 vCenter 의 VM 이다
+    return !b || b.length <= vc.length;
+  };
+  const rows0 = allowed ? rowsIn.filter(ownRow) : rowsIn;
   // v2.743(감사 VC-02 — 재현): **등록부·스냅샷 어디에도 없는 vCenter**(등록에서 지운 vCenter)의 행은 합계·목록·CSV 에 넣지 않고 개수로 밝힌다
   //   (예전에는 50일 전 행이 합계에 그대로 들어갔고 coverage 에는 그 vCenter 줄이 없었다). 행 정리는 폴러의 보존 정리 틱이 한다 — 그 전에도
   //   리포트가 거짓 합계를 내지 않게 여기서 먼저 뺀다. 알려진 vCenter 를 판정할 수 없으면(null) 예전처럼 전부 둔다(지우는 쪽으로 단정하지 않는다).
   //   범위 계정은 허용 vCenter(스냅샷에 있는 것)만 조회하므로 이 목록에 걸리지 않는다.
-  const known = knownVcenterIds();
   const rows = known ? rows0.filter((r) => known.has(String(r.vcenterId))) : rows0;
   const orphanRows = rows0.length - rows.length;
   const orphanVcenters = orphanRows ? new Set(rows0.filter((r) => !known.has(String(r.vcenterId))).map((r) => String(r.vcenterId))).size : 0;

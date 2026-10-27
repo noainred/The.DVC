@@ -258,3 +258,125 @@
     포트그룹 없는 표준 스위치는 판정에서 뺀다 · 링크 다운은 인벤토리 `host.nics[].link` 를 알 때만 · 포트그룹 드리프트는 목록이 잘렸으면(`pgsTotal > pgs.length`) 비교하지 않는다.
   · ⚠ 정직 기록: 실장비 응답(configurationEx·vswitch·proxySwitch XML)은 합성 입력으로만 확인했다. 위조 전송·MAC 변경은 vSS 기본값이 허용이라 판정하지 않았다(소음).
 
+- **v2.771(점검 R6-F3)**: SOAP → REST 폴백은 **능력 부재의 증거**가 있을 때만(vim fault 는 MethodNotFound·NotSupported·NotImplemented 만, 그 밖의 vim fault 는 던져 lastGood 이월 — `soapFallbackAllowed`).
+  VM 장치 조회 실패는 `vmGpuUnknown` 표지 + 직전 vm.gpu 이월(`carryVmGpu`) · 점검중 분기도 보존 창 안의 lastGood 을 싣는다(stale) · 위임 병합은 엣지 stale 을 보존(`edgeStale`)·공개 API 수집 시각 = min(receivedAt, staleSince).
+  /summary 의 vCPU/코어·RAM 할당률은 용량 미상 호스트가 있으면 null + `hostsCapacityUnknown`. 남김: 재시작 직후(직전 스냅샷 없음) vmGpuUnknown 표지를 소비처(overview gpuVms·hardwareGpu·gpu/poller)가 아직 읽지 않는다.
+
+- **v2.792 — vCenter › VM 및 폴더 'VM 목록 CSV · 엑셀(폴더 트리)'(Veeam·스냅샷 포함). 판정은 새로 만들지 않는다 — '백업 세부내용' 과 같은 `vcBackup → vmBackupView`, 한 칸 판단은 `backupStatus.backupVerdict`(= `viewClass`)**
+  (사용자 요청 "vm 폴더에서 vm list export 할때 Veeam 백업여부, 백업여부 판단할 수 있는 snapshot 포함여부 포함해서 csv export" · 선택 '화면 기준 전체' · 표준 검증. 회귀 `server/test/vmListCsv2792.test.js` + 웹 `vcdVmList.test.js`):
+  · `POST /veeam/vm-list.csv?vcenterId=`(읽기 POST — 본문에 화면 VM id) · 게이트 `requirePerm('data.csv')`(관리자 전용 · 웹 canCsv 와 같은 판정) · 조회 범위 밖 404(`vcOf`) ·
+    받은 id ∩ 그 vCenter 인벤토리(남의 vCenter id 는 빠진다) · id 없으면 전체(`power:'noOff'` = 화면 visibleVms 와 같은 꺼진 VM 제외) · 상한 `VM_LIST_MAX_IDS`(2만 — /api 본문 1MB 안) 400 ·
+    동시 1건(`exportBusy`) · 감사(대수만). 사람이 정한 표시(중요도·메모)는 백업 세부내용 도구 데이터라 싣지 않는다.
+  · 열은 `veeam/vmListCsv.js` 하나: Veeam 상태는 '백업 대상·백업 중·대기·없음·연동 없음·모름' 을 나누고(모름 ≠ 없음), 스냅샷은 ① 지금 Veeam 임시 스냅샷(하루 넘으면 '잔존' 따로 — 백업 흔적으로 치지 않는다)
+    ② 최근 N일 Veeam 계정 스냅샷 이벤트(모르면 '모름') ③ VM 의 전체 스냅샷(수·크기·최근·이름 — 사람이 만든 것 포함)을 따로 싣는다. 시각은 포탈 시각(머리에 UTC 오프셋).
+  · 웹은 판정하지 않는다 — 보이는 VM(검색 중이면 일치 VM) id 만 보낸다(`vcdVmList.vmListRequest`). 검색 결과가 상한을 넘으면 잘라 보내지 않고 거절한다.
+  · **엑셀(같은 대상·판정·게이트 — `POST /veeam/vm-list.xlsx`, 시안 https://claude.ai/artifact/MENTpVFxe9D4Y4XgAazpBg 승인 · 회귀 `vmListXlsx2792.test.js`)**: `veeam/vmListXlsx.js` —
+    요약 · VM 목록(폴더 트리) · 데이터(행 단위 = CSV 와 같은 `vmListColumns`) · 읽는 법. 폴더 트리는 **엑셀 개요(행 그룹)** 로 접는다 — `outlineProperties.summaryBelow=false`
+    (폴더 행이 하위 행 위 — 기본값(아래)이면 −/+ 가 엉뚱한 행에 붙는다) · 단계 = 폴더 깊이, **7 상한**(엑셀 한계 — 더 깊으면 7에 모이고 들여쓰기·'폴더 경로' 는 그대로).
+    들여쓰기는 `alignment.indent` 에 **`horizontal:'left'` 를 같이** 줘야 적용된다(빠지면 엑셀·LibreOffice 가 무시 — 렌더 판독에서 확인). 폴더 행 수는 하위 포함 합계,
+    Veeam 백업률 = Veeam 백업 ÷ **Veeam 상태를 아는 VM**(연동 없음·아는 VM 0대면 '—', 0% 아님). '먼저 볼 VM' 은 켜진 VM 의 확인 안 됨·모름 + 잔존(전원 무관), 템플릿·vCLS 제외.
+    **워커에서 만든다**(`renderVmListWorkbook` — 2만 대를 메인에서 만들면 약 7초·최대 정지 5초, 워커는 최대 정지 62ms · 작성 중 실측) · 워커로는 열이 쓰는 인벤토리 필드만(`slimVmRows`).
+    끄는 길 env `VM_LIST_XLSX_WORKER=0` · 시한 `VM_LIST_XLSX_TIMEOUT_MS`(기본 3분 = 웹 내려받기 시한). CSV 도 요청 경로에서 조각으로 만든다(`vmListCsvAsync` — 2만 대 약 130ms).
+  · 폴더는 '폴더 1~N단계'(가장 깊은 VM 기준) + '폴더 경로' 열(`vmListCsv.folderParts` — 화면 `buildFolderTree` 와 같은 규칙: '/' 로 나누고 숨은 'vm' 을 뺀다). 열 수가 파일마다 다르니 **테스트는 그 파일의 머리로 열을 찾는다**.
+  · **행 순서는 하나**(`vmListCsv.vmTreeCmp` — 라우트·엑셀 트리·데이터 시트·CSV 공용): 폴더는 화면 트리와 같은 **코드 단위 순서**(`Object.keys().sort()` — 'DMZ' < 'Dev'),
+    같은 단계에서는 하위 폴더 먼저 그다음 직속 VM(이름 자연 순서). 검증 지적 2건(엑셀 폴더 순서 ≠ 화면 · CSV 경로 문자열 순 ≠ 데이터 시트)을 이것으로 맞췄다 — 라우트 정렬을 되돌리면 테스트가 깨진다.
+  · 본문 `view`(search·all·noOff)는 **이름표일 뿐**(파일 이름·엑셀 '화면 조건') — 대상은 ids/power 로만 고른다. 모르는 값은 무시(검증 지적: 세 조건의 파일 이름이 같았다).
+- **v2.795 — Veeam Enterprise Manager 를 vCenter 화면의 Veeam 출처로(VM 단위). 대조·수·판정 코어는 그대로 — EM 기록을 B&R 결과와 같은 모양(`jobs[]`·`vms[]`)으로 만들어 `resultsFor` 한 곳에서 합류한다**
+  (사용자 요청 'EM 에서 등록되면 vCenter 화면에서도 등록되고 vCenter 세부 백업 내용에도 반영' · 결정 'VM 단위까지' · 'B&R 우선, 실패 시 EM' · 표준 검증. 회귀 `server/test/veeamEmVm2795.test.js`(변이 8/8)):
+  · 수집(`veeam/em/client.js readVmBackups` — 항목 `vmBackups`): BackupTaskSession·VmRestorePoint 를 **새것부터 페이지로 받다가 기준보다 오래된 행에서 멈춘다**(날짜 필터 문법 미확인 — 기대지 않는다).
+    항목 예산(env `VEEAM_EM_VM_BUDGET_MS`, 기본 120초)·페이지 상한이면 미완결 → 기준을 옮기지 않는다. 행은 결과 파일에 싣지 않고 `veeam/em/vmStore.js`(`veeam-em-vms.json`)에 합친다(폴러 `absorbVmRows`).
+  · 저장소: 더 최신일 때만 덮음 · 진행 중 task 는 싣지 않는다(15분 주기 — 오래된 '백업 중' 금지) · 접속처 지문이 바뀌면 비움 · 서버 링크가 없는 행은 EM 의 백업 서버가 하나뿐일 때만 그 서버, 아니면 세기만(`ua`).
+  · 출처(`veeam/em/sources.js`): vCenter 는 매핑 결과(수동 > 짝 B&R 등록 > 모름)만 — **모르면 어디에도 싣지 않는다**. 짝 B&R 이 이 vCenter 를 맡고 **지금 정상**(`routes/api/veeam.js brHealthy` —
+    마지막 읽기 성공 ∧ `resultMaxAgeMs` 이내)이면 EM 을 빼고, 아니면 넣는다. 설정 매핑 표의 'vCenter 반영' 칸(`admin/veeamEm.js reflectOf`)도 같은 `brHealthy` 하나를 쓴다.
+    VM 기록을 아직 저장하지 못했거나 서버를 가릴 수 없는 기록뿐이면 결과를 내지 않는다(뷰만 — '0대' 가 아니라 첫 수집 대기).
+  · '연동됨' 판정은 `veeamLinked`(B&R 등록 ∨ EM 출처) 하나 — `serversForVcenter(...).length` 를 다시 직접 쓰지 말 것(EM 으로만 연동된 법인이 '연동 없음' 으로 돌아간다).
+  · EM 기록은 `h:''`(vCenter 이름 없음) → `matchToVcenter` 가 moref 면 이름까지 같아야, moref 가 없으면 그 vCenter 에서 유일한 이름일 때만 짝짓는다. 복원 지점 수는 모른다(`rp:-1`).
+    HierarchyObjRef 의 루트 GUID 는 vCenter 식별자와 같다는 보장이 없어 쓰지 않는다(문서와 사례 보고가 엇갈림).
+  · 응답 캐시(backup-counts·summary·detail) 키에 `em${emSourcesRev()}`(VM 기록·매핑 리비전) — 새 기록이 60초 캐시를 기다리지 않는다.
+  · ⚠ 실물 EM 응답 미확인(엔티티·필드는 문서 검색 결과 기준). 실물에서 행이 0이거나 서버 링크가 없으면 설정 › EM 수집 상태의 'VM 별 기록' 칩과 비고가 말한다.
+- **v2.798 — VM 목록 내보내기 '필요한 항목만 고르기' + 계정 저장값. 열은 `veeam/vmListCatalog.js` 하나(key 고정 — 저장값에 남는다, 바꾸지 말 것)**
+  ⚠ v2.800 정정: 이 창은 **백업 현황 › Detail 의 ‘CSV · 엑셀…’ 로 옮겼고** 디스크·파티션·구성·사용률 항목과 `multi:'partRows'` 는 지웠다(아래 v2.800). vCenter 화면은 VM 전체 정보 내보내기.
+  (사용자 요청 "메모, TAG, 디스크 파티션 종류 등 구성 정보에서 내가 필요한 것만 선택해서 export" + "기본값 · 이름1~5 다섯 칸 · 저장하는 값 지정" · 시안 https://claude.ai/artifact/FS8Uk5piEnbFJE7qvLRWQW ·
+  결정: 저장값은 계정 · 파일 시스템 종류 수집 포함 · 실시간 조회(생성일·UUID·NIC) 제외 · 표준 검증. 회귀 `server/test/vmListSelect2798.test.js`(변이 7/8 — 남은 1건은 전역 `denyDemoGuest` 가 먼저 막는 이중 방어) + 웹 `vmListExportText.test.js`):
+  · `POST /veeam/vm-list.{csv,xlsx}` 본문 `cols`(고른 순서 = 열 순서 · 모르는 key 400) · 없으면 v2.792 열 그대로(`LEGACY_KEYS` — 머리·칸이 같다는 것을 테스트가 대조). `multi:'partRows'` 는 파티션 열을 고른 때만 행 반복 · `tagCols` 는 카테고리별 열.
+  · 고른 항목에 필요한 소스만 읽는다(`needsOf`): Veeam 열이 없고 CSV 면 `vcBackup` 을 부르지 않는다(무겁다) — 엑셀은 요약·트리 시트가 써서 늘 부른다. 엑셀 '데이터' 시트는 라우트가 만든 표(`dataTable`)를 그대로 쓴다.
+  · 값 규칙: 그 vCenter 에서 못 모은 소스(태그 수집 전·실패 · 게스트 파티션 이번 수집에 없는 VM · 구성 캐시 미도달)는 ‘수집 안 됨’(`MISSING`) · 못 읽은 값은 빈칸 — 0·없음 금지.
+  · 저장값 `veeam/vmListPrefs.js`(`vm-list-prefs.json`) — 키는 **인증된 req.user.username**(본문 값 무시) · 'u:' 접두(‘__proto__’ 계정) · 저장할 내용은 사람이 고른 것만(고르지 않은 것은 불러올 때 지금 값 유지) ·
+    손상 보존 → 쓰기 503 · 쓰기 게이트 data.csv + 관리자·운영자 · 칸에서 온 기본값(`def.from`)은 그 칸과 같이 바뀐다.
+  · 파일 시스템 종류: `soapParse.parseGuestDisks` 가 `filesystemType` 을 읽고(`util/fsType.js fsTypeOf` — 영숫자·._- 32자, 그 밖은 버림) 엣지 정제(`sanitizeGuestDiskVms`)도 같은 함수 · `part_latest.fs` 열(ALTER — 없을 때만).
+    ⚠ vSphere 7.0 이상이 주는 값으로 **추정**(실물 미확인) — 옛 판·엣지가 이 판 전이면 빈칸.
+  · ⚠⚠ v2.799.1(사용자 보고 — Excel '내용에 문제가 있습니다 · 복구하시겠습니까?'): v2.792 부터 VM 목록 엑셀은 **매번** 손상 판정이었다. 'VM 목록(폴더 트리)' 시트가
+    fitToPage(폭 한 장 인쇄)와 outlineProperties(개요 단추 위치)를 함께 쓰는데 exceljs 4.4.0 이 `<sheetPr>` 안에 pageSetUpPr 를 outlinePr **앞**에 쓴다(스키마는
+    tabColor → outlinePr → pageSetUpPr). 바로잡기는 `util/xlsxSheetPrOrder.js`(exceljs 렌더 함수 하나를 스키마 순서판으로 — 워커가 불러오는 모듈이 import 해야 워커에도 걸린다).
+    LibreOffice·openpyxl·exceljs 로 다시 읽기는 순서를 보지 않아 통과한다 — **엑셀 검증은 생성 XML 의 요소 순서를 직접 본다**(회귀 `server/test/xlsxSheetPr2799.test.js` — 인라인·워커, 변이 2/2).
+- **v2.798 — EM 백업 서버 목록 보강 + 매핑 줄에서 '포탈에 B&R 로 등록'** (사용자 보고 'EM 에 등록된 서버가 많은데 전체 리스트를 못 가져온다 — 표에도 일부만' · 선택 '바로 등록' · 표준. 회귀 `server/test/veeamEmBs2798.test.js`(변이 4/4) + 웹 `backupEmText.test.js`):
+  · `veeam/em/client.js completeBackupServers` — 목록(`/api/backupServers`)이 개요(`overview.backupServers`)보다 적을 때만 질의 서비스 `type=BackupServer` 로 다시 읽어 이름(대소문자 무시)으로 합친다.
+    개요 수를 모르면 그대로(지어내지 않는다) · 질의 실패는 목록 유지 + 사유 · 인증 실패는 위로. 결과 `backupServersMeta`(개요·목록·합친 수) → 매핑 화면 `counts` 가 모자란 EM 을 경고로 밝힌다.
+    ⚠ 원인은 **추정**(EM 계정의 역할·범위가 일부만 보이게 함) — 실물로 확인하지 못했다. 고친 뒤에도 경고가 남으면 그 EM 계정 역할부터 볼 것.
+  · '포탈에 B&R 로 등록' 은 새 API 를 만들지 않는다 — 기존 `POST /admin/veeam/servers`(관리자·전체 범위·감사·비밀 봉인·SSRF 검사) 그대로 → 성공하면 `PUT /admin/veeam/em/map` 으로 그 줄을 짝짓는다(법인은 비워 B&R 등록을 따름).
+    주소는 EM 이 아는 서버 이름을 미리 채울 뿐 — 접속 가능한지는 사람이 확인(화면이 말한다). 두 요청 모두 `r?.ok === false` 확인.
+- **v2.799 — 특수 기능 'VM 전체 정보 내보내기'(`vm-export`) — 항목 고르기 · 출처 대체 · 계정 저장값. 열은 `vcenter/vmExportCatalog.js` 하나(key 고정 — 저장값에 남는다)**
+  (사용자 요청 "VM 전체 정보 CSV 버그 수정 · 추가할 수 있는 정보 · 클로드 디자인으로 멋지게 · vm list export 참고" · 시안 https://claude.ai/artifact/FCUJ73AgKCxpzcr4J6Y6TC ·
+  선택: 시안대로 · 표준 검증 · main 기준 독립. 회귀 `server/test/vmExport2799.test.js`(변이 10/11 — 남은 1건은 data.csv 게이트가 데모 계정을 먼저 막는 이중 방어) + 웹 `vmExportText.test.js`):
+  · 출처(`src`)는 항목마다 하나 — snap(인벤토리) · cache(`vm.cfg`·`vm.dev`) · both(실시간 → 없으면 구성 캐시) · live(실시간 전용) · parts(실시간 guest.disk → 없으면 `partsForVcenter`) · tags(`tagInv`).
+    실시간 보강은 `liveAvailability`(= `onDemandVcBlock` — 엣지 위임·비활성·점검중·인증 정지는 로그인하지 않는다) 하나로 판정하고, 접속 정보(비밀번호)는 판정 객체에 섞지 않는다(`liveGate`).
+  · ⚠ 결함 재발 금지: 실시간 '성공' 이어도 **VM 마다** 속성이 왔는지로 판정한다(예전 `enriched ? 0 : ''` 는 응답에 없는 VM 의 NIC·디스크 수를 0 으로 썼다) ·
+    Thin(추정)은 uncommitted 를 못 읽었으면 빈칸 · 메모리 결측 빈칸 · 시각은 `localStamp` + 머리에 시간대(예전 UTC …Z) · 장치 목록이 상한(32)에서 잘린 캐시는 디스크 수·합계를 쓰지 않는다.
+  · 미리보기(`POST /tools/vm-export/preview`)는 **실시간을 부르지 않는다** — 실시간 칸은 ‘내려받을 때 조회’(예전: 화면을 열기만 해도 vCenter 전량 조회 + 60초 뒤 내려받으면 한 번 더).
+  · 내려받기 `POST /tools/vm-export.{csv,xlsx}` · 예전 `GET /tools/vm-export.csv`(= ‘예전 CSV 그대로’ 100열) 모두 동시 1건(`acquireExport`) + 조건·행 수 감사(VM 이름 없음) · 내려받기 POST 는 `AUDIT_SKIP`(두 줄 방지).
+    엑셀은 워커(`util/xlsxWorkerRun.js` — 새 엑셀은 이 공용 실행기를 쓴다; ipam·storage·veeam 의 기존 실행기 이전은 별건).
+  · 저장값 `vcenter/vmExportPrefs.js` = `util/exportPrefs.js` 공장(파일 `vm-export-prefs.json`) — 규칙은 v2.798 `veeam/vmListPrefs.js` 와 같다(그쪽 이전은 별건).
+  · 라우트는 `routes/api/vmExport.js`(ipamExport.js 에서 옮김) — 전부 data.csv + tools · 범위 밖 404 · 저장값 쓰기는 역할 게이트 먼저.
+- **v2.800 — 내보내기 화면 분리(vCenter = 전체 VM · 백업 현황 = 백업)**
+  (사용자 보고 "엑셀 다운 받으면 데이터가 안나와"(폴더 트리 시트가 Protected View 에서 빈 화면) + "export 는 여기(백업 현황 Detail)의 CSV 로" + "vCenter 는 전체 VM, 여기는 백업 — 분리" ·
+  결정: 화면별 전용 창 · vCenter 쪽은 v2.799 VM 전체 정보 내보내기 재사용 · 표준 검증. 회귀 `vmListSelect2798.test.js` 갱신 · 웹 `vmListExportText`·`vcdVmList`·`audit2785e` 테스트):
+  · 빈 시트의 원인(<sheetPr> 의 pageSetUpPr/outlinePr 순서)은 같은 날 다른 세션이 **v2.799.1 `util/xlsxSheetPrOrder.js`**(exceljs 렌더 순서 교정 — 위 항목)로 먼저 고쳤다.
+    이 세션은 처음에 폴더 트리 시트에서 fitToPage 를 빼는 쪽으로 고쳤다가, main 병합 때 v2.799.1 로 통일하고 되돌렸다(폭 맞춤 인쇄 유지 · 수정 한 벌).
+  · 화면 분리: vCenter › VM 및 폴더의 버튼은 ‘⤓ VM 전체 정보 내보내기…’(창 안에 `tools/VmExport.jsx` 를 그 vCenter 로 — 도구 권한 `toolAllowed('vm-export')`) ·
+    백업 현황 › Detail 의 ‘CSV · 엑셀…’ = `VmListExportDialog`(백업 내보내기 — 대상: 화면에 보이는 VM(보기·검색 반영, `backupScreenRequest`, view `detail` → 파일 꼬리 `backup`) 또는 폴더).
+    예전 `GET /tools/backup-detail.csv` 는 창 안 ‘예전 CSV(화면 열 그대로)’ 로 남겼다(외부 스크립트 호환).
+  · `veeam/vmListCatalog.js` 는 백업 전용 — 묶음 기본 · 메모·태그·속성(+백업 표시) · 자원·IP(v2.792 열인 vCPU·메모리·스토리지·IP 만) · 스냅샷 · Veeam. 구성 항목을 다시 늘리지 말 것
+    (같은 값을 `vcenter/vmExportCatalog.js` 와 두 벌로 만들게 된다). 예전 저장값의 사라진 항목은 불러올 때 빼고 개수를 알린다(`droppedCols`), `multi` 는 저장할 때 버린다.
+- **v2.801 — VM 엑셀 꾸미기 · 폴더 트리 시트 · Veeam '여부' 두 항목 · 미리보기 크게 보기**
+  (사용자 요청 "엑셀로 예쁘게, 가독성 좋게" · "디렉터리를 계층별로 — 폴더별로 나눠서" · "선택 항목에 veeam 마지막 백업 여부 / 백업용 snapshot 최근 생성 여부도" ·
+  "미리보기를 전체화면 팝업으로" — 시안 https://claude.ai/artifact/5PT9nUWUwMPTxwURq3xm1h 승인 · 결정: 폴더 트리 시트 · 시안대로 전부 · 여부 기준 기본 1일. 회귀 `vmExcel2801.test.js`):
+  · VM 전체 정보 엑셀 = 요약(`vcenter/vmExportSummary.js` — 고른 항목과 무관 · 인벤토리·구성 캐시 · 못 읽은 값은 unknown 으로 따로 · 부분 합은 '≥') · **폴더 트리**
+    (뿌리 'vCenter / vm' → 폴더 → VM · 개요 단계 = 깊이(7 상한) · 폴더 행은 굵은 이름 + 회색 'N VM' · 합할 수 있는 열만 합(`SUM_KEYS`) · 전원·여부는 셈 · 열은 앞 20개 `TREE_COLS_MAX`)
+    · 데이터 · 읽는 법. VM 목록 엑셀 폴더 트리도 같은 뿌리 행·표기(개요 단계가 한 칸씩 내려갔다 — `vmListXlsx2792` 갱신).
+  · 서식은 `vcenter/vmXlsxStyle.js` 하나(두 엑셀 공용 · 워커 안전): 값은 그대로, 색·숫자 서식·줄무늬만. 종류는 **열 key** 로(`KIND_BY_KEY` — 테스트가 key 가 카탈로그에 있는지 본다).
+    조건부 서식·수식은 쓰지 않는다(칸 고유 색을 덮고 '복구' 위험). ‘아니오’ 에 빨간 바탕을 칠하지 말 것 — 백업 안 된 VM 이 많은 법인에서 표 전체가 빨갛다(렌더 확인).
+    웹 미리보기 칸 색(`web/src/views/tools/exportPreviewText.js cellTone`)은 이 규칙과 한 쌍 — 서버 테스트가 같은 입력으로 대조.
+  · Veeam 묶음(VM 전체 정보)은 VM 목록 카탈로그 항목을 key·머리·칸 그대로 빌린다(`VEEAM_KEYS`). 판정 입력(vcBackup)은 veeam 라우트에 있어 **라우트끼리 import 하지 않고**
+    `veeam/vmViewProvider.js` 에 veeam 라우트가 mount 때 함수를 건다(의존 방향 — arch2579). 걸린 것이 없거나 실패하면 null → 칸 '수집 안 됨'. Veeam 은 Veeam 항목을 골랐거나 엑셀(요약)일 때만 읽는다.
+  · ‘여부’ 판정은 `backupStatus.recentBackupYn`·`recentBackupSnapYn` 하나(예 · 아니오 · 모름 — 연동 없음·Veeam 모름·이벤트 못 읽음은 모름). 기준 `YN_DAYS` 1·2·3·7(기본 1).
+  · 미리보기 ‘크게 보기’(`components/ExportPreviewModal.jsx` — body 로 portal · 열 때 한 번 · 첫 100대 · 폴더별로 나눠 보기면 표 정렬은 끈다). 서버 상한: VM 전체 정보 `rows` 3~100 · VM 목록 ids 100.
+  · ⚠ 성능(실측 6,000대 × 60열): 처음 판이 19.9초(예전 2.9초)였다 — 열 너비 계산의 `toLocaleString` 칸마다 호출이 5.6초. 숫자 길이는 직접 세고, 트리 열은 20개 상한으로 6.3초.
+    나머지 비용은 exceljs 직렬화(워커 안이라 이벤트 루프는 막지 않는다). 칸마다 부르는 함수에 `toLocaleString`·`Intl` 을 넣지 말 것.
+- **v2.802 — vCenter 화면 '호스트 · 클러스터 엑셀'(호스트 1대 = 시트 1장)**
+  (사용자 요청 "호스트 및 클러스터 정보로 VM 처럼 멋지게 · 호스트에는 정보가 많으니 호스트 1개에 엑셀 sheet 1개 · 최대한 자세하고 많은 정보" —
+  시안 https://claude.ai/artifact/HKxFuVeie66ddR2i8VxmFX 승인 · 결정: 시안대로 · 표준 검증. 회귀 `hostExport2802.test.js` · 웹 `hostExportText.test.js`):
+  · 시트 = 요약(KPI 8칸 · 클러스터별 · 확인할 것) · 클러스터(HA · 승인 제어 · 모니터링 · DRS · EVC · 규칙 · 빌드 종류) · 호스트 목록(호스트 이름 = 그 시트 링크) ·
+    호스트마다 한 장(머리 · KPI · 왼쪽 기본/클러스터/구성·보안 점검 · 오른쪽 네트워크/스토리지/하드웨어/온도/최근 재부팅 · 아래 VM 표) · 읽는 법.
+  · **판정을 새로 하지 않는다**: 구성·보안 = `hostcfg/parse.js hostCfgFindings` + `clusterDrift`(드리프트 행) · 재부팅 = `hostcfg/reboots.js analyzeReboots`(라우트가 hostHygiene 과 같은 입력으로 읽는다) ·
+    iDRAC 부품 = `idrac/invView.js inventoryView` partState · 업링크 끊김 = 구성 점검의 `net-uplink-down` 사실. 클러스터 묶음 = `clustercfg/analyze.js clusterRefMode`(열쇠 'r:ref'·'n:이름'·'standalone').
+  · 화면 글자는 웹 `views/hostcfg/hostCfgText.js` 에 있다 — 서버 사본 `hostcfg/text.js`(번들 경계라 두 벌)를 테스트가 같은 입력으로 대조한다(날짜 줄만 다르다: 화면 = 브라우저 시각, 엑셀 = 포탈 시각).
+  · 게이트: data.csv(관리자 전용 키) · 범위 밖 404 · 묶음 권한은 그 기능과 같은 판정(`accessOf` — tools + 도구 키 host-hygiene · cluster-check / iDRAC = `isAdminDetailUser`).
+    권한으로 뺀 묶음은 그 자리와 '읽는 법' 에 사유를 적는다(조용히 빼지 않는다). ⚠ 지금은 data.csv 가 관리자 전용이라 내려받는 계정은 전부 관리자이고 묶음이 빠지는 경로는 실제로 열리지 않는다 —
+    data.csv 를 운영자에게 열 수 있게 바꾸면 이 판정이 살아난다(그래서 지우지 않는다).
+  · 세그먼트 `host-export` 는 특수 기능 카드 키가 아니다 — `toolAccess.UNMAPPED_TOOL_SEGMENTS` 에 사유와 함께 선언. 내려받기 POST 는 `AUDIT_SKIP`(라우트가 감사 한 줄) · 동시 1건 · 한 파일 최대 `HOSTS_MAX`(300)대.
+  · 시트 안 링크는 규격 모양(`<hyperlink ref location>` — 관계 없음)으로 쓴다: `util/xlsxInternalLink.js`(exceljs 가 `시트!A1` 링크에 외부 관계 + location 을 둘 다 싣는다 — xlsxSheetPrOrder 와 같은 방식의 패치).
+    ⚠ exceljs 는 **읽을 때** 이 링크를 되살리지 않는다(관계 기반만 읽는다) — 링크 검사는 XML 로 할 것. Excel · LibreOffice · openpyxl 은 location 을 읽는다.
+  · 데이터스토어는 '이 호스트 VM 의 디스크가 놓인 곳'(VM 장치 캐시)이다 — 호스트별 마운트 목록은 수집하지 않는다(VM 이 없는 데이터스토어는 나오지 않는다 — 읽는 법에 적었다).
+    vmk(VMkernel) 목록도 수집하지 않아 관리 IP 만 싣는다.
+  · 실측(목 데이터 복제): 300대 · VM 4,800대 — 내용 120ms(메인) · 워크북 3.2초(워커 3.8초) · 1.7MB. 30대 0.5초.
+- **v2.803 — 백업 현황 › Detail '백업 방식'(사람이 정한 값) · 표 6열(백업 = Veeam 또는 스냅샷 · Clone) · CSV·엑셀 반영**
+  (사용자 요청 "업무 중요도 다음 '백업 방식' — Veeam · Clone · Config 백업 · 백업 안함" + "작업 열 대신 Clone 열" + "스냅샷은 Veeam 이 없을 때 Veeam 자리에" + "CSV/Excel 에도" ·
+  시안 https://claude.ai/artifact/D9BQPJJdZ7XQ5iLr4F525V · 결정: 사람이 정한 값만(수집값으로 추정 안 함) · Clone 칸 = 복제 잡 마지막 실행 · 표준 검증.
+  회귀 `server/test/backupMethod2803.test.js`(변이 2/2 — method 검증 제거 · PUT 키 목록에서 method 제거) + 웹 `backupViewText.test.js` v2.803 묶음):
+  · 저장은 `veeam/backupMarks.js` 표시의 `method`('veeam'|'clone'|'config'|'none'|'') — 중요도와 같은 파일·같은 PUT(`/tools/backup-detail/marks`)·같은 게이트(역할 → 조회 밖 404 → 쓰기 밖 403 → 소속).
+    글자는 서버 `backupStatus.METHOD_TEXT` = 웹 `backupViewText.METHODS`(테스트 대조) · 보기 필터 `method-*`(서버 VIEW_FILTERS = 웹 FILTERS + CRIT_FILTERS + METHOD_FILTERS).
+  · Clone 칸 자료(`c`)는 **백업 방식이 Clone 인 VM 에만**(`vmBackupView`) — `vmclone/jobState.js cloneStateByVm` 이 실행 노드 기준으로 고른다: 중앙 직접 수집은 이 노드의 `job.lastRun`,
+    엣지 위임(site)은 그 엣지의 보고(`dispatch.edgeStateOf` — VM 백업 센터 `mergeJobView` 와 같은 규칙). 보고가 없거나 담당 불일치면 '모름' — 이 노드의 낡은 기록으로 채우지 않는다.
+    잡 파일을 못 읽으면 null(모름 — '잡 없음' 을 지어내지 않는다). 잡 이름·대상 경로는 싣지 않는다. Detail 응답 캐시 키에 `vmclone/store.js jobsRev()`(c) — 실행 직후에도 낡지 않게.
+  · 예전 CSV(`/tools/backup-detail.csv`)는 '작업' 열을 지우지 않았다(파일 소비자 호환) — '중요도' 앞에 '백업 방식 · Clone 마지막 실행(UTC) · Clone 결과'.
+    엑셀 폴더 트리 시트는 '백업 방식'(4)·'Clone'(6) 열이 들어와 폴더 행 병합이 (2~5)·(7~8), 잔존은 9번 칸 — 시트 열을 더 바꾸면 이 번호들을 함께 옮길 것.

@@ -19,6 +19,7 @@ import mimetypes
 import posixpath
 import re
 import time
+import traceback
 from http import HTTPStatus
 from http.cookies import SimpleCookie
 import threading
@@ -68,6 +69,7 @@ class HubHandler(BaseHTTPRequestHandler):
     # ---------- 응답 헬퍼 ----------
 
     def _send(self, status, body: bytes, content_type: str, extra_headers: dict = None) -> None:
+        self._response_started = True   # v2.768(R3-C3-3): _dispatch 최종 except 가 이중 응답을 쓰지 않게
         self.send_response(status)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(body)))
@@ -265,6 +267,7 @@ class HubHandler(BaseHTTPRequestHandler):
         self._dispatch("DELETE")
 
     def _dispatch(self, method):
+        self._response_started = False   # keep-alive 로 같은 핸들러가 여러 요청을 처리한다 — 요청마다 초기화
         self._drain_body()
         path = urlsplit(self.path).path
         if not path.startswith("/api/"):
@@ -295,6 +298,19 @@ class HubHandler(BaseHTTPRequestHandler):
                 return self._error(HTTPStatus.NOT_FOUND, "대상을 찾을 수 없습니다.")
             except ValueError as exc:
                 return self._error(HTTPStatus.BAD_REQUEST, str(exc))
+            except Exception as exc:  # noqa: BLE001
+                # v2.768(점검 R3-C3-3·C3-6): 위 목록 밖 예외(http.client.HTTPException·csv.Error 등)는 예전에
+                # 응답 없이 연결을 끊었다(화면은 원인 대신 네트워크 오류). 원문은 응답에 싣지 않고(내부 경로·
+                # 대상 응답 조각이 섞일 수 있다) 서버 콘솔에만 남긴 뒤(예전 socketserver 기본 처리와 같은 traceback)
+                # 500 JSON 으로 답한다.
+                # 이미 응답을 쓰기 시작했거나 클라이언트가 끊은 경우에는 덧쓰지 않고 연결만 닫는다.
+                self.close_connection = True
+                self.log_message("ERROR unhandled %s in %s %s", type(exc).__name__, method, path)
+                traceback.print_exc()
+                if getattr(self, "_response_started", False) or isinstance(exc, ConnectionError):
+                    return None
+                return self._error(HTTPStatus.INTERNAL_SERVER_ERROR,
+                                   "서버 내부 오류로 요청을 처리하지 못했습니다.", code="internal_error")
         return self._error(HTTPStatus.NOT_FOUND, "없는 API 입니다.")
 
     # ================= 공개 조회 =================
@@ -385,16 +401,19 @@ class HubHandler(BaseHTTPRequestHandler):
                            "checkedAt": self.date_time_string()})
 
     def _health_targets(self, payload) -> list:
+        # v2.767(점검 R2-B5-3): 중지된 바로가기(v2.227)는 자동 점검뿐 아니라 [지금 점검](전체)·ids 경로에서도 뺀다 —
+        # 예전에는 전부 넘겨 중지한 링크에 접속하고 이력·웹훅 전환 알림까지 냈다(툴팁 '사용으로 바꾸면 다시 포함' 과 모순).
+        active = [item for item in self.ctx.shortcuts.all() if item.get("enabled", True)]
         if isinstance(payload, dict):
             ids = payload.get("ids")
             if isinstance(ids, list) and ids:
                 wanted = {str(value) for value in ids}
                 return [{"id": item["id"], "url": item["url"]}
-                        for item in self.ctx.shortcuts.all() if item["id"] in wanted]
+                        for item in active if item["id"] in wanted]
             urls = payload.get("urls")
             if isinstance(urls, list) and urls:
                 return [{"id": None, "url": str(value)} for value in urls[:200]]
-        return [{"id": item["id"], "url": item["url"]} for item in self.ctx.shortcuts.all()]
+        return [{"id": item["id"], "url": item["url"]} for item in active]
 
     # ================= 설정 세션 =================
 
@@ -595,14 +614,20 @@ class HubHandler(BaseHTTPRequestHandler):
             return None
         if not self.ctx.datacenters.delete(dc_id):
             return self._error(HTTPStatus.NOT_FOUND, "데이터센터를 찾을 수 없습니다.")
-        return self._json({"success": True, "datacenters": self.ctx.datacenters.all()})
+        # v2.760(점검 B-07): 그 데이터센터에 묶인 바로가기는 '전체'로 옮긴다(카테고리 삭제와 같은 규칙).
+        moved = self.ctx.shortcuts.reassign_missing_datacenters(self.ctx.datacenters.ids())
+        return self._json({"success": True, "datacenters": self.ctx.datacenters.all(),
+                           "shortcuts": self.ctx.shortcuts.all(), "movedShortcuts": moved})
 
     def api_dc_reset(self):
         actor = self._require_admin()
         if not actor:
             return None
         self._audit("datacenter.reset", actor=actor["username"])
-        return self._json({"success": True, "datacenters": self.ctx.datacenters.reset()})
+        datacenters = self.ctx.datacenters.reset()
+        moved = self.ctx.shortcuts.reassign_missing_datacenters({dc["id"] for dc in datacenters})
+        return self._json({"success": True, "datacenters": datacenters,
+                           "shortcuts": self.ctx.shortcuts.all(), "movedShortcuts": moved})
 
     def api_dc_move(self, dc_id):
         if not self._require_admin():

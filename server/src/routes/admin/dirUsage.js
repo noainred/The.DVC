@@ -13,6 +13,7 @@ import { load as loadCfg, save as saveCfg, redact, validate } from '../../dirusa
 import { getDb, dbStatus } from '../../dirusage/db.js';
 import { runNow, schedulerStatus } from '../../dirusage/scheduler.js';
 import { renderReport, renderSubject } from '../../dirusage/report.js';
+import { comparableBase, compareScansJson } from '../../dirusage/scan.js';
 import { listRmaAgents } from '../../rma/jobs.js';
 
 const adminOnly = requireRole('admin');
@@ -64,7 +65,7 @@ export function registerDirUsage(adminRouter) {
     res.status(r.ok ? 200 : 409).json(r);
   });
 
-  // 대상별 이력(최근 N건). 증감 계산은 화면이 두 건을 비교해 만든다.
+  // 대상별 이력(최근 N건). 증감은 /dir-usage/scan/:id 의 compare(서버 compareScans — v2.767 R2-B2-05)를 쓴다.
   adminRouter.get('/dir-usage/history/:targetId', adminOnly, fleetReadOnly, async (req, res) => {
     const db = await getDb();
     if (!db) return res.status(503).json({ ok: false, reason: '이력 DB 를 사용할 수 없습니다(node:sqlite).' });
@@ -79,7 +80,12 @@ export function registerDirUsage(adminRouter) {
     const scan = db.get(Number(req.params.id));
     if (!scan) return res.status(404).json({ ok: false, reason: '스캔 기록이 없습니다.' });
     // v2.620(SRV2620-01): 지문 집합(name_set)은 비교용 내부 값이라 응답에 싣지 않는다(행마다 최대 160KB).
-    res.json({ ok: true, scan: withoutNameSet(scan), prev: withoutNameSet(db.prev(scan.target_id, scan.ts)) });
+    // v2.767(점검 R2-B2-06): 직전 기록은 같은 루트·엣지일 때만 기준선(경로를 같은 id 로 바꾼 뒤 옛 경로와 비교하지 않는다).
+    // v2.767(점검 R2-B2-05): 증감·신규·순위 진입/이탈 판정은 **메일과 같은 compareScans** 결과를 싣는다 — 화면이 Top-N 끼리 다시 비교하면
+    //   순위 진입을 '신규' 로, 순위 밖 이탈을 표시 없이 보였다(재현).
+    const base = comparableBase(scan, db.prev(scan.target_id, scan.ts));
+    const compare = compareScansJson(toRec(scan), base.prev ? toRec(base.prev) : null);
+    res.json({ ok: true, scan: withoutNameSet(scan), prev: withoutNameSet(base.prev), compare, ...(base.baseChanged ? { baseChanged: true } : {}) });
   });
 
   // 메일 미리보기(HTML) — 실제 발송 없이 본문만 확인한다. 발송 전에 서식을 보게 하는 용도.
@@ -89,8 +95,8 @@ export function registerDirUsage(adminRouter) {
     const row = db.get(Number(req.params.id));
     if (!row) return res.status(404).json({ ok: false, reason: '스캔 기록이 없습니다.' });
     const scan = toRec(row);
-    const prev = db.prev(row.target_id, row.ts);
-    const { html, text } = renderReport(scan, prev ? toRec(prev) : null);
+    const base = comparableBase(row, db.prev(row.target_id, row.ts));   // v2.767(점검 R2-B2-06)
+    const { html, text } = renderReport(scan, base.prev ? toRec(base.prev) : null, { baseChanged: base.baseChanged });
     const cfg = loadCfg();
     res.json({ ok: true, subject: renderSubject(cfg.mail.subject, { root: scan.root, agent: scan.agent, ts: scan.ts, topN: scan.entries.length }), html, text });
   });
@@ -105,7 +111,7 @@ function toRec(r) {
     targetId: r.target_id, agent: r.agent, root: r.root, ts: r.ts,
     totalBytes: r.total_bytes, sumBytes: r.sum_bytes, count: r.count,
     othersBytes: r.others_bytes, othersCount: r.others_count,
-    skipped: r.skipped, truncated: !!r.truncated, entries: r.entries || [],
+    skipped: r.skipped, truncated: !!r.truncated, entries: r.entries || [], warnCount: Number(r.warn_count) || 0,
     nameSet: r.name_set || null,   // v2.620(SRV2620-01): 순위 밖 이탈·진입 판정 근거(옛 행은 null)
   };
 }

@@ -68,7 +68,9 @@ def _safe_webhook(value) -> str:
 def _clamp_int(value, low, high, default):
     try:
         number = int(value)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
+        # v2.762(H5): json 은 1e999·Infinity 를 float inf 로 읽는다 — int(inf) 는 OverflowError 라
+        # 한 칸 때문에 설정 전체를 못 읽던 B-08 과 같은 증상이 남아 있었다.
         return default
     return max(low, min(high, number))
 
@@ -76,7 +78,9 @@ def _clamp_int(value, low, high, default):
 def _clamp_choice(value, choices, default):
     try:
         number = int(value)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
+        # v2.762(H5): json 은 1e999·Infinity 를 float inf 로 읽는다 — int(inf) 는 OverflowError 라
+        # 한 칸 때문에 설정 전체를 못 읽던 B-08 과 같은 증상이 남아 있었다.
         return default
     return number if number in choices else default
 
@@ -105,7 +109,9 @@ class SettingsStore:
                 "intervalMinutes": _clamp_choice(backup.get("intervalMinutes"),
                                                  BACKUP_INTERVAL_CHOICES,
                                                  DEFAULTS["backup"]["intervalMinutes"]),
-                "keep": max(1, min(200, int(backup.get("keep", DEFAULTS["backup"]["keep"]) or 1))),
+                # v2.760(점검 B-08): 다른 칸과 같은 _clamp_int — int() 를 그대로 쓰면 'abc'·'7.5' 한 칸 때문에
+                #   설정 전체를 읽지 못해 자동 백업·자동 점검이 매 주기 실패했다.
+                "keep": _clamp_int(backup.get("keep"), 1, 200, DEFAULTS["backup"]["keep"]),
             },
             "health": {
                 "autoEnabled": bool(health.get("autoEnabled", DEFAULTS["health"]["autoEnabled"])),

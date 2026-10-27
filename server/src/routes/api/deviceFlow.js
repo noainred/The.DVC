@@ -17,7 +17,8 @@ import { fullScopeOnlyWith } from '../admin/shared.js';
 import { buildCommMap } from '../../commmap/build.js';
 import { buildDataFlow } from '../../dataflow/build.js';
 import { buildDeviceFlow, ITEM_MAX } from '../../devflow/build.js';
-import { gatherCommInputs } from './commMap.js';
+import { gatherCommInputs, DEMO_FLOW_PREDS, demoFlowKey } from './commMap.js';
+import { maskFlowInputsForDemoGuest, maskIdracForDemoGuest, mergeMasked, maxMasked } from '../../commmap/demoMask.js';
 import { gatherFlowInputs } from './dataFlow.js';
 import { loadRegistry as loadIdrac } from '../../idrac/registry.js';
 import { allRemoteServers } from '../../collector/remoteInventory.js';
@@ -27,20 +28,29 @@ const fullScopeOnly = fullScopeOnlyWith('3단 지도는 전체 범위(vCenter �
 
 export function registerDeviceFlow(api) {
   api.get('/tools/device-flow', adminOnly, fullScopeOnly, async (req, res) => {
+    const demo = demoFlowKey(req) === 'demo';
     await memoJson(req, res, 'device-flow', async (snap) => {
       const sourceErrors = [];
-      const comm = buildCommMap({ ...(await gatherCommInputs(snap, sourceErrors)), resMax: Infinity, directMax: Infinity });
-      const flow = buildDataFlow(gatherFlowInputs(sourceErrors));
+      // v2.768(점검 R3-C2-2): 데모 계정은 사람이 등록한 엣지·vCenter·장비·iDRAC(이름·서비스태그)을 가린 입력으로 조립한다.
+      const commIn = await gatherCommInputs(snap, sourceErrors);
+      const flowIn = gatherFlowInputs(sourceErrors);
+      const cm = demo ? maskFlowInputsForDemoGuest(commIn, DEMO_FLOW_PREDS) : { inputs: commIn, masked: null };
+      const fm = demo ? maskFlowInputsForDemoGuest(flowIn, DEMO_FLOW_PREDS) : { inputs: flowIn, masked: null };
+      const comm = buildCommMap({ ...cm.inputs, resMax: Infinity, directMax: Infinity });
+      const flow = buildDataFlow(fm.inputs);
       let idracLocal = [];
       try { idracLocal = loadIdrac(); } catch (e) { sourceErrors.push({ source: 'idrac', error: String(e?.message || e).slice(0, 160) }); }
       let idracRemote = [];
       try { idracRemote = allRemoteServers(); } catch (e) { sourceErrors.push({ source: 'idrac-edge', error: String(e?.message || e).slice(0, 160) }); }
+      const im = demo ? maskIdracForDemoGuest(idracLocal, idracRemote, DEMO_FLOW_PREDS) : { idracLocal, idracRemote, masked: null };
       const out = buildDeviceFlow({
-        now: Date.now(), comm, flow, idracLocal, idracRemote,
+        now: Date.now(), comm, flow, idracLocal: im.idracLocal, idracRemote: im.idracRemote,
         central: { version: currentVersion(), agentName: config.agent?.name || '' },
       });
       // 비밀 필드(password)는 idracItem 이 애초에 옮기지 않는다 — 여기서 추가로 싣지 말 것.
-      return { ok: true, ...out, cats: flow.cats || [], itemMax: ITEM_MAX, sourceErrors, generatedAt: Date.now() };
-    });
+      // 가린 수 — 통신 입력과 흐름 입력이 같은 수집 서버·기록을 두 번 세지 않게 키별 최댓값(같은 원천)을 쓴다.
+      const masked = demo ? mergeMasked(maxMasked(cm.masked, fm.masked), im.masked) : null;
+      return { ok: true, ...out, ...(demo ? { demoMasked: masked } : {}), cats: flow.cats || [], itemMax: ITEM_MAX, sourceErrors, generatedAt: Date.now() };
+    }, { extraKey: demoFlowKey(req) });
   });
 }

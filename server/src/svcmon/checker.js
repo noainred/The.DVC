@@ -102,7 +102,9 @@ async function runCheckInner(test, host) {
     switch (test.type) {
       case 'ping': {
         const r = await pingOne(host, { timeoutMs: 4000 });
-        return r.alive ? ok(`${r.rttMs ?? 0} ms`, r.rttMs ?? 0) : bad('응답 없음', started);
+        // v2.769(점검 R4-D3-6): RTT 를 못 읽었으면(출력 형식이 다른 OS·로케일) 0ms 가 아니다 — ms 는 null(CSV 빈 칸 · 분석 평균/p95 에서 제외).
+        if (!r.alive) return bad('응답 없음', started);
+        return r.rttMs != null ? ok(`${r.rttMs} ms`, r.rttMs) : ok('응답함 · RTT 미상', null);
       }
       case 'trace': {
         // 문구에도 **실제 적용된** 임계를 쓴다 — traceLimits 가 63 으로 클램프하므로(상한 64가

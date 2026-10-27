@@ -79,6 +79,11 @@ export async function scanForIdracs({ ips, username, password, ilo = null, concu
   let authSkipped = 0; let authSkippedRegistered = 0;
   const authSkippedIps = [];
   const MAX_AUTHSKIP_IPS = 200;
+  // v2.770(점검 R5-E4-01): 장비 인증서를 신뢰하지 못해 로그인하지 않은 **실재** BMC(probeIdrac tlsUntrusted — 서비스 루트로
+  //   벤더·Redfish 를 확인한 뒤 자격증명을 보내지 않았다). 예전에는 unreachable 로만 세어 scanPartialReasons 가 보지 못했고,
+  //   replace-datacenter 가 인증서가 바뀐(펌웨어 갱신·재발급) 등록 서버를 지웠다. unreachable 에도 그대로 센다(화면 '무응답' 의 뜻 유지 — 부분집합).
+  let tlsUntrusted = 0;
+  const tlsUntrustedIps = [];
   let aborted = false;
   async function worker() {
     while (idx < targets.length) {
@@ -96,7 +101,10 @@ export async function scanForIdracs({ ips, username, password, ilo = null, concu
       }
       const r = await probeIdrac(ip, username, password, perHostTimeout, { credsFor });
       if (r.ok && r.vendor === 'hpe') hpeDetected++;
-      if (!r.ok) unreachable++;
+      if (!r.ok) {
+        unreachable++;
+        if (r.tlsUntrusted === true) { tlsUntrusted++; if (tlsUntrustedIps.length < MAX_AUTHFAIL_IPS) tlsUntrustedIps.push(ip); }
+      }
       // v2.611(감사 SEC2611-01): iLO 전용 대역에서 벤더가 알려진 비-Dell·비-HPE Redfish(Lenovo 등)는 계정이 없어 로그인하지
       //   않았지만 '계정 없음' 이 아니라 예전처럼 '미지원 서버' 다(Dell 계정이 있었어도 등록되지 않는다).
       else if (r.noCreds && knownOtherVendor(r)) noteUnsupported(ip, r);
@@ -173,6 +181,10 @@ export async function scanForIdracs({ ips, username, password, ilo = null, concu
     authSkippedRegistered,
     authSkippedIps: authSkippedIps.sort(IP_COLLATOR.compare),
     authSkippedTruncated: authSkipped > authSkippedIps.length,
+    // v2.770(점검 R5-E4-01): 인증서 미신뢰로 로그인하지 않은 실재 BMC(unreachable 의 부분집합) — replace 강등 사유.
+    tlsUntrusted,
+    tlsUntrustedIps: tlsUntrustedIps.sort(IP_COLLATOR.compare),
+    tlsUntrustedTruncated: tlsUntrusted > tlsUntrustedIps.length,
   };
 }
 
@@ -211,6 +223,10 @@ export function scanPartialReasons(r, { registeredHpe = false } = {}) {
   if ((Number(r?.authSkipped) || 0) > 0) out.push(`인증 정지로 건너뜀 ${Number(r.authSkipped)}개`);
   if ((Number(r?.noCreds) || 0) > 0) out.push(`계정이 없어 시도하지 않음 ${Number(r.noCreds)}대`);
   if ((Number(r?.authFailed) || 0) > 0) out.push(`인증 실패 ${Number(r.authFailed)}대`);
+  // v2.770(점검 R5-E4-01): 인증서 미신뢰(tlsUntrusted)도 서비스 루트로 실재가 확인된 장비다(authFailed 와 같은 근거) — 인증서가 바뀐
+  //   등록 서버가 한 번의 스캔으로 지워지지 않게 강등한다. ⚠ 일반 무응답(unreachable)은 강등 사유에 넣지 않는다 — 폐기 서버는 늘
+  //   무응답이라 넣으면 replace 가 영원히 아무것도 못 지운다. 대신 교체로 지운 IP 를 결과·감사 로그에 남긴다(registry.registerScanned).
+  if ((Number(r?.tlsUntrusted) || 0) > 0) out.push(`장비 인증서 미신뢰 ${Number(r.tlsUntrusted)}대`);
   if (registeredHpe && !r?.iloEnabled) out.push('iLO 계정 없이 스캔 — 등록된 HPE 서버를 찾지 않음');
   return out;
 }

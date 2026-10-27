@@ -1,0 +1,23 @@
+Storage system address: 127.0.0.1
+Storage system port: 443
+HTTPS connection
+
+Remote certificate:
+Issuer: CN=SYNTH0000000000,O=Synthetic,C=US
+Would you like to:
+  [1] Accept the certificate for this session
+  [2] Reject the certificate
+  [3] Accept and store
+Please input your selection (The default selection is [1]): 1:    ID                         = res_1
+      File system                = fs_1
+      Name                       = temp_share
+      Protocol                   = nfs
+      Size                       = 644245094400 (600.0G)
+      Size used                  = 9019431322 (8.4G)
+
+2:    ID                         = res_3
+      File system                = fs_3
+      Name                       = sandbox
+      Protocol                   = cifs
+      Size                       = 1099511627776 (1.0T)
+      Size used                  = 199286482534 (185.6G)

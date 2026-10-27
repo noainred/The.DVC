@@ -22,6 +22,7 @@ import { numOrNull } from '../util/numOrNull.js';
 import { chunkedDelete, createPruneFlight } from '../util/chunkedPrune.js';
 import { createYielder } from '../util/timeSlice.js';   // v2.743 DB-01: 합계 추이 조각 사이 양보(시간 기준)
 import { pushAll } from '../util/pushAll.js';
+import { normalizeResourceList, resourceKey } from './resources.js';   // v2.789 하위 항목
 
 // DB 저장 경로 설정(v2.379)을 따른다 — dbLocation 이 지정한 dbDir 아래, 없으면 configDir.
 // (vmperf/vmtrack 과 동일 규약. MIGRATABLE 에 이 파일이 있어 미적용 시 마이그레이션 후
@@ -138,7 +139,18 @@ async function openInner() {
       /* 운영 메타(v2.534) — 1회성 마이그레이션 표식과 '이력 재시작' 기록을 담는다.
          용량 이력은 '측정 기준' 이 바뀌면 이전 값과 이어 붙일 수 없다. 그 사실을 남기지
          않으면 화면의 '관측 N일' 이 이유 없이 1일로 줄어 사용자가 수집 장애로 오해한다. */
-      CREATE TABLE IF NOT EXISTS storage_meta (k TEXT PRIMARY KEY, v TEXT NOT NULL);`);
+      CREATE TABLE IF NOT EXISTS storage_meta (k TEXT PRIMARY KEY, v TEXT NOT NULL);
+      /* 하위 항목(LUN·파일시스템) 일 롤업(v2.789) — 사용자 요청 "스토리지 사용량을 일간/주간 별로" + 선택 "LUN·파일시스템까지".
+         capacity_daily 와 같은 규칙: 하루 1행 · 그 날의 마지막 관측 · 더 늦은 관측만 갱신 · samples 누적 · 보존은 일 롤업 보존일.
+         rkey = storage/resources.js resourceKey(종류 + 장비 id, 없으면 이름) — 이름을 바꿔도 이력이 이어진다. name 은 그 날의 이름.
+         크기를 못 읽은 항목은 행을 만들지 않는다(0 을 지어내지 않는다). */
+      CREATE TABLE IF NOT EXISTS resource_daily (
+        device_id TEXT NOT NULL, rkey TEXT NOT NULL, day INTEGER NOT NULL, last_ts INTEGER NOT NULL,
+        kind TEXT NOT NULL, name TEXT, pool TEXT, total_bytes INTEGER, used_bytes INTEGER,
+        samples INTEGER NOT NULL DEFAULT 1,
+        PRIMARY KEY (device_id, rkey, day)
+      );
+      CREATE INDEX IF NOT EXISTS idx_resd_day ON resource_daily (day);`);
     _db = {
       conn,
       upLatest: conn.prepare(`INSERT INTO api_latest (device_id, area, endpoint, ts, ok, bytes, truncated, json, error)
@@ -233,6 +245,9 @@ async function openInner() {
       selDailyAll: conn.prepare(`SELECT device_id, day, last_ts, total_bytes, used_bytes,
           hdd_total, hdd_used, ssd_total, ssd_used, max_used, samples
         FROM capacity_daily WHERE day >= ? ORDER BY device_id, day`),
+      // v2.791: 구간 읽기(보고표 '전체 누적' — 5년 × 장비 수를 한 번에 .all() 하지 않게 조각으로). idx_capd_day 를 탄다.
+      selDailyRange: conn.prepare(`SELECT device_id, day, total_bytes, used_bytes, hdd_total, hdd_used, ssd_total, ssd_used
+        FROM capacity_daily WHERE day >= ? AND day < ?`),
       // 장비별 **전체 이력 범위**(조회 구간과 무관). 화면의 '관측 N일' 은 이 값이어야 한다 —
       // 조회 구간(예: 90일)으로 대신하면 700일치를 가진 장비가 '92일' 로 보인다(v2.531 실제 결함).
       // capacity_daily 는 하루 1행이라 전 행을 훑어도 20대×5년 = 3.6만 행이다.
@@ -247,6 +262,23 @@ async function openInner() {
       prune1: conn.prepare('DELETE FROM api_history WHERE rowid IN (SELECT rowid FROM api_history WHERE ts < ? LIMIT ?)'),
       prune2: conn.prepare('DELETE FROM capacity_history WHERE rowid IN (SELECT rowid FROM capacity_history WHERE ts < ? LIMIT ?)'),
       prune3: conn.prepare('DELETE FROM capacity_daily WHERE day < ?'),
+      // v2.789 하위 항목 일 롤업 — capacity_daily 와 같은 upsert 규칙(더 늦은 관측만 갱신).
+      upRes: conn.prepare(`INSERT INTO resource_daily
+          (device_id, rkey, day, last_ts, kind, name, pool, total_bytes, used_bytes, samples)
+        VALUES (?,?,?,?,?,?,?,?,?,1)
+        ON CONFLICT(device_id, rkey, day) DO UPDATE SET
+          last_ts     = CASE WHEN excluded.last_ts > resource_daily.last_ts THEN excluded.last_ts     ELSE resource_daily.last_ts     END,
+          name        = CASE WHEN excluded.last_ts > resource_daily.last_ts THEN excluded.name        ELSE resource_daily.name        END,
+          pool        = CASE WHEN excluded.last_ts > resource_daily.last_ts THEN excluded.pool        ELSE resource_daily.pool        END,
+          total_bytes = CASE WHEN excluded.last_ts > resource_daily.last_ts THEN excluded.total_bytes ELSE resource_daily.total_bytes END,
+          used_bytes  = CASE WHEN excluded.last_ts > resource_daily.last_ts THEN excluded.used_bytes  ELSE resource_daily.used_bytes  END,
+          samples     = resource_daily.samples + 1`),
+      // 조회는 **일 구간 조각**으로 읽는다(resourceDailyRange — 조각 사이 양보). day 인덱스를 탄다.
+      selResRange: conn.prepare(`SELECT device_id, rkey, day, kind, name, pool, total_bytes, used_bytes
+        FROM resource_daily WHERE day >= ? AND day < ? ORDER BY device_id, rkey, day`),
+      delResDev: conn.prepare('DELETE FROM resource_daily WHERE device_id = ?'),
+      // 하위 항목은 장비 × 항목 × 일이라 capacity_daily 보다 크다(Unity 18대 × 20항목 × 5년 ≈ 66만 행) — 청크로 지운다(DB2606-02 규약).
+      prune4: conn.prepare('DELETE FROM resource_daily WHERE rowid IN (SELECT rowid FROM resource_daily WHERE day < ? LIMIT ?)'),
     };
     lockRetry.ok();
     return _db;
@@ -321,7 +353,9 @@ function runPrune(db) {
     const a = await chunkedDelete(db.prune1, [key.cut], { label: 'storage api_history' });
     const c = await chunkedDelete(db.prune2, [key.cut], { label: 'storage capacity_history' });
     const d = Number(db.prune3.run(key.dayCut)?.changes || 0);
-    return { apiHistory: a.deleted, capacityHistory: c.deleted, capacityDaily: d, done: a.done && c.done };
+    // v2.789: 하위 항목 일 롤업도 같은 보존일(청크 — 아래 prune4 주석).
+    const r = await chunkedDelete(db.prune4, [key.dayCut], { label: 'storage resource_daily' });
+    return { apiHistory: a.deleted, capacityHistory: c.deleted, capacityDaily: d, resourceDaily: r.deleted, done: a.done && c.done && r.done };
   });
 }
 
@@ -410,8 +444,55 @@ export async function saveCapacityPoint(snap) {
   db.insCap.run(snap.deviceId, ts, total, used, hT, hU, sT, sU);
   const day = dayIndex(ts);
   db.upDaily.run(snap.deviceId, day, ts, total, used, hT, hU, sT, sU, used);
+  const resources = saveResourceRows(db, snap, day, ts);
   maybePrune(db);
-  return { saved: true, day };
+  return { saved: true, day, ...(resources ? { resources } : {}) };
+}
+
+/**
+ * v2.789 — 하위 항목(LUN·파일시스템) 일 롤업 적재. 장비 점이 적재될 때만 부른다(같은 중복·적격 가드를 공유한다).
+ * ⚠ 한 스냅샷에 수십~수백 행이므로 **트랜잭션 하나**로 묶는다(CLAUDE.md '대량 SQLite write 는 트랜잭션' — 무트랜잭션
+ *   6천 행 25초 블로킹 사고). 안에 await 가 없어 다른 트랜잭션과 겹치지 않는다.
+ * ⚠ 크기를 못 읽은 항목은 행을 만들지 않는다 · 사용량을 못 읽으면 null 로 둔다(0 이 아니다).
+ * @returns {number} 적재한 행 수
+ */
+function saveResourceRows(db, snap, day, ts) {
+  const raw = snap.extra?.resources;
+  if (!Array.isArray(raw) || !raw.length) return 0;
+  const { list } = normalizeResourceList(raw);
+  const rows = list.filter((r) => r.totalBytes != null);
+  if (!rows.length) return 0;
+  db.conn.exec('BEGIN');
+  try {
+    for (const r of rows) {
+      db.upRes.run(snap.deviceId, resourceKey(r), day, ts, r.kind, r.name, r.pool, r.totalBytes, r.usedBytes);
+    }
+    db.conn.exec('COMMIT');
+  } catch (e) {
+    try { db.conn.exec('ROLLBACK'); } catch { /* */ }
+    console.warn(`[storage-db] 하위 항목 일 롤업 적재 실패(${snap.deviceId}): ${e.message}`);
+    return 0;
+  }
+  return rows.length;
+}
+
+/**
+ * v2.789 — 하위 항목 일 롤업 조회 [fromDay, toDay]. **일 구간 조각**(기본 31일)으로 나눠 읽고 조각 사이에 양보한다
+ * (요청 경로의 큰 조회 — perf-db 규약 '조각 + 시간 기준 양보'). deviceIds 가 있으면 그 장비만 돌려준다.
+ * @returns {Promise<{device_id:string,rkey:string,day:number,kind:string,name:string,pool:string|null,total_bytes:number,used_bytes:number|null}[]>}
+ */
+export async function resourceDailyRange(fromDay, toDay, { deviceIds = null, sliceDays = 31 } = {}) {
+  const db = await open();
+  if (!db) return [];
+  const want = deviceIds ? new Set(deviceIds) : null;
+  const out = [];
+  const yieldNow = createYielder();
+  for (let lo = fromDay; lo <= toDay; lo += sliceDays) {
+    const hi = Math.min(toDay + 1, lo + sliceDays);
+    for (const r of db.selResRange.all(lo, hi)) if (!want || want.has(r.device_id)) out.push(r);
+    await yieldNow();
+  }
+  return out;
 }
 
 /**
@@ -419,6 +500,23 @@ export async function saveCapacityPoint(snap) {
  * @param {string|null} deviceId null 이면 전 장비(장비별로 묶어 돌려준다)
  * @param {number} sinceDay 일 인덱스(포함)
  */
+/**
+ * v2.791 — 일 롤업 구간 읽기([fromDay, toDay]). 보고표가 '전체 누적'(최대 5년)을 읽을 때 한 번의 동기 `.all()` 로 수십만 행을 만들지 않게
+ * `sliceDays` 조각으로 읽고 조각 사이에 시간 기준으로 양보한다(CLAUDE.md '요청 경로의 큰 집계는 조각 + 시간 기준 양보' — resourceDailyRange 와 같은 모양).
+ */
+export async function dailyRange(fromDay, toDay, { deviceIds = null, sliceDays = 31 } = {}) {
+  const db = await open();
+  if (!db) return [];
+  const want = deviceIds ? new Set(deviceIds) : null;
+  const out = [];
+  const yieldNow = createYielder();
+  for (let lo = fromDay; lo <= toDay; lo += sliceDays) {
+    const hi = Math.min(toDay + 1, lo + sliceDays);
+    for (const r of db.selDailyRange.all(lo, hi)) if (!want || want.has(r.device_id)) out.push(r);
+    await yieldNow();
+  }
+  return out;
+}
 export async function dailySeries(deviceId, sinceDay) {
   const db = await open();
   if (!db) return [];
@@ -643,7 +741,8 @@ export async function resetCapacityHistory(deviceIds, { reason = '측정 기준 
     for (const id of ids) {
       const a = db.delCapDev.run(id);
       const b = db.delDailyDev.run(id);
-      const n = Number(a?.changes || 0) + Number(b?.changes || 0);
+      const c = db.delResDev.run(id);   // v2.789 — 하위 항목 이력도 같은 기준 재시작
+      const n = Number(a?.changes || 0) + Number(b?.changes || 0) + Number(c?.changes || 0);
       rows += n;
       if (n > 0) devices += 1;
       // 지운 행이 0 이어도 기록한다 — '새로 등록된 장비' 와 '기준이 바뀐 장비' 는 다르다.

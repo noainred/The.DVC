@@ -168,6 +168,10 @@ const AUDIT_SKIP = new Set([
   'POST /tools/rma/tests/validate', // 테스트 정의 검증(저장 아님)
   'POST /tools/credentials/inspect-key', // 개인키 사전 검증(저장하지 않고 지문만)
   'POST /svcmon/targets/hostmap/parse',  // 호스트맵 텍스트 파싱(저장 아님)
+  'POST /tools/vm-export/preview',  // VM 전체 정보 미리보기(대상 첫 3대 — 저장 아님, v2.799)
+  'POST /tools/vm-export.csv',      // VM 전체 정보 내려받기 — 라우트가 조건·행 수를 담은 감사 줄을 직접 남긴다(두 줄 방지, v2.799)
+  'POST /tools/vm-export.xlsx',     // 〃 엑셀
+  'POST /tools/host-export.xlsx',   // 호스트 · 클러스터 엑셀 — 라우트가 대상·묶음을 담은 감사 줄을 직접 남긴다(두 줄 방지, v2.802)
 ]);
 export function auditSkipped(method, urlPath) {
   return AUDIT_SKIP.has(`${method} ${String(urlPath || '').replace(/^\/api(?=\/)/, '')}`);

@@ -18,9 +18,9 @@ export function roleLabel(user) {
   return ROLE_LABEL[user.role] || String(user.role ?? '');
 }
 
-/** ⌘K 검색 버튼 문구 — 기능(특수 기능)·화면(탭)만 찾는다. VM 이름 검색은 Platform 탭의 검색창이다(여기서 약속하지 않는다). */
-export const SEARCH_PLACEHOLDER = '기능 · 화면 찾기';
-export const SEARCH_TITLE = '기능·화면 찾기 (⌘K / Ctrl+K)';
+/** ⌘K 검색 버튼 문구 — 기능(특수 기능)·탭(상단 메뉴)만 찾는다. VM 이름 검색은 Platform 탭의 검색창이다(여기서 약속하지 않는다). */
+export const SEARCH_PLACEHOLDER = '기능 · 탭 찾기';
+export const SEARCH_TITLE = '기능·탭 찾기 (⌘K / Ctrl+K)';
 
 /** 수집 시각을 헤더 한 줄에 붙일 짧은 표기(ko-KR 시각). 읽지 못하면 빈 문자열 — '—' 를 붙이지 않는다(값 자리가 아니라 꼬리). */
 export function generatedAtText(iso) {

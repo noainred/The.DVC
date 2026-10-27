@@ -21,15 +21,15 @@ import { snapMemo, sendCached } from '../util/snapCache.js';
 import { computeFinOps, loadFinopsConfig, saveFinopsConfig } from '../insights/finops.js';
 import { computePowerBreakdown } from '../insights/powerBreakdown.js';
 import { getDatacenterAssign, listDatacenters } from '../datacenter/store.js';
-import { getFleetInventory, fleetLiveKeys } from '../insights/fleetInventory.js';
+import { getFleetInventory, fleetGhostReport } from '../insights/fleetInventory.js'; // v2.783(점검 Q2 P-B3): prune 은 화면과 같은 유령 판정
 import { setFleetTag, pruneFleetTags, loadFleetTags, applyFleetExclude } from '../insights/fleetTags.js';
 import { setFleetAssign, setFleetAssignMany, applyFleetAssign, pruneFleetAssign, loadFleetAssign } from '../insights/fleetAssign.js';
 import { fleetRev } from '../insights/fleetRev.js';
 import { fleetPartialsSummary } from '../central/fleet.js'; // v2.607 LEFT2607-02
 import { loadRegistry, updateServer, assignVcenter } from '../idrac/registry.js';
 import { logAudit } from '../audit.js';
-import { detectAnomalies } from '../insights/anomaly.js';
-import { forecastCapacity } from '../insights/forecast.js';
+import { detectAnomalies, anomalyCfgArgs } from '../insights/anomaly.js';
+import { forecastCapacity, forecastCfgArgs } from '../insights/forecast.js';
 import { computeSecurityPosture } from '../insights/cve.js';
 import { buildTopology } from '../insights/topology.js';
 import { buildGraph } from '../insights/graph.js';
@@ -117,7 +117,9 @@ insightsRouter.get('/finops', async (req, res) => {
       // v2.733(C2-02): 읽지 못한 vCenter·끊긴 호스트의 vCenter 추정 전력은 '지금 값' 이 아니다 — 합산에서 빼고 개수로 밝힌다.
       const vcSkip = vcPowerSkipOf(scoped);
       let measured = filterMeasuredByMapping(applyFleetExclude(applyFleetAssign(await allMeasuredPower({ hosts: scoped.hosts, vcenterFirst: true, ...vcSkip }), validIds)), scoped);
-      if (scopeLimited) measured = keepMappedMeasured(measured, scoped);
+      // v2.785(GV P-B4): vCenter 를 고르면(전체 범위 계정 포함) 그 vCenter 에 귀속된 서버만 — 예전에는 범위 계정만 걸러, 전체 범위 계정의
+      //   ?vcenterId=X 가 다른 vCenter 서버 전력을 '(미매핑)' 으로 더한 전 함대 값이 됐다(형제 /power-breakdown 은 vcFilter 로 뺀다).
+      if (scopeLimited || String(req.query.vcenterId || '')) measured = keepMappedMeasured(measured, scoped);
       return { ...computeFinOps(scoped, measured), vcPowerSkipped: vcPowerSkippedReport(scoped, vcSkip) };
     });
     if (isAdminReq(req)) sendCached(req, res, key, payload);
@@ -274,20 +276,40 @@ insightsRouter.put('/fleet/assign-bulk', adminOnly, fleetFullScopeOnly, (req, re
 });
 
 // 유령 태그/소속 키 정리(관리자) — 현재 어느 '등록된' 서버/호스트와도 매칭 안 되는 잔재 키 제거.
-// liveKeys는 레지스트리(전원오프 포함)+OME 캐시+호스트에서 직접 산출(전력 DB 미경유) → 등록 서버 보호.
-// body.dryRun=true면 삭제하지 않고 제거 대상 수만 반환(미리보기).
+// v2.783(점검 Q2 P-B3 — 데이터 손실): ① 판정은 화면 요약과 같은 fleetGhostReport 하나(원격 수집 서버·OME·엣지·호스트 전부의 합집합).
+//   ② 출처를 하나라도 못 읽었으면(등록부 손상·OME 미수신·수집 서버 미수신·호스트 목록 모르는 vCenter·엣지 보류/만료) 지우지 않는다 —
+//      등록부 손상은 503(registryUnreadable), 그 밖은 409. 미리보기(dryRun)도 같은 판정(blocked·unreadable)과 지울 키 목록을 준다.
+//   ③ 실제 삭제는 **미리 본 키 목록(keys)** 을 받아 '그 목록 ∩ 지금도 유령' 만 지운다(확인창과 실제 삭제 사이에 바뀐 것을 지우지 않는다).
+//      목록 없는 요청(구버전 화면의 {})은 400 — 예전에는 그 요청이 전부를 지웠다.
+const PRUNE_KEYS_MAX = 5000;
 insightsRouter.post('/fleet/prune', adminOnly, fleetFullScopeOnly, (req, res) => {
   try {
-    const live = fleetLiveKeys(store.get());
-    if (req.body?.dryRun) {
-      const ghostT = Object.keys(loadFleetTags()).filter((k) => !live.has(k)).length;
-      const ghostA = Object.keys(loadFleetAssign()).filter((k) => !live.has(k)).length;
-      return res.json({ ok: true, dryRun: true, wouldRemoveTags: ghostT, wouldRemoveAssign: ghostA });
+    const rep = fleetGhostReport(store.get());
+    const blocked = rep.unreadable.length > 0;
+    const regBlocked = rep.unreadable.some((u) => u.registry);
+    const reason = blocked
+      ? `읽지 못한 출처가 있어 유령 키를 정리하지 않습니다(살아 있는 서버의 키를 지울 수 있습니다) — ${rep.unreadable.slice(0, 5).map((u) => u.reason).join(' · ')}${rep.unreadable.length > 5 ? ` 외 ${rep.unreadable.length - 5}건` : ''}`
+      : '';
+    const view = {
+      ghostKeys: rep.ghostKeys, wouldRemoveTags: rep.tags.length, wouldRemoveAssign: rep.assign.length,
+      keys: rep.keys.slice(0, PRUNE_KEYS_MAX), keysTotal: rep.keys.length, blocked,
+      unreadable: rep.unreadable.map(({ source, id, reason: r }) => ({ source, ...(id ? { id } : {}), reason: r })),
+    };
+    if (req.body?.dryRun) return res.json({ ok: true, dryRun: true, ...view, ...(blocked ? { reason } : {}) });
+    if (blocked) return res.status(regBlocked ? 503 : 409).json({ ok: false, ...view, reason, ...(regBlocked ? { registryUnreadable: true } : {}) });
+    const want = Array.isArray(req.body?.keys) ? req.body.keys : null;
+    if (!want) return res.status(400).json({ ok: false, reason: '정리할 키 목록(keys — 미리보기 결과)이 필요합니다. 화면을 새로 고친 뒤 다시 시도하세요.' });
+    const ghost = new Set(rep.keys);
+    const del = new Set();
+    for (const k of want.slice(0, PRUNE_KEYS_MAX)) {
+      if (typeof k === 'string' && ghost.has(k)) del.add(k); // 미리보기가 준 키 그대로(저장 키와 글자 단위로 같다)
     }
-    const tags = pruneFleetTags(live);
-    const assign = pruneFleetAssign(live);
-    logAudit({ user: req.user?.username, action: '플릿 유령 키 정리', target: `태그 ${tags} · 소속 ${assign}`, ip: req.ip || '' });
-    res.json({ ok: true, removedTags: tags, removedAssign: assign });
+    const keepOf = (obj) => new Set(Object.keys(obj || {}).filter((k) => !del.has(k)));
+    const tags = del.size ? pruneFleetTags(keepOf(loadFleetTags())) : 0;
+    const assign = del.size ? pruneFleetAssign(keepOf(loadFleetAssign())) : 0;
+    const skipped = Math.max(0, want.length - del.size); // 미리 본 뒤 유령이 아니게 된 키(또는 잘못된 값) — 지우지 않았다
+    logAudit({ user: req.user?.username, action: '플릿 유령 키 정리', target: `키 ${del.size} (태그 ${tags} · 소속 ${assign})`, detail: `${[...del].slice(0, 20).join(', ')}${del.size > 20 ? ` 외 ${del.size - 20}` : ''}${skipped ? ` · 건너뜀 ${skipped}` : ''}`, ip: req.ip || '' });
+    res.json({ ok: true, removedKeys: del.size, removedTags: tags, removedAssign: assign, skipped });
   } catch (e) { res.status(500).json({ ok: false, reason: e.message }); }
 });
 
@@ -295,7 +317,7 @@ insightsRouter.post('/fleet/prune', adminOnly, fleetFullScopeOnly, (req, res) =>
  * v2.689(I2): 이상 탐지·예측은 metrics DB 를 여러 번 훑는 가장 비싼 조회다. 두 가지를 막는다.
  *  ① 캐시 키에 `req.originalUrl` 전체를 쓰면 의미 없는 쿼리(`&_=난수`)만 바꿔도 single-flight·60초 기억을 우회해 매번 재계산한다
  *     → 키는 **계산이 실제로 읽는 인자를 클램프한 값**으로만 만들고, 계산에도 그 값을 넘긴다(키와 계산이 같은 값을 본다).
- *     클램프 식은 detectAnomalies·forecastCapacity 의 식과 같다(그 함수들이 다시 클램프해도 결과가 같다 — 멱등).
+ *     v2.769(R4-D2-06): 정규화는 계산 모듈의 함수 하나(anomalyCfgArgs·forecastCfgArgs)다 — 계산이 다시 정규화해도 결과가 같다(멱등).
  *  ② 키가 다른 계산도 **전역 동시 1건**으로 줄 세운다(진행 중 계산 뒤에 붙는다). 서로 다른 인자 수십 개가 동시에 들어와도
  *     DB 스캔이 겹치지 않는다. 같은 키의 동시 요청은 snapMemo 가 진행 중 Promise 에 합류시킨다.
  */
@@ -316,20 +338,22 @@ export function _insightsHeavyStats({ reset = false } = {}) {
   if (reset) _heavyPeak = _heavyActive;
   return r;
 }
-const clampNum = (v, lo, hi, dflt) => { const n = Number(v); return Number.isFinite(n) ? Math.max(lo, Math.min(hi, n)) : dflt; };
-/** 이상 탐지 인자(anomaly.js detectAnomalies 와 같은 클램프). */
-function anomalyArgs(q = {}) {
-  return { z: Math.max(2, Number(q.z) || 3.5), windowHours: clampNum(q.windowHours, 1, 168, 24), bucketMin: clampNum(q.bucketMin, 1, 1440, 10) };
+/*
+ * v2.769(점검 R4-D2-06): 인자 정규화는 계산 모듈의 함수(anomalyCfgArgs·forecastCfgArgs)를 그대로 쓴다 — 예전 사본은 z 상한·
+ *   minR2 클램프·정수화가 없어 `z=2.0001`… 이 캐시를 우회하고 직렬 대기열을 늘렸고, `?minR2=` 는 Number('')=0 으로 필터를 풀었다.
+ *   키는 정규화 뒤 값으로 만든다(같은 계산 = 같은 키).
+ */
+/** 이상 탐지 인자(anomaly.js detectAnomalies 와 같은 함수). */
+export function anomalyArgs(q = {}) {
+  return anomalyCfgArgs(q);
 }
-/** 예측 인자(forecast.js forecastCapacity 와 같은 클램프 — 버킷은 1시간 정배수). */
-function forecastArgs(q = {}) {
-  const days = Math.max(3, Math.min(1830, Number(q.days) || 14));
-  const bucketH = Math.max(1, Math.round(Math.max(60, Math.min(1440, Number(q.bucketMin) || 60)) / 60));
-  const out = { days, bucketMin: bucketH * 60 };
-  if (q.minR2 != null) out.minR2 = Number(q.minR2);
+/** 예측 인자(forecast.js forecastCapacity 와 같은 함수 — 버킷은 1시간 정배수). */
+export function forecastArgs(q = {}) {
+  const out = forecastCfgArgs(q);
   if (q.vcenterId) out.vcenterId = String(q.vcenterId);
   return out;
 }
+
 const argsKey = (o) => Object.keys(o).sort().map((k) => `${k}=${o[k]}`).join('&');
 
 // --- AI 이상탐지 ---

@@ -10,6 +10,7 @@ import path from 'node:path';
 import { config } from '../config.js';
 import { ipBlockReason, ssrfBlockReason, ssrfBlockReasonResolved } from '../util/ssrfBlock.js';
 import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
+import { makeLoadError, corruptOnlyReason, autoWriteRefusal, summarizeRegistryError } from '../util/registryCore.js'; // v2.771(점검 R6-F4-2): 형제 등록부와 같은 '읽지 못함' 판정
 import { openSecretsDeep, sealSecretsDeep } from '../security/secretVault.js'; // 자격증명 저장 방식(평문/암호화, v2.296) — 로드 시 복호·저장 시 봉인
 import { bumpFleetRev } from '../insights/fleetRev.js';
 import { readJsonCapped } from '../util/readCapped.js'; // v2.604 CEN2604-01: 자기등록 검증 ping 응답 크기 상한
@@ -52,11 +53,41 @@ function dedupeByIdCase(list) {
   return { list: out, changed };
 }
 
+/**
+ * v2.771(점검 R6-F4-2): 등록부 파일을 **읽지 못했다**는 사실(storage·sanswitch·pdu·cvp·idrac 와 같은 `util/registryCore.js` 판정).
+ *   예전에는 손상 → preserveCorrupt → 빈 목록 뒤에 아무 표지가 없어 ① 엣지 자기등록(/register-collector — 부팅·6시간마다)이 그 빈 목록 위에
+ *   자기 항목 하나만 저장해 관리자 등록(토큰·vCenter 매핑)이 보존본에만 남은 채 굳었고(재현) ② puller 의 clearStaleRemote 가 빈 집합으로
+ *   **전 수집 서버의 원격 전력·상태를 지웠고** ③ /link-check-config 가 엣지↔엣지 링크를 빈 목록으로 내려보냈다.
+ *   이 등록부는 캐시 없이 매번 읽으므로 표지는 읽을 때마다 다시 정한다: 정상 파싱 → 해제 · 파싱 실패 → 설정 ·
+ *   파일 없음 → registryLoadError() 가 '보존본만 남음' 이면 설정, 보존본도 없으면(첫 설치) 해제.
+ *   ⚠ 파일이 없을 때의 보존본 판정(설정 폴더 목록)은 loadCollectors 에서 하지 않는다 — 요청·폴러마다 불리고 엣지 노드에는 파일이 없는 것이 정상이다.
+ */
+const loadErr = makeLoadError();
+/** @returns {null|{at:number, reason:string}} 못 읽었으면 사유(원문 — 밖으로 낼 때는 summarizeRegistryError). */
+export function registryLoadError() {
+  loadCollectors();
+  let exists = false;
+  try { exists = fs.existsSync(FILE); } catch { exists = false; }
+  if (!exists) {
+    // 첫 설치(파일·보존본 둘 다 없음)는 오류가 아니다 — 자기등록이 막히면 안 된다. 보존본만 남았으면 재시작 뒤에도 '못 읽음'.
+    if (corruptOnlyReason(FILE)) loadErr.checkCorruptOnly(FILE); else loadErr.clear();
+  }
+  return loadErr.get();
+}
+/** 화면·응답용 요약(원문 없음 — 등록부가 토큰 파일이라 JSON.parse 오류 조각을 싣지 않는다). 읽을 수 있으면 null. */
+export function registryLoadErrorSummary() {
+  const e = registryLoadError();
+  if (!e) return null;
+  const s = summarizeRegistryError(e);
+  return { at: Number.isFinite(e.at) ? e.at : null, code: s?.code || null, text: s?.text || '사유 미상' };
+}
+
 export function loadCollectors() {
   if (!fs.existsSync(FILE)) return [];
   try {
     const parsed = JSON.parse(fs.readFileSync(FILE, 'utf8'));
     const arr = openSecretsDeep(Array.isArray(parsed?.collectors) ? parsed.collectors : []); // v2.296 토큰 복호(메모리 평문)
+    loadErr.clear(); // v2.771(R6-F4-2): 정상으로 읽었다(사람이 보존본을 되돌린 경우 포함)
     // 대소문자 중복을 로드 시 자동 정리(최초 1회 병합·영속화, 이후엔 중복이 없어 재저장 안 함).
     const { list, changed } = dedupeByIdCase(arr);
     if (changed) { try { save(list); } catch { /* best effort — 다음 로드에서 재시도 */ } }
@@ -65,8 +96,14 @@ export function loadCollectors() {
     // save() 주석대로 손상 시 다음 저장이 빈 목록으로 덮어써 전 수집서버·토큰이 유실된다 →
     // 손상본을 .corrupt로 보존(자기등록으로 쓰기 빈도가 높아 노출 창이 큰 파일).
     preserveCorrupt(FILE, e.message);
+    loadErr.set(e); // v2.771(R6-F4-2): 조용한 빈 목록 금지 — 자동 저장 거절·clearStaleRemote 건너뜀·링크 설정 503 의 근거
     return [];
   }
+}
+
+/** v2.771(R6-F4-2): 사람이 아닌 경로(엣지 자기등록·배포 후 자동 등록·데모 시드)의 저장 거절. 읽을 수 있으면 null. */
+function collectorsAutoWriteRefusal() {
+  return autoWriteRefusal(registryLoadError(), '수집 서버 등록부(collectors.json)');
 }
 
 function save(list) {
@@ -75,6 +112,9 @@ function save(list) {
   // []를 반환하고 다음 저장이 빈 목록으로 덮어써 전 수집서버·토큰이 영구 유실된다(자기등록으로
   // 쓰기 빈도가 늘어 노출 창이 커짐). atomicWrite(임시파일+rename)로 방지.
   atomicWriteFileSync(FILE, JSON.stringify(sealSecretsDeep({ collectors: list }), null, 2), { mode: 0o600 }); // 암호화 모드면 token 봉인
+  // v2.771(R6-F4-2): 저장이 성공하면 그때부터는 관리자가 다시 만든 목록이 진실이다(형제 등록부와 같다). 사람이 아닌 경로는
+  //   읽지 못한 동안 여기까지 오지 않는다(upsertCollectorFromAgent·markSelfRegVerification·관리자 아닌 addCollector 가 먼저 거절).
+  loadErr.clear();
   bumpFleetRev(); // 수집서버 vcenterId 매핑 변경 → fleet/finops 캐시 즉시 무효화
 }
 
@@ -251,6 +291,9 @@ function rejectResult(err, code, body, ctx) {
 // managed=true: 관리자가 UI에서 직접 등록/수정한 항목(=수동 고정). 엣지 자기등록이 URL/토큰을
 // 덮어쓰지 않는다(NAT/포트포워딩으로 관리자가 URL·토큰을 실제 값과 다르게 지정하는 경우 보존).
 export function addCollector(body, { managed = false, transport = null } = {}) {
+  // v2.771(R6-F4-2): 관리자 등록 화면(managed:true)이 아닌 추가(배포 성공 후 자동 등록 agent/autoRegister.js · 데모 시드)는 등록부를
+  //   읽지 못한 동안 저장하지 않는다 — 손상된 빈 목록 위에 한 항목만 저장하면 표지가 지워지고 나머지 등록은 보존본에만 남는다.
+  if (!managed) { const refusal = collectorsAutoWriteRefusal(); if (refusal) return refusal; }
   const list = loadCollectors();
   const [entry, err, , code] = normalize(body, null, transport);
   if (err) return rejectResult(err, code, body, transport);
@@ -287,6 +330,11 @@ export function updateCollector(id, body, { managed, transport = null } = {}) {
  *   다음 자기등록 주기에 원복되던 버그 방지. (관리자 편집이 곧 '이 값으로 고정' 의사표시)
  */
 export function upsertCollectorFromAgent({ name, url, token, datacenter = '', unverified = false, shared = false } = {}) {
+  // v2.771(점검 R6-F4-2 — 재현): 등록부를 읽지 못한 동안 자기등록은 저장하지 않는다(내부 updateCollector·addCollector 호출 전).
+  //   예전에는 손상 직후 빈 목록 위에 이 엣지 항목 하나만 저장해 관리자 등록(토큰·vcenterId)이 보존본에만 남았고, 파일이 다시 생겨
+  //   재시작 뒤에도 표지가 없었다. 표지를 지우는 것은 관리자 저장(설정 › 수집 서버)뿐이다. 첫 설치(파일·보존본 모두 없음)는 막지 않는다.
+  const refusal = collectorsAutoWriteRefusal();
+  if (refusal) return refusal;
   // S-09: 자기등록은 평문 HTTP 예외를 스스로 만들 수 없다 — 같은 URL 갱신·운영자 허용 목록만 받는다.
   const transport = { source: 'self-register' };
   const id = String(name || '').trim();
@@ -324,6 +372,7 @@ export const SELF_REG_UNVERIFIED_MAX = Math.max(1, Number(process.env.CENTRAL_SE
  * 을 우회하던 것을 막는다. 검증에 성공하면 표식을 지운다. 이 표식이 없는 옛 항목은 예전처럼 '아는 엣지' 다(호환).
  */
 function markSelfRegVerification(id, unverified) {
+  if (collectorsAutoWriteRefusal()) return; // v2.771(R6-F4-2): 자동 경로 — 읽지 못한 등록부에 쓰지 않는다
   const list = loadCollectors();
   const idx = list.findIndex((c) => c.id === id);
   if (idx === -1) return;

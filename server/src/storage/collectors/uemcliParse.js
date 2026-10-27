@@ -290,3 +290,60 @@ export function checkSpaceIdentity({ totalBytes, usedBytes, freeBytes, prealloca
   const diff = t - (u + f + p);
   return { ok: Math.abs(diff) <= 1024, checked: true, diff };
 }
+
+/**
+ * v2.789 — `uemcli /stor/prov/luns/lun show -detail` → LUN 배열(하위 항목 — 사용자 요청 "LUN·파일시스템까지").
+ *
+ * ⚠⚠ **이 장비의 이 출력은 본 적이 없다**(정직 기록). 키 이름은 Dell Unity Unisphere CLI 사용자 가이드의 예시
+ *   (`Size = 2199023255552 (2T)` · `Current allocation = …`)를 근거로 했고, 형식 규칙(` = ` 구분 · `N:` 레코드 경계 ·
+ *   앞의 정수 바이트)은 실장비 출력으로 확인된 풀 출력과 같다고 **가정**했다. 그래서:
+ *   · 키를 못 찾으면 그 값은 **null** 이다(0 을 만들지 않는다) — 사용률도 null 이 된다.
+ *   · 레코드는 있는데 크기를 하나도 못 읽었으면 호출부가 'unparsed' 로 밝힌다(`resourceProbe`) — 원문은 CLI 원문 상세에 있다.
+ * '사용량' 은 **풀에서 할당된 양**(`Current allocation`)이다 — 호스트가 본 사용량이 아니다(usedSource 'allocation').
+ * @param {string} text
+ */
+export function parseLuns(text) {
+  const out = [];
+  for (const r of parseUemcli(text)) {
+    const name = String(r.Name || '').trim();
+    const id = String(r.ID || '').trim();
+    const size = toBytes(r.Size);
+    if (!name && !id) continue;
+    if (size == null && r['Current allocation'] == null && r['Storage pool'] == null) continue;   // LUN 으로 볼 근거가 없다
+    const alloc = toBytes(r['Current allocation']);
+    out.push({
+      kind: 'lun', id: id || null, name: name || id,
+      pool: String(r['Storage pool'] || r['Storage pool ID'] || '').trim() || null,
+      totalBytes: size, usedBytes: alloc, usedSource: alloc != null ? 'allocation' : null,
+      health: healthOf(r['Health state']) || null,
+    });
+  }
+  return out;
+}
+
+/**
+ * v2.789 — `uemcli /stor/prov/fs show -detail` → 파일시스템 배열.
+ * ⚠⚠ 위 `parseLuns` 와 같은 한계 — 이 장비의 출력을 본 적이 없다. 키는 가이드 예시(`Size` · `Size used`)가 근거다.
+ * '사용량' 은 파일시스템이 보고한 사용량(`Size used`)이다(usedSource 'fs').
+ * @param {string} text
+ */
+export function parseFilesystems(text) {
+  const out = [];
+  for (const r of parseUemcli(text)) {
+    const name = String(r.Name || '').trim();
+    // `ID = res_1`(스토리지 리소스) 와 `File system = fs_1` 이 함께 온다 — 이력 키는 리소스 ID 를 쓴다.
+    const id = String(r.ID || r['File system'] || '').trim();
+    const size = toBytes(r.Size);
+    if (!name && !id) continue;
+    if (size == null && r['Size used'] == null && r.Protocol == null) continue;   // 파일시스템으로 볼 근거가 없다
+    const used = toBytes(r['Size used']);
+    out.push({
+      kind: 'fs', id: id || null, name: name || id,
+      pool: String(r['Storage pool'] || r['Storage pool ID'] || '').trim() || null,
+      totalBytes: size, usedBytes: used, usedSource: used != null ? 'fs' : null,
+      health: healthOf(r['Health state']) || null,
+      protocol: String(r.Protocol || '').trim() || null,
+    });
+  }
+  return out;
+}

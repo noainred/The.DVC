@@ -52,6 +52,9 @@ function hostKeyInfo(key, lookups, port) {
 const t = (v) => String(v ?? '').trim();
 const ms = (t0) => Date.now() - t0;
 
+/** v2.785(GE E-B3): 협상 전에 상대가 닫았을 때의 설명(접속 거부·방화벽·인증서와 조치가 다르다). */
+const SSH_CLOSED_EARLY = 'SSH 협상 전에 상대가 연결을 닫았습니다(sshd MaxStartups 초과·접근 제한(hosts.deny)·중계 장비 가능)';
+
 /**
  * SSH — **협상까지**. 반환의 `banner`·`kex`·`serverKey` 가 이슈 분석 자료다.
  * @param {string} ip   DNS 단계가 검사한 주소
@@ -101,10 +104,30 @@ export async function stepSsh(ip, port, { timeoutMs = 12_000, host = '' } = {}) 
        *   algorithm` 은 구형 장비의 알고리즘 문제이고 조치가 정반대다(자격증명이 아니라 설정).
        */
       const kexBad = /no matching|handshake failed|unable to (?:verify|exchange)/i.test(msg);
+      /*
+       * v2.785(GE E-B3): ssh2 의 'Connection lost before handshake' 는 **협상 전에 상대가 TCP 를 닫은 것**이다
+       *   (sshd MaxStartups 초과·hosts.deny/TCP wrapper·중계 장비). phases.js failKindOfCode 의 /handshake/i 에 맡기면
+       *   'tls-fail' 이 되어 인증서 조치를 안내한다(조치가 정반대). phases.js 는 다른 단계·테스트가 같이 쓰므로 여기서만 가른다.
+       */
+      const lostEarly = !kexBad && /connection lost before handshake/i.test(msg);
       fin({
         ok: false,
-        failKind: kexBad ? 'ssh-kex' : failKindOfCode(e?.code, msg),
-        error: msg.slice(0, 200),
+        failKind: kexBad ? 'ssh-kex' : lostEarly ? 'reset' : failKindOfCode(e?.code, msg),
+        error: (lostEarly ? `${msg} — ${SSH_CLOSED_EARLY}` : msg).slice(0, 200),
+        ...(ident ? { banner: ident.slice(0, 200) } : {}),
+      });
+    });
+    /*
+     * v2.785(GE E-B3): 배너를 보낸 뒤 닫는 장비는 ssh2 가 error 없이 end → close 만 낸다 — 이 처리기가 없으면
+     *   시한(기본 12초)을 다 기다린 뒤 'timeout'(방화벽 안내)이 됐다. 협상 성공(fin 이 conn.end 를 부른다)·error 뒤의
+     *   close 는 `done` 가드가 무시한다.
+     */
+    conn.on('close', () => {
+      clearTimeout(timer);
+      fin({
+        ok: false,
+        failKind: 'reset',
+        error: SSH_CLOSED_EARLY,
         ...(ident ? { banner: ident.slice(0, 200) } : {}),
       });
     });
@@ -135,13 +158,34 @@ export function stepSmtp(ip, port, { timeoutMs = 12_000, secure = false, servern
     const sock = secure
       ? tls.connect({ host: ip, port, servername: t(servername) || undefined, rejectUnauthorized: false, family: net.isIPv6(ip) ? 6 : 4 })
       : net.connect({ host: ip, port, family: net.isIPv6(ip) ? 6 : 4 });
-    const fin = (r) => { if (done) return; done = true; try { sock.destroy(); } catch { /* */ } resolve({ ...r, ms: ms(t0) }); };
-    sock.setTimeout(timeoutMs, () => fin({
+    /*
+     * v2.769(점검 R4-D3-1): 예전에는 시한이 `sock.setTimeout`(소켓 **비활동** 타이머)뿐이고 'close'/'end' 처리기가 없었다.
+     *   상대가 응답 없이 FIN 으로 닫으면(배너 전·EHLO 뒤·개행 없는 부분 배너) 소켓이 파괴되며 비활동 타이머도 해제돼
+     *   Promise 가 **영원히** 끝나지 않았고 → 통신 점검 폴러의 재진입 가드(running)가 영구 true(중앙·엣지 모두 점검 정지).
+     *   svcmon/checker.js banner() 의 v2.279 CRITICAL 과 같은 기전이다. 그래서 ① 'close' 에서 **받은 것으로** 판정하고
+     *   ② 소켓 이벤트와 무관한 실제 setTimeout 하드 시한을 둔다(어느 쪽이 먼저든 fin 은 한 번만, 타이머는 fin 에서 해제).
+     */
+    let hard = null;
+    const fin = (r) => { if (done) return; done = true; if (hard) clearTimeout(hard); try { sock.destroy(); } catch { /* */ } resolve({ ...r, ms: ms(t0) }); };
+    const timeoutResult = () => ({
       ok: false, failKind: 'timeout',
       error: `SMTP 응답 타임아웃(${Math.round(timeoutMs / 1000)}초${phase === 'banner' ? ' — 220 배너를 받지 못했습니다' : ' — EHLO 응답을 받지 못했습니다'})`,
       ...(banner ? { banner } : {}),
-    }));
+    });
+    sock.setTimeout(timeoutMs, () => fin(timeoutResult()));
+    hard = setTimeout(() => fin(timeoutResult()), timeoutMs + 1_000);
     sock.on('error', (e) => fin({ ok: false, failKind: failKindOfCode(e?.code, e?.message), error: `${e?.code || ''} ${e?.message || ''}`.trim().slice(0, 200) }));
+    sock.once('close', () => {
+      if (done) return;
+      // 배너 단계: 받은 조각이 있으면 그 첫 줄을 결과에 싣는다(개행이 없었을 뿐). 220 이어도 EHLO 전에 끊었으니 실패다.
+      const got = buf.split(/\r?\n/)[0].slice(0, 200);
+      if (phase === 'banner') {
+        return fin(got
+          ? { ok: false, failKind: 'smtp-refused', error: `SMTP 서버가 대화 전에 연결을 닫았습니다(받은 배너: ${got.slice(0, 120)})`, banner: got }
+          : { ok: false, failKind: 'smtp-refused', error: 'SMTP 서버가 220 배너 없이 연결을 닫았습니다(포트 앞 LB·포트포워딩에 백엔드가 없거나 접속 거부 정책일 수 있습니다).' });
+      }
+      return fin({ ok: false, failKind: 'smtp-refused', error: 'SMTP 서버가 EHLO 에 응답하지 않고 연결을 닫았습니다.', banner, ...(buf ? { ehlo: buf.slice(0, 600) } : {}) });
+    });
     const onLine = () => {
       if (phase === 'banner') {
         const line = buf.split(/\r?\n/)[0] || '';

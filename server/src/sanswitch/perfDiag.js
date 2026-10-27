@@ -17,7 +17,7 @@
  * ── 역할 분리 ─────────────────────────────────────────────────────────────────
  * 이 모듈은 **판정만** 한다(`kind` + 판정 근거 `facts`). 사람이 읽는 문구는 웹의 순수 모듈
  * `web/src/views/tools/sanPerfDiagText.js` 가 `kind` 로 만든다 — 판정 한 곳, 문구 한 곳
- * (`components/accessDeniedText.js`·`version_4/loadState.js` 와 같은 관례).
+ * (`components/accessDeniedText.js`·`components/loadState.js` 와 같은 관례).
  *
  * ⚠ `waiting` 은 '기다리면 채워지는가' 다. pending 과 unreachable 을 합치지 말라는 v2.509 규칙과
  *   같은 이유로, 이 값을 대충 true 로 두면 화면이 "기다리세요" 라고 말해 놓고 영원히 안 채워진다.

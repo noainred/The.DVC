@@ -95,6 +95,17 @@ function sanitizeEdgePush(e) {
   return { total: num(e.total) ?? 0, ok: num(e.ok) ?? 0, failed };
 }
 
+/** v2.775: 수집 서버 push 요약 정제(manager.summarizeCollectorPush 모양) — 이름·사유는 글자만, 64건 상한. */
+function sanitizeCollectorPush(e) {
+  if (!e || typeof e !== 'object') return null;
+  const items = Array.isArray(e.items) ? e.items.filter((f) => f && typeof f === 'object').slice(0, 64)
+    .map((f) => ({ id: txt(f.id, 128) || '', name: txt(f.name, 128) || '', ok: f.ok === true, status: num(f.status), version: ver(f.version) || '', reason: txt(f.reason, 300) || '' })) : [];
+  const out = { total: num(e.total) ?? 0, ok: num(e.ok) ?? 0, items };
+  const sk = txt(e.skipped, 300);
+  if (sk) out.skipped = sk;
+  return out;
+}
+
 /** 적용 결과(manager.apply · 엣지/수집기 push 수신) 정제 — 쓸 때·읽을 때 공용. */
 export function sanitizeResult(r) {
   if (!r || typeof r !== 'object') return null;
@@ -114,6 +125,8 @@ export function sanitizeResult(r) {
   }
   const ep = sanitizeEdgePush(r.edgePush);
   if (ep) out.edgePush = ep;
+  const cp = sanitizeCollectorPush(r.collectorPush);
+  if (cp) out.collectorPush = cp;
   if (r.restored === true) out.restored = true;
   for (const k of Object.keys(out)) if (out[k] === undefined || out[k] === null) delete out[k];
   out.at = at; out.ok = bool(r.ok); // 핵심 필드는 null 이어도 남긴다(위 정리에서 지우지 않게)

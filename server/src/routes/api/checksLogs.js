@@ -21,6 +21,7 @@ import { getAllGpuGuestDiag } from '../../central/gpuGuestDiag.js';
 import zlib from 'node:zlib';
 import { createYielder } from '../../util/timeSlice.js';   // v2.742(DB-03): 필터 내보내기 조각 사이 시간 기준 양보
 import { todayStamp } from "../../util/dayKey.js";
+import { waitDrain } from '../../util/waitDrain.js'; // v2.783(점검 Q5): 공용 백프레셔 대기(drain·close·error 중 먼저 — 리스너 전부 뗀다)
 // v2.643: CSV·텍스트 가져오기/내보내기는 관리자 이상 + 'data.csv' 권한(super_admin 항상, admin 은 권한 설정에서 끌 수 있다).
 const csvPerm = requirePerm('data.csv');
 // v2.732(B4-01): /tools/vclogs/sources — 담당 엣지를 모르는 site vCenter 의 표지(이름을 지어내지 않는다). 아래 라우트 주석 참조.
@@ -279,7 +280,9 @@ api.get('/tools/vmware-config', requirePerm('tools'), csvPermIfDownload, async (
         if (res.destroyed) { gzip.destroy(); return undefined; }   // 클라이언트 중단 시 즉시 정지
         if (!gzip.write(json.slice(i, i + CHUNK))) {
           // drain 또는 연결 종료 중 먼저 오는 쪽을 기다린다(abort 시 영원히 기다리지 않도록).
-          await new Promise((r) => { gzip.once('drain', r); res.once('close', r); });
+          // v2.783(점검 Q5 — O-B4 형제): 예전 `gzip.once('drain'); res.once('close')` 는 drain 이 먼저 오면 res 'close' 리스너가 조각마다 남았다.
+          //   공용 waitDrain 은 먼저 온 쪽 하나로 끝내고 건 리스너를 전부 뗀다. 끊겼으면(false) gzip 을 버리고 빠져나간다.
+          if (!(await waitDrain(gzip, res))) { gzip.destroy(); return undefined; }
         }
       }
       gzip.end();
@@ -423,7 +426,10 @@ api.get('/tools/vclogs/export.csv', csvPerm, requirePerm('tools'), async (req, r
       onRows: async (rows) => {
         if (res.destroyed) return false; // 클라이언트 중단 시 즉시 종료(불필요한 조회 방지)
         const ok = res.write(rows.map((x) => [new Date(x.ts).toISOString(), x.vcenterId, x.severity, x.type, x.user, x.entity, x.message].map(esc).join(',')).join('\n') + '\n');
-        if (!ok) await new Promise((resolve) => res.once('drain', resolve)); // 소켓 백프레셔(느린 클라이언트에 수십 MB 버퍼링 방지)
+        // 소켓 백프레셔(느린 클라이언트에 수십 MB 버퍼링 방지).
+        // v2.783(점검 Q5): drain **또는 끊김** — 예전 drain 만 기다리면 백프레셔 중 끊긴 클라이언트에서 이 요청이 영원히 멈췄다.
+        //   끊겼으면 false 를 돌려 exportLogPages 가 aborted 로 끝내게 한다.
+        if (!ok && !(await waitDrain(res))) return false;
         return true;
       },
     });

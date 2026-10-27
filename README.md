@@ -68,8 +68,8 @@ Unity·XtremIO·VMAX/PowerMax·VPLEX/Metro Node, v2.302+) · VM 복제(백업식
 ### 인프라 운영
 - **NSX** — NSX-T/4.x 매니저별 게이트웨이(T0/T1)·세그먼트(Overlay/VLAN, 연결 VM 포트 수)·분산방화벽(DFW, 허용/차단·로깅)·보안그룹(**라이브 멤버 조회**).
 - **스토리지 어레이 모니터링 (v2.302~2.326)** — 글로벌 법인의 물리 스토리지를 **엣지 현지 수집 → 중앙 집계**로 통합 조회. 수집기 카탈로그 8종 전체 구현: **PowerScale/Isilon**(SSH `isi status` 파싱이 기본 + OneFS API 39개 영역 선택) · **PowerStore · Unity · XtremIO · VPLEX/Metro Node**(REST 또는 SSH CLI — 장비별 선택: pstcli·uemcli·xmcli·vplexcli) · **VMAX/PowerMax**(Unisphere REST 전용, 기본 8443). 용량(HDD/SSD 풀 분리)·노드별 상세(IP·상태·처리량)·Critical Events·버전을 수집해 SQLite 시계열로 저장, 장비 상세에 **용량 추이 그래프**(v2.318). 장비 CSV 가져오기/내보내기(비밀번호 포함 내보내기 선택 + 가져오기 드라이런 검증, v2.317), 수집 방식(SSH/API) 표시, 전체 새로고침 + **수집 작업 로그 패널**(진행중/완료, v2.315), 실패 사유 표시.
-- **VM 복제(백업식) (v2.299)** — vCenter별 VM 지정 → 스냅샷 시점 무중단 클론. **스케줄 정기 복제**·대상 데이터스토어/NFS 선택·**최근 N개 보존**(오래된 사본 자동 정리)·Platform 트리에 Clone/veeamed 배지.
-- **VM 전체 정보 CSV (v2.275·2.278)** — 선택 vCenter 모든 VM 을 **85+ 컬럼**(호스트·클러스터/CPU·코어/메모리/NIC·MAC·IP/디스크 1~7 슬롯별 용량·타입·데이터스토어·파일/게스트 파티션/스냅샷/Tools/UUID 등)으로 내보내기.
+- **VM 복제(백업식) (v2.299)** — vCenter별 VM 지정 → 스냅샷 시점 무중단 클론. **스케줄 정기 복제**·대상 데이터스토어/NFS 선택·**최근 N개 보존**(오래된 사본 자동 정리)·Platform 트리에 Clone 배지(Veeam 표시는 'Veeam 백업 VM 표시' — Veeam 서버 연동 배지 + vCenter 스냅샷 기준 📸 점선 배지. v2.753 에 VM 메모 휴리스틱 veeamed 는 없앴다).
+- **VM 전체 정보 내보내기 (v2.275·2.278 → v2.799)** — 선택 vCenter 의 VM 을 **필요한 항목만 골라** CSV · 엑셀(데이터 · 읽는 법 시트)로 내보내기. 80여 항목(호스트·클러스터/CPU·코어/메모리/NIC·MAC·IP·DNS/디스크 1~7 슬롯/게스트 파티션·파일 시스템/스냅샷/Tools/UUID · 태그·사용자 지정 속성 · CD-ROM·통합 필요 등 장치 위생) · 빠른 조합 6종(‘예전 CSV 그대로’ = 예전 100열) · 내 저장값(기본값·1~5칸) · 출처 표시(항상·캐시·실시간) · 엣지 위임 vCenter 는 구성 캐시·게스트 디스크 수집으로 채움(실시간 전용 칸은 ‘수집 안 됨’).
 - **데이터스토어 브라우즈 (v2.276)** — 데이터스토어 클릭 시 할당된 VM 과 실제 파일 목록(크기·유형·수정시각).
 - **파트 인벤토리 (v2.328~2.330, 서버 분석 내)** — iDRAC Redfish 로 물리 서버의 전체 하드웨어 파트(CPU·DIMM·디스크·NIC·PSU 등)를 수집·필터·드릴다운. 장착 서버 목록에 호스트 IP·호스트네임 병기.
 - **베어메탈 스토리지 (v2.340~2.341)** — 하이퍼바이저 밖 물리 서버의 로컬 디스크 용량을 **SSH(df)** 로 주기 수집(마운트 포인트 복수 지정·사용자 지정 주기). 서버는 **최대 3개 그룹** 소속 가능, 서버/그룹/전체 합산(총·사용·가용). 중앙에서 직접 접속 불가한 서버는 **엣지 위임(중앙→엣지 PUSH + claim→ack)** 으로 점검. 서버 목록 CSV 가져오기/내보내기(드라이런 검증 → 덮어쓰기 확인).
@@ -324,7 +324,7 @@ git 소스로 실행하면 `CONFIG_DIR` 기본값이 `server/config` 라 이 파
 | `GET/POST/DELETE /alarm-mutes` `GET/PUT /ui-settings` `POST /search/nl` | 음소거 · UI설정 · 자연어검색 |
 
 ### 특수기능 `/api/tools/*`
-`gpu`(+`/history`,`/vms`), `esxi-temp`(+`/history`), `capacity`, `capacity-forecast`, `waste`, `thin-vms`, `guest-os`, `hba`, `licenses`, **`license-expiry`**(vCenter+NSX+Horizon 만료일), `esxi`, `solutions`, `hardware`, `vmtools`, `snapshots`, `duplicate-ips`, `vm-finder`(POST), `ipam`(+`/subnets`,`/sheet`,`/annotation`,`.xlsx`,`.csv`), `deep-search`(POST), `ip-ping`, `service-check`, `network-check`, `vmware-config`, `vclogs`(+`/export.csv`,`/federate`,`/sources`), **`storage`**(+`/devices`,`/devices/import`,`/collect-all`,`/activity` — 스토리지 어레이 모니터링), **`vm-clone`**(+`/jobs`,`/jobs/:id/run`,`/badges` — 백업식 복제), **`vm-track`**(+`/changes`,`/ds-changes`,`/ds-list`,`/ds-series`,`/ds-series-all`,`/ds-top`,`/ds-change-log`,`/ds-pivot`,`/snapshot` — VM 수량·데이터스토어 사용량 추이, v2.345~2.356), **`bm-storage`**(+`/servers`,`/settings`,`/collect`,`/import`,`/export.csv` — 베어메탈 스토리지, 관리자), **`rightsize`**(자원 축소 근거 리포트 — CPU/메모리 실사용 통계·권장 사양, `?days=7|30|90|180|365`, v2.445+), **`guest-disk`**(+`/vm/:id`,`/export.csv`,`/status`,`/run` — 게스트 OS 디스크 할당/사용량·회수 후보, 엣지 push 수집, v2.466+), **`sanswitch`**(SAN 스위치 포트·처리량, v2.410+), **`pdu`**(PDU 정보, v2.4xx), **`credentials`**(통합 계정 관리 — 비밀 값은 어떤 응답에도 미포함, v2.419), **`rma`**(원격 명령 실행 — 프리셋 카탈로그, v2.416), **`relaytopo`**(중계 토폴로지/HAProxy 구성, admin 전용 렌더, v2.431), **`relaycheck`**(HAProxy 경로 점검 — 비-admin 은 대상 IP·포트 마스킹, v2.478), **`serial-lookup`**, **`secret-scan`**(평문 자격증명 점검), **`threats`**(위협 탐지), **`vm-export`**(VM 전체 정보 CSV), **`report`**(일일 헬스체크 리포트), **`insights`**
+`gpu`(+`/history`,`/vms`), `esxi-temp`(+`/history`), `capacity`, `capacity-forecast`, `waste`, `thin-vms`, `guest-os`, `hba`, `licenses`, **`license-expiry`**(vCenter+NSX+Horizon 만료일), `esxi`, `solutions`, `hardware`, `vmtools`, `snapshots`, `duplicate-ips`, `vm-finder`(POST), `ipam`(+`/subnets`,`/sheet`,`/annotation`,`.xlsx`,`.csv`), `deep-search`(POST), `ip-ping`, `service-check`, `network-check`, `vmware-config`, `vclogs`(+`/export.csv`,`/federate`,`/sources`), **`storage`**(+`/devices`,`/devices/import`,`/collect-all`,`/activity` — 스토리지 어레이 모니터링), **`vm-clone`**(+`/jobs`,`/jobs/:id/run`,`/badges` — 백업식 복제), **`vm-track`**(+`/changes`,`/ds-changes`,`/ds-list`,`/ds-series`,`/ds-series-all`,`/ds-top`,`/ds-change-log`,`/ds-pivot`,`/snapshot` — VM 수량·데이터스토어 사용량 추이, v2.345~2.356), **`bm-storage`**(+`/servers`,`/settings`,`/collect`,`/import`,`/export.csv` — 베어메탈 스토리지, 관리자), **`rightsize`**(자원 축소 근거 리포트 — CPU/메모리 실사용 통계·권장 사양, `?days=7|30|90|180|365`, v2.445+), **`guest-disk`**(+`/vm/:id`,`/export.csv`,`/status`,`/run` — 게스트 OS 디스크 할당/사용량·회수 후보, 엣지 push 수집, v2.466+), **`sanswitch`**(SAN 스위치 포트·처리량, v2.410+), **`pdu`**(PDU 정보, v2.4xx), **`credentials`**(통합 계정 관리 — 비밀 값은 어떤 응답에도 미포함, v2.419), **`rma`**(원격 명령 실행 — 프리셋 카탈로그, v2.416), **`relaytopo`**(중계 토폴로지/HAProxy 구성, admin 전용 렌더, v2.431), **`relaycheck`**(HAProxy 경로 점검 — 비-admin 은 대상 IP·포트 마스킹, v2.478), **`serial-lookup`**, **`secret-scan`**(평문 자격증명 점검), **`threats`**(위협 탐지), **`vm-export`**(VM 전체 정보 내보내기 — `/catalog`·`/preview`·`.csv`·`.xlsx`·`/prefs`), **`report`**(일일 헬스체크 리포트), **`insights`**
 
 > **v2.478+: `/api/tools/*` 는 조회(GET)까지 `tools` 기능 권한 게이트**입니다(감사 S5 — 예전엔 capacity/waste/rightsize/guest-disk/vclogs/hardware/gpu 등 조회가 무게이트라 `tools` 권한이 없는 viewer 도 curl 로 내려받을 수 있었음). 화면에서 403 은 공용 `ErrorBox` 가 `AccessDenied` 안내로 바꿔 보여줍니다.
 > 상태변경(POST/PUT/DELETE) 라우트는 **기능 권한(`requirePerm`)** 으로 보호됩니다(v2.196+) — IPAM 편집·ip-ping·Tools 업그레이드는 `tools`, 알람 음소거는 `inv.alarms`, VM 사양변경은 `vm.reconfig`, 원격 콘솔은 `vm.console`, SSH/RDP 터널·probe·rdp-ticket은 `remote.access`. 기본 매트릭스는 기존 `requireRole('admin','operator')` 동작과 동일(viewer는 조회 전용)이며, 설정 › 사용자 관리에서 역할별로 조정할 수 있습니다.
@@ -383,7 +383,7 @@ git 소스로 실행하면 `CONFIG_DIR` 기본값이 `server/config` 라 이 파
 | `change-history` | **구성 변경 이력**(이벤트 타임라인, v2.217) | `unprotected-vms` | **미보호 VM**(백업 공백 탐지, v2.217) |
 | `service-hub` | 서비스 허브(별도 포탈, 새 탭 — `SERVICE_HUB_URL` 설정 시 표시) | `explore` | **탐색·랭킹**(Top N·상세 스펙 검색 — 상단 탭에서 이동, v2.274) |
 | `storage-mon` | **스토리지 모니터링**(PowerScale·PowerStore·Unity·XtremIO·VMAX/PowerMax·VPLEX 8종, v2.302+) | `vm-clone` | **VM 복제(백업식)** — 스케줄·데이터스토어/NFS·보존 N개(v2.299) |
-| `vm-export` | **VM 전체 정보 CSV**(85+ 컬럼·디스크 1~7 슬롯별, v2.275·2.278) | `secret-scan` | **평문 자격증명 점검**(설정·env·로그·소스, 값 마스킹, v2.297) |
+| `vm-export` | **VM 전체 정보 내보내기**(항목 고르기·CSV/엑셀·저장값, v2.275·2.278 → v2.799) | `secret-scan` | **평문 자격증명 점검**(설정·env·로그·소스, 값 마스킹, v2.297) |
 | `codex-check` | **보안점검 리포트**(외부 전수 점검 + 실시간 지표, 관리자, v2.284) | `capacity-advisor` | **리소스 적정성 진단**(포탈 중앙/엣지 서버 자체 실측, v2.254+) |
 | `bm-storage` | **베어메탈 스토리지**(SSH df 합산·그룹 3개·엣지 위임·CSV, v2.340) | `vm-track` | **VM 수량 추이**(00/12시 스냅샷·증감 클릭 상세·전원 전환, v2.345+) |
 | `storage-track` | **스토리지 사용량 추이**(합계+DS별 시계열·변경 이력·소진 예상, v2.348+) | `svcmon-config` | 성능점검 설정(템플릿·대량등록·가져오기/내보내기·엣지 배정·로그) |
@@ -441,12 +441,7 @@ git 소스로 실행하면 `CONFIG_DIR` 기본값이 `server/config` 라 이 파
 (v2.478 시점 기록 — 현재 카드 수는 위 v2.540~v2.583 절 참조) 위 목록에 없는 도구:
 
 - **게스트 디스크 회수**(`guest-disk`, v2.466+): 게스트 OS 파티션 할당/사용량을 엣지가 수집해 중앙으로 push(`POST /api/central/guest-disk`), 회수 후보(과할당) 리포트·VM 상세 추이(7일~1년)·PDF/JPG 내보내기.
-- **신규 포탈(V4)**(`web/src/version_4/`, v2.508 — v2.490 의 V3 를 승격): UI 개편 시안(`Design/uiredesign/` 아트보드 8장)을 구현한 라이트 테마 셸. 설정 › 신규 포탈 보기 › **V4** 버튼 또는 `#/v4` 로 진입하고, 기존 개발 포탈은 그대로 유지한다. 옛 `#/v3` · `#/v3/<화면>` 은 `#/v4/...` 로 자동 이동한다.
-  - **화면 9개**: 전사 현황 `#/v4/overview` · 법인 비교·용량 `compare` · 전력·비용·탄소 `power` · 컴퓨트 `compute` · 스토리지 `storage` · 네트워크 `network` · 물리·설비 `facility` · 알람 센터 `alarms` · 기능 찾기 `tools`.
-  - **좌측 내비 = IA 트리 11그룹**(`version_4/tree.js`): 특수 기능 전부(v2.583 기준 86개) + 개발 포탈 탭 11개 + 화면 9개를 **한 트리에 1회씩** 배치(미분류 0, 중복 소속은 '별칭' 표기). 도구 화면은 개발 포탈 `#/tools/<키>` 에서 열리며 **키 문자열은 바꾸지 않는다**(toolsDenied 값이자 서버 집행 매핑).
-  - **보기 모드 토글**(`version_4/mode.js`): '경영 보기 ↔ 엔지니어 보기'. 바꾸는 것은 랜딩·표 행수(10/50)·추이 기간(90일/7일)·원시 열(vCenter ID·서비스태그·moref)·수집 상태 바 펼침뿐이고, **권한·데이터 범위·임계값(75/90%)은 두 모드가 같다**. 패널 구성이 달라 호출 API 집합은 다를 수 있지만 모드로 접근 권한이 바뀌지는 않는다. `?view=exec|eng` → `localStorage` → 역할 기본값(admin·viewer=경영, operator=엔지니어) 순으로 정한다.
-  - **⌘K / Ctrl+K 커맨드 팔레트**(`version_4/palette.js`): 이름 외에 **키**(`gpu`·`ipam`·`rma`) · **분류명** · **구 명칭 별칭**(`aka`)으로도 찾는다. 같은 매칭 규칙(`views/toolSearch.js`)을 특수 기능 카드 그리드도 쓴다.
-  - 데이터는 실 API 만 쓰고, 수집 API 가 없는 항목(계약 전력 대비 %·백본 회선·펌웨어 기준선 준수율·SLA/가용률·자원의 금액 환산)은 **그리지 않고 왜 없는지 화면에 적는다**. 무거운 조회는 60초 이상 주기이고, 고아 VMDK 는 vCenter SOAP 왕복이 있어 **버튼으로 1회 스캔**한다(결과는 '삭제 대상' 이 아니라 '확인 필요 후보').
+- **신규 포탈(V4) — v2.747 에 삭제**: v2.508 에 만든 V4 셸과 v2.616·v2.623 의 V5·V6 틀(`web/src/version_4~6/`)·설정 › 신규 포탈 보기는 사용자 요청으로 지웠다. 화면은 기본 셸 + 관제 콘솔 둘이다. 옛 주소(`#/v4/…`·`#/v5/…`·`#/v6/…`·`#/m/…`)는 기본 화면으로 옮겨 열린다. 기본 셸의 ⌘K 기능 찾기·Overview 경영/엔지니어 보기는 그대로 있다.
 - **Overview 물리 서버 합계**(v2.486): CPU/메모리 카드 두 번째 줄에 iDRAC 가 인식한 모든 물리 서버(중앙 등록 + 위임 법인 원격, OME 엔트리 제외)의 코어 수·물리 메모리 량을 표시. 사용률(%)은 그대로 vCenter(ESXi) 실측이며 출처를 나란히 표기(`/overview` 응답 `physical`).
 - **호스트 접근 제어**(설정 › Security, v2.485): 포탈 호스트의 SSH 열림/허용목록/완전 차단(+sshd 중지), 웹(포탈 포트·80/443) 허용목록, OS 방화벽 추가 규칙을 firewalld 로 적용. 런타임 적용 → N분 내 확정하지 않으면 자동 되돌림(commit-confirm), 요청자 IP 포함 강제, 적용/확정에 본인 OTP. 설계·오픈소스 권고는 `docs/HOST-ACCESS.md`.
 - **전원 꺼진 VM '꺼진 지 N일'**(`waste/off-since`, v2.483): Optimization › 전원 꺼짐 표의 열. vCenter 인벤토리엔 꺼진 시각이 없어 ① 전원 이벤트(로그 수집 DB, 정확) ② VM 추적 12시간 슬롯 On→Off 전환('≥' 하한) ③ 전원 꺼짐 점검(v2.484, 설정 › 수집 서버 › 전원 꺼짐 점검 — 기본 6시간마다 스냅샷의 꺼진 VM 을 관측, 정밀도 = 주기, '≥' 하한) ④ 추적 시작 이후 계속 꺼짐(first_seen, '≥' 하한)을 합쳐 판정하고 출처를 표시. 출처가 전혀 없으면 '—'.
@@ -470,7 +465,7 @@ git 소스로 실행하면 `CONFIG_DIR` 기본값이 `server/config` 라 이 파
 | 🛡️ **Security** | 세션 보안 · 자격증명 저장 방식 · 연동 키(외부 포탈 조회 API) · 이상동작 탐지 · 호스트 접근 제어 · 보안 자가진단 |
 | 📋 **Log** | vCenter 로그 보관 · 진단·로그 · 서버 성능 측정(요청 ID 찾기 포함) · **로그 분석(개선점)**(v2.583) · 감사 로그 |
 
-그 외 단독 메뉴: DataCenter(법인) · NSX 관리 · AI 검색 · 알림 · 메일 발송 · 특수 기능 카테고리 · 신규 포탈 보기 · 포탈 백업 · NFS 마운트(백업 대상) · 폴더 사용량 리포트 · ⬆ 업그레이드 · About.
+그 외 단독 메뉴: DataCenter(법인) · NSX 관리 · AI 검색 · 알림 · 메일 발송 · 특수 기능 카테고리 · 포탈 백업 · NFS 마운트(백업 대상) · 폴더 사용량 리포트 · ⬆ 업그레이드 · About.
 
 ---
 

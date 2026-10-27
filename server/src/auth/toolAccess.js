@@ -56,6 +56,7 @@ export const TOOL_PATH_KEYS = Object.freeze({
   'esxi-temp': 'esxitemp',
   gpu: 'gpu',
   'guest-disk': 'guest-disk',
+  'guest-partition': 'guest-partition', // v2.749 게스트 파티션 사용률 경보(GuestPartTool.jsx)
   'guest-os': 'guestos',
   hardware: 'hardware',
   hba: 'hba',
@@ -98,6 +99,8 @@ export const TOOL_PATH_KEYS = Object.freeze({
   // v2.531: 스토리지 증가량은 **전용 엔드포인트**다(/tools/storage-growth*) — 'storage' 와
   // 묶으면 증가량만 막고 싶을 때 모니터링 화면까지 같이 막힌다(반대도 마찬가지).
   'storage-growth': 'storage-growth',
+  // v2.789: 스토리지 사용량 보고서(일간·주간·월간 표 · 비교 · 예약 메일) — 증가량과 따로 막을 수 있게 전용 키.
+  'storage-usage': 'storage-usage',
   'thin-vms': 'thinvms',
   threats: 'threats',
   'vm-clone': 'vm-clone',
@@ -111,6 +114,9 @@ export const TOOL_PATH_KEYS = Object.freeze({
   'vm-lifecycle': 'vm-lifecycle',    // VmLifecycleTool.jsx 전용(v2.706 C5)
   'contention': 'contention',        // ContentionTool.jsx + VM·호스트 상세의 경합·지연 칸은 스냅샷 값만 그려 이 경로를 부르지 않는다(v2.706 C2·C3)
   'vm-availability': 'vm-availability', // VmAvailabilityTool.jsx 전용(v2.707 C6)
+  'backup-summary': 'backup-summary', // BackupSummaryTool.jsx 전용(v2.779 백업 메뉴)
+  'backup-detail': 'backup-detail',   // BackupDetailTool.jsx 전용(v2.779 백업 메뉴)
+  'backup-em': 'backup-em',           // BackupEmTool.jsx 전용(v2.788 Veeam EM 탭)
   'cost-showback': 'cost-showback',   // CostShowbackTool.jsx 전용(v2.707 C11) — 단가 저장은 admin + 전체 범위
   'migration-readiness': 'migration-readiness', // MigrationReadinessTool.jsx 전용(v2.707 C7)
   'cluster-check': 'cluster-check',  // ClusterCheckTool.jsx + VM·호스트 상세의 클러스터 칸(v2.701) — 화면이 toolAllowed 를 먼저 본다
@@ -174,6 +180,7 @@ export const UNMAPPED_TOOL_SEGMENTS = Object.freeze({
   'ip-ping': 'VM·호스트 상세(components/EntityDetail.jsx)가 쓰는 공용 도달성 확인 — 특수 기능 카드 키가 없고, 한 도구에 묶으면 상세 화면이 같이 막힌다',
   vclogs: 'vCenter 로그 조회는 상단 메뉴 화면(ChecksLogs)이 쓴다 — 특수 기능 카드 키가 없다',
   groups: '특수 기능 헤더의 클러스터·폴더 콤보가 쓰는 공용 목록(ToolPanel) — 도구마다 쓴다',
+  'host-export': 'vCenter 화면 ‘호스트 및 클러스터’ 탭의 엑셀 내려받기(v2.802) — 특수 기능 카드 키가 없다. 묶음마다 그 기능의 도구 키(host-hygiene·cluster-check)를 라우트가 issueFor 로 직접 본다',
 });
 
 /**

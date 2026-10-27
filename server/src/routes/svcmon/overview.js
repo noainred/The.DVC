@@ -23,7 +23,7 @@ import { testState, emptySummary } from '../../svcmon/status.js';
 import { edgeSummary, edgeSummaryWithAssigned, edgeTotals } from '../../central/svcmonEdge.js';
 import { silenceStatus } from '../../central/svcmonSilence.js';
 import { svcmonPushStatus } from '../../agent/svcmonPush.js';
-import { getResults, getLastSweep, runNow, pollerStats } from '../../svcmon/poller.js';
+import { getResults, getLastSweep, runNow, pollerStats, executesHere, pollerRole } from '../../svcmon/poller.js';
 import { ROTATE_UNITS, ROTATE_LABEL } from '../../svcmon/logsettings.js';
 import { logStats } from '../../svcmon/csvlog.js';
 import { canEdit, fullScopeOnly, adminOnly } from './shared.js';
@@ -98,6 +98,8 @@ svcmonRouter.get('/state', (req, res) => {
     rotateUnits: ROTATE_UNITS,
     rotateLabels: ROTATE_LABEL,
     lastSweep: getLastSweep(),
+    // v2.769(점검 R4-D3-3): 이 인스턴스가 점검을 직접 실행하는가 — 화면이 '새로고침' 버튼을 이 값으로 끈다(중앙·킬스위치).
+    executes: executesHere(),
   });
 });
 
@@ -114,6 +116,17 @@ svcmonRouter.get('/diag', canEdit, (req, res) => {
 });
 
 svcmonRouter.post('/refresh', canEdit, fullScopeOnly, async (req, res) => {
+  // v2.769(점검 R4-D3-3): 실행하지 않는 역할(SVCMON_ROLE=central)·킬스위치(SVCMON_ENABLED=false)면 409 — 예전에는 runNow 가
+  //   가드 없이 전 법인 대상을 중앙에서 직접 점검했다. '진행 중(202)' 과 구분한다.
+  if (!executesHere()) {
+    const r = pollerRole();
+    return res.status(409).json({
+      ok: false, ran: false, reason: r.enabled === false ? 'disabled' : 'not-executing',
+      error: r.enabled === false
+        ? '이 인스턴스는 성능점검이 꺼져 있습니다(SVCMON_ENABLED=false) — 수동 새로고침도 실행하지 않습니다.'
+        : '이 인스턴스(중앙)는 점검을 직접 실행하지 않습니다 — 결과는 배정된 엣지가 보고합니다.',
+    });
+  }
   const ran = await runNow();
   res.status(ran ? 200 : 202).json({ ok: true, ran });
 });

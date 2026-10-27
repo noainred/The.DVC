@@ -543,8 +543,11 @@ adminRouter.post('/ollama-deploy/test', adminOnly, fleetOnly, async (req, res) =
 // v2.583(감사 확정): 서버의 로컬 파일을 요청자가 고른 호스트로 보내는 경로라 자격증명 CSV 내보내기와 같은
 //   등급(설정 소유자)으로 올린다 — 파일 검증(checkOllamaArchive)과 이중 방어.
 adminRouter.post('/ollama-deploy', adminOnly, fleetOnly, requireSettingsOwner, async (req, res) => {
-  const { mode, binaryPath, model, port, applyToPortal, ...target } = req.body || {};
-  const r = await installOllama(target, { mode, binaryPath, model, port, applyToPortal });
+  // v2.767(점검 R2-B4-2): 본문 `port` 는 **SSH 포트**다 — 형제 /ollama-deploy/test(testTarget(req.body))와 같은 뜻으로
+  //   target 에 남긴다. 예전에는 여기서 빼 가 Ollama 포트로 써서 SSH 는 늘 22, 포탈 LLM 주소는 http://<host>:22 였다.
+  //   Ollama 가 들을 포트는 별도 키 `ollamaPort`(비우면 11434).
+  const { mode, binaryPath, model, ollamaPort, applyToPortal, ...target } = req.body || {};
+  const r = await installOllama(target, { mode, binaryPath, model, ollamaPort, applyToPortal });
   res.status(r.ok ? 200 : 400).json(r);
 });
 

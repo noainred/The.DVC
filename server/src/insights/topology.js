@@ -6,9 +6,10 @@
 
 import { numOrNull } from '../util/numOrNull.js';
 import { usageReadable } from '../store.js';
+import { vcPowerSkipReason } from '../idrac/service.js';
+import { unreadVcenterReasons } from '../metrics/unreadVcenters.js';
 import { clusterIndex, clusterLabelOf } from '../clustercfg/analyze.js'; // v2.744(감사 VC-02): 클러스터 묶음 키·이름 한 벌(ref 우선)
 
-const num = (x) => (Number.isFinite(x) ? x : 0);
 // v2.632 WEB2632-03: 사용률은 '못 읽음' 을 0 으로 채우지 않는다. 끊긴·무응답 호스트는 사용량을 읽을 수 없으므로
 // (store.usageReadable — 사용률 기준 단일 소스) null 이고, VM·호스트의 결측 값도 null 이다(화면 '—').
 const pctOrNull = (x) => numOrNull(x);
@@ -39,6 +40,9 @@ export function buildTopology(snap, { vcenterId = null, host = null } = {}) {
   //   한 노드에 섞여 장애 영향 범위가 틀렸다. 같은 이름이 둘 이상이면 라벨에 데이터센터를 붙인다(clusterLabelOf). 클러스터에 속하지 않은
   //   호스트('standalone'·소속 미상)는 예전처럼 이름 그대로 묶는다.
   const cidx = clusterIndex(snap.hosts || []);
+  // v2.769(점검 R4-D2-04): 읽지 못한 vCenter·끊긴 호스트의 powerWatts 는 몇 시간 전 값이다(v2.733 C2-02 — finops·fleet 와 같은 판정).
+  //   cpu/mem 처럼 null(화면 '—')로 두고, 결측도 0 이 아니라 null 이다.
+  const vcSkip = { unread: unreadVcenterReasons(snap), hostReadable: usageReadable };
   for (const v of vcs) {
     const hs = hostsByVc.get(v.id) || [];
     const clusters = new Map();   // 묶음 키 → { cl(이름), gk(clusterIndex 키 또는 null), hosts }
@@ -59,7 +63,7 @@ export function buildTopology(snap, { vcenterId = null, host = null } = {}) {
           state: h.connectionState, power: h.powerState,
           cpuPct: usageReadable(h) ? pctOrNull(h.cpuUsagePct) : null,
           memPct: usageReadable(h) ? pctOrNull(h.memUsagePct) : null,
-          watts: num(h.powerWatts), gpus: (h.gpus || []).length,
+          watts: vcPowerSkipReason(h, vcSkip) ? null : numOrNull(h.powerWatts), gpus: (h.gpus || []).length,
           vmCount: vms.length, vmOn: on,
           children: [],
         };

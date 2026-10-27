@@ -67,6 +67,7 @@ python3 app.py                  # http://<서버>:8095
 | `HUB_LOGIN_MAX_FAILS` / `HUB_LOGIN_LOCKOUT_SEC` | `8` / `300` | 로그인 실패 잠금 |
 | `HUB_HISTORY_RETENTION_DAYS` | `40` | 점검 이력 보관 기간(한 달 차트를 위해 31일 이상 권장) |
 | `HUB_HEALTH_TIMEOUT` | `4.0` | 링크 점검 1건 타임아웃(초) |
+| `HUB_HEALTH_TOTAL_TIMEOUT` | (소켓 시한 × 3) | 링크 점검 1건의 요청 전체 시한(초) — 연결·TLS·헤더를 합친 상한. 소켓 시한보다 작게는 내려가지 않음 |
 | `HUB_HEALTH_CONCURRENCY` | `8` | 링크 점검 동시 실행 수 |
 | `HUB_HEALTH_TLS_VERIFY` | `true` | 점검 시 TLS 검증(자체서명 때문에 끄려면 `false` — 그 요청에만 적용) |
 | `HUB_HEALTH_ALLOW_PRIVATE` | `true` | 사설 대역(10/172.16/192.168) 점검 허용 |

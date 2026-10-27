@@ -37,6 +37,8 @@
 - (원래 3594행) 스토리지 시리얼(v2.735.2) — 못 읽으면 사유를 싣고, 화면 문구는 `web/src/views/tools/storageSerialText.js` 하나
 - (원래 4615행) 스토리지 소비 전력(v2.667) — 경로 표는 `storage/power.js POWER_PATHS` 하나이고, 못 읽은 장비는 사유별로 센다
 - (원래 5142행) v2.635 — 베어메탈 스토리지 디스크 사용량 12시간 이력. 새 수집이 아니라 '최신 결과를 떼어 적재' 한다
+- (v2.749) 게스트 파티션 사용률 경보 — 원천은 게스트 디스크 수집의 part_latest · 경로 모양으로 OS · 정규식 없는 패턴 · 메일은 아이실론 코어
+- (v2.789) 스토리지 사용량 보고서(일간·주간·월간 표 · LUN·파일시스템 · CSV · 법인/종류 비교 · 예약 메일)
 
 ## 본문
 
@@ -713,4 +715,63 @@
     · 추이는 kind 없이 **한 번** 조회해 세 보기(전체 합계·그룹별 합산·전체 서버)를 그린다 — 보기·단위·강조는 다시 부르지 않는다. 7일 응답은 `onSeven` 으로 맨 위 요약·주의 카드가 같이 쓴다(따로 부르지 말 것). 폴링 금지는 그대로.
     · 90% 도달은 7일 온전한 점의 **선형 추정**이고 증가가 0 이하·점 2개 미만이면 null(말하지 않는다). 부분 합 점은 변화 계산에서 뺀다. 그룹 색은 이름 가나다 자리로 정한다(사용량 순위가 바뀌어도 색이 바뀌지 않게).
     · 셸(← 특수 기능 · 제목)은 SpecialTools 가 그린다 — 시안의 breadcrumb·h1 은 넣지 않았다.
+- ⚠⚠ **v2.789 — 스토리지 사용량 보고서(도구 키 `storage-usage`). 표·합계는 `storage/usageReport.js`(순수), 조회는 `usageData.js` 하나(화면·메일 공용), 하위 항목 계약은 `storage/resources.js`**
+  (사용자 요청 "스토리지 사용량을 일간/주간 별로 이렇게 정리"(엑셀 캡처) · "표 형식 기본 · CSV export · 법인별/같은 종류 스토리지별 비교" · 선택 "LUN·파일시스템까지 · 새 메뉴 · 표준 검증" +
+  "사용자가 지정한 시간에 전체 사용량을 이메일로". 회귀 `server/test/storageUsage2789.test.js`·`storageResources2789.test.js` + 웹 `storageUsageText.test.js`(서버 사본 대조)):
+  · 기간은 '그 날 기준 값' — 일간은 그 날 관측만(앞날 값을 끌어오지 않는다), 주간은 기준 요일(기본 월 — 캡처 날짜) + 직전 6일, 월간은 그 달 마지막 날(이번 달은 오늘). 기준일이 아니면 `exact:false` 와 관측일('≈').
+  · 합계는 크기·사용량을 **둘 다** 읽은 장비만 · 빠진 장비는 `partial`(값 있음 N/M대) · 이력이 늦게 시작한 장비·꺼진 장비는 그 기간에 기대하지 않는다(`expectedIn`). 직전 대비·범위 변화는
+    양쪽이 완전한 합계일 때만, 추이 차트는 부분 합 점을 끊는다. 웹 `storageUsageText.js` 의 `aggregateCells`·`deltaOf`·`expectedIn` 은 사본이다 — **한쪽만 고치지 말 것**(웹 테스트가 대조).
+  · 하위 항목 = `extra.resources`(공용 스키마를 넓히지 않는다) + 종류별 `extra.resourcesProbe`(ok·unparsed·failed·skipped — '0개' 와 '못 읽음' 을 나눈다). 일 롤업 `resource_daily`
+    (키 = 종류 + 장비 id — 이름을 바꿔도 이어진다 · 더 늦은 관측만 갱신 · 크기를 못 읽은 항목은 행을 만들지 않음 · 한 스냅샷의 행은 트랜잭션 하나 · 보존은 일 롤업 보존일 · 측정 기준 재시작 시 함께 지움).
+    엣지 수신은 `central/storageEdge.js narrowStorageSnapshot` 이 `sanitizeEdgeResources` 로 좁힌다(아는 필드·객체만·상한 256 — 넘친 개수 `resourcesDropped`).
+  · Unity SSH 는 `uemcli /stor/prov/luns/lun show -detail`·`/stor/prov/fs show -detail` 을 **맨 뒤 lowPriority**(전원 뒤 · 시한 25초)로 돈다 — 앞 항목(용량·상태·버전·전원)을 밀어내지 않고
+    예산 산수(`unitySshBudget2528`)에 들지 않는다. REST 는 `lun`(sizeTotal·sizeAllocated)·`filesystem`(sizeTotal·sizeUsed)을 따로 조회한다(실패가 다른 섹션을 깨지 않게).
+    LUN '사용' 은 풀 할당량(Current allocation)이고 호스트가 본 사용량이 아니다 — 화면·메일이 그렇게 적는다.
+  · ⚠ 정직 기록: **이 장비의 LUN·파일시스템 출력(uemcli·REST)은 본 적이 없다** — 키는 Dell CLI·REST 문서 기준이고 픽스처(`uemcli-{lun,fs}-detail-2789.txt`)는 합성이다(값은 사용자 캡처의 GB 를 바이트로).
+    첫 실수집에서 'unparsed'·'failed' 가 보이면 상세의 CLI 원문으로 키를 좁힐 것. VMware 데이터스토어(`/stor/prov/vmware/*`)로 만든 LUN·NFS 가 위 두 목록에 나오는지도 확인하지 못했다.
+  · 화면 `web/src/views/tools/StorageUsageTool.jsx`(탭: 날짜별 표(엑셀형 — 머리 3줄 법인 › 장비 › 지표, 첫 열 고정) · 장비별 표(+ LUN·파일시스템 · 최근 수집 상태) · 법인별 비교 · 종류별 비교 · 메일 발송(관리자)).
+    법인·종류 필터는 `DeviceFacetBar`(다른 스토리지 화면과 같은 메뉴)이고 거른 뒤 묶는다 — KPI·합계·차트·CSV 가 전부 그 부분집합이다. 폴링하지 않는다(마운트 + 조건 변경 + 새로고침).
+    비교 차트 색은 전체 데이터 기준 고정 순서(현재 사용량 큰 순) 앞 7개 + 회색 '기타' — 필터로 다시 칠하지 않는다(팔레트는 포탈 패널 #141b2d 에서 검증).
+  · CSV 두 가지 — 표 그대로(머리 3줄 · 숫자 칸은 숫자만 · 단위는 머리) / 행 단위(기간 × 장비·항목 · 관측일 · 직전 대비). 둘 다 `util/csv.js` 수식 가드 · UTF-8 BOM.
+  · 예약 메일 `storage/usageMail.js`(+ 규칙·본문 `usageMailRules.js`) — 일정·받는 사람·놓침은 **아이실론 종합 메일의 `planDigestTick`·`digestRecipients` 를 그대로 쓴다**(사본 금지). 중앙만 보낸다 ·
+    회차는 보내기 전에 기록 · 놓친 회차는 몰아서 보내지 않음 · 상태·기록에 주소 없음 · 메일은 비관리자 판본(관리 주소 가림) · 설정 손상이면 저장 409·정기 발송 중지 · 지금 보내기 실패 409.
+    본문은 표 레이아웃·인라인 스타일·전부 이스케이프·520px 이하 @media(400px 넘침 0 — Chromium 확인). ~~공용 SMTP 모듈에 첨부가 없어 CSV 는 붙이지 않는다~~ —
+    **정정(v2.791)**: 이 문장은 틀렸다. `util/smtp.js buildMime` 은 v2.749 부터 첨부를 지원했다. v2.791 부터 엑셀을 붙인다(아래 항목).
+- ⚠⚠ **v2.791 — 스토리지 사용량 엑셀 첨부·판단 자료·PowerScale HDD/SSD 풀·ISO 주차·전체 누적. 판단은 `storage/usageInsights.js` 하나(메일 본문·엑셀 공용), 엑셀은 `storage/usageXlsx.js`(워커 `usageXlsxWorker.js`)**
+  (사용자 요청 "메일 발송을 Excel 형식으로 · 누적된 모든 주간 사용량(2026년 1주차, 2주차…) · 포탈에서 보이는것처럼" · "클로드 디자인으로 관리자가 실제로 사용할 수 있는 데이터를 첨부" ·
+  "파워스케일/아이실론은 HDD 풀과 SSD 풀을 분리" · 선택 "시안 먼저 승인 · ISO 8601 · 표준 검증". 시안 https://claude.ai/artifact/8CD6gZbSab7UBo1RZ6spTW (승인 2026-10-26).
+  회귀 `server/test/storageUsage2791.test.js` + 웹 `storageUsageText.test.js`):
+  · 주간 행 이름은 ISO 주차(`isoWeekOf` — 그 주 목요일의 연도 · 엑셀 ISOWEEKNUM 과 같은 번호 · 53주 해 포함). 값의 창(기준 요일 + 직전 6일)은 v2.789 그대로이고 기준일은 `dayLabel` 로 함께 싣는다.
+  · '전체 누적'(`count=all` — 주간·월간만): 등록부에 있는 장비 중 가장 이른 이력이 든 기간부터(`countForAll`), 상한 `allMax`(주 262 — 일 롤업 보존 5년을 덮는다).
+    ⚠ `buildPeriods` 는 `all:true` 일 때만 max(104)를 넘긴다 — 빠지면 2년 넘는 이력이 **조용히 잘린다**(작성 중 합성 5년치로 실제 재현 · 테스트 고정).
+    5년 × 장비 수를 한 번에 `.all()` 하지 않게 일 롤업은 `db.dailyRange`(31일 조각 + 시간 기준 양보 · `idx_capd_day`)로 읽는다.
+  · 풀(`usageReport.poolsOf` — PowerScale 만): 두 풀 모두 관측되면 `pools`(HDD 풀·SSD 풀 — 장비 바로 뒤 열, 장비와 같은 TB 단위), 한 풀만이면 열 없이 `poolNote`('HDD 풀만'·'SSD 풀만'),
+    매체 값이 없으면 아무것도(이유를 단정하지 않는다). 풀은 장비 합계의 **부분** — `aggregateCells` 에 더하지 않는다. SSD 가 L3 캐시인지 아예 없는지는 수집기가 구분하지 못한다(문구도 그렇게).
+  · 판단 자료(`buildInsights`): 조치 항목 = 사용률 `warnPct`(80) 이상 또는 최근 `avgWeeks`(4)걸음 평균 증가로 `horizonWeeks`(8)주 안에 `critPct`(90) 도달(`ACTION_RULE` — 화면 문구는 API 값).
+    평균은 양쪽 값이 다 있는 걸음만, `minSteps`(2) 미만이면 '추정 안 함' · 증가 0 이하 '증가 없음' · 104주 넘으면 '2년 넘게'(직선을 몇 년 뒤까지 늘이지 않는다). 합계 변화는 두 주가 완전한 합계일 때만.
+  · 엑셀 5시트(요약 · 주간 사용량 · 법인별·종류별 · 데이터(행 단위) · 읽는 법): 숫자 칸은 숫자(사용률은 % 서식 분수) · 못 읽음은 빈 칸 · 수집 전 기간은 회색 · 기준일이 아닌 관측은 파란 기울임 ·
+    주간 시트는 머리 4줄(법인/장비/구분/지표) + 주차·기준일 열 고정, 법인 순서는 포탈 표와 같은 ko 정렬 · 데이터 시트는 최근 주가 위 + 자동 필터 · 이름은 문자열 칸만(수식 칸 없음).
+  · ⚠ 워크북 직렬화는 쪼갤 수 없는 동기 코드다 — 메인 스레드에서 5년 × 79대 합성이 **최대 1.5초 정지**(실측). 그래서 IP 대장과 같은 워커 패턴(`renderUsageWorkbook` —
+    ready 전 실패만 인라인 · 시한 `STORAGE_XLSX_TIMEOUT_MS` · 끄기 `STORAGE_XLSX_WORKER=0`)으로 만든다(같은 합성에서 메인 정지 4ms). 결과는 인라인과 같다(테스트가 셀 단위로 대조).
+  · 메일: 본문은 항상 주간(예전 gran·count·includeDevices 설정은 읽지 않는다) · 첨부(`attachExcel`, 기본 켬)는 공용 SMTP 상한(`ATTACH_MAX_BYTES` 5MB)을 넘으면 데이터 시트만 최근
+    `ATTACH_DATA_WEEKS`(52)주로 다시 만들고, 그래도 넘거나 실패하면 **첨부 없이 보내고 본문·기록이 밝힌다**. 실측: 79대 × 262주 2.4MB, 200대 × 262주 5.6MB(→ 52주 2.5MB).
+    메일 첨부는 비관리자 판본(관리 주소 가림). 내려받기 `GET /tools/storage-usage/xlsx` 는 관리자 + `data.csv`(웹 canCsv 와 같은 판정) + 전체 범위 + 동시 1건(`exportBusy`).
+  · ⚠ 정직 기록: 실제 메일 서버·Outlook 에서 첨부를 연 적은 없다(가짜 SMTP 왕복으로 MIME 을 풀어 exceljs 로 다시 읽은 것까지). 실장비의 HDD/SSD 매체 값은 v2.303 수집기 가정 그대로다.
 
+- **게스트 파티션 사용률 경보(v2.749 — 시안 ①~④ 승인)** — 판정 코어 `server/src/guestpart/rules.js`(순수) · 조회 `report.js` · 설정 `settings.js`(`guest-partition.json`) ·
+  메일 `notify.js`(+ `mailHtml.js`) · 라우트 `routes/api/toolsGuestPart.js` · 화면 `GuestPartTool.jsx`(특수기능)·`GuestPartSettings.jsx`(설정 › 수집 서버). 회귀 `server/test/guestPart2749.test.js` · `web/src/views/tools/guestPartText.test.js`.
+  - **원천은 게스트 디스크 회수와 같은 수집**이다(수집 켜기·주기는 `guest-disk.json` 한 곳 — 두 곳에 두지 말 것). 현재 사용률은 새 표 `part_latest`(수집마다 vCenter 단위 교체,
+    `commitCollection` 같은 트랜잭션)에서 읽는다. `part_last` 는 diff 기준(변화가 기준 GB 이상일 때만 갱신)이라 사용률 원천이 될 수 없다(50 GB 에서 1 GB = 2%p). 엣지 수신도 같은 함수를 지난다.
+  - 사용률을 모르는 파티션(여유 공간 미보고)은 `unknown=1`·값 null — 0% 가 아니다. Tools 미보고 게스트는 '확인 불가' 로 따로 센다(인벤토리 게스트 − 보고 게스트, 템플릿 제외).
+  - OS 는 **경로 모양**(드라이브 문자·UNC = Windows, `/` = Linux)으로 가린다. 무시 규칙은 경보·메일에서만 빼고 수집·저장은 그대로 — 무시한 수는 사유별로 보여 준다.
+    패턴은 `*` 만 특수 문자인 **정규식 없는** 두 포인터 매칭(외부 입력 패턴 × 경로 1,024자 — ReDoS 규약). Windows CD-ROM·ISO 는 경로로 알 수 없어 '남은 공간 0 + 10 GB 이하' 로 **추정**한다(화면 문구도 추정이라 말한다).
+  - 범위 계정은 자기 vCenter 행만 — 기억한 전체 목록(수집 커밋마다 세대 증가 + 60초)에서 **판정·요청 필터보다 먼저** 좁힌다. 범위 밖 단건은 404. 설정·메일 저장은 관리자 + 전체 범위(전 법인 공용).
+  - 메일은 아이실론과 **같은 코어**(`isidu/digestRules.planDigestTick·digestRecipients` · `isidu/mailRules.normalizeTargetMail·mailRecipients·failAlertDue`)를 쓴다 — 사본 금지.
+    공용 서비스(`sendPortalMail`)는 받는 사람이 비면 기본 받는 사람으로 보내므로 **호출 전에** 빈 목록을 막는다. 보내는 사람(From)은 헤더만 바꾸고(봉투는 메일 설정 주소 — 반송),
+    CSV 첨부는 `util/smtp.js buildMime` 의 `attachments`(파일 이름·형식 화이트리스트 — 헤더 주입 차단, 5개·5 MB 상한) 를 쓴다. 데모(mock)는 자동 메일을 보내지 않는다.
+  - (v2.750) VM 상세 창의 '게스트 파티션 사용량'은 `GET /vms/:id/partitions`(**inv.vms** — 특수 기능이 아니라 그 VM 의 속성, 창을 열 때 1회) ·
+    조립은 `report.js buildVmPartitions`(순수) 하나. VM 은 **스냅샷에서** 찾고 범위 밖은 404, 수집 행의 vCenter 가 스냅샷과 다르면 쓰지 않는다(옮겨진 VM 의 옛 값).
+    라이브 조회가 아니므로 **수집 시각을 반드시 함께** 보이고(`timeText`·`agoText`), 값이 없는 이유는 `guestPartText.vmPartNote` 가 아는 것만 말한다. 무시 규칙은 사유 문구만 싣는다(패턴 원문 금지). 회귀 `server/test/vmPartitions2750.test.js`.
+  - 7일 증가는 `part_series` 의 기준 시각 이하 마지막 점(diff-저장)으로 낸다 — 기준 점이 없으면 null(관측 부족), 변화 기준(기본 1 GB) 미만 변화는 보이지 않는다. 가득 참 예상은 그 속도의 단순 추정.
+  · v2.770(점검 R5-E2): 엣지 소비 전력의 부분 합 표지(`partial`·`missing`)도 중앙 정제 화이트리스트에(missing>0 일 때만 partial) — 빠지면 전체 전력이 부분 합을 '측정' 으로 센다.
+    장비 출력 파서에 `m` 플래그 + 무제한 부정 클래스 금지(외로운 \r 마다 시작점) · `/^(\d+):\s*(.*)$/` 대신 `uemcliParse.recStart` 를 쓴다(한 벌) · 주기 수집은 `_inFlight` 를 보고 건너뛰며(`inFlightSkipped`), finally 는 자기 항목만 지운다.

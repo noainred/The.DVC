@@ -3,7 +3,7 @@
  * 순수 함수 — 호스트 상세(/tools/gpu/host)와 GPU 모니터링 호스트 표(buildGpuInventory)가 **같은 판정**을 쓴다.
  *
  * 값마다 출처가 다르고 화면이 그 사실을 말한다(섞지 않는다):
- *   · 사용률      ESXi 성능 카운터 gpu.utilization(vGPU/vSGA 호스트) → 없으면 게스트 nvidia-smi 평균(패스스루)
+ *   · 사용률      ESXi 성능 카운터 gpu.utilization(vGPU/vSGA 호스트) → 없으면 켜진 GPU VM 게스트 nvidia-smi 최댓값(패스스루 — 폴러 대표값·추이와 같은 정의)
  *   · 온도        게스트 nvidia-smi temperature.gpu — **ESXi 경로에는 없다**. 게스트 수집 VM 이 없으면 null
  *   · 메모리 용량  vGPU/vSGA 는 vCenter 가 준 값(memorySizeInKB), 패스스루는 **모델명으로 추정**(capacityEstimated)
  *   · 메모리 할당  vGPU 는 프로파일 GB × 장치 수(켜진 VM 만 — 꺼진 VM 은 프레임버퍼를 잡지 않는다),
@@ -42,6 +42,7 @@ export function summarizeHostGpu(host, vms, guestByVm, { now = Date.now() } = {}
   let memUsed = 0; let memTotal = 0; let memVms = 0;
   const utils = []; const temps = []; const acts = [];
   let vmsOn = 0; let vmsRead = 0;
+  let gpuErrors = 0; // v2.769(점검 R4-D5-3): 켜진 VM 게스트에서 '응답 없음' 으로 센 GPU 장수 합
   for (const v of vms || []) {
     const on = v.powerState === 'POWERED_ON';
     const g = on ? (guestByVm && guestByVm.get(v.id)) || null : null;
@@ -57,6 +58,7 @@ export function summarizeHostGpu(host, vms, guestByVm, { now = Date.now() } = {}
     if (g) {
       vmsRead++;
       if (g.utilPct != null) utils.push(g.utilPct);
+      if (numOrNull(g.gpuErrors) > 0) gpuErrors += Number(g.gpuErrors);
       if (numOrNull(g.tempC) != null) temps.push(Number(g.tempC));
       if (numOrNull(g.memUsedMB) != null && numOrNull(g.memTotalMB) > 0) { memUsed += Number(g.memUsedMB); memTotal += Number(g.memTotalMB); memVms++; }
     }
@@ -69,12 +71,15 @@ export function summarizeHostGpu(host, vms, guestByVm, { now = Date.now() } = {}
       memUsedPct: g ? numOrNull(g.memUsedPct) : null,
       tempC: g ? numOrNull(g.tempC) : null,
       gpusSeen: g ? numOrNull(g.gpus) : null,
+      gpuErrors: g ? numOrNull(g.gpuErrors) : null, // v2.769(R4-D5-3): 응답 없는 GPU 장수(null = 모름 — 구버전 엣지)
       activity: act.state, activityReason: act.reason,
       ageMs: g && g.at ? Math.max(0, now - g.at) : null,
     });
   }
   const esxi = numOrNull(host?.gpuUtilPct);
-  const guestAvg = utils.length ? Math.round(utils.reduce((a, b) => a + b, 0) / utils.length) : null;
+  // v2.769(점검 R4-D5-1): 평균 → 최댓값. 추이(gpu_util — poller 호스트 대표값 = GPU VM 최댓값)와 같은 정의여야
+  //   같은 호스트가 상세·표(평균 40)와 차트(80)에서 다르게 보이지 않는다. utils 는 켜진 VM·utilPct 있는 것(MIG 제외)만이다.
+  const guestMax = utils.length ? Math.round(Math.max(...utils)) : null;
   // v2.653: 게스트 값이 없으면 ESXi 카운터(gpu.temperature · gpu.mem.used/usage — vGPU/vSGA 호스트)로 채우고 출처를 밝힌다.
   //   게스트 값이 있으면 게스트가 먼저다(VM 이 실제로 쓰는 프레임버퍼 기준). 두 값을 섞지 않는다.
   const esxiTemp = numOrNull(host?.gpuTempC);
@@ -92,8 +97,8 @@ export function summarizeHostGpu(host, vms, guestByVm, { now = Date.now() } = {}
     gpus: gpus.length,
     models: [...new Set(gpus.map((g) => g.model).filter(Boolean))],
     capacityGB, capacityEstimated,
-    utilPct: esxi ?? guestAvg,
-    utilSource: esxi != null ? 'esxi' : guestAvg != null ? 'guest' : null,
+    utilPct: esxi ?? guestMax,
+    utilSource: esxi != null ? 'esxi' : guestMax != null ? 'guest' : null,
     tempC,
     tempSource: temps.length ? 'guest' : esxiTemp != null ? 'esxi' : null,
     // 할당 — vGPU 는 GB, 패스스루는 장(한 장 통째)
@@ -109,6 +114,7 @@ export function summarizeHostGpu(host, vms, guestByVm, { now = Date.now() } = {}
     memSource: mem ? mem.src : null,
     memVms,
     vmsOn, vmsRead, vmsUnread: vmsOn - vmsRead,
+    gpuErrors,
     activity: activityCounts(acts),
     vms: rows,
   };

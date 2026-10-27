@@ -841,3 +841,5 @@
   - ⚠ 정직 기록: 운영 포탈의 실제 주기 소요는 보지 못했다(추정). 서비스 점검 'iDRAC 폴 주기' 행이 그 값을 보여준다 —
     주기가 짧은데도 계속 비면 다른 원인이다. `lastRun.at` 은 호환을 위해 여전히 주기 **시작** 시각이다(`finishedAt` 별도).
 
+  · v2.770(점검 R5-E4): replace 스캔의 부분 판정(`scanPartialReasons`)에 **인증서 미신뢰(tlsUntrusted)** 를 넣는다 — 실재가 확인된 장비라 authFailed 와 같은 근거로 merge 강등(일반 무응답은 강등하지 않는다 — 폐기 서버를 지울 수 있어야 한다).
+    교체로 지운 등록은 `removedIds` 로 결과·감사 로그(`idrac.scan.replace.removed`)·중앙 정제까지 남긴다. 등록부 accessMoved 는 **정규화한 host** 로 비교(스킴 없는 같은 주소를 이동으로 보지 않는다), CSV 에 없는 열은 키를 만들지 않는다.

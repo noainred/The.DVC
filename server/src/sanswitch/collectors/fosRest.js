@@ -21,7 +21,7 @@ import { reqTimeoutMs } from '../../agent/envTimeout.js';
 import { withSsrfLookup } from '../../util/ssrfLookup.js';
 import { deviceTlsConnect, unwrapTlsPeer } from '../../security/tlsTrust.js'; // 2026-10-09 S-02: CA 체인 또는 승인 지문 — 자격증명 전에 판정
 import { emptySnapshot, summarizePorts, MAX_PORTS } from '../types.js';
-import { applyRates } from '../rates.js';
+import { applyRates, skipRates } from '../rates.js';
 import { zoningFromRest } from '../zoningCollect.js';
 import { isAbsentWord } from './fosParse.js';   // v2.742 DEV-02: 빈 슬롯 판정 — SSH 와 한 벌   // v2.511: 조닝 — SSH 경로와 같은 스키마
 
@@ -135,7 +135,8 @@ function makeClient(device, signal) {
 //   두 주기의 '카운터 읽은 시각' 차이여야 한다 — 예전에는 스냅샷 조립 시각(뒤 GET 8개가 끝난 뒤)을 써서 뒤 단계 소요가
 //   주기마다 흔들리면 오류 없이 틀린 값이 됐다(감사 재현: 뒤 단계 5초→65초면 17% 과소, 65초→5초면 25% 과다).
 //   값이 없으면 예전처럼 호출 시각이다(시험·단독 호출 호환).
-export function buildSnapshot(device, parts = {}, { countersAt = null } = {}) {
+// v2.770(점검 R5-E3-3): opts.noRates = 연결 테스트 — 처리량 기준값(rates._prev)을 덮지 않는다(rates.skipRates).
+export function buildSnapshot(device, parts = {}, { countersAt = null, noRates = false } = {}) {
   const snap = emptySnapshot(device);
   const sw = asArray(parts.switch?.['fibrechannel-switch'])[0] || {};
   const chassis = asArray(parts.chassis?.chassis)[0] || {};
@@ -196,7 +197,7 @@ export function buildSnapshot(device, parts = {}, { countersAt = null } = {}) {
       sfpVendor: md['vendor-name'] || '', sfpSerial: md['serial-number'] || '', sfpPartNumber: md['part-number'] || '',
     };
   });
-  const rate = applyRates(device.id, list, Number.isFinite(countersAt) ? countersAt : Date.now());
+  const rate = noRates ? skipRates(list) : applyRates(device.id, list, Number.isFinite(countersAt) ? countersAt : Date.now());
   snap.ports = { ...summarizePorts(list), truncated: ifaces.length > MAX_PORTS };
   snap.licenses = asArray(parts.license?.license).slice(0, 32)
     .map((l) => ({ key: '', name: l.name || l.feature || '', expires: l['expiration-date'] || '', pod: /ports?\s*on\s*demand|POD/i.test(String(l.name || '')) }));
@@ -227,7 +228,7 @@ export function fruCounts(list) {
 }
 
 /** 수집 진입점. 섹션 실패는 sections 에 남기고 계속 진행한다(포트 표는 살린다). */
-export async function collect(device, { signal, trace = null } = {}) {
+export async function collect(device, { signal, trace = null, noRates = false } = {}) {
   const c = makeClient(device, signal);
   const t0 = Date.now();
   trace?.(`REST 로그인 → https://${device.host}:${Number(device.httpsPort) || 443}/rest/login (Basic · 인증서는 CA 체인 또는 승인 지문 — security/tlsTrust.js)`);
@@ -257,7 +258,7 @@ export async function collect(device, { signal, trace = null } = {}) {
   } finally {
     await c.logout(); // 세션 반납은 반드시(FOS 동시 REST 세션 수가 매우 적다)
   }
-  const snap = buildSnapshot(device, parts, { countersAt: doneAt.stats ?? null });
+  const snap = buildSnapshot(device, parts, { countersAt: doneAt.stats ?? null, noRates });
   snap.sections = sections;
   return snap;
 }

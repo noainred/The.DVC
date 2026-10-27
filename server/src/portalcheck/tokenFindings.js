@@ -10,7 +10,7 @@
  *   세지 않는다(v2.519·v2.523·v2.548 규약).
  */
 
-import { PROBE_STATE, TOKEN_MODE, EDGE_TOKEN_FACT } from './tokenScan.js';
+import { PROBE_STATE, TOKEN_MODE, EDGE_TOKEN_FACT, edgeReportFault } from './tokenScan.js';
 
 /**
  * 발견 코드. **여기에 없는 코드를 화면이 만들지 않는다**(테스트가 두 목록을 대조한다).
@@ -38,6 +38,7 @@ export const FINDING = Object.freeze({
   EDGE_OLD_VERSION: 'edge-old-version',
   EDGE_NAME_MISMATCH: 'edge-name-mismatch',
   EDGE_COLLECTOR_FP_DIFF: 'edge-collector-fp-diff',
+  EDGE_REPORT_STALE: 'edge-report-stale', // v2.767(점검 R2-B4-4): 낡은 보고가 결함을 말한다 — 지금도 그런지 모른다
   // ④ 구성
   EDGE_IS_ALSO_CENTRAL: 'edge-is-also-central',
   DEPLOY_COLLECTOR_DIFF: 'deploy-collector-diff',
@@ -70,6 +71,7 @@ export const FINDING_GRADE = Object.freeze({
   [FINDING.EDGE_OLD_VERSION]: 'unknown',
   [FINDING.EDGE_NAME_MISMATCH]: 'warn',
   [FINDING.EDGE_COLLECTOR_FP_DIFF]: 'fault',
+  [FINDING.EDGE_REPORT_STALE]: 'unknown',
 
   [FINDING.EDGE_IS_ALSO_CENTRAL]: 'warn',
   [FINDING.DEPLOY_COLLECTOR_DIFF]: 'warn',
@@ -149,7 +151,8 @@ export function findingsOf(scan = {}) {
       add(FINDING.PROBE_NO_TOKEN_STORED, a, {});
     } else if (st === PROBE_STATE.OLD_ROUTE || st === PROBE_STATE.HTTP) {
       add(FINDING.PROBE_HTTP, a, { httpStatus: r.probe?.httpStatus || null, reason: r.probe?.reason || '' });
-    } else if (st === PROBE_STATE.NOT_RUN) {
+    } else if (st === PROBE_STATE.NOT_RUN && r.disabled !== true) {
+      // v2.767(점검 R2-B4-5): 비활성 수집 서버는 '다시 누르면 이어서 점검' 대상이 아니다 — 발견으로 내지 않는다(행은 확인 불가 + '비활성' 사유).
       add(FINDING.PROBE_NOT_RUN, a, { reason: r.probe?.reason || '' });
     }
 
@@ -158,6 +161,14 @@ export function findingsOf(scan = {}) {
       // 보고가 없는 이유를 **버전으로 가른다**(조치가 정반대다 — 업그레이드 / 다시 당기기).
       if (r.capability === 'old-version') add(FINDING.EDGE_OLD_VERSION, a, { version: r.version || '' });
       else add(FINDING.EDGE_NO_REPORT, a, { capability: r.capability || 'unknown-version', version: r.version || '' });
+    } else if (r.edge.stale && edgeReportFault(r.edge)) {
+      // v2.767(점검 R2-B4-4): 낡은 보고의 결함(거부·이름·지문)은 fault 로 내지 않는다 — '다시 당겨 확인' 한 줄로(rowStateOf 와 같은 기준).
+      const staleFact = r.edge.fact === EDGE_TOKEN_FACT.REJECTED || r.edge.fact === EDGE_TOKEN_FACT.AGENT_WRONG_NAME ? r.edge.fact : 'collector-fp-diff';
+      add(FINDING.EDGE_REPORT_STALE, a, { ageMs: r.edge.ageMs ?? null, staleMs: r.edge.staleMs ?? null, staleFact });
+      if (r.edge.nameMismatch) add(FINDING.EDGE_NAME_MISMATCH, a, { said: r.edge.said });
+      if (r.edge.centralRole?.enabled) {
+        add(FINDING.EDGE_IS_ALSO_CENTRAL, a, { byEnv: !!r.edge.centralRole.byEnv, byIssuedTokens: !!r.edge.centralRole.byIssuedTokens, source: 'edge-report' });
+      }
     } else {
       if (r.edge.fact === EDGE_TOKEN_FACT.REJECTED) {
         add(FINDING.EDGE_CENTRAL_REJECTED, a, { reason: r.edge.selfProbe?.reason || '', short: r.edge.tokens?.centralSend?.short || '' });

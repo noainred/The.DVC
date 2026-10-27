@@ -7,7 +7,7 @@ import { downloadFailText } from '../downloadFailText.js';
 import { DataTable, Loading, ErrorBox, UsageCell, Modal, VmLink } from '../../components/ui.jsx';
 import { Card, useTool } from './shared.jsx';
 import { STable } from '../../components/STable.jsx';
-import { activityOf, memText, memMainText, gbText, tempText, allocText, allocTitle, activityRuleNote, activitySummary, vramText, vramTitle } from './gpuUsageText.js';
+import { activityOf, memText, memMainText, gbText, tempText, allocText, allocTitle, activityRuleNote, activitySummary, vramText, vramTitle, gpuErrText } from './gpuUsageText.js';
 import { numOrNull } from '../../numOrNull.js'; // v2.727(E-12): VRAM 결측(null)을 0 으로 접지 않는다
 import { whyChip, whyBannerItems, vmChips, activityBar, srcText, collectCheckGroups, readCell } from './gpuWhyText.js';
 import Select from '../../components/Select.jsx';
@@ -155,6 +155,7 @@ export function Gpu({ scope }) {
     // v2.653
     guestWhy: h.guestWhy || null, collectPath: h.collectPath || null, collectAgent: h.collectAgent || null,
     memSource: h.memSource || null, tempSource: h.tempSource || null, vms: h.vms || [],
+    gpuErrors: h.gpuErrors || 0, // v2.769(R4-D5-3)
   }));
   // 법인 × GPU 모델별 수량 집계: 어떤 법인에 어떤 GPU 카드가 몇 장 설치됐는지.
   const modelAgg = () => {
@@ -193,10 +194,10 @@ export function Gpu({ scope }) {
         <span className="gpu-sub">{r.vcenterId} · <span style={{ color: r.collectPath === 'site' ? 'var(--amber)' : 'var(--accent-2)' }}>{r.collectPath === 'site' ? `엣지${r.collectAgent ? ` ${r.collectAgent}` : ''}` : '중앙 직접'}</span></span>
       </div>
     ) },
-    { key: 'count', label: 'GPU', align: 'left', sortValue: (r) => r.count, render: (r) => <span className="nowrap">{r.model} <span className="muted gpu-mono" title={vramTitle(r)}>×{r.count} · {vramText(r.memGB)}</span></span> },
+    { key: 'count', label: 'GPU', align: 'left', sortValue: (r) => r.count, render: (r) => <span className="nowrap">{r.model} <span className="muted gpu-mono" title={vramTitle(r)}>×{r.count} · {vramText(r.memGB)}</span>{gpuErrText(r.gpuErrors) && <span className="gpu-why" style={{ marginLeft: 6 }} title="켜진 GPU VM 의 nvidia-smi 가 이 수만큼 GPU 를 읽지 못했습니다(드라이버·장치 점검 필요). 사용률·메모리는 응답한 GPU 기준입니다.">{gpuErrText(r.gpuErrors)}</span>}</span> },
     { key: 'mode', label: '방식', sortValue: (r) => r.mode, render: (r) => <GpuModeBadge mode={r.mode} modes={r.modes} /> },
     { key: 'util', label: '사용률', render: (r) => (r.util == null ? <span className="muted">—</span>
-      : <span className="flex gap" style={{ alignItems: 'center', flexWrap: 'nowrap' }}><UsageCell pct={r.util} />{r.utilSource === 'guest' && <span className="gpu-src" title="게스트 OS에서 수집(패스쓰루)">게스트</span>}</span>) },
+      : <span className="flex gap" style={{ alignItems: 'center', flexWrap: 'nowrap' }}><UsageCell pct={r.util} />{r.utilSource === 'guest' && <span className="gpu-src" title="게스트 OS에서 수집(패스쓰루) — 켜진 GPU VM 중 최댓값(추이 차트와 같은 정의)">게스트</span>}</span>) },
     { key: 'tempC', label: '온도', align: 'right', sortValue: (r) => r.tempC, render: (r) => (r.tempC == null ? <span className="muted" title="온도 값 없음(게스트 수집값도 ESXi 카운터도 없음)">—</span>
       : <span className="nowrap"><button className="cell-link gpu-mono" title={r.tempSource === 'esxi' ? 'ESXi gpu.temperature(가장 뜨거운 GPU)' : '가장 높은 GPU(게스트 nvidia-smi)'} onClick={() => openHist('host', r.key, 'temp')}>{tempText(r.tempC)}</button><SrcTag s={r.tempSource} /></span>) },
     { key: 'memUsedMB', label: '메모리 사용', sortValue: (r) => r.memUsedPct, render: (r) => ((r.memUsedMB == null && r.memUsedPct == null) ? <WhyChip why={r.guestWhy} /> : (
@@ -249,7 +250,7 @@ export function Gpu({ scope }) {
                 <td className="nowrap" style={{ color: on ? 'var(--green)' : 'var(--text-faint)' }}>● {on ? '켜짐' : '꺼짐'}</td>
                 <td className="muted gpu-mono" style={{ fontSize: 12 }}>{v.profile || (v.mode === 'passthrough' ? '패스쓰루' : v.mode || '—')}</td>
                 <td className="right gpu-mono" data-sort={v.allocGB ?? ''}>{v.allocGB == null ? '—' : gbText(v.allocGB)}</td>
-                <td className="right gpu-mono" data-sort={v.utilPct ?? ''}>{v.utilNA ? 'N/A(MIG)' : v.utilPct == null ? '—' : `${v.utilPct}%`}</td>
+                <td className="right gpu-mono" data-sort={v.utilPct ?? ''}>{v.utilNA ? 'N/A(MIG)' : v.utilPct == null ? '—' : `${v.utilPct}%`}{gpuErrText(v.gpuErrors) && <div style={{ color: 'var(--amber)', fontSize: 11 }}>{gpuErrText(v.gpuErrors)}</div>}</td>
                 <td className="right gpu-mono" data-sort={v.memUsedMB ?? ''}>{memText(v.memUsedMB, v.memTotalMB)}</td>
                 <td className="right gpu-mono" data-sort={v.tempC ?? ''}>{tempText(v.tempC)}</td>
                 <td className="nowrap" title={a.title} style={{ color: `var(--${a.tone === 'gray' ? 'text-dim' : a.tone})` }}>{on ? a.label : '꺼짐'}</td>

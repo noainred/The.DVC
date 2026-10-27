@@ -306,6 +306,12 @@ export function errorText(row) {
   // v2.605 WEB2605-04: k/m/g 축약 카운터로 **신규 판정만 보류**한 포트는 누적이 읽혀 있다 — '카운터 없음'
   //   이라 말하면 사용자가 명령·권한을 의심한다(조치가 다르다).
   if (row.errors === 'unknown' && row.errHeld === 'approx') return `누적 ${row.errSum ?? '—'} (축약 표기 — 신규 판정 보류)`;
+  // v2.770(점검 R5-E3-1): 카운터 리셋(기준선보다 작음)은 '신규 0' 이 아니다 — 이후 값이 0 이면 보류, 있으면 '리셋 이후 최소'.
+  if (row.errHeld === 'reset') {
+    if (row.errors === 'unknown') return `누적 ${row.errSum ?? '—'} (카운터 리셋 — 신규 판정 보류)`;
+    return `리셋 이후 최소 ${row.errNewMin ?? row.errSum ?? '—'} (누적 ${row.errSum ?? '—'})`;
+  }
+  if (row.errHeld === 'noRow') return `누적 ${row.errSum ?? '—'} (기준선에 이 포트 없음)`;
   if (row.errors === 'unknown') return '카운터 없음';
   if (row.errNew != null) return `신규 ${row.errNew} (누적 ${row.errSum})`;
   return `누적 ${row.errSum} (기준선 없음)`;

@@ -137,25 +137,34 @@ export function scanInventory({
   }).sort((a, b) => STATE_ORDER[a.state] - STATE_ORDER[b.state] || a.name.localeCompare(b.name, 'ko'));
 
   // ── 엣지 축 — 수신 트래픽 표의 `—` 를 설명한다 ──────────────────────────────
-  // `ingestStats` 의 `last` 는 **`/inventory` push 일 때만** 채워진다. 그래서 `last:null` 은
-  // "이 집계 시작 이후 인벤토리를 한 번도 성공적으로 보내지 않았다" 는 뜻이다.
+  // `ingestStats` 의 `last` 는 **요약(summary)을 실은 마지막 push** 다 — `/inventory` 뿐 아니라
+  // svcmon-report·capacity-report 도 요약을 싣는다(routes/central.js res.locals.ingestSummary).
+  // v2.767(점검 R2-B4-1): 그래서 `last` 하나로 '인벤토리를 보내나' 를 가르면 인벤토리 push 직후 60초 주기
+  //   svcmon 하트비트가 덮어 신선한 담당 엣지가 FAULT 로 깜빡였다. 경로별 기록(`byEndpoint` 의 '/inventory'
+  //   lastAt)이 낡음 경계(stale) 안이면 보내는 중으로 본다. `last` 의 의미는 그대로 둔다(진단 표 '마지막 대상').
   const ownerSet = new Set(rows.map((r) => low(r.owner)).filter(Boolean));
   const agents = ingestRows.map((a) => {
     const name = t(a?.agent);
     const rj = rejByAgent.get(low(name)) || null;
     const mock = !!(identity?.byAgent || {})[low(name)]?.mock;
+    const lastIsInv = Boolean(a?.last && t(a.last.endpoint).replace(/^\//, '') === 'inventory');
+    const invEp = (Array.isArray(a?.byEndpoint) ? a.byEndpoint : []).find((e) => t(e?.endpoint).replace(/^\//, '') === 'inventory');
+    const invAt = num(invEp?.lastAt);
+    const invFresh = invAt != null && invAt > 0 && (!at || at - invAt <= stale);
     return {
       agent: name,
       pushes: num(a?.pushes) ?? 0,
       wireBytes: num(a?.wireBytes) ?? 0,
       lastAt: num(a?.lastAt) ?? null,
       // ⚠ 이 값이 이 표의 존재 이유다 — false 면 그 엣지는 인벤토리를 안 보내고 있다.
-      sentInventory: Boolean(a?.last && t(a.last.endpoint).replace(/^\//, '') === 'inventory'),
+      sentInventory: lastIsInv || invFresh,
+      lastInventoryAt: invAt,
       lastEndpoint: t(a?.last?.endpoint).replace(/^\//, '') || null,
       lastVcenterId: t(a?.last?.vcenterId) || null,
-      lastHosts: num(a?.last?.hosts),
-      lastVms: num(a?.last?.vms),
-      gzip: a?.last ? Boolean(a.last.gzip) : null,
+      // 호스트·VM·압축은 인벤토리 요약에만 있다 — 마지막 요약이 다른 경로면 모른다(null, 0 아님).
+      lastHosts: lastIsInv ? num(a.last.hosts) : null,
+      lastVms: lastIsInv ? num(a.last.vms) : null,
+      gzip: lastIsInv ? Boolean(a.last.gzip) : null,
       rejects: rj ? { total: rj.total, lastAt: rj.lastAt, lastKind: rj.lastKind, lastReason: rj.lastReason, byKind: rj.byKind } : null,
       mockReported: mock,
       // 이 엣지가 위임 vCenter 의 담당으로 **학습된 적이 있나** — 없으면 인벤토리 담당이 아닐 수 있다.
@@ -192,6 +201,7 @@ export function scanInventory({
       wireBytes: 0,
       lastAt: null,
       sentInventory: false,
+      lastInventoryAt: null,
       lastEndpoint: null,
       lastVcenterId: t(r?.lastVcenterId) || null,
       lastHosts: null,
@@ -226,6 +236,33 @@ export function scanInventory({
 }
 
 const STATE_ORDER = Object.freeze({ rejected: 0, never: 1, stale: 2, unknown: 3, ok: 4 });
+
+/**
+ * v2.767(점검 R2-B4-6): 데모 계정(mock 모드) 판본 — **사람이 등록한 항목만 가린다**(데모 엣지 화면은 그대로 둔다).
+ * 형제 portal-check/tokens·link-check·edge-log 는 '전 법인 엣지 주소·거부 사유' 를 이유로 데모 계정에 막혀 있는데(v2.719·v2.720)
+ * 이 응답은 같은 종류(엣지 이름·거부 원문·vCenter 이름)를 싣고 있었다. 통째로 막으면 데모 엣지(v2.708)용 화면이 사라지므로
+ * 데모 vCenter·데모 엣지 행만 남기고 KPI·발견은 남은 행으로 다시 센다. 가린 개수는 밝힌다(조용한 상한 금지).
+ * @param scan scanInventory() 결과
+ * @param opts.isDemoVcenter (vcenterId) => boolean
+ * @param opts.isDemoAgent   (agentName) => boolean
+ */
+export function maskInventoryForDemoGuest(scan, { isDemoVcenter = () => false, isDemoAgent = () => false } = {}) {
+  const rows0 = scan?.rows || [];
+  const agents0 = scan?.agents || [];
+  const orphans0 = scan?.orphans || [];
+  // 행은 데모 vCenter 이고, 담당(owner)이 있으면 그것도 데모 엣지일 때만 남긴다(실제 엣지 이름·거부 원문이 데모 행에 섞이지 않게).
+  const rows = rows0.filter((r) => isDemoVcenter(r?.vcenterId) && (!r?.owner || isDemoAgent(r.owner))
+    && (!r?.reject?.agent || isDemoAgent(r.reject.agent)));
+  const agents = agents0.filter((a) => isDemoAgent(a?.agent));
+  const orphans = orphans0.filter((o) => o?.agent && isDemoAgent(o.agent));
+  return {
+    ...scan,
+    rows, agents, orphans,
+    kpis: kpisOf(rows),
+    siteCount: rows.length,
+    demoMasked: { rows: rows0.length - rows.length, agents: agents0.length - agents.length, orphans: orphans0.length - orphans.length },
+  };
+}
 
 /**
  * KPI — **겹치지 않는다**: 합계 = 정상 + 낡음 + 미수신 + 거부됨 + 확인 불가.

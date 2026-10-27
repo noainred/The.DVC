@@ -212,18 +212,26 @@ public sealed class MainForm : Form
             case ViewMode.Cards: RefreshDashboard(snap); break;
             case ViewMode.Table: RefreshGrid(snap); break;
         }
-        _summary.Text = $"DB: {_db.DbPath}      ·      마지막 갱신 {DateTime.Now:HH:mm:ss}";
+        // v2.767(점검 R2-B5-1): 저장이 연속으로 실패하면 바닥 줄에 먼저 알린다(예전에는 아무 표시·기록 없이 점검이 멈췄다).
+        var saveFails = _monitor.SaveFailures;
+        if (saveFails > 0)
+        {
+            var since = _monitor.SaveFailingSinceUtc?.ToLocalTime();
+            _summary.Text = $"⚠ 점검 결과 저장 실패 {saveFails}회째({since:HH:mm:ss}부터) — {_monitor.LastSaveError}      ·      DB: {_db.DbPath}";
+            _summary.ForeColor = Color.FromArgb(0xC0, 0x39, 0x2B);
+        }
+        else
+        {
+            _summary.Text = $"DB: {_db.DbPath}      ·      마지막 갱신 {DateTime.Now:HH:mm:ss}";
+            _summary.ForeColor = Theme.Muted;
+        }
     }
 
     private void UpdateHeader(List<EndpointStatus> snap)
     {
-        var en = snap.Where(x => x.Endpoint.Enabled).ToList();
-        _header.SetCounts(
-            en.Count(x => x.Status == HealthStatus.Up),
-            en.Count(x => x.Status == HealthStatus.Warn),
-            en.Count(x => x.Status == HealthStatus.Down),
-            en.Count(x => x.Status == HealthStatus.Unknown),
-            snap.Count);
+        // v2.767(점검 R2-B5-1): 트레이와 같은 집계(오래된 결과는 '대기').
+        var c = MonitorRules.CountStatuses(snap, DateTime.UtcNow, MonitorRules.DefaultMinStale);
+        _header.SetCounts(c.Up, c.Warn, c.Down, c.Unknown, snap.Count);
     }
 
     // ── 카드 대시보드 ─────────────────────────────────────────────────────────

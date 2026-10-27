@@ -1,11 +1,11 @@
 /**
- * views/audit2732i3_stale.test.js — 점검 2회차(v2.732) 그룹 i3: 경영 보기 법인 점(execOverviewText.siteRowsExec)과 V6 법인 카드 톤
- * (version_6/v6Data.siteCards)이 낡은 위임 vCenter(서버 B2-01 — status 'connected' 그대로 + stale:true)를 정상 초록으로 칠하지 않는가.
- * 판정은 corpSiteStatus().stale 하나(그룹 a 가 만든 것)를 두 화면이 그대로 쓴다 — 여기서는 실제 함수를 호출해 결과로 본다.
+ * views/audit2732i3_stale.test.js — 점검 2회차(v2.732) 그룹 i3: 경영 보기 법인 점(execOverviewText.siteRowsExec)이
+ * 낡은 위임 vCenter(서버 B2-01 — status 'connected' 그대로 + stale:true)를 정상 초록으로 칠하지 않는가.
+ * 판정은 corpSiteStatus().stale 하나(그룹 a 가 만든 것)를 그대로 쓴다 — 여기서는 실제 함수를 호출해 결과로 본다.
+ * (v2.747: V6 법인 카드 톤 검사는 V6 셸과 함께 지웠다.)
  */
 import { describe, it, expect } from 'vitest';
 import { siteRowsExec } from './execOverviewText.js';
-import { siteCards, siteToneCounts } from '../version_6/v6Data.js';
 
 const NOW = Date.UTC(2026, 9, 10, 1, 30); // 정시에서 떨어진 고정 시각(시각 경계를 판정하지 않는다)
 const DAY = 86_400_000;
@@ -37,26 +37,5 @@ describe('경영 보기 법인 점 — 낡은 값은 초록이 아니다', () =>
   });
   it('연결 실패 이월(LASTGOOD) 도 초록이 아니다', () => {
     expect(rows['vc-lastgood'].dot).toBe('warn');
-  });
-});
-
-describe('V6 법인 카드 톤 — 낡은 값은 정상(ok)으로 세지 않는다', () => {
-  const cards = siteCards(SITES);
-  const byId = Object.fromEntries(cards.map((c) => [c.id, c]));
-  it('지금 값 카드는 예전 그대로 ok', () => {
-    expect(byId['vc-fresh'].tone).toBe('ok');
-  });
-  it('낡은 값 카드는 warn(주의) · 마지막 값이 위험이면 crit', () => {
-    expect(byId['vc-site-stale'].tone).toBe('warn');
-    expect(byId['vc-site-stale'].stale).toBe(true);
-    expect(byId['vc-site-stale'].mark).toBe('낡은 값');
-    expect(byId['vc-stale-crit'].tone).toBe('crit');
-    expect(byId['vc-lastgood'].tone).toBe('warn');
-  });
-  it('머리말 개수 — 정상에 낡은 값이 섞이지 않는다', () => {
-    const c = siteToneCounts(cards);
-    expect(c.ok).toBe(1);
-    expect(c.warn).toBe(2);
-    expect(c.crit).toBe(1);
   });
 });

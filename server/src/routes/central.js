@@ -27,11 +27,14 @@ import { trimTrailingSlashes, COLLECTOR_URL_MAX } from '../util/trimSlashes.js';
 import { summarizeRegistryError } from '../util/registryCore.js'; // v2.744(리드 후속 RY): registryUnreadable 503 사유는 요약(원문 없음)
 import { safeLoadText } from '../util/atomicWrite.js'; // v2.744(회귀 검토 리드): 설정 파일 손상 사유도 요약(원문 = 파일 조각)
 import { Router } from 'express';
+import fs from 'node:fs';   // v2.793: VM 백업 위임 — 등록부 파일 존재 확인(읽지 못함 ≠ 비어 있음)
+import path from 'node:path';
+import { getDataSource as getDataSourceForVmClone } from '../runtime-settings.js';
 import { config, loadVcenterConfig, currentVersion, clampIntervalMs } from '../config.js';
 import { instanceId } from '../instanceId.js';
 import { getAssignment, setResult, listAssignments as listScanAssignments, assignmentsLoadError } from '../central/assignments.js'; // v2.727(D-01): 손상 판정
 import { tokenMatches } from '../util/secureCompare.js';
-import { resolveAgentByToken, hasAnyAgentToken, listAgentTokens } from '../central/agentTokens.js';
+import { resolveAgentByToken, hasAnyAgentToken, listAgentTokens, agentTokensLoadError } from '../central/agentTokens.js';
 import { setInventory, getInventory, listInventory } from '../central/inventory.js';
 import { noteAgentIdentity, noteVcenterOwner } from '../central/agentIdentity.js';
 import { isMockVcenter } from '../mock/generator.js';
@@ -69,7 +72,7 @@ import { commitCurUser } from '../curuser/db.js';                     // v2.520:
 import { load as loadCurUserSettings, curUserSettingsLoadError } from '../curuser/settings.js';
 import { recordCurUserActivity } from '../curuser/activityLog.js';
 import { load as loadGuestDiskSettings } from '../guestdisk/settings.js';
-import { sanitizeGuestDiskVms } from '../guestdisk/analyze.js';
+import { sanitizeGuestDiskVms, splitVmsByOwner } from '../guestdisk/analyze.js';
 import { brokerFetch as credentialBrokerFetch } from '../security/credentialStore.js';
 import { logAudit } from '../audit.js';
 import { takeBmstorJobs, ackBmstorJob, bmstorAgentOfReq, lateBmstorResult, bmstorJobKnown } from '../bmstor/jobs.js';
@@ -81,7 +84,7 @@ import { putEdgeLinkReport } from '../central/linkCheckEdge.js';   // v2.552: �
 import { buildLinks, publicLink, EDGE_KINDS } from '../linkcheck/links.js';
 // ⚠ **redact 된 목록**을 쓴다 — 링크 계산에 필요한 것은 name·url·host 뿐이고, 이 응답은 엣지로
 //   나간다(비밀이 섞일 여지를 구조적으로 없앤다).
-import { listCollectors as listCollectorsForLinks } from '../collector/registry.js';
+import { listCollectors as listCollectorsForLinks, registryLoadError as collectorsRegistryLoadError } from '../collector/registry.js';
 import { allCollectorStatus as allCollectorStatusForKnown } from '../collector/state.js'; // v2.604 CEN2604-04: pull 성공한 자기등록 항목만 '아는 엣지'
 import { listRegistry as listVcentersForLinks } from '../vcenter/registry.js';
 import { loadLinkCheckSettings, linkCheckEnabled, linkCheckSettingsLoadError } from '../linkcheck/settings.js';
@@ -237,7 +240,9 @@ const REQUIRE_AGENT_TOKEN = process.env.CENTRAL_REQUIRE_AGENT_TOKEN === 'true';
 // 공유 토큰 사용 통계 — 관리 화면이 '아직 개별 토큰으로 이관되지 않은 엣지가 있다'를 알 수 있게.
 const sharedStats = { uses: 0, lastAt: null, lastAgent: '', lastPath: '' };
 export function getCentralAuthStats() {
-  return { ...sharedStats, requireAgentToken: REQUIRE_AGENT_TOKEN, agentTokens: listAgentTokens().length };
+  // v2.771(점검 R6-F4-2): 토큰 파일을 읽지 못했으면 agentTokens 는 null(모름) + 사유 요약 — 0 은 '발급 없음' 으로 읽힌다.
+  const tokErr = agentTokensLoadError();
+  return { ...sharedStats, requireAgentToken: REQUIRE_AGENT_TOKEN, agentTokens: tokErr ? null : listAgentTokens().length, agentTokensUnreadable: tokErr };
 }
 
 /**
@@ -342,10 +347,21 @@ export function requireCentral({ notFound = { ok: false, reason: 'central 비활
   requireCentralGate.gate = Object.freeze({ kind: 'central' }); // v2.614 아키텍처 점검 태그(auth.js requireRole 참조)
   return requireCentralGate;
   function requireCentralGate(req, res, next) {
-    if (!centralEnabled()) return res.status(404).json(notFound);
-    if (!authed(req)) return res.status(403).json({ ok: false, reason: denyReason(req) });
+    // v2.771(점검 R6-F4-2): 개별 토큰 파일을 **읽지 못한** 동안의 거절은 '꺼짐(404)'·'토큰 불일치(403)' 가 아니라 503 이다 — 엣지는 404 를
+    //   '중앙 미지원' 으로 6시간 물러나고 403 을 인증 실패로 다룬다(조치가 틀린다). 허용 범위는 넓히지 않는다(거절만 바꾼다). 판정은 실패 갈래에서만.
+    if (!centralEnabled()) return agentTokensUnreadable(res) ? undefined : res.status(404).json(notFound);
+    if (!authed(req)) return agentTokensUnreadable(res) ? undefined : res.status(403).json({ ok: false, reason: denyReason(req) });
     next();
   }
+}
+
+/** v2.771(R6-F4-2): 토큰 파일을 읽지 못했으면 503 registryUnreadable 로 답하고 true(사유는 요약 — 원문 없음). */
+function agentTokensUnreadable(res) {
+  let e = null;
+  try { e = agentTokensLoadError(); } catch { e = null; }
+  if (!e) return false;
+  persistent503(res).json({ ok: false, reason: 'registryUnreadable', detail: `중앙 엣지 개별 토큰 파일(central-agent-tokens.json)을 읽지 못했습니다(${e.text}) — 엣지는 직전 상태를 유지하고 다시 시도합니다. 중앙 설정 디렉터리의 손상 보존본을 되돌리거나 토큰을 다시 발급하세요.`, since: e.at || null });
+  return true;
 }
 
 /**
@@ -430,6 +446,8 @@ centralRouter.post('/register-collector', requireCentral({ notFound: { ok: false
     return res.status(403).json({ ok: false, reason: bindDenied });
   }
   if (!b.collectorToken) return res.status(400).json({ ok: false, reason: 'collectorToken이 필요합니다(엣지의 export 인증 토큰).' });
+  // v2.771(점검 R6-F4-2): 수집 서버 등록부를 읽지 못했으면 검증 ping(엣지로 나가는 요청) 전에 503 — 등록부도 자동 저장을 거절한다(upsertCollectorFromAgent).
+  if (registryUnreadable(res, collectorsRegistryLoadError, '수집 서버')) return;
   // ⚠ v2.602(감사 SEC2602-01): urlHint·collectorToken 은 **글자·길이부터** 본다. 예전에는 길이 상한이 없어 '/' 12만 개 +
   //   'x' 인 urlHint 하나가 registry.js 의 `/\/+$/`(verifyDerivedCollectorUrl·normalize 두 번)에서 O(n²) 로 돌아 중앙
   //   이벤트 루프가 23초 멈췄다(동시 /api/auth/config 8.7초). 객체면 String() 이 던졌다.
@@ -477,6 +495,7 @@ centralRouter.post('/register-collector', requireCentral({ notFound: { ok: false
   // v2.604(감사 CEN2604-04): 검증 결과와 토큰 종류를 넘긴다 — 공유 토큰의 새 이름 생성은 개수 상한, 미검증 항목은 '아는 엣지' 가 아니다.
   const r = upsertCollectorFromAgent({ name, url, token: b.collectorToken, datacenter: regDc, unverified: !!unverified, shared: req.centralAuth?.mode !== 'agent' });
   if (!r.ok && r.code === 'insecure-http') console.warn(`[central] 엣지 자기등록 거부(평문 HTTP): ${name} → ${url} — ${r.reason}`);
+  if (!r.ok && r.code === 'registry-unreadable') return registryUnreadable(res, () => collectorsRegistryLoadError() || { at: r.registryUnreadable?.at ?? Date.now(), reason: '' }, '수집 서버'); // 검사 뒤(검증 ping 동안) 손상된 경합
   if (!r.ok && r.capped) { console.warn(`[central] 엣지 자기등록 상한: ${name} — ${r.reason}`); return res.status(429).json({ ok: false, reason: r.reason, capped: true }); }
   if (r.ok) _knownNames = { at: 0, set: null }; // 등록부가 바뀌었다 — '아는 엣지' 캐시를 버린다
   if (r.ok) console.log(`[central] 엣지 자기등록: ${name} → ${url}${regVer ? ` (v${regVer})` : ''}${unverified ? ` ⚠ 미검증: ${unverified}` : ''}`);
@@ -917,7 +936,12 @@ centralRouter.post('/guest-disk', requireCentral(), async (req, res) => {
   if (b.source === 'mock' || b.mock === true || isMockVcenter({ id: String(b.vcenterId || ''), name: b.vcenterName })) {
     return res.status(400).json({ ok: false, reason: `엣지 '${agent}' 가 mock(가짜) 게스트 디스크를 보냈습니다 — 저장하지 않습니다.`, mockBlocked: true });
   }
-  const vms = sanitizeGuestDiskVms(b.vms);
+  // v2.767(점검 R2-B2-02 — 재현): vmId 는 `${vcenterId}:` 네임스페이스여야 한다(최장 프리픽스 — vc.id 에 콜론). 아니면 남의 vCenter VM 행을
+  //   vm_id PK 로 덮어 그 이력·파티션 경로가 이 vCenter 범위 계정에 열렸다. 토큰 종류와 무관한 구조 규칙이라 공유 토큰에도 건다. 뺀 수는 dropped 로 밝힌다.
+  const gdKnownVcIds = (() => { try { return (loadVcenterConfig().vcenters || []).map((v) => String(v?.id || '')).filter(Boolean); } catch { return []; } })();
+  const gdOwn = splitVmsByOwner(sanitizeGuestDiskVms(b.vms), String(b.vcenterId), gdKnownVcIds);
+  const vms = gdOwn.kept;
+  if (gdOwn.foreign) console.warn(`[central] guest-disk: ${String(agent).slice(0, 64)} vc=${String(b.vcenterId).slice(0, 128)} 의 vCenter 네임스페이스가 아닌 VM ${gdOwn.foreign}개 드롭(위조 방지)`);
   const vcName = String(b.vcenterName || '').slice(0, 256) || String(b.vcenterId);
   // 시계열 ts 는 중앙 수신시각(단일 권위 시계)을 쓴다 — 엣지 wall-clock(generatedAt)을 그대로
   // 쓰면 NTP 미동기 엣지의 시계 오차가 prune(중앙 Date.now 기준)·신선도와 어긋난다(미래 skew =
@@ -930,9 +954,9 @@ centralRouter.post('/guest-disk', requireCentral(), async (req, res) => {
   console.log(`[central] guest-disk 수신: agent=${agent} vc=${b.vcenterId} vms=${vms.length} (series vm=${commit.vmSeriesRows} part=${commit.partSeriesRows})`);
   // v2.613(감사 CONTRACT2613-03): 적재하지 않고 **센** 행(v2.601 RECENT2601-01 — 숫자가 아닌 VM·파티션)을 응답에 싣는다. 예전에는 로그에만
   //   남아 엣지 상태·로그가 '보냈다(N대)' 인데 중앙에는 그만큼 없었다(v2.606 centralReply 규약의 누락). 뺀 것이 없으면 필드 자체가 없다(구버전 엣지 호환).
-  const gdSkipped = (Number(commit.skippedVms) || 0) + (Number(commit.skippedParts) || 0);
+  const gdSkipped = (Number(commit.skippedVms) || 0) + (Number(commit.skippedParts) || 0) + gdOwn.foreign;
   res.json({ ok: true, vcenterId: b.vcenterId, vms: vms.length, vmSeriesRows: commit.vmSeriesRows, partSeriesRows: commit.partSeriesRows,
-    ...(gdSkipped ? { dropped: { vms: Number(commit.skippedVms) || 0, parts: Number(commit.skippedParts) || 0 } } : {}) });
+    ...(gdSkipped ? { dropped: { vms: Number(commit.skippedVms) || 0, parts: Number(commit.skippedParts) || 0, ...(gdOwn.foreign ? { notOwned: gdOwn.foreign } : {}) } } : {}) });
 });
 
 // 사이트 위임 실시간 스파이크 수신(v2.510) — 엣지 vmseries 폴러가 저장한 같은 주기 결과를 push.
@@ -1309,6 +1333,8 @@ export function narrowGpuRow(x, dropped = { badPct: 0 }) {
   if (Object.hasOwn(x, 'memTotalMB')) out.memTotalMB = mbOrNull(x.memTotalMB);
   if (Object.hasOwn(x, 'tempC')) out.tempC = tempOrNull(x.tempC);
   if (Object.hasOwn(x, 'gpus')) { const n = numOrNull(x.gpus); out.gpus = n != null && n >= 0 && n <= 64 ? Math.floor(n) : null; }
+  // v2.769(점검 R4-D5-3): 응답 없는 GPU 장수 — gpus 와 같은 범위 규칙(밖이면 null = 모름). 구버전 엣지는 필드가 없다.
+  if (Object.hasOwn(x, 'gpuErrors')) { const n = numOrNull(x.gpuErrors); out.gpuErrors = n != null && n >= 0 && n <= 64 ? Math.floor(n) : null; }
   if (x.utilNA === true) out.utilNA = true;
   for (const k of ['host', 'vcenterId', 'name']) if (x[k] != null) out[k] = typeof x[k] === 'string' ? x[k].slice(0, 256) : (typeof x[k] === 'number' && Number.isFinite(x[k]) ? String(x[k]) : null);
   return out;
@@ -1731,9 +1757,21 @@ centralRouter.get('/pdu-config', requireCentral(), async (req, res) => {
   const { intervalsForEdge, pduIntervalsLoadError } = await import('../pdu/intervals.js');
   const ivPart = intervalsPartOrUnreadable(req, res, pduIntervalsLoadError, 'PDU 수집 주기', () => intervalsForEdge());
   if (!ivPart) return;
+  // v2.769(점검 R4-D4-02): 임계치도 싣는다 — 위임 PDU 경보는 엣지가 현장에서 평가·발송하는데(pdu/poller.js 의도) 엣지가 중앙 임계치를
+  //   몰라 중앙 화면에서 바꾼 값이 먹지 않았다. 중앙 파일이 있을 때만 싣고(thresholdsForEdge), 못 읽었으면 값 대신 thresholdsUnreadable
+  //   (엣지는 직전 값 유지 — 옛 엣지는 이 필드를 모르고 무시하므로 503 으로 막지 않는다). ⚠ 알림 채널 설정은 배포하지 않는다(pdu/thresholds.js 머리말).
+  // v2.770(점검 R5-E1-1): thresholdsForEdge 는 **관리자가 바꾼 키만**(enabled 제외) 돌려주고, 파일·지정 키가 없으면 `{}` 다 — {} 도 싣는다
+  //   (엣지가 v2.769 가 넣은 전체 세트를 지우는 '중앙 지정 없음' 신호. 필드를 빼면 엣지는 직전 값을 유지한다).
+  const { thresholdsForEdge, pduThresholdsLoadError } = await import('../pdu/thresholds.js');
+  let thPart = {};
+  try {
+    const thErr = pduThresholdsLoadError();
+    if (thErr) thPart = { thresholdsUnreadable: { reason: loadWhy(thErr.reason), since: thErr.at || null } };
+    else { const th = thresholdsForEdge(); if (th) thPart = { thresholds: th }; }
+  } catch (e) { thPart = { thresholdsUnreadable: { reason: loadWhy(e?.message || String(e)), since: Date.now() } }; }
   res.json({
     ok: true, agent, devices: devicesForAgent(agent), collectNow: takeRequestsForAgent(agent),
-    ...ivPart,
+    ...ivPart, ...thPart,
   });
 });
 
@@ -2213,6 +2251,63 @@ centralRouter.post('/isidu-data', requireCentral(), async (req, res) => {
   res.json({ ok: true, saved, ...(edgeDropSummary({ dropped: clean.dropped })), ...clampedPart, ...runDrops });
 });
 
+// ── Veeam 백업 상태 위임(v2.751) — vCenter 와 같은 법인에 있는 Veeam B&R 을 그 엣지가 REST 로 읽는다 ────────────────
+// GET /api/central/veeam-config?agent=<이름> — 이 엣지 몫 Veeam 서버(자격증명 포함: 엣지가 Veeam 에 로그인해야 한다 —
+// WAN TLS 검증 ON). **개별(엣지별) 토큰만** 받는다 — 이 파일 머리말의 신규 라우트 규약 1·2(v2.751 검토 #5): 공유 CENTRAL_TOKEN 은
+// 어느 엣지의 것인지 가릴 수 없어 `?agent=<아무 엣지>` 로 그 엣지의 Veeam 비밀번호를 받아 갈 수 있다(storage-config 의 레거시 동작을
+// 새 라우트에 복사하지 않는다). 공유 토큰 엣지는 설정 › 수집 서버에서 그 엣지의 개별 토큰을 발급해야 Veeam 위임을 쓴다.
+// 등록부를 못 읽으면 503(빈 목록을 ok 로 주면 엣지가 사본을 지운다 — v2.612).
+const VEEAM_AGENT_TOKEN_ONLY = 'Veeam 위임은 엣지별(개별) 토큰으로만 받습니다 — 공유 CENTRAL_TOKEN 으로는 엣지를 가릴 수 없습니다. 중앙 설정 › 수집 서버에서 이 엣지의 개별 토큰을 발급해 엣지 CENTRAL_TOKEN 에 넣으세요.';
+// v2.763(V2-3): 403 의도(v2.751 검토 #5)는 그대로 — 거부 기록의 사유만 사실대로('토큰 불일치' 가 아니라 '개별 토큰 필요').
+const veeamAgentTokenOnly = (res) => {
+  res.locals.ingestReject = { kind: REJECT_KIND.AUTH, reason: '개별 토큰 필요 — 공유 토큰으로는 Veeam 위임을 받지 않습니다(토큰 자체는 맞습니다)' };
+  return res.status(403).json({ ok: false, reason: VEEAM_AGENT_TOKEN_ONLY, agentTokenRequired: true });
+};
+centralRouter.get('/veeam-config', requireCentral(), async (req, res) => {
+  if (req.centralAuth?.mode !== 'agent') return veeamAgentTokenOnly(res);
+  const agent = req.centralAuth.agent;
+  if (!agent) return res.status(400).json({ ok: false, reason: 'agent가 필요합니다.' });
+  const R = await import('../veeam/registry.js');
+  if (registryUnreadable(res, R.registryLoadError, 'Veeam 서버')) return;
+  res.set('Cache-Control', 'no-store');
+  // v2.754: 'Veeam 계정' — 사람이 적은 것 + 중앙이 배운 것. 엣지가 자기 vCenter 이벤트에서 Veeam 스냅샷을 가리는 데 쓴다(비밀 아님).
+  const S = await import('../veeam/snapEvents.js');
+  //   계정 파일을 못 읽었으면 필드를 싣지 않는다(빈 목록을 보내면 엣지 사본이 지워진다 — 엣지는 필드가 없으면 그대로 둔다, v2.754 검토 #4).
+  res.json({ ok: true, agent, servers: R.serversForAgent(agent), ...(S.accountsUnreadable() ? {} : { vcAccounts: S.veeamAccounts() }) });
+});
+
+// POST /api/central/veeam-data — 엣지가 읽은 Veeam 결과. 저장 이름은 인증된 agent · 그 엣지에 배정된 서버 id 만 받는다.
+// 결과가 0건이어도 상태는 받는다(엣지 무음 실패 금지 규약). 결과가 있는데 등록부를 못 읽으면 503(엣지는 다음 주기에 다시 보낸다).
+centralRouter.post('/veeam-data', requireCentral(), async (req, res) => {
+  if (req.centralAuth?.mode !== 'agent') return veeamAgentTokenOnly(res); // v2.751 검토 #5
+  const agent = req.centralAuth.agent;
+  if (!agent) return res.status(400).json({ ok: false, reason: 'agent가 필요합니다.' });
+  const E = await import('../central/veeamEdge.js');
+  // v2.754: 엣지가 직접 이벤트를 모으는 vCenter 의 'Veeam 계정 스냅샷 생성' 요약 — 그 엣지가 맡은 site vCenter 만 받는다
+  //   (위임 인벤토리 소유자 일치 + edgeVcWriteDenied(requireSite)). 정제는 veeam/snapEvents.js sanitizeEdgeSnap.
+  let snap = null;
+  if (Array.isArray(req.body?.snapEvents)) {
+    const S = await import('../veeam/snapEvents.js');
+    // 소유권은 TOFU 없이 — 그 site vCenter 의 위임 인벤토리를 실제로 보내는 엣지만(인벤토리가 아직 없으면 받지 않는다 — 다음 push 에 다시 온다).
+    const inv = new Map(listInventory().map((e) => [String(e.vcenterId), String(e.agent || '').toLowerCase()]));
+    const me = String(agent).toLowerCase();
+    const r = S.sanitizeEdgeSnap(req.body.snapEvents, (vcId) => inv.get(vcId) === me && !edgeVcWriteDenied(vcId, { requireSite: true }));
+    S.putEdgeSnap(agent, r.items);
+    snap = { saved: r.items.length, ...(r.dropped.notOwned || r.dropped.bad ? { dropped: r.dropped } : {}) };
+    if (r.dropped.notOwned) console.warn(`[central] veeam-data: ${String(agent).slice(0, 64)} 가 맡지 않은 vCenter 의 이벤트 요약 ${r.dropped.notOwned}건 거절`);
+  }
+  const results = Array.isArray(req.body?.results) ? req.body.results : [];
+  if (!results.length) { const at = Date.now(); E.saveVeeamEdgeStatus(agent, req.body?.status, { at, results: 0, saved: 0 }, { clockOffsetMs: E.edgeClockOffset(req.body, at), now: at }); return res.json({ ok: true, saved: 0, ...(snap ? { snap } : {}) }); }
+  const R = await import('../veeam/registry.js');
+  if (registryUnreadable(res, R.registryLoadError, 'Veeam 서버')) { console.warn('[central] veeam-data: 중앙 Veeam 서버 등록부를 읽지 못해 503 으로 답했습니다(엣지는 다음 주기에 다시 보냅니다)'); return; }
+  // v2.762(G1): id → 지금 접속처 지문 — 접속처를 바꾼 뒤 옛 접속처에서 읽은 결과(엣지가 아직 pull 전)를 받지 않는다.
+  const owned = new Map(R.serversForAgent(agent).map((d) => [d.id, R.accessFingerprint(d)]));
+  const r = E.ingestVeeamPush(agent, req.body || {}, owned);
+  if (r.dropped.notOwned) console.warn(`[central] veeam-data: ${String(agent).slice(0, 64)} 배정되지 않은 서버 결과 ${r.dropped.notOwned}건 거절`);
+  const rejected = r.dropped.notOwned + r.dropped.bad + (r.dropped.stale || 0);
+  res.json({ ok: true, saved: r.saved, ...(rejected ? { rejected, dropped: r.dropped } : {}), ...(snap ? { snap } : {}) });
+});
+
 // GET /api/central/users-config?agent=<이름>
 centralRouter.get('/users-config', requireCentral(), (req, res) => {
   const agent = String(req.query.agent || req.get('X-Agent-Name') || '').trim();
@@ -2332,6 +2427,52 @@ centralRouter.post('/capture-result', requireCentral({ notFound: { ok: false } }
   const hostA = typeof b.result?.hostA === 'string' ? b.result.hostA.replace(/[\u0000-\u001f\u007f]/g, '').trim().slice(0, 255) : '';
   try { if (b.result?.ok) recordCapture(b.result, { source: 'manual', via: 'agent', ...(hostA ? { hostA } : {}) }); } catch { /* */ }
   res.json({ ok: true, ...(applied.late ? { late: true } : {}) });
+});
+
+// ── VM 백업 센터 법인 위임(v2.793) — vmclone/dispatch.js · agent/vmCloneWorker.js ──────────────────────────────
+// 엣지는 자기 담당 vCenter(등록값 remoteAgent 우선, 없으면 그 vCenter 인벤토리를 올린 엣지 — 둘이 다르면 어느 쪽에도 맡기지 않는다)의
+// 백업 잡 정의를 당기고, 인출한 작업(지금 실행·검증·복구·NFS 데이터스토어 연결)을 실행한 뒤 상태·회신을 올린다.
+// 3규약(이 파일 머리): 개별 토큰(agent 모드)만 · 저장 키는 req.centralAuth.agent 만 · 엣지는 X-Agent-Name 을 붙인다.
+function vmCloneAgentOnly(req, res) {
+  if (req.centralAuth.mode === 'agent') return req.centralAuth.agent;
+  res.status(403).json({ ok: false, reason: '이 엔드포인트는 엣지별 개별 토큰만 허용합니다(공유 CENTRAL_TOKEN 으로는 어느 법인의 백업인지 신뢰할 수 없습니다). 설정 > 엣지 토큰에서 이 엣지의 토큰을 발급해 주세요.' });
+  return null;
+}
+/** vCenter 등록부·위임 인벤토리 → 실행 위치. 등록부 파일이 있는데 읽지 못했으면 null(빈 목록으로 답하지 않는다). */
+async function vmCloneTargets() {
+  const cfg = loadVcenterConfig();
+  if (!cfg.file && fs.existsSync(path.join(config.configDir, 'vcenters.json'))) return null;
+  const { execTargets } = await import('../vmclone/dispatch.js');
+  return execTargets(cfg.vcenters || [], listInventory(), { mock: isMockModeForVmClone() });
+}
+// 데모(mock) 중앙은 엣지에 위임하지 않는다(데모 법인 잡은 중앙이 시뮬레이션한다 — vmclone/scheduler.js).
+function isMockModeForVmClone() { try { return getDataSourceForVmClone() === 'mock'; } catch { return false; } }
+
+centralRouter.get('/vm-clone-sync', requireCentral(), async (req, res) => {
+  const agent = vmCloneAgentOnly(req, res); if (!agent) return;
+  const { jobsLoadError, listJobs: listCloneJobs } = await import('../vmclone/store.js');
+  // 잡 파일을 못 읽었으면 503 — 빈 목록을 내려보내면 엣지가 위임 잡을 지운다(v2.631 EDGE2631-01 과 같은 구조).
+  if (settingsUnreadable(res, jobsLoadError, 'VM 백업 잡(vm-clone.json)')) return;
+  const targets = await vmCloneTargets();
+  if (!targets) return persistent503(res).json({ ok: false, reason: 'registryUnreadable', detail: '중앙 vCenter 등록부(vcenters.json)를 읽지 못했습니다 — 엣지는 위임 잡을 그대로 유지합니다.' });
+  const { syncPayloadFor, takeOps, releasedFor } = await import('../vmclone/dispatch.js');
+  const p = syncPayloadFor(agent, listCloneJobs(), targets);
+  const mine = (op) => { const tg = targets.get(String(op.vcenterId)); return tg?.where === 'edge' && tg.agent.toLowerCase() === String(agent).toLowerCase(); };
+  const ops = takeOps(agent, Date.now(), mine);
+  // have: 엣지가 들고 있는 위임 잡의 vCenter(쉼표 구분) → 이 엣지 담당이 아닌 것을 released 로 알려 엣지가 멈추게 한다(반증 검토 F3).
+  const have = typeof req.query.have === 'string' ? req.query.have.slice(0, 20_000).split(',') : [];
+  res.json({ ok: true, proto: 1, vcenters: p.vcenters, jobs: p.jobs, ops, released: releasedFor(agent, have, targets) });
+});
+
+centralRouter.post('/vm-clone-report', requireCentral(), async (req, res) => {
+  const agent = vmCloneAgentOnly(req, res); if (!agent) return;
+  const targets = await vmCloneTargets();
+  if (!targets) return persistent503(res).json({ ok: false, reason: 'registryUnreadable', detail: '중앙 vCenter 등록부(vcenters.json)를 읽지 못해 보고를 받지 않았습니다 — 다음 주기에 다시 보내세요.' });
+  const { sanitizeReport: sanitizeVmCloneReport, ingestReport: ingestVmCloneReport } = await import('../vmclone/dispatch.js');   // svcmon 의 ingestReport 와 이름을 겹치지 않는다(TDZ 스윕)
+  const clean = sanitizeVmCloneReport(req.body);
+  const r = ingestVmCloneReport(agent, clean, targets);
+  res.locals.ingestSummary = { accepted: r.jobs, dropped: r.droppedJobs + r.droppedAcks, rows: clean.jobs.length };
+  res.json(r);
 });
 
 // 베어메탈 스토리지 폴링 위임(v2.341): 엣지가 자기 이름의 df 수집 잡을 인출(claim) →
@@ -2506,6 +2647,8 @@ centralRouter.get('/link-check-config', requireCentral(), (req, res) => {
   // v2.632(감사 EDGE2632-03): 설정 파일을 못 읽었으면 기본값(꺼짐)을 enabled:false 로 내리지 않는다 — 화면이 '점검 꺼짐' 이라 말했다.
   //   env LINKCHECK_ENABLED 로 강제한 경우도 링크·주기·시한은 파일 값이라 같은 판단이다.
   if (settingsUnreadable(res, linkCheckSettingsLoadError, '통신 점검')) return;
+  // v2.771(점검 R6-F4-2): 수집 서버 등록부를 읽지 못했으면 빈 목록으로 엣지↔엣지 링크를 0개로 내려보내지 않는다(엣지는 직전 링크 유지).
+  if (registryUnreadable(res, collectorsRegistryLoadError, '수집 서버')) return;
   const s = loadLinkCheckSettings();
   let links = [];
   try {

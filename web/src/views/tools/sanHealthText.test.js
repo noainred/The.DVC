@@ -221,3 +221,14 @@ describe('v2.605 WEB2605-02/04', () => {
     expect(_et({ errors: 'unknown', errHeld: null, errSum: 0 })).toBe('카운터 없음');
   });
 });
+
+// v2.770(점검 R5-E3-1) — 카운터 리셋·기준선 행 없음은 '신규 0' 도 '기준선 없음' 도 아니다
+describe('v2.770 R5-E3-1 errorText', () => {
+  it('리셋 이후 0건은 보류, 이후 값이 있으면 최소 신규로 말한다', () => {
+    expect(_et({ errors: 'unknown', errHeld: 'reset', errSum: 0, errNew: null })).toBe('누적 0 (카운터 리셋 — 신규 판정 보류)');
+    expect(_et({ errors: 'bad', errHeld: 'reset', errSum: 500, errNew: null, errNewMin: 500 })).toBe('리셋 이후 최소 500 (누적 500)');
+  });
+  it('기준선에 이 포트가 없으면 그렇게 말한다(기준선 자체가 없는 것과 구분)', () => {
+    expect(_et({ errors: 'warn', errHeld: 'noRow', errSum: 300, errNew: null })).toBe('누적 300 (기준선에 이 포트 없음)');
+  });
+});

@@ -34,7 +34,9 @@ import { listDevices as listPdu } from '../../pdu/registry.js';
 import { edgeStorageReports } from '../../central/storageEdge.js';
 import { edgePduStatus } from '../../central/pduEdge.js';
 import { edgeSanSwitchSnapshots } from '../../central/sanSwitchEdge.js';
-import { demoDecorateVcenters } from '../../mock/demo/edge.js'; // v2.708: mock 이면 데모 엣지가 맡는 vCenter 를 위임으로 표시(입력만)
+import { demoDecorateVcenters, isDemoCollector, isDemoEdgeId, isDemoHost } from '../../mock/demo/edge.js'; // v2.708: mock 이면 데모 엣지가 맡는 vCenter 를 위임으로 표시(입력만)
+import { isDemoGuest } from '../../auth/demoGuest.js';
+import { maskFlowInputsForDemoGuest } from '../../commmap/demoMask.js';
 import { buildCommMap, RES_MAX_PER_KIND, DIRECT_MAX_PER_KIND, PUSH_FRESH_FACTOR, REASON_SEVERITY } from '../../commmap/build.js';
 
 const adminOnly = requireRole('admin');
@@ -89,18 +91,36 @@ export async function gatherCommInputs(snap, sourceErrors) {
   };
 }
 
+/**
+ * v2.768(점검 R3-C2-2): 데모 계정 판본의 판정 — 사람이 등록한 항목을 가리고 데모 엣지·데모 항목만 남긴다(세 지도 공용).
+ * 데모 판정은 기존 함수(isDemoCollector·isDemoEdgeId·isDemoHost) 그대로다.
+ */
+export const DEMO_FLOW_PREDS = Object.freeze({
+  isDemoCollector,
+  isDemoAgent: isDemoEdgeId,
+  isDemoItem: (x) => isDemoEdgeId(x?.id),
+  isDemoOrigin: (u) => { try { return isDemoHost(new URL(String(u || '')).hostname); } catch { return false; } },
+});
+/** 이 요청이 데모 판본을 받는가 + memoJson 키 축(관리자 판본과 같은 칸에 섞이지 않게). */
+export function demoFlowKey(req) { return isDemoGuest(req.user) ? 'demo' : 'full'; }
+
 export function registerCommMap(api) {
   api.get('/tools/comm-map', adminOnly, fullScopeOnly, async (req, res) => {
+    const demo = demoFlowKey(req) === 'demo';
     await memoJson(req, res, 'comm-map', async (snap) => {
       const sourceErrors = [];
-      const map = buildCommMap(await gatherCommInputs(snap, sourceErrors));
+      const inputs0 = await gatherCommInputs(snap, sourceErrors);
+      // v2.768(점검 R3-C2-2): 데모 계정은 사람이 등록한 엣지·vCenter·장비를 가린 입력으로 조립한다(가린 수는 demoMasked).
+      const { inputs, masked } = demo ? maskFlowInputsForDemoGuest(inputs0, DEMO_FLOW_PREDS) : { inputs: inputs0, masked: null };
+      const map = buildCommMap(inputs);
       return {
         ok: true, ...map,
+        ...(demo ? { demoMasked: masked } : {}),
         central: { version: currentVersion(), agentName: config.agent?.name || '', centralTokenSet: !!config.central?.token, dataSource: snap.source || '', generatedAt: snap.generatedAt || null },
         limits: { resMaxPerKind: RES_MAX_PER_KIND, directMaxPerKind: DIRECT_MAX_PER_KIND, pushFreshFactor: PUSH_FRESH_FACTOR },
         reasonSeverity: REASON_SEVERITY,
         sourceErrors,
       };
-    });
+    }, { extraKey: demoFlowKey(req) });
   });
 }

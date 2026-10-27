@@ -93,6 +93,7 @@ test('ARCH-1 스윕 — configDir JSON 을 읽고 원자 쓰기로 저장하는 
     'idrac/scanLog.js', 'net/captureHistory.js',          // 이력 링버퍼(캐시 성격 — v2.516 활동 로그와 같은 판단)
     'auth/sessions.js',                                   // 세션 — 손상이면 재로그인(v2.580 판단)
     'bmusage/notify.js',                                  // 알림 억제 상태 — 손상이면 재알림 1회
+    'veeam/licenseWatch.js',                              // v2.788 라이선스 만료 알림 단계 — 손상이면 단계당 재알림 1회(bmusage/notify 와 같은 판단)
     'rma/agent.js',                                       // 엣지 RMA 에이전트 상태
     'insights/dbLocation.js', // 설정 — 손상이면 기본값(별도 감사 대상). finops·dailyReport 는 v2.595 에 preserveCorrupt 를 받았다
     'routes/admin/nsxImport.js', 'central/inventory.js', 'central/agentTokens.js', // 자체 보존 로직(renameSync .corrupt) 또는 저장소가 아닌 경로(nsxImport 는 가져오기 파일 읽기) — v2.583: scanStore·packageSettings 는 '자체 보존' 이 사실이 아니어서 빼고 고쳤다

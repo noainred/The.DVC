@@ -28,10 +28,43 @@ export const LINK_ID_MAX = 256;
 export const LINK_TO_MAX = 128;
 /** 오래된 보고는 '지금 상태' 가 아니다(기본 3시간 — v2.548 규약과 같은 값). */
 export const REPORT_STALE_MS = Math.max(600_000, Number(process.env.LINKCHECK_REPORT_STALE_MS) || 3 * 3_600_000);
+/** 주기 기반 낡음 경계의 여유(엣지 한 주기의 점검 소요·전송 지연을 덮는다). */
+export const REPORT_STALE_SLACK_MS = 10 * 60_000;
+/**
+ * v2.770(점검 R5-E1-3): 엣지 보고 낡음 경계 = max(REPORT_STALE_MS, 주기 × 3 + 여유)(순수 — gpu/guestWhy.js edgeReportStaleMs 선례).
+ *   엣지 워커는 주기마다 한 번 보고하고(agent/linkCheckWorker.js) 주기는 6시간까지 허용된다(linkcheck/settings.js MAX_INTERVAL_MS) —
+ *   고정 3시간이면 주기 > 3h 인 정상 엣지의 링크가 매 주기 후반 '보고 오래됨'(no-data) 이었다. 주기를 모르면 고정값 그대로(넓히지 않는다).
+ *   서버 `stale` 과 화면에 내려가는 `reportStaleMs` 는 **이 함수 하나**로 만든다(판정 복제 금지).
+ */
+export function reportStaleLimitMs(intervalMs) {
+  const iv = (intervalMs == null || intervalMs === '') ? NaN : Number(intervalMs);
+  return Math.max(REPORT_STALE_MS, Number.isFinite(iv) && iv > 0 ? iv * 3 + REPORT_STALE_SLACK_MS : 0);
+}
+/** 지금 설정의 점검 주기로 낡음 경계를 낸다. 설정을 못 읽으면 고정값(넓히지 않는다). */
+export function currentReportStaleMs() {
+  try { return reportStaleLimitMs(loadLinkCheckSettings()?.intervalMs); } catch { return REPORT_STALE_MS; }
+}
+/**
+ * v2.770(점검 R5-E1-3): 엣지 결과 ts(엣지 시계)를 **수신 시각 기준**으로 환산한다(순수).
+ *   예전에는 엣지 ts 를 그대로 적재하고 미래만 잘랐다 — 엣지 시계가 3×주기(기본 15분)보다 늦으면 갓 잰 정상 링크가
+ *   늘 '오래된 측정' 이었다. 엣지가 보고 본문에 실은 자기 시각(`body.at`)과 측정 ts 의 차이(= 엣지 시계로 잰 측정 나이)는
+ *   시계 차이에 흔들리지 않으므로, 중앙 수신 시각에서 그 나이를 뺀다. `body.at` 이 없으면(옛 본문) 예전 규칙(미래만 자름).
+ * @param {*} rawTs  엣지가 보낸 측정 ts
+ * @param {*} edgeAt 엣지가 보낸 보고 시각(엣지 시계)
+ * @param {number} at 중앙 수신 시각
+ */
+export function edgeTsToCentral(rawTs, edgeAt, at) {
+  const n = iOr(rawTs);
+  if (!(n > 0)) return at;
+  const ea = iOr(edgeAt);
+  if (!(ea > 0)) return n <= at + 5 * 60_000 ? n : at;
+  const ageOnEdge = Math.max(0, ea - n);            // 측정이 보고보다 뒤면(엣지 오류) 나이 0
+  return Math.max(1, at - ageOnEdge);
+}
 
 const _reports = new Map();    // agent -> { at, version, links, ok, failed, skipped, rejected, omitted }
 const t = (v) => String(v ?? '').trim();
-const iOr = (v) => { const n = Number(v); return Number.isFinite(n) ? Math.round(n) : null; };
+function iOr(v) { if (v == null || v === '') return null; const n = Number(v); return Number.isFinite(n) ? Math.round(n) : null; }
 
 /** 단계 객체를 **아는 키만** 남겨 담는다(엣지가 보낸 임의 필드를 DB·화면에 흘리지 않게). */
 function sanitizeSteps(raw) {
@@ -127,7 +160,7 @@ export async function putEdgeLinkReport(agent, body = {}) {
     };
     toSave.push({
       link: safeLink,
-      ts: (() => { const n = iOr(r.ts); return (n && n > 0 && n <= at + 5 * 60_000) ? n : at; })(),
+      ts: edgeTsToCentral(r.ts, body?.at, at),       // v2.770(점검 R5-E1-3): 수신 시각 기준 — 원본 엣지 ts 는 detail.edgeTs
       verdict: {
         ok: v.ok === true,
         phase: capTrim(v.phase, 20), failKind: capTrim(v.failKind, 40),
@@ -135,7 +168,7 @@ export async function putEdgeLinkReport(agent, body = {}) {
       },
       steps,
       summary: capTrim(r.summary, 300),
-      detail: { steps, link: safeLink, byEdge: ag },
+      detail: { steps, link: safeLink, byEdge: ag, edgeTs: iOr(r.ts) },
       byNode: ag,
     });
   }
@@ -168,16 +201,22 @@ export async function putEdgeLinkReport(agent, body = {}) {
   };
 }
 
-/** 그 엣지의 마지막 보고. `stale` 은 **모듈이 찍은 시각**으로 판정한다(v2.548 테스트 규약). */
-export function edgeLinkReport(agent) {
+/**
+ * 그 엣지의 마지막 보고. `stale` 은 **모듈이 찍은 시각**으로 판정한다(v2.548 테스트 규약).
+ * v2.770(점검 R5-E1-3): 경계는 reportStaleLimitMs(주기) — `staleMs` 를 넘기지 않으면 지금 설정의 주기로 낸다.
+ */
+export function edgeLinkReport(agent, { staleMs } = {}) {
   const r = _reports.get(t(agent));
   if (!r) return null;
-  return { ...r, stale: (Date.now() - r.at) > REPORT_STALE_MS, ageMs: Date.now() - r.at };
+  const limit = Number(staleMs) > 0 ? Number(staleMs) : currentReportStaleMs();
+  const ageMs = Date.now() - r.at;
+  return { ...r, stale: ageMs > limit, ageMs, staleMs: limit };
 }
 
-export function allEdgeLinkReports() {
+export function allEdgeLinkReports({ staleMs } = {}) {
+  const limit = Number(staleMs) > 0 ? Number(staleMs) : currentReportStaleMs(); // 설정 파일은 한 번만 읽는다
   const out = {};
-  for (const ag of _reports.keys()) out[ag] = edgeLinkReport(ag);
+  for (const ag of _reports.keys()) out[ag] = edgeLinkReport(ag, { staleMs: limit });
   return out;
 }
 

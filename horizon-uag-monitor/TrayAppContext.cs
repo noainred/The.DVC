@@ -27,6 +27,7 @@ public sealed class TrayAppContext : ApplicationContext
     private HealthStatus _lastOverall = (HealthStatus)(-1);
     private readonly System.Windows.Forms.Timer _uiTimer = new() { Interval = 1000 };
     private volatile bool _dirty;
+    private int _uiTick;
 
     public TrayAppContext(string? dbPath = null, bool startHidden = false)
     {
@@ -53,7 +54,9 @@ public sealed class TrayAppContext : ApplicationContext
         _monitor.Updated += OnMonitorUpdated;
 
         // 트레이 아이콘/툴팁 갱신은 UI 스레드 타이머로 디바운스(점검 완료가 몰려도 초당 최대 1회 DB 조회).
-        _uiTimer.Tick += (_, _) => { if (!_exiting && _dirty) { _dirty = false; RefreshTray(); } };
+        // v2.767(점검 R2-B5-1): 점검 완료가 없어도 10초마다 다시 그린다 — 결과가 오래되면 '대기' 로 바뀌어야 하는데
+        //   점검·저장이 멈추면 Updated 도 오지 않는다(스냅샷은 DB 가 그대로면 캐시라 가볍다).
+        _uiTimer.Tick += (_, _) => { if (!_exiting && (_dirty || (++_uiTick % 10 == 0))) { _dirty = false; RefreshTray(); } };
         _uiTimer.Start();
 
         if (!startHidden) _main.Show();
@@ -85,24 +88,14 @@ public sealed class TrayAppContext : ApplicationContext
     {
         if (_exiting) return;
         var snap = _monitor.Snapshot(); // 1회 조회로 카운트와 전체 상태 모두 계산(중복 DB 조회 제거).
-        int up = 0, warn = 0, down = 0, unknown = 0;
-        foreach (var es in snap)
-        {
-            if (!es.Endpoint.Enabled) continue;
-            switch (es.Status)
-            {
-                case HealthStatus.Up: up++; break;
-                case HealthStatus.Warn: warn++; break;
-                case HealthStatus.Down: down++; break;
-                default: unknown++; break;
-            }
-        }
-        var overall = (up + warn + down + unknown) == 0 ? HealthStatus.Unknown
-            : down > 0 ? HealthStatus.Down
-            : warn > 0 ? HealthStatus.Warn
-            : (up == 0 && unknown > 0) ? HealthStatus.Unknown
-            : HealthStatus.Up;
-        _tray.Text = Truncate($"Horizon UAG: 정상 {up} / 주의 {warn} / 위험 {down}", 63);
+        // v2.767(점검 R2-B5-1): 오래된 결과는 대기로 센다(알람 엔진과 같은 판정) + 저장 실패 중이면 그 사실을 먼저 보인다.
+        var saveFails = _monitor.SaveFailures;
+        var c = MonitorRules.CountStatuses(snap, DateTime.UtcNow, MonitorRules.DefaultMinStale, saveFails > 0);
+        var overall = c.Overall;
+        var text = saveFails > 0
+            ? $"Horizon UAG: 결과 저장 실패 {saveFails}회 — error.log 확인"
+            : $"Horizon UAG: 정상 {c.Up} / 주의 {c.Warn} / 위험 {c.Down}" + (c.Unknown > 0 ? $" / 대기 {c.Unknown}" : "");
+        _tray.Text = Truncate(text, 63);
         UpdateTrayIcon(overall);
         try
         {

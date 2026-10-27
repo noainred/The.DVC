@@ -91,7 +91,8 @@ test('sshGateway: mappingAccessIssue 소유·scope 재검사 + handleConnection(
   const s = read('proxy/sshGateway.js');
   assert.match(s, /export function mappingAccessIssue\(user, m\)/);
   assert.match(s, /m\.owner !== user\.username/);       // 소유자 없는 매핑도 admin 전용
-  assert.match(s, /targetHostScopeIssue\(store\.get\(\)/); // scope 재검사
+  // v2.770(점검 R5-E5-1): 대상 문자열만이 아니라 (vcenterId, targetHost) 쌍 + 매핑의 중계로 재검사한다(판정은 targetHostScope.js).
+  assert.match(s, /mappingTargetScopeIssue\(store\.get\(\)/); // scope 재검사
   assert.match(s, /handleConnection\(ws, user\)/);
   const g = read('proxy/guacdTunnel.js');
   assert.match(g, /mappingAccessIssue\(user, m\)/);

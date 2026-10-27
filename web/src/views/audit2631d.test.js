@@ -6,8 +6,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { stripComments } from '../test/_stripComments.js';
 import { recentAlarms, alarmPanelText } from './overviewAlarmsText.js';
-import { corpSiteStatus, corpTotalLabel } from './corpSiteStatus.js';
-import { serverCorpRows } from '../version_6/v6Data.js';
+import { corpSiteStatus } from './corpSiteStatus.js';
 import { bmcPollSummary, BMC_TONE_COLOR } from './bmcPollText.js';
 import { dsTrendMeta } from './dsTrendKpiText.js';
 import { serverRatio, ratioLabel } from './virtRatioText.js';
@@ -69,25 +68,6 @@ describe('WEB2631-03 — 법인별 서버 표: 첫 수집 중·연결 실패·�
     expect(corpSiteStatus({ status: 'unreachable' })).toMatchObject({ countable: false, mark: '연결 실패' });
     expect(corpSiteStatus({ status: 'unreachable', stale: true, metrics: { hosts: 3 } })).toMatchObject({ countable: true, mark: '낡은 값' });
   });
-  it('V6 serverCorpRows: pending vCenter 의 호스트·VM·합계는 null, 합계 표지는 제외 개수를 밝힌다', () => {
-    const ov = {
-      sites: [
-        { id: 'a', status: 'connected', metrics: { hosts: 4, vms: 20, vmsPoweredOn: 18 } },
-        { id: 'b', status: 'pending', metrics: { hosts: 0, vms: 0 } },
-      ],
-      physicalByCorp: { byVcenterPhysicalOnly: { a: 1, b: 2 } },
-    };
-    const rows = serverCorpRows(ov);
-    expect(rows[0]).toMatchObject({ hosts: 4, vms: 20, total: 5 });
-    expect(rows[1]).toMatchObject({ hosts: null, vms: null, total: null, vmsOn: null, physOnly: 2, mark: '첫 수집 중' });
-    expect(corpTotalLabel(rows)).toMatch(/1곳 제외/);
-    expect(corpTotalLabel(rows.slice(0, 1))).toBe('합계');
-  });
-  it('V6 서버 메뉴 합계 행이 부분 합 표지를 쓰고 행에 상태 표지를 단다', () => {
-    const s = src('version_6/pages/MenuPage.jsx');
-    expect(s).toMatch(/\{corpTotalLabel\(rows\)\}/);
-    expect(s).toMatch(/r\.mark &&/);
-  });
   it('개발 포탈 개요도 같은 판정을 쓴다', () => {
     const s = src('views/Overview.jsx');
     expect(s).toMatch(/corpSiteStatus\(s\)/);
@@ -123,14 +103,6 @@ describe('WEB2631-05 — Explore Top 목록은 값 없음을 null%·null GB 로 
   });
 });
 
-describe('WEB2631-06 — V4 전산 화면 물리 서버 KPI 는 ESXi 호스트 수로 대체하지 않는다', () => {
-  it('Compute.jsx 가 physicalServersKpi 를 쓴다', () => {
-    const s = src('version_4/pages/Compute.jsx');
-    expect(s).toMatch(/physicalServersKpi\(/);
-    expect(s).not.toMatch(/phys\?\.servers \? fmtInt\(phys\.servers\) : fmtInt\(g\?\.hosts\)/);
-  });
-});
-
 describe('WEB2631-07 — 폴링하지 않은 주기의 BMC 응답은 초록 0% 가 아니다', () => {
   it('ok+failed=0 이면 pct null · 중립 · 사유', () => {
     const st = bmcPollSummary({ ok: 0, failed: 0, skipped: '긴급중단', results: [] });
@@ -150,8 +122,8 @@ describe('WEB2631-07 — 폴링하지 않은 주기의 BMC 응답은 초록 0% �
 });
 
 describe('WEB2631-08 — 스토리지 사용률 KPI 는 사용량 미상 DS 제외를 말한다', () => {
-  it('V4 스토리지·관제 콘솔 스토리지', () => {
-    for (const f of ['version_4/pages/Storage.jsx', 'console/pages/ConsoleStorage.jsx']) {
+  it('관제 콘솔 스토리지(v2.747 V4 스토리지는 셸과 함께 지웠다)', () => {
+    for (const f of ['console/pages/ConsoleStorage.jsx']) {
       expect(src(f)).toMatch(/storageUsageUnknownNote\(g\)/);
     }
   });
@@ -190,11 +162,4 @@ describe('WEB2631-12 — vCenter 상세는 vm-clone 도구 권한이 있을 때�
   it('toolAllowed 게이트', () => {
     expect(src('views/VCenterDetail.jsx')).toMatch(/usePolling\(toolAllowed\('vm-clone'\) \? '\/tools\/vm-clone\/badges' : null/);
   });
-});
-
-// v2.631 리드 통합: V4 설비의 BMC 응답 KPI 도 bmcPollSummary 를 쓴다(시도 0대를 초록 0% 로 보이지 않는다).
-it('WEB2631-07 V4 Facility 가 bmcPollSummary 를 쓴다', () => {
-  const src = stripComments(fs.readFileSync(fileURLToPath(new URL('../version_4/pages/Facility.jsx', import.meta.url)), 'utf8'));
-  expect(src).toMatch(/bmcPollSummary\(lr\)/);
-  expect(src).not.toMatch(/Math\.max\(1, \(lr\.ok/);
 });

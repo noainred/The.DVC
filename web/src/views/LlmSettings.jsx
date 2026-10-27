@@ -78,7 +78,7 @@ export default function LlmSettings() {
         <div className="muted" style={{ fontSize: 12, margin: '4px 0 8px' }}>별도 서버에 SSH로 접속해 Ollama를 설치하고 0.0.0.0:11434로 노출, (선택)모델 pull 후 위 설정에 자동 연결합니다. root 권한 필요.</div>
         <div className="spec-grid">
           <label>SSH 호스트<input className="input" value={dep.host} onChange={setD('host')} placeholder="10.40.0.9" /></label>
-          <label>포트<input className="input" type="number" value={dep.port} onChange={setD('port')} /></label>
+          <label>SSH 포트<input className="input" type="number" value={dep.port} onChange={setD('port')} /></label>
           <label>사용자(root)<input className="input" value={dep.username} onChange={setD('username')} /></label>
           <label>비밀번호<input className="input" type="password" value={dep.password} onChange={setD('password')} placeholder="(키 사용 시 비움)" /></label>
           <label>설치 모드

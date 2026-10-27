@@ -4,6 +4,7 @@
  * 작업 정의는 CONFIG_DIR/guest-scans.json(자격증명 포함, 0600).
  */
 
+import { randomBytes } from 'node:crypto';
 import fs from 'node:fs';
 import { morefOf } from '../vcenter/registry.js';   // v2.447: vcenterId 에 콜론이 있어도 안전한 moref 추출(감사 B1)
 import path from 'node:path';
@@ -69,7 +70,9 @@ function posOr(v, max, def) {
 
 export function saveGuestScan(body = {}) {
   load();
-  const id = body.id || `gscan_${Date.now().toString(36)}`;
+  // v2.783: 새 id 는 시각만으로 만들지 않는다 — 같은 밀리초에 두 개를 만들면 id 가 겹쳐 새 항목이 기존 항목의 '수정' 이 되고 이전 값을 물려받았다
+  //   (CI 빠른 러너에서 audit2600e LO2600-0x 가 [1440,…] 을 받은 원인). 시각 + 임의 6자리.
+  const id = body.id || `gscan_${Date.now().toString(36)}${randomBytes(3).toString('hex')}`;
   // v2.600 LO2600-02: 수정 저장의 빈 숫자 칸은 **이전 값 유지**(새 항목일 때만 기본값). 예전 `Number('') || 60` 은
   // 기존 1440분 주기를 60분으로 되돌려 게스트 로그인 빈도가 24배가 됐다(adminOnly API 직접 호출 경로 — v2.596 규약).
   const prev = cache.find((x) => x.id === id) || {};

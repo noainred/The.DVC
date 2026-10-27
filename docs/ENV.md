@@ -1,9 +1,9 @@
 # 환경변수 레퍼런스 (자동 생성)
 
-`server/src` 가 실제로 읽는 환경변수 **661개**를 코드에서 추출한 목록이다.
+`server/src` 가 실제로 읽는 환경변수 **689개**를 코드에서 추출한 목록이다.
 설치본에서는 `/etc/vmware-portal/portal.env` 에 `KEY=값` 으로 넣고 서비스를 재시작한다.
 
-- 생성: `node scripts/env-doc.mjs` (마지막 갱신 2026-10-20)
+- 생성: `node scripts/env-doc.mjs` (마지막 갱신 2026-10-27)
 - **이 파일을 직접 고치지 말 것** — 코드가 진실의 원천이며 다음 실행에서 덮어써진다.
 - `portal.env.example` 에 예시가 있는 키는 ✅, 없는 키는 빈칸으로 표시한다.
 - 기본값 칸이 비어 있으면 코드에서 한 줄로 추출하지 못한 것이다(해당 파일을 참조).
@@ -54,7 +54,7 @@
 | `WAN_TLS_CA_FILE` | `''` | ✅ | util/resilientFetch.js |
 | `WAN_TLS_INSECURE` | `기본 적용('true' 로 끄기)` | ✅ | util/resilientFetch.js |
 
-## 공통 (196)
+## 공통 (207)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
@@ -233,11 +233,22 @@
 | `VC_WAIT_UPDATES` | `기본 아님('true' 일 때만 적용)` |  | config.js |
 | `VC_WAIT_UPDATES_FULL_MS` |  |  | config.js |
 | `VCENTERS_EXAMPLE_FALLBACK` | `기본 아님('true' 일 때만 적용)` |  | config.js |
+| `VEEAM_CONCURRENCY` | `4` |  | veeam/poller.js |
+| `VEEAM_EM_DEADLINE_MS` |  |  | veeam/em/poller.js |
+| `VEEAM_EM_POLL_MS` | `900000` |  | veeam/em/poller.js |
+| `VEEAM_EM_VM_BUDGET_MS` |  |  | veeam/em/client.js |
+| `VEEAM_HTTP_TIMEOUT_MS` |  |  | veeam/client.js, veeam/em/client.js |
+| `VEEAM_POLL_MS` | `600000` |  | veeam/poller.js |
+| `VEEAM_SERVER_DEADLINE_MS` |  |  | veeam/poller.js |
+| `VEEAM_SNAP_CONCURRENCY` | `6` |  | veeam/snapCollector.js |
+| `VEEAM_TLS_VERIFY` |  |  | veeam/client.js, veeam/em/client.js |
 | `VM_CFG_PER_CYCLE` |  |  | config.js |
 | `VM_CFG_REFRESH_MS` |  |  | config.js |
 | `VM_CFG_SCAN` | `기본 적용('false' 로 끄기)` |  | config.js |
 | `VM_DEV_PER_CYCLE` |  |  | config.js |
 | `VM_DEV_REFRESH_MS` |  |  | config.js |
+| `VM_LIST_XLSX_TIMEOUT_MS` | `180000` |  | veeam/vmListXlsx.js |
+| `VM_LIST_XLSX_WORKER` | `'1'` |  | veeam/vmListXlsx.js |
 | `VMDNS_HISTORY_INTERVAL_MS` | `600000` |  | vmdns/poller.js |
 | `VMDNS_HISTORY_RETENTION_DAYS` | `365` |  | vmdns/poller.js |
 | `VMSERIES_CONCURRENCY` | `4` |  | vmseries/poller.js |
@@ -255,11 +266,12 @@
 | `XFER_TEST_ENABLED` | `''` |  | xferspeed/serve.js |
 | `XFER_TEST_MAX_BYTES` | `67108864` |  | xferspeed/serve.js |
 
-## 로그 (2)
+## 로그 (3)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
 | `LOGS_META_TTL_MS` | `300000` |  | logs/db.js |
+| `VCLOGS_BATCH_ROWS` |  |  | logs/poller.js |
 | `VCLOGS_CONCURRENCY` | `6` |  | logs/poller.js |
 
 ## 메트릭 수집 (13)
@@ -280,11 +292,12 @@
 | `VMPERF_RETENTION_DAYS` | `90` |  | metrics/vmperfSettings.js |
 | `VMPERF_TRACK_TOTAL` | `기본 적용('false' 로 끄기)` |  | metrics/vmperfSettings.js |
 
-## 백업 (1)
+## 백업 (2)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
 | `BACKUP_STARTUP_DELAY_MS` |  |  | backup/settings.js |
+| `CONFIG_DIR` |  | ✅ | backup/stagedRestore.js, config.js 외 2 |
 
 ## 베어메탈 스토리지 (8)
 
@@ -348,7 +361,7 @@
 | `SVCMON_WORKERS` |  |  | svcmon/capacity.js, svcmon/pool.js |
 | `SVCMON_XLSX_MAX_UNCOMPRESSED_BYTES` | `64` |  | svcmon/formats.js |
 
-## 수집 서버 (8)
+## 수집 서버 (9)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
@@ -356,12 +369,13 @@
 | `CENTRAL_SELF_REGISTER_UNVERIFIED_MAX` | `16` |  | collector/registry.js |
 | `COLLECTOR_HTTP_ALLOW` | `''` | ✅ | collector/transportPolicy.js |
 | `COLLECTOR_PULL_CYCLE_MAX_MS` |  |  | collector/puller.js |
+| `COLLECTOR_REMOTE_BYHOST_MAX` |  |  | collector/remoteInventory.js |
 | `COLLECTOR_REMOTE_SERVERS_MAX` | `20000` |  | collector/remoteInventory.js |
 | `EDGE_PUSH_TIMEOUT_MS` |  |  | collector/upgradePush.js, upgrade/upgrade.js |
 | `POWER_CURRENT_STALE_MS` | `2` |  | collector/state.js, idrac/service.js |
 | `UPGRADE_PUSH_CONCURRENCY` | `4` |  | collector/upgradePush.js |
 
-## 스토리지 수집 (24)
+## 스토리지 수집 (26)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
@@ -388,6 +402,8 @@
 | `STORAGE_UNISPHERE_PORT` | `8443` |  | storage/collectors/powermax.js |
 | `STORAGE_UNITY_PORT` | `443` |  | storage/collectors/unity.js |
 | `STORAGE_VPLEX_PORT` | `443` |  | storage/collectors/vplex.js |
+| `STORAGE_XLSX_TIMEOUT_MS` | `300000` |  | storage/usageXlsx.js |
+| `STORAGE_XLSX_WORKER` | `'1'` |  | storage/usageXlsx.js |
 | `STORAGE_XMS_PORT` | `443` |  | storage/collectors/xtremio.js |
 
 ## 시스템 (1)
@@ -411,7 +427,7 @@
 | `UPGRADE_TLS_INSECURE` | `기본 적용('true' 로 끄기)` |  | upgrade/upgradeAgent.js |
 | `UPGRADE_VERSIONS_MAX_BYTES` | `1048576` |  | upgrade/versionsDoc.js |
 
-## 엣지 에이전트 (42)
+## 엣지 에이전트 (47)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
@@ -456,12 +472,18 @@
 | `SVCMON_PUSH_GZIP` | `기본 적용('false' 로 끄기)` |  | agent/svcmonPush.js |
 | `SVCMON_PUSH_INTERVAL_MS` |  |  | agent/svcmonPush.js |
 | `SVCMON_PUSH_TIMEOUT_MS` |  |  | agent/svcmonPush.js |
+| `VEEAM_CONFIG_PULL_MS` | `300000` |  | agent/veeamConfigPull.js |
+| `VMCLONE_DELEGATION` | `기본 적용('false' 로 끄기)` |  | agent/vmCloneWorker.js |
+| `VMCLONE_REPORT_TIMEOUT_MS` |  |  | agent/vmCloneWorker.js |
+| `VMCLONE_SYNC_MS` |  |  | agent/vmCloneWorker.js |
+| `VMCLONE_SYNC_TIMEOUT_MS` |  |  | agent/vmCloneWorker.js |
 | `VMSERIES_LOCAL_SETTINGS` | `기본 적용('true' 로 끄기)` |  | agent/vmSeriesConfigPull.js |
 
-## 원격 명령(RMA) (37)
+## 원격 명령(RMA) (38)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
+| `AGENT_CENTRAL_TOKEN` |  |  | config.js, rma/agent.js |
 | `AGENT_NAME` |  | ✅ | config.js, rma/agent.js |
 | `CENTRAL_URL` | `''` | ✅ | config.js, rma/agent.js |
 | `COLLECTOR_DATACENTER` |  | ✅ | config.js, rma/agent.js |
@@ -536,11 +558,10 @@
 | `SSH_PTY_ROWS` | `200` |  | proxy/sshExec.js |
 | `SSH_READY_TIMEOUT_MS` |  |  | proxy/sshExec.js, proxy/sshGateway.js |
 
-## 인사이트 (7)
+## 인사이트 (6)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
-| `CONFIG_DIR` |  | ✅ | config.js, insights/dbLocation.js 외 1 |
 | `DB_HEALTH_COUNT_MAX_BYTES` | `512` |  | insights/dbHealth.js |
 | `DB_HEALTH_FULL_MAX_BYTES` | `256` |  | insights/dbHealth.js |
 | `DB_HEALTH_QUICK_MAX_BYTES` | `512` |  | insights/dbHealth.js |
@@ -583,7 +604,7 @@
 | `RELAYTOPO_CONCURRENCY` | `4` | ✅ | relaytopo/ops.js |
 | `RELAYTOPO_SSH_TIMEOUT_MS` | `45000` | ✅ | relaytopo/ops.js |
 
-## 중앙(위임 수집) (56)
+## 중앙(위임 수집) (57)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
@@ -638,6 +659,7 @@
 | `PORTALCHECK_PULL_TIMEOUT_MS` | `20000` |  | central/tokenCheckPull.js |
 | `SVCMON_EDGE_MAX_AGENTS` |  |  | central/svcmonEdge.js |
 | `SVCMON_EDGE_MAX_ROWS` |  |  | central/svcmonEdge.js |
+| `SVCMON_EDGE_REGRESS_GC_HOLD_MS` |  |  | central/svcmonEdge.js |
 | `SVCMON_EDGE_SILENCE_MIN_MS` |  |  | central/svcmonEdge.js |
 | `SVCMON_EDGE_SKEW_WARN_MS` |  |  | central/svcmonEdge.js |
 | `SVCMON_EDGE_WARM_GC_HOLD_MS` |  |  | central/svcmonEdge.js |
@@ -775,7 +797,7 @@
 | `NSX_LIST_MAX_PAGES` | `20` |  | nsx/client.js |
 | `NSX_TLS_REJECT_UNAUTHORIZED` |  |  | nsx/client.js |
 
-## PDU (11)
+## PDU (12)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
@@ -790,6 +812,7 @@
 | `PDU_PUSH_WITHHOLD_MAX_MS` | `15` |  | pdu/push.js |
 | `PDU_RETAIN_DAYS` | `400` |  | pdu/db.js |
 | `PDU_SESSION_BUDGET_MS` | `75000` |  | pdu/collectors/apcSsh.js |
+| `PDU_THRESHOLDS_LOCAL` | `기본 아님('1' 일 때만 적용)` |  | pdu/thresholds.js |
 
 ## SAN 스위치 (34)
 
@@ -830,12 +853,22 @@
 | `SANSWITCH_ACTIVITY_MAX` | `500` |  | sanswitch/activityLog.js |
 | `SANSWITCH_TLS_VERIFY` |  |  | sanswitch/collectors/fosRest.js |
 
-## vCenter 수집 (2)
+## vCenter 수집 (6)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
+| `HOST_EXPORT_XLSX_TIMEOUT_MS` | `300000` |  | vcenter/hostExportXlsx.js |
+| `HOST_EXPORT_XLSX_WORKER` | `'1'` |  | vcenter/hostExportXlsx.js |
 | `PERF_COUNTER_TTL_MS` | `6` |  | vcenter/soapClient.js |
 | `VC_KEEPALIVE_MS` | `4000` |  | vcenter/restClient.js |
+| `VM_EXPORT_XLSX_TIMEOUT_MS` | `300000` |  | vcenter/vmExportXlsx.js |
+| `VM_EXPORT_XLSX_WORKER` | `'1'` |  | vcenter/vmExportXlsx.js |
+
+## VM 복제 (1)
+
+| 키 | 기본값 | 예시 | 정의 위치 |
+|---|---|---|---|
+| `VMCLONE_VERIFY_TIMEOUT_MIN` |  |  | vmclone/vsOps.js |
 
 ## VM 프로비저닝 (1)
 
@@ -845,4 +878,4 @@
 
 ---
 
-예시 파일(`packaging/offline/portal.env.example`)에 있는 키: 85 / 661
+예시 파일(`packaging/offline/portal.env.example`)에 있는 키: 85 / 689

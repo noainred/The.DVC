@@ -47,7 +47,9 @@ test('★ CSP — 완화는 /intro 에만 적용되고 env 로 끄거나 바꿀 
   const intro = s.slice(s.indexOf('const INTRO_CSP'), s.indexOf('const CSP_HEADER'));
   assert.match(intro, /unsafe-eval/, 'intro 의 dc-runtime 은 문자열 eval 을 쓴다 — 빼면 데모 페이지가 깨진다');
   // 적용 분기: /intro 판정이 실제로 있어야 한다(정책만 선언하고 안 쓰면 뜻이 없다).
-  assert.match(s, /req\.path === '\/intro' \|\| req\.path\.startsWith\('\/intro\/'\)/);
+  // v2.767(점검 R2-B4-3): 판정을 함수 하나(isIntroPath)로 모았다 — CSP 분기와 SPA 폴백 404 가 같이 쓴다.
+  assert.match(s, /const isIntroPath = \(p\) => p === '\/intro' \|\| p\.startsWith\('\/intro\/'\)/);
+  assert.match(s, /isIntroPath\(req\.path\) && !process\.env\.CSP \? INTRO_CSP : CSP_HEADER/);
   assert.match(s, /process\.env\.CSP === 'off'/, 'CSP=off 탈출구가 사라졌다');
 });
 
