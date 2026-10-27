@@ -261,6 +261,10 @@ describe('v2.803 백업 방식 · 백업 칸 · Clone 칸', async () => {
     const vms = [{ id: 'a', m: { method: 'clone' } }, { id: 'b', m: { method: 'veeam' } }, { id: 'c', m: { crit: 'high' } }, { id: 'd' }, { id: 'e', m: { method: 'bogus' } }];
     for (const [f] of METHOD_FILTERS) for (const v of vms) expect(vmMatches(v, f), `${f}/${v.id}`).toBe(S.vmViewMatches(v, f));
     expect(vms.filter((v) => vmMatches(v, 'method-unset')).map((v) => v.id)).toEqual(['c', 'd', 'e'], '모르는 값은 미지정');
+    // v2.806 needgap — 백업 안함·Clone 은 미백업 아님(웹·서버 한 쌍)
+    const nv = ['veeam', 'clone', 'config', 'none', ''].map((method, i) => ({ id: `n${i}`, v: null, s: { ev: null }, m: { need: true, method } }));
+    for (const v of nv) expect(vmMatches(v, 'needgap'), v.m.method).toBe(S.vmViewMatches(v, 'needgap'));
+    expect(nv.filter((v) => vmMatches(v, 'needgap')).map((v) => v.m.method)).toEqual(['veeam', 'config', '']);
   });
   it('백업 칸 — Veeam 이 있으면 Veeam(스냅샷 숨김) · 없으면 스냅샷 · 둘 다 없으면 Veeam 표기 · 모름을 — 로 덮지 않는다', () => {
     expect(backupCell({ v: { lb: T }, s: { ev: { n: 2, ts: T } } })).toMatchObject({ tone: 'ok', src: 'veeam' });
@@ -282,5 +286,50 @@ describe('v2.803 백업 방식 · 백업 칸 · Clone 칸', async () => {
     expect(cloneCell({ c: st({ at: T, ok: true }, false) }).text).toMatch(/잡 꺼짐$/);
     expect([undefined, null, S.cloneView(undefined), st(undefined), st(null), st({ at: T, ok: true }), st({ at: T, ok: false }), st({ at: T, ok: false, skipped: 'x' })].map(S.cloneResultText))
       .toEqual(['', '모름', '잡 없음', '모름', '아직 실행 안 함', '성공', '실패', '건너뜀·중단']);
+  });
+});
+
+describe('v2.806 백업 방식 단축키 · 우선순위 VM', async () => {
+  const B = await import('./backupViewText.js');
+  const S = await import('../../../../server/src/veeam/backupStatus.js');
+  const ev = (key, extra = {}) => ({ key, target: { tagName: 'DIV' }, ...extra });
+  it('단축키 — V·C·G·N(대소문자 무관) · 조합키·IME·반복·입력 칸이면 무시', () => {
+    expect(['v', 'C', 'g', 'N', 'x'].map((k) => B.methodKeyOf(ev(k)))).toEqual(['veeam', 'clone', 'config', 'none', null]);
+    expect(B.methodKeyOf(ev('v', { ctrlKey: true }))).toBe(null);
+    expect(B.methodKeyOf(ev('v', { metaKey: true }))).toBe(null);
+    expect(B.methodKeyOf(ev('v', { altKey: true }))).toBe(null);
+    expect(B.methodKeyOf(ev('v', { isComposing: true }))).toBe(null);
+    expect(B.methodKeyOf(ev('v', { repeat: true }))).toBe(null);
+    for (const tagName of ['INPUT', 'TEXTAREA', 'SELECT']) expect(B.methodKeyOf(ev('v', { target: { tagName } })), tagName).toBe(null);
+    expect(B.methodKeyOf(ev('v', { target: { tagName: 'DIV', isContentEditable: true } }))).toBe(null);
+    expect(Object.values(B.METHOD_KEYS_MAP).sort()).toEqual([...B.METHODS.map((m) => m.key)].sort(), '네 방식 모두 키가 있다');
+  });
+  it('화면 — keydown 은 고른 VM·편집 가능일 때만 · 같은 값이면 저장하지 않는다 · 안내 한 줄', async () => {
+    const fs = await import('node:fs');
+    const src = fs.readFileSync(new URL('./BackupDetailTool.jsx', import.meta.url), 'utf8');
+    expect(src).toMatch(/if \(!selVm \|\| !writable\) return undefined;/);
+    expect(src).toMatch(/const method = methodKeyOf\(e\);/);
+    expect(src).toMatch(/if \(\(selVm\.m\?\.method \|\| ''\) !== method\) saveMarks\(\[selVm\.id\], \{ method \}\);/);
+    expect(src).toMatch(/단축키 V Veeam · C Clone · G Config 백업 · N 백업 안함/);
+  });
+  it('우선순위 VM — 백업 안함·Clone 은 Veeam 미백업이 아니다 · Clone 실패·잡 없음은 실패 탭 · Config 는 확인 불가 태그', () => {
+    const NOW = 1_800_000_000_000;
+    const vms = ['a', 'b', 'c', 'd', 'e', 'f'].map((id) => ({ id, name: id }));
+    const marks = { a: { need: true }, b: { need: true, method: 'none' }, c: { need: true, method: 'clone' }, d: { need: true, method: 'clone' }, e: { need: true, method: 'config' }, f: { method: 'clone' } };
+    const clones = { c: { job: true, on: true, at: NOW - 1000, ok: true }, d: { job: false }, f: null };
+    const items = S.priorityCandidates(vms, { byVm: {}, marks, veeamKnown: true, now: NOW, cloneOf: (id) => clones[id] });
+    const by = Object.fromEntries(items.map((x) => [x.id, x]));
+    expect(Object.keys(by).sort()).toEqual(['a', 'd', 'e'], 'b 백업 안함 · c Clone 성공 · f Clone 모름은 후보 아님');
+    expect([by.a.gap, by.d.gap, by.d.cloneBad, by.e.gap, by.e.method]).toEqual([true, false, true, true, 'config']);
+    const v = B.priorityView(items, { rpoDays: 1, now: NOW });
+    const tags = Object.fromEntries(v.items.map((x) => [x.id, x.tags.map(([, t]) => t)]));
+    expect(tags.a).toContain('Veeam 백업 없음');
+    expect(tags.e).toContain('Config 백업 — 확인 불가');
+    expect(tags.d).toContain('Clone 실패·잡 없음');
+    expect([v.counts.gap, v.counts.fail]).toEqual([2, 1]);
+    expect(v.items.filter((x) => B.prioMatches(x, 'fail')).map((x) => x.id)).toEqual(['d']);
+    expect(S.cloneBadOf({ job: true, on: true, at: NOW, ok: false })).toBe(true);
+    expect(S.cloneBadOf({ job: true, on: true, at: null, ok: null })).toBe(false, '아직 실행 안 함은 실패가 아니다');
+    expect(S.cloneBadOf({ job: true, on: true, unknown: true })).toBe(false);
   });
 });

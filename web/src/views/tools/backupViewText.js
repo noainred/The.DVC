@@ -311,7 +311,7 @@ export function vmMatches(vm, f, opts) {
   if (f === 'rpo') return c.old;
   if (f === 'fail') return c.fail;
   if (f === 'need') return c.need;
-  if (f === 'needgap') return c.need && c.vKnown && !c.veeam;   // Veeam 을 모르는 VM 은 넣지 않는다(서버 vmViewMatches 와 한 쌍)
+  if (f === 'needgap') return c.need && c.vKnown && !c.veeam && c.method !== 'none' && c.method !== 'clone';   // Veeam 을 모르는 VM 은 넣지 않는다 · v2.806 백업 안함·Clone 은 미백업 아님(서버 vmViewMatches 와 한 쌍)
   if (f === 'crit-high' || f === 'crit-mid' || f === 'crit-low') return c.crit === f.slice(5);
   if (f.startsWith('method-')) return f === 'method-unset' ? !c.method : c.method === f.slice(7);   // 서버 vmViewMatches 와 한 쌍
   return true;
@@ -427,6 +427,19 @@ export function snapCell(vm, days = 7) {
 }
 
 /**
+ * v2.806 백업 방식 단축키(사용자 요청 — VM 을 고른 상태에서 V Veeam · C Clone · G Config 백업 · N 백업 안함). 아니면 null.
+ *   조합키(Ctrl·Meta·Alt)·IME 조합 중·누르고 있는 반복·입력 칸(input·textarea·select·편집 가능 요소)에 초점이 있으면 null — 메모를 쓰다가 글자가 백업 방식으로 바뀌지 않게.
+ */
+export const METHOD_KEYS_MAP = Object.freeze({ v: 'veeam', c: 'clone', g: 'config', n: 'none' });
+export function methodKeyOf(e) {
+  if (!e || e.ctrlKey || e.metaKey || e.altKey || e.isComposing || e.repeat) return null;
+  const t = e.target;
+  const tag = String(t?.tagName || '').toUpperCase();
+  if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || t?.isContentEditable) return null;
+  return METHOD_KEYS_MAP[String(e.key || '').toLowerCase()] || null;
+}
+
+/**
  * v2.803 '백업' 칸(사용자 요청 '스냅샷은 Veeam 이 없을 때 Veeam 자리에, Veeam 이 있으면 숨김') — Veeam 이 있으면 Veeam 칩,
  *   Veeam 이 없거나 모르면 스냅샷 칩(잔존·지금·최근 N일). 둘 다 없으면 Veeam 쪽 표기('—' · 모름)를 그대로 쓴다(스냅샷 '—' 로 Veeam 모름을 덮지 않는다).
  */
@@ -499,9 +512,11 @@ export function priorityView(items, { rpoDays = 1, now = Date.now() } = {}) {
   const out = [];
   for (const it of Array.isArray(items) ? items : []) {
     const old = typeof it.lb === 'number' && now - it.lb > days * 86_400_000;
-    if (!it.gap && !it.fail && !it.stale && !old) continue;
+    if (!it.gap && !it.fail && !it.cloneBad && !it.stale && !old) continue;
     const tags = [];
-    if (it.gap) tags.push(['gap', 'Veeam 백업 없음']);
+    // v2.806: 백업 방식 — Config 백업은 포탈이 확인할 수 없어 '확인 불가' · Clone 은 Veeam 부재 대신 복제 잡 상태(cloneBad)
+    if (it.gap) tags.push(['gap', it.method === 'config' ? 'Config 백업 — 확인 불가' : 'Veeam 백업 없음']);
+    if (it.cloneBad) tags.push(['fail', 'Clone 실패·잡 없음']);
     if (it.crit === 'high') tags.push(['high', '중요도 상']);
     if (it.need) tags.push(['need', '백업 필요']);
     if (it.fail) tags.push(['fail', '마지막 실패']);
@@ -510,12 +525,12 @@ export function priorityView(items, { rpoDays = 1, now = Date.now() } = {}) {
     out.push({ ...it, old, tags });
   }
   const tier = (x) => (x.crit === 'high' ? 0 : x.need ? 1 : 2);
-  const prob = (x) => (x.gap ? 0 : x.fail ? 1 : x.stale ? 2 : 3);
+  const prob = (x) => (x.gap ? 0 : (x.fail || x.cloneBad) ? 1 : x.stale ? 2 : 3);   // 서버 priorityRank 와 같은 단계
   out.sort((a, b) => (tier(a) - tier(b)) || (prob(a) - prob(b)) || ((a.lb ?? Infinity) - (b.lb ?? Infinity)) || String(a.name).localeCompare(String(b.name)));
   const counts = { all: out.length, gap: 0, high: 0, fail: 0, old: 0, stale: 0 };
-  for (const x of out) { if (x.gap) counts.gap++; if (x.crit === 'high') counts.high++; if (x.fail) counts.fail++; if (x.old) counts.old++; if (x.stale) counts.stale++; }
+  for (const x of out) { if (x.gap) counts.gap++; if (x.crit === 'high') counts.high++; if (x.fail || x.cloneBad) counts.fail++; if (x.old) counts.old++; if (x.stale) counts.stale++; }
   return { items: out, counts };
 }
-export const prioMatches = (x, tab) => (tab === 'all' ? true : tab === 'high' ? x.crit === 'high' : !!x[tab]);
+export const prioMatches = (x, tab) => (tab === 'all' ? true : tab === 'high' ? x.crit === 'high' : tab === 'fail' ? !!(x.fail || x.cloneBad) : !!x[tab]);   // v2.806 Clone 실패는 '실패' 탭
 /** 폴더 끝 두 조각(‘A.MGMT › AD’) — 긴 경로가 칸을 넘지 않게. */
 export const folderTail = (folder) => folderParts(folder).slice(-2).join(' › ') || '—';

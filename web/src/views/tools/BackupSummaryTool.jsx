@@ -12,7 +12,7 @@ import { STable } from '../../components/STable.jsx';
 import { fmtNum, pctOf, veeamStateOf, snapReasonText, filterRows, attentionList, summaryKpis, runningCell, shortTs, isIrs, loadOpts, saveOpts, scopeQuery, scopeNote, CRIT, marksLine, marksNotice, quickTone, QUICK_DOT, coverageOf, SORTS, sortRows, matchSite, PRIO_TABS, priorityView, prioMatches, folderTail } from './backupViewText.js';
 import VeeamHeader from './VeeamHeader.jsx';
 import Select from '../../components/Select.jsx';
-import { CritIcon, NeedIcon, NEED_COLOR } from './BackupMarkIcons.jsx';
+import { CritIcon, NeedIcon, NEED_COLOR, MethodBadge } from './BackupMarkIcons.jsx';
 import BackupOptions from './BackupOptions.jsx';
 
 export const DETAIL_VC_KEY = 'backup-detail-vc';   // 서머리에서 고른 vCenter 를 세부내용이 이어받는다(이 브라우저에만)
@@ -297,7 +297,7 @@ export default function BackupSummaryTool() {
                 {prioShown.map((x, i) => (
                   <tr key={x.id} style={{ borderTop: '1px solid var(--border-soft)' }}>
                     <td style={{ padding: '8px 14px', color: 'var(--text-dim)', fontVariantNumeric: 'tabular-nums' }}>{i + 1}</td>
-                    <td data-sort={x.name} style={{ padding: '8px 6px', whiteSpace: 'nowrap' }}><span className="flex" style={{ alignItems: 'center', gap: 6 }}><CritIcon crit={x.crit} size={14} />{x.need && <NeedIcon size={14} />}<b>{x.name}</b></span></td>
+                    <td data-sort={x.name} style={{ padding: '8px 6px', whiteSpace: 'nowrap' }}><span className="flex" style={{ alignItems: 'center', gap: 6 }}><CritIcon crit={x.crit} size={14} />{x.need && <NeedIcon size={14} />}<b>{x.name}</b><MethodBadge method={x.method} small /></span></td>
                     <td data-sort={`${x.vcName} ${x.folder}`} style={{ padding: '8px 6px', whiteSpace: 'nowrap', color: 'var(--text-dim)' }}>{x.vcName} <span aria-hidden="true">›</span> {folderTail(x.folder)}</td>
                     <td style={{ padding: '8px 6px' }}><span className="flex wrap" style={{ gap: 4 }}>{x.tags.map(([k, text]) => <span key={k} style={{ padding: '2px 8px', borderRadius: 999, fontSize: 11, fontWeight: 700, whiteSpace: 'nowrap', ...PRIO_TAG[k] }}>{text}</span>)}</span></td>
                     <td data-sort={x.lb ?? ''} style={{ padding: '8px 6px', whiteSpace: 'nowrap', fontFamily: 'var(--mono)', fontSize: 12, color: x.lb ? undefined : TONE.bad }}>{shortTs(x.lb)}</td>

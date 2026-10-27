@@ -8,7 +8,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { fetchJson, downloadFile, canCsv, putJson } from '../../api.js';
 import { Loading, ErrorBox } from '../../components/ui.jsx';
 import Select from '../../components/Select.jsx';
-import { fmtNum, pctOf, veeamStateOf, snapReasonText, FILTERS, filterCounts, buildTree, flattenTree, initialOpen, veeamCell, snapCell, shortTs, vmClass, loadOpts, saveOpts, scopeQuery, scopeNote, runningCell, CRIT, critOf, MEMO_MAX, marksLine, marksNotice, filterCountText, detailLoadKey, toggleAllVisible, visibleVmIds, filterLabel, METHODS, methodOf, backupCell, cloneCell } from './backupViewText.js';
+import { fmtNum, pctOf, veeamStateOf, snapReasonText, FILTERS, filterCounts, buildTree, flattenTree, initialOpen, veeamCell, snapCell, shortTs, vmClass, loadOpts, saveOpts, scopeQuery, scopeNote, runningCell, CRIT, critOf, MEMO_MAX, marksLine, marksNotice, filterCountText, detailLoadKey, toggleAllVisible, visibleVmIds, filterLabel, METHODS, methodOf, backupCell, cloneCell, methodKeyOf, METHOD_KEYS_MAP } from './backupViewText.js';
 import { CritIcon, NeedIcon, NEED_COLOR, MethodBadge } from './BackupMarkIcons.jsx';
 import BackupOptions from './BackupOptions.jsx';
 import VeeamHeader from './VeeamHeader.jsx';
@@ -132,6 +132,18 @@ export default function BackupDetailTool({ scope }) {
     } catch (e) { setSaveErr(e); }
     finally { setSaving(false); }
   }, [vcId, opts]);
+  // v2.806 백업 방식 단축키(V·C·G·N) — VM 을 고른 상태 · 편집 가능 · 저장 중 아님 · 지금 값과 다를 때만. 입력 칸·조합키는 methodKeyOf 가 거른다.
+  useEffect(() => {
+    if (!selVm || !writable) return undefined;
+    const onKey = (e) => {
+      const method = methodKeyOf(e);
+      if (!method || saving) return;
+      e.preventDefault();
+      if ((selVm.m?.method || '') !== method) saveMarks([selVm.id], { method });
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [selVm, writable, saving, saveMarks]);
   const toggleCheck = (id) => setChecked((cur) => { const s = new Set(cur); if (s.has(id)) s.delete(id); else s.add(id); return s; });
 
   const toggle = (key) => setOpen((cur) => { const s = new Set(cur || openSet); if (s.has(key)) s.delete(key); else s.add(key); return s; });
@@ -371,16 +383,17 @@ export default function BackupDetailTool({ scope }) {
                       <span className="flex wrap" style={{ gap: 6, alignItems: 'center', flex: '1 1 0', minWidth: 0 }}>
                       {writable ? [...METHODS, { key: '', text: '없음' }].map((x) => {
                         const on = (selVm.m?.method || '') === x.key;
-                        return <button key={x.key || 'none'} type="button" className={`tab${on ? ' active' : ''}`} aria-pressed={on} disabled={saving} onClick={() => !on && saveMarks([selVm.id], { method: x.key })} style={{ padding: '3px 7px', fontSize: 12, display: 'inline-flex', alignItems: 'center' }}>{x.key ? <MethodBadge method={x.key} plain={on} small /> : '없음'}</button>;
+                        return <button key={x.key || 'none'} type="button" className={`tab${on ? ' active' : ''}`} aria-pressed={on} disabled={saving} onClick={() => !on && saveMarks([selVm.id], { method: x.key })} title={x.key ? `단축키 ${Object.entries(METHOD_KEYS_MAP).find(([, v]) => v === x.key)?.[0]?.toUpperCase()}` : undefined} style={{ padding: '3px 7px', fontSize: 12, display: 'inline-flex', alignItems: 'center' }}>{x.key ? <MethodBadge method={x.key} plain={on} small /> : '없음'}</button>;
                       }) : (methodOf(selVm.m?.method) ? <MethodBadge method={selVm.m.method} /> : <span className="muted">—</span>)}
                       </span>
                     </div>
+                    {writable && <span className="muted" data-method-keys="" style={{ fontSize: 11.5, paddingLeft: 62 }}>단축키 V Veeam · C Clone · G Config 백업 · N 백업 안함</span>}
                     <div className="flex wrap" style={{ gap: 6, alignItems: 'center' }}>
                       <span className="muted" style={{ fontSize: 12, minWidth: 56 }}>백업 필요</span>
                       {writable ? (
                         <button type="button" className={`tab${selVm.m?.need ? ' active' : ''}`} aria-pressed={!!selVm.m?.need} disabled={saving} onClick={() => saveMarks([selVm.id], { need: !selVm.m?.need })} style={{ padding: '3px 10px', fontSize: 12, display: 'inline-flex', alignItems: 'center', gap: 4 }}><NeedIcon size={13} />{selVm.m?.need ? '표시됨 — 누르면 해제' : '표시'}</button>
                       ) : (selVm.m?.need ? <span className="flex" style={{ gap: 4, alignItems: 'center' }}><NeedIcon size={13} />표시됨</span> : <span className="muted">—</span>)}
-                      {selVm.m?.need && c.vKnown && !c.veeam && <span style={{ fontSize: 12, color: '#fca5a5' }}>Veeam 백업 대상이 아닙니다</span>}
+                      {selVm.m?.need && c.vKnown && !c.veeam && c.method !== 'none' && c.method !== 'clone' && <span style={{ fontSize: 12, color: '#fca5a5' }}>Veeam 백업 대상이 아닙니다</span>}
                     </div>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
                       <span className="muted" style={{ fontSize: 12 }} id="backup-memo-label">백업 메모</span>
