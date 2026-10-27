@@ -2,7 +2,15 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { fetchJson, postJson } from '../../api.js';
 import Select from '../../components/Select.jsx';
 import { dsOptionLabel } from './vmCloneDsText.js';
-import { agoText, fmtBytes, restoreNameDefault } from './vmCloneView.js';
+import { agoText, fmtBytes, restoreNameDefault, meterOf } from './vmCloneView.js';
+
+const GIB = 1024 ** 3;
+/** 안전 장치 한 줄의 아이콘(체크 · 주의). */
+function SafeIcon({ ok }) {
+  return ok
+    ? <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="8" style={{ fill: 'rgba(34,197,94,.18)' }} /><path d="M4.5 8.2l2.2 2.2 4.8-4.8" fill="none" style={{ stroke: '#86efac' }} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg>
+    : <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="8" style={{ fill: 'rgba(245,158,11,.18)' }} /><path d="M8 4.2v4.6M8 11.3v.2" fill="none" style={{ stroke: '#fcd34d' }} strokeWidth="1.8" strokeLinecap="round" /></svg>;
+}
 
 /**
  * VM 백업 센터 › 새 VM 으로 복구(시안 ④, v2.793).
@@ -31,6 +39,10 @@ export default function VmCloneRestore({ d, job, initialRef, onBack, onDone }) {
   }, [job.vcenterId]);
   const pick = clones.find((c) => c.ref === ref);
   const now = Date.now();
+  // v2.797 대상 여유 미터 — 수집된 데이터스토어 용량 + 고른 지점 크기(모르면 사용량만). 실제 판정은 서버가 실행 직전 실시간 여유로 한다.
+  const dsPick = dss.find((x) => x.name === dsName) || null;
+  const needGB = pick?.bytes != null && Number.isFinite(Number(pick.bytes)) ? Number(pick.bytes) / GIB : null;
+  const meter = dsPick ? meterOf({ capacityGB: dsPick.capacityGB ?? null, freeGB: dsPick.freeGB ?? null, needGB }) : null;
 
   const submit = async () => {
     setBusy(true); setErr(null);
@@ -88,13 +100,13 @@ export default function VmCloneRestore({ d, job, initialRef, onBack, onDone }) {
 
           <div className="vbk-panel"><div className="bd" style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
             <div className="vbk-sec">3. 네트워크 · 전원</div>
-            <label className="flex" style={{ gap: 10, alignItems: 'flex-start', fontSize: 13 }}>
+            <label className="vbk-opt">
               <input type="checkbox" checked={nicOff} onChange={(e) => { setNicOff(e.target.checked); if (!e.target.checked) setPowerOn(false); }} style={{ marginTop: 3 }} />
-              <span><b>네트워크 카드를 끊은 채 만들기(권장)</b><br /><span className="muted" style={{ fontSize: 12 }}>원본이 살아 있으면 같은 IP·호스트명·AD 컴퓨터 계정이 충돌합니다. 확인한 뒤 vCenter 에서 직접 연결하세요.</span></span>
+              <span><b>네트워크 카드를 끊은 채 만들기(권장)</b><small>원본이 살아 있으면 같은 IP·호스트명·AD 컴퓨터 계정이 충돌합니다. 확인한 뒤 vCenter 에서 직접 연결하세요.</small></span>
             </label>
-            <label className="flex" style={{ gap: 10, alignItems: 'flex-start', fontSize: 13, opacity: nicOff ? 1 : 0.5 }}>
+            <label className={`vbk-opt${nicOff ? '' : ' off'}`}>
               <input type="checkbox" disabled={!nicOff} checked={nicOff && powerOn} onChange={(e) => setPowerOn(e.target.checked)} style={{ marginTop: 3 }} />
-              <span><b>만든 뒤 바로 켜기</b><br /><span className="muted" style={{ fontSize: 12 }}>네트워크를 끊은 상태에서만 고를 수 있습니다.</span></span>
+              <span><b>만든 뒤 바로 켜기</b><small>네트워크를 끊은 상태에서만 고를 수 있습니다.</small></span>
             </label>
             <div className="vbk-note" role="note">원본 VM 을 덮어쓰는 복구(제자리 복구)는 제공하지 않습니다. 새 VM 을 확인한 뒤 원본과의 교체는 운영자가 직접 합니다.</div>
             {err && <div style={{ color: 'var(--red)', fontSize: 12.5 }}>⚠ {err}</div>}
@@ -114,8 +126,37 @@ export default function VmCloneRestore({ d, job, initialRef, onBack, onDone }) {
             <div className="vbk-kv"><span>네트워크</span><span>{nicOff ? '끊은 채 생성' : '원본과 같게(충돌 주의)'}</span></div>
             <div className="vbk-kv"><span>전원</span><span>{nicOff && powerOn ? '켜기' : '꺼진 상태'}</span></div>
             <div className="muted" style={{ fontSize: 12, lineHeight: 1.7, borderTop: '1px solid var(--border-soft)', paddingTop: 10, marginTop: 6 }}>
-              복구도 백업과 같은 실행 큐에서 한 번에 1개씩 돕니다{job.exec?.where === 'edge' ? `(담당 엣지 ${job.exec.agent})` : ''}. 결과는 잡의 세션 이력과 감사 로그에 남습니다. 복구로 만든 VM 은 보존 정리 대상이 아닙니다.
+              복구도 백업과 같은 실행 큐에서 한 번에 1개씩 돕니다{job.exec?.where === 'edge' ? `(담당 엣지 ${job.exec.agent})` : ''}. 결과는 잡의 세션 이력과 감사 로그에 남습니다.
             </div>
+          </div></div>
+
+          <div className="vbk-panel"><div className="hd"><div className="vbk-sec">대상 여유</div></div><div className="bd" style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
+            {!dsName && <div className="muted" style={{ fontSize: 12.5 }}>데이터스토어를 고르면 수집된 용량으로 보여 드립니다.</div>}
+            {dsName && !meter && <div className="muted" style={{ fontSize: 12.5 }}>이 데이터스토어의 전체·여유 용량을 수집하지 못했습니다 — 실행 직전 서버가 실시간으로 다시 확인합니다.</div>}
+            {meter && (
+              <>
+                <div className="vbk-meter" role="img" aria-label={`사용 중 ${Math.round(meter.usedPct)}% · 복원 지점 ${Math.round(meter.needPct)}%`}>
+                  <b className="used" style={{ width: `${meter.usedPct}%` }} /><b className={`need${meter.over ? ' over' : ''}`} style={{ width: `${meter.needPct}%` }} />
+                </div>
+                <div className="vbk-meter-lg">
+                  <span><i style={{ background: '#3a4766' }} />사용 중 {Math.round(meter.usedPct)}%</span>
+                  {needGB != null ? <span><i style={{ background: meter.over ? 'var(--red)' : 'var(--accent)' }} />복원 지점 {fmtBytes(pick.bytes)}</span> : <span>복원 지점 크기 모름</span>}
+                </div>
+                <div className="vbk-kv"><span>여유 / 전체</span><span>{fmtBytes(meter.freeGB * GIB)} / {fmtBytes(meter.capacityGB * GIB)}</span></div>
+                {meter.over && <div className="vbk-note">복원 지점이 수집된 여유보다 큽니다 — 서버가 실행 직전 다시 확인해 부족하면 시작하지 않습니다.</div>}
+              </>
+            )}
+          </div></div>
+
+          <div className="vbk-panel"><div className="hd"><div className="vbk-sec">안전 장치</div></div><div className="bd">
+            <ul className="vbk-safety">
+              <li><SafeIcon ok /><span>원본 VM 은 건드리지 않습니다 — 원본과 같은 이름은 서버가 거부합니다.</span></li>
+              <li><SafeIcon ok /><span>이 vCenter 에 같은 이름의 VM 이 있으면 서버가 거부합니다.</span></li>
+              <li><SafeIcon ok /><span>실행 직전 대상 데이터스토어의 실시간 여유를 확인해, 남겨 둘 여유 아래로 떨어지면 시작하지 않습니다(여유를 읽지 못하면 이 확인은 건너뜁니다).</span></li>
+              <li className={nicOff ? '' : 'warn'}><SafeIcon ok={nicOff} /><span>{nicOff ? '네트워크 카드를 끊은 채 만듭니다.' : '네트워크 카드가 원본과 같게 연결됩니다 — IP·호스트명 충돌에 주의하세요.'}</span></li>
+              <li><SafeIcon ok /><span>{nicOff && powerOn ? '네트워크를 끊은 상태로만 켭니다.' : '꺼진 상태로 만듭니다.'}</span></li>
+              <li><SafeIcon ok /><span>복구로 만든 VM 은 보존 정리 대상이 아닙니다(포탈이 지우지 않습니다).</span></li>
+            </ul>
           </div></div>
         </div>
       </div>

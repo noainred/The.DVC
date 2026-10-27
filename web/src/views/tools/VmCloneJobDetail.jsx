@@ -3,7 +3,8 @@ import { postJson, canCsv } from '../../api.js';
 import { STable } from '../../components/STable.jsx';
 import { mountLabel } from './vmCloneMountText.js';
 import {
-  backupRuns, runTone, cloneBytes, fmtBytes, agoText, durText, execText, phaseRows, busyOp, KIND_LABEL, triggerText, keepText, HISTORY_FILTERS, historyFilter, historyCsv,
+  backupRuns, runTone, cloneBytes, fmtBytes, agoText, durText, execText, busyOp, KIND_LABEL, triggerText, keepText, HISTORY_FILTERS, historyFilter, historyCsv,
+  rpoText, ganttRows, pointTimeline, progressOf,
 } from './vmCloneView.js';
 
 /**
@@ -14,11 +15,22 @@ import {
 const MODE_LABEL = { manual: '수동만', daily: '매일', interval: '간격' };
 const scheduleText = (s) => `${MODE_LABEL[s?.mode] || '수동만'}${s?.mode === 'daily' ? ` ${s.time}` : s?.mode === 'interval' ? ` ${s.hours}시간` : ''}`;
 const fmtAt = (ts) => (ts ? new Date(ts).toLocaleString('ko-KR', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : '—');
+const mmdd = (ts) => { const x = new Date(ts); return `${String(x.getMonth() + 1).padStart(2, '0')}.${String(x.getDate()).padStart(2, '0')}`; };
+/** 타임라인 눈금 — 겹치지 않게 앞 눈금과 minGap% 이상 떨어진 점에만 날짜를 단다(첫·끝은 항상). */
+function tickIdx(points, minGap = 14) {
+  const out = new Set(); let last = -Infinity;
+  points.forEach((p, i) => { if (i === 0 || i === points.length - 1 || p.left - last >= minGap) { out.add(i); last = p.left; } });
+  // 끝 눈금이 바로 앞 눈금과 겹치면 앞의 것을 뺀다
+  const arr = [...out].sort((a, b) => a - b);
+  if (arr.length > 2 && points[arr[arr.length - 1]].left - points[arr[arr.length - 2]].left < minGap) out.delete(arr[arr.length - 2]);
+  return out;
+}
 
 export default function VmCloneJobDetail({ d, job, now, msg, busy, onBack, onRun, onEdit, onDelete, onRestore, onReload, setMsg }) {
   const [sel, setSel] = useState(null);      // 이력에서 고른 줄(타임라인)
   const [pending, setPending] = useState(''); // 방금 누른 사본 ref(응답 전 잠금)
   const [hf, setHf] = useState('all');        // v2.794 이력 필터
+  const [pt, setPt] = useState('');           // v2.797 타임라인에서 고른 복원 지점
   const runs = backupRuns(job);
   const history = useMemo(() => [...(job.history || [])].sort((a, b) => (b.at || 0) - (a.at || 0)), [job.history]);
   const shownHist = useMemo(() => historyFilter(history, hf), [history, hf]);
@@ -42,7 +54,11 @@ export default function VmCloneJobDetail({ d, job, now, msg, busy, onBack, onRun
   const runningLocal = d.status?.running && d.status.running.jobId === job.id ? d.status.running : null;
   const running = runningLocal || (job.exec?.runningPhase ? { phase: job.exec.runningPhase, kind: job.exec.runningKind, startedAt: job.exec.runningSince } : null);
   const shown = sel || (running ? null : history[0]) || null;
-  const rows = phaseRows(shown || { phases: [] }, !sel && running ? running : null);
+  const gantt = ganttRows(!sel && running ? null : shown);
+  const runPct = running ? progressOf(running.phase) : null;
+  const tl = useMemo(() => pointTimeline(job.clones, now, 12), [job.clones, now]);
+  const ticks = useMemo(() => tickIdx(tl.points), [tl]);
+  const ptClone = clones.find((c) => c.ref === pt) || null;
   const ops = d.ops || [];
 
   const act = async (kind, ref) => {
@@ -64,6 +80,8 @@ export default function VmCloneJobDetail({ d, job, now, msg, busy, onBack, onRun
             <span className={`vbk-chip ${isDs ? 'ds' : 'nfs'}`}>{isDs ? `${job.dest.nfsDsId ? 'NFS-DS' : 'DS'} · ${job.dest.datastoreName}` : `엣지 NFS · ${mountLabel((d.mounts || []).find((m) => m.id === job.dest.mountId)) || job.dest.mountId}`}</span>
             <span className={`vbk-chip ${job.quiesce ? 'ok' : ''}`} title={job.quiesce ? (job.quiesceFallback === false ? '정지점이 실패하면 그 회차는 실패' : '정지점이 실패하면 일반 스냅샷으로 백업(⚠)') : ''}>{job.quiesce ? `앱 정합(정지점${job.quiesceFallback === false ? ' · 필수' : ''})` : '크래시 정합'}</span>
             <span className="vbk-chip">보존 {keepText(job)}</span>
+            {job.rpo ? <span className={`vbk-chip ${job.rpo.overdue ? 'warn' : 'ok'}`} title={job.rpo.overdue ? rpoText(job.rpo, now) : '마지막 성공이 스케줄 주기의 2배 + 1시간 안입니다'}>{job.rpo.overdue ? 'RPO 초과' : 'RPO 충족'}</span>
+              : job.enabled !== false && <span className="vbk-chip" title="수동 실행만 하거나, 담당 엣지가 멈췄거나, 시작 시각을 몰라 판정하지 않습니다">RPO 판정 안 함</span>}
             {job.verifying && !running && <span className="vbk-chip warn" title="재시작으로 검증이 중단됐습니다 — 실행 노드가 다음 확인(1분 안팎)에 사본을 끄고 검증 전 상태로 되돌립니다. 그 전에는 새 검증·잡 삭제를 하지 않습니다.">중단된 검증 정리 대기</span>}
             {!job.enabled && <span className="vbk-chip warn">비활성</span>}
           </div>
@@ -96,6 +114,38 @@ export default function VmCloneJobDetail({ d, job, now, msg, busy, onBack, onRun
               <div className="vbk-sec">복원 지점 <small>{clones.length}개</small></div>
               <span className="muted" style={{ fontSize: 12 }}>오래된 것부터 자동 정리 · 포탈이 만든 사본(원장)만 지웁니다</span>
             </div>
+            {tl.points.length > 0 && (
+              <div className="bd" style={{ borderBottom: '1px solid var(--border-soft)', paddingBottom: 8 }}>
+                <div className="vbk-tlh-wrap">
+                  <div className="vbk-tlh" role="group" aria-label="복원 지점 타임라인">
+                    <div className="axis" />
+                    {tl.points.map((p, i) => (
+                      <React.Fragment key={p.ref}>
+                        <button type="button" className={`${p.tone}${p.latest ? ' latest' : ''}${pt === p.ref ? ' on' : ''}`} style={{ left: `${p.left}%` }}
+                          aria-pressed={pt === p.ref} aria-label={`${fmtAt(p.at)} 복원 지점 · ${p.tone === 'ok' ? '부팅 확인' : p.tone === 'fail' ? '검증 실패' : '미검증'}`}
+                          title={`${fmtAt(p.at)} · ${p.tone === 'ok' ? '부팅 확인' : p.tone === 'fail' ? '검증 실패' : '미검증'}${p.latest ? ' · 최신' : ''}`}
+                          onClick={() => setPt(pt === p.ref ? '' : p.ref)} />
+                        {ticks.has(i) && <span className={`lbl${p.left <= 3 ? ' first' : p.left >= 97 ? ' last' : ''}`} style={{ left: `${p.left}%` }}>{p.latest ? `${mmdd(p.at)} 최신` : mmdd(p.at)}</span>}
+                      </React.Fragment>
+                    ))}
+                  </div>
+                </div>
+                <div className="flex wrap" style={{ gap: '4px 14px', alignItems: 'center', fontSize: 12, color: 'var(--text-dim)' }}>
+                  <span><span className="vbk-dot ok" style={{ marginRight: 6 }} />부팅 확인</span>
+                  <span><span className="vbk-dot fail" style={{ marginRight: 6 }} />검증 실패</span>
+                  <span><span className="vbk-dot" style={{ marginRight: 6 }} />미검증</span>
+                  <span><span className="vbk-dot" style={{ marginRight: 6, background: 'var(--accent)' }} />최신</span>
+                  {clones.length > tl.points.length + tl.unknown && <span>최근 {tl.points.length}개만 표시</span>}
+                  {tl.unknown > 0 && <span>시각 모르는 사본 {tl.unknown}개 제외</span>}
+                  {ptClone && (
+                    <span className="flex wrap" style={{ gap: 8, alignItems: 'center', marginLeft: 'auto', color: 'var(--text)' }}>
+                      <b>{fmtAt(ptClone.at)}</b><span className="muted">{agoText(ptClone.at, now)} · {fmtBytes(ptClone.bytes)}</span>
+                      {isDs && <button type="button" className="vbk-btn sm" onClick={() => onRestore(ptClone.ref)}>이 지점으로 복구</button>}
+                    </span>
+                  )}
+                </div>
+              </div>
+            )}
             {!isDs && <div className="bd muted" style={{ fontSize: 12.5 }}>엣지 NFS 사본은 날짜 폴더(manifest.json)로 남습니다 — 켜서 검증하거나 이 화면에서 복구할 수 없습니다. 복구는 manifest.json 의 안내대로 데이터스토어에 올린 뒤 vmx 를 등록합니다.</div>}
             {isDs && (
               <div style={{ overflowX: 'auto' }}>
@@ -106,7 +156,7 @@ export default function VmCloneJobDetail({ d, job, now, msg, busy, onBack, onRun
                     {clones.map((c) => {
                       const vBusy = busyOp(ops, job.id, 'verify', c.ref);
                       return (
-                        <tr key={c.ref}>
+                        <tr key={c.ref} style={pt === c.ref ? { background: 'rgba(59,130,246,.10)' } : undefined}>
                           <td data-sort={c.at}><div style={{ fontWeight: 600 }}>{fmtAt(c.at)}</div><div className="muted" style={{ fontSize: 11.5 }}>{agoText(c.at, now)}</div></td>
                           <td style={{ fontFamily: 'var(--mono)', fontSize: 12 }}>{c.name}</td>
                           <td style={{ textAlign: 'right' }} data-sort={c.bytes ?? ''}>{fmtBytes(c.bytes)}</td>
@@ -133,17 +183,32 @@ export default function VmCloneJobDetail({ d, job, now, msg, busy, onBack, onRun
                 : running ? <span className="vbk-chip warn">실행 중</span>
                   : shown ? <span className={`vbk-chip ${runTone(shown) === 'ok' ? 'ok' : runTone(shown) === 'fail' ? 'fail' : 'warn'}`}>{KIND_LABEL[shown.kind || 'backup']}</span> : null}
             </div>
-            <div className="bd">
-              {rows.length === 0 && <div className="muted" style={{ fontSize: 12.5 }}>{shown ? '단계 기록이 없는 실행입니다(이전 판에서 실행).' : '아직 실행 기록이 없습니다.'}</div>}
-              <div className="vbk-tl">
-                {rows.map((r, i) => (
-                  <div key={i}>
-                    <div className="rail"><i className={r.state} />{i < rows.length - 1 && <b />}</div>
-                    <div className="body"><span>{r.name}</span><span>{r.ms == null ? '진행 중' : durText(r.ms)}</span></div>
+            <div className="bd" style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {/* v2.797 단계 간트 — 끝난 실행은 단계별 소요를 누적 위치로, 진행 중이면 지금 단계만(앞 단계의 소요는 실행이 끝나야 남는다) */}
+              {!sel && running ? (
+                <div className="vbk-gantt">
+                  <div>
+                    <span className="nm" title={running.phase}>{String(running.phase || '단계 보고 전').slice(0, 160).replace(/\s*·\s*\d{1,3}%$/, '')}</span>
+                    <span className="tr" title={runPct == null ? '이 단계는 진행률을 보고하지 않습니다' : `${runPct}%`}>{runPct == null ? <b className="indet" /> : <b className="running" style={{ left: 0, width: `${runPct}%` }} />}</span>
+                    <span className="t">{runPct == null ? '진행 중' : `${runPct}%`}</span>
                   </div>
-                ))}
-              </div>
-              {shown?.detail && <div className="muted" style={{ fontSize: 12, marginTop: 4, overflowWrap: 'anywhere' }}>{shown.detail}</div>}
+                </div>
+              ) : gantt.rows.length === 0 ? (
+                <div className="muted" style={{ fontSize: 12.5 }}>{shown ? '단계 기록이 없는 실행입니다(이전 판에서 실행).' : '아직 실행 기록이 없습니다.'}</div>
+              ) : (
+                <div className="vbk-gantt">
+                  {gantt.rows.map((r, i) => (
+                    <div key={i}>
+                      <span className="nm" title={r.name}>{r.name}</span>
+                      <span className="tr">{r.width > 0 && <b className={r.state === 'fail' ? 'fail' : ''} style={{ left: `${r.left}%`, width: `${r.width}%` }} />}</span>
+                      <span className="t" style={r.state === 'fail' ? { color: '#fca5a5' } : undefined}>{r.ms == null ? '—' : durText(r.ms)}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {!(!sel && running) && gantt.totalMs > 0 && <div className="flex between" style={{ fontSize: 12, color: 'var(--text-dim)', borderTop: '1px solid var(--border-soft)', paddingTop: 7 }}><span>단계 합계</span><span style={{ fontFamily: 'var(--mono)' }}>{durText(gantt.totalMs)}</span></div>}
+              {!sel && running?.startedAt ? <div className="muted" style={{ fontSize: 12 }}>시작 {fmtAt(running.startedAt)} · {durText(now - running.startedAt)}째</div> : null}
+              {shown?.detail && !(!sel && running) && <div className="muted" style={{ fontSize: 12, overflowWrap: 'anywhere' }}>{shown.detail}</div>}
             </div>
           </div>
           <div className="vbk-panel">

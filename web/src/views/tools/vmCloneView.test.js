@@ -3,6 +3,7 @@ import {
   runTone, lastRunTones, lastVerify, cloneBytes, fmtBytes, agoText, durText, kpisOf, jobState, execText,
   corpEdgeState, corpCards, recentSessions, storageRows, capacityEstimate, restoreNameDefault, busyOp, phaseRows,
   keepText, triggerText, historyFilter, historyCsv, rpoText, rpoOverdueCount,
+  rpoSummary, dayCounts, progressOf, jobFilter, jobFilterCounts, nextRunText, ganttRows, pointTimeline, meterOf, untilText,
 } from './vmCloneView.js';
 
 const NOW = Date.UTC(2026, 9, 26, 3, 0, 0);
@@ -156,5 +157,111 @@ describe('VM 백업 센터 v2.795 — RPO 초과 문구(서버 판정을 그대�
     expect(rpoText({ overdue: true, intervalMs: 24 * H, lastOkAt: NOW - 50 * H }, NOW)).toMatch(/^RPO 초과 · 마지막 성공 .+\(주기 24시간\)$/);
     expect(rpoText({ overdue: true, intervalMs: 6 * H, lastOkAt: null }, NOW)).toBe('RPO 초과 · 성공한 백업 없음(주기 6시간)');
     expect(rpoOverdueCount([{ rpo: { overdue: true } }, { rpo: null }, {}])).toBe(1);
+  });
+});
+
+describe('VM 백업 센터 v2.797 — 화면 개편 계산(링·14일·필터·간트·타임라인·미터)', () => {
+  const NOW = new Date(2026, 9, 26, 12, 0, 0).getTime(); // 브라우저 시각 기준 정오(일 경계 판정과 무관하게)
+  const H = 3_600_000;
+
+  it('rpoSummary — 서버 판정만 분모에, 수동·판정 없음·비활성은 따로 센다', () => {
+    const s = rpoSummary([
+      { enabled: true, schedule: { mode: 'daily' }, rpo: { overdue: false } },
+      { enabled: true, schedule: { mode: 'daily' }, rpo: { overdue: true } },
+      { enabled: true, schedule: { mode: 'manual' }, rpo: null },
+      { enabled: true, schedule: { mode: 'interval', hours: 6 }, rpo: null },
+      { enabled: false, schedule: { mode: 'daily' }, rpo: null },
+      { enabled: true, schedule: { mode: 'daily' }, rpo: null, exec: { where: 'edge', reported: false } },
+    ]);
+    expect(s).toMatchObject({ judged: 2, ok: 1, overdue: 1, manual: 1, unjudged: 2, disabled: 1, noReport: 1, pct: 50 });
+    expect(rpoSummary([{ enabled: true, schedule: { mode: 'manual' } }]).pct).toBe(null);
+  });
+
+  it('dayCounts — 백업만 날짜별로, 건너뜀은 total 에 넣지 않고, 이력이 가득 찬 잡의 가장 오래된 기록 이전은 partial', () => {
+    const job = { history: [
+      { at: NOW - 1 * H, ok: true },
+      { at: NOW - 2 * H, ok: false },
+      { at: NOW - 3 * H, ok: true, detail: '⚠ 스냅샷 삭제 실패' },
+      { at: NOW - 4 * H, skipped: '인증 정지' },
+      { at: NOW - 5 * H, kind: 'verify', ok: true },
+      { at: NOW - 30 * 86_400_000, ok: true },
+    ] };
+    const days = dayCounts([job], NOW, 14, { historyMax: 30 });
+    expect(days).toHaveLength(14);
+    const today = days[13];
+    expect(today).toMatchObject({ ok: 1, fail: 1, warn: 1, skip: 1, total: 3, partial: false });
+    expect(days.slice(0, 13).every((d) => d.total === 0 && !d.partial)).toBe(true);
+    // 이력이 상한(여기선 6)만큼 차 있으면 가장 오래된 기록 이전 날은 partial
+    const full = dayCounts([{ history: job.history.slice(0, 5).concat([{ at: NOW - 3 * 86_400_000, ok: true }]) }], NOW, 14, { historyMax: 6 });
+    expect(full[9].partial).toBe(true);    // 4일 전
+    expect(full[10].partial).toBe(true);   // 3일 전 — 가장 오래된 기록이 있는 날도 그 이전 시각은 빠졌을 수 있다
+    expect(full[10].ok).toBe(1);
+    expect(full[11].partial).toBe(false);  // 2일 전
+    // 상한을 모르면 판정하지 않는다
+    expect(dayCounts([{ history: job.history }], NOW, 14).some((d) => d.partial)).toBe(false);
+  });
+
+  it('progressOf — 단계 문구 끝의 % 만, 없으면 null', () => {
+    expect(progressOf('클론 → demo-nfs-bk01 · 42%')).toBe(42);
+    expect(progressOf('스냅샷')).toBe(null);
+    expect(progressOf('')).toBe(null);
+    expect(progressOf('클론 · 250%')).toBe(null);
+  });
+
+  it('jobFilter·jobFilterCounts — 실패(담당 미확정 포함)·RPO 초과·검증 실패·비활성', () => {
+    const jobs = [
+      { id: 'a', enabled: true, history: [{ at: 1, ok: false }] },
+      { id: 'b', enabled: true, history: [{ at: 1, ok: true }], rpo: { overdue: true }, clones: [{ verify: { ok: false, at: 2 } }] },
+      { id: 'c', enabled: false, history: [] },
+      { id: 'd', enabled: true, exec: { where: 'none' } },
+    ];
+    expect(jobFilterCounts(jobs)).toEqual({ all: 4, fail: 2, rpo: 1, verifyFail: 1, off: 1 });
+    expect(jobFilter(jobs, 'fail').map((j) => j.id)).toEqual(['a', 'd']);
+    expect(jobFilter(jobs, '없는필터')).toHaveLength(4);
+  });
+
+  it('nextRunText — 간격 잡만 계산하고 매일 잡은 포탈 시각이라 계산하지 않는다', () => {
+    expect(nextRunText({ enabled: true, schedule: { mode: 'interval', hours: 6 }, lastRun: { at: NOW - 2 * H } }, NOW)).toBe('4시간 뒤 실행');
+    expect(nextRunText({ enabled: true, schedule: { mode: 'interval', hours: 6 }, lastRun: { at: NOW - 7 * H } }, NOW)).toBe('주기 도래 · 곧 실행');
+    expect(nextRunText({ enabled: true, schedule: { mode: 'interval', hours: 6 } }, NOW)).toBe('첫 실행 대기');
+    expect(nextRunText({ enabled: true, schedule: { mode: 'daily', time: '02:00' }, lastRun: { at: NOW } }, NOW)).toBe('');
+    expect(nextRunText({ enabled: false, schedule: { mode: 'interval', hours: 6 } }, NOW)).toBe('');
+  });
+
+  it('ganttRows — 누적 시각으로 배치, ms 모르는 단계는 폭 0', () => {
+    const { rows, totalMs } = ganttRows({ phases: [{ n: '스냅샷', ms: 1000 }, { n: '클론', ms: 3000 }, { n: '정리', ok: false }] });
+    expect(totalMs).toBe(4000);
+    expect(rows[0]).toMatchObject({ name: '스냅샷', left: 0, width: 25, state: 'done' });
+    expect(rows[1]).toMatchObject({ left: 25, width: 75 });
+    expect(rows[2]).toMatchObject({ ms: null, width: 0, state: 'fail' });
+    expect(ganttRows(null)).toEqual({ rows: [], totalMs: 0 });
+  });
+
+  it('pointTimeline — 최근 max 개를 시각 순으로, 시각 모르는 사본은 따로', () => {
+    const clones = [
+      { ref: 'x1', at: NOW - 48 * H, verify: { ok: true } },
+      { ref: 'x2', at: NOW - 24 * H, verify: { ok: false } },
+      { ref: 'x3', at: NOW },
+      { ref: 'x4' },
+    ];
+    const t = pointTimeline(clones, NOW, 12);
+    expect(t.unknown).toBe(1);
+    expect(t.points.map((p) => [p.ref, Math.round(p.left), p.tone, p.latest])).toEqual([['x1', 0, 'ok', false], ['x2', 50, 'fail', false], ['x3', 100, 'none', true]]);
+    expect(pointTimeline(clones, NOW, 2).points.map((p) => p.ref)).toEqual(['x2', 'x3']);
+    expect(pointTimeline([{ ref: 'one', at: NOW - H }], NOW).points[0].left).toBe(50);
+    expect(pointTimeline([], NOW).points).toEqual([]);
+  });
+
+  it('meterOf — 전체·여유를 모르면 null, 들어갈 양이 여유보다 크면 over', () => {
+    expect(meterOf({ capacityGB: 1000, freeGB: 600, needGB: 200 })).toMatchObject({ usedPct: 40, needPct: 20, over: false });
+    expect(meterOf({ capacityGB: 1000, freeGB: 100, needGB: 200 })).toMatchObject({ usedPct: 90, needPct: 10, over: true });
+    expect(meterOf({ capacityGB: 1000, freeGB: 600 })).toMatchObject({ needPct: 0, over: false });
+    expect(meterOf({ capacityGB: null, freeGB: 600 })).toBe(null);
+    expect(meterOf({ capacityGB: 1000, freeGB: null })).toBe(null);
+  });
+
+  it('untilText — 지난 시각은 빈 문자열', () => {
+    expect(untilText(NOW + 30 * 60_000, NOW)).toBe('30분 뒤');
+    expect(untilText(NOW - 1, NOW)).toBe('');
   });
 });

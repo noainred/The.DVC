@@ -11,7 +11,8 @@ import { mountLabel, MOUNTS_MASKED_NOTE, showMountsMaskedNote } from './vmCloneM
 import Select from '../../components/Select.jsx';
 import {
   kpisOf, corpCards, lastRunTones, jobState, execText, cloneBytes, fmtBytes, lastVerify, recentSessions, storageRows,
-  capacityEstimate, agoText, durText, KIND_LABEL, keepText, rpoText, rpoOverdueCount,
+  capacityEstimate, agoText, durText, KIND_LABEL, keepText, rpoText,
+  rpoSummary, dayCounts, progressOf, JOB_FILTERS, jobFilter, jobFilterCounts, nextRunText, meterOf,
 } from './vmCloneView.js';
 import VmCloneJobDetail from './VmCloneJobDetail.jsx';
 import VmCloneRestore from './VmCloneRestore.jsx';
@@ -54,6 +55,7 @@ export default function VmCloneTool() {
   const [busy, setBusy] = useState('');      // 진행 중인 요청 대상(잡 id) — 그 대상만 잠근다(web.md '긴 작업의 진행 중 잠금')
   const [view, setView] = useState({ name: 'dash' });   // dash | job | restore | corp | wizard
   const [now, setNow] = useState(Date.now());
+  const [jf, setJf] = useState('all');       // v2.797 잡 표 필터 칩
 
   // 늦게 온 이전 응답은 버린다(고RTT·10초 폴링 — 새 응답을 옛 응답이 덮지 않게, web.md 규약).
   const loadSeq = useRef(0);
@@ -106,7 +108,7 @@ export default function VmCloneTool() {
     return <VmCloneCorp d={d} now={now} initialKey={view.key} onBack={back} onReload={load} />;
   }
 
-  // ── ① 대시보드 ──
+  // ── ① 대시보드(v2.797 디자인 v2 — 보호 현황 밴드 · 법인 레일 · 필터 칩) ──
   const localRun = d.status?.running;
   const running = [
     ...(localRun ? [{ where: '이 포탈', vm: jobs.find((j) => j.id === localRun.jobId)?.vmName || (localRun.kind === 'nfsds-attach' ? 'NFS 데이터스토어 연결' : localRun.kind === 'nfsds-detach' ? 'NFS 데이터스토어 떼어 내기' : localRun.jobId || '작업'), phase: localRun.phase, since: localRun.startedAt }] : []),
@@ -114,13 +116,22 @@ export default function VmCloneTool() {
   ];
   const queued = (d.status?.queued?.length || 0) + (d.corps || []).reduce((a, c) => a + (c.edge?.runner?.queued?.length || 0), 0);
   const stores = storageRows(jobs, [], d.nfsDatastores);
+  const rpo = rpoSummary(jobs);
+  const days = dayCounts(jobs, now, 14, { historyMax: d.limits?.historyMax });
+  const dayMax = Math.max(1, ...days.map((x) => x.total + x.skip));
+  const daySum = days.reduce((a, x) => ({ ok: a.ok + x.ok + x.warn, warn: a.warn + x.warn, fail: a.fail + x.fail, skip: a.skip + x.skip }), { ok: 0, warn: 0, fail: 0, skip: 0 });
+  const anyPartial = days.some((x) => x.partial);
+  const fCounts = jobFilterCounts(jobs);
+  const shownJobs = jobFilter(jobs, jf);
+  const runOf = (j) => (localRun && localRun.jobId === j.id ? localRun.phase : j.exec?.runningPhase) || '';
+  const RING_C = 2 * Math.PI * 44;
 
   return (
     <div className="vbk">
       <div className="vbk-head">
         <div>
-          <h2 className="vbk-title">VM 백업</h2>
-          <div className="vbk-sub">스냅샷 시점 클론으로 만든 사본을 복원 지점으로 관리합니다 · 데이터스토어·ESXi NFS 데이터스토어(서버측 복사) / 엣지 NFS(파일)</div>
+          <h2 className="vbk-title">VM 백업 센터</h2>
+          <div className="vbk-sub">스냅샷 시점 클론을 복원 지점으로 관리합니다 · 데이터스토어 · ESXi NFS 데이터스토어(서버측 복사) · 엣지 NFS(파일)</div>
         </div>
         <div className="vbk-actions">
           <button type="button" className="vbk-btn" onClick={() => setView({ name: 'corp' })}>법인 저장소</button>
@@ -128,9 +139,97 @@ export default function VmCloneTool() {
         </div>
       </div>
 
-      {rpoOverdueCount(jobs) > 0 && (
-        <div className="vbk-note" role="status">RPO 초과 잡 {rpoOverdueCount(jobs)}개 — 마지막 성공이 스케줄 주기의 2배 + 1시간을 넘었습니다. 실행이 멈췄거나(엣지 중단·담당 미확정) 매번 건너뛰고 있는지 잡 표의 해당 줄을 확인하세요.</div>
+      {msg && <div className="vbk-note info" role="status">{msg}</div>}
+      {showMountsMaskedNote(d) && <div className="muted" style={{ fontSize: 12 }}>{MOUNTS_MASKED_NOTE}</div>}
+      {/* v2.599(AUTHZ-2599-05): 범위 제한 계정에는 범위 밖 vCenter 의 잡을 빼고 그 개수를 밝힌다 */}
+      {/* v2.631 A6-2631-06: scoped·omittedOutOfScope 판정·문구는 scopeOmitText.js 하나가 소유한다 */}
+      <ScopeOmitBanner data={d} unit="복제 잡" counter="개" why="조회 범위 밖 vCenter 의" />
+
+      {rpo.overdue > 0 && (
+        <div className="vbk-note" role="status" style={{ alignItems: 'center', flexWrap: 'wrap' }}>
+          <span style={{ flex: '1 1 300px', minWidth: 0 }}>RPO 초과 잡 {rpo.overdue}개 — 마지막 성공이 스케줄 주기의 2배 + 1시간을 넘었습니다. 실행이 멈췄거나(엣지 중단·담당 미확정) 매번 건너뛰고 있는지 확인하세요.</span>
+          {jf !== 'rpo' && <button type="button" className="vbk-btn sm" onClick={() => setJf('rpo')}>해당 잡만 보기</button>}
+        </div>
       )}
+
+      {/* 보호 현황 밴드 — RPO 링 · 최근 14일 실행 · 지금 실행 */}
+      <div className="vbk-band">
+        <section className="vbk-ring" aria-label="보호 현황">
+          <svg width="104" height="104" viewBox="0 0 104 104" role="img" aria-label={rpo.pct == null ? 'RPO 판정 대상 없음' : `RPO 충족 ${rpo.ok} / ${rpo.judged}`}>
+            <circle cx="52" cy="52" r="44" fill="none" style={{ stroke: 'var(--border-soft)' }} strokeWidth="10" />
+            {rpo.pct != null && rpo.ok > 0 && (
+              <circle cx="52" cy="52" r="44" fill="none" style={{ stroke: rpo.overdue ? 'var(--amber)' : 'var(--green)' }} strokeWidth="10" strokeLinecap="round"
+                strokeDasharray={`${(rpo.ok / rpo.judged) * RING_C} ${RING_C}`} transform="rotate(-90 52 52)" />
+            )}
+            <text x="52" y="50" textAnchor="middle" style={{ fill: 'var(--text)', fontSize: 22, fontWeight: 700 }}>{rpo.pct == null ? '—' : `${rpo.pct}%`}</text>
+            <text x="52" y="67" textAnchor="middle" style={{ fill: 'var(--text-dim)', fontSize: 10.5 }}>RPO 충족</text>
+          </svg>
+          <div style={{ minWidth: 0, display: 'flex', flexDirection: 'column', gap: 6 }}>
+            <div className="l">보호 현황</div>
+            <div className="big">{rpo.judged ? <>{rpo.ok} <small>/ {rpo.judged} 잡이 주기 안에 성공</small></> : <small>판정할 스케줄 잡이 없습니다</small>}</div>
+            <div className="vbk-chips">
+              <span className={`vbk-chip${rpo.overdue ? ' warn' : ''}`} title="마지막 성공이 스케줄 주기의 2배 + 1시간을 넘었습니다"><i style={{ background: rpo.overdue ? 'var(--amber)' : 'var(--text-faint)' }} />RPO 초과 {rpo.overdue}</span>
+              {rpo.manual > 0 && <span className="vbk-chip" title="수동 실행만 하는 잡은 주기가 없어 RPO 를 판정하지 않습니다">수동 {rpo.manual}</span>}
+              {rpo.unjudged > 0 && <span className="vbk-chip" title="담당 엣지가 멈췄거나 시작 시각을 몰라 서버가 판정하지 않은 잡">판정 안 함 {rpo.unjudged}</span>}
+              {rpo.disabled > 0 && <span className="vbk-chip">비활성 {rpo.disabled}</span>}
+              {rpo.noReport > 0 && <span className="vbk-chip warn">엣지 보고 없음 {rpo.noReport}</span>}
+            </div>
+          </div>
+        </section>
+
+        <section aria-label="최근 14일 실행">
+          <div className="hdr">
+            <span className="l">최근 14일 백업 실행</span>
+            <span><b>{daySum.ok}</b> 성공{daySum.warn ? ` (경고 ${daySum.warn})` : ''} · <b style={{ color: daySum.fail ? '#fca5a5' : undefined }}>{daySum.fail}</b> 실패{daySum.skip ? ` · 건너뜀 ${daySum.skip}` : ''}</span>
+          </div>
+          <div className="vbk-heat">
+            {days.map((x) => {
+              const h = (n) => `${Math.max(n ? 3 : 0, Math.round((n / dayMax) * 54))}px`;
+              const empty = !x.total && !x.skip;
+              return (
+                <div key={x.start} className={x.partial ? 'partial' : ''} title={`${x.label} · 성공 ${x.ok + x.warn}${x.warn ? `(경고 ${x.warn})` : ''} · 실패 ${x.fail}${x.skip ? ` · 건너뜀 ${x.skip}` : ''}${x.partial ? ' · 이력 보관 한도로 일부만 셉니다' : ''}`}>
+                  {empty ? <i className="empty" /> : <>
+                    {x.fail > 0 && <i className="fail" style={{ height: h(x.fail) }} />}
+                    {x.warn > 0 && <i className="warn" style={{ height: h(x.warn) }} />}
+                    {x.ok > 0 && <i className="ok" style={{ height: h(x.ok) }} />}
+                    {x.skip > 0 && <i className="skip" style={{ height: h(x.skip) }} />}
+                  </>}
+                </div>
+              );
+            })}
+          </div>
+          <div className="vbk-axis"><span>{days[0].label}</span><span>{days[7].label}</span><span>오늘</span></div>
+          {anyPartial && <div className="muted" style={{ fontSize: 11.5 }}>흐린 날은 이력이 잡마다 최근 {d.limits?.historyMax}회만 남아 일부만 셉니다.</div>}
+        </section>
+
+        <section aria-label="지금 실행">
+          <div className="hdr">
+            <span className="l">지금 실행</span>
+            <span style={{ color: running.length ? '#fcd34d' : undefined, fontWeight: 600 }}>{running.length ? `${running.length} 실행 중` : '유휴'} · 대기 {queued}</span>
+          </div>
+          {running.slice(0, 3).map((r, i) => {
+            const pct = progressOf(r.phase);
+            return (
+              <div key={i} className="vbk-now">
+                <div className="top"><b>{r.vm}</b><span>{r.since ? `${durText(now - r.since)}째` : ''}</span></div>
+                <div className="sub">{r.where} · {r.phase || '단계 보고 전'}</div>
+                <div className="vbk-bar" title={pct == null ? '이 단계는 진행률을 보고하지 않습니다' : `${pct}%`}>{pct == null ? <b className="indet" /> : <b style={{ width: `${pct}%` }} />}</div>
+              </div>
+            );
+          })}
+          {running.length > 3 && <div className="muted" style={{ fontSize: 12 }}>그 밖에 {running.length - 3}개 법인에서 실행 중</div>}
+          {!running.length && <div className="muted" style={{ fontSize: 12.5 }}>실행 중인 백업·검증·복구가 없습니다.</div>}
+          <div className="muted" style={{ fontSize: 11.5, marginTop: 'auto' }}>법인(실행 노드)마다 한 번에 1개씩 직렬로 돕니다.{d.status?.runningOutOfScope ? ' 조회 범위 밖 잡이 실행 중입니다.' : ''}</div>
+        </section>
+      </div>
+
+      <div className="vbk-kpis">
+        <div className="vbk-kpi"><div className="l">보호 중인 VM</div><div className="v">{kpi.protectedVms}<small>대</small></div><div className="m">잡 {jobs.length}개{kpi.disabled ? ` · 비활성 ${kpi.disabled}` : ''}{kpi.noReport ? ` · 엣지 보고 없음 ${kpi.noReport}` : ''}</div></div>
+        <div className="vbk-kpi"><div className="l">최근 24시간</div><div className="v" style={{ color: kpi.fail24 ? 'var(--amber)' : kpi.total24 ? 'var(--green)' : undefined }}>{kpi.total24 ? kpi.ok24 + kpi.warn24 : '—'}<small>{kpi.total24 ? `/ ${kpi.total24} 성공` : '실행 없음'}</small></div><div className="m">실패 {kpi.fail24} · 경고 {kpi.warn24}{kpi.skip24 ? ` · 건너뜀 ${kpi.skip24}` : ''}</div></div>
+        <div className="vbk-kpi"><div className="l">복원 지점</div><div className="v">{kpi.points}<small>개</small></div><div className="m">{kpi.oldestPointAt ? `가장 오래된 지점 ${agoText(kpi.oldestPointAt, now)}` : '아직 없음'}</div></div>
+        <div className="vbk-kpi"><div className="l">사본 용량</div><div className="v">{kpi.bytes ? fmtBytes(kpi.bytes) : '—'}</div><div className="m">{kpi.unknownBytes ? `크기 모르는 사본 ${kpi.unknownBytes}개 제외(최소값)` : '원장 사본 합계'}</div></div>
+        <div className="vbk-kpi"><div className="l">최근 검증</div><div className="v" style={{ color: kpi.verifyTotal && kpi.verifyOk < kpi.verifyTotal ? 'var(--amber)' : kpi.verifyTotal ? 'var(--green)' : undefined }}>{kpi.verifyTotal ? kpi.verifyOk : '—'}<small>{kpi.verifyTotal ? `/ ${kpi.verifyTotal} 부팅 확인` : '검증 기록 없음'}</small></div><div className="m">잡마다 가장 최근 검증 결과</div></div>
+      </div>
 
       {cards.length > 0 && (
         <div>
@@ -139,62 +238,48 @@ export default function VmCloneTool() {
             {cards.map((c) => (
               <button type="button" key={c.key} className={`vbk-corp${c.state === 'problem' || c.fail24 ? ' bad' : ['old', 'stale', 'noreport'].includes(c.state) ? ' warn' : ''}`}
                 style={{ textAlign: 'left', font: 'inherit', color: 'inherit', cursor: 'pointer' }} onClick={() => setView({ name: 'corp', key: c.key })}>
-                <span className="flex between gap" style={{ gap: 8 }}>
+                <span className="flex between gap" style={{ gap: 8, alignItems: 'center' }}>
                   <span className="nm">{c.name}</span>
-                  <span className={`vbk-chip ${c.state === 'ok' || c.state === 'central' ? 'ok' : c.state === 'problem' ? 'fail' : c.state === 'sim' ? '' : 'warn'}`}>{c.stateLabel}</span>
+                  <span className={`vbk-chip ${c.running ? 'warn' : c.state === 'ok' || c.state === 'central' ? 'ok' : c.state === 'problem' ? 'fail' : c.state === 'sim' ? '' : 'warn'}`}>{c.running ? '실행 중' : c.stateLabel}</span>
                 </span>
                 <span className="ln">{c.sub}</span>
-                <span className="nums">
-                  <span><b>{c.jobs}</b> <span className="muted">잡</span></span>
-                  <span><b style={{ color: c.fail24 ? 'var(--red)' : undefined }}>{c.total24 ? `${c.ok24}/${c.total24}` : '—'}</b> <span className="muted">24시간 성공</span></span>
-                  {c.queued > 0 && <span><b>{c.queued}</b> <span className="muted">대기</span></span>}
+                <span className="vbk-split" title={c.total24 ? `24시간 성공 ${c.ok24} · 실패 ${c.fail24}` : '24시간 실행 없음'}>
+                  {c.total24 > 0 && <><b className="ok" style={{ width: `${(c.ok24 / c.total24) * 100}%` }} /><b className="fail" style={{ width: `${(c.fail24 / c.total24) * 100}%` }} /></>}
                 </span>
-                <span className="ln" style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{c.storesText}</span>
+                <span className="flex between" style={{ gap: 8, fontSize: 12, color: 'var(--text-dim)' }}>
+                  <span style={{ whiteSpace: 'nowrap' }}><b style={{ color: 'var(--text)' }}>{c.jobs}</b> 잡 · <b style={{ color: c.fail24 ? '#fca5a5' : 'var(--text)' }}>{c.total24 ? `${c.ok24}/${c.total24}` : '—'}</b> 24시간 성공{c.queued > 0 ? ` · 대기 ${c.queued}` : ''}</span>
+                  <span className="st" title={c.storesText}>{c.storesText}</span>
+                </span>
               </button>
             ))}
           </div>
         </div>
       )}
 
-      <div className="vbk-strip">
-        {running.length ? running.map((r, i) => (
-          <span key={i} className="flex" style={{ alignItems: 'center', gap: 8, minWidth: 0 }}>
-            <span className="vbk-dot running" />
-            <b>실행 중 · {r.vm}</b>
-            <span className="muted">{r.where} · {r.phase || '—'}{r.since ? ` · ${durText(now - r.since)}째` : ''}</span>
-          </span>
-        )) : <span className="muted"><span className="vbk-dot" style={{ marginRight: 8 }} />유휴</span>}
-        <span className="muted">대기 {queued}건 · 노드마다 한 번에 1개씩 직렬 실행</span>
-        {d.status?.runningOutOfScope && <span className="muted">조회 범위 밖 잡이 실행 중입니다</span>}
-        {msg && <span style={{ flexBasis: '100%', fontSize: 12.5 }}>{msg}</span>}
-      </div>
-      {showMountsMaskedNote(d) && <div className="muted" style={{ fontSize: 12 }}>{MOUNTS_MASKED_NOTE}</div>}
-      {/* v2.599(AUTHZ-2599-05): 범위 제한 계정에는 범위 밖 vCenter 의 잡을 빼고 그 개수를 밝힌다 */}
-      {/* v2.631 A6-2631-06: scoped·omittedOutOfScope 판정·문구는 scopeOmitText.js 하나가 소유한다 */}
-      <ScopeOmitBanner data={d} unit="복제 잡" counter="개" why="조회 범위 밖 vCenter 의" />
-
-      <div className="vbk-kpis">
-        <div className="vbk-kpi"><div className="l">보호 중인 VM</div><div className="v">{kpi.protectedVms}<small>대</small></div><div className="m">잡 {jobs.length}개{kpi.disabled ? ` · 비활성 ${kpi.disabled}` : ''}{kpi.noReport ? ` · 엣지 보고 없음 ${kpi.noReport}` : ''}</div></div>
-        <div className="vbk-kpi"><div className="l">최근 24시간</div><div className="v" style={{ color: kpi.fail24 ? 'var(--amber)' : kpi.total24 ? 'var(--green)' : undefined }}>{kpi.total24 ? kpi.ok24 + kpi.warn24 : '—'}<small>{kpi.total24 ? `/ ${kpi.total24} 성공` : '실행 없음'}</small></div><div className="m">실패 {kpi.fail24} · 경고 {kpi.warn24}{kpi.skip24 ? ` · 건너뜀 ${kpi.skip24}` : ''}</div></div>
-        <div className="vbk-kpi"><div className="l">복원 지점</div><div className="v">{kpi.points}<small>개</small></div><div className="m">{kpi.oldestPointAt ? `가장 오래된 지점 ${agoText(kpi.oldestPointAt, now)}` : '아직 없음'}</div></div>
-        <div className="vbk-kpi"><div className="l">사본 용량</div><div className="v">{kpi.bytes ? fmtBytes(kpi.bytes) : '—'}</div><div className="m">{kpi.unknownBytes ? `크기 모르는 사본 ${kpi.unknownBytes}개 제외(최소값)` : '원장 사본 합계'}</div></div>
-        <div className="vbk-kpi"><div className="l">최근 검증</div><div className="v" style={{ color: kpi.verifyTotal && kpi.verifyOk < kpi.verifyTotal ? 'var(--amber)' : undefined }}>{kpi.verifyTotal ? kpi.verifyOk : '—'}<small>{kpi.verifyTotal ? `/ ${kpi.verifyTotal} 부팅 확인` : '검증 기록 없음'}</small></div><div className="m">잡마다 가장 최근 검증 결과</div></div>
-      </div>
-
       <div className="vbk-cols">
         <div className="vbk-main">
           <div className="vbk-panel">
-            <div className="hd"><div className="vbk-sec">백업 잡 <small>{jobs.length}개</small></div></div>
+            <div className="hd">
+              <div className="vbk-sec">백업 잡 <small>{jf === 'all' ? `${jobs.length}개` : `${shownJobs.length} / ${jobs.length}개`}</small></div>
+              <div className="flex wrap" style={{ gap: 4 }} role="group" aria-label="잡 필터">
+                {JOB_FILTERS.map(([k, label]) => (k === 'all' || fCounts[k] > 0 || jf === k) && (
+                  <button type="button" key={k} className="vbk-filter" aria-pressed={jf === k} onClick={() => setJf(k)}>{label} {fCounts[k]}</button>
+                ))}
+              </div>
+            </div>
             <div style={{ overflowX: 'auto' }}>
               <STable minWidth={780}>
                 <thead><tr><th>VM</th><th>대상</th><th>스케줄</th><th data-nosort>최근 14회</th><th style={{ textAlign: 'right' }}>복원 지점</th><th>검증</th><th className="right" data-nosort>작업</th></tr></thead>
                 <tbody>
                   {jobs.length === 0 && <tr><td colSpan={7} className="center muted" style={{ padding: 22 }}>백업 잡이 없습니다 — "+ 백업 잡 추가"로 vCenter별 VM 을 지정하세요.</td></tr>}
-                  {jobs.map((j) => {
+                  {jobs.length > 0 && shownJobs.length === 0 && <tr><td colSpan={7} className="center muted" style={{ padding: 22 }}>이 조건의 잡이 없습니다.</td></tr>}
+                  {shownJobs.map((j) => {
                     const st = jobState(j);
                     const b = cloneBytes(j.clones);
                     const v = lastVerify(j);
                     const mark = j.lastRun ? cloneRunMark(j.lastRun) : null;
+                    const ph = runOf(j);
+                    const next = nextRunText(j, now);
                     return (
                       <tr key={j.id} style={{ opacity: j.enabled ? 1 : 0.6 }}>
                         <td data-sort={j.vmName}>
@@ -215,7 +300,9 @@ export default function VmCloneTool() {
                         </td>
                         <td style={{ fontSize: 12.5 }}>
                           <div>{scheduleText(j.schedule)}</div>
-                          {mark && <div style={{ fontSize: 11.5, color: `var(--${mark.tone})` }} title={j.lastRun.detail}>{mark.icon} {agoText(j.lastRun.at, now)}</div>}
+                          {ph ? <div style={{ fontSize: 11.5, color: '#fcd34d', maxWidth: 150, whiteSpace: 'normal' }}>실행 중 · {ph}</div>
+                            : mark && <div style={{ fontSize: 11.5, color: `var(--${mark.tone})` }} title={j.lastRun.detail}>{mark.icon} {agoText(j.lastRun.at, now)}</div>}
+                          {!ph && next && <div className="muted" style={{ fontSize: 11.5, maxWidth: 110, whiteSpace: 'normal' }}>{next}</div>}
                           {/* v2.795: 두 줄로(⏰ RPO 초과 / 사유) — 한 줄이면 스케줄 열이 늘어 1440px 에서도 표가 카드 밖으로 밀린다(Chromium 실측 1013px > 820px). */}
                           {rpoText(j.rpo, now) && <div style={{ fontSize: 11.5, color: 'var(--amber)', maxWidth: 150, whiteSpace: 'normal' }} title="마지막 성공이 스케줄 주기의 2배 + 1시간을 넘었습니다"><b>⏰ RPO 초과</b><br />{rpoText(j.rpo, now).replace(/^RPO 초과 · /, '')}</div>}
                         </td>
@@ -346,7 +433,12 @@ function JobForm({ d, form: initial, onCancel, onSaved }) {
   const destFreeGB = kind === 'datastore' ? dss.find((x) => x.name === form.dest.datastoreName)?.freeGB
     : kind === 'nfsds' ? nfsDs.find((x) => x.id === form.dest.nfsDsId)?.freeGB
       : (() => { const m = mounts.find((x) => x.id === form.dest.mountId); return m?.freeBytes != null ? m.freeBytes / 1024 ** 3 : null; })();
+  const destCapGB = kind === 'datastore' ? dss.find((x) => x.name === form.dest.datastoreName)?.capacityGB
+    : kind === 'nfsds' ? nfsDs.find((x) => x.id === form.dest.nfsDsId)?.capacityGB
+      : (() => { const m = mounts.find((x) => x.id === form.dest.mountId); return m?.totalBytes != null ? m.totalBytes / 1024 ** 3 : null; })();
   const est = capacityEstimate(sel?.storageGB ?? null, form.keep, destFreeGB ?? null);
+  // v2.797: 대상 사용량 + 이번 보존분 미터(전체·여유를 모르면 그리지 않는다)
+  const meter = est && destReady ? meterOf({ capacityGB: destCapGB ?? null, freeGB: destFreeGB ?? null, needGB: est.needGB }) : null;
 
   const save = async () => {
     setBusy(true); setErr(null);
@@ -374,17 +466,23 @@ function JobForm({ d, form: initial, onCancel, onSaved }) {
           <h2 className="vbk-title">{form.id ? `백업 잡 수정 — ${form.vmName}` : '백업 잡 추가'}</h2>
         </div>
       </div>
-      <ol className="vbk-steps">
-        {steps.map(([n, s], i) => (
-          <li key={n} className={i + 1 === step ? 'cur' : i + 1 < step ? 'done' : ''}>
-            <span>{i + 1 < step ? '✓' : i + 1}</span>
-            <div>{n}<small>{s}</small></div>
-          </li>
-        ))}
-      </ol>
-
       <div className="vbk-cols">
         <div className="vbk-main">
+          <div className="vbk-wiz">
+          {/* v2.797 세로 스텝퍼 — 지난 단계는 눌러서 돌아간다(수정 중인 잡은 VM 을 바꿀 수 없으므로 1단계 잠금). 720px 이하에서는 2열로 위에 쌓인다. */}
+          <ol className="vbk-panel vbk-stepper" aria-label="단계">
+            {steps.map(([n, sub], i) => {
+              const st = i + 1 === step ? 'cur' : i + 1 < step ? 'done' : '';
+              return (
+                <li key={n}>
+                  <button type="button" className={st} aria-current={st === 'cur' ? 'step' : undefined} disabled={st !== 'done' || (!!form.id && i === 0)} onClick={() => setStep(i + 1)}>
+                    <span>{st === 'done' ? '✓' : i + 1}</span>
+                    <div>{n}<small>{sub}</small></div>
+                  </button>
+                </li>
+              );
+            })}
+          </ol>
           <div className="vbk-panel"><div className="bd" style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
             {step === 1 && (
               <>
@@ -486,23 +584,25 @@ function JobForm({ d, form: initial, onCancel, onSaved }) {
                   <label>보존 개수(복원 지점)<input className="input" type="number" min={1} max={30} value={form.keep} onChange={(e) => setForm({ ...form, keep: Number(e.target.value) || 3 })} /></label>
                   <label title="이보다 오래된 사본도 지웁니다. 가장 최근 1개는 언제나 남깁니다. 0 이면 개수만 봅니다.">보존 기간(일 · 0=개수만)<input className="input" type="number" min={0} max={365} value={form.keepDays || 0} onChange={(e) => setForm({ ...form, keepDays: Math.max(0, Math.min(365, Math.floor(Number(e.target.value)) || 0)) })} /></label>
                 </div>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 10, borderTop: '1px solid var(--border-soft)', paddingTop: 14 }}>
-                  <label className="flex gap" style={{ alignItems: 'flex-start', fontSize: 13, gap: 10 }} title="VMware Tools 정지점(VSS/freeze) 스냅샷 — DB 등 앱 정합 사본. Tools 필수.">
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8, borderTop: '1px solid var(--border-soft)', paddingTop: 14 }}>
+                  <div style={{ fontSize: 12.5, fontWeight: 600 }}>옵션</div>
+                  <label className="vbk-opt" title="VMware Tools 정지점(VSS/freeze) 스냅샷 — DB 등 앱 정합 사본. Tools 필수.">
                     <input type="checkbox" checked={!!form.quiesce} onChange={(e) => setForm({ ...form, quiesce: e.target.checked })} style={{ marginTop: 3 }} />
-                    <span><b>정지점(앱 정합)</b><br /><span className="muted" style={{ fontSize: 12 }}>VMware Tools VSS/freeze 스냅샷. Tools 가 없으면 정지점이 실패합니다{form.quiesce ? ' — 그때 어떻게 할지는 아래에서 고릅니다' : ''}.</span></span>
+                    <span><b>정지점(앱 정합)</b><small>VMware Tools VSS/freeze 스냅샷. Tools 가 없으면 정지점이 실패합니다{form.quiesce ? ' — 그때 어떻게 할지는 아래에서 고릅니다' : ''}.</small></span>
                   </label>
                   {form.quiesce && (
-                    <label className="flex gap" style={{ alignItems: 'flex-start', fontSize: 13, gap: 10, paddingLeft: 24 }}>
+                    <label className="vbk-opt sub">
                       <input type="checkbox" checked={form.quiesceFallback !== false} onChange={(e) => setForm({ ...form, quiesceFallback: e.target.checked })} style={{ marginTop: 3 }} />
-                      <span><b>정지점이 실패하면 일반 스냅샷으로 백업</b><br /><span className="muted" style={{ fontSize: 12 }}>앱 정합이 아닌(crash-consistent) 사본이 되고 결과에 ⚠ 가 남습니다. 끄면 그 회차는 실패로 남고 실패 메일이 갑니다.</span></span>
+                      <span><b>정지점이 실패하면 일반 스냅샷으로 백업</b><small>앱 정합이 아닌(crash-consistent) 사본이 되고 결과에 ⚠ 가 남습니다. 끄면 그 회차는 실패로 남고 실패 메일이 갑니다.</small></span>
                     </label>
                   )}
-                  <label className="flex gap" style={{ alignItems: 'flex-start', fontSize: 13, gap: 10, opacity: kind === 'nfs' ? 0.5 : 1 }}>
+                  <label className={`vbk-opt${kind === 'nfs' ? ' off' : ''}`}>
                     <input type="checkbox" disabled={kind === 'nfs'} checked={kind !== 'nfs' && !!form.verifyAfter} onChange={(e) => setForm({ ...form, verifyAfter: e.target.checked })} style={{ marginTop: 3 }} />
-                    <span><b>복제 후 자동 검증</b><br /><span className="muted" style={{ fontSize: 12 }}>새 사본에 검증용 스냅샷을 만들고 네트워크를 끊은 채 켜서 VMware Tools 응답을 확인한 뒤, 끄고 검증 전 상태로 되돌립니다{d.limits?.verifyTimeoutMin ? `(응답 대기 ${d.limits.verifyTimeoutMin}분)` : ''}. {kind === 'nfs' ? '엣지 NFS 사본은 켤 VM 이 없어 쓸 수 없습니다.' : ''}</span></span>
+                    <span><b>복제 후 자동 검증</b><small>새 사본에 검증용 스냅샷을 만들고 네트워크를 끊은 채 켜서 VMware Tools 응답을 확인한 뒤, 끄고 검증 전 상태로 되돌립니다{d.limits?.verifyTimeoutMin ? `(응답 대기 ${d.limits.verifyTimeoutMin}분)` : ''}.{kind === 'nfs' ? ' 엣지 NFS 사본은 켤 VM 이 없어 쓸 수 없습니다.' : ''}</small></span>
                   </label>
-                  <label className="flex gap" style={{ alignItems: 'center', fontSize: 13, gap: 10 }}>
-                    <input type="checkbox" checked={form.enabled !== false} onChange={(e) => setForm({ ...form, enabled: e.target.checked })} /> <b>활성</b>
+                  <label className="vbk-opt">
+                    <input type="checkbox" checked={form.enabled !== false} onChange={(e) => setForm({ ...form, enabled: e.target.checked })} style={{ marginTop: 3 }} />
+                    <span><b>활성</b><small>끄면 스케줄로 돌지 않고, 지금 실행도 막힙니다. 원장·이력은 그대로 남습니다.</small></span>
                   </label>
                 </div>
               </>
@@ -543,6 +643,7 @@ function JobForm({ d, form: initial, onCancel, onSaved }) {
               </div>
             </div>
           </div></div>
+          </div>
         </div>
 
         <div className="vbk-side">
@@ -551,6 +652,18 @@ function JobForm({ d, form: initial, onCancel, onSaved }) {
               <>
                 <div style={{ fontSize: 24, fontWeight: 700 }}>{fmtBytes(est.needGB * 1024 ** 3)} <span className="muted" style={{ fontSize: 13, fontWeight: 500 }}>= {unitText(sel.storageGB, 'GB')} × 보존 {est.keep}</span></div>
                 {destReady && <div className="vbk-kv"><span>대상 여유</span><span>{est.freeGB != null ? fmtBytes(est.freeGB * 1024 ** 3) : '—(이 대상의 여유를 모릅니다)'}</span></div>}
+                {meter && (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 6 }}>
+                    <div className="vbk-meter" role="img" aria-label={`사용 중 ${Math.round(meter.usedPct)}% · 이번 보존분 ${Math.round(meter.needPct)}%`}>
+                      <b className="used" style={{ width: `${meter.usedPct}%` }} /><b className={`need${meter.over ? ' over' : ''}`} style={{ width: `${meter.needPct}%` }} />
+                    </div>
+                    <div className="vbk-meter-lg">
+                      <span><i style={{ background: '#3a4766' }} />사용 중 {Math.round(meter.usedPct)}%</span>
+                      <span><i style={{ background: meter.over ? 'var(--red)' : 'var(--accent)' }} />보존분 {meter.over ? '여유 초과' : `${Math.round(meter.needPct)}%`}</span>
+                      <span>전체 {fmtBytes(meter.capacityGB * 1024 ** 3)}</span>
+                    </div>
+                  </div>
+                )}
                 {est.fits === false && <div className="vbk-note" style={{ marginTop: 6 }}>예측이 대상 여유보다 큽니다 — 보존 개수를 줄이거나 다른 대상을 고르세요.</div>}
               </>
             ) : <div className="muted" style={{ fontSize: 12.5 }}>VM 을 고르면 VM 크기 × 보존 개수로 계산합니다.</div>}
