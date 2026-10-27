@@ -1,4 +1,4 @@
-// views/hostChecksText.js — ESXi 호스트 화면(#/hosts)의 '엑셀 수준 상세' 판본(v2.803, 승인 시안 https://claude.ai/artifact/EFh5K3UDzuGpUpqVyqXPf1 ①):
+// views/hostChecksText.js — ESXi 호스트 화면(#/hosts)의 '엑셀 수준 상세' 판본(v2.805, 승인 시안 https://claude.ai/artifact/EFh5K3UDzuGpUpqVyqXPf1 ①):
 //   열 묶음 9개(엑셀 '호스트 목록' 시트와 같은 순서) · 요약 8칸 · '지금 확인할 것' 칩 · 칩으로 거르기 · 점검 열 글자.
 // 판정을 새로 하지 않는다:
 //   · 확인 대상(점검 · 끊김 · CPU 90% 초과)은 hostTriage.js 그대로(시안 B 판정 — 카드 숫자 = 표 탭).

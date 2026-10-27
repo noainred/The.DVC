@@ -12,10 +12,10 @@
  *  · v2.792 열(vmListCsv.vmListColumns)과 같은 항목은 머리·칸 글자가 같다(테스트가 대조 — cols 를 안 보내면 예전 그대로 그 열을 쓴다).
  *  · 못 읽은 값은 빈칸, 그 vCenter 에서 아직 모으지 않은 소스(태그 수집 전·파티션 수집 안 된 VM·구성 캐시 미도달)는 '수집 안 됨'(MISSING) — 0·'없음' 으로 쓰지 않는다.
  *  · avail = 채워짐 정도(화면 배지): snap 30초 인벤토리 · cache 주기 수집 캐시.
- *  · needs = 그 열이 읽는 추가 소스(veeam·tags·marks) — 라우트는 고른 열에 필요한 소스만 읽는다(Veeam 대조는 무겁다).
+ *  · needs = 그 열이 읽는 추가 소스(veeam·tags·marks·clone — 여러 개면 배열) — 라우트는 고른 열에 필요한 소스만 읽는다(Veeam 대조는 무겁다).
  */
 import { folderParts, offsetLabel, veeamStateText } from './vmListCsv.js';
-import { backupVerdict, recentBackupYn, recentBackupSnapYn, ynDaysOf, YN_DAYS, YN_DEFAULT_DAYS } from './backupStatus.js';
+import { backupVerdict, METHOD_TEXT, cloneResultText, recentBackupYn, recentBackupSnapYn, ynDaysOf, YN_DAYS, YN_DEFAULT_DAYS } from './backupStatus.js';
 import { localStamp, DAY_OFFSET_MIN } from '../util/dayKey.js';
 
 export const MISSING = '수집 안 됨';
@@ -72,6 +72,11 @@ export const CATALOG = Object.freeze([
   { key: 'custom', group: 'meta', label: '사용자 지정 속성', avail: 'cache', needs: 'tags', get: customCell },
   { key: 'bmark', group: 'meta', label: '백업 표시(중요도·백업 필요·메모)', avail: 'snap', needs: 'marks',
     get: (r) => (!r.marksOk || !r.mark ? '' : [CRIT_TEXT[r.mark.crit] || '', r.mark.need ? '백업 필요' : '', r.mark.memo || ''].filter(Boolean).join(' · ')) },
+  // v2.803 백업 방식(사람이 정한 값) · Clone 마지막 실행(백업 방식이 Clone 인 VM 만 — 포탈 복제 잡, 실행 노드 기준)
+  { key: 'bmethod', group: 'meta', label: '백업 방식(Veeam·Clone·Config 백업·백업 안함)', avail: 'snap', needs: 'marks', isNew: true,
+    get: (r) => (!r.marksOk || !r.mark ? '' : METHOD_TEXT[r.mark.method] || '') },
+  { key: 'bclone', group: 'meta', label: 'Clone 마지막 실행·결과', head: (o) => `Clone 마지막 실행 ${o.tz}`, avail: 'snap', needs: ['marks', 'clone'], isNew: true,
+    get: (r, o) => (r.mark?.method !== 'clone' ? '' : [o.t(r.clone?.at), cloneResultText(r.clone)].filter(Boolean).join(' ')) },
   // 자원 · IP(v2.792 열 — 사용률·네트워크 상세는 VM 전체 정보 내보내기)
   { key: 'cpu', group: 'res', label: 'vCPU', avail: 'snap', get: (r) => (fin(r.inv.cpuCount) ? r.inv.cpuCount : '') },
   { key: 'mem', group: 'res', label: '메모리(GB)', avail: 'snap', get: (r) => (fin(r.inv.memMB) ? num1(r.inv.memMB / 1024) : '') },
@@ -114,9 +119,9 @@ export const LEGACY_KEYS = Object.freeze(['vc', 'flv', 'folder', 'name', 'power'
 /** 빠른 조합(화면 버튼) — key 목록. */
 export const PRESETS = Object.freeze([
   { id: 'base', name: '기본', keys: ['folder', 'name', 'power', 'host', 'ip', 'vjudge', 'vstate', 'vlast', 'vrp', 'snN'] },
-  { id: 'backup', name: '백업 확인', keys: ['folder', 'name', 'power', 'vjudge', 'vstate', 'vlast', 'vres', 'snN', 'bmark'] },
+  { id: 'backup', name: '백업 확인', keys: ['folder', 'name', 'power', 'bmethod', 'vjudge', 'vstate', 'vlast', 'vres', 'bclone', 'snN', 'bmark'] },
   { id: 'snap', name: '스냅샷', keys: ['folder', 'name', 'power', 'snN', 'snSize', 'snOld', 'snNew', 'snNames', 'vtmp', 'vtmpTs', 'vtmpStale', 'vsnapN', 'vsnapTs'] },
-  { id: 'mark', name: '백업 표시', keys: ['folder', 'name', 'power', 'bmark', 'notes', 'vjudge', 'vlast'] },
+  { id: 'mark', name: '백업 표시', keys: ['folder', 'name', 'power', 'bmethod', 'bmark', 'notes', 'vjudge', 'vlast'] },
   { id: 'legacy', name: '예전 열 그대로', keys: [...LEGACY_KEYS] },
   { id: 'all', name: '전체', keys: CATALOG.map((c) => c.key) },
 ]);
@@ -146,7 +151,7 @@ export function knownKeys(cols) {
 /** 고른 열이 읽는 추가 소스. */
 export function needsOf(keys) {
   const s = new Set();
-  for (const k of keys) { const n = BY_KEY.get(k)?.needs; if (n) s.add(n); }
+  for (const k of keys) { const n = BY_KEY.get(k)?.needs; for (const x of Array.isArray(n) ? n : n ? [n] : []) s.add(x); }
   return s;
 }
 

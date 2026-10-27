@@ -140,7 +140,7 @@ export function backupTotals(rows) {
     rpo: { d1: 0, d3: 0, d7: 0, unknown: 0 }, failed: 0, warning: 0, excluded: 0, powerUnknown: 0,
     veeamKnownVcs: 0, snapKnownVcs: 0, vmVeeamKnown: 0, vmSnapKnown: 0, veeamPartial: 0, snapPartial: 0, runningUnknown: 0, vmUnknown: 0,
     // v2.784: 사람이 정한 표시(중요도·백업 필요) — needGap(백업 필요인데 Veeam 대상 아님)은 아는 vCenter 만 더하고 모르는 곳을 센다
-    marks: { high: 0, mid: 0, low: 0, need: 0, needGap: 0, needGapUnknown: 0 },
+    marks: { high: 0, mid: 0, low: 0, need: 0, needGap: 0, needGapUnknown: 0, method: { veeam: 0, clone: 0, config: 0, none: 0, unset: 0 } },   // v2.803 method = 백업 방식별 수
     // v2.785(GR R-B2): 표시 파일을 못 읽은 행(marks null) 수 — 하나라도 있으면 marks 합계 값은 null('—' · 부분 합을 합계로 내지 않는다)
     marksUnknown: 0 };
   for (const r of Array.isArray(rows) ? rows : []) {
@@ -167,9 +167,10 @@ export function backupTotals(rows) {
     else if (m) {
       for (const k of ['high', 'mid', 'low', 'need']) t.marks[k] += m[k] || 0;
       if (isFin(m.needGap)) t.marks.needGap += m.needGap; else if (m.need > 0) t.marks.needGapUnknown++;
+      for (const k of Object.keys(t.marks.method)) t.marks.method[k] += m.method?.[k] || 0;
     }
   }
-  if (t.marksUnknown > 0) for (const k of ['high', 'mid', 'low', 'need', 'needGap']) t.marks[k] = null;
+  if (t.marksUnknown > 0) { for (const k of ['high', 'mid', 'low', 'need', 'needGap']) t.marks[k] = null; t.marks.method = null; }
   return t;
 }
 
@@ -179,7 +180,7 @@ export function backupTotals(rows) {
  * v2.782(점검 K4 B-B3): absentKnown(기본 true) — 대조에 없는 VM 을 '없음'(v null)으로 확정해도 되는가. false 면(첫 수집 전·한 번도 성공 못 한 서버가 있음 —
  *   backupRow veeamAbsentUnknown) 대조에 없는 VM 만 v 모름(undefined — JSON 에서 키 없음)이고, 맞은 VM 은 값을 그대로 싣는다.
  */
-export function vmBackupView(vm, ve, evEntry, { veeamKnown = true, snapKnown = true, absentKnown = true, now = Date.now(), mark } = {}) {
+export function vmBackupView(vm, ve, evEntry, { veeamKnown = true, snapKnown = true, absentKnown = true, now = Date.now(), mark, clone } = {}) {
   const v = ve ? {
     state: ve.run === 1 ? 'run' : ve.run === 2 ? 'wait' : 'ok', pg: ve.run === 1 && isFin(ve.pg) ? ve.pg : null, by: ve.by || '',
     jobs: Array.isArray(ve.jobs) ? ve.jobs.slice(0, 5) : [], rp: isFin(ve.rp) ? ve.rp : null,
@@ -192,6 +193,9 @@ export function vmBackupView(vm, ve, evEntry, { veeamKnown = true, snapKnown = t
     v: veeamKnown ? (v ?? (absentKnown ? null : undefined)) : undefined,
     s: { ev: snapKnown ? ev : undefined, now: currentSnapOf(vm, now) },
     ...(mark ? { m: mark } : {}),   // v2.784: 사람이 정한 표시(backupMarks.markView — 있을 때만)
+    // v2.803 Clone 칸 — 백업 방식을 Clone 으로 정한 VM 에만(사용자 요청 'Clone 이라고 표시된 항목이면 여기에'). cloneView 결과 그대로:
+    //   { job:false }(포탈 복제 잡 없음) | { job:true, on, at, ok, skipped? } | null(잡 목록을 못 읽음 — 모름). 그 밖의 VM 은 키 없음.
+    ...(mark?.method === 'clone' && clone !== undefined ? { c: clone } : {}),
   };
 }
 
@@ -201,7 +205,9 @@ export function vmBackupView(vm, ve, evEntry, { veeamKnown = true, snapKnown = t
  *   v 키 없음 = Veeam 모름 · v null = 없음 / s.ev 키 없음 = 스냅샷 모름 · 잔존(하루 넘은 임시 스냅샷)은 스냅샷으로 치지 않는다.
  */
 // v2.784: need(백업 필요 표시) · needgap(백업 필요인데 Veeam 대상이 아님 — Veeam 을 모르는 VM 은 넣지 않는다) · crit-*(중요도)
-export const VIEW_FILTERS = Object.freeze(['all', 'veeam', 'snaponly', 'none', 'run', 'stale', 'rpo', 'fail', 'need', 'needgap', 'crit-high', 'crit-mid', 'crit-low']);
+// v2.803: method-*(백업 방식 — unset = 정하지 않음)
+export const VIEW_FILTERS = Object.freeze(['all', 'veeam', 'snaponly', 'none', 'run', 'stale', 'rpo', 'fail', 'need', 'needgap', 'crit-high', 'crit-mid', 'crit-low',
+  'method-veeam', 'method-clone', 'method-config', 'method-none', 'method-unset']);
 export function viewClass(vm, { rpoDays = 1, now = Date.now() } = {}) {
   const vKnown = !!vm && 'v' in vm && vm.v !== undefined;
   const v = vKnown ? vm.v : null;
@@ -214,6 +220,38 @@ export function viewClass(vm, { rpoDays = 1, now = Date.now() } = {}) {
     vKnown, veeam: !!v, run: !!(v && (v.state === 'run' || v.state === 'wait')), sKnown, snap, stale: !!(snapNow && snapNow.stale),
     old: !!(v && isFin(v.lb) && now - v.lb > days * DAY), fail: /^(fail|warn)/i.test(r),
     crit: ['high', 'mid', 'low'].includes(vm?.m?.crit) ? vm.m.crit : '', need: vm?.m?.need === true,
+    method: ['veeam', 'clone', 'config', 'none'].includes(vm?.m?.method) ? vm.m.method : '',   // v2.803 백업 방식(사람이 정한 값)
+  };
+}
+/** v2.803 백업 방식 글자(화면·CSV·엑셀 공용 — 웹 backupViewText.METHODS 와 같은 글자, 테스트 대조). */
+export const METHOD_TEXT = Object.freeze({ veeam: 'Veeam', clone: 'Clone', config: 'Config 백업', none: '백업 안함' });
+/**
+ * v2.803 Clone 결과 한 마디(CSV·엑셀·내보내기 창 공용). c = vmBackupView 의 c(백업 방식이 Clone 인 VM 에만 있다).
+ *   키 없음(Clone 이 아님) '' · null(잡 목록을 못 읽음)·unknown(실행 노드 보고 없음) '모름' · 잡 없음 · 아직 실행 안 함 · 성공 · 실패 · 건너뜀 + 잡이 꺼졌으면 '(잡 꺼짐)'.
+ */
+export function cloneResultText(c) {
+  if (c === undefined) return '';
+  if (c === null || c.unknown) return '모름';
+  if (!c.job) return '잡 없음';
+  const off = c.on === false ? ' (잡 꺼짐)' : '';
+  if (!isFin(c.at)) return `아직 실행 안 함${off}`;
+  return `${c.skipped ? '건너뜀·중단' : c.ok ? '성공' : '실패'}${off}`;
+}
+
+/**
+ * v2.803 Clone 칸 자료 — 포탈 복제 잡 한 개 + 그 마지막 실행(vmclone/jobState.js cloneStateByVm 의 원소) → 화면·CSV 가 쓰는 작은 모양.
+ *   잡 이름·대상 경로·이력 원문은 싣지 않는다. lastRun undefined = 실행 노드(엣지)의 보고가 없어 모름 · null = 아직 실행 안 함.
+ * @param {{job:object, lastRun:object|null|undefined}|undefined} st 그 VM 의 상태(잡이 없으면 undefined)
+ */
+export function cloneView(st) {
+  if (!st?.job) return { job: false };
+  const on = st.job.enabled !== false;
+  if (st.lastRun === undefined) return { job: true, on, unknown: true };
+  const lr = st.lastRun && typeof st.lastRun === 'object' ? st.lastRun : null;
+  return {
+    job: true, on,
+    at: lr && isFin(lr.at) ? lr.at : null, ok: lr ? lr.ok === true : null,
+    ...(lr?.skipped ? { skipped: String(lr.skipped).slice(0, 40) } : {}),
   };
 }
 /*
@@ -283,6 +321,7 @@ export function vmViewMatches(vm, f, opts) {
   if (f === 'need') return c.need;
   if (f === 'needgap') return c.need && c.vKnown && !c.veeam;
   if (f === 'crit-high' || f === 'crit-mid' || f === 'crit-low') return c.crit === f.slice(5);
+  if (f.startsWith('method-')) return f === 'method-unset' ? !c.method : c.method === f.slice(7);
   return true;
 }
 

@@ -1,4 +1,4 @@
-// ESXi 호스트 화면(#/hosts)의 '점검' 열과 호스트 상세 페이지(v2.803 — 승인 시안 https://claude.ai/artifact/EFh5K3UDzuGpUpqVyqXPf1).
+// ESXi 호스트 화면(#/hosts)의 '점검' 열과 호스트 상세 페이지(v2.805 — 승인 시안 https://claude.ai/artifact/EFh5K3UDzuGpUpqVyqXPf1).
 //
 //   · GET /hosts/checks   호스트별 iDRAC 부품 상태 · 최근 재부팅 판정 · Veeam 최근 백업 수 — /hosts 와 같은 범위·필터(applyFilters + state).
 //                         무거운 집계(로그 DB · iDRAC 등록부 · Veeam 대조)라 화면은 마운트 1회 + 버튼으로만 부르고, 서버는 60초 캐시(범위 · 판본 키).

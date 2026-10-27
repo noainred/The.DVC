@@ -1,4 +1,4 @@
-// views/HostDetail.jsx — ESXi 호스트 상세 **전체 페이지**(#/hosts/<id>, v2.803 — 승인 시안 https://claude.ai/artifact/EFh5K3UDzuGpUpqVyqXPf1 ② · 사용자 선택 '전체 페이지').
+// views/HostDetail.jsx — ESXi 호스트 상세 **전체 페이지**(#/hosts/<id>, v2.805 — 승인 시안 https://claude.ai/artifact/EFh5K3UDzuGpUpqVyqXPf1 ② · 사용자 선택 '전체 페이지').
 //
 // 화면을 복제하지 않는다 — 기존 호스트 상세 모달(components/EntityDetail.jsx)의 구성요소(HostBasicRows · HostCfgSection · PerfcSection ·
 //   ClusterCfgSection · HostHbaTable · HostGpuPanel · HostPowerPanel · HostMetricButton · IdracTrendLinkButton · HostVmsModal)를 그대로 쓰고,

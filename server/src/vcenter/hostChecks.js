@@ -1,5 +1,5 @@
 /**
- * vcenter/hostChecks.js — ESXi 호스트 화면의 '점검' 열(iDRAC 부품 상태 · 최근 재부팅 판정 · Veeam 최근 백업) 집계(순수, v2.803 —
+ * vcenter/hostChecks.js — ESXi 호스트 화면의 '점검' 열(iDRAC 부품 상태 · 최근 재부팅 판정 · Veeam 최근 백업) 집계(순수, v2.805 —
  *   승인 시안 https://claude.ai/artifact/EFh5K3UDzuGpUpqVyqXPf1 ① 호스트 목록 '점검'·'백업' 묶음).
  *
  * 판정을 새로 하지 않는다 — 호스트·클러스터 엑셀(hostExport.js)이 쓰는 같은 함수의 결과를 호스트별 한 줄로 줄인다:

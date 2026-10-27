@@ -1925,7 +1925,7 @@ tr.row-sel > td { background: rgba(59, 130, 246, .10); }
 @media (min-width: 721px) {
   .ht-more-narrow { display: none; }
 }
-/* ── v2.803 ESXi 호스트 — 엑셀 수준 상세(디자인 캔버스 'ESXi 호스트 화면 시안 — 엑셀 수준 상세' ①~③) — 포탈 토큰만 쓴다 ── */
+/* ── v2.805 ESXi 호스트 — 엑셀 수준 상세(디자인 캔버스 'ESXi 호스트 화면 시안 — 엑셀 수준 상세' ①~③) — 포탈 토큰만 쓴다 ── */
 .ht-top { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 10px 16px; margin-bottom: 12px; }
 .ht-title { display: flex; flex-wrap: wrap; align-items: baseline; gap: 10px; min-width: 0; }
 .ht-title > b { font-size: 20px; letter-spacing: -0.01em; }

@@ -552,7 +552,7 @@ export function PerfcSection({ item, isVm }) {
 }
 
 /**
- * 호스트 기본 행 17개(v2.803 — 호스트 상세 모달과 전체 페이지 views/HostDetail.jsx 가 같은 것을 그린다. 복제하지 말 것).
+ * 호스트 기본 행 17개(v2.805 — 호스트 상세 모달과 전체 페이지 views/HostDetail.jsx 가 같은 것을 그린다. 복제하지 말 것).
  * onShowVms: 'VM n대 보기' 버튼 — 호출부가 HostVmsModal 을 연다.
  */
 export function HostBasicRows({ item, onShowVms }) {
@@ -596,7 +596,7 @@ export function HostBasicRows({ item, onShowVms }) {
   );
 }
 
-/** 스토리지 어댑터(HBA) 표 — 모달·전체 페이지 공용(v2.803). */
+/** 스토리지 어댑터(HBA) 표 — 모달·전체 페이지 공용(v2.805). */
 export function HostHbaTable({ item }) {
   if (!(item?.hbas?.length > 0)) return null;
   return (

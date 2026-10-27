@@ -1,5 +1,5 @@
 /**
- * v2.803 — ESXi 호스트 화면 '점검' 열 집계(/hosts/checks) + 호스트 단건(/hosts/:id). 승인 시안 https://claude.ai/artifact/EFh5K3UDzuGpUpqVyqXPf1.
+ * v2.805 — ESXi 호스트 화면 '점검' 열 집계(/hosts/checks) + 호스트 단건(/hosts/:id). 승인 시안 https://claude.ai/artifact/EFh5K3UDzuGpUpqVyqXPf1.
  *  ① 순수 — iDRAC 한 줄(등록 안 됨 · 읽는 중 · 묶음 상태 · 등록부 못 읽음) · 재부팅 행 그대로 · Veeam 수(템플릿 제외 · 수집 안 됨 null)
  *  ② 권한으로 뺀 묶음은 키 자체가 없다(조용히 0 을 넣지 않는다)
  *  ③ 실제 라우트 — inv.hosts 게이트 · 범위(applyFilters) · 관리자 판본(iDRAC) · 구성 점검 도구 권한(재부팅) · /hosts/checks 가 id 로 잡히지 않는다 · 범위 밖 호스트 404
@@ -10,7 +10,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-const DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'hostchecks2803-'));
+const DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'hostchecks2805-'));
 Object.assign(process.env, { CONFIG_DIR: DIR, DATA_SOURCE: 'live', AUTH_ENABLED: 'true' });
 const VC = 'vc-a'; const OUT = 'vc-out';
 fs.writeFileSync(path.join(DIR, 'runtime.json'), JSON.stringify({ dataSource: 'live' }));

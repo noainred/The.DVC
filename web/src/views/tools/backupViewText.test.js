@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import fs from 'node:fs';
-import { fmtNum, pctOf, veeamStateOf, filterRows, needsAttention, attentionList, vmClass, vmMatches, filterCounts, folderParts, buildTree, flattenTree, initialOpen, veeamCell, snapCell, shortTs, FILTERS, CRIT_FILTERS, POWER, RPO_DAYS, loadOpts, saveOpts, scopeQuery, scopeNote } from './backupViewText.js';
+import { fmtNum, pctOf, veeamStateOf, filterRows, needsAttention, attentionList, vmClass, vmMatches, filterCounts, folderParts, buildTree, flattenTree, initialOpen, veeamCell, snapCell, shortTs, FILTERS, CRIT_FILTERS, METHOD_FILTERS, METHODS, backupCell, cloneCell, POWER, RPO_DAYS, loadOpts, saveOpts, scopeQuery, scopeNote } from './backupViewText.js';
 import { vmViewMatches, VIEW_FILTERS, viewClass as serverViewClass, POWER_VALUES, RPO_DAYS as SERVER_RPO_DAYS } from '../../../../server/src/veeam/backupStatus.js';
 
 const H = 3_600_000;
@@ -46,7 +46,8 @@ describe('v2.779 백업 메뉴 — 순수 헬퍼', () => {
     expect(vmClass(VMS[6])).toMatchObject({ vKnown: false, sKnown: false });
     expect(vmClass(VMS[4])).toMatchObject({ snap: false, stale: true });
     const c = filterCounts(VMS);
-    expect(c).toEqual({ all: 7, veeam: 3, snaponly: 1, none: 2, run: 2, stale: 1, rpo: 1, fail: 0, need: 0, needgap: 0, 'crit-high': 0, 'crit-mid': 0, 'crit-low': 0 });   // v2.784 표시 필터(표시 없음 = 0)   // v2.780 rpo: dc01 의 lb 1(아주 오래 전)
+    expect(c).toEqual({ all: 7, veeam: 3, snaponly: 1, none: 2, run: 2, stale: 1, rpo: 1, fail: 0, need: 0, needgap: 0, 'crit-high': 0, 'crit-mid': 0, 'crit-low': 0,
+      'method-veeam': 0, 'method-clone': 0, 'method-config': 0, 'method-none': 0, 'method-unset': 7 });   // v2.803 백업 방식(표시 없음 = 미지정)   // v2.784 표시 필터(표시 없음 = 0)   // v2.780 rpo: dc01 의 lb 1(아주 오래 전)
     expect(vmMatches(VMS[6], 'none')).toBe(false);
   });
 
@@ -54,7 +55,7 @@ describe('v2.779 백업 메뉴 — 순수 헬퍼', () => {
     expect(folderParts('DC1/vm/A.MGMT/AD')).toEqual(['DC1', 'A.MGMT', 'AD']);
     const t = buildTree(VMS);
     const dc = t.children[0];
-    expect(dc.name).toBe('DC1'); expect(dc.agg).toEqual({ n: 7, veeam: 3, snap: 3, run: 2, none: 2 });
+    expect(dc.name).toBe('DC1'); expect(dc.agg).toEqual({ n: 7, veeam: 3, snap: 3, run: 2, none: 2, clone: 0 });
     expect(dc.children.map((c) => c.name)).toEqual(['A.MGMT', 'B.Service', 'C.Add-ons']);
     const runOnly = buildTree(VMS, { filter: 'run' });
     expect(runOnly.children[0].children.map((c) => c.name)).toEqual(['A.MGMT']);
@@ -114,7 +115,7 @@ describe('v2.780 백업 옵션 — 전원·제외·오래된 백업·실패·경
   });
 
   it('웹 vmMatches = 서버 vmViewMatches(같은 입력 · CSV 가 화면과 같은 VM 을 낸다) · 값 목록도 같다', () => {
-    expect([...FILTERS, ...CRIT_FILTERS].map(([k]) => k)).toEqual([...VIEW_FILTERS]);   // v2.784: 중요도 필터는 칩 줄 밖(상단 수)
+    expect([...FILTERS, ...CRIT_FILTERS, ...METHOD_FILTERS].map(([k]) => k)).toEqual([...VIEW_FILTERS]);   // v2.803 백업 방식 필터도 칩 줄 밖   // v2.784: 중요도 필터는 칩 줄 밖(상단 수)
     expect(POWER.map(([k]) => k)).toEqual([...POWER_VALUES]);
     expect(RPO_DAYS).toEqual([...SERVER_RPO_DAYS]);
     const edge = [{}, { v: undefined, s: {} }, { v: null, s: { ev: undefined } }, { v: { state: 'wait' }, s: { now: { stale: true, ts: NOW } } }, ...X];
@@ -203,7 +204,7 @@ describe('v2.784 백업 표시 — 중요도·백업 필요·메모', async () =
     expect([...sel]).toEqual(['a']);
   });
   it('상단 수·주의 목록 — 미백업을 모르면 null(0 이 아니다) · 미백업 요약은 정보 칸 한 줄', () => {
-    expect(M.marksLine({ high: 1, mid: 0, low: 2, need: 3, needGap: null })).toEqual({ high: 1, mid: 0, low: 2, need: 3, needGap: null });
+    expect(M.marksLine({ high: 1, mid: 0, low: 2, need: 3, needGap: null })).toEqual({ high: 1, mid: 0, low: 2, need: 3, needGap: null, method: null });
     expect(M.marksLine(null)).toBe(null);
     const att = M.attentionList([{ id: 'v1', name: 'VC1', veeamState: 'ok', snap: 1, snapStale: 0, marks: { need: 2, needGap: 2 } }, { id: 'v2', name: 'VC2', veeamState: 'ok', snap: 1, snapStale: 0, marks: { need: 1, needGap: null } }]);
     expect(att.map((a) => a.title)).toEqual(['백업 필요인데 Veeam 백업 없음 2대']);
@@ -216,7 +217,7 @@ describe('v2.784 백업 표시 — 중요도·백업 필요·메모', async () =
     expect(det).toMatch(/\{writable && <input type="checkbox"/);
     expect(det).toMatch(/load\(true\)/);
     expect(det).toMatch(/const r = await putJson\('\/tools\/backup-detail\/marks'[\s\S]{0,120}r\?\.ok === false\)[\s\S]{0,80}r\.reason/);   // 400 본문을 성공으로 삼키지 않는다
-    expect(det).toMatch(/const GRID = 'minmax\(220px, 2fr\) 52px minmax\(140px, 1\.2fr\) minmax\(90px, 1fr\) 64px minmax\(110px, 1fr\) 104px'/);
+    expect(det).toMatch(/const GRID = 'minmax\(220px, 2fr\) 52px minmax\(150px, 1\.3fr\) minmax\(140px, 1\.1fr\) 64px 104px'/);   // v2.803 6열(백업 · Clone)
     const sum = fs.readFileSync(new URL('./BackupSummaryTool.jsx', import.meta.url), 'utf8');
     expect(sum).toMatch(/data-backup-marks/);
     expect(Number((/<STable minWidth=\{(\d+)\}/.exec(sum) || [])[1])).toBeLessThanOrEqual(1100);   // v2.787 전폭 표
@@ -249,5 +250,37 @@ describe('v2.787 Summary — 바로가기 · 법인별 표 · 우선순위', asy
     const det = fs.readFileSync(new URL('./BackupDetailTool.jsx', import.meta.url), 'utf8');
     expect(det).toMatch(/<VeeamHeader active="detail"/);
     expect(sum + det).not.toMatch(/textTransform/);
+  });
+});
+
+describe('v2.803 백업 방식 · 백업 칸 · Clone 칸', async () => {
+  const S = await import('../../../../server/src/veeam/backupStatus.js');
+  const T = 1_800_000_000_000;
+  it('백업 방식 글자 = 서버 METHOD_TEXT · 필터는 웹·서버 한 쌍(방식별 · 미지정)', () => {
+    expect(Object.fromEntries(METHODS.map((m) => [m.key, m.text]))).toEqual({ ...S.METHOD_TEXT });
+    const vms = [{ id: 'a', m: { method: 'clone' } }, { id: 'b', m: { method: 'veeam' } }, { id: 'c', m: { crit: 'high' } }, { id: 'd' }, { id: 'e', m: { method: 'bogus' } }];
+    for (const [f] of METHOD_FILTERS) for (const v of vms) expect(vmMatches(v, f), `${f}/${v.id}`).toBe(S.vmViewMatches(v, f));
+    expect(vms.filter((v) => vmMatches(v, 'method-unset')).map((v) => v.id)).toEqual(['c', 'd', 'e'], '모르는 값은 미지정');
+  });
+  it('백업 칸 — Veeam 이 있으면 Veeam(스냅샷 숨김) · 없으면 스냅샷 · 둘 다 없으면 Veeam 표기 · 모름을 — 로 덮지 않는다', () => {
+    expect(backupCell({ v: { lb: T }, s: { ev: { n: 2, ts: T } } })).toMatchObject({ tone: 'ok', src: 'veeam' });
+    expect(backupCell({ v: null, s: { ev: { n: 2, ts: T } } })).toMatchObject({ tone: 'ev', text: '7일 2회', src: 'snap' });
+    expect(backupCell({ v: null, s: { ev: null, now: { n: 1, ts: T, stale: true } } })).toMatchObject({ tone: 'stale', src: 'snap' });
+    expect(backupCell({ v: null, s: { ev: null } })).toMatchObject({ text: '—', tone: 'none' });
+    expect(backupCell({ s: { ev: null } })).toMatchObject({ text: '모름', tone: 'unknown' }, 'Veeam 모름');
+    expect(backupCell({ v: null, s: {} })).toMatchObject({ text: '모름', tone: 'unknown' }, '스냅샷 모름');
+  });
+  it('Clone 칸 — 키 없으면 없음(null) · 잡 없음 · 모름 · 실행 안 함 · 성공/실패 · 잡 꺼짐 · 서버 cloneView·cloneResultText 와 같은 갈래', () => {
+    expect(cloneCell({})).toBe(null);
+    expect(cloneCell({ c: null }).text).toBe('Clone · 모름');
+    const st = (lastRun, enabled = true) => S.cloneView({ job: { enabled }, lastRun });
+    expect(cloneCell({ c: S.cloneView(undefined) }).text).toBe('Clone · 잡 없음');
+    expect(cloneCell({ c: st(undefined) }).text).toBe('Clone · 모름');
+    expect(cloneCell({ c: st(null) }).text).toBe('Clone · 아직 실행 안 함');
+    expect(cloneCell({ c: st({ at: T, ok: true }) })).toMatchObject({ tone: 'clone' });
+    expect(cloneCell({ c: st({ at: T, ok: false }) })).toMatchObject({ tone: 'cloneBad' });
+    expect(cloneCell({ c: st({ at: T, ok: true }, false) }).text).toMatch(/잡 꺼짐$/);
+    expect([undefined, null, S.cloneView(undefined), st(undefined), st(null), st({ at: T, ok: true }), st({ at: T, ok: false }), st({ at: T, ok: false, skipped: 'x' })].map(S.cloneResultText))
+      .toEqual(['', '모름', '잡 없음', '모름', '아직 실행 안 함', '성공', '실패', '건너뜀·중단']);
   });
 });

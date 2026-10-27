@@ -1,4 +1,4 @@
-// v2.803 ESXi 호스트 화면 '엑셀 수준 상세' — 열 묶음 · 저장값 · 점검 열 글자 · 요약 · 칩(승인 시안 https://claude.ai/artifact/EFh5K3UDzuGpUpqVyqXPf1 ①).
+// v2.805 ESXi 호스트 화면 '엑셀 수준 상세' — 열 묶음 · 저장값 · 점검 열 글자 · 요약 · 칩(승인 시안 https://claude.ai/artifact/EFh5K3UDzuGpUpqVyqXPf1 ①).
 //   '—' 는 못 읽은 값(0 이 아님) · 묶음을 못 읽었으면 칩 수는 null · 구성·보안 판정은 hostCfgFindings 하나 · 기본 묶음은 끌 수 없다.
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';

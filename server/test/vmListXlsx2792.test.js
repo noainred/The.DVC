@@ -85,16 +85,17 @@ test('① 순수 워크북 — 폴더 트리·개요·색·데이터 시트 = CS
   assert.equal(lv['deep-vm'], 7);
   const prodRow = ts.getRow(4 + names.indexOf('📁 Production  4 VM'));
   assert.equal(text(prodRow.getCell(2)), 'VM 4 · Veeam 2 · 확인 안 됨 2', '하위 포함 합계 · 0 인 판단은 뺀다');
-  assert.equal(text(prodRow.getCell(5)), `Veeam 50% ${X.barText(0.5)}`);
-  assert.equal(text(prodRow.getCell(7)), '잔존 1');
+  // v2.803: '백업 방식'(4) · 'Clone'(6) 열이 들어와 Veeam 백업률은 7번 · 잔존은 9번 칸
+  assert.equal(text(prodRow.getCell(7)), `Veeam 50% ${X.barText(0.5)}`);
+  assert.equal(text(prodRow.getCell(9)), '잔존 1');
   const vmRow = (n) => ts.getRow(4 + names.indexOf(n));
   assert.equal(argb(vmRow('web-02').getCell(3)), X.VERDICT_STYLE.veeam.bg);
   assert.equal(argb(vmRow('web-01').getCell(3)), X.VERDICT_STYLE.none.bg);
   assert.equal(argb(vmRow('dev-1').getCell(3)), X.VERDICT_STYLE.snap.bg);
   assert.equal(argb(vmRow('dev-2').getCell(3)), X.VERDICT_STYLE.unknown.bg);
   assert.equal(text(vmRow('db-ora').getCell(3)), '확인 안 됨', '하루 넘은 잔존은 백업 흔적이 아니다');
-  assert.equal(text(vmRow('db-ora').getCell(7)), '1개 · 잔존 2일째');
-  assert.equal(argb(vmRow('db-ora').getCell(7)), X.VERDICT_STYLE.stale.bg);
+  assert.equal(text(vmRow('db-ora').getCell(9)), '1개 · 잔존 2일째');
+  assert.equal(argb(vmRow('db-ora').getCell(9)), X.VERDICT_STYLE.stale.bg);
   assert.equal(vmRow('=HYPERLINK("x")').getCell(1).type, ExcelJS.ValueType.String, '수식 모양 이름도 문자열 칸');
 
   // ③ 데이터 시트 = CSV 와 같은 열·값
@@ -137,7 +138,7 @@ test('① 순수 워크북 — 폴더 트리·개요·색·데이터 시트 = CS
   // 연동 없음 — Veeam 백업률은 0% 가 아니라 '—'
   const un = await load((await X.buildVmListWorkbook({ vcName: 'vc', rows: rows.map((r) => ({ ...r, view: { ...r.view, v: null } })), linked: false, at: AT })).buffer);
   const uts = un.getWorksheet('VM 목록(폴더 트리)');
-  const folderRow = []; uts.eachRow((row) => { if (String(text(row.getCell(1))).startsWith('📁 Production')) folderRow.push(text(row.getCell(5))); });
+  const folderRow = []; uts.eachRow((row) => { if (String(text(row.getCell(1))).startsWith('📁 Production')) folderRow.push(text(row.getCell(7))); });
   assert.deepEqual(folderRow, ['Veeam 연동 없음']);
   assert.equal(X.veeamRate({ veeam: 0, vKnown: 0 }, true), null, '아는 VM 0대면 모름');
 });

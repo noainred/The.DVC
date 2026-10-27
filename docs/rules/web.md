@@ -24,7 +24,7 @@
 - (원래 3453행) 로딩 표시의 '요청자' 는 서버가 기록한 로그인 계정이 먼저다
 - (원래 4643행) Optimization(`#/tools/waste`) 화면은 시안 A 배치다 — 계산은 `views/tools/wasteViewText.js` 하나
 - (v2.764 추가) ESXi 호스트(`#/hosts`) 화면은 시안 B '이상 우선' 배치다 — 판정은 `views/hostTriage.js` 하나
-- (v2.803 추가) ESXi 호스트 화면의 '엑셀 수준 상세' — 열 묶음 9개·점검 열은 `views/hostChecksText.js` + 서버 `/hosts/checks` · 상세는 전체 페이지 `#/hosts/<id>`(모달 구성요소 공용)
+- (v2.805 추가) ESXi 호스트 화면의 '엑셀 수준 상세' — 열 묶음 9개·점검 열은 `views/hostChecksText.js` + 서버 `/hosts/checks` · 상세는 전체 페이지 `#/hosts/<id>`(모달 구성요소 공용)
 - (원래 5663행) v2.708 — 드롭다운은 공용 `Select`·`DataList` 하나다(자동 정렬)
 - (원래 5801행) 특수 기능 화면(v2.679) — 표시 이름·설명·개발 단계는 '덮어쓰기' 이고 키는 그대로다
 - (원래 5848행) 접속 공지 팝업 · 게시판(v2.722)
@@ -292,7 +292,7 @@
   전부 같은 `hostReasons`/`cpuBucket` 을 쓴다 — 화면에서 따로 세지 말 것. 사용률은 `hostUsagePct` 로 읽고 못 읽은 호스트는 '미수집' 구간(0% 아님)·평균 제외.
   CPU % 는 정격 용량 대비라 100 을 넘으므로 '100% 초과' 를 별도 구간으로 둔다. 클러스터 키는 (vCenter, 클러스터)다(동명 클러스터 분리). 예전 KPI 카드 6장의 값(전원 On/Off·코어·vCore 비율·메모리·전력·ESXi 버전)은
   요약 띠로 옮겼을 뿐 빼지 않았다. 타일은 1440 에서 12개·720px 이하 4개부터(400px 에서 표까지 스크롤이 길었다 — Chromium 판독).
-- **v2.803 — ESXi 호스트 화면의 '엑셀 수준 상세'(승인 시안 https://claude.ai/artifact/EFh5K3UDzuGpUpqVyqXPf1)** — 요약 8칸 · '지금 확인할 것' 카드 3 + 칩 10 · 호스트 목록 표 30열 9묶음 · 전체 페이지 상세(사용자 선택). 회귀 `hostChecksText.test.js` + `server/test/hostChecks2803.test.js`:
+- **v2.805 — ESXi 호스트 화면의 '엑셀 수준 상세'(승인 시안 https://claude.ai/artifact/EFh5K3UDzuGpUpqVyqXPf1)** — 요약 8칸 · '지금 확인할 것' 카드 3 + 칩 10 · 호스트 목록 표 30열 9묶음 · 전체 페이지 상세(사용자 선택). 회귀 `hostChecksText.test.js` + `server/test/hostChecks2805.test.js`:
   · 판정은 셋뿐이다 — 확인 대상(카드·탭)은 `hostTriage.js` 그대로, 구성·보안(열·칩 코드)은 `hostcfg/hostCfgText.js hostCfgFindings`, iDRAC 부품·최근 재부팅·Veeam·VM 할당 합은 서버
     `GET /hosts/checks`(`vcenter/hostChecks.js` — 호스트·클러스터 엑셀과 같은 함수 `hwSummary`·`analyzeReboots`·`recentBackupYn`). 화면에서 따로 세지 말 것. 칩 수는 그 묶음을 못 읽었으면 **null('—')** 이지 0 이 아니다.
   · `/hosts/checks` 는 무거운 집계(로그 DB·iDRAC 등록부·Veeam 대조 — 서버 60초 캐시, 범위·판본 키)라 **마운트 1회 + 필터 변경 + '다시 읽기' 버튼**만 — 15초 폴링(/hosts)에 섞지 말 것.

@@ -8,14 +8,14 @@ import { hashSegments } from '../hooks/hashTab.js';
 import { hostUsagePct } from './vcdOverview.js'; // v2.606 WEB2606-02: 끊긴·무응답 호스트의 0% 는 '못 읽음'(—)
 // v2.764: 시안 B '이상 우선' 배치 — 확인 대상·CPU 구간·클러스터 타일 판정은 hostTriage.js 하나(카드 숫자와 표 필터가 같은 판정).
 import { CPU_ATTENTION_PCT, CPU_BUCKETS, hostReasons, triageCounts, cpuDistribution, clusterTiles } from './hostTriage.js';
-// v2.803: 엑셀 수준 상세(승인 시안 https://claude.ai/artifact/EFh5K3UDzuGpUpqVyqXPf1 ①) — 열 묶음 9개 · 요약 8칸 · 확인 칩 · 점검 열 글자는 hostChecksText.js 하나.
+// v2.805: 엑셀 수준 상세(승인 시안 https://claude.ai/artifact/EFh5K3UDzuGpUpqVyqXPf1 ①) — 열 묶음 9개 · 요약 8칸 · 확인 칩 · 점검 열 글자는 hostChecksText.js 하나.
 //   iDRAC 부품 · 최근 재부팅 · Veeam 은 서버 /hosts/checks(무거운 집계 — 마운트 1회 + 필터 변경 + 버튼, 15초 폴링 금지).
 import {
   COL_GROUPS, FIXED_GROUP, readColPrefs, writeColPrefs, visibleColumns, secCountsOf, secText, secTone, uplinkDownOf, nicLinkDownOf, deadPathsOf, lunsOf,
   uptimeDays, coresText, gbText, kwText, ratioText, hwCell, bootCell, veeamCell, hostKpis, chipCounts, filterHostsExt, focusLabelExt,
 } from './hostChecksText.js';
 
-const HostDetail = React.lazy(() => import('./HostDetail.jsx'));          // v2.803 전체 페이지 상세(#/hosts/<id>)
+const HostDetail = React.lazy(() => import('./HostDetail.jsx'));          // v2.805 전체 페이지 상세(#/hosts/<id>)
 const HostExportDialog = React.lazy(() => import('./HostExportDialog.jsx')); // v2.802 호스트 · 클러스터 엑셀(vCenter 단위)
 
 const TILE_LIMIT = 12; // 처음엔 '먼저 볼' 클러스터만 — 나머지는 '모두 보기'
