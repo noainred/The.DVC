@@ -18,6 +18,7 @@
  */
 import { Worker } from 'node:worker_threads';
 import ExcelJS from 'exceljs';
+import '../util/xlsxSheetPrOrder.js';   // v2.799.1: 폴더 트리 시트(fitToPage + outlineProperties)의 <sheetPr> 순서 — Excel '복구' 대화상자(워커도 이 파일을 불러 같이 걸린다)
 import { deadlineMs } from '../util/deadline.js';
 import { localStamp, DAY_OFFSET_MIN } from '../util/dayKey.js';
 import { backupVerdict, isSystemVm } from './backupStatus.js';

@@ -304,6 +304,10 @@
     손상 보존 → 쓰기 503 · 쓰기 게이트 data.csv + 관리자·운영자 · 칸에서 온 기본값(`def.from`)은 그 칸과 같이 바뀐다.
   · 파일 시스템 종류: `soapParse.parseGuestDisks` 가 `filesystemType` 을 읽고(`util/fsType.js fsTypeOf` — 영숫자·._- 32자, 그 밖은 버림) 엣지 정제(`sanitizeGuestDiskVms`)도 같은 함수 · `part_latest.fs` 열(ALTER — 없을 때만).
     ⚠ vSphere 7.0 이상이 주는 값으로 **추정**(실물 미확인) — 옛 판·엣지가 이 판 전이면 빈칸.
+  · ⚠⚠ v2.799.1(사용자 보고 — Excel '내용에 문제가 있습니다 · 복구하시겠습니까?'): v2.792 부터 VM 목록 엑셀은 **매번** 손상 판정이었다. 'VM 목록(폴더 트리)' 시트가
+    fitToPage(폭 한 장 인쇄)와 outlineProperties(개요 단추 위치)를 함께 쓰는데 exceljs 4.4.0 이 `<sheetPr>` 안에 pageSetUpPr 를 outlinePr **앞**에 쓴다(스키마는
+    tabColor → outlinePr → pageSetUpPr). 바로잡기는 `util/xlsxSheetPrOrder.js`(exceljs 렌더 함수 하나를 스키마 순서판으로 — 워커가 불러오는 모듈이 import 해야 워커에도 걸린다).
+    LibreOffice·openpyxl·exceljs 로 다시 읽기는 순서를 보지 않아 통과한다 — **엑셀 검증은 생성 XML 의 요소 순서를 직접 본다**(회귀 `server/test/xlsxSheetPr2799.test.js` — 인라인·워커, 변이 2/2).
 - **v2.798 — EM 백업 서버 목록 보강 + 매핑 줄에서 '포탈에 B&R 로 등록'** (사용자 보고 'EM 에 등록된 서버가 많은데 전체 리스트를 못 가져온다 — 표에도 일부만' · 선택 '바로 등록' · 표준. 회귀 `server/test/veeamEmBs2798.test.js`(변이 4/4) + 웹 `backupEmText.test.js`):
   · `veeam/em/client.js completeBackupServers` — 목록(`/api/backupServers`)이 개요(`overview.backupServers`)보다 적을 때만 질의 서비스 `type=BackupServer` 로 다시 읽어 이름(대소문자 무시)으로 합친다.
     개요 수를 모르면 그대로(지어내지 않는다) · 질의 실패는 목록 유지 + 사유 · 인증 실패는 위로. 결과 `backupServersMeta`(개요·목록·합친 수) → 매핑 화면 `counts` 가 모자란 EM 을 경고로 밝힌다.
