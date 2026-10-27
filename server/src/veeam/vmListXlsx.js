@@ -133,7 +133,7 @@ function tempSnapText(now, offsetMin, at) {
  * '먼저 볼 VM'(순수) — 잔존 스냅샷(전원 무관) · 켜진 VM 의 확인 안 됨 · 켜진 VM 의 모름. 템플릿·vCLS 는 백업 대상이 아니라 뺀다(세부내용 '제외' 와 같은 기준).
  * 순서: 확인 안 됨 → 잔존 스냅샷 → 모름(시안 순서), 같은 묶음 안에서는 트리 순서(vmTreeCmp).
  */
-export function watchList(items, { snapDays = 7, at = Date.now() } = {}) {
+export function watchList(items, { snapDays = 7, at = Date.now(), marksUnknown = false } = {}) {
   const out = [];
   for (const it of items) {
     if (isSystemVm(it.inv) || isSystemVm({ name: it.view.name })) continue;
@@ -150,6 +150,16 @@ export function watchList(items, { snapDays = 7, at = Date.now() } = {}) {
     } else if (on && it.verdict.code === 'unknown') {
       tag = '모름';
       why = it.view.v === undefined ? 'Veeam 상태를 읽지 못해 판단하지 못함' : `vCenter 이벤트(최근 ${snapDays}일)를 아직 판단하지 못함`;
+    }
+    // v2.804(사용자 결정 '백업 방식도 반영'): 사람이 정한 백업 방식 — '백업 안함' 과 Clone 마지막 복제 성공은 '확인 안 됨'·'모름' 에서 뺀다.
+    //   그 밖의 방식은 남기고 이유 앞에 밝힌다. 잔존 스냅샷은 방식과 무관(정리 실패 의심). 표시 파일을 못 읽었으면 방식으로 빼지 않는다.
+    if (tag && tag !== '잔존 스냅샷' && !marksUnknown) {
+      const mt = it.view.m?.method; const c = it.view.c;
+      if (mt === 'none') continue;
+      if (mt === 'clone' && c?.job && c.ok === true && fin(c.at) && !c.skipped) continue;
+      if (mt === 'clone') why = `백업 방식 Clone · ${cloneResultText(c) || '모름'} — ${why}`;
+      else if (mt === 'config') why = `백업 방식 Config 백업(포탈이 확인할 수 없음) — ${why}`;
+      else if (mt === 'veeam') why = `백업 방식 Veeam 으로 정함 — ${why}`;
     }
     if (tag) out.push({ tag, why, it });
   }
@@ -453,6 +463,7 @@ function legendSheet(wb, ctx) {
     o.dataTable ? "'데이터(행 단위)' 시트는 내보내기 창에서 고른 항목과 순서 그대로입니다(CSV 와 같은 열). ‘수집 안 됨’ 은 그 vCenter 에서 아직 모으지 않은 값(태그 수집 전 · 게스트 파티션 미수집 · 구성 캐시 미도달)이고, 빈칸은 못 읽은 값입니다."
       : "'데이터(행 단위)' 시트는 CSV 와 같은 열입니다(폴더 1~N단계 · 폴더 경로 포함). 색·접기는 엑셀에만 있습니다. 폴더 경로가 비어 있으면 데이터센터 바로 아래(최상위) VM 입니다.",
     '대상 VM 은 내려받을 때 포탈 화면에 보이던 목록입니다(보기·검색 반영) 또는 고른 폴더입니다. 판단은 Veeam 백업 현황 › Detail 과 같은 기준입니다.',
+    "'먼저 볼 VM' 은 백업 방식을 '백업 안함' 으로 정한 VM 과 Clone 마지막 복제가 성공한 VM 을 빼고, 그 밖의 방식은 이유 앞에 밝힙니다.",
     "'백업 방식' 은 Veeam 백업 현황 › Detail 에서 사람이 정한 값입니다(Veeam · Clone · Config 백업 · 백업 안함 — 정하지 않은 VM 은 빈칸 · 수집값으로 추정하지 않습니다). 'Clone' 칸은 백업 방식이 Clone 인 VM 에만, 포탈 VM 백업(복제) 잡의 마지막 실행 시각과 결과를 씁니다 — '잡 없음' 은 그 VM 의 복제 잡이 없다는 뜻, '모름' 은 실행하는 노드(엣지)의 보고를 아직 받지 못한 것입니다.",
     'VM · 폴더 이름은 문자열 칸으로만 씁니다(수식 칸을 만들지 않습니다).',
     `만든 시각 ${o.stamp} ${o.tz} · 포탈 › 서버 › Veeam 백업 현황 › Detail 에서 같은 목록을 볼 수 있습니다.`,
@@ -472,7 +483,7 @@ export async function buildVmListWorkbook({ vcName, rows, linked, snapDays = 7, 
   const tree = buildVmTree(rows, { linked: o.linked });
   const flat = flattenTree(tree.root);
   const items = flat.filter((e) => e.kind === 'vm').map((e) => e.it);
-  const ctx = { o, tree, flat, items, watch: watchList(items, { snapDays, at }) };
+  const ctx = { o, tree, flat, items, watch: watchList(items, { snapDays, at, marksUnknown: o.marksUnknown }) };
   const wb = new ExcelJS.Workbook();
   wb.creator = 'VMware Global Monitoring Portal';
   wb.created = new Date(at);
