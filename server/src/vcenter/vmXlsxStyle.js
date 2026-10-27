@@ -8,7 +8,7 @@
  *  ⚠ 워커(vmExportXlsxWorker · vmListXlsxWorker)에서도 로드된다 — store·config·DB 같은 부수효과 있는 import 를 넣지 말 것.
  */
 import '../util/xlsxSheetPrOrder.js';   // v2.799.1 — 폴더 트리 시트(개요 + 폭 한 장 인쇄)의 <sheetPr> 순서(워커도 이 파일을 불러 같이 걸린다)
-import { VERDICT_TEXT } from '../veeam/backupStatus.js';
+import { VERDICT_TEXT, METHOD_TEXT } from '../veeam/backupStatus.js';
 
 export const fill = (argb) => ({ type: 'pattern', pattern: 'solid', fgColor: { argb } });
 const thin = { style: 'thin', color: { argb: 'FFD4D8DE' } };
@@ -28,6 +28,7 @@ export const KIND_BY_KEY = Object.freeze({
   cpuUsagePct: 'pct', memUsagePct: 'pct',
   vbkYn: 'yn', vsnapYn: 'yn',
   vjudge: 'verdict',
+  bmethod: 'method',
   name: 'name',
 });
 export const kindOf = (key) => KIND_BY_KEY[key] || '';
@@ -50,6 +51,18 @@ const VERDICT = Object.freeze({
   [VERDICT_TEXT.unknown]: { bg: 'FFF1F5F9', color: PAL.muted },
 });
 
+/**
+ * v2.807 백업 방식(사람이 정한 값) 색 — 밝은 바탕용(웹 backupViewText METHODS 와 같은 계열 · 키 집합은 METHOD_TEXT 와 같다 — 테스트 대조).
+ * 트리 시트 VM 칸 · 폴더 합계 글자 · 요약 줄 · 데이터 시트 'bmethod' 칸이 함께 쓴다.
+ */
+export const METHOD_LOOK = Object.freeze({
+  veeam: Object.freeze({ fg: 'FF166534', bg: 'FFDCFCE7' }),
+  clone: Object.freeze({ fg: 'FF0E7490', bg: 'FFCFFAFE' }),
+  config: Object.freeze({ fg: 'FF6D28D9', bg: 'FFEDE9FE' }),
+  none: Object.freeze({ fg: 'FF475569', bg: 'FFF1F5F9' }),
+});
+const METHOD_BY_TEXT = Object.freeze(Object.fromEntries(Object.entries(METHOD_TEXT).map(([k, t]) => [t, { bg: METHOD_LOOK[k].bg, color: METHOD_LOOK[k].fg, bold: true }])));
+
 /** 숫자 서식 — 정수 '#,##0' · 소수 '#,##0.0'(값은 그대로). */
 export const numFmtOf = (v) => (Number.isInteger(v) ? '#,##0' : '#,##0.0');
 
@@ -68,7 +81,7 @@ export function cellLook(v, kind, zebra = false) {
       if (v >= 90) { bg = PAL.redBg; out.font = { bold: true, color: { argb: PAL.redFg } }; } else if (v >= 80) { bg = PAL.amberBg; out.font = { bold: true, color: { argb: PAL.amberFg } }; }
     }
   } else if (typeof v === 'string' && v) {
-    const st = kind === 'power' ? POWER[v] : kind === 'tools' ? TOOLS[v] : kind === 'yn' ? YN[v] : kind === 'verdict' ? VERDICT[v] : null;
+    const st = kind === 'power' ? POWER[v] : kind === 'tools' ? TOOLS[v] : kind === 'yn' ? YN[v] : kind === 'verdict' ? VERDICT[v] : kind === 'method' ? METHOD_BY_TEXT[v] : null;
     if (st) { out.font = { bold: !!st.bold, color: { argb: st.color } }; if (st.bg) bg = st.bg; }
   }
   if (kind === 'name') out.font = { ...(out.font || {}), bold: true };

@@ -255,6 +255,7 @@ test('⑥ 웹 미리보기 칸 색 = 엑셀 서식(같은 입력으로 대조 �
     ['수집 안 됨', 'uuid'], ['POWERED_ON', 'powerState'], ['POWERED_OFF', 'powerState'], ['SUSPENDED', 'powerState'], ['켜짐', 'power'],
     ['RUNNING', 'toolsStatus'], ['NOT_RUNNING', 'toolsStatus'], [95, 'cpuUsagePct'], [85, 'memUsagePct'], [10, 'cpuUsagePct'],
     ['예', 'vbkYn'], ['아니오', 'vsnapYn'], ['모름', 'vbkYn'], ['Veeam 백업', 'vjudge'], ['확인 안 됨', 'vjudge'], ['abc', 'notes'], [3, 'cpuCount'],
+    ['Veeam', 'bmethod'], ['Clone', 'bmethod'], ['Config 백업', 'bmethod'], ['백업 안함', 'bmethod'], ['', 'bmethod'],
   ];
   // 서버 모양 → 같은 뜻의 이름(색 묶음)
   const sv = (v, key) => {
@@ -268,6 +269,7 @@ test('⑥ 웹 미리보기 칸 색 = 엑셀 서식(같은 입력으로 대조 �
     if (c === XS.PAL.redFg) return 'no';
     if (c === XS.PAL.amber) return 'warn';
     if (c === 'FF64748B') return 'off';
+    if (XS.kindOf(key) === 'method') return `m-${Object.keys(XS.METHOD_LOOK).find((k) => XS.METHOD_LOOK[k].bg === bg)}`;
     if (bg === 'FFDCFCE7') return 'v-veeam';
     if (bg === XS.PAL.amberBg) return 'v-none';
     return '';
