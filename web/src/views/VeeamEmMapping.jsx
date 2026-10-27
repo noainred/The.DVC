@@ -99,7 +99,8 @@ export default function VeeamEmMapping({ mapping, onSaved }) {
                   </tr>
                   {on && (
                     <tr><td colSpan={6} style={{ padding: '4px 0 12px' }}>
-                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 14, padding: 12, border: '1px solid var(--border)', borderRadius: 10, background: 'var(--panel-deep)' }}>
+                      {/* v2.798 화면 확인: 편집 칸(등록 양식 포함)의 내용 폭이 표를 넓혀 오른쪽 버튼이 표 안 가로 스크롤 뒤로 숨었다 — 폭은 표가 정하고 내용은 줄바꿈(contain) */}
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 14, padding: 12, border: '1px solid var(--border)', borderRadius: 10, background: 'var(--panel-deep)', contain: 'inline-size' }}>
                         <label className="muted" style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12, flex: '1 1 220px', minWidth: 0 }}>포탈 B&R 등록
                           <Select className="input" sort={false} value={edit.br} onChange={(e) => setEdit((x) => ({ ...x, br: e.target.value }))} style={{ minWidth: 0 }}>
                             <option value="">자동(이름으로 짝짓기)</option>
@@ -130,14 +131,14 @@ export default function VeeamEmMapping({ mapping, onSaved }) {
                           )}
                         </div>
                         {reg?.key === k && (
-                          <div data-br-register="" style={{ flex: '1 1 100%', display: 'flex', flexWrap: 'wrap', gap: '10px 14px', alignItems: 'flex-end', paddingTop: 10, borderTop: '1px solid var(--border-soft)' }}>
-                            <b style={{ flex: '1 1 100%', fontSize: 12.5 }}>포탈에 B&R 로 등록 — 설정 › B&R 서버와 같은 등록(관리자 · 감사 기록 · 비밀번호는 암호화 저장)</b>
+                          <div data-br-register="" style={{ flex: '1 1 100%', minWidth: 0, maxWidth: '100%', display: 'flex', flexWrap: 'wrap', gap: '10px 14px', alignItems: 'flex-end', paddingTop: 10, borderTop: '1px solid var(--border-soft)' }}>
+                            <b style={{ flex: '1 1 100%', fontSize: 12.5, overflowWrap: 'anywhere' }}>포탈에 B&R 로 등록 — 설정 › B&R 서버와 같은 등록(관리자 · 감사 기록 · 비밀번호는 암호화 저장)</b>
                             {[['name', '표시명', 160, 'text'], ['host', '주소(IP·호스트 이름)', 200, 'text'], ['port', '포트(REST)', 90, 'text'], ['username', '계정', 160, 'text'], ['password', '비밀번호', 160, 'password']].map(([f, label, w, type]) => (
                               <label key={f} className="muted" style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12, minWidth: 0 }}>{label}
-                                <input className="input" type={type} autoComplete={type === 'password' ? 'new-password' : 'off'} value={reg[f]} onChange={(e) => setReg((x) => ({ ...x, [f]: e.target.value }))} style={{ width: w, maxWidth: '100%' }} />
+                                <input className="input" type={type} autoComplete={type === 'password' ? 'new-password' : 'off'} value={reg[f]} onChange={(e) => setReg((x) => ({ ...x, [f]: e.target.value }))} style={{ width: w, maxWidth: '100%', minWidth: 0 }} />
                               </label>
                             ))}
-                            <span className="muted" style={{ flex: '1 1 100%', fontSize: 11.5, lineHeight: 1.55 }}>
+                            <span className="muted" style={{ flex: '1 1 100%', minWidth: 0, fontSize: 11.5, lineHeight: 1.55, overflowWrap: 'anywhere', whiteSpace: 'normal' }}>
                               법인(vCenter): {edit.vcenterIds.size ? vcs.filter((v) => edit.vcenterIds.has(v.id)).map((v) => v.name).join(', ') : '— 위 목록에서 하나 이상 고르세요'} · 주소는 EM 이 아는 서버 이름을 미리 채웠습니다 — 포탈에서 그 이름으로 접속되는지 확인하세요 · 엣지가 대신 수집해야 하는 법인이면 등록 뒤 B&R 서버 탭에서 담당 엣지를 고르세요.
                             </span>
                             <span className="flex gap" style={{ marginLeft: 'auto', gap: 8 }}>
