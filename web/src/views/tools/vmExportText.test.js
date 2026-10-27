@@ -73,7 +73,7 @@ describe('고른 항목 — 순서 · 끌어 놓기 · 묶음', () => {
 describe('저장값 — 고른 것만 싣고 불러올 때 그것만 바꾼다', () => {
   const cat = { defaultPreset: 'asset', presets: [{ id: 'legacy', keys: ['x'] }, { id: 'asset', keys: ['name', 'uuid'] }] };
   it('처음 상태 = 기본 조합 · 내 기본값이 있으면 그것', () => {
-    expect(initialState(cat, null)).toEqual({ cols: ['name', 'uuid'], fmt: 'csv', disk: 'slots', tagCols: false, live: true, target: 'all', folder: '', tmpl: true });
+    expect(initialState(cat, null)).toEqual({ cols: ['name', 'uuid'], fmt: 'csv', disk: 'slots', tagCols: false, live: true, target: 'all', folder: '', tmpl: true, ynDays: 1 });   // v2.801 ynDays(카탈로그 ynDefault 없으면 1)
     expect(initialState(cat, { def: { cols: ['vcenter'], fmt: 'xlsx', live: false } })).toMatchObject({ cols: ['vcenter'], fmt: 'xlsx', live: false, disk: 'slots' });
   });
   it('valueToSave — what 에서 고른 것만', () => {

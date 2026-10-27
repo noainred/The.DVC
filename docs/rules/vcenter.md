@@ -337,3 +337,18 @@
     예전 `GET /tools/backup-detail.csv` 는 창 안 ‘예전 CSV(화면 열 그대로)’ 로 남겼다(외부 스크립트 호환).
   · `veeam/vmListCatalog.js` 는 백업 전용 — 묶음 기본 · 메모·태그·속성(+백업 표시) · 자원·IP(v2.792 열인 vCPU·메모리·스토리지·IP 만) · 스냅샷 · Veeam. 구성 항목을 다시 늘리지 말 것
     (같은 값을 `vcenter/vmExportCatalog.js` 와 두 벌로 만들게 된다). 예전 저장값의 사라진 항목은 불러올 때 빼고 개수를 알린다(`droppedCols`), `multi` 는 저장할 때 버린다.
+- **v2.801 — VM 엑셀 꾸미기 · 폴더 트리 시트 · Veeam '여부' 두 항목 · 미리보기 크게 보기**
+  (사용자 요청 "엑셀로 예쁘게, 가독성 좋게" · "디렉터리를 계층별로 — 폴더별로 나눠서" · "선택 항목에 veeam 마지막 백업 여부 / 백업용 snapshot 최근 생성 여부도" ·
+  "미리보기를 전체화면 팝업으로" — 시안 https://claude.ai/artifact/5PT9nUWUwMPTxwURq3xm1h 승인 · 결정: 폴더 트리 시트 · 시안대로 전부 · 여부 기준 기본 1일. 회귀 `vmExcel2801.test.js`):
+  · VM 전체 정보 엑셀 = 요약(`vcenter/vmExportSummary.js` — 고른 항목과 무관 · 인벤토리·구성 캐시 · 못 읽은 값은 unknown 으로 따로 · 부분 합은 '≥') · **폴더 트리**
+    (뿌리 'vCenter / vm' → 폴더 → VM · 개요 단계 = 깊이(7 상한) · 폴더 행은 굵은 이름 + 회색 'N VM' · 합할 수 있는 열만 합(`SUM_KEYS`) · 전원·여부는 셈 · 열은 앞 20개 `TREE_COLS_MAX`)
+    · 데이터 · 읽는 법. VM 목록 엑셀 폴더 트리도 같은 뿌리 행·표기(개요 단계가 한 칸씩 내려갔다 — `vmListXlsx2792` 갱신).
+  · 서식은 `vcenter/vmXlsxStyle.js` 하나(두 엑셀 공용 · 워커 안전): 값은 그대로, 색·숫자 서식·줄무늬만. 종류는 **열 key** 로(`KIND_BY_KEY` — 테스트가 key 가 카탈로그에 있는지 본다).
+    조건부 서식·수식은 쓰지 않는다(칸 고유 색을 덮고 '복구' 위험). ‘아니오’ 에 빨간 바탕을 칠하지 말 것 — 백업 안 된 VM 이 많은 법인에서 표 전체가 빨갛다(렌더 확인).
+    웹 미리보기 칸 색(`web/src/views/tools/exportPreviewText.js cellTone`)은 이 규칙과 한 쌍 — 서버 테스트가 같은 입력으로 대조.
+  · Veeam 묶음(VM 전체 정보)은 VM 목록 카탈로그 항목을 key·머리·칸 그대로 빌린다(`VEEAM_KEYS`). 판정 입력(vcBackup)은 veeam 라우트에 있어 **라우트끼리 import 하지 않고**
+    `veeam/vmViewProvider.js` 에 veeam 라우트가 mount 때 함수를 건다(의존 방향 — arch2579). 걸린 것이 없거나 실패하면 null → 칸 '수집 안 됨'. Veeam 은 Veeam 항목을 골랐거나 엑셀(요약)일 때만 읽는다.
+  · ‘여부’ 판정은 `backupStatus.recentBackupYn`·`recentBackupSnapYn` 하나(예 · 아니오 · 모름 — 연동 없음·Veeam 모름·이벤트 못 읽음은 모름). 기준 `YN_DAYS` 1·2·3·7(기본 1).
+  · 미리보기 ‘크게 보기’(`components/ExportPreviewModal.jsx` — body 로 portal · 열 때 한 번 · 첫 100대 · 폴더별로 나눠 보기면 표 정렬은 끈다). 서버 상한: VM 전체 정보 `rows` 3~100 · VM 목록 ids 100.
+  · ⚠ 성능(실측 6,000대 × 60열): 처음 판이 19.9초(예전 2.9초)였다 — 열 너비 계산의 `toLocaleString` 칸마다 호출이 5.6초. 숫자 길이는 직접 세고, 트리 열은 20개 상한으로 6.3초.
+    나머지 비용은 exceljs 직렬화(워커 안이라 이벤트 루프는 막지 않는다). 칸마다 부르는 함수에 `toLocaleString`·`Intl` 을 넣지 말 것.

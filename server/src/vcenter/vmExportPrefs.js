@@ -1,10 +1,11 @@
 /**
  * vcenter/vmExportPrefs.js — 'VM 전체 정보 내보내기' 내 저장값(계정별 기본값 + 1~5칸, v2.799).
  * 저장소 규칙은 util/exportPrefs.js(공장) 머리말 — 파일 CONFIG_DIR/vm-export-prefs.json · 비밀 없음.
- * 선택값(사람이 '저장할 내용' 에서 고른 것만 실린다): fmt(형식) · disk·tagCols(표기 방식) · live(실시간 보강) · target·folder·tmpl(대상).
+ * 선택값(사람이 '저장할 내용' 에서 고른 것만 실린다): fmt(형식) · disk·tagCols·ynDays(표기 방식 — v2.801 '여부' 기준 일수) · live(실시간 보강) · target·folder·tmpl(대상).
  */
 import { createExportPrefs } from '../util/exportPrefs.js';
 import { resolveCols, knownKeys } from './vmExportCatalog.js';
+import { YN_DAYS } from '../veeam/backupStatus.js';
 
 export const FMTS = Object.freeze(['csv', 'xlsx']);
 export const DISK_MODES = Object.freeze(['slots', 'join']);
@@ -17,6 +18,7 @@ export function normalizeVmExportOpts(v) {
   if (v.fmt !== undefined) { if (!FMTS.includes(v.fmt)) return { ok: false, reason: '형식은 CSV 또는 엑셀입니다.' }; out.fmt = v.fmt; }
   if (v.disk !== undefined) { if (!DISK_MODES.includes(v.disk)) return { ok: false, reason: '디스크 표기 방식이 잘못됐습니다.' }; out.disk = v.disk; }
   if (v.tagCols !== undefined) out.tagCols = v.tagCols === true;
+  if (v.ynDays !== undefined) { if (!YN_DAYS.includes(v.ynDays)) return { ok: false, reason: '‘여부’ 기준 일수가 잘못됐습니다.' }; out.ynDays = v.ynDays; }   // v2.801
   if (v.live !== undefined) out.live = v.live === true;
   if (v.target !== undefined) { if (!TARGETS.includes(v.target)) return { ok: false, reason: '대상이 잘못됐습니다.' }; out.target = v.target; }
   if (v.folder !== undefined) {

@@ -11,6 +11,8 @@ import { STable } from '../components/STable.jsx';
 import Select from '../components/Select.jsx';
 import { ErrorBox } from '../components/primitives.jsx';
 import { VM_LIST_MAX_IDS } from './vcdVmList.js';
+import ExportPreviewModal from '../components/ExportPreviewModal.jsx';   // v2.801 미리보기 크게 보기(전체 화면 팝업)
+import { PREVIEW_BIG } from './tools/exportPreviewText.js';
 import {
   SLOT_COUNT, NAME_MAX, SAVE_WHAT, folderOptions, vmsInFolder, availBadge, moveCol, toggleCol, addCols, dropCols,
   valueToSave, applyValue, initialState, slotLabel, defaultLine, savedText, exportBody,
@@ -35,6 +37,7 @@ export default function VmListExportDialog({ vcenterId, vcName, vms, screenReq, 
   const [msg, setMsg] = useState(null);         // { ok, text }
   const [busy, setBusy] = useState('');
   const [pv, setPv] = useState(null);
+  const [big, setBig] = useState(false);        // v2.801 '크게 보기' 팝업
   const pvGen = useRef(0);
 
   useEffect(() => {
@@ -51,17 +54,14 @@ export default function VmListExportDialog({ vcenterId, vcName, vms, screenReq, 
   const itemOf = useMemo(() => new Map((cat?.groups || []).flatMap((g) => g.items).map((it) => [it.key, it])), [cat]);
 
   // 미리보기 — 고른 항목이 바뀌면 0.5초 뒤 대상 첫 3대. 늦게 온 이전 응답은 버린다.
-  const pvIds = useMemo(() => {
-    if (!st) return [];
-    if (st.target === 'folder') return folderVms.slice(0, 3).map((v) => v.id);
-    return (screenReq?.body?.ids || vms.map((v) => v.id)).slice(0, 3);
-  }, [st, folderVms, screenReq, vms]);
-  const pvKey = st ? JSON.stringify([st.cols, st.tagCols, pvIds]) : '';
+  const idsOf = (n) => (!st ? [] : st.target === 'folder' ? folderVms.slice(0, n).map((v) => v.id) : (screenReq?.body?.ids || vms.map((v) => v.id)).slice(0, n));
+  const pvIds = useMemo(() => idsOf(3), [st, folderVms, screenReq, vms]); // eslint-disable-line react-hooks/exhaustive-deps
+  const pvKey = st ? JSON.stringify([st.cols, st.tagCols, st.ynDays, pvIds]) : '';
   useEffect(() => {
     if (!st || !st.cols.length || !pvIds.length) { setPv(null); return undefined; }
     const my = ++pvGen.current;
     const h = setTimeout(() => {
-      postJson(`/veeam/vm-list/preview?vcenterId=${encodeURIComponent(vcenterId)}`, { cols: st.cols, tagCols: st.tagCols, ids: pvIds })
+      postJson(`/veeam/vm-list/preview?vcenterId=${encodeURIComponent(vcenterId)}`, { cols: st.cols, tagCols: st.tagCols, ynDays: st.ynDays, ids: pvIds })
         .then((r) => { if (my === pvGen.current) setPv(r?.ok === false ? { error: r.reason } : r); })
         .catch((e) => { if (my === pvGen.current) setPv({ error: e?.message || '미리보기를 받지 못했습니다' }); });
     }, 500);
@@ -97,7 +97,7 @@ export default function VmListExportDialog({ vcenterId, vcName, vms, screenReq, 
   const openSave = () => {
     const empty = (prefs?.slots || []).findIndex((s) => !s);
     const i = empty >= 0 ? empty : 0;
-    setSave({ slot: i + 1, name: prefs?.slots?.[i]?.name || `이름${i + 1}`, what: { fmt: true, tagCols: true, target: false }, alsoDefault: false });
+    setSave({ slot: i + 1, name: prefs?.slots?.[i]?.name || `이름${i + 1}`, what: { fmt: true, tagCols: true, ynDays: true, target: false }, alsoDefault: false });
   };
   const pickSlot = (n) => setSave((s) => ({ ...s, slot: n, name: prefs?.slots?.[n - 1]?.name || `이름${n}` }));
   const slotTarget = save ? prefs?.slots?.[save.slot - 1] : null;
@@ -241,7 +241,11 @@ export default function VmListExportDialog({ vcenterId, vcName, vms, screenReq, 
               {!st.cols.length && <span className="muted">아직 고른 항목이 없습니다.</span>}
             </div>
 
-            <div><b>미리보기</b> <span className="muted" style={{ fontSize: 12 }}>대상 첫 3대 · 내려받는 파일과 같은 값</span></div>
+            <div className="flex gap" style={{ alignItems: 'center', gap: 8 }}>
+              <span><b>미리보기</b> <span className="muted" style={{ fontSize: 12 }}>대상 첫 3대 · 내려받는 파일과 같은 값</span></span>
+              <button type="button" className="tab" style={{ marginLeft: 'auto', flex: 'none', fontSize: 12.5 }} disabled={!st.cols.length || !pvIds.length} onClick={() => setBig(true)}
+                title={`대상 첫 ${PREVIEW_BIG}대를 화면 가득 봅니다`}>⤢ 크게 보기</button>
+            </div>
             {pv?.error ? <div className="banner warn">{pv.error}</div> : !pv ? <div className="muted" style={{ fontSize: 12 }}>{st.cols.length ? '미리보기를 만드는 중…' : '항목을 고르면 보입니다.'}</div> : (
               <div style={{ overflowX: 'auto', border: '1px solid var(--border-soft)', borderRadius: 10 }}>
                 <STable minWidth={Math.max(360, pv.head.length * 120)} style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
@@ -259,6 +263,12 @@ export default function VmListExportDialog({ vcenterId, vcName, vms, screenReq, 
               <b style={{ fontSize: 12.5 }}>여러 값이 있는 항목(태그 · 작업 · 스냅샷 이름)</b>
               <span className="muted" style={{ fontSize: 12 }}>한 칸에 ‘ | ’ 로 이어 씁니다 — VM 1대 = 1행</span>
               <label className="flex gap" style={{ alignItems: 'center', gap: 8 }}><input type="checkbox" checked={st.tagCols} onChange={() => set({ tagCols: !st.tagCols })} />vSphere 태그는 카테고리마다 따로 열(‘태그: 환경’ · ‘태그: 서비스’ …)</label>
+              {/* v2.801 '여부' 기준 일수 — 최근 N일 Veeam 백업 · 백업용 스냅샷 생성(서버 YN_DAYS — 카탈로그가 준다) */}
+              <div className="flex gap wrap" style={{ alignItems: 'center', gap: '6px 8px' }} role="group" aria-label="‘여부’ 기준 일수">
+                <span>‘여부’ 기준</span>
+                {(cat.ynDays || []).map((d) => <button key={d} type="button" className="tab" aria-pressed={st.ynDays === d} style={chipBtn(st.ynDays === d)} onClick={() => set({ ynDays: d })}>{d}일</button>)}
+                <span className="muted" style={{ fontSize: 12 }}>— 최근 N일 Veeam 백업 · 백업용 스냅샷 생성 여부</span>
+              </div>
             </div>
             <div className="muted" style={{ fontSize: 12, lineHeight: 1.6 }}>
               못 읽은 값은 빈칸입니다(0·‘없음’ 으로 쓰지 않습니다). 그 vCenter 에서 아직 모으지 않은 값(태그 수집 전)은 ‘{cat.missingText}’ 입니다.
@@ -285,6 +295,16 @@ export default function VmListExportDialog({ vcenterId, vcName, vms, screenReq, 
           </span>
         </div>
       </div>
+      {big && (
+        <ExportPreviewModal
+          title={`미리보기 — VM 목록 · ${vcName}`}
+          sub={`대상 ${(target?.count || 0).toLocaleString()}대 중 첫 ${PREVIEW_BIG}대까지 · 고른 항목 ${st.cols.length}개 · 내려받는 파일과 같은 값`}
+          load={() => postJson(`/veeam/vm-list/preview?vcenterId=${encodeURIComponent(vcenterId)}`, { cols: st.cols, tagCols: st.tagCols, ynDays: st.ynDays, ids: idsOf(PREVIEW_BIG) })
+            .then((r) => (r?.ok === false ? r : { ...r, rows: target?.count }))}
+          onDownload={download} downloadDisabled={!canDownload} downloadLabel={busy === 'down' ? '만드는 중…' : `⤓ ${st.fmt === 'xlsx' ? '엑셀' : 'CSV'} 내려받기`}
+          onClose={() => setBig(false)}
+        />
+      )}
     </Modal>
   );
 }

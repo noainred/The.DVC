@@ -72,15 +72,18 @@ test('① 순수 워크북 — 폴더 트리·개요·색·데이터 시트 = CS
   const lines = [];
   for (let r = 4; r <= ts.rowCount; r++) { const row = ts.getRow(r); lines.push([row.outlineLevel || 0, String(text(row.getCell(1)))]); }
   const names = lines.map((x) => x[1]);
-  assert.ok(names.indexOf('📁 Production  (4)') < names.indexOf('📁 DB  (1)') && names.indexOf('📁 DB  (1)') < names.indexOf('📁 Web  (2)'), '폴더 이름 순');
-  assert.ok(names.indexOf('📁 Web  (2)') < names.indexOf('batch'), '같은 단계에서 하위 폴더 먼저, 그다음 VM');
+  assert.ok(names.indexOf('📁 Production  4 VM') < names.indexOf('📁 DB  1 VM') && names.indexOf('📁 DB  1 VM') < names.indexOf('📁 Web  2 VM'), '폴더 이름 순');
+  assert.ok(names.indexOf('📁 Web  2 VM') < names.indexOf('batch'), '같은 단계에서 하위 폴더 먼저, 그다음 VM');
   assert.ok(names.indexOf('web-01') < names.indexOf('web-02'), 'VM 이름 순');
   assert.equal(names.at(-1), '=HYPERLINK("x")', '최상위 VM 은 폴더 뒤');
   const lv = Object.fromEntries(lines.map(([l, n]) => [n, l]));
-  assert.deepEqual([lv['📁 Production  (4)'], lv['📁 Web  (2)'], lv['web-01'], lv.batch, lv['=HYPERLINK("x")']], [0, 1, 2, 1, 0]);
-  assert.equal(lv['📁 L9  (1)'], 7, '깊이 8 폴더도 7단계에 모인다');
+  // v2.801(시안 ④): 맨 위 'vCenter / vm' 행이 0단계 — 폴더·VM 은 한 단계씩 내려간다(7 상한은 그대로)
+  assert.equal(names[0], '📁 apac-vc01 / vm  9 VM', '맨 위 행 = 화면 트리 뿌리와 같은 표기');
+  assert.equal(lv['📁 apac-vc01 / vm  9 VM'], 0);
+  assert.deepEqual([lv['📁 Production  4 VM'], lv['📁 Web  2 VM'], lv['web-01'], lv.batch, lv['=HYPERLINK("x")']], [1, 2, 3, 2, 1]);
+  assert.equal(lv['📁 L9  1 VM'], 7, '깊이 8 폴더도 7단계에 모인다');
   assert.equal(lv['deep-vm'], 7);
-  const prodRow = ts.getRow(4 + names.indexOf('📁 Production  (4)'));
+  const prodRow = ts.getRow(4 + names.indexOf('📁 Production  4 VM'));
   assert.equal(text(prodRow.getCell(2)), 'VM 4 · Veeam 2 · 확인 안 됨 2', '하위 포함 합계 · 0 인 판단은 뺀다');
   assert.equal(text(prodRow.getCell(5)), `Veeam 50% ${X.barText(0.5)}`);
   assert.equal(text(prodRow.getCell(7)), '잔존 1');
@@ -194,7 +197,7 @@ test('③ 실제 라우트 — 엑셀 200 · 파일 이름 · 409 · operator 40
     assert.match(sub, /화면 조건: 검색 결과 2대/);
     assert.match(sub, /Veeam: 연결됨\(서버 1대\)/);
     const names = []; wb.getWorksheet('VM 목록(폴더 트리)').eachRow((row, n) => { if (n > 3) names.push(String(text(row.getCell(1)))); });
-    assert.deepEqual(names, ['📁 Production  (2)', '📁 DB  (1)', 'db01', '📁 Web  (1)', 'web01']);
+    assert.deepEqual(names, ['📁 apac:vc01 / vm  2 VM', '📁 Production  2 VM', '📁 DB  1 VM', 'db01', '📁 Web  1 VM', 'web01']);
 
     // CSV 도 트리 순서 — 하위 폴더(DB·Web)의 VM 이 Production 직속 VM 보다 먼저, 최상위 VM 은 맨 뒤(옛 경로 문자열 순이면 batch01 이 먼저였다)
     const rc = await fetch(`${base}/veeam/vm-list.csv?vcenterId=${encodeURIComponent(VC)}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });

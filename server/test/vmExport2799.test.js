@@ -268,19 +268,20 @@ test('⑤ 실제 라우트 — 게이트·범위 · 카탈로그 상태 · 미�
   const lock = EB.acquireExport('vm-export.csv', { user: { username: 'other' } });
   try { assert.equal((await post('vm-export.csv', VC, { cols: ['name'] })).status, 409); } finally { lock.release(); }
 
-  // 엑셀 — 워커 · 시트 2장 · 묶음 띠 + 머리 · 수집 안 됨 칸 색 · 읽는 법(실시간 결과)
+  // 엑셀 — 워커 · 시트 4장(v2.801 요약·폴더 트리 추가) · 묶음 띠 + 머리 · 수집 안 됨 흐린 기울임(v2.801 — 예전 주황 칸) · 읽는 법(실시간 결과)
   r = await post('vm-export.xlsx', VC, { cols: ['name', 'uuid', 'diskCount', 'tags'], prefName: '월간' });
   assert.equal(r.status, 200, await r.clone().text());
   assert.match(r.headers.get('content-type'), /spreadsheetml/);
   const wb = new ExcelJS.Workbook();
   await wb.xlsx.load(Buffer.from(await r.arrayBuffer()));
-  assert.deepEqual(wb.worksheets.map((w) => w.name), ['데이터', '읽는 법']);
+  assert.deepEqual(wb.worksheets.map((w) => w.name), ['요약', '폴더 트리', '데이터', '읽는 법']);
   const ws = wb.getWorksheet('데이터');
   assert.deepEqual(ws.getRow(2).values.slice(1), ['VM 이름', 'VM UUID', '디스크 수', 'vSphere 태그']);
   assert.equal(ws.getRow(1).getCell(2).value, '식별 · 이력');
   const webRow = [3, 4, 5].map((i) => ws.getRow(i)).find((row) => row.getCell(1).value === 'web01');
   assert.equal(webRow.getCell(2).value, C.MISSING);
-  assert.equal(webRow.getCell(2).fill?.fgColor?.argb, 'FFFEF3C7');
+  assert.equal(webRow.getCell(2).font?.italic, true, '수집 안 됨 = 흐린 기울임');
+  assert.equal(webRow.getCell(2).fill?.fgColor?.argb === 'FFFEF3C7', false, '주황 칸은 없앴다');
   assert.equal(webRow.getCell(3).value, 1, '수는 숫자 칸');
   const evil = [3, 4, 5].map((i) => ws.getRow(i)).find((row) => String(row.getCell(1).value).includes('cmd'));
   assert.equal(evil.getCell(1).value, '=cmd|evil', '엑셀은 문자열 칸(수식이 아니다)');
@@ -324,7 +325,9 @@ test('⑤ 실제 라우트 — 게이트·범위 · 카탈로그 상태 · 미�
 });
 
 test('⑥ 본문 선택 해석 — 실시간 기본 켬 · 모르는 값 400 · 폴더 경로 제어 문자 거절', () => {
-  assert.deepEqual(selOf({ cols: ['name'] }).sel, { keys: ['name'], live: true, disk: 'slots', tagCols: false, target: 'all', folder: '', tmpl: true, prefName: '' });
+  assert.deepEqual(selOf({ cols: ['name'] }).sel, { keys: ['name'], live: true, disk: 'slots', tagCols: false, target: 'all', folder: '', tmpl: true, prefName: '', ynDays: 1 });
+  assert.equal(selOf({ cols: ['name'], ynDays: 3 }).sel.ynDays, 3, 'v2.801 여부 기준 일수');
+  assert.equal(selOf({ cols: ['name'], ynDays: 5 }).ok, false, '1·2·3·7 밖은 400');
   assert.equal(selOf({ cols: ['name'], live: false }).sel.live, false);
   assert.equal(selOf({ cols: ['name'], target: 'x' }).ok, false);
   assert.equal(selOf({ cols: ['name'], target: 'folder', folder: 'a\u0000b' }).ok, false);

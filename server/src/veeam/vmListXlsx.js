@@ -23,6 +23,7 @@ import { deadlineMs } from '../util/deadline.js';
 import { localStamp, DAY_OFFSET_MIN } from '../util/dayKey.js';
 import { backupVerdict, isSystemVm } from './backupStatus.js';
 import { vmListColumns, folderParts, folderLevels, offsetLabel, veeamStateText, folderNameCmp, vmTreeCmp } from './vmListCsv.js';
+import { kindOf, styleDataRow, depthTint, folderLabel, PAL } from '../vcenter/vmXlsxStyle.js';   // v2.801 공용 서식(줄무늬 · 숫자 서식 · 전원·여부 색 · 폴더 단계 색)
 
 export const XLSX_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 export const VM_XLSX_SHEETS = Object.freeze(['요약', 'VM 목록(폴더 트리)', '데이터(행 단위)', '읽는 법']);
@@ -305,20 +306,30 @@ async function treeSheet(wb, ctx) {
   t.getCell(1).font = { bold: true, size: 13, color: { argb: C.title } };
   ws.addRow([`기준 ${o.stamp} ${o.tz} · 화면 조건: ${o.cond} · 왼쪽 위 1/2/3 단추로 단계별 접기 · 폴더 행 왼쪽 −/+ 로 그 폴더만 접기`]).getCell(1).font = { color: { argb: C.muted } };
   headRow(ws, heads.map((x) => x.h)).height = 32;   // 시각 열 머리(오프셋 포함)가 잘리지 않게 두 줄
-  let maxLevel = 0; let n = 0;
+  // v2.801(시안 ④): 맨 위 'vCenter / vm' 행(화면 트리의 뿌리와 같은 표기 — 전체를 한 번에 접는다) · 폴더 이름 굵게 + 회색 'N VM' · 단계마다 옅어지는 바탕 ·
+  //   VM 행 줄무늬. 단계(개요)는 뿌리가 0 이라 폴더 깊이 + 1(7 상한).
+  const folderRow = (label, depth, fa) => {
+    const fr = veeamRate(fa, o.linked);
+    const r = ws.addRow([label, folderSummaryText(fa), '', '', o.linked ? `Veeam ${fr == null ? '—' : `${Math.round(fr * 100)}%`} ${barText(fr)}` : 'Veeam 연동 없음', '', fa.stale ? `잔존 ${fa.stale}` : '']);
+    ws.mergeCells(r.number, 2, r.number, 4); ws.mergeCells(r.number, 5, r.number, 6);
+    const tint = depthTint(depth);
+    for (let c = 2; c <= heads.length; c++) { const cell = r.getCell(c); cell.fill = fill(tint); cell.font = { color: { argb: 'FF1F2937' } }; }
+    r.getCell(1).fill = fill(tint);
+    r.getCell(1).alignment = { horizontal: 'left', indent: Math.min(15, depth * 2) };
+    r.getCell(5).font = { bold: true, color: { argb: o.linked ? 'FF166534' : C.muted } };
+    if (fa.stale) paint(r.getCell(7), VERDICT_STYLE.stale);
+    r.outlineLevel = Math.min(OUTLINE_MAX, depth);
+    return r;
+  };
+  folderRow(folderLabel(`${o.vcName} / vm`, ctx.tree.root.agg.vm), 0, ctx.tree.root.agg);
+  let maxLevel = 0; let n = 0; let z = 0;
   for (const e of ctx.flat) {
     if (++n % 2000 === 0) await yieldLoop();
     if (e.kind === 'folder') {
-      const f = e.node; const fa = f.agg; const fr = veeamRate(fa, o.linked);
-      const r = ws.addRow([`📁 ${f.name}  (${fa.vm})`, folderSummaryText(fa), '', '', o.linked ? `Veeam ${fr == null ? '—' : `${Math.round(fr * 100)}%`} ${barText(fr)}` : 'Veeam 연동 없음', '', fa.stale ? `잔존 ${fa.stale}` : '']);
-      ws.mergeCells(r.number, 2, r.number, 4); ws.mergeCells(r.number, 5, r.number, 6);
-      const tint = C.depth[Math.min(f.depth, C.depth.length - 1)];
-      for (let c = 1; c <= heads.length; c++) { const cell = r.getCell(c); cell.fill = fill(tint); cell.font = { bold: c === 1, color: { argb: c === 1 ? C.title : 'FF1F2937' } }; }
-      r.getCell(1).alignment = { horizontal: 'left', indent: Math.min(15, f.depth * 2) };
-      r.getCell(5).font = { bold: true, color: { argb: o.linked ? 'FF166534' : C.muted } };
-      if (fa.stale) paint(r.getCell(7), VERDICT_STYLE.stale);
-      r.outlineLevel = Math.min(OUTLINE_MAX, f.depth);
+      const f = e.node;
+      const r = folderRow(folderLabel(f.name, f.agg.vm), f.depth + 1, f.agg);
       maxLevel = Math.max(maxLevel, r.outlineLevel);
+      z = 0;
       continue;
     }
     const it = e.it; const v = it.view.v;
@@ -336,12 +347,13 @@ async function treeSheet(wb, ctx) {
       it.inv?.host || '',
       it.inv?.ipAddress || '',
     ]);
-    r.getCell(1).alignment = { horizontal: 'left', indent: Math.min(15, e.depth * 2) };
-    if (it.view.power === 'POWERED_OFF') r.getCell(2).font = { color: { argb: C.muted } };
+    r.getCell(1).alignment = { horizontal: 'left', indent: Math.min(15, (e.depth + 1) * 2) };
+    if ((z++ % 2) === 1) for (let c = 1; c <= heads.length; c++) r.getCell(c).fill = fill(PAL.zebra);
+    r.getCell(2).font = it.view.power === 'POWERED_OFF' ? { color: { argb: C.muted } } : it.view.power === 'POWERED_ON' ? { bold: true, color: { argb: PAL.green } } : {};
     paint(r.getCell(3), styleOfGroup(it));
     if (it.stale) paint(r.getCell(7), VERDICT_STYLE.stale);
     if (ev === undefined) r.getCell(8).font = { color: { argb: C.muted } };
-    r.outlineLevel = Math.min(OUTLINE_MAX, e.depth);
+    r.outlineLevel = Math.min(OUTLINE_MAX, e.depth + 1);
     maxLevel = Math.max(maxLevel, r.outlineLevel);
   }
   ws.properties.outlineLevelRow = maxLevel;
@@ -361,10 +373,14 @@ async function dataSheet(wb, ctx) {
   h.height = 32;
   const iVerdict = cols.findIndex((c) => c.h === '백업 판단') + 1;
   const iStale = cols.findIndex((c) => c.h === 'Veeam 임시 스냅샷 잔존(하루+)') + 1;
+  // v2.801: 줄무늬 · 숫자 서식 · 전원 색(공용 vmXlsxStyle) — v2.792 열에는 key 가 없어 머리 글자로 종류를 고른다(전원 · VM 이름만).
+  const kinds = cols.map((c) => (c.h === '전원' ? 'power' : c.h === 'VM' ? 'name' : ''));
   let n = 0;
   for (const it of items) {
     if (++n % 2000 === 0) await yieldLoop();
-    const r = ws.addRow(cols.map((c) => c.get({ ...it, vc: o.vcName, linked: o.linked })));
+    const vals = cols.map((c) => c.get({ ...it, vc: o.vcName, linked: o.linked }));
+    const r = ws.addRow(vals);
+    styleDataRow(r, vals, kinds, n % 2 === 0);
     paint(r.getCell(iVerdict), styleOfGroup(it), false);
     if (it.stale) paint(r.getCell(iStale), VERDICT_STYLE.stale);
   }
@@ -384,10 +400,13 @@ async function selectedDataSheet(wb, t) {
   const hr = ws.addRow(head);
   hr.eachCell((c, i) => { c.fill = fill(t.folderCols?.[i - 1] ? 'FF24507F' : C.head); c.font = { bold: true, color: { argb: C.headFg } }; c.border = BORDER; c.alignment = { vertical: 'middle', wrapText: true }; });
   hr.height = 32;
+  // v2.801: 줄무늬 · 숫자 서식 · 전원·여부·백업 판단·사용률 색(공용 vmXlsxStyle — 열 key 로 종류)
+  const kinds = Array.isArray(t.keys) ? t.keys.map((k) => kindOf(k)) : null;
   let n = 0;
   for (const row of t.cells || []) {
     if (++n % 2000 === 0) await yieldLoop();
-    ws.addRow(Array.isArray(row) ? row : []);
+    const vals = Array.isArray(row) ? row : [];
+    styleDataRow(ws.addRow(vals), vals, kinds, n % 2 === 0);
   }
   if (head.length) ws.autoFilter = { from: { row: 1, column: 1 }, to: { row: 1, column: head.length } };
   return ws;

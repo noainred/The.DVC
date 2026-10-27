@@ -3,7 +3,7 @@
  *
  * 사용자 요청: "지금 설정을 기본값으로 저장하기, 지금 설정을 저장하기/저장하기 이름1,2,3,4,5 이렇게 5개 설정값을 저장할 수 있고, 저장하는 값을 지정".
  *  · CONFIG_DIR/vm-list-prefs.json = { v:1, users: { 'u:<계정>': { def, slots:[5], at } } } — 키 앞의 'u:' 는 계정 이름이 '__proto__' 같아도 객체 키가 되지 않게.
- *  · 값 = { name, cols(필수 — 고른 열과 순서), fmt?, tagCols?, folder? }(v2.800: multi(파티션 한 줄 반복)는 파티션 열과 함께 없앴다 — 예전 값의 multi 는 저장할 때 버린다) — 사람이 '저장할 내용' 에서 고르지 않은 항목은 아예 싣지 않는다
+ *  · 값 = { name, cols(필수 — 고른 열과 순서), fmt?, tagCols?, ynDays?(v2.801 '여부' 기준 일수), folder? }(v2.801: multi(파티션 한 줄 반복)는 파티션 열과 함께 없앴다 — 예전 값의 multi 는 저장할 때 버린다) — 사람이 '저장할 내용' 에서 고르지 않은 항목은 아예 싣지 않는다
  *    (불러올 때 그 항목은 지금 화면 값을 그대로 둔다). def 는 값 그대로 + from(그 값을 가져온 칸 번호 — 화면 표시용).
  *  · 계정은 **인증된 req.user.username** 으로만 고른다(라우트) — 본문의 이름을 믿지 않는다(남의 저장값을 읽거나 덮지 못하게).
  *  · 원자적 쓰기(0600) · 로드 손상은 옆에 보존하고 쓰기를 거부한다(503 — 빈 값 위에 덮어 전 계정 저장값을 잃지 않게) · 상한(계정 2,000 · 이름 30자).
@@ -14,6 +14,7 @@ import path from 'node:path';
 import { config } from '../config.js';
 import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
 import { resolveCols, knownKeys } from './vmListCatalog.js';
+import { YN_DAYS } from './backupStatus.js';
 
 const FILE = () => path.join(config.configDir, 'vm-list-prefs.json');
 export const SLOT_COUNT = 5;
@@ -52,6 +53,7 @@ export function normalizeValue(v, { slotNo = null } = {}) {
   const out = { name: cleanName(v.name) || (slotNo ? `이름${slotNo}` : '기본값'), cols: c.keys };
   if (v.fmt !== undefined) { if (!FMTS.includes(v.fmt)) return { ok: false, reason: '형식은 CSV 또는 엑셀입니다.' }; out.fmt = v.fmt; }
   if (v.tagCols !== undefined) out.tagCols = v.tagCols === true;
+  if (v.ynDays !== undefined) { if (!YN_DAYS.includes(v.ynDays)) return { ok: false, reason: '‘여부’ 기준 일수가 잘못됐습니다.' }; out.ynDays = v.ynDays; }   // v2.801
   if (v.folder !== undefined) {
     if (typeof v.folder !== 'string' || v.folder.length > 512 || /[\x00-\x1f\x7f]/.test(v.folder)) return { ok: false, reason: '폴더 경로 형식이 잘못됐습니다.' }; // eslint-disable-line no-control-regex
     out.folder = v.folder;
