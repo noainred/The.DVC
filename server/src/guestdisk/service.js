@@ -70,7 +70,7 @@ export async function collectVcenterGuestDisk(vcenterId) {
     raw.push({
       vmId: vm.id, vmName: vm.name || vm.id,
       allocGB: s.allocGB, usedGB: s.usedGB, freeGB: s.freeGB, ratioPct: s.ratioPct, partCount: s.partCount,
-      parts: parts.map((p) => ({ path: p.path, capGB: p.capacityGB, usedGB: p.usedGB })),
+      parts: parts.map((p) => ({ path: p.path, capGB: p.capacityGB, usedGB: p.usedGB, ...(p.fs ? { fs: p.fs } : {}) })),   // v2.798 파일 시스템 종류
     });
   }
   // ⚠ v2.601(감사 RECENT2601-01): 중앙 수신 경로(routes/central.js /guest-disk)와 **같은 정제**를 거친다. 예전에는

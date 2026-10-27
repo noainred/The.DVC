@@ -135,3 +135,26 @@ describe('v2.795 EM VM 단위 반영 — 설정 매핑 표의 vCenter 반영 칸
     expect(m).not.toMatch(/colSpan=\{5\}/);
   });
 });
+
+describe('v2.798 EM 서버를 포탈 B&R 로 바로 등록 · 서버 수 확인', () => {
+  it('등록 양식 — 이름을 표시명·주소로 미리 채우고 REST 9419 · 빈 칸은 먼저 알린다', () => {
+    const d = T.brRegisterDraft({ name: ' HM_SDBX ' });
+    expect(d).toMatchObject({ name: 'HM_SDBX', host: 'HM_SDBX', port: '9419', username: '', password: '' });
+    expect(T.brRegisterIssue(d)).toMatch(/계정/);
+    expect(T.brRegisterIssue({ ...d, username: 'u', password: 'p', vcenterIds: [] })).toMatch(/vCenter/);
+    expect(T.brRegisterIssue({ ...d, username: 'u', password: 'p', vcenterIds: ['kr:vc1'] })).toBe('');
+  });
+  it('서버 수 경고 — 개요보다 적은 EM 만 · 모르면 말하지 않는다', () => {
+    const w = T.serverCountWarnings([{ emName: 'HQ', overview: 22, merged: 5, viaQuery: true }, { emName: 'B', overview: 3, merged: 3 }, { emName: 'C', overview: null, merged: 1 }]);
+    expect(w).toHaveLength(1);
+    expect(w[0]).toMatch(/개요는 백업 서버 22대인데 목록은 5대만.*추정/);
+  });
+  it('화면 — 기존 등록 API 그대로 · 두 요청 모두 r?.ok === false 확인 · 비밀번호 칸 · 백틱 없음', () => {
+    const m = fs.readFileSync(new URL('../VeeamEmMapping.jsx', import.meta.url), 'utf8');
+    expect(m).toMatch(/sendJson\('\/admin\/veeam\/servers', 'POST'/);
+    expect(m).toMatch(/if \(a\?\.ok === false\)/);
+    expect(m).toMatch(/if \(b\?\.ok === false\)/);
+    expect(m).toMatch(/type === 'password' \? 'new-password'/);
+    expect(m).not.toMatch(/textTransform|text-transform/);
+  });
+});

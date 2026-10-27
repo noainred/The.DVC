@@ -9,7 +9,7 @@ import React, { useMemo, useState } from 'react';
 import { sendJson } from '../api.js';
 import { STable } from '../components/STable.jsx';
 import Select from '../components/Select.jsx';
-import { brMatchText, vcMatchText, reflectText, mappingSummary, TONE } from './tools/backupEmText.js';
+import { brMatchText, vcMatchText, reflectText, mappingSummary, TONE, brRegisterDraft, brRegisterIssue, serverCountWarnings } from './tools/backupEmText.js';
 
 const rowKey = (r) => `${r.emId}|${String(r.name).toLowerCase()}`;
 
@@ -19,6 +19,7 @@ export default function VeeamEmMapping({ mapping, onSaved }) {
   const [busy, setBusy] = useState('');
   const [msg, setMsg] = useState(null);
   const [q, setQ] = useState('');
+  const [reg, setReg] = useState(null);     // v2.798 '포탈에 B&R 로 등록' 양식(열린 줄만) — { key, ...brRegisterDraft }
   const rows = useMemo(() => (Array.isArray(mapping?.rows) ? mapping.rows : []), [mapping]);
   const sum = useMemo(() => mappingSummary(rows), [rows]);
   const shown = rows.filter((r) => !q.trim() || `${r.name} ${r.emName} ${(r.vcNames || []).join(' ')} ${r.brName}`.toLowerCase().includes(q.trim().toLowerCase()));
@@ -38,6 +39,25 @@ export default function VeeamEmMapping({ mapping, onSaved }) {
       onSaved?.();
     } catch (e) { setMsg({ ok: false, text: e.message }); } finally { setBusy(''); }
   };
+  // v2.798(사용자 요청 'EM 서버를 포탈 B&R 로 바로 등록'): 기존 등록 API(POST /admin/veeam/servers — 관리자·전체 범위·감사·비밀 봉인) 그대로 →
+  //   성공하면 이 줄의 짝을 그 등록으로 저장(법인은 비워 B&R 등록을 따르게). 비밀번호는 이 화면에만 잠깐 있고 다시 보이지 않는다.
+  const register = async (r) => {
+    if (!reg || busy) return;
+    const draft = { ...reg, vcenterIds: [...(edit?.vcenterIds || [])] };   // 편집 칸에서 지금 고른 법인
+    const issue = brRegisterIssue(draft);
+    if (issue) { setMsg({ ok: false, text: issue }); return; }
+    setBusy(reg.key); setMsg(null);
+    try {
+      const a = await sendJson('/admin/veeam/servers', 'POST', { name: reg.name.trim(), host: reg.host.trim(), port: String(reg.port).trim() === '' ? undefined : Number(reg.port), username: reg.username.trim(), password: reg.password, vcenterIds: draft.vcenterIds });
+      if (a?.ok === false) { setMsg({ ok: false, text: a.reason || '등록하지 못했습니다.' }); return; }
+      const id = a?.server?.id;
+      const b = id ? await sendJson('/admin/veeam/em/map', 'PUT', { emId: r.emId, server: r.name, br: id, vcenterIds: [] }) : { ok: false, reason: '등록 결과에 id 가 없습니다.' };
+      if (b?.ok === false) { setMsg({ ok: false, text: `B&R 로는 등록했지만 짝짓기를 저장하지 못했습니다 — ${b.reason || ''} (매핑에서 직접 고르세요)` }); onSaved?.(); return; }
+      setMsg({ ok: true, text: `${r.name} — 포탈 B&R 로 등록하고 짝지었습니다. B&R 직접 수집이 시작되면(설정 › B&R 서버) 그 vCenter 화면은 B&R 값을 우선 씁니다.` });
+      setReg(null); setEdit(null);
+      onSaved?.();
+    } catch (e) { setMsg({ ok: false, text: e.message }); } finally { setBusy(''); }
+  };
   const toggleVc = (id) => setEdit((e) => { const s = new Set(e.vcenterIds); if (s.has(id)) s.delete(id); else s.add(id); return { ...e, vcenterIds: s }; });
 
   return (
@@ -53,6 +73,7 @@ export default function VeeamEmMapping({ mapping, onSaved }) {
         <b> vCenter 반영</b> — 법인을 정한 서버는 EM 의 VM 별 기록(작업 결과·복원 지점)이 그 vCenter 의 카드·VM 배지·Veeam 현황에 'EM ·' 출처로 실립니다.
         짝지은 B&R 직접 수집이 정상이면 그쪽이 우선이고, 읽기 실패·첫 수집 대기일 때만 EM 기록으로 채웁니다. EM 기록에는 진행 중·진행률이 없습니다.
       </div>
+      {serverCountWarnings(mapping?.counts).map((t) => <div key={t} className="banner warn">{t}</div>)}
       {mapping?.unreadable && <div className="banner warn">매핑 파일을 읽지 못했습니다 — 저장하지 않습니다(손상 사본은 설정 폴더에 남았습니다).</div>}
       {msg && <div className={`banner ${msg.ok ? 'info' : 'warn'}`}>{msg.text}</div>}
       {!rows.length ? <div className="muted" style={{ fontSize: 13 }}>아직 EM 수집 결과가 없습니다 — EM 을 등록하고 '지금 수집' 을 누르면 백업 서버 목록이 나옵니다.</div> : (
@@ -78,7 +99,8 @@ export default function VeeamEmMapping({ mapping, onSaved }) {
                   </tr>
                   {on && (
                     <tr><td colSpan={6} style={{ padding: '4px 0 12px' }}>
-                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 14, padding: 12, border: '1px solid var(--border)', borderRadius: 10, background: 'var(--panel-deep)' }}>
+                      {/* v2.798 화면 확인: 편집 칸(등록 양식 포함)의 내용 폭이 표를 넓혀 오른쪽 버튼이 표 안 가로 스크롤 뒤로 숨었다 — 폭은 표가 정하고 내용은 줄바꿈(contain) */}
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 14, padding: 12, border: '1px solid var(--border)', borderRadius: 10, background: 'var(--panel-deep)', contain: 'inline-size' }}>
                         <label className="muted" style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12, flex: '1 1 220px', minWidth: 0 }}>포탈 B&R 등록
                           <Select className="input" sort={false} value={edit.br} onChange={(e) => setEdit((x) => ({ ...x, br: e.target.value }))} style={{ minWidth: 0 }}>
                             <option value="">자동(이름으로 짝짓기)</option>
@@ -102,7 +124,29 @@ export default function VeeamEmMapping({ mapping, onSaved }) {
                         <div className="flex gap wrap" style={{ alignSelf: 'flex-end' }}>
                           <button type="button" className="login-btn" style={{ flex: 'none' }} disabled={!!busy || mapping?.unreadable} onClick={() => save(false)}>{busy === k ? '저장 중…' : '저장'}</button>
                           <button type="button" className="tab" style={{ flex: 'none' }} disabled={!!busy || mapping?.unreadable || !r.manual} onClick={() => save(true)} title="이 서버의 매핑을 지우고 자동으로 짝짓습니다">자동으로 되돌리기</button>
+                          {!r.registered && !r.gone && (
+                            <button type="button" className={reg?.key === k ? 'login-btn' : 'tab'} style={{ flex: 'none' }} disabled={!!busy}
+                              onClick={() => setReg((x) => (x?.key === k ? null : { key: k, ...brRegisterDraft(r) }))}
+                              title="이 서버를 포탈의 B&R 서버로 등록합니다(B&R REST 직접 수집 — 진행률·복원 지점 수까지). 등록 후 이 줄과 자동으로 짝짓습니다">포탈에 B&R 로 등록…</button>
+                          )}
                         </div>
+                        {reg?.key === k && (
+                          <div data-br-register="" style={{ flex: '1 1 100%', minWidth: 0, maxWidth: '100%', display: 'flex', flexWrap: 'wrap', gap: '10px 14px', alignItems: 'flex-end', paddingTop: 10, borderTop: '1px solid var(--border-soft)' }}>
+                            <b style={{ flex: '1 1 100%', fontSize: 12.5, overflowWrap: 'anywhere' }}>포탈에 B&R 로 등록 — 설정 › B&R 서버와 같은 등록(관리자 · 감사 기록 · 비밀번호는 암호화 저장)</b>
+                            {[['name', '표시명', 160, 'text'], ['host', '주소(IP·호스트 이름)', 200, 'text'], ['port', '포트(REST)', 90, 'text'], ['username', '계정', 160, 'text'], ['password', '비밀번호', 160, 'password']].map(([f, label, w, type]) => (
+                              <label key={f} className="muted" style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12, minWidth: 0 }}>{label}
+                                <input className="input" type={type} autoComplete={type === 'password' ? 'new-password' : 'off'} value={reg[f]} onChange={(e) => setReg((x) => ({ ...x, [f]: e.target.value }))} style={{ width: w, maxWidth: '100%', minWidth: 0 }} />
+                              </label>
+                            ))}
+                            <span className="muted" style={{ flex: '1 1 100%', minWidth: 0, fontSize: 11.5, lineHeight: 1.55, overflowWrap: 'anywhere', whiteSpace: 'normal' }}>
+                              법인(vCenter): {edit.vcenterIds.size ? vcs.filter((v) => edit.vcenterIds.has(v.id)).map((v) => v.name).join(', ') : '— 위 목록에서 하나 이상 고르세요'} · 주소는 EM 이 아는 서버 이름을 미리 채웠습니다 — 포탈에서 그 이름으로 접속되는지 확인하세요 · 엣지가 대신 수집해야 하는 법인이면 등록 뒤 B&R 서버 탭에서 담당 엣지를 고르세요.
+                            </span>
+                            <span className="flex gap" style={{ marginLeft: 'auto', gap: 8 }}>
+                              <button type="button" className="tab" style={{ flex: 'none' }} onClick={() => setReg(null)}>취소</button>
+                              <button type="button" className="login-btn" style={{ flex: 'none' }} disabled={!!busy} onClick={() => register(r)}>{busy === k ? '등록 중…' : '등록하고 짝짓기'}</button>
+                            </span>
+                          </div>
+                        )}
                       </div>
                     </td></tr>
                   )}

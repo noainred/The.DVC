@@ -350,6 +350,7 @@ async function treeSheet(wb, ctx) {
 /* ── ③ 데이터(행 단위) — CSV 와 같은 열 ─────────────────────────────── */
 async function dataSheet(wb, ctx) {
   const { o, items } = ctx;
+  if (o.dataTable) return selectedDataSheet(wb, o.dataTable);
   const cols = vmListColumns({ snapDays: o.snapDays, offsetMin: o.offsetMin, levels: folderLevels(items) });
   // 인쇄는 가로·머리 반복만 — 열이 많아(폴더 단계 + 30여 열) 폭 한 장 맞춤이면 글자가 읽을 수 없게 작아진다. 이 시트는 필터·피벗용이다.
   const ws = wb.addWorksheet(VM_XLSX_SHEETS[2], { views: [{ state: 'frozen', ySplit: 1 }], pageSetup: { orientation: 'landscape', paperSize: 9, printTitlesRow: '1:1' } });
@@ -367,6 +368,27 @@ async function dataSheet(wb, ctx) {
     if (it.stale) paint(r.getCell(iStale), VERDICT_STYLE.stale);
   }
   ws.autoFilter = { from: { row: 1, column: 1 }, to: { row: 1, column: cols.length } };
+  return ws;
+}
+
+/**
+ * v2.798 '필요한 항목만 고르기' — 데이터 시트는 라우트가 카탈로그(vmListCatalog)로 미리 만든 표 그대로(CSV 와 같은 머리·칸).
+ * 요약·폴더 트리 시트는 고른 항목과 무관하게 그대로다(Veeam 판정 기준 시트).
+ * @param {{head:string[], cells:Array<Array>, folderCols?:boolean[]}} t
+ */
+async function selectedDataSheet(wb, t) {
+  const head = Array.isArray(t.head) ? t.head : [];
+  const ws = wb.addWorksheet(VM_XLSX_SHEETS[2], { views: [{ state: 'frozen', ySplit: 1 }], pageSetup: { orientation: 'landscape', paperSize: 9, printTitlesRow: '1:1' } });
+  ws.columns = head.map((h, i) => ({ width: t.folderCols?.[i] ? 16 : /^VM$|폴더 경로|파티션 상세|태그|속성|메모|이름/.test(h) ? 34 : h.length > 12 ? 22 : 13 }));
+  const hr = ws.addRow(head);
+  hr.eachCell((c, i) => { c.fill = fill(t.folderCols?.[i - 1] ? 'FF24507F' : C.head); c.font = { bold: true, color: { argb: C.headFg } }; c.border = BORDER; c.alignment = { vertical: 'middle', wrapText: true }; });
+  hr.height = 32;
+  let n = 0;
+  for (const row of t.cells || []) {
+    if (++n % 2000 === 0) await yieldLoop();
+    ws.addRow(Array.isArray(row) ? row : []);
+  }
+  if (head.length) ws.autoFilter = { from: { row: 1, column: 1 }, to: { row: 1, column: head.length } };
   return ws;
 }
 
@@ -396,7 +418,8 @@ function legendSheet(wb, ctx) {
     "'VM 목록(폴더 트리)' 시트: 폴더 행의 수는 하위 폴더를 포함한 합계입니다. 왼쪽 위 1/2/3… 단추로 단계별로 접고, 폴더 행 왼쪽 −/+ 로 그 폴더만 접습니다. 엑셀 개요는 7단계까지라 더 깊은 폴더는 7단계에 모입니다(들여쓰기와 '폴더 경로' 는 깊이 그대로).",
     'Veeam 백업률 = Veeam 백업 VM ÷ Veeam 상태를 아는 VM 입니다. Veeam 서버가 연결돼 있지 않거나 아는 VM 이 없으면 — 로 둡니다(0% 가 아닙니다).',
     `스냅샷은 셋으로 나눠 싣습니다: ① 지금 있는 Veeam 임시 스냅샷 ② 최근 ${o.snapDays}일 Veeam 계정이 만든 스냅샷 이벤트(횟수 · '모름' 은 이벤트를 아직 판단하지 못한 것) ③ VM 의 전체 스냅샷(사람이 만든 것 포함 — 수 · 크기 · 이름).`,
-    "'데이터(행 단위)' 시트는 CSV 와 같은 열입니다(폴더 1~N단계 · 폴더 경로 포함). 색·접기는 엑셀에만 있습니다. 폴더 경로가 비어 있으면 데이터센터 바로 아래(최상위) VM 입니다.",
+    o.dataTable ? "'데이터(행 단위)' 시트는 내보내기 창에서 고른 항목과 순서 그대로입니다(CSV 와 같은 열). ‘수집 안 됨’ 은 그 vCenter 에서 아직 모으지 않은 값(태그 수집 전 · 게스트 파티션 미수집 · 구성 캐시 미도달)이고, 빈칸은 못 읽은 값입니다."
+      : "'데이터(행 단위)' 시트는 CSV 와 같은 열입니다(폴더 1~N단계 · 폴더 경로 포함). 색·접기는 엑셀에만 있습니다. 폴더 경로가 비어 있으면 데이터센터 바로 아래(최상위) VM 입니다.",
     '대상 VM 은 내려받을 때 포탈 화면에 보이던 목록입니다(‘Off VM 포함’ · 검색 결과 반영). 판단은 백업 › 백업 세부내용과 같은 기준이고, 사람이 정한 중요도·메모는 싣지 않습니다.',
     'VM · 폴더 이름은 문자열 칸으로만 씁니다(수식 칸을 만들지 않습니다).',
     `만든 시각 ${o.stamp} ${o.tz} · 포탈 › vCenter › VM 및 폴더에서 같은 목록을 볼 수 있습니다.`,
@@ -410,8 +433,8 @@ function legendSheet(wb, ctx) {
  * @param {{ vcName:string, rows:Array<{inv:object, view:object}>, linked:boolean, snapDays?:number, offsetMin?:number, cond?:string, veeamText?:string, at?:number }} a
  * @returns {Promise<{buffer:Buffer, rows:number, folders:number, outlineLevels:number}>}
  */
-export async function buildVmListWorkbook({ vcName, rows, linked, snapDays = 7, offsetMin = DAY_OFFSET_MIN, cond = '전체 VM', veeamText = '', at = Date.now() }) {
-  const o = { vcName: String(vcName || ''), linked: !!linked, snapDays, offsetMin, cond, at, tz: offsetLabel(offsetMin), stamp: localStamp(at, offsetMin),
+export async function buildVmListWorkbook({ vcName, rows, linked, snapDays = 7, offsetMin = DAY_OFFSET_MIN, cond = '전체 VM', veeamText = '', at = Date.now(), dataTable = null }) {
+  const o = { vcName: String(vcName || ''), linked: !!linked, snapDays, offsetMin, cond, at, tz: offsetLabel(offsetMin), stamp: localStamp(at, offsetMin), dataTable,
     veeamText: veeamText || (linked ? '연결됨' : '연동 없음 — 스냅샷으로만 판단') };
   const tree = buildVmTree(rows, { linked: o.linked });
   const flat = flattenTree(tree.root);

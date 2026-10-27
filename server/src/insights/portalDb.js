@@ -113,6 +113,7 @@ const PURPOSES = {
   'veeam-em.json': 'Veeam Enterprise Manager 등록부(주소·계정 — 비밀번호 봉인 · 중앙 전용, v2.788)',
   'veeam-em-latest.json': 'Veeam Enterprise Manager 별 마지막 수집 결과(상태 — 요약·작업·세션·저장소, v2.788)',
   'veeam-em-map.json': 'Veeam Enterprise Manager 백업 서버 매핑(사람이 정함 — 법인 vCenter · 포탈 B&R 등록 짝, v2.788.1)',
+  'vm-list-prefs.json': 'VM 목록 내보내기 내 저장값(계정별 — 기본값 · 1~5칸의 고른 항목·형식, v2.798)',
   'veeam-em-vms.json': 'Veeam Enterprise Manager 가 알려 준 VM 별 최신 백업 기록(작업 결과·복원 지점 — vCenter 화면 반영, v2.795)',
   'veeam-em-auth-stops.json': 'Veeam Enterprise Manager 인증 실패 정지 기록(상태 — 자격증명이 바뀌면 자동 재개, v2.788)',
   'veeam-license-alert-state.json': 'Veeam 라이선스·지원 만료 알림 단계(상태 — 재시작 뒤 같은 알림을 다시 보내지 않게, v2.788)',
