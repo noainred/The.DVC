@@ -714,7 +714,10 @@ async function summaryData(req, snap, scope) {
     const vms = vmsBy.get(vc.id) || [];
     const b = await vcBackup(vc, vms, req, { initial: snap?.initial === true, scope });
     // v2.787(우선순위 VM): 같은 범위(scope 교집합 vCenter · 전원·제외 목록)에서만 — 다른 수와 같은 기준
-    if (prioOk) for (const c of priorityCandidates(b.scopedVms, { byVm: b.match?.byVm || null, marks, veeamKnown: b.row.veeam != null || !b.linked, absentKnown: !b.row.veeamAbsentUnknown, now })) {
+    // v2.806: Clone 방식 VM 의 복제 잡 상태(Detail 과 같은 실행 노드 기준) — 못 읽으면 null(모름 — cloneBad 로 세지 않는다)
+    const clones = prioOk ? cloneStatesOf(vc.id) : null;
+    const cloneOf = (id) => (clones ? cloneView(clones.get(id)) : null);
+    if (prioOk) for (const c of priorityCandidates(b.scopedVms, { byVm: b.match?.byVm || null, marks, veeamKnown: b.row.veeam != null || !b.linked, absentKnown: !b.row.veeamAbsentUnknown, now, cloneOf })) {
       prio.push({ ...c, vcenterId: vc.id, vcName: vc.name || vc.id });
     }
     rows.push({ id: vc.id, name: vc.name || vc.id, ...b.row,
@@ -816,7 +819,7 @@ export function registerBackupStatus(api) {
     const admin = isAdminDetailUser(req.user);
     const scope = scopeOf(req);
     return memoJson(req, res, 'backup-summary', async () => summaryData(req, snap, scope),
-      { ttlMs: 60_000, extraKey: `${scopeKey(req.user, snap)}|${admin ? 'admin' : 'user'}|m${marksRev()}|d${detailToolOk(req) ? 1 : 0}|em${emSourcesRev()}` });   // v2.787 Detail 접근(우선순위 VM) · 키에 req.originalUrl(전원·제외)도 든다(shared.js) · v2.784 표시 리비전(저장 즉시 수가 바뀐다)
+      { ttlMs: 60_000, extraKey: `${scopeKey(req.user, snap)}|${admin ? 'admin' : 'user'}|m${marksRev()}|d${detailToolOk(req) ? 1 : 0}|em${emSourcesRev()}|c${jobsRev()}` });   // v2.787 Detail 접근(우선순위 VM) · 키에 req.originalUrl(전원·제외)도 든다(shared.js) · v2.784 표시 리비전(저장 즉시 수가 바뀐다) · v2.806 c = 복제 잡 기록 리비전(우선순위 VM 의 Clone 상태)
   });
 
   /*

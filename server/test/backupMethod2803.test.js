@@ -98,6 +98,9 @@ test('B 라우트 — PUT method · Detail c 는 Clone VM 에만 · 잡 저장 �
     // 서머리 수 · 보기 필터
     const sum = await (await fetch(`${base}/tools/backup-summary`)).json();
     assert.deepEqual(sum.rows.find((x) => x.id === VC).marks.method, { veeam: 0, clone: 2, config: 1, none: 0, unset: 0 });
+    // v2.806 우선순위 VM — Clone 방식 VM 은 복제 잡 상태로(web01 마지막 실패 · db01 잡 없음 → cloneBad) · 방식이 실린다
+    const pr = Object.fromEntries((sum.priority?.items || []).map((x) => [x.name, x]));
+    assert.deepEqual([pr.web01?.method, pr.web01?.cloneBad, pr.db01?.cloneBad, pr.web01?.gap], ['clone', true, true, false], JSON.stringify(sum.priority));
     for (const [f, want] of [['method-clone', ['web01', 'db01']], ['method-config', ['cfg01']], ['method-unset', []]]) {
       assert.deepEqual(d.vms.filter((v) => BS.vmViewMatches(v, f)).map((v) => v.name).sort(), [...want].sort(), f);
     }
@@ -194,4 +197,15 @@ test('D v2.804 먼저 볼 VM — 백업 안함·Clone 성공은 뺀다 · 그 �
   const u = X.watchList(items, { snapDays: 7, at: NOW, marksUnknown: true });
   assert.equal(u.length, items.length);
   assert.equal(u.some((x) => x.why.startsWith('백업 방식')), false);
+});
+
+test('E v2.806 우선순위 VM — 백업 안함은 미백업 아님 · Clone 은 복제 잡 상태 · Config 는 gap 유지 · 모름은 cloneBad 아님 · 서머리 캐시 키에 복제 잡 리비전', () => {
+  const vms = ['a', 'b', 'c', 'd', 'e'].map((id) => ({ id, name: id }));
+  const marks = { a: { crit: 'high' }, b: { crit: 'high', method: 'none' }, c: { need: true, method: 'clone' }, d: { need: true, method: 'config' }, e: { method: 'clone' } };
+  const cl = { c: { job: true, on: true, at: NOW, ok: true }, e: { job: true, on: true, unknown: true } };
+  const by = Object.fromEntries(BS.priorityCandidates(vms, { byVm: {}, marks, veeamKnown: true, now: NOW, cloneOf: (id) => cl[id] }).map((x) => [x.id, x]));
+  assert.deepEqual(Object.keys(by).sort(), ['a', 'd']);
+  assert.deepEqual([by.a.gap, by.d.gap, by.d.method], [true, true, 'config']);
+  const src = fs.readFileSync(new URL('../src/routes/api/veeam.js', import.meta.url), 'utf8');
+  assert.equal((src.match(/\|c\$\{jobsRev\(\)\}/g) || []).length, 2, '서머리·세부 둘 다');
 });

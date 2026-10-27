@@ -332,9 +332,19 @@ export function vmViewMatches(vm, f, opts) {
  *  · stale = 하루 넘게 남은 Veeam 임시 스냅샷(currentSnapOf — 서머리 snapStale 과 같은 판정)
  *  · lb    = 마지막 백업 완료 — '오래된 백업' 은 화면이 고른 기준 일수로 거른다(그래서 하루 넘은 것만 후보로 싣는다)
  *  범위는 호출부가 정한다(scope 교집합 vCenter · 전원·제외를 거친 목록). 표시(m)가 없고 문제도 없는 VM 은 싣지 않는다.
- * @returns {Array<{id,name,folder,crit,need,gap,fail,stale,lb}>}
+ *  v2.806(사용자 요청 'Summary 우선순위 VM 에도 백업 방식 반영' — 엑셀 먼저 볼 VM(vmListXlsx.watchList)과 같은 규칙):
+ *   · method  = 사람이 정한 백업 방식 · 백업 안함이면 gap 아님 · Clone 이면 Veeam 부재가 아니라 복제 잡 상태로 본다(cloneOf — cloneView)
+ *   · cloneBad = 방식 Clone 인데 잡 없음 · 마지막 실패 · 건너뜀(모름은 넣지 않는다 — 지어내지 않는다) — Veeam '마지막 실패' 처럼 표시와 무관하게 후보
+ *   · Config 백업은 포탈이 확인할 수 없어 gap 을 유지한다(화면 태그 글자로 구분)
+ * @param {{cloneOf?:(vmId:string)=>object|null|undefined}} o cloneOf 가 없거나 null 을 돌려주면 Clone 상태 모름
+ * @returns {Array<{id,name,folder,crit,need,method,gap,fail,cloneBad,stale,lb}>}
  */
-export function priorityCandidates(vms, { byVm = null, marks = {}, veeamKnown = false, absentKnown = true, now = Date.now() } = {}) {
+export function cloneBadOf(c) {
+  if (!c || c.unknown) return false;
+  if (!c.job) return true;
+  return isFin(c.at) && (c.ok === false || !!c.skipped);
+}
+export function priorityCandidates(vms, { byVm = null, marks = {}, veeamKnown = false, absentKnown = true, now = Date.now(), cloneOf = null } = {}) {
   const out = [];
   const gapKnown = !!veeamKnown && absentKnown !== false;
   for (const vm of Array.isArray(vms) ? vms : []) {
@@ -342,14 +352,17 @@ export function priorityCandidates(vms, { byVm = null, marks = {}, veeamKnown = 
     const ve = byVm ? byVm[vm.id] : undefined;
     const crit = m && ['high', 'mid', 'low'].includes(m.crit) ? m.crit : '';
     const need = m?.need === true;
-    const gap = gapKnown && (need || crit === 'high') && !ve;
+    const method = m && ['veeam', 'clone', 'config', 'none'].includes(m.method) ? m.method : '';
+    const c = method === 'clone' && typeof cloneOf === 'function' ? cloneOf(vm.id) : undefined;
+    const cloneBad = method === 'clone' && cloneBadOf(c);
+    const gap = gapKnown && (need || crit === 'high') && !ve && method !== 'none' && method !== 'clone';
     const fail = !!ve && /^fail/i.test(resultOf(ve));
     const cs = currentSnapOf(vm, now);
     const stale = !!(cs && cs.stale);
     const lb = ve && isFin(ve.lb) ? ve.lb : null;
     const old = lb != null && now - lb > DAY;
-    if (!gap && !fail && !stale && !old) continue;
-    out.push({ id: vm.id, name: String(vm.name || ''), folder: String(vm.folder || ''), crit, need, gap, fail, stale, lb });
+    if (!gap && !fail && !cloneBad && !stale && !old) continue;
+    out.push({ id: vm.id, name: String(vm.name || ''), folder: String(vm.folder || ''), crit, need, method, gap, fail, cloneBad, stale, lb });
   }
   return out;
 }
@@ -357,7 +370,7 @@ export function priorityCandidates(vms, { byVm = null, marks = {}, veeamKnown = 
 /** 우선순위 — 중요도 상 → 백업 필요 → 나머지, 같은 단계에서는 미백업 → 실패 → 잔존 → 오래된(마지막 백업이 이른 순). 서버 상한 자르기용(웹은 기준 일수로 다시 매긴다). */
 export function priorityRank(a, b) {
   const tier = (x) => (x.crit === 'high' ? 0 : x.need ? 1 : 2);
-  const prob = (x) => (x.gap ? 0 : x.fail ? 1 : x.stale ? 2 : 3);
+  const prob = (x) => (x.gap ? 0 : (x.fail || x.cloneBad) ? 1 : x.stale ? 2 : 3);   // v2.806 Clone 실패·잡 없음은 실패와 같은 단계
   return (tier(a) - tier(b)) || (prob(a) - prob(b)) || ((a.lb ?? Infinity) - (b.lb ?? Infinity)) || String(a.name).localeCompare(String(b.name));
 }
 export const PRIORITY_MAX = 500;
