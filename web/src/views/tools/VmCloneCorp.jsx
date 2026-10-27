@@ -4,7 +4,9 @@ import Select from '../../components/Select.jsx';
 import { STable } from '../../components/STable.jsx';
 import { requireChanged } from '../changeResult.js';
 import { mountLabel } from './vmCloneMountText.js';
-import { corpCards, agoText, fmtBytes } from './vmCloneView.js';
+import { corpCards, agoText, fmtBytes, meterOf } from './vmCloneView.js';
+
+const GIB = 1024 ** 3;
 
 /**
  * VM 백업 센터 › 법인 저장소(시안 ⑤, v2.793).
@@ -93,9 +95,11 @@ export default function VmCloneCorp({ d, now, initialKey, onBack, onReload }) {
         <div style={{ flex: '1 1 240px', minWidth: 0 }}>
           <nav className="vbk-panel vbk-corpnav" aria-label="법인">
             {cards.map((x) => (
-              <button type="button" key={x.key} className={x.key === c.key ? 'on' : ''} onClick={() => setKey(x.key)}>
-                <span className="flex between" style={{ gap: 8 }}><b>{x.name}</b><span style={{ fontSize: 11.5, color: x.state === 'ok' || x.state === 'central' ? '#86efac' : x.state === 'sim' ? 'var(--text-dim)' : '#fcd34d' }}>{x.stateLabel}</span></span>
+              <button type="button" key={x.key} className={x.key === c.key ? 'on' : ''} aria-pressed={x.key === c.key} onClick={() => setKey(x.key)}>
+                <span className="flex between" style={{ gap: 8, alignItems: 'center' }}><b style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{x.name}</b><span className={`vbk-chip ${x.state === 'ok' || x.state === 'central' ? 'ok' : x.state === 'problem' ? 'fail' : x.state === 'sim' ? '' : 'warn'}`}>{x.stateLabel}</span></span>
                 <small>{x.sub}</small>
+                <small>잡 {x.jobs} · 24시간 {x.total24 ? `${x.ok24}/${x.total24} 성공` : '실행 없음'}</small>
+                {x.total24 > 0 && <span className="vbk-split" aria-hidden="true"><b className="ok" style={{ width: `${(x.ok24 / x.total24) * 100}%` }} /><b className="fail" style={{ width: `${(x.fail24 / x.total24) * 100}%` }} /></span>}
               </button>
             ))}
           </nav>
@@ -107,10 +111,11 @@ export default function VmCloneCorp({ d, now, initialKey, onBack, onReload }) {
               <div style={{ fontSize: 17, fontWeight: 700 }}>{c.label}</div>
               <div className="muted" style={{ fontSize: 12.5, marginTop: 3 }}>{[...vcIds].map((id) => d.vcenterNames?.[id] || id).join(' · ')}</div>
             </div>
-            <div className="flex wrap" style={{ gap: 18, fontSize: 12.5 }}>
-              <div><div className="muted">실행 위치</div><div style={{ fontWeight: 600, marginTop: 2 }}>{c.agent ? `엣지 ${c.agent}${c.edge?.version ? ` · v${c.edge.version}` : ''}` : c.simulated ? '데모(이 포탈이 시뮬레이션)' : c.key === 'central' ? '중앙(이 포탈)' : '담당 미확정'}</div></div>
-              {c.agent && <div><div className="muted">백업 위임</div><div style={{ fontWeight: 600, marginTop: 2, color: c.edge ? '#86efac' : '#fcd34d' }}>{c.edge ? `보고 ${agoText(c.edge.at, now)}` : '아직 보고 없음'}</div></div>}
-              <div><div className="muted">실행 상태</div><div style={{ fontWeight: 600, marginTop: 2 }}>{card?.running ? `실행 중 · ${card.running.phase || ''}` : '유휴'} · 대기 {card?.queued || 0}</div></div>
+            <div className="vbk-stats" style={{ flexBasis: '100%' }}>
+              <div><div className="l">실행 위치</div><div className="v">{c.agent ? `엣지 ${c.agent}${c.edge?.version ? ` · v${c.edge.version}` : ''}` : c.simulated ? '데모(이 포탈이 시뮬레이션)' : c.key === 'central' ? '중앙(이 포탈)' : '담당 미확정'}</div></div>
+              <div><div className="l">백업 위임</div><div className="v" style={{ color: !c.agent ? undefined : c.edge ? '#86efac' : '#fcd34d' }}>{!c.agent ? (c.simulated ? '데모(위임 없음)' : c.key === 'central' ? '해당 없음(중앙이 직접 실행)' : '담당 미확정') : c.edge ? `보고 ${agoText(c.edge.at, now)}` : '아직 보고 없음'}</div></div>
+              <div><div className="l">실행 상태</div><div className="v" style={{ color: card?.running ? '#fcd34d' : undefined }}>{card?.running ? `실행 중 · ${card.running.phase || ''}` : '유휴'} · 대기 {card?.queued || 0}</div></div>
+              <div><div className="l">잡 · 24시간</div><div className="v">{card?.jobs ?? 0}개 · {card?.total24 ? <span style={{ color: card.fail24 ? '#fca5a5' : '#86efac' }}>{card.ok24}/{card.total24} 성공</span> : '실행 없음'}</div></div>
             </div>
             {c.problem && <div className="vbk-note" style={{ flexBasis: '100%' }}>{c.problem}</div>}
             {c.agent && !c.edge && <div className="vbk-note info" style={{ flexBasis: '100%' }}>엣지 {c.agent} 가 VM 백업 위임 보고를 아직 올리지 않았습니다 — 엣지를 이 판 이상으로 업그레이드하고, 엣지별 개별 토큰을 쓰는지 확인하세요(공유 토큰은 거부합니다).</div>}
@@ -136,43 +141,49 @@ export default function VmCloneCorp({ d, now, initialKey, onBack, onReload }) {
                 <div className="muted" style={{ fontSize: 12, marginTop: 3 }}>NFS 를 이 법인 ESXi 호스트에 데이터스토어로 붙입니다. 클론이 vCenter 서버측 복사로 NFS 에 바로 써지고, 사본을 켜서 검증·복구할 수 있습니다.</div>
               </div>
             </div>
-            <div style={{ overflowX: 'auto' }}>
-              <STable minWidth={780}>
-                <thead><tr><th>데이터스토어</th><th>NFS</th><th>연결 호스트</th><th style={{ textAlign: 'right' }}>여유 / 전체</th><th className="right" data-nosort>작업</th></tr></thead>
-                <tbody>
-                  {items.length === 0 && <tr><td colSpan={5} className="center muted" style={{ padding: 18 }}>이 법인에 정의된 NFS 데이터스토어가 없습니다.</td></tr>}
-                  {items.map((it) => {
-                    const pct = it.hostsTotal ? Math.round((it.hostsOk / it.hostsTotal) * 100) : 0;
-                    const failed = Object.values(it.hosts || {}).filter((h) => !h.ok);
-                    const running = nfsOps.find((o) => o.state !== 'done' && o.target === it.name);
-                    const usedBy = (d.jobs || []).filter((j) => j.dest?.nfsDsId === it.id).length;
-                    return (
-                      <tr key={it.id}>
-                        <td data-sort={it.name}><div style={{ fontWeight: 600 }}>{it.name}</div><div className="muted" style={{ fontSize: 11.5 }}>{d.vcenterNames?.[it.vcenterId] || it.vcenterId}{usedBy ? ` · 잡 ${usedBy}개가 사용` : ''}</div></td>
-                        <td style={{ fontFamily: 'var(--mono)', fontSize: 12, overflowWrap: 'anywhere' }}>{it.server}:{it.exportPath} · NFS {it.nfsVersion}</td>
-                        <td data-sort={it.hostsOk}>
-                          <div className="flex" style={{ alignItems: 'center', gap: 8 }}>
-                            <div className="vbk-bar" style={{ width: 90 }}><b style={{ width: `${pct}%`, background: it.hostsOk === it.hostsTotal && it.hostsTotal ? 'var(--green)' : 'var(--amber)' }} /></div>
-                            <span>{it.hostsOk} / {it.hostsTotal}</span>
-                          </div>
-                          {running && <div style={{ fontSize: 11.5, color: '#fcd34d', marginTop: 3 }}>{running.where === 'edge' && running.state === 'pending' ? `담당 엣지 ${running.agent} 가져가기 대기` : running.kind === 'nfsds-detach' ? '떼어 내는 중' : '연결 중'}</div>}
-                          {/* v2.794: 사유가 길면 줄바꿈(최대 2줄) — 예전엔 한 줄로 늘어나 1440px 에서도 '작업' 열이 화면 밖으로 밀렸다. 전체 사유는 title. */}
-                          {!running && failed.length > 0 && <div style={{ fontSize: 11.5, color: '#fcd34d', marginTop: 3, maxWidth: 300, whiteSpace: 'normal', overflowWrap: 'anywhere', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }} title={failed.map((h) => h.detail).join('\n')}>실패 {failed.length}대 — {failed[0].detail}</div>}
-                        </td>
-                        <td style={{ textAlign: 'right' }} data-sort={it.freeGB ?? ''}>{it.freeGB != null && it.capacityGB != null ? `${fmtBytes(it.freeGB * 1024 ** 3)} / ${fmtBytes(it.capacityGB * 1024 ** 3)}` : '—'}</td>
-                        <td className="right">
-                          <div className="flex wrap" style={{ gap: 4, justifyContent: 'flex-end' }}>
-                            <button type="button" className="vbk-btn sm" disabled={busyId === it.id || !!running || !writable.has(String(it.vcenterId))} onClick={() => retry(it)}>미연결 호스트에 연결</button>
-                            <button type="button" className="vbk-btn sm" disabled={busyId === it.id || !!running || !writable.has(String(it.vcenterId)) || !it.hostsOk || usedBy > 0} title={usedBy > 0 ? `이 데이터스토어를 쓰는 잡 ${usedBy}개 — 대상을 바꾼 뒤 떼어 낼 수 있습니다` : !it.hostsOk ? '연결된 호스트가 없습니다' : ''} onClick={() => detach(it)}>떼어 내기</button>
-                            <button type="button" className="vbk-btn sm danger" disabled={busyId === it.id || !writable.has(String(it.vcenterId))} onClick={() => forget(it)}>목록에서 삭제</button>
-                          </div>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </STable>
-            </div>
+            {/* v2.797 데이터스토어 카드 — 호스트 연결 막대 · 여유 막대 · 실패 사유(2줄) · 작업 버튼(줄바꿈). 표의 '작업' 열이 밀리던 문제가 구조적으로 없다. */}
+            {items.length === 0 && <div className="bd muted" style={{ fontSize: 12.5 }}>이 법인에 정의된 NFS 데이터스토어가 없습니다.</div>}
+            {items.length > 0 && (
+              <div className="vbk-dscards">
+                {items.map((it) => {
+                  const pct = it.hostsTotal ? Math.round((it.hostsOk / it.hostsTotal) * 100) : 0;
+                  const failed = Object.values(it.hosts || {}).filter((h) => !h.ok);
+                  const running = nfsOps.find((o) => o.state !== 'done' && o.target === it.name);
+                  const usedBy = (d.jobs || []).filter((j) => j.dest?.nfsDsId === it.id).length;
+                  const m = meterOf({ capacityGB: it.capacityGB ?? null, freeGB: it.freeGB ?? null });
+                  const allOk = it.hostsTotal > 0 && it.hostsOk === it.hostsTotal;
+                  return (
+                    <div key={it.id} className={`vbk-dscard${!running && failed.length ? ' warn' : ''}`}>
+                      <div className="flex between" style={{ gap: 8, alignItems: 'flex-start' }}>
+                        <div style={{ minWidth: 0 }}>
+                          <div className="nm">{it.name}</div>
+                          <div className="muted" style={{ fontSize: 11.5 }}>{d.vcenterNames?.[it.vcenterId] || it.vcenterId}{usedBy ? ` · 잡 ${usedBy}개가 사용` : ''}</div>
+                        </div>
+                        <span className="vbk-chip ds">NFS {it.nfsVersion}</span>
+                      </div>
+                      <div className="addr">{it.server}:{it.exportPath}</div>
+                      <div className="row">
+                        <span>연결 호스트</span>
+                        <div className="vbk-bar"><b style={{ width: `${pct}%`, background: allOk ? 'var(--green)' : 'var(--amber)' }} /></div>
+                        <span>{it.hostsOk} / {it.hostsTotal}</span>
+                      </div>
+                      <div className="row">
+                        <span>사용량</span>
+                        {m ? <div className="vbk-bar"><b style={{ width: `${m.usedPct}%` }} /></div> : <span className="muted">—</span>}
+                        <span>{m ? `여유 ${fmtBytes(m.freeGB * GIB)} / ${fmtBytes(m.capacityGB * GIB)}` : '용량 모름'}</span>
+                      </div>
+                      {running && <div style={{ fontSize: 11.5, color: '#fcd34d' }}>{running.where === 'edge' && running.state === 'pending' ? `담당 엣지 ${running.agent} 가져가기 대기` : running.kind === 'nfsds-detach' ? '떼어 내는 중' : '연결 중'}</div>}
+                      {!running && failed.length > 0 && <div className="why" title={failed.map((h) => h.detail).join('\n')}>실패 {failed.length}대 — {failed[0].detail}</div>}
+                      <div className="acts">
+                        <button type="button" className="vbk-btn sm" disabled={busyId === it.id || !!running || !writable.has(String(it.vcenterId))} onClick={() => retry(it)}>미연결 호스트에 연결</button>
+                        <button type="button" className="vbk-btn sm" disabled={busyId === it.id || !!running || !writable.has(String(it.vcenterId)) || !it.hostsOk || usedBy > 0} title={usedBy > 0 ? `이 데이터스토어를 쓰는 잡 ${usedBy}개 — 대상을 바꾼 뒤 떼어 낼 수 있습니다` : !it.hostsOk ? '연결된 호스트가 없습니다' : ''} onClick={() => detach(it)}>떼어 내기</button>
+                        <button type="button" className="vbk-btn sm danger" disabled={busyId === it.id || !writable.has(String(it.vcenterId))} onClick={() => forget(it)}>목록에서 삭제</button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
             <NfsDsForm d={d} corp={c} writable={writable} onDone={async (text) => { setMsg(text); await onReload(); }} />
           </div>
 
@@ -193,7 +204,10 @@ export default function VmCloneCorp({ d, now, initialKey, onBack, onReload }) {
                       <td><label className="flex" style={{ alignItems: 'center', gap: 6 }}><input type="checkbox" aria-label={`${mountLabel(m) || m.label} 백업에 사용`} disabled={!corpEditable || busyId === 'mount-use'} checked={useSet.has(m.id)} onChange={(e) => { const n = new Set(useSet); if (e.target.checked) n.add(m.id); else n.delete(m.id); setUseDraft(n); }} />{useSet.has(m.id) ? '사용' : <span className="muted">안 씀</span>}</label></td>
                       <td style={{ fontFamily: 'var(--mono)', fontSize: 12 }}>{mountLabel(m) || m.label}</td>
                       <td>{m.mounted ? <span className="vbk-chip ok">마운트됨</span> : <span className="vbk-chip warn">미마운트</span>}</td>
-                      <td style={{ textAlign: 'right' }} data-sort={m.freeBytes ?? ''}>{m.freeBytes != null && m.totalBytes != null ? `${fmtBytes(m.freeBytes)} / ${fmtBytes(m.totalBytes)}` : '—'}</td>
+                      <td style={{ textAlign: 'right' }} data-sort={m.freeBytes ?? ''}>
+                        {m.freeBytes != null && m.totalBytes != null ? `${fmtBytes(m.freeBytes)} / ${fmtBytes(m.totalBytes)}` : '—'}
+                        {(() => { const mt = meterOf({ capacityGB: m.totalBytes != null ? m.totalBytes / GIB : null, freeGB: m.freeBytes != null ? m.freeBytes / GIB : null }); return mt ? <div className="vbk-meter" style={{ height: 6, marginTop: 4, marginLeft: 'auto', maxWidth: 160 }} title={`사용 ${Math.round(mt.usedPct)}%`}><b className="nfs" style={{ width: `${mt.usedPct}%` }} /></div> : null; })()}
+                      </td>
                     </tr>
                   ))}
                 </tbody>
