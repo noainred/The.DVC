@@ -180,6 +180,7 @@ export const UNMAPPED_TOOL_SEGMENTS = Object.freeze({
   'ip-ping': 'VM·호스트 상세(components/EntityDetail.jsx)가 쓰는 공용 도달성 확인 — 특수 기능 카드 키가 없고, 한 도구에 묶으면 상세 화면이 같이 막힌다',
   vclogs: 'vCenter 로그 조회는 상단 메뉴 화면(ChecksLogs)이 쓴다 — 특수 기능 카드 키가 없다',
   groups: '특수 기능 헤더의 클러스터·폴더 콤보가 쓰는 공용 목록(ToolPanel) — 도구마다 쓴다',
+  'host-export': 'vCenter 화면 ‘호스트 및 클러스터’ 탭의 엑셀 내려받기(v2.802) — 특수 기능 카드 키가 없다. 묶음마다 그 기능의 도구 키(host-hygiene·cluster-check)를 라우트가 issueFor 로 직접 본다',
 });
 
 /**
