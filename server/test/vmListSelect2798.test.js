@@ -197,5 +197,5 @@ test('F Veeam 열이 없으면 Veeam 대조(vcBackup)를 부르지 않는다 —
   assert.match(detail, /screenReq=\{backupScreenRequest\(visibleIds, VM_LIST_MAX_IDS\)\}/);
   const web = fs.readFileSync(new URL('../../web/src/views/VCenterDetail.jsx', import.meta.url), 'utf8');
   assert.doesNotMatch(web, /<VmListExportDialog |import VmListExportDialog/);
-  assert.match(web, /<VmExport scope=\{vcenterId\} \/>/);
+  assert.match(web, /<VmExport scope=\{vcenterId\} embedded \/>/);
 });

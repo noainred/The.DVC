@@ -107,7 +107,7 @@ export default function VmListExportDialog({ vcenterId, vcName, vms, screenReq, 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 10, minWidth: 0 }} data-vmlist-export="">
         {/* 대상 · 형식 */}
         <div className="flex gap wrap" style={{ alignItems: 'center', rowGap: 6 }}>
-          <span className="muted">대상</span>
+          <span className="muted" style={{ whiteSpace: 'nowrap' }}>대상</span>
           <label className="flex gap" style={{ alignItems: 'center', gap: 6 }}><input type="radio" name="vle-target" checked={st.target === 'screen'} onChange={() => set({ target: 'screen' })} />{screenText} <b>{(screenReq?.count || 0).toLocaleString()}대</b></label>
           <label className="flex gap" style={{ alignItems: 'center', gap: 6 }}><input type="radio" name="vle-target" checked={st.target === 'folder'} onChange={() => set({ target: 'folder' })} />폴더 고르기</label>
           {st.target === 'folder' && (
@@ -117,7 +117,7 @@ export default function VmListExportDialog({ vcenterId, vcName, vms, screenReq, 
             </Select>
           )}
           <span className="flex gap" style={{ marginLeft: 'auto', alignItems: 'center', gap: 10 }}>
-            <span className="muted">형식</span>
+            <span className="muted" style={{ whiteSpace: 'nowrap' }}>형식</span>
             <label className="flex gap" style={{ alignItems: 'center', gap: 6 }}><input type="radio" name="vle-fmt" checked={st.fmt === 'csv'} onChange={() => set({ fmt: 'csv' })} />CSV</label>
             <label className="flex gap" style={{ alignItems: 'center', gap: 6 }}><input type="radio" name="vle-fmt" checked={st.fmt === 'xlsx'} onChange={() => set({ fmt: 'xlsx' })} />엑셀(요약 · 폴더 트리 · 데이터)</label>
           </span>

@@ -18,7 +18,8 @@ import './vmExport.css';
 const fmtN = (v) => (typeof v === 'number' && Number.isFinite(v) ? v.toLocaleString() : '—');
 const Badge = ({ b }) => (b.text ? <span className="vmx-badge" style={{ color: TONE[b.tone]?.color, borderColor: TONE[b.tone]?.border }}>{b.text}</span> : null);
 
-export function VmExport({ scope }) {
+// embedded(v2.800): vCenter 화면의 창 안에 띄울 때 — 창 제목이 이름을 말하므로 h2 를 빼고, 아래 막대를 창 바닥에 붙인다(포탈 상태바 높이를 빼지 않는다).
+export function VmExport({ scope, embedded = false }) {
   const csvOk = canCsv();
   const [cat, setCat] = useState(null);
   const [err, setErr] = useState(null);
@@ -116,11 +117,11 @@ export function VmExport({ scope }) {
   };
 
   return (
-    <div className="vmx" data-vm-export="">
+    <div className={embedded ? 'vmx vmx-embedded' : 'vmx'} data-vm-export="">
       {/* 머리 */}
       <div className="vmx-head">
         <div style={{ display: 'flex', flexDirection: 'column', gap: 4, minWidth: 0, flex: '1 1 520px' }}>
-          <h2>VM 전체 정보 내보내기 <span className="vmx-chipvc">{cat.status?.vcenterName || scope}</span></h2>
+          {!embedded && <h2>VM 전체 정보 내보내기 <span className="vmx-chipvc">{cat.status?.vcenterName || scope}</span></h2>}
           <div className="sub">선택한 vCenter 의 VM 을 필요한 항목만 골라 CSV · 엑셀로 내려받습니다. 예전 열 그대로가 필요하면 ‘예전 CSV 그대로’ 조합을 누르세요.</div>
         </div>
       </div>

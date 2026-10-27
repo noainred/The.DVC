@@ -617,7 +617,7 @@ export default function VCenterDetail({ site, onBack }) {
           </div>
           {vmExportOpen && (
             <Modal title={`VM 전체 정보 내보내기 · ${site?.name || vcenterId}`} onClose={() => setVmExportOpen(false)} width={1240}>
-              <React.Suspense fallback={<div className="muted">불러오는 중…</div>}><VmExport scope={vcenterId} /></React.Suspense>
+              <React.Suspense fallback={<div className="muted">불러오는 중…</div>}><VmExport scope={vcenterId} embedded /></React.Suspense>
             </Modal>
           )}
           {veeamOn && <VeeamSummaryCard sum={veeamSum} />}
