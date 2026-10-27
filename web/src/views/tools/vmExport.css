@@ -87,6 +87,8 @@
 .vmx-save .nums button { width: 40px; padding: 7px 0; }
 
 /* 포탈 하단 상태바(position: fixed — App 이 높이를 재 --statusbar-h 로 넘긴다) 위에 선다 — bottom:0 이면 버튼이 상태바에 가려졌다(Chromium 1440·400 판독). */
+/* v2.800 vCenter 화면의 창 안(embedded) — 창 본문이 스크롤 상자라 상태바 높이를 띄우면 막대 아래로 항목이 비친다. */
+.vmx-embedded .vmx-foot { bottom: 0; }
 .vmx-foot { position: sticky; bottom: calc(var(--statusbar-h, 0px) + 8px); z-index: 2; background: rgba(20, 27, 45, .96); border: 1px solid var(--border); border-radius: 12px; padding: 12px 16px; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; box-shadow: var(--shadow); }
 .vmx-foot .sum { display: flex; flex-wrap: wrap; gap: 4px 14px; align-items: baseline; min-width: 0; }
 .vmx-foot .sum b { font-size: 14px; }

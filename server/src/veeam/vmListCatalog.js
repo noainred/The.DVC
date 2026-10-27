@@ -3,18 +3,20 @@
  *
  * 사용자 요청(2026-10-27): "vm list export 하는 기능에서 메모, TAG, 디스크 파티션 종류 등의 구성 정보에서 내가 필요한 것만 선택해서 export"
  *   · 시안 https://claude.ai/artifact/FS8Uk5piEnbFJE7qvLRWQW 승인 · 결정: 저장값은 계정에 · 파일 시스템 종류 수집 포함 · 실시간 조회 항목(생성일·UUID·NIC) 제외.
+ * ⚠ v2.800(사용자 지시 "vCenter 화면은 전체 VM, 백업 현황은 백업 — 분리 필요"): 이 카탈로그는 **백업 현황 › Detail 의 '백업 내보내기' 창 전용**이다.
+ *   디스크·파티션·구성·자원(사용률·네트워크) 묶음은 지웠다 — 전체 VM 구성은 'VM 전체 정보 내보내기'(vcenter/vmExportCatalog.js · 도구 vm-export)가 맡는다.
+ *   여기에 구성 항목을 다시 늘리지 말 것(같은 값을 두 카탈로그가 따로 만들게 된다). 남긴 자원 열(vCPU·메모리·스토리지·IP)은 v2.792 열(LEGACY_KEYS)이라서다.
  *
  * 열은 여기 하나다 — 웹 창(GET /veeam/vm-list/catalog 로 받는다)·CSV·엑셀 '데이터' 시트가 같은 key·머리·칸 값을 쓴다.
  *  · key 는 고정(저장값에 남는다 — 바꾸지 말 것. 지우면 저장값에서 조용히 빠지고 화면이 알린다).
  *  · v2.792 열(vmListCsv.vmListColumns)과 같은 항목은 머리·칸 글자가 같다(테스트가 대조 — cols 를 안 보내면 예전 그대로 그 열을 쓴다).
  *  · 못 읽은 값은 빈칸, 그 vCenter 에서 아직 모으지 않은 소스(태그 수집 전·파티션 수집 안 된 VM·구성 캐시 미도달)는 '수집 안 됨'(MISSING) — 0·'없음' 으로 쓰지 않는다.
- *  · avail = 채워짐 정도(화면 배지): snap 30초 인벤토리 · cache 주기 수집 캐시 · opt 수집을 켜야 함(게스트 파티션) · 바꾸지 않는 값.
- *  · needs = 그 열이 읽는 추가 소스(veeam·tags·parts·marks) — 라우트는 고른 열에 필요한 소스만 읽는다(Veeam 대조는 무겁다).
+ *  · avail = 채워짐 정도(화면 배지): snap 30초 인벤토리 · cache 주기 수집 캐시.
+ *  · needs = 그 열이 읽는 추가 소스(veeam·tags·marks) — 라우트는 고른 열에 필요한 소스만 읽는다(Veeam 대조는 무겁다).
  */
 import { folderParts, offsetLabel, veeamStateText } from './vmListCsv.js';
 import { backupVerdict } from './backupStatus.js';
 import { localStamp, DAY_OFFSET_MIN } from '../util/dayKey.js';
-import { osOfPath } from '../guestpart/rules.js';
 
 export const MISSING = '수집 안 됨';
 export const MAX_COLS = 100;
@@ -22,57 +24,27 @@ const POWER_TEXT = Object.freeze({ POWERED_ON: '켜짐', POWERED_OFF: '꺼짐', 
 const TOOLS_TEXT = Object.freeze({ RUNNING: '실행 중', NOT_RUNNING: '꺼짐' });
 const TOOLS_VS_TEXT = Object.freeze({ guestToolsCurrent: '최신', guestToolsNeedUpgrade: '업그레이드 필요', guestToolsNotInstalled: '설치 안 됨', guestToolsUnmanaged: '직접 관리', guestToolsTooOld: '너무 오래됨', guestToolsSupportedOld: '지원(구판)', guestToolsSupportedNew: '지원(신판)', guestToolsTooNew: '너무 새것', guestToolsBlacklisted: '차단 판' });
 const CRIT_TEXT = Object.freeze({ high: '중요도 상', mid: '중요도 중', low: '중요도 하' });
-const OS_TEXT = Object.freeze({ win: 'Windows', lnx: 'Linux' });
 const fin = (v) => typeof v === 'number' && Number.isFinite(v);
 const num1 = (v) => (fin(v) ? Math.round(v * 10) / 10 : '');
 const join = (a) => (Array.isArray(a) ? a.filter((x) => x != null && x !== '').join(' | ') : '');
-const onOff = (b) => (b === true ? '켜짐' : b === false ? '꺼짐' : '모름');
 
 export const GROUPS = Object.freeze([
   { id: 'base', name: '기본' },
   { id: 'meta', name: '메모 · 태그 · 속성' },
-  { id: 'disk', name: '디스크 · 파티션' },
-  { id: 'cfg', name: '구성' },
-  { id: 'res', name: '자원 · 네트워크' },
+  { id: 'res', name: '자원 · IP' },
   { id: 'snap', name: '스냅샷' },
   { id: 'veeam', name: 'Veeam 백업' },
 ]);
 export const GROUP_NOTES = Object.freeze({
   meta: '태그·사용자 지정 속성은 vCenter 마다 주기(기본 6시간)로 모읍니다 — 재시작 직후 첫 수집 전에는 ‘수집 안 됨’ 입니다. 백업 표시는 포탈에서 사람이 적은 값입니다.',
-  disk: '게스트 파티션은 설정의 게스트 디스크 수집이 켜져 있고 VMware Tools 가 도는 VM 만 있습니다(그 밖은 ‘수집 안 됨’). 파일 시스템 종류는 vSphere 7.0 이상이 주는 값으로 추정합니다(옛 판이면 빈칸). 가상 디스크·CD-ROM 은 구성 캐시(주기 수집)입니다.',
-  cfg: '구성 캐시는 주기마다 일부 VM 씩 채웁니다 — 재시작 직후에는 아직 도달하지 않은 VM 이 ‘수집 안 됨’ 입니다.',
+  res: '디스크·파티션·구성·사용률은 VM 전체 정보 내보내기(vCenter 화면의 ‘⤓ VM 전체 정보 내보내기…’)에 있습니다.',
 });
 
 /* ── 소스 읽기 도우미(행 r 의 모양은 라우트 vmListExport 가 만든다) ──
- * r = { vc(이름), linked, inv(인벤토리 VM), view(vmBackupView — Veeam 열을 고른 때만), tg({tags,custom} | undefined = 수집 안 됨),
- *       parts(파티션 배열 | undefined = 수집 안 됨), part(파티션 한 줄 반복 모드의 그 파티션), mark(markView), marksOk }
+ * r = { vc(이름), linked, inv(인벤토리 VM), view(vmBackupView — Veeam 열을 고른 때만), tg({tags,custom} | undefined = 수집 안 됨), mark(markView), marksOk }
  */
 const tagsCell = (r) => (r.tg?.tags == null ? MISSING : join(r.tg.tags.map((t) => (t.category ? `${t.category}:${t.tag}` : t.tag))));
 const customCell = (r) => (r.tg?.custom == null ? MISSING : join(r.tg.custom.map((c) => `${c.name}=${c.value}`)));
-const partsOf = (r) => (r.part ? [r.part] : r.parts);
-function partText(p) {
-  const cap = fin(p.capGB) ? `${num1(p.capGB)}GB` : '';
-  const free = fin(p.capGB) && fin(p.usedGB) ? ` 여유 ${num1(p.capGB - p.usedGB)}` : p.unknown ? ' 여유 모름' : '';
-  return `${p.path}${cap ? ` ${cap}` : ''}${free}${p.fs ? ` (${p.fs})` : ''}`;
-}
-function partSum(parts) {
-  let cap = 0; let used = 0; let unk = 0;
-  for (const p of parts) { if (fin(p.capGB) && fin(p.usedGB)) { cap += p.capGB; used += p.usedGB; } else unk++; }
-  const known = parts.length - unk;
-  if (!known) return unk ? '모름' : '';
-  return `${num1(cap)} / ${num1(used)} / ${num1(cap - used)}${unk ? ` (모름 ${unk}개 제외)` : ''}`;
-}
-const cfgOf = (r, f) => (r.inv?.cfg ? f(r.inv.cfg) : MISSING);
-const devOf = (r, f) => (r.inv?.dev ? f(r.inv.dev) : MISSING);
-function resvText(c) {
-  const out = [];
-  if (fin(c.cpuReservationMhz) && c.cpuReservationMhz > 0) out.push(`CPU 예약 ${c.cpuReservationMhz}MHz`);
-  if (fin(c.cpuLimitMhz) && c.cpuLimitMhz >= 0) out.push(`CPU 제한 ${c.cpuLimitMhz}MHz`);
-  if (fin(c.memReservationMB) && c.memReservationMB > 0) out.push(`메모리 예약 ${num1(c.memReservationMB / 1024)}GB`);
-  if (fin(c.memLimitMB) && c.memLimitMB >= 0) out.push(`메모리 제한 ${num1(c.memLimitMB / 1024)}GB`);
-  if (out.length) return out.join(' · ');
-  return [c.cpuReservationMhz, c.cpuLimitMhz, c.memReservationMB, c.memLimitMB].every((x) => x == null) ? '' : '없음';
-}
 
 /**
  * 카탈로그 — 항목마다 { key, group, label(화면) , head(o)(파일 머리 — 없으면 label), avail, needs?, get(r, o) }.
@@ -100,47 +72,11 @@ export const CATALOG = Object.freeze([
   { key: 'custom', group: 'meta', label: '사용자 지정 속성', avail: 'cache', needs: 'tags', get: customCell },
   { key: 'bmark', group: 'meta', label: '백업 표시(중요도·백업 필요·메모)', avail: 'snap', needs: 'marks',
     get: (r) => (!r.marksOk || !r.mark ? '' : [CRIT_TEXT[r.mark.crit] || '', r.mark.need ? '백업 필요' : '', r.mark.memo || ''].filter(Boolean).join(' · ')) },
-  // 디스크 · 파티션
-  { key: 'partN', group: 'disk', label: '파티션 수', avail: 'opt', needs: 'parts', get: (r) => (r.parts === undefined ? MISSING : r.parts.length) },
-  { key: 'partSum', group: 'disk', label: '파티션 합계(용량 / 사용 / 여유 GB)', avail: 'opt', needs: 'parts', get: (r) => (r.parts === undefined ? MISSING : partSum(r.parts)) },
-  { key: 'partDetail', group: 'disk', label: '파티션 상세(경로·용량·여유·파일 시스템)', avail: 'opt', needs: 'parts', get: (r) => (partsOf(r) === undefined ? MISSING : join(partsOf(r).map(partText))) },
-  { key: 'partOs', group: 'disk', label: 'OS 계열(파티션 경로로 추정)', avail: 'opt', needs: 'parts',
-    get: (r) => { const ps = r.parts; if (ps === undefined) return MISSING; const k = ps.length ? osOfPath(ps[0].path) : ''; return OS_TEXT[k] || ''; } },
-  { key: 'fsType', group: 'disk', label: '파일 시스템 종류(NTFS·ext4·xfs)', avail: 'opt', needs: 'parts',
-    get: (r) => (partsOf(r) === undefined ? MISSING : join([...new Set(partsOf(r).map((p) => p.fs).filter(Boolean))])) },
-  { key: 'vdisk', group: 'disk', label: '가상 디스크(수·크기·데이터스토어·모드)', avail: 'cache',
-    get: (r) => devOf(r, (d) => {
-      const ds = d.disks || [];
-      if (!ds.length) return '0개';
-      const caps = ds.map((x) => (fin(x.capacityGB) ? num1(x.capacityGB) : '?')).join('+');
-      const stores = [...new Set(ds.map((x) => x.datastore).filter(Boolean))].join(', ');
-      const modes = [...new Set(ds.map((x) => x.mode).filter(Boolean))].join(', ');
-      return [`${ds.length}개`, `${caps}GB`, stores, modes].filter(Boolean).join(' · ');
-    }) },
-  { key: 'rdm', group: 'disk', label: 'RDM 디스크', avail: 'cache',
-    get: (r) => devOf(r, (d) => { const x = (d.disks || []).filter((k) => k.rdm); return x.length ? `${x.length}개(${[...new Set(x.map((k) => k.rdmMode).filter(Boolean))].join(', ') || '모드 모름'})` : ''; }) },
-  { key: 'cd', group: 'disk', label: 'CD-ROM 연결(ISO)', avail: 'cache',
-    get: (r) => devOf(r, (d) => join((d.cdroms || []).filter((c) => c.connected === true).map((c) => c.file || (c.host ? '호스트 장치' : '연결됨')))) },
-  // 구성
-  { key: 'fw', group: 'cfg', label: '펌웨어(BIOS/EFI)', avail: 'cache', get: (r) => cfgOf(r, (c) => (c.firmware ? c.firmware.toUpperCase() : '')) },
-  { key: 'hot', group: 'cfg', label: 'CPU·메모리 핫 애드', avail: 'cache', get: (r) => cfgOf(r, (c) => (c.cpuHotAdd == null && c.memHotAdd == null ? '' : `CPU ${onOff(c.cpuHotAdd)} · 메모리 ${onOff(c.memHotAdd)}`)) },
-  { key: 'resv', group: 'cfg', label: '예약·제한(CPU·메모리)', avail: 'cache', get: (r) => cfgOf(r, resvText) },
-  { key: 'cbt', group: 'cfg', label: 'CBT(변경 블록 추적)', avail: 'cache', get: (r) => cfgOf(r, (c) => (c.cbt == null ? '' : onOff(c.cbt))) },
-  { key: 'cons', group: 'cfg', label: '디스크 통합 필요', avail: 'cache', get: (r) => cfgOf(r, (c) => (c.consolidationNeeded === true ? '예' : '')) },
-  { key: 'boot', group: 'cfg', label: '마지막 부팅(가동 일수)', head: (o) => `마지막 부팅 ${o.tz}`, avail: 'cache',
-    get: (r, o) => cfgOf(r, (c) => (fin(c.bootTime) && c.bootTime > 0 ? `${o.t(c.bootTime)} (${Math.max(0, Math.floor((o.now - c.bootTime) / 86_400_000))}일)` : '')) },
-  // 자원 · 네트워크
+  // 자원 · IP(v2.792 열 — 사용률·네트워크 상세는 VM 전체 정보 내보내기)
   { key: 'cpu', group: 'res', label: 'vCPU', avail: 'snap', get: (r) => (fin(r.inv.cpuCount) ? r.inv.cpuCount : '') },
   { key: 'mem', group: 'res', label: '메모리(GB)', avail: 'snap', get: (r) => (fin(r.inv.memMB) ? num1(r.inv.memMB / 1024) : '') },
-  { key: 'cpuPct', group: 'res', label: 'CPU 사용률(%)', avail: 'snap', get: (r) => num1(r.inv.cpuUsagePct) },
-  { key: 'memPct', group: 'res', label: '메모리 사용률(%)', avail: 'snap', get: (r) => num1(r.inv.memUsagePct) },
   { key: 'stor', group: 'res', label: '스토리지 사용(GB)', avail: 'snap', get: (r) => num1(r.inv.storageGB) },
-  { key: 'uncom', group: 'res', label: '미할당 예약(GB)', avail: 'snap', get: (r) => num1(r.inv.uncommittedGB) },
-  { key: 'thin', group: 'res', label: 'Thin(추정)', avail: 'snap', get: (r) => (r.inv.thin === true ? '예' : '') },
   { key: 'ip', group: 'res', label: 'IP', avail: 'snap', get: (r) => r.inv.ipAddress || '' },
-  { key: 'ips', group: 'res', label: '모든 IP', avail: 'snap', get: (r) => join(r.inv.ipAddresses) },
-  { key: 'gw', group: 'res', label: '게이트웨이', avail: 'snap', get: (r) => join(r.inv.gateways) },
-  { key: 'dns', group: 'res', label: 'DNS 서버', avail: 'snap', get: (r) => join(r.inv.dns?.servers) },
   // 스냅샷
   { key: 'snN', group: 'snap', label: '스냅샷 수(전체)', avail: 'snap', get: (r) => (fin(r.inv.snapshotCount) ? r.inv.snapshotCount : '') },
   { key: 'snSize', group: 'snap', label: '스냅샷 크기(GB)', avail: 'snap', get: (r) => num1(r.inv.snapshotSizeGB) },
@@ -171,11 +107,11 @@ export const LEGACY_KEYS = Object.freeze(['vc', 'flv', 'folder', 'name', 'power'
 
 /** 빠른 조합(화면 버튼) — key 목록. */
 export const PRESETS = Object.freeze([
-  { id: 'base', name: '기본', keys: ['vc', 'folder', 'name', 'power', 'os', 'cpu', 'mem', 'stor', 'ip', 'notes'] },
-  { id: 'asset', name: '자산 대장', keys: ['vc', 'folder', 'name', 'power', 'cluster', 'host', 'os', 'hw', 'tools', 'cpu', 'mem', 'stor', 'ips', 'notes', 'tags', 'custom'] },
-  { id: 'cfg', name: '구성 점검', keys: ['folder', 'name', 'hw', 'tools', 'fw', 'hot', 'resv', 'cbt', 'cons', 'vdisk', 'cd', 'snN', 'snOld'] },
-  { id: 'disk', name: '디스크', keys: ['folder', 'name', 'os', 'stor', 'partN', 'partSum', 'partDetail', 'partOs', 'fsType', 'vdisk', 'rdm'] },
+  { id: 'base', name: '기본', keys: ['folder', 'name', 'power', 'host', 'ip', 'vjudge', 'vstate', 'vlast', 'vrp', 'snN'] },
   { id: 'backup', name: '백업 확인', keys: ['folder', 'name', 'power', 'vjudge', 'vstate', 'vlast', 'vres', 'snN', 'bmark'] },
+  { id: 'snap', name: '스냅샷', keys: ['folder', 'name', 'power', 'snN', 'snSize', 'snOld', 'snNew', 'snNames', 'vtmp', 'vtmpTs', 'vtmpStale', 'vsnapN', 'vsnapTs'] },
+  { id: 'mark', name: '백업 표시', keys: ['folder', 'name', 'power', 'bmark', 'notes', 'vjudge', 'vlast'] },
+  { id: 'legacy', name: '예전 열 그대로', keys: [...LEGACY_KEYS] },
   { id: 'all', name: '전체', keys: CATALOG.map((c) => c.key) },
 ]);
 
@@ -237,18 +173,6 @@ export function selectedColumns(keys, { levels = 1, tagCols = false, tagCategori
       continue;
     }
     out.push({ key: k, h: c.head ? c.head(o) : c.label, get: (r) => c.get(r, o) });
-  }
-  return out;
-}
-
-/** 파티션 한 줄 반복 모드 — 파티션 열(partDetail·fsType)을 고른 때만, 파티션이 있는 VM 은 파티션마다 한 행. */
-export const PART_ROW_KEYS = Object.freeze(['partDetail', 'fsType']);
-export function expandPartRows(rows, keys, multi) {
-  if (multi !== 'partRows' || !keys.some((k) => PART_ROW_KEYS.includes(k))) return rows;
-  const out = [];
-  for (const r of rows) {
-    if (Array.isArray(r.parts) && r.parts.length) for (const p of r.parts) out.push({ ...r, part: p });
-    else out.push(r);
   }
   return out;
 }

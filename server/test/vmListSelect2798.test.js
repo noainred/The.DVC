@@ -2,7 +2,8 @@
  * v2.798 — VM 목록 내보내기 '필요한 항목만 고르기' + 계정 저장값(기본값 · 5칸) + 게스트 파티션 파일 시스템 종류.
  *  · 카탈로그 : key 고유 · v2.792 열과 머리·칸 같음(cols 없이 보내면 예전 그대로) · 모르는 key 400 · 순서 = 고른 순서
  *  · 값 규칙  : 못 모은 소스는 '수집 안 됨'(태그 수집 전 · 파티션 미수집 VM · 구성 캐시 미도달) · 모르는 값은 빈칸(0 아님)
- *  · 여러 값  : 파티션 한 줄 반복 · 태그 카테고리별 열 · Veeam 열이 없으면 Veeam 대조를 하지 않는다
+ *  · 여러 값  : 태그 카테고리별 열 · Veeam 열이 없으면 Veeam 대조를 하지 않는다
+ *  · v2.800  : 이 카탈로그는 백업 현황 › Detail '백업 내보내기' 전용 — 디스크·파티션·구성·사용률 항목은 없다(VM 전체 정보 내보내기가 맡는다)
  *  · 저장값   : 본인 것만(인증 계정 키 · 본문 이름 무시) · 칸 1~5·기본값 · 고른 내용만 저장 · 손상 503 · viewer·데모 거부 · 사라진 항목은 빼고 알림
  *  · 파일 시스템: filesystemType 파싱 · 형식 밖 값 버림 · 엣지 정제 화이트리스트 · DB 열
  */
@@ -50,33 +51,23 @@ test('A 카탈로그 — key 고유 · 조합은 아는 key · v2.792 열과 같
   assert.deepEqual(CAT.resolveCols(['notes', 'name']).keys, ['notes', 'name'], '고른 순서 그대로');
 });
 
-test('B 값 규칙 — 수집 안 됨 vs 빈칸 · 태그 카테고리 열 · 파티션 반복 · 구성 캐시', () => {
+test('B 값 규칙 — 수집 안 됨 vs 빈칸 · 태그 카테고리 열 · v2.800 백업 전용(구성 항목 없음)', () => {
   const cols = (keys, o = {}) => CAT.selectedColumns(keys, { levels: 1, ...o });
-  const base = { vc: 'vc1', linked: false, inv: { name: 'a', folder: 'vm', notes: '  결제 API \n', cfg: { firmware: 'efi', cpuHotAdd: true, memHotAdd: null, cbt: false, bootTime: NOW - 49 * H }, dev: { disks: [{ capacityGB: 100, datastore: 'DS1', mode: 'persistent' }, { capacityGB: 50, datastore: 'DS1', mode: 'persistent', rdm: true, rdmMode: 'physicalMode' }], cdroms: [{ connected: true, file: '[DS1] iso/u.iso' }] } } };
-  const parts = [{ path: 'C:\\', capGB: 100, usedGB: 60, fs: 'NTFS' }, { path: 'D:\\', capGB: 200, usedGB: null, unknown: true, fs: '' }];
-  const row = { ...base, tg: { tags: [{ category: '환경', tag: '운영' }, { category: '서비스', tag: '결제' }], custom: [{ name: 'Owner', value: 'ops' }] }, parts };
-  const c = cols(['notes', 'tags', 'custom', 'partN', 'partSum', 'fsType', 'partOs', 'fw', 'hot', 'cbt', 'vdisk', 'rdm', 'cd', 'boot']);
-  const v = Object.fromEntries(c.map((x, i) => [CAT.selectedColumns([], {}).length + i, x.get(row)]));
-  assert.deepEqual(Object.values(v).slice(0, 7), ['결제 API', '환경:운영 | 서비스:결제', 'Owner=ops', 2, '100 / 60 / 40 (모름 1개 제외)', 'NTFS', 'Windows']);
-  assert.deepEqual(Object.values(v).slice(7, 10), ['EFI', 'CPU 켜짐 · 메모리 모름', '꺼짐']);
-  assert.match(String(Object.values(v)[10]), /^2개 · 100\+50GB · DS1 · persistent$/);
-  assert.equal(Object.values(v)[11], '1개(physicalMode)');
-  assert.equal(Object.values(v)[12], '[DS1] iso/u.iso');
-  assert.match(String(Object.values(v)[13]), /\(2일\)$/);
-  // 못 모은 소스는 '수집 안 됨' — 0·없음이 아니다
-  const none = { vc: 'vc1', linked: false, inv: { name: 'b', folder: 'vm' }, tg: undefined, parts: undefined };
-  const cn = cols(['tags', 'custom', 'partN', 'fsType', 'fw', 'vdisk', 'notes', 'cpu']);
-  assert.deepEqual(cn.map((x) => x.get(none)), [CAT.MISSING, CAT.MISSING, CAT.MISSING, CAT.MISSING, CAT.MISSING, CAT.MISSING, '', '']);
+  const row = { vc: 'vc1', linked: false, inv: { name: 'a', folder: 'vm', notes: '  결제 API \n', cpuCount: 2, ipAddress: '10.0.0.9' },
+    tg: { tags: [{ category: '환경', tag: '운영' }, { category: '서비스', tag: '결제' }], custom: [{ name: 'Owner', value: 'ops' }] }, mark: { crit: 'high', need: true, memo: '월말' }, marksOk: true };
+  assert.deepEqual(cols(['notes', 'tags', 'custom', 'bmark', 'cpu', 'ip']).map((x) => x.get(row)), ['결제 API', '환경:운영 | 서비스:결제', 'Owner=ops', '중요도 상 · 백업 필요 · 월말', 2, '10.0.0.9']);
+  // 못 모은 소스는 '수집 안 됨' — 0·없음이 아니다 · 못 읽은 값은 빈칸
+  const none = { vc: 'vc1', linked: false, inv: { name: 'b', folder: 'vm' }, tg: undefined, marksOk: false };
+  assert.deepEqual(cols(['tags', 'custom', 'bmark', 'notes', 'cpu']).map((x) => x.get(none)), [CAT.MISSING, CAT.MISSING, '', '', '']);
   // 태그 카테고리별 열(이름 순)
   const tc = CAT.selectedColumns(['name', 'tags'], { tagCols: true, tagCategories: ['환경', '서비스'] });
   assert.deepEqual(tc.map((x) => x.h), ['VM', '태그: 서비스', '태그: 환경']);
   assert.deepEqual(tc.map((x) => x.get(row)), ['a', '결제', '운영']);
-  // 파티션 한 줄 반복 — 파티션 열을 고른 때만
-  const ex = CAT.expandPartRows([row, none], ['name', 'partDetail', 'fsType'], 'partRows');
-  assert.equal(ex.length, 3);
-  assert.deepEqual(cols(['partDetail', 'fsType']).map((x) => x.get(ex[0])), ['C:\\ 100GB 여유 40 (NTFS)', 'NTFS']);
-  assert.equal(CAT.expandPartRows([row], ['name', 'partN'], 'partRows').length, 1, '파티션 상세·FS 를 안 고르면 반복하지 않는다');
-  assert.deepEqual([...CAT.needsOf(['name', 'tags', 'vstate', 'partN', 'bmark'])].sort(), ['marks', 'parts', 'tags', 'veeam']);
+  assert.deepEqual([...CAT.needsOf(['name', 'tags', 'vstate', 'bmark'])].sort(), ['marks', 'tags', 'veeam']);
+  // v2.800 분리: 디스크·파티션·구성·사용률 항목은 이 카탈로그에 없다(모르는 항목 400) — 전체 VM 구성은 vcenter/vmExportCatalog.js
+  for (const k of ['partN', 'partDetail', 'fsType', 'fw', 'vdisk', 'cbt', 'cpuPct', 'dns']) assert.match(CAT.resolveCols(['name', k]).reason || '', /모르는 항목/, k);
+  assert.deepEqual(CAT.GROUPS.map((g) => g.id), ['base', 'meta', 'res', 'snap', 'veeam']);
+  assert.equal(typeof CAT.expandPartRows, 'undefined');
 });
 
 test('C 파일 시스템 종류 — 파싱 · 형식 밖 값 버림 · 엣지 정제 · DB 열', async () => {
@@ -152,14 +143,19 @@ test('E 라우트 — 고른 열 CSV · 수집 안 됨 · Veeam 미선택이면 
     const post = (p, body, vc = VC) => fetch(`${base}${p}?vcenterId=${encodeURIComponent(vc)}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
     const send = (method, body, q = '') => fetch(`${base}/veeam/vm-list/prefs${q}`, { method, headers: { 'content-type': 'application/json' }, body: body ? JSON.stringify(body) : undefined });
 
-    const r = await post('/veeam/vm-list.csv', { cols: ['name', 'notes', 'tags', 'custom', 'fsType', 'fw', 'folder'] });
+    const r = await post('/veeam/vm-list.csv', { cols: ['name', 'notes', 'tags', 'custom', 'folder'] });
     assert.equal(r.status, 200, await r.clone().text());
     const t = parseCsvRows((await r.text()).replace(/^\uFEFF/, ''));
-    assert.deepEqual(t[0], ['VM', '메모(vCenter 주석)', 'vSphere 태그(카테고리:태그)', '사용자 지정 속성', '파일 시스템 종류(NTFS·ext4·xfs)', '펌웨어(BIOS/EFI)', '폴더 경로'], '고른 순서대로');
+    assert.deepEqual(t[0], ['VM', '메모(vCenter 주석)', 'vSphere 태그(카테고리:태그)', '사용자 지정 속성', '폴더 경로'], '고른 순서대로');
     const byName = Object.fromEntries(t.slice(1).map((x) => [x[0], x]));
-    assert.deepEqual(byName.web01.slice(1), ['결제 API', '환경:운영', 'Owner=ops', 'xfs', 'EFI', 'DC/A']);
-    assert.deepEqual(byName.db01.slice(1, 6), ['', '', '', CAT.MISSING, CAT.MISSING], '태그 연결 없음은 빈칸 · 파티션 미수집·구성 캐시 미도달은 수집 안 됨');
+    assert.deepEqual(byName.web01.slice(1), ['결제 API', '환경:운영', 'Owner=ops', 'DC/A']);
+    assert.deepEqual(byName.db01.slice(1, 4), ['', '', ''], '태그 연결 없음은 빈칸');
     assert.equal((await post('/veeam/vm-list.csv', { cols: ['name', 'zzz'] })).status, 400);
+    assert.equal((await post('/veeam/vm-list.csv', { cols: ['name', 'fsType'] })).status, 400, 'v2.800 — 구성 항목은 백업 내보내기에 없다');
+    // v2.800 백업 현황 화면 대상(view detail) — 파일 이름 꼬리 backup · 남의 vCenter id 는 빠진다
+    const d = await post('/veeam/vm-list.csv', { cols: ['name'], view: 'detail', ids: [`${VC}:vm-2`, `${OUT}:vm-1`] });
+    assert.match(d.headers.get('content-disposition') || '', /-backup-/);
+    assert.deepEqual(parseCsvRows((await d.text()).replace(/^\uFEFF/, '')).slice(1), [['db01']]);
     // 태그를 아직 못 읽은 vCenter — 빈칸이 아니라 '수집 안 됨'
     const o = parseCsvRows((await (await post('/veeam/vm-list.csv', { cols: ['name', 'tags', 'custom'] }, OUT)).text()).replace(/^\uFEFF/, ''));
     assert.deepEqual(o[1], ['o1', CAT.MISSING, CAT.MISSING]);
@@ -171,7 +167,7 @@ test('E 라우트 — 고른 열 CSV · 수집 안 됨 · Veeam 미선택이면 
     user = { username: 'adm', role: 'admin' };
     // 카탈로그 · 미리보기
     const cat = await (await fetch(`${base}/veeam/vm-list/catalog?vcenterId=${encodeURIComponent(VC)}`)).json();
-    assert.deepEqual([cat.status.tags, cat.status.vmTotal, cat.status.cfgVms, cat.groups.length > 5, !!cat.prefs], ['ok', 2, 1, true, true]);
+    assert.deepEqual([cat.status.tags, cat.status.vmTotal, cat.groups.map((g) => g.id).join(','), !!cat.prefs, 'partsOn' in cat.status], ['ok', 2, 'base,meta,res,snap,veeam', true, false]);
     const pv = await (await post('/veeam/vm-list/preview', { cols: ['name', 'tags'], ids: [`${VC}:vm-1`, `${OUT}:vm-1`] })).json();
     assert.deepEqual([pv.head, pv.cells], [['VM', 'vSphere 태그(카테고리:태그)'], [['web01', '환경:운영']]], '남의 vCenter id 는 빠진다');
     // 저장값 — 본인 것만(본문 username 무시) · 역할 · 데모
@@ -195,6 +191,11 @@ test('F Veeam 열이 없으면 Veeam 대조(vcBackup)를 부르지 않는다 —
   assert.match(src, /const needVeeam = !sel \|\| kind === 'xlsx' \|\| needsOf\(sel\.keys\)\.has\('veeam'\);\s*\n\s*const b = needVeeam \? await vcBackup/);
   assert.match(src, /api\.put\('\/veeam\/vm-list\/prefs', requirePerm\('data\.csv'\), requireRole\('admin', 'operator'\)/);
   assert.match(src, /setPref\(req\.user\?\.username,/);
+  // v2.800 분리: 백업 내보내기 창은 백업 현황 › Detail 의 CSV 버튼 · vCenter 화면은 VM 전체 정보 내보내기(vm-export)
+  const detail = fs.readFileSync(new URL('../../web/src/views/tools/BackupDetailTool.jsx', import.meta.url), 'utf8');
+  assert.match(detail, /<VmListExportDialog /);
+  assert.match(detail, /screenReq=\{backupScreenRequest\(visibleIds, VM_LIST_MAX_IDS\)\}/);
   const web = fs.readFileSync(new URL('../../web/src/views/VCenterDetail.jsx', import.meta.url), 'utf8');
-  assert.match(web, /<VmListExportDialog /);
+  assert.doesNotMatch(web, /<VmListExportDialog |import VmListExportDialog/);
+  assert.match(web, /<VmExport scope=\{vcenterId\} embedded \/>/);
 });

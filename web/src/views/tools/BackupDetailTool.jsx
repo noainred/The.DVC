@@ -13,6 +13,10 @@ import { CritIcon, NeedIcon, NEED_COLOR } from './BackupMarkIcons.jsx';
 import BackupOptions from './BackupOptions.jsx';
 import VeeamHeader from './VeeamHeader.jsx';
 import { DETAIL_VC_KEY } from './BackupSummaryTool.jsx';
+import VmListExportDialog from '../VmListExportDialog.jsx';   // v2.800 'CSV' 버튼 = 백업 내보내기 창(필요한 항목만 · CSV/엑셀 · 내 저장값)
+import { backupScreenRequest } from '../vmListExportText.js';
+import { VM_LIST_MAX_IDS } from '../vcdVmList.js';
+import { downloadFailText } from '../downloadFailText.js';
 
 const CHIP = {
   ok: { color: '#86efac', background: 'rgba(34,197,94,.14)' },
@@ -53,6 +57,7 @@ export default function BackupDetailTool({ scope }) {
   const [sel, setSel] = useState(null);
   const [opts, setOpts] = useState(() => loadOpts());   // 서머리와 함께 기억(전원·제외는 서버가 세고, 오래된 백업 기준은 화면이 고른다)
   const [csvErr, setCsvErr] = useState(null);
+  const [exportOpen, setExportOpen] = useState(false);   // v2.800 백업 내보내기 창
   // v2.784 백업 표시 — 체크한 VM(일괄 적용) · 저장 중 · 저장 오류 · 메모 초안(고른 VM 이 바뀔 때만 다시 채운다)
   const [checked, setChecked] = useState(() => new Set());
   const [saving, setSaving] = useState(false);
@@ -143,13 +148,20 @@ export default function BackupDetailTool({ scope }) {
               {(vcs || []).map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}
             </Select>
           </label>
-          {canCsv() && <button type="button" className="tab" disabled={!vcId || !data} onClick={csv} title="지금 고른 vCenter·전원·보기 조건 그대로(검색어는 반영하지 않음)" style={{ padding: '6px 14px' }}>CSV</button>}
+          {canCsv() && <button type="button" className="tab" disabled={!vcId || !data} onClick={() => setExportOpen(true)} style={{ padding: '6px 14px' }}
+            title="지금 화면의 VM(보기·검색 반영) 또는 고른 폴더를 CSV·엑셀로 — Veeam·스냅샷·백업 표시·메모·태그에서 필요한 항목만 고르고 내 계정에 저장해 둘 수 있습니다">CSV · 엑셀…</button>}
           <button type="button" className="tab" disabled={loading || !vcId} onClick={load} style={{ padding: '6px 14px' }}>{loading ? '읽는 중…' : '새로고침'}</button>
         </>} />
       <div className="flex gap wrap" style={{ alignItems: 'center', rowGap: 6 }}>
         <BackupOptions opts={opts} onChange={changeOpts} disabled={loading} />
         {data && scopeNote(data.scope, data.row) && <span className="muted" style={{ fontSize: 12, overflowWrap: 'anywhere', minWidth: 0 }}>{scopeNote(data.scope, data.row)}</span>}
       </div>
+      {exportOpen && data && (
+        <VmListExportDialog vcenterId={vcId} vcName={data.vcenter?.name || vcId} vms={vms}
+          screenReq={backupScreenRequest(visibleIds, VM_LIST_MAX_IDS)}
+          screenText={`지금 화면의 VM(${filterLabel(filter)}${q.trim() ? ' · 검색' : ''})`}
+          downloadFailText={downloadFailText} onLegacyCsv={csv} onClose={() => setExportOpen(false)} />
+      )}
       {csvErr && <div className="card" style={{ padding: '8px 12px', color: '#fca5a5', fontSize: 12 }}>CSV 내보내기 실패 — {csvErr?.status === 403 ? 'CSV 권한이 없습니다.' : String(csvErr.message || csvErr)}</div>}
       {!data && error && <ErrorBox error={error} />}
       {!data && !error && loading && <Loading />}

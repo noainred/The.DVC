@@ -50,7 +50,10 @@ describe('C-B4 백업 화면 오류 처리', () => {
       expect(s).toMatch(/<ErrorBox error=\{error\} \/>/);
     }
   });
-  it('C-I1 세부내용 CSV 버튼 안내 — 검색어는 반영하지 않는다고 밝힌다', () => {
-    expect(det).toMatch(/title="[^"]*검색어는 반영하지 않음[^"]*"[^>]*>CSV</);
+  // v2.800: 'CSV' 버튼은 백업 내보내기 창(보기·검색 반영)으로 바뀌었다 — 검색어를 반영하지 않는 예전 CSV 는 창 안 버튼이 그 사실을 밝힌다.
+  it('C-I1 세부내용 CSV 버튼 안내 — 무엇이 반영되는지 밝힌다(창: 보기·검색 반영 · 예전 CSV: 검색어 미반영)', () => {
+    expect(det).toMatch(/title="[^"]*보기·검색 반영[^"]*">CSV · 엑셀…</);
+    const dlg = fs.readFileSync(new URL('../VmListExportDialog.jsx', import.meta.url), 'utf8');
+    expect(dlg).toMatch(/title="[^"]*검색어 미반영[^"]*">예전 CSV\(화면 열 그대로\)</);
   });
 });
