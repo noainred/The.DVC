@@ -163,3 +163,35 @@ test('C 소스 — PUT 키 목록에 method · Detail 캐시 키에 복제 잡 �
   const js = fs.readFileSync(new URL('../src/vmclone/jobState.js', import.meta.url), 'utf8');
   assert.match(js, /edgeStateOf\(tg\.agent\)/, '엣지에 위임한 vCenter 는 엣지 보고');
 });
+
+test('D v2.804 먼저 볼 VM — 백업 안함·Clone 성공은 뺀다 · 그 밖의 방식은 이유 앞에 · 표시를 못 읽으면 그대로 · 잔존은 방식과 무관', async () => {
+  const X = await import('../src/veeam/vmListXlsx.js');
+  const mk = (name, extra = {}) => ({ inv: { name, snapshotCount: 0 }, view: { id: name, name, folder: 'DC/vm/A', power: 'POWERED_ON', v: null, s: { ev: null, now: extra.now || null }, ...extra.view },
+    verdict: { code: 'none' }, stale: !!extra.now?.stale });
+  const ok = { job: true, on: true, at: NOW - H, ok: true };
+  const items = [
+    mk('plain'),
+    mk('none', { view: { m: { method: 'none' } } }),
+    mk('cloneOk', { view: { m: { method: 'clone' }, c: ok } }),
+    mk('cloneFail', { view: { m: { method: 'clone' }, c: { ...ok, ok: false } } }),
+    mk('cloneNoJob', { view: { m: { method: 'clone' }, c: { job: false } } }),
+    mk('cloneSkip', { view: { m: { method: 'clone' }, c: { ...ok, skipped: 'restart-interrupted' } } }),
+    mk('config', { view: { m: { method: 'config' } } }),
+    mk('veeam', { view: { m: { method: 'veeam' } } }),
+    mk('staleNone', { view: { m: { method: 'none' } }, now: { n: 1, ts: NOW - 50 * H, stale: true } }),
+  ];
+  const w = X.watchList(items, { snapDays: 7, at: NOW });
+  const by = Object.fromEntries(w.map((x) => [x.it.view.name, x]));
+  assert.deepEqual(Object.keys(by).sort(), ['cloneFail', 'cloneNoJob', 'cloneSkip', 'config', 'plain', 'staleNone', 'veeam'].sort());
+  assert.match(by.cloneFail.why, /^백업 방식 Clone · 실패 — /);
+  assert.match(by.cloneNoJob.why, /^백업 방식 Clone · 잡 없음 — /);
+  assert.match(by.cloneSkip.why, /^백업 방식 Clone · 건너뜀·중단 — /, '건너뛴 실행은 성공이 아니다');
+  assert.match(by.config.why, /^백업 방식 Config 백업\(포탈이 확인할 수 없음\) — /);
+  assert.match(by.veeam.why, /^백업 방식 Veeam 으로 정함 — /);
+  assert.equal(by.plain.why.startsWith('백업 방식'), false);
+  assert.equal(by.staleNone.tag, '잔존 스냅샷', '잔존은 백업 안함이어도 남는다');
+  // 표시 파일을 못 읽었으면 방식으로 줄이지 않는다
+  const u = X.watchList(items, { snapDays: 7, at: NOW, marksUnknown: true });
+  assert.equal(u.length, items.length);
+  assert.equal(u.some((x) => x.why.startsWith('백업 방식')), false);
+});

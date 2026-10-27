@@ -1,6 +1,14 @@
 {
   "notes": [
     {
+      "version": "2.804.0",
+      "date": "2026-10-27",
+      "title": "엑셀 요약 ‘먼저 볼 VM’ 에 백업 방식 반영",
+      "notes": [
+        "Veeam 백업 현황 내보내기 엑셀의 요약 시트 ‘먼저 볼 VM’ 에서, 백업 방식을 ‘백업 안함’ 으로 정한 VM 과 Clone(포탈 복제) 마지막 실행이 성공한 VM 은 빼고, 그 밖의 방식(Clone 실패·잡 없음 · Config 백업 · Veeam 으로 정했는데 Veeam 에 없음)은 이유 앞에 밝힙니다. 백업 표시 파일을 읽지 못하면 예전처럼 둡니다."
+      ]
+    },
+    {
       "version": "2.803.0",
       "date": "2026-10-27",
       "title": "Veeam 백업 현황 Detail — 백업 방식(Veeam · Clone · Config 백업 · 백업 안함) · Clone 열 · 백업 한 열(Veeam 또는 스냅샷) · CSV·엑셀 반영",
