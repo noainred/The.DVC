@@ -1,4 +1,5 @@
-// IPAM 조회/쓰기 + VM 전체 export — api.js(구 2,445줄) 분할(v2.283.0). 본문은 원본 그대로, 등록 순서는 api.js 호출 순서가 보존한다.
+// IPAM 조회/쓰기 — api.js(구 2,445줄) 분할(v2.283.0). 본문은 원본 그대로, 등록 순서는 api.js 호출 순서가 보존한다.
+// (VM 전체 정보 내보내기 라우트는 v2.799 에 routes/api/vmExport.js 로 옮겼다.)
 import { canonIp } from '../../util/ipv4.js';
 import { requirePerm, requireRole } from '../../auth/auth.js';
 // v2.590 D1: 상태변경 라우트는 역할 게이트가 **먼저**다(server/CLAUDE.md '상태변경 라우트 RBAC 은 requirePerm 만으로
@@ -9,7 +10,6 @@ import { scopedVcenterIds, writeScopedVcenterIds, inUserScope } from '../../auth
 import { csvCell } from '../../util/csv.js';
 import { store, ledgerInputSignatureOf } from '../../store.js'; // v2.733 C6-01: 서브넷 목록은 원장 입력 지문으로 기억한다
 import { loadVcenterConfig } from '../../config.js';
-import { buildVmExport, vmExportCsv } from '../../vcenter/vmExport.js';
 import { buildIpamRowsShared, buildSubnetSheets, buildSubnetSheetsAsync, listSubnets, ipVcenterOwners, ipamRevKey, ipInWriteScope } from '../../ipam/ledger.js';
 import { currentScanDatacenters } from '../../ipam/scanDatacenterSource.js';
 import { memoJson, scopeKey } from './shared.js';
@@ -34,17 +34,6 @@ import { todayStamp, DAY_OFFSET_MIN } from "../../util/dayKey.js";
 const csvPerm = requirePerm('data.csv');
 
 
-// VM 전체 정보 export (특수 기능) — 선택 vCenter 의 모든 VM 을 '획득 가능한 최대 필드'로.
-// vCenter 단위 사용자 scope 를 먼저 강제하고, 범위 밖은 404(존재 여부 미노출 — v2.207 규칙).
-function vmExportGuard(req, res) {
-  const vcenterId = String(req.query.vcenterId || '');
-  const snap = store.get();
-  if (!vcenterId || !(snap.vcenters || []).some((v) => v.id === vcenterId) || !inUserScope(req.user, snap, vcenterId)) {
-    res.status(404).json({ error: 'vCenter를 찾을 수 없습니다.' });
-    return null;
-  }
-  return vcenterId;
-}
 // vCenter 귀속 값 검증 — 알 수 없는 vCenter id를 붙이면 거부(오타·고아 참조 방지). 빈값=전역=허용.
 // 설정 읽기 실패 시엔 막지 않는다(fail-open).
 const isKnownVcenter = (id) => { if (!id) return true; try { return (loadVcenterConfig().vcenters || []).some((v) => v.id === id); } catch { return true; } };
@@ -163,26 +152,6 @@ api.get('/tools/ipam', requirePerm('tools'), (req, res) => memoJson(req, res, 't
   // v2.631(감사 R2631-02): 예약 만료일을 화면이 '포탈 오프셋 기준 그 날' 로 되읽을 수 있게 오프셋을 싣는다(브라우저 시간대가 아니다).
   return { ...data, rows, tzOffsetMin: DAY_OFFSET_MIN, ...(q ? { q, matched, truncated } : {}) };
 }, { extraKey: `${scopeKey(req.user, store.get())}|${ipamRevKey()}|d${currentScanDatacenters(store.get().vcenters).sig}` })); // v2.638: 스캔 행 데이터센터 귀속이 바뀌면 캐시를 버린다
-api.get('/tools/vm-export', csvPerm, requirePerm('tools'), async (req, res) => {
-  const vcenterId = vmExportGuard(req, res);
-  if (!vcenterId) return;
-  try {
-    const r = await buildVmExport(vcenterId);
-    // 미리보기는 100행까지 — 전체는 CSV 다운로드로(total 로 전체 행 수 표시).
-    res.json({ ...r, rows: r.rows.slice(0, 100) });
-  } catch (e) { res.status(502).json({ error: e.message }); }
-});
-api.get('/tools/vm-export.csv', csvPerm, requirePerm('tools'), async (req, res) => {
-  const vcenterId = vmExportGuard(req, res);
-  if (!vcenterId) return;
-  try {
-    const r = await buildVmExport(vcenterId);
-    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
-    res.setHeader('Content-Disposition', `attachment; filename="vm-export-${encodeURIComponent(vcenterId)}-${todayStamp()}.csv"`);
-    res.send(vmExportCsv(r));
-  } catch (e) { res.status(502).json({ error: e.message }); }
-});
-
 // IPAM 추천 기능 30선 — 유명 IPAM 솔루션 대표 기능을 수집 데이터로 계산.
 api.get('/tools/ipam/insights', requirePerm('tools'), async (req, res) => {
   const snap = store.get();

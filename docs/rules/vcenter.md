@@ -310,3 +310,15 @@
     ⚠ 원인은 **추정**(EM 계정의 역할·범위가 일부만 보이게 함) — 실물로 확인하지 못했다. 고친 뒤에도 경고가 남으면 그 EM 계정 역할부터 볼 것.
   · '포탈에 B&R 로 등록' 은 새 API 를 만들지 않는다 — 기존 `POST /admin/veeam/servers`(관리자·전체 범위·감사·비밀 봉인·SSRF 검사) 그대로 → 성공하면 `PUT /admin/veeam/em/map` 으로 그 줄을 짝짓는다(법인은 비워 B&R 등록을 따름).
     주소는 EM 이 아는 서버 이름을 미리 채울 뿐 — 접속 가능한지는 사람이 확인(화면이 말한다). 두 요청 모두 `r?.ok === false` 확인.
+- **v2.799 — 특수 기능 'VM 전체 정보 내보내기'(`vm-export`) — 항목 고르기 · 출처 대체 · 계정 저장값. 열은 `vcenter/vmExportCatalog.js` 하나(key 고정 — 저장값에 남는다)**
+  (사용자 요청 "VM 전체 정보 CSV 버그 수정 · 추가할 수 있는 정보 · 클로드 디자인으로 멋지게 · vm list export 참고" · 시안 https://claude.ai/artifact/FCUJ73AgKCxpzcr4J6Y6TC ·
+  선택: 시안대로 · 표준 검증 · main 기준 독립. 회귀 `server/test/vmExport2799.test.js`(변이 10/11 — 남은 1건은 data.csv 게이트가 데모 계정을 먼저 막는 이중 방어) + 웹 `vmExportText.test.js`):
+  · 출처(`src`)는 항목마다 하나 — snap(인벤토리) · cache(`vm.cfg`·`vm.dev`) · both(실시간 → 없으면 구성 캐시) · live(실시간 전용) · parts(실시간 guest.disk → 없으면 `partsForVcenter`) · tags(`tagInv`).
+    실시간 보강은 `liveAvailability`(= `onDemandVcBlock` — 엣지 위임·비활성·점검중·인증 정지는 로그인하지 않는다) 하나로 판정하고, 접속 정보(비밀번호)는 판정 객체에 섞지 않는다(`liveGate`).
+  · ⚠ 결함 재발 금지: 실시간 '성공' 이어도 **VM 마다** 속성이 왔는지로 판정한다(예전 `enriched ? 0 : ''` 는 응답에 없는 VM 의 NIC·디스크 수를 0 으로 썼다) ·
+    Thin(추정)은 uncommitted 를 못 읽었으면 빈칸 · 메모리 결측 빈칸 · 시각은 `localStamp` + 머리에 시간대(예전 UTC …Z) · 장치 목록이 상한(32)에서 잘린 캐시는 디스크 수·합계를 쓰지 않는다.
+  · 미리보기(`POST /tools/vm-export/preview`)는 **실시간을 부르지 않는다** — 실시간 칸은 ‘내려받을 때 조회’(예전: 화면을 열기만 해도 vCenter 전량 조회 + 60초 뒤 내려받으면 한 번 더).
+  · 내려받기 `POST /tools/vm-export.{csv,xlsx}` · 예전 `GET /tools/vm-export.csv`(= ‘예전 CSV 그대로’ 100열) 모두 동시 1건(`acquireExport`) + 조건·행 수 감사(VM 이름 없음) · 내려받기 POST 는 `AUDIT_SKIP`(두 줄 방지).
+    엑셀은 워커(`util/xlsxWorkerRun.js` — 새 엑셀은 이 공용 실행기를 쓴다; ipam·storage·veeam 의 기존 실행기 이전은 별건).
+  · 저장값 `vcenter/vmExportPrefs.js` = `util/exportPrefs.js` 공장(파일 `vm-export-prefs.json`) — 규칙은 v2.798 `veeam/vmListPrefs.js` 와 같다(그쪽 이전은 별건).
+  · 라우트는 `routes/api/vmExport.js`(ipamExport.js 에서 옮김) — 전부 data.csv + tools · 범위 밖 404 · 저장값 쓰기는 역할 게이트 먼저.

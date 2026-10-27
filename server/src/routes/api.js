@@ -10,6 +10,7 @@ import { registerVcTools } from './api/vcTools.js';
 import { registerReports } from './api/reports.js';
 import { registerSearchNotes } from './api/searchNotes.js';
 import { registerIpamExport } from './api/ipamExport.js';
+import { registerVmExport } from './api/vmExport.js';   // v2.799 VM 전체 정보 내보내기(ipamExport.js 에서 옮김)
 import { registerHardwareGpu } from './api/hardwareGpu.js';
 import { registerChecksLogs } from './api/checksLogs.js';
 import { registerToolsAnalytics } from './api/toolsAnalytics.js';
@@ -105,6 +106,7 @@ registerVcTools(api);
 registerReports(api);
 registerSearchNotes(api);
 registerIpamExport(api);
+registerVmExport(api);
 registerHardwareGpu(api);
 registerChecksLogs(api);
 registerToolsAnalytics(api);

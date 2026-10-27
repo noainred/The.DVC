@@ -1,9 +1,9 @@
 # 환경변수 레퍼런스 (자동 생성)
 
-`server/src` 가 실제로 읽는 환경변수 **685개**를 코드에서 추출한 목록이다.
+`server/src` 가 실제로 읽는 환경변수 **687개**를 코드에서 추출한 목록이다.
 설치본에서는 `/etc/vmware-portal/portal.env` 에 `KEY=값` 으로 넣고 서비스를 재시작한다.
 
-- 생성: `node scripts/env-doc.mjs` (마지막 갱신 2026-10-26)
+- 생성: `node scripts/env-doc.mjs` (마지막 갱신 2026-10-27)
 - **이 파일을 직접 고치지 말 것** — 코드가 진실의 원천이며 다음 실행에서 덮어써진다.
 - `portal.env.example` 에 예시가 있는 키는 ✅, 없는 키는 빈칸으로 표시한다.
 - 기본값 칸이 비어 있으면 코드에서 한 줄로 추출하지 못한 것이다(해당 파일을 참조).
@@ -853,12 +853,14 @@
 | `SANSWITCH_ACTIVITY_MAX` | `500` |  | sanswitch/activityLog.js |
 | `SANSWITCH_TLS_VERIFY` |  |  | sanswitch/collectors/fosRest.js |
 
-## vCenter 수집 (2)
+## vCenter 수집 (4)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
 | `PERF_COUNTER_TTL_MS` | `6` |  | vcenter/soapClient.js |
 | `VC_KEEPALIVE_MS` | `4000` |  | vcenter/restClient.js |
+| `VM_EXPORT_XLSX_TIMEOUT_MS` | `300000` |  | vcenter/vmExportXlsx.js |
+| `VM_EXPORT_XLSX_WORKER` | `'1'` |  | vcenter/vmExportXlsx.js |
 
 ## VM 복제 (1)
 
@@ -874,4 +876,4 @@
 
 ---
 
-예시 파일(`packaging/offline/portal.env.example`)에 있는 키: 85 / 685
+예시 파일(`packaging/offline/portal.env.example`)에 있는 키: 85 / 687

@@ -1,18 +1,25 @@
 /**
- * VM 전체 정보 CSV export (특수 기능, v2.275) — 선택한 vCenter 의 모든 VM 에 대해
- * '획득 가능한 최대 필드'를 한 행으로 펼친다. RVTools 의 탭 체계(vInfo·vCPU·vMemory·
- * vDisk·vPartition·vNetwork·vSnapshot·vTools)를 기준 체크리스트로 삼았다.
+ * VM 전체 정보 내보내기 (특수 기능, v2.275 → v2.799 '필요한 항목만 고르기') — 선택한 vCenter 의 VM 을
+ * 고른 항목만 한 행으로 펼친다. RVTools 의 탭 체계(vInfo·vCPU·vMemory·vDisk·vPartition·vNetwork·vSnapshot·vTools)를
+ * 기준 체크리스트로 삼았다. 항목·머리·칸 값은 vmExportCatalog.js 하나다(CSV·엑셀·미리보기가 같은 함수).
  *
- * 데이터 소스 2단:
+ * 데이터 출처(v2.799 — 실시간이 안 되면 캐시로 대체한다):
  *  1) 수집 스냅샷(store) — 이름/호스트/클러스터/폴더/CPU/메모리/IP/스냅샷/Tools 등(항상 가용).
- *  2) 내보내기 시점 라이브 SOAP 1회(retrieveManyObjectProps, 250개씩 페이지) —
- *     NIC 상세(MAC·네트워크)·디스크별 용량/thin/데이터스토어·게스트 파티션 사용량·
- *     UUID·코어수·예약/제한 등 스냅샷에 없는 필드 보강. 실패해도 export 는 성공하고
- *     enriched=false + 사유를 함께 반환한다(엣지 수집(site) vCenter 는 중앙에서 직접
- *     접속이 안 될 수 있다 — 그 경우 스냅샷 필드만 내려간다).
+ *  2) 구성·장치 캐시(vm.cfg·vm.dev — vmcfg/, 주기 수집 · 엣지도 보낸다) — 펌웨어·핫애드·예약·CBT·부팅·디스크(용량·데이터스토어·모드)·CD-ROM.
+ *  3) 게스트 디스크 수집 DB(guestdisk/ — 설정에서 켬) — 실시간이 없을 때의 게스트 파티션.
+ *  4) 태그 인벤토리(vcenter.tagInv) — vSphere 태그·사용자 지정 속성.
+ *  5) 내보내기 시점 라이브 SOAP 1회(retrieveManyObjectProps, 250개씩 페이지) — NIC 상세(MAC·네트워크)·디스크 파일/thin·
+ *     게스트 파티션·UUID·생성일·코어 수. 실패하거나 막힌 vCenter(엣지 위임·비활성·점검중·인증 정지)는 1~4 로 계속하고
+ *     실시간 전용 칸은 '수집 안 됨'(사유 동봉). ⚠ v2.799 이전에는 이 경우 디스크·파티션 칸까지 모두 빈칸이었다(결함 7).
  *
- * 결과는 vCenter 단위 60초 캐시(같은 데이터로 미리보기(JSON)와 CSV 다운로드가 연달아
- * 호출되므로 라이브 조회를 두 번 하지 않기 위함). 사용자 scope 검사는 라우트에서
+ * v2.799 결함 수정(사용자 요청 '버그 수정' — 시안 https://claude.ai/artifact/FCUJ73AgKCxpzcr4J6Y6TC):
+ *  ① NIC·디스크 수: 보강이 성공해도 그 VM 이 응답에 없으면 0 을 썼다 → VM 마다 실시간 속성 유무로 판정('수집 안 됨').
+ *  ② Thin 여부: uncommitted 를 못 읽어도 'N' → 빈칸. ③ 메모리: memMB 결측 → 0/NaN → 빈칸.
+ *  ④ 시각이 UTC(…Z) → 포탈 시각(localStamp) + 머리에 시간대. ⑤ 동시 1건(acquireExport)·감사 로그 없음 → 라우트.
+ *  ⑥ 화면을 열기만 해도 전량 실시간 조회 → 미리보기는 실시간을 부르지 않는다(실시간 칸은 '내려받을 때 조회').
+ *
+ * 실시간 결과는 vCenter 단위 60초 캐시(buildVmExport — 연달아 받는 CSV·엑셀이 라이브 조회를 두 번 하지 않게).
+ * 캐시에는 장치 XML 원문 대신 해석한 값만 둔다(VM 1,500대 × 수십 KB 를 60초 붙잡지 않게). 사용자 scope 검사는 라우트에서
  * vCenter 단위로 끝난 뒤 호출되므로 캐시에 사용자 차원은 없다.
  */
 
@@ -20,9 +27,19 @@ import { VimSoapClient } from './soapClient.js';
 import { parseVmDevices, parseGuestDisks } from './soapParse.js';
 import { store } from '../store.js';
 import { loadVcenterConfig } from '../config.js';
-import { csvLine, CSV_BOM } from '../util/csv.js';
-import { numOrNull } from '../util/numOrNull.js'; // v2.727(C-01)
 import { onDemandVcBlock, onDemandLoginError } from './dsBrowse.js';   // v2.742(VC-03): 주문형 로그인 문(collectTarget·authStopGate 를 묶은 것)
+import { DAY_OFFSET_MIN } from '../util/dayKey.js';
+import { partsForVcenter } from '../guestdisk/db.js';   // v2.798 — 한 vCenter 의 파티션 최신 값(파일 시스템 종류 포함) + 수집에 든 VM
+import { load as loadGuestDiskSettings } from '../guestdisk/settings.js';
+import { vmRefOf, vmTagsOf, tagStateOf } from '../tags/analyze.js';
+import {
+  MISSING, LIVE_LATER, FOLDER_LEVELS_MAX, PRESETS, selectedColumns, needsOf, legacyColumns, guestKnownSum, folderParts, folderOptions, inFolder,
+} from './vmExportCatalog.js';
+
+export { guestKnownSum };
+/** 예전 열 목록(v2.278 — '예전 CSV 그대로' 조합과 같다). get(vm, d, ctx) 모양을 테스트·호환이 쓴다. */
+export const VM_EXPORT_COLUMNS = Object.freeze(legacyColumns());
+export const LEGACY_KEYS = PRESETS.find((p) => p.id === 'legacy').keys;
 
 // 라이브 보강으로 가져올 per-VM 속성 — 없는 속성은 응답에서 빠질 뿐이라 전부 best-effort.
 const ENRICH_PROPS = [
@@ -33,152 +50,6 @@ const ENRICH_PROPS = [
   'config.memoryAllocation.reservation', 'config.memoryAllocation.limit',
   'summary.config.numEthernetCards', 'summary.config.numVirtualDisks',
   'config.changeTrackingEnabled',
-];
-
-const num = (v) => { const n = Number(v); return Number.isFinite(n) ? n : 0; };
-const iso = (v) => { const t = Date.parse(v || ''); return Number.isFinite(t) ? new Date(t).toISOString() : ''; };
-const isoTs = (t) => (Number.isFinite(t) && t ? new Date(t).toISOString() : '');
-const yn = (v) => (v === true || v === 'true' ? 'Y' : v === false || v === 'false' ? 'N' : '');
-const join = (arr) => (arr && arr.length ? arr.join('; ') : '');
-/** v2.600(LO2600-07): 게스트 파티션의 사용·여유 합 — 값을 모르는 파티션(null)은 빼고, 아는 것이 하나도 없으면 ''. */
-export function guestKnownSum(guest, key) {
-  const known = (guest || []).filter((x) => x && x[key] != null);
-  return known.length ? Math.round(known.reduce((s, x) => s + x[key], 0) * 10) / 10 : '';
-}
-
-/**
- * 디스크 슬롯 컬럼(v2.278, 사용자 확정 템플릿) — VM 당 1행을 유지한 채 '디스크1~7'을
- * 가로로 펼친다. 각 슬롯은 5필드(용량GB·타입·모드·데이터스토어·파일)이고, 디스크가 없는
- * 슬롯은 빈칸이다. 8개 이상 연결된 VM 은 마지막 '디스크8+ 요약' 컬럼에 나머지를 묶어 넣어
- * 정보 손실이 없다(운영 환경 최대 디스크 수를 7로 가정한 요구 — 초과분은 요약으로 보전).
- * 슬롯 번호는 디바이스 정의 순서를 라벨 자연순(Hard disk 1, 2, …)으로 정렬한 순번이다.
- */
-const DISK_SLOTS = 7;
-const diskTypeOf = (x) => (x.rdm ? 'RDM' : x.thin ? 'thin' : 'thick');
-const DISK_SLOT_COLUMNS = [];
-for (let i = 0; i < DISK_SLOTS; i++) {
-  const n = i + 1;
-  DISK_SLOT_COLUMNS.push(
-    { key: `disk${n}CapacityGB`, label: `디스크${n} 용량(GB)`, get: (vm, d) => (d.disks[i] ? d.disks[i].capacityGB : '') },
-    { key: `disk${n}Type`, label: `디스크${n} 타입`, get: (vm, d) => (d.disks[i] ? diskTypeOf(d.disks[i]) : '') },
-    { key: `disk${n}Mode`, label: `디스크${n} 모드`, get: (vm, d) => (d.disks[i] ? d.disks[i].mode : '') },
-    { key: `disk${n}Datastore`, label: `디스크${n} 데이터스토어`, get: (vm, d) => (d.disks[i] ? d.disks[i].datastore : '') },
-    { key: `disk${n}File`, label: `디스크${n} 파일`, get: (vm, d) => (d.disks[i] ? d.disks[i].fileName : '') },
-  );
-}
-// 8개 이상 초과분 — 슬롯과 같은 정보를 '라벨 용량 타입 모드 [데이터스토어]' 형식으로 이어붙인다.
-const DISK_OVERFLOW_COLUMN = {
-  key: 'disksOverflow',
-  label: '디스크8+ 요약',
-  get: (vm, d) => join(d.disks.slice(DISK_SLOTS).map((x) => `${x.label} ${x.capacityGB}GB ${diskTypeOf(x)} ${x.mode} [${x.datastore || '?'}]`)),
-};
-
-/**
- * 컬럼 정의 — JSON 미리보기와 CSV 가 같은 정의를 공유한다(어긋남 방지).
- * get(vm, d): vm=스냅샷 VM, d={ props, nics, disks, guest } (라이브 보강, 없으면 빈 값).
- */
-export const VM_EXPORT_COLUMNS = [
-  { key: 'vcenter', label: 'vCenter', get: (vm, d, ctx) => ctx.vcName },
-  { key: 'vcenterId', label: 'vCenter ID', get: (vm) => vm.vcenterId },
-  { key: 'name', label: 'VM 이름', get: (vm) => vm.name },
-  { key: 'powerState', label: '전원', get: (vm) => vm.powerState },
-  { key: 'connectionState', label: '연결 상태', get: (vm) => vm.connectionState || '' },
-  { key: 'template', label: '템플릿', get: (vm) => yn(!!vm.template) },
-  { key: 'cluster', label: '클러스터', get: (vm) => vm.cluster || '' },
-  { key: 'host', label: '호스트(ESXi)', get: (vm) => vm.host || '' },
-  { key: 'folder', label: '폴더', get: (vm) => vm.folder || '' },
-  { key: 'resourcePool', label: '리소스 풀', get: (vm) => vm.resourcePool || '' },
-  { key: 'guestOS', label: 'Guest OS(구성)', get: (vm) => vm.guestOS || '' },
-  { key: 'guestId', label: 'Guest ID', get: (vm, d) => d.props['config.guestId'] || '' },
-  { key: 'guestHostName', label: '게스트 호스트명', get: (vm, d) => d.props['guest.hostName'] || '' },
-  { key: 'toolsStatus', label: 'Tools 상태', get: (vm) => vm.toolsStatus || '' },
-  { key: 'toolsVersion', label: 'Tools 버전', get: (vm) => vm.toolsVersion || '' },
-  { key: 'toolsVersionStatus', label: 'Tools 버전 상태', get: (vm) => vm.toolsVersionStatus || '' },
-  { key: 'hwVersion', label: 'HW 버전', get: (vm) => vm.hwVersion || '' },
-  { key: 'firmware', label: '펌웨어', get: (vm, d) => d.props['config.firmware'] || '' },
-  { key: 'uuid', label: 'VM UUID', get: (vm, d) => d.props['config.uuid'] || '' },
-  { key: 'instanceUuid', label: 'Instance UUID', get: (vm, d) => d.props['config.instanceUuid'] || '' },
-  { key: 'cbt', label: 'CBT(변경 추적)', get: (vm, d) => yn(d.props['config.changeTrackingEnabled']) },
-  { key: 'createDate', label: '생성일', get: (vm, d) => iso(d.props['config.createDate']) },
-  { key: 'bootTime', label: '최근 부팅', get: (vm, d) => iso(d.props['runtime.bootTime']) },
-  { key: 'cpuCount', label: 'vCPU', get: (vm) => vm.cpuCount },
-  { key: 'coresPerSocket', label: '소켓당 코어', get: (vm, d) => num(d.props['config.hardware.numCoresPerSocket']) || '' },
-  {
-    key: 'sockets',
-    label: '소켓 수',
-    get: (vm, d) => { const c = num(d.props['config.hardware.numCoresPerSocket']); return c > 0 ? Math.round(vm.cpuCount / c) : ''; },
-  },
-  { key: 'cpuHotAdd', label: 'CPU 핫애드', get: (vm, d) => yn(d.props['config.cpuHotAddEnabled']) },
-  { key: 'cpuUsagePct', label: 'CPU 사용률(%)', get: (vm) => vm.cpuUsagePct ?? '' },
-  { key: 'cpuReservation', label: 'CPU 예약(MHz)', get: (vm, d) => d.props['config.cpuAllocation.reservation'] ?? '' },
-  { key: 'cpuLimit', label: 'CPU 제한(MHz)', get: (vm, d) => d.props['config.cpuAllocation.limit'] ?? '' },
-  { key: 'memGB', label: '메모리(GB)', get: (vm) => Math.round((vm.memMB / 1024) * 10) / 10 },
-  { key: 'memHotAdd', label: '메모리 핫애드', get: (vm, d) => yn(d.props['config.memoryHotAddEnabled']) },
-  { key: 'memUsagePct', label: '메모리 사용률(%)', get: (vm) => vm.memUsagePct ?? '' },
-  { key: 'memReservation', label: '메모리 예약(MB)', get: (vm, d) => d.props['config.memoryAllocation.reservation'] ?? '' },
-  { key: 'memLimit', label: '메모리 제한(MB)', get: (vm, d) => d.props['config.memoryAllocation.limit'] ?? '' },
-  { key: 'nicCount', label: 'NIC 수', get: (vm, d) => (d.nics.length || num(d.props['summary.config.numEthernetCards']) || (d.enriched ? 0 : '')) },
-  {
-    key: 'nics',
-    label: 'NIC 상세',
-    get: (vm, d) => join(d.nics.map((n) => `${n.label}(${n.type}) ${n.mac} @${n.network || '?'}${n.connected ? '' : ' [끊김]'}`)),
-  },
-  { key: 'macs', label: 'MAC 목록', get: (vm, d) => join(d.nics.map((n) => n.mac).filter(Boolean)) },
-  { key: 'networks', label: '네트워크 목록', get: (vm, d) => join([...new Set(d.nics.map((n) => n.network).filter(Boolean))]) },
-  { key: 'ipAddress', label: '대표 IP', get: (vm) => vm.ipAddress || '' },
-  { key: 'ipAddresses', label: 'IP 전체', get: (vm) => join(vm.ipAddresses) },
-  { key: 'gateways', label: '게이트웨이', get: (vm) => join(vm.gateways) },
-  { key: 'diskCount', label: '디스크 수', get: (vm, d) => (d.disks.length || num(d.props['summary.config.numVirtualDisks']) || (d.enriched ? 0 : '')) },
-  {
-    key: 'diskProvisionedGB',
-    label: '디스크 프로비저닝 합계(GB)',
-    get: (vm, d) => (d.disks.length ? Math.round(d.disks.reduce((s, x) => s + x.capacityGB, 0) * 10) / 10 : ''),
-  },
-  { key: 'datastores', label: '데이터스토어 목록', get: (vm, d) => join([...new Set(d.disks.map((x) => x.datastore).filter(Boolean))]) },
-  // '디스크 상세'(한 칸 병합, ~v2.277)는 디스크1~7 슬롯 컬럼으로 대체됐다(v2.278 사용자 요청 —
-  // "최대 7개 디스크 템플릿을 만들고 할당된 디스크 정보를 해당 칸에, 없으면 빈칸"). 초과분은
-  // '디스크8+ 요약'이 보전한다.
-  ...DISK_SLOT_COLUMNS,
-  DISK_OVERFLOW_COLUMN,
-  { key: 'thinDiskCount', label: 'Thin 디스크 수', get: (vm, d) => (d.disks.length ? d.disks.filter((x) => x.thin).length : '') },
-  { key: 'rdmCount', label: 'RDM 수', get: (vm, d) => (d.disks.length ? d.disks.filter((x) => x.rdm).length : '') },
-  { key: 'storageUsedGB', label: '스토리지 사용(GB, committed)', get: (vm) => vm.storageGB ?? '' },
-  { key: 'storageUncommittedGB', label: '스토리지 미할당(GB, uncommitted)', get: (vm) => vm.uncommittedGB ?? '' },
-  // v2.727(감사 C-01): committed·uncommitted 중 하나라도 못 읽었으면(null — v2.719 부터) 합을 지어내지 않는다 — 빈 칸. 예전 num() 은
-  //   null 을 0 으로 더해 '프로비저닝 = 읽은 쪽만' 이라는 틀린 수치를 CSV 에 썼다. 보고된 0 은 값이다.
-  { key: 'storageProvisionedGB', label: '스토리지 프로비저닝(GB)', get: (vm) => { const c = numOrNull(vm.storageGB); const u = numOrNull(vm.uncommittedGB); return c == null || u == null ? '' : c + u; } },
-  { key: 'thin', label: 'Thin 여부(추정)', get: (vm) => yn(!!vm.thin) },
-  { key: 'guestPartCount', label: '게스트 파티션 수', get: (vm, d) => (d.guest.length ? d.guest.length : '') },
-  {
-    key: 'guestCapacityGB',
-    label: '게스트 디스크 총량(GB)',
-    get: (vm, d) => (d.guest.length ? Math.round(d.guest.reduce((s, x) => s + x.capacityGB, 0) * 10) / 10 : ''),
-  },
-  // v2.600(감사 LO2600-07): 여유를 보고하지 않은 파티션(usedGB·freeGB null)은 사용·여유 합계에서 빼고 개수를 따로 싣는다 —
-  //   예전에는 사용 = 용량(100%)으로 지어낸 값이 합계에 들어갔다. 그 파티션뿐이면 합계는 빈 칸('모른다')이다.
-  {
-    key: 'guestUsedGB',
-    label: '게스트 사용량(GB)',
-    get: (vm, d) => guestKnownSum(d.guest, 'usedGB'),
-  },
-  {
-    key: 'guestFreeGB',
-    label: '게스트 여유(GB)',
-    get: (vm, d) => guestKnownSum(d.guest, 'freeGB'),
-  },
-  {
-    key: 'guestPartsUnknown',
-    label: '게스트 여유 미보고 파티션 수',
-    get: (vm, d) => (d.guest.length ? d.guest.filter((x) => x.usedGB == null).length : ''),
-  },
-  { key: 'guestParts', label: '게스트 파티션 상세', get: (vm, d) => join(d.guest.map((x) => `${x.path} ${x.usedGB == null ? '?' : x.usedGB}/${x.capacityGB}GB`)) },
-  { key: 'snapshotCount', label: '스냅샷 수', get: (vm) => vm.snapshotCount ?? 0 },
-  { key: 'snapshotSizeGB', label: '스냅샷 크기(GB)', get: (vm) => vm.snapshotSizeGB ?? '' },
-  { key: 'snapshotOldest', label: '스냅샷 최초 생성', get: (vm) => isoTs(vm.snapshotOldestTs) },
-  { key: 'snapshotNewest', label: '스냅샷 최근 생성', get: (vm) => isoTs(vm.snapshotNewestTs) },
-  { key: 'snapshotNames', label: '스냅샷 이름', get: (vm) => join(vm.snapshotNames) },
-  { key: 'gpu', label: 'GPU', get: (vm) => (vm.gpu ? `${vm.gpu.type} x${vm.gpu.count}${vm.gpu.profile ? ` (${vm.gpu.profile})` : ''}` : '') },
-  { key: 'notes', label: '메모', get: (vm) => vm.notes || '' },
 ];
 
 /** 라이브 보강 — 대상 vCenter 에 로그인해 per-VM 상세 속성을 한 번에 가져온다.
@@ -196,6 +67,24 @@ export async function collectDetails(vc, morefs, { signal = null } = {}) {
   } finally {
     await c.logout().catch(() => {});
   }
+}
+
+const labelCmp = (a, b) => String(a.label).localeCompare(String(b.label), undefined, { numeric: true });
+/**
+ * 실시간 속성 한 VM → 캐시에 둘 값. 장치 목록을 받지 못했으면 nics·disks 는 null(모름 — 0 개가 아니다).
+ * guest.disk 가 없으면 []( Tools 가 파티션을 보고하지 않았다 — 칸은 빈칸).
+ */
+export function compactLive(props) {
+  const { 'config.hardware.device': devXml, 'guest.disk': guestXml, ...rest } = props || {};
+  let nics = null; let disks = null;
+  if (typeof devXml === 'string' && devXml) {
+    const p = parseVmDevices(devXml);
+    nics = p.nics;
+    // 슬롯 배치는 라벨 자연순(Hard disk 1, 2, … 10) — 디바이스 XML 순서가 라벨 순과 다른 드문 구성에서도
+    // '디스크1' 슬롯이 Hard disk 1 을 가리키게 한다(numeric 비교로 10>2 오정렬 방지).
+    disks = p.disks.sort(labelCmp);
+  }
+  return { props: rest, nics, disks, guest: parseGuestDisks(typeof guestXml === 'string' ? guestXml : '') };
 }
 
 // vCenter 단위 결과 캐시(60초) — 미리보기(JSON)와 CSV 다운로드가 연달아 와도 라이브 조회 1회.
@@ -216,6 +105,10 @@ function sweepExpired(now = Date.now()) {
 /** 테스트·진단용 — 캐시 항목 수. */
 export function _vmExportCacheSize(now) { sweepExpired(now); return _cache.size; }
 
+/**
+ * 실시간 보강(캐시 60초) — { vcenterId, vcenterName, enriched, enrichError, enrichBlocked?, total, details: Map<moref, compactLive> }.
+ * v2.799: 예전에는 여기서 85+열 행까지 만들었다 — 이제 실시간 값만 돌려주고 표는 buildVmExportTable 이 고른 항목으로 만든다.
+ */
 export function buildVmExport(vcenterId) {
   sweepExpired();
   const hit = _cache.get(vcenterId);
@@ -237,64 +130,191 @@ export function buildVmExport(vcenterId) {
   return entry.promise;
 }
 
+/**
+ * 실시간 보강을 할 수 있는가(로그인하지 않고 판정) — 화면 상태·내보내기가 같은 판정.
+ * @returns {{state:'ok'} | {state:'demo'|'noConfig'|'blocked', reason:string, skipReason?:string, authStopped?:object}}
+ */
+export function liveAvailability(vcenterId, snap = store.get()) { return liveGate(vcenterId, snap).av; }
+// 접속 정보(비밀번호 포함)는 응답 객체에 섞지 않는다 — 판정(av)과 접속 정보를 따로 돌려준다.
+function liveGate(vcenterId, snap) {
+  if (snap?.source === 'mock') return { av: { state: 'demo', reason: '데모 모드 — 실시간 보강(NIC/UUID/생성일/디스크 파일)을 조회하지 않습니다' }, vcCfg: null };
+  let vcCfg = null;
+  try { vcCfg = loadVcenterConfig().vcenters.find((v) => v.id === vcenterId) || null; } catch { vcCfg = null; }
+  if (!vcCfg) return { av: { state: 'noConfig', reason: 'vCenter 접속 정보 없음 — 실시간 보강을 할 수 없습니다' }, vcCfg: null };
+  // v2.742(감사 VC-03): 비활성·점검중·엣지 위임·인증 정지 vCenter 에는 라이브 보강 로그인을 하지 않는다(판정은 dsBrowse.js
+  //   onDemandVcBlock — collectTarget·authStopGate 를 그대로 쓴다).
+  const block = onDemandVcBlock(vcCfg);
+  if (block) return { av: { state: 'blocked', reason: block.reason, ...(block.skipReason ? { skipReason: block.skipReason } : { authStopped: block.authStopped }) }, vcCfg: null };
+  return { av: { state: 'ok' }, vcCfg };
+}
+
 async function buildVmExportFresh(vcenterId) {
   const snap = store.get();
   const vc = (snap.vcenters || []).find((v) => v.id === vcenterId);
   const vms = (snap.vms || []).filter((v) => v.vcenterId === vcenterId);
   const vcName = vc?.name || vcenterId;
 
-  // 라이브 보강 — 실패해도 export 는 스냅샷 필드로 계속(사유 동봉).
-  let details = new Map();
+  // 라이브 보강 — 실패해도 내보내기는 다른 출처로 계속(사유 동봉).
+  const details = new Map();
   let enriched = false;
   let enrichError = '';
   let enrichBlocked = null;   // v2.742(VC-03): 로그인하지 않은(또는 거부된) 사유 — { skipReason } | { authStopped }
-  if (snap.source === 'mock') {
-    enrichError = '데모 모드 — 라이브 상세(NIC/디스크/게스트 파티션) 미조회';
+  const { av, vcCfg } = liveGate(vcenterId, snap);
+  if (av.state !== 'ok') {
+    enrichError = av.state === 'blocked' ? `${av.reason} — 실시간 보강을 조회하지 않고 캐시 값으로 내보냅니다` : av.reason;
+    if (av.state === 'blocked') enrichBlocked = av.skipReason ? { skipReason: av.skipReason } : { authStopped: av.authStopped };
   } else {
-    const vcCfg = loadVcenterConfig().vcenters.find((v) => v.id === vcenterId);
-    // v2.742(감사 VC-03): 비활성·점검중·엣지 위임·인증 정지 vCenter 에는 라이브 보강 로그인을 하지 않는다(판정은 dsBrowse.js
-    //   onDemandVcBlock — collectTarget·authStopGate 를 그대로 쓴다). 내보내기 자체는 스냅샷 필드로 계속하고 사유를 싣는다.
-    const block = vcCfg ? onDemandVcBlock(vcCfg) : null;
-    if (!vcCfg) {
-      enrichError = 'vCenter 접속 정보 없음 — 스냅샷 필드만 내보냅니다';
-    } else if (block) {
-      enrichError = `${block.reason} — 라이브 상세(NIC/디스크/게스트 파티션)를 조회하지 않고 스냅샷 필드만 내보냅니다`;
-      enrichBlocked = block.skipReason ? { skipReason: block.skipReason } : { authStopped: block.authStopped };
-    } else {
-      try {
-        // vc.id 에는 콜론이 있을 수 있어 split(':') 금지 — 알려진 프리픽스 길이로 잘라낸다.
-        const morefs = vms.map((v) => v.id.slice(vcenterId.length + 1)).filter(Boolean);
-        if (morefs.length) details = await collectDetails(vcCfg, morefs);
-        enriched = true;
-      } catch (e) {
-        // 로그인 거부(자격증명)는 주 폴러와 같은 정지 기록에 올린다 — 다음 내보내기는 로그인하지 않는다.
-        const le = onDemandLoginError(vcCfg, e);
-        if (le !== e && le.authStopped) enrichBlocked = { authStopped: le.authStopped };
-        enrichError = `라이브 상세 조회 실패(${e.message}) — 스냅샷 필드만 내보냅니다`;
-      }
+    try {
+      // vc.id 에는 콜론이 있을 수 있어 split(':') 금지 — 알려진 프리픽스 길이로 잘라낸다.
+      const morefs = vms.map((v) => v.id.slice(vcenterId.length + 1)).filter(Boolean);
+      if (morefs.length) for (const [ref, props] of await collectDetails(vcCfg, morefs)) details.set(ref, compactLive(props));
+      enriched = true;
+    } catch (e) {
+      // 로그인 거부(자격증명)는 주 폴러와 같은 정지 기록에 올린다 — 다음 내보내기는 로그인하지 않는다.
+      const le = onDemandLoginError(vcCfg, e);
+      if (le !== e && le.authStopped) enrichBlocked = { authStopped: le.authStopped };
+      enrichError = `실시간 보강 실패(${String(e?.message || e).slice(0, 300)}) — 캐시 값으로 내보냅니다`;
     }
   }
-
-  const ctx = { vcName };
-  const rows = vms.map((vm) => {
-    const props = details.get(vm.id.slice(vcenterId.length + 1)) || {};
-    const { nics, disks } = parseVmDevices(props['config.hardware.device']);
-    // 슬롯 배치는 라벨 자연순(Hard disk 1, 2, … 10) — 디바이스 XML 순서가 라벨 순과 다른
-    // 드문 구성에서도 '디스크1' 슬롯이 Hard disk 1 을 가리키게 한다(numeric 비교로 10>2 오정렬 방지).
-    disks.sort((a, b) => String(a.label).localeCompare(String(b.label), undefined, { numeric: true }));
-    const guest = parseGuestDisks(props['guest.disk']);
-    const d = { props, nics, disks, guest, enriched };
-    const row = {};
-    for (const col of VM_EXPORT_COLUMNS) row[col.key] = col.get(vm, d, ctx);
-    return row;
-  });
-  rows.sort((a, b) => String(a.name).localeCompare(String(b.name)));
-  return { vcenterId, vcenterName: vcName, enriched, enrichError, ...(enrichBlocked ? { enrichBlocked } : {}), total: rows.length, columns: VM_EXPORT_COLUMNS.map((c) => ({ key: c.key, label: c.label })), rows };
+  return { vcenterId, vcenterName: vcName, enriched, enrichError, ...(enrichBlocked ? { enrichBlocked } : {}), total: vms.length, details };
 }
 
-/** export 결과 → CSV 문자열(UTF-8 BOM + 수식 인젝션 가드 — 엑셀에서 한글/보안 안전). */
-export function vmExportCsv(result) {
-  const lines = [csvLine(VM_EXPORT_COLUMNS.map((c) => c.label))];
-  for (const row of result.rows) lines.push(csvLine(VM_EXPORT_COLUMNS.map((c) => row[c.key])));
-  return CSV_BOM + lines.join('\r\n') + '\r\n';
+/** 게스트 파티션(수집 DB) — { collected:Set<vmId>, byVm:Map<vmId, parts[]> } | null(DB 없음·읽기 실패). 실시간 guest.disk 와 같은 모양으로 바꾼다. */
+async function partsFromDb(vcenterId) {
+  try {
+    const p = await partsForVcenter(vcenterId);
+    if (!p) return null;
+    const byVm = new Map();
+    for (const [vmId, rows] of p.byVm) {
+      byVm.set(vmId, rows.map((r) => {
+        const known = r.capGB != null && r.usedGB != null;
+        return { path: r.path, capacityGB: r.capGB, usedGB: known ? r.usedGB : null, freeGB: known ? Math.round((r.capGB - r.usedGB) * 10) / 10 : null, ...(r.fs ? { fs: r.fs } : {}) };
+      }));
+    }
+    return { collected: p.collected, byVm, ts: p.ts };
+  } catch { return null; }
+}
+
+// 구성 캐시 디스크(vmcfg parseVmDeviceHygiene) → 실시간 디스크와 같은 모양. 파일 경로·thin 은 캐시에 없다(null = 모름).
+const cacheDisk = (x) => ({ label: x.label || '', capacityGB: x.capacityGB ?? null, thin: null, rdm: x.rdm === true, mode: x.mode || '', datastore: x.datastore || '', fileName: null, sharing: x.sharing || null });
+const DEV_LIST_MAX = 32;
+
+/**
+ * VM 한 대의 출처 묶음(vmExportCatalog 의 d). 실시간 값이 있으면 그것, 없으면 캐시.
+ * @param {object} vm 스냅샷 VM
+ * @param {{ vcenterId:string, live:object|null, partsDb:object|null, tagInv:object|null, liveMiss:string }} src
+ */
+export function rowContext(vm, src) {
+  const ref = vm.id.slice(src.vcenterId.length + 1);
+  const lv = src.live ? src.live.get(ref) || null : null;
+  const d = { live: !!lv, props: lv?.props || {}, nics: lv ? lv.nics : null, liveMiss: src.liveMiss, cfg: vm.cfg || null, dev: vm.dev || null, tg: null };
+  if (lv && Array.isArray(lv.disks)) { d.disks = lv.disks; d.diskSrc = 'live'; }
+  else if (vm.dev && Array.isArray(vm.dev.disks)) {
+    d.disks = vm.dev.disks.map(cacheDisk).sort(labelCmp);
+    d.diskSrc = 'cache';
+    // 장치 목록은 종류마다 32개까지만 싣는다(omitted) — 그때 디스크 수·합계는 모른다.
+    d.disksPartial = Number(vm.dev.omitted) > 0 && vm.dev.disks.length >= DEV_LIST_MAX;
+  } else { d.disks = null; d.diskSrc = null; }
+  if (lv) d.guest = lv.guest;
+  else if (src.partsDb) d.guest = src.partsDb.collected.has(vm.id) ? (src.partsDb.byVm.get(vm.id) || []) : null;
+  else d.guest = null;
+  if (src.tagInv) d.tg = vmTagsOf(src.tagInv, vmRefOf(src.vcenterId, vm.id) || ref);
+  return d;
+}
+
+const nameCmp = (a, b) => String(a.name).localeCompare(String(b.name));
+
+/**
+ * 고른 항목의 표 — CSV·엑셀·미리보기가 같은 함수(v2.799).
+ * @param {string} vcenterId 라우트가 scope 를 이미 확인한 vCenter
+ * @param {{ keys:string[], live?:boolean, disk?:'slots'|'join', tagCols?:boolean, target?:'all'|'on'|'folder', folder?:string, tmpl?:boolean,
+ *           ids?:string[], preview?:boolean, limit?:number, now?:number, maybeYield?:()=>Promise<void> }} sel
+ * @returns {Promise<{ head:string[], cells:any[][], cols:Array<{key,item,h,group,src}>, meta:object }>}
+ */
+export async function buildVmExportTable(vcenterId, sel) {
+  const now = sel.now ?? Date.now();
+  const maybeYield = sel.maybeYield || (async () => {});
+  const snap = store.get();
+  const vc = (snap.vcenters || []).find((v) => v.id === vcenterId) || { id: vcenterId };
+  const vcName = vc.name || vcenterId;
+  const all = (snap.vms || []).filter((v) => v.vcenterId === vcenterId);
+  const ids = Array.isArray(sel.ids) ? new Set(sel.ids.filter((x) => typeof x === 'string')) : null;
+  let list = all.filter((vm) => (sel.tmpl === false ? vm.template !== true : true)
+    && (sel.target === 'on' ? vm.powerState === 'POWERED_ON' : true)
+    && (sel.target === 'folder' ? inFolder(vm, sel.folder || '') : true)
+    && (ids ? ids.has(vm.id) : true));
+  list.sort(nameCmp);
+  const matched = list.length;   // 대상 조건에 맞는 VM 수(미리보기는 앞 몇 대만 만든다)
+  if (Number.isInteger(sel.limit) && sel.limit >= 0) list = list.slice(0, sel.limit);
+
+  const need = needsOf(sel.keys);
+  let L = null;
+  let live;
+  if (!sel.live) live = { state: 'off' };
+  else if (!need.has('live')) live = { state: 'unused' };
+  else if (sel.preview) live = { state: 'preview', ...liveStateOf(liveAvailability(vcenterId, snap)) };
+  else {
+    L = await buildVmExport(vcenterId);
+    const got = L.enriched ? list.filter((vm) => L.details.has(vm.id.slice(vcenterId.length + 1))).length : 0;
+    live = L.enriched ? { state: 'ok', vms: got, rows: list.length } : { state: L.enrichBlocked ? 'blocked' : 'failed', reason: L.enrichError, ...(L.enrichBlocked || {}) };
+  }
+  const partsDb = need.has('parts') ? await partsFromDb(vcenterId) : null;
+  const tagInv0 = need.has('tags') ? (vc.tagInv || null) : null;
+  const tagState = tagStateOf(tagInv0);
+  const tagInv = tagInv0 && ['ok', 'stale'].includes(tagState) ? tagInv0 : null;
+
+  let levels = 1;
+  for (const vm of list) levels = Math.max(levels, folderParts(vm.folder).length);
+  const o = {
+    vcName, offsetMin: DAY_OFFSET_MIN, now, disk: sel.disk === 'join' ? 'join' : 'slots', tagCols: sel.tagCols === true,
+    tagCategories: (tagInv?.categories || []).map((c) => c?.name), levels: Math.min(FOLDER_LEVELS_MAX, levels),
+  };
+  const cols = selectedColumns(sel.keys, o);
+  const src = { vcenterId, live: L?.enriched ? L.details : null, partsDb, tagInv, liveMiss: sel.preview && sel.live ? LIVE_LATER : MISSING };
+  const cells = [];
+  const filled = new Array(cols.length).fill(0);
+  for (const vm of list) {
+    await maybeYield();
+    const d = rowContext(vm, src);
+    const row = cols.map((c) => c.get(vm, d));
+    for (let i = 0; i < row.length; i++) { const v = row[i]; if (v !== '' && v != null && v !== MISSING && v !== LIVE_LATER) filled[i] += 1; }
+    cells.push(row);
+  }
+  return {
+    head: cols.map((c) => c.h),
+    cells,
+    cols: cols.map((c, i) => ({ key: c.key, item: c.item, h: c.h, group: c.group, src: c.src, filled: filled[i] })),
+    meta: {
+      vcenterId, vcenterName: vcName, total: all.length, matched, rows: list.length, live, at: now, offsetMin: DAY_OFFSET_MIN,
+      tags: need.has('tags') ? tagState : null, parts: need.has('parts') ? (partsDb ? 'ok' : 'unreadable') : null,
+    },
+  };
+}
+const liveStateOf = (av) => (av.state === 'ok' ? { can: true } : { can: false, reason: av.reason, ...(av.skipReason ? { skipReason: av.skipReason } : {}), ...(av.authStopped ? { authStopped: av.authStopped } : {}) });
+
+/**
+ * 화면 상태(GET /tools/vm-export/catalog) — 그 vCenter 의 출처마다 지금 상태. 로그인하지 않는다.
+ * 숫자는 모르면 null(0 이 아니다).
+ */
+export async function vmExportStatus(vcenterId) {
+  const snap = store.get();
+  const vc = (snap.vcenters || []).find((v) => v.id === vcenterId) || {};
+  const vms = (snap.vms || []).filter((v) => v.vcenterId === vcenterId);
+  const av = liveAvailability(vcenterId, snap);
+  let partsOn = null;
+  try { partsOn = loadGuestDiskSettings()?.enabled === true; } catch { partsOn = null; }
+  const pdb = await partsFromDb(vcenterId);
+  const partVms = pdb ? pdb.collected.size : null;
+  const partAt = pdb ? pdb.ts : null;
+  const inv = vc.tagInv || null;
+  return {
+    vcenterId, vcenterName: vc.name || vcenterId,
+    vmTotal: vms.length, vmOn: vms.filter((v) => v.powerState === 'POWERED_ON').length, templates: vms.filter((v) => v.template === true).length,
+    invAt: snap.generatedAt || null,
+    cfgVms: vms.filter((v) => v.cfg).length, devVms: vms.filter((v) => v.dev).length,
+    live: { state: av.state, ...(av.reason ? { reason: av.reason } : {}), ...(av.skipReason ? { skipReason: av.skipReason } : {}), ...(av.authStopped ? { authStopped: av.authStopped } : {}) },
+    parts: { on: partsOn, vms: partVms, at: partAt },
+    tags: { state: tagStateOf(inv), at: inv?.tagsAt ?? null, categories: Array.isArray(inv?.categories) ? inv.categories.length : 0 },
+    folders: folderOptions(vms),
+  };
 }
