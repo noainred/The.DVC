@@ -236,21 +236,24 @@ export default function BackupDetailTool({ scope }) {
           {checked.size > 0 && <button type="button" className="tab" onClick={() => setChecked(new Set())} style={{ padding: '3px 10px', fontSize: 12 }}>선택 해제</button>}
           <span style={{ width: 1, height: 18, background: 'var(--border)' }} aria-hidden="true" />
           {/* v2.803(Chromium 판독): 라벨과 그 버튼을 한 묶음으로 — 줄이 꺾일 때 라벨만 홀로 남지 않게 */}
+          <span className="flex" style={{ gap: 6, alignItems: 'flex-start', flexWrap: 'nowrap', minWidth: 0, maxWidth: '100%' }}>
+          <span className="muted" style={{ paddingTop: 4, whiteSpace: 'nowrap' }}>중요도</span>
           <span className="flex" style={{ gap: 6, alignItems: 'center', flexWrap: 'wrap', minWidth: 0 }}>
-          <span className="muted">중요도</span>
           {CRIT.map((c) => <button key={c.key} type="button" className="tab" disabled={!checked.size || saving} onClick={() => saveMarks([...checked], { crit: c.key })} style={{ padding: '3px 9px', fontSize: 12, display: 'inline-flex', alignItems: 'center', gap: 4 }}><CritIcon crit={c.key} withText /></button>)}
           <button type="button" className="tab" disabled={!checked.size || saving} onClick={() => saveMarks([...checked], { crit: '' })} style={{ padding: '3px 9px', fontSize: 12 }}>지움</button>
-          </span>
+          </span></span>
+          <span className="flex" style={{ gap: 6, alignItems: 'flex-start', flexWrap: 'nowrap', minWidth: 0, maxWidth: '100%' }}>
+          <span className="muted" style={{ paddingTop: 4, whiteSpace: 'nowrap' }}>백업 방식</span>
           <span className="flex" style={{ gap: 6, alignItems: 'center', flexWrap: 'wrap', minWidth: 0 }}>
-          <span className="muted">백업 방식</span>
           {METHODS.map((x) => <button key={x.key} type="button" className="tab" disabled={!checked.size || saving} onClick={() => saveMarks([...checked], { method: x.key })} style={{ padding: '3px 7px', fontSize: 12 }}><MethodBadge method={x.key} small /></button>)}
           <button type="button" className="tab" disabled={!checked.size || saving} onClick={() => saveMarks([...checked], { method: '' })} style={{ padding: '3px 9px', fontSize: 12 }}>지움</button>
-          </span>
+          </span></span>
+          <span className="flex" style={{ gap: 6, alignItems: 'flex-start', flexWrap: 'nowrap', minWidth: 0, maxWidth: '100%' }}>
+          <span className="muted" style={{ paddingTop: 4, whiteSpace: 'nowrap' }}>백업 필요</span>
           <span className="flex" style={{ gap: 6, alignItems: 'center', flexWrap: 'wrap', minWidth: 0 }}>
-          <span className="muted">백업 필요</span>
           <button type="button" className="tab" disabled={!checked.size || saving} onClick={() => saveMarks([...checked], { need: true })} style={{ padding: '3px 9px', fontSize: 12, display: 'inline-flex', alignItems: 'center', gap: 4 }}><NeedIcon size={13} />표시</button>
           <button type="button" className="tab" disabled={!checked.size || saving} onClick={() => saveMarks([...checked], { need: false })} style={{ padding: '3px 9px', fontSize: 12 }}>해제</button>
-          </span>
+          </span></span>
           {saving && <span className="muted">저장 중…</span>}
           {saveErr && <span style={{ color: '#fca5a5', overflowWrap: 'anywhere', minWidth: 0 }}>저장 실패 — {saveErr?.status === 403 ? '수정 권한이 없습니다.' : String(saveErr.message || saveErr)}</span>}
         </div>
@@ -353,8 +356,8 @@ export default function BackupDetailTool({ scope }) {
                   {/* v2.784: 백업 표시 — 편집 가능하면 바로 저장(중요도·백업 필요), 메모는 저장 버튼 */}
                   <div data-backup-mark-edit="" style={{ borderTop: '1px solid var(--border-soft)', paddingTop: 10, display: 'flex', flexDirection: 'column', gap: 8, fontSize: 13 }}>
                     <b style={{ fontSize: 13 }}>백업 표시</b>
-                    <div className="flex wrap" style={{ gap: 6, alignItems: 'center' }}>
-                      <span className="muted" style={{ fontSize: 12, minWidth: 56 }}>업무 중요도</span>
+                    <div className="flex" style={{ gap: 6, alignItems: 'flex-start' }}>
+                      <span className="muted" style={{ fontSize: 12, minWidth: 56, paddingTop: 4 }}>업무 중요도</span>
                       <span className="flex wrap" style={{ gap: 6, alignItems: 'center', flex: '1 1 0', minWidth: 0 }}>{/* v2.803: 버튼이 꺾여도 라벨 칸 아래로 내려가지 않게 */}
                       {writable ? [...CRIT, { key: '', text: '없음' }].map((c) => {
                         const on = (selVm.m?.crit || '') === c.key;
@@ -363,8 +366,8 @@ export default function BackupDetailTool({ scope }) {
                       </span>
                     </div>
                     {/* v2.803 백업 방식(사람이 정한 값) — 업무 중요도 다음 */}
-                    <div className="flex wrap" style={{ gap: 6, alignItems: 'center' }} data-backup-method-edit="">
-                      <span className="muted" style={{ fontSize: 12, minWidth: 56 }}>백업 방식</span>
+                    <div className="flex" style={{ gap: 6, alignItems: 'flex-start' }} data-backup-method-edit="">
+                      <span className="muted" style={{ fontSize: 12, minWidth: 56, paddingTop: 4 }}>백업 방식</span>
                       <span className="flex wrap" style={{ gap: 6, alignItems: 'center', flex: '1 1 0', minWidth: 0 }}>
                       {writable ? [...METHODS, { key: '', text: '없음' }].map((x) => {
                         const on = (selVm.m?.method || '') === x.key;
