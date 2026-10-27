@@ -13,7 +13,7 @@ import { logAudit } from '../../audit.js';
 import { loadVcenterConfig } from '../../config.js';
 import { getDataSource } from '../../runtime-settings.js';
 import { listInventory } from '../../central/inventory.js';
-import { listJobs, saveJob, deleteJob, jobVmIds, getJob, isDelegatedJob } from '../../vmclone/store.js';
+import { listJobs, saveJob, deleteJob, jobVmIds, getJob, isDelegatedJob, HISTORY_MAX } from '../../vmclone/store.js';
 import { enqueueRun } from '../../vmclone/runner.js';
 import { schedulerStatus } from '../../vmclone/scheduler.js';
 import { listMounts } from '../../system/nfsMounts.js';
@@ -213,7 +213,8 @@ api.get('/tools/vm-clone', adminOnly, (req, res) => {
     nfsDatastores,
     ops: listOpsView({ allowed }),
     ...(corpMountsLoadError() ? { corpMountsError: corpMountsLoadError().reason } : {}),
-    limits: { verifyTimeoutMin: VERIFY_TIMEOUT_MIN, opPendingMin: Math.round(PENDING_TTL_MS / 60_000), opClaimMin: Math.round(CLAIM_MS / 60_000) },
+    // v2.797 historyMax: 화면의 14일 실행 격자가 '잡당 최근 N회만 남은 이력' 으로 잘린 날을 0 이 아니라 '일부' 로 표시한다(숫자를 화면에 박지 않는다).
+    limits: { verifyTimeoutMin: VERIFY_TIMEOUT_MIN, opPendingMin: Math.round(PENDING_TTL_MS / 60_000), opClaimMin: Math.round(CLAIM_MS / 60_000), historyMax: HISTORY_MAX },
   });
 });
 

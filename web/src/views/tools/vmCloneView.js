@@ -260,3 +260,161 @@ export function rpoText(rpo, now = Date.now()) {
   return rpo.lastOkAt ? `RPO 초과 · 마지막 성공 ${agoText(rpo.lastOkAt, now)}${h ? `(주기 ${h}시간)` : ''}` : `RPO 초과 · 성공한 백업 없음${h ? `(주기 ${h}시간)` : ''}`;
 }
 export const rpoOverdueCount = (jobs) => (Array.isArray(jobs) ? jobs : []).filter((j) => j?.rpo?.overdue).length;
+
+// ───────────── v2.797 화면 개편(디자인 캔버스 'VM 백업 센터 디자인 v2' ①~⑥) — 새 시각 요소의 계산은 전부 여기 ─────────────
+
+/** 남은 시간 문구('N분/시간/일 뒤'). 이미 지났으면 ''. */
+export function untilText(ts, now = Date.now()) {
+  const t = Number(ts);
+  if (!t || !Number.isFinite(t) || t <= now) return '';
+  const s = Math.round((t - now) / 1000);
+  if (s < 60) return '1분 안';
+  if (s < 3600) return `${Math.round(s / 60)}분 뒤`;
+  if (s < 86400) return `${Math.round(s / 3600)}시간 뒤`;
+  return `${Math.round(s / 86400)}일 뒤`;
+}
+
+/**
+ * 보호 현황 링 — 서버 RPO 판정(jobs[].rpo) 그대로 센다. 판정이 없는 잡(수동만·비활성·멈춘 위임·시작 시각 모름)은
+ * 분모에 넣지 않고 따로 센다('못 읽은 값은 0 이 아니다'). judged 가 0 이면 pct 는 null(링에 '—').
+ */
+export function rpoSummary(jobs) {
+  let judged = 0; let ok = 0; let overdue = 0; let manual = 0; let unjudged = 0; let disabled = 0; let noReport = 0;
+  for (const j of Array.isArray(jobs) ? jobs : []) {
+    if (j?.exec && j.exec.where === 'edge' && !j.exec.reported) noReport++;
+    if (j?.enabled === false) { disabled++; continue; }
+    if (j?.rpo) { judged++; if (j.rpo.overdue) overdue++; else ok++; continue; }
+    if (!j?.schedule?.mode || j.schedule.mode === 'manual') manual++; else unjudged++;
+  }
+  return { judged, ok, overdue, manual, unjudged, disabled, noReport, pct: judged ? Math.round((ok / judged) * 100) : null };
+}
+
+const pad2 = (n) => String(n).padStart(2, '0');
+/** 브라우저 시각 기준 그날 0시(ms). */
+const dayStart = (ts) => { const d = new Date(ts); d.setHours(0, 0, 0, 0); return d.getTime(); };
+
+/**
+ * 최근 days 일의 일별 백업 실행 수(오래된 날 → 오늘). 검증·복구는 넣지 않는다.
+ * 이력은 잡마다 최근 historyMax 회만 남는다(서버 limits.historyMax) — 이력이 가득 찬 잡의 가장 오래된 기록보다 앞선 날은
+ * 그 잡의 실행이 빠졌을 수 있으므로 partial 로 표시한다(세지 못한 것을 0 으로 보이지 않게). historyMax 를 모르면 판정하지 않는다.
+ */
+export function dayCounts(jobs, now = Date.now(), days = 14, { historyMax = null } = {}) {
+  const today = dayStart(now);
+  const out = [];
+  for (let i = days - 1; i >= 0; i--) {
+    // 날짜 산술은 Date 로(서머타임 지역에서 24시간 ≠ 하루).
+    const d = new Date(today); d.setDate(d.getDate() - i);
+    const start = d.getTime(); const e = new Date(d); e.setDate(e.getDate() + 1);
+    out.push({ start, end: e.getTime(), label: `${pad2(d.getMonth() + 1)}.${pad2(d.getDate())}`, ok: 0, warn: 0, fail: 0, skip: 0, total: 0, partial: false });
+  }
+  const from = out[0].start;
+  let cutoff = null; // 이 시각 이전은 일부 잡의 이력이 잘렸을 수 있다
+  const max = Number(historyMax);
+  for (const j of Array.isArray(jobs) ? jobs : []) {
+    const hist = Array.isArray(j?.history) ? j.history : [];
+    if (Number.isFinite(max) && max > 0 && hist.length >= max) {
+      const oldest = hist.reduce((m, h) => (h?.at && (m == null || h.at < m) ? h.at : m), null);
+      if (oldest != null && (cutoff == null || oldest > cutoff)) cutoff = oldest;
+    }
+    for (const h of backupRuns(j)) {
+      const at = Number(h?.at);
+      if (!at || at < from || at > now) continue;
+      const day = out.find((x) => at >= x.start && at < x.end);
+      if (!day) continue;
+      const t = runTone(h);
+      if (t === 'ok' || t === 'warn' || t === 'fail' || t === 'skip') day[t]++;
+      if (t !== 'skip') day.total++;
+    }
+  }
+  if (cutoff != null) for (const x of out) if (x.start < cutoff) x.partial = true;
+  return out;
+}
+
+/** 실행 단계 문구 끝의 진행률('클론 → ds · 42%') — 없으면 null(진행률을 지어내지 않는다). */
+export function progressOf(phase) {
+  const m = /·\s?(\d{1,3})%$/.exec(String(phase || '').slice(-12));
+  if (!m) return null;
+  const n = Number(m[1]);
+  return n >= 0 && n <= 100 ? n : null;
+}
+
+/** v2.797 잡 표 필터 칩 — 전체 · 실패 · RPO 초과 · 검증 실패 · 비활성. */
+export const JOB_FILTERS = Object.freeze([['all', '전체'], ['fail', '실패'], ['rpo', 'RPO 초과'], ['verifyFail', '검증 실패'], ['off', '비활성']]);
+const JOB_FILTER_TEST = {
+  all: () => true,
+  fail: (j) => { const s = jobState(j); return s === 'fail' || s === 'problem'; },
+  rpo: (j) => !!j?.rpo?.overdue,
+  verifyFail: (j) => { const v = lastVerify(j); return !!v && !v.ok; },
+  off: (j) => j?.enabled === false,
+};
+export function jobFilter(jobs, f = 'all') {
+  const xs = Array.isArray(jobs) ? jobs : [];
+  return xs.filter(JOB_FILTER_TEST[f] || JOB_FILTER_TEST.all);
+}
+export function jobFilterCounts(jobs) {
+  return Object.fromEntries(JOB_FILTERS.map(([k]) => [k, jobFilter(jobs, k).length]));
+}
+
+/**
+ * 다음 실행 문구 — 'N시간 간격' 만 계산한다(서버 isDue 와 같은 규칙: 마지막 실행 + N시간). '매일 HH:MM' 은 **포탈 시각**이라
+ * 브라우저 시각으로 다시 계산하면 시간대가 다른 PC 에서 틀린다 — 스케줄 문구가 이미 시각을 말하므로 ''.
+ */
+export function nextRunText(job, now = Date.now()) {
+  if (!job || job.enabled === false || job.schedule?.mode !== 'interval') return '';
+  const h = Number(job.schedule.hours);
+  const last = Number(job.lastRun?.at);
+  if (!Number.isFinite(h) || h <= 0) return '';
+  if (!last) return '첫 실행 대기';
+  const next = last + h * 3_600_000;
+  return next <= now ? '주기 도래 · 곧 실행' : `${untilText(next, now)} 실행`;
+}
+
+/**
+ * 세션 단계 간트 — 끝난 실행의 phases 를 누적 시각으로 배치한다(left·width %). ms 를 모르는 단계는 폭 0 으로 두고 시간 칸에 '—'.
+ */
+export function ganttRows(entry) {
+  const ph = Array.isArray(entry?.phases) ? entry.phases : [];
+  const total = ph.reduce((a, p) => a + (Number(p?.ms) > 0 ? Number(p.ms) : 0), 0);
+  let acc = 0;
+  const rows = ph.map((p) => {
+    const ms = Number(p?.ms) > 0 ? Number(p.ms) : null;
+    const left = total ? (acc / total) * 100 : 0;
+    const width = total && ms ? Math.max(0.8, (ms / total) * 100) : 0;
+    acc += ms || 0;
+    return { name: p?.n || '—', ms, state: p?.ok === false ? 'fail' : 'done', left: Math.min(100, left), width: Math.min(100 - Math.min(100, left), width) };
+  });
+  return { rows, totalMs: total };
+}
+
+/**
+ * 복원 지점 가로 타임라인 — 최근 max 개를 가장 오래된 지점 ~ 지금 사이에 놓는다(left %). 시각 모르는 사본은 빼고 따로 센다.
+ * tone: ok(부팅 확인) · fail(검증 실패) · none(미검증). latest: 가장 최근 지점.
+ */
+export function pointTimeline(clones, now = Date.now(), max = 12) {
+  const all = Array.isArray(clones) ? clones : [];
+  const known = all.filter((c) => Number(c?.at) > 0).sort((a, b) => a.at - b.at).slice(-max);
+  const unknown = all.filter((c) => !(Number(c?.at) > 0)).length;
+  if (!known.length) return { points: [], from: null, to: now, unknown };
+  const from = known[0].at;
+  const to = Math.max(now, known[known.length - 1].at);
+  const span = Math.max(to - from, 3_600_000);
+  const points = known.map((c, i) => ({
+    ref: c.ref, at: c.at, left: known.length === 1 ? 50 : Math.min(100, Math.max(0, ((c.at - from) / span) * 100)),
+    tone: c.verify ? (c.verify.ok ? 'ok' : 'fail') : 'none', latest: i === known.length - 1,
+  }));
+  return { points, from, to, unknown };
+}
+
+/**
+ * 저장소 미터 — 지금 쓰는 양 + 이번에 들어갈 양을 전체 대비 %로. 전체·여유를 모르면 null(막대를 그리지 않는다).
+ * needGB 를 모르면 used 만. over: 들어갈 양이 여유보다 크다.
+ */
+export function meterOf({ capacityGB, freeGB, needGB = null } = {}) {
+  const cap = capacityGB == null ? NaN : Number(capacityGB); const free = freeGB == null ? NaN : Number(freeGB);
+  if (!Number.isFinite(cap) || cap <= 0 || !Number.isFinite(free) || free < 0) return null;
+  const used = Math.max(0, Math.min(cap, cap - free));
+  const need = needGB == null || !Number.isFinite(Number(needGB)) || Number(needGB) < 0 ? null : Number(needGB);
+  const usedPct = (used / cap) * 100;
+  const needPct = need == null ? 0 : Math.min(100 - usedPct, (need / cap) * 100);
+  return { usedPct: Math.round(usedPct * 10) / 10, needPct: Math.round(needPct * 10) / 10, over: need != null && need > free, freeGB: free, capacityGB: cap };
+}
