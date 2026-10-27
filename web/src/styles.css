@@ -1925,6 +1925,70 @@ tr.row-sel > td { background: rgba(59, 130, 246, .10); }
 @media (min-width: 721px) {
   .ht-more-narrow { display: none; }
 }
+/* ── v2.803 ESXi 호스트 — 엑셀 수준 상세(디자인 캔버스 'ESXi 호스트 화면 시안 — 엑셀 수준 상세' ①~③) — 포탈 토큰만 쓴다 ── */
+.ht-top { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 10px 16px; margin-bottom: 12px; }
+.ht-title { display: flex; flex-wrap: wrap; align-items: baseline; gap: 10px; min-width: 0; }
+.ht-title > b { font-size: 20px; letter-spacing: -0.01em; }
+.ht-title .muted { font-size: 12.5px; }
+.ht-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.ht-pick { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 10px; padding: 8px 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--panel); font-size: 12.5px; }
+.ht-kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(128px, 1fr)); gap: 10px; margin-bottom: 12px; } /* 1440 에서 8칸 한 줄(사이드바 236px 빼고 약 1150px) */
+.ht-kpi { display: flex; flex-direction: column; gap: 3px; min-width: 0; padding: 11px 13px; border: 1px solid var(--border); border-radius: 10px; background: var(--panel); }
+.ht-kpi-l { font-size: 11px; color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ht-kpi-v { display: flex; align-items: baseline; gap: 5px; min-width: 0; font-size: 21px; font-weight: 700; font-variant-numeric: tabular-nums; letter-spacing: -0.01em; }
+.ht-kpi-v small { font-size: 11px; font-weight: 500; color: var(--text-dim); }
+.ht-kpi-bar { display: block; height: 4px; border-radius: 2px; background: var(--border-soft); overflow: hidden; }
+.ht-kpi-bar > i { display: block; height: 100%; border-radius: 2px; }
+.ht-kpi-s { font-size: 11px; color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ht-kpi-ver { display: flex; flex-wrap: wrap; gap: 4px; white-space: normal; }
+.ht-kpi-ver .badge { font-size: 10px; padding: 0 5px; }
+.ht-checks { display: flex; flex-direction: column; gap: 10px; margin-bottom: 12px; }
+.ht-checks .ht-cards { margin-bottom: 0; }
+.ht-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.ht-chipbtn { display: inline-flex; align-items: center; gap: 7px; min-height: 30px; padding: 0 10px; border-radius: 15px; border: 1px solid var(--border); background: var(--panel-deep); color: var(--text); font: inherit; font-size: 12px; cursor: pointer; white-space: nowrap; }
+.ht-chipbtn:hover:not(:disabled) { border-color: var(--accent); }
+.ht-chipbtn:disabled { cursor: default; color: var(--text-dim); }
+.ht-gdot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; flex: none; }
+.ht-col { display: inline-flex; align-items: center; gap: 5px; }
+.ht-groups { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-bottom: 8px; font-size: 12px; }
+.ht-group { display: inline-flex; align-items: center; gap: 6px; min-height: 28px; padding: 0 10px; border-radius: 14px; border: 1px solid var(--border); background: var(--panel-deep); color: var(--text-dim); font: inherit; font-size: 11.5px; font-weight: 600; cursor: pointer; white-space: nowrap; }
+.ht-group-on { color: var(--text); background: rgba(59, 130, 246, .10); border-color: rgba(59, 130, 246, .5); }
+.ht-group:disabled { cursor: default; opacity: .85; }
+.ht-groups-note { margin-left: auto; font-size: 11.5px; }
+.ht-table th, .ht-table td { white-space: nowrap; }
+/* 첫 열(호스트 이름)은 가로 스크롤 중에도 고정 — 래퍼(.table-wrap)가 스크롤 컨테이너다 */
+.ht-table th:first-child, .ht-table td:first-child { position: sticky; left: 0; z-index: 1; background: var(--panel); box-shadow: 1px 0 0 var(--border-soft); }
+.ht-table thead th:first-child { z-index: 2; }
+.ht-link { text-decoration: none; }
+/* 호스트 상세 전체 페이지(#/hosts/<id>) */
+.hd { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.hd-top { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 10px 16px; }
+.hd-title { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+.hd-back { font-size: 12px; text-decoration: none; color: var(--accent-2); }
+.hd-name { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-width: 0; }
+.hd-name > b { font-size: 20px; letter-spacing: -0.01em; overflow-wrap: anywhere; }
+.hd-sub { font-size: 12px; overflow-wrap: anywhere; }
+.hd-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.hd-vmbtn { min-height: 34px; padding: 0 12px; border-radius: 16px; border: 1px solid rgba(56,189,248,.45); background: rgba(56,189,248,.12); color: #7dd3fc; font: inherit; font-weight: 700; cursor: pointer; white-space: nowrap; }
+.hd-nav { display: flex; flex-wrap: wrap; gap: 6px; }
+.hd-nav > a { display: inline-flex; align-items: center; gap: 6px; min-height: 30px; padding: 0 12px; border-radius: 15px; border: 1px solid var(--border); background: var(--panel); color: var(--text); text-decoration: none; font-size: 12px; font-weight: 600; }
+.hd-nav > a:hover { border-color: var(--accent); }
+.hd-kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
+.hd-kpi-v { font-size: 18px; }
+.hd-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(480px, 100%), 1fr)); gap: 12px; align-items: start; }
+.hd-col { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.hd-card { padding: 12px 14px; min-width: 0; overflow: hidden; }
+.hd-card-h { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 6px 10px; margin-bottom: 8px; font-size: 13.5px; }
+.hd-card-h > b { display: inline-flex; align-items: center; gap: 8px; }
+.hd-card-h .muted { font-size: 11.5px; min-width: 0; overflow-wrap: anywhere; }
+.hd-flat > div { margin-top: 0 !important; }
+.hd-rows { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(260px, 100%), 1fr)); gap: 0 24px; white-space: normal; }
+.hd-boot { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; font-size: 12.5px; }
+.hd-note { font-size: 11.5px; margin-top: 8px; line-height: 1.5; overflow-wrap: anywhere; }
+@media (max-width: 720px) {
+  .ht-kpis, .hd-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .ht-groups-note { margin-left: 0; }
+}
 /* v2.778.1: Veeam 서버 등록 — 표시 이름과 맞는 vCenter 체크 칸 강조(세 번 반짝인 뒤 테두리·배경만 남는다 · 움직임 줄이기 설정이면 반짝이지 않는다) */
 .vc-pick-match { border-color: #fbbf24 !important; background: rgba(251,191,36,.12); font-weight: 600; animation: vc-pick 0.9s ease-in-out 3; }
 @keyframes vc-pick { 0%,100% { box-shadow: 0 0 0 0 rgba(251,191,36,0); } 50% { box-shadow: 0 0 0 3px rgba(251,191,36,.5); } }

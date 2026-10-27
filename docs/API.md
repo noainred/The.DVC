@@ -22,10 +22,10 @@
 
 | 항목 | 값 |
 |---|---|
-| 엔드포인트 | **1082개** |
+| 엔드포인트 | **1084개** |
 | 마운트 그룹 | 14개 |
-| 라우트 파일 | 109개 |
-| GET | 578개 |
+| 라우트 파일 | 110개 |
+| GET | 580개 |
 | POST | 338개 |
 | PUT | 107개 |
 | PATCH | 2개 |
@@ -45,7 +45,7 @@
 | [`/api/ping`](#apiping) | 14 | 네트워크 Ping 모니터링(조회=인증, 대상 관리=관리자). |
 | [`/metrics`](#metrics) | 1 | Prometheus/OTel 익스포터(선택 토큰). |
 | [`/api/v1`](#apiv1) | 10 | **외부 포탈용 공개 조회 API**(v2.562). 전용 API 키(`X-Api-Key`)로 인증하고 조회 전용이다. 상세는 [API-PUBLIC.md](API-PUBLIC.md). |
-| [`/api`](#api) | 509 | 포탈 화면이 쓰는 **주 조회·작업 API**. `authMiddleware + requireEnrolled` 뒤이고, `/tools/*` 는 `toolGate` 가 사용자별 도구 권한을 집행한다. |
+| [`/api`](#api) | 511 | 포탈 화면이 쓰는 **주 조회·작업 API**. `authMiddleware + requireEnrolled` 뒤이고, `/tools/*` 는 `toolGate` 가 사용자별 도구 권한을 집행한다. |
 | [`/dl`](#dl) | 2 | 중앙 업그레이드 소스(`versions.json` + 번들). **공개**다. |
 
 ---
@@ -747,7 +747,9 @@ Prometheus/OTel 익스포터(선택 토큰).
 | GET | `/datastores/:id/browse` | 권한 `inv.datastores` | [server/src/routes/api/inventory.js:502](../server/src/routes/api/inventory.js#L502) |
 | GET | `/health` | — | [server/src/routes/api/overviewNsx.js:132](../server/src/routes/api/overviewNsx.js#L132) |
 | GET | `/hosts` | 권한 `inv.hosts` | [server/src/routes/api/inventory.js:337](../server/src/routes/api/inventory.js#L337) |
+| GET | `/hosts/:id` | 권한 `inv.hosts` | [server/src/routes/api/hostChecks.js:66](../server/src/routes/api/hostChecks.js#L66) |
 | GET | `/hosts/:id/metrics` | 권한 `inv.hosts` | [server/src/routes/api/vmMetrics.js:125](../server/src/routes/api/vmMetrics.js#L125) |
+| GET | `/hosts/checks` | 권한 `inv.hosts` | [server/src/routes/api/hostChecks.js:42](../server/src/routes/api/hostChecks.js#L42) |
 | GET | `/idrac/host-power` | 권한 `inv.hosts` | [server/src/routes/api/vmMetrics.js:213](../server/src/routes/api/vmMetrics.js#L213) |
 | GET | `/networks` | 권한 `inv.networks` | [server/src/routes/api/inventory.js:517](../server/src/routes/api/inventory.js#L517) |
 | GET | `/notices` | — | [server/src/routes/api/bulletin.js:103](../server/src/routes/api/bulletin.js#L103) |
