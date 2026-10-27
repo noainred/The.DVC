@@ -84,7 +84,11 @@ function writeFile() {
  *   관리자 저장(persistByAdmin)·'기본값으로 확정' 만 파일을 쓰고 오류를 푼다.
  */
 let _heldWarned = false;
+// v2.803: 잡·실행 기록이 바뀔 때마다 오른다 — 백업 현황 Detail 응답 캐시 키(Clone 칸이 실행 직후에도 낡지 않게). 메모리에만 둔 기록도 바뀐 것이다.
+let _rev = 0;
+export function jobsRev() { return _rev; }
 function persist() {
+  _rev++;
   load();
   if (_loadErr.get()) {
     if (!_heldWarned) { _heldWarned = true; console.warn('[vmclone] vm-clone.json 을 읽지 못한 상태라 실행 기록을 파일에 쓰지 않습니다(메모리에만) — 손상 보존본을 되돌리거나 VM 백업 화면에서 잡을 저장하면 다시 씁니다'); }
@@ -93,7 +97,7 @@ function persist() {
   writeFile();
 }
 /** 관리자 저장 — 쓰기에 성공하면 로드 오류를 푼다(그 저장이 지금 보이는 목록을 확정한다). */
-function persistByAdmin() { writeFile(); _loadErr.ok(); _heldWarned = false; }
+function persistByAdmin() { _rev++; writeFile(); _loadErr.ok(); _heldWarned = false; }
 
 const clampKeep = (n) => Math.max(1, Math.min(30, Math.floor(Number(n)) || 3));
 /** v2.794 보존 기간(일) — 0(또는 무효) = 끔, 1~365. */
@@ -578,6 +582,18 @@ export function pruneList(clones, keep, keepDays = 0, now = Date.now(), { protec
 export function lastVerifiedRef(clones) {
   const ok = (clones || []).filter((c) => c?.verify?.ok === true).sort((a, b) => (b.at || 0) - (a.at || 0));
   return ok[0]?.ref || '';
+}
+
+/**
+ * v2.803 백업 현황 Detail 'Clone' 칸 — 그 vCenter 의 잡을 vmId 로(꺼진 잡 포함 — 화면이 '꺼짐' 을 말한다). 잡 파일을 못 읽었으면 null(모름 — 빈 맵으로 '잡 없음' 을 지어내지 않는다).
+ * @returns {Map<string, object>|null}
+ */
+export function jobsByVm(vcenterId) {
+  const db = load();
+  if (_loadErr.get()) return null;
+  const out = new Map();
+  for (const j of db.jobs) if (j.vcenterId === vcenterId && j.vmId) out.set(j.vmId, j);
+  return out;
 }
 
 /** 트리 배지용 — vCenter 의 복제 잡 대상 vmId 목록(뷰가 'Clone' 아이콘 표시). */

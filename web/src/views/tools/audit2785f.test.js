@@ -23,7 +23,7 @@ describe('R-B2 표시 수 — 못 읽으면 0 이 아니라 모름', () => {
     expect(marksLine({ high: null, mid: 1, low: 0, need: null, needGap: 0 }).high).toBe(null);
   });
   it('읽은 값은 그대로 · 데이터 없음(옛 응답)은 null', () => {
-    expect(marksLine({ high: 1, mid: 0, low: 2, need: 3, needGap: null })).toEqual({ high: 1, mid: 0, low: 2, need: 3, needGap: null });
+    expect(marksLine({ high: 1, mid: 0, low: 2, need: 3, needGap: null })).toEqual({ high: 1, mid: 0, low: 2, need: 3, needGap: null, method: null });   // v2.803 옛 응답(method 없음)은 null
     expect(marksLine(null)).toBe(null);
     expect(marksLine({ high: 1, mid: 0, low: 0, need: 2, needGap: 1, needGapUnknown: 2 }).needGapUnknown).toBe(2);
   });

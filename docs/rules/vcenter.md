@@ -369,3 +369,14 @@
   · 데이터스토어는 '이 호스트 VM 의 디스크가 놓인 곳'(VM 장치 캐시)이다 — 호스트별 마운트 목록은 수집하지 않는다(VM 이 없는 데이터스토어는 나오지 않는다 — 읽는 법에 적었다).
     vmk(VMkernel) 목록도 수집하지 않아 관리 IP 만 싣는다.
   · 실측(목 데이터 복제): 300대 · VM 4,800대 — 내용 120ms(메인) · 워크북 3.2초(워커 3.8초) · 1.7MB. 30대 0.5초.
+- **v2.803 — 백업 현황 › Detail '백업 방식'(사람이 정한 값) · 표 6열(백업 = Veeam 또는 스냅샷 · Clone) · CSV·엑셀 반영**
+  (사용자 요청 "업무 중요도 다음 '백업 방식' — Veeam · Clone · Config 백업 · 백업 안함" + "작업 열 대신 Clone 열" + "스냅샷은 Veeam 이 없을 때 Veeam 자리에" + "CSV/Excel 에도" ·
+  시안 https://claude.ai/artifact/D9BQPJJdZ7XQ5iLr4F525V · 결정: 사람이 정한 값만(수집값으로 추정 안 함) · Clone 칸 = 복제 잡 마지막 실행 · 표준 검증.
+  회귀 `server/test/backupMethod2803.test.js`(변이 2/2 — method 검증 제거 · PUT 키 목록에서 method 제거) + 웹 `backupViewText.test.js` v2.803 묶음):
+  · 저장은 `veeam/backupMarks.js` 표시의 `method`('veeam'|'clone'|'config'|'none'|'') — 중요도와 같은 파일·같은 PUT(`/tools/backup-detail/marks`)·같은 게이트(역할 → 조회 밖 404 → 쓰기 밖 403 → 소속).
+    글자는 서버 `backupStatus.METHOD_TEXT` = 웹 `backupViewText.METHODS`(테스트 대조) · 보기 필터 `method-*`(서버 VIEW_FILTERS = 웹 FILTERS + CRIT_FILTERS + METHOD_FILTERS).
+  · Clone 칸 자료(`c`)는 **백업 방식이 Clone 인 VM 에만**(`vmBackupView`) — `vmclone/jobState.js cloneStateByVm` 이 실행 노드 기준으로 고른다: 중앙 직접 수집은 이 노드의 `job.lastRun`,
+    엣지 위임(site)은 그 엣지의 보고(`dispatch.edgeStateOf` — VM 백업 센터 `mergeJobView` 와 같은 규칙). 보고가 없거나 담당 불일치면 '모름' — 이 노드의 낡은 기록으로 채우지 않는다.
+    잡 파일을 못 읽으면 null(모름 — '잡 없음' 을 지어내지 않는다). 잡 이름·대상 경로는 싣지 않는다. Detail 응답 캐시 키에 `vmclone/store.js jobsRev()`(c) — 실행 직후에도 낡지 않게.
+  · 예전 CSV(`/tools/backup-detail.csv`)는 '작업' 열을 지우지 않았다(파일 소비자 호환) — '중요도' 앞에 '백업 방식 · Clone 마지막 실행(UTC) · Clone 결과'.
+    엑셀 폴더 트리 시트는 '백업 방식'(4)·'Clone'(6) 열이 들어와 폴더 행 병합이 (2~5)·(7~8), 잔존은 9번 칸 — 시트 열을 더 바꾸면 이 번호들을 함께 옮길 것.

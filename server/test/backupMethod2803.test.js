@@ -1,0 +1,165 @@
+/**
+ * v2.803 — 백업 현황 › Detail '백업 방식'(사용자 요청 "업무 중요도 다음 — Veeam · Clone · Config 백업 · 백업 안함" · 시안 https://claude.ai/artifact/D9BQPJJdZ7XQ5iLr4F525V ·
+ *   결정: 사람이 정한 값만 · Clone 칸은 복제 잡 마지막 실행) + 표 열(작업 → Clone · 스냅샷은 Veeam 자리에) + CSV·엑셀 반영.
+ *  · 저장소: method 검증(모르는 값 400) · 빈 값 = 지움 · 표시가 모두 비면 지운다 · 일괄에서 method 만 바꿔도 다른 표시는 그대로
+ *  · 집계: markCounts.method(방식별 + 미지정) · 서머리 합계(못 읽은 행이 있으면 null)
+ *  · 라우트: PUT method · 감사 · Detail 응답의 c(Clone 칸)는 백업 방식 Clone 인 VM 에만 · 잡 저장 즉시 반영(캐시 키 jobsRev) · method-* 보기
+ *  · 내보내기: 예전 CSV 의 새 열 · 백업 내보내기 창 bmethod·bclone · 엑셀 폴더 트리 시트 '백업 방식'·'Clone' 열(+ sheetPr 순서)
+ */
+import { test, after } from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+
+const DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'backup2803-'));
+process.env.CONFIG_DIR = DIR;
+process.env.DATA_SOURCE = 'live';
+delete process.env.CENTRAL_URL;
+const VC = 'apac:vc01';
+const OUT = 'us:vc04';
+fs.writeFileSync(path.join(DIR, 'vcenters.json'), JSON.stringify({ vcenters: [VC, OUT].map((id) => ({ id, name: id, host: `${id.split(':')[1]}.corp.local`, username: 'u', password: 'p' })) }));
+const closers = [];
+after(async () => { for (const c of closers.reverse()) { try { await c(); } catch { /* */ } } try { fs.rmSync(DIR, { recursive: true, force: true }); } catch { /* */ } });
+
+const BM = await import('../src/veeam/backupMarks.js');
+const BS = await import('../src/veeam/backupStatus.js');
+const CAT = await import('../src/veeam/vmListCatalog.js');
+const CS = await import('../src/vmclone/store.js');
+const ExcelJS = (await import('exceljs')).default;
+const JSZip = (await import('jszip')).default;
+const U = { username: 'op1' };
+const H = 3_600_000;
+const NOW = Math.floor(Date.now() / H) * H;
+
+test('A 저장소 — method 검증 · 지움 · 다른 표시 유지 · 모두 비면 지운다 · 집계(방식별 + 미지정)', () => {
+  BM._resetMarksForTest();
+  const vms = [{ id: 'x:1', name: 'a', vcenterId: 'x' }, { id: 'x:2', name: 'b', vcenterId: 'x' }];
+  assert.equal(BM.setMarks(vms, { method: 'tape' }, U).status, 400, '모르는 백업 방식');
+  assert.equal(BM.setMarks(vms, { method: 'clone', crit: 'high' }, U).ok, true);
+  BM.setMarks([vms[0]], { method: 'veeam' }, U);
+  assert.deepEqual([BM.getMarks()['x:1'].method, BM.getMarks()['x:1'].crit], ['veeam', 'high'], 'method 만 바꿔도 중요도는 그대로');
+  assert.equal(BM.markView(BM.getMarks()['x:2']).method, 'clone');
+  BM.setMarks([vms[1]], { method: '', crit: '' }, U);
+  assert.equal(BM.getMarks()['x:2'], undefined, '모두 비면 지운다');
+  BM.setMarks([vms[1]], { method: 'none' }, U);
+  assert.ok(BM.getMarks()['x:2'], 'method 하나만 있어도 남는다');
+  const c = BM.markCounts([...vms, { id: 'x:3' }], BM.getMarks(), {}, { veeamKnown: true });
+  assert.deepEqual(c.method, { veeam: 1, clone: 0, config: 0, none: 1, unset: 1 });
+  assert.equal(BM.markView({ crit: 'low', method: 'bogus' }).method, '', '파일의 모르는 값은 미지정');
+  // 서머리 합계 — 못 읽은 행이 있으면 null(부분 합 금지)
+  const t = BS.backupTotals([{ vm: 1, marks: { high: 0, mid: 0, low: 0, need: 0, needGap: 0, method: { veeam: 1, clone: 0, config: 0, none: 0, unset: 0 } } }, { vm: 1, marks: null }]);
+  assert.equal(t.marks.method, null);
+  assert.deepEqual(BS.backupTotals([{ vm: 2, marks: { method: { veeam: 1, clone: 1, config: 0, none: 0, unset: 0 } } }]).marks.method, { veeam: 1, clone: 1, config: 0, none: 0, unset: 0 });
+});
+
+test('B 라우트 — PUT method · Detail c 는 Clone VM 에만 · 잡 저장 즉시 반영 · method 보기 · CSV · 내보내기 창 · 엑셀', async () => {
+  BM._resetMarksForTest(); try { fs.rmSync(path.join(DIR, 'backup-marks.json')); } catch { /* */ }
+  const express = (await import('express')).default;
+  const { store } = await import('../src/store.js');
+  const { registerBackupStatus, registerVeeamBadges } = await import('../src/routes/api/veeam.js');
+  const { listAudit } = await import('../src/audit.js');
+  const prev = store.snapshot;
+  store.snapshot = { source: 'live', generatedAt: NOW, vcenters: [VC, OUT].map((id) => ({ id, name: id })), hosts: [], vms: [
+    { id: `${VC}:vm-1`, vcenterId: VC, name: 'web01', folder: 'DC/vm/A', powerState: 'POWERED_ON' },
+    { id: `${VC}:vm-2`, vcenterId: VC, name: 'db01', folder: 'DC/vm/A', powerState: 'POWERED_ON' },
+    { id: `${VC}:vm-3`, vcenterId: VC, name: 'cfg01', folder: 'DC/vm/B', powerState: 'POWERED_ON' },
+    { id: `${OUT}:vm-1`, vcenterId: OUT, name: 'o1', powerState: 'POWERED_ON' },
+  ] };
+  let user = { username: 'op1', role: 'operator', scope: { vcenters: [VC] } };
+  const app = express(); app.use(express.json());
+  app.use((req, _res, next) => { req.user = user; next(); });
+  const api = express.Router(); registerBackupStatus(api); registerVeeamBadges(api); app.use('/api', api);
+  const srv = await new Promise((r) => { const s = app.listen(0, '127.0.0.1', () => r(s)); });
+  closers.push(() => new Promise((r) => srv.close(() => r())));
+  const base = `http://127.0.0.1:${srv.address().port}/api`;
+  const put = (body) => fetch(`${base}/tools/backup-detail/marks`, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+  const detail = async () => (await fetch(`${base}/tools/backup-detail?vcenterId=${encodeURIComponent(VC)}`)).json();
+  try {
+    assert.equal((await detail()).vms.some((v) => 'c' in v), false, '처음에는 Clone 칸 자료가 없다');
+    assert.equal((await put({ vcenterId: VC, vmIds: [`${VC}:vm-1`], method: 'tape' })).status, 400);
+    assert.equal((await put({ vcenterId: OUT, vmIds: [`${OUT}:vm-1`], method: 'veeam' })).status, 404, '범위 밖');
+    let r = await put({ vcenterId: VC, vmIds: [`${VC}:vm-1`, `${VC}:vm-2`], method: 'clone' });
+    assert.equal(r.status, 200, await r.clone().text());
+    assert.equal((await put({ vcenterId: VC, vmIds: [`${VC}:vm-3`], method: 'config' })).status, 200);
+    let d = await detail();
+    const by = (n) => d.vms.find((v) => v.name === n);
+    assert.deepEqual([by('web01').m.method, by('cfg01').m.method], ['clone', 'config']);
+    assert.deepEqual([by('web01').c, 'c' in by('cfg01')], [{ job: false }, false], 'Clone 이면 잡 없음 · Clone 이 아니면 c 키 없음');
+    // 복제 잡을 만들고 실행 기록을 남기면 캐시가 낡지 않고 바로 보인다(jobsRev)
+    const job = CS.saveJob({ vcenterId: VC, vmId: `${VC}:vm-1`, vmName: 'web01', dest: { type: 'datastore', datastoreName: 'DS1' }, schedule: { mode: 'manual' } });
+    d = await detail();
+    assert.deepEqual(by('web01').c, { job: true, on: true, at: null, ok: null }, '아직 실행 안 함');
+    CS.recordRun(job.id, { ok: false, detail: 'x', ms: 1 });
+    d = await detail();
+    assert.equal(by('web01').c.ok, false);
+    assert.ok(Number.isFinite(by('web01').c.at));
+    assert.equal(JSON.stringify(by('web01').c).includes('DS1'), false, '대상 경로·잡 이름 원문은 싣지 않는다');
+    // 서머리 수 · 보기 필터
+    const sum = await (await fetch(`${base}/tools/backup-summary`)).json();
+    assert.deepEqual(sum.rows.find((x) => x.id === VC).marks.method, { veeam: 0, clone: 2, config: 1, none: 0, unset: 0 });
+    for (const [f, want] of [['method-clone', ['web01', 'db01']], ['method-config', ['cfg01']], ['method-unset', []]]) {
+      assert.deepEqual(d.vms.filter((v) => BS.vmViewMatches(v, f)).map((v) => v.name).sort(), [...want].sort(), f);
+    }
+    // 감사
+    const au = listAudit({ limit: 20 });
+    const rows = (Array.isArray(au) ? au : au.rows || au.items || []).filter((x) => x.action === 'backup-marks');
+    assert.ok(rows.some((x) => /2대 · 백업 방식=clone/.test(x.detail)), JSON.stringify(rows.map((x) => x.detail)));
+    // viewer · 데모 거부
+    user = { username: 'v', role: 'viewer', permissions: ['tools'] };
+    assert.equal((await put({ vcenterId: VC, vmIds: [`${VC}:vm-3`], method: 'none' })).status, 403);
+    user = { username: 'demo', role: 'operator', demoGuest: true };
+    assert.equal((await put({ vcenterId: VC, vmIds: [`${VC}:vm-3`], method: 'none' })).status, 403);
+    assert.equal(BM.getMarks()[`${VC}:vm-3`].method, 'config');
+
+    // 예전 CSV — '작업' 열은 그대로 · 새 세 열은 '중요도' 앞
+    user = { username: 'adm', role: 'admin' };
+    store.snapshot = { ...store.snapshot, generatedAt: NOW + 1 };
+    const csv = (await (await fetch(`${base}/tools/backup-detail.csv?vcenterId=${encodeURIComponent(VC)}`)).text()).replace(/^\uFEFF/, '').split('\r\n');
+    assert.match(csv[0], /,작업,.*,백업 방식,Clone 마지막 실행\(UTC\),Clone 결과,중요도,백업 필요,메모$/);
+    const web = csv.find((l) => l.includes(',web01,'));
+    assert.match(web, /,Clone,\d{4}-\d\d-\d\dT[^,]+,실패,,,$/);
+    assert.match(csv.find((l) => l.includes(',db01,')), /,Clone,,잡 없음,,,$/);
+    assert.match(csv.find((l) => l.includes(',cfg01,')), /,Config 백업,,,,,$/);
+
+    // 백업 내보내기 창 — bmethod · bclone
+    const post = (p, body) => fetch(`${base}${p}?vcenterId=${encodeURIComponent(VC)}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+    const sel = (await (await post('/veeam/vm-list.csv', { cols: ['name', 'bmethod', 'bclone'] })).text()).replace(/^\uFEFF/, '').split('\r\n');
+    assert.match(sel[0], /^VM,백업 방식\(Veeam·Clone·Config 백업·백업 안함\),Clone 마지막 실행 /);
+    assert.match(sel.find((l) => l.startsWith('web01,')), /^web01,Clone,\d{4}-\d\d-\d\d \d\d:\d\d 실패$/);
+    assert.equal(sel.find((l) => l.startsWith('cfg01,')), 'cfg01,Config 백업,');
+    assert.deepEqual([...CAT.needsOf(['bclone'])].sort(), ['clone', 'marks']);
+
+    // 엑셀 폴더 트리 시트 — '백업 방식'(4) · 'Clone'(6) · 폴더 행 Clone 수 · sheetPr 순서
+    const xr = await post('/veeam/vm-list.xlsx', {});
+    assert.equal(xr.status, 200);
+    const buf = Buffer.from(await xr.arrayBuffer());
+    const wb = new ExcelJS.Workbook(); await wb.xlsx.load(buf);
+    const ts = wb.getWorksheet('VM 목록(폴더 트리)');
+    assert.deepEqual([ts.getRow(3).getCell(4).value, ts.getRow(3).getCell(6).value], ['백업 방식', 'Clone']);
+    const rowOf = (n) => { let hit = null; ts.eachRow((row) => { if (row.getCell(1).value === n) hit = row; }); return hit; };
+    assert.equal(rowOf('web01').getCell(4).value, 'Clone');
+    assert.match(String(rowOf('web01').getCell(6).value), /^\d{4}-\d\d-\d\d \d\d:\d\d 실패$/);
+    assert.ok(!rowOf('cfg01').getCell(6).value, 'Clone 이 아닌 VM 은 빈칸');
+    const txt = (v) => (v && typeof v === 'object' && v.richText ? v.richText.map((x) => x.text).join('') : String(v ?? ''));   // 폴더 이름은 서식 글자(folderLabel)
+    let folderClone = null; ts.eachRow((row) => { if (/^📁 A {2}/.test(txt(row.getCell(1).value))) folderClone = row.getCell(6).value; });
+    assert.equal(folderClone, 'Clone 2');
+    const zip = await JSZip.loadAsync(buf);
+    for (const n of Object.keys(zip.files).filter((f) => /^xl\/worksheets\/sheet\d+\.xml$/.test(f))) {
+      const m = /<sheetPr\b[^>]*>([\s\S]*?)<\/sheetPr>/.exec(await zip.file(n).async('string'));
+      const kids = m ? [...m[1].matchAll(/<([A-Za-z]+)\b/g)].map((k) => k[1]) : [];
+      assert.ok(!(kids.includes('outlinePr') && kids.includes('pageSetUpPr') && kids.indexOf('pageSetUpPr') < kids.indexOf('outlinePr')), `${n} ${kids}`);
+    }
+    const sumWs = wb.getWorksheet('요약');
+    let line = ''; sumWs.eachRow((row) => { if (row.getCell(1).value === '백업 방식') line = String(row.getCell(2).value); });
+    assert.equal(line, 'Veeam 0 · Clone 2 · Config 백업 1 · 백업 안함 0 · 미지정 0');
+  } finally { store.snapshot = prev; }
+});
+
+test('C 소스 — PUT 키 목록에 method · Detail 캐시 키에 복제 잡 리비전 · Clone 칸은 실행 노드 기준(vmclone/jobState)', () => {
+  const src = fs.readFileSync(new URL('../src/routes/api/veeam.js', import.meta.url), 'utf8');
+  assert.match(src, /for \(const k of \['crit', 'method', 'need', 'memo'\]\)/);
+  assert.match(src, /\|c\$\{jobsRev\(\)\}/);
+  const js = fs.readFileSync(new URL('../src/vmclone/jobState.js', import.meta.url), 'utf8');
+  assert.match(js, /edgeStateOf\(tg\.agent\)/, '엣지에 위임한 vCenter 는 엣지 보고');
+});

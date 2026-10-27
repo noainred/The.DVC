@@ -221,6 +221,7 @@ export function vmClass(vm, { rpoDays = 1, now = Date.now() } = {}) {
     vKnown, veeam: !!v, run: !!(v && (v.state === 'run' || v.state === 'wait')), sKnown, snap, stale: !!(snapNow && snapNow.stale),
     old: !!(v && typeof v.lb === 'number' && Number.isFinite(v.lb) && now - v.lb > days * 86_400_000), fail: /^(fail|warn)/i.test(r),
     crit: CRIT_KEYS.includes(vm?.m?.crit) ? vm.m.crit : '', need: vm?.m?.need === true,
+    method: METHOD_KEYS.includes(vm?.m?.method) ? vm.m.method : '',   // v2.803 백업 방식(사람이 정한 값)
   };
 }
 
@@ -233,6 +234,18 @@ export const CRIT = [
   { key: 'low', text: '하', label: '중요도 하', color: '#94a3b8' },
 ];
 export const critOf = (k) => CRIT.find((c) => c.key === k) || null;
+/**
+ * v2.803 백업 방식(사용자 요청 '업무 중요도 다음 — Veeam · Clone · Config 백업 · 백업 안함') — 사람이 정한 값만(수집값으로 추정하지 않는다).
+ *   글자는 서버 veeam/backupStatus.js METHOD_TEXT 와 같다(테스트 대조). 색은 화면 칩 — 글자와 함께 쓴다(색만으로 구분하지 않게).
+ */
+export const METHODS = [
+  { key: 'veeam', text: 'Veeam', color: '#86efac' },
+  { key: 'clone', text: 'Clone', color: '#67e8f9' },
+  { key: 'config', text: 'Config 백업', color: '#a78bfa' },
+  { key: 'none', text: '백업 안함', color: '#94a3b8' },
+];
+const METHOD_KEYS = METHODS.map((m) => m.key);
+export const methodOf = (k) => METHODS.find((m) => m.key === k) || null;
 export const MEMO_MAX = 1000;   // 서버 veeam/backupMarks.js MEMO_MAX 와 같다(테스트 대조)
 /**
  * 상단 지표 — 중요도별 · 백업 필요 · 미백업(needGap 을 모르면 '—').
@@ -241,9 +254,11 @@ export const MEMO_MAX = 1000;   // 서버 veeam/backupMarks.js MEMO_MAX 와 같�
  */
 const markNum = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
 export function marksLine(m, unreadable = false) {
-  if (unreadable) return { high: null, mid: null, low: null, need: null, needGap: null, unknown: true };
+  if (unreadable) return { high: null, mid: null, low: null, need: null, needGap: null, method: null, unknown: true };
   if (!m) return null;
-  return { high: markNum(m.high), mid: markNum(m.mid), low: markNum(m.low), need: markNum(m.need), needGap: markNum(m.needGap),
+  // v2.803 method — 백업 방식별 수 { veeam, clone, config, none, unset } · 옛 응답(없음)·모름은 null
+  const method = m.method && typeof m.method === 'object' ? Object.fromEntries(['veeam', 'clone', 'config', 'none', 'unset'].map((k) => [k, markNum(m.method[k])])) : null;
+  return { high: markNum(m.high), mid: markNum(m.mid), low: markNum(m.low), need: markNum(m.need), needGap: markNum(m.needGap), method,
     needGapUnknown: m.needGapUnknown > 0 ? m.needGapUnknown : undefined };
 }
 /**
@@ -256,7 +271,7 @@ export function marksNotice(d) {
   return null;
 }
 /** v2.785(GR R-B2): 세부 보기 칩의 수 — 표시 기준 칩(백업 필요·미백업·중요도)은 표시를 모르면 '—'. */
-const MARK_FILTER_KEYS = new Set(['need', 'needgap', 'crit-high', 'crit-mid', 'crit-low']);
+const MARK_FILTER_KEYS = new Set(['need', 'needgap', 'crit-high', 'crit-mid', 'crit-low', 'method-veeam', 'method-clone', 'method-config', 'method-none', 'method-unset']);
 export function filterCountText(k, counts, marksUnknown) {
   if (marksUnknown && MARK_FILTER_KEYS.has(k)) return '—';
   return counts?.[k];
@@ -279,7 +294,9 @@ export const FILTERS = [
 ];
 /** 중요도 필터 — 칩 줄에 두지 않고 상단 중요도 수를 누르면 적용한다(칩 줄이 길어지지 않게). 서버 VIEW_FILTERS 는 FILTERS + 이것. */
 export const CRIT_FILTERS = [['crit-high', '중요도 상'], ['crit-mid', '중요도 중'], ['crit-low', '중요도 하']];
-export const filterLabel = (f) => ([...FILTERS, ...CRIT_FILTERS].find(([k]) => k === f) || [f, f])[1];
+/** v2.803 백업 방식 필터 — 중요도처럼 칩 줄 밖(상단 백업 방식 수를 누르면 적용). 서버 VIEW_FILTERS = FILTERS + CRIT_FILTERS + 이것. */
+export const METHOD_FILTERS = [...METHODS.map((m) => [`method-${m.key}`, `백업 방식 ${m.text}`]), ['method-unset', '백업 방식 미지정']];
+export const filterLabel = (f) => ([...FILTERS, ...CRIT_FILTERS, ...METHOD_FILTERS].find(([k]) => k === f) || [f, f])[1];
 
 /** VM 이 보기 필터에 드는가. '확인 안 됨' 은 두 쪽을 다 읽었는데 둘 다 없을 때만(모름은 넣지 않는다). */
 export function vmMatches(vm, f, opts) {
@@ -296,13 +313,14 @@ export function vmMatches(vm, f, opts) {
   if (f === 'need') return c.need;
   if (f === 'needgap') return c.need && c.vKnown && !c.veeam;   // Veeam 을 모르는 VM 은 넣지 않는다(서버 vmViewMatches 와 한 쌍)
   if (f === 'crit-high' || f === 'crit-mid' || f === 'crit-low') return c.crit === f.slice(5);
+  if (f.startsWith('method-')) return f === 'method-unset' ? !c.method : c.method === f.slice(7);   // 서버 vmViewMatches 와 한 쌍
   return true;
 }
 
 /** 필터별 VM 수. */
 export function filterCounts(vms, opts) {
   const out = {};
-  const keys = [...FILTERS, ...CRIT_FILTERS].map(([k]) => k);
+  const keys = [...FILTERS, ...CRIT_FILTERS, ...METHOD_FILTERS].map(([k]) => k);
   for (const k of keys) out[k] = 0;
   for (const vm of Array.isArray(vms) ? vms : []) for (const k of keys) if (vmMatches(vm, k, opts)) out[k]++;
   return out;
@@ -315,7 +333,7 @@ const nat = new Intl.Collator('en', { numeric: true, sensitivity: 'base' });
 
 /**
  * 폴더 트리 — 필터·검색에 드는 VM 만 담고, 폴더마다 그 아래(전체 VM 기준 — 필터와 무관)의 집계를 단다.
- * @returns {{ key:'', name:string, children:Array, vms:Array, agg:{n,veeam,snap,run,none} }}
+ * @returns {{ key:'', name:string, children:Array, vms:Array, agg:{n,veeam,snap,run,none,clone} }}   // v2.803 clone = 백업 방식 Clone 인 VM 수
  */
 /** 보기 필터·검색에 드는 VM 인가(트리와 '보이는 VM 전체 선택' 이 같은 판정). needle 은 소문자로 다듬은 검색어. */
 export function vmShown(vm, filter, needle, opts, parts = folderParts(vm?.folder)) {
@@ -328,7 +346,7 @@ export function visibleVmIds(vms, { filter = 'all', q = '', rpoDays = 1, now = D
 }
 
 export function buildTree(vms, { filter = 'all', q = '', rpoDays = 1, now = Date.now() } = {}) {
-  const root = { key: '', name: '', children: new Map(), vms: [], agg: { n: 0, veeam: 0, snap: 0, run: 0, none: 0 }, hit: 0 };
+  const root = { key: '', name: '', children: new Map(), vms: [], agg: { n: 0, veeam: 0, snap: 0, run: 0, none: 0, clone: 0 }, hit: 0 };
   const needle = String(q || '').trim().toLowerCase();
   for (const vm of Array.isArray(vms) ? vms : []) {
     const parts = folderParts(vm.folder);
@@ -339,11 +357,11 @@ export function buildTree(vms, { filter = 'all', q = '', rpoDays = 1, now = Date
     for (const p of parts) {
       const key = node.key ? `${node.key}/${p}` : p;
       let next = node.children.get(p);
-      if (!next) { next = { key, name: p, children: new Map(), vms: [], agg: { n: 0, veeam: 0, snap: 0, run: 0, none: 0 }, hit: 0 }; node.children.set(p, next); }
+      if (!next) { next = { key, name: p, children: new Map(), vms: [], agg: { n: 0, veeam: 0, snap: 0, run: 0, none: 0, clone: 0 }, hit: 0 }; node.children.set(p, next); }
       node = next; path.push(node);
     }
     for (const n of path) {
-      n.agg.n++; if (c.veeam) n.agg.veeam++; if (c.snap) n.agg.snap++; if (c.run) n.agg.run++;
+      n.agg.n++; if (c.veeam) n.agg.veeam++; if (c.snap) n.agg.snap++; if (c.run) n.agg.run++; if (c.method === 'clone') n.agg.clone++;
       if (c.vKnown && c.sKnown && !c.veeam && !c.snap) n.agg.none++;
       if (show) n.hit++;
     }
@@ -406,6 +424,32 @@ export function snapCell(vm, days = 7) {
   if (!('ev' in s)) return { text: '모름', tone: 'unknown' };
   if (s.ev) return { text: `${days}일 ${Number.isInteger(s.ev.n) ? `${s.ev.n}회` : '시도'}`, tone: 'ev' };
   return { text: '—', tone: 'none' };
+}
+
+/**
+ * v2.803 '백업' 칸(사용자 요청 '스냅샷은 Veeam 이 없을 때 Veeam 자리에, Veeam 이 있으면 숨김') — Veeam 이 있으면 Veeam 칩,
+ *   Veeam 이 없거나 모르면 스냅샷 칩(잔존·지금·최근 N일). 둘 다 없으면 Veeam 쪽 표기('—' · 모름)를 그대로 쓴다(스냅샷 '—' 로 Veeam 모름을 덮지 않는다).
+ */
+export function backupCell(vm, days = 7) {
+  const v = veeamCell(vm);
+  if (v.tone !== 'none' && v.tone !== 'unknown') return { ...v, src: 'veeam' };
+  const s = snapCell(vm, days);
+  if (s.tone !== 'none' && s.tone !== 'unknown') return { ...s, src: 'snap' };
+  return { ...(v.tone === 'unknown' || s.tone === 'unknown' ? { text: '모름', tone: 'unknown' } : v), src: '' };
+}
+/**
+ * v2.803 'Clone' 칸 — 백업 방식이 Clone 인 VM 에만 서버가 c 를 싣는다(키 없음 = 빈칸).
+ *   c null(잡 목록 못 읽음)·unknown(실행 노드 보고 없음) '모름' · 잡 없음 · 아직 실행 안 함 · 'Clone 월-일 시:분'(성공 clone · 실패·건너뜀 bad) + 잡 꺼짐.
+ */
+export function cloneCell(vm) {
+  if (!vm || !('c' in vm)) return null;
+  const c = vm.c;
+  if (!c || c.unknown) return { text: 'Clone · 모름', tone: 'unknown' };
+  if (!c.job) return { text: 'Clone · 잡 없음', tone: 'cloneNone' };
+  const off = c.on === false ? ' · 잡 꺼짐' : '';
+  if (!(typeof c.at === 'number' && Number.isFinite(c.at))) return { text: `Clone · 아직 실행 안 함${off}`, tone: 'cloneNone' };
+  if (c.skipped) return { text: `Clone 건너뜀 ${shortTs(c.at)}${off}`, tone: 'cloneBad' };
+  return c.ok ? { text: `Clone ${shortTs(c.at)}${off}`, tone: 'clone' } : { text: `Clone 실패 ${shortTs(c.at)}${off}`, tone: 'cloneBad' };
 }
 
 /* ── v2.787 Veeam 백업 현황 Summary — 바로가기 · 법인별 표 · 우선순위 VM(사용자 요청 + 시안) ─────────── */
