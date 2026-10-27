@@ -171,6 +171,7 @@ const AUDIT_SKIP = new Set([
   'POST /tools/vm-export/preview',  // VM 전체 정보 미리보기(대상 첫 3대 — 저장 아님, v2.799)
   'POST /tools/vm-export.csv',      // VM 전체 정보 내려받기 — 라우트가 조건·행 수를 담은 감사 줄을 직접 남긴다(두 줄 방지, v2.799)
   'POST /tools/vm-export.xlsx',     // 〃 엑셀
+  'POST /tools/host-export.xlsx',   // 호스트 · 클러스터 엑셀 — 라우트가 대상·묶음을 담은 감사 줄을 직접 남긴다(두 줄 방지, v2.802)
 ]);
 export function auditSkipped(method, urlPath) {
   return AUDIT_SKIP.has(`${method} ${String(urlPath || '').replace(/^\/api(?=\/)/, '')}`);

@@ -11,6 +11,7 @@ import { registerReports } from './api/reports.js';
 import { registerSearchNotes } from './api/searchNotes.js';
 import { registerIpamExport } from './api/ipamExport.js';
 import { registerVmExport } from './api/vmExport.js';   // v2.799 VM 전체 정보 내보내기(ipamExport.js 에서 옮김)
+import { registerHostExport } from './api/hostExport.js'; // v2.802 vCenter 화면 '호스트 · 클러스터 엑셀'(호스트 1대 = 시트 1장)
 import { registerHardwareGpu } from './api/hardwareGpu.js';
 import { registerChecksLogs } from './api/checksLogs.js';
 import { registerToolsAnalytics } from './api/toolsAnalytics.js';
@@ -107,6 +108,7 @@ registerReports(api);
 registerSearchNotes(api);
 registerIpamExport(api);
 registerVmExport(api);
+registerHostExport(api);
 registerHardwareGpu(api);
 registerChecksLogs(api);
 registerToolsAnalytics(api);

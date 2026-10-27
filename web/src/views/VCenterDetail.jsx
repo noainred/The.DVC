@@ -27,6 +27,7 @@ import BoldText from '../components/boldText.jsx';
 // v2.800(사용자 지시 "vCenter 화면은 전체 VM, 백업 현황은 백업 — 분리"): 이 화면의 내보내기는 'VM 전체 정보 내보내기'(특수 기능 vm-export)를
 //   그 vCenter 로 연다. 백업 항목(Veeam·스냅샷 판단) 내보내기는 서버 › Veeam 백업 현황 › Detail 의 'CSV · 엑셀…' 로 옮겼다(VmListExportDialog).
 const VmExport = React.lazy(() => import('./tools/VmExport.jsx').then((m) => ({ default: m.VmExport })));
+const HostExportDialog = React.lazy(() => import('./HostExportDialog.jsx'));   // v2.802 호스트 · 클러스터 엑셀(호스트 1대 = 시트 1장)
 import { veeamSummary, veeamSnapCounts } from './veeamBadge.js'; // v2.751: 'Veeam 백업 VM 표시' 요약 문구(순수)
 import { Modal } from '../components/Modal.jsx';
 import { VeeamTag, VeeamSummaryCard, VeeamSnapSummary, VeeamDetailModal } from './VeeamParts.jsx'; // v2.751: 배지(누르면 상세 창)·요약 카드 · v2.753 스냅샷 기준 요약
@@ -280,6 +281,7 @@ export default function VCenterDetail({ site, onBack }) {
   const [veeamVm, setVeeamVm] = useState(null); // v2.751: 배지를 눌러 연 Veeam 백업 상세 창의 VM
   const [overview, setOverview] = useState(false); // '전체 현황' 평면 표(모든 클러스터·호스트) 표시 여부
   const [vmExportOpen, setVmExportOpen] = useState(false); // v2.800 'VM 전체 정보 내보내기' 창(항목·형식·저장값은 그 도구 그대로)
+  const [hostExportOpen, setHostExportOpen] = useState(false); // v2.802 '호스트 · 클러스터 엑셀' 창
   const [dsKind, setDsKind] = useState('');  // datastore storage filter
   const [comparing, setComparing] = useState(false); // vCenter 2개 비교 모드
   const toggle = (k) => setOpen((o) => ({ ...o, [k]: !o[k] }));
@@ -612,9 +614,16 @@ export default function VCenterDetail({ site, onBack }) {
                   title={hostsOk && vmsOk ? '모든 클러스터·호스트의 현황(VM 수·CPU/MEM 사용률·가상화율·할당/물리 자원·ESXi 버전·모델·전력·온도)을 CSV 로 내려받습니다' : '호스트·VM 목록을 아직 받지 못했습니다 — 받은 뒤에 내려받을 수 있습니다(빈 CSV 를 만들지 않습니다)'}>
                   ⤓ CSV
                 </button>}
+                {canCsv() && <button className="login-btn" style={{ flex: 'none', padding: '6px 12px' }} onClick={() => setHostExportOpen(true)}
+                  title="호스트 1대 = 시트 1장 — 요약 · 클러스터 · 호스트 목록 · 호스트마다 기본 · 클러스터 · 구성·보안 점검 · 네트워크 · 스토리지 · 하드웨어 · 최근 재부팅 · VM 목록">
+                  ⤓ 호스트·클러스터 엑셀…
+                </button>}
               </span>
             )}
           </div>
+          {hostExportOpen && (
+            <React.Suspense fallback={null}><HostExportDialog vcenterId={vcenterId} vcName={site?.name || vcenterId} onClose={() => setHostExportOpen(false)} /></React.Suspense>
+          )}
           {vmExportOpen && (
             <Modal title={`VM 전체 정보 내보내기 · ${site?.name || vcenterId}`} onClose={() => setVmExportOpen(false)} width={1240}>
               <React.Suspense fallback={<div className="muted">불러오는 중…</div>}><VmExport scope={vcenterId} embedded /></React.Suspense>

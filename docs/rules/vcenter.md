@@ -352,3 +352,20 @@
   · 미리보기 ‘크게 보기’(`components/ExportPreviewModal.jsx` — body 로 portal · 열 때 한 번 · 첫 100대 · 폴더별로 나눠 보기면 표 정렬은 끈다). 서버 상한: VM 전체 정보 `rows` 3~100 · VM 목록 ids 100.
   · ⚠ 성능(실측 6,000대 × 60열): 처음 판이 19.9초(예전 2.9초)였다 — 열 너비 계산의 `toLocaleString` 칸마다 호출이 5.6초. 숫자 길이는 직접 세고, 트리 열은 20개 상한으로 6.3초.
     나머지 비용은 exceljs 직렬화(워커 안이라 이벤트 루프는 막지 않는다). 칸마다 부르는 함수에 `toLocaleString`·`Intl` 을 넣지 말 것.
+- **v2.802 — vCenter 화면 '호스트 · 클러스터 엑셀'(호스트 1대 = 시트 1장)**
+  (사용자 요청 "호스트 및 클러스터 정보로 VM 처럼 멋지게 · 호스트에는 정보가 많으니 호스트 1개에 엑셀 sheet 1개 · 최대한 자세하고 많은 정보" —
+  시안 https://claude.ai/artifact/HKxFuVeie66ddR2i8VxmFX 승인 · 결정: 시안대로 · 표준 검증. 회귀 `hostExport2802.test.js` · 웹 `hostExportText.test.js`):
+  · 시트 = 요약(KPI 8칸 · 클러스터별 · 확인할 것) · 클러스터(HA · 승인 제어 · 모니터링 · DRS · EVC · 규칙 · 빌드 종류) · 호스트 목록(호스트 이름 = 그 시트 링크) ·
+    호스트마다 한 장(머리 · KPI · 왼쪽 기본/클러스터/구성·보안 점검 · 오른쪽 네트워크/스토리지/하드웨어/온도/최근 재부팅 · 아래 VM 표) · 읽는 법.
+  · **판정을 새로 하지 않는다**: 구성·보안 = `hostcfg/parse.js hostCfgFindings` + `clusterDrift`(드리프트 행) · 재부팅 = `hostcfg/reboots.js analyzeReboots`(라우트가 hostHygiene 과 같은 입력으로 읽는다) ·
+    iDRAC 부품 = `idrac/invView.js inventoryView` partState · 업링크 끊김 = 구성 점검의 `net-uplink-down` 사실. 클러스터 묶음 = `clustercfg/analyze.js clusterRefMode`(열쇠 'r:ref'·'n:이름'·'standalone').
+  · 화면 글자는 웹 `views/hostcfg/hostCfgText.js` 에 있다 — 서버 사본 `hostcfg/text.js`(번들 경계라 두 벌)를 테스트가 같은 입력으로 대조한다(날짜 줄만 다르다: 화면 = 브라우저 시각, 엑셀 = 포탈 시각).
+  · 게이트: data.csv(관리자 전용 키) · 범위 밖 404 · 묶음 권한은 그 기능과 같은 판정(`accessOf` — tools + 도구 키 host-hygiene · cluster-check / iDRAC = `isAdminDetailUser`).
+    권한으로 뺀 묶음은 그 자리와 '읽는 법' 에 사유를 적는다(조용히 빼지 않는다). ⚠ 지금은 data.csv 가 관리자 전용이라 내려받는 계정은 전부 관리자이고 묶음이 빠지는 경로는 실제로 열리지 않는다 —
+    data.csv 를 운영자에게 열 수 있게 바꾸면 이 판정이 살아난다(그래서 지우지 않는다).
+  · 세그먼트 `host-export` 는 특수 기능 카드 키가 아니다 — `toolAccess.UNMAPPED_TOOL_SEGMENTS` 에 사유와 함께 선언. 내려받기 POST 는 `AUDIT_SKIP`(라우트가 감사 한 줄) · 동시 1건 · 한 파일 최대 `HOSTS_MAX`(300)대.
+  · 시트 안 링크는 규격 모양(`<hyperlink ref location>` — 관계 없음)으로 쓴다: `util/xlsxInternalLink.js`(exceljs 가 `시트!A1` 링크에 외부 관계 + location 을 둘 다 싣는다 — xlsxSheetPrOrder 와 같은 방식의 패치).
+    ⚠ exceljs 는 **읽을 때** 이 링크를 되살리지 않는다(관계 기반만 읽는다) — 링크 검사는 XML 로 할 것. Excel · LibreOffice · openpyxl 은 location 을 읽는다.
+  · 데이터스토어는 '이 호스트 VM 의 디스크가 놓인 곳'(VM 장치 캐시)이다 — 호스트별 마운트 목록은 수집하지 않는다(VM 이 없는 데이터스토어는 나오지 않는다 — 읽는 법에 적었다).
+    vmk(VMkernel) 목록도 수집하지 않아 관리 IP 만 싣는다.
+  · 실측(목 데이터 복제): 300대 · VM 4,800대 — 내용 120ms(메인) · 워크북 3.2초(워커 3.8초) · 1.7MB. 30대 0.5초.
