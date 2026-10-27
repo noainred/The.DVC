@@ -1,4 +1,6 @@
-// views/VmListExportDialog.jsx — vCenter › VM 및 폴더 'VM 목록 내보내기' 창(v2.798).
+// views/VmListExportDialog.jsx — '백업 내보내기' 창(v2.798 — v2.800 부터 서버 › Veeam 백업 현황 › Detail 의 CSV 버튼).
+// v2.800(사용자 지시 "vCenter 화면은 전체 VM, 백업 현황은 백업 — 분리"): vCenter 화면은 'VM 전체 정보 내보내기'(tools/VmExport.jsx)를 연다.
+//   이 창은 백업 항목(기본 식별 · Veeam · 스냅샷 · 백업 표시 · 메모·태그)만 고르고, 엑셀은 요약 · 폴더 트리 · 데이터 시트를 만든다.
 // 사용자 요청: "메모, TAG, 디스크 파티션 종류 등의 구성 정보에서 내가 필요한 것만 선택해서 export" + "지금 설정을 기본값으로 · 이름1~5 다섯 칸 · 저장하는 값을 지정".
 // 시안 https://claude.ai/artifact/FS8Uk5piEnbFJE7qvLRWQW. 항목·조합은 서버 카탈로그(GET /veeam/vm-list/catalog)를 그대로 쓴다(복제하지 않는다).
 // 저장값은 계정에(PUT /veeam/vm-list/prefs — 본인 것만). 미리보기는 고른 항목으로 대상 첫 3대(서버가 내려받기와 같은 표 함수로 만든다).
@@ -19,16 +21,17 @@ const BORDER = { ok: '#14532d', run: '#1e3a8a', warn: '#713f12', none: 'var(--bo
 const chipBtn = (on) => ({ flex: 'none', fontSize: 12.5, borderRadius: 99, padding: '5px 12px', ...(on ? { background: 'var(--accent)', color: '#fff', borderColor: 'var(--accent)' } : {}) });
 
 /**
- * @param {{ vcenterId:string, vcName:string, vms:Array, screenReq:{body:object|null,count:number,error?:string}, screenText:string, downloadFailText:(e)=>string, onClose:()=>void }} p
- *   vms = 화면의 VM(‘Off VM 포함’ 반영 — 폴더 고르기의 범위) · screenReq = 화면 기준 요청(vcdVmList.vmListRequest — 검색 반영)
+ * @param {{ vcenterId:string, vcName:string, vms:Array, screenReq:{body:object|null,count:number,error?:string}, screenText:string, downloadFailText:(e)=>string, onLegacyCsv?:()=>void, onClose:()=>void }} p
+ *   vms = 백업 현황이 받은 VM(전원·제외 반영 — 폴더 고르기의 범위) · screenReq = 화면 기준 요청(vmListExportText.backupScreenRequest — 보기·검색 반영)
+ *   onLegacyCsv = 예전 '화면 열 그대로' CSV(GET /tools/backup-detail.csv — 외부 스크립트 호환으로 남김)
  */
-export default function VmListExportDialog({ vcenterId, vcName, vms, screenReq, screenText, downloadFailText, onClose }) {
+export default function VmListExportDialog({ vcenterId, vcName, vms, screenReq, screenText, downloadFailText, onLegacyCsv, onClose }) {
   const [cat, setCat] = useState(null);
   const [err, setErr] = useState(null);
   const [prefs, setPrefs] = useState(null);
-  const [st, setSt] = useState(null);           // { cols, fmt, multi, tagCols, target, folder }
+  const [st, setSt] = useState(null);           // { cols, fmt, tagCols, target, folder }
   const [q, setQ] = useState('');
-  const [save, setSave] = useState(null);       // { slot, name, what:{fmt,multi,target}, alsoDefault } — 열렸을 때만
+  const [save, setSave] = useState(null);       // { slot, name, what:{fmt,tagCols,target}, alsoDefault } — 열렸을 때만
   const [msg, setMsg] = useState(null);         // { ok, text }
   const [busy, setBusy] = useState('');
   const [pv, setPv] = useState(null);
@@ -53,20 +56,20 @@ export default function VmListExportDialog({ vcenterId, vcName, vms, screenReq, 
     if (st.target === 'folder') return folderVms.slice(0, 3).map((v) => v.id);
     return (screenReq?.body?.ids || vms.map((v) => v.id)).slice(0, 3);
   }, [st, folderVms, screenReq, vms]);
-  const pvKey = st ? JSON.stringify([st.cols, st.multi, st.tagCols, pvIds]) : '';
+  const pvKey = st ? JSON.stringify([st.cols, st.tagCols, pvIds]) : '';
   useEffect(() => {
     if (!st || !st.cols.length || !pvIds.length) { setPv(null); return undefined; }
     const my = ++pvGen.current;
     const h = setTimeout(() => {
-      postJson(`/veeam/vm-list/preview?vcenterId=${encodeURIComponent(vcenterId)}`, { cols: st.cols, multi: st.multi, tagCols: st.tagCols, ids: pvIds })
+      postJson(`/veeam/vm-list/preview?vcenterId=${encodeURIComponent(vcenterId)}`, { cols: st.cols, tagCols: st.tagCols, ids: pvIds })
         .then((r) => { if (my === pvGen.current) setPv(r?.ok === false ? { error: r.reason } : r); })
         .catch((e) => { if (my === pvGen.current) setPv({ error: e?.message || '미리보기를 받지 못했습니다' }); });
     }, 500);
     return () => clearTimeout(h);
   }, [pvKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  if (err) return <Modal title="VM 목록 내보내기" onClose={onClose} width={720}><ErrorBox error={err} /></Modal>;
-  if (!cat || !st) return <Modal title="VM 목록 내보내기" onClose={onClose} width={720}><div className="muted">항목 목록을 불러오는 중…</div></Modal>;
+  if (err) return <Modal title="백업 내보내기" onClose={onClose} width={720}><ErrorBox error={err} /></Modal>;
+  if (!cat || !st) return <Modal title="백업 내보내기" onClose={onClose} width={720}><div className="muted">항목 목록을 불러오는 중…</div></Modal>;
 
   const set = (patch) => setSt((x) => ({ ...x, ...patch }));
   const ql = q.trim().toLowerCase();
@@ -94,13 +97,13 @@ export default function VmListExportDialog({ vcenterId, vcName, vms, screenReq, 
   const openSave = () => {
     const empty = (prefs?.slots || []).findIndex((s) => !s);
     const i = empty >= 0 ? empty : 0;
-    setSave({ slot: i + 1, name: prefs?.slots?.[i]?.name || `이름${i + 1}`, what: { fmt: true, multi: true, target: false }, alsoDefault: false });
+    setSave({ slot: i + 1, name: prefs?.slots?.[i]?.name || `이름${i + 1}`, what: { fmt: true, tagCols: true, target: false }, alsoDefault: false });
   };
   const pickSlot = (n) => setSave((s) => ({ ...s, slot: n, name: prefs?.slots?.[n - 1]?.name || `이름${n}` }));
   const slotTarget = save ? prefs?.slots?.[save.slot - 1] : null;
 
   return (
-    <Modal title={`VM 목록 내보내기 — 필요한 항목만 고르기 · ${vcName}`} onClose={onClose} width={1120}>
+    <Modal title={`백업 내보내기 — 필요한 항목만 고르기 · ${vcName}`} onClose={onClose} width={1120}>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 10, minWidth: 0 }} data-vmlist-export="">
         {/* 대상 · 형식 */}
         <div className="flex gap wrap" style={{ alignItems: 'center', rowGap: 6 }}>
@@ -116,7 +119,7 @@ export default function VmListExportDialog({ vcenterId, vcName, vms, screenReq, 
           <span className="flex gap" style={{ marginLeft: 'auto', alignItems: 'center', gap: 10 }}>
             <span className="muted">형식</span>
             <label className="flex gap" style={{ alignItems: 'center', gap: 6 }}><input type="radio" name="vle-fmt" checked={st.fmt === 'csv'} onChange={() => set({ fmt: 'csv' })} />CSV</label>
-            <label className="flex gap" style={{ alignItems: 'center', gap: 6 }}><input type="radio" name="vle-fmt" checked={st.fmt === 'xlsx'} onChange={() => set({ fmt: 'xlsx' })} />엑셀(데이터 시트)</label>
+            <label className="flex gap" style={{ alignItems: 'center', gap: 6 }}><input type="radio" name="vle-fmt" checked={st.fmt === 'xlsx'} onChange={() => set({ fmt: 'xlsx' })} />엑셀(요약 · 폴더 트리 · 데이터)</label>
           </span>
         </div>
 
@@ -142,7 +145,7 @@ export default function VmListExportDialog({ vcenterId, vcName, vms, screenReq, 
             })}
             <span className="flex gap wrap" style={{ marginLeft: 'auto', alignItems: 'center', rowGap: 6 }}>
               <button type="button" className="tab" style={{ flex: 'none', color: TONE.ok }} disabled={!st.cols.length || busy === 'save' || prefs?.unreadable}
-                onClick={() => putPref('default', valueToSave(st, { fmt: true, multi: true, target: true }, '기본값'))}>지금 설정을 기본값으로</button>
+                onClick={() => putPref('default', valueToSave(st, { fmt: true, tagCols: true, target: true }, '기본값'))}>지금 설정을 기본값으로</button>
               <button type="button" className={save ? 'login-btn' : 'tab'} style={{ flex: 'none' }} disabled={!st.cols.length || prefs?.unreadable} onClick={() => (save ? setSave(null) : openSave())}>지금 설정 저장하기…</button>
             </span>
           </div>
@@ -190,10 +193,10 @@ export default function VmListExportDialog({ vcenterId, vcName, vms, screenReq, 
         {/* 본문 — 왼쪽 항목 · 오른쪽 고른 항목·미리보기 */}
         <div className="flex wrap" style={{ gap: 14, alignItems: 'flex-start' }}>
           <div style={{ flex: '1 1 440px', minWidth: 0, display: 'flex', flexDirection: 'column', gap: 8 }}>
-            <input className="input" value={q} onChange={(e) => setQ(e.target.value)} placeholder="항목 찾기 — 예: 메모, 태그, 파티션" aria-label="항목 찾기" />
+            <input className="input" value={q} onChange={(e) => setQ(e.target.value)} placeholder="항목 찾기 — 예: Veeam, 스냅샷, 메모" aria-label="항목 찾기" />
             <div className="muted flex gap wrap" style={{ fontSize: 11, rowGap: 2 }}>
               <span><b style={{ color: TONE.ok }}>항상</b> 30초 인벤토리</span><span><b style={{ color: TONE.run }}>캐시</b> 주기 수집 — 늦게 채워짐</span>
-              <span><b style={{ color: TONE.warn }}>수집 켜야 함</b> 게스트 파티션(기본 꺼짐)</span><span>못 모은 값은 파일에 ‘{cat.missingText}’</span>
+              <span>못 모은 값은 파일에 ‘{cat.missingText}’</span>
             </div>
             {cat.groups.map((g) => {
               const items = g.items.filter((it) => !ql || it.label.toLowerCase().includes(ql) || g.name.toLowerCase().includes(ql));
@@ -253,14 +256,13 @@ export default function VmListExportDialog({ vcenterId, vcName, vms, screenReq, 
             )}
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6, padding: '10px 12px', border: '1px solid var(--border-soft)', borderRadius: 10, background: 'var(--panel-deep)' }}>
-              <b style={{ fontSize: 12.5 }}>여러 값이 있는 항목(태그 · IP · 파티션)</b>
-              <label className="flex gap" style={{ alignItems: 'center', gap: 8 }}><input type="radio" name="vle-multi" checked={st.multi === 'join'} onChange={() => set({ multi: 'join' })} />한 칸에 ‘ | ’ 로 이어 쓰기 <span className="muted">— VM 1대 = 1행</span></label>
-              <label className="flex gap" style={{ alignItems: 'center', gap: 8 }}><input type="radio" name="vle-multi" checked={st.multi === 'partRows'} onChange={() => set({ multi: 'partRows' })} />파티션은 한 줄에 하나 <span className="muted">— 파티션 상세·파일 시스템을 고르면 VM 정보가 파티션 수만큼 반복</span></label>
+              <b style={{ fontSize: 12.5 }}>여러 값이 있는 항목(태그 · 작업 · 스냅샷 이름)</b>
+              <span className="muted" style={{ fontSize: 12 }}>한 칸에 ‘ | ’ 로 이어 씁니다 — VM 1대 = 1행</span>
               <label className="flex gap" style={{ alignItems: 'center', gap: 8 }}><input type="checkbox" checked={st.tagCols} onChange={() => set({ tagCols: !st.tagCols })} />vSphere 태그는 카테고리마다 따로 열(‘태그: 환경’ · ‘태그: 서비스’ …)</label>
             </div>
             <div className="muted" style={{ fontSize: 12, lineHeight: 1.6 }}>
-              못 읽은 값은 빈칸입니다(0·‘없음’ 으로 쓰지 않습니다). 그 vCenter 에서 아직 모으지 않은 값(태그 수집 전 · 게스트 파티션 미수집 VM · 구성 캐시 미도달)은 ‘{cat.missingText}’ 입니다.
-              {cat.status?.partsOn === false && ' 게스트 파티션 수집이 꺼져 있어 파티션 항목은 모두 ‘수집 안 됨’ 입니다(설정에서 켤 수 있습니다).'}
+              못 읽은 값은 빈칸입니다(0·‘없음’ 으로 쓰지 않습니다). 그 vCenter 에서 아직 모으지 않은 값(태그 수집 전)은 ‘{cat.missingText}’ 입니다.
+              디스크·파티션·구성 같은 VM 전체 정보는 vCenter 화면의 ‘⤓ VM 전체 정보 내보내기…’ 에 있습니다.
             </div>
           </div>
         </div>
@@ -273,7 +275,9 @@ export default function VmListExportDialog({ vcenterId, vcName, vms, screenReq, 
                 : st.target === 'folder' && !st.folder ? '폴더를 고르세요.'
                   : `${st.cols.length}개 항목 · ${(target?.count || 0).toLocaleString()}대`}
           </span>
-          <span className="flex gap" style={{ marginLeft: 'auto', gap: 8 }}>
+          <span className="flex gap wrap" style={{ marginLeft: 'auto', gap: 8, rowGap: 6 }}>
+            {onLegacyCsv && <button type="button" className="tab" style={{ flex: 'none' }} disabled={!!busy} onClick={onLegacyCsv}
+              title="v2.779 의 백업 현황 CSV — 화면 열 그대로(고른 항목·저장값과 무관 · 검색어 미반영)">예전 CSV(화면 열 그대로)</button>}
             <button type="button" className="tab" style={{ flex: 'none' }} onClick={onClose}>닫기</button>
             <button type="button" className="login-btn" style={{ flex: 'none' }} disabled={!canDownload} onClick={download}>
               {busy === 'down' ? '만드는 중…' : `⤓ ${st.fmt === 'xlsx' ? '엑셀' : 'CSV'} 내려받기`}

@@ -295,6 +295,7 @@
   · 응답 캐시(backup-counts·summary·detail) 키에 `em${emSourcesRev()}`(VM 기록·매핑 리비전) — 새 기록이 60초 캐시를 기다리지 않는다.
   · ⚠ 실물 EM 응답 미확인(엔티티·필드는 문서 검색 결과 기준). 실물에서 행이 0이거나 서버 링크가 없으면 설정 › EM 수집 상태의 'VM 별 기록' 칩과 비고가 말한다.
 - **v2.798 — VM 목록 내보내기 '필요한 항목만 고르기' + 계정 저장값. 열은 `veeam/vmListCatalog.js` 하나(key 고정 — 저장값에 남는다, 바꾸지 말 것)**
+  ⚠ v2.800 정정: 이 창은 **백업 현황 › Detail 의 ‘CSV · 엑셀…’ 로 옮겼고** 디스크·파티션·구성·사용률 항목과 `multi:'partRows'` 는 지웠다(아래 v2.800). vCenter 화면은 VM 전체 정보 내보내기.
   (사용자 요청 "메모, TAG, 디스크 파티션 종류 등 구성 정보에서 내가 필요한 것만 선택해서 export" + "기본값 · 이름1~5 다섯 칸 · 저장하는 값 지정" · 시안 https://claude.ai/artifact/FS8Uk5piEnbFJE7qvLRWQW ·
   결정: 저장값은 계정 · 파일 시스템 종류 수집 포함 · 실시간 조회(생성일·UUID·NIC) 제외 · 표준 검증. 회귀 `server/test/vmListSelect2798.test.js`(변이 7/8 — 남은 1건은 전역 `denyDemoGuest` 가 먼저 막는 이중 방어) + 웹 `vmListExportText.test.js`):
   · `POST /veeam/vm-list.{csv,xlsx}` 본문 `cols`(고른 순서 = 열 순서 · 모르는 key 400) · 없으면 v2.792 열 그대로(`LEGACY_KEYS` — 머리·칸이 같다는 것을 테스트가 대조). `multi:'partRows'` 는 파티션 열을 고른 때만 행 반복 · `tagCols` 는 카테고리별 열.
@@ -322,3 +323,14 @@
     엑셀은 워커(`util/xlsxWorkerRun.js` — 새 엑셀은 이 공용 실행기를 쓴다; ipam·storage·veeam 의 기존 실행기 이전은 별건).
   · 저장값 `vcenter/vmExportPrefs.js` = `util/exportPrefs.js` 공장(파일 `vm-export-prefs.json`) — 규칙은 v2.798 `veeam/vmListPrefs.js` 와 같다(그쪽 이전은 별건).
   · 라우트는 `routes/api/vmExport.js`(ipamExport.js 에서 옮김) — 전부 data.csv + tools · 범위 밖 404 · 저장값 쓰기는 역할 게이트 먼저.
+- **v2.800 — 엑셀 시트에 '접기(outlineProperties)' 와 '한 페이지 폭 맞춤(fitToPage)' 을 함께 쓰지 말 것 + 내보내기 화면 분리(vCenter = 전체 VM · 백업 현황 = 백업)**
+  (사용자 보고 "엑셀 다운 받으면 데이터가 안나와"(폴더 트리 시트가 A1 부터 빈칸 · 열 너비 기본 · 틀 고정 없음) + "export 는 여기(백업 현황 Detail)의 CSV 로" + "vCenter 는 전체 VM, 여기는 백업 — 분리" ·
+  결정: 화면별 전용 창 · vCenter 쪽은 v2.799 VM 전체 정보 내보내기 재사용 · 표준 검증. 회귀 `server/test/vmListXlsx2800.test.js`(수정 전 코드에서 실패 확인) · `vmListSelect2798.test.js` 갱신):
+  · 원인: exceljs 는 `<sheetPr>` 안에 `pageSetUpPr` 를 `outlinePr` **앞에** 쓴다 — OOXML 순서(tabColor → outlinePr → pageSetUpPr) 위반. exceljs·xmllint·LibreOffice 는 읽어서
+    v2.792 테스트(exceljs 로 다시 읽기)가 못 잡았고, Excel 은 그 시트를 버린 것으로 본다(⚠ Excel 실물 재현은 못 함 — 추정). 폴더 트리 시트만 폭 맞춤을 뺐다(`PRINT_NOFIT`).
+    새 엑셀 시트가 접기를 쓰면 폭 맞춤을 빼고, `vmListXlsx2800.test.js` 의 `sheetPrIssues` 같은 '풀어서 순서 보기' 검사를 붙일 것 — exceljs 로 다시 읽는 테스트는 이 결함을 못 잡는다.
+  · 화면 분리: vCenter › VM 및 폴더의 버튼은 ‘⤓ VM 전체 정보 내보내기…’(창 안에 `tools/VmExport.jsx` 를 그 vCenter 로 — 도구 권한 `toolAllowed('vm-export')`) ·
+    백업 현황 › Detail 의 ‘CSV · 엑셀…’ = `VmListExportDialog`(백업 내보내기 — 대상: 화면에 보이는 VM(보기·검색 반영, `backupScreenRequest`, view `detail` → 파일 꼬리 `backup`) 또는 폴더).
+    예전 `GET /tools/backup-detail.csv` 는 창 안 ‘예전 CSV(화면 열 그대로)’ 로 남겼다(외부 스크립트 호환).
+  · `veeam/vmListCatalog.js` 는 백업 전용 — 묶음 기본 · 메모·태그·속성(+백업 표시) · 자원·IP(v2.792 열인 vCPU·메모리·스토리지·IP 만) · 스냅샷 · Veeam. 구성 항목을 다시 늘리지 말 것
+    (같은 값을 `vcenter/vmExportCatalog.js` 와 두 벌로 만들게 된다). 예전 저장값의 사라진 항목은 불러올 때 빼고 개수를 알린다(`droppedCols`), `multi` 는 저장할 때 버린다.

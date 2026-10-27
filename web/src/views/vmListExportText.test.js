@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import fs from 'node:fs';
 import * as T from './vmListExportText.js';
 
-describe('v2.798 VM 목록 내보내기 — 항목 고르기 · 내 저장값', async () => {
+describe('v2.798 VM 목록 내보내기(v2.800 백업 현황 › Detail 백업 내보내기) — 항목 고르기 · 내 저장값', async () => {
   const P = await import('../../../server/src/veeam/vmListPrefs.js');
   const C = await import('../../../server/src/veeam/vmListCatalog.js');
   const vms = [
@@ -29,14 +29,17 @@ describe('v2.798 VM 목록 내보내기 — 항목 고르기 · 내 저장값', 
   });
 
   it('저장할 내용 — 고른 것만 싣고 불러올 때 없는 것은 지금 값 유지', () => {
-    const st = { cols: ['name', 'tags'], fmt: 'xlsx', multi: 'partRows', tagCols: true, target: 'folder', folder: 'DC/Prod' };
+    const st = { cols: ['name', 'tags'], fmt: 'xlsx', tagCols: true, target: 'folder', folder: 'DC/Prod' };
     const v = T.valueToSave(st, { fmt: true }, '월말');
     expect(v).toEqual({ name: '월말', cols: ['name', 'tags'], fmt: 'xlsx' });
     // 서버 검증을 통과하는 모양(같은 정규화 코어)
     expect(P.normalizeValue(v, { slotNo: 1 }).ok).toBe(true);
-    const cur = { cols: ['x'], fmt: 'csv', multi: 'join', tagCols: false, target: 'screen', folder: '' };
+    const cur = { cols: ['x'], fmt: 'csv', tagCols: false, target: 'screen', folder: '' };
     expect(T.applyValue(cur, v)).toEqual({ ...cur, cols: ['name', 'tags'], fmt: 'xlsx' });
-    expect(T.applyValue(cur, T.valueToSave(st, { target: true, multi: true }))).toMatchObject({ target: 'folder', folder: 'DC/Prod', multi: 'partRows', tagCols: true, fmt: 'csv' });
+    expect(T.applyValue(cur, T.valueToSave(st, { target: true, tagCols: true }))).toMatchObject({ target: 'folder', folder: 'DC/Prod', tagCols: true, fmt: 'csv' });
+    expect(P.normalizeValue(T.valueToSave(st, { fmt: true, tagCols: true, target: true }), { slotNo: 2 }).ok).toBe(true);
+    // 예전(v2.798) 저장값의 multi 는 불러와도 상태에 싣지 않는다(파티션 반복은 없앴다)
+    expect('multi' in T.applyValue(cur, { cols: ['name'], multi: 'partRows' })).toBe(false);
   });
 
   it('창을 열 때 — 기본값, 없으면 서버의 기본 조합', () => {
@@ -49,13 +52,13 @@ describe('v2.798 VM 목록 내보내기 — 항목 고르기 · 내 저장값', 
 
   it('상태 배지 — 그 vCenter 의 실제 수집 상태가 우선', () => {
     expect(T.availBadge({ key: 'tags', avail: 'cache' }, { tags: 'not-collected' }).text).toBe('수집 전');
-    expect(T.availBadge({ key: 'partN', avail: 'opt' }, { partsOn: false }).text).toBe('수집 꺼짐');
+    expect(T.availBadge({ key: 'vjudge', avail: 'snap' }, { tags: 'not-collected' }).text).toBe('항상');
     expect(T.availBadge({ key: 'name', avail: 'snap' }, {}).text).toBe('항상');
   });
 
   it('내려받기 본문 — 화면 요청에 고른 항목을 붙인다 · 폴더면 그 폴더 id', () => {
-    const st = { cols: ['name'], multi: 'join', tagCols: false, target: 'screen', folder: '' };
-    expect(T.exportBody(st, { body: { ids: ['v:1'], view: 'search' }, count: 1 }).body).toEqual({ ids: ['v:1'], view: 'search', cols: ['name'], multi: 'join', tagCols: false });
+    const st = { cols: ['name'], tagCols: false, target: 'screen', folder: '' };
+    expect(T.exportBody(st, T.backupScreenRequest(['v:1'], 10)).body).toEqual({ ids: ['v:1'], view: 'detail', cols: ['name'], tagCols: false });
     expect(T.exportBody(st, { body: null, count: 30000, error: '넘습니다' })).toMatchObject({ body: null, error: '넘습니다' });
     expect(T.exportBody({ ...st, target: 'folder' }, null, [{ id: 'v:2' }]).body).toMatchObject({ ids: ['v:2'], view: 'folder' });
   });
@@ -66,5 +69,6 @@ describe('v2.798 VM 목록 내보내기 — 항목 고르기 · 내 저장값', 
     expect(src).toMatch(/if \(r\?\.ok === false\)/);
     expect(src).toMatch(/if \(my === pvGen\.current\)/);
     expect(src).not.toMatch(/textTransform|text-transform/);
+    expect(src).not.toMatch(/multi|partRows/, 'v2.800 — 파티션 한 줄 반복은 없앴다');
   });
 });

@@ -27,11 +27,9 @@ import { requirePerm, requireRole, toolActorOf } from '../../auth/auth.js';
 import { issueFor } from '../../auth/toolAccess.js';
 import { backupRow, backupTotals, vmBackupView, vmScope, POWER_VALUES, RPO_DAYS, VIEW_FILTERS, vmViewMatches, priorityCandidates, priorityRank, PRIORITY_MAX } from '../../veeam/backupStatus.js';   // v2.779 백업 메뉴 · v2.780 범위·CSV
 import { vmListCsvAsync, vmTreeCmp, VM_LIST_MAX_IDS, folderParts } from '../../veeam/vmListCsv.js';
-import { resolveCols, needsOf, selectedColumns, expandPartRows, catalogView } from '../../veeam/vmListCatalog.js';   // v2.798 필요한 항목만 고르기
+import { resolveCols, needsOf, selectedColumns, catalogView } from '../../veeam/vmListCatalog.js';   // v2.798 필요한 항목만 고르기(v2.800 백업 현황 › Detail '백업 내보내기' 전용)
 import { getPrefs, setPref, clearPref } from '../../veeam/vmListPrefs.js';   // v2.798 계정 저장값(기본값 · 5칸)
 import { vmRefOf, vmTagsOf, tagStateOf } from '../../tags/analyze.js';
-import { partsForVcenter } from '../../guestdisk/db.js';
-import { load as loadGuestDiskSettings } from '../../guestdisk/settings.js';   // v2.792 vCenter › VM 및 폴더 'VM 목록 CSV'
 import { renderVmListWorkbook, XLSX_MIME } from '../../veeam/vmListXlsx.js';   // v2.792 같은 목록의 엑셀(폴더 트리 — 시안 승인)
 export { VM_LIST_MAX_IDS };
 import { logAudit } from '../../audit.js';
@@ -319,7 +317,8 @@ export function registerVeeamBadges(api) {
 
   /*
    * v2.798(사용자 요청 "메모, TAG, 디스크 파티션 종류 등 구성 정보에서 내가 필요한 것만 선택해서 export" · 시안 https://claude.ai/artifact/FS8Uk5piEnbFJE7qvLRWQW):
-   *   · catalog — 고를 수 있는 항목·빠른 조합(veeam/vmListCatalog.js 하나 — 웹은 복제하지 않는다) + 그 vCenter 의 실제 수집 상태(태그·게스트 파티션·구성 캐시) + 내 저장값.
+   *   · catalog — 고를 수 있는 항목·빠른 조합(veeam/vmListCatalog.js 하나 — 웹은 복제하지 않는다) + 그 vCenter 의 실제 수집 상태(태그) + 내 저장값.
+   *   ⚠ v2.800(사용자 지시 '화면 분리'): 이 창은 **백업 현황 › Detail 의 CSV 버튼**(백업 내보내기)이다 — 전체 VM 구성 내보내기는 routes/api/vmExport.js(도구 vm-export).
    *   · preview — 고른 항목으로 화면이 보낸 VM 3대의 행(같은 표 함수 — 내려받기와 같은 값).
    *   · prefs — 내 저장값(기본값 · 1~5칸). 키는 인증된 계정 이름(본문 값을 믿지 않는다) · 바꾸기는 관리자·운영자 · 데모 손님 불가 · 감사.
    *   게이트는 내보내기와 같은 data.csv · 조회 범위 밖 vCenter 404(vcOf).
@@ -329,13 +328,10 @@ export function registerVeeamBadges(api) {
     if (!t) return res.status(404).json({ ok: false, reason: 'vCenter 를 찾을 수 없습니다.' });
     const vc = (store.get()?.vcenters || []).find((v) => v.id === t.vcenterId) || {};
     const inv = vc.tagInv || null;
-    let partsOn = null;
-    try { partsOn = loadGuestDiskSettings()?.enabled === true; } catch { partsOn = null; }
     res.set('Cache-Control', 'no-store').json({
       ok: true, ...catalogView({ snapDays: LOOKBACK_DAYS }),
       status: {
         vmTotal: t.vms.length, tags: tagStateOf(inv), tagsAt: inv?.tagsAt ?? null, tagCategories: Array.isArray(inv?.categories) ? inv.categories.length : 0,
-        partsOn, cfgVms: t.vms.filter((v) => v.cfg).length, devVms: t.vms.filter((v) => v.dev).length,
       },
       prefs: getPrefs(req.user?.username),
     });
@@ -514,27 +510,26 @@ function maskDetail(detail, admin, vmName = '') {
  *   · 읽기 POST(본문에 id 목록) — 게이트는 CSV 내보내기 권한(data.csv — 관리자 전용, 웹 canCsv 와 같은 판정) · 조회 범위 밖 vCenter 404(vcOf) ·
  *     동시 1건(exportBusy — vCenter 전체 대조·스냅샷 요약을 다시 계산한다) · 감사 로그 · 파일 이름에 화면 조건(all · poweredon · search).
  */
-const VM_LIST_VIEWS = Object.freeze({ all: '전체 VM', noOff: '꺼진 VM 제외(‘Off VM 포함’ 해제)', search: '검색 결과', folder: '고른 폴더' });   // v2.798 폴더 고르기
-const VM_LIST_FILE_TAG = Object.freeze({ all: 'all', noOff: 'poweredon', search: 'search', folder: 'folder' });
-/** v2.798 본문의 '고른 항목' — 없으면 null(v2.792 열). { ok, keys, multi, tagCols } | { ok:false, reason }. */
+// v2.798 폴더 고르기 · v2.800 detail = 백업 현황 › Detail 화면에 보이는 VM(보기·검색 반영 — 창이 그 id 를 보낸다)
+const VM_LIST_VIEWS = Object.freeze({ all: '전체 VM', noOff: '꺼진 VM 제외(‘Off VM 포함’ 해제)', search: '검색 결과', folder: '고른 폴더', detail: '백업 현황 화면' });
+const VM_LIST_FILE_TAG = Object.freeze({ all: 'all', noOff: 'poweredon', search: 'search', folder: 'folder', detail: 'backup' });
+/** v2.798 본문의 '고른 항목' — 없으면 null(v2.792 열). { ok, keys, tagCols } | { ok:false, reason }. */
 function selOf(body) {
   if (body.cols == null) return null;
   const c = resolveCols(body.cols);
   if (!c.ok) return c;
-  return { ok: true, keys: c.keys, multi: body.multi === 'partRows' ? 'partRows' : 'join', tagCols: body.tagCols === true };
+  return { ok: true, keys: c.keys, tagCols: body.tagCols === true };
 }
 
 /**
  * v2.798 고른 항목의 표(머리 + 칸) — 카탈로그(veeam/vmListCatalog.js) 하나로 CSV·엑셀 데이터 시트·미리보기가 같은 값을 쓴다.
- * 고른 항목에 필요한 소스만 읽는다: 태그(스냅샷 vcenter.tagInv — 못 읽은 vCenter 는 '수집 안 됨') · 게스트 파티션(guestdisk DB — 이번 수집에 없는 VM 은
- * '수집 안 됨') · 백업 표시(파일을 못 읽으면 빈칸). Veeam 열은 vmBackupView(rows — 위에서 만든 것) 그대로.
+ * 고른 항목에 필요한 소스만 읽는다: 태그(스냅샷 vcenter.tagInv — 못 읽은 vCenter 는 '수집 안 됨') · 백업 표시(파일을 못 읽으면 빈칸).
+ * Veeam 열은 vmBackupView(rows — 위에서 만든 것) 그대로. (v2.800: 게스트 파티션·구성 열은 'VM 전체 정보 내보내기' 로 — 여기서 읽지 않는다)
  */
 async function vmListSelTable({ vc, vcName, list, rows, b, sel, snapDays, now, maybeYield, limit = Infinity }) {
   const need = needsOf(sel.keys);
   const tagInv = need.has('tags') ? (vc?.tagInv || null) : null;
   const tagOk = !!tagInv && ['ok', 'stale'].includes(tagStateOf(tagInv));
-  let parts = null;
-  if (need.has('parts')) { try { parts = await partsForVcenter(vc.id); } catch { parts = null; } }
   const marks = need.has('marks') ? getMarks() : null;
   const marksOk = need.has('marks') && !marksUnreadable();
   const viewOf = new Map(rows.map((r) => [r.inv.id, r.view]));
@@ -546,13 +541,12 @@ async function vmListSelTable({ vc, vcName, list, rows, b, sel, snapDays, now, m
     levels = Math.max(levels, folderParts(vm.folder).length);
     const r = { vc: vcName, linked: b ? b.linked : false, inv: vm, view: viewOf.get(vm.id) };
     if (need.has('tags')) r.tg = tagOk ? vmTagsOf(tagInv, vmRefOf(vc.id, vm.id)) : undefined;
-    if (need.has('parts')) r.parts = parts && parts.collected.has(vm.id) ? (parts.byVm.get(vm.id) || []) : undefined;
     if (need.has('marks')) { r.mark = markView(marks?.[vm.id]); r.marksOk = marksOk; }
     out.push(r);
   }
   const cols = selectedColumns(sel.keys, { levels: Math.min(32, levels), tagCols: sel.tagCols, tagCategories: (tagInv?.categories || []).map((c) => c?.name), snapDays, now });
   const cells = [];
-  for (const r of expandPartRows(out, sel.keys, sel.multi)) { await maybeYield(); cells.push(cols.map((c) => c.get(r))); }
+  for (const r of out) { await maybeYield(); cells.push(cols.map((c) => c.get(r))); }
   return { head: cols.map((c) => c.h), folderCols: cols.map((c) => !!c.folderLevel), cells, vms: out.length };
 }
 

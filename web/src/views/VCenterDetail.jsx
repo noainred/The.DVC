@@ -1,7 +1,7 @@
 import { unitText } from './unitText.js';
 import { numOrNull } from '../numOrNull.js';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { fetchJson, postJson, usePolling, toolAllowed, canCsv, postDownload } from '../api.js'; // v2.643 canCsv: CSV 내보내기 게이팅
+import { fetchJson, postJson, usePolling, toolAllowed, canCsv } from '../api.js'; // v2.643 canCsv: CSV 내보내기 게이팅
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid } from 'recharts';
 import { Loading, ErrorBox, StateBadge, UsageCell, EntityDetail, DataTable, SearchBox } from '../components/ui.jsx';
 import EscClose from '../components/EscClose.jsx';
@@ -24,10 +24,11 @@ import {
 import { dayStamp } from '../dayStamp.js';
 import Select from '../components/Select.jsx';
 import BoldText from '../components/boldText.jsx';
-import { vmListRequest } from './vcdVmList.js'; // v2.792: 'VM 목록 엑셀·CSV'(Veeam·스냅샷 포함) 요청 본문(순수)
-import VmListExportDialog from './VmListExportDialog.jsx'; // v2.798 필요한 항목만 고르기 · 내 저장값
-import { downloadFailText } from './downloadFailText.js';
+// v2.800(사용자 지시 "vCenter 화면은 전체 VM, 백업 현황은 백업 — 분리"): 이 화면의 내보내기는 'VM 전체 정보 내보내기'(특수 기능 vm-export)를
+//   그 vCenter 로 연다. 백업 항목(Veeam·스냅샷 판단) 내보내기는 서버 › Veeam 백업 현황 › Detail 의 'CSV · 엑셀…' 로 옮겼다(VmListExportDialog).
+const VmExport = React.lazy(() => import('./tools/VmExport.jsx').then((m) => ({ default: m.VmExport })));
 import { veeamSummary, veeamSnapCounts } from './veeamBadge.js'; // v2.751: 'Veeam 백업 VM 표시' 요약 문구(순수)
+import { Modal } from '../components/Modal.jsx';
 import { VeeamTag, VeeamSummaryCard, VeeamSnapSummary, VeeamDetailModal } from './VeeamParts.jsx'; // v2.751: 배지(누르면 상세 창)·요약 카드 · v2.753 스냅샷 기준 요약
 import { authStopNote, authStopCell, authStopSingleText, plainText, skipNote, skipCell, skipSingleText } from './vcAuthStopText.js'; // v2.733(C3-01): 인증 정지로 조회하지 않음 · v2.744(감사 후속 FA-②): 직접 수집 대상 아님
 
@@ -278,7 +279,7 @@ export default function VCenterDetail({ site, onBack }) {
   const [veeamOn, setVeeamOn] = useState(false); // v2.751: Veeam 백업 VM 표시(배지만 — 목록은 그대로). 기본 꺼짐 — 켤 때만 조회한다
   const [veeamVm, setVeeamVm] = useState(null); // v2.751: 배지를 눌러 연 Veeam 백업 상세 창의 VM
   const [overview, setOverview] = useState(false); // '전체 현황' 평면 표(모든 클러스터·호스트) 표시 여부
-  const [vmExportOpen, setVmExportOpen] = useState(false); // v2.798 'VM 목록 내보내기' 창(형식·항목·저장값은 창 안에서)
+  const [vmExportOpen, setVmExportOpen] = useState(false); // v2.800 'VM 전체 정보 내보내기' 창(항목·형식·저장값은 그 도구 그대로)
   const [dsKind, setDsKind] = useState('');  // datastore storage filter
   const [comparing, setComparing] = useState(false); // vCenter 2개 비교 모드
   const toggle = (k) => setOpen((o) => ({ ...o, [k]: !o[k] }));
@@ -594,9 +595,9 @@ export default function VCenterDetail({ site, onBack }) {
                 표와 CSV 는 같은 행을 쓰고, 'Off VM 포함' 설정이 가상화율에 그대로 반영된다. */}
             {view === 'vms' && canCsv() && (
               <span className="flex gap" style={{ marginLeft: 'auto', flex: 'none', alignItems: 'center' }}>
-                <button className="login-btn" style={{ flex: 'none', padding: '6px 12px' }} disabled={!vmsOk} onClick={() => setVmExportOpen(true)}
-                  title={vmsOk ? `지금 화면의 VM(${query ? '검색 결과' : inclPoweredOff ? '전체' : '꺼진 VM 제외'}) 또는 고른 폴더를 CSV·엑셀로 내려받습니다 — 메모·태그·게스트 파티션·구성·Veeam 백업 등에서 필요한 항목만 고르고, 고른 조합을 내 계정에 저장해 둘 수 있습니다` : 'VM 목록을 아직 받지 못했습니다 — 받은 뒤에 내려받을 수 있습니다(빈 파일을 만들지 않습니다)'}>
-                  ⤓ VM 목록 내보내기…
+                <button className="login-btn" style={{ flex: 'none', padding: '6px 12px' }} disabled={!toolAllowed('vm-export')} onClick={() => setVmExportOpen(true)}
+                  title={toolAllowed('vm-export') ? '이 vCenter 의 VM 을 필요한 항목만 골라 CSV·엑셀로 — 호스트·CPU·메모리·NIC·디스크·게스트 파티션·스냅샷·Tools·태그·메모 등(VM 전체 정보 내보내기). 백업 판단은 서버 › Veeam 백업 현황 › Detail 의 ‘CSV · 엑셀…’' : 'VM 전체 정보 내보내기 기능 권한이 없습니다'}>
+                  ⤓ VM 전체 정보 내보내기…
                 </button>
               </span>
             )}
@@ -615,10 +616,9 @@ export default function VCenterDetail({ site, onBack }) {
             )}
           </div>
           {vmExportOpen && (
-            <VmListExportDialog vcenterId={vcenterId} vcName={site?.name || vcenterId} vms={visibleVms}
-              screenReq={vmListRequest({ query, matches, visibleVms, inclPoweredOff })}
-              screenText={query ? '지금 검색 결과의 VM' : inclPoweredOff ? '지금 화면의 VM' : '지금 화면의 VM(꺼진 VM 제외)'}
-              downloadFailText={downloadFailText} onClose={() => setVmExportOpen(false)} />
+            <Modal title={`VM 전체 정보 내보내기 · ${site?.name || vcenterId}`} onClose={() => setVmExportOpen(false)} width={1240}>
+              <React.Suspense fallback={<div className="muted">불러오는 중…</div>}><VmExport scope={vcenterId} /></React.Suspense>
+            </Modal>
           )}
           {veeamOn && <VeeamSummaryCard sum={veeamSum} />}
           {veeamOn && <VeeamSnapSummary counts={veeamSnapCnt} ev={veeamEv} evError={veeamEvP.errorInfo?.message || veeamEvP.error || ''} />}

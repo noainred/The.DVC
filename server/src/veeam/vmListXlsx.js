@@ -155,6 +155,7 @@ export function watchList(items, { snapDays = 7, at = Date.now() } = {}) {
 
 /** 인쇄 — 가로 · 폭 한 장(세로는 이어서). 큰 표를 인쇄해도 열이 여러 장으로 갈라지지 않게. */
 const PRINT = Object.freeze({ orientation: 'landscape', fitToPage: true, fitToWidth: 1, fitToHeight: 0, paperSize: 9, margins: { left: 0.4, right: 0.4, top: 0.5, bottom: 0.5, header: 0.2, footer: 0.2 } });
+const PRINT_NOFIT = Object.freeze({ orientation: 'landscape', paperSize: 9, margins: PRINT.margins });   // 접기(outlineProperties)를 쓰는 시트용 — 아래 treeSheet
 const styleOfGroup = (it) => VERDICT_STYLE[it.group] || VERDICT_STYLE.unknown;
 function paint(cell, st, bold = true) {
   cell.fill = fill(st.bg);
@@ -290,7 +291,9 @@ async function treeSheet(wb, ctx) {
   const ws = wb.addWorksheet(VM_XLSX_SHEETS[1], {
     views: [{ state: 'frozen', ySplit: 3, xSplit: 1, showGridLines: true }],
     properties: { outlineLevelRow: 0 },
-    pageSetup: { ...PRINT, printTitlesRow: '3:3' },
+    // v2.800: 이 시트는 '한 페이지 폭 맞춤'(fitToPage)을 쓰지 않는다 — exceljs 가 <sheetPr> 안에 pageSetUpPr 를 outlinePr 앞에 써서(OOXML 순서는
+    //   outlinePr → pageSetUpPr) Excel 이 이 시트를 통째로 버렸다(사용자 보고: 폴더 트리 시트가 빈 화면). summaryBelow:false(아래)를 지키려면 둘 중 하나를 빼야 한다.
+    pageSetup: { ...PRINT_NOFIT, printTitlesRow: '3:3' },
   });
   // 폴더(요약) 행이 하위 행 **위** 에 오게 — 기본(아래)이면 −/+ 단추가 폴더 행이 아니라 그다음 폴더 위에 붙는다.
   ws.properties.outlineProperties = { summaryBelow: false, summaryRight: false };
