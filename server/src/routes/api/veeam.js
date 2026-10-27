@@ -25,13 +25,15 @@ import { veeamEdgeStatus } from '../../central/veeamEdge.js';
 import { createYielder } from '../../util/timeSlice.js';
 import { requirePerm, requireRole, toolActorOf } from '../../auth/auth.js';
 import { issueFor } from '../../auth/toolAccess.js';
-import { backupRow, backupTotals, vmBackupView, vmScope, POWER_VALUES, RPO_DAYS, VIEW_FILTERS, vmViewMatches, priorityCandidates, priorityRank, PRIORITY_MAX, ynDaysOf } from '../../veeam/backupStatus.js';   // v2.779 백업 메뉴 · v2.780 범위·CSV
+import { backupRow, backupTotals, vmBackupView, cloneView, cloneResultText, METHOD_TEXT, vmScope, POWER_VALUES, RPO_DAYS, VIEW_FILTERS, vmViewMatches, priorityCandidates, priorityRank, PRIORITY_MAX, ynDaysOf } from '../../veeam/backupStatus.js';   // v2.779 백업 메뉴 · v2.780 범위·CSV
 import { vmListCsvAsync, vmTreeCmp, VM_LIST_MAX_IDS, folderParts } from '../../veeam/vmListCsv.js';
 import { resolveCols, needsOf, selectedColumns, catalogView } from '../../veeam/vmListCatalog.js';   // v2.798 필요한 항목만 고르기(v2.800 백업 현황 › Detail '백업 내보내기' 전용)
 import { getPrefs, setPref, clearPref } from '../../veeam/vmListPrefs.js';   // v2.798 계정 저장값(기본값 · 5칸)
 import { vmRefOf, vmTagsOf, tagStateOf } from '../../tags/analyze.js';
 import { renderVmListWorkbook, XLSX_MIME } from '../../veeam/vmListXlsx.js';   // v2.792 같은 목록의 엑셀(폴더 트리 — 시안 승인)
-import { setVeeamVmViewProvider } from '../../veeam/vmViewProvider.js';   // v2.801 VM 전체 정보 내보내기의 Veeam 묶음(같은 vcBackup → vmBackupView)
+import { setVeeamVmViewProvider } from '../../veeam/vmViewProvider.js';
+import { cloneStateByVm } from '../../vmclone/jobState.js';   // v2.803 백업 현황 Detail 'Clone' 칸(복제 잡 마지막 실행 — 실행 노드 기준)
+import { jobsRev } from '../../vmclone/store.js';   // v2.801 VM 전체 정보 내보내기의 Veeam 묶음(같은 vcBackup → vmBackupView)
 export { VM_LIST_MAX_IDS };
 import { logAudit } from '../../audit.js';
 import { csvLine, CSV_BOM } from '../../util/csv.js';
@@ -553,6 +555,7 @@ async function vmListSelTable({ vc, vcName, list, rows, b, sel, snapDays, now, m
   const tagOk = !!tagInv && ['ok', 'stale'].includes(tagStateOf(tagInv));
   const marks = need.has('marks') ? getMarks() : null;
   const marksOk = need.has('marks') && !marksUnreadable();
+  const clones = need.has('clone') ? cloneStatesOf(vc?.id) : null;   // v2.803 Clone 마지막 실행(백업 방식 Clone 인 VM 만)
   const viewOf = new Map(rows.map((r) => [r.inv.id, r.view]));
   const out = [];
   let levels = 1;
@@ -563,6 +566,7 @@ async function vmListSelTable({ vc, vcName, list, rows, b, sel, snapDays, now, m
     const r = { vc: vcName, linked: b ? b.linked : false, inv: vm, view: viewOf.get(vm.id) };
     if (need.has('tags')) r.tg = tagOk ? vmTagsOf(tagInv, vmRefOf(vc.id, vm.id)) : undefined;
     if (need.has('marks')) { r.mark = markView(marks?.[vm.id]); r.marksOk = marksOk; }
+    if (need.has('clone') && r.mark?.method === 'clone') r.clone = clones ? cloneView(clones.get(vm.id)) : null;
     out.push(r);
   }
   const cols = selectedColumns(sel.keys, { levels: Math.min(32, levels), tagCols: sel.tagCols, tagCategories: (tagInv?.categories || []).map((c) => c?.name), snapDays, now, ynDays: sel.ynDays });
@@ -602,13 +606,17 @@ async function vmListExport(req, res, kind) {
     // 순서는 트리를 위에서부터 읽은 순서(vmTreeCmp — 엑셀 폴더 트리·데이터 시트와 같다)
     const list = scoped.filter((vm) => (ids ? ids.has(vm.id) : !(noOff && vm.powerState === 'POWERED_OFF'))).sort(vmTreeCmp);
     const rows = [];
+    // v2.803: 엑셀 폴더 트리 시트의 '백업 방식'·'Clone' 칸 — 사람이 정한 표시와 복제 잡 상태를 view 에 싣는다(Detail 화면과 같은 vmBackupView)
+    const xMarks = kind === 'xlsx' && !marksUnreadable() ? getMarks() : null;
+    const xClones = kind === 'xlsx' ? cloneStatesOf(vc.id) : null;
     if (b) {
       const veeamKnown = b.row.veeam != null;
       const snapKnown = b.row.snap != null;
       for (const vm of list) {
         await maybeYield();
         rows.push({ inv: vm, view: vmBackupView(vm, b.match?.byVm?.[vm.id], b.ev?.byVm?.[vm.id],
-          { veeamKnown: veeamKnown || !b.linked, snapKnown, absentKnown: !b.row.veeamAbsentUnknown, now }) });
+          { veeamKnown: veeamKnown || !b.linked, snapKnown, absentKnown: !b.row.veeamAbsentUnknown, now,
+            ...(xMarks ? { mark: markView(xMarks[vm.id]), clone: xClones ? cloneView(xClones.get(vm.id)) : null } : {}) }) });
       }
     }
     const vcName = vc.name || vc.id;
@@ -618,7 +626,7 @@ async function vmListExport(req, res, kind) {
     let payload; let type;
     if (kind === 'xlsx') {
       const veeamText = !b.linked ? '연동 없음 — 스냅샷으로만 판단' : b.vcnt?.n == null ? '연결됨(이번 대조 결과 모름)' : `연결됨(서버 ${b.views.length}대)`;
-      const out = await renderVmListWorkbook({ vcName, rows, linked: b.linked, snapDays, cond: `${VM_LIST_VIEWS[view]} ${rows.length}대`, veeamText, at: now,
+      const out = await renderVmListWorkbook({ vcName, rows, linked: b.linked, snapDays, marksUnknown: marksUnreadable(), cond: `${VM_LIST_VIEWS[view]} ${rows.length}대`, veeamText, at: now,
         ...(table ? { dataTable: { head: table.head, keys: table.keys, cells: table.cells, folderCols: table.folderCols } } : {}) }, { signal: ac.signal });
       payload = out.buffer; type = XLSX_MIME;
     } else if (table) {
@@ -733,11 +741,18 @@ async function detailData(req, snap, t, scope) {
   const now = Date.now();
   const marks = getMarks();
   const unreadable = marksUnreadable();   // v2.785(GR R-B2)
-  const vms = b.scopedVms.map((vm) => vmBackupView(vm, b.match?.byVm?.[vm.id], b.ev?.byVm?.[vm.id], { veeamKnown: veeamKnown || !b.linked, snapKnown, absentKnown: !b.row.veeamAbsentUnknown, now, mark: markView(marks[vm.id]) }));   // v2.782(점검 K4 B-B3) · v2.784 표시
+  const clones = cloneStatesOf(vc.id);   // v2.803 — 못 읽으면 null(Clone 칸 '모름')
+  const vms = b.scopedVms.map((vm) => vmBackupView(vm, b.match?.byVm?.[vm.id], b.ev?.byVm?.[vm.id], { veeamKnown: veeamKnown || !b.linked, snapKnown, absentKnown: !b.row.veeamAbsentUnknown, now, mark: markView(marks[vm.id]),
+    clone: clones ? cloneView(clones.get(vm.id)) : null }));   // v2.782(점검 K4 B-B3) · v2.784 표시 · v2.803 Clone 칸(백업 방식 Clone 인 VM 만 싣는다 — vmBackupView)
   const views = b.views.map((v) => ({ name: v.name, ok: v.ok, lastOkTs: v.lastOkTs, stale: v.stale, error: v.error, authStopped: v.authStopped, via: v.via, ...(admin && v.runningJobs ? { runningJobs: v.runningJobs } : {}) }));
   return { ok: true, at: now, scope, vcenter: { id: vc.id, name: vc.name || vc.id }, row: { ...b.row, veeamReason: b.vcnt?.reason || '', snapReason: b.sc?.reason || '', ...(b.vcnt?.hostMismatch ? { hostMismatch: true } : {}) },
     linked: b.linked, servers: views, snapDays: b.ev?.days ?? null, snapSource: b.ev?.source || '', vms, ...(b.match?.aliasHosts && admin ? { aliasHosts: b.match.aliasHosts } : {}),
     writable: marksWritable(req, snap, vc.id), marksUnreadable: unreadable || undefined, marksCorruptKept: (!unreadable && marksCorruptKept()) || undefined };
+}
+
+/** v2.803: 그 vCenter 의 VM 별 복제 잡 상태(vmclone/jobState.js) — 실패는 null(모름). */
+function cloneStatesOf(vcenterId) {
+  try { return cloneStateByVm(vcenterId); } catch { return null; }
 }
 
 /** v2.784: 이 계정이 이 vCenter 의 백업 표시를 바꿀 수 있는가 — 화면이 편집 칸을 여는 값(서버 PUT 판정과 같은 조건). */
@@ -748,6 +763,8 @@ function marksWritable(req, snap, vcenterId) {
 }
 
 const iso = (ms) => (Number.isFinite(ms) && ms > 0 ? new Date(ms).toISOString() : '');
+/** v2.803 예전 CSV 의 Clone 두 칸 — [마지막 실행(UTC), 결과]. 백업 방식이 Clone 이 아닌 VM 은 빈칸. */
+const cloneCsvCells = (vm) => ('c' in vm ? [iso(vm.c?.at), cloneResultText(vm.c)] : ['', '']);
 const scopeText = (sc) => `${sc.power === 'on' ? '켜진 VM' : sc.power === 'off' ? '꺼진 VM' : '전체 VM'}${sc.excl ? ' · 템플릿·vCLS 제외' : ''}`;
 
 /** v2.788 EM 탭 응답(순수 조합 — 판정은 veeam/em/view.js). */
@@ -854,7 +871,7 @@ export function registerBackupStatus(api) {
     const admin = isAdminDetailUser(req.user);
     const scope = scopeOf(req);
     return memoJson(req, res, `backup-detail:${t.vcenterId}`, async () => detailData(req, snap, t, scope),
-      { ttlMs: 60_000, extraKey: `${scopeKey(req.user, snap)}|${admin ? 'admin' : 'user'}|m${marksRev()}|w${marksWritable(req, snap, t.vcenterId) ? 1 : 0}|em${emSourcesRev()}` });   // 쓰기 가능 여부도 계정마다 다르다(writeVcenters)
+      { ttlMs: 60_000, extraKey: `${scopeKey(req.user, snap)}|${admin ? 'admin' : 'user'}|m${marksRev()}|w${marksWritable(req, snap, t.vcenterId) ? 1 : 0}|em${emSourcesRev()}|c${jobsRev()}` });   // 쓰기 가능 여부도 계정마다 다르다(writeVcenters) · v2.803 c = 복제 잡 기록 리비전(Clone 칸)
   });
 
   /*
@@ -883,10 +900,10 @@ export function registerBackupStatus(api) {
       targets.push({ id, name: vm.name, vcenterId });
     }
     const patch = {};
-    for (const k of ['crit', 'need', 'memo']) if (Object.prototype.hasOwnProperty.call(body, k)) patch[k] = body[k];
+    for (const k of ['crit', 'method', 'need', 'memo']) if (Object.prototype.hasOwnProperty.call(body, k)) patch[k] = body[k];   // v2.803 method = 백업 방식
     const r = setMarks(targets, patch, req.user);
     if (!r.ok) return res.status(r.status || 400).json({ ok: false, reason: r.reason, ...(r.code ? { code: r.code } : {}) });
-    const what = [patch.crit !== undefined ? `중요도=${patch.crit || '지움'}` : '', patch.need !== undefined ? `백업 필요=${patch.need ? '표시' : '해제'}` : '',
+    const what = [patch.crit !== undefined ? `중요도=${patch.crit || '지움'}` : '', patch.method !== undefined ? `백업 방식=${patch.method || '지움'}` : '', patch.need !== undefined ? `백업 필요=${patch.need ? '표시' : '해제'}` : '',
       patch.memo !== undefined ? `메모 ${String(patch.memo || '').length}자` : ''].filter(Boolean).join(' · ');
     logAudit({ user: req.user?.username, action: 'backup-marks', target: vcenterId, detail: `${targets.length}대 · ${what}${targets.length === 1 ? ` · ${targets[0].name}` : ''}`, ip: req.ip });
     res.json({ ok: true, changed: r.changed, removed: r.removed });
@@ -919,7 +936,7 @@ export function registerBackupStatus(api) {
     } catch { if (!res.headersSent) res.status(500).json({ ok: false, reason: 'CSV 를 만들지 못했습니다.' }); } finally { lock.release(); }
   });
 
-  api.get('/tools/backup-detail.csv', csvPerm, toolsPerm, async (req, res) => {
+  api.get('/tools/backup-detail.csv', csvPerm, toolsPerm, async (req, res) => {   // v2.803 백업 방식 · Clone 열(cloneCsvCells)
     const t = vcOf(req);
     if (!t) return res.status(404).json({ ok: false, reason: 'vCenter 를 찾을 수 없습니다.' });
     const lock = acquireExport('backup-detail.csv', req);
@@ -932,7 +949,9 @@ export function registerBackupStatus(api) {
       const now = Date.now();
       const st = (v) => (v === undefined ? '모름' : !v ? '없음' : v.state === 'run' ? '백업 중' : v.state === 'wait' ? '대기' : '백업 대상');
       const lines = [CSV_BOM + csvLine(['vCenter', '폴더', 'VM', '전원', 'Veeam', '진행률(%)', '작업', '복원 지점', '마지막 백업 완료(UTC)', '마지막 결과',
-        `스냅샷 최근 ${d.snapDays || 7}일 횟수`, '스냅샷 마지막(UTC)', '지금 스냅샷', '스냅샷 잔존', '중요도', '백업 필요', '메모'])];
+        `스냅샷 최근 ${d.snapDays || 7}일 횟수`, '스냅샷 마지막(UTC)', '지금 스냅샷', '스냅샷 잔존',
+        // v2.803: 백업 방식(사람이 정한 값) · Clone 마지막 실행(백업 방식 Clone 인 VM 만) — '작업' 열은 파일 소비자 호환으로 그대로 둔다
+        '백업 방식', 'Clone 마지막 실행(UTC)', 'Clone 결과', '중요도', '백업 필요', '메모'])];
       const CRIT_TEXT = { high: '상', mid: '중', low: '하' };
       let n = 0;
       for (const vm of d.vms) {
@@ -943,7 +962,7 @@ export function registerBackupStatus(api) {
           v?.jobs?.join(' | ') || '', v && Number.isFinite(v.rp) && v.rp >= 0 ? v.rp : '', iso(v?.lb), v ? (v.lr || v.lastResult || '') : '',
           s.ev === undefined ? '모름' : s.ev ? (s.ev.n ?? '') : 0, iso(s.ev?.ts), s.now && !s.now.stale ? s.now.n : '', s.now?.stale ? '예' : '',
           // v2.785(GR R-B2): 표시 파일을 못 읽었으면 빈칸('없음' 으로 읽힌다)이 아니라 모름 — Veeam·스냅샷 열과 같은 표기
-          ...(d.marksUnreadable ? ['모름', '모름', ''] : [CRIT_TEXT[vm.m?.crit] || '', vm.m?.need ? '예' : '', vm.m?.memo || ''])]));
+          ...(d.marksUnreadable ? ['모름', '', '', '모름', '모름', ''] : [METHOD_TEXT[vm.m?.method] || '', ...cloneCsvCells(vm), CRIT_TEXT[vm.m?.crit] || '', vm.m?.need ? '예' : '', vm.m?.memo || ''])]));
       }
       logAudit({ user: req.user?.username, action: 'backup-detail.csv', target: t.vcenterId, detail: `${n} rows · ${scopeText(scope)} · 보기 ${filter}${filter === 'rpo' ? ` ${rpoDays}일` : ''}`, ip: req.ip });
       res.setHeader('Content-Type', 'text/csv; charset=utf-8');

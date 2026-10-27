@@ -60,7 +60,7 @@ test('A-2 손상 — 원본을 보존하고 쓰기는 503(빈 맵 위에 덮지 
 test('A-3 markCounts — 범위 목록만 · 미백업은 Veeam 대상이 아닌 백업 필요 · Veeam 모르면(또는 대조 부재가 모름이면) null', () => {
   const marks = { a: { crit: 'high', need: true }, b: { crit: 'mid', need: true }, c: { crit: 'low' }, z: { crit: 'high', need: true } };
   const vms = [{ id: 'a' }, { id: 'b' }, { id: 'c' }];
-  assert.deepEqual(BM.markCounts(vms, marks, { a: {} }, { veeamKnown: true }), { high: 1, mid: 1, low: 1, need: 2, needGap: 1 });
+  assert.deepEqual(BM.markCounts(vms, marks, { a: {} }, { veeamKnown: true }), { high: 1, mid: 1, low: 1, need: 2, needGap: 1, method: { veeam: 0, clone: 0, config: 0, none: 0, unset: 3 } });   // v2.803 백업 방식 — 정하지 않음 3
   assert.equal(BM.markCounts(vms, marks, null, { veeamKnown: false }).needGap, null);
   assert.equal(BM.markCounts(vms, marks, { a: {} }, { veeamKnown: true, absentKnown: false }).needGap, null, '첫 수집 전 서버가 있으면 부재는 모름');
 });
@@ -94,7 +94,7 @@ test('B 라우트 — 권한·범위·소속 검사 · 감사 · 저장 즉시 �
   closers.push(() => new Promise((r) => srv.close(() => r())));
   const base = `http://127.0.0.1:${srv.address().port}/api`;
   const put = (body) => fetch(`${base}/tools/backup-detail/marks`, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
-  const sumRow = async (id) => (await (await fetch(`${base}/tools/backup-summary`)).json()).rows.find((r) => r.id === id);
+  const sumRow = async (id) => { const r = (await (await fetch(`${base}/tools/backup-summary`)).json()).rows.find((x) => x.id === id); if (r?.marks) delete r.marks.method; return r; };   // v2.803 백업 방식 수는 backupMethod2803 이 본다
   try {
     assert.deepEqual((await sumRow(VC)).marks, { high: 0, mid: 0, low: 0, need: 0, needGap: 0 }, '먼저 한 번 읽어 응답 캐시를 채운다');
     const det0 = await (await fetch(`${base}/tools/backup-detail?vcenterId=${encodeURIComponent(VC)}`)).json();
@@ -121,7 +121,8 @@ test('B 라우트 — 권한·범위·소속 검사 · 감사 · 저장 즉시 �
     assert.equal((await put({ vcenterId: SN, vmIds: [`${SN}:vm-1`], need: true })).status, 200);
     const sum = await (await fetch(`${base}/tools/backup-summary`)).json();
     assert.equal(sum.rows.find((x) => x.id === SN).marks.needGap, 1);
-    assert.deepEqual(sum.totals.marks, { high: 2, mid: 0, low: 0, need: 3, needGap: 2, needGapUnknown: 0 });
+    const { method: _tm, ...tmarks } = sum.totals.marks;
+    assert.deepEqual(tmarks, { high: 2, mid: 0, low: 0, need: 3, needGap: 2, needGapUnknown: 0 });
 
     // 감사 — 대수·바꾼 필드 · 메모는 길이만
     const au = listAudit({ limit: 20 });

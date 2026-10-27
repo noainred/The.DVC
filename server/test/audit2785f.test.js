@@ -30,10 +30,10 @@ test('R-B2 합계 — marks 가 null 인 행은 0 으로 더하지 않는다(값
   const ok = { vm: 2, veeam: 1, veeamState: 'ok', snap: 1, split: { both: 1, vOnly: 0, sOnly: 0, none: 1 }, marks: { high: 1, mid: 0, low: 0, need: 1, needGap: 0 } };
   const t = S.backupTotals([ok, { ...ok, marks: null }]);
   assert.equal(t.marksUnknown, 1);
-  assert.deepEqual(t.marks, { high: null, mid: null, low: null, need: null, needGap: null, needGapUnknown: 0 }, '부분 합을 합계로 내지 않는다');
+  assert.deepEqual(t.marks, { high: null, mid: null, low: null, need: null, needGap: null, needGapUnknown: 0, method: null }, '부분 합을 합계로 내지 않는다(v2.803 백업 방식 수도)');
   const k = S.backupTotals([ok]);
   assert.equal(k.marksUnknown, 0);
-  assert.deepEqual(k.marks, { high: 1, mid: 0, low: 0, need: 1, needGap: 0, needGapUnknown: 0 }, '읽은 경우는 그대로');
+  assert.deepEqual(k.marks, { high: 1, mid: 0, low: 0, need: 1, needGap: 0, needGapUnknown: 0, method: { veeam: 0, clone: 0, config: 0, none: 0, unset: 0 } }, '읽은 경우는 그대로(옛 행 — method 없음은 0)');
 });
 
 test('R-B2 라우트 — 손상 파일: 서머리·세부 marks null · 합계 null · CSV 빈칸/모름 · 재시작 뒤 손상 사본 안내(지우면 사라진다)', async () => {
@@ -100,7 +100,8 @@ test('R-B2 라우트 — 손상 파일: 서머리·세부 marks null · 합계 n
     assert.equal(BM.marksCorruptKept(), false);
     const sum3 = await j('/tools/backup-summary');
     assert.equal(sum3.marksCorruptKept, undefined);
-    assert.deepEqual(sum3.rows.find((r) => r.id === VC).marks, { high: 0, mid: 0, low: 0, need: 1, needGap: 1 });
+    const { method: _m3, ...marks3 } = sum3.rows.find((r) => r.id === VC).marks;   // v2.803 백업 방식 수는 backupMethod2803 이 본다
+    assert.deepEqual(marks3, { high: 0, mid: 0, low: 0, need: 1, needGap: 1 });
   } finally { store.snapshot = prev; }
 });
 

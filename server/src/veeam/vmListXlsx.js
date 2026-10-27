@@ -21,7 +21,7 @@ import ExcelJS from 'exceljs';
 import '../util/xlsxSheetPrOrder.js';   // v2.799.1: 폴더 트리 시트(fitToPage + outlineProperties)의 <sheetPr> 순서 — Excel '복구' 대화상자(워커도 이 파일을 불러 같이 걸린다)
 import { deadlineMs } from '../util/deadline.js';
 import { localStamp, DAY_OFFSET_MIN } from '../util/dayKey.js';
-import { backupVerdict, isSystemVm } from './backupStatus.js';
+import { backupVerdict, isSystemVm, METHOD_TEXT, cloneResultText } from './backupStatus.js';
 import { vmListColumns, folderParts, folderLevels, offsetLabel, veeamStateText, folderNameCmp, vmTreeCmp } from './vmListCsv.js';
 import { kindOf, styleDataRow, depthTint, folderLabel, PAL } from '../vcenter/vmXlsxStyle.js';   // v2.801 공용 서식(줄무늬 · 숫자 서식 · 전원·여부 색 · 폴더 단계 색)
 
@@ -61,9 +61,12 @@ export function barText(rate, width = 10) {
   return '█'.repeat(n) + '░'.repeat(width - n);
 }
 
-const newAgg = () => ({ vm: 0, veeam: 0, snap: 0, none: 0, unknown: 0, stale: 0, run: 0, wait: 0, vKnown: 0, off: 0 });
+// v2.803 method = 백업 방식별 수(사람이 정한 값 — view.m.method · 없으면 unset)
+const newAgg = () => ({ vm: 0, veeam: 0, snap: 0, none: 0, unknown: 0, stale: 0, run: 0, wait: 0, vKnown: 0, off: 0, method: { veeam: 0, clone: 0, config: 0, none: 0, unset: 0 } });
 function addAgg(a, it) {
   a.vm++; a[it.group]++;
+  const mt = it.view.m?.method;
+  a.method[Object.hasOwn(METHOD_TEXT, mt || '') ? mt : 'unset']++;
   if (it.stale) a.stale++;
   if (it.view.v !== undefined) a.vKnown++;
   if (it.view.v?.state === 'run') a.run++;
@@ -205,6 +208,9 @@ function summarySheet(wb, ctx) {
     sr.getCell(col).border = { left: thin, right: thin, bottom: thin };
     sr.getCell(col).font = { size: 9, color: { argb: C.muted } };
   });
+  // v2.803 백업 방식(사람이 정한 값) 수 한 줄 — 표시 파일을 못 읽었으면 모름
+  ws.addRow(['백업 방식', o.marksUnknown ? '모름(백업 표시 파일을 읽지 못함)' : `${Object.entries(METHOD_TEXT).map(([k, t]) => `${t} ${a.method[k]}`).join(' · ')} · 미지정 ${a.method.unset}`])
+    .getCell(1).font = { bold: true, color: { argb: C.muted } };
   vr.height = 28;
 
   // 판단 분포 — 색 막대(글자 40칸) + 범례
@@ -297,7 +303,8 @@ async function treeSheet(wb, ctx) {
   // 폴더(요약) 행이 하위 행 **위** 에 오게 — 기본(아래)이면 −/+ 단추가 폴더 행이 아니라 그다음 폴더 위에 붙는다.
   ws.properties.outlineProperties = { summaryBelow: false, summaryRight: false };
   const heads = [
-    { h: '폴더 / VM', w: 46 }, { h: '전원', w: 9 }, { h: '백업 판단', w: 30 }, { h: 'Veeam', w: 12 }, { h: `마지막 백업 완료 ${o.tz}`, w: 24 },
+    // v2.803: '백업 방식'(사람이 정한 값) · 'Clone'(백업 방식 Clone 인 VM 의 포탈 복제 잡 마지막 실행) — 열이 둘 늘어 폴더 행 병합·색칠 위치도 옮겼다
+    { h: '폴더 / VM', w: 46 }, { h: '전원', w: 9 }, { h: '백업 판단', w: 30 }, { h: '백업 방식', w: 13 }, { h: 'Veeam', w: 12 }, { h: 'Clone', w: 26 }, { h: `마지막 백업 완료 ${o.tz}`, w: 24 },
     { h: '복원 지점', w: 10 }, { h: 'Veeam 임시 스냅샷(지금)', w: 22 }, { h: `최근 ${o.snapDays}일 Veeam 스냅샷`, w: 18 }, { h: '스냅샷 수(전체)', w: 16 },
     { h: '호스트', w: 28 }, { h: 'IP', w: 16 },
   ];
@@ -310,14 +317,16 @@ async function treeSheet(wb, ctx) {
   //   VM 행 줄무늬. 단계(개요)는 뿌리가 0 이라 폴더 깊이 + 1(7 상한).
   const folderRow = (label, depth, fa) => {
     const fr = veeamRate(fa, o.linked);
-    const r = ws.addRow([label, folderSummaryText(fa), '', '', o.linked ? `Veeam ${fr == null ? '—' : `${Math.round(fr * 100)}%`} ${barText(fr)}` : 'Veeam 연동 없음', '', fa.stale ? `잔존 ${fa.stale}` : '']);
-    ws.mergeCells(r.number, 2, r.number, 4); ws.mergeCells(r.number, 5, r.number, 6);
+    const r = ws.addRow([label, folderSummaryText(fa), '', '', '', fa.method.clone ? `Clone ${fa.method.clone}` : '',
+      o.linked ? `Veeam ${fr == null ? '—' : `${Math.round(fr * 100)}%`} ${barText(fr)}` : 'Veeam 연동 없음', '', fa.stale ? `잔존 ${fa.stale}` : '']);
+    ws.mergeCells(r.number, 2, r.number, 5); ws.mergeCells(r.number, 7, r.number, 8);
     const tint = depthTint(depth);
     for (let c = 2; c <= heads.length; c++) { const cell = r.getCell(c); cell.fill = fill(tint); cell.font = { color: { argb: 'FF1F2937' } }; }
     r.getCell(1).fill = fill(tint);
     r.getCell(1).alignment = { horizontal: 'left', indent: Math.min(15, depth * 2) };
-    r.getCell(5).font = { bold: true, color: { argb: o.linked ? 'FF166534' : C.muted } };
-    if (fa.stale) paint(r.getCell(7), VERDICT_STYLE.stale);
+    r.getCell(7).font = { bold: true, color: { argb: o.linked ? 'FF166534' : C.muted } };
+    if (fa.method.clone) r.getCell(6).font = { bold: true, color: { argb: 'FF0E7490' } };
+    if (fa.stale) paint(r.getCell(9), VERDICT_STYLE.stale);
     r.outlineLevel = Math.min(OUTLINE_MAX, depth);
     return r;
   };
@@ -338,7 +347,9 @@ async function treeSheet(wb, ctx) {
       it.view.name,
       POWER_TEXT[it.view.power] || it.view.power || '',
       it.verdict.text,
+      o.marksUnknown ? '모름' : METHOD_TEXT[it.view.m?.method] || '',
       veeamStateText(v, o.linked),
+      cloneCellText(it.view, o),
       v && fin(v.lb) && v.lb > 0 ? localStamp(v.lb, o.offsetMin) : '',
       v && fin(v.rp) && v.rp >= 0 ? v.rp : '',
       tempSnapText(it.view.s?.now, o.offsetMin, o.at),
@@ -351,8 +362,9 @@ async function treeSheet(wb, ctx) {
     if ((z++ % 2) === 1) for (let c = 1; c <= heads.length; c++) r.getCell(c).fill = fill(PAL.zebra);
     r.getCell(2).font = it.view.power === 'POWERED_OFF' ? { color: { argb: C.muted } } : it.view.power === 'POWERED_ON' ? { bold: true, color: { argb: PAL.green } } : {};
     paint(r.getCell(3), styleOfGroup(it));
-    if (it.stale) paint(r.getCell(7), VERDICT_STYLE.stale);
-    if (ev === undefined) r.getCell(8).font = { color: { argb: C.muted } };
+    if (it.view.c) r.getCell(6).font = { bold: true, color: { argb: it.view.c.job && it.view.c.at != null && it.view.c.ok === false ? 'FFB91C1C' : 'FF0E7490' } };
+    if (it.stale) paint(r.getCell(9), VERDICT_STYLE.stale);
+    if (ev === undefined) r.getCell(10).font = { color: { argb: C.muted } };
     r.outlineLevel = Math.min(OUTLINE_MAX, e.depth + 1);
     maxLevel = Math.max(maxLevel, r.outlineLevel);
   }
@@ -440,9 +452,10 @@ function legendSheet(wb, ctx) {
     `스냅샷은 셋으로 나눠 싣습니다: ① 지금 있는 Veeam 임시 스냅샷 ② 최근 ${o.snapDays}일 Veeam 계정이 만든 스냅샷 이벤트(횟수 · '모름' 은 이벤트를 아직 판단하지 못한 것) ③ VM 의 전체 스냅샷(사람이 만든 것 포함 — 수 · 크기 · 이름).`,
     o.dataTable ? "'데이터(행 단위)' 시트는 내보내기 창에서 고른 항목과 순서 그대로입니다(CSV 와 같은 열). ‘수집 안 됨’ 은 그 vCenter 에서 아직 모으지 않은 값(태그 수집 전 · 게스트 파티션 미수집 · 구성 캐시 미도달)이고, 빈칸은 못 읽은 값입니다."
       : "'데이터(행 단위)' 시트는 CSV 와 같은 열입니다(폴더 1~N단계 · 폴더 경로 포함). 색·접기는 엑셀에만 있습니다. 폴더 경로가 비어 있으면 데이터센터 바로 아래(최상위) VM 입니다.",
-    '대상 VM 은 내려받을 때 포탈 화면에 보이던 목록입니다(‘Off VM 포함’ · 검색 결과 반영). 판단은 백업 › 백업 세부내용과 같은 기준이고, 사람이 정한 중요도·메모는 싣지 않습니다.',
+    '대상 VM 은 내려받을 때 포탈 화면에 보이던 목록입니다(보기·검색 반영) 또는 고른 폴더입니다. 판단은 Veeam 백업 현황 › Detail 과 같은 기준입니다.',
+    "'백업 방식' 은 Veeam 백업 현황 › Detail 에서 사람이 정한 값입니다(Veeam · Clone · Config 백업 · 백업 안함 — 정하지 않은 VM 은 빈칸 · 수집값으로 추정하지 않습니다). 'Clone' 칸은 백업 방식이 Clone 인 VM 에만, 포탈 VM 백업(복제) 잡의 마지막 실행 시각과 결과를 씁니다 — '잡 없음' 은 그 VM 의 복제 잡이 없다는 뜻, '모름' 은 실행하는 노드(엣지)의 보고를 아직 받지 못한 것입니다.",
     'VM · 폴더 이름은 문자열 칸으로만 씁니다(수식 칸을 만들지 않습니다).',
-    `만든 시각 ${o.stamp} ${o.tz} · 포탈 › vCenter › VM 및 폴더에서 같은 목록을 볼 수 있습니다.`,
+    `만든 시각 ${o.stamp} ${o.tz} · 포탈 › 서버 › Veeam 백업 현황 › Detail 에서 같은 목록을 볼 수 있습니다.`,
   ];
   for (const t of notes) ws.addRow(['', `※ ${t}`]).getCell(2).alignment = { wrapText: true, vertical: 'top' };
   return ws;
@@ -453,8 +466,8 @@ function legendSheet(wb, ctx) {
  * @param {{ vcName:string, rows:Array<{inv:object, view:object}>, linked:boolean, snapDays?:number, offsetMin?:number, cond?:string, veeamText?:string, at?:number }} a
  * @returns {Promise<{buffer:Buffer, rows:number, folders:number, outlineLevels:number}>}
  */
-export async function buildVmListWorkbook({ vcName, rows, linked, snapDays = 7, offsetMin = DAY_OFFSET_MIN, cond = '전체 VM', veeamText = '', at = Date.now(), dataTable = null }) {
-  const o = { vcName: String(vcName || ''), linked: !!linked, snapDays, offsetMin, cond, at, tz: offsetLabel(offsetMin), stamp: localStamp(at, offsetMin), dataTable,
+export async function buildVmListWorkbook({ vcName, rows, linked, snapDays = 7, offsetMin = DAY_OFFSET_MIN, cond = '전체 VM', veeamText = '', at = Date.now(), dataTable = null, marksUnknown = false }) {
+  const o = { marksUnknown: !!marksUnknown, vcName: String(vcName || ''), linked: !!linked, snapDays, offsetMin, cond, at, tz: offsetLabel(offsetMin), stamp: localStamp(at, offsetMin), dataTable,
     veeamText: veeamText || (linked ? '연결됨' : '연동 없음 — 스냅샷으로만 판단') };
   const tree = buildVmTree(rows, { linked: o.linked });
   const flat = flattenTree(tree.root);
@@ -482,6 +495,13 @@ export function slimVmRows(rows) {
     for (const k of INV_FIELDS) if (r.inv?.[k] !== undefined) inv[k] = k === 'snapshotNames' && Array.isArray(r.inv[k]) ? r.inv[k].slice(0, 20) : r.inv[k];
     return { inv, view: r.view };
   });
+}
+
+/** v2.803 트리 시트 'Clone' 칸 — 백업 방식이 Clone 인 VM(view.c 가 있다)만: '2026-10-27 02:00 성공' · '잡 없음' · '모름'. */
+function cloneCellText(view, o) {
+  if (!view || !('c' in view)) return '';
+  const c = view.c;
+  return [c && fin(c.at) ? localStamp(c.at, o.offsetMin) : '', cloneResultText(c)].filter(Boolean).join(' ');
 }
 
 /* ── 워커 실행(메인 스레드가 멈추지 않게) ─────────────────────────────
