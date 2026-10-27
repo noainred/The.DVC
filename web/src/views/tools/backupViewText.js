@@ -311,7 +311,7 @@ export function vmMatches(vm, f, opts) {
   if (f === 'rpo') return c.old;
   if (f === 'fail') return c.fail;
   if (f === 'need') return c.need;
-  if (f === 'needgap') return c.need && c.vKnown && !c.veeam;   // Veeam 을 모르는 VM 은 넣지 않는다(서버 vmViewMatches 와 한 쌍)
+  if (f === 'needgap') return c.need && c.vKnown && !c.veeam && c.method !== 'none' && c.method !== 'clone';   // Veeam 을 모르는 VM 은 넣지 않는다 · v2.806 백업 안함·Clone 은 미백업 아님(서버 vmViewMatches 와 한 쌍)
   if (f === 'crit-high' || f === 'crit-mid' || f === 'crit-low') return c.crit === f.slice(5);
   if (f.startsWith('method-')) return f === 'method-unset' ? !c.method : c.method === f.slice(7);   // 서버 vmViewMatches 와 한 쌍
   return true;

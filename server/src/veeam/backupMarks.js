@@ -119,7 +119,8 @@ export function markCounts(vms, marks, byVm, { veeamKnown, absentKnown = true } 
     if (m && METHOD_VALUES.includes(m.method)) c.method[m.method]++; else c.method.unset++;
     if (!m) continue;
     if (CRIT_VALUES.includes(m.crit)) c[m.crit]++;
-    if (m.need === true) { c.need++; if (gapKnown && !byVm?.[vm.id]) c.needGap++; }
+    // v2.806: 백업 방식이 백업 안함·Clone 이면 Veeam 부재는 미백업이 아니다(우선순위 VM priorityCandidates · 보기 필터 needgap 과 같은 규칙)
+    if (m.need === true) { c.need++; if (gapKnown && !byVm?.[vm.id] && m.method !== 'none' && m.method !== 'clone') c.needGap++; }
   }
   if (!gapKnown) c.needGap = null;
   return c;

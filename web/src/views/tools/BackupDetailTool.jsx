@@ -393,7 +393,7 @@ export default function BackupDetailTool({ scope }) {
                       {writable ? (
                         <button type="button" className={`tab${selVm.m?.need ? ' active' : ''}`} aria-pressed={!!selVm.m?.need} disabled={saving} onClick={() => saveMarks([selVm.id], { need: !selVm.m?.need })} style={{ padding: '3px 10px', fontSize: 12, display: 'inline-flex', alignItems: 'center', gap: 4 }}><NeedIcon size={13} />{selVm.m?.need ? '표시됨 — 누르면 해제' : '표시'}</button>
                       ) : (selVm.m?.need ? <span className="flex" style={{ gap: 4, alignItems: 'center' }}><NeedIcon size={13} />표시됨</span> : <span className="muted">—</span>)}
-                      {selVm.m?.need && c.vKnown && !c.veeam && <span style={{ fontSize: 12, color: '#fca5a5' }}>Veeam 백업 대상이 아닙니다</span>}
+                      {selVm.m?.need && c.vKnown && !c.veeam && c.method !== 'none' && c.method !== 'clone' && <span style={{ fontSize: 12, color: '#fca5a5' }}>Veeam 백업 대상이 아닙니다</span>}
                     </div>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
                       <span className="muted" style={{ fontSize: 12 }} id="backup-memo-label">백업 메모</span>

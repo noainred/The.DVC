@@ -261,6 +261,10 @@ describe('v2.803 백업 방식 · 백업 칸 · Clone 칸', async () => {
     const vms = [{ id: 'a', m: { method: 'clone' } }, { id: 'b', m: { method: 'veeam' } }, { id: 'c', m: { crit: 'high' } }, { id: 'd' }, { id: 'e', m: { method: 'bogus' } }];
     for (const [f] of METHOD_FILTERS) for (const v of vms) expect(vmMatches(v, f), `${f}/${v.id}`).toBe(S.vmViewMatches(v, f));
     expect(vms.filter((v) => vmMatches(v, 'method-unset')).map((v) => v.id)).toEqual(['c', 'd', 'e'], '모르는 값은 미지정');
+    // v2.806 needgap — 백업 안함·Clone 은 미백업 아님(웹·서버 한 쌍)
+    const nv = ['veeam', 'clone', 'config', 'none', ''].map((method, i) => ({ id: `n${i}`, v: null, s: { ev: null }, m: { need: true, method } }));
+    for (const v of nv) expect(vmMatches(v, 'needgap'), v.m.method).toBe(S.vmViewMatches(v, 'needgap'));
+    expect(nv.filter((v) => vmMatches(v, 'needgap')).map((v) => v.m.method)).toEqual(['veeam', 'config', '']);
   });
   it('백업 칸 — Veeam 이 있으면 Veeam(스냅샷 숨김) · 없으면 스냅샷 · 둘 다 없으면 Veeam 표기 · 모름을 — 로 덮지 않는다', () => {
     expect(backupCell({ v: { lb: T }, s: { ev: { n: 2, ts: T } } })).toMatchObject({ tone: 'ok', src: 'veeam' });
