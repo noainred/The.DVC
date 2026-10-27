@@ -16,15 +16,18 @@ export const KIND_BY_KEY = Object.freeze({
   cpuUsagePct: 'pct', memUsagePct: 'pct',
   vbkYn: 'yn', vsnapYn: 'yn',
   vjudge: 'verdict',
+  bmethod: 'method',
   name: 'name',
 });
 const POWER = Object.freeze({ POWERED_ON: 'on', 켜짐: 'on', POWERED_OFF: 'off', 꺼짐: 'off', SUSPENDED: 'warn', '일시 중지': 'warn' });
 const TOOLS = Object.freeze({ RUNNING: 'on', NOT_RUNNING: 'warn', OUTDATED: 'warn' });
 const YN = Object.freeze({ 예: 'yes', 아니오: 'no', 모름: 'off' });
+// v2.807 백업 방식(서버 METHOD_TEXT 글자) → 색 — 서버 vmXlsxStyle METHOD_LOOK 과 같은 뜻
+const METHOD = Object.freeze({ Veeam: 'm-veeam', Clone: 'm-clone', 'Config 백업': 'm-config', '백업 안함': 'm-none' });
 
 /**
  * 칸 모양 이름(CSS 클래스 접미사) — '' 이면 손대지 않는다.
- * missing(흐린 기울임) · on(초록) · off(회색) · warn(주황) · yes · no · hot(90%+) · warm(80%+) · v-veeam · v-snap · v-none · v-unknown · name
+ * missing(흐린 기울임) · on(초록) · off(회색) · warn(주황) · yes · no · hot(90%+) · warm(80%+) · v-veeam · v-snap · v-none · v-unknown · m-veeam · m-clone · m-config · m-none · name
  */
 export function cellTone(v, key) {
   if (typeof v === 'string' && MISSING_TEXTS.includes(v)) return 'missing';
@@ -37,6 +40,7 @@ export function cellTone(v, key) {
   if (kind === 'power') return POWER[v] || '';
   if (kind === 'tools') return TOOLS[v] || '';
   if (kind === 'yn') return YN[v] || '';
+  if (kind === 'method') return METHOD[v] || '';
   if (kind === 'verdict') {
     if (v === 'Veeam 백업') return 'v-veeam';
     if (v.startsWith('스냅샷 흔적')) return 'v-snap';

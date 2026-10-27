@@ -18,6 +18,8 @@ const TONE_STYLE = Object.freeze({
   yes: { color: '#4ade80', fontWeight: 600 }, no: { color: '#fca5a5', fontWeight: 600 },
   hot: { color: '#fca5a5', fontWeight: 600, background: 'rgba(239,68,68,.18)' }, warm: { color: '#fcd34d', fontWeight: 600, background: 'rgba(245,158,11,.16)' },
   'v-veeam': { color: '#86efac', fontWeight: 600 }, 'v-snap': { color: '#7dd3fc', fontWeight: 600 }, 'v-none': { color: '#fcd34d', fontWeight: 600 }, 'v-unknown': { color: 'var(--text-dim)' },
+  // v2.807 백업 방식 — Detail 배지(backupViewText METHODS)와 같은 색
+  'm-veeam': { color: '#86efac', fontWeight: 600 }, 'm-clone': { color: '#67e8f9', fontWeight: 600 }, 'm-config': { color: '#a78bfa', fontWeight: 600 }, 'm-none': { color: '#94a3b8', fontWeight: 600 },
   name: { fontWeight: 700 },
 });
 const BAND = ['#1e3355', '#123047', '#2a2150', '#123826', '#3a2c10', '#3a1f10', '#23285a', '#3a1720', '#3a1530', '#183a2a'];

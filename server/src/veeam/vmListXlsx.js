@@ -23,7 +23,7 @@ import { deadlineMs } from '../util/deadline.js';
 import { localStamp, DAY_OFFSET_MIN } from '../util/dayKey.js';
 import { backupVerdict, isSystemVm, METHOD_TEXT, cloneResultText } from './backupStatus.js';
 import { vmListColumns, folderParts, folderLevels, offsetLabel, veeamStateText, folderNameCmp, vmTreeCmp } from './vmListCsv.js';
-import { kindOf, styleDataRow, depthTint, folderLabel, PAL } from '../vcenter/vmXlsxStyle.js';   // v2.801 공용 서식(줄무늬 · 숫자 서식 · 전원·여부 색 · 폴더 단계 색)
+import { kindOf, styleDataRow, depthTint, folderLabel, PAL, METHOD_LOOK } from '../vcenter/vmXlsxStyle.js';   // v2.801 공용 서식(줄무늬 · 숫자 서식 · 전원·여부 색 · 폴더 단계 색)
 
 export const XLSX_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 export const VM_XLSX_SHEETS = Object.freeze(['요약', 'VM 목록(폴더 트리)', '데이터(행 단위)', '읽는 법']);
@@ -120,6 +120,19 @@ export function folderSummaryText(a) {
   if (a.none) parts.push(`확인 안 됨 ${a.none}`);
   if (a.unknown) parts.push(`모름 ${a.unknown}`);
   return parts.join(' · ');
+}
+
+/**
+ * v2.807 백업 방식별 수(사람이 정한 값) — 서식 글자. 방식 이름·수는 그 방식 색 굵게, 미지정은 회색.
+ *   full=true(요약 시트)면 0 인 방식도 쓴다(전체 한 줄) · false(폴더 행)면 0 은 생략. 표시 파일을 못 읽었으면 '모름'.
+ */
+export function methodCountsRich(a, unknown, { full = false, unknownText = '모름' } = {}) {
+  if (unknown) return unknownText;
+  const parts = Object.entries(METHOD_TEXT).filter(([k]) => full || a.method[k] > 0)
+    .map(([k, t]) => ({ text: `${t} ${a.method[k].toLocaleString('en-US')}`, font: { bold: true, color: { argb: METHOD_LOOK[k].fg } } }));
+  if (full || a.method.unset > 0) parts.push({ text: `미지정 ${a.method.unset.toLocaleString('en-US')}`, font: { color: { argb: C.muted } } });
+  if (!parts.length) return '';
+  return { richText: parts.flatMap((p, i) => (i ? [{ text: ' · ', font: { color: { argb: C.muted } } }, p] : [p])) };
 }
 
 /** 지금 있는 Veeam 임시 스냅샷 칸 — '1개 · 10-26 18:02' · 잔존이면 '1개 · 잔존 2일째'. */
@@ -219,7 +232,8 @@ function summarySheet(wb, ctx) {
     sr.getCell(col).font = { size: 9, color: { argb: C.muted } };
   });
   // v2.803 백업 방식(사람이 정한 값) 수 한 줄 — 표시 파일을 못 읽었으면 모름
-  ws.addRow(['백업 방식', o.marksUnknown ? '모름(백업 표시 파일을 읽지 못함)' : `${Object.entries(METHOD_TEXT).map(([k, t]) => `${t} ${a.method[k]}`).join(' · ')} · 미지정 ${a.method.unset}`])
+  //   v2.807: 방식마다 색(트리 시트 '백업 방식' 칸과 같은 색)
+  ws.addRow(['백업 방식', methodCountsRich(a, o.marksUnknown, { full: true, unknownText: '모름(백업 표시 파일을 읽지 못함)' })])
     .getCell(1).font = { bold: true, color: { argb: C.muted } };
   vr.height = 28;
 
@@ -314,7 +328,7 @@ async function treeSheet(wb, ctx) {
   ws.properties.outlineProperties = { summaryBelow: false, summaryRight: false };
   const heads = [
     // v2.803: '백업 방식'(사람이 정한 값) · 'Clone'(백업 방식 Clone 인 VM 의 포탈 복제 잡 마지막 실행) — 열이 둘 늘어 폴더 행 병합·색칠 위치도 옮겼다
-    { h: '폴더 / VM', w: 46 }, { h: '전원', w: 9 }, { h: '백업 판단', w: 30 }, { h: '백업 방식', w: 13 }, { h: 'Veeam', w: 12 }, { h: 'Clone', w: 26 }, { h: `마지막 백업 완료 ${o.tz}`, w: 24 },
+    { h: '폴더 / VM', w: 46 }, { h: '전원', w: 9 }, { h: '백업 판단', w: 40 }, { h: '백업 방식', w: 16 }, { h: 'Veeam', w: 12 }, { h: 'Clone', w: 26 }, { h: `마지막 백업 완료 ${o.tz}`, w: 24 },
     { h: '복원 지점', w: 10 }, { h: 'Veeam 임시 스냅샷(지금)', w: 22 }, { h: `최근 ${o.snapDays}일 Veeam 스냅샷`, w: 18 }, { h: '스냅샷 수(전체)', w: 16 },
     { h: '호스트', w: 28 }, { h: 'IP', w: 16 },
   ];
@@ -327,15 +341,15 @@ async function treeSheet(wb, ctx) {
   //   VM 행 줄무늬. 단계(개요)는 뿌리가 0 이라 폴더 깊이 + 1(7 상한).
   const folderRow = (label, depth, fa) => {
     const fr = veeamRate(fa, o.linked);
-    const r = ws.addRow([label, folderSummaryText(fa), '', '', '', fa.method.clone ? `Clone ${fa.method.clone}` : '',
+    // v2.807(사용자 요청 '백업 방식별 합계를 백업 판단처럼 위에'): 2~3 = 백업 판단 합계 · 4~6 = 백업 방식 합계(하위 폴더 포함 · 방식 색) — 예전 6열 'Clone N' 은 이 합계에 들었다
+    const r = ws.addRow([label, folderSummaryText(fa), '', methodCountsRich(fa, o.marksUnknown), '', '',
       o.linked ? `Veeam ${fr == null ? '—' : `${Math.round(fr * 100)}%`} ${barText(fr)}` : 'Veeam 연동 없음', '', fa.stale ? `잔존 ${fa.stale}` : '']);
-    ws.mergeCells(r.number, 2, r.number, 5); ws.mergeCells(r.number, 7, r.number, 8);
+    ws.mergeCells(r.number, 2, r.number, 3); ws.mergeCells(r.number, 4, r.number, 6); ws.mergeCells(r.number, 7, r.number, 8);
     const tint = depthTint(depth);
-    for (let c = 2; c <= heads.length; c++) { const cell = r.getCell(c); cell.fill = fill(tint); cell.font = { color: { argb: 'FF1F2937' } }; }
+    for (let c = 2; c <= heads.length; c++) { const cell = r.getCell(c); cell.fill = fill(tint); if (c !== 4) cell.font = { color: { argb: 'FF1F2937' } }; }
     r.getCell(1).fill = fill(tint);
     r.getCell(1).alignment = { horizontal: 'left', indent: Math.min(15, depth * 2) };
     r.getCell(7).font = { bold: true, color: { argb: o.linked ? 'FF166534' : C.muted } };
-    if (fa.method.clone) r.getCell(6).font = { bold: true, color: { argb: 'FF0E7490' } };
     if (fa.stale) paint(r.getCell(9), VERDICT_STYLE.stale);
     r.outlineLevel = Math.min(OUTLINE_MAX, depth);
     return r;
@@ -372,6 +386,7 @@ async function treeSheet(wb, ctx) {
     if ((z++ % 2) === 1) for (let c = 1; c <= heads.length; c++) r.getCell(c).fill = fill(PAL.zebra);
     r.getCell(2).font = it.view.power === 'POWERED_OFF' ? { color: { argb: C.muted } } : it.view.power === 'POWERED_ON' ? { bold: true, color: { argb: PAL.green } } : {};
     paint(r.getCell(3), styleOfGroup(it));
+    if (!o.marksUnknown && METHOD_LOOK[it.view.m?.method]) paint(r.getCell(4), METHOD_LOOK[it.view.m.method]);   // v2.807 방식 색
     if (it.view.c) r.getCell(6).font = { bold: true, color: { argb: it.view.c.job && it.view.c.at != null && it.view.c.ok === false ? 'FFB91C1C' : 'FF0E7490' } };
     if (it.stale) paint(r.getCell(9), VERDICT_STYLE.stale);
     if (ev === undefined) r.getCell(10).font = { color: { argb: C.muted } };
@@ -465,6 +480,7 @@ function legendSheet(wb, ctx) {
     '대상 VM 은 내려받을 때 포탈 화면에 보이던 목록입니다(보기·검색 반영) 또는 고른 폴더입니다. 판단은 Veeam 백업 현황 › Detail 과 같은 기준입니다.',
     "'먼저 볼 VM' 은 백업 방식을 '백업 안함' 으로 정한 VM 과 Clone 마지막 복제가 성공한 VM 을 빼고, 그 밖의 방식은 이유 앞에 밝힙니다.",
     "'백업 방식' 은 Veeam 백업 현황 › Detail 에서 사람이 정한 값입니다(Veeam · Clone · Config 백업 · 백업 안함 — 정하지 않은 VM 은 빈칸 · 수집값으로 추정하지 않습니다). 'Clone' 칸은 백업 방식이 Clone 인 VM 에만, 포탈 VM 백업(복제) 잡의 마지막 실행 시각과 결과를 씁니다 — '잡 없음' 은 그 VM 의 복제 잡이 없다는 뜻, '모름' 은 실행하는 노드(엣지)의 보고를 아직 받지 못한 것입니다.",
+    "폴더 행의 '백업 방식' 칸은 그 폴더(하위 폴더 포함)의 방식별 VM 수입니다(0 인 방식은 생략 · 맨 위 vCenter 행이 전체 합계). 색: Veeam 녹색 · Clone 청록 · Config 백업 보라 · 백업 안함 회색 · 미지정은 색 없음.",
     'VM · 폴더 이름은 문자열 칸으로만 씁니다(수식 칸을 만들지 않습니다).',
     `만든 시각 ${o.stamp} ${o.tz} · 포탈 › 서버 › Veeam 백업 현황 › Detail 에서 같은 목록을 볼 수 있습니다.`,
   ];

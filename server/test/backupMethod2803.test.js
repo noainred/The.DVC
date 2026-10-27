@@ -25,6 +25,8 @@ after(async () => { for (const c of closers.reverse()) { try { await c(); } catc
 const BM = await import('../src/veeam/backupMarks.js');
 const BS = await import('../src/veeam/backupStatus.js');
 const CAT = await import('../src/veeam/vmListCatalog.js');
+const XS = await import('../src/vcenter/vmXlsxStyle.js');
+const XL = await import('../src/veeam/vmListXlsx.js');
 const CS = await import('../src/vmclone/store.js');
 const ExcelJS = (await import('exceljs')).default;
 const JSZip = (await import('jszip')).default;
@@ -145,8 +147,15 @@ test('B 라우트 — PUT method · Detail c 는 Clone VM 에만 · 잡 저장 �
     assert.match(String(rowOf('web01').getCell(6).value), /^\d{4}-\d\d-\d\d \d\d:\d\d 실패$/);
     assert.ok(!rowOf('cfg01').getCell(6).value, 'Clone 이 아닌 VM 은 빈칸');
     const txt = (v) => (v && typeof v === 'object' && v.richText ? v.richText.map((x) => x.text).join('') : String(v ?? ''));   // 폴더 이름은 서식 글자(folderLabel)
-    let folderClone = null; ts.eachRow((row) => { if (/^📁 A {2}/.test(txt(row.getCell(1).value))) folderClone = row.getCell(6).value; });
-    assert.equal(folderClone, 'Clone 2');
+    // v2.807: 폴더 행 4~6 병합 = 백업 방식 합계(하위 포함 · 0 생략 · 방식 색) · 2~3 = 백업 판단 합계 · VM 칸은 방식 색
+    let folderRow = null; ts.eachRow((row) => { if (/^📁 A {2}/.test(txt(row.getCell(1).value))) folderRow = row; });
+    assert.equal(txt(folderRow.getCell(4).value), 'Clone 2');
+    assert.equal(folderRow.getCell(4).value.richText[0].font.color.argb, XS.METHOD_LOOK.clone.fg);
+    assert.ok(ts.model.merges.includes(`D${folderRow.number}:F${folderRow.number}`) && ts.model.merges.includes(`B${folderRow.number}:C${folderRow.number}`), ts.model.merges.join(','));
+    let rootRow = null; ts.eachRow((row) => { if (!rootRow && /\/ vm {2}/.test(txt(row.getCell(1).value))) rootRow = row; });
+    assert.equal(txt(rootRow.getCell(4).value), 'Clone 2 · Config 백업 1', '맨 위 vCenter 행이 전체 합계');
+    assert.deepEqual([rowOf('web01').getCell(4).fill.fgColor.argb, rowOf('web01').getCell(4).font.color.argb], [XS.METHOD_LOOK.clone.bg, XS.METHOD_LOOK.clone.fg]);
+    assert.equal(rowOf('cfg01').getCell(4).fill.fgColor.argb, XS.METHOD_LOOK.config.bg);
     const zip = await JSZip.loadAsync(buf);
     for (const n of Object.keys(zip.files).filter((f) => /^xl\/worksheets\/sheet\d+\.xml$/.test(f))) {
       const m = /<sheetPr\b[^>]*>([\s\S]*?)<\/sheetPr>/.exec(await zip.file(n).async('string'));
@@ -154,7 +163,7 @@ test('B 라우트 — PUT method · Detail c 는 Clone VM 에만 · 잡 저장 �
       assert.ok(!(kids.includes('outlinePr') && kids.includes('pageSetUpPr') && kids.indexOf('pageSetUpPr') < kids.indexOf('outlinePr')), `${n} ${kids}`);
     }
     const sumWs = wb.getWorksheet('요약');
-    let line = ''; sumWs.eachRow((row) => { if (row.getCell(1).value === '백업 방식') line = String(row.getCell(2).value); });
+    let line = ''; sumWs.eachRow((row) => { if (row.getCell(1).value === '백업 방식') line = txt(row.getCell(2).value); });
     assert.equal(line, 'Veeam 0 · Clone 2 · Config 백업 1 · 백업 안함 0 · 미지정 0');
   } finally { store.snapshot = prev; }
 });
@@ -213,4 +222,20 @@ test('E v2.806 우선순위 VM — 백업 안함은 미백업 아님 · Clone �
   assert.deepEqual(views.filter((v) => BS.vmViewMatches(v, 'needgap')).map((v) => v.id), ['a', 'd']);
   const src = fs.readFileSync(new URL('../src/routes/api/veeam.js', import.meta.url), 'utf8');
   assert.equal((src.match(/\|c\$\{jobsRev\(\)\}/g) || []).length, 2, '서머리·세부 둘 다');
+});
+
+test('F v2.807 엑셀 백업 방식 — 색 표는 방식 키와 같다 · 데이터 시트 칸 색 · 합계 글자(0 생략 · 미지정 · 모름)', () => {
+  assert.deepEqual(Object.keys(XS.METHOD_LOOK).sort(), Object.keys(BS.METHOD_TEXT).sort(), '방식이 늘면 색도');
+  assert.equal(XS.kindOf('bmethod'), 'method');
+  for (const [k, t] of Object.entries(BS.METHOD_TEXT)) {
+    const look = XS.cellLook(t, 'method', true);
+    assert.deepEqual([look.fill.fgColor.argb, look.font.color.argb], [XS.METHOD_LOOK[k].bg, XS.METHOD_LOOK[k].fg], t);
+  }
+  assert.equal(XS.cellLook('', 'method', false), null, '미지정 빈칸은 색 없음');
+  const txt = (v) => (v && typeof v === 'object' && v.richText ? v.richText.map((x) => x.text).join('') : String(v ?? ''));
+  const a = { method: { veeam: 1200, clone: 3, config: 0, none: 40, unset: 0 } };
+  assert.equal(txt(XL.methodCountsRich(a, false)), 'Veeam 1,200 · Clone 3 · 백업 안함 40');
+  assert.equal(txt(XL.methodCountsRich({ method: { veeam: 0, clone: 0, config: 0, none: 0, unset: 5 } }, false)), '미지정 5');
+  assert.equal(txt(XL.methodCountsRich(a, false, { full: true })), 'Veeam 1,200 · Clone 3 · Config 백업 0 · 백업 안함 40 · 미지정 0');
+  assert.equal(XL.methodCountsRich(a, true), '모름', '표시 파일을 못 읽으면 0 으로 쓰지 않는다');
 });
