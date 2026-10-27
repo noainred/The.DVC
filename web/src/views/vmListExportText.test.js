@@ -57,7 +57,7 @@ describe('v2.797 VM 목록 내보내기 — 항목 고르기 · 내 저장값', 
     const st = { cols: ['name'], multi: 'join', tagCols: false, target: 'screen', folder: '' };
     expect(T.exportBody(st, { body: { ids: ['v:1'], view: 'search' }, count: 1 }).body).toEqual({ ids: ['v:1'], view: 'search', cols: ['name'], multi: 'join', tagCols: false });
     expect(T.exportBody(st, { body: null, count: 30000, error: '넘습니다' })).toMatchObject({ body: null, error: '넘습니다' });
-    expect(T.exportBody({ ...st, target: 'folder' }, null, [{ id: 'v:2' }]).body.ids).toEqual(['v:2']);
+    expect(T.exportBody({ ...st, target: 'folder' }, null, [{ id: 'v:2' }]).body).toMatchObject({ ids: ['v:2'], view: 'folder' });
   });
 
   it('화면 — 날 select 없음 · 저장 결과 r?.ok === false 확인 · 늦은 미리보기 버림 · 대문자 변환 없음', () => {

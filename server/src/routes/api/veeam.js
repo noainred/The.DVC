@@ -514,8 +514,8 @@ function maskDetail(detail, admin, vmName = '') {
  *   · 읽기 POST(본문에 id 목록) — 게이트는 CSV 내보내기 권한(data.csv — 관리자 전용, 웹 canCsv 와 같은 판정) · 조회 범위 밖 vCenter 404(vcOf) ·
  *     동시 1건(exportBusy — vCenter 전체 대조·스냅샷 요약을 다시 계산한다) · 감사 로그 · 파일 이름에 화면 조건(all · poweredon · search).
  */
-const VM_LIST_VIEWS = Object.freeze({ all: '전체 VM', noOff: '꺼진 VM 제외(‘Off VM 포함’ 해제)', search: '검색 결과' });
-const VM_LIST_FILE_TAG = Object.freeze({ all: 'all', noOff: 'poweredon', search: 'search' });
+const VM_LIST_VIEWS = Object.freeze({ all: '전체 VM', noOff: '꺼진 VM 제외(‘Off VM 포함’ 해제)', search: '검색 결과', folder: '고른 폴더' });   // v2.797 폴더 고르기
+const VM_LIST_FILE_TAG = Object.freeze({ all: 'all', noOff: 'poweredon', search: 'search', folder: 'folder' });
 /** v2.797 본문의 '고른 항목' — 없으면 null(v2.792 열). { ok, keys, multi, tagCols } | { ok:false, reason }. */
 function selOf(body) {
   if (body.cols == null) return null;

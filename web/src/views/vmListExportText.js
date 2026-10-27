@@ -108,7 +108,7 @@ export function savedText(slot, v, alsoDefault) {
  */
 export function exportBody(st, screenReq, folderVms) {
   const sel = { cols: [...st.cols], multi: st.multi, tagCols: !!st.tagCols };
-  if (st.target === 'folder') return { body: { ids: (folderVms || []).map((v) => v.id), view: 'all', ...sel }, count: (folderVms || []).length };
+  if (st.target === 'folder') return { body: { ids: (folderVms || []).map((v) => v.id), view: 'folder', ...sel }, count: (folderVms || []).length };   // 파일 이름에 'folder'
   if (!screenReq?.body) return { body: null, count: screenReq?.count || 0, error: screenReq?.error || '' };
   return { body: { ...screenReq.body, ...sel }, count: screenReq.count };
 }
