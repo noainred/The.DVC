@@ -25,7 +25,7 @@ import { dayStamp } from '../dayStamp.js';
 import Select from '../components/Select.jsx';
 import BoldText from '../components/boldText.jsx';
 import { vmListRequest } from './vcdVmList.js'; // v2.792: 'VM 목록 엑셀·CSV'(Veeam·스냅샷 포함) 요청 본문(순수)
-import VmListExportDialog from './VmListExportDialog.jsx'; // v2.797 필요한 항목만 고르기 · 내 저장값
+import VmListExportDialog from './VmListExportDialog.jsx'; // v2.798 필요한 항목만 고르기 · 내 저장값
 import { downloadFailText } from './downloadFailText.js';
 import { veeamSummary, veeamSnapCounts } from './veeamBadge.js'; // v2.751: 'Veeam 백업 VM 표시' 요약 문구(순수)
 import { VeeamTag, VeeamSummaryCard, VeeamSnapSummary, VeeamDetailModal } from './VeeamParts.jsx'; // v2.751: 배지(누르면 상세 창)·요약 카드 · v2.753 스냅샷 기준 요약
@@ -278,7 +278,7 @@ export default function VCenterDetail({ site, onBack }) {
   const [veeamOn, setVeeamOn] = useState(false); // v2.751: Veeam 백업 VM 표시(배지만 — 목록은 그대로). 기본 꺼짐 — 켤 때만 조회한다
   const [veeamVm, setVeeamVm] = useState(null); // v2.751: 배지를 눌러 연 Veeam 백업 상세 창의 VM
   const [overview, setOverview] = useState(false); // '전체 현황' 평면 표(모든 클러스터·호스트) 표시 여부
-  const [vmExportOpen, setVmExportOpen] = useState(false); // v2.797 'VM 목록 내보내기' 창(형식·항목·저장값은 창 안에서)
+  const [vmExportOpen, setVmExportOpen] = useState(false); // v2.798 'VM 목록 내보내기' 창(형식·항목·저장값은 창 안에서)
   const [dsKind, setDsKind] = useState('');  // datastore storage filter
   const [comparing, setComparing] = useState(false); // vCenter 2개 비교 모드
   const toggle = (k) => setOpen((o) => ({ ...o, [k]: !o[k] }));

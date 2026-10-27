@@ -1,5 +1,5 @@
 /**
- * views/vmListExportText.js — VM 목록 내보내기 창(필요한 항목만 고르기 · 내 저장값) 도우미(순수, v2.797).
+ * views/vmListExportText.js — VM 목록 내보내기 창(필요한 항목만 고르기 · 내 저장값) 도우미(순수, v2.798).
  *
  * 사용자 요청: "메모, TAG, 디스크 파티션 종류 등 구성 정보에서 내가 필요한 것만 선택해서 export" + "지금 설정을 기본값으로 · 이름1~5 다섯 칸 · 저장하는 값을 지정".
  * 시안 https://claude.ai/artifact/FS8Uk5piEnbFJE7qvLRWQW. 항목 목록·빠른 조합은 서버(GET /veeam/vm-list/catalog — veeam/vmListCatalog.js)가 준다 — 여기서 복제하지 않는다.

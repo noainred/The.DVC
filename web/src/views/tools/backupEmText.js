@@ -175,3 +175,25 @@ export function detailSummary(d) {
 }
 /** 상세를 열 수 있는 결과인가(실패·경고 + 세션 UID 가 있을 때만). */
 export const canOpenDetail = (result, uid) => (result === 'fail' || result === 'warn') && !!uid;
+
+/* ── v2.798 EM 서버를 포탈 B&R 로 바로 등록 · 백업 서버 수 확인 ───────────── */
+/** 등록 양식 처음 값 — 표시명·주소는 EM 이 아는 서버 이름(주소로 쓸 수 있는지는 사람이 확인), 포트는 B&R REST 기본 9419. */
+export function brRegisterDraft(row, vcenterIds = []) {
+  const name = String(row?.name || '').trim();
+  return { name: name.slice(0, 64), host: name, port: '9419', username: '', password: '', vcenterIds: [...vcenterIds] };
+}
+/** 보내기 전에 막을 것 — 서버(veeam/registry serverInputIssue)가 최종 판정이고, 여기서는 빈 칸만 먼저 알린다. */
+export function brRegisterIssue(d) {
+  if (!String(d?.name || '').trim()) return '표시명을 입력하세요.';
+  if (!String(d?.host || '').trim()) return '주소(IP·호스트 이름)를 입력하세요.';
+  if (!String(d?.username || '').trim()) return '접속 계정을 입력하세요.';
+  if (!String(d?.password || '')) return '비밀번호를 입력하세요.';
+  if (!Array.isArray(d?.vcenterIds) || !d.vcenterIds.length) return '이 서버가 백업하는 vCenter(법인)를 하나 이상 고르세요.';
+  return '';
+}
+/** EM 별 백업 서버 수 — 개요보다 받은 목록이 적은 EM 만 문구로(모르면 말하지 않는다). */
+export function serverCountWarnings(counts) {
+  return (Array.isArray(counts) ? counts : [])
+    .filter((c) => Number.isFinite(c?.overview) && Number.isFinite(c?.merged) && c.merged < c.overview)
+    .map((c) => `EM ‘${c.emName}’ — 개요는 백업 서버 ${c.overview}대인데 목록은 ${c.merged}대만 받았습니다${c.viaQuery ? '(질의 서비스로 다시 읽은 뒤)' : ''}. EM 계정의 역할이 일부 서버만 보이게 할 수 있습니다(추정 — EM 에서 그 계정의 역할·범위를 확인하세요).`);
+}

@@ -18,7 +18,7 @@
  *    필요하며, 파티션 정렬·OS 지원에 따라 전량을 회수하지 못할 수 있다 — 화면/문서에 명시한다.
  *  - 추이는 관측 시작 이후만. 표본이 정책 하한(점 수)을 못 넘으면 증가율을 계산하지 않고 null.
  */
-import { fsTypeOf } from '../util/fsType.js';   // v2.797 파일 시스템 종류(엣지 정제)
+import { fsTypeOf } from '../util/fsType.js';   // v2.798 파일 시스템 종류(엣지 정제)
 
 /** 사용량을 모르는 파티션인가(v2.600 LO2600-07 — soapParse 가 freeSpace 없는 파티션을 usedGB:null 로 준다). */
 export function partUsedUnknown(p) {
@@ -150,7 +150,7 @@ export function sanitizeGuestDiskVms(raw, { maxVms = 200_000, maxParts = 128 } =
       // v2.600(감사 LO2600-07): 사용량을 모르는 파티션은 저장하지 않는다 — nn(null) 이 0 이 되어 '비어 있는 파티션' 으로
       //   적재·추이에 남았다. VM 합계(allocGB·usedGB)도 vmSummary 가 같은 파티션을 뺐으므로 일관된다. 개수는 밝힌다.
       if (p.usedGB == null || p.usedGB === '') { partsUnknown += 1; if (ppath && unknownPaths.length < maxParts) unknownPaths.push(ppath); continue; }
-      const fs = fsTypeOf(p.fs);   // v2.797 파일 시스템 종류 — 엣지가 보낸 값도 같은 형식만(정제 화이트리스트)
+      const fs = fsTypeOf(p.fs);   // v2.798 파일 시스템 종류 — 엣지가 보낸 값도 같은 형식만(정제 화이트리스트)
       parts.push({ path: ppath, capGB: cap, usedGB: nn(p.usedGB), ...(fs ? { fs } : {}) });
     }
     out.push({

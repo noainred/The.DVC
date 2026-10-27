@@ -48,10 +48,12 @@ export function reflectOf(x, { healthy = brHealthy, now = Date.now() } = {}) {
 export function emMappingView(ems, { recOf = getEmRecord, map = getEmMap(), brServers = listServers(), vcenters = store.get()?.vcenters || [], healthy = brHealthy } = {}) {
   const vcName = new Map(vcenters.map((v) => [v.id, v.name || v.id]));
   const rows = [];
+  const bsCounts = [];   // v2.798 EM 별 백업 서버 수 — 개요 vs 받은 목록(모자라면 화면이 알린다)
   const now = Date.now();
   for (const em of ems) {
     const rec = recOf(em.id);
     const data = rec?.result?.ok ? rec.result : (rec?.lastOk || null);
+    if (data?.backupServersMeta) bsCounts.push({ emId: em.id, emName: em.name, ...data.backupServersMeta });
     const list = mapBackupServers(data?.backupServers || [], { emId: em.id, map, brServers, vcName });
     const seen = new Set(list.map((x) => mapKey(em.id, x.name)));
     const counts = emVmCountsByServer(em.id);
@@ -64,7 +66,7 @@ export function emMappingView(ems, { recOf = getEmRecord, map = getEmMap(), brSe
     }
   }
   return {
-    rows, unreadable: emMapUnreadable() || undefined,
+    rows, counts: bsCounts, unreadable: emMapUnreadable() || undefined,
     vcenters: vcenters.map((v) => ({ id: v.id, name: v.name || v.id })).sort((a, b) => String(a.name).localeCompare(String(b.name), 'en', { numeric: true })),
     brServers: brServers.map((b) => ({ id: b.id, name: b.name, host: b.host, vcenterIds: b.vcenterIds || [] })),
   };

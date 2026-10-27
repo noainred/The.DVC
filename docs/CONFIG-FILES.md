@@ -3,7 +3,7 @@
 포탈이 `CONFIG_DIR`(설치본 기본 `/etc/vmware-portal`) 아래에 만드는 파일 **235개**의 목록이다.
 시계열 DB 는 `db-location.json` 이 가리키는 `dbDir` 로 옮길 수 있다.
 
-- 생성: `node scripts/config-doc.mjs` (마지막 갱신 2026-10-26)
+- 생성: `node scripts/config-doc.mjs` (마지막 갱신 2026-10-27)
 - **이 파일을 직접 고치지 말 것** — 코드가 진실의 원천이다. 설명 보완은 `scripts/config-doc.mjs` 의 `NOTES` 에 추가한다.
 - 열 의미: **원자적** = 쓰기 도중 크래시에도 파일이 깨지지 않음(`atomicWriteFileSync`) · **손상보존** = 읽기 실패 시 원본을 `.corrupt.<ts>` 로 보존 · **0600** = 소유자만 읽기
 
@@ -243,7 +243,7 @@
 | `vm-dns-policy.json` | 설정 | VM DNS 승인 정책(`vm-dns-policy.json`, v2.696). 사람이 손으로 정하는 **설정** 파일이다(상태 파일 아님 — | ✅ | ✅ | ✅ | vmdns/policy.js |
 | `vm-dns.db` | DB | VM DNS 서버 설정 **변경 이력** 전용 DB(`vm-dns.db`, v2.696). |  |  | ✅ | vmdns/db.js |
 | `vm-hygiene.json` | 설정 | VM 구성 점검·스냅샷 정책 설정(`vm-hygiene.json`, v2.698). 사람이 정하는 **설정** 파일이다 | ✅ | ✅ |  | vmhygiene/settings.js |
-| `vm-list-prefs.json` | 설정 | VM 목록 내보내기 '내 저장값'(계정별, v2.797 — 사용자 결정 '계정에 저장'). | ✅ | ✅ | ✅ | veeam/vmListPrefs.js |
+| `vm-list-prefs.json` | 설정 | VM 목록 내보내기 '내 저장값'(계정별, v2.798 — 사용자 결정 '계정에 저장'). | ✅ | ✅ | ✅ | veeam/vmListPrefs.js |
 | `vm-track.db` | DB | VM 수량·데이터스토어 사용량 추이(변경분만 저장) |  |  | ✅ | vmtrack/db.js |
 | `vmperf` | 디렉터리 | 디렉터리 — vCenter별 VM 성능 DB(+ _index.json 역산 매핑) | ✅ | ✅ | ✅ | metrics/vmperfDb.js |
 | `vmperf.json` | 설정 | 낭비 리소스(VM 성능) 트래킹 설정 — 보존기간 + 대상 vCenter 선택(v2.376). | ✅ | ✅ | ✅ | metrics/vmperfSettings.js |

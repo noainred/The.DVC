@@ -372,7 +372,7 @@ async function dataSheet(wb, ctx) {
 }
 
 /**
- * v2.797 '필요한 항목만 고르기' — 데이터 시트는 라우트가 카탈로그(vmListCatalog)로 미리 만든 표 그대로(CSV 와 같은 머리·칸).
+ * v2.798 '필요한 항목만 고르기' — 데이터 시트는 라우트가 카탈로그(vmListCatalog)로 미리 만든 표 그대로(CSV 와 같은 머리·칸).
  * 요약·폴더 트리 시트는 고른 항목과 무관하게 그대로다(Veeam 판정 기준 시트).
  * @param {{head:string[], cells:Array<Array>, folderCols?:boolean[]}} t
  */

@@ -109,6 +109,33 @@ export function sessionQuery(type, { page = 1, since = null } = {}) {
   return `/api/query?${q.toString()}`;
 }
 
+/**
+ * v2.798 백업 서버 목록 보강 — 목록(GET /api/backupServers)이 EM 개요의 서버 수(want)보다 적으면 질의 서비스로 한 번 더 읽어 이름(대소문자 무시)으로 합친다.
+ *  · want 를 모르면(개요 실패) 목록 그대로 · 질의 실패는 비고만(목록은 살린다) · 인증 실패·시한은 위로.
+ * @returns {{ list:Array, meta:{ overview:number|null, listed:number, merged:number, viaQuery:boolean }, note:string }}
+ */
+export async function completeBackupServers(c, list, want, { signal = null } = {}) {
+  const base = Array.isArray(list) ? list : [];
+  const meta = { overview: Number.isFinite(want) ? want : null, listed: base.length, merged: base.length, viaQuery: false };
+  if (meta.overview == null || base.length >= meta.overview) return { list: base, meta, note: '' };
+  const seen = new Set(base.map((s) => s.name.toLowerCase()));
+  const out = [...base];
+  let qErr = '';
+  try {
+    const q = new URLSearchParams({ type: 'BackupServer', format: 'Entities', pageSize: '1000', page: '1' });
+    for (const s of backupServersOf(await c.get(`/api/query?${q.toString()}`))) {
+      if (seen.has(s.name.toLowerCase())) continue;
+      seen.add(s.name.toLowerCase()); out.push(s);
+    }
+    meta.viaQuery = true;
+  } catch (e) { if (isFatal(e) || signal?.aborted) throw e; qErr = c.mask(String(e?.message || e)).slice(0, 120); }
+  meta.merged = out.length;
+  const note = out.length < meta.overview
+    ? `EM 개요는 백업 서버 ${meta.overview}대인데 목록은 ${out.length}대만 받았습니다${qErr ? `(질의 서비스도 실패: ${qErr})` : ''} — EM 계정의 역할이 일부 서버만 보이게 할 수 있습니다(추정 — EM 에서 그 계정의 역할·범위를 확인하세요)`
+    : `백업 서버 목록이 ${base.length}대뿐이라 질의 서비스로 다시 읽어 ${out.length}대로 맞췄습니다`;
+  return { list: out, meta, note };
+}
+
 /** v2.795 VM 단위 질의 — 새것부터 · 페이지(필터 없음). */
 export function vmQuery(type, page = 1) {
   const q = new URLSearchParams({ type, format: 'Entities', pageSize: String(VM_PAGE), page: String(page), sortDesc: 'CreationTime' });
@@ -187,6 +214,10 @@ export async function collectEm(em, { signal = null, fetchImpl, now = Date.now()
       }
       return { list: out, truncated, filtered, replicaErr };
     });
+    // v2.798(사용자 보고 'EM 에 등록된 서버가 많은데 전체 리스트를 못 가져온다'): 백업 서버 목록이 EM 개요의 서버 수보다 적으면
+    //   질의 서비스(type=BackupServer)로 한 번 더 읽어 이름으로 합친다. 그래도 모자라면 그 사실을 비고로 남긴다(원인 추정 — 계정 역할이 일부만 보이게 할 수 있다).
+    const bs = backupServersBody ? await completeBackupServers(c, backupServersOf(backupServersBody), overview?.backupServers, { signal }) : null;
+    if (bs?.note) notes.push(bs.note);
     // v2.795 VM 단위 기록 — 결과에는 행 수만 싣고, 행(vmRows)은 폴러가 vmStore 에 합친 뒤 버린다(veeam-em-latest.json 을 키우지 않게).
     const since = Number.isFinite(vmSince) && vmSince > now - 400 * 86_400_000 ? vmSince : now - VM_WINDOW_MS;
     const vmRows = await soft('vmBackups', () => readVmBackups(c, { since, signal }));
@@ -209,7 +240,8 @@ export async function collectEm(em, { signal = null, fetchImpl, now = Date.now()
       ok: true, ts: Date.now(), ms: Date.now() - t0, target: emFingerprint(em), error: '', sections, notes,
       overview, jobStats, vms, processed,
       repoReport: repoReportBody ? repoReportOf(repoReportBody) : null,
-      backupServers: backupServersBody ? backupServersOf(backupServersBody) : null,
+      backupServers: bs ? bs.list : null,
+      ...(bs ? { backupServersMeta: bs.meta } : {}),
       repositories: repositoriesBody ? repositoriesOf(repositoriesBody) : null,
       jobs, sessions: digest,
       vmBackups: vmRows ? { since, tasks: vmRows.tasks.length, points: vmRows.points.length, complete: vmRows.complete, errors: vmRows.errors } : null,

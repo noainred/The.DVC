@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import fs from 'node:fs';
 import * as T from './vmListExportText.js';
 
-describe('v2.797 VM 목록 내보내기 — 항목 고르기 · 내 저장값', async () => {
+describe('v2.798 VM 목록 내보내기 — 항목 고르기 · 내 저장값', async () => {
   const P = await import('../../../server/src/veeam/vmListPrefs.js');
   const C = await import('../../../server/src/veeam/vmListCatalog.js');
   const vms = [

@@ -69,7 +69,7 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
 | `docs/rules/storage.md` (34항목) | 스토리지 모니터링·증가량·Unity/PowerMax·전력·시리얼 — server/src/storage/ · web/src/views/tools/Storage* · bmstor |
 | `docs/rules/sanswitch.md` (16항목) | SAN 스위치(수집·조닝·사용량·월간 점검) — server/src/sanswitch/ · web/src/views/tools/SanSwitch*·san* |
 | `docs/rules/idrac-server.md` (24항목) | iDRAC·베어메탈 사용률·파트 장애·서버 온도·전력·Overview 서버 수량 — server/src/{idrac,bmusage,partfault,corpusage,power}/ · Overview |
-| `docs/rules/vcenter.md` (22항목) | vCenter 점검 기능(VM 구성·호스트·DS·클러스터·라이선스·태그·이벤트·증분 수집·스파이크) — server/src/{vcenter,vmcfg,vmhygiene,hostcfg,dscfg,clustercfg,corelicense,tags,vmchanges,vmlife,contention,availability,cost,migration,vmseries,vmtrack}/ |
+| `docs/rules/vcenter.md` (23항목) | vCenter 점검 기능(VM 구성·호스트·DS·클러스터·라이선스·태그·이벤트·증분 수집·스파이크) — server/src/{vcenter,vmcfg,vmhygiene,hostcfg,dscfg,clustercfg,corelicense,tags,vmchanges,vmlife,contention,availability,cost,migration,vmseries,vmtrack}/ |
 | `docs/rules/gpu.md` (6항목) | GPU 모니터링(할당·메모리·온도·수집 점검) — server/src/gpu/ · web/src/views/tools/Gpu* |
 | `docs/rules/cvp.md` (11항목) | Arista CVP 수집·장애·GBIC·Overview — server/src/cvp/ · web/src/views/tools/Cvp*·cvp* |
 | `docs/rules/isilon.md` (7항목) | 아이실론 디렉터리 사용량·메일 — server/src/isidu/ · web/src/views/tools/Isidu*·isidu* |

@@ -1,4 +1,4 @@
-// views/VmListExportDialog.jsx — vCenter › VM 및 폴더 'VM 목록 내보내기' 창(v2.797).
+// views/VmListExportDialog.jsx — vCenter › VM 및 폴더 'VM 목록 내보내기' 창(v2.798).
 // 사용자 요청: "메모, TAG, 디스크 파티션 종류 등의 구성 정보에서 내가 필요한 것만 선택해서 export" + "지금 설정을 기본값으로 · 이름1~5 다섯 칸 · 저장하는 값을 지정".
 // 시안 https://claude.ai/artifact/FS8Uk5piEnbFJE7qvLRWQW. 항목·조합은 서버 카탈로그(GET /veeam/vm-list/catalog)를 그대로 쓴다(복제하지 않는다).
 // 저장값은 계정에(PUT /veeam/vm-list/prefs — 본인 것만). 미리보기는 고른 항목으로 대상 첫 3대(서버가 내려받기와 같은 표 함수로 만든다).

@@ -1,5 +1,5 @@
 /**
- * v2.797 — VM 목록 내보내기 '필요한 항목만 고르기' + 계정 저장값(기본값 · 5칸) + 게스트 파티션 파일 시스템 종류.
+ * v2.798 — VM 목록 내보내기 '필요한 항목만 고르기' + 계정 저장값(기본값 · 5칸) + 게스트 파티션 파일 시스템 종류.
  *  · 카탈로그 : key 고유 · v2.792 열과 머리·칸 같음(cols 없이 보내면 예전 그대로) · 모르는 key 400 · 순서 = 고른 순서
  *  · 값 규칙  : 못 모은 소스는 '수집 안 됨'(태그 수집 전 · 파티션 미수집 VM · 구성 캐시 미도달) · 모르는 값은 빈칸(0 아님)
  *  · 여러 값  : 파티션 한 줄 반복 · 태그 카테고리별 열 · Veeam 열이 없으면 Veeam 대조를 하지 않는다
@@ -12,7 +12,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-const DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'vmListSelect2797-'));
+const DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'vmListSelect2798-'));
 process.env.CONFIG_DIR = DIR;
 process.env.DATA_SOURCE = 'live';
 delete process.env.CENTRAL_URL;

@@ -102,7 +102,7 @@ function initSqlite() {
     // v2.631(감사 R2631-01): vm_latest.partial — 이 행이 **부분 합**(여유 공간 미보고 파티션을 뺀 합)인지. 예전 DB 에는 열이 없다.
     //   table_info 로 없을 때만 더한다(v2.603 DB2603-01 — 잠금을 '열 있음' 으로 삼키지 않게 duplicate 만 삼킨다).
     const cols = new Set(db.prepare('PRAGMA table_info(vm_latest)').all().map((c) => c.name));
-    // v2.797 part_latest.fs — 파티션 파일 시스템 종류(NTFS·xfs…). 예전 DB 에는 없다 — 없을 때만 더한다(같은 규칙).
+    // v2.798 part_latest.fs — 파티션 파일 시스템 종류(NTFS·xfs…). 예전 DB 에는 없다 — 없을 때만 더한다(같은 규칙).
     const pcols = new Set(db.prepare('PRAGMA table_info(part_latest)').all().map((c) => c.name));
     if (!pcols.has('fs')) {
       try { db.exec('ALTER TABLE part_latest ADD COLUMN fs TEXT'); } catch (e) { if (!/duplicate column name/i.test(String(e?.message))) throw e; }
@@ -532,7 +532,7 @@ export async function vmPartLatest(vmId) {
 }
 
 /**
- * v2.797 VM 목록 내보내기 — 한 vCenter 의 파티션 최신 값 전부(vcenter_id 인덱스 한 번) + 이번 수집에 든 VM 집합.
+ * v2.798 VM 목록 내보내기 — 한 vCenter 의 파티션 최신 값 전부(vcenter_id 인덱스 한 번) + 이번 수집에 든 VM 집합.
  * 반환 null = DB 없음. collected 에 없는 VM 은 '수집 안 됨'(Tools 미실행·수집 꺼짐 — 0 이 아니다).
  * @returns {Promise<{ collected:Set<string>, byVm:Map<string,Array<{path,capGB,usedGB,unknown,fs}>>, ts:number|null }|null>}
  */

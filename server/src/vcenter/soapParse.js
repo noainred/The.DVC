@@ -3,7 +3,7 @@
  * soapClient.js에서 분리했다. 여기에는 config/DB/네트워크 등 부수효과 있는 import를 절대
  * 추가하지 말 것(워커가 로드할 때 부수효과가 워커 스레드에서 실행되면 안 됨).
  */
-import { fsTypeOf } from '../util/fsType.js';   // v2.797 파일 시스템 종류(순수 — 부수효과 없음)
+import { fsTypeOf } from '../util/fsType.js';   // v2.798 파일 시스템 종류(순수 — 부수효과 없음)
 
 const XML_ENT_RE = /&(amp|lt|gt|quot|apos|#(\d+)|#x([0-9a-fA-F]+));/g;
 const XML_ENT_MAP = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'" };
@@ -207,7 +207,7 @@ export function parseGuestDisks(guestDiskXml) {
     const freeM = /<freeSpace>(\d+)<\/freeSpace>/.exec(blk);
     if (!path && !cap) continue;
     const gb = (n) => Math.round((n / 1024 ** 3) * 10) / 10;
-    // v2.797 파일 시스템 종류(GuestDiskInfo.filesystemType — vSphere 7.0 이상이 준다고 **추정**, 실물 미확인). 없거나 형식이 아니면 넣지 않는다(모름).
+    // v2.798 파일 시스템 종류(GuestDiskInfo.filesystemType — vSphere 7.0 이상이 준다고 **추정**, 실물 미확인). 없거나 형식이 아니면 넣지 않는다(모름).
     const fs = fsTypeOf(xmlUnescape(/<filesystemType>([^<]{0,64})<\/filesystemType>/.exec(blk)?.[1] || ''));
     const fsOf = fs ? { fs } : {};
     // v2.600(감사 LO2600-07): freeSpace 가 없으면 예전에는 여유 0 · 사용 = 용량(100%)으로 읽혔다(지어낸 값).

@@ -27,8 +27,8 @@ import { requirePerm, requireRole, toolActorOf } from '../../auth/auth.js';
 import { issueFor } from '../../auth/toolAccess.js';
 import { backupRow, backupTotals, vmBackupView, vmScope, POWER_VALUES, RPO_DAYS, VIEW_FILTERS, vmViewMatches, priorityCandidates, priorityRank, PRIORITY_MAX } from '../../veeam/backupStatus.js';   // v2.779 백업 메뉴 · v2.780 범위·CSV
 import { vmListCsvAsync, vmTreeCmp, VM_LIST_MAX_IDS, folderParts } from '../../veeam/vmListCsv.js';
-import { resolveCols, needsOf, selectedColumns, expandPartRows, catalogView } from '../../veeam/vmListCatalog.js';   // v2.797 필요한 항목만 고르기
-import { getPrefs, setPref, clearPref } from '../../veeam/vmListPrefs.js';   // v2.797 계정 저장값(기본값 · 5칸)
+import { resolveCols, needsOf, selectedColumns, expandPartRows, catalogView } from '../../veeam/vmListCatalog.js';   // v2.798 필요한 항목만 고르기
+import { getPrefs, setPref, clearPref } from '../../veeam/vmListPrefs.js';   // v2.798 계정 저장값(기본값 · 5칸)
 import { vmRefOf, vmTagsOf, tagStateOf } from '../../tags/analyze.js';
 import { partsForVcenter } from '../../guestdisk/db.js';
 import { load as loadGuestDiskSettings } from '../../guestdisk/settings.js';   // v2.792 vCenter › VM 및 폴더 'VM 목록 CSV'
@@ -318,7 +318,7 @@ export function registerVeeamBadges(api) {
   api.post('/veeam/vm-list.xlsx', requirePerm('data.csv'), (req, res) => vmListExport(req, res, 'xlsx'));
 
   /*
-   * v2.797(사용자 요청 "메모, TAG, 디스크 파티션 종류 등 구성 정보에서 내가 필요한 것만 선택해서 export" · 시안 https://claude.ai/artifact/FS8Uk5piEnbFJE7qvLRWQW):
+   * v2.798(사용자 요청 "메모, TAG, 디스크 파티션 종류 등 구성 정보에서 내가 필요한 것만 선택해서 export" · 시안 https://claude.ai/artifact/FS8Uk5piEnbFJE7qvLRWQW):
    *   · catalog — 고를 수 있는 항목·빠른 조합(veeam/vmListCatalog.js 하나 — 웹은 복제하지 않는다) + 그 vCenter 의 실제 수집 상태(태그·게스트 파티션·구성 캐시) + 내 저장값.
    *   · preview — 고른 항목으로 화면이 보낸 VM 3대의 행(같은 표 함수 — 내려받기와 같은 값).
    *   · prefs — 내 저장값(기본값 · 1~5칸). 키는 인증된 계정 이름(본문 값을 믿지 않는다) · 바꾸기는 관리자·운영자 · 데모 손님 불가 · 감사.
@@ -514,9 +514,9 @@ function maskDetail(detail, admin, vmName = '') {
  *   · 읽기 POST(본문에 id 목록) — 게이트는 CSV 내보내기 권한(data.csv — 관리자 전용, 웹 canCsv 와 같은 판정) · 조회 범위 밖 vCenter 404(vcOf) ·
  *     동시 1건(exportBusy — vCenter 전체 대조·스냅샷 요약을 다시 계산한다) · 감사 로그 · 파일 이름에 화면 조건(all · poweredon · search).
  */
-const VM_LIST_VIEWS = Object.freeze({ all: '전체 VM', noOff: '꺼진 VM 제외(‘Off VM 포함’ 해제)', search: '검색 결과', folder: '고른 폴더' });   // v2.797 폴더 고르기
+const VM_LIST_VIEWS = Object.freeze({ all: '전체 VM', noOff: '꺼진 VM 제외(‘Off VM 포함’ 해제)', search: '검색 결과', folder: '고른 폴더' });   // v2.798 폴더 고르기
 const VM_LIST_FILE_TAG = Object.freeze({ all: 'all', noOff: 'poweredon', search: 'search', folder: 'folder' });
-/** v2.797 본문의 '고른 항목' — 없으면 null(v2.792 열). { ok, keys, multi, tagCols } | { ok:false, reason }. */
+/** v2.798 본문의 '고른 항목' — 없으면 null(v2.792 열). { ok, keys, multi, tagCols } | { ok:false, reason }. */
 function selOf(body) {
   if (body.cols == null) return null;
   const c = resolveCols(body.cols);
@@ -525,7 +525,7 @@ function selOf(body) {
 }
 
 /**
- * v2.797 고른 항목의 표(머리 + 칸) — 카탈로그(veeam/vmListCatalog.js) 하나로 CSV·엑셀 데이터 시트·미리보기가 같은 값을 쓴다.
+ * v2.798 고른 항목의 표(머리 + 칸) — 카탈로그(veeam/vmListCatalog.js) 하나로 CSV·엑셀 데이터 시트·미리보기가 같은 값을 쓴다.
  * 고른 항목에 필요한 소스만 읽는다: 태그(스냅샷 vcenter.tagInv — 못 읽은 vCenter 는 '수집 안 됨') · 게스트 파티션(guestdisk DB — 이번 수집에 없는 VM 은
  * '수집 안 됨') · 백업 표시(파일을 못 읽으면 빈칸). Veeam 열은 vmBackupView(rows — 위에서 만든 것) 그대로.
  */
@@ -568,7 +568,7 @@ async function vmListExport(req, res, kind) {
   }
   const noOff = body.power === 'noOff';
   const view = Object.hasOwn(VM_LIST_VIEWS, body.view) ? body.view : ids ? 'all' : noOff ? 'noOff' : 'all';
-  // v2.797: cols 를 보내면 고른 항목·순서로(vmListCatalog) — 안 보내면 v2.792 열 그대로(예전 화면·기본 엑셀). 모르는 항목은 400(조용히 버리지 않는다).
+  // v2.798: cols 를 보내면 고른 항목·순서로(vmListCatalog) — 안 보내면 v2.792 열 그대로(예전 화면·기본 엑셀). 모르는 항목은 400(조용히 버리지 않는다).
   const sel = selOf(body);
   if (sel && !sel.ok) return res.status(400).json({ ok: false, reason: sel.reason });
   const lock = acquireExport(`vm-list.${kind}`, req);
@@ -580,7 +580,7 @@ async function vmListExport(req, res, kind) {
     const vc = (snap?.vcenters || []).find((v) => v.id === t.vcenterId) || { id: t.vcenterId };
     const now = Date.now();
     const maybeYield = createYielder(15);
-    // v2.797: Veeam 대조(vCenter 전체 · 스냅샷 요약)는 무겁다 — 고른 항목에 Veeam 열이 없고 CSV 면 건너뛴다(엑셀은 요약·트리 시트가 쓴다).
+    // v2.798: Veeam 대조(vCenter 전체 · 스냅샷 요약)는 무겁다 — 고른 항목에 Veeam 열이 없고 CSV 면 건너뛴다(엑셀은 요약·트리 시트가 쓴다).
     const needVeeam = !sel || kind === 'xlsx' || needsOf(sel.keys).has('veeam');
     const b = needVeeam ? await vcBackup(vc, t.vms, req, { initial: snap?.initial === true, scope: { power: 'all', excl: false } }) : null;
     const scoped = b ? b.scopedVms : vmScope(t.vms, { power: 'all', excl: false }).vms;

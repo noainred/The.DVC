@@ -1,5 +1,5 @@
 /**
- * veeam/vmListCatalog.js — VM 목록 내보내기 '필요한 항목만 고르기' 열 카탈로그(순수, v2.797).
+ * veeam/vmListCatalog.js — VM 목록 내보내기 '필요한 항목만 고르기' 열 카탈로그(순수, v2.798).
  *
  * 사용자 요청(2026-10-27): "vm list export 하는 기능에서 메모, TAG, 디스크 파티션 종류 등의 구성 정보에서 내가 필요한 것만 선택해서 export"
  *   · 시안 https://claude.ai/artifact/FS8Uk5piEnbFJE7qvLRWQW 승인 · 결정: 저장값은 계정에 · 파일 시스템 종류 수집 포함 · 실시간 조회 항목(생성일·UUID·NIC) 제외.
