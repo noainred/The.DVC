@@ -240,6 +240,35 @@ export function backupVerdict(vm, { linked = true } = {}) {
   return { code, text: VERDICT_TEXT[code] };
 }
 
+/*
+ * v2.801(사용자 요청 "선택 항목에 veeam 마지막 백업 여부 / 백업용 snapshot 최근 생성 여부도"): VM 한 대의 '여부' 두 칸(순수 — vmBackupView 모양).
+ *   VM 목록(vmListCatalog)과 VM 전체 정보(vmExportCatalog) 두 카탈로그가 이 함수 하나를 쓴다(판정 코어 하나). 값은 '예' · '아니오' · '모름' —
+ *   모르는 것을 '아니오' 로 쓰지 않는다(못 읽은 값은 0 이 아니다).
+ *   · 백업: Veeam 연동이 없거나 Veeam 쪽을 모르면(v 키 없음 — 읽기 실패·첫 수집 전) 모름. 대조에 없음(v null — 확정)은 아니오.
+ *     마지막 백업 완료(lb)가 N일 안이면 예, 그보다 오래면 아니오. lb 를 모르는데 복원 지점이 0 이면 아니오(한 번도 없음), 그 밖은 모름.
+ *   · 백업용 스냅샷: 지금 있는 Veeam 임시 스냅샷이 N일 안에 생겼으면 예. 아니면 스냅샷 이벤트(s.ev — 최근 LOOKBACK 일)의 마지막 생성이 N일 안이면 예,
+ *     이벤트를 못 읽었으면(s.ev 키 없음) 모름, 읽었는데 없거나 오래면 아니오. N 은 YN_DAYS 안(이벤트 창 7일을 넘지 않는다).
+ */
+export const YN_DAYS = Object.freeze([1, 2, 3, 7]);
+export const YN_DEFAULT_DAYS = 1;   // 사용자 결정(2026-10-27): 매일 백업 기준 — '어제부터 지금까지'
+export const ynDaysOf = (v) => (YN_DAYS.includes(Number(v)) ? Number(v) : YN_DEFAULT_DAYS);
+export function recentBackupYn(vm, { linked = true, days = YN_DEFAULT_DAYS, now = Date.now() } = {}) {
+  if (!vm || !linked || !('v' in vm) || vm.v === undefined) return '모름';
+  const v = vm.v;
+  if (!v) return '아니오';
+  if (isFin(v.lb) && v.lb > 0) return now - v.lb <= ynDaysOf(days) * DAY ? '예' : '아니오';
+  return v.rp === 0 ? '아니오' : '모름';
+}
+export function recentBackupSnapYn(vm, { days = YN_DEFAULT_DAYS, now = Date.now() } = {}) {
+  if (!vm || !vm.s) return '모름';
+  const win = ynDaysOf(days) * DAY;
+  const cur = vm.s.now;
+  if (cur && isFin(cur.ts) && now - cur.ts <= win) return '예';
+  if (!('ev' in vm.s) || vm.s.ev === undefined) return '모름';
+  const ev = vm.s.ev;
+  return ev && isFin(ev.ts) && now - ev.ts <= win ? '예' : '아니오';
+}
+
 export function vmViewMatches(vm, f, opts) {
   const c = viewClass(vm, opts);
   if (f === 'veeam') return c.veeam;

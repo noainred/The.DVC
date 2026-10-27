@@ -9,6 +9,7 @@ export const SLOT_COUNT = 5;   // 서버 util/exportPrefs.SLOT_COUNT 와 같은 
 export const NAME_MAX = 30;    // 서버 util/exportPrefs.NAME_MAX 와 같은 값
 export const MISSING = '수집 안 됨';          // 서버 vmExportCatalog.MISSING
 export const LIVE_LATER = '내려받을 때 조회';  // 서버 vmExportCatalog.LIVE_LATER
+export const YN_DAYS = Object.freeze([1, 2, 3, 7]);  // 서버 veeam/backupStatus.YN_DAYS(v2.801 '여부' 기준 일수)
 export const SAVE_WHAT = Object.freeze([
   ['cols', '고른 항목과 순서', true],
   ['fmt', '형식(CSV/엑셀)', false],
@@ -52,6 +53,7 @@ export function badgeOf(item, status = {}, liveOn = true) {
     const st = status?.tags?.state;
     return TAG_BAD[st] ? { text: TAG_BAD[st], tone: 'opt' } : { text: '캐시', tone: 'cache' };
   }
+  if (src === 'veeam') return { text: 'Veeam', tone: 'cache' };   // v2.801 Veeam 묶음(주기 수집 — VM 목록 내보내기와 같은 판정)
   return { text: '', tone: 'none' };
 }
 
@@ -119,7 +121,7 @@ export const dropCols = (cols, keys) => (cols || []).filter((k) => !(keys || [])
 /** 화면 상태 기본값 — 내 기본값, 없으면 서버가 정한 기본 조합. */
 export function initialState(catalog, prefs) {
   const preset = catalog?.presets?.find((p) => p.id === catalog?.defaultPreset) || catalog?.presets?.[0];
-  const base = { cols: [...(preset?.keys || [])], fmt: 'csv', disk: 'slots', tagCols: false, live: true, target: 'all', folder: '', tmpl: true };
+  const base = { cols: [...(preset?.keys || [])], fmt: 'csv', disk: 'slots', tagCols: false, live: true, target: 'all', folder: '', tmpl: true, ynDays: catalog?.ynDefault ?? 1 };
   return prefs?.def ? applyValue(base, prefs.def) : base;
 }
 
@@ -130,7 +132,7 @@ export function initialState(catalog, prefs) {
 export function valueToSave(st, what = {}, name = '') {
   const v = { name: String(name || '').slice(0, NAME_MAX), cols: [...(st.cols || [])] };
   if (what.fmt) v.fmt = st.fmt;
-  if (what.view) { v.disk = st.disk; v.tagCols = !!st.tagCols; }
+  if (what.view) { v.disk = st.disk; v.tagCols = !!st.tagCols; if (Number.isInteger(st.ynDays)) v.ynDays = st.ynDays; }
   if (what.live) v.live = !!st.live;
   if (what.target) { v.target = st.target; v.folder = st.target === 'folder' ? String(st.folder || '') : ''; v.tmpl = st.tmpl !== false; }
   return v;
@@ -142,6 +144,7 @@ export function applyValue(st, v) {
   if (v.fmt === 'csv' || v.fmt === 'xlsx') next.fmt = v.fmt;
   if (v.disk === 'slots' || v.disk === 'join') next.disk = v.disk;
   if (typeof v.tagCols === 'boolean') next.tagCols = v.tagCols;
+  if (YN_DAYS.includes(v.ynDays)) next.ynDays = v.ynDays;
   if (typeof v.live === 'boolean') next.live = v.live;
   if (['all', 'on', 'folder'].includes(v.target)) { next.target = v.target; next.folder = v.target === 'folder' ? String(v.folder || '') : ''; }
   if (typeof v.tmpl === 'boolean') next.tmpl = v.tmpl;
@@ -174,6 +177,7 @@ export function exportBody(st, prefName = '') {
   return {
     cols: [...(st.cols || [])], live: st.live !== false, disk: st.disk === 'join' ? 'join' : 'slots', tagCols: !!st.tagCols,
     target: st.target || 'all', ...(st.target === 'folder' ? { folder: String(st.folder || '') } : {}), tmpl: st.tmpl !== false,
+    ...(YN_DAYS.includes(st.ynDays) ? { ynDays: st.ynDays } : {}),
     ...(prefName ? { prefName: String(prefName).slice(0, NAME_MAX) } : {}),
   };
 }

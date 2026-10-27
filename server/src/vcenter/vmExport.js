@@ -35,6 +35,8 @@ import { vmRefOf, vmTagsOf, tagStateOf } from '../tags/analyze.js';
 import {
   MISSING, LIVE_LATER, FOLDER_LEVELS_MAX, PRESETS, selectedColumns, needsOf, legacyColumns, guestKnownSum, folderParts, folderOptions, inFolder,
 } from './vmExportCatalog.js';
+import { ynDaysOf } from '../veeam/backupStatus.js';
+import { vmExportSummary } from './vmExportSummary.js';   // v2.801 엑셀 '요약' 시트
 
 export { guestKnownSum };
 /** 예전 열 목록(v2.278 — '예전 CSV 그대로' 조합과 같다). get(vm, d, ctx) 모양을 테스트·호환이 쓴다. */
@@ -219,6 +221,8 @@ export function rowContext(vm, src) {
   else if (src.partsDb) d.guest = src.partsDb.collected.has(vm.id) ? (src.partsDb.byVm.get(vm.id) || []) : null;
   else d.guest = null;
   if (src.tagInv) d.tg = vmTagsOf(src.tagInv, vmRefOf(src.vcenterId, vm.id) || ref);
+  // v2.801 Veeam 묶음 — src.bv: undefined(고르지 않음) · null(못 읽음 → 칸 '수집 안 됨') · { linked, byId }.
+  if (src.bv) { d.bv = src.bv.byId?.get(vm.id) ?? null; d.bvLinked = src.bv.linked !== false; }
   return d;
 }
 
@@ -228,8 +232,11 @@ const nameCmp = (a, b) => String(a.name).localeCompare(String(b.name));
  * 고른 항목의 표 — CSV·엑셀·미리보기가 같은 함수(v2.799).
  * @param {string} vcenterId 라우트가 scope 를 이미 확인한 vCenter
  * @param {{ keys:string[], live?:boolean, disk?:'slots'|'join', tagCols?:boolean, target?:'all'|'on'|'folder', folder?:string, tmpl?:boolean,
- *           ids?:string[], preview?:boolean, limit?:number, now?:number, maybeYield?:()=>Promise<void> }} sel
- * @returns {Promise<{ head:string[], cells:any[][], cols:Array<{key,item,h,group,src}>, meta:object }>}
+ *           ids?:string[], preview?:boolean, limit?:number, now?:number, maybeYield?:()=>Promise<void>,
+ *           ynDays?:number, summary?:boolean, veeamViews?:(vc, vms)=>Promise<{linked,snapDays,byId}|null> }} sel
+ *   v2.801: ynDays = '여부' 기준 일수(1·2·3·7, 기본 1) · summary = 엑셀 '요약' 시트 숫자도 만든다 · veeamViews = Veeam 판정을 읽는 함수
+ *   (라우트가 veeam/vmViewProvider 로 건다 — 이 파일은 req 를 모른다). Veeam 은 Veeam 항목을 골랐거나 요약을 만들 때만 읽는다(vCenter 전체 대조라 무겁다).
+ * @returns {Promise<{ head:string[], cells:any[][], cols:Array<{key,item,h,group,src}>, rowFolder:string[], rowPower:string[], summary?:object, meta:object }>}
  */
 export async function buildVmExportTable(vcenterId, sel) {
   const now = sel.now ?? Date.now();
@@ -262,16 +269,21 @@ export async function buildVmExportTable(vcenterId, sel) {
   const tagInv0 = need.has('tags') ? (vc.tagInv || null) : null;
   const tagState = tagStateOf(tagInv0);
   const tagInv = tagInv0 && ['ok', 'stale'].includes(tagState) ? tagInv0 : null;
+  const ynDays = ynDaysOf(sel.ynDays);
+  let views;   // undefined = 읽지 않음 · null = 못 읽음
+  if (need.has('veeam') || sel.summary === true) views = typeof sel.veeamViews === 'function' ? await sel.veeamViews(vc, all) : null;
 
   let levels = 1;
   for (const vm of list) levels = Math.max(levels, folderParts(vm.folder).length);
   const o = {
     vcName, offsetMin: DAY_OFFSET_MIN, now, disk: sel.disk === 'join' ? 'join' : 'slots', tagCols: sel.tagCols === true,
     tagCategories: (tagInv?.categories || []).map((c) => c?.name), levels: Math.min(FOLDER_LEVELS_MAX, levels),
+    ynDays, snapDays: views?.snapDays ?? 7,
   };
   const cols = selectedColumns(sel.keys, o);
-  const src = { vcenterId, live: L?.enriched ? L.details : null, partsDb, tagInv, liveMiss: sel.preview && sel.live ? LIVE_LATER : MISSING };
-  const cells = [];
+  const src = { vcenterId, live: L?.enriched ? L.details : null, partsDb, tagInv, liveMiss: sel.preview && sel.live ? LIVE_LATER : MISSING,
+    bv: need.has('veeam') ? (views || null) : undefined };
+  const cells = []; const rowFolder = []; const rowPower = [];
   const filled = new Array(cols.length).fill(0);
   for (const vm of list) {
     await maybeYield();
@@ -279,14 +291,18 @@ export async function buildVmExportTable(vcenterId, sel) {
     const row = cols.map((c) => c.get(vm, d));
     for (let i = 0; i < row.length; i++) { const v = row[i]; if (v !== '' && v != null && v !== MISSING && v !== LIVE_LATER) filled[i] += 1; }
     cells.push(row);
+    rowFolder.push(folderParts(vm.folder).join('/')); rowPower.push(vm.powerState || '');
   }
   return {
     head: cols.map((c) => c.h),
     cells,
     cols: cols.map((c, i) => ({ key: c.key, item: c.item, h: c.h, group: c.group, src: c.src, filled: filled[i] })),
+    rowFolder, rowPower,
+    ...(sel.summary === true ? { summary: vmExportSummary(list, { views: views || null, ynDays, now }) } : {}),
     meta: {
       vcenterId, vcenterName: vcName, total: all.length, matched, rows: list.length, live, at: now, offsetMin: DAY_OFFSET_MIN,
       tags: need.has('tags') ? tagState : null, parts: need.has('parts') ? (partsDb ? 'ok' : 'unreadable') : null,
+      veeam: views === undefined ? null : views ? (views.linked ? 'ok' : 'unlinked') : 'unreadable', ynDays,
     },
   };
 }

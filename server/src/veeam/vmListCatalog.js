@@ -15,7 +15,7 @@
  *  · needs = 그 열이 읽는 추가 소스(veeam·tags·marks) — 라우트는 고른 열에 필요한 소스만 읽는다(Veeam 대조는 무겁다).
  */
 import { folderParts, offsetLabel, veeamStateText } from './vmListCsv.js';
-import { backupVerdict } from './backupStatus.js';
+import { backupVerdict, recentBackupYn, recentBackupSnapYn, ynDaysOf, YN_DAYS, YN_DEFAULT_DAYS } from './backupStatus.js';
 import { localStamp, DAY_OFFSET_MIN } from '../util/dayKey.js';
 
 export const MISSING = '수집 안 됨';
@@ -97,6 +97,12 @@ export const CATALOG = Object.freeze([
   { key: 'vsnapN', group: 'veeam', label: '최근 N일 Veeam 스냅샷 생성 횟수', head: (o) => `최근 ${o.snapDays}일 Veeam 스냅샷 생성 횟수`, avail: 'snap', needs: 'veeam',
     get: (r) => (!r.view ? '' : r.view.s?.ev === undefined ? '모름' : r.view.s.ev ? (r.view.s.ev.n ?? '') : 0) },
   { key: 'vsnapTs', group: 'veeam', label: 'Veeam 스냅샷 마지막 생성', head: (o) => `Veeam 스냅샷 마지막 생성 ${o.tz}`, avail: 'snap', needs: 'veeam', get: (r, o) => o.t(r.view?.s?.ev?.ts) },
+  // v2.801 '여부' 두 칸 — 판정은 backupStatus.recentBackupYn·recentBackupSnapYn 하나(VM 전체 정보 카탈로그도 이 항목을 그대로 쓴다).
+  //   N 은 화면에서 고른 기준 일수(o.ynDays — 1·2·3·7, 기본 1). Veeam 소스를 못 읽었으면(view 없음) '모름'.
+  { key: 'vbkYn', group: 'veeam', label: '최근 N일 Veeam 백업 여부', head: (o) => `최근 ${o.ynDays}일 Veeam 백업`, avail: 'snap', needs: 'veeam', isNew: true,
+    get: (r, o) => recentBackupYn(r.view, { linked: r.linked, days: o.ynDays, now: o.now }) },
+  { key: 'vsnapYn', group: 'veeam', label: '최근 N일 백업용 스냅샷 생성 여부', head: (o) => `최근 ${o.ynDays}일 백업용 스냅샷 생성`, avail: 'snap', needs: 'veeam', isNew: true,
+    get: (r, o) => recentBackupSnapYn(r.view, { days: o.ynDays, now: o.now }) },
 ]);
 const BY_KEY = new Map(CATALOG.map((c) => [c.key, c]));
 export const CATALOG_KEYS = Object.freeze(CATALOG.map((c) => c.key));
@@ -145,8 +151,8 @@ export function needsOf(keys) {
 }
 
 /** 시각 칸 도우미 묶음. */
-export function timeCtx({ snapDays = 7, offsetMin = DAY_OFFSET_MIN, now = Date.now() } = {}) {
-  return { snapDays, offsetMin, now, tz: offsetLabel(offsetMin), t: (ms) => (fin(ms) && ms > 0 ? localStamp(ms, offsetMin) : '') };
+export function timeCtx({ snapDays = 7, offsetMin = DAY_OFFSET_MIN, now = Date.now(), ynDays } = {}) {
+  return { snapDays, offsetMin, now, ynDays: ynDaysOf(ynDays), tz: offsetLabel(offsetMin), t: (ms) => (fin(ms) && ms > 0 ? localStamp(ms, offsetMin) : '') };
 }
 
 /**
@@ -182,9 +188,9 @@ export function catalogView({ snapDays = 7 } = {}) {
   return {
     groups: GROUPS.map((g) => ({
       id: g.id, name: g.name, note: GROUP_NOTES[g.id] || '',
-      items: CATALOG.filter((c) => c.group === g.id).map((c) => ({ key: c.key, label: c.key === 'vsnapN' ? `최근 ${snapDays}일 Veeam 스냅샷 생성 횟수` : c.label, avail: c.avail })),
+      items: CATALOG.filter((c) => c.group === g.id).map((c) => ({ key: c.key, label: c.key === 'vsnapN' ? `최근 ${snapDays}일 Veeam 스냅샷 생성 횟수` : c.label, avail: c.avail, ...(c.isNew ? { isNew: true } : {}) })),
     })),
     presets: PRESETS.map((p) => ({ id: p.id, name: p.name, keys: p.keys })),
-    legacyKeys: LEGACY_KEYS, maxCols: MAX_COLS, missingText: MISSING,
+    legacyKeys: LEGACY_KEYS, maxCols: MAX_COLS, missingText: MISSING, ynDays: [...YN_DAYS], ynDefault: YN_DEFAULT_DAYS,
   };
 }

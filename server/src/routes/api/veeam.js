@@ -25,12 +25,13 @@ import { veeamEdgeStatus } from '../../central/veeamEdge.js';
 import { createYielder } from '../../util/timeSlice.js';
 import { requirePerm, requireRole, toolActorOf } from '../../auth/auth.js';
 import { issueFor } from '../../auth/toolAccess.js';
-import { backupRow, backupTotals, vmBackupView, vmScope, POWER_VALUES, RPO_DAYS, VIEW_FILTERS, vmViewMatches, priorityCandidates, priorityRank, PRIORITY_MAX } from '../../veeam/backupStatus.js';   // v2.779 백업 메뉴 · v2.780 범위·CSV
+import { backupRow, backupTotals, vmBackupView, vmScope, POWER_VALUES, RPO_DAYS, VIEW_FILTERS, vmViewMatches, priorityCandidates, priorityRank, PRIORITY_MAX, ynDaysOf } from '../../veeam/backupStatus.js';   // v2.779 백업 메뉴 · v2.780 범위·CSV
 import { vmListCsvAsync, vmTreeCmp, VM_LIST_MAX_IDS, folderParts } from '../../veeam/vmListCsv.js';
 import { resolveCols, needsOf, selectedColumns, catalogView } from '../../veeam/vmListCatalog.js';   // v2.798 필요한 항목만 고르기(v2.800 백업 현황 › Detail '백업 내보내기' 전용)
 import { getPrefs, setPref, clearPref } from '../../veeam/vmListPrefs.js';   // v2.798 계정 저장값(기본값 · 5칸)
 import { vmRefOf, vmTagsOf, tagStateOf } from '../../tags/analyze.js';
 import { renderVmListWorkbook, XLSX_MIME } from '../../veeam/vmListXlsx.js';   // v2.792 같은 목록의 엑셀(폴더 트리 — 시안 승인)
+import { setVeeamVmViewProvider } from '../../veeam/vmViewProvider.js';   // v2.801 VM 전체 정보 내보내기의 Veeam 묶음(같은 vcBackup → vmBackupView)
 export { VM_LIST_MAX_IDS };
 import { logAudit } from '../../audit.js';
 import { csvLine, CSV_BOM } from '../../util/csv.js';
@@ -266,6 +267,7 @@ function cachedSnapEvents(vcenterId, vms, { initial = false, wait = true, now = 
 }
 
 export function registerVeeamBadges(api) {
+  setVeeamVmViewProvider(veeamViewsForExport);
   api.get('/veeam/badges', (req, res) => {
     const t = vcOf(req);
     if (!t) return res.status(404).json({ ok: false, reason: 'vCenter 를 찾을 수 없습니다.' });
@@ -342,7 +344,8 @@ export function registerVeeamBadges(api) {
     const body = req.body && typeof req.body === 'object' && !Array.isArray(req.body) ? req.body : {};
     const sel = selOf({ ...body, cols: body.cols ?? [] });
     if (!sel.ok) return res.status(400).json({ ok: false, reason: sel.reason });
-    const want = new Set((Array.isArray(body.ids) ? body.ids : []).filter((x) => typeof x === 'string').slice(0, 3));
+    // v2.801: 크게 보기(전체 화면 팝업)는 100대까지 — 창 안 미리보기는 3대를 보낸다. 행은 트리 순서(vmTreeCmp)라 폴더별로 나눠 볼 수 있게 폴더 경로를 함께 싣는다.
+    const want = new Set((Array.isArray(body.ids) ? body.ids : []).filter((x) => typeof x === 'string').slice(0, VM_LIST_PREVIEW_MAX));
     const list = t.vms.filter((vm) => want.has(vm.id)).sort(vmTreeCmp);
     try {
       const snap = store.get();
@@ -352,7 +355,8 @@ export function registerVeeamBadges(api) {
       const rows = b ? list.map((vm) => ({ inv: vm, view: vmBackupView(vm, b.match?.byVm?.[vm.id], b.ev?.byVm?.[vm.id],
         { veeamKnown: b.row.veeam != null || !b.linked, snapKnown: b.row.snap != null, absentKnown: !b.row.veeamAbsentUnknown, now }) })) : [];
       const table = await vmListSelTable({ vc, vcName: vc.name || vc.id, list, rows, b, sel, snapDays: b?.ev?.days ?? LOOKBACK_DAYS, now, maybeYield: async () => {} });
-      res.set('Cache-Control', 'no-store').json({ ok: true, head: table.head, cells: table.cells.slice(0, 12) });
+      const n = Math.min(table.cells.length, VM_LIST_PREVIEW_MAX);
+      res.set('Cache-Control', 'no-store').json({ ok: true, head: table.head, keys: table.keys, cells: table.cells.slice(0, n), folders: table.folders.slice(0, n), vms: list.length });
     } catch { res.status(500).json({ ok: false, reason: '미리보기를 만들지 못했습니다.' }); }
   });
   api.get('/veeam/vm-list/prefs', requirePerm('data.csv'), (req, res) => res.set('Cache-Control', 'no-store').json({ ok: true, prefs: getPrefs(req.user?.username) }));
@@ -510,6 +514,23 @@ function maskDetail(detail, admin, vmName = '') {
  *   · 읽기 POST(본문에 id 목록) — 게이트는 CSV 내보내기 권한(data.csv — 관리자 전용, 웹 canCsv 와 같은 판정) · 조회 범위 밖 vCenter 404(vcOf) ·
  *     동시 1건(exportBusy — vCenter 전체 대조·스냅샷 요약을 다시 계산한다) · 감사 로그 · 파일 이름에 화면 조건(all · poweredon · search).
  */
+/** v2.801 미리보기 '크게 보기' 상한(VM 수) — 창 안 미리보기는 3대. */
+export const VM_LIST_PREVIEW_MAX = 100;
+/**
+ * v2.801 VM 전체 정보 내보내기의 Veeam 묶음(veeam/vmViewProvider.js 로 건다) — VM 목록 내보내기와 같은 vcBackup → vmBackupView(판정 코어 하나).
+ * vms = 그 vCenter 의 **전체** VM(대조·스냅샷 요약은 vCenter 전체로 — vcBackup 주석). 범위 검사는 부르는 라우트가 끝냈다.
+ */
+async function veeamViewsForExport(vc, vms, req, { now = Date.now() } = {}) {
+  const snap = store.get();
+  const b = await vcBackup(vc, vms, req, { initial: snap?.initial === true, scope: { power: 'all', excl: false } });
+  const veeamKnown = b.row.veeam != null || !b.linked;
+  const snapKnown = b.row.snap != null;
+  const byId = new Map();
+  for (const vm of vms) {
+    byId.set(vm.id, vmBackupView(vm, b.match?.byVm?.[vm.id], b.ev?.byVm?.[vm.id], { veeamKnown, snapKnown, absentKnown: !b.row.veeamAbsentUnknown, now }));
+  }
+  return { linked: b.linked, snapDays: b.ev?.days ?? LOOKBACK_DAYS, byId };
+}
 // v2.798 폴더 고르기 · v2.800 detail = 백업 현황 › Detail 화면에 보이는 VM(보기·검색 반영 — 창이 그 id 를 보낸다)
 const VM_LIST_VIEWS = Object.freeze({ all: '전체 VM', noOff: '꺼진 VM 제외(‘Off VM 포함’ 해제)', search: '검색 결과', folder: '고른 폴더', detail: '백업 현황 화면' });
 const VM_LIST_FILE_TAG = Object.freeze({ all: 'all', noOff: 'poweredon', search: 'search', folder: 'folder', detail: 'backup' });
@@ -518,7 +539,7 @@ function selOf(body) {
   if (body.cols == null) return null;
   const c = resolveCols(body.cols);
   if (!c.ok) return c;
-  return { ok: true, keys: c.keys, tagCols: body.tagCols === true };
+  return { ok: true, keys: c.keys, tagCols: body.tagCols === true, ynDays: ynDaysOf(body.ynDays) };
 }
 
 /**
@@ -544,10 +565,10 @@ async function vmListSelTable({ vc, vcName, list, rows, b, sel, snapDays, now, m
     if (need.has('marks')) { r.mark = markView(marks?.[vm.id]); r.marksOk = marksOk; }
     out.push(r);
   }
-  const cols = selectedColumns(sel.keys, { levels: Math.min(32, levels), tagCols: sel.tagCols, tagCategories: (tagInv?.categories || []).map((c) => c?.name), snapDays, now });
-  const cells = [];
-  for (const r of out) { await maybeYield(); cells.push(cols.map((c) => c.get(r))); }
-  return { head: cols.map((c) => c.h), folderCols: cols.map((c) => !!c.folderLevel), cells, vms: out.length };
+  const cols = selectedColumns(sel.keys, { levels: Math.min(32, levels), tagCols: sel.tagCols, tagCategories: (tagInv?.categories || []).map((c) => c?.name), snapDays, now, ynDays: sel.ynDays });
+  const cells = []; const folders = [];
+  for (const r of out) { await maybeYield(); cells.push(cols.map((c) => c.get(r))); folders.push(folderParts(r.inv.folder).join('/')); }
+  return { head: cols.map((c) => c.h), keys: cols.map((c) => c.key), folderCols: cols.map((c) => !!c.folderLevel), cells, folders, vms: out.length };
 }
 
 async function vmListExport(req, res, kind) {
@@ -598,7 +619,7 @@ async function vmListExport(req, res, kind) {
     if (kind === 'xlsx') {
       const veeamText = !b.linked ? '연동 없음 — 스냅샷으로만 판단' : b.vcnt?.n == null ? '연결됨(이번 대조 결과 모름)' : `연결됨(서버 ${b.views.length}대)`;
       const out = await renderVmListWorkbook({ vcName, rows, linked: b.linked, snapDays, cond: `${VM_LIST_VIEWS[view]} ${rows.length}대`, veeamText, at: now,
-        ...(table ? { dataTable: { head: table.head, cells: table.cells, folderCols: table.folderCols } } : {}) }, { signal: ac.signal });
+        ...(table ? { dataTable: { head: table.head, keys: table.keys, cells: table.cells, folderCols: table.folderCols } } : {}) }, { signal: ac.signal });
       payload = out.buffer; type = XLSX_MIME;
     } else if (table) {
       const lines = [CSV_BOM + csvLine(table.head)];

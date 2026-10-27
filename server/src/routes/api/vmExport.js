@@ -20,10 +20,14 @@ import { buildVmExportTable, vmExportStatus, LEGACY_KEYS } from '../../vcenter/v
 import { catalogView, resolveCols, GROUPS, tzName } from '../../vcenter/vmExportCatalog.js';
 import { getPrefs, setPref, clearPref, DISK_MODES, TARGETS, FOLDER_MAX } from '../../vcenter/vmExportPrefs.js';
 import { renderVmExportWorkbook, XLSX_MIME, liveResultText } from '../../vcenter/vmExportXlsx.js';
+import { veeamVmViews } from '../../veeam/vmViewProvider.js';   // v2.801 Veeam 묶음 — veeam 라우트가 건 vcBackup → vmBackupView(VM 목록과 같은 판정)
+import { YN_DAYS, ynDaysOf } from '../../veeam/backupStatus.js';
+import { LOOKBACK_DAYS } from '../../veeam/snapEvents.js';
 
 const csvPerm = requirePerm('data.csv');
 const toolsPerm = requirePerm('tools');
 const PREVIEW_ROWS = 3;
+export const PREVIEW_MAX = 100;   // v2.801 '크게 보기'(전체 화면 팝업) — 본문 rows 로 3~100
 const GROUP_NAMES = Object.freeze(Object.fromEntries(GROUPS.map((g) => [g.id, g.name])));
 const TARGET_TEXT = Object.freeze({ all: '전체 VM', on: '켜진 VM', folder: '고른 폴더' });
 
@@ -49,6 +53,7 @@ export function selOf(body) {
   if (!c.ok) return c;
   if (b.disk !== undefined && !DISK_MODES.includes(b.disk)) return { ok: false, reason: '디스크 표기 방식이 잘못됐습니다.' };
   if (b.target !== undefined && !TARGETS.includes(b.target)) return { ok: false, reason: '대상이 잘못됐습니다.' };
+  if (b.ynDays !== undefined && !YN_DAYS.includes(b.ynDays)) return { ok: false, reason: '‘여부’ 기준 일수가 잘못됐습니다.' };
   // eslint-disable-next-line no-control-regex
   if (b.folder !== undefined && (typeof b.folder !== 'string' || b.folder.length > FOLDER_MAX || /[\x00-\x1f\x7f]/.test(b.folder))) return { ok: false, reason: '폴더 경로 형식이 잘못됐습니다.' };
   const target = b.target || 'all';
@@ -59,9 +64,13 @@ export function selOf(body) {
       keys: c.keys, live: b.live !== false, disk: b.disk === 'join' ? 'join' : 'slots', tagCols: b.tagCols === true,
       target, folder: target === 'folder' ? String(b.folder) : '', tmpl: b.tmpl !== false,
       prefName: typeof b.prefName === 'string' ? b.prefName.slice(0, 30) : '',
+      ynDays: ynDaysOf(b.ynDays),
     },
   };
 }
+
+/** v2.801 Veeam 판정 읽기(라우트만 req 를 안다) — vCenter 전체 VM 으로 대조한다. */
+const veeamOf = (req) => (vc, vms) => veeamVmViews(vc, vms, req, { now: Date.now() });
 
 const fileBase = (vcenterId, target) => `vm-export-${String(vcenterId).replace(/[^A-Za-z0-9._-]+/g, '_').slice(0, 60)}-${target}-${fileStamp()}`;
 
@@ -73,12 +82,13 @@ async function sendExport(req, res, vcenterId, sel, kind, { legacy = false } = {
   res.on('close', () => { if (!res.writableFinished) ac.abort(); });
   try {
     const maybeYield = createYielder(15);
-    const table = await buildVmExportTable(vcenterId, { ...sel, maybeYield });
+    // v2.801: 엑셀은 '요약' 시트 숫자도(summary) — Veeam 판정은 Veeam 항목을 골랐거나 엑셀일 때만 읽는다(veeamOf).
+    const table = await buildVmExportTable(vcenterId, { ...sel, maybeYield, summary: kind === 'xlsx', veeamViews: veeamOf(req) });
     if (ac.signal.aborted) return;
     let payload;
     if (kind === 'xlsx') {
       const out = await renderVmExportWorkbook({
-        head: table.head, cells: table.cells, cols: table.cols, meta: table.meta,
+        head: table.head, cells: table.cells, cols: table.cols, meta: table.meta, rowFolder: table.rowFolder, rowPower: table.rowPower, summary: table.summary,
         cond: { target: TARGET_TEXT[sel.target] + (sel.target === 'folder' ? ` ‘${sel.folder}’` : '') + (sel.tmpl ? '' : '(템플릿 제외)'), items: sel.keys.length,
           groupNames: GROUP_NAMES, offsetLabel: tzName(table.meta.offsetMin), prefName: sel.prefName },
       }, { signal: ac.signal });
@@ -109,7 +119,7 @@ export function registerVmExport(api) {
     const vcenterId = vcOf(req, res);
     if (!vcenterId) return;
     try {
-      res.set('Cache-Control', 'no-store').json({ ok: true, ...catalogView(), status: await vmExportStatus(vcenterId), prefs: getPrefs(req.user?.username) });
+      res.set('Cache-Control', 'no-store').json({ ok: true, ...catalogView({ snapDays: LOOKBACK_DAYS }), status: await vmExportStatus(vcenterId), prefs: getPrefs(req.user?.username) });
     } catch { res.status(500).json({ ok: false, reason: '항목 목록을 만들지 못했습니다.' }); }
   });
 
@@ -119,10 +129,12 @@ export function registerVmExport(api) {
     const s = selOf(req.body);
     if (!s.ok) return res.status(400).json({ ok: false, reason: s.reason });
     try {
-      const t = await buildVmExportTable(vcenterId, { ...s.sel, preview: true, limit: PREVIEW_ROWS });
+      // v2.801: rows(3~100) — 화면 안 미리보기 3대 · '크게 보기' 팝업 100대. 행마다 폴더 경로(rowFolder — 폴더별로 나눠 보기).
+      const n = Number.isInteger(req.body?.rows) ? Math.max(PREVIEW_ROWS, Math.min(PREVIEW_MAX, req.body.rows)) : PREVIEW_ROWS;
+      const t = await buildVmExportTable(vcenterId, { ...s.sel, preview: true, limit: n, veeamViews: veeamOf(req) });
       res.set('Cache-Control', 'no-store').json({
         ok: true, head: t.head, cells: t.cells, cols: t.cols.map((c) => ({ key: c.key, item: c.item, group: c.group, src: c.src })),
-        rows: t.meta.matched, total: t.meta.total, live: t.meta.live, tags: t.meta.tags, parts: t.meta.parts,
+        folders: t.rowFolder, rows: t.meta.matched, total: t.meta.total, live: t.meta.live, tags: t.meta.tags, parts: t.meta.parts, veeam: t.meta.veeam,
       });
     } catch { res.status(500).json({ ok: false, reason: '미리보기를 만들지 못했습니다.' }); }
   });

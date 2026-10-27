@@ -8,10 +8,12 @@
  */
 export const SLOT_COUNT = 5;   // 서버 vmListPrefs.SLOT_COUNT 와 같은 값(테스트 대조)
 export const NAME_MAX = 30;
+export const YN_DAYS = Object.freeze([1, 2, 3, 7]);   // 서버 veeam/backupStatus.YN_DAYS(v2.801 '여부' 기준 일수)
 export const SAVE_WHAT = Object.freeze([
   ['cols', '고른 항목과 순서', true],
   ['fmt', '형식(CSV/엑셀)', false],
   ['tagCols', '태그 열 나누기', false],
+  ['ynDays', '‘여부’ 기준 일수', false],   // v2.801
   ['target', '대상(폴더)', false],
 ]);
 
@@ -66,6 +68,7 @@ export function valueToSave(st, what = {}, name = '') {
   const v = { name: String(name || '').slice(0, NAME_MAX), cols: [...(st.cols || [])] };
   if (what.fmt) v.fmt = st.fmt;
   if (what.tagCols) v.tagCols = !!st.tagCols;
+  if (what.ynDays && YN_DAYS.includes(st.ynDays)) v.ynDays = st.ynDays;
   if (what.target) v.folder = st.target === 'folder' ? String(st.folder || '') : '';
   return v;
 }
@@ -75,12 +78,13 @@ export function applyValue(st, v) {
   const next = { ...st, cols: Array.isArray(v.cols) ? [...v.cols] : st.cols };
   if (v.fmt) next.fmt = v.fmt;
   if (typeof v.tagCols === 'boolean') next.tagCols = v.tagCols;
+  if (YN_DAYS.includes(v.ynDays)) next.ynDays = v.ynDays;
   if (typeof v.folder === 'string') { next.target = v.folder ? 'folder' : 'screen'; next.folder = v.folder; }
   return next;
 }
 /** 창을 열 때 — 내 기본값, 없으면 '기본' 조합. */
 export function initialState(catalog, prefs) {
-  const base = { cols: [...(catalog?.presets?.find((p) => p.id === 'base')?.keys || [])], fmt: 'csv', tagCols: false, target: 'screen', folder: '' };
+  const base = { cols: [...(catalog?.presets?.find((p) => p.id === 'base')?.keys || [])], fmt: 'csv', tagCols: false, target: 'screen', folder: '', ynDays: catalog?.ynDefault ?? 1 };
   return prefs?.def ? applyValue(base, prefs.def) : base;
 }
 
@@ -117,7 +121,7 @@ export function backupScreenRequest(ids, max) {
  * @param {{body:object|null, count:number, error?:string}} screenReq
  */
 export function exportBody(st, screenReq, folderVms) {
-  const sel = { cols: [...st.cols], tagCols: !!st.tagCols };
+  const sel = { cols: [...st.cols], tagCols: !!st.tagCols, ...(YN_DAYS.includes(st.ynDays) ? { ynDays: st.ynDays } : {}) };
   if (st.target === 'folder') return { body: { ids: (folderVms || []).map((v) => v.id), view: 'folder', ...sel }, count: (folderVms || []).length };   // 파일 이름에 'folder'
   if (!screenReq?.body) return { body: null, count: screenReq?.count || 0, error: screenReq?.error || '' };
   return { body: { ...screenReq.body, ...sel }, count: screenReq.count };

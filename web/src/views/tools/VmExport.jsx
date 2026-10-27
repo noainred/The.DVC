@@ -9,6 +9,8 @@ import { downloadFailText } from '../downloadFailText.js';
 import { ErrorBox, Loading } from '../../components/primitives.jsx';
 import { STable } from '../../components/STable.jsx';
 import Select from '../../components/Select.jsx';
+import ExportPreviewModal from '../../components/ExportPreviewModal.jsx';   // v2.801 미리보기 크게 보기(전체 화면 팝업)
+import { PREVIEW_BIG } from './exportPreviewText.js';
 import {
   SLOT_COUNT, NAME_MAX, SAVE_WHAT, TONE, badgeOf, sourceTiles, dropCol, moveCol, toggleCol, addCols, dropCols, initialState, valueToSave, applyValue,
   slotLabel, defaultLine, savedText, exportBody, targetCount, liveMissCount, footerText, cellKind,
@@ -33,6 +35,7 @@ export function VmExport({ scope, embedded = false }) {
   const [pv, setPv] = useState(null);
   const [drag, setDrag] = useState({ from: '', over: '' });
   const [prefName, setPrefName] = useState('');
+  const [big, setBig] = useState(false);        // v2.801 '크게 보기' 팝업
   const pvGen = useRef(0);
 
   useEffect(() => {
@@ -57,7 +60,7 @@ export function VmExport({ scope, embedded = false }) {
   const status = cat?.status || {};
 
   // 미리보기 — 고른 것이 바뀌면 0.5초 뒤 대상 첫 3대. 늦게 온 이전 응답은 버린다(실시간은 부르지 않는다).
-  const pvKey = st ? JSON.stringify([scope, st.cols, st.disk, st.tagCols, st.live, st.target, st.folder, st.tmpl]) : '';
+  const pvKey = st ? JSON.stringify([scope, st.cols, st.disk, st.tagCols, st.live, st.target, st.folder, st.tmpl, st.ynDays]) : '';
   useEffect(() => {
     if (!st || !scope) return undefined;
     if (!st.cols.length || (st.target === 'folder' && !st.folder)) { pvGen.current += 1; setPv(null); return undefined; }
@@ -333,6 +336,8 @@ export function VmExport({ scope, embedded = false }) {
             <div className="vmx-row" style={{ alignItems: 'baseline', gap: '4px 10px', marginBottom: 8 }}>
               <b>미리보기</b>
               <span className="muted" style={{ fontSize: 12 }}>대상 첫 3대 · 내려받는 파일과 같은 값 · 실시간 항목은 내려받을 때 조회</span>
+              <button type="button" className="vmx-btn" style={{ marginLeft: 'auto' }} disabled={!st.cols.length || (st.target === 'folder' && !st.folder)} onClick={() => setBig(true)}
+                title={`대상 첫 ${PREVIEW_BIG}대를 화면 가득 봅니다`}>⤢ 크게 보기</button>
             </div>
             {pv?.error ? <div className="banner warn">{pv.error}</div>
               : !pv ? <div className="muted" style={{ fontSize: 12 }}>{st.cols.length ? (st.target === 'folder' && !st.folder ? '폴더를 고르면 보입니다.' : '미리보기를 만드는 중…') : '항목을 고르면 보입니다.'}</div>
@@ -353,6 +358,14 @@ export function VmExport({ scope, embedded = false }) {
             <label className="vmx-row" style={{ gap: 8, flexWrap: 'nowrap', alignItems: 'flex-start' }}><input type="radio" name="vmx-disk" checked={st.disk === 'slots'} onChange={() => set({ disk: 'slots' })} /><span>디스크는 1~7번 슬롯 열(슬롯당 용량 · 타입 · 모드 · 데이터스토어 · 파일) <span className="muted">— 예전과 같음</span></span></label>
             <label className="vmx-row" style={{ gap: 8, flexWrap: 'nowrap', alignItems: 'flex-start' }}><input type="radio" name="vmx-disk" checked={st.disk === 'join'} onChange={() => set({ disk: 'join' })} /><span>디스크는 한 칸에 ‘ ; ’ 로 이어 쓰기 <span className="muted">— 열이 35개 줄어듦</span></span></label>
             <label className="vmx-row" style={{ gap: 8, flexWrap: 'nowrap', alignItems: 'flex-start' }}><input type="checkbox" checked={st.tagCols} onChange={() => set({ tagCols: !st.tagCols })} /><span>vSphere 태그는 카테고리마다 따로 열(‘태그: 환경’ · ‘태그: 서비스’ …)</span></label>
+            {/* v2.801 '여부' 기준 일수 — 최근 N일 Veeam 백업 · 백업용 스냅샷 생성(서버 YN_DAYS — 카탈로그가 준다) */}
+            <div className="vmx-row" style={{ gap: '6px 8px', alignItems: 'center' }} role="group" aria-label="‘여부’ 기준 일수">
+              <span>‘여부’ 기준</span>
+              {(cat.ynDays || []).map((d) => (
+                <button key={d} type="button" className={`vmx-pill${st.ynDays === d ? ' on' : ''}`} aria-pressed={st.ynDays === d} onClick={() => set({ ynDays: d })}>{d}일</button>
+              ))}
+              <span className="muted" style={{ fontSize: 12 }}>— 최근 N일 Veeam 백업 · 백업용 스냅샷 생성 여부(예 · 아니오 · 모름)</span>
+            </div>
             <div className="muted" style={{ fontSize: 12 }}>시각은 포탈 시각(KST, UTC+9)으로 쓰고 머리에 표기합니다 — 예전 파일은 UTC(…Z)였습니다.</div>
           </div>
         </div>
@@ -373,6 +386,16 @@ export function VmExport({ scope, embedded = false }) {
           </button>
         </span>
       </div>
+      {big && (
+        <ExportPreviewModal
+          title={`미리보기 — ${status.vcenterName || scope}`}
+          sub={`대상 첫 ${PREVIEW_BIG}대까지 · 고른 항목 ${st.cols.length}개 · 내려받는 파일과 같은 값 · 실시간 항목은 내려받을 때 조회`}
+          load={() => postJson(`/tools/vm-export/preview?vcenterId=${encodeURIComponent(scope)}`, { ...exportBody(st), rows: PREVIEW_BIG })}
+          groupName={(g) => (cat.groups || []).find((x) => x.id === g)?.name || g}
+          onDownload={download} downloadDisabled={!canDownload} downloadLabel={busy === 'down' ? '만드는 중…' : `⤓ ${st.fmt === 'xlsx' ? '엑셀' : 'CSV'} 내려받기`}
+          onClose={() => setBig(false)}
+        />
+      )}
     </div>
   );
 }

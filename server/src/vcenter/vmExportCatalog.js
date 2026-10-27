@@ -20,6 +20,8 @@
  */
 import { localStamp, DAY_OFFSET_MIN } from '../util/dayKey.js';
 import { numOrNull } from '../util/numOrNull.js';
+import { CATALOG as VM_LIST_CATALOG, timeCtx as vmListTimeCtx } from '../veeam/vmListCatalog.js';   // v2.801 Veeam 묶음은 VM 목록 항목을 그대로 쓴다
+import { YN_DAYS, YN_DEFAULT_DAYS } from '../veeam/backupStatus.js';
 
 export const MISSING = '수집 안 됨';
 /** 미리보기 전용 — 실시간 전용 칸은 미리보기에서 조회하지 않는다(화면을 여는 것만으로 vCenter 전량 조회를 하지 않게 — v2.799 결함 6). */
@@ -40,6 +42,7 @@ export const GROUPS = Object.freeze([
   { id: 'snap', name: '스냅샷' },
   { id: 'dev', name: '장치 · 위생', isNew: true },
   { id: 'meta', name: '태그 · 속성', isNew: true },
+  { id: 'veeam', name: 'Veeam 백업', isNew: true },
 ]);
 export const GROUP_NOTES = Object.freeze({
   ident: 'UUID · 생성일은 실시간 보강으로만 얻습니다 — 엣지 위임 vCenter 나 실시간 보강을 끄면 ‘수집 안 됨’ 입니다.',
@@ -48,6 +51,7 @@ export const GROUP_NOTES = Object.freeze({
   part: '실시간 보강이 있으면 그 시점의 게스트 파티션, 없으면 게스트 디스크 수집(설정에서 켬) 값입니다. Tools 가 도는 VM 만 있습니다. 파일 시스템 종류는 vSphere 7.0 이상이 주는 값으로 추정합니다(옛 판이면 빈칸).',
   dev: '구성 캐시(주기 수집)입니다 — 재시작 직후 아직 읽지 않은 VM 은 ‘수집 안 됨’ 입니다.',
   meta: '태그와 사용자 지정 속성은 vCenter 마다 주기(기본 6시간)로 모읍니다 — 첫 수집 전에는 ‘수집 안 됨’ 입니다.',
+  veeam: 'VM 목록 내보내기와 같은 판정입니다(Veeam 연동 대조 · vCenter 스냅샷 이벤트 최근 7일). ‘여부’ 두 항목은 예 · 아니오 · 모름 — Veeam 연동이 없거나 아직 못 읽은 VM 은 ‘아니오’ 가 아니라 ‘모름’ 입니다.',
 });
 
 const fin = (v) => typeof v === 'number' && Number.isFinite(v);
@@ -113,6 +117,22 @@ const partsOf = (d, f) => { const g = dd(d).guest; if (g == null) return MISSING
 const tagText = (t) => (t.category ? `${t.category}:${t.tag}` : t.tag);
 const tagsCell = (d) => (d?.tg?.tags == null ? MISSING : join(d.tg.tags.map(tagText)));
 const customCell = (d) => (d?.tg?.custom == null ? MISSING : join(d.tg.custom.map((c) => `${c.name}=${c.value}`)));
+
+/*
+ * v2.801 Veeam 백업 묶음 — VM 목록 카탈로그(veeam/vmListCatalog.js)의 항목을 key·머리·칸 그대로 빌려 온다(판정 코어 하나 — 복제하지 않는다).
+ *   d.bv = 그 VM 의 vmBackupView(veeam/vmViewProvider — 라우트가 읽는다) · d.bvLinked = Veeam 연동 여부. Veeam 소스를 못 읽었으면(d.bv undefined) '수집 안 됨'.
+ *   시간대 표기만 이 카탈로그의 것(tzName — 'KST')으로 바꾼다.
+ */
+export const VEEAM_KEYS = Object.freeze(['vbkYn', 'vlast', 'vres', 'vjudge', 'vstate', 'vrp', 'vjob', 'vsnapYn', 'vsnapTs', 'vsnapN', 'vtmp', 'vtmpTs', 'vtmpStale']);
+const veeamCtx = (o) => ({ ...vmListTimeCtx({ snapDays: o?.snapDays ?? 7, offsetMin: o?.offsetMin ?? DAY_OFFSET_MIN, now: o?.now ?? Date.now(), ynDays: o?.ynDays }), tz: tzName(o?.offsetMin) });
+const VEEAM_ITEMS = VEEAM_KEYS.map((k) => {
+  const L = VM_LIST_CATALOG.find((c) => c.key === k);
+  return {
+    key: k, group: 'veeam', label: L.label, src: 'veeam', ...(L.isNew ? { isNew: true } : {}),
+    ...(L.head ? { head: (o) => L.head(veeamCtx(o)) } : {}),
+    get: (vm, d, o) => (d?.bv === undefined ? MISSING : L.get({ inv: vm, view: d.bv || undefined, linked: d.bvLinked !== false }, veeamCtx(o))),
+  };
+});
 
 /**
  * 카탈로그 — 항목마다 { key, group, label, src, isNew?, head?(o), cols?(o), get(vm, d, o) }.
@@ -254,6 +274,8 @@ export const CATALOG = Object.freeze([
       return out;
     } },
   { key: 'custom', group: 'meta', label: '사용자 지정 속성', src: 'tags', isNew: true, get: (vm, d) => customCell(d) },
+  // Veeam 백업(v2.801 — 위 VEEAM_ITEMS)
+  ...VEEAM_ITEMS,
 ]);
 
 const BY_KEY = new Map(CATALOG.map((it) => [it.key, it]));
@@ -283,6 +305,7 @@ export const PRESETS = Object.freeze([
   { id: 'hygiene', name: '위생 점검', keys: Object.freeze(['name', 'powerState', 'connectionState', 'template', 'toolsStatus', 'toolsVersionStatus', 'hwVersion', 'snapshotCount',
     'snapshotOldest', 'snapshotAgeDays', 'cdrom', 'consolidation', 'question', 'cbt', 'uptimeDays']) },
   { id: 'meta', name: '메모 · 태그', keys: Object.freeze(['vcenter', 'name', 'folder', 'notes', 'tags', 'custom']) },
+  { id: 'backup', name: '백업 확인', keys: Object.freeze(['name', 'powerState', 'folder', 'vbkYn', 'vlast', 'vres', 'vjudge', 'vsnapYn', 'vsnapTs', 'snapshotCount', 'snapshotNewest']) },   // v2.801
 ]);
 export const DEFAULT_PRESET = 'asset';
 
@@ -315,6 +338,7 @@ export function needsOf(keys) {
     if (it.src === 'live' || it.src === 'both') out.add('live');
     if (it.src === 'parts') { out.add('parts'); out.add('live'); }
     if (it.src === 'tags') out.add('tags');
+    if (it.src === 'veeam') out.add('veeam');
   }
   return out;
 }
@@ -324,7 +348,7 @@ export const liveOnlyCount = (keys) => (keys || []).filter((k) => BY_KEY.get(k)?
 /**
  * 고른 항목 → 열 목록 [{ key, item, h, group, src, get(vm, d) }] — 한 항목이 여러 열이 될 수 있다.
  * @param {string[]} keys resolveCols 를 통과한 순서
- * @param {{ vcName?:string, offsetMin?:number, now?:number, disk?:'slots'|'join', tagCols?:boolean, tagCategories?:string[], levels?:number }} o
+ * @param {{ vcName?:string, offsetMin?:number, now?:number, disk?:'slots'|'join', tagCols?:boolean, tagCategories?:string[], levels?:number, ynDays?:number, snapDays?:number }} o
  */
 export function selectedColumns(keys, o = {}) {
   const out = [];
@@ -368,16 +392,19 @@ export function inFolder(vm, path) {
 }
 
 /** 화면이 받는 카탈로그(함수 없이) — 묶음 · 항목 · 빠른 조합 · 글자. */
-export function catalogView() {
+export function catalogView({ snapDays = 7 } = {}) {
   return {
     groups: GROUPS.map((g) => ({
       id: g.id, name: g.name, ...(g.isNew ? { isNew: true } : {}), ...(GROUP_NOTES[g.id] ? { note: GROUP_NOTES[g.id] } : {}),
-      items: CATALOG.filter((it) => it.group === g.id).map((it) => ({ key: it.key, label: it.label, src: it.src, ...(it.isNew ? { isNew: true } : {}) })),
+      items: CATALOG.filter((it) => it.group === g.id).map((it) => ({
+        key: it.key, label: it.key === 'vsnapN' ? `최근 ${snapDays}일 Veeam 스냅샷 생성 횟수` : it.label, src: it.src, ...(it.isNew ? { isNew: true } : {}),
+      })),
     })),
     presets: PRESETS.map((p) => ({ id: p.id, name: p.name, keys: [...p.keys] })),
     defaultPreset: DEFAULT_PRESET,
     missingText: MISSING,
     liveLaterText: LIVE_LATER,
     maxItems: MAX_ITEMS,
+    ynDays: [...YN_DAYS], ynDefault: YN_DEFAULT_DAYS,
   };
 }
