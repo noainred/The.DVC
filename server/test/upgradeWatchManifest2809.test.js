@@ -39,6 +39,9 @@ test('감시 폴더 번들만 — 거부 · 사유에 폴더와 manifest 이름 
   m.settings = { ...m.settings, enabled: true, watchDir: watch, remoteBase: '', installDir: inst, autoApply: false, pollIntervalMs: 0 };
   let c = await m.check();
   assert.deepEqual([c.watch.available, c.watch.manifest, c.watch.hasManifest], [true, 'vmware-portal-99.0.0.manifest.json', false]);
+  // 화면은 status().lastCheck 를 읽는다 — 정제(autoState.sanitizeCheck)를 지나도 두 필드가 남아야 한다(Chromium 확인에서 빠진 것이 발견됨)
+  const lc = m.status().lastCheck;
+  assert.deepEqual([lc.watch.manifest, lc.watch.hasManifest], ['vmware-portal-99.0.0.manifest.json', false], JSON.stringify(lc));
   const a = await m.apply({ source: 'watch' });
   assert.equal(a.ok, false);
   assert.match(a.reason, /찾은 위치: .*vmware-portal-99\.0\.0\.manifest\.json/);
@@ -46,6 +49,7 @@ test('감시 폴더 번들만 — 거부 · 사유에 폴더와 manifest 이름 
   fs.writeFileSync(path.join(watch, 'vmware-portal-99.0.0.manifest.json'), '{"format":"x"}');
   c = await m.check();
   assert.equal(c.watch.hasManifest, true, '있는지만 본다(서명 확인은 적용 때)');
+  assert.equal(m.status().lastCheck.watch.hasManifest, true);
   const a2 = await m.apply({ source: 'watch' });
   assert.equal(a2.ok, false, '형식이 틀린 manifest 는 여전히 거부');
   assert.ok(!/찾은 위치/.test(a2.reason), 'manifest 가 있으면 위치 안내 대상이 아니다');

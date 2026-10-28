@@ -32,6 +32,7 @@ import { fileURLToPath } from 'node:url';
 import { config, currentVersion } from '../config.js';
 import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
 import { registerStateFile } from '../util/stateFiles.js';
+import { activeOverride, loadOverride } from './signatureOverride.js';   // v2.810 화면에서 시한부로 끈 상태
 import {
   parseKeysDoc, mergeTrust, verifyEnvelopeText, matchArtifact, sha256Hex, strictBase64,
   CANNOT_VERIFY, MANIFEST_MAX_BYTES, manifestNameFor, resolvePolicy, trustUnconfigured,
@@ -58,14 +59,21 @@ const DOC = 'docs/RELEASE-SIGNING.md';
  * 키가 하나도 설정되지 않은 설치본은 warn(source 'unconfigured'), 그 밖은 require(source 'default').
  * `trust` 를 넘기지 않으면 지금 키 파일을 읽어 판단한다(loadTrust — 작은 파일 두 개).
  */
-export function signaturePolicy(env = process.env, trust) {
+export function signaturePolicy(env = process.env, trust, { ignoreOverride = false } = {}) {
   const v = env.UPGRADE_SIGNATURE_POLICY;
   if (v != null && v !== '') return resolvePolicy(v);
   let t = trust;
   if (t === undefined) { try { t = loadTrust(); } catch { t = null; } }
   // v2.742(INJPKG-01): root 소유 사본이 있으면 호스트 파일이 지워졌어도 '키 미설정' 으로 약해지지 않는다(require 쪽).
   const hostPresent = !!(t?.sources?.host?.present || t?.sources?.rootCopy?.present);
-  return resolvePolicy(v, { unconfigured: trustUnconfigured(t, { hostPresent }) });
+  const base = resolvePolicy(v, { unconfigured: trustUnconfigured(t, { hostPresent }) });
+  // v2.810: 화면에서 시한부로 끈 상태(signatureOverride.js) — env 가 없을 때만 · root 확인(install.sh·verify CLI)은 보지 않는다 ·
+  //   신뢰 키를 읽지 못했으면(fatal) 적용하지 않는다. 결과는 env warn 과 같다(CANNOT_VERIFY 만 통과 — 틀린 서명은 그대로 거부).
+  if (base.policy === 'require' && !ignoreOverride && !runningAsRoot() && t && !t.fatal) {
+    const o = activeOverride();
+    if (o) return { policy: 'warn', source: 'ui', until: o.until, by: o.by };
+  }
+  return base;
 }
 
 /**
@@ -76,7 +84,11 @@ export function signaturePolicy(env = process.env, trust) {
  *   사라졌고, 회수한 키로 서명한 패키지를 install.sh·vmware-portal-verify 가 '확인됨' 으로 받았다(회수를 더해도 더 엄격해질 뿐이다).
  *   그 파일이 손상돼 읽히지 않으면 회수 목록을 알 수 없으므로 예전 서비스 계정 판정처럼 fatal 이다(fail-closed).
  */
-export const runningAsRoot = () => process.platform !== 'win32' && typeof process.getuid === 'function' && process.getuid() === 0;
+export const runningAsRoot = () => (_rootForTest != null ? _rootForTest
+  : process.platform !== 'win32' && typeof process.getuid === 'function' && process.getuid() === 0);
+let _rootForTest = null;
+/** 테스트 전용 — 컨테이너(root)에서 서비스 계정 판정을 재현한다(null = 실제 uid). HTTP·env 로 바꿀 수 없다. */
+export function _setRunningAsRootForTest(v) { _rootForTest = v == null ? null : !!v; }
 let _hostNotRootWarned = false;
 let _rootCopyWarned = false;
 /**
@@ -338,7 +350,8 @@ function guidance(code) {
  */
 export function decideSignature(o = {}) {
   const trust = o.trust || loadTrust();
-  const pol = o.policy ? { policy: o.policy, source: 'arg' } : signaturePolicy(process.env, trust);
+  // v2.810: 오프라인 확인(verify CLI — root 로 돈다)은 화면 설정을 보지 않는다(signaturePolicy 의 root 판정과 이중)
+  const pol = o.policy ? { policy: o.policy, source: 'arg' } : signaturePolicy(process.env, trust, { ignoreOverride: o.where === 'offline' });
   const sha = o.sha256 ? String(o.sha256).toLowerCase() : (o.bytes ? sha256Hex(o.bytes) : '');
   const size = Number.isFinite(o.size) ? o.size : (o.bytes ? o.bytes.length : undefined);
   let r;
@@ -364,9 +377,11 @@ export function decideSignature(o = {}) {
   else if (CANNOT_VERIFY.has(r.code) && pol.policy === 'warn') {
     const why = pol.source === 'unconfigured'
       ? '이 설치본에 서명 공개키가 아직 설정되지 않아(키 등록 전 릴리스) 경고 후 진행합니다'
-      : 'UPGRADE_SIGNATURE_POLICY=warn 이라 진행합니다';
+      : pol.source === 'ui'
+        ? `업그레이드 화면에서 서명 확인을 ${new Date(pol.until).toISOString().slice(0, 16).replace('T', ' ')} UTC 까지 끄도록 해(${pol.by || '?'}) 진행합니다`
+        : 'UPGRADE_SIGNATURE_POLICY=warn 이라 진행합니다';
     out = { ok: true, verified: false, warned: true, code: r.code, reason: `서명을 확인하지 못했지만 ${why} — ${r.reason}`, keyId: r.keyId || null, version: r.version || null, policySource: pol.source || null, ...base };
-    console.warn(`[upgrade] ⚠ 서명 미확인 설치 허용(${pol.source === 'unconfigured' ? '서명 키 미설정' : 'UPGRADE_SIGNATURE_POLICY=warn'}, ${base.where}): ${r.reason}`);
+    console.warn(`[upgrade] ⚠ 서명 미확인 설치 허용(${pol.source === 'unconfigured' ? '서명 키 미설정' : pol.source === 'ui' ? `화면에서 끔 — ${pol.by || '?'}` : 'UPGRADE_SIGNATURE_POLICY=warn'}, ${base.where}): ${r.reason}`);
   } else {
     out = { ok: false, verified: false, code: r.code, reason: `서명 검증 실패 — ${r.reason}.${guidance(r.code)}`, keyId: r.keyId || null, version: r.version || null, ...base };
     console.warn(`[upgrade] 서명 검증 실패(${base.where}, ${r.code}): ${r.reason}`);
@@ -385,6 +400,9 @@ export function signatureStatus() {
   const activeIds = [...t.byId.values()].filter((k) => !k.revoked && k.publicKey).map((k) => k.keyId);
   return {
     policy: pol.policy, policySource: pol.source, policyInvalid: pol.invalid || null,
+    // v2.810 화면 끄기 — envLocked 면 화면에서 바꿀 수 없다 · override 는 저장된 기록(시한이 지났으면 expired)
+    envLocked: (() => { const v = process.env.UPGRADE_SIGNATURE_POLICY; return v != null && v !== ''; })(),
+    override: (() => { const o = loadOverride(); return o ? { until: o.until, at: o.at, by: o.by, active: Date.now() < o.until } : null; })(),
     unconfigured: pol.source === 'unconfigured',
     trustedKeys: t.activeCount, revokedKeys: t.revokedCount, keyIds: activeIds.slice(0, 8),
     ready: !t.fatal && t.activeCount > 0,

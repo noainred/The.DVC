@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
-  policyText, trustText, lastVerifyText, countsText, remoteLastGoodText, whereText, WHERE_LABEL, watchManifestWarn,
+  policyText, trustText, lastVerifyText, countsText, remoteLastGoodText, whereText, WHERE_LABEL, watchManifestWarn, overrideView, OVERRIDE_HOURS, overrideHoursLabel,
   recentVerifyList, logIssueText, NO_RECORD_DETAIL,
 } from './upgradeSignatureText.js';
 
@@ -183,5 +183,35 @@ describe('v2.809 감시 폴더 manifest 경고', () => {
     expect(watchManifestWarn({ available: false, hasManifest: false })).toBe('');
     expect(watchManifestWarn(null)).toBe('');
     expect(watchManifestWarn({ available: true, version: '2.809.0', hasManifest: false })).toContain('vmware-portal-2.809.0.manifest.json');
+  });
+});
+
+describe('v2.809 서명 확인 시한부 끄기 — 화면 설정 줄', () => {
+  const NOW = Date.UTC(2026, 9, 28, 3, 0);
+  const H = 3_600_000;
+  const base = { policy: 'require', policySource: 'default', envLocked: false, override: null };
+  it('상태 — 옛 서버(envLocked 없음)는 버튼 없음 · env 잠금 · 켜짐 · 꺼짐 · 시한 지남 · 판정에 안 쓰이는 기록 · 키 미설정(na)', () => {
+    expect(overrideView({ policy: 'require' }, NOW).state).toBe('unknown');
+    expect(overrideView({ ...base, envLocked: true }, NOW).state).toBe('env');
+    expect(overrideView(base, NOW)).toMatchObject({ state: 'on', tone: 'ok' });
+    const off = overrideView({ ...base, policy: 'warn', policySource: 'ui', override: { until: NOW + 5 * H, at: NOW - H, by: 'own', active: true } }, NOW);
+    expect(off).toMatchObject({ state: 'off', tone: 'bad' });
+    expect(off.text).toContain('own');
+    const past = overrideView({ ...base, override: { until: NOW - H, at: NOW - 3 * H, by: 'own', active: false } }, NOW);
+    expect(past.state).toBe('on');
+    expect(past.text).toContain('시한 지나 다시 켜짐');
+    const unused = overrideView({ ...base, override: { until: NOW + H, at: NOW - H, by: 'own', active: true } }, NOW);
+    expect(unused).toMatchObject({ state: 'off', tone: 'warn' });
+    expect(unused.text).toContain('서명 필수로 동작');
+    expect(overrideView({ ...base, policy: 'warn', policySource: 'unconfigured' }, NOW).state).toBe('na');
+    for (const v of [off, past, unused]) expect(v.text).not.toMatch(/`|\*\*/);
+  });
+  it('정책 줄 — 화면에서 끈 상태는 따로 말한다(틀린 서명은 계속 거부) · 시한 선택지는 서버 범위 [1, 168]', () => {
+    const p = policyText({ policy: 'warn', policySource: 'ui', override: { until: NOW + H } });
+    expect(p.tone).toBe('bad');
+    expect(p.text).toContain('화면에서 시한부로 끔');
+    expect(p.text).toContain('틀린 서명은 계속 거부');
+    expect(OVERRIDE_HOURS.every((h) => h >= 1 && h <= 168)).toBe(true);
+    expect(OVERRIDE_HOURS.map(overrideHoursLabel)).toEqual(['1시간', '1일', '3일', '7일']);
   });
 });

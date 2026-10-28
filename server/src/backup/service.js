@@ -57,6 +57,7 @@ export const RUNTIME_STATE_NAMES = new Set([
   //   여기에도 적는다(이중 안전망 — 헬퍼 모듈이 아직 로드되지 않은 시점의 판정까지 같게).
   'central-agent-cvp.json', 'cvp-push.json',
   'ipam-vcrange-migration.json', // v2.691: vCenter 별 스캔 대역 → 에이전트 1회 이전 기록(ipam/vcRangeMigrate.js 도 스스로 등록한다)
+  'upgrade-signature-override.json', // v2.810: 업그레이드 서명 확인 시한부 끄기 — 엣지 push·백업 복원으로 다른 포탈에 퍼지거나 되살아나지 않게(signatureOverride.js 도 스스로 등록)
   'ipam-scan-agents.json', // v2.674: 에이전트별 마지막 스캔 보고 — 엣지 보고마다 갱신되는 상태(ipam/scanStore.js 도 스스로 등록한다)
   'upgrade-status.json', // v2.736.2: 업그레이드 확인·적용·자동 확인 기록(upgrade/statusStore.js 도 스스로 등록한다)
   'isidu-edge-targets.json', 'isidu-push.json', // v2.736: 엣지가 받은 아이실론 디렉터리 사용량 대상 사본 · 엣지 push 커서(각 모듈도 스스로 등록한다)

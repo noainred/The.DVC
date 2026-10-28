@@ -74,6 +74,9 @@ export function sanitizeCheck(c) {
   const out = { at, current: ver(c.current), trigger: trig(c.trigger) };
   if (c.watch && typeof c.watch === 'object') {
     out.watch = { available: bool(c.watch.available), version: ver(c.watch.version), path: txt(c.watch.path, 400) };
+    // v2.809: 번들 옆 서명 manifest 유무(manager.check) — 빠뜨리면 화면(status.lastCheck)이 'manifest 없음' 경고를 못 띄운다(Chromium 확인에서 발견)
+    if (typeof c.watch.hasManifest === 'boolean') out.watch.hasManifest = c.watch.hasManifest;
+    if (c.watch.manifest != null) out.watch.manifest = txt(c.watch.manifest, 200);
   }
   if (c.remote && typeof c.remote === 'object') out.remote = sanitizeRemote(c.remote);
   if (c.restored === true) out.restored = true;

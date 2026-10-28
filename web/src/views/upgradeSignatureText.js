@@ -25,6 +25,39 @@ export const WHERE_LABEL = {
 
 export const whereText = (w) => (w ? (WHERE_LABEL[w] || String(w)) : '—');
 
+const pad2 = (n) => String(n).padStart(2, '0');
+/** 브라우저 시각 'YYYY-MM-DD HH:mm'. */
+export function localStamp(ms) {
+  const d = new Date(ms);
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())} ${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+}
+
+/** v2.810 서명 확인 끄기 시한 선택지(시간) — 서버 signatureOverride.js [1, 168] · 기본 24. */
+export const OVERRIDE_HOURS = Object.freeze([1, 24, 72, 168]);
+export const overrideHoursLabel = (h) => (h >= 24 && h % 24 === 0 ? `${h / 24}일` : `${h}시간`);
+
+/**
+ * v2.810 '화면 설정' 줄 — { state, text, tone }. state:
+ *   'env'(환경변수가 정해 화면에서 못 바꿈) · 'off'(지금 꺼짐 — 다시 켜기 버튼) · 'on'(켜짐 — 끄기 버튼) · 'unknown'(옛 서버 — 버튼 없음)
+ *   override 기록이 있지만 시한이 지났으면 'on' + 지난 기록 한 마디. 정책이 이미 warn(키 미설정)이면 끄기 버튼을 내지 않는다('na').
+ */
+export function overrideView(sig, now = Date.now()) {
+  if (!sig || typeof sig !== 'object' || typeof sig.envLocked !== 'boolean') return { state: 'unknown', text: '', tone: 'muted' };
+  if (sig.envLocked) return { state: 'env', text: '서버 환경변수 UPGRADE_SIGNATURE_POLICY 가 정해져 있어 화면에서 바꿀 수 없습니다(환경변수가 우선).', tone: 'muted' };
+  const o = sig.override;
+  const until = numOrNull(o?.until);
+  if (o && until != null && until > now && sig.policySource === 'ui') {
+    return { state: 'off', text: `서명 확인 꺼짐 — ${localStamp(until)} 까지(${o.by || '?'} · ${agoText(numOrNull(o.at), now) || '—'}) · 시한이 지나면 자동으로 다시 켜집니다.`, tone: 'bad' };
+  }
+  if (o && until != null && until > now) {
+    // 기록은 유효한데 판정에 쓰이지 않는다(신뢰 키 파일 오류 · root 실행) — 지어내지 않고 사실만
+    return { state: 'off', text: `끄기 기록이 있지만 지금 판정에 쓰이지 않습니다(신뢰 키 파일 오류 또는 root 실행) — 서명 필수로 동작합니다. 기록 ${localStamp(until)} 까지.`, tone: 'warn' };
+  }
+  if (sig.policy !== 'require') return { state: 'na', text: '', tone: 'muted' };
+  const past = o && until != null ? ` 마지막으로 끈 기록: ${o.by || '?'} · ${localStamp(until)} 시한 지나 다시 켜짐.` : '';
+  return { state: 'on', text: `켜짐 — 서명을 확인한 번들만 설치합니다.${past}`, tone: 'ok' };
+}
+
 /** 정책 한 줄 — { text, tone }. tone: 'ok' | 'warn' | 'bad' | 'muted' */
 export function policyText(sig) {
   if (!sig || typeof sig !== 'object') return { text: '알 수 없음(서버가 서명 상태를 보내지 않았습니다)', tone: 'muted' };
@@ -34,6 +67,11 @@ export function policyText(sig) {
   if (sig.policy === 'warn' && (sig.unconfigured || sig.policySource === 'unconfigured')) {
     // v2.735.1: 서명 공개키가 아직 설정되지 않은 설치본 — 관리자가 끈 것이 아니라 키 등록 전 상태다(조치가 다르다).
     return { text: '경고만(서명 공개키가 아직 설정되지 않은 설치본 — 키가 들어간 릴리스를 설치하면 서명 필수로 바뀝니다)', tone: 'warn' };
+  }
+  if (sig.policy === 'warn' && sig.policySource === 'ui') {
+    // v2.810: 화면에서 시한부로 끈 상태 — env warn 과 같은 판정(틀린 서명은 그대로 거부)
+    const until = numOrNull(sig.override?.until);
+    return { text: `경고만(화면에서 시한부로 끔${until != null ? ` — ${localStamp(until)} 까지` : ''} · 틀린 서명은 계속 거부)`, tone: 'bad' };
   }
   if (sig.policy === 'warn') {
     return { text: '경고만(서명이 없거나 확인할 수 없는 번들도 설치합니다 — 호스트 portal.env 설정)', tone: 'bad' };

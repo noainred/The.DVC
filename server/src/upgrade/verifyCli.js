@@ -51,7 +51,7 @@ export async function runVerify(argv, { log = console.log } = {}) {
   const usage = '사용법: verifyCli.js --file <패키지 파일> --manifest <vmware-portal-<버전>.manifest.json> [--version X.Y.Z] [--json]';
   if (o.help) { log(usage); return 0; }
   if (o.policy && !o.unknown && !o.file && !o.manifest) {
-    const p = signaturePolicy();
+    const p = signaturePolicy(process.env, undefined, { ignoreOverride: true });   // v2.810: root 확인은 화면 끄기를 보지 않는다
     log(`policy=${p.policy} source=${p.source}${p.invalid ? ` invalid=${p.invalid}` : ''}`);
     return 0;
   }
