@@ -16,7 +16,7 @@ import { wrapAsyncRouter } from '../util/asyncRoute.js';
 import { fullScopeOnlyWith, requireSettingsOwner } from './admin/shared.js';
 import { verifyUserOtp } from '../auth/auth.js';
 import { logAudit } from '../audit.js';
-import { loadTrust, runningAsRoot } from '../upgrade/signature.js';
+import { loadTrust, runningAsRoot, signaturePolicy } from '../upgrade/signature.js';
 import { setOverride, clearOverride, loadOverride, clampHours } from '../upgrade/signatureOverride.js';   // v2.810 서명 확인 시한부 끄기
 export const upgradeRouter = Router();
 // v2.574 BUG-03: express 4 는 async 핸들러의 throw 를 잡지 않아 그 요청이 **응답 없이
@@ -212,30 +212,34 @@ upgradeRouter.put('/settings', adminOnly, (req, res) => {
  * v2.810(사용자 요청 '서명 검증 활성화/비활성화' · 결정: 확인 불가만 허용 · 소유자 + OTP 재인증 + 감사 · 시한 후 자동 복구).
  * PUT /signature-override  { verify: false, hours?, otp }  → 시한부로 끈다(env warn 과 같은 판정 — 틀린 서명은 그대로 거부)
  *                          { verify: true }                → 다시 켠다(OTP 없이 — 더 안전한 쪽)
- * 거부: env UPGRADE_SIGNATURE_POLICY 가 정해져 있으면 409(env 가 이긴다) · 신뢰 키를 읽지 못하면 끄기 409(fail-closed) ·
+ * 끄기 거부: env UPGRADE_SIGNATURE_POLICY 가 정해져 있으면 409(env 가 이긴다) · 인증이 꺼진 포탈 409 · 이미 서명 필수가 아니면 409 ·
+ *   신뢰 키를 읽지 못하면 409(fail-closed) · 다시 켜기는 env 잠금이어도 받는다 ·
  *   OTP 재인증 실패는 403(401 이면 화면이 세션 만료로 보고 로그아웃한다 — opsSettings 와 같은 규약).
  */
 upgradeRouter.put('/signature-override', adminOnly, requireSettingsOwner, (req, res) => {
   const b = req.body || {};
   const username = req.user?.username || 'unknown';
   if (typeof b.verify !== 'boolean') return res.status(400).json({ ok: false, reason: 'verify 는 true(켜기)·false(끄기) 중 하나여야 합니다.' });
-  const envV = process.env.UPGRADE_SIGNATURE_POLICY;
-  if (envV != null && envV !== '') return res.status(409).json({ ok: false, code: 'env-locked', reason: '서버 환경변수 UPGRADE_SIGNATURE_POLICY 가 정해져 있어 화면에서 바꿀 수 없습니다(환경변수가 우선).' });
+  // 다시 켜기는 언제나 받는다(env 잠금이어도 — 반증 I-1: 남은 파일이 env 를 뺀 뒤 되살아나지 않게)
   if (b.verify === true) {
     const before = loadOverride();
     const removed = clearOverride();
     if (removed) logAudit({ user: username, action: '업그레이드 서명 확인 다시 켬', target: 'upgrade/signature-override', detail: before ? `끈 사람 ${before.by || '?'} · 시한 ${new Date(before.until).toISOString()}` : '기록 없음', ip: req.ip || '' });
     return res.json({ ok: true, verify: true, changed: removed });
   }
+  const envV = process.env.UPGRADE_SIGNATURE_POLICY;
+  if (envV != null && envV !== '') return res.status(409).json({ ok: false, code: 'env-locked', reason: '서버 환경변수 UPGRADE_SIGNATURE_POLICY 가 정해져 있어 화면에서 끌 수 없습니다(환경변수가 우선).' });
+  // v2.809(반증 M-1): 인증이 꺼진 포탈은 익명이 admin 이다 — OTP 재인증을 할 수 없으므로 화면 끄기를 받지 않는다(필요하면 env warn)
+  if (!config.auth.enabled) return res.status(409).json({ ok: false, code: 'auth-disabled', reason: '로그인(인증)이 꺼진 포탈에서는 OTP 재인증을 할 수 없어 화면에서 서명 확인을 끌 수 없습니다 — 호스트 portal.env 의 UPGRADE_SIGNATURE_POLICY=warn 을 쓰세요.' });
   const hours = clampHours(b.hours);
   if (hours == null) return res.status(400).json({ ok: false, reason: '시한(시간)이 숫자가 아닙니다.' });
   let trust = null;
   try { trust = loadTrust(); } catch { trust = null; }
   if (!trust || trust.fatal) return res.status(409).json({ ok: false, code: 'trust-unreadable', reason: '신뢰 키 파일을 읽지 못해 서명 확인을 끌 수 없습니다(회수 목록을 모르는 채로 약하게 만들지 않습니다).' });
-  if (config.auth.enabled) {
-    const v = verifyUserOtp(username, b.otp);
-    if (!v.ok) return res.status(403).json({ ok: false, reason: v.reason, needEnroll: !!v.needEnroll });
-  }
+  // v2.809(반증 L-3): 이미 서명 필수가 아니면(키 미설정 설치본 = warn) 끌 것이 없다 — 저장·감사하지 않는다
+  if (signaturePolicy(process.env, trust, { ignoreOverride: true }).policy !== 'require') return res.status(409).json({ ok: false, code: 'not-required', reason: '이 설치본은 이미 서명 필수가 아니라(서명 공개키 미설정) 끌 것이 없습니다.' });
+  const v = verifyUserOtp(username, b.otp);
+  if (!v.ok) return res.status(403).json({ ok: false, reason: v.reason, needEnroll: !!v.needEnroll });
   const o = setOverride({ hours, by: username });
   logAudit({ user: username, action: '업그레이드 서명 확인 끔(시한부)', target: 'upgrade/signature-override', detail: `${hours}시간 · ${new Date(o.until).toISOString()} 까지 · 확인 불가(manifest 없음 등)만 경고 후 설치 — 틀린 서명은 계속 거부${runningAsRoot() ? ' · ⚠ root 로 실행 중이라 적용되지 않음' : ''}`, ip: req.ip || '' });
   res.json({ ok: true, verify: false, until: o.until, hours, by: o.by, ...(runningAsRoot() ? { warning: '포탈이 root 로 실행 중이라 이 설정은 적용되지 않습니다(root 확인은 화면 설정을 보지 않습니다).' } : {}) });

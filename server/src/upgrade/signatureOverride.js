@@ -13,7 +13,8 @@
  *    이 파일로 root 확인을 약하게 만들 수 있으면 서비스 계정 탈취가 root 설치 경로로 번진다(v2.742 INJPKG-01 과 같은 이유).
  *  · 신뢰 키를 읽지 못하면(trust.fatal) 적용하지 않는다(fail-closed — 회수 목록을 모르는 채로 약하게 만들지 않는다).
  *  · 파일이 손상되면 보존(preserveCorrupt) 후 '켜짐' 이다. 모르는 mode·시한 이상값도 '켜짐'.
- *  · 상태 파일로 등록한다(registerStateFile) — 엣지 설정 push·설정 백업 복원으로 **다른 포탈에 퍼지거나 되살아나지 않게**.
+ *  · 상태 파일로 등록한다(registerStateFile) — 엣지 설정 push 로 **다른 포탈에 퍼지지 않게**. 백업 복원 제외는 backup/stagedRestore.js
+ *    RESTORE_EXCLUDE(반증 M-2 — 상태 파일 등록만으로는 복원이 막히지 않는다).
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -30,6 +31,7 @@ export const OVERRIDE_DEFAULT_HOURS = 24;
 export const OVERRIDE_MIN_HOURS = 1;
 export const OVERRIDE_MAX_HOURS = 168;   // 7일
 const USER_MAX = 64;
+const CLOCK_SKEW_MS = 5 * 60_000;   // 저장 시각이 '지금' 보다 이만큼 넘게 미래면 무효
 
 /** 시한(시간) — 정수 [1, 168] · 숫자가 아니면 null(거부). */
 export function clampHours(v) {
@@ -67,7 +69,8 @@ export function loadOverride({ configDir = config.configDir, now = Date.now() } 
 export function activeOverride(opts = {}) {
   const now = opts.now ?? Date.now();
   const o = loadOverride({ ...opts, now });
-  return o && now < o.until ? o : null;
+  // v2.809(반증 L-1): 상한을 '지금' 기준으로도 — 미래 시각의 at(시계를 되돌림·직접 쓴 파일)으로 168시간을 넘겨 늘리지 못하게
+  return o && now < o.until && now >= o.at - CLOCK_SKEW_MS && o.until - now <= OVERRIDE_MAX_HOURS * HOUR ? o : null;
 }
 
 /** 끈다(시한부). 호출자(라우트)가 소유자·OTP·env 잠금·신뢰 키 상태를 먼저 확인한다. */

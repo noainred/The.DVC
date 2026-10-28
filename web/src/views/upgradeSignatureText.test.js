@@ -204,6 +204,7 @@ describe('v2.809 서명 확인 시한부 끄기 — 화면 설정 줄', () => {
     expect(unused).toMatchObject({ state: 'off', tone: 'warn' });
     expect(unused.text).toContain('서명 필수로 동작');
     expect(overrideView({ ...base, policy: 'warn', policySource: 'unconfigured' }, NOW).state).toBe('na');
+    expect(overrideView({ ...base, policy: 'warn', policySource: 'unconfigured', override: { until: NOW + H, at: NOW, by: 'x', active: true } }, NOW).state).toBe('na', '반증 L-3');
     for (const v of [off, past, unused]) expect(v.text).not.toMatch(/`|\*\*/);
   });
   it('정책 줄 — 화면에서 끈 상태는 따로 말한다(틀린 서명은 계속 거부) · 시한 선택지는 서버 범위 [1, 168]', () => {

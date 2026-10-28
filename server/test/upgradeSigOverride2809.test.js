@@ -65,6 +65,9 @@ test('③ 신뢰 키 fatal 이면 적용 안 함 · 시한 지나면 켜짐 · �
   fs.writeFileSync(SO.overrideFile(), JSON.stringify({ mode: 'warn', at: now, until: now + 30 * 24 * H, by: 'x' }));
   assert.equal(SIG.signaturePolicy({}).policy, 'require', '7일을 넘는 시한은 형식 밖');
   reset();
+  fs.writeFileSync(SO.overrideFile(), JSON.stringify({ mode: 'warn', at: now + 1000 * H, until: now + 1005 * H, by: 'x' }));
+  assert.equal(SIG.signaturePolicy({}).policy, 'require', '반증 L-1: 미래 시각 at 으로 168시간을 넘겨 늘리지 못한다');
+  reset();
   fs.writeFileSync(SO.overrideFile(), JSON.stringify({ mode: 'off', at: now, until: now + H }));
   assert.equal(SIG.signaturePolicy({}).policy, 'require', '모르는 mode');
   reset();
@@ -75,6 +78,8 @@ test('④ 상태 파일 — 엣지 설정 push·백업 감시에서 빠진다', 
   const B = await import('../src/backup/service.js');
   assert.equal(B.isRuntimeStateFile(SO.OVERRIDE_NAME), true);
   assert.ok(B.RUNTIME_STATE_NAMES.has(SO.OVERRIDE_NAME), '이름 목록에도(이중 안전망)');
+  const { RESTORE_EXCLUDE } = await import('../src/backup/stagedRestore.js');
+  assert.ok(RESTORE_EXCLUDE.has(SO.OVERRIDE_NAME), '반증 M-2: 백업 복원이 다시 켠 서명 확인을 OTP 없이 끄지 못한다');
   const { isRegisteredStateFile } = await import('../src/util/stateFiles.js');
   assert.equal(isRegisteredStateFile(SO.OVERRIDE_NAME), true, '모듈이 스스로 등록한다(이름 목록과 별개 축)');
 });
@@ -122,10 +127,29 @@ test('⑤ 라우트 — 소유자만 · 끄기 OTP 재인증 · 켜기 OTP 없�
     assert.deepEqual([off.j.verify, off.j.hours, off.j.by], [false, 3, 'own']);
     assert.equal(SIG.signaturePolicy(process.env).source, 'ui');
     process.env.UPGRADE_SIGNATURE_POLICY = 'require';
-    assert.equal((await put('own', { verify: true })).st, 409, 'env 잠금');
-    delete process.env.UPGRADE_SIGNATURE_POLICY;
+    assert.equal((await put('own', { verify: false, hours: 1, otp: '123456' })).j.code, 'env-locked', 'env 잠금 — 끄기 409');
     const on = await put('own', { verify: true });
-    assert.deepEqual([on.st, on.j.changed], [200, true], '켜기는 OTP 없이');
+    assert.deepEqual([on.st, on.j.changed], [200, true], '켜기는 OTP 없이 · env 잠금이어도(반증 I-1)');
+    delete process.env.UPGRADE_SIGNATURE_POLICY;
+    assert.equal(SIG.signaturePolicy(process.env).policy, 'require');
+    // 반증 L-3: 이미 서명 필수가 아니면(키 미설정 설치본) 끌 것이 없다 — 저장·감사하지 않는다
+    const emptyKeys = path.join(CFG, 'empty-keys.json'); fs.writeFileSync(emptyKeys, JSON.stringify({ keys: [] }));
+    SIG._setRepoKeysFileForTest(emptyKeys);
+    try {
+      const na = await put('own', { verify: false, hours: 1, otp: nextCode() });
+      assert.deepEqual([na.st, na.j.code], [409, 'not-required'], JSON.stringify(na.j));
+      assert.equal(fs.existsSync(SO.overrideFile()), false);
+    } finally { SIG._setRepoKeysFileForTest(null); }
+    // 반증 M-1: 인증이 꺼진 포탈(익명 = admin)은 OTP 재인증을 할 수 없으므로 끄기를 받지 않는다
+    const { config } = await import('../src/config.js');
+    const prevAuth = config.auth.enabled;
+    config.auth.enabled = false;
+    try {
+      const anon = await fetch(`${base}/api/upgrade/signature-override`, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ verify: false, hours: 168 }) });
+      const aj = await anon.json();
+      assert.deepEqual([anon.status, aj.code], [409, 'auth-disabled'], JSON.stringify(aj));
+      assert.equal(fs.existsSync(SO.overrideFile()), false);
+    } finally { config.auth.enabled = prevAuth; }
     assert.equal(SIG.signaturePolicy(process.env).policy, 'require');
     const acts = listAudit({ limit: 50 }).items.map((e) => e.action).filter(Boolean);
     assert.ok(acts.includes('업그레이드 서명 확인 끔(시한부)') && acts.includes('업그레이드 서명 확인 다시 켬'), JSON.stringify(acts.slice(0, 10)));

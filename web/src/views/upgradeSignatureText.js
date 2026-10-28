@@ -44,6 +44,8 @@ export const overrideHoursLabel = (h) => (h >= 24 && h % 24 === 0 ? `${h / 24}�
 export function overrideView(sig, now = Date.now()) {
   if (!sig || typeof sig !== 'object' || typeof sig.envLocked !== 'boolean') return { state: 'unknown', text: '', tone: 'muted' };
   if (sig.envLocked) return { state: 'env', text: '서버 환경변수 UPGRADE_SIGNATURE_POLICY 가 정해져 있어 화면에서 바꿀 수 없습니다(환경변수가 우선).', tone: 'muted' };
+  // 반증 L-3: 이미 서명 필수가 아니면(키 미설정 설치본 · env warn) 끌 것이 없다 — 남은 기록이 있어도 '서명 필수로 동작' 이라 말하지 않는다
+  if (sig.policy !== 'require' && sig.policySource !== 'ui') return { state: 'na', text: '', tone: 'muted' };
   const o = sig.override;
   const until = numOrNull(o?.until);
   if (o && until != null && until > now && sig.policySource === 'ui') {
@@ -53,7 +55,6 @@ export function overrideView(sig, now = Date.now()) {
     // 기록은 유효한데 판정에 쓰이지 않는다(신뢰 키 파일 오류 · root 실행) — 지어내지 않고 사실만
     return { state: 'off', text: `끄기 기록이 있지만 지금 판정에 쓰이지 않습니다(신뢰 키 파일 오류 또는 root 실행) — 서명 필수로 동작합니다. 기록 ${localStamp(until)} 까지.`, tone: 'warn' };
   }
-  if (sig.policy !== 'require') return { state: 'na', text: '', tone: 'muted' };
   const past = o && until != null ? ` 마지막으로 끈 기록: ${o.by || '?'} · ${localStamp(until)} 시한 지나 다시 켜짐.` : '';
   return { state: 'on', text: `켜짐 — 서명을 확인한 번들만 설치합니다.${past}`, tone: 'ok' };
 }

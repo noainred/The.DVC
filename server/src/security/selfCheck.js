@@ -352,6 +352,7 @@ export function collectSelfCheck({ users = null, env = process.env, dir = null }
         + (!sig.ready && sig.policy !== 'warn' ? ' — 신뢰 키가 없어 서명 필수 정책에서 업그레이드 번들을 설치하지 않는다.' : ''),
     evidence: 'server/src/upgrade/release-signing-keys.json · CONFIG_DIR/release-signing-keys.conf · portal.env UPGRADE_SIGNATURE_POLICY',
     howto: sig && sig.unconfigured ? 'docs/RELEASE-SIGNING.md 절차로 서명 키를 만들고 공개키가 들어간 릴리스를 설치한다(설치하면 서명 필수로 바뀐다).'
+      : sig && sig.policy === 'warn' && sig.policySource === 'ui' ? '설정 › 업그레이드 › 릴리스 서명에서 \'지금 다시 켜기\' 를 누른다(시한이 지나면 저절로 다시 켜진다).'
       : sig && sig.policy === 'warn' ? 'portal.env 의 UPGRADE_SIGNATURE_POLICY=warn 을 지우고 재시작한다.'
       : sig && !sig.ready ? 'docs/RELEASE-SIGNING.md 절차로 서명 키를 만들고 공개키를 등록한다(새 릴리스에 포함되거나 호스트 파일로).' : '',
   });

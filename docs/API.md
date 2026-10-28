@@ -182,13 +182,13 @@ FinOps·이상탐지·예측·토폴로지·ChatOps. 마운트에서 `requirePer
 | 메서드 | 경로 | 게이트(공통 제외) | 소스 |
 |---|---|---|---|
 | POST | `/apply` | 역할 `admin` · `fullScopeOnlyWith` | [server/src/routes/upgrade.js:161](../server/src/routes/upgrade.js#L161) |
-| POST | `/bundle` | 역할 `admin` · `fullScopeOnlyWith` · `express.raw` | [server/src/routes/upgrade.js:246](../server/src/routes/upgrade.js#L246) |
+| POST | `/bundle` | 역할 `admin` · `fullScopeOnlyWith` · `express.raw` | [server/src/routes/upgrade.js:250](../server/src/routes/upgrade.js#L250) |
 | POST | `/check` | 역할 `admin` · `fullScopeOnlyWith` | [server/src/routes/upgrade.js:155](../server/src/routes/upgrade.js#L155) |
 | GET | `/detect-install` | 역할 `admin` · `fullScopeOnlyWith` | [server/src/routes/upgrade.js:180](../server/src/routes/upgrade.js#L180) |
 | POST | `/restart` | 역할 `admin` · `fullScopeOnlyWith` | [server/src/routes/upgrade.js:169](../server/src/routes/upgrade.js#L169) |
 | GET | `/settings` | 역할 `admin` · `fullScopeOnlyWith` | [server/src/routes/upgrade.js:175](../server/src/routes/upgrade.js#L175) |
 | PUT | `/settings` | 역할 `admin` · `fullScopeOnlyWith` | [server/src/routes/upgrade.js:190](../server/src/routes/upgrade.js#L190) |
-| PUT | `/signature-override` | 역할 `admin` · `fullScopeOnlyWith` · `requireSettingsOwner` | [server/src/routes/upgrade.js:218](../server/src/routes/upgrade.js#L218) |
+| PUT | `/signature-override` | 역할 `admin` · `fullScopeOnlyWith` · `requireSettingsOwner` | [server/src/routes/upgrade.js:219](../server/src/routes/upgrade.js#L219) |
 | GET | `/status` | 역할 `admin` · `fullScopeOnlyWith` | [server/src/routes/upgrade.js:150](../server/src/routes/upgrade.js#L150) |
 
 ## `/api/remote`
