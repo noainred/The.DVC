@@ -309,7 +309,7 @@ export default function BackupDetailTool({ scope }) {
                         <button type="button" onClick={() => toggle(row.key)} disabled={forceOpen} style={{ display: 'flex', alignItems: 'center', gap: 8, flex: 1, minWidth: 0, minHeight: 40, padding: '0 8px 0 0', background: 'none', border: 0, color: 'var(--text)', font: 'inherit', cursor: forceOpen ? 'default' : 'pointer', textAlign: 'left' }}>
                           <span className="muted" style={{ width: 12 }}>{row.open ? '▾' : '▸'}</span>
                           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke={row.depth === 0 ? '#22d3ee' : '#fbbf24'} strokeWidth="2" strokeLinejoin="round" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" /></svg>
-                          <b style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{row.node.name}</b>
+                          <b title={row.node.name} style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{row.node.name}</b>
                           <span className="muted" style={{ fontSize: 12, whiteSpace: 'nowrap' }}>{a.n} VM{forceOpen && row.node.hit !== a.n ? ` · 해당 ${row.node.hit}` : ''}</span>
                         </button>
                       </div>
