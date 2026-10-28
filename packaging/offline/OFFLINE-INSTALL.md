@@ -176,11 +176,13 @@ sudo ./install.sh --port 4000
    sudo chown vmportal:vmportal /opt/vmware-portal/incoming
    sudo systemctl restart vmware-portal
    ```
-2. 새 **업그레이드 번들**(`vmware-portal-<새버전>.tar.gz`)을 감시 폴더에 복사:
+2. 새 **업그레이드 번들**(`vmware-portal-<새버전>.tar.gz`)과 **같은 버전의 서명 manifest**(`vmware-portal-<새버전>.manifest.json`)를
+   **둘 다** 감시 폴더에 복사합니다(v2.730+ — manifest 가 없으면 '서명 manifest 가 없습니다' 로 적용이 거부됩니다. 두 파일 모두 릴리스 `downloads` 자산에 있습니다):
    ```bash
-   sudo cp vmware-portal-<새버전>.tar.gz /opt/vmware-portal/incoming/
-   sudo chown vmportal:vmportal /opt/vmware-portal/incoming/vmware-portal-*.tar.gz
+   sudo cp vmware-portal-<새버전>.tar.gz vmware-portal-<새버전>.manifest.json /opt/vmware-portal/incoming/
+   sudo chown vmportal:vmportal /opt/vmware-portal/incoming/vmware-portal-*
    ```
+   v2.809+ 는 '새 버전 확인' 에서 manifest 가 빠졌으면 감시 폴더 줄 아래에 미리 알립니다.
 3. 포탈 로그인(admin) → **업그레이드** 탭 → **새 버전 확인** → **업그레이드 적용** →
    **프로세스 재시작**. (또는 `sudo systemctl restart vmware-portal`)
 
@@ -194,7 +196,7 @@ UPGRADE_INSTALL_DIR=/opt/vmware-portal/app
 UPGRADE_POLL_INTERVAL_MS=300000     # 5분마다 확인
 UPGRADE_AUTO_APPLY=true             # 새 번들 발견 시 자동 적용 + 재시작
 ```
-이후에는 새 번들을 감시 폴더에 **넣기만** 하면, 폴링 주기 내에 자동으로 적용되고
+이후에는 새 번들과 같은 버전의 manifest 를 감시 폴더에 **넣기만** 하면, 폴링 주기 내에 자동으로 적용되고
 서비스가 재시작됩니다. (더 높은 버전만 적용)
 
 > 원격 자동 업그레이드: 사내 미러/웹에 `versions.json` + 번들을 두고 `UPGRADE_REMOTE_BASE`

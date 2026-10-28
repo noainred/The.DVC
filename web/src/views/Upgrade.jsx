@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { fetchJson, postJson, putJson } from '../api.js';
 import { Loading, ErrorBox, StateBadge } from '../components/ui.jsx';
 import { pollMinutesOf, pollIsOff, pollIntervalPatch } from './settingsFormDiff.js'; // v2.630 WEB2630-01
-import { policyText, trustText, lastVerifyText, recentVerifyList, logIssueText, countsText, remoteLastGoodText, TONE_COLOR } from './upgradeSignatureText.js'; // v2.730 S-10 · v2.736.1 기록
+import { policyText, trustText, lastVerifyText, recentVerifyList, logIssueText, countsText, remoteLastGoodText, watchManifestWarn, TONE_COLOR } from './upgradeSignatureText.js'; // v2.730 S-10 · v2.736.1 기록
 import { droppedSecretNote } from './droppedSecretText.js'; // v2.731(A3-01 ①): 주소가 바뀌어 저장 토큰을 폐기한 사실
 // v2.736.2: 자동 업그레이드가 지금 동작하는가 · 왜 안 하는가 · 다음 확인은 언제인가(판정은 서버 autoState.js, 문장은 여기).
 import { autoSummary, autoApplyRowText, noTickText, resultSummary, actionMsg, restoredNote, triggerText, remoteSourceLabel, runningScanWarning } from './upgradeAutoText.js';
@@ -291,6 +291,9 @@ export default function Upgrade() {
               {check.watch && <Row label="감시 폴더">{check.watch.available
                 ? <b style={{ color: 'var(--green)' }}>새 버전 v{check.watch.version}</b>
                 : <span className="muted">최신</span>}</Row>}
+              {watchManifestWarn(check.watch) && (
+                <div data-watch-manifest="" style={{ fontSize: 12, padding: '4px 0', whiteSpace: 'normal', color: TONE_COLOR.warn }}>{watchManifestWarn(check.watch)}</div>
+              )}
               {check.remote && <Row label={remoteSourceLabel(check.remote.source)}>{check.remote.available
                 ? <b style={{ color: 'var(--green)' }}>새 버전 v{check.remote.latest}</b>
                 : <span className="muted" style={{ whiteSpace: 'normal' }}>{check.remote.error ? `오류: ${check.remote.error}` : `최신 (v${check.remote.latest || '?'})`}</span>}</Row>}

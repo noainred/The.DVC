@@ -263,7 +263,7 @@ export function upgradeFromArchive(archivePath, installDir, currentVersion, pkgN
     manifestText: manifestText !== undefined ? manifestText : readManifestFile(manifestPathForArchive(archivePath)),
     bytes: buf, name: path.basename(archivePath), kind: 'bundle', expectVersion: archiveVersionOf(archivePath) || undefined, where, trust,
   });
-  if (!sig.ok) return { ok: false, reason: sig.reason, signature: signatureSummary(sig) };
+  if (!sig.ok) return { ok: false, reason: sig.reason + watchManifestHint(sig, archivePath, where, manifestText), signature: signatureSummary(sig) };
   let members;
   try {
     members = collectMembers(archivePath.endsWith('.zip') ? parseZip(buf) : parseTarGz(buf), pkgName);
@@ -277,6 +277,18 @@ export function upgradeFromArchive(archivePath, installDir, currentVersion, pkgN
   //  업그레이드 푸시가 조용히 no-op이 되어 버전이 갈라졌다.)
   if (res.ok) res.appliedArchive = archivePath;
   return res;
+}
+
+/**
+ * v2.809(사용자 신고 — 감시 폴더에 tar.gz 만 넣어 '서명 manifest 가 없습니다' 로 업그레이드가 멈췄다): 감시 폴더 번들이 manifest 없음으로
+ *   거부되면 **어느 폴더에 어떤 이름의 파일**이 필요한지 덧붙인다. 판정(decideSignature)은 그대로 — 문구만이다.
+ *   호출자가 manifestText 를 넘긴 경우(원격 다운로드 등)는 옆 파일을 찾지 않았으므로 덧붙이지 않는다.
+ */
+function watchManifestHint(sig, archivePath, where, manifestText) {
+  if (sig.code !== 'manifest-missing' || where !== 'watch' || manifestText !== undefined) return '';
+  const p = manifestPathForArchive(archivePath);
+  if (!p) return '';
+  return ` 찾은 위치: ${p} (번들 ${path.basename(archivePath)}) — 릴리스(downloads)에서 같은 버전의 ${path.basename(p)} 를 받아 이 폴더에 넣으세요.`;
 }
 
 /**

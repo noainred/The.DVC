@@ -131,4 +131,13 @@ export function remoteLastGoodText(remote, now = Date.now()) {
   return `직전 정상 확인: ${latest} · ${agoText(g.checkedAt, now)} — 참고용이며 설치는 새로 받은 정보로만 합니다`;
 }
 
+/**
+ * v2.809 감시 폴더 새 번들 옆에 서명 manifest 가 없으면 한 줄 경고(적용하면 manifest-missing 으로 거부된다). 있거나 모르면(옛 응답) ''.
+ */
+export function watchManifestWarn(watch) {
+  if (!watch?.available || watch.hasManifest !== false) return '';
+  const name = watch.manifest || `vmware-portal-${watch.version || '<버전>'}.manifest.json`;
+  return `서명 manifest 없음 — ${name} 을 같은 폴더에 넣어야 적용됩니다(릴리스 downloads 에서 번들과 같은 버전).`;
+}
+
 export const TONE_COLOR = { ok: 'var(--green)', warn: '#fbbf24', bad: 'var(--red)', muted: 'var(--text-dim)' };

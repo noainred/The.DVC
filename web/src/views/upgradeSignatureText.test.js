@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
-  policyText, trustText, lastVerifyText, countsText, remoteLastGoodText, whereText, WHERE_LABEL,
+  policyText, trustText, lastVerifyText, countsText, remoteLastGoodText, whereText, WHERE_LABEL, watchManifestWarn,
   recentVerifyList, logIssueText, NO_RECORD_DETAIL,
 } from './upgradeSignatureText.js';
 
@@ -170,5 +170,18 @@ describe('v2.736.1 — 검증 기록이 재시작을 넘어 남는다', () => {
     for (const s of [NO_RECORD_DETAIL, logIssueText({ log: { error: 'x', corruptKept: 'y' } })]) {
       expect(s).not.toMatch(/`|\*\*/);
     }
+  });
+});
+
+describe('v2.809 감시 폴더 manifest 경고', () => {
+  it('새 번들 옆에 manifest 가 없을 때만 — 이름 포함 · 있거나 모르면(옛 응답) 빈 값 · 백틱·굵게 없음', () => {
+    const w = watchManifestWarn({ available: true, version: '2.808.0', manifest: 'vmware-portal-2.808.0.manifest.json', hasManifest: false });
+    expect(w).toContain('vmware-portal-2.808.0.manifest.json');
+    expect(w).not.toMatch(/`|\*\*/);
+    expect(watchManifestWarn({ available: true, version: '2.808.0', hasManifest: true })).toBe('');
+    expect(watchManifestWarn({ available: true, version: '2.808.0' })).toBe('');
+    expect(watchManifestWarn({ available: false, hasManifest: false })).toBe('');
+    expect(watchManifestWarn(null)).toBe('');
+    expect(watchManifestWarn({ available: true, version: '2.809.0', hasManifest: false })).toContain('vmware-portal-2.809.0.manifest.json');
   });
 });
