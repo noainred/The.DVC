@@ -384,4 +384,5 @@
     그 밖의 방식은 이유 앞에 밝히고, 잔존 스냅샷은 방식과 무관 · 표시 파일을 못 읽으면 방식으로 빼지 않는다.
   · v2.806: Summary 우선순위 VM(`backupStatus.priorityCandidates`)도 같은 규칙 — 백업 안함·Clone 은 gap(Veeam 미백업)이 아니고, Clone 은 `cloneBadOf`(잡 없음·마지막 실패·건너뜀 — 모름 제외)로 후보 · Config 는 gap 유지('확인 불가' 태그).
   · v2.807: 엑셀 'VM 목록(폴더 트리)' 폴더 행 4~6열 병합 = 방식별 수(`vmListXlsx.methodCountsRich` — 0 생략·미지정 회색·못 읽으면 '모름') · 2~3열 = 백업 판단 합계(예전 2~5 병합 · 6열 'Clone N' 은 이 합계에 흡수). 방식 색은 `vmXlsxStyle.METHOD_LOOK` 하나(키 = `METHOD_TEXT` — 테스트 대조) · 웹 미리보기 `exportPreviewText` 의 `m-*` 와 한 쌍(vmExcel2801 ⑥).
+  · v2.814: Detail 응답 VM 에 `gb`(디스크 사용 GB — `backupStatus.gbOf`: 0 이상 유한수·1자리·모르면 null) · 웹 `backupViewText.fmtGb`·`methodGbTotals`·트리 agg `gb`/`gbUnknown` — 모르는 VM 은 합에 넣지 않고 따로 센다.
     서머리 응답 캐시 키에도 `c${jobsRev()}`. Detail 단축키 V·C·G·N(`backupViewText.methodKeyOf` — 조합키·IME·반복·입력 칸이면 무시 · 같은 값이면 저장하지 않음).
