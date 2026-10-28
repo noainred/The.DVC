@@ -8,7 +8,7 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
 - 개발 브랜치: `claude/vmware-global-monitoring-portal-nrnpnt`
 - **개발 방법론은 `docs/DEV-METHOD.md`**(v2.677 — 작업 등급·8단계 파이프라인·모델/에포트·토큰 다이어트·반복 결함 자동 검사). 새 교훈은 이 파일 본문에 단락으로 쌓지 말고 테스트 → 디렉터리 CLAUDE.md → docs 순으로 남긴다.
 - 빌드 검증: `npm run verify` (= `npm test` 단위테스트 + `npm run build` 웹빌드). 서버 실행은 `node server/src/index.js`
-  - 단위 테스트는 `server/test/*.test.js`(node:test). 핵심 로직 변경 시 테스트를 추가/갱신하고 커밋 전 `npm test` 통과 확인.
+  - 단위 테스트는 `server/test/*.test.js`(node:test). 핵심 로직 변경 시 테스트를 추가/갱신한다(돌리는 범위는 아래 '작업 규모 기본값').
 - 오프라인 패키지: `packaging/offline/build-package.sh` (Rocky Linux 9)
 - 의존성: CI(`ci.yml`)의 `npm audit` 는 **critical 만 차단**(v2.478)이고 **`--omit=dev` 기준**이다. 잔여 수용 항목 — 웹 high `d3-color`(3d-force-graph·react-simple-maps·recharts 경유. v2.500 에서 색 문자열이 **전부 프론트 상수**임을 재확인했다: `Topology3D` COLOR 맵·`WorldMap` 상수·`sInfo.color` 계열, 서버 응답에 color 필드 없음 → 외부 입력 도달 불가. override 강제는 지도·차트 회귀 위험이 실익보다 크다), 서버 moderate `exceljs→uuid`(exceljs 는 `uuid.v4` 만 사용 — CVE 는 v3/v5/v6 의 `buf` 인자 경계검사). 개발·빌드 전용 잔여는 v2.500 의 비파괴 `npm audit fix` 로 11→6 건이 됐고, 남은 critical 은 **dev 전용 `vitest`**(Vitest UI 서버가 열려 있을 때만 성립 — `@vitest/ui` 미설치·`--ui` 미사용. 수정본은 4.1.11+ 로 2.1.9 에서 두 메이저 점프라 미적용). 새 critical 이 뜨면 PR 이 막히니 `npm audit --omit=dev` 로 먼저 확인.
 - 소스 NUL 바이트 탐지는 `tr -cd '\000' < 파일 | wc -c` 로(`grep -cP '\x00'` 은 0 을 돌려주는 오탐 — v2.478 문서 오판의 원인). `file` 이 JS 를 'data' 로 분류하면 의심할 것. 분석 에이전트는 `model` 을 지정하지 말고 기본 모델로, 결과를 scratchpad 파일에도 쓰게 하면 12분 안에 돌아온다(2026-09-11 2차 감사 실측).
@@ -162,7 +162,6 @@ pyportal/ 아래 파일을 만질 때 자동 로드된다. 되돌리면 안 되�
 - **PR 완료 시 GitHub 다운로드 링크 자동 안내**: 브랜치 ZIP `https://github.com/noainred/The.DVC/archive/refs/heads/<branch>.zip`,
   머지됐으면 main ZIP `https://github.com/noainred/The.DVC/archive/refs/heads/main.zip`, 그리고 PR 링크.
 - **작업 완료 시 자동 업그레이드가 되도록 반드시 릴리스를 게시**(★사용자 강조): 기능 작업은 버전업·커밋·PR 로 끝내지 말고
-  GitHub 릴리스까지 게시하고 `versions.json` 의 `latest` 가 새 버전으로 바뀌었는지 확인해 보고한다
-  (`https://github.com/noainred/The.DVC/releases/download/downloads/versions.json`). 게시 누락 = 자동 업그레이드 정지다.
+  GitHub 릴리스까지 게시하고 `versions.json` 의 `latest` 가 새 버전으로 바뀌었는지 확인해 보고한다. 게시 누락 = 자동 업그레이드 정지다.
   절차(버전 파일 3종·release-notes·pyportal ver.txt·태그/워크플로·자산 1000개 상한)는 `.claude/skills/release/SKILL.md`.
   포탈 동작이 바뀌지 않는 문서·개발 도구 변경은 새 버전을 내지 않고 다음 기능 릴리스에 싣는다(전 법인 포탈이 이유 없이 재시작하지 않게) — 그 사실을 보고한다.
