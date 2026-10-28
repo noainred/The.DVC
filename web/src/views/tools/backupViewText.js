@@ -382,8 +382,32 @@ export function visibleVmIds(vms, { filter = 'all', q = '', rpoDays = 1, now = D
   return (Array.isArray(vms) ? vms : []).filter((vm) => vmShown(vm, filter, needle, { rpoDays, now })).map((vm) => vm.id);
 }
 
+/* ── v2.814 디스크 사용 용량(GB — 서버 backupStatus.gbOf: 0 이상 유한수 · 소수 1자리 · 모르면 null) ── */
+const gbKnown = (v) => typeof v === 'number' && Number.isFinite(v) && v >= 0;
+/** GB → '—' · '512 GB' · '1,000 GB' · '1.2 TB'(1024 GB 이상). 1자리 반올림. */
+export function fmtGb(gb) {
+  if (!gbKnown(gb)) return '—';
+  if (gb >= 1024) return `${(gb / 1024).toLocaleString('en-US', { minimumFractionDigits: 1, maximumFractionDigits: 1 })} TB`;
+  return `${(Math.round(gb * 10) / 10).toLocaleString('en-US', { maximumFractionDigits: 1 })} GB`;
+}
+/**
+ * 백업 방식별 용량 합 — { all, veeam, clone, config, none, unset, unknown(용량을 모르는 VM 수) }.
+ * 표시 파일을 못 읽었으면(marksUnreadable) 방식별 합은 null(어느 방식인지 모른다) — 전체 합만.
+ */
+export function methodGbTotals(vms, { marksUnreadable = false } = {}) {
+  const out = { all: 0, unknown: 0, ...Object.fromEntries([...METHOD_KEYS, 'unset'].map((k) => [k, marksUnreadable ? null : 0])) };
+  for (const vm of Array.isArray(vms) ? vms : []) {
+    if (!gbKnown(vm?.gb)) { out.unknown++; continue; }
+    out.all += vm.gb;
+    if (marksUnreadable) continue;
+    const k = methodOf(vm?.m?.method) ? vm.m.method : 'unset';
+    out[k] += vm.gb;
+  }
+  return out;
+}
+
 export function buildTree(vms, { filter = 'all', q = '', rpoDays = 1, now = Date.now() } = {}) {
-  const root = { key: '', name: '', children: new Map(), vms: [], agg: { n: 0, veeam: 0, snap: 0, run: 0, none: 0, clone: 0 }, hit: 0 };
+  const root = { key: '', name: '', children: new Map(), vms: [], agg: { n: 0, veeam: 0, snap: 0, run: 0, none: 0, clone: 0, gb: 0, gbUnknown: 0 }, hit: 0 };
   const needle = String(q || '').trim().toLowerCase();
   for (const vm of Array.isArray(vms) ? vms : []) {
     const parts = folderParts(vm.folder);
@@ -394,12 +418,13 @@ export function buildTree(vms, { filter = 'all', q = '', rpoDays = 1, now = Date
     for (const p of parts) {
       const key = node.key ? `${node.key}/${p}` : p;
       let next = node.children.get(p);
-      if (!next) { next = { key, name: p, children: new Map(), vms: [], agg: { n: 0, veeam: 0, snap: 0, run: 0, none: 0, clone: 0 }, hit: 0 }; node.children.set(p, next); }
+      if (!next) { next = { key, name: p, children: new Map(), vms: [], agg: { n: 0, veeam: 0, snap: 0, run: 0, none: 0, clone: 0, gb: 0, gbUnknown: 0 }, hit: 0 }; node.children.set(p, next); }
       node = next; path.push(node);
     }
     for (const n of path) {
       n.agg.n++; if (c.veeam) n.agg.veeam++; if (c.snap) n.agg.snap++; if (c.run) n.agg.run++; if (c.method === 'clone') n.agg.clone++;
       if (c.vKnown && c.sKnown && !c.veeam && !c.snap) n.agg.none++;
+      if (gbKnown(vm.gb)) n.agg.gb += vm.gb; else n.agg.gbUnknown++;   // v2.814 디스크 용량 합(모르는 VM 은 따로 센다 — 0 으로 더하지 않는다)
       if (show) n.hit++;
     }
     if (show) node.vms.push(vm);

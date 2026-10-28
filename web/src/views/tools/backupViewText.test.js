@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import fs from 'node:fs';
-import { fmtNum, pctOf, veeamStateOf, filterRows, needsAttention, attentionList, vmClass, vmMatches, filterCounts, folderParts, buildTree, flattenTree, initialOpen, veeamCell, snapCell, shortTs, FILTERS, CRIT_FILTERS, METHOD_FILTERS, METHODS, backupCell, cloneCell, POWER, RPO_DAYS, loadOpts, saveOpts, scopeQuery, scopeNote } from './backupViewText.js';
+import { fmtNum, pctOf, veeamStateOf, filterRows, needsAttention, attentionList, vmClass, vmMatches, filterCounts, folderParts, buildTree, flattenTree, initialOpen, veeamCell, snapCell, shortTs, FILTERS, CRIT_FILTERS, METHOD_FILTERS, METHODS, backupCell, cloneCell, POWER, RPO_DAYS, loadOpts, saveOpts, scopeQuery, scopeNote, fmtGb, methodGbTotals } from './backupViewText.js';
 import { vmViewMatches, VIEW_FILTERS, viewClass as serverViewClass, POWER_VALUES, RPO_DAYS as SERVER_RPO_DAYS } from '../../../../server/src/veeam/backupStatus.js';
 
 const H = 3_600_000;
@@ -55,7 +55,7 @@ describe('v2.779 백업 메뉴 — 순수 헬퍼', () => {
     expect(folderParts('DC1/vm/A.MGMT/AD')).toEqual(['DC1', 'A.MGMT', 'AD']);
     const t = buildTree(VMS);
     const dc = t.children[0];
-    expect(dc.name).toBe('DC1'); expect(dc.agg).toEqual({ n: 7, veeam: 3, snap: 3, run: 2, none: 2, clone: 0 });
+    expect(dc.name).toBe('DC1'); expect(dc.agg).toEqual({ n: 7, veeam: 3, snap: 3, run: 2, none: 2, clone: 0, gb: 0, gbUnknown: 7 });   // v2.814: 용량 없는 VM 은 gbUnknown
     expect(dc.children.map((c) => c.name)).toEqual(['A.MGMT', 'B.Service', 'C.Add-ons']);
     const runOnly = buildTree(VMS, { filter: 'run' });
     expect(runOnly.children[0].children.map((c) => c.name)).toEqual(['A.MGMT']);
@@ -217,7 +217,7 @@ describe('v2.784 백업 표시 — 중요도·백업 필요·메모', async () =
     expect(det).toMatch(/\{writable && <input type="checkbox"/);
     expect(det).toMatch(/load\(true\)/);
     expect(det).toMatch(/const r = await putJson\('\/tools\/backup-detail\/marks'[\s\S]{0,120}r\?\.ok === false\)[\s\S]{0,80}r\.reason/);   // 400 본문을 성공으로 삼키지 않는다
-    expect(det).toMatch(/const GRID = 'minmax\(220px, 2fr\) 52px minmax\(150px, 1\.3fr\) minmax\(140px, 1\.1fr\) 64px 104px'/);   // v2.803 6열(백업 · Clone)
+    expect(det).toMatch(/const GRID = 'minmax\(220px, 2fr\) 52px 84px minmax\(150px, 1\.3fr\) minmax\(140px, 1\.1fr\) 64px 104px'/);   // v2.803 6열(백업 · Clone) · v2.814 용량 열
     const sum = fs.readFileSync(new URL('./BackupSummaryTool.jsx', import.meta.url), 'utf8');
     expect(sum).toMatch(/data-backup-marks/);
     expect(Number((/<STable minWidth=\{(\d+)\}/.exec(sum) || [])[1])).toBeLessThanOrEqual(1100);   // v2.787 전폭 표
@@ -390,5 +390,38 @@ describe('v2.812 선택 반전', () => {
   it('일괄 바에 선택 반전 버튼 — 보이는 VM 기준', () => {
     const src = fs.readFileSync(new URL('./BackupDetailTool.jsx', import.meta.url), 'utf8');
     expect(src).toMatch(/onClick=\{\(\) => setChecked\(\(cur\) => invertVisible\(cur, visibleIds\)\)\} disabled=\{!visibleIds\.length\}[^>]*>선택 반전<\/button>/);
+  });
+});
+
+describe('v2.814 디스크 용량(Detail) — 표시 · 폴더 합 · 백업 방식별 합 · 모름은 따로', () => {
+  it('fmtGb — 모르면 —(0 으로 두지 않는다) · GB · 1024 이상 TB', () => {
+    expect([null, undefined, NaN, -1, '12'].map(fmtGb)).toEqual(['—', '—', '—', '—', '—']);
+    expect([0, 999.94, 1000, 1023.9, 1024, 12345].map(fmtGb)).toEqual(['0 GB', '999.9 GB', '1,000 GB', '1,023.9 GB', '1.0 TB', '12.1 TB']);
+  });
+  it('buildTree — 폴더 합은 하위 폴더 포함 · 모르는 VM 수는 따로(필터와 무관한 전체)', () => {
+    const vms = [
+      { id: 'a', name: 'a', folder: 'DC/x', gb: 100 }, { id: 'b', name: 'b', folder: 'DC/x/y', gb: 50.5 },
+      { id: 'c', name: 'c', folder: 'DC/z', gb: null }, { id: 'd', name: 'd', folder: 'DC/z', gb: 0 },
+    ];
+    const t = buildTree(vms);
+    const dc = t.children[0];
+    expect([dc.agg.gb, dc.agg.gbUnknown]).toEqual([150.5, 1]);
+    const x = dc.children.find((n) => n.name === 'x');
+    expect([x.agg.gb, x.agg.gbUnknown]).toEqual([150.5, 0]);
+    const z = dc.children.find((n) => n.name === 'z');
+    expect([z.agg.gb, z.agg.gbUnknown]).toEqual([0, 1]);
+  });
+  it('methodGbTotals — 방식별 · 미지정 · 모름 분리 · 표시 파일을 못 읽으면 방식별은 null', () => {
+    const vms = [{ gb: 10, m: { method: 'veeam' } }, { gb: 2048, m: { method: 'clone' } }, { gb: 5 }, { gb: null, m: { method: 'veeam' } }, { gb: 1, m: { method: 'bogus' } }];
+    expect(methodGbTotals(vms)).toEqual({ all: 2064, unknown: 1, veeam: 10, clone: 2048, config: 0, none: 0, unset: 6 });
+    expect(methodGbTotals(vms, { marksUnreadable: true })).toEqual({ all: 2064, unknown: 1, veeam: null, clone: null, config: null, none: null, unset: null });
+  });
+  it('소스 — 표 머리 ‘용량’ · VM·폴더·패널·상단 합계에 fmtGb', () => {
+    const det = fs.readFileSync(new URL('./BackupDetailTool.jsx', import.meta.url), 'utf8');
+    expect(det).toMatch(/>용량<\/div>/);
+    expect(det).toMatch(/fmtGb\(vm\.gb\)/);
+    expect(det).toMatch(/fmtGb\(a\.gb\)/);
+    expect(det).toMatch(/fmtGb\(selVm\.gb\)/);
+    expect(det).toMatch(/data-backup-capacity/);
   });
 });

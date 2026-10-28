@@ -9,6 +9,7 @@
  * 못 읽은 쪽은 0 이 아니라 모름(null)이다. 한쪽을 모르면 '둘 다/한쪽만/확인 안 됨' 나눔도 모름이다(연동 없는 Veeam 은 모름이 아니라 '없음').
  */
 import { VEEAM_SNAP_STALE_MS } from './backupCounts.js';
+import { numOrNull } from '../util/numOrNull.js';
 
 const isFin = (v) => typeof v === 'number' && Number.isFinite(v);
 
@@ -180,6 +181,12 @@ export function backupTotals(rows) {
  * v2.782(점검 K4 B-B3): absentKnown(기본 true) — 대조에 없는 VM 을 '없음'(v null)으로 확정해도 되는가. false 면(첫 수집 전·한 번도 성공 못 한 서버가 있음 —
  *   backupRow veeamAbsentUnknown) 대조에 없는 VM 만 v 모름(undefined — JSON 에서 키 없음)이고, 맞은 VM 은 값을 그대로 싣는다.
  */
+/** v2.814 VM 디스크 사용 용량(GB) — 0 이상 유한수만, 소수 1자리. 그 밖(null·''·문자·음수)은 null(모름). */
+export function gbOf(v) {
+  const n = numOrNull(v);
+  return n != null && n >= 0 ? Math.round(n * 10) / 10 : null;
+}
+
 export function vmBackupView(vm, ve, evEntry, { veeamKnown = true, snapKnown = true, absentKnown = true, now = Date.now(), mark, clone } = {}) {
   const v = ve ? {
     state: ve.run === 1 ? 'run' : ve.run === 2 ? 'wait' : 'ok', pg: ve.run === 1 && isFin(ve.pg) ? ve.pg : null, by: ve.by || '',
@@ -192,6 +199,8 @@ export function vmBackupView(vm, ve, evEntry, { veeamKnown = true, snapKnown = t
     id: vm.id, name: String(vm.name || ''), folder: String(vm.folder || ''), power: vm.powerState || '',
     v: veeamKnown ? (v ?? (absentKnown ? null : undefined)) : undefined,
     s: { ev: snapKnown ? ev : undefined, now: currentSnapOf(vm, now) },
+    // v2.814: 디스크 사용 용량(GB, vCenter 인벤토리 storageGB — 엑셀·CSV '스토리지 사용(GB)' 과 같은 값). 못 읽으면 null(0 으로 두지 않는다)
+    gb: gbOf(vm.storageGB),
     ...(mark ? { m: mark } : {}),   // v2.784: 사람이 정한 표시(backupMarks.markView — 있을 때만)
     // v2.803 Clone 칸 — 백업 방식을 Clone 으로 정한 VM 에만(사용자 요청 'Clone 이라고 표시된 항목이면 여기에'). cloneView 결과 그대로:
     //   { job:false }(포탈 복제 잡 없음) | { job:true, on, at, ok, skipped? } | null(잡 목록을 못 읽음 — 모름). 그 밖의 VM 은 키 없음.

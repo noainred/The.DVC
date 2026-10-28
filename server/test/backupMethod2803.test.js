@@ -63,8 +63,8 @@ test('B 라우트 — PUT method · Detail c 는 Clone VM 에만 · 잡 저장 �
   const { listAudit } = await import('../src/audit.js');
   const prev = store.snapshot;
   store.snapshot = { source: 'live', generatedAt: NOW, vcenters: [VC, OUT].map((id) => ({ id, name: id })), hosts: [], vms: [
-    { id: `${VC}:vm-1`, vcenterId: VC, name: 'web01', folder: 'DC/vm/A', powerState: 'POWERED_ON' },
-    { id: `${VC}:vm-2`, vcenterId: VC, name: 'db01', folder: 'DC/vm/A', powerState: 'POWERED_ON' },
+    { id: `${VC}:vm-1`, vcenterId: VC, name: 'web01', folder: 'DC/vm/A', powerState: 'POWERED_ON', storageGB: 120.25 },
+    { id: `${VC}:vm-2`, vcenterId: VC, name: 'db01', folder: 'DC/vm/A', powerState: 'POWERED_ON', storageGB: '' },
     { id: `${VC}:vm-3`, vcenterId: VC, name: 'cfg01', folder: 'DC/vm/B', powerState: 'POWERED_ON' },
     { id: `${OUT}:vm-1`, vcenterId: OUT, name: 'o1', powerState: 'POWERED_ON' },
   ] };
@@ -87,6 +87,7 @@ test('B 라우트 — PUT method · Detail c 는 Clone VM 에만 · 잡 저장 �
     let d = await detail();
     const by = (n) => d.vms.find((v) => v.name === n);
     assert.deepEqual([by('web01').m.method, by('cfg01').m.method], ['clone', 'config']);
+    assert.deepEqual([by('web01').gb, by('db01').gb, by('cfg01').gb], [120.3, null, null], 'v2.814 디스크 용량 — 빈 값·없음은 null(0 이 아니다)');
     assert.deepEqual([by('web01').c, 'c' in by('cfg01')], [{ job: false }, false], 'Clone 이면 잡 없음 · Clone 이 아니면 c 키 없음');
     // 복제 잡을 만들고 실행 기록을 남기면 캐시가 낡지 않고 바로 보인다(jobsRev)
     const job = CS.saveJob({ vcenterId: VC, vmId: `${VC}:vm-1`, vmName: 'web01', dest: { type: 'datastore', datastoreName: 'DS1' }, schedule: { mode: 'manual' } });
@@ -238,4 +239,12 @@ test('F v2.807 엑셀 백업 방식 — 색 표는 방식 키와 같다 · 데�
   assert.equal(txt(XL.methodCountsRich({ method: { veeam: 0, clone: 0, config: 0, none: 0, unset: 5 } }, false)), '미지정 5');
   assert.equal(txt(XL.methodCountsRich(a, false, { full: true })), 'Veeam 1,200 · Clone 3 · Config 백업 0 · 백업 안함 40 · 미지정 0');
   assert.equal(XL.methodCountsRich(a, true), '모름', '표시 파일을 못 읽으면 0 으로 쓰지 않는다');
+});
+
+test('G v2.814 gbOf — 0 이상 유한수만 · 소수 1자리 · 그 밖은 null(못 읽은 값은 0 이 아니다)', () => {
+  assert.deepEqual([null, undefined, '', ' ', 'abc', -1, NaN, Infinity].map(BS.gbOf), [null, null, null, null, null, null, null, null]);
+  assert.deepEqual([0, 12.34, '40', 1024.05].map(BS.gbOf), [0, 12.3, 40, 1024.1]);
+  const v = BS.vmBackupView({ id: 'x', name: 'x', storageGB: 55 }, null, null, {});
+  assert.equal(v.gb, 55);
+  assert.equal(BS.vmBackupView({ id: 'y', name: 'y' }, null, null, {}).gb, null);
 });

@@ -8,7 +8,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { fetchJson, downloadFile, canCsv, putJson } from '../../api.js';
 import { Loading, ErrorBox } from '../../components/ui.jsx';
 import Select from '../../components/Select.jsx';
-import { fmtNum, pctOf, veeamStateOf, snapReasonText, FILTERS, filterCounts, buildTree, flattenTree, initialOpen, veeamCell, snapCell, shortTs, vmClass, loadOpts, saveOpts, scopeQuery, scopeNote, runningCell, CRIT, critOf, MEMO_MAX, marksLine, marksNotice, filterCountText, detailLoadKey, toggleAllVisible, invertVisible, visibleVmIds, folderVmIdMap, folderCheckState, filterLabel, METHODS, methodOf, backupCell, cloneCell, methodKeyOf, METHOD_KEYS_MAP } from './backupViewText.js';
+import { fmtNum, pctOf, veeamStateOf, snapReasonText, FILTERS, filterCounts, buildTree, flattenTree, initialOpen, veeamCell, snapCell, shortTs, vmClass, loadOpts, saveOpts, scopeQuery, scopeNote, runningCell, CRIT, critOf, MEMO_MAX, marksLine, marksNotice, filterCountText, detailLoadKey, toggleAllVisible, invertVisible, visibleVmIds, folderVmIdMap, folderCheckState, filterLabel, METHODS, methodOf, backupCell, cloneCell, methodKeyOf, METHOD_KEYS_MAP, fmtGb, methodGbTotals } from './backupViewText.js';
 import { CritIcon, NeedIcon, NEED_COLOR, MethodBadge } from './BackupMarkIcons.jsx';
 import BackupOptions from './BackupOptions.jsx';
 import VeeamHeader from './VeeamHeader.jsx';
@@ -49,7 +49,8 @@ function AggBar({ n, of, color }) {
 const readSavedVc = () => { try { return localStorage.getItem(DETAIL_VC_KEY) || ''; } catch { return ''; } };
 // 1440px 에서 옆 상세 칸(280px)과 함께 가로 스크롤 없이 들어가는 폭(약 790px) — 좁으면 표만 가로로 스크롤한다
 // v2.803(사용자 요청): '작업' 열을 지우고 'Clone' 열 · 'Veeam 백업'·'스냅샷' 두 열을 '백업' 한 열로(Veeam 이 있으면 Veeam, 없으면 그 자리에 스냅샷)
-const GRID = 'minmax(220px, 2fr) 52px minmax(150px, 1.3fr) minmax(140px, 1.1fr) 64px 104px';
+// v2.814: 전원 다음 '용량'(디스크 사용 GB) 열
+const GRID = 'minmax(220px, 2fr) 52px 84px minmax(150px, 1.3fr) minmax(140px, 1.1fr) 64px 104px';
 
 export default function BackupDetailTool({ scope }) {
   const [vcs, setVcs] = useState(null);
@@ -123,6 +124,7 @@ export default function BackupDetailTool({ scope }) {
   const selVm = useMemo(() => vms.find((v) => v.id === sel) || null, [vms, sel]);
   const writable = data?.writable === true && !data?.marksUnreadable;
   const marksUnknown = data?.marksUnreadable === true;   // v2.785(GR R-B2): 표시 수·칩은 '—'
+  const gbTot = useMemo(() => methodGbTotals(vms, { marksUnreadable: marksUnknown }), [vms, marksUnknown]);   // v2.814 백업 방식별 용량 합
   const visibleIds = useMemo(() => visibleVmIds(vms, { filter, q, ...vopts }), [vms, filter, q, vopts]);
   useEffect(() => { setMemo(selVm?.m?.memo || ''); setSaveErr(null); }, [sel]); // eslint-disable-line react-hooks/exhaustive-deps
   const saveMarks = useCallback(async (ids, patch) => {
@@ -224,6 +226,16 @@ export default function BackupDetailTool({ scope }) {
               </span>
             </div>
           ); })()}
+          {/* v2.814 디스크 용량 합(이 vCenter 전체 — 보기 필터와 무관) · 백업 방식별(0 은 생략) · 용량을 모르는 VM 은 따로 센다 */}
+          {vms.length > 0 && (
+            <div data-backup-capacity="" className="flex wrap" style={{ flexBasis: '100%', gap: '6px 12px', alignItems: 'center', fontSize: 13 }}>
+              <span className="muted" style={{ fontSize: 12 }}>용량 합계</span>
+              <b style={{ fontVariantNumeric: 'tabular-nums' }} title="VM 스토리지 사용(GB, vCenter 인벤토리)의 합">{fmtGb(gbTot.all)}</b>
+              {METHODS.filter((x) => gbTot[x.key] > 0).map((x) => <span key={x.key} style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}><MethodBadge method={x.key} small /><span style={{ fontVariantNumeric: 'tabular-nums' }}>{fmtGb(gbTot[x.key])}</span></span>)}
+              {gbTot.unset > 0 && <span className="muted">미지정 <span style={{ fontVariantNumeric: 'tabular-nums' }}>{fmtGb(gbTot.unset)}</span></span>}
+              {gbTot.unknown > 0 && <span className="muted" title="인벤토리에 디스크 용량이 없는 VM — 합계에 넣지 않았습니다">용량 모름 {fmtNum(gbTot.unknown)}대</span>}
+            </div>
+          )}
           {marksNotice(data) && <div style={{ flexBasis: '100%', fontSize: 12, color: marksNotice(data).tone === 'bad' ? '#fca5a5' : '#fcd34d' }}>{marksNotice(data).text}</div>}
           {/* v2.782(점검 K4 B-B3): 이 vCenter 의 Veeam 서버 중 첫 수집 전·한 번도 읽지 못한 서버가 있으면 맞지 않은 VM 은 '없음' 이 아니라 '모름' — 이유를 밝힌다. */}
           {r.veeam != null && r.veeamAbsentUnknown && <div style={{ flexBasis: '100%', fontSize: 12, color: '#fcd34d' }}>이 vCenter 를 맡은 Veeam 서버 중 아직 첫 수집 전이거나 한 번도 읽지 못한 서버가 있어, 백업 목록에 없는 VM 의 Veeam 칸은 ‘없음’ 이 아니라 ‘모름’ 입니다 — 그 서버를 읽으면 바로잡힙니다.</div>}
@@ -281,10 +293,11 @@ export default function BackupDetailTool({ scope }) {
       <div className="flex wrap" style={{ gap: 14, alignItems: 'flex-start' }}>
         <div className="card" style={{ flex: '999 1 640px', minWidth: 0, padding: 0, overflow: 'hidden' }}>
           <div style={{ overflowX: 'auto' }}>
-            <div role="treegrid" aria-label="폴더 › VM 백업" style={{ minWidth: 790, fontSize: 13 }}>
+            <div role="treegrid" aria-label="폴더 › VM 백업" style={{ minWidth: 870, fontSize: 13 }}>
               <div role="row" style={{ display: 'grid', gridTemplateColumns: GRID, gap: 0, background: 'var(--panel-deep)', color: 'var(--text-dim)', fontSize: 12, fontWeight: 600 }}>
                 <div role="columnheader" style={{ padding: '9px 14px' }}>vCenter › 폴더 › VM</div>
                 <div role="columnheader" style={{ padding: '9px 6px' }}>전원</div>
+                <div role="columnheader" style={{ padding: '9px 10px 9px 6px', textAlign: 'right' }} title="VM 스토리지 사용(GB, vCenter 인벤토리) · 폴더 = 그 아래 VM 합">용량</div>
                 <div role="columnheader" style={{ padding: '9px 6px' }}>백업 <span style={{ fontWeight: 400 }}>(Veeam · 스냅샷)</span></div>
                 <div role="columnheader" style={{ padding: '9px 6px' }}>Clone</div>
                 <div role="columnheader" style={{ padding: '9px 6px', textAlign: 'right' }}>복원 지점</div>
@@ -314,6 +327,9 @@ export default function BackupDetailTool({ scope }) {
                         </button>
                       </div>
                       <div role="gridcell" />
+                      <div role="gridcell" style={{ padding: '0 10px 0 6px', textAlign: 'right', fontSize: 12, fontVariantNumeric: 'tabular-nums', lineHeight: 1.3 }} title={a.gbUnknown ? `용량을 모르는 VM ${a.gbUnknown}대는 합에 넣지 않았습니다` : undefined}>
+                        <b>{a.n > a.gbUnknown ? fmtGb(a.gb) : '—'}</b>{a.gbUnknown ? <div className="muted" style={{ fontSize: 11 }}>+모름 {a.gbUnknown}</div> : null}
+                      </div>
                       <div role="gridcell" style={{ padding: '4px 6px', display: 'flex', flexDirection: 'column', gap: 3, minWidth: 0 }}>
                         {r.veeam != null ? <AggBar n={a.veeam} of={a.n} color="#22c55e" /> : <span className="muted" style={{ fontSize: 12 }}>Veeam —</span>}
                         {r.snap != null ? <AggBar n={a.snap} of={a.n} color="#a855f7" /> : <span className="muted" style={{ fontSize: 12 }}>스냅샷 —</span>}
@@ -342,6 +358,7 @@ export default function BackupDetailTool({ scope }) {
                       </button>
                     </div>
                     <div role="gridcell" style={{ padding: '0 6px', fontSize: 12, color: vm.power === 'POWERED_ON' ? '#86efac' : 'var(--text-dim)' }}>{vm.power === 'POWERED_ON' ? '켜짐' : vm.power ? '꺼짐' : '—'}</div>
+                    <div role="gridcell" style={{ padding: '0 10px 0 6px', textAlign: 'right', fontSize: 12, fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap', color: vm.gb == null ? 'var(--text-dim)' : undefined }}>{fmtGb(vm.gb)}</div>
                     <div role="gridcell" style={{ padding: '0 6px', minWidth: 0 }} title={bc.src === 'snap' ? 'Veeam 백업이 없어 스냅샷 흔적을 보입니다' : bc.src === 'veeam' ? 'Veeam 백업이 있어 스냅샷 칸은 숨깁니다(오른쪽 상세에 있습니다)' : undefined}><Chip c={bc} /></div>
                     <div role="gridcell" style={{ padding: '0 6px', minWidth: 0 }}>{cc ? <Chip c={cc} /> : <span className="muted">—</span>}</div>
                     <div role="gridcell" style={{ padding: '0 6px', textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{vm.v && Number.isFinite(vm.v.rp) && vm.v.rp >= 0 ? vm.v.rp : '—'}</div>
@@ -351,7 +368,7 @@ export default function BackupDetailTool({ scope }) {
               })}
             </div>
           </div>
-          <div className="muted" style={{ padding: '8px 14px', fontSize: 12, borderTop: '1px solid var(--border-soft)' }}>폴더 줄의 수 = 그 아래 VM 중 Veeam(위)·스냅샷(아래)이 보이는 수 / 전체 · Clone N = 백업 방식을 Clone 으로 정한 VM 수 · 폴더를 누르면 펼치고 접습니다(검색·보기 필터 중에는 모두 펼침) · VM 을 누르면 오른쪽에 상세</div>
+          <div className="muted" style={{ padding: '8px 14px', fontSize: 12, borderTop: '1px solid var(--border-soft)' }}>폴더 줄의 수 = 그 아래 VM 중 Veeam(위)·스냅샷(아래)이 보이는 수 / 전체 · Clone N = 백업 방식을 Clone 으로 정한 VM 수 · 용량 = VM 스토리지 사용(vCenter 인벤토리), 폴더는 그 아래 VM 합 · 폴더를 누르면 펼치고 접습니다(검색·보기 필터 중에는 모두 펼침) · VM 을 누르면 오른쪽에 상세</div>
         </div>
 
         {/* 긴 트리를 내려가도 고른 VM 의 상세가 보이게(넓은 화면) — 좁은 화면에서는 표 아래로 내려간다. v2.810: top 은 .bk-side(일괄 표시 바 아래) */}
@@ -371,6 +388,7 @@ export default function BackupDetailTool({ scope }) {
                     </div>
                   )}
                   <dl style={{ margin: 0, display: 'grid', gridTemplateColumns: 'auto minmax(0, 1fr)', gap: '6px 12px', fontSize: 13 }}>
+                    <dt className="muted">디스크 용량</dt><dd style={{ margin: 0 }}>{fmtGb(selVm.gb)}{selVm.gb == null ? ' (인벤토리에 값 없음)' : ''}</dd>
                     <dt className="muted">Veeam 작업</dt><dd style={{ margin: 0, overflowWrap: 'anywhere' }}>{v?.jobs?.length ? v.jobs.join(', ') : (c.vKnown ? '—' : '모름')}</dd>
                     <dt className="muted">마지막 백업 완료</dt><dd style={{ margin: 0 }}>{shortTs(v?.lb)}{v?.lbSrc === 'rp' ? ' (복원 지점 생성 시각)' : ''}</dd>
                     <dt className="muted">마지막 결과</dt><dd style={{ margin: 0, overflowWrap: 'anywhere', color: c.fail ? '#fca5a5' : undefined }}>{v?.lr ? `이 VM ${v.lr}${v.lastResult && v.lastResult !== v.lr ? ` · 작업 ${v.lastResult}` : ''}` : (v?.lastResult ? `작업 ${v.lastResult}` : '—')}</dd>
