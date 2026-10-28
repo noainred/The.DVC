@@ -101,7 +101,7 @@ export const DB_GUIDE_DATA = {
   },
   "veeam-em.json": {
     "title": "Veeam Enterprise Manager 등록부",
-    "summary": "Veeam Backup Enterprise Manager(EM) 목록입니다(v2.788). EM 마다 접속 주소·포트(기본 9398)·계정·비밀번호가 들어 있어 중앙 포탈은 이 목록을 보고 EM REST API 에 로그인해 전 백업 서버의 요약·작업 결과·세션·저장소를 읽습니다. '서버 › Veeam › EM' 탭의 출처입니다. 비밀번호가 들어 있으므로 손으로 편집하거나 외부에 공유하면 안 됩니다.",
+    "summary": "Veeam Backup Enterprise Manager(EM) 목록입니다(v2.788). EM 마다 접속 주소·포트(기본 9398)·계정·비밀번호가 들어 있어 중앙 포탈은 이 목록을 보고 EM REST API 에 로그인해 전 백업 서버의 요약·작업 결과·세션·저장소를 읽습니다. 'Backup 현황 › EM' 탭의 출처입니다. 비밀번호가 들어 있으므로 손으로 편집하거나 외부에 공유하면 안 됩니다.",
     "stores": [
       "EM 마다 식별자(vem- 로 시작), 등록 시각, 이름(최대 64자), 주소(IP 또는 호스트 이름), 포트, 계정, 비밀번호, 수집 사용 여부, 메모(최대 200자).",
       "읽은 결과는 이 파일이 아니라 ‘veeam-em-latest.json’ 에 저장합니다."
@@ -109,7 +109,7 @@ export const DB_GUIDE_DATA = {
     "writer": "설정 › Veeam 백업 서버 › Enterprise Manager 에서 등록·수정·삭제할 때 씁니다(최대 20대, 원자적 쓰기, 권한 0600, 관리자 + 전체 범위, 감사 로그). 중앙 포탈에만 있습니다(엣지는 EM 을 읽지 않습니다).",
     "usedBy": [
       "Veeam Enterprise Manager 폴러(중앙 전용, 기본 15분마다)",
-      "서버 › Veeam › EM 탭"
+      "Backup 현황 › EM 탭"
     ],
     "retention": "자동 정리는 없습니다. 관리자가 삭제할 때까지 남습니다.",
     "growth": "등록한 EM 수(최대 20대)에 비례하며 작습니다.",
@@ -137,7 +137,7 @@ export const DB_GUIDE_DATA = {
     ],
     "writer": "Veeam Enterprise Manager 폴러가 수집할 때마다(5초 묶어 쓰기).",
     "usedBy": [
-      "서버 › Veeam › EM 탭",
+      "Backup 현황 › EM 탭",
       "설정 › Veeam 백업 서버 › Enterprise Manager 의 상태 표시"
     ],
     "retention": "등록부에서 지운 EM 의 결과는 다음 수집 때 지웁니다.",
@@ -190,7 +190,7 @@ export const DB_GUIDE_DATA = {
     "writer": "Enterprise Manager 주기 수집(중앙 전용, 기본 15분)이 끝날 때마다 한 번 씁니다(원자적 쓰기). 첫 수집은 최근 8일, 그 뒤로는 직전 완결 수집 이후만 읽습니다. EM 을 지우거나 접속처를 바꾸면 그 EM 의 기록을 지웁니다.",
     "usedBy": [
       "vCenter 카드 'VM 백업' 칸 · VM 의 Veeam 배지·상세 창",
-      "서버 › Veeam › Summary · Detail, VM 목록 CSV·엑셀",
+      "Backup 현황 › Summary · Detail, VM 목록 CSV·엑셀",
       "설정 › Veeam 백업 서버 › Enterprise Manager — 매핑 표의 'vCenter 반영' 칸"
     ],
     "retention": "마지막 근거(작업 끝·복원 지점)가 400일보다 오래된 VM 은 지웁니다. EM 당 최대 30,000대(오래된 것부터 버립니다).",
@@ -210,13 +210,13 @@ export const DB_GUIDE_DATA = {
   },
   "veeam-em-map.json": {
     "title": "Veeam Enterprise Manager 백업 서버 매핑",
-    "summary": "EM 이 아는 B&R 서버마다 사람이 정한 값을 담는 파일입니다(v2.788.1). 그 서버가 백업하는 vCenter(법인)와, 포탈에 등록된 어느 B&R 서버와 같은지(이름이 달라 자동으로 못 찾을 때) 또는 '포탈에 없음' 으로 확정했는지를 적습니다. 서버 › Veeam › EM 탭의 법인 이름과 '포탈 등록됨' 표시가 이 값을 씁니다.",
+    "summary": "EM 이 아는 B&R 서버마다 사람이 정한 값을 담는 파일입니다(v2.788.1). 그 서버가 백업하는 vCenter(법인)와, 포탈에 등록된 어느 B&R 서버와 같은지(이름이 달라 자동으로 못 찾을 때) 또는 '포탈에 없음' 으로 확정했는지를 적습니다. Backup 현황 › EM 탭의 법인 이름과 '포탈 등록됨' 표시가 이 값을 씁니다.",
     "stores": [
       "'EM id|백업 서버 이름' 마다: vCenter 목록(비면 B&R 등록을 따름), B&R 짝(비면 이름으로 자동 · 등록 id · 'none' = 포탈에 없음), 바꾼 사람·시각."
     ],
     "writer": "설정 › Veeam 백업 서버 › Enterprise Manager › 백업 서버 매핑에서 저장할 때 씁니다(관리자 + 전체 범위, 감사 로그, 원자적 쓰기). EM 을 지우면 그 EM 의 매핑도 지웁니다.",
     "usedBy": [
-      "서버 › Veeam › EM 탭 — 백업 서버·작업·저장소의 법인 이름, '포탈 등록됨' 판정",
+      "Backup 현황 › EM 탭 — 백업 서버·작업·저장소의 법인 이름, '포탈 등록됨' 판정",
       "설정 › Veeam 백업 서버 › Enterprise Manager — 매핑 표"
     ],
     "retention": "자동 정리는 없습니다. 사람이 '자동으로 되돌리기' 를 누르거나 EM 을 지울 때 지웁니다.",
@@ -1313,14 +1313,14 @@ export const DB_GUIDE_DATA = {
   },
   "veeam-history.db": {
     "title": "Veeam 일 단위 이력 DB",
-    "summary": "Veeam 의 지난 값을 하루 한 점씩 담는 SQLite 데이터베이스입니다(v2.788). B&R 서버마다 라이선스 사용 수량과 만료일을, Enterprise Manager 마다 저장소 용량과 여유 공간을 기록합니다. '서버 › Veeam › EM' 탭의 라이선스·저장소 추이와, 다음 판의 저장소 소진 예측이 이 기록을 읽습니다. 중앙 포탈에만 생깁니다.",
+    "summary": "Veeam 의 지난 값을 하루 한 점씩 담는 SQLite 데이터베이스입니다(v2.788). B&R 서버마다 라이선스 사용 수량과 만료일을, Enterprise Manager 마다 저장소 용량과 여유 공간을 기록합니다. 'Backup 현황 › EM' 탭의 라이선스·저장소 추이와, 다음 판의 저장소 소진 예측이 이 기록을 읽습니다. 중앙 포탈에만 생깁니다.",
     "stores": [
       "라이선스 표(‘license_daily’): B&R 서버, 날짜, 사용·전체 인스턴스, 사용·전체 소켓, 라이선스 만료일, 지원 만료일 — 못 읽은 값은 비워 둡니다(0 이 아닙니다).",
       "저장소 표(‘repo_daily’): Enterprise Manager, 저장소(백업 서버와 이름), 날짜, 용량, 여유 공간, 백업 크기."
     ],
     "writer": "라이선스 감시가 1시간마다 B&R 결과의 라이선스를 쓰고, Enterprise Manager 폴러가 수집 직후 저장소 용량을 씁니다. 같은 날 다시 쓰면 그날 값을 새 값으로 바꿉니다.",
     "usedBy": [
-      "서버 › Veeam › EM 탭: 라이선스 사용 추이와 저장소 용량 추이(최근 90일)."
+      "Backup 현황 › EM 탭: 라이선스 사용 추이와 저장소 용량 추이(최근 90일)."
     ],
     "retention": "400일입니다. 쓰기 24번마다 한 번 오래된 행을 조금씩 나눠 지웁니다. 화면에서 바꾸는 곳은 없습니다.",
     "growth": "작습니다 — 대략 '(B&R 서버 수 + EM 저장소 수) × 400일' 행(계산값)입니다.",
