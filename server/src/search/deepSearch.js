@@ -33,7 +33,11 @@ const ipToInt = ipToNum; // v2.586 — util/ipv4.js 하나(같은 엄격 규칙)
 function ipInCidr(ip, cidr) {
   try {
     const [net, bitsStr] = String(cidr).split('/');
-    const bits = Number(bitsStr); if (!net || !(bits >= 0 && bits <= 32)) return false;
+    // v2.815: 접두 길이는 숫자만 — `Number('')===0` 이라 '10.1.2.0/'(입력 중·오타)가 /0 이 되어 **모든 IP 가 일치**했다(재현).
+    //   util/ipv4.js cidrMatch 와 같은 규칙(/^\d+$/).
+    const bitsText = String(bitsStr ?? '').trim();   // '10.1.2.0/24 ' 은 예전처럼 /24 (Number 가 공백을 무시했다)
+    if (!/^\d{1,2}$/.test(bitsText)) return false;
+    const bits = Number(bitsText); if (!net || !(bits >= 0 && bits <= 32)) return false;
     const ni = ipToInt(net); const ii = ipToInt(ip);
     if (ni == null || ii == null) return false;
     const mask = bits === 0 ? 0 : (~((1 << (32 - bits)) - 1)) >>> 0;
@@ -112,12 +116,26 @@ function probeScript(probe, isWindows) {
   if (isWindows) {
     if (probe.type === 'gpuDriver') return '@echo off\r\nwhere nvidia-smi >nul 2>&1 && (echo MATCH & nvidia-smi -L) || echo NOMATCH\r\n';
     // cmd.exe 배치는 안전한 인용이 없어 메타문자(& | < > ^ ( ) " %)를 화이트리스트로 제거한다(프로세스명만 허용).
-    if (probe.type === 'process') { const p = String(probe.pattern || '').replace(/[^A-Za-z0-9._ -]/g, ''); return `@echo off\r\ntasklist | findstr /I /C:"${p}" >nul 2>&1 && (echo MATCH & tasklist ^| findstr /I /C:"${p}") || echo NOMATCH\r\n`; }
+    // v2.815: 괄호 안의 파이프는 그대로 `|` 다 — 예전 `^|` 는 파이프가 아니라 글자 '|' 인자로 tasklist 에 넘어가 증거 줄이 비었다(추정 — Windows 실기 미확인).
+    if (probe.type === 'process') { const p = String(probe.pattern || '').replace(/[^A-Za-z0-9._ -]/g, ''); return `@echo off\r\ntasklist | findstr /I /C:"${p}" >nul 2>&1 && (echo MATCH & tasklist | findstr /I /C:"${p}") || echo NOMATCH\r\n`; }
     return '@echo off\r\necho NOMATCH\r\n';
   }
   if (probe.type === 'gpuDriver') return 'if command -v nvidia-smi >/dev/null 2>&1; then echo MATCH; nvidia-smi -L 2>/dev/null | head -2; else echo NOMATCH; fi';
   if (probe.type === 'process') { const pat = shq(probe.pattern || ''); return `L=$(ps -ef 2>/dev/null | grep -F -- ${pat} | grep -v grep | head -3); if [ -n "$L" ]; then echo MATCH; echo "$L"; else echo NOMATCH; fi`; }
   return 'echo NOMATCH';
+}
+
+/**
+ * 탐침 출력 → { matched, evidence }(v2.815). 첫 줄이 `MATCH` 면 일치, 나머지 줄이 증거다.
+ * ⚠ Windows 배치 출력은 줄바꿈이 `\r\n` 이고 `echo MATCH & …` 는 cmd 특성상 `MATCH ` 처럼 뒤 공백을 남긴다 —
+ *   예전 판정 `/(^|\n)MATCH(\n|$)/` 는 `MATCH\r\n…` 을 놓쳐 **nvidia-smi 가 GPU 를 한 줄이라도 출력하면(= 드라이버가 있으면)
+ *   불일치**로 셌다(재현). 줄 단위로 나눠(`\r\n`·`\n`) 줄 끝 공백을 뺀 값이 정확히 `MATCH` 인 줄을 찾는다(`NOMATCH` 는 아니다).
+ */
+export function probeOutputMatch(stdout) {
+  const lines = String(stdout ?? '').split(/\r?\n|\r/);
+  const i = lines.findIndex((l) => l.trimEnd() === 'MATCH');
+  if (i < 0) return { matched: false, evidence: '' };
+  return { matched: true, evidence: lines.slice(i + 1).join('\n').trim().slice(0, 300) };
 }
 
 /**
@@ -184,7 +202,8 @@ export async function guestProbe(candidates, probe, { guestUser = '', guestPass 
         try {
           checked++;
           const r = await runGuestScript(c, moref, creds, probeScript(probe, isWindows), { isWindows, timeoutMs: 20_000 });
-          if (/(^|\n)MATCH(\n|$)/.test(r.stdout)) matched.push({ ...v, evidence: r.stdout.replace(/^MATCH\n?/, '').trim().slice(0, 300) });
+          const hit = probeOutputMatch(r.stdout);
+          if (hit.matched) matched.push({ ...v, evidence: hit.evidence });
         } catch (e) { errors.push({ vm: v.name, error: String(e.message).slice(0, 120) }); }
       });
     } catch (e) { errors.push({ vcenterId: vcId, error: `탐침 실패: ${e.message}` }); }   // 로그인 실패는 위에서 따로 싣는다
