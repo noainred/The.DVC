@@ -53,6 +53,11 @@ export function parseColPrefs(raw) {
 export const stringifyColPrefs = (off) => JSON.stringify({ v: 1, off: COL_GROUPS.map((g) => g.key).filter((k) => off[k] && k !== FIXED_GROUP) });
 export function readColPrefs() { try { return parseColPrefs(window.localStorage.getItem(PREF_KEY)); } catch { return {}; } }
 export function writeColPrefs(off) { try { window.localStorage.setItem(PREF_KEY, stringifyColPrefs(off)); } catch { /* 저장 실패는 기능을 막지 않는다 */ } }
+// v2.811: 보기(호스트별 · 법인별) — 이 브라우저에 기억한다. 모르는 값·저장 못 함은 '호스트별'.
+const VIEW_KEY = 'dvc.hosts.view';
+export const parseHostsView = (v) => (v === 'corp' ? 'corp' : 'host');
+export function readHostsView() { try { return parseHostsView(window.localStorage.getItem(VIEW_KEY)); } catch { return 'host'; } }
+export function writeHostsView(v) { try { window.localStorage.setItem(VIEW_KEY, parseHostsView(v)); } catch { /* 저장 실패는 기능을 막지 않는다 */ } }
 /** 보이는 열 — 끈 묶음의 열을 뺀다. access.hw 가 아니면 iDRAC 열은 없다(관리자 판본). */
 export function visibleColumns(off, { hw = true } = {}) {
   return COLUMNS.filter((c) => !off[c.group] && (c.key !== 'idrac' || hw));
