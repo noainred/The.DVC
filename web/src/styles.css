@@ -2163,3 +2163,15 @@ tr.row-sel > td { background: rgba(59, 130, 246, .10); }
   .vbk-tlh { min-width: 0; }
 }
 @media (max-width: 720px) { .vbk-title { font-size: 19px; } .vbk-kpi .v { font-size: 22px; } }
+
+/* Veeam 백업 현황 › Detail 일괄 표시 바(v2.810 사용자 요청 '스크롤 내리면 선택 바가 계속 보이게') — 셸 머리 아래에 붙는다.
+   --bk-head(셸 머리 높이)·--bk-bulk(바 높이 + 8px, 바가 없으면 0)는 BackupDetailTool 이 재서 넘긴다(숫자를 박지 않는다).
+   배경은 불투명(.card 의 그라디언트를 덮는다) — 아래로 지나가는 표 줄이 비쳐 버튼이 안 읽히지 않게.
+   옆 상세 칸(.bk-side)은 바 아래에 붙는다(예전 top:56 고정은 바와 겹친다).
+   720px 이하는 고정하지 않는다 — 버튼이 4~5줄로 꺾여 400px 화면을 크게 가린다(.st-bar 와 같은 규칙). */
+.bk-bulk { position: sticky; top: calc(var(--bk-head, 56px) + 8px); z-index: 15; background: var(--panel); }
+.bk-side { position: sticky; top: calc(var(--bk-head, 56px) + 8px + var(--bk-bulk, 0px)); }
+@media (max-width: 720px) {
+  .bk-bulk { position: static; }
+  .bk-side { top: calc(var(--bk-head, 56px) + 8px); }
+}

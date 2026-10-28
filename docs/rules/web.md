@@ -314,6 +314,9 @@
   · 카테고리 저장(PUT 에 overrides·stages 없음)은 덮어쓰기를 건드리지 않는다 — `Object.hasOwn(body, …)` 일 때만 바꾼다(테스트 고정).
   · 바꾼 이름은 특수 기능 화면·도구 제목에만 쓴다. ⌘K 팔레트는 원래 이름이다(드로어 안내가 말한다). 원래 이름은 `aka` 로 검색된다.
   · 분류 바 sticky top = 셸 머리 실제 높이 + 8px(ResizeObserver) · 720px 이하는 고정하지 않는다(탭이 여러 줄이라 400px 화면의 1/3 을 가렸다 — Chromium 판독).
+  · v2.810: 화면 안 sticky 바의 높이 측정은 `web/src/hooks/useStickyOffset.js` 하나(셸 머리 `useStickyHeadH` · 바 `useBoxHeight` — 셸 머리 선택자 사본 금지).
+    Veeam 백업 현황 › Detail 의 일괄 표시 바(`.bk-bulk`)도 같은 규칙 — 머리 아래 sticky · 불투명 배경 · 옆 상세 칸(`.bk-side`)은 바 아래 · 720px 이하 고정 안 함.
+    회귀 `web/src/views/tools/bulkSticky2810.test.js`.
 - **접속 공지 팝업 · 게시판(v2.722)** — `server/src/bulletin/store.js`(notices.json·board.json, 원자 쓰기·손상 보존·상한 거부) + `routes/api/bulletin.js`
   (`/notices/*`·`/board/*`, 회귀 `server/test/bulletin2722.test.js` — 실제 api 라우터로 역할별 상태코드) + 웹 `views/board/`{Board.jsx,NoticePopup.jsx,bulletinText.js}:
   · 팝업은 **로그인 뒤에만**(App 의 `<Portal>` 옆 — 모든 셸 위) · 폴링 없음 · '보지 않기' 는 브라우저 저장이고 키가 `rev`(id + 수정 시각)라 고치면 다시 보인다.

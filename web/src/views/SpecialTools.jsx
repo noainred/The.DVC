@@ -9,6 +9,7 @@ import { TOOLS } from './specialToolsList.js';
 import { visibleTools, lockReasonOf as lockReason } from './toolVisibility.js'; // v2.613 CATALOG2613-07: 잠금 사유도 한 모듈
 import { buildSections, applyOverrides, buildStageSections, stagesOf, displayLabel, isNonDefaultStage, introLine } from './toolSections.js'; // 섹션·덮어쓰기·단계 계산(v2.455 · v2.679, 순수)
 import { ToolNamesDrawer, StageDot, StageBadge } from './ToolNamesStages.jsx'; // 이름·설명·단계 편집(v2.679)
+import { useStickyHeadH } from '../hooks/useStickyOffset.js'; // 셸 머리 높이(v2.810 공용 — Veeam 백업 Detail 의 일괄 표시 바와 같은 측정)
 import { searchTools } from './toolSearch.js'; // 도구 검색 매칭(v2.508, 순수 · V4 팔레트와 공용)
 
 
@@ -150,8 +151,6 @@ const AXIS_KEY = 'tools.axis';
 const FAV_MAX = 6;          // 자주 쓰는 기능 상위 N
 const INDEX_ROWS = 6;       // '전체' 탭 분류 패널의 행 수
 const KO = new Intl.Collator('ko', { numeric: true, sensitivity: 'base' }); // 이름순 — 비교기를 한 번만 만든다(v2.503)
-// 분류 바 sticky 기준 — 셸마다 머리(sticky) 요소가 다르다. 첫 번째로 찾은 것의 높이를 쓴다.
-const STICKY_HEADS = '.v6 .v6-top, .v5 .v5-top, .v3-top, .topbar';
 const loadRecent = () => { try { const a = JSON.parse(localStorage.getItem(RECENT_KEY) || '[]'); return Array.isArray(a) ? a.filter((s) => typeof s === 'string' && s.trim()) : []; } catch { return []; } };
 
 export default function SpecialTools({ defaultScope = '' } = {}) {
@@ -179,7 +178,8 @@ export default function SpecialTools({ defaultScope = '' } = {}) {
   const [sortMode, setSortMode] = useState('usage');
   const [drawer, setDrawer] = useState(false);
   const [qFocus, setQFocus] = useState(false);
-  const [headH, setHeadH] = useState(0); // 셸 머리(sticky)의 실제 높이 — 분류 바의 top
+  // 분류 바 sticky top = 셸 머리(sticky) 실제 높이 + 8px. 좁은 화면에서 머리가 여러 줄로 늘어나므로 잰다(v2.810: 측정은 공용 훅 — 셸 머리 선택자도 그쪽 하나).
+  const headH = useStickyHeadH(!tool);
   const addRecent = (q) => {
     const t = String(q || '').trim();
     if (!t) return;
@@ -242,18 +242,6 @@ export default function SpecialTools({ defaultScope = '' } = {}) {
   useEffect(() => {
     if (tool) return;
     fetchJson('/tool-usage/top', { n: 200 }).then((r) => setTopKeys(r.top || [])).catch(() => {});
-  }, [tool]);
-  // 분류 바 sticky top = 셸 머리(sticky) 실제 높이 + 8px. 좁은 화면에서 머리가 여러 줄로 늘어나므로 잰다.
-  useEffect(() => {
-    if (tool) return undefined;
-    const el = document.querySelector(STICKY_HEADS);
-    if (!el) { setHeadH(0); return undefined; }
-    const calc = () => setHeadH(Math.round(el.getBoundingClientRect().height || 0));
-    calc();
-    const ro = (typeof ResizeObserver !== 'undefined') ? new ResizeObserver(calc) : null;
-    if (ro) ro.observe(el);
-    window.addEventListener('resize', calc);
-    return () => { if (ro) ro.disconnect(); window.removeEventListener('resize', calc); };
   }, [tool]);
   // 도구 잠금 사유 — 접근 가능하면 null. 특수 기능은 항목이 많아 '숨김'보다 '회색 잠금'이 낫다:
   // 어떤 기능이 있는지는 보이고, 권한이 없으면 클릭만 막아 관리자에게 요청할 수 있게 한다.
