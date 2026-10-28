@@ -35,7 +35,9 @@ describe('일괄 표시 바 sticky', () => {
     expect(css).toMatch(/\.bk-side \{ position: sticky; top: calc\(var\(--bk-head, 56px\) \+ 8px \+ var\(--bk-bulk, 0px\)\); \}/);
     // 배경이 반투명이면 지나가는 표 줄이 비친다 — --panel 은 불투명 색이어야 한다
     expect(css).toMatch(/--panel: #[0-9a-fA-F]{6};/);
-    const m = css.match(/@media \(max-width: 720px\) \{\n {2}\.bk-bulk \{ position: static; \}\n {2}\.bk-side \{ top: calc\(var\(--bk-head, 56px\) \+ 8px\); \}\n\}/);
+    // 머리와 바 사이 8px 틈은 페이지 바탕색으로 덮는다(지나가는 표 줄이 비치지 않게 — Chromium 판독)
+    expect(css).toMatch(/\.bk-bulk::before \{ content: ''; position: absolute; left: -1px; right: -1px; bottom: 100%; height: 9px; background: var\(--bg\); \}/);
+    const m = css.match(/@media \(max-width: 720px\) \{\n {2}\.bk-bulk \{ position: static; \}\n {2}\.bk-bulk::before \{ display: none; \}\n {2}\.bk-side \{ top: calc\(var\(--bk-head, 56px\) \+ 8px\); \}\n\}/);
     expect(m, '좁은 화면 규칙').not.toBe(null);
     // 바(z 15)는 셸 머리(.topbar z 30)·사이드바(z 20) 아래
     expect(css).toMatch(/\.topbar \{[^}]*z-index: 30;/);

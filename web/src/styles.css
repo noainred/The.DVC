@@ -2170,8 +2170,11 @@ tr.row-sel > td { background: rgba(59, 130, 246, .10); }
    옆 상세 칸(.bk-side)은 바 아래에 붙는다(예전 top:56 고정은 바와 겹친다).
    720px 이하는 고정하지 않는다 — 버튼이 4~5줄로 꺾여 400px 화면을 크게 가린다(.st-bar 와 같은 규칙). */
 .bk-bulk { position: sticky; top: calc(var(--bk-head, 56px) + 8px); z-index: 15; background: var(--panel); }
+/* 머리와 바 사이 8px 틈 — 덮지 않으면 지나가는 표 줄 조각이 그 틈에 비친다(v2.810 Chromium 판독). 페이지 바탕색으로 덮는다. */
+.bk-bulk::before { content: ''; position: absolute; left: -1px; right: -1px; bottom: 100%; height: 9px; background: var(--bg); }
 .bk-side { position: sticky; top: calc(var(--bk-head, 56px) + 8px + var(--bk-bulk, 0px)); }
 @media (max-width: 720px) {
   .bk-bulk { position: static; }
+  .bk-bulk::before { display: none; }
   .bk-side { top: calc(var(--bk-head, 56px) + 8px); }
 }
