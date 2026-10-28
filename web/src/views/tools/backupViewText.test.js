@@ -423,5 +423,8 @@ describe('v2.814 디스크 용량(Detail) — 표시 · 폴더 합 · 백업 방
     expect(det).toMatch(/fmtGb\(a\.gb\)/);
     expect(det).toMatch(/fmtGb\(selVm\.gb\)/);
     expect(det).toMatch(/data-backup-capacity/);
+    // 1440 폭에서 표 칸(약 860px)보다 넓으면 가로 스크롤이 생긴다(870 일 때 Chromium 실측 10px) — 최소 칸 합(220+52+84+150+140+64+104=814) 이상 · 860 미만
+    const mw = Number((det.match(/aria-label="폴더 › VM 백업" style=\{\{ minWidth: (\d+)/) || [])[1]);
+    expect(mw >= 814 && mw < 860).toBe(true);
   });
 });

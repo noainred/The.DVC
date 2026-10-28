@@ -293,7 +293,7 @@ export default function BackupDetailTool({ scope }) {
       <div className="flex wrap" style={{ gap: 14, alignItems: 'flex-start' }}>
         <div className="card" style={{ flex: '999 1 640px', minWidth: 0, padding: 0, overflow: 'hidden' }}>
           <div style={{ overflowX: 'auto' }}>
-            <div role="treegrid" aria-label="폴더 › VM 백업" style={{ minWidth: 870, fontSize: 13 }}>
+            <div role="treegrid" aria-label="폴더 › VM 백업" style={{ minWidth: 840, fontSize: 13 }}>
               <div role="row" style={{ display: 'grid', gridTemplateColumns: GRID, gap: 0, background: 'var(--panel-deep)', color: 'var(--text-dim)', fontSize: 12, fontWeight: 600 }}>
                 <div role="columnheader" style={{ padding: '9px 14px' }}>vCenter › 폴더 › VM</div>
                 <div role="columnheader" style={{ padding: '9px 6px' }}>전원</div>
