@@ -13,12 +13,12 @@ export default function VeeamHeader({ active, desc, actions }) {
     <div data-veeam-header="" style={{ display: 'flex', flexDirection: 'column', gap: 12, minWidth: 0 }}>
       <div className="flex gap wrap" style={{ alignItems: 'flex-end', rowGap: 8 }}>
         <div style={{ minWidth: 0 }}>
-          <div style={{ fontSize: 22, fontWeight: 800 }}>Veeam 백업 현황</div>
+          <div style={{ fontSize: 22, fontWeight: 800 }}>Backup 현황</div>
           {desc && <div className="muted" style={{ fontSize: 13, overflowWrap: 'anywhere' }}>{desc}</div>}
         </div>
         {actions && <div className="flex gap wrap" style={{ marginLeft: 'auto', alignItems: 'flex-end', rowGap: 6 }}>{actions}</div>}
       </div>
-      <div role="tablist" aria-label="Veeam 백업 현황 보기" style={{ display: 'flex', gap: 4, borderBottom: '1px solid var(--border)' }}>
+      <div role="tablist" aria-label="Backup 현황 보기" style={{ display: 'flex', gap: 4, borderBottom: '1px solid var(--border)' }}>
         {VEEAM_TABS.map(([k, label, href]) => {
           const on = k === active;
           return (

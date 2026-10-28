@@ -70,7 +70,7 @@ export default function VeeamEmMapping({ mapping, onSaved }) {
       <div className="muted" style={{ fontSize: 12, lineHeight: 1.6 }}>
         <b>법인(vCenter)</b>을 정하면 EM 탭의 백업 서버·작업·저장소에 법인 이름이 붙습니다(비우면 짝지어진 B&R 등록의 vCenter 를 따릅니다).
         <b> 포탈 B&R</b>은 이름이 달라 자동으로 못 찾는 서버를 손으로 짝짓거나, 포탈에 등록하지 않을 서버를 '포탈에 없음' 으로 확정합니다.
-        <b> vCenter 반영</b> — 법인을 정한 서버는 EM 의 VM 별 기록(작업 결과·복원 지점)이 그 vCenter 의 카드·VM 배지·Veeam 현황에 'EM ·' 출처로 실립니다.
+        <b> vCenter 반영</b> — 법인을 정한 서버는 EM 의 VM 별 기록(작업 결과·복원 지점)이 그 vCenter 의 카드·VM 배지·Backup 현황에 'EM ·' 출처로 실립니다.
         짝지은 B&R 직접 수집이 정상이면 그쪽이 우선이고, 읽기 실패·첫 수집 대기일 때만 EM 기록으로 채웁니다. EM 기록에는 진행 중·진행률이 없습니다.
       </div>
       {serverCountWarnings(mapping?.counts).map((t) => <div key={t} className="banner warn">{t}</div>)}

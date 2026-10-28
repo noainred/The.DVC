@@ -1,6 +1,6 @@
 /**
  * views/VeeamEmSettings.jsx — 설정 › Veeam 백업 서버 › Enterprise Manager(v2.788 · 사용자 요청 + 시안).
- *  · Enterprise Manager(REST 기본 9398)를 등록하면 **중앙 포탈이 직접** 읽어 서버 › Veeam › EM 탭을 채운다(엣지 배정 없음).
+ *  · Enterprise Manager(REST 기본 9398)를 등록하면 **중앙 포탈이 직접** 읽어 Backup 현황 › EM 탭을 채운다(엣지 배정 없음).
  *  · 비밀번호는 응답에 없다(hasPassword) — 비우면 유지 · 주소·포트·계정을 바꾸면 서버가 저장 비밀번호를 버리고 그 사실을 말한다.
  *  · 목록 403(범위 제한 관리자)·읽기 실패를 '0대 등록' 으로 칠하지 않는다 · 늦게 온 이전 응답은 버린다 · 진행 중 잠금은 그 대상만.
  *  · sendJson·delJson 은 400 본문을 돌려준다 — r?.ok === false 를 본다(audit2727e).
@@ -76,7 +76,7 @@ export default function VeeamEmSettings() {
       } else {
         const r = await postJson(`/admin/veeam/em/${encodeURIComponent(em.id)}/${kind}`, {});
         if (kind === 'test') setMsg(r?.ok ? { ok: true, text: `연결 성공 · 백업 서버 ${Number.isFinite(r.backupServers) ? `${r.backupServers}대` : '수 모름'} · ${r.ms}ms${r.authStopCleared ? ' · 인증 실패로 멈춘 주기 수집을 풀었습니다' : ''}` } : { ok: false, text: r?.reason || '연결 실패' });
-        else setMsg(r?.ok ? { ok: true, text: '수집했습니다 — 서버 › Veeam › EM 탭에서 확인하세요.' } : { ok: false, text: r?.reason || '수집 실패' });
+        else setMsg(r?.ok ? { ok: true, text: '수집했습니다 — Backup 현황 › EM 탭에서 확인하세요.' } : { ok: false, text: r?.reason || '수집 실패' });
       }
       load();
     } catch (e) { setMsg({ ok: false, text: e.message }); } finally { busyOff(key); }
@@ -88,7 +88,7 @@ export default function VeeamEmSettings() {
     <>
       <div className="section-title" style={{ marginTop: 0 }}>🛰️ Veeam Enterprise Manager{d ? ` (${ems.length}대)` : ''}</div>
       <div className="muted" style={{ fontSize: 12, lineHeight: 1.6 }}>
-        Enterprise Manager 를 등록하면 <b>중앙 포탈이 직접</b> EM REST API(기본 포트 9398)를 읽어 전 백업 서버의 작업 결과·세션·저장소를 <b>서버 › Veeam › EM</b> 탭에 보입니다.
+        Enterprise Manager 를 등록하면 <b>중앙 포탈이 직접</b> EM REST API(기본 포트 9398)를 읽어 전 백업 서버의 작업 결과·세션·저장소를 <b>Backup 현황 › EM</b> 탭에 보입니다.
         읽기 전용 계정(EM Portal User 역할)을 권장합니다 — 포탈은 작업을 시작·중지하지 않습니다. 처음 연결하면 EM 인증서가 <b>승인 대기</b>로 멈춥니다(설정 › Security › 장비 신뢰에서 지문 확인 뒤 승인).
       </div>
       {d?.registryError && <div className="banner warn" style={{ marginTop: 8 }}>등록부를 읽지 못했습니다(0대라는 뜻이 아닙니다): {d.registryError}</div>}

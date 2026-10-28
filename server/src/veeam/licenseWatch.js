@@ -67,7 +67,7 @@ export function alertOf(f) {
   }
   const sev = f.stage === 'expired' || f.stage === 'd7' ? 'critical' : f.stage === 'd30' ? 'warning' : 'info';
   const head = f.stage === 'expired' ? `Veeam ${what}가 만료됐습니다` : `Veeam ${what} 만료 D-${f.daysLeft}`;
-  return { key: `veeamlic:${f.key}:${f.stage}`, severity: sev, title: `${head} — ${f.name}`, detail: `서버: ${f.name}\n만료일: ${date}\n확인: 서버 › Veeam › EM 탭의 라이선스 카드` };
+  return { key: `veeamlic:${f.key}:${f.stage}`, severity: sev, title: `${head} — ${f.name}`, detail: `서버: ${f.name}\n만료일: ${date}\n확인: Backup 현황 › EM 탭의 라이선스 카드` };
 }
 
 let _state = null;

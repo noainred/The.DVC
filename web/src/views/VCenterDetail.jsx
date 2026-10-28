@@ -598,7 +598,7 @@ export default function VCenterDetail({ site, onBack }) {
             {view === 'vms' && canCsv() && (
               <span className="flex gap" style={{ marginLeft: 'auto', flex: 'none', alignItems: 'center' }}>
                 <button className="login-btn" style={{ flex: 'none', padding: '6px 12px' }} disabled={!toolAllowed('vm-export')} onClick={() => setVmExportOpen(true)}
-                  title={toolAllowed('vm-export') ? '이 vCenter 의 VM 을 필요한 항목만 골라 CSV·엑셀로 — 호스트·CPU·메모리·NIC·디스크·게스트 파티션·스냅샷·Tools·태그·메모 등(VM 전체 정보 내보내기). 백업 판단은 서버 › Veeam 백업 현황 › Detail 의 ‘CSV · 엑셀…’' : 'VM 전체 정보 내보내기 기능 권한이 없습니다'}>
+                  title={toolAllowed('vm-export') ? '이 vCenter 의 VM 을 필요한 항목만 골라 CSV·엑셀로 — 호스트·CPU·메모리·NIC·디스크·게스트 파티션·스냅샷·Tools·태그·메모 등(VM 전체 정보 내보내기). 백업 판단은 Backup 현황 › Detail 의 ‘CSV · 엑셀…’' : 'VM 전체 정보 내보내기 기능 권한이 없습니다'}>
                   ⤓ VM 전체 정보 내보내기…
                 </button>
               </span>
