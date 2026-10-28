@@ -17,6 +17,7 @@ import VmListExportDialog from '../VmListExportDialog.jsx';   // v2.800 'CSV' �
 import { backupScreenRequest } from '../vmListExportText.js';
 import { VM_LIST_MAX_IDS } from '../vcdVmList.js';
 import { downloadFailText } from '../downloadFailText.js';
+import { useStickyHeadH, useBoxHeight } from '../../hooks/useStickyOffset.js';
 
 const CHIP = {
   ok: { color: '#86efac', background: 'rgba(34,197,94,.14)' },
@@ -69,6 +70,10 @@ export default function BackupDetailTool({ scope }) {
   const [saveErr, setSaveErr] = useState(null);
   const [memo, setMemo] = useState('');
   const gen = useRef(0);
+  // v2.810(사용자 요청 '스크롤 내리면 선택 바가 계속 보이게'): 일괄 표시 바는 셸 머리 아래에 붙는다 — 머리·바의 실제 높이를 재서
+  //   CSS 변수로 넘긴다(.bk-bulk · .bk-side — 숫자를 박지 않는다). 바가 없으면(편집 불가) 높이 0 이라 옆 상세 칸이 머리 바로 아래에 붙는다.
+  const headH = useStickyHeadH();
+  const [bulkRef, bulkH] = useBoxHeight();
 
   useEffect(() => {
     let on = true;
@@ -157,7 +162,7 @@ export default function BackupDetailTool({ scope }) {
   const days = data?.snapDays || 7;
 
   return (
-    <div data-backup-detail="" style={{ display: 'flex', flexDirection: 'column', gap: 14, minWidth: 0 }}>
+    <div data-backup-detail="" style={{ display: 'flex', flexDirection: 'column', gap: 14, minWidth: 0, '--bk-head': `${headH}px`, '--bk-bulk': `${bulkH ? bulkH + 8 : 0}px` }}>
       <VeeamHeader active="detail" desc="vCenter 하나를 골라 폴더 › VM 마다 Veeam 백업과 스냅샷 흔적을 봅니다."
         actions={<>
           <label className="muted" style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12 }}>vCenter
@@ -240,7 +245,7 @@ export default function BackupDetailTool({ scope }) {
       </div>
 
       {writable && (
-        <div className="card" data-backup-bulk="" style={{ padding: '8px 12px', display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '6px 10px', fontSize: 12, minWidth: 0 }}>
+        <div ref={bulkRef} className="card bk-bulk" data-backup-bulk="" style={{ padding: '8px 12px', display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '6px 10px', fontSize: 12, minWidth: 0 }}>
           <b style={{ fontSize: 13 }}>{checked.size ? `${fmtNum(checked.size)}대 선택` : '선택 없음'}</b>
           <button type="button" className="tab" onClick={() => setChecked((cur) => toggleAllVisible(cur, visibleIds))} disabled={!visibleIds.length} style={{ padding: '3px 10px', fontSize: 12 }}>
             {visibleIds.length && visibleIds.every((id) => checked.has(id)) ? '보이는 VM 선택 해제' : `보이는 VM 전체 선택(${fmtNum(visibleIds.length)})`}
@@ -339,8 +344,8 @@ export default function BackupDetailTool({ scope }) {
           <div className="muted" style={{ padding: '8px 14px', fontSize: 12, borderTop: '1px solid var(--border-soft)' }}>폴더 줄의 수 = 그 아래 VM 중 Veeam(위)·스냅샷(아래)이 보이는 수 / 전체 · Clone N = 백업 방식을 Clone 으로 정한 VM 수 · 폴더를 누르면 펼치고 접습니다(검색·보기 필터 중에는 모두 펼침) · VM 을 누르면 오른쪽에 상세</div>
         </div>
 
-        {/* 긴 트리를 내려가도 고른 VM 의 상세가 보이게(넓은 화면) — 좁은 화면에서는 표 아래로 내려간다 */}
-        <div style={{ flex: '1 1 280px', minWidth: 0, display: 'flex', flexDirection: 'column', gap: 12, position: 'sticky', top: 56, alignSelf: 'flex-start' }}>
+        {/* 긴 트리를 내려가도 고른 VM 의 상세가 보이게(넓은 화면) — 좁은 화면에서는 표 아래로 내려간다. v2.810: top 은 .bk-side(일괄 표시 바 아래) */}
+        <div className="bk-side" style={{ flex: '1 1 280px', minWidth: 0, display: 'flex', flexDirection: 'column', gap: 12, alignSelf: 'flex-start' }}>
           <div className="card" style={{ padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 10, minWidth: 0 }}>
             {!selVm ? <div className="muted" style={{ fontSize: 13 }}>VM 을 누르면 여기에 백업 상세가 보입니다.</div> : (() => {
               const c = vmClass(selVm, vopts); const v = selVm.v;
