@@ -333,3 +333,62 @@ describe('v2.806 백업 방식 단축키 · 우선순위 VM', async () => {
     expect(S.cloneBadOf({ job: true, on: true, unknown: true })).toBe(false);
   });
 });
+
+describe('v2.812 폴더 선택 — 폴더를 고르면 그 아래 VM 전부', () => {
+  it('폴더 키 → 하위 폴더까지 포함한 VM id(접힘과 무관)', async () => {
+    const { folderVmIdMap } = await import('./backupViewText.js');
+    const m = folderVmIdMap(buildTree(VMS));
+    expect(m.get('DC1').slice().sort()).toEqual(VMS.map((v) => v.id).sort());
+    expect(m.get('DC1/A.MGMT').slice().sort()).toEqual(['dc01', 'spf01', 'spf02']);
+    expect(m.get('DC1/A.MGMT/Spotfire').slice().sort()).toEqual(['spf01', 'spf02']);
+    expect(m.get('DC1/B.Service').slice().sort()).toEqual(['app01', 'old01']);
+  });
+  it('보기 조건에 드는 VM 만 — 보이는 VM 전체 선택과 같은 집합', async () => {
+    const { folderVmIdMap, visibleVmIds } = await import('./backupViewText.js');
+    for (const filter of ['veeam', 'snaponly', 'none', 'run', 'stale']) {
+      const m = folderVmIdMap(buildTree(VMS, { filter }));
+      const all = [...m.entries()].filter(([k]) => !k.includes('/')).flatMap(([, ids]) => ids).sort();
+      expect(all, filter).toEqual(visibleVmIds(VMS, { filter }).slice().sort());
+    }
+    const q = folderVmIdMap(buildTree(VMS, { q: 'spf' }));
+    expect(q.get('DC1').slice().sort()).toEqual(['spf01', 'spf02']);
+    expect(q.has('DC1/B.Service')).toBe(false);   // 해당 VM 이 없는 폴더는 트리에서 빠진다
+  });
+  it('체크 상태 all · some · none, 그리고 폴더 토글은 모두 고르기 ↔ 모두 풀기', async () => {
+    const { folderCheckState, toggleAllVisible } = await import('./backupViewText.js');
+    const ids = ['a', 'b'];
+    expect(folderCheckState(new Set(), ids)).toBe('none');
+    expect(folderCheckState(new Set(['a']), ids)).toBe('some');
+    expect(folderCheckState(new Set(['a', 'b', 'z']), ids)).toBe('all');
+    expect(folderCheckState(new Set(['a']), [])).toBe('none');   // VM 0대 폴더는 '모두 선택' 으로 보이지 않는다
+    expect(folderCheckState(null, ids)).toBe('none');
+    let sel = toggleAllVisible(new Set(['a', 'z']), ids);   // 일부 → 모두
+    expect([...sel].sort()).toEqual(['a', 'b', 'z']);
+    sel = toggleAllVisible(sel, ids);                        // 모두 → 그 폴더만 풀림(다른 선택 z 는 유지)
+    expect([...sel]).toEqual(['z']);
+  });
+  it('화면 계약 — 편집 가능할 때만 · 일부 선택은 indeterminate · 트리 기준 맵', () => {
+    const src = fs.readFileSync(new URL('./BackupDetailTool.jsx', import.meta.url), 'utf8');
+    expect(src).toMatch(/const folderIds = useMemo\(\(\) => folderVmIdMap\(tree\), \[tree\]\);/);
+    expect(src).toMatch(/\{writable && \(\(\) => \{\s*const ids = folderIds\.get\(row\.key\)/);
+    expect(src).toMatch(/el\.indeterminate = st === 'some'/);
+    expect(src).toMatch(/onChange=\{\(\) => setChecked\(\(cur\) => toggleAllVisible\(cur, ids\)\)\}/);
+    const early = src.indexOf('if (vcs && !vcs.length) return');
+    expect(src.indexOf('folderVmIdMap(tree)')).toBeLessThan(early);   // 훅은 조기 return 위
+  });
+});
+
+describe('v2.812 선택 반전', () => {
+  it('보이는 VM 만 뒤집고 보이지 않는 VM 의 선택은 그대로', async () => {
+    const { invertVisible } = await import('./backupViewText.js');
+    const sel = invertVisible(new Set(['a', 'hidden']), ['a', 'b', 'c']);
+    expect([...sel].sort()).toEqual(['b', 'c', 'hidden']);
+    expect([...invertVisible(sel, ['a', 'b', 'c'])].sort()).toEqual(['a', 'hidden']);   // 두 번 뒤집으면 제자리
+    expect([...invertVisible(null, ['x'])]).toEqual(['x']);
+    expect([...invertVisible(new Set(['k']), [])]).toEqual(['k']);
+  });
+  it('일괄 바에 선택 반전 버튼 — 보이는 VM 기준', () => {
+    const src = fs.readFileSync(new URL('./BackupDetailTool.jsx', import.meta.url), 'utf8');
+    expect(src).toMatch(/onClick=\{\(\) => setChecked\(\(cur\) => invertVisible\(cur, visibleIds\)\)\} disabled=\{!visibleIds\.length\}[^>]*>선택 반전<\/button>/);
+  });
+});

@@ -287,6 +287,43 @@ export function toggleAllVisible(sel, visibleIds) {
   return s;
 }
 
+/**
+ * v2.812(사용자 요청 '선택과 반전 기능') — 보이는 VM 의 선택을 뒤집는다: 고른 것은 풀고, 안 고른 것은 고른다.
+ * 보이지 않는 VM(필터·검색 밖)의 선택은 그대로 둔다 — 일괄 적용 대상이 몰래 바뀌지 않게.
+ */
+export function invertVisible(sel, visibleIds) {
+  const s = new Set(sel || []);
+  for (const id of Array.isArray(visibleIds) ? visibleIds : []) { if (s.has(id)) s.delete(id); else s.add(id); }
+  return s;
+}
+
+/**
+ * v2.812(사용자 요청 '폴더를 선택하면 포함된 모든 VM 을 선택') — 폴더 키 → 그 폴더 아래(하위 폴더 포함) VM id 목록.
+ * buildTree 결과를 받으므로 지금 보기 조건(필터·검색)에 드는 VM 만 담긴다 — '보이는 VM 전체 선택' 과 같은 규칙.
+ * 접힌 폴더도 안의 VM 을 모두 담는다(펼침 여부와 무관). 한 번의 후위 순회로 만든다(VM 수 × 폴더 깊이).
+ * @returns {Map<string, string[]>}
+ */
+export function folderVmIdMap(tree) {
+  const out = new Map();
+  const walk = (n) => {
+    const ids = (n.vms || []).map((v) => v.id).filter((id) => id != null);
+    for (const c of n.children || []) ids.push(...walk(c));
+    if (n.key) out.set(n.key, ids);
+    return ids;
+  };
+  if (tree) walk(tree);
+  return out;
+}
+
+/** 폴더 체크 상태 — 'all'(모두 선택) · 'some'(일부) · 'none'(없음 · VM 0대 포함). */
+export function folderCheckState(sel, ids) {
+  const list = Array.isArray(ids) ? ids : [];
+  if (!list.length || !sel || !sel.size) return 'none';
+  let n = 0;
+  for (const id of list) if (sel.has(id)) n++;
+  return n === 0 ? 'none' : n === list.length ? 'all' : 'some';
+}
+
 export const FILTERS = [
   ['all', '전체'], ['veeam', 'Veeam 백업'], ['snaponly', '스냅샷만'], ['none', '확인 안 됨'], ['run', '백업 중·대기'], ['stale', '스냅샷 잔존'],
   ['rpo', '오래된 백업'], ['fail', '실패·경고'],
