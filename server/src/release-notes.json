@@ -1,6 +1,15 @@
 {
   "notes": [
     {
+      "version": "2.813.0",
+      "date": "2026-10-28",
+      "title": "메뉴 'Veeam' → 'Backup' 이름 변경",
+      "notes": [
+        "왼쪽 메뉴 'Veeam' 을 'Backup' 으로, 화면 제목 'Veeam 백업 현황' 을 'Backup 현황' 으로 바꿨습니다(Summary · Detail · EM 탭 포함). 기능 검색은 옛 이름으로도 찾을 수 있습니다.",
+        "VM 의 'Veeam' 배지 · 백업 방식 'Veeam' 은 실제 제품 이름이라 그대로입니다. 도구 주소(#/tools/backup-*)와 권한은 바뀌지 않습니다."
+      ]
+    },
+    {
       "version": "2.812.0",
       "date": "2026-10-28",
       "title": "Veeam 백업 Detail — 폴더 체크로 그 아래 VM 모두 선택 · 선택 반전",
