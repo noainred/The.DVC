@@ -1,4 +1,4 @@
-// ESXi 호스트 화면 '법인별' 보기(v2.810 — 승인 시안 B https://claude.ai/artifact/JGykMmoG7kAyNsa5y4uG1x).
+// ESXi 호스트 화면 '법인별' 보기(v2.811 — 승인 시안 B https://claude.ai/artifact/JGykMmoG7kAyNsa5y4uG1x).
 //
 //   · GET /hosts/corp   법인(vCenter)별 호스트 상태 · CPU 구간 · 용량/할당 · 클러스터 자세(HA·수용 제어·DRS·EVC·N+1) · 수집 상태 · RTT.
 //                       /hosts 와 같은 범위·필터(applyFilters + state). 판정은 vcenter/hostCorp.js(순수) 하나.

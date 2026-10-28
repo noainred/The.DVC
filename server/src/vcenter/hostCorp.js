@@ -1,10 +1,10 @@
 /**
- * vcenter/hostCorp.js — ESXi 호스트 화면 '법인별' 보기의 집계(순수, v2.810 — 승인 시안 B https://claude.ai/artifact/JGykMmoG7kAyNsa5y4uG1x).
+ * vcenter/hostCorp.js — ESXi 호스트 화면 '법인별' 보기의 집계(순수, v2.811 — 승인 시안 B https://claude.ai/artifact/JGykMmoG7kAyNsa5y4uG1x).
  *
  * 법인 = vCenter 1:1. 법인 한 줄 = 호스트 상태 · CPU 구간 · 용량/할당 · 클러스터 자세(HA·수용 제어·DRS·EVC·N+1) · 수집 상태 · RTT.
  * 판정을 새로 만들지 않는다 — 있는 함수를 그대로 부른다:
  *   · CPU 구간: 웹 views/hostTriage.js cpuBucket 과 같은 경계(> 90 확인 · > 100 별도 · 못 읽음 'na') — 번들 경계라 두 벌이고
- *     server/test/hostCorp2810.test.js 가 같은 입력으로 대조한다.
+ *     server/test/hostCorp2811.test.js 가 같은 입력으로 대조한다.
  *   · 클러스터 묶음: clustercfg/analyze.js clusterIndex(ref 우선 · 같은 이름 다른 데이터센터를 섞지 않는다)
  *   · HA·DRS·EVC·판정 코드: clustercfg/analyze.js analyzeClusters(클러스터 HA·DRS 점검 화면과 같은 결과)
  *   · N+1: clustercfg/n1.js n1Groups('인사이트' 화면과 같은 판정 — 가장 큰 호스트 1대 장애 · CPU·메모리 ≤ 90% · 점검 호스트는 받는 쪽에서 뺀다)

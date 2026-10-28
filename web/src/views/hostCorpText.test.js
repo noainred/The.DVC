@@ -1,4 +1,4 @@
-// v2.810 — ESXi 호스트 '법인별' 보기 글자·색 판정(hostCorpText.js).
+// v2.811 — ESXi 호스트 '법인별' 보기 글자·색 판정(hostCorpText.js).
 import { describe, it, expect } from 'vitest';
 import { parseHostsView } from './hostChecksText.js';
 import { stepTone, RATIO_STEPS, ratioText, pctText, gbText, fmtN, rttCell, corpMark, corpSortKey, chipList, corpView, clusterTags, bucketSegs, corpKpis, CORP_CHIPS } from './hostCorpText.js';

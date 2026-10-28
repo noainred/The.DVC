@@ -17,7 +17,7 @@ import { nsxStore } from '../../nsx/store.js';
 import { memoJson, hash, scopeSlice, scopeKey } from './shared.js';
 import { suggestSize } from '../../reports/rightsizing.js'; // v2.629 DATA2629-05: 과대 VM 은 초과분만
 import { gpuHostKey } from './hardwareGpu.js'; // v2.598 VC2598-03 — (vCenter, 호스트) 키
-import { n1Groups } from '../../clustercfg/n1.js'; // v2.810 — N+1 판정(법인별 호스트 보기와 같은 함수)
+import { n1Groups } from '../../clustercfg/n1.js'; // v2.811 — N+1 판정(법인별 호스트 보기와 같은 함수)
 import { ownsClusterKey } from '../../gpu/clusterKeyScope.js'; // v2.769(점검 R4-D5-4): 클러스터 키 소유 vCenter = 최장 프리픽스
 
 
@@ -66,7 +66,7 @@ api.get('/tools/insights', requirePerm('tools'), (req, res) => memoJson(req, res
   };
 
   // ④ 클러스터 N+1 (가장 큰 호스트 1대 장애 시 잔여 용량으로 현재 사용량 수용 가능?)
-  // v2.810: 판정을 clustercfg/n1.js n1Groups 로 옮겼다(법인별 호스트 보기와 한 함수). 규칙·주석은 그 파일에 그대로 있다.
+  // v2.811: 판정을 clustercfg/n1.js n1Groups 로 옮겼다(법인별 호스트 보기와 한 함수). 규칙·주석은 그 파일에 그대로 있다.
   const clusters = n1Groups(hosts, usageReadable).map((x) => x.row);
 
   // ⑧ 알람 핫스팟

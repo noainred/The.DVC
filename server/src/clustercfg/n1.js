@@ -1,6 +1,6 @@
 /**
  * clustercfg/n1.js — 클러스터 N+1 판정(가장 큰 호스트 1대 장애 시 남은 용량으로 지금 사용량을 받을 수 있는가, 순수).
- *   v2.810: '인사이트'(routes/api/toolsAnalytics.js ④)의 판정을 그대로 옮겼다 — 법인별 호스트 보기(vcenter/hostCorp.js)가 같은 함수를 쓴다
+ *   v2.811: '인사이트'(routes/api/toolsAnalytics.js ④)의 판정을 그대로 옮겼다 — 법인별 호스트 보기(vcenter/hostCorp.js)가 같은 함수를 쓴다
  *   (판정 코어는 하나 — 두 화면이 같은 클러스터에 다른 N+1 을 말하지 않게). 규칙·주석은 옮기기 전과 같다.
  * ⚠ store 를 import 하지 않는다 — readable(h)(store.usageReadable)을 호출부가 넘긴다.
  * @returns {{key:string, row:object}[]} key = 클러스터 묶음 키(clusterGroupKeyOf, 독립 호스트는 `${vc}\u0000standalone`), row = 인사이트 응답 한 줄

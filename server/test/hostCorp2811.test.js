@@ -1,5 +1,5 @@
 /**
- * v2.810 — ESXi 호스트 화면 '법인별' 보기 집계(/hosts/corp). 승인 시안 B https://claude.ai/artifact/JGykMmoG7kAyNsa5y4uG1x.
+ * v2.811 — ESXi 호스트 화면 '법인별' 보기 집계(/hosts/corp). 승인 시안 B https://claude.ai/artifact/JGykMmoG7kAyNsa5y4uG1x.
  *  ① CPU 구간 경계가 웹 hostTriage.cpuBucket 과 같다(번들 경계라 두 벌 — 같은 입력으로 대조)
  *  ② 순수 집계 — 법인 판정(위험·주의·없음) · 못 읽은 값은 null · 클러스터 구성 권한이 없으면 키가 없다 · 분모를 못 읽으면 비율 null
  *  ③ N+1 은 '인사이트' 와 같은 함수(n1Groups) — 같은 입력에 같은 결과
@@ -11,7 +11,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-const DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'hostcorp2810-'));
+const DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'hostcorp2811-'));
 Object.assign(process.env, { CONFIG_DIR: DIR, DATA_SOURCE: 'live', AUTH_ENABLED: 'true' });
 const VC = 'vc-a'; const VB = 'vc-b'; const OUT = 'vc-out';
 fs.writeFileSync(path.join(DIR, 'runtime.json'), JSON.stringify({ dataSource: 'live' }));

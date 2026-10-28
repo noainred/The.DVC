@@ -1,5 +1,5 @@
 /**
- * hostCorpText.js — ESXi 호스트 화면 '법인별' 보기의 글자·색 판정(순수, v2.810 — 승인 시안 B https://claude.ai/artifact/JGykMmoG7kAyNsa5y4uG1x).
+ * hostCorpText.js — ESXi 호스트 화면 '법인별' 보기의 글자·색 판정(순수, v2.811 — 승인 시안 B https://claude.ai/artifact/JGykMmoG7kAyNsa5y4uG1x).
  *
  * 숫자와 판정(위험·주의·사유·N+1)은 서버 /hosts/corp(vcenter/hostCorp.js)가 만든다 — 여기서는 그 값을 글자·색으로만 바꾼다.
  * 법인 상태 표지(낡은 값 · 첫 수집 중 · 비활성 · 연결 실패 · 인증 정지)는 corpSiteStatus 하나를 그대로 쓴다(다른 법인 화면과 같은 말).

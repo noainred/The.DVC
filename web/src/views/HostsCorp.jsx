@@ -1,4 +1,4 @@
-// ESXi 호스트 화면 '법인별' 보기(v2.810 — 승인 시안 B https://claude.ai/artifact/JGykMmoG7kAyNsa5y4uG1x).
+// ESXi 호스트 화면 '법인별' 보기(v2.811 — 승인 시안 B https://claude.ai/artifact/JGykMmoG7kAyNsa5y4uG1x).
 // 법인 × 지표 표(정렬 · 다빈치/IRS · '지금 확인' 칩은 흐리게) + 고른 법인의 패널(클러스터 자세 · 호스트 칸 · 펼치면 호스트 표).
 // 숫자·판정은 서버 /hosts/corp, 글자·색은 hostCorpText.js. 호스트 칸·표는 부모(Hosts)가 이미 폴링하는 /hosts 행을 쓴다(같은 판정 — hostTriage.cpuBucket).
 import React, { useEffect, useMemo, useRef, useState } from 'react';
