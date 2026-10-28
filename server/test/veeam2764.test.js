@@ -323,14 +323,22 @@ test('⑪ 1-a — ingestSnapRows 는 조각 트랜잭션 + 조각 사이 양보(
     const N = 12_000;
     const rows = Array.from({ length: N }, (_, i) => ({ vcenterId: 'ing1', ts: T0 + i * 1000, severity: 'info', type: 'TaskEvent', user: 'CORP\\svc-veeam', entity: `vm-${i % 300}`, message: `Task: Create virtual machine snapshot #${i}` }));
     rows.push({ vcenterId: 'ing1', ts: T0, severity: 'info', type: 'TaskEvent', user: 'u', entity: 'x', message: 'Task: Reconfigure virtual machine' });   // 스냅샷 아님 — 세지 않는다
+    const n = await D.ingestSnapRows(rows);
+    assert.equal(n, N, '넣으려 한 스냅샷 행 수');
+    assert.equal(db.rowsFor('ing1', 0, N + 10).length, N);
+    // 양보 — 예전에는 기본값(시간 기준 15ms)으로 셌다: 빠른 러너에서 적재 전체가 86ms 라 2회만 끼어들어 실패했다(2026-10-27 CI).
+    //   이제 조각 경계 양보를 결정적으로 본다(yieldMs 아주 작게 = 조각마다) · 기본 경로가 조각+양보를 탄다는 것은 소스로 고정한다.
+    const rows2 = rows.map((r) => ({ ...r, vcenterId: 'ing2' }));
     let ticks = 0; let done = false;
     const loop = () => { ticks++; if (!done) setImmediate(loop); };
     setImmediate(loop);
-    const n = await D.ingestSnapRows(rows);
+    const n3 = await db.ingestAsync(rows2, { chunkRows: 1_000, yieldMs: 0.001 });
     done = true;
-    assert.equal(n, N, '넣으려 한 스냅샷 행 수');
-    assert.equal(db.rowsFor('ing1', 0, N + 10).length, N);
-    assert.ok(ticks >= 3, `적재 중 이벤트 루프가 돌았다(setImmediate ${ticks}회) — 한 덩어리였으면 0`);
+    assert.equal(n3, N);
+    assert.ok(ticks >= 6, `조각(1,000행 × 12) 사이마다 이벤트 루프가 돌았다(setImmediate ${ticks}회) — 한 덩어리였으면 0`);
+    const snapSrc = fs.readFileSync(new URL('../src/veeam/snapDb.js', import.meta.url), 'utf8');
+    assert.match(snapSrc, /if \(db\) return await db\.ingestAsync\(rows\)/, 'ingestSnapRows 는 조각+양보 경로(ingestAsync 기본값)를 탄다');
+    assert.match(snapSrc, /for \(let i = 0; i < list\.length; i \+= per\) \{ n \+= api\.ingest\(list\.slice\(i, i \+ per\), \{ tick: false \}\); await maybeYield\(\); \}/, '조각마다 양보');
     // 조각 크기 지정 · 중복은 해시로 한 번
     const n2 = await db.ingestAsync(rows.slice(0, 2500), { chunkRows: 100 });
     assert.equal(n2, 2500);
