@@ -209,7 +209,54 @@ export default function Upgrade() {
       <div className="section-title">시스템 자동 업그레이드 (관리자)</div>
       {reload.banner && <div className="card" data-reload-fail="" style={{ marginBottom: 10, padding: '8px 12px', color: 'var(--amber)', fontSize: 12, whiteSpace: 'normal' }}>{reload.banner}</div>}
 
-      {/* v2.736.2: 자동 업그레이드가 왜 안 되는지·다음 확인은 언제인지 — 맨 위에 먼저 말한다. */}
+      {/* v2.808: 자동 적용 체크와 저장·확인·적용·재시작 버튼을 화면 맨 위로 — 설정 카드 끝까지 한참 내려가야 했다(사용자 요청).
+          '설정 저장' 은 아래 '업그레이드 설정' 카드의 값도 함께 저장한다(폼은 하나). */}
+      <div className="card" style={{ marginBottom: 16, minWidth: 0 }}>
+        <label className="flex gap" style={{ alignItems: 'center', fontSize: 13 }}>
+          <input type="checkbox" checked={form.autoApply} onChange={setChk('autoApply')} />
+          <span>새 버전 발견 시 <b>자동 적용 + 재시작</b> (끄면 확인만 하고 수동 적용)</span>
+        </label>
+
+        {/* v2.580: 버튼 4개가 한 줄에 고정돼 400px 에서 83px 가로 넘침(Chromium A/B 실측 — 기존 결함). 줄바꿈 허용. */}
+        <div className="flex gap" style={{ marginTop: 14, flexWrap: 'wrap' }}>
+          <button className="login-btn" style={{ flex: 'none', padding: '10px 18px' }} disabled={busy} onClick={saveSettings}>
+            {busy === 'save' ? '저장 중…' : '설정 저장'}
+          </button>
+          {/* v2.736.2(리뷰 UPG-UI-05): 잠금은 **저장된** 설정 기준이다 — 서버는 저장값으로 판정한다(체크만 하고 누르면 409). */}
+          <button className="logout-btn" style={{ padding: '10px 18px' }} disabled={busy || !savedEnabled} title={lockTitle}
+            onClick={() => run('check', () => postJson('/upgrade/check'))}>
+            {busy === 'check' ? '확인 중…' : '새 버전 확인'}
+          </button>
+          <button className="login-btn" style={{ flex: 'none', padding: '10px 18px', background: newer ? 'linear-gradient(135deg,var(--green),#16a34a)' : undefined }}
+            disabled={busy || !savedEnabled || !newer} title={lockTitle} onClick={() => {
+              // v2.737: 수동 적용은 실행 중 스캔을 기다리지 않는다 — 끊긴다는 사실을 먼저 말한다(재시작 뒤 자동 재개).
+              const warn = runningScanWarning(status);
+              if (warn && !window.confirm(warn)) return;
+              run('apply', () => postJson('/upgrade/apply', { source: 'auto', restart: true }));
+            }}>
+            {busy === 'apply' ? '적용 중…' : '업그레이드 적용 + 재시작'}
+          </button>
+          <button className="logout-btn" style={{ padding: '10px 18px' }} disabled={busy}
+            onClick={() => { const warn = runningScanWarning(status); if (warn && !window.confirm(warn)) return; run('restart', () => postJson('/upgrade/restart')); }}>
+            {busy === 'restart' ? '재시작 중…' : '프로세스 재시작'}
+          </button>
+        </div>
+
+        {/* v2.736.2: 문구는 actionMsg 하나 — 예전에는 '새 버전 확인' 응답에 ok 가 없어 확인이 성공해도 '실패' 로 보였다. */}
+        {msg && (() => {
+          const m = actionMsg(msg.action, msg.r);
+          const good = m.ok && !m.warn;
+          return (
+            <div style={{ marginTop: 14, padding: '10px 12px', borderRadius: 8, whiteSpace: 'normal', wordBreak: 'break-word',
+              background: good ? 'rgba(34,197,94,.12)' : 'rgba(245,158,11,.12)',
+              color: good ? '#4ade80' : '#fbbf24', fontSize: 13 }}>
+              <b>{m.label}</b> · {m.text}
+            </div>
+          );
+        })()}
+      </div>
+
+      {/* v2.736.2: 자동 업그레이드가 왜 안 되는지·다음 확인은 언제인지 — 실행 줄 바로 아래에 말한다. */}
       <AutoCard status={status} />
 
       {/* 현재 상태 + 최근 확인 결과 — 화면 최상단(설정 위)에 먼저 보여준다. */}
@@ -325,48 +372,7 @@ export default function Upgrade() {
           </div>
         </div>
 
-        <label className="flex gap" style={{ alignItems: 'center', fontSize: 13, marginTop: 10 }}>
-          <input type="checkbox" checked={form.autoApply} onChange={setChk('autoApply')} />
-          <span>새 버전 발견 시 <b>자동 적용 + 재시작</b> (끄면 확인만 하고 수동 적용)</span>
-        </label>
-
-        {/* v2.580: 버튼 4개가 한 줄에 고정돼 400px 에서 83px 가로 넘침(Chromium A/B 실측 — 기존 결함). 줄바꿈 허용. */}
-        <div className="flex gap" style={{ marginTop: 14, flexWrap: 'wrap' }}>
-          <button className="login-btn" style={{ flex: 'none', padding: '10px 18px' }} disabled={busy} onClick={saveSettings}>
-            {busy === 'save' ? '저장 중…' : '설정 저장'}
-          </button>
-          {/* v2.736.2(리뷰 UPG-UI-05): 잠금은 **저장된** 설정 기준이다 — 서버는 저장값으로 판정한다(체크만 하고 누르면 409). */}
-          <button className="logout-btn" style={{ padding: '10px 18px' }} disabled={busy || !savedEnabled} title={lockTitle}
-            onClick={() => run('check', () => postJson('/upgrade/check'))}>
-            {busy === 'check' ? '확인 중…' : '새 버전 확인'}
-          </button>
-          <button className="login-btn" style={{ flex: 'none', padding: '10px 18px', background: newer ? 'linear-gradient(135deg,var(--green),#16a34a)' : undefined }}
-            disabled={busy || !savedEnabled || !newer} title={lockTitle} onClick={() => {
-              // v2.737: 수동 적용은 실행 중 스캔을 기다리지 않는다 — 끊긴다는 사실을 먼저 말한다(재시작 뒤 자동 재개).
-              const warn = runningScanWarning(status);
-              if (warn && !window.confirm(warn)) return;
-              run('apply', () => postJson('/upgrade/apply', { source: 'auto', restart: true }));
-            }}>
-            {busy === 'apply' ? '적용 중…' : '업그레이드 적용 + 재시작'}
-          </button>
-          <button className="logout-btn" style={{ padding: '10px 18px' }} disabled={busy}
-            onClick={() => { const warn = runningScanWarning(status); if (warn && !window.confirm(warn)) return; run('restart', () => postJson('/upgrade/restart')); }}>
-            {busy === 'restart' ? '재시작 중…' : '프로세스 재시작'}
-          </button>
-        </div>
-
-        {/* v2.736.2: 문구는 actionMsg 하나 — 예전에는 '새 버전 확인' 응답에 ok 가 없어 확인이 성공해도 '실패' 로 보였다. */}
-        {msg && (() => {
-          const m = actionMsg(msg.action, msg.r);
-          const good = m.ok && !m.warn;
-          return (
-            <div style={{ marginTop: 14, padding: '10px 12px', borderRadius: 8, whiteSpace: 'normal', wordBreak: 'break-word',
-              background: good ? 'rgba(34,197,94,.12)' : 'rgba(245,158,11,.12)',
-              color: good ? '#4ade80' : '#fbbf24', fontSize: 13 }}>
-              <b>{m.label}</b> · {m.text}
-            </div>
-          );
-        })()}
+        <div className="muted" style={{ marginTop: 12, fontSize: 12, whiteSpace: 'normal' }}>바꾼 값은 화면 맨 위의 ‘설정 저장’ 버튼으로 저장합니다.</div>
       </div>
 
       {result && (
