@@ -7,6 +7,7 @@
  * and can be reloaded at runtime. Everything is a no-op unless enabled.
  */
 
+import path from 'node:path';
 import { currentVersion, config } from '../config.js';
 import { loadSettings, saveSettings, redactSettings, clampPollMs } from './settings.js';
 import { checkpointConfigDbs } from './dbCheckpoint.js';
@@ -14,7 +15,7 @@ import {
   findNewerArchive, upgradeFromArchive, checkRemote, upgradeFromRemote,
   restartProcess, pushBundleToEdge, vstr, safeUrlText,
 } from './upgrade.js';
-import { signatureStatus } from './signature.js';     // v2.730(검토 S-10): 화면이 서명 검증 상태를 보인다
+import { signatureStatus, manifestPathForArchive, readManifestFile } from './signature.js';     // v2.730(검토 S-10): 화면이 서명 검증 상태를 보인다
 import { rememberRemoteCheck } from './versionsDoc.js'; // v2.730(검토 I-08): 직전 정상 확인 결과 유지 계약
 import { resolveBundleBytes, bundleFromArchive, lastBundleReject } from './bundleSource.js';
 import { pushUpgradeToCollectors, pushConcurrencyOf } from '../collector/upgradePush.js'; // v2.741(TIMING-07): push 동시 개수(엣지 push 도 같은 값)
@@ -259,7 +260,11 @@ export class UpgradeManager {
 
     if (s.watchDir) {
       const found = findNewerArchive(s.watchDir, cur);
-      result.watch = found ? { available: true, version: vstr(found.version), path: found.path } : { available: false };
+      // v2.809: 번들 옆 서명 manifest 가 있는지 미리 알린다(없으면 적용이 manifest-missing 으로 거부된다) — 있는지만 본다(서명 확인은 적용 때)
+      const manPath = found ? manifestPathForArchive(found.path) : null;
+      result.watch = found
+        ? { available: true, version: vstr(found.version), path: found.path, manifest: manPath ? path.basename(manPath) : null, hasManifest: !!readManifestFile(manPath) }
+        : { available: false };
     }
     if (s.remoteBase) {
       // v2.730(I-08): 실패한 확인은 직전 정상값을 `lastGood` 으로 **참고만** 싣는다 — available 은 이번 확인 기준(false)이고,

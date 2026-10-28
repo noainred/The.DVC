@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { fetchJson, postJson, putJson } from '../api.js';
 import { Loading, ErrorBox, StateBadge } from '../components/ui.jsx';
 import { pollMinutesOf, pollIsOff, pollIntervalPatch } from './settingsFormDiff.js'; // v2.630 WEB2630-01
-import { policyText, trustText, lastVerifyText, recentVerifyList, logIssueText, countsText, remoteLastGoodText, TONE_COLOR } from './upgradeSignatureText.js'; // v2.730 S-10 · v2.736.1 기록
+import { policyText, trustText, lastVerifyText, recentVerifyList, logIssueText, countsText, remoteLastGoodText, watchManifestWarn, overrideView, OVERRIDE_HOURS, overrideHoursLabel, TONE_COLOR } from './upgradeSignatureText.js'; // v2.730 S-10 · v2.736.1 기록
 import { droppedSecretNote } from './droppedSecretText.js'; // v2.731(A3-01 ①): 주소가 바뀌어 저장 토큰을 폐기한 사실
 // v2.736.2: 자동 업그레이드가 지금 동작하는가 · 왜 안 하는가 · 다음 확인은 언제인가(판정은 서버 autoState.js, 문장은 여기).
 import { autoSummary, autoApplyRowText, noTickText, resultSummary, actionMsg, restoredNote, triggerText, remoteSourceLabel, runningScanWarning } from './upgradeAutoText.js';
@@ -42,8 +42,65 @@ function Toned({ v }) {
   return <span style={{ color: TONE_COLOR[v.tone] || 'inherit', whiteSpace: 'normal' }}>{v.text}</span>;
 }
 
+/**
+ * v2.810 서명 확인 시한부 끄기·다시 켜기(사용자 요청 — 결정: 확인 불가만 허용 · 설정 소유자 + OTP 재인증 + 감사 · 시한 후 자동 복구).
+ * 판정·권한은 서버(PUT /upgrade/signature-override) — 화면은 상태를 보이고 요청만 보낸다. 소유자가 아니면 서버 403 을 그대로 말한다.
+ */
+function OverrideControl({ sig, onChanged }) {
+  const [open, setOpen] = useState(false);
+  const [hours, setHours] = useState(24);
+  const [otp, setOtp] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState(null);
+  const v = overrideView(sig);
+  if (v.state === 'unknown' || v.state === 'na') return null;
+  const send = async (body) => {
+    setBusy(true); setMsg(null);
+    try {
+      const r = await putJson('/upgrade/signature-override', body);
+      if (r && r.ok === false) setMsg({ ok: false, text: r.reason || '실패' });
+      else { setMsg({ ok: true, text: body.verify ? '서명 확인을 다시 켰습니다.' : `서명 확인을 ${overrideHoursLabel(r.hours)} 동안 껐습니다.${r.warning ? ` ${r.warning}` : ''}` }); setOpen(false); setOtp(''); onChanged?.(); }
+    } catch (e) { setMsg({ ok: false, text: e.message }); }
+    finally { setBusy(false); }
+  };
+  return (
+    <div data-sig-override="" style={{ marginTop: 10, borderTop: '1px solid rgba(255,255,255,.08)', paddingTop: 10 }}>
+      <div className="flex gap wrap" style={{ alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+        <span className="muted" style={{ flex: 'none' }}>화면 설정</span>
+        <span style={{ color: TONE_COLOR[v.tone] || 'inherit', whiteSpace: 'normal', minWidth: 0, flex: '1 1 240px' }}>{v.text}</span>
+        {v.state === 'off' && <button type="button" className="tab" disabled={busy} onClick={() => send({ verify: true })}>지금 다시 켜기</button>}
+        {v.state === 'on' && !open && <button type="button" className="tab" disabled={busy} onClick={() => { setOpen(true); setMsg(null); }}>서명 확인 끄기…</button>}
+      </div>
+      {v.state === 'on' && open && (
+        <div style={{ marginTop: 8, padding: '10px 12px', borderRadius: 8, background: 'rgba(239,68,68,.08)', border: '1px solid rgba(239,68,68,.25)' }}>
+          <div style={{ fontSize: 12, whiteSpace: 'normal', marginBottom: 8 }}>
+            끄는 동안 서명을 확인할 수 없는 번들(manifest 없음·받지 못함)도 <b>경고 후 설치</b>합니다. 틀린 서명·회수된 키·버전이 맞지 않는 번들은 계속 거부합니다.
+            시한이 지나면 자동으로 다시 켜집니다. 설정 소유자만 바꿀 수 있고 감사 로그에 남습니다.
+          </div>
+          <div className="flex gap wrap" style={{ alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+            <span className="muted">시한</span>
+            {OVERRIDE_HOURS.map((h) => (
+              <button key={h} type="button" className={`tab${hours === h ? ' active' : ''}`} aria-pressed={hours === h} onClick={() => setHours(h)}>{overrideHoursLabel(h)}</button>
+            ))}
+          </div>
+          <div className="flex gap wrap" style={{ alignItems: 'center', gap: 8, marginTop: 8, flexWrap: 'wrap' }}>
+            <span className="muted">본인 OTP 6자리</span>
+            <input className="input" inputMode="numeric" autoComplete="one-time-code" placeholder="000000" maxLength={6} style={{ width: 120, letterSpacing: 3 }}
+              value={otp} onChange={(e) => setOtp(e.target.value.replace(/\D/g, '').slice(0, 6))} />
+            <button type="button" className="login-btn" style={{ flex: 'none', padding: '6px 14px', background: 'var(--red)' }} disabled={busy} onClick={() => send({ verify: false, hours, otp: otp.trim() })}>
+              {busy ? '저장 중…' : `${overrideHoursLabel(hours)} 동안 끄기`}
+            </button>
+            <button type="button" className="tab" disabled={busy} onClick={() => { setOpen(false); setOtp(''); }}>취소</button>
+          </div>
+        </div>
+      )}
+      {msg && <div style={{ marginTop: 6, fontSize: 12, whiteSpace: 'normal', color: msg.ok ? 'var(--green)' : 'var(--red)' }}>{msg.text}</div>}
+    </div>
+  );
+}
+
 /** 릴리스 서명 상태 — 짧게(정책·신뢰 키 수·마지막 검증). 판정은 서버, 문구는 upgradeSignatureText.js. */
-function SignatureCard({ sig }) {
+function SignatureCard({ sig, onChanged }) {
   const pol = policyText(sig);
   const trust = trustText(sig);
   const last = lastVerifyText(sig);
@@ -71,8 +128,9 @@ function SignatureCard({ sig }) {
       )}
       {logIssue && <div style={{ marginTop: 4, fontSize: 11.5, color: TONE_COLOR.warn, whiteSpace: 'normal' }}>{logIssue}</div>}
       {counts && <div className="muted" style={{ marginTop: 4, fontSize: 11.5 }}>{counts}</div>}
+      <OverrideControl sig={sig} onChanged={onChanged} />
       <div className="muted" style={{ marginTop: 6, fontSize: 11.5, whiteSpace: 'normal' }}>
-        서명 정책은 화면에서 바꿀 수 없습니다 — 호스트의 portal.env 와 docs/RELEASE-SIGNING.md 를 보세요.
+        호스트 portal.env 의 UPGRADE_SIGNATURE_POLICY 가 정해져 있으면 그 값이 우선합니다 — docs/RELEASE-SIGNING.md 를 보세요.
       </div>
     </div>
   );
@@ -291,6 +349,9 @@ export default function Upgrade() {
               {check.watch && <Row label="감시 폴더">{check.watch.available
                 ? <b style={{ color: 'var(--green)' }}>새 버전 v{check.watch.version}</b>
                 : <span className="muted">최신</span>}</Row>}
+              {watchManifestWarn(check.watch) && (
+                <div data-watch-manifest="" style={{ fontSize: 12, padding: '4px 0', whiteSpace: 'normal', color: TONE_COLOR.warn }}>{watchManifestWarn(check.watch)}</div>
+              )}
               {check.remote && <Row label={remoteSourceLabel(check.remote.source)}>{check.remote.available
                 ? <b style={{ color: 'var(--green)' }}>새 버전 v{check.remote.latest}</b>
                 : <span className="muted" style={{ whiteSpace: 'normal' }}>{check.remote.error ? `오류: ${check.remote.error}` : `최신 (v${check.remote.latest || '?'})`}</span>}</Row>}
@@ -304,8 +365,8 @@ export default function Upgrade() {
         </div>
       </div>
 
-      {/* v2.730 S-10: 릴리스 서명 — 정책·신뢰 공개키·마지막 검증. 설정은 화면에서 바꾸지 않는다(호스트 portal.env · docs/RELEASE-SIGNING.md). */}
-      <SignatureCard sig={status.signature} />
+      {/* v2.730 S-10: 릴리스 서명 — 정책·신뢰 공개키·마지막 검증. v2.810: 시한부 끄기만 화면에서(소유자 + OTP) — 그 밖은 호스트 portal.env · docs/RELEASE-SIGNING.md. */}
+      <SignatureCard sig={status.signature} onChanged={load} />
 
       {/* Editable settings */}
       <div className="card" style={{ marginBottom: 16 }}>

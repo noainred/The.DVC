@@ -46,6 +46,8 @@ export const DATA_FILE_NAMES = new Set(['central-inventory.json', 'central-agent
  */
 export const RESTORE_EXCLUDE = new Map([
   ['session-state.json', '세션 폐기 목록 — 되돌리면 백업 이후 로그아웃한 세션이 되살아난다'],
+  // v2.809(반증 M-2): 서명 확인 시한부 끄기 — 되돌리면 소유자가 다시 켠 뒤에도 OTP 재인증 없이 '꺼짐' 이 되살아난다
+  ['upgrade-signature-override.json', '업그레이드 서명 확인 끄기 — 되돌리면 다시 켠 서명 확인이 OTP 재인증 없이 꺼진다'],
 ]);
 /** 예약 파일 읽기 상한 — 번들 해제 상한(64MB)의 JSON 이스케이프 팽창까지 감안한 여유. 넘으면 적용하지 않는다. */
 export const STAGED_MAX_BYTES = 512 * 1024 * 1024;
