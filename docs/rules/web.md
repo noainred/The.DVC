@@ -25,6 +25,7 @@
 - (원래 4643행) Optimization(`#/tools/waste`) 화면은 시안 A 배치다 — 계산은 `views/tools/wasteViewText.js` 하나
 - (v2.764 추가) ESXi 호스트(`#/hosts`) 화면은 시안 B '이상 우선' 배치다 — 판정은 `views/hostTriage.js` 하나
 - (v2.805 추가) ESXi 호스트 화면의 '엑셀 수준 상세' — 열 묶음 9개·점검 열은 `views/hostChecksText.js` + 서버 `/hosts/checks` · 상세는 전체 페이지 `#/hosts/<id>`(모달 구성요소 공용)
+- (v2.810 추가) ESXi 호스트 화면의 '법인별' 보기 — 숫자·판정은 서버 `/hosts/corp`(`vcenter/hostCorp.js`), 글자·색은 `views/hostCorpText.js`
 - (원래 5663행) v2.708 — 드롭다운은 공용 `Select`·`DataList` 하나다(자동 정렬)
 - (원래 5801행) 특수 기능 화면(v2.679) — 표시 이름·설명·개발 단계는 '덮어쓰기' 이고 키는 그대로다
 - (원래 5848행) 접속 공지 팝업 · 게시판(v2.722)
@@ -301,6 +302,16 @@
   · 상세는 `#/hosts/<id>`(Hosts.jsx 가 해시 둘째 조각으로 가른다 — 탭 id 는 그대로 `hosts`). **모달과 같은 구성요소**(`EntityDetail.jsx` 의 `HostBasicRows`·`HostCfgSection`·`PerfcSection`·
     `ClusterCfgSection`·`HostHbaTable` + `HostGpuPanel`·`HostPowerPanel`·`HostMetricButton`·`IdracTrendLinkButton`·`HostVmsModal`)를 export 해 쓴다 — 화면을 복제하지 않는다. 호스트 한 대는
     `GET /hosts/:id`(범위 밖 404 — `/hosts/checks` 를 먼저 등록해 'checks' 가 id 로 잡히지 않게). 정직 기록: 목 데이터 호스트는 NIC 인벤토리가 없어 네트워크 표는 '없음' 문구만 봤다.
+- **v2.810 — ESXi 호스트 화면의 '법인별' 보기(승인 시안 B https://claude.ai/artifact/JGykMmoG7kAyNsa5y4uG1x)** — 사용자 선택 2026-10-28: 서버 집계 API 신설 · 시안 판정 그대로 ·
+  기본 정렬 리전 › 이름 · 같은 화면의 '호스트별 | 법인별' 전환(`localStorage dvc.hosts.view`). 회귀 `hostCorpText.test.js` + `server/test/hostCorp2810.test.js`:
+  · 숫자·판정(법인 위험/주의/모름 · 확인 사유 · CPU 구간 · 여유 메모리 · 과할당 비율)은 서버 `GET /hosts/corp`(`vcenter/hostCorp.js` 순수) 하나 — 화면에서 다시 세지 말 것.
+    CPU 구간 경계는 웹 `hostTriage.cpuBucket` 과 두 벌이라 서버 테스트가 같은 입력으로 대조한다. N+1 은 '인사이트' 와 같은 `clustercfg/n1.js n1Groups`(v2.810 에 옮겼다).
+  · 클러스터 구성(HA·수용 제어·DRS·EVC)·N+1 은 '클러스터 HA·DRS 점검' 과 같은 권한(`accessOf().cluster`)일 때만 응답에 실린다 — 없으면 키 자체가 없고 화면은 그 열을 뺀다.
+  · RTT 는 핑 모니터가 저장한 vCenter 대상의 마지막 값이다(요청마다 실시간 측정 금지 — `/tools/network-check` 는 최대 5초 프로브). 30분보다 오래된 값은 흐리게.
+  · 호스트를 모르는 법인(첫 수집 중·비활성·이월 값 없는 연결 실패)은 개수를 null('—')로 둔다 — 표지는 `corpSiteStatus` 그대로. 요약 합에서는 빼고 '미수집 N곳 제외' 를 밝힌다.
+  · 과할당 비율은 용량(코어·메모리)을 하나라도 못 읽은 법인·클러스터에서 null — 분자만 남은 비율 금지(`toolsCapacity` 와 같은 규칙). vCPU 합은 템플릿 제외(`vmSumsOf`).
+  · 표는 `STable`(법인 열 sticky · `data-sort` 로 null 뒤로). 패널은 콘텐츠가 넓을 때(창 1600px 이상)만 표 옆, 그보다 좁으면 표 아래로 내려가고 행을 고르면 그 패널로 스크롤한다.
+    펼친 클러스터의 호스트 표는 `limit` 8 + '호스트 N대 모두 보기 — 호스트별 보기로'(그 클러스터 focus 로 내려간다).
 - ⚠⚠ **v2.708 — 드롭다운은 공용 `Select`·`DataList` 하나다(자동 정렬)**(`web/src/components/`{Select.jsx,DataList.jsx,selectSort.js}, 사용자 요청 "모든 드랍박스 메뉴를 소팅되서 보이게 하고 앞으로 만들면 소팅"):
   · 날 `<select>`·`<datalist>` 는 eslint `no-restricted-syntax` 와 `selectSort.test.js` 스윕이 막는다. 선택지는 보이는 글자 순(숫자 인식 — vcenter-2 < vcenter-10),
     value ''·'all'·'*'·'__…' 이거나 글자가 '전체·모든·—·(·선택' 으로 시작하거나 `data-pin` 이면 맨 위 고정.

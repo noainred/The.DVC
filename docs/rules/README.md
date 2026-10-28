@@ -9,7 +9,7 @@
 | [perf-db.md](perf-db.md) | 24 | 성능·DB·폴러 규약 | 폴러·DB 모듈·캐시·대량 쓰기·응답 캐시를 새로 만들거나 고칠 때 |
 | [common.md](common.md) | 11 | 공통 코드·테스트·문서 규약(numOrNull·주석 제거·TDZ·생성기·의존 방향·릴리스 워크플로) | 테스트·스윕·문서 생성기·릴리스 워크플로를 만질 때 |
 | [security-api.md](security-api.md) | 16 | 보안·라우트·외부 API·감사 로그·라이선스 | server/src/routes/ · publicapi · auth · 압축 해제 · CSP |
-| [web.md](web.md) | 23 | 웹 화면·메뉴·표·문구 규약 | web/src/ 전반(메뉴·사이드바·표·문구·드롭다운·게시판) |
+| [web.md](web.md) | 24 | 웹 화면·메뉴·표·문구 규약 | web/src/ 전반(메뉴·사이드바·표·문구·드롭다운·게시판) |
 | [edge.md](edge.md) | 18 | 중앙↔엣지 통신·엣지 로그·통신 점검·토큰 점검·지도·전송 속도·스캔 재개 | server/src/{agent,central,collector,linkcheck,edgelog,portalcheck,commmap,dataflow,devflow,xferspeed}/ |
 | [storage.md](storage.md) | 34 | 스토리지 모니터링·증가량·Unity/PowerMax·전력·시리얼 | server/src/storage/ · web/src/views/tools/Storage* · bmstor |
 | [sanswitch.md](sanswitch.md) | 16 | SAN 스위치(수집·조닝·사용량·월간 점검) | server/src/sanswitch/ · web/src/views/tools/SanSwitch*·san* |

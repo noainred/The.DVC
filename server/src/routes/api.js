@@ -12,6 +12,7 @@ import { registerSearchNotes } from './api/searchNotes.js';
 import { registerIpamExport } from './api/ipamExport.js';
 import { registerVmExport } from './api/vmExport.js';   // v2.799 VM 전체 정보 내보내기(ipamExport.js 에서 옮김)
 import { registerHostExport } from './api/hostExport.js'; // v2.802 vCenter 화면 '호스트 · 클러스터 엑셀'(호스트 1대 = 시트 1장)
+import { registerHostCorp } from './api/hostCorp.js'; // v2.810 ESXi 호스트 화면 '법인별' 보기 집계(/hosts/:id 보다 먼저)
 import { registerHostChecks } from './api/hostChecks.js'; // v2.805 ESXi 호스트 화면 '점검' 열 집계 + 호스트 단건(상세 페이지)
 import { registerHardwareGpu } from './api/hardwareGpu.js';
 import { registerChecksLogs } from './api/checksLogs.js';
@@ -110,6 +111,7 @@ registerSearchNotes(api);
 registerIpamExport(api);
 registerVmExport(api);
 registerHostExport(api);
+registerHostCorp(api);
 registerHostChecks(api);
 registerHardwareGpu(api);
 registerChecksLogs(api);

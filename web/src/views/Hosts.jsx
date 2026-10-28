@@ -13,10 +13,12 @@ import { CPU_ATTENTION_PCT, CPU_BUCKETS, hostReasons, triageCounts, cpuDistribut
 import {
   COL_GROUPS, FIXED_GROUP, readColPrefs, writeColPrefs, visibleColumns, secCountsOf, secText, secTone, uplinkDownOf, nicLinkDownOf, deadPathsOf, lunsOf,
   uptimeDays, coresText, gbText, kwText, ratioText, hwCell, bootCell, veeamCell, hostKpis, chipCounts, filterHostsExt, focusLabelExt,
+  readHostsView, writeHostsView,   // v2.810 보기(호스트별 · 법인별) 기억
 } from './hostChecksText.js';
 
 const HostDetail = React.lazy(() => import('./HostDetail.jsx'));          // v2.805 전체 페이지 상세(#/hosts/<id>)
 const HostExportDialog = React.lazy(() => import('./HostExportDialog.jsx')); // v2.802 호스트 · 클러스터 엑셀(vCenter 단위)
+const HostsCorp = React.lazy(() => import('./HostsCorp.jsx'));               // v2.810 '법인별' 보기(승인 시안 B https://claude.ai/artifact/JGykMmoG7kAyNsa5y4uG1x)
 
 const TILE_LIMIT = 12; // 처음엔 '먼저 볼' 클러스터만 — 나머지는 '모두 보기'
 const TILE_LIMIT_NARROW = 4; // 720px 이하는 4개(styles.css .ht-tiles) — 12개가 세로로 쌓이면 표까지 스크롤이 너무 길다(Chromium 400px 판독)
@@ -40,6 +42,8 @@ export default function Hosts({ filters }) {
   const [exportVc, setExportVc] = useState('');
   const [exportOpen, setExportOpen] = useState(false);
   const [exportPick, setExportPick] = useState(false);
+  const [view, setViewState] = useState(readHostsView);
+  const setView = (v) => { setViewState(v); writeHostsView(v); };
   const filtersKey = JSON.stringify(filters || {});
 
   useEffect(() => {
@@ -56,7 +60,8 @@ export default function Hosts({ filters }) {
       .catch((e) => { if (seq === checksSeq.current) setChecksErr(e?.message || String(e)); })
       .finally(() => { if (seq === checksSeq.current) setChecksBusy(false); });
   }, [filtersKey]);
-  useEffect(() => { if (!hostId) loadChecks(); }, [loadChecks, hostId]);
+  // 점검 집계는 호스트별 보기에서만 읽는다(법인별 보기는 /hosts/corp 를 쓴다 — 무거운 집계를 쓸데없이 부르지 않게).
+  useEffect(() => { if (!hostId && view === 'host') loadChecks(); }, [loadChecks, hostId, view]);
 
   const rows = useMemo(() => data?.items || [], [data]);
   // 구성·보안 판정은 호스트당 한 번(표·칩·거르기가 같은 결과를 쓴다). 폴링마다 다시 센다.
@@ -104,6 +109,9 @@ export default function Hosts({ filters }) {
     if (vcIds.length === 1) { setExportVc(vcIds[0]); setExportOpen(true); return; }
     setExportPick((v) => !v);
   };
+
+  // 법인별 보기 → 호스트별 보기의 그 클러스터(hostTriage.clusterKey 와 같은 키)로 내려간다.
+  const openCluster = (vc, cluster) => { setView('host'); setTab('all'); setFocus({ kind: 'cluster', value: `${vc}\t${cluster || 'standalone'}` }); window.scrollTo({ top: 0 }); };
 
   const cards = [
     { kind: 'maint', n: counts.maint, title: '점검(Maintenance) 모드', sub: '유지보수 상태 호스트', tone: 'amber' },
@@ -178,9 +186,13 @@ export default function Hosts({ filters }) {
           <span className="muted">vCenter {fmt(vcIds.length)} · 호스트 {fmt(rows.length)}{data.generatedAt ? ` · 인벤토리 ${new Date(data.generatedAt).toLocaleTimeString('ko-KR')}` : ''}</span>
         </div>
         <div className="ht-actions">
-          <button type="button" className="btn" onClick={loadChecks} disabled={checksBusy} title="iDRAC 부품 · 최근 재부팅 · Veeam 집계를 다시 읽습니다(무거운 집계라 자동 갱신하지 않습니다)">
+          <div className="hc-seg" role="group" aria-label="보기">
+            <button type="button" className={view === 'host' ? 'hc-seg-on' : ''} aria-pressed={view === 'host'} onClick={() => setView('host')}>호스트별</button>
+            <button type="button" className={view === 'corp' ? 'hc-seg-on' : ''} aria-pressed={view === 'corp'} onClick={() => setView('corp')}>법인별</button>
+          </div>
+          {view === 'host' && <button type="button" className="btn" onClick={loadChecks} disabled={checksBusy} title="iDRAC 부품 · 최근 재부팅 · Veeam 집계를 다시 읽습니다(무거운 집계라 자동 갱신하지 않습니다)">
             {checksBusy ? '점검 집계 읽는 중…' : `점검 집계 다시 읽기${checks?.at ? ` (${new Date(checks.at).toLocaleTimeString('ko-KR')})` : ''}`}
-          </button>
+          </button>}
           {csvOk && <button type="button" className="btn primary" onClick={openExport}>⤓ 호스트·클러스터 엑셀…</button>}
         </div>
       </div>
@@ -194,160 +206,169 @@ export default function Hosts({ filters }) {
           <button type="button" className="btn" disabled={!exportVc} onClick={() => { setExportOpen(true); setExportPick(false); }}>열기</button>
         </div>
       )}
-      {checksErr && <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>점검 집계를 읽지 못했습니다({checksErr}) — iDRAC · 재부팅 · Veeam 열은 ‘—’ 로 둡니다.</div>}
-
-      {s && (
-        <div className="ht-kpis" aria-label="글로벌 호스트 요약">
-          {kpis.map((k) => (
-            <div key={k.key} className="ht-kpi">
-              <span className="ht-kpi-l">{k.label}</span>
-              <span className="ht-kpi-v"><b style={{ color: KPI_COLOR[k.tone] || 'var(--text)' }}>{k.value}</b>{k.unit ? <small>{k.unit}</small> : null}</span>
-              <span className="ht-kpi-bar"><i style={{ width: `${Math.round(Math.max(0, Math.min(1, k.bar || 0)) * 100)}%`, background: KPI_COLOR[k.tone] || 'var(--text-dim)' }} /></span>
-              {k.key === 'ver' && k.versions?.length ? (
-                <span className="ht-kpi-s ht-kpi-ver" title={k.versions.map((v) => `${v.version} · ${v.count}`).join(' / ')}>{k.versions.slice(0, 3).map((v) => <span key={v.version} className="badge blue" title={`${v.count} 호스트`}>{v.version} · {v.count}</span>)}{k.versions.length > 3 ? <span className="muted">+{k.versions.length - 3}</span> : null}</span>
-              ) : <span className="ht-kpi-s" title={k.sub}>{k.sub}</span>}
-            </div>
-          ))}
-        </div>
+      {view === 'host' && checksErr && <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>점검 집계를 읽지 못했습니다({checksErr}) — iDRAC · 재부팅 · Veeam 열은 ‘—’ 로 둡니다.</div>}
+      {view === 'corp' && (
+        <React.Suspense fallback={<Loading />}>
+          <HostsCorp filters={filters} rows={rows} onOpenCluster={openCluster} />
+        </React.Suspense>
       )}
+      {view === 'host' && (
+        <>
 
-      <section className="card ht-checks" aria-label="지금 확인할 것">
-        <div className="ht-head">
-          <b>지금 확인할 것</b>
-          <span className="muted">엑셀 ‘요약’ 시트의 확인 목록과 같은 판정 · 누르면 아래 목록이 그 호스트만 보입니다 · 확인 대상 <b style={{ color: 'var(--text)' }}>{fmt(counts.attention)}</b> / {fmt(rows.length)}</span>
-        </div>
-        <div className="ht-cards">
-          {cards.map((c) => (
-            <button
-              key={c.kind}
-              type="button"
-              className={`ht-card${c.n > 0 ? ` ht-card-${c.tone}` : ''}${isFocus(c.kind, undefined) ? ' ht-on' : ''}`}
-              onClick={() => pick({ kind: c.kind }, 'attention')}
-              disabled={c.n === 0}
-              aria-pressed={isFocus(c.kind, undefined)}
-              title={c.n > 0 ? '눌러서 이 호스트만 보기(다시 누르면 해제)' : '해당 호스트 없음'}
-            >
-              <span className="ht-card-n">{fmt(c.n)}</span>
-              <span className="ht-card-t"><b>{c.title}</b><span className="muted">{c.sub}</span></span>
-            </button>
-          ))}
-        </div>
-        <div className="ht-chips">
-          {chips.map((c) => (
-            <button
-              key={c.kind}
-              type="button"
-              className={`ht-chipbtn${isFocus(c.kind, undefined) ? ' ht-on' : ''}`}
-              onClick={() => pick({ kind: c.kind }, 'all')}
-              disabled={!c.n}
-              aria-pressed={isFocus(c.kind, undefined)}
-              title={c.n == null ? `셀 수 없음 — ${c.why}` : c.n > 0 ? '눌러서 이 호스트만 보기(다시 누르면 해제)' : '해당 호스트 없음'}
-            >
-              <i className="ht-gdot" style={{ background: c.tone === 'red' ? 'var(--red)' : c.tone === 'amber' ? 'var(--amber)' : 'var(--text-dim)' }} aria-hidden="true" />
-              <span>{c.label}</span>
-              <b className="tabular" style={{ color: c.n ? (c.tone === 'red' ? '#f87171' : '#fbbf24') : 'var(--text-dim)' }}>{c.n == null ? '—' : fmt(c.n)}</b>
-            </button>
-          ))}
-        </div>
-      </section>
-
-      <div className="ht-panels">
-        <section className="card ht-heat" aria-label="클러스터별 호스트 CPU">
-          <div className="ht-head">
-            <b>클러스터별 호스트 CPU</b>
-            <span className="ht-legend">
-              {CPU_BUCKETS.map((b) => <span key={b.key}><i className={`ht-cell ht-b-${b.key}`} />{b.label}</span>)}
-            </span>
+        {s && (
+          <div className="ht-kpis" aria-label="글로벌 호스트 요약">
+            {kpis.map((k) => (
+              <div key={k.key} className="ht-kpi">
+                <span className="ht-kpi-l">{k.label}</span>
+                <span className="ht-kpi-v"><b style={{ color: KPI_COLOR[k.tone] || 'var(--text)' }}>{k.value}</b>{k.unit ? <small>{k.unit}</small> : null}</span>
+                <span className="ht-kpi-bar"><i style={{ width: `${Math.round(Math.max(0, Math.min(1, k.bar || 0)) * 100)}%`, background: KPI_COLOR[k.tone] || 'var(--text-dim)' }} /></span>
+                {k.key === 'ver' && k.versions?.length ? (
+                  <span className="ht-kpi-s ht-kpi-ver" title={k.versions.map((v) => `${v.version} · ${v.count}`).join(' / ')}>{k.versions.slice(0, 3).map((v) => <span key={v.version} className="badge blue" title={`${v.count} 호스트`}>{v.version} · {v.count}</span>)}{k.versions.length > 3 ? <span className="muted">+{k.versions.length - 3}</span> : null}</span>
+                ) : <span className="ht-kpi-s" title={k.sub}>{k.sub}</span>}
+              </div>
+            ))}
           </div>
-          {tiles.length === 0 && <div className="muted">호스트가 없습니다.</div>}
-          <div className={`ht-tiles${allTiles ? ' ht-all' : ''}`}>
-            {visibleTiles.map((t) => (
+        )}
+
+        <section className="card ht-checks" aria-label="지금 확인할 것">
+          <div className="ht-head">
+            <b>지금 확인할 것</b>
+            <span className="muted">엑셀 ‘요약’ 시트의 확인 목록과 같은 판정 · 누르면 아래 목록이 그 호스트만 보입니다 · 확인 대상 <b style={{ color: 'var(--text)' }}>{fmt(counts.attention)}</b> / {fmt(rows.length)}</span>
+          </div>
+          <div className="ht-cards">
+            {cards.map((c) => (
               <button
-                key={t.key}
+                key={c.kind}
                 type="button"
-                className={`ht-tile${t.attention > 0 ? ' ht-tile-hot' : ''}${isFocus('cluster', t.key) ? ' ht-on' : ''}`}
-                onClick={() => pick({ kind: 'cluster', value: t.key }, 'all')}
-                aria-pressed={isFocus('cluster', t.key)}
+                className={`ht-card${c.n > 0 ? ` ht-card-${c.tone}` : ''}${isFocus(c.kind, undefined) ? ' ht-on' : ''}`}
+                onClick={() => pick({ kind: c.kind }, 'attention')}
+                disabled={c.n === 0}
+                aria-pressed={isFocus(c.kind, undefined)}
+                title={c.n > 0 ? '눌러서 이 호스트만 보기(다시 누르면 해제)' : '해당 호스트 없음'}
               >
-                <span className="ht-tile-h">
-                  <span className="ht-tile-name" title={`${t.vcenterId} · ${t.cluster}`}><span className="muted">{t.vcenterId} · </span>{t.cluster}</span>
-                  <span className="muted tabular">{fmt(t.count)}</span>
-                </span>
-                <span className="ht-cells" aria-hidden="true">
-                  {t.cells.map((c, i) => <i key={`${c.name}-${i}`} className={`ht-cell ht-b-${c.bucket}`} title={`${c.name} — CPU ${pctText(c.pct)}`} />)}
-                </span>
-                <span className="muted tabular ht-tile-f">
-                  평균 {pctText(t.avg)} · 최대 {pctText(t.max)}
-                  {t.attention > 0 && <span className="badge red">확인 {t.attention}</span>}
-                </span>
+                <span className="ht-card-n">{fmt(c.n)}</span>
+                <span className="ht-card-t"><b>{c.title}</b><span className="muted">{c.sub}</span></span>
               </button>
             ))}
           </div>
-          {tiles.length > TILE_LIMIT_NARROW && (
-            <button type="button" className={`btn ht-more${tiles.length <= TILE_LIMIT ? ' ht-more-narrow' : ''}`} onClick={() => setAllTiles((v) => !v)}>
-              {allTiles ? '먼저 볼 클러스터만' : `모두 보기 (${fmt(tiles.length)}개 클러스터)`}
-            </button>
-          )}
+          <div className="ht-chips">
+            {chips.map((c) => (
+              <button
+                key={c.kind}
+                type="button"
+                className={`ht-chipbtn${isFocus(c.kind, undefined) ? ' ht-on' : ''}`}
+                onClick={() => pick({ kind: c.kind }, 'all')}
+                disabled={!c.n}
+                aria-pressed={isFocus(c.kind, undefined)}
+                title={c.n == null ? `셀 수 없음 — ${c.why}` : c.n > 0 ? '눌러서 이 호스트만 보기(다시 누르면 해제)' : '해당 호스트 없음'}
+              >
+                <i className="ht-gdot" style={{ background: c.tone === 'red' ? 'var(--red)' : c.tone === 'amber' ? 'var(--amber)' : 'var(--text-dim)' }} aria-hidden="true" />
+                <span>{c.label}</span>
+                <b className="tabular" style={{ color: c.n ? (c.tone === 'red' ? '#f87171' : '#fbbf24') : 'var(--text-dim)' }}>{c.n == null ? '—' : fmt(c.n)}</b>
+              </button>
+            ))}
+          </div>
         </section>
 
-        <section className="card ht-dist" aria-label="CPU 사용률 분포">
-          <div className="ht-head"><b>CPU 사용률 분포</b><span className="muted">호스트 수</span></div>
-          {dist.map((b) => (
-            <button
-              key={b.key}
-              type="button"
-              className={`ht-bar-row${isFocus('bucket', b.key) ? ' ht-on' : ''}`}
-              onClick={() => pick({ kind: 'bucket', value: b.key }, 'all')}
-              disabled={b.count === 0}
-              aria-pressed={isFocus('bucket', b.key)}
-            >
-              <span className="muted">{b.label}</span>
-              <span className="ht-bar"><i className={`ht-b-${b.key}`} style={{ width: `${Math.round(b.share * 100)}%` }} /></span>
-              <span className="tabular">{fmt(b.count)}</span>
-            </button>
-          ))}
-          <div className="muted ht-note">막대를 누르면 아래 목록이 그 구간으로 걸러집니다. 사용률을 못 읽은 호스트는 0% 가 아니라 '미수집' 으로 따로 셉니다. CPU % 는 정격 용량 대비라 100% 를 넘을 수 있습니다.</div>
-        </section>
-      </div>
+        <div className="ht-panels">
+          <section className="card ht-heat" aria-label="클러스터별 호스트 CPU">
+            <div className="ht-head">
+              <b>클러스터별 호스트 CPU</b>
+              <span className="ht-legend">
+                {CPU_BUCKETS.map((b) => <span key={b.key}><i className={`ht-cell ht-b-${b.key}`} />{b.label}</span>)}
+              </span>
+            </div>
+            {tiles.length === 0 && <div className="muted">호스트가 없습니다.</div>}
+            <div className={`ht-tiles${allTiles ? ' ht-all' : ''}`}>
+              {visibleTiles.map((t) => (
+                <button
+                  key={t.key}
+                  type="button"
+                  className={`ht-tile${t.attention > 0 ? ' ht-tile-hot' : ''}${isFocus('cluster', t.key) ? ' ht-on' : ''}`}
+                  onClick={() => pick({ kind: 'cluster', value: t.key }, 'all')}
+                  aria-pressed={isFocus('cluster', t.key)}
+                >
+                  <span className="ht-tile-h">
+                    <span className="ht-tile-name" title={`${t.vcenterId} · ${t.cluster}`}><span className="muted">{t.vcenterId} · </span>{t.cluster}</span>
+                    <span className="muted tabular">{fmt(t.count)}</span>
+                  </span>
+                  <span className="ht-cells" aria-hidden="true">
+                    {t.cells.map((c, i) => <i key={`${c.name}-${i}`} className={`ht-cell ht-b-${c.bucket}`} title={`${c.name} — CPU ${pctText(c.pct)}`} />)}
+                  </span>
+                  <span className="muted tabular ht-tile-f">
+                    평균 {pctText(t.avg)} · 최대 {pctText(t.max)}
+                    {t.attention > 0 && <span className="badge red">확인 {t.attention}</span>}
+                  </span>
+                </button>
+              ))}
+            </div>
+            {tiles.length > TILE_LIMIT_NARROW && (
+              <button type="button" className={`btn ht-more${tiles.length <= TILE_LIMIT ? ' ht-more-narrow' : ''}`} onClick={() => setAllTiles((v) => !v)}>
+                {allTiles ? '먼저 볼 클러스터만' : `모두 보기 (${fmt(tiles.length)}개 클러스터)`}
+              </button>
+            )}
+          </section>
 
-      <div className="ht-tablebar">
-        <div className="ht-tabs" role="group" aria-label="목록 범위">
-          <button type="button" className={`btn${curTab === 'attention' ? ' ht-tab-on' : ''}`} aria-pressed={curTab === 'attention'} onClick={() => setTab('attention')}>확인 대상 <span className="tabular">{fmt(counts.attention)}</span></button>
-          <button type="button" className={`btn${curTab === 'all' ? ' ht-tab-on' : ''}`} aria-pressed={curTab === 'all'} onClick={() => setTab('all')}>전체 <span className="tabular">{fmt(rows.length)}</span></button>
+          <section className="card ht-dist" aria-label="CPU 사용률 분포">
+            <div className="ht-head"><b>CPU 사용률 분포</b><span className="muted">호스트 수</span></div>
+            {dist.map((b) => (
+              <button
+                key={b.key}
+                type="button"
+                className={`ht-bar-row${isFocus('bucket', b.key) ? ' ht-on' : ''}`}
+                onClick={() => pick({ kind: 'bucket', value: b.key }, 'all')}
+                disabled={b.count === 0}
+                aria-pressed={isFocus('bucket', b.key)}
+              >
+                <span className="muted">{b.label}</span>
+                <span className="ht-bar"><i className={`ht-b-${b.key}`} style={{ width: `${Math.round(b.share * 100)}%` }} /></span>
+                <span className="tabular">{fmt(b.count)}</span>
+              </button>
+            ))}
+            <div className="muted ht-note">막대를 누르면 아래 목록이 그 구간으로 걸러집니다. 사용률을 못 읽은 호스트는 0% 가 아니라 '미수집' 으로 따로 셉니다. CPU % 는 정격 용량 대비라 100% 를 넘을 수 있습니다.</div>
+          </section>
         </div>
-        {focus && (
-          <span className="badge blue ht-chip">
-            {focusLabelExt(focus)}
-            <button type="button" className="ht-chip-x" onClick={() => setFocus(null)} aria-label="조건 해제">✕</button>
+
+        <div className="ht-tablebar">
+          <div className="ht-tabs" role="group" aria-label="목록 범위">
+            <button type="button" className={`btn${curTab === 'attention' ? ' ht-tab-on' : ''}`} aria-pressed={curTab === 'attention'} onClick={() => setTab('attention')}>확인 대상 <span className="tabular">{fmt(counts.attention)}</span></button>
+            <button type="button" className={`btn${curTab === 'all' ? ' ht-tab-on' : ''}`} aria-pressed={curTab === 'all'} onClick={() => setTab('all')}>전체 <span className="tabular">{fmt(rows.length)}</span></button>
+          </div>
+          {focus && (
+            <span className="badge blue ht-chip">
+              {focusLabelExt(focus)}
+              <button type="button" className="ht-chip-x" onClick={() => setFocus(null)} aria-label="조건 해제">✕</button>
+            </span>
+          )}
+          <span className="muted result-count">
+            표시 <b style={{ color: 'var(--text)' }}>{fmt(shown.length)}</b> / 총 {fmt(rows.length)}개 호스트
+            {filtered && <span className="badge blue" style={{ marginLeft: 8 }}>필터 적용 중</span>}
           </span>
-        )}
-        <span className="muted result-count">
-          표시 <b style={{ color: 'var(--text)' }}>{fmt(shown.length)}</b> / 총 {fmt(rows.length)}개 호스트
-          {filtered && <span className="badge blue" style={{ marginLeft: 8 }}>필터 적용 중</span>}
-        </span>
-      </div>
-      <div className="ht-groups" role="group" aria-label="열 묶음">
-        <span className="muted">열 묶음</span>
-        {COL_GROUPS.map((g) => {
-          const on = !off[g.key];
-          const fixed = g.key === FIXED_GROUP;
-          return (
-            <button key={g.key} type="button" className={`ht-group${on ? ' ht-group-on' : ''}`} onClick={() => toggleGroup(g.key)} disabled={fixed} aria-pressed={on}
-              title={fixed ? '기본 묶음은 끌 수 없습니다' : on ? '누르면 이 묶음의 열을 숨깁니다(이 브라우저에 기억)' : '누르면 이 묶음의 열을 보입니다'}>
-              {dot(g)}{g.label}
-            </button>
-          );
-        })}
-        <span className="muted ht-groups-note">엑셀 ‘호스트 목록’ 시트와 같은 열 순서 · ‘—’ 는 못 읽은 값(0 이 아님){access && !access.hw ? ' · iDRAC 열은 관리자 판본에만' : ''}</span>
-      </div>
-      <DataTable
-        className="ht-table"
-        columns={columns}
-        rows={shown}
-        initialSort={{ key: 'cpuUsagePct', dir: 'desc' }}
-        emptyText={curTab === 'attention' && !focus ? '확인할 호스트가 없습니다.' : '조건에 맞는 호스트가 없습니다.'}
-      />
-      <IpmsMatches filters={filters} />
+        </div>
+        <div className="ht-groups" role="group" aria-label="열 묶음">
+          <span className="muted">열 묶음</span>
+          {COL_GROUPS.map((g) => {
+            const on = !off[g.key];
+            const fixed = g.key === FIXED_GROUP;
+            return (
+              <button key={g.key} type="button" className={`ht-group${on ? ' ht-group-on' : ''}`} onClick={() => toggleGroup(g.key)} disabled={fixed} aria-pressed={on}
+                title={fixed ? '기본 묶음은 끌 수 없습니다' : on ? '누르면 이 묶음의 열을 숨깁니다(이 브라우저에 기억)' : '누르면 이 묶음의 열을 보입니다'}>
+                {dot(g)}{g.label}
+              </button>
+            );
+          })}
+          <span className="muted ht-groups-note">엑셀 ‘호스트 목록’ 시트와 같은 열 순서 · ‘—’ 는 못 읽은 값(0 이 아님){access && !access.hw ? ' · iDRAC 열은 관리자 판본에만' : ''}</span>
+        </div>
+        <DataTable
+          className="ht-table"
+          columns={columns}
+          rows={shown}
+          initialSort={{ key: 'cpuUsagePct', dir: 'desc' }}
+          emptyText={curTab === 'attention' && !focus ? '확인할 호스트가 없습니다.' : '조건에 맞는 호스트가 없습니다.'}
+        />
+        <IpmsMatches filters={filters} />
+        </>
+      )}
       {exportOpen && exportVc && (
         <React.Suspense fallback={null}><HostExportDialog vcenterId={exportVc} vcName={exportVc} onClose={() => setExportOpen(false)} /></React.Suspense>
       )}
