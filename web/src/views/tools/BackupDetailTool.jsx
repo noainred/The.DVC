@@ -8,7 +8,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { fetchJson, downloadFile, canCsv, putJson } from '../../api.js';
 import { Loading, ErrorBox } from '../../components/ui.jsx';
 import Select from '../../components/Select.jsx';
-import { fmtNum, pctOf, veeamStateOf, snapReasonText, FILTERS, filterCounts, buildTree, flattenTree, initialOpen, veeamCell, snapCell, shortTs, vmClass, loadOpts, saveOpts, scopeQuery, scopeNote, runningCell, CRIT, critOf, MEMO_MAX, marksLine, marksNotice, filterCountText, detailLoadKey, toggleAllVisible, visibleVmIds, filterLabel, METHODS, methodOf, backupCell, cloneCell, methodKeyOf, METHOD_KEYS_MAP } from './backupViewText.js';
+import { fmtNum, pctOf, veeamStateOf, snapReasonText, FILTERS, filterCounts, buildTree, flattenTree, initialOpen, veeamCell, snapCell, shortTs, vmClass, loadOpts, saveOpts, scopeQuery, scopeNote, runningCell, CRIT, critOf, MEMO_MAX, marksLine, marksNotice, filterCountText, detailLoadKey, toggleAllVisible, invertVisible, visibleVmIds, folderVmIdMap, folderCheckState, filterLabel, METHODS, methodOf, backupCell, cloneCell, methodKeyOf, METHOD_KEYS_MAP } from './backupViewText.js';
 import { CritIcon, NeedIcon, NEED_COLOR, MethodBadge } from './BackupMarkIcons.jsx';
 import BackupOptions from './BackupOptions.jsx';
 import VeeamHeader from './VeeamHeader.jsx';
@@ -119,6 +119,7 @@ export default function BackupDetailTool({ scope }) {
   const openSet = useMemo(() => open || initialOpen(buildTree(vms)), [open, vms]);
   const forceOpen = filter !== 'all' || !!q.trim();
   const rows = useMemo(() => flattenTree(tree, openSet, { forceOpen }), [tree, openSet, forceOpen]);
+  const folderIds = useMemo(() => folderVmIdMap(tree), [tree]);   // v2.812 폴더 체크 → 그 아래 보이는 VM 전부
   const selVm = useMemo(() => vms.find((v) => v.id === sel) || null, [vms, sel]);
   const writable = data?.writable === true && !data?.marksUnreadable;
   const marksUnknown = data?.marksUnreadable === true;   // v2.785(GR R-B2): 표시 수·칩은 '—'
@@ -250,6 +251,7 @@ export default function BackupDetailTool({ scope }) {
           <button type="button" className="tab" onClick={() => setChecked((cur) => toggleAllVisible(cur, visibleIds))} disabled={!visibleIds.length} style={{ padding: '3px 10px', fontSize: 12 }}>
             {visibleIds.length && visibleIds.every((id) => checked.has(id)) ? '보이는 VM 선택 해제' : `보이는 VM 전체 선택(${fmtNum(visibleIds.length)})`}
           </button>
+          <button type="button" className="tab" onClick={() => setChecked((cur) => invertVisible(cur, visibleIds))} disabled={!visibleIds.length} title="보이는 VM 중 고른 것은 풀고 안 고른 것은 고릅니다(필터·검색 밖 VM 의 선택은 그대로)" style={{ padding: '3px 10px', fontSize: 12 }}>선택 반전</button>
           {checked.size > 0 && <button type="button" className="tab" onClick={() => setChecked(new Set())} style={{ padding: '3px 10px', fontSize: 12 }}>선택 해제</button>}
           <span style={{ width: 1, height: 18, background: 'var(--border)' }} aria-hidden="true" />
           {/* v2.803(Chromium 판독): 라벨과 그 버튼을 한 묶음으로 — 줄이 꺾일 때 라벨만 홀로 남지 않게 */}
@@ -295,8 +297,16 @@ export default function BackupDetailTool({ scope }) {
                   const a = row.node.agg;
                   return (
                     <div role="row" key={row.key} aria-expanded={row.open} style={{ display: 'grid', gridTemplateColumns: GRID, alignItems: 'center', borderTop: '1px solid var(--border-soft)', background: row.depth === 0 ? 'rgba(59,130,246,.06)' : undefined }}>
-                      <div role="gridcell" style={{ minWidth: 0 }}>
-                        <button type="button" onClick={() => toggle(row.key)} disabled={forceOpen} style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%', minHeight: 40, padding: `0 8px 0 ${pad}px`, background: 'none', border: 0, color: 'var(--text)', font: 'inherit', cursor: forceOpen ? 'default' : 'pointer', textAlign: 'left' }}>
+                      <div role="gridcell" style={{ minWidth: 0, display: 'flex', alignItems: 'center', paddingLeft: pad }}>
+                        {/* v2.812: 폴더 체크 — 그 폴더 아래(하위 폴더 · 접힌 폴더 포함) 보이는 VM 을 모두 고르거나 모두 푼다. 일부만 골랐으면 '－'(indeterminate). */}
+                        {writable && (() => {
+                          const ids = folderIds.get(row.key) || [];
+                          const st = folderCheckState(checked, ids);
+                          return <input type="checkbox" aria-label={`${row.node.name} 폴더의 VM ${ids.length}대 ${st === 'all' ? '선택 해제' : '모두 선택'}`} title={`이 폴더 아래 보이는 VM ${fmtNum(ids.length)}대 ${st === 'all' ? '선택 해제' : '모두 선택'}`}
+                            checked={st === 'all'} ref={(el) => { if (el) el.indeterminate = st === 'some'; }} disabled={!ids.length}
+                            onChange={() => setChecked((cur) => toggleAllVisible(cur, ids))} style={{ width: 15, height: 15, margin: '0 5px 0 0', flex: 'none' }} />;
+                        })()}
+                        <button type="button" onClick={() => toggle(row.key)} disabled={forceOpen} style={{ display: 'flex', alignItems: 'center', gap: 8, flex: 1, minWidth: 0, minHeight: 40, padding: '0 8px 0 0', background: 'none', border: 0, color: 'var(--text)', font: 'inherit', cursor: forceOpen ? 'default' : 'pointer', textAlign: 'left' }}>
                           <span className="muted" style={{ width: 12 }}>{row.open ? '▾' : '▸'}</span>
                           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke={row.depth === 0 ? '#22d3ee' : '#fbbf24'} strokeWidth="2" strokeLinejoin="round" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" /></svg>
                           <b style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{row.node.name}</b>
