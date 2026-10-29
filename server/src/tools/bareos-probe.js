@@ -23,7 +23,7 @@
  * 주소 검사: 포탈과 같은 SSRF 규칙(루프백·링크로컬 차단)을 쓴다. 같은 호스트의 Director 를 시험하려면 SSRF_ALLOW_LOOPBACK=true.
  */
 import process from 'node:process';
-import { openConsole } from '../bareos/console.js';
+import { openConsole, diagnoseConsole } from '../bareos/console.js';
 import { probe, catalogLists, jobHistory, restoreChain } from '../bareos/director.js';
 
 const argv = process.argv.slice(2);
@@ -52,7 +52,16 @@ const opts = {
 
 let s = null;
 try {
-  step(1, `접속·인증: ${opts.host}:${opts.port} · 콘솔 ‘${opts.name}’ · ${opts.tls === 'psk' ? `TLS-PSK(최대 ${opts.tlsMaxVersion})` : '평문(시험 전용)'}`);
+  // v2.822: 먼저 단계별 진단(설정 화면 '연결 시험' 과 같은 함수) — 어느 단계에서 막혔는지와 조치를 바로 보인다.
+  step(0, `단계별 진단: ${opts.host}:${opts.port} · 콘솔 ‘${opts.name}’ · ${opts.tls === 'psk' ? `TLS-PSK(최대 ${opts.tlsMaxVersion})` : '평문(시험 전용)'}`);
+  const d = await diagnoseConsole(opts);
+  for (const x of d.stages) {
+    const mark = x.skipped ? '·' : x.ok ? '✔' : '✖';
+    console.log(`  ${mark} ${x.label}${x.skipped ? '' : ` (${x.ms}ms)`} — ${x.detail || ''}`);
+    if (x.hint) console.log(`      조치: ${x.hint}`);
+  }
+  if (!d.ok) { const e = new Error(`${d.failed?.key || '?'} 단계에서 실패했습니다 — ${d.failed?.detail || ''}`); e.code = d.failed?.code; throw e; }
+  step(1, '접속·인증(작업 세션)');
   s = await openConsole(opts);
   const p = await probe(s);
   console.log(`  ✔ 인증 성공 — Director ‘${p.director || '?'}’ 버전 ${p.version || '?'} · 암호화 ${s.info.tls ? `${s.info.tls.protocol} ${s.info.tls.cipher}` : '없음'}`);
@@ -74,9 +83,17 @@ try {
     }
   }
   if (val('--chain')) {
-    step(4, `복원 체인(.bvfs_get_jobids): jobid ${val('--chain')}`);
-    const ids = await restoreChain(s, Number(val('--chain')));
-    console.log(ids ? `  ✔ ${ids.join(', ')}` : '  ✖ 응답에서 jobid 를 읽지 못했습니다 — 아래 --cmd 로 원문을 확인해 알려 주세요.');
+    step(4, `복원 체인 비교: jobid ${val('--chain')}`);
+    const id = Number(val('--chain'));
+    const row = await jobStatus(s, id);
+    if (!row?.name) console.log('  ✖ 그 jobid 를 카탈로그에서 찾지 못했습니다.');
+    else {
+      const mine = chainFromHistory(await jobRuns(s, row.name), id);
+      console.log(mine ? `  ✔ 포탈이 쓰는 체인(잡 ‘${row.name}’ 의 이력): ${mine.join(', ')}` : '  ✖ 이 잡의 이력으로 체인(Full 부터)을 만들지 못했습니다.');
+      // 참고 — .bvfs_get_jobids 는 FD + FileSet 으로만 골라 같은 FD·범용 FileSet 의 다른 VM 이 섞일 수 있다(포탈은 쓰지 않는다 — v2.822 S1)
+      const bvfs = await restoreChain(s, id).catch((e) => { console.log(`  · .bvfs_get_jobids 실패: ${e?.message || e}`); return null; });
+      if (bvfs) console.log(`  · 참고 .bvfs_get_jobids: ${bvfs.join(', ')}${mine && bvfs.join(',') !== mine.join(',') ? '  ← 다르다(다른 VM 의 jobid 가 섞였을 수 있다 — 포탈은 위 체인을 쓴다)' : ''}`);
+    }
   }
   if (val('--cmd')) {
     step(5, `명령: ${val('--cmd')}`);

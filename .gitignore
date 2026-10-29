@@ -232,6 +232,7 @@ server/config/central-agent-cvp.json
 server/config/bareos.json
 server/config/bareos-jobs.json
 server/config/bareos-auth-stops.json
+server/config/bareos-mail-state.json
 server/config/pdu-auth-stops.json
 server/config/gpu-auth-stops.json
 server/config/bmstor-auth-stops.json

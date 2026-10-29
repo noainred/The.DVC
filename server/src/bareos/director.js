@@ -7,7 +7,7 @@
  *
  * 명령 조립: 값은 전부 names.js 관문을 지난 것만 넣고 `consoleQuote` 로 인용한다(next_arg 규칙의 역).
  */
-import { consoleQuote, isResourceName, normLevel, statusOf } from './names.js';
+import { consoleQuote, isResourceName, normLevel, statusOf, isFinalStatus } from './names.js';
 import { BareosConsoleError } from './console.js';
 import { numOrNull } from '../util/numOrNull.js';
 
@@ -24,13 +24,31 @@ export function firstArray(result) {
 
 /** 이름 목록(.clients 등) — 항목이 문자열이거나 {name} 이다. 리소스 이름 규칙에 맞는 것만(화면 드롭다운 원천). */
 export function namesOf(result, cap = 2000) {
-  const out = [];
+  const out = new Set();   // v2.822(P6): includes 는 잡 수천 개에서 O(n²)
   for (const it of firstArray(result)) {
     const n = typeof it === 'string' ? it : (it && typeof it.name === 'string' ? it.name : '');
-    if (n && isResourceName(n) && !out.includes(n)) out.push(n);
-    if (out.length >= cap) break;
+    if (n && isResourceName(n)) out.add(n);
+    if (out.size >= cap) break;
   }
-  return out.sort((a, b) => a.localeCompare(b));
+  return [...out].sort((a, b) => a.localeCompare(b));
+}
+
+const boolOrNull = (v) => (v === true || v === 1 || v === '1' || v === 'true' || v === 'yes' ? true
+  : v === false || v === 0 || v === '0' || v === 'false' || v === 'no' ? false : null);
+
+/**
+ * `.jobs` → Map(잡 이름 → enabled: true|false|null). enabled 는 Director 메모리의 현재 값이다(`{name, enabled}` — ua_dotcmds.cc DotJobsCmd).
+ * 그 칸이 없는 Director 면 null(모른다 — 호출부가 아무것도 하지 않는다).
+ */
+export async function jobStates(session) {
+  const m = new Map();
+  for (const it of firstArray(await session.call('.jobs', { maxBytes: 16 * 1024 * 1024 }))) {
+    const n = typeof it === 'string' ? it : (it && typeof it.name === 'string' ? it.name : '');
+    if (!n || !isResourceName(n) || m.has(n)) continue;
+    m.set(n, it && typeof it === 'object' ? boolOrNull(it.enabled) : null);
+    if (m.size >= 100_000) break;
+  }
+  return m;
 }
 
 /** 접속 배너(`OK: bareos-dir Version: 25.0.4 (…)`)에서 Director 이름·버전. */
@@ -119,6 +137,8 @@ const nonNeg = (v) => { const n = numOrNull(v); return n !== null && n >= 0 ? n 
 export function normalizeJobRow(r = {}) {
   const ts = (v) => { if (!v) return null; const t = Date.parse(String(v).replace(' ', 'T')); return Number.isFinite(t) ? t : null; };
   const code = String(r.jobstatus ?? r.status ?? '').slice(0, 1);
+  // 끝나지 않은 실행의 카탈로그 바이트·파일 수는 끝날 때 채워진다(실행 중에는 0 — 추정) — 0 B 로 보이지 않게 null(C9-5 · 못 읽은 값은 0 이 아니다)
+  const fin = isFinalStatus(code);
   return {
     jobid: numOrNull(r.jobid),
     job: String(r.job ?? '').slice(0, 200),
@@ -129,18 +149,28 @@ export function normalizeJobRow(r = {}) {
     state: statusOf(code),
     startedAt: ts(r.starttime),
     endedAt: ts(r.endtime),
-    bytes: nonNeg(r.jobbytes),
-    files: nonNeg(r.jobfiles),
+    bytes: fin ? nonNeg(r.jobbytes) : null,
+    files: fin ? nonNeg(r.jobfiles) : null,
     errors: nonNeg(r.joberrors),
     client: String(r.client ?? r.clientname ?? '').slice(0, 128),
   };
 }
 
-/** 잡 이름의 최근 실행(`list jobs job=… limit=…`). */
-export async function jobHistory(session, job, limit = 30) {
+/**
+ * 잡 이름의 실행 전부(`list jobs job=…`) — jobid 내림차순(최신 먼저).
+ * Bareos 는 `ORDER BY StartTime` **오름차순** + LIMIT 이라 `limit=N` 을 주면 **가장 오래된** N건이 온다(v2.822 W1 — sql_list.cc).
+ * 그래서 limit 없이 받아 여기서 정렬한다. VM 하나의 실행 행이라 수천 건이어도 수 MB 다(상한 16MB — 넘으면 too-large).
+ */
+export async function jobRuns(session, job) {
   if (!isResourceName(job)) throw bad('잡 이름이 올바르지 않습니다.');
+  return firstArray(await session.call(`list jobs job=${job}`, { maxBytes: 16 * 1024 * 1024 }))
+    .map(normalizeJobRow).filter((x) => x.jobid).sort((a, b) => b.jobid - a.jobid);
+}
+
+/** 잡 이름의 최근 실행 N건(최신 먼저 — jobRuns 를 자른다). */
+export async function jobHistory(session, job, limit = 30) {
   const n = Math.max(1, Math.min(200, Math.floor(Number(limit)) || 30));
-  return firstArray(await session.call(`list jobs job=${job} limit=${n}`)).map(normalizeJobRow).filter((x) => x.jobid);
+  return (await jobRuns(session, job)).slice(0, n);
 }
 
 /** 최근 N일의 모든 잡 실행(`list jobs days=N`) — 폴러 대조용(Bareos 스케줄이 돌린 실행도 원장 lastRun 에 반영). */
@@ -154,7 +184,8 @@ export async function recentJobs(session, days = 2) {
  * @returns {{ lines: string[], truncated: boolean, total: number }}
  */
 export async function jobLog(session, jobid, { maxBytes = 256 * 1024, maxLines = 4000 } = {}) {
-  const rows = firstArray(await session.call(`list joblog jobid=${asId(jobid)}`, { maxBytes: Math.max(maxBytes * 4, 1024 * 1024) }));
+  // 원문 상한은 넉넉히(16MB) — 예전 1MB 는 로그가 길면 too-large 502 가 나서 '뒤쪽 보존' 이 동작하지 않았다(C9-3 — 재현). 자르기는 아래에서.
+  const rows = firstArray(await session.call(`list joblog jobid=${asId(jobid)}`, { maxBytes: Math.max(maxBytes * 4, 16 * 1024 * 1024) }));
   const lines = [];
   for (const r of rows) {
     const t = typeof r === 'string' ? r : String(r?.logtext ?? r?.text ?? '');
@@ -178,8 +209,10 @@ export async function setJobEnabled(session, job, enabled) {
 }
 
 /**
- * 복원 체인(`.bvfs_get_jobids jobid=N`) — 그 백업을 복원하는 데 필요한 jobid 목록(Full → Diff → Incr).
- * 응답 모양이 문서에 없어(계획서 R8) 숫자 jobid 를 모으고, 못 읽으면 null(호출부가 카탈로그로 계산 — restore.js).
+ * `.bvfs_get_jobids jobid=N` 의 jobid 목록 — **probe 진단용이다. 복원 라우트는 쓰지 않는다**(v2.822 S1).
+ * Director 는 이 목록을 ClientId + FileSet 으로만 고른다(AccurateGetJobids — 잡 이름을 보지 않는다). 범용 FileSet 하나를
+ * 같은 사이트 FD 의 여러 VM 이 공유하므로 다른 VM 의 Full·Incr 가 섞인다. 복원 체인은 이 잡의 이력으로만 계산한다(restore.js chainFromHistory).
+ * 응답 모양이 문서에 없어(계획서 R8) 숫자 jobid 를 모으고, 못 읽으면 null.
  */
 export async function restoreChain(session, jobid) {
   const r = await session.call(`.bvfs_get_jobids jobid=${asId(jobid)}`);

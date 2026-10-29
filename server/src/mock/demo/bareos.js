@@ -133,7 +133,11 @@ export function demoCall(cmd, settings) {
     case '.schedules': return { schedules: uniq(['VMwareNightly', 'VMwareWeekly']) };
     case '.jobdefs': return { jobdefs: uniq(['DefaultJob', DEFAULTS.defaults.jobDefs]) };
     case '.filesets': return { filesets: uniq(['Catalog', DEFAULTS.defaults.fileSet]) };
-    case '.jobs': return { jobs: uniq([...S.jobs.keys(), 'BackupCatalog', 'RestoreFiles', DEFAULTS.defaults.restoreJob]) };
+    case '.jobs': {   // 실제처럼 {name, enabled}(ua_dotcmds.cc DotJobsCmd — enabled 는 Director 메모리 값)
+      const all = new Map([['BackupCatalog', true], ['RestoreFiles', true], [DEFAULTS.defaults.restoreJob, true]]);
+      for (const [name, j] of S.jobs) all.set(name, j.enabled !== false);
+      return { jobs: [...all].sort((a, b) => a[0].localeCompare(b[0])).map(([name, enabled]) => ({ name, enabled })) };
+    }
     case '.bvfs_get_jobids': {
       const id = Number(kv.jobid);
       const row = rowById(id);
@@ -195,11 +199,17 @@ export function demoCall(cmd, settings) {
         for (const id of S.runs.keys()) { const r = liveRow(id); if (r && r.name === n) rows.push(r); }
       }
       if (cutoff) rows = rows.filter((r) => Date.parse(r.starttime.replace(' ', 'T')) >= cutoff);
-      rows.sort((a, b) => b.jobid - a.jobid);
+      // 실제 Director 와 같은 순서 — 시작 시각 오름차순 + LIMIT(가장 오래된 N건, sql_list.cc). 포탈이 받아서 최신 순으로 정렬한다(v2.822 W1).
+      rows.sort((a, b) => a.starttime.localeCompare(b.starttime) || a.jobid - b.jobid);
       return { jobs: rows.slice(0, lim) };
     }
     case 'cancel': { const r = S.runs.get(Number(kv.jobid)); if (!r) fail('No Jobs running.'); r.canceled = true; return { cancel: { jobid: Number(kv.jobid) } }; }
-    case 'enable': case 'disable': { const j = S.jobs.get(kv.job); if (j) j.enabled = head === 'enable'; return { [head]: { job: kv.job } }; }
+    case 'enable': case 'disable': {   // 모르는 잡은 실제처럼 거부한다(ua_cmds.cc — 'Job "X" not found.')
+      const j = S.jobs.get(kv.job);
+      if (!j) fail(`Job "${kv.job}" not found.`);
+      j.enabled = head === 'enable';
+      return { [head]: { jobs: [kv.job] } };
+    }
     default: fail(`demo: 지원하지 않는 명령입니다(${head}).`);
   }
   return null;

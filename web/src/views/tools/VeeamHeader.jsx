@@ -10,7 +10,13 @@ import { hasRole, toolAllowed } from '../../api.js';
 export const VEEAM_TABS = [['summary', 'Summary', '#/tools/backup-summary'], ['detail', 'Detail', '#/tools/backup-detail'], ['em', 'EM', '#/tools/backup-em']];   // v2.788 EM
 // v2.818: 백업 실행 탭(관리자 전용 도구 backup-run — 상태를 바꾼다). 관리자에게만 보인다(서버 API 도 admin 만 — 탭은 UX 게이팅일 뿐).
 export const RUN_TAB = ['run', '백업 실행', '#/tools/backup-run'];
-export const visibleTabs = ({ admin = false, runOk = false } = {}) => (admin && runOk ? [...VEEAM_TABS, RUN_TAB] : VEEAM_TABS);
+// v2.822(사용자 요청 'Backup 상단 메뉴에 Bareos 탭'): Bareos VM 백업(관리자 전용 도구 bareos-backup — 상태를 바꾼다). 백업 실행 탭과 같은 게이트.
+export const BAREOS_TAB = ['bareos', 'Bareos', '#/tools/bareos-backup'];
+export const visibleTabs = ({ admin = false, runOk = false, bareosOk = false } = {}) => [
+  ...VEEAM_TABS,
+  ...(admin && runOk ? [RUN_TAB] : []),
+  ...(admin && bareosOk ? [BAREOS_TAB] : []),
+];
 
 export default function VeeamHeader({ active, desc, actions }) {
   return (
@@ -22,9 +28,9 @@ export default function VeeamHeader({ active, desc, actions }) {
         </div>
         {actions && <div className="flex gap wrap" style={{ marginLeft: 'auto', alignItems: 'flex-end', rowGap: 6 }}>{actions}</div>}
       </div>
-      {/* v2.818: 탭 4개(백업 실행)면 400px 본문에서 넘칠 수 있다 — 탭 줄만 가로 스크롤(페이지는 밀리지 않는다) */}
+      {/* v2.818: 탭 4개(백업 실행)면 400px 본문에서 넘칠 수 있다 — 탭 줄만 가로 스크롤(페이지는 밀리지 않는다). v2.822 Bareos 로 5개 */}
       <div role="tablist" aria-label="Backup 현황 보기" style={{ display: 'flex', gap: 4, borderBottom: '1px solid var(--border)', overflowX: 'auto', minWidth: 0 }}>
-        {visibleTabs({ admin: hasRole('admin'), runOk: toolAllowed('backup-run') }).map(([k, label, href]) => {
+        {visibleTabs({ admin: hasRole('admin'), runOk: toolAllowed('backup-run'), bareosOk: toolAllowed('bareos-backup') }).map(([k, label, href]) => {
           const on = k === active;
           return (
             <a key={k} role="tab" aria-selected={on} href={href}

@@ -31,6 +31,10 @@ describe('backupRunText', () => {
     expect(visibleTabs({ admin: false, runOk: true })).toEqual(VEEAM_TABS);
     expect(visibleTabs({ admin: true, runOk: false })).toEqual(VEEAM_TABS);
     expect(visibleTabs({ admin: true, runOk: true }).map((t) => t[0])).toEqual(['summary', 'detail', 'em', 'run']);
+    // v2.822 Bareos 탭 — 같은 게이트(관리자 + 도구 허용), 백업 실행 탭과 독립
+    expect(visibleTabs({ admin: true, runOk: true, bareosOk: true }).map((t) => t[0])).toEqual(['summary', 'detail', 'em', 'run', 'bareos']);
+    expect(visibleTabs({ admin: true, runOk: false, bareosOk: true }).map((t) => t[0])).toEqual(['summary', 'detail', 'em', 'bareos']);
+    expect(visibleTabs({ admin: false, runOk: true, bareosOk: true })).toEqual(VEEAM_TABS);
   });
 });
 

@@ -20,7 +20,7 @@
 import net from 'node:net';
 import tls from 'node:tls';
 import crypto from 'node:crypto';
-import { ssrfLookup } from '../util/ssrfLookup.js';
+import { ssrfLookup, pinnedLookup } from '../util/ssrfLookup.js';
 import { ipBlockReason } from '../util/ssrfBlock.js';
 import { cramResponse, passwordMd5Hex } from './base64.js';
 
@@ -312,6 +312,12 @@ export class BareosSession {
   }
 }
 
+/**
+ * SSRF 차단 코드 — util/ssrfLookup.js 는 'ESSRFBLOCKED' 를 쓴다(v2.822: 예전에는 'ESSRF' 만 봐서 이름이 차단 주소로 풀리면
+ * 'blocked' 가 아니라 'connect' 로 분류됐다 — 문구만 맞고 코드가 틀렸다).
+ */
+const blockedCode = (c) => c === 'ESSRFBLOCKED' || c === 'ESSRF';
+
 /** TCP 접속(절대 시한). */
 function connectTcp(host, port, deadlineAt, lookup, signal) {
   return new Promise((resolve, reject) => {
@@ -328,17 +334,19 @@ function connectTcp(host, port, deadlineAt, lookup, signal) {
     sock.once('connect', () => fin(null));
     sock.once('error', (e) => {
       const c = e?.code || '';
+      const blocked = blockedCode(c) || /SSRF|차단/.test(e?.message || '');
       const why = c === 'ECONNREFUSED' ? '연결 거부(포트가 닫혀 있거나 Director 가 꺼져 있음)'
         : c === 'ENOTFOUND' || c === 'EAI_AGAIN' ? '이름 해석 실패'
           : /EHOSTUNREACH|ENETUNREACH/.test(c) ? '네트워크 도달 불가'
-            : c === 'ESSRF' || /SSRF|차단/.test(e?.message || '') ? `접속이 차단된 주소입니다(${e?.message || ''})` : (c || e?.message || '알 수 없는 오류');
-      fin(err(c === 'ESSRF' ? 'blocked' : 'connect', `Director 에 연결하지 못했습니다: ${why}`));
+            : blocked ? '접속이 차단된 대역(링크로컬·루프백 등)으로 해석되는 주소입니다' : (c || e?.message || '알 수 없는 오류');
+      // v2.822(S4 — 재현): 차단 문구에 ssrfLookup 원문(Director 호스트 이름·해석 결과)을 싣지 않는다 — 이 문구는 lastError 로 범위 계정 목록에도 간다.
+      fin(err(blocked ? 'blocked' : 'connect', `Director 에 연결하지 못했습니다: ${why}`));
     });
   });
 }
 
 /** TLS-PSK 래핑(절대 시한). */
-function wrapPsk(raw, { name, md5hex, tlsMaxVersion }, deadlineAt) {
+function wrapPsk(raw, { name, md5hex, tlsMaxVersion }, deadlineAt, signal = null) {
   return new Promise((resolve, reject) => {
     let done = false;
     const identity = `R_CONSOLE\x1e${name}`;
@@ -352,12 +360,22 @@ function wrapPsk(raw, { name, md5hex, tlsMaxVersion }, deadlineAt) {
       checkServerIdentity: () => undefined, // 인증서가 없다 — 상대 확인은 PSK(같은 비밀) + CRAM-MD5 역챌린지가 한다
     });
     const fin = (e) => {
-      if (done) return; done = true; clearTimeout(t);
+      if (done) return; done = true; clearTimeout(t); signal?.removeEventListener?.('abort', onAbort);
       if (e) { try { sock.destroy(); } catch { /* */ } reject(e); } else resolve(sock);
     };
+    // v2.822: 핸드셰이크 중에도 취소를 받는다(예전에는 TCP·세션 단계만 받아 이 구간의 취소가 시한까지 매달렸다)
+    const onAbort = () => fin(err('aborted', '요청이 취소됐습니다.'));
     const t = setTimeout(() => fin(err('timeout', 'Director TLS-PSK 핸드셰이크 시한을 넘겼습니다.')), Math.max(1, deadlineAt - Date.now()));
+    signal?.addEventListener?.('abort', onAbort, { once: true });
+    if (signal?.aborted) { onAbort(); return; }
     sock.once('secureConnect', () => fin(null));
-    sock.once('error', (e) => fin(err('tls', `TLS-PSK 핸드셰이크 실패: ${String(e?.code || e?.message || e).slice(0, 160)} — 콘솔 이름·비밀번호가 맞는지, Director 의 TLS 설정을 확인하세요.`)));
+    // v2.822(C7 — 재현): TLS 경보(ERR_SSL_*)만 'tls'(=자격 불일치 — 주기 조회를 멈춘다). 핸드셰이크 중 ECONNRESET 같은 소켓 끊김은
+    //   일시적일 수 있어 'closed' 로 둔다 — 예전에는 둘 다 'tls' 라 한 번의 끊김이 인증 정지를 파일로 남기고 주기 조회를 멈췄다.
+    sock.once('error', (e) => {
+      const c = String(e?.code || e?.message || e).slice(0, 160);
+      if (/^ERR_SSL/.test(String(e?.code || ''))) fin(err('tls', `TLS-PSK 핸드셰이크 실패: ${c} — 콘솔 이름·비밀번호가 맞는지, Director 의 TLS 설정을 확인하세요.`));
+      else fin(err('closed', `TLS-PSK 핸드셰이크 중 연결이 끊겼습니다(${c}) — 일시적 끊김이거나 Director 가 TLS-PSK 를 받지 않는 설정일 수 있습니다.`));
+    });
   });
 }
 
@@ -377,7 +395,7 @@ export async function openConsole(opts, { lookup = ssrfLookup, blockReason = ipB
   let sock = raw;
   let tlsInfo = null;
   if (o.tls === 'psk') {
-    sock = await wrapPsk(raw, { name: o.name, md5hex, tlsMaxVersion: o.tlsMaxVersion }, deadlineAt);
+    sock = await wrapPsk(raw, { name: o.name, md5hex, tlsMaxVersion: o.tlsMaxVersion }, deadlineAt, signal);
     const c = sock.getCipher?.();
     tlsInfo = { protocol: sock.getProtocol?.() || '', cipher: c?.standardName || c?.name || '' };
   }
@@ -406,3 +424,123 @@ export async function withConsole(opts, fn, deps) {
   const s = await openConsole(opts, deps);
   try { return await fn(s); } finally { s.close(); }
 }
+
+/* ───────────────────────── v2.822 단계별 연결 진단 ───────────────────────── */
+
+/** 진단 단계(순서 고정) — 화면·CLI 가 같은 이름을 쓴다. */
+export const DIAG_STAGES = Object.freeze([
+  ['address', '주소 검사'], ['dns', '이름 해석(DNS)'], ['tcp', 'TCP 연결'], ['tls', 'TLS-PSK 핸드셰이크'],
+  ['auth', '콘솔 인증(CRAM-MD5)'], ['api', 'JSON 모드(.api json)'], ['command', '시험 명령(.clients)'],
+]);
+const DIAG_LABEL = Object.fromEntries(DIAG_STAGES);
+
+/** 실패 단계·코드 → 조치 안내(정해진 문구 — Director 응답 원문은 detail 에만). */
+function diagHint(key, code) {
+  if (key === 'address') return code === 'blocked' ? '링크로컬·루프백 같은 차단 대역입니다 — 사내 주소(RFC1918)는 허용됩니다.' : '주소·포트·콘솔 이름 형식을 확인하세요.';
+  if (key === 'dns') return code === 'blocked' ? '이름이 차단 대역 주소로 풀립니다 — DNS 기록을 확인하세요.' : '포탈 서버에서 이 이름을 풀 수 있는지(DNS·hosts) 확인하세요. IP 로 넣어도 됩니다.';
+  if (key === 'tcp') return code === 'timeout' ? '응답이 없습니다 — 방화벽·라우팅이 포탈 서버 → Director 9101 을 막고 있는지 확인하세요.' : 'Director(bareos-dir)가 실행 중이고 그 포트에서 듣는지, 방화벽이 막지 않는지 확인하세요.';
+  if (key === 'tls' && code === 'closed') return 'TLS 협상 전에 Director 가 연결을 끊었습니다 — 다시 시험해 보고, 계속 끊기면 Director 의 TLS 설정(TLS Enable·TLS PSK Require)과 그 사이 장비(프록시·IPS)를 확인하세요.';
+  if (key === 'tls') return 'TLS-PSK 키는 콘솔 이름·비밀번호로 만든다 — 둘 중 하나가 Director 의 Console 리소스와 다르면 여기서 실패합니다. Director 의 TLS 설정(TLS Enable·TLS PSK Require)도 확인하세요.';
+  if (key === 'auth') return code === 'pam' ? 'Console 리소스에 PAM 이 켜져 있습니다 — 포탈 전용 콘솔은 PAM 을 쓰지 않게 만드세요.' : '콘솔 비밀번호·이름을 Director 의 Console 리소스와 맞추세요(응답이 맞지 않으면 다른 Director 일 수 있습니다).';
+  if (key === 'api') return 'Bareos 15.2 이상이어야 JSON 모드를 씁니다(권장 25.x).';
+  if (key === 'command') return code === 'jsonrpc' ? '콘솔 Profile 의 Command ACL 에 .clients 와 포탈이 쓰는 명령(설정 탭 사전 준비 블록)이 있는지 확인하세요.' : '응답이 JSON 이 아니면 JSON 모드가 켜지지 않은 것입니다(Bareos 버전 확인).';
+  return '';
+}
+
+/** 이름 한 번 풀기(주입 가능 — 기본 ssrfLookup: 3초 시한 · 차단 대역 거부). */
+function lookupOnce(lookup, host) {
+  return new Promise((resolve, reject) => {
+    try {
+      lookup(host, { all: false }, (e, address, family) => (e ? reject(e) : resolve({ address: String(address), family })));
+    } catch (e) { reject(e); }
+  });
+}
+
+/**
+ * 단계별 연결 진단 — **던지지 않는다**. 주소 검사 → DNS → TCP → TLS-PSK → 콘솔 인증 → JSON 모드 → 시험 명령(.clients) 순으로
+ * 실제로 접속해 단계마다 { key, label, ok, ms, detail, hint, code } 를 남기고, 실패한 단계 뒤는 skipped(시도 안 함 — 실패로 세지 않는다).
+ * DNS 는 자기 단계로 먼저 재고 그 주소로 고정해 붙는다(util/ssrfLookup.pinnedLookup — 단계 시간이 섞이지 않고 '이 IP 로 점검했다' 가 참이다).
+ * 시한은 openConsole 과 같이 전체 timeoutMs 하나다.
+ * @returns {Promise<{ ok, stages, failed: {key,code,detail}|null, banner, tls, clients, address }>}
+ */
+export async function diagnoseConsole(opts, { lookup = ssrfLookup, blockReason = ipBlockReason, signal = null } = {}) {
+  const stages = [];
+  const out = { ok: false, stages, failed: null, banner: '', tls: null, clients: null, address: '' };
+  const push = (key, t0, ok, detail = '', code = '') => {
+    const row = { key, label: DIAG_LABEL[key], ok, ms: Math.max(0, Date.now() - t0), detail: String(detail || '').slice(0, 300) };
+    if (!ok) { row.code = code || 'error'; row.hint = diagHint(key, code); if (!out.failed) out.failed = { key, code: row.code, detail: row.detail }; }
+    stages.push(row);
+  };
+  const skip = (key, detail) => stages.push({ key, label: DIAG_LABEL[key], skipped: true, detail });
+  const finish = () => {
+    for (const [key] of DIAG_STAGES) if (!stages.some((x) => x.key === key)) skip(key, '앞 단계가 실패해 시도하지 않았습니다.');
+    stages.sort((a, b) => DIAG_STAGES.findIndex(([k]) => k === a.key) - DIAG_STAGES.findIndex(([k]) => k === b.key));
+    out.ok = !stages.some((x) => x.ok === false);
+    return out;
+  };
+  let t0 = Date.now();
+  let o;
+  try { o = normalizeConsoleOptions(opts); } catch (e) { push('address', t0, false, e?.message, e?.code || 'invalid'); return finish(); }
+  const why = blockReason(o.host);
+  if (why) { push('address', t0, false, `접속이 차단된 Director 주소입니다: ${why}`, 'blocked'); return finish(); }
+  push('address', t0, true, `${o.host}:${o.port} · 콘솔 ‘${o.name}’`);
+  const deadlineAt = Date.now() + o.timeoutMs;
+  let lk = lookup;
+  t0 = Date.now();
+  if (net.isIP(o.host)) { skip('dns', 'IP 주소라 이름 해석이 없습니다.'); out.address = o.host; }
+  else {
+    try {
+      const a = await lookupOnce(lookup, o.host);
+      out.address = a.address;
+      lk = pinnedLookup(a.address);
+      push('dns', t0, true, a.address);
+    } catch (e) {
+      const c = e?.code || '';
+      const code = blockedCode(c) ? 'blocked' : c === 'ETIMEDOUT' ? 'timeout' : 'dns';
+      const detail = blockedCode(c) ? String(e?.message || '차단 대역 주소') : c === 'ENOTFOUND' || c === 'EAI_AGAIN' ? `이름을 찾을 수 없습니다(${c})` : c === 'ETIMEDOUT' ? 'DNS 응답 시한을 넘겼습니다.' : String(c || e?.message || e);
+      push('dns', t0, false, detail, code);
+      return finish();
+    }
+  }
+  const md5hex = passwordMd5Hex(o.password);
+  let sock = null;
+  t0 = Date.now();
+  try { sock = await connectTcp(o.host, o.port, deadlineAt, lk, signal); push('tcp', t0, true, `${out.address || o.host}:${o.port}`); }
+  catch (e) { push('tcp', t0, false, e?.message, e?.code); return finish(); }
+  if (o.tls === 'psk') {
+    t0 = Date.now();
+    try {
+      sock = await wrapPsk(sock, { name: o.name, md5hex, tlsMaxVersion: o.tlsMaxVersion }, deadlineAt, signal);
+      const c = sock.getCipher?.();
+      out.tls = { protocol: sock.getProtocol?.() || '', cipher: c?.standardName || c?.name || '' };
+      push('tls', t0, true, `${out.tls.protocol} ${out.tls.cipher}`.trim());
+    } catch (e) { push('tls', t0, false, e?.message, e?.code); try { sock.destroy(); } catch { /* */ } return finish(); }
+  } else skip('tls', 'TLS 를 쓰지 않는 시험 연결입니다(포탈 설정에는 이 경로가 없다).');
+  const s = new BareosSession(sock, o);
+  s.info.tls = out.tls;
+  const onAbort = () => s._fail(err('aborted', '요청이 취소됐습니다.'));
+  signal?.addEventListener?.('abort', onAbort, { once: true });
+  try {
+    t0 = Date.now();
+    try { await s._authenticate(o.name, md5hex, deadlineAt); out.banner = s.info.banner; push('auth', t0, true, s.info.banner || '인증 성공'); }
+    catch (e) { push('auth', t0, false, e?.message, e?.code); return finish(); }
+    t0 = Date.now();
+    try {
+      await s.callRaw('.api json', { timeoutMs: Math.max(1_000, deadlineAt - Date.now()) });
+      await s.callRaw('.api json compact=yes', { timeoutMs: Math.max(1_000, deadlineAt - Date.now()) });
+      push('api', t0, true, 'JSON 모드로 전환했습니다.');
+    } catch (e) { push('api', t0, false, e?.message, e?.code); return finish(); }
+    t0 = Date.now();
+    try {
+      const r = await s.call('.clients', { timeoutMs: Math.max(1_000, deadlineAt - Date.now()) });
+      const list = r && typeof r === 'object' ? Object.values(r).find(Array.isArray) : null;
+      out.clients = Array.isArray(list) ? list.map((x) => String(x?.name ?? x ?? '')).filter(Boolean).slice(0, 200) : [];
+      push('command', t0, true, `클라이언트 ${out.clients.length}개`);
+    } catch (e) { push('command', t0, false, e?.message, e?.code); return finish(); }
+    return finish();
+  } finally {
+    signal?.removeEventListener?.('abort', onAbort);
+    s.close();
+  }
+}
+
