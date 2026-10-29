@@ -162,8 +162,8 @@ function TargetsTab({ d, reload }) {
                         ? <button type="button" className="logout-btn" style={{ ...BTN, color: 'var(--red)' }} disabled={busy} onClick={() => cancel(j, liveJobid)}>취소</button>
                         : runFor === j.id
                           ? <>
-                            <Select className="input" value={runLevel} onChange={(e) => setRunLevel(e.target.value)} style={{ minWidth: 0, width: 150, padding: '3px 6px', fontSize: 12 }} aria-label="실행 레벨">
-                              <option value="">등록 레벨({levelLabel(j.level)})</option>
+                            <Select className="input" sort={false} value={runLevel} onChange={(e) => setRunLevel(e.target.value)} style={{ minWidth: 0, width: 168, padding: '3px 6px', fontSize: 12 }} aria-label="실행 레벨">
+                              <option value="">기본({levelLabel(j.level)})</option>
                               {['Full', 'Incremental', 'Differential'].map((l) => <option key={l} value={l}>{levelLabel(l)}</option>)}
                             </Select>
                             <button type="button" className="logout-btn" style={BTN} disabled={busy} onClick={() => run(j)}>시작</button>
@@ -538,8 +538,8 @@ function DiagStages({ stages }) {
       {stages.map((x) => {
         const v = diagView(x);
         return (
-          <li key={x.key} style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 150px) minmax(0, 1fr)', gap: 8, alignItems: 'baseline', fontSize: 12 }}>
-            <span style={{ minWidth: 0 }}><span className={`badge ${v.cls}`} style={{ fontSize: 10.5 }}>{v.mark}</span> {x.label}</span>
+          <li key={x.key} style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 17em) minmax(0, 1fr)', gap: 8, alignItems: 'baseline', fontSize: 12 }}>
+            <span style={{ minWidth: 0, wordBreak: 'keep-all' }}><span className={`badge ${v.cls}`} style={{ fontSize: 10.5 }}>{v.mark}</span> {x.label}</span>
             <span style={{ minWidth: 0, overflowWrap: 'anywhere' }}>
               <span className={x.ok === false ? '' : 'muted'}>{x.detail || '—'}</span>{v.ms && <span className="muted"> · {v.ms}</span>}
               {x.hint && <div style={{ color: 'var(--amber)', marginTop: 2 }}>조치: {x.hint}</div>}

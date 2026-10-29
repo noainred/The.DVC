@@ -37,8 +37,11 @@ export function demoSettings(snapshot) {
 }
 
 // ── 데모 Director 상태(메모리 — 재시작하면 '실행 중' 은 사라지고 과거 이력은 결정적으로 다시 만든다) ──
-const S = { jobs: new Map(), runs: new Map(), nextId: 9000 };
-export function _resetBareosDemoForTest() { S.jobs.clear(); S.runs.clear(); S.nextId = 9000; _seeded = false; }
+// 새 실행 jobid 는 합성 이력(historyOf — 100000 + 최대 80000 + 13)보다 커야 한다: 실제 Director 의 jobid 는 단조 증가이고
+//   포탈은 jobid 로 최신을 고른다(director.jobRuns·원장 lastRun). 9000 에서 시작하면 방금 실행이 이력 표 맨 뒤로 밀렸다(v2.822 화면 확인).
+const FIRST_RUN_ID = 200_000;
+const S = { jobs: new Map(), runs: new Map(), nextId: FIRST_RUN_ID };
+export function _resetBareosDemoForTest() { S.jobs.clear(); S.runs.clear(); S.nextId = FIRST_RUN_ID; _seeded = false; }
 
 /** lib/scan.cc next_arg 와 같은 규칙의 인자 분해. */
 function parseArgs(cmd) {
