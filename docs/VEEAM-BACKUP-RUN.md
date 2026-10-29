@@ -15,17 +15,19 @@ Detail 화면에서 VM 을 고르고 **'Veeam 백업 실행 →'** 을 누르면
 
 ## 정직 기록 — 실제 VBR 로 확인하지 못한 것
 
-이 기능의 **쓰기 요청은 실제 VBR 서버로 한 번도 확인하지 않았다**(개발 환경에 VBR 이 없고, Veeam 공식 레퍼런스도 개발 환경에서 열리지 않았다).
+v2.818.0 까지 쓰기 요청은 실제 VBR 로 확인하지 못했다(개발 환경에 VBR 이 없다). **2026-10-29 현장 첫 실행**(VBR 'OC2', 포탈 전용 잡 1대 — 실행 기록 화면)으로
+아래 표의 '현장 확인' 항목이 확인됐다. VBR 버전·API 판은 기록에 없다(등록부 기본 1.1-rev0 추정).
 
 | 항목 | 근거 | 상태 |
 |---|---|---|
 | 토큰·`x-api-version`·잡 목록·세션 읽기 | 모니터링 모듈(`veeam/client.js`)과 같은 방식 — 그 모듈 주석에 실서버(VBR 12.3) 응답 기록이 있다 | 확인(모니터링 기록 기준 — 이 기능으로 다시 확인하지는 않았다) |
-| 잡 시작 `POST /api/v1/jobs/{id}/start` | Veeam REST 문서·커뮤니티 예시 | 확인(문서) — 본문 `{performActiveFull:false}` 은 추정(거절되면 본문 없이) |
-| 잡 VM 지정 `virtualMachines.includes[]`(vCenter 이름 + moref, `inventoryObject` 래퍼 유무가 리비전마다 다름) | 문서 요약·포럼 예시 | 확인(두 모양 다 시도) |
+| 잡 시작 `POST /api/v1/jobs/{id}/start` · 본문 `{performActiveFull:false}` | 현장 기록 `start:body` | **현장 확인**(OC2) — 시작 응답에서 세션 id 도 읽혔다 |
+| 잡 VM 지정 `virtualMachines.includes[]` | 현장 기록 | **현장 확인 — flat**(`{type,hostName,name,objectId}`). `inventoryObject` 래퍼는 OC2 가 400 `'Name'·'Type'·'Host Name' must not be empty` 로 거절 → v2.818.1 부터 flat 을 먼저 보낸다 |
 | Quick Backup 은 API 1.2-rev0 부터 · 전체 복원 지점이 있는 VM 만 | 'New Features 1.2-rev0' · 사용자 가이드 | 확인(문서) |
 | Quick Backup 경로 `POST /api/v1/jobs/quickBackup/vSphere` 와 본문 | 공개 자료로 확정 못 함 | **추정** — 후보 3개(A `{virtualMachines:[…]}` · B `{objects:[…]}` · C VM 마다 하나)를 차례로, 쓴 후보를 실행 기록 '요청 형태' 에 남긴다 |
-| 잡 생성 본문(type `Backup`/`VSphereBackup`, 저장소·보존·스케줄 필드) | 문서 요약 | **추정** — 4개 조합을 차례로 |
-| 세션의 VM 별 작업(`/sessions/{id}/taskSessions`) 필드 | 모니터링 모듈이 같은 경로를 읽는다 | 일부 확인 — 결과·진행률 필드명은 후보 이름을 본다 |
+| 잡 생성 본문(type·저장소·보존·스케줄) | 현장 기록 `create:Backup:flat` | **현장 확인** — type `Backup` + flat 이 생성됐다(다른 VBR 판은 남은 후보로) |
+| 세션 읽기(`/sessions/{id}` — 상태·결과) | 현장 기록(결과 Success) | **현장 확인** |
+| 세션의 VM 별 작업(`/sessions/{id}/taskSessions`) | 현장 기록 | **현장에서 실패 — 사유 미상**. v2.818.1 부터 실패 사유를 실행 기록에 남긴다(다음 실행에서 확인) |
 | 필요한 Veeam 계정 최소 역할 | — | 확인 못 함 |
 
 첫 실사용에서: 실행 현황의 **요청 형태**(variant)와 그룹 메모(거절된 후보)를 보고 후보를 좁힌다.

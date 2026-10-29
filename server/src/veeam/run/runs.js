@@ -161,9 +161,10 @@ export function applySession(run, sessionId, s) {
     }
     if (s.finished) {
       const st = vmState(s.result);
-      if (st && !s.tasksKnown) { v.state = st; v.detail = `세션 전체 결과(VM 별 결과는 읽지 못함)${s.message ? ` — ${s.message}` : ''}`; }
+      if (s.progress != null) v.progress = s.progress;
+      if (st && !s.tasksKnown) { v.state = st; v.detail = `세션 전체 결과(VM 별 결과는 읽지 못함${s.tasksError ? ` — ${s.tasksError}` : ''})${s.message ? ` — ${s.message}` : ''}`; }
       else { v.state = 'unknown'; v.detail = s.tasksKnown ? '세션은 끝났지만 이 VM 의 작업 기록이 없습니다.' : '세션은 끝났지만 결과를 읽지 못했습니다.'; }
-    } else if (s.progress != null && v.progress == null) v.progress = s.progress;
+    } else if (s.progress != null) v.progress = s.progress;   // 최신 값으로(처음 값에 고정하면 끝난 VM 이 0% 로 남는다 — 2026-10-29 현장 기록)
   }
 }
 
@@ -201,7 +202,7 @@ export async function trackOnce(now = Date.now()) {
         const x = got.get(s.id);
         if (!x) continue;
         if (!x.ok) { s.lastError = x.reason; s.lastErrorAt = Date.now(); changed = true; continue; }
-        s.lastError = ''; s.state = x.state; s.result = x.result; s.progress = x.progress;
+        s.lastError = ''; s.state = x.state; s.result = x.result; s.progress = x.progress; s.tasksError = x.tasksError || '';
         if (x.finished) s.finished = true;
         applySession(run, s.id, x);
         changed = true;

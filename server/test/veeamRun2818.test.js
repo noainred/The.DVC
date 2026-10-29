@@ -377,3 +377,22 @@ test('라우트: VM 목록 범위 밖 404 · 미리보기는 조회 밖 404 → 
     assert.equal((await fetch(`${b}/tools/backup-run/runs/nope`)).status, 404);
   } finally { store.get = origGet; srv.close(); }
 });
+
+/* ── 2.818.1 현장 기록(2026-10-29 실 VBR 'OC2') ─────────────────────── */
+test('2.818.1: 잡 생성은 flat 모양 먼저 · taskSessions 실패 사유를 남긴다 · 진행률은 최신 값(0% 고정 금지)', async () => {
+  const f = fakeVbr({ ...TOKEN,
+    'GET /api/v1/jobs': { json: { data: [] } },
+    'POST /api/v1/jobs': ({ body }) => (body.virtualMachines.includes[0].inventoryObject ? { status: 400, json: { message: "'Name' must not be empty." } } : { status: 201, json: { id: 'job-1', name: body.name } }),
+    'POST /api/v1/jobs/job-1/start': { status: 201, json: { id: 'sess-9', state: 'Starting', jobId: 'job-1' } },
+    'GET /api/v1/sessions/sess-9': { json: { id: 'sess-9', state: 'Stopped', result: { result: 'Success' }, progressPercent: 100 } },
+    'GET /api/v1/sessions/sess-9/taskSessions': { status: 403, json: { message: 'forbidden' } },
+  });
+  const r = await exec.opPortalJob(SRV, { jobName: 'PORTAL-OC2-d6c8d5', repositoryId: 'repo-1', vms: VMS.slice(0, 1), fetchImpl: f });
+  assert.equal(r.ok, true, r.reason); assert.equal(r.variant, 'create:Backup:flat+start:body');
+  assert.equal(f.calls.filter((c) => c.key === 'POST /api/v1/jobs').length, 1, '첫 후보가 현장 확인된 모양');
+  const s = await exec.opSessions(SRV, { sessionIds: ['sess-9'], fetchImpl: f });
+  assert.equal(s.sessions[0].tasksKnown, false); assert.match(s.sessions[0].tasksError, /403/);
+  const run = { vms: [{ vmId: 'a', name: 'erp-db', objectId: 'vm-10', sessionId: 'sess-9', state: 'running', progress: 0 }] };
+  runs.applySession(run, 'sess-9', s.sessions[0]);
+  assert.equal(run.vms[0].state, 'success'); assert.equal(run.vms[0].progress, 100); assert.match(run.vms[0].detail, /403/);
+});

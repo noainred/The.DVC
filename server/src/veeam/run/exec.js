@@ -129,7 +129,8 @@ export async function opPortalJob(server, { jobName = '', repositoryId = '', ret
     if (!hit) {
       if (!repositoryId) return { ok: false, notSent: true, reason: `포탈 전용 잡 '${jobName}' 이 아직 없고 저장소가 지정되지 않았습니다 — 백업 실행 설정에서 그 Veeam 서버의 저장소를 고르세요.` };
       let lastErr = null;
-      for (const [type, wrapped] of [['Backup', true], ['Backup', false], ['VSphereBackup', true], ['VSphereBackup', false]]) {
+      // 순서: 현장 확인된 모양(type Backup + VM flat — 2026-10-29 실 VBR 'OC2' 에서 inventoryObject 래퍼는 400 'Name'·'Type'·'Host Name' must not be empty)부터.
+      for (const [type, wrapped] of [['Backup', false], ['Backup', true], ['VSphereBackup', false], ['VSphereBackup', true]]) {
         if (expired(deadlineAt)) return { ...NOT_SENT_LATE, notes };
         try {
           const { json } = await c.call('POST', '/api/v1/jobs', { body: portalJobBody({ name: jobName, repositoryId, retention: ret, refs, type, wrapped }) });
@@ -156,7 +157,7 @@ export async function opPortalJob(server, { jobName = '', repositoryId = '', ret
         return { ok: false, notSent: true, reason: `Veeam 에 같은 이름의 잡 '${jobName}' 이 있지만 포탈이 만든 잡이 아닙니다(설명에 표지 없음) — 사람이 만든 잡은 고치지 않습니다. 잡 이름 접두를 바꾸세요.` };
       }
       const inc = Array.isArray(full?.virtualMachines?.includes) ? full.virtualMachines.includes : [];
-      const wrapped = inc.length ? !!inc[0]?.inventoryObject : true;
+      const wrapped = inc.length ? !!inc[0]?.inventoryObject : false;   // 빈 잡은 현장 확인된 flat 모양으로
       const have = new Set(inc.map((x) => { const o = P.inventoryObjectOf(x); return `${o.hostName.toLowerCase()}|${o.objectId}`; }));
       const missing = refs.filter((v) => !have.has(`${v.hostName.toLowerCase()}|${v.objectId}`));
       if (missing.length) {
@@ -194,9 +195,10 @@ export async function opSessions(server, { sessionIds = [], signal, fetchImpl } 
     for (const sid of ids) {
       try {
         const s = (await c.call('GET', `/api/v1/sessions/${encodeURIComponent(sid)}`)).json;
-        let tasks = null;
-        try { tasks = await c.list(`/api/v1/sessions/${encodeURIComponent(sid)}/taskSessions`, { max: 500 }); } catch { tasks = null; } // 작업 세션은 선택 — 없으면 세션 전체 결과로만
-        out.push({ ...P.sessionFrom(s, tasks), id: sid });
+        let tasks = null; let tasksError = '';
+        // 작업 세션은 선택 — 없으면 세션 전체 결과로만. 실패 사유는 남긴다(2026-10-29 현장 기록: 사유 없이 '읽지 못함' 만 보여 원인을 알 수 없었다).
+        try { tasks = await c.list(`/api/v1/sessions/${encodeURIComponent(sid)}/taskSessions`, { max: 500 }); } catch (e) { tasks = null; tasksError = reasonOf(e).slice(0, 300); }
+        out.push({ ...P.sessionFrom(s, tasks), id: sid, ...(tasksError ? { tasksError } : {}) });
       } catch (e) { out.push({ id: sid, ok: false, reason: reasonOf(e).slice(0, 300) }); }
     }
     return { ok: true, sessions: out };
