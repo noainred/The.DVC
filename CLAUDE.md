@@ -57,7 +57,7 @@ VMware Global Monitoring Portal — 전세계 분산 vCenter 인프라를 통합
 ## 영역별 규칙 문서 — 그 영역을 고치기 전에 해당 파일을 읽을 것
 
 목록·목차는 `docs/rules/README.md`. 서버 모듈별 불변조건은 그 폴더의 CLAUDE.md 에도 있다(자동 로드):
-`server/src/{relaytopo,agent,rma,security,sanswitch,hostaccess}/CLAUDE.md`.
+`server/src/{relaytopo,agent,rma,security,sanswitch,hostaccess,veeam/run}/CLAUDE.md`.
 
 | 파일 | 다루는 것 · 언제 읽나 |
 |---|---|

@@ -53,7 +53,7 @@ export const CATS = Object.freeze([
   { id: 'watch', label: '장애·감시', test: /^central:\/(part-faults|partfault-config|svcmon-(config|config-ack|report)|link-check(-config)?|ping-(jobs|result))$|^collector:\/(ping|xfer-test)$/ },
   { id: 'users', label: '사용자·세션', test: /^central:\/(curuser(-config)?|users-config)$/ },
   // v2.793: VM 백업 법인 위임(엣지가 담당 vCenter 의 잡 정의·작업을 당기고 상태를 올린다)도 운영 작업 칸이다.
-  { id: 'ops', label: '운영 작업', test: /^central:\/(capture-(jobs|result)|rma-(poll|result|credential)|log-quer(ies|y-result)|edge-log-(jobs|result)|result|vm-clone-(sync|report))$|^collector:\/edge-log$/ },
+  { id: 'ops', label: '운영 작업', test: /^central:\/(capture-(jobs|result)|rma-(poll|result|credential)|log-quer(ies|y-result)|edge-log-(jobs|result)|result|vm-clone-(sync|report)|veeam-run-(ops|result))$|^collector:\/edge-log$/ },
   { id: 'reg', label: '등록·설정', test: /^central:\/(register-collector|agent-config|health-probe)$|^collector:\/(token-check|upgrade|set-password|central-token)$/ },
 ]);
 
@@ -64,7 +64,7 @@ export const CATS = Object.freeze([
  *  cpull 중앙이 엣지에서 가져옴           cpush 중앙이 엣지에 보냄(명령·번들)
  */
 export const KINDS = Object.freeze(['push', 'reply', 'pull', 'job', 'cpull', 'cpush']);
-const JOB_PATHS = /^\/(.*-jobs|assignment|ip-scan-assignment|log-queries|rma-poll|rma-credential)$/;
+const JOB_PATHS = /^\/(.*-jobs|assignment|ip-scan-assignment|log-queries|rma-poll|rma-credential|veeam-run-ops)$/;
 const REPLY_PATHS = /^\/(.*-result|.*-progress|svcmon-config-ack|result)$/;
 
 export function kindOf(side, method, path) {

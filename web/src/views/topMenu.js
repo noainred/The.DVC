@@ -27,7 +27,7 @@ export const MENU_GROUPS = Object.freeze([
     { id: 'bm', label: '물리 서버', tool: 'serveranalysis', seg: BAREMETAL_SEG },
     // v2.787(사용자 요청 + 시안): Veeam 백업 현황 — 메뉴는 하나, 화면 위 Summary | Detail 탭으로 두 도구를 오간다.
     //   also: 이 항목이 함께 맡는 도구(Detail 화면에서도 이 메뉴가 켜진다 — locate). 도구 키는 그대로(권한 파일·북마크).
-    { id: 'veeam', label: 'Backup', tool: 'backup-summary', also: ['backup-detail', 'backup-em'] },   // v2.788 EM 탭도 같은 항목 · v2.813 이름 'Veeam' → 'Backup'(사용자 요청 — id·도구 키는 그대로)
+    { id: 'veeam', label: 'Backup', tool: 'backup-summary', also: ['backup-detail', 'backup-em', 'backup-run'] },   // v2.788 EM 탭도 같은 항목 · v2.813 이름 'Veeam' → 'Backup'(사용자 요청 — id·도구 키는 그대로)
     { id: 'alarm', label: '알람', tab: 'alarms' },
   ] },
   { id: 'storage', label: '스토리지', children: [
