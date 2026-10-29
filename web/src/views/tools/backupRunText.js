@@ -121,3 +121,47 @@ export function pickHandoff(rows, ids, writable) {
 }
 /** 복원 지점 정렬 값 — '있음(개수 모름)'(-1)은 0 보다 위·1 보다 아래(재검토: -1 그대로면 '없음' 아래로 갔다). */
 export const rpSort = (n) => (typeof n === 'number' && Number.isFinite(n) ? (n === -1 ? 0.5 : n) : '');
+
+/* ── v2.822.2 진행 상세 · VM 크기 ─────────────────────────────────────── */
+
+const fin = (x) => typeof x === 'number' && Number.isFinite(x);
+/** GB(vCenter 값) → 'N GB' · 1024 이상은 TB. 값이 없으면 '—'(단위를 붙이지 않는다). */
+export function gbText(gb) {
+  if (!fin(gb)) return '—';
+  return gb >= 1024 ? `${(gb / 1024).toFixed(gb >= 10240 ? 0 : 1)} TB` : `${gb >= 100 ? Math.round(gb) : Math.round(gb * 10) / 10} GB`;
+}
+/** 바이트(Veeam 값) → GB/TB 글자. 없으면 '—'. */
+export const bytesText = (b) => (fin(b) ? gbText(b / 1024 ** 3) : '—');
+/** 경과(ms) → '45초' · '15분' · '2시간 5분'. 없거나 음수면 ''. */
+export function elapsedText(ms) {
+  if (!fin(ms) || ms < 0) return '';
+  const m = Math.floor(ms / 60_000);
+  if (m < 1) return `${Math.max(0, Math.round(ms / 1000))}초`;
+  if (m < 60) return `${m}분`;
+  return `${Math.floor(m / 60)}시간${m % 60 ? ` ${m % 60}분` : ''}`;
+}
+/** 평균 처리 속도(처리량 ÷ 경과) — **계산값**(Veeam 이 준 속도가 아니다). 둘 중 하나라도 없으면 null. */
+export function avgRate(processedBytes, elapsedMs) {
+  if (!fin(processedBytes) || !fin(elapsedMs) || elapsedMs < 1000) return null;
+  return processedBytes / (elapsedMs / 1000);
+}
+const rateText = (bps) => (bps == null ? '' : bps >= 1024 ** 3 ? `${(bps / 1024 ** 3).toFixed(1)} GB/s` : `${Math.round(bps / 1024 ** 2)} MB/s`);
+
+/**
+ * 진행 한 줄 요약 — '37% · 처리 120 GB / 할당 150 GB · 15분째 · 평균 133 MB/s(계산)'. 없는 조각은 뺀다(0 을 만들지 않는다).
+ * live = portal-vms 의 live({ state, progress, metrics }), sizeGB/provisionedGB = VM 크기.
+ */
+export function progressLine(live, { provisionedGB = null, now = Date.now() } = {}) {
+  if (!live) return '';
+  const m = live.metrics || {};
+  const running = ['starting', 'running', 'queued'].includes(live.state);
+  const parts = [];
+  if (fin(live.progress)) parts.push(`${live.progress}%`);
+  if (fin(m.processedBytes)) parts.push(`처리 ${bytesText(m.processedBytes)}${fin(provisionedGB) ? ` / 할당 ${gbText(provisionedGB)}` : ''}${m.scope === 'session' ? '(세션 전체)' : ''}`);
+  const end = fin(m.endedAt) ? m.endedAt : (running ? now : null);
+  const el = fin(m.startedAt) && end != null ? end - m.startedAt : null;
+  if (el != null) parts.push(running ? `${elapsedText(el)}째` : `${elapsedText(el)} 걸림`);
+  const rate = avgRate(m.processedBytes, el);
+  if (rate != null) parts.push(`평균 ${rateText(rate)}(계산)`);
+  return parts.join(' · ');
+}

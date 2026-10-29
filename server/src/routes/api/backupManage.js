@@ -15,9 +15,9 @@ import { logAudit } from '../../audit.js';
 import { serversForVcenter, getServerWithSecret, registryLoadError } from '../../veeam/registry.js';
 import { reauth } from './reauth.js';
 import { vcentersOf, vcRunState, runVisible } from './backupRun.js';
-import { portalJobName, morefOf } from '../../veeam/run/plan.js';
+import { portalJobName, morefOf, vmSizeOf } from '../../veeam/run/plan.js';
 import { getRunSettings } from '../../veeam/run/settings.js';
-import { startRun, listRuns, serverBusy, claimServer, releaseServer } from '../../veeam/run/runs.js';
+import { startRun, listRuns, getRun, serverBusy, claimServer, releaseServer } from '../../veeam/run/runs.js';
 import { dispatchOp, authStopOf } from '../../veeam/run/dispatch.js';
 import { listPortalVms, getPortalVm, notePortalVm } from '../../veeam/run/portalVms.js';
 import { NEW_NAME_RE } from '../../veeam/run/manage.js';
@@ -76,6 +76,16 @@ function busyIssue(server) {
 }
 const vmView = (ctx) => ({ id: ctx.vm.id, name: ctx.vm.name, vcenterId: ctx.vm.vcenterId, vcenterName: ctx.vc.name, folder: typeof ctx.vm.folder === 'string' ? ctx.vm.folder.slice(0, 200) : '', host: ctx.vm.host || '', powerState: ctx.vm.powerState || '' });
 
+/** 마지막 실행에서 이 VM 의 진행(v2.822.2 '백업하는 세부 내용') — 실행 기록이 없으면(100건 상한으로 밀림) null. 비밀 없음. */
+function liveOf(rec) {
+  const run = rec?.lastRunId ? getRun(rec.lastRunId) : null;
+  const v = run?.vms?.find((x) => x.vmId === rec.vmId);
+  if (!v) return null;
+  const g = (run.groups || []).find((x) => x.serverId === v.serverId && x.kind === v.how && (!x.vcenterId || x.vcenterId === v.vcenterId)) || {};
+  return { runId: run.id, at: run.at, state: v.state, progress: v.progress ?? null, detail: String(v.detail || '').slice(0, 300), sessionId: v.sessionId || '',
+    metrics: v.metrics || null, variant: g.variant || '', groupState: g.state || '' };
+}
+
 export function registerBackupManage(api) {
 
 /** 포탈로 백업한 VM 목록(조회 범위 교집합). Query: vcenterId(선택). 폴더 트리 배지·'포탈 백업 VM' 표가 쓴다(가벼운 로컬 읽기). */
@@ -90,7 +100,8 @@ api.get('/tools/backup-run/portal-vms', toolsPerm, adminOnly, (req, res) => {
     const live = present.get(r.vmId);
     return { vmId: r.vmId, name: live?.name || r.name, vcenterId: r.vcenterId, vcenterName: vcs.get(r.vcenterId)?.name || r.vcenterId, folder: typeof live?.folder === 'string' ? live.folder.slice(0, 200) : '',
       exists: !!live, serverName: r.serverName || '', how: r.how || '', jobName: r.jobName || '', lastAt: r.lastAt ?? null, lastState: r.lastState || '',
-      excludedAt: r.excludedAt ?? null, deletedAt: r.deletedAt ?? null, restores: (r.restores || []).slice(0, 3) };
+      excludedAt: r.excludedAt ?? null, deletedAt: r.deletedAt ?? null, restores: (r.restores || []).slice(0, 3),
+      ...vmSizeOf(live), live: liveOf(r) };
   });
   res.json({ ok: true, vms });
 });
@@ -140,7 +151,7 @@ api.post('/tools/backup-run/vm/:vmId/restore', toolsPerm, adminOnly, reauth, (re
   if (issue) return res.status(issue.status).json({ ok: false, reason: issue.error });
   const pointAt = Number.isFinite(Number(b.pointAt)) ? Number(b.pointAt) : null;
   const vmRow = { vmId: ctx.vm.id, name: ctx.vm.name, vcenterId: ctx.vm.vcenterId, objectId: morefOf(ctx.vm), hostName: ctx.hostName, serverId: server.id, serverName: server.name, how: 'restore',
-    restore: { restorePointId: pid, newName, dest: ctx.dest, pointAt, jobName: ctx.record?.jobName || ctx.jobName } };
+    restore: { restorePointId: pid, newName, dest: ctx.dest, pointAt, jobName: ctx.record?.jobName || ctx.jobName }, ...vmSizeOf(ctx.vm) };
   const run = startRun({ vms: [vmRow], groups: [{ serverId: server.id, serverName: server.name, kind: 'restore', vcenterId: ctx.vm.vcenterId, refs: [vmRow] }] }, { user: req.user?.username || '', mode: 'restore' });
   logAudit({ user: req.user?.username, action: 'Veeam 새 VM 복원 요청', target: run.id, detail: `${ctx.vm.name} → ${newName} · 복원 지점 ${pid} · 서버 ${server.name} · 호스트 ${ctx.dest.host.name}`, ip: req.ip });
   res.json({ ok: true, run });

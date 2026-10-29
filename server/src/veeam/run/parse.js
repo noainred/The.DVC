@@ -32,14 +32,20 @@ export function sanitizeStart(s) {
   };
 }
 
+/** 용량(바이트) — 음수·숫자 아님은 null(엣지 회신도 지난다 — 0 을 만들지 않는다). */
+const bytesNum = (v) => { const n = numOrNull(v); return n != null && n >= 0 ? Math.round(n) : null; };
+const bytesOf = (o) => ({ processedBytes: bytesNum(o.processedBytes), readBytes: bytesNum(o.readBytes), transferredBytes: bytesNum(o.transferredBytes) });
+
 function sanitizeOneSession(s) {
   const r = obj(s);
   return {
     id: str(r.id, 64), ok: r.ok === true, reason: str(r.reason, 500),
-    state: str(r.state, 40), result: str(r.result, 40), message: str(r.message, 1000), progress: pct(r.progress), endedAt: timeOf(r.endedAt), finished: r.finished === true,
+    state: str(r.state, 40), result: str(r.result, 40), message: str(r.message, 1000), progress: pct(r.progress), startedAt: timeOf(r.startedAt), endedAt: timeOf(r.endedAt), finished: r.finished === true,
+    ...bytesOf(r),
     tasks: arr(r.tasks).slice(0, 500).map((t0) => {
       const t = obj(t0);
-      return { name: str(t.name, 256), objectId: str(t.objectId, 128), state: str(t.state, 40), result: str(t.result, 40), message: str(t.message, 1000), progress: pct(t.progress) };
+      return { name: str(t.name, 256), objectId: str(t.objectId, 128), state: str(t.state, 40), result: str(t.result, 40), message: str(t.message, 1000), progress: pct(t.progress),
+        startedAt: timeOf(t.startedAt), endedAt: timeOf(t.endedAt), ...bytesOf(t) };
     }),
     tasksKnown: r.tasksKnown === true, tasksError: str(r.tasksError, 300),
   };
@@ -97,7 +103,14 @@ export function taskFrom(t) {
     name: str(o.name ?? o.objectName, 256), objectId: str(o.objectId, 128), state: str(o.state, 40),
     result: str(res.result ?? (typeof o.result === 'string' ? o.result : ''), 40), message: str(res.message ?? o.message, 1000),
     progress: pct(obj(o.progress).progressPercent ?? o.progressPercent),
+    // v2.822.2 진행 상세 — 필드 이름은 모니터링 모듈(veeam/parse.js lastTasks)과 같은 **추정** 후보(실서버 미확인). 없으면 null.
+    startedAt: timeOf(o.creationTime ?? o.startTime), endedAt: timeOf(o.endTime), ...rawBytes(o),
   };
+}
+/** Veeam 진행 용량(progress.processedSize·readSize·transferredSize — 추정 이름). */
+function rawBytes(o) {
+  const pr = obj(o.progress);
+  return { processedBytes: numOrNull(pr.processedSize ?? o.processedSize), readBytes: numOrNull(pr.readSize ?? o.readSize), transferredBytes: numOrNull(pr.transferredSize ?? pr.transferedSize ?? o.transferredSize) };
 }
 /** 세션 원문(SessionModel 추정) → 표준. 끝남 = state 가 Stopped 류이거나 종료 시각이 있다. */
 export function sessionFrom(s, tasks = null) {
@@ -107,7 +120,7 @@ export function sessionFrom(s, tasks = null) {
   const endedAt = timeOf(o.endTime ?? o.endedAt);
   return {
     id: str(o.id, 64), ok: true, state, result: str(res.result ?? (typeof o.result === 'string' ? o.result : ''), 40),
-    message: str(res.message ?? o.message, 1000), progress: pct(o.progressPercent ?? obj(o.progress).progressPercent), endedAt,
+    message: str(res.message ?? o.message, 1000), progress: pct(o.progressPercent ?? obj(o.progress).progressPercent), startedAt: timeOf(o.creationTime ?? o.startTime), endedAt, ...rawBytes(o),
     finished: /^(stopped|finished|completed)$/i.test(state) || endedAt != null,
     tasks: Array.isArray(tasks) ? tasks.map(taskFrom) : [], tasksKnown: Array.isArray(tasks),
   };

@@ -19,7 +19,7 @@ import { listRegistry as listVcenters } from '../../vcenter/registry.js';
 import { serversForVcenter, listServers, getServerWithSecret, registryLoadError } from '../../veeam/registry.js';
 import { reauth } from './reauth.js';
 import { veeamMatchFor } from './veeam.js';
-import { runStatusOf, planBackup, portalJobName, veeamHostFor } from '../../veeam/run/plan.js';
+import { runStatusOf, planBackup, portalJobName, veeamHostFor, vmSizeOf } from '../../veeam/run/plan.js';
 import { getRunSettings, saveRunSettings, settingsLoadError, serverRunSettings } from '../../veeam/run/settings.js';
 import { startRun, listRuns, getRun, activeRunFor, closeRun, serverBusy } from '../../veeam/run/runs.js';
 import { dispatchOp, authStopOf } from '../../veeam/run/dispatch.js';
@@ -103,6 +103,15 @@ export function planFor(req) {
   return { plan, vcs, mode };
 }
 
+/** 보낼 VM(Quick·포탈 잡)의 크기 합계 — 모르는 VM 은 더하지 않고 개수만 센다(부분 합을 전체처럼 말하지 않게). */
+export function sizeTotal(vms) {
+  const send = (Array.isArray(vms) ? vms : []).filter((v) => v.how === 'quick' || v.how === 'portal');
+  const known = send.filter((v) => typeof v.sizeGB === 'number');
+  const prov = send.filter((v) => typeof v.provisionedGB === 'number');
+  const sum = (a, k) => Math.round(a.reduce((x, v) => x + v[k], 0) * 100) / 100;
+  return { totalSizeGB: known.length ? sum(known, 'sizeGB') : null, totalProvisionedGB: prov.length ? sum(prov, 'provisionedGB') : null, sizeUnknown: send.length - known.length, sendCount: send.length };
+}
+
 /** 범위 계정에 보일 실행인가 — VM 이 전부 허용 vCenter 에 있을 때만. */
 export const runVisible = (run, allowed) => !allowed || (run.vms || []).every((v) => allowed.has(String(v.vcenterId)));
 
@@ -126,7 +135,7 @@ api.get('/tools/backup-run/vms', toolsPerm, adminOnly, (req, res) => {
   for (const { vm, run } of s.rows.values()) {
     if (vm.template === true || /^vcls/i.test(String(vm.name || ''))) continue;   // 백업 대상이 아니다(backupStatus.isSystemVm 과 같은 기준)
     counts[run.status] = (counts[run.status] || 0) + 1;
-    rows.push({ id: vm.id, name: vm.name || vm.id, powerState: vm.powerState || '', folder: typeof vm.folder === 'string' ? vm.folder.slice(0, 200) : '', run });
+    rows.push({ id: vm.id, name: vm.name || vm.id, powerState: vm.powerState || '', folder: typeof vm.folder === 'string' ? vm.folder.slice(0, 200) : '', run, ...vmSizeOf(vm) });
   }
   rows.sort((a, b) => String(a.name).localeCompare(String(b.name)));
   const servers = s.servers.map((d) => {
@@ -144,7 +153,7 @@ api.post('/tools/backup-run/plan', toolsPerm, adminOnly, (req, res) => {
   const p = planFor(req);
   if (p.error && !p.plan) return res.status(p.status).json({ ok: false, reason: p.error });
   res.json({ ok: true, vms: p.plan.vms, groups: p.plan.groups.map((g) => ({ serverId: g.serverId, serverName: g.serverName, kind: g.kind, vcenterId: g.vcenterId || '', count: g.refs.length,
-    jobName: g.kind === 'portal' ? portalJobName(getRunSettings().jobPrefix, p.vcs.get(g.vcenterId) || { id: g.vcenterId }) : '' })), ...(p.error ? { blocked: p.error } : {}) });
+    jobName: g.kind === 'portal' ? portalJobName(getRunSettings().jobPrefix, p.vcs.get(g.vcenterId) || { id: g.vcenterId }) : '' })), ...sizeTotal(p.plan.vms), ...(p.error ? { blocked: p.error } : {}) });
 });
 
 /** 실행 — 재인증(OTP) + 감사. */
