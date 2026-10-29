@@ -29,7 +29,7 @@ const adminOnly = requireRole('admin');
 const toolsPerm = requirePerm('tools');
 const fullScopeOnly = fullScopeOnlyWith('백업 실행 설정은 전 법인 공용이라 전체 범위(vCenter 제한 없는) 계정만 쓸 수 있습니다.');
 export const MAX_BACKUP_VMS = 200;
-export const RUN_STATUSES = Object.freeze(['protected', 'in-job', 'unprotected', 'elsewhere', 'unknown', 'unmapped']);
+export const RUN_STATUSES = Object.freeze(['protected', 'in-job', 'unprotected', 'agent', 'elsewhere', 'unknown', 'unmapped']);
 
 /** vCenter id → { id, name, host } — 이름은 스냅샷, 주소는 등록부(스냅샷에는 접속 주소가 없을 수 있다). */
 export function vcentersOf(snap) {
@@ -203,10 +203,11 @@ api.get('/tools/backup-run/settings', toolsPerm, adminOnly, fullScopeOnly, (_req
 });
 
 api.put('/tools/backup-run/settings', toolsPerm, adminOnly, fullScopeOnly, reauth, (req, res) => {
-  // 등록부를 못 읽으면 화면의 서버 목록이 비어 servers:{} 가 온다 — 그대로 저장하면 서버별 저장소·보존이 전부 지워진다(v2.820.1 B3).
-  if (registryLoadError()) return res.status(503).json({ ok: false, registryUnreadable: true, reason: 'Veeam 서버 등록부를 읽지 못해 설정을 저장하지 않았습니다(서버별 저장소·보존이 지워지지 않게) — 설정 › Veeam 백업 서버에서 먼저 확인하세요.' });
   const { otp, ...input } = req.body && typeof req.body === 'object' ? req.body : {};
   void otp;
+  // 등록부를 못 읽으면 화면의 서버 목록이 비어 servers:{} 가 온다(v2.820.1 B3) — 서버별 값은 받지 않고(잡 접두·vCenter 이름만 저장),
+  //   그렇지 않아도 saveRunSettings 가 서버별 값을 **합친다**(입력에 없는 서버 id 는 유지 — 재시작 뒤 '파일 없음' 으로 보이는 경우까지).
+  if (registryLoadError()) delete input.servers;
   const r = saveRunSettings(input);
   if (!r.ok) return res.status(400).json(r);
   logAudit({ user: req.user?.username, action: 'Veeam 백업 실행 설정 변경', target: 'backup-run', detail: `잡 접두 '${r.settings.jobPrefix}' · 저장소 지정 서버 ${Object.values(r.settings.servers).filter((x) => x.repositoryId).length} · vCenter 이름 지정 ${Object.keys(r.settings.hosts).length}`, ip: req.ip });

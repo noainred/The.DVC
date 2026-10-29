@@ -6,7 +6,7 @@ import path from 'node:path';
 
 // v2.820.1 Veeam 백업 실행·관리 버그 수정 회귀(사용자 요청 '버그 5개 찾아서 수정' — 2026-10-30).
 //  B1 복원 지점 '있음(개수 모름)'(rp -1)을 미보호로 판정 → 이미 백업된 VM 이 포탈 전용 잡에도 들어갔다
-//  B3 Veeam 서버 등록부를 못 읽은 채 설정을 저장하면 서버별 저장소·보존이 전부 지워졌다
+//  B3 Veeam 서버 등록부를 못 읽은 채 설정을 저장하면 서버별 저장소·보존이 전부 지워졌다(재검토 뒤: 막지 않고 서버별 값을 합친다)
 //  B5 VM 하나만 담은 세션(복원·VM 별 Quick)이 작업 목록에 그 VM 이름이 없다는 이유로 '확인 불가' 가 됐다
 // (B2·B4 는 웹 — web/src/views/tools/backupRunText.test.js)
 const CFG = fs.mkdtempSync(path.join(os.tmpdir(), 'portal-veeambugs-'));
@@ -31,9 +31,14 @@ test('B1: 복원 지점 있음(개수 모름, rp -1)은 보호됨 — 미보호�
   assert.deepEqual(p.vms.map((v) => v.how), ['quick']);
   // 0 은 여전히 '복원 지점 없음'
   assert.equal(plan.runStatusOf(vm, { servers, known: true, entry: { rp: 0, jobs: ['Daily'], servers: ['VBR-KR'] } }).status, 'in-job');
+  // 재검토: 게스트 에이전트 백업(ag 1)이 섞이면 Quick 근거가 아니다 — Quick 방식은 건너뛰고(미보호로 단정해 포탈 잡에도 넣지 않음), 포탈 방식이면 보낸다
+  const ag = plan.runStatusOf(vm, { servers, known: true, entry: { rp: -1, servers: ['VBR-KR'], ag: 1 } });
+  assert.equal(ag.status, 'agent');
+  assert.deepEqual(plan.planBackup([{ vm, run: ag, hostName: 'vc1.local' }], { mode: 'quick', unprotected: 'portal' }).vms.map((v) => v.how), ['skip']);
+  assert.deepEqual(plan.planBackup([{ vm, run: ag, hostName: 'vc1.local' }], { mode: 'portal' }).vms.map((v) => v.how), ['portal']);
 });
 
-test('B3: 등록부를 못 읽으면 백업 실행 설정 저장은 503 — 서버별 저장소·보존이 지워지지 않는다', async () => {
+test('B3: 등록부를 못 읽어도(빈 서버 목록) 저장이 서버별 저장소·보존을 지우지 않는다 — 잡 접두·vCenter 이름은 저장된다 · 서버별 값은 합친다', async () => {
   settings._resetForTest();
   fs.writeFileSync(path.join(CFG, 'veeam-backup-run.json'), JSON.stringify({ version: 1, jobPrefix: 'PORTAL-', servers: { 'vbr-a': { repositoryId: 'repo-1', retention: 14 } }, hosts: {} }));
   const express = (await import('express')).default;
@@ -45,13 +50,19 @@ test('B3: 등록부를 못 읽으면 백업 실행 설정 저장은 503 — 서�
     const b = `http://127.0.0.1:${srv.address().port}/api/tools/backup-run/settings`;
     const g = await (await fetch(b)).json();
     assert.equal(g.registryUnreadable, true); assert.deepEqual(g.servers, []);
-    // 화면은 서버 목록이 비어 servers:{} 를 보낸다 — 그대로 저장하면 repo-1 이 사라진다
-    const r = await fetch(b, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ jobPrefix: 'PORTAL-', servers: {}, hosts: {} }) });
-    assert.equal(r.status, 503);
-    assert.equal((await r.json()).registryUnreadable, true);
+    // 화면은 서버 목록이 비어 servers:{} 를 보낸다(재검토: 503 은 잡 접두·vCenter 이름까지 막았다)
+    const r = await fetch(b, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ jobPrefix: 'PX-', servers: {}, hosts: { vc1: 'vc1.corp.local' } }) });
+    assert.equal(r.status, 200);
     settings._resetForTest();
     assert.equal(settings.serverRunSettings('vbr-a').repositoryId, 'repo-1', '저장소 설정이 남아 있다');
+    assert.equal(settings.getRunSettings().jobPrefix, 'PX-'); assert.equal(settings.getRunSettings().hosts.vc1, 'vc1.corp.local');
   } finally { srv.close(); }
+  // 등록부가 정상이어도(재시작 뒤 '파일 없음' 으로 보이는 경우) 입력에 없는 서버 id 는 유지 — 지우려면 그 id 에 빈 값을 보낸다
+  settings.saveRunSettings({ servers: { 'vbr-b': { repositoryId: 'repo-2', retention: 7 } } });
+  assert.equal(settings.serverRunSettings('vbr-a').repositoryId, 'repo-1');
+  assert.equal(settings.serverRunSettings('vbr-b').repositoryId, 'repo-2');
+  settings.saveRunSettings({ servers: { 'vbr-a': { repositoryId: '', retention: 7 } } });
+  assert.equal(settings.serverRunSettings('vbr-a').repositoryId, '');
 });
 
 test('B5: VM 하나만 담은 세션(복원)은 작업 목록에 그 이름이 없어도 세션 결과로 판정 · 여러 VM 세션은 그대로 단정하지 않음', () => {
@@ -69,4 +80,12 @@ test('B5: VM 하나만 담은 세션(복원)은 작업 목록에 그 이름이 �
     groups: [{ kind: 'portal', sessions: [{ id: 's3', objectIds: ['vm-1', 'vm-2'] }] }] };
   runs.applySession(multi, 's3', { finished: true, tasksKnown: true, result: 'Success', tasks: [{ name: 'x', result: 'Success', state: 'Stopped' }] });
   assert.deepEqual(multi.vms.map((v) => v.state), ['success', 'unknown']);
+  // 재검토: 포탈 전용 잡에 VM 1대만 넣어 시작해도 그 잡 세션은 잡의 다른 VM 도 돈다 — 세션 결과·다른 VM 작업으로 단정하지 않는다
+  const portal1 = { vms: [{ vmId: 'e', name: 'C', objectId: 'vm-9', sessionId: 's4', state: 'running', how: 'portal' }], groups: [{ kind: 'portal', sessions: [{ id: 's4', objectIds: ['vm-9'] }] }] };
+  runs.applySession(portal1, 's4', { finished: true, tasksKnown: true, result: 'Success', tasks: [{ name: 'A', result: 'Success', state: 'Stopped' }] });
+  assert.equal(portal1.vms[0].state, 'unknown', '다른 VM(A) 의 작업 결과를 C 에 붙이지 않는다');
+  // 그룹을 모르면(세션 기록 없음) 단일 VM 세션으로 보지 않는다
+  const orphan = { vms: [{ vmId: 'f', name: 'D', objectId: 'vm-8', sessionId: 's5', state: 'running', how: 'quick' }], groups: [] };
+  runs.applySession(orphan, 's5', { finished: true, tasksKnown: true, result: 'Success', tasks: [] });
+  assert.equal(orphan.vms[0].state, 'unknown');
 });

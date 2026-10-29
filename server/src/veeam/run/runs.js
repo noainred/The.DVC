@@ -180,9 +180,12 @@ async function execute(run) {
 export function applySession(run, sessionId, s) {
   // 이 세션이 VM 하나만 담았나(복원·VM 별 Quick) — 그러면 세션 결과가 곧 그 VM 의 결과다. 작업 목록에 그 이름이 없어도(복원 작업은 새 VM 이름으로
   //   적힐 수 있다 · 작업이 없는 세션 종류) '확인 불가' 로 두지 않는다(v2.820.1 B5). 여러 VM 세션은 지금처럼 단정하지 않는다.
+  //   ⚠ 포탈 전용 잡 세션은 제외 — 그 세션은 잡에 이미 들어 있던 다른 VM 도 함께 돌고, objectIds 에는 이번에 넣은 VM 만 있다(재검토 재현).
   const members = run.vms.filter((x) => x.sessionId === sessionId);
-  const sess = (run.groups || []).flatMap((g) => g.sessions || []).find((x) => x.id === sessionId);
-  const dedicated = members.length === 1 && (!sess || (Array.isArray(sess.objectIds) && sess.objectIds.length <= 1));
+  const grp = (run.groups || []).find((g) => (g.sessions || []).some((x) => x.id === sessionId));
+  const sess = grp ? grp.sessions.find((x) => x.id === sessionId) : null;
+  const dedicated = members.length === 1 && !!sess && Array.isArray(sess.objectIds) && sess.objectIds.length === 1
+    && (grp.kind === 'restore' || grp.kind === 'quick');
   for (const v of members.filter((x) => !FINAL.has(x.state))) {
     const t = (s.tasks || []).find((x) => (x.objectId && x.objectId === v.objectId) || (x.name && (x.name === v.name || (v.restore?.newName && x.name === v.restore.newName))))
       || (dedicated && (s.tasks || []).length === 1 ? s.tasks[0] : null);

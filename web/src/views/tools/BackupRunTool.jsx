@@ -4,7 +4,7 @@ import { Loading, ErrorBox, SearchBox } from '../../components/ui.jsx';
 import { STable } from '../../components/STable.jsx';
 import Select from '../../components/Select.jsx';
 import VeeamHeader from './VeeamHeader.jsx';
-import { RUN_STATUS, RUN_STATUS_ORDER, VM_STATE, HOW, HOST_HOW, ago, shortTime, powerText, runSummary, takeHandoff, portalMark, rpText, pickHandoff } from './backupRunText.js';
+import { RUN_STATUS, RUN_STATUS_ORDER, VM_STATE, HOW, HOST_HOW, ago, shortTime, powerText, runSummary, takeHandoff, portalMark, rpText, rpSort, pickHandoff } from './backupRunText.js';
 import BackupManageModal from './BackupManageModal.jsx';
 
 /**
@@ -44,7 +44,7 @@ export default function BackupRunTool() {
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14, minWidth: 0 }}>
       <VeeamHeader active="run" desc="포탈에서 고른 VM 을 Veeam 으로 백업합니다 — 보내기 전에 미리보기로 방식을 확인하고 OTP 로 다시 확인합니다. 모든 요청은 감사 로그에 남습니다." actions={vcSelect} />
       {listErr && !list ? <ErrorBox error={listErr} /> : !list ? <Loading label="vCenter 목록" /> : null}
-      {vcId ? <VmPanel key={vcId} vcId={vcId} initialIds={handoff.current?.vcenterId === vcId ? handoff.current.vmIds : []} /> : list && <div className="card muted">vCenter 를 고르세요.</div>}
+      {vcId ? <VmPanel key={vcId} vcId={vcId} initialIds={handoff.current?.vcenterId === vcId ? handoff.current.vmIds : []} onHandoffUsed={() => { handoff.current = null; }} /> : list && <div className="card muted">vCenter 를 고르세요.</div>}
       <RunsPanel />
       <PortalVmsPanel />
       <SettingsPanel />
@@ -54,7 +54,7 @@ export default function BackupRunTool() {
 
 /* ── VM 선택 · 미리보기 · 실행 ───────────────────────────────────────── */
 
-function VmPanel({ vcId, initialIds }) {
+function VmPanel({ vcId, initialIds, onHandoffUsed }) {
   const [d, setD] = useState(null);
   const [err, setErr] = useState(null);
   const [q, setQ] = useState('');
@@ -76,7 +76,7 @@ function VmPanel({ vcId, initialIds }) {
     fetchJson('/tools/backup-run/vms', { vcenterId: vcId }).then((r) => {
       if (my !== seq.current) return;
       setD(r); setErr(null);
-      if (!handoffUsed.current && initialIds?.length) { handoffUsed.current = true; const pick = pickHandoff(r.rows, initialIds, r.writable); setSel((cur) => (cur.size ? cur : pick)); }
+      if (!handoffUsed.current && initialIds?.length) { handoffUsed.current = true; onHandoffUsed?.(); const pick = pickHandoff(r.rows, initialIds, r.writable); setSel((cur) => (cur.size ? cur : pick)); }
     }).catch((e) => { if (my === seq.current) setErr(e); });
   }, [vcId]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { load(); }, [load]);
@@ -163,7 +163,7 @@ function VmPanel({ vcId, initialIds }) {
                       <td style={{ fontWeight: 500 }}>{r.name}<div className="muted" style={{ fontSize: 11, overflowWrap: 'anywhere' }}>{r.folder || p.objectId || '—'}</div></td>
                       <td>{powerText(r.powerState)}</td>
                       <td data-sort={RUN_STATUS_ORDER.indexOf(p.status)}><Badge cls={st.cls} title={p.reason || ''}>{st.label}</Badge>{p.running ? <span className="muted" style={{ fontSize: 11 }}> · 백업 중</span> : null}</td>
-                      <td data-sort={p.restorePoints ?? ''} className="mono">{rpText(p.restorePoints)}</td>
+                      <td data-sort={rpSort(p.restorePoints)} className="mono">{rpText(p.restorePoints)}</td>
                       <td data-sort={p.lastBackup ?? ''} className="mono">{shortTime(p.lastBackup)}</td>
                       <td style={{ fontSize: 12 }}>{(p.jobs || []).join(', ') || '—'}</td>
                     </tr>
@@ -398,7 +398,7 @@ function SettingsPanel() {
       {!open ? null : err && !d ? <div style={{ marginTop: 10 }}><ErrorBox error={err} /></div> : !d || !form ? <Loading label="설정" /> : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginTop: 12, minWidth: 0 }}>
           {d.settingsUnreadable ? <div style={{ color: 'var(--red)', fontSize: 12 }}>설정 파일을 읽지 못했습니다 — 저장하면 새 설정으로 씁니다(손상 원본은 보존돼 있습니다).</div> : null}
-          {d.registryUnreadable ? <div style={{ color: 'var(--red)', fontSize: 12 }}>Veeam 서버 등록부를 읽지 못해 서버 목록이 비어 있습니다 — 이 상태로 저장하면 서버별 저장소·보존이 지워지므로 저장을 막습니다. 설정 › Veeam 백업 서버에서 먼저 확인하세요.</div> : null}
+          {d.registryUnreadable ? <div style={{ color: 'var(--red)', fontSize: 12 }}>Veeam 서버 등록부를 읽지 못해 서버 목록이 비어 있습니다 — 지금 저장하면 잡 접두·vCenter 이름만 저장되고 서버별 저장소·보존은 그대로 둡니다. 설정 › Veeam 백업 서버에서 먼저 확인하세요.</div> : null}
           <div className="muted" style={{ fontSize: 12 }}>Veeam 서버(주소·계정·담당 엣지·연결 vCenter)는 설정 › Veeam 백업 서버에서 등록합니다. 여기서는 백업 실행에만 쓰는 값을 정합니다.</div>
           <label className="muted" style={{ ...field, maxWidth: 260 }}>포탈 전용 잡 이름 접두
             <input className="input" value={form.jobPrefix} onChange={(e) => setForm({ ...form, jobPrefix: e.target.value })} />
@@ -448,7 +448,7 @@ function SettingsPanel() {
             <label className="muted" style={field}>OTP 코드(재인증)
               <input className="input" inputMode="numeric" autoComplete="one-time-code" value={otp} onChange={(e) => setOtp(e.target.value.replace(/\D/g, '').slice(0, 8))} placeholder="6자리" style={{ width: 140 }} />
             </label>
-            <button type="button" className="login-btn" disabled={!!busy || !!d.registryUnreadable} onClick={save}>{busy === 'save' ? '저장 중…' : '설정 저장'}</button>
+            <button type="button" className="login-btn" disabled={!!busy} onClick={save}>{busy === 'save' ? '저장 중…' : '설정 저장'}</button>
             {msg ? <span style={{ fontSize: 12, overflowWrap: 'anywhere' }}>{msg}</span> : null}
           </div>
           {d.pendingEdgeOps?.length ? <div className="muted" style={{ fontSize: 12 }}>엣지 대기 작업 {d.pendingEdgeOps.length}건</div> : null}

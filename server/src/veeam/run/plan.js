@@ -12,6 +12,7 @@
  *  · 'unprotected' 대조 결과를 읽었고 Veeam 에 이 VM 이 없다
  *  · 'unknown'     이 vCenter 의 Veeam 결과를 아직 못 읽었다(등록부 손상·결과 없음·인벤토리 없음) — 미보호로 단정하지 않는다
  *  · 'unmapped'    이 vCenter 를 맡는 B&R 서버가 등록부에 없다
+ *  · 'agent'       게스트 에이전트 백업이 섞여 VM 단위 백업인지 모름 — Quick 불가 · 포탈 전용 잡 방식으로만 보낸다(v2.820.1)
  */
 import crypto from 'node:crypto';
 
@@ -56,6 +57,10 @@ export function runStatusOf(vm, { servers = [], known = false, entry } = {}) {
   const names = new Set((Array.isArray(entry.servers) ? entry.servers : []).map(lc));
   const owner = servers.find((s) => names.has(lc(s.name))) || null;
   const base = { objectId, restorePoints: rp, lastBackup: lb, jobs, running: entry.run === 1 };
+  // 게스트 에이전트 백업(컴퓨터 이름으로 맞춘 것 — ag 1)이 하나라도 섞이면 VM 단위 백업인지 이 값만으로는 가를 수 없다(대조 코어가 근거를 합친다):
+  //   Quick Backup 근거로 쓰지 않고(에이전트 백업이면 Veeam 이 거절), 미보호로 단정해 포탈 잡에 넣지도 않는다(v2.820.1 재검토 — 'agent').
+  if (entry.ag === 1) return { status: 'agent', ...base, serverId: (owner || servers[0]).id, serverName: (owner || servers[0]).name,
+    reason: '게스트 에이전트 백업이 섞여 있어(컴퓨터 이름으로 맞춘 백업) VM 단위 백업인지 확인할 수 없습니다 — Quick Backup 은 보내지 않습니다. VM 단위 백업이 없는 것이 확실하면 \'포탈 전용 잡\' 방식으로 보내세요.' };
   // rp -1 = '복원 지점 있음(개수 모름)'(모니터링 코어 veeam/parse.js 의 표기 — 증거 판정도 rp !== 0). rp > 0 만 보면 그 VM 을 미보호로 보고
   //   기본 설정(미보호 → 포탈 전용 잡)이 이미 백업된 VM 을 포탈 잡에 또 넣는다(v2.820.1 B1).
   if ((rp != null && rp !== 0) || lb != null) {
@@ -82,6 +87,7 @@ export function planBackup(items, { mode = 'quick', unprotected = 'portal' } = {
     if (!row.hostName) { skip('Veeam 이 이 vCenter 를 부르는 이름을 모릅니다 — 백업 실행 설정에서 vCenter 이름을 지정하세요.'); continue; }
     if (p?.running) { skip('지금 백업 중인 VM 입니다 — 끝난 뒤 다시 요청하세요.'); continue; }
     if (mode === 'portal') { vms.push({ ...row, how: 'portal' }); continue; }
+    if (p?.status === 'agent') { skip(p.reason); continue; }   // Quick 방식: 에이전트 백업은 Quick 근거가 아니고 미보호로 단정하지도 않는다
     if (p?.status === 'protected') { vms.push({ ...row, how: 'quick' }); continue; }
     if (unprotected === 'portal') { vms.push({ ...row, how: 'portal', reason: p?.status === 'in-job' ? '전체 복원 지점이 없어 포탈 전용 잡으로 넘깁니다(그 VM 은 두 잡에 들어갑니다).' : '미보호 VM — 포탈 전용 잡으로 넘깁니다.' }); continue; }
     skip(p?.status === 'in-job' ? '전체 복원 지점이 없어 Quick Backup 을 할 수 없습니다(건너뜀).' : '미보호 VM — 건너뜀(설정).');

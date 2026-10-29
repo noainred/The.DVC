@@ -8,11 +8,12 @@ export const RUN_STATUS = Object.freeze({
   protected: { label: '보호됨 · Quick 가능', cls: 'green' },
   'in-job': { label: '복원 지점 없음', cls: 'amber' },
   unprotected: { label: '미보호', cls: 'amber' },
+  agent: { label: '에이전트 백업 포함', cls: 'gray' },
   elsewhere: { label: '다른 서버(미등록)', cls: 'gray' },
   unknown: { label: '확인 불가', cls: 'gray' },
   unmapped: { label: '연결 서버 없음', cls: 'gray' },
 });
-export const RUN_STATUS_ORDER = Object.freeze(['protected', 'in-job', 'unprotected', 'elsewhere', 'unknown', 'unmapped']);
+export const RUN_STATUS_ORDER = Object.freeze(['protected', 'in-job', 'unprotected', 'agent', 'elsewhere', 'unknown', 'unmapped']);
 
 export const VM_STATE = Object.freeze({
   queued: { label: '대기', cls: 'gray' },
@@ -118,3 +119,5 @@ export function pickHandoff(rows, ids, writable) {
   if (!writable || !want.size) return new Map();
   return new Map((Array.isArray(rows) ? rows : []).filter((r) => want.has(r.id) && r.run?.status !== 'unmapped').map((r) => [r.id, r.name]));
 }
+/** 복원 지점 정렬 값 — '있음(개수 모름)'(-1)은 0 보다 위·1 보다 아래(재검토: -1 그대로면 '없음' 아래로 갔다). */
+export const rpSort = (n) => (typeof n === 'number' && Number.isFinite(n) ? (n === -1 ? 0.5 : n) : '');
