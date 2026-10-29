@@ -788,18 +788,18 @@ Prometheus/OTel 익스포터(선택 토큰).
 | GET | `/tools/backup-em/session` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/veeam.js:867](../server/src/routes/api/veeam.js#L867) |
 | POST | `/tools/backup-run/backup` | 역할 `admin` · 권한 `tools` · `reauth` | [server/src/routes/api/backupRun.js:151](../server/src/routes/api/backupRun.js#L151) |
 | POST | `/tools/backup-run/plan` | 역할 `admin` · 권한 `tools` | [server/src/routes/api/backupRun.js:143](../server/src/routes/api/backupRun.js#L143) |
-| GET | `/tools/backup-run/portal-vms` | 역할 `admin` · 권한 `tools` | [server/src/routes/api/backupManage.js:70](../server/src/routes/api/backupManage.js#L70) |
+| GET | `/tools/backup-run/portal-vms` | 역할 `admin` · 권한 `tools` | [server/src/routes/api/backupManage.js:82](../server/src/routes/api/backupManage.js#L82) |
 | GET | `/tools/backup-run/runs` | 역할 `admin` · 권한 `tools` | [server/src/routes/api/backupRun.js:160](../server/src/routes/api/backupRun.js#L160) |
 | GET | `/tools/backup-run/runs/:id` | 역할 `admin` · 권한 `tools` | [server/src/routes/api/backupRun.js:168](../server/src/routes/api/backupRun.js#L168) |
 | POST | `/tools/backup-run/runs/:id/close` | 역할 `admin` · 권한 `tools` · `reauth` | [server/src/routes/api/backupRun.js:179](../server/src/routes/api/backupRun.js#L179) |
 | POST | `/tools/backup-run/servers/:id/repos` | 역할 `admin` · 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/backupRun.js:215](../server/src/routes/api/backupRun.js#L215) |
 | GET | `/tools/backup-run/settings` | 역할 `admin` · 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/backupRun.js:192](../server/src/routes/api/backupRun.js#L192) |
 | PUT | `/tools/backup-run/settings` | 역할 `admin` · 권한 `tools` · `fullScopeOnly` · `reauth` | [server/src/routes/api/backupRun.js:205](../server/src/routes/api/backupRun.js#L205) |
-| GET | `/tools/backup-run/vm/:vmId` | 역할 `admin` · 권한 `tools` | [server/src/routes/api/backupManage.js:87](../server/src/routes/api/backupManage.js#L87) |
-| POST | `/tools/backup-run/vm/:vmId/delete-backup` | 역할 `admin` · 권한 `tools` · `reauth` | [server/src/routes/api/backupManage.js:153](../server/src/routes/api/backupManage.js#L153) |
-| POST | `/tools/backup-run/vm/:vmId/exclude` | 역할 `admin` · 권한 `tools` · `reauth` | [server/src/routes/api/backupManage.js:138](../server/src/routes/api/backupManage.js#L138) |
-| POST | `/tools/backup-run/vm/:vmId/points` | 역할 `admin` · 권한 `tools` | [server/src/routes/api/backupManage.js:105](../server/src/routes/api/backupManage.js#L105) |
-| POST | `/tools/backup-run/vm/:vmId/restore` | 역할 `admin` · 권한 `tools` · `reauth` | [server/src/routes/api/backupManage.js:116](../server/src/routes/api/backupManage.js#L116) |
+| GET | `/tools/backup-run/vm/:vmId` | 역할 `admin` · 권한 `tools` | [server/src/routes/api/backupManage.js:99](../server/src/routes/api/backupManage.js#L99) |
+| POST | `/tools/backup-run/vm/:vmId/delete-backup` | 역할 `admin` · 권한 `tools` · `reauth` | [server/src/routes/api/backupManage.js:169](../server/src/routes/api/backupManage.js#L169) |
+| POST | `/tools/backup-run/vm/:vmId/exclude` | 역할 `admin` · 권한 `tools` · `reauth` | [server/src/routes/api/backupManage.js:150](../server/src/routes/api/backupManage.js#L150) |
+| POST | `/tools/backup-run/vm/:vmId/points` | 역할 `admin` · 권한 `tools` | [server/src/routes/api/backupManage.js:117](../server/src/routes/api/backupManage.js#L117) |
+| POST | `/tools/backup-run/vm/:vmId/restore` | 역할 `admin` · 권한 `tools` · `reauth` | [server/src/routes/api/backupManage.js:128](../server/src/routes/api/backupManage.js#L128) |
 | GET | `/tools/backup-run/vms` | 역할 `admin` · 권한 `tools` | [server/src/routes/api/backupRun.js:112](../server/src/routes/api/backupRun.js#L112) |
 | GET | `/tools/backup-summary` | 권한 `tools` | [server/src/routes/api/veeam.js:844](../server/src/routes/api/veeam.js#L844) |
 | GET | `/tools/backup-summary.csv` | 권한 `data.csv`, `tools` | [server/src/routes/api/veeam.js:945](../server/src/routes/api/veeam.js#L945) |

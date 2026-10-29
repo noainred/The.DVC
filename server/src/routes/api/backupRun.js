@@ -21,7 +21,7 @@ import { reauth } from './reauth.js';
 import { veeamMatchFor } from './veeam.js';
 import { runStatusOf, planBackup, portalJobName, veeamHostFor } from '../../veeam/run/plan.js';
 import { getRunSettings, saveRunSettings, settingsLoadError, serverRunSettings } from '../../veeam/run/settings.js';
-import { startRun, listRuns, getRun, activeRunFor, closeRun } from '../../veeam/run/runs.js';
+import { startRun, listRuns, getRun, activeRunFor, closeRun, serverBusy } from '../../veeam/run/runs.js';
 import { dispatchOp, authStopOf } from '../../veeam/run/dispatch.js';
 import { pendingView } from '../../veeam/run/edgeOps.js';
 
@@ -91,8 +91,8 @@ export function planFor(req) {
   const plan = planBackup(items, { mode, unprotected });
   if (!plan.groups.length) return { plan, vcs, mode, error: '보낼 VM 이 없습니다 — 고른 VM 이 전부 건너뜀입니다(아래 사유).', status: 400 };
   for (const g of plan.groups) {
-    const busy = activeRunFor(g.serverId);
-    if (busy) return { plan, vcs, mode, error: `Veeam 서버 '${g.serverName}' 로 진행 중인 백업 요청이 있습니다(${busy.id}) — 끝난 뒤 다시 요청하세요.`, status: 409, runId: busy.id };
+    const busy = serverBusy(g.serverId);   // 실행 기록 + 관리 작업(빼기·삭제 — v2.819)
+    if (busy) return { plan, vcs, mode, error: `Veeam 서버 '${g.serverName}' 로 진행 중인 요청이 있습니다(${busy.id}) — 끝난 뒤 다시 요청하세요.`, status: 409, runId: busy.id };
     const srv = getServerWithSecret(g.serverId);
     const stop = authStopOf(srv);
     if (stop) return { plan, vcs, mode, error: `Veeam 서버 '${g.serverName}' 은(는) 인증 실패로 정지 중입니다 — 설정 › Veeam 백업 서버에서 계정을 고치세요(틀린 계정으로 반복하면 계정이 잠깁니다).`, status: 409 };
@@ -132,7 +132,7 @@ api.get('/tools/backup-run/vms', toolsPerm, adminOnly, (req, res) => {
   const servers = s.servers.map((d) => {
     const full = getServerWithSecret(d.id);
     const stop = authStopOf(full);
-    return { id: d.id, name: d.name, via: d.agent ? 'edge' : 'central', ...(admin ? { agent: d.agent || '' } : {}), authStopped: !!stop, active: !!activeRunFor(d.id),
+    return { id: d.id, name: d.name, via: d.agent ? 'edge' : 'central', ...(admin ? { agent: d.agent || '' } : {}), authStopped: !!stop, active: !!serverBusy(d.id),
       repositorySet: !!serverRunSettings(d.id).repositoryId };
   });
   res.json({ ok: true, vcenters: list, vcenter: { id: vcId, name: s.vc.name }, known: s.known, hostName: s.hostName, jobName: portalJobName(getRunSettings().jobPrefix, s.vc),

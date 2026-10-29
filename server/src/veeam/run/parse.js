@@ -65,8 +65,10 @@ export function sanitizePoints(s) {
     points: arr(r.points).slice(0, 200).map((p0) => {
       const p = obj(p0);
       return { id: str(p.id, 64), name: str(p.name, 256), at: timeOf(p.creationTime ?? p.at), backupId: str(p.backupId, 64), backupName: str(p.backupName, 256),
-        jobId: str(p.jobId, 64), jobName: str(p.jobName, 256), portal: p.portal === true, type: str(p.type, 40), platformName: str(p.platformName, 40) };
-    }).filter((p) => p.id),
+        jobId: str(p.jobId, 64), jobName: str(p.jobName, 256), portal: p.portal === true, type: str(p.type, 40), platformName: str(p.platformName, 40),
+        binding: p.binding === 'verified' || p.binding === 'portalJob' ? p.binding : '' };
+    }).filter((p) => p.id && p.binding),   // 이 VM 으로 묶이지 않은 지점은 엣지가 보냈어도 버린다(반증 F1)
+    hidden: numOrNull(r.hidden), truncated: r.truncated === true,
     job: r.job && typeof r.job === 'object' ? { id: str(j.id, 64), name: str(j.name, 128), found: j.found === true, marker: j.marker === true, included: j.included === true } : null,
   };
 }

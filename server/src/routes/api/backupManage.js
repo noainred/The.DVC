@@ -17,7 +17,7 @@ import { reauth } from './reauth.js';
 import { vcentersOf, vcRunState, runVisible } from './backupRun.js';
 import { portalJobName, morefOf } from '../../veeam/run/plan.js';
 import { getRunSettings } from '../../veeam/run/settings.js';
-import { startRun, listRuns, activeRunFor } from '../../veeam/run/runs.js';
+import { startRun, listRuns, serverBusy, claimServer, releaseServer } from '../../veeam/run/runs.js';
 import { dispatchOp, authStopOf } from '../../veeam/run/dispatch.js';
 import { listPortalVms, getPortalVm, notePortalVm } from '../../veeam/run/portalVms.js';
 import { NEW_NAME_RE } from '../../veeam/run/manage.js';
@@ -52,6 +52,14 @@ export function ctxFor(req, vmId, { write = false } = {}) {
   return { snap, vm, vc, servers, run: s.rows.get(vm.id)?.run || null, hostName, hostHow, jobHostName, jobName: portalJobName(getRunSettings().jobPrefix, vc), dest, record, vms };
 }
 
+/** 새 VM 이름으로 쓸 수 없는 이름 — 그 vCenter 인벤토리 + 이 VM 의 최근 복원 요청 이름(결과를 모르는 복원이 아직 인벤토리에 없을 수 있다 — 반증 F7). */
+function takenNames(ctx) {
+  const names = new Set(ctx.vms.map((v) => String(v.name || '').toLowerCase()));
+  for (const r of ctx.record?.restores || []) if (r?.newName) names.add(String(r.newName).toLowerCase());
+  for (const run of listRuns().slice(0, 100)) for (const v of run.vms || []) if (v.how === 'restore' && v.vcenterId === ctx.vm.vcenterId && v.restore?.newName) names.add(String(v.restore.newName).toLowerCase());
+  return names;
+}
+
 /** 본문의 serverId 를 그 vCenter 의 서버 중에서만 받는다. 없으면 기록·대조가 가리키는 서버, 그다음 첫 서버. */
 function serverOf(ctx, wanted) {
   const ids = ctx.servers.map((d) => d.id);
@@ -61,7 +69,7 @@ function serverOf(ctx, wanted) {
 /** 보내기 전 공통 확인(진행 중·인증 정지). */
 function busyIssue(server) {
   if (!server) return { error: '이 vCenter 를 맡는 Veeam B&R 서버가 등록돼 있지 않습니다.', status: 400 };
-  const busy = activeRunFor(server.id);
+  const busy = serverBusy(server.id);
   if (busy) return { error: `Veeam 서버 '${server.name}' 로 진행 중인 요청이 있습니다(${busy.id}) — 끝난 뒤 다시 하세요.`, status: 409 };
   if (authStopOf(server)) return { error: `Veeam 서버 '${server.name}' 은(는) 인증 실패로 정지 중입니다 — 설정 › Veeam 백업 서버에서 계정을 고치세요.`, status: 409 };
   return null;
@@ -96,10 +104,10 @@ api.get('/tools/backup-run/vm/:vmId', toolsPerm, adminOnly, (req, res) => {
     const v = r.vms.find((x) => x.vmId === ctx.vm.id);
     return { id: r.id, at: r.at, user: r.user, how: v.how, state: v.state, detail: v.detail, newName: v.restore?.newName || '' };
   });
-  const names = new Set(ctx.vms.map((v) => String(v.name || '').toLowerCase()));
+  const names = takenNames(ctx);
   res.json({
     ok: true, vm: vmView(ctx), record: ctx.record, jobName: ctx.record?.jobName || ctx.jobName, hostName: { name: ctx.hostName, how: ctx.hostHow }, canRestore: !!ctx.dest,
-    servers: ctx.servers.map((d) => { const full = getServerWithSecret(d.id); return { id: d.id, name: d.name, authStopped: !!authStopOf(full), active: !!activeRunFor(d.id) }; }),
+    servers: ctx.servers.map((d) => { const full = getServerWithSecret(d.id); return { id: d.id, name: d.name, authStopped: !!authStopOf(full), active: !!serverBusy(d.id) }; }),
     serverId: serverOf(ctx, '')?.id || '', writable: inUserWriteScope(req.user, ctx.snap, ctx.vm.vcenterId), runs,
     suggestName: suggestName(ctx.vm.name, names),
   });
@@ -125,14 +133,14 @@ api.post('/tools/backup-run/vm/:vmId/restore', toolsPerm, adminOnly, reauth, (re
   const newName = typeof b.newName === 'string' ? b.newName.trim() : '';
   if (!/^[A-Za-z0-9-]{1,64}$/.test(pid)) return res.status(400).json({ ok: false, reason: '복원 지점을 고르세요.' });
   if (!NEW_NAME_RE.test(newName)) return res.status(400).json({ ok: false, reason: '새 VM 이름은 영문·숫자로 시작하고 영문·숫자·. _ - 만 쓸 수 있습니다(80자까지).' });
-  if (ctx.vms.some((v) => String(v.name || '').toLowerCase() === newName.toLowerCase())) return res.status(409).json({ ok: false, reason: `이 vCenter 에 '${newName}' VM 이 이미 있습니다 — 다른 이름을 쓰세요(원본을 덮어쓰지 않습니다).` });
+  if (takenNames(ctx).has(newName.toLowerCase())) return res.status(409).json({ ok: false, reason: `'${newName}' 은 이 vCenter 의 VM 이름이거나 최근 복원 요청에 쓴 이름입니다 — 다른 이름을 쓰세요(원본을 덮어쓰지 않고, 결과를 모르는 복원을 겹쳐 만들지 않습니다).` });
   if (!ctx.dest) return res.status(400).json({ ok: false, reason: '복원할 ESXi 호스트나 Veeam 이 이 vCenter 를 부르는 이름을 모릅니다 — 백업 실행 설정의 vCenter 이름을 확인하세요.' });
   const server = serverOf(ctx, String(b.serverId || ''));
   const issue = busyIssue(server);
   if (issue) return res.status(issue.status).json({ ok: false, reason: issue.error });
   const pointAt = Number.isFinite(Number(b.pointAt)) ? Number(b.pointAt) : null;
   const vmRow = { vmId: ctx.vm.id, name: ctx.vm.name, vcenterId: ctx.vm.vcenterId, objectId: morefOf(ctx.vm), hostName: ctx.hostName, serverId: server.id, serverName: server.name, how: 'restore',
-    restore: { restorePointId: pid, newName, dest: ctx.dest, pointAt } };
+    restore: { restorePointId: pid, newName, dest: ctx.dest, pointAt, jobName: ctx.record?.jobName || ctx.jobName } };
   const run = startRun({ vms: [vmRow], groups: [{ serverId: server.id, serverName: server.name, kind: 'restore', vcenterId: ctx.vm.vcenterId, refs: [vmRow] }] }, { user: req.user?.username || '', mode: 'restore' });
   logAudit({ user: req.user?.username, action: 'Veeam 새 VM 복원 요청', target: run.id, detail: `${ctx.vm.name} → ${newName} · 복원 지점 ${pid} · 서버 ${server.name} · 호스트 ${ctx.dest.host.name}`, ip: req.ip });
   res.json({ ok: true, run });
@@ -146,9 +154,13 @@ api.post('/tools/backup-run/vm/:vmId/exclude', toolsPerm, adminOnly, reauth, asy
   const issue = busyIssue(server);
   if (issue) return res.status(issue.status).json({ ok: false, reason: issue.error });
   const jobName = ctx.record?.jobName || ctx.jobName;
+  const token = claimServer(server.id, 'exclude', req.user?.username);   // 반증 F4 — 확인(busyIssue)과 같은 동기 구간
+  if (!token) return res.status(409).json({ ok: false, reason: `Veeam 서버 '${server.name}' 로 진행 중인 요청이 있습니다 — 끝난 뒤 다시 하세요.` });
   res.locals.perfExpectSlow = true;
-  const r = await dispatchOp(server, 'jobExclude', { jobName, vms: [{ hostName: ctx.jobHostName, objectId: ctx.record?.objectId || morefOf(ctx.vm) }] });
-  if (r.ok) notePortalVm(ctx.vm.id, { excludedAt: Date.now() });
+  let r;
+  try { r = await dispatchOp(server, 'jobExclude', { jobName, vms: [{ hostName: ctx.jobHostName, objectId: ctx.record?.objectId || morefOf(ctx.vm), name: ctx.vm.name }] }); }
+  finally { releaseServer(server.id, token); }
+  if (r.ok && r.removed) notePortalVm(ctx.vm.id, { excludedAt: Date.now() });
   logAudit({ user: req.user?.username, action: 'Veeam 포탈 잡에서 VM 빼기', target: ctx.vm.name, detail: `잡 '${jobName}' · 서버 ${server.name} · ${r.ok ? `뺌 ${r.removed ?? 0}` : r.unknown ? '결과 모름' : `실패 — ${String(r.reason || '').slice(0, 200)}`}`, ip: req.ip });
   res.json({ ...r, jobName });
 });
@@ -162,11 +174,17 @@ api.post('/tools/backup-run/vm/:vmId/delete-backup', toolsPerm, adminOnly, reaut
   const issue = busyIssue(server);
   if (issue) return res.status(issue.status).json({ ok: false, reason: issue.error });
   const jobName = ctx.record?.jobName || ctx.jobName;
+  const token = claimServer(server.id, 'deleteBackup', req.user?.username);   // 반증 F4
+  if (!token) return res.status(409).json({ ok: false, reason: `Veeam 서버 '${server.name}' 로 진행 중인 요청이 있습니다 — 끝난 뒤 다시 하세요.` });
   res.locals.perfExpectSlow = true;
-  const r = await dispatchOp(server, 'deleteBackup', { jobName, vm: { name: ctx.vm.name, hostName: ctx.jobHostName, objectId: ctx.record?.objectId || morefOf(ctx.vm) } });
+  let r;
+  try { r = await dispatchOp(server, 'deleteBackup', { jobName, vm: { name: ctx.vm.name, hostName: ctx.jobHostName, objectId: ctx.record?.objectId || morefOf(ctx.vm) } }); }
+  finally { releaseServer(server.id, token); }
   const now = Date.now();
-  if (r.excluded || r.ok) notePortalVm(ctx.vm.id, { ...(r.excluded ? { excludedAt: now } : {}), ...(r.ok && r.deleted ? { deletedAt: now } : {}) });
-  logAudit({ user: req.user?.username, action: 'Veeam 포탈 잡 백업 삭제', target: ctx.vm.name, detail: `잡 '${jobName}' · 서버 ${server.name} · ${r.ok ? `삭제 ${r.deleted ?? 0}건${r.excluded ? ' · 잡에서 뺌' : ''}` : r.unknown ? '결과 모름' : `실패 — ${String(r.reason || '').slice(0, 200)}`}`, ip: req.ip });
+  // 결과와 무관하게 실제로 바뀐 것(뺐음·지운 건수)은 기록·감사한다(반증 F6).
+  if (r.excluded || r.deleted) notePortalVm(ctx.vm.id, { ...(r.excluded ? { excludedAt: now } : {}), ...(r.deleted ? { deletedAt: now } : {}) });
+  const what = `잡에서 뺌 ${r.excluded ? '예' : '아니오'} · 삭제 요청 수락 ${r.deleted ?? 0}건`;
+  logAudit({ user: req.user?.username, action: 'Veeam 포탈 잡 백업 삭제', target: ctx.vm.name, detail: `잡 '${jobName}' · 서버 ${server.name} · ${r.ok ? '완료' : r.unknown ? '결과 모름' : `실패 — ${String(r.reason || '').slice(0, 200)}`} · ${what}`, ip: req.ip });
   res.json({ ...r, jobName });
 });
 

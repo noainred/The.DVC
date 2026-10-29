@@ -19,4 +19,5 @@
 - 백업 실행용 '보호 상태를 안다' 는 B&R 결과가 **전부 있고 신선할 때만**(`veeamMatchFor` — `resultMaxAgeMs`, N4). 인증 정지는 저장소 조회에도 적용한다.
 - **복원은 새 VM 으로만**(사용자 결정 2026-10-29 — `manage.js RESTORE_TYPE='Customized'` 하나, 코드에 OriginalLocation 없음 — 테스트가 소스를 본다).
   새 이름이 인벤토리 VM 이름과 겹치면 409, 복원 지점이 그 VM 이름의 것이 아니면 보내지 않는다. 백업 삭제는 **포탈 잡(표지)의 그 VM 만** — 다른 VM 이 든 백업을
-  통째로 지우는 후보를 넣지 말 것. 삭제 전에 잡에서 빼고, 빼기가 실패·모름이면 지우지 않는다. 작업 표는 `run/ops.js` 하나(새 작업은 OPS·MUTATING·SANITIZERS·RESULT_MS 넷 다).
+  통째로 지우는 후보를 넣지 말 것. 삭제 전에 잡에서 빼고, 빼기가 실패·모름·마지막 VM·확정 못 함이면 지우지 않는다. **VM 은 이름이 아니라 moref + vCenter 로 묶는다**
+  (`manage.js objectBinding/pointBinding` — 확인 못 하면 이 vCenter 포탈 잡만, 반증 F1·F2). 빼기·삭제는 `runs.js claimServer` 로 서버 자리를 차지한다(F4). 작업 표는 `run/ops.js` 하나(새 작업은 OPS·MUTATING·SANITIZERS·RESULT_MS 넷 다).

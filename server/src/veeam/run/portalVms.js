@@ -39,6 +39,7 @@ function persist() {
   catch (e) { console.warn(`[veeam-run] 포탈 백업 VM 목록 저장 실패: ${e?.message || e}`); }
 }
 
+const cur0 = (vmId) => load().get(vmId) || null;
 function upsert(vmId, base, patch) {
   const m = load();
   const cur = m.get(vmId) || { vmId, ...base, restores: [] };
@@ -68,7 +69,11 @@ export function notePortalRun(run) {
     }
     if (v.how !== 'quick' && v.how !== 'portal') continue;
     const patch = { serverId: v.serverId, serverName: v.serverName, hostName: v.hostName || '', objectId: v.objectId || '', how: v.how, lastRunId: run.id, lastAt: run.at, lastState: v.state, final: FINAL.has(v.state) };
-    if (v.how === 'portal') { patch.jobName = g.jobName || ''; patch.excludedAt = null; patch.deletedAt = null; }   // 다시 넣고 백업했다
+    if (v.how === 'portal') {
+      patch.jobName = g.jobName || cur0(v.vmId)?.jobName || '';
+      // 다시 넣고 백업했다 — 빼냄·삭제 표시는 **백업이 실제로 된 뒤에만** 지운다(보내기 전·실패에 지우면 '삭제됨' 이 사라진다 — 반증 F7)
+      if (v.state === 'success' || v.state === 'warning') { patch.excludedAt = null; patch.deletedAt = null; }
+    }
     changed = upsert(v.vmId, base, patch) || changed;
   }
   if (changed) persist();

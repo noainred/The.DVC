@@ -29,6 +29,7 @@ export default function BackupManageModal({ vmId, onClose }) {
   const [busy, setBusy] = useState('');
   const [msg, setMsg] = useState(null);       // { ok, text }
   const seq = useRef(0);
+  const pseq = useRef(0);   // 복원 지점 요청 순번 — 서버를 바꾸면 늦게 온 이전 응답을 버린다
 
   const load = () => {
     const my = ++seq.current;
@@ -39,10 +40,13 @@ export default function BackupManageModal({ vmId, onClose }) {
   useEffect(() => { load(); return () => { seq.current += 1; }; }, [vmId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const readPoints = async (sid) => {
+    const my = ++pseq.current;
     setPtsBusy(true); setPts(null); setPick('');
-    try { setPts(await postJson(`/tools/backup-run/vm/${encodeURIComponent(vmId)}/points`, { serverId: sid })); }
-    catch (e) { setPts({ ok: false, reason: errText(e) }); }
-    finally { setPtsBusy(false); }
+    let r;
+    try { r = await postJson(`/tools/backup-run/vm/${encodeURIComponent(vmId)}/points`, { serverId: sid }); }
+    catch (e) { r = { ok: false, reason: errText(e) }; }
+    if (my !== pseq.current) return;
+    setPts(r); setPtsBusy(false);
   };
   // 창을 열면 한 번 읽는다(Veeam 왕복 — 폴링하지 않는다. 다시 읽기는 버튼).
   useEffect(() => { if (d?.servers?.length && serverId && !pts && !ptsBusy) readPoints(serverId); }, [d, serverId]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -52,12 +56,13 @@ export default function BackupManageModal({ vmId, onClose }) {
     try {
       const r = await postJson(`/tools/backup-run/vm/${encodeURIComponent(vmId)}/${path}`, { serverId, otp, ...body });
       if (r.ok) { setOtp(''); setConfirm(''); }
+      if (kind === 'restore') setNewName('');   // 다음 제안 이름을 새로 받는다(같은 이름으로 다시 보내지 않게)
       const text = r.ok
         ? (kind === 'restore' ? `복원 요청을 보냈습니다(${r.run?.id}) — 결과는 아래 '최근 요청' 과 Backup › 백업 실행 › 실행 현황에서 봅니다.`
           : kind === 'exclude' ? `포탈 전용 잡 '${r.jobName}' 에서 ${r.removed ? '뺐습니다' : '뺄 것이 없었습니다(이미 없음)'}.`
-          : `백업을 지웠습니다(${r.deleted ?? 0}건)${r.excluded ? ' · 포탈 전용 잡에서도 뺐습니다' : ''}.`)
-        : `${r.unknown ? '결과를 모릅니다 — ' : r.notSent ? '보내지 않았습니다 — ' : ''}${r.reason || '실패했습니다.'}`;
-      setMsg({ ok: !!r.ok, text });
+          : `Veeam 이 삭제 요청을 받았습니다(${r.deleted ?? 0}건)${r.excluded ? ' · 포탈 전용 잡에서도 뺐습니다' : ''} — 지우는 작업은 Veeam 에서 이어질 수 있습니다.`)
+        : `${r.unknown ? '결과를 모릅니다 — ' : r.notSent ? '보내지 않았습니다 — ' : ''}${r.reason || '실패했습니다.'}${kind === 'delete' && (r.excluded || r.deleted) ? ` (그 전에 바뀐 것: 잡에서 뺌 ${r.excluded ? '예' : '아니오'} · 삭제 요청 ${r.deleted ?? 0}건)` : ''}`;
+      setMsg({ ok: !!r.ok, text, notes: Array.isArray(r.notes) ? r.notes.slice(0, 6) : [] });
       load();
       if (r.ok && kind !== 'restore') readPoints(serverId);
     } catch (e) { setMsg({ ok: false, text: errText(e) }); }
@@ -100,11 +105,11 @@ export default function BackupManageModal({ vmId, onClose }) {
           </div>
           {ptsBusy && !pts ? <div className="muted" style={{ fontSize: 12 }}>Veeam 에서 읽는 중…</div> : null}
           {pts && !pts.ok ? <div style={{ fontSize: 12, color: 'var(--red)', overflowWrap: 'anywhere' }}>{pts.reason || '읽지 못했습니다.'}</div> : null}
-          {pts?.ok && !pts.points.length ? <div className="muted" style={{ fontSize: 12 }}>이 VM 이름의 복원 지점이 없습니다.</div> : null}
+          {pts?.ok && !pts.points.length ? <div className="muted" style={{ fontSize: 12 }}>이 VM 으로 확인된 복원 지점이 없습니다{pts.truncated || pts.hidden ? '(위 안내 참고 — 없다고 단정할 수는 없습니다)' : ''}.</div> : null}
           {pts?.ok && pts.points.length ? (
             <div style={{ maxHeight: 260, overflow: 'auto', minWidth: 0 }}>
               <STable className="table" minWidth={560}>
-                <thead><tr><th data-nosort>선택</th><th>만든 시각</th><th>백업(잡)</th><th>종류</th></tr></thead>
+                <thead><tr><th data-nosort>선택</th><th>만든 시각</th><th>백업(잡)</th><th>이 VM 확인</th></tr></thead>
                 <tbody>
                   {pts.points.map((p) => {
                     const src = pointSource(p);
@@ -113,7 +118,7 @@ export default function BackupManageModal({ vmId, onClose }) {
                         <td><input type="radio" name="rp" checked={pick === p.id} onChange={() => setPick(p.id)} aria-label={`${shortTime(p.at)} 복원 지점 선택`} /></td>
                         <td data-sort={p.at ?? ''} className="mono">{shortTime(p.at)}</td>
                         <td style={{ overflowWrap: 'anywhere' }}>{src.name}{src.portal ? <> <Badge cls="blue">포탈 잡</Badge></> : null}</td>
-                        <td>{p.type || '—'}</td>
+                        <td style={{ fontSize: 12 }} title={p.binding === 'verified' ? '백업 개체의 moref·vCenter 가 이 VM 과 같습니다' : '응답에서 moref·vCenter 를 확인하지 못했지만 이 vCenter 의 포탈 전용 잡 백업입니다'}>{p.binding === 'verified' ? 'moref·vCenter 일치' : '포탈 잡(이 vCenter)'}</td>
                       </tr>
                     );
                   })}
@@ -121,7 +126,13 @@ export default function BackupManageModal({ vmId, onClose }) {
               </STable>
             </div>
           ) : null}
-          {pts?.ok ? <div className="muted" style={{ fontSize: 11 }}>Veeam 에서 VM 을 이름(‘{vm.name}’)으로 찾았습니다 — 다른 vCenter 에 같은 이름의 VM 이 있으면 그 백업도 보일 수 있습니다. 요청 형태 {pts.variant || '—'}.</div> : null}
+          {pts?.ok ? (
+            <div className="muted" style={{ fontSize: 11, overflowWrap: 'anywhere' }}>
+              백업 개체의 moref·vCenter 가 이 VM 과 맞는 지점, 또는 이 vCenter 의 포탈 전용 잡 지점만 보입니다(다른 vCenter 의 같은 이름 VM 백업은 숨깁니다).
+              {pts.hidden ? ` 이 VM 으로 확인되지 않아 숨긴 지점 ${pts.hidden}개.` : ''}{pts.truncated ? ' 지점이 많아 앞부분만 읽었습니다 — 오래된 지점은 빠졌을 수 있습니다.' : ''} 요청 형태 {pts.variant || '—'}.
+              {(pts.notes || []).slice(0, 4).map((n, i) => <div key={i}>{n}</div>)}
+            </div>
+          ) : null}
         </div>
 
         {/* 새 VM 으로 복원 */}
@@ -147,8 +158,8 @@ export default function BackupManageModal({ vmId, onClose }) {
           <details style={{ fontSize: 12 }}>
             <summary style={{ cursor: 'pointer', color: 'var(--red)' }}>백업 삭제(되돌릴 수 없음)</summary>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 6, minWidth: 0 }}>
-              <div className="muted">포탈 전용 잡의 이 VM 백업(복원 지점 전부)을 Veeam 에서 지웁니다. 먼저 잡에서 빼서 다음 실행이 다시 만들지 않게 합니다. 사람이 만든 잡의 백업은 지우지 않습니다.
-                Veeam REST 에 VM 단위 삭제가 없으면 잡에서 빼기까지만 하고 그렇다고 알려 드립니다.</div>
+              <div className="muted">포탈 전용 잡의 이 VM(moref) 백업(복원 지점 전부)을 Veeam 에서 지웁니다. 먼저 잡에서 빼고, 빼지 못하면(잡의 마지막 VM 등) 지우지 않습니다. 사람이 만든 잡의 백업과 다른 VM 의 백업은 지우지 않습니다.
+                이 VM 백업만 안전하게 지울 REST 경로가 없으면 잡에서 빼기까지만 하고 그렇다고 알려 드립니다.</div>
               <label style={field}>확인 — VM 이름 ‘{vm.name}’ 을 그대로 입력
                 <input className="input" value={confirm} onChange={(e) => setConfirm(e.target.value)} style={{ maxWidth: 320 }} />
               </label>
@@ -167,7 +178,8 @@ export default function BackupManageModal({ vmId, onClose }) {
           <button type="button" className="logout-btn" style={{ minHeight: 38 }} disabled={lock || !otpOk || (job && (!job.marker || !job.included))}
             onClick={() => act('exclude', 'exclude', {})}>{busy === 'exclude' ? '빼는 중…' : '포탈 잡에서 빼기'}</button>
         </div>
-        {msg ? <div style={{ fontSize: 12, color: msg.ok ? 'var(--green)' : 'var(--red)', overflowWrap: 'anywhere' }}>{msg.text}</div> : null}
+        {msg ? <div style={{ fontSize: 12, color: msg.ok ? 'var(--green)' : 'var(--red)', overflowWrap: 'anywhere' }}>{msg.text}
+          {(msg.notes || []).map((n, i) => <div key={i} className="muted">{n}</div>)}</div> : null}
 
         {/* 최근 요청 */}
         {d.runs.length ? (
