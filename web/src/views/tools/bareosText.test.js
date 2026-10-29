@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   stateBadge, levelLabel, bytesText, whenText, elapsedText, runCell, directorLine, restoreLine, candidateSummary,
-  directorPrepBlock, fdIniTemplate, PREP_CHECKLIST, STATE_LABEL, RESTORE_MODE_LABEL,
+  directorPrepBlock, fdIniTemplate, PREP_CHECKLIST, STATE_LABEL, RESTORE_MODE_LABEL, autoSetupDirectorText, autoSetupFdText, thumbprintText,
 } from './bareosText.js';
 
 describe('bareosText (v2.820 Bareos VM 백업)', () => {
@@ -76,5 +76,20 @@ describe('bareosText (v2.820 Bareos VM 백업)', () => {
       expect(t).not.toMatch(/`/);
       expect(t).not.toMatch(/\*\*/);
     }
+  });
+});
+
+describe('자동 설정 문구(v2.821)', () => {
+  it('Director·FD 요약은 파일·동작을 밝히고 값이 없으면 —', () => {
+    const t = autoSetupDirectorText({ files: [{ path: '/etc/bareos/bareos-dir.d/console/portal.conf', action: 'created' }, { path: '/x', action: 'unchanged' }], settings: { director: { consoleName: 'portal' } }, probe: { version: '24.0.1' } });
+    expect(t).toContain('새 콘솔 ‘portal’');
+    expect(t).toContain('/etc/bareos/bareos-dir.d/console/portal.conf(새로 만듦)');
+    expect(t).toContain('/x(그대로)');
+    expect(t).not.toContain('`');
+    expect(autoSetupDirectorText({})).toContain('파일: —');
+    expect(autoSetupFdText({ path: '/etc/bareos/vmware/a.ini', action: 'updated', plugin: 'missing' })).toContain('찾지 못했습니다');
+    expect(autoSetupFdText({ path: '/a', action: 'created', plugin: 'installed' })).toContain('설치됨');
+    expect(thumbprintText({})).toBe('');
+    expect(thumbprintText({ thumbprint: 'AB', vcserver: 'vc' })).toContain('**AB**');
   });
 });

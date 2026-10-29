@@ -1,6 +1,17 @@
 {
   "notes": [
     {
+      "version": "2.821.0",
+      "date": "2026-10-30",
+      "title": "Bareos 자동 설정 — 서버 주소·SSH root 계정·비밀번호로 Director 사전 준비와 사이트 FD INI 를 포탈이 대신",
+      "notes": [
+        "설정 탭 'Director 자동 설정': FileSet·JobDefs·복원 잡·Console·Profile 5개를 bareos-dir.d 에 넣고 bareos-dir -t → reload → 새 콘솔로 실제 접속 성공 시에만 포탈 Director 연결을 그 콘솔로 바꾼다",
+        "'FD INI 자동 설정': 저장된 사이트 매핑의 INI 경로에 vCenter 자격증명 INI(bareos 소유 0600) — 'FD 에서 지문 읽기' 로 vCenter 인증서 SHA1 지문을 FD 에서 읽어 채운다",
+        "안전장치: SSH·vCenter·생성 콘솔 비밀번호는 저장·감사·응답·명령 인자에 없음(SFTP 0600 임시 파일) · 포탈이 만들지 않은 파일은 덮어쓰지 않음(쓰기 전 전수 확인) · 검사 실패 시 넣은 파일 원복 · root 만 · 본인 OTP · 동시 1건 · SSH 호스트키 승인 관문 그대로",
+        "⚠ 실환경 미확인: bconsole reload 출력 모양(판정은 접속 시험이 한다) · VMware 플러그인 INI 파서의 % 처리 — 첫 실행은 시험 Director 에서 권한다"
+      ]
+    },
+    {
       "version": "2.820.0",
       "date": "2026-10-29",
       "title": "Bareos VM 백업 — 포탈에서 고른 VM 을 Bareos VMware 플러그인으로 백업·복원",
