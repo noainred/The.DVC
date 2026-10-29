@@ -196,4 +196,12 @@ describe('v2.817 EM 연결 현황 — 모든 EM · 실패 EM 행 · 포탈에 �
     expect(src).toMatch(/<EmLinks ems=\{ems\} now=\{now\} sel=\{em\?\.id \|\| ''\} onPick=\{setEmId\} \/>/);
     expect(src).toMatch(/data-em-links/);
   });
+  it('소스 — 연결 현황 표 제목 칸은 줄바꿈한다(STable 의 정렬 th nowrap 을 덮어씀 — 400 에서 첫 열 제목이 옆 열에 닿지 않게)', () => {
+    const src = fs.readFileSync(new URL('./BackupEmTool.jsx', import.meta.url), 'utf8');
+    const body = src.slice(src.indexOf('function EmLinks'));
+    const head = body.slice(body.indexOf('<thead>'), body.indexOf('</thead>'));
+    const ths = head.match(/<th [^>]*>/g) || [];
+    expect(ths).toHaveLength(6);
+    for (const th of ths) expect(th).toMatch(/whiteSpace: 'normal'/);
+  });
 });
