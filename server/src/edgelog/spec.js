@@ -129,6 +129,7 @@ export const STATUS_SPEC = Object.freeze([
    *   앞의 셋은 상태 export 자체가 없어 `catch { return null; }` 로 **무음 실패**하고 있었다.
    */
   { key: 'push.ping', label: 'Ping 위임', group: 'push', mod: '../agent/pingWorker.js', fn: 'pingWorkerStatus' },
+  { key: 'push.veeamRun', label: 'Veeam 백업 실행 대행', group: 'push', mod: '../agent/veeamRunWorker.js', fn: 'veeamRunWorkerStatus' }, // v2.818
   { key: 'push.capture', label: '트래픽 캡처 위임', group: 'push', mod: '../agent/captureWorker.js', fn: 'captureWorkerStatus' },
   { key: 'push.bmstor', label: '베어메탈 스토리지 위임', group: 'push', mod: '../agent/bmstorWorker.js', fn: 'bmstorWorkerStatus' },
   { key: 'collect.bmUsage', label: '베어메탈 사용률 수집', group: 'collect', mod: '../bmusage/poller.js', fn: 'bmUsageStatus' },

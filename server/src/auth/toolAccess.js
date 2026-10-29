@@ -117,6 +117,7 @@ export const TOOL_PATH_KEYS = Object.freeze({
   'backup-summary': 'backup-summary', // BackupSummaryTool.jsx 전용(v2.779 백업 메뉴)
   'backup-detail': 'backup-detail',   // BackupDetailTool.jsx 전용(v2.779 백업 메뉴)
   'backup-em': 'backup-em',           // BackupEmTool.jsx 전용(v2.788 Veeam EM 탭)
+  'backup-run': 'backup-run',         // BackupRunTool.jsx 전용(v2.818 백업 실행 — adminOnly · 설정은 전체 범위만)
   'cost-showback': 'cost-showback',   // CostShowbackTool.jsx 전용(v2.707 C11) — 단가 저장은 admin + 전체 범위
   'migration-readiness': 'migration-readiness', // MigrationReadinessTool.jsx 전용(v2.707 C7)
   'cluster-check': 'cluster-check',  // ClusterCheckTool.jsx + VM·호스트 상세의 클러스터 칸(v2.701) — 화면이 toolAllowed 를 먼저 본다

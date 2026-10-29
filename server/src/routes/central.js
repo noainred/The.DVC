@@ -2319,6 +2319,28 @@ centralRouter.get('/users-config', requireCentral(), (req, res) => {
 
 // 위임 Ping: 현장 에이전트가 자기 담당 vCenter들의 대기 IP를 인출 → ping → 결과 보고.
 // 중앙이 VM 사설 IP에 직접 못 가는 환경에서, 그 망에 닿는 에이전트가 ping을 대행.
+/**
+ * Backup 백업 실행 대행(v2.818 — veeam/run/edgeOps.js). **개별 토큰 전용**(svcmon-report 3규약): 담당 엣지가 자기 몫 작업을 인출해
+ * 현지 Veeam 에 보내고 결과를 회신한다. 작업에는 비밀번호가 없다(서버 id 뿐 — 엣지는 중앙이 배정한 자기 등록부 사본으로 로그인한다).
+ * 키는 req.centralAuth.agent 만. 회신은 그 작업의 대상 엣지만(completeEdgeOp 대조) · 결과는 작업 종류의 sanitize 를 지난다.
+ */
+centralRouter.get('/veeam-run-ops', requireCentral(), async (req, res) => {
+  if (req.centralAuth.mode !== 'agent') return res.status(403).json({ ok: false, reason: 'Veeam 백업 실행 대행은 엣지별 개별 토큰만 허용합니다 — 설정 › 엣지 토큰에서 이 엣지의 토큰을 발급하세요.' });
+  const { takeEdgeOps } = await import('../veeam/run/edgeOps.js');
+  res.set('Cache-Control', 'no-store');
+  res.json({ ok: true, ops: takeEdgeOps(req.centralAuth.agent) });
+});
+// Body: { id, result }
+centralRouter.post('/veeam-run-result', requireCentral({ notFound: { ok: false } }), async (req, res) => {
+  if (req.centralAuth.mode !== 'agent') return res.status(403).json({ ok: false, reason: 'Veeam 백업 실행 대행은 엣지별 개별 토큰만 허용합니다.' });
+  const id = typeof req.body?.id === 'string' ? req.body.id.slice(0, 64) : '';
+  if (!id) return res.status(400).json({ ok: false, reason: 'id 가 필요합니다(글자).' });
+  const { completeEdgeOp } = await import('../veeam/run/edgeOps.js');
+  const r = completeEdgeOp(id, req.centralAuth.agent, req.body?.result);
+  if (!r.ok) return res.status(r.status || 400).json({ ok: false, reason: r.reason });
+  res.json(r);
+});
+
 centralRouter.get('/ping-jobs', requireCentral(), (req, res) => {
   let vcs = String(req.query.vcenters || '').split(',').map((s) => s.trim()).filter(Boolean);
   // 개별 토큰은 자기가 소유한 vCenter 의 대기 ping 작업만 인출(남의 사이트 대상 IP 목록 가로채기 차단).

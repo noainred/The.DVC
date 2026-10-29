@@ -8,10 +8,9 @@
  *  - 연결 테스트: 저장된 계정으로 지정 법인 RMA 가 대상에 SSH `true` 를 실행(ssh-exec 잡) — 비밀은
  *    브로커 경로로만 흐른다.
  */
-import { requireRole, verifyUserOtp, getUser } from '../../auth/auth.js';
+import { requireRole } from '../../auth/auth.js';
+import { reauth } from './reauth.js'; // v2.818: 재인증 판정은 한 벌(Backup 백업 실행과 공유)
 import { logAudit } from '../../audit.js';
-import { config } from '../../config.js';
-import { loadSessionSecurity } from '../../security/securitySettings.js';
 import { listCredentials, saveCredential, deleteCredential, getCredentialView, credentialUsable, KINDS, inspectPrivateKey } from '../../security/credentialStore.js';
 import { knownAgentNames } from '../../central/knownAgents.js';
 import { enqueueJob, listRmaAgents } from '../../rma/jobs.js';
@@ -23,22 +22,6 @@ import { fullScopeOnlyWith } from '../admin/shared.js';
 const adminOnly = requireRole('admin');
 // v2.612 AUTHZ2612-06: 통합 계정은 엣지·호스트 단위라 법인 축이 없다 — 범위 제한 admin 도 403.
 const fullScopeOnly = fullScopeOnlyWith('통합 계정 관리는 전 법인 공용이라 전체 범위(vCenter 제한 없는) 계정만 쓸 수 있습니다.');
-
-/** 재인증 게이트 — 로컬 OTP 계정: OTP 코드 검증(403 + needEnroll), 그 외: 설정 소유자만. */
-function reauth(req, res, next) {
-  if (!config.auth.enabled) return next();
-  const username = req.user?.username || '';
-  const u = getUser(username);
-  if (u && u.totpEnabled) {
-    const v = verifyUserOtp(username, req.body?.otp ?? req.query?.otp); // DELETE 는 본문이 없어 쿼리로
-    if (!v.ok) return res.status(403).json({ ok: false, reason: v.reason, needOtp: true, needEnroll: !!v.needEnroll });
-    return next();
-  }
-  let owners = [];
-  try { owners = loadSessionSecurity().settingsOwners || []; } catch { owners = []; }
-  if (owners.includes(username)) return next();
-  return res.status(403).json({ ok: false, reason: 'OTP 가 없는 계정은 설정 소유자만 계정 정보를 변경할 수 있습니다(OTP 를 등록하면 본인 재인증으로 가능).' });
-}
 
 export function registerCredentials(api) {
 

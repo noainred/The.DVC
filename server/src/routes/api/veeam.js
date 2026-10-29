@@ -654,6 +654,24 @@ async function vmListExport(req, res, kind) {
  *   (Veeam)와 cachedSnapEvents·snapCount(스냅샷)를 그대로 쓰고 veeam/backupStatus.js 가 VM 단위로 합친다(카드·VM 화면과 같은 수).
  *   범위: 서머리는 scope 교집합, 세부내용은 vcOf(범위 밖 404). 응답 캐시는 범위·역할 키(관리자 판본: 실행 중 작업 이름·otherVcenter 수).
  */
+/**
+ * v2.818: 백업 실행(routes/api/backupRun.js)이 쓰는 대조 — vcBackup 의 Veeam 부분과 **같은 코어**(resultsFor → matchToVcenter)만, 스냅샷 이벤트 없이.
+ * known 은 '이 vCenter 를 맡는 B&R 서버 전부의 쓸 수 있는 결과가 있다' 일 때만 true — 한 서버라도 결과가 없으면 그 서버가 백업하는 VM 이
+ *   '미보호' 로 보이므로(거짓 미보호 → 포탈 전용 잡 중복 등록) 모름으로 둔다.
+ * @returns {{ known:boolean, match:object|null, views:object[], host:string, results:number }}
+ */
+export function veeamMatchFor(vc, vms, req) {
+  if (registryBroken()) return { known: false, match: null, views: [], host: '', results: 0, reason: 'registry-unreadable' };
+  const brCount = serversForVcenter(vc.id).length;
+  if (!brCount) return { known: false, match: null, views: [], host: '', results: 0 };
+  const r = resultsFor(vc.id, req);
+  const brIds = new Set(serversForVcenter(vc.id).map((d) => d.id));
+  const br = r.results.filter((x) => x.server?.src !== 'em' && brIds.has(x.server?.id));
+  const known = br.length >= brCount && Array.isArray(vms) && vms.length > 0;
+  const match = known ? matchToVcenter({ id: vc.id, host: r.host }, vms, r.results, { otherHosts: r.otherHosts }) : null;
+  return { known, match, views: r.views, host: r.host, results: br.length };
+}
+
 async function vcBackup(vc, vms, req, { initial = false, scope = null } = {}) {
   const admin = isAdminDetailUser(req.user);
   const linked = !registryBroken() && veeamLinked(vc.id);

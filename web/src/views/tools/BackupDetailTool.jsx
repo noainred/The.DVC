@@ -5,7 +5,8 @@
  * ⚠ VM 의 Veeam 키가 없으면 '모름'(서버가 못 읽음), null 이면 '없음' — 둘을 섞지 않는다.
  */
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { fetchJson, downloadFile, canCsv, putJson } from '../../api.js';
+import { fetchJson, downloadFile, canCsv, putJson, hasRole, toolAllowed } from '../../api.js';
+import { saveHandoff } from './backupRunText.js';   // v2.818 고른 VM 을 '백업 실행' 탭으로 넘긴다
 import { Loading, ErrorBox } from '../../components/ui.jsx';
 import Select from '../../components/Select.jsx';
 import { fmtNum, pctOf, veeamStateOf, snapReasonText, FILTERS, filterCounts, buildTree, flattenTree, initialOpen, veeamCell, snapCell, shortTs, vmClass, loadOpts, saveOpts, scopeQuery, scopeNote, runningCell, CRIT, critOf, MEMO_MAX, marksLine, marksNotice, filterCountText, detailLoadKey, toggleAllVisible, invertVisible, visibleVmIds, folderVmIdMap, folderCheckState, filterLabel, METHODS, methodOf, backupCell, cloneCell, methodKeyOf, METHOD_KEYS_MAP, fmtGb, methodGbTotals } from './backupViewText.js';
@@ -285,6 +286,10 @@ export default function BackupDetailTool({ scope }) {
           <button type="button" className="tab" disabled={!checked.size || saving} onClick={() => saveMarks([...checked], { need: true })} style={{ padding: '3px 9px', fontSize: 12, display: 'inline-flex', alignItems: 'center', gap: 4 }}><NeedIcon size={13} />표시</button>
           <button type="button" className="tab" disabled={!checked.size || saving} onClick={() => saveMarks([...checked], { need: false })} style={{ padding: '3px 9px', fontSize: 12 }}>해제</button>
           </span></span>
+          {/* v2.818: 고른 VM 을 백업 실행 탭으로(관리자 — 실행은 그 화면에서 미리보기·OTP 를 거친다) */}
+          {hasRole('admin') && toolAllowed('backup-run') && (
+            <button type="button" className="tab" disabled={!checked.size} onClick={() => { saveHandoff(vcId, [...checked]); window.location.hash = '#/tools/backup-run'; }} title="고른 VM 을 백업 실행 화면으로 가져갑니다 — 거기서 미리보기·OTP 확인 뒤 Veeam 으로 보냅니다" style={{ padding: '3px 10px', fontSize: 12 }}>Veeam 백업 실행 →</button>
+          )}
           {saving && <span className="muted">저장 중…</span>}
           {saveErr && <span style={{ color: '#fca5a5', overflowWrap: 'anywhere', minWidth: 0 }}>저장 실패 — {saveErr?.status === 403 ? '수정 권한이 없습니다.' : String(saveErr.message || saveErr)}</span>}
         </div>

@@ -80,6 +80,8 @@ import { startGpuGuestPush } from './agent/gpuGuestPush.js';
 import { startGpuGuestConfigPull } from './agent/gpuGuestConfigPull.js';
 import { startUsersConfigPull } from './agent/usersConfigPull.js';
 import { startPingWorker } from './agent/pingWorker.js';
+import { startVeeamRunWorker } from './agent/veeamRunWorker.js';   // Backup 백업 실행 대행(v2.818) — 엣지 전용
+import { startVeeamRunTracker } from './veeam/run/runs.js';         // Backup 백업 실행 세션 추적(v2.818) — 중앙 전용
 import { startConfigPush } from './agent/configPush.js';
 import { startBackupScheduler } from './backup/settings.js';
 import { startLogPoller } from './logs/poller.js';
@@ -389,6 +391,7 @@ app.use('/api/central/sanswitch-test-result', BIG_JSON);
 // v2.608: CVP push — 장비 레코드(포트 구성·부품·BGP)와 원시 표본이 청크 700KB 로 오지만 해제 후 1MB 를 넘을 수 있다(413 = 조용한 소실).
 app.use('/api/central/cvp-data', BIG_JSON);
 app.use('/api/central/isidu-data', BIG_JSON);   // v2.736 — 사용자 폴더 수천 개 × 스캔 여러 건(해제 후 1MB 를 넘는다 — 413 은 조용한 소실)
+app.use('/api/central/veeam-run-result', BIG_JSON);   // v2.818 — 세션 묶음(최대 50 × VM 작업 500)은 1mb 기본을 넘을 수 있다 — 413 은 조용한 소실
 app.use('/api/central/veeam-data', BIG_JSON);   // v2.751 — Veeam 서버별 VM 표(5,850 VM 규모면 해제 후 1MB 를 넘을 수 있다 — 413 은 조용한 소실)
 // '현재 사용자' push(v2.520) — 레코드에 계정명 목록이 붙어 대상이 많은 법인은 1MB 기본을 넘을 수
 // 있다. express.json 의 limit 은 **gzip 해제 후 길이**라 gzip 만으로는 413 이 해결되지 않는다.
@@ -614,6 +617,7 @@ const stagger = [
   startIsiduPoller, startIsiduPush, startIsiduConfigPull, startIsiduDigest, startIsiduTargetMail, // 아이실론 디렉터리 사용량(v2.736) — 대상이 없으면 틱만 돈다 · push/pull 은 CENTRAL_URL 미설정이면 자기기동 안 함
   startGuestPartMail, // 게스트 파티션 사용률 메일(v2.749) — 엣지는 기동하지 않는다 · 메일 설정이 꺼져 있으면 틱만 돈다
   startVeeamPoller, startVeeamPush, startVeeamConfigPull, startVeeamSnapWarmup, startVeeamSnapCollector, startEmPoller, startLicenseWatch, // Veeam 백업 상태(v2.751) — 서버 0대면 틱만 돈다 · push/pull 은 CENTRAL_URL 미설정이면 자기기동 안 함 · 전용 수집기(v2.765)는 로그 수집 주기로 Veeam 계정 이벤트만
+  startVeeamRunTracker, startVeeamRunWorker, // Backup 백업 실행(v2.818) — 중앙: 세션 추적(20초 · 재진입 가드) · 엣지: 대행 워커(CENTRAL_URL 미설정이면 자기기동 안 함)
   startXferSpeedPoller, // 법인 간 전송 속도(v2.735) — 적응형 타이머(기본 30분) + 재진입 가드 + 주기 예산. 중앙 전용·opt-in
   startStorageUsageMail, // 스토리지 사용량 예약 메일(v2.789) — 30초 틱 · 중앙 전용 · 기본 꺼짐(켜지 않으면 할 일 없음)
 ];

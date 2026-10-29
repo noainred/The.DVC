@@ -49,6 +49,7 @@ import { registerPdu } from './api/pdu.js';               // PDU 정보(APC Rack
 import { registerSerialLookup } from './api/serialLookup.js'; // 시리얼 통합 조회(v2.412)
 import { registerRma } from './api/rma.js';                   // 원격 명령 실행(RMA, v2.416)
 import { registerCredentials } from './api/credentials.js';   // 통합 계정 관리(v2.419)
+import { registerBackupRun } from './api/backupRun.js';       // Backup 현황 › 백업 실행(v2.818 — Veeam B&R REST)
 import { registerRelayCheck } from './api/relaycheck.js';     // HAProxy 경로 점검(v2.429)
 import { registerRelayTopo } from './api/relaytopo.js';       // 중계 토폴로지·HAProxy 구성(v2.431)
 import { registerBmStorage } from './api/bmstor.js'; // 베어메탈 스토리지(SSH df 마운트 합산, v2.340)
@@ -150,6 +151,7 @@ registerRma(api);
 registerPerfClient(api);
 registerCompareMatrix(api);
 registerCredentials(api);
+registerBackupRun(api);
 registerRelayCheck(api);
 registerRelayTopo(api);
 registerBmStorage(api);

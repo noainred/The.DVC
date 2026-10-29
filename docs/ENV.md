@@ -1,9 +1,9 @@
 # 환경변수 레퍼런스 (자동 생성)
 
-`server/src` 가 실제로 읽는 환경변수 **689개**를 코드에서 추출한 목록이다.
+`server/src` 가 실제로 읽는 환경변수 **694개**를 코드에서 추출한 목록이다.
 설치본에서는 `/etc/vmware-portal/portal.env` 에 `KEY=값` 으로 넣고 서비스를 재시작한다.
 
-- 생성: `node scripts/env-doc.mjs` (마지막 갱신 2026-10-28)
+- 생성: `node scripts/env-doc.mjs` (마지막 갱신 2026-10-29)
 - **이 파일을 직접 고치지 말 것** — 코드가 진실의 원천이며 다음 실행에서 덮어써진다.
 - `portal.env.example` 에 예시가 있는 키는 ✅, 없는 키는 빈칸으로 표시한다.
 - 기본값 칸이 비어 있으면 코드에서 한 줄로 추출하지 못한 것이다(해당 파일을 참조).
@@ -54,7 +54,7 @@
 | `WAN_TLS_CA_FILE` | `''` | ✅ | util/resilientFetch.js |
 | `WAN_TLS_INSECURE` | `기본 적용('true' 로 끄기)` | ✅ | util/resilientFetch.js |
 
-## 공통 (207)
+## 공통 (211)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
@@ -239,9 +239,13 @@
 | `VEEAM_EM_VM_BUDGET_MS` |  |  | veeam/em/client.js |
 | `VEEAM_HTTP_TIMEOUT_MS` |  |  | veeam/client.js, veeam/em/client.js |
 | `VEEAM_POLL_MS` | `600000` |  | veeam/poller.js |
+| `VEEAM_RUN_DEADLINE_MS` | `24` |  | veeam/run/runs.js |
+| `VEEAM_RUN_HTTP_TIMEOUT_MS` |  |  | veeam/run/client.js |
+| `VEEAM_RUN_PICKUP_MS` | `2` |  | veeam/run/edgeOps.js |
+| `VEEAM_RUN_TRACK_MS` | `20000` |  | veeam/run/runs.js |
 | `VEEAM_SERVER_DEADLINE_MS` |  |  | veeam/poller.js |
 | `VEEAM_SNAP_CONCURRENCY` | `6` |  | veeam/snapCollector.js |
-| `VEEAM_TLS_VERIFY` |  |  | veeam/client.js, veeam/em/client.js |
+| `VEEAM_TLS_VERIFY` |  |  | veeam/client.js, veeam/em/client.js 외 1 |
 | `VM_CFG_PER_CYCLE` |  |  | config.js |
 | `VM_CFG_REFRESH_MS` |  |  | config.js |
 | `VM_CFG_SCAN` | `기본 적용('false' 로 끄기)` |  | config.js |
@@ -426,7 +430,7 @@
 | `UPGRADE_TLS_INSECURE` | `기본 적용('true' 로 끄기)` |  | upgrade/upgradeAgent.js |
 | `UPGRADE_VERSIONS_MAX_BYTES` | `1048576` |  | upgrade/versionsDoc.js |
 
-## 엣지 에이전트 (47)
+## 엣지 에이전트 (48)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
@@ -453,6 +457,7 @@
 | `AGENT_PUSH_FLEET` | `기본 적용('false' 로 끄기)` |  | agent/fleetPush.js |
 | `AGENT_PUSH_GZIP` | `기본 적용('false' 로 끄기)` |  | agent/curUserPush.js, agent/fleetPush.js 외 4 |
 | `AGENT_PUSH_TIMEOUT_MS` |  |  | agent/fleetPush.js, agent/inventoryPush.js |
+| `AGENT_VEEAM_RUN_POLL_MS` | `5000` |  | agent/veeamRunWorker.js |
 | `AGENT_VMSERIES_CHUNK_BYTES` | `700000` |  | agent/vmSeriesPush.js |
 | `AGENT_VMSERIES_CONFIG_PULL_MS` | `10` |  | agent/vmSeriesConfigPull.js |
 | `AGENT_VMSERIES_PUSH_TIMEOUT_MS` |  |  | agent/vmSeriesPush.js |
@@ -878,4 +883,4 @@
 
 ---
 
-예시 파일(`packaging/offline/portal.env.example`)에 있는 키: 85 / 689
+예시 파일(`packaging/offline/portal.env.example`)에 있는 키: 85 / 694
