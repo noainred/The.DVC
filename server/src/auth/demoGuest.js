@@ -48,6 +48,8 @@ export const READ_DENY = [
   //   이유 — 등록 장비 주소·계정명이 상태에 실린다. 접두 비교라 위 '/api/tools/edge-log' 가 '-local' 을 덮지 않는다).
   '/api/tools/cvp/servers', '/api/tools/sanswitch/perf/settings', '/api/admin/vclogs', '/api/admin/ipam/db-info',
   '/api/tools/edge-log-local',
+  // v2.820: Bareos Director 설정(주소·콘솔 이름)과 Director 카탈로그(실제 Director 에 접속) — 설정 탭.
+  '/api/tools/bareos-backup/settings', '/api/tools/bareos-backup/catalog',
 ];
 
 /** v2.720(감사 R1-03·R1-06): 데모 계정이 사람이 등록한(비-mock) 장비를 수집하려 할 때 라우트·폴러가 함께 쓰는 문구. */

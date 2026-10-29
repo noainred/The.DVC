@@ -28,6 +28,7 @@ import { registerInventory } from './api/inventory.js';
 import { wrapAsyncRouter } from '../util/asyncRoute.js';
 import { registerVmClone } from './api/vmClone.js'; // VM 복제(백업식, v2.299)
 import { registerVeeamBadges, registerBackupStatus } from './api/veeam.js'; // Veeam 백업 VM 배지(v2.751) · 백업 메뉴(v2.779)
+import { registerBareosBackup } from './api/bareosBackup.js'; // Bareos VM 백업(v2.820)
 import { registerStorageMon } from './api/storageMon.js'; // 스토리지 모니터링(Isilon 등, v2.302)
 import { registerSanSwitch } from './api/sanSwitch.js';   // SAN 스위치 모니터링(Brocade FOS, v2.410)
 import { registerCvp } from './api/cvp.js';               // Arista CloudVision(CVP) 네트워크 스위치(v2.608)
@@ -129,6 +130,7 @@ registerInventory(api);
 registerVmClone(api);
 registerVeeamBadges(api);
 registerBackupStatus(api); // v2.779 백업 서머리·세부내용(도구 키 backup-summary·backup-detail)
+registerBareosBackup(api);
 registerStorageMon(api);
 registerSanSwitch(api);
 registerCvp(api);

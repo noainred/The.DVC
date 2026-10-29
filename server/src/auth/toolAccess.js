@@ -104,6 +104,7 @@ export const TOOL_PATH_KEYS = Object.freeze({
   'thin-vms': 'thinvms',
   threats: 'threats',
   'vm-clone': 'vm-clone',
+  'bareos-backup': 'bareos-backup',  // v2.820 Bareos VM 백업(BareosBackupTool.jsx)
   'vm-export': 'vm-export',
   'vm-finder': 'vmfinder',
   'vm-track': 'vm-track',

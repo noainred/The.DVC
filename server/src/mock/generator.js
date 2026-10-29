@@ -636,6 +636,9 @@ export function generateSnapshot() {
         dns: powered ? mkDns(site, vm.idx) : null,   // v2.695: VM 이 쓰는 DNS 서버(IP 대장에는 들어가지 않는다)
         folder: VM_FOLDERS[(vm.idx * 7 + site.id.length) % VM_FOLDERS.length],
         resourcePool: RES_POOLS[(vm.idx * 3) % RES_POOLS.length],
+        // v2.820: Bareos 연동용 정확한 위치(vcenter/vmPlacement.js 와 같은 모양) — 데이터센터는 사이트별 1개, 폴더는 위 folder 의 '/' 경로.
+        vcDcPath: `DC-${site.id}`,
+        folderPath: `/${VM_FOLDERS[(vm.idx * 7 + site.id.length) % VM_FOLDERS.length]}`,
         toolsStatus: powered ? (vm.idx % 19 === 3 ? 'OUTDATED' : 'RUNNING') : 'NOT_RUNNING',
         toolsVersion: TOOLS_VERSIONS[vm.idx % TOOLS_VERSIONS.length],
         // 버전/패치 준수 리포트용 — 실환경 SOAP의 guest.toolsVersionStatus2와 동일한 값 집합.

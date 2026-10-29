@@ -149,6 +149,14 @@ export const ROUTE_GATE_ALLOW = Object.freeze({
   'DELETE /api/tools/vm-clone/nfs-datastores/:id': 'accessOf — 정의의 vCenter 조회 404 · 쓰기 403(v2.793)',
   'POST /api/tools/vm-clone/nfs-datastores/:id/detach': 'accessOf — 정의의 vCenter 조회 404 · 쓰기 403(v2.794)',
   'PUT /api/tools/vm-clone/corps/mounts': 'scopedVcenterIds·inUserWriteScope — 법인 vCenter 조회 404 · 전부 쓰기 아니면 403(v2.794)',
+  // v2.820 Bareos VM 백업 — 대상 vCenter 귀속: bareosAccess(조회 밖 404 → 쓰기 밖 403)
+  'POST /api/tools/bareos-backup/jobs': 'bareosAccess — 대상 vCenter 조회 404 → 쓰기 403(v2.820)',
+  'POST /api/tools/bareos-backup/jobs/:id/run': 'bareosAccess — 대상의 vCenter 쓰기 범위(v2.820)',
+  'POST /api/tools/bareos-backup/jobs/:id/cancel': 'bareosAccess — 대상의 vCenter 쓰기 범위(v2.820)',
+  'PATCH /api/tools/bareos-backup/jobs/:id': 'bareosAccess — 대상의 vCenter 쓰기 범위(v2.820)',
+  'DELETE /api/tools/bareos-backup/jobs/:id': 'bareosAccess — 대상의 vCenter 쓰기 범위(v2.820)',
+  'POST /api/tools/bareos-backup/jobs/:id/restore': 'bareosAccess + 본인 OTP — 대상의 vCenter 쓰기 범위(v2.820)',
+  'POST /api/tools/bareos-backup/poll': '상태 조회만(원장 갱신) — 범위 계정은 자기 범위 결과만 받는다(목록 GET 이 거른다, v2.820)',
 });
 
 /**

@@ -122,6 +122,8 @@ const PURPOSES = {
   'veeam-em-auth-stops.json': 'Veeam Enterprise Manager 인증 실패 정지 기록(상태 — 자격증명이 바뀌면 자동 재개, v2.788)',
   'veeam-license-alert-state.json': 'Veeam 라이선스·지원 만료 알림 단계(상태 — 재시작 뒤 같은 알림을 다시 보내지 않게, v2.788)',
   'cvp-settings.json': 'CVP 수집 설정(켜짐·주기·보존일·동시성·장비 시한, v2.608)',
+  'bareos.json': 'Bareos 연동 설정(Director 주소·콘솔 계정 — 비밀번호 봉인 · 기본 JobDefs·FileSet · vCenter 별 사이트 FD·SD 매핑, v2.820)',
+  'bareos-jobs.json': 'Bareos VM 백업 대상 원장(vCenter·VM·Director 잡 이름·최근 실행·복원 이력 — 자격증명 없음, v2.820)',
   'vm-dns-policy.json': 'VM DNS 승인 정책(법인별 승인 DNS 주소·CIDR · 공인 DNS 판정, v2.696)',
   'bm-storage.json': '베어메탈 스토리지 서버 등록부 + 수집 주기(마운트 경로·SSH 계정 — 비밀 봉인, v2.340)',
   'horizon.json': 'Horizon 커넥션 서버 등록(주소·계정 — 비밀 봉인)',

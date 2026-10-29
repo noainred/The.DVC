@@ -95,6 +95,7 @@ export const SECRET_FILES = [
   // 필드 이름이 `url` 이라 SECRET_FIELDS(정확 일치)에 걸리지 않아 암호화 모드에서도 평문이었다. `url` 을 전역 필드로
   // 넣으면 collectors.json 등의 접속 주소까지 봉인되므로, **이 파일에서만** 추가 필드로 봉인한다(FILE_EXTRA_SECRET_FIELDS).
   'alerts.json',                   // 알림 채널 웹훅 URL(alerts.js — 파일 한정 추가 필드 'url')
+  'bareos.json',                   // Bareos Director 콘솔 비밀번호(bareos/settings.js, v2.820)
 ];
 
 /**

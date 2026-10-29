@@ -36,6 +36,7 @@ const NetIssues = React.lazy(() => import('./NetIssues.jsx'));
 const SecretScanTool = React.lazy(() => import('./tools/SecretScanTool.jsx'));
 const CodexCheck = React.lazy(() => import('./CodexCheck.jsx'));
 const VmCloneTool = React.lazy(() => import('./tools/VmCloneTool.jsx'));
+const BareosBackupTool = React.lazy(() => import('./tools/BareosBackupTool.jsx'));
 const StorageMonTool = React.lazy(() => import('./tools/StorageMonTool.jsx'));
 const StorageGrowthTool = React.lazy(() => import('./tools/StorageGrowthTool.jsx'));
 const StorageUsageTool = React.lazy(() => import('./tools/StorageUsageTool.jsx')); // v2.789 스토리지 사용량 보고서
@@ -608,6 +609,7 @@ function ToolPanel({ tool, onBack, isAdmin, defaultScope = '', cfg = null }) {
       {tool === 'secret-scan' && <SecretScanTool />}
       {tool === 'codex-check' && <CodexCheck />}
       {tool === 'vm-clone' && <VmCloneTool />}
+      {tool === 'bareos-backup' && <BareosBackupTool />}
       {tool === 'storage-mon' && <StorageMonTool />}
       {tool === 'storage-growth' && <StorageGrowthTool />}
       {tool === 'storage-usage' && <StorageUsageTool isAdmin={isAdmin} />}

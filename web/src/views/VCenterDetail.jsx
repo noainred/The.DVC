@@ -309,6 +309,9 @@ export default function VCenterDetail({ site, onBack }) {
   //   (v2.616 TrendKpis 와 같은 결함). 배지는 장식이라 권한이 없을 때 오류를 표시하지 않는 것이 정상이다(배지 없이 트리만).
   const { data: cloneBadgeD } = usePolling(toolAllowed('vm-clone') ? '/tools/vm-clone/badges' : null, { vcenterId }, 60_000);
   const cloneSet = useMemo(() => new Set(cloneBadgeD?.vmIds || []), [cloneBadgeD]);
+  // v2.820: Bareos VM 백업 대상 — 같은 규칙(도구 권한이 있을 때만 · 실패면 배지 없이 트리만 · 범위 밖은 서버가 빈 목록).
+  const { data: bareosBadgeD } = usePolling(toolAllowed('bareos-backup') ? '/tools/bareos-backup/badges' : null, { vcenterId }, 60_000);
+  const bareosSet = useMemo(() => new Set(bareosBadgeD?.vmIds || []), [bareosBadgeD]);
   // v2.751(사용자 요청 "veeam 백업 VM 표시"): vCenter 와 같은 법인의 Veeam 서버(중앙 직접 또는 그 법인 엣지가 읽음)가 알려 준
   //   백업 대상·백업 중 VM 에 배지를 붙인다. 켤 때만 60초 폴링(서버는 Veeam 을 주기 수집해 둔 값을 대조만 한다 — Veeam 왕복 없음).
   const veeamP = usePolling(veeamOn ? '/veeam/badges' : null, { vcenterId }, 60_000);
@@ -730,7 +733,7 @@ export default function VCenterDetail({ site, onBack }) {
                     {/* 메모로만 걸린 결과 — 어떤 메모 문구에 걸렸는지 스니펫으로 표시(하이라이트 포함) */}
                     <VmUsageCell {...usageProps(vm)} />
                     {viaNotes && <span style={{ color: 'var(--amber)' }}> · 📝 <Highlight text={notesSnippet(vm.notes, token)} tokens={tokens} /></span>}
-                    <VmBadges vm={vm} cloneSet={cloneSet} />
+                    <VmBadges vm={vm} cloneSet={cloneSet} bareosSet={bareosSet} />
                   </>} />
               ))}
             </Node>
@@ -760,7 +763,7 @@ export default function VCenterDetail({ site, onBack }) {
                     {(vmsByHost.get(h.name) || []).map((vm) => (
                       <Leaf key={vm.id} icon="🧊" onClick={() => setSel({ type: 'vm', item: vm })}
                         label={vm.name} badge={<><StateBadge state={vm.powerState} /><VeeamTag vm={vm} veeam={veeamMap} on={veeamOn} ev={veeamEv} onOpen={setVeeamVm} /><PortalTag vm={vm} map={portalMap} onOpen={setPortalVm} /></>}
-                        sub={<>{`${vm.guestOS} · ${vm.cpuCount}vCPU · ${Math.round(vm.memMB / 1024)}GB`}<VmUsageCell {...usageProps(vm)} /><VmBadges vm={vm} cloneSet={cloneSet} /></>} />
+                        sub={<>{`${vm.guestOS} · ${vm.cpuCount}vCPU · ${Math.round(vm.memMB / 1024)}GB`}<VmUsageCell {...usageProps(vm)} /><VmBadges vm={vm} cloneSet={cloneSet} bareosSet={bareosSet} /></>} />
                     ))}
                   </Tree>
                 ))}
@@ -773,7 +776,7 @@ export default function VCenterDetail({ site, onBack }) {
         {view === 'vms' && !query && !vmsOk && gateEl(vmsPart, 'VM 목록')}
         {view === 'vms' && !query && vmsOk && (
           <Node label={`📁 ${site.name} / vm`} defaultOpen sub={`${visibleVms.length} VM`}>
-            <FolderNodes node={folderTree} path="" open={open} toggle={toggle} cloneSet={cloneSet} veeamMap={veeamMap} veeamOn={veeamOn} veeamEv={veeamEv} setVeeamVm={setVeeamVm} usageProps={usageProps} onSelect={(vm) => setSel({ type: 'vm', item: vm })}
+            <FolderNodes node={folderTree} path="" open={open} toggle={toggle} cloneSet={cloneSet} bareosSet={bareosSet} veeamMap={veeamMap} veeamOn={veeamOn} veeamEv={veeamEv} setVeeamVm={setVeeamVm} usageProps={usageProps} onSelect={(vm) => setSel({ type: 'vm', item: vm })}
               portalMap={portalMap} setPortalVm={setPortalVm} onFolderBackup={onFolderBackup} />
           </Node>
         )}
@@ -1026,7 +1029,7 @@ function Highlight({ text, tokens }) {
   );
 }
 
-function FolderNodes({ node, path, open, toggle, onSelect, cloneSet, veeamMap, veeamOn, veeamEv, setVeeamVm, usageProps, portalMap, setPortalVm, onFolderBackup }) {
+function FolderNodes({ node, path, open, toggle, onSelect, cloneSet, bareosSet, veeamMap, veeamOn, veeamEv, setVeeamVm, usageProps, portalMap, setPortalVm, onFolderBackup }) {
   const childFolders = Object.keys(node.folders).sort();
   return (
     <>
@@ -1036,11 +1039,11 @@ function FolderNodes({ node, path, open, toggle, onSelect, cloneSet, veeamMap, v
         return (
           <Tree key={key} k={key} open={open} toggle={toggle} icon="📁" label={name} sub={`${f.count} VM`}
             action={onFolderBackup ? <FolderBackupBtn node={f} name={name} onGo={onFolderBackup} /> : null}>
-            <FolderNodes node={f} path={`${path}/${name}`} open={open} toggle={toggle} cloneSet={cloneSet} veeamMap={veeamMap} veeamOn={veeamOn} veeamEv={veeamEv} setVeeamVm={setVeeamVm} usageProps={usageProps} onSelect={onSelect}
+            <FolderNodes node={f} path={`${path}/${name}`} open={open} toggle={toggle} cloneSet={cloneSet} bareosSet={bareosSet} veeamMap={veeamMap} veeamOn={veeamOn} veeamEv={veeamEv} setVeeamVm={setVeeamVm} usageProps={usageProps} onSelect={onSelect}
               portalMap={portalMap} setPortalVm={setPortalVm} onFolderBackup={onFolderBackup} />
             {f.vms.map((vm) => (
               <Leaf key={vm.id} icon="🧊" onClick={() => onSelect(vm)} label={vm.name} badge={<><StateBadge state={vm.powerState} /><VeeamTag vm={vm} veeam={veeamMap} on={veeamOn} ev={veeamEv} onOpen={setVeeamVm} /><PortalTag vm={vm} map={portalMap} onOpen={setPortalVm} /></>}
-                sub={<>{`${vm.guestOS} · ${vm.cpuCount}vCPU · ${Math.round(vm.memMB / 1024)}GB`}<VmUsageCell {...usageProps(vm)} /><VmBadges vm={vm} cloneSet={cloneSet} /></>} />
+                sub={<>{`${vm.guestOS} · ${vm.cpuCount}vCPU · ${Math.round(vm.memMB / 1024)}GB`}<VmUsageCell {...usageProps(vm)} /><VmBadges vm={vm} cloneSet={cloneSet} bareosSet={bareosSet} /></>} />
             ))}
           </Tree>
         );
@@ -1072,7 +1075,7 @@ export const tb = (g) => {
 };
 
 /**
- * VM 행 배지(v2.299): Clone = 이 포탈의 복제(백업) 잡 대상.
+ * VM 행 배지(v2.299): Clone = 이 포탈의 복제(백업) 잡 대상 · Bareos = Bareos VM 백업 대상(v2.820).
  * v2.751: Veeam 배지는 VeeamTag(VeeamParts.jsx)가 전원 배지 옆(badge 칸)에 그린다 — 보조 줄(sub)은 좁은 화면(400px)에서 말줄임으로 잘린다.
  * v2.753(사용자 지시 '메모는 참고하지 말고 스냅샷으로만'): VM 메모의 'veeam' 글자로 붙이던 veeamed 휴리스틱을 없앴다 —
  *   연동 없는 Veeam 표시는 vCenter 스냅샷 이름(VeeamTag 의 📸 점선 배지)만 쓴다.
@@ -1103,8 +1106,15 @@ function FolderBackupBtn({ node, name, onGo }) {
       onClick={(e) => { e.stopPropagation(); onGo(ids.slice(0, 200)); }}>이 폴더 백업{over ? ' (200대)' : ''}</button>
   );
 }
-function VmBadges({ vm, cloneSet }) {
-  if (!cloneSet?.has(vm.id)) return null;
-  return <span className="badge blue" style={{ fontSize: 10, marginLeft: 4 }} title="이 포탈의 VM 복제(백업) 잡 대상 — 특수기능 › VM 복제(백업)">Clone</span>;
+function VmBadges({ vm, cloneSet, bareosSet }) {
+  const cloned = cloneSet?.has(vm.id);
+  const bareos = bareosSet?.has(vm.id);   // v2.820 Bareos VM 백업 대상
+  if (!cloned && !bareos) return null;
+  return (
+    <>
+      {cloned && <span className="badge blue" style={{ fontSize: 10, marginLeft: 4 }} title="이 포탈의 VM 복제(백업) 잡 대상 — 특수기능 › VM 복제(백업)">Clone</span>}
+      {bareos && <span className="badge blue" style={{ fontSize: 10, marginLeft: 4 }} title="Bareos VM 백업 대상 — 특수기능 › Bareos VM 백업(실행 결과는 그 화면에서 봅니다)">Bareos</span>}
+    </>
+  );
 }
 

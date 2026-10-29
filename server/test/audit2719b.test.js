@@ -40,13 +40,15 @@ test('① 보안·비밀 조회(/api/tools 아래)도 거부 (R1-08)', () => {
 
 // 실제 장비·네트워크에 접속하는 함수(라우트 핸들러에서 부르면 '실접속 GET').
 const LIVE_CALLEES = ['probeRelayPath', 'fetchIdracInventory', 'fetchIdracSensors', 'probeGpuTelemetry', 'getNetworkCheck', 'tcpProbeMany', 'tcpProbe(',
-  'collectHorizonLicenses', 'fetchHorizonLicenses'];
+  'collectHorizonLicenses', 'fetchHorizonLicenses',
+  // v2.820: Bareos Director 콘솔 — 조회 라우트는 readDirector(데모 필터), 그 밖(카탈로그)은 withDirector 로 READ_DENY 여야 한다.
+  'withDirector(', 'readDirector'];
 /*
  * v2.732(점검 2회차 B3-01): 함수 **안에** 데모 계정 필터(`demoOnly`)가 있는 실접속 함수 — 라우트가 그 호출에 `demoOnly: isDemoGuest(req.user)` 를
  * 넘기면 경로 전체를 거부하는 대신 허용한다(같은 화면의 데모 데이터는 보여야 한다 — v2.720 R1-03 '수집형 실행은 demoOnly' 의 GET 판).
  * 인자를 빼면 그 GET 은 다시 '열린 실접속 GET' 으로 잡힌다. 실제로 접속하지 않는지는 audit2732h ① 이 가짜 커넥션 서버로 확인한다.
  */
-const DEMO_ONLY_CALLEES = ['collectHorizonLicenses'];
+const DEMO_ONLY_CALLEES = ['collectHorizonLicenses', 'readDirector'];
 const demoOnlyCallRe = (c) => new RegExp(`${c.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\(\\s*\\{[^}]*\\bdemoOnly:\\s*isDemoGuest\\(req\\.user\\)`);
 
 /** 라우트 파일에서 '실접속 함수를 부르는 GET 선언' → [{ lit, query }]. 질의 조건(req.query.X === '1')이 그 앞에 있으면 함께. */
