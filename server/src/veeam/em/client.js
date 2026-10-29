@@ -22,7 +22,7 @@ import { readJsonCapped } from '../../util/readCapped.js';
 import { authError, maskText, failText } from '../client.js';
 import { DEFAULT_EM_PORT, emFingerprint } from './registry.js';
 import {
-  overviewOf, jobStatsOf, vmsOverviewOf, processedOf, repoReportOf, backupServersOf, repositoriesOf, sessionsOf, firstArray, jobsWithResults, sessionDigest, pick,
+  overviewOf, jobStatsOf, vmsOverviewOf, processedOf, repoReportOf, backupServersOf, repositoriesOf, hierarchyRootsOf, sessionsOf, firstArray, jobsWithResults, sessionDigest, pick,
   taskSessionsOf, sessionHeadOf, vmTasksOf, vmPointsOf, rowTimeOf,
 } from './parse.js';
 
@@ -34,7 +34,7 @@ export const SESSION_PAGE = 500;
 export const SESSION_MAX_PAGES = 6;         // 세션 최대 3,000건(28 vCenter · 작업 200여 개 · 하루 수백 회 × 7일 기준)
 export const SESSION_WINDOW_MS = 7 * 86_400_000;
 /** 읽는 항목 — 화면의 '수집 상태' 줄이 이 순서로 말한다. */
-export const EM_SECTIONS = Object.freeze(['overview', 'jobStats', 'vms', 'processed', 'repoReport', 'backupServers', 'jobs', 'repositories', 'sessions', 'vmBackups']);
+export const EM_SECTIONS = Object.freeze(['overview', 'jobStats', 'vms', 'processed', 'repoReport', 'backupServers', 'jobs', 'repositories', 'hierarchyRoots', 'sessions', 'vmBackups']);   // v2.817 hierarchyRoots(EM 연결 현황)
 /*
  * v2.795 VM 단위 기록(vmBackups) — BackupTaskSession·VmRestorePoint 를 **새것부터** 페이지로 받다가 기준 시각보다 오래된 행이 나오면 멈춘다
  *   (날짜 필터 문법이 문서로 확인되지 않아 필터에 기대지 않는다). 기준 = 직전 완결 수집 시각 − 겹침(vmStore.js) · 첫 수집은 8일(주간 작업 포함).
@@ -193,6 +193,8 @@ export async function collectEm(em, { signal = null, fetchImpl, now = Date.now()
     const backupServersBody = await soft('backupServers', () => c.get('/api/backupServers?format=Entity'));
     const jobsBody = await soft('jobs', () => c.get('/api/jobs?format=Entity'));
     const repositoriesBody = await soft('repositories', () => c.get('/api/repositories?format=Entity'));
+    // v2.817 EM 연결 현황 — 백업 서버마다 등록된 가상화 호스트(vCenter). 실패해도 다른 항목은 살린다(섹션 사유 — 화면은 '모름').
+    const rootsBody = await soft('hierarchyRoots', () => c.get('/api/hierarchyRoots?format=Entity'));
     // 세션 — 최근 7일 · 새것부터 · 페이지 상한. 필터를 거절(400)하면 필터 없이 받아 직접 거른다(정렬은 받은 대로 — 그래서 상한에 걸리면 알린다).
     const rawSessions = await soft('sessions', async () => {
       const out = []; let truncated = false; let filtered = true; let replicaErr = '';
@@ -243,6 +245,7 @@ export async function collectEm(em, { signal = null, fetchImpl, now = Date.now()
       backupServers: bs ? bs.list : null,
       ...(bs ? { backupServersMeta: bs.meta } : {}),
       repositories: repositoriesBody ? repositoriesOf(repositoriesBody) : null,
+      hierarchyRoots: rootsBody ? hierarchyRootsOf(rootsBody) : null,
       jobs, sessions: digest,
       vmBackups: vmRows ? { since, tasks: vmRows.tasks.length, points: vmRows.points.length, complete: vmRows.complete, errors: vmRows.errors } : null,
       ...(vmRows ? { vmRows: { since, tasks: vmRows.tasks, points: vmRows.points, complete: vmRows.complete } } : {}),

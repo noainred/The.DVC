@@ -158,3 +158,42 @@ describe('v2.798 EM 서버를 포탈 B&R 로 바로 등록 · 서버 수 확인'
     expect(m).not.toMatch(/textTransform|text-transform/);
   });
 });
+
+describe('v2.817 EM 연결 현황 — 모든 EM · 실패 EM 행 · 포탈에 없는 vCenter · 대조', () => {
+  const NOW = Date.UTC(2026, 9, 29, 6, 0);
+  const ems = [
+    { id: 'a', name: 'EM-A', status: { ok: true, ts: NOW - 60_000, sections: { hierarchyRoots: { ok: true } } }, data: { hierarchyRootsKnown: true, orphanRoots: [{ name: 'vc-old.local', hostType: 'VC', server: 'VBR-OLD', vcenterId: null }],
+      backupServers: [
+        { name: 'VBR-KR', vcSource: 'manual', vcNames: ['Seoul'], vcenterIds: ['kr'], vcCheck: 'same', roots: [{ name: 'vc01', hostType: 'VC', vcenterId: 'kr', vcName: 'Seoul' }, { name: 'esx-1', hostType: 'ESX', vcenterId: null, vcName: null }] },
+        { name: 'VBR-US', vcSource: 'br', vcNames: ['Seoul'], vcenterIds: ['kr'], vcCheck: 'diff', roots: [{ name: 'vc-x.local', hostType: 'VC', vcenterId: null, vcName: null }] },
+      ] } },
+    { id: 'b', name: 'EM-B', status: { ok: true, ts: NOW - 60_000, sections: {} }, data: { hierarchyRootsKnown: false, orphanRoots: null, backupServers: [{ name: 'VBR-JP', vcSource: null, vcNames: [], vcCheck: 'unknown', roots: null }] } },
+    { id: 'c', name: 'EM-C', status: { ok: false, ts: NOW, error: '수집 시한', lastOkTs: null }, data: null },
+  ];
+  it('emLinkRows — 서버 한 행 · 실패 EM 은 상태 한 행 · 목록에 없는 서버 행 · 칸 글자', () => {
+    const rows = T.emLinkRows(ems, NOW);
+    expect(rows.map((r) => [r.emName, r.server, r.checkKey])).toEqual([
+      ['EM-A', 'VBR-KR', 'same'], ['EM-A', 'VBR-US', 'diff'], ['EM-A', 'VBR-OLD', 'orphan'], ['EM-B', 'VBR-JP', 'unknown'], ['EM-C', '', 'unknown'],
+    ]);
+    expect(rows[0].roots.map((x) => x.text)).toEqual(['Seoul', 'esx-1 (ESX)']);
+    expect(rows[1].roots[0].text).toBe('vc-x.local (포탈에 없음)');
+    expect(rows[1].portal).toEqual({ text: 'Seoul', source: 'B&R 등록' });
+    expect(rows[3].roots).toBe(null);
+    expect(rows[4].note).toMatch(/백업 서버가 보이지 않습니다/);
+    expect(rows[4].statusTone).toBe('bad');
+    for (const r of rows) expect(`${r.note}${r.statusText}${r.check.label}`).not.toMatch(/`|\*\*/);
+  });
+  it('행 키는 같은 EM 안에 같은 이름의 백업 서버가 있어도 겹치지 않는다(겹치면 정렬 때 행이 늘었다 — Chromium 실측)', () => {
+    const dup = [{ id: 'x', name: 'X', status: { ok: true, ts: NOW }, data: { hierarchyRootsKnown: true, orphanRoots: [], backupServers: [{ name: 'VBR', vcCheck: 'none', roots: [] }, { name: 'VBR', vcCheck: 'none', roots: [] }] } }];
+    const keys = T.emLinkRows(dup, NOW).map((r) => r.key);
+    expect(new Set(keys).size).toBe(keys.length);
+  });
+  it('emLinkSummary — EM·실패·서버·본 vCenter·포탈에 없는 vCenter·다름·루트 모름', () => {
+    expect(T.emLinkSummary(ems)).toEqual({ ems: 3, failed: 1, noData: 1, servers: 3, vcSeen: 1, notInPortal: 1, diff: 1, unmapped: 0, rootsUnknown: 1 });
+  });
+  it('소스 — 연결 현황 카드는 선택한 EM 이 아니라 ems 전체를 쓴다 · EM 이름을 누르면 상세가 바뀐다', () => {
+    const src = fs.readFileSync(new URL('./BackupEmTool.jsx', import.meta.url), 'utf8');
+    expect(src).toMatch(/<EmLinks ems=\{ems\} now=\{now\} sel=\{em\?\.id \|\| ''\} onPick=\{setEmId\} \/>/);
+    expect(src).toMatch(/data-em-links/);
+  });
+});

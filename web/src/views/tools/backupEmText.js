@@ -44,7 +44,7 @@ export const BADGE_BG = { fail: 'rgba(239,68,68,.16)', warn: 'rgba(245,158,11,.1
 /** 수집 항목 이름 — 서버 veeam/em/client.js EM_SECTIONS 와 같은 키·순서(테스트가 대조). */
 export const SECTION_LABEL = Object.freeze({
   overview: '전체 개요', jobStats: '작업 통계', vms: 'VM 개요', processed: '처리 VM', repoReport: '저장소 보고서',
-  backupServers: '백업 서버', jobs: '작업', repositories: '저장소', sessions: '세션', vmBackups: 'VM 별 기록',
+  backupServers: '백업 서버', jobs: '작업', repositories: '저장소', hierarchyRoots: '연결 호스트', sessions: '세션', vmBackups: 'VM 별 기록',
 });
 /** 수집 상태 칩 — 항목별 성공·실패(사유). 수집 전이면 빈 목록. */
 export function sectionChips(status) {
@@ -196,4 +196,66 @@ export function serverCountWarnings(counts) {
   return (Array.isArray(counts) ? counts : [])
     .filter((c) => Number.isFinite(c?.overview) && Number.isFinite(c?.merged) && c.merged < c.overview)
     .map((c) => `EM ‘${c.emName}’ — 개요는 백업 서버 ${c.overview}대인데 목록은 ${c.merged}대만 받았습니다${c.viaQuery ? '(질의 서비스로 다시 읽은 뒤)' : ''}. EM 계정의 역할이 일부 서버만 보이게 할 수 있습니다(추정 — EM 에서 그 계정의 역할·범위를 확인하세요).`);
+}
+
+/* ── v2.817 EM 연결 현황 — 모든 EM 을 한 표로(EM → 백업 서버 → EM 이 본 vCenter · 포탈 매핑 대조) ── */
+export const VC_CHECK = Object.freeze({
+  same: { label: '같음', tone: 'ok' }, diff: { label: '다름', tone: 'fail' }, unmapped: { label: '매핑 없음', tone: 'warn' },
+  none: { label: 'EM 에 호스트 없음', tone: 'none' }, unknown: { label: '모름', tone: 'none' }, orphan: { label: '목록에 없는 서버', tone: 'warn' },
+});
+const isVc = (r) => /^(vc|vcenter)/i.test(String(r?.hostType || '').replace(/\s+/g, ''));
+/** EM 이 본 호스트 한 개 → 칸 글자 — 포탈 vCenter 로 맞췄으면 그 이름 · VC 인데 못 맞춤 '(포탈에 없음)' · 그 밖은 종류. */
+export function rootText(r) {
+  if (r?.vcName) return { text: r.vcName, tone: 'ok', inPortal: true };
+  if (isVc(r)) return { text: `${r.name} (포탈에 없음)`, tone: 'warn', inPortal: false };
+  return { text: `${r?.name || '—'}${r?.hostType ? ` (${r.hostType})` : ''}`, tone: 'none', inPortal: false };
+}
+const srcText = { manual: '수동', br: 'B&R 등록' };
+/**
+ * 표 행 — 백업 서버 하나가 한 행. 수집 결과가 없는 EM(실패·수집 전)·서버 목록을 못 읽은 EM·서버가 없는 EM 은 상태 한 행.
+ * EM 루트에만 있고 서버 목록에 없는 서버(orphanRoots)도 서버별 한 행으로 보인다(서버가 일부만 보이는 까닭을 찾게).
+ */
+export function emLinkRows(ems, now = Date.now()) {
+  const out = [];
+  for (const em of Array.isArray(ems) ? ems : []) {
+    const st = statusLine(em?.status, now);
+    const base = { emId: em.id, emName: em.name || em.id, statusText: st.text, statusTone: st.tone };
+    const d = em?.data || null;
+    const servers = d?.backupServers;
+    if (!d || !Array.isArray(servers) || !servers.length) {
+      out.push({ ...base, key: `${em.id}|-`, server: '', note: !d ? '수집 결과 없음 — 이 EM 의 백업 서버가 보이지 않습니다' : !Array.isArray(servers) ? '백업 서버 목록을 읽지 못했습니다' : 'EM 에 백업 서버가 없습니다', roots: [], portal: null, check: VC_CHECK.unknown, checkKey: 'unknown' });
+      continue;
+    }
+    servers.forEach((s, i) => {
+      const ck = s.vcCheck && VC_CHECK[s.vcCheck] ? s.vcCheck : 'unknown';
+      // 키에 순번 — 같은 EM 안에 같은 이름의 백업 서버가 있으면 React 키가 겹쳐 정렬 때 행이 늘어났다(Chromium 실측 v2.817)
+      out.push({ ...base, key: `${em.id}|${i}|${s.uid || ''}|${s.name}`, server: s.name, note: '',
+        roots: Array.isArray(s.roots) ? s.roots.map(rootText) : null,
+        portal: s.vcSource ? { text: (s.vcNames || []).join(', ') || '—', source: srcText[s.vcSource] || s.vcSource } : null,
+        check: VC_CHECK[ck], checkKey: ck });
+    });
+    const orph = new Map();
+    for (const r of Array.isArray(d.orphanRoots) ? d.orphanRoots : []) { const k = r.server || ''; if (!orph.has(k)) orph.set(k, []); orph.get(k).push(r); }
+    for (const [sv, list] of orph) out.push({ ...base, key: `${em.id}|orphan|${sv}`, server: sv || '(서버 모름)', note: '연결 호스트에는 있지만 백업 서버 목록에는 없는 서버', roots: list.map(rootText), portal: null, check: VC_CHECK.orphan, checkKey: 'orphan' });
+  }
+  return out;
+}
+/** 요약 수 — EM 수·수집 실패·백업 서버·EM 이 본 vCenter(포탈 vCenter 로 맞춘 것)·포탈에 없는 vCenter 호스트·다름·매핑 없음·루트 모름. */
+export function emLinkSummary(ems) {
+  const list = Array.isArray(ems) ? ems : [];
+  const vcSeen = new Set(); const notIn = new Set();
+  let servers = 0; let diff = 0; let unmapped = 0; let rootsUnknown = 0;
+  for (const em of list) {
+    const s = em?.data?.backupServers;
+    if (!Array.isArray(s)) continue;
+    if (!em.data.hierarchyRootsKnown) rootsUnknown++;
+    servers += s.length;
+    for (const x of s) {
+      if (x.vcCheck === 'diff') diff++;
+      if (x.vcCheck === 'unmapped') unmapped++;
+      for (const r of x.roots || []) { if (r.vcenterId) vcSeen.add(r.vcenterId); else if (isVc(r)) notIn.add(String(r.name).toLowerCase()); }
+    }
+  }
+  return { ems: list.length, failed: list.filter((e) => e?.status && e.status.ok === false).length, noData: list.filter((e) => !e?.data).length,
+    servers, vcSeen: vcSeen.size, notInPortal: notIn.size, diff, unmapped, rootsUnknown };
 }

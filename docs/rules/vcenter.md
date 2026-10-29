@@ -385,4 +385,5 @@
   · v2.806: Summary 우선순위 VM(`backupStatus.priorityCandidates`)도 같은 규칙 — 백업 안함·Clone 은 gap(Veeam 미백업)이 아니고, Clone 은 `cloneBadOf`(잡 없음·마지막 실패·건너뜀 — 모름 제외)로 후보 · Config 는 gap 유지('확인 불가' 태그).
   · v2.807: 엑셀 'VM 목록(폴더 트리)' 폴더 행 4~6열 병합 = 방식별 수(`vmListXlsx.methodCountsRich` — 0 생략·미지정 회색·못 읽으면 '모름') · 2~3열 = 백업 판단 합계(예전 2~5 병합 · 6열 'Clone N' 은 이 합계에 흡수). 방식 색은 `vmXlsxStyle.METHOD_LOOK` 하나(키 = `METHOD_TEXT` — 테스트 대조) · 웹 미리보기 `exportPreviewText` 의 `m-*` 와 한 쌍(vmExcel2801 ⑥).
   · v2.814: Detail 응답 VM 에 `gb`(디스크 사용 GB — `backupStatus.gbOf`: 0 이상 유한수·1자리·모르면 null) · 웹 `backupViewText.fmtGb`·`methodGbTotals`·트리 agg `gb`/`gbUnknown` — 모르는 VM 은 합에 넣지 않고 따로 센다.
+  · v2.817 EM 연결 현황: EM `hierarchyRoots` 수집(soft — 실패해도 다른 섹션 유지 · 응답 모양 추정) · `em/view.js matchVcenter` 는 host·이름 **정확 일치**만(autoBrMatch 의 앞 마디 비교를 되풀이하지 말 것) · 화면 연결 현황은 `ems` 전체(선택 EM 아님) — 회귀 `veeamEmLinks2817`.
     서머리 응답 캐시 키에도 `c${jobsRev()}`. Detail 단축키 V·C·G·N(`backupViewText.methodKeyOf` — 조합키·IME·반복·입력 칸이면 무시 · 같은 값이면 저장하지 않음).
