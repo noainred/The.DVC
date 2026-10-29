@@ -178,8 +178,14 @@ async function execute(run) {
 
 /** 세션 결과 → VM 상태(run 을 고친다). 작업 목록을 읽었는데 그 VM 이 없으면 세션 전체 결과로 단정하지 않는다. */
 export function applySession(run, sessionId, s) {
-  for (const v of run.vms.filter((x) => x.sessionId === sessionId && !FINAL.has(x.state))) {
-    const t = (s.tasks || []).find((x) => (x.objectId && x.objectId === v.objectId) || (x.name && x.name === v.name));
+  // 이 세션이 VM 하나만 담았나(복원·VM 별 Quick) — 그러면 세션 결과가 곧 그 VM 의 결과다. 작업 목록에 그 이름이 없어도(복원 작업은 새 VM 이름으로
+  //   적힐 수 있다 · 작업이 없는 세션 종류) '확인 불가' 로 두지 않는다(v2.820.1 B5). 여러 VM 세션은 지금처럼 단정하지 않는다.
+  const members = run.vms.filter((x) => x.sessionId === sessionId);
+  const sess = (run.groups || []).flatMap((g) => g.sessions || []).find((x) => x.id === sessionId);
+  const dedicated = members.length === 1 && (!sess || (Array.isArray(sess.objectIds) && sess.objectIds.length <= 1));
+  for (const v of members.filter((x) => !FINAL.has(x.state))) {
+    const t = (s.tasks || []).find((x) => (x.objectId && x.objectId === v.objectId) || (x.name && (x.name === v.name || (v.restore?.newName && x.name === v.restore.newName))))
+      || (dedicated && (s.tasks || []).length === 1 ? s.tasks[0] : null);
     if (t) {
       v.progress = t.progress;
       const st = vmState(t.result);
@@ -190,6 +196,7 @@ export function applySession(run, sessionId, s) {
     if (s.finished) {
       const st = vmState(s.result);
       if (s.progress != null) v.progress = s.progress;
+      if (st && dedicated) { v.state = st; v.detail = `세션 결과(이 VM 만 담은 세션${!s.tasksKnown && s.tasksError ? ` · VM 별 작업은 읽지 못함 — ${s.tasksError}` : ''})${s.message ? ` — ${s.message}` : ''}`; continue; }
       if (st && !s.tasksKnown) { v.state = st; v.detail = `세션 전체 결과(VM 별 결과는 읽지 못함${s.tasksError ? ` — ${s.tasksError}` : ''})${s.message ? ` — ${s.message}` : ''}`; }
       else { v.state = 'unknown'; v.detail = s.tasksKnown ? '세션은 끝났지만 이 VM 의 작업 기록이 없습니다.' : '세션은 끝났지만 결과를 읽지 못했습니다.'; }
     } else if (s.progress != null) v.progress = s.progress;   // 최신 값으로(처음 값에 고정하면 끝난 VM 이 0% 로 남는다 — 2026-10-29 현장 기록)

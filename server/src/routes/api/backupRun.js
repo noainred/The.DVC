@@ -203,6 +203,8 @@ api.get('/tools/backup-run/settings', toolsPerm, adminOnly, fullScopeOnly, (_req
 });
 
 api.put('/tools/backup-run/settings', toolsPerm, adminOnly, fullScopeOnly, reauth, (req, res) => {
+  // 등록부를 못 읽으면 화면의 서버 목록이 비어 servers:{} 가 온다 — 그대로 저장하면 서버별 저장소·보존이 전부 지워진다(v2.820.1 B3).
+  if (registryLoadError()) return res.status(503).json({ ok: false, registryUnreadable: true, reason: 'Veeam 서버 등록부를 읽지 못해 설정을 저장하지 않았습니다(서버별 저장소·보존이 지워지지 않게) — 설정 › Veeam 백업 서버에서 먼저 확인하세요.' });
   const { otp, ...input } = req.body && typeof req.body === 'object' ? req.body : {};
   void otp;
   const r = saveRunSettings(input);

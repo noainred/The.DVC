@@ -56,7 +56,9 @@ export function runStatusOf(vm, { servers = [], known = false, entry } = {}) {
   const names = new Set((Array.isArray(entry.servers) ? entry.servers : []).map(lc));
   const owner = servers.find((s) => names.has(lc(s.name))) || null;
   const base = { objectId, restorePoints: rp, lastBackup: lb, jobs, running: entry.run === 1 };
-  if ((rp != null && rp > 0) || lb != null) {
+  // rp -1 = '복원 지점 있음(개수 모름)'(모니터링 코어 veeam/parse.js 의 표기 — 증거 판정도 rp !== 0). rp > 0 만 보면 그 VM 을 미보호로 보고
+  //   기본 설정(미보호 → 포탈 전용 잡)이 이미 백업된 VM 을 포탈 잡에 또 넣는다(v2.820.1 B1).
+  if ((rp != null && rp !== 0) || lb != null) {
     if (!owner) return { status: 'elsewhere', ...base, reason: '백업 기록은 있지만 그 Veeam 서버가 B&R 로 등록돼 있지 않아(EM 으로만 보임 등) 어느 서버에 보낼지 모릅니다.' };
     return { status: 'protected', ...base, serverId: owner.id, serverName: owner.name };
   }
