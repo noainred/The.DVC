@@ -115,7 +115,7 @@ export function candidateSummary(c) {
 }
 
 /** Director 에 1회 넣을 사전 준비 블록(설정 화면 복사용). */
-export function directorPrepBlock({ defaults = {}, consoleName = 'portal', anyClient = 'kr-fd', anyPool = 'VMwarePool' } = {}) {
+export function directorPrepBlock({ defaults = {}, consoleName = 'portal', anyClient = 'kr-fd', anyStorage = 'File', anyPool = 'VMwarePool' } = {}) {
   const fs = defaults.fileSet || 'PortalVmwareGeneric';
   const jd = defaults.jobDefs || 'PortalVmwareDefaults';
   const rj = defaults.restoreJob || 'PortalVmwareRestore';
@@ -142,6 +142,7 @@ export function directorPrepBlock({ defaults = {}, consoleName = 'portal', anyCl
     `  Type = Restore`,
     `  FileSet = "${fs}"`,
     `  Client = ${anyClient}`,
+    `  Storage = ${anyStorage}`,
     `  Pool = ${anyPool}`,
     `  Where = /`,
     `  Messages = Standard`,
@@ -233,4 +234,28 @@ export function diagView(st) {
   if (!st || st.skipped) return { mark: '시도 안 함', cls: 'gray', ms: '' };
   const ms = Number.isFinite(st.ms) && st.ms >= 0 ? `${st.ms < 1000 ? `${Math.round(st.ms)}ms` : `${(st.ms / 1000).toFixed(1)}초`}` : '';
   return st.ok ? { mark: '✓ 통과', cls: 'green', ms } : { mark: '✗ 실패', cls: 'red', ms };
+}
+
+/* ───────── 자동 설정(v2.821 — 서버 bareos/autoSetup.js) ───────── */
+const FILE_ACTION_LABEL = Object.freeze({ created: '새로 만듦', updated: '덮어씀(포탈 파일)', unchanged: '그대로' });
+
+/** Director 자동 설정 성공 요약(한 줄). */
+export function autoSetupDirectorText(r) {
+  if (!r) return '';
+  const files = (r.files || []).map((f) => `${f.path}(${FILE_ACTION_LABEL[f.action] || f.action || '—'})`).join(' · ');
+  const ver = r.probe?.version ? ` ${r.probe.version}` : '';
+  return `**Director 자동 설정 완료** — 새 콘솔 ‘${r.settings?.director?.consoleName || '—'}’ 로 접속 확인(Director${ver}) · 포탈 설정을 이 콘솔로 바꿨습니다. 파일: ${files || '—'}`;
+}
+
+/** FD INI 자동 설정 성공 요약(한 줄). 플러그인 패키지 판정은 참고값이다(rpm·dpkg 조회). */
+export function autoSetupFdText(r) {
+  if (!r) return '';
+  const pk = r.plugin === 'installed' ? '플러그인 패키지 설치됨' : '플러그인 패키지를 찾지 못했습니다(bareos-vmware-plugin 설치 확인)';
+  return `**FD INI 자동 설정 완료** — ${r.path || '—'}(${FILE_ACTION_LABEL[r.action] || r.action || '—'} · bareos 소유 0600) · ${pk}${r.note ? ` · ${r.note}` : ''}`;
+}
+
+/** 지문 읽기 결과(관리자가 vCenter 화면 값과 대조할 수 있게 주체·만료를 함께). */
+export function thumbprintText(r) {
+  if (!r?.thumbprint) return '';
+  return `FD 에서 읽은 ${r.vcserver || '—'}:443 인증서 — SHA1 **${r.thumbprint}** · ${r.subject || '주체 —'} · 만료 ${r.notAfter || '—'}. vCenter 화면(또는 브라우저 인증서 정보)의 값과 같은지 확인한 뒤 실행하세요.`;
 }
