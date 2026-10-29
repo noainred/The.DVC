@@ -21,7 +21,7 @@ import { reauth } from './reauth.js';
 import { veeamMatchFor } from './veeam.js';
 import { runStatusOf, planBackup, portalJobName, veeamHostFor } from '../../veeam/run/plan.js';
 import { getRunSettings, saveRunSettings, settingsLoadError, serverRunSettings } from '../../veeam/run/settings.js';
-import { startRun, listRuns, getRun, activeRunFor } from '../../veeam/run/runs.js';
+import { startRun, listRuns, getRun, activeRunFor, closeRun } from '../../veeam/run/runs.js';
 import { dispatchOp, authStopOf } from '../../veeam/run/dispatch.js';
 import { pendingView } from '../../veeam/run/edgeOps.js';
 
@@ -170,6 +170,22 @@ api.get('/tools/backup-run/runs/:id', toolsPerm, adminOnly, (req, res) => {
   const run = getRun(String(req.params.id));
   if (!run || !runVisible(run, allowed)) return res.status(404).json({ ok: false, reason: '실행 기록을 찾을 수 없습니다.' });
   res.json({ ok: true, run });
+});
+
+/**
+ * 실행 기록 닫기(재인증 + 감사) — 세션 추적이 계속 실패해 그 서버의 새 실행이 시한까지 막힐 때의 탈출구(2차 반증 N3).
+ * 포탈 기록만 닫는다(끝나지 않은 VM 은 확인 불가) — Veeam 의 세션·잡은 멈추지 않는다. 조회 밖 404 → 쓰기 밖 403.
+ */
+api.post('/tools/backup-run/runs/:id/close', toolsPerm, adminOnly, reauth, (req, res) => {
+  const snap = store.get();
+  const allowed = scopedVcenterIds(req.user, snap);
+  const run = getRun(String(req.params.id));
+  if (!run || !runVisible(run, allowed)) return res.status(404).json({ ok: false, reason: '실행 기록을 찾을 수 없습니다.' });
+  if (run.vms.some((v) => !inUserWriteScope(req.user, snap, v.vcenterId))) return res.status(403).json({ ok: false, reason: '조회 전용 범위의 VM 이 들어 있는 실행은 닫을 수 없습니다.' });
+  const r = closeRun(run.id, { user: req.user?.username || '' });
+  if (!r.ok) return res.status(r.status).json({ ok: false, reason: r.reason || '닫지 못했습니다.' });
+  logAudit({ user: req.user?.username, action: 'Veeam 백업 실행 기록 닫기', target: run.id, detail: `VM ${run.vms.length} — 확인 불가 ${r.run.summary?.unknown ?? 0}`, ip: req.ip });
+  res.json({ ok: true, run: r.run });
 });
 
 /** 설정 — 잡 접두·서버별 저장소·보존·vCenter 이름. 서버·vCenter 목록(비밀 없음)과 엣지 대기 작업 수를 함께. */

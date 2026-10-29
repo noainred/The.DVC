@@ -87,9 +87,10 @@ export function planBackup(items, { mode = 'quick', unprotected = 'portal' } = {
   const groups = new Map();
   for (const v of vms) {
     if (v.how === 'skip') continue;
-    // 포탈 전용 잡은 vCenter 마다 하나 — 그룹 키에 vCenter 를 넣는다. Quick Backup 은 서버 단위로 한 번에.
-    const key = v.how === 'portal' ? `${v.serverId}|portal|${v.vcenterId}` : `${v.serverId}|quick`;
-    const g = groups.get(key) || { serverId: v.serverId, serverName: v.serverName, kind: v.how, ...(v.how === 'portal' ? { vcenterId: v.vcenterId } : {}), refs: [] };
+    // 포탈 전용 잡은 vCenter 마다 하나.
+    // 그룹은 서버×방식×vCenter — moref 는 vCenter 안에서만 유일하다(두 vCenter 의 vm-100 이 한 요청에 섞이면 세션을 엉뚱한 VM 에 붙인다 — 2차 반증 R-A).
+    const key = `${v.serverId}|${v.how}|${v.vcenterId}`;
+    const g = groups.get(key) || { serverId: v.serverId, serverName: v.serverName, kind: v.how, vcenterId: v.vcenterId, refs: [] };
     g.refs.push({ vmId: v.vmId, name: v.name, hostName: v.hostName, objectId: v.objectId });
     groups.set(key, g);
   }

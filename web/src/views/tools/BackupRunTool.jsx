@@ -128,7 +128,7 @@ function VmPanel({ vcId, initialIds }) {
         )) : <span className="muted">이 vCenter 를 맡는 Veeam B&amp;R 서버가 없습니다 — 설정 › Veeam 백업 서버에서 연결 vCenter 를 지정하세요.</span>}
         <span className="muted" style={{ flexBasis: '100%', fontSize: 12, overflowWrap: 'anywhere' }}>
           Veeam 이 이 vCenter 를 부르는 이름: <b className="mono">{d.hostName?.name || '—'}</b> ({HOST_HOW[d.hostName?.how || ''] || '모름'}) · 포탈 전용 잡 이름: <span className="mono">{d.jobName}</span>
-          {!d.known && d.servers.length ? ' · 이 vCenter 의 Veeam 결과를 아직 다 읽지 못해 보호 상태를 모릅니다(포탈 전용 잡 방식만 보낼 수 있습니다).' : ''}
+          {!d.known && d.servers.length ? ' · 이 vCenter 의 Veeam 결과를 다 읽지 못했거나 오래돼 보호 상태를 모릅니다 — 확인 불가 VM 은 어느 방식으로도 보내지 않습니다(Veeam 수집이 다시 성공하면 풀립니다).' : ''}
         </span>
       </div>
 
@@ -282,6 +282,7 @@ function RunDetail({ run }) {
           {(g.sessions || []).filter((s) => s.lastError).map((s) => <div key={s.id} style={{ color: 'var(--amber)' }}>세션 {s.id} 확인 실패: {s.lastError}</div>)}
         </div>
       ))}
+      {run.status === 'running' && !(run.vms || []).some((v) => v.state === 'starting' || v.state === 'queued') ? <CloseRun run={run} /> : null}
       <STable className="table" minWidth={680}>
         <thead><tr><th>VM</th><th>방식</th><th>상태</th><th>진행</th><th>내용</th></tr></thead>
         <tbody>
@@ -297,6 +298,27 @@ function RunDetail({ run }) {
           })}
         </tbody>
       </STable>
+    </div>
+  );
+}
+
+/** 기록 닫기 — 세션 추적이 계속 실패해 그 서버의 새 요청이 막힐 때. 포탈 기록만 닫는다(Veeam 은 멈추지 않는다). */
+function CloseRun({ run }) {
+  const [otp, setOtp] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState('');
+  const close = async () => {
+    setBusy(true); setMsg('');
+    try { const r = await postJson(`/tools/backup-run/runs/${encodeURIComponent(run.id)}/close`, { otp }); setMsg(r.ok ? '닫았습니다 — 다음 새로 고침에 반영됩니다.' : (r.reason || '닫지 못했습니다.')); if (r.ok) setOtp(''); }
+    catch (e) { setMsg(e?.status === 403 ? '권한이 없습니다(조회 전용 범위 또는 재인증 실패).' : String(e?.message || e)); }
+    finally { setBusy(false); }
+  };
+  return (
+    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center', fontSize: 12, minWidth: 0 }}>
+      <span className="muted" style={{ flex: '1 1 260px', minWidth: 0, overflowWrap: 'anywhere' }}>세션 확인이 계속 실패하면 이 Veeam 서버의 새 요청이 막힙니다. 기록을 닫으면 끝나지 않은 VM 은 확인 불가가 됩니다(Veeam 의 백업은 멈추지 않습니다).</span>
+      <input className="input" inputMode="numeric" autoComplete="one-time-code" value={otp} onChange={(e) => setOtp(e.target.value.replace(/\D/g, '').slice(0, 8))} placeholder="OTP" aria-label="기록 닫기 OTP" style={{ width: 100 }} />
+      <button type="button" className="logout-btn" disabled={busy} onClick={close}>{busy ? '닫는 중…' : '기록 닫기'}</button>
+      {msg ? <span style={{ overflowWrap: 'anywhere', minWidth: 0 }}>{msg}</span> : null}
     </div>
   );
 }

@@ -28,7 +28,7 @@ export default function VeeamHeader({ active, desc, actions }) {
           const on = k === active;
           return (
             <a key={k} role="tab" aria-selected={on} href={href}
-              style={{ flex: '0 0 auto', minWidth: 84, minHeight: 40, whiteSpace: 'nowrap', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', padding: '0 18px', marginBottom: -1, textDecoration: 'none', fontSize: 15, fontWeight: on ? 800 : 600, color: on ? 'var(--text)' : 'var(--text-dim)', borderBottom: `3px solid ${on ? 'var(--accent)' : 'transparent'}` }}>
+              style={{ flex: '0 0 auto', minWidth: 'min(84px, 18vw)', minHeight: 40, whiteSpace: 'nowrap', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', padding: '0 clamp(10px, 2vw, 18px)', marginBottom: -1, textDecoration: 'none', fontSize: 15, fontWeight: on ? 800 : 600, color: on ? 'var(--text)' : 'var(--text-dim)', borderBottom: `3px solid ${on ? 'var(--accent)' : 'transparent'}` }}>
               {label}
             </a>
           );

@@ -13,3 +13,7 @@
 - 결과는 항상 `run/parse.js` sanitize 를 지난다(중앙 직접·엣지 회신 둘 다). 새 필드는 sanitize 에도 넣는다.
 - '확인 불가'(unknown)·'보내지 않음'(skipped)은 성공도 실패도 아니다. 보호 상태를 모르면 '미보호' 로 단정하지 않는다
   (`routes/api/veeam.js veeamMatchFor` — 그 vCenter 의 B&R 서버 결과가 **전부** 있을 때만 known).
+- **재시작 복구는 실행 기록 파일을 처음 읽을 때만**(`runs.js load`) — 기동 뒤 타이머에서 복구하면 그 사이 이 프로세스가 시작한 살아 있는 실행을 닫아
+  409 가드가 풀린다(2차 반증 N1). 진행 중 실행은 기록 상한(100)으로 잘라 내지 않는다. 추적이 막히면 '기록 닫기'(OTP·감사)로 포탈 기록만 닫는다(N3).
+- **상태 변경 요청이 2xx 를 받았으면 그 뒤 예외는 실패가 아니다**(`run/client.js call` — 본문 끊김·비JSON 은 json null, N2). Quick Backup 후보 C 는 VM 마다 독립(N5).
+- 백업 실행용 '보호 상태를 안다' 는 B&R 결과가 **전부 있고 신선할 때만**(`veeamMatchFor` — `resultMaxAgeMs`, N4). 인증 정지는 저장소 조회에도 적용한다.

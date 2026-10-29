@@ -23,6 +23,7 @@ import { getServerWithSecret } from '../registry.js';
 import { dispatchOp } from './dispatch.js';
 import { serverRunSettings, getRunSettings } from './settings.js';
 import { portalJobName } from './plan.js';
+import { poolRun } from '../../util/pool.js';
 
 const FILE_NAME = 'veeam-backup-runs.json';
 registerStateFile(FILE_NAME);
@@ -30,6 +31,7 @@ const FILE = () => path.join(config.configDir, FILE_NAME);
 const MAX_RUNS = 100;
 export const TRACK_MS = clampIntervalMs(Number(process.env.VEEAM_RUN_TRACK_MS) || 20_000, 20_000, 5_000);
 export const RUN_DEADLINE_MS = clampIntervalMs(Number(process.env.VEEAM_RUN_DEADLINE_MS) || 24 * 3_600_000, 24 * 3_600_000, 60_000);
+const TRACK_CONCURRENCY = 4;
 const FINAL = new Set(['success', 'warning', 'failed', 'skipped', 'unknown']);
 
 let _runs = null;
@@ -44,10 +46,17 @@ function load() {
     const raw = JSON.parse(fs.readFileSync(FILE(), 'utf8'));
     _runs = Array.isArray(raw?.runs) ? raw.runs.filter((r) => r && typeof r === 'object' && typeof r.id === 'string' && Array.isArray(r.vms) && Array.isArray(r.groups)) : [];
   } catch (e) { preserveCorrupt(FILE(), e?.message); _runs = []; }   // 손상 원본은 보존(감사 근거)하고 빈 기록으로 시작
+  // 파일에서 읽은 실행은 **이전 프로세스의 것**이다 — 읽는 이 순간(동기)에만 복구한다. 기동 뒤 타이머에서 복구하면
+  // 그 사이 이 프로세스가 시작한 살아 있는 실행까지 '재시작으로 끊김' 으로 닫는다(2차 반증 N1 — 이중 실행 문이 열린다).
+  if (recoverRuns(_runs)) persist();
   return _runs;
 }
+/** 상한 — 끝난 실행부터 오래된 순으로 버린다(진행 중 실행을 잘라 내면 추적·409 가드가 사라진다). */
+function trim(runs) {
+  for (let i = runs.length - 1; runs.length > MAX_RUNS && i >= 0; i--) if (runs[i].status !== 'running') runs.splice(i, 1);
+}
 function persist() {
-  try { atomicWriteFileSync(FILE(), JSON.stringify({ version: 1, runs: load().slice(0, MAX_RUNS) }), { mode: 0o600 }); }
+  try { atomicWriteFileSync(FILE(), JSON.stringify({ version: 1, runs: load() }), { mode: 0o600 }); }
   catch (e) { console.warn(`[veeam-run] 실행 기록 저장 실패: ${e?.message || e}`); }
 }
 
@@ -92,7 +101,7 @@ export function startRun(plan, { user = '', vcById = new Map(), mode = 'quick' }
     })),
   };
   runs.unshift(run);
-  if (runs.length > MAX_RUNS) runs.length = MAX_RUNS;
+  trim(runs);
   settle(run);
   persist();
   if (run.status === 'running') execute(run).catch((e) => console.warn(`[veeam-run] 실행 ${run.id} 오류: ${e?.message || e}`));
@@ -102,7 +111,7 @@ export function startRun(plan, { user = '', vcById = new Map(), mode = 'quick' }
 async function execute(run) {
   for (const g of run.groups) {
     const server = getServerWithSecret(g.serverId);
-    const mine = run.vms.filter((v) => v.serverId === g.serverId && v.how === g.kind && (g.kind !== 'portal' || v.vcenterId === g.vcenterId));
+    const mine = run.vms.filter((v) => v.serverId === g.serverId && v.how === g.kind && (!g.vcenterId || v.vcenterId === g.vcenterId));
     const refs = mine.map((v) => ({ name: v.name, objectId: v.objectId, hostName: v.hostName }));
     g.state = 'starting';
     for (const v of mine) v.state = 'starting';
@@ -114,12 +123,17 @@ async function execute(run) {
     if (r.jobId) g.jobId = r.jobId;
     if (r.ok) {
       g.state = 'running';
-      g.sessions = (r.sessions || []).map((s) => ({ id: s.id, objectIds: s.objectIds, finished: !s.id, result: '', state: '' }));
+      g.sessions = (r.sessions || []).map((s) => ({ id: s.id, objectIds: s.objectIds, finished: !s.id, result: '', state: '', ...(s.unknown ? { unknown: true } : {}) }));
       for (const v of mine) {
         // 다른 VM 의 세션에 붙이지 않는다 — 그 VM 을 담은 세션이 없으면(VM 별 요청 중 이 VM 만 거절) 실패다.
         const s = g.sessions.find((x) => x.objectIds.includes(v.objectId));
         if (!s) { v.state = 'failed'; v.detail = (r.notes || []).find((n) => n.startsWith(`${v.name}:`)) || 'Veeam 이 이 VM 의 요청을 거절했습니다.'; continue; }
-        if (!s.id) { v.state = 'unknown'; v.detail = 'Veeam 이 요청을 받았지만 세션 id 를 확인하지 못했습니다 — 결과는 Veeam 콘솔에서 확인하세요.'; continue; }
+        if (!s.id) {
+          v.state = 'unknown';
+          v.detail = s.unknown ? (r.notes || []).find((n) => n.startsWith(`${v.name}:`)) || '응답을 받지 못해 Veeam 이 시작했는지 알 수 없습니다 — 포탈은 다시 보내지 않습니다. Veeam 콘솔에서 확인하세요.'
+            : 'Veeam 이 요청을 받았지만 세션 id 를 확인하지 못했습니다 — 결과는 Veeam 콘솔에서 확인하세요.';
+          continue;
+        }
         v.state = 'running'; v.sessionId = s.id;
         v.detail = g.kind === 'portal' ? `포탈 전용 잡 '${g.jobName}'${r.created ? '(새로 만듦)' : ''}` : 'Quick Backup';
       }
@@ -173,14 +187,15 @@ export async function trackOnce(now = Date.now()) {
         for (const s of g.sessions) if (!s.finished && s.id) { const a = byServer.get(g.serverId) || []; a.push({ run, g, s }); byServer.set(g.serverId, a); }
       }
     }
-    for (const [serverId, list] of byServer) {
+    // 서버마다 병렬(동시 4) — 꺼진 엣지 하나의 회신 시한이 다른 서버의 추적을 늦추지 않게(2차 반증 N8).
+    await poolRun([...byServer], TRACK_CONCURRENCY, async ([serverId, list]) => {
       const server = getServerWithSecret(serverId);
       if (!server) {
         for (const { run, s } of list) { s.finished = true; for (const v of run.vms) if (v.sessionId === s.id && !FINAL.has(v.state)) { v.state = 'unknown'; v.detail = 'Veeam 서버 등록이 삭제돼 결과를 읽을 수 없습니다.'; } }
-        changed = true; continue;
+        changed = true; return;
       }
       const r = await dispatchOp(server, 'sessions', { sessionIds: list.slice(0, 50).map((x) => x.s.id) });
-      if (!r.ok) { for (const { s } of list) { s.lastError = String(r.reason || '').slice(0, 300); s.lastErrorAt = Date.now(); } changed = true; continue; }
+      if (!r.ok) { for (const { s } of list) { s.lastError = String(r.reason || '').slice(0, 300); s.lastErrorAt = Date.now(); } changed = true; return; }
       const got = new Map((r.sessions || []).map((x) => [x.id, x]));
       for (const { run, s } of list) {
         const x = got.get(s.id);
@@ -191,7 +206,7 @@ export async function trackOnce(now = Date.now()) {
         applySession(run, s.id, x);
         changed = true;
       }
-    }
+    });
     for (const run of load().filter((r) => r.status === 'running')) {
       for (const g of run.groups) if (g.state === 'running' && g.sessions.every((s) => s.finished || !s.id)) g.state = 'done';
       settle(run);
@@ -203,10 +218,10 @@ export async function trackOnce(now = Date.now()) {
   return { ok: true };
 }
 
-/** 재시작 직후 — 보내던 중(starting) VM 은 Veeam 이 받았는지 모른다: 다시 보내지 않고 확인 불가로 닫는다. 세션을 받은 VM 은 추적을 잇는다. */
-export function recoverInterrupted() {
+/** 재시작 직후(파일을 처음 읽을 때만) — 보내던 중(starting) VM 은 Veeam 이 받았는지 모른다: 다시 보내지 않고 확인 불가로 닫는다. 세션을 받은 VM 은 추적을 잇는다. */
+function recoverRuns(runs) {
   let n = 0;
-  for (const run of load().filter((r) => r.status === 'running')) {
+  for (const run of runs.filter((r) => r.status === 'running')) {
     for (const g of run.groups) if (g.state === 'starting' || g.state === 'queued') { g.state = 'failed'; g.reason = '포탈이 재시작돼 요청이 끊겼습니다.'; }
     for (const v of run.vms) {
       if (v.state === 'starting') { v.state = 'unknown'; v.detail = '요청을 보내는 중에 포탈이 재시작했습니다 — Veeam 이 받았는지 알 수 없습니다(다시 보내지 않았습니다). Veeam 콘솔에서 확인하세요.'; n++; }
@@ -214,14 +229,31 @@ export function recoverInterrupted() {
     }
     settle(run);
   }
-  if (n) persist();
   return n;
+}
+
+/**
+ * 관리자가 실행을 닫는다(2차 반증 N3 — 세션 추적이 계속 실패하면 그 서버의 새 실행이 시한까지 409 로 막힌다).
+ * 끝나지 않은 VM 은 '확인 불가' — 포탈 기록만 닫는다. Veeam 의 세션·잡은 멈추지 않는다.
+ */
+export function closeRun(id, { user = '' } = {}) {
+  const run = getRun(id);
+  if (!run) return { ok: false, status: 404 };
+  if (run.status !== 'running') return { ok: false, status: 409, reason: '이미 끝난 실행입니다.' };
+  if (run.vms.some((v) => v.state === 'starting' || v.state === 'queued')) return { ok: false, status: 409, reason: '아직 Veeam 에 보내는 중인 VM 이 있습니다 — 요청이 끝난 뒤 닫을 수 있습니다.' };
+  const who = String(user).slice(0, 64);
+  for (const v of run.vms) if (!FINAL.has(v.state)) { v.state = 'unknown'; v.detail = `관리자(${who})가 실행 기록을 닫았습니다 — 포탈은 더 추적하지 않습니다. 결과는 Veeam 콘솔에서 확인하세요.`; }
+  for (const g of run.groups) { if (g.state === 'running') g.state = 'done'; for (const s of g.sessions) s.finished = true; }
+  run.closedBy = who;
+  settle(run);
+  persist();
+  return { ok: true, run };
 }
 
 export function startVeeamRunTracker() {
   if (config.agent.centralUrl) return; // 엣지 노드 — 실행 기록은 중앙만
   if (_timer) return;
-  try { recoverInterrupted(); } catch (e) { console.warn(`[veeam-run] 실행 기록 복구 실패: ${e?.message || e}`); }
+  load();   // 재시작 복구는 첫 읽기에서(위 load 주석)
   _timer = setInterval(() => { trackOnce().catch((e) => console.warn(`[veeam-run] 세션 추적 실패: ${e?.message || e}`)); }, TRACK_MS);
   _timer.unref?.();
 }

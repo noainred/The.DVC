@@ -666,7 +666,11 @@ export function veeamMatchFor(vc, vms, req) {
   if (!brCount) return { known: false, match: null, views: [], host: '', results: 0 };
   const r = resultsFor(vc.id, req);
   const brIds = new Set(serversForVcenter(vc.id).map((d) => d.id));
-  const br = r.results.filter((x) => x.server?.src !== 'em' && brIds.has(x.server?.id));
+  // 백업 실행 판정용 — 결과가 있어도 **오래됐으면 모름**이다(2차 반증 N4: 며칠 실패한 서버의 마지막 성공분으로 '미보호' 를 단정하면
+  //   그 사이 사람이 잡에 넣은 VM 이 포탈 전용 잡에도 들어간다). 시한은 화면의 '백업 중' 신선도와 같은 식(resultMaxAgeMs).
+  const now = Date.now();
+  const fresh = (x) => { const rec = getRecord(x.server.id); const ts = Number(x.result?.ts); return ts > 0 && now - ts <= resultMaxAgeMs(rec?.via, rec?.agent); };
+  const br = r.results.filter((x) => x.server?.src !== 'em' && brIds.has(x.server?.id) && fresh(x));
   const known = br.length >= brCount && Array.isArray(vms) && vms.length > 0;
   const match = known ? matchToVcenter({ id: vc.id, host: r.host }, vms, r.results, { otherHosts: r.otherHosts }) : null;
   return { known, match, views: r.views, host: r.host, results: br.length };

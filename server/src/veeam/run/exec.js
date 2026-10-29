@@ -75,19 +75,25 @@ export async function opQuickBackup(server, { vms = [], deadlineAt = 0, signal, 
         notes.push(`${variant} 거절 — ${reasonOf(e).slice(0, 200)}`);
       }
     }
-    const sessions = []; const fails = [];
+    // C 는 VM 마다 독립 요청이다 — 한 VM 의 거절·모름이 다른 VM 의 요청이나 이미 받은 세션을 버리게 하지 않는다(2차 반증 N5·N8).
+    //   400 은 '모양을 모른다' 와 'VM 사유(전체 복원 지점 없음 등)' 를 구별할 수 없다 — 전부 거절일 때 두 가능성을 함께 말한다.
+    const sessions = []; const fails = []; let shapeFails = 0;
     for (const ref of refs) {
-      if (expired(deadlineAt)) { fails.push(`${ref.name || ref.objectId}: 시한이 지나 보내지 않음`); continue; }
+      const label = ref.name || ref.objectId;
+      if (expired(deadlineAt)) { fails.push(`${label}: 시한이 지나 보내지 않음`); continue; }
       try {
         const { json } = await c.call('POST', QUICK_PATH, { body: ref });
         sessions.push({ id: sessionIdOf(json), objectIds: [ref.objectId] });
       } catch (e) {
-        if (shapeMiss(e) && !sessions.length && !fails.length) return { ok: false, reason: `Quick Backup 요청 모양을 서버가 받지 않았습니다(후보 3개 모두 거절) — ${reasonOf(e).slice(0, 300)}`, notes, variant: 'C:per-vm' };
-        if (outcomeUnknown(e)) return { ...changeFail(e, `Quick Backup 요청(${ref.name || ref.objectId})`), variant: 'C:per-vm', sessions, notes: [...notes, ...fails] };
-        fails.push(`${ref.name || ref.objectId}: ${reasonOf(e).slice(0, 200)}`);
+        if (outcomeUnknown(e)) { sessions.push({ id: '', objectIds: [ref.objectId], unknown: true }); notes.push(`${label}: 응답을 받지 못했습니다(${reasonOf(e).slice(0, 160)}) — Veeam 이 시작했는지 알 수 없습니다.`); continue; }
+        if (shapeMiss(e)) shapeFails++;
+        fails.push(`${label}: ${reasonOf(e).slice(0, 200)}`);
       }
     }
-    return { ok: sessions.length > 0, variant: 'C:per-vm', sessions, notes: [...notes, ...fails], ...(sessions.length ? {} : { reason: fails.join(' · ') }) };
+    const reason = !sessions.length && shapeFails === refs.length
+      ? `Quick Backup 요청을 서버가 모두 거절했습니다(후보 3개) — 요청 모양을 모르거나 VM 이 Quick Backup 조건(전체 복원 지점)을 갖추지 못했습니다: ${fails.join(' · ').slice(0, 400)}`
+      : fails.join(' · ');
+    return { ok: sessions.length > 0, variant: 'C:per-vm', sessions, notes: [...notes, ...fails], ...(sessions.length ? {} : { reason }) };
   });
   return P.sanitizeStart(r);
 }

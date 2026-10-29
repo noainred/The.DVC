@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-10-29T07:01:32.863Z",
+  "generatedAt": "2026-10-29T07:11:03.925Z",
   "count": 115,
   "tools": [
     {
@@ -627,16 +627,16 @@
       "comingSoon": false
     },
     {
-      "k": "backup-run",
-      "adminOnly": true,
+      "k": "backup-em",
+      "adminOnly": false,
       "perm": null,
       "external": null,
       "topTab": false,
       "comingSoon": false
     },
     {
-      "k": "backup-em",
-      "adminOnly": false,
+      "k": "backup-run",
+      "adminOnly": true,
       "perm": null,
       "external": null,
       "topTab": false,

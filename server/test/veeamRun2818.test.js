@@ -153,7 +153,7 @@ test('방식 배정 · F6 포탈 잡 이름은 vCenter 마다 다르다(한글 �
     { vm: { id: 'C:vm-6', vcenterId: 'C', name: 'x' }, run: { status: 'protected', objectId: 'vm-6', ...S }, hostName: '' }];
   const q = plan.planBackup(items, { mode: 'quick', unprotected: 'portal' });
   assert.deepEqual(q.vms.map((v) => v.how), ['quick', 'portal', 'portal', 'skip', 'skip', 'skip']);
-  assert.deepEqual(q.groups.map((g) => `${g.kind}:${g.vcenterId || ''}:${g.refs.length}`).sort(), ['portal:A:1', 'portal:B:1', 'quick::1']);
+  assert.deepEqual(q.groups.map((g) => `${g.kind}:${g.vcenterId || ''}:${g.refs.length}`).sort(), ['portal:A:1', 'portal:B:1', 'quick:A:1']);   // Quick 도 vCenter 별 그룹(2차 반증 N7 — moref 는 vCenter 안에서만 유일)
   assert.deepEqual(plan.planBackup(items, { mode: 'quick', unprotected: 'skip' }).vms.map((v) => v.how), ['quick', 'skip', 'skip', 'skip', 'skip', 'skip']);
   const a = plan.portalJobName('PORTAL-', { id: 'vc-seoul', name: '서울' });
   const b = plan.portalJobName('PORTAL-', { id: 'vc-busan', name: '부산' });
@@ -253,8 +253,98 @@ test('실행: 세션 결과 반영(VM 별 작업 우선 · 목록에 없으면 �
   runs._resetForTest();
   fs.writeFileSync(path.join(CFG, 'veeam-backup-runs.json'), JSON.stringify({ version: 1, runs: [{ id: 'vbr_1', at: Date.now(), status: 'running', groups: [{ serverId: 's', kind: 'quick', state: 'starting', sessions: [] }],
     vms: [{ vmId: 'a', name: 'a', state: 'starting' }, { vmId: 'b', name: 'b', state: 'queued' }, { vmId: 'c', name: 'c', state: 'running', sessionId: 'x' }] }] }));
-  assert.equal(runs.recoverInterrupted(), 2);
+  // 복구는 파일을 처음 읽을 때(이전 프로세스의 실행) — 별도 호출 없이
   assert.deepEqual(runs.getRun('vbr_1').vms.map((v) => v.state), ['unknown', 'skipped', 'running']);
+  assert.equal(JSON.parse(fs.readFileSync(path.join(CFG, 'veeam-backup-runs.json'), 'utf8')).runs[0].vms[0].state, 'unknown');   // 복구 결과를 저장
+});
+
+/* ── 2차 반증(N1~N5) ────────────────────────────────────────────────── */
+const tick = (ms = 10) => new Promise((r) => setTimeout(r, ms));
+async function until(fn, ms = 3000) { const t0 = Date.now(); while (!fn()) { if (Date.now() - t0 > ms) throw new Error('timeout'); await tick(); } }
+
+test('N1: 이 프로세스가 시작한 실행은 tracker 기동(stagger 뒤)이 복구로 망가뜨리지 않는다 — 진행 중 유지 · 409 가드 유지', async () => {
+  const reg = await import('../src/veeam/registry.js');
+  const s = reg.saveServer({ name: 'VBR-N1', host: 'vbr-n1.corp.local', port: 9419, username: 'svc', password: 'pw', vcenterIds: ['vcN1'] });
+  const sid = s.server?.id || s.id;
+  runs._resetForTest();
+  let release; const gate = new Promise((r) => { release = r; });
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (url, init = {}) => {
+    const k = `${init.method || 'GET'} ${new URL(url).pathname}`;
+    if (k === 'POST /api/oauth2/token') return new Response(JSON.stringify({ access_token: 't' }), { status: 200 });
+    if (k === `POST ${exec.QUICK_PATH}`) { await gate; return new Response(JSON.stringify({ id: 'sess-live', state: 'Starting' }), { status: 201 }); }
+    return new Response('', { status: 200 });
+  };
+  try {
+    const run = runs.startRun({ vms: [{ vmId: 'vcN1:vm-1', name: 'x', vcenterId: 'vcN1', objectId: 'vm-1', hostName: 'vcn1', serverId: sid, serverName: 'VBR-N1', how: 'quick' }],
+      groups: [{ serverId: sid, serverName: 'VBR-N1', kind: 'quick', vcenterId: 'vcN1', refs: [] }] }, { user: 'u' });
+    await until(() => run.vms[0].state === 'starting');
+    runs.startVeeamRunTracker();   // 기동 stagger 뒤 tracker — 살아 있는 실행을 건드리면 안 된다
+    assert.equal(run.status, 'running'); assert.equal(run.vms[0].state, 'starting');
+    assert.ok(runs.activeRunFor(sid), '진행 중 409 가드 유지');
+    release();
+    await until(() => run.vms[0].state === 'running');
+    assert.equal(run.vms[0].sessionId, 'sess-live'); assert.equal(run.status, 'running');
+  } finally { globalThis.fetch = realFetch; release(); }
+});
+
+test('N2: 2xx 뒤 본문이 JSON 이 아니거나 읽기 중 끊기면 실패가 아니라 \'받았으나 세션 id 모름\'', async () => {
+  const f1 = fakeVbr({ ...TOKEN, [`POST ${exec.QUICK_PATH}`]: { status: 201, text: 'Accepted', headers: { 'content-type': 'text/plain' } } });
+  const r1 = await exec.opQuickBackup(SRV, { vms: VMS, fetchImpl: f1 });
+  assert.equal(r1.ok, true); assert.equal(r1.sessions[0].id, ''); assert.equal(f1.posts().length, 1, '다음 후보로 다시 보내지 않는다');
+  const f2 = async (url, init = {}) => {
+    const k = `${init.method || 'GET'} ${new URL(url).pathname}`;
+    if (k === 'POST /api/oauth2/token') return new Response(JSON.stringify({ access_token: 't' }), { status: 200 });
+    if (k === `POST ${exec.QUICK_PATH}`) {
+      const body = new ReadableStream({ start(c) { c.enqueue(new TextEncoder().encode('{"id":"s')); c.error(Object.assign(new TypeError('terminated'), { cause: { code: 'ECONNRESET' } })); } });
+      return new Response(body, { status: 201 });
+    }
+    return new Response('', { status: 200 });
+  };
+  const r2 = await exec.opQuickBackup(SRV, { vms: VMS, fetchImpl: f2 });
+  assert.equal(r2.ok, true); assert.equal(r2.sessions[0].id, '');
+});
+
+test('N3: 기록 닫기 — 끝나지 않은 VM 은 확인 불가 · 409 가드 해제 · 보내는 중이면 거부', () => {
+  runs._resetForTest();
+  fs.writeFileSync(path.join(CFG, 'veeam-backup-runs.json'), JSON.stringify({ version: 1, runs: [
+    { id: 'vbr_c', at: Date.now(), status: 'running', groups: [{ serverId: 'sC', kind: 'quick', state: 'running', sessions: [{ id: 'x', objectIds: ['vm-1'], finished: false }] }],
+      vms: [{ vmId: 'a', name: 'a', state: 'running', sessionId: 'x' }, { vmId: 'b', name: 'b', state: 'success', sessionId: 'x' }] },
+    { id: 'vbr_s', at: Date.now(), status: 'running', groups: [{ serverId: 'sD', kind: 'quick', state: 'running', sessions: [] }],
+      vms: [{ vmId: 'c', name: 'c', state: 'running', sessionId: 'y' }] }] }));
+  assert.ok(runs.activeRunFor('sC'));
+  const r = runs.closeRun('vbr_c', { user: 'admin1' });
+  assert.equal(r.ok, true);
+  assert.deepEqual(r.run.vms.map((v) => v.state), ['unknown', 'success']);
+  assert.equal(r.run.status, 'done'); assert.equal(runs.activeRunFor('sC'), null);
+  assert.equal(runs.closeRun('vbr_c').status, 409);
+  assert.equal(runs.closeRun('nope').status, 404);
+});
+
+test('N5·N8: 후보 C 는 VM 마다 독립 — 첫 VM 400 이어도 다음 VM 을 보내고 · 응답 없음은 그 VM 만 확인 불가(받은 세션 유지)', async () => {
+  const three = [...VMS, { name: 'erp-web', objectId: 'vm-14', hostName: 'kr-vc01.corp.local' }];
+  const f = fakeVbr({ ...TOKEN, [`POST ${exec.QUICK_PATH}`]: ({ body }) => {
+    if (body.virtualMachines || body.objects) return { status: 422, json: { message: 'shape' } };
+    if (body.objectId === 'vm-10') return { status: 400, json: { message: 'no full restore point' } };
+    if (body.objectId === 'vm-12') return 'THROW';
+    return { status: 201, json: { id: 'sess-14', state: 'Starting' } };
+  } });
+  const r = await exec.opQuickBackup(SRV, { vms: three, fetchImpl: f });
+  assert.equal(r.ok, true);
+  assert.deepEqual(r.sessions, [{ id: '', objectIds: ['vm-12'], unknown: true }, { id: 'sess-14', objectIds: ['vm-14'] }]);
+  assert.equal(f.posts().filter((c) => !c.body.virtualMachines && !c.body.objects).length, 3, 'VM 셋 다 보냈다');
+  // 전부 400 이면 두 가능성을 함께 말한다
+  const g = fakeVbr({ ...TOKEN, [`POST ${exec.QUICK_PATH}`]: { status: 400, json: { message: 'bad' } } });
+  const r2 = await exec.opQuickBackup(SRV, { vms: VMS, fetchImpl: g });
+  assert.equal(r2.ok, false); assert.match(r2.reason, /모양을 모르거나 VM 이 Quick Backup 조건/);
+});
+
+test('N8: 인증 정지 중이면 저장소 목록 조회도 보내지 않는다', async () => {
+  const s = { ...SRV, id: 'vbr-stop-repos' };
+  authGuard.markAuthStopped(s.id, s, '인증 실패');
+  const f = fakeVbr({ ...TOKEN });
+  const r = await dispatch.dispatchOp(s, 'repos', {}, { fetchImpl: f });
+  assert.equal(r.ok, false); assert.equal(r.authStopped, true); assert.equal(f.calls.length, 0);
 });
 
 /* ── 라우트 범위 ─────────────────────────────────────────────────────── */

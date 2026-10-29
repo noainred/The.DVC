@@ -34,10 +34,9 @@ export async function dispatchOp(server, kind, args = {}, { signal, fetchImpl } 
   const sanitize = SANITIZERS[kind] || ((x) => x);
   if (!server) return sanitize({ ok: false, notSent: true, reason: 'Veeam 서버 등록을 찾을 수 없습니다(삭제됨).' });
   if (server.enabled === false) return sanitize({ ok: false, notSent: true, reason: `Veeam 서버 '${server.name}' 은(는) 꺼져 있습니다(설정).` });
-  if (kind !== 'repos') {
-    const stop = authStopOf(server);
-    if (stop) return { ...sanitize({ ok: false, notSent: true, reason: `Veeam 서버 '${server.name}' 은(는) 인증 실패로 정지 중입니다(${stop.reason}) — 계정을 고치면 풀립니다. 보내지 않았습니다.` }), authStopped: true };
-  }
+  // 저장소 조회(repos)도 같은 계정으로 로그인한다 — 정지 중 반복 클릭이 계정을 잠그지 않게 예외 없이(2차 반증 N8).
+  const stop = authStopOf(server);
+  if (stop) return { ...sanitize({ ok: false, notSent: true, reason: `Veeam 서버 '${server.name}' 은(는) 인증 실패로 정지 중입니다(${stop.reason}) — 계정을 고치면 풀립니다. 보내지 않았습니다.` }), authStopped: true };
   if (server.agent) return enqueueEdgeOp(server, kind, args);
   const deadline = AbortSignal.timeout(RESULT_MS[kind] || 120_000);
   const r = await runOp(server, kind, { ...args, deadlineAt: Date.now() + (RESULT_MS[kind] || 120_000) - 5_000 }, { signal: signal ? AbortSignal.any([signal, deadline]) : deadline, fetchImpl });

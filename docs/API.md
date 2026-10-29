@@ -22,11 +22,11 @@
 
 | 항목 | 값 |
 |---|---|
-| 엔드포인트 | **1096개** |
+| 엔드포인트 | **1097개** |
 | 마운트 그룹 | 14개 |
 | 라우트 파일 | 112개 |
 | GET | 586개 |
-| POST | 342개 |
+| POST | 343개 |
 | PUT | 109개 |
 | PATCH | 2개 |
 | DELETE | 57개 |
@@ -45,7 +45,7 @@
 | [`/api/ping`](#apiping) | 14 | 네트워크 Ping 모니터링(조회=인증, 대상 관리=관리자). |
 | [`/metrics`](#metrics) | 1 | Prometheus/OTel 익스포터(선택 토큰). |
 | [`/api/v1`](#apiv1) | 10 | **외부 포탈용 공개 조회 API**(v2.562). 전용 API 키(`X-Api-Key`)로 인증하고 조회 전용이다. 상세는 [API-PUBLIC.md](API-PUBLIC.md). |
-| [`/api`](#api) | 520 | 포탈 화면이 쓰는 **주 조회·작업 API**. `authMiddleware + requireEnrolled` 뒤이고, `/tools/*` 는 `toolGate` 가 사용자별 도구 권한을 집행한다. |
+| [`/api`](#api) | 521 | 포탈 화면이 쓰는 **주 조회·작업 API**. `authMiddleware + requireEnrolled` 뒤이고, `/tools/*` 는 `toolGate` 가 사용자별 도구 권한을 집행한다. |
 | [`/dl`](#dl) | 2 | 중앙 업그레이드 소스(`versions.json` + 번들). **공개**다. |
 
 ---
@@ -781,21 +781,22 @@ Prometheus/OTel 익스포터(선택 토큰).
 | GET | `/summary` | — | [server/src/routes/api/inventory.js:151](../server/src/routes/api/inventory.js#L151) |
 | POST | `/tool-usage` | — | [server/src/routes/api/inventory.js:630](../server/src/routes/api/inventory.js#L630) |
 | GET | `/tool-usage/top` | — | [server/src/routes/api/inventory.js:626](../server/src/routes/api/inventory.js#L626) |
-| GET | `/tools/backup-detail` | 권한 `tools` | [server/src/routes/api/veeam.js:893](../server/src/routes/api/veeam.js#L893) |
-| GET | `/tools/backup-detail.csv` | 권한 `data.csv`, `tools` | [server/src/routes/api/veeam.js:965](../server/src/routes/api/veeam.js#L965) |
-| PUT | `/tools/backup-detail/marks` | 역할 `admin/operator` · 권한 `tools` | [server/src/routes/api/veeam.js:908](../server/src/routes/api/veeam.js#L908) |
-| GET | `/tools/backup-em` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/veeam.js:854](../server/src/routes/api/veeam.js#L854) |
-| GET | `/tools/backup-em/session` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/veeam.js:863](../server/src/routes/api/veeam.js#L863) |
+| GET | `/tools/backup-detail` | 권한 `tools` | [server/src/routes/api/veeam.js:897](../server/src/routes/api/veeam.js#L897) |
+| GET | `/tools/backup-detail.csv` | 권한 `data.csv`, `tools` | [server/src/routes/api/veeam.js:969](../server/src/routes/api/veeam.js#L969) |
+| PUT | `/tools/backup-detail/marks` | 역할 `admin/operator` · 권한 `tools` | [server/src/routes/api/veeam.js:912](../server/src/routes/api/veeam.js#L912) |
+| GET | `/tools/backup-em` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/veeam.js:858](../server/src/routes/api/veeam.js#L858) |
+| GET | `/tools/backup-em/session` | 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/veeam.js:867](../server/src/routes/api/veeam.js#L867) |
 | POST | `/tools/backup-run/backup` | 역할 `admin` · 권한 `tools` · `reauth` | [server/src/routes/api/backupRun.js:151](../server/src/routes/api/backupRun.js#L151) |
 | POST | `/tools/backup-run/plan` | 역할 `admin` · 권한 `tools` | [server/src/routes/api/backupRun.js:143](../server/src/routes/api/backupRun.js#L143) |
 | GET | `/tools/backup-run/runs` | 역할 `admin` · 권한 `tools` | [server/src/routes/api/backupRun.js:160](../server/src/routes/api/backupRun.js#L160) |
 | GET | `/tools/backup-run/runs/:id` | 역할 `admin` · 권한 `tools` | [server/src/routes/api/backupRun.js:168](../server/src/routes/api/backupRun.js#L168) |
-| POST | `/tools/backup-run/servers/:id/repos` | 역할 `admin` · 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/backupRun.js:199](../server/src/routes/api/backupRun.js#L199) |
-| GET | `/tools/backup-run/settings` | 역할 `admin` · 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/backupRun.js:176](../server/src/routes/api/backupRun.js#L176) |
-| PUT | `/tools/backup-run/settings` | 역할 `admin` · 권한 `tools` · `fullScopeOnly` · `reauth` | [server/src/routes/api/backupRun.js:189](../server/src/routes/api/backupRun.js#L189) |
+| POST | `/tools/backup-run/runs/:id/close` | 역할 `admin` · 권한 `tools` · `reauth` | [server/src/routes/api/backupRun.js:179](../server/src/routes/api/backupRun.js#L179) |
+| POST | `/tools/backup-run/servers/:id/repos` | 역할 `admin` · 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/backupRun.js:215](../server/src/routes/api/backupRun.js#L215) |
+| GET | `/tools/backup-run/settings` | 역할 `admin` · 권한 `tools` · `fullScopeOnly` | [server/src/routes/api/backupRun.js:192](../server/src/routes/api/backupRun.js#L192) |
+| PUT | `/tools/backup-run/settings` | 역할 `admin` · 권한 `tools` · `fullScopeOnly` · `reauth` | [server/src/routes/api/backupRun.js:205](../server/src/routes/api/backupRun.js#L205) |
 | GET | `/tools/backup-run/vms` | 역할 `admin` · 권한 `tools` | [server/src/routes/api/backupRun.js:112](../server/src/routes/api/backupRun.js#L112) |
-| GET | `/tools/backup-summary` | 권한 `tools` | [server/src/routes/api/veeam.js:840](../server/src/routes/api/veeam.js#L840) |
-| GET | `/tools/backup-summary.csv` | 권한 `data.csv`, `tools` | [server/src/routes/api/veeam.js:941](../server/src/routes/api/veeam.js#L941) |
+| GET | `/tools/backup-summary` | 권한 `tools` | [server/src/routes/api/veeam.js:844](../server/src/routes/api/veeam.js#L844) |
+| GET | `/tools/backup-summary.csv` | 권한 `data.csv`, `tools` | [server/src/routes/api/veeam.js:945](../server/src/routes/api/veeam.js#L945) |
 | GET | `/tools/bm-storage` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/bmstor.js:26](../server/src/routes/api/bmstor.js#L26) |
 | POST | `/tools/bm-storage/collect` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/bmstor.js:143](../server/src/routes/api/bmstor.js#L143) |
 | GET | `/tools/bm-storage/export.csv` | 역할 `admin` · `csvPerm` · `fullScopeOnly` | [server/src/routes/api/bmstor.js:87](../server/src/routes/api/bmstor.js#L87) |
@@ -1279,9 +1280,9 @@ Prometheus/OTel 익스포터(선택 토큰).
 | `fullScopeOnlyWith` | 9 | **전체 범위 계정만**(사유 문구를 받는 `fullScopeOnly` — v2.628 SEC2628-01 업그레이드 제어·SEC2628-05 리소스 적정성 진단 등). 범위 제한 계정은 403. |
 | `authMiddleware` | 8 | 세션 토큰 검증(`resolveTokenUser`). 대부분의 `/api/*` 는 마운트에서 이미 걸리고, 여기 보이는 것은 **라우터가 따로 건** 경우다(`/api/auth` 안의 admin 라우트 등). |
 | `guarded` | 8 | 공개 API 전용 래퍼 — 허용 목록 검사 + 스냅샷 준비 + async throw 안전 처리. 미들웨어가 아니라 핸들러를 감싼 것이다. |
+| `reauth` | 6 | 통합 계정 관리의 재인증 — 로컬 OTP 계정은 OTP, OTP 없는 계정은 설정 소유자만. |
 | `tokenFirst` | 6 | **수집 토큰 확인을 본문 해석보다 먼저** 한다(v2.741 — 토큰 없는 요청이 본문 파서·큰 본문 한도에 닿지 않게). 토큰이 없거나 틀리면 403, 수집 토큰 미설정이면 404. |
 | `express.json` | 6 | 본문 파서(대용량 JSON 한도). ⚠ 게이트가 아니다 — 이 자리에 있는 이유는 **인증보다 먼저 파싱하지 않기 위해** 라우트 단위로 붙였기 때문이다(`util/bigJsonGate.js` 규약). |
-| `reauth` | 5 | 통합 계정 관리의 재인증 — 로컬 OTP 계정은 OTP, OTP 없는 계정은 설정 소유자만. |
 | `prefsWrite` | 4 | VM 목록 내보내기 내 저장값 쓰기(v2.798) — **데모 손님 403** · 저장 키는 인증된 계정 이름(본문 값 무시) · 손상 파일이면 503 · 감사 로그. |
 | `requireEnrolled` | 4 | OTP **강제 등록 미완료 세션을 차단**한다(v2.206). 부트스트랩 admin 이 등록 전에 API 를 쓰지 못하게 하는 게이트로, 대부분의 `/api/*` 는 마운트에서 이미 걸린다 — 여기 보이는 것은 `/api/auth` 안의 admin 라우트처럼 **라우터가 따로 건** 경우다. |
 | `fleetFullScopeOnly` | 4 | **전체 범위 계정만**(통합 서버 인벤토리 변경 — v2.606 AUTHZ2606-01). 베어메탈은 귀속 전에는 법인 축이 없어 범위로 나눌 수 없고, 귀속을 바꾸는 쓰기가 읽기 범위를 넓히므로 범위 제한 계정은 403. |

@@ -88,9 +88,17 @@ export function makeRunClient(server, { signal = null, fetchImpl = fetch } = {})
     }
     const res = await raw(p, { method, headers: headers(body !== undefined ? { 'Content-Type': 'application/json' } : {}), ...(body !== undefined ? { body: JSON.stringify(body) } : {}) });
     if (!res.ok) throw new RunHttpError(`${method} ${path} ← ${await failText(res, secrets)}`, res.status);
-    const text = await readTextCapped(res, BODY_MAX, `Veeam ${path} 응답`);
+    // 상태 변경 요청은 2xx 를 받은 순간 Veeam 이 이미 받아들였다 — 그 뒤 본문 읽기가 끊기거나 JSON 이 아니어도 '실패' 로 던지지 않는다
+    // (실패로 보이면 사람이 다시 눌러 같은 백업이 두 번 돈다 — 2차 반증 N2). 본문 없이(json null) 돌려주면 호출측이 '세션 id 모름' 으로 다룬다.
+    const mutating = method !== 'GET';
+    let text = '';
+    try { text = await readTextCapped(res, BODY_MAX, `Veeam ${path} 응답`); }
+    catch (e) { if (mutating) return { status: res.status, json: null, bodyError: String(e?.message || e).slice(0, 200) }; throw e; }
     if (!text.trim()) return { status: res.status, json: null };
-    try { return { status: res.status, json: JSON.parse(text) }; } catch { throw new RunHttpError(`${method} ${path} 응답이 JSON 이 아닙니다`, res.status); }
+    try { return { status: res.status, json: JSON.parse(text) }; } catch {
+      if (mutating) return { status: res.status, json: null, bodyError: '응답이 JSON 이 아닙니다' };
+      throw new RunHttpError(`${method} ${path} 응답이 JSON 이 아닙니다`, res.status);
+    }
   }
 
   /** 목록(`{data:[…], pagination}`)을 상한까지. */

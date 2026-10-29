@@ -27,7 +27,7 @@ export function sanitizeStart(s) {
     ...common(r),
     unknown: r.unknown === true, notSent: r.notSent === true,
     // 세션 id 가 없어도 VM 이 실린 원소는 남긴다(받았지만 id 를 모름 = 확인 불가). 둘 다 비면 버린다(엣지가 보낸 잡음).
-    sessions: arr(r.sessions).slice(0, 200).map((x) => ({ id: str(obj(x).id, 64), objectIds: arr(obj(x).objectIds).slice(0, 200).map((v) => str(v, 128)).filter(Boolean) })).filter((x) => x.id || x.objectIds.length),
+    sessions: arr(r.sessions).slice(0, 200).map((x) => ({ id: str(obj(x).id, 64), objectIds: arr(obj(x).objectIds).slice(0, 200).map((v) => str(v, 128)).filter(Boolean), ...(obj(x).unknown === true ? { unknown: true } : {}) })).filter((x) => x.id || x.objectIds.length),
     jobId: str(r.jobId, 64), jobName: str(r.jobName, 128), variant: str(r.variant, 120), created: r.created === true, added: numOrNull(r.added),
   };
 }
