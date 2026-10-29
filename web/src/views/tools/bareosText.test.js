@@ -2,6 +2,8 @@ import { describe, it, expect } from 'vitest';
 import {
   stateBadge, levelLabel, bytesText, whenText, elapsedText, runCell, directorLine, restoreLine, candidateSummary,
   directorPrepBlock, fdIniTemplate, PREP_CHECKLIST, STATE_LABEL, RESTORE_MODE_LABEL, autoSetupDirectorText, autoSetupFdText, thumbprintText,
+  folderOptions, inFolder, pickCap, bulkSummary, NO_FOLDER, diagView,
+  driftText, restorePointsNote,
 } from './bareosText.js';
 
 describe('bareosText (v2.820 Bareos VM 백업)', () => {
@@ -76,6 +78,41 @@ describe('bareosText (v2.820 Bareos VM 백업)', () => {
       expect(t).not.toMatch(/`/);
       expect(t).not.toMatch(/\*\*/);
     }
+  });
+
+  it('v2.822 일괄 등록 — 폴더 목록·하위 폴더 포함 필터·폴더 없음 · 고를 수 있는 수 · 결과 한 줄', () => {
+    const items = [{ folder: '/app/web' }, { folder: '/app' }, { folder: '/db' }, { folder: null }, { folder: '/app' }];
+    expect(folderOptions(items).map((f) => f.label)).toEqual(['/app', '/app/web', '/db', '(폴더 정보 없음)']);
+    expect(items.filter((x) => inFolder(x, '/app')).length).toBe(3);
+    expect(items.filter((x) => inFolder(x, '/ap')).length).toBe(0);
+    expect(items.filter((x) => inFolder(x, NO_FOLDER)).length).toBe(1);
+    expect(items.filter((x) => inFolder(x, '')).length).toBe(5);
+    expect(pickCap({ maxBulk: 200, jobsLeft: 37 })).toBe(37);
+    expect(pickCap({ maxBulk: 200 })).toBe(200);
+    expect(pickCap(null)).toBe(0);
+    expect(bulkSummary({ created: 2, failed: 1 })).toMatch(/^2대를 .* 1대는 등록하지 못했습니다/);
+    expect(bulkSummary({ created: 0, failed: 3 })).toMatch(/한 대도/);
+    for (const t of [bulkSummary({ created: 2, failed: 1 }), folderOptions([{}])[0].label]) expect(t).not.toMatch(/`|\*\*/);
+  });
+
+  it('v2.822 연결 진단 — 시도 안 함은 실패가 아니다 · 시간 표기 · 못 읽은 시간은 비운다', () => {
+    expect(diagView({ skipped: true })).toEqual({ mark: '시도 안 함', cls: 'gray', ms: '' });
+    expect(diagView({ ok: true, ms: 12 })).toEqual({ mark: '✓ 통과', cls: 'green', ms: '12ms' });
+    expect(diagView({ ok: false, ms: 2500 }).ms).toBe('2.5초');
+    expect(diagView({ ok: false }).ms).toBe('');
+    expect(diagView({ ok: false, ms: -1 }).cls).toBe('red');
+  });
+
+  it('v2.822 drift 안내 · 복원 지점 잘림 안내(숫자는 API 값)', () => {
+    expect(driftText(null)).toBe('');
+    expect(driftText('missing')).toMatch(/찾지 못했습니다/);
+    expect(driftText(['이름', '폴더'])).toMatch(/이름·폴더이\(가\) 바뀌었습니다/);
+    for (const t of [driftText(['이름']), driftText('missing'), restorePointsNote({ items: [1, 2], scanned: 60 }, 30)]) {
+      expect(t).not.toMatch(/`|\*\*/);
+    }
+    expect(restorePointsNote({ items: Array.from({ length: 40 }, (_, i) => i), scanned: 60 }, 30)).toMatch(/40건 중 최근 30건/);
+    expect(restorePointsNote({ items: [1], scanned: 60 }, 30)).toMatch(/1건\. Director 카탈로그의 최근 실행 60건/);
+    expect(restorePointsNote({ items: [] }, 30)).toBe('성공한 백업 0건.');
   });
 });
 

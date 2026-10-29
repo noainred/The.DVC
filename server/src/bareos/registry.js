@@ -11,6 +11,7 @@
  *   missingInDirector: boolean,                         // Director `.jobs` 에 없으면 true(누가 conf 를 지웠다)
  *   restores: [ { jobid, fromJobids, mode, target, status, state, startedAt, endedAt, by, at } ],   // 최근 RESTORES_KEEP 건
  * }
+ * retired = [ { name, at, demo? } ]   // v2.822(I3): 원장에서 지운 대상의 Director 잡 이름 — 대조 틱이 다시 켜졌으면 disable 을 다시 보낸다
  *
  * 왜 원장을 두나: Bareos 에는 '이 잡이 어느 vCenter 의 어느 VM 인가' 가 없다(잡 이름만 있다). 범위(scope) 판정·트리 배지·
  *   화면은 vcenterId 가 필요하다. 원장이 손상되면 Director 의 잡은 남고 포탈만 모른다 — 그래서 손상 보존(preserveCorrupt)이
@@ -28,6 +29,7 @@ export const FILE_NAME = 'bareos-jobs.json';
 const FILE = () => path.join(config.configDir, 'bareos-jobs.json'); // 문자열 그대로 — scripts/config-doc.mjs 가 이 모양으로 파일을 찾는다
 export const MAX_JOBS = 500;
 export const RESTORES_KEEP = 20;
+export const RETIRED_KEEP = 1000;
 
 let _db = null;
 const _loadErr = makeLoadError();
@@ -38,7 +40,10 @@ function load() {
     if (fs.existsSync(FILE())) {
       const p = JSON.parse(fs.readFileSync(FILE(), 'utf8'));
       if (!p || typeof p !== 'object' || Array.isArray(p)) throw new Error('형식 오류');
-      _db = { jobs: (Array.isArray(p.jobs) ? p.jobs : []).filter((j) => j && typeof j === 'object' && typeof j.id === 'string') };
+      _db = {
+        jobs: (Array.isArray(p.jobs) ? p.jobs : []).filter((j) => j && typeof j === 'object' && typeof j.id === 'string'),
+        retired: (Array.isArray(p.retired) ? p.retired : []).filter((r) => r && typeof r.name === 'string' && r.name).slice(-RETIRED_KEEP),
+      };
       _loadErr.clear();
       return _db;
     }
@@ -48,15 +53,33 @@ function load() {
     console.warn(`[bareos] 백업 대상 원장을 읽지 못했습니다(${safeLoadText(e) || '사유 미상'}) — 손상본을 보존했습니다.`);
   }
   _loadErr.checkCorruptOnly(FILE());
-  _db = { jobs: [] };
+  _db = { jobs: [], retired: [] };
   return _db;
 }
 
 /** 원장을 읽지 못했나(손상) — 쓰기 라우트는 이 상태에서 새 잡을 만들지 않는다(빈 원장 저장이 보존본을 덮지 않게). */
 export function registryLoadError() { load(); return _loadErr.get(); }
 
+/*
+ * v2.822(검토 P2·I4 — 실측): 대조 틱이 대상마다 persist() 를 불러 500개 원장에서 한 틱에 동기 2.5초(복원 이력이 많으면 18초)를
+ *   막았다. inBatch(fn) 안의 쓰기는 끝에 **한 번만** 쓴다 — fn 은 동기여야 한다(await 를 넘어 묶으면 그 사이 라우트의 저장이 늦어진다).
+ */
+let _batch = 0;
+let _dirty = false;
+export function inBatch(fn) {
+  _batch += 1;
+  try { return fn(); } finally {
+    _batch -= 1;
+    if (!_batch && _dirty) { _dirty = false; writeNow(); }
+  }
+}
 function persist() {
-  atomicWriteFileSync(FILE(), JSON.stringify({ version: 1, jobs: load().jobs }, null, 2), { mode: 0o600 });
+  if (_batch) { _dirty = true; return; }
+  writeNow();
+}
+function writeNow() {
+  const db = load();
+  atomicWriteFileSync(FILE(), JSON.stringify({ version: 1, jobs: db.jobs, retired: db.retired }, null, 2), { mode: 0o600 });
   _loadErr.clear();
 }
 
@@ -84,8 +107,11 @@ export function addJob(input) {
     ...(input.demo ? { demo: true } : {}),
     pending: null, lastRun: null, lastError: null, missingInDirector: false, restores: [],
   };
+  const retiredBefore = db.retired;
   db.jobs.push(job);
-  persist();
+  if (db.retired?.some((r) => r.name === job.bareosJob)) db.retired = db.retired.filter((r) => r.name !== job.bareosJob);   // 같은 이름을 다시 쓰면 '지운 잡' 이 아니다
+  // 파일에 못 쓰면 메모리에도 넣지 않는다(v2.822 — 예전에는 메모리에만 남아 화면은 '등록됨', 재시작하면 사라졌다)
+  try { persist(); } catch (e) { db.jobs.pop(); db.retired = retiredBefore; throw e; }
   return copy(job);
 }
 
@@ -104,7 +130,8 @@ export function deleteJob(id) {
   const db = load();
   const i = db.jobs.findIndex((j) => j.id === id);
   if (i < 0) return false;
-  db.jobs.splice(i, 1);
+  const [j] = db.jobs.splice(i, 1);
+  addRetired(db, j.bareosJob, !!j.demo);
   persist();
   return true;
 }
@@ -131,7 +158,7 @@ export function applyRunRow(id, row, now = Date.now()) {
   let changed = false;
   if (j.pending && j.pending.jobid === row.jobid) {
     if (isFinalStatus(row.status)) { j.pending = null; changed = true; }
-    else if (j.pending.status !== row.status) { j.pending = { ...j.pending, status: row.status, state: rec.state }; changed = true; }
+    else if (j.pending.status !== row.status || j.pending.misses) { j.pending = { ...j.pending, status: row.status, state: rec.state, misses: 0 }; changed = true; }
   }
   // lastRun 은 가장 새 실행(jobid 가 같거나 큰 것) — Bareos 스케줄이 돌린 실행(포탈이 시작하지 않은 것)도 여기로 들어온다.
   if (!j.lastRun || (Number(j.lastRun.jobid) || 0) <= row.jobid) {
@@ -162,21 +189,100 @@ export function applyRestoreRow(id, row, now = Date.now()) {
   const j = db.jobs.find((x) => x.id === id);
   const r = j?.restores?.find((x) => x.jobid === row?.jobid);
   if (!r) return null;
-  const changed = r.status !== row.status || (r.endedAt ?? null) !== (row.endedAt ?? null);
-  Object.assign(r, { status: row.status, state: statusOf(row.status), startedAt: row.startedAt ?? r.startedAt ?? null, endedAt: row.endedAt ?? null, checkedAt: now });
+  const changed = r.status !== row.status || (r.endedAt ?? null) !== (row.endedAt ?? null) || !!r.misses;
+  Object.assign(r, { status: row.status, state: statusOf(row.status), startedAt: row.startedAt ?? r.startedAt ?? null, endedAt: row.endedAt ?? null, checkedAt: now, misses: 0 });
   if (changed) persist();
   return copy(j);
 }
+
+/** 아직 끝나지 않은(추적 중인) 복원인가 — 진행 중 409·복원 지점 화면·삭제 거부가 같은 판정을 쓴다. */
+export const restoreOpen = (r) => !!r?.jobid && !isFinalStatus(r.status) && !r.abandoned;
 
 /** 아직 끝나지 않은 실행(백업·복원) — 폴러가 이것만 조회한다. */
 export function pendingWork() {
   const out = [];
   for (const j of load().jobs) {
-    if (j.pending?.jobid) out.push({ id: j.id, jobid: j.pending.jobid, kind: 'backup', demo: !!j.demo });
-    for (const r of j.restores || []) if (r.jobid && !isFinalStatus(r.status)) out.push({ id: j.id, jobid: r.jobid, kind: 'restore', demo: !!j.demo });
+    if (j.pending?.jobid) out.push({ id: j.id, jobid: j.pending.jobid, kind: 'backup', job: j.bareosJob, demo: !!j.demo });
+    for (const r of j.restores || []) if (restoreOpen(r)) out.push({ id: j.id, jobid: r.jobid, kind: 'restore', demo: !!j.demo });
   }
   return out;
 }
+
+/*
+ * v2.822(검토 P5 — 재현): Director 카탈로그가 그 jobid 를 모르면(재시작으로 기록이 사라짐·다른 Director 로 바꿈) pending 이 영원히 남아
+ *   ① '할 일이 없으면 접속하지 않는다' 가 깨지고 ② 그 대상은 실행·삭제·복원이 막혔다. 연속 MISS_LIMIT 번 못 찾고 시작한 지
+ *   MISS_MIN_AGE_MS 가 지났으면 **추적을 멈추고** 그 사실을 lastError 에 남긴다(결과를 지어내지 않는다 — '실패' 로 적지 않는다).
+ */
+export const MISS_LIMIT = 5;
+export const MISS_MIN_AGE_MS = 60 * 60_000;
+export function notePendingMiss(id, kind, jobid, now = Date.now()) {
+  const db = load();
+  const j = db.jobs.find((x) => x.id === id);
+  if (!j) return null;
+  const msg = (n) => `jobid ${jobid} 를 Director 카탈로그에서 ${n}번 연속 찾지 못해 포탈의 추적을 멈췄습니다(Director 재시작·설정 변경 등) — 실제 결과는 Director 에서 확인하세요.`;
+  if (kind === 'backup') {
+    if (j.pending?.jobid !== jobid) return null;
+    const misses = (Number(j.pending.misses) || 0) + 1;
+    if (misses >= MISS_LIMIT && now - (Number(j.pending.since) || now) >= MISS_MIN_AGE_MS) {
+      j.pending = null;
+      j.lastError = { at: now, message: msg(misses) };
+      persist();
+      return 'abandoned';
+    }
+    j.pending = { ...j.pending, misses };
+    persist();
+    return 'missed';
+  }
+  const r = (j.restores || []).find((x) => x.jobid === jobid);
+  if (!r || !restoreOpen(r)) return null;
+  r.misses = (Number(r.misses) || 0) + 1;
+  if (r.misses >= MISS_LIMIT && now - (Number(r.at) || now) >= MISS_MIN_AGE_MS) {
+    Object.assign(r, { abandoned: true, state: 'unknown', detail: msg(r.misses) });
+    persist();
+    return 'abandoned';
+  }
+  persist();
+  return 'missed';
+}
+
+/** 포탈 쪽 추적만 내린다(취소 요청인데 Director 가 그 실행을 모를 때). */
+export function clearPending(id, message, now = Date.now()) {
+  const db = load();
+  const j = db.jobs.find((x) => x.id === id);
+  if (!j?.pending) return null;
+  j.pending = null;
+  j.lastError = { at: now, message: String(message || '').slice(0, 300) };
+  persist();
+  return copy(j);
+}
+
+/*
+ * v2.822(검토 I3 — Bareos 소스 확인): `disable job=` 은 Director 메모리의 값만 바꾼다(ua_cmds.cc — conf 파일은 그대로).
+ *   Director 를 reload·재시작하면 conf 값(기본 활성)으로 돌아가 **지운 대상·비활성 대상이 다시 스케줄 백업된다**. 지운 대상의 잡 이름을
+ *   남겨 두고 폴러 대조 틱이 `.jobs` 의 enabled 를 보고 다시 끈다(비활성 대상은 원장 enabled:false 로 같은 처리).
+ *   Director 에서 잡이 사라지면(관리자가 conf 를 지움) 기록도 지운다.
+ */
+function addRetired(db, name, demo) {
+  if (!name) return;
+  db.retired = [...(db.retired || []).filter((r) => r.name !== name), { name: String(name), at: Date.now(), ...(demo ? { demo: true } : {}) }].slice(-RETIRED_KEEP);
+}
+/** Director 에 잡만 남은 이름을 기록(원장 등록 실패 등) — 원장을 못 읽은 상태면 쓰지 않는다(빈 원장 저장이 보존본을 덮지 않게). */
+export function retireName(name, demo = false) {
+  const db = load();
+  if (_loadErr.get()) return false;
+  addRetired(db, name, demo);
+  persist();
+  return true;
+}
+export function retiredNames() { return (load().retired || []).map((r) => ({ ...r })); }
+export function forgetRetired(names) {
+  const drop = new Set(names);
+  const db = load();
+  const before = (db.retired || []).length;
+  db.retired = (db.retired || []).filter((r) => !drop.has(r.name));
+  if (db.retired.length !== before) persist();
+}
+export function jobCount() { return load().jobs.length; }
 
 /** 트리 배지 — 이 vCenter 의 (활성) 백업 대상 vmId. */
 export function jobVmIds(vcenterId) {

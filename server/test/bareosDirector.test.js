@@ -105,7 +105,19 @@ test('jobHistory · enable/disable · cancel 명령 문자열', async () => {
   const { log } = await withFake(() => ({ jobs: [{ jobid: 1, jobstatus: 'T' }] }), async (s) => {
     await jobHistory(s, 'pv-1-vm-1', 500); await setJobEnabled(s, 'pv-1-vm-1', false); await setJobEnabled(s, 'pv-1-vm-1', true); await cancelJob(s, 42);
   });
-  assert.deepEqual(log, ['list jobs job=pv-1-vm-1 limit=200', 'disable job=pv-1-vm-1', 'enable job=pv-1-vm-1', 'cancel jobid=42']);
+  assert.deepEqual(log, ['list jobs job=pv-1-vm-1', 'disable job=pv-1-vm-1', 'enable job=pv-1-vm-1', 'cancel jobid=42']);
+});
+
+test('W1(v2.822): jobHistory 는 limit 를 Director 에 넘기지 않고 최신 순으로 자른다(Bareos 는 오름차순 + LIMIT = 가장 오래된 N건)', async () => {
+  const asc = Array.from({ length: 250 }, (_, i) => ({ jobid: 1000 + i, name: 'pv-1-vm-1', type: 'B', level: i % 7 ? 'I' : 'F', jobstatus: 'T' }));
+  const { r, log } = await withFake(() => ({ jobs: asc }), (s) => jobHistory(s, 'pv-1-vm-1', 30));
+  assert.deepEqual(log, ['list jobs job=pv-1-vm-1']);
+  assert.equal(r.length, 30);
+  assert.deepEqual([r[0].jobid, r[29].jobid], [1249, 1220], '최신 30건 · 최신 먼저');
+  const { demoCall } = await import('../src/mock/demo/bareos.js');
+  demoCall('configure add job name=pv-w1-vm-1 client=c storage=s pool=p', {});
+  const rows = demoCall('list jobs job=pv-w1-vm-1 limit=3', {}).jobs;
+  assert.ok(rows.length === 3 && rows[0].jobid < rows[2].jobid, '데모 Director 도 실제처럼 오름차순 + LIMIT(가림 방지)');
 });
 
 test('배너 해석 · 이름 목록 필터', () => {

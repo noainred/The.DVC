@@ -19,6 +19,25 @@ export function stateBadge(state, status = '') {
 const LEVELS = { F: 'Full', I: 'Incremental', D: 'Differential', Full: 'Full', Incremental: 'Incremental', Differential: 'Differential' };
 export const levelLabel = (v) => LEVELS[v] || '—';
 
+/** W13(v2.822): 복원 지점 목록이 잘렸으면 밝힌다 — 서버가 본 최근 실행 수(scanned)와 화면에 보이는 수. */
+export function restorePointsNote(pts, shown) {
+  const n = (pts?.items || []).length;
+  const scanned = numOrNull(pts?.scanned);
+  const head = n > shown ? `성공한 백업 ${n}건 중 최근 ${shown}건을 보입니다.` : `성공한 백업 ${n}건.`;
+  return `${head}${scanned !== null ? ` Director 카탈로그의 최근 실행 ${scanned}건에서 골랐습니다 — 더 오래된 지점은 Director 에서 복원하세요.` : ''}`;
+}
+
+/**
+ * v2.822(S3·I5): 등록 뒤 VM 이 바뀐 대상의 안내 — 잡은 등록 때의 이름·위치를 가리키므로 백업이 실패하고 덮어쓰기 복원은 막힌다.
+ * @param {'missing'|string[]|null|undefined} drift  서버 placementDrift 결과
+ */
+export function driftText(drift) {
+  if (!drift) return '';
+  if (drift === 'missing') return '인벤토리에서 이 VM 을 찾지 못했습니다(지워졌거나 다른 vCenter 로 옮겨졌을 수 있습니다) — 백업이 실패할 수 있습니다.';
+  const what = Array.isArray(drift) ? drift.join('·') : String(drift);
+  return `등록 뒤 VM 의 ${what}이(가) 바뀌었습니다 — Bareos 잡은 등록 때의 값을 쓰므로 백업이 실패할 수 있고 덮어쓰기 복원은 막힙니다. 대상을 지우고 다시 등록하세요.`;
+}
+
 /** 바이트 → 사람이 읽는 크기. 못 읽은 값은 '—'(0 이 아니다). */
 export function bytesText(v) {
   const n = numOrNull(v);
@@ -168,6 +187,54 @@ export const PREP_CHECKLIST = Object.freeze([
   'vCenter 에 백업 전용 관리자 계정을 만들고 VADP 를 쓰는 라이선스(Essentials 이상)인지 확인합니다.',
   '포탈 서버에서 Director 9101 포트로 TLS-PSK 접속이 되는지 bareos-probe 도구로 먼저 확인합니다.',
 ]);
+
+/* ───────────── v2.822 여러 VM 한 번에 등록(폴더 단위 포함) ───────────── */
+
+export const NO_FOLDER = '\u0000none';   // 폴더 정보가 없는 VM(vApp 안·SOAP 수집 전) — 드롭다운 값으로만 쓴다
+
+/** 후보의 폴더 목록(정렬·중복 없음). 폴더 정보가 없는 VM 이 있으면 마지막에 그 항목. */
+export function folderOptions(items) {
+  const set = new Set();
+  let none = false;
+  for (const x of items || []) { if (typeof x?.folder === 'string' && x.folder) set.add(x.folder); else none = true; }
+  const list = [...set].sort((a, b) => a.localeCompare(b)).map((f) => ({ value: f, label: f }));
+  if (none) list.push({ value: NO_FOLDER, label: '(폴더 정보 없음)' });
+  return list;
+}
+
+/** 폴더 필터 — 하위 폴더 포함('/app' 은 '/app/web' 도). '' 은 전체. */
+export function inFolder(x, f) {
+  if (!f) return true;
+  if (f === NO_FOLDER) return !(typeof x?.folder === 'string' && x.folder);
+  const p = typeof x?.folder === 'string' ? x.folder : '';
+  if (f === '/') return p.startsWith('/');
+  return p === f || p.startsWith(`${f}/`);
+}
+
+/** 한 번에 고를 수 있는 수 — API 의 일괄 상한과 원장 남은 자리 중 작은 값(모르면 상한). */
+export function pickCap(cand) {
+  const max = Number.isInteger(cand?.maxBulk) && cand.maxBulk > 0 ? cand.maxBulk : 0;
+  const left = Number.isInteger(cand?.jobsLeft) && cand.jobsLeft >= 0 ? cand.jobsLeft : max;
+  return Math.min(max, left);
+}
+
+/** 일괄 등록 결과 한 줄. */
+export function bulkSummary(r) {
+  if (!r) return '';
+  const ok = Number(r.created) || 0;
+  const bad = Number(r.failed) || 0;
+  if (!ok) return `한 대도 등록하지 못했습니다 — 아래 사유를 보세요(${bad}대).`;
+  return `${ok}대를 백업 대상으로 등록했습니다${bad ? ` · ${bad}대는 등록하지 못했습니다(아래 사유)` : ''}. Director 에 VM 마다 잡을 만들고 사이트 매핑의 스케줄을 배정했습니다.`;
+}
+
+/* ───────────── v2.822 단계별 연결 진단 ───────────── */
+
+/** 진단 단계 한 줄의 표시(배지 글자·색·시간). 시도하지 않은 단계는 실패가 아니다(회색). */
+export function diagView(st) {
+  if (!st || st.skipped) return { mark: '시도 안 함', cls: 'gray', ms: '' };
+  const ms = Number.isFinite(st.ms) && st.ms >= 0 ? `${st.ms < 1000 ? `${Math.round(st.ms)}ms` : `${(st.ms / 1000).toFixed(1)}초`}` : '';
+  return st.ok ? { mark: '✓ 통과', cls: 'green', ms } : { mark: '✗ 실패', cls: 'red', ms };
+}
 
 /* ───────── 자동 설정(v2.821 — 서버 bareos/autoSetup.js) ───────── */
 const FILE_ACTION_LABEL = Object.freeze({ created: '새로 만듦', updated: '덮어씀(포탈 파일)', unchanged: '그대로' });

@@ -18,14 +18,14 @@ const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'bareosrestore-'));
 process.env.CONFIG_DIR = tmp;
 process.env.DATA_SOURCE = 'mock';
 
-const { restorePlan, chainFromHistory, chainIssue } = await import('../src/bareos/restore.js');
+const { restorePlan, chainFromHistory, chainIssue, placementDrift } = await import('../src/bareos/restore.js');
 const settings = await import('../src/bareos/settings.js');
 const registry = await import('../src/bareos/registry.js');
 after(() => { try { fs.rmSync(tmp, { recursive: true, force: true }); } catch { /* */ } });
 
-const job = { vcenterId: 'vc-a', vmId: 'vc-a:vm-1', vmName: 'web-01' };
-const snap = (vm = {}) => ({
-  vms: [{ id: 'vc-a:vm-1', vcenterId: 'vc-a', name: 'web-01', powerState: 'POWERED_OFF', snapshotCount: 0, ...vm }, { id: 'vc-b:vm-2', vcenterId: 'vc-b', name: 'other' }],
+const job = { vcenterId: 'vc-a', vmId: 'vc-a:vm-1', vmName: 'web-01', dc: 'DC-A', folder: '/web' };
+const snap = (vm = {}, extra = []) => ({
+  vms: [{ id: 'vc-a:vm-1', vcenterId: 'vc-a', name: 'web-01', powerState: 'POWERED_OFF', snapshotCount: 0, vcDcPath: 'DC-A', folderPath: '/web', ...vm }, { id: 'vc-b:vm-2', vcenterId: 'vc-b', name: 'other' }, ...extra],
   hosts: [{ vcenterId: 'vc-a', name: 'esx-1', cluster: 'CL-A' }, { vcenterId: 'vc-b', name: 'esx-b', cluster: 'CL-B' }],
   datastores: [{ vcenterId: 'vc-a', name: 'ds-a' }, { vcenterId: 'vc-b', name: 'ds-b' }],
 });
@@ -41,6 +41,22 @@ test('덮어쓰기: 이름 재입력·꺼짐·스냅샷 0 이어야 · 못 읽�
   const ok = restorePlan({ mode: 'original', job, snapshot: snap(), confirmName: 'web-01' });
   assert.equal(ok.ok, true);
   assert.equal(ok.pluginOptions, 'python3:restore_powerstate=off');
+});
+
+test('S3(v2.822): 등록 뒤 이름·위치가 바뀌었거나 같은 폴더에 같은 이름 VM 이 있으면 덮어쓰기 거부 · 위치를 못 읽으면 거부', () => {
+  // 원래 VM 의 이름이 바뀌고 같은 폴더에 같은 이름의 새 VM 이 생겼다 — 플러그인(vmname=web-01)은 새 VM 을 겨눈다
+  const renamed = snap({ name: 'web-01-old' }, [{ id: 'vc-a:vm-200', vcenterId: 'vc-a', name: 'web-01', powerState: 'POWERED_OFF', snapshotCount: 0, vcDcPath: 'DC-A', folderPath: '/web' }]);
+  assert.match(restorePlan({ mode: 'original', job, snapshot: renamed, confirmName: 'web-01' }).issue, /이름이\(가\) 바뀌었습니다/);
+  assert.match(restorePlan({ mode: 'original', job, snapshot: snap({ folderPath: '/moved' }), confirmName: 'web-01' }).issue, /폴더이\(가\) 바뀌었습니다/);
+  const twins = snap({}, [{ id: 'vc-a:vm-3', vcenterId: 'vc-a', name: 'web-01', vcDcPath: 'DC-A', folderPath: '/web' }]);
+  assert.match(restorePlan({ mode: 'original', job, snapshot: twins, confirmName: 'web-01' }).issue, /2대 있습니다/);
+  assert.match(restorePlan({ mode: 'original', job, snapshot: snap({ vcDcPath: null }), confirmName: 'web-01' }).issue, /경로를 읽지 못했습니다/);
+  // 다른 폴더의 같은 이름은 상관없다
+  assert.equal(restorePlan({ mode: 'original', job, snapshot: snap({}, [{ id: 'vc-a:vm-4', vcenterId: 'vc-a', name: 'web-01', vcDcPath: 'DC-A', folderPath: '/other' }]), confirmName: 'web-01' }).ok, true);
+  assert.equal(placementDrift(job, null), 'missing');
+  assert.equal(placementDrift(job, snap().vms[0]), null);
+  assert.deepEqual(placementDrift(job, { name: 'x', vcDcPath: 'DC-B', folderPath: '/web' }), ['이름', '데이터센터']);
+  assert.equal(placementDrift(job, { name: 'web-01', vcDcPath: null, folderPath: null }), null, '못 읽은 위치는 바뀐 것으로 세지 않는다');
 });
 
 test('새 VM: 동명 거부 · 인벤토리 검증(다른 vCenter 의 DS·클러스터는 안 됨) · 전원 off 고정', () => {
@@ -74,7 +90,14 @@ test('체인: Full → 마지막 Diff → 그 뒤 Incr · 실패 제외 · Full 
   assert.equal(chainFromHistory([R(9, 'F', 'ok', 'R')], 9), null, '복원 잡 행은 쓰지 않는다');
   assert.equal(chainIssue([1, 3, 6], 6), '');
   assert.match(chainIssue([1, 3], 6), /없습니다/);
-  assert.match(chainIssue([3, 1, 6], 6), /순서/);
+  assert.match(chainIssue([1, 6, 6], 6), /중복/);
+  assert.match(chainIssue([1, 6, 3], 6), /없습니다/, '대상으로 끝나야 한다');
+  // C9-2(v2.822): Migration 된 Full 은 새 jobid(150)를 받지만 시작 시각은 원래 것이다 — 시각 순으로 체인을 만든다
+  const T = (jobid, level, startedAt) => ({ jobid, level, state: 'ok', type: 'B', startedAt });
+  const mig = [T(150, 'F', 1000), T(110, 'I', 2000), T(120, 'I', 3000), T(130, 'I', 4000)];
+  assert.deepEqual(chainFromHistory(mig, 120), [150, 110, 120]);
+  assert.equal(chainIssue(chainFromHistory(mig, 120), 120), '');
+  assert.deepEqual(chainFromHistory([...mig.slice(0, 3), { ...mig[3], startedAt: null }], 120), null, '시각을 못 읽은 행이 있으면 jobid 순(Migration Full 150 은 120 뒤라 Full 없음)');
   assert.match(chainIssue(null, 6), /찾지 못했습니다/);
 });
 

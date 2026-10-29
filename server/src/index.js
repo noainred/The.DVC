@@ -110,6 +110,7 @@ import { startDailyReport } from './reports/dailyReport.js';
 import { startVmCloneScheduler } from './vmclone/scheduler.js'; // VM 복제(백업식) 스케줄러(v2.299)
 import { startVmBackupMail } from './vmclone/notify.js'; // VM 백업 실패 메일(v2.794) — 중앙 전용 · 메일 설정이 꺼져 있으면 기준만 옮긴다
 import { startVmCloneWorker } from './agent/vmCloneWorker.js'; // VM 백업 법인 위임 — 엣지 동기화·보고(v2.793). CENTRAL_URL 미설정이면 자기기동 안 함
+import { startBareosMail } from './bareos/notify.js'; // Bareos 백업 실패 메일(v2.822) — 중앙 전용 · 메일 설정이 꺼져 있으면 커서만 옮긴다
 import { startBareosPoller } from './bareos/poller.js'; // Bareos VM 백업 실행 상태(v2.820) — Director 미설정이면 접속하지 않는다
 import { startStoragePoller } from './storage/poller.js';        // 스토리지 수집(v2.302)
 import { applyGrowthSettings } from './storage/growthSettings.js'; // 사용량 보존 기간(v2.531)
@@ -585,6 +586,7 @@ const stagger = [
   startVmBackupMail,     // 〃 실패 메일(v2.794) — 1분 틱, 엣지는 기동하지 않는다
   startVmCloneWorker,    // 〃 법인 위임(v2.793) — 엣지가 담당 vCenter 의 잡 정의·작업을 당기고 상태를 올린다. 재진입 가드, CENTRAL_URL 미설정이면 자기기동 안 함
   startBareosPoller, // Bareos VM 백업(v2.820) — 설정 주기, 할 일이 없으면 접속 안 함 · 10틱마다 대조
+  startBareosMail,   // 〃 실패 메일(v2.822) — 1분 틱, 원장만 읽는다(Director 에 닿지 않는다) · 엣지는 기동하지 않는다
   startStoragePoller, startStoragePush, startStorageConfigPull, // 스토리지 모니터링(v2.302) — 전부 재진입 가드, push/pull 은 CENTRAL_URL 미설정 시 자기기동 안 함
   startSanSwitchPoller, startSanSwitchPush, startSanSwitchConfigPull, // SAN 스위치(v2.410) — 동일 규약(재진입 가드 + 적응형 타이머)
   startPduPoller, startPduPush, startPduConfigPull, // PDU(v2.424) — 동일 규약(자동 센서 탐지 + 재진입 가드 + 적응형 타이머)

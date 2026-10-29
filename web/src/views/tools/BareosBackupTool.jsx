@@ -8,8 +8,10 @@ import ScopeOmitBanner from '../ScopeOmitBanner.jsx';
 import { useHashTab } from '../../hooks/useHashTab.js';
 import { requireChanged } from '../changeResult.js';
 import { droppedSecretNote } from '../droppedSecretText.js';
+import VeeamHeader from './VeeamHeader.jsx';
 import {
-  stateBadge, levelLabel, bytesText, whenText, runCell, directorLine, RESTORE_MODE_LABEL, restoreLine, candidateSummary,
+  stateBadge, levelLabel, bytesText, whenText, runCell, directorLine, RESTORE_MODE_LABEL, restoreLine, candidateSummary, driftText, restorePointsNote,
+  folderOptions, inFolder, pickCap, bulkSummary, diagView,
   directorPrepBlock, fdIniTemplate, PREP_CHECKLIST, autoSetupDirectorText, autoSetupFdText, thumbprintText,
 } from './bareosText.js';
 
@@ -24,9 +26,13 @@ const TABS = [['targets', '백업 대상'], ['history', '실행 현황 · 이력
 const ROW = { display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' };
 const NOTE = { padding: '8px 12px', marginBottom: 10, fontSize: 12.5, lineHeight: 1.6 };
 const BTN = { padding: '4px 9px', fontSize: 12 };
+const WRAP = { display: 'flex', flexDirection: 'column', gap: 14, minWidth: 0 };
 // 전역 .input 의 min-width 220px 이 격자 칸·표 칸 입력을 밀어낸다(styles.css 1267 의 v2.636 사례) — 칸 안 입력은 이것으로.
 const INP = { minWidth: 0, width: '100%', boxSizing: 'border-box' };
 const enc = encodeURIComponent;
+// W2(v2.822): Director 를 거치는 조회는 자동 재시도하지 않는다(502·시한마다 Director 인증을 다시 시도하고, 서버는 앞 요청을 계속 돌린다 — 규약 '자동 재시도 금지')
+const DIRECTOR_GET = { retries: 0, timeoutMs: 60_000 };
+const RESTORE_POINTS_SHOWN = 30;   // 창 높이 때문에 보이는 개수 — 잘리면 문구가 밝힌다(restorePointsNote)
 
 export default function BareosBackupTool() {
   const [tab, setTab] = useHashTab({ base: ['tools', 'bareos-backup'], valid: TABS.map(([k]) => k), fallback: 'targets' });
@@ -41,11 +47,16 @@ export default function BareosBackupTool() {
   const me = getCurrentUser();
   const fullScope = !me?.scope || (!(me.scope.vcenters || []).length && !(me.scope.regions || []).length);
 
-  if (error && !data) return <ErrorBox error={error} />;
-  if (!data) return <Loading />;
+  // v2.822: Backup 상단 메뉴의 한 탭(Summary·Detail·EM·백업 실행 옆) — 머리는 불러오는 중·오류에도 보인다(탭으로 되돌아갈 수 있게).
+  const head = <VeeamHeader active="bareos" desc="포탈에서 고른 VM 을 Bareos VMware 플러그인으로 백업·복원합니다(관리자)." />;
+  if (error && !data) return <div style={WRAP}>{head}<ErrorBox error={error} /></div>;
+  if (!data) return <div style={WRAP}>{head}<Loading /></div>;
 
   return (
-    <div>
+    <div style={WRAP}>
+      {head}
+      <div>
+      {error && <div className="banner warn" style={{ marginBottom: 10 }}>최근 새로 고침에 실패했습니다 — 아래는 마지막으로 받은 내용입니다({String(error.message || error).slice(0, 160)}).</div>}
       <div className="card" style={{ ...NOTE, borderLeft: `3px solid var(--${data.demo ? 'amber' : data.configured && data.poller?.ok !== false && !data.authStopped ? 'green' : 'red'})` }}>
         <BoldText text={directorLine(data)} />
       </div>
@@ -59,6 +70,8 @@ export default function BareosBackupTool() {
       {tab === 'targets' && <TargetsTab d={data} reload={reload} />}
       {tab === 'history' && <HistoryTab d={data} />}
       {tab === 'settings' && fullScope && <SettingsTab onSaved={reload} />}
+      {tab === 'settings' && !fullScope && <div className="muted" style={{ padding: 16 }}>Director 설정은 전체 범위 관리자만 볼 수 있습니다 — 백업 대상 탭을 쓰세요.</div>}
+      </div>
     </div>
   );
 }
@@ -68,25 +81,35 @@ function TargetsTab({ d, reload }) {
   const [vc, setVc] = useState('');
   const [q, setQ] = useState('');
   const [adding, setAdding] = useState(false);
-  const [busy, setBusy] = useState(false);
+  const [busyIds, setBusyIds] = useState(() => new Set());   // W11: 처리 중 잠금은 그 대상만
   const [msg, setMsg] = useState(null);
   const [logOf, setLogOf] = useState(null);       // { job, jobid }
   const [restoreOf, setRestoreOf] = useState(null); // job
+  const [runFor, setRunFor] = useState(null);     // W6: 레벨을 고르는 중인 대상 id
+  const [runLevel, setRunLevel] = useState('');
   const vcs = useMemo(() => [...new Set(d.jobs.map((j) => j.vcenterId))].sort(), [d.jobs]);
+  // W10: 고른 vCenter 의 마지막 대상이 사라지면 필터를 풀고(드롭다운은 '전체' 를 보이는데 상태만 남는 어긋남), 보던 대상이 지워지면 창을 닫는다
+  useEffect(() => { if (vc && !vcs.includes(vc)) setVc(''); }, [vc, vcs]);
+  useEffect(() => {
+    const ids = new Set(d.jobs.map((j) => j.id));
+    if (logOf && !ids.has(logOf.job.id)) setLogOf(null);
+    if (restoreOf && !ids.has(restoreOf.id)) setRestoreOf(null);
+    if (runFor && !ids.has(runFor)) setRunFor(null);
+  }, [d.jobs, logOf, restoreOf, runFor]);
   const rows = d.jobs.filter((j) => (!vc || j.vcenterId === vc) && (!q || `${j.vmName} ${j.folder} ${j.bareosJob}`.toLowerCase().includes(q.toLowerCase())));
 
-  const act = async (fn, okText) => {
-    setBusy(true); setMsg(null);
+  const act = async (j, fn, okText) => {
+    setBusyIds((b) => new Set(b).add(j.id)); setMsg(null);
     try { const r = await fn(); requireChanged(r); setMsg({ ok: true, text: okText(r) }); reload(); }
     catch (e) { setMsg({ ok: false, text: `오류: ${e.message}` }); }
-    finally { setBusy(false); }
+    finally { setBusyIds((b) => { const n = new Set(b); n.delete(j.id); return n; }); }
   };
-  const run = (j) => act(() => postJson(`${BASE}/jobs/${enc(j.id)}/run`, {}), (r) => `‘${j.vmName}’ 백업을 시작했습니다(jobid ${r.jobid}). 진행은 이 표와 실행 현황 탭에서 보입니다.`);
-  const cancel = (j) => { if (window.confirm(`‘${j.vmName}’ 의 실행 중 백업을 취소할까요?`)) act(() => postJson(`${BASE}/jobs/${enc(j.id)}/cancel`, {}), () => '취소를 요청했습니다(Director 가 멈추기까지 시간이 걸릴 수 있습니다).'); };
-  const toggle = (j) => act(() => patchJson(`${BASE}/jobs/${enc(j.id)}`, { enabled: !j.enabled }), () => (j.enabled ? '비활성화했습니다 — Bareos 스케줄도 이 잡을 돌리지 않습니다.' : '활성화했습니다.'));
+  const run = (j) => { setRunFor(null); act(j, () => postJson(`${BASE}/jobs/${enc(j.id)}/run`, runLevel ? { level: runLevel } : {}), (r) => `‘${j.vmName}’ 백업을 시작했습니다(jobid ${r.jobid}). 진행은 이 표와 실행 현황 탭에서 보입니다.`); };
+  const cancel = (j, jobid) => { if (window.confirm(`‘${j.vmName}’ 의 실행 중 백업(jobid ${jobid})을 취소할까요?`)) act(j, () => postJson(`${BASE}/jobs/${enc(j.id)}/cancel`, { jobid }), (r) => r.note || '취소를 요청했습니다(Director 가 멈추기까지 시간이 걸릴 수 있습니다).'); };
+  const toggle = (j) => act(j, () => patchJson(`${BASE}/jobs/${enc(j.id)}`, { enabled: !j.enabled }), () => (j.enabled ? '비활성화했습니다 — Bareos 의 비활성화는 Director 를 reload·재시작하면 풀리므로 포탈이 상태 대조 때마다 다시 끕니다.' : '활성화했습니다.'));
   const remove = (j) => {
-    if (!window.confirm(`‘${j.vmName}’ 을(를) 백업 대상에서 지울까요?\nDirector 의 잡은 비활성화되고 정의 파일은 남습니다. 백업 데이터는 지우지 않습니다.`)) return;
-    act(() => delJson(`${BASE}/jobs/${enc(j.id)}`), (r) => r.note || '지웠습니다.');
+    if (!window.confirm(`‘${j.vmName}’ 을(를) 백업 대상에서 지울까요?\nDirector 의 잡은 비활성화하고 정의 파일은 남습니다(Director 를 reload 하면 다시 켜지므로 포탈이 대조 때마다 다시 끕니다 — 영구히 멈추려면 정의 파일을 지우세요). 백업 데이터는 지우지 않습니다.`)) return;
+    act(j, () => delJson(`${BASE}/jobs/${enc(j.id)}`), (r) => r.note || '지웠습니다.');
   };
 
   return (
@@ -103,11 +126,11 @@ function TargetsTab({ d, reload }) {
         <button type="button" className="login-btn" style={{ flex: 'none', padding: '8px 16px' }} disabled={!d.configured || !!d.registryLoadError} onClick={() => setAdding(true)}>+ 백업 대상 추가</button>
       </div>
       {msg && <div className={`banner ${msg.ok ? 'ok' : 'bad'}`} style={{ marginBottom: 10 }}><BoldText text={msg.text} /></div>}
-      {adding && <AddForm d={d} onClose={() => setAdding(false)} onDone={(t) => { setAdding(false); setMsg({ ok: true, text: t }); reload(); }} />}
+      {adding && <AddForm d={d} onClose={() => setAdding(false)} onChanged={reload} />}
       <ScopeOmitBanner data={d} unit="백업 대상" counter="개" why="조회 범위 밖 vCenter 의" />
 
       <div className="table-wrap" style={{ maxHeight: '58vh' }}>
-        <STable minWidth={1040}>
+        <STable minWidth={1040} wrap={false}>
           <thead><tr>
             <th>VM</th><th>vCenter</th><th>데이터센터 · 폴더</th><th>사이트 FD · 레벨 · 스케줄</th>
             <th>최근 실행</th><th className="right">용량</th><th data-nosort>작업</th>
@@ -116,10 +139,13 @@ function TargetsTab({ d, reload }) {
             {rows.length === 0 && <tr><td colSpan={7} className="center muted" style={{ padding: 22 }}>{d.jobs.length ? '조건에 맞는 대상이 없습니다.' : '백업 대상이 없습니다 — ‘+ 백업 대상 추가’ 로 vCenter 의 VM 을 고르세요.'}</td></tr>}
             {rows.map((j) => {
               const c = runCell(j);
-              const running = !!j.pending?.jobid;
+              // W5: 포탈이 시작한 실행(pending)뿐 아니라 Bareos 스케줄이 돌리는 실행(대조가 넣은 lastRun)도 실행 중이다 — 대조 주기만큼 늦을 수 있다
+              const liveJobid = j.pending?.jobid || (['running', 'queued', 'waiting'].includes(j.lastRun?.state) ? j.lastRun.jobid : null);
+              const running = !!liveJobid;
+              const busy = busyIds.has(j.id);
               return (
                 <tr key={j.id} style={{ opacity: j.enabled ? 1 : 0.6 }}>
-                  <td data-sort={j.vmName}><b>{j.vmName}</b>{!j.enabled && <span className="badge gray" style={{ marginLeft: 6 }}>비활성</span>}{j.missingInDirector && <span className="badge red" style={{ marginLeft: 6 }} title="Director 의 잡 목록에 없습니다(누가 정의 파일을 지웠을 수 있습니다)">Director 에 없음</span>}{j.demo && <span className="badge amber" style={{ marginLeft: 6 }}>데모</span>}</td>
+                  <td data-sort={j.vmName}><b>{j.vmName}</b>{!j.enabled && <span className="badge gray" style={{ marginLeft: 6 }}>비활성</span>}{j.missingInDirector && <span className="badge red" style={{ marginLeft: 6 }} title="Director 의 잡 목록에 없습니다(누가 정의 파일을 지웠을 수 있습니다)">Director 에 없음</span>}{j.demo && <span className="badge amber" style={{ marginLeft: 6 }}>데모</span>}{j.drift && <span className="badge amber" style={{ marginLeft: 6 }} title={driftText(j.drift)}>{j.drift === 'missing' ? '인벤토리에 없음' : '등록 뒤 바뀜'}</span>}</td>
                   <td className="muted">{j.vcenterId}</td>
                   <td className="muted" style={{ fontSize: 12 }}><div style={{ maxWidth: 220, whiteSpace: 'normal', overflowWrap: 'anywhere' }}>{j.dc} · {j.folder}</div></td>
                   <td data-sort={j.client} style={{ fontSize: 12.5 }}>{j.client}<div className="muted" style={{ fontSize: 11 }}>{levelLabel(j.level)} · {j.schedule || '수동'}</div></td>
@@ -133,8 +159,17 @@ function TargetsTab({ d, reload }) {
                   <td style={{ minWidth: 236 }}>
                     <span style={{ ...ROW, gap: 6 }}>
                       {running
-                        ? <button type="button" className="logout-btn" style={{ ...BTN, color: 'var(--red)' }} disabled={busy} onClick={() => cancel(j)}>취소</button>
-                        : <button type="button" className="logout-btn" style={BTN} disabled={busy || !j.enabled} onClick={() => run(j)}>실행</button>}
+                        ? <button type="button" className="logout-btn" style={{ ...BTN, color: 'var(--red)' }} disabled={busy} onClick={() => cancel(j, liveJobid)}>취소</button>
+                        : runFor === j.id
+                          ? <>
+                            <Select className="input" sort={false} value={runLevel} onChange={(e) => setRunLevel(e.target.value)} style={{ minWidth: 0, width: 168, padding: '3px 6px', fontSize: 12 }} aria-label="실행 레벨">
+                              <option value="">기본({levelLabel(j.level)})</option>
+                              {['Full', 'Incremental', 'Differential'].map((l) => <option key={l} value={l}>{levelLabel(l)}</option>)}
+                            </Select>
+                            <button type="button" className="logout-btn" style={BTN} disabled={busy} onClick={() => run(j)}>시작</button>
+                            <button type="button" className="logout-btn" style={BTN} onClick={() => setRunFor(null)}>닫기</button>
+                          </>
+                          : <button type="button" className="logout-btn" style={BTN} disabled={busy || !j.enabled} onClick={() => { setRunLevel(''); setRunFor(j.id); }}>실행…</button>}
                       <button type="button" className="logout-btn" style={BTN} disabled={!c.jobid} onClick={() => setLogOf({ job: j, jobid: c.jobid })}>로그</button>
                       <button type="button" className="logout-btn" style={BTN} disabled={busy} onClick={() => setRestoreOf(j)}>복원…</button>
                       <button type="button" className="logout-btn" style={BTN} disabled={busy || running} onClick={() => toggle(j)}>{j.enabled ? '비활성' : '활성'}</button>
@@ -149,7 +184,7 @@ function TargetsTab({ d, reload }) {
       </div>
       <div className="muted" style={{ fontSize: 11.5, marginTop: 8, lineHeight: 1.6 }}>
         스케줄은 Bareos 가 돌립니다(포탈이 꺼져 있어도 백업은 계속됩니다). 레벨·스케줄을 바꾸려면 대상을 지우고 다시 등록하세요 — Bareos 에는 잡 수정 명령이 없습니다.
-        대상 VM 은 vCenter 상세(서버 › vCenter)의 VM 행에 <span className="badge blue" style={{ fontSize: 10 }}>Bareos</span> 배지로 표시됩니다.
+        활성 대상 VM 은 vCenter 상세(서버 › vCenter)의 VM 행에 <span className="badge blue" style={{ fontSize: 10 }}>Bareos</span> 배지로 표시됩니다.
       </div>
       {logOf && <LogModal job={logOf.job} jobid={logOf.jobid} onClose={() => setLogOf(null)} />}
       {restoreOf && <RestoreModal job={restoreOf} onClose={() => setRestoreOf(null)} onDone={(t) => { setRestoreOf(null); setMsg({ ok: true, text: t }); reload(); }} />}
@@ -158,52 +193,81 @@ function TargetsTab({ d, reload }) {
 }
 
 /** 대상 추가 — vCenter → 등록 후보(서버가 가능 여부·사유를 준다) → 레벨 → 등록. */
-function AddForm({ d, onClose, onDone }) {
+function AddForm({ d, onClose, onChanged }) {
   const [vcs, setVcs] = useState(null);
   const [vcErr, setVcErr] = useState(null);
   const [vc, setVc] = useState('');
   const [cand, setCand] = useState(null);
   const [candErr, setCandErr] = useState(null);
   const [q, setQ] = useState('');
-  const [vmId, setVmId] = useState('');
+  const [folder, setFolder] = useState('');
+  const [sel, setSel] = useState(() => new Set());
   const [level, setLevel] = useState(d.defaults?.level || 'Incremental');
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState(null);
+  const [result, setResult] = useState(null);
+  const [rev, setRev] = useState(0);
   const gen = useRef(0);
   useEffect(() => { fetchJson('/vcenters').then((r) => setVcs(Array.isArray(r) ? r : [])).catch(setVcErr); }, []);
   useEffect(() => {
-    const g = ++gen.current;
-    setCand(null); setCandErr(null); setVmId('');
+    const g = ++gen.current;   // 늦게 온 이전 vCenter 의 응답은 버린다
+    setCand(null); setCandErr(null);
     if (!vc) return;
     fetchJson(`${BASE}/vm-candidates`, { vcenterId: vc }).then((r) => { if (g === gen.current) setCand(r); }).catch((e) => { if (g === gen.current) setCandErr(e); });
-  }, [vc]);
-  const items = (cand?.items || []).filter((x) => !q || x.name.toLowerCase().includes(q.toLowerCase()));
-  const pick = (cand?.items || []).find((x) => x.id === vmId);
+  }, [vc, rev]);
+  useEffect(() => { setSel(new Set()); setFolder(''); setResult(null); setErr(null); }, [vc]);
+  const all = useMemo(() => cand?.items || [], [cand]);
+  const folders = useMemo(() => folderOptions(all), [all]);
+  const items = all.filter((x) => inFolder(x, folder) && (!q || x.name.toLowerCase().includes(q.toLowerCase())));
+  const pickable = (x) => !!cand?.writable && x.eligible && !x.registered;
+  const cap = pickCap(cand);
+  const toggle = (x) => setSel((prev) => {
+    const n = new Set(prev);
+    if (n.has(x.id)) n.delete(x.id); else if (n.size < cap) n.add(x.id);
+    return n;
+  });
+  const visiblePickable = items.filter(pickable);
+  const pickVisible = () => setSel((prev) => {
+    const n = new Set(prev);
+    for (const x of visiblePickable) { if (n.size >= cap) break; n.add(x.id); }
+    return n;
+  });
   const submit = async () => {
-    setBusy(true); setErr(null);
+    setBusy(true); setErr(null); setResult(null);
     try {
-      const r = await postJson(`${BASE}/jobs`, { vcenterId: vc, vmId, level });
-      requireChanged(r);
-      onDone(`‘${r.job.vmName}’ 을(를) 백업 대상으로 등록했습니다 — Director 잡 ‘${r.job.bareosJob}’.`);
+      const r = await postJson(`${BASE}/jobs/bulk`, { vcenterId: vc, vmIds: [...sel], level });
+      setResult(r);
+      if (r.created > 0) { setSel(new Set()); setRev((x) => x + 1); onChanged(); }
     } catch (e) { setErr(e.message); } finally { setBusy(false); }
   };
+  const nameOf = new Map(all.map((x) => [x.id, x.name]));
   return (
-    <div className="card" style={{ padding: 14, marginBottom: 12 }}>
+    <div className="card" style={{ padding: 14, marginBottom: 12, minWidth: 0 }}>
       <div style={{ ...ROW, marginBottom: 8 }}>
         <b>백업 대상 추가</b>
+        <span className="muted" style={{ fontSize: 12 }}>여러 VM 을 고르거나 폴더를 골라 한 번에 등록합니다</span>
         <div style={{ flexGrow: 1 }} />
         <button type="button" className="logout-btn" style={BTN} onClick={onClose}>닫기</button>
       </div>
       {vcErr && <ErrorBox error={vcErr} />}
       <div style={{ ...ROW, marginBottom: 8 }}>
         <label htmlFor="bareos-add-vc" className="muted" style={{ fontSize: 12 }}>vCenter</label>
-        <Select id="bareos-add-vc" className="input" value={vc} onChange={(e) => setVc(e.target.value)} style={{ minWidth: 200 }}>
+        <Select id="bareos-add-vc" className="input" value={vc} onChange={(e) => setVc(e.target.value)} style={{ ...INP, width: 'auto', minWidth: 200, maxWidth: '100%' }}>
           <option value="">선택…</option>
           {(vcs || []).map((v) => <option key={v.id} value={v.id}>{v.name ? `${v.name} (${v.id})` : v.id}</option>)}
         </Select>
-        {vc && <SearchBox value={q} onChange={setQ} placeholder="VM 이름" style={{ width: 200, maxWidth: '100%' }} />}
+        {cand && (
+          <>
+            <label htmlFor="bareos-add-folder" className="muted" style={{ fontSize: 12 }}>폴더</label>
+            <Select id="bareos-add-folder" className="input" sort={false} value={folder} onChange={(e) => setFolder(e.target.value)} style={{ ...INP, width: 'auto', minWidth: 160, maxWidth: '100%' }}>
+              <option value="">전체 폴더</option>
+              {folders.map((f) => <option key={f.value} value={f.value}>{f.label}</option>)}
+            </Select>
+            <SearchBox value={q} onChange={setQ} placeholder="VM 이름" style={{ width: 200, maxWidth: '100%' }} />
+          </>
+        )}
         <label htmlFor="bareos-add-level" className="muted" style={{ fontSize: 12 }}>기본 레벨</label>
-        <Select id="bareos-add-level" className="input" sort={false} value={level} onChange={(e) => setLevel(e.target.value)}>
+        <Select id="bareos-add-level" className="input" sort={false} value={level} onChange={(e) => setLevel(e.target.value)} style={{ ...INP, width: 'auto', minWidth: 140 }}>
           <option value="Incremental">Incremental</option><option value="Differential">Differential</option><option value="Full">Full</option>
         </Select>
       </div>
@@ -212,14 +276,19 @@ function AddForm({ d, onClose, onDone }) {
       {cand && (
         <>
           <div className="muted" style={{ fontSize: 12, marginBottom: 6 }}>{candidateSummary(cand)}{!cand.mapped ? ' · 이 vCenter 의 사이트 매핑이 없습니다(설정 탭)' : ''}{!cand.writable ? ' · 조회 전용 범위라 등록할 수 없습니다' : ''}</div>
-          <div className="table-wrap" style={{ maxHeight: '32vh' }}>
-            <STable minWidth={640} limit={500}>
+          <div style={{ ...ROW, marginBottom: 6 }}>
+            <button type="button" className="logout-btn" style={BTN} disabled={!visiblePickable.length || sel.size >= cap} onClick={pickVisible}>보이는 등록 가능 VM 전체 선택({visiblePickable.length}대)</button>
+            <button type="button" className="logout-btn" style={BTN} disabled={!sel.size} onClick={() => setSel(new Set())}>선택 해제</button>
+            <span className="muted" style={{ fontSize: 12 }}>{sel.size}대 선택 · 한 번에 최대 {cap}대{cap < (cand.maxBulk || 0) ? `(원장 남은 자리 ${cand.jobsLeft}개)` : ''}</span>
+          </div>
+          <div className="table-wrap" style={{ maxHeight: '36vh' }}>
+            <STable minWidth={640} limit={500} wrap={false}>
               <thead><tr><th data-nosort>선택</th><th>VM</th><th>데이터센터 · 폴더</th><th>상태</th><th>등록 가능</th></tr></thead>
               <tbody>
                 {items.length === 0 && <tr><td colSpan={5} className="center muted" style={{ padding: 14 }}>조건에 맞는 VM 이 없습니다.</td></tr>}
                 {items.map((x) => (
-                  <tr key={x.id} style={{ opacity: x.eligible && !x.registered ? 1 : 0.6 }}>
-                    <td><input type="radio" name="bareos-pick" id={`bareos-pick-${x.id}`} aria-label={`${x.name} 선택`} disabled={!x.eligible || x.registered || !cand.writable} checked={vmId === x.id} onChange={() => setVmId(x.id)} /></td>
+                  <tr key={x.id} style={{ opacity: pickable(x) ? 1 : 0.6 }}>
+                    <td><input type="checkbox" id={`bareos-pick-${x.id}`} aria-label={`${x.name} 선택`} disabled={!pickable(x) || (!sel.has(x.id) && sel.size >= cap)} checked={sel.has(x.id)} onChange={() => toggle(x)} /></td>
                     <td><label htmlFor={`bareos-pick-${x.id}`}>{x.name}</label></td>
                     <td className="muted" style={{ fontSize: 12 }}>{x.dc ?? '—'} · {x.folder ?? '—'}</td>
                     <td className="muted" style={{ fontSize: 12 }}>{x.template ? '템플릿' : x.powerState === 'POWERED_ON' ? '켜짐' : x.powerState === 'POWERED_OFF' ? '꺼짐' : '—'}</td>
@@ -229,13 +298,27 @@ function AddForm({ d, onClose, onDone }) {
               </tbody>
             </STable>
           </div>
+          {items.length > 500 && <div className="muted" style={{ fontSize: 11.5, marginTop: 4 }}>표에는 정렬 기준 앞 500대만 보입니다(조건에 맞는 VM {items.length}대) — 폴더·이름으로 좁히세요. 전체 선택은 보이는 표가 아니라 조건에 맞는 VM 전체에서 고릅니다.</div>}
         </>
       )}
       {err && <div className="banner bad" style={{ marginTop: 8 }}>{err}</div>}
+      {result && (
+        <div style={{ marginTop: 10 }}>
+          <div className={`banner ${result.created > 0 ? (result.failed ? 'warn' : 'ok') : 'bad'}`} style={{ marginBottom: 6 }}>{bulkSummary(result)}</div>
+          {result.failed > 0 && (
+            <div className="table-wrap" style={{ maxHeight: '24vh' }}>
+              <STable minWidth={520} wrap={false}>
+                <thead><tr><th>VM</th><th>사유</th></tr></thead>
+                <tbody>{(result.results || []).filter((x) => !x.ok).map((x) => <tr key={x.vmId}><td>{x.vmName || nameOf.get(x.vmId) || x.vmId}</td><td style={{ fontSize: 12 }}>{x.reason}</td></tr>)}</tbody>
+              </STable>
+            </div>
+          )}
+        </div>
+      )}
       <div style={{ ...ROW, marginTop: 10 }}>
-        <span className="muted" style={{ fontSize: 12 }}>{pick ? `‘${pick.name}’ — Director 에 잡을 만들고(configure add job) 사이트 매핑의 스케줄을 배정합니다.` : 'VM 을 고르세요.'}</span>
+        <span className="muted" style={{ fontSize: 12 }}>{sel.size ? `${sel.size}대 — VM 마다 Director 에 잡을 만들고(configure add job) 사이트 매핑의 스케줄을 배정합니다. Director 접속은 한 번입니다.` : 'VM 을 고르세요.'}</span>
         <div style={{ flexGrow: 1 }} />
-        <button type="button" className="login-btn" style={{ flex: 'none', padding: '8px 16px' }} disabled={!vmId || busy} onClick={submit}>{busy ? '등록 중…' : '등록'}</button>
+        <button type="button" className="login-btn" style={{ flex: 'none', padding: '8px 16px' }} disabled={!sel.size || busy} onClick={submit}>{busy ? '등록 중…' : `${sel.size || ''}대 등록`}</button>
       </div>
     </div>
   );
@@ -245,7 +328,7 @@ function AddForm({ d, onClose, onDone }) {
 function LogModal({ job, jobid, onClose }) {
   const [r, setR] = useState(null);
   const [err, setErr] = useState(null);
-  useEffect(() => { fetchJson(`${BASE}/jobs/${enc(job.id)}/log`, { jobid }).then(setR).catch(setErr); }, [job.id, jobid]);
+  useEffect(() => { fetchJson(`${BASE}/jobs/${enc(job.id)}/log`, { jobid }, undefined, DIRECTOR_GET).then(setR).catch(setErr); }, [job.id, jobid]);
   return (
     <Modal title={`작업 로그 — jobid ${jobid} · ${job.vmName}`} onClose={onClose} width={920}>
       {err && <ErrorBox error={err} />}
@@ -274,7 +357,7 @@ function RestoreModal({ job, onClose, onDone }) {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState(null);
   useEffect(() => {
-    fetchJson(`${BASE}/jobs/${enc(job.id)}/restore-points`).then((r) => { setPts(r); if (r.items?.length) setJobid(r.items[0].jobid); }).catch(setPtsErr);
+    fetchJson(`${BASE}/jobs/${enc(job.id)}/restore-points`, {}, undefined, DIRECTOR_GET).then((r) => { setPts(r); if (r.items?.length) setJobid(r.items[0].jobid); }).catch(setPtsErr);
     fetchJson('/datastores', { vcenterId: job.vcenterId, limit: 2000 }).then((r) => setDss((r.items || []).map((x) => x.name))).catch(() => setDss([]));
     fetchJson('/hosts', { vcenterId: job.vcenterId, limit: 2000 }).then((r) => setClusters([...new Set((r.items || []).map((x) => x.cluster).filter((c) => c && c !== 'standalone'))])).catch(() => setClusters([]));
   }, [job.id, job.vcenterId]);
@@ -285,12 +368,14 @@ function RestoreModal({ job, onClose, onDone }) {
       const r = await postJson(`${BASE}/jobs/${enc(job.id)}/restore`, body);
       requireChanged(r);
       onDone(`복원을 시작했습니다(jobid ${r.jobid} · 원본 ${r.fromJobids.join(',')}). 진행은 실행 현황 탭에서 보입니다.`);
-    } catch (e) { setErr(e.message); } finally { setBusy(false); }
+    } catch (e) { setErr(e.message); setOtp(''); } finally { setBusy(false); }   // W8: 쓴(또는 틀린) OTP 를 남기면 다시 누를 때 실패 횟수만 오른다
   };
   const ready = jobid && /^\d{6}$/.test(otp) && (mode !== 'original' || confirmName === job.vmName) && (mode !== 'newVm' || nv.name.trim());
   return (
     <Modal title={`복원 — ${job.vmName}`} onClose={onClose} width={760}>
-      <div className="muted" style={{ fontSize: 12, marginBottom: 10 }}>{job.vcenterId} · {job.dc} · {job.folder} · 사이트 FD ‘{job.client}’ · 원래 vCenter 로만 복원합니다(Bareos 플러그인 제약).</div>
+      <div className="muted" style={{ fontSize: 12, marginBottom: 10 }}>{job.vcenterId} · {job.dc} · {job.folder} · 복원 FD ‘{pts?.restoreClient || job.client}’{pts?.restoreClient && pts.restoreClient !== job.client ? `(등록 때 ‘${job.client}’ — 지금의 사이트 매핑으로 복원합니다)` : ''} · 원래 vCenter 로만 복원합니다(Bareos 플러그인 제약).</div>
+      {job.drift && <div className="banner warn" style={{ marginBottom: 10 }}>{driftText(job.drift)}</div>}
+      {/-r\d$/.test(job.bareosJob) && <div className="muted" style={{ fontSize: 12, marginBottom: 10 }}>이 대상은 다시 등록한 잡(‘{job.bareosJob}’)입니다 — 지우기 전 잡의 백업은 여기 나오지 않습니다(Director 에서 그 잡 이름으로 복원하세요).</div>}
       {pts?.restorePending && <div className="banner bad" style={{ marginBottom: 10 }}>이 대상의 다른 복원이 진행 중입니다 — 끝난 뒤 다시 시도하세요.</div>}
       <fieldset style={{ border: 0, padding: 0, margin: '0 0 12px', minWidth: 0 }}>
         <legend style={{ fontWeight: 600, marginBottom: 6 }}>1. 복원 지점 <span className="muted" style={{ fontWeight: 400, fontSize: 12 }}>(성공한 백업 — 체인은 서버가 Director 카탈로그로 계산)</span></legend>
@@ -298,7 +383,7 @@ function RestoreModal({ job, onClose, onDone }) {
         {!pts && !ptsErr && <Loading />}
         {pts && !pts.items.length && <div className="muted">성공한 백업이 없습니다.</div>}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 180, overflow: 'auto' }}>
-          {(pts?.items || []).slice(0, 30).map((p) => (
+          {(pts?.items || []).slice(0, RESTORE_POINTS_SHOWN).map((p) => (
             <label key={p.jobid} htmlFor={`bareos-rp-${p.jobid}`} style={{ ...ROW, padding: '6px 10px', border: `1px solid ${jobid === p.jobid ? 'var(--accent)' : 'var(--border)'}`, borderRadius: 8, cursor: 'pointer' }}>
               <input type="radio" name="bareos-rp" id={`bareos-rp-${p.jobid}`} checked={jobid === p.jobid} onChange={() => setJobid(p.jobid)} />
               <b>{whenText(p.startedAt)}</b><span>{levelLabel(p.level)} · jobid {p.jobid}</span>
@@ -307,12 +392,13 @@ function RestoreModal({ job, onClose, onDone }) {
             </label>
           ))}
         </div>
+        {pts && <div className="muted" style={{ fontSize: 11.5, marginTop: 4 }}>{restorePointsNote(pts, RESTORE_POINTS_SHOWN)}</div>}
       </fieldset>
       <fieldset style={{ border: 0, padding: 0, margin: '0 0 12px', minWidth: 0 }}>
         <legend style={{ fontWeight: 600, marginBottom: 6 }}>2. 복원 방식</legend>
         {Object.entries(RESTORE_MODE_LABEL).map(([k, l]) => (
           <label key={k} htmlFor={`bareos-mode-${k}`} style={{ ...ROW, padding: '4px 0', cursor: 'pointer' }}>
-            <input type="radio" name="bareos-mode" id={`bareos-mode-${k}`} checked={mode === k} onChange={() => setMode(k)} />
+            <input type="radio" name="bareos-mode" id={`bareos-mode-${k}`} checked={mode === k} disabled={k === 'original' && !!job.drift} onChange={() => setMode(k)} />
             <span>{l}</span>
             <span className="muted" style={{ fontSize: 12 }}>
               {k === 'original' ? '— 파괴적: VM 이 꺼져 있고 스냅샷이 없어야 합니다(서버가 인벤토리로 확인)' : k === 'newVm' ? '— 새 MAC·UUID 로 만들고 꺼진 채로 둡니다(정적 IP 충돌 방지)' : '— FD 의 /tmp/bareos-restores/ 에 VMDK 로 풉니다(운영자용)'}
@@ -365,21 +451,25 @@ function HistoryTab({ d }) {
   const [err, setErr] = useState(null);
   const [logOf, setLogOf] = useState(null);
   const gen = useRef(0);
+  const [limit, setLimit] = useState(null);
   const job = d.jobs.find((j) => j.id === sel);
+  // W10: 고른 대상이 지워지면 첫 대상으로(예전에는 job 이 없어 '보기' 가 화면 오류를 냈다)
+  useEffect(() => { if (sel && !job) setSel(d.jobs[0]?.id || ''); }, [sel, job, d.jobs]);
   const load = () => {
     const g = ++gen.current;
     setHist(null); setErr(null);
     if (!sel) return;
-    fetchJson(`${BASE}/jobs/${enc(sel)}/history`).then((r) => { if (g === gen.current) setHist(r.items || []); }).catch((e) => { if (g === gen.current) setErr(e); });
+    fetchJson(`${BASE}/jobs/${enc(sel)}/history`, {}, undefined, DIRECTOR_GET).then((r) => { if (g === gen.current) { setHist(r.items || []); setLimit(r.limit ?? null); } }).catch((e) => { if (g === gen.current) setErr(e); });
   };
   useEffect(load, [sel]);
-  const running = d.jobs.filter((j) => j.pending?.jobid);
+  // W5: 포탈이 시작한 실행 + Bareos 스케줄이 돌리는 실행(대조가 넣은 lastRun — 대조 주기만큼 늦을 수 있다)
+  const running = d.jobs.filter((j) => j.pending?.jobid || ['running', 'queued', 'waiting'].includes(j.lastRun?.state));
   const restores = d.jobs.flatMap((j) => (j.restores || []).map((r) => ({ ...r, job: j }))).sort((a, b) => (b.at || 0) - (a.at || 0)).slice(0, 50);
   return (
     <div>
-      <div className="muted" style={{ fontSize: 12, fontWeight: 600, marginBottom: 6 }}>포탈이 시작한 실행 중 백업 {running.length}건</div>
+      <div className="muted" style={{ fontSize: 12, fontWeight: 600, marginBottom: 6 }}>실행 중 백업 {running.length}건</div>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: 10, marginBottom: 14 }}>
-        {running.length === 0 && <div className="muted" style={{ fontSize: 12.5, gridColumn: '1 / -1' }}>없음 — Bareos 스케줄이 돌린 실행은 대상 표의 ‘최근 실행’ 에 반영됩니다(대조 주기마다).</div>}
+        {running.length === 0 && <div className="muted" style={{ fontSize: 12.5, gridColumn: '1 / -1' }}>없음 — Bareos 스케줄이 돌린 실행은 상태 대조 때 반영됩니다(대조 주기만큼 늦을 수 있습니다).</div>}
         {running.map((j) => { const c = runCell(j); return (
           <div key={j.id} className="card" style={{ padding: '10px 12px', minWidth: 0, borderLeft: '3px solid var(--accent-2)' }}>
             <div style={ROW}><b>{j.vmName}</b><span className="muted" style={{ fontSize: 12 }}>{j.vcenterId}</span>{c.badge && <span className={`badge ${c.badge.cls}`}>{c.badge.label}</span>}</div>
@@ -395,13 +485,13 @@ function HistoryTab({ d }) {
           {d.jobs.map((j) => <option key={j.id} value={j.id}>{j.vmName} · {j.vcenterId}</option>)}
         </Select>
         <button type="button" className="logout-btn" style={BTN} onClick={load} disabled={!sel}>새로 고침</button>
-        <span className="muted" style={{ fontSize: 12 }}>Director 카탈로그 최근 30건 · 상태 코드 T 성공 · W 경고 · E·f 오류 · A 취소 · R 실행 중 · C 대기</span>
+        <span className="muted" style={{ fontSize: 12 }}>Director 카탈로그 {Number.isInteger(limit) ? `최근 ${limit}건` : '최근 실행'} · 상태 코드 T 성공 · W 경고 · E·f 오류 · A 취소 · R 실행 중 · C 대기</span>
       </div>
       {err && <ErrorBox error={err} />}
       {sel && !hist && !err && <Loading />}
       {hist && (
         <div className="table-wrap" style={{ maxHeight: '40vh', marginBottom: 14 }}>
-          <STable minWidth={820}>
+          <STable minWidth={820} wrap={false}>
             <thead><tr><th>jobid</th><th>레벨</th><th>시작</th><th>종료</th><th className="right">바이트</th><th className="right">파일</th><th>상태</th><th data-nosort>로그</th></tr></thead>
             <tbody>
               {hist.length === 0 && <tr><td colSpan={8} className="center muted" style={{ padding: 16 }}>실행 이력이 없습니다.</td></tr>}
@@ -411,7 +501,7 @@ function HistoryTab({ d }) {
                   <td data-sort={r.startedAt ?? ''}>{whenText(r.startedAt)}</td><td data-sort={r.endedAt ?? ''}>{whenText(r.endedAt)}</td>
                   <td className="right" data-sort={r.bytes ?? ''}>{bytesText(r.bytes)}</td><td className="right" data-sort={r.files ?? ''}>{r.files ?? '—'}</td>
                   <td><span className={`badge ${b.cls}`}>{b.label}</span></td>
-                  <td><button type="button" className="logout-btn" style={BTN} onClick={() => setLogOf({ job, jobid: r.jobid })}>보기</button></td>
+                  <td><button type="button" className="logout-btn" style={BTN} disabled={!job} onClick={() => job && setLogOf({ job, jobid: r.jobid })}>보기</button></td>
                 </tr>
               ); })}
             </tbody>
@@ -419,9 +509,9 @@ function HistoryTab({ d }) {
         </div>
       )}
 
-      <div className="muted" style={{ fontSize: 12, fontWeight: 600, marginBottom: 6 }}>복원 이력(대상별 최근 20건)</div>
+      <div className="muted" style={{ fontSize: 12, fontWeight: 600, marginBottom: 6 }}>복원 이력(대상마다 최근 기록 — 전체는 Director 카탈로그)</div>
       <div className="table-wrap" style={{ maxHeight: '30vh' }}>
-        <STable minWidth={760}>
+        <STable minWidth={760} wrap={false}>
           <thead><tr><th>복원 jobid</th><th>VM</th><th>방식 · 대상</th><th>요청</th><th>상태</th><th data-nosort>로그</th></tr></thead>
           <tbody>
             {restores.length === 0 && <tr><td colSpan={6} className="center muted" style={{ padding: 14 }}>복원 이력이 없습니다.</td></tr>}
@@ -441,6 +531,26 @@ function HistoryTab({ d }) {
   );
 }
 
+/** v2.822 단계별 연결 진단 — 단계마다 ✓/✗/시도 안 함 · 걸린 시간 · 내용 · (실패면) 조치. 문구는 서버(console.diagnoseConsole)가 만든다. */
+function DiagStages({ stages }) {
+  return (
+    <ol aria-label="연결 진단 단계" style={{ listStyle: 'none', margin: '10px 0 0', padding: 0, display: 'flex', flexDirection: 'column', gap: 4 }}>
+      {stages.map((x) => {
+        const v = diagView(x);
+        return (
+          <li key={x.key} style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 17em) minmax(0, 1fr)', gap: 8, alignItems: 'baseline', fontSize: 12 }}>
+            <span style={{ minWidth: 0, wordBreak: 'keep-all' }}><span className={`badge ${v.cls}`} style={{ fontSize: 10.5 }}>{v.mark}</span> {x.label}</span>
+            <span style={{ minWidth: 0, overflowWrap: 'anywhere' }}>
+              <span className={x.ok === false ? '' : 'muted'}>{x.detail || '—'}</span>{v.ms && <span className="muted"> · {v.ms}</span>}
+              {x.hint && <div style={{ color: 'var(--amber)', marginTop: 2 }}>조치: {x.hint}</div>}
+            </span>
+          </li>
+        );
+      })}
+    </ol>
+  );
+}
+
 /* ───────────────────────── 설정(전체 범위 관리자) ───────────────────────── */
 function SettingsTab({ onSaved }) {
   const [s, setS] = useState(null);
@@ -451,6 +561,7 @@ function SettingsTab({ onSaved }) {
   const [msg, setMsg] = useState(null);
   const [busy, setBusy] = useState(false);
   const [addVc, setAddVc] = useState('');
+  const [diag, setDiag] = useState(null);   // v2.822 단계별 연결 진단 결과(stages)
   // keepEdits: 자동 설정이 Director 연결만 바꿨을 때 — 저장하지 않은 기본값·사이트 표 편집은 버리지 않는다.
   const fetchSettings = (keepEdits) => fetchJson(`${BASE}/settings`).then((r) => {
     setS(r); setErr(null);
@@ -458,7 +569,13 @@ function SettingsTab({ onSaved }) {
     setForm((f) => (keepEdits && f ? { ...f, director } : { director, defaults: { ...r.defaults }, sites: r.sites.map((x) => ({ ...x })) }));
   }).catch(setErr);
   const load = () => fetchSettings(false);
-  const loadCat = (refresh) => { setCatErr(null); fetchJson(`${BASE}/catalog`, refresh ? { refresh: 1 } : {}).then(setCat).catch(setCatErr); };
+  const catGen = useRef(0);
+  // W14: 늦게 온 이전 응답은 버린다(저장 직후 새로 읽기와 겹칠 때) · W2: 재시도 없음
+  const loadCat = (refresh) => {
+    const g = ++catGen.current;
+    setCatErr(null);
+    fetchJson(`${BASE}/catalog`, refresh ? { refresh: 1 } : {}, undefined, DIRECTOR_GET).then((r) => { if (g === catGen.current) setCat(r); }).catch((e) => { if (g === catGen.current) setCatErr(e); });
+  };
   useEffect(() => { fetchSettings(false); loadCat(false); }, []);
   if (err && !s) return <ErrorBox error={err} />;
   if (!s || !form) return <Loading />;
@@ -482,13 +599,17 @@ function SettingsTab({ onSaved }) {
     } catch (e) { setMsg({ ok: false, text: `저장 실패: ${e.message}` }); } finally { setBusy(false); }
   };
   const test = async () => {
-    setBusy(true); setMsg(null);
+    setBusy(true); setMsg(null); setDiag(null);
     try {
       const body = form.director.password ? { director: { ...form.director } } : {};
       const r = await postJson(`${BASE}/settings/test`, body);
       requireChanged(r);
+      setDiag(r.stages || null);
       setMsg({ ok: true, text: `연결 성공 — Director ‘${r.director || '?'}’ ${r.version || ''} · ${r.tls ? `${r.tls.protocol} ${r.tls.cipher}` : '암호화 없음'} · 클라이언트 ${r.clients ? `${r.clients.length}개` : `조회 실패(${r.clientsError})`}${form.director.password ? '' : ' (저장된 주소·비밀번호로 시험)'}` });
-    } catch (e) { setMsg({ ok: false, text: `연결 실패: ${e.message}` }); } finally { setBusy(false); }
+    } catch (e) {
+      setDiag(Array.isArray(e?.body?.stages) ? e.body.stages : null);
+      setMsg({ ok: false, text: `연결 실패: ${e.message}` });
+    } finally { setBusy(false); }
   };
   const copy = (text) => { try { navigator.clipboard.writeText(text).then(() => setMsg({ ok: true, text: '복사했습니다.' }), () => setMsg({ ok: false, text: '복사하지 못했습니다 — 글을 직접 선택해 복사하세요.' })); } catch { setMsg({ ok: false, text: '복사하지 못했습니다 — 글을 직접 선택해 복사하세요.' }); } };
   const field = { fontSize: 12, display: 'flex', flexDirection: 'column', gap: 4, minWidth: 0 };
@@ -519,12 +640,15 @@ function SettingsTab({ onSaved }) {
             전송은 TLS-PSK 로만 합니다(평문 하향 없음). 저장된 비밀번호로 시험하면 저장된 주소로만 접속합니다. 주소·포트·콘솔 이름을 바꾸면 저장된 비밀번호는 승계하지 않습니다.
           </div>
           <div style={{ ...ROW, marginTop: 10 }}>
-            <button type="button" className="logout-btn" style={{ padding: '7px 14px' }} disabled={busy} onClick={test}>연결 시험</button>
+            <button type="button" className="logout-btn" style={{ padding: '7px 14px' }} disabled={busy} onClick={test}>{busy ? '시험 중…' : '연결 시험'}</button>
+            <span className="muted" style={{ fontSize: 11.5 }}>주소 → DNS → TCP → TLS-PSK → 인증 → JSON 모드 → 시험 명령을 차례로 봅니다</span>
           </div>
+          {diag && <DiagStages stages={diag} />}
         </div>
         <div className="card" style={{ padding: 14, minWidth: 0 }}>
           <div style={ROW}><b>기본값</b><span className="muted" style={{ fontSize: 12 }}>Director 카탈로그에서 고릅니다</span><div style={{ flexGrow: 1 }} /><button type="button" className="logout-btn" style={BTN} onClick={() => loadCat(true)}>카탈로그 새로 고침</button></div>
           {catErr && <div className="muted" style={{ fontSize: 12, color: 'var(--red)', marginTop: 6 }}>카탈로그를 읽지 못했습니다: {catErr.message} — 이름을 직접 확인하세요.</div>}
+          {cat?.errors && Object.keys(cat.errors).length > 0 && <div className="muted" style={{ fontSize: 12, color: 'var(--amber)', marginTop: 6 }}>일부 목록을 읽지 못했습니다(그 칸의 선택지가 비어 있을 수 있습니다): {Object.entries(cat.errors).map(([k, v]) => `${k} — ${String(v).slice(0, 120)}`).join(' · ')}</div>}
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 8, marginTop: 8 }}>
             {[['jobDefs', 'JobDefs', 'jobdefs'], ['fileSet', 'FileSet(범용)', 'filesets'], ['restoreJob', '복원 잡', null]].map(([k, l, ck]) => (
               <label key={k} className="muted" style={field}>{l}

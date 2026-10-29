@@ -151,6 +151,7 @@ export const ROUTE_GATE_ALLOW = Object.freeze({
   'PUT /api/tools/vm-clone/corps/mounts': 'scopedVcenterIds·inUserWriteScope — 법인 vCenter 조회 404 · 전부 쓰기 아니면 403(v2.794)',
   // v2.820 Bareos VM 백업 — 대상 vCenter 귀속: bareosAccess(조회 밖 404 → 쓰기 밖 403)
   'POST /api/tools/bareos-backup/jobs': 'bareosAccess — 대상 vCenter 조회 404 → 쓰기 403(v2.820)',
+  'POST /api/tools/bareos-backup/jobs/bulk': 'bareosAccess — 대상 vCenter 조회 404 → 쓰기 403 · VM 마다 그 vCenter 인벤토리인지 prepareTarget(v2.822)',
   'POST /api/tools/bareos-backup/jobs/:id/run': 'bareosAccess — 대상의 vCenter 쓰기 범위(v2.820)',
   'POST /api/tools/bareos-backup/jobs/:id/cancel': 'bareosAccess — 대상의 vCenter 쓰기 범위(v2.820)',
   'PATCH /api/tools/bareos-backup/jobs/:id': 'bareosAccess — 대상의 vCenter 쓰기 범위(v2.820)',

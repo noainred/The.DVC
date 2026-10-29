@@ -125,6 +125,13 @@ export const MIXED_EXTRA_RUN_FIELDS = new Map([
     }
     return { ...obj, agents };
   }],
+  // v2.822(검토 I6 — 재현): Bareos 원장의 실행 상태 — 포탈이 시작한 실행 1건이 pending 기록·상태 전이·복원 기록마다 지문을 바꿔
+  //   change 백업을 최대 3번 만들었다. 대상(잡) 정의만 남긴다(lastRun·lastError 는 last* 규칙이 이미 뺀다).
+  ['bareos-jobs.json', (obj) => {
+    if (!obj || typeof obj !== 'object' || !Array.isArray(obj.jobs)) return obj;
+    const BAREOS_RUN = new Set(['pending', 'restores', 'missingInDirector']);
+    return { ...obj, jobs: obj.jobs.map((j) => (j && typeof j === 'object' ? Object.fromEntries(Object.entries(j).filter(([k]) => !BAREOS_RUN.has(k))) : j)) };
+  }],
 ]);
 function stripRunFields(v) {
   if (Array.isArray(v)) return v.map(stripRunFields);

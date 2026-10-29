@@ -41,7 +41,7 @@ function handle(cmd) {
   D.cmds.push(cmd);
   const kv = Object.fromEntries([...cmd.matchAll(/(\w+)=("(?:\\.|[^"])*"|\S+)/g)].map((m) => [m[1], m[2]]));
   if (cmd === '.clients') return { clients: [{ name: 'kr-fd' }] };
-  if (cmd === '.jobs') return { jobs: [...D.jobs.keys()].map((name) => ({ name })) };
+  if (cmd === '.jobs') return { jobs: [...D.jobs].map(([name, j]) => ({ name, enabled: j.enabled !== false })) };   // 실제처럼 enabled(메모리 값)
   if (cmd.startsWith('configure add job')) {
     if (D.jobs.has(kv.name)) return { error: [`Resource "Job" with name "${kv.name}" already exists.`] };
     D.jobs.set(kv.name, { enabled: true }); return { add: { resource: 'Job', name: kv.name, filename: `/etc/bareos/bareos-dir.d/job/${kv.name}.conf` } };
@@ -50,17 +50,23 @@ function handle(cmd) {
   if (cmd.startsWith('restore ')) { const id = D.nextId++; D.runs.set(id, { name: 'PortalVmwareRestore', status: 'C', type: 'R' }); return { run: { jobid: id } }; }
   if (cmd.startsWith('llist jobid=')) {
     const id = Number(kv.jobid);
+    if (D.denyLlist?.has(id)) return { error: ['llist: access denied'] };
     const r = D.runs.get(id);
     if (r) return { jobs: [{ jobid: id, name: r.name, type: r.type, level: 'I', jobstatus: r.status, starttime: '2026-10-29 02:00:00', endtime: r.status === 'T' ? '2026-10-29 02:10:00' : '', jobbytes: r.status === 'T' ? 2048 : 0 }] };
     for (const n of D.jobs.keys()) { const h = HIST(n).find((x) => x.jobid === id); if (h) return { jobs: [h] }; }
     return { jobs: [] };
   }
-  if (cmd.startsWith('list jobs job=')) return { jobs: HIST(kv.job).reverse() };
+  if (cmd.startsWith('list jobs job=')) return { jobs: HIST(kv.job) };   // 실제 Director 처럼 오름차순(v2.822 W1)
   if (cmd.startsWith('list jobs days=')) return { jobs: [...D.runs.entries()].filter(([, r]) => r.type === 'B').map(([jobid, r]) => ({ jobid, name: r.name, type: 'B', level: 'I', jobstatus: r.status })) };
   if (cmd.startsWith('list joblog')) return { joblog: [{ time: '2026-10-29 02:00:00', logtext: `log of ${kv.jobid}\n` }] };
-  if (cmd.startsWith('.bvfs_get_jobids')) return { jobids: '100,110,130' };
+  if (cmd.startsWith('.bvfs_get_jobids')) return { jobids: '90,100,105,110,130' };   // 실제처럼 FD+FileSet 로 골라 다른 VM(90·105)이 섞인다 — 포탈은 쓰면 안 된다(S1)
   if (cmd.startsWith('cancel ')) { const r = D.runs.get(Number(kv.jobid)); if (r) r.status = 'A'; return { cancel: {} }; }
-  if (cmd.startsWith('enable ') || cmd.startsWith('disable ')) return { ok: true };
+  if (cmd.startsWith('enable ') || cmd.startsWith('disable ')) {   // 실제처럼 메모리 값만 바꾸고, 모르는 잡은 거부(ua_cmds.cc)
+    const j = D.jobs.get(kv.job);
+    if (!j) return { error: [`Job "${kv.job}" not found.`] };
+    j.enabled = cmd.startsWith('enable ');
+    return { [cmd.split(' ')[0]]: { jobs: [kv.job] } };
+  }
   return { error: [`unknown command ${cmd}`] };
 }
 
@@ -93,6 +99,7 @@ before(async () => {
       { id: 'vc-a:vm-3', vcenterId: 'vc-a', name: 'vapp-child', powerState: 'POWERED_ON', vcDcPath: null, folderPath: null },
       { id: 'vc-a:vm-4', vcenterId: 'vc-a', name: 'bad:name', powerState: 'POWERED_ON', vcDcPath: 'DC-A', folderPath: '/' },
       { id: 'vc-b:vm-9', vcenterId: 'vc-b', name: 'db-09', powerState: 'POWERED_ON', snapshotCount: 0, vcDcPath: 'DC-B', folderPath: '/' },
+      { id: 'vc-a:vm-5', vcenterId: 'vc-a', name: 'app-05', powerState: 'POWERED_ON', snapshotCount: 0, vcDcPath: 'DC-A', folderPath: '/app' },
     ],
     alarms: [], networks: [],
   };
@@ -154,6 +161,19 @@ test('③ 연결 시험: 저장 비밀번호로 시험하면 요청의 주소를
   r = await call('admin', 'POST', '/settings/test', { director: { host: '127.0.0.1', port: 1, consoleName: 'portal', password: 'pw-1' } });
   assert.equal(r.s, 502);
   assert.equal(r.j.code, 'connect');
+  // v2.822 단계별 진단 — 실패 단계와 그 뒤 '시도 안 함' · 성공 시험도 단계를 돌려준다
+  const st = Object.fromEntries(r.j.stages.map((x) => [x.key, x]));
+  assert.equal(st.address.ok, true); assert.equal(st.tcp.ok, false); assert.ok(st.tcp.hint); assert.equal(st.tls.skipped, true);
+  const good = await call('admin', 'POST', '/settings/test', {});
+  assert.deepEqual(good.j.stages.map((x) => x.ok ?? 'skip'), [true, 'skip', true, true, true, true, true]);
+  // v2.822(B4) 감사 대상은 실제 접속한 주소 — 저장 비밀번호 시험은 요청 주소를 무시한다
+  const { listAudit } = await import('../src/audit.js');
+  const last = listAudit({ limit: 20, q: 'Bareos 연결 시험' }).items[0];
+  assert.ok(last, '연결 시험 감사 기록');
+  assert.equal(last.target, `127.0.0.1:${fd.port}`, '저장 비밀번호 시험은 요청의 주소(127.0.0.1:1)가 아니라 실제 접속한 저장 주소');
+  const bodyHost = await call('admin', 'POST', '/settings/test', { director: { host: '10.9.9.9', port: 1 } });
+  assert.equal(bodyHost.s, 200, '저장 비밀번호 시험은 요청 주소를 무시한다(v2.480)');
+  assert.equal(listAudit({ limit: 20, q: 'Bareos 연결 시험' }).items[0].target, `127.0.0.1:${fd.port}`);
 });
 
 test('④ 등록 후보: 범위 밖 404 · 템플릿·위치 없음·금지 글자는 사유와 함께 불가', async () => {
@@ -229,6 +249,7 @@ test('⑥ 복원: OTP 없는 계정 403 · 전제 실패는 OTP 를 쓰기 전�
   assert.deepEqual(r.j.fromJobids, [100, 110, 130]);
   const cmd = D.cmds.find((c) => c.startsWith('restore '));
   assert.equal(cmd, 'restore client=kr-fd restoreclient=kr-fd jobid=100,110,130 restorejob=PortalVmwareRestore pluginoptions="python3:vmname=web-01-r:restore_powerstate=off:restore_datastore=ds-a1" select all done yes');
+  assert.equal(D.cmds.filter((c) => c.startsWith('.bvfs_get_jobids')).length, 0, 'S1: 체인은 이 잡의 이력으로만 — bvfs 는 같은 FD 의 다른 VM(90·105)을 섞는다');
   assert.equal(registry.getJob(jobId).restores[0].jobid, r.j.jobid);
   assert.equal((await call('admin', 'POST', `/jobs/${jobId}/restore`, { jobid: 130, mode: 'localVmdk', otp: 'x' })).s, 409);
   // 폴링이 복원 상태를 갱신한다
@@ -273,4 +294,164 @@ test('⑤ 비활성 → 삭제(Director 잡은 disable, 원장만 삭제 · conf
   assert.match(r.j.note, /bareos-dir\.d\/job\/pv-/);
   assert.equal(registry.getJob(jobId), null);
   assert.ok(D.cmds.filter((c) => c.startsWith('disable job=')).length >= 2);
+});
+
+test('⑧ 일괄 등록(v2.822): 조회 밖 404 · 쓰기 밖 403 · 상한 400 · Director 세션 1개로 순차 등록 · 한 대의 실패가 나머지를 막지 않는다', async () => {
+  assert.equal((await call('sadm', 'POST', '/jobs/bulk', { vcenterId: 'vc-b', vmIds: ['vc-b:vm-9'] })).s, 404);
+  assert.equal((await call('wadm', 'POST', '/jobs/bulk', { vcenterId: 'vc-b', vmIds: ['vc-b:vm-9'] })).s, 403);
+  assert.equal((await call('op', 'POST', '/jobs/bulk', { vcenterId: 'vc-a', vmIds: ['vc-a:vm-5'] })).s, 403, 'admin 전용');
+  const many = Array.from({ length: 201 }, (_, i) => `vc-a:vm-x${i}`);
+  const big = await call('admin', 'POST', '/jobs/bulk', { vcenterId: 'vc-a', vmIds: many });
+  assert.equal(big.s, 400);
+  assert.equal(big.j.maxBulk, 200);
+  assert.equal((await call('admin', 'POST', '/jobs/bulk', { vcenterId: 'vc-a', vmIds: [] })).s, 400);
+  const cand = await call('admin', 'GET', '/vm-candidates?vcenterId=vc-a');
+  assert.equal(cand.j.maxBulk, 200, '화면은 상한을 API 값으로 쓴다');
+  assert.ok(Number.isInteger(cand.j.jobsLeft));
+  const conns = fd.identities.length;
+  const adds = D.cmds.filter((c) => c.startsWith('configure add job')).length;
+  // vm-1 은 앞 시험에서 지워졌다(Director 에는 비활성 잡이 남아 있다 → 접미사 r2 로 새 잡) · vm-2 템플릿 · vm-3 위치 없음 · 없는 VM · 중복 id
+  const r = await call('admin', 'POST', '/jobs/bulk', { vcenterId: 'vc-a', vmIds: ['vc-a:vm-5', 'vc-a:vm-1', 'vc-a:vm-2', 'vc-a:vm-3', 'vc-a:nope', 'vc-a:vm-5'] });
+  assert.equal(r.s, 200, r.t);
+  assert.equal(r.j.ok, true);
+  assert.equal(r.j.created, 2);
+  assert.equal(r.j.failed, 3, '중복 id 는 한 번만');
+  const by = Object.fromEntries(r.j.results.map((x) => [x.vmId, x]));
+  assert.equal(by['vc-a:vm-5'].ok, true);
+  assert.equal(by['vc-a:vm-1'].ok, true);
+  assert.match(by['vc-a:vm-1'].bareosJob, /-r2$/, 'Director 에 같은 이름이 남아 있으면 접미사로 새 잡');
+  assert.match(by['vc-a:vm-2'].reason, /템플릿/);
+  assert.match(by['vc-a:vm-3'].reason, /데이터센터·폴더/);
+  assert.match(by['vc-a:nope'].reason, /인벤토리에 없습니다/);
+  assert.equal(fd.identities.length - conns, 1, 'Director 세션은 하나');
+  assert.equal(D.cmds.filter((c) => c.startsWith('configure add job')).length - adds, 3, 'vm-5 1번 + vm-1 2번(이미 있음 → r2) — 준비 단계에서 걸러진 VM 은 Director 에 닿지 않는다');
+  assert.ok(registry.findByVm('vc-a', 'vc-a:vm-5'));
+  // 모두 실패면 ok:false + 사유(대상별 결과는 그대로)
+  const none = await call('admin', 'POST', '/jobs/bulk', { vcenterId: 'vc-a', vmIds: ['vc-a:vm-5'] });
+  assert.equal(none.j.ok, false);
+  assert.match(none.j.results[0].reason, /이미 백업 대상/);
+});
+
+test('⑨ B2(v2.822): 같은 대상의 실행 요청이 동시에 오면 하나만 Director 에 간다(나머지 409) · B3: /poll 응답도 범위 관리자에게 가린다', async () => {
+  const id = registry.findByVm('vc-a', 'vc-a:vm-5').id;
+  const runs = D.cmds.filter((c) => c.startsWith('run ')).length;
+  const rs = await Promise.all([call('admin', 'POST', `/jobs/${id}/run`, {}), call('admin', 'POST', `/jobs/${id}/run`, {}), call('admin', 'POST', `/jobs/${id}/run`, {})]);
+  assert.deepEqual(rs.map((r) => r.s).sort(), [202, 409, 409], rs.map((r) => r.t).join(' | '));
+  assert.equal(D.cmds.filter((c) => c.startsWith('run ')).length - runs, 1, 'Director 에 run 은 한 번');
+  // B3 — 폴러 오류 원문(주소가 실린다)은 전체 범위 관리자만
+  const svc = await import('../src/bareos/service.js');
+  svc._setSessionFactoryForTest(async () => { const e = new Error('Director 에 연결하지 못했습니다: 10.1.2.3:9101 연결 거부'); e.code = 'connect'; throw e; });
+  try {
+    const s = await call('sadm', 'POST', '/poll');
+    assert.equal(s.s, 200);
+    assert.equal(s.j.poller.ok, false);
+    assert.doesNotMatch(s.t, /10\.1\.2\.3/, '범위 관리자 응답에 Director 주소가 없다');
+    const a = await call('admin', 'POST', '/poll');
+    assert.match(a.j.poller.error, /10\.1\.2\.3/, '전체 범위 관리자는 원문을 본다');
+  } finally { svc._setSessionFactoryForTest(null); }
+});
+
+test('⑩ v2.822 확정 결함: C3 동시 등록·원장 못 씀·원장 손상 · I3 reload 뒤 다시 끄기 · P5 취소로 추적 해제 · P4 복원 중 삭제 409 · C5 한 건 거부', async () => {
+  store.snapshot.vms.push(
+    { id: 'vc-a:vm-6', vcenterId: 'vc-a', name: 'app-06', powerState: 'POWERED_OFF', snapshotCount: 0, vcDcPath: 'DC-A', folderPath: '/app' },
+    { id: 'vc-a:vm-7', vcenterId: 'vc-a', name: 'app-07', powerState: 'POWERED_OFF', snapshotCount: 0, vcDcPath: 'DC-A', folderPath: '/app' },
+    { id: 'vc-a:vm-8', vcenterId: 'vc-a', name: 'app-08', powerState: 'POWERED_OFF', snapshotCount: 0, vcDcPath: 'DC-A', folderPath: '/app' },
+  );
+  const addsFor = (moref) => D.cmds.filter((c) => c.startsWith('configure add job') && new RegExp(`name=pv-[0-9a-f]+-${moref}(-r\\d)?\\b`).test(c)).length;
+  // C3 — 같은 VM 을 동시에 두 번: Director 잡은 하나(예전에는 -r2 고아)
+  const two = await Promise.all([call('admin', 'POST', '/jobs', { vcenterId: 'vc-a', vmId: 'vc-a:vm-6' }), call('admin', 'POST', '/jobs', { vcenterId: 'vc-a', vmId: 'vc-a:vm-6' })]);
+  assert.deepEqual(two.map((r) => r.s).sort(), [201, two.find((r) => r.s !== 201).s].sort());
+  assert.ok([400, 409].includes(two.find((r) => r.s !== 201).s), two.map((r) => r.t).join(' | '));
+  assert.equal(addsFor('vm-6'), 1, 'configure add 는 한 번');
+  const j6 = registry.findByVm('vc-a', 'vc-a:vm-6');
+
+  // I3 — 비활성 대상·지운 대상의 잡이 Director reload 로 다시 켜지면 대조 틱이 다시 끈다
+  assert.equal((await call('admin', 'PATCH', `/jobs/${j6.id}`, { enabled: false })).s, 200);
+  const retired = registry.retiredNames().map((r) => r.name);
+  assert.ok(retired.length >= 1, '⑤ 에서 지운 대상의 잡 이름이 남아 있다');
+  for (const j of D.jobs.values()) j.enabled = true;   // Director reload — disable 은 conf 에 없어 다시 켜진다
+  let p = await call('admin', 'POST', '/poll');
+  assert.equal(p.j.poller.ok, true, p.t);
+  assert.equal(D.jobs.get(j6.bareosJob).enabled, false, '비활성 대상을 다시 껐다');
+  for (const n of retired) assert.equal(D.jobs.get(n).enabled, false, `지운 대상 ${n} 을 다시 껐다`);
+  assert.ok(p.j.poller.redisabled >= 1 + retired.length);
+  D.jobs.delete(retired[0]);   // 관리자가 conf 를 지우고 reload
+  await call('admin', 'POST', '/poll');
+  assert.ok(!registry.retiredNames().some((r) => r.name === retired[0]), 'Director 에서 사라진 잡은 기록에서도 지운다');
+
+  // P5 — Director 가 모르는 pending 은 취소로 추적만 내린다(예전에는 영구 409)
+  registry.markPending(j6.id, { jobid: 777777, level: 'I', by: 't' });
+  assert.equal((await call('admin', 'DELETE', `/jobs/${j6.id}`)).s, 409);
+  const c = await call('admin', 'POST', `/jobs/${j6.id}/cancel`, {});
+  assert.equal(c.s, 200, c.t);
+  assert.equal(c.j.cleared, true);
+  assert.equal(registry.getJob(j6.id).pending, null);
+  assert.match(registry.getJob(j6.id).lastError.message, /777777/);
+  assert.equal(D.cmds.filter((x) => x === 'cancel jobid=777777').length, 0, 'Director 에 없는 실행에 cancel 을 보내지 않는다');
+
+  // P4 — 복원이 진행 중이면 삭제 409 · C5 — 그 복원의 llist 가 거부돼도 다른 대상의 갱신은 계속
+  registry.addRestore(j6.id, { jobid: 888888, fromJobids: [100], mode: 'newVm', by: 't', client: 'kr-fd' });
+  const del = await call('admin', 'DELETE', `/jobs/${j6.id}`);
+  assert.equal(del.s, 409);
+  assert.match(del.j.reason, /복원이 진행 중/);
+  D.denyLlist = new Set([888888]);
+  const j5 = registry.findByVm('vc-a', 'vc-a:vm-5');
+  for (const r of D.runs.values()) if (r.name === j5.bareosJob) r.status = 'T';
+  p = await call('admin', 'POST', '/poll');
+  D.denyLlist = null;
+  assert.equal(p.j.poller.ok, true, p.t);
+  assert.ok(p.j.poller.itemErrors >= 1);
+  assert.equal(registry.getJob(j5.id).pending, null, '한 건의 거부가 다른 대상의 갱신을 막지 않는다');
+
+  // S3·I5 — 등록 뒤 이름이 바뀌면 목록에 drift · 덮어쓰기 복원은 OTP 를 쓰기 전에 400
+  const vm6 = store.snapshot.vms.find((v) => v.id === 'vc-a:vm-6');
+  vm6.name = 'app-06-old';
+  const lst = await call('admin', 'GET', '');
+  assert.deepEqual(lst.j.jobs.find((x) => x.id === j6.id).drift, ['이름']);
+  vm6.name = 'app-06';
+  assert.equal((await call('admin', 'GET', '')).j.jobs.find((x) => x.id === j6.id).drift, undefined);
+
+  // I8 — 실제 원장에 남은 데모 대상: 실제 Director 에 run·enable 을 보내지 않고, 지우기는 원장에서만
+  const dj = registry.addJob({ vcenterId: 'vc-a', vmId: 'vc-a:demo-1', vmName: 'demo-1', dc: 'DC-A', folder: '/', bareosJob: 'pv-demo-vm-1', client: 'kr-fd', storage: 'kr-sd', pool: 'P', demo: true });
+  const before = D.cmds.length;
+  assert.equal((await call('admin', 'POST', `/jobs/${dj.id}/run`, {})).s, 409);
+  assert.equal((await call('admin', 'PATCH', `/jobs/${dj.id}`, { enabled: false })).s, 409);
+  const dd = await call('admin', 'DELETE', `/jobs/${dj.id}`);
+  assert.equal(dd.s, 200, dd.t);
+  assert.match(dd.j.note, /원장에서만/);
+  assert.equal(D.cmds.slice(before).filter((x) => x.includes('pv-demo-vm-1')).length, 0, '실제 Director 에 데모 잡 명령을 보내지 않는다');
+
+  // C3 — 원장 파일을 못 쓰면 만든 Director 잡을 끄고 이름을 밝힌다 · 메모리에도 남기지 않는다
+  const file = path.join(tmp, 'bareos-jobs.json');
+  const saved = fs.readFileSync(file);
+  fs.rmSync(file); fs.mkdirSync(file); fs.writeFileSync(path.join(file, 'x'), '');   // rename 이 실패하는 자리
+  const w = await call('admin', 'POST', '/jobs', { vcenterId: 'vc-a', vmId: 'vc-a:vm-7' });
+  fs.rmSync(file, { recursive: true }); fs.writeFileSync(file, saved);
+  assert.equal(w.s, 500, w.t);
+  assert.match(w.j.reason, /원장에 넣지 못했습니다/);
+  assert.match(w.j.reason, /비활성화했습니다/);
+  const orphan = [...D.jobs.keys()].find((n) => /-vm-7$/.test(n));
+  assert.equal(D.jobs.get(orphan).enabled, false, '고아 잡은 꺼 둔다');
+  assert.equal(registry.findByVm('vc-a', 'vc-a:vm-7'), null, '파일에 못 쓴 대상은 메모리에도 없다');
+
+  // C3 — 원장을 못 읽은 상태(손상)면 Director 에 닿기 전에 503
+  fs.writeFileSync(file, '{ broken');
+  registry._resetForTest();
+  const conns = fd.identities.length;
+  const r = await call('admin', 'POST', '/jobs', { vcenterId: 'vc-a', vmId: 'vc-a:vm-8' });
+  assert.equal(r.s, 503, r.t);
+  assert.equal(fd.identities.length, conns, 'Director 에 접속하지 않았다');
+  assert.equal(addsFor('vm-8'), 0);
+
+  // S2 — 로드 오류 원문(JSON.parse 가 파일 조각을 싣는다 — 손상된 비밀번호 조각)을 응답에 싣지 않는다
+  fs.writeFileSync(file, '{"jobs": [], "x": Sup3rS3cretLeak}');
+  registry._resetForTest();
+  for (const u of ['admin', 'sadm', 'demo']) {
+    const g = await call(u, 'GET', '');
+    assert.equal(g.s, 200, u);
+    assert.ok(g.j.registryLoadError, u);
+    assert.doesNotMatch(g.t, /Sup3rS3cret/, `${u}: 원문 조각이 없다`);
+  }
+  assert.match((await call('admin', 'GET', '')).j.registryLoadError.reason, /JSON 형식 오류/);
+  assert.equal((await call('sadm', 'GET', '')).j.registryLoadError.reasonDetailHidden, true);
 });

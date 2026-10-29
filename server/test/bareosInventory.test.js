@@ -40,11 +40,21 @@ test('루트 VM 은 / · 루트 데이터센터는 이름만', () => {
   assert.deepEqual(vmPlacement('group-v7', folders, dcs), { vcDcPath: 'DC-Root', folderPath: '/' });
 });
 
+test('I1(v2.822): 실 수집 지도에는 루트 폴더가 없다(ContainerView 는 컨테이너 자신을 넣지 않는다) — 그래도 경로를 낸다', () => {
+  const noRoot = new Map([...folders].filter(([k]) => k !== 'group-d1'));
+  assert.deepEqual(vmPlacement('group-v6', noRoot, dcs), { vcDcPath: 'Asia/DC-Seoul', folderPath: '/vm/web' });
+  assert.deepEqual(vmPlacement('group-v7', noRoot, dcs), { vcDcPath: 'DC-Root', folderPath: '/' });
+  assert.deepEqual(vmPlacement('group-v5', noRoot, dcs), { vcDcPath: 'Asia/DC-Seoul', folderPath: '/vm' });
+});
+
 test('따라갈 수 없으면 null(지어내지 않는다): vApp(부모 없음) · 모르는 부모 · 고리', () => {
   const none = { vcDcPath: null, folderPath: null };
   assert.deepEqual(vmPlacement(undefined, folders, dcs), none);
   assert.deepEqual(vmPlacement('resgroup-99', folders, dcs), none);
   assert.deepEqual(vmPlacement('loop-1', folders, dcs), none);
+  // C9-4(v2.822): 데이터센터 위쪽이 고리면 잘린 경로가 아니라 null
+  const up = new Map([...folders, ['up-1', { name: 'x', parent: 'up-2' }], ['up-2', { name: 'y', parent: 'up-1' }], ['group-v9', { name: 'vm', parent: 'datacenter-9' }]]);
+  assert.deepEqual(vmPlacement('group-v9', up, new Map([...dcs, ['datacenter-9', { name: 'DC-L', parent: 'up-1' }]])), none);
 });
 
 test('soapClient: Datacenter 는 parent 를 받고 VM 레코드에 vmPlacement 를 펼친다', () => {

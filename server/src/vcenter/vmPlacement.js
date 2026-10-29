@@ -38,13 +38,18 @@ export function vmPlacement(vmParent, folders, dcs) {
   if (!dc || typeof dc.name !== 'string' || !dc.name) return none;
   const dcParts = [dc.name];
   let up = dc.parent;
+  let ended = !up;
   for (let i = 0; i < MAX_DEPTH && up; i++) {
     const f = folders.get(up);
-    if (!f) return none;
-    if (!f.parent) break; // 루트 폴더(Datacenters) — 넣지 않는다
+    // v2.822(검토 I1 — 실 vCenter 에서 모든 VM 이 null 이던 결함): 수집기의 ContainerView(rootFolder, recursive)는
+    //   **컨테이너 자신(루트 폴더 group-d1)을 결과에 넣지 않는다**. 데이터센터의 부모 사슬은 반드시 루트에서 끝나므로
+    //   지도에 없는 부모는 루트다 — 여기서 멈춘다(예전에는 null 을 돌려 기능 전체가 '등록 불가' 였다. 시험 지도에 루트를 넣어 가려졌다).
+    if (!f || !f.parent) { ended = true; break; } // 지도에 없음 = 루트 · 부모 없음 = 지도에 있는 루트 폴더(Datacenters) — 넣지 않는다
     if (typeof f.name !== 'string' || !f.name) return none;
     dcParts.unshift(f.name);
     up = f.parent;
+    if (!up) ended = true;
   }
+  if (!ended) return none; // 고리이거나 너무 깊다 — 잘린 경로를 지어내지 않는다(C9-4)
   return { vcDcPath: dcParts.join('/'), folderPath: parts.length ? `/${parts.join('/')}` : '/' };
 }
