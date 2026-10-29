@@ -27,6 +27,17 @@ export function morefOf(vm) {
 }
 
 /**
+ * VM 크기(v2.822.1 — 백업 대상 크기). 사용량 = vCenter summary.storage.committed(스냅샷·스왑 포함 · 못 읽으면 null),
+ * 할당량 = committed + uncommitted(둘 다 있을 때만). 화면·미리보기 합계·실행 기록이 이 함수 하나를 쓴다.
+ * @returns {{ sizeGB:number|null, provisionedGB:number|null }}
+ */
+export function vmSizeOf(vm) {
+  const n = (x) => (typeof x === 'number' && Number.isFinite(x) && x >= 0 ? x : null);
+  const used = n(vm?.storageGB); const unc = n(vm?.uncommittedGB);
+  return { sizeGB: used, provisionedGB: used != null && unc != null ? Math.round((used + unc) * 100) / 100 : null };
+}
+
+/**
  * Veeam 이 이 vCenter 를 부르는 이름(잡 includes 의 hostName). 직접 지정 > 대조가 배운 별칭(하나일 때만) > 포탈 등록 주소.
  * @returns {{ name:string, how:'manual'|'alias'|'host'|'' }}
  */
@@ -79,7 +90,7 @@ export function runStatusOf(vm, { servers = [], known = false, entry } = {}) {
 export function planBackup(items, { mode = 'quick', unprotected = 'portal' } = {}) {
   const vms = [];
   for (const { vm, run: p, hostName } of items) {
-    const row = { vmId: vm.id, name: vm.name || vm.id, vcenterId: vm.vcenterId, objectId: p?.objectId || morefOf(vm), serverId: p?.serverId || '', serverName: p?.serverName || '', hostName: hostName || '' };
+    const row = { vmId: vm.id, name: vm.name || vm.id, vcenterId: vm.vcenterId, objectId: p?.objectId || morefOf(vm), serverId: p?.serverId || '', serverName: p?.serverName || '', hostName: hostName || '', ...vmSizeOf(vm) };
     const skip = (reason) => vms.push({ ...row, how: 'skip', reason });
     if (!row.objectId) { skip('VM 의 moref 를 알 수 없습니다.'); continue; }
     if (p?.status === 'unmapped' || p?.status === 'unknown' || p?.status === 'elsewhere') { skip(p.reason || '보낼 수 없습니다.'); continue; }

@@ -27,6 +27,7 @@ v2.818.0 까지 쓰기 요청은 실제 VBR 로 확인하지 못했다(개발 �
 | Quick Backup 경로 `POST /api/v1/jobs/quickBackup/vSphere` 와 본문 | 공개 자료로 확정 못 함 | **추정** — 후보 3개(A `{virtualMachines:[…]}` · B `{objects:[…]}` · C VM 마다 하나)를 차례로, 쓴 후보를 실행 기록 '요청 형태' 에 남긴다 |
 | 잡 생성 본문(type·저장소·보존·스케줄) | 현장 기록 `create:Backup:flat` | **현장 확인** — type `Backup` + flat 이 생성됐다(다른 VBR 판은 남은 후보로) |
 | 세션 읽기(`/sessions/{id}` — 상태·결과) | 현장 기록(결과 Success) | **현장 확인** |
+| 진행 상세(v2.822.1 — 작업·세션의 creationTime·endTime · progress.processedSize·readSize·transferredSize) | 모니터링 모듈과 같은 후보 이름 | **추정** — 못 읽으면 '—'(0 을 만들지 않음). 평균 속도는 처리량 ÷ 경과로 포탈이 계산한 값 |
 | 세션의 VM 별 작업(`/sessions/{id}/taskSessions`) | 현장 기록 | **현장에서 실패 — 사유 미상**. v2.818.1 부터 실패 사유를 실행 기록에 남긴다(다음 실행에서 확인) |
 | 필요한 Veeam 계정 최소 역할 | — | 확인 못 함 |
 
@@ -54,6 +55,13 @@ v2.818.0 까지 쓰기 요청은 실제 VBR 로 확인하지 못했다(개발 �
 | 연결 서버 없음 | 그 vCenter 를 맡는 B&R 서버가 등록돼 있지 않다 |
 
 Veeam 이 그 vCenter 를 부르는 이름(잡 includes 의 hostName): 직접 지정 > 대조가 배운 별칭(하나일 때) > 포탈 등록 주소. 화면이 무엇을 쓰는지 보여 준다.
+
+## 진행 상세 · VM 크기(v2.822.1)
+
+- 포탈 백업 VM 표: VM 크기(사용 · 할당) 열과, 상태 아래 한 줄 진행 요약(진행률 · 처리량/할당 · 경과 · 평균 속도(계산)). '세부 보기' 로
+  시작 · 경과 · 처리/읽음/전송 · Veeam 세션·작업 상태와 메시지 · 요청·세션 id 를 펼친다. Veeam 에 따로 묻지 않는다 — 세션 추적이 이미 읽는 응답에서 꺼낸다.
+- 여러 VM 을 담은 세션에서 그 VM 의 작업 값을 못 읽으면 세션 전체 값을 쓰고 '(세션 전체)' 라고 표시한다.
+- VM 크기: 사용 = vCenter `summary.storage.committed`(스냅샷·스왑 포함), 할당 = committed + uncommitted(둘 다 읽었을 때만). VM 선택 표·미리보기 합계(크기 모르는 VM 은 더하지 않고 센다)·실행 기록에 같은 값.
 
 ## 실행 결과
 

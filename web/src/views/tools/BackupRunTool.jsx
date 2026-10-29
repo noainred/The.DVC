@@ -4,7 +4,7 @@ import { Loading, ErrorBox, SearchBox } from '../../components/ui.jsx';
 import { STable } from '../../components/STable.jsx';
 import Select from '../../components/Select.jsx';
 import VeeamHeader from './VeeamHeader.jsx';
-import { RUN_STATUS, RUN_STATUS_ORDER, VM_STATE, HOW, HOST_HOW, ago, shortTime, powerText, runSummary, takeHandoff, portalMark, rpText, rpSort, pickHandoff } from './backupRunText.js';
+import { RUN_STATUS, RUN_STATUS_ORDER, VM_STATE, HOW, HOST_HOW, ago, shortTime, powerText, runSummary, takeHandoff, portalMark, rpText, rpSort, pickHandoff, gbText, bytesText, elapsedText, progressLine } from './backupRunText.js';
 import BackupManageModal from './BackupManageModal.jsx';
 
 /**
@@ -152,7 +152,7 @@ function VmPanel({ vcId, initialIds, onHandoffUsed }) {
             <STable className="table" minWidth={860} limit={1000}>
               <thead><tr>
                 <th data-nosort><input type="checkbox" aria-label="보이는 VM 전체 선택" checked={allOn} onChange={toggleAll} disabled={!visibleIds.length} /></th>
-                <th>VM</th><th>전원</th><th>실행 상태</th><th>복원 지점</th><th>마지막 백업</th><th>잡</th>
+                <th>VM</th><th>전원</th><th>크기</th><th>실행 상태</th><th>복원 지점</th><th>마지막 백업</th><th>잡</th>
               </tr></thead>
               <tbody>
                 {rows.map((r) => {
@@ -162,6 +162,9 @@ function VmPanel({ vcId, initialIds, onHandoffUsed }) {
                       <td><input type="checkbox" aria-label={`${r.name} 선택`} checked={sel.has(r.id)} disabled={!canPick(r)} onChange={() => toggle(r)} /></td>
                       <td style={{ fontWeight: 500 }}>{r.name}<div className="muted" style={{ fontSize: 11, overflowWrap: 'anywhere' }}>{r.folder || p.objectId || '—'}</div></td>
                       <td>{powerText(r.powerState)}</td>
+                      <td data-sort={r.sizeGB ?? ''} className="mono" title={r.provisionedGB != null ? `사용 ${gbText(r.sizeGB)} · 할당 ${gbText(r.provisionedGB)}(디스크 최대 크기) — vCenter 값, 스냅샷·스왑 포함` : '사용량 — vCenter 값(스냅샷·스왑 포함)'}>
+                        {gbText(r.sizeGB)}{r.provisionedGB != null ? <div className="muted" style={{ fontSize: 11 }}>할당 {gbText(r.provisionedGB)}</div> : null}
+                      </td>
                       <td data-sort={RUN_STATUS_ORDER.indexOf(p.status)}><Badge cls={st.cls} title={p.reason || ''}>{st.label}</Badge>{p.running ? <span className="muted" style={{ fontSize: 11 }}> · 백업 중</span> : null}</td>
                       <td data-sort={rpSort(p.restorePoints)} className="mono">{rpText(p.restorePoints)}</td>
                       <td data-sort={p.lastBackup ?? ''} className="mono">{shortTime(p.lastBackup)}</td>
@@ -212,6 +215,8 @@ function VmPanel({ vcId, initialIds, onHandoffUsed }) {
               {planErr ? <div style={{ color: 'var(--red)' }}>{planErr}</div> : !plan ? <div className="muted">계산 중…</div> : (
                 <>
                   <div>Quick Backup <b>{count('quick')}</b> · 포탈 전용 잡 <b>{count('portal')}</b> · 건너뜀 <b>{count('skip')}</b></div>
+                  {plan.sendCount ? <div>보낼 VM 크기 합계 <b>{gbText(plan.totalSizeGB)}</b>{plan.totalProvisionedGB != null ? ` · 할당 ${gbText(plan.totalProvisionedGB)}` : ''}
+                    {plan.sizeUnknown ? <span className="muted"> · 크기 모름 {plan.sizeUnknown}대(합계에서 뺌)</span> : null}</div> : null}
                   {(plan.groups || []).map((g) => <div key={`${g.serverId}|${g.kind}|${g.vcenterId}`} className="muted">→ {g.serverName}: {HOW[g.kind]}{g.jobName ? ` ‘${g.jobName}’` : ''} {g.count}대</div>)}
                   {(plan.vms || []).filter((v) => v.reason).slice(0, 8).map((v) => <div key={v.vmId} style={{ color: v.how === 'skip' ? 'var(--amber)' : 'var(--text-dim)', overflowWrap: 'anywhere' }}>{v.name}: {v.reason}</div>)}
                   {plan.blocked ? <div style={{ color: 'var(--red)', overflowWrap: 'anywhere' }}>{plan.blocked}</div> : null}
@@ -278,6 +283,7 @@ function PortalVmsPanel() {
   const { data: d, error: err } = usePolling('/tools/backup-run/portal-vms', {}, 30_000);
   const [q, setQ] = useState('');
   const [open, setOpen] = useState('');
+  const [detail, setDetail] = useState('');
   if (err && !d) return <ErrorBox error={err} />;
   if (!d) return <Loading label="포탈 백업 VM" />;
   const needle = q.trim().toLowerCase();
@@ -290,27 +296,66 @@ function PortalVmsPanel() {
       </div>
       <div className="muted" style={{ fontSize: 12 }}>포탈에서 백업을 요청한 VM 입니다(포탈이 보낸 요청과 그 결과). Veeam 이 지금 가진 복원 지점은 ‘관리’ 창이 Veeam 에 직접 묻습니다. vCenter 상세의 폴더 트리에서도 같은 배지로 보입니다.</div>
       {!rows.length ? <div className="muted">{(d.vms || []).length ? '검색과 맞는 VM 이 없습니다.' : '아직 포탈로 백업한 VM 이 없습니다.'}</div> : (
-        <STable className="table" minWidth={860} limit={300}>
-          <thead><tr><th>VM</th><th>vCenter · 폴더</th><th>방식</th><th>마지막 요청</th><th>상태</th><th>복원</th><th data-nosort>관리</th></tr></thead>
+        <STable className="table" minWidth={980} limit={300}>
+          <thead><tr><th>VM</th><th>vCenter · 폴더</th><th>크기</th><th>방식</th><th>마지막 요청</th><th>상태 · 진행</th><th>복원</th><th data-nosort>관리</th></tr></thead>
           <tbody>
             {rows.map((v) => {
               const m = portalMark(v);
+              const line = progressLine(v.live, { provisionedGB: v.provisionedGB });
               return (
-                <tr key={v.vmId}>
+                <React.Fragment key={v.vmId}>
+                <tr>
                   <td>{v.name}{!v.exists ? <span className="muted" style={{ fontSize: 11 }}> (인벤토리에 없음)</span> : null}</td>
                   <td style={{ fontSize: 12, overflowWrap: 'anywhere' }}>{v.vcenterName}<div className="muted">{v.folder || '—'}</div></td>
+                  <td data-sort={v.sizeGB ?? ''} className="mono" title="사용량 — vCenter 값(스냅샷·스왑 포함)">{gbText(v.sizeGB)}{v.provisionedGB != null ? <div className="muted" style={{ fontSize: 11 }}>할당 {gbText(v.provisionedGB)}</div> : null}</td>
                   <td>{HOW[v.how] || '—'}{v.jobName ? <div className="muted" style={{ fontSize: 11 }}>{v.jobName}</div> : null}</td>
                   <td data-sort={v.lastAt ?? ''} className="mono">{shortTime(v.lastAt)}</td>
-                  <td>{m ? <Badge cls={m.cls} title={m.title}>{m.label}</Badge> : '—'}</td>
+                  <td style={{ minWidth: 160 }}>{m ? <Badge cls={m.cls} title={m.title}>{m.label}</Badge> : '—'}
+                    {line ? <div className="mono" style={{ fontSize: 11, marginTop: 4, overflowWrap: 'anywhere' }}>{line}</div> : null}
+                    {v.live ? <button type="button" className="logout-btn" style={{ fontSize: 11, padding: '1px 6px', marginTop: 4 }} aria-expanded={detail === v.vmId} onClick={() => setDetail(detail === v.vmId ? '' : v.vmId)}>{detail === v.vmId ? '세부 접기' : '세부 보기'}</button> : null}
+                  </td>
                   <td style={{ fontSize: 12 }}>{v.restores?.length ? `${v.restores[0].newName} (${(VM_STATE[v.restores[0].state] || VM_STATE.unknown).label})` : '—'}</td>
                   <td><button type="button" className="logout-btn" disabled={!v.exists} title={v.exists ? '' : '인벤토리에 없는 VM 은 관리 창을 열 수 없습니다'} onClick={() => setOpen(v.vmId)}>관리</button></td>
                 </tr>
+                {detail === v.vmId && v.live ? <tr><td colSpan={8} style={{ background: 'var(--panel-deep)' }}><LiveDetail v={v} /></td></tr> : null}
+                </React.Fragment>
               );
             })}
           </tbody>
         </STable>
       )}
       {open ? <BackupManageModal vmId={open} onClose={() => setOpen('')} /> : null}
+    </div>
+  );
+}
+
+/** 실행 VM 의 경과 — 끝났으면 걸린 시간, 진행 중이면 지금까지. */
+function elapsedOf(v, now = Date.now()) {
+  const m = v?.metrics; if (!m || typeof m.startedAt !== 'number') return '';
+  const end = typeof m.endedAt === 'number' ? m.endedAt : (['running', 'starting'].includes(v.state) ? now : null);
+  if (end == null) return '';
+  const t = elapsedText(end - m.startedAt);
+  return t ? (typeof m.endedAt === 'number' ? `${t} 걸림` : `${t}째`) : '';
+}
+
+/** 포탈 백업 VM 한 대의 마지막 실행 세부(v2.822.1) — 값은 Veeam 세션 추적이 읽은 것. 없는 값은 '—'. */
+function LiveDetail({ v }) {
+  const L = v.live; const m = L.metrics || {};
+  const st = VM_STATE[L.state] || VM_STATE.unknown;
+  const row = (k, val) => <div style={{ display: 'flex', gap: 8, minWidth: 0 }}><span className="muted" style={{ flex: '0 0 110px' }}>{k}</span><span style={{ minWidth: 0, overflowWrap: 'anywhere' }}>{val}</span></div>;
+  return (
+    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: '6px 18px', fontSize: 12, padding: '6px 2px', minWidth: 0 }}>
+      {row('상태', <><Badge cls={st.cls}>{st.label}</Badge>{m.sessionState ? <span className="muted"> · Veeam 세션 {m.sessionState}</span> : null}</>)}
+      {row('진행률', typeof L.progress === 'number' ? `${L.progress}%` : '—')}
+      {row('시작', shortTime(m.startedAt))}
+      {row('경과', elapsedOf({ state: L.state, metrics: m }) || '—')}
+      {row('처리량', `${bytesText(m.processedBytes)}${m.scope === 'session' && m.processedBytes != null ? '(세션 전체)' : ''}`)}
+      {row('읽음 · 전송', `${bytesText(m.readBytes)} · ${bytesText(m.transferredBytes)}`)}
+      {row('VM 크기', `사용 ${gbText(v.sizeGB)}${v.provisionedGB != null ? ` · 할당 ${gbText(v.provisionedGB)}` : ''}`)}
+      {row('Veeam 작업', [m.state, m.message].filter(Boolean).join(' — ') || '—')}
+      {row('내용', L.detail || '—')}
+      {row('요청 · 세션', <span className="mono">{L.runId}{L.sessionId ? ` · ${L.sessionId}` : ''}{L.variant ? ` · ${L.variant}` : ''}</span>)}
+      <div className="muted" style={{ gridColumn: '1 / -1' }}>값은 포탈의 Veeam 세션 추적이 읽을 때마다 바뀝니다. 처리량·읽음·전송·시작 필드 이름은 실제 VBR 로 확인하지 못한 추정이라 못 읽으면 ‘—’ 입니다. 평균 속도는 처리량 ÷ 경과로 계산한 값입니다.</div>
     </div>
   );
 }
@@ -330,7 +375,7 @@ function RunDetail({ run }) {
       ))}
       {run.status === 'running' && !(run.vms || []).some((v) => v.state === 'starting' || v.state === 'queued') ? <CloseRun run={run} /> : null}
       <STable className="table" minWidth={680}>
-        <thead><tr><th>VM</th><th>방식</th><th>상태</th><th>진행</th><th>내용</th></tr></thead>
+        <thead><tr><th>VM</th><th>방식</th><th>상태</th><th>진행</th><th>처리량</th><th>시작 · 경과</th><th>내용</th></tr></thead>
         <tbody>
           {(run.vms || []).map((v) => {
             const st = VM_STATE[v.state] || VM_STATE.unknown;
@@ -338,6 +383,8 @@ function RunDetail({ run }) {
               <tr key={v.vmId}>
                 <td>{v.name}</td><td>{HOW[v.how] || v.how}</td><td><Badge cls={st.cls}>{st.label}</Badge></td>
                 <td data-sort={v.progress ?? ''} className="mono">{typeof v.progress === 'number' ? `${v.progress}%` : '—'}</td>
+                <td data-sort={v.metrics?.processedBytes ?? ''} className="mono" title={v.metrics?.scope === 'session' ? '세션 전체 값(이 VM 만의 값을 읽지 못함)' : ''}>{bytesText(v.metrics?.processedBytes)}{v.metrics?.scope === 'session' && v.metrics?.processedBytes != null ? '*' : ''}</td>
+                <td data-sort={v.metrics?.startedAt ?? ''} className="mono" style={{ fontSize: 12 }}>{shortTime(v.metrics?.startedAt)}{elapsedOf(v) ? <div className="muted">{elapsedOf(v)}</div> : null}</td>
                 <td style={{ fontSize: 12, overflowWrap: 'anywhere' }}>{v.detail || '—'}</td>
               </tr>
             );

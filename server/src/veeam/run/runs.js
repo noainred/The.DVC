@@ -120,6 +120,7 @@ export function startRun(plan, { user = '', vcById = new Map(), mode = 'quick' }
     })),
     vms: plan.vms.map((v) => ({
       vmId: v.vmId, name: v.name, vcenterId: v.vcenterId, objectId: v.objectId, hostName: v.hostName || '', serverId: v.serverId, serverName: v.serverName, how: v.how,
+      sizeGB: typeof v.sizeGB === 'number' ? v.sizeGB : null, provisionedGB: typeof v.provisionedGB === 'number' ? v.provisionedGB : null,   // v2.822.1 백업 대상 크기(vCenter 값)
       state: v.how === 'skip' ? 'skipped' : 'queued', detail: v.reason || '', progress: null, sessionId: '',
       ...(v.how === 'restore' && v.restore ? { restore: v.restore } : {}),   // v2.819 { restorePointId, newName, dest, pointAt } — 비밀 없음
     })),
@@ -177,6 +178,17 @@ async function execute(run) {
 }
 
 /** 세션 결과 → VM 상태(run 을 고친다). 작업 목록을 읽었는데 그 VM 이 없으면 세션 전체 결과로 단정하지 않는다. */
+/** 진행 지표(없는 값은 null — 0 을 만들지 않는다). */
+function metricsOf(src, scope, ses) {
+  const n = (x) => (typeof x === 'number' && Number.isFinite(x) ? x : null);
+  return {
+    scope, state: String(src?.state || '').slice(0, 40), message: String(src?.message || '').slice(0, 300),
+    startedAt: n(src?.startedAt) ?? n(ses?.startedAt), endedAt: n(src?.endedAt),
+    processedBytes: n(src?.processedBytes), readBytes: n(src?.readBytes), transferredBytes: n(src?.transferredBytes),
+    sessionState: String(ses?.state || '').slice(0, 40), at: Date.now(),
+  };
+}
+
 export function applySession(run, sessionId, s) {
   // 이 세션이 VM 하나만 담았나(복원·VM 별 Quick) — 그러면 세션 결과가 곧 그 VM 의 결과다. 작업 목록에 그 이름이 없어도(복원 작업은 새 VM 이름으로
   //   적힐 수 있다 · 작업이 없는 세션 종류) '확인 불가' 로 두지 않는다(v2.820.1 B5). 여러 VM 세션은 지금처럼 단정하지 않는다.
@@ -189,6 +201,8 @@ export function applySession(run, sessionId, s) {
   for (const v of members.filter((x) => !FINAL.has(x.state))) {
     const t = (s.tasks || []).find((x) => (x.objectId && x.objectId === v.objectId) || (x.name && (x.name === v.name || (v.restore?.newName && x.name === v.restore.newName))))
       || (dedicated && (s.tasks || []).length === 1 ? s.tasks[0] : null);
+    // v2.822.1 진행 상세 — VM 의 작업 값이 있으면 그것(scope 'vm'), 없으면 세션 값(scope 'session' — 여러 VM 세션이면 세션 전체 합이라 화면이 그렇게 말한다).
+    v.metrics = metricsOf(t || s, t ? 'vm' : 'session', s);
     if (t) {
       v.progress = t.progress;
       const st = vmState(t.result);

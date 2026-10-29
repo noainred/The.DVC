@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { portalMark, pointSource, rpText, rpSort, pickHandoff, RUN_STATUS, RUN_STATUS_ORDER, VM_STATE, powerText, runSummary, ago, saveHandoff, takeHandoff, HANDOFF_KEY } from './backupRunText.js';
+import { gbText, bytesText, elapsedText, avgRate, progressLine, portalMark, pointSource, rpText, rpSort, pickHandoff, RUN_STATUS, RUN_STATUS_ORDER, VM_STATE, powerText, runSummary, ago, saveHandoff, takeHandoff, HANDOFF_KEY } from './backupRunText.js';
 import { visibleTabs, VEEAM_TABS } from './VeeamHeader.jsx';
 
 // v2.818 Backup 현황 › 백업 실행 — 서버 판정을 글자로만 바꾼다(판정 복제 금지). 못 읽은 값은 '—'.
@@ -70,5 +70,25 @@ describe('v2.820.1 B2·B4', () => {
     expect([...pickHandoff(rows, ['a', 'b', 'c', 'zz'], true).keys()]).toEqual(['a', 'c']);
     expect(pickHandoff(rows, ['a'], false).size).toBe(0);
     expect(pickHandoff(rows, [], true).size).toBe(0);
+  });
+});
+
+describe('v2.822.1 진행 상세 · VM 크기', () => {
+  it('용량 — GB/TB · 없으면 — (단위 없음)', () => {
+    expect(gbText(120.46)).toBe('120 GB'); expect(gbText(12.34)).toBe('12.3 GB'); expect(gbText(2048)).toBe('2.0 TB'); expect(gbText(null)).toBe('—');
+    expect(bytesText(120 * 1024 ** 3)).toBe('120 GB'); expect(bytesText(undefined)).toBe('—');
+  });
+  it('경과·평균 속도(계산값)', () => {
+    expect(elapsedText(45_000)).toBe('45초'); expect(elapsedText(15 * 60_000)).toBe('15분'); expect(elapsedText(125 * 60_000)).toBe('2시간 5분'); expect(elapsedText(null)).toBe('');
+    expect(avgRate(100 * 1024 ** 2, 1000)).toBe(100 * 1024 ** 2); expect(avgRate(null, 5000)).toBe(null); expect(avgRate(10, 500)).toBe(null);
+  });
+  it('진행 한 줄 — 있는 값만 · 진행 중이면 \'째\' · 끝나면 \'걸림\' · 세션 전체 값은 그렇게 말한다', () => {
+    const now = 1_000_000_000_000;
+    const live = { state: 'running', progress: 37, metrics: { scope: 'vm', startedAt: now - 15 * 60_000, processedBytes: 120 * 1024 ** 3 } };
+    expect(progressLine(live, { provisionedGB: 150, now })).toBe('37% · 처리 120 GB / 할당 150 GB · 15분째 · 평균 137 MB/s(계산)');
+    expect(progressLine({ state: 'success', progress: 100, metrics: { scope: 'session', startedAt: now - 60_000, endedAt: now, processedBytes: 1024 ** 3 } }, { now }))
+      .toBe('100% · 처리 1 GB(세션 전체) · 1분 걸림 · 평균 17 MB/s(계산)');
+    expect(progressLine({ state: 'running', progress: null, metrics: null }, { now })).toBe('');
+    expect(progressLine(null)).toBe('');
   });
 });
