@@ -130,3 +130,12 @@ describe('자동 설정 문구(v2.821)', () => {
     expect(thumbprintText({ thumbprint: 'AB', vcserver: 'vc' })).toContain('**AB**');
   });
 });
+
+describe('사전 준비 체크리스트 — pyVmomi(v2.822.1)', () => {
+  it('Python 3.9 FD 는 pyVmomi 8.x 안내가 있다(9.x 는 3.10 이상 — 현장 실측 실패)', () => {
+    const t = PREP_CHECKLIST.find((x) => x.includes('pyvmomi>=8,<9'));
+    expect(t).toBeTruthy();
+    expect(t).toContain('Python 3.10 이상');
+    expect(t).not.toContain('`');
+  });
+});
