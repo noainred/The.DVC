@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-// v2.822.1 포탈 백업 진행 상세 · 백업 대상 VM 크기(사용자 요청 2026-10-30 '백업하는 세부 내용' · 'VM 크기').
+// v2.822.2 포탈 백업 진행 상세 · 백업 대상 VM 크기(사용자 요청 2026-10-30 '백업하는 세부 내용' · 'VM 크기').
 // 실제 VBR 의 작업 세션 용량·시각 필드 이름은 추정(모니터링 모듈과 같은 후보) — 못 읽으면 null 이고 0 을 만들지 않는다.
 const CFG = fs.mkdtempSync(path.join(os.tmpdir(), 'portal-veeamdetail-'));
 process.env.CONFIG_DIR = CFG;

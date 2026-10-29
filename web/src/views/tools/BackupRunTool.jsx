@@ -338,7 +338,7 @@ function elapsedOf(v, now = Date.now()) {
   return t ? (typeof m.endedAt === 'number' ? `${t} 걸림` : `${t}째`) : '';
 }
 
-/** 포탈 백업 VM 한 대의 마지막 실행 세부(v2.822.1) — 값은 Veeam 세션 추적이 읽은 것. 없는 값은 '—'. */
+/** 포탈 백업 VM 한 대의 마지막 실행 세부(v2.822.2) — 값은 Veeam 세션 추적이 읽은 것. 없는 값은 '—'. */
 function LiveDetail({ v }) {
   const L = v.live; const m = L.metrics || {};
   const st = VM_STATE[L.state] || VM_STATE.unknown;

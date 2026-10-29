@@ -103,7 +103,7 @@ export function taskFrom(t) {
     name: str(o.name ?? o.objectName, 256), objectId: str(o.objectId, 128), state: str(o.state, 40),
     result: str(res.result ?? (typeof o.result === 'string' ? o.result : ''), 40), message: str(res.message ?? o.message, 1000),
     progress: pct(obj(o.progress).progressPercent ?? o.progressPercent),
-    // v2.822.1 진행 상세 — 필드 이름은 모니터링 모듈(veeam/parse.js lastTasks)과 같은 **추정** 후보(실서버 미확인). 없으면 null.
+    // v2.822.2 진행 상세 — 필드 이름은 모니터링 모듈(veeam/parse.js lastTasks)과 같은 **추정** 후보(실서버 미확인). 없으면 null.
     startedAt: timeOf(o.creationTime ?? o.startTime), endedAt: timeOf(o.endTime), ...rawBytes(o),
   };
 }

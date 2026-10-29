@@ -73,7 +73,7 @@ describe('v2.820.1 B2·B4', () => {
   });
 });
 
-describe('v2.822.1 진행 상세 · VM 크기', () => {
+describe('v2.822.2 진행 상세 · VM 크기', () => {
   it('용량 — GB/TB · 없으면 — (단위 없음)', () => {
     expect(gbText(120.46)).toBe('120 GB'); expect(gbText(12.34)).toBe('12.3 GB'); expect(gbText(2048)).toBe('2.0 TB'); expect(gbText(null)).toBe('—');
     expect(bytesText(120 * 1024 ** 3)).toBe('120 GB'); expect(bytesText(undefined)).toBe('—');

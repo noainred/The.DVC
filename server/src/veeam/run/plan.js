@@ -27,7 +27,7 @@ export function morefOf(vm) {
 }
 
 /**
- * VM 크기(v2.822.1 — 백업 대상 크기). 사용량 = vCenter summary.storage.committed(스냅샷·스왑 포함 · 못 읽으면 null),
+ * VM 크기(v2.822.2 — 백업 대상 크기). 사용량 = vCenter summary.storage.committed(스냅샷·스왑 포함 · 못 읽으면 null),
  * 할당량 = committed + uncommitted(둘 다 있을 때만). 화면·미리보기 합계·실행 기록이 이 함수 하나를 쓴다.
  * @returns {{ sizeGB:number|null, provisionedGB:number|null }}
  */

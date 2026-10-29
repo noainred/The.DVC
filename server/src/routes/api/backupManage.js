@@ -76,7 +76,7 @@ function busyIssue(server) {
 }
 const vmView = (ctx) => ({ id: ctx.vm.id, name: ctx.vm.name, vcenterId: ctx.vm.vcenterId, vcenterName: ctx.vc.name, folder: typeof ctx.vm.folder === 'string' ? ctx.vm.folder.slice(0, 200) : '', host: ctx.vm.host || '', powerState: ctx.vm.powerState || '' });
 
-/** 마지막 실행에서 이 VM 의 진행(v2.822.1 '백업하는 세부 내용') — 실행 기록이 없으면(100건 상한으로 밀림) null. 비밀 없음. */
+/** 마지막 실행에서 이 VM 의 진행(v2.822.2 '백업하는 세부 내용') — 실행 기록이 없으면(100건 상한으로 밀림) null. 비밀 없음. */
 function liveOf(rec) {
   const run = rec?.lastRunId ? getRun(rec.lastRunId) : null;
   const v = run?.vms?.find((x) => x.vmId === rec.vmId);

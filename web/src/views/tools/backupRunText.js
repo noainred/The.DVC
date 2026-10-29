@@ -122,7 +122,7 @@ export function pickHandoff(rows, ids, writable) {
 /** 복원 지점 정렬 값 — '있음(개수 모름)'(-1)은 0 보다 위·1 보다 아래(재검토: -1 그대로면 '없음' 아래로 갔다). */
 export const rpSort = (n) => (typeof n === 'number' && Number.isFinite(n) ? (n === -1 ? 0.5 : n) : '');
 
-/* ── v2.822.1 진행 상세 · VM 크기 ─────────────────────────────────────── */
+/* ── v2.822.2 진행 상세 · VM 크기 ─────────────────────────────────────── */
 
 const fin = (x) => typeof x === 'number' && Number.isFinite(x);
 /** GB(vCenter 값) → 'N GB' · 1024 이상은 TB. 값이 없으면 '—'(단위를 붙이지 않는다). */

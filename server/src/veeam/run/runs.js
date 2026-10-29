@@ -120,7 +120,7 @@ export function startRun(plan, { user = '', vcById = new Map(), mode = 'quick' }
     })),
     vms: plan.vms.map((v) => ({
       vmId: v.vmId, name: v.name, vcenterId: v.vcenterId, objectId: v.objectId, hostName: v.hostName || '', serverId: v.serverId, serverName: v.serverName, how: v.how,
-      sizeGB: typeof v.sizeGB === 'number' ? v.sizeGB : null, provisionedGB: typeof v.provisionedGB === 'number' ? v.provisionedGB : null,   // v2.822.1 백업 대상 크기(vCenter 값)
+      sizeGB: typeof v.sizeGB === 'number' ? v.sizeGB : null, provisionedGB: typeof v.provisionedGB === 'number' ? v.provisionedGB : null,   // v2.822.2 백업 대상 크기(vCenter 값)
       state: v.how === 'skip' ? 'skipped' : 'queued', detail: v.reason || '', progress: null, sessionId: '',
       ...(v.how === 'restore' && v.restore ? { restore: v.restore } : {}),   // v2.819 { restorePointId, newName, dest, pointAt } — 비밀 없음
     })),
@@ -201,7 +201,7 @@ export function applySession(run, sessionId, s) {
   for (const v of members.filter((x) => !FINAL.has(x.state))) {
     const t = (s.tasks || []).find((x) => (x.objectId && x.objectId === v.objectId) || (x.name && (x.name === v.name || (v.restore?.newName && x.name === v.restore.newName))))
       || (dedicated && (s.tasks || []).length === 1 ? s.tasks[0] : null);
-    // v2.822.1 진행 상세 — VM 의 작업 값이 있으면 그것(scope 'vm'), 없으면 세션 값(scope 'session' — 여러 VM 세션이면 세션 전체 합이라 화면이 그렇게 말한다).
+    // v2.822.2 진행 상세 — VM 의 작업 값이 있으면 그것(scope 'vm'), 없으면 세션 값(scope 'session' — 여러 VM 세션이면 세션 전체 합이라 화면이 그렇게 말한다).
     v.metrics = metricsOf(t || s, t ? 'vm' : 'session', s);
     if (t) {
       v.progress = t.progress;
