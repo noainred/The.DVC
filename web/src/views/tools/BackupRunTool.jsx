@@ -280,6 +280,7 @@ function RunDetail({ run }) {
           {g.reason ? <div style={{ color: g.state === 'failed' ? 'var(--red)' : 'var(--text-dim)' }}>{g.reason}</div> : null}
           {(g.notes || []).map((n, i) => <div key={i} className="muted">{n}</div>)}
           {(g.sessions || []).filter((s) => s.lastError).map((s) => <div key={s.id} style={{ color: 'var(--amber)' }}>세션 {s.id} 확인 실패: {s.lastError}</div>)}
+          {(g.sessions || []).filter((s) => !s.lastError && s.tasksError).map((s) => <div key={`t${s.id}`} className="muted">세션 {s.id} 의 VM 별 작업을 읽지 못함: {s.tasksError}</div>)}
         </div>
       ))}
       {run.status === 'running' && !(run.vms || []).some((v) => v.state === 'starting' || v.state === 'queued') ? <CloseRun run={run} /> : null}

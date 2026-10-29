@@ -41,7 +41,7 @@ function sanitizeOneSession(s) {
       const t = obj(t0);
       return { name: str(t.name, 256), objectId: str(t.objectId, 128), state: str(t.state, 40), result: str(t.result, 40), message: str(t.message, 1000), progress: pct(t.progress) };
     }),
-    tasksKnown: r.tasksKnown === true,
+    tasksKnown: r.tasksKnown === true, tasksError: str(r.tasksError, 300),
   };
 }
 /** 세션 여러 개(한 로그인으로 읽은 묶음). */
