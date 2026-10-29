@@ -1,11 +1,95 @@
 /**
- * insights/dbGuideData.js — '특수 기능 › 포탈 DB' 자세히 팝업의 설명 원문(v2.674, 파일 88개).
+ * insights/dbGuideData.js — '특수 기능 › 포탈 DB' 자세히 팝업의 설명 원문(v2.674, 파일 88개 · v2.819 Veeam 백업 실행·관리 3개 추가).
  * 파일마다 코드를 읽어 확인한 내용이다(근거는 각 항목의 sources). 확인하지 못한 것은 '(추정)' 으로 밝혔다.
  * ⚠ 문구에 백틱·별표 두 개를 쓰지 말 것(화면에 글자로 샌다) — test/portalDbGuide2674.test.js 가 막는다.
  * ⚠ 코드가 바뀌어 설명이 틀려지면 여기를 고칠 것(주기·보존 기본값·화면 이름이 가장 자주 바뀐다).
  */
 /* eslint-disable */
 export const DB_GUIDE_DATA = {
+  "veeam-portal-vms.json": {
+    "title": "포탈 백업 VM 목록",
+    "summary": "포탈에서 Veeam 백업을 요청한 VM 의 목록입니다. VM 마다 한 줄로 마지막 요청 시각·방식(Quick Backup 또는 포탈 전용 잡)·결과, 포탈 전용 잡에서 뺀 시각, 백업을 지운 시각, 최근 새 VM 복원 요청이 들어 있습니다. vCenter › VM 및 폴더 트리의 Portal 배지와 Backup › 백업 실행의 포탈 백업 VM 표가 이 파일을 읽습니다. 포탈이 보낸 요청과 그 결과일 뿐이고, Veeam 이 지금 가진 복원 지점은 관리 창이 Veeam 에 직접 묻습니다.",
+    "stores": [
+      "VM 마다 VM id·vCenter·이름·Veeam 서버·Veeam 이 이 vCenter 를 부르는 이름·moref·방식·포탈 전용 잡 이름·마지막 실행 id·시각·결과.",
+      "잡에서 뺀 시각·백업 삭제 시각(관리 창에서 한 일)과 최근 복원 요청 10건(새 VM 이름·결과). 비밀번호는 없습니다."
+    ],
+    "writer": "백업 실행·복원 실행의 상태가 바뀔 때(veeam/run/runs.js) 그리고 관리 창에서 잡에서 빼기·백업 삭제를 했을 때 씁니다(원자적 쓰기, 권한 0600, 바뀐 것이 있을 때만).",
+    "usedBy": [
+      "vCenter › VM 및 폴더 — Portal 배지",
+      "Backup › 백업 실행 — 포탈 백업 VM 표",
+      "포탈 백업 관리 창(복원 이름 겹침 확인)"
+    ],
+    "retention": "VM 5000대까지 — 넘으면 마지막 활동이 오래된 것부터 지웁니다. 그 밖의 자동 정리는 없습니다.",
+    "growth": "포탈로 백업한 VM 수에 비례하며 작습니다.",
+    "shrink": "줄일 필요가 없습니다.",
+    "ifDeleted": "Portal 배지와 포탈 백업 VM 표가 비고, 복원 이름 겹침 확인이 인벤토리 이름만 봅니다. Veeam 의 백업·잡은 그대로입니다. 파일이 깨지면 ‘.corrupt.<시각>’ 으로 보존하고 빈 목록으로 시작합니다.",
+    "cautions": [
+      "상태 파일이라 설정 백업 변경 감지와 엣지 설정 push 대상이 아닙니다."
+    ],
+    "settings": [
+      "Backup › 백업 실행 · vCenter › VM 및 폴더"
+    ],
+    "sources": [
+      "server/src/veeam/run/portalVms.js",
+      "server/src/veeam/run/runs.js",
+      "server/src/routes/api/backupManage.js"
+    ]
+  },
+  "veeam-backup-runs.json": {
+    "title": "Veeam 백업 실행·복원 요청 기록",
+    "summary": "포탈이 Veeam 으로 보낸 백업 요청(Quick Backup · 포탈 전용 잡)과 새 VM 복원 요청의 기록입니다. 요청마다 요청자·시각·Veeam 서버별 요청 형태·세션 id 와 VM 별 상태(대기·진행·성공·경고·실패·확인 불가·보내지 않음)를 담고, 추적 타이머가 Veeam 세션을 읽어 갱신합니다. 같은 Veeam 서버로 진행 중인 요청이 있으면 새 요청을 막는 근거이기도 합니다.",
+    "stores": [
+      "요청마다 id·시각·요청자·방식·Veeam 서버별 그룹(요청 형태·메모·세션)·VM 별 상태와 내용·진행률.",
+      "복원 요청은 복원 지점 id·새 VM 이름·대상 호스트도 담습니다. 비밀번호는 없습니다."
+    ],
+    "writer": "백업 실행·복원 요청과 세션 추적(기본 20초, VEEAM_RUN_TRACK_MS)이 씁니다(원자적 쓰기, 권한 0600). 중앙만 씁니다.",
+    "usedBy": [
+      "Backup › 백업 실행 — 실행 현황·이력",
+      "포탈 백업 관리 창 — 최근 요청",
+      "진행 중 요청 409 가드"
+    ],
+    "retention": "최근 100건 — 넘으면 끝난 요청부터 오래된 순으로 지웁니다(진행 중 요청은 지우지 않습니다). 결과 확인 시한(기본 24시간)이 지나면 확인 불가로 닫습니다.",
+    "growth": "100건 상한이라 작습니다.",
+    "shrink": "줄일 필요가 없습니다.",
+    "ifDeleted": "실행 이력이 사라지고 진행 중이던 요청의 추적이 멈춥니다(Veeam 의 세션은 그대로 — 결과는 Veeam 콘솔에서). 포탈이 재시작하면 보내던 중이던 VM 은 확인 불가로 닫고 다시 보내지 않습니다. 파일이 깨지면 ‘.corrupt.<시각>’ 으로 보존합니다.",
+    "cautions": [
+      "확인 불가는 성공도 실패도 아닙니다 — 포탈은 자동으로 다시 보내지 않습니다(이중 백업 방지)."
+    ],
+    "settings": [
+      "VEEAM_RUN_TRACK_MS · VEEAM_RUN_DEADLINE_MS"
+    ],
+    "sources": [
+      "server/src/veeam/run/runs.js",
+      "server/src/routes/api/backupRun.js",
+      "server/src/routes/api/backupManage.js"
+    ]
+  },
+  "veeam-backup-run.json": {
+    "title": "Veeam 백업 실행 설정",
+    "summary": "Backup › 백업 실행의 설정입니다. 포탈 전용 잡 이름 접두, Veeam 서버마다 포탈 전용 잡의 저장소·보존(복원 지점 수), vCenter 마다 Veeam 이 그 vCenter 를 부르는 이름(직접 지정)이 들어 있습니다.",
+    "stores": [
+      "잡 이름 접두(기본 PORTAL-) · 서버별 저장소 id·보존 · vCenter 별 Veeam 쪽 이름. 비밀번호는 없습니다(서버 계정은 ‘veeam-servers.json’)."
+    ],
+    "writer": "백업 실행 설정 화면에서 저장할 때 씁니다(전체 범위 관리자 + OTP 재인증 + 감사 로그, 원자적 쓰기).",
+    "usedBy": [
+      "백업 실행 — 포탈 전용 잡 이름·저장소",
+      "포탈 백업 관리 — 복원 대상 vCenter 이름"
+    ],
+    "retention": "자동 정리는 없습니다.",
+    "growth": "Veeam 서버·vCenter 수에 비례하며 작습니다.",
+    "shrink": "줄일 필요가 없습니다.",
+    "ifDeleted": "기본값으로 돌아갑니다(접두 PORTAL- · 저장소 미지정 — 포탈 전용 잡으로 보낼 수 없음). 접두를 바꾸면 이미 만든 포탈 잡을 찾지 못하니 주의하세요. 파일이 깨지면 보존하고 백업 실행이 503 으로 막힙니다.",
+    "cautions": [
+      "잡 이름 접두를 바꾸면 이미 만든 포탈 전용 잡을 찾지 못해 새 잡이 생깁니다."
+    ],
+    "settings": [
+      "Backup › 백업 실행 › 백업 실행 설정"
+    ],
+    "sources": [
+      "server/src/veeam/run/settings.js",
+      "server/src/routes/api/backupRun.js"
+    ]
+  },
   "veeam-servers.json": {
     "title": "Veeam 백업 서버 등록부",
     "summary": "vCenter 별 Veeam Backup & Replication 서버 목록입니다. 서버마다 접속 주소·포트·계정·비밀번호, 이 서버가 백업하는 vCenter, 읽는 곳(중앙 또는 그 법인 엣지)이 들어 있어 포탈은 이 목록을 보고 Veeam REST API 에 로그인해 백업 작업·백업 대상·실행 중 백업을 읽습니다. vCenter › VM 및 폴더의 'Veeam 백업 VM 표시' 배지의 출처입니다. 비밀번호가 들어 있으므로 손으로 편집하거나 외부에 공유하면 안 됩니다.",
@@ -27,7 +111,7 @@ export const DB_GUIDE_DATA = {
     "cautions": [
       "Veeam 계정·비밀번호가 들어 있습니다. 설정 › Security › 자격증명 저장 방식을 ‘암호화’ 로 하면 봉인되어 저장됩니다. 목록 화면·API 응답은 비밀번호를 싣지 않습니다.",
       "주소·포트·계정을 바꾸면 저장된 비밀번호를 이어받지 않으니 다시 입력해야 합니다. 읽는 곳만 바꾸는 경우는 이어받습니다.",
-      "읽기 전용 계정(Veeam Backup Viewer 역할)을 권장합니다. 포탈은 작업을 시작·중지하지 않습니다."
+      "백업 실행·포탈 백업 관리(v2.818~)를 쓰지 않으면 읽기 전용 계정(Veeam Backup Viewer 역할)을 권장합니다. 쓰면 같은 계정으로 잡 생성·시작·VM 넣고 빼기·새 VM 복원·백업 삭제 요청을 보내므로 그 권한이 필요합니다(필요한 최소 역할은 확인하지 못했습니다 — 추정). 포탈은 실행 중 백업을 중지하지 않습니다."
     ],
     "settings": [
       "설정 › vCenter 관리 › Veeam 백업 서버",

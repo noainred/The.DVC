@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { RUN_STATUS, RUN_STATUS_ORDER, VM_STATE, powerText, runSummary, ago, saveHandoff, takeHandoff, HANDOFF_KEY } from './backupRunText.js';
+import { portalMark, pointSource, RUN_STATUS, RUN_STATUS_ORDER, VM_STATE, powerText, runSummary, ago, saveHandoff, takeHandoff, HANDOFF_KEY } from './backupRunText.js';
 import { visibleTabs, VEEAM_TABS } from './VeeamHeader.jsx';
 
 // v2.818 Backup 현황 › 백업 실행 — 서버 판정을 글자로만 바꾼다(판정 복제 금지). 못 읽은 값은 '—'.
@@ -31,5 +31,23 @@ describe('backupRunText', () => {
     expect(visibleTabs({ admin: false, runOk: true })).toEqual(VEEAM_TABS);
     expect(visibleTabs({ admin: true, runOk: false })).toEqual(VEEAM_TABS);
     expect(visibleTabs({ admin: true, runOk: true }).map((t) => t[0])).toEqual(['summary', 'detail', 'em', 'run']);
+  });
+});
+
+describe('v2.819 portalMark · pointSource', () => {
+  it('상태별 배지 — 삭제·빼냄이 우선 · 진행 중 · 결과 기호 · 값 없으면 null', () => {
+    expect(portalMark(null)).toBe(null);
+    const t = new Date(2026, 9, 29, 21, 27).getTime();
+    expect(portalMark({ how: 'portal', lastAt: t, lastState: 'success' })).toMatchObject({ label: 'Portal ✓ 10-29', cls: 'green' });
+    expect(portalMark({ how: 'portal', lastAt: t, lastState: 'failed' }).label).toBe('Portal ✕ 10-29');
+    expect(portalMark({ how: 'quick', lastAt: t, lastState: 'running' }).label).toBe('Portal 백업 중');
+    expect(portalMark({ how: 'portal', lastAt: t, lastState: 'success', excludedAt: t }).label).toBe('Portal 잡에서 뺌');
+    expect(portalMark({ how: 'portal', lastAt: t, lastState: 'success', excludedAt: t, deletedAt: t }).label).toBe('Portal 백업 삭제됨');
+    expect(portalMark({ lastState: 'unknown' }).label).toBe('Portal ?');   // 시각이 없으면 붙이지 않는다
+  });
+  it('복원 지점 출처', () => {
+    expect(pointSource({ jobName: 'PORTAL-x', portal: true })).toEqual({ name: 'PORTAL-x', portal: true });
+    expect(pointSource({ backupName: 'Daily' })).toEqual({ name: 'Daily', portal: false });
+    expect(pointSource({})).toEqual({ name: '—', portal: false });
   });
 });

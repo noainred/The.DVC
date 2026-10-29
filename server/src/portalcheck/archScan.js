@@ -135,6 +135,11 @@ export const ROUTE_GATE_ALLOW = Object.freeze({
   // routes/api/backupRun.js(v2.818) — planFor 한 함수가 VM 마다 '조회 밖 404 → 쓰기 밖 403'(inUserScope → inUserWriteScope)
   'POST /api/tools/backup-run/backup': 'planFor — VM 마다 inUserScope 404 → inUserWriteScope 403 + reauth',
   'POST /api/tools/backup-run/runs/:id/close': 'runVisible 404 → 실행의 VM 전부 inUserWriteScope 403 + reauth',
+  // routes/api/backupManage.js(v2.819) — ctxFor 한 함수가 '조회 밖 404 → 쓰기 밖 403'
+  'POST /api/tools/backup-run/vm/:vmId/points': 'ctxFor — inUserScope 404 · 복원 지점 읽기(읽기성 POST)',
+  'POST /api/tools/backup-run/vm/:vmId/restore': 'ctxFor(write) — inUserScope 404 → inUserWriteScope 403 + reauth · 새 VM 으로만',
+  'POST /api/tools/backup-run/vm/:vmId/exclude': 'ctxFor(write) — inUserScope 404 → inUserWriteScope 403 + reauth',
+  'POST /api/tools/backup-run/vm/:vmId/delete-backup': 'ctxFor(write) — inUserScope 404 → inUserWriteScope 403 + reauth + 이름 재입력',
   'POST /api/tools/backup-run/plan': 'planFor — 실행과 같은 범위 판정, 아무것도 보내지 않는 읽기성 POST',
   // v2.793 VM 백업 센터 — routes/api/vmClone.js cloneJobDenied(잡)·accessOf(vCenter): 조회 밖 404 → 쓰기 밖 403
   'POST /api/tools/vm-clone/jobs/:id/verify': 'cloneJobDenied — 잡 vCenter 조회 404 · 쓰기 403(v2.793)',

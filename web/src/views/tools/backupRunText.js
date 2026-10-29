@@ -24,8 +24,8 @@ export const VM_STATE = Object.freeze({
   skipped: { label: '보내지 않음', cls: 'gray' },
   unknown: { label: '확인 불가', cls: 'gray' },
 });
-export const HOW = Object.freeze({ quick: 'Quick Backup', portal: '포탈 전용 잡', skip: '건너뜀' });
-export const HOST_HOW = Object.freeze({ manual: '직접 지정', alias: '대조가 배운 이름', host: '포탈 등록 주소', '': '모름' });
+export const HOW = Object.freeze({ quick: 'Quick Backup', portal: '포탈 전용 잡', skip: '건너뜀', restore: '새 VM 복원' });
+export const HOST_HOW = Object.freeze({ manual: '직접 지정', alias: '대조가 배운 이름', host: '포탈 등록 주소', record: '지난 요청에 쓴 이름', '': '모름' });
 
 /** 상대 시각 — 코어(relTime.agoText)에 위임(로컬 구현 금지). */
 export const ago = (ms, now = Date.now()) => agoText(ms, now);
@@ -73,4 +73,30 @@ export function takeHandoff(store = globalThis.sessionStorage, now = Date.now())
     if (!(now - Number(j.at) <= HANDOFF_TTL_MS)) return null;
     return { vcenterId: j.vcenterId, vmIds: j.vmIds.filter((x) => typeof x === 'string').slice(0, 200) };
   } catch { return null; }
+}
+
+/* ── v2.819 포탈 백업 관리 ──────────────────────────────────────────── */
+
+/**
+ * 포탈 백업 VM 기록(서버 portalVms.js) → 폴더 트리·목록 배지. 판정은 서버가 한 상태(lastState·excludedAt·deletedAt)를 글자로만 바꾼다.
+ * 값이 없으면 null(배지 없음). 시각이 없으면 시각을 붙이지 않는다.
+ */
+export function portalMark(rec) {
+  if (!rec || typeof rec !== 'object') return null;
+  const when = typeof rec.lastAt === 'number' ? shortTime(rec.lastAt).slice(0, 5) : '';
+  const how = HOW[rec.how] || '';
+  const st = VM_STATE[rec.lastState];
+  const title = [`포탈 ${how || '백업'}`, typeof rec.lastAt === 'number' ? shortTime(rec.lastAt) : '', st ? st.label : ''].filter(Boolean).join(' · ');
+  if (typeof rec.deletedAt === 'number') return { label: 'Portal 백업 삭제됨', cls: 'gray', title: `${title} · 백업 삭제 ${shortTime(rec.deletedAt)}` };
+  if (typeof rec.excludedAt === 'number') return { label: 'Portal 잡에서 뺌', cls: 'gray', title: `${title} · 잡에서 뺌 ${shortTime(rec.excludedAt)}` };
+  if (['queued', 'starting', 'running'].includes(rec.lastState)) return { label: 'Portal 백업 중', cls: 'blue', title };
+  if (!st) return { label: 'Portal', cls: 'gray', title };
+  const mark = rec.lastState === 'success' ? '✓' : rec.lastState === 'warning' ? '!' : rec.lastState === 'failed' ? '✕' : '?';
+  return { label: `Portal ${mark}${when ? ` ${when}` : ''}`, cls: st.cls, title };
+}
+
+/** 복원 지점 표의 '백업' 칸 — 잡 이름(없으면 백업 이름) + 포탈 잡 여부. */
+export function pointSource(p) {
+  const name = p?.jobName || p?.backupName || '';
+  return { name: name || '—', portal: p?.portal === true };
 }
