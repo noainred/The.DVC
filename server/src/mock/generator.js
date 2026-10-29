@@ -637,7 +637,7 @@ export function generateSnapshot() {
         folder: VM_FOLDERS[(vm.idx * 7 + site.id.length) % VM_FOLDERS.length],
         resourcePool: RES_POOLS[(vm.idx * 3) % RES_POOLS.length],
         // v2.820: Bareos 연동용 정확한 위치(vcenter/vmPlacement.js 와 같은 모양) — 데이터센터는 사이트별 1개, 폴더는 위 folder 의 '/' 경로.
-        vcDatacenter: `DC-${site.id}`,
+        vcDcPath: `DC-${site.id}`,
         folderPath: `/${VM_FOLDERS[(vm.idx * 7 + site.id.length) % VM_FOLDERS.length]}`,
         toolsStatus: powered ? (vm.idx % 19 === 3 ? 'OUTDATED' : 'RUNNING') : 'NOT_RUNNING',
         toolsVersion: TOOLS_VERSIONS[vm.idx % TOOLS_VERSIONS.length],

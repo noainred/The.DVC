@@ -9,6 +9,8 @@
  *   데이터센터가 폴더 안에 있으면 플러그인의 `dc` 는 전체 경로다(Bareos VMware 플러그인 문서 'Use the full path if it is not in the
  *   root folder') — 루트 폴더(부모 없는 Folder)는 넣지 않는다.
  *   따라갈 수 없으면(vApp 안의 VM 은 parent 가 없다 · 고리 · 깊이 32 초과) **null** — 지어내지 않는다.
+ * ⚠ 필드 이름이 `vcDcPath` 인 이유: 호스트 레코드의 `vcDatacenter`(v2.742 — 데이터센터 **이름**, 클러스터 구분용)와 뜻이 다르다
+ *   (폴더 안 데이터센터면 이쪽은 'Folder/DC' 경로). 같은 이름으로 두면 두 값을 섞어 쓰는 소비처가 생긴다 — 합치지 말 것.
  */
 const MAX_DEPTH = 32;
 
@@ -16,10 +18,10 @@ const MAX_DEPTH = 32;
  * @param {string|undefined} vmParent   VM 의 parent ref
  * @param {Map<string,{name:string,parent?:string}>} folders  Folder ref → { name, parent }
  * @param {Map<string,{name:string,parent?:string}>} dcs      Datacenter ref → { name, parent }
- * @returns {{ vcDatacenter: string|null, folderPath: string|null }}
+ * @returns {{ vcDcPath: string|null, folderPath: string|null }}
  */
 export function vmPlacement(vmParent, folders, dcs) {
-  const none = { vcDatacenter: null, folderPath: null };
+  const none = { vcDcPath: null, folderPath: null };
   if (!vmParent || !folders?.has?.(vmParent)) return none;
   const parts = [];
   let cur = vmParent; let dcRef = null;
@@ -44,5 +46,5 @@ export function vmPlacement(vmParent, folders, dcs) {
     dcParts.unshift(f.name);
     up = f.parent;
   }
-  return { vcDatacenter: dcParts.join('/'), folderPath: parts.length ? `/${parts.join('/')}` : '/' };
+  return { vcDcPath: dcParts.join('/'), folderPath: parts.length ? `/${parts.join('/')}` : '/' };
 }

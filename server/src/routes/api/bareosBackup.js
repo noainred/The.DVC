@@ -200,7 +200,7 @@ api.get('/tools/bareos-backup/vm-candidates', adminOnly, (req, res) => {
   const all = (store.get()?.vms || []).filter((v) => String(v.vcenterId) === vcenterId);
   const rows = all.slice().sort((x, y) => String(x.name).localeCompare(String(y.name))).slice(0, MAX_CANDIDATES).map((v) => {
     const el = eligibility(v, settings);
-    return { id: v.id, name: v.name, powerState: v.powerState, template: !!v.template, dc: v.vcDatacenter ?? null, folder: v.folderPath ?? null, eligible: el.ok, reason: el.ok ? '' : el.reason, registered: registered.has(v.id) };
+    return { id: v.id, name: v.name, powerState: v.powerState, template: !!v.template, dc: v.vcDcPath ?? null, folder: v.folderPath ?? null, eligible: el.ok, reason: el.ok ? '' : el.reason, registered: registered.has(v.id) };
   });
   res.json({
     ok: true, vcenterId, total: all.length, returned: rows.length, items: rows,

@@ -102,9 +102,10 @@ test('JobStatus → 포탈 상태 · 끝난 상태 · 레벨 정규화', () => {
   assert.equal(normLevel('__proto__'), 'Incremental');
 });
 
-test('ReDoS: 긴 입력도 선형(100KB 값 검사 1회 < 50ms)', () => {
-  const big = 'a'.repeat(100_000) + ':';
-  const t0 = performance.now();
-  pluginValueIssue(big, 'x'); jobNameFor(big, big); folderForPlugin(big.replace(/a/g, 'a/'));
-  assert.ok(performance.now() - t0 < 50);
+test('ReDoS: 긴 입력도 선형 — 비율로(절대 ms 금지 · 입력 8배에 시간이 64배(이차) 가까이 늘면 안 된다)', () => {
+  const run = (n) => { const big = 'a'.repeat(n) + ':'; pluginValueIssue(big, 'x'); jobNameFor(big, big); folderForPlugin(big.replace(/a/g, 'a/')); };
+  const time = (n) => { const t = process.hrtime.bigint(); for (let i = 0; i < 3; i++) run(n); return Number(process.hrtime.bigint() - t) + 1; };
+  time(12_500);
+  const r = time(100_000) / time(12_500);
+  assert.ok(r < 40, `8배 입력에 ${r.toFixed(1)}배(선형이면 ~8)`);
 });

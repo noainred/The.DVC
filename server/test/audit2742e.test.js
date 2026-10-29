@@ -317,7 +317,8 @@ test('VC-05 ④-b 상세 창 라우트(/tools/cluster-check/of): hostId·cluster
 test('VC-05 ⑤ 수집기 소스: 호스트에 clusterRef·vcDatacenter, VM 에 clusterRef 를 싣고 Datacenter 이름을 같은 조회로 받는다', () => {
   const src = stripComments(fs.readFileSync(path.join(SRC, 'vcenter', 'soapClient.js'), 'utf8'));
   assert.match(src, /type: 'ClusterComputeResource', paths: \['name', 'parent'\]/);
-  assert.match(src, /type: 'Datacenter', paths: \['name'\]/);
+  // v2.820: Bareos 연동이 parent 를 더했다(폴더 안 데이터센터의 경로 — vcenter/vmPlacement.js). 이름을 같은 조회로 받는 것은 그대로.
+  assert.match(src, /type: 'Datacenter', paths: \['name'(?:, 'parent')?\]/);
   assert.match(src, /'ResourcePool', 'Datacenter',/);
   assert.match(src, /clusterRef: clusterName\.has\(p\.parent\) \? p\.parent : null/);
   assert.match(src, /clusterRef: host\?\.clusterRef \?\? null/);

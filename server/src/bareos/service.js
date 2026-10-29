@@ -79,10 +79,10 @@ export async function withDirector(fn, { trigger = 'manual', signal = null, demo
 export function eligibility(vm, settings) {
   if (!vm) return { ok: false, reason: '인벤토리에 없는 VM 입니다.' };
   if (vm.template) return { ok: false, reason: '템플릿은 백업할 수 없습니다(스냅샷을 만들 수 없음 — Bareos 플러그인 제약).' };
-  if (!vm.vcDatacenter || !vm.folderPath) return { ok: false, reason: '인벤토리에 데이터센터·폴더 경로가 없습니다(vApp 안의 VM 이거나 SOAP 수집 전 — 다음 수집 뒤 다시 보세요).' };
+  if (!vm.vcDcPath || !vm.folderPath) return { ok: false, reason: '인벤토리에 데이터센터·폴더 경로가 없습니다(vApp 안의 VM 이거나 SOAP 수집 전 — 다음 수집 뒤 다시 보세요).' };
   const site = siteFor(vm.vcenterId, settings);
   if (!site) return { ok: false, reason: '이 vCenter 의 사이트 매핑(FD·스토리지·풀)이 없습니다 — 설정 탭에서 먼저 지정하세요.' };
-  const p = backupPluginOptions({ plugin: settings.defaults.pluginName, vcserver: site.vcserver, dc: vm.vcDatacenter, folder: vm.folderPath, vmname: vm.name, configFile: site.configFile });
+  const p = backupPluginOptions({ plugin: settings.defaults.pluginName, vcserver: site.vcserver, dc: vm.vcDcPath, folder: vm.folderPath, vmname: vm.name, configFile: site.configFile });
   if (p.issue) return { ok: false, reason: p.issue };
   return { ok: true, site, plugin: p.value };
 }
@@ -118,7 +118,7 @@ export async function createBackupTarget({ vcenterId, vmId, level, schedule, by,
     throw fail('invalid', '같은 VM 의 Bareos 잡이 Director 에 이미 여러 개 있습니다 — Director 의 bareos-dir.d/job 아래 pv-… 파일을 정리한 뒤 다시 시도하세요.');
   });
   return registryAddJob({
-    vcenterId: vm.vcenterId, vmId: vm.id, vmName: vm.name, dc: vm.vcDatacenter, folder: vm.folderPath,
+    vcenterId: vm.vcenterId, vmId: vm.id, vmName: vm.name, dc: vm.vcDcPath, folder: vm.folderPath,
     bareosJob: created.name, client: el.site.client, storage: el.site.storage, pool: el.site.pool, schedule: sched, level: lvl,
     createdBy: by, demo,
   });

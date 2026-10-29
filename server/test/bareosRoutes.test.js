@@ -88,11 +88,11 @@ before(async () => {
     hosts: [{ id: 'vc-a:host-1', vcenterId: 'vc-a', name: 'esx-a1', cluster: 'CL-A' }],
     datastores: [{ id: 'vc-a:ds-1', vcenterId: 'vc-a', name: 'ds-a1' }],
     vms: [
-      { id: 'vc-a:vm-1', vcenterId: 'vc-a', name: 'web-01', powerState: 'POWERED_ON', snapshotCount: 0, vcDatacenter: 'DC-A', folderPath: '/web' },
-      { id: 'vc-a:vm-2', vcenterId: 'vc-a', name: 'tpl', template: true, powerState: 'POWERED_OFF', vcDatacenter: 'DC-A', folderPath: '/' },
-      { id: 'vc-a:vm-3', vcenterId: 'vc-a', name: 'vapp-child', powerState: 'POWERED_ON', vcDatacenter: null, folderPath: null },
-      { id: 'vc-a:vm-4', vcenterId: 'vc-a', name: 'bad:name', powerState: 'POWERED_ON', vcDatacenter: 'DC-A', folderPath: '/' },
-      { id: 'vc-b:vm-9', vcenterId: 'vc-b', name: 'db-09', powerState: 'POWERED_ON', snapshotCount: 0, vcDatacenter: 'DC-B', folderPath: '/' },
+      { id: 'vc-a:vm-1', vcenterId: 'vc-a', name: 'web-01', powerState: 'POWERED_ON', snapshotCount: 0, vcDcPath: 'DC-A', folderPath: '/web' },
+      { id: 'vc-a:vm-2', vcenterId: 'vc-a', name: 'tpl', template: true, powerState: 'POWERED_OFF', vcDcPath: 'DC-A', folderPath: '/' },
+      { id: 'vc-a:vm-3', vcenterId: 'vc-a', name: 'vapp-child', powerState: 'POWERED_ON', vcDcPath: null, folderPath: null },
+      { id: 'vc-a:vm-4', vcenterId: 'vc-a', name: 'bad:name', powerState: 'POWERED_ON', vcDcPath: 'DC-A', folderPath: '/' },
+      { id: 'vc-b:vm-9', vcenterId: 'vc-b', name: 'db-09', powerState: 'POWERED_ON', snapshotCount: 0, vcDcPath: 'DC-B', folderPath: '/' },
     ],
     alarms: [], networks: [],
   };

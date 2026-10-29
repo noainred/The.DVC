@@ -9,6 +9,7 @@
  *  · 백업 대상 시드는 원장이 **비어 있을 때만** 1회(demo:true 표지 — live 폴러는 건너뛴다).
  */
 import { isMockMode, demoHash } from './flags.js';
+import { pushAll } from '../../util/pushAll.js';
 import { DEFAULTS } from '../../bareos/settings.js';
 import { BareosConsoleError } from '../../bareos/console.js';
 
@@ -190,7 +191,7 @@ export function demoCall(cmd, settings) {
       const cutoff = days ? Date.now() - days * DAY : 0;
       let rows = [];
       for (const n of names) {
-        rows.push(...historyOf(n));
+        pushAll(rows, historyOf(n));   // 펼침 push 금지(인벤토리 규모 배열 — audit2603a 스윕)
         for (const id of S.runs.keys()) { const r = liveRow(id); if (r && r.name === n) rows.push(r); }
       }
       if (cutoff) rows = rows.filter((r) => Date.parse(r.starttime.replace(' ', 'T')) >= cutoff);
@@ -230,7 +231,7 @@ export async function ensureBareosDemo({ listJobs, createTarget, snapshot }) {
   const picks = []; const seenVc = new Set();
   for (const v of snapshot.vms) {
     if (picks.length >= 5) break;
-    if (v.template || v.powerState !== 'POWERED_ON' || seenVc.has(v.vcenterId) || !v.vcDatacenter || !v.folderPath) continue;
+    if (v.template || v.powerState !== 'POWERED_ON' || seenVc.has(v.vcenterId) || !v.vcDcPath || !v.folderPath) continue;
     if (!/^(db|app|web|mail|dc)-/.test(v.name || '')) continue;
     seenVc.add(v.vcenterId); picks.push(v);
   }

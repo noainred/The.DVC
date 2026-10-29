@@ -32,16 +32,16 @@ const dcs = new Map([
 ]);
 
 test('정확한 위치: 사용자 폴더 이름이 vm 이어도 넣는다 · 폴더 속 데이터센터는 전체 경로', () => {
-  assert.deepEqual(vmPlacement('group-v6', folders, dcs), { vcDatacenter: 'Asia/DC-Seoul', folderPath: '/vm/web' });
-  assert.deepEqual(vmPlacement('group-v5', folders, dcs), { vcDatacenter: 'Asia/DC-Seoul', folderPath: '/vm' });
+  assert.deepEqual(vmPlacement('group-v6', folders, dcs), { vcDcPath: 'Asia/DC-Seoul', folderPath: '/vm/web' });
+  assert.deepEqual(vmPlacement('group-v5', folders, dcs), { vcDcPath: 'Asia/DC-Seoul', folderPath: '/vm' });
 });
 
 test('루트 VM 은 / · 루트 데이터센터는 이름만', () => {
-  assert.deepEqual(vmPlacement('group-v7', folders, dcs), { vcDatacenter: 'DC-Root', folderPath: '/' });
+  assert.deepEqual(vmPlacement('group-v7', folders, dcs), { vcDcPath: 'DC-Root', folderPath: '/' });
 });
 
 test('따라갈 수 없으면 null(지어내지 않는다): vApp(부모 없음) · 모르는 부모 · 고리', () => {
-  const none = { vcDatacenter: null, folderPath: null };
+  const none = { vcDcPath: null, folderPath: null };
   assert.deepEqual(vmPlacement(undefined, folders, dcs), none);
   assert.deepEqual(vmPlacement('resgroup-99', folders, dcs), none);
   assert.deepEqual(vmPlacement('loop-1', folders, dcs), none);
@@ -54,22 +54,22 @@ test('soapClient: Datacenter 는 parent 를 받고 VM 레코드에 vmPlacement �
   assert.match(s, /folder: folderPath\(p\.parent\),\s*(?:\/\/[^\n]*\n\s*)*\.\.\.vmPlacement\(p\.parent, folderByRef, dcByRef\)/);
 });
 
-test('엣지 정제: vcDatacenter·folderPath 는 글자만(객체·수는 null)', async () => {
+test('엣지 정제: vcDcPath·folderPath 는 글자만(객체·수는 null)', async () => {
   const { sanitizeInventoryList } = await import('../src/routes/central.js');
   const dropped = { notObject: 0, otherVcenter: 0, badId: 0, coerced: 0 };
   const out = sanitizeInventoryList([
-    { id: 'vc:vm-1', vcenterId: 'vc', name: 'a', vcDatacenter: 'DC', folderPath: '/x' },
-    { id: 'vc:vm-2', vcenterId: 'vc', name: 'b', vcDatacenter: { evil: 1 }, folderPath: 5 },
+    { id: 'vc:vm-1', vcenterId: 'vc', name: 'a', vcDcPath: 'DC', folderPath: '/x' },
+    { id: 'vc:vm-2', vcenterId: 'vc', name: 'b', vcDcPath: { evil: 1 }, folderPath: 5 },
   ], 'vc', 10, dropped);
-  assert.equal(out[0].vcDatacenter, 'DC');
+  assert.equal(out[0].vcDcPath, 'DC');
   assert.equal(out[0].folderPath, '/x');
-  assert.equal(out[1].vcDatacenter, null);
+  assert.equal(out[1].vcDcPath, null);
   assert.equal(out[1].folderPath, null);
   assert.ok(dropped.coerced >= 2);
 });
 
 test('목업 VM 도 두 필드를 갖는다', () => {
   const s = fs.readFileSync(path.join(SRC, 'mock/generator.js'), 'utf8');
-  assert.match(s, /vcDatacenter: `DC-\$\{site\.id\}`/);
+  assert.match(s, /vcDcPath: `DC-\$\{site\.id\}`/);
   assert.match(s, /folderPath: `\/\$\{VM_FOLDERS\[/);
 });

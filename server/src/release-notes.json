@@ -1,6 +1,19 @@
 {
   "notes": [
     {
+      "version": "2.820.0",
+      "date": "2026-10-29",
+      "title": "Bareos VM 백업 — 포탈에서 고른 VM 을 Bareos VMware 플러그인으로 백업·복원",
+      "notes": [
+        "특수 기능 › Bareos VM 백업(관리자): vCenter·VM 을 고르면 Director 에 VM 마다 잡을 만들고(configure add job) 지금 실행(Full/Incremental/Differential) · Bareos 스케줄 배정 · 실행 상태·이력·로그 · 취소 · 비활성 · 삭제(Director 잡은 비활성, 정의 파일은 남는다)",
+        "복원: 원래 VM 덮어쓰기(VM 이름 재입력 · 전원 꺼짐 · 스냅샷 0 — 못 읽으면 거부) / 새 VM(꺼진 채 · 동명 거부) / FD 로컬 VMDK — 전부 본인 OTP 재인증 · 감사 로그 · 백업 체인(jobid 목록)으로만 복원",
+        "연결: 포탈 서버가 Director 9101 에 직접(TLS-PSK · CRAM-MD5 · JSON API) — 설치할 것 없음 · vCenter 비밀번호는 포탈이 갖지 않는다(사이트 FD 의 INI) · 백업 데이터는 사이트 FD→SD 안에서만",
+        "설정 탭(전체 범위 관리자): Director 주소·콘솔·비밀번호(봉인 저장) · 연결 시험(저장 비밀번호면 저장 주소로 고정) · vCenter→사이트 FD·SD·풀·스케줄 매핑 · Director 사전 준비 블록·FD INI 복사",
+        "vCenter 상세 VM 행에 Bareos 배지 · 인벤토리에 VM 의 데이터센터·폴더 정확한 경로(vcDcPath·folderPath — 엣지 수집분도) · 데모(mock) 모드는 합성 Director",
+        "⚠ 현장 확인 필요(추정): Node↔Director TLS-PSK 협상 · 잡 수준 플러그인 옵션 병합 · .bvfs_get_jobids 응답 모양은 실제 Director 로 확인하지 못했다 — 먼저 서버의 bareos-probe 도구(server/src/tools/bareos-probe.js)로 접속·테스트 잡을 확인할 것"
+      ]
+    },
+    {
       "version": "2.819.0",
       "date": "2026-10-29",
       "title": "포탈 백업 관리 — 복원 지점 · 새 VM 복원 · 포탈 잡에서 빼기 · 백업 삭제 · 폴더 트리 Portal 배지",

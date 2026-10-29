@@ -27,7 +27,20 @@ let _tick = 0;
 let _last = { at: null, ok: null, trigger: null, checked: 0, updated: 0, reconciled: false, error: '', configured: null };
 let _timer = null;
 
-export function pollerStatus() { return { ..._last, busy: _busy, running: !!_timer }; }
+/**
+ * 상태(엣지 로그 spec 'collect.bareos' · 서비스 점검 · 화면). enabled = Director 가 설정됐거나 데모 Director —
+ * 미설정이면 서비스 점검이 '꺼짐' 으로 칠한다(폴러는 돌지만 접속하지 않는다). 설정을 못 읽으면 켜진 것으로 둔다(모르는 것을 꺼짐으로 칠하지 않는다).
+ */
+export function pollerStatus() {
+  let enabled = true;
+  let intervalMs = null;
+  try {
+    const s = loadSettings();
+    intervalMs = (s.defaults.pollIntervalSec || 60) * 1000;
+    enabled = isDemoActive(s) || !!directorConn(s).conn;
+  } catch { /* 위 주석 */ }
+  return { ..._last, busy: _busy, running: !!_timer, enabled, intervalMs };
+}
 
 /**
  * 한 번 조회. @param {{ trigger?: 'timer'|'manual', reconcile?: boolean }} o
