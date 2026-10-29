@@ -305,19 +305,19 @@ function PortalVmsPanel() {
               return (
                 <React.Fragment key={v.vmId}>
                 <tr>
-                  <td>{v.name}{!v.exists ? <span className="muted" style={{ fontSize: 11 }}> (인벤토리에 없음)</span> : null}</td>
-                  <td style={{ fontSize: 12, overflowWrap: 'anywhere' }}>{v.vcenterName}<div className="muted">{v.folder || '—'}</div></td>
+                  <td style={{ maxWidth: 240, whiteSpace: 'normal', overflowWrap: 'anywhere' }}>{v.name}{!v.exists ? <span className="muted" style={{ fontSize: 11 }}> (인벤토리에 없음)</span> : null}</td>
+                  <td style={{ fontSize: 12, maxWidth: 240, whiteSpace: 'normal', overflowWrap: 'anywhere' }}>{v.vcenterName}<div className="muted">{v.folder || '—'}</div></td>
                   <td data-sort={v.sizeGB ?? ''} className="mono" title="사용량 — vCenter 값(스냅샷·스왑 포함)">{gbText(v.sizeGB)}{v.provisionedGB != null ? <div className="muted" style={{ fontSize: 11 }}>할당 {gbText(v.provisionedGB)}</div> : null}</td>
                   <td>{HOW[v.how] || '—'}{v.jobName ? <div className="muted" style={{ fontSize: 11 }}>{v.jobName}</div> : null}</td>
                   <td data-sort={v.lastAt ?? ''} className="mono">{shortTime(v.lastAt)}</td>
-                  <td style={{ minWidth: 160 }}>{m ? <Badge cls={m.cls} title={m.title}>{m.label}</Badge> : '—'}
-                    {line ? <div className="mono" style={{ fontSize: 11, marginTop: 4, overflowWrap: 'anywhere' }}>{line}</div> : null}
+                  <td style={{ minWidth: 160, maxWidth: 260, whiteSpace: 'normal' }}>{m ? <Badge cls={m.cls} title={m.title}>{m.label}</Badge> : '—'}
+                    {line ? <div style={{ fontSize: 11, marginTop: 4, overflowWrap: 'anywhere', lineHeight: 1.45 }}>{line}</div> : null}
                     {v.live ? <button type="button" className="logout-btn" style={{ fontSize: 11, padding: '1px 6px', marginTop: 4 }} aria-expanded={detail === v.vmId} onClick={() => setDetail(detail === v.vmId ? '' : v.vmId)}>{detail === v.vmId ? '세부 접기' : '세부 보기'}</button> : null}
                   </td>
                   <td style={{ fontSize: 12 }}>{v.restores?.length ? `${v.restores[0].newName} (${(VM_STATE[v.restores[0].state] || VM_STATE.unknown).label})` : '—'}</td>
                   <td><button type="button" className="logout-btn" disabled={!v.exists} title={v.exists ? '' : '인벤토리에 없는 VM 은 관리 창을 열 수 없습니다'} onClick={() => setOpen(v.vmId)}>관리</button></td>
                 </tr>
-                {detail === v.vmId && v.live ? <tr><td colSpan={8} style={{ background: 'var(--panel-deep)' }}><LiveDetail v={v} /></td></tr> : null}
+                {detail === v.vmId && v.live ? <tr><td colSpan={8} style={{ background: 'var(--panel-deep)', whiteSpace: 'normal' }}><LiveDetail v={v} /></td></tr> : null}
                 </React.Fragment>
               );
             })}
@@ -342,9 +342,10 @@ function elapsedOf(v, now = Date.now()) {
 function LiveDetail({ v }) {
   const L = v.live; const m = L.metrics || {};
   const st = VM_STATE[L.state] || VM_STATE.unknown;
-  const row = (k, val) => <div style={{ display: 'flex', gap: 8, minWidth: 0 }}><span className="muted" style={{ flex: '0 0 110px' }}>{k}</span><span style={{ minWidth: 0, overflowWrap: 'anywhere' }}>{val}</span></div>;
+  // 표 칸은 기본이 nowrap(styles.css tbody td) — 여기서는 줄바꿈해야 값이 옆 칸 라벨을 덮지 않는다(1440 화면 확인).
+  const row = (k, val) => <div style={{ display: 'grid', gridTemplateColumns: '96px minmax(0, 1fr)', gap: 8, minWidth: 0 }}><span className="muted">{k}</span><span style={{ minWidth: 0, overflowWrap: 'anywhere', whiteSpace: 'normal' }}>{val}</span></div>;
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: '6px 18px', fontSize: 12, padding: '6px 2px', minWidth: 0 }}>
+    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 300px), 1fr))', gap: '6px 18px', fontSize: 12, padding: '6px 2px', minWidth: 0, whiteSpace: 'normal' }}>
       {row('상태', <><Badge cls={st.cls}>{st.label}</Badge>{m.sessionState ? <span className="muted"> · Veeam 세션 {m.sessionState}</span> : null}</>)}
       {row('진행률', typeof L.progress === 'number' ? `${L.progress}%` : '—')}
       {row('시작', shortTime(m.startedAt))}
