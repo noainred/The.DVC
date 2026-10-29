@@ -149,7 +149,10 @@ async function seed() {
   devA = reg.saveDevice({ type: 'unity480', name: 'UNITY-A', host: '10.20.0.5', username: 'svc', password: 'p', collectMethod: 'ssh' });
   devB = reg.saveDevice({ type: 'isilon', name: '10.20.0.6', host: '10.20.0.6', username: 'svc', password: 'p' });
   const today = db.dayIndex(now);
-  for (let k = 3; k >= 0; k--) {
+  // v2.820.1: 11일치(오늘 포함) — 메일 본문은 **주간** 보고라 최근 4일만 심으면 그 4일이 모두 이번 주에 들어가는 요일(목~일)에
+  //   '이력이 있는 장비 없음(no-devices)' 으로 ⑥-2 가 실패했다(2026-10-30 금요일 KST 재현 · main 에서도 같음). 지난주가 늘 들어가게 한다.
+  //   ⑤ 의 최근 4일 값(30+k)은 그대로다.
+  for (let k = 10; k >= 0; k--) {
     const ts = db.dayStartMs(today - k) + 7200_000;
     await db.saveCapacityPoint({ ...snapAt(devA.id, ts, 100 * T, (30 + k) * T, [{ kind: 'lun', id: 'sv_1', name: 'Davinci_01', totalBytes: 120 * T, usedBytes: (40 + k) * T }]), name: 'UNITY-A' });
     if (k !== 1) await db.saveCapacityPoint({ ...snapAt(devB.id, ts, 500 * T, 250 * T), type: 'isilon', name: '10.20.0.6' });
