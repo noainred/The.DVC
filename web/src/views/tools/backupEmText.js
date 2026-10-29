@@ -226,13 +226,14 @@ export function emLinkRows(ems, now = Date.now()) {
       out.push({ ...base, key: `${em.id}|-`, server: '', note: !d ? '수집 결과 없음 — 이 EM 의 백업 서버가 보이지 않습니다' : !Array.isArray(servers) ? '백업 서버 목록을 읽지 못했습니다' : 'EM 에 백업 서버가 없습니다', roots: [], portal: null, check: VC_CHECK.unknown, checkKey: 'unknown' });
       continue;
     }
-    for (const s of servers) {
+    servers.forEach((s, i) => {
       const ck = s.vcCheck && VC_CHECK[s.vcCheck] ? s.vcCheck : 'unknown';
-      out.push({ ...base, key: `${em.id}|${s.name}`, server: s.name, note: '',
+      // 키에 순번 — 같은 EM 안에 같은 이름의 백업 서버가 있으면 React 키가 겹쳐 정렬 때 행이 늘어났다(Chromium 실측 v2.817)
+      out.push({ ...base, key: `${em.id}|${i}|${s.uid || ''}|${s.name}`, server: s.name, note: '',
         roots: Array.isArray(s.roots) ? s.roots.map(rootText) : null,
         portal: s.vcSource ? { text: (s.vcNames || []).join(', ') || '—', source: srcText[s.vcSource] || s.vcSource } : null,
         check: VC_CHECK[ck], checkKey: ck });
-    }
+    });
     const orph = new Map();
     for (const r of Array.isArray(d.orphanRoots) ? d.orphanRoots : []) { const k = r.server || ''; if (!orph.has(k)) orph.set(k, []); orph.get(k).push(r); }
     for (const [sv, list] of orph) out.push({ ...base, key: `${em.id}|orphan|${sv}`, server: sv || '(서버 모름)', note: '연결 호스트에는 있지만 백업 서버 목록에는 없는 서버', roots: list.map(rootText), portal: null, check: VC_CHECK.orphan, checkKey: 'orphan' });

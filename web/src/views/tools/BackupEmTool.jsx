@@ -37,25 +37,26 @@ function EmLinks({ ems, now, sel, onPick }) {
           {sm.unmapped ? <span> · 매핑 없는 서버 {fmtNum(sm.unmapped)}</span> : null}
           {sm.rootsUnknown ? <span> · 연결 호스트를 못 읽은 EM {fmtNum(sm.rootsUnknown)}</span> : null}</span>
       </div>
-      <div style={{ overflowX: 'auto', marginTop: 8 }}>
-        <STable minWidth={900} style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+      {/* 가로 스크롤 래퍼는 STable(minWidth)이 만든다 — 바깥에 또 두지 않는다 · 칸 글자는 줄바꿈(1440 에서 대조 열이 잘리지 않게) */}
+      <div style={{ marginTop: 8 }}>
+        <STable minWidth={860} style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, tableLayout: 'fixed' }}>
           <thead><tr style={{ textAlign: 'left', fontSize: 12 }}>
-            <th style={{ padding: '6px 6px 6px 0' }}>Enterprise Manager</th><th style={{ padding: '6px' }}>수집</th><th style={{ padding: '6px' }}>백업 서버</th>
-            <th style={{ padding: '6px' }}>EM 이 본 vCenter·호스트</th><th style={{ padding: '6px' }}>포탈 매핑(법인)</th><th style={{ padding: '6px 0 6px 6px' }}>대조</th>
+            <th style={{ padding: '6px 6px 6px 0', width: '13%' }}>Enterprise Manager</th><th style={{ padding: '6px', width: '21%' }}>수집</th><th style={{ padding: '6px', width: '14%' }}>백업 서버</th>
+            <th style={{ padding: '6px', width: '23%' }}>EM 이 본 vCenter·호스트</th><th style={{ padding: '6px', width: '19%' }}>포탈 매핑(법인)</th><th style={{ padding: '6px 0 6px 6px', width: '10%' }}>대조</th>
           </tr></thead>
           <tbody>
             {rows.map((r) => (
               <tr key={r.key} style={{ borderTop: '1px solid var(--border-soft)', verticalAlign: 'top', background: r.emId === sel ? 'rgba(59,130,246,.07)' : undefined }}>
-                <td style={{ padding: '6px 6px 6px 0', whiteSpace: 'nowrap' }} data-sort={r.emName}>
+                <td style={{ padding: '6px 6px 6px 0', whiteSpace: 'normal', overflowWrap: 'anywhere' }} data-sort={r.emName}>
                   <button type="button" onClick={() => onPick(r.emId)} title="아래 상세를 이 EM 으로" style={{ background: 'none', border: 0, padding: 0, color: 'var(--accent, #60a5fa)', font: 'inherit', fontWeight: 700, cursor: 'pointer' }}>{r.emName}</button>
                 </td>
-                <td style={{ padding: '6px', maxWidth: 260, color: r.statusTone === 'bad' ? TONE.fail : r.statusTone === 'warn' ? TONE.warn : 'var(--text-dim)', fontSize: 12, overflowWrap: 'anywhere' }}>{r.statusText}</td>
-                <td style={{ padding: '6px', fontWeight: 600, overflowWrap: 'anywhere' }} data-sort={r.server || ''}>{r.server || <span className="muted" style={{ fontWeight: 400 }}>—</span>}{r.note && <div style={{ fontSize: 12, fontWeight: 400, color: r.checkKey === 'orphan' ? TONE.warn : TONE.fail }}>{r.note}</div>}</td>
-                <td style={{ padding: '6px', fontSize: 12.5 }} data-sort={r.roots?.[0]?.text || ''}>
+                <td style={{ padding: '6px', whiteSpace: 'normal', color: r.statusTone === 'bad' ? TONE.fail : r.statusTone === 'warn' ? TONE.warn : 'var(--text-dim)', fontSize: 12, overflowWrap: 'anywhere' }}>{r.statusText}</td>
+                <td style={{ padding: '6px', fontWeight: 600, whiteSpace: 'normal', overflowWrap: 'anywhere' }} data-sort={r.server || ''}>{r.server || <span className="muted" style={{ fontWeight: 400 }}>—</span>}{r.note && <div style={{ fontSize: 12, fontWeight: 400, color: r.checkKey === 'orphan' ? TONE.warn : TONE.fail }}>{r.note}</div>}</td>
+                <td style={{ padding: '6px', fontSize: 12.5, whiteSpace: 'normal', overflowWrap: 'anywhere' }} data-sort={r.roots?.[0]?.text || ''}>
                   {r.roots == null ? <span className="muted">모름(연결 호스트를 읽지 못함)</span> : r.roots.length ? r.roots.map((x, i) => <div key={i} style={{ color: x.tone === 'ok' ? undefined : x.tone === 'warn' ? TONE.warn : 'var(--text-dim)' }}>{x.text}</div>) : <span className="muted">—</span>}
                 </td>
-                <td style={{ padding: '6px', fontSize: 12.5 }} data-sort={r.portal?.text || ''}>{r.portal ? <>{r.portal.text} <span className="muted">· {r.portal.source}</span></> : <span className="muted">—</span>}</td>
-                <td style={{ padding: '6px 0 6px 6px', whiteSpace: 'nowrap', fontWeight: 700, color: TONE[r.check.tone] || 'var(--text-dim)' }} data-sort={r.check.label}>{r.check.label}</td>
+                <td style={{ padding: '6px', fontSize: 12.5, whiteSpace: 'normal', overflowWrap: 'anywhere' }} data-sort={r.portal?.text || ''}>{r.portal ? <>{r.portal.text} <span className="muted">· {r.portal.source}</span></> : <span className="muted">—</span>}</td>
+                <td style={{ padding: '6px 0 6px 6px', whiteSpace: 'normal', fontWeight: 700, color: TONE[r.check.tone] || 'var(--text-dim)' }} data-sort={r.check.label}>{r.check.label}</td>
               </tr>
             ))}
           </tbody>

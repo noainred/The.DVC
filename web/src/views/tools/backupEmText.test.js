@@ -183,6 +183,11 @@ describe('v2.817 EM 연결 현황 — 모든 EM · 실패 EM 행 · 포탈에 �
     expect(rows[4].statusTone).toBe('bad');
     for (const r of rows) expect(`${r.note}${r.statusText}${r.check.label}`).not.toMatch(/`|\*\*/);
   });
+  it('행 키는 같은 EM 안에 같은 이름의 백업 서버가 있어도 겹치지 않는다(겹치면 정렬 때 행이 늘었다 — Chromium 실측)', () => {
+    const dup = [{ id: 'x', name: 'X', status: { ok: true, ts: NOW }, data: { hierarchyRootsKnown: true, orphanRoots: [], backupServers: [{ name: 'VBR', vcCheck: 'none', roots: [] }, { name: 'VBR', vcCheck: 'none', roots: [] }] } }];
+    const keys = T.emLinkRows(dup, NOW).map((r) => r.key);
+    expect(new Set(keys).size).toBe(keys.length);
+  });
   it('emLinkSummary — EM·실패·서버·본 vCenter·포탈에 없는 vCenter·다름·루트 모름', () => {
     expect(T.emLinkSummary(ems)).toEqual({ ems: 3, failed: 1, noData: 1, servers: 3, vcSeen: 1, notInPortal: 1, diff: 1, unmapped: 0, rootsUnknown: 1 });
   });

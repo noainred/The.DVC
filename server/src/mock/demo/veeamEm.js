@@ -13,6 +13,9 @@ export function demoEmView(snap, now = Date.now()) {
   let seq = 0;
   const rnd = () => demoRand(`veeam-em:${seq++}`);   // 결정적(같은 순서 = 같은 값)
   const servers = vcs.slice(0, Math.max(1, Math.ceil(vcs.length / 2))).map((v, i) => ({ name: `VBR-${String(v.name || v.id).split(/[.-]/)[1] || i}`.toUpperCase().slice(0, 24), uid: `demo-vbr-${i}`, version: i % 3 ? '12.3.1' : '12.2.0', port: 9392, description: '', registered: i % 4 !== 3 }));
+  // v2.817: 이름이 겹치면(vCenter 이름 마디가 같다) 뒤에 순번 — 같은 EM 안에 같은 이름 서버가 두 대면 데모가 헷갈린다
+  const seen = new Map();
+  for (const sv of servers) { const n = (seen.get(sv.name) || 0) + 1; seen.set(sv.name, n); if (n > 1) sv.name = `${sv.name}-${n}`; }
   const kinds = [['ok', 0.86], ['warn', 0.08], ['fail', 0.03], ['run', 0.03]];
   const pickState = () => { const x = rnd(); let acc = 0; for (const [k, p] of kinds) { acc += p; if (x < acc) return k; } return 'ok'; };
   const jobs = [];
