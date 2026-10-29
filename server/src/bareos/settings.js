@@ -1,5 +1,5 @@
 /**
- * bareos/settings.js — Bareos 연동 설정(v2.747). 파일: CONFIG_DIR/bareos.json (0600 · 원자적 쓰기 · 비밀 봉인).
+ * bareos/settings.js — Bareos 연동 설정(v2.820). 파일: CONFIG_DIR/bareos.json (0600 · 원자적 쓰기 · 비밀 봉인).
  *
  * {
  *   version: 1,

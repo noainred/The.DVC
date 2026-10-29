@@ -4,7 +4,7 @@ import { Loading, ErrorBox } from '../components/ui.jsx';
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid } from 'recharts';
 import GuestScanJobs from './GuestScanJobs.jsx';
 import { STable } from '../components/STable.jsx';
-import { scanNote, analyzedAtText, ANALYSIS_REFRESH_MS, notCollectedLoginNote, kpiValueText } from './loginFailsText.js';
+import { scanNote, analyzedAtText, ANALYSIS_REFRESH_MS, notCollectedLoginNote, laggingLoginNote, kpiValueText } from './loginFailsText.js';
 
 const fmtTime = (ts) => (ts ? new Date(ts).toLocaleString('ko-KR') : '—');
 const fmtHour = (ts) => new Date(ts).toLocaleString('ko-KR', { month: '2-digit', day: '2-digit', hour: '2-digit' });
@@ -73,12 +73,14 @@ export default function LoginFails() {
         const sn = scanNote(d.scan);
         const at = analyzedAtText(d.generatedAt);
         const nc = notCollectedLoginNote(d.notCollected);   // v2.733(C1-01): 지금 이벤트를 수집하지 않는 vCenter — 감시 밖
-        if (!sn.text && !sn.warn && !at && !nc) return null;
+        const lg = laggingLoginNote(d.lagging);   // v2.772(Z4-2): 수집이 뒤처진 vCenter — 이 기간 결과는 일부
+        if (!sn.text && !sn.warn && !at && !nc && !lg) return null;
         return (
           <div style={{ marginBottom: 8, fontSize: 12 }}>
             {(at || sn.text) && <div className="muted">{[at, sn.text].filter(Boolean).join(' · ')}</div>}
             {sn.warn && <div className="banner" style={{ marginTop: 4 }}>⚠ {sn.warn}</div>}
             {nc && <div className="banner" style={{ marginTop: 4, whiteSpace: 'normal' }}>{nc}</div>}
+            {lg && <div className="banner" style={{ marginTop: 4, whiteSpace: 'normal' }}>⚠ {lg}</div>}
           </div>
         );
       })()}

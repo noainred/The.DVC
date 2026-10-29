@@ -72,8 +72,10 @@ export const KIND_BADGE = Object.freeze({ vm: 'blue', host: 'teal', public: 'red
 export const kindLabel = (k) => KIND_LABEL[k] || '확인 불가';
 export const kindBadge = (k) => KIND_BADGE[k] || 'gray';
 
-export const POLICY_LABEL = Object.freeze({ approved: '승인', unapproved: '비승인', mixed: '법인마다 다름', none: '정책 없음' });
-export const POLICY_BADGE = Object.freeze({ approved: 'green', unapproved: 'amber', mixed: 'amber', none: 'gray' });
+// v2.785(GN N-B2·N-I2): unsupported = IPv6 서버(정책 항목이 IPv4·CIDR 만이라 판정 불가) · local = 로컬 스텁만 쓰는 VM(상위 DNS 모름).
+export const POLICY_LABEL = Object.freeze({ approved: '승인', unapproved: '비승인', mixed: '법인마다 다름', none: '정책 없음',
+  unsupported: 'IPv6 — 정책 미지원', local: '로컬 스텁 — 판정 안 함' });
+export const POLICY_BADGE = Object.freeze({ approved: 'green', unapproved: 'amber', mixed: 'amber', none: 'gray', unsupported: 'gray', local: 'gray' });
 export const policyLabel = (p) => POLICY_LABEL[p] || '확인 불가';
 export const policyBadge = (p) => POLICY_BADGE[p] || 'gray';
 
@@ -83,6 +85,8 @@ export const POLICY_TITLE = Object.freeze({
   unapproved: '이 주소를 쓰는 법인 정책 밖입니다(또는 공인 DNS 를 비승인으로 정했습니다)',
   mixed: '어떤 법인에서는 승인, 어떤 법인에서는 비승인입니다 — 상세에서 VM 별 판정을 보세요',
   none: '이 주소를 쓰는 법인에 승인 목록이 없어 판정하지 않았습니다(위반으로 세지 않습니다)',
+  unsupported: 'IPv6 주소입니다 — 승인 목록은 IPv4 주소와 CIDR 만 받으므로 판정하지 않았습니다(위반으로 세지 않습니다)',
+  local: '게스트 안의 로컬 DNS 스텁(예: systemd-resolved 127.0.0.53)만 보이는 VM 입니다 — 실제 상위 DNS 를 몰라 판정하지 않았습니다(위반으로 세지 않습니다)',
 });
 
 /** 범위 밖 소유자 가림 표지(서버 계약: who = { label:'다른 법인 VM', name:null, vcenterId:null }). */
@@ -117,6 +121,7 @@ export const SKIP_TEXT = Object.freeze({
   local: '루프백·링크 로컬 등 — 중앙에서 물으면 중앙 자신의 값이라 점검하지 않음',
   cap: '대상 상한을 넘어 이번에 점검하지 않음',
   budget: '시간 예산을 넘어 이번에 점검하지 않음(다시 누르면 다시 잽니다)',
+  'no-ipv6': '중앙 서버에 IPv6 가 없어 점검하지 않음(그 서버의 응답 없음이 아닙니다)',
 });
 export const skipText = (why) => SKIP_TEXT[why] || (why ? `점검하지 않음(${why})` : '점검하지 않음');
 function legText(leg, name) {
@@ -158,7 +163,7 @@ export function qnameText(q) {
 /** 점검 요약의 건너뜀 사유 분해 — '데모 3 · 시간 예산 2'. 없으면 ''. */
 export function skippedByText(summary) {
   const by = summary && typeof summary.skippedBy === 'object' && summary.skippedBy ? summary.skippedBy : {};
-  const label = { mock: '데모', local: '로컬 주소', cap: '상한 초과', budget: '시간 예산' };
+  const label = { mock: '데모', local: '로컬 주소', cap: '상한 초과', budget: '시간 예산', 'no-ipv6': 'IPv6 없음' };
   return Object.entries(by).map(([k, v]) => [k, numOrNull(v)]).filter(([, v]) => v != null && v > 0)
     .map(([k, v]) => `${label[k] || k} ${nText(v)}`).join(' · ');
 }
@@ -200,11 +205,14 @@ export function kpiCards(kpis, ctx = {}) {
     ? `정책이 있는 법인 ${nText(corps)}곳${pubRule} 기준`
     : ctx.publicUnapproved === true ? '법인 정책 없음 — 공인 DNS 규칙만 판정' : '정책 없음 — 판정하지 않았습니다';
   const vcCount = numOrNull(ctx.vcCount);
+  // v2.785(GN N-I2): 로컬 스텁만 보이는 VM — 보고는 했지만 실제 DNS 는 모른다. 서버가 값을 줄 때만(예전 서버는 필드가 없다).
+  const stub = n('localStubVms');
+  const stubText = stub != null && stub > 0 ? ` · 로컬 스텁만 ${nText(stub)}대` : '';
   return [
     { key: 'vms', label: '조사한 VM', value: nText(vms), dot: 'var(--accent)', tone: 'plain',
       sub: `템플릿 제외 · 켜짐·꺼짐 포함${vcCount != null ? ` · vCenter ${nText(vcCount)}개` : ''}` },
     { key: 'reported', label: 'DNS 보고', value: nText(reported), dot: 'var(--mint)', tone: 'plain',
-      sub: pct != null ? `${pct}% · 나머지는 모름·미수집` : 'VMware Tools 가 보고한 VM' },
+      sub: `${pct != null ? `${pct}% · 나머지는 모름·미수집` : 'VMware Tools 가 보고한 VM'}${stubText}` },
     { key: 'servers', label: '고유 DNS 서버', value: nText(n('servers')), dot: 'var(--accent-2)', tone: 'plain',
       sub: kindParts.length ? kindParts.join(' · ') : '쓰는 주소 없음' },
     { key: 'unapprovedVms', label: '비승인 DNS 사용', value: nText(n('unapprovedVms')), dot: 'var(--amber)', tone: tone(n('unapprovedVms'), 'warn'), sub: unapprovedSub },
@@ -329,10 +337,15 @@ export function isOtherCorp(server, rowVcId) {
   return isMaskedWho(who);
 }
 
-/** 칸 톤 — 공인은 늘 bad, 그다음 다른 법인(amber), 그다음 열 정책. */
-export function cellTone(col, rowVcId, server) {
+/**
+ * 칸 톤 — 공인은 늘 bad, 그다음 다른 법인(amber), 그다음 열 정책.
+ * v2.785(GN N-B3): otherCorp 는 서버가 칸마다 준 판정(소유 vCenter **집합** 기준)이다 — 있으면 그것만 쓴다.
+ *   대표 소유자 1명(who)으로 다시 판정하면 같은 사설 주소를 여러 법인이 가진 경우 KPI(0)와 다른 색을 칠했다.
+ *   불리언이 아니면(필드가 없는 예전 서버 응답) 예전 판정으로 돌아간다.
+ */
+export function cellTone(col, rowVcId, server, otherCorp) {
   if (col?.kind === 'public') return 'bad';
-  if (isOtherCorp(server, rowVcId)) return 'other';
+  if (typeof otherCorp === 'boolean' ? otherCorp : isOtherCorp(server, rowVcId)) return 'other';
   return colTone(col);
 }
 
@@ -354,6 +367,7 @@ export function matrixView(matrix, servers) {
   });
   const rows = (Array.isArray(matrix?.rows) ? matrix.rows : []).filter((r) => r && typeof r === 'object').map((r) => {
     const cells = Array.isArray(r.cells) ? r.cells : [];
+    const oc = Array.isArray(r.otherCorp) ? r.otherCorp : null;   // v2.785(GN N-B3) 서버 판정
     const sum = cells.reduce((a, v) => a + (numOrNull(v) || 0), 0) + (numOrNull(r.other) || 0);
     const total = numOrNull(r.total) || sum;
     const mk = (v, tone, title) => {
@@ -362,7 +376,7 @@ export function matrixView(matrix, servers) {
       return { v: x, text: x == null ? '—' : x === 0 ? '·' : nText(x), bg: cellBg(tone, a), strong: a > 0, tone, title };
     };
     const out = cols.map((c, i) => {
-      const tone = cellTone(c, r.vcenterId, byIp.get(c.ip));
+      const tone = cellTone(c, r.vcenterId, byIp.get(c.ip), oc ? oc[i] === true : undefined);
       return mk(cells[i], tone, `${r.name || r.vcenterId} → ${c.ip}: ${nText(cells[i])}대${tone === 'other' ? ' · 다른 법인의 DNS' : ''}`);
     });
     out.push(mk(r.other, 'none', `${r.name || r.vcenterId} → 상위 ${cols.length}개 밖의 주소: ${nText(r.other)}대`));
@@ -388,17 +402,21 @@ export function modeSplit(kpis) {
 }
 
 /** 정합성 점검 3줄 — 0 이면 중립색. */
-export function checkRows(checks) {
+// v2.785(GN N-I2): kpis.localStubVms 가 있으면(새 서버) 넷째 줄 '로컬 스텁만' — DNS 1개·비승인으로 세지 않은 VM 수.
+export function checkRows(checks, kpis = null) {
   const c = checks && typeof checks === 'object' ? checks : {};
-  const row = (key, label, sub, tone) => {
-    const v = numOrNull(c[key]);
+  const row = (key, label, sub, tone, raw = c[key]) => {
+    const v = numOrNull(raw);
     return { key, label, sub, n: nText(v), tone: v != null && v > 0 ? tone : 'plain' };
   };
-  return [
+  const out = [
     row('mismatch', 'NIC 설정 ≠ OS 실제 DNS', '어댑터에 넣은 값과 OS 가 쓰는 값이 다름', 'purple'),
     row('otherCorp', '다른 법인 DNS 사용', '같은 회선이 아니면 해석 지연·장애 전파', 'warn'),
     row('singleDns', 'DNS 1개만 설정', '그 서버가 내려가면 이름 해석이 멈춤', 'neutral'),
   ];
+  const stub = kpis && typeof kpis === 'object' ? numOrNull(kpis.localStubVms) : null;
+  if (stub != null) out.push(row('localStub', '로컬 DNS 스텁만 보임', '127.0.0.53 등 게스트 안 스텁 — 실제 DNS 를 몰라 DNS 1개·비승인으로 세지 않음', 'neutral', stub));
+  return out;
 }
 
 // ── 변경 이력 ────────────────────────────────────────────────────────────────
@@ -449,9 +467,11 @@ export function historyNote(h, now = Date.now()) {
 }
 
 // ── DNS 서버 상세(VM 목록) ────────────────────────────────────────────────────
-export const FLAG_LABEL = Object.freeze({ public: '공인 DNS', unapproved: '비승인', 'other-corp': '다른 법인 DNS', mismatch: 'NIC ≠ OS', single: 'DNS 1개' });
-export const FLAG_BADGE = Object.freeze({ public: 'red', unapproved: 'amber', 'other-corp': 'amber', mismatch: 'purple', single: 'gray' });
-const FLAG_ORDER = ['public', 'unapproved', 'other-corp', 'mismatch', 'single'];
+// v2.785(GN N-I2): 'local-stub' = 루프백 스텁만 보임(상위 DNS 모름 — 서버가 'single' 대신 붙인다).
+export const FLAG_LABEL = Object.freeze({ public: '공인 DNS', unapproved: '비승인', 'other-corp': '다른 법인 DNS', mismatch: 'NIC ≠ OS', single: 'DNS 1개',
+  'local-stub': '로컬 스텁만' });
+export const FLAG_BADGE = Object.freeze({ public: 'red', unapproved: 'amber', 'other-corp': 'amber', mismatch: 'purple', single: 'gray', 'local-stub': 'gray' });
+const FLAG_ORDER = ['public', 'unapproved', 'other-corp', 'mismatch', 'single', 'local-stub'];
 
 /** 판정 표지 칩(순서 고정). 모르는 표지도 버리지 않고 원문 그대로 회색으로 보인다. */
 export function flagChips(flags) {
@@ -526,7 +546,8 @@ export function ipBadge(ip, vm, serverByIp) {
   const s = serverByIp?.get ? serverByIp.get(ip) : null;
   if (!s) return 'gray';
   if (s.kind === 'public') return 'red';
-  if (isOtherCorp(s, vm?.vcenterId)) return 'amber';
+  // v2.785(GN N-B3): VM 행에 서버 판정(otherCorpIps)이 있으면 그것만 — 없으면(예전 서버) 대표 소유자 판정.
+  if (Array.isArray(vm?.otherCorpIps) ? vm.otherCorpIps.includes(ip) : isOtherCorp(s, vm?.vcenterId)) return 'amber';
   if (s.kind === 'unknown') return 'gray';
   return 'blue';
 }
@@ -569,6 +590,8 @@ export function policyHeadText(s) {
     case 'unapproved': return `비승인 — 법인 ${corps}곳에서 사용`;
     case 'mixed': return `법인마다 다름 — 비승인 ${nText(un)}대`;
     case 'none': return '정책 없음(판정 안 함)';
+    case 'unsupported': return 'IPv6 — 정책 미지원(판정 안 함)';
+    case 'local': return '로컬 스텁 — 판정 안 함';
     default: return '확인 불가';
   }
 }

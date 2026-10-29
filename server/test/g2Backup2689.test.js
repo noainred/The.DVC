@@ -69,6 +69,11 @@ test('③ 복원 중 한 파일 쓰기가 실패하면 failed 로 밝히고 나�
   assert.equal(r.failed.length, 1);
   assert.equal(r.failed[0].file, 'g2-blocked.json');
   assert.ok(r.failed[0].reason, '사유를 싣는다');
+  // v2.768(점검 R3-C5-02): 나머지는 예약 → 다음 기동 때 적용(stagedRestore.js). 적용할 수 없는 이름(디렉터리)은 복원 때 바로 failed 로 밝힌다.
+  assert.deepEqual(r.staged, ['g2-c.json']);
+  assert.equal(fs.existsSync(path.join(DIR, 'g2-c.json')), false, '재시작 전에는 쓰지 않는다');
+  const ap = (await import('../src/backup/stagedRestore.js')).applyStagedRestore({ configDir: DIR });
+  assert.deepEqual(ap.applied, ['g2-c.json']);
   assert.equal(fs.readFileSync(path.join(DIR, 'g2-c.json'), 'utf8'), '{"c":2}');
   assert.ok(warned.some((m) => m.includes('g2-blocked.json')), '실패를 콘솔에도 남긴다');
   fs.rmSync(path.join(DIR, 'g2-blocked.json'), { recursive: true, force: true });

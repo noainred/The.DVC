@@ -9,6 +9,7 @@ import { TOOLS } from './specialToolsList.js';
 import { visibleTools, lockReasonOf as lockReason } from './toolVisibility.js'; // v2.613 CATALOG2613-07: 잠금 사유도 한 모듈
 import { buildSections, applyOverrides, buildStageSections, stagesOf, displayLabel, isNonDefaultStage, introLine } from './toolSections.js'; // 섹션·덮어쓰기·단계 계산(v2.455 · v2.679, 순수)
 import { ToolNamesDrawer, StageDot, StageBadge } from './ToolNamesStages.jsx'; // 이름·설명·단계 편집(v2.679)
+import { useStickyHeadH } from '../hooks/useStickyOffset.js'; // 셸 머리 높이(v2.810 공용 — Veeam 백업 Detail 의 일괄 표시 바와 같은 측정)
 import { searchTools } from './toolSearch.js'; // 도구 검색 매칭(v2.508, 순수 · V4 팔레트와 공용)
 
 
@@ -38,6 +39,7 @@ const VmCloneTool = React.lazy(() => import('./tools/VmCloneTool.jsx'));
 const BareosBackupTool = React.lazy(() => import('./tools/BareosBackupTool.jsx'));
 const StorageMonTool = React.lazy(() => import('./tools/StorageMonTool.jsx'));
 const StorageGrowthTool = React.lazy(() => import('./tools/StorageGrowthTool.jsx'));
+const StorageUsageTool = React.lazy(() => import('./tools/StorageUsageTool.jsx')); // v2.789 스토리지 사용량 보고서
 const PartFaults = React.lazy(() => import('./tools/PartFaults.jsx'));   // 파트 장애(v2.547)
 const EdgeLog = React.lazy(() => import('./tools/EdgeLog.jsx'));         // 엣지 로그·진행상태(v2.549)
 const BmUsage = React.lazy(() => import('./tools/BmUsage.jsx'));         // 베어메탈 사용률(v2.550)
@@ -61,6 +63,10 @@ const VmChangesTool = React.lazy(() => import('./tools/VmChangesTool.jsx')); // 
 const VmLifecycleTool = React.lazy(() => import('./tools/VmLifecycleTool.jsx')); // VM 생성·삭제 이력(v2.706 C5)
 const ContentionTool = React.lazy(() => import('./tools/ContentionTool.jsx')); // CPU 경합·디스크 지연(v2.706 C2·C3)
 const VmAvailabilityTool = React.lazy(() => import('./tools/VmAvailabilityTool.jsx')); // VM 가용성 SLA(v2.707 C6)
+const BackupSummaryTool = React.lazy(() => import('./tools/BackupSummaryTool.jsx')); // 백업 서머리(v2.779 백업 메뉴)
+const BackupDetailTool = React.lazy(() => import('./tools/BackupDetailTool.jsx')); // 백업 세부내용(v2.779 백업 메뉴)
+const BackupRunTool = React.lazy(() => import('./tools/BackupRunTool.jsx')); // 백업 실행(v2.818 — Veeam B&R REST)
+const BackupEmTool = React.lazy(() => import('./tools/BackupEmTool.jsx')); // Veeam 백업 현황 · EM(v2.788)
 const CostShowbackTool = React.lazy(() => import('./tools/CostShowbackTool.jsx')); // 비용 배분(v2.707 C11)
 const MigrationReadinessTool = React.lazy(() => import('./tools/MigrationReadinessTool.jsx')); // VM 이전 준비도(v2.707 C7)
 const CoreLicenseTool = React.lazy(() => import('./tools/CoreLicenseTool.jsx')); // 코어 라이선스 산정(v2.703)
@@ -75,6 +81,7 @@ const RelayTopoTool = React.lazy(() => import('./tools/RelayTopoTool.jsx'));
 const SerialLookup = React.lazy(() => import('./tools/SerialLookup.jsx'));
 const VmTrackTool = React.lazy(() => import('./tools/VmTrackTool.jsx'));
 const GuestDiskReport = React.lazy(() => import('./tools/GuestDiskReport.jsx'));
+const GuestPartTool = React.lazy(() => import('./tools/GuestPartTool.jsx'));   // v2.749 게스트 파티션 사용률 경보
 const StorageTrackTool = React.lazy(() => import('./tools/StorageTrackTool.jsx'));
 const ServiceCheck = React.lazy(() => import('./DavinciChecks.jsx').then((m) => ({ default: m.ServiceCheck })));
 const NetworkCheck = React.lazy(() => import('./DavinciChecks.jsx').then((m) => ({ default: m.NetworkCheck })));
@@ -146,8 +153,6 @@ const AXIS_KEY = 'tools.axis';
 const FAV_MAX = 6;          // 자주 쓰는 기능 상위 N
 const INDEX_ROWS = 6;       // '전체' 탭 분류 패널의 행 수
 const KO = new Intl.Collator('ko', { numeric: true, sensitivity: 'base' }); // 이름순 — 비교기를 한 번만 만든다(v2.503)
-// 분류 바 sticky 기준 — 셸마다 머리(sticky) 요소가 다르다. 첫 번째로 찾은 것의 높이를 쓴다.
-const STICKY_HEADS = '.v6 .v6-top, .v5 .v5-top, .v3-top, .topbar';
 const loadRecent = () => { try { const a = JSON.parse(localStorage.getItem(RECENT_KEY) || '[]'); return Array.isArray(a) ? a.filter((s) => typeof s === 'string' && s.trim()) : []; } catch { return []; } };
 
 export default function SpecialTools({ defaultScope = '' } = {}) {
@@ -175,7 +180,8 @@ export default function SpecialTools({ defaultScope = '' } = {}) {
   const [sortMode, setSortMode] = useState('usage');
   const [drawer, setDrawer] = useState(false);
   const [qFocus, setQFocus] = useState(false);
-  const [headH, setHeadH] = useState(0); // 셸 머리(sticky)의 실제 높이 — 분류 바의 top
+  // 분류 바 sticky top = 셸 머리(sticky) 실제 높이 + 8px. 좁은 화면에서 머리가 여러 줄로 늘어나므로 잰다(v2.810: 측정은 공용 훅 — 셸 머리 선택자도 그쪽 하나).
+  const headH = useStickyHeadH(!tool);
   const addRecent = (q) => {
     const t = String(q || '').trim();
     if (!t) return;
@@ -238,18 +244,6 @@ export default function SpecialTools({ defaultScope = '' } = {}) {
   useEffect(() => {
     if (tool) return;
     fetchJson('/tool-usage/top', { n: 200 }).then((r) => setTopKeys(r.top || [])).catch(() => {});
-  }, [tool]);
-  // 분류 바 sticky top = 셸 머리(sticky) 실제 높이 + 8px. 좁은 화면에서 머리가 여러 줄로 늘어나므로 잰다.
-  useEffect(() => {
-    if (tool) return undefined;
-    const el = document.querySelector(STICKY_HEADS);
-    if (!el) { setHeadH(0); return undefined; }
-    const calc = () => setHeadH(Math.round(el.getBoundingClientRect().height || 0));
-    calc();
-    const ro = (typeof ResizeObserver !== 'undefined') ? new ResizeObserver(calc) : null;
-    if (ro) ro.observe(el);
-    window.addEventListener('resize', calc);
-    return () => { if (ro) ro.disconnect(); window.removeEventListener('resize', calc); };
   }, [tool]);
   // 도구 잠금 사유 — 접근 가능하면 null. 특수 기능은 항목이 많아 '숨김'보다 '회색 잠금'이 낫다:
   // 어떤 기능이 있는지는 보이고, 권한이 없으면 클릭만 막아 관리자에게 요청할 수 있게 한다.
@@ -618,6 +612,7 @@ function ToolPanel({ tool, onBack, isAdmin, defaultScope = '', cfg = null }) {
       {tool === 'bareos-backup' && <BareosBackupTool />}
       {tool === 'storage-mon' && <StorageMonTool />}
       {tool === 'storage-growth' && <StorageGrowthTool />}
+      {tool === 'storage-usage' && <StorageUsageTool isAdmin={isAdmin} />}
       {tool === 'part-faults' && <PartFaults />}
       {tool === 'edge-log' && <EdgeLog />}
       {tool === 'bm-usage' && <BmUsage />}
@@ -642,6 +637,7 @@ function ToolPanel({ tool, onBack, isAdmin, defaultScope = '', cfg = null }) {
       {tool === 'serial-lookup' && <SerialLookup />}
       {tool === 'vm-track' && <VmTrackTool />}
       {tool === 'guest-disk' && <GuestDiskReport scope={scope} />}
+      {tool === 'guest-partition' && <GuestPartTool />}
       {tool === 'storage-track' && <StorageTrackTool />}
       {tool === 'vmfinder' && <VmFinder />}
       {tool === 'capacity' && <Capacity scope={scope} />}
@@ -660,6 +656,10 @@ function ToolPanel({ tool, onBack, isAdmin, defaultScope = '', cfg = null }) {
       {tool === 'vm-lifecycle' && <VmLifecycleTool scope={scope} />}
       {tool === 'contention' && <ContentionTool scope={scope} />}
       {tool === 'vm-availability' && <VmAvailabilityTool scope={scope} />}
+      {tool === 'backup-summary' && <BackupSummaryTool />}
+      {tool === 'backup-detail' && <BackupDetailTool scope={scope} />}
+      {tool === 'backup-run' && <BackupRunTool />}
+      {tool === 'backup-em' && <BackupEmTool />}
       {tool === 'cost-showback' && <CostShowbackTool scope={scope} />}
       {tool === 'migration-readiness' && <MigrationReadinessTool scope={scope} />}
       {tool === 'core-license' && <CoreLicenseTool scope={scope} />}

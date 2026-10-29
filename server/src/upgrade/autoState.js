@@ -74,6 +74,9 @@ export function sanitizeCheck(c) {
   const out = { at, current: ver(c.current), trigger: trig(c.trigger) };
   if (c.watch && typeof c.watch === 'object') {
     out.watch = { available: bool(c.watch.available), version: ver(c.watch.version), path: txt(c.watch.path, 400) };
+    // v2.809: 번들 옆 서명 manifest 유무(manager.check) — 빠뜨리면 화면(status.lastCheck)이 'manifest 없음' 경고를 못 띄운다(Chromium 확인에서 발견)
+    if (typeof c.watch.hasManifest === 'boolean') out.watch.hasManifest = c.watch.hasManifest;
+    if (c.watch.manifest != null) out.watch.manifest = txt(c.watch.manifest, 200);
   }
   if (c.remote && typeof c.remote === 'object') out.remote = sanitizeRemote(c.remote);
   if (c.restored === true) out.restored = true;
@@ -95,6 +98,17 @@ function sanitizeEdgePush(e) {
   return { total: num(e.total) ?? 0, ok: num(e.ok) ?? 0, failed };
 }
 
+/** v2.775: 수집 서버 push 요약 정제(manager.summarizeCollectorPush 모양) — 이름·사유는 글자만, 64건 상한. */
+function sanitizeCollectorPush(e) {
+  if (!e || typeof e !== 'object') return null;
+  const items = Array.isArray(e.items) ? e.items.filter((f) => f && typeof f === 'object').slice(0, 64)
+    .map((f) => ({ id: txt(f.id, 128) || '', name: txt(f.name, 128) || '', ok: f.ok === true, status: num(f.status), version: ver(f.version) || '', reason: txt(f.reason, 300) || '' })) : [];
+  const out = { total: num(e.total) ?? 0, ok: num(e.ok) ?? 0, items };
+  const sk = txt(e.skipped, 300);
+  if (sk) out.skipped = sk;
+  return out;
+}
+
 /** 적용 결과(manager.apply · 엣지/수집기 push 수신) 정제 — 쓸 때·읽을 때 공용. */
 export function sanitizeResult(r) {
   if (!r || typeof r !== 'object') return null;
@@ -114,6 +128,8 @@ export function sanitizeResult(r) {
   }
   const ep = sanitizeEdgePush(r.edgePush);
   if (ep) out.edgePush = ep;
+  const cp = sanitizeCollectorPush(r.collectorPush);
+  if (cp) out.collectorPush = cp;
   if (r.restored === true) out.restored = true;
   for (const k of Object.keys(out)) if (out[k] === undefined || out[k] === null) delete out[k];
   out.at = at; out.ok = bool(r.ok); // 핵심 필드는 null 이어도 남긴다(위 정리에서 지우지 않게)

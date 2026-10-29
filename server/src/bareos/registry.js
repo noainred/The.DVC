@@ -1,5 +1,5 @@
 /**
- * bareos/registry.js — 포탈의 Bareos 백업 대상 원장(v2.747). 파일: CONFIG_DIR/bareos-jobs.json (자격증명 없음 · 원자적 쓰기 · 손상 보존).
+ * bareos/registry.js — 포탈의 Bareos 백업 대상 원장(v2.820). 파일: CONFIG_DIR/bareos-jobs.json (자격증명 없음 · 원자적 쓰기 · 손상 보존).
  *
  * job = {
  *   id, vcenterId, vmId, vmName, dc, folder,          // 등록 시점의 VM 위치(플러그인 옵션에 들어간 값 — 화면이 그대로 보인다)

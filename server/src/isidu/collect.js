@@ -167,6 +167,20 @@ export async function collectTarget(t, { trigger = 'schedule', manual = false, a
  * @returns {Promise<{ok:boolean, ms:number, out?:string, err?:string, code?:number|null, command:string, reason?:string, kind?:string, demo?:boolean, keyCreated?:boolean, attempted?:false}>}
  *   `attempted:false` = 접속 정보를 만들지 못해 접속을 시도하지 않았다(키 없음·등록부에 장비 없음).
  */
+/**
+ * v2.769(점검 R4-D4-06): 연결 시험 대상이 **저장된 대상과 같은 접속처·계정**인가(순수) — 정규화한 host·port·username·auth·deviceId 가 모두 같을 때만 참.
+ * 연결 시험은 본문(저장 전 편집값)으로 접속하므로, 편집 창에서 다른 주소·계정으로 시험만 하고 성공하면 예전에는 **저장된** 대상의 인증 정지가
+ * 풀렸다(다음 주기 수집이 틀린 계정으로 다시 로그인 — authGuard 지문은 host 를 보지 않는다). vcenter/registry.js 의 usedSaved 와 같은 규칙.
+ * 비교는 resolveTarget 을 거친 값끼리 한다(장비 계정 인증이면 host·username 은 등록부 값). 한쪽이 없으면 거짓.
+ */
+export function sameConnIdentity(a, b) {
+  if (!a || !b) return false;
+  const s = (v) => String(v ?? '').trim();
+  const port = (v) => { const n = Number(v); return Number.isFinite(n) && n > 0 ? Math.round(n) : 22; };
+  return s(a.host).toLowerCase() === s(b.host).toLowerCase() && port(a.port) === port(b.port)
+    && s(a.username) === s(b.username) && (s(a.auth) || 'key') === (s(b.auth) || 'key') && s(a.deviceId) === s(b.deviceId);
+}
+
 export async function testTargetPath(r, { clearStopId = '' } = {}) {
   const command = duCommand(r.path, r.sizeMode);
   if (String(r.id || '').startsWith('mock-') && isMockMode()) return { ok: true, demo: true, ms: 0, out: `${r.path} (데모 — 접속하지 않았습니다)`, command };

@@ -1175,6 +1175,7 @@
       .then(function (data) {
         state.dcAll = data.datacenters;
         if (state.selectedDcId === dc.id) state.selectedDcId = null;
+        if (data.shortcuts) applyShortcuts(data.shortcuts);   // v2.760: 묶여 있던 바로가기는 서버가 '전체 공통'으로 옮겼다
         fillFormSelects();
         toast("삭제했습니다.", "ok");
         return refreshDatacenters();
@@ -2059,6 +2060,7 @@
       api("/api/settings/datacenters/reset", { method: "POST", body: {} })
         .then(function (data) {
           state.dcAll = data.datacenters;
+          if (data.shortcuts) applyShortcuts(data.shortcuts);
           fillFormSelects();
           toast(data.datacenters.length + "개 기본 목록으로 복원했습니다.", "ok");
           return refreshDatacenters();

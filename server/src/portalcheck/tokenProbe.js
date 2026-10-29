@@ -49,7 +49,12 @@ export const PROBE_TIMEOUT_MS = Math.max(2_000, Number(process.env.PORTALCHECK_T
  * 점검 1회의 **총 예산**. 사람이 버튼을 누르고 기다리는 화면이라 무한히 늘릴 수 없다.
  * ⚠ 예산에 걸려 시도하지 못한 행은 **조용히 빼지 않고** `not-run` + 사유를 남긴다.
  */
-export const PROBE_BUDGET_MS = Math.max(10_000, Number(process.env.PORTALCHECK_BUDGET_MS) || 90_000);
+/**
+ * v2.785(GE 개선): 예산 **상한**. 화면의 요청 시한(web/src/api.js MUT_TIMEOUT_MS 180초)보다 짧아야 한다 — 그보다 길면 화면은
+ *   시한 초과로 실패를 보이는데 서버는 계속 돌고(재진입 가드도 잡힌 채) 결과는 다음 진입에야 보인다. 30초는 마지막 요청의 시한·응답 직렬화 여유.
+ */
+export const PROBE_BUDGET_MAX_MS = 150_000;
+export const PROBE_BUDGET_MS = Math.min(PROBE_BUDGET_MAX_MS, Math.max(10_000, Number(process.env.PORTALCHECK_BUDGET_MS) || 90_000));
 
 const t = (v) => String(v ?? '').trim();
 const base = (u) => t(u).replace(/\/+$/, '');
@@ -66,6 +71,10 @@ export function errorKindOf(msg) {
  */
 export async function probeCollectorPing(row, { fetchImpl = resilientFetch, timeoutMs = PROBE_TIMEOUT_MS, otherIds = [], token = '' } = {}) {
   const t0 = Date.now();
+  // v2.767(점검 R2-B4-5): 비활성 수집 서버는 점검하지 않는다 — '토큰 미저장' 으로 말하면 거짓이다(등록부에 토큰은 있다).
+  if (row?.disabled === true) {
+    return { at: t0, ms: 0, state: PROBE_STATE.NOT_RUN, httpStatus: null, reason: '비활성 수집 서버라 점검하지 않았습니다 — 설정 › 수집 서버에서 켜면 점검합니다.', evidence: 'unknown', disabled: true };
+  }
   const hasToken = row?.collector?.set === true && t(token) !== '';
   const url = base(row?.url);
   if (!url) {
@@ -187,7 +196,14 @@ export async function probeAll(rows = [], {
   let budgetExceeded = 0;
   const t0 = Date.now();
 
-  const probes = await pool(rows, concurrency, async (row) => {
+  /*
+   * v2.785(GE O-B1): 결과에 **프로브 당시 등록부 지문(8자)·URL** 을 함께 싣는다 — 보관분이 그 뒤 바뀐 등록값을 '같음(증명)' 으로
+   *   말하지 않게 `tokenScan.js mergeProbe` 가 대조한다. 8자 지문은 이미 응답에 실리는 값이다(평문·전체 해시 아님).
+   */
+  const stamp = (row, r) => ({ ...r, tokenShort: t(row?.collector?.short).slice(0, 8), url: base(row?.url) });
+  const probes = (await pool(rows, concurrency, async (row) => {
+    // v2.767(점검 R2-B4-5): 비활성 항목은 예산과 무관하게 '비활성' 으로 남긴다(네트워크 0 — 예산 초과로 세지 않는다).
+    if (row?.disabled === true) return { agent: row.agent, probe: await probeCollectorPing(row, { fetchImpl, timeoutMs }), centralRole: null };
     // ⚠ 남은 예산이 한 요청 시한보다 적으면 **시작하지 않는다** — 시작해 놓고 잘리면 결과가
     //   버려지고 화면에는 '시한 초과' 만 남는다(v2.550.3 osSsh 규약).
     if (Date.now() + timeoutMs > deadline) {
@@ -207,7 +223,7 @@ export async function probeAll(rows = [], {
       centralRole = { probed: false, kind: 'unknown', reason: '점검 시간 예산을 넘겨 무인증 확인은 하지 않았습니다.' };
     }
     return { agent: row.agent, probe, centralRole };
-  });
+  })).map((r, i) => (r && typeof r === 'object' && 'probe' in r ? stamp(rows[i], r) : r));
 
   return { probes, budgetExceeded, ms: Date.now() - t0 };
 }
@@ -227,7 +243,12 @@ export function putProbeResults(results = []) {
   for (const r of results) {
     const k = t(r?.agent).toLowerCase();
     if (!k) continue;
-    _probes.set(k, { agent: t(r.agent), probe: r.probe || null, centralRole: r.centralRole || null });
+    _probes.set(k, {
+      agent: t(r.agent), probe: r.probe || null, centralRole: r.centralRole || null,
+      // v2.785(GE O-B1): 프로브 당시 등록값(지문 8자·URL) — 없으면(데모 시드·옛 호출부) 싣지 않는다(대조하지 않음).
+      ...(typeof r.tokenShort === 'string' ? { tokenShort: r.tokenShort.slice(0, 8) } : {}),
+      ...(typeof r.url === 'string' ? { url: r.url } : {}),
+    });
   }
   return _probes.size;
 }

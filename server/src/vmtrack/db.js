@@ -221,6 +221,7 @@ function initSqlite() {
         (snap_id, ts, vcenter_id, kind, vm_id, name, cluster, host, datastore, power_state, cpu, mem_mb, storage_gb, guest_os)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
       rosterOf: db.prepare('SELECT vm_id, name, cluster, host, datastore, power_state, cpu, mem_mb, storage_gb, guest_os FROM roster WHERE vcenter_id=?'),
+      lastVcSnapTotal: db.prepare('SELECT total FROM snaps WHERE vcenter_id=? ORDER BY ts DESC, id DESC LIMIT 1'), // v2.760 B-03 — idx_snaps_vc_ts
       // v2.483 '꺼진 지 N일': VM 별 최신 전원 전환 슬롯 시각 + 로스터 first_seen(추적 시작 이후 계속 꺼짐 판정용).
       powerChangesOf: db.prepare("SELECT vm_id, kind, MAX(ts) AS ts FROM changes WHERE vcenter_id=? AND kind IN ('powered_off','powered_on') GROUP BY vm_id, kind"),
       rosterFirstSeenOf: db.prepare('SELECT vm_id, first_seen, power_state FROM roster WHERE vcenter_id=?'),
@@ -477,6 +478,19 @@ export async function loadRoster(vcenterId) {
   if (!x) return new Map();
   const rows = x.st.rosterOf.all(String(vcenterId));
   return new Map(rows.map((r) => [r.vm_id, r]));
+}
+
+/**
+ * v2.760(점검 B-03 — 재현): 로스터가 비었을 때 '기준선이 아직 없다' 와 '기준선이 0대다' 를 가른다.
+ *   이 vCenter 의 가장 최근 슬롯 행이 total 0 이면 0대를 이미 읽은 것이다(연결된 빈 vCenter·전부 삭제).
+ *   예전에는 둘을 구분하지 못해 빈 vCenter 에 새로 만든 VM 이 '신규' 로 잡히지 않고 총계만 뛰었다.
+ * @returns {Promise<boolean>}
+ */
+export async function rosterKnownEmpty(vcenterId) {
+  const x = await getDb();
+  if (!x) return false;
+  const r = x.st.lastVcSnapTotal.get(String(vcenterId));
+  return !!r && Number(r.total) === 0;
 }
 
 /** v2.483: VM 별 최신 전원 전환 시각(Map vm_id → {offTs,onTs}). changes 는 diff 만 저장돼 작다(풀스캔 무해). */

@@ -11,7 +11,7 @@ import { CLUSTER_CFG_CODES, clusterCfgFindings } from './parse.js';
 
 const SEV_ORDER = { crit: 0, warn: 1, info: 2 };
 export const ROWS_MAX = 2000;
-const keyOf = (vcId, name) => `${vcId}\u0000${String(name).toLowerCase()}`;
+export const keyOf = (vcId, name) => `${vcId}\u0000${String(name).toLowerCase()}`;
 
 /*
  * v2.742(감사 VC-05): 클러스터 식별은 (vCenter, 클러스터 moref) 다. vSphere 의 클러스터 이름은 **데이터센터 안에서만** 유일해서
@@ -23,7 +23,7 @@ const keyOf = (vcId, name) => `${vcId}\u0000${String(name).toLowerCase()}`;
  *     않는다 — 구성마다 행을 따로 두고 호스트는 어느 쪽인지 알 수 없어 붙이지 않는다(nameCollision · hostsAmbiguous 로 밝힌다).
  */
 const refOf = (x) => (typeof x?.clusterRef === 'string' && x.clusterRef ? x.clusterRef : null);
-const refKeyOf = (vcId, ref) => `${vcId}\u0000r:${ref}`;
+export const refKeyOf = (vcId, ref) => `${vcId}\u0000r:${ref}`;
 const inCluster = (h) => !!h && typeof h.cluster === 'string' && h.cluster !== '' && h.cluster !== 'standalone';
 
 /** vCenter 마다 ref 로 묶을 수 있는가 — 클러스터에 속한 호스트가 **전부** clusterRef 를 실었을 때만 true. 클러스터 호스트가 없는 vCenter 는 항목이 없다. */

@@ -139,9 +139,31 @@ export function demoStorageSnapshot(dev, t = Date.now(), now = t) {
         { name: `${spec.name.toLowerCase()}_a300`, totalBytes: total - a, usedBytes: used - au, pct: r2((used - au) / (total - a) * 100) },
       ];
     } else snap.pools = [{ name: spec.type === 'powermax' || spec.type === 'vmax' ? 'SRP_1' : 'pool_1', totalBytes: total, usedBytes: used, pct: r2(used / total * 100) }];
-    if (spec.type === 'isilon') {
+    if (spec.type === 'isilon' && spec.k === 'ps-sha-01') {
+      // v2.791 데모: SSD 를 L3 캐시로만 쓰는 구성 — SSD 풀이 없다(media.ssd = null). 보고표가 'HDD 풀만' 으로 밝히는지 보이려고.
+      snap.media = { hdd: { totalBytes: total, usedBytes: used, pct: r2(used / total * 100) }, ssd: null };
+    } else if (spec.type === 'isilon') {
       const ssdT = Math.round(total * 0.08); const ssdU = Math.round(ssdT * 0.42);
       snap.media = { hdd: { totalBytes: total - ssdT, usedBytes: used - ssdU, pct: r2((used - ssdU) / (total - ssdT) * 100) }, ssd: { totalBytes: ssdT, usedBytes: ssdU, pct: r2(ssdU / ssdT * 100) } };
+    }
+    if (spec.type === 'unity480') {
+      // v2.789 — 하위 항목(LUN·파일시스템) 데모. 사용자 캡처의 모양(SAN 큰 LUN 1개 + NAS 파일시스템 여럿)을 흉내 낸다.
+      //   이름·크기는 합성이다. 사용량은 장비 사용률을 따라 완만히 늘어난다(증감 열이 비지 않게).
+      const GiB = 1024 ** 3;
+      const pctNow = usedPctAt(spec, t, now) / 100;
+      const lunT = Math.round((total * 0.55) / GiB) * GiB;
+      const fsDef = [['res_1', 'temp_share', 600, 0.014], ['res_2', 'spitforebackup', 500, 0.011], ['res_3', 'sandbox', 1024, 0.18],
+        ['res_4', 'repo', 4096, 0.51], ['res_5', 'dvc_portal', 500, 0.2], ['res_6', 'dvc_datakey', 100, 0.047]];
+      const grow = pctNow / Math.max(0.01, (spec.pct || 50) / 100);
+      snap.extra.resources = [
+        { kind: 'lun', id: 'sv_1', name: spec.k === 'unity-sjc-01' ? 'UNT_948_0' : 'Davinci_01', pool: 'pool_1', totalBytes: lunT,
+          usedBytes: Math.round(lunT * Math.min(0.95, 0.37 * grow)), usedSource: 'allocation', health: 'OK' },
+        ...fsDef.map(([id, name, gb, u]) => ({ kind: 'fs', id, name, pool: 'pool_1', totalBytes: gb * GiB,
+          usedBytes: Math.round(gb * GiB * Math.min(0.95, u * grow)), usedSource: 'fs', health: 'OK', protocol: name === 'sandbox' ? 'cifs' : 'nfs' })),
+      ];
+      snap.extra.resourcesProbe = spec.method === 'ssh'
+        ? { lun: { state: 'ok', source: 'uemcli /stor/prov/luns/lun show -detail', count: 1 }, fs: { state: 'ok', source: 'uemcli /stor/prov/fs show -detail', count: fsDef.length } }
+        : { lun: { state: 'ok', source: 'Unisphere REST /api/types/lun/instances', count: 1 }, fs: { state: 'ok', source: 'Unisphere REST /api/types/filesystem/instances', count: fsDef.length } };
     }
     if (spec.type === 'powermax' || spec.type === 'vmax') {
       snap.extra.capacityBasis = 'system_capacity.usable';

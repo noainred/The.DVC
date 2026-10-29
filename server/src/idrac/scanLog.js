@@ -77,6 +77,9 @@ function appendShape(rec = {}) {
     authSkipped: n(rec.authSkipped),
     // v2.611(감사 RECENT2611-04): 그 벤더의 계정이 없어 로그인하지 않은 서버 수(예: iLO 전용 대역의 Dell). 옛 기록은 null.
     noCreds: n(rec.noCreds),
+    // v2.770(점검 R5-E4-01): 인증서 미신뢰 대수 · 교체(replace-datacenter)로 지운 등록 — 옛 기록·위임은 null/없음.
+    tlsUntrusted: n(rec.tlsUntrusted),
+    ...(n(rec.removed) ? { removed: n(rec.removed), removedIps: (Array.isArray(rec.removedIps) ? rec.removedIps : []).slice(0, 200).map((x) => s(x, 64)).filter(Boolean) } : {}),
     error: rec.error ? s(rec.error, 500) : null,
     stopped: rec.stopped ? true : undefined,
   };

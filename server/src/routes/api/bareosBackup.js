@@ -1,4 +1,4 @@
-// Bareos VM 백업 라우트 — 특수 기능 'Bareos VM 백업'(v2.747, 도구 키 bareos-backup).
+// Bareos VM 백업 라우트 — 특수 기능 'Bareos VM 백업'(v2.820, 도구 키 bareos-backup).
 // 전부 admin 전용: Director 에 잡을 만들고 백업·복원을 실행하는 운영 작업이다(vm-clone 과 같은 등급 — server/CLAUDE.md RBAC).
 // 범위: 백업 대상은 vCenter 귀속 — 조회 범위 밖 404(존재 은닉) → 쓰기 범위 밖 403. Director 설정·카탈로그는 법인 축이 없는
 //   전 법인 설정이라 전체 범위 전용(fullScopeOnly). 예외: /badges 는 트리(전 사용자) 표시용 — 로그인 + tools 권한, 범위 밖은 빈 목록.

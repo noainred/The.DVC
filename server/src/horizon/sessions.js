@@ -104,6 +104,12 @@ export function normalizeSessions(raw, { maxUsers = 2000, maxPools = 200 } = {})
   }
   let usedStateKey = null;
   for (const k of STATE_KEYS) { if (list.some((r) => pickKey(r, [k])[0])) { usedStateKey = k; break; } }
+  // v2.770(점검 R5-E5-3): 세션이 **0건**인 서버(야간·대기 팟)는 상태 키를 찾을 세션이 없어 접속 수가 null('모름')이 됐고,
+  //   combineServers 가 그 서버 하나로 stateBlind 가 되어 다중 팟 전체의 '접속 중' 합계·추이까지 NULL 이었다(0 을 모름으로 바꾸는 결측 오판).
+  //   응답이 **배열이고 비어 있을 때만** 접속 관련 수치를 0 으로 확정한다(세션이 없으니 접속도 0). 배열이 아닌 입력은 그대로 '모름' —
+  //   이 함수는 비배열도 [] 로 바꾸므로 list 가 아니라 raw 를 본다.
+  const emptyKnown = Array.isArray(raw) && raw.length === 0;
+  const stateKnown = !!usedStateKey || emptyKnown;
 
   // 계정명 필드를 전혀 못 찾았다 → '형식 미인식'. 수치를 만들지 않는다(규칙 3).
   if (list.length && !usedUserKey) {
@@ -175,13 +181,13 @@ export function normalizeSessions(raw, { maxUsers = 2000, maxPools = 200 } = {})
     parsed: true,
     sessions: list.length,
     // ⚠ 상태 필드를 못 읽었으면 **null** — 0 은 '지금 아무도 없다' 는 거짓이 된다(규칙 1).
-    connected: usedStateKey ? connected : null,
-    disconnected: usedStateKey ? disconnected : null,
-    pending: usedStateKey ? pending : null,
-    other: usedStateKey ? other : null,
+    connected: stateKnown ? connected : null,
+    disconnected: stateKnown ? disconnected : null,
+    pending: stateKnown ? pending : null,
+    other: stateKnown ? other : null,
     stateUnknown,
     users: names.length,
-    usersConnected: usedStateKey ? names.filter((u) => u.connected > 0).length : null,
+    usersConnected: stateKnown ? names.filter((u) => u.connected > 0).length : null,
     names: names.slice(0, maxUsers),
     usersOmitted: Math.max(0, names.length - maxUsers),
     pools: pools.slice(0, maxPools),

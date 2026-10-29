@@ -25,23 +25,48 @@ const MAX_BODY = 2 * 1024 * 1024; // 통계 응답 상한(비정상 대량 응�
  * 해석된 IP 로 하되 TLS SNI·Host 헤더는 원래 호스트로 핀한다. 저장 시점 검증만으로는 DNS 가
  * 나중에 루프백/링크로컬/공개서버로 바뀌는 경우(또는 host 만 바꿔치기)를 놓쳐 UAG 관리자
  * 자격증명(Basic 헤더)이 공격자 서버로 선제 전송될 수 있다 — 그 경로를 여기서 봉인한다.
+ *
+ * ## 전체 시한 (v2.767 R2-B5-5)
+ * timeoutMs 안에 주소 해석·연결·본문 수신이 모두 끝나지 않으면 요청을 끊고 오류로 끝낸다(소켓 유휴 시한과 별개).
+ * lookup 은 테스트용 주입점(기본 dns.promises.lookup) — 해석 결과는 언제나 hostBlockReason 으로 재검증한다.
  */
-export async function fetchUagStats(target, { timeoutMs = 10_000 } = {}) {
+export async function fetchUagStats(target, { timeoutMs = 10_000, lookup = dns.promises.lookup } = {}) {
+  // v2.767(점검 R2-B5-5): timeoutMs 는 **요청 전체 시한**이다(주소 해석 + 연결 + 응답 본문 끝까지). 예전에는 https.request 의
+  //   timeout(소켓 유휴 시한)만 있어 응답을 시한보다 짧은 간격으로 조금씩 흘리는 대상이 요청을 무한정 붙잡았고, 폴러는 전 대상을
+  //   기다리므로(Promise.allSettled) 모든 UAG 수집이 멈췄다(재현: 2초 시한에 13초). dns.lookup 도 같은 시한과 경쟁시킨다.
+  const deadline = Date.now() + timeoutMs;
+  const secs = timeoutMs / 1000;
   const host = String(target.host || '');
   let connectHost = host;
   // 8진·16진 등 우회 표기까지 IP 로 인식(guard 규칙 재사용). IP 리터럴은 저장 검증이 이미 봤다.
   const looksIp = parseIpv4(host) != null || host.includes(':');
   if (!looksIp) {
     let resolved;
-    try { resolved = await dns.promises.lookup(host, { verbatim: true }); }
-    catch (e) { return { ok: false, error: `주소 해석 실패: ${e.message}` }; }
+    let dnsTimer;
+    try {
+      resolved = await Promise.race([
+        lookup(host, { verbatim: true }),
+        new Promise((_, reject) => {
+          // unref 하지 않는다 — 끝나지 않는 해석만 남았을 때도 이 시한이 결과를 낸다(성공·실패 때는 finally 가 지운다).
+          dnsTimer = setTimeout(() => reject(new Error(`${secs}s 안에 끝나지 않음`)), timeoutMs);
+        }),
+      ]);
+    } catch (e) { return { ok: false, error: `주소 해석 실패: ${e.message}` }; }
+    finally { clearTimeout(dnsTimer); }
     const blocked = hostBlockReason(resolved.address);
     if (blocked) return { ok: false, error: `차단된 주소로 해석됨(${resolved.address}): ${blocked}` };
     connectHost = resolved.address;
   }
+  const remaining = Math.max(1, deadline - Date.now());
   return new Promise((resolve) => {
     let settled = false;
-    const done = (r) => { if (!settled) { settled = true; resolve(r); } };
+    let wall = null;
+    const done = (r) => {
+      if (settled) return;
+      settled = true;
+      if (wall) clearTimeout(wall);
+      resolve(r);
+    };
     let req;
     try {
       const auth = Buffer.from(`${target.username || ''}:${target.password || ''}`).toString('base64');
@@ -54,13 +79,23 @@ export async function fetchUagStats(target, { timeoutMs = 10_000 } = {}) {
         headers: { Host: host, Authorization: `Basic ${auth}`, Accept: 'application/json' },
         // 자체서명 UAG 대응 — 이 요청에만 적용(전역 완화 금지).
         rejectUnauthorized: !target.insecureTls,
-        timeout: timeoutMs,
+        timeout: remaining,         // 소켓 유휴 시한(보조) — 전체 시한은 아래 wall 타이머
       }, (res) => {
         const chunks = [];
         let total = 0;
-        res.on('data', (d) => { total += d.length; if (total <= MAX_BODY) chunks.push(d); });
+        res.on('data', (d) => {
+          if (settled) return;
+          total += d.length;
+          if (total > MAX_BODY) {
+            // v2.767(R2-B5-5): 상한을 넘으면 곧바로 끊는다 — 예전에는 버리기만 하고 끝까지 받았다(시한 없는 대량 응답이 요청을 붙잡았다).
+            done({ ok: false, error: `응답이 너무 큽니다 (${MAX_BODY} bytes 초과)` });
+            req.destroy();
+            return;
+          }
+          chunks.push(d);
+        });
         res.on('end', () => {
-          if (total > MAX_BODY) return done({ ok: false, error: `응답이 너무 큽니다 (${total} bytes)` });
+          if (settled) return;
           const body = Buffer.concat(chunks).toString('utf8');
           if (res.statusCode === 401 || res.statusCode === 403) {
             return done({ ok: false, error: `인증 실패 (HTTP ${res.statusCode}) — UAG 관리 계정을 확인하세요` });
@@ -71,11 +106,17 @@ export async function fetchUagStats(target, { timeoutMs = 10_000 } = {}) {
           try { done(parseStats(body)); }
           catch (err) { done({ ok: false, error: `응답 해석 실패: ${err?.message || err}` }); }
         });
+        res.on('error', (err) => done({ ok: false, error: err.message }));
       });
     } catch (err) {
       return done({ ok: false, error: err.message });
     }
-    req.on('timeout', () => req.destroy(new Error(`응답 없음 (${timeoutMs / 1000}s 초과)`)));
+    wall = setTimeout(() => {
+      const msg = `응답 없음 (전체 ${secs}s 초과)`;
+      done({ ok: false, error: msg });
+      try { req.destroy(new Error(msg)); } catch { /* 이미 끊김 */ }
+    }, remaining);
+    req.on('timeout', () => req.destroy(new Error(`응답 없음 (${secs}s 초과)`)));
     req.on('error', (err) => done({ ok: false, error: err.message }));
     req.end();
   });
@@ -83,7 +124,14 @@ export async function fetchUagStats(target, { timeoutMs = 10_000 } = {}) {
 
 /* ------------------------------ 정규화 파서 ------------------------------ */
 
-const num = (v) => { const n = Number(v); return Number.isFinite(n) ? n : null; };
+// v2.760(점검 B-06 — 재현): '못 읽은 값' 은 0 이 아니다. 예전 `Number(v)` 는 null·''(XML 빈 요소)·[] 를 0 으로 만들어
+//   전체 세션이 '0'(서비스 합계 대체를 건너뜀)·메모리 '0%' 로 보였다. 숫자와 숫자 문자열만 값으로 읽는다.
+export const num = (v) => {
+  if (typeof v === 'number') return Number.isFinite(v) ? v : null;
+  if (typeof v !== 'string' || v.trim() === '') return null;
+  const n = Number(v.trim());
+  return Number.isFinite(n) ? n : null;
+};
 const str = (v) => (v == null ? '' : String(v));
 const arr = (v) => (Array.isArray(v) ? v : v != null ? [v] : []);
 
@@ -109,12 +157,16 @@ export function parseStats(body) {
   const services = arr(root.edgeServiceSessionStats).filter((s) => s && typeof s === 'object').map((s) => ({
     id: str(s.identifier || s.edgeServiceId || s.id || '').toUpperCase() || 'UNKNOWN',
     status: str(s.edgeServiceStatus || s.status || '').toUpperCase(),
-    sessions: num(s.totalSessionCount ?? s.activeSessionCount ?? s.sessionCount),
+    // v2.762(H3): `??` 체인은 XML 빈 요소('')에서 멈춘다 — 각 칸을 num 으로 읽은 뒤 대체한다.
+    sessions: num(s.totalSessionCount) ?? num(s.activeSessionCount) ?? num(s.sessionCount),
     high: num(s.highWaterMark),
   }));
 
-  const sumSessions = services.reduce((a, s) => a + (s.sessions || 0), 0);
-  const totalSessions = num(root.totalSessionCount) ?? (services.length ? sumSessions : null);
+  // v2.762(H3): 서비스 합 대체는 **모든 서비스 세션을 읽었을 때만** — 못 읽은 서비스(null)를 0 으로 더하면 0 이나 부분 합이
+  //   '전체 세션' 으로 보이고 추이에 적재된다(못 읽은 값은 0 이 아니다 · 부분 합은 추이에 넣지 않는다). 하나라도 못 읽었으면 null.
+  const allRead = services.length > 0 && services.every((s) => s.sessions != null);
+  const sumSessions = allRead ? services.reduce((a, s) => a + s.sessions, 0) : null;
+  const totalSessions = num(root.totalSessionCount) ?? sumSessions;
 
   const sys = (root.systemStats && typeof root.systemStats === 'object') ? root.systemStats : root;
   let memPercent = num(sys.memoryUtilPercent);

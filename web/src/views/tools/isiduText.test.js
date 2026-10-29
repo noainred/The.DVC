@@ -120,6 +120,17 @@ describe('스파크라인·추이', () => {
     expect(n.join(' ')).toMatch(/실패한 수집 1회/);
     expect(trendNotes(tr, { sizeMode: 'k' }).join(' ')).not.toMatch(/반올림/);
   });
+  it('v2.769(R4-D4-04) 추이 해설 — 서버가 솎았거나(thinned) 오래된 쪽을 잘랐으면(truncated) 말하고, 아니면 말하지 않는다', () => {
+    const pts = [{ ts: 1, bytes: 10 }, { ts: 2, bytes: 11 }];
+    expect(trendNotes({ points: pts }, { sizeMode: 'k' }).join(' ')).not.toMatch(/고르게|최근 것부터/);
+    const thin = trendNotes({ points: pts, thinned: { total: 5600, shown: 5000 } }, { sizeMode: 'k' }).join(' ');
+    expect(thin).toMatch(/5,600회 중 5,000회를 기간 전체에 고르게/);
+    const cut = trendNotes({ points: pts, truncated: true, fromTs: Date.UTC(2026, 0, 2, 3) }, { sizeMode: 'k' }).join(' ');
+    expect(cut).toMatch(/최근 것부터 읽을 수 있는 만큼만/);
+    expect(cut).toMatch(/이전은 빠졌습니다/);
+    expect(trendNotes({ points: pts, truncated: true, fromTs: null }, { sizeMode: 'k' }).join(' ')).not.toMatch(/이전은 빠졌습니다/);
+    expect(trendNotes({ points: pts, thinned: { total: '', shown: '' } }, { sizeMode: 'k' }).join(' ')).not.toMatch(/고르게/);
+  });
 });
 
 describe('보고서 해설·KPI', () => {

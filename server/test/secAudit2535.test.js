@@ -116,7 +116,8 @@ test('★ SSH 장비 등록부 3종은 host 변경 시 저장 비밀번호를 �
   const cases = [
     // v2.607(SEC2607-07): 판정이 공용 accessMoved(host·username·port) + dropCarriedSecrets 로 넓어졌다 — host 가 키 목록에 있어야 한다.
     ['storage/registry.js', /accessMoved\([\s\S]{0,400}\['host',[\s\S]{0,200}dropCarriedSecrets\(dev,/],
-    ['sanswitch/registry.js', /accessMoved\([\s\S]{0,600}\['host',[\s\S]{0,200}dropCarriedSecrets\(dev,/],
+    // v2.770(R5-E3-4): SAN 은 판정을 sanAccessMoved 로 뽑아 연결 테스트와 공유한다 — 함수 안에 host 키, saveDevice 가 그 함수 → dropCarriedSecrets.
+    ['sanswitch/registry.js', /function sanAccessMoved\([\s\S]{0,900}accessMoved\([\s\S]{0,600}\['host',[\s\S]{0,1500}sanAccessMoved\(existing, input\)[\s\S]{0,300}dropCarriedSecrets\(dev,/],
     // PDU 는 normalize() 안에서 처리한다 — host 가 바뀌면 '' 로 만든다.
     ['pdu/registry.js', /input\.host[\s\S]{0,160}e\.host[\s\S]{0,40}\?\s*''/],
   ];

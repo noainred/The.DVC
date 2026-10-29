@@ -220,6 +220,8 @@ export async function allRows(targetId) {
 }
 
 export const TREND_DAYS = Object.freeze([7, 30, 90, 365]);
+/** 추이 한 번에 싣는 점 상한(v2.769 R4-D4-04 — 예전 읽기 상한 5000 과 같은 값). */
+export const TREND_POINTS_MAX = 5000;
 
 /**
  * 추이 — name 이 없으면 디렉터리 전체(루트 합계, 없으면 폴더 합), 있으면 그 사용자 폴더. 권한 오류가 있던 스캔은 partial 로 표시한다.
@@ -235,11 +237,20 @@ export async function trend(targetId, { name = '', days = 30 } = {}) {
     if (pts == null) return { state: 'db-unavailable' };
     return { state: 'ok', name, days: d, points: pts.map((p) => ({ ts: p.ts, bytes: p.bytes, res: p.res })) };
   }
-  const scans = await db.scansIn(HISTORY_AGENT, targetId, since, 5000);
-  if (scans == null) return { state: 'db-unavailable' };
-  const points = scans.filter((s) => s.ok).map((s) => ({ ts: s.ts, bytes: denomOf(s), res: s.total?.res ?? s.sumRes ?? null, count: s.count, partial: (s.errLines || 0) > 0 }));
+  // v2.769(점검 R4-D4-04): 최신부터 읽는다(예전 오름차순 LIMIT 5000 은 1시간 주기 대상의 365일 보기에서 최근 몇 달을 잘랐다).
+  //   점이 TREND_POINTS_MAX 를 넘으면 기간 전체에 고르게 솎고(첫·마지막 점 유지) `thinned` 로, 읽기 상한을 넘어 가장 오래된 쪽을
+  //   잘랐으면 `truncated`·`fromTs` 로 밝힌다(화면 trendNotes 가 말한다 — 조용히 빼지 않는다).
+  const got = await db.scansInLatest(HISTORY_AGENT, targetId, since);
+  if (got == null) return { state: 'db-unavailable' };
+  const scans = got.scans;
+  const all = scans.filter((s) => s.ok).map((s) => ({ ts: s.ts, bytes: denomOf(s), res: s.total?.res ?? s.sumRes ?? null, count: s.count, partial: (s.errLines || 0) > 0 }));
+  const points = thinPoints(all, TREND_POINTS_MAX);
   const failures = scans.filter((s) => !s.ok).map((s) => ({ ts: s.ts, kind: s.kind }));
-  return { state: 'ok', name: '', days: d, points, failures };
+  return {
+    state: 'ok', name: '', days: d, points, failures,
+    ...(points.length < all.length ? { thinned: { total: all.length, shown: points.length } } : {}),
+    ...(got.truncated ? { truncated: true, fromTs: scans.length ? scans[0].ts : null } : {}),
+  };
 }
 
 /* ─────────────── v2.739 개요(서머리 · 법인 현황 · 전 법인 Top 10) ─────────────── */

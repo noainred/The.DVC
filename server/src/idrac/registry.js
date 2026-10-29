@@ -26,6 +26,7 @@ import { removeSensorDetail } from './sensorDetailCache.js';
 import { clearSensorSeries } from './sensorStore.js';
 import { parseCsvRows } from '../util/csv.js';
 import { accessMoved, dropCarriedSecrets } from '../util/secretCarry.js'; // v2.503: 접속처 변경 시 저장 비밀 폐기(공용 판정)
+import { logAudit } from '../audit.js'; // v2.770(점검 R5-E4-01): 스캔 교체로 지운 등록을 감사 로그에 남긴다
 
 // 삭제된 서버의 파생 캐시 정리 — 안 하면 인벤토리(디스크 영속)와 센서 시계열(메모리, 서버당
 // 최대 1440샘플×64센서)이 프로세스 수명 내내 남아 서버 등록/삭제 반복 시 무한 증식한다.
@@ -215,7 +216,9 @@ function normalize(body, existing = null) {
   // 그대로 남아, 다음 수집 주기에 **운영 계정·비밀번호가 그 호스트로 평문 전송**된다.
   // v2.480 의 "연결 테스트는 host 를 저장값으로 고정" 은 테스트 라우트만 막으므로 저장 1회로 우회된다.
   // 버린 키는 호출부가 `droppedSecrets` 로 받아 '비밀번호를 다시 입력하세요' 를 안내한다.
-  const droppedSecrets = existing && accessMoved(existing, body, ['host', 'username'])
+  // v2.770(점검 R5-E4-02): 비교는 **정규화한 값**으로 한다 — 예전에는 원문 body.host('10.0.0.5')를 저장값('https://10.0.0.5')과 비교해
+  //   같은 주소를 스킴 없이 보낸 병합 가져오기·수정이 '이동' 으로 판정돼 비밀번호가 지워졌다. 스킴은 여전히 비교한다(http↔https 는 이동).
+  const droppedSecrets = existing && accessMoved(existing, { host, username }, ['host', 'username'])
     ? dropCarriedSecrets(entry, body, ['password']) : [];
   return [entry, null, droppedSecrets];
 }
@@ -266,10 +269,14 @@ export function importServers(incoming, mode = 'merge', { replaceScope = null } 
   const skipped = [];
   const valid = [];
   let scopeKept = null; // v2.742: replace-datacenter + replaceScope 일 때 범위 밖이라 남긴 같은 법인 항목 수
+  // v2.770(점검 R5-E4-02): 접속처 이동으로 저장 비밀번호를 버린 항목 — 예전에는 normalize 의 droppedSecrets 를 버려 응답에 남지 않았고
+  //   폴러는 '비밀번호 미저장' 으로 조용히 제외했다. updateServer 처럼 호출부가 '비밀번호를 다시 입력하세요' 를 말할 수 있게 싣는다.
+  const droppedSecrets = [];
   for (const raw of incoming) {
     const base = mode === 'replace' ? null : existing.find((s) => s.id === raw?.id);
-    const [entry, err] = normalize(raw || {}, base);
+    const [entry, err, dropped] = normalize(raw || {}, base);
     if (err) { skipped.push({ id: raw?.id || '(id 없음)', reason: err }); continue; }
+    if (Array.isArray(dropped) && dropped.length) droppedSecrets.push({ id: entry.id, keys: dropped });
     valid.push(entry);
   }
   let result;
@@ -305,7 +312,14 @@ export function importServers(incoming, mode = 'merge', { replaceScope = null } 
   const keptIds = new Set(result.map((s) => s.id));
   const droppedIds = existing.filter((s) => !keptIds.has(s.id)).map((s) => s.id);
   if (droppedIds.length) dropDerivedCaches(droppedIds);
-  return { ok: true, mode, added, updated, skipped, total: result.length, ...(scopeKept != null ? { removed: droppedIds.length, scopeKept } : {}) };
+  // v2.770(점검 R5-E4-01): 스캔 교체(replaceScope)로 지운 등록 id(= 스캔 등록은 접속 주소)를 싣는다 — 일반 무응답 1회로도 교체가 지우므로
+  //   무엇을 지웠는지 결과·감사 로그가 말해야 한다(registerScanned). 상한 200 + 절단 표지.
+  const REMOVED_IDS_MAX = 200;
+  return {
+    ok: true, mode, added, updated, skipped, total: result.length,
+    ...(droppedSecrets.length ? { droppedSecrets } : {}),
+    ...(scopeKept != null ? { removed: droppedIds.length, scopeKept, removedIds: droppedIds.slice(0, REMOVED_IDS_MAX), removedIdsTruncated: droppedIds.length > REMOVED_IDS_MAX } : {}),
+  };
 }
 
 /**
@@ -394,6 +408,14 @@ export function registerScanned(found, username, password, mode = 'merge', vcent
   // v2.742(감사 DEV-01): 스캔 등록의 replace-datacenter 는 **언제나** 범위를 준다 — 엔트리 id·대역을 모르는 호출(구버전 중앙의 잡 등)이면
   //   범위가 비어 아무것도 지우지 않는다(= 병합). 법인 전체 교체로 떨어지지 않게 한다.
   const r = importServers(servers, mode, mode === 'replace-datacenter' ? { replaceScope: makeScanReplaceScope({ scanRangeId: rid, ranges: scanRanges }) } : {});
+  // v2.770(점검 R5-E4-01): 교체가 지운 등록(자격증명·인벤토리·센서 이력 포함)을 감사 로그·콘솔에 남긴다 — 일반 무응답 1회로도 지워지므로
+  //   (폐기 서버 정리가 replace 의 목적이라 강등하지 않는다) 사람이 나중에 '무엇이 왜 사라졌는지' 를 찾을 수 있어야 한다.
+  if (r.ok && (r.removed || 0) > 0) {
+    const ids = Array.isArray(r.removedIds) ? r.removedIds : [];
+    const list = ids.join(', ') + (r.removedIdsTruncated ? ` 외 ${r.removed - ids.length}대` : '');
+    console.warn(`[idrac-scan] ${dc || '(법인 없음)'}: 법인 교체(replace-datacenter)로 이번 스캔에서 발견되지 않은 등록 ${r.removed}대를 지웠습니다 — ${list}`);
+    logAudit({ user: manualRemote ? 'idrac-scan(관리자 위임 등록)' : (auto ? 'idrac-scan(자동)' : 'idrac-scan'), action: 'idrac.scan.replace.removed', target: `${dc}${rid ? ` · 대역 ${rid}` : ''}`, detail: `발견되지 않아 지운 등록 ${r.removed}대: ${list}` });
+  }
   return skippedNoCreds ? { ...r, skippedNoCreds } : r;
 }
 
@@ -451,15 +473,18 @@ export function parseCsv(text) {
     // 비밀번호는 앞뒤 공백이 유의미할 수 있어 trim하지 않는다(다른 필드만 trim).
     header.forEach((h, i) => { const v = cells[i] ?? ''; row[h] = h === 'password' ? v : v.trim(); });
     if (!row.name && !row.host) continue;
+    // v2.770(점검 R5-E4-02): 헤더에 **없는** 열은 키를 만들지 않는다(vendor 와 같은 처리) — 예전에는 늘 ''·[] 를 실어 같은 CSV 의
+    //   병합 가져오기가 열이 없는 serviceTag·vcenterId·hostNames 를 지웠다. 열이 있으면(값이 비어도) 예전처럼 그 값으로 바꾼다.
+    const has = (...ks) => ks.some((k) => Object.hasOwn(row, k));
     out.push({
       id: row.id || row.servicetag || row.name || row.host,
       name: row.name || row.host,
       host: row.host,
       username: row.username,
       password: row.password,
-      serviceTag: row.servicetag || row.service_tag || '',
-      vcenterId: row.vcenterid || row.vcenter || row.vcenter_id || '',
-      hostNames: (row.hostnames || row.host_names || row.esxi || '').split(/[;|]/).map((s) => s.trim()).filter(Boolean),
+      ...(has('servicetag', 'service_tag') ? { serviceTag: row.servicetag || row.service_tag || '' } : {}),
+      ...(has('vcenterid', 'vcenter', 'vcenter_id') ? { vcenterId: row.vcenterid || row.vcenter || row.vcenter_id || '' } : {}),
+      ...(has('hostnames', 'host_names', 'esxi') ? { hostNames: (row.hostnames || row.host_names || row.esxi || '').split(/[;|]/).map((s) => s.trim()).filter(Boolean) } : {}),
       // v2.611(감사 RECENT2611-06): vendor 열(선택) — 'hpe' 만 값으로 인정한다(normVendor). 열이 없으면 undefined 라
       //   merge 는 기존 vendor 를 유지하고, replace 는 예전처럼 비운다(Dell). 예전에는 열 자체를 읽지 않아 replace 가져오기가
       //   HPE 표시를 지웠고, 그 결과 bmusage 의 HPE 제외(racadm 대체 경로)가 풀렸다.

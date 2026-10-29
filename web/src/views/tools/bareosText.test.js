@@ -4,7 +4,7 @@ import {
   directorPrepBlock, fdIniTemplate, PREP_CHECKLIST, STATE_LABEL, RESTORE_MODE_LABEL,
 } from './bareosText.js';
 
-describe('bareosText (v2.747 Bareos VM 백업)', () => {
+describe('bareosText (v2.820 Bareos VM 백업)', () => {
   it('못 읽은 값은 0 이 아니라 —', () => {
     for (const v of [null, undefined, '', 'abc', -1]) expect(bytesText(v)).toBe('—');
     expect(bytesText(0)).toBe('0 B');

@@ -1,11 +1,374 @@
 /**
- * insights/dbGuideData.js — '특수 기능 › 포탈 DB' 자세히 팝업의 설명 원문(v2.674, 파일 88개).
+ * insights/dbGuideData.js — '특수 기능 › 포탈 DB' 자세히 팝업의 설명 원문(v2.674, 파일 88개 · v2.819 Veeam 백업 실행·관리 3개 추가).
  * 파일마다 코드를 읽어 확인한 내용이다(근거는 각 항목의 sources). 확인하지 못한 것은 '(추정)' 으로 밝혔다.
  * ⚠ 문구에 백틱·별표 두 개를 쓰지 말 것(화면에 글자로 샌다) — test/portalDbGuide2674.test.js 가 막는다.
  * ⚠ 코드가 바뀌어 설명이 틀려지면 여기를 고칠 것(주기·보존 기본값·화면 이름이 가장 자주 바뀐다).
  */
 /* eslint-disable */
 export const DB_GUIDE_DATA = {
+  "veeam-portal-vms.json": {
+    "title": "포탈 백업 VM 목록",
+    "summary": "포탈에서 Veeam 백업을 요청한 VM 의 목록입니다. VM 마다 한 줄로 마지막 요청 시각·방식(Quick Backup 또는 포탈 전용 잡)·결과, 포탈 전용 잡에서 뺀 시각, 백업을 지운 시각, 최근 새 VM 복원 요청이 들어 있습니다. vCenter › VM 및 폴더 트리의 Portal 배지와 Backup › 백업 실행의 포탈 백업 VM 표가 이 파일을 읽습니다. 포탈이 보낸 요청과 그 결과일 뿐이고, Veeam 이 지금 가진 복원 지점은 관리 창이 Veeam 에 직접 묻습니다.",
+    "stores": [
+      "VM 마다 VM id·vCenter·이름·Veeam 서버·Veeam 이 이 vCenter 를 부르는 이름·moref·방식·포탈 전용 잡 이름·마지막 실행 id·시각·결과.",
+      "잡에서 뺀 시각·백업 삭제 시각(관리 창에서 한 일)과 최근 복원 요청 10건(새 VM 이름·결과). 비밀번호는 없습니다."
+    ],
+    "writer": "백업 실행·복원 실행의 상태가 바뀔 때(veeam/run/runs.js) 그리고 관리 창에서 잡에서 빼기·백업 삭제를 했을 때 씁니다(원자적 쓰기, 권한 0600, 바뀐 것이 있을 때만).",
+    "usedBy": [
+      "vCenter › VM 및 폴더 — Portal 배지",
+      "Backup › 백업 실행 — 포탈 백업 VM 표",
+      "포탈 백업 관리 창(복원 이름 겹침 확인)"
+    ],
+    "retention": "VM 5000대까지 — 넘으면 마지막 활동이 오래된 것부터 지웁니다. 그 밖의 자동 정리는 없습니다.",
+    "growth": "포탈로 백업한 VM 수에 비례하며 작습니다.",
+    "shrink": "줄일 필요가 없습니다.",
+    "ifDeleted": "Portal 배지와 포탈 백업 VM 표가 비고, 복원 이름 겹침 확인이 인벤토리 이름만 봅니다. Veeam 의 백업·잡은 그대로입니다. 파일이 깨지면 ‘.corrupt.<시각>’ 으로 보존하고 빈 목록으로 시작합니다.",
+    "cautions": [
+      "상태 파일이라 설정 백업 변경 감지와 엣지 설정 push 대상이 아닙니다."
+    ],
+    "settings": [
+      "Backup › 백업 실행 · vCenter › VM 및 폴더"
+    ],
+    "sources": [
+      "server/src/veeam/run/portalVms.js",
+      "server/src/veeam/run/runs.js",
+      "server/src/routes/api/backupManage.js"
+    ]
+  },
+  "veeam-backup-runs.json": {
+    "title": "Veeam 백업 실행·복원 요청 기록",
+    "summary": "포탈이 Veeam 으로 보낸 백업 요청(Quick Backup · 포탈 전용 잡)과 새 VM 복원 요청의 기록입니다. 요청마다 요청자·시각·Veeam 서버별 요청 형태·세션 id 와 VM 별 상태(대기·진행·성공·경고·실패·확인 불가·보내지 않음)를 담고, 추적 타이머가 Veeam 세션을 읽어 갱신합니다. 같은 Veeam 서버로 진행 중인 요청이 있으면 새 요청을 막는 근거이기도 합니다.",
+    "stores": [
+      "요청마다 id·시각·요청자·방식·Veeam 서버별 그룹(요청 형태·메모·세션)·VM 별 상태와 내용·진행률.",
+      "복원 요청은 복원 지점 id·새 VM 이름·대상 호스트도 담습니다. 비밀번호는 없습니다."
+    ],
+    "writer": "백업 실행·복원 요청과 세션 추적(기본 20초, VEEAM_RUN_TRACK_MS)이 씁니다(원자적 쓰기, 권한 0600). 중앙만 씁니다.",
+    "usedBy": [
+      "Backup › 백업 실행 — 실행 현황·이력",
+      "포탈 백업 관리 창 — 최근 요청",
+      "진행 중 요청 409 가드"
+    ],
+    "retention": "최근 100건 — 넘으면 끝난 요청부터 오래된 순으로 지웁니다(진행 중 요청은 지우지 않습니다). 결과 확인 시한(기본 24시간)이 지나면 확인 불가로 닫습니다.",
+    "growth": "100건 상한이라 작습니다.",
+    "shrink": "줄일 필요가 없습니다.",
+    "ifDeleted": "실행 이력이 사라지고 진행 중이던 요청의 추적이 멈춥니다(Veeam 의 세션은 그대로 — 결과는 Veeam 콘솔에서). 포탈이 재시작하면 보내던 중이던 VM 은 확인 불가로 닫고 다시 보내지 않습니다. 파일이 깨지면 ‘.corrupt.<시각>’ 으로 보존합니다.",
+    "cautions": [
+      "확인 불가는 성공도 실패도 아닙니다 — 포탈은 자동으로 다시 보내지 않습니다(이중 백업 방지)."
+    ],
+    "settings": [
+      "VEEAM_RUN_TRACK_MS · VEEAM_RUN_DEADLINE_MS"
+    ],
+    "sources": [
+      "server/src/veeam/run/runs.js",
+      "server/src/routes/api/backupRun.js",
+      "server/src/routes/api/backupManage.js"
+    ]
+  },
+  "veeam-backup-run.json": {
+    "title": "Veeam 백업 실행 설정",
+    "summary": "Backup › 백업 실행의 설정입니다. 포탈 전용 잡 이름 접두, Veeam 서버마다 포탈 전용 잡의 저장소·보존(복원 지점 수), vCenter 마다 Veeam 이 그 vCenter 를 부르는 이름(직접 지정)이 들어 있습니다.",
+    "stores": [
+      "잡 이름 접두(기본 PORTAL-) · 서버별 저장소 id·보존 · vCenter 별 Veeam 쪽 이름. 비밀번호는 없습니다(서버 계정은 ‘veeam-servers.json’)."
+    ],
+    "writer": "백업 실행 설정 화면에서 저장할 때 씁니다(전체 범위 관리자 + OTP 재인증 + 감사 로그, 원자적 쓰기).",
+    "usedBy": [
+      "백업 실행 — 포탈 전용 잡 이름·저장소",
+      "포탈 백업 관리 — 복원 대상 vCenter 이름"
+    ],
+    "retention": "자동 정리는 없습니다.",
+    "growth": "Veeam 서버·vCenter 수에 비례하며 작습니다.",
+    "shrink": "줄일 필요가 없습니다.",
+    "ifDeleted": "기본값으로 돌아갑니다(접두 PORTAL- · 저장소 미지정 — 포탈 전용 잡으로 보낼 수 없음). 접두를 바꾸면 이미 만든 포탈 잡을 찾지 못하니 주의하세요. 파일이 깨지면 보존하고 백업 실행이 503 으로 막힙니다.",
+    "cautions": [
+      "잡 이름 접두를 바꾸면 이미 만든 포탈 전용 잡을 찾지 못해 새 잡이 생깁니다."
+    ],
+    "settings": [
+      "Backup › 백업 실행 › 백업 실행 설정"
+    ],
+    "sources": [
+      "server/src/veeam/run/settings.js",
+      "server/src/routes/api/backupRun.js"
+    ]
+  },
+  "veeam-servers.json": {
+    "title": "Veeam 백업 서버 등록부",
+    "summary": "vCenter 별 Veeam Backup & Replication 서버 목록입니다. 서버마다 접속 주소·포트·계정·비밀번호, 이 서버가 백업하는 vCenter, 읽는 곳(중앙 또는 그 법인 엣지)이 들어 있어 포탈은 이 목록을 보고 Veeam REST API 에 로그인해 백업 작업·백업 대상·실행 중 백업을 읽습니다. vCenter › VM 및 폴더의 'Veeam 백업 VM 표시' 배지의 출처입니다. 비밀번호가 들어 있으므로 손으로 편집하거나 외부에 공유하면 안 됩니다.",
+    "stores": [
+      "서버마다 식별자(vbr- 로 시작), 등록 시각, 이름(최대 64자), 주소(IP 또는 호스트 이름), 포트(기본 9419), 계정, 비밀번호, REST API 판(기본 1.1-rev0).",
+      "연결 vCenter 목록(최대 32개), 읽는 곳(비어 있으면 중앙이 직접 읽음), 사용 여부, 메모(최대 200자), 엣지에서는 중앙에서 받아 온 항목이라는 표시(pulled).",
+      "읽은 결과는 이 파일이 아니라 ‘veeam-latest.json’ 에 저장합니다."
+    ],
+    "writer": "설정 › vCenter 관리 › Veeam 백업 서버에서 등록·수정·삭제할 때 씁니다(최대 200대, 원자적 쓰기, 권한 0600, 관리자 + 전체 범위, 감사 로그). 엣지는 중앙 목록 중 자기 몫(읽는 곳이 자기 이름인 서버)을 5분마다(VEEAM_CONFIG_PULL_MS) 받아 자기 파일의 그 부분을 바꿉니다. 그래서 중앙과 엣지 모두 이 파일을 갖습니다.",
+    "usedBy": [
+      "Veeam 백업 상태 폴러(중앙·엣지 — 자기 몫 서버만, 기본 10분마다)",
+      "엣지 설정 pull(/api/central/veeam-config)",
+      "vCenter › VM 및 폴더 — Veeam 백업 VM 표시(어느 서버가 어느 vCenter 에 연결됐는지)"
+    ],
+    "retention": "자동 정리는 없습니다. 서버는 관리자가 삭제할 때까지 남습니다.",
+    "growth": "등록한 서버 수(최대 200대)에 비례하며 작습니다.",
+    "shrink": "줄일 필요가 없습니다.",
+    "ifDeleted": "모든 Veeam 서버 등록과 비밀번호가 사라지고 배지가 '연결된 Veeam 서버 없음' 으로 바뀝니다. 다시 등록해야 합니다(설정 › 포탈 백업에 백업이 있으면 복원할 수 있습니다). 파일이 깨지면 ‘.corrupt.<시각>’ 으로 보존하고, 중앙은 엣지의 설정 요청에 ‘등록부를 읽지 못함’(503)으로 답해 엣지가 빈 목록으로 서버를 지우는 사고를 막습니다.",
+    "cautions": [
+      "Veeam 계정·비밀번호가 들어 있습니다. 설정 › Security › 자격증명 저장 방식을 ‘암호화’ 로 하면 봉인되어 저장됩니다. 목록 화면·API 응답은 비밀번호를 싣지 않습니다.",
+      "주소·포트·계정을 바꾸면 저장된 비밀번호를 이어받지 않으니 다시 입력해야 합니다. 읽는 곳만 바꾸는 경우는 이어받습니다.",
+      "백업 실행·포탈 백업 관리(v2.818~)를 쓰지 않으면 읽기 전용 계정(Veeam Backup Viewer 역할)을 권장합니다. 쓰면 같은 계정으로 잡 생성·시작·VM 넣고 빼기·새 VM 복원·백업 삭제 요청을 보내므로 그 권한이 필요합니다(필요한 최소 역할은 확인하지 못했습니다 — 추정). 포탈은 실행 중 백업을 중지하지 않습니다."
+    ],
+    "settings": [
+      "설정 › vCenter 관리 › Veeam 백업 서버",
+      "설정 › Security › 장비 신뢰 — Veeam 자체서명 인증서 승인",
+      "VEEAM_POLL_MS · VEEAM_CONFIG_PULL_MS · VEEAM_SERVER_DEADLINE_MS · VEEAM_CONCURRENCY · VEEAM_HTTP_TIMEOUT_MS · VEEAM_TLS_VERIFY"
+    ],
+    "sources": [
+      "server/src/veeam/registry.js",
+      "server/src/agent/veeamConfigPull.js",
+      "server/src/routes/admin/veeam.js",
+      "server/src/routes/central.js",
+      "server/src/security/secretVault.js",
+      "server/src/util/secretCarry.js"
+    ]
+  },
+  "veeam-latest.json": {
+    "title": "Veeam 백업 상태(서버별 마지막 결과)",
+    "summary": "Veeam 서버마다 마지막으로 읽은 결과입니다 — 작업 목록과 상태, VM 단위 백업 대상(작업 포함·복원 지점 수), 지금 백업 중인 VM 과 진행률, VM 별 마지막 백업 결과(완료 시각·소요·처리 용량)·최근 복원 지점 10개 시각, 백업(체인)별 파일 용량. 중앙이 직접 읽은 결과와 엣지가 보낸 결과가 같은 파일에 들어갑니다. 재시작 직후 화면이 비지 않게 하는 캐시입니다.",
+    "stores": [
+      "서버 id 마다: 결과(성공 여부·시각·걸린 시간·오류·API 판·작업·VM·개수·안내 문구), 받은 경로(중앙 직접 또는 엣지)와 엣지 이름, 기록 시각.",
+      "마지막 성공 결과(lastOk) — 이번 읽기가 실패해도 배지가 전부 사라지지 않게 따로 둡니다(화면은 마지막 성공 시각과 오류를 함께 말합니다)."
+    ],
+    "writer": "Veeam 백업 상태 폴러(중앙 직접 서버)와 엣지 결과 수신(/api/central/veeam-data)이 씁니다 — 5초 묶음 비동기 저장, 종료 때 남은 것을 씁니다. 등록부에서 지운 서버의 결과는 다음 수집 때 지웁니다.",
+    "usedBy": [
+      "vCenter › VM 및 폴더 — Veeam 백업 VM 표시(/api/veeam/badges 가 이 결과를 vCenter VM 과 맞춘다)",
+      "설정 › vCenter 관리 › Veeam 백업 서버 — 상태·작업 목록",
+      "엣지 push(엣지에서는 자기 몫 서버의 결과를 중앙에 보냅니다)"
+    ],
+    "retention": "서버마다 마지막 결과 하나만 둡니다(이력은 쌓지 않습니다).",
+    "growth": "서버의 VM 수에 비례합니다(VM 한 대에 약 300바이트 — 복원 지점 시각 10개 포함 — 5,850 VM 이면 약 2MB — 추정).",
+    "shrink": "줄일 필요가 없습니다.",
+    "ifDeleted": "다음 수집(기본 10분)까지 배지가 '아직 읽은 결과가 없습니다' 로 보이고, 수집이 끝나면 다시 채워집니다. 등록부에는 영향이 없습니다. 포탈 백업에 들어가지만 ‘설정 변경 시 자동 백업’ 을 일으키지 않는 상태 파일입니다.",
+    "cautions": [
+      "비밀번호·토큰은 들어 있지 않습니다. VM 이름과 Veeam 작업 이름은 들어 있습니다."
+    ],
+    "settings": [
+      "VEEAM_POLL_MS — 수집 주기(기본 10분)"
+    ],
+    "sources": [
+      "server/src/veeam/store.js",
+      "server/src/veeam/poller.js",
+      "server/src/central/veeamEdge.js",
+      "server/src/routes/api/veeam.js"
+    ]
+  },
+  "veeam-auth-stops.json": {
+    "title": "Veeam 인증 실패 정지 기록",
+    "summary": "Veeam 서버가 계정·비밀번호를 거부(401)하면 그 서버의 주기 수집을 멈추고 그 사실을 남기는 상태 파일입니다. 같은 틀린 비밀번호로 10분마다 다시 로그인해 서비스 계정을 잠그지 않게 합니다.",
+    "stores": [
+      "서버 id 마다: 자격증명 지문(평문 아님), 처음 정지한 시각, 마지막 시도 시각, 시도 횟수, 사유."
+    ],
+    "writer": "Veeam 백업 상태 폴러가 401 을 받으면 쓰고, 성공하면 지웁니다. 비밀번호를 바꾸면 지문이 달라져 자동으로 다시 읽습니다. 설정 화면의 '지금 읽기'(사람이 누름)는 정지와 관계없이 한 번 시도합니다.",
+    "usedBy": [
+      "Veeam 백업 상태 폴러",
+      "설정 › vCenter 관리 › Veeam 백업 서버 — '인증 실패로 주기 수집 정지' 표시"
+    ],
+    "retention": "정지가 풀리면(성공·비밀번호 변경·서버 삭제) 그 줄을 지웁니다.",
+    "growth": "정지된 서버 수만큼입니다.",
+    "shrink": "줄일 필요가 없습니다.",
+    "ifDeleted": "정지가 풀려 다음 주기에 같은 계정으로 다시 로그인합니다(비밀번호가 여전히 틀리면 다시 정지합니다). 등록부에는 영향이 없습니다.",
+    "cautions": [
+      "비밀번호는 들어 있지 않습니다(지문만)."
+    ],
+    "settings": [
+      "설정 › vCenter 관리 › Veeam 백업 서버 — 비밀번호를 고치면 자동 재개"
+    ],
+    "sources": [
+      "server/src/veeam/poller.js",
+      "server/src/util/authGuard.js"
+    ]
+  },
+  "veeam-em.json": {
+    "title": "Veeam Enterprise Manager 등록부",
+    "summary": "Veeam Backup Enterprise Manager(EM) 목록입니다(v2.788). EM 마다 접속 주소·포트(기본 9398)·계정·비밀번호가 들어 있어 중앙 포탈은 이 목록을 보고 EM REST API 에 로그인해 전 백업 서버의 요약·작업 결과·세션·저장소를 읽습니다. 'Backup 현황 › EM' 탭의 출처입니다. 비밀번호가 들어 있으므로 손으로 편집하거나 외부에 공유하면 안 됩니다.",
+    "stores": [
+      "EM 마다 식별자(vem- 로 시작), 등록 시각, 이름(최대 64자), 주소(IP 또는 호스트 이름), 포트, 계정, 비밀번호, 수집 사용 여부, 메모(최대 200자).",
+      "읽은 결과는 이 파일이 아니라 ‘veeam-em-latest.json’ 에 저장합니다."
+    ],
+    "writer": "설정 › Veeam 백업 서버 › Enterprise Manager 에서 등록·수정·삭제할 때 씁니다(최대 20대, 원자적 쓰기, 권한 0600, 관리자 + 전체 범위, 감사 로그). 중앙 포탈에만 있습니다(엣지는 EM 을 읽지 않습니다).",
+    "usedBy": [
+      "Veeam Enterprise Manager 폴러(중앙 전용, 기본 15분마다)",
+      "Backup 현황 › EM 탭"
+    ],
+    "retention": "자동 정리는 없습니다. 관리자가 삭제할 때까지 남습니다.",
+    "growth": "등록한 EM 수(최대 20대)에 비례하며 작습니다.",
+    "shrink": "줄일 필요가 없습니다.",
+    "ifDeleted": "모든 EM 등록과 비밀번호가 사라지고 EM 탭이 '등록된 EM 없음' 으로 바뀝니다. 다시 등록해야 합니다. 파일이 깨지면 ‘.corrupt.<시각>’ 으로 보존하고 빈 목록으로 시작합니다(깨진 원본 위에 덮어쓰지 않습니다).",
+    "cautions": [
+      "EM 계정·비밀번호가 들어 있습니다. 설정 › Security › 자격증명 저장 방식을 ‘암호화’ 로 하면 봉인되어 저장됩니다. 목록 화면·API 응답은 비밀번호를 싣지 않습니다.",
+      "주소·포트·계정을 바꾸면 저장된 비밀번호를 이어받지 않으니 다시 입력해야 합니다.",
+      "읽기 전용 계정(EM Portal User 역할)을 권장합니다. 포탈은 작업을 시작·중지하지 않습니다."
+    ],
+    "settings": [
+      "설정 › Veeam 백업 서버 › Enterprise Manager"
+    ],
+    "sources": [
+      "server/src/veeam/em/registry.js",
+      "server/src/routes/admin/veeamEm.js"
+    ]
+  },
+  "veeam-em-latest.json": {
+    "title": "Veeam Enterprise Manager 마지막 수집 결과",
+    "summary": "EM 마다 마지막으로 읽은 결과를 담는 상태 파일입니다(v2.788). 재시작 직후에도 EM 탭이 비지 않게 하는 캐시이며, 다음 수집이 다시 채웁니다.",
+    "stores": [
+      "EM id 마다: 수집 시각, 성공 여부, 항목별(요약 보고서·작업·세션·저장소 등) 성공·사유, 전체 개요·작업 통계·VM 개요, 작업별 마지막 결과, 최근 24시간 세션 집계, 저장소 용량.",
+      "실패한 수집은 직전 성공 결과를 지우지 않고 함께 들고 있습니다."
+    ],
+    "writer": "Veeam Enterprise Manager 폴러가 수집할 때마다(5초 묶어 쓰기).",
+    "usedBy": [
+      "Backup 현황 › EM 탭",
+      "설정 › Veeam 백업 서버 › Enterprise Manager 의 상태 표시"
+    ],
+    "retention": "등록부에서 지운 EM 의 결과는 다음 수집 때 지웁니다.",
+    "growth": "EM 수와 작업 수에 비례합니다(작업 수천 개 규모에서 수 MB 이하 — 추정).",
+    "shrink": "줄일 필요가 없습니다.",
+    "ifDeleted": "다음 수집(기본 15분 안)까지 EM 탭이 '아직 수집 전' 으로 보입니다. 그 밖의 영향은 없습니다.",
+    "cautions": [
+      "비밀번호·세션 정보는 들어 있지 않습니다."
+    ],
+    "settings": [
+      "설정 › Veeam 백업 서버 › Enterprise Manager — '지금 수집'"
+    ],
+    "sources": [
+      "server/src/veeam/em/store.js",
+      "server/src/veeam/em/poller.js"
+    ]
+  },
+  "vm-list-prefs.json": {
+    "title": "VM 목록 내보내기 내 저장값",
+    "summary": "vCenter › VM 및 폴더 › VM 목록 내보내기 창의 저장값입니다(v2.798). 계정마다 기본값 하나와 1~5번 칸에 고른 항목과 순서, 그리고 사람이 저장하기로 고른 형식(CSV/엑셀)·여러 값 처리 방식·대상 폴더를 담습니다.",
+    "stores": [
+      "계정마다: 기본값(어느 칸에서 왔는지), 1~5번 칸(이름 · 고른 항목 key 와 순서 · 고른 경우 형식 · 여러 값 처리 · 태그 카테고리별 열 · 대상 폴더 경로), 마지막 저장 시각."
+    ],
+    "writer": "내보내기 창의 '지금 설정을 기본값으로' · '지금 설정 저장하기' 를 누를 때 씁니다(관리자·운영자, 본인 계정 것만, 감사 로그, 원자적 쓰기).",
+    "usedBy": [
+      "vCenter › VM 및 폴더 › VM 목록 내보내기 창 — 창을 열 때 기본값으로 시작, 칸 버튼으로 불러오기"
+    ],
+    "retention": "자동 정리는 없습니다. 사람이 칸을 비우거나 덮어쓸 때 바뀝니다.",
+    "growth": "계정 수 × 6개 값으로 작습니다(최대 2,000 계정).",
+    "shrink": "줄일 필요가 없습니다.",
+    "ifDeleted": "모든 계정의 저장값이 사라지고 창은 포탈 기본 조합으로 시작합니다. 파일이 깨지면 ‘.corrupt.<시각>’ 으로 보존하고, 그동안 저장을 거부합니다(빈 값 위에 덮지 않습니다).",
+    "cautions": [
+      "비밀은 들어 있지 않습니다(항목 이름·폴더 경로만). 카탈로그에서 사라진 항목은 불러올 때 빼고 화면이 알립니다."
+    ],
+    "settings": [
+      "vCenter › VM 및 폴더 › VM 목록 내보내기 창"
+    ],
+    "sources": [
+      "server/src/veeam/vmListPrefs.js",
+      "server/src/veeam/vmListCatalog.js"
+    ]
+  },
+  "veeam-em-vms.json": {
+    "title": "Veeam Enterprise Manager VM 별 백업 기록",
+    "summary": "EM 이 알려 준 VM 별 최신 백업 기록입니다(v2.795). 백업 서버마다 VM 의 마지막 작업 결과(성공·경고·실패와 시각)와 최근 복원 지점 시각을 담습니다. 매핑으로 법인(vCenter)을 정한 백업 서버의 기록이 vCenter 카드·VM 배지·Veeam 현황에 'EM ·' 출처로 실립니다(짝지은 B&R 직접 수집이 정상이면 그쪽이 우선).",
+    "stores": [
+      "EM 마다: 접속처 지문, 다음 수집 기준 시각, 마지막 저장 시각, 서버를 가릴 수 없었던 행 수.",
+      "'백업 서버|VM 이름' 마다: VM 이름, 백업 서버, moref(있을 때), 작업 이름, 마지막 작업 결과·시작·끝, 최근 복원 지점 시각(최대 10개)."
+    ],
+    "writer": "Enterprise Manager 주기 수집(중앙 전용, 기본 15분)이 끝날 때마다 한 번 씁니다(원자적 쓰기). 첫 수집은 최근 8일, 그 뒤로는 직전 완결 수집 이후만 읽습니다. EM 을 지우거나 접속처를 바꾸면 그 EM 의 기록을 지웁니다.",
+    "usedBy": [
+      "vCenter 카드 'VM 백업' 칸 · VM 의 Veeam 배지·상세 창",
+      "Backup 현황 › Summary · Detail, VM 목록 CSV·엑셀",
+      "설정 › Veeam 백업 서버 › Enterprise Manager — 매핑 표의 'vCenter 반영' 칸"
+    ],
+    "retention": "마지막 근거(작업 끝·복원 지점)가 400일보다 오래된 VM 은 지웁니다. EM 당 최대 30,000대(오래된 것부터 버립니다).",
+    "growth": "EM 이 백업하는 VM 수에 비례합니다(VM 1대에 수백 바이트 — 6천 대면 약 2 MB).",
+    "shrink": "줄일 필요가 없습니다. 지우면 다음 수집이 최근 8일로 다시 채웁니다.",
+    "ifDeleted": "다음 수집이 최근 8일 기록으로 다시 만듭니다. 그 사이 EM 으로만 연동된 vCenter 의 Veeam 칸은 '첫 수집 대기' 로 보입니다(0 이 아닙니다). 파일이 깨지면 ‘.corrupt.<시각>’ 으로 보존하고 빈 기록으로 시작합니다.",
+    "cautions": [
+      "비밀은 들어 있지 않습니다(VM·서버·작업 이름과 시각만)."
+    ],
+    "settings": [
+      "설정 › Veeam 백업 서버 › Enterprise Manager › 백업 서버 매핑(법인을 정해야 반영됩니다)"
+    ],
+    "sources": [
+      "server/src/veeam/em/vmStore.js",
+      "server/src/veeam/em/sources.js"
+    ]
+  },
+  "veeam-em-map.json": {
+    "title": "Veeam Enterprise Manager 백업 서버 매핑",
+    "summary": "EM 이 아는 B&R 서버마다 사람이 정한 값을 담는 파일입니다(v2.788.1). 그 서버가 백업하는 vCenter(법인)와, 포탈에 등록된 어느 B&R 서버와 같은지(이름이 달라 자동으로 못 찾을 때) 또는 '포탈에 없음' 으로 확정했는지를 적습니다. Backup 현황 › EM 탭의 법인 이름과 '포탈 등록됨' 표시가 이 값을 씁니다.",
+    "stores": [
+      "'EM id|백업 서버 이름' 마다: vCenter 목록(비면 B&R 등록을 따름), B&R 짝(비면 이름으로 자동 · 등록 id · 'none' = 포탈에 없음), 바꾼 사람·시각."
+    ],
+    "writer": "설정 › Veeam 백업 서버 › Enterprise Manager › 백업 서버 매핑에서 저장할 때 씁니다(관리자 + 전체 범위, 감사 로그, 원자적 쓰기). EM 을 지우면 그 EM 의 매핑도 지웁니다.",
+    "usedBy": [
+      "Backup 현황 › EM 탭 — 백업 서버·작업·저장소의 법인 이름, '포탈 등록됨' 판정",
+      "설정 › Veeam 백업 서버 › Enterprise Manager — 매핑 표"
+    ],
+    "retention": "자동 정리는 없습니다. 사람이 '자동으로 되돌리기' 를 누르거나 EM 을 지울 때 지웁니다.",
+    "growth": "EM 백업 서버 수(최대 2,000줄)에 비례하며 작습니다.",
+    "shrink": "줄일 필요가 없습니다.",
+    "ifDeleted": "모든 매핑이 사라지고 이름 자동 짝짓기로 돌아갑니다(법인 이름은 짝지어진 B&R 등록의 vCenter 만 남습니다). 파일이 깨지면 ‘.corrupt.<시각>’ 으로 보존하고, 그동안 매핑 저장을 거부합니다(빈 값 위에 덮지 않습니다).",
+    "cautions": [
+      "비밀은 들어 있지 않습니다(이름·id 만)."
+    ],
+    "settings": [
+      "설정 › Veeam 백업 서버 › Enterprise Manager › 백업 서버 매핑"
+    ],
+    "sources": [
+      "server/src/veeam/em/mapping.js",
+      "server/src/veeam/em/view.js",
+      "server/src/routes/admin/veeamEm.js"
+    ]
+  },
+  "veeam-em-auth-stops.json": {
+    "title": "Veeam Enterprise Manager 인증 실패 정지 기록",
+    "summary": "EM 이 계정·비밀번호를 거부(401)하면 그 EM 의 주기 수집을 멈추고 그 사실을 남기는 상태 파일입니다(v2.788). 같은 틀린 비밀번호로 계속 로그인해 서비스 계정을 잠그지 않게 합니다.",
+    "stores": [
+      "EM id 마다: 자격증명 지문(평문 아님), 처음 정지한 시각, 마지막 시도 시각, 시도 횟수, 사유."
+    ],
+    "writer": "Veeam Enterprise Manager 폴러가 401 을 받으면 쓰고, 성공하면 지웁니다. 비밀번호를 바꾸면 자동으로 다시 읽습니다. 설정 화면의 '지금 수집' 은 정지와 관계없이 한 번 시도합니다.",
+    "usedBy": [
+      "Veeam Enterprise Manager 폴러",
+      "설정 › Veeam 백업 서버 › Enterprise Manager — '인증 실패로 주기 수집 정지' 표시"
+    ],
+    "retention": "정지가 풀리면(성공·비밀번호 변경·삭제) 그 줄을 지웁니다.",
+    "growth": "정지된 EM 수만큼입니다.",
+    "shrink": "줄일 필요가 없습니다.",
+    "ifDeleted": "정지가 풀려 다음 주기에 같은 계정으로 다시 로그인합니다(비밀번호가 여전히 틀리면 다시 정지합니다).",
+    "cautions": [
+      "비밀번호는 들어 있지 않습니다(지문만)."
+    ],
+    "settings": [
+      "설정 › Veeam 백업 서버 › Enterprise Manager — 비밀번호를 고치면 자동 재개"
+    ],
+    "sources": [
+      "server/src/veeam/em/poller.js",
+      "server/src/util/authGuard.js"
+    ]
+  },
+  "veeam-license-alert-state.json": {
+    "title": "Veeam 라이선스 만료 알림 단계",
+    "summary": "B&R 서버마다 라이선스·지원 만료가 어느 단계(정상·D-90·D-30·D-7·만료)인지 기억하는 상태 파일입니다(v2.788). 단계가 바뀔 때만 한 번 알리고, 재시작 뒤 같은 알림을 다시 보내지 않게 합니다.",
+    "stores": [
+      "'서버 id:종류'(라이선스·지원) 마다: 단계, 그 단계가 된 시각, 만료 시각."
+    ],
+    "writer": "라이선스 감시(중앙, 1시간마다)가 판정할 때 씁니다. 데모 모드에서는 알리지 않습니다.",
+    "usedBy": [
+      "Veeam 라이선스 감시 — 알림 채널(설정 › 알림)로 만료 단계 알림"
+    ],
+    "retention": "서버가 있는 동안 남습니다.",
+    "growth": "B&R 서버 수 × 2 줄로 작습니다.",
+    "shrink": "줄일 필요가 없습니다.",
+    "ifDeleted": "다음 판정에서 지금 나쁜 단계(D-90 이하)인 항목을 한 번씩 다시 알립니다(단계당 1건 — 쏟아지지 않습니다).",
+    "cautions": [
+      "비밀은 들어 있지 않습니다."
+    ],
+    "settings": [
+      "설정 › 알림 — 알림 채널"
+    ],
+    "sources": [
+      "server/src/veeam/licenseWatch.js"
+    ]
+  },
   "isidu.db": {
     "title": "아이실론 디렉터리 사용량 이력 DB",
     "summary": "지정한 아이실론(PowerScale) 디렉터리 바로 아래 폴더(사용자 폴더 — 폴더 이름이 곧 사용자 이름)마다 크기를 조사해 쌓는 SQLite 데이터베이스입니다. 조사는 그 아이실론에 SSH 로 접속해 du -A -h(또는 -k) -d 1 명령을 실행해 얻습니다. '특수 기능 › 아이실론 디렉터리 사용량' 화면이 이 파일을 읽습니다. 대상을 등록하기 전에는 파일이 없을 수 있습니다.",
@@ -120,6 +483,56 @@ export const DB_GUIDE_DATA = {
     ],
     "sources": [
       "server/src/isidu/push.js"
+    ]
+  },
+  "vcenter-logs-cursor.json": {
+    "title": "vCenter 이벤트 수집 커서",
+    "summary": "vCenter 로그 보관 폴러가 vCenter 마다 '어디까지 읽었는지' 와 '어느 시각까지 이벤트가 온전한지' 를 재시작 뒤에도 잇기 위해 남기는 상태 파일입니다(v2.765).",
+    "stores": [
+      "vCenter 별 마지막으로 읽은 이벤트 시각(저장 여부와 무관), 온전한 마지막 시각, 끝까지 읽었는지·왜 끝났는지(시간 예산/시한/상한), 연속으로 끝까지 못 읽은 주기 수, 그리고 이 커서가 어느 로그 DB 의 것인지(종류·경로·파일)."
+    ],
+    "writer": "로그 보관 폴러가 주기마다 적재를 끝낸 뒤 한 번 씁니다(바뀐 것이 있을 때만). 기동 뒤 첫 수집 전에 읽습니다. 등록부에서 지운 vCenter 의 항목은 그때 함께 지웁니다.",
+    "readers": [
+      "로그 보관 폴러(다음 수집 시작 시각 = 마지막 저장 시각과 읽은 시각 중 늦은 것 — 그 시각을 포함해 다시 읽고, 같은 이벤트는 번호@시각 키가 거릅니다)",
+      "설정 › Log 의 vCenter 별 수집 상태 표(지연·상한·상태)"
+    ],
+    "retention": "vCenter 수만큼의 항목이라 정리할 것이 없습니다.",
+    "growth": "늘지 않습니다.",
+    "shrink": "줄일 필요가 없습니다.",
+    "ifDeleted": "다음 수집이 로그 DB 의 마지막 저장 시각부터 다시 읽습니다. 중복 저장은 없습니다(이벤트 번호@시각 키). 예전(v2.763 까지)에는 이 기록이 메모리에만 있어 재시작마다 그렇게 되돌아갔습니다. 로그 DB 를 새로 만들거나 저장 경로를 바꿀 때는 이 파일도 지우는 것이 안전합니다 — 안 지우면 새 DB 가 첫 7일을 채우지 않을 수 있습니다(폴러가 파일에 적힌 DB 종류·경로·파일과 다르면 스스로 무시하고 경고 1줄을 남기지만, 파일 식별이 같게 보이는 경우까지 보장하지는 않습니다).",
+    "cautions": [
+      "상태 파일이라 백업 '변경 감시' 에서 빠집니다.",
+      "손상되면 .corrupt.<시각> 으로 보존하고 빈 기록으로 시작합니다.",
+      "로그 DB 를 새로 만들거나 저장 경로를 바꾸면 이 파일도 지울 것 — 안 지우면 새 DB 가 첫 7일을 채우지 않습니다(다른 DB 의 커서로 판정되면 자동으로 무시하고 경고를 남깁니다)."
+    ],
+    "settings": [
+      "설정 › Log 의 수집 주기(따라잡기 시간 예산 = 주기의 80%), 환경 변수 VCLOGS_BATCH_ROWS(한 세션 안에서 적재하는 묶음 크기, 기본 2,000)"
+    ],
+    "sources": [
+      "server/src/logs/poller.js"
+    ]
+  },
+  "upgrade-signature-override.json": {
+    "title": "업그레이드 서명 확인 시한부 끄기",
+    "summary": "설정 › 업그레이드 › 릴리스 서명에서 설정 소유자가 OTP 재인증 후 서명 확인을 시한부로 끈 기록입니다. 시한이 지나면 저절로 무효가 됩니다.",
+    "stores": [
+      "끈 시각·시한(최대 7일)·끈 계정 1건."
+    ],
+    "writer": "설정 › 업그레이드에서 끄거나 다시 켤 때 서버가 씁니다(다시 켜면 파일을 지웁니다). 판정은 이 파일을 매번 읽어 시한을 봅니다.",
+    "usedBy": [
+      "업그레이드 서명 판정(감시 폴더·원격 다운로드·받은 번들) — root 로 도는 설치 확인(install.sh·vmware-portal-verify)은 보지 않습니다",
+      "설정 › 업그레이드 › 릴리스 서명 카드 · 보안 자체 점검"
+    ],
+    "retention": "다시 켜면 지웁니다. 시한이 지난 기록은 남아도 효력이 없습니다.",
+    "growth": "늘지 않습니다.",
+    "shrink": "줄일 필요가 없습니다.",
+    "ifDeleted": "서명 확인이 즉시 다시 켜집니다(안전한 쪽).",
+    "cautions": [
+      "상태 파일이라 엣지 설정 push·백업 변경 감시에서 빠지고, 백업 복원에서도 제외됩니다(다시 켠 서명 확인이 복원으로 꺼지지 않게).",
+      "손상되거나 형식이 맞지 않으면 보존(.corrupt) 후 '켜짐' 으로 봅니다. 서버 환경변수 UPGRADE_SIGNATURE_POLICY 가 있으면 그 값이 우선합니다."
+    ],
+    "settings": [
+      "설정 › 업그레이드 › 릴리스 서명 '화면 설정'(설정 소유자 + OTP)"
     ]
   },
   "upgrade-status.json": {
@@ -944,6 +1357,70 @@ export const DB_GUIDE_DATA = {
       "docs/SETTINGS.md",
       "docs/ENV.md",
       "docs/CONFIG-FILES.md"
+    ]
+  },
+  "veeam-snap.db": {
+    "title": "Veeam 스냅샷 이벤트 DB",
+    "summary": "vCenter 이벤트 가운데 스냅샷 생성·제거 행만 따로 담는 SQLite 데이터베이스입니다(v2.759). '서버 › vCenter' 카드의 VM 백업 수량(스냅샷 기준)과 'VM 및 폴더' 화면의 'Veeam 백업 시도' 가 이 작은 표만 읽어 바로 계산합니다. 예전에는 요청마다 vCenter 이벤트 로그 DB 전체를 검색해 첫 화면이 오래 걸렸습니다. 중앙과 각 엣지에 생기며, 중앙에는 엣지가 보내온 Veeam 스냅샷 요약도 보존합니다.",
+    "stores": [
+      "스냅샷 이벤트 표(‘snap_ev’): vCenter, 시각, 심각도, 종류, 계정, 대상, 문구 — 스냅샷 관련 행만(같은 행은 한 번).",
+      "진행 기록 표(‘snap_meta’): vCenter 마다 이 DB 가 빠짐없이 가진 가장 이른 시각(업그레이드 뒤 백필 진행).",
+      "엣지 요약 표(‘snap_edge’, 중앙): 엣지가 보낸 vCenter 별 Veeam 스냅샷 요약과 받은 시각 — 중앙 재시작 직후에도 마지막 요약을 보여 줍니다."
+    ],
+    "writer": "vCenter 로그 폴러가 이벤트를 적재할 때 스냅샷 행을 함께 씁니다. 업그레이드 뒤 한 번은 기존 vCenter 이벤트 로그 DB 에서 최근 8일을 먼저, 이어서 31일까지 백그라운드로 옮깁니다(하루씩 · 재시작해도 이어서). 중앙은 엣지의 Veeam push 를 받을 때 요약을 씁니다.",
+    "usedBy": [
+      "서버 › vCenter 카드: VM 백업 수량(Veeam 연동이 없는 vCenter 의 스냅샷 기준).",
+      "vCenter › VM 및 폴더: 'Veeam 백업 VM 표시' 의 최근 7일 Veeam 백업 시도.",
+      "엣지: 중앙에 보내는 Veeam 스냅샷 요약 계산."
+    ],
+    "retention": "31일(최근 1달)입니다. 적재 30번마다 한 번 오래된 행을 조금씩 나눠 지웁니다. 화면에서 바꾸는 곳은 없습니다.",
+    "growth": "스냅샷 생성·제거 행만 담아 작습니다 — 대략 '백업되는 VM 수 × 하루 백업 횟수 × 2(생성·제거) × 31일' 행(계산값)입니다.",
+    "shrink": "보관 기간이 고정(31일)이라 자연히 일정 크기를 유지합니다. 파일 크기를 줄이려면 다른 SQLite DB 와 같이 VACUUM 이 필요합니다.",
+    "ifDeleted": "지우면 백업 수량·Veeam 백업 시도가 잠시 '집계 준비 중' 으로 보이고, 다음에 열 때 빈 파일이 만들어져 vCenter 이벤트 로그 DB 에서 다시 백필합니다(로그 DB 의 보관 기간 안에서만). 서비스를 멈춘 뒤 ‘-wal’·‘-shm’ 파일과 함께 지워야 합니다.",
+    "cautions": [
+      "vCenter 이벤트 수집(설정 › vCenter 로그)이 꺼져 있거나 최소 심각도가 정보보다 높으면 이 DB 도 채워지지 않습니다.",
+      "SQLite 를 쓸 수 없는 환경이면 이 DB 없이 예전 방식(로그 DB 검색)으로 계산합니다 — 결과는 같고 느립니다.",
+      "포탈 백업('설정 › 포탈 백업')에는 들어가지 않습니다. 파일 권한은 0600 입니다.",
+      "'특수 기능 › 포탈 DB' 의 DB 저장 경로 이전 대상입니다."
+    ],
+    "settings": [
+      "설정 › vCenter 로그: 이벤트 수집 켜기·최소 심각도(이 DB 의 원천)",
+      "특수 기능 › 포탈 DB: 크기 확인과 DB 저장 경로 이전"
+    ],
+    "sources": [
+      "server/src/veeam/snapDb.js",
+      "server/src/veeam/snapEvents.js",
+      "server/src/veeam/snapWarm.js",
+      "server/src/logs/poller.js",
+      "server/src/routes/api/veeam.js"
+    ]
+  },
+  "veeam-history.db": {
+    "title": "Veeam 일 단위 이력 DB",
+    "summary": "Veeam 의 지난 값을 하루 한 점씩 담는 SQLite 데이터베이스입니다(v2.788). B&R 서버마다 라이선스 사용 수량과 만료일을, Enterprise Manager 마다 저장소 용량과 여유 공간을 기록합니다. 'Backup 현황 › EM' 탭의 라이선스·저장소 추이와, 다음 판의 저장소 소진 예측이 이 기록을 읽습니다. 중앙 포탈에만 생깁니다.",
+    "stores": [
+      "라이선스 표(‘license_daily’): B&R 서버, 날짜, 사용·전체 인스턴스, 사용·전체 소켓, 라이선스 만료일, 지원 만료일 — 못 읽은 값은 비워 둡니다(0 이 아닙니다).",
+      "저장소 표(‘repo_daily’): Enterprise Manager, 저장소(백업 서버와 이름), 날짜, 용량, 여유 공간, 백업 크기."
+    ],
+    "writer": "라이선스 감시가 1시간마다 B&R 결과의 라이선스를 쓰고, Enterprise Manager 폴러가 수집 직후 저장소 용량을 씁니다. 같은 날 다시 쓰면 그날 값을 새 값으로 바꿉니다.",
+    "usedBy": [
+      "Backup 현황 › EM 탭: 라이선스 사용 추이와 저장소 용량 추이(최근 90일)."
+    ],
+    "retention": "400일입니다. 쓰기 24번마다 한 번 오래된 행을 조금씩 나눠 지웁니다. 화면에서 바꾸는 곳은 없습니다.",
+    "growth": "작습니다 — 대략 '(B&R 서버 수 + EM 저장소 수) × 400일' 행(계산값)입니다.",
+    "shrink": "보관 기간이 고정이라 일정 크기를 유지합니다.",
+    "ifDeleted": "지우면 추이만 처음부터 다시 쌓입니다. 수집·알림·나머지 화면은 그대로입니다. 서비스를 멈춘 뒤 ‘-wal’·‘-shm’ 파일과 함께 지워야 합니다.",
+    "cautions": [
+      "SQLite 를 쓸 수 없는 환경이면 추이를 쌓지 않고 화면은 '이력 없음' 으로 보입니다.",
+      "'특수 기능 › 포탈 DB' 의 DB 저장 경로 이전 대상입니다."
+    ],
+    "settings": [
+      "설정 › Veeam 백업 서버: B&R 서버(라이선스의 원천)와 Enterprise Manager(저장소의 원천) 등록"
+    ],
+    "sources": [
+      "server/src/veeam/historyDb.js",
+      "server/src/veeam/licenseWatch.js",
+      "server/src/veeam/em/poller.js"
     ]
   },
   "capacity.db": {

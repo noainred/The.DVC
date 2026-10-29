@@ -5,7 +5,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { agoText } from './tools/relTime.js'; // v2.618 ARCH-5
 import { fetchJson, postJson, putJson, delJson, downloadFile, canCsv } from '../api.js';
 import { droppedSecretNote } from './droppedSecretText.js';
-import { readFailText, agentTokSummary } from './readFailText.js'; // v2.733(C5-02): 조회 실패를 'push 없음'·'0개 발급' 으로 그리지 않는다
+import { readFailText, agentTokSummary, fileUnreadableText } from './readFailText.js'; // v2.733(C5-02): 조회 실패를 'push 없음'·'0개 발급' 으로 그리지 않는다
 import { Loading, ErrorBox } from '../components/ui.jsx';
 import EscClose from '../components/EscClose.jsx';
 import { STable } from '../components/STable.jsx';
@@ -18,6 +18,7 @@ const EmptyInvModal = React.lazy(() => import('./collectors/EmptyInvModal.jsx'))
 // 2026-10-09 검토 S-09(그룹 J): 중앙↔엣지 전송 보호 — 평문 HTTP 는 승인된 예외만(판정은 서버, 문장은 transportText).
 import TransportPanel from './collectors/TransportPanel.jsx';
 import { transportBadge, formHttpNote, importHttpNote } from './collectors/transportText.js';
+import { upgradeCell, autoPushLine } from './collectorUpgradeText.js'; // v2.775 업그레이드 결과 이유·시각
 
 // S-09: 새 기본값은 https:// — 평문 http:// 는 사유를 적은 예외로만 등록된다.
 const EMPTY = { id: '', name: '', datacenter: '', url: 'https://', token: '', enabled: true, allowInsecureHttp: false, insecureHttpReason: '' };
@@ -282,6 +283,12 @@ export default function Collectors() {
   return (
     <>
       {error && <div className="card" style={{ marginBottom: 8, padding: '8px 12px', color: 'var(--red)', fontSize: 12 }}>일시적 갱신 오류: {String(error.message || error)} — 직전 데이터를 표시 중입니다.</div>}
+      {/* v2.771(점검 R6-F4-2): 등록부(collectors.json)를 읽지 못했으면 빈 목록이 '등록 없음' 이 아니다 — 자기등록·자동 정리도 멈춰 있다. */}
+      {data.loadError && (
+        <div className="banner warn" style={{ marginBottom: 8 }}>
+          {fileUnreadableText(data.loadError, '수집 서버 등록부(collectors.json)', { notMeaning: '아래 목록이 비어 보여도 등록이 없다는 뜻이 아니며, 그동안 엣지 자기등록·원격 전력 정리·pull 을 멈춥니다' })}
+        </div>
+      )}
       <div className="flex between wrap gap" style={{ marginBottom: 6 }}>
         <div className="section-title" style={{ margin: '6px 0', display: 'flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap' }}>
           수집 서버 — 분산 수집 (관리자)
@@ -308,6 +315,10 @@ export default function Collectors() {
 
       {csvOk && csvModal === 'export' && <CollectorsCsvExportModal onClose={() => setCsvModal(null)} />}
       {csvOk && csvModal === 'import' && <CollectorsCsvImportModal onClose={() => setCsvModal(null)} onDone={() => { setCsvModal(null); load(); }} />}
+
+      {/* v2.775: 마지막 자동 업그레이드에서 수집 서버로 보낸 결과(재시작 전에 파일로 남긴 것) — 전부 받았으면 조용히 한 줄 */}
+      {autoPushLine(data?.autoPush) && (() => { const a = autoPushLine(data.autoPush); return (
+        <div style={{ marginBottom: 10, fontSize: 12, whiteSpace: 'normal', overflowWrap: 'anywhere', color: a.tone === 'ok' ? 'var(--text-dim)' : a.tone === 'warn' ? 'var(--amber)' : '#f87171' }}>{a.text}</div>); })()}
 
       {banner && (
         <div style={{ marginBottom: 12, padding: '10px 12px', borderRadius: 8, fontSize: 13,
@@ -345,6 +356,11 @@ export default function Collectors() {
         <summary style={{ cursor: 'pointer', fontWeight: 700, fontSize: 13 }}>
           🔑 엣지별 개별 central 토큰 ({agentTokSummary(agentTok, agentTokErr)})
         </summary>
+        {agentTok?.loadError && (
+          <div className="banner warn" style={{ marginTop: 8 }}>
+            {fileUnreadableText(agentTok.loadError, '엣지 개별 토큰 파일(central-agent-tokens.json)', { notMeaning: '발급된 토큰이 없다는 뜻이 아니며, 그동안 개별 토큰 엣지의 요청은 503 으로 답합니다' })}
+          </div>
+        )}
         {agentTokErr && (
           <div className="banner warn" style={{ marginTop: 8 }}>
             {readFailText('개별 토큰 발급 현황', agentTokErr, { notMeaning: '발급된 토큰이 없다는 뜻이 아닙니다', stale: !!agentTok })}
@@ -462,7 +478,11 @@ export default function Collectors() {
                   <td className="tabular">{s?.ok ? (s.hosts ?? 0).toLocaleString() : '—'}</td>
                   <td className="muted">
                     {s?.version ? <>v{s.version}{central && s.version !== central && <span className="badge amber" style={{ marginLeft: 6 }} title={`중앙 v${central}`}>구버전</span>}</> : '—'}
-                    {s?.upgrade && <div className="muted" style={{ fontSize: 11, color: s.upgrade.ok ? 'var(--green)' : 'var(--red)' }}>{s.upgrade.ok ? `업그레이드 v${s.upgrade.version || ''} 적용` : `업그레이드 실패`}</div>}
+                    {/* v2.775: 실패 이유·시각·자동 여부까지(예전에는 '업그레이드 실패' 만) */}
+                    {upgradeCell(s?.upgrade) && (() => { const u = upgradeCell(s.upgrade); return (
+                      <div style={{ fontSize: 11, color: u.tone === 'ok' ? 'var(--green)' : 'var(--red)', whiteSpace: 'normal', overflowWrap: 'anywhere', maxWidth: 320 }}>
+                        {u.text}{u.reason && <div className="muted" style={{ fontSize: 11 }}>{u.reason}</div>}
+                      </div>); })()}
                   </td>
                   <td className="muted">{s?.at ? new Date(s.at).toLocaleTimeString('ko-KR') : '—'}</td>
                   <td>{c.enabled === false ? <span className="badge gray">중지</span> : <span className="badge green">on</span>}</td>

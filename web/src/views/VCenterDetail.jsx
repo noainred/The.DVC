@@ -1,7 +1,7 @@
 import { unitText } from './unitText.js';
 import { numOrNull } from '../numOrNull.js';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { fetchJson, postJson, usePolling, toolAllowed, canCsv } from '../api.js'; // v2.643 canCsv: CSV 내보내기 게이팅
+import { fetchJson, postJson, usePolling, toolAllowed, canCsv, hasRole } from '../api.js'; // v2.643 canCsv: CSV 내보내기 게이팅 · v2.819 hasRole(포탈 백업 배지)
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid } from 'recharts';
 import { Loading, ErrorBox, StateBadge, UsageCell, EntityDetail, DataTable, SearchBox } from '../components/ui.jsx';
 import EscClose from '../components/EscClose.jsx';
@@ -24,6 +24,15 @@ import {
 import { dayStamp } from '../dayStamp.js';
 import Select from '../components/Select.jsx';
 import BoldText from '../components/boldText.jsx';
+// v2.800(사용자 지시 "vCenter 화면은 전체 VM, 백업 현황은 백업 — 분리"): 이 화면의 내보내기는 'VM 전체 정보 내보내기'(특수 기능 vm-export)를
+//   그 vCenter 로 연다. 백업 항목(Veeam·스냅샷 판단) 내보내기는 서버 › Veeam 백업 현황 › Detail 의 'CSV · 엑셀…' 로 옮겼다(VmListExportDialog).
+const VmExport = React.lazy(() => import('./tools/VmExport.jsx').then((m) => ({ default: m.VmExport })));
+const HostExportDialog = React.lazy(() => import('./HostExportDialog.jsx'));   // v2.802 호스트 · 클러스터 엑셀(호스트 1대 = 시트 1장)
+import { veeamSummary, veeamSnapCounts } from './veeamBadge.js'; // v2.751: 'Veeam 백업 VM 표시' 요약 문구(순수)
+import { Modal } from '../components/Modal.jsx';
+import { portalMark, saveHandoff } from './tools/backupRunText.js'; // v2.819 포탈 백업 배지·폴더 백업 넘김(순수)
+const BackupManageModal = React.lazy(() => import('./tools/BackupManageModal.jsx')); // v2.819 — 열 때만 받는다
+import { VeeamTag, VeeamSummaryCard, VeeamSnapSummary, VeeamDetailModal } from './VeeamParts.jsx'; // v2.751: 배지(누르면 상세 창)·요약 카드 · v2.753 스냅샷 기준 요약
 import { authStopNote, authStopCell, authStopSingleText, plainText, skipNote, skipCell, skipSingleText } from './vcAuthStopText.js'; // v2.733(C3-01): 인증 정지로 조회하지 않음 · v2.744(감사 후속 FA-②): 직접 수집 대상 아님
 
 const VIEWS = [
@@ -270,7 +279,11 @@ export default function VCenterDetail({ site, onBack }) {
   const [q, setQ] = useState('');            // VM name search (hosts/vms views)
   const [inclNotes, setInclNotes] = useState(false); // 검색 시 VM 메모(vSphere annotation) 포함 여부(v2.293)
   const [inclPoweredOff, setInclPoweredOff] = useState(true); // 트리·검색에 Off VM 포함 여부(기본 포함=기존 동작 유지)
+  const [veeamOn, setVeeamOn] = useState(false); // v2.751: Veeam 백업 VM 표시(배지만 — 목록은 그대로). 기본 꺼짐 — 켤 때만 조회한다
+  const [veeamVm, setVeeamVm] = useState(null); // v2.751: 배지를 눌러 연 Veeam 백업 상세 창의 VM
   const [overview, setOverview] = useState(false); // '전체 현황' 평면 표(모든 클러스터·호스트) 표시 여부
+  const [vmExportOpen, setVmExportOpen] = useState(false); // v2.800 'VM 전체 정보 내보내기' 창(항목·형식·저장값은 그 도구 그대로)
+  const [hostExportOpen, setHostExportOpen] = useState(false); // v2.802 '호스트 · 클러스터 엑셀' 창
   const [dsKind, setDsKind] = useState('');  // datastore storage filter
   const [comparing, setComparing] = useState(false); // vCenter 2개 비교 모드
   const toggle = (k) => setOpen((o) => ({ ...o, [k]: !o[k] }));
@@ -296,9 +309,23 @@ export default function VCenterDetail({ site, onBack }) {
   //   (v2.616 TrendKpis 와 같은 결함). 배지는 장식이라 권한이 없을 때 오류를 표시하지 않는 것이 정상이다(배지 없이 트리만).
   const { data: cloneBadgeD } = usePolling(toolAllowed('vm-clone') ? '/tools/vm-clone/badges' : null, { vcenterId }, 60_000);
   const cloneSet = useMemo(() => new Set(cloneBadgeD?.vmIds || []), [cloneBadgeD]);
-  // v2.747: Bareos VM 백업 대상 — 같은 규칙(도구 권한이 있을 때만 · 실패면 배지 없이 트리만 · 범위 밖은 서버가 빈 목록).
+  // v2.820: Bareos VM 백업 대상 — 같은 규칙(도구 권한이 있을 때만 · 실패면 배지 없이 트리만 · 범위 밖은 서버가 빈 목록).
   const { data: bareosBadgeD } = usePolling(toolAllowed('bareos-backup') ? '/tools/bareos-backup/badges' : null, { vcenterId }, 60_000);
   const bareosSet = useMemo(() => new Set(bareosBadgeD?.vmIds || []), [bareosBadgeD]);
+  // v2.751(사용자 요청 "veeam 백업 VM 표시"): vCenter 와 같은 법인의 Veeam 서버(중앙 직접 또는 그 법인 엣지가 읽음)가 알려 준
+  //   백업 대상·백업 중 VM 에 배지를 붙인다. 켤 때만 60초 폴링(서버는 Veeam 을 주기 수집해 둔 값을 대조만 한다 — Veeam 왕복 없음).
+  const veeamP = usePolling(veeamOn ? '/veeam/badges' : null, { vcenterId }, 60_000);
+  const veeamD = veeamOn ? veeamP.data : null;
+  // 연결된 서버가 있을 때만 배지 표 — 없으면 null(그때는 스냅샷 기준 배지만 — v2.753).
+  const veeamMap = useMemo(() => (veeamD?.configured ? (veeamD.byVm || {}) : null), [veeamD]);
+  // v2.819(사용자 요청 '포탈에서 백업한 VM 은 vCenter 폴더 리스트에서 관리'): 포탈로 백업한 VM 에 'Portal' 배지 — 누르면 관리 창(복원 지점·새 VM 복원·잡에서 빼기·삭제).
+  //   관리자 + 백업 실행 도구 권한일 때만 부른다(그 밖은 403 — 배지는 장식이라 오류를 표시하지 않는다). 로컬 기록이라 가볍다(60초).
+  const canPortal = hasRole('admin') && toolAllowed('backup-run');
+  const { data: portalD } = usePolling(canPortal ? '/tools/backup-run/portal-vms' : null, { vcenterId }, 60_000);
+  const portalMap = useMemo(() => new Map((portalD?.vms || []).map((r) => [r.vmId, r])), [portalD]);
+  const [portalVm, setPortalVm] = useState(null);   // 관리 창을 연 VM id
+  // 폴더 단위 백업 — 그 폴더(하위 포함) VM 을 백업 실행 화면으로 넘긴다(실행은 그 화면에서 미리보기·OTP — 여기서 보내지 않는다).
+  const onFolderBackup = canPortal ? (ids) => { saveHandoff(vcenterId, ids); window.location.hash = '#/tools/backup-run'; } : null;
   const vmsP = usePolling('/vms', { vcenterId, limit: 5000 }, 20_000);
   const dsP = usePolling('/datastores', { vcenterId }, 30_000);
   const netP = usePolling('/networks', { vcenterId }, 30_000);
@@ -317,6 +344,18 @@ export default function VCenterDetail({ site, onBack }) {
   // (가상화율·폴더트리·검색·사용률 대상 수집)가 폴링 틱마다 전부 재계산된다(eslint 경고의 실체).
   const hosts = useMemo(() => hostsD?.items || [], [hostsD]);
   const vms = useMemo(() => vmsD?.items || [], [vmsD]);
+  // ⚠ vms 아래에 둔다(TDZ — 위에 두면 상세 화면이 'Cannot access before initialization' 으로 죽는다. v2.751 Chromium 확인에서 잡음).
+  // 사용자 결정(시안 검토): 체크하면 요약 카드, 체크하지 않으면 요약·배지(스냅샷 기준 포함)까지 Veeam 관련 표시를 하나도 그리지 않는다.
+  // v2.761(D2·D8): VM 목록을 못 받았으면 전체 VM 수·임시 스냅샷 수를 0 으로 단정하지 않는다(vmsOk 일 때만) ·
+  //   첫 응답 뒤 갱신이 실패하면 옛 값을 지우지 않되 '마지막으로 받은 값' 이라고 말한다.
+  const veeamErr = veeamP.errorInfo?.message || veeamP.error || '';
+  const veeamSum = useMemo(() => (veeamOn ? veeamSummary(veeamD, { loading: veeamP.loading, error: veeamD ? '' : veeamErr, refreshError: veeamD ? veeamErr : '', vmTotal: vmsOk ? vms.length : null }) : null),
+    [veeamOn, veeamD, veeamP.loading, veeamErr, vmsOk, vms.length]);
+  // v2.753(사용자 요청 — Veeam 연동 없이 스냅샷으로만): VM 의 'VEEAM BACKUP TEMPORARY SNAPSHOT'(수집기가 veeamSnaps·veeamSnapTs 로 싣는다).
+  const veeamSnapCnt = useMemo(() => (veeamOn && vmsOk ? veeamSnapCounts(vms) : null), [veeamOn, vmsOk, vms]);
+  // v2.754: vCenter 이벤트 기준(최근 7일 Veeam 계정의 스냅샷 생성) — 저장된 이벤트를 읽는 조회라 5분마다만(서버 60초 캐시).
+  const veeamEvP = usePolling(veeamOn ? '/veeam/snap-events' : null, { vcenterId }, 300_000);
+  const veeamEv = veeamOn ? (veeamEvP.data || null) : null;
   // 표시용 VM 목록 — 'Off VM 포함' 해제 시 POWERED_OFF 를 숨긴다. 트리·검색뿐 아니라
   // CPU·MEM 가상화율(할당 vCPU/RAM 합계)도 이 목록을 기준으로 계산한다(v2.334, 사용자 요구 —
   // '꺼진 VM 제외하고 실제로 켜진 부하만 보는' 용도. 전체 기준으로 보려면 체크박스를 켠다).
@@ -378,6 +417,10 @@ export default function VCenterDetail({ site, onBack }) {
 
   // folder path -> vms (vSphere "VMs and Templates")
   const folderTree = useMemo(() => buildFolderTree(visibleVms), [visibleVms]);
+  // v2.792(사용자 요청 "vm 폴더에서 vm list export 할때 Veeam 백업여부 · 백업여부 판단할 수 있는 snapshot 포함여부"): 화면 기준 VM 목록 CSV.
+  //   보이는 VM(검색 중이면 일치 VM)의 id 를 보내고, Veeam·스냅샷 판정은 서버가 '백업 세부내용' 과 같은 코어로 한다(화면에서 판정하지 않는다).
+  //   'Veeam 백업 VM 표시' 체크와 무관하다 — 서버가 그 순간의 값을 읽는다. (검색 matches 는 아래에서 만든다 — 클릭 시점에 읽는다)
+  //   + 엑셀(시안 승인 — 요약 · 폴더 트리 접기 · 데이터(CSV 와 같은 열) · 읽는 법). 본문은 같고 kind 로 형식만 고른다.
 
   // VM 검색(v2.293 확장) — 다단어 OR: 공백으로 나눈 각 토큰이 **하나라도** 포함되면 일치
   // (예: "NTP WA" → 'NTP' 포함 VM + 'WA' 포함 VM 전부). '메모 포함' 체크 시 vm.notes
@@ -556,10 +599,23 @@ export default function VCenterDetail({ site, onBack }) {
               title="해제하면 전원이 꺼진(Power Off) VM을 트리·검색에서 숨기고, VM 수와 CPU·MEM 가상화율을 켜진 VM 기준으로 계산합니다">
               <input type="checkbox" checked={inclPoweredOff} onChange={(e) => setInclPoweredOff(e.target.checked)} /> Off VM 포함
             </label>
+            {/* v2.751 Veeam 백업 VM 표시 — 목록은 그대로 두고 백업 대상·백업 중 VM 행에 배지만 붙인다(숨기는 필터가 아니다). */}
+            <label className="muted flex gap" style={{ alignItems: 'center', fontSize: 12, flex: 'none', cursor: 'pointer' }}
+              title="체크하면 이 vCenter 와 연결된 Veeam 백업 서버가 알려 준 백업 대상 VM 에 'Veeam' 배지를, 지금 백업 중인 VM 에 'Veeam 백업 중' 배지를 붙입니다(목록은 그대로)">
+              <input type="checkbox" checked={veeamOn} onChange={(e) => setVeeamOn(e.target.checked)} /> Veeam 백업 VM 표시
+            </label>
             {query && <span className="muted" style={{ fontSize: 12 }}>{view === 'hosts' && hostMatches.length ? `호스트 ${hostMatches.length} · ` : ''}{matches.length} VM 일치{matches.length > SEARCH_CAP ? ` (처음 ${SEARCH_CAP}개 표시)` : ''}</span>}
             {q && <button className="tab" style={{ flex: 'none', padding: '6px 10px' }} onClick={() => setQ('')}>지우기</button>}
             {/* 전체 현황 / CSV — 트리를 하나하나 펼치지 않고 모든 클러스터·호스트를 한 번에 본다(v2.335).
                 표와 CSV 는 같은 행을 쓰고, 'Off VM 포함' 설정이 가상화율에 그대로 반영된다. */}
+            {view === 'vms' && canCsv() && (
+              <span className="flex gap" style={{ marginLeft: 'auto', flex: 'none', alignItems: 'center' }}>
+                <button className="login-btn" style={{ flex: 'none', padding: '6px 12px' }} disabled={!toolAllowed('vm-export')} onClick={() => setVmExportOpen(true)}
+                  title={toolAllowed('vm-export') ? '이 vCenter 의 VM 을 필요한 항목만 골라 CSV·엑셀로 — 호스트·CPU·메모리·NIC·디스크·게스트 파티션·스냅샷·Tools·태그·메모 등(VM 전체 정보 내보내기). 백업 판단은 Backup 현황 › Detail 의 ‘CSV · 엑셀…’' : 'VM 전체 정보 내보내기 기능 권한이 없습니다'}>
+                  ⤓ VM 전체 정보 내보내기…
+                </button>
+              </span>
+            )}
             {view === 'hosts' && (
               <span className="flex gap" style={{ marginLeft: 'auto', flex: 'none', alignItems: 'center' }}>
                 <button className={overview ? 'login-btn' : 'tab'} style={{ flex: 'none', padding: '6px 12px' }}
@@ -571,9 +627,23 @@ export default function VCenterDetail({ site, onBack }) {
                   title={hostsOk && vmsOk ? '모든 클러스터·호스트의 현황(VM 수·CPU/MEM 사용률·가상화율·할당/물리 자원·ESXi 버전·모델·전력·온도)을 CSV 로 내려받습니다' : '호스트·VM 목록을 아직 받지 못했습니다 — 받은 뒤에 내려받을 수 있습니다(빈 CSV 를 만들지 않습니다)'}>
                   ⤓ CSV
                 </button>}
+                {canCsv() && <button className="login-btn" style={{ flex: 'none', padding: '6px 12px' }} onClick={() => setHostExportOpen(true)}
+                  title="호스트 1대 = 시트 1장 — 요약 · 클러스터 · 호스트 목록 · 호스트마다 기본 · 클러스터 · 구성·보안 점검 · 네트워크 · 스토리지 · 하드웨어 · 최근 재부팅 · VM 목록">
+                  ⤓ 호스트·클러스터 엑셀…
+                </button>}
               </span>
             )}
           </div>
+          {hostExportOpen && (
+            <React.Suspense fallback={null}><HostExportDialog vcenterId={vcenterId} vcName={site?.name || vcenterId} onClose={() => setHostExportOpen(false)} /></React.Suspense>
+          )}
+          {vmExportOpen && (
+            <Modal title={`VM 전체 정보 내보내기 · ${site?.name || vcenterId}`} onClose={() => setVmExportOpen(false)} width={1240}>
+              <React.Suspense fallback={<div className="muted">불러오는 중…</div>}><VmExport scope={vcenterId} embedded /></React.Suspense>
+            </Modal>
+          )}
+          {veeamOn && <VeeamSummaryCard sum={veeamSum} />}
+          {veeamOn && <VeeamSnapSummary counts={veeamSnapCnt} ev={veeamEv} evError={veeamEvP.errorInfo?.message || veeamEvP.error || ''} />}
           {/* VM 기간 실사용률(v2.492, 사용자 요구) — 행에는 할당 사양만 있어 '실제로 얼마나 쓰는지'를
               볼 수 없었다. 기본 30일이고 7~365일을 고를 수 있다. 출처는 vCenter 성능 롤업이며 우리
               DB 에 per-VM 시계열이 없으므로 **펼쳐진 행만** 요청 시 조회한다(요청당 상한 있음). */}
@@ -657,7 +727,7 @@ export default function VCenterDetail({ site, onBack }) {
               ))}
               {matches.slice(0, SEARCH_CAP).map(({ v: vm, viaNotes, token }) => (
                 <Leaf key={vm.id} icon="🧊" onClick={() => setSel({ type: 'vm', item: vm })}
-                  label={<Highlight text={vm.name} tokens={tokens} />} badge={<StateBadge state={vm.powerState} />}
+                  label={<Highlight text={vm.name} tokens={tokens} />} badge={<><StateBadge state={vm.powerState} /><VeeamTag vm={vm} veeam={veeamMap} on={veeamOn} ev={veeamEv} onOpen={setVeeamVm} /><PortalTag vm={vm} map={portalMap} onOpen={setPortalVm} /></>}
                   sub={<>
                     {`🧩 ${vm.cluster || '—'} · 🖥️ ${vm.host || '—'} · 📁 ${vm.folder || 'vm'} · ${vm.cpuCount || 0}vCPU · ${Math.round((vm.memMB || 0) / 1024)}GB · 💾 ${vm.storageGB == null ? '—' : fmtGb(vm.storageGB)}`}
                     {/* 메모로만 걸린 결과 — 어떤 메모 문구에 걸렸는지 스니펫으로 표시(하이라이트 포함) */}
@@ -692,7 +762,7 @@ export default function VCenterDetail({ site, onBack }) {
                     sub={<UsageBars lead={<StateBadge state={h.connectionState} />} cpu={hostUsagePct(h, 'cpuUsagePct')} mem={hostUsagePct(h, 'memUsagePct')} tail={<span className="muted" style={{ fontSize: 12, display: 'inline-flex', gap: 10, alignItems: 'center' }}><span>VM {hostVmCount(h)}</span><VirtBadge alloc={vcpuByHost.get(h.name) || 0} base={h.cpuCores} kind="cpu" /><VirtBadge alloc={vmemByHost.get(h.name) || 0} base={h.memTotalMB} kind="mem" /></span>} />}>
                     {(vmsByHost.get(h.name) || []).map((vm) => (
                       <Leaf key={vm.id} icon="🧊" onClick={() => setSel({ type: 'vm', item: vm })}
-                        label={vm.name} badge={<StateBadge state={vm.powerState} />}
+                        label={vm.name} badge={<><StateBadge state={vm.powerState} /><VeeamTag vm={vm} veeam={veeamMap} on={veeamOn} ev={veeamEv} onOpen={setVeeamVm} /><PortalTag vm={vm} map={portalMap} onOpen={setPortalVm} /></>}
                         sub={<>{`${vm.guestOS} · ${vm.cpuCount}vCPU · ${Math.round(vm.memMB / 1024)}GB`}<VmUsageCell {...usageProps(vm)} /><VmBadges vm={vm} cloneSet={cloneSet} bareosSet={bareosSet} /></>} />
                     ))}
                   </Tree>
@@ -706,7 +776,8 @@ export default function VCenterDetail({ site, onBack }) {
         {view === 'vms' && !query && !vmsOk && gateEl(vmsPart, 'VM 목록')}
         {view === 'vms' && !query && vmsOk && (
           <Node label={`📁 ${site.name} / vm`} defaultOpen sub={`${visibleVms.length} VM`}>
-            <FolderNodes node={folderTree} path="" open={open} toggle={toggle} cloneSet={cloneSet} bareosSet={bareosSet} usageProps={usageProps} onSelect={(vm) => setSel({ type: 'vm', item: vm })} />
+            <FolderNodes node={folderTree} path="" open={open} toggle={toggle} cloneSet={cloneSet} bareosSet={bareosSet} veeamMap={veeamMap} veeamOn={veeamOn} veeamEv={veeamEv} setVeeamVm={setVeeamVm} usageProps={usageProps} onSelect={(vm) => setSel({ type: 'vm', item: vm })}
+              portalMap={portalMap} setPortalVm={setPortalVm} onFolderBackup={onFolderBackup} />
           </Node>
         )}
 
@@ -742,6 +813,8 @@ export default function VCenterDetail({ site, onBack }) {
       </div>
 
       {sel && <EntityDetail type={sel.type} item={sel.item} onClose={() => setSel(null)} />}
+      {veeamVm && <VeeamDetailModal vcenterId={vcenterId} vm={veeamVm} onClose={() => setVeeamVm(null)} />}
+      {portalVm && <React.Suspense fallback={null}><BackupManageModal vmId={portalVm} onClose={() => setPortalVm(null)} /></React.Suspense>}
     </div>
   );
 }
@@ -758,14 +831,14 @@ function Node({ label, sub, children, defaultOpen }) {
     </div>
   );
 }
-function Tree({ k, open, toggle, icon, label, sub, children }) {
+function Tree({ k, open, toggle, icon, label, sub, action, children }) {
   const o = open[k];
   const hasKids = React.Children.count(children) > 0;
   return (
     <div>
       <div className="vcd-node" onClick={() => toggle(k)}>
         <span className="vcd-caret">{hasKids ? (o ? '▾' : '▸') : ''}</span>
-        <span>{icon}</span> <span className="vcd-nlabel">{label}</span> {sub && <span className="vcd-sub">{sub}</span>}
+        <span>{icon}</span> <span className="vcd-nlabel">{label}</span> {sub && <span className="vcd-sub">{sub}</span>} {action}
       </div>
       {o && hasKids && <div className="vcd-children">{children}</div>}
     </div>
@@ -956,7 +1029,7 @@ function Highlight({ text, tokens }) {
   );
 }
 
-function FolderNodes({ node, path, open, toggle, onSelect, cloneSet, bareosSet, usageProps }) {
+function FolderNodes({ node, path, open, toggle, onSelect, cloneSet, bareosSet, veeamMap, veeamOn, veeamEv, setVeeamVm, usageProps, portalMap, setPortalVm, onFolderBackup }) {
   const childFolders = Object.keys(node.folders).sort();
   return (
     <>
@@ -964,10 +1037,12 @@ function FolderNodes({ node, path, open, toggle, onSelect, cloneSet, bareosSet, 
         const key = `f:${path}/${name}`;
         const f = node.folders[name];
         return (
-          <Tree key={key} k={key} open={open} toggle={toggle} icon="📁" label={name} sub={`${f.count} VM`}>
-            <FolderNodes node={f} path={`${path}/${name}`} open={open} toggle={toggle} cloneSet={cloneSet} bareosSet={bareosSet} usageProps={usageProps} onSelect={onSelect} />
+          <Tree key={key} k={key} open={open} toggle={toggle} icon="📁" label={name} sub={`${f.count} VM`}
+            action={onFolderBackup ? <FolderBackupBtn node={f} name={name} onGo={onFolderBackup} /> : null}>
+            <FolderNodes node={f} path={`${path}/${name}`} open={open} toggle={toggle} cloneSet={cloneSet} bareosSet={bareosSet} veeamMap={veeamMap} veeamOn={veeamOn} veeamEv={veeamEv} setVeeamVm={setVeeamVm} usageProps={usageProps} onSelect={onSelect}
+              portalMap={portalMap} setPortalVm={setPortalVm} onFolderBackup={onFolderBackup} />
             {f.vms.map((vm) => (
-              <Leaf key={vm.id} icon="🧊" onClick={() => onSelect(vm)} label={vm.name} badge={<StateBadge state={vm.powerState} />}
+              <Leaf key={vm.id} icon="🧊" onClick={() => onSelect(vm)} label={vm.name} badge={<><StateBadge state={vm.powerState} /><VeeamTag vm={vm} veeam={veeamMap} on={veeamOn} ev={veeamEv} onOpen={setVeeamVm} /><PortalTag vm={vm} map={portalMap} onOpen={setPortalVm} /></>}
                 sub={<>{`${vm.guestOS} · ${vm.cpuCount}vCPU · ${Math.round(vm.memMB / 1024)}GB`}<VmUsageCell {...usageProps(vm)} /><VmBadges vm={vm} cloneSet={cloneSet} bareosSet={bareosSet} /></>} />
             ))}
           </Tree>
@@ -1000,21 +1075,45 @@ export const tb = (g) => {
 };
 
 /**
- * VM 행 배지(v2.299): Clone = 이 포탈의 복제(백업) 잡 대상 · Bareos = Bareos VM 백업 대상(v2.747) · veeamed = Veeam 백업 흔적.
- * veeamed 는 **휴리스틱**이다 — Veeam 이 기본 설정에서 백업 시각을 VM 메모(vSphere notes)에
- * 기록하는 동작을 근거로 vm.notes 의 'veeam' 문자열을 탐지한다. Veeam 쪽에서 메모 기록을
- * 꺼둔 환경에서는 표시되지 않는다(정직 표기 — 툴팁에 명시).
+ * VM 행 배지(v2.299): Clone = 이 포탈의 복제(백업) 잡 대상 · Bareos = Bareos VM 백업 대상(v2.820).
+ * v2.751: Veeam 배지는 VeeamTag(VeeamParts.jsx)가 전원 배지 옆(badge 칸)에 그린다 — 보조 줄(sub)은 좁은 화면(400px)에서 말줄임으로 잘린다.
+ * v2.753(사용자 지시 '메모는 참고하지 말고 스냅샷으로만'): VM 메모의 'veeam' 글자로 붙이던 veeamed 휴리스틱을 없앴다 —
+ *   연동 없는 Veeam 표시는 vCenter 스냅샷 이름(VeeamTag 의 📸 점선 배지)만 쓴다.
  */
+/** v2.819 포탈 백업 배지 — 포탈로 백업한 VM 에만. 누르면 관리 창(행 클릭의 VM 상세는 열지 않는다). 글자·색은 backupRunText.portalMark(순수). */
+function PortalTag({ vm, map, onOpen }) {
+  const m = portalMark(map?.get(vm.id));
+  if (!m) return null;
+  return (
+    <button type="button" className={`badge ${m.cls}`} title={`${m.title} — 눌러서 복원 지점·새 VM 복원·잡에서 빼기·삭제`}
+      onClick={(e) => { e.stopPropagation(); onOpen(vm.id); }} style={{ fontSize: 10, marginLeft: 4, cursor: 'pointer', border: 'none' }}>{m.label}</button>
+  );
+}
+/** 폴더 하위 VM 전부(템플릿 제외) — 백업 실행 화면으로 넘길 id. */
+function folderVmIds(node, out = []) {
+  for (const vm of node.vms) if (vm.template !== true) out.push(vm.id);
+  for (const k of Object.keys(node.folders)) folderVmIds(node.folders[k], out);
+  return out;
+}
+/** v2.819 폴더 단위 '이 폴더 백업' — 백업 실행 화면으로 넘기기만 한다(200대까지 — 넘으면 앞 200대이고 그렇다고 말한다). */
+function FolderBackupBtn({ node, name, onGo }) {
+  const ids = folderVmIds(node);
+  if (!ids.length) return null;
+  const over = ids.length > 200;
+  return (
+    <button type="button" className="logout-btn" style={{ fontSize: 10, padding: '1px 6px', marginLeft: 4 }}
+      title={`'${name}' 폴더(하위 포함)의 VM ${ids.length}대를 백업 실행 화면으로 가져갑니다${over ? ' — 한 번에 200대까지라 앞 200대만' : ''}. 보내기 전에 미리보기·OTP 를 거칩니다.`}
+      onClick={(e) => { e.stopPropagation(); onGo(ids.slice(0, 200)); }}>이 폴더 백업{over ? ' (200대)' : ''}</button>
+  );
+}
 function VmBadges({ vm, cloneSet, bareosSet }) {
   const cloned = cloneSet?.has(vm.id);
-  const bareos = bareosSet?.has(vm.id);
-  const veeamed = /veeam/i.test(vm.notes || '');
-  if (!cloned && !bareos && !veeamed) return null;
+  const bareos = bareosSet?.has(vm.id);   // v2.820 Bareos VM 백업 대상
+  if (!cloned && !bareos) return null;
   return (
     <>
       {cloned && <span className="badge blue" style={{ fontSize: 10, marginLeft: 4 }} title="이 포탈의 VM 복제(백업) 잡 대상 — 특수기능 › VM 복제(백업)">Clone</span>}
       {bareos && <span className="badge blue" style={{ fontSize: 10, marginLeft: 4 }} title="Bareos VM 백업 대상 — 특수기능 › Bareos VM 백업(실행 결과는 그 화면에서 봅니다)">Bareos</span>}
-      {veeamed && <span className="badge green" style={{ fontSize: 10, marginLeft: 4 }} title="VM 메모에 Veeam 백업 기록이 있습니다(휴리스틱 — Veeam 이 메모 기록을 끈 환경에선 표시되지 않음)">veeamed</span>}
     </>
   );
 }

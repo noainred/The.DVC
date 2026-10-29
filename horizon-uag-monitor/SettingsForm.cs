@@ -260,60 +260,17 @@ public sealed class SettingsForm : Form
             using var doc = System.Text.Json.JsonDocument.Parse(json);
             var root = doc.RootElement;
             if (root.ValueKind != System.Text.Json.JsonValueKind.Array) { MessageBox.Show(this, "JSON 최상위가 배열이어야 합니다.", "JSON", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; }
-            var existing = _db.ListEndpoints().ToDictionary(x => Key(x), x => x.Id);
-            int added = 0, updated = 0, sort = _db.ListEndpoints().Count;
-            foreach (var o in root.EnumerateArray())
-            {
-                if (o.ValueKind != System.Text.Json.JsonValueKind.Object) continue;
-                var host = Str(o, "host");
-                if (string.IsNullOrWhiteSpace(host)) continue;
-                var e = new Endpoint
-                {
-                    Name = Str(o, "name", host),
-                    Type = Str(o, "type", "UAG"),
-                    Datacenter = Str(o, "datacenter"),
-                    Scheme = string.Equals(Str(o, "scheme", "https"), "http", StringComparison.OrdinalIgnoreCase) ? "http" : "https",
-                    Host = host,
-                    Port = ClampPort(Int(o, "port", 443)),
-                    Path = NormPath(Str(o, "path", "/")),
-                    MatchText = Str(o, "matchText"),
-                    City = Str(o, "city"),
-                    Region = Str(o, "region"),
-                    Lat = Dbl(o, "lat", 0),
-                    Lon = Dbl(o, "lon", 0),
-                    IntervalSec = Math.Max(5, Int(o, "intervalSec", 60)),
-                    TimeoutMs = Math.Max(1000, Int(o, "timeoutMs", 5000)),
-                    Enabled = Bool(o, "enabled", true),
-                };
-                if (existing.TryGetValue(Key(e), out var id)) { e.Id = id; updated++; }
-                else { e.Id = 0; e.Sort = sort++; added++; }
-                _db.UpsertEndpoint(e);
-            }
+            // v2.768(점검 R3-C3-2): 판정은 EndpointImport(순수 — tests/EndpointImportTests.cs). 갱신은 파일에 있는 칸만·sort 유지,
+            // 파일 안 같은 키는 한 번만, DB 의 중복 키에도 예외 없이 동작한다.
+            var plan = EndpointImport.Build(root, _db.ListEndpoints());
+            foreach (var e in plan.Upserts) _db.UpsertEndpoint(e);
+            int added = plan.Added, updated = plan.Updated;
             LoadList();
-            MessageBox.Show(this, $"가져오기 완료 — 추가 {added}건, 갱신 {updated}건", "JSON", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            var dupNote = plan.DuplicatesInFile > 0 ? $"\n(파일 안 같은 대상 {plan.DuplicatesInFile}건은 처음 것만 반영)" : "";
+            MessageBox.Show(this, $"가져오기 완료 — 추가 {added}건, 갱신 {updated}건{dupNote}", "JSON", MessageBoxButtons.OK, MessageBoxIcon.Information);
         }
         catch (Exception ex) { MessageBox.Show(this, $"가져오기 실패:\n{ex}", "JSON 오류", MessageBoxButtons.OK, MessageBoxIcon.Error); }
     }
-
-    private static int ClampPort(int p) => p is >= 1 and <= 65535 ? p : 443;
-    private static string NormPath(string p) => string.IsNullOrWhiteSpace(p) ? "/" : p;
-    private static string Key(Endpoint e) => $"{e.Name}|{e.Host}|{e.Port}".ToLowerInvariant();
-
-    // JsonElement에서 대소문자 무시로 값 읽기(수동 파싱, 리플렉션 불필요).
-    private static bool TryProp(System.Text.Json.JsonElement o, string name, out System.Text.Json.JsonElement v)
-    {
-        foreach (var p in o.EnumerateObject())
-            if (string.Equals(p.Name, name, StringComparison.OrdinalIgnoreCase)) { v = p.Value; return true; }
-        v = default; return false;
-    }
-    private static string Str(System.Text.Json.JsonElement o, string name, string def = "")
-        => TryProp(o, name, out var v) && v.ValueKind == System.Text.Json.JsonValueKind.String ? (v.GetString() ?? def) : def;
-    private static int Int(System.Text.Json.JsonElement o, string name, int def)
-        => TryProp(o, name, out var v) && v.ValueKind == System.Text.Json.JsonValueKind.Number && v.TryGetInt32(out var n) ? n : def;
-    private static double Dbl(System.Text.Json.JsonElement o, string name, double def)
-        => TryProp(o, name, out var v) && v.ValueKind == System.Text.Json.JsonValueKind.Number && v.TryGetDouble(out var n) ? n : def;
-    private static bool Bool(System.Text.Json.JsonElement o, string name, bool def)
-        => TryProp(o, name, out var v) ? v.ValueKind == System.Text.Json.JsonValueKind.True || (v.ValueKind != System.Text.Json.JsonValueKind.False && def) : def;
 
     private void Save()
     {

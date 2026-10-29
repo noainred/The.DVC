@@ -21,16 +21,20 @@ import { pipeline } from 'node:stream/promises';
 import { Readable } from 'node:stream';
 import { VimSoapClient } from '../vcenter/soapClient.js';
 import { vcDispatcher } from '../vcenter/restClient.js';
+import { trimTrailingSlashes } from '../util/trimSlashes.js'; // v2.793: '/\/+$/' 는 O(n²) — 루프로 뗀다(CLAUDE.md 정규식 규약)
 
 const esc = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&apos;');
 
 /** 태스크 완료 대기(dsBrowse 패턴) — success 면 result MoRef 문자열(있으면), error 면 throw. */
-export async function waitTask(c, taskRef, { timeoutMs = 4 * 3600_000, pollMs = 5_000, label = '작업' } = {}) {
+// v2.795: onProgress(퍼센트 0~100) — 실행 상태 문구에 진행률을 싣는다(표시용 — 던져도 태스크 대기는 계속한다).
+export async function waitTask(c, taskRef, { timeoutMs = 4 * 3600_000, pollMs = 5_000, label = '작업', onProgress = null } = {}) {
   const t0 = Date.now();
   for (;;) {
     const objs = await c.retrieveObjectProps('Task', taskRef, ['info.state', 'info.result', 'info.error.localizedMessage', 'info.progress']);
     const p = objs[0]?.props || {};
     const state = p['info.state'] || '';
+    const pct = p['info.progress'] == null || p['info.progress'] === '' ? null : Number(p['info.progress']);
+    if (onProgress && state === 'running' && Number.isFinite(pct)) { try { onProgress(Math.max(0, Math.min(100, Math.round(pct)))); } catch { /* 표시용 */ } }
     if (state === 'success') return { result: p['info.result'] || null, progress: 100 };
     if (state === 'error') throw new Error(`${label} 실패: ${p['info.error.localizedMessage'] || 'vCenter 태스크 오류'}`);
     if (Date.now() - t0 > timeoutMs) {
@@ -97,11 +101,15 @@ export async function parentFolderOf(c, vmRef) {
  * 스냅샷 시점 클론 → 새 VM MoRef. dsRef 지정 시 다른 데이터스토어로(요구사항 핵심).
  * powerOn=false 고정 — 사본이 켜지면 원본과 IP/호스트명 충돌(복제 Q&A 에서 안내한 리스크).
  */
-export async function cloneFromSnapshot(c, { vmRef, folderRef, name, dsRef = null, snapshotRef = null }) {
+// v2.794: configXml — VirtualMachineConfigSpec 내부(호출부가 만든 XML · 예: nicDisconnectSpec 의 deviceChange). 복구 VM 을 **NIC 가 끊긴 채로 태어나게**
+//   한다 — 클론 뒤에 끊으면 그 사이(클론 태스크 시한 초과로 결과를 못 받은 경우 포함) 연결된 NIC 의 사본이 vCenter 에 생긴다.
+//   vim25 VirtualMachineCloneSpec 순서: location · template · config · customization · powerOn · snapshot · memory.
+export async function cloneFromSnapshot(c, { vmRef, folderRef, name, dsRef = null, snapshotRef = null, configXml = '', onProgress = null }) {
   const spec =
     `<spec>` +
     `<location>${dsRef ? `<datastore type="Datastore">${esc(dsRef)}</datastore>` : ''}</location>` +
     `<template>false</template>` +
+    (configXml ? `<config>${configXml}</config>` : '') +
     `<powerOn>false</powerOn>` +
     (snapshotRef ? `<snapshot type="VirtualMachineSnapshot">${esc(snapshotRef)}</snapshot>` : '') +
     `</spec>`;
@@ -111,7 +119,7 @@ export async function cloneFromSnapshot(c, { vmRef, folderRef, name, dsRef = nul
   );
   const task = taskRefOf(xml);
   if (!task) throw new Error('클론 태스크 제출 실패');
-  const { result } = await waitTask(c, task, { label: `클론(${name})` });
+  const { result } = await waitTask(c, task, { label: `클론(${name})`, onProgress });
   return result; // 새 VM MoRef(문자열) — 보존 원장에 기록
 }
 
@@ -120,7 +128,9 @@ export async function cloneFromSnapshot(c, { vmRef, folderRef, name, dsRef = nul
  * 켜져 있으면(누가 수동으로 켰으면) 삭제하지 않고 오류를 돌려준다 — 백업 사본을 쓰는 중일 수
  * 있는데 자동으로 꺼서 지우는 건 파괴적이다(정직한 실패 > 조용한 강행).
  */
-export async function destroyClone(c, vmRef) {
+// vSphere 는 엔터티 이름의 '/'·'\\'·'%' 를 %2f·%5c·%25 로 바꿔 돌려준다 — 원장 이름과 비교하기 전에 되돌린다.
+const vcNameNorm = (s) => String(s ?? '').replace(/%(2f|5c|25)/gi, (m) => decodeURIComponent(m));
+export async function destroyClone(c, vmRef, { expectedName = '' } = {}) {
   let objs = [];
   // 이미 수동 삭제된 클론 조회는 ManagedObjectNotFound fault 로 throw 될 수 있다 — 그 경우도
   // '원장에서만 제거'로 처리(진짜 통신 오류와 구분: not.?found 계열 메시지일 때만).
@@ -128,6 +138,11 @@ export async function destroyClone(c, vmRef) {
   catch (e) { if (/notfound|not found|managedobject/i.test(String(e.message))) return { gone: true }; throw e; }
   const p = objs[0]?.props || {};
   if (!p.name) return { gone: true }; // 이미 수동 삭제됨 — 원장에서만 제거
+  // v2.767(점검 R2-B3-6): ref 가 원장 이름과 다른 VM 을 가리키면 지우지 않는다 — vCenter 재설치 뒤 같은 vcenterId 로 재등록하면
+  //   MoRef 카운터가 다시 시작해 옛 클론의 ref 가 꺼진 운영 VM 을 가리킬 수 있다. 오류로 돌려 건너뜀으로 보고하고 원장에서는 지우지 않는다.
+  if (expectedName && vcNameNorm(p.name) !== vcNameNorm(expectedName)) {
+    throw new Error(`보존정책 삭제 건너뜀 — 원장의 클론 '${expectedName}' 자리(${vmRef})에 다른 이름의 VM '${p.name}' 이 있습니다(수동 확인 필요)`);
+  }
   if (p['runtime.powerState'] === 'poweredOn') throw new Error(`보존정책 삭제 건너뜀 — 클론 '${p.name}' 이 켜져 있습니다(수동 확인 필요)`);
   const xml = await c.callRaw(`<Destroy_Task xmlns="urn:vim25"><_this type="VirtualMachine">${esc(vmRef)}</_this></Destroy_Task>`);
   const task = taskRefOf(xml);
@@ -206,6 +221,231 @@ export async function downloadDsFile(c, vc, { dcPath, ds, rel, destFile }) {
   fs.mkdirSync(path.dirname(destFile), { recursive: true });
   await pipeline(Readable.fromWeb(res.body), fs.createWriteStream(destFile));
   return fs.statSync(destFile).size;
+}
+
+// ── v2.793 VM 백업 센터 — 검증·복구·ESXi NFS 데이터스토어 ─────────────────────────────────────────────
+
+/** VM 사본 크기(커밋 바이트). 못 읽으면 null — 0 으로 만들지 않는다(util/numOrNull 규약). */
+export async function vmCommittedBytes(c, vmRef) {
+  try {
+    const objs = await c.retrieveObjectProps('VirtualMachine', vmRef, ['summary.storage.committed']);
+    const raw = objs[0]?.props?.['summary.storage.committed'];
+    if (raw == null || raw === '') return null;
+    const n = Number(raw);
+    return Number.isFinite(n) && n >= 0 ? n : null;
+  } catch { return null; }
+}
+
+/** VM 의 이름·전원 상태·장치 XML. 없으면 throw(호출부가 not found 로 다룬다). */
+export async function vmStateOf(c, vmRef) {
+  const objs = await c.retrieveObjectProps('VirtualMachine', vmRef, ['name', 'runtime.powerState', 'config.hardware.device']);
+  const p = objs[0]?.props || {};
+  if (!p.name) throw new Error(`VM 을 찾을 수 없습니다(${vmRef})`);
+  return { name: vcNameNorm(p.name), powerState: p['runtime.powerState'] || '', deviceXml: String(p['config.hardware.device'] || '') };
+}
+
+// NIC 로 취급하는 VirtualDevice 구체 타입 — VirtualEthernetCard 하위 전부(soapParse.js NIC_TYPE_RE 와 같은 집합).
+const NIC_TYPE_RE = /^Virtual(E1000e?|Vmxnet\d?|Vmxnet3Vrdma|PCNet32|SriovEthernetCard)$/i;
+
+/** 장치 XML → NIC 블록 [{type, inner}] (순수). 배열 원소는 `<VirtualDevice xsi:type="구체타입">…</VirtualDevice>` 로 직렬화된다. */
+export function nicBlocksOf(deviceXml) {
+  const out = [];
+  for (const piece of String(deviceXml || '').split(/<VirtualDevice(?=[ >])/).slice(1)) {
+    const type = /^[^>]*xsi:type="([^"]+)"/.exec(piece)?.[1] || '';
+    if (!NIC_TYPE_RE.test(type)) continue;
+    const open = piece.indexOf('>');
+    const close = piece.lastIndexOf('</VirtualDevice>');
+    if (open < 0 || close < open) continue;
+    out.push({ type, inner: piece.slice(open + 1, close) });
+  }
+  return out;
+}
+
+/**
+ * 모든 NIC 를 '연결 끊음 · 켤 때 연결 안 함' 으로 바꾸는 ReconfigVM spec 내부 XML(순수 — 테스트 고정).
+ * 장치는 **읽은 그대로 되돌려 보낸다**(backing 을 비우면 DVS 포트가 풀린다 — provision/reconfig.js 와 같은 이유). connectable 만 바꾼다.
+ * vim25 VirtualDeviceConnectInfo 순서: migrateConnect? · startConnected · allowGuestControl · connected · status?.
+ * @returns {{ specXml: string, count: number }} NIC 가 없으면 count 0, specXml ''.
+ */
+export function nicDisconnectSpec(deviceXml) {
+  const nics = nicBlocksOf(deviceXml);
+  const changes = nics.map(({ type, inner }) => {
+    const guest = /<connectable>[\s\S]*?<allowGuestControl>(true|false)<\/allowGuestControl>/.exec(inner)?.[1] || 'false';
+    const conn = `<connectable><startConnected>false</startConnected><allowGuestControl>${guest}</allowGuestControl><connected>false</connected></connectable>`;
+    let body;
+    if (/<connectable>[\s\S]*?<\/connectable>/.test(inner)) body = inner.replace(/<connectable>[\s\S]*?<\/connectable>/, conn);
+    else if (/<slotInfo[\s>]/.test(inner)) body = inner.replace(/<slotInfo[\s>]/, (m) => `${conn}${m}`);
+    else if (/<controllerKey>/.test(inner)) body = inner.replace('<controllerKey>', `${conn}<controllerKey>`);
+    else body = `${inner}${conn}`;
+    return `<deviceChange><operation>edit</operation><device xsi:type="${esc(type)}">${body}</device></deviceChange>`;
+  });
+  return { specXml: changes.join(''), count: changes.length };
+}
+
+/** 모든 NIC 가 끊겨 있고 켤 때도 연결하지 않는가(순수). NIC 가 없으면 true. */
+export function allNicsDisconnected(deviceXml) {
+  return nicBlocksOf(deviceXml).every(({ inner }) => {
+    const conn = /<connectable>([\s\S]*?)<\/connectable>/.exec(inner)?.[1] || '';
+    return /<connected>false<\/connected>/.test(conn) && /<startConnected>false<\/startConnected>/.test(conn);
+  });
+}
+
+/** ReconfigVM_Task 로 spec 내부 XML 적용. */
+export async function reconfigVm(c, vmRef, specInnerXml, { label = 'VM 재구성' } = {}) {
+  const xml = await c.callRaw(`<ReconfigVM_Task xmlns="urn:vim25"><_this type="VirtualMachine">${esc(vmRef)}</_this><spec>${specInnerXml}</spec></ReconfigVM_Task>`);
+  const task = taskRefOf(xml);
+  if (!task) throw new Error(`${label} 태스크 제출 실패`);
+  await waitTask(c, task, { timeoutMs: 10 * 60_000, pollMs: 2_000, label });
+}
+
+/**
+ * NIC 를 모두 끊고, 다시 읽어 **실제로 끊겼는지 확인**한다. 확인되지 않으면 throw — 호출부는 이 VM 을 켜지 않는다
+ * (원본이 살아 있는 망에 같은 IP·호스트명·AD 컴퓨터 계정으로 붙는 사고를 막는 유일한 문이다).
+ * @returns {Promise<number>} 끊은 NIC 수
+ */
+export async function disconnectAllNics(c, vmRef) {
+  const st = await vmStateOf(c, vmRef);
+  const { specXml, count } = nicDisconnectSpec(st.deviceXml);
+  // v2.794: 이미 끊겨 태어난 VM(복구 — cloneFromSnapshot configXml)은 다시 재구성하지 않는다. 확인(다시 읽기)은 그대로 한다.
+  if (count && !allNicsDisconnected(st.deviceXml)) await reconfigVm(c, vmRef, specXml, { label: '네트워크 카드 연결 끊기' });
+  const after = await vmStateOf(c, vmRef);
+  if (!allNicsDisconnected(after.deviceXml)) throw new Error('네트워크 카드 연결을 끊었는지 확인하지 못했습니다 — 안전을 위해 이 VM 을 켜지 않습니다');
+  return count;
+}
+
+export async function powerOnVm(c, vmRef) {
+  const xml = await c.callRaw(`<PowerOnVM_Task xmlns="urn:vim25"><_this type="VirtualMachine">${esc(vmRef)}</_this></PowerOnVM_Task>`);
+  const task = taskRefOf(xml);
+  if (!task) throw new Error('전원 켜기 태스크 제출 실패');
+  await waitTask(c, task, { timeoutMs: 10 * 60_000, pollMs: 2_000, label: '전원 켜기' });
+}
+
+export async function powerOffVm(c, vmRef) {
+  const xml = await c.callRaw(`<PowerOffVM_Task xmlns="urn:vim25"><_this type="VirtualMachine">${esc(vmRef)}</_this></PowerOffVM_Task>`);
+  const task = taskRefOf(xml);
+  if (!task) throw new Error('전원 끄기 태스크 제출 실패');
+  await waitTask(c, task, { timeoutMs: 10 * 60_000, pollMs: 2_000, label: '전원 끄기' });
+}
+
+/** VMware Tools 가 응답할 때까지 기다린다. 응답하면 걸린 ms, 시한을 넘기면 null. */
+export async function waitToolsRunning(c, vmRef, { timeoutMs = 10 * 60_000, pollMs = 10_000 } = {}) {
+  const t0 = Date.now();
+  for (;;) {
+    const objs = await c.retrieveObjectProps('VirtualMachine', vmRef, ['guest.toolsRunningStatus', 'guest.guestHeartbeatStatus']);
+    const p = objs[0]?.props || {};
+    if (p['guest.toolsRunningStatus'] === 'guestToolsRunning') return Date.now() - t0;
+    if (Date.now() - t0 >= timeoutMs) return null;
+    await new Promise((r) => setTimeout(r, pollMs));
+  }
+}
+
+export async function revertToSnapshot(c, snapRef) {
+  const xml = await c.callRaw(`<RevertToSnapshot_Task xmlns="urn:vim25"><_this type="VirtualMachineSnapshot">${esc(snapRef)}</_this><suppressPowerOn>true</suppressPowerOn></RevertToSnapshot_Task>`);
+  const task = taskRefOf(xml);
+  if (!task) throw new Error('스냅샷 되돌리기 태스크 제출 실패');
+  await waitTask(c, task, { timeoutMs: 30 * 60_000, pollMs: 3_000, label: '스냅샷 되돌리기' });
+}
+
+// ── ESXi NFS 데이터스토어 ──
+// 형식은 system/nfsMounts.js validateMountSpec 과 같은 화이트리스트다(같은 NFS 를 엣지 마운트로도 쓰므로 규칙을 맞춘다).
+const RE_NFS_SERVER = /^[A-Za-z0-9][A-Za-z0-9._-]{0,253}$/;
+const RE_NFS_EXPORT = /^\/[A-Za-z0-9._/-]{0,500}$/;
+const RE_DS_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,41}$/;   // vSphere 데이터스토어 이름 상한 42자
+
+/** NFS 데이터스토어 정의 검증(순수). 통과하면 정규화 값, 아니면 throw. */
+export function validateNfsDsSpec({ name, server, exportPath, nfsVersion } = {}) {
+  const n = String(name ?? '').trim();
+  const s = String(server ?? '').trim();
+  const e = String(exportPath ?? '').trim();
+  const v = String(nfsVersion ?? '3').trim() === '4.1' ? '4.1' : '3';
+  if (!RE_DS_NAME.test(n)) throw new Error('데이터스토어 이름 형식 오류 — 영숫자로 시작하고 영숫자·. _ - 만, 42자까지');
+  if (!RE_NFS_SERVER.test(s)) throw new Error('NFS 서버 형식 오류 — 호스트명/IP 만(공백·특수문자 불가, 선행 - 불가)');
+  if (!RE_NFS_EXPORT.test(e) || e.split('/').includes('..')) throw new Error("export 경로 형식 오류 — '/'로 시작하는 절대경로, '..' 금지");
+  return { name: n, server: s, exportPath: e, nfsVersion: v };
+}
+
+/** CreateNasDatastore 요청 XML(순수). vim25 HostNasVolumeSpec 순서: remoteHost · remotePath · localPath · accessMode · type · … · remoteHostNames · securityType. */
+export function nasDatastoreXml(dsSysRef, spec) {
+  const s = validateNfsDsSpec(spec);
+  const v41 = s.nfsVersion === '4.1';
+  return `<CreateNasDatastore xmlns="urn:vim25"><_this type="HostDatastoreSystem">${esc(dsSysRef)}</_this><spec>` +
+    `<remoteHost>${esc(s.server)}</remoteHost><remotePath>${esc(s.exportPath)}</remotePath><localPath>${esc(s.name)}</localPath>` +
+    `<accessMode>readWrite</accessMode><type>${v41 ? 'NFS41' : 'NFS'}</type>` +
+    (v41 ? `<remoteHostNames>${esc(s.server)}</remoteHostNames><securityType>AUTH_SYS</securityType>` : '') +
+    `</spec></CreateNasDatastore>`;
+}
+
+/**
+ * 호스트 1대에 NFS 데이터스토어를 붙인다. 이미 같은 이름이 있으면 그 데이터스토어가 **같은 NFS** 를 가리킬 때만 성공으로 본다
+ * (이름만 같고 다른 저장소면 실패 — 백업이 엉뚱한 곳에 써지지 않게).
+ * @returns {Promise<{ok:boolean, detail:string, already?:boolean}>}
+ */
+export async function attachNasToHost(c, hostRef, spec) {
+  const s = validateNfsDsSpec(spec);
+  const objs = await c.retrieveObjectProps('HostSystem', hostRef, ['name', 'configManager.datastoreSystem', 'datastore']);
+  const p = objs[0]?.props || {};
+  const dsSys = p['configManager.datastoreSystem'];
+  if (!dsSys || dsSys.includes('<')) return { ok: false, detail: '호스트의 데이터스토어 시스템을 찾지 못했습니다' };
+  // 같은 이름이 이미 붙어 있는가
+  const refs = [...String(p.datastore || '').matchAll(/<ManagedObjectReference type="Datastore">([^<]+)<\/ManagedObjectReference>/g)].map((m) => m[1]);
+  if (refs.length) {
+    const many = await c.retrieveManyObjectProps('Datastore', refs, ['name']);
+    const hit = many.find((o) => vcNameNorm(o.props?.name) === s.name);
+    if (hit) {
+      const info = (await c.retrieveObjectProps('Datastore', hit.ref, ['info']))[0]?.props?.info || '';
+      const rh = /<remoteHost>([^<]*)<\/remoteHost>/.exec(info)?.[1] || /<remoteHostNames>([^<]*)<\/remoteHostNames>/.exec(info)?.[1] || '';
+      const rp = /<remotePath>([^<]*)<\/remotePath>/.exec(info)?.[1] || '';
+      if (rh === s.server && trimTrailingSlashes(rp.slice(0, 600)) === trimTrailingSlashes(s.exportPath)) return { ok: true, already: true, detail: '이미 같은 NFS 로 연결돼 있습니다' };
+      return { ok: false, detail: `같은 이름의 다른 데이터스토어가 있습니다(${rh || '?'}:${rp || '?'}) — 이름을 바꾸세요` };
+    }
+  }
+  try {
+    await c.callRaw(nasDatastoreXml(dsSys, s));
+    return { ok: true, detail: '연결했습니다' };
+  } catch (e) {
+    return { ok: false, detail: String(e?.message || e).slice(0, 300) };
+  }
+}
+
+/**
+ * v2.794 — 호스트 1대에서 NFS 데이터스토어를 떼어 낸다(HostDatastoreSystem.RemoveDatastore). 안전 규칙:
+ *  · 이름이 같아도 **같은 NFS**(서버·경로)를 가리킬 때만 뗀다 — 이름만 같은 다른 저장소를 떼지 않는다.
+ *  · **이 호스트에 등록된 VM 이 그 데이터스토어를 쓰면 떼지 않는다**(백업 사본·복구 VM 이 접근 불가가 된다) — 개수와 이름 몇 개를 알려 준다.
+ *  · 이미 붙어 있지 않으면 성공(already)으로 본다.
+ * @returns {Promise<{ok:boolean, detail:string, already?:boolean}>}
+ */
+export async function detachNasFromHost(c, hostRef, spec) {
+  const s = validateNfsDsSpec(spec);
+  const objs = await c.retrieveObjectProps('HostSystem', hostRef, ['name', 'configManager.datastoreSystem', 'datastore']);
+  const p = objs[0]?.props || {};
+  const dsSys = p['configManager.datastoreSystem'];
+  if (!dsSys || dsSys.includes('<')) return { ok: false, detail: '호스트의 데이터스토어 시스템을 찾지 못했습니다' };
+  const refs = [...String(p.datastore || '').matchAll(/<ManagedObjectReference type="Datastore">([^<]+)<\/ManagedObjectReference>/g)].map((m) => m[1]);
+  const many = refs.length ? await c.retrieveManyObjectProps('Datastore', refs, ['name']) : [];
+  const hit = many.find((o) => vcNameNorm(o.props?.name) === s.name);
+  if (!hit) return { ok: true, already: true, detail: '이 호스트에는 연결돼 있지 않습니다' };
+  const dp = (await c.retrieveObjectProps('Datastore', hit.ref, ['info', 'vm']))[0]?.props || {};
+  const info = String(dp.info || '');
+  const rh = /<remoteHost>([^<]*)<\/remoteHost>/.exec(info)?.[1] || /<remoteHostNames>([^<]*)<\/remoteHostNames>/.exec(info)?.[1] || '';
+  const rp = /<remotePath>([^<]*)<\/remotePath>/.exec(info)?.[1] || '';
+  if (rh !== s.server || trimTrailingSlashes(rp.slice(0, 600)) !== trimTrailingSlashes(s.exportPath)) {
+    return { ok: false, detail: `같은 이름의 다른 데이터스토어(${rh || '?'}:${rp || '?'})라 떼어 내지 않았습니다` };
+  }
+  const vmRefs = [...String(dp.vm || '').matchAll(/<ManagedObjectReference type="VirtualMachine">([^<]+)<\/ManagedObjectReference>/g)].map((m) => m[1]).slice(0, 2000);
+  if (vmRefs.length) {
+    const vms = await c.retrieveManyObjectProps('VirtualMachine', vmRefs, ['name', 'runtime.host']);
+    const here = vms.filter((v) => String(v.props?.['runtime.host'] || '') === String(hostRef));
+    if (here.length) {
+      const names = here.slice(0, 3).map((v) => vcNameNorm(v.props?.name || v.ref)).join(', ');
+      return { ok: false, detail: `이 호스트의 VM ${here.length}대가 이 데이터스토어를 씁니다(${names}${here.length > 3 ? ' 외' : ''}) — 사본을 옮기거나 지운 뒤 떼어 내세요` };
+    }
+  }
+  try {
+    await c.callRaw(`<RemoveDatastore xmlns="urn:vim25"><_this type="HostDatastoreSystem">${esc(dsSys)}</_this><datastore type="Datastore">${esc(hit.ref)}</datastore></RemoveDatastore>`);
+    return { ok: true, detail: '떼어 냈습니다' };
+  } catch (e) {
+    return { ok: false, detail: String(e?.message || e).slice(0, 300) };
+  }
 }
 
 export { VimSoapClient };

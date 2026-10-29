@@ -6,7 +6,7 @@
  * 숫자(상한·기간)는 서버가 준 값만 쓴다(문구에 박지 않는다 — v2.509 규약). 백틱·별표 금지(BoldText 규약).
  */
 import { numOrNull } from '../numOrNull.js';
-import { notCollectedNote, notCollectedItems } from './eventCoverageText.js'; // v2.733(C1-01)
+import { notCollectedNote, notCollectedItems, laggingNote } from './eventCoverageText.js'; // v2.733(C1-01) · v2.772(Z4-2)
 
 const nf = new Intl.NumberFormat('ko-KR');
 const num = numOrNull;   // 읽지 못한 값은 0 이 아니라 null(웹 numOrNull 하나 — v2.618 ARCH-6 사본 금지)
@@ -67,4 +67,13 @@ export function notCollectedLoginNote(notCollected) {
 export function kpiValueText(v) {
   const n = num(v);
   return n == null ? '—' : nf.format(n);
+}
+
+/**
+ * v2.772(Z4-2): 수집은 하지만 뒤처진 vCenter(따라잡는 중 포함) 안내 — 서버 lagging. 그 vCenter 의 수집이 끝난 시각 뒤 로그인 실패는
+ * 이 분석·주기 감시(알림)가 아직 보지 못했다(브루트포스가 그 사이에 있었어도 0건으로 보인다). 없거나 판정 못 함(null)이면 ''.
+ */
+export function laggingLoginNote(lagging) {
+  const base = laggingNote(lagging, { what: '로그인 실패' });
+  return base ? `${base} 그 사이의 브루트포스는 따라잡은 뒤에야 보이고, 활성 공격 알림은 최근 활성창 기준이라 늦게 들어온 실패로는 울리지 않습니다.` : '';
 }

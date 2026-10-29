@@ -112,3 +112,78 @@ describe('화면별 — 0건·정상 대신 말한다', () => {
     expect(vcLogNotCollectedText({})).toBe('');
   });
 });
+
+/*
+ * v2.772(bughunt4 Z4 — 그룹 G3): '수집은 하지만 뒤처진 vCenter'(따라잡는 중 포함) 문구. 서버 판정은 server/src/logs/coverage.js
+ * (서버 테스트 evlog2772c — 웹 lagDurText 와 서버 eventLagText 를 같은 입력으로 대조한다).
+ */
+describe('v2.772 Z4 — 수집이 뒤처진 vCenter 를 0건·정상·미보호에 섞지 않는다', async () => {
+  const { lagDurText, laggingNote } = await import('./eventCoverageText.js');
+  const { laggingLoginNote } = await import('./loginFailsText.js');
+  const { changeScanNote } = await import('./toolsReportText.js');
+  const { vmHistoryLagText, HISTORY_STALE_MS } = await import('./vmchanges/vmChangesText.js');
+  const { coverageNote: availNote, tailCutText } = await import('./bizreport/availText.js');
+  const H = 3_600_000;
+  const LAG = [{ vcenterId: 'oc2s', okAt: 1, lagMs: 94 * H, name: 'OC2Sandbox' }, { vcenterId: 'oc2', lagMs: 232 * H }];
+
+  it('lagDurText — 분·시간·일 · 못 읽은 값은 빈 문자열(0분이 아니다)', () => {
+    expect(lagDurText(94 * H)).toBe('3일 22시간');
+    expect(lagDurText(5 * H)).toBe('5시간');
+    expect(lagDurText(48 * H)).toBe('2일');
+    expect(lagDurText(40 * 60_000)).toBe('40분');
+    expect(lagDurText(null)).toBe('');
+    expect(lagDurText('')).toBe('');
+  });
+
+  it('laggingNote — 뒤처진 vCenter 와 지연 · 이 기간 결과는 일부 · 없거나 판정 못 함(null)이면 빈 문자열', () => {
+    const n = laggingNote(LAG, { what: '오류' });
+    expect(n).toContain('이벤트 수집이 뒤처진 vCenter 2곳(따라잡는 중 포함)');
+    expect(n).toContain('OC2Sandbox 3일 22시간 뒤처짐');
+    expect(n).toContain('oc2 9일 16시간 뒤처짐');
+    expect(n).toContain('이 기간 결과는 일부입니다');
+    expect(laggingNote([])).toBe('');
+    expect(laggingNote(null)).toBe('');
+    expect(n).not.toMatch(/[`*]/);
+  });
+
+  it('로그인 실패 — 뒤처진 vCenter 는 감시가 아직 보지 못했다고 말한다', () => {
+    const n = laggingLoginNote(LAG);
+    expect(n).toContain('로그인 실패 기록은 아직 받지 못해');
+    expect(n).toContain('브루트포스');
+    expect(laggingLoginNote(undefined)).toBe('');
+  });
+
+  it('미보호 VM — collect-lag 사유와 지연 vCenter', () => {
+    const n = undeterminedNote({ undeterminedCount: 1, undeterminedByReason: { 'collect-lag': 1 }, laggingVcenters: [{ vcenterId: 'oc2s', okAt: 1, lagMs: 94 * H, vms: 1 }] });
+    expect(n).toContain('이벤트 수집이 뒤처진 vCenter(따라잡는 중 포함)');
+    expect(n).toContain('수집이 뒤처진 vCenter: oc2s(3일 22시간 뒤처짐)');
+    expect(n).not.toContain('collect-lag');
+  });
+
+  it('구성 변경 이력 — 상한에 닿으면 실제로 훑은 범위를 말하고 기간을 줄이라고 하지 않는다', () => {
+    const n = changeScanNote({ truncated: true, scanned: 20000, scanMax: 20000, scannedFrom: 1000, scannedTo: 2000 }, (t) => `T${t}`);
+    expect(n).toContain('최신 20,000행');
+    expect(n).toContain('T1000 ~ T2000 만 봤습니다');
+    expect(n).not.toContain('기간을 줄이세요');
+    expect(changeScanNote({ truncated: false, scanned: 10 })).toBe(null);
+    expect(changeScanNote({ truncated: true, scanned: 20000 })).not.toContain('~');   // 시각을 모르면 범위를 지어내지 않는다
+    const src = fs.readFileSync(path.resolve(here, 'ToolsReports.jsx'), 'utf8');
+    expect(src).not.toContain('기간을 줄이세요');
+  });
+
+  it('VM 상세 이력 — 서버 lagging 이 있으면 그것, 없으면 마지막 이벤트가 2일 넘게 지났을 때만', () => {
+    const now = 100 * 24 * H;
+    expect(vmHistoryLagText({ lagging: { okAt: 1, lagMs: 94 * H }, items: [] }, now)).toContain('3일 22시간 뒤처져');
+    expect(vmHistoryLagText({ lastTs: now - HISTORY_STALE_MS - H, items: [] }, now)).toContain('2일 1시간 전');
+    expect(vmHistoryLagText({ lastTs: now - H, items: [] }, now)).toBe(null);
+    expect(vmHistoryLagText({ lastTs: null, items: [] }, now)).toBe(null);
+    expect(vmHistoryLagText({ notCollected: 'site', lastTs: 1, items: [] }, now)).toBe(null);   // 다른 문장이 말한다
+  });
+
+  it('VM 가용성 — 꼬리를 자른 vCenter 를 \'멈춘\' 으로 단정하지 않는다(따라잡는 중 포함)', () => {
+    const n = availNote({ coverage: { staleTail: 2, tailVcenters: 1 } });
+    expect(n).toContain('이벤트 수집이 멈췄거나 뒤처진(따라잡는 중 포함) vCenter 1곳');
+    expect(n).not.toContain('수집이 멈춘 vCenter');
+    expect(tailCutText({ tailCut: true, windowTo: 5 }, () => 'T')).toBe('수집 멈춤·지연 — T 까지만 잼');
+  });
+});

@@ -10,6 +10,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
+import net from 'node:net';
 import { config } from '../config.js';
 import { ipBlockReason, ssrfBlockReason } from '../collector/registry.js'; // v2.537: proxyHost 차단 대역 검사 · v2.631 AX3-02: 배포 주소도
 import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
@@ -339,20 +340,52 @@ const PROTO_PORT = { ssh: 22, rdp: 3389, nsx: 443 }; // nsx = HTTPS API(TCP 패�
 // (remote.js /probe의 SAFE_HOST와 동일 규칙 — 생성 경로에도 반드시 적용.)
 const SAFE_TARGET_HOST = /^[A-Za-z0-9._:][A-Za-z0-9._:-]*$/;
 
+/*
+ * v2.770(점검 R5-E5-4): 포트는 정수 1~65535 만 — 예전 'Number(x) || 기본' 은 70000·-1·1.5 를 그대로 저장해 HAProxy 블록에
+ *   'server target 10.0.0.5:70000'·'bind *:-3' 이 들어갔고, SSH 자동배포는 프록시의 전 매핑을 한 블록으로 검증(haproxy -c)하므로
+ *   그 한 줄 때문에 **그 프록시의 이후 모든 배포가 실패**했다. 대상 호스트의 ':' 는 IPv6(net.isIP===6)일 때만 허용한다 —
+ *   '10.0.0.5:2222' 는 haproxyAddress(v2.603)가 IPv6 로 오인해 'ipv6@10.0.0.5:2222:22' 를 만들었다. IPv6 경로는 그대로 둔다.
+ * 빈 값(undefined·null·'')은 '미지정'(기본 포트·자동 배정)이고, 값이 있는데 틀리면 NaN(거부)이다.
+ */
+export function mappingPortOf(v) {
+  if (v === undefined || v === null || (typeof v === 'string' && v.trim() === '')) return undefined;
+  const n = numOrNull(v);
+  return Number.isInteger(n) && n >= 1 && n <= 65535 ? n : NaN;
+}
+export function targetHostFormatIssue(targetHost) {
+  const h = String(targetHost ?? '');
+  if (!h) return '대상 호스트(IP)를 입력하세요.';
+  if (!SAFE_TARGET_HOST.test(h) || h.length > 255) return '대상 호스트 형식이 올바르지 않습니다(IP/호스트명만, 공백·특수문자 불가).';
+  if (h.includes(':') && net.isIP(h) !== 6) return '대상 호스트 형식이 올바르지 않습니다(\':\' 는 IPv6 주소에만 쓸 수 있습니다 — 포트는 포트 칸에 넣으세요).';
+  return null;
+}
+/** 저장된 매핑이 HAProxy 블록에 들어갈 수 있는가(배포 블록 생성이 깨진 예전 매핑을 건너뛰는 데 쓴다). 사유 또는 null. */
+export function mappingConfigIssue(m) {
+  const hostBad = targetHostFormatIssue(m?.targetHost);
+  if (hostBad) return hostBad;
+  if (!(mappingPortOf(m?.targetPort) >= 1)) return `대상 포트(${String(m?.targetPort).slice(0, 20)})가 1~65535 정수가 아닙니다.`;
+  if (!(mappingPortOf(m?.publicPort) >= 1)) return `공개 포트(${String(m?.publicPort).slice(0, 20)})가 1~65535 정수가 아닙니다.`;
+  return null;
+}
+
 export function addMapping({ name, vcenterId, protocol, targetHost, targetPort, publicPort, proxyId, owner, ephemeral } = {}) {
   const c = load();
   protocol = PROTO_PORT[protocol] ? protocol : 'ssh';
-  targetPort = Number(targetPort) || PROTO_PORT[protocol];
-  targetHost = String(targetHost || '').trim();
-  if (!targetHost) return { ok: false, reason: '대상 호스트(IP)를 입력하세요.' };
-  if (!SAFE_TARGET_HOST.test(targetHost) || targetHost.length > 255) {
-    return { ok: false, reason: '대상 호스트 형식이 올바르지 않습니다(IP/호스트명만, 공백·특수문자 불가).' };
+  {
+    const tp = mappingPortOf(targetPort);
+    if (Number.isNaN(tp)) return { ok: false, reason: '대상 포트는 1~65535 사이의 정수여야 합니다.' };
+    targetPort = tp ?? PROTO_PORT[protocol];
   }
+  targetHost = String(targetHost || '').trim();
+  { const bad = targetHostFormatIssue(targetHost); if (bad) return { ok: false, reason: bad }; }
+  const pubIn = mappingPortOf(publicPort);
+  if (Number.isNaN(pubIn)) return { ok: false, reason: '공개 포트는 1~65535 사이의 정수여야 합니다.' };
   // 표시 이름은 HAProxy 설정 주석(`# <name>`)에 들어가므로 개행/제어문자를 제거(설정 구조 보호).
   name = name != null ? String(name).replace(/[\r\n\t]/g, ' ').slice(0, 120) : name;
   const proxy = proxyId ? getProxyById(proxyId) : resolveProxy(vcenterId);
   const pid = proxy.id;
-  publicPort = Number(publicPort) || nextPublicPort(pid, proxy.publicPortBase);
+  publicPort = pubIn ?? nextPublicPort(pid, proxy.publicPortBase);
+  if (!(publicPort >= 1 && publicPort <= 65535)) return { ok: false, reason: `프록시 '${proxy.name}'에 배정할 공개 포트가 남아 있지 않습니다(1~65535).` };
   if (c.mappings.some((m) => (m.proxyId || 'default') === pid && m.publicPort === publicPort)) {
     return { ok: false, reason: `프록시 '${proxy.name}'에서 공개 포트 ${publicPort} 가 이미 사용 중입니다.` };
   }

@@ -149,14 +149,16 @@ test('DEV-02 ①-b SAN: 예산 끝 무렵에 시작한 명령은 남은 시간�
   // ⚠ 이 파일의 축척(명령 시한 1초)에서는 남은 시간으로 줄인 시한이 1초 아래가 되는데, sshExec 가 exec 시한을 1초 아래로
   //   내리지 않는다(execTimeoutMs 하한). 그래서 줄인 효과가 보이지 않는다 — 명령 시한 4초인 자식 프로세스에서 잰다.
   //   자식은 동기 실행(execFileSync)이면 가짜 서버(이 프로세스)가 멈추므로 비동기로 띄운다.
+  //   v2.809(불안정 수정 — 2026-10-27 release CI 실패 'cfgshow 가 시작되지 않았다'): 부하가 걸린 러너에서 cfgshow 앞의 빠른 명령 약 10개가
+  //   예산 3초를 다 써 cfgshow 에 닿지 못했다(이 검증의 전제 붕괴). 장비가 가진 명령을 switchshow·cfgshow·lsan 으로 좁혀 앞 명령을 없앤다.
   const srv = await fakeSsh((c) => {
     if (c === 'echo $PATH') return '/fabos/bin\n';
-    if (c.startsWith('ls ')) return SAN_CMDS.split(' ').join('\n') + '\n';
+    if (c.startsWith('ls ')) return 'switchshow\ncfgshow\nlsan\n';
     if (SAN_SLOW.has(c)) return null;
     return c === 'switchshow' ? SWITCHSHOW : `${c} output\n`;
   });
   try {
-    const BUDGET = 3_000;   // 앞 명령 약 1.2초 → cfgshow 는 남은 약 1.8초만 기다려야 한다. 명령 시한(4초)을 다 기다리면 약 5초.
+    const BUDGET = 3_000;   // 앞 명령(접속·switchshow) 뒤 cfgshow 는 남은 시간만 기다려야 한다. 명령 시한(4초)을 다 기다리면 4초를 넘는다.
     const childDir = fs.mkdtempSync(path.join(TMP, 'slice-'));
     const env = { ...process.env, CONFIG_DIR: childDir, SANSW_CLI_TIMEOUT_MS: '4000' };
     delete env.SSH_EXEC_TIMEOUT_MS;
@@ -165,12 +167,13 @@ const dev = { id: 'sw-slice', type: 'brocade', host: '127.0.0.1', sshPort: ${srv
 const t0 = Date.now();
 const snap = await fos.collect(dev, { budgetMs: ${BUDGET} });
 console.log(JSON.stringify({ ms: Date.now() - t0, name: snap.name, cmd: fos.CMD_TIMEOUT_MS, slice: fos.MIN_SLICE_MS, skipped: snap.extra?.cliSkippedKeys || [] }));`;
+    const tStart = Date.now();
     const out = await new Promise((resolve, reject) => execFile(process.execPath, ['--input-type=module', '-e', code], { env, encoding: 'utf8', timeout: 30_000 },
       (err, stdout, stderr) => (err ? reject(new Error(`${err.message}\n${stderr}`)) : resolve(stdout))));
     const r = JSON.parse(out.trim().split('\n').pop());
     assert.equal(r.cmd, 4_000); assert.equal(r.slice, 1_000);
     assert.equal(r.name, 'sw-demo');
-    assert.ok(srv.seen.includes('cfgshow'), `cfgshow 가 시작되지 않았다(앞 명령이 예산을 다 썼다 — 이 검증이 무의미하다): ${JSON.stringify(srv.seen)}`);
+    assert.ok(srv.seen.includes('cfgshow'), `cfgshow 가 시작되지 않았다(앞 명령이 예산을 다 썼다 — 이 검증이 무의미하다): ${JSON.stringify(srv.seen)} · 자식 ${r.ms}ms · 전체 ${Date.now() - tStart}ms`);
     assert.ok(r.ms < BUDGET + 1_000, `세션이 예산(${BUDGET}ms)을 크게 넘겼다 — 남은 시간이 아니라 명령 시한을 기다렸다: ${r.ms}ms`);
     assert.ok(r.skipped.includes('lsanshow'), JSON.stringify(r.skipped));
   } finally { await srv.close(); }

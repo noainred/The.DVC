@@ -19,7 +19,7 @@ import dgram from 'node:dgram';
 import { execFile } from 'node:child_process';
 import { Resolver } from 'node:dns/promises';
 import { Agent } from 'undici';
-import { withSsrfLookup } from '../util/ssrfLookup.js';
+import { withSsrfLookup, ssrfLookup } from '../util/ssrfLookup.js';
 import { pingOne } from '../util/ping.js';
 import { ssrfBlockReasonResolved } from '../collector/registry.js';
 // v2.603(SEC2603-03): 본문 앞부분 읽기는 util 하나(rma/testRunner.js 도 같은 헬퍼) — 재수출은 import+export 형태(v2.575)
@@ -47,6 +47,28 @@ const insecureAgent = new Agent({ connect: withSsrfLookup({ rejectUnauthorized: 
 const secureAgent = new Agent({ connect: withSsrfLookup({}) });
 const SAFE_HOST = /^[a-zA-Z0-9._:-]+$/;
 const shortErr = (e) => String(e?.cause?.code || e?.code || e?.message || e).slice(0, 140);
+
+/**
+ * DNS 점검의 질의 서버 → `Resolver.setServers` 가 받는 주소(v2.815).
+ * ⚠ `setServers` 는 **IP 만** 받는다(호스트 이름이면 ERR_INVALID_IP_ADDRESS). 저장 검증(SAFE_HOST)은 이름을 허용하고 내장
+ *   'DNS 서버' 템플릿은 `server: '{host}'` 라, 이름으로 등록한 대상의 DNS 점검이 **매번 bad** 였다(재현). 이름이면 먼저 해석한다 —
+ *   시한 있는 검증 lookup(`ssrfLookup`, 3초 · 루프백·링크로컬 해석 차단)을 쓴다(server/CLAUDE.md — 핫패스에 시한 없는 DNS 금지).
+ *   IP 리터럴(포트 포함)은 예전 그대로 넘긴다. `이름:포트` 는 해석한 IP 에 포트를 다시 붙인다.
+ */
+export async function dnsServerAddr(server, lookup = ssrfLookup) {
+  const s = String(server ?? '').trim();
+  if (!s) throw new Error('질의 서버가 비어 있습니다');
+  if (net.isIP(s) || /^\[[0-9a-fA-F:.]+\]:\d{1,5}$/.test(s)) return s;
+  const m = /^([^:]+):(\d{1,5})$/.exec(s);
+  const name = m ? m[1] : s;
+  const port = m ? m[2] : '';
+  if (net.isIP(name)) return s;
+  const { address, family } = await new Promise((resolve, reject) => {
+    lookup(name, {}, (err, a, f) => (err ? reject(err) : resolve({ address: a, family: f })));
+  });
+  if (!port) return address;
+  return family === 6 ? `[${address}]:${port}` : `${address}:${port}`;
+}
 
 /** 유형별 기본 포트 — 폼에서 비워두면 이 값을 쓴다. */
 export const DEFAULT_PORTS = {
@@ -102,7 +124,9 @@ async function runCheckInner(test, host) {
     switch (test.type) {
       case 'ping': {
         const r = await pingOne(host, { timeoutMs: 4000 });
-        return r.alive ? ok(`${r.rttMs ?? 0} ms`, r.rttMs ?? 0) : bad('응답 없음', started);
+        // v2.769(점검 R4-D3-6): RTT 를 못 읽었으면(출력 형식이 다른 OS·로케일) 0ms 가 아니다 — ms 는 null(CSV 빈 칸 · 분석 평균/p95 에서 제외).
+        if (!r.alive) return bad('응답 없음', started);
+        return r.rttMs != null ? ok(`${r.rttMs} ms`, r.rttMs) : ok('응답함 · RTT 미상', null);
       }
       case 'trace': {
         // 문구에도 **실제 적용된** 임계를 쓴다 — traceLimits 가 63 으로 클램프하므로(상한 64가
@@ -157,7 +181,10 @@ async function runCheckInner(test, host) {
       }
       case 'dns': {
         const resolver = new Resolver({ timeout: 4000, tries: 1 });
-        resolver.setServers([test.server || host]);
+        let serverAddr;
+        try { serverAddr = await dnsServerAddr(test.server || host); }
+        catch (e) { return bad(`질의 서버 이름 해석 실패: ${String(test.server || host).slice(0, 80)} (${shortErr(e)})`, started); }
+        resolver.setServers([serverAddr]);
         const name = test.record || 'localhost';
         const addrs = await resolver.resolve4(name).catch(() => resolver.resolve6(name));
         const ms = Date.now() - started;
@@ -621,11 +648,33 @@ async function domainDaysLeft(domain, timeoutMs) {
   const first = await whois('whois.iana.org', domain, timeoutMs);
   const refer = /refer:\s*(\S+)/i.exec(first)?.[1];
   const text = refer && SAFE_HOST.test(refer) ? await whois(refer, domain, timeoutMs) : first;
-  const m = /(?:Registry Expiry Date|Expiration Date|paid-till|expires?(?: on)?)\s*:\s*(\S+)/i.exec(text);
-  if (!m) return null;
-  const t = new Date(m[1]).getTime();
-  if (!Number.isFinite(t)) return null;
+  const t = parseWhoisExpiry(text);
+  if (t == null) return null;
   return Math.floor((t - Date.now()) / 86400000);
+}
+
+/**
+ * WHOIS 응답 → 만료 시각(ms) 또는 null(v2.815).
+ * ⚠ 예전에는 `:\s*(\S+)` 로 **공백 전까지만** 잘라 `new Date()` 에 넘겼다. KISA(whois.kr)의 만료일 줄은
+ *   `Expiration Date : 2027. 03. 15.` 형식이라 `'2027.'` 만 잡혀 V8 이 **그해 1월 1일**로 읽었다(파싱 재현 — 연중 만료 .kr 도메인이
+ *   1월 1일부터 '만료됨'). 줄 끝까지 잡고 `YYYY. MM. DD.`·`YYYY/MM/DD`·`YYYY-MM-DD` 를 먼저 읽고, 그 밖(ISO 시각 등)은 예전처럼 첫 토큰을 Date 로 읽는다.
+ *   ⚠ whois.kr 의 실제 응답은 이 환경에서 접속하지 못해 실측하지 못했다(공개된 형식 기준).
+ */
+export function parseWhoisExpiry(text) {
+  const m = /(?:Registry Expiry Date|Expiration Date|paid-till|expires?(?: on)?)[ \t]*:[ \t]*([^\r\n]{1,80})/i.exec(String(text ?? ''));
+  if (!m) return null;
+  const v = m[1].trim();
+  const ymd = /^(\d{4})[ \t]*[./-][ \t]*(\d{1,2})[ \t]*[./-][ \t]*(\d{1,2})\.?(?=$|[ \t])/.exec(v);
+  if (ymd) {
+    const y = Number(ymd[1]); const mo = Number(ymd[2]); const d = Number(ymd[3]);
+    const t = Date.UTC(y, mo - 1, d);
+    const back = new Date(t);
+    // 2027. 02. 31. 같은 없는 날은 Date.UTC 가 다음 달로 넘긴다 — 믿지 않는다.
+    if (back.getUTCFullYear() !== y || back.getUTCMonth() !== mo - 1 || back.getUTCDate() !== d) return null;
+    return t;
+  }
+  const t = new Date(v.split(/[ \t]/)[0]).getTime();
+  return Number.isFinite(t) ? t : null;
 }
 
 function whois(server, query, timeoutMs) {

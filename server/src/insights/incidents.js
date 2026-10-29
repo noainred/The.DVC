@@ -35,9 +35,11 @@ const sevRank = (s) => (s === 'critical' ? 3 : s === 'warning' ? 2 : s === 'reso
  *   실어 정밀 필터링하는 것은 후속 개선 과제 — 지금은 '덜 보여주는' 쪽이 안전하다.)
  */
 export function getIncidents({ limit = 200, allowed = null } = {}) {
-  const st = alertStatus();
-  const snap = store.get();
-  const now = Date.now();
+  return buildIncidents(alertStatus(), store.get(), { limit, allowed });
+}
+
+/** 순수 본체(v2.769 R4-D2-05 — 테스트가 알림 상태를 직접 넣어 본다). st = alertStatus() 모양, snap = 스냅샷. */
+export function buildIncidents(st, snap, { limit = 200, allowed = null, now = Date.now() } = {}) {
   const alertInScope = (a) => !allowed || (a.vcenterId ? allowed.has(a.vcenterId) : false);
 
   // 1) 현재 진행중(firing) — 시작시각 기준 미해소 인시던트.
@@ -54,12 +56,43 @@ export function getIncidents({ limit = 200, allowed = null } = {}) {
     title: r.title, detail: r.detail || '', channels: r.channels || null,
     kind: r.severity === 'resolved' ? 'resolved' : 'fired',
   }));
+  /*
+   * v2.783(점검 Q4 P-B1): recent 의 비-해소 항목은 '발생' 이 아니라 **발송 기록**이다 — alerts.js 는 firing 이 이어지는 동안
+   *   쿨다운마다 다시 보내고 재시도마다도 pushRecent 한다(24시간 지속 경보 = 24건). 그것을 전부 '발생' 으로 세어 지속 장애
+   *   하나가 최근 24h·일자별 추세를 부풀렸다. 발생은 'key 의 직전 사건이 해소이거나 없을 때의 fired' 만이고, 나머지는
+   *   kind 'notify'(재발송 — 타임라인 표기만, 집계 제외)다. key 별로 오래된 것부터 훑는다(recent 는 최신이 앞 — 같은 ts 면
+   *   앞의 것이 나중 사건이므로 인덱스가 큰 것이 먼저).
+   *   ⚠ 남은 한계: 알림 채널이 하나도 없으면 alerts.js 가 fired 를 recent 에 넣지 않아 발생 0 이다(발생 링은 alerts.js 몫 — 별건).
+   *   recent 상한(100건)에서 잘린 key 는 남은 가장 오래된 재발송을 발생 1회로 센다(최대 key 당 1회 과대).
+   */
+  {
+    const order = events.map((e, i) => ({ e, i })).sort((a, b) => a.e.ts - b.e.ts || b.i - a.i);
+    const lastKind = new Map();
+    for (const { e } of order) {
+      if (e.kind === 'fired' && lastKind.has(e.key) && lastKind.get(e.key) !== 'resolved') e.kind = 'notify';
+      lastKind.set(e.key, e.kind);
+    }
+  }
 
   // 3) vCenter 수집 실패도 인시던트로 표면화(알림 채널 미설정이어도 보이게).
   // snap 은 store 전체이므로 여기서 직접 scope 를 적용한다(허용 vCenter 만).
+  // v2.769(점검 R4-D2-05): 알림 엔진 vcenterDown 규칙이 같은 키(vc:<id>)로 발송할 때마다 recent 에 fired 를 남긴다 —
+  //   그때 합성 이벤트를 또 넣으면 한 장애가 타임라인·24h·일자별에 두 번 이상 셌다.
+  // v2.770(점검 R5-E1-4): 생략 조건은 '그 key 의 **가장 최근** 사건이 fired(그 뒤 resolved 없음)' 이다. 예전에는 같은 key 의
+  //   fired 가 recent 에 하나라도 있으면 시각과 무관하게 생략해, 발생→해소→재발(쿨다운 안이라 재발송 없음)이나 vcenterDown 규칙을
+  //   끈 뒤의 재발이 타임라인·24h·일자별 어디에도 없었다. 시각 비교(fired ts >= 시작)는 쓰지 않는다 — vcFailureStartTs 가
+  //   receivedAt 으로 폴백하면 같은 장애의 fired 보다 늦은 시각이 나와 중복을 되살린다.
+  //   recent 는 최신이 앞이다(alerts.js pushRecent unshift) — 같은 ts 면 앞의 것이 최신.
+  const latestByKey = new Map();
+  for (const e of events) {
+    const cur = latestByKey.get(e.key);
+    if (!cur || e.ts > cur.ts) latestByKey.set(e.key, e);
+  }
   for (const v of snap.vcenters || []) {
     if (allowed && !allowed.has(v.id)) continue;
-    if (v.status === 'unreachable') {
+    // v2.783(P-B1): 가장 최근 사건이 재발송(notify)이어도 진행 중인 같은 장애다 — 합성하지 않는다.
+    const lk = latestByKey.get(`vc:${v.id}`)?.kind;
+    if (v.status === 'unreachable' && lk !== 'fired' && lk !== 'notify') {
       const t = vcFailureStartTs(v);
       events.push({ at: t == null ? null : new Date(t).toISOString(), ts: t, ...(t == null ? { timeUnknown: true } : {}), key: `vc:${v.id}`, severity: 'critical', title: `vCenter 수집 실패: ${v.name || v.id}`, detail: v.error || '연결 불가', kind: 'fired' });
     }
@@ -88,7 +121,10 @@ export function getIncidents({ limit = 200, allowed = null } = {}) {
       recent24h: events.filter((e) => e.kind === 'fired' && e.ts != null && e.ts >= now - 86_400_000).length,
       // v2.632 AX2-2632-05: 발생 시각을 모르는 인시던트 수(최근 24시간·일자별 집계에서 뺐다 — 빼면 개수를 밝힌다).
       timeUnknown: events.filter((e) => e.ts == null).length,
-      channelsOn: !!(st.config?.channels?.slack?.enabled || st.config?.channels?.webhook?.enabled),
+      // v2.783(P-B1 덤): alerts.js 발송 판정과 같은 네 채널 — teams·email 만 켠 설치를 '알림 채널 꺼짐' 으로 말하지 않는다.
+      channelsOn: ['slack', 'webhook', 'teams', 'email'].some((c) => !!st.config?.channels?.[c]?.enabled),
+      // v2.783(P-B1): 같은 장애 안의 재발송·재시도 수(발생에는 넣지 않는다 — 타임라인 '재발송').
+      notifies: events.filter((e) => e.kind === 'notify').length,
     },
     open,
     timeline,

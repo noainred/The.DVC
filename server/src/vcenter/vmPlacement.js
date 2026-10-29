@@ -1,5 +1,5 @@
 /**
- * vcenter/vmPlacement.js — VM 의 **정확한** vSphere 위치(데이터센터 경로·VM 폴더 경로) 계산(순수 함수, v2.747 Bareos 연동).
+ * vcenter/vmPlacement.js — VM 의 **정확한** vSphere 위치(데이터센터 경로·VM 폴더 경로) 계산(순수 함수, v2.820 Bareos 연동).
  *
  * 왜 따로 두나: 기존 VM 레코드의 `folder`(soapClient folderPath)는 화면 표시용이라 이름이 `vm`·`Datacenters` 인 폴더를
  *   **모든 깊이에서** 건너뛰고 루트를 'vm' 으로 적는다 — Bareos VMware 플러그인처럼 경로로 VM 을 찾는 쪽에는 쓸 수 없다

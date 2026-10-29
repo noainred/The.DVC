@@ -85,6 +85,9 @@
     뒤 세 가지는 `security-session.json`에 기록하지 않아 **UI 저장이 지울 수 없다** — 전원이 설정에서
     잠기는 사고의 복구 경로이므로 `fileSettingsOwners()` 합산을 제거하지 말 것.
 - **RDP 자격증명은 티켓으로**: RDP WS 게이트웨이는 username/password/domain을 URL 쿼리스트링에 싣지 않는다 — `proxy/rdpTicket.js`의 1회용 단기 티켓(`POST /api/remote/rdp-ticket`)으로 발급받아 쿼리엔 티켓 ID만 싣고 게이트웨이가 인메모리에서 조회한다(쿼리스트링은 상위 프록시 액세스 로그·브라우저 히스토리에 남음).
+- **서명 확인 화면 끄기(v2.809)는 env warn 과 같은 판정·시한부·소유자+OTP·root 확인 제외**(`upgrade/signatureOverride.js` · `signaturePolicy`) —
+  `!runningAsRoot()`·`!t.fatal`·env 우선·`where:'offline'` 제외·상태 파일 등록·인증 꺼짐 409·복원 제외(RESTORE_EXCLUDE)·'지금' 기준 상한 중
+  하나라도 빼면 회귀(`test/upgradeSigOverride2809.test.js` 변이 16건 · 반증 1인 M-1·M-2·L-1·L-3 반영).
 - **업그레이드 번들 sha256 필수**: 자체 업그레이드·엣지 푸시 양쪽 모두 검증하고, 부재도 거부(`UPGRADE_ALLOW_UNVERIFIED`만 예외). 한쪽만 검증하면 함대 확산 경로가 뚫린다.
   - ⚠️ v2.480 정직 기록: 이 규칙은 v2.479 까지 **문서만** 있었다 — 엣지 `/api/upgrade/bundle`·수집기 `/api/collector/upgrade` 는 sha 를 받지도 검증하지도 않았다. 이제 중앙 push(`upgrade.js pushBundleToEdge`·`collector/upgradePush.js`)가 `X-Bundle-Sha256` 헤더를 보내고 수신측이 `upgrade/upgrade.js bundleShaIssue` 로 검증한다(`test/audit2480.test.js`). 헤더를 없애거나 검증을 빼면 이 규칙이 다시 문서만 남는다.
   - ⚠⚠ **v2.591 정직 정정(감사 P6 — 재현)**: push 경로의 `X-Bundle-Sha256` 은 **같은 요청이 스스로 신고한 해시**라

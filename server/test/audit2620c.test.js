@@ -221,6 +221,9 @@ test('PERF2620-01 — 복원 전 백업에는 덮어쓰기 **전** 설정이 들
   fs.writeFileSync(path.join(DIR, 'ui.json'), '{"v":"before"}');
   const r = await bk.restoreCentral({ central: { files: { 'ui.json': '{"v":"restored"}' } } }, { retention: 30 });
   assert.equal(r.restored, 1);
+  // v2.768(점검 R3-C5-02): JSON 설정은 예약 → 다음 기동 때 적용(stagedRestore.js). 적용 함수를 불러 기동을 흉내 낸다.
+  assert.equal(fs.readFileSync(path.join(DIR, 'ui.json'), 'utf8'), '{"v":"before"}', '예약만 하고 재시작 전에는 덮지 않는다');
+  (await import('../src/backup/stagedRestore.js')).applyStagedRestore({ configDir: DIR });
   assert.equal(fs.readFileSync(path.join(DIR, 'ui.json'), 'utf8'), '{"v":"restored"}');
   const pre = bk.listBackups().find((b) => bk.reasonOfName(b.name) === 'pre-restore');
   assert.ok(pre, 'pre-restore 백업이 있어야 한다');

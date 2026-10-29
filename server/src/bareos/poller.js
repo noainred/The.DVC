@@ -1,5 +1,5 @@
 /**
- * bareos/poller.js — Bareos 실행 상태 폴러(v2.747).
+ * bareos/poller.js — Bareos 실행 상태 폴러(v2.820).
  *
  * 하는 일(주기 = 설정 pollIntervalSec, startAdaptiveTimer — 저장하면 즉시 재무장):
  *  ① 포탈이 시작한 실행(백업 pending·복원)만 `llist jobid=` 로 갱신 — 할 일이 없으면 **접속하지 않는다**.

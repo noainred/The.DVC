@@ -27,6 +27,18 @@ export const STORAGE_EXTRA_DISPLAY_KEYS = Object.freeze([
  * v2.680(감사 F-06): 소비 전력 결과(`extra.power`·`powerProbe`)를 아는 필드로 좁히고 시각을 수신 시각 이하로 자른다.
  *   엣지 시계가 앞서 있으면 마지막 전력값이 6시간 신선도 경계를 지나서도 전체 소비 전력 합에 남았다. 객체가 아니면 지운다.
  */
+/**
+ * v2.770(점검 R5-E2-01): 부분 합 표지(`partial`·`missing` — storage/power.js powerResult v2.682 R3D-03)도 받는다. 예전 화이트리스트에
+ *   없어서 중앙이 지웠고, power/total.js 가 엣지 장비의 부분 합을 '측정' 으로 셌다. 규칙은 수집기와 같다 — `missing` 이 양의
+ *   정수(상한 POWER_MISSING_MAX)일 때만 `partial:true` 이고, 엣지가 `partial:true` 만 보내고 개수가 없으면 표지를 지어내지 않는다.
+ */
+export const POWER_MISSING_MAX = 10000;
+function powerPartialOf(p) {
+  const n = numOrNull(p.missing);
+  if (n == null || n <= 0 || n > POWER_MISSING_MAX) return {};
+  const m = Math.round(n);
+  return m > 0 ? { partial: true, missing: m } : {};
+}
 export function narrowStoragePower(ex, now = Date.now()) {
   let narrowed = 0;
   const atOf = (v) => { const a = numOrNull(v); return a == null ? null : Math.min(a, now); };
@@ -38,6 +50,7 @@ export function narrowStoragePower(ex, now = Date.now()) {
         watts: w, source: capStr(p.source, 200), basis: capStr(p.basis, 32), scope: capStr(p.scope, 32), at: atOf(p.at),
         ...(numOrNull(p.parts) != null ? { parts: numOrNull(p.parts) } : {}),
         ...(Array.isArray(p.keys) ? { keys: p.keys.slice(0, 8).map((k) => capStr(k, 80)) } : {}),
+        ...powerPartialOf(p),
       };
     }
   }
@@ -135,6 +148,14 @@ export function narrowStorageSnapshot(d) {
     na = narrowStorageAreas(exA);
     d = { ...d, extra: exA };
   }
+  // v2.789: 하위 항목(LUN·파일시스템 — extra.resources·resourcesProbe)도 아는 필드·객체만·상한. 일 롤업(db.saveCapacityPoint)과
+  //   사용량 보고 화면이 그대로 읽으므로 수신에서 좁힌다('새 엣지 export 필드는 중앙 정제 화이트리스트에도').
+  if (Object.hasOwn(d.extra, 'resources') || Object.hasOwn(d.extra, 'resourcesProbe')) {
+    const exR = { ...d.extra };
+    const o = { extra: exR };
+    na += sanitizeEdgeResources(o);
+    d = { ...d, extra: o.extra };
+  }
   const r = narrowStorageSnapshotRest(d);
   return { snap: r.snap, narrowed: r.narrowed + na };
 }
@@ -162,6 +183,7 @@ function narrowStorageSnapshotRest(d) {
   return { snap: { ...d, extra: { ...d.extra, appliances: apps } }, narrowed };
 }
 import { recordActivity } from '../storage/activityLog.js';
+import { sanitizeEdgeResources } from '../storage/resources.js'; // v2.789
 import { saveCapacityPoint } from '../storage/db.js';
 import { ackCollect, setCollectBaseResolver } from '../storage/collectRequests.js';
 

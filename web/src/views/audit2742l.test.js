@@ -163,7 +163,7 @@ describe('WEB-04 네트워크 트래픽 분석 카드 — 관리자 전용(주 A
     expect(t).toBeTruthy();
     expect(t.adminOnly).toBe(true);
   });
-  it('operator 에게는 잠기고 admin 에게는 열린다(카드·V4 내비·팔레트가 같은 판정)', () => {
+  it('operator 에게는 잠기고 admin 에게는 열린다(카드·팔레트가 같은 판정)', () => {
     expect(lockReasonOf(t, { isAdmin: false })).toBe('관리자(admin) 전용 기능입니다.');
     expect(lockReasonOf(t, { isAdmin: true })).toBe(null);
   });
@@ -188,12 +188,6 @@ describe('LEFT-06 용량 모름 호스트(hostsCapacityUnknown)를 총량 옆에
     expect(hostCapTotal([{ metrics: { hostsCapacityUnknown: 2 } }, { metrics: {} }, { metrics: { hostsCapacityUnknown: 3 } }, null, {}])).toBe(5);
     expect(hostCapTotal(null)).toBe(0);
     expect(HOST_CAP_METRICS).toEqual(['cpuTotalGhz', 'memTotalGB']);
-  });
-  it('V4 Overview 전사 용량 헤드룸 — CPU·메모리 줄에 표지, 각주는 패널에 한 번', () => {
-    const s = src('version_4/pages/Overview.jsx');
-    expect(s).toMatch(/import \{ hostCapShort, hostCapFootnote \} from '\.\.\/\.\.\/views\/hostCapacityText\.js'/);
-    expect((s.match(/hostCapShort\(g\.hostsCapacityUnknown\)/g) || []).length).toBe(2);
-    expect(s).toMatch(/hostCapFootnote\(g\.hostsCapacityUnknown\)/);
   });
   it('vCenter 카드 — 카드마다 짧은 표지(긴 이유는 title), 목록 위 각주 한 번', () => {
     const s = src('views/VCenters.jsx');

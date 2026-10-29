@@ -16,6 +16,7 @@
  */
 import crypto from 'node:crypto';
 import { config, currentVersion } from '../config.js';
+import { waitDrain } from '../util/waitDrain.js'; // v2.783(점검 Q5): 공용 백프레셔 대기(drain·close·error 중 먼저 — 리스너 전부 뗀다)
 
 export const XFER_TEST_MAX_BYTES = Math.max(1_048_576, Number(process.env.XFER_TEST_MAX_BYTES) || 67108864);   // 기본 64MB(리터럴 — env-doc 생성기가 첫 숫자를 기본값으로 적는다)
 export const XFER_TEST_MAX_CONCURRENT = 2;
@@ -23,14 +24,8 @@ const CHUNK = 256 * 1024;
 
 let _active = 0;
 
-/** drain 또는 close 중 먼저 오는 것을 기다린다 — 둘 다 떼고 끝낸다(조각마다 once 를 걸면 남은 쪽 리스너가 쌓인다). */
-function waitDrain(res) {
-  return new Promise((resolve) => {
-    const fin = () => { res.off('drain', fin); res.off('close', fin); resolve(); };
-    res.on('drain', fin);
-    res.on('close', fin);
-  });
-}
+// drain 또는 close 중 먼저 오는 것을 기다린다 — 둘 다 떼고 끝낸다(조각마다 once 를 걸면 남은 쪽 리스너가 쌓인다).
+// v2.783(점검 Q5): 이 지역 함수가 원형이었다 — 내보내기 라우트들이 같은 규칙을 쓰도록 util/waitDrain.js 로 옮겼다.
 
 const randomBytesAsync = (n) => new Promise((resolve, reject) => crypto.randomBytes(n, (e, b) => (e ? reject(e) : resolve(b))));
 

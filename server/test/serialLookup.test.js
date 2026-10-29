@@ -119,3 +119,22 @@ test('buildSerialIndex: 한 출처가 실패해도 나머지는 살아 있고 �
   assert.ok(idx.sources, '출처별 상태를 반드시 보고한다');
   assert.ok(Object.keys(idx.sources).length >= 6, '실패한 출처가 있어도 나머지 출처는 집계된다');
 });
+
+test('buildSerialIndex: 엣지 베어메탈 행은 getEdgeFleetServers 필드(serverName·serverId·remoteAgent)로 채운다 (v2.769 점검 R4-D2-03)', async () => {
+  // 예전엔 없는 필드(name·fleetId·source)를 읽어 장비명·ID 가 빈칸, 수집처는 늘 'edge' 였다.
+  const fleet = await import('../src/central/fleet.js');
+  const { buildSerialIndex } = await import('../src/insights/serialLookup.js');
+  const { maskSerialRow } = await import('../src/routes/api/serialLookup.js');
+  fleet.setEdgeFleet('edge-pl', [{ fleetId: 'abc1234', name: 'bm-warsaw-01', serviceTag: 'ABC1234', model: 'R750' }], null, { verified: true });
+  const src = fleet.getEdgeFleetServers().find((e) => e.serviceTag === 'ABC1234');
+  const row = buildSerialIndex({ query: {} }).rows.find((r) => r.kind === 'bm-edge' && r.serial === 'ABC1234');
+  assert.ok(src && row);
+  assert.equal(row.deviceName, src.serverName);
+  assert.equal(row.deviceName, 'bm-warsaw-01');
+  assert.equal(row.deviceId, src.serverId);
+  assert.equal(row.agent, 'edge-pl', '어느 엣지가 보고했는지');
+  assert.equal(row.model, 'R750');
+  // 엣지 이름이 주소인 장비의 deviceId(`edge:<agent>:<주소>`)는 비-admin 응답에서 가린다
+  assert.equal(maskSerialRow({ ...row, deviceId: 'edge:edge-pl:10.1.2.3' }).deviceId, '');
+  assert.equal(maskSerialRow(row).deviceId, src.serverId, '주소가 아니면 그대로');
+});

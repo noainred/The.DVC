@@ -49,8 +49,8 @@ describe('NSX 합계 표기 (v2.600 COL-2600-06 후속)', () => {
     expect(nsxFailedShort({ segments: 3 })).toBe('');
     expect(nsxFailedShort(null)).toBe('');
   });
-  it('세 화면이 null 합계를 직접 더하거나 그대로 찍지 않는다(소스)', () => {
-    for (const f of ['./Nsx.jsx', '../version_4/pages/Network.jsx', '../console/pages/ConsoleNetwork.jsx']) {
+  it('두 화면이 null 합계를 직접 더하거나 그대로 찍지 않는다(소스 — v2.747 V4 네트워크는 셸과 함께 지웠다)', () => {
+    for (const f of ['./Nsx.jsx', '../console/pages/ConsoleNetwork.jsx']) {
       const src = readFileSync(new URL(f, import.meta.url), 'utf8');
       expect(src, f).not.toMatch(/r\.hostNodes\s*\+\s*r\.edgeNodes|\(r\.hostNodes \?\? 0\) \+/);
       expect(src, f).not.toMatch(/Overlay \$\{r\.overlaySegments/);

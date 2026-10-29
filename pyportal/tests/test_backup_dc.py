@@ -59,6 +59,14 @@ class BackupTest(unittest.TestCase):
         restored = json.loads(self.files["categories"].read_text(encoding="utf-8"))
         self.assertEqual(restored[0]["name"], "원본 분류", "복원 시 categories 도 되돌아와야 한다.")
 
+    def test_non_numeric_keep_falls_back_instead_of_breaking_settings(self):
+        # v2.760(점검 B-08 — 재현): 'abc'·'7.5' 한 칸 때문에 설정 전체를 못 읽으면 자동 백업·점검이 매 주기 실패한다.
+        for bad in ("abc", "7.5", None):
+            write_json(self.files["settings"], {"backup": {"keep": bad}})
+            store = SettingsStore(self.files["settings"])
+            self.assertEqual(store.section("backup")["keep"], 14, repr(bad))
+            self.assertIn("health", store.all())
+
     def test_keep_setting_prunes_old_backups(self):
         self.settings.update_section("backup", {"keep": 2})
         for _ in range(4):

@@ -28,6 +28,7 @@ export const KIND_SHORT = Object.freeze({ push: '↑ push', reply: '↑ 회신',
 export const CAT_COLOR = Object.freeze({
   inv: '#2f7a4f', idrac: '#2c5f9e', gpu: '#6a4bb0', power: '#a8742a', storage: '#a05a2c',
   san: '#8a6d1f', watch: '#9b3a3a', users: '#2e7f86', ops: '#55606f', reg: '#4c5b86', other: '#6b3f6b',
+  backup: '#3d7a6e',   // v2.763(V2-3): Veeam 백업 결과·배정은 인벤토리(vCenter) 칸이 아니다
 });
 
 /** 경로 표시 이름 — 중앙 수신은 /api/central, 중앙→엣지는 /api/collector 접두. */

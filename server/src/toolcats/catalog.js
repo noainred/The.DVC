@@ -55,8 +55,8 @@ export const PRESET = Object.freeze([
   },
   {
     id: 'storage', label: '스토리지', icon: '💾',
-    tools: ['storage-mon', 'storage-growth', 'storage-track', 'bm-storage', 'san-switch', 'dsusage', 'thinvms',
-      'dir-usage', 'isilon-dirusage', 'portaldb', 'snapshots', 'snapshot-age', 'vm-hygiene', 'storage-paths', 'orphanvmdk', 'guest-disk'],
+    tools: ['storage-mon', 'storage-growth', 'storage-usage', 'storage-track', 'bm-storage', 'san-switch', 'dsusage', 'thinvms',
+      'dir-usage', 'isilon-dirusage', 'portaldb', 'snapshots', 'snapshot-age', 'vm-hygiene', 'storage-paths', 'orphanvmdk', 'guest-disk', 'guest-partition'],
   },
   {
     id: 'virtualization', label: '가상화', icon: '🧊',
@@ -66,7 +66,7 @@ export const PRESET = Object.freeze([
   {
     id: 'capacity', label: '용량·최적화', icon: '📈',
     tools: ['capacity', 'capacity-advisor', 'capacity-forecast', 'forecast', 'waste', 'rightsizing',
-      'thinvms', 'zombie-vms', 'explore', 'storage-track', 'dir-usage', 'orphanvmdk', 'guest-disk'],
+      'thinvms', 'zombie-vms', 'explore', 'storage-track', 'dir-usage', 'orphanvmdk', 'guest-disk', 'guest-partition'],
   },
   {
     id: 'security', label: '보안·계정', icon: '🛡️',
@@ -76,7 +76,7 @@ export const PRESET = Object.freeze([
   {
     id: 'report', label: '리포트·점검', icon: '📋',
     tools: ['daily-health', 'insights', 'insights-hub', 'compliance-report', 'change-history', 'unprotected-vms',
-      'alert-channels', 'davinci-svc', 'svcmon-config', 'vmware-backup', 'dir-usage', 'capacity',
+      'alert-channels', 'davinci-svc', 'svcmon-config', 'vmware-backup', 'backup-summary', 'backup-detail', 'backup-em', 'dir-usage', 'capacity',
       'portal-check'],
   },
   {
@@ -85,7 +85,7 @@ export const PRESET = Object.freeze([
   },
   {
     id: 'ops', label: '운영 작업', icon: '🛠️',
-    tools: ['rma', 'vmprovision', 'vm-clone', 'bareos-backup', 'agent-scans', 'shutdown', 'credentials',
+    tools: ['rma', 'vmprovision', 'vm-clone', 'backup-run', 'bareos-backup', 'agent-scans', 'shutdown', 'credentials',
       'diskadd', 'backup', 'massdeploy', 'service-hub', 'mail-diag', 'edge-log'],
   },
 ]);

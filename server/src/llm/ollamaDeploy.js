@@ -6,7 +6,7 @@
  *  - offline : SFTP the official ollama-linux-amd64.tgz (placed on the central
  *              server) to the target, extract to /usr, and register the service.
  *
- * Either way the service is configured to listen on 0.0.0.0:11434 so the portal
+ * Either way the service is configured to listen on 0.0.0.0:<ollamaPort> (default 11434) so the portal
  * can reach it, and (optionally) a model is pulled and the portal's LLM config
  * is pointed at the new server.
  */
@@ -17,7 +17,8 @@ import { withSsh } from '../proxy/sshExec.js';
 import { remoteTmpDir } from '../agent/deploy.js';
 import { saveLlmConfig } from './config.js';
 
-const SERVICE = `[Unit]
+// v2.767(점검 R2-B4-2): 듣는 포트를 인자로 받는다 — 저장할 LLM 주소의 포트와 서비스가 실제로 듣는 포트가 한 값에서 나오게.
+const serviceUnit = (port) => `[Unit]
 Description=Ollama Service
 After=network-online.target
 Wants=network-online.target
@@ -28,17 +29,31 @@ User=ollama
 Group=ollama
 Restart=always
 RestartSec=3
-Environment="OLLAMA_HOST=0.0.0.0:11434"
+Environment="OLLAMA_HOST=0.0.0.0:${port}"
 
 [Install]
 WantedBy=multi-user.target
 `;
 
-const OVERRIDE = `[Service]
-Environment="OLLAMA_HOST=0.0.0.0:11434"
+const overrideConf = (port) => `[Service]
+Environment="OLLAMA_HOST=0.0.0.0:${port}"
 `;
 
 const creds = (t) => ({ host: t.host, port: t.port || 22, username: t.username, password: t.password, privateKey: t.privateKey || undefined });
+
+/**
+ * v2.767(점검 R2-B4-2): Ollama 가 들을 포트. **SSH 포트(target.port)와 다른 키(ollamaPort)** 다 — 예전에는 라우트가
+ * 본문 `port`(화면의 SSH 포트 칸, 기본 22)를 Ollama 포트로 빼 가서 SSH 는 늘 22 로 붙고 포탈 LLM 주소가
+ * `http://<host>:22` 로 저장됐다. 비우면 11434, 정수 1~65535 가 아니면 null(거부).
+ */
+export const OLLAMA_DEFAULT_PORT = 11434;
+export function normOllamaPort(v) {
+  if (v == null || v === '') return OLLAMA_DEFAULT_PORT;
+  const s = String(v).trim();
+  if (!/^\d{1,5}$/.test(s)) return null;
+  const n = Number(s);
+  return n >= 1 && n <= 65535 ? n : null;
+}
 
 /**
  * 오프라인 설치 파일 검증(v2.583 — 감사 확정. v2.447 S1 `agent/deploy.js resolveInstaller` 의 형제 누락).
@@ -68,8 +83,10 @@ export function checkOllamaArchive(p) {
   return { ok: true, real };
 }
 
-export async function installOllama(target, { mode = 'online', binaryPath, model, port = 11434, applyToPortal = true } = {}) {
+export async function installOllama(target, { mode = 'online', binaryPath, model, ollamaPort, applyToPortal = true } = {}) {
   if (!target?.host || !target?.username) return { ok: false, reason: 'host/username을 입력하세요.' };
+  const port = normOllamaPort(ollamaPort);
+  if (port == null) return { ok: false, reason: 'Ollama 포트는 1~65535 사이 정수여야 합니다.' };
   if (mode === 'offline') {
     const chk = checkOllamaArchive(binaryPath);
     if (!chk.ok) return chk;
@@ -95,7 +112,7 @@ export async function installOllama(target, { mode = 'online', binaryPath, model
           x = await exec(`tar -C /usr -xzf ${remote}`);
         } finally { await exec(`rm -rf ${tmp}`).catch(() => {}); }
         if (x.code !== 0) return { ok: false, reason: `압축 해제 실패: ${x.stderr}` };
-        await writeFile('/etc/systemd/system/ollama.service', SERVICE, 0o644);
+        await writeFile('/etc/systemd/system/ollama.service', serviceUnit(port), 0o644);
         const up = await exec('systemctl daemon-reload && systemctl enable --now ollama');
         if (up.code !== 0) return { ok: false, reason: `서비스 시작 실패: ${up.stderr || up.stdout}` };
       } else {
@@ -103,18 +120,18 @@ export async function installOllama(target, { mode = 'online', binaryPath, model
         if (inst.code !== 0) return { ok: false, reason: `설치 스크립트 실패(인터넷 필요?): ${(inst.stderr || inst.stdout).slice(-400)}` };
         // expose on all interfaces so the portal can connect
         await exec('mkdir -p /etc/systemd/system/ollama.service.d');
-        await writeFile('/etc/systemd/system/ollama.service.d/override.conf', OVERRIDE, 0o644);
+        await writeFile('/etc/systemd/system/ollama.service.d/override.conf', overrideConf(port), 0o644);
         await exec('systemctl daemon-reload && systemctl restart ollama');
       }
 
       // wait briefly, verify the API
-      await exec('for i in $(seq 1 10); do curl -sf http://127.0.0.1:11434/api/tags >/dev/null && break || sleep 1; done');
-      const tags = await exec('curl -sf http://127.0.0.1:11434/api/tags || echo FAIL');
-      if (tags.stdout.includes('FAIL')) return { ok: false, reason: 'Ollama API(11434)가 응답하지 않습니다. 서비스 로그를 확인하세요.' };
+      await exec(`for i in $(seq 1 10); do curl -sf http://127.0.0.1:${port}/api/tags >/dev/null && break || sleep 1; done`);
+      const tags = await exec(`curl -sf http://127.0.0.1:${port}/api/tags || echo FAIL`);
+      if (tags.stdout.includes('FAIL')) return { ok: false, reason: `Ollama API(${port})가 응답하지 않습니다. 서비스 로그를 확인하세요.` };
 
       let pulled = null;
       if (model) {
-        const p = await exec(`OLLAMA_HOST=127.0.0.1:11434 ollama pull ${model.replace(/[^\w.:/-]/g, '')}`);
+        const p = await exec(`OLLAMA_HOST=127.0.0.1:${port} ollama pull ${model.replace(/[^\w.:/-]/g, '')}`);
         pulled = { model, ok: p.code === 0, error: p.code === 0 ? undefined : (p.stderr || p.stdout).slice(-300) };
       }
 

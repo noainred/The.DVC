@@ -3,6 +3,7 @@ import { fetchJson, postJson } from '../../api.js';
 import { Loading, ErrorBox } from '../../components/ui.jsx';
 import { STable } from '../../components/STable.jsx';
 import Select from '../../components/Select.jsx';
+import { dirUsageRows, dirUsageNotes, dirUsageDeltaText } from './dirUsageRows.js';
 
 /**
  * 특수 기능 › 폴더 사용량 Top-N (v2.454, admin 전용).
@@ -22,6 +23,14 @@ export function DirUsageReport() {
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState(null);
   const pollRef = useRef(null);
+  // v2.768(점검 R3-C4-2): 상세(최신 스캔·이력·[보기]) 전용 상태 — 예전엔 상세 실패를 폴링 오류(err)에 실어 20초 폴링의 setErr(null) 이 지웠고,
+  //   대상을 바꿔도 detail·history 를 비우지 않아 실패하면 이전 대상의 표가 새 선택 아래 남았다. [보기] 의 늦은 응답도 가드가 없었다.
+  //   세대(detailGen) — 대상 전환·[보기] 마다 올리고, 응답은 자기 세대·자기 대상일 때만 반영한다.
+  const [detailErr, setDetailErr] = useState(null);
+  const [detailLoading, setDetailLoading] = useState(false);
+  const detailGen = useRef(0);
+  const selRef = useRef(sel);
+  selRef.current = sel;
 
   const load = async () => {
     try { setD(await fetchJson('/admin/dir-usage')); setErr(null); }
@@ -36,48 +45,49 @@ export function DirUsageReport() {
     return () => { if (pollRef.current) clearInterval(pollRef.current); pollRef.current = null; };
   }, []);
 
-  // 대상이 정해지면 최신 스캔 + 이력을 가져온다.
+  // 대상이 정해지면 최신 스캔 + 이력을 가져온다. 전환하면 이전 대상의 표·이력·오류를 먼저 비운다.
   useEffect(() => {
-    if (!sel) { setDetail(null); setHistory([]); return; }
+    const g = ++detailGen.current;
+    setDetail(null); setHistory([]); setDetailErr(null);
+    if (!sel) { setDetailLoading(false); return undefined; }
     let alive = true;
+    const fresh = () => alive && g === detailGen.current;
+    setDetailLoading(true);
     (async () => {
       try {
         const h = await fetchJson(`/admin/dir-usage/history/${encodeURIComponent(sel)}`, { limit: 30 });
-        if (!alive) return;
+        if (!fresh()) return;
         setHistory(h.scans || []);
         const newest = (h.scans || [])[0];
         if (newest) {
           const one = await fetchJson(`/admin/dir-usage/scan/${newest.id}`);
-          if (alive) setDetail(one);
+          if (fresh()) setDetail(one);
         } else setDetail(null);
-      } catch (e) { if (alive) setErr(e.message); }
+      } catch (e) { if (fresh()) setDetailErr(e); }
+      finally { if (fresh()) setDetailLoading(false); }
     })();
-    return () => { alive = false; };
+    return () => { alive = false; };   // 언마운트·전환 — 진행 중 응답 무효화(전환은 다음 실행이 세대도 올린다)
   }, [sel]);
+
+  /** 이력의 [보기] — 누른 순간의 대상·세대가 그대로일 때만 반영한다(대상을 바꾼 뒤 늦게 온 옛 스캔이 새 화면을 덮지 않게). */
+  const viewScan = (id) => {
+    const g = ++detailGen.current;
+    const target = sel;
+    setDetailErr(null);
+    fetchJson(`/admin/dir-usage/scan/${id}`).then((one) => {
+      if (g !== detailGen.current || selRef.current !== target) return;
+      if (one?.scan?.target_id != null && String(one.scan.target_id) !== String(target)) return;
+      setDetail(one); setDetailLoading(false);
+    }).catch((e) => { if (g === detailGen.current && selRef.current === target) { setDetailErr(e); setDetailLoading(false); } });
+  };
 
   const targets = d?.settings?.targets || [];
   // 첫 로드에서 대상이 하나뿐이면 자동 선택(클릭 한 번을 아낀다).
   useEffect(() => { if (!sel && targets.length) setSel(targets[0].id); }, [targets.length]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const rows = useMemo(() => {
-    const scan = detail?.scan;
-    if (!scan) return [];
-    const prevMap = new Map((detail?.prev?.entries || []).map((e) => [e.name, e.bytes]));
-    const hasPrev = (detail?.prev?.entries || []).length > 0;
-    const denom = scan.total_bytes || scan.sum_bytes || 0;
-    return (scan.entries || []).map((e, i) => {
-      const p = prevMap.get(e.name);
-      return {
-        rank: i + 1,
-        name: e.name,
-        bytes: e.bytes,
-        pct: denom > 0 ? Math.round((e.bytes / denom) * 1000) / 10 : null,
-        // 기준선 원칙: 직전 관측이 없으면 증감을 만들지 않는다(0 으로 채우지 않는다).
-        delta: !hasPrev ? null : (p == null ? null : e.bytes - p),
-        isNew: hasPrev && p == null,
-      };
-    });
-  }, [detail]);
+  // v2.767(점검 R2-B2-05): 판정은 서버 compareScans 결과(메일과 같은 기준) — dirUsageRows.js.
+  const rows = useMemo(() => dirUsageRows(detail), [detail]);
+  const notes = useMemo(() => dirUsageNotes(detail), [detail]);
 
   const runNow = async () => {
     setBusy(true); setMsg(null);
@@ -118,7 +128,10 @@ export function DirUsageReport() {
         </div>
       )}
 
-      {targets.length > 0 && !scan && (
+      {detailErr && <div style={{ marginBottom: 8 }}><ErrorBox error={detailErr} /></div>}
+      {targets.length > 0 && !scan && detailLoading && <div className="muted" style={{ fontSize: 13, padding: '18px 0' }}>수집 결과를 불러오는 중…</div>}
+
+      {targets.length > 0 && !scan && !detailErr && !detailLoading && (
         <div className="muted" style={{ fontSize: 13, padding: '18px 0' }}>
           아직 수집 결과가 없습니다. '지금 스캔'을 누르거나 설정한 주기를 기다리세요.
           {target && <> (엣지 <b>{target.agent}</b> 의 RMA 가 온라인이어야 합니다)</>}
@@ -135,10 +148,11 @@ export function DirUsageReport() {
             {detail?.prev && <Stat label="직전 수집" value={new Date(detail.prev.ts).toLocaleString()} />}
           </div>
 
-          {(scan.skipped > 0 || scan.truncated) && (
+          {(scan.skipped > 0 || scan.truncated || scan.warn_count > 0) && (
             <div className="muted" style={{ fontSize: 12, marginBottom: 10, color: '#fb0' }}>
               {scan.skipped > 0 && `⚠ 해석하지 못한 줄 ${scan.skipped}개(권한 없는 폴더이거나 이름에 개행이 있는 경우) — 그만큼 합계에서 빠집니다. `}
-              {scan.truncated && '⚠ 하위 폴더가 매우 많아 일부만 집계했습니다.'}
+              {scan.truncated && '⚠ 하위 폴더가 매우 많아 일부만 집계했습니다. '}
+              {scan.warn_count > 0 && `⚠ du 가 읽지 못한 경로 ${scan.warn_count}건(권한 거부 등) — 그 아래 용량은 합계에서 빠졌을 수 있습니다.`}
             </div>
           )}
 
@@ -160,8 +174,8 @@ export function DirUsageReport() {
                       <div style={{ height: '100%', width: `${Math.max(1, r.pct || 0)}%`, background: '#2e90fa' }} />
                     </div>
                   </td>
-                  <td data-sort={r.delta ?? ''} style={{ textAlign: 'right', color: r.isNew ? '#a78bfa' : r.delta > 0 ? '#f97066' : r.delta < 0 ? '#32d583' : undefined }}>
-                    {r.isNew ? '신규' : r.delta == null ? '—' : `${r.delta > 0 ? '+' : ''}${human(r.delta)}`}
+                  <td data-sort={r.delta ?? ''} style={{ textAlign: 'right', color: r.isNew ? '#a78bfa' : r.entered ? '#53b1fd' : r.delta > 0 ? '#f97066' : r.delta < 0 ? '#32d583' : undefined }}>
+                    {dirUsageDeltaText(r, human)}
                   </td>
                 </tr>
               ))}
@@ -175,6 +189,12 @@ export function DirUsageReport() {
               )}
             </tbody>
           </STable>
+
+          {notes.length > 0 && (
+            <ul className="muted" style={{ fontSize: 12, lineHeight: 1.7, margin: '10px 0 0', paddingLeft: 18 }}>
+              {notes.map((n) => <li key={n} style={{ minWidth: 0, wordBreak: 'break-all' }}>{n}</li>)}
+            </ul>
+          )}
 
           {history.length > 1 && (
             <>
@@ -190,7 +210,7 @@ export function DirUsageReport() {
                       <td className="muted">{h.mailed === 1 ? `발송(${h.mail_note || ''})` : h.mailed === 2 ? `실패: ${h.mail_note || ''}` : h.mail_note || '—'}</td>
                       <td>
                         <button className="logout-btn" style={{ padding: '2px 8px', fontSize: 11 }}
-                          onClick={() => fetchJson(`/admin/dir-usage/scan/${h.id}`).then(setDetail).catch((e) => setErr(e.message))}>보기</button>
+                          onClick={() => viewScan(h.id)}>보기</button>
                       </td>
                     </tr>
                   ))}

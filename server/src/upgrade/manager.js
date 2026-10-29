@@ -7,6 +7,7 @@
  * and can be reloaded at runtime. Everything is a no-op unless enabled.
  */
 
+import path from 'node:path';
 import { currentVersion, config } from '../config.js';
 import { loadSettings, saveSettings, redactSettings, clampPollMs } from './settings.js';
 import { checkpointConfigDbs } from './dbCheckpoint.js';
@@ -14,7 +15,7 @@ import {
   findNewerArchive, upgradeFromArchive, checkRemote, upgradeFromRemote,
   restartProcess, pushBundleToEdge, vstr, safeUrlText,
 } from './upgrade.js';
-import { signatureStatus } from './signature.js';     // v2.730(검토 S-10): 화면이 서명 검증 상태를 보인다
+import { signatureStatus, manifestPathForArchive, readManifestFile } from './signature.js';     // v2.730(검토 S-10): 화면이 서명 검증 상태를 보인다
 import { rememberRemoteCheck } from './versionsDoc.js'; // v2.730(검토 I-08): 직전 정상 확인 결과 유지 계약
 import { resolveBundleBytes, bundleFromArchive, lastBundleReject } from './bundleSource.js';
 import { pushUpgradeToCollectors, pushConcurrencyOf } from '../collector/upgradePush.js'; // v2.741(TIMING-07): push 동시 개수(엣지 push 도 같은 값)
@@ -119,6 +120,22 @@ export function summarizeEdgePush(results) {
   const failed = list.filter((r) => r.ok !== true).slice(0, 20)
     .map((r) => ({ edge: originOf(r.edge), status: Number.isFinite(r.status) ? r.status : null, reason: typeof r.reason === 'string' ? r.reason.slice(0, 300) : '' }));
   return { total: list.length, ok: list.filter((r) => r.ok === true).length, failed };
+}
+
+/**
+ * v2.775(사용자 보고 '수집서버 자동 업그레이드가 안되'): 수집 서버 push 결과 요약(순수). 예전에는 자동 적용 뒤 push 결과를 lastResult 에
+ *   남기지 않았고(엣지 push 만 남겼다), 수집 서버별 결과는 메모리 상태에만 있어 **곧바로 이어지는 재시작이 지웠다** — 콘솔에도 'n/m 성공'
+ *   한 줄뿐이라 어느 수집 서버가 왜 실패했는지 어디에도 없었다. 수집 서버 수(수십)만큼 전부(상한 64) — 성공도 남겨 화면이 '이번 자동 적용에 받음' 을 말한다.
+ * @returns {{ total:number, ok:number, items:{id:string,name:string,ok:boolean,status:number|null,version:string,reason:string}[] }}
+ */
+export function summarizeCollectorPush(results) {
+  const list = Array.isArray(results) ? results.filter((r) => r && typeof r === 'object') : [];
+  const items = list.slice(0, 64).map((r) => ({
+    id: typeof r.id === 'string' ? r.id.slice(0, 128) : '', name: typeof r.name === 'string' ? r.name.slice(0, 128) : '',
+    ok: r.ok === true, status: Number.isFinite(r.status) ? r.status : null,
+    version: typeof r.version === 'string' ? r.version.slice(0, 32) : '', reason: typeof r.reason === 'string' ? r.reason.slice(0, 300) : '',
+  }));
+  return { total: list.length, ok: list.filter((r) => r.ok === true).length, items };
 }
 
 /** 두 출처(원격 latest · 감시 폴더 버전) 중 큰 버전 — 비교할 수 없는 값은 건너뛴다(v2.740 B-02 ③). */
@@ -243,7 +260,11 @@ export class UpgradeManager {
 
     if (s.watchDir) {
       const found = findNewerArchive(s.watchDir, cur);
-      result.watch = found ? { available: true, version: vstr(found.version), path: found.path } : { available: false };
+      // v2.809: 번들 옆 서명 manifest 가 있는지 미리 알린다(없으면 적용이 manifest-missing 으로 거부된다) — 있는지만 본다(서명 확인은 적용 때)
+      const manPath = found ? manifestPathForArchive(found.path) : null;
+      result.watch = found
+        ? { available: true, version: vstr(found.version), path: found.path, manifest: manPath ? path.basename(manPath) : null, hasManifest: !!readManifestFile(manPath) }
+        : { available: false };
     }
     if (s.remoteBase) {
       // v2.730(I-08): 실패한 확인은 직전 정상값을 `lastGood` 으로 **참고만** 싣는다 — available 은 이번 확인 기준(false)이고,
@@ -306,7 +327,10 @@ export class UpgradeManager {
       if (Array.isArray(edgePush) && edgePush.length) { this.#lastResult.edgePush = summarizeEdgePush(edgePush); this.#save(); }
       // v2.740(B-03): 수집기에도 **방금 적용한 번들**을 민다(엣지 push 와 같은 대상) — 예전에는 resolveBundleBytes 를 다시 불러
       //   감시 폴더의 옛 번들을 고르거나(그 manifest 가 없으면) 조용히 생략했다.
-      await this.pushToCollectors(res.appliedArchive).catch(() => {});
+      // v2.775: 수집 서버 push 결과도 재시작 **전에** lastResult 에 남긴다(파일) — 예전에는 .catch(() => {}) 로 버렸고 메모리 상태는 재시작이 지웠다.
+      const colPush = await this.pushToCollectors(res.appliedArchive).catch((e) => { console.warn(`[upgrade] 수집 에이전트 업그레이드 푸시 실패: ${e?.message || e}`); return null; });
+      if (Array.isArray(colPush) && colPush.length) { this.#lastResult.collectorPush = summarizeCollectorPush(colPush); this.#save(); }
+      else if (this.lastCollectorSkip) { this.#lastResult.collectorPush = { total: 0, ok: 0, items: [], skipped: this.lastCollectorSkip }; this.#save(); }
       if (restart) setTimeout(() => restartProcess(), 250);
     }
     return res;
@@ -317,15 +341,21 @@ export class UpgradeManager {
    * collector agent so all datacenters stay on the same version automatically.
    */
   async pushToCollectors(archivePath) {
+    this.lastCollectorSkip = null;   // v2.775: 이전 적용의 '생략' 이 이번 결과로 새지 않게
     if (!loadCollectors().some((c) => c.enabled !== false)) return [];
     const bundle = archivePath ? bundleFromArchive(archivePath) : await resolveBundleBytes(this.settings);
     if (!bundle) {
-      if (archivePath) console.warn(`[upgrade] 수집 에이전트 업그레이드 푸시 생략 — 적용한 번들을 다시 확인하지 못했습니다: ${lastBundleReject() || '사유 없음'}`);
+      const why = lastBundleReject() || '사유 없음';
+      if (archivePath) console.warn(`[upgrade] 수집 에이전트 업그레이드 푸시 생략 — 적용한 번들을 다시 확인하지 못했습니다: ${why}`);
+      // v2.775: 생략도 결과다 — 수집 서버가 하나도 받지 못했다는 사실과 사유를 apply 가 lastResult 에 남긴다(예전에는 콘솔 한 줄뿐).
+      this.lastCollectorSkip = `번들을 다시 확인하지 못해 수집 서버에 보내지 않았습니다: ${String(why).slice(0, 240)}`;
       return [];
     }
-    const results = await pushUpgradeToCollectors(bundle.bytes, { manifest: bundle.manifest || null }); // v2.730(S-10): 서명 manifest 를 함께
+    const results = await pushUpgradeToCollectors(bundle.bytes, { manifest: bundle.manifest || null, auto: true }); // v2.730(S-10): 서명 manifest 를 함께
     const ok = results.filter((r) => r.ok).length;
     if (results.length) console.log(`[upgrade] 수집 에이전트 업그레이드 푸시: ${ok}/${results.length} 성공`);
+    // v2.775: 실패한 수집 서버마다 한 줄(이름·사유) — 예전에는 'n/m 성공' 뿐이라 journalctl 로도 원인을 알 수 없었다(엣지 push 와 같은 모양).
+    for (const r of results) if (!r.ok) console.warn(`[upgrade] 수집 에이전트 업그레이드 푸시 실패 ${r.name || r.id}: ${String(r.reason || '사유 미상').slice(0, 300)}`);
     return results;
   }
 

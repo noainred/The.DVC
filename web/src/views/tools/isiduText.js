@@ -254,6 +254,14 @@ export function trendNotes(tr, { sizeMode = 'h' } = {}) {
   if (partial) out.push(`속이 빈 점 ${partial}개는 권한 오류가 난 수집입니다 — 그때 크기는 실제보다 작을 수 있어 선에 넣지 않았습니다.`);
   const fails = (tr?.failures || []).length;
   if (fails) out.push(`이 기간에 실패한 수집 ${fails}회는 점이 없습니다.`);
+  // v2.769(점검 R4-D4-04): 서버가 점을 솎았거나(기간 전체에 고르게) 읽기 상한을 넘어 오래된 쪽을 잘랐으면 그 사실을 말한다.
+  const th = tr?.thinned;
+  const total = numOrNull(th?.total); const shown = numOrNull(th?.shown);
+  if (total != null && shown != null && shown < total) out.push(`수집이 많아 ${total.toLocaleString()}회 중 ${shown.toLocaleString()}회를 기간 전체에 고르게 골라 그렸습니다(첫·마지막 수집은 포함).`);
+  if (tr?.truncated) {
+    const from = numOrNull(tr.fromTs);
+    out.push(`수집이 너무 많아 최근 것부터 읽을 수 있는 만큼만 그렸습니다${from != null ? ` — ${new Date(from).toLocaleDateString()} 이전은 빠졌습니다` : ''}.`);
+  }
   return out;
 }
 

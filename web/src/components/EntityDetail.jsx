@@ -32,14 +32,15 @@ import { fetchJson, postJson, toolAllowed } from '../api.js';
 import { Modal } from './Modal.jsx';
 import { GpuBadge, UsageCell, StateBadge, Loading, ErrorBox } from './primitives.jsx';
 import { STable } from './STable.jsx';
+import { levelOf, gbText, pctText, timeText, agoText, vmPartNote } from '../views/tools/guestPartText.js'; // v2.750 게스트 파티션 사용량(순수·vitest 고정)
 import { vmCfgFindings, vmCfgRows, VM_CFG_TEXT } from '../views/vmcfg/vmCfgText.js'; // v2.697(B10)
 import { hostCfgFindings, hostCfgRows, HOST_CFG_TEXT, findingDetail as hostFindingDetail } from '../views/hostcfg/hostCfgText.js'; // v2.699
-import { MOVE_KIND_LABEL, fmtTs as vmChgTs, routeText, changeText, vmHistoryNotCollectedText } from '../views/vmchanges/vmChangesText.js'; // v2.702 · v2.733(C1-01)
+import { MOVE_KIND_LABEL, fmtTs as vmChgTs, routeText, changeText, vmHistoryNotCollectedText, vmHistoryLagText } from '../views/vmchanges/vmChangesText.js'; // v2.702 · v2.733(C1-01) · v2.772(Z4-2)
 import { vmTagLine } from '../views/tags/vmTagsText.js'; // v2.703
 import { vmContentionFindings, CONTENTION_TEXT, avgMaxText, msText } from '../views/contention/contentionText.js'; // v2.706(C2·C3)
 import { CLUSTER_TEXT, clusterDetailRows, vmRulesText, findingDetail as clusterFindingDetail, ageText as clusterAgeText, clusterOfParams, clusterMissLine } from '../views/clustercfg/clusterCfgText.js'; // v2.701 · v2.742(VC-05) 조회 인자·빈 사유
 
-function DRow({ label, children, full = false, nowrap = false }) {
+export function DRow({ label, children, full = false, nowrap = false }) {
   return (
     <div className="flex between" style={{ padding: '8px 0', borderBottom: '1px solid rgba(36,48,73,.4)', gap: 16, gridColumn: full ? '1 / -1' : 'auto' }}>
       <span className="muted" style={{ whiteSpace: 'nowrap' }}>{label}</span>
@@ -361,6 +362,89 @@ function DsBrowseSection({ item }) {
  * 판정은 vmCfgText.vmCfgFindings 하나(서버 vmcfg/parse.js 와 같은 규칙 — 테스트 대조).
  */
 const SEV_BADGE = { crit: ['위험', 'red'], warn: ['주의', 'amber'], info: ['참고', 'gray'] };
+
+/**
+ * v2.750: 게스트 파티션 사용량 — 게스트 디스크 주기 수집(VMware Tools 가 보고한 guest.disk)의 이 VM 최신 값과 **수집 시각**.
+ * 창을 열 때 1회 조회한다(폴링 없음 — 값은 수집 주기마다 바뀐다). 라이브 조회가 아니므로 시각을 반드시 함께 보인다.
+ * 값을 모르는 파티션(여유 공간 미보고)은 0% 가 아니라 '값 모름'. 경보 무시 규칙에 걸린 파티션도 보이되 표지를 단다.
+ */
+function VmPartitionsSection({ vm }) {
+  const [st, setSt] = useState({ data: null, error: null });
+  useEffect(() => {
+    if (!vm?.id) return undefined;
+    let active = true;
+    setSt({ data: null, error: null });
+    fetchJson(`/vms/${encodeURIComponent(vm.id)}/partitions`)
+      .then((d) => { if (active) setSt({ data: d, error: null }); })
+      .catch((e) => { if (active) setSt({ data: null, error: e }); });
+    return () => { active = false; };
+  }, [vm?.id]);
+  if (!vm?.id) return null;
+  const d = st.data;
+  const parts = Array.isArray(d?.parts) ? d.parts : [];
+  const note = vmPartNote(d, d?.now);
+  const over = parts.filter((p) => p.over && !p.ignored).length;
+  const iv = d?.collect?.intervalHours;
+  return (
+    <div style={{ marginTop: 14, whiteSpace: 'normal' }}>
+      <div className="muted" style={{ fontSize: 12, marginBottom: 6, display: 'flex', flexWrap: 'wrap', gap: '2px 10px', alignItems: 'baseline' }}>
+        <span>게스트 파티션 사용량{parts.length ? ` — ${parts.length}개` : ''}{over ? ` · 임계 ${d.thr}% 이상 ${over}개` : ''}</span>
+        {d?.collectedAt != null && (
+          <span title="게스트 디스크 주기 수집이 이 VM 의 파티션을 읽은 시각(포탈 시각). 화면을 연 시각의 실시간 값이 아닙니다.">
+            수집 <b style={{ color: 'var(--text)' }}>{timeText(d.collectedAt, d.offsetMin)}</b> ({agoText(d.collectedAt, d.now)})
+          </span>
+        )}
+        {d && <span>{d.collect?.enabled ? `주기 ${iv}시간` : '주기 수집 꺼짐'}</span>}
+      </div>
+      {st.error ? <div className="muted" style={{ fontSize: 12 }}>{st.error.status === 404 ? '이 VM 을 현재 인벤토리에서 찾지 못했습니다.' : st.error.status === 403 ? '파티션 사용량을 볼 권한이 없습니다.' : '파티션 사용량을 불러오지 못했습니다.'}</div>
+        : !d ? <div className="muted" style={{ fontSize: 12 }}>불러오는 중…</div>
+        : note.empty ? <div className="muted" style={{ fontSize: 12, lineHeight: 1.6 }}>{note.empty}</div>
+        : (
+          <>
+            <div className="table-wrap" style={{ maxHeight: '32vh' }}>
+              <STable limit={50}>
+                <thead><tr><th>파티션</th><th style={{ width: '46%' }} title="사용률 · 사용 / 할당">사용률</th><th style={{ textAlign: 'right' }}>여유</th></tr></thead>
+                <tbody>
+                  {parts.map((p) => {
+                    const lv = levelOf(p.pct, d.thr);
+                    return (
+                      <tr key={p.path}>
+                        <td style={{ maxWidth: 220, overflowWrap: 'anywhere' }} data-sort={p.path}>
+                          <b style={{ fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', fontSize: 12.5 }}>{p.path}</b>
+                          {p.ignored && <span className="badge gray" style={{ fontSize: 10, marginLeft: 6 }} title={`경보 무시 규칙 — ${p.ignored}. 메일·초과 목록에서 빠집니다.`}>경보 제외</span>}
+                        </td>
+                        <td data-sort={p.pct ?? ''}>
+                          {p.pct == null ? <span className="muted" style={{ fontSize: 12 }} title="게스트가 이 파티션의 여유 공간을 보고하지 않았습니다(0% 가 아닙니다).">값 모름</span> : (
+                            <>
+                              <span style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
+                                <span style={{ flex: 1, minWidth: 24, height: 7, borderRadius: 4, background: 'rgba(148,163,184,.18)', overflow: 'hidden' }}>
+                                  <span style={{ display: 'block', width: `${Math.min(100, p.pct)}%`, height: '100%', background: lv.color }} />
+                                </span>
+                                <b style={{ color: lv.color, fontSize: 12.5, whiteSpace: 'nowrap' }}>{pctText(p.pct)}</b>
+                              </span>
+                              <span className="muted" style={{ display: 'block', fontSize: 11.5, marginTop: 2 }}>{gbText(p.usedGB)} / {gbText(p.capGB)}</span>
+                            </>
+                          )}
+                          {p.pct == null && p.capGB != null && <span className="muted" style={{ display: 'block', fontSize: 11.5, marginTop: 2 }}>할당 {gbText(p.capGB)}</span>}
+                        </td>
+                        <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }} data-sort={p.freeGB ?? ''}>{gbText(p.freeGB)}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </STable>
+            </div>
+            {(note.stale || d.partial) && (
+              <div className="muted" style={{ fontSize: 11, marginTop: 6, whiteSpace: 'normal' }}>
+                {[note.stale, d.partial ? '여유 공간을 보고하지 않은 파티션이 있어 VM 합계는 부분 값입니다.' : ''].filter(Boolean).join(' ')}
+              </div>
+            )}
+          </>
+        )}
+    </div>
+  );
+}
+
 function VmCfgSection({ vm }) {
   const view = vmCfgRows(vm);
   const findings = vmCfgFindings(vm);
@@ -410,7 +494,7 @@ function VmCfgSection({ vm }) {
  * v2.706(C2·C3): CPU 경합·디스크 지연 — 수집 서버가 실시간 통계(최근 창)를 나눠 읽은 값(vm.perfc·host.perfc).
  * 화면이 vCenter 에 따로 묻지 않는다(왕복 0). 값이 없으면 '측정하지 않음' 이지 '경합 없음' 이 아니다.
  */
-function PerfcSection({ item, isVm }) {
+export function PerfcSection({ item, isVm }) {
   const p = item?.perfc;
   const off = isVm && item?.powerState && item.powerState !== 'POWERED_ON';
   const findings = isVm ? vmContentionFindings(item) : [];
@@ -467,6 +551,77 @@ function PerfcSection({ item, isVm }) {
   );
 }
 
+/**
+ * 호스트 기본 행 17개(v2.805 — 호스트 상세 모달과 전체 페이지 views/HostDetail.jsx 가 같은 것을 그린다. 복제하지 말 것).
+ * onShowVms: 'VM n대 보기' 버튼 — 호출부가 HostVmsModal 을 연다.
+ */
+export function HostBasicRows({ item, onShowVms }) {
+  return (
+    <>
+      <DRow label="이름">
+        <span style={{ display: 'inline-flex', flexWrap: 'wrap', alignItems: 'baseline', gap: 6 }}>
+          <b className="cell-link" style={{ cursor: 'pointer', wordBreak: 'break-all' }} title="이 호스트의 VM 목록 보기" onClick={onShowVms}>{item.name}</b>
+          {/* 저대비 텍스트 링크 → 버튼형 배지(테두리+배경)로 가독성 강화 */}
+          <button type="button" title="이 호스트의 VM 목록 보기" onClick={onShowVms}
+            style={{ fontSize: 12, fontWeight: 700, cursor: 'pointer', whiteSpace: 'nowrap', padding: '3px 10px', borderRadius: 999,
+              color: '#7dd3fc', background: 'rgba(56,189,248,.12)', border: '1px solid rgba(56,189,248,.45)', lineHeight: 1.4 }}>
+            🖥️ VM {item.vmCount ?? 0}대 보기 ›
+          </button>
+        </span>
+      </DRow>
+      <DRow label="상태"><StateBadge state={item.connectionState} /></DRow>
+      <DRow label="vCenter">{item.vcenterId}</DRow>
+      <DRow label="클러스터">{item.cluster || '—'}</DRow>
+      <DRow label="전원">{item.powerState === 'POWERED_ON' ? 'On' : (item.powerState ? 'Off' : '—')}</DRow>
+      <DRow label="제조사 / 모델">{[item.vendor, item.model].filter(Boolean).join(' / ') || '—'}</DRow>
+      {/* 장비 서비스 태그(Dell Service Tag 등) — vCenter 가 수집한 하드웨어 식별자
+          (summary.hardware.otherIdentifyingInfo). 서버 교체·A/S·자산 대조용. 없으면 '—'. */}
+      <DRow label="서비스 태그">{item.serviceTag ? <b style={{ letterSpacing: 0.5 }}>{item.serviceTag}</b> : '—'}</DRow>
+      <DRow label="ESXi 버전">{item.version ? `${item.version}${item.build ? ` (build ${item.build})` : ''}` : '—'}</DRow>
+      <DRow label="CPU">{item.cpuCores}코어{item.cpuThreads ? ` / ${item.cpuThreads}스레드` : ''}{item.cpuTotalMhz ? ` · ${(item.cpuTotalMhz / 1000).toFixed(1)}GHz` : ''}</DRow>
+      {/* v2.556(사용자 요청): CPU 모델명. 원문이 40자 안팎이라 2열 칸에 넣으면 옆 칸을
+          밀어내므로 **한 줄 전체**를 쓴다. 다듬은 값 옆에 원문을 툴팁으로 남기고(정리가
+          다른 벤더에서 빗나갈 수 있다), 값이 없으면 '—' + 이유를 말한다. */}
+      <DRow label="CPU 모델" full nowrap>
+        {(() => { const c = cpuModelCell(item.cpuModel); return <span title={c.title || undefined}>{c.text}</span>; })()}
+      </DRow>
+      <DRow label="CPU 사용률"><UsageCell pct={hostUsagePct(item, 'cpuUsagePct')} /></DRow>
+      <DRow label="메모리">{gb(item.memTotalMB)}{item.memUsageMB ? ` · 사용 ${gb(item.memUsageMB)}` : ''}</DRow>
+      <DRow label="메모리 사용률"><UsageCell pct={hostUsagePct(item, 'memUsagePct')} /></DRow>
+      {item.powerWatts > 0 && <DRow label="소비전력" full nowrap>{(item.powerWatts / 1000).toFixed(2)} kW ({item.powerWatts} W){item.powerSource === 'idrac' ? ' · iDRAC' : (item.idracBacked ? ' · vCenter 추정' : '')}</DRow>}
+      {item.idracBacked && item.powerWattsIdrac > 0 && <DRow label="iDRAC 실측" full nowrap>{(item.powerWattsIdrac / 1000).toFixed(2)} kW ({item.powerWattsIdrac} W) <span className="muted" style={{ fontSize: 11 }}>· iDRAC 서버 등록 메뉴 집계</span></DRow>}
+      <DRow label="VM 수">{item.vmCount}</DRow>
+      <DRow label="HBA / GPU">{(item.hbas?.length || 0)}개 / {(item.gpus?.length || 0)}개</DRow>
+    </>
+  );
+}
+
+/** 스토리지 어댑터(HBA) 표 — 모달·전체 페이지 공용(v2.805). */
+export function HostHbaTable({ item }) {
+  if (!(item?.hbas?.length > 0)) return null;
+  return (
+    <div style={{ marginTop: 14 }}>
+      <div className="muted" style={{ fontSize: 12, marginBottom: 6 }}>스토리지 어댑터 (HBA) — {item.hbas.length}</div>
+      <div className="table-wrap" style={{ maxHeight: '28vh' }}>
+        <STable>
+          <thead><tr><th>어댑터</th><th>유형</th><th>모델</th><th style={{ textAlign: 'right' }}>속도</th><th>WWN</th></tr></thead>
+          <tbody>
+            {item.hbas.map((h, i) => (
+              <tr key={i}>
+                <td><b>{h.name || '—'}</b></td>
+                <td><span className="badge blue">{h.type}</span></td>
+                <td className="muted" style={{ fontSize: 12 }}>{h.model || '—'}</td>
+                <td style={{ textAlign: 'right' }}>{h.speedGbps ? `${h.speedGbps} Gb` : '—'}</td>
+                <td className="muted" style={{ fontSize: 11 }}>{h.wwn || '—'}</td>
+              </tr>
+            ))}
+          </tbody>
+        </STable>
+      </div>
+    </div>
+  );
+}
+
 export function EntityDetail({ type, item, onClose }) {
   const titles = { vm: 'VM', host: '호스트', datastore: '데이터스토어' };
   const [showHostVms, setShowHostVms] = useState(false);
@@ -507,44 +662,7 @@ export function EntityDetail({ type, item, onClose }) {
             <DRow label="메모">{item.notes || '—'}</DRow>
           </>
         )}
-        {type === 'host' && (
-          <>
-            <DRow label="이름">
-              <span style={{ display: 'inline-flex', flexWrap: 'wrap', alignItems: 'baseline', gap: 6 }}>
-                <b className="cell-link" style={{ cursor: 'pointer', wordBreak: 'break-all' }} title="이 호스트의 VM 목록 보기" onClick={() => setShowHostVms(true)}>{item.name}</b>
-                {/* 저대비 텍스트 링크 → 버튼형 배지(테두리+배경)로 가독성 강화 */}
-                <button type="button" title="이 호스트의 VM 목록 보기" onClick={() => setShowHostVms(true)}
-                  style={{ fontSize: 12, fontWeight: 700, cursor: 'pointer', whiteSpace: 'nowrap', padding: '3px 10px', borderRadius: 999,
-                    color: '#7dd3fc', background: 'rgba(56,189,248,.12)', border: '1px solid rgba(56,189,248,.45)', lineHeight: 1.4 }}>
-                  🖥️ VM {item.vmCount ?? 0}대 보기 ›
-                </button>
-              </span>
-            </DRow>
-            <DRow label="상태"><StateBadge state={item.connectionState} /></DRow>
-            <DRow label="vCenter">{item.vcenterId}</DRow>
-            <DRow label="클러스터">{item.cluster || '—'}</DRow>
-            <DRow label="전원">{item.powerState === 'POWERED_ON' ? 'On' : (item.powerState ? 'Off' : '—')}</DRow>
-            <DRow label="제조사 / 모델">{[item.vendor, item.model].filter(Boolean).join(' / ') || '—'}</DRow>
-            {/* 장비 서비스 태그(Dell Service Tag 등) — vCenter 가 수집한 하드웨어 식별자
-                (summary.hardware.otherIdentifyingInfo). 서버 교체·A/S·자산 대조용. 없으면 '—'. */}
-            <DRow label="서비스 태그">{item.serviceTag ? <b style={{ letterSpacing: 0.5 }}>{item.serviceTag}</b> : '—'}</DRow>
-            <DRow label="ESXi 버전">{item.version ? `${item.version}${item.build ? ` (build ${item.build})` : ''}` : '—'}</DRow>
-            <DRow label="CPU">{item.cpuCores}코어{item.cpuThreads ? ` / ${item.cpuThreads}스레드` : ''}{item.cpuTotalMhz ? ` · ${(item.cpuTotalMhz / 1000).toFixed(1)}GHz` : ''}</DRow>
-            {/* v2.556(사용자 요청): CPU 모델명. 원문이 40자 안팎이라 2열 칸에 넣으면 옆 칸을
-                밀어내므로 **한 줄 전체**를 쓴다. 다듬은 값 옆에 원문을 툴팁으로 남기고(정리가
-                다른 벤더에서 빗나갈 수 있다), 값이 없으면 '—' + 이유를 말한다. */}
-            <DRow label="CPU 모델" full nowrap>
-              {(() => { const c = cpuModelCell(item.cpuModel); return <span title={c.title || undefined}>{c.text}</span>; })()}
-            </DRow>
-            <DRow label="CPU 사용률"><UsageCell pct={hostUsagePct(item, 'cpuUsagePct')} /></DRow>
-            <DRow label="메모리">{gb(item.memTotalMB)}{item.memUsageMB ? ` · 사용 ${gb(item.memUsageMB)}` : ''}</DRow>
-            <DRow label="메모리 사용률"><UsageCell pct={hostUsagePct(item, 'memUsagePct')} /></DRow>
-            {item.powerWatts > 0 && <DRow label="소비전력" full nowrap>{(item.powerWatts / 1000).toFixed(2)} kW ({item.powerWatts} W){item.powerSource === 'idrac' ? ' · iDRAC' : (item.idracBacked ? ' · vCenter 추정' : '')}</DRow>}
-            {item.idracBacked && item.powerWattsIdrac > 0 && <DRow label="iDRAC 실측" full nowrap>{(item.powerWattsIdrac / 1000).toFixed(2)} kW ({item.powerWattsIdrac} W) <span className="muted" style={{ fontSize: 11 }}>· iDRAC 서버 등록 메뉴 집계</span></DRow>}
-            <DRow label="VM 수">{item.vmCount}</DRow>
-            <DRow label="HBA / GPU">{(item.hbas?.length || 0)}개 / {(item.gpus?.length || 0)}개</DRow>
-          </>
-        )}
+        {type === 'host' && <HostBasicRows item={item} onShowVms={() => setShowHostVms(true)} />}
         {type === 'datastore' && (
           <>
             <DRow label="이름"><b>{item.name}</b></DRow>
@@ -559,6 +677,7 @@ export function EntityDetail({ type, item, onClose }) {
           </>
         )}
       </div>
+      {type === 'vm' && <VmPartitionsSection vm={item} />}
       {type === 'vm' && <VmCfgSection vm={item} />}
       {type === 'host' && <HostCfgSection host={item} />}
       {(type === 'vm' || type === 'host') && <PerfcSection item={item} isVm={type === 'vm'} />}
@@ -566,27 +685,7 @@ export function EntityDetail({ type, item, onClose }) {
       {type === 'vm' && <VmTagsSection vm={item} />}
       {type === 'vm' && <VmChangesSection vm={item} />}
       {type === 'datastore' && <DsBrowseSection item={item} />}
-      {type === 'host' && item.hbas?.length > 0 && (
-        <div style={{ marginTop: 14 }}>
-          <div className="muted" style={{ fontSize: 12, marginBottom: 6 }}>스토리지 어댑터 (HBA) — {item.hbas.length}</div>
-          <div className="table-wrap" style={{ maxHeight: '28vh' }}>
-            <STable>
-              <thead><tr><th>어댑터</th><th>유형</th><th>모델</th><th style={{ textAlign: 'right' }}>속도</th><th>WWN</th></tr></thead>
-              <tbody>
-                {item.hbas.map((h, i) => (
-                  <tr key={i}>
-                    <td><b>{h.name || '—'}</b></td>
-                    <td><span className="badge blue">{h.type}</span></td>
-                    <td className="muted" style={{ fontSize: 12 }}>{h.model || '—'}</td>
-                    <td style={{ textAlign: 'right' }}>{h.speedGbps ? `${h.speedGbps} Gb` : '—'}</td>
-                    <td className="muted" style={{ fontSize: 11 }}>{h.wwn || '—'}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </STable>
-          </div>
-        </div>
-      )}
+      {type === 'host' && <HostHbaTable item={item} />}
       {type === 'host' && item.gpus?.length > 0 && (
         <div style={{ marginTop: 12 }}>
           <div className="muted" style={{ fontSize: 12, marginBottom: 6 }}>GPU — {item.gpus.length}</div>
@@ -635,7 +734,7 @@ export function EntityDetail({ type, item, onClose }) {
  * 값은 수집 서버가 오래된 호스트부터 나눠 읽은 캐시(host.hcfg). 판정은 hostCfgText.hostCfgFindings(서버와 같은 규칙 — 테스트 대조).
  * 클러스터 드리프트는 여러 호스트를 비교해야 하므로 여기서는 하지 않는다(특수 기능 'ESXi 호스트 구성 점검').
  */
-function HostCfgSection({ host }) {
+export function HostCfgSection({ host }) {
   const view = hostCfgRows(host);
   const findings = hostCfgFindings(host);
   return (
@@ -679,7 +778,7 @@ function HostCfgSection({ host }) {
  * v2.701(A6): 이 VM·호스트가 속한 클러스터의 HA·DRS·EVC·유효 호스트 + (VM 이면) 그 VM 이 들어 있는 선호도 규칙.
  * 열 때 1회 조회(폴링 없음) · 도구 권한이 없으면 부르지 않는다(403 을 만들지 않게) · 늦게 온 응답은 버린다.
  */
-function ClusterCfgSection({ item, isVm }) {
+export function ClusterCfgSection({ item, isVm }) {
   const allowed = toolAllowed('cluster-check');
   const cluster = item?.cluster;
   const [st, setSt] = useState({ data: null, error: null });
@@ -797,10 +896,12 @@ function VmChangesSection({ vm }) {
         // v2.733(C1-01): 이 VM 의 vCenter 를 이 포탈이 지금 이벤트로 수집하지 않으면(엣지 위임·비활성·점검중) '변경 없음' 이라 말하지 않는다.
         : vmHistoryNotCollectedText(d) && items.length === 0 ? <div className="muted" style={{ fontSize: 12, whiteSpace: 'normal' }}>{vmHistoryNotCollectedText(d)}</div>
         : !d.lastTs ? <div className="muted" style={{ fontSize: 12 }}>이 VM 의 vCenter 에서 받은 이벤트가 아직 없습니다 — '이동 없음' 이 아닙니다.</div>
-        : items.length === 0 ? <div className="muted" style={{ fontSize: 12 }}>받아 둔 이벤트 중 이 VM 의 이동·구성 변경이 없습니다.</div>
+        // v2.772(Z4-2): 수집이 뒤처졌으면 '없음' 이 그 뒤까지 뜻하지 않게 함께 말한다.
+        : items.length === 0 ? <div className="muted" style={{ fontSize: 12, whiteSpace: 'normal' }}>받아 둔 이벤트 중 이 VM 의 이동·구성 변경이 없습니다.{vmHistoryLagText(d) ? ` ${vmHistoryLagText(d)}` : ''}</div>
         : (
           <>
           {vmHistoryNotCollectedText(d) && <div className="muted" style={{ fontSize: 12, whiteSpace: 'normal', marginBottom: 4 }}>{vmHistoryNotCollectedText(d)}</div>}
+          {vmHistoryLagText(d) && <div style={{ fontSize: 12, whiteSpace: 'normal', marginBottom: 4, color: 'var(--amber)' }}>⚠ {vmHistoryLagText(d)}</div>}
           <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', gap: 4 }}>
             {items.map((x, i) => (
               <li key={`${x.ts}-${i}`} style={{ display: 'flex', gap: 8, alignItems: 'flex-start', minWidth: 0, fontSize: 12, whiteSpace: 'normal', flexWrap: 'wrap' }}>
@@ -828,7 +929,7 @@ function VmChangesSection({ vm }) {
  * 어디서나 VM 이름/IP/호스트명을 클릭하면 VM 상세(EntityDetail) 팝업을 띄우는 공용 링크.
  * 스냅샷에서 단건 조회(/vms/lookup) 후 모달을 연다. 못 찾으면 안내 모달.
  */
-export function VmLink({ name, ip, vcenterId, label, item, className = 'cell-link', style }) {
+export function VmLink({ name, ip, vcenterId, vmId, label, item, className = 'cell-link', style, title }) {
   const [vm, setVm] = useState(null);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState(null);
@@ -843,6 +944,7 @@ export function VmLink({ name, ip, vcenterId, label, item, className = 'cell-lin
       if (name) params.name = name;
       if (ip) params.ip = ip;
       if (vcenterId) params.vcenterId = vcenterId;
+      if (vmId) params.id = vmId;   // v2.749.1: id 를 알면 정확히 찾는다(이름 부분 일치로 다른 VM 을 열지 않게)
       const r = await fetchJson('/vms/lookup', params);
       // seed로 이미 열렸는데 cur가 null이면 사용자가 닫은 것 — 늦은 응답이 모달을 다시 열지 않게 한다.
       // (seed가 없던 경우엔 아직 안 열린 상태이므로 정상적으로 연다.)
@@ -854,7 +956,7 @@ export function VmLink({ name, ip, vcenterId, label, item, className = 'cell-lin
   };
   return (
     <>
-      <button className={className} style={style} disabled={busy} onClick={open} title="클릭하면 VM 상세 보기">{label ?? name ?? ip}</button>
+      <button type="button" className={className} style={style} disabled={busy} onClick={open} title={title || '클릭하면 VM 상세 보기'}>{label ?? name ?? ip}</button>
       {vm && <EntityDetail type="vm" item={vm} onClose={() => setVm(null)} />}
       {msg && <Modal title="VM 조회" onClose={() => setMsg(null)} width={380}><div className="muted" style={{ padding: 4 }}>{msg}</div></Modal>}
     </>

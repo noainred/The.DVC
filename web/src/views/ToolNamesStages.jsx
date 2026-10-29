@@ -136,7 +136,7 @@ export default function ToolNamesStages({ settings, limits = {}, defaultStages =
         <div className="st-editor-title">메뉴 이름 · 설명 · 개발 단계</div>
         <div className="st-editor-note">
           메뉴 이름·설명·단계를 바꾸면 모든 사용자의 특수 기능 화면에 바로 반영됩니다. 기능 키와 링크(#/tools/키)는 바뀌지 않습니다.
-          왼쪽 메뉴(V4·V5·V6)와 검색 팔레트에는 원래 이름이 그대로 보입니다.
+          ⌘K 검색 팔레트에는 원래 이름이 그대로 보입니다.
         </div>
         <div className="st-seg st-editor-tabs">
           <button className={tab === 'names' ? 'on' : ''} onClick={() => setTab('names')}>기능 이름 · 단계</button>

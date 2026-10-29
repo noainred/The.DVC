@@ -26,6 +26,8 @@ import { centralRouter } from '../central.js';
 import { collectorRouter } from '../collector.js';
 import { buildDataFlow, KINDS } from '../../dataflow/build.js';
 import { GROUP_LABEL } from '../../edgelog/spec.js';
+import { maskFlowInputsForDemoGuest } from '../../commmap/demoMask.js';
+import { DEMO_FLOW_PREDS, demoFlowKey } from './commMap.js';
 
 const adminOnly = requireRole('admin');
 const fullScopeOnly = fullScopeOnlyWith('데이터 흐름 지도는 전체 범위(vCenter 제한 없는) 계정만 조회할 수 있습니다 — 전 법인 엣지의 이름·주소·거부 사유가 들어갑니다.');
@@ -60,11 +62,15 @@ export function gatherFlowInputs(sourceErrors) {
 
 export function registerDataFlow(api) {
   api.get('/tools/data-flow', adminOnly, fullScopeOnly, async (req, res) => {
+    const demo = demoFlowKey(req) === 'demo';
     await memoJson(req, res, 'data-flow', async () => {
       const sourceErrors = [];
-      const flow = buildDataFlow(gatherFlowInputs(sourceErrors));
+      const inputs0 = gatherFlowInputs(sourceErrors);
+      // v2.768(점검 R3-C2-2): 데모 계정은 실제 엣지 이름·주소·거부 사유를 가린 입력으로 조립한다(가린 수는 demoMasked).
+      const { inputs, masked } = demo ? maskFlowInputsForDemoGuest(inputs0, DEMO_FLOW_PREDS) : { inputs: inputs0, masked: null };
+      const flow = buildDataFlow(inputs);
       // 엣지 주소는 origin 만(경로·쿼리에 토큰이 실릴 수 있다) — build 가 이미 origin 만 담는다.
-      return { ok: true, ...flow, kinds: KINDS, innerGroupLabel: GROUP_LABEL, sourceErrors, generatedAt: Date.now() };
-    });
+      return { ok: true, ...flow, ...(demo ? { demoMasked: masked } : {}), kinds: KINDS, innerGroupLabel: GROUP_LABEL, sourceErrors, generatedAt: Date.now() };
+    }, { extraKey: demoFlowKey(req) });
   });
 }

@@ -81,23 +81,42 @@ public sealed class MonitorService : IDisposable
         try { SettingsApplied?.Invoke(); } catch { /* 구독자 오류는 격리 */ }
     }
 
-    /// <summary>현재 대상 + 최신 상태 스냅샷(UI 그리드용).</summary>
+    // v2.767(점검 R2-B5-2): 메인 창(1초 타이머)과 트레이(1초 타이머)가 따로 Snapshot 을 불러 같은 조회를 두 번 했다.
+    //   DB 변경 표지(연결 세대 + total_changes)가 같으면 직전 결과를 나눠 쓴다 — 세대가 바뀌면(쓰기 1건이라도·연결 전환)
+    //   통째로 다시 읽는다. 표지는 조회 '전에' 잡으므로 그 사이 쓰기가 끼면 다음 호출이 다시 읽는다(낡은 값을 붙잡지 않는다).
+    private readonly object _snapGate = new();
+    private (long Conn, long Changes)? _snapStamp;
+    private List<EndpointStatus>? _snapCache;
+
+    /// <summary>현재 대상 + 최신 상태 스냅샷(UI 그리드용). 호출마다 새 목록이다(원소는 직전 호출과 공유할 수 있으니 고치지 말 것).</summary>
     public List<EndpointStatus> Snapshot()
     {
+        var stamp = _db.ChangeStamp();
+        lock (_snapGate)
+        {
+            if (_snapCache != null && _snapStamp == stamp) return new List<EndpointStatus>(_snapCache);
+        }
         var eps = _db.ListEndpoints();
         var latest = _db.LatestByEndpoint();
-        return eps.Select(e => new EndpointStatus { Endpoint = e, Latest = latest.TryGetValue(e.Id, out var s) ? s : null }).ToList();
+        var list = eps.Select(e => new EndpointStatus { Endpoint = e, Latest = latest.TryGetValue(e.Id, out var s) ? s : null }).ToList();
+        lock (_snapGate) { _snapCache = list; _snapStamp = stamp; }
+        return new List<EndpointStatus>(list);
     }
 
+    /// <summary>전체 상태 — 트레이와 같은 판정(오래된 결과는 대기, 저장 실패 중이면 '정상' 아님).</summary>
     public HealthStatus OverallStatus()
-    {
-        var snap = Snapshot().Where(s => s.Endpoint.Enabled).ToList();
-        if (snap.Count == 0) return HealthStatus.Unknown;
-        if (snap.Any(s => s.Status == HealthStatus.Down)) return HealthStatus.Down;
-        if (snap.Any(s => s.Status == HealthStatus.Warn)) return HealthStatus.Warn;
-        if (snap.All(s => s.Status == HealthStatus.Unknown)) return HealthStatus.Unknown;
-        return HealthStatus.Up;
-    }
+        => MonitorRules.CountStatuses(Snapshot(), DateTime.UtcNow, MonitorRules.DefaultMinStale, SaveFailures > 0).Overall;
+
+    // v2.767(점검 R2-B5-1): 저장 실패 추적 — 예전에는 InsertSample 예외를 catch { } 로 삼켜 error.log 에 한 줄도 없이 점검이 멈췄다.
+    private readonly SaveFailureTracker _saveFailures = new();
+
+    /// <summary>마지막 저장 성공 이후 연속 저장 실패 수(0 = 정상). 트레이·머리말이 '저장 실패' 를 표시한다.</summary>
+    public int SaveFailures => _saveFailures.Consecutive;
+    public string? LastSaveError => _saveFailures.LastError;
+    public DateTime? SaveFailingSinceUtc => _saveFailures.SinceUtc;
+
+    /// <summary>error.log 기록(테스트가 바꿔 끼운다 — AppLog.Dir 는 전역이라 병렬 테스트끼리 섞인다).</summary>
+    internal Action<string> ErrorLog { get; set; } = line => AppLog.Write(AppLog.ErrorFile, line);
 
     private async Task LoopAsync(CancellationToken token)
     {
@@ -160,11 +179,25 @@ public sealed class MonitorService : IDisposable
             catch (OperationCanceledException) when (token.IsCancellationRequested)
             {
                 // 앱 종료로 끊긴 점검 — 결과가 아니다. '시간 초과(위험)' 로 저장하면 다시 켰을 때 멀쩡한 장비에 알람이 울린다.
-                AppLog.Write(AppLog.ErrorFile, $"점검 중단(앱 종료): {ep.Name} — 결과를 저장하지 않았습니다.");
+                ErrorLog($"점검 중단(앱 종료): {ep.Name} — 결과를 저장하지 않았습니다.");
                 return;
             }
-            if (!_db.InsertSample(sample, gen))
-                AppLog.Write(AppLog.ErrorFile, $"점검 결과 버림(저장 DB 전환): {ep.Name} — 전환 전 DB 의 대상이었습니다.");
+            bool saved;
+            try { saved = _db.InsertSample(sample, gen); }
+            catch (Exception ex)
+            {
+                // v2.767(점검 R2-B5-1): 쓰기 실패(디스크 가득·폴더 끊김·잠금 시한)는 조용히 삼키지 않는다 — 스로틀해 남기고 연속 실패를 센다.
+                var line = _saveFailures.Fail(ep.Name, ex, DateTime.UtcNow);
+                if (line != null) ErrorLog(line);
+                return;
+            }
+            if (!saved)
+            {
+                ErrorLog($"점검 결과 버림(저장 DB 전환): {ep.Name} — 전환 전 DB 의 대상이었습니다.");
+                return;
+            }
+            var recovered = _saveFailures.Succeed(DateTime.UtcNow);
+            if (recovered != null) ErrorLog(recovered);
         }
         catch { /* 개별 점검 실패/취소는 격리 */ }
         finally

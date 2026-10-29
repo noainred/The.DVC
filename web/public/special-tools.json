@@ -1,6 +1,6 @@
 {
-  "generatedAt": "2026-10-29T13:52:23.349Z",
-  "count": 110,
+  "generatedAt": "2026-10-29T14:08:27.687Z",
+  "count": 116,
   "tools": [
     {
       "k": "service-hub",
@@ -92,6 +92,14 @@
     },
     {
       "k": "storage-growth",
+      "adminOnly": true,
+      "perm": null,
+      "external": null,
+      "topTab": false,
+      "comingSoon": false
+    },
+    {
+      "k": "storage-usage",
       "adminOnly": true,
       "perm": null,
       "external": null,
@@ -387,6 +395,14 @@
       "comingSoon": false
     },
     {
+      "k": "guest-partition",
+      "adminOnly": false,
+      "perm": null,
+      "external": null,
+      "topTab": false,
+      "comingSoon": false
+    },
+    {
       "k": "vm-export",
       "adminOnly": false,
       "perm": null,
@@ -597,6 +613,38 @@
     {
       "k": "contention",
       "adminOnly": false,
+      "perm": null,
+      "external": null,
+      "topTab": false,
+      "comingSoon": false
+    },
+    {
+      "k": "backup-summary",
+      "adminOnly": false,
+      "perm": null,
+      "external": null,
+      "topTab": false,
+      "comingSoon": false
+    },
+    {
+      "k": "backup-detail",
+      "adminOnly": false,
+      "perm": null,
+      "external": null,
+      "topTab": false,
+      "comingSoon": false
+    },
+    {
+      "k": "backup-em",
+      "adminOnly": false,
+      "perm": null,
+      "external": null,
+      "topTab": false,
+      "comingSoon": false
+    },
+    {
+      "k": "backup-run",
+      "adminOnly": true,
       "perm": null,
       "external": null,
       "topTab": false,

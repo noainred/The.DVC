@@ -23,6 +23,7 @@
 - (원래 3622행) v2.737 — 업그레이드·재시작으로 끊긴 스캔은 '실행 중 스캔 기록' 으로 자동 재개한다. 기록 판정은 `util/scanJournal.js` 하나
 - (원래 4692행) 등록 폼의 '담당 엣지'·'DataCenter' 는 자유 입력이 아니라 기존 목록에서 고른다 — 서버도 같은 규칙을 집행한다
 - (원래 4860행) 아키텍처 점검(v2.614) — 포탈 점검 3번째 서브메뉴. 운영 포탈이 자기 라우터 스택·카탈로그·표·파일을 스스로 판정한다
+- (v2.793) VM 백업 센터 법인 위임 — 엣지 위임 vCenter 의 백업은 담당 엣지가 실행한다. 중앙은 정의·화면·이력만
 
 ## 본문
 
@@ -669,4 +670,54 @@
     운영 CONFIG_DIR 에서 미분류 warn 이 나올 수 있고 `detail.classifier` 가 그 사실을 싣는다(정직 기록). `stripComments` 는 `archScan.js` 안에
     사본이 있다(배포 패키지에 `server/test` 가 없어 런타임 import 불가 — 테스트가 `test/_stripComments.js` 와 출력 동일성을 고정).
   - 권한 adminOnly + fullScopeOnly(형제 서브메뉴와 같다) · `memoJson` 30초(extraKey 에 역할) · 왕복 0 · 폴링 금지 · 표 `STable minWidth`.
+
+  - v2.769(점검 R4-D3·D4): 통신 점검 프로토콜 단계는 **'close' 에서 판정 + 실제 setTimeout 하드 시한**(소켓 비활동 타이머는 파괴 때 같이 사라진다), 폴러는 항목별 시한(`runWithItemDeadline`)으로
+    한 항목이 `running` 을 영구히 잡지 못하게 한다. 화면은 latest 가 있어도 꺼짐·엣지 보고 stale·나이 > 주기×3 이면 '측정 없음'(서버가 `ageMs` 를 싣는다).
+    svcmon 수동 새로고침은 실행하는 인스턴스(`EXECUTES && ENABLED`)에서만(아니면 409). 엣지 svcmon 재전송의 건너뛰는 분기도 `snapId` 를 갱신하고, snapId 역행 보류에는 시한(`REGRESS_GC_HOLD_MS`).
+    PDU 임계치는 중앙 파일이 있을 때만 pdu-config 로 엣지에 배포(메모리 적용 · `PDU_THRESHOLDS_LOCAL=1` 이면 현장 고정) — 알림 채널 설정은 배포하지 않는다(위임 PDU 경보는 엣지 채널에 달림).
+  - v2.770(점검 R5): 통신 점검 엣지 보고 낡음 경계 = max(3시간, 주기×3+10분)(`reportStaleLimitMs` — 서버 판정과 응답 `reportStaleMs` 가 같은 값), 엣지 결과 ts 는 엣지 시계 나이를 수신 시각에서 빼 환산(원본은 detail.edgeTs).
+    PDU 임계치 배포는 관리자가 **바꾼 키만**(`_assigned`, enabled 제외 · 표지 없는 파일은 `{}` — 엣지는 `{}` 를 '중앙 지정 없음' 으로 직전 세트를 지운다). 혼합 버전(v2.769 중앙 + v2.770 엣지)에서는 중앙을 먼저 올릴 것.
+  - v2.771(점검 R6-F4): 엣지 export 의 `power.byHost` 상한(`REMOTE_BYHOST_MAX`, 뺀 수 `byHostDropped`). collectors.json·central-agent-tokens.json 손상은 표지(`registryLoadError`·`agentTokensLoadError`)로 드러내고,
+    자동 경로(자기등록·검증 표시·비관리자 add)는 `autoWriteRefusal` 로 거절 — 관리자 저장만 표지를 푼다. 첫 설치(파일·보존본 없음)는 막지 않는다. 손상 중 puller 는 clearStaleRemote 를 건너뛰고, link-check·register·central 게이트는 503 registryUnreadable.
+
+- **VM 백업 센터 법인 위임(v2.793)** — `vmclone/dispatch.js`(중앙) · `agent/vmCloneWorker.js`(엣지) · `vmclone/execOp.js`(공용 실행) ·
+  `routes/central.js` `/vm-clone-sync`(GET)·`/vm-clone-report`(POST). 사용자 결정(2026-10-26): 법인 = 수집 엣지, 실행 = 담당 엣지, 저장소 = ESXi NFS 데이터스토어 또는 엣지 NFS 마운트.
+  회귀 `server/test/vmCloneCenter2793.test.js`.
+  · **담당 엣지는 등록값(`remoteAgent`)이 먼저**, 없으면 그 vCenter 인벤토리를 올린 엣지. 둘이 다르면 `conflict` — 어느 쪽에도 맡기지 않는다(같은 VM 을 두 엣지가 스냅샷하지 않게).
+  · 엣지는 정의를 로컬 저장소에 **위임 잡(`origin:'central'`)** 으로 맞추고 기존 스케줄러·실행기(재시작 정리 포함)로 돌린다 — 중앙과 끊겨도 백업은 계속된다.
+    중앙 스케줄러는 이 노드가 위임한(site) vCenter 의 잡을 넣지 않는다(`dueJobsOf` `siteVcIds`). 엣지 화면·API 로 위임 잡을 고치거나 지울 수 없다.
+  · **지우기는 중앙이 이 엣지 담당이라고 확인한 vCenter(`vcenters`)의 잡만** — 담당 미확정·빈 목록으로는 지우지 않는다. 무효 정의가 와도 그 id 는 남긴다.
+    실행 중 기록이 남은 잡은 정리가 끝날 때까지 둔다. `vm-clone.json` 손상이면 sync 는 503 settingsUnreadable(엣지는 그대로 유지), 등록부 파일을 못 읽으면 503 registryUnreadable.
+  · 엣지 보고는 `sanitizeReport` 로 아는 필드만·상한·글자만 받고, 잡 상태는 **그 엣지 담당 vCenter 의 중앙 잡 id** 만, 회신(ack)은 **그 엣지에 배정된 작업**만 받는다.
+    3규약(개별 토큰 전용 · 저장 키는 `req.centralAuth.agent` · X-Agent-Name). 보고는 BIG_JSON 등록. 워커는 0건이어도 보고한다(`edgelog/spec.js` `pull.vmClone`).
+  · 작업(지금 실행·검증·복구·NFS 연결)은 claim→ack. 대기 `PENDING_TTL_MS`(30분) · 인출 뒤 진행 보고 없음 `CLAIM_MS`(15분, 보고마다 연장)로 닫고 **다시 내려보내지 않는다**
+    (복구 VM·데이터스토어가 두 번 만들어지지 않게). 늦은 회신은 결과만 고친다. 작업 등록부·엣지 보고는 인메모리 — 중앙 재시작이면 대기 작업은 사라진다(화면이 말한다).
+  · 검증은 사본에 검증용 스냅샷 → **NIC 끊기 후 다시 읽어 확인**(`disconnectAllNics` — 확인 못 하면 켜지 않는다) → 켜기 → Tools 대기 → 끄기 → 되돌리기 → 스냅샷 삭제.
+    복구는 새 VM 만(원본 덮어쓰기 없음) · 기본 NIC 끊김 · 끊지 않으면 자동으로 켜지 않는다. ~~ESXi NFS 데이터스토어는 붙이기만 한다(떼기 없음)~~ → v2.794 에 떼어 내기 추가(아래).
+  · **v2.794(3회 개선)** — 회귀 `server/test/vmCloneSafety2794.test.js`·`vmCloneFeatures2794.test.js`.
+    - 검증 진행 기록(`job.verifying`)을 **스냅샷 요청 전에** 동기로 남긴다. 다른 프로세스의 기록(또는 뒷정리 실패 `boot:'cleanup-retry'`)이면 스케줄러가
+      `verify-cleanup` 작업으로 '끄기 → 되돌리기 → 스냅샷 삭제'(기록한 ref·스냅샷만, 사본 이름이 다르면 손대지 않음) · 보류 10분 · 시한 6시간.
+      정리 전에는 새 검증·잡 삭제를 막고 위임 동기화도 그 잡을 지우지 않는다. 전원 켜기는 **실측**으로 끈다(태스크 오류여도 켜졌을 수 있다).
+    - 네트워크를 끊는 복구는 CloneSpec `config`(template 뒤·powerOn 앞)의 deviceChange 로 **NIC 가 끊긴 채 태어나게** 한다 — 클론 뒤에 끊으면 그 사이 연결된 사본이 생긴다.
+    - NFS 데이터스토어 떼어 내기(`nfsds-detach`): 같은 NFS 일 때만 · 그 호스트의 VM 이 쓰면 거부 · 그 데이터스토어를 쓰는 잡이 있으면 라우트가 409. 실패 호스트는 연결 상태를 유지한다.
+    - 보존 기간 `keepDays`(1~365): 개수 + 기간 · **최근 1개는 언제나 남긴다** · 시각을 모르면 기간으로 지우지 않는다(원장·NFS 같은 규칙). 구판 엣지는 무시한다.
+    - 법인별 '백업에 사용' 마운트(`vm-clone-corp.json`, 키 = `corpKeyOfTarget`): 지정이 없으면 전부. 잡 저장(서버)이 지정 밖 마운트를 거부하고, 파일을 못 읽으면 NFS 대상을 거부(fail-closed).
+      바꾸려면 그 법인의 vCenter 를 **모두** 쓸 수 있어야 한다(조회 밖 404 → 쓰기 밖 403).
+    - 실패 메일(메일 종류 `vm-backup`, `vmclone/notify.js` — 중앙 전용): 엣지 이력 시각은 **수신 시각으로 자른다** · 처음은 지금부터 센다 · 발송 실패면 기준을 옮기지 않는다 ·
+      메일이 꺼져 있던 동안의 실패는 켠 뒤 쏟지 않는다.
+  · **v2.795(백업 실행 경로)** — 회귀 `server/test/vmCloneRun2795.test.js`.
+    - 스냅샷 **전에** 사전 확인(읽기 전용): 원본 VM 의 `config.instanceUuid` 를 처음 본 값으로 잡에 적고(`job.vmUuid` — 실행 상태라 정의 저장·위임 동기화가 덮지 않는다)
+      다르면 멈춘다(MoRef 재사용 방지). 대상 데이터스토어 실시간 여유·NFS 마운트 statfs 가 필요량 + 하한(max 10GiB, 5% — `vmclone/capacity.js`)보다 적으면 시작하지 않는다.
+      **못 읽은 값은 검사하지 않는다**(0 으로 보고 막지 않는다). 원본과 같은 데이터스토어면 결과에 ⚠. 복구도 같은 용량 규칙.
+    - 정지점 스냅샷이 **태스크 오류**면 일반 스냅샷으로 한 번 다시(`quiesceFallback` 기본 켬 · 결과 ⚠). 시간 초과는 다시 하지 않는다(태스크가 아직 돌 수 있다).
+    - 보존정책은 검증을 통과한 가장 최근 복원 지점(`lastVerifiedRef`)을 지우지 않는다(보존 +1). 클론 진행률은 실행 상태 문구에만(`waitTask onProgress`).
+    - RPO 초과(`vmclone/rpo.js` 하나 — 화면 `jobs[].rpo`·실패 메일이 같은 함수): 마지막 성공(건너뜀·검증 줄 제외)이 기대 주기 × 2 + 1시간을 넘으면.
+      수동·꺼짐·멈춤·데모·모름은 판정하지 않는다. 엣지 이력 시각은 수신 시각으로 자른다. 메일은 잡마다 한 번(같은 '마지막 성공' 이면 다시 안 보냄, 풀리면 다시 무장).
+  · **v2.797(화면 개편 — 디자인 캔버스 'VM 백업 센터 디자인 v2')** — 계산은 전부 `web/src/views/tools/vmCloneView.js`(회귀 `vmCloneView.test.js` v2.797 절).
+    - 보호 현황 링은 서버 판정 `jobs[].rpo` 만 분모에 넣는다(수동·판정 안 함·비활성은 따로 센다 — 0 으로 섞지 않는다).
+    - 14일 실행 격자: 이력은 잡마다 최근 `limits.historyMax`(서버 `HISTORY_MAX`)회만 남는다 — 이력이 가득 찬 잡의 가장 오래된 기록 이전 날은 '일부'(흐리게)로 표시한다.
+      상한 숫자를 화면에 박지 말 것(API 값).
+    - '다음 실행' 은 **N시간 간격만** 계산한다(마지막 실행 + N — 서버 `isDue` 와 같은 규칙). '매일 HH:MM' 은 포탈 시각이라 브라우저에서 다시 계산하면 시간대가 다른 PC 에서 틀린다.
+    - 진행률은 실행 단계 문구 끝의 '· N%' 가 있을 때만 막대로 — 없으면 줄무늬(진행률을 지어내지 않는다). 진행 중 실행은 지금 단계만 간트에 둔다(앞 단계 소요는 실행이 끝나야 남는다).
+    - 잡 표는 1440px 카드 폭 820px 안에 들어야 한다(Chromium 실측 — 대상 열 고정폭 글꼴·'다음 실행 N시간 뒤' 문구가 838~860px 로 밀었다).
 

@@ -11,7 +11,7 @@
  */
 import { config } from '../config.js';
 import { loadHostAccess, saveHostAccess } from './settings.js';
-import { normalizeSettings, parseListAll, planCommands, fingerprint } from './render.js';
+import { normalizeSettings, parseListAll, planCommands, fingerprint, normalizeRequesterIp } from './render.js';
 import * as realExec from './exec.js';
 import { listeningPortalPorts } from '../util/httpsServer.js';
 
@@ -69,7 +69,8 @@ export async function hostAccessStatus({ requesterIp = '' } = {}) {
   try { sshdActive = await deps.sshdActive(); } catch { sshdActive = null; }
   const ports = portalPorts();
   return {
-    ok: true, draft: st.draft, applied: st.applied, pending: st.pending, engine, sshdActive, requesterIp,
+    // v2.771(R6-F5-2): 화면 '내 IP 추가' 가 이 값을 그대로 넣는다 — '::ffff:a.b.c.d' 면 IPv4 로(라우트도 정규화하지만 이중 방어).
+    ok: true, draft: st.draft, applied: st.applied, pending: st.pending, engine, sshdActive, requesterIp: normalizeRequesterIp(requesterIp),
     // portalPort(하나)는 예전 화면 호환 — 광고 포트(TLS 면 TLS_PORT). 관리 대상은 portalPorts 전부다.
     portalPort: ports[0], portalPorts: ports, busy,
     dirty: st.applied ? fingerprint(st.draft) !== st.applied.fingerprint : true,

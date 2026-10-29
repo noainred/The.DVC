@@ -14,7 +14,7 @@ import {
 } from './bareosText.js';
 
 /**
- * 특수 기능 › Bareos VM 백업(v2.747, 도구 키 bareos-backup — admin 전용).
+ * 특수 기능 › Bareos VM 백업(v2.820, 도구 키 bareos-backup — admin 전용).
  * 포탈에서 고른 VM 을 Bareos VMware 플러그인으로 백업·복원한다. 포탈은 Director 콘솔(TLS-PSK · JSON)로 잡을 만들고 실행·조회하며,
  * 백업 데이터는 사이트 FD → SD 안에서만 흐른다. vCenter 비밀번호는 포탈이 갖지 않는다(사이트 FD 의 INI).
  * 문구·판정은 bareosText.js 하나(백틱 금지 · 값이 없으면 '—').

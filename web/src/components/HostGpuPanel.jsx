@@ -49,7 +49,7 @@ export default function HostGpuPanel({ hostId, hostName }) {
   return (
     <div style={{ marginTop: 10 }}>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(170px, 100%), 1fr))', gap: 8 }}>
-        <Stat label="GPU 사용률" sub={d.utilSource === 'esxi' ? 'ESXi 성능 카운터' : d.utilSource === 'guest' ? '게스트 nvidia-smi 평균' : '미수집'}>
+        <Stat label="GPU 사용률" sub={d.utilSource === 'esxi' ? 'ESXi 성능 카운터' : d.utilSource === 'guest' ? '게스트 nvidia-smi · 켜진 GPU VM 최댓값' : '미수집'}>
           {d.utilPct == null ? <span className="muted">—</span> : <UsageCell pct={d.utilPct} />}
         </Stat>
         <Stat label="GPU 온도(가장 높은 GPU)" sub={tempSubText(d)}>

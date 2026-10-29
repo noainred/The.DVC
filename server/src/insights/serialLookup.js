@@ -237,10 +237,12 @@ export function buildSerialIndex(req, { includeSfp = true } = {}) {
   try {
     let n = 0;
     for (const e of getEdgeFleetServers() || []) {
+      // v2.769(점검 R4-D2-03): getEdgeFleetServers 원소 필드는 serverName·serverId·remoteAgent 다(central/fleet.js) —
+      //   예전엔 없는 name·fleetId·source 를 읽어 장비명·ID 가 빈칸, 수집처는 늘 'edge' 였다.
       const r = row('bm-edge', e.serviceTag, {
-        deviceName: e.name || e.fleetId || '', host: '', model: e.model || '',
+        deviceName: e.serverName || '', host: '', model: e.model || '',
         serialType: '서비스 태그', vcenterId: e.vcenterId || '', datacenterId: '',
-        agent: e.source || '엣지', deviceId: e.fleetId || '',
+        agent: e.remoteAgent || '엣지', deviceId: e.serverId || '',
       });
       if (r) { rows.push(r); n++; }
     }

@@ -312,8 +312,8 @@ describe('CATALOG2613-07: 잠금 사유 판정은 toolVisibility.lockReasonOf �
       expect(lockReasonOf(t, { can: () => false, toolAllowed: () => false }) || '').not.toContain('`');
     }
   });
-  it('네 화면(카드 그리드·V4 내비·V4 기능 찾기·⌘K 팔레트)이 같은 함수를 쓰고 자기 판정을 두지 않는다', () => {
-    const FILES = ['views/SpecialTools.jsx', 'version_4/V4App.jsx', 'version_4/pages/Tools.jsx', 'version_4/Palette.jsx'];
+  it('두 화면(카드 그리드·⌘K 팔레트)이 같은 함수를 쓰고 자기 판정을 두지 않는다(v2.747 V4 내비·기능 찾기는 셸과 함께 지웠다)', () => {
+    const FILES = ['views/SpecialTools.jsx', 'components/Palette.jsx'];
     for (const rel of FILES) {
       const src = readWeb(rel);
       expect(src, rel).toMatch(/import \{[^}]*\blockReasonOf\b[^}]*\} from '[./]+\/(?:views\/)?toolVisibility\.js'/);
@@ -339,7 +339,7 @@ describe('CATALOG2613-08: ToolPanel 에 인라인 관리자 가드(isAdmin ? …
 
 // ── CATALOG2613-11 ───────────────────────────────────────────────────────────
 describe('CATALOG2613-11: 주석에 도구 수를 적지 않는다(매 릴리스 낡는다 — TOOLS.length 가 사실)', () => {
-  const FILES = ['version_4/tree.js', 'views/toolSections.js', 'views/SpecialTools.jsx', 'version_4/pages/Tools.jsx', 'version_4/V4App.jsx', '../../server/src/toolcats/catalog.js'];
+  const FILES = ['views/toolSections.js', 'views/SpecialTools.jsx', 'components/palette.js', '../../server/src/toolcats/catalog.js'];
   for (const rel of FILES) {
     it(rel, () => {
       const src = readWeb(rel);

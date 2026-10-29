@@ -82,7 +82,7 @@ export function recordReject(agent, endpoint, { status = 0, kind = '', reason = 
       for (const [kk, vv] of byAgent) if (!oldest || vv.lastAt < oldest[1].lastAt) oldest = [kk, vv];
       if (oldest) byAgent.delete(oldest[0]);
     }
-    a = { agent: key, total: 0, firstAt: now, lastAt: now, byKind: new Map(), byEndpoint: new Map(), lastReason: '', lastVcenterId: '', lastKind: '' };
+    a = { agent: key, total: 0, firstAt: now, lastAt: now, byKind: new Map(), byEndpoint: new Map(), lastByEndpoint: new Map(), lastReason: '', lastVcenterId: '', lastKind: '' };
     byAgent.set(key, a);
   }
   a.total++; a.lastAt = now; a.lastKind = k;
@@ -92,6 +92,9 @@ export function recordReject(agent, endpoint, { status = 0, kind = '', reason = 
   a.byKind.set(k, (a.byKind.get(k) || 0) + 1);
   const ep = ep0 && (a.byEndpoint.has(ep0) || a.byEndpoint.size < MAX_ENDPOINTS) ? ep0 : (ep0 ? '(기타)' : '');
   if (ep) a.byEndpoint.set(ep, (a.byEndpoint.get(ep) || 0) + 1);
+  // v2.778: 경로별 마지막 거부(시각·상태·사유) — 에이전트 전체의 lastReason 은 다른 경로의 사유일 수 있다(실서버 GM1: Veeam 결과 거부 수 옆에
+  //   /inventory 의 'direct vCenter' 사유가 붙었다). 경로 종류는 위 byEndpoint 와 같은 상한이다.
+  if (ep) a.lastByEndpoint.set(ep, { at: now, status: Number(status) || 0, reason: cut(reason) });
 
   recent.unshift({ at: now, agent: key, endpoint: ep, status: Number(status) || 0, kind: k, reason: cut(reason), vcenterId: vc, wireBytes: Number(wireBytes) || 0 });
   if (recent.length > KEEP) recent.length = KEEP;
@@ -109,6 +112,7 @@ export function rejectStats() {
     lastVcenterId: a.lastVcenterId,
     byKind: Object.fromEntries(a.byKind),
     byEndpoint: Object.fromEntries(a.byEndpoint),
+    lastByEndpoint: Object.fromEntries(a.lastByEndpoint || []),
   })).sort((x, z) => z.lastAt - x.lastAt);
   return { rows, total: rows.reduce((s, r) => s + r.total, 0), recent: recent.slice(0, KEEP), keep: KEEP, unverified: true };
 }

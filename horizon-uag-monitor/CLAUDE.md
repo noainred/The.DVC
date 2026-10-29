@@ -2,11 +2,13 @@
 
 포탈(`server/`·`web/`)과 별개인 .NET 8 WinForms 앱이다. 릴리스는 `.github/workflows/horizon-monitor-release.yml`
 (롤링 릴리스 `horizon-monitor`)이고 포탈 버전과 무관하다. 소스를 고치면 `dotnet test tests/UagMonitor.Tests.csproj` 를 돌린다
-(화면과 무관한 논리 53건 — Linux 에서도 돈다. WinForms 화면은 Linux 에서 띄울 수 없다).
+(화면과 무관한 논리 70건 — Linux 에서도 돈다(`apt install dotnet-sdk-8.0`). WinForms 화면은 Linux 에서 띄울 수 없다).
+⚠ 이 테스트는 PR CI(`ci.yml`)에서 돌지 않는다 — 릴리스 워크플로(수동·`horizon-v*` 태그)에서만 돈다. 소스를 고쳤으면 직접 돌릴 것.
 
 - **알람 판정은 `AlarmEngine`(순수)이 하고 화면(`AlarmOverlay`)은 그리기만 한다.** 규칙: 주의·위험이 알람, 끄면(확인) 같은 상태에서는
   다시 울리지 않고 ① 정상을 거쳐 재발 ② 주의→위험 악화 ③ 다른 대상의 새 장애에서만 다시 울린다. 위험→주의는 다시 울리지 않는다.
   **오래된 점검 결과(주기×3, 최소 3분)는 알람이 아니다** — 앱을 켠 직후 DB 에 남은 예전 '위험'으로 울리지 않게 하는 장치다.
+  v2.760: 결과가 오래돼 사라진 알람이 '확인됨' 이었으면 그 등급을 기억해, 정상을 거치지 않고 같은 등급 이하로 돌아오면 **확인된 채로** 되살린다(절전 뒤 재울림 방지).
 - **저장 폴더 위치는 DB 안에 둘 수 없다.** `%LOCALAPPDATA%\HorizonUagMonitor\location.json`(`DataLocation`)에만 둔다.
   `--db` 로 실행하면 설정에서 폴더를 못 바꾼다(`CommandLineOverride`). 지정 폴더를 시작 때 못 쓰면 기본 폴더로 열고 **location.json 은 지우지 않는다**.
 - **폴더 이동 순서가 안전장치다**(`DataMigrator` + `Database.ExportCopyTo/FinishMigration`): 점검 → 별도 연결로 `VACUUM INTO` 복사(점검은 계속)
@@ -24,3 +26,13 @@
   `History(LIMIT 20000)` 이 아니라 `HistoryBuckets`(1일=1분 … 365일=4시간, 점 ≤ 약 2,200)로 그리고 통계도 같은 집계다 — 2만 건 상한은 60초 주기에서
   약 14일이었다. 버킷의 가장 나쁜 상태는 Down 이 하나라도 있으면 Down. ④ `Prune` 은 5,000건 청크 사이에 잠금을 놓고 끝에 `wal_checkpoint(TRUNCATE)`
   (VACUUM 은 이동의 `VACUUM INTO` 가 담당). 되돌리기 전에 `tests/MonitorFixTests.cs`(변이 10종 검출)를 볼 것.
+- **v2.767(점검 R2-B5) — 저장 실패·오래됨·최신 조회**: ① 점검 결과 저장(InsertSample) 예외를 삼키지 않는다 — `SaveFailureTracker`(MonitorRules.cs)가
+  연속 실패를 세고 error.log 는 첫 실패 즉시 + 5분마다 한 줄 + 복구 한 줄. 트레이 툴팁·메인 창 바닥 줄이 '저장 실패' 를 보인다.
+  ② 트레이 아이콘·머리말 집계는 `MonitorRules.CountStatuses` 하나로 — **오래된 결과(주기×3, 최소 3분)는 대기**, 저장 실패 중이면 '정상' 으로 그리지 않는다.
+  오래됨 경계는 알람 엔진과 같은 `MonitorRules.IsFresh`(복제 금지). 트레이는 점검 완료가 없어도 10초마다 다시 그린다(멈추면 Updated 도 안 온다).
+  ③ `LatestByEndpoint` 는 대상별 `ORDER BY ts DESC, id DESC LIMIT 1`(인덱스 시크) — `GROUP BY + MAX(ts)` 로 되돌리지 말 것(630만 행 약 0.5초, 잠금+UI 스레드).
+  ④ `MonitorService.Snapshot` 은 `Database.ChangeStamp()`(연결 세대 + total_changes)가 같으면 직전 결과를 메인 창·트레이가 나눠 쓴다 — 연결을 바꾸는 곳은
+  `_connEpoch` 를 올릴 것. 근거·변이 검증은 `tests/SaveAndLatestTests.cs`. MainForm·TrayAppContext 변경은 Linux 에서 WinForms 참조 팩(Microsoft.WindowsDesktop.App.Ref 8.0.10)으로 컴파일만 확인했다(화면은 미확인).
+- **v2.768(점검 R3-C3-2) — JSON 가져오기 판정은 `EndpointImport.Build`(순수)**: 갱신은 기존 레코드에 **파일에 있는 칸만** 덮고 sort 는 파일값 또는 유지
+  (새 Endpoint 로 덮으면 Sort=0 으로 맨 위로 튀고 꺼 둔 대상이 다시 켜진다), 파일 안 같은 키(name|host|port)는 처음 한 번만, DB 중복 키는 `GroupBy` 로 견딘다
+  (`ToDictionary` 예외로 이후 가져오기가 전부 실패했다). `tests/EndpointImportTests.cs`. SettingsForm 은 Linux 에서 WinForms 참조 팩으로 컴파일만 확인했다.

@@ -15,8 +15,27 @@ import { guestDiskDbStatus } from '../../guestdisk/db.js';
 import { guestDiskPollerStatus, runGuestDiskNow, guestDiskOrphanPruneStatus } from '../../guestdisk/poller.js';
 import { load as loadSettings, save as saveSettings } from '../../guestdisk/settings.js';
 import { todayStamp } from "../../util/dayKey.js";
+import { vmOwnerByPrefix } from '../../guestdisk/analyze.js';
 // v2.643: CSV·텍스트 가져오기/내보내기는 관리자 이상 + 'data.csv' 권한(super_admin 항상, admin 은 권한 설정에서 끌 수 있다).
 const csvPerm = requirePerm('data.csv');
+
+/**
+ * v2.767(점검 R2-B2-02): 범위 계정의 VM 단건 판정 — 수집 DB 의 vcenterId **하나만** 믿지 않는다(이중화).
+ * 예전에는 DB 행의 vcenterId 로만 판정해, 엣지가 남의 vCenter VM id 로 행을 덮으면 그 VM 이력이 덮은 쪽 범위 계정에 200 으로 열렸다.
+ * ① id 의 최장 프리픽스 소유 vCenter(스냅샷 vCenter 목록 + DB vcenterId)가 DB vcenterId 와 같아야 하고 ② 그것이 허용 목록에 있어야 하며
+ * ③ 스냅샷에 그 VM 이 있으면 스냅샷의 vCenter 도 허용 목록에 있어야 한다(형제 /vms/:id/partitions 와 같은 기준). 하나라도 어긋나면 404.
+ */
+export function guestDiskVmInScope(vmId, dbVcenterId, snap, allowed) {
+  if (!allowed) return true;
+  const dbVc = String(dbVcenterId ?? '');
+  if (!dbVc || !allowed.has(dbVc)) return false;
+  const ids = new Set((snap?.vcenters || []).map((v) => String(v?.id || '')).filter(Boolean));
+  ids.add(dbVc);
+  if (vmOwnerByPrefix(vmId, ids) !== dbVc) return false;
+  const snapVm = (snap?.vms || []).find((v) => v.id === vmId);
+  if (snapVm && !allowed.has(String(snapVm.vcenterId ?? ''))) return false;
+  return true;
+}
 
 export function registerToolsGuestDisk(api) {
   // 회수 목록(VM별 할당/사용/여유/비율) — scope 적용.
@@ -37,8 +56,9 @@ export function registerToolsGuestDisk(api) {
     const usageFactor = req.query.usageFactor != null ? Number(req.query.usageFactor) : 1;
     const detail = await vmDetail(req.params.id, { days: Number.isFinite(days) && days > 0 ? days : 0, usageFactor });
     if (!detail) return res.status(404).json({ error: 'not found' });
-    const allowed = scopedVcenterIds(req.user, store.get());
-    if (allowed && !allowed.has(detail.vcenterId)) return res.status(404).json({ error: 'not found' });
+    const snap = store.get();
+    const allowed = scopedVcenterIds(req.user, snap);
+    if (allowed && !guestDiskVmInScope(String(req.params.id), detail.vcenterId, snap, allowed)) return res.status(404).json({ error: 'not found' });
     res.json(detail);
   });
 

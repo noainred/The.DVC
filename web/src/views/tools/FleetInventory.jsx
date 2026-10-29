@@ -9,6 +9,7 @@ import { STable } from '../../components/STable.jsx';
 import { dayStamp } from '../../dayStamp.js';
 import { fleetPartialsNote, fleetHeldNote, fleetHeldBadge } from '../fleetPartialText.js'; // v2.607 LEFT2607-02 · v2.744(감사 후속 FC): 등록부 손상으로 직전 목록 유지
 import { requireChanged } from '../changeResult.js'; // v2.732 B5-03: 실패 본문(400 · 200+ok:false)을 성공으로 읽지 않는다
+import { prunePlan, pruneDoneText } from './fleetPruneText.js'; // v2.783(점검 Q2 P-B3): 확인창은 미리보기 결과로
 
 /**
  * v2.732(점검 2회차 B5-03): 일괄 등록 응답 → 완료 문구. 실패 본문이면 사유를 던진다(requireChanged).
@@ -108,14 +109,21 @@ export function FleetInventory({ isAdmin }) {
     finally { setBusy(''); }
   };
   const toggleSel = (id) => setSel((prev) => { const n = new Set(prev); if (n.has(id)) n.delete(id); else n.add(id); return n; });
-  // 유령(교체·삭제된 서버의 잔재) 분류/소속 키 정리. 등록된 서버는 보호되며, 삭제 전 확인한다.
+  // 유령(교체·삭제된 서버의 잔재) 분류/소속 키 정리.
+  // v2.783(점검 Q2 P-B3 — 데이터 손실): 화면 요약 숫자로 묻지 않는다 — 미리보기(dryRun)를 먼저 받아 **실제로 지울 키·수**로 묻고,
+  //   읽지 못한 출처가 있으면(blocked) 묻지 않고 사유를 보인다. 실제 요청은 미리 본 키 목록만 보낸다(서버가 다시 판정).
+  //   postJson 은 409 를 던지지 않고 본문을 돌려준다 — requireChanged 로 실패 본문을 성공으로 읽지 않는다.
   const prune = async () => {
-    const ghost = d?.summary?.ghostKeys ?? 0;
-    if (!window.confirm(`현재 어느 등록 서버/호스트와도 매칭되지 않는 유령 키 ${ghost}개를 제거합니다.\n(등록된 서버는 전원오프여도 보호됩니다.) 진행할까요?`)) return;
     setBusy('__prune__');
     setNotice('');
-    try { const r = await postJson('/insights/fleet/prune', {}); await load(); setErr(null); setNotice(`유령 키 정리 완료 — 태그 ${r.removedTags}개 · 소속 ${r.removedAssign}개 제거`); }
-    catch (e) { setErr(e.message); }
+    try {
+      const plan = prunePlan(await postJson('/insights/fleet/prune', { dryRun: true }));
+      if (plan.kind === 'blocked') { setErr(plan.message); return; }
+      if (plan.kind === 'none') { setErr(null); setNotice(plan.message); await load(); return; }
+      if (!window.confirm(plan.confirm)) return;
+      const r = requireChanged(await postJson('/insights/fleet/prune', { keys: plan.keys }));
+      await load(); setErr(null); setNotice(pruneDoneText(r));
+    } catch (e) { setErr(e.message); }
     finally { setBusy(''); }
   };
 
@@ -212,7 +220,7 @@ export function FleetInventory({ isAdmin }) {
       {notice && <div className="card flex between gap" style={{ padding: '8px 12px', marginBottom: 10, borderLeft: '3px solid var(--green)', fontSize: 13, alignItems: 'center' }}><span>✓ {notice}</span><button className="logout-btn" style={{ padding: '2px 8px' }} onClick={() => setNotice('')}>✕</button></div>}
       {isAdmin && s.ghostKeys > 0 && (
         <div className="card flex between wrap gap" style={{ padding: '8px 12px', marginBottom: 10, borderLeft: '3px solid var(--amber)', alignItems: 'center' }}>
-          <span style={{ fontSize: 13 }}>⚠ 유령 분류/소속 키 <b>{s.ghostKeys}</b>개 — 교체·삭제된 서버의 잔재가 남아 있습니다.</span>
+          <span style={{ fontSize: 13, minWidth: 0 }}>⚠ 유령 분류/소속 키 <b>{s.ghostKeys}</b>개 — 교체·삭제된 서버의 잔재가 남아 있습니다.{Array.isArray(s.ghostBlocked) && s.ghostBlocked.length > 0 && <span className="muted" style={{ fontSize: 12 }}> 지금은 읽지 못한 출처가 있어 일부는 실제로 살아 있는 서버일 수 있습니다 — 정리는 사유를 보여 주고 멈춥니다.</span>}</span>
           <button className="logout-btn" style={{ padding: '6px 12px' }} disabled={busy === '__prune__'} onClick={prune}>{busy === '__prune__' ? '정리 중…' : '유령 키 정리'}</button>
         </div>
       )}

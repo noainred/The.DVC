@@ -99,7 +99,7 @@ if (typeof globalThis.window === 'undefined') {
 
 const { guardCell, csvCell, toCsv } = await import('../util/csv.js');
 const serverCsv = await import('../../../server/src/util/csv.js');
-const { corpSiteStatus, countableTotals, corpVmChart, corpTotalLabel, partialNote } = await import('./corpSiteStatus.js');
+const { corpSiteStatus, countableTotals, corpVmChart, partialNote } = await import('./corpSiteStatus.js');
 const { chartGroup } = await import('./execOverviewText.js');
 const { ErrorBox } = await import('../components/ui.jsx');
 
@@ -183,10 +183,9 @@ describe('WEB-01 countableTotals — 셀 수 있는 vCenter 만 더하고 뺀 �
     // 등록 0개는 '모른다' 가 아니라 셀 것이 없는 것이다.
     expect(countableTotals([], { isIrs })).toMatchObject({ hosts: 0, vms: 0, missing: 0, note: null });
   });
-  it('합계 행 표기와 KPI 표지가 같은 문구를 쓴다', () => {
+  it('부분 합 표지 문구(v2.747 — 합계 행 corpTotalLabel 은 V6 셸과 함께 지웠다)', () => {
     expect(partialNote(2)).toBe('최소 · 미수집 2곳 제외');
     expect(partialNote(0)).toBeNull();
-    expect(corpTotalLabel([{ countable: false }, { countable: true }])).toBe('합계(최소 · 미수집 1곳 제외)');
   });
 });
 

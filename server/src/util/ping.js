@@ -52,6 +52,19 @@ export function pingProbeMode() {
 }
 export function pingProbeStats() { return { mode: pingProbeMode(), attempts: pingAttempts, cliMissing: pingMissing }; }
 
+/**
+ * ping 출력 판독(순수 — 테스트 대상). 성공 판정: 에러코드 0 + "ttl=" 포함(일부 OS는 손실에도 0 반환하므로 ttl 확인).
+ * v2.769(점검 R4-D3-6): RTT 는 영어 'time=3ms'·'time<1ms' 만 읽어, 한국어 Windows('시간=3ms'·'시간<1ms' — packaging/windows
+ *   배포 대상)에서는 alive=true · rttMs=null 이 됐다(svcmon 은 그것을 0ms 로 기록했다). 한국어 표기도 읽는다.
+ *   출력은 앞 4KB 만 보고(ping -c 1 은 수백 바이트), 정규식은 고정 접두어 뒤 한정 반복이라 선형이다.
+ */
+export function parsePingOutput(stdout, err = null) {
+  const out = String(stdout || '').slice(0, 4096);
+  const alive = !err && /ttl[=:]/i.test(out);
+  const m = /(?:time|시간)\s{0,3}[=<]\s{0,3}(\d{1,7}(?:\.\d{1,6})?)\s{0,3}ms/i.exec(out);
+  return { alive, rttMs: alive && m ? Number(m[1]) : null };
+}
+
 export function pingOne(ip, { timeoutMs = 1500 } = {}) {
   return new Promise((resolve) => {
     const target = String(ip || '').trim();
@@ -67,11 +80,7 @@ export function pingOne(ip, { timeoutMs = 1500 } = {}) {
         pingMissing = true;
         return tcpReachable(target, timeoutMs).then((r) => resolve({ ip: target, ...r }));
       }
-      const out = String(stdout || '');
-      // 성공 판정: 에러코드 0 + "ttl=" 포함(일부 OS는 손실에도 0 반환하므로 ttl 확인).
-      const alive = !err && /ttl[=:]/i.test(out);
-      const m = /time[=<]\s*([\d.]+)\s*ms/i.exec(out);
-      resolve({ ip: target, alive, rttMs: alive && m ? Number(m[1]) : null });
+      resolve({ ip: target, ...parsePingOutput(stdout, err) });
     });
   });
 }

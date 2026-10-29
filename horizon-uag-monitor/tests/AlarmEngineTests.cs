@@ -148,6 +148,41 @@ public class AlarmEngineTests
     }
 
     [Fact]
+    public void 끈_알람은_결과가_잠시_오래돼도_정상을_거치지_않으면_다시_울리지_않는다()
+    {
+        // v2.760(점검 B-05): PC 절전 등으로 점검 결과가 오래되면 알람이 사라졌다가, 깨어나 같은 '위험' 이 오면 새 알람으로 다시 울렸다.
+        var e = new AlarmEngine();
+        e.Update(new[] { Ep(1, "A", HealthStatus.Down) }, T0);
+        e.AcknowledgeAll();
+        var gone = e.Update(new[] { Ep(1, "A", HealthStatus.Down, T0) }, T0.AddHours(1));   // 절전 — 결과가 오래됨
+        Assert.Equal(AlarmEventKind.Cleared, Assert.Single(gone).Kind);
+        var back = e.Update(new[] { Ep(1, "A", HealthStatus.Down, T0.AddHours(1)) }, T0.AddHours(1).AddSeconds(5));
+        Assert.Equal(AlarmEventKind.Raised, Assert.Single(back).Kind);
+        Assert.True(back[0].Item.Acknowledged);
+        Assert.Empty(e.Pending);
+        Assert.Single(e.Active);
+    }
+
+    [Fact]
+    public void 오래됨을_거친_뒤라도_더_나빠지거나_정상을_거치면_다시_울린다()
+    {
+        var e = new AlarmEngine();
+        e.Update(new[] { Ep(1, "A", HealthStatus.Warn) }, T0);
+        e.AcknowledgeAll();
+        e.Update(new[] { Ep(1, "A", HealthStatus.Warn, T0) }, T0.AddHours(1));
+        e.Update(new[] { Ep(1, "A", HealthStatus.Down, T0.AddHours(1)) }, T0.AddHours(1));   // 주의 → 위험(악화)
+        Assert.Single(e.Pending);
+
+        var e2 = new AlarmEngine();
+        e2.Update(new[] { Ep(2, "B", HealthStatus.Down) }, T0);
+        e2.AcknowledgeAll();
+        e2.Update(new[] { Ep(2, "B", HealthStatus.Down, T0) }, T0.AddHours(1));
+        e2.Update(new[] { Ep(2, "B", HealthStatus.Up, T0.AddHours(1)) }, T0.AddHours(1));    // 정상을 거침
+        e2.Update(new[] { Ep(2, "B", HealthStatus.Down, T0.AddHours(1).AddMinutes(1)) }, T0.AddHours(1).AddMinutes(1));
+        Assert.Single(e2.Pending);
+    }
+
+    [Fact]
     public void 최소_등급을_위험으로_올리면_주의는_울리지_않는다()
     {
         var e = new AlarmEngine { MinLevel = HealthStatus.Down };

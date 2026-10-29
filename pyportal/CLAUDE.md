@@ -99,3 +99,18 @@
   내려주지 않는다(저장 여부만 `hasWebhookUrl`). 전송은 admin 전용인데 값 읽기가 열려 있으면 경계가 어긋난다.
 - **sqlite 파일도 0600**(`history.py`): 다른 데이터 파일은 전부 0600 인데 sqlite 생성 파일만 umask 기본
   (0644)이었다. 점검 이력에는 등록 링크·내부 호스트가 담긴다.
+
+## v2.767 버그 점검 2회차 조치 — 되돌리지 말 것
+- **중지된 바로가기는 모든 점검 경로에서 뺀다**(`server.py _health_targets` — 자동·[지금 점검] 전체·ids 지정 모두). 예전에는 자동 점검만 걸러 중지 링크에 접속·이력·웹훅이 나갔다.
+- **바로가기 id 는 라우트 패턴(`[A-Za-z0-9_-]{1,64}`)을 지킨다**(`store.py ID_RE`): 가져오기·로드·복원에서 패턴 밖 id 만 `sc-<hex>` 로 재발급하고 곧바로 저장한다(재기동마다 다른 id 가 붙어 이력이 끊기지 않게). 정상 id 는 건드리지 않는다.
+- **세션 서명 비교는 bytes 로**(`auth.py SessionStore.resolve`) — str 을 compare_digest 에 넣으면 비-ASCII 헤더 한 줄로 TypeError → 무응답 끊김(v2.500 `_hub_token_ok` 와 같은 결함).
+
+## v2.768 버그 점검 3회차 조치 — 되돌리지 말 것(`tests/test_audit2768.py`)
+- **http 점검·웹훅은 요청 전체 시한**(`pinned.RequestDeadline` — 워치독이 dup 소켓을 shutdown): urllib timeout 은 recv 1회 단위라 1바이트씩 흘리는 대상이 점검 작업(GuardedJob)을 무한정 붙잡았다. 핀 연결 구조(검사 IP 직접 접속·SNI 유지)는 그대로 — 새 접속 경로도 `deadline=` 을 넘길 것.
+- **`_dispatch` 최종 `except Exception` → 500 JSON(원문 미노출)**, 응답을 이미 쓰기 시작했으면 덧쓰지 않는다(`_response_started`). 웹훅 전송은 `http.client.HTTPException`(BadStatusLine — OSError 아님)도 실패로 접는다. CSV 의 `csv.Error` 는 `ValidationError`(400).
+- **이력 최신값은 재귀 CTE + id 별 `ORDER BY ts DESC, id DESC LIMIT 1`**, stats 는 MIN·MAX 단독 문장 + 행 수 캐시(record/prune 이 같은 잠금에서 맞춤). `GROUP BY + MAX(ts)`·한 문장 다중 집계로 되돌리지 말 것.
+- **새 계정 `tokenVersion` 은 무작위 시작**(`auth._fresh_token_version`, bootstrap 포함): 1 로 시작하면 삭제 → 재기동 → 같은 이름 재생성 때 삭제 전 토큰이 통과했다. 기존 계정 값은 건드리지 않고, payload `i` 도 유지한다.
+
+## v2.769 버그 점검 4회차 조치 — 되돌리지 말 것(`tests/test_audit2769.py`)
+- **요청 전체 시한 ≠ 소켓 시한**(`pinned.total_deadline_seconds` — 기본 소켓 × 3, 상한 90초 · env `HUB_HEALTH_TOTAL_TIMEOUT` 우선): v2.768 은 둘을 같은 값(4초)으로 잡아 RTT 800ms TLS 대상의 정상 서버가 '응답 시간 초과' 로 떨어졌다. 배수는 4 미만(드립 시험 상한 = 시한 × 4). 웹훅도 같은 구조.
+- **헤더 단계에서 워치독이 끊었으면 시한 초과**(`deadline.fired` 를 `opener.open` 직후·HTTPError 에서 본다): 평문 http.client 는 shutdown 뒤 EOF 를 '헤더 끝' 으로 읽어 잘린 상태줄만으로 healthy 가 됐다(TLS 와 판정이 갈렸다).

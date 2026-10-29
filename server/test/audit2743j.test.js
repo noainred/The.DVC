@@ -256,5 +256,6 @@ test('WEB-04 라우트 /vclogs/collect — pollLogsOnce 결과(busy·skipped·fa
   const i = src.indexOf("'/vclogs/collect'");
   assert.ok(i > 0);
   const body = src.slice(i, i + 400);
-  assert.match(body, /res\.json\(\{ ok: true, \.\.\.\(await pollLogsOnce\(\{ manual: true \}\)\) \}\)/, '결과를 펼쳐 싣는다(busy·skipped·failed 가 빠지지 않게)');
+  // v2.772(Z1-3): 150초 경주(vcLogCollectRace) 뒤에도 결과를 펼쳐 싣는다
+  assert.match(body, /res\.json\(\{ ok: true, \.\.\.\(await vcLogCollectRace\(pollLogsOnce\(\{ manual: true \}\)/, '결과를 펼쳐 싣는다(busy·skipped·failed 가 빠지지 않게)');
 });

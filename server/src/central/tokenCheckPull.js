@@ -23,7 +23,13 @@ import { capTrim } from '../util/capStr.js'; // v2.606 TIM2606-02: 보관 글자
 
 /** 이 엔드포인트를 내주기 시작한 최소 엣지 버전 — 그 아래는 경로가 없다. */
 export const MIN_EDGE_VERSION = '2.560.0';
-const TIMEOUT_MS = Math.max(3_000, Number(process.env.PORTALCHECK_PULL_TIMEOUT_MS) || 20_000);
+/**
+ * 한 엣지 인출 시한. v2.783(점검 Q5 — O-I2): **export** 한다 — 라우트(`routes/api/portalCheck.js` edge-pull)의 총 예산 판정이
+ * 이 값 대신 프로브 시한(PROBE_TIMEOUT_MS 8초)을 써서 기본값에서도 예산을 약 12초 넘겼다. 그리고 **상한 60초**를 둔다 — 예전엔 하한만 있어
+ * env 를 크게 잡으면 요청이 웹 백스톱(postJson 180초)을 넘겨 화면은 '실패' 인데 서버는 계속 돌았다. 기본값(리터럴 — env-doc 생성기가 읽는다)은 그대로.
+ */
+export const PULL_TIMEOUT_MS = Math.min(60_000, Math.max(3_000, Number(process.env.PORTALCHECK_PULL_TIMEOUT_MS) || 20_000));
+const TIMEOUT_MS = PULL_TIMEOUT_MS;
 /** 보고가 이보다 오래되면 화면이 '낡았다' 고 말한다(값을 지우지는 않는다). */
 export const STALE_MS = Math.max(60_000, Number(process.env.PORTALCHECK_PULL_STALE_MS) || 30 * 60_000);
 

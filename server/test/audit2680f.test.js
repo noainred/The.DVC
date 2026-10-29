@@ -17,7 +17,7 @@ test('C-03 — AD 토큰에는 로컬 표지가 없고 /totp/begin·confirm 은 
   const { authRouter } = await import('../src/routes/auth.js');
   A.createUser({ username: 'samename', name: 'S', role: 'admin', password: 'Xx!23456789abc' }, { trusted: true });
   const ad = A.signToken({ sub: 'samename', role: 'admin', name: 'AD', src: 'ad' });
-  const lo = A.signToken({ sub: 'samename', role: 'admin', name: 'L', src: 'local', tv: 0 });
+  const lo = A.signToken({ sub: 'samename', role: 'admin', name: 'L', src: 'local', tv: A.getUser('samename').tokenVersion || 0 }); // v2.771 R6-F5-1: 새 계정 tokenVersion 은 무작위 시작값
   assert.equal(A.resolveTokenUser(ad), null, 'v2.681 R2B-01: 로컬 이름과 같은 AD 토큰은 무효');
   const app = express(); app.use(express.json()); app.use('/api/auth', authRouter);
   const srv = await new Promise((r) => { const s = app.listen(0, '127.0.0.1', () => r(s)); });

@@ -239,6 +239,19 @@ collectorRouter.post('/set-password', tokenFirst('set-password'), express.json({
   res.status(r.ok ? 200 : 400).json({ ...r, version: currentVersion() });
 });
 
+// v2.776(엣지 개별 토큰 자동 적용): 중앙이 이 엣지의 **개별 central 토큰**을 내려준다. 수집 토큰을 먼저 보고(tokenFirst), 엣지는
+//   portal.env 의 AGENT_CENTRAL_TOKEN 에 쓰고 새 토큰으로 중앙 health-probe 를 확인한 뒤에만 남긴다(실패면 되돌린다 — agent/centralTokenApply.js).
+//   토큰 값은 감사·응답에 싣지 않는다(지문만).
+collectorRouter.post('/central-token', tokenFirst('central-token'), express.json({ limit: '4kb' }), async (req, res) => {
+  const { applyAgentCentralToken } = await import('../agent/centralTokenApply.js');
+  const r = await applyAgentCentralToken({ token: req.body?.token });
+  logAudit({ user: 'central-portal', action: r.applied ? '엣지 개별 central 토큰 적용' : '엣지 개별 central 토큰 적용 안 함', target: config.agent.name || '', detail: `${r.fp ? `지문 ${r.fp}` : ''}${r.applied ? '' : ` · ${r.reason || ''} · 바뀐 것 없음`}`, ip: req.ip || '' });
+  res.status(r.ok ? 200 : (r.reason === 'bad-token' ? 400 : r.reason === 'busy' ? 409 : 200)).json(r);
+  // v2.778: 적용됐으면 Veeam 배정을 곧바로 새 토큰으로 다시 가져온다(개별 토큰 전용 라우트 — 주기 5분을 기다리지 않게. 실서버 GM1 은 적용 뒤
+  //   진행 상태가 몇 분간 '배정 받기 403' 으로 남았다). 응답을 보낸 뒤에 돌리고 실패는 그 모듈의 상태·콘솔에 남는다(무음 아님).
+  if (r.applied) setImmediate(() => { import('../agent/veeamConfigPull.js').then((m) => m.pullVeeamConfigNow()).catch(() => {}); });
+});
+
 // 중앙→엣지 직접(PUSH) iDRAC 스캔 — 엣지가 중앙으로 폴링하지 않아도, 중앙이 이 엣지의
 // COLLECTOR_TOKEN으로 직접 스캔을 시키고 결과를 동기로 받는다(엣지 CENTRAL_URL 미설정에도 동작).
 // 엣지가 현지에서 Redfish 스캔 → (noRegister 아니면) 현지 등록 → 요약 반환.

@@ -50,7 +50,8 @@ test('따라갈 수 없으면 null(지어내지 않는다): vApp(부모 없음) 
 test('soapClient: Datacenter 는 parent 를 받고 VM 레코드에 vmPlacement 를 펼친다', () => {
   const s = stripComments(fs.readFileSync(path.join(SRC, 'vcenter/soapClient.js'), 'utf8'));
   assert.match(s, /\{ type: 'Datacenter', paths: \['name', 'parent'\] \}/);
-  assert.match(s, /folder: folderPath\(p\.parent\),\s*\.\.\.vmPlacement\(p\.parent, folderByRef, dcByRef\)/);
+  // 주석 줄은 건너뛴다 — stripComments 는 휴리스틱이라 큰 파일 뒤쪽에서 주석을 남길 때가 있다(main 병합 뒤 실제로 그랬다).
+  assert.match(s, /folder: folderPath\(p\.parent\),\s*(?:\/\/[^\n]*\n\s*)*\.\.\.vmPlacement\(p\.parent, folderByRef, dcByRef\)/);
 });
 
 test('엣지 정제: vcDatacenter·folderPath 는 글자만(객체·수는 null)', async () => {

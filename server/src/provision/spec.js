@@ -28,14 +28,21 @@ export function expandSpec(spec = {}) {
 
   // Explicit per-VM list wins.
   if (Array.isArray(spec.perVm) && spec.perVm.length) {
+    // v2.767(점검 R2-B3-11): perVm 경로에도 패턴 경로와 같은 500대 상한 — 상한이 없어 본문 한도(1MB)만큼 한 번에 만들 수 있었고
+    //   중복 검사(indexOf)가 O(n²)이라 큰 본문 하나가 이벤트 루프를 수 초 막았다(/api/provision/preview 도 같은 함수).
+    //   상한은 원본 길이로 먼저 보고(잘라서 통과시키지 않는다) 넘으면 펼치지 않는다. 객체가 아닌 원소(null 등)는 500 대신 400 사유로.
+    if (spec.perVm.length > 500) return { vms: [], errors: [`한 번에 최대 500대까지 생성할 수 있습니다 (요청: ${spec.perVm.length}대).`] };
+    const bad = spec.perVm.findIndex((v) => !v || typeof v !== 'object' || Array.isArray(v));
+    if (bad >= 0) return { vms: [], errors: [`VM 목록 ${bad + 1}번째 항목이 올바르지 않습니다.`] };
     const vms = spec.perVm.map((v, i) => ({
       name: String(v.name || '').trim() || `vm-${i + 1}`,
       hostname: String(v.hostname || v.name || '').trim(),
       ip: dhcp ? '' : String(v.ip || '').trim(),
     }));
     if (!dhcp) for (const v of vms) if (v.ip && ipToNum(v.ip) == null) errors.push(`잘못된 IP: ${v.ip} (${v.name})`);
-    const dup = vms.map((v) => v.name).filter((n, i, a) => a.indexOf(n) !== i);
-    if (dup.length) errors.push(`중복된 VM 이름: ${[...new Set(dup)].join(', ')}`);
+    const seen = new Set(); const dup = new Set();
+    for (const v of vms) { if (seen.has(v.name)) dup.add(v.name); else seen.add(v.name); }
+    if (dup.size) errors.push(`중복된 VM 이름: ${[...dup].join(', ')}`);
     return { vms, errors };
   }
 

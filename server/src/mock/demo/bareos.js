@@ -1,5 +1,5 @@
 /**
- * mock/demo/bareos.js — 데모(DATA_SOURCE=mock) Bareos Director(v2.747).
+ * mock/demo/bareos.js — 데모(DATA_SOURCE=mock) Bareos Director(v2.820).
  *
  * 규칙(mock/demo/flags.js 머리말과 같다)
  *  · mock 모드이고 **Director 설정이 비어 있을 때만** 쓴다(사람이 Director 를 등록하면 mock 모드에서도 실제 Director 에 붙는다).

@@ -238,8 +238,9 @@
 | [SVCMON-ARCHITECTURE.md](SVCMON-ARCHITECTURE.md) | 성능점검 — 아키텍처 / 용량 산정 / 튜닝 |
 | [SVCMON-BULK.md](SVCMON-BULK.md) | 성능점검 — 가져오기 / 내보내기 · 대량 자동등록 |
 | [SVCMON-TESTS.md](SVCMON-TESTS.md) | 성능점검 — 테스트 유형 상세 |
+| [VEEAM-BACKUP-RUN.md](VEEAM-BACKUP-RUN.md) | Backup 현황 › 백업 실행 (v2.818) |
 | [WORKLOG-2026-07-31.md](WORKLOG-2026-07-31.md) | 작업 기록 — VMware Global Monitoring Portal (The.DVC) |
 | [WORKLOG-2026-08-01.md](WORKLOG-2026-08-01.md) | 작업 기록 — 권한 세분화 · 로그인 테마 · 계정 정책 · 보안 감사 (2026-08-01) |
 
-`docs/*.md` 101개(이름순). 위 분류 절에 없는 문서도 여기에는 반드시 있다 — 분류 절은 손으로 쓰고 이 절은 생성한다.
+`docs/*.md` 102개(이름순). 위 분류 절에 없는 문서도 여기에는 반드시 있다 — 분류 절은 손으로 쓰고 이 절은 생성한다.
 <!-- arch-doc:docs:end -->

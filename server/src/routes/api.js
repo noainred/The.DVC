@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { config } from '../config.js';
-import { authDisabledRole } from '../auth/auth.js';
+import { authDisabledRole, toolActorOf } from '../auth/auth.js';
 import { toolGate, exactToolAccessIssue } from '../auth/toolAccess.js';
 import { registerVmMetrics } from './api/vmMetrics.js';
 import { registerOverviewNsx } from './api/overviewNsx.js';
@@ -10,19 +10,25 @@ import { registerVcTools } from './api/vcTools.js';
 import { registerReports } from './api/reports.js';
 import { registerSearchNotes } from './api/searchNotes.js';
 import { registerIpamExport } from './api/ipamExport.js';
+import { registerVmExport } from './api/vmExport.js';   // v2.799 VM 전체 정보 내보내기(ipamExport.js 에서 옮김)
+import { registerHostExport } from './api/hostExport.js'; // v2.802 vCenter 화면 '호스트 · 클러스터 엑셀'(호스트 1대 = 시트 1장)
+import { registerHostCorp } from './api/hostCorp.js'; // v2.811 ESXi 호스트 화면 '법인별' 보기 집계(/hosts/:id 보다 먼저)
+import { registerHostChecks } from './api/hostChecks.js'; // v2.805 ESXi 호스트 화면 '점검' 열 집계 + 호스트 단건(상세 페이지)
 import { registerHardwareGpu } from './api/hardwareGpu.js';
 import { registerChecksLogs } from './api/checksLogs.js';
 import { registerToolsAnalytics } from './api/toolsAnalytics.js';
 import { registerToolsCapacity } from './api/toolsCapacity.js';
 import { registerToolsInfo } from './api/toolsInfo.js';
 import { registerToolsGuestDisk } from './api/toolsGuestDisk.js';
+import { registerToolsGuestPart } from './api/toolsGuestPart.js';   // v2.749 게스트 파티션 사용률 경보
 import { registerVmSeries } from './api/vmSeries.js'; // v2.510: 실시간(20초) 스파이크 수집 — vCenter별 독립 DB
 import { registerCurUser } from './api/curUser.js';
 import { registerHorizonSessions } from './api/horizonSessions.js';  // v2.525: Horizon 실시간 사용자(세션)  // v2.520: '현재 사용자' — 게스트 계정 없이 guestinfo 읽기
 import { registerInventory } from './api/inventory.js';
 import { wrapAsyncRouter } from '../util/asyncRoute.js';
 import { registerVmClone } from './api/vmClone.js'; // VM 복제(백업식, v2.299)
-import { registerBareosBackup } from './api/bareosBackup.js'; // Bareos VM 백업(v2.747)
+import { registerVeeamBadges, registerBackupStatus } from './api/veeam.js'; // Veeam 백업 VM 배지(v2.751) · 백업 메뉴(v2.779)
+import { registerBareosBackup } from './api/bareosBackup.js'; // Bareos VM 백업(v2.820)
 import { registerStorageMon } from './api/storageMon.js'; // 스토리지 모니터링(Isilon 등, v2.302)
 import { registerSanSwitch } from './api/sanSwitch.js';   // SAN 스위치 모니터링(Brocade FOS, v2.410)
 import { registerCvp } from './api/cvp.js';               // Arista CloudVision(CVP) 네트워크 스위치(v2.608)
@@ -35,6 +41,7 @@ import { registerCorpUsage } from './api/corpUsage.js'; // 법인별 서버 사�
 import { registerLinkCheck } from './api/linkCheck.js'; // 통신 점검(중앙↔엣지·vCenter·엣지↔엣지, v2.552)
 import { registerXferSpeed } from './api/xferSpeed.js'; // 법인 간 전송 속도(중앙↔엣지 10MB 왕복, v2.735)
 import { registerIsilonDirUsage } from './api/isilonDirUsage.js'; // 아이실론 디렉터리 사용량(사용자 폴더 du Top N·추이, v2.736)
+import { registerStorageUsage } from './api/storageUsage.js'; // 스토리지 사용량 보고서(일간·주간·월간 표·비교·예약 메일, v2.789)
 import { registerPortalCheck } from './api/portalCheck.js'; // 포탈 점검 › 토큰 점검(v2.560)
 import { registerCommMap } from './api/commMap.js'; // 통신 지도(중앙↔엣지 통신 시각화, v2.584)
 import { registerDataFlow } from './api/dataFlow.js'; // 데이터 흐름 지도(포탈 사이 전 경로, v2.587)
@@ -43,6 +50,8 @@ import { registerPdu } from './api/pdu.js';               // PDU 정보(APC Rack
 import { registerSerialLookup } from './api/serialLookup.js'; // 시리얼 통합 조회(v2.412)
 import { registerRma } from './api/rma.js';                   // 원격 명령 실행(RMA, v2.416)
 import { registerCredentials } from './api/credentials.js';   // 통합 계정 관리(v2.419)
+import { registerBackupRun } from './api/backupRun.js';       // Backup 현황 › 백업 실행(v2.818 — Veeam B&R REST)
+import { registerBackupManage } from './api/backupManage.js'; // 포탈 백업 관리(v2.819 — 복원 지점·새 VM 복원·잡에서 빼기·백업 삭제)
 import { registerRelayCheck } from './api/relaycheck.js';     // HAProxy 경로 점검(v2.429)
 import { registerRelayTopo } from './api/relaytopo.js';       // 중계 토폴로지·HAProxy 구성(v2.431)
 import { registerBmStorage } from './api/bmstor.js'; // 베어메탈 스토리지(SSH df 마운트 합산, v2.340)
@@ -87,10 +96,7 @@ const toolGateRole = (req) => (!config.auth.enabled ? authDisabledRole() : (req.
  *   그대로 열린다(v2.536 이 겪은 '프론트 탭 조건만 있던' 사고와 같은 유형).
  *   인증 비활성 환경에서는 사용자가 없으므로 역할만 남는다(대체 역할은 위 함수가 정한다).
  */
-const toolGateUser = (req) => ({
-  username: (config.auth.enabled && req.user && req.user.username) || '',
-  role: toolGateRole(req),
-});
+const toolGateUser = toolActorOf;   // v2.787: 판정 사용자 하나(auth.js toolActorOf — 백업 Summary 도 같은 함수로 Detail 접근을 본다)
 api.use('/tools', toolGate({ roleOf: toolGateRole, userOf: toolGateUser }));
 // 같은 집행을 `/api/tools` **밖**의 전용 엔드포인트에도 적용한다(v2.506 검증 반영):
 // `/search/nl`(AI 검색)·`/top`(탐색·랭킹)은 각각 한 화면만 쓰는데 기능 권한 게이트가 없어
@@ -106,17 +112,24 @@ registerVcTools(api);
 registerReports(api);
 registerSearchNotes(api);
 registerIpamExport(api);
+registerVmExport(api);
+registerHostExport(api);
+registerHostCorp(api);
+registerHostChecks(api);
 registerHardwareGpu(api);
 registerChecksLogs(api);
 registerToolsAnalytics(api);
 registerToolsCapacity(api);
 registerToolsInfo(api);
 registerToolsGuestDisk(api);
+registerToolsGuestPart(api);
 registerVmSeries(api);
 registerCurUser(api);
 registerHorizonSessions(api);
 registerInventory(api);
 registerVmClone(api);
+registerVeeamBadges(api);
+registerBackupStatus(api); // v2.779 백업 서머리·세부내용(도구 키 backup-summary·backup-detail)
 registerBareosBackup(api);
 registerStorageMon(api);
 registerSanSwitch(api);
@@ -130,6 +143,7 @@ registerServerSensors(api);
 registerLinkCheck(api);
 registerXferSpeed(api);
 registerIsilonDirUsage(api);
+registerStorageUsage(api);
 registerPortalCheck(api);
 registerCommMap(api);
 registerDataFlow(api);
@@ -140,6 +154,8 @@ registerRma(api);
 registerPerfClient(api);
 registerCompareMatrix(api);
 registerCredentials(api);
+registerBackupRun(api);
+registerBackupManage(api);
 registerRelayCheck(api);
 registerRelayTopo(api);
 registerBmStorage(api);

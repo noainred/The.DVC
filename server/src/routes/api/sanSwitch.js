@@ -14,7 +14,7 @@ import { isAdminReq, maskDeviceAddress, maskSnapAddress, maskActivityEvents, mas
 import { store } from '../../store.js';
 import { logAudit } from '../../audit.js';
 import { SAN_SWITCH_TYPES, collectMethodsFor } from '../../sanswitch/types.js';
-import { listDevices, saveDevice, deleteDevice, deviceInputIssue, getDeviceWithSecret, normalizeDeviceInput } from '../../sanswitch/registry.js';
+import { listDevices, saveDevice, deleteDevice, deviceInputIssue, getDeviceWithSecret, normalizeDeviceInput, sanAccessMoved } from '../../sanswitch/registry.js';
 import { localSnapshots, getSnapshot, dropSnapshot } from '../../sanswitch/store.js';
 import { collectDeviceNow, sanSwitchPollerStatus, pollSanSwitchOnce, testDeviceConnection, ensureSanSwitchDemo } from '../../sanswitch/poller.js';
 import { isMockMode, demoOn } from '../../mock/demo/flags.js';   // v2.708 데모(mock)
@@ -38,6 +38,8 @@ import { checkDevice, checkPorts, summarizeAll, CHECK_ITEMS } from '../../sanswi
 import { recordRun, listRuns, compareRuns, healthHistoryStatus, MAX_RUNS } from '../../sanswitch/healthHistory.js';
 import { saveBaseline, getBaseline, clearBaseline, publicBaseline, listBaselines } from '../../sanswitch/errBaseline.js';
 import { portSeries, storageSeries, storageSeriesMulti, arraySerialOf, endpointKind, perfDbStats, pruneNow, latestSampleTs, available as perfDbAvailable, invalidatePerfQueries, perfQueryTtlMs } from '../../sanswitch/perfDb.js';
+import * as pu from '../../sanswitch/portUsage.js';   // v2.748 포트 사용량 화면(순수 조립)
+import { csvLine, CSV_BOM } from '../../util/csv.js';
 import { listDevices as listStorageDevices } from '../../storage/registry.js';
 import { localSnapshots as storageLocalSnaps } from '../../storage/store.js';
 import { edgeStorageSnapshots } from '../../central/storageEdge.js';
@@ -357,7 +359,7 @@ api.delete('/tools/sanswitch/devices/:id', adminOnly, fullScopeOnly, (req, res) 
  * 연결 테스트 — 등록 전/수정 중 값으로 실제 접속해 본다. 스냅샷은 저장하지 않는다.
  * 보안: adminOnly + deviceInputIssue(SSRF·형식) 선검증 + 감사로그. **host 를 바꿔 테스트할 때
  * 저장된 비밀번호를 이월하지 않는다**(uagmon M3 — host 바꿔치기로 자격증명이 공격자 서버로
- * 선제 전송되는 경로 차단). 비번을 새로 입력하지 않으면 같은 host 일 때만 저장분을 쓴다.
+ * 선제 전송되는 경로 차단). 비번을 새로 입력하지 않으면 접속처(host·계정·포트·방식)가 저장분과 같을 때만 저장분을 쓴다(v2.770 R5-E3-4).
  */
 api.post('/tools/sanswitch/test', adminOnly, fullScopeOnly, async (req, res) => {
   const b = req.body || {};
@@ -366,7 +368,8 @@ api.post('/tools/sanswitch/test', adminOnly, fullScopeOnly, async (req, res) => 
   let password = String(b.password ?? '');
   if (!password && b.id) {
     const saved = getDeviceWithSecret(b.id);
-    if (saved && saved.host === String(b.host || '').trim()) password = saved.password || '';
+    // v2.770(점검 R5-E3-4): host 만 보던 것을 저장 경로와 **같은 판정**(host·username·포트·수집 방식 — registry.sanAccessMoved)으로.
+    if (saved && !sanAccessMoved(saved, b)) password = saved.password || '';
   }
   // body 를 그대로 수집기에 넘기지 않는다 — vfId 는 CLI(`setcontext <vfId>;`)에 삽입되므로 저장 경로와
   // 같은 정규화(정수 1..128 / 포트 1..65535)를 거친다(v2.416 보안 감사 M-1).
@@ -759,6 +762,99 @@ api.get('/tools/sanswitch/devices/:id/perf/storage', toolsPerm, fullScopeOnly, a
   try { r = await storageSeries(req.params.id, { hours, from, to, signal: perfAbortSignal(res) }); }
   catch (e) { if (abandoned(e)) return; throw e; }
   res.json({ ok: true, unit: 'bytesPerSec', hours, from, to, rangeIssue: issue || null, ...(await withPerfDiag(req.params.id, r, req)) });
+});
+
+/**
+ * v2.748 — 포트 사용량 화면(시안 A안 개정 2): 1일/7일/1달 단위 + 이전 기록 + 포트별/스토리지별 + 히스토리 칸.
+ * 조립은 sanswitch/portUsage.js(순수)이고 여기는 portSeries 조회(기억·합류·취소)만 한다. 조회는 기간 전체 창(끝이 미래여도)으로 —
+ * 그래야 버킷이 기간 경계에 정확히 맞고, 같은 기간을 다시 열면 기억이 맞는다.
+ *  ① hist: 1시간 칸, 모든 포트 — d 는 고른 날로 끝나는 7일(히트맵 B), w·m 은 그 기간(차트·히트맵 A·B 를 함께 채운다)
+ *  ② chart: d 만, 대상 포트만 15분 칸(15분 집계 보관 31일 안일 때 — 지나면 hist 의 그날을 쓴다)
+ *  ③ prev: 요청했을 때만, 대상 포트만 — 앞 기간
+ *  ④ idle: 지난 30일, 모든 포트(유휴 판정) — 3시간 칸을 지역 하루로 접는다(v2.785 — 하루 버킷은 UTC 하루다)
+ * 단위·off 가 틀리면 400(조용히 다른 기간을 보여 주지 않는다).
+ */
+async function portUsageFor(req, res) {
+  const id = req.params.id;
+  const dev = listDevices().find((d) => d.id === id);
+  if (!dev) { res.status(404).json({ ok: false, reason: '스위치를 찾을 수 없습니다.' }); return null; }
+  const unit = String(req.query.unit || 'd');
+  const now = Date.now();
+  const retentionDays = (() => { try { return Number(loadPerfSettings().rollupRetentionDays) || 730; } catch { return 730; } })();
+  const period = pu.periodOf(unit, req.query.off == null || req.query.off === '' ? 0 : Number(req.query.off), { now, retentionDays });
+  if (period.issue) { res.status(400).json({ ok: false, reason: period.issue, minOff: period.minOff ?? null }); return null; }
+  const view = req.query.view === 'storage' ? 'storage' : 'port';
+  const signal = perfAbortSignal(res);
+  const HOUR = 3_600_000, DAY = 86_400_000;
+  const isD = unit === 'd';
+  const histSince = isD ? period.start - 6 * DAY : period.start;
+  const q = (from, to, bucketMs, ports = null) => portSeries(id, { from, to, points: Math.round((to - from) / bucketMs), ports, signal });
+  const hist = await q(histSince, period.end, HOUR);
+  const snap = snapshotFor(id);
+  const meta = new Map((hist.series || []).map((s) => [Number(s.port), { name: s.name, speed: s.speed }]));
+  const ports = pu.portList(snap?.ports?.list || [], meta);
+  // 대상을 먼저 정해야 대상 포트만 조회할 수 있다 — 조립의 바탕(전 포트 칸·스토리지 합)을 한 번 만들어 대상을 고르고,
+  // 같은 바탕을 최종 조립에 넘긴다. v2.782(점검 K3 I-I2): 전에는 대상 고르기용으로 buildPortUsage 를 한 번 더 돌렸다
+  // (768포트·1달에서 동기 수십 ms 가 요청마다 두 번).
+  const base = pu.usageBase({ period, ports, hist, histSince, now });
+  const members = pu.usageTargetMembers(base, { view, target: req.query.target ?? null });
+  let chart = null, prev = null, daily30 = null;
+  // v2.785(GI I-B4): 차트·앞 기간의 칸 폭·칸 수는 **응답의 bucketMs** 로 만든다(pu.seriesFrame) — perfDb 는 15분 표 보관
+  //   (SANSW_PERF_ROLLUP_15M_DAYS)이 지난 구간을 1시간 칸으로 돌려주는데, 15분·96칸으로 단정하면 96칸 중 72칸이 비었다.
+  const Q15 = 900_000;
+  if (members.length) {
+    if (isD && period.fine) {
+      const cr = await q(period.start, period.end, Q15, members);
+      chart = { res: cr, ...pu.seriesFrame(cr, { since: period.start, end: period.end, wantMs: Q15 }) };
+    }
+    if (req.query.prev === '1') {
+      const pp = pu.periodOf(unit, period.off - 1, { now, retentionDays: retentionDays + 400 });
+      if (!pp.issue) {
+        const want = isD && pp.fine ? Q15 : HOUR;
+        const pr = await q(pp.start, pp.end, want, members);
+        prev = { res: pr, ...pu.seriesFrame(pr, { since: pp.start, end: pp.end, wantMs: want }), label: pp.label };
+      }
+    }
+  }
+  // v2.785(GI I-B3): 유휴 30일은 3시간 칸(지역 자정의 정배수)으로 읽어 지역 하루로 접는다 — 하루(DAY) 버킷은 epoch 정배수라
+  //   UTC 하루(한국 09:00 경계)로 묶여 첫 한국 아침 표본이 버려지고 데이터 일수가 +1 됐다. 1시간 칸은 768포트에서 요청당 +0.5~0.7초라 쓰지 않는다.
+  const iw = pu.idleWindow(now);
+  const idleRes = await q(iw.since, iw.until, iw.bucketMs);
+  daily30 = pu.idleDailyOf(idleRes, { ...iw, now });
+  const r = pu.buildPortUsage({ period, ports, hist, histSince, chart, prev, daily30, view, target: req.query.target ?? null, now, base });
+  if (r.target?.chart?.prev && prev) r.target.chart.prev.label = prev.label;
+  // 조닝 상대(포트 하나일 때만) — 트래픽 몫이 아니라 조닝 설정상의 상대다. 전 포트로 넓히지 말 것(O(zone×멤버²)).
+  if (r.target?.kind === 'port' && snap) {
+    const z = zoneDetailFor(snap, [{ index: r.target.port }]);
+    r.target.zones = { row: z.rows[0] || null, note: z.note };
+  }
+  const admin = isAdminReq(req);
+  const name = admin ? (dev.name || dev.host) : ((dev.name && dev.name !== dev.host) ? dev.name : maskedNameLabel(dev));
+  return { r, name, demo: !!hist.demo, collectedAt: snap?.collectedAt || null, admin };
+}
+
+api.get('/tools/sanswitch/devices/:id/port-usage', toolsPerm, fullScopeOnly, async (req, res) => {
+  let out;
+  try { out = await portUsageFor(req, res); }
+  catch (e) { if (abandoned(e)) return; throw e; }
+  if (!out) return;
+  res.json({ ok: true, deviceId: req.params.id, name: out.name, unitOfValue: 'bytesPerSec', demo: out.demo, collectedAt: out.collectedAt,
+    ...out.r, ...(out.admin ? {} : { addressHidden: true }) });
+});
+
+api.get('/tools/sanswitch/devices/:id/port-usage.csv', csvPerm, toolsPerm, fullScopeOnly, async (req, res) => {
+  let out;
+  try { out = await portUsageFor(req, res); }
+  catch (e) { if (abandoned(e)) return; throw e; }
+  if (!out) return;
+  const { r } = out;
+  const rows = pu.usageCsvRows(r, { deviceName: out.name });
+  logAudit({ user: req.user?.username, action: 'SAN 포트 사용량 CSV 내보내기', target: `${out.name}(${req.params.id})`, detail: `${r.view} ${r.unit} ${r.label} ${rows.length - 1}행` });
+  const day = new Date(r.start + r.offsetMin * 60_000).toISOString().slice(0, 10).replace(/-/g, '');
+  const safeId = String(req.params.id).replace(/[^A-Za-z0-9_.-]/g, '_').slice(0, 60);
+  res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+  res.setHeader('Content-Disposition', `attachment; filename="san-port-usage_${safeId}_${r.view}_${{ d: '1d', w: '7d', m: '1m' }[r.unit]}_${day}.csv"`);
+  res.send(CSV_BOM + rows.map((x) => csvLine(x)).join('\r\n') + '\r\n');
 });
 
 /**

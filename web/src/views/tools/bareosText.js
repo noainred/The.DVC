@@ -1,5 +1,5 @@
 /**
- * views/tools/bareosText.js — Bareos VM 백업 화면 문구·판정(순수 함수, v2.747). 화면(BareosBackupTool.jsx)은 이 모듈만 본다.
+ * views/tools/bareosText.js — Bareos VM 백업 화면 문구·판정(순수 함수, v2.820). 화면(BareosBackupTool.jsx)은 이 모듈만 본다.
  * 규칙(docs/rules/web.md): 문구에 백틱 금지(값 인용은 ‘ ’) · 값이 없으면 '—'(0 으로 보이지 않게) · 주기·상한 숫자는 API 값.
  */
 import { numOrNull } from '../../numOrNull.js';

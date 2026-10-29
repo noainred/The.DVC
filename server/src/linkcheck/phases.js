@@ -49,7 +49,7 @@ export const FAIL_KINDS = Object.freeze({
   'old-version': { phase: 'http', label: '버전 부족', fix: '상대 포탈이 이 점검을 지원하지 않는 버전입니다 — 업그레이드하면 채워집니다.' },
   // v2.553 — 설정 전수 점검의 비-HTTP 경로
   'ssh-kex': { phase: 'ssh', label: 'SSH 협상 실패', fix: '키 교환·호스트키 알고리즘이 맞지 않습니다(구형 장비). **자격증명 문제가 아닙니다** — 상대 펌웨어나 우리 쪽 허용 알고리즘을 보세요.' },
-  'smtp-refused': { phase: 'smtp', label: 'SMTP 거부', fix: '연결은 됐지만 서버가 대화를 거부했습니다(220 아님·EHLO 거부) — 릴레이 제한이나 IP 차단입니다.' },
+  'smtp-refused': { phase: 'smtp', label: 'SMTP 거부', fix: '연결은 됐지만 서버가 대화를 거부했습니다(220 아님·EHLO 거부·대화 전에 연결 종료) — 릴레이 제한이나 IP 차단입니다.' },
   unknown: { phase: 'http', label: '원인 미상', fix: '분류하지 못한 오류입니다 — 상세 로그의 원문을 보세요.' },
 });
 

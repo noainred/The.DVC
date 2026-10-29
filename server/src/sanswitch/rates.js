@@ -103,4 +103,14 @@ export function applyRates(deviceId, ports = [], now = Date.now()) {
   return out;
 }
 
+/**
+ * v2.770(점검 R5-E3-3): **연결 테스트용** — 처리량 칸을 비우기만 하고 기준값(`_prev`)·마지막 결과(`_last`)는 건드리지 않는다.
+ * 테스트는 저장하지 않는 수집인데 실장비 id 로 `applyRates` 를 부르면 기준값이 덮여(편집 중 다른 host 로 테스트하면 두 스위치
+ * 카운터 차이가 됨) 다음 주기 처리량이 수백 배 틀렸다(재현: fps 20 → 10056).
+ */
+export function skipRates(ports = []) {
+  for (const p of ports) { p.inBps = null; p.outBps = null; p.inFps = null; p.outFps = null; }
+  return { computed: false, gapSec: null, reason: 'test', maxGapSec: Math.round(maxGapMs() / 1000) };
+}
+
 export function _resetForTest() { _prev.clear(); _last.clear(); _cadence = { intervalMs: 0, runMs: 0 }; }

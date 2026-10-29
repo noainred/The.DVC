@@ -1,5 +1,5 @@
 /**
- * bareos/service.js — Bareos 연동의 업무 단위(v2.747). 라우트·폴러·데모가 같은 함수를 쓴다.
+ * bareos/service.js — Bareos 연동의 업무 단위(v2.820). 라우트·폴러·데모가 같은 함수를 쓴다.
  *
  *  - withDirector(fn): 요청마다 콘솔 세션 1개(상시 연결 없음). 데모(mock 모드 + Director 미설정)면 메모리 Director.
  *    인증 실패(auth·pam·tls)는 정지 기록(util/authGuard.js) — **주기 조회만** 멈추고 수동 실행은 계속(자동 재시도 금지).

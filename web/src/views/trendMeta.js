@@ -31,7 +31,7 @@
  * ## 규약
  *
  * - 순수 함수만 둔다(웹 테스트는 node 환경이라 DOM 이 없다 — `accessDeniedText.js`·
- *   `version_4/loadState.js` 와 같은 관례). 회귀는 `trendMeta.test.js`.
+ *   `components/loadState.js` 와 같은 관례). 회귀는 `trendMeta.test.js`.
  * - 문구에 **백틱을 쓰지 않는다**(`BoldText` 는 강조 표기만 해석하고 백틱은 글자로 샌다 —
  *   v2.439·2.440·2.505·2.545·2.553·2.576). 값 인용은 홑화살괄호로 한다.
  * - 수치는 `numOrNull` 로 좁힌다(`Number(null) === 0` — 여덟 번 재발한 결함).
