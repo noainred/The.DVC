@@ -141,7 +141,7 @@ export function backupTotals(rows) {
     rpo: { d1: 0, d3: 0, d7: 0, unknown: 0 }, failed: 0, warning: 0, excluded: 0, powerUnknown: 0,
     veeamKnownVcs: 0, snapKnownVcs: 0, vmVeeamKnown: 0, vmSnapKnown: 0, veeamPartial: 0, snapPartial: 0, runningUnknown: 0, vmUnknown: 0,
     // v2.784: 사람이 정한 표시(중요도·백업 필요) — needGap(백업 필요인데 Veeam 대상 아님)은 아는 vCenter 만 더하고 모르는 곳을 센다
-    marks: { high: 0, mid: 0, low: 0, need: 0, needGap: 0, needGapUnknown: 0, method: { veeam: 0, clone: 0, config: 0, none: 0, unset: 0 } },   // v2.803 method = 백업 방식별 수
+    marks: { high: 0, mid: 0, low: 0, need: 0, needGap: 0, needGapUnknown: 0, method: { veeam: 0, clone: 0, config: 0, none: 0, check: 0, unset: 0 } },   // v2.803 method = 백업 방식별 수
     // v2.785(GR R-B2): 표시 파일을 못 읽은 행(marks null) 수 — 하나라도 있으면 marks 합계 값은 null('—' · 부분 합을 합계로 내지 않는다)
     marksUnknown: 0 };
   for (const r of Array.isArray(rows) ? rows : []) {
@@ -216,7 +216,7 @@ export function vmBackupView(vm, ve, evEntry, { veeamKnown = true, snapKnown = t
 // v2.784: need(백업 필요 표시) · needgap(백업 필요인데 Veeam 대상이 아님 — Veeam 을 모르는 VM 은 넣지 않는다) · crit-*(중요도)
 // v2.803: method-*(백업 방식 — unset = 정하지 않음)
 export const VIEW_FILTERS = Object.freeze(['all', 'veeam', 'snaponly', 'none', 'run', 'stale', 'rpo', 'fail', 'need', 'needgap', 'crit-high', 'crit-mid', 'crit-low',
-  'method-veeam', 'method-clone', 'method-config', 'method-none', 'method-unset']);
+  'method-veeam', 'method-clone', 'method-config', 'method-none', 'method-check', 'method-unset']);
 export function viewClass(vm, { rpoDays = 1, now = Date.now() } = {}) {
   const vKnown = !!vm && 'v' in vm && vm.v !== undefined;
   const v = vKnown ? vm.v : null;
@@ -229,11 +229,11 @@ export function viewClass(vm, { rpoDays = 1, now = Date.now() } = {}) {
     vKnown, veeam: !!v, run: !!(v && (v.state === 'run' || v.state === 'wait')), sKnown, snap, stale: !!(snapNow && snapNow.stale),
     old: !!(v && isFin(v.lb) && now - v.lb > days * DAY), fail: /^(fail|warn)/i.test(r),
     crit: ['high', 'mid', 'low'].includes(vm?.m?.crit) ? vm.m.crit : '', need: vm?.m?.need === true,
-    method: ['veeam', 'clone', 'config', 'none'].includes(vm?.m?.method) ? vm.m.method : '',   // v2.803 백업 방식(사람이 정한 값)
+    method: ['veeam', 'clone', 'config', 'none', 'check'].includes(vm?.m?.method) ? vm.m.method : '',   // v2.803 백업 방식(사람이 정한 값)
   };
 }
 /** v2.803 백업 방식 글자(화면·CSV·엑셀 공용 — 웹 backupViewText.METHODS 와 같은 글자, 테스트 대조). */
-export const METHOD_TEXT = Object.freeze({ veeam: 'Veeam', clone: 'Clone', config: 'Config 백업', none: '백업 안함' });
+export const METHOD_TEXT = Object.freeze({ veeam: 'Veeam', clone: 'Clone', config: 'Config 백업', none: '백업 안함', check: '확인 필요' });
 /**
  * v2.803 Clone 결과 한 마디(CSV·엑셀·내보내기 창 공용). c = vmBackupView 의 c(백업 방식이 Clone 인 VM 에만 있다).
  *   키 없음(Clone 이 아님) '' · null(잡 목록을 못 읽음)·unknown(실행 노드 보고 없음) '모름' · 잡 없음 · 아직 실행 안 함 · 성공 · 실패 · 건너뜀 + 잡이 꺼졌으면 '(잡 꺼짐)'.
@@ -361,7 +361,7 @@ export function priorityCandidates(vms, { byVm = null, marks = {}, veeamKnown = 
     const ve = byVm ? byVm[vm.id] : undefined;
     const crit = m && ['high', 'mid', 'low'].includes(m.crit) ? m.crit : '';
     const need = m?.need === true;
-    const method = m && ['veeam', 'clone', 'config', 'none'].includes(m.method) ? m.method : '';
+    const method = m && ['veeam', 'clone', 'config', 'none', 'check'].includes(m.method) ? m.method : '';
     const c = method === 'clone' && typeof cloneOf === 'function' ? cloneOf(vm.id) : undefined;
     const cloneBad = method === 'clone' && cloneBadOf(c);
     const gap = gapKnown && (need || crit === 'high') && !ve && method !== 'none' && method !== 'clone';

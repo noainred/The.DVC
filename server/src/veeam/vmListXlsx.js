@@ -62,7 +62,7 @@ export function barText(rate, width = 10) {
 }
 
 // v2.803 method = 백업 방식별 수(사람이 정한 값 — view.m.method · 없으면 unset)
-const newAgg = () => ({ vm: 0, veeam: 0, snap: 0, none: 0, unknown: 0, stale: 0, run: 0, wait: 0, vKnown: 0, off: 0, method: { veeam: 0, clone: 0, config: 0, none: 0, unset: 0 } });
+const newAgg = () => ({ vm: 0, veeam: 0, snap: 0, none: 0, unknown: 0, stale: 0, run: 0, wait: 0, vKnown: 0, off: 0, method: { veeam: 0, clone: 0, config: 0, none: 0, check: 0, unset: 0 } });
 function addAgg(a, it) {
   a.vm++; a[it.group]++;
   const mt = it.view.m?.method;
@@ -172,6 +172,7 @@ export function watchList(items, { snapDays = 7, at = Date.now(), marksUnknown =
       if (mt === 'clone' && c?.job && c.ok === true && fin(c.at) && !c.skipped) continue;
       if (mt === 'clone') why = `백업 방식 Clone · ${cloneResultText(c) || '모름'} — ${why}`;
       else if (mt === 'config') why = `백업 방식 Config 백업(포탈이 확인할 수 없음) — ${why}`;
+      else if (mt === 'check') why = `백업 방식 확인 필요로 표시함 — ${why}`;
       else if (mt === 'veeam') why = `백업 방식 Veeam 으로 정함 — ${why}`;
     }
     if (tag) out.push({ tag, why, it });
@@ -479,8 +480,8 @@ function legendSheet(wb, ctx) {
       : "'데이터(행 단위)' 시트는 CSV 와 같은 열입니다(폴더 1~N단계 · 폴더 경로 포함). 색·접기는 엑셀에만 있습니다. 폴더 경로가 비어 있으면 데이터센터 바로 아래(최상위) VM 입니다.",
     '대상 VM 은 내려받을 때 포탈 화면에 보이던 목록입니다(보기·검색 반영) 또는 고른 폴더입니다. 판단은 Backup 현황 › Detail 과 같은 기준입니다.',
     "'먼저 볼 VM' 은 백업 방식을 '백업 안함' 으로 정한 VM 과 Clone 마지막 복제가 성공한 VM 을 빼고, 그 밖의 방식은 이유 앞에 밝힙니다.",
-    "'백업 방식' 은 Backup 현황 › Detail 에서 사람이 정한 값입니다(Veeam · Clone · Config 백업 · 백업 안함 — 정하지 않은 VM 은 빈칸 · 수집값으로 추정하지 않습니다). 'Clone' 칸은 백업 방식이 Clone 인 VM 에만, 포탈 VM 백업(복제) 잡의 마지막 실행 시각과 결과를 씁니다 — '잡 없음' 은 그 VM 의 복제 잡이 없다는 뜻, '모름' 은 실행하는 노드(엣지)의 보고를 아직 받지 못한 것입니다.",
-    "폴더 행의 '백업 방식' 칸은 그 폴더(하위 폴더 포함)의 방식별 VM 수입니다(0 인 방식은 생략 · 맨 위 vCenter 행이 전체 합계). 색: Veeam 녹색 · Clone 청록 · Config 백업 보라 · 백업 안함 회색 · 미지정은 색 없음.",
+    "'백업 방식' 은 Backup 현황 › Detail 에서 사람이 정한 값입니다(Veeam · Clone · Config 백업 · 백업 안함 · 확인 필요 — 정하지 않은 VM 은 빈칸 · 수집값으로 추정하지 않습니다). 'Clone' 칸은 백업 방식이 Clone 인 VM 에만, 포탈 VM 백업(복제) 잡의 마지막 실행 시각과 결과를 씁니다 — '잡 없음' 은 그 VM 의 복제 잡이 없다는 뜻, '모름' 은 실행하는 노드(엣지)의 보고를 아직 받지 못한 것입니다.",
+    "폴더 행의 '백업 방식' 칸은 그 폴더(하위 폴더 포함)의 방식별 VM 수입니다(0 인 방식은 생략 · 맨 위 vCenter 행이 전체 합계). 색: Veeam 녹색 · Clone 청록 · Config 백업 보라 · 백업 안함 회색 · 확인 필요 주황 · 미지정은 색 없음.",
     'VM · 폴더 이름은 문자열 칸으로만 씁니다(수식 칸을 만들지 않습니다).',
     `만든 시각 ${o.stamp} ${o.tz} · 포탈 › Backup 현황 › Detail 에서 같은 목록을 볼 수 있습니다.`,
   ];

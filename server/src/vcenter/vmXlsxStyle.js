@@ -60,6 +60,7 @@ export const METHOD_LOOK = Object.freeze({
   clone: Object.freeze({ fg: 'FF0E7490', bg: 'FFCFFAFE' }),
   config: Object.freeze({ fg: 'FF6D28D9', bg: 'FFEDE9FE' }),
   none: Object.freeze({ fg: 'FF475569', bg: 'FFF1F5F9' }),
+  check: Object.freeze({ fg: 'FFB45309', bg: 'FFFEF3C7' }),   // v2.816 확인 필요
 });
 const METHOD_BY_TEXT = Object.freeze(Object.fromEntries(Object.entries(METHOD_TEXT).map(([k, t]) => [t, { bg: METHOD_LOOK[k].bg, color: METHOD_LOOK[k].fg, bold: true }])));
 

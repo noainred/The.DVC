@@ -47,7 +47,7 @@ describe('v2.779 백업 메뉴 — 순수 헬퍼', () => {
     expect(vmClass(VMS[4])).toMatchObject({ snap: false, stale: true });
     const c = filterCounts(VMS);
     expect(c).toEqual({ all: 7, veeam: 3, snaponly: 1, none: 2, run: 2, stale: 1, rpo: 1, fail: 0, need: 0, needgap: 0, 'crit-high': 0, 'crit-mid': 0, 'crit-low': 0,
-      'method-veeam': 0, 'method-clone': 0, 'method-config': 0, 'method-none': 0, 'method-unset': 7 });   // v2.803 백업 방식(표시 없음 = 미지정)   // v2.784 표시 필터(표시 없음 = 0)   // v2.780 rpo: dc01 의 lb 1(아주 오래 전)
+      'method-veeam': 0, 'method-clone': 0, 'method-config': 0, 'method-none': 0, 'method-check': 0, 'method-unset': 7 });   // v2.803 백업 방식(표시 없음 = 미지정)   // v2.784 표시 필터(표시 없음 = 0)   // v2.780 rpo: dc01 의 lb 1(아주 오래 전)
     expect(vmMatches(VMS[6], 'none')).toBe(false);
   });
 
@@ -294,7 +294,7 @@ describe('v2.806 백업 방식 단축키 · 우선순위 VM', async () => {
   const S = await import('../../../../server/src/veeam/backupStatus.js');
   const ev = (key, extra = {}) => ({ key, target: { tagName: 'DIV' }, ...extra });
   it('단축키 — V·C·G·N(대소문자 무관) · 조합키·IME·반복·입력 칸이면 무시', () => {
-    expect(['v', 'C', 'g', 'N', 'x'].map((k) => B.methodKeyOf(ev(k)))).toEqual(['veeam', 'clone', 'config', 'none', null]);
+    expect(['v', 'C', 'g', 'N', 'K', 'x'].map((k) => B.methodKeyOf(ev(k)))).toEqual(['veeam', 'clone', 'config', 'none', 'check', null]);   // v2.816 K 확인 필요
     expect(B.methodKeyOf(ev('v', { ctrlKey: true }))).toBe(null);
     expect(B.methodKeyOf(ev('v', { metaKey: true }))).toBe(null);
     expect(B.methodKeyOf(ev('v', { altKey: true }))).toBe(null);
@@ -302,7 +302,7 @@ describe('v2.806 백업 방식 단축키 · 우선순위 VM', async () => {
     expect(B.methodKeyOf(ev('v', { repeat: true }))).toBe(null);
     for (const tagName of ['INPUT', 'TEXTAREA', 'SELECT']) expect(B.methodKeyOf(ev('v', { target: { tagName } })), tagName).toBe(null);
     expect(B.methodKeyOf(ev('v', { target: { tagName: 'DIV', isContentEditable: true } }))).toBe(null);
-    expect(Object.values(B.METHOD_KEYS_MAP).sort()).toEqual([...B.METHODS.map((m) => m.key)].sort(), '네 방식 모두 키가 있다');
+    expect(Object.values(B.METHOD_KEYS_MAP).sort()).toEqual([...B.METHODS.map((m) => m.key)].sort(), '모든 방식에 키가 있다');
   });
   it('화면 — keydown 은 고른 VM·편집 가능일 때만 · 같은 값이면 저장하지 않는다 · 안내 한 줄', async () => {
     const fs = await import('node:fs');
@@ -310,7 +310,7 @@ describe('v2.806 백업 방식 단축키 · 우선순위 VM', async () => {
     expect(src).toMatch(/if \(!selVm \|\| !writable\) return undefined;/);
     expect(src).toMatch(/const method = methodKeyOf\(e\);/);
     expect(src).toMatch(/if \(\(selVm\.m\?\.method \|\| ''\) !== method\) saveMarks\(\[selVm\.id\], \{ method \}\);/);
-    expect(src).toMatch(/단축키 V Veeam · C Clone · G Config 백업 · N 백업 안함/);
+    expect(src).toMatch(/단축키 V Veeam · C Clone · G Config 백업 · N 백업 안함 · K 확인 필요/);
   });
   it('우선순위 VM — 백업 안함·Clone 은 Veeam 미백업이 아니다 · Clone 실패·잡 없음은 실패 탭 · Config 는 확인 불가 태그', () => {
     const NOW = 1_800_000_000_000;
@@ -413,8 +413,8 @@ describe('v2.814 디스크 용량(Detail) — 표시 · 폴더 합 · 백업 방
   });
   it('methodGbTotals — 방식별 · 미지정 · 모름 분리 · 표시 파일을 못 읽으면 방식별은 null', () => {
     const vms = [{ gb: 10, m: { method: 'veeam' } }, { gb: 2048, m: { method: 'clone' } }, { gb: 5 }, { gb: null, m: { method: 'veeam' } }, { gb: 1, m: { method: 'bogus' } }];
-    expect(methodGbTotals(vms)).toEqual({ all: 2064, unknown: 1, veeam: 10, clone: 2048, config: 0, none: 0, unset: 6 });
-    expect(methodGbTotals(vms, { marksUnreadable: true })).toEqual({ all: 2064, unknown: 1, veeam: null, clone: null, config: null, none: null, unset: null });
+    expect(methodGbTotals(vms)).toEqual({ all: 2064, unknown: 1, veeam: 10, clone: 2048, config: 0, none: 0, check: 0, unset: 6 });
+    expect(methodGbTotals(vms, { marksUnreadable: true })).toEqual({ all: 2064, unknown: 1, veeam: null, clone: null, config: null, none: null, check: null, unset: null });
   });
   it('소스 — 표 머리 ‘용량’ · VM·폴더·패널·상단 합계에 fmtGb', () => {
     const det = fs.readFileSync(new URL('./BackupDetailTool.jsx', import.meta.url), 'utf8');

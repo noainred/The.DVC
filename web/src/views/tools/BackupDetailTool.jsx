@@ -420,7 +420,7 @@ export default function BackupDetailTool({ scope }) {
                       }) : (methodOf(selVm.m?.method) ? <MethodBadge method={selVm.m.method} /> : <span className="muted">—</span>)}
                       </span>
                     </div>
-                    {writable && <span className="muted" data-method-keys="" style={{ fontSize: 11.5, paddingLeft: 62 }}>단축키 V Veeam · C Clone · G Config 백업 · N 백업 안함</span>}
+                    {writable && <span className="muted" data-method-keys="" style={{ fontSize: 11.5, paddingLeft: 62 }}>단축키 V Veeam · C Clone · G Config 백업 · N 백업 안함 · K 확인 필요</span>}
                     <div className="flex wrap" style={{ gap: 6, alignItems: 'center' }}>
                       <span className="muted" style={{ fontSize: 12, minWidth: 56 }}>백업 필요</span>
                       {writable ? (

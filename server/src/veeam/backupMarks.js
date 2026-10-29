@@ -19,7 +19,7 @@ import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
 
 const FILE = () => path.join(config.configDir, 'backup-marks.json');
 export const CRIT_VALUES = Object.freeze(['high', 'mid', 'low']);
-export const METHOD_VALUES = Object.freeze(['veeam', 'clone', 'config', 'none']);   // v2.803 백업 방식(화면 순서)
+export const METHOD_VALUES = Object.freeze(['veeam', 'clone', 'config', 'none', 'check']);   // v2.803 백업 방식(화면 순서) · v2.816 'check' 확인 필요(사용자 요청)
 export const MEMO_MAX = 1000;
 export const MAX_IDS_PER_REQUEST = 2000;
 export const MAX_ENTRIES = 50_000;
@@ -112,7 +112,7 @@ export function setMarks(vms, patch = {}, user) {
  */
 export function markCounts(vms, marks, byVm, { veeamKnown, absentKnown = true } = {}) {
   // v2.803 method: 백업 방식별 수(unset = 범위 안에서 정하지 않은 VM — 표시가 없는 VM 포함)
-  const c = { high: 0, mid: 0, low: 0, need: 0, needGap: 0, method: { veeam: 0, clone: 0, config: 0, none: 0, unset: 0 } };
+  const c = { high: 0, mid: 0, low: 0, need: 0, needGap: 0, method: { veeam: 0, clone: 0, config: 0, none: 0, check: 0, unset: 0 } };
   const gapKnown = !!veeamKnown && absentKnown !== false;
   for (const vm of Array.isArray(vms) ? vms : []) {
     const m = marks?.[vm.id];

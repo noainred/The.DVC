@@ -11,7 +11,7 @@ describe('exportPreviewText', () => {
     expect(cellTone('POWERED_ON', 'powerState')).toBe('on');
     expect(cellTone('꺼짐', 'power')).toBe('off');
     // v2.807 백업 방식 색(서버 METHOD_LOOK 과 한 쌍 — 서버 vmExcel2801 ⑥ 대조)
-    expect(['Veeam', 'Clone', 'Config 백업', '백업 안함', ''].map((v) => cellTone(v, 'bmethod'))).toEqual(['m-veeam', 'm-clone', 'm-config', 'm-none', '']);
+    expect(['Veeam', 'Clone', 'Config 백업', '백업 안함', '확인 필요', ''].map((v) => cellTone(v, 'bmethod'))).toEqual(['m-veeam', 'm-clone', 'm-config', 'm-none', 'm-check', '']);
     expect(cellTone('SUSPENDED', 'powerState')).toBe('warn');
     expect(cellTone(95, 'cpuUsagePct')).toBe('hot');
     expect(cellTone(80, 'memUsagePct')).toBe('warm');

@@ -243,6 +243,7 @@ export const METHODS = [
   { key: 'clone', text: 'Clone', color: '#67e8f9' },
   { key: 'config', text: 'Config 백업', color: '#a78bfa' },
   { key: 'none', text: '백업 안함', color: '#94a3b8' },
+  { key: 'check', text: '확인 필요', color: '#fbbf24' },   // v2.816 사용자 요청 — 방식을 아직 확인하지 못한 VM 표시
 ];
 const METHOD_KEYS = METHODS.map((m) => m.key);
 export const methodOf = (k) => METHODS.find((m) => m.key === k) || null;
@@ -256,8 +257,8 @@ const markNum = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
 export function marksLine(m, unreadable = false) {
   if (unreadable) return { high: null, mid: null, low: null, need: null, needGap: null, method: null, unknown: true };
   if (!m) return null;
-  // v2.803 method — 백업 방식별 수 { veeam, clone, config, none, unset } · 옛 응답(없음)·모름은 null
-  const method = m.method && typeof m.method === 'object' ? Object.fromEntries(['veeam', 'clone', 'config', 'none', 'unset'].map((k) => [k, markNum(m.method[k])])) : null;
+  // v2.803 method — 백업 방식별 수 { veeam, clone, config, none, check, unset } · 옛 응답(없음)·모름은 null
+  const method = m.method && typeof m.method === 'object' ? Object.fromEntries(['veeam', 'clone', 'config', 'none', 'check', 'unset'].map((k) => [k, markNum(m.method[k])])) : null;
   return { high: markNum(m.high), mid: markNum(m.mid), low: markNum(m.low), need: markNum(m.need), needGap: markNum(m.needGap), method,
     needGapUnknown: m.needGapUnknown > 0 ? m.needGapUnknown : undefined };
 }
@@ -271,7 +272,7 @@ export function marksNotice(d) {
   return null;
 }
 /** v2.785(GR R-B2): 세부 보기 칩의 수 — 표시 기준 칩(백업 필요·미백업·중요도)은 표시를 모르면 '—'. */
-const MARK_FILTER_KEYS = new Set(['need', 'needgap', 'crit-high', 'crit-mid', 'crit-low', 'method-veeam', 'method-clone', 'method-config', 'method-none', 'method-unset']);
+const MARK_FILTER_KEYS = new Set(['need', 'needgap', 'crit-high', 'crit-mid', 'crit-low', 'method-veeam', 'method-clone', 'method-config', 'method-none', 'method-check', 'method-unset']);
 export function filterCountText(k, counts, marksUnknown) {
   if (marksUnknown && MARK_FILTER_KEYS.has(k)) return '—';
   return counts?.[k];
@@ -492,7 +493,7 @@ export function snapCell(vm, days = 7) {
  * v2.806 백업 방식 단축키(사용자 요청 — VM 을 고른 상태에서 V Veeam · C Clone · G Config 백업 · N 백업 안함). 아니면 null.
  *   조합키(Ctrl·Meta·Alt)·IME 조합 중·누르고 있는 반복·입력 칸(input·textarea·select·편집 가능 요소)에 초점이 있으면 null — 메모를 쓰다가 글자가 백업 방식으로 바뀌지 않게.
  */
-export const METHOD_KEYS_MAP = Object.freeze({ v: 'veeam', c: 'clone', g: 'config', n: 'none' });
+export const METHOD_KEYS_MAP = Object.freeze({ v: 'veeam', c: 'clone', g: 'config', n: 'none', k: 'check' });   // v2.816 K 확인 필요
 export function methodKeyOf(e) {
   if (!e || e.ctrlKey || e.metaKey || e.altKey || e.isComposing || e.repeat) return null;
   const t = e.target;

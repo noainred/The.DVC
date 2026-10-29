@@ -23,11 +23,11 @@ const POWER = Object.freeze({ POWERED_ON: 'on', 켜짐: 'on', POWERED_OFF: 'off'
 const TOOLS = Object.freeze({ RUNNING: 'on', NOT_RUNNING: 'warn', OUTDATED: 'warn' });
 const YN = Object.freeze({ 예: 'yes', 아니오: 'no', 모름: 'off' });
 // v2.807 백업 방식(서버 METHOD_TEXT 글자) → 색 — 서버 vmXlsxStyle METHOD_LOOK 과 같은 뜻
-const METHOD = Object.freeze({ Veeam: 'm-veeam', Clone: 'm-clone', 'Config 백업': 'm-config', '백업 안함': 'm-none' });
+const METHOD = Object.freeze({ Veeam: 'm-veeam', Clone: 'm-clone', 'Config 백업': 'm-config', '백업 안함': 'm-none', '확인 필요': 'm-check' });
 
 /**
  * 칸 모양 이름(CSS 클래스 접미사) — '' 이면 손대지 않는다.
- * missing(흐린 기울임) · on(초록) · off(회색) · warn(주황) · yes · no · hot(90%+) · warm(80%+) · v-veeam · v-snap · v-none · v-unknown · m-veeam · m-clone · m-config · m-none · name
+ * missing(흐린 기울임) · on(초록) · off(회색) · warn(주황) · yes · no · hot(90%+) · warm(80%+) · v-veeam · v-snap · v-none · v-unknown · m-veeam · m-clone · m-config · m-none · m-check · name
  */
 export function cellTone(v, key) {
   if (typeof v === 'string' && MISSING_TEXTS.includes(v)) return 'missing';

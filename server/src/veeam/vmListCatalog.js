@@ -73,7 +73,7 @@ export const CATALOG = Object.freeze([
   { key: 'bmark', group: 'meta', label: '백업 표시(중요도·백업 필요·메모)', avail: 'snap', needs: 'marks',
     get: (r) => (!r.marksOk || !r.mark ? '' : [CRIT_TEXT[r.mark.crit] || '', r.mark.need ? '백업 필요' : '', r.mark.memo || ''].filter(Boolean).join(' · ')) },
   // v2.803 백업 방식(사람이 정한 값) · Clone 마지막 실행(백업 방식이 Clone 인 VM 만 — 포탈 복제 잡, 실행 노드 기준)
-  { key: 'bmethod', group: 'meta', label: '백업 방식(Veeam·Clone·Config 백업·백업 안함)', avail: 'snap', needs: 'marks', isNew: true,
+  { key: 'bmethod', group: 'meta', label: '백업 방식(Veeam·Clone·Config 백업·백업 안함·확인 필요)', avail: 'snap', needs: 'marks', isNew: true,
     get: (r) => (!r.marksOk || !r.mark ? '' : METHOD_TEXT[r.mark.method] || '') },
   { key: 'bclone', group: 'meta', label: 'Clone 마지막 실행·결과', head: (o) => `Clone 마지막 실행 ${o.tz}`, avail: 'snap', needs: ['marks', 'clone'], isNew: true,
     get: (r, o) => (r.mark?.method !== 'clone' ? '' : [o.t(r.clone?.at), cloneResultText(r.clone)].filter(Boolean).join(' ')) },
