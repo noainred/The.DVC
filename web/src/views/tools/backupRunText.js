@@ -8,11 +8,12 @@ export const RUN_STATUS = Object.freeze({
   protected: { label: '보호됨 · Quick 가능', cls: 'green' },
   'in-job': { label: '복원 지점 없음', cls: 'amber' },
   unprotected: { label: '미보호', cls: 'amber' },
+  agent: { label: '에이전트 백업 포함', cls: 'gray' },
   elsewhere: { label: '다른 서버(미등록)', cls: 'gray' },
   unknown: { label: '확인 불가', cls: 'gray' },
   unmapped: { label: '연결 서버 없음', cls: 'gray' },
 });
-export const RUN_STATUS_ORDER = Object.freeze(['protected', 'in-job', 'unprotected', 'elsewhere', 'unknown', 'unmapped']);
+export const RUN_STATUS_ORDER = Object.freeze(['protected', 'in-job', 'unprotected', 'agent', 'elsewhere', 'unknown', 'unmapped']);
 
 export const VM_STATE = Object.freeze({
   queued: { label: '대기', cls: 'gray' },
@@ -100,3 +101,23 @@ export function pointSource(p) {
   const name = p?.jobName || p?.backupName || '';
   return { name: name || '—', portal: p?.portal === true };
 }
+
+/* ── v2.820.1 ───────────────────────────────────────────────────────── */
+
+/** 복원 지점 수 — 모니터링 코어는 '있지만 개수 모름' 을 -1 로 적는다(B2: 표에 '-1' 이 그대로 보였다). 값이 없으면 '—'. */
+export function rpText(n) {
+  if (typeof n !== 'number' || !Number.isFinite(n)) return '—';
+  return n === -1 ? '있음(개수 모름)' : String(n);
+}
+
+/**
+ * Detail·폴더 트리에서 넘겨받은 VM → 선택(Map id→이름). 화면에서 고를 수 있는 행만(연결 서버 없음·조회 전용은 체크박스가 잠긴다 — 같은 기준).
+ * 넘김은 **한 번만** 적용한다(B4: 요청 뒤 목록을 다시 읽을 때마다 같은 VM 이 다시 골라져 같은 백업을 또 보낼 수 있었다 — 호출부가 소비 표시).
+ */
+export function pickHandoff(rows, ids, writable) {
+  const want = new Set(Array.isArray(ids) ? ids : []);
+  if (!writable || !want.size) return new Map();
+  return new Map((Array.isArray(rows) ? rows : []).filter((r) => want.has(r.id) && r.run?.status !== 'unmapped').map((r) => [r.id, r.name]));
+}
+/** 복원 지점 정렬 값 — '있음(개수 모름)'(-1)은 0 보다 위·1 보다 아래(재검토: -1 그대로면 '없음' 아래로 갔다). */
+export const rpSort = (n) => (typeof n === 'number' && Number.isFinite(n) ? (n === -1 ? 0.5 : n) : '');

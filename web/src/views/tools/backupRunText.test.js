@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { portalMark, pointSource, RUN_STATUS, RUN_STATUS_ORDER, VM_STATE, powerText, runSummary, ago, saveHandoff, takeHandoff, HANDOFF_KEY } from './backupRunText.js';
+import { portalMark, pointSource, rpText, rpSort, pickHandoff, RUN_STATUS, RUN_STATUS_ORDER, VM_STATE, powerText, runSummary, ago, saveHandoff, takeHandoff, HANDOFF_KEY } from './backupRunText.js';
 import { visibleTabs, VEEAM_TABS } from './VeeamHeader.jsx';
 
 // v2.818 Backup 현황 › 백업 실행 — 서버 판정을 글자로만 바꾼다(판정 복제 금지). 못 읽은 값은 '—'.
@@ -7,7 +7,7 @@ const memStore = () => { const m = new Map(); return { setItem: (k, v) => m.set(
 
 describe('backupRunText', () => {
   it('실행 상태 6종 문구 · 확인 불가·보내지 않음은 회색(성공도 실패도 아님)', () => {
-    expect(RUN_STATUS_ORDER).toEqual(['protected', 'in-job', 'unprotected', 'elsewhere', 'unknown', 'unmapped']);
+    expect(RUN_STATUS_ORDER).toEqual(['protected', 'in-job', 'unprotected', 'agent', 'elsewhere', 'unknown', 'unmapped']);
     for (const k of RUN_STATUS_ORDER) expect(RUN_STATUS[k].label).toBeTruthy();
     expect(VM_STATE.unknown.cls).toBe('gray'); expect(VM_STATE.skipped.cls).toBe('gray'); expect(VM_STATE.failed.cls).toBe('red');
   });
@@ -49,5 +49,22 @@ describe('v2.819 portalMark · pointSource', () => {
     expect(pointSource({ jobName: 'PORTAL-x', portal: true })).toEqual({ name: 'PORTAL-x', portal: true });
     expect(pointSource({ backupName: 'Daily' })).toEqual({ name: 'Daily', portal: false });
     expect(pointSource({})).toEqual({ name: '—', portal: false });
+  });
+});
+
+describe('v2.820.1 B2·B4', () => {
+  it('B2 복원 지점 수 — -1 은 \'있음(개수 모름)\'(모니터링 코어 표기) · 없으면 —', () => {
+    expect(rpText(-1)).toBe('있음(개수 모름)');
+    expect(rpText(12)).toBe('12');
+    expect(rpText(0)).toBe('0');
+    expect(rpText(null)).toBe('—');
+    expect(rpText(undefined)).toBe('—');
+    expect([3, -1, 0, null].map(rpSort)).toEqual([3, 0.5, 0, '']);
+  });
+  it('B4 넘겨받은 VM — 고를 수 있는 행만(연결 서버 없음·조회 전용 제외)', () => {
+    const rows = [{ id: 'a', name: 'A', run: { status: 'protected' } }, { id: 'b', name: 'B', run: { status: 'unmapped' } }, { id: 'c', name: 'C', run: { status: 'unknown' } }];
+    expect([...pickHandoff(rows, ['a', 'b', 'c', 'zz'], true).keys()]).toEqual(['a', 'c']);
+    expect(pickHandoff(rows, ['a'], false).size).toBe(0);
+    expect(pickHandoff(rows, [], true).size).toBe(0);
   });
 });

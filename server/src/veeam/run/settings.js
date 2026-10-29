@@ -85,7 +85,8 @@ export function saveRunSettings(input = {}) {
   const cur = load();
   _db = normalizeRunSettings({
     jobPrefix: i.jobPrefix !== undefined ? i.jobPrefix : cur.jobPrefix,
-    servers: i.servers !== undefined ? i.servers : cur.servers,
+    // 서버별 값은 합친다 — 입력에 없는 서버 id 는 유지(빈 서버 목록 화면이 저장소·보존을 지우지 않게 — v2.820.1 B3). 값을 지우려면 그 id 에 빈 저장소를 보낸다.
+    servers: i.servers && typeof i.servers === 'object' && !Array.isArray(i.servers) ? { ...cur.servers, ...i.servers } : cur.servers,
     hosts: i.hosts !== undefined ? i.hosts : cur.hosts,
   });
   atomicWriteFileSync(FILE(), JSON.stringify({ version: 1, ..._db }, null, 2), { mode: 0o600 });
