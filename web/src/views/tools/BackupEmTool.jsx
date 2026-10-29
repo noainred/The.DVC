@@ -37,12 +37,12 @@ function EmLinks({ ems, now, sel, onPick }) {
           {sm.unmapped ? <span> · 매핑 없는 서버 {fmtNum(sm.unmapped)}</span> : null}
           {sm.rootsUnknown ? <span> · 연결 호스트를 못 읽은 EM {fmtNum(sm.rootsUnknown)}</span> : null}</span>
       </div>
-      {/* 가로 스크롤 래퍼는 STable(minWidth)이 만든다 — 바깥에 또 두지 않는다 · 칸 글자는 줄바꿈(1440 에서 대조 열이 잘리지 않게) */}
+      {/* 가로 스크롤 래퍼는 STable(minWidth)이 만든다 — 바깥에 또 두지 않는다 · 칸 글자는 줄바꿈(1440 에서 대조 열이 잘리지 않게) · th 도 normal(STable 이 정렬 th 에 nowrap 을 넣어 400 에서 첫 열 제목이 옆 열에 닿는다) */}
       <div style={{ marginTop: 8 }}>
         <STable minWidth={860} style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, tableLayout: 'fixed' }}>
           <thead><tr style={{ textAlign: 'left', fontSize: 12 }}>
-            <th style={{ padding: '6px 6px 6px 0', width: '13%' }}>Enterprise Manager</th><th style={{ padding: '6px', width: '21%' }}>수집</th><th style={{ padding: '6px', width: '14%' }}>백업 서버</th>
-            <th style={{ padding: '6px', width: '23%' }}>EM 이 본 vCenter·호스트</th><th style={{ padding: '6px', width: '19%' }}>포탈 매핑(법인)</th><th style={{ padding: '6px 0 6px 6px', width: '10%' }}>대조</th>
+            <th style={{ padding: '6px 6px 6px 0', width: '13%', whiteSpace: 'normal' }}>Enterprise Manager</th><th style={{ padding: '6px', width: '21%', whiteSpace: 'normal' }}>수집</th><th style={{ padding: '6px', width: '14%', whiteSpace: 'normal' }}>백업 서버</th>
+            <th style={{ padding: '6px', width: '23%', whiteSpace: 'normal' }}>EM 이 본 vCenter·호스트</th><th style={{ padding: '6px', width: '19%', whiteSpace: 'normal' }}>포탈 매핑(법인)</th><th style={{ padding: '6px 0 6px 6px', width: '10%', whiteSpace: 'normal' }}>대조</th>
           </tr></thead>
           <tbody>
             {rows.map((r) => (
