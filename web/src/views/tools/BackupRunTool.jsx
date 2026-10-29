@@ -4,7 +4,8 @@ import { Loading, ErrorBox, SearchBox } from '../../components/ui.jsx';
 import { STable } from '../../components/STable.jsx';
 import Select from '../../components/Select.jsx';
 import VeeamHeader from './VeeamHeader.jsx';
-import { RUN_STATUS, RUN_STATUS_ORDER, VM_STATE, HOW, HOST_HOW, ago, shortTime, powerText, runSummary, takeHandoff } from './backupRunText.js';
+import { RUN_STATUS, RUN_STATUS_ORDER, VM_STATE, HOW, HOST_HOW, ago, shortTime, powerText, runSummary, takeHandoff, portalMark } from './backupRunText.js';
+import BackupManageModal from './BackupManageModal.jsx';
 
 /**
  * Backup 현황 › 백업 실행(v2.818, admin 전용 · 도구 키 backup-run) — 포탈에서 고른 VM 을 Veeam B&R REST API 로 백업한다.
@@ -45,6 +46,7 @@ export default function BackupRunTool() {
       {listErr && !list ? <ErrorBox error={listErr} /> : !list ? <Loading label="vCenter 목록" /> : null}
       {vcId ? <VmPanel key={vcId} vcId={vcId} initialIds={handoff.current?.vcenterId === vcId ? handoff.current.vmIds : []} /> : list && <div className="card muted">vCenter 를 고르세요.</div>}
       <RunsPanel />
+      <PortalVmsPanel />
       <SettingsPanel />
     </div>
   );
@@ -266,6 +268,48 @@ function RunsPanel() {
           </tbody>
         </STable>
       )}
+    </div>
+  );
+}
+
+/** 포탈로 백업한 VM(v2.819) — 마지막 백업·결과·잡에서 뺌·삭제 · '관리' 로 복원 지점·새 VM 복원·빼기·삭제. 로컬 기록이라 가볍다(30초). */
+function PortalVmsPanel() {
+  const { data: d, error: err } = usePolling('/tools/backup-run/portal-vms', {}, 30_000);
+  const [q, setQ] = useState('');
+  const [open, setOpen] = useState('');
+  if (err && !d) return <ErrorBox error={err} />;
+  if (!d) return <Loading label="포탈 백업 VM" />;
+  const needle = q.trim().toLowerCase();
+  const rows = (d.vms || []).filter((v) => !needle || `${v.name} ${v.vcenterName} ${v.folder}`.toLowerCase().includes(needle));
+  return (
+    <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: 10, minWidth: 0 }}>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, justifyContent: 'space-between', alignItems: 'center' }}>
+        <b>포탈 백업 VM {(d.vms || []).length}대</b>
+        <div style={{ flex: '0 1 280px', minWidth: 0 }}><SearchBox value={q} onChange={setQ} placeholder="VM · vCenter · 폴더" /></div>
+      </div>
+      <div className="muted" style={{ fontSize: 12 }}>포탈에서 백업을 요청한 VM 입니다(포탈이 보낸 요청과 그 결과). Veeam 이 지금 가진 복원 지점은 ‘관리’ 창이 Veeam 에 직접 묻습니다. vCenter 상세의 폴더 트리에서도 같은 배지로 보입니다.</div>
+      {!rows.length ? <div className="muted">{(d.vms || []).length ? '검색과 맞는 VM 이 없습니다.' : '아직 포탈로 백업한 VM 이 없습니다.'}</div> : (
+        <STable className="table" minWidth={860} limit={300}>
+          <thead><tr><th>VM</th><th>vCenter · 폴더</th><th>방식</th><th>마지막 요청</th><th>상태</th><th>복원</th><th data-nosort>관리</th></tr></thead>
+          <tbody>
+            {rows.map((v) => {
+              const m = portalMark(v);
+              return (
+                <tr key={v.vmId}>
+                  <td>{v.name}{!v.exists ? <span className="muted" style={{ fontSize: 11 }}> (인벤토리에 없음)</span> : null}</td>
+                  <td style={{ fontSize: 12, overflowWrap: 'anywhere' }}>{v.vcenterName}<div className="muted">{v.folder || '—'}</div></td>
+                  <td>{HOW[v.how] || '—'}{v.jobName ? <div className="muted" style={{ fontSize: 11 }}>{v.jobName}</div> : null}</td>
+                  <td data-sort={v.lastAt ?? ''} className="mono">{shortTime(v.lastAt)}</td>
+                  <td>{m ? <Badge cls={m.cls} title={m.title}>{m.label}</Badge> : '—'}</td>
+                  <td style={{ fontSize: 12 }}>{v.restores?.length ? `${v.restores[0].newName} (${(VM_STATE[v.restores[0].state] || VM_STATE.unknown).label})` : '—'}</td>
+                  <td><button type="button" className="logout-btn" disabled={!v.exists} title={v.exists ? '' : '인벤토리에 없는 VM 은 관리 창을 열 수 없습니다'} onClick={() => setOpen(v.vmId)}>관리</button></td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </STable>
+      )}
+      {open ? <BackupManageModal vmId={open} onClose={() => setOpen('')} /> : null}
     </div>
   );
 }

@@ -212,6 +212,7 @@ server/config/cvp-servers.json
 server/config/veeam-servers.json
 server/config/veeam-backup-run.json
 server/config/veeam-backup-runs.json
+server/config/veeam-portal-vms.json
 # v2.788 Veeam Enterprise Manager — 등록부(비밀번호 봉인)·마지막 결과·인증 정지 · Veeam 일 단위 이력 DB · 라이선스 알림 상태
 server/config/veeam-em.json
 server/config/veeam-em-latest.json

@@ -15,12 +15,12 @@
  */
 import crypto from 'node:crypto';
 import { SANITIZERS } from './parse.js';
-import { MUTATING } from './exec.js';
+import { MUTATING } from './ops.js';
 import { clampIntervalMs } from '../../config.js';
 
 export const PICKUP_MS = clampIntervalMs(Number(process.env.VEEAM_RUN_PICKUP_MS) || 2 * 60_000, 2 * 60_000, 30_000);
 /** 가져간 뒤 회신 시한(종류별). 엣지는 이보다 MARGIN_MS 일찍 손을 뗀다. */
-export const RESULT_MS = Object.freeze({ quickBackup: 4 * 60_000, portalJob: 5 * 60_000, sessions: 3 * 60_000, repos: 2 * 60_000 });
+export const RESULT_MS = Object.freeze({ quickBackup: 4 * 60_000, portalJob: 5 * 60_000, sessions: 3 * 60_000, repos: 2 * 60_000, vmPoints: 3 * 60_000, restoreVm: 4 * 60_000, jobExclude: 3 * 60_000, deleteBackup: 5 * 60_000 });
 export const MARGIN_MS = 30_000;
 const MAX_PER_AGENT = 50;
 const TAKE_MAX = 5;

@@ -32,7 +32,7 @@ export const MAX_BACKUP_VMS = 200;
 export const RUN_STATUSES = Object.freeze(['protected', 'in-job', 'unprotected', 'elsewhere', 'unknown', 'unmapped']);
 
 /** vCenter id → { id, name, host } — 이름은 스냅샷, 주소는 등록부(스냅샷에는 접속 주소가 없을 수 있다). */
-function vcentersOf(snap) {
+export function vcentersOf(snap) {
   let reg = [];
   try { reg = listVcenters() || []; } catch { reg = []; }
   const host = new Map(reg.map((v) => [String(v.id), String(v.host || '')]));
@@ -45,7 +45,7 @@ function vcentersOf(snap) {
  * 한 vCenter 의 VM 별 실행 상태(+ Veeam 이 그 vCenter 를 부르는 이름). 순서: 대조(모니터링 코어) → runStatusOf → hostName.
  * @returns {{ vc, servers, known, hostName:{name,how}, rows:Map<vmId,{vm,run}> }}
  */
-function vcRunState(vc, vms, req) {
+export function vcRunState(vc, vms, req) {
   const servers = serversForVcenter(vc.id);   // enabled · 등록 순서 · 비밀 없음
   const m = servers.length ? veeamMatchFor(vc, vms, req) : { known: false, match: null };
   const st = getRunSettings();
@@ -104,7 +104,7 @@ export function planFor(req) {
 }
 
 /** 범위 계정에 보일 실행인가 — VM 이 전부 허용 vCenter 에 있을 때만. */
-const runVisible = (run, allowed) => !allowed || (run.vms || []).every((v) => allowed.has(String(v.vcenterId)));
+export const runVisible = (run, allowed) => !allowed || (run.vms || []).every((v) => allowed.has(String(v.vcenterId)));
 
 export function registerBackupRun(api) {
 

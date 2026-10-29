@@ -20,7 +20,7 @@ import { poolRun } from '../util/pool.js';
 import { agentHeaders, withAgentQuery } from './agentNameCarry.js';
 import { getServerWithSecret } from '../veeam/registry.js';
 import { authGuard } from '../veeam/poller.js';
-import { runOp, MUTATING } from '../veeam/run/exec.js';
+import { runOp, MUTATING } from '../veeam/run/ops.js';
 import { SANITIZERS } from '../veeam/run/parse.js';
 
 const POLL_MS = clampIntervalMs(Number(process.env.AGENT_VEEAM_RUN_POLL_MS) || 5_000, 5_000, 1_000);
@@ -65,10 +65,9 @@ export async function runEdgeOp(op, { receivedAt = Date.now(), fetchImpl, getSer
   const ttl = Math.max(0, Number(op.ttlMs) || 0);
   const deadlineAt = receivedAt + ttl;
   if (!ttl || Date.now() >= deadlineAt) return sanitize({ ok: false, notSent: true, reason: '요청 시한이 지나 Veeam 에 보내지 않았습니다.' });
-  if (MUTATING.has(op.kind) || op.kind === 'sessions') {
-    const stop = authGuard.peekAuthStop(server);
-    if (stop) return sanitize({ ok: false, notSent: true, reason: `이 엣지에서 Veeam 서버 '${server.name}' 이(가) 인증 실패로 정지 중입니다(${stop.reason}) — 보내지 않았습니다.` });
-  }
+  // 인증 정지는 작업 종류와 무관하게(읽기도 같은 계정으로 로그인한다 — 중앙 dispatch.js 와 같은 규칙)
+  const stop = authGuard.peekAuthStop(server);
+  if (stop) return sanitize({ ok: false, notSent: true, reason: `이 엣지에서 Veeam 서버 '${server.name}' 이(가) 인증 실패로 정지 중입니다(${stop.reason}) — 보내지 않았습니다.` });
   const res = await runOp(server, op.kind, { ...(op.args && typeof op.args === 'object' ? op.args : {}), deadlineAt }, { signal: AbortSignal.timeout(Math.max(1_000, deadlineAt - Date.now())), fetchImpl });
   if (res.authFailed) { authGuard.markAuthStopped(server.id, server, res.reason); authGuard.flush?.(); }
   return res;

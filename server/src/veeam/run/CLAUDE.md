@@ -1,6 +1,6 @@
-# Backup 현황 › 백업 실행(`server/src/veeam/run/`, v2.818) 불변조건 — 되돌리지 말 것
+# Backup 현황 › 백업 실행·포탈 백업 관리(`server/src/veeam/run/`, v2.818~) 불변조건 — 되돌리지 말 것
 
-운영 문서·정직 기록(확인/추정 구분)은 `docs/VEEAM-BACKUP-RUN.md`. 회귀 테스트 `server/test/veeamRun2818.test.js`.
+운영 문서·정직 기록(확인/추정 구분)은 `docs/VEEAM-BACKUP-RUN.md`. 회귀 테스트 `server/test/veeamRun2818.test.js` · `veeamManage2819.test.js`.
 
 - **모니터링 클라이언트(`veeam/client.js`)에 쓰기 요청을 넣지 않는다**(그 파일의 설계 규칙). 상태를 바꾸는 요청은 `run/client.js` 에만 둔다.
   서버 등록부·VM 대조(`parse.js matchToVcenter`)·인증 정지(`poller.js authGuard`)는 모니터링 것을 그대로 쓴다 — 다시 만들지 말 것.
@@ -17,3 +17,6 @@
   409 가드가 풀린다(2차 반증 N1). 진행 중 실행은 기록 상한(100)으로 잘라 내지 않는다. 추적이 막히면 '기록 닫기'(OTP·감사)로 포탈 기록만 닫는다(N3).
 - **상태 변경 요청이 2xx 를 받았으면 그 뒤 예외는 실패가 아니다**(`run/client.js call` — 본문 끊김·비JSON 은 json null, N2). Quick Backup 후보 C 는 VM 마다 독립(N5).
 - 백업 실행용 '보호 상태를 안다' 는 B&R 결과가 **전부 있고 신선할 때만**(`veeamMatchFor` — `resultMaxAgeMs`, N4). 인증 정지는 저장소 조회에도 적용한다.
+- **복원은 새 VM 으로만**(사용자 결정 2026-10-29 — `manage.js RESTORE_TYPE='Customized'` 하나, 코드에 OriginalLocation 없음 — 테스트가 소스를 본다).
+  새 이름이 인벤토리 VM 이름과 겹치면 409, 복원 지점이 그 VM 이름의 것이 아니면 보내지 않는다. 백업 삭제는 **포탈 잡(표지)의 그 VM 만** — 다른 VM 이 든 백업을
+  통째로 지우는 후보를 넣지 말 것. 삭제 전에 잡에서 빼고, 빼기가 실패·모름이면 지우지 않는다. 작업 표는 `run/ops.js` 하나(새 작업은 OPS·MUTATING·SANITIZERS·RESULT_MS 넷 다).

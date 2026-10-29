@@ -24,6 +24,7 @@ import { dispatchOp } from './dispatch.js';
 import { serverRunSettings, getRunSettings } from './settings.js';
 import { portalJobName } from './plan.js';
 import { poolRun } from '../../util/pool.js';
+import { notePortalRun } from './portalVms.js';
 
 const FILE_NAME = 'veeam-backup-runs.json';
 registerStateFile(FILE_NAME);
@@ -74,6 +75,7 @@ const vmState = (s) => {
 };
 
 function settle(run) {
+  try { notePortalRun(run); } catch (e) { console.warn(`[veeam-run] 포탈 백업 VM 목록 반영 실패: ${e?.message || e}`); }   // v2.819 — 진행 중 상태도(배지가 '진행 중' 을 보인다)
   if (!run.vms.every((v) => FINAL.has(v.state))) return;
   run.status = 'done';
   run.finishedAt = run.finishedAt || Date.now();
@@ -98,6 +100,7 @@ export function startRun(plan, { user = '', vcById = new Map(), mode = 'quick' }
     vms: plan.vms.map((v) => ({
       vmId: v.vmId, name: v.name, vcenterId: v.vcenterId, objectId: v.objectId, hostName: v.hostName || '', serverId: v.serverId, serverName: v.serverName, how: v.how,
       state: v.how === 'skip' ? 'skipped' : 'queued', detail: v.reason || '', progress: null, sessionId: '',
+      ...(v.how === 'restore' && v.restore ? { restore: v.restore } : {}),   // v2.819 { restorePointId, newName, dest, pointAt } — 비밀 없음
     })),
   };
   runs.unshift(run);
@@ -117,7 +120,11 @@ async function execute(run) {
     for (const v of mine) v.state = 'starting';
     persist();
     let r;
-    if (g.kind === 'quick') r = await dispatchOp(server, 'quickBackup', { vms: refs });
+    if (g.kind === 'restore') {
+      // v2.819 새 VM 복원 — 그룹마다 VM 1대(라우트가 그렇게 만든다). 원래 위치 복원은 없다(manage.js RESTORE_TYPE).
+      const v = mine[0];
+      r = await dispatchOp(server, 'restoreVm', { restorePointId: v.restore?.restorePointId, vm: { name: v.name, objectId: v.objectId }, newName: v.restore?.newName, dest: v.restore?.dest, reason: `포탈 백업 관리 — ${run.user || ''}`.slice(0, 200) });
+    } else if (g.kind === 'quick') r = await dispatchOp(server, 'quickBackup', { vms: refs });
     else { const st = serverRunSettings(g.serverId); r = await dispatchOp(server, 'portalJob', { jobName: g.jobName, repositoryId: st.repositoryId, retention: st.retention, vms: refs }); }
     g.variant = r.variant || ''; g.notes = r.notes || []; g.reason = r.reason || '';
     if (r.jobId) g.jobId = r.jobId;
@@ -135,7 +142,7 @@ async function execute(run) {
           continue;
         }
         v.state = 'running'; v.sessionId = s.id;
-        v.detail = g.kind === 'portal' ? `포탈 전용 잡 '${g.jobName}'${r.created ? '(새로 만듦)' : ''}` : 'Quick Backup';
+        v.detail = g.kind === 'restore' ? `새 VM '${v.restore?.newName || ''}' 으로 복원(전원 꺼짐)` : g.kind === 'portal' ? `포탈 전용 잡 '${g.jobName}'${r.created ? '(새로 만듦)' : ''}` : 'Quick Backup';
       }
       if (g.sessions.every((s) => s.finished)) g.state = 'done';
     } else {

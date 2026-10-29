@@ -1,7 +1,7 @@
 /**
  * veeam/run/dispatch.js — 백업 실행 작업을 **어디서** 실행할지 가르고 인증 정지를 적용한다(v2.818).
  *
- *  · 담당 엣지 없음(agent '') → 이 중앙 노드가 직접(exec.runOp, 종류별 시한).
+ *  · 담당 엣지 없음(agent '') → 이 중앙 노드가 직접(ops.runOp, 종류별 시한).
  *  · 담당 엣지 있음 → edgeOps 큐(엣지가 자기 등록부 사본으로 실행 — 비밀번호를 보내지 않는다).
  *
  * 인증 정지 — 모니터링 폴러와 **같은 기록**(veeam/poller.js authGuard — 같은 계정이다):
@@ -11,7 +11,7 @@
  */
 import { authGuard } from '../poller.js';
 import { getRecord } from '../store.js';
-import { runOp } from './exec.js';
+import { runOp } from './ops.js';
 import { enqueueEdgeOp, RESULT_MS } from './edgeOps.js';
 import { SANITIZERS } from './parse.js';
 
@@ -28,7 +28,7 @@ export function authStopOf(server) {
 
 /**
  * @param {object} server 등록 항목(중앙 직접이면 비밀 포함 원소 — veeam/registry.js getServerWithSecret)
- * @param {string} kind   exec.OPS 키
+ * @param {string} kind   ops.OPS 키
  */
 export async function dispatchOp(server, kind, args = {}, { signal, fetchImpl } = {}) {
   const sanitize = SANITIZERS[kind] || ((x) => x);

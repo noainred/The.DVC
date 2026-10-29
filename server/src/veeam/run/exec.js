@@ -5,6 +5,7 @@
  *   portalJob    포탈 전용 잡(PORTAL-<vCenter>)을 만들거나 VM 을 넣고 시작 — 포탈은 **표지가 있는 자기 잡만** 고친다
  *   sessions     세션 여러 개의 상태 + VM 별 작업(task) — 한 번 로그인으로 묶어 읽는다(세션마다 로그인하지 않는다)
  *   repos        저장소 목록(포탈 전용 잡 저장소 고르기 — 읽기)
+ *   (v2.819 백업 관리 — 복원 지점·새 VM 복원·잡에서 빼기·백업 삭제 — 는 run/manage.js · 작업 표는 run/ops.js)
  *
  * ⚠⚠ 정직 기록 — 실제 VBR 로 확인하지 못했다. Quick Backup 경로·본문, 세션·작업 세션 응답 필드는 추정이라 **후보 체인**이다.
  *   다음 후보로 넘어가는 것은 서버가 '이 모양을 모른다'(400·404·405·415·422) 고 답했을 때뿐이다. 어떤 후보를 썼는지 variant 로 남긴다.
@@ -27,9 +28,9 @@ const statusOf = (e) => (e instanceof RunHttpError ? e.status : (e?.authFailed ?
 export const shapeMiss = (e) => SHAPE_MISS.has(statusOf(e));
 /** 상태 변경 요청의 결과를 모르는가 — 전송 오류(0)·시한·408·5xx. */
 export const outcomeUnknown = (e) => { const s = statusOf(e); return s === 0 || s === 408 || (s >= 500 && s <= 599); };
-const reasonOf = (e) => String(e?.message || e).slice(0, 1000);
-const vmRef = (v) => ({ type: 'VirtualMachine', hostName: String(v?.hostName || ''), name: String(v?.name || ''), objectId: String(v?.objectId || '') });
-const MAX_JOBS = 2000;
+export const reasonOf = (e) => String(e?.message || e).slice(0, 1000);
+export const vmRef = (v) => ({ type: 'VirtualMachine', hostName: String(v?.hostName || ''), name: String(v?.name || ''), objectId: String(v?.objectId || '') });
+export const MAX_JOBS = 2000;
 
 /** 세션 id — 시작 응답(SessionModel 추정)에서. 모양을 모르면 ''. */
 export function sessionIdOf(json) {
@@ -40,15 +41,15 @@ export function sessionIdOf(json) {
   return '';
 }
 
-async function withSession(server, { signal, fetchImpl }, fn) {
+export async function withSession(server, { signal, fetchImpl }, fn) {
   const c = makeRunClient(server, { signal, fetchImpl });
   try { await c.login(); } catch (e) { return { ok: false, reason: reasonOf(e), authFailed: e?.authFailed === true }; }   // 로그인 단계 — 아무것도 보내지 않았다
   try { return await fn(c); } catch (e) { return { ok: false, reason: reasonOf(e) }; } finally { await c.logout(); }
 }
-const expired = (deadlineAt) => Number.isFinite(deadlineAt) && deadlineAt > 0 && Date.now() >= deadlineAt;
-const NOT_SENT_LATE = { ok: false, notSent: true, reason: '요청 시한이 지나 Veeam 에 보내지 않았습니다(중앙이 이미 결과를 닫았습니다) — 필요하면 다시 요청하세요.' };
+export const expired = (deadlineAt) => Number.isFinite(deadlineAt) && deadlineAt > 0 && Date.now() >= deadlineAt;
+export const NOT_SENT_LATE = { ok: false, notSent: true, reason: '요청 시한이 지나 Veeam 에 보내지 않았습니다(중앙이 이미 결과를 닫았습니다) — 필요하면 다시 요청하세요.' };
 /** 상태 변경 요청 실패를 결과로 — 모름이면 unknown, 아니면 실패. */
-const changeFail = (e, what, extra = {}) => (outcomeUnknown(e)
+export const changeFail = (e, what, extra = {}) => (outcomeUnknown(e)
   ? { ok: false, unknown: true, reason: `${what} — 응답을 받지 못해 Veeam 이 시작했는지 알 수 없습니다(${reasonOf(e).slice(0, 300)}). 포탈은 다시 보내지 않습니다 — Veeam 콘솔에서 확인하세요.`, ...extra }
   : { ok: false, reason: `${what} — ${reasonOf(e)}`, ...extra });
 
@@ -215,14 +216,4 @@ export async function opRepos(server, { signal, fetchImpl } = {}) {
   });
   return P.sanitizeRepos(r);
 }
-
-export const OPS = Object.freeze({ quickBackup: opQuickBackup, portalJob: opPortalJob, sessions: opSessions, repos: opRepos });
-export const MUTATING = new Set(['quickBackup', 'portalJob']);
-
-/** 작업 실행(던지지 않는다). */
-export async function runOp(server, kind, args = {}, { signal, fetchImpl } = {}) {
-  const fn = OPS[kind];
-  if (!fn) return { ok: false, reason: `알 수 없는 작업 '${String(kind).slice(0, 40)}'` };
-  try { return await fn(server, { ...(args && typeof args === 'object' ? args : {}), signal, fetchImpl }); }
-  catch (e) { return P.SANITIZERS[kind]({ ok: false, reason: reasonOf(e), ...(MUTATING.has(kind) ? { unknown: true } : {}) }); }
-}
+// 작업 표(OPS·MUTATING·runOp)는 run/ops.js — 백업 관리 작업(run/manage.js)과 함께 한 곳에(v2.819).
