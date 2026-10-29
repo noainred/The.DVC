@@ -1,9 +1,9 @@
 # 환경변수 레퍼런스 (자동 생성)
 
-`server/src` 가 실제로 읽는 환경변수 **661개**를 코드에서 추출한 목록이다.
+`server/src` 가 실제로 읽는 환경변수 **662개**를 코드에서 추출한 목록이다.
 설치본에서는 `/etc/vmware-portal/portal.env` 에 `KEY=값` 으로 넣고 서비스를 재시작한다.
 
-- 생성: `node scripts/env-doc.mjs` (마지막 갱신 2026-10-20)
+- 생성: `node scripts/env-doc.mjs` (마지막 갱신 2026-10-29)
 - **이 파일을 직접 고치지 말 것** — 코드가 진실의 원천이며 다음 실행에서 덮어써진다.
 - `portal.env.example` 에 예시가 있는 키는 ✅, 없는 키는 빈칸으로 표시한다.
 - 기본값 칸이 비어 있으면 코드에서 한 줄로 추출하지 못한 것이다(해당 파일을 참조).
@@ -321,10 +321,11 @@
 | `TLS_PEER_POLICY` | `미지정 — peer-trust.json 정책(새 설치 enforce · 기존 현장 observe)` |  | security/peerTrust.js |
 | `X` |  |  | security/tlsTrust.js, util/dayKey.js 외 1 |
 
-## 분석 도구 (8)
+## 분석 도구 (9)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
+| `BAREOS_PASSWORD` | `''` |  | tools/bareos-probe.js |
 | `DISKTREND_CRIT_PCT` | `85` |  | tools/diskTrend.js |
 | `DISKTREND_SNAPSHOT_MAX_HOURS` | `72` |  | tools/diskTrend.js |
 | `DISKTREND_WARN_PCT` | `75` |  | tools/diskTrend.js |
@@ -845,4 +846,4 @@
 
 ---
 
-예시 파일(`packaging/offline/portal.env.example`)에 있는 키: 85 / 661
+예시 파일(`packaging/offline/portal.env.example`)에 있는 키: 85 / 662

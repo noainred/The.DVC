@@ -216,7 +216,7 @@ describe('CATALOG2613-02: 도구 키에 묶인 /tools 엔드포인트를 소유 
     const owners = new Set([...st.matchAll(/import\('\.\/([^']+)'\)/g)].map((m) => path.join(WEB, 'views', m[1])));
     // 정당한 예외 — 사유는 실제 코드를 열어 확인한 것(verify-catalog CATALOG2613-02).
     const ALLOW = {
-      'views/VCenterDetail.jsx': 'vm-clone 배지는 그 도구의 데이터 — 실패 시 숨김이 주석에 명시된 설계(usePolling 은 403 이면 폴링을 끊는다)',
+      'views/VCenterDetail.jsx': 'vm-clone·bareos-backup 배지는 그 도구의 데이터 — 둘 다 toolAllowed 게이트 + 실패 시 숨김이 주석에 명시된 설계(usePolling 은 403 이면 폴링을 끊는다)',
       'views/VCenters.jsx': 'vm-track TrendKpi — 실패(403)면 카드를 숨기는 의도된 강등(주석 명시)',
       'components/taskLabel.js': '요청 라벨 표 — 호출이 아니라 문자열 키',
       'views/fleetPartialText.js': '문구 모듈 — 경로를 문장에 적을 뿐 호출하지 않는다',

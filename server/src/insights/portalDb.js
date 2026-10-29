@@ -105,6 +105,8 @@ const PURPOSES = {
   'pdu-devices.json': 'PDU 등록부(호스트·SSH CLI 계정·담당 엣지 — 비밀 봉인)',
   'cvp-servers.json': 'Arista CloudVision(CVP) 서버 등록부(주소·토큰/계정·담당 엣지 — 비밀 봉인, v2.608)',
   'cvp-settings.json': 'CVP 수집 설정(켜짐·주기·보존일·동시성·장비 시한, v2.608)',
+  'bareos.json': 'Bareos 연동 설정(Director 주소·콘솔 계정 — 비밀번호 봉인 · 기본 JobDefs·FileSet · vCenter 별 사이트 FD·SD 매핑, v2.747)',
+  'bareos-jobs.json': 'Bareos VM 백업 대상 원장(vCenter·VM·Director 잡 이름·최근 실행·복원 이력 — 자격증명 없음, v2.747)',
   'vm-dns-policy.json': 'VM DNS 승인 정책(법인별 승인 DNS 주소·CIDR · 공인 DNS 판정, v2.696)',
   'bm-storage.json': '베어메탈 스토리지 서버 등록부 + 수집 주기(마운트 경로·SSH 계정 — 비밀 봉인, v2.340)',
   'horizon.json': 'Horizon 커넥션 서버 등록(주소·계정 — 비밀 봉인)',

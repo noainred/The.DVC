@@ -35,6 +35,7 @@ const NetIssues = React.lazy(() => import('./NetIssues.jsx'));
 const SecretScanTool = React.lazy(() => import('./tools/SecretScanTool.jsx'));
 const CodexCheck = React.lazy(() => import('./CodexCheck.jsx'));
 const VmCloneTool = React.lazy(() => import('./tools/VmCloneTool.jsx'));
+const BareosBackupTool = React.lazy(() => import('./tools/BareosBackupTool.jsx'));
 const StorageMonTool = React.lazy(() => import('./tools/StorageMonTool.jsx'));
 const StorageGrowthTool = React.lazy(() => import('./tools/StorageGrowthTool.jsx'));
 const PartFaults = React.lazy(() => import('./tools/PartFaults.jsx'));   // 파트 장애(v2.547)
@@ -614,6 +615,7 @@ function ToolPanel({ tool, onBack, isAdmin, defaultScope = '', cfg = null }) {
       {tool === 'secret-scan' && <SecretScanTool />}
       {tool === 'codex-check' && <CodexCheck />}
       {tool === 'vm-clone' && <VmCloneTool />}
+      {tool === 'bareos-backup' && <BareosBackupTool />}
       {tool === 'storage-mon' && <StorageMonTool />}
       {tool === 'storage-growth' && <StorageGrowthTool />}
       {tool === 'part-faults' && <PartFaults />}

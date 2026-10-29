@@ -63,7 +63,7 @@ export const GROUPS = Object.freeze([
   },
   {
     id: 'auto', section: 'OPERATIONS', label: '자동화', icon: 'bolt',
-    items: [tool('rma'), tool('vmprovision'), tool('vm-clone'), tool('agent-scans'), tool('shutdown'), tool('diskadd'),
+    items: [tool('rma'), tool('vmprovision'), tool('vm-clone'), tool('bareos-backup'), tool('agent-scans'), tool('shutdown'), tool('diskadd'),
       tool('backup'), tool('massdeploy')],
   },
   {
@@ -78,7 +78,7 @@ export const GROUPS = Object.freeze([
 ]);
 
 /** 상태를 바꾸는 도구 — '자동화' 가 주소속이어야 한다(테스트 고정). */
-export const MUTATING_TOOLS = Object.freeze(['rma', 'vmprovision', 'vm-clone', 'agent-scans', 'shutdown', 'diskadd', 'backup', 'massdeploy']);
+export const MUTATING_TOOLS = Object.freeze(['rma', 'vmprovision', 'vm-clone', 'bareos-backup', 'agent-scans', 'shutdown', 'diskadd', 'backup', 'massdeploy']);
 
 export const treeToolKeys = () => GROUPS.flatMap((g) => g.items.filter((i) => i.kind === 'tool').map((i) => i.k));
 export const treeTabIds = () => [...HOME, ...GROUPS.flatMap((g) => g.items)].filter((i) => i.kind === 'tab').map((i) => i.id);

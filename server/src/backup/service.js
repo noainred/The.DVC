@@ -79,6 +79,8 @@ export function isRuntimeStateFile(name) {
  * **지문에서만** `last*` 키를 빼고 본다(번들 내용은 그대로 — 복원 가능).
  */
 export const MIXED_STATE_FILES = new Set(['capture-monitors.json', 'os-scan.json', 'guest-scans.json', 'vm-clone.json',
+  // v2.747: Bareos 백업 대상 원장 — 폴러가 실행 결과(lastRun·pending·복원 상태)를 쓴다.
+  'bareos-jobs.json',
   // v2.596(감사 R2596-03 — 재현): 엣지 pull 마다 lastUsedAt(엣지당 60초) · 연동 키 useCount · 일일 보고 lastRunTs 를 쓴다.
   'central-agent-tokens.json', 'api-keys.json', 'daily-report.json',
   // v2.601(감사 LO2601-03 — 재현): iDRAC 대역 스캔 폴러가 엔트리마다 lastRun 을, 원격 접속 게이트웨이가 매 접속마다 매핑의

@@ -4,7 +4,7 @@
  * 담는 것: V4 화면 9개 + 개발 포탈 탭 14개 + 특수 기능 도구 전부(specialToolsList.js — 개수는 적지 않는다, v2.613) = **미분류 0**.
  *   · 도구는 **주소속 1곳**에 정확히 1회 배치한다(`alias: true` 는 편의상 한 번 더 보여주는 것이라
  *     커버리지 계산에서 제외한다). 이 규칙을 깨면 '어디에 있더라' 가 다시 시작된다.
- *   · **상태를 바꾸는 도구**(rma · vm-clone · vmprovision · shutdown · diskadd · backup · massdeploy ·
+ *   · **상태를 바꾸는 도구**(rma · vm-clone · bareos-backup · vmprovision · shutdown · diskadd · backup · massdeploy ·
  *     agent-scans)는 무조건 `운영 작업` 이 주소속이다 — 조회 그룹에서 실행 버튼을 만나지 않게.
  *   · 라벨·아이콘·권한(adminOnly)은 여기 **복사하지 않는다**. `specialToolsList.js` 하나가 소유하고
  *     화면이 조인한다 — 복사해 두면 도구 이름을 바꾼 날 트리만 낡는다(v2.507 이 겪은 유형).
@@ -104,7 +104,7 @@ export const TREE = Object.freeze([
   },
   {
     id: 'ops', label: '운영 작업', items: [
-      tool('rma'), tool('vmprovision'), tool('vm-clone'), tool('agent-scans'),
+      tool('rma'), tool('vmprovision'), tool('vm-clone'), tool('bareos-backup'), tool('agent-scans'),
       tool('diskadd'), tool('backup'), tool('massdeploy'), tool('shutdown'),
     ],
   },

@@ -132,6 +132,14 @@ export const ROUTE_GATE_ALLOW = Object.freeze({
   'POST /api/tools/vm-clone/jobs': 'inUserWriteScope — 대상 vCenter 쓰기 범위(v2.369)',
   'DELETE /api/tools/vm-clone/jobs/:id': 'scopedVcenterIds — 작업의 vCenter 범위 판정',
   'POST /api/tools/vm-clone/jobs/:id/run': 'scopedVcenterIds — 작업의 vCenter 범위 판정',
+  // v2.747 Bareos VM 백업 — 대상 vCenter 귀속: bareosAccess(조회 밖 404 → 쓰기 밖 403)
+  'POST /api/tools/bareos-backup/jobs': 'bareosAccess — 대상 vCenter 조회 404 → 쓰기 403(v2.747)',
+  'POST /api/tools/bareos-backup/jobs/:id/run': 'bareosAccess — 대상의 vCenter 쓰기 범위(v2.747)',
+  'POST /api/tools/bareos-backup/jobs/:id/cancel': 'bareosAccess — 대상의 vCenter 쓰기 범위(v2.747)',
+  'PATCH /api/tools/bareos-backup/jobs/:id': 'bareosAccess — 대상의 vCenter 쓰기 범위(v2.747)',
+  'DELETE /api/tools/bareos-backup/jobs/:id': 'bareosAccess — 대상의 vCenter 쓰기 범위(v2.747)',
+  'POST /api/tools/bareos-backup/jobs/:id/restore': 'bareosAccess + 본인 OTP — 대상의 vCenter 쓰기 범위(v2.747)',
+  'POST /api/tools/bareos-backup/poll': '상태 조회만(원장 갱신) — 범위 계정은 자기 범위 결과만 받는다(목록 GET 이 거른다, v2.747)',
 });
 
 /**

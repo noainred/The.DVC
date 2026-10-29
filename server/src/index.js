@@ -105,6 +105,7 @@ import { startDbSizeSampler } from './insights/portalDb.js';
 import { startCertMonitor } from './security/certMonitor.js';
 import { startDailyReport } from './reports/dailyReport.js';
 import { startVmCloneScheduler } from './vmclone/scheduler.js'; // VM 복제(백업식) 스케줄러(v2.299)
+import { startBareosPoller } from './bareos/poller.js'; // Bareos VM 백업 실행 상태(v2.747) — Director 미설정이면 접속하지 않는다
 import { startStoragePoller } from './storage/poller.js';        // 스토리지 수집(v2.302)
 import { applyGrowthSettings } from './storage/growthSettings.js'; // 사용량 보존 기간(v2.531)
 import { runCapacityBasisMigration } from './storage/capacityBasisMigration.js'; // 용량 기준 변경 1회 정리(v2.534)
@@ -559,6 +560,7 @@ const stagger = [
   // 둘 다 재진입 가드가 있고, 조건(CENTRAL_URL·토큰) 미충족이면 스스로 기동하지 않는다.
   startSvcmonPush, startSvcmonConfigPull, startSvcmonSilenceWatch,
   startVmCloneScheduler, // VM 복제(백업식) — 60초 틱, 재진입 가드 + 전역 직렬 실행 큐(runner)
+  startBareosPoller, // Bareos VM 백업(v2.747) — 설정 주기, 할 일이 없으면 접속 안 함 · 10틱마다 대조
   startStoragePoller, startStoragePush, startStorageConfigPull, // 스토리지 모니터링(v2.302) — 전부 재진입 가드, push/pull 은 CENTRAL_URL 미설정 시 자기기동 안 함
   startSanSwitchPoller, startSanSwitchPush, startSanSwitchConfigPull, // SAN 스위치(v2.410) — 동일 규약(재진입 가드 + 적응형 타이머)
   startPduPoller, startPduPush, startPduConfigPull, // PDU(v2.424) — 동일 규약(자동 센서 탐지 + 재진입 가드 + 적응형 타이머)

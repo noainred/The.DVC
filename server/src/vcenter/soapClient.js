@@ -38,6 +38,7 @@ import { inventoryViaUpdates, updateSessionStatus } from './updateSession.js';  
 import { refreshTagInv, getTagInv, TAG_BUDGET_MS } from '../tags/collect.js';   // v2.703(A15)
 import { eventDetail, detailJson } from '../vmchanges/eventDetail.js';   // v2.702(A7·A8)
 import { NO_REDIRECT, refuseRedirect } from '../util/noRedirect.js';
+import { vmPlacement } from './vmPlacement.js';   // v2.747: Bareos 연동 — VM 의 정확한 데이터센터·폴더 경로
 
 // 호스트 GPU 사용률 캐시(주기 throttle용). vcId → Map<hostRef, { pct, memPct, memUsedKB, tempC, at }>.
 // v2.689(C-05): vCenter 별로 나눠 두고 수집마다 live ref 로 정리한다(예전 `${vcId}:${ref}` 평면 키는 지우는 곳이 없었다).
@@ -1702,7 +1703,8 @@ export async function collectFromVCenterSoap(vc, { signal = null, deadlineAt = D
     const INV_SPECS = [
       { type: 'Folder', paths: ['name', 'parent'] },
       { type: 'ClusterComputeResource', paths: ['name', 'parent'] },
-      { type: 'Datacenter', paths: ['name'] },
+      // v2.747: parent 추가 — 폴더 안 데이터센터의 전체 경로(Bareos VMware 플러그인의 dc). 데이터센터는 몇 개뿐이라 응답이 거의 늘지 않는다.
+      { type: 'Datacenter', paths: ['name', 'parent'] },
       { type: 'HostSystem', paths: [
         'name', 'parent', 'runtime.connectionState', 'runtime.powerState', 'runtime.inMaintenanceMode',
         // v2.556: cpuModel 추가(사용자 요청 — 호스트 상세에 CPU 모델명). 같은 retrieveProperties
@@ -1756,6 +1758,9 @@ export async function collectFromVCenterSoap(vc, { signal = null, deadlineAt = D
     //   못 따라가면 null(지어내지 않는다). 포탈의 'DataCenter'(법인 묶음)와 다른 개념이라 필드 이름을 vcDatacenter 로 둔다.
     const dcName = new Map();
     for (const o of objs) if (o.type === 'Datacenter') dcName.set(o.ref, o.props.name);
+    // v2.747: VM 의 정확한 위치(vmPlacement) — 데이터센터 ref → { name, parent }.
+    const dcByRef = new Map();
+    for (const o of objs) if (o.type === 'Datacenter') dcByRef.set(o.ref, { name: o.props.name, parent: o.props.parent });
     const clusterDc = new Map();
     for (const o of objs) {
       if (o.type !== 'ClusterComputeResource') continue;
@@ -1986,6 +1991,8 @@ export async function collectFromVCenterSoap(vc, { signal = null, deadlineAt = D
         cluster: host?.cluster || '',
         clusterRef: host?.clusterRef ?? null,   // v2.742(VC-05) — 이름이 겹치는 클러스터를 가른다(VM 상세의 클러스터 칸)
         folder: folderPath(p.parent),
+        // v2.747: Bareos VMware 플러그인용 정확한 위치(vcenter/vmPlacement.js) — 못 따라가면 null(지어내지 않는다).
+        ...vmPlacement(p.parent, folderByRef, dcByRef),
         resourcePool: poolName.get(p.resourcePool) || '',
         name: p.name,
         powerState: powered ? 'POWERED_ON' : 'POWERED_OFF',

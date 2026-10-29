@@ -71,7 +71,7 @@ export const MENUS = Object.freeze([
     { name: '스냅샷', items: ['snapshots', 'snapshot-age', 'vm-hygiene'] },
     { name: '준수', items: ['cert-expiry', 'compliance-report'] }] },
   { id: 'auto', code: 'AUTOMATION', label: '자동화', desc: '상태를 바꾸는 작업만 모았다 — 조회 메뉴에서 실행 버튼을 만나지 않게', groups: [
-    { name: '프로비저닝 · 복제', items: ['vmprovision', 'vm-clone', 'diskadd', 'massdeploy', 'backup'] },
+    { name: '프로비저닝 · 복제', items: ['vmprovision', 'vm-clone', 'bareos-backup', 'diskadd', 'massdeploy', 'backup'] },
     { name: '원격 작업', items: ['rma', 'agent-scans'] },
     { name: '비상', items: ['shutdown'] }] },
   { id: 'sec', code: 'SECURITY', label: '보안', desc: '위협·자격증명·접근 기록', groups: [
@@ -85,7 +85,7 @@ export const MENUS = Object.freeze([
 ]);
 
 /** 상태를 바꾸는 도구 — '자동화' 가 주소속이어야 한다(테스트 고정 · V5 tree.js 와 같은 목록). */
-export const MUTATING_TOOLS = Object.freeze(['rma', 'vmprovision', 'vm-clone', 'agent-scans', 'shutdown', 'diskadd', 'backup', 'massdeploy']);
+export const MUTATING_TOOLS = Object.freeze(['rma', 'vmprovision', 'vm-clone', 'bareos-backup', 'agent-scans', 'shutdown', 'diskadd', 'backup', 'massdeploy']);
 /** 위험 표지(시안 flag 'd') — 비상 정지만. */
 export const DANGER_TOOLS = Object.freeze(['shutdown']);
 

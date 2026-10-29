@@ -1,6 +1,6 @@
 {
-  "generatedAt": "2026-10-16T01:45:12.844Z",
-  "count": 109,
+  "generatedAt": "2026-10-29T13:52:23.349Z",
+  "count": 110,
   "tools": [
     {
       "k": "service-hub",
@@ -68,6 +68,14 @@
     },
     {
       "k": "vm-clone",
+      "adminOnly": true,
+      "perm": null,
+      "external": null,
+      "topTab": false,
+      "comingSoon": false
+    },
+    {
+      "k": "bareos-backup",
       "adminOnly": true,
       "perm": null,
       "external": null,

@@ -60,7 +60,7 @@ export const PRESET = Object.freeze([
   },
   {
     id: 'virtualization', label: '가상화', icon: '🧊',
-    tools: ['vmfinder', 'vm-track', 'vmtools', 'guestos', 'real-os', 'curuser', 'snapshots', 'vm-clone',
+    tools: ['vmfinder', 'vm-track', 'vmtools', 'guestos', 'real-os', 'curuser', 'snapshots', 'vm-clone', 'bareos-backup',
       'vmprovision', 'vm-export', 'vm-changes', 'vm-lifecycle', 'contention', 'vm-availability', 'cost-showback', 'migration-readiness', 'esxi', 'host-hygiene', 'cluster-check', 'esxitemp', 'vcversion', 'solutions', 'gpu', 'topo3d'],
   },
   {
@@ -85,7 +85,7 @@ export const PRESET = Object.freeze([
   },
   {
     id: 'ops', label: '운영 작업', icon: '🛠️',
-    tools: ['rma', 'vmprovision', 'vm-clone', 'agent-scans', 'shutdown', 'credentials',
+    tools: ['rma', 'vmprovision', 'vm-clone', 'bareos-backup', 'agent-scans', 'shutdown', 'credentials',
       'diskadd', 'backup', 'massdeploy', 'service-hub', 'mail-diag', 'edge-log'],
   },
 ]);

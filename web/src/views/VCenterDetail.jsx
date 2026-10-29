@@ -296,6 +296,9 @@ export default function VCenterDetail({ site, onBack }) {
   //   (v2.616 TrendKpis 와 같은 결함). 배지는 장식이라 권한이 없을 때 오류를 표시하지 않는 것이 정상이다(배지 없이 트리만).
   const { data: cloneBadgeD } = usePolling(toolAllowed('vm-clone') ? '/tools/vm-clone/badges' : null, { vcenterId }, 60_000);
   const cloneSet = useMemo(() => new Set(cloneBadgeD?.vmIds || []), [cloneBadgeD]);
+  // v2.747: Bareos VM 백업 대상 — 같은 규칙(도구 권한이 있을 때만 · 실패면 배지 없이 트리만 · 범위 밖은 서버가 빈 목록).
+  const { data: bareosBadgeD } = usePolling(toolAllowed('bareos-backup') ? '/tools/bareos-backup/badges' : null, { vcenterId }, 60_000);
+  const bareosSet = useMemo(() => new Set(bareosBadgeD?.vmIds || []), [bareosBadgeD]);
   const vmsP = usePolling('/vms', { vcenterId, limit: 5000 }, 20_000);
   const dsP = usePolling('/datastores', { vcenterId }, 30_000);
   const netP = usePolling('/networks', { vcenterId }, 30_000);
@@ -660,7 +663,7 @@ export default function VCenterDetail({ site, onBack }) {
                     {/* 메모로만 걸린 결과 — 어떤 메모 문구에 걸렸는지 스니펫으로 표시(하이라이트 포함) */}
                     <VmUsageCell {...usageProps(vm)} />
                     {viaNotes && <span style={{ color: 'var(--amber)' }}> · 📝 <Highlight text={notesSnippet(vm.notes, token)} tokens={tokens} /></span>}
-                    <VmBadges vm={vm} cloneSet={cloneSet} />
+                    <VmBadges vm={vm} cloneSet={cloneSet} bareosSet={bareosSet} />
                   </>} />
               ))}
             </Node>
@@ -690,7 +693,7 @@ export default function VCenterDetail({ site, onBack }) {
                     {(vmsByHost.get(h.name) || []).map((vm) => (
                       <Leaf key={vm.id} icon="🧊" onClick={() => setSel({ type: 'vm', item: vm })}
                         label={vm.name} badge={<StateBadge state={vm.powerState} />}
-                        sub={<>{`${vm.guestOS} · ${vm.cpuCount}vCPU · ${Math.round(vm.memMB / 1024)}GB`}<VmUsageCell {...usageProps(vm)} /><VmBadges vm={vm} cloneSet={cloneSet} /></>} />
+                        sub={<>{`${vm.guestOS} · ${vm.cpuCount}vCPU · ${Math.round(vm.memMB / 1024)}GB`}<VmUsageCell {...usageProps(vm)} /><VmBadges vm={vm} cloneSet={cloneSet} bareosSet={bareosSet} /></>} />
                     ))}
                   </Tree>
                 ))}
@@ -703,7 +706,7 @@ export default function VCenterDetail({ site, onBack }) {
         {view === 'vms' && !query && !vmsOk && gateEl(vmsPart, 'VM 목록')}
         {view === 'vms' && !query && vmsOk && (
           <Node label={`📁 ${site.name} / vm`} defaultOpen sub={`${visibleVms.length} VM`}>
-            <FolderNodes node={folderTree} path="" open={open} toggle={toggle} cloneSet={cloneSet} usageProps={usageProps} onSelect={(vm) => setSel({ type: 'vm', item: vm })} />
+            <FolderNodes node={folderTree} path="" open={open} toggle={toggle} cloneSet={cloneSet} bareosSet={bareosSet} usageProps={usageProps} onSelect={(vm) => setSel({ type: 'vm', item: vm })} />
           </Node>
         )}
 
@@ -953,7 +956,7 @@ function Highlight({ text, tokens }) {
   );
 }
 
-function FolderNodes({ node, path, open, toggle, onSelect, cloneSet, usageProps }) {
+function FolderNodes({ node, path, open, toggle, onSelect, cloneSet, bareosSet, usageProps }) {
   const childFolders = Object.keys(node.folders).sort();
   return (
     <>
@@ -962,10 +965,10 @@ function FolderNodes({ node, path, open, toggle, onSelect, cloneSet, usageProps 
         const f = node.folders[name];
         return (
           <Tree key={key} k={key} open={open} toggle={toggle} icon="📁" label={name} sub={`${f.count} VM`}>
-            <FolderNodes node={f} path={`${path}/${name}`} open={open} toggle={toggle} cloneSet={cloneSet} usageProps={usageProps} onSelect={onSelect} />
+            <FolderNodes node={f} path={`${path}/${name}`} open={open} toggle={toggle} cloneSet={cloneSet} bareosSet={bareosSet} usageProps={usageProps} onSelect={onSelect} />
             {f.vms.map((vm) => (
               <Leaf key={vm.id} icon="🧊" onClick={() => onSelect(vm)} label={vm.name} badge={<StateBadge state={vm.powerState} />}
-                sub={<>{`${vm.guestOS} · ${vm.cpuCount}vCPU · ${Math.round(vm.memMB / 1024)}GB`}<VmUsageCell {...usageProps(vm)} /><VmBadges vm={vm} cloneSet={cloneSet} /></>} />
+                sub={<>{`${vm.guestOS} · ${vm.cpuCount}vCPU · ${Math.round(vm.memMB / 1024)}GB`}<VmUsageCell {...usageProps(vm)} /><VmBadges vm={vm} cloneSet={cloneSet} bareosSet={bareosSet} /></>} />
             ))}
           </Tree>
         );
@@ -997,18 +1000,20 @@ export const tb = (g) => {
 };
 
 /**
- * VM 행 배지(v2.299): Clone = 이 포탈의 복제(백업) 잡 대상 · veeamed = Veeam 백업 흔적.
+ * VM 행 배지(v2.299): Clone = 이 포탈의 복제(백업) 잡 대상 · Bareos = Bareos VM 백업 대상(v2.747) · veeamed = Veeam 백업 흔적.
  * veeamed 는 **휴리스틱**이다 — Veeam 이 기본 설정에서 백업 시각을 VM 메모(vSphere notes)에
  * 기록하는 동작을 근거로 vm.notes 의 'veeam' 문자열을 탐지한다. Veeam 쪽에서 메모 기록을
  * 꺼둔 환경에서는 표시되지 않는다(정직 표기 — 툴팁에 명시).
  */
-function VmBadges({ vm, cloneSet }) {
+function VmBadges({ vm, cloneSet, bareosSet }) {
   const cloned = cloneSet?.has(vm.id);
+  const bareos = bareosSet?.has(vm.id);
   const veeamed = /veeam/i.test(vm.notes || '');
-  if (!cloned && !veeamed) return null;
+  if (!cloned && !bareos && !veeamed) return null;
   return (
     <>
       {cloned && <span className="badge blue" style={{ fontSize: 10, marginLeft: 4 }} title="이 포탈의 VM 복제(백업) 잡 대상 — 특수기능 › VM 복제(백업)">Clone</span>}
+      {bareos && <span className="badge blue" style={{ fontSize: 10, marginLeft: 4 }} title="Bareos VM 백업 대상 — 특수기능 › Bareos VM 백업(실행 결과는 그 화면에서 봅니다)">Bareos</span>}
       {veeamed && <span className="badge green" style={{ fontSize: 10, marginLeft: 4 }} title="VM 메모에 Veeam 백업 기록이 있습니다(휴리스틱 — Veeam 이 메모 기록을 끈 환경에선 표시되지 않음)">veeamed</span>}
     </>
   );
