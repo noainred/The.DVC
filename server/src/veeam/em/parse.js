@@ -108,6 +108,20 @@ export function backupServersOf(b) {
     port: num(s, 'Port'), description: str(pick(s, 'Description'), 200),
   })).filter((s) => s.name);
 }
+/**
+ * v2.817 EM 의 HierarchyRoot(백업 서버에 등록된 가상화 호스트 — vCenter·ESXi·Hyper-V) — GET /api/hierarchyRoots?format=Entity.
+ *   ⚠ 응답 모양은 Veeam EM REST 문서 기준 추정(실장비 미확인): Name(호스트명·IP) · HostType(VC/ESX/HyperV…) · UniqueId · Links(BackupServerReference).
+ *   이름이 없으면 버린다 · 상한 2000. server 는 Links 의 백업 서버 참조 이름(없으면 '' — 어느 서버 것인지 모름).
+ */
+export function hierarchyRootsOf(b) {
+  return firstArray(b).slice(0, 2000).map((o) => ({
+    name: str(pick(o, 'Name', 'HostName'), 255), hostType: str(pick(o, 'HostType', 'Type'), 40),
+    uid: str(pick(o, 'UID', 'Uid', 'HierarchyRootId', 'Id'), 200), uniqueId: str(pick(o, 'UniqueId'), 200),
+    server: linkName(o, /BackupServer/i),
+  })).filter((r) => r.name);
+}
+/** VC 형 루트인가(HostType 'VC' · 'VCenter' · 'vCenter Server' …) — ESXi 단독·Hyper-V 는 아니다. 종류를 모르면(빈 값) 넣지 않는다. */
+export const isVcRoot = (r) => /^(vc|vcenter)/i.test(String(r?.hostType || '').replace(/\s+/g, ''));
 export function repositoriesOf(b) {
   return firstArray(b).slice(0, 1000).map((r) => ({
     name: str(pick(r, 'Name'), 120), uid: str(pick(r, 'UID', 'Uid', 'Id'), 200), kind: str(pick(r, 'Kind', 'Type'), 40),

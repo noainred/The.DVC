@@ -46,11 +46,11 @@ import { getEmRecord } from '../../veeam/em/store.js';
 import { emPollMs, emAuthGuard } from '../../veeam/em/poller.js';
 import { sessionDetail } from '../../veeam/em/client.js';
 import { withDeadline } from '../../util/deadline.js';
-import { emView, jobsView, licenseTotals } from '../../veeam/em/view.js';
+import { emView, jobsView, licenseTotals, vcIndexOf } from '../../veeam/em/view.js';
 import { getEmMap, emMapRev } from '../../veeam/em/mapping.js';
 import { currentLicenses } from '../../veeam/licenseWatch.js';
 import { licenseHistory, repoHistory } from '../../veeam/historyDb.js';
-import { demoEmView, demoLicenses, demoSessionDetail } from '../../mock/demo/veeamEm.js';
+import { demoEmViews, demoLicenses, demoSessionDetail, DEMO_EM_IDS } from '../../mock/demo/veeamEm.js';
 import { emSourcesForVcenter, emLinkedVcenter, emSourcesRev } from '../../veeam/em/sources.js';   // v2.795 EM 을 vCenter 화면의 Veeam 출처로(VM 단위)   // v2.784 백업 표시(중요도·백업 필요·메모)
 
 /** 실패 사유의 일반 문구(관리자가 아닌 계정용) — 원문에는 Veeam 주소·포트가 들어간다(전송 오류·리다이렉트·TLS 문구). v2.751 검토 #7. */
@@ -777,14 +777,19 @@ async function emData(admin) {
   const demo = !ems.length && isMockMode();
   const brServers = listServers();
   let views;
+  // v2.817 EM 연결 현황 — EM 이 본 호스트를 포탈 vCenter 로 맞추는 색인(등록부 host · 스냅샷 이름 — 비밀 없음)
+  const snapVcs = store.get()?.vcenters || [];
+  let regVcs = [];
+  try { regVcs = listVcenters(); } catch { regVcs = []; }
+  const vcIndex = vcIndexOf([...regVcs.map((v) => ({ id: v.id, name: snapVcs.find((x) => x.id === v.id)?.name || v.name || v.id, host: v.host })),
+    ...snapVcs.filter((x) => !regVcs.some((v) => v.id === x.id)).map((x) => ({ id: x.id, name: x.name || x.id }))]);
   if (demo) {
-    const v = demoEmView(store.get(), now);
-    v.data.jobs = jobsView(v.data._jobs); delete v.data._jobs;
-    views = [v];
+    views = demoEmViews(store.get(), now, { vcIndex });
+    for (const v of views) if (v.data) { v.data.jobs = jobsView(v.data._jobs || []); delete v.data._jobs; }
   } else {
-    const vcName = new Map((store.get()?.vcenters || []).map((v) => [v.id, v.name || v.id]));
+    const vcName = new Map(snapVcs.map((v) => [v.id, v.name || v.id]));
     const map = getEmMap();   // v2.788.1 매핑(백업 서버 → vCenter·B&R 등록)
-    views = ems.map((em) => emView(em, getEmRecord(em.id), { brServers, map, vcName, maxAgeMs: emPollMs() * 3, now }));
+    views = ems.map((em) => emView(em, getEmRecord(em.id), { brServers, map, vcName, vcIndex, maxAgeMs: emPollMs() * 3, now }));
   }
   if (!admin) views = views.map(({ host: _h, port: _p, ...v }) => v);
   let licItems = currentLicenses();
@@ -840,7 +845,7 @@ export function registerBackupStatus(api) {
   api.get('/tools/backup-em/session', toolsPerm, fullScopeOnly, async (req, res) => {
     const emId = String(req.query.em || '').slice(0, 80);
     const uid = String(req.query.uid || '').slice(0, 200);
-    if (!listEms().length && isMockMode() && emId === 'mock-em-1') return res.json(demoSessionDetail(uid));
+    if (!listEms().length && isMockMode() && DEMO_EM_IDS.includes(emId)) return res.json(demoSessionDetail(uid));
     const em = getEmWithSecret(emId);
     if (!em) return res.status(404).json({ ok: false, reason: 'Enterprise Manager 를 찾을 수 없습니다.' });
     const rec = getEmRecord(em.id);

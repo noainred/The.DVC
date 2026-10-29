@@ -4,6 +4,7 @@
  * 값은 스냅샷의 vCenter·VM 수에서 결정적으로 만든다(새로고침마다 바뀌지 않게) — 실제 장비 값이 아니다.
  */
 import { demoRand } from './flags.js';
+import { rootsCheck, vcIndexOf } from '../../veeam/em/view.js';
 
 const H = 3_600_000;
 export function demoEmView(snap, now = Date.now()) {
@@ -55,6 +56,52 @@ export function demoEmView(snap, now = Date.now()) {
       sessions: { counts24: { total: jobs.length * 3, ok: c.ok * 3, warn: c.warn * 3, fail: c.fail * 3, running: jobs.filter((j) => j.running).length }, recentBad: bad.slice(0, 50), recentBadTotal: bad.length },
     },
   };
+}
+
+/**
+ * v2.817 데모 EM 여러 대 — 'EM 연결 현황'(EM → 백업 서버 → vCenter)을 보이게. 실제 장비 값이 아니다(결정적).
+ *  · EM 1·2 = 같은 데모 백업 서버를 반씩 · 서버마다 EM 이 본 호스트(VC 루트 + 일부 ESXi 단독 · 포탈에 없는 옛 vCenter)
+ *  · 포탈 매핑: 대부분 같음 · 일부 다름 · 일부 매핑 없음 · EM 3 = 수집 실패(서버가 안 보이는 경우를 재현)
+ */
+export const DEMO_EM_IDS = Object.freeze(['mock-em-1', 'mock-em-2', 'mock-em-3']);
+export function demoEmViews(snap, now = Date.now(), { vcIndex = null } = {}) {
+  const base = demoEmView(snap, now);
+  const vcs = (snap?.vcenters || []).slice(0, 40);
+  const idx = vcIndex || vcIndexOf(vcs.map((v) => ({ id: v.id, name: v.name || v.id })));
+  const all = base.data.backupServers.map((sv, i) => {
+    const vA = vcs[(i * 2) % Math.max(1, vcs.length)]; const vB = vcs[(i * 2 + 1) % Math.max(1, vcs.length)];
+    const roots = [{ name: vA?.name || vA?.id || 'vc-demo', hostType: 'VC', server: sv.name }];
+    if (i % 4 === 0 && vB) roots.push({ name: vB.name || vB.id, hostType: 'VC', server: sv.name });
+    if (i % 3 === 1) roots.push({ name: `esx-${String(i + 1).padStart(2, '0')}.demo.local`, hostType: 'ESX', server: sv.name });
+    if (i % 6 === 5) roots.push({ name: 'vc-legacy.demo.local', hostType: 'VC', server: sv.name });
+    const mapped = i % 5 === 2 ? [] : i % 7 === 3 && vB ? [vB.id] : roots.filter((r) => r.hostType === 'VC').map((r) => vcs.find((v) => (v.name || v.id) === r.name)?.id).filter(Boolean);
+    const vcSource = mapped.length ? 'manual' : null;
+    const s0 = { ...sv, vcenterIds: mapped, vcNames: mapped.map((id) => idx.name.get(id) || id), vcSource, brSource: sv.registered ? 'auto' : null };
+    return { s0, roots };
+  });
+  const half = Math.ceil(all.length / 2);
+  const mk = (id, name, host, part) => {
+    const names = new Set(part.map((x) => x.s0.name));
+    const roots = part.flatMap((x) => x.roots);
+    const servers = part.map((x) => ({ ...x.s0, ...rootsCheck(x.s0, roots, idx) }));
+    const jobs = (base.data._jobs || []).filter((j) => names.has(j.server));
+    const v = JSON.parse(JSON.stringify({ ...base, data: { ...base.data, _jobs: undefined } }));
+    v.id = id; v.name = name; v.host = host;
+    v.status.sections.hierarchyRoots = { ok: true };
+    v.data.backupServers = servers; v.data.hierarchyRootsKnown = true; v.data.orphanRoots = [];
+    v.data._jobs = jobs;
+    v.data.overview.backupServers = servers.length; v.data.overview.scheduledJobs = jobs.length;
+    v.data.repositories = (v.data.repositories || []).filter((r) => names.has(r.server));
+    v.data.sessions.recentBad = (v.data.sessions.recentBad || []).filter((b) => names.has(b.server));
+    v.data.sessions.recentBadTotal = v.data.sessions.recentBad.length;
+    return v;
+  };
+  const failed = {
+    id: DEMO_EM_IDS[2], name: 'DEMO-VEM03', host: 'vem3-demo.local', port: 9398, enabled: true, demo: true,
+    status: { ok: false, ts: now - 4 * 60_000, error: '수집 시한(240초)이 지나 일부만 읽었습니다 — 부분 결과는 저장하지 않습니다', kind: 'timeout', authStop: null, lastOkTs: null, stale: true, sections: {}, notes: [] },
+    data: null,
+  };
+  return [mk(DEMO_EM_IDS[0], 'DEMO-VEM01', 'vem-demo.local', all.slice(0, half)), mk(DEMO_EM_IDS[1], 'DEMO-VEM02', 'vem2-demo.local', all.slice(half)), failed];
 }
 
 /** 데모 라이선스(B&R 서버 2대 몫) — 실제 등록 B&R 이 없을 때만. */
