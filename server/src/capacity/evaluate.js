@@ -130,6 +130,24 @@ export async function evaluateHost(k) {
       out.advice.push({ group: g, level: 'scale_up', text: `${label}: 최근 1일 급성 악화 — ${worst?.reason || ''}` });
       continue;
     }
+    // v2.815: 임계가 있는 지표가 하나도 없는 축(네트워크 — net_rx·net_tx 는 정보 지표)은 groups 에 오르지 않는다.
+    //   예전에는 아래 `!mv` 분기로 떨어져 표본이 1천 개를 넘어도 '표본이 아직 부족합니다' 라고 영원히 말했다(재현).
+    //   판정하지 않는다는 사실과 실측 통계를 그대로 말한다.
+    if (!metas.some((m) => m.group === g && m.warn != null)) {
+      const ms = Object.values(month.metrics).filter((m) => m.group === g);
+      if (!ms.length) continue;
+      const seen = ms.filter((m) => m.verdict === 'info' && m.stats);
+      if (!seen.length) {
+        const noData = ms.every((m) => !m.stats);
+        out.advice.push({ group: g, level: 'measuring', text: noData
+          ? `${label}: 1달 창에 측정값이 없습니다(판정 임계가 없는 정보 지표).`
+          : `${label}: 측정 축적 중 — 1달 창 통계에 필요한 표본이 아직 부족합니다(판정 임계가 없는 정보 지표).` });
+        continue;
+      }
+      const stat = seen.map((m) => `${m.label} p95 ${fmtVal(m.stats.p95, m.unit)} · 최대 ${fmtVal(m.stats.max, m.unit)}`).join(' / ');
+      out.advice.push({ group: g, level: 'info', text: `${label}: 판정 임계가 없는 정보 지표라 확장/감축을 판정하지 않습니다 — ${stat} (표본 ${seen[0].stats.n.toLocaleString()}개)` });
+      continue;
+    }
     if (!mv || mv === 'measuring') { out.advice.push({ group: g, level: 'measuring', text: `${label}: 측정 축적 중 — 1달 창 판정에 필요한 표본이 아직 부족합니다.` }); continue; }
     const worst = Object.values(month.metrics).filter((m) => m.group === g && m.verdict === mv)
       .sort((a, b) => (b.stats?.p95 || 0) - (a.stats?.p95 || 0))[0];
