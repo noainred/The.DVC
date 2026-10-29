@@ -28,6 +28,8 @@ import { restorePlan, chainFromHistory, chainIssue } from '../../bareos/restore.
 import { normLevel, isFinalStatus } from '../../bareos/names.js';
 import { authStopView } from '../../util/authGuard.js';
 import { isDemoGuest, isAdminDetailUser } from '../../auth/demoGuest.js';
+import { planDirector, setupDirector, planFdIni, setupFdIni, readFdThumbprint } from '../../bareos/autoSetup.js';
+import { isSshAuthError, isSshHostKeyError } from '../../proxy/sshExec.js';
 
 const adminOnly = requireRole('admin');
 const fullScopeOnly = fullScopeOnlyWith('Bareos Director 설정은 전 법인 공용이라 전체 범위(vCenter 제한 없는) 계정만 볼 수 있습니다.');
@@ -88,7 +90,38 @@ function jobFor(req, res, { write = true } = {}) {
 }
 
 let _testBusy = false;
+let _setupBusy = false;
 let _catalogMemo = { key: '', at: 0, value: null };
+
+/**
+ * 자동 설정 오류 → 응답(v2.821). SSH 인증 실패는 자동 재시도하지 않는다(계정 잠금) — 사람이 고쳐 다시 누른다.
+ * 호스트키 거부는 인증 실패가 아니다(문구 그대로 — 장비 신뢰에서 승인).
+ */
+function sendSetupErr(res, e) {
+  const code = e?.code || '';
+  if (isSshHostKeyError(e)) return res.status(502).json({ ok: false, code: 'ssh-hostkey', reason: String(e.message).slice(0, 600) });
+  if (isSshAuthError(e)) return res.status(502).json({ ok: false, code: 'ssh-auth', reason: 'SSH 인증 실패 — 계정·비밀번호를 확인하세요(자동으로 다시 시도하지 않습니다).' });
+  const status = code === 'invalid' ? 400 : code === 'conflict' ? 409 : code === 'config-test' ? 422 : 502;
+  res.status(status).json({ ok: false, code: code || 'ssh', reason: String(e?.message || e).slice(0, 1800), ...(e?.paths ? { paths: e.paths } : {}), ...(e?.files ? { files: e.files } : {}) });
+}
+
+/**
+ * 원격 root 로 파일을 쓰는 자동 설정의 공통 문지기 — 데모 계정 403 · 동시 1건 · 입력 판정(plan) · **그다음** 본인 OTP.
+ * 통과하면 true(그때 _setupBusy 를 잡는다 — 호출부가 finally 에서 푼다).
+ */
+function setupGate(req, res, plan) {
+  if (isDemoGuest(req.user)) { res.status(403).json({ ok: false, demoGuest: true, reason: '데모 계정은 실제 서버를 설정할 수 없습니다.' }); return false; }
+  if (_setupBusy) { res.status(409).json({ ok: false, reason: '다른 자동 설정이 진행 중입니다 — 끝난 뒤 다시 시도하세요.' }); return false; }
+  const name = req.user?.username || '';
+  if (config.auth.enabled && !getUser(name)?.totpEnabled) { res.status(403).json({ ok: false, needEnroll: true, reason: '자동 설정은 OTP 가 등록된 계정만 실행할 수 있습니다. 사용자 관리에서 OTP 를 등록하세요.' }); return false; }
+  try { plan(req.body || {}); } catch (e) { sendSetupErr(res, e); return false; }
+  if (config.auth.enabled) {
+    const v = verifyUserOtp(name, req.body?.otp);
+    if (!v.ok) { res.status(403).json({ ok: false, reason: `OTP 인증 실패 — ${v.reason}` }); return false; }
+  }
+  _setupBusy = true;
+  return true;
+}
 
 export function registerBareosBackup(api) {
 
@@ -132,6 +165,8 @@ api.get('/tools/bareos-backup/settings', adminOnly, fullScopeOnly, (req, res) =>
 });
 
 api.put('/tools/bareos-backup/settings', adminOnly, fullScopeOnly, (req, res) => {
+  // v2.821: 자동 설정이 끝에 Director 연결을 저장한다 — 그 사이의 저장을 받으면 어느 한쪽이 조용히 덮인다.
+  if (_setupBusy) return res.status(409).json({ ok: false, reason: '자동 설정이 진행 중입니다 — 끝난 뒤 저장하세요.' });
   const body = req.body || {};
   if (Array.isArray(body.sites)) {
     const known = new Set((store.get()?.vcenters || []).map((v) => v.id));
@@ -176,6 +211,53 @@ api.post('/tools/bareos-backup/settings/test', adminOnly, fullScopeOnly, async (
     audit(req, 'Bareos 연결 시험', b.host || loadSettings().director.host || '', `실패 — ${e?.code || ''} ${String(e?.message || '').slice(0, 120)}`);
     sendErr(res, e);
   } finally { _testBusy = false; }
+});
+
+/**
+ * 자동 설정(v2.821 — bareos/autoSetup.js). 전부 admin + 전체 범위 + 데모 계정 거부 + 동시 1건.
+ * 쓰기(Director·FD INI)는 본인 OTP 를 더 건다(원격 root 로 설정 파일을 쓴다). SSH·vCenter 비밀번호는 저장하지 않는다.
+ */
+api.post('/tools/bareos-backup/settings/auto-setup/director', adminOnly, fullScopeOnly, async (req, res) => {
+  if (!setupGate(req, res, planDirector)) return;
+  const b = req.body || {};
+  try {
+    const r = await setupDirector(b);
+    _catalogMemo = { key: '', at: 0, value: null };
+    audit(req, 'Bareos 자동 설정(Director)', String(b.host || ''), `성공 — 콘솔 ${r.settings.director.consoleName} · ${r.files.map((f) => `${f.path}(${f.action})`).join(', ')}`);
+    res.json(r);
+  } catch (e) {
+    audit(req, 'Bareos 자동 설정(Director)', String(b.host || ''), `실패 — ${e?.code || ''} ${String(e?.message || '').slice(0, 200)}`);
+    sendSetupErr(res, e);
+  } finally { _setupBusy = false; }
+});
+
+api.post('/tools/bareos-backup/settings/auto-setup/fd', adminOnly, fullScopeOnly, async (req, res) => {
+  if (!setupGate(req, res, planFdIni)) return;
+  const b = req.body || {};
+  try {
+    const r = await setupFdIni(b);
+    audit(req, 'Bareos 자동 설정(FD INI)', `${r.vcenterId} → ${b.host}`, `성공 — ${r.path}(${r.action}) · 플러그인 ${r.plugin === 'installed' ? '설치됨' : '미확인'}`);
+    res.json(r);
+  } catch (e) {
+    audit(req, 'Bareos 자동 설정(FD INI)', `${b.vcenterId || ''} → ${b.host || ''}`, `실패 — ${e?.code || ''} ${String(e?.message || '').slice(0, 200)}`);
+    sendSetupErr(res, e);
+  } finally { _setupBusy = false; }
+});
+
+/** FD 에서 vCenter 인증서 지문 읽기 — 쓰기 없음이라 OTP 는 걸지 않는다(SSH 접속은 하므로 동시 1건·데모 거부는 같다). */
+api.post('/tools/bareos-backup/settings/auto-setup/fd-thumbprint', adminOnly, fullScopeOnly, async (req, res) => {
+  if (isDemoGuest(req.user)) return res.status(403).json({ ok: false, demoGuest: true, reason: '데모 계정은 실제 서버에 접속할 수 없습니다.' });
+  if (_setupBusy) return res.status(409).json({ ok: false, reason: '다른 자동 설정이 진행 중입니다 — 끝난 뒤 다시 시도하세요.' });
+  _setupBusy = true;
+  const b = req.body || {};
+  try {
+    const r = await readFdThumbprint(b);
+    audit(req, 'Bareos 자동 설정(지문 읽기)', `${r.vcenterId} → ${b.host}`, `성공 — ${r.vcserver}`);
+    res.json(r);
+  } catch (e) {
+    audit(req, 'Bareos 자동 설정(지문 읽기)', `${b.vcenterId || ''} → ${b.host || ''}`, `실패 — ${e?.code || ''} ${String(e?.message || '').slice(0, 160)}`);
+    sendSetupErr(res, e);
+  } finally { _setupBusy = false; }
 });
 
 /** 사이트 매핑 드롭다운 원천(.clients·.storages·.pools·.schedules·.jobdefs·.filesets) — 60초 기억. */
