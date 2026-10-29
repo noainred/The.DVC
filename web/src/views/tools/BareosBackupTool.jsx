@@ -485,7 +485,7 @@ function HistoryTab({ d }) {
           {d.jobs.map((j) => <option key={j.id} value={j.id}>{j.vmName} · {j.vcenterId}</option>)}
         </Select>
         <button type="button" className="logout-btn" style={BTN} onClick={load} disabled={!sel}>새로 고침</button>
-        <span className="muted" style={{ fontSize: 12 }}>Director 카탈로그 최근 {limit ?? '—'}건 · 상태 코드 T 성공 · W 경고 · E·f 오류 · A 취소 · R 실행 중 · C 대기</span>
+        <span className="muted" style={{ fontSize: 12 }}>Director 카탈로그 {Number.isInteger(limit) ? `최근 ${limit}건` : '최근 실행'} · 상태 코드 T 성공 · W 경고 · E·f 오류 · A 취소 · R 실행 중 · C 대기</span>
       </div>
       {err && <ErrorBox error={err} />}
       {sel && !hist && !err && <Loading />}
