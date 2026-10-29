@@ -1,6 +1,14 @@
 {
   "notes": [
     {
+      "version": "2.822.1",
+      "date": "2026-10-30",
+      "title": "Bareos 사전 준비 체크리스트 — Rocky·RHEL 9 FD 는 pyVmomi 8.x(9.x 는 Python 3.10 이상 필요)",
+      "notes": [
+        "설정 탭 사전 준비 체크리스트에 'Rocky·RHEL 9 FD(Python 3.9)는 pyVmomi 8.x — pip install pyvmomi>=8,<9 · 바꾼 뒤 bareos-fd 재시작' 안내 추가(현장 작업 로그 'Python 3.10 or newer is required (found 3.9)' 실측)"
+      ]
+    },
+    {
       "version": "2.822.0",
       "date": "2026-10-30",
       "title": "Bareos 검토 확정 결함 수정 + Backup 탭·단계별 연결 진단·여러 VM 일괄 등록·실패 알림 메일",
