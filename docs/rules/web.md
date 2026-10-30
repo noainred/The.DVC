@@ -459,3 +459,10 @@
   - 문구 로직은 `components/accessDeniedText.js`(순수 함수)에 둔다 — 웹 테스트가 node 환경
     (DOM 없음)이라 컴포넌트 렌더 테스트가 불가하므로 판정·문구는 여기서 회귀로 고정한다.
 
+- **엣지 토큰 맞추기는 독립 도구(`edge-tokens`)이자 공통 메뉴(설정 그룹) 항목이다**(v2.827 — 사용자 요청 "독립적인 메뉴 · 기존 메뉴에서 추출해서 공통 메뉴로").
+  화면은 `views/EdgeTokenSync.jsx` 하나(설정 하위 탭 v2.825 에서 추출 — 복제하지 않는다). 등록 지점은 `specialToolsList.js`(adminOnly · aka) ·
+  `SpecialTools.jsx` 렌더 · `toolcats/catalog.js` '운영 작업' · `topMenu.js` 설정 그룹 `{tool:'edge-tokens'}` · `auth/toolAccess.js TOOL_ENFORCEMENT_NOTES`
+  (전용 /api/tools 경로가 없고 /api/admin/* 라우터가 집행) · `web/public/special-tools.json` 재생성. 옛 주소 `#/settings/edge-tokens` 는
+  `hooks/hashTab.js MOVED_SUBS`(두 조각 이동 규칙 — 첫 조각 `settings` 는 살아 있는 화면이라 MOVED_TABS 에 넣을 수 없다)가 새 주소로 보낸다.
+  하위 탭 주소를 통째로 옮길 때는 같은 방식으로 적고 `hashTab.test.js` 에 고정한다.
+

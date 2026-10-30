@@ -48,6 +48,7 @@ const PowerTotal = React.lazy(() => import('./tools/PowerTotal.jsx')); // v2.664
 const IdracTrend = React.lazy(() => import('./tools/IdracTrendTool.jsx')); // iDRAC 통합 추이(v2.660)     // 법인별 서버 사용량(v2.625)
 const LinkCheck = React.lazy(() => import('./tools/LinkCheck.jsx'));     // 통신 점검(중앙↔엣지·vCenter, v2.552)
 const PortalCheck = React.lazy(() => import('./tools/PortalCheck.jsx')); // 포탈 점검 › 토큰 점검(v2.560)
+const EdgeTokenSync = React.lazy(() => import('./EdgeTokenSync.jsx'));   // 엣지 토큰 맞추기(v2.827 — 설정 하위 탭에서 독립 도구로)
 const CommMap = React.lazy(() => import('./tools/CommMap.jsx'));
 const XferSpeedTool = React.lazy(() => import('./tools/XferSpeedTool.jsx'));   // 법인 간 전송 속도(v2.735)         // 통신 지도(중앙↔엣지 라디얼, v2.584)
 const IsilonDirUsageTool = React.lazy(() => import('./tools/IsilonDirUsageTool.jsx'));   // 아이실론 디렉터리 사용량(v2.736)
@@ -621,6 +622,7 @@ function ToolPanel({ tool, onBack, isAdmin, defaultScope = '', cfg = null }) {
       {tool === 'idrac-trend' && <IdracTrend />}
       {tool === 'link-check' && <LinkCheck />}
       {tool === 'portal-check' && <PortalCheck />}
+      {tool === 'edge-tokens' && <EdgeTokenSync />}
       {tool === 'comm-map' && <CommMap />}
       {tool === 'xfer-speed' && <XferSpeedTool />}
       {tool === 'isilon-dirusage' && <IsilonDirUsageTool />}

@@ -51,7 +51,6 @@ import HorizonAdmin from './HorizonAdmin.jsx'; // v2.685
 const IsiduSettingsPage = lazy(() => import('./tools/IsiduSettingsPage.jsx')); // v2.740 아이실론 수집 대상 설정(슈퍼 관리자 전용)
 const GuestPartSettings = lazy(() => import('./tools/GuestPartSettings.jsx')); // v2.749 게스트 파티션 사용률 — 조회 주기·임계·무시 규칙·메일
 const VeeamSettings = lazy(() => import('./VeeamSettings.jsx')); // v2.751 Veeam 백업 서버(vCenter 별 · 중앙 또는 그 법인 엣지가 읽음)
-const EdgeTokenSync = lazy(() => import('./EdgeTokenSync.jsx')); // v2.825 엣지 토큰 맞추기(개별 central 토큰 현황 + 자동 적용)
 
 // 모든 하위 화면 정의(키→라벨→컴포넌트). 그룹에 속한 항목은 group 키로 묶는다.
 const SUB = [
@@ -80,8 +79,8 @@ const SUB = [
   { k: 'gpu-guest-diag', label: 'GPU 수집 진단', C: GpuGuestDiag, group: 'gpu' },
   { k: 'guest-account', label: '게스트 계정 추가', C: GuestAccount, group: 'collect' },
   { k: 'collectors', label: '수집 서버(원격)', C: Collectors, group: 'collect' },
-  // v2.825(사용자 요청 "토큰 맞추는 기능을 설정에 서브메뉴로 별도로"): Veeam 화면 안에만 있던 개별 토큰 자동 적용을 엣지 전체 표로
-  { k: 'edge-tokens', label: '엣지 토큰 맞추기', C: EdgeTokenSync, group: 'collect' },
+  // v2.825 의 '엣지 토큰 맞추기'(edge-tokens) 하위 탭은 v2.827 에 독립 도구(#/tools/edge-tokens · 공통 메뉴 설정 › 엣지 토큰 맞추기)로 옮겼다 —
+  //   옛 주소 #/settings/edge-tokens 는 hooks/hashTab.js MOVED_SUBS 가 새 주소로 보낸다.
   { k: 'agent-deploy', label: '원격 법인(DC)에 Edge 노드 포탈 설치', C: AgentDeploy, group: 'collect' },
   // --- 원격 접속 서버 그룹 ---
   { k: 'proxy', label: '중계 서버', C: ProxySettings, group: 'remote-srv' },

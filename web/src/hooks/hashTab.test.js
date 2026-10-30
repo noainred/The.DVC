@@ -3,7 +3,7 @@
  * 웹 테스트는 node 환경(DOM 없음)이라 훅 자체는 못 돌린다 — 판정을 순수 함수로 고정한다.
  */
 import { describe, it, expect } from 'vitest';
-import { hashSegments, isUnderBase, tabFromHash, buildHash, movedTabHash, MOVED_TABS, legacyShellHash } from './hashTab.js';
+import { hashSegments, isUnderBase, tabFromHash, buildHash, movedTabHash, MOVED_TABS, MOVED_SUBS, legacyShellHash } from './hashTab.js';
 
 describe('hashSegments', () => {
   it('선행 #/ 와 빈 조각을 걷어낸다', () => {
@@ -103,5 +103,16 @@ describe('legacyShellHash (v2.747 V3~V6 셸 삭제)', () => {
   });
   it('일반 주소는 건드리지 않는다', () => {
     for (const h of ['', '#/', '#/overview', '#/tools/gpu', '#/console', '#/vms', '#/v7', '#/mm']) expect(legacyShellHash(h)).toBe(null);
+  });
+});
+
+describe('movedTabHash — 두 조각 이동(v2.827 설정 › 엣지 토큰 맞추기 → 독립 도구)', () => {
+  it('#/settings/edge-tokens 는 #/tools/edge-tokens 로, 다른 설정 하위 탭은 그대로(null)', () => {
+    expect(MOVED_SUBS['settings/edge-tokens']).toEqual(['tools', 'edge-tokens']);
+    expect(movedTabHash('#/settings/edge-tokens')).toBe('#/tools/edge-tokens');
+    expect(movedTabHash('#settings/edge-tokens')).toBe('#/tools/edge-tokens');
+    expect(movedTabHash('#/settings/collectors')).toBe(null);
+    expect(movedTabHash('#/settings')).toBe(null);
+    expect(movedTabHash('#/tools/edge-tokens')).toBe(null);
   });
 });

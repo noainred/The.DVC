@@ -53,8 +53,19 @@ export const MOVED_TABS = Object.freeze({
   explore: ['tools', 'explore'],
   nsx: ['tools', 'nsx'],
 });
+/**
+ * v2.827: 하위 탭 주소(두 조각)가 통째로 옮겨 간 것 — 첫 조각은 그대로 살아 있는 화면이라 MOVED_TABS 에 넣을 수 없다.
+ *   '#/settings/edge-tokens' → '#/tools/edge-tokens'  (설정 › 수집 서버 › 엣지 토큰 맞추기 → 독립 도구·공통 메뉴)
+ */
+export const MOVED_SUBS = Object.freeze({
+  'settings/edge-tokens': ['tools', 'edge-tokens'],
+});
 export function movedTabHash(hash) {
   const segs = hashSegments(hash);
+  if (segs.length >= 2) {
+    const k2 = `${segs[0]}/${segs[1]}`;
+    if (Object.hasOwn(MOVED_SUBS, k2)) return `#/${[...MOVED_SUBS[k2], ...segs.slice(2)].join('/')}`;
+  }
   const to = segs.length ? MOVED_TABS[segs[0]] : null;
   if (!to || !Object.hasOwn(MOVED_TABS, segs[0])) return null;
   return `#/${[...to, ...segs.slice(1)].join('/')}`;

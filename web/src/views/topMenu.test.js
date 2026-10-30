@@ -18,7 +18,8 @@ describe('메뉴 구성', () => {
     expect(MENU_GROUPS.map((g) => g.label)).toEqual(['Overview', 'Summary', '서버', '스토리지', '네트워크', '자원관리', '자원 최적화', '특수 기능', '게시판', '설정']);
     expect(MENU_GROUPS.find((g) => g.id === 'backup')).toBe(undefined);
     const settings = MENU_GROUPS.find((g) => g.id === 'settings');
-    expect(settings.children.map((c) => c.tab)).toEqual(['settings', 'upgrade']);
+    // v2.827: 엣지 토큰 맞추기가 설정 그룹의 독립 항목(도구)으로 들어왔다
+    expect(settings.children.map((c) => c.tab || `tool:${c.tool}`)).toEqual(['settings', 'upgrade', 'tool:edge-tokens']);
   });
 
   it('App 의 탭은 전부 어느 메뉴엔가 있다(빠지면 그 화면으로 갈 메뉴가 없다)', () => {
@@ -33,8 +34,8 @@ describe('메뉴 구성', () => {
 
   it('메뉴가 가리키는 도구는 카탈로그에 실재하고 패널이 있는 도구다', () => {
     const keys = allItems().map(({ c }) => c?.tool).filter(Boolean);
-    expect(keys.length).toBe(16);               // 서버 분석은 '물리 서버' 와 '서버 분석' 두 자리 · v2.787 Veeam 1(Detail 은 also) · v2.789 스토리지 사용량 보고서 1
-    expect(new Set(keys).size).toBe(15);
+    expect(keys.length).toBe(17);               // 서버 분석은 '물리 서버' 와 '서버 분석' 두 자리 · v2.787 Veeam 1(Detail 은 also) · v2.789 스토리지 사용량 보고서 1 · v2.827 엣지 토큰 맞추기 1
+    expect(new Set(keys).size).toBe(16);
     for (const k of keys) {
       const t = TOOLS.find((x) => x.k === k);
       expect(t, k).toBeTruthy();
