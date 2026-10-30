@@ -12,7 +12,7 @@
  *   · 엣지 노드는 돌리지 않는다(그룹 원장은 중앙에 있다 — 엣지는 대행 큐로 받는다).
  */
 import { listGroups, getGroup, claimSlots, recordMisses, recordFire, markSending, groupsLoadError } from './groups.js';
-import { decideFire, CATCHUP_MS } from './groupSchedule.js';
+import { decideFire, CATCHUP_MS, slotKey } from './groupSchedule.js';
 import { jobDigests, markPending, patchJob, registryLoadError, inBatch } from './registry.js';
 import { onDirector, isDemoActive, effectiveSettings } from './service.js';
 import { jobDirectorId } from './settings.js';
@@ -202,6 +202,7 @@ export async function runGroup(groupId, { trigger = 'manual', by = '', level = n
 }
 
 let _scanning = false;
+const _clockWarned = new Set();
 /**
  * 예약 틱 한 번 — 돌릴 회차를 **한 번의 쓰기로** 차지하고(놓친 회차도 한 번에) 실행을 띄운다.
  * 같은 Director 의 그룹은 **차례로**, 다른 Director 끼리는 동시에(v2.830 검토 L10 — 같은 분에 그룹 수십 개가 한 Director 에 세션을 동시에 열면
@@ -215,7 +216,10 @@ export async function groupTick(now = Date.now(), { catchupMs = CATCHUP_MS } = {
   try {
     if (groupsLoadError() || registryLoadError()) return { scanned: false, fired, missed };
     const due = []; const miss = []; const byId = new Map();
+    const nowKey = slotKey(now);
     for (const g of listGroups()) {
+      // 버그 점검 S6: 처리한 회차가 지금보다 미래면(시계가 앞섰다 돌아옴) 그 열쇠까지 회차가 돌지 않는다 — 조용히 넘기지 않고 한 번 알린다
+      if (g.lastKey && g.lastKey > nowKey && !_clockWarned.has(g.id)) { _clockWarned.add(g.id); console.warn(`[bareos] 백업 그룹 ‘${g.name}’ 의 마지막 처리 회차(${g.lastKey})가 지금(${nowKey})보다 미래입니다 — 서버 시계를 확인하세요. 그 회차까지는 예약 실행이 돌지 않습니다.`); }
       const d = decideFire(g, now, catchupMs);
       if (d.action === 'miss') miss.push({ id: g.id, slot: d.slot, reason: 'down' });
       else if (d.action === 'fire' && !groupRunning(g.id)) { due.push({ id: g.id, key: d.slot.key, trigger: 'timer' }); byId.set(g.id, { g, slot: d.slot }); }

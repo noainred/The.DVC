@@ -107,8 +107,37 @@ export function reconcileAgentTokensText(backupText, currentText) {
   return { text: JSON.stringify({ ...b, tokens }, null, 2), revived, currentUnreadable: curList === null };
 }
 
+/**
+ * bareos-groups.json — 그룹 정의는 백업 것, **회차 기록은 더 늦은 쪽**(v2.830 버그 점검 S7 — 백업은 정의가 바뀔 때 만들어져 lastKey 가 며칠 묵는다.
+ * 그대로 되돌리면 복원 뒤 6시간 안에 기동할 때 이미 돈 회차를 다시 보냈다 — 한 번 이하 위반). 회차 열쇠는 'YYYY-MM-DD HH:MM' 이라 글자 비교 = 시각 비교.
+ * 복원본의 보내는 중 표지(sending)는 비운다(그때 보내던 실행은 지금 것이 아니다 — 거짓 '재시작' 경고).
+ * @returns {{ text:string, kept:number }}
+ */
+export function reconcileBareosGroupsText(backupText, currentText) {
+  const b = parseJson(backupText);
+  if (!b || !Array.isArray(b.groups)) return { text: String(backupText), kept: 0 };
+  const cur = parseJson(currentText);
+  const curKey = new Map((Array.isArray(cur?.groups) ? cur.groups : []).filter((g) => g && typeof g.id === 'string').map((g) => [g.id, typeof g.lastKey === 'string' ? g.lastKey : '']));
+  let kept = 0;
+  const groups = b.groups.map((g) => {
+    if (!g || typeof g !== 'object') return g;
+    const mine = typeof g.lastKey === 'string' ? g.lastKey : '';
+    const now = curKey.get(g.id) || '';
+    const next = { ...g, sending: null };
+    if (now > mine) { next.lastKey = now; kept += 1; }
+    return next;
+  });
+  return { text: JSON.stringify({ ...b, groups }), kept };
+}
+
 /** 적용할 내용을 현재 파일과 맞춘다 — 대상이 아니면 그대로. @returns {{ content:string, warning?:{file,reason}, info?:object }} */
 export function reconcileForApply(name, content, configDir) {
+  if (name === 'bareos-groups.json') {
+    let cur = null;
+    try { cur = fs.readFileSync(path.join(configDir, name), 'utf8'); } catch { cur = null; }
+    const r = reconcileBareosGroupsText(content, cur);
+    return { content: r.text, info: { bareosGroupSlotsKept: r.kept } };
+  }
   if (name !== 'users.json' && name !== 'central-agent-tokens.json') return { content };
   let currentText = null;
   try { currentText = fs.readFileSync(path.join(configDir, name), 'utf8'); } catch { currentText = null; }

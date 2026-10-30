@@ -62,7 +62,10 @@ export const numText = (v) => (v == null ? '—' : isFin(v) ? v.toLocaleString('
 /** 결과 막대 조각(%) — 성공·경고·실패·진행·나머지(아직·모름). 잡이 없거나 결과를 모르면 null(막대를 그리지 않는다). */
 export function resultBar(c) {
   if (!c || !isFin(c.jobs) || c.jobs <= 0 || c.ok == null) return null;
-  const p = (n) => Math.round((n / c.jobs) * 1000) / 10;
+  // 버그 점검 W3: 성공·경고·실패는 '마지막으로 끝난 실행', 진행은 '지금 도는 실행' 이라 한 잡이 둘 다 셀 수 있다(지난번 성공 + 지금 실행) —
+  //   분모를 잡 수로만 두면 합이 100% 를 넘어 막대가 비율을 잃었다. 분모 = max(잡 수, 조각 합)
+  const den = Math.max(c.jobs, (c.ok || 0) + (c.warn || 0) + (c.fail || 0) + (c.run || 0));
+  const p = (n) => Math.round((n / den) * 1000) / 10;
   return { ok: p(c.ok), warn: p(c.warn), fail: p(c.fail), run: p(c.run) };
 }
 
@@ -111,6 +114,9 @@ export function detailFilterCounts(rows, opts) {
   for (const [k] of DETAIL_FILTERS) out[k] = 0;
   for (const r of Array.isArray(rows) ? rows : []) for (const [k] of DETAIL_FILTERS) if (rowMatches(r, k, opts)) out[k]++;
   if (opts?.resultsKnown === false) for (const k of ['run', 'bad', 'old', 'never']) out[k] = null;
+  // 버그 점검 W1: 파일을 못 읽으면 그 파일로 세는 칩은 '모름'(null → '—') — 0 이 아니다(서버 corpCounts 와 같은 뜻)
+  if (opts?.marksKnown === false) for (const k of ['missing', 'mismatch']) out[k] = null;
+  if (opts?.registryKnown === false) for (const [k] of DETAIL_FILTERS) if (k !== 'all') out[k] = null;
   return out;
 }
 
@@ -197,7 +203,8 @@ export function bareosSubTabs({ summaryOk = false, detailOk = false, manageOk = 
   return [
     ...(summaryOk ? [['summary', '통합 현황', '#/tools/bareos-summary']] : []),
     ...(detailOk ? [['detail', '법인별 현황', '#/tools/bareos-detail']] : []),
-    ...(admin && manageOk ? [['targets', '백업 대상', '#/tools/bareos-backup/targets'], ['history', '실행 현황 · 이력', '#/tools/bareos-backup/history']] : []),
+    // 버그 점검 W11: 관리 도구의 '백업 그룹' 탭(v2.830)도 같은 줄에(통합·법인별 화면에서 바로 간다)
+    ...(admin && manageOk ? [['targets', '백업 대상', '#/tools/bareos-backup/targets'], ['groups', '백업 그룹', '#/tools/bareos-backup/groups'], ['history', '실행 현황 · 이력', '#/tools/bareos-backup/history']] : []),
     ...(admin && manageOk && fullScope ? [['settings', '설정', '#/tools/bareos-backup/settings']] : []),
   ];
 }

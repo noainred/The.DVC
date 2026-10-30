@@ -11,7 +11,8 @@
  *   · 못 읽은 값은 0 이 아니다(vmView.corpCounts) — 표시 파일 손상·원장 손상·Director 조회 정지는 null + 사유.
  *   · 쓰기(지금 백업·복원·등록)는 여기 없다 — 관리 화면(bareos-backup)의 기존 POST 라우트(admin · OTP)만.
  */
-import { requirePerm } from '../../auth/auth.js';
+import { requirePerm, toolActorOf } from '../../auth/auth.js';
+import { issueFor } from '../../auth/toolAccess.js';
 import { scopedVcenterIds } from '../../auth/scope.js';
 import { store } from '../../store.js';
 import { memoJson, scopeKey } from './shared.js';
@@ -121,7 +122,7 @@ const notices = (p) => ({
 });
 
 /** 통합 현황 — 법인마다 한 줄 + 합계 + 우선 확인 목록. 요청 경로 O(VM 수)(28 × 약 200대 — 한 번 순회). */
-export function summaryData(req, snap, { rpoDays = 1, now = Date.now() } = {}) {
+export function summaryData(req, snap, { rpoDays = 1, now = Date.now(), detailOk = true } = {}) {
   const p = prepare(req, snap);
   const vmsBy = new Map();
   for (const vm of snap?.vms || []) { const a = vmsBy.get(vm.vcenterId); if (a) a.push(vm); else vmsBy.set(vm.vcenterId, [vm]); }
@@ -130,8 +131,9 @@ export function summaryData(req, snap, { rpoDays = 1, now = Date.now() } = {}) {
     const dir = directorInfo(vc.id, p.settings, p.poller, p.demo);
     const { rows, vmTotal } = corpRows(vc.id, vmsBy.get(vc.id) || [], p.byVcVm.get(vc.id) || new Map(), p.marks, p);
     const counts = corpCounts(rows, { marksKnown: p.marksKnown, resultsKnown: dir.resultsKnown, registryKnown: p.registryKnown, rpoDays, now });
+    // 버그 점검 S13: '마지막 백업' = 마지막으로 **백업이 만들어진**(성공·경고) 시각(b.ok) — 끝난 실행(b.at)이면 실패도 들어가 법인별 화면·우선 목록과 달랐다
     let lastAt = null;
-    for (const r of rows) if (r.b?.at && (lastAt == null || r.b.at > lastAt)) lastAt = r.b.at;
+    for (const r of rows) if (r.b?.ok && (lastAt == null || r.b.ok > lastAt)) lastAt = r.b.ok;
     out.push({ id: vc.id, name: vc.name || vc.id, region: vc.location?.region || '', vm: vmTotal, director: dir, counts, lastAt: dir.resultsKnown ? lastAt : null });
     for (const r of rows) {
       const kind = priorityKind(r, { resultsKnown: dir.resultsKnown, marksKnown: p.marksKnown, rpoDays, now });
@@ -145,7 +147,9 @@ export function summaryData(req, snap, { rpoDays = 1, now = Date.now() } = {}) {
   for (const r of out) dirStates[r.director.state] = (dirStates[r.director.state] || 0) + 1;
   return {
     ok: true, at: now, rpoDays, rows: out, totals: { ...sumCounts(out.map((r) => r.counts)), vm: out.reduce((s, r) => s + r.vm, 0) }, directorStates: dirStates,
-    priority: prio.slice(0, PRIORITY_MAX), priorityTotal: prio.length, priorityByKind: kindCount, ...notices(p),
+    // 버그 점검 S15: 우선 확인 목록은 VM 단위(이름·폴더) — 법인별 현황(bareos-detail)을 거부한 계정에는 싣지 않는다(backup-summary 의 v2.787 withheld 와 같은 규칙)
+    ...(detailOk ? { priority: prio.slice(0, PRIORITY_MAX), priorityTotal: prio.length, priorityByKind: kindCount } : { priority: [], priorityTotal: null, priorityByKind: {}, priorityWithheld: 'detail-tool' }),
+    ...notices(p),
     ...(p.allowed ? { scoped: true } : {}),
   };
 }
@@ -179,7 +183,8 @@ export function registerBareosViews(api) {
   api.get('/tools/bareos-summary', toolsPerm, (req, res) => {
     const snap = store.get();
     const rpoDays = rpoOf(req);
-    return memoJson(req, res, 'bareos-summary', async () => summaryData(req, snap, { rpoDays }), { ttlMs: 30_000, extraKey: cacheKey(req, snap) });
+    const detailOk = !issueFor(toolActorOf(req), 'bareos-detail');
+    return memoJson(req, res, 'bareos-summary', async () => summaryData(req, snap, { rpoDays, detailOk }), { ttlMs: 30_000, extraKey: `${cacheKey(req, snap)}|d${detailOk ? 1 : 0}` });   // d = 우선 목록 공개 여부(키에 없으면 캐시로 샌다)
   });
 
   api.get('/tools/bareos-detail', toolsPerm, (req, res) => {
@@ -230,7 +235,9 @@ export function registerBareosViews(api) {
         const k = bareosClass(r.b, { rpoDays: d.rpoDays, now });
         lines.push(csvLine([d.vcenter.name, r.folder, r.name, r.power === 'POWERED_ON' ? '켜짐' : r.power ? '꺼짐' : '', n(r.gb),
           r.method == null ? '모름' : METHOD_TEXT[r.method] || '', r.b == null ? '모름' : k.job ? '있음' : k.missing ? '미등록' : '', k.job ? (k.on ? '예' : '아니오') : '',
-          k.job ? ST_TEXT[r.b.st] || '' : '', iso(r.b?.at), r.b?.lv || '', n(r.b?.by), iso(r.b?.ok), r.b?.run ? '예' : '', d.director.resultsKnown ? (k.old ? '예' : '') : '모름', r.gone ? '예' : '']));
+          // 버그 점검 S17: 결과를 모르는 법인(인증 정지·조회 실패·미설정)은 결과·진행 칸에 '모름' 을 덧붙인다(값은 마지막으로 읽은 것 — 화면의 회색 칩과 같은 뜻)
+          k.job ? `${ST_TEXT[r.b.st] || ''}${d.director.resultsKnown ? '' : '(모름 — 마지막으로 읽은 값)'}` : '', iso(r.b?.at), r.b?.lv || '', n(r.b?.by), iso(r.b?.ok),
+          d.director.resultsKnown ? (r.b?.run ? '예' : '') : (k.job ? '모름' : ''), d.director.resultsKnown ? (k.old ? '예' : '') : '모름', r.gone ? '예' : '']));
       }
       logAudit({ user: req.user?.username, action: 'bareos-detail.csv', target: vcenterId, detail: `${d.rows.length} rows`, ip: req.ip });
       res.setHeader('Content-Type', 'text/csv; charset=utf-8');

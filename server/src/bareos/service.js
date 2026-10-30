@@ -14,7 +14,7 @@ import {
 import { OPS } from './ops.js';
 import { enqueueEdgeOp } from './edgeOps.js';
 import { config } from '../config.js';
-import { addJob as registryAddJob, listJobs, findByVm, registryLoadError, jobCount, retireName, MAX_JOBS } from './registry.js';
+import { addJob as registryAddJob, addJobs as registryAddJobs, listJobs, findByVm, registryLoadError, jobCount, retireName, MAX_JOBS } from './registry.js';
 import { backupPluginOptions, jobNameFor, normLevel } from './names.js';
 import { createAuthGuard } from '../util/authGuard.js';
 import { isMockMode } from '../mock/demo/flags.js';
@@ -234,13 +234,23 @@ function claimVm(prep) {
 }
 
 /** 원장 기록(Director 잡을 만든 **뒤**). directorId 를 고정한다(잡은 그 Director 의 conf 에 있다). */
-function recordTarget(prep, jobName, by, demo) {
+function targetInput(prep, jobName, by, demo) {
   const { vm, el } = prep;
-  return registryAddJob({
+  return {
     vcenterId: vm.vcenterId, vmId: vm.id, vmName: vm.name, dc: vm.vcDcPath, folder: vm.folderPath, directorId: prep.directorId,
     bareosJob: jobName, client: el.site.client, storage: el.site.storage, pool: el.site.pool, schedule: prep.sched, level: prep.lvl,
     createdBy: by, demo,
-  });
+  };
+}
+function recordTarget(prep, jobName, by, demo) { return registryAddJob(targetInput(prep, jobName, by, demo)); }
+/**
+ * 여러 대상을 원장에 **한 번의 쓰기로**(v2.830 버그 점검 S2 — 대상마다 원장 전체를 써 200대 5.2초 정지).
+ * @param {{ prep, name }[]} list
+ * @returns {{ ok:true, job } | { ok:false, err }}[]  — 끝 쓰기가 실패하면 전부 실패(원장은 되돌려졌다 — 부르는 쪽이 그 잡들을 끈다)
+ */
+function recordTargets(list, by, demo) {
+  if (!list.length) return [];
+  try { return registryAddJobs(list.map((o) => targetInput(o.prep, o.name, by, demo))); } catch (e) { return list.map(() => ({ ok: false, err: e })); }
 }
 
 /**
@@ -270,11 +280,12 @@ function lateAddJobs(directorId, ready, by, demo) {
     if (!lr?.ok || !Array.isArray(lr.value)) return;
     const byKey = new Map(lr.value.map((r) => [r.key, r]));
     const orphans = []; let recorded = 0;
+    const made = [];
     for (const { i, prep } of ready) {
       const r = byKey.get(i);
-      if (!r?.ok || !r.name) continue;
-      try { recordTarget(prep, r.name, by, demo); recorded += 1; } catch (e) { orphans.push({ i, name: r.name, err: e }); }
+      if (r?.ok && r.name) made.push({ i, prep, name: r.name });
     }
+    recordTargets(made, by, demo).forEach((x, k) => { if (x.ok) recorded += 1; else orphans.push({ i: made[k].i, name: made[k].name, err: x.err }); });
     if (recorded || orphans.length) console.warn(`[bareos] 늦게 도착한 엣지 등록 결과를 반영했습니다(Director ${directorId}): 원장에 넣음 ${recorded} · 넣지 못해 끔 ${orphans.length}`);
     if (orphans.length) orphanCleanup(directorId, orphans, demo).catch(() => {});
   };
@@ -340,12 +351,18 @@ export async function createBackupTargets({ vcenterId, vmIds, level, schedule, b
     }
     const byKey = new Map(results.map((r) => [r.key, r]));
     const orphans = [];
+    const made = [];
     for (const { i, prep } of ready) {
       const r = byKey.get(i);
       if (!r?.ok) { out[i].reason = r?.message || '사유 미상'; continue; }
       if (!r.name) { out[i].reason = 'Director 가 잡 이름 없이 성공을 회신했습니다 — 잡이 생겼을 수 있습니다. Director 에서 확인하세요.'; continue; }   // G3
-      try { out[i].job = recordTarget(prep, r.name, by, demo); out[i].ok = true; } catch (e) { orphans.push({ i, name: r.name, err: e }); }
+      made.push({ i, prep, name: r.name });
     }
+    // 원장은 한 번에(S2) — 끝 쓰기가 실패하면 이번 묶음 전부 원장 밖 잡이다(아래 orphanCleanup 이 끄고 이름을 밝힌다)
+    recordTargets(made, by, demo).forEach((x, k) => {
+      const o = made[k];
+      if (x.ok) { out[o.i].job = x.job; out[o.i].ok = true; } else orphans.push({ i: o.i, name: o.name, err: x.err });
+    });
     if (orphans.length) {
       // Director 잡은 이미 생겼다 — 끄고, 숨기지 않고 이름을 밝힌다.
       const why = await orphanCleanup(directorId, orphans, demo);

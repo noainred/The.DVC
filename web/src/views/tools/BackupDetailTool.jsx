@@ -256,8 +256,8 @@ export default function BackupDetailTool({ scope }) {
       {data && (<>
       <div className="flex gap wrap" style={{ alignItems: 'center', rowGap: 8 }}>
         <div className="flex gap wrap" role="group" aria-label="보기" style={{ rowGap: 6 }}>
-          {FILTERS.filter(([k]) => hasBareos || (k !== 'bareos' && k !== 'bareos-missing') || filter === k).map(([k, label]) => <button key={k} type="button" className={`tab${filter === k ? ' active' : ''}`} aria-pressed={filter === k} onClick={() => setFilter(k)} style={{ padding: '5px 12px', fontSize: 12 }}>{label}{k === 'rpo' ? `(${opts.rpoDays}일)` : ''} {filterCountText(k, counts, marksUnknown)}</button>)}
-          {(filter.startsWith('crit-') || filter.startsWith('method-')) && <button type="button" className="tab active" aria-pressed="true" onClick={() => setFilter('all')} title="중요도·백업 방식 보기 끄기" style={{ padding: '5px 12px', fontSize: 12 }}>{filterLabel(filter)} {filterCountText(filter, counts, marksUnknown)} ✕</button>}
+          {FILTERS.filter(([k]) => hasBareos || (k !== 'bareos' && k !== 'bareos-missing') || filter === k).map(([k, label]) => <button key={k} type="button" className={`tab${filter === k ? ' active' : ''}`} aria-pressed={filter === k} onClick={() => setFilter(k)} style={{ padding: '5px 12px', fontSize: 12 }}>{label}{k === 'rpo' ? `(${opts.rpoDays}일)` : ''} {filterCountText(k, counts, marksUnknown, !!data?.bareosUnreadable)}</button>)}
+          {(filter.startsWith('crit-') || filter.startsWith('method-')) && <button type="button" className="tab active" aria-pressed="true" onClick={() => setFilter('all')} title="중요도·백업 방식 보기 끄기" style={{ padding: '5px 12px', fontSize: 12 }}>{filterLabel(filter)} {filterCountText(filter, counts, marksUnknown, !!data?.bareosUnreadable)} ✕</button>}
         </div>
         <label style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 6, minWidth: 0, flex: '0 1 280px' }}>
           <span className="muted" style={{ fontSize: 12, whiteSpace: 'nowrap' }}>검색</span>

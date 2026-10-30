@@ -111,7 +111,9 @@ test('A-2 bareosClass · corpCounts — 모름은 null · 결과를 모르면 un
   assert.equal(VV.bareosClass(null).unknown, true); assert.equal(VV.bareosClass(null).job, false);
   const rows = [{ method: 'bareos', b: { job: true, on: true, st: 'ok', ok: NOW } }, { method: 'bareos', b: { job: false } }, { method: 'veeam', b: { job: true, on: false, st: 'error', ok: null } }];
   const c = VV.corpCounts(rows, { now: NOW });
-  assert.deepEqual([c.bareosMethod, c.jobs, c.on, c.off, c.missing, c.mismatch, c.ok, c.fail, c.never], [2, 2, 1, 1, 1, 1, 1, 1, 1]);
+  // v2.830 버그 점검 S16: '백업 없음' 은 켜진 잡만(웹 칩·우선 목록과 같은 판정) — 꺼진 잡(셋째 행)은 세지 않는다(예전 기대값 1 은 서버만 다르게 셌다)
+  assert.deepEqual([c.bareosMethod, c.jobs, c.on, c.off, c.missing, c.mismatch, c.ok, c.fail, c.never], [2, 2, 1, 1, 1, 1, 1, 1, 0]);
+  assert.equal(VV.corpCounts([{ method: 'bareos', b: { job: true, on: true, st: null, ok: null } }], { now: NOW }).never, 1, '켜진 잡의 백업 없음은 센다');
   const u = VV.corpCounts(rows, { resultsKnown: false, now: NOW });
   assert.deepEqual([u.ok, u.fail, u.old, u.run, u.unknown, u.jobs], [null, null, null, null, 2, 2], 'Director 를 못 읽으면 결과는 모름 — 잡 수는 원장으로 안다');
   const m = VV.corpCounts(rows, { marksKnown: false, now: NOW });

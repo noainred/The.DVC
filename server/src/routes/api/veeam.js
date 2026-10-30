@@ -775,7 +775,8 @@ async function detailData(req, snap, t, scope) {
   const views = b.views.map((v) => ({ name: v.name, ok: v.ok, lastOkTs: v.lastOkTs, stale: v.stale, error: v.error, authStopped: v.authStopped, via: v.via, ...(admin && v.runningJobs ? { runningJobs: v.runningJobs } : {}) }));
   return { ok: true, at: now, scope, vcenter: { id: vc.id, name: vc.name || vc.id }, row: { ...b.row, veeamReason: b.vcnt?.reason || '', snapReason: b.sc?.reason || '', ...(b.vcnt?.hostMismatch ? { hostMismatch: true } : {}) },
     linked: b.linked, servers: views, snapDays: b.ev?.days ?? null, snapSource: b.ev?.source || '', vms, ...(b.match?.aliasHosts && admin ? { aliasHosts: b.match.aliasHosts } : {}),
-    writable: marksWritable(req, snap, vc.id), marksUnreadable: unreadable || undefined, marksCorruptKept: (!unreadable && marksCorruptKept()) || undefined };
+    writable: marksWritable(req, snap, vc.id), marksUnreadable: unreadable || undefined, marksCorruptKept: (!unreadable && marksCorruptKept()) || undefined,
+    bareosUnreadable: bareos == null || undefined };   // 버그 점검 W2: Bareos 원장을 못 읽었다 — 화면의 Bareos 칩은 '—'(0 이 아니다)
 }
 
 /** v2.828: 그 vCenter 의 VM 별 Bareos 잡 요약(원장 — Director 에 접속하지 않는다). 원장을 못 읽었으면 null(모름). */

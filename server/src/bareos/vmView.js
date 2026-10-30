@@ -117,7 +117,7 @@ export function corpCounts(rows, { marksKnown = true, resultsKnown = true, regis
     if (r.method === 'bareos') c.bareosMethod++;
     if (k.job) { c.jobs++; if (k.on) c.on++; else c.off++; if (k.gone) c.gone++; else if (r.method !== 'bareos') c.mismatch++; }   // 인벤토리에 없는 VM 은 방식을 정할 수 없어 불일치로 세지 않는다
     if (k.missing) c.missing++;
-    if (k.ok) c.ok++; if (k.warn) c.warn++; if (k.fail) c.fail++; if (k.never) c.never++; if (k.old) c.old++; if (k.run) c.run++;
+    if (k.ok) c.ok++; if (k.warn) c.warn++; if (k.fail) c.fail++; if (k.never && k.on) c.never++;   /* 버그 점검 S16: 웹 칩·우선 목록과 같은 판정(꺼진 잡은 '백업 없음' 으로 세지 않는다) */ if (k.old) c.old++; if (k.run) c.run++;
     if (isFin(r.gb) && r.gb >= 0) c.gb += r.gb; else if (!r.gone) c.gbUnknown++;
   }
   c.gb = Math.round(c.gb * 10) / 10;

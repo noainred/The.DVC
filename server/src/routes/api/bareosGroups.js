@@ -12,7 +12,7 @@ import { relayLimits } from '../../bareos/edgeOps.js';
 import { directorById, directorConn, siteMissing } from '../../bareos/settings.js';
 import { jobDigests, MAX_JOBS, registryLoadError } from '../../bareos/registry.js';
 import { listGroups, getGroup, addGroup, updateGroup, deleteGroup, checkGroupInput, groupsLoadError, MAX_MEMBERS, MAX_GROUPS } from '../../bareos/groups.js';
-import { nextSlot, scheduleText, CATCHUP_MS, LEVELS } from '../../bareos/groupSchedule.js';
+import { nextSlot, scheduleText, slotKey, CATCHUP_MS, LEVELS } from '../../bareos/groupSchedule.js';
 import { queueGroupRun, groupRunning } from '../../bareos/groupRunner.js';
 import { bareosVmView } from '../../bareos/vmView.js';
 import { getMarks, marksUnreadable } from '../../veeam/backupMarks.js';
@@ -34,7 +34,9 @@ const serverTz = () => { try { return Intl.DateTimeFormat().resolvedOptions().ti
 /** 그룹 → 응답(비밀 없음 — 원장에 비밀이 없다). 다음 회차·실행 중 여부를 덧붙인다. */
 export function groupView(g, now = Date.now()) {
   const next = nextSlot(g.schedule, now);
-  return { ...g, scheduleText: scheduleText(g.schedule), next: next ? { at: next.at, key: next.key, level: next.level } : null, running: groupRunning(g.id) };
+  // 버그 점검 S6: 마지막으로 처리한 회차가 지금보다 미래 — 서버 시계가 앞섰다 돌아왔다. 그 사이 회차는 돌지 않는다(한 번 이하를 지키려고 열쇠를 내리지 않는다) — 화면이 알린다
+  const clockAhead = !!g.lastKey && g.lastKey > slotKey(now);
+  return { ...g, scheduleText: scheduleText(g.schedule), next: next ? { at: next.at, key: next.key, level: next.level } : null, running: groupRunning(g.id), ...(clockAhead ? { clockAhead: true } : {}) };
 }
 
 /** 법인(vCenter)의 Director 매핑 상태. */

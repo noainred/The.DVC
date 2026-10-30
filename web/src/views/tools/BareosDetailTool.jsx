@@ -93,7 +93,7 @@ export default function BareosDetailTool() {
   useEffect(() => { setSel(null); setOpen(null); }, [vcId]);
   const pickVc = (id) => { setVcId(id); try { localStorage.setItem(BAREOS_DETAIL_VC_KEY, id); } catch { /* 이 브라우저에만 */ } };
   const known = data?.director?.resultsKnown !== false;
-  const fopts = useMemo(() => ({ rpoDays, now: data?.at || Date.now(), resultsKnown: known }), [rpoDays, data, known]);
+  const fopts = useMemo(() => ({ rpoDays, now: data?.at || Date.now(), resultsKnown: known, marksKnown: !data?.marksUnreadable, registryKnown: !data?.registryUnreadable }), [rpoDays, data, known]);
   const rows = useMemo(() => (Array.isArray(data?.rows) ? data.rows : []), [data]);
   const counts = useMemo(() => detailFilterCounts(rows, fopts), [rows, fopts]);
   const tree = useMemo(() => buildBareosTree(rows, { filter, q, ...fopts }), [rows, filter, q, fopts]);
@@ -211,7 +211,8 @@ export default function BareosDetailTool() {
                 if (row.kind === 'folder') {
                   const a = row.node.agg;
                   const tot = a.job || 0;
-                  const p = (n) => (tot ? `${(n / tot) * 100}%` : '0%');
+                  const den = Math.max(tot, a.ok + a.warn + a.fail + a.run);   // 버그 점검 W3 — 성공 + 지금 진행이 겹쳐도 100% 를 넘지 않게
+                  const p = (n) => (den ? `${(n / den) * 100}%` : '0%');
                   return (
                     <div role="row" key={row.key} aria-expanded={row.open} style={{ display: 'grid', gridTemplateColumns: GRID, alignItems: 'center', borderTop: '1px solid var(--border-soft)', background: row.depth === 0 ? 'rgba(251,146,60,.06)' : undefined }}>
                       <div role="gridcell" style={{ minWidth: 0, paddingLeft: pad }}>
