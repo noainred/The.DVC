@@ -6,7 +6,7 @@ import {
   folderOptions, inFolder, pickCap, bulkSummary, NO_FOLDER, diagView,
   driftText, restorePointsNote, directorPatch, outcomeUnknown, missingText,
   directorStatus, preflightView, preflightSummary, autoSetupFdPluginText, fillEmptyMapping, directorFormPatch, WEEKDAYS, newMappingRow,
-  isRelayDir, relayWaitMs, withRelayWait, unknownOutcomeText, directorChipTitle, secText,
+  isRelayDir, relayWaitMs, withRelayWait, unknownOutcomeText, directorChipTitle, secText, relayKindLabel,
 } from './bareosText.js';
 
 describe('bareosText (v2.820 Bareos VM 백업)', () => {
@@ -304,6 +304,7 @@ describe('작업 결과 요약(v2.822.3 — 현장 jobid 8 로그 모양)', () =
     expect(directorChipTitle({ configured: true, agent: 'PL', poll: { relay: 'pending', ok: null } })).toMatch(/법인 엣지 ‘PL’ 가 대신 조회/);
     expect(directorChipTitle({ configured: true, poll: { ok: false, error: 'E' } })).toBe('E');
     expect(directorChipTitle({ configured: true, poll: { ok: true } })).toBe('');
+    expect(relayKindLabel('catalog')).toBe('카탈로그'); expect(relayKindLabel('setup.director')).toBe('자동 설정 2단계'); expect(relayKindLabel('x')).toBe('작업');
   });
 
   it('v2.823 검토 — 거부 확정은 결과 모름이 아니다(W7) · 저장 전 행은 이유와 함께 남김(W2) · 새 행은 주소·INI 를 미리 · INI 경로 겹침 접미사', () => {

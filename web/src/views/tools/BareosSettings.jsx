@@ -8,7 +8,7 @@ import { requireChanged } from '../changeResult.js';
 import { droppedSecretNote } from '../droppedSecretText.js';
 import {
   diagView, directorPrepBlock, fdIniTemplate, PREP_CHECKLIST, autoSetupDirectorText, autoSetupFdText, thumbprintText,
-  outcomeUnknown, missingText, preflightView, preflightSummary, autoSetupFdPluginText, fillEmptyMapping, directorFormPatch, withRelayWait, secText,
+  outcomeUnknown, missingText, preflightView, preflightSummary, autoSetupFdPluginText, fillEmptyMapping, directorFormPatch, withRelayWait, secText, relayKindLabel,
   VMWARE_POOL_FULL, VMWARE_SCHEDULE, WEEKDAYS, WEEKDAY_LABEL, MAPPING_FIELDS, newMappingRow, vcSlug,
 } from './bareosText.js';
 
@@ -199,13 +199,19 @@ function AgentSelect({ agents, value, onChange, saved = '', withToken = null }) 
   const known = new Set(agents || []);
   const tok = Array.isArray(withToken) ? new Set(withToken.map((x) => String(x).toLowerCase())) : null;
   const list = [...new Set([...(saved ? [saved] : []), ...(value ? [value] : []), ...(agents || [])])];
-  const label = (a) => `엣지 ${a}${!known.has(a) ? ' (목록에 없음)' : tok && !tok.has(a.toLowerCase()) ? ' (개별 토큰 없음 — 대행 불가)' : ''}`;
+  const issue = (a) => (!a ? '' : !known.has(a) ? 'gone' : tok && !tok.has(a.toLowerCase()) ? 'token' : '');
+  // Chromium 확인: 좁은 칸에서 닫힌 선택 상자는 뒤가 잘린다 — 표지는 짧게, 고른 값의 문제는 아래 줄에 풀어 쓴다
+  const label = (a) => `엣지 ${a}${issue(a) === 'gone' ? ' (목록에 없음)' : issue(a) === 'token' ? ' (토큰 없음)' : ''}`;
+  const why = issue(value);
   return (
     <label className="muted" style={FIELD}>담당(접속 주체)
       <Select className="input" style={INP} value={value || ''} onChange={(e) => onChange(e.target.value)} aria-label="담당 엣지">
         <option value="">중앙 직접</option>
         {list.map((a) => <option key={a} value={a}>{label(a)}</option>)}
       </Select>
+      {why && <span style={{ fontSize: 11, lineHeight: 1.5, color: 'var(--amber)' }}>{why === 'gone'
+        ? `‘${value}’ 는 중앙이 아는 엣지 목록에 없습니다 — 엣지 이름이 바뀌었거나 등록에서 빠졌을 수 있습니다.`
+        : `‘${value}’ 엣지에 개별 토큰이 없어 대행 작업을 가져가지 못합니다 — 중앙 설정 › 수집 서버에서 개별 토큰을 발급하세요.`}</span>}
     </label>
   );
 }
@@ -381,7 +387,7 @@ function DirectorEditor({ s, dir, locked, onReload, onSaved, onClose, onDeleted 
           {(form.agent || '') !== (dir.agent || '') && <div className="banner warn" style={{ marginTop: 8, fontSize: 12, lineHeight: 1.6 }}>담당을 바꿨습니다(저장 전) — 지금 연결 시험·자동 설정은 저장된 담당({dir.agent ? `법인 엣지 ‘${dir.agent}’` : '중앙 직접'})으로 실행합니다. ‘연결 저장’ 을 누르면 {form.agent ? `법인 엣지 ‘${form.agent}’ 가` : '중앙이 직접'} 접속합니다.</div>}
           {dir.agent && <div className="banner" style={{ marginTop: 8, fontSize: 12, lineHeight: 1.6 }}>법인 엣지 ‘{dir.agent}’ 가 이 Director 에 대신 접속합니다(중앙은 접속하지 않습니다). 엣지는 저장된 접속값으로 접속합니다 — 엣지 사본이 다르면 작업 전에 배정을 다시 받습니다. 새 비밀번호는 저장한 뒤 시험하세요. 자동 설정도 그 엣지가 SSH 로 실행하고, 처음 접속하는 서버의 SSH 호스트키 승인은 <b>그 엣지 포탈</b>(설정 › 장비 신뢰)에서 합니다.</div>}
           {dir.agent && (s.relayPending || []).some((o) => o.directorId === dir.id) && (
-            <div className="muted" style={{ fontSize: 11.5, marginTop: 6 }}>엣지 대행 작업(이 화면을 연 때 기준): {(s.relayPending || []).filter((o) => o.directorId === dir.id).slice(0, 6).map((o) => `${o.kind} ${o.status === 'queued' ? '인출 대기' : '엣지 실행 중'} ${secText(o.ageMs)}`).join(' · ')}</div>
+            <div className="muted" style={{ fontSize: 11.5, marginTop: 6 }}>엣지 대행 작업(이 화면을 연 때 기준): {(s.relayPending || []).filter((o) => o.directorId === dir.id).slice(0, 6).map((o) => `${relayKindLabel(o.kind)} ${o.status === 'queued' ? '인출 대기' : '엣지 실행 중'} ${secText(o.ageMs)}`).join(' · ')}</div>
           )}
           <div className="muted" style={{ fontSize: 11.5, marginTop: 8, lineHeight: 1.6 }}>주소·포트·콘솔 이름을 바꾸면 이 Director 의 저장 비밀번호는 승계하지 않습니다. 저장된 비밀번호로 하는 연결 시험은 저장된 주소로만 접속합니다.</div>
           <div style={{ ...ROW, marginTop: 10 }}>

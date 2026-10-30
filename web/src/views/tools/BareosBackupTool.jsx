@@ -129,7 +129,8 @@ function TargetsTab({ d, reload }) {
             return (
               <button key={x.id} type="button" className={`tab${dirF === x.id ? ' active' : ''}`} style={{ padding: '4px 12px', fontSize: 12, display: 'inline-flex', alignItems: 'center', gap: 6 }}
                 title={directorChipTitle(x)} onClick={() => setDirF(dirF === x.id ? '' : x.id)}>
-                <span className={`badge ${b.cls}`} style={{ fontSize: 10 }}>{b.label}</span>{x.name} <span className="muted">{x.jobs ?? 0}</span>
+                {/* Chromium 확인: 고른 칩(파란 바탕) 위의 파란·회색 배지가 흐려 읽히지 않았다 — 고른 칩에서는 배지 바탕을 어둡게 */}
+                <span className={`badge ${b.cls}`} style={{ fontSize: 10, ...(dirF === x.id ? { background: 'rgba(15,23,42,.6)' } : {}) }}>{b.label}</span>{x.name} <span className="muted">{x.jobs ?? 0}</span>
               </button>
             );
           })}

@@ -82,6 +82,13 @@ export function secText(ms) {
   const m = Math.floor(sec / 60); const r = sec % 60;
   return m ? `${m}분${r ? ` ${r}초` : ''}` : `${r}초`;
 }
+/** 엣지 대행 작업 종류 → 화면 이름(영문 키를 그대로 보이지 않게 · Chromium 확인). 모르는 종류는 '작업'. */
+const RELAY_KIND_LABEL = Object.freeze({
+  probe: '연결 시험', catalog: '카탈로그', addJobs: '대상 등록', disableJobs: '잡 끄기', runJob: '백업 실행', setEnabled: '켜기·끄기', history: '이력',
+  cancel: '취소', log: '로그', restore: '복원', poll: '상태 조회', 'setup.preflight': '자동 설정 점검', 'setup.director': '자동 설정 2단계',
+  'setup.fdPlugin': '자동 설정 FD 플러그인', 'setup.fdIni': '자동 설정 FD INI', 'setup.thumbprint': '자동 설정 지문 읽기',
+});
+export const relayKindLabel = (k) => RELAY_KIND_LABEL[k] || '작업';
 /** 기본 요청 옵션에 엣지 대행 시한을 얹는다(더 길 때만). */
 export function withRelayWait(opts, dir, limits, kind, o) {
   const t = isRelayDir(dir) ? relayWaitMs(limits, kind, o) : null;
