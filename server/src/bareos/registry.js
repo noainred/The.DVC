@@ -31,7 +31,9 @@ import { DEFAULT_DIRECTOR_ID } from './settings.js';
 
 export const FILE_NAME = 'bareos-jobs.json';
 const FILE = () => path.join(config.configDir, 'bareos-jobs.json'); // 문자열 그대로 — scripts/config-doc.mjs 가 이 모양으로 파일을 찾는다
-export const MAX_JOBS = 500;
+// v2.828(사용자 승인 — 28개 법인 통합 화면): 500 → 3,000. 실측(scratch 벤치 · 대상마다 끝난 실행 10건): 5,000 이면 파일 8MB·한 번 쓰기 54ms·
+//   listJobs 깊은 복사 47ms 로 폴링 주기마다 이벤트 루프를 오래 잡는다 — 3,000 은 그 6할(약 30ms). 더 올리려면 Director 별 파일 분할이 먼저다.
+export const MAX_JOBS = 3000;
 export const RESTORES_KEEP = 20;
 export const RETIRED_KEEP = 1000;
 export const FINISHED_KEEP = 10;
@@ -78,18 +80,45 @@ export function inBatch(fn) {
     if (!_batch && _dirty) { _dirty = false; writeNow(); }
   }
 }
+let _rev = 0;
+/** v2.828 원장 변경 리비전 — 조회 화면(bareos-summary·bareos-detail) 응답 캐시 키(저장 즉시 수가 바뀌게). */
+export function registryRev() { return _rev; }
 function persist() {
+  _rev += 1;
   if (_batch) { _dirty = true; return; }
   writeNow();
 }
 function writeNow() {
   const db = load();
-  atomicWriteFileSync(FILE(), JSON.stringify({ version: 1, jobs: db.jobs, retired: db.retired }, null, 2), { mode: 0o600 });
+  // v2.828: 들여쓰기 없이 쓴다(3,000개에서 크기·직렬화 시간이 약 절반 — 위 MAX_JOBS 실측). 읽기는 예전 들여쓴 파일도 같다.
+  atomicWriteFileSync(FILE(), JSON.stringify({ version: 1, jobs: db.jobs, retired: db.retired }), { mode: 0o600 });
   _loadErr.clear();
 }
 
 const copy = (j) => (j ? JSON.parse(JSON.stringify(j)) : null);
 export function listJobs() { return load().jobs.map(copy); }
+/**
+ * v2.828 조회 화면용 가벼운 읽기 — 깊은 복사 없이 화면이 쓰는 칸만(얕은 사본 · 복원 이력·끝난 실행 원문은 싣지 않는다).
+ *   listJobs 는 대상마다 JSON 왕복이라 3,000개에서 약 30ms 다(MAX_JOBS 실측). 돌려준 객체를 고쳐도 원장은 바뀌지 않는다(lastRun·pending 도 사본).
+ */
+export function jobDigests() {
+  return load().jobs.map((j) => ({
+    id: j.id, vcenterId: j.vcenterId, vmId: j.vmId, vmName: j.vmName, folder: j.folder, directorId: j.directorId, bareosJob: j.bareosJob,
+    client: j.client, storage: j.storage, pool: j.pool, schedule: j.schedule, level: j.level, enabled: j.enabled !== false, demo: !!j.demo,
+    createdBy: j.createdBy, createdAt: j.createdAt, missingInDirector: !!j.missingInDirector,
+    pending: j.pending ? { ...j.pending } : null, lastRun: j.lastRun ? { ...j.lastRun } : null, lastError: j.lastError ? { ...j.lastError } : null,
+    lastOkAt: lastOkAt(j),
+    recentRuns: (Array.isArray(j.finishedRuns) ? j.finishedRuns : []).slice(-5).map((r) => ({ ...r })),
+  }));
+}
+/** 마지막으로 **백업이 만들어진**(T 성공 · W 경고 — 둘 다 복원 지점이 생긴다) 실행이 끝난 시각. lastRun 이 실패여도 finishedRuns 에 있으면 그 시각. 모르면 null. */
+function lastOkAt(j) {
+  let best = null;
+  for (const r of [j.lastRun, ...(Array.isArray(j.finishedRuns) ? j.finishedRuns : [])]) {
+    if (r && (r.status === 'T' || r.status === 'W') && Number.isFinite(r.endedAt) && r.endedAt > 0 && (best == null || r.endedAt > best)) best = r.endedAt;
+  }
+  return best;
+}
 export function getJob(id) { return copy(load().jobs.find((j) => j.id === id)); }
 export function findByVm(vcenterId, vmId) { return copy(load().jobs.find((j) => j.vcenterId === vcenterId && j.vmId === vmId)); }
 

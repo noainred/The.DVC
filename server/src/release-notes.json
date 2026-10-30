@@ -1,6 +1,16 @@
 {
   "notes": [
     {
+      "version": "2.828.0",
+      "date": "2026-10-30",
+      "title": "Bareos 백업 전용 화면 — 백업 방식 Bareos · 법인별 현황 · 28개 법인 통합 현황",
+      "notes": [
+        "Backup › Detail 백업 방식에 Bareos(단축키 B) · 'Clone · Bareos' 칸(마지막 실행·미등록) · 보기 필터 'Bareos 백업·Bareos 미등록' · 고른 VM 을 Bareos 백업 대상 추가 창으로",
+        "Bareos 탭 › 통합 현황(28개 법인 한 표 · Director 상태 · 우선 확인 · CSV) · 법인별 현황(Bareos 방식 VM·잡이 있는 VM 만 폴더 › VM · 최근 실행 · CSV) — 조회 전용(운영자도 · Director 에 접속하지 않음)",
+        "Bareos 백업 대상 상한 500 → 3,000(원장 쓰기 크기 실측 · 들여쓰기 없는 쓰기)"
+      ]
+    },
+    {
       "version": "2.827.0",
       "date": "2026-10-30",
       "title": "엣지 토큰 맞추기 — 독립 메뉴(특수 기능 도구 + 공통 메뉴 설정 그룹)로 추출",

@@ -19,7 +19,8 @@ import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
 
 const FILE = () => path.join(config.configDir, 'backup-marks.json');
 export const CRIT_VALUES = Object.freeze(['high', 'mid', 'low']);
-export const METHOD_VALUES = Object.freeze(['veeam', 'clone', 'config', 'none', 'check']);   // v2.803 백업 방식(화면 순서) · v2.816 'check' 확인 필요(사용자 요청)
+export const METHOD_VALUES = Object.freeze(['veeam', 'clone', 'bareos', 'config', 'none', 'check']);   // v2.803 백업 방식(화면 순서) · v2.816 'check' 확인 필요 · v2.828 'bareos'(사용자 요청)
+export const NOT_VEEAM_GAP_MARKS = Object.freeze(['none', 'clone', 'bareos']);   // v2.828 — backupStatus.NOT_VEEAM_GAP 사본(테스트 대조)
 export const MEMO_MAX = 1000;
 export const MAX_IDS_PER_REQUEST = 2000;
 export const MAX_ENTRIES = 50_000;
@@ -112,7 +113,7 @@ export function setMarks(vms, patch = {}, user) {
  */
 export function markCounts(vms, marks, byVm, { veeamKnown, absentKnown = true } = {}) {
   // v2.803 method: 백업 방식별 수(unset = 범위 안에서 정하지 않은 VM — 표시가 없는 VM 포함)
-  const c = { high: 0, mid: 0, low: 0, need: 0, needGap: 0, method: { veeam: 0, clone: 0, config: 0, none: 0, check: 0, unset: 0 } };
+  const c = { high: 0, mid: 0, low: 0, need: 0, needGap: 0, method: { ...Object.fromEntries(METHOD_VALUES.map((k) => [k, 0])), unset: 0 } };
   const gapKnown = !!veeamKnown && absentKnown !== false;
   for (const vm of Array.isArray(vms) ? vms : []) {
     const m = marks?.[vm.id];
@@ -120,7 +121,8 @@ export function markCounts(vms, marks, byVm, { veeamKnown, absentKnown = true } 
     if (!m) continue;
     if (CRIT_VALUES.includes(m.crit)) c[m.crit]++;
     // v2.806: 백업 방식이 백업 안함·Clone 이면 Veeam 부재는 미백업이 아니다(우선순위 VM priorityCandidates · 보기 필터 needgap 과 같은 규칙)
-    if (m.need === true) { c.need++; if (gapKnown && !byVm?.[vm.id] && m.method !== 'none' && m.method !== 'clone') c.needGap++; }
+    //   v2.828 Bareos 도 — backupStatus NOT_VEEAM_GAP 와 같은 목록(테스트 대조 · 의존 방향 때문에 여기 사본을 둔다)
+    if (m.need === true) { c.need++; if (gapKnown && !byVm?.[vm.id] && !NOT_VEEAM_GAP_MARKS.includes(m.method)) c.needGap++; }
   }
   if (!gapKnown) c.needGap = null;
   return c;

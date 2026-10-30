@@ -62,7 +62,7 @@ export function barText(rate, width = 10) {
 }
 
 // v2.803 method = 백업 방식별 수(사람이 정한 값 — view.m.method · 없으면 unset)
-const newAgg = () => ({ vm: 0, veeam: 0, snap: 0, none: 0, unknown: 0, stale: 0, run: 0, wait: 0, vKnown: 0, off: 0, method: { veeam: 0, clone: 0, config: 0, none: 0, check: 0, unset: 0 } });
+const newAgg = () => ({ vm: 0, veeam: 0, snap: 0, none: 0, unknown: 0, stale: 0, run: 0, wait: 0, vKnown: 0, off: 0, method: { ...Object.fromEntries(Object.keys(METHOD_TEXT).map((k) => [k, 0])), unset: 0 } });
 function addAgg(a, it) {
   a.vm++; a[it.group]++;
   const mt = it.view.m?.method;

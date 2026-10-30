@@ -33,7 +33,9 @@ import { vmRefOf, vmTagsOf, tagStateOf } from '../../tags/analyze.js';
 import { renderVmListWorkbook, XLSX_MIME } from '../../veeam/vmListXlsx.js';   // v2.792 같은 목록의 엑셀(폴더 트리 — 시안 승인)
 import { setVeeamVmViewProvider } from '../../veeam/vmViewProvider.js';
 import { cloneStateByVm } from '../../vmclone/jobState.js';   // v2.803 백업 현황 Detail 'Clone' 칸(복제 잡 마지막 실행 — 실행 노드 기준)
-import { jobsRev } from '../../vmclone/store.js';   // v2.801 VM 전체 정보 내보내기의 Veeam 묶음(같은 vcBackup → vmBackupView)
+import { jobsRev } from '../../vmclone/store.js';
+import { jobDigests as bareosJobDigests, registryLoadError as bareosRegistryLoadError, registryRev as bareosRegistryRev } from '../../bareos/registry.js';   // v2.828 Detail 'Bareos' 칸
+import { bareosVmView } from '../../bareos/vmView.js';   // v2.801 VM 전체 정보 내보내기의 Veeam 묶음(같은 vcBackup → vmBackupView)
 export { VM_LIST_MAX_IDS };
 import { logAudit } from '../../audit.js';
 import { csvLine, CSV_BOM } from '../../util/csv.js';
@@ -767,12 +769,34 @@ async function detailData(req, snap, t, scope) {
   const marks = getMarks();
   const unreadable = marksUnreadable();   // v2.785(GR R-B2)
   const clones = cloneStatesOf(vc.id);   // v2.803 — 못 읽으면 null(Clone 칸 '모름')
+  const bareos = bareosStatesOf(vc.id);   // v2.828 — Bareos 잡(원장) · 못 읽으면 null(Bareos 칸 '모름')
   const vms = b.scopedVms.map((vm) => vmBackupView(vm, b.match?.byVm?.[vm.id], b.ev?.byVm?.[vm.id], { veeamKnown: veeamKnown || !b.linked, snapKnown, absentKnown: !b.row.veeamAbsentUnknown, now, mark: markView(marks[vm.id]),
-    clone: clones ? cloneView(clones.get(vm.id)) : null }));   // v2.782(점검 K4 B-B3) · v2.784 표시 · v2.803 Clone 칸(백업 방식 Clone 인 VM 만 싣는다 — vmBackupView)
+    clone: clones ? cloneView(clones.get(vm.id)) : null })).map((row) => withBareos(row, bareos, unreadable));   // v2.782(점검 K4 B-B3) · v2.784 표시 · v2.803 Clone 칸(백업 방식 Clone 인 VM 만 싣는다 — vmBackupView)
   const views = b.views.map((v) => ({ name: v.name, ok: v.ok, lastOkTs: v.lastOkTs, stale: v.stale, error: v.error, authStopped: v.authStopped, via: v.via, ...(admin && v.runningJobs ? { runningJobs: v.runningJobs } : {}) }));
   return { ok: true, at: now, scope, vcenter: { id: vc.id, name: vc.name || vc.id }, row: { ...b.row, veeamReason: b.vcnt?.reason || '', snapReason: b.sc?.reason || '', ...(b.vcnt?.hostMismatch ? { hostMismatch: true } : {}) },
     linked: b.linked, servers: views, snapDays: b.ev?.days ?? null, snapSource: b.ev?.source || '', vms, ...(b.match?.aliasHosts && admin ? { aliasHosts: b.match.aliasHosts } : {}),
     writable: marksWritable(req, snap, vc.id), marksUnreadable: unreadable || undefined, marksCorruptKept: (!unreadable && marksCorruptKept()) || undefined };
+}
+
+/** v2.828: 그 vCenter 의 VM 별 Bareos 잡 요약(원장 — Director 에 접속하지 않는다). 원장을 못 읽었으면 null(모름). */
+function bareosStatesOf(vcenterId) {
+  try {
+    if (bareosRegistryLoadError()) return null;
+    const m = new Map();
+    for (const j of bareosJobDigests()) if (j.vcenterId === vcenterId) m.set(j.vmId, j);
+    return m;
+  } catch { return null; }
+}
+/**
+ * v2.828 Detail 행의 'Bareos' 칸 b(bareos/vmView.bareosVmView) — 잡이 있거나 백업 방식이 Bareos 인 VM 에만 싣는다(키 없음 = 무관).
+ *   원장을 못 읽었으면 방식이 Bareos 인 VM 에 b:null(모름) — 잡이 있는지 모르므로 '미등록' 이라 하지 않는다.
+ *   표시 파일을 못 읽었으면 방식을 모르니 잡이 있는 VM 만 싣는다(미등록 판정 없음).
+ */
+function withBareos(row, bareos, marksBad) {
+  const method = marksBad ? '' : row.m?.method || '';
+  if (bareos == null) return method === 'bareos' ? { ...row, b: null } : row;
+  const b = bareosVmView(bareos.get(row.id), method);
+  return b === undefined ? row : { ...row, b };
 }
 
 /** v2.803: 그 vCenter 의 VM 별 복제 잡 상태(vmclone/jobState.js) — 실패는 null(모름). */
@@ -901,7 +925,7 @@ export function registerBackupStatus(api) {
     const admin = isAdminDetailUser(req.user);
     const scope = scopeOf(req);
     return memoJson(req, res, `backup-detail:${t.vcenterId}`, async () => detailData(req, snap, t, scope),
-      { ttlMs: 60_000, extraKey: `${scopeKey(req.user, snap)}|${admin ? 'admin' : 'user'}|m${marksRev()}|w${marksWritable(req, snap, t.vcenterId) ? 1 : 0}|em${emSourcesRev()}|c${jobsRev()}` });   // 쓰기 가능 여부도 계정마다 다르다(writeVcenters) · v2.803 c = 복제 잡 기록 리비전(Clone 칸)
+      { ttlMs: 60_000, extraKey: `${scopeKey(req.user, snap)}|${admin ? 'admin' : 'user'}|m${marksRev()}|w${marksWritable(req, snap, t.vcenterId) ? 1 : 0}|em${emSourcesRev()}|c${jobsRev()}|b${bareosRegistryRev()}` });   // 쓰기 가능 여부도 계정마다 다르다 · v2.828 b = Bareos 원장 리비전(Bareos 칸)(writeVcenters) · v2.803 c = 복제 잡 기록 리비전(Clone 칸)
   });
 
   /*

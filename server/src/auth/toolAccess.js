@@ -105,6 +105,8 @@ export const TOOL_PATH_KEYS = Object.freeze({
   threats: 'threats',
   'vm-clone': 'vm-clone',
   'bareos-backup': 'bareos-backup',  // v2.820 Bareos VM 백업(BareosBackupTool.jsx)
+  'bareos-summary': 'bareos-summary', // v2.828 Bareos 통합 현황(BareosSummaryTool.jsx — 조회 전용 · adminOnly 아님)
+  'bareos-detail': 'bareos-detail',   // v2.828 Bareos 법인별 현황(BareosDetailTool.jsx — 조회 전용 · adminOnly 아님)
   'vm-export': 'vm-export',
   'vm-finder': 'vmfinder',
   'vm-track': 'vm-track',

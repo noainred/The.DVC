@@ -12,10 +12,11 @@ export const VEEAM_TABS = [['summary', 'Summary', '#/tools/backup-summary'], ['d
 export const RUN_TAB = ['run', '백업 실행', '#/tools/backup-run'];
 // v2.822(사용자 요청 'Backup 상단 메뉴에 Bareos 탭'): Bareos VM 백업(관리자 전용 도구 bareos-backup — 상태를 바꾼다). 백업 실행 탭과 같은 게이트.
 export const BAREOS_TAB = ['bareos', 'Bareos', '#/tools/bareos-backup'];
-export const visibleTabs = ({ admin = false, runOk = false, bareosOk = false } = {}) => [
+// v2.828(권장안 A): 조회 전용 화면(통합 현황 bareos-summary · 법인별 bareos-detail)은 관리자가 아니어도 보인다 — 탭은 그 권한이 있으면 통합 현황으로 간다.
+export const visibleTabs = ({ admin = false, runOk = false, bareosOk = false, bareosViewOk = false } = {}) => [
   ...VEEAM_TABS,
   ...(admin && runOk ? [RUN_TAB] : []),
-  ...(admin && bareosOk ? [BAREOS_TAB] : []),
+  ...(bareosViewOk ? [['bareos', 'Bareos', '#/tools/bareos-summary']] : admin && bareosOk ? [BAREOS_TAB] : []),
 ];
 
 export default function VeeamHeader({ active, desc, actions }) {
@@ -45,7 +46,7 @@ export default function VeeamHeader({ active, desc, actions }) {
           세로는 숨긴다 · 좁은 폭의 가로 스크롤바도 그리지 않는다(tabstrip-noscroll — 터치·트랙패드·Shift+휠로 넘어가고 열린 탭은 위 효과가 보이게 옮긴다) */}
       <div ref={listRef} role="tablist" aria-label="Backup 현황 보기" className="tabstrip-noscroll"
         style={{ display: 'flex', gap: 4, boxShadow: 'inset 0 -1px 0 var(--border)', overflowX: 'auto', overflowY: 'hidden', minWidth: 0 }}>
-        {visibleTabs({ admin: hasRole('admin'), runOk: toolAllowed('backup-run'), bareosOk: toolAllowed('bareos-backup') }).map(([k, label, href]) => {
+        {visibleTabs({ admin: hasRole('admin'), runOk: toolAllowed('backup-run'), bareosOk: toolAllowed('bareos-backup'), bareosViewOk: toolAllowed('bareos-summary') }).map(([k, label, href]) => {
           const on = k === active;
           return (
             <a key={k} role="tab" aria-selected={on} href={href}
