@@ -42,7 +42,8 @@ test('① 보안·비밀 조회(/api/tools 아래)도 거부 (R1-08)', () => {
 const LIVE_CALLEES = ['probeRelayPath', 'fetchIdracInventory', 'fetchIdracSensors', 'probeGpuTelemetry', 'getNetworkCheck', 'tcpProbeMany', 'tcpProbe(',
   'collectHorizonLicenses', 'fetchHorizonLicenses',
   // v2.820: Bareos Director 콘솔 — 조회 라우트는 readDirector(데모 필터), 그 밖(카탈로그)은 withDirector 로 READ_DENY 여야 한다.
-  'withDirector(', 'readDirector'];
+  // v2.823: 법인별 Director 의 작업 표 호출(onDirector — 카탈로그·매핑 제안)도 같은 규칙.
+  'withDirector(', 'onDirector(', 'readDirector'];
 /*
  * v2.732(점검 2회차 B3-01): 함수 **안에** 데모 계정 필터(`demoOnly`)가 있는 실접속 함수 — 라우트가 그 호출에 `demoOnly: isDemoGuest(req.user)` 를
  * 넘기면 경로 전체를 거부하는 대신 허용한다(같은 화면의 데모 데이터는 보여야 한다 — v2.720 R1-03 '수집형 실행은 demoOnly' 의 GET 판).

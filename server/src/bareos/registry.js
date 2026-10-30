@@ -3,6 +3,7 @@
  *
  * job = {
  *   id, vcenterId, vmId, vmName, dc, folder,          // 등록 시점의 VM 위치(플러그인 옵션에 들어간 값 — 화면이 그대로 보인다)
+ *   directorId,                                         // v2.823 등록 때의 법인 Director(잡은 그 Director 의 conf 에 있다 — 바꾸지 않는다. 옛 잡은 없음 → settings.jobDirectorId)
  *   bareosJob, client, storage, pool, schedule, level, // Director 에 만든 잡(이름은 names.jobNameFor)
  *   enabled, createdBy, createdAt, demo?,
  *   pending: { jobid, since, level, by, trigger } | null,   // 포탈이 실행했고 아직 끝나지 않은 백업
@@ -12,7 +13,8 @@
  *   restores: [ { jobid, fromJobids, mode, target, status, state, startedAt, endedAt, by, at } ],   // 최근 RESTORES_KEEP 건
  *   finishedRuns: [ { jobid, status, state, level, endedAt, errors, checkedAt } ],   // v2.822.3 끝난 백업 실행 최근 FINISHED_KEEP 건(실패 메일용)
  * }
- * retired = [ { name, at, demo? } ]   // v2.822(I3): 원장에서 지운 대상의 Director 잡 이름 — 대조 틱이 다시 켜졌으면 disable 을 다시 보낸다
+ * retired = [ { name, directorId?, at, demo? } ]   // v2.822(I3): 원장에서 지운 대상의 Director 잡 이름 — 대조 틱이 다시 켜졌으면 disable 을 다시 보낸다
+ *                                                  //   v2.823: (directorId, 이름)이 열쇠다 — 같은 이름이 다른 법인 Director 에 다시 생겨도 옛 Director 의 기록을 지우지 않는다
  *
  * 왜 원장을 두나: Bareos 에는 '이 잡이 어느 vCenter 의 어느 VM 인가' 가 없다(잡 이름만 있다). 범위(scope) 판정·트리 배지·
  *   화면은 vcenterId 가 필요하다. 원장이 손상되면 Director 의 잡은 남고 포탈만 모른다 — 그래서 손상 보존(preserveCorrupt)이
@@ -25,6 +27,7 @@ import { config } from '../config.js';
 import { atomicWriteFileSync, preserveCorrupt, safeLoadText } from '../util/atomicWrite.js';
 import { makeLoadError } from '../util/registryCore.js';
 import { isFinalStatus, statusOf } from './names.js';
+import { DEFAULT_DIRECTOR_ID } from './settings.js';
 
 export const FILE_NAME = 'bareos-jobs.json';
 const FILE = () => path.join(config.configDir, 'bareos-jobs.json'); // 문자열 그대로 — scripts/config-doc.mjs 가 이 모양으로 파일을 찾는다
@@ -103,6 +106,7 @@ export function addJob(input) {
     id: `bj_${Date.now().toString(36)}${crypto.randomBytes(3).toString('hex')}`,
     vcenterId: String(input.vcenterId), vmId: String(input.vmId), vmName: String(input.vmName),
     dc: String(input.dc), folder: String(input.folder),
+    ...(input.directorId ? { directorId: String(input.directorId) } : {}),
     bareosJob: String(input.bareosJob), client: String(input.client), storage: String(input.storage), pool: String(input.pool),
     schedule: String(input.schedule || ''), level: String(input.level || 'Incremental'),
     enabled: true, createdBy: String(input.createdBy || ''), createdAt: Date.now(),
@@ -111,7 +115,8 @@ export function addJob(input) {
   };
   const retiredBefore = db.retired;
   db.jobs.push(job);
-  if (db.retired?.some((r) => r.name === job.bareosJob)) db.retired = db.retired.filter((r) => r.name !== job.bareosJob);   // 같은 이름을 다시 쓰면 '지운 잡' 이 아니다
+  const sameRetired = (r) => r.name === job.bareosJob && retiredDir(r) === (job.directorId || DEFAULT_DIRECTOR_ID);
+  if (db.retired?.some(sameRetired)) db.retired = db.retired.filter((r) => !sameRetired(r));   // 같은 Director 에서 같은 이름을 다시 쓰면 '지운 잡' 이 아니다
   // 파일에 못 쓰면 메모리에도 넣지 않는다(v2.822 — 예전에는 메모리에만 남아 화면은 '등록됨', 재시작하면 사라졌다)
   try { persist(); } catch (e) { db.jobs.pop(); db.retired = retiredBefore; throw e; }
   return copy(job);
@@ -128,12 +133,17 @@ export function patchJob(id, patch) {
   return copy(j);
 }
 
-export function deleteJob(id) {
+/**
+ * @param {string} id
+ * @param {{ directorId?: string }} [o] 이 잡의 Director(옛 잡은 directorId 가 없어 라우트가 settings.jobDirectorId 로 풀어 넘긴다 —
+ *   지운 뒤 그 vCenter 를 다른 Director 로 옮겨도 '다시 끄기' 가 옛 Director 로 가게)
+ */
+export function deleteJob(id, { directorId = '' } = {}) {
   const db = load();
   const i = db.jobs.findIndex((j) => j.id === id);
   if (i < 0) return false;
   const [j] = db.jobs.splice(i, 1);
-  addRetired(db, j.bareosJob, !!j.demo);
+  addRetired(db, j.bareosJob, !!j.demo, j.directorId || directorId || DEFAULT_DIRECTOR_ID);
   persist();
   return true;
 }
@@ -212,8 +222,9 @@ export const restoreOpen = (r) => !!r?.jobid && !isFinalStatus(r.status) && !r.a
 export function pendingWork() {
   const out = [];
   for (const j of load().jobs) {
-    if (j.pending?.jobid) out.push({ id: j.id, jobid: j.pending.jobid, kind: 'backup', job: j.bareosJob, demo: !!j.demo });
-    for (const r of j.restores || []) if (restoreOpen(r)) out.push({ id: j.id, jobid: r.jobid, kind: 'restore', demo: !!j.demo });
+    const dir = j.directorId || '';   // 옛 잡('')은 폴러가 settings.jobDirectorId 로 푼다
+    if (j.pending?.jobid) out.push({ id: j.id, jobid: j.pending.jobid, kind: 'backup', job: j.bareosJob, demo: !!j.demo, directorId: dir, vcenterId: j.vcenterId });
+    for (const r of j.restores || []) if (restoreOpen(r)) out.push({ id: j.id, jobid: r.jobid, kind: 'restore', demo: !!j.demo, directorId: dir, vcenterId: j.vcenterId });
   }
   return out;
 }
@@ -272,24 +283,28 @@ export function clearPending(id, message, now = Date.now()) {
  *   남겨 두고 폴러 대조 틱이 `.jobs` 의 enabled 를 보고 다시 끈다(비활성 대상은 원장 enabled:false 로 같은 처리).
  *   Director 에서 잡이 사라지면(관리자가 conf 를 지움) 기록도 지운다.
  */
-function addRetired(db, name, demo) {
+/** 지운 잡 기록의 Director — v2.823 이전 기록은 Director 가 하나뿐이었다('dir_default'). */
+export const retiredDir = (r) => (typeof r?.directorId === 'string' && r.directorId) || DEFAULT_DIRECTOR_ID;
+function addRetired(db, name, demo, directorId = DEFAULT_DIRECTOR_ID) {
   if (!name) return;
-  db.retired = [...(db.retired || []).filter((r) => r.name !== name), { name: String(name), at: Date.now(), ...(demo ? { demo: true } : {}) }].slice(-RETIRED_KEEP);
+  const dir = directorId || DEFAULT_DIRECTOR_ID;
+  db.retired = [...(db.retired || []).filter((r) => !(r.name === name && retiredDir(r) === dir)), { name: String(name), directorId: dir, at: Date.now(), ...(demo ? { demo: true } : {}) }].slice(-RETIRED_KEEP);
 }
 /** Director 에 잡만 남은 이름을 기록(원장 등록 실패 등) — 원장을 못 읽은 상태면 쓰지 않는다(빈 원장 저장이 보존본을 덮지 않게). */
-export function retireName(name, demo = false) {
+export function retireName(name, demo = false, directorId = DEFAULT_DIRECTOR_ID) {
   const db = load();
   if (_loadErr.get()) return false;
-  addRetired(db, name, demo);
+  addRetired(db, name, demo, directorId);
   persist();
   return true;
 }
-export function retiredNames() { return (load().retired || []).map((r) => ({ ...r })); }
-export function forgetRetired(names) {
+export function retiredNames() { return (load().retired || []).map((r) => ({ ...r, directorId: retiredDir(r) })); }
+/** @param {string} directorId @param {string[]} names 그 Director 에서 사라진 잡 이름(다른 Director 의 같은 이름 기록은 건드리지 않는다) */
+export function forgetRetired(directorId, names) {
   const drop = new Set(names);
   const db = load();
   const before = (db.retired || []).length;
-  db.retired = (db.retired || []).filter((r) => !drop.has(r.name));
+  db.retired = (db.retired || []).filter((r) => !(drop.has(r.name) && retiredDir(r) === directorId));
   if (db.retired.length !== before) persist();
 }
 export function jobCount() { return load().jobs.length; }

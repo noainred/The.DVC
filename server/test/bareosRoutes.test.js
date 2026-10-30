@@ -126,26 +126,31 @@ test('① RBAC: operator·viewer 403 · 설정은 범위 계정 403', async () =
   assert.equal((await call('op', 'POST', '/jobs', { vcenterId: 'vc-a', vmId: 'vc-a:vm-1' })).s, 403);
   assert.equal((await call('sadm', 'GET', '/settings')).s, 403);
   assert.equal((await call('sadm', 'PUT', '/settings', { director: { host: 'x.corp' } })).s, 403);
-  assert.equal((await call('sadm', 'GET', '/catalog')).s, 403);
+  assert.equal((await call('sadm', 'GET', '/settings/directors/dir_x/catalog')).s, 403);
+  assert.equal((await call('sadm', 'POST', '/settings/directors', { name: 'x', host: 'x.corp' })).s, 403);
 });
 
+let DIR = '';
 test('③④ 설정: 차단 주소 400 · 비밀번호는 응답에 없음 · 접속처 변경 시 비밀번호 폐기 · 모르는 vCenter 매핑 400', async () => {
-  assert.equal((await call('admin', 'PUT', '/settings', { director: { host: '169.254.169.254', consoleName: 'portal', password: 'pw-1' } })).s, 400);
-  let r = await call('admin', 'PUT', '/settings', { director: { host: 'bareos-dir.corp', port: 9101, consoleName: 'portal', password: 'pw-1' } });
-  assert.equal(r.s, 200);
-  assert.equal(r.j.settings.director.hasPassword, true);
+  assert.equal((await call('admin', 'POST', '/settings/directors', { name: '한국', host: '169.254.169.254', consoleName: 'portal', password: 'pw-1' })).s, 400);
+  let r = await call('admin', 'POST', '/settings/directors', { name: '한국', host: 'bareos-dir.corp', port: 9101, consoleName: 'portal', password: 'pw-1' });
+  assert.equal(r.s, 201, r.t);
+  DIR = r.j.director.id;
+  assert.equal(r.j.director.hasPassword, true);
   assert.doesNotMatch(r.t, /pw-1/);
-  r = await call('admin', 'PUT', '/settings', { director: { host: 'other-dir.corp' } });
+  r = await call('admin', 'PUT', `/settings/directors/${DIR}`, { host: 'other-dir.corp' });
   assert.deepEqual(r.j.droppedSecrets, ['password']);
-  assert.equal(r.j.settings.director.hasPassword, false);
-  r = await call('admin', 'PUT', '/settings', { sites: [{ vcenterId: 'vc-zzz', vcserver: 'v', client: 'kr-fd', storage: 'kr-sd', pool: 'P', configFile: '/etc/bareos/x.ini' }] });
+  assert.equal(r.j.director.hasPassword, false);
+  assert.equal((await call('admin', 'PUT', '/settings', { director: { host: 'x.corp' } })).s, 400, '접속값은 Director 경로로만');
+  r = await call('admin', 'PUT', '/settings', { sites: [{ vcenterId: 'vc-zzz', directorId: DIR, vcserver: 'v', client: 'kr-fd', storage: 'kr-sd', pool: 'P', configFile: '/etc/bareos/x.ini' }] });
   assert.equal(r.s, 400);
   // 실제로 쓸 설정: 가짜 Director(127.0.0.1) + vc-a·vc-b 매핑
+  r = await call('admin', 'PUT', `/settings/directors/${DIR}`, { host: '127.0.0.1', port: fd.port, consoleName: 'portal', password: 'pw-1', timeoutMs: 5000 });
+  assert.equal(r.s, 200, r.t);
   r = await call('admin', 'PUT', '/settings', {
-    director: { host: '127.0.0.1', port: fd.port, consoleName: 'portal', password: 'pw-1', timeoutMs: 5000 },
     sites: [
-      { vcenterId: 'vc-a', vcserver: 'vc-a.corp', client: 'kr-fd', storage: 'kr-sd', pool: 'VMwareKR', schedule: 'VMwareNightly', configFile: '/etc/bareos/vmware/vc-a.ini' },
-      { vcenterId: 'vc-b', vcserver: 'vc-b.corp', client: 'pl-fd', storage: 'pl-sd', pool: 'VMwarePL', configFile: '/etc/bareos/vmware/vc-b.ini' },
+      { vcenterId: 'vc-a', directorId: DIR, vcserver: 'vc-a.corp', client: 'kr-fd', storage: 'kr-sd', pool: 'VMwareKR', schedule: 'VMwareNightly', configFile: '/etc/bareos/vmware/vc-a.ini' },
+      { vcenterId: 'vc-b', directorId: DIR, vcserver: 'vc-b.corp', client: 'pl-fd', storage: 'pl-sd', pool: 'VMwarePL', configFile: '/etc/bareos/vmware/vc-b.ini' },
     ],
   });
   assert.equal(r.s, 200, r.t);
@@ -155,26 +160,26 @@ test('③④ 설정: 차단 주소 400 · 비밀번호는 응답에 없음 · �
 });
 
 test('③ 연결 시험: 저장 비밀번호로 시험하면 요청의 주소를 무시하고 저장 주소로 · 새 비밀번호면 요청 주소로', async () => {
-  let r = await call('admin', 'POST', '/settings/test', { director: { host: '127.0.0.1', port: 1 } });
+  let r = await call('admin', 'POST', `/settings/directors/${DIR}/test`, { director: { host: '127.0.0.1', port: 1 } });
   assert.equal(r.s, 200, r.t);
   assert.equal(r.j.version, '25.0.4');
   assert.deepEqual(r.j.clients, ['kr-fd']);
-  r = await call('admin', 'POST', '/settings/test', { director: { host: '127.0.0.1', port: 1, consoleName: 'portal', password: 'pw-1' } });
+  r = await call('admin', 'POST', `/settings/directors/${DIR}/test`, { director: { host: '127.0.0.1', port: 1, consoleName: 'portal', password: 'pw-1' } });
   assert.equal(r.s, 502);
   assert.equal(r.j.code, 'connect');
   // v2.822 단계별 진단 — 실패 단계와 그 뒤 '시도 안 함' · 성공 시험도 단계를 돌려준다
   const st = Object.fromEntries(r.j.stages.map((x) => [x.key, x]));
   assert.equal(st.address.ok, true); assert.equal(st.tcp.ok, false); assert.ok(st.tcp.hint); assert.equal(st.tls.skipped, true);
-  const good = await call('admin', 'POST', '/settings/test', {});
+  const good = await call('admin', 'POST', `/settings/directors/${DIR}/test`, {});
   assert.deepEqual(good.j.stages.map((x) => x.ok ?? 'skip'), [true, 'skip', true, true, true, true, true]);
   // v2.822(B4) 감사 대상은 실제 접속한 주소 — 저장 비밀번호 시험은 요청 주소를 무시한다
   const { listAudit } = await import('../src/audit.js');
   const last = listAudit({ limit: 20, q: 'Bareos 연결 시험' }).items[0];
   assert.ok(last, '연결 시험 감사 기록');
-  assert.equal(last.target, `127.0.0.1:${fd.port}`, '저장 비밀번호 시험은 요청의 주소(127.0.0.1:1)가 아니라 실제 접속한 저장 주소');
-  const bodyHost = await call('admin', 'POST', '/settings/test', { director: { host: '10.9.9.9', port: 1 } });
+  assert.equal(last.target, `한국 127.0.0.1:${fd.port}`, '저장 비밀번호 시험은 요청의 주소(127.0.0.1:1)가 아니라 실제 접속한 저장 주소');
+  const bodyHost = await call('admin', 'POST', `/settings/directors/${DIR}/test`, { director: { host: '10.9.9.9', port: 1 } });
   assert.equal(bodyHost.s, 200, '저장 비밀번호 시험은 요청 주소를 무시한다(v2.480)');
-  assert.equal(listAudit({ limit: 20, q: 'Bareos 연결 시험' }).items[0].target, `127.0.0.1:${fd.port}`);
+  assert.equal(listAudit({ limit: 20, q: 'Bareos 연결 시험' }).items[0].target, `한국 127.0.0.1:${fd.port}`);
 });
 
 test('④ 등록 후보: 범위 밖 404 · 템플릿·위치 없음·금지 글자는 사유와 함께 불가', async () => {
@@ -282,13 +287,17 @@ test('⑥ 복원: OTP 없는 계정 403 · 전제 실패는 OTP 를 쓰기 전�
 
 test('⑦ 가림·데모: Director 주소는 전체 범위 관리자만 · 데모 계정의 실 Director 조회는 403(접속 0)', async () => {
   const full = await call('admin', 'GET', '');
-  assert.equal(full.j.director.host, '127.0.0.1');
-  assert.equal(full.j.director.consoleName, 'portal');
+  const fd0 = full.j.directors.find((d) => d.id === DIR);
+  assert.equal(fd0.host, '127.0.0.1');
+  assert.equal(fd0.consoleName, 'portal');
+  assert.equal(full.j.jobs.find((j) => j.id === jobId).directorId, DIR, '잡에 법인 Director id');
   for (const u of ['sadm', 'demo']) {
     const r = await call(u, 'GET', '');
     assert.equal(r.s, 200, u);
-    assert.equal(r.j.director.masked, true, u);
-    assert.equal(r.j.director.host, undefined, u);
+    const d0 = r.j.directors.find((d) => d.id === DIR);
+    assert.equal(d0.masked, true, u);
+    assert.equal(d0.host, undefined, u);
+    assert.equal(d0.name, '한국', u);
     assert.doesNotMatch(r.t, /127\.0\.0\.1|"consoleName"/, u);
   }
   const conns = fd.identities.length;

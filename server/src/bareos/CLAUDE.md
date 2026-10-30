@@ -1,4 +1,4 @@
-# Bareos VM 백업 연동(`server/src/bareos/`) 불변조건 (v2.820)
+# Bareos VM 백업 연동(`server/src/bareos/`) 불변조건 (v2.820 · v2.823 법인별 Director)
 
 포탈이 Bareos Director 콘솔(9101 · TLS-PSK · CRAM-MD5 · `.api json`)로 VM 마다 잡을 만들고 실행·조회·복원한다.
 백업 데이터는 사이트 FD → SD 안에서만 흐르고, 포탈은 제어 명령(수 KB)만 보낸다. 되돌리면 안 되는 규칙:
@@ -47,28 +47,20 @@
 - **v2.822 실패 알림 메일**(`bareos/notify.js`, 메일 종류 `bareos-backup`): 중앙 전용 · 원장만 읽는다(Director 에 닿지 않는다) · 커서는 대상별 **jobid**
   (카탈로그 시각은 시간대가 없다) · 끝나지 않은 실행으로는 커서를 옮기지 않는다 · 메일 꺼짐이면 커서만 · 발송 실패면 커서 유지 · mock·데모 대상 제외.
   한계: 스케줄 실행은 대조 틱마다 대상별 최신 1건만 원장에 들어와 그 사이 실패가 2건이면 1건만 알린다.
-- **v2.822 검토 확정분(되돌리지 말 것)**: ① `list jobs job=X limit=N` 은 **오름차순 + LIMIT = 가장 오래된 N건**(sql_list.cc) — limit 를 넘기지 않고 받아 최신 순으로 자른다(W1).
-  ② `disable job=` 은 Director **메모리 값**이라 reload·재시작이면 conf 값(활성)으로 돌아간다(ua_cmds.cc 경고문) — 원장 `retired`(지운 잡 이름)와 enabled:false 대상을
-  대조 틱이 `.jobs` 의 enabled 로 보고 다시 끈다. 문구는 '비활성으로 남는다' 고 단정하지 않는다(I3). ③ 등록은 원장 손상·상한을 **Director 에 닿기 전에** 보고, VM 마다
-  처리 중 표시(`busy` 409) · 원장 기록이 실패하면 만든 잡을 끄고 이름을 밝힌다 · 파일에 못 쓴 대상은 메모리에도 넣지 않는다(C3). ④ 핸드셰이크 중 소켓 끊김은
-  'closed'(TLS 경보 `ERR_SSL_*` 만 'tls' = 인증 정지 대상, C7). ⑤ 덮어쓰기 복원은 지금 인벤토리의 이름·데이터센터·폴더가 등록 때와 같고 같은 폴더에 동명 VM 이
-  없을 때만(S3 — 잡은 등록 때 값을 가리킨다). 목록은 `drift` 로 알린다. ⑥ 로드 오류는 원문(JSON.parse 조각)이 아니라 `summarizeRegistryError` 요약(S2) ·
-  차단 문구에 호스트 이름 없음(S4). ⑦ 설정 백업 지문에서 pending·restores·missingInDirector 를 뺀다(I6). ⑧ 데모 대상과 실제 Director 를 섞지 않는다 — 실행·변경 409,
-  데모 대상 삭제는 원장만(I8). ⑨ 취소는 Director 가 모르는 pending 을 추적만 내린다 · 복원이 진행 중이면 삭제 409(P4·P5). ⑩ Director 를 거치는 화면 GET 은 재시도 0(W2).
-  남긴 것(낮음): 카탈로그 memo 세대(P9) · 옛 원장 복원 뒤 Director 고아 잡 탐지(I7). (응답 프레임 개수 상한 P8 은 v2.822.3 에 고쳤다.)
-- **v2.822.3 2차 검토(5축 + 반증 2인) 확정분**: ① 공용 `proxy/sshExec.js` 의 SFTP 읽기·쓰기·올리기는 끝나면 `sftp.end()`(I2-1 — 채널이 쌓여 MaxSessions 를
-  넘으면 exec 가 거부됐다 · `bareosSftpChannels28223`). ② 자동 설정의 원격 읽기·쓰기·삭제는 **부모 디렉터리 정규 경로 검사**(`canonDir` — readlink -f)를
-  같은 셸 명령 안에서(S2-1 — bareos-dir.d 는 패키지가 bareos 소유로 둔다; 남는 창은 bareos 계정을 쥔 경우뿐). FD INI 는 `/etc/bareos/**.ini` 만(S2-2 — 매핑 저장은 그대로).
-  ③ 가림은 생성 콘솔 비밀번호만 — 출력에 SSH 비밀번호가 있으면 출력 전체를 싣지 않는다(S2-5 부분 가림 오라클). 감사에는 원격 출력을 싣지 않는다(`setupAuditReason`, I2-10).
-  ④ reload 를 보냈으면 되돌린 뒤 다시 reload(C2-4) · 새 콘솔 접속 뒤 저장 실패도 되돌린다(C2-5) · 되돌린 뒤 인증 정지 기록을 지운다(P2-12).
-  ⑤ FD INI 값의 `%` 는 `%%`(플러그인이 ConfigParser 보간으로 읽는다 — C2-1). ⑥ reload 뒤 `requestReconcile()`(C2-3) · 시한에 잘린 대조는 다음 틱(P2-5) ·
-  빈 `.jobs` 로 retired·missing 을 바꾸지 않는다(I2-5). ⑦ 실패 메일은 `finishedRuns` + 판정한 jobid(seen)로 — 포탈 실행이 진행 중이면 커서를 그 앞에서 멈춘다(C2-2).
-  ⑧ 취소·활성 전환도 `oneAtATime`(C2-14) · 데모 Director 일 때 자동 설정 409(I2-6) · 명령별 응답 상한은 요청값(최대 64MB — C2-8, 단 **프레임 하나는 4MB** —
-  Director 가 큰 JSON 을 나눠 보내는지는 미확인) · 쌓인 프레임 누적 카운터·개수 상한(P8) · 화면 설정 저장은 **달라진 Director 칸만**(`directorPatch` — W2-1).
-  **구조상 남는 위험(S2-3)**: 포탈 콘솔은 잡을 만들려고 `configure` 가 필요한데 Bareos 는 그 하위 명령·리소스 단위 ACL 이 없다 — 포탈 콘솔 자격 = Director 관리자 +
-  전 FD root 등급이다(ACL 을 좁혀도 우회). 비밀번호를 그 등급으로 지킨다(체크리스트에 적었다).
-  남긴 것(낮음 — 반증 판정표 adv2_server.md·adv2_web.md): DNS 핀·IPv6 리터럴(S2-4) · 콘솔 이름 바꾼 재실행의 옛 콘솔(S2-6) · INI 소유자(S2-8) · 시한 끊김 tmp(S2-9) ·
-  두 포탈의 같은 콘솔(I2-4) · 엣지 메일(I2-7) · 자동 설정 진행 상태 노출·탭 이동 뒤 표시(P2-1·W2-4 — 데이터 손실은 ⑧ 로 막았다) · BUDGET 강제(P2-7) · 일괄 등록 180초(P2-11) ·
-  목록 memo(P7) · 카탈로그 memo 세대(P9) · 고아 잡(I7) · Migration 새 잡의 일시 lastRun(C2-7).
+- **v2.822 · v2.822.3 검토 확정분**(되돌리지 말 것 — `list jobs` 오름차순 LIMIT · disable 은 메모리 값 · 원장 선검사 · TLS 분류 · 덮어쓰기 복원 전제 · 로드 오류 요약 ·
+  SFTP 채널 닫기 · canonDir · 가림 · reload 뒤 대조 · INI `%%` · 실패 메일 커서 · oneAtATime · 구조상 위험 S2-3 · 남긴 것)은 `docs/rules/audits.md` 의
+  'Bareos v2.822 · v2.822.3 검토 확정분' 절에 원문 그대로 있다 — 이 폴더를 고치기 전에 읽을 것(크기 상한으로 옮겼다 · 2026-10-30).
+- **v2.823 법인별 Director**(사용자 요청 — 법인마다 Bareos 를 깔고 그 법인 vCenter 는 그 법인 Bareos 로 · 초기 설치 뒤 세부 설정은 포탈에서 · `bareosCorp2823`):
+  ① 설정 v2 = `directors[]` + `sites[].directorId`(vCenter 하나 → Director 하나). v1 파일은 **읽을 때만** `dir_default` 로 바꾼다(로드는 파일을 다시 쓰지 않는다) ·
+  저장은 v2 + 구버전 호환 `director` 사본(첫 Director). Director id 는 난수 · 바꾸지 않는다. 같은 이름·같은 콘솔(주소:포트·이름) 두 항목 거부.
+  ② **원장 잡은 등록 때의 `directorId` 를 고정**하고 잡 라우트는 그 Director 로만 보낸다(`settings.jobDirectorId` — 옛 잡은 매핑에서 푼다). 그래서 백업 대상이 있는
+  vCenter 의 Director 를 바꾸거나 매핑을 지우면 409, 매핑·대상이 있는 Director 삭제도 409. 지운 잡 기록(retired)은 (Director, 이름)이 열쇠(같은 이름이 다른 Director 에 생겨도 지우지 않는다).
+  ③ Director 일은 작업 표 `ops.js`(직렬화 가능한 인자만 — 2차 엣지 대행이 같은 표를 쓴다) + `service.onDirector`. 조회 GET 은 `readDirector({ demoOnly … }, id, kind, args)` ·
+  `onDirector(` 는 `audit2719b` 실접속 목록에 있다. 인증 정지·연결 시험 고정(v2.480)·`accessMoved` 비밀번호 폐기·자동 설정 동시 1건은 **Director 마다**(옛 Director 는 인증 정지 id 'director' 를 잇는다).
+  ④ 폴러는 Director 마다 병렬(동시 4) + **Director 별 시한** — 느린 법인 하나가 나머지를 막지 않는다 · 상태는 `pollerStatus().directors`.
+  ⑤ 자동 설정 확장: 사전 점검(쓰기·OTP 없음 — 못 읽은 항목은 '확인 불가', 없음으로 단정하지 않는다) · Pool·Schedule(MARKER 파일 · JobDefs 의 레벨별 풀 · 웹 블록과 글자까지 같다) ·
+  **FD 플러그인 켜기는 패키지 파일 `myself.conf` 를 제자리 수정하는 유일한 예외** — Client 블록 하나·여러 줄일 때만, 없는 줄만 넣고 같은 값이면 그대로,
+  **다른 값이면 거부**, 쓰기 전 사본 → `bareos-fd -t` → 재시작 → 실패면 사본으로 원복·재시작(세션이 끊기면 새 세션으로). 매핑 채움은 쓰기 없음(빈 칸만 · 후보가 여럿이면 비운다).
+  실환경 미확인(추정): 플러그인 경로(`/usr/lib64` · `/usr/lib` 의 python3-fd.so) · 기본 리소스 이름을 conf **파일 이름**으로 읽는 것 · VDDK 경로 · 레벨별 풀 지시어가 잡의 pool= 을 덮는 순서.
 - 실환경 미확인(추정 — `tools/bareos-probe.js` 로 확인할 것): Node↔Director TLS-PSK 협상 · 잡 수준 FdPluginOptions 와 FileSet 플러그인 문자열 병합 ·
   `.bvfs_get_jobids` JSON 모양 · Profile ACL 지시어 이름 · `list jobs days=N` · 25.x `.jobs` 의 enabled 칸(master 소스 기준 — 없으면 다시 끄기를 하지 않는다) · Migration 행의 시작 시각.

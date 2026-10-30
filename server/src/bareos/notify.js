@@ -30,6 +30,7 @@ import { sendPortalMail } from '../mail/service.js';
 import { load as loadMailCfg } from '../mail/settings.js';
 import { localStamp } from '../util/dayKey.js';
 import { listJobs, registryLoadError } from './registry.js';
+import { loadSettings, directorById, jobDirectorId } from './settings.js';
 import { isFinalStatus } from './names.js';
 
 export const MAIL_KIND = 'bareos-backup';
@@ -123,7 +124,7 @@ export function collectBareosFailures(jobs, st) {
       maxJudged = Math.max(maxJudged, jid); judged.push(jid);
       if (jr.alert && (r.state === 'error' || r.state === 'warning')) {
         rows.push({ kind: 'backup', state: r.state, status: r.status, jobid: jid, at: Number(r.checkedAt) || 0, ended: r.endedAt || null,
-          level: LEVEL[r.level] || '', jobName: j.bareosJob, vmName: j.vmName, vcenterId: j.vcenterId, client: j.client || '', errors: r.errors ?? null });
+          level: LEVEL[r.level] || '', jobName: j.bareosJob, vmName: j.vmName, vcenterId: j.vcenterId, directorId: j.directorId || '', client: j.client || '', errors: r.errors ?? null });
       }
     }
     if (maxJudged) {
@@ -141,7 +142,7 @@ export function collectBareosFailures(jobs, st) {
       restMax = Math.max(restMax, Number(x.jobid));
       if (jx.alert && x.state === 'error') {
         rows.push({ kind: 'restore', state: 'error', status: x.status, jobid: Number(x.jobid), at: Number(x.checkedAt) || Number(x.at) || 0, ended: x.endedAt || null,
-          level: '', jobName: j.bareosJob, vmName: j.vmName, vcenterId: j.vcenterId, client: x.client || j.client || '', mode: x.mode || '', errors: null });
+          level: '', jobName: j.bareosJob, vmName: j.vmName, vcenterId: j.vcenterId, directorId: j.directorId || '', client: x.client || j.client || '', mode: x.mode || '', errors: null });
       }
     }
     if (restMax) marks.restores[j.id] = restMax;
@@ -155,8 +156,11 @@ const RESTORE_MODE = { original: '원래 VM 덮어쓰기', newVm: '새 VM', loca
 const what = (r) => (r.kind === 'restore' ? `복원(${RESTORE_MODE[r.mode] || '—'})` : `백업${r.level ? ` ${r.level}` : ''}`);
 const result = (r) => `${r.state === 'warning' ? '경고' : '오류'} · ${r.status || '?'}`;
 
-/** 메일 본문(순수). 값은 전부 esc · 인라인 스타일 · 포탈 링크 없음(메뉴 경로를 글로 적는다). */
-export function renderBareosMail(rows, vcName = (id) => id) {
+/**
+ * 메일 본문(순수). 값은 전부 esc · 인라인 스타일 · 포탈 링크 없음(메뉴 경로를 글로 적는다).
+ * v2.823: 법인 Director 열 — dirName(row) 가 그 행의 Director 이름('' 이면 '—').
+ */
+export function renderBareosMail(rows, vcName = (id) => id, dirName = () => '') {
   const shown = rows.slice(0, MAX_ROWS);
   const more = rows.length - shown.length;
   const vms = [...new Set(rows.map((r) => r.vmName))];
@@ -165,14 +169,14 @@ export function renderBareosMail(rows, vcName = (id) => id) {
   const head = [nErr ? `실패 ${nErr}건` : '', nWarn ? `경고 ${nWarn}건` : ''].filter(Boolean).join(' · ');
   const subject = `[Bareos 백업] ${head} — ${vms.slice(0, 3).join(', ')}${vms.length > 3 ? ` 외 ${vms.length - 3}` : ''}`;
   const td = (v, extra = '') => `<td style="padding:4px 8px${extra}">${v}</td>`;
-  const tr = shown.map((r) => `<tr>${td(esc(r.at ? localStamp(r.at) : '—'), ';white-space:nowrap')}${td(esc(vcName(r.vcenterId)))}${td(`<b>${esc(r.vmName)}</b>`)}${td(esc(what(r)))}${td(esc(result(r)))}${td(esc(r.jobid))}${td(esc(r.jobName))}${td(esc(r.client || '—'))}</tr>`).join('');
-  const th = ['확인 시각', 'vCenter', 'VM', '종류', '결과', 'jobid', 'Bareos 잡', '사이트 FD'].map((h) => `<th style="padding:4px 8px">${h}</th>`).join('');
+  const tr = shown.map((r) => `<tr>${td(esc(r.at ? localStamp(r.at) : '—'), ';white-space:nowrap')}${td(esc(dirName(r) || '—'))}${td(esc(vcName(r.vcenterId)))}${td(`<b>${esc(r.vmName)}</b>`)}${td(esc(what(r)))}${td(esc(result(r)))}${td(esc(r.jobid))}${td(esc(r.jobName))}${td(esc(r.client || '—'))}</tr>`).join('');
+  const th = ['확인 시각', '법인 Director', 'vCenter', 'VM', '종류', '결과', 'jobid', 'Bareos 잡', '사이트 FD'].map((h) => `<th style="padding:4px 8px">${h}</th>`).join('');
   const html = `<div style="font-family:sans-serif;font-size:13px">`
     + `<p>Bareos VM 백업에서 확인이 필요한 실행이 ${rows.length}건 있습니다(${head}). 작업 로그는 포탈 › Backup 현황 › Bareos(특수 기능 › Backup 현황 · Bareos)의 백업 대상 표 '로그' 에서 볼 수 있습니다.</p>`
     + `<table style="border-collapse:collapse;font-size:12.5px" border="1" cellspacing="0"><thead><tr style="background:#f1f5f9">${th}</tr></thead><tbody>${tr}</tbody></table>`
     + (more > 0 ? `<p>그 밖에 ${more}건은 메일에 싣지 않았습니다 — 포탈에서 확인하세요.</p>` : '')
     + `<p style="color:#64748b">확인 시각은 포탈이 결과를 읽은 시각입니다. 이 메일은 설정 › 메일 발송의 'Bareos 백업 실패' 종류로 보냈습니다. 같은 1분 확인 주기의 항목은 한 통으로 묶습니다.</p></div>`;
-  const text = [`Bareos 백업 ${head}`, ...shown.map((r) => [r.at ? localStamp(r.at) : '—', vcName(r.vcenterId), r.vmName, what(r), result(r), `jobid ${r.jobid}`, r.jobName].join(' · ')), ...(more > 0 ? [`그 밖에 ${more}건`] : [])].join('\n');
+  const text = [`Bareos 백업 ${head}`, ...shown.map((r) => [r.at ? localStamp(r.at) : '—', dirName(r) || '—', vcName(r.vcenterId), r.vmName, what(r), result(r), `jobid ${r.jobid}`, r.jobName].join(' · ')), ...(more > 0 ? [`그 밖에 ${more}건`] : [])].join('\n');
   return { subject, html, text };
 }
 
@@ -204,7 +208,10 @@ export async function tick(now = Date.now()) {
     const cfg = loadMailCfg();
     if (!cfg?.enabled || cfg?.kinds?.[MAIL_KIND]?.enabled === false) { advance(); _last = { at: now, sent: false, rows: rows.length, reason: '메일 발송 또는 이 종류가 꺼져 있습니다' }; return; }
     const names = new Map((store.get()?.vcenters || []).map((v) => [String(v.id), v.name || v.id]));
-    const m = renderBareosMail(rows, (id) => names.get(String(id)) || id);
+    let settings = null;
+    try { settings = loadSettings(); } catch { /* 이름만 비운다 */ }
+    const dirName = (r) => (settings ? directorById(jobDirectorId(r, settings), settings)?.name || '' : '');
+    const m = renderBareosMail(rows, (id) => names.get(String(id)) || id, dirName);
     const r = await sendPortalMail({ kind: MAIL_KIND, subject: m.subject, html: m.html, text: m.text, by: 'system' });
     _last = { at: now, sent: !!r?.ok, rows: rows.length, ...(r?.ok ? {} : { reason: String(r?.reason || '발송 실패').slice(0, 200) }) };
     if (r?.ok) {

@@ -16,24 +16,39 @@ import { BareosConsoleError } from '../../bareos/console.js';
 const DAY = 86_400_000;
 const slugOf = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 24) || 'site';
 
-/** 데모 설정(메모리) — 스냅샷의 vCenter 마다 사이트 매핑 1개. */
+/** 데모 법인 Director 수 상한 — 지역(region)마다 하나. */
+const DEMO_MAX_DIRECTORS = 6;
+
+/**
+ * 데모 설정(메모리 · v2.823 법인별 Director) — 스냅샷 vCenter 의 지역(location.region)마다 데모 Director 하나, vCenter 마다 매핑 1개.
+ * 데모 Director 들은 같은 메모리 Director 를 나눠 쓴다(잡 이름이 vCenter 마다 달라 섞이지 않는다 — 접속하지 않는 합성 응답).
+ */
 export function demoSettings(snapshot) {
-  const sites = (snapshot?.vcenters || []).slice(0, 60).map((vc) => {
+  const directors = [];
+  const byRegion = new Map();
+  const sites = [];
+  for (const vc of (snapshot?.vcenters || []).slice(0, 60)) {
+    const region = String(vc.location?.region || vc.region || 'Global').slice(0, 40);
+    let d = byRegion.get(region);
+    if (!d) {
+      if (directors.length >= DEMO_MAX_DIRECTORS) d = directors[directors.length - 1];
+      else {
+        const n = directors.length + 1;   // 지역 이름은 한글이라(util/regions.js) 순번으로 id·주소를 만든다
+        d = { id: `dir_demo_${n}`, name: `${region} 법인(데모)`, host: `bareos-r${n}.demo`, port: 9101, consoleName: 'portal', timeoutMs: DEFAULTS.director.timeoutMs, tlsMax: 'TLSv1.3', password: '(demo)' };
+        directors.push(d);
+      }
+      byRegion.set(region, d);
+    }
     const slug = slugOf(vc.id);
-    return {
-      vcenterId: vc.id,
+    sites.push({
+      vcenterId: vc.id, directorId: d.id,
       vcserver: `${slug}.vcenter.demo`,
       client: `${slug}-fd`, storage: `${slug}-sd`, pool: `VMware-${slug}`,
       schedule: demoHash(vc.id) % 4 === 0 ? 'VMwareWeekly' : 'VMwareNightly',
       configFile: `/etc/bareos/vmware/${slug}.ini`,
-    };
-  });
-  return {
-    version: 1,
-    director: { host: 'bareos-dir.demo', port: 9101, consoleName: 'portal', timeoutMs: DEFAULTS.director.timeoutMs, tlsMax: 'TLSv1.3', password: '(demo)' },
-    defaults: { ...DEFAULTS.defaults },
-    sites,
-  };
+    });
+  }
+  return { version: 2, directors, defaults: { ...DEFAULTS.defaults }, sites };
 }
 
 // ── 데모 Director 상태(메모리 — 재시작하면 '실행 중' 은 사라지고 과거 이력은 결정적으로 다시 만든다) ──
