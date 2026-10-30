@@ -41,18 +41,21 @@ function fakeServer(o = {}) {
     let m;
     if (cmd === 'id -u') return ok(`${st.uid}\n`);
     if (cmd.startsWith('test -d /etc/bareos/bareos-dir.d && echo D;')) return ok(st.env.split(' ').join('\n'));
-    if ((m = /^if \[ -L (\S+) \]/.exec(cmd))) { const f = F.get(m[1]); return ok(!f ? 'NONE\n' : f.link ? 'LINK\n' : f.dir ? 'OTHER\n' : `FILE\n${f.content}`); }
+    // v2.822.3(S2-1): 부모 디렉터리 정규 경로 검사가 앞에 붙는다 — st.linkedDirs 에 든 디렉터리는 심링크(readlink -f 가 다르다)
+    const canonOk = (d) => !(st.linkedDirs || []).includes(d);
+    if ((m = /^if ! \[ "\$\(readlink -f -- (\S+)\)" = "\S+" \]; then echo LINK; elif \[ -L (\S+) \]/.exec(cmd))) { if (!canonOk(m[1])) return ok('LINK\n'); const f = F.get(m[2]); return ok(!f ? 'NONE\n' : f.link ? 'LINK\n' : f.dir ? 'OTHER\n' : `FILE\n${f.content}`); }
     if ((m = /^mktemp -d \/tmp\/([a-z-]+)\.X{10}$/.exec(cmd))) return ok(`/tmp/${m[1]}.Ab3dEf7hIj\n`);
     if (/^test -d \S+ && test ! -L \S+ && test -O \S+ && echo ok$/.test(cmd)) return ok('ok\n');
     if (/^test -d \S+ \|\| install -d /.test(cmd)) return ok();
-    if ((m = /^install -o bareos -g bareos -m (\d+) (\S+) (\S+) && rm -f \S+$/.exec(cmd))) {
-      if (st.installFail && m[3] === st.installFail) return { code: 1, stdout: '', stderr: 'install: No space left on device' };
-      const t = F.get(m[2]); if (!t) return { code: 1, stdout: '', stderr: 'no tmp' };
-      F.set(m[3], { content: t.content, mode: m[1], owner: 'bareos' }); F.delete(m[2]); return ok();
+    if ((m = /^\[ "\$\(readlink -f -- (\S+)\)" = "\S+" \] && install -o (\w+) -g bareos -m (\d+) (\S+) (\S+) && rm -f \S+$/.exec(cmd))) {
+      if (!canonOk(m[1])) return { code: 1, stdout: '', stderr: '' };
+      if (st.installFail && m[5] === st.installFail) return { code: 1, stdout: '', stderr: 'install: No space left on device' };
+      const t = F.get(m[4]); if (!t) return { code: 1, stdout: '', stderr: 'no tmp' };
+      F.set(m[5], { content: t.content, mode: m[3], owner: m[2] }); F.delete(m[4]); return ok();
     }
     if (cmd.includes('bareos-dir -t')) return { code: st.testCode, stdout: st.testOut, stderr: '' };
     if (cmd.startsWith('printf') && cmd.includes('bconsole')) { st.reloads += 1; return ok('reloaded\n'); }
-    if ((m = /^rm -f (\S+)$/.exec(cmd))) { F.delete(m[1]); return ok(); }
+    if ((m = /^\[ "\$\(readlink -f -- (\S+)\)" = "\S+" \] && rm -f (\S+)$/.exec(cmd))) { if (!canonOk(m[1])) return { code: 1, stdout: '', stderr: '' }; F.delete(m[2]); return ok(); }
     if (/^rm -rf \/tmp\/portal-bareos\.\w+$/.test(cmd)) { for (const k of [...F.keys()]) if (k.startsWith(cmd.slice(7))) F.delete(k); return ok(); }
     if (cmd.startsWith('id -u bareos')) return ok('U\n');
     if (cmd.startsWith('rpm -q bareos-vmware-plugin')) return ok('bareos-vmware-plugin-24.0.1-1.el9.x86_64\n');
@@ -210,8 +213,9 @@ test('② reload 실패 → 되돌림 · 세션이 시한으로 끊김 → 새 �
   const orig = srv.ssh;
   srv.ssh = (creds, fn) => orig(creds, (api) => fn({ ...api, exec: async (c) => (c.startsWith('printf') && !srv.st.failedOnce ? ((srv.st.failedOnce = true), { code: 1, stdout: 'Director not running', stderr: '' }) : api.exec(c)) }));
   A._setDepsForTest({ ssh: srv.ssh, openConsole: fakeConsole().open, sleep: async () => {} });
-  await assert.rejects(A.setupDirector(DIR_BODY), (e) => e.code === 'remote' && /reload\(bconsole\)가 실패/.test(e.message) && /되돌렸습니다/.test(e.message));
+  await assert.rejects(A.setupDirector(DIR_BODY), (e) => e.code === 'remote' && /reload\(bconsole\)가 실패/.test(e.message) && /되돌렸습니다\(Director 를 다시 읽혔습니다\)/.test(e.message));
   assert.equal([...srv.F.keys()].filter((k) => k.startsWith('/etc/')).length, 0);
+  assert.equal(srv.st.reloads, 1, 'C2-4(v2.822.3): reload 를 보냈으면 되돌린 뒤 다시 읽힌다(bconsole 이 시한으로 끝나도 Director 는 읽었을 수 있다)');
 
   // 끊김: 첫 세션은 검사 단계에서 연결이 죽는다(이후 그 세션의 명령은 전부 실패) — 세션 안 되돌리기는 실패, 새 세션이 되돌린다.
   const s2 = fakeServer();
@@ -228,6 +232,65 @@ test('② reload 실패 → 되돌림 · 세션이 시한으로 끊김 → 새 �
   assert.equal(session, 2);
   assert.equal([...s2.F.keys()].filter((k) => k.startsWith('/etc/')).length, 0);
   assert.equal(s2.st.reloads, 1, '되돌린 뒤 다시 읽힌다');
+});
+
+test('v2.822.3 S2-1: 부모 디렉터리가 심링크면(bareos-dir.d 는 bareos 소유) 읽지도 쓰지도 않는다 · S2-5: SSH 비밀번호를 부분 가림으로 드러내지 않는다', async () => {
+  const srv = fakeServer();
+  srv.st.linkedDirs = ['/etc/bareos/bareos-dir.d/profile'];
+  A._setDepsForTest({ ssh: srv.ssh, openConsole: fakeConsole().open, sleep: async () => {} });
+  await assert.rejects(A.setupDirector(DIR_BODY), (e) => e.code === 'conflict' && /profile\/portal\.conf 가 일반 파일이 아닙니다/.test(e.message));
+  assert.equal(srv.st.writes.length, 0, '아무것도 쓰지 않았다');
+  // 놓는 순간에 바꿔치기(살펴볼 때는 정상) → install 이 정규 경로 검사로 실패 → 되돌림
+  const s2 = fakeServer();
+  const base = s2.ssh;
+  s2.ssh = (creds, fn) => base(creds, (api) => fn({ ...api, exec: async (c) => { if (c.includes('install -o') && c.includes('/profile/')) s2.st.linkedDirs = ['/etc/bareos/bareos-dir.d/profile']; return api.exec(c); } }));
+  A._setDepsForTest({ ssh: s2.ssh, openConsole: fakeConsole().open, sleep: async () => {} });
+  await assert.rejects(A.setupDirector(DIR_BODY), (e) => e.code === 'remote' && /심링크/.test(e.message));
+  assert.equal([...s2.F.keys()].filter((k) => k.startsWith('/etc/')).length, 0, '앞서 놓은 파일도 되돌렸다');
+  // S2-5 — SSH 비밀번호가 흔한 낱말(bareos)이면 '****-dir' 처럼 가린 자리가 곧 비밀번호였다
+  const s3 = fakeServer({ testCode: 1 });
+  s3.st.testOut = 'Config error: /etc/bareos/bareos-dir.d/job/x.conf line 3';
+  A._setDepsForTest({ ssh: s3.ssh, openConsole: fakeConsole().open, sleep: async () => {} });
+  await assert.rejects(A.setupDirector({ ...DIR_BODY, password: 'bareos' }), (e) => {
+    assert.equal(e.code, 'config-test');
+    assert.doesNotMatch(e.message, /\*\*\*\*-dir|\/etc\/\*\*\*\*/);
+    assert.match(e.message, /출력을 싣지 않습니다/);
+    return true;
+  });
+});
+
+test('v2.822.3 C2-5: 새 콘솔 접속 뒤 설정 저장이 실패하면 되돌리고 다시 reload · P2-12: 되돌린 뒤 인증 정지 기록을 지운다', async () => {
+  S.saveSettings({ director: { host: '10.20.30.40', port: 9101, consoleName: 'portal', password: 'pw-before' } });
+  const before = JSON.stringify(S.loadSettings().director);
+  const svc = await import('../src/bareos/service.js');
+  const cred = S.directorCred(S.loadSettings());
+  // 저장 실패를 흉내 낸다 — 콘솔 접속이 성공한 직후 bareos.json 자리를 비어 있지 않은 디렉터리로(원자적 쓰기의 rename 이 실패)
+  const file = path.join(tmp, 'bareos.json');
+  const keep = fs.readFileSync(file);
+  const srv = fakeServer();
+  const con = fakeConsole(() => { fs.rmSync(file); fs.mkdirSync(file); fs.writeFileSync(path.join(file, 'x'), ''); return true; });
+  A._setDepsForTest({ ssh: srv.ssh, openConsole: con.open, sleep: async () => {} });
+  svc.bareosAuthGuard.markAuthStopped(cred.id, cred, 'Authorization failed.');
+  try {
+    await assert.rejects(A.setupDirector(DIR_BODY), (e) => {
+      assert.equal(e.code, 'save');
+      assert.match(e.message, /되돌리고 Director 를 다시 읽혔습니다/);
+      assert.doesNotMatch(e.message, new RegExp(tmp.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')), 'CONFIG_DIR 경로 원문을 싣지 않는다');
+      return true;
+    });
+  } finally { fs.rmSync(file, { recursive: true }); fs.writeFileSync(file, keep); }
+  assert.equal(srv.st.reloads, 2, 'reload → 되돌린 뒤 다시 reload');
+  assert.equal([...srv.F.keys()].filter((k) => k.startsWith('/etc/')).length, 0);
+  assert.equal(JSON.stringify(S.loadSettings().director), before, '포탈 설정은 그대로');
+  assert.equal(svc.bareosAuthGuard.peekAuthStop(cred), null, 'P2-12: 되돌린 뒤의 인증 정지 기록은 지운다');
+});
+
+test('v2.822.3 S2-2: FD INI 자동 설정은 /etc/bareos/ 아래 .ini 에만 쓴다(root 로 아무 절대 경로나 쓰던 것)', async () => {
+  for (const bad of ['/etc/cron.d/bareos.ini', '/etc/bareos/vmware/vc-a.conf', '/etc/sudoers.d/x.ini', '/var/lib/bareos/x.ini']) {
+    S.saveSettings({ sites: [{ vcenterId: 'vc-a', vcserver: 'vc-a.corp', client: 'kr-fd', storage: 'kr-sd', pool: 'VMwareKR', configFile: bad }] });
+    assert.throws(() => A.planFdIni({ vcenterId: 'vc-a', host: '10.20.30.41', password: SSH_PW, vcuser: 'u', vcpass: 'p', vcthumbprint: '56:f5:97:fe:60:52:17:73:d0:73:a2:ed:47:ce:07:28:2c:e6:fe:9c' }), (e) => e.code === 'invalid' && /\/etc\/bareos\//.test(e.message), bad);
+  }
+  S.saveSettings({ sites: [{ vcenterId: 'vc-a', vcserver: 'vc-a.corp', client: 'kr-fd', storage: 'kr-sd', pool: 'VMwareKR', configFile: '/etc/bareos/vmware/vc-a.ini' }] });
 });
 
 test('입력 판정: 차단 주소·앞 글자 - ·잘못된 리소스 이름·비밀번호 없음은 원격 접속 전에 거부', async () => {
@@ -251,9 +314,10 @@ test('④ FD INI: 매핑 경로에 0600 bareos · 지문 정규화 · vCenter �
   A._setDepsForTest({ ssh: srv.ssh, openConsole: fakeConsole().open, sleep: async () => {} });
   const r = await A.setupFdIni(FD);
   assert.equal(r.action, 'created'); assert.equal(r.plugin, 'installed'); assert.match(r.note, /%%/);
+  // C2-1(v2.822.3): 플러그인은 ConfigParser(보간 켬)로 읽는다 — '%' 는 '%%' 로 적어야 '%' 로 읽힌다
   const f = srv.F.get('/etc/bareos/vmware/vc-a.ini');
   assert.equal(f.mode, '0600'); assert.equal(f.owner, 'bareos');
-  assert.equal(f.content, `${A.MARKER}\n[vmware_plugin_options]\nvcserver=vc-a.corp\nvcuser=svc-backup@vsphere.local\nvcpass=Vc%Pa ss!\nvcthumbprint=56F597FE60521773D073A2ED47CE07282CE6FE9C\n`);
+  assert.equal(f.content, `${A.MARKER}\n[vmware_plugin_options]\nvcserver=vc-a.corp\nvcuser=svc-backup@vsphere.local\nvcpass=Vc%%Pa ss!\nvcthumbprint=56F597FE60521773D073A2ED47CE07282CE6FE9C\n`);
   assert.ok(!srv.st.cmds.join('\n').includes('Vc%Pa') && !JSON.stringify(r).includes('Vc%Pa'));
   // 다시 실행 = 포탈 파일이라 updated
   const again = fakeServer({ files: { '/etc/bareos/vmware/vc-a.ini': f } });
@@ -361,6 +425,13 @@ test('⑤ 라우트: 권한·범위·데모·OTP 게이트 · 입력 오류는 O
   A._setDepsForTest({ ssh: foreign.ssh, openConsole: fakeConsole().open, sleep: async () => {} });
   const cf = await call('admin', '/director', { ...DIR_BODY, otp: generateToken(SECRET, { counter: now + 1 }) });
   assert.equal(cf.s, 409); assert.equal(cf.j.code, 'conflict');
+
+  // I2-10(v2.822.3): 검사 출력은 남의 리소스 비밀번호 줄을 그대로 찍을 수 있다(lex.cc) — 응답에는 싣되(관리자) 감사에는 싣지 않는다
+  const { setupAuditReason } = await import('../src/routes/api/bareosBackup.js');
+  const leakErr = Object.assign(new Error('Director 설정 검사(bareos-dir -t)가 실패했습니다: Config error: client/x.conf line 4: Password = "foreign-secret-77"'), { code: 'config-test' });
+  assert.ok(!setupAuditReason(leakErr).includes('foreign-secret-77'), '감사 사유에 원격 출력이 없다');
+  assert.match(setupAuditReason(leakErr), /^config-test Director 설정 검사/);
+  assert.match(setupAuditReason(Object.assign(new Error('이 주소에는 접속할 수 없습니다'), { code: 'invalid' })), /^invalid 이 주소에는/);
 
   const logs = JSON.stringify(auditMod.listAudit({ limit: 500 }));
   for (const s of [pw, SSH_PW, 'VcSecret-9']) assert.ok(!logs.includes(s), '감사에 비밀 없음');

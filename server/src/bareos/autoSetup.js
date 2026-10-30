@@ -25,7 +25,8 @@ import { remoteTmpDir } from '../agent/deploy.js';
 import { openConsole } from './console.js';
 import { probe } from './director.js';
 import { isResourceName } from './names.js';
-import { loadSettings, saveSettings, directorIssue } from './settings.js';
+import { loadSettings, saveSettings, directorIssue, directorCred } from './settings.js';
+import { bareosAuthGuard } from './service.js';
 import { ipBlockReason, ssrfBlockReasonResolved } from '../util/ssrfBlock.js';
 
 /**
@@ -105,7 +106,10 @@ export function iniValueIssue(v, what, max) {
 
 /** FD 자격증명 INI 본문(순수). 첫 줄은 MARKER. */
 export function fdIniText({ vcserver, vcuser, vcpass, vcthumbprint }) {
-  return [MARKER, '[vmware_plugin_options]', `vcserver=${vcserver}`, `vcuser=${vcuser}`, `vcpass=${vcpass}`, `vcthumbprint=${vcthumbprint}`, ''].join('\n');
+  // v2.822.3(C2-1 — 플러그인 소스 확인): bareos-fd-vmware 는 configparser.ConfigParser()(보간 켬)로 읽고 IOError 만 잡는다 —
+  //   값의 '%' 는 보간 문법이라 InterpolationSyntaxError 로 그 사이트 백업이 전부 실패했다. '%%' 로 적으면 '%' 로 읽힌다.
+  const ini = (v) => String(v).replace(/%/g, '%%');
+  return [MARKER, '[vmware_plugin_options]', `vcserver=${vcserver}`, `vcuser=${ini(vcuser)}`, `vcpass=${ini(vcpass)}`, `vcthumbprint=${vcthumbprint}`, ''].join('\n');
 }
 
 /** 출력에서 비밀을 가린다(검사 출력에 설정 줄이 그대로 실릴 수 있다). */
@@ -162,7 +166,8 @@ async function requireRoot(exec) {
  */
 async function pathState(api, p) {
   // 판정과 읽기를 root 명령 하나로(따로 하면 그 사이에 bareos 계정이 심링크로 바꿔 root 가 다른 파일을 읽을 수 있다).
-  const r = await api.exec(`if [ -L ${p} ]; then echo LINK; elif [ -f ${p} ]; then echo FILE; head -c ${READ_MAX + 1} ${p}; elif [ -e ${p} ]; then echo OTHER; else echo NONE; fi`);
+  // v2.822.3(S2-1 — 재현): 마지막 조각만 보면 **부모 디렉터리**가 심링크일 때(bareos-dir.d 는 bareos 소유 — 패키지가 chown -R) root 가 그 밖을 읽고 썼다.
+  const r = await api.exec(`if ! ${canonDir(p)}; then echo LINK; elif [ -L ${p} ]; then echo LINK; elif [ -f ${p} ]; then echo FILE; head -c ${READ_MAX + 1} ${p}; elif [ -e ${p} ]; then echo OTHER; else echo NONE; fi`);
   const out = String(r?.stdout || '');
   const nl = out.indexOf('\n');
   const k = (nl < 0 ? out : out.slice(0, nl)).trim();
@@ -173,12 +178,18 @@ async function pathState(api, p) {
   return old.split('\n')[0] === MARKER ? { state: 'managed', old } : { state: 'foreign' };
 }
 
+/**
+ * 부모 디렉터리가 정규 경로인가(심링크를 거치지 않는가) — 같은 셸 명령 안에서 install·rm·읽기 바로 앞에 둔다(창을 줄인다).
+ * 남는 창(검사와 install 사이 바꿔치기)은 bareos 계정을 이미 쥔 경우뿐이고, 그 계정은 Director 로서 FD 를 부릴 수 있다(추정 — CLAUDE.md 에 기록).
+ */
+const canonDir = (p) => { const d = path.posix.dirname(p); return `[ "$(readlink -f -- ${d})" = "${d}" ]`; };
+
 /** tmp(0700 root) 에 0600 으로 올리고 install 로 자리에 놓는다(내용은 명령 인자에 싣지 않는다). */
-async function placeFile(api, tmp, i, content, dest, mode) {
+async function placeFile(api, tmp, i, content, dest, mode, owner = 'bareos') {
   const t = `${tmp}/f${i}`;
   await api.writeFile(t, content, 0o600);
-  const r = await api.exec(`install -o bareos -g bareos -m ${mode} ${t} ${dest} && rm -f ${t}`);
-  if (r?.code !== 0) throw fail('remote', `파일을 놓지 못했습니다(${dest}): ${tail(r?.stderr || r?.stdout, 300)}`);
+  const r = await api.exec(`${canonDir(dest)} && install -o ${owner} -g bareos -m ${mode} ${t} ${dest} && rm -f ${t}`);
+  if (r?.code !== 0) throw fail('remote', `파일을 놓지 못했습니다(${dest} — 경로에 심링크가 있거나 쓰기 실패): ${tail(r?.stderr || r?.stdout, 300)}`);
 }
 
 /** 되돌리기 — 새로 만든 것은 지우고 바꾼 것은 옛 내용으로. 실패해도 나머지는 계속한다(남은 것은 보고한다). */
@@ -187,7 +198,7 @@ async function rollback(api, tmp, placed) {
   for (const [i, f] of placed.entries()) {
     try {
       if (f.old == null) {
-        const r = await api.exec(`rm -f ${f.path}`);
+        const r = await api.exec(`${canonDir(f.path)} && rm -f ${f.path}`);
         if (r?.code !== 0) left.push(f.path);
       } else {
         await placeFile(api, tmp, `r${i}`, f.old, f.path, f.mode);
@@ -255,10 +266,17 @@ export async function setupDirector(b = {}) {
   const password = newConsolePassword();
   const res = directorResources({ defaults: cur.defaults, consoleName, consolePassword: password, restoreClient, restoreStorage, restorePool })
     .map((r) => ({ ...r, path: `${DIR_CONF_ROOT}/${r.type}/${r.name}.conf`, content: `${MARKER}\n${r.text}\n`, mode: '0640' }));
-  const mask = (t) => maskSecrets(t, [password, ssh.password]);
+  // v2.822.3(S2-5 — 재현): SSH 비밀번호를 부분 문자열로 가리면 '****-dir' 처럼 가린 자리가 곧 비밀번호가 됐다(감사·응답).
+  //   생성 콘솔 비밀번호만 가리고, 출력에 SSH 비밀번호와 같은 글자가 있으면 출력 전체를 싣지 않는다.
+  const mask = (t) => {
+    const x = String(t ?? '');
+    if (ssh.password.length >= 4 && x.includes(ssh.password)) return '(출력을 싣지 않습니다 — SSH 비밀번호와 같은 글자가 들어 있습니다)';
+    return maskSecrets(x, [password]);
+  };
   // 놓은 파일(옛 내용 포함)은 세션 밖에서도 안다 — 세션이 시한으로 끊기면 새 세션으로 되돌린다.
   const placed = [];
   let settled = false; // 세션 안에서 되돌렸거나(실패) 끝까지 갔다(성공)
+  let reloadTried = false;
 
   let remote;
   try {
@@ -295,6 +313,7 @@ export async function setupDirector(b = {}) {
         }
         const t = await api.exec(env.includes('R') ? 'runuser -u bareos -- bareos-dir -t 2>&1' : 'bareos-dir -t 2>&1', BUDGET.testMs);
         if (t?.code !== 0) throw fail('config-test', `Director 설정 검사(bareos-dir -t)가 실패했습니다: ${tail(mask(t?.stdout || t?.stderr))}`);
+        reloadTried = true;
         const rl = await api.exec(RELOAD_CMD, BUDGET.reloadMs);
         if (rl?.code !== 0) throw fail('remote', `Director reload(bconsole)가 실패했습니다(종료 코드 ${rl?.code ?? '—'}): ${tail(mask(rl?.stdout || rl?.stderr), 400) || '출력 없음'}`);
         settled = true;
@@ -304,7 +323,13 @@ export async function setupDirector(b = {}) {
           const left = await rollback(api, tmp, placed).catch(() => placed.map((x) => x.path));
           // 되돌리지 못한 것이 있으면(세션이 끊긴 경우 등) 바깥이 새 세션으로 다시 되돌린다.
           settled = !left.length;
-          if (settled) e.message = `${e.message} — 넣은 파일을 되돌렸습니다.`;
+          if (settled) {
+            // v2.822.3(C2-4): reload 를 보냈다면(bconsole 이 시한으로 끝나도 Director 는 이미 읽었을 수 있다) 되돌린 뒤 다시 읽힌다 —
+            //   안 그러면 Director 메모리만 새 콘솔 비밀번호가 되어 같은 이름 콘솔로 쓰던 연결이 끊긴다.
+            let again = null;
+            if (reloadTried) again = await api.exec(RELOAD_CMD, BUDGET.reloadMs).catch(() => null);
+            e.message = `${e.message} — 넣은 파일을 되돌렸습니다${reloadTried ? (again?.code === 0 ? '(Director 를 다시 읽혔습니다)' : '(Director 를 다시 읽히지 못했습니다 — 직접 reload 하세요)') : ''}.`;
+          }
         } else settled = true;
         throw e;
       } finally {
@@ -330,13 +355,32 @@ export async function setupDirector(b = {}) {
   }
   if (!pr) {
     const rb = await rollbackInNewSession(ssh, placed, { reload: true });
+    clearStaleAuthStop();
     const undone = !rb.left.length;
     throw fail('console-login', `포탈이 새 콘솔 ‘${consoleName}’ 로 접속하지 못했습니다(${lastErr?.code || 'error'}: ${mask(String(lastErr?.message || lastErr)).slice(0, 300)}). `
       + (undone ? `넣은 파일을 되돌리고 Director 를 다시 읽혔습니다(reload ${rb.reloaded === false ? '실패 — 직접 reload 하세요' : '완료'}). 포탈 설정은 바꾸지 않았습니다.`
         : `${leftText(rb)}. 포탈 설정은 바꾸지 않았습니다.`), { files: remote.files });
   }
-  const saved = saveSettings({ director: { host: ssh.host, port: directorPort, consoleName, password } });
+  // v2.822.3(C2-5·I2-2 — 재현): 저장이 실패하면(비밀 정책 잠금·디스크) Director 만 새 비밀번호가 되고 생성 비밀번호는 잃는다 — 되돌린다.
+  let saved;
+  try {
+    saved = saveSettings({ director: { host: ssh.host, port: directorPort, consoleName, password } });
+  } catch (se) {
+    const rb = await rollbackInNewSession(ssh, placed, { reload: true });
+    clearStaleAuthStop();
+    // 사유는 코드만(오류 원문에 CONFIG_DIR 경로가 실린다)
+    throw fail('save', `새 콘솔 접속은 됐지만 포탈 설정을 저장하지 못했습니다(${se?.code || '저장 오류'}). `
+      + (rb.left.length ? `${leftText(rb)}.` : `넣은 파일을 되돌리고 Director 를 다시 읽혔습니다(reload ${rb.reloaded === false ? '실패 — 직접 reload 하세요' : '완료'}). 포탈 설정은 그대로입니다.`), { files: remote.files });
+  }
   return { ok: true, files: remote.files, test: remote.test, reload: remote.reload, probe: pr, settings: saved.settings, droppedSecrets: saved.droppedSecrets };
+}
+
+/**
+ * v2.822.3(P2-12): reload 뒤 되돌리기 전까지 주기 조회가 옛 비밀번호로 붙어 인증 실패(정지)를 남길 수 있다 — 되돌린 뒤에는 그 정지가
+ * 사실이 아니므로 지운다(남기면 수동 조회가 성공할 때까지 주기 조회가 멈춘다).
+ */
+function clearStaleAuthStop() {
+  try { bareosAuthGuard.clearAuthStop(directorCred(loadSettings()).id); } catch { /* 설정을 못 읽으면 그대로 */ }
 }
 
 /* ───────────────────────── ② 사이트 FD INI ───────────────────────── */
@@ -345,6 +389,9 @@ function siteOf(vcenterId) {
   const site = loadSettings().sites.find((s) => s.vcenterId === String(vcenterId || ''));
   if (!site) throw fail('invalid', '이 vCenter 의 사이트 매핑이 없습니다 — 설정 탭에서 매핑(FD·스토리지·풀·INI 경로)을 먼저 저장하세요.');
   if (!FD_PATH_RE.test(site.configFile) || /(^|\/)\.\.(\/|$)/.test(site.configFile)) throw fail('invalid', '사이트 매핑의 INI 경로가 올바르지 않습니다.');
+  // v2.822.3(S2-2 — 재현): root 로 쓰는 경로는 /etc/bareos/ 아래 .ini 만(예전에는 /etc/cron.d·/etc/sudoers.d 같은 아무 절대 경로나 됐다).
+  //   매핑 저장(normalizeSite)은 그대로 둔다 — 넣으면 예전 매핑이 로드 때 조용히 사라진다. 자동 설정만 거부한다.
+  if (!/^\/etc\/bareos\/[A-Za-z0-9._/-]+\.ini$/.test(site.configFile)) throw fail('invalid', `자동 설정은 /etc/bareos/ 아래 .ini 경로에만 씁니다(지금 매핑: ${site.configFile}) — 매핑의 INI 경로를 바꾸거나 직접 넣으세요.`);
   if (!HOST_RE.test(site.vcserver)) throw fail('invalid', '사이트 매핑의 vcserver 주소가 올바르지 않습니다.');
   return site;
 }
@@ -394,7 +441,7 @@ export async function setupFdIni(b = {}) {
   });
   return {
     ok: true, vcenterId: site.vcenterId, path: dest, action: out.action, plugin: out.plugin, pluginText: out.pluginText,
-    ...(b.vcpass.includes('%') ? { note: '비밀번호에 ‘%’ 가 있습니다 — 플러그인의 INI 해석 방식에 따라 ‘%%’ 로 적어야 할 수 있습니다(미확인). 첫 백업 로그로 확인하세요.' } : {}),
+    ...(/%/.test(`${b.vcpass}${b.vcuser}`) ? { note: '값의 ‘%’ 는 플러그인 INI 해석(보간)에 맞춰 ‘%%’ 로 적었습니다.' } : {}),
   };
 }
 

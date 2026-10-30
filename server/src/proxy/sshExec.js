@@ -595,12 +595,20 @@ function execPaged(conn, command, { maxPages, ...rest } = {}) {
 // v2.612 LEFT2612-07: SFTP 읽기 상한 — 예전 sftp.readFile 은 파일 전량을 메모리로 읽었다(대상 호스트의 그 파일이 비정상적으로
 //   크면 중앙 메모리가 그만큼 는다). 읽는 파일은 설치 디렉터리 JSON·haproxy.cfg 같은 작은 설정이다. exec 출력 상한과 같은 값.
 const SFTP_READ_MAX = EXEC_MAX_OUTPUT;
+// v2.822.3(I2-1·P2-8 — 재현): 세 함수 모두 SFTP 채널을 **닫지 않았다**(ssh2 의 스트림 close 는 파일 핸들만 닫는다) — 파일마다 세션 채널이
+//   쌓여 sshd MaxSessions(기본 10)를 넘으면 그 뒤 exec 가 'Channel open failure' 로 거부됐다(Bareos 자동 설정 첫 실행 실패 ·
+//   실패 뒤 되돌리기가 깨져 '세션이 끊겨' 라는 틀린 문구 · RMA·엣지 배포도 같은 함수). 끝나면(성공·실패 모두) sftp.end().
+const endSftp = (sftp) => { try { sftp?.end?.(); } catch { /* 이미 닫힘 */ } };
 function sftpReadFile(conn, path, { maxBytes = SFTP_READ_MAX } = {}) {
   const cap = Math.max(1, Number(maxBytes) || SFTP_READ_MAX);
   const tooBig = (n) => new Error(`SFTP 파일 크기 상한(${Math.ceil(cap / 1024)}KB) 초과${n != null ? `(${Math.ceil(n / 1024)}KB)` : ''} — 읽지 않았습니다: ${path}`);
-  return new Promise((resolve, reject) => {
+  return new Promise((res0, rej0) => {
+    let ch = null;
+    const resolve = (v) => { endSftp(ch); res0(v); };
+    const reject = (e) => { endSftp(ch); rej0(e); };
     conn.sftp((err, sftp) => {
       if (err) return reject(err);
+      ch = sftp;
       // ① stat 으로 먼저 거른다 ② 그 사이 파일이 자라도 스트림이 상한+1 바이트까지만 읽는다(stat 만 믿지 않는다).
       sftp.stat(path, (se, st) => {
         if (se) return reject(se);
@@ -627,7 +635,7 @@ function sftpPutFile(conn, localPath, remotePath) {
   return new Promise((resolve, reject) => {
     conn.sftp((err, sftp) => {
       if (err) return reject(err);
-      sftp.fastPut(localPath, remotePath, (e) => (e ? reject(e) : resolve()));
+      sftp.fastPut(localPath, remotePath, (e) => { endSftp(sftp); return e ? reject(e) : resolve(); });
     });
   });
 }
@@ -636,9 +644,11 @@ function sftpWriteFile(conn, path, content, mode = 0o644) {
   return new Promise((resolve, reject) => {
     conn.sftp((err, sftp) => {
       if (err) return reject(err);
+      let done = false;
+      const fin = (fn, v) => { if (done) return; done = true; endSftp(sftp); fn(v); };
       const ws = sftp.createWriteStream(path, { mode });
-      ws.on('close', resolve);
-      ws.on('error', reject);
+      ws.on('close', () => fin(resolve));
+      ws.on('error', (e) => fin(reject, e));
       ws.end(Buffer.isBuffer(content) ? content : Buffer.from(content));
     });
   });

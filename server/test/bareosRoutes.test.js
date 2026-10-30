@@ -37,11 +37,12 @@ const HIST = (name) => [
   { jobid: 120, name, type: 'B', level: 'I', jobstatus: 'f', starttime: '2026-10-22 02:00:00', endtime: '2026-10-22 02:01:00', jobbytes: 0, jobfiles: 0, joberrors: 1 },
   { jobid: 130, name, type: 'B', level: 'I', jobstatus: 'T', starttime: '2026-10-23 02:00:00', endtime: '2026-10-23 02:05:00', jobbytes: 12, jobfiles: 3, joberrors: 0 },
 ];
-function handle(cmd) {
+async function handle(cmd) {
   D.cmds.push(cmd);
+  if (D.gate && (!D.gateFor || D.gateFor(cmd))) await D.gate;   // 시험이 명령을 붙잡아 둔다(동시성 시험 — 결정적으로)
   const kv = Object.fromEntries([...cmd.matchAll(/(\w+)=("(?:\\.|[^"])*"|\S+)/g)].map((m) => [m[1], m[2]]));
   if (cmd === '.clients') return { clients: [{ name: 'kr-fd' }] };
-  if (cmd === '.jobs') return { jobs: [...D.jobs].map(([name, j]) => ({ name, enabled: j.enabled !== false })) };   // 실제처럼 enabled(메모리 값)
+  if (cmd === '.jobs') return D.emptyJobs ? { jobs: [] } : { jobs: [...D.jobs].map(([name, j]) => ({ name, enabled: j.enabled !== false })) };   // 실제처럼 enabled(메모리 값)
   if (cmd.startsWith('configure add job')) {
     if (D.jobs.has(kv.name)) return { error: [`Resource "Job" with name "${kv.name}" already exists.`] };
     D.jobs.set(kv.name, { enabled: true }); return { add: { resource: 'Job', name: kv.name, filename: `/etc/bareos/bareos-dir.d/job/${kv.name}.conf` } };
@@ -375,6 +376,40 @@ test('⑩ v2.822 확정 결함: C3 동시 등록·원장 못 씀·원장 손상 
   assert.equal(D.jobs.get(j6.bareosJob).enabled, false, '비활성 대상을 다시 껐다');
   for (const n of retired) assert.equal(D.jobs.get(n).enabled, false, `지운 대상 ${n} 을 다시 껐다`);
   assert.ok(p.j.poller.redisabled >= 1 + retired.length);
+  // I2-5(v2.822.3): `.jobs` 가 한 번 비어 오면(ACL·일시 오류) 지운 잡 기록을 지우지 않고, 대상을 '없음' 으로 칠하지도 않는다
+  const keepRetired = registry.retiredNames().length;
+  D.emptyJobs = true;
+  await call('admin', 'POST', '/poll');
+  D.emptyJobs = false;
+  assert.equal(registry.retiredNames().length, keepRetired);
+  assert.equal(registry.getJob(j6.id).missingInDirector, false);
+  // C2-3(v2.822.3): 자동 설정의 reload 뒤 대조를 앞당긴다 — requestReconcile 이 정기 대조를 기다리지 않고 다시 끈다
+  const poller = await import('../src/bareos/poller.js');
+  // ① 폴러가 바쁠 때 요청하면 표시만 남기고 다음 정기 틱(대조 틱이 아니어도)에 대조한다
+  poller._resetPollerForTest();
+  await poller.pollOnce({ trigger: 'timer' });   // 틱 1 = 정기 대조
+  for (const j of D.jobs.values()) j.enabled = true;
+  registry.markPending(j6.id, { jobid: 990001, level: 'I', by: 't' });   // 할 일이 있어야 접속한다(붙잡을 명령)
+  let rel; D.gate = new Promise((r) => { rel = r; }); D.gateFor = (c) => c === 'llist jobid=990001';
+  const busyPoll = poller.pollOnce({ trigger: 'timer' });   // 틱 2 — 대조 틱이 아니다
+  for (let i = 0; i < 100 && !poller.pollerStatus().busy; i++) await new Promise((r) => setTimeout(r, 10));
+  poller.requestReconcile();   // 바쁘다 — 표시만
+  rel(); D.gate = null; D.gateFor = null;
+  const r2 = await busyPoll;
+  assert.equal(r2.reconciled, false, '틱 2 는 대조하지 않았다');
+  const r3 = await poller.pollOnce({ trigger: 'timer' });   // 틱 3 — 대조 틱이 아니지만 표시가 있다
+  assert.equal(r3.reconciled, true, '표시가 있으면 다음 틱에 대조한다');
+  assert.equal(D.jobs.get(j6.bareosJob).enabled, false);
+  registry.clearPending(j6.id, 't');
+  // ② 바쁘지 않으면 바로
+  for (const j of D.jobs.values()) j.enabled = true;
+  const disables = D.cmds.filter((c) => c.startsWith('disable job=')).length;
+  poller.requestReconcile();
+  for (let i = 0; i < 100 && D.cmds.filter((c) => c.startsWith('disable job=')).length === disables; i++) await new Promise((r) => setTimeout(r, 20));
+  assert.ok(D.cmds.filter((c) => c.startsWith('disable job=')).length > disables, '대조를 바로 돌려 다시 끈다');
+  assert.equal(D.jobs.get(j6.bareosJob).enabled, false);
+  for (let i = 0; i < 200 && poller.pollerStatus().busy; i++) await new Promise((r) => setTimeout(r, 20));   // 앞당긴 대조가 끝나기를
+
   D.jobs.delete(retired[0]);   // 관리자가 conf 를 지우고 reload
   await call('admin', 'POST', '/poll');
   assert.ok(!registry.retiredNames().some((r) => r.name === retired[0]), 'Director 에서 사라진 잡은 기록에서도 지운다');
@@ -420,6 +455,21 @@ test('⑩ v2.822 확정 결함: C3 동시 등록·원장 못 씀·원장 손상 
   assert.equal(dd.s, 200, dd.t);
   assert.match(dd.j.note, /원장에서만/);
   assert.equal(D.cmds.slice(before).filter((x) => x.includes('pv-demo-vm-1')).length, 0, '실제 Director 에 데모 잡 명령을 보내지 않는다');
+
+  // C2-14(v2.822.3): 활성 전환·취소도 대상마다 한 번에 하나 — 삭제와 겹치면 Director 잡이 켜진 채 원장에서 사라졌다
+  store.snapshot.vms.push({ id: 'vc-a:vm-10', vcenterId: 'vc-a', name: 'app-10', powerState: 'POWERED_OFF', snapshotCount: 0, vcDcPath: 'DC-A', folderPath: '/app' });
+  assert.equal((await call('admin', 'POST', '/jobs', { vcenterId: 'vc-a', vmId: 'vc-a:vm-10' })).s, 201);
+  const j10 = registry.findByVm('vc-a', 'vc-a:vm-10');
+  // 삭제가 Director 의 disable 에서 붙잡혀 있는 동안(잠금을 쥔 채) PATCH 가 오면 409 — 잠금이 없으면 PATCH 가 잡을 켠 뒤 삭제가 원장을 지웠다
+  let release; D.gate = new Promise((r) => { release = r; }); D.gateFor = (c) => c.startsWith(`disable job=${j10.bareosJob}`);
+  const del10 = call('admin', 'DELETE', `/jobs/${j10.id}`);
+  for (let i = 0; i < 100 && !D.cmds.includes(`disable job=${j10.bareosJob}`); i++) await new Promise((r) => setTimeout(r, 20));
+  const pt = await call('admin', 'PATCH', `/jobs/${j10.id}`, { enabled: true });
+  release(); D.gate = null; D.gateFor = null;
+  assert.equal(pt.s, 409, pt.t);
+  assert.equal((await del10).s, 200);
+  assert.equal(D.jobs.get(j10.bareosJob).enabled, false, '지운 대상의 Director 잡은 꺼진 채');
+  assert.equal(D.cmds.filter((c) => c === `enable job=${j10.bareosJob}`).length, 0, 'PATCH 는 Director 에 닿지 않았다');
 
   // C3 — 원장 파일을 못 쓰면 만든 Director 잡을 끄고 이름을 밝힌다 · 메모리에도 남기지 않는다
   const file = path.join(tmp, 'bareos-jobs.json');

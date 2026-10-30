@@ -10,6 +10,7 @@
  *   lastError: { at, message } | null,
  *   missingInDirector: boolean,                         // Director `.jobs` 에 없으면 true(누가 conf 를 지웠다)
  *   restores: [ { jobid, fromJobids, mode, target, status, state, startedAt, endedAt, by, at } ],   // 최근 RESTORES_KEEP 건
+ *   finishedRuns: [ { jobid, status, state, level, endedAt, errors, checkedAt } ],   // v2.822.3 끝난 백업 실행 최근 FINISHED_KEEP 건(실패 메일용)
  * }
  * retired = [ { name, at, demo? } ]   // v2.822(I3): 원장에서 지운 대상의 Director 잡 이름 — 대조 틱이 다시 켜졌으면 disable 을 다시 보낸다
  *
@@ -30,6 +31,7 @@ const FILE = () => path.join(config.configDir, 'bareos-jobs.json'); // 문자열
 export const MAX_JOBS = 500;
 export const RESTORES_KEEP = 20;
 export const RETIRED_KEEP = 1000;
+export const FINISHED_KEEP = 10;
 
 let _db = null;
 const _loadErr = makeLoadError();
@@ -156,6 +158,14 @@ export function applyRunRow(id, row, now = Date.now()) {
     checkedAt: now,
   };
   let changed = false;
+  // v2.822.3(C2-2 — 재현): 끝난 실행을 따로 남긴다(최근 FINISHED_KEEP 건). 포탈이 시작한 실행이 끝날 때 더 큰 jobid(대기 중인 스케줄 실행)가
+  //   이미 lastRun 이면 그 결과가 어디에도 남지 않아 실패 메일에서 빠졌다. 실패 메일(notify)이 이 목록도 본다.
+  if (isFinalStatus(row.status) && !(j.finishedRuns || []).some((x) => x.jobid === rec.jobid)) {
+    const { jobid, status, state, level, endedAt, errors } = rec;
+    j.finishedRuns = [...(Array.isArray(j.finishedRuns) ? j.finishedRuns : []), { jobid, status, state, level, endedAt, errors, checkedAt: now }]
+      .sort((a, b) => a.jobid - b.jobid).slice(-FINISHED_KEEP);
+    changed = true;
+  }
   if (j.pending && j.pending.jobid === row.jobid) {
     if (isFinalStatus(row.status)) { j.pending = null; changed = true; }
     else if (j.pending.status !== row.status || j.pending.misses) { j.pending = { ...j.pending, status: row.status, state: rec.state, misses: 0 }; changed = true; }

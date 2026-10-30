@@ -133,3 +133,29 @@ test('등록 — 메일 종류·중앙 전용 기동·엣지 스윕 제외 사�
   const nf = fs.readFileSync(path.join(SRC, 'bareos/notify.js'), 'utf8');
   assert.match(nf, /if \(_timer \|\| isEdge\(\)\) return;/, '엣지는 기동하지 않는다');
 });
+
+test('C2-2(v2.822.3): 포탈 실행이 실패로 끝날 때 더 큰 jobid(스케줄 실행)가 lastRun 이어도 알린다 · 끝나는 순서가 바뀌어도 · 중복 없음', () => {
+  const fin = (jobid, status, state) => ({ jobid, status, state, level: 'I', checkedAt: SINCE + 50 });
+  // ① 포탈 실행 590 이 먼저 실패로 끝남(lastRun 은 대기 중인 600) — finishedRuns 에 590
+  let st = { since: SINCE, runs: { a: 500 }, seen: {}, restores: {} };
+  const a1 = job('a', run(600, 'C', 'queued'), { finishedRuns: [fin(590, 'f', 'error')] });
+  let out = collectBareosFailures([a1], st);
+  assert.deepEqual(out.rows.map((r) => r.jobid), [590]);
+  st = { ...st, runs: { ...st.runs, ...out.marks.runs }, seen: { ...out.marks.seen } };
+  // 600 이 성공으로 끝남 — 새 알림 없음 · 590 을 다시 알리지 않는다
+  out = collectBareosFailures([job('a', run(600, 'T', 'ok'), { finishedRuns: [fin(590, 'f', 'error'), fin(600, 'T', 'ok')] })], st);
+  assert.equal(out.rows.length, 0);
+  // ② 순서 반대 — 스케줄 실행 600 이 먼저 끝나고 포탈 실행 590 은 아직 진행 중(pending) → 커서는 590 앞에서 멈춘다
+  st = { since: SINCE, runs: { b: 500 }, seen: {}, restores: {} };
+  out = collectBareosFailures([job('b', run(600, 'T', 'ok'), { pending: { jobid: 590 }, finishedRuns: [fin(600, 'T', 'ok')] })], st);
+  assert.equal(out.rows.length, 0);
+  assert.equal(out.marks.runs.b, 589, '진행 중인 포탈 실행 앞에서 멈춘다');
+  assert.deepEqual(out.marks.seen.b, [600]);
+  st = { ...st, runs: { b: 589 }, seen: { b: [600] } };
+  // 그 뒤 590 이 실패로 끝남 — 커서(589)보다 크므로 알린다 · 600 은 seen 이라 다시 알리지 않는다
+  out = collectBareosFailures([job('b', run(600, 'T', 'ok'), { finishedRuns: [fin(590, 'E', 'error'), fin(600, 'T', 'ok')] })], st);
+  assert.deepEqual(out.rows.map((r) => r.jobid), [590]);
+  assert.equal(out.marks.runs.b, 590);
+  assert.deepEqual(out.marks.seen.b, [600], '600 은 커서보다 커도 seen 이라 다시 알리지 않는다');
+  assert.equal(collectBareosFailures([job('b', run(600, 'T', 'ok'), { finishedRuns: [fin(590, 'E', 'error'), fin(600, 'T', 'ok')] })], { ...st, runs: { b: 590 }, seen: { b: [600] } }).rows.length, 0, '다음 틱에 중복 없음');
+});
