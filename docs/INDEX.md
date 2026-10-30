@@ -26,6 +26,7 @@
 | 문서 | 용도 |
 |---|---|
 | [../packaging/offline/OFFLINE-INSTALL.md](../packaging/offline/OFFLINE-INSTALL.md) | 에어갭(Rocky Linux 9) 오프라인 설치 패키지의 구성·설치·업그레이드 상세 |
+| [BAREOS-VMWARE-ROCKY9-INSTALL.md](BAREOS-VMWARE-ROCKY9-INSTALL.md) | Bareos 설치 — Rocky 9 · vSphere 8/9 VM 백업(VDDK 9.0 · pyVmomi 8.x · 저장 경로 /mnt/bareos · 사이트별 FD+SD · 포탈 연동) |
 | [../packaging/README.md](../packaging/README.md) | 패키징 개요 — 오프라인 패키지 빌드 방법(`build-package.sh`) |
 | [../packaging/windows/README-WINDOWS.md](../packaging/windows/README-WINDOWS.md) | Windows 수집 에이전트/포탈 오프라인 설치 |
 | [../packaging/DISTRIBUTED-COLLECTION.md](../packaging/DISTRIBUTED-COLLECTION.md) | 분산 수집 아키텍처 — DC별 수집 에이전트 + 중앙 병합(전력 iDRAC/OME) |
@@ -148,6 +149,7 @@
 | [ARCH-CHECK.md](ARCH-CHECK.md) | 아키텍처 점검(특수 기능 › 포탈 점검) — 판정 계약 (v2.614) |
 | [ARCH-HEAVY-JOB-ISOLATION.md](ARCH-HEAVY-JOB-ISOLATION.md) | 대용량 작업 격리 아키텍처 — vCenter 수집 프로세스 분리 vs worker_threads |
 | [ARCHITECTURE.md](ARCHITECTURE.md) | 아키텍처 — 코드 지도와 데이터 흐름 |
+| [BAREOS-VMWARE-ROCKY9-INSTALL.md](BAREOS-VMWARE-ROCKY9-INSTALL.md) | Bareos 설치 가이드 — Rocky Linux 9 · VMware vSphere 8/9 게스트 VM 백업 (저장 경로 `/mnt/bareos`) |
 | [AUDIT-2026-06-27.md](AUDIT-2026-06-27.md) | 전체 소스 보안·버그 감사 (2026-06-27) |
 | [AUDIT-2026-08-13.md](AUDIT-2026-08-13.md) | 전체 소스 보안·버그 감사 (2026-08-13) |
 | [AUDIT-2026-08-17.md](AUDIT-2026-08-17.md) | 전체 소스 보안·취약점 감사 (2026-08-17) |
