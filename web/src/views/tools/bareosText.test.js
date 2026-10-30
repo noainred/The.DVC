@@ -6,6 +6,7 @@ import {
   folderOptions, inFolder, pickCap, bulkSummary, NO_FOLDER, diagView,
   driftText, restorePointsNote, directorPatch, outcomeUnknown, missingText,
   directorStatus, preflightView, preflightSummary, autoSetupFdPluginText, fillEmptyMapping, directorFormPatch, WEEKDAYS, newMappingRow,
+  isRelayDir, relayWaitMs, withRelayWait, unknownOutcomeText, directorChipTitle, secText,
 } from './bareosText.js';
 
 describe('bareosText (v2.820 Bareos VM 백업)', () => {
@@ -278,6 +279,31 @@ describe('작업 결과 요약(v2.822.3 — 현장 jobid 8 로그 모양)', () =
     expect(directorPatch({ host: 'a', port: 9101, consoleName: 'p' }, { host: 'a', port: 9101, consoleName: 'p', agent: 'PL' })).toBe(null);   // 칸이 없으면 건드리지 않는다
     expect(directorStatus({ configured: true, poll: { relay: 'sent', ok: null } }).label).toBe('엣지 대행 중');
     expect(directorStatus({ configured: true, poll: { relay: 'pending', ok: true } }).label).toBe('정상');   // 지난 결과가 있으면 그것
+  });
+
+  it('v2.824 검토 — 대행 시한은 API 값(W3·W4·W9) · 504 는 결과 모름(W5) · 요약에 대행 중·조회 전(W6) · 칩 설명(W7)', () => {
+    const limits = { pickupMs: 120_000, secretPickupMs: 90_000, resultMs: { catalog: 150_000, 'setup.director': 480_000 } };
+    expect(relayWaitMs(limits, 'catalog')).toBe(120_000 + 150_000 + 15_000);
+    expect(relayWaitMs(limits, 'setup.director', { setup: true })).toBe(90_000 + 480_000 + 15_000);
+    expect(relayWaitMs(null, 'catalog')).toBe(null);
+    expect(relayWaitMs(limits, 'nope')).toBe(null);
+    const base = { retries: 0, timeoutMs: 60_000 };
+    expect(withRelayWait(base, { agent: 'PL' }, limits, 'catalog')).toEqual({ retries: 0, timeoutMs: 285_000 });
+    expect(withRelayWait(base, { relay: true }, limits, 'catalog').timeoutMs).toBe(285_000);   // 가린 목록도
+    expect(withRelayWait(base, { agent: '' }, limits, 'catalog')).toBe(base);   // 중앙 직접은 그대로
+    expect(isRelayDir({ agent: 'x' })).toBe(true); expect(isRelayDir({})).toBe(false);
+    expect(secText(120_000)).toBe('2분'); expect(secText(90_000)).toBe('1분 30초'); expect(secText(45_000)).toBe('45초'); expect(secText(null)).toBe('—');
+    expect(outcomeUnknown(Object.assign(new Error('결과 모름'), { status: 504 }))).toBe(true);
+    expect(outcomeUnknown(Object.assign(new Error('보내지 않음'), { status: 503 }))).toBe(false);
+    expect(unknownOutcomeText('복원', new Error('signal timed out'))).toMatch(/^복원 결과를 확인하지 못했습니다 — 이미 시작됐을 수 있습니다/);
+    expect(unknownOutcomeText('등록')).not.toMatch(/`/);
+    const line = directorLine({ configured: true, directors: [
+      { configured: true, poll: { ok: true } }, { configured: true, poll: { relay: 'sent', ok: null } }, { configured: true, poll: null },
+    ], poller: {}, defaults: {} });
+    expect(line).toMatch(/정상 1 · 엣지 대행 중 1 · 조회 전 1/);
+    expect(directorChipTitle({ configured: true, agent: 'PL', poll: { relay: 'pending', ok: null } })).toMatch(/법인 엣지 ‘PL’ 가 대신 조회/);
+    expect(directorChipTitle({ configured: true, poll: { ok: false, error: 'E' } })).toBe('E');
+    expect(directorChipTitle({ configured: true, poll: { ok: true } })).toBe('');
   });
 
   it('v2.823 검토 — 거부 확정은 결과 모름이 아니다(W7) · 저장 전 행은 이유와 함께 남김(W2) · 새 행은 주소·INI 를 미리 · INI 경로 겹침 접미사', () => {

@@ -61,7 +61,7 @@ export const RUNTIME_STATE_NAMES = new Set([
   'upgrade-signature-override.json', // v2.810: 업그레이드 서명 확인 시한부 끄기 — 엣지 push·백업 복원으로 다른 포탈에 퍼지거나 되살아나지 않게(signatureOverride.js 도 스스로 등록)
   'ipam-scan-agents.json', // v2.674: 에이전트별 마지막 스캔 보고 — 엣지 보고마다 갱신되는 상태(ipam/scanStore.js 도 스스로 등록한다)
   'upgrade-status.json', // v2.736.2: 업그레이드 확인·적용·자동 확인 기록(upgrade/statusStore.js 도 스스로 등록한다)
-  'bareos-edge-directors.json', // v2.824: 엣지가 받은 Bareos 법인 Director 대행 사본(원본은 중앙 bareos.json — 복원으로 옛 배정이 되살아나지 않게)
+  'bareos-edge-directors.json', // v2.824: 엣지가 받은 Bareos 법인 Director 대행 사본(원본은 중앙 bareos.json — 변경 감시·엣지 push 에서만 뺀다 · 번들에는 들어간다 · 검토 I5)
   'isidu-edge-targets.json', 'isidu-push.json', // v2.736: 엣지가 받은 아이실론 디렉터리 사용량 대상 사본 · 엣지 push 커서(각 모듈도 스스로 등록한다)
   'scan-journal.json', // v2.737: 실행 중 스캔 기록(재시작 뒤 자동 재개 — util/scanJournal.js 도 스스로 등록한다)
   'isidu-mail-state.json', // v2.738: 아이실론 디렉터리 사용량 결과 메일의 대상별 마지막 발송 기록(isidu/notify.js 도 스스로 등록한다)

@@ -74,6 +74,11 @@ async function pollDirector(d, { work, mine, retired, doReconcile, trigger, at, 
   const slice = [...work.slice(off), ...work.slice(0, off)].slice(0, MAX_PENDING_PER_TICK);
   const due = doReconcile || _reconcileDue.has(d.id);
   const seq = _dueSeq.get(d.id) || 0;
+  // v2.824 검토(W7): 엣지가 아직 회신하지 않은 poll 이 있으면 할 일이 없는 틱이어도 '대행 중' 을 유지한다(덮으면 칩이 '조회 전' 으로 깜빡였다)
+  if (relayed(d, demo) && hasPending(d.id, 'poll')) {
+    if (due) _reconcileDue.add(d.id);   // C4: 진행 중 poll 과 겹친 대조 요청을 버리지 않는다(다음 틱에)
+    return { ...base, ok: null, relay: 'pending', idle: !slice.length && !due, checked: 0, updated: 0, reconciled: false, error: '' };
+  }
   if (!slice.length && !due) return { ...base, ok: true, checked: 0, updated: 0, reconciled: false, error: '', idle: true };
   const live = new Set(mine.map((j) => j.bareosJob));
   const disableIfEnabled = [...mine.filter((j) => !j.enabled).map((j) => j.bareosJob), ...retired.filter((r) => !live.has(r.name)).map((r) => r.name)];
@@ -92,12 +97,12 @@ async function pollDirector(d, { work, mine, retired, doReconcile, trigger, at, 
   // v2.824 엣지 대행 Director: 틱이 회신을 기다리지 않는다(엣지가 꺼져 있으면 인출 시한 2분 — 다른 법인 조회를 그만큼 막는다).
   //   Director 마다 진행 중인 poll 은 하나(미회신이면 더 넣지 않는다) · 결과는 도착할 때 같은 반영 함수로 · 화면 상태는 그때 바뀐다.
   if (relayed(d, demo)) {
-    if (hasPending(d.id, 'poll')) return { ...base, ok: null, relay: 'pending', idle: true, checked: 0, updated: 0, reconciled: false, error: '' };
     relayToEdge(d, 'poll', args, { trigger })
       .then((r) => applyPoll(ctx, r), (e) => pollFailed(ctx, e))
       .then((out) => { _byDir.set(d.id, { ...out, relay: 'done' }); })
-      .catch(() => {});
-    return { ...base, ok: null, relay: 'sent', idle: true, checked: 0, updated: 0, reconciled: false, error: '' };
+      .catch((e) => console.warn(`[bareos] ‘${d.name}’ 엣지 대행 조회 결과 반영 실패: ${String(e?.message || e).slice(0, 200)}`));   // C8: 무음 실패 금지
+    // 할 일이 있어 보냈다 — idle 이 아니다(W6: 머리 줄이 '진행 중 실행 없음' 이라고 말하지 않게)
+    return { ...base, ok: null, relay: 'sent', idle: false, checked: 0, updated: 0, reconciled: false, error: '' };
   }
   let r;
   try {
@@ -227,12 +232,19 @@ export async function pollOnce({ trigger = 'timer', reconcile = null, directorId
     const per = results.map((x, i) => (x.status === 'fulfilled' ? x.value : { at, name: targets[i].name, ok: false, error: String(x.reason?.message || x.reason).slice(0, 300), checked: 0, updated: 0 }));
     // v2.823 검토(W4): 할 일이 없어 접속하지 않은 틱(idle)은 마지막으로 실제 접속한 결과를 그대로 둔다 — 덮으면 접속 실패 뒤
     //   idle 틱이 칩을 '정상' 으로 바꿨다. 한 번도 접속하지 않았으면 ok:null('조회 전').
-    targets.forEach((d, i) => {
+    // v2.824 엣지 대행(sent·pending)은 결과가 도착할 때 바뀐다 — 그동안은 마지막으로 도착한 결과를 그대로 두고 표지만 단다.
+    const shown = targets.map((d, i) => {
       const prev = _byDir.get(d.id);
-      const relay = per[i].relay ? { relay: per[i].relay } : {};   // v2.824 엣지 대행 중(sent·pending) — 결과는 도착할 때 바뀐다
-      _byDir.set(d.id, per[i].idle ? (prev && !prev.idle ? { ...prev, idleAt: at, ...relay } : { at: null, name: d.name, ok: null, idle: true, idleAt: at, ...relay }) : per[i]);
+      const x = per[i];
+      const next = x.relay
+        ? (prev && !prev.idle ? { ...prev, relay: x.relay, relayAt: at } : { at: null, name: d.name, ok: null, idle: true, relay: x.relay, relayAt: at })
+        : x.idle ? (prev && !prev.idle ? { ...prev, idleAt: at } : { at: null, name: d.name, ok: null, idle: true, idleAt: at }) : x;
+      _byDir.set(d.id, next);
+      return next;
     });
-    const bad = per.filter((x) => !x.ok);
+    // v2.824 검토(W1 — 재현): 대행 중(ok:null)을 실패로 세면 머리 카드가 빨강이 되고 사유가 빈칸이었다.
+    //   대행 Director 는 **마지막으로 도착한 결과**가 실패일 때만 센다(회신 전이면 세지 않는다) · 중앙 직접은 이 틱의 결과 그대로.
+    const bad = per.map((x, i) => (x.relay ? (shown[i].ok === false ? shown[i] : null) : (!x.ok ? x : null))).filter(Boolean);
     _last = {
       at, trigger, configured: true, demo,
       ok: bad.length === 0,

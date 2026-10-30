@@ -28,7 +28,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { config } from '../config.js';
 import { atomicWriteFileSync, preserveCorrupt, safeLoadText } from '../util/atomicWrite.js';
-import { openSecretsDeep, sealSecretsDeep } from '../security/secretVault.js';
+import { openSecretsDeep, sealSecret, sealSecretsDeep } from '../security/secretVault.js';
 import { accessMoved, dropCarriedSecrets, secretProvided } from '../util/secretCarry.js';
 import { ipBlockReason } from '../util/ssrfBlock.js';
 import { makeLoadError } from '../util/registryCore.js';
@@ -300,6 +300,12 @@ export function addDirector(body = {}) {
  * @throws Error(code invalid|not-found)
  */
 export function updateDirector(id, body = {}) {
+  const { next, d, droppedSecrets } = prepareDirectorUpdate(id, body);
+  persist(next);
+  return { director: publicDirector(d), droppedSecrets };
+}
+
+function prepareDirectorUpdate(id, body) {
   const cur = loadSettings();
   const next = cloneSettings(cur);
   const d = next.directors.find((x) => x.id === id);
@@ -313,8 +319,17 @@ export function updateDirector(id, body = {}) {
   if (moved) droppedSecrets = dropCarriedSecrets(d, body, ['password']);
   const issue = directorIssue(d) || clashIssue(next.directors, d);
   if (issue) throw fail('invalid', issue);
-  persist(next);
-  return { director: publicDirector(d), droppedSecrets };
+  return { next, d, droppedSecrets };
+}
+
+/**
+ * updateDirector 를 저장 없이 미리 판정한다(v2.824 검토 S3 — 엣지 대행 자동 설정은 원격을 바꾼 **뒤에** 중앙이 저장하므로,
+ * 바꾸기 전에 저장이 될지 먼저 본다: 항목 판정·같은 콘솔 충돌·비밀 정책 잠금). 통과해도 그사이 다른 저장이 끼면 실패할 수 있다.
+ * @throws Error(code not-found|invalid|SECRETS_POLICY_UNAVAILABLE …)
+ */
+export function checkDirectorUpdate(id, body = {}) {
+  const { d } = prepareDirectorUpdate(id, body);
+  sealSecret(d.password || 'probe');   // 정책이 잠겨 새 비밀을 봉인할 수 없으면 여기서 던진다(SECRETS_POLICY_UNAVAILABLE) — 결과는 버린다
 }
 
 /**
@@ -379,8 +394,21 @@ export const anyDirectorConfigured = (s = loadSettings()) => s.directors.some((d
  * 'dir_default'(v1 에서 넘어온 Director)는 예전 id('director')를 그대로 써서 올리기 전의 정지 기록을 잇는다(올렸다고 한 번 더 붙지 않게).
  */
 export function directorCred(d) {
-  const id = d?.id === DEFAULT_DIRECTOR_ID ? 'director' : `director:${d?.id || ''}`;
+  // v2.824 검토(S6·I10): 엣지 대행 사본(edgeStore — edgeCopy)은 따로 센다 — 엣지 자기 Director 와 둘 다 dir_default 면 같은 키('director')를 써서
+  //   대행 성공이 엣지 자기 Director 의 인증 정지를 지웠다(틀린 자격으로 다시 붙는다 — 자동 재시도 금지 위반).
+  const id = d?.edgeCopy ? `edge-director:${d?.id || ''}` : d?.id === DEFAULT_DIRECTOR_ID ? 'director' : `director:${d?.id || ''}`;
   return { id, username: `${d?.host || ''}:${d?.port || ''}/${d?.consoleName || ''}`, password: d?.password || '' };
+}
+
+const _connSigKey = crypto.randomBytes(32);
+/**
+ * v2.824 검토(I1 — 재현): 엣지 대행 작업과 엣지 사본이 **같은 접속값**(주소·포트·콘솔 이름·비밀번호)인지 대조하는 표지.
+ * 프로세스 키 HMAC 앞 16자 — 비밀번호를 거꾸로 풀 수 없고 재시작하면 바뀐다(엣지는 다르면 배정을 다시 받아 맞춘다). 로그·화면에 싣지 않는다.
+ */
+export function directorConnSig(d) {
+  if (!d || typeof d !== 'object') return '';
+  const key = `${String(d.host ?? '').trim().toLowerCase()}\n${Number(d.port) || 0}\n${String(d.consoleName ?? '')}\n${String(d.password ?? '')}`;
+  return crypto.createHmac('sha256', _connSigKey).update(key).digest('hex').slice(0, 16);
 }
 
 export function onSettingsChange(cb) { _listeners.add(cb); return () => _listeners.delete(cb); }

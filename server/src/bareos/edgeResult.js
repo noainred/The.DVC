@@ -37,10 +37,12 @@ export const VALUE = Object.freeze({
   catalog: (v) => {
     const r = obj(v); const out = {};
     for (const k of ['clients', 'storages', 'pools', 'schedules', 'jobdefs', 'filesets']) out[k] = names(r[k]);
-    out.errors = Object.fromEntries(Object.entries(obj(r.errors)).filter(([k]) => k in out).map(([k, m]) => [k, str(m, 300)]));
+    // v2.824 검토(S2): 자기 키만(`in` 은 constructor·toString 같은 프로토타입 키를 통과시켰다)
+    out.errors = Object.fromEntries(Object.entries(obj(r.errors)).filter(([k]) => Object.hasOwn(out, k)).map(([k, m]) => [k, str(m, 300)]));
     return out;
   },
-  addJobs: (v) => arr(v).slice(0, 500).map((x0) => { const x = obj(x0); return { key: str(x.key, 200), ok: bool(x.ok), ...(x.name ? { name: str(x.name, 128) } : {}), ...(x.code ? { code: str(x.code, 40) } : {}), ...(x.message ? { message: str(x.message, 300) } : {}) }; }),
+  // key: 부른 쪽이 준 순번(정수) 그대로 — 글자로 바꾸면 일괄 등록이 결과를 하나도 짝짓지 못했다(v2.824 검토 S1·C1 — 재현: Director 에 잡만 생기고 원장 0)
+  addJobs: (v) => arr(v).slice(0, 500).map((x0) => { const x = obj(x0); return { key: Number.isInteger(x.key) && x.key >= 0 && x.key < 1_000_000 ? x.key : str(x.key, 200), ok: bool(x.ok), ...(x.name ? { name: str(x.name, 128) } : {}), ...(x.code ? { code: str(x.code, 40) } : {}), ...(x.message ? { message: str(x.message, 300) } : {}) }; }),
   disableJobs: (v) => arr(v).slice(0, 500).map((x0) => { const x = obj(x0); return { name: str(x.name, 128), ok: bool(x.ok) }; }),
   runJob: (v) => posInt(v),
   setEnabled: () => null,
@@ -81,6 +83,15 @@ export const VALUE = Object.freeze({
   'setup.thumbprint': (v) => { const r = obj(v); const tp = str(r.thumbprint, 40); return { thumbprint: /^[0-9A-F]{40}$/.test(tp) ? tp : '', subject: str(r.subject, 300), notAfter: str(r.notAfter, 60) }; },
 });
 
+/**
+ * 성공 값에 꼭 있어야 하는 것(v2.824 검토 C9) — 없으면 '성공' 으로 받지 않는다. 상태를 바꾼 작업이라 실패로 단정하지 않고 '결과 모름'.
+ * (runJob 의 jobid 가 null 이면 원장에 jobid 없는 실행이, restore 의 rid 가 null 이면 열린 복원이 남았다.)
+ */
+const REQUIRED = Object.freeze({
+  runJob: (v) => v !== null,
+  restore: (v) => v.rid !== null,
+});
+
 /** 엣지가 돌려줄 수 있는 오류 코드(그 밖은 'error'). */
 const CODES = new Set(['invalid', 'conflict', 'not-configured', 'not-found', 'auth', 'pam', 'tls', 'connect', 'closed', 'timeout', 'aborted', 'protocol', 'too-large',
   'jsonrpc', 'blocked', 'remote', 'config-test', 'console-login', 'save', 'ssh-auth', 'ssh-hostkey', 'auth-stopped', 'not-sent', 'unknown', 'unavailable', 'error']);
@@ -93,7 +104,11 @@ export function sanitizeEdgeResult(kind, result) {
   const r = obj(result);
   const fn = VALUE[kind];
   if (!fn) return { ok: false, code: 'error', reason: `알 수 없는 작업 '${str(kind, 40)}'` };
-  if (r.ok === true) return { ok: true, value: fn(r.value) };
+  if (r.ok === true) {
+    const value = fn(r.value);
+    if (REQUIRED[kind] && !REQUIRED[kind](value)) return { ok: false, code: 'unknown', unknown: true, reason: '엣지가 성공이라고 회신했지만 결과 값(jobid)을 읽지 못했습니다 — 실행됐는지 알 수 없습니다. Director 에서 확인하세요.' };
+    return { ok: true, value };
+  }
   const code = CODES.has(r.code) ? r.code : 'error';
   return {
     ok: false, code, reason: str(r.reason, 1800) || '엣지가 사유 없이 실패를 회신했습니다.',

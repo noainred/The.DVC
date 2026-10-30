@@ -2363,13 +2363,16 @@ centralRouter.get('/bareos-config', requireCentral(), async (req, res) => {
   if (registryUnreadable(res, S.settingsLoadError, 'Bareos Director 설정')) return;
   const me = String(agent).trim().toLowerCase();
   res.set('Cache-Control', 'no-store');
-  res.json({ ok: true, agent, directors: S.loadSettings().directors.filter((d) => String(d.agent || '').trim().toLowerCase() === me).map((d) => ({ ...d })) });
+  // connSig: 작업과 사본이 같은 접속값인지 엣지가 대조하는 표지(v2.824 검토 I1 — 비밀번호를 풀 수 없는 HMAC)
+  res.json({ ok: true, agent, directors: S.loadSettings().directors.filter((d) => String(d.agent || '').trim().toLowerCase() === me).map((d) => ({ ...d, connSig: S.directorConnSig(d) })) });
 });
 centralRouter.get('/bareos-ops', requireCentral(), async (req, res) => {
   if (req.centralAuth?.mode !== 'agent') return bareosAgentTokenOnly(res);
-  const { takeEdgeOps } = await import('../bareos/edgeOps.js');
+  const { takeEdgeOps, TAKE_MAX } = await import('../bareos/edgeOps.js');
+  // max: 엣지 워커의 빈 자리(v2.824 검토 P2) — 없거나 틀리면 기본 상한
+  const max = /^[0-9]{1,2}$/.test(String(req.query.max ?? '')) ? Number(req.query.max) : TAKE_MAX;
   res.set('Cache-Control', 'no-store');
-  res.json({ ok: true, ops: takeEdgeOps(req.centralAuth.agent) });
+  res.json({ ok: true, ops: takeEdgeOps(req.centralAuth.agent, max) });
 });
 // Body: { id, result }
 centralRouter.post('/bareos-op-result', requireCentral({ notFound: { ok: false } }), async (req, res) => {

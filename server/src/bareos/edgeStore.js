@@ -34,7 +34,7 @@ export function loadEdgeDirectors() {
         const id = typeof d?.id === 'string' ? d.id : '';
         if (!DIRECTOR_ID_RE.test(id) || directors.some((x) => x.id === id)) continue;
         const rec = readDirectorRecord(d, id);
-        if (rec) directors.push(rec);
+        if (rec) directors.push(withEdgeMeta(rec, d));
         if (directors.length >= MAX_DIRECTORS) break;
       }
       _cache = { directors };
@@ -53,6 +53,13 @@ export function loadEdgeDirectors() {
 export function edgeStoreLoadError() { loadEdgeDirectors(); return _loadErr.get(); }
 export function edgeDirectorById(id) { return loadEdgeDirectors().directors.find((d) => d.id === String(id || '')) || null; }
 
+const SIG_RE = /^[0-9a-f]{16}$/;
+/**
+ * 사본 원소 표지: edgeCopy(인증 정지 키를 엣지 자기 Director 와 나눈다 — settings.directorCred) · connSig(중앙이 준 접속값 표지 —
+ * 작업의 connSig 와 다르면 워커가 배정을 다시 받는다. 모르면 '').
+ */
+function withEdgeMeta(rec, src) { return { ...rec, edgeCopy: true, connSig: SIG_RE.test(src?.connSig) ? src.connSig : '' }; }
+
 function persist(directors) {
   atomicWriteFileSync(FILE(), JSON.stringify(sealSecretsDeep({ version: 1, directors }), null, 2), { mode: 0o600 });
   _cache = { directors };
@@ -69,9 +76,11 @@ export function applyPulledDirectors(list, me) {
   for (const d of (Array.isArray(list) ? list : []).slice(0, MAX_DIRECTORS)) {
     const id = typeof d?.id === 'string' ? d.id : '';
     if (!DIRECTOR_ID_RE.test(id) || next.some((x) => x.id === id) || lc(d?.agent) !== lc(me)) { rejected += 1; continue; }
-    const rec = readDirectorRecord(d, id);
-    if (typeof d.password === 'string' && d.password) rec.password = d.password.slice(0, 512);
-    if (!rec || directorIssue(rec)) { rejected += 1; continue; }
+    const rec0 = readDirectorRecord(d, id);
+    if (!rec0) { rejected += 1; continue; }
+    if (typeof d.password === 'string' && d.password) rec0.password = d.password.slice(0, 512);
+    const rec = withEdgeMeta(rec0, d);
+    if (directorIssue(rec)) { rejected += 1; continue; }
     next.push(rec);
   }
   const ids = new Set(next.map((d) => d.id));
@@ -86,7 +95,8 @@ export function updateEdgeDirectorConn(id, { host, port, consoleName, password }
   const list = loadEdgeDirectors().directors.map((d) => ({ ...d }));
   const d = list.find((x) => x.id === id);
   if (!d) return false;
-  Object.assign(d, { host, port, consoleName, password });
+  // 중앙 저장값의 표지는 아직 모른다('' — 다음 작업이 다른 표지를 가져오면 워커가 배정을 다시 받는다)
+  Object.assign(d, { host, port, consoleName, password, connSig: '' });
   if (directorIssue(d)) return false;
   persist(list);
   return true;

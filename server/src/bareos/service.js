@@ -9,7 +9,7 @@
  */
 import { openConsole, BareosConsoleError } from './console.js';
 import {
-  loadSettings, directorConn, directorCred, directorById, siteFor, siteMissing,
+  loadSettings, directorConn, directorCred, directorConnSig, directorById, siteFor, siteMissing,
 } from './settings.js';
 import { OPS } from './ops.js';
 import { enqueueEdgeOp } from './edgeOps.js';
@@ -115,15 +115,20 @@ function edgeError(r) {
  * 인증 정지는 중앙이 그 Director 의 cred 로 기록한다(엣지 회신의 authFailed — 주기 조회는 정지면 큐에 넣지 않는다).
  * @param {{ secretArgs?: object }} [o] 자동 설정 대행만(1회 전달 — edgeOps 머리말)
  */
-export async function relayToEdge(dir, kind, args = {}, { trigger = 'manual', signal = null, secretArgs = null } = {}) {
+export async function relayToEdge(dir, kind, args = {}, { trigger = 'manual', signal = null, secretArgs = null, onLate = null } = {}) {
   const cred = directorCred(dir);
   if (trigger === 'timer') {
     const stop = bareosAuthGuard.authStopFor(cred);
     if (stop) throw fail('auth-stopped', `인증 실패로 ‘${dir.name}’ 주기 조회를 멈췄습니다(${stop.reason}) — 설정을 고치면 다시 시작합니다.`);
   }
-  const r = await enqueueEdgeOp(dir, kind, args, { secretArgs, signal });
-  if (r.ok) { if (!kind.startsWith('setup.')) bareosAuthGuard.clearAuthStop(cred.id); return r.value; }
-  if (r.authFailed) bareosAuthGuard.markAuthStopped(cred.id, cred, r.reason);
+  // v2.824 검토(I1 — 재현): 작업에 이 순간의 접속값 표지를 싣는다 — 엣지 사본이 다르면(저장 직후·배정 인출 전) 엣지가 배정을 다시 받고,
+  //   그래도 다르면 Director 에 보내지 않는다(옛 비밀번호로 실패한 것을 새 비밀번호의 인증 정지로 기록하지 않게).
+  const connSig = directorConnSig(dir);
+  const r = await enqueueEdgeOp({ id: dir.id, agent: dir.agent, connSig }, kind, args, { secretArgs, signal, onLate });
+  // 회신을 기다리는 사이 중앙 접속값이 바뀌었으면 그 결과로 정지를 걸거나 풀지 않는다(옛 접속값의 결과다).
+  const sameNow = () => { try { return directorConnSig(directorById(dir.id)) === connSig; } catch { return false; } };
+  if (r.ok) { if (!kind.startsWith('setup.') && sameNow()) bareosAuthGuard.clearAuthStop(cred.id); return r.value; }
+  if (r.authFailed && sameNow()) bareosAuthGuard.markAuthStopped(cred.id, cred, r.reason);
   throw edgeError(r);
 }
 
@@ -140,7 +145,7 @@ export async function runLocalOp(dir, kind, args = {}, { signal = null } = {}) {
  * @param {keyof OPS} kind
  * @param {object} args 직렬화할 수 있는 값만(2차 엣지 대행이 같은 인자를 보낸다)
  */
-export async function onDirector(directorId, kind, args = {}, { trigger = 'manual', signal = null, demoOnly = false, hooks = null } = {}) {
+export async function onDirector(directorId, kind, args = {}, { trigger = 'manual', signal = null, demoOnly = false, hooks = null, onLate = null } = {}) {
   const op = OPS[kind];
   if (!op) throw fail('invalid', `알 수 없는 Director 작업입니다(${kind}).`);
   if (demoOnly && !isDemoActive()) throw fail('demo-only', DEMO_ONLY_REASON);
@@ -148,7 +153,7 @@ export async function onDirector(directorId, kind, args = {}, { trigger = 'manua
     const settings = loadSettings();
     if (!isDemoActive(settings)) {
       const dir = directorById(directorId, settings);
-      if (dir?.agent) return relayToEdge(dir, kind, args, { trigger, signal });
+      if (dir?.agent) return relayToEdge(dir, kind, args, { trigger, signal, onLate });
     }
   }
   // hooks: 중앙 직접 실행에서만 쓰는 함수(예: poll 의 disableNow — 그 순간의 원장으로 고른다). 직렬화하지 않는다(엣지 대행에는 없다).
@@ -238,6 +243,28 @@ async function orphanCleanup(directorId, orphans, demo) {
 }
 
 /**
+ * v2.824 검토(P1 — 재현): 엣지가 등록(addJobs)을 가져간 뒤 시한 안에 회신하지 못해 '결과 모름' 으로 끝났는데 결과가 **늦게** 오면 —
+ * 만든 잡을 그때 원장에 넣는다(이미 대상이면·원장을 못 쓰면 끈다 — orphanCleanup). 버리면 원장 밖 스케줄 잡이 Director 에 영구히 남고,
+ * 다시 등록하면 같은 VM 의 스케줄 잡이 둘이 됐다. 늦은 결과는 edgeOps 가 그 엣지에서 온 것만·정제해서 넘긴다.
+ */
+function lateAddJobs(directorId, ready, by, demo) {
+  return (lr) => {
+    if (!lr?.ok || !Array.isArray(lr.value)) return;
+    const byKey = new Map(lr.value.map((r) => [r.key, r]));
+    const orphans = []; let recorded = 0;
+    for (const { i, prep } of ready) {
+      const r = byKey.get(i);
+      if (!r?.ok || !r.name) continue;
+      try { recordTarget(prep, r.name, by, demo); recorded += 1; } catch (e) { orphans.push({ i, name: r.name, err: e }); }
+    }
+    if (recorded || orphans.length) console.warn(`[bareos] 늦게 도착한 엣지 등록 결과를 반영했습니다(Director ${directorId}): 원장에 넣음 ${recorded} · 넣지 못해 끔 ${orphans.length}`);
+    if (orphans.length) orphanCleanup(directorId, orphans, demo).catch(() => {});
+  };
+}
+/** 엣지 '결과 모름' 의 사유(등록) — Director 에 잡이 생겼을 수 있다는 사실과 늦은 결과 처리를 밝힌다. */
+const addUnknownText = (why) => `${why} — Director 에 잡이 생겼을 수 있습니다. 결과가 늦게 도착하면 포탈이 원장에 넣거나(이미 대상이면) 그 잡을 끕니다. 다시 등록하기 전에 목록을 새로 고쳐 확인하세요.`;
+
+/**
  * 백업 대상 등록(Director 잡 생성 + 원장). 범위 판정은 라우트가 먼저 한다.
  * @param {{ vcenterId, vmId, level?, schedule?, by, demo? }} o
  * @returns {Promise<object>} 원장 job
@@ -246,7 +273,11 @@ export async function createBackupTarget({ vcenterId, vmId, level, schedule, by,
   const prep = prepareTarget({ vcenterId, vmId, level, schedule });
   const key = claimVm(prep);
   try {
-    const [r] = await onDirector(prep.directorId, 'addJobs', { items: [{ key: 0, vcenterId: prep.vm.vcenterId, moref: prep.moref, base: prep.base }] });
+    let r;
+    try {
+      [r] = await onDirector(prep.directorId, 'addJobs', { items: [{ key: 0, vcenterId: prep.vm.vcenterId, moref: prep.moref, base: prep.base }] },
+        { onLate: lateAddJobs(prep.directorId, [{ i: 0, prep }], by, demo) });
+    } catch (e) { if (e?.code === 'unknown') throw fail('unknown', addUnknownText(String(e.message || e).slice(0, 300))); throw e; }
     if (!r?.ok) throw fail(r?.code === 'skipped' ? 'connect' : (r?.code || 'error'), r?.message || 'Director 잡을 만들지 못했습니다.');
     try { return recordTarget(prep, r.name, by, demo); } catch (e) {
       const why = await orphanCleanup(prep.directorId, [{ name: r.name, err: e }], demo);
@@ -279,10 +310,12 @@ export async function createBackupTargets({ vcenterId, vmIds, level, schedule, b
   try {
     let results;
     try {
-      results = await onDirector(directorId, 'addJobs', { items: ready.map(({ i, prep }) => ({ key: i, vcenterId: prep.vm.vcenterId, moref: prep.moref, base: prep.base })) });
+      results = await onDirector(directorId, 'addJobs', { items: ready.map(({ i, prep }) => ({ key: i, vcenterId: prep.vm.vcenterId, moref: prep.moref, base: prep.base })) },
+        { onLate: lateAddJobs(directorId, ready, by, demo) });
     } catch (e) {
       // 세션을 열지 못했다(설정 미완·접속·인증) — 준비를 통과한 VM 전부 같은 사유. 원장·Director 는 바뀌지 않았다.
-      const why = String(e?.message || e).slice(0, 300);
+      //   예외: 엣지 대행 '결과 모름'(unknown) — 엣지가 실행했을 수 있다(P1 — 늦은 결과는 lateAddJobs 가 처리한다).
+      const why = e?.code === 'unknown' ? addUnknownText(String(e?.message || e).slice(0, 300)) : String(e?.message || e).slice(0, 300);
       for (const { i } of ready) if (!out[i].reason) out[i].reason = why;
       const err = fail(e?.code || 'connect', why); err.results = out; throw err;
     }

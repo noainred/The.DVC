@@ -12,7 +12,7 @@ import { config } from '../../config.js';
 import { store } from '../../store.js';
 import { logAudit } from '../../audit.js';
 import {
-  publicSettings, publicDirector, saveSettings, addDirector, updateDirector, deleteDirector, settingsLoadError, settingsRev,
+  publicSettings, publicDirector, saveSettings, addDirector, updateDirector, checkDirectorUpdate, deleteDirector, settingsLoadError, settingsRev,
   directorConn, directorCred, directorById, loadSettings, jobDirectorId, siteMissing, anyDirectorConfigured, LIMITS,
 } from '../../bareos/settings.js';
 import {
@@ -24,7 +24,8 @@ import { secretProvided } from '../../util/secretCarry.js';
 import {
   onDirector, relayToEdge, isDemoActive, effectiveSettings, eligibility, createBackupTarget, createBackupTargets, bareosAuthGuard,
 } from '../../bareos/service.js';
-import { pendingView } from '../../bareos/edgeOps.js';
+import { pendingView, relayLimits } from '../../bareos/edgeOps.js';
+import { listAgentTokens } from '../../central/agentTokens.js';
 import { pickAgent } from '../../cvp/formChoices.js';
 import { knownAgentNames } from '../../central/knownAgents.js';
 import { pollerStatus, pollOnce, requestReconcile } from '../../bareos/poller.js';
@@ -348,6 +349,7 @@ api.get('/tools/bareos-backup', adminOnly, (req, res) => {
     jobs: views,
     ...(scoped ? { scoped: true, omittedOutOfScope: omitted } : {}),
     poller,
+    relayLimits: relayLimits(),   // v2.824 엣지 대행 Director 의 화면 시한(서버 대기 시간 — 숫자를 화면에 박지 않는다)
     settingsLoadError: loadErrorView(settingsLoadError(), detail),
     registryLoadError: loadErrorView(registryLoadError(), detail),
   });
@@ -367,7 +369,10 @@ api.get('/tools/bareos-backup/settings', adminOnly, fullScopeOnly, (req, res) =>
     directors: pub.directors.map((d) => ({ ...d, jobs: jobsByDir.get(d.id) || 0, busy: _setupBusy.has(d.id) })),
     rev: revToken(),   // 매핑·기본값 저장 때 돌려보낸다(P4 — 다른 화면의 저장을 덮지 않게)
     agents: (() => { try { return knownAgentNames(); } catch { return []; } })(),   // v2.824 담당 엣지 고르기(중앙이 아는 엣지)
+    // v2.824 검토(W11·I3): 대행 작업 인출은 엣지별 개별 토큰 전용 — 토큰이 있는 엣지 이름(화면이 없는 이름을 '대행 불가' 로 표시)
+    agentsWithToken: (() => { try { return listAgentTokens().map((t) => t.agent); } catch { return []; } })(),
     relayPending: pendingView(),   // v2.824 엣지 대행 대기·진행 작업(인자·비밀 없음)
+    relayLimits: relayLimits(),
     limits: LIMITS,
     vcenters: (snap?.vcenters || []).map((v) => ({ id: v.id, name: v.name || v.id, host: String(v.host || '').replace(/^https?:\/\//, '').replace(/\/.*$/, '') })),
     jobsByVcenter: Object.fromEntries([...listJobs().filter((j) => !j.demo).reduce((m, j) => m.set(j.vcenterId, (m.get(j.vcenterId) || 0) + 1), new Map())]),
@@ -467,10 +472,10 @@ api.post('/tools/bareos-backup/settings/directors/:directorId/test', adminOnly, 
       return res.json({ ok: true, ...result, stages, demo: true });
     }
     const fresh = secretProvided(b.password);
-    // v2.824 엣지 대행 Director: 중앙이 접속하지 않는다 — 그 엣지가 자기 사본(저장값 — 저장 뒤 최대 5분 늦게 반영)으로 시험한다.
+    // v2.824 엣지 대행 Director: 중앙이 접속하지 않는다 — 그 엣지가 자기 사본으로 시험한다(작업의 접속값 표지가 다르면 엣지가 배정을 먼저 다시 받는다 — 검토 I1).
     //   입력한 새 비밀번호를 시험용으로 엣지에 보내지 않는다(저장한 뒤 시험 — 비밀은 자동 설정 대행에만 싣는다).
     if (saved.agent && !isDemoActive()) {
-      if (fresh) return res.status(400).json({ ok: false, reason: `이 Director 는 법인 엣지 '${saved.agent}' 가 대행합니다 — 새 비밀번호는 먼저 저장한 뒤 시험하세요(엣지가 저장된 값으로 시험합니다 · 엣지 반영은 최대 5분).` });
+      if (fresh) return res.status(400).json({ ok: false, reason: `이 Director 는 법인 엣지 '${saved.agent}' 가 대행합니다 — 새 비밀번호는 먼저 저장한 뒤 시험하세요(엣지가 저장된 값으로 시험합니다).` });
       target = `${saved.name} (엣지 ${saved.agent} 대행)`;
       const result = await relayToEdge(saved, 'probe', {});
       bareosAuthGuard.clearAuthStop(directorCred(saved).id);
@@ -550,14 +555,28 @@ async function runSetup(d, kind, b, local) {
     args.site = { ...site };
   }
   const consolePassword = kind === 'setup.director' ? newConsolePassword() : '';
-  const secretArgs = { password: String(password ?? ''), ...(kind === 'setup.fdIni' ? { vcpass: String(vcpass ?? '') } : {}), ...(consolePassword ? { consolePassword } : {}) };
-  const value = await relayToEdge(d, kind, args, { secretArgs });
+  // v2.824 검토(S3·C7·I9 — 재현): 2단계는 엣지가 원격·엣지 사본을 바꾼 **뒤에** 중앙이 저장한다 — 중앙 판정과 저장 가능 여부를 **보내기 전에** 본다
+  //   (보낸 뒤 planDirector 가 던지거나 같은 콘솔 충돌·비밀 정책 잠금으로 저장이 실패하면 Director 만 새 비밀번호가 된다).
+  let conn = null;
   if (kind === 'setup.director') {
     const pl = planDirector(b);
+    conn = { host: pl.ssh.host, port: pl.directorPort, consoleName: pl.consoleName, password: consolePassword };
+    checkDirectorUpdate(d.id, conn);
+  }
+  const secretArgs = { password: String(password ?? ''), ...(kind === 'setup.fdIni' ? { vcpass: String(vcpass ?? '') } : {}), ...(consolePassword ? { consolePassword } : {}) };
+  let value;
+  try { value = await relayToEdge(d, kind, args, { secretArgs }); }
+  catch (e) {
+    // 엣지가 되돌렸다(새 콘솔 접속 실패·저장 실패) — 그사이 주기 조회가 남긴 인증 정지는 사실이 아니다(직접 경로 P2-12 와 같다 · C10)
+    if (kind === 'setup.director' && (e?.code === 'console-login' || e?.code === 'save')) bareosAuthGuard.clearAuthStop(directorCred(d).id);
+    throw e;
+  }
+  if (kind === 'setup.director') {
     let saved;
-    try { saved = updateDirector(d.id, { host: pl.ssh.host, port: pl.directorPort, consoleName: pl.consoleName, password: consolePassword }); }
+    try { saved = updateDirector(d.id, conn); }
     catch (se) {
-      throw Object.assign(new Error(`법인 엣지 '${d.agent}' 의 Director 자동 설정은 끝났지만(새 콘솔 접속 확인까지) 중앙 설정을 저장하지 못했습니다(${se?.code || '저장 오류'}) — 이 Director 의 콘솔 접속값은 바뀌지 않았습니다. 다시 실행하면 같은 파일을 덮어 새 콘솔을 만듭니다.`), { code: 'save', files: value.files });
+      // 미리 본 판정을 지났는데도 실패(그사이 다른 저장·디스크) — 원격은 이미 새 콘솔이다. 사실대로 알린다(엣지에는 되돌릴 SSH 비밀번호가 남아 있지 않다).
+      throw Object.assign(new Error(`법인 엣지 '${d.agent}' 가 Director 자동 설정을 끝냈지만(새 콘솔 접속 확인까지) 중앙 설정을 저장하지 못했습니다(${se?.code || '저장 오류'}) — 법인 Director 와 엣지 사본은 새 콘솔 비밀번호로 바뀌었고 중앙은 옛 값입니다. 이 Director 조회가 인증 실패로 멈출 수 있습니다. 원인을 고친 뒤 이 단계를 다시 실행하세요(포탈이 만든 파일을 덮어 새 콘솔로 맞춥니다).`), { code: 'save', files: value.files });
     }
     bareosAuthGuard.clearAuthStop(directorCred(d).id);
     return { ok: true, directorId: d.id, ...value, director: saved.director, droppedSecrets: saved.droppedSecrets, relay: d.agent };

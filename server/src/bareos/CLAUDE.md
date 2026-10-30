@@ -39,35 +39,22 @@
 - **v2.822 · v2.822.3 검토 확정분**(되돌리지 말 것 — `list jobs` 오름차순 LIMIT · disable 은 메모리 값 · 원장 선검사 · TLS 분류 · 덮어쓰기 복원 전제 · 로드 오류 요약 ·
   SFTP 채널 닫기 · canonDir · 가림 · reload 뒤 대조 · INI `%%` · 실패 메일 커서 · oneAtATime · 구조상 위험 S2-3 · 남긴 것)은 `docs/rules/audits.md` 의
   'Bareos v2.822 · v2.822.3 검토 확정분' 절에 원문 그대로 있다 — 이 폴더를 고치기 전에 읽을 것(크기 상한으로 옮겼다 · 2026-10-30).
-- **v2.823 법인별 Director**(사용자 요청 — 법인마다 Bareos 를 깔고 그 법인 vCenter 는 그 법인 Bareos 로 · 초기 설치 뒤 세부 설정은 포탈에서 · `bareosCorp2823`):
-  ① 설정 v2 = `directors[]` + `sites[].directorId`(vCenter 하나 → Director 하나). v1 파일은 **읽을 때만** `dir_default` 로 바꾼다(로드는 파일을 다시 쓰지 않는다) ·
-  저장은 v2 + 구버전 호환 `director` 사본(첫 Director). Director id 는 난수 · 바꾸지 않는다. 같은 이름·같은 콘솔(주소:포트·이름) 두 항목 거부.
-  ⚠ 구버전 호환의 한계(검토 C4): 되돌린 구버전은 첫 Director 만 읽고, **구버전에서 저장하면** 나머지 Director·법인 묶음이 사라진다 → 다시 올리면 2.823 에서 만든 잡이
-  없는 Director 를 가리킨다. 그런 잡(덜 됨이 아니라 '없음')은 원장에서만 취소·삭제된다(C3 `orphanOf` — Director 쪽 잡은 그대로라고 문구·감사에 남긴다).
-  ② **원장 잡은 등록 때의 `directorId` 를 고정**하고 잡 라우트는 그 Director 로만 보낸다(`settings.jobDirectorId` — 옛 잡은 매핑에서 푼다). 그래서 백업 대상이 있는
-  vCenter 를 **그 잡들이 가리키는 Director 와 다른 곳**에 묶거나 매핑을 지우면 409(S3 — 매핑 없는 옛 잡도 비교한다), 매핑·대상이 있는 Director 삭제도 409. 지운 잡 기록(retired)은 (Director, 이름)이 열쇠(같은 이름이 다른 Director 에 생겨도 지우지 않는다).
-  ③ Director 일은 작업 표 `ops.js`(직렬화 가능한 인자만 — 2차 엣지 대행이 같은 표를 쓴다) + `service.onDirector`. 조회 GET 은 `readDirector({ demoOnly … }, id, kind, args)` ·
-  `onDirector(` 는 `audit2719b` 실접속 목록에 있다. 인증 정지·연결 시험 고정(v2.480)·`accessMoved` 비밀번호 폐기·자동 설정 동시 1건은 **Director 마다**(옛 Director 는 인증 정지 id 'director' 를 잇는다).
-  ④ 폴러는 Director 마다 병렬(동시 8) + **Director 별 시한** — 느린 법인 하나가 나머지를 막지 않는다 · 상태는 `pollerStatus().directors`.
-  **시한·끊김이어도 읽은 행은 반영하고 회전은 시작한 항목 수만큼 나아간다**(`ops.poll` 은 세션 오류를 던지지 않고 `fault` 로 돌려준다 — C1·P1 라이브락) ·
-  다시 끌 이름은 `.jobs` 를 읽은 **뒤** 그 순간의 원장으로 고른다(`hooks.disableNow` — 틱 시작 사본이면 사용자가 그사이 켠 잡을 껐다, P3) ·
-  idle 틱은 마지막 실제 결과를 덮지 않는다(한 번도 접속 안 했으면 '조회 전' — W4) · 범위 계정의 폴러 상태·`/poll` 은 자기 법인 Director 만(S1).
-  ⑤ 자동 설정 확장: 사전 점검(쓰기·OTP 없음 — 못 읽은 항목은 '확인 불가', 없음으로 단정하지 않는다) · Pool·Schedule(MARKER 파일 · JobDefs 의 레벨별 풀 · 웹 블록과 글자까지 같다) ·
-  **FD 플러그인 켜기는 패키지 파일 `myself.conf` 를 제자리 수정하는 유일한 예외** — Client 블록 하나·여러 줄일 때만, 없는 줄만 넣고 같은 값이면 그대로,
-  **다른 값이면 거부**(깨진 글자 U+FFFD·Client 블록 안 `@` 포함 지시도 거부 — S7·S8), 임시 디렉터리 → 쓰기 전 사본(심링크 아님 확인) → `bareos-fd -t` → 재시작 →
-  실패면 사본으로 원복(심링크 아님 확인 — S5)·재시작(세션이 끊기면 새 세션으로). 매핑 채움은 쓰기 없음(빈 칸만 · 하나뿐·포탈 이름·설치 기본 이름만 고르고 그 밖은 비운다 ·
-  INI 경로가 다른 vCenter 와 겹치면 해시 접미사 — C7). 화면 단계 순서는 점검 → 리소스 → 플러그인 → **매핑 채움·저장 → FD INI**(FD INI 가 저장된 매핑을 쓴다 — W3).
-  매핑·기본값 저장은 GET 의 `rev` 를 돌려받아 다르면 409 `stale`(다른 화면의 저장을 덮지 않는다 — P4) · 인벤토리에서 빠진 vCenter 의 **저장된** 매핑은 그대로 받는다(W1).
-  데모(mock)는 사람이 등록한 Director 가 **0개**일 때만(I4). 검토 기록 전문은 `docs/rules/audits.md` 'Bareos v2.823 법인별 Director 검토 확정분'.
-  실환경 미확인(추정): 플러그인 경로(`/usr/lib64` · `/usr/lib` 의 python3-fd.so) · 기본 리소스 이름을 conf **파일 이름**으로 읽는 것 · VDDK 경로 · 레벨별 풀 지시어가 잡의 pool= 을 덮는 순서.
-- **v2.824 법인 엣지 대행**(사용자 선택 'Director 마다 선택(중앙/엣지 대행)' · `bareosEdge2824`): Director `agent`('' = 중앙 직접 · 엣지 이름 = 대행 — 라우트가
-  `pickAgent(knownAgentNames)` 로만 받는다 · 담당만 바뀌면 비밀번호 승계). 중앙은 그 Director 에 **세션을 열지 않는다**(`withDirector` 가 'edge-relay' 로 거부) —
-  `onDirector` 가 작업 표 한 줄을 `edgeOps.js` 큐에 둔다. 큐 작업에 **콘솔 비밀번호 없음**(Director id·args·남은 시간 ttlMs) · 인출·회신은 개별 토큰 전용·자기 몫만 ·
-  회신은 `edgeResult.js sanitizeEdgeResult`(새 작업 종류는 VALUE 표에도) · 가져간 상태 변경의 미회신 = 결과 모름(다시 보내지 않음) · 인출 전 시한 = 보내지 않음.
-  자동 설정 대행만 `secretArgs`(SSH·vCenter·**중앙이 만든** 새 콘솔 비밀번호): 중앙 메모리만 · **엣지가 인출하면 즉시 지움** · 인출 전 2분 · 목록·로그·감사·응답에 없음.
-  2단계 회신 ok → 중앙이 그 콘솔 값으로 저장, 엣지는 성공 즉시 자기 사본(`edgeStore.js` — `bareos-edge-directors.json`, 엣지 자기 bareos.json 과 섞지 않음)을 갱신.
-  엣지 워커는 사본에 있고 담당 = 나 인 Director 만 · 받은 시각 + ttl 이 지나면 시작하지 않음 · 회신만 재시도. 인증 실패 회신(`authFailed`)은 **중앙이** 그 cred 로 정지 기록 →
-  주기 조회는 큐에 넣지 않는다. 폴러는 엣지 Director 를 **기다리지 않는다**(Director 당 진행 중 poll 1개 · 회신 때 같은 반영 함수 · P3 은 회신 뒤 최신 원장으로 보상 setEnabled).
-  엣지 Director 의 연결 시험은 저장값(엣지 사본 — 최대 5분 지연)으로만 — 입력한 새 비밀번호를 시험용으로 엣지에 보내지 않는다.
+- **v2.823 법인별 Director**(`bareosCorp2823`·`bareosReview2823`): 설정 v2 = `directors[]` + `sites[].directorId`(v1 은 **읽을 때만** `dir_default` — 로드는 파일을 쓰지 않는다) ·
+  원장 잡은 등록 때의 `directorId` 고정, 잡 라우트는 그 Director 로만(대상이 있는 vCenter 재매핑·대상·매핑이 있는 Director 삭제 409) · Director 일은 작업 표 `ops.js` + `service.onDirector`
+  (조회 GET 은 `readDirector({ demoOnly … })`) · 인증 정지·연결 시험 고정·`accessMoved`·자동 설정 동시 1건은 Director 마다 · 폴러는 Director 별 시한 병렬, 시한이어도 읽은 행 반영
+  (`ops.poll` 은 던지지 않고 `fault`) · 다시 끌 이름은 `.jobs` 뒤 그 순간 원장(`hooks.disableNow`) · FD 플러그인 켜기는 `myself.conf` 제자리 수정의 유일한 예외(다른 값 거부·사본·`-t`·원복) ·
+  매핑·기본값 저장은 `rev` 대조 409. **원문 전체(구버전 호환 한계·검토 번호·실환경 미확인)는 `docs/rules/audits.md` 'Bareos v2.823 법인별 Director 모듈 규칙' 절** — 고치기 전에 읽을 것.
+- **v2.824 법인 엣지 대행**(사용자 선택 'Director 마다 선택(중앙/엣지 대행)' · `bareosEdge2824`·`bareosEdgeReview2824`): Director `agent`('' = 중앙 직접 · 엣지 이름 — `pickAgent(knownAgentNames)`
+  로만 · 담당만 바뀌면 비밀번호 승계). 중앙은 그 Director 에 **세션을 열지 않는다**(`withDirector` 'edge-relay') — `onDirector` 가 작업 표 한 줄을 `edgeOps.js` 큐에 둔다.
+  ① 큐 작업에 **콘솔 비밀번호 없음**(Director id·args·ttlMs·접속값 표지 `connSig` — `settings.directorConnSig` HMAC) · 인출·회신은 개별 토큰 전용·자기 몫만·빈 자리만큼(`max`) ·
+  회신은 `sanitizeEdgeResult`(새 작업 종류는 VALUE 표에 · 숫자 key 보존 · 필수 값 없으면 결과 모름).
+  ② 엣지 워커: 사본(`edgeStore.js` — `bareos-edge-directors.json`, 엣지 자기 bareos.json 과 섞지 않음)에 있고 담당 = 나 · **사본 표지가 다르거나 없으면 배정을 즉시 다시 받고**
+  (`pullBareosConfigForce`) 그래도 다르면 보내지 않는다 · 받은 시각 + ttl 이 지나면 시작하지 않음 · 자동 설정에도 시한(본 SSH 세션에만 — 되돌리기 세션에는 걸지 않는다) · 회신만 재시도(MARGIN_MS > 회신 예산).
+  ③ 가져간 상태 변경의 미회신 = 결과 모름(다시 보내지 않음) · `onLate` 를 준 작업(등록)만 늦은 회신을 받아 원장에 넣거나 그 잡을 끈다 · 인출 전 시한 = 보내지 않음.
+  ④ 인증 실패 회신은 **중앙이** 정지 기록, 성공 회신은 해제 — 회신 사이 중앙 접속값이 바뀌었으면 하지 않는다(`sameNow`) · 엣지 사본의 정지 키는 `edge-director:<id>`(엣지 자기 Director 와 나눈다).
+  ⑤ 자동 설정 대행만 `secretArgs`(SSH·vCenter·**중앙이 만든** 새 콘솔 비밀번호): 대기열 사본은 **엣지가 인출하면 즉시 지움**(요청 본문은 응답까지) · 인출 전 시한 · 목록·로그·감사·응답에 없음.
+  2단계는 중앙 판정·저장 가능 여부(`checkDirectorUpdate`)를 **보내기 전에** 보고, 회신 ok → 중앙 저장 · 엣지는 성공 즉시(시한 안일 때만) 사본 갱신.
+  ⑥ 폴러는 엣지 Director 를 **기다리지 않는다**(진행 중 poll 1개 · 회신 때 같은 반영 함수 · 회신 전은 실패로 세지 않는다). 화면은 서버 대기 시간(`relayLimits`)만큼 기다리고 시한·504 는 결과 모름.
+  확정분·남긴 것 전문은 `docs/rules/audits.md` 'Bareos v2.824 법인 엣지 대행 검토 확정분'.
 - 실환경 미확인(추정 — `tools/bareos-probe.js` 로 확인할 것): Node↔Director TLS-PSK 협상 · 잡 수준 FdPluginOptions 와 FileSet 플러그인 문자열 병합 ·
   `.bvfs_get_jobids` JSON 모양 · Profile ACL 지시어 이름 · `list jobs days=N` · 25.x `.jobs` 의 enabled 칸(master 소스 기준 — 없으면 다시 끄기를 하지 않는다) · Migration 행의 시작 시각.

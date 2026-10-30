@@ -23,16 +23,29 @@ import { agentHeaders } from './agentNameCarry.js';
 
 export const configPullMs = () => clampIntervalMs(Number(process.env.BAREOS_CONFIG_PULL_MS) || 300_000, 300_000, 60_000);
 const _log = createChangeLogger({ windowMs: 10 * 60_000 });
-let _timer = null; let _last = null; let running = false; let _lastSig = '';
+let _timer = null; let _last = null; let _running = null; let _lastSig = '';
 let _recovered = null;
 
-export async function pullBareosConfigNow() {
-  if (running) return { ok: false, busy: true, reason: '이전 pull 진행 중(겹침 방지)' };
-  running = true;
-  try { return await _pull(); } finally { running = false; }
+/** 주기 pull(본문이 직전과 같으면 사본을 다시 쓰지 않는다). 진행 중인 pull 이 있으면 그 결과를 같이 기다린다. */
+export async function pullBareosConfigNow() { return pullShared(false); }
+
+/**
+ * 강제 pull — 본문이 직전과 같아도 사본에 다시 적용한다. 대행 워커가 작업의 접속값 표지(connSig)와 사본이 다르거나 사본에 그 Director 가
+ * 없을 때 부른다(v2.824 검토 I1·I8 — 엣지가 자동 설정 2단계로 사본을 먼저 바꿨는데 중앙 저장이 실패하면, 같은 본문이라 영영 다시 적용되지 않았다).
+ * 진행 중인 pull 이 있으면 끝난 뒤 한 번 더(겹치지 않게).
+ */
+export function pullBareosConfigForce() { return pullShared(true); }
+
+async function pullShared(force) {
+  if (_running) {
+    const r = await _running.catch(() => null);
+    if (!force) return r || { ok: false, reason: '이전 pull 실패' };
+  }
+  _running = _pull({ force });
+  try { return await _running; } finally { _running = null; }
 }
 
-async function _pull() {
+async function _pull({ force = false } = {}) {
   if (!config.agent.centralUrl || !config.agent.centralToken) return { ok: false, reason: 'pull 비활성화(CENTRAL_URL/TOKEN 미설정)' };
   try {
     const url = `${config.agent.centralUrl}/api/central/bareos-config?agent=${encodeURIComponent(config.agent.name || '')}`;
@@ -51,7 +64,7 @@ async function _pull() {
     if (!Array.isArray(body?.directors)) throw new Error('bareos-config 응답에 directors 가 없습니다 — 직전 Director 사본을 그대로 씁니다');
     const sig = crypto.createHash('sha256').update(JSON.stringify(body.directors)).digest('hex');
     let applied = null;
-    if (sig !== _lastSig) {
+    if (force || sig !== _lastSig) {
       const loadErr = edgeStoreLoadError();
       const before = new Map(loadEdgeDirectors().directors.map((d) => [d.id, d]));
       applied = applyPulledDirectors(body.directors, config.agent.name || '');
@@ -78,4 +91,4 @@ export function startBareosConfigPull() {
   _timer = startAdaptiveTimer(configPullMs, () => pullBareosConfigNow(), { firstDelayMs: 45_000, name: 'Bareos Director 배정 pull' });
 }
 export function bareosConfigPullStatus() { return { ...(_last || {}), ...(_recovered ? { registryRecovered: _recovered } : {}), intervalMs: configPullMs() }; }
-export function _resetForTest() { _last = null; _lastSig = ''; _recovered = null; running = false; }
+export function _resetForTest() { _last = null; _lastSig = ''; _recovered = null; _running = null; }

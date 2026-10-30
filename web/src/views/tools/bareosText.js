@@ -59,7 +59,36 @@ export function directorPatch(formDir = {}, snapDir = {}) {
 
 /** HTTP 상태가 없는 실패(연결 끊김·브라우저 시한) — 서버는 끝까지 돌았을 수 있다(W2-2·P2-1). */
 // v2.823 검토(W7): 서버가 본문으로 거부한 것(requireChanged — 409 진행 중·남의 파일 등)은 결과가 **확정**이다 — '결과 모름' 으로 감싸지 않는다.
-export const outcomeUnknown = (e) => !e?.changeRejected && !(Number.isInteger(e?.status) && e.status > 0);
+// v2.824 검토(W5): 서버가 '결과 모름'(504 — 엣지가 가져갔지만 회신 없음)으로 답한 것도 결과 모름이다(실패로 단정하지 않는다).
+export const outcomeUnknown = (e) => !e?.changeRejected && (!(Number.isInteger(e?.status) && e.status > 0) || e.status === 504);
+
+/** 엣지 대행 Director 인가(목록 항목 — 전체 범위는 agent, 가린 목록은 relay 불리언). */
+export const isRelayDir = (x) => !!(x?.agent || x?.relay);
+
+/**
+ * v2.824 검토(W3·W4): 엣지 대행 작업의 화면 시한 — 서버가 기다리는 시간(인출 대기 + 그 작업의 회신 시한, API 값) + 여유.
+ * 이보다 짧으면 서버의 '보내지 않음'·'결과 모름' 사유가 화면에 오지 못하고 브라우저 시한 문구만 보였다. 값을 못 받으면 null(기본 시한).
+ */
+export function relayWaitMs(limits, kind, { setup = false } = {}) {
+  const r = Number(limits?.resultMs?.[kind]);
+  const p = Number(setup ? limits?.secretPickupMs : limits?.pickupMs);
+  return Number.isFinite(r) && r > 0 && Number.isFinite(p) && p > 0 ? p + r + 15_000 : null;
+}
+/** 밀리초 → '2분' · '45초' · '1분 30초'(API 값을 문구로 — 숫자를 화면에 박지 않는다 · W9). 못 읽으면 '—'. */
+export function secText(ms) {
+  const n = numOrNull(ms);   // Number(null)===0 함정 — 못 읽은 값은 '0초' 가 아니라 '—'
+  if (n === null || n < 0) return '—';
+  const sec = Math.round(n / 1000);
+  const m = Math.floor(sec / 60); const r = sec % 60;
+  return m ? `${m}분${r ? ` ${r}초` : ''}` : `${r}초`;
+}
+/** 기본 요청 옵션에 엣지 대행 시한을 얹는다(더 길 때만). */
+export function withRelayWait(opts, dir, limits, kind, o) {
+  const t = isRelayDir(dir) ? relayWaitMs(limits, kind, o) : null;
+  return t && t > (opts?.timeoutMs || 0) ? { ...opts, timeoutMs: t } : opts;
+}
+/** 결과를 모르는 변경(브라우저 시한·504)의 문구 — 실패로 단정하지 않고 확인 뒤 다시 하라고 말한다. */
+export const unknownOutcomeText = (what, e) => `${what} 결과를 확인하지 못했습니다 — 이미 시작됐을 수 있습니다. 목록·이력(또는 Director)에서 확인한 뒤 다시 시도하세요.${e?.message ? ` (${String(e.message).slice(0, 300)})` : ''}`;
 
 /** 자동 설정 버튼이 잠긴 사유(W2-8 — 잠긴 버튼은 사유를 말한다). 비어 있으면 잠기지 않았다. */
 export function missingText(pairs) {
@@ -134,6 +163,14 @@ export function directorStatus(dir) {
   return { cls: 'gray', label: '조회 전' };
 }
 
+/** Director 칩 설명(title) — 조회 실패 사유 · 인증 정지 · 엣지 대행 대기(W7). 없으면 ''. */
+export function directorChipTitle(x) {
+  if (x?.poll?.error) return x.poll.error;
+  if (x?.authStopped) return `인증 정지 — ${x.authStopped.reason || ''}`;
+  if (directorStatus(x).label === '엣지 대행 중') return x.agent ? `법인 엣지 ‘${x.agent}’ 가 대신 조회하고 있습니다 — 회신을 기다리는 중` : '법인 엣지가 대신 조회하고 있습니다 — 회신을 기다리는 중';
+  return '';
+}
+
 /** 머리 상태 줄(법인별 Director 요약 · 폴러). */
 export function directorLine(d) {
   if (!d) return '';
@@ -153,6 +190,9 @@ export function directorLine(d) {
   if (n('조회 실패')) parts.push(`**조회 실패 ${n('조회 실패')}**`);
   if (n('인증 정지')) parts.push(`**인증 정지 ${n('인증 정지')}**(주기 조회를 멈췄습니다 — 설정을 고치면 다시 시작합니다)`);
   if (n('설정 덜 됨')) parts.push(`설정 덜 됨 ${n('설정 덜 됨')}`);
+  // v2.824 검토(W6): 회신을 기다리는 대행·아직 조회 전도 센다(요약 칸의 합이 Director 수와 맞게)
+  if (n('엣지 대행 중')) parts.push(`엣지 대행 중 ${n('엣지 대행 중')}`);
+  if (n('조회 전')) parts.push(`조회 전 ${n('조회 전')}`);
   const masked = list.some((x) => x.masked) ? ' · 주소·콘솔 이름은 전체 범위 관리자만 봅니다' : '';
   const p = d.poller || {};
   const when = p.at ? ` · 상태 조회 ${whenText(p.at)}${p.idle ? '(진행 중 실행 없음)' : ''} · ${d.defaults?.pollIntervalSec || '—'}초 주기` : ' · 상태 조회 대기 중';

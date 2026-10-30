@@ -209,7 +209,11 @@ export function _setDepsForTest({ ssh = withSsh, openConsole: oc = openConsole, 
   _ssh = ssh; _openConsole = oc; _sleep = sleep || ((ms) => new Promise((r) => setTimeout(r, ms)));
 }
 
-const runSsh = (ssh, fn) => _ssh({ ...ssh }, fn, { signal: AbortSignal.timeout(SESSION_MS) });
+/**
+ * extra: 부른 쪽의 시한 신호(v2.824 엣지 대행 — 작업 ttl). 본 작업 세션에만 준다 — 되돌리기 세션(rollbackInNewSession·사본 복원)에는 주지 않는다
+ * (시한이 지나 끊겼으니 되돌려야 한다 · 검토 P3).
+ */
+const runSsh = (ssh, fn, extra = null) => _ssh({ ...ssh }, fn, { signal: extra ? AbortSignal.any([AbortSignal.timeout(SESSION_MS), extra]) : AbortSignal.timeout(SESSION_MS) });
 
 async function requireRoot(exec) {
   const r = await exec('id -u');
@@ -406,7 +410,7 @@ export async function setupDirector(b = {}, ctx = null) {
       } finally {
         await api.exec(`rm -rf ${tmp}`).catch(() => {});
       }
-    });
+    }, ctx?.signal);
   } catch (e) {
     // 세션이 시한으로 끊겼다(세션 안 되돌리기가 돌지 못함) — 새 세션으로 되돌리고 Director 를 다시 읽힌다.
     if (!settled && placed.length) {
@@ -511,7 +515,7 @@ export async function setupFdIni(b = {}, ctx = null) {
     const pk = await api.exec('rpm -q bareos-vmware-plugin 2>/dev/null || dpkg-query -W bareos-vmware-plugin 2>/dev/null || echo NOPKG').catch(() => null);
     const pkText = String(pk?.stdout || '').trim();
     return { action: st.state === 'managed' ? 'updated' : 'created', plugin: !pkText || /NOPKG|not installed|no packages found/i.test(pkText) ? 'missing' : 'installed', pluginText: tail(pkText, 200) };
-  });
+  }, ctx?.signal);
   return {
     ok: true, vcenterId: site.vcenterId, path: dest, action: out.action, plugin: out.plugin, pluginText: out.pluginText,
     ...(/%/.test(`${b.vcpass}${b.vcuser}`) ? { note: '값의 ‘%’ 는 플러그인 INI 해석(보간)에 맞춰 ‘%%’ 로 적었습니다.' } : {}),
@@ -542,7 +546,7 @@ export async function readFdThumbprint(b = {}, ctx = null) {
   const sni = /^\d{1,3}(\.\d{1,3}){3}$/.test(v) ? '' : ` -servername ${v}`;
   const r = await runSsh(ssh, async (api) => ({
     out: await api.exec(`timeout 20 openssl s_client -connect ${target}${sni} </dev/null 2>/dev/null | openssl x509 -noout -fingerprint -sha1 -subject -enddate 2>&1`, 40_000),
-  }));
+  }), ctx?.signal);
   const p = parseOpensslFingerprint(r.out?.stdout);
   if (!p.thumbprint) throw fail('remote', `FD 에서 ${target} 의 인증서를 읽지 못했습니다(openssl 없음·443 막힘·이름 해석 실패) — ${tail(r.out?.stdout || r.out?.stderr, 200) || '출력 없음'}`);
   return { ok: true, vcenterId: site.vcenterId, vcserver: v, ...p };
@@ -660,7 +664,7 @@ export async function preflight(b = {}, ctx = null) {
   if (issue) throw fail('invalid', issue);
   const ri = await resolvedHostIssue(ssh.host);
   if (ri) throw fail('invalid', ri);
-  const r = await runSsh(ssh, (api) => api.exec(PREFLIGHT_SCRIPT, 90_000));
+  const r = await runSsh(ssh, (api) => api.exec(PREFLIGHT_SCRIPT, 90_000), ctx?.signal);
   const out = String(r?.stdout || '');
   if (ssh.password.length >= 4 && out.includes(ssh.password)) throw fail('remote', '점검 출력에 SSH 비밀번호와 같은 글자가 들어 있어 결과를 싣지 않습니다.');
   return { ok: true, directorId: dir.id, host: ssh.host, ...parsePreflight(out) };
@@ -793,7 +797,7 @@ export async function setupFdPlugin(b = {}, ctx = null) {
       } finally {
         await api.exec(`rm -rf ${tmp}`).catch(() => {});
       }
-    });
+    }, ctx?.signal);
   } catch (e) {
     // 세션이 끊겨(시한) 세션 안 되돌리기가 돌지 못했다 — 새 세션으로 사본을 되돌리고 다시 시작한다.
     if (!settled && backup) {

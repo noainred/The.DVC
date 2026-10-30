@@ -138,7 +138,10 @@ test('② 시한: 인출 전 secretArgs 시한 → notSent·비밀 삭제 · 상
     mock.timers.tick(E.RESULT_MS.runJob + 1);
     const r2 = await p2;
     assert.equal(r2.unknown, true, '가져간 상태 변경의 미회신은 결과 모름');
-    assert.ok(E.RESULT_MS['setup.director'] > A.BUDGET.sessionMs + E.MARGIN_MS, '자동 설정 회신 시한 > SSH 세션 예산 + 여유(엣지가 끝까지 할 수 있게)');
+    // v2.824 검토(P3): 엣지는 ttl(= RESULT_MS − MARGIN_MS)에 SSH 를 끊고 되돌린다 — ttl 은 SSH 세션 예산 이상(보통 경로가 시한에 걸리지 않게),
+    //   인출 대기 + 회신 시한은 포탈 요청 시한(SERVER_REQUEST_TIMEOUT_MS 기본 600초) 이하
+    for (const k of ['setup.director', 'setup.fdPlugin']) assert.ok(E.RESULT_MS[k] - E.MARGIN_MS >= A.BUDGET.sessionMs, `${k}: 엣지 ttl ≥ SSH 세션 예산`);
+    for (const k of Object.keys(E.RESULT_MS)) assert.ok(Math.max(E.PICKUP_MS, E.SECRET_TTL_MS) + E.RESULT_MS[k] <= 600_000, `${k}: 인출 대기 + 회신 시한 ≤ 600초`);
   } finally { mock.timers.reset(); E._resetForTest(); }
 });
 
