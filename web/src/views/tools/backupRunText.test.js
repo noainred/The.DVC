@@ -5,6 +5,19 @@ import { visibleTabs, VEEAM_TABS } from './VeeamHeader.jsx';
 // v2.818 Backup 현황 › 백업 실행 — 서버 판정을 글자로만 바꾼다(판정 복제 금지). 못 읽은 값은 '—'.
 const memStore = () => { const m = new Map(); return { setItem: (k, v) => m.set(k, String(v)), getItem: (k) => (m.has(k) ? m.get(k) : null), removeItem: (k) => m.delete(k), m }; };
 
+describe('VeeamHeader 탭 줄(v2.824.1 — 스크롤바)', () => {
+  it('세로로 넘치지 않는다(음수 아래 여백 없음 · 세로 숨김) · 스크롤바를 그리지 않는다', async () => {
+    const fs = await import('node:fs');
+    const src = fs.readFileSync(new URL('./VeeamHeader.jsx', import.meta.url), 'utf8');
+    const css = fs.readFileSync(new URL('../../styles.css', import.meta.url), 'utf8');
+    expect(src).not.toMatch(/marginBottom:\s*-1/);   // 테두리 겹치기 1px 가 overflow-y:auto 의 세로 스크롤바를 만들었다
+    expect(src).toMatch(/role="tablist"[^>]*className="tabstrip-noscroll"/);
+    expect(src).toMatch(/overflowY: 'hidden'/);
+    expect(css).toMatch(/\.tabstrip-noscroll \{ scrollbar-width: none; \}/);
+    expect(css).toMatch(/\.tabstrip-noscroll::-webkit-scrollbar \{ display: none; \}/);
+  });
+});
+
 describe('backupRunText', () => {
   it('실행 상태 6종 문구 · 확인 불가·보내지 않음은 회색(성공도 실패도 아님)', () => {
     expect(RUN_STATUS_ORDER).toEqual(['protected', 'in-job', 'unprotected', 'agent', 'elsewhere', 'unknown', 'unmapped']);

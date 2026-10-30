@@ -39,13 +39,17 @@ export default function VeeamHeader({ active, desc, actions }) {
         </div>
         {actions && <div className="flex gap wrap" style={{ marginLeft: 'auto', alignItems: 'flex-end', rowGap: 6 }}>{actions}</div>}
       </div>
-      {/* v2.818: 탭 4개(백업 실행)면 400px 본문에서 넘칠 수 있다 — 탭 줄만 가로 스크롤(페이지는 밀리지 않는다). v2.822 Bareos 로 5개 */}
-      <div ref={listRef} role="tablist" aria-label="Backup 현황 보기" style={{ display: 'flex', gap: 4, borderBottom: '1px solid var(--border)', overflowX: 'auto', minWidth: 0 }}>
+      {/* v2.818: 탭 4개(백업 실행)면 400px 본문에서 넘칠 수 있다 — 탭 줄만 가로 스크롤(페이지는 밀리지 않는다). v2.822 Bareos 로 5개
+          v2.824.1(사용자 요청 '스크롤바 생기는거 없애줘'): overflowX:auto 는 세로도 auto 로 만든다 — 탭의 음수 아래 여백(-1px — 테두리 겹치기)이 세로 1px 를 넘겨
+          Windows(화살표 스크롤바)에서 탭 줄 오른쪽에 세로 스크롤바가 생겼다. 아래 선은 안쪽 그림자(내용 아래에 그려져 열린 탭 밑줄이 덮는다)로 바꾸고
+          세로는 숨긴다 · 좁은 폭의 가로 스크롤바도 그리지 않는다(tabstrip-noscroll — 터치·트랙패드·Shift+휠로 넘어가고 열린 탭은 위 효과가 보이게 옮긴다) */}
+      <div ref={listRef} role="tablist" aria-label="Backup 현황 보기" className="tabstrip-noscroll"
+        style={{ display: 'flex', gap: 4, boxShadow: 'inset 0 -1px 0 var(--border)', overflowX: 'auto', overflowY: 'hidden', minWidth: 0 }}>
         {visibleTabs({ admin: hasRole('admin'), runOk: toolAllowed('backup-run'), bareosOk: toolAllowed('bareos-backup') }).map(([k, label, href]) => {
           const on = k === active;
           return (
             <a key={k} role="tab" aria-selected={on} href={href}
-              style={{ flex: '0 0 auto', minWidth: 'min(84px, 18vw)', minHeight: 40, whiteSpace: 'nowrap', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', padding: '0 clamp(10px, 2vw, 18px)', marginBottom: -1, textDecoration: 'none', fontSize: 15, fontWeight: on ? 800 : 600, color: on ? 'var(--text)' : 'var(--text-dim)', borderBottom: `3px solid ${on ? 'var(--accent)' : 'transparent'}` }}>
+              style={{ flex: '0 0 auto', minWidth: 'min(84px, 18vw)', minHeight: 40, whiteSpace: 'nowrap', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', padding: '0 clamp(10px, 2vw, 18px)', textDecoration: 'none', fontSize: 15, fontWeight: on ? 800 : 600, color: on ? 'var(--text)' : 'var(--text-dim)', borderBottom: `3px solid ${on ? 'var(--accent)' : 'transparent'}` }}>
               {label}
             </a>
           );
