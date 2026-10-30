@@ -16,7 +16,7 @@
   ⑤ 라우트: admin + 전체 범위 + 데모 계정 403 + 동시 1건 + 입력 판정(`planDirector`·`planFdIni`) **뒤에** 본인 OTP(지문 읽기는 쓰기가 없어 OTP 없음).
   ⑥ root 만(`id -u`=0, sudo 경로 없음) · 단일 설정 파일(`bareos-dir.conf`) Director 는 거부 · 원격 명령 값은 화이트리스트(리소스 이름·경로·호스트, 앞 `-` 금지).
   리소스 본문은 웹 `bareosText.js directorPrepBlock` 과 글자까지 같다(테스트 ①이 대조 — 한쪽만 고치지 말 것).
-  실환경 미확인(추정): `bconsole reload` 출력 모양(판정에 쓰지 않음 — 접속 시험이 판정) · 플러그인의 INI 파서가 `%` 를 보간하는지.
+  실환경 미확인(추정): `bconsole reload` 출력 모양(판정에 쓰지 않음 — 접속 시험이 판정). INI 의 `%` 보간은 v2.822.3 에 플러그인 소스로 확인했다(`%%` 로 쓴다).
 - **콘솔 명령에 넣는 값은 `names.js` 를 통과한 것만**: 리소스 이름 `[A-Za-z0-9._-]{1,64}` · 플러그인 값은 `" \ : ; @`·제어문자·앞뒤 공백·200자 초과 거부.
   `configure add` 는 FdPluginOptions 를 따옴표 없이 쓰므로 `consoleQuote(…, { literalQuotes: true })` 로 따옴표를 남긴다(빼면 `:` 뒤가 잘린다).
 - **복원은 jobid 목록으로만**: 범용 FileSet 하나를 여러 VM 이 공유하므로 `restore … select current`(client+fileset 최신)는 다른 VM 을 섞는다 — 화면·API 에 그 경로를 두지 않는다.
@@ -54,6 +54,20 @@
   없을 때만(S3 — 잡은 등록 때 값을 가리킨다). 목록은 `drift` 로 알린다. ⑥ 로드 오류는 원문(JSON.parse 조각)이 아니라 `summarizeRegistryError` 요약(S2) ·
   차단 문구에 호스트 이름 없음(S4). ⑦ 설정 백업 지문에서 pending·restores·missingInDirector 를 뺀다(I6). ⑧ 데모 대상과 실제 Director 를 섞지 않는다 — 실행·변경 409,
   데모 대상 삭제는 원장만(I8). ⑨ 취소는 Director 가 모르는 pending 을 추적만 내린다 · 복원이 진행 중이면 삭제 409(P4·P5). ⑩ Director 를 거치는 화면 GET 은 재시도 0(W2).
-  남긴 것(낮음): 응답 프레임 개수 상한(P8 — 인증된 Director 만 보낼 수 있다) · 카탈로그 memo 세대(P9) · 옛 원장 복원 뒤 Director 고아 잡 탐지(I7).
+  남긴 것(낮음): 카탈로그 memo 세대(P9) · 옛 원장 복원 뒤 Director 고아 잡 탐지(I7). (응답 프레임 개수 상한 P8 은 v2.822.3 에 고쳤다.)
+- **v2.822.3 2차 검토(5축 + 반증 2인) 확정분**: ① 공용 `proxy/sshExec.js` 의 SFTP 읽기·쓰기·올리기는 끝나면 `sftp.end()`(I2-1 — 채널이 쌓여 MaxSessions 를
+  넘으면 exec 가 거부됐다 · `bareosSftpChannels28223`). ② 자동 설정의 원격 읽기·쓰기·삭제는 **부모 디렉터리 정규 경로 검사**(`canonDir` — readlink -f)를
+  같은 셸 명령 안에서(S2-1 — bareos-dir.d 는 패키지가 bareos 소유로 둔다; 남는 창은 bareos 계정을 쥔 경우뿐). FD INI 는 `/etc/bareos/**.ini` 만(S2-2 — 매핑 저장은 그대로).
+  ③ 가림은 생성 콘솔 비밀번호만 — 출력에 SSH 비밀번호가 있으면 출력 전체를 싣지 않는다(S2-5 부분 가림 오라클). 감사에는 원격 출력을 싣지 않는다(`setupAuditReason`, I2-10).
+  ④ reload 를 보냈으면 되돌린 뒤 다시 reload(C2-4) · 새 콘솔 접속 뒤 저장 실패도 되돌린다(C2-5) · 되돌린 뒤 인증 정지 기록을 지운다(P2-12).
+  ⑤ FD INI 값의 `%` 는 `%%`(플러그인이 ConfigParser 보간으로 읽는다 — C2-1). ⑥ reload 뒤 `requestReconcile()`(C2-3) · 시한에 잘린 대조는 다음 틱(P2-5) ·
+  빈 `.jobs` 로 retired·missing 을 바꾸지 않는다(I2-5). ⑦ 실패 메일은 `finishedRuns` + 판정한 jobid(seen)로 — 포탈 실행이 진행 중이면 커서를 그 앞에서 멈춘다(C2-2).
+  ⑧ 취소·활성 전환도 `oneAtATime`(C2-14) · 데모 Director 일 때 자동 설정 409(I2-6) · 명령별 응답 상한은 요청값(최대 64MB — C2-8, 단 **프레임 하나는 4MB** —
+  Director 가 큰 JSON 을 나눠 보내는지는 미확인) · 쌓인 프레임 누적 카운터·개수 상한(P8) · 화면 설정 저장은 **달라진 Director 칸만**(`directorPatch` — W2-1).
+  **구조상 남는 위험(S2-3)**: 포탈 콘솔은 잡을 만들려고 `configure` 가 필요한데 Bareos 는 그 하위 명령·리소스 단위 ACL 이 없다 — 포탈 콘솔 자격 = Director 관리자 +
+  전 FD root 등급이다(ACL 을 좁혀도 우회). 비밀번호를 그 등급으로 지킨다(체크리스트에 적었다).
+  남긴 것(낮음 — 반증 판정표 adv2_server.md·adv2_web.md): DNS 핀·IPv6 리터럴(S2-4) · 콘솔 이름 바꾼 재실행의 옛 콘솔(S2-6) · INI 소유자(S2-8) · 시한 끊김 tmp(S2-9) ·
+  두 포탈의 같은 콘솔(I2-4) · 엣지 메일(I2-7) · 자동 설정 진행 상태 노출·탭 이동 뒤 표시(P2-1·W2-4 — 데이터 손실은 ⑧ 로 막았다) · BUDGET 강제(P2-7) · 일괄 등록 180초(P2-11) ·
+  목록 memo(P7) · 카탈로그 memo 세대(P9) · 고아 잡(I7) · Migration 새 잡의 일시 lastRun(C2-7).
 - 실환경 미확인(추정 — `tools/bareos-probe.js` 로 확인할 것): Node↔Director TLS-PSK 협상 · 잡 수준 FdPluginOptions 와 FileSet 플러그인 문자열 병합 ·
   `.bvfs_get_jobids` JSON 모양 · Profile ACL 지시어 이름 · `list jobs days=N` · 25.x `.jobs` 의 enabled 칸(master 소스 기준 — 없으면 다시 끄기를 하지 않는다) · Migration 행의 시작 시각.

@@ -3,7 +3,7 @@
 포탈이 `CONFIG_DIR`(설치본 기본 `/etc/vmware-portal`) 아래에 만드는 파일 **240개**의 목록이다.
 시계열 DB 는 `db-location.json` 이 가리키는 `dbDir` 로 옮길 수 있다.
 
-- 생성: `node scripts/config-doc.mjs` (마지막 갱신 2026-10-29)
+- 생성: `node scripts/config-doc.mjs` (마지막 갱신 2026-10-30)
 - **이 파일을 직접 고치지 말 것** — 코드가 진실의 원천이다. 설명 보완은 `scripts/config-doc.mjs` 의 `NOTES` 에 추가한다.
 - 열 의미: **원자적** = 쓰기 도중 크래시에도 파일이 깨지지 않음(`atomicWriteFileSync`) · **손상보존** = 읽기 실패 시 원본을 `.corrupt.<ts>` 로 보존 · **0600** = 소유자만 읽기
 
@@ -36,7 +36,7 @@
 | `backups` | 디렉터리 | 포탈 백업 코어 — 중앙 포탈의 모든 설정(CONFIG_DIR의 *.json / *.env)과, 엣지 포탈(에이전트)이 | ✅ | ✅ | ✅ | backup/service.js, backup/stagedRestore.js |
 | `bareos-auth-stops.json` | 설정 | 인증 실패(자격증명 거부) 주기 수집 정지 기록 — util/authGuard.js | ✅ |  | ✅ | bareos/service.js |
 | `bareos-jobs.json` | 설정 | 포탈의 Bareos 백업 대상 원장(v2.820). 파일: CONFIG_DIR/bareos-jobs.json (자격증명 없음 · 원자적 쓰기 · 손상 보존). | ✅ | ✅ | ✅ | bareos/registry.js |
-| `bareos-mail-state.json` | 설정 | Bareos 백업 실패 알림 메일(v2.821, 메일 종류 'bareos-backup'). | ✅ | ✅ | ✅ | bareos/notify.js |
+| `bareos-mail-state.json` | 설정 | Bareos 백업 실패 알림 메일(v2.822, 메일 종류 'bareos-backup'). | ✅ | ✅ | ✅ | bareos/notify.js |
 | `bareos.json` | 설정 | Bareos 연동 설정(v2.820). 파일: CONFIG_DIR/bareos.json (0600 · 원자적 쓰기 · 비밀 봉인). | ✅ | ✅ | ✅ | bareos/settings.js |
 | `bm-storage.json` | 설정 | 베어메탈 스토리지 서버 목록 + 설정(v2.340). | ✅ | ✅ | ✅ | bmstor/registry.js |
 | `bm-usage.db` | DB | 베어메탈 사용률 DB(v2.550). 파일: `<dbDir>/bm-usage.db` |  | ✅ | ✅ | bmusage/db.js, bmusage/poller.js |

@@ -1,5 +1,5 @@
 /**
- * bareos/notify.js — Bareos 백업 실패 알림 메일(v2.821, 메일 종류 'bareos-backup').
+ * bareos/notify.js — Bareos 백업 실패 알림 메일(v2.822, 메일 종류 'bareos-backup').
  *
  * 사용자 요청(2026-10-30 '프로그램 개선' — 백업 실패 알림 메일): Bareos 실행이 오류·경고로 끝나도 화면을 열기 전에는 몰랐다.
  * 모양은 vmclone/notify.js(VM 백업 실패 메일)를 따른다 — 공용 메일 경로(sendPortalMail)·1분 틱·대상별 커서·첫 실행은 '지금부터'.
@@ -14,9 +14,11 @@
  *    메일이 꺼져 있거나 이 종류가 꺼져 있으면 옮긴다(나중에 켰을 때 쌓인 실패를 한꺼번에 보내지 않게).
  *  · 데모(mock) 인벤토리·데모 대상(demo:true)은 보내지 않는다.
  * 한계(정직 기록): Bareos 스케줄이 돌린 실행은 폴러의 대조 틱(기본 10틱 — 약 10분)마다 '대상별 최신 1건' 만 원장에 들어온다 —
- *   그 사이에 같은 대상이 두 번 실패하면 최신 1건만 알린다(포탈이 시작한 실행은 jobid 로 따로 추적해 빠지지 않는다).
+ *   그 사이에 같은 대상이 두 번 실패하면 최신 1건만 알린다. 포탈이 시작한 실행은 pending 으로 따로 추적하고 끝난 실행 목록(finishedRuns)에
+ *   남아 빠지지 않는다(v2.822.3 C2-2 — 그 전에는 더 큰 jobid 가 lastRun 이면 빠졌다).
  *
- * 상태 파일: CONFIG_DIR/bareos-mail-state.json → { since, runs: { <대상 id>: jobid }, restores: { <대상 id>: jobid }, history: [...] } (비밀 없음)
+ * 상태 파일: CONFIG_DIR/bareos-mail-state.json → { since, runs: { <대상 id>: jobid(커서) }, seen: { <대상 id>: [커서보다 큰 판정한 jobid] },
+ *   restores: { <대상 id>: jobid }, history: [...] } (비밀 없음)
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -27,7 +29,7 @@ import { registerStateFile } from '../util/stateFiles.js';
 import { sendPortalMail } from '../mail/service.js';
 import { load as loadMailCfg } from '../mail/settings.js';
 import { localStamp } from '../util/dayKey.js';
-import { listJobs } from './registry.js';
+import { listJobs, registryLoadError } from './registry.js';
 import { isFinalStatus } from './names.js';
 
 export const MAIL_KIND = 'bareos-backup';
@@ -42,11 +44,20 @@ const FILE = () => path.join(config.configDir, 'bareos-mail-state.json');   // �
 const isEdge = () => !!(config.agent.centralUrl && config.agent.centralToken);
 const isMock = () => store.get()?.source === 'mock';
 
+// v2.822.3(C2-11·P2-9): 넘치면 **최근** 키를 남긴다(예전에는 앞의 2,000개 — 오래된 것만 남아 최근 대상이 재시작마다 같은 실패를 다시 받았다)
 const numMap = (o) => {
   const out = {};
-  for (const [k, v] of Object.entries(o && typeof o === 'object' && !Array.isArray(o) ? o : {}).slice(0, KEYS_MAX)) {
+  for (const [k, v] of Object.entries(o && typeof o === 'object' && !Array.isArray(o) ? o : {}).slice(-KEYS_MAX)) {
     const n = Number(v);
     if (Number.isInteger(n) && n > 0) out[k] = n;
+  }
+  return out;
+};
+const SEEN_KEEP = 50;
+const seenMap = (o) => {
+  const out = {};
+  for (const [k, v] of Object.entries(o && typeof o === 'object' && !Array.isArray(o) ? o : {}).slice(-KEYS_MAX)) {
+    if (Array.isArray(v)) out[k] = v.map(Number).filter((n) => Number.isInteger(n) && n > 0).slice(-SEEN_KEEP);
   }
   return out;
 };
@@ -58,12 +69,12 @@ function state() {
     if (fs.existsSync(FILE())) {
       const raw = JSON.parse(fs.readFileSync(FILE(), 'utf8'));
       if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error('형식 오류');
-      _state = { since: Number(raw.since) || Date.now(), runs: numMap(raw.runs), restores: numMap(raw.restores), history: (Array.isArray(raw.history) ? raw.history : []).slice(0, HISTORY_MAX) };
+      _state = { since: Number(raw.since) || Date.now(), runs: numMap(raw.runs), seen: seenMap(raw.seen), restores: numMap(raw.restores), history: (Array.isArray(raw.history) ? raw.history : []).slice(0, HISTORY_MAX) };
       return _state;
     }
   } catch { preserveCorrupt(FILE()); }
   // 처음(또는 손상) — 지금부터 센다. 기준 시각을 바로 남긴다(첫 발송이 실패한 채 재시작해도 since 가 밀리지 않게).
-  _state = { since: Date.now(), runs: {}, restores: {}, history: [] };
+  _state = { since: Date.now(), runs: {}, seen: {}, restores: {}, history: [] };
   save();
   return _state;
 }
@@ -93,19 +104,34 @@ function judge(rec, mark, since) {
  */
 export function collectBareosFailures(jobs, st) {
   const rows = [];
-  const marks = { runs: {}, restores: {} };
+  const marks = { runs: {}, seen: {}, restores: {} };
   const since = Number(st?.since) || 0;
   for (const j of jobs || []) {
     if (!j || j.demo) continue;
-    const r = j.lastRun;
-    const runMark = Number(st?.runs?.[j.id]) || 0;
-    const jr = r ? judge(r, runMark, since) : { advance: false, alert: false };
-    if (jr.advance) {
-      marks.runs[j.id] = Number(r.jobid);
+    // v2.822.3(C2-2 — 재현): lastRun 하나만 보면 포탈이 시작한 실행이 끝날 때 더 큰 jobid(대기 중인 스케줄 실행)가 lastRun 이라 그 실패가 빠졌다.
+    //   끝난 실행 목록(registry finishedRuns)과 lastRun 을 jobid 순으로 보고, 판정한 jobid 는 seen 에 둔다. 커서(floor)는 진행 중인
+    //   포탈 실행 앞에서 멈춘다(그 실행이 나중에 끝나도 커서보다 커서 판정된다).
+    const floor = Number(st?.runs?.[j.id]) || 0;
+    const seen = new Set(Array.isArray(st?.seen?.[j.id]) ? st.seen[j.id] : []);
+    const byId = new Map();
+    for (const x of [...(Array.isArray(j.finishedRuns) ? j.finishedRuns : []), j.lastRun]) if (x?.jobid && !byId.has(Number(x.jobid))) byId.set(Number(x.jobid), x);
+    let maxJudged = 0; const judged = [];
+    for (const [jid, r] of [...byId].sort((a, b) => a[0] - b[0])) {
+      if (seen.has(jid)) continue;
+      const jr = judge(r, floor, since);
+      if (!jr.advance) continue;
+      maxJudged = Math.max(maxJudged, jid); judged.push(jid);
       if (jr.alert && (r.state === 'error' || r.state === 'warning')) {
-        rows.push({ kind: 'backup', state: r.state, status: r.status, jobid: Number(r.jobid), at: Number(r.checkedAt) || 0, ended: r.endedAt || null,
+        rows.push({ kind: 'backup', state: r.state, status: r.status, jobid: jid, at: Number(r.checkedAt) || 0, ended: r.endedAt || null,
           level: LEVEL[r.level] || '', jobName: j.bareosJob, vmName: j.vmName, vcenterId: j.vcenterId, client: j.client || '', errors: r.errors ?? null });
       }
+    }
+    if (maxJudged) {
+      const inflight = Number(j.pending?.jobid) || 0;
+      const newFloor = inflight && inflight < maxJudged ? Math.max(floor, inflight - 1) : Math.max(floor, maxJudged);
+      if (newFloor !== floor) marks.runs[j.id] = newFloor;
+      const keep = [...seen, ...judged].filter((x) => x > newFloor).sort((a, b) => a - b).slice(-SEEN_KEEP);
+      if (keep.length || seen.size) marks.seen[j.id] = keep;
     }
     const restMark = Number(st?.restores?.[j.id]) || 0;
     let restMax = 0;
@@ -160,8 +186,20 @@ export async function tick(now = Date.now()) {
   try {
     const st = state();
     const { rows, marks } = collectBareosFailures(listJobs(), st);
-    const advance = () => { Object.assign(st.runs, marks.runs); Object.assign(st.restores, marks.restores); save(); };
-    const moved = Object.keys(marks.runs).length + Object.keys(marks.restores).length;
+    const advance = () => {
+      Object.assign(st.runs, marks.runs); Object.assign(st.restores, marks.restores);
+      st.seen = st.seen || {};
+      for (const [k, v] of Object.entries(marks.seen || {})) { if (v.length) st.seen[k] = v; else delete st.seen[k]; }
+      save();
+    };
+    // C2-11: 원장에서 지운 대상의 커서는 정리한다(원장을 읽었을 때만 — 손상으로 빈 목록이면 지우면 안 된다)
+    if (!registryLoadError()) {
+      const ids = new Set(listJobs().map((j) => j.id));
+      let pruned = false;
+      for (const m of [st.runs, st.restores, st.seen || {}]) for (const k of Object.keys(m)) if (!ids.has(k)) { delete m[k]; pruned = true; }
+      if (pruned) save();
+    }
+    const moved = Object.keys(marks.runs).length + Object.keys(marks.restores).length + Object.keys(marks.seen || {}).length;
     if (!rows.length) { if (moved) advance(); return; }   // 성공·취소만 새로 끝났다 — 커서만 옮긴다
     const cfg = loadMailCfg();
     if (!cfg?.enabled || cfg?.kinds?.[MAIL_KIND]?.enabled === false) { advance(); _last = { at: now, sent: false, rows: rows.length, reason: '메일 발송 또는 이 종류가 꺼져 있습니다' }; return; }

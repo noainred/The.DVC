@@ -23,7 +23,7 @@ import { secretProvided } from '../../util/secretCarry.js';
 import {
   withDirector, isDemoActive, effectiveSettings, eligibility, createBackupTarget, createBackupTargets, bareosAuthGuard,
 } from '../../bareos/service.js';
-import { pollerStatus, pollOnce } from '../../bareos/poller.js';
+import { pollerStatus, pollOnce, requestReconcile } from '../../bareos/poller.js';
 import { restorePlan, chainFromHistory, chainIssue, placementDrift } from '../../bareos/restore.js';
 import { summarizeRegistryError } from '../../util/registryCore.js';
 import { normLevel, isFinalStatus } from '../../bareos/names.js';
@@ -154,9 +154,21 @@ let _catalogMemo = { key: '', at: 0, value: null };
 function sendSetupErr(res, e) {
   const code = e?.code || '';
   if (isSshHostKeyError(e)) return res.status(502).json({ ok: false, code: 'ssh-hostkey', reason: String(e.message).slice(0, 600) });
-  if (isSshAuthError(e)) return res.status(502).json({ ok: false, code: 'ssh-auth', reason: 'SSH 인증 실패 — 계정·비밀번호를 확인하세요(자동으로 다시 시도하지 않습니다).' });
+  // v2.822.3(I2-3): Rocky·RHEL 9 의 sshd 기본값(PermitRootLogin prohibit-password)은 root 비밀번호 로그인을 막는다 — 비밀번호가 맞아도 여기서 실패한다(추정 — 배포판 기본값)
+  if (isSshAuthError(e)) return res.status(502).json({ ok: false, code: 'ssh-auth', reason: 'SSH 인증 실패 — 계정·비밀번호를 확인하세요(자동으로 다시 시도하지 않습니다). 비밀번호가 맞다면 그 서버의 sshd 가 root 비밀번호 로그인을 막고 있을 수 있습니다(Rocky·RHEL 9 기본값 PermitRootLogin prohibit-password).' });
   const status = code === 'invalid' ? 400 : code === 'conflict' ? 409 : code === 'config-test' ? 422 : 502;
   res.status(status).json({ ok: false, code: code || 'ssh', reason: String(e?.message || e).slice(0, 1800), ...(e?.paths ? { paths: e.paths } : {}), ...(e?.files ? { files: e.files } : {}) });
+}
+
+/**
+ * v2.822.3(I2-10·W2-11): 감사에는 원격 출력을 싣지 않는다 — `bareos-dir -t` 는 설정 오류 줄 원문을 찍고(lex.cc), 그 줄이 남의 리소스의
+ * 비밀번호 줄일 수 있다(포탈이 가리는 것은 자기가 만든 비밀번호뿐). 원격 출력이 실린 코드는 코드·첫 마디만, 나머지는 사유 앞부분.
+ */
+export function setupAuditReason(e) {
+  const code = e?.code || '';
+  const msg = String(e?.message || '');
+  if (['config-test', 'remote', 'console-login', 'save'].includes(code)) return `${code} ${msg.split(/[:(]/)[0].slice(0, 80).trim()}(원격 출력은 감사에 싣지 않습니다)`;
+  return `${code} ${msg.slice(0, 200)}`.trim();
 }
 
 /**
@@ -166,6 +178,8 @@ function sendSetupErr(res, e) {
 function setupGate(req, res, plan) {
   if (isDemoGuest(req.user)) { res.status(403).json({ ok: false, demoGuest: true, reason: '데모 계정은 실제 서버를 설정할 수 없습니다.' }); return false; }
   if (_setupBusy) { res.status(409).json({ ok: false, reason: '다른 자동 설정이 진행 중입니다 — 끝난 뒤 다시 시도하세요.' }); return false; }
+  // v2.822.3(I2-6 — 재현): 데모 Director 를 쓰는 동안은 화면 매핑이 데모 값이라 실제 서버 설정과 섞인다
+  if (isDemoActive()) { res.status(409).json({ ok: false, reason: '데모 Director 를 쓰는 중입니다 — 자동 설정은 실제 Director 를 설정한 뒤(설정 탭에서 Director 연결 저장) 쓸 수 있습니다.' }); return false; }
   const name = req.user?.username || '';
   if (config.auth.enabled && !getUser(name)?.totpEnabled) { res.status(403).json({ ok: false, needEnroll: true, reason: '자동 설정은 OTP 가 등록된 계정만 실행할 수 있습니다. 사용자 관리에서 OTP 를 등록하세요.' }); return false; }
   try { plan(req.body || {}); } catch (e) { sendSetupErr(res, e); return false; }
@@ -295,9 +309,13 @@ api.post('/tools/bareos-backup/settings/auto-setup/director', adminOnly, fullSco
     audit(req, 'Bareos 자동 설정(Director)', String(b.host || ''), `성공 — 콘솔 ${r.settings.director.consoleName} · ${r.files.map((f) => `${f.path}(${f.action})`).join(', ')}`);
     res.json(r);
   } catch (e) {
-    audit(req, 'Bareos 자동 설정(Director)', String(b.host || ''), `실패 — ${e?.code || ''} ${String(e?.message || '').slice(0, 200)}`);
+    audit(req, 'Bareos 자동 설정(Director)', String(b.host || ''), `실패 — ${setupAuditReason(e)}`);
     sendSetupErr(res, e);
-  } finally { _setupBusy = false; }
+  } finally {
+    _setupBusy = false;
+    // v2.822.3(C2-3): reload(성공·되돌리기 모두)는 포탈이 꺼 둔 잡을 다시 켠다 — 다음 정기 대조를 기다리지 않고 지금 대조해 다시 끈다
+    requestReconcile();
+  }
 });
 
 api.post('/tools/bareos-backup/settings/auto-setup/fd', adminOnly, fullScopeOnly, async (req, res) => {
@@ -308,7 +326,7 @@ api.post('/tools/bareos-backup/settings/auto-setup/fd', adminOnly, fullScopeOnly
     audit(req, 'Bareos 자동 설정(FD INI)', `${r.vcenterId} → ${b.host}`, `성공 — ${r.path}(${r.action}) · 플러그인 ${r.plugin === 'installed' ? '설치됨' : '미확인'}`);
     res.json(r);
   } catch (e) {
-    audit(req, 'Bareos 자동 설정(FD INI)', `${b.vcenterId || ''} → ${b.host || ''}`, `실패 — ${e?.code || ''} ${String(e?.message || '').slice(0, 200)}`);
+    audit(req, 'Bareos 자동 설정(FD INI)', `${b.vcenterId || ''} → ${b.host || ''}`, `실패 — ${setupAuditReason(e)}`);
     sendSetupErr(res, e);
   } finally { _setupBusy = false; }
 });
@@ -317,6 +335,7 @@ api.post('/tools/bareos-backup/settings/auto-setup/fd', adminOnly, fullScopeOnly
 api.post('/tools/bareos-backup/settings/auto-setup/fd-thumbprint', adminOnly, fullScopeOnly, async (req, res) => {
   if (isDemoGuest(req.user)) return res.status(403).json({ ok: false, demoGuest: true, reason: '데모 계정은 실제 서버에 접속할 수 없습니다.' });
   if (_setupBusy) return res.status(409).json({ ok: false, reason: '다른 자동 설정이 진행 중입니다 — 끝난 뒤 다시 시도하세요.' });
+  if (isDemoActive()) return res.status(409).json({ ok: false, reason: '데모 Director 를 쓰는 중입니다 — 자동 설정은 실제 Director 를 설정한 뒤 쓸 수 있습니다.' });
   _setupBusy = true;
   const b = req.body || {};
   try {
@@ -324,7 +343,7 @@ api.post('/tools/bareos-backup/settings/auto-setup/fd-thumbprint', adminOnly, fu
     audit(req, 'Bareos 자동 설정(지문 읽기)', `${r.vcenterId} → ${b.host}`, `성공 — ${r.vcserver}`);
     res.json(r);
   } catch (e) {
-    audit(req, 'Bareos 자동 설정(지문 읽기)', `${b.vcenterId || ''} → ${b.host || ''}`, `실패 — ${e?.code || ''} ${String(e?.message || '').slice(0, 160)}`);
+    audit(req, 'Bareos 자동 설정(지문 읽기)', `${b.vcenterId || ''} → ${b.host || ''}`, `실패 — ${setupAuditReason(e)}`);
     sendSetupErr(res, e);
   } finally { _setupBusy = false; }
 });
@@ -437,7 +456,12 @@ async function runRoute(req, res, job) {
 
 /** 실행 중 취소 — 포탈이 시작한 실행(pending) 또는 그 대상의 실행 중 jobid(body.jobid — 잡 이름이 맞을 때만). */
 api.post('/tools/bareos-backup/jobs/:id/cancel', adminOnly, async (req, res) => {
-  const job = jobFor(req, res); if (!job) return;
+  const found = jobFor(req, res); if (!found) return;
+  // v2.822.3(C2-14·P2-6): 취소·활성 전환도 대상마다 한 번에 하나(삭제와 겹치면 Director 잡은 켜진 채 원장에서 사라졌다)
+  await oneAtATime(found, res, () => cancelRoute(req, res, getJob(found.id)));
+});
+async function cancelRoute(req, res, job) {
+  if (!job) return res.status(404).json({ ok: false, reason: '백업 대상을 찾을 수 없습니다.' });
   const mm = modeMismatch(job); if (mm) return res.status(409).json({ ok: false, reason: mm });
   const want = Number(req.body?.jobid || job.pending?.jobid || job.lastRun?.jobid || 0);
   if (!Number.isInteger(want) || want <= 0) return res.status(409).json({ ok: false, reason: '취소할 실행이 없습니다.' });
@@ -460,20 +484,25 @@ api.post('/tools/bareos-backup/jobs/:id/cancel', adminOnly, async (req, res) => 
     audit(req, 'Bareos 백업 취소', `${job.vcenterId}/${job.vmName}`, `jobid ${want}`);
     res.json({ ok: true, jobid: want });
   } catch (e) { sendErr(res, e); }
-});
+}
 
 /** 활성/비활성 — body { enabled }. Director 의 enable/disable job 과 원장을 함께 바꾼다. */
 api.patch('/tools/bareos-backup/jobs/:id', adminOnly, async (req, res) => {
-  const job = jobFor(req, res); if (!job) return;
+  const found = jobFor(req, res); if (!found) return;
+  await oneAtATime(found, res, () => patchRoute(req, res, getJob(found.id)));
+});
+async function patchRoute(req, res, job) {
+  if (!job) return res.status(404).json({ ok: false, reason: '백업 대상을 찾을 수 없습니다.' });
   const mm = modeMismatch(job); if (mm) return res.status(409).json({ ok: false, reason: mm });
   if (typeof req.body?.enabled !== 'boolean') return res.status(400).json({ ok: false, reason: 'enabled(true/false) 만 바꿀 수 있습니다 — 레벨·스케줄은 대상을 지우고 다시 등록하세요(Bareos 에 잡 수정 명령이 없습니다).' });
   try {
     await withDirector((s) => setJobEnabled(s, job.bareosJob, req.body.enabled));
     const j = patchJob(job.id, { enabled: req.body.enabled });
+    if (!j) return res.status(409).json({ ok: false, reason: '그사이 대상이 지워졌습니다 — Director 잡 상태는 다음 대조 때 맞춥니다.' });
     audit(req, req.body.enabled ? 'Bareos 백업 대상 활성화' : 'Bareos 백업 대상 비활성화', `${job.vcenterId}/${job.vmName}`, `잡 ${job.bareosJob}`);
     res.json({ ok: true, job: j });
   } catch (e) { sendErr(res, e); }
-});
+}
 
 /**
  * 삭제 = Director 잡 비활성화 + 원장에서 제거. Bareos 에는 리소스 삭제 명령이 없어 conf 파일은 남는다(경로를 알려 준다).
@@ -539,7 +568,7 @@ api.get('/tools/bareos-backup/jobs/:id/restore-points', adminOnly, async (req, r
     const items = rows.filter((r) => r.type === 'B' && (r.state === 'ok' || r.state === 'warning'));
     const site = effectiveSettings().sites.find((x) => x.vcenterId === job.vcenterId);
     // W7: 복원은 지금의 사이트 매핑 FD 로 실행한다(등록 때 FD 와 다를 수 있다) — 화면이 실제 값을 보이게
-    res.json({ ok: true, items, restorePending: (job.restores || []).some(restoreOpen), restoreClient: site?.client || job.client, scanned: RESTORE_POINTS_SCAN });
+    res.json({ ok: true, items, restorePending: (job.restores || []).some(restoreOpen), restoreClient: site?.client || job.client, scanned: rows.length, limit: RESTORE_POINTS_SCAN });   // W2-6: 실제로 본 실행 수(상수가 아니다)
   } catch (e) { sendErr(res, e); }
 });
 

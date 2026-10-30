@@ -19,12 +19,49 @@ export function stateBadge(state, status = '') {
 const LEVELS = { F: 'Full', I: 'Incremental', D: 'Differential', Full: 'Full', Incremental: 'Incremental', Differential: 'Differential' };
 export const levelLabel = (v) => LEVELS[v] || '—';
 
-/** W13(v2.822): 복원 지점 목록이 잘렸으면 밝힌다 — 서버가 본 최근 실행 수(scanned)와 화면에 보이는 수. */
+/**
+ * W13(v2.822): 복원 지점 목록이 잘렸으면 밝힌다. v2.822.3(W2-6): scanned 는 서버가 **실제로 본** 실행 수, limit 는 상한 —
+ * '더 오래된 지점' 문장은 상한에 닿았을 때만(예전에는 상수 60 을 보내 이력이 13건뿐이어도 그렇게 말했다).
+ */
 export function restorePointsNote(pts, shown) {
   const n = (pts?.items || []).length;
   const scanned = numOrNull(pts?.scanned);
+  const limit = numOrNull(pts?.limit);
   const head = n > shown ? `성공한 백업 ${n}건 중 최근 ${shown}건을 보입니다.` : `성공한 백업 ${n}건.`;
-  return `${head}${scanned !== null ? ` Director 카탈로그의 최근 실행 ${scanned}건에서 골랐습니다 — 더 오래된 지점은 Director 에서 복원하세요.` : ''}`;
+  if (scanned === null) return head;
+  const cut = limit !== null && scanned >= limit;
+  return `${head} Director 카탈로그의 이 잡 실행 ${cut ? `최근 ${scanned}건` : `${scanned}건 전부`}에서 골랐습니다${cut ? ' — 더 오래된 지점은 Director 에서 복원하세요' : ''}.`;
+}
+
+/**
+ * v2.822.3(W2-1·P2-1·P2-2·W2-4 — 반증 재현): 설정 저장은 Director 연결 중 **화면이 읽어 온 값과 달라진 칸만**(+ 입력한 비밀번호) 보낸다.
+ * 예전에는 마지막으로 읽은 사본을 통째로 보내, 자동 설정이 콘솔을 바꾼 뒤(다시 읽기 실패·180초 시한·탭 이동·다른 탭) 옛 값이 되돌아가고
+ * 서버 accessMoved 가 방금 만든 콘솔 비밀번호를 폐기했다. 사용자가 칸을 직접 고친 경우는 의도이므로 지금처럼 보낸다(순수 함수).
+ * @param {object} formDir  화면 폼의 director(문자열 칸)
+ * @param {object} snapDir  서버에서 읽어 온 director(GET /settings)
+ * @returns {object|null}  보낼 칸(없으면 null — director 를 보내지 않는다)
+ */
+export function directorPatch(formDir = {}, snapDir = {}) {
+  const cur = {
+    host: String(formDir.host ?? ''), port: Number(formDir.port) || 9101, consoleName: String(formDir.consoleName ?? ''),
+    timeoutMs: Number(formDir.timeoutMs) || undefined, tlsMax: formDir.tlsMax,
+  };
+  const out = {};
+  for (const k of ['host', 'port', 'consoleName', 'timeoutMs', 'tlsMax']) {
+    if (cur[k] === undefined) continue;
+    if (cur[k] !== snapDir[k]) out[k] = cur[k];
+  }
+  if (typeof formDir.password === 'string' && formDir.password) out.password = formDir.password;
+  return Object.keys(out).length ? out : null;
+}
+
+/** HTTP 상태가 없는 실패(연결 끊김·브라우저 시한) — 서버는 끝까지 돌았을 수 있다(W2-2·P2-1). */
+export const outcomeUnknown = (e) => !(Number.isInteger(e?.status) && e.status > 0);
+
+/** 자동 설정 버튼이 잠긴 사유(W2-8 — 잠긴 버튼은 사유를 말한다). 비어 있으면 잠기지 않았다. */
+export function missingText(pairs) {
+  const miss = pairs.filter(([ok]) => !ok).map(([, label]) => label);
+  return miss.length ? `필요: ${miss.join(' · ')}` : '';
 }
 
 /**
@@ -184,7 +221,10 @@ export function fdIniTemplate(site) {
 export const PREP_CHECKLIST = Object.freeze([
   '사이트 FD 에 bareos-vmware-plugin(VDDK 포함)과 pyVmomi(vSphere 메이저 버전과 맞춤)를 설치합니다.',
   // v2.822.1(현장 실측 — 작업 로그 'Python 3.10 or newer is required (found 3.9)'): FD 의 Python 플러그인은 OS 기본 Python 으로 돈다.
-  'Rocky·RHEL 9 FD(Python 3.9)는 pyVmomi 8.x 를 씁니다 — python3 -m pip install ‘pyvmomi>=8,<9’ · 9.x 는 Python 3.10 이상이 필요해 플러그인이 시작하지 못합니다(바꾼 뒤 bareos-fd 재시작).',
+  // v2.822.3(S2-3 — 반증 확인): 잡을 만들려면 configure 가 필요하고 Bareos 에는 그 하위 명령·리소스 단위 ACL 이 없다 — 숨기지 않고 알린다
+  '포탈 콘솔(Profile portal)은 잡을 만들려고 configure 를 쓰므로 사실상 Director 관리자 등급입니다(모든 FD 에 root 로 닿는다) — 콘솔 비밀번호를 그 등급으로 지키세요.',
+  // v2.822.3(W2-7): 셸에 붙여 넣는 명령은 ASCII 작은따옴표 — 굽은 따옴표(‘ ’)는 셸이 따옴표로 보지 않아 > · < 가 리다이렉트가 됐다
+  "Rocky·RHEL 9 FD(Python 3.9)는 pyVmomi 8.x 를 씁니다 — python3 -m pip install 'pyvmomi>=8,<9' · 9.x 는 Python 3.10 이상이 필요해 플러그인이 시작하지 못합니다(바꾼 뒤 bareos-fd 재시작).",
   'FD 의 Client 리소스에 Plugin Names = python3 · Plugin Directory 를 지정합니다.',
   'vCenter 에 백업 전용 관리자 계정을 만들고 VADP 를 쓰는 라이선스(Essentials 이상)인지 확인합니다.',
   '포탈 서버에서 Director 9101 포트로 TLS-PSK 접속이 되는지 bareos-probe 도구로 먼저 확인합니다.',

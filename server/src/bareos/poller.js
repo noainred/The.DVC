@@ -27,6 +27,17 @@ let _tick = 0;
 let _last = { at: null, ok: null, trigger: null, checked: 0, updated: 0, reconciled: false, error: '', configured: null };
 let _timer = null;
 let _rot = 0;   // v2.822: 시한으로 잘린 틱이 목록 뒤쪽을 굶기지 않게 시작 위치를 돌린다
+// v2.822.3(C2-3·P2-4·I2-9·P2-5 — 확인): 대조를 앞당겨야 할 때(자동 설정의 reload 가 꺼 둔 잡을 다시 켰다 · 시한에 잘려 대조를 못 끝냈다).
+//   예전에는 다음 정기 대조(기본 10틱 ≈ 10분, 주기 상한이면 10시간)까지 지운·비활성 잡이 스케줄대로 돌았다.
+let _reconcileDue = false;
+
+/** 다음 기회에 대조한다 — 바쁘지 않으면 지금 한 번 돈다(주기 조회와 같은 가드·인증 정지 규칙). */
+export function requestReconcile() {
+  _reconcileDue = true;
+  if (_busy) return;
+  const t = setTimeout(() => { pollOnce({ trigger: 'timer', reconcile: true }).catch(() => {}); }, 0);
+  t.unref?.();
+}
 
 /**
  * 상태(엣지 로그 spec 'collect.bareos' · 서비스 점검 · 화면). enabled = Director 가 설정됐거나 데모 Director —
@@ -61,7 +72,7 @@ export async function pollOnce({ trigger = 'timer', reconcile = null } = {}) {
       return pollerStatus();
     }
     _tick += 1;
-    const doReconcile = reconcile ?? (trigger !== 'timer' || _tick % RECONCILE_EVERY === 1);
+    const doReconcile = reconcile ?? (trigger !== 'timer' || _tick % RECONCILE_EVERY === 1 || _reconcileDue);
     const allWork = pendingWork().filter((w) => (demo ? w.demo : !w.demo));
     const off = allWork.length ? _rot % allWork.length : 0;
     const work = [...allWork.slice(off), ...allWork.slice(0, off)].slice(0, MAX_PENDING_PER_TICK);
@@ -87,6 +98,7 @@ export async function pollOnce({ trigger = 'timer', reconcile = null } = {}) {
       }
       let reconciled = false;
       let redisabled = 0;
+      if (doReconcile && signal.aborted) _reconcileDue = true;   // 시한에 잘려 대조를 못 했다 — 다음 틱에
       if (doReconcile && !signal.aborted) {
         const mine = listJobs().filter((j) => (demo ? j.demo : !j.demo));
         const retired = retiredNames().filter((r) => (demo ? r.demo : !r.demo));
@@ -102,7 +114,7 @@ export async function pollOnce({ trigger = 'timer', reconcile = null } = {}) {
           inBatch(() => {   // 원장 쓰기는 이 묶음 끝에 한 번(P2·I4)
             for (const j of mine) {
               const missing = !states.has(j.bareosJob);
-              if (missing !== !!j.missingInDirector) patchJob(j.id, { missingInDirector: missing });
+              if (states.size > 0 && missing !== !!j.missingInDirector) patchJob(j.id, { missingInDirector: missing });   // 빈 응답으로 전부 '없음' 칠하지 않는다
               const row = newest.get(j.bareosJob);
               if (row) applyRunRow(j.id, row);
               // disable 은 Director 메모리 값이라 reload·재시작이면 다시 켜진다(I3) — 포탈이 끈 잡이 켜져 있으면 다시 끈다
@@ -110,20 +122,25 @@ export async function pollOnce({ trigger = 'timer', reconcile = null } = {}) {
             }
           });
           const live = new Set(mine.map((j) => j.bareosJob));
+          // v2.822.3(I2-5 — 재현): `.jobs` 가 한 번 비어 오면(ACL·일시 오류) 지운 잡 기록이 통째로 사라졌다 — 응답을 믿을 수 있을 때만 잊는다
+          const trusted = states.size > 0 && (!mine.length || mine.some((j) => states.has(j.bareosJob)));
           const gone = [];
           for (const r of retired) {
             if (live.has(r.name)) continue;
-            if (!states.has(r.name)) gone.push(r.name);              // 관리자가 conf 를 지웠다 — 더 볼 것 없다
+            if (!states.has(r.name)) { if (trusted) gone.push(r.name); }   // 관리자가 conf 를 지웠다 — 더 볼 것 없다
             else if (states.get(r.name) === true) toDisable.push(r.name);
           }
           if (gone.length) forgetRetired(gone);
+          let cut = false;
           for (const name of toDisable) {
-            if (signal.aborted) break;
+            if (signal.aborted) { cut = true; break; }
             try { await setJobEnabled(s, name, false); redisabled += 1; } catch (e) { if (e?.code !== 'jsonrpc') throw e; itemErrors += 1; }
           }
+          _reconcileDue = cut;   // 다시 끄기가 시한에 잘렸으면 다음 틱에 이어서(P2-5)
           if (redisabled) console.warn(`[bareos] Director 에서 다시 켜진 잡 ${redisabled}개를 다시 비활성화했습니다(reload·재시작 — disable 은 conf 에 남지 않는다).`);
         }
         reconciled = true;
+        if (!mine.length && !retired.length) _reconcileDue = false;
       }
       return { checked, updated, reconciled, redisabled, itemErrors };
     }, { trigger, signal }), 'Bareos 상태 조회 시한');
