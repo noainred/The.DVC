@@ -195,24 +195,33 @@ export default function SettingsTab({ onSaved }) {
  * 검토 W11: 저장된 값은 목록에 없어도 늘 선택지로 남기고 '목록에 없음' 을 붙인다(다른 값으로 바꿨다가 되돌릴 수 있게) ·
  * 대행 작업 인출은 엣지별 개별 토큰 전용이라 토큰이 없는 이름에 '개별 토큰 없음 — 대행 불가' 를 붙인다(withToken 을 못 받으면 붙이지 않는다).
  */
-function AgentSelect({ agents, value, onChange, saved = '', withToken = null }) {
-  const known = new Set(agents || []);
+function agentIssue(a, agents, withToken) {
+  if (!a) return '';
+  if (!(agents || []).includes(a)) return 'gone';
   const tok = Array.isArray(withToken) ? new Set(withToken.map((x) => String(x).toLowerCase())) : null;
+  return tok && !tok.has(a.toLowerCase()) ? 'token' : '';
+}
+function AgentSelect({ agents, value, onChange, saved = '', withToken = null }) {
   const list = [...new Set([...(saved ? [saved] : []), ...(value ? [value] : []), ...(agents || [])])];
-  const issue = (a) => (!a ? '' : !known.has(a) ? 'gone' : tok && !tok.has(a.toLowerCase()) ? 'token' : '');
-  // Chromium 확인: 좁은 칸에서 닫힌 선택 상자는 뒤가 잘린다 — 표지는 짧게, 고른 값의 문제는 아래 줄에 풀어 쓴다
-  const label = (a) => `엣지 ${a}${issue(a) === 'gone' ? ' (목록에 없음)' : issue(a) === 'token' ? ' (토큰 없음)' : ''}`;
-  const why = issue(value);
+  // Chromium 확인: 좁은 칸에서 닫힌 선택 상자는 뒤가 잘린다 — 표지는 짧게, 고른 값의 문제는 격자 밖 한 줄(AgentIssueLine)에 풀어 쓴다
+  const label = (a) => { const i = agentIssue(a, agents, withToken); return `엣지 ${a}${i === 'gone' ? ' (목록에 없음)' : i === 'token' ? ' (토큰 없음)' : ''}`; };
   return (
     <label className="muted" style={FIELD}>담당(접속 주체)
       <Select className="input" style={INP} value={value || ''} onChange={(e) => onChange(e.target.value)} aria-label="담당 엣지">
         <option value="">중앙 직접</option>
         {list.map((a) => <option key={a} value={a}>{label(a)}</option>)}
       </Select>
-      {why && <span style={{ fontSize: 11, lineHeight: 1.5, color: 'var(--amber)' }}>{why === 'gone'
-        ? `‘${value}’ 는 중앙이 아는 엣지 목록에 없습니다 — 엣지 이름이 바뀌었거나 등록에서 빠졌을 수 있습니다.`
-        : `‘${value}’ 엣지에 개별 토큰이 없어 대행 작업을 가져가지 못합니다 — 중앙 설정 › 수집 서버에서 개별 토큰을 발급하세요.`}</span>}
     </label>
+  );
+}
+/** 고른 담당의 문제(목록에 없음·개별 토큰 없음) — 격자 밖 전체 폭(칸 안에 두면 같은 줄 다른 칸이 밀렸다 · Chromium 1440). 없으면 아무것도 그리지 않는다. */
+function AgentIssueLine({ value, agents, withToken }) {
+  const why = agentIssue(value, agents, withToken);
+  if (!why) return null;
+  return (
+    <div style={{ fontSize: 11.5, lineHeight: 1.6, marginTop: 6, color: 'var(--amber)' }}>{why === 'gone'
+      ? `담당 ‘${value}’ 는 중앙이 아는 엣지 목록에 없습니다 — 엣지 이름이 바뀌었거나 등록에서 빠졌을 수 있습니다.`
+      : `담당 ‘${value}’ 엣지에 개별 토큰이 없어 대행 작업을 가져가지 못합니다 — 중앙 설정 › 수집 서버에서 개별 토큰을 발급하세요.`}</div>
   );
 }
 
@@ -240,6 +249,7 @@ function AddDirectorForm({ agents, withToken, onDone }) {
         <label className="muted" style={FIELD}>콘솔 비밀번호(있으면)<input className="input" style={INP} type="password" autoComplete="new-password" value={f.password} onChange={(e) => set('password', e.target.value)} placeholder="자동 설정이 만듭니다" aria-label="콘솔 비밀번호" /></label>
         <AgentSelect agents={agents} withToken={withToken} value={f.agent} onChange={(v) => set('agent', v)} />
       </div>
+      <AgentIssueLine value={f.agent} agents={agents} withToken={withToken} />
       <div style={{ ...ROW, marginTop: 10 }}>
         <button type="button" className="login-btn" style={{ flex: 'none', padding: '8px 16px' }} disabled={busy || !f.name.trim() || !f.host} onClick={submit}>{busy ? '추가 중…' : '추가'}</button>
         <span className="muted" style={{ fontSize: 11.5 }}>{missingText([[f.name.trim(), '법인 이름'], [f.host, 'Director 주소']]) || '초기 설치만 된 서버면 콘솔은 비워 두고 추가한 뒤 자동 설정을 쓰세요.'}</span>
@@ -383,6 +393,7 @@ function DirectorEditor({ s, dir, locked, onReload, onSaved, onClose, onDeleted 
             </label>
             <AgentSelect agents={s.agents || []} withToken={s.agentsWithToken} saved={dir.agent || ''} value={form.agent} onChange={(v) => set('agent', v)} />
           </div>
+          <AgentIssueLine value={form.agent} agents={s.agents || []} withToken={s.agentsWithToken} />
           {/* W8: 지금 동작은 저장된 담당 기준이다 — 고르기만 하고 저장하지 않았으면 그렇게 말한다 · W9: 주기 숫자를 박지 않는다 */}
           {(form.agent || '') !== (dir.agent || '') && <div className="banner warn" style={{ marginTop: 8, fontSize: 12, lineHeight: 1.6 }}>담당을 바꿨습니다(저장 전) — 지금 연결 시험·자동 설정은 저장된 담당({dir.agent ? `법인 엣지 ‘${dir.agent}’` : '중앙 직접'})으로 실행합니다. ‘연결 저장’ 을 누르면 {form.agent ? `법인 엣지 ‘${form.agent}’ 가` : '중앙이 직접'} 접속합니다.</div>}
           {dir.agent && <div className="banner" style={{ marginTop: 8, fontSize: 12, lineHeight: 1.6 }}>법인 엣지 ‘{dir.agent}’ 가 이 Director 에 대신 접속합니다(중앙은 접속하지 않습니다). 엣지는 저장된 접속값으로 접속합니다 — 엣지 사본이 다르면 작업 전에 배정을 다시 받습니다. 새 비밀번호는 저장한 뒤 시험하세요. 자동 설정도 그 엣지가 SSH 로 실행하고, 처음 접속하는 서버의 SSH 호스트키 승인은 <b>그 엣지 포탈</b>(설정 › 장비 신뢰)에서 합니다.</div>}
