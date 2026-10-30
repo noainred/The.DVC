@@ -9,9 +9,10 @@ import { fetchJson, downloadFile, canCsv, putJson, hasRole, toolAllowed } from '
 import { saveHandoff } from './backupRunText.js';   // v2.818 고른 VM 을 '백업 실행' 탭으로 넘긴다
 import { Loading, ErrorBox } from '../../components/ui.jsx';
 import Select from '../../components/Select.jsx';
-import { fmtNum, pctOf, veeamStateOf, snapReasonText, FILTERS, filterCounts, buildTree, flattenTree, initialOpen, veeamCell, snapCell, shortTs, vmClass, loadOpts, saveOpts, scopeQuery, scopeNote, runningCell, CRIT, critOf, MEMO_MAX, marksLine, marksNotice, filterCountText, detailLoadKey, toggleAllVisible, invertVisible, visibleVmIds, folderVmIdMap, folderCheckState, filterLabel, METHODS, methodOf, backupCell, cloneCell, methodKeyOf, METHOD_KEYS_MAP, fmtGb, methodGbTotals } from './backupViewText.js';
+import { fmtNum, pctOf, veeamStateOf, snapReasonText, FILTERS, filterCounts, buildTree, flattenTree, initialOpen, veeamCell, snapCell, shortTs, vmClass, loadOpts, saveOpts, scopeQuery, scopeNote, runningCell, CRIT, critOf, MEMO_MAX, marksLine, marksNotice, filterCountText, detailLoadKey, toggleAllVisible, invertVisible, visibleVmIds, folderVmIdMap, folderCheckState, filterLabel, METHODS, methodOf, backupCell, cloneCell, bareosCell, methodKeyOf, METHOD_KEYS_MAP, fmtGb, methodGbTotals, NOT_VEEAM_GAP } from './backupViewText.js';
 import { CritIcon, NeedIcon, NEED_COLOR, MethodBadge } from './BackupMarkIcons.jsx';
 import BackupOptions from './BackupOptions.jsx';
+import { saveBareosHandoff, HANDOFF_MAX as BAREOS_HANDOFF_MAX, lvText } from './bareosViewText.js';
 import VeeamHeader from './VeeamHeader.jsx';
 import { DETAIL_VC_KEY } from './BackupSummaryTool.jsx';
 import VmListExportDialog from '../VmListExportDialog.jsx';   // v2.800 'CSV' 버튼 = 백업 내보내기 창(필요한 항목만 · CSV/엑셀 · 내 저장값)
@@ -33,6 +34,11 @@ const CHIP = {
   clone: { color: '#67e8f9', background: 'rgba(103,232,249,.14)' },
   cloneBad: { color: '#fca5a5', background: 'rgba(239,68,68,.14)' },
   cloneNone: { color: '#67e8f9', background: 'transparent', border: '1px dashed rgba(103,232,249,.5)' },
+  // v2.828 Bareos 칸(주황 — 백업 방식 칩과 같은 계열)
+  bareos: { color: '#fdba74', background: 'rgba(251,146,60,.14)' },
+  bareosWarn: { color: '#fcd34d', background: 'rgba(245,158,11,.16)' },
+  bareosBad: { color: '#fca5a5', background: 'rgba(239,68,68,.14)' },
+  bareosNone: { color: '#fdba74', background: 'transparent', border: '1px dashed rgba(251,146,60,.55)' },
 };
 function Chip({ c }) {
   return <span style={{ display: 'inline-block', padding: '2px 8px', borderRadius: 10, fontSize: 12, fontWeight: 700, whiteSpace: 'nowrap', ...(CHIP[c.tone] || CHIP.none) }}>{c.text}</span>;
@@ -117,6 +123,7 @@ export default function BackupDetailTool({ scope }) {
   const now = data?.at || 0;
   const vopts = useMemo(() => ({ rpoDays: opts.rpoDays, now: now || Date.now() }), [opts.rpoDays, now]);
   const counts = useMemo(() => filterCounts(vms, vopts), [vms, vopts]);
+  const hasBareos = useMemo(() => (vms || []).some((v) => 'b' in v), [vms]);   // v2.828 이 vCenter 에 Bareos 칸이 하나라도 있나(없으면 Bareos 칩·막대를 그리지 않는다)
   const tree = useMemo(() => buildTree(vms, { filter, q, ...vopts }), [vms, filter, q, vopts]);
   const openSet = useMemo(() => open || initialOpen(buildTree(vms)), [open, vms]);
   const forceOpen = filter !== 'all' || !!q.trim();
@@ -249,7 +256,7 @@ export default function BackupDetailTool({ scope }) {
       {data && (<>
       <div className="flex gap wrap" style={{ alignItems: 'center', rowGap: 8 }}>
         <div className="flex gap wrap" role="group" aria-label="보기" style={{ rowGap: 6 }}>
-          {FILTERS.map(([k, label]) => <button key={k} type="button" className={`tab${filter === k ? ' active' : ''}`} aria-pressed={filter === k} onClick={() => setFilter(k)} style={{ padding: '5px 12px', fontSize: 12 }}>{label}{k === 'rpo' ? `(${opts.rpoDays}일)` : ''} {filterCountText(k, counts, marksUnknown)}</button>)}
+          {FILTERS.filter(([k]) => hasBareos || (k !== 'bareos' && k !== 'bareos-missing') || filter === k).map(([k, label]) => <button key={k} type="button" className={`tab${filter === k ? ' active' : ''}`} aria-pressed={filter === k} onClick={() => setFilter(k)} style={{ padding: '5px 12px', fontSize: 12 }}>{label}{k === 'rpo' ? `(${opts.rpoDays}일)` : ''} {filterCountText(k, counts, marksUnknown)}</button>)}
           {(filter.startsWith('crit-') || filter.startsWith('method-')) && <button type="button" className="tab active" aria-pressed="true" onClick={() => setFilter('all')} title="중요도·백업 방식 보기 끄기" style={{ padding: '5px 12px', fontSize: 12 }}>{filterLabel(filter)} {filterCountText(filter, counts, marksUnknown)} ✕</button>}
         </div>
         <label style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 6, minWidth: 0, flex: '0 1 280px' }}>
@@ -290,6 +297,13 @@ export default function BackupDetailTool({ scope }) {
           {hasRole('admin') && toolAllowed('backup-run') && (
             <button type="button" className="tab" disabled={!checked.size} onClick={() => { saveHandoff(vcId, [...checked]); window.location.hash = '#/tools/backup-run'; }} title="고른 VM 을 백업 실행 화면으로 가져갑니다 — 거기서 미리보기·OTP 확인 뒤 Veeam 으로 보냅니다" style={{ padding: '3px 10px', fontSize: 12 }}>Veeam 백업 실행 →</button>
           )}
+          {/* v2.828: 고른 VM 을 Bareos 백업 대상 추가 창으로(관리자 — 등록은 그 화면에서. 200대까지 — 넘으면 앞 200대이고 그렇다고 말한다) */}
+          {hasRole('admin') && toolAllowed('bareos-backup') && (
+            <button type="button" className="tab" disabled={!checked.size} onClick={() => { saveBareosHandoff(vcId, [...checked]); window.location.hash = '#/tools/bareos-backup/targets'; }}
+              title={`고른 VM 을 Bareos 백업 대상 추가 창으로 가져갑니다 — 거기서 레벨을 고르고 등록합니다${checked.size > BAREOS_HANDOFF_MAX ? `(앞 ${BAREOS_HANDOFF_MAX}대만)` : ''}`} style={{ padding: '3px 10px', fontSize: 12, color: '#fdba74' }}>
+              Bareos 백업 대상으로 등록{checked.size > BAREOS_HANDOFF_MAX ? `(앞 ${BAREOS_HANDOFF_MAX}대)` : ''} →
+            </button>
+          )}
           {saving && <span className="muted">저장 중…</span>}
           {saveErr && <span style={{ color: '#fca5a5', overflowWrap: 'anywhere', minWidth: 0 }}>저장 실패 — {saveErr?.status === 403 ? '수정 권한이 없습니다.' : String(saveErr.message || saveErr)}</span>}
         </div>
@@ -304,7 +318,7 @@ export default function BackupDetailTool({ scope }) {
                 <div role="columnheader" style={{ padding: '9px 6px' }}>전원</div>
                 <div role="columnheader" style={{ padding: '9px 10px 9px 6px', textAlign: 'right' }} title="VM 스토리지 사용(GB, vCenter 인벤토리) · 폴더 = 그 아래 VM 합">용량</div>
                 <div role="columnheader" style={{ padding: '9px 6px' }}>백업 <span style={{ fontWeight: 400 }}>(Veeam · 스냅샷)</span></div>
-                <div role="columnheader" style={{ padding: '9px 6px' }}>Clone</div>
+                <div role="columnheader" style={{ padding: '9px 6px' }}>Clone{hasBareos ? ' · Bareos' : ''}</div>
                 <div role="columnheader" style={{ padding: '9px 6px', textAlign: 'right' }}>복원 지점</div>
                 <div role="columnheader" style={{ padding: '9px 14px 9px 6px' }}>마지막 백업</div>
               </div>
@@ -338,15 +352,16 @@ export default function BackupDetailTool({ scope }) {
                       <div role="gridcell" style={{ padding: '4px 6px', display: 'flex', flexDirection: 'column', gap: 3, minWidth: 0 }}>
                         {r.veeam != null ? <AggBar n={a.veeam} of={a.n} color="#22c55e" /> : <span className="muted" style={{ fontSize: 12 }}>Veeam —</span>}
                         {r.snap != null ? <AggBar n={a.snap} of={a.n} color="#a855f7" /> : <span className="muted" style={{ fontSize: 12 }}>스냅샷 —</span>}
+                        {hasBareos && <AggBar n={a.bareos} of={a.n} color="#fb923c" />}
                         {a.run ? <span style={{ color: '#fbbf24', fontWeight: 700, fontSize: 12 }}>백업 중·대기 {a.run}</span> : null}
                       </div>
-                      <div role="gridcell" style={{ padding: '0 6px', fontSize: 12 }}>{a.clone ? <span style={{ color: '#67e8f9', fontWeight: 700 }}>Clone {a.clone}</span> : null}</div>
+                      <div role="gridcell" style={{ padding: '0 6px', fontSize: 12, display: 'flex', flexDirection: 'column', gap: 2 }}>{a.clone ? <span style={{ color: '#67e8f9', fontWeight: 700 }}>Clone {a.clone}</span> : null}{a.bareos ? <span style={{ color: '#fdba74', fontWeight: 700 }}>Bareos {a.bareos}</span> : null}{a.bareosMissing ? <span style={{ color: '#fcd34d' }}>Bareos 미등록 {a.bareosMissing}</span> : null}</div>
                       <div role="gridcell" />
                       <div role="gridcell" />
                     </div>
                   );
                 }
-                const vm = row.vm; const bc = backupCell(vm, days); const cc = cloneCell(vm);
+                const vm = row.vm; const bc = backupCell(vm, days); const cc = cloneCell(vm); const bk = bareosCell(vm);
                 const isSel = sel === vm.id;
                 return (
                   <div role="row" key={row.key} aria-selected={isSel} style={{ display: 'grid', gridTemplateColumns: GRID, alignItems: 'center', borderTop: '1px solid var(--border-soft)', background: isSel ? 'rgba(59,130,246,.12)' : undefined }}>
@@ -365,7 +380,7 @@ export default function BackupDetailTool({ scope }) {
                     <div role="gridcell" style={{ padding: '0 6px', fontSize: 12, color: vm.power === 'POWERED_ON' ? '#86efac' : 'var(--text-dim)' }}>{vm.power === 'POWERED_ON' ? '켜짐' : vm.power ? '꺼짐' : '—'}</div>
                     <div role="gridcell" style={{ padding: '0 10px 0 6px', textAlign: 'right', fontSize: 12, fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap', color: vm.gb == null ? 'var(--text-dim)' : undefined }}>{fmtGb(vm.gb)}</div>
                     <div role="gridcell" style={{ padding: '0 6px', minWidth: 0 }} title={bc.src === 'snap' ? 'Veeam 백업이 없어 스냅샷 흔적을 보입니다' : bc.src === 'veeam' ? 'Veeam 백업이 있어 스냅샷 칸은 숨깁니다(오른쪽 상세에 있습니다)' : undefined}><Chip c={bc} /></div>
-                    <div role="gridcell" style={{ padding: '0 6px', minWidth: 0 }}>{cc ? <Chip c={cc} /> : <span className="muted">—</span>}</div>
+                    <div role="gridcell" style={{ padding: '0 6px', minWidth: 0, display: 'flex', flexDirection: 'column', gap: 3, alignItems: 'flex-start' }}>{cc || bk ? <>{cc && <Chip c={cc} />}{bk && <Chip c={bk} />}</> : <span className="muted">—</span>}</div>
                     <div role="gridcell" style={{ padding: '0 6px', textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{vm.v && Number.isFinite(vm.v.rp) && vm.v.rp >= 0 ? vm.v.rp : '—'}</div>
                     <div role="gridcell" style={{ padding: '0 14px 0 6px', fontFamily: 'var(--mono)', fontSize: 12, whiteSpace: 'nowrap' }}>{shortTs(vm.v?.lb)}</div>
                   </div>
@@ -373,7 +388,7 @@ export default function BackupDetailTool({ scope }) {
               })}
             </div>
           </div>
-          <div className="muted" style={{ padding: '8px 14px', fontSize: 12, borderTop: '1px solid var(--border-soft)' }}>폴더 줄의 수 = 그 아래 VM 중 Veeam(위)·스냅샷(아래)이 보이는 수 / 전체 · Clone N = 백업 방식을 Clone 으로 정한 VM 수 · 용량 = VM 스토리지 사용(vCenter 인벤토리), 폴더는 그 아래 VM 합 · 폴더를 누르면 펼치고 접습니다(검색·보기 필터 중에는 모두 펼침) · VM 을 누르면 오른쪽에 상세</div>
+          <div className="muted" style={{ padding: '8px 14px', fontSize: 12, borderTop: '1px solid var(--border-soft)' }}>폴더 줄의 수 = 그 아래 VM 중 Veeam(위)·스냅샷(아래)이 보이는 수 / 전체 · Clone N = 백업 방식을 Clone 으로 정한 VM 수{hasBareos ? ' · Bareos N = Bareos 잡이 있는 VM 수(주황 막대)' : ''} · 용량 = VM 스토리지 사용(vCenter 인벤토리), 폴더는 그 아래 VM 합 · 폴더를 누르면 펼치고 접습니다(검색·보기 필터 중에는 모두 펼침) · VM 을 누르면 오른쪽에 상세</div>
         </div>
 
         {/* 긴 트리를 내려가도 고른 VM 의 상세가 보이게(넓은 화면) — 좁은 화면에서는 표 아래로 내려간다. v2.810: top 은 .bk-side(일괄 표시 바 아래) */}
@@ -385,7 +400,7 @@ export default function BackupDetailTool({ scope }) {
                 <>
                   <div className="muted" style={{ fontSize: 12, overflowWrap: 'anywhere' }}>{selVm.folder || '—'}</div>
                   <div style={{ fontSize: 17, fontWeight: 800, overflowWrap: 'anywhere' }}>{selVm.name}</div>
-                  <div className="flex gap wrap" style={{ rowGap: 6 }}><Chip c={veeamCell(selVm)} /><Chip c={snapCell(selVm, days)} />{cloneCell(selVm) && <Chip c={cloneCell(selVm)} />}</div>
+                  <div className="flex gap wrap" style={{ rowGap: 6 }}><Chip c={veeamCell(selVm)} /><Chip c={snapCell(selVm, days)} />{cloneCell(selVm) && <Chip c={cloneCell(selVm)} />}{bareosCell(selVm) && <Chip c={bareosCell(selVm)} />}</div>
                   {v && v.state === 'run' && Number.isFinite(v.pg) && (
                     <div>
                       <div className="flex" style={{ justifyContent: 'space-between', fontSize: 12 }}><span>이 VM 진행률</span><b style={{ color: '#fbbf24' }}>{v.pg}%</b></div>
@@ -401,6 +416,8 @@ export default function BackupDetailTool({ scope }) {
                     <dt className="muted">복원 지점</dt><dd style={{ margin: 0 }}>{v && Number.isFinite(v.rp) && v.rp >= 0 ? `${v.rp}개` : v?.rp === -1 ? '있음(개수 모름)' : '—'}</dd>
                     <dt className="muted">스냅샷 흔적</dt><dd style={{ margin: 0 }}>{selVm.s?.ev ? `최근 ${days}일 ${selVm.s.ev.n ?? '?'}회 · 마지막 ${shortTs(selVm.s.ev.ts)}` : ('ev' in (selVm.s || {}) ? '없음' : '모름')}</dd>
                     <dt className="muted">지금 스냅샷</dt><dd style={{ margin: 0 }}>{selVm.s?.now ? `${selVm.s.now.n}개 · 생성 ${shortTs(selVm.s.now.ts)}${selVm.s.now.stale ? ' — 하루 넘게 남음(정리 실패 의심)' : ''}` : '없음'}</dd>
+                    {selVm.b?.job && <><dt className="muted" style={{ color: '#fdba74' }}>Bareos 마지막 백업</dt><dd style={{ margin: 0 }}>{shortTs(selVm.b.ok)}{selVm.b.lv ? ` · 마지막 실행 ${lvText(selVm.b.lv)}` : ''}</dd></>}
+                    {selVm.b && selVm.b.job === false && <><dt className="muted" style={{ color: '#fdba74' }}>Bareos</dt><dd style={{ margin: 0, color: '#fcd34d' }}>백업 방식은 Bareos 인데 백업 대상(잡)에 없습니다</dd></>}
                     {cloneCell(selVm) && <><dt className="muted" style={{ color: '#67e8f9' }}>복제 잡</dt><dd style={{ margin: 0, overflowWrap: 'anywhere' }}>{cloneCell(selVm).text.replace(/^Clone ?·? ?/, '') || '—'}</dd></>}
                   </dl>
                   {/* v2.784: 백업 표시 — 편집 가능하면 바로 저장(중요도·백업 필요), 메모는 저장 버튼 */}
@@ -425,13 +442,13 @@ export default function BackupDetailTool({ scope }) {
                       }) : (methodOf(selVm.m?.method) ? <MethodBadge method={selVm.m.method} /> : <span className="muted">—</span>)}
                       </span>
                     </div>
-                    {writable && <span className="muted" data-method-keys="" style={{ fontSize: 11.5, paddingLeft: 62 }}>단축키 V Veeam · C Clone · G Config 백업 · N 백업 안함 · K 확인 필요</span>}
+                    {writable && <span className="muted" data-method-keys="" style={{ fontSize: 11.5, paddingLeft: 62 }}>단축키 V Veeam · C Clone · B Bareos · G Config 백업 · N 백업 안함 · K 확인 필요</span>}
                     <div className="flex wrap" style={{ gap: 6, alignItems: 'center' }}>
                       <span className="muted" style={{ fontSize: 12, minWidth: 56 }}>백업 필요</span>
                       {writable ? (
                         <button type="button" className={`tab${selVm.m?.need ? ' active' : ''}`} aria-pressed={!!selVm.m?.need} disabled={saving} onClick={() => saveMarks([selVm.id], { need: !selVm.m?.need })} style={{ padding: '3px 10px', fontSize: 12, display: 'inline-flex', alignItems: 'center', gap: 4 }}><NeedIcon size={13} />{selVm.m?.need ? '표시됨 — 누르면 해제' : '표시'}</button>
                       ) : (selVm.m?.need ? <span className="flex" style={{ gap: 4, alignItems: 'center' }}><NeedIcon size={13} />표시됨</span> : <span className="muted">—</span>)}
-                      {selVm.m?.need && c.vKnown && !c.veeam && c.method !== 'none' && c.method !== 'clone' && <span style={{ fontSize: 12, color: '#fca5a5' }}>Veeam 백업 대상이 아닙니다</span>}
+                      {selVm.m?.need && c.vKnown && !c.veeam && !NOT_VEEAM_GAP.includes(c.method) && <span style={{ fontSize: 12, color: '#fca5a5' }}>Veeam 백업 대상이 아닙니다</span>}
                     </div>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
                       <span className="muted" style={{ fontSize: 12 }} id="backup-memo-label">백업 메모</span>
@@ -458,6 +475,7 @@ export default function BackupDetailTool({ scope }) {
             <div><b style={{ color: '#fcd34d' }}>백업 중 N%</b> 그 VM 의 진행률 · <b style={{ color: '#93c5fd' }}>대기</b> 차례 기다림</div>
             <div><b style={{ color: '#d8b4fe' }}>{days}일 N회</b> Veeam 이 없는 VM 의 스냅샷 흔적(Veeam 이 있으면 숨김) · <b style={{ color: '#fca5a5' }}>잔존</b> 하루 넘게 남은 임시 스냅샷</div>
             <div><b style={{ color: '#67e8f9' }}>Clone 월-일 시:분</b> 백업 방식이 Clone 인 VM 의 포탈 복제 잡 마지막 실행(실패 빨강 · <b style={{ color: '#67e8f9' }}>잡 없음</b> = 복제 잡이 없음 · 모름 = 실행 노드 보고 없음)</div>
+            <div><b style={{ color: '#fdba74' }}>Bareos 월-일 시:분</b> Bareos 백업 대상(잡)의 마지막으로 끝난 실행(경고 노랑 · 실패 빨강 · 진행 중 · 잡 꺼짐) · <b style={{ color: '#fdba74' }}>미등록</b> = 백업 방식은 Bareos 인데 잡이 없음</div>
             <div className="flex" style={{ gap: 4, alignItems: 'center', flexWrap: 'wrap' }}>{METHODS.map((x) => <MethodBadge key={x.key} method={x.key} small />)} 백업 방식(사람이 정한 값)</div>
             <div className="flex" style={{ gap: 4, alignItems: 'center', flexWrap: 'wrap' }}><CritIcon crit="high" size={13} /><CritIcon crit="mid" size={13} /><CritIcon crit="low" size={13} /> 업무 중요도 상·중·하 · <NeedIcon size={13} /> 백업 필요(사람이 정한 표시)</div>
             <div className="muted">— 는 없음, ‘모름’ 은 그쪽을 읽지 못함(백업 안 됨이 아님)</div>

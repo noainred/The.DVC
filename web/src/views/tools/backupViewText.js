@@ -222,6 +222,7 @@ export function vmClass(vm, { rpoDays = 1, now = Date.now() } = {}) {
     old: !!(v && typeof v.lb === 'number' && Number.isFinite(v.lb) && now - v.lb > days * 86_400_000), fail: /^(fail|warn)/i.test(r),
     crit: CRIT_KEYS.includes(vm?.m?.crit) ? vm.m.crit : '', need: vm?.m?.need === true,
     method: METHOD_KEYS.includes(vm?.m?.method) ? vm.m.method : '',   // v2.803 백업 방식(사람이 정한 값)
+    bareos: vm?.b?.job === true, bareosMissing: !!vm?.b && vm.b.job === false,   // v2.828 Bareos 칸(서버 viewClass 와 한 쌍)
   };
 }
 
@@ -241,11 +242,14 @@ export const critOf = (k) => CRIT.find((c) => c.key === k) || null;
 export const METHODS = [
   { key: 'veeam', text: 'Veeam', color: '#86efac' },
   { key: 'clone', text: 'Clone', color: '#67e8f9' },
+  { key: 'bareos', text: 'Bareos', color: '#fdba74' },   // v2.828 사용자 요청 — Bareos VMware 플러그인 백업(주황 — 다른 다섯 색과 색상·명도 모두 다르다)
   { key: 'config', text: 'Config 백업', color: '#a78bfa' },
   { key: 'none', text: '백업 안함', color: '#94a3b8' },
   { key: 'check', text: '확인 필요', color: '#fbbf24' },   // v2.816 사용자 요청 — 방식을 아직 확인하지 못한 VM 표시
 ];
 const METHOD_KEYS = METHODS.map((m) => m.key);
+/** v2.806 · v2.828: 이 방식이면 Veeam 이 없어도 '미백업' 이 아니다(서버 veeam/backupStatus.js NOT_VEEAM_GAP 와 같다 — 테스트 대조). */
+export const NOT_VEEAM_GAP = Object.freeze(['none', 'clone', 'bareos']);
 export const methodOf = (k) => METHODS.find((m) => m.key === k) || null;
 export const MEMO_MAX = 1000;   // 서버 veeam/backupMarks.js MEMO_MAX 와 같다(테스트 대조)
 /**
@@ -258,7 +262,7 @@ export function marksLine(m, unreadable = false) {
   if (unreadable) return { high: null, mid: null, low: null, need: null, needGap: null, method: null, unknown: true };
   if (!m) return null;
   // v2.803 method — 백업 방식별 수 { veeam, clone, config, none, check, unset } · 옛 응답(없음)·모름은 null
-  const method = m.method && typeof m.method === 'object' ? Object.fromEntries(['veeam', 'clone', 'config', 'none', 'check', 'unset'].map((k) => [k, markNum(m.method[k])])) : null;
+  const method = m.method && typeof m.method === 'object' ? Object.fromEntries([...METHOD_KEYS, 'unset'].map((k) => [k, markNum(m.method[k])])) : null;
   return { high: markNum(m.high), mid: markNum(m.mid), low: markNum(m.low), need: markNum(m.need), needGap: markNum(m.needGap), method,
     needGapUnknown: m.needGapUnknown > 0 ? m.needGapUnknown : undefined };
 }
@@ -272,7 +276,7 @@ export function marksNotice(d) {
   return null;
 }
 /** v2.785(GR R-B2): 세부 보기 칩의 수 — 표시 기준 칩(백업 필요·미백업·중요도)은 표시를 모르면 '—'. */
-const MARK_FILTER_KEYS = new Set(['need', 'needgap', 'crit-high', 'crit-mid', 'crit-low', 'method-veeam', 'method-clone', 'method-config', 'method-none', 'method-check', 'method-unset']);
+const MARK_FILTER_KEYS = new Set(['need', 'needgap', 'bareos-missing', 'crit-high', 'crit-mid', 'crit-low', ...METHODS.map((m) => `method-${m.key}`), 'method-unset']);   // v2.828 bareos-missing 도 방식 기준
 export function filterCountText(k, counts, marksUnknown) {
   if (marksUnknown && MARK_FILTER_KEYS.has(k)) return '—';
   return counts?.[k];
@@ -329,6 +333,7 @@ export const FILTERS = [
   ['all', '전체'], ['veeam', 'Veeam 백업'], ['snaponly', '스냅샷만'], ['none', '확인 안 됨'], ['run', '백업 중·대기'], ['stale', '스냅샷 잔존'],
   ['rpo', '오래된 백업'], ['fail', '실패·경고'],
   ['need', '백업 필요'], ['needgap', '백업 필요·미백업'],
+  ['bareos', 'Bareos 백업'], ['bareos-missing', 'Bareos 미등록'],   // v2.828 — 그 vCenter 에 Bareos 칸이 하나도 없으면 화면이 칩을 숨긴다
 ];
 /** 중요도 필터 — 칩 줄에 두지 않고 상단 중요도 수를 누르면 적용한다(칩 줄이 길어지지 않게). 서버 VIEW_FILTERS 는 FILTERS + 이것. */
 export const CRIT_FILTERS = [['crit-high', '중요도 상'], ['crit-mid', '중요도 중'], ['crit-low', '중요도 하']];
@@ -349,7 +354,9 @@ export function vmMatches(vm, f, opts) {
   if (f === 'rpo') return c.old;
   if (f === 'fail') return c.fail;
   if (f === 'need') return c.need;
-  if (f === 'needgap') return c.need && c.vKnown && !c.veeam && c.method !== 'none' && c.method !== 'clone';   // Veeam 을 모르는 VM 은 넣지 않는다 · v2.806 백업 안함·Clone 은 미백업 아님(서버 vmViewMatches 와 한 쌍)
+  if (f === 'bareos') return c.bareos;   // v2.828(서버 vmViewMatches 와 한 쌍)
+  if (f === 'bareos-missing') return c.bareosMissing;
+  if (f === 'needgap') return c.need && c.vKnown && !c.veeam && !NOT_VEEAM_GAP.includes(c.method);   // Veeam 을 모르는 VM 은 넣지 않는다 · v2.806 백업 안함·Clone 은 미백업 아님(서버 vmViewMatches 와 한 쌍)
   if (f === 'crit-high' || f === 'crit-mid' || f === 'crit-low') return c.crit === f.slice(5);
   if (f.startsWith('method-')) return f === 'method-unset' ? !c.method : c.method === f.slice(7);   // 서버 vmViewMatches 와 한 쌍
   return true;
@@ -408,7 +415,7 @@ export function methodGbTotals(vms, { marksUnreadable = false } = {}) {
 }
 
 export function buildTree(vms, { filter = 'all', q = '', rpoDays = 1, now = Date.now() } = {}) {
-  const root = { key: '', name: '', children: new Map(), vms: [], agg: { n: 0, veeam: 0, snap: 0, run: 0, none: 0, clone: 0, gb: 0, gbUnknown: 0 }, hit: 0 };
+  const root = { key: '', name: '', children: new Map(), vms: [], agg: { n: 0, veeam: 0, snap: 0, run: 0, none: 0, clone: 0, bareos: 0, bareosMissing: 0, gb: 0, gbUnknown: 0 }, hit: 0 };
   const needle = String(q || '').trim().toLowerCase();
   for (const vm of Array.isArray(vms) ? vms : []) {
     const parts = folderParts(vm.folder);
@@ -419,11 +426,11 @@ export function buildTree(vms, { filter = 'all', q = '', rpoDays = 1, now = Date
     for (const p of parts) {
       const key = node.key ? `${node.key}/${p}` : p;
       let next = node.children.get(p);
-      if (!next) { next = { key, name: p, children: new Map(), vms: [], agg: { n: 0, veeam: 0, snap: 0, run: 0, none: 0, clone: 0, gb: 0, gbUnknown: 0 }, hit: 0 }; node.children.set(p, next); }
+      if (!next) { next = { key, name: p, children: new Map(), vms: [], agg: { n: 0, veeam: 0, snap: 0, run: 0, none: 0, clone: 0, bareos: 0, bareosMissing: 0, gb: 0, gbUnknown: 0 }, hit: 0 }; node.children.set(p, next); }
       node = next; path.push(node);
     }
     for (const n of path) {
-      n.agg.n++; if (c.veeam) n.agg.veeam++; if (c.snap) n.agg.snap++; if (c.run) n.agg.run++; if (c.method === 'clone') n.agg.clone++;
+      n.agg.n++; if (c.veeam) n.agg.veeam++; if (c.snap) n.agg.snap++; if (c.run) n.agg.run++; if (c.method === 'clone') n.agg.clone++; if (c.bareos) n.agg.bareos++; if (c.bareosMissing) n.agg.bareosMissing++;
       if (c.vKnown && c.sKnown && !c.veeam && !c.snap) n.agg.none++;
       if (gbKnown(vm.gb)) n.agg.gb += vm.gb; else n.agg.gbUnknown++;   // v2.814 디스크 용량 합(모르는 VM 은 따로 센다 — 0 으로 더하지 않는다)
       if (show) n.hit++;
@@ -493,7 +500,7 @@ export function snapCell(vm, days = 7) {
  * v2.806 백업 방식 단축키(사용자 요청 — VM 을 고른 상태에서 V Veeam · C Clone · G Config 백업 · N 백업 안함). 아니면 null.
  *   조합키(Ctrl·Meta·Alt)·IME 조합 중·누르고 있는 반복·입력 칸(input·textarea·select·편집 가능 요소)에 초점이 있으면 null — 메모를 쓰다가 글자가 백업 방식으로 바뀌지 않게.
  */
-export const METHOD_KEYS_MAP = Object.freeze({ v: 'veeam', c: 'clone', g: 'config', n: 'none', k: 'check' });   // v2.816 K 확인 필요
+export const METHOD_KEYS_MAP = Object.freeze({ v: 'veeam', c: 'clone', b: 'bareos', g: 'config', n: 'none', k: 'check' });   // v2.816 K 확인 필요 · v2.828 B Bareos
 export function methodKeyOf(e) {
   if (!e || e.ctrlKey || e.metaKey || e.altKey || e.isComposing || e.repeat) return null;
   const t = e.target;
@@ -526,6 +533,22 @@ export function cloneCell(vm) {
   if (!(typeof c.at === 'number' && Number.isFinite(c.at))) return { text: `Clone · 아직 실행 안 함${off}`, tone: 'cloneNone' };
   if (c.skipped) return { text: `Clone 건너뜀 ${shortTs(c.at)}${off}`, tone: 'cloneBad' };
   return c.ok ? { text: `Clone ${shortTs(c.at)}${off}`, tone: 'clone' } : { text: `Clone 실패 ${shortTs(c.at)}${off}`, tone: 'cloneBad' };
+}
+
+/**
+ * v2.828 'Bareos' 칸 — 서버가 잡이 있거나 백업 방식이 Bareos 인 VM 에만 b 를 싣는다(키 없음 = 빈칸 · bareos/vmView.bareosVmView).
+ *   b null(원장 못 읽음) '모름' · 잡 없음 '미등록' · 끝난 실행이 없으면 '아직 실행 안 함' · 'Bareos 월-일 시:분'(성공) · 경고 · 실패 + 진행 중 · 잡 꺼짐.
+ */
+export function bareosCell(vm) {
+  if (!vm || !('b' in vm)) return null;
+  const b = vm.b;
+  if (!b) return { text: 'Bareos · 모름', tone: 'unknown' };
+  if (!b.job) return { text: 'Bareos · 미등록', tone: 'bareosNone' };
+  const tail = `${b.run ? ' · 진행 중' : ''}${b.on === false ? ' · 잡 꺼짐' : ''}${b.gone ? ' · VM 없음' : ''}`;
+  if (!b.st) return { text: `Bareos · ${b.run ? '진행 중' : '아직 실행 안 함'}${b.on === false ? ' · 잡 꺼짐' : ''}`, tone: b.run ? 'run' : 'bareosNone' };
+  if (b.st === 'ok') return { text: `Bareos ${shortTs(b.at)}${tail}`, tone: 'bareos' };
+  if (b.st === 'warning') return { text: `Bareos 경고 ${shortTs(b.at)}${tail}`, tone: 'bareosWarn' };
+  return { text: `Bareos ${b.st === 'canceled' ? '취소' : '실패'} ${shortTs(b.at)}${tail}`, tone: 'bareosBad' };
 }
 
 /* ── v2.787 Veeam 백업 현황 Summary — 바로가기 · 법인별 표 · 우선순위 VM(사용자 요청 + 시안) ─────────── */

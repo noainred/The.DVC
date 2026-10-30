@@ -58,6 +58,7 @@ const VERDICT = Object.freeze({
 export const METHOD_LOOK = Object.freeze({
   veeam: Object.freeze({ fg: 'FF166534', bg: 'FFDCFCE7' }),
   clone: Object.freeze({ fg: 'FF0E7490', bg: 'FFCFFAFE' }),
+  bareos: Object.freeze({ fg: 'FFC2410C', bg: 'FFFFEDD5' }),   // v2.828 Bareos(웹 칩 #fdba74 계열 — 밝은 바탕용 진한 주황)
   config: Object.freeze({ fg: 'FF6D28D9', bg: 'FFEDE9FE' }),
   none: Object.freeze({ fg: 'FF475569', bg: 'FFF1F5F9' }),
   check: Object.freeze({ fg: 'FFB45309', bg: 'FFFEF3C7' }),   // v2.816 확인 필요

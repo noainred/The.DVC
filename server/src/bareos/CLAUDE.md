@@ -65,3 +65,7 @@
   반올림하면 같은 창의 보고서 값과 0.1 씩 어긋났다) · 데모 보고(`mock/demo/bareos.js demoReport`)도 같은 규칙, 속도는 1000 B · 탭 본문 높이 고정(`LOG_PANE_H`). 회귀 `bareosJobDetail2828.test.js`.
 - 실환경 미확인(추정 — `tools/bareos-probe.js` 로 확인할 것): Node↔Director TLS-PSK 협상 · 잡 수준 FdPluginOptions 와 FileSet 플러그인 문자열 병합 ·
   `.bvfs_get_jobids` JSON 모양 · Profile ACL 지시어 이름 · `list jobs days=N` · 25.x `.jobs` 의 enabled 칸(master 소스 기준 — 없으면 다시 끄기를 하지 않는다) · Migration 행의 시작 시각.
+- **v2.828 조회 화면**(통합 `bareos-summary` · 법인별 `bareos-detail` — 조회 전용 키, adminOnly 아님 · `bareosViews2828`): 판정은 `vmView.js` 하나(웹 `bareosViewText.js` 와 대조) ·
+  **Director 에 접속하지 않는다**(원장 `jobDigests`·백업 표시·폴러 메모리만 — 소스 스윕) · 주소·콘솔·오류 원문 없음 · 범위 밖 404 · 캐시 키 = scopeKey + 표시·원장·설정 리비전 + 손상 여부 ·
+  미설정·인증 정지·조회 실패 법인은 결과 수 null(unknown = 잡 수) · 백업 방식 'bareos' 는 사람이 정한 값만(잡이 있다고 추정하지 않는다 — 미등록·방식 불일치를 따로 센다) ·
+  원장 상한 3,000(5,000 은 쓰기 54ms·복사 47ms 실측 — 더 올리려면 Director 별 파일 분할이 먼저).

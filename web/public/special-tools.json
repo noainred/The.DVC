@@ -1,6 +1,6 @@
 {
-  "generatedAt": "2026-10-30T11:31:40.937Z",
-  "count": 117,
+  "generatedAt": "2026-10-30T13:49:58.780Z",
+  "count": 119,
   "tools": [
     {
       "k": "service-hub",
@@ -636,6 +636,22 @@
     },
     {
       "k": "backup-detail",
+      "adminOnly": false,
+      "perm": null,
+      "external": null,
+      "topTab": false,
+      "comingSoon": false
+    },
+    {
+      "k": "bareos-summary",
+      "adminOnly": false,
+      "perm": null,
+      "external": null,
+      "topTab": false,
+      "comingSoon": false
+    },
+    {
+      "k": "bareos-detail",
       "adminOnly": false,
       "perm": null,
       "external": null,

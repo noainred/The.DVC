@@ -129,6 +129,12 @@ describe('v2.828 크기·속도·소요 표기 — Bareos 보고서와 같은 �
     expect(sized.length).toBeGreaterThanOrEqual(4);
     for (const [, num, paren] of sized) expect(decBytesText(Number(num.replace(/,/g, '')))).toBe(paren);
   });
+  it('현황 화면(bareosViewText)도 같은 함수 — 같은 백업이 화면마다 다른 숫자로 보이지 않는다', async () => {
+    const view = await import('./bareosViewText.js');
+    for (const n of [0, 999, 2048, 622513630072, 190492305747, 53687091200]) expect(view.bytesText(n)).toBe(decBytesText(n));
+    expect(view.bytesText(622513630072)).toBe('622.5 GB');   // 예전 이 화면은 579.8 GB
+    for (const v of [null, undefined, '', NaN, -1]) expect(view.bytesText(v)).toBe('—');
+  });
   it('보고서 크기는 바이트 수에서 계산(실제 보고서에서는 괄호 값과 같다) — 못 읽으면 —', () => {
     expect(reportSizeText('622,513,630,072 (622.5 GB)')).toBe('622.5 GB');
     expect(reportSizeText('1,000 (1 KB)')).toBe('1.000 KB');   // 바이트 수에서 계산 — 모양이 다른 괄호 값을 그대로 옮기지 않는다
