@@ -56,7 +56,8 @@ export function directorPatch(formDir = {}, snapDir = {}) {
 }
 
 /** HTTP 상태가 없는 실패(연결 끊김·브라우저 시한) — 서버는 끝까지 돌았을 수 있다(W2-2·P2-1). */
-export const outcomeUnknown = (e) => !(Number.isInteger(e?.status) && e.status > 0);
+// v2.823 검토(W7): 서버가 본문으로 거부한 것(requireChanged — 409 진행 중·남의 파일 등)은 결과가 **확정**이다 — '결과 모름' 으로 감싸지 않는다.
+export const outcomeUnknown = (e) => !e?.changeRejected && !(Number.isInteger(e?.status) && e.status > 0);
 
 /** 자동 설정 버튼이 잠긴 사유(W2-8 — 잠긴 버튼은 사유를 말한다). 비어 있으면 잠기지 않았다. */
 export function missingText(pairs) {
@@ -116,19 +117,42 @@ export function runCell(job, now = Date.now()) {
   return { when: whenText(r.startedAt ?? r.checkedAt), badge: stateBadge(r.state, r.status), note: `jobid ${r.jobid}${r.level ? ` · ${levelLabel(r.level)}` : ''}`, bytes: bytesText(r.bytes), jobid: r.jobid };
 }
 
-/** 머리 상태 줄(Director 연결·폴러). */
+/**
+ * Director 하나의 상태 배지(v2.823 법인별 Director) — 설정 덜 됨 · 인증 정지 · 조회 실패 · 정상 · 조회 전.
+ * @param {{ configured?, authStopped?, poll? }} dir  목록 응답의 directors[] 한 항목
+ */
+export function directorStatus(dir) {
+  if (!dir) return { cls: 'gray', label: '—' };
+  if (!dir.configured) return { cls: 'gray', label: '설정 덜 됨' };
+  if (dir.authStopped) return { cls: 'red', label: '인증 정지' };
+  if (dir.poll?.ok === false) return { cls: 'red', label: '조회 실패' };
+  if (dir.poll?.ok) return { cls: 'green', label: '정상' };
+  return { cls: 'gray', label: '조회 전' };
+}
+
+/** 머리 상태 줄(법인별 Director 요약 · 폴러). */
 export function directorLine(d) {
   if (!d) return '';
-  if (d.demo) return '데모 Director(합성 응답 — 어디에도 접속하지 않습니다). 설정 탭에서 실제 Director 를 등록하면 그쪽으로 바뀝니다.';
-  if (!d.configured) return 'Director 가 설정되지 않았습니다 — 설정 탭에서 주소·콘솔 이름·비밀번호를 등록하세요.';
+  if (d.demo) return '데모 Director(합성 응답 — 어디에도 접속하지 않습니다). 설정 › 법인별 Director 에서 실제 Director 를 추가하면 그쪽으로 바뀝니다.';
+  if (!d.configured) {
+    const n = Array.isArray(d.directors) ? d.directors.length : 0;
+    // Chromium 확인: Director 를 추가한 뒤에도 '추가하고' 라고 말했다 — 있으면 '접속값이 덜 됐다' 로
+    return n
+      ? `법인 Director ${n}개 — 아직 콘솔 접속값(콘솔 이름·비밀번호)을 갖춘 Director 가 없습니다. 설정 › 법인별 Director 편집에서 자동 설정 2단계(또는 연결 저장)로 채우세요.`
+      : 'Director 가 설정되지 않았습니다 — 설정 › 법인별 Director 에서 법인 Director 를 추가하고 주소·콘솔 이름·비밀번호를 등록하세요.';
+  }
+  const list = Array.isArray(d.directors) ? d.directors : [];
+  const st = list.map(directorStatus);
+  const n = (label) => st.filter((x) => x.label === label).length;
+  const parts = [`법인 Director ${list.length}개`];
+  if (n('정상')) parts.push(`정상 ${n('정상')}`);
+  if (n('조회 실패')) parts.push(`**조회 실패 ${n('조회 실패')}**`);
+  if (n('인증 정지')) parts.push(`**인증 정지 ${n('인증 정지')}**(주기 조회를 멈췄습니다 — 설정을 고치면 다시 시작합니다)`);
+  if (n('설정 덜 됨')) parts.push(`설정 덜 됨 ${n('설정 덜 됨')}`);
+  const masked = list.some((x) => x.masked) ? ' · 주소·콘솔 이름은 전체 범위 관리자만 봅니다' : '';
   const p = d.poller || {};
-  const base = d.director?.masked
-    ? 'Director(주소·콘솔 이름은 전체 범위 관리자만 봅니다)'
-    : `Director ‘${d.director?.host || '?'}:${d.director?.port || 9101}’ · 콘솔 ‘${d.director?.consoleName || '?'}’`;
-  if (d.authStopped) return `${base} · 인증 실패로 주기 조회를 멈췄습니다(${d.authStopped.reason}) — 설정을 고치면 다시 시작합니다.`;
-  if (p.ok === false) return `${base} · 마지막 상태 조회 실패: ${p.error || '사유 미상'}`;
-  if (p.at) return `${base} · 상태 조회 ${whenText(p.at)}${p.idle ? '(진행 중 실행 없음)' : ''} · ${d.defaults?.pollIntervalSec || '—'}초 주기`;
-  return `${base} · 상태 조회 대기 중`;
+  const when = p.at ? ` · 상태 조회 ${whenText(p.at)}${p.idle ? '(진행 중 실행 없음)' : ''} · ${d.defaults?.pollIntervalSec || '—'}초 주기` : ' · 상태 조회 대기 중';
+  return `${parts.join(' · ')}${when}${masked}`;
 }
 
 export const RESTORE_MODE_LABEL = Object.freeze({ original: '원래 VM 에 덮어쓰기', newVm: '새 VM 으로', localVmdk: 'FD 로컬 VMDK 파일로' });
@@ -152,7 +176,17 @@ export function candidateSummary(c) {
 }
 
 /** Director 에 1회 넣을 사전 준비 블록(설정 화면 복사용). */
-export function directorPrepBlock({ defaults = {}, consoleName = 'portal', anyClient = 'kr-fd', anyStorage = 'File', anyPool = 'VMwarePool' } = {}) {
+export const VMWARE_POOL_FULL = 'PortalVmwareFull';
+export const VMWARE_POOL_INCR = 'PortalVmwareIncr';
+export const VMWARE_SCHEDULE = 'PortalVmwareNightly';
+export const WEEKDAYS = Object.freeze(['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat']);
+export const WEEKDAY_LABEL = Object.freeze({ sun: '일요일', mon: '월요일', tue: '화요일', wed: '수요일', thu: '목요일', fri: '금요일', sat: '토요일' });
+
+/**
+ * Director 에 1회 넣을 사전 준비 블록(설정 화면 복사용). v2.823: 풀(pools)·스케줄(schedule)을 고르면 그 블록도 — 서버 autoSetup.directorResources 와
+ * 글자까지 같다(bareosAutoSetup·bareosCorp2823 시험이 대조 — 한쪽만 고치지 말 것).
+ */
+export function directorPrepBlock({ defaults = {}, consoleName = 'portal', anyClient = 'kr-fd', anyStorage = 'File', anyPool = 'VMwarePool', pools = null, schedule = null } = {}) {
   const fs = defaults.fileSet || 'PortalVmwareGeneric';
   const jd = defaults.jobDefs || 'PortalVmwareDefaults';
   const rj = defaults.restoreJob || 'PortalVmwareRestore';
@@ -173,6 +207,7 @@ export function directorPrepBlock({ defaults = {}, consoleName = 'portal', anyCl
     `  Messages = Standard`,
     `  Priority = 10`,
     `  Write Bootstrap = "/var/lib/bareos/%c.bsr"`,
+    ...(pools ? [`  Full Backup Pool = "${VMWARE_POOL_FULL}"`, `  Differential Backup Pool = "${VMWARE_POOL_INCR}"`, `  Incremental Backup Pool = "${VMWARE_POOL_INCR}"`] : []),
     `}`,
     `Job {`,
     `  Name = "${rj}"`,
@@ -202,6 +237,12 @@ export function directorPrepBlock({ defaults = {}, consoleName = 'portal', anyCl
     `  Where ACL = *all*`,
     `  Plugin Options ACL = *all*`,
     `}`,
+    ...(pools ? [VMWARE_POOL_FULL, VMWARE_POOL_INCR].flatMap((name) => [
+      `Pool {`, `  Name = "${name}"`, `  Pool Type = Backup`, `  Recycle = yes`, `  AutoPrune = yes`,
+      `  Volume Retention = ${name === VMWARE_POOL_FULL ? pools.fullDays : pools.incrDays} days`, `  Maximum Volume Bytes = ${pools.maxVolumeGB}G`, `  Label Format = "${name}-"`, `}`,
+    ]) : []),
+    ...(schedule ? [`Schedule {`, `  Name = "${VMWARE_SCHEDULE}"`, `  Run = Full ${schedule.fullDay} at ${schedule.time}`,
+      ...WEEKDAYS.filter((x) => x !== schedule.fullDay).map((x) => `  Run = Incremental ${x} at ${schedule.time}`), `}`] : []),
   ].join('\n');
 }
 
@@ -225,7 +266,7 @@ export const PREP_CHECKLIST = Object.freeze([
   '포탈 콘솔(Profile portal)은 잡을 만들려고 configure 를 쓰므로 사실상 Director 관리자 등급입니다(모든 FD 에 root 로 닿는다) — 콘솔 비밀번호를 그 등급으로 지키세요.',
   // v2.822.3(W2-7): 셸에 붙여 넣는 명령은 ASCII 작은따옴표 — 굽은 따옴표(‘ ’)는 셸이 따옴표로 보지 않아 > · < 가 리다이렉트가 됐다
   "Rocky·RHEL 9 FD(Python 3.9)는 pyVmomi 8.x 를 씁니다 — python3 -m pip install 'pyvmomi>=8,<9' · 9.x 는 Python 3.10 이상이 필요해 플러그인이 시작하지 못합니다(바꾼 뒤 bareos-fd 재시작).",
-  'FD 의 Client 리소스에 Plugin Names = python3 · Plugin Directory 를 지정합니다.',
+  'FD 의 Client 리소스에 Plugin Names = python3 · Plugin Directory 가 있어야 합니다 — 편집 화면 자동 설정 3단계 ‘FD 플러그인 켜기’ 가 넣습니다(다른 값이 이미 있으면 덮지 않습니다).',
   'vCenter 에 백업 전용 관리자 계정을 만들고 VADP 를 쓰는 라이선스(Essentials 이상)인지 확인합니다.',
   '포탈 서버에서 Director 9101 포트로 TLS-PSK 접속이 되는지 bareos-probe 도구로 먼저 확인합니다.',
 ]);
@@ -286,7 +327,7 @@ export function autoSetupDirectorText(r) {
   if (!r) return '';
   const files = (r.files || []).map((f) => `${f.path}(${FILE_ACTION_LABEL[f.action] || f.action || '—'})`).join(' · ');
   const ver = r.probe?.version ? ` ${r.probe.version}` : '';
-  return `**Director 자동 설정 완료** — 새 콘솔 ‘${r.settings?.director?.consoleName || '—'}’ 로 접속 확인(Director${ver}) · 포탈 설정을 이 콘솔로 바꿨습니다. 파일: ${files || '—'}`;
+  return `**Director 자동 설정 완료** — 새 콘솔 ‘${r.director?.consoleName || r.settings?.director?.consoleName || '—'}’ 로 접속 확인(Director${ver}) · 이 법인 Director 의 포탈 설정을 이 콘솔로 바꿨습니다. 파일: ${files || '—'}`;
 }
 
 /** FD INI 자동 설정 성공 요약(한 줄). 플러그인 패키지 판정은 참고값이다(rpm·dpkg 조회). */
@@ -435,4 +476,80 @@ export function reportValue(v) {
   const s = String(v ?? '').trim();
   if (!s) return '—';
   return s.replace(/\s*\(From [A-Za-z ]{1,40}\)$/, '').replace(/^"([^"]*)"$/, '$1') || '—';
+}
+
+/* ───────── v2.823 법인별 Director — 자동 설정 단계 · 매핑 채움 ───────── */
+
+/** 사전 점검 항목의 표시(서버 autoSetup.parsePreflight 의 status). 못 읽은 것은 '확인 불가'(없음으로 단정하지 않는다). */
+export const PREFLIGHT_LABEL = Object.freeze({ ok: { mark: '✓', cls: 'green' }, missing: { mark: '✗ 없음', cls: 'red' }, warn: { mark: '! 확인', cls: 'amber' }, unknown: { mark: '? 확인 불가', cls: 'gray' } });
+export const preflightView = (st) => PREFLIGHT_LABEL[st] || PREFLIGHT_LABEL.unknown;
+
+/** 사전 점검 요약 한 줄. */
+export function preflightSummary(r) {
+  const items = Array.isArray(r?.items) ? r.items : [];
+  if (!items.length) return '';
+  const c = (k) => items.filter((x) => x.status === k).length;
+  return `점검 ${items.length}항목 — 정상 ${c('ok')} · 없음 ${c('missing')} · 확인 필요 ${c('warn')} · 확인 불가 ${c('unknown')}`;
+}
+
+/** FD 플러그인 켜기 결과 한 줄. */
+export function autoSetupFdPluginText(r) {
+  if (!r) return '';
+  if (r.action === 'unchanged') return `**FD 플러그인은 이미 켜져 있습니다** — 바꾸지 않았습니다(플러그인 경로 ${r.pluginDir || '—'}).`;
+  return `**FD 플러그인 켜기 완료** — ${(r.added || []).join(' · ') || '—'} 를 넣고 bareos-fd 를 다시 시작했습니다. 쓰기 전 사본: ${r.backup || '—'}`;
+}
+
+/** 매핑 칸 → 화면 이름(제안 표시). */
+export const MAPPING_FIELDS = Object.freeze([['vcserver', 'vcserver'], ['client', 'FD client'], ['storage', 'SD storage'], ['pool', 'Pool'], ['schedule', 'Schedule'], ['configFile', 'FD INI 경로']]);
+
+/**
+ * 매핑 채움 — 서버 제안(suggestions[].fields[k].value)으로 **빈 칸만** 채운다(순수). 사람이 넣은 값은 덮지 않는다.
+ * @returns {{ sites: object[], filled: number, left: string[] }} left = 제안이 없어 비어 남은 칸(화면 이름 'vCenter · 칸')
+ */
+export function fillEmptyMapping(sites = [], suggestions = [], vcName = (id) => id) {
+  const by = new Map((suggestions || []).map((x) => [x.vcenterId, x.fields || {}]));
+  let filled = 0;
+  const left = [];
+  const out = sites.map((s) => {
+    const f = by.get(s.vcenterId);
+    if (!f) {
+      // v2.823 검토(W2): 제안은 **저장된** 매핑에만 온다 — 체크만 하고 저장하지 않은 vCenter 는 이유와 함께 남긴다('0개 채움' 만 말하지 않게)
+      if (MAPPING_FIELDS.some(([k]) => k !== 'schedule' && !s[k])) left.push(`${vcName(s.vcenterId)}(저장 전 — 매핑을 저장한 뒤 다시 채우세요)`);
+      return s;
+    }
+    const next = { ...s };
+    for (const [k, label] of MAPPING_FIELDS) {
+      if (next[k]) continue;
+      const v = f[k]?.value;
+      if (typeof v === 'string' && v) { next[k] = v; filled += 1; } else if (k !== 'schedule') left.push(`${vcName(s.vcenterId)} · ${label}`);
+    }
+    return next;
+  });
+  return { sites: out, filled, left };
+}
+
+/** INI 경로·잡 이름에 쓰는 vCenter 조각(서버 bareosBackup.js suggestMapping 과 같은 규칙). */
+export const vcSlug = (id) => String(id || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40) || 'vcenter';
+
+/**
+ * 새로 묶는 vCenter 의 매핑 행(v2.823 검토 W2 — 순수). vcserver 는 vCenter 등록부 주소, INI 경로는 vCenter 조각 —
+ * 같은 경로가 이미 있으면(다른 vCenter 가 같은 조각) 접미사를 붙인다(FD INI 가 서로 덮지 않게 — 검토 C7).
+ */
+export function newMappingRow(vcenterId, directorId, host = '', taken = []) {
+  const used = new Set(taken.filter(Boolean));
+  const stem = `/etc/bareos/vmware/${vcSlug(vcenterId)}`;
+  let configFile = `${stem}.ini`;
+  for (let i = 2; used.has(configFile) && i < 100; i++) configFile = `${stem}-${i}.ini`;
+  return { vcenterId, directorId, vcserver: /^[A-Za-z0-9.-]+$/.test(host) ? host : '', client: '', storage: '', pool: '', schedule: '', configFile };
+}
+
+/**
+ * Director 하나의 접속 폼에서 달라진 칸(이름 포함). directorPatch 와 같은 규칙에 법인 이름을 더한다(순수).
+ * @returns {object|null}
+ */
+export function directorFormPatch(form = {}, snap = {}) {
+  const p = directorPatch(form, snap) || {};
+  const name = String(form.name ?? '').trim();
+  if (name && name !== snap.name) p.name = name;
+  return Object.keys(p).length ? p : null;
 }

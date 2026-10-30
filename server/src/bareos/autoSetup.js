@@ -6,6 +6,11 @@
  *     `bareos-dir -t`(문법 검사) → `bconsole reload` → **새 콘솔로 포탈이 실제 접속**에 성공하면 그때 포탈 설정의 콘솔을 그것으로 바꾼다.
  *  ② 사이트 FD(`setupFdIni`): 사이트 매핑의 INI 경로에 vCenter 자격증명 INI(bareos 소유 0600)를 쓴다.
  *  ③ 지문 읽기(`readFdThumbprint`): FD 에서 vCenter 443 인증서의 SHA1 지문을 읽어 화면이 보여 준다(쓰기 없음 — 관리자가 대조 후 ②에 넣는다).
+ *  v2.823 법인별 Director(사용자 요청 '법인에 bareos 초기 설치만 하면 세부 설정을 포탈에서'): 모든 단계는 **Director 하나**(`directorId`)를 대상으로 한다.
+ *  ④ 사전 점검(`preflight`): 쓰기 없이 패키지·서비스·Python·pyVmomi·VDDK·FD 플러그인 줄·설정 구성·기본 리소스 이름을 읽는다(못 읽은 것은 '확인 불가').
+ *  ⑤ FD 플러그인 켜기(`setupFdPlugin`): 패키지 파일 `bareos-fd.d/client/myself.conf` 를 **제자리 수정**하는 유일한 예외 — Client 블록이 하나일 때만,
+ *     없는 줄만 넣고(같은 값이면 그대로) **다른 값이면 거부**(사람이 정한 값을 덮지 않는다) · 쓰기 전 사본 · `bareos-fd -t` · 재시작 · 실패면 사본으로 원복.
+ *  ⑥ Pool·Schedule(①의 선택 블록): VMware 전용 Full·Incr 풀과 야간 스케줄을 MARKER 파일로 넣는다(JobDefs 가 레벨별 풀을 고른다).
  *
  * 규칙(bareos/CLAUDE.md '자동 설정'):
  *  - **SSH 비밀번호·vCenter 비밀번호는 저장하지 않는다**(요청 1회만 쓰고 버린다) · 명령 인자에 싣지 않는다(SFTP 로 0600 임시 파일 → install).
@@ -25,7 +30,7 @@ import { remoteTmpDir } from '../agent/deploy.js';
 import { openConsole } from './console.js';
 import { probe } from './director.js';
 import { isResourceName } from './names.js';
-import { loadSettings, saveSettings, directorIssue, directorCred } from './settings.js';
+import { loadSettings, updateDirector, directorIssue, directorCred, directorById } from './settings.js';
 import { bareosAuthGuard } from './service.js';
 import { ipBlockReason, ssrfBlockReasonResolved } from '../util/ssrfBlock.js';
 
@@ -39,7 +44,9 @@ export const DIR_CONF_ROOT = '/etc/bareos/bareos-dir.d';
  * 시한 예산(루트 규칙 'SSH 세션 예산 < 장비 시한' — 테스트가 산수를 고정). 세션 시한(withSsh signal)이 끝나면 연결을 끊으므로
  * 그 안에서 되돌리기가 돌 수 없다 — 단계 상한의 합이 세션 시한보다 작아야 한다. 고RTT(800ms+) 왕복 약 30회를 넉넉히 잡는다.
  */
-export const BUDGET = Object.freeze({ sshReadyMs: 60_000, testMs: 60_000, reloadMs: 60_000, roundTrips: 40, roundTripMs: 2_500, sessionMs: 360_000 });
+// v2.823 검토(P5 — 왕복 계수): Pool·Schedule 3개가 늘어 '재실행 + reload 실패 → 세션 안 되돌림(파일마다 쓰기·설치) → 다시 reload' 최악 경로가
+//   reload 2회 + 약 53왕복이 됐다(372.5초 > 옛 세션 시한 360초). reload 를 두 번 세고 왕복을 60으로 잡는다.
+export const BUDGET = Object.freeze({ sshReadyMs: 60_000, testMs: 60_000, reloadMs: 60_000, reloads: 2, roundTrips: 60, roundTripMs: 2_500, sessionMs: 420_000 });
 const SESSION_MS = BUDGET.sessionMs;
 const RELOAD_CMD = "printf 'reload\\n' | timeout 45 bconsole 2>&1";
 const READ_MAX = 1_048_576;
@@ -56,19 +63,54 @@ const fail = (code, message, extra = {}) => Object.assign(new Error(message), { 
  * Director 에 넣을 리소스 5개(순수). 본문은 화면의 '사전 준비' 블록과 **글자까지 같다**(`bareosAutoSetup.test.js` 가 웹 모듈과 대조).
  * @returns {{ type: string, name: string, text: string }[]}
  */
-export function directorResources({ defaults = {}, consoleName, consolePassword, restoreClient, restoreStorage, restorePool }) {
+export const VMWARE_POOL_FULL = 'PortalVmwareFull';
+export const VMWARE_POOL_INCR = 'PortalVmwareIncr';
+export const VMWARE_SCHEDULE = 'PortalVmwareNightly';
+export const WEEKDAYS = Object.freeze(['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat']);
+
+/**
+ * Pool·Schedule 입력 정규화(순수 — 화면 블록과 같은 판정). 둘 다 선택이다(없으면 null).
+ * @returns {{ pools: {fullDays, incrDays, maxVolumeGB}|null, schedule: {fullDay, time}|null, issue?: string }}
+ */
+export function normVmwareExtras(b = {}) {
+  let pools = null; let schedule = null;
+  if (b.pools && typeof b.pools === 'object') {
+    const n = (v, min, max) => { const x = Number(v); return Number.isInteger(x) && x >= min && x <= max ? x : null; };
+    const fullDays = n(b.pools.fullDays, 1, 3650); const incrDays = n(b.pools.incrDays, 1, 3650); const maxVolumeGB = n(b.pools.maxVolumeGB, 1, 1024);
+    if (fullDays === null || incrDays === null) return { pools, schedule, issue: '풀 보존 기간은 1~3650일(정수)로 적습니다.' };
+    if (maxVolumeGB === null) return { pools, schedule, issue: '볼륨 최대 크기는 1~1024 GB(정수)로 적습니다.' };
+    pools = { fullDays, incrDays, maxVolumeGB };
+  }
+  if (b.schedule && typeof b.schedule === 'object') {
+    const fullDay = String(b.schedule.fullDay || '');
+    const time = String(b.schedule.time || '');
+    if (!WEEKDAYS.includes(fullDay)) return { pools, schedule, issue: '전체 백업 요일을 고르세요.' };
+    if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(time)) return { pools, schedule, issue: '백업 시각은 HH:MM(00:00~23:59)으로 적습니다.' };
+    schedule = { fullDay, time };
+  }
+  return { pools, schedule };
+}
+
+/**
+ * Director 에 넣을 리소스(순수). 기본 5개 + 선택한 Pool 2개·Schedule 1개. 본문은 화면의 '사전 준비' 블록과 **글자까지 같다**
+ * (`bareosAutoSetup.test.js` 가 웹 모듈과 대조). 풀을 만들면 JobDefs 가 레벨별 풀(Full → Full 풀, 증분·차등 → Incr 풀)을 고른다.
+ * @returns {{ type: string, name: string, text: string }[]}
+ */
+export function directorResources({ defaults = {}, consoleName, consolePassword, restoreClient, restoreStorage, restorePool, pools = null, schedule = null }) {
   const fs = defaults.fileSet || 'PortalVmwareGeneric';
   const jd = defaults.jobDefs || 'PortalVmwareDefaults';
   const rj = defaults.restoreJob || 'PortalVmwareRestore';
   const plugin = defaults.pluginName || 'python3';
   const con = consoleName || 'portal';
-  return [
+  const out = [
     { type: 'fileset', name: fs, text: [
       'FileSet {', `  Name = "${fs}"`, '  Include {', '    Options { Signature = XXH128; Compression = LZ4 }', `    Plugin = "${plugin}:module_name=bareos-fd-vmware"`, '  }', '}',
     ].join('\n') },
     { type: 'jobdefs', name: jd, text: [
       'JobDefs {', `  Name = "${jd}"`, '  Type = Backup', '  Level = Incremental', `  FileSet = "${fs}"`, '  Messages = Standard', '  Priority = 10',
-      '  Write Bootstrap = "/var/lib/bareos/%c.bsr"', '}',
+      '  Write Bootstrap = "/var/lib/bareos/%c.bsr"',
+      ...(pools ? [`  Full Backup Pool = "${VMWARE_POOL_FULL}"`, `  Differential Backup Pool = "${VMWARE_POOL_INCR}"`, `  Incremental Backup Pool = "${VMWARE_POOL_INCR}"`] : []),
+      '}',
     ].join('\n') },
     { type: 'job', name: rj, text: [
       'Job {', `  Name = "${rj}"`, '  Type = Restore', `  FileSet = "${fs}"`, `  Client = ${restoreClient}`, `  Storage = ${restoreStorage}`, `  Pool = ${restorePool}`, '  Where = /', '  Messages = Standard', '}',
@@ -83,6 +125,20 @@ export function directorResources({ defaults = {}, consoleName, consolePassword,
       '  Catalog ACL = *all*', '  Where ACL = *all*', '  Plugin Options ACL = *all*', '}',
     ].join('\n') },
   ];
+  if (pools) {
+    const pool = (name, days) => ({ type: 'pool', name, text: [
+      'Pool {', `  Name = "${name}"`, '  Pool Type = Backup', '  Recycle = yes', '  AutoPrune = yes', `  Volume Retention = ${days} days`,
+      `  Maximum Volume Bytes = ${pools.maxVolumeGB}G`, `  Label Format = "${name}-"`, '}',
+    ].join('\n') });
+    out.push(pool(VMWARE_POOL_FULL, pools.fullDays), pool(VMWARE_POOL_INCR, pools.incrDays));
+  }
+  if (schedule) {
+    out.push({ type: 'schedule', name: VMWARE_SCHEDULE, text: [
+      'Schedule {', `  Name = "${VMWARE_SCHEDULE}"`, `  Run = Full ${schedule.fullDay} at ${schedule.time}`,
+      ...WEEKDAYS.filter((d) => d !== schedule.fullDay).map((d) => `  Run = Incremental ${d} at ${schedule.time}`), '}',
+    ].join('\n') });
+  }
+  return out;
 }
 
 /** 생성 콘솔 비밀번호 — 설정 파일 따옴표 안에 그대로 들어가므로 base64url 글자만(따옴표·역슬래시 없음). */
@@ -185,10 +241,10 @@ async function pathState(api, p) {
 const canonDir = (p) => { const d = path.posix.dirname(p); return `[ "$(readlink -f -- ${d})" = "${d}" ]`; };
 
 /** tmp(0700 root) 에 0600 으로 올리고 install 로 자리에 놓는다(내용은 명령 인자에 싣지 않는다). */
-async function placeFile(api, tmp, i, content, dest, mode, owner = 'bareos') {
+async function placeFile(api, tmp, i, content, dest, mode, owner = 'bareos', group = 'bareos') {
   const t = `${tmp}/f${i}`;
   await api.writeFile(t, content, 0o600);
-  const r = await api.exec(`${canonDir(dest)} && install -o ${owner} -g bareos -m ${mode} ${t} ${dest} && rm -f ${t}`);
+  const r = await api.exec(`${canonDir(dest)} && install -o ${owner} -g ${group} -m ${mode} ${t} ${dest} && rm -f ${t}`);
   if (r?.code !== 0) throw fail('remote', `파일을 놓지 못했습니다(${dest} — 경로에 심링크가 있거나 쓰기 실패): ${tail(r?.stderr || r?.stdout, 300)}`);
 }
 
@@ -237,6 +293,9 @@ const leftText = (r) => (r.left?.length ? `되돌리지 못한 파일: ${r.left.
  * @throws Error(code 'invalid')
  */
 export function planDirector(b = {}) {
+  const cur = loadSettings();
+  const dir = directorById(b.directorId, cur);
+  if (!dir) throw fail('invalid', '자동 설정할 법인 Director 를 고르세요(설정 › 법인별 Director 에서 먼저 추가합니다).');
   const { ssh, issue } = normSsh(b);
   if (issue) throw fail('invalid', issue);
   const directorPort = b.directorPort === undefined || b.directorPort === '' ? 9101 : Number(b.directorPort);
@@ -247,11 +306,16 @@ export function planDirector(b = {}) {
   }
   const di = directorIssue({ host: ssh.host, port: directorPort, consoleName });
   if (di) throw fail('invalid', di);
-  const cur = loadSettings();
+  // 다른 법인 Director 가 같은 콘솔(주소:포트·이름)을 이미 쓰면 거부 — 두 항목이 한 콘솔을 나눠 쓰면 원장이 둘로 갈린다
+  const lc = (x) => String(x || '').toLowerCase();
+  const clash = cur.directors.find((o) => o.id !== dir.id && lc(o.host) === lc(ssh.host) && Number(o.port) === directorPort && o.consoleName === consoleName);
+  if (clash) throw fail('invalid', `같은 콘솔(${ssh.host}:${directorPort} · ${consoleName})을 ‘${clash.name}’ Director 가 이미 씁니다 — 다른 콘솔 이름을 쓰세요.`);
   for (const k of ['fileSet', 'jobDefs', 'restoreJob']) {
     if (!isResourceName(cur.defaults[k] || '')) throw fail('invalid', `설정 탭 기본값의 ${k} 이름이 비어 있거나 올바르지 않습니다 — 먼저 기본값을 저장하세요.`);
   }
-  return { ssh, directorPort, consoleName, restoreClient: String(b.restoreClient), restoreStorage: String(b.restoreStorage), restorePool: String(b.restorePool), cur };
+  const ex = normVmwareExtras(b);
+  if (ex.issue) throw fail('invalid', ex.issue);
+  return { dir, ssh, directorPort, consoleName, restoreClient: String(b.restoreClient), restoreStorage: String(b.restoreStorage), restorePool: String(b.restorePool), pools: ex.pools, schedule: ex.schedule, cur };
 }
 
 /**
@@ -260,11 +324,11 @@ export function planDirector(b = {}) {
  * @throws Error(code: invalid·conflict·remote·config-test·console-login, message 사람이 읽는 사유)
  */
 export async function setupDirector(b = {}) {
-  const { ssh, directorPort, consoleName, restoreClient, restoreStorage, restorePool, cur } = planDirector(b);
+  const { dir, ssh, directorPort, consoleName, restoreClient, restoreStorage, restorePool, pools, schedule, cur } = planDirector(b);
   const ri = await resolvedHostIssue(ssh.host);
   if (ri) throw fail('invalid', ri);
   const password = newConsolePassword();
-  const res = directorResources({ defaults: cur.defaults, consoleName, consolePassword: password, restoreClient, restoreStorage, restorePool })
+  const res = directorResources({ defaults: cur.defaults, consoleName, consolePassword: password, restoreClient, restoreStorage, restorePool, pools, schedule })
     .map((r) => ({ ...r, path: `${DIR_CONF_ROOT}/${r.type}/${r.name}.conf`, content: `${MARKER}\n${r.text}\n`, mode: '0640' }));
   // v2.822.3(S2-5 — 재현): SSH 비밀번호를 부분 문자열로 가리면 '****-dir' 처럼 가린 자리가 곧 비밀번호가 됐다(감사·응답).
   //   생성 콘솔 비밀번호만 가리고, 출력에 SSH 비밀번호와 같은 글자가 있으면 출력 전체를 싣지 않는다.
@@ -347,7 +411,7 @@ export async function setupDirector(b = {}) {
 
   // 5) 포탈이 새 콘솔로 실제 접속 — 성공해야만 설정을 바꾼다. 실패하면 넣은 파일을 되돌리고 다시 reload 한다
   //    (그대로 두면 같은 이름 콘솔을 다시 만든 경우 Director 만 새 비밀번호가 되어 쓰던 연결이 끊긴다).
-  const conn = { host: ssh.host, port: directorPort, name: consoleName, password, timeoutMs: cur.director.timeoutMs, tlsMaxVersion: cur.director.tlsMax };
+  const conn = { host: ssh.host, port: directorPort, name: consoleName, password, timeoutMs: dir.timeoutMs, tlsMaxVersion: dir.tlsMax };
   let pr = null; let lastErr = null;
   for (let i = 0; i < 2 && !pr; i++) {
     if (i) await _sleep(2000);
@@ -355,7 +419,7 @@ export async function setupDirector(b = {}) {
   }
   if (!pr) {
     const rb = await rollbackInNewSession(ssh, placed, { reload: true });
-    clearStaleAuthStop();
+    clearStaleAuthStop(dir.id);
     const undone = !rb.left.length;
     throw fail('console-login', `포탈이 새 콘솔 ‘${consoleName}’ 로 접속하지 못했습니다(${lastErr?.code || 'error'}: ${mask(String(lastErr?.message || lastErr)).slice(0, 300)}). `
       + (undone ? `넣은 파일을 되돌리고 Director 를 다시 읽혔습니다(reload ${rb.reloaded === false ? '실패 — 직접 reload 하세요' : '완료'}). 포탈 설정은 바꾸지 않았습니다.`
@@ -364,30 +428,32 @@ export async function setupDirector(b = {}) {
   // v2.822.3(C2-5·I2-2 — 재현): 저장이 실패하면(비밀 정책 잠금·디스크) Director 만 새 비밀번호가 되고 생성 비밀번호는 잃는다 — 되돌린다.
   let saved;
   try {
-    saved = saveSettings({ director: { host: ssh.host, port: directorPort, consoleName, password } });
+    saved = updateDirector(dir.id, { host: ssh.host, port: directorPort, consoleName, password });
   } catch (se) {
     const rb = await rollbackInNewSession(ssh, placed, { reload: true });
-    clearStaleAuthStop();
+    clearStaleAuthStop(dir.id);
     // 사유는 코드만(오류 원문에 CONFIG_DIR 경로가 실린다)
     throw fail('save', `새 콘솔 접속은 됐지만 포탈 설정을 저장하지 못했습니다(${se?.code || '저장 오류'}). `
       + (rb.left.length ? `${leftText(rb)}.` : `넣은 파일을 되돌리고 Director 를 다시 읽혔습니다(reload ${rb.reloaded === false ? '실패 — 직접 reload 하세요' : '완료'}). 포탈 설정은 그대로입니다.`), { files: remote.files });
   }
-  return { ok: true, files: remote.files, test: remote.test, reload: remote.reload, probe: pr, settings: saved.settings, droppedSecrets: saved.droppedSecrets };
+  return { ok: true, directorId: dir.id, files: remote.files, test: remote.test, reload: remote.reload, probe: pr, director: saved.director, droppedSecrets: saved.droppedSecrets };
 }
 
 /**
  * v2.822.3(P2-12): reload 뒤 되돌리기 전까지 주기 조회가 옛 비밀번호로 붙어 인증 실패(정지)를 남길 수 있다 — 되돌린 뒤에는 그 정지가
  * 사실이 아니므로 지운다(남기면 수동 조회가 성공할 때까지 주기 조회가 멈춘다).
  */
-function clearStaleAuthStop() {
-  try { bareosAuthGuard.clearAuthStop(directorCred(loadSettings()).id); } catch { /* 설정을 못 읽으면 그대로 */ }
+function clearStaleAuthStop(directorId) {
+  try { const d = directorById(directorId); if (d) bareosAuthGuard.clearAuthStop(directorCred(d).id); } catch { /* 설정을 못 읽으면 그대로 */ }
 }
 
 /* ───────────────────────── ② 사이트 FD INI ───────────────────────── */
 
-function siteOf(vcenterId) {
+function siteOf(vcenterId, directorId = '') {
   const site = loadSettings().sites.find((s) => s.vcenterId === String(vcenterId || ''));
   if (!site) throw fail('invalid', '이 vCenter 의 사이트 매핑이 없습니다 — 설정 탭에서 매핑(FD·스토리지·풀·INI 경로)을 먼저 저장하세요.');
+  // v2.823: 이 Director 편집 화면에서 연 단계는 이 Director 에 묶인 vCenter 만 다룬다(다른 법인 FD 에 쓰지 않게)
+  if (directorId && site.directorId !== directorId) throw fail('invalid', '이 vCenter 는 이 Director 에 묶여 있지 않습니다.');
   if (!FD_PATH_RE.test(site.configFile) || /(^|\/)\.\.(\/|$)/.test(site.configFile)) throw fail('invalid', '사이트 매핑의 INI 경로가 올바르지 않습니다.');
   // v2.822.3(S2-2 — 재현): root 로 쓰는 경로는 /etc/bareos/ 아래 .ini 만(예전에는 /etc/cron.d·/etc/sudoers.d 같은 아무 절대 경로나 됐다).
   //   매핑 저장(normalizeSite)은 그대로 둔다 — 넣으면 예전 매핑이 로드 때 조용히 사라진다. 자동 설정만 거부한다.
@@ -402,7 +468,7 @@ function siteOf(vcenterId) {
  * @param {{ vcenterId, host, sshPort?, username?, password, vcuser, vcpass, vcthumbprint }} b
  */
 export function planFdIni(b = {}) {
-  const site = siteOf(b.vcenterId);
+  const site = siteOf(b.vcenterId, b.directorId);
   const { ssh, issue } = normSsh(b);
   if (issue) throw fail('invalid', issue);
   const ui = iniValueIssue(b.vcuser, 'vCenter 계정', 128) || iniValueIssue(b.vcpass, 'vCenter 비밀번호', 256);
@@ -458,7 +524,7 @@ export function parseOpensslFingerprint(text) {
 
 /** 사이트 FD 에서 그 vCenter(vcserver:443)의 인증서 지문을 읽는다(쓰기 없음). FD 에서 보이는 값이어야 플러그인이 받는 값과 같다. */
 export async function readFdThumbprint(b = {}) {
-  const site = siteOf(b.vcenterId);
+  const site = siteOf(b.vcenterId, b.directorId);
   const { ssh, issue } = normSsh(b);
   if (issue) throw fail('invalid', issue);
   const ri = await resolvedHostIssue(ssh.host);
@@ -473,4 +539,260 @@ export async function readFdThumbprint(b = {}) {
   const p = parseOpensslFingerprint(r.out?.stdout);
   if (!p.thumbprint) throw fail('remote', `FD 에서 ${target} 의 인증서를 읽지 못했습니다(openssl 없음·443 막힘·이름 해석 실패) — ${tail(r.out?.stdout || r.out?.stderr, 200) || '출력 없음'}`);
   return { ok: true, vcenterId: site.vcenterId, vcserver: v, ...p };
+}
+
+/* ───────────────────────── ④ 사전 점검(쓰기 없음 — v2.823) ───────────────────────── */
+
+const PREFLIGHT_PKGS = Object.freeze(['bareos-director', 'bareos-storage', 'bareos-filedaemon', 'bareos-vmware-plugin', 'bareos-filedaemon-python3-plugin']);
+/** python3-fd 플러그인(.so)이 있을 수 있는 곳 — RHEL 계열 lib64 · Debian 계열 lib(추정 — 패키지 배치 기준). 고정 목록만 쓴다. */
+export const FD_PLUGIN_DIRS = Object.freeze(['/usr/lib64/bareos/plugins', '/usr/lib/bareos/plugins']);
+const FD_CLIENT_CONF = '/etc/bareos/bareos-fd.d/client/myself.conf';
+
+/** 점검 스크립트 — 고정 글자만(사용자 값 없음). 구역마다 '@@이름' 줄로 나눈다. */
+const PREFLIGHT_SCRIPT = [
+  'echo @@id; id -u',
+  `echo @@pkg; for p in ${PREFLIGHT_PKGS.join(' ')}; do if command -v rpm >/dev/null 2>&1; then v=$(rpm -q --qf '%{VERSION}' "$p" 2>/dev/null) || v=-; else v=$(dpkg-query -W -f='\${Version}' "$p" 2>/dev/null); [ -n "$v" ] || v=-; fi; echo "$p $v"; done`,
+  'echo @@svc; for s in bareos-dir bareos-sd bareos-fd; do echo "$s $(systemctl is-active $s 2>/dev/null || true)"; done',
+  'echo @@py; python3 -c \'import sys;print("%d.%d.%d" % sys.version_info[:3])\' 2>/dev/null || echo -',
+  // v2.823 검토(C8): importlib.metadata 는 Python 3.8+ — 그 전 판에서는 import 로만 확인하고 버전은 '?'(설치됨 · 버전 모름)
+  'echo @@pyvmomi; if python3 -c \'import pyVmomi\' 2>/dev/null; then python3 -c \'import importlib.metadata as m;print(m.version("pyvmomi"))\' 2>/dev/null || echo "?"; else echo -; fi',
+  'echo @@vddk; ls -d /usr/lib/vmware-vix-disklib* /usr/lib64/vmware-vix-disklib* /opt/vmware-vix-disklib* 2>/dev/null | head -3',
+  `echo @@plugdir; for d in ${FD_PLUGIN_DIRS.join(' ')}; do [ -e "$d/python3-fd.so" ] && echo "$d"; done`,
+  `echo @@fdconf; if [ -f ${FD_CLIENT_CONF} ]; then grep -iE '^[[:space:]]*plugin[[:space:]]*(names|directory)[[:space:]]*=' ${FD_CLIENT_CONF} 2>/dev/null; else echo NOFILE; fi`,
+  `echo @@layout; test -d ${DIR_CONF_ROOT} && echo D; test -e /etc/bareos/bareos-dir.conf && echo S; command -v bconsole >/dev/null 2>&1 && echo C`,
+  `echo @@res; for t in client storage pool schedule; do for f in ${DIR_CONF_ROOT}/$t/*.conf; do [ -f "$f" ] && echo "$t $(basename "$f" .conf)"; done; done`,
+  'echo @@end',
+].join('\n');
+
+/** 점검 출력 → 구역별 줄(순수). */
+function sections(text) {
+  const out = {};
+  let cur = null;
+  for (const raw of String(text ?? '').split('\n').slice(0, 400)) {
+    const line = raw.slice(0, 400).replace(/\r$/, '');
+    const m = /^@@([a-z]+)$/.exec(line.trim());
+    if (m) { cur = m[1]; out[cur] = []; continue; }
+    if (cur && line.trim()) out[cur].push(line.trim());
+  }
+  return out;
+}
+
+const verOk = (v) => /^\d+(\.\d+){0,3}/.test(v);
+const verTuple = (v) => String(v).split('.').map((x) => parseInt(x, 10) || 0);
+
+/**
+ * 사전 점검 출력 해석(순수 — 테스트가 고정). 못 읽은 항목은 'unknown'(없음으로 단정하지 않는다).
+ * @returns {{ items: {key,label,status:'ok'|'missing'|'warn'|'unknown',detail,hint}[], resources: {client,storage,pool,schedule}, pluginDir: string }}
+ */
+export function parsePreflight(text) {
+  const s = sections(text);
+  const items = [];
+  const add = (key, label, status, detail, hint = '') => items.push({ key, label, status, detail: String(detail ?? '').slice(0, 200), hint });
+  if (!s.end) add('output', '점검 출력', 'unknown', '점검 출력이 끝까지 오지 않았습니다(시한·연결 끊김)', '다시 점검하세요.');
+  const id = (s.id || [])[0];
+  if (id === undefined) add('root', 'root 권한', 'unknown', '읽지 못함');
+  else add('root', 'root 권한', id === '0' ? 'ok' : 'missing', `id -u = ${id}`, id === '0' ? '' : '자동 설정은 root 계정으로 접속해야 합니다(sudo 경로는 쓰지 않습니다).');
+  const pk = new Map((s.pkg || []).map((l) => { const [n, v] = l.split(/\s+/); return [n, v || '-']; }));
+  for (const p of PREFLIGHT_PKGS) {
+    const v = pk.get(p);
+    if (v === undefined) add(`pkg:${p}`, p, 'unknown', '읽지 못함(rpm·dpkg 조회 실패)');
+    else if (v === '-' || !verOk(v)) add(`pkg:${p}`, p, 'missing', '설치되지 않음', `${p} 패키지를 설치하세요.`);
+    else add(`pkg:${p}`, p, 'ok', v);
+  }
+  const svc = new Map((s.svc || []).map((l) => { const [n, st] = l.split(/\s+/); return [n, st || '']; }));
+  for (const n of ['bareos-dir', 'bareos-sd', 'bareos-fd']) {
+    const st = svc.get(n);
+    if (st === undefined || st === '') add(`svc:${n}`, `${n} 서비스`, 'unknown', '읽지 못함');
+    else add(`svc:${n}`, `${n} 서비스`, st === 'active' ? 'ok' : 'missing', st, st === 'active' ? '' : `systemctl enable --now ${n}`);
+  }
+  const py = (s.py || [])[0];
+  const pv = (s.pyvmomi || [])[0];
+  if (!py || py === '-') add('python', 'Python 3', py === '-' ? 'missing' : 'unknown', py === '-' ? '없음' : '읽지 못함', 'python3 을 설치하세요(FD 의 VMware 플러그인이 씁니다).');
+  else add('python', 'Python 3', 'ok', py);
+  if (!pv || pv === '-') add('pyvmomi', 'pyVmomi', pv === '-' ? 'missing' : 'unknown', pv === '-' ? '설치되지 않음' : '읽지 못함', "python3 -m pip install 'pyvmomi>=8,<9' (Python 3.9 FD)");
+  else if (pv === '?') add('pyvmomi', 'pyVmomi', 'warn', '설치됨 — 버전을 읽지 못했습니다(Python 3.8 미만은 importlib.metadata 가 없습니다)', 'python3 -m pip show pyvmomi 로 버전을 확인하세요(Python 3.10 미만이면 9.x 는 플러그인이 시작하지 못합니다).');
+  else {
+    const old = py && verOk(py) && (verTuple(py)[0] < 3 || (verTuple(py)[0] === 3 && verTuple(py)[1] < 10));
+    if (verTuple(pv)[0] >= 9 && old) add('pyvmomi', 'pyVmomi', 'warn', `${pv} — Python ${py} 에서는 플러그인이 시작하지 못합니다`, "python3 -m pip install 'pyvmomi>=8,<9'");
+    else add('pyvmomi', 'pyVmomi', 'ok', pv);
+  }
+  const vd = s.vddk || [];
+  add('vddk', 'VDDK', vd.length ? 'ok' : 'unknown', vd.length ? vd.join(' · ') : '알려진 경로에서 찾지 못함', vd.length ? '' : '설치 경로가 다를 수 있습니다 — 첫 백업의 작업 로그로 확인하세요.');
+  const pluginDir = (s.plugdir || []).find((d) => FD_PLUGIN_DIRS.includes(d)) || '';
+  add('plugdir', 'python3-fd 플러그인', pluginDir ? 'ok' : (s.plugdir ? 'missing' : 'unknown'), pluginDir || '찾지 못함', pluginDir ? '' : 'bareos-filedaemon-python3-plugin 패키지를 설치하세요.');
+  const fdLines = (s.fdconf || []).map((l) => l.replace(/\s+/g, ' '));
+  const namesLine = fdLines.find((l) => /plugin ?names/i.test(l));
+  if (!s.fdconf) add('fdplugin', 'FD 플러그인 줄', 'unknown', '읽지 못함');
+  else if (fdLines.includes('NOFILE')) add('fdplugin', 'FD 플러그인 줄', 'missing', `${FD_CLIENT_CONF} 없음`, 'FD 설정 구성이 패키지 기본과 다릅니다 — 3단계는 이 파일이 있어야 합니다(직접 확인하세요).');
+  else if (!namesLine) add('fdplugin', 'FD 플러그인 줄', 'missing', 'Plugin Names 없음', '3단계 ‘FD 플러그인 켜기’ 가 넣습니다.');
+  else add('fdplugin', 'FD 플러그인 줄', /python3/i.test(namesLine) ? 'ok' : 'warn', namesLine, /python3/i.test(namesLine) ? '' : 'python3 이 아닌 값이 있습니다 — 3단계는 사람이 정한 값을 덮지 않습니다.');
+  const lay = new Set(s.layout || []);
+  if (!s.layout) add('layout', 'Director 설정 구성', 'unknown', '읽지 못함');
+  else if (lay.has('S')) add('layout', 'Director 설정 구성', 'warn', '단일 파일(bareos-dir.conf)', '자동 설정은 bareos-dir.d 구성만 다룹니다.');
+  else add('layout', 'Director 설정 구성', lay.has('D') ? 'ok' : 'missing', lay.has('D') ? 'bareos-dir.d(디렉터리 구성)' : 'bareos-dir.d 없음', lay.has('D') ? '' : 'bareos-director 패키지를 먼저 설치하세요.');
+  if (s.layout) add('bconsole', 'bconsole', lay.has('C') ? 'ok' : 'missing', lay.has('C') ? '있음' : '없음', lay.has('C') ? '' : 'bareos-bconsole 패키지(Director reload 에 필요)');
+  const resources = { client: [], storage: [], pool: [], schedule: [] };
+  for (const l of s.res || []) {
+    const [t, n] = l.split(/\s+/);
+    if (resources[t] && isResourceName(n || '') && resources[t].length < 50) resources[t].push(n);
+  }
+  add('resources', '기본 리소스(파일 이름 기준)', s.res ? 'ok' : 'unknown',
+    s.res ? ['client', 'storage', 'pool', 'schedule'].map((t) => `${t} ${resources[t].join(',') || '—'}`).join(' · ') : '읽지 못함',
+    '이름은 설정 파일 이름에서 읽었습니다(리소스 Name 과 다를 수 있음 — 추정).');
+  return { items, resources, pluginDir };
+}
+
+/**
+ * 사전 점검 — SSH 로 읽기만 한다(쓰기 없음 · OTP 없음). 출력에 SSH 비밀번호와 같은 글자가 있으면 싣지 않는다(S2-5).
+ * @param {{ directorId, host, sshPort?, username?, password }} b
+ */
+export async function preflight(b = {}) {
+  const dir = directorById(b.directorId);
+  if (!dir) throw fail('invalid', '점검할 법인 Director 를 고르세요.');
+  const { ssh, issue } = normSsh(b);
+  if (issue) throw fail('invalid', issue);
+  const ri = await resolvedHostIssue(ssh.host);
+  if (ri) throw fail('invalid', ri);
+  const r = await runSsh(ssh, (api) => api.exec(PREFLIGHT_SCRIPT, 90_000));
+  const out = String(r?.stdout || '');
+  if (ssh.password.length >= 4 && out.includes(ssh.password)) throw fail('remote', '점검 출력에 SSH 비밀번호와 같은 글자가 들어 있어 결과를 싣지 않습니다.');
+  return { ok: true, directorId: dir.id, host: ssh.host, ...parsePreflight(out) };
+}
+
+/* ───────────────────────── ⑤ FD 플러그인 켜기(v2.823) ───────────────────────── */
+
+/** 주석·따옴표 밖 부분(순수). 설정 값에 '#' 이 들어간 줄은 다루지 않는다(myself.conf 기본 모양에는 없다 — 추정). */
+const codePart = (line) => { let q = false; for (let i = 0; i < line.length; i++) { const c = line[i]; if (c === '"') q = !q; else if (c === '#' && !q) return line.slice(0, i); } return line; };
+const unquote = (v) => String(v ?? '').trim().replace(/^"(.*)"$/, '$1').trim();
+
+/**
+ * myself.conf 에 Plugin Directory·Plugin Names 를 넣는다(순수 — 테스트가 고정).
+ *  · Client 블록이 **정확히 하나**이고 여러 줄일 때만 · 없는 줄만 넣는다(닫는 괄호 앞) · 같은 값이면 그대로 · **다른 값이면 거부**.
+ * @returns {{ action: 'unchanged'|'updated', text: string, added: string[] } | { issue: string }}
+ */
+export function fdPluginEdit(text, pluginDir, pluginNames = 'python3') {
+  // v2.823 검토(S7): SSH 출력은 UTF-8 로 읽힌다 — 깨진 글자(U+FFFD)가 있으면 되쓰면 원본이 바뀐다. 고치지 않는다.
+  if (String(text ?? '').includes('\uFFFD')) return { issue: 'UTF-8 이 아닌 글자가 있어 그대로 다시 쓸 수 없습니다 — 직접 확인하세요.' };
+  const lines = String(text ?? '').split('\n');
+  const starts = [];
+  lines.forEach((l, i) => { if (/^\s*client\s*\{/i.test(codePart(l))) starts.push(i); });
+  if (starts.length !== 1) return { issue: `Client 블록이 ${starts.length}개입니다(하나일 때만 자동으로 고칩니다) — 직접 확인하세요.` };
+  const start = starts[0];
+  let depth = 0; let end = -1;
+  for (let i = start; i < lines.length && end < 0; i++) {
+    const c = codePart(lines[i]); let q = false;
+    for (const ch of c) {
+      if (ch === '"') q = !q;
+      else if (!q && ch === '{') depth += 1;
+      else if (!q && ch === '}') { depth -= 1; if (depth === 0) { end = i; break; } }
+    }
+  }
+  if (end < 0) return { issue: 'Client 블록의 닫는 괄호를 찾지 못했습니다 — 직접 확인하세요.' };
+  if (end === start) return { issue: '한 줄로 된 Client 블록은 자동으로 고치지 않습니다 — 직접 확인하세요.' };
+  let names = null; let dirv = null;
+  for (let i = start + 1; i < end; i++) {
+    const c = codePart(lines[i].slice(0, 4096));   // 장비 출력 — 길이를 먼저 자른다(정규식 규약)
+    // v2.823 검토(S8): 포함 파일(@…)의 값은 여기서 볼 수 없다 — 같은 지시어가 거기 있을 수 있어 고치지 않는다
+    if (/^\s*@/.test(c)) return { issue: 'Client 블록 안에 포함 지시(@…)가 있습니다 — 포함된 파일의 값을 확인할 수 없어 자동으로 고치지 않습니다(직접 확인하세요).' };
+    let m = /^\s*plugin\s*names\s*=\s*(.*?)\s*$/i.exec(c);
+    if (m) { if (names !== null) return { issue: 'Plugin Names 줄이 두 번 있습니다 — 직접 확인하세요.' }; names = unquote(m[1]); continue; }
+    m = /^\s*plugin\s*directory\s*=\s*(.*?)\s*$/i.exec(c);
+    if (m) { if (dirv !== null) return { issue: 'Plugin Directory 줄이 두 번 있습니다 — 직접 확인하세요.' }; dirv = unquote(m[1]).slice(0, 300); while (dirv.endsWith('/')) dirv = dirv.slice(0, -1); }
+  }
+  if (names !== null && names !== pluginNames) return { issue: `이미 Plugin Names = "${names.slice(0, 80)}" 가 있습니다 — 사람이 정한 값을 덮지 않습니다(${pluginNames} 를 직접 넣으세요).` };
+  if (dirv !== null && dirv !== pluginDir) return { issue: `이미 Plugin Directory = "${dirv.slice(0, 120)}" 가 있습니다 — 이 서버의 플러그인은 ${pluginDir} 에 있습니다(직접 확인하세요).` };
+  const added = [];
+  if (dirv === null) added.push(`  Plugin Directory = "${pluginDir}"`);
+  if (names === null) added.push(`  Plugin Names = "${pluginNames}"`);
+  if (!added.length) return { action: 'unchanged', text: String(text ?? ''), added };
+  return { action: 'updated', text: [...lines.slice(0, end), ...added, ...lines.slice(end)].join('\n'), added: added.map((x) => x.trim()) };
+}
+
+const OWNER_RE = /^[a-z_][a-z0-9_-]{0,31}$/;
+/** 사본으로 되돌리기 — conf 자리가 심링크면 따라 쓰지 않는다(S5 — root 가 링크 너머 파일을 덮지 않게). */
+const restoreCmd = (conf, backup) => `${canonDir(conf)} && [ ! -L ${conf} ] && cp -p ${backup} ${conf} && systemctl restart bareos-fd`;
+
+/** FD 플러그인 켜기 입력 판정(원격 접속 없음 — 라우트가 OTP 전에 부른다). */
+export function planFdPlugin(b = {}) {
+  const dir = directorById(b.directorId);
+  if (!dir) throw fail('invalid', '법인 Director 를 고르세요.');
+  const { ssh, issue } = normSsh(b);
+  if (issue) throw fail('invalid', issue);
+  return { dir, ssh };
+}
+
+/**
+ * FD 의 myself.conf 에 python3 플러그인 줄을 넣고 bareos-fd 를 재시작한다. 실패하면 쓰기 전 사본으로 되돌리고 다시 재시작한다.
+ * @returns {Promise<{ ok, action, pluginDir, backup?, added }>}
+ */
+export async function setupFdPlugin(b = {}) {
+  const { dir, ssh } = planFdPlugin(b);
+  const ri = await resolvedHostIssue(ssh.host);
+  if (ri) throw fail('invalid', ri);
+  const conf = FD_CLIENT_CONF;
+  const mask = (t) => { const x = String(t ?? ''); return ssh.password.length >= 4 && x.includes(ssh.password) ? '(출력을 싣지 않습니다 — SSH 비밀번호와 같은 글자가 들어 있습니다)' : x; };
+  let backup = '';
+  let settled = true;
+  let ownerMode = null;
+  try {
+    return await runSsh(ssh, async (api) => {
+      await requireRoot(api.exec);
+      const env = String((await api.exec(`command -v bareos-fd >/dev/null 2>&1 && echo F; for d in ${FD_PLUGIN_DIRS.join(' ')}; do [ -e "$d/python3-fd.so" ] && echo "P:$d"; done; command -v systemctl >/dev/null 2>&1 && echo Y`))?.stdout || '').split(/\s+/);
+      if (!env.includes('F')) throw fail('invalid', '이 서버에 bareos-fd 가 없습니다 — bareos-filedaemon 패키지를 먼저 설치하세요.');
+      if (!env.includes('Y')) throw fail('invalid', 'systemctl 이 없습니다 — bareos-fd 를 재시작할 수 없어 바꾸지 않습니다.');
+      const pluginDir = (env.find((x) => x.startsWith('P:')) || '').slice(2);
+      if (!FD_PLUGIN_DIRS.includes(pluginDir)) throw fail('invalid', 'python3-fd 플러그인(.so)을 찾지 못했습니다 — bareos-filedaemon-python3-plugin 패키지를 먼저 설치하세요.');
+      const rd = await api.exec(`if ! ${canonDir(conf)}; then echo LINK; elif [ -L ${conf} ]; then echo LINK; elif [ -f ${conf} ]; then echo FILE; stat -c '%U %G %a' ${conf}; head -c ${READ_MAX + 1} ${conf}; else echo NONE; fi`);
+      const out = String(rd?.stdout || '');
+      const [kind, st, ...rest] = out.split('\n');
+      if (kind?.trim() === 'NONE') throw fail('invalid', `${conf} 가 없습니다 — FD 설정 구성이 패키지 기본과 다릅니다(직접 확인하세요).`);
+      if (kind?.trim() !== 'FILE') throw fail('conflict', `${conf} 가 일반 파일이 아닙니다(심링크·디렉터리) — 아무것도 바꾸지 않았습니다.`);
+      const [owner, group, mode] = String(st || '').trim().split(/\s+/);
+      if (!OWNER_RE.test(owner || '') || !OWNER_RE.test(group || '') || !/^[0-7]{3,4}$/.test(mode || '')) throw fail('remote', `${conf} 의 소유자·권한을 읽지 못했습니다 — 아무것도 바꾸지 않았습니다.`);
+      ownerMode = { owner, group, mode };
+      const old = rest.join('\n');
+      if (old.length > READ_MAX) throw fail('conflict', `${conf} 가 너무 큽니다 — 아무것도 바꾸지 않았습니다.`);
+      const ed = fdPluginEdit(old, pluginDir);
+      if (ed.issue) throw fail('conflict', `${ed.issue} 아무것도 바꾸지 않았습니다.`);
+      if (ed.action === 'unchanged') return { ok: true, directorId: dir.id, action: 'unchanged', pluginDir, added: [] };
+      // v2.823 검토(C6): 임시 디렉터리를 사본·변경 **전에** 만든다 — 예전에는 그 실패가 '세션이 끊겨 …' 문구로 바뀐 것 없는 conf 를 덮고 FD 를 재시작했다
+      const tmp = await remoteTmpDir(api.exec, TMP_PREFIX);
+      try {
+      backup = `${conf}.portal-bak.${Date.now()}`;
+      // v2.823 검토(S5): cp 는 대상 심링크를 따라 쓴다 — 원본·사본 자리가 심링크가 아닐 때만(같은 명령 안에서 확인)
+      const cp = await api.exec(`${canonDir(conf)} && [ ! -L ${conf} ] && [ ! -e ${backup} ] && cp -p ${conf} ${backup}`);
+      if (cp?.code !== 0) throw fail('remote', `쓰기 전 사본을 만들지 못했습니다(${tail(mask(cp?.stderr), 200) || '심링크이거나 사본 자리가 이미 있습니다'}) — 아무것도 바꾸지 않았습니다.`);
+      settled = false;
+      let restored = false;
+      const restore = async (why) => {
+        restored = true;
+        const back = await api.exec(`${restoreCmd(conf, backup)}`, BUDGET.reloadMs).catch(() => null);
+        settled = back?.code === 0;
+        return `${why} — ${settled ? `사본으로 되돌리고 bareos-fd 를 다시 시작했습니다(사본 ${backup})` : `되돌리지 못했습니다 — ${backup} 를 ${conf} 로 직접 되돌리세요`}.`;
+      };
+      try {
+        await placeFile(api, tmp, 0, ed.text, conf, ownerMode.mode, ownerMode.owner, ownerMode.group);
+        const t = await api.exec('bareos-fd -t 2>&1', BUDGET.testMs);
+        if (t?.code !== 0) throw fail('config-test', await restore(`FD 설정 검사(bareos-fd -t)가 실패했습니다: ${tail(mask(t?.stdout || t?.stderr), 600)}`));
+        const rs = await api.exec('systemctl restart bareos-fd 2>&1; sleep 2; systemctl is-active bareos-fd 2>&1', BUDGET.reloadMs);
+        const active = String(rs?.stdout || '').trim().split('\n').pop() === 'active';
+        if (!active) throw fail('remote', await restore(`bareos-fd 재시작 뒤 서비스가 돌지 않습니다(${tail(mask(rs?.stdout), 300) || '출력 없음'})`));
+        settled = true;
+        return { ok: true, directorId: dir.id, action: 'updated', pluginDir, backup, added: ed.added };
+      } catch (e) {
+        if (!settled && !restored) e.message = await restore(String(e?.message || e));   // 놓기 실패 등 — 반쯤 쓴 파일을 남기지 않는다
+        throw e;
+      }
+      } finally {
+        await api.exec(`rm -rf ${tmp}`).catch(() => {});
+      }
+    });
+  } catch (e) {
+    // 세션이 끊겨(시한) 세션 안 되돌리기가 돌지 못했다 — 새 세션으로 사본을 되돌리고 다시 시작한다.
+    if (!settled && backup) {
+      const rb = await runSsh(ssh, (api) => api.exec(restoreCmd(conf, backup), BUDGET.reloadMs)).catch(() => null);
+      e.message = `${mask(String(e?.message || e))} — ${rb?.code === 0 ? '세션이 끊겨 새 세션으로 사본을 되돌리고 bareos-fd 를 다시 시작했습니다' : `되돌리지 못했습니다 — ${backup} 를 ${conf} 로 직접 되돌리세요`}.`;
+    }
+    throw e;
+  }
 }

@@ -49,7 +49,7 @@ export const READ_DENY = [
   '/api/tools/cvp/servers', '/api/tools/sanswitch/perf/settings', '/api/admin/vclogs', '/api/admin/ipam/db-info',
   '/api/tools/edge-log-local',
   // v2.820: Bareos Director 설정(주소·콘솔 이름)과 Director 카탈로그(실제 Director 에 접속) — 설정 탭.
-  '/api/tools/bareos-backup/settings', '/api/tools/bareos-backup/catalog',
+  '/api/tools/bareos-backup/settings',   // v2.823: 카탈로그·매핑 제안·자동 설정도 /settings/directors/… 아래(옛 /catalog 경로는 없앴다 — 검토 I5)
 ];
 
 /** v2.720(감사 R1-03·R1-06): 데모 계정이 사람이 등록한(비-mock) 장비를 수집하려 할 때 라우트·폴러가 함께 쓰는 문구. */

@@ -5,6 +5,7 @@ import {
   parseJobReport, reportBytes, reportVerdict, reportCards, issueHint, storeRatio, reportText, reportValue,
   folderOptions, inFolder, pickCap, bulkSummary, NO_FOLDER, diagView,
   driftText, restorePointsNote, directorPatch, outcomeUnknown, missingText,
+  directorStatus, preflightView, preflightSummary, autoSetupFdPluginText, fillEmptyMapping, directorFormPatch, WEEKDAYS, newMappingRow,
 } from './bareosText.js';
 
 describe('bareosText (v2.820 Bareos VM 백업)', () => {
@@ -42,11 +43,16 @@ describe('bareosText (v2.820 Bareos VM 백업)', () => {
   it('머리 상태 줄 — 데모·미설정·가림·인증 정지·조회 실패', () => {
     expect(directorLine({ demo: true })).toMatch(/데모 Director/);
     expect(directorLine({ configured: false })).toMatch(/설정되지 않았습니다/);
-    const masked = directorLine({ configured: true, director: { masked: true }, poller: {} });
+    expect(directorLine({ configured: false, directors: [{ name: '폴란드 법인', configured: false }] })).toMatch(/1개 — 아직 콘솔 접속값/);   // 추가한 뒤 '추가하고' 라고 하지 않는다
+    // v2.823 법인별 Director — 상태별 개수 요약(조회 실패·인증 정지는 굵게) · 가린 판본은 그렇다고 밝힌다
+    const masked = directorLine({ configured: true, directors: [{ masked: true, configured: true, poll: { ok: true } }], poller: {} });
     expect(masked).toMatch(/전체 범위 관리자만/);
     expect(masked).not.toMatch(/\?/);
-    expect(directorLine({ configured: true, director: { host: 'dir', port: 9101, consoleName: 'portal' }, authStopped: { reason: '인증 실패' } })).toMatch(/주기 조회를 멈췄습니다/);
-    expect(directorLine({ configured: true, director: { host: 'dir' }, poller: { ok: false, error: 'x' } })).toMatch(/조회 실패: x/);
+    expect(directorLine({ configured: true, directors: [{ configured: true, authStopped: { reason: '인증 실패' } }] })).toMatch(/인증 정지 1[\s\S]*주기 조회를 멈췄습니다/);
+    const mix = directorLine({ configured: true, directors: [{ configured: true, poll: { ok: false } }, { configured: true, poll: { ok: true } }, { configured: false }], poller: { at: Date.now() }, defaults: { pollIntervalSec: 60 } });
+    expect(mix).toMatch(/법인 Director 3개 · 정상 1 · \*\*조회 실패 1\*\* · 설정 덜 됨 1/);
+    expect(directorStatus({ configured: true })).toEqual({ cls: 'gray', label: '조회 전' });
+    expect(directorStatus({ configured: false, authStopped: {} }).label).toBe('설정 덜 됨');
   });
 
   it('복원 이력 한 줄·후보 요약', () => {
@@ -246,5 +252,35 @@ describe('작업 결과 요약(v2.822.3 — 현장 jobid 8 로그 모양)', () =
     expect(t).not.toContain('`');
     const long = [`${T}   ${'A'.repeat(50000)}:  x`, `${T} ${' '.repeat(50000)}x`];
     const t0 = Date.now(); parseJobReport(long); expect(Date.now() - t0).toBeLessThan(200);
+  });
+
+  it('v2.823 법인별 Director — 사전 점검 표시·매핑 채움(빈 칸만)·접속 폼 차이(이름 포함)', () => {
+    expect(preflightView('unknown').mark).toBe('? 확인 불가');
+    expect(preflightView('nope').mark).toBe('? 확인 불가');
+    expect(preflightSummary({ items: [{ status: 'ok' }, { status: 'missing' }, { status: 'unknown' }] })).toBe('점검 3항목 — 정상 1 · 없음 1 · 확인 필요 0 · 확인 불가 1');
+    expect(autoSetupFdPluginText({ action: 'unchanged', pluginDir: '/usr/lib64/bareos/plugins' })).toMatch(/이미 켜져/);
+    const sites = [{ vcenterId: 'vc-a', client: 'mine-fd', storage: '', pool: '', schedule: '', vcserver: '', configFile: '' }];
+    const sug = [{ vcenterId: 'vc-a', fields: { client: { value: 'bareos-fd' }, storage: { value: 'File' }, pool: { value: '' }, schedule: { value: '' }, vcserver: { value: 'vc-a.corp' }, configFile: { value: '/etc/bareos/vmware/vc-a.ini' } } }];
+    const r = fillEmptyMapping(sites, sug, () => 'Seoul');
+    expect(r.sites[0].client).toBe('mine-fd');   // 사람이 넣은 값은 덮지 않는다
+    expect(r.sites[0].storage).toBe('File');
+    expect(r.filled).toBe(3);
+    expect(r.left).toEqual(['Seoul · Pool']);
+    expect(directorFormPatch({ name: '한국', host: 'a', port: 9101, consoleName: 'p', timeoutMs: 15000, tlsMax: 'TLSv1.3', password: '' }, { name: '한국', host: 'a', port: 9101, consoleName: 'p', timeoutMs: 15000, tlsMax: 'TLSv1.3' })).toBe(null);
+    expect(directorFormPatch({ name: '폴란드', host: 'a', port: 9101, consoleName: 'p', password: '' }, { name: '한국', host: 'a', port: 9101, consoleName: 'p' })).toEqual({ name: '폴란드' });
+    expect(WEEKDAYS).toHaveLength(7);
+    for (const t of [preflightSummary({ items: [{ status: 'ok' }] }), autoSetupFdPluginText({ action: 'updated', added: ['Plugin Names = "python3"'], backup: '/x' })]) expect(t).not.toMatch(/`/);
+  });
+
+  it('v2.823 검토 — 거부 확정은 결과 모름이 아니다(W7) · 저장 전 행은 이유와 함께 남김(W2) · 새 행은 주소·INI 를 미리 · INI 경로 겹침 접미사', () => {
+    const rejected = Object.assign(new Error('이 Director 의 자동 설정이 진행 중입니다.'), { changeRejected: true, body: { ok: false } });
+    expect(outcomeUnknown(rejected)).toBe(false);
+    expect(outcomeUnknown(new TypeError('Failed to fetch'))).toBe(true);
+    const r = fillEmptyMapping([{ vcenterId: 'vc-b', vcserver: '', client: '', storage: '', pool: '', schedule: '', configFile: '' }], [], () => 'Warsaw');
+    expect(r.filled).toBe(0);
+    expect(r.left).toEqual(['Warsaw(저장 전 — 매핑을 저장한 뒤 다시 채우세요)']);
+    const row = newMappingRow('KR_VC01', 'dir_a', 'vc01.kr.corp', ['/etc/bareos/vmware/kr-vc01.ini']);
+    expect(row).toMatchObject({ vcenterId: 'KR_VC01', directorId: 'dir_a', vcserver: 'vc01.kr.corp', configFile: '/etc/bareos/vmware/kr-vc01-2.ini' });
+    expect(newMappingRow('vc-a', 'd', 'bad host;x').vcserver).toBe('');
   });
 });

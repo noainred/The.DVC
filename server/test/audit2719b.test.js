@@ -42,7 +42,9 @@ test('① 보안·비밀 조회(/api/tools 아래)도 거부 (R1-08)', () => {
 const LIVE_CALLEES = ['probeRelayPath', 'fetchIdracInventory', 'fetchIdracSensors', 'probeGpuTelemetry', 'getNetworkCheck', 'tcpProbeMany', 'tcpProbe(',
   'collectHorizonLicenses', 'fetchHorizonLicenses',
   // v2.820: Bareos Director 콘솔 — 조회 라우트는 readDirector(데모 필터), 그 밖(카탈로그)은 withDirector 로 READ_DENY 여야 한다.
-  'withDirector(', 'readDirector'];
+  // v2.823: 법인별 Director 의 작업 표 호출(onDirector)도 같은 규칙. 카탈로그·매핑 제안 GET 은 헬퍼 catalogOf 를 거친다 —
+  //   v2.823 검토(S4): 스윕은 핸들러 본문 글자만 보므로 헬퍼 이름도 여기 둔다(빠지면 두 GET 이 스윕에서 보이지 않았다).
+  'withDirector(', 'onDirector(', 'readDirector', 'catalogOf('];
 /*
  * v2.732(점검 2회차 B3-01): 함수 **안에** 데모 계정 필터(`demoOnly`)가 있는 실접속 함수 — 라우트가 그 호출에 `demoOnly: isDemoGuest(req.user)` 를
  * 넘기면 경로 전체를 거부하는 대신 허용한다(같은 화면의 데모 데이터는 보여야 한다 — v2.720 R1-03 '수집형 실행은 demoOnly' 의 GET 판).
@@ -116,6 +118,10 @@ test('② 라우터 스택: LIVE_GET_DENY 는 실재 GET 이고, 실접속 함�
   const lic = decls.find((d) => d.lit === '/tools/license-expiry');
   assert.ok(lic, `라이선스 만료 GET 을 실접속 GET 으로 못 찾았다: ${JSON.stringify(decls)}`);
   assert.equal(lic.demoGuarded, true, `라이선스 만료 GET 이 demoOnly: isDemoGuest(req.user) 를 넘기지 않는다: ${JSON.stringify(lic)}`);
+  // v2.823 검토(S4): 법인 Director 의 카탈로그·매핑 제안 GET(헬퍼 catalogOf 경유)도 스윕이 본다 — 빠지면 데모 계정 거부를 아무도 확인하지 않는다.
+  for (const lit of ['/tools/bareos-backup/settings/directors/:directorId/catalog', '/tools/bareos-backup/settings/directors/:directorId/suggest']) {
+    assert.ok(decls.some((d) => d.lit === lit), `${lit} 를 실접속 GET 으로 못 찾았다: ${JSON.stringify(decls.map((d) => d.lit))}`);
+  }
   for (const d of decls) {
     const full = gets.filter((g) => g.endsWith(d.lit));
     assert.ok(full.length, `${d.file} 의 GET ${d.lit} 를 라우터 스택에서 못 찾았다`);

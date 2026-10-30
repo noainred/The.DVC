@@ -21,6 +21,8 @@ after(() => { fs.rmSync(DIR, { recursive: true, force: true }); });
 
 const { default: ssh2 } = await import('ssh2');
 const auto = await import('../src/bareos/autoSetup.js');
+// v2.823: 자동 설정은 법인 Director 하나를 대상으로 한다
+const DIR_ID = (await import('../src/bareos/settings.js')).addDirector({ name: '시험', host: '127.0.0.1' }).director.id;
 const newKey = () => crypto.generateKeyPairSync('ec', { namedCurve: 'prime256v1' }).privateKey.export({ type: 'sec1', format: 'pem' });
 
 function bareosHost({ maxSessions, mode /* 'none' | 'managed' */, testFails, noSftp = false }) {
@@ -83,7 +85,7 @@ after(() => auto._setDepsForTest());
 async function run(opts) {
   const h = await bareosHost(opts);
   try {
-    const r = await auto.setupDirector({ host: '127.0.0.1', sshPort: h.port, username: 'root', password: 'rootpw', restoreClient: 'site-fd', restoreStorage: 'File', restorePool: 'Full' });
+    const r = await auto.setupDirector({ directorId: DIR_ID, host: '127.0.0.1', sshPort: h.port, username: 'root', password: 'rootpw', restoreClient: 'site-fd', restoreStorage: 'File', restorePool: 'Full' });
     return { ok: true, files: r.files.map((f) => f.action).join(','), stats: h.stats };
   } catch (e) {
     return { ok: false, code: e.code || '', message: String(e.message), stats: h.stats };

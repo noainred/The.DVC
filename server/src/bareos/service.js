@@ -1,15 +1,17 @@
 /**
- * bareos/service.js — Bareos 연동의 업무 단위(v2.820). 라우트·폴러·데모가 같은 함수를 쓴다.
+ * bareos/service.js — Bareos 연동의 업무 단위(v2.820 · v2.823 법인별 Director). 라우트·폴러·데모가 같은 함수를 쓴다.
  *
- *  - withDirector(fn): 요청마다 콘솔 세션 1개(상시 연결 없음). 데모(mock 모드 + Director 미설정)면 메모리 Director.
- *    인증 실패(auth·pam·tls)는 정지 기록(util/authGuard.js) — **주기 조회만** 멈추고 수동 실행은 계속(자동 재시도 금지).
- *  - createBackupTarget: 스냅샷의 VM → 사이트 매핑 → 플러그인 옵션 → Director `configure add job` → 원장.
- *    Director 에 같은 이름이 이미 있으면(예전에 지운 대상의 비활성 잡) 접미사(-r2…)로 새로 만든다 — 옛 잡의 옵션은
- *    바뀌었을 수 있어 그대로 '입양' 하지 않는다.
+ *  - withDirector(directorId, fn): 요청마다 그 Director 의 콘솔 세션 1개(상시 연결 없음). 데모(mock 모드 + 접속할 Director 가 하나도 없음)면 메모리 Director.
+ *    인증 실패(auth·pam·tls)는 **그 Director 의** 정지 기록(util/authGuard.js) — 주기 조회만 멈추고 수동 실행은 계속(자동 재시도 금지).
+ *  - onDirector(directorId, kind, args): 작업 표(ops.js)의 한 작업을 그 Director 에서 실행한다. 2차 릴리스에서 담당 엣지가 있는 Director 는
+ *    같은 작업을 엣지 대행 큐로 보낸다(부르는 쪽은 바뀌지 않는다).
+ *  - createBackupTarget(s): 스냅샷의 VM → 그 vCenter 의 법인 Director·매핑 → 플러그인 옵션 → `configure add job` → 원장(directorId 고정).
  */
 import { openConsole, BareosConsoleError } from './console.js';
-import { loadSettings, directorConn, directorCred, siteFor } from './settings.js';
-import { addJob as directorAddJob, setJobEnabled } from './director.js';
+import {
+  loadSettings, directorConn, directorCred, directorById, siteFor, siteMissing,
+} from './settings.js';
+import { OPS } from './ops.js';
 import { addJob as registryAddJob, listJobs, findByVm, registryLoadError, jobCount, retireName, MAX_JOBS } from './registry.js';
 import { backupPluginOptions, jobNameFor, normLevel } from './names.js';
 import { createAuthGuard } from '../util/authGuard.js';
@@ -24,11 +26,13 @@ export const bareosAuthGuard = createAuthGuard({ file: 'bareos-auth-stops.json' 
 const fail = (code, msg) => new BareosConsoleError(code, msg);
 
 let _factory = null;
-/** 테스트 주입 — () => Promise<session>. null 이면 실제 경로. */
+/** 테스트 주입 — (directorId) => Promise<session>. null 이면 실제 경로. */
 export function _setSessionFactoryForTest(fn) { _factory = fn; }
 
-/** 데모 Director 를 쓰는가 — mock 모드이고 Director 설정이 비어 있을 때만. */
-export function isDemoActive(s = loadSettings()) { return !_factory && isMockMode() && !directorConn(s).conn; }
+/** 데모 Director 를 쓰는가 — mock 모드이고 접속할 수 있는 Director 가 하나도 없을 때만. */
+// v2.823 검토(I4·W9 — 재현): 데모는 **사람이 등록한 Director 가 하나도 없을 때만**. 예전에는 '접속값을 모두 갖춘 Director' 가 없으면 데모라,
+//   자동 설정을 쓰려고 비밀번호 없이 추가한 Director 가 설정 화면에 보이지 않고(데모 Director 만) 그 id 의 라우트가 404 였다 — 빠져나갈 길이 없었다.
+export function isDemoActive(s = loadSettings()) { return !_factory && isMockMode() && !(s.directors || []).length; }
 
 /** 화면·라우트가 쓰는 설정(데모면 메모리 데모 설정 — 파일은 그대로). 비밀번호 포함(내부 전용). */
 export function effectiveSettings() {
@@ -39,27 +43,37 @@ export function effectiveSettings() {
 const AUTH_CODES = new Set(['auth', 'pam', 'tls']);
 
 /**
- * 세션을 열어 fn(session) 을 돌리고 닫는다.
+ * 그 Director 의 세션을 열어 fn(session) 을 돌리고 닫는다.
+ * @param {string} directorId
  * @param {(s) => Promise<any>} fn
- * @param {{ trigger?: 'timer'|'manual', signal?: AbortSignal }} [o]
+ * @param {{ trigger?: 'timer'|'manual', signal?: AbortSignal, demoOnly?: boolean }} [o]
  */
-export async function withDirector(fn, { trigger = 'manual', signal = null, demoOnly = false } = {}) {
+export async function withDirector(directorId, fn, { trigger = 'manual', signal = null, demoOnly = false } = {}) {
   // 데모 계정(mock 모드 내장 계정 — 요청 문맥은 admin)은 **데모 Director 일 때만** 접속한다. 사람이 등록한 Director 에는
   // 닿지 않는다(auth/demoGuest.js '실제 호스트에 닿는 실행은 막는다' 의 GET 판 — audit2719b 가 라우트 호출 모양을 대조한다).
   if (demoOnly && !isDemoActive()) throw fail('demo-only', DEMO_ONLY_REASON);
-  if (_factory) { const s = await _factory(); try { return await fn(s); } finally { s.close?.(); } }
+  if (_factory) {
+    // 테스트 주입 경로도 시한 신호를 세션에 잇는다(v2.823 검토 P1 — 잇지 않아 시한 경로를 테스트가 못 잡았다).
+    const s = await _factory(directorId);
+    const onAbort = () => s._fail?.(new BareosConsoleError('aborted', '시한·취소로 Director 세션을 끊었습니다.'));
+    signal?.addEventListener?.('abort', onAbort, { once: true });
+    if (signal?.aborted) onAbort();
+    try { return await fn(s); } finally { signal?.removeEventListener?.('abort', onAbort); s.close?.(); }
+  }
   const settings = loadSettings();
   if (isDemoActive(settings)) {
     registerDemoJobNames(listJobs().filter((j) => j.demo).map((j) => j.bareosJob));
     const s = demoSession(demoSettings(store.get?.()));
     try { return await fn(s); } finally { s.close(); }
   }
-  const { conn, missing } = directorConn(settings);
-  if (!conn) throw fail('not-configured', `Bareos Director 설정이 덜 됐습니다(${missing.join('·')}) — 설정 탭에서 먼저 등록하세요.`);
-  const cred = directorCred(settings);
+  const dir = directorById(directorId, settings);
+  if (!dir) throw fail('not-configured', '이 백업 대상의 법인 Director 가 설정에 없습니다 — 설정 › 법인별 Director 에서 확인하세요.');
+  const { conn, missing } = directorConn(dir);
+  if (!conn) throw fail('not-configured', `‘${dir.name}’ Director 설정이 덜 됐습니다(${missing.join('·')}) — 설정 › 법인별 Director 에서 먼저 채우세요.`);
+  const cred = directorCred(dir);
   if (trigger === 'timer') {
     const stop = bareosAuthGuard.authStopFor(cred);
-    if (stop) throw fail('auth-stopped', `인증 실패로 주기 조회를 멈췄습니다(${stop.reason}) — 설정을 고치면 다시 시작합니다.`);
+    if (stop) throw fail('auth-stopped', `인증 실패로 ‘${dir.name}’ 주기 조회를 멈췄습니다(${stop.reason}) — 설정을 고치면 다시 시작합니다.`);
   }
   let s;
   try {
@@ -69,8 +83,7 @@ export async function withDirector(fn, { trigger = 'manual', signal = null, demo
     throw e;
   }
   bareosAuthGuard.clearAuthStop(cred.id);
-  // v2.822(검토 P1·S6 — 재현): 시한 신호를 **세션이 열린 뒤에도** 세션에 잇는다. 예전에는 openConsole 이 인증 뒤 리스너를 떼어
-  //   폴러 예산(withDeadline)이 명령 단계를 끊지 못했다 — 느린 Director 에서 한 틱이 수십 분 _busy 를 붙잡았다(실측 30초 예산에 40초).
+  // v2.822(검토 P1·S6 — 재현): 시한 신호를 **세션이 열린 뒤에도** 세션에 잇는다(폴러 예산이 명령 단계를 끊을 수 있게).
   const onAbort = () => s._fail?.(new BareosConsoleError('aborted', '시한·취소로 Director 세션을 끊었습니다.'));
   signal?.addEventListener?.('abort', onAbort, { once: true });
   if (signal?.aborted) onAbort();
@@ -78,26 +91,43 @@ export async function withDirector(fn, { trigger = 'manual', signal = null, demo
 }
 
 /**
+ * 작업 표(ops.js)의 한 작업을 그 Director 에서 실행한다(1차 릴리스: 중앙이 직접). 결과는 작업이 돌려준 값 그대로.
+ * @param {string} directorId
+ * @param {keyof OPS} kind
+ * @param {object} args 직렬화할 수 있는 값만(2차 엣지 대행이 같은 인자를 보낸다)
+ */
+export async function onDirector(directorId, kind, args = {}, { trigger = 'manual', signal = null, demoOnly = false, hooks = null } = {}) {
+  const op = OPS[kind];
+  if (!op) throw fail('invalid', `알 수 없는 Director 작업입니다(${kind}).`);
+  // hooks: 중앙 직접 실행에서만 쓰는 함수(예: poll 의 disableNow — 그 순간의 원장으로 고른다). 직렬화하지 않는다(엣지 대행에는 없다).
+  return withDirector(directorId, (s) => op(s, args, { signal, ...(hooks || {}) }), { trigger, signal, demoOnly });
+}
+
+/**
  * 스냅샷 VM 1대의 등록 가능 여부(순수에 가까움 — 스냅샷·설정만 본다).
- * @returns {{ ok: boolean, reason?: string, site?: object, plugin?: string }}
+ * @returns {{ ok: boolean, reason?: string, site?: object, director?: object, plugin?: string }}
  */
 export function eligibility(vm, settings) {
   if (!vm) return { ok: false, reason: '인벤토리에 없는 VM 입니다.' };
   if (vm.template) return { ok: false, reason: '템플릿은 백업할 수 없습니다(스냅샷을 만들 수 없음 — Bareos 플러그인 제약).' };
   if (!vm.vcDcPath || !vm.folderPath) return { ok: false, reason: '인벤토리에 데이터센터·폴더 경로가 없습니다(vApp 안의 VM 이거나 SOAP 수집 전 — 다음 수집 뒤 다시 보세요).' };
   const site = siteFor(vm.vcenterId, settings);
-  if (!site) return { ok: false, reason: '이 vCenter 의 사이트 매핑(FD·스토리지·풀)이 없습니다 — 설정 탭에서 먼저 지정하세요.' };
+  if (!site) return { ok: false, reason: '이 vCenter 가 어느 법인 Director 에도 묶여 있지 않습니다 — 설정 › 법인별 Director 에서 먼저 묶으세요.' };
+  const director = directorById(site.directorId, settings);
+  if (!director) return { ok: false, reason: '이 vCenter 를 묶은 Director 가 설정에 없습니다 — 설정 › 법인별 Director 에서 확인하세요.' };
+  const miss = siteMissing(site);
+  if (miss.length) return { ok: false, reason: `이 vCenter 의 매핑이 덜 됐습니다(${miss.join('·')}) — ‘${director.name}’ 편집 화면의 매핑 표를 채우세요.` };
   const p = backupPluginOptions({ plugin: settings.defaults.pluginName, vcserver: site.vcserver, dc: vm.vcDcPath, folder: vm.folderPath, vmname: vm.name, configFile: site.configFile });
   if (p.issue) return { ok: false, reason: p.issue };
-  return { ok: true, site, plugin: p.value };
+  return { ok: true, site, director, plugin: p.value };
 }
 
 /**
  * 등록 준비(순수에 가까움 — 스냅샷·설정·원장만 본다). 실패는 throw(invalid).
- * @returns {{ vm, el, base, moref, lvl, sched }}
+ * @returns {{ vm, el, base, moref, lvl, sched, directorId }}
  */
 export function prepareTarget({ vcenterId, vmId, level, schedule }, { snap = store.get(), settings = effectiveSettings() } = {}) {
-  // 원장에 넣을 수 없는 상태면 Director 에 닿기 **전에** 거절한다(C3·P3) — 예전에는 잡을 만든 뒤 원장 추가가 실패해 스케줄이 붙은 고아 잡이 남았다.
+  // 원장에 넣을 수 없는 상태면 Director 에 닿기 **전에** 거절한다(C3·P3).
   if (registryLoadError()) throw fail('unavailable', '백업 대상 원장을 읽지 못한 상태라 새 대상을 추가하지 않습니다(손상본 보존 — 서비스 점검에서 확인).');
   if (jobCount() >= MAX_JOBS) throw fail('invalid', `백업 대상은 ${MAX_JOBS}개까지 등록할 수 있습니다.`);
   const vm = (snap?.vms || []).find((v) => v.id === vmId);
@@ -106,24 +136,14 @@ export function prepareTarget({ vcenterId, vmId, level, schedule }, { snap = sto
   const el = eligibility(vm, settings);
   if (!el.ok) throw fail('invalid', el.reason);
   const moref = morefOf(vm.id, vm.vcenterId);
+  if (!jobNameFor(vm.vcenterId, moref)) throw fail('invalid', 'VM 관리 id(moref)로 잡 이름을 만들 수 없습니다.');
   const lvl = normLevel(level || settings.defaults.level);
   const sched = schedule === '' ? '' : (schedule || el.site.schedule || '');
   const base = {
     jobDefs: settings.defaults.jobDefs, client: el.site.client, storage: el.site.storage, pool: el.site.pool,
     schedule: sched || undefined, level: lvl, pluginOptions: el.plugin, description: `VMware Portal ${vm.name}`.replace(/[^\p{L}\p{N} ._-]/gu, ' '),
   };
-  return { vm, el, base, moref, lvl, sched };
-}
-
-/** 열린 세션에서 Director 잡 만들기 — 같은 이름이 있으면 접미사(r2…r5)로 다시. */
-async function addOnDirector(s, prep) {
-  for (const sfx of ['', 'r2', 'r3', 'r4', 'r5']) {
-    const name = jobNameFor(prep.vm.vcenterId, prep.moref, sfx);
-    if (!name) throw fail('invalid', 'VM 관리 id(moref)로 잡 이름을 만들 수 없습니다.');
-    const r = await directorAddJob(s, { ...prep.base, name });
-    if (!r.exists) return r;
-  }
-  throw fail('invalid', '같은 VM 의 Bareos 잡이 Director 에 이미 여러 개 있습니다 — Director 의 bareos-dir.d/job 아래 pv-… 파일을 정리한 뒤 다시 시도하세요.');
+  return { vm, el, base, moref, lvl, sched, directorId: el.site.directorId };
 }
 
 /*
@@ -138,22 +158,31 @@ function claimVm(prep) {
   return k;
 }
 
-/** 원장 기록이 실패한 Director 잡 — 끄고(스케줄이 돌지 않게) 이름을 남긴다(대조 틱이 다시 켜지면 또 끈다). 사유에 잡 이름을 밝힌다. */
-async function orphanCleanup(s, created, err, demo) {
-  let off = false;
-  try { await setJobEnabled(s, created.name, false); off = true; } catch { /* 아래 문구가 밝힌다 */ }
-  try { retireName(created.name, demo); } catch { /* 원장을 못 쓰는 상태일 수 있다 */ }
-  return `Director 잡 ‘${created.name}’ 은 만들었지만 원장에 넣지 못했습니다(${String(err?.message || err).slice(0, 200)}) — ${off ? '그 잡은 비활성화했습니다' : '그 잡을 비활성화하지도 못했습니다'}. Director 호스트에서 bareos-dir.d/job/${created.name}.conf 를 정리하세요.`;
-}
-
-/** 원장 기록(Director 잡을 만든 **뒤**). */
-function recordTarget(prep, created, by, demo) {
+/** 원장 기록(Director 잡을 만든 **뒤**). directorId 를 고정한다(잡은 그 Director 의 conf 에 있다). */
+function recordTarget(prep, jobName, by, demo) {
   const { vm, el } = prep;
   return registryAddJob({
-    vcenterId: vm.vcenterId, vmId: vm.id, vmName: vm.name, dc: vm.vcDcPath, folder: vm.folderPath,
-    bareosJob: created.name, client: el.site.client, storage: el.site.storage, pool: el.site.pool, schedule: prep.sched, level: prep.lvl,
+    vcenterId: vm.vcenterId, vmId: vm.id, vmName: vm.name, dc: vm.vcDcPath, folder: vm.folderPath, directorId: prep.directorId,
+    bareosJob: jobName, client: el.site.client, storage: el.site.storage, pool: el.site.pool, schedule: prep.sched, level: prep.lvl,
     createdBy: by, demo,
   });
+}
+
+/**
+ * 원장 기록이 실패한 Director 잡들 — 끄고(스케줄이 돌지 않게) 이름을 남긴다(대조 틱이 다시 켜지면 또 끈다). 사유에 잡 이름을 밝힌다.
+ * @returns {Promise<Map<string, string>>} 잡 이름 → 사유
+ */
+async function orphanCleanup(directorId, orphans, demo) {
+  const off = new Set();
+  try {
+    for (const r of await onDirector(directorId, 'disableJobs', { names: orphans.map((o) => o.name) })) if (r.ok) off.add(r.name);
+  } catch { /* 아래 문구가 밝힌다 */ }
+  const out = new Map();
+  for (const o of orphans) {
+    try { retireName(o.name, demo, directorId); } catch { /* 원장을 못 쓰는 상태일 수 있다 */ }
+    out.set(o.name, `Director 잡 ‘${o.name}’ 은 만들었지만 원장에 넣지 못했습니다(${String(o.err?.message || o.err).slice(0, 200)}) — ${off.has(o.name) ? '그 잡은 비활성화했습니다' : '그 잡을 비활성화하지도 못했습니다'}. Director 호스트에서 bareos-dir.d/job/${o.name}.conf 를 정리하세요.`);
+  }
+  return out;
 }
 
 /**
@@ -165,19 +194,18 @@ export async function createBackupTarget({ vcenterId, vmId, level, schedule, by,
   const prep = prepareTarget({ vcenterId, vmId, level, schedule });
   const key = claimVm(prep);
   try {
-    return await withDirector(async (s) => {
-      const created = await addOnDirector(s, prep);
-      try { return recordTarget(prep, created, by, demo); } catch (e) { throw fail('record', await orphanCleanup(s, created, e, demo)); }
-    });
+    const [r] = await onDirector(prep.directorId, 'addJobs', { items: [{ key: 0, vcenterId: prep.vm.vcenterId, moref: prep.moref, base: prep.base }] });
+    if (!r?.ok) throw fail(r?.code === 'skipped' ? 'connect' : (r?.code || 'error'), r?.message || 'Director 잡을 만들지 못했습니다.');
+    try { return recordTarget(prep, r.name, by, demo); } catch (e) {
+      const why = await orphanCleanup(prep.directorId, [{ name: r.name, err: e }], demo);
+      throw fail('record', why.get(r.name));
+    }
   } finally { _registering.delete(key); }
 }
 
-/** 세션째 쓸 수 없게 된 오류(이후 VM 도 같은 이유로 실패한다) — 일괄 등록이 여기서 멈춘다. */
-const SESSION_DEAD = new Set(['closed', 'timeout', 'aborted', 'protocol', 'too-large', 'connect', 'tls', 'auth', 'pam', 'blocked']);
-
 /**
- * v2.822 일괄 등록 — 같은 vCenter 의 여러 VM 을 **Director 세션 하나**로 순차 등록한다(VM 마다 접속하지 않는다).
- * 한 VM 의 실패(이름·자격·Director 거부)는 나머지를 막지 않는다. 세션이 끊기면(SESSION_DEAD) 남은 VM 은 그 사유로 '건너뜀'.
+ * v2.822 일괄 등록 — 같은 vCenter 의 여러 VM 을 **그 법인 Director 세션 하나**로 순차 등록한다(VM 마다 접속하지 않는다).
+ * 한 VM 의 실패(이름·자격·Director 거부)는 나머지를 막지 않는다. 세션이 끊기면 남은 VM 은 그 사유로 '건너뜀'.
  * 준비 단계(인벤토리·이미 대상·등록 조건) 실패는 Director 에 닿기 전에 걸러진다. 범위·상한·원장 여유는 라우트가 먼저 본다.
  * @returns {Promise<Array<{ vmId, vmName, ok, job?, reason? }>>} 요청 순서 그대로
  */
@@ -195,28 +223,29 @@ export async function createBackupTargets({ vcenterId, vmIds, level, schedule, b
     } catch (e) { o.reason = String(e?.message || e).slice(0, 300); }
   });
   if (!ready.length) return out;
+  const directorId = ready[0].prep.directorId;   // vCenter 하나 → Director 하나
   try {
-    await withDirector(async (s) => {
-      let dead = '';
-      for (const { i, prep } of ready) {
-        if (dead) { out[i].reason = `건너뜀 — ${dead}`; continue; }
-        let created;
-        try { created = await addOnDirector(s, prep); } catch (e) {
-          out[i].reason = String(e?.message || e).slice(0, 300);
-          if (SESSION_DEAD.has(e?.code)) dead = `Director 연결 문제로 멈췄습니다(${e.code})`;
-          continue;
-        }
-        try { out[i].job = recordTarget(prep, created, by, demo); out[i].ok = true; } catch (e) {
-          // Director 잡은 이미 생겼다 — 끄고, 숨기지 않고 이름을 밝힌다(다시 등록하면 접미사가 붙은 새 잡이 생기므로 Director 쪽 정리가 필요할 수 있다).
-          out[i].reason = await orphanCleanup(s, created, e, demo);
-        }
-      }
-    });
-  } catch (e) {
-    // 세션을 열지 못했다(설정 미완·접속·인증) — 준비를 통과한 VM 전부 같은 사유. 원장·Director 는 바뀌지 않았다.
-    const why = String(e?.message || e).slice(0, 300);
-    for (const { i } of ready) if (!out[i].ok && !out[i].reason) out[i].reason = why;
-    if (!ready.some(({ i }) => out[i].ok)) { const err = fail(e?.code || 'connect', why); err.results = out; throw err; }
+    let results;
+    try {
+      results = await onDirector(directorId, 'addJobs', { items: ready.map(({ i, prep }) => ({ key: i, vcenterId: prep.vm.vcenterId, moref: prep.moref, base: prep.base })) });
+    } catch (e) {
+      // 세션을 열지 못했다(설정 미완·접속·인증) — 준비를 통과한 VM 전부 같은 사유. 원장·Director 는 바뀌지 않았다.
+      const why = String(e?.message || e).slice(0, 300);
+      for (const { i } of ready) if (!out[i].reason) out[i].reason = why;
+      const err = fail(e?.code || 'connect', why); err.results = out; throw err;
+    }
+    const byKey = new Map(results.map((r) => [r.key, r]));
+    const orphans = [];
+    for (const { i, prep } of ready) {
+      const r = byKey.get(i);
+      if (!r?.ok) { out[i].reason = r?.message || '사유 미상'; continue; }
+      try { out[i].job = recordTarget(prep, r.name, by, demo); out[i].ok = true; } catch (e) { orphans.push({ i, name: r.name, err: e }); }
+    }
+    if (orphans.length) {
+      // Director 잡은 이미 생겼다 — 끄고, 숨기지 않고 이름을 밝힌다.
+      const why = await orphanCleanup(directorId, orphans, demo);
+      for (const o of orphans) out[o.i].reason = why.get(o.name);
+    }
   } finally {
     for (const k of claimed) _registering.delete(k);
   }

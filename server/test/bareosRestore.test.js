@@ -101,29 +101,33 @@ test('체인: Full → 마지막 Diff → 그 뒤 Incr · 실패 제외 · Full 
   assert.match(chainIssue(null, 6), /찾지 못했습니다/);
 });
 
-test('설정: 비밀번호는 봉인 저장(0600) · 응답에는 hasPassword 만 · 접속처 변경 시 폐기', () => {
+test('설정: 비밀번호는 봉인 저장(0600) · 응답에는 hasPassword 만 · 접속처 변경 시 폐기(v2.823 Director 마다)', () => {
   settings._resetForTest();
-  const r = settings.saveSettings({ director: { host: 'bareos-dir.corp', consoleName: 'portal', password: 'pw-x' } });
-  assert.equal(r.settings.director.hasPassword, true);
-  assert.equal(r.settings.director.password, '');
+  const r = settings.addDirector({ name: '한국', host: 'bareos-dir.corp', consoleName: 'portal', password: 'pw-x' });
+  const id = r.director.id;
+  assert.equal(r.director.hasPassword, true);
+  assert.equal(r.director.password, '');
   const file = path.join(tmp, 'bareos.json');
   assert.equal(fs.statSync(file).mode & 0o777, 0o600);
-  assert.equal(settings.directorConn().conn.password, 'pw-x');
-  assert.deepEqual(settings.saveSettings({ director: { port: 9102 } }).droppedSecrets, ['password']);
-  assert.ok(settings.directorConn().missing.includes('콘솔 비밀번호'));
-  assert.deepEqual(settings.saveSettings({ director: { password: 'pw-y' } }).droppedSecrets, []);
-  assert.throws(() => settings.saveSettings({ director: { host: 'http://x' } }), /스킴/);
-  assert.throws(() => settings.saveSettings({ sites: [{ vcenterId: 'a', vcserver: 'v', client: 'c d', storage: 's', pool: 'p', configFile: '/etc/x.ini' }] }), /FD 클라이언트/);
+  assert.equal(settings.directorConn(settings.directorById(id)).conn.password, 'pw-x');
+  assert.deepEqual(settings.updateDirector(id, { port: 9102 }).droppedSecrets, ['password']);
+  assert.ok(settings.directorConn(settings.directorById(id)).missing.includes('콘솔 비밀번호'));
+  assert.deepEqual(settings.updateDirector(id, { password: 'pw-y' }).droppedSecrets, []);
+  assert.throws(() => settings.updateDirector(id, { host: 'http://x' }), /스킴/);
+  assert.throws(() => settings.saveSettings({ director: { host: 'x' } }), /법인별 Director/, '접속값은 Director 화면에서만');
+  assert.throws(() => settings.saveSettings({ sites: [{ vcenterId: 'a', directorId: id, vcserver: 'v', client: 'c d', storage: 's', pool: 'p', configFile: '/etc/x.ini' }] }), /FD 클라이언트/);
   assert.throws(() => settings.saveSettings({ sites: [
-    { vcenterId: 'a', vcserver: 'v', client: 'c', storage: 's', pool: 'p', configFile: '/etc/x.ini' },
-    { vcenterId: 'a', vcserver: 'v', client: 'c', storage: 's', pool: 'p', configFile: '/etc/x.ini' }] }), /두 번/);
+    { vcenterId: 'a', directorId: id, vcserver: 'v', client: 'c', storage: 's', pool: 'p', configFile: '/etc/x.ini' },
+    { vcenterId: 'a', directorId: id, vcserver: 'v', client: 'c', storage: 's', pool: 'p', configFile: '/etc/x.ini' }] }), /두 번/);
+  assert.throws(() => settings.saveSettings({ sites: [{ vcenterId: 'a', directorId: 'dir_nope' }] }), /없는 Director/);
+  settings.deleteDirector(id);
 });
 
 test('설정 손상: 보존본을 남기고 빈 설정 + 오류 표시', () => {
   const file = path.join(tmp, 'bareos.json');
   fs.writeFileSync(file, '{ "director": { "password": "pw-leak');
   settings._resetForTest();
-  assert.equal(settings.loadSettings().director.host, '');
+  assert.deepEqual(settings.loadSettings().directors, []);
   assert.ok(settings.settingsLoadError());
   assert.ok(fs.readdirSync(tmp).some((f) => f.startsWith('bareos.json.corrupt.')));
   assert.doesNotMatch(settings.settingsLoadError().reason, /pw-leak/);

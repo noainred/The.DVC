@@ -27,6 +27,8 @@ fs.writeFileSync(path.join(tmp, 'users.json'), JSON.stringify({ users: [
 
 const A = await import('../src/bareos/autoSetup.js');
 const S = await import('../src/bareos/settings.js');
+// v2.823 법인별 Director — 자동 설정은 Director 하나를 대상으로 한다(그 Director 항목에 콘솔을 저장한다)
+const DIR = S.addDirector({ name: '한국 본사', host: '10.20.30.40', port: 9101 }).director.id;
 const { directorPrepBlock } = await import('../../web/src/views/tools/bareosText.js');
 
 const SSH_PW = 'ssh-Secret-123';
@@ -82,7 +84,7 @@ function fakeConsole(accept = () => true) {
   return { open, seen };
 }
 
-const DIR_BODY = { host: '10.20.30.40', username: 'root', password: SSH_PW, restoreClient: 'kr-fd', restoreStorage: 'kr-sd', restorePool: 'VMwareKR' };
+const DIR_BODY = { directorId: DIR, host: '10.20.30.40', username: 'root', password: SSH_PW, restoreClient: 'kr-fd', restoreStorage: 'kr-sd', restorePool: 'VMwareKR' };
 const consolePwOf = (F) => /Password = "([^"]+)"/.exec(F.get('/etc/bareos/bareos-dir.d/console/portal.conf')?.content || '')?.[1];
 
 after(() => { A._setDepsForTest(); try { fs.rmSync(tmp, { recursive: true, force: true }); } catch { /* */ } });
@@ -122,13 +124,14 @@ test('② Director 정상: 5개 생성(0640·bareos·표지) → 검사 → relo
   assert.equal(con.seen[0].name, 'portal');
   assert.equal(con.seen[0].host, '10.20.30.40');
   assert.equal(con.seen[0].port, 9101);
-  const saved = S.loadSettings().director;
+  const saved = S.directorById(DIR);
   assert.equal(saved.consoleName, 'portal'); assert.equal(saved.password, pw); assert.equal(saved.host, '10.20.30.40');
   const all = srv.st.cmds.join('\n');
   assert.ok(!all.includes(pw) && !all.includes(SSH_PW), '비밀번호는 명령 문자열에 없다');
   const body = JSON.stringify(r);
   assert.ok(!body.includes(pw) && !body.includes(SSH_PW), '응답에 비밀번호 없음');
-  assert.equal(r.settings.director.hasPassword, true);
+  assert.equal(r.director.hasPassword, true);
+  assert.equal(r.directorId, DIR);
   assert.equal(srv.st.creds.password, SSH_PW);
   assert.ok(![...srv.F.keys()].some((k) => k.startsWith('/tmp/')), '임시 디렉터리는 지운다');
 });
@@ -156,7 +159,7 @@ test('② 다시 실행: 포탈이 만든 파일은 덮어쓴다(updated/unchang
 });
 
 test('② bareos-dir -t 실패 → 새 파일 삭제 · 바꾼 파일 원복 · reload 없음 · 설정 그대로 · 출력의 콘솔 비밀번호 가림', async () => {
-  const before = JSON.stringify(S.loadSettings().director);
+  const before = JSON.stringify(S.directorById(DIR));
   const oldProfile = `${A.MARKER}\nProfile {\n  Name = "portal"\n}\n`;
   const srv = fakeServer({ files: { '/etc/bareos/bareos-dir.d/profile/portal.conf': oldProfile }, testCode: 1 });
   let leaked = '';
@@ -176,7 +179,7 @@ test('② bareos-dir -t 실패 → 새 파일 삭제 · 바꾼 파일 원복 · 
   assert.equal(con.seen.length, 0);
   assert.deepEqual([...srv.F.keys()], ['/etc/bareos/bareos-dir.d/profile/portal.conf']);
   assert.equal(srv.F.get('/etc/bareos/bareos-dir.d/profile/portal.conf').content, oldProfile);
-  assert.equal(JSON.stringify(S.loadSettings().director), before);
+  assert.equal(JSON.stringify(S.directorById(DIR)), before);
 });
 
 test('② 놓는 도중 실패 → 앞서 놓은 파일 되돌림 · 단일 설정 파일·root 아님·bconsole 없음은 쓰기 전에 거부', async () => {
@@ -195,7 +198,7 @@ test('② 놓는 도중 실패 → 앞서 놓은 파일 되돌림 · 단일 설�
 });
 
 test('② 새 콘솔 접속 실패(2회) → 새 세션으로 되돌리고 다시 reload · 포탈 설정은 그대로', async () => {
-  const before = JSON.stringify(S.loadSettings().director);
+  const before = JSON.stringify(S.directorById(DIR));
   const oldConsole = `${A.MARKER}\nConsole {\n  Name = "portal"\n  Password = "old-pw-kept"\n  Profile = "portal"\n}\n`;
   const srv = fakeServer({ files: { '/etc/bareos/bareos-dir.d/console/portal.conf': oldConsole } });
   const con = fakeConsole(() => false);
@@ -205,7 +208,7 @@ test('② 새 콘솔 접속 실패(2회) → 새 세션으로 되돌리고 다�
   assert.equal(srv.st.reloads, 2, 'reload → 되돌린 뒤 다시 reload');
   assert.equal(srv.F.get('/etc/bareos/bareos-dir.d/console/portal.conf').content, oldConsole, '같은 이름 콘솔은 옛 비밀번호로 원복(쓰던 연결이 끊기지 않게)');
   assert.deepEqual([...srv.F.keys()].filter((k) => k.startsWith('/etc/')), ['/etc/bareos/bareos-dir.d/console/portal.conf']);
-  assert.equal(JSON.stringify(S.loadSettings().director), before);
+  assert.equal(JSON.stringify(S.directorById(DIR)), before);
 });
 
 test('② reload 실패 → 되돌림 · 세션이 시한으로 끊김 → 새 세션으로 되돌리고 다시 reload', async () => {
@@ -260,10 +263,10 @@ test('v2.822.3 S2-1: 부모 디렉터리가 심링크면(bareos-dir.d 는 bareos
 });
 
 test('v2.822.3 C2-5: 새 콘솔 접속 뒤 설정 저장이 실패하면 되돌리고 다시 reload · P2-12: 되돌린 뒤 인증 정지 기록을 지운다', async () => {
-  S.saveSettings({ director: { host: '10.20.30.40', port: 9101, consoleName: 'portal', password: 'pw-before' } });
-  const before = JSON.stringify(S.loadSettings().director);
+  S.updateDirector(DIR, { host: '10.20.30.40', port: 9101, consoleName: 'portal', password: 'pw-before' });
+  const before = JSON.stringify(S.directorById(DIR));
   const svc = await import('../src/bareos/service.js');
-  const cred = S.directorCred(S.loadSettings());
+  const cred = S.directorCred(S.directorById(DIR));
   // 저장 실패를 흉내 낸다 — 콘솔 접속이 성공한 직후 bareos.json 자리를 비어 있지 않은 디렉터리로(원자적 쓰기의 rename 이 실패)
   const file = path.join(tmp, 'bareos.json');
   const keep = fs.readFileSync(file);
@@ -281,16 +284,16 @@ test('v2.822.3 C2-5: 새 콘솔 접속 뒤 설정 저장이 실패하면 되돌�
   } finally { fs.rmSync(file, { recursive: true }); fs.writeFileSync(file, keep); }
   assert.equal(srv.st.reloads, 2, 'reload → 되돌린 뒤 다시 reload');
   assert.equal([...srv.F.keys()].filter((k) => k.startsWith('/etc/')).length, 0);
-  assert.equal(JSON.stringify(S.loadSettings().director), before, '포탈 설정은 그대로');
+  assert.equal(JSON.stringify(S.directorById(DIR)), before, '포탈 설정은 그대로');
   assert.equal(svc.bareosAuthGuard.peekAuthStop(cred), null, 'P2-12: 되돌린 뒤의 인증 정지 기록은 지운다');
 });
 
 test('v2.822.3 S2-2: FD INI 자동 설정은 /etc/bareos/ 아래 .ini 에만 쓴다(root 로 아무 절대 경로나 쓰던 것)', async () => {
   for (const bad of ['/etc/cron.d/bareos.ini', '/etc/bareos/vmware/vc-a.conf', '/etc/sudoers.d/x.ini', '/var/lib/bareos/x.ini']) {
-    S.saveSettings({ sites: [{ vcenterId: 'vc-a', vcserver: 'vc-a.corp', client: 'kr-fd', storage: 'kr-sd', pool: 'VMwareKR', configFile: bad }] });
+    S.saveSettings({ sites: [{ vcenterId: 'vc-a', directorId: DIR, vcserver: 'vc-a.corp', client: 'kr-fd', storage: 'kr-sd', pool: 'VMwareKR', configFile: bad }] });
     assert.throws(() => A.planFdIni({ vcenterId: 'vc-a', host: '10.20.30.41', password: SSH_PW, vcuser: 'u', vcpass: 'p', vcthumbprint: '56:f5:97:fe:60:52:17:73:d0:73:a2:ed:47:ce:07:28:2c:e6:fe:9c' }), (e) => e.code === 'invalid' && /\/etc\/bareos\//.test(e.message), bad);
   }
-  S.saveSettings({ sites: [{ vcenterId: 'vc-a', vcserver: 'vc-a.corp', client: 'kr-fd', storage: 'kr-sd', pool: 'VMwareKR', configFile: '/etc/bareos/vmware/vc-a.ini' }] });
+  S.saveSettings({ sites: [{ vcenterId: 'vc-a', directorId: DIR, vcserver: 'vc-a.corp', client: 'kr-fd', storage: 'kr-sd', pool: 'VMwareKR', configFile: '/etc/bareos/vmware/vc-a.ini' }] });
 });
 
 test('입력 판정: 차단 주소·앞 글자 - ·잘못된 리소스 이름·비밀번호 없음은 원격 접속 전에 거부', async () => {
@@ -308,7 +311,7 @@ test('입력 판정: 차단 주소·앞 글자 - ·잘못된 리소스 이름·�
 });
 
 test('④ FD INI: 매핑 경로에 0600 bareos · 지문 정규화 · vCenter 비밀번호는 명령에 없음 · 남의 파일 거부 · 줄바꿈 거부', async () => {
-  S.saveSettings({ sites: [{ vcenterId: 'vc-a', vcserver: 'vc-a.corp', client: 'kr-fd', storage: 'kr-sd', pool: 'VMwareKR', configFile: '/etc/bareos/vmware/vc-a.ini' }] });
+  S.saveSettings({ sites: [{ vcenterId: 'vc-a', directorId: DIR, vcserver: 'vc-a.corp', client: 'kr-fd', storage: 'kr-sd', pool: 'VMwareKR', configFile: '/etc/bareos/vmware/vc-a.ini' }] });
   const FD = { vcenterId: 'vc-a', host: '10.20.30.41', password: SSH_PW, vcuser: 'svc-backup@vsphere.local', vcpass: 'Vc%Pa ss!', vcthumbprint: '56:f5:97:fe:60:52:17:73:d0:73:a2:ed:47:ce:07:28:2c:e6:fe:9c' };
   const srv = fakeServer();
   A._setDepsForTest({ ssh: srv.ssh, openConsole: fakeConsole().open, sleep: async () => {} });
@@ -341,13 +344,13 @@ test('④ 지문 읽기: openssl 출력 파싱 · IP 는 SNI 없음 · 못 읽�
   const r = await A.readFdThumbprint({ vcenterId: 'vc-a', host: '10.20.30.41', password: SSH_PW });
   assert.equal(r.thumbprint, '56F597FE60521773D073A2ED47CE07282CE6FE9C');
   assert.match(srv.st.cmds.at(-1), /-connect vc-a\.corp:443 -servername vc-a\.corp </);
-  S.saveSettings({ sites: [{ vcenterId: 'vc-a', vcserver: 'vc-a.corp', client: 'kr-fd', storage: 'kr-sd', pool: 'VMwareKR', configFile: '/etc/bareos/vmware/vc-a.ini' }, { vcenterId: 'vc-b', vcserver: '10.1.1.1', client: 'pl-fd', storage: 'pl-sd', pool: 'P', configFile: '/etc/bareos/vmware/vc-b.ini' }] });
+  S.saveSettings({ sites: [{ vcenterId: 'vc-a', directorId: DIR, vcserver: 'vc-a.corp', client: 'kr-fd', storage: 'kr-sd', pool: 'VMwareKR', configFile: '/etc/bareos/vmware/vc-a.ini' }, { vcenterId: 'vc-b', directorId: DIR, vcserver: '10.1.1.1', client: 'pl-fd', storage: 'pl-sd', pool: 'P', configFile: '/etc/bareos/vmware/vc-b.ini' }] });
   await A.readFdThumbprint({ vcenterId: 'vc-b', host: '10.20.30.41', password: SSH_PW });
   assert.match(srv.st.cmds.at(-1), /-connect 10\.1\.1\.1:443 </);
   srv = fakeServer({ openssl: '' });
   A._setDepsForTest({ ssh: srv.ssh, openConsole: fakeConsole().open, sleep: async () => {} });
   await assert.rejects(A.readFdThumbprint({ vcenterId: 'vc-b', host: '10.20.30.41', password: SSH_PW }), (e) => e.code === 'remote');
-  S.saveSettings({ sites: [{ vcenterId: 'vc-a', vcserver: 'vc-a.corp', client: 'kr-fd', storage: 'kr-sd', pool: 'VMwareKR', configFile: '/etc/bareos/vmware/vc-a.ini' }] });
+  S.saveSettings({ sites: [{ vcenterId: 'vc-a', directorId: DIR, vcserver: 'vc-a.corp', client: 'kr-fd', storage: 'kr-sd', pool: 'VMwareKR', configFile: '/etc/bareos/vmware/vc-a.ini' }] });
 });
 
 /* ───────────────────────── ⑤ 라우트 ───────────────────────── */
@@ -370,7 +373,7 @@ before(async () => {
   app.use((req, _res, next) => { req.user = USERS[req.headers['x-u']] || null; next(); });
   app.use('/api', api);
   srvHttp = await new Promise((r) => { const s = app.listen(0, '127.0.0.1', () => r(s)); });
-  base = `http://127.0.0.1:${srvHttp.address().port}/api/tools/bareos-backup/settings/auto-setup`;
+  base = `http://127.0.0.1:${srvHttp.address().port}/api/tools/bareos-backup/settings/directors/${DIR}/auto-setup`;
 });
 after(() => { try { srvHttp?.close(); } catch { /* */ } });
 
@@ -399,19 +402,21 @@ test('⑤ 라우트: 권한·범위·데모·OTP 게이트 · 입력 오류는 O
   assert.equal(bad.s, 400);
   const ok = await call('admin', '/director', { ...DIR_BODY, otp: t1 });   // 같은 코드 — 입력 오류가 OTP 를 태우지 않았다
   assert.equal(ok.s, 200, ok.t);
-  assert.equal(ok.j.settings.director.consoleName, 'portal');
+  assert.equal(ok.j.director.consoleName, 'portal');
   const pw = consolePwOf(srv.F);
   assert.ok(!ok.t.includes(pw) && !ok.t.includes(SSH_PW));
   assert.equal((await call('admin', '/director', { ...DIR_BODY, otp: t1 })).s, 403, '쓴 코드는 다시 못 쓴다');
 
-  // 진행 중에는 일반 설정 저장 409(끝에 저장하는 Director 연결과 서로 덮지 않게)
+  // 진행 중에는 그 Director 의 접속값 저장 409(끝에 저장하는 Director 연결과 서로 덮지 않게 — v2.823 Director 마다)
   let release; const gate = new Promise((r) => { release = r; });
   const slow = fakeServer();
   A._setDepsForTest({ ssh: async (c, fn) => { await gate; return slow.ssh(c, fn); }, openConsole: fakeConsole().open, sleep: async () => {} });
   const pending = call('admin', '/fd-thumbprint', { vcenterId: 'vc-a', host: '10.20.30.41', password: SSH_PW });
   await new Promise((r) => setTimeout(r, 50));
-  const put = await fetch(base.replace('/settings/auto-setup', '/settings'), { method: 'PUT', headers: { 'x-u': 'admin', 'content-type': 'application/json' }, body: JSON.stringify({ defaults: { level: 'Full' } }) });
+  const put = await fetch(base.replace('/auto-setup', ''), { method: 'PUT', headers: { 'x-u': 'admin', 'content-type': 'application/json' }, body: JSON.stringify({ timeoutMs: 20000 }) });
   assert.equal(put.status, 409);
+  const same = await call('admin', '/preflight', { host: '10.20.30.41', password: SSH_PW });
+  assert.equal(same.s, 409, '같은 Director 의 다른 자동 설정은 409');
   release(); assert.equal((await pending).s, 200);
   A._setDepsForTest({ ssh: srv.ssh, openConsole: fakeConsole().open, sleep: async () => {} });
 

@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { fetchJson, postJson, putJson, patchJson, delJson, usePolling, getCurrentUser } from '../../api.js';
+import { fetchJson, postJson, patchJson, delJson, usePolling, getCurrentUser } from '../../api.js';
 import { Loading, ErrorBox, SearchBox, Modal } from '../../components/ui.jsx';
 import { STable } from '../../components/STable.jsx';
 import Select from '../../components/Select.jsx';
@@ -7,20 +7,18 @@ import BoldText from '../../components/boldText.jsx';
 import ScopeOmitBanner from '../ScopeOmitBanner.jsx';
 import { useHashTab } from '../../hooks/useHashTab.js';
 import { requireChanged } from '../changeResult.js';
-import { droppedSecretNote } from '../droppedSecretText.js';
 import VeeamHeader from './VeeamHeader.jsx';
+import SettingsTab from './BareosSettings.jsx';
 import {
-  stateBadge, levelLabel, bytesText, whenText, runCell, directorLine, RESTORE_MODE_LABEL, restoreLine, candidateSummary, driftText, restorePointsNote,
-  folderOptions, inFolder, pickCap, bulkSummary, diagView,
-  directorPrepBlock, fdIniTemplate, PREP_CHECKLIST, autoSetupDirectorText, autoSetupFdText, thumbprintText,
-  directorPatch, outcomeUnknown, missingText,
+  stateBadge, levelLabel, bytesText, whenText, runCell, directorLine, directorStatus, RESTORE_MODE_LABEL, restoreLine, candidateSummary, driftText, restorePointsNote,
+  folderOptions, inFolder, pickCap, bulkSummary,
   parseJobReport, reportCards, REPORT_KEYS, issueHint, storeRatio, reportText, reportBytes, reportValue,
 } from './bareosText.js';
 
 /**
- * 특수 기능 › Bareos VM 백업(v2.820, 도구 키 bareos-backup — admin 전용).
- * 포탈에서 고른 VM 을 Bareos VMware 플러그인으로 백업·복원한다. 포탈은 Director 콘솔(TLS-PSK · JSON)로 잡을 만들고 실행·조회하며,
- * 백업 데이터는 사이트 FD → SD 안에서만 흐른다. vCenter 비밀번호는 포탈이 갖지 않는다(사이트 FD 의 INI).
+ * 특수 기능 › Bareos VM 백업(v2.820, 도구 키 bareos-backup — admin 전용 · v2.823 법인별 Director).
+ * 포탈에서 고른 VM 을 Bareos VMware 플러그인으로 백업·복원한다. 포탈은 법인마다 둔 Director 콘솔(TLS-PSK · JSON)로 잡을 만들고 실행·조회하며,
+ * 백업 데이터는 그 법인의 FD → SD 안에서만 흐른다. vCenter 비밀번호는 포탈이 갖지 않는다(FD 의 INI). 설정 탭은 BareosSettings.jsx.
  * 문구·판정은 bareosText.js 하나(백틱 금지 · 값이 없으면 '—').
  */
 const BASE = '/tools/bareos-backup';
@@ -59,7 +57,7 @@ export default function BareosBackupTool() {
       {head}
       <div>
       {error && <div className="banner warn" style={{ marginBottom: 10 }}>최근 새로 고침에 실패했습니다 — 아래는 마지막으로 받은 내용입니다({String(error.message || error).slice(0, 160)}).</div>}
-      <div className="card" style={{ ...NOTE, borderLeft: `3px solid var(--${data.demo ? 'amber' : data.configured && data.poller?.ok !== false && !data.authStopped ? 'green' : 'red'})` }}>
+      <div className="card" style={{ ...NOTE, borderLeft: `3px solid var(--${data.demo ? 'amber' : data.configured && data.poller?.ok !== false && !(data.directors || []).some((x) => x.authStopped) ? 'green' : 'red'})` }}>
         <BoldText text={directorLine(data)} />
       </div>
       {data.settingsLoadError && <div className="banner bad" style={{ marginBottom: 10 }}>설정 파일을 읽지 못했습니다(손상본 보존) — {data.settingsLoadError.reason}</div>}
@@ -81,6 +79,7 @@ export default function BareosBackupTool() {
 /* ───────────────────────── 백업 대상 ───────────────────────── */
 function TargetsTab({ d, reload }) {
   const [vc, setVc] = useState('');
+  const [dirF, setDirF] = useState('');   // v2.823 법인 Director 필터(상단 칩)
   const [q, setQ] = useState('');
   const [adding, setAdding] = useState(false);
   const [busyIds, setBusyIds] = useState(() => new Set());   // W11: 처리 중 잠금은 그 대상만
@@ -98,7 +97,10 @@ function TargetsTab({ d, reload }) {
     if (restoreOf && !ids.has(restoreOf.id)) setRestoreOf(null);
     if (runFor && !ids.has(runFor)) setRunFor(null);
   }, [d.jobs, logOf, restoreOf, runFor]);
-  const rows = d.jobs.filter((j) => (!vc || j.vcenterId === vc) && (!q || `${j.vmName} ${j.folder} ${j.bareosJob}`.toLowerCase().includes(q.toLowerCase())));
+  const dirs = useMemo(() => d.directors || [], [d.directors]);
+  const dirName = (id) => dirs.find((x) => x.id === id)?.name || '—';
+  useEffect(() => { if (dirF && !dirs.some((x) => x.id === dirF)) setDirF(''); }, [dirF, dirs]);
+  const rows = d.jobs.filter((j) => (!vc || j.vcenterId === vc) && (!dirF || j.directorId === dirF) && (!q || `${j.vmName} ${j.folder} ${j.bareosJob}`.toLowerCase().includes(q.toLowerCase())));
 
   const act = async (j, fn, okText) => {
     setBusyIds((b) => new Set(b).add(j.id)); setMsg(null);
@@ -116,6 +118,21 @@ function TargetsTab({ d, reload }) {
 
   return (
     <div>
+      {dirs.length > 0 && (
+        <div style={{ ...ROW, marginBottom: 10 }} aria-label="법인 Director 필터">
+          <span className="muted" style={{ fontSize: 12 }}>법인 Director</span>
+          <button type="button" className={`tab${!dirF ? ' active' : ''}`} style={{ padding: '4px 12px', fontSize: 12 }} onClick={() => setDirF('')}>전체 {d.jobs.length}</button>
+          {dirs.map((x) => {
+            const b = directorStatus(x);
+            return (
+              <button key={x.id} type="button" className={`tab${dirF === x.id ? ' active' : ''}`} style={{ padding: '4px 12px', fontSize: 12, display: 'inline-flex', alignItems: 'center', gap: 6 }}
+                title={x.poll?.error || (x.authStopped ? `인증 정지 — ${x.authStopped.reason || ''}` : '')} onClick={() => setDirF(dirF === x.id ? '' : x.id)}>
+                <span className={`badge ${b.cls}`} style={{ fontSize: 10 }}>{b.label}</span>{x.name} <span className="muted">{x.jobs ?? 0}</span>
+              </button>
+            );
+          })}
+        </div>
+      )}
       <div style={{ ...ROW, marginBottom: 10 }}>
         <span className="muted" style={{ fontSize: 12 }}>vCenter</span>
         <Select className="input" value={vc} onChange={(e) => setVc(e.target.value)} style={{ minWidth: 160 }} aria-label="vCenter 필터">
@@ -132,13 +149,13 @@ function TargetsTab({ d, reload }) {
       <ScopeOmitBanner data={d} unit="백업 대상" counter="개" why="조회 범위 밖 vCenter 의" />
 
       <div className="table-wrap" style={{ maxHeight: '58vh' }}>
-        <STable minWidth={1040} wrap={false}>
+        <STable minWidth={1160} wrap={false}>
           <thead><tr>
-            <th>VM</th><th>vCenter</th><th>데이터센터 · 폴더</th><th>사이트 FD · 레벨 · 스케줄</th>
+            <th>VM</th><th>법인 Director</th><th>vCenter</th><th>데이터센터 · 폴더</th><th>FD · 레벨 · 스케줄</th>
             <th>최근 실행</th><th className="right">용량</th><th data-nosort>작업</th>
           </tr></thead>
           <tbody>
-            {rows.length === 0 && <tr><td colSpan={7} className="center muted" style={{ padding: 22 }}>{d.jobs.length ? '조건에 맞는 대상이 없습니다.' : '백업 대상이 없습니다 — ‘+ 백업 대상 추가’ 로 vCenter 의 VM 을 고르세요.'}</td></tr>}
+            {rows.length === 0 && <tr><td colSpan={8} className="center muted" style={{ padding: 22 }}>{d.jobs.length ? '조건에 맞는 대상이 없습니다.' : '백업 대상이 없습니다 — ‘+ 백업 대상 추가’ 로 vCenter 의 VM 을 고르세요.'}</td></tr>}
             {rows.map((j) => {
               const c = runCell(j);
               // W5: 포탈이 시작한 실행(pending)뿐 아니라 Bareos 스케줄이 돌리는 실행(대조가 넣은 lastRun)도 실행 중이다 — 대조 주기만큼 늦을 수 있다
@@ -148,6 +165,7 @@ function TargetsTab({ d, reload }) {
               return (
                 <tr key={j.id} style={{ opacity: j.enabled ? 1 : 0.6 }}>
                   <td data-sort={j.vmName}><b>{j.vmName}</b>{!j.enabled && <span className="badge gray" style={{ marginLeft: 6 }}>비활성</span>}{j.missingInDirector && <span className="badge red" style={{ marginLeft: 6 }} title="Director 의 잡 목록에 없습니다(누가 정의 파일을 지웠을 수 있습니다)">Director 에 없음</span>}{j.demo && <span className="badge amber" style={{ marginLeft: 6 }}>데모</span>}{j.drift && <span className="badge amber" style={{ marginLeft: 6 }} title={driftText(j.drift)}>{j.drift === 'missing' ? '인벤토리에 없음' : '등록 뒤 바뀜'}</span>}</td>
+                  <td data-sort={dirName(j.directorId)} style={{ fontSize: 12.5 }}>{dirName(j.directorId)}</td>
                   <td className="muted">{j.vcenterId}</td>
                   <td className="muted" style={{ fontSize: 12 }}><div style={{ maxWidth: 220, whiteSpace: 'normal', overflowWrap: 'anywhere' }}>{j.dc} · {j.folder}</div></td>
                   <td data-sort={j.client} style={{ fontSize: 12.5 }}>{j.client}<div className="muted" style={{ fontSize: 11 }}>{levelLabel(j.level)} · {j.schedule || '수동'}</div></td>
@@ -278,7 +296,7 @@ function AddForm({ d, onClose, onChanged }) {
       {vc && !cand && !candErr && <Loading />}
       {cand && (
         <>
-          <div className="muted" style={{ fontSize: 12, marginBottom: 6 }}>{candidateSummary(cand)}{!cand.mapped ? ' · 이 vCenter 의 사이트 매핑이 없습니다(설정 탭)' : ''}{!cand.writable ? ' · 조회 전용 범위라 등록할 수 없습니다' : ''}</div>
+          <div className="muted" style={{ fontSize: 12, marginBottom: 6 }}>{candidateSummary(cand)}{cand.director ? ` · 잡을 만들 법인 Director ‘${cand.director.name}’` : ' · 이 vCenter 는 어느 법인 Director 에도 묶여 있지 않습니다(설정 › 법인별 Director)'}{cand.director && cand.mappingMissing?.length ? ` · 매핑이 덜 됐습니다(${cand.mappingMissing.join('·')})` : ''}{!cand.writable ? ' · 조회 전용 범위라 등록할 수 없습니다' : ''}</div>
           <div style={{ ...ROW, marginBottom: 6 }}>
             <button type="button" className="logout-btn" style={BTN} disabled={!visiblePickable.length || sel.size >= cap} onClick={pickVisible}>보이는 등록 가능 VM 전체 선택({visiblePickable.length}대)</button>
             <button type="button" className="logout-btn" style={BTN} disabled={!sel.size} onClick={() => setSel(new Set())}>선택 해제</button>
@@ -679,360 +697,6 @@ function HistoryTab({ d }) {
         </STable>
       </div>
       {logOf && <LogModal job={logOf.job} jobid={logOf.jobid} view={logOf.view} onClose={() => setLogOf(null)} />}
-    </div>
-  );
-}
-
-/** v2.822 단계별 연결 진단 — 단계마다 ✓/✗/시도 안 함 · 걸린 시간 · 내용 · (실패면) 조치. 문구는 서버(console.diagnoseConsole)가 만든다. */
-function DiagStages({ stages }) {
-  return (
-    <ol aria-label="연결 진단 단계" style={{ listStyle: 'none', margin: '10px 0 0', padding: 0, display: 'flex', flexDirection: 'column', gap: 4 }}>
-      {stages.map((x) => {
-        const v = diagView(x);
-        return (
-          <li key={x.key} style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 17em) minmax(0, 1fr)', gap: 8, alignItems: 'baseline', fontSize: 12 }}>
-            <span style={{ minWidth: 0, wordBreak: 'keep-all' }}><span className={`badge ${v.cls}`} style={{ fontSize: 10.5 }}>{v.mark}</span> {x.label}</span>
-            <span style={{ minWidth: 0, overflowWrap: 'anywhere' }}>
-              <span className={x.ok === false ? '' : 'muted'}>{x.detail || '—'}</span>{v.ms && <span className="muted"> · {v.ms}</span>}
-              {x.hint && <div style={{ color: 'var(--amber)', marginTop: 2 }}>조치: {x.hint}</div>}
-            </span>
-          </li>
-        );
-      })}
-    </ol>
-  );
-}
-
-/* ───────────────────────── 설정(전체 범위 관리자) ───────────────────────── */
-function SettingsTab({ onSaved }) {
-  const [s, setS] = useState(null);
-  const [err, setErr] = useState(null);
-  const [form, setForm] = useState(null);
-  const [cat, setCat] = useState(null);
-  const [catErr, setCatErr] = useState(null);
-  const [msg, setMsg] = useState(null);
-  const [busy, setBusy] = useState(false);
-  const [addVc, setAddVc] = useState('');
-  const [diag, setDiag] = useState(null);   // v2.822 단계별 연결 진단 결과(stages)
-  // keepEdits: 자동 설정이 Director 연결만 바꿨을 때 — 저장하지 않은 기본값·사이트 표 편집은 버리지 않는다.
-  const fetchSettings = (keepEdits) => fetchJson(`${BASE}/settings`).then((r) => {
-    setS(r); setErr(null);
-    const director = { host: r.director.host, port: r.director.port, consoleName: r.director.consoleName, password: '', timeoutMs: r.director.timeoutMs, tlsMax: r.director.tlsMax };
-    setForm((f) => (keepEdits && f ? { ...f, director } : { director, defaults: { ...r.defaults }, sites: r.sites.map((x) => ({ ...x })) }));
-  }).catch(setErr);
-  const load = () => fetchSettings(false);
-  const catGen = useRef(0);
-  // W14: 늦게 온 이전 응답은 버린다(저장 직후 새로 읽기와 겹칠 때) · W2: 재시도 없음
-  const loadCat = (refresh) => {
-    const g = ++catGen.current;
-    setCatErr(null);
-    fetchJson(`${BASE}/catalog`, refresh ? { refresh: 1 } : {}, undefined, DIRECTOR_GET).then((r) => { if (g === catGen.current) setCat(r); }).catch((e) => { if (g === catGen.current) setCatErr(e); });
-  };
-  useEffect(() => { fetchSettings(false); loadCat(false); }, []);
-  if (err && !s) return <ErrorBox error={err} />;
-  if (!s || !form) return <Loading />;
-  const setDir = (k, v) => setForm({ ...form, director: { ...form.director, [k]: v } });
-  const setDef = (k, v) => setForm({ ...form, defaults: { ...form.defaults, [k]: v } });
-  const setSite = (i, k, v) => setForm({ ...form, sites: form.sites.map((x, j) => (j === i ? { ...x, [k]: v } : x)) });
-  const vcName = (id) => s.vcenters.find((v) => v.id === id)?.name || id;
-  const unmapped = s.vcenters.filter((v) => !form.sites.some((x) => x.vcenterId === v.id));
-  const opts = (k, cur) => { const list = cat?.[k] || []; return [...new Set([...(cur ? [cur] : []), ...list])]; };
-
-  const save = async () => {
-    setBusy(true); setMsg(null);
-    try {
-      // Director 연결은 읽어 온 값과 달라진 칸만(directorPatch — W2-1·P2-1: 옛 사본을 통째로 보내 새 콘솔 비밀번호를 폐기하던 것)
-      const dir = directorPatch(form.director, s.director);
-      const body = { ...(dir ? { director: dir } : {}), defaults: { ...form.defaults, pollIntervalSec: Number(form.defaults.pollIntervalSec) || undefined }, sites: form.sites };
-      const r = await putJson(`${BASE}/settings`, body);
-      requireChanged(r);
-      const dropped = droppedSecretNote(r);
-      setMsg({ ok: true, text: `저장했습니다.${dropped ? ` ${dropped}` : ''}` });
-      await load(); loadCat(true); onSaved();
-    } catch (e) { setMsg({ ok: false, text: `저장 실패: ${e.message}` }); } finally { setBusy(false); }
-  };
-  const test = async () => {
-    setBusy(true); setMsg(null); setDiag(null);
-    try {
-      const body = form.director.password ? { director: { ...form.director } } : {};
-      const r = await postJson(`${BASE}/settings/test`, body);
-      requireChanged(r);
-      setDiag(r.stages || null);
-      setMsg({ ok: true, text: `연결 성공 — Director ‘${r.director || '?'}’ ${r.version || ''} · ${r.tls ? `${r.tls.protocol} ${r.tls.cipher}` : '암호화 없음'} · 클라이언트 ${r.clients ? `${r.clients.length}개` : `조회 실패(${r.clientsError})`}${form.director.password ? '' : ' (저장된 주소·비밀번호로 시험)'}` });
-    } catch (e) {
-      setDiag(Array.isArray(e?.body?.stages) ? e.body.stages : null);
-      setMsg({ ok: false, text: `연결 실패: ${e.message}` });
-    } finally { setBusy(false); }
-  };
-  const copy = (text) => { try { navigator.clipboard.writeText(text).then(() => setMsg({ ok: true, text: '복사했습니다.' }), () => setMsg({ ok: false, text: '복사하지 못했습니다 — 글을 직접 선택해 복사하세요.' })); } catch { setMsg({ ok: false, text: '복사하지 못했습니다 — 글을 직접 선택해 복사하세요.' }); } };
-  const field = { fontSize: 12, display: 'flex', flexDirection: 'column', gap: 4, minWidth: 0 };
-
-  return (
-    <div>
-      {s.demo && <div className="card" style={{ ...NOTE, borderLeft: '3px solid var(--amber)' }}>데모 모드 — 아래 값은 메모리의 데모 설정입니다. 실제 Director 를 저장하면 그쪽으로 접속합니다.</div>}
-      {s.loadError && <div className="banner bad" style={{ marginBottom: 10 }}>설정 파일을 읽지 못했습니다(손상본 보존) — {s.loadError.reason}</div>}
-      {err && <div className="banner bad" role="alert" style={{ marginBottom: 10 }}>설정을 다시 읽지 못했습니다({String(err.message || err).slice(0, 160)}) — 화면 값이 최신이 아닐 수 있어 저장을 잠갔습니다. <button type="button" className="logout-btn" style={BTN} onClick={load}>다시 읽기</button></div>}
-      {msg && <div className={`banner ${msg.ok ? 'ok' : 'bad'}`} style={{ marginBottom: 10 }}><BoldText text={msg.text} /></div>}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))', gap: 12, marginBottom: 12 }}>
-        <div className="card" style={{ padding: 14, minWidth: 0 }}>
-          <b>Director 연결</b>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 8, marginTop: 8 }}>
-            <label className="muted" style={field}>호스트<input className="input" id="bareos-dir-host" style={INP} value={form.director.host} onChange={(e) => setDir('host', e.target.value.trim())} placeholder="bareos-dir.corp" /></label>
-            <label className="muted" style={field}>포트<input className="input" id="bareos-dir-port" style={INP} inputMode="numeric" value={form.director.port} onChange={(e) => setDir('port', e.target.value.replace(/\D/g, '').slice(0, 5))} /></label>
-            <label className="muted" style={field}>콘솔 이름<input className="input" id="bareos-dir-console" style={INP} value={form.director.consoleName} onChange={(e) => setDir('consoleName', e.target.value)} placeholder="portal" /></label>
-            <label className="muted" style={field}>콘솔 비밀번호 {s.director.hasPassword ? <span style={{ color: 'var(--green)' }}>저장됨</span> : <span style={{ color: 'var(--red)' }}>없음</span>}
-              <input className="input" id="bareos-dir-pw" style={INP} type="password" autoComplete="new-password" value={form.director.password} onChange={(e) => setDir('password', e.target.value)} placeholder="바꿀 때만 입력" />
-            </label>
-            <label className="muted" style={field}>명령 시한(초)<input className="input" id="bareos-dir-timeout" style={INP} inputMode="numeric" value={Math.round((Number(form.director.timeoutMs) || 0) / 1000) || ''} onChange={(e) => setDir('timeoutMs', (Number(e.target.value.replace(/\D/g, '')) || 0) * 1000)} /></label>
-            <label className="muted" style={field}>TLS 최고 버전
-              <Select className="input" id="bareos-dir-tls" sort={false} style={INP} value={form.director.tlsMax} onChange={(e) => setDir('tlsMax', e.target.value)}>
-                <option value="TLSv1.3">TLS 1.3(기본)</option><option value="TLSv1.2">TLS 1.2</option>
-              </Select>
-            </label>
-          </div>
-          <div className="muted" style={{ fontSize: 11.5, marginTop: 8, lineHeight: 1.6 }}>
-            전송은 TLS-PSK 로만 합니다(평문 하향 없음). 저장된 비밀번호로 시험하면 저장된 주소로만 접속합니다. 주소·포트·콘솔 이름을 바꾸면 저장된 비밀번호는 승계하지 않습니다.
-          </div>
-          <div style={{ ...ROW, marginTop: 10 }}>
-            <button type="button" className="logout-btn" style={{ padding: '7px 14px' }} disabled={busy} onClick={test}>{busy ? '시험 중…' : '연결 시험'}</button>
-            <span className="muted" style={{ fontSize: 11.5 }}>주소 → DNS → TCP → TLS-PSK → 인증 → JSON 모드 → 시험 명령을 차례로 봅니다</span>
-          </div>
-          {diag && <DiagStages stages={diag} />}
-        </div>
-        <div className="card" style={{ padding: 14, minWidth: 0 }}>
-          <div style={ROW}><b>기본값</b><span className="muted" style={{ fontSize: 12 }}>Director 카탈로그에서 고릅니다</span><div style={{ flexGrow: 1 }} /><button type="button" className="logout-btn" style={BTN} onClick={() => loadCat(true)}>카탈로그 새로 고침</button></div>
-          {catErr && <div className="muted" style={{ fontSize: 12, color: 'var(--red)', marginTop: 6 }}>카탈로그를 읽지 못했습니다: {catErr.message} — 이름을 직접 확인하세요.</div>}
-          {cat?.errors && Object.keys(cat.errors).length > 0 && <div className="muted" style={{ fontSize: 12, color: 'var(--amber)', marginTop: 6 }}>일부 목록을 읽지 못했습니다(그 칸의 선택지가 비어 있을 수 있습니다): {Object.entries(cat.errors).map(([k, v]) => `${k} — ${String(v).slice(0, 120)}`).join(' · ')}</div>}
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 8, marginTop: 8 }}>
-            {[['jobDefs', 'JobDefs', 'jobdefs'], ['fileSet', 'FileSet(범용)', 'filesets'], ['restoreJob', '복원 잡', null]].map(([k, l, ck]) => (
-              <label key={k} className="muted" style={field}>{l}
-                {ck && cat?.[ck] ? (
-                  <Select className="input" id={`bareos-def-${k}`} style={INP} value={form.defaults[k]} onChange={(e) => setDef(k, e.target.value)}>
-                    {opts(ck, form.defaults[k]).map((x) => <option key={x} value={x}>{x}</option>)}
-                  </Select>
-                ) : <input className="input" id={`bareos-def-${k}`} style={INP} value={form.defaults[k]} onChange={(e) => setDef(k, e.target.value.trim())} />}
-              </label>
-            ))}
-            <label className="muted" style={field}>기본 레벨
-              <Select className="input" id="bareos-def-level" sort={false} style={INP} value={form.defaults.level} onChange={(e) => setDef('level', e.target.value)}>
-                <option value="Incremental">Incremental</option><option value="Differential">Differential</option><option value="Full">Full</option>
-              </Select>
-            </label>
-            <label className="muted" style={field}>상태 조회 주기(초)<input className="input" id="bareos-def-poll" style={INP} inputMode="numeric" value={form.defaults.pollIntervalSec} onChange={(e) => setDef('pollIntervalSec', e.target.value.replace(/\D/g, '').slice(0, 4))} /></label>
-          </div>
-          <div className="muted" style={{ fontSize: 11.5, marginTop: 8 }}>스케줄은 Bareos Schedule 리소스가 돌립니다 — 포탈은 잡에 스케줄 이름만 배정합니다. 조회 주기 범위는 {s.limits?.pollIntervalSec ? `${s.limits.pollIntervalSec.min}~${s.limits.pollIntervalSec.max}초` : '—'}.</div>
-        </div>
-      </div>
-
-      <div style={{ ...ROW, marginBottom: 6 }}>
-        <b>사이트 매핑</b><span className="muted" style={{ fontSize: 12 }}>vCenter 마다 백업 데이터가 머무는 사이트 FD · SD · 풀</span>
-        <div style={{ flexGrow: 1 }} />
-        <Select className="input" id="bareos-site-add" value={addVc} onChange={(e) => setAddVc(e.target.value)} style={{ minWidth: 180 }} aria-label="매핑을 추가할 vCenter">
-          <option value="">vCenter 선택…</option>
-          {unmapped.map((v) => <option key={v.id} value={v.id}>{v.name} ({v.id})</option>)}
-        </Select>
-        <button type="button" className="logout-btn" style={BTN} disabled={!addVc} onClick={() => { const v = s.vcenters.find((x) => x.id === addVc); setForm({ ...form, sites: [...form.sites, { vcenterId: addVc, vcserver: v?.host || '', client: '', storage: '', pool: '', schedule: '', configFile: `/etc/bareos/vmware/${addVc.replace(/[^A-Za-z0-9._-]/g, '-')}.ini` }] }); setAddVc(''); }}>+ 매핑 추가</button>
-      </div>
-      <div className="table-wrap" style={{ maxHeight: '44vh', marginBottom: 10 }}>
-        <STable minWidth={1120} sortable={false}>
-          <thead><tr><th>vCenter</th><th>vcserver(FD 가 보는 주소)</th><th>FD client</th><th>SD storage</th><th>Pool</th><th>Schedule</th><th>FD INI 경로</th><th>작업</th></tr></thead>
-          <tbody>
-            {form.sites.length === 0 && <tr><td colSpan={8} className="center muted" style={{ padding: 16 }}>매핑이 없습니다 — 매핑이 없는 vCenter 의 VM 은 백업 대상으로 등록할 수 없습니다.</td></tr>}
-            {form.sites.map((x, i) => (
-              <tr key={x.vcenterId}>
-                <td><b>{vcName(x.vcenterId)}</b><div className="muted" style={{ fontSize: 11 }}>{x.vcenterId}</div></td>
-                <td><input className="input" aria-label="vcserver" value={x.vcserver} onChange={(e) => setSite(i, 'vcserver', e.target.value.trim())} style={{ ...INP, width: 170 }} /></td>
-                {[['client', 'clients'], ['storage', 'storages'], ['pool', 'pools'], ['schedule', 'schedules']].map(([k, ck]) => (
-                  <td key={k}>{cat?.[ck] ? (
-                    <Select className="input" aria-label={k} value={x[k]} onChange={(e) => setSite(i, k, e.target.value)} style={{ ...INP, width: 130 }}>
-                      <option value="">{k === 'schedule' ? '— (수동)' : '선택…'}</option>
-                      {opts(ck, x[k]).map((n) => <option key={n} value={n}>{n}</option>)}
-                    </Select>
-                  ) : <input className="input" aria-label={k} value={x[k]} onChange={(e) => setSite(i, k, e.target.value.trim())} style={{ ...INP, width: 120 }} />}</td>
-                ))}
-                <td><input className="input" aria-label="INI 경로" value={x.configFile} onChange={(e) => setSite(i, 'configFile', e.target.value.trim())} style={{ ...INP, width: 220 }} /></td>
-                <td><span style={{ ...ROW, gap: 6 }}>
-                  <button type="button" className="logout-btn" style={BTN} onClick={() => copy(fdIniTemplate(x))}>INI 내용 복사</button>
-                  <button type="button" className="logout-btn" style={{ ...BTN, color: 'var(--red)' }} onClick={() => setForm({ ...form, sites: form.sites.filter((_, j) => j !== i) })}>빼기</button>
-                </span></td>
-              </tr>
-            ))}
-          </tbody>
-        </STable>
-      </div>
-      <div style={{ ...ROW, marginBottom: 14 }}>
-        <button type="button" className="login-btn" style={{ flex: 'none', padding: '8px 18px' }} disabled={busy || !!err} title={err ? '설정을 다시 읽은 뒤 저장할 수 있습니다' : undefined} onClick={save}>{busy ? '저장 중…' : '저장'}</button>
-        <span className="muted" style={{ fontSize: 12 }}>매핑을 바꿔도 이미 만든 Director 잡은 바뀌지 않습니다(새로 등록하는 대상부터 적용).</span>
-      </div>
-
-      <AutoSetupCards s={s} cat={cat} form={form} onDirectorDone={async () => { await fetchSettings(true); loadCat(true); onSaved(); }} onMaybeChanged={() => fetchSettings(true)} />
-
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))', gap: 12 }}>
-        <div className="card" style={{ padding: 14, minWidth: 0 }}>
-          <div style={ROW}><b>사전 준비 — Director 에 1회 넣을 블록</b><div style={{ flexGrow: 1 }} /><button type="button" className="logout-btn" style={BTN} onClick={() => copy(directorPrepBlock({ defaults: form.defaults, consoleName: form.director.consoleName, anyClient: form.sites[0]?.client || 'kr-fd', anyStorage: form.sites[0]?.storage || 'File', anyPool: form.sites[0]?.pool || 'VMwarePool' }))}>복사</button></div>
-          <pre style={{ margin: '8px 0 0', padding: 10, maxHeight: 280, overflow: 'auto', fontSize: 11.5, lineHeight: 1.55, background: 'var(--panel-deep)', borderRadius: 8 }}>{directorPrepBlock({ defaults: form.defaults, consoleName: form.director.consoleName, anyClient: form.sites[0]?.client || 'kr-fd', anyStorage: form.sites[0]?.storage || 'File', anyPool: form.sites[0]?.pool || 'VMwarePool' })}</pre>
-          <div className="muted" style={{ fontSize: 11.5, marginTop: 6 }}>Profile 의 ACL 지시어 이름은 설치한 Director 버전 문서로 한 번 확인하세요. 넣은 뒤 Director 를 reload 합니다.</div>
-        </div>
-        <div className="card" style={{ padding: 14, minWidth: 0 }}>
-          <b>사전 준비 체크리스트</b>
-          <ul style={{ margin: '8px 0 0', paddingLeft: 18, fontSize: 12.5, lineHeight: 1.7 }}>
-            {PREP_CHECKLIST.map((t) => <li key={t}>{t}</li>)}
-          </ul>
-          <div className="muted" style={{ fontSize: 11.5, marginTop: 6 }}>vCenter 비밀번호는 포탈에 저장하지 않습니다 — 각 사이트 FD 의 INI 파일에 직접 넣거나(행의 ‘INI 내용 복사’) 위 ‘FD INI 자동 설정’ 을 쓰세요(그 요청에서만 전달하고 저장하지 않습니다).</div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-/**
- * 자동 설정(v2.821) — Bareos 서버의 주소·SSH root 계정·비밀번호로 포탈이 사전 준비를 대신한다(서버 bareos/autoSetup.js).
- * SSH·vCenter 비밀번호는 요청 1회에만 쓰고 저장하지 않는다 · 쓰기는 본인 OTP · 포탈이 만들지 않은 파일은 덮어쓰지 않는다.
- * FD 쪽은 **저장된** 사이트 매핑(INI 경로·vcserver)을 쓴다 — 표에서 고친 뒤 저장하지 않은 값은 쓰지 않는다.
- */
-function AutoSetupCards({ s, cat, form, onDirectorDone, onMaybeChanged }) {
-  const first = s.sites[0] || {};
-  const [d, setD] = useState({ host: s.director.host || '', sshPort: '22', username: 'root', password: '', directorPort: String(s.director.port || 9101), consoleName: 'portal', restoreClient: first.client || '', restoreStorage: first.storage || '', restorePool: first.pool || '', otp: '' });
-  const [f, setF] = useState({ vcenterId: first.vcenterId || '', host: '', sshPort: '22', username: 'root', password: '', vcuser: '', vcpass: '', vcthumbprint: '', otp: '' });
-  const [busy, setBusy] = useState('');
-  const [dMsg, setDMsg] = useState(null);
-  const [fMsg, setFMsg] = useState(null);
-  const field = { fontSize: 12, display: 'flex', flexDirection: 'column', gap: 4, minWidth: 0 };
-  const GRID = { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 8, marginTop: 8 };
-  const setDk = (k, v) => setD((x) => ({ ...x, [k]: v }));
-  // W2-3: 대상 vCenter·FD 주소가 바뀌면 읽어 둔 지문은 그 대상의 것이 아니다 — 비운다
-  const setFk = (k, v) => setF((x) => ({ ...x, [k]: v, ...((k === 'vcenterId' || k === 'host') && x[k] !== v ? { vcthumbprint: '' } : {}) }));
-  useEffect(() => { setFMsg(null); }, [f.vcenterId, f.host]);
-  const vcLabel = (id) => s.vcenters.find((v) => v.id === id)?.name || id;
-  const site = s.sites.find((x) => x.vcenterId === f.vcenterId);
-  const unsaved = JSON.stringify(form.sites) !== JSON.stringify(s.sites);
-  const nameSel = (k, list, label) => (
-    <label className="muted" style={field}>{label}
-      {list ? (
-        <Select className="input" style={INP} value={d[k]} onChange={(e) => setDk(k, e.target.value)} aria-label={label}>
-          <option value="">선택…</option>
-          {[...new Set([...(d[k] ? [d[k]] : []), ...list])].map((n) => <option key={n} value={n}>{n}</option>)}
-        </Select>
-      ) : <input className="input" style={INP} value={d[k]} onChange={(e) => setDk(k, e.target.value.trim())} aria-label={label} />}
-    </label>
-  );
-  const sshFields = (v, set, prefix, ph) => (
-    <>
-      <label className="muted" style={field}>서버 주소<input className="input" id={`${prefix}-host`} style={INP} value={v.host} onChange={(e) => set('host', e.target.value.trim())} placeholder={ph} /></label>
-      <label className="muted" style={field}>SSH 포트<input className="input" style={INP} inputMode="numeric" value={v.sshPort} onChange={(e) => set('sshPort', e.target.value.replace(/\D/g, '').slice(0, 5))} aria-label="SSH 포트" /></label>
-      <label className="muted" style={field}>SSH 계정(root)<input className="input" style={INP} value={v.username} onChange={(e) => set('username', e.target.value.trim())} aria-label="SSH 계정" /></label>
-      <label className="muted" style={field}>SSH 비밀번호<input className="input" id={`${prefix}-pw`} style={INP} type="password" autoComplete="new-password" value={v.password} onChange={(e) => set('password', e.target.value)} placeholder="저장하지 않습니다" /></label>
-    </>
-  );
-  const otpField = (v, set, id) => (
-    <label className="muted" style={field}>OTP(본인)<input className="input" id={id} style={INP} inputMode="numeric" autoComplete="one-time-code" value={v.otp} onChange={(e) => set('otp', e.target.value.replace(/\D/g, '').slice(0, 6))} /></label>
-  );
-
-  const runDirector = async () => {
-    setBusy('director'); setDMsg(null);
-    try {
-      const r = await postJson(`${BASE}/settings/auto-setup/director`, { ...d, sshPort: Number(d.sshPort) || 22, directorPort: Number(d.directorPort) || 9101 });
-      requireChanged(r);
-      setDMsg({ ok: true, text: autoSetupDirectorText(r) });
-      setD((x) => ({ ...x, password: '', otp: '' }));
-      await onDirectorDone();
-    } catch (e) {
-      if (outcomeUnknown(e)) {
-        // 응답을 받지 못했다(연결 끊김·브라우저 시한) — 서버는 끝까지 돌아 연결을 바꿨을 수 있다(W2-2·P2-1). 단정하지 않고 설정을 다시 읽는다.
-        setDMsg({ ok: false, text: `Director 자동 설정 결과를 확인하지 못했습니다(${e.message}) — 서버에서는 계속 진행됐을 수 있습니다. 잠시 뒤 설정을 다시 읽어 Director 연결을 확인하세요(감사 로그에 결과가 남습니다).` });
-        onMaybeChanged?.();
-      } else setDMsg({ ok: false, text: `Director 자동 설정 실패: ${e.message}` });
-      setD((x) => ({ ...x, otp: '', ...(e?.body?.code === 'ssh-auth' ? { password: '' } : {}) }));   // W2-5: 틀린 비밀번호를 남겨 같은 인증을 되풀이하지 않게
-    } finally { setBusy(''); }
-  };
-  const readThumb = async () => {
-    setBusy('thumb'); setFMsg(null);
-    const want = { vcenterId: f.vcenterId, host: f.host };
-    try {
-      const r = await postJson(`${BASE}/settings/auto-setup/fd-thumbprint`, { vcenterId: f.vcenterId, host: f.host, sshPort: Number(f.sshPort) || 22, username: f.username, password: f.password });
-      requireChanged(r);
-      // W2-3: 그사이 대상이 바뀌었거나 응답이 다른 vCenter 의 것이면 버린다(다른 vCenter 의 INI 에 엉뚱한 지문이 실리던 것)
-      if (r.vcenterId && r.vcenterId !== want.vcenterId) throw new Error('응답이 고른 vCenter 의 것이 아닙니다 — 다시 읽으세요.');
-      setF((x) => (x.vcenterId === want.vcenterId && x.host === want.host ? { ...x, vcthumbprint: r.thumbprint } : x));
-      setFMsg({ ok: true, text: thumbprintText(r) });
-    } catch (e) {
-      setFMsg({ ok: false, text: `지문 읽기 실패: ${e.message}` });
-      if (e?.body?.code === 'ssh-auth') setFk('password', '');
-    } finally { setBusy(''); }
-  };
-  const runFd = async () => {
-    setBusy('fd'); setFMsg(null);
-    try {
-      const r = await postJson(`${BASE}/settings/auto-setup/fd`, { ...f, sshPort: Number(f.sshPort) || 22 });
-      requireChanged(r);
-      setFMsg({ ok: true, text: autoSetupFdText(r) });
-      setF((x) => ({ ...x, password: '', vcpass: '', otp: '' }));
-    } catch (e) {
-      setFMsg({ ok: false, text: outcomeUnknown(e) ? `FD INI 자동 설정 결과를 확인하지 못했습니다(${e.message}) — FD 에서 파일이 바뀌었을 수 있습니다(감사 로그 확인).` : `FD INI 자동 설정 실패: ${e.message}` });
-      setF((x) => ({ ...x, otp: '', ...(e?.body?.code === 'ssh-auth' ? { password: '' } : {}) }));
-    } finally { setBusy(''); }
-  };
-  const dReady = d.host && d.password && d.restoreClient && d.restoreStorage && d.restorePool && /^\d{6}$/.test(d.otp) && !busy;
-  const sshReady = f.vcenterId && site && f.host && f.password && !busy;
-  const fReady = sshReady && f.vcuser && f.vcpass && f.vcthumbprint && /^\d{6}$/.test(f.otp);
-  // W2-8: 잠긴 버튼은 사유를 말한다
-  const dMissing = busy ? '' : missingText([[d.host, '서버 주소'], [d.password, 'SSH 비밀번호'], [d.restoreClient && d.restoreStorage && d.restorePool, '복원 잡 FD·스토리지·풀'], [/^\d{6}$/.test(d.otp), 'OTP 6자리']]);
-  const fMissing = busy ? '' : missingText([[f.vcenterId && site, '매핑된 vCenter'], [f.host, '서버 주소'], [f.password, 'SSH 비밀번호'], [f.vcuser && f.vcpass, 'vCenter 계정·비밀번호'], [f.vcthumbprint, '지문'], [/^\d{6}$/.test(f.otp), 'OTP 6자리']]);
-
-  return (
-    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))', gap: 12, marginBottom: 12 }}>
-      <div className="card" style={{ padding: 14, minWidth: 0 }}>
-        <b>Director 자동 설정</b>
-        <div className="muted" style={{ fontSize: 11.5, marginTop: 4, lineHeight: 1.6 }}>
-          아래 ‘사전 준비’ 블록의 5개 리소스를 bareos-dir.d 에 넣고 설정 검사 → reload → 새 콘솔로 접속을 확인한 뒤, 포탈의 Director 연결을 그 콘솔로 바꿉니다.
-          포탈이 만들지 않은 같은 이름의 파일이 있으면 아무것도 바꾸지 않고 멈추고, 검사가 실패하면 넣은 파일을 되돌립니다.
-          처음 접속하는 서버는 SSH 호스트키 승인(설정 › 장비 신뢰)이 먼저 필요할 수 있습니다 — 거부되면 비밀번호는 보내지 않습니다.
-        </div>
-        <div style={GRID}>
-          {sshFields(d, setDk, 'bareos-auto-dir', 'bareos-dir.corp')}
-          <label className="muted" style={field}>Director 포트<input className="input" style={INP} inputMode="numeric" value={d.directorPort} onChange={(e) => setDk('directorPort', e.target.value.replace(/\D/g, '').slice(0, 5))} aria-label="Director 포트" /></label>
-          <label className="muted" style={field}>만들 콘솔 이름<input className="input" style={INP} value={d.consoleName} onChange={(e) => setDk('consoleName', e.target.value.trim())} aria-label="만들 콘솔 이름" /></label>
-          {nameSel('restoreClient', cat?.clients, '복원 잡 FD')}
-          {nameSel('restoreStorage', cat?.storages, '복원 잡 스토리지')}
-          {nameSel('restorePool', cat?.pools, '복원 잡 풀')}
-          {otpField(d, setDk, 'bareos-auto-dir-otp')}
-        </div>
-        <div style={{ ...ROW, marginTop: 10 }}>
-          <button type="button" className="login-btn" style={{ flex: 'none', padding: '8px 16px' }} disabled={!dReady} onClick={runDirector}>{busy === 'director' ? '설정 중…' : 'Director 자동 설정'}</button>
-          <span className="muted" style={{ fontSize: 11.5 }}>{dMissing || 'root 로 접속합니다 · 비밀번호는 저장하지 않습니다'}</span>
-        </div>
-        {dMsg && <div className={`banner ${dMsg.ok ? 'ok' : 'bad'}`} role={dMsg.ok ? 'status' : 'alert'} style={{ marginTop: 10, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}><BoldText text={dMsg.text} /></div>}
-      </div>
-
-      <div className="card" style={{ padding: 14, minWidth: 0 }}>
-        <b>FD INI 자동 설정</b>
-        <div className="muted" style={{ fontSize: 11.5, marginTop: 4, lineHeight: 1.6 }}>
-          저장된 사이트 매핑의 INI 경로에 vCenter 자격증명 INI(bareos 소유 0600)를 씁니다. vCenter 비밀번호는 이 요청에서만 FD 로 전달하고 포탈에 저장하지 않습니다.
-          지문은 ‘FD 에서 지문 읽기’ 로 채운 뒤 vCenter 의 실제 값과 대조하세요.
-        </div>
-        {unsaved && <div className="muted" style={{ fontSize: 11.5, marginTop: 6, color: 'var(--amber)' }}>사이트 매핑 표에 저장하지 않은 변경이 있습니다 — 여기서는 저장된 매핑을 씁니다.</div>}
-        <div style={GRID}>
-          <label className="muted" style={field}>vCenter(매핑)
-            <Select className="input" style={INP} value={f.vcenterId} onChange={(e) => setFk('vcenterId', e.target.value)} aria-label="매핑된 vCenter">
-              <option value="">선택…</option>
-              {s.sites.map((x) => <option key={x.vcenterId} value={x.vcenterId}>{vcLabel(x.vcenterId)}</option>)}
-            </Select>
-          </label>
-          {sshFields(f, setFk, 'bareos-auto-fd', '사이트 FD 서버 주소')}
-          <label className="muted" style={field}>vCenter 계정<input className="input" style={INP} value={f.vcuser} onChange={(e) => setFk('vcuser', e.target.value)} placeholder="backup@vsphere.local" aria-label="vCenter 계정" /></label>
-          <label className="muted" style={field}>vCenter 비밀번호<input className="input" style={INP} type="password" autoComplete="new-password" value={f.vcpass} onChange={(e) => setFk('vcpass', e.target.value)} placeholder="저장하지 않습니다" aria-label="vCenter 비밀번호" /></label>
-          <label className="muted" style={{ ...field, gridColumn: '1 / -1' }}>vCenter 인증서 SHA1 지문<input className="input" style={INP} value={f.vcthumbprint} onChange={(e) => setFk('vcthumbprint', e.target.value.trim())} placeholder="16진 40자(콜론 있어도 됨)" aria-label="vCenter 인증서 지문" /></label>
-          {otpField(f, setFk, 'bareos-auto-fd-otp')}
-        </div>
-        {site && <div className="muted" style={{ fontSize: 11.5, marginTop: 6 }}>쓸 경로 ‘{site.configFile}’ · FD 가 볼 vCenter ‘{site.vcserver}’ · FD 클라이언트 ‘{site.client}’</div>}
-        {!s.sites.length && <div className="muted" style={{ fontSize: 11.5, marginTop: 6 }}>사이트 매핑이 없습니다 — 아래 표에서 매핑을 먼저 저장하세요.</div>}
-        <div style={{ ...ROW, marginTop: 10 }}>
-          <button type="button" className="logout-btn" style={{ padding: '7px 14px' }} disabled={!sshReady} onClick={readThumb}>{busy === 'thumb' ? '읽는 중…' : 'FD 에서 지문 읽기'}</button>
-          <button type="button" className="login-btn" style={{ flex: 'none', padding: '8px 16px' }} disabled={!fReady} onClick={runFd}>{busy === 'fd' ? '쓰는 중…' : 'FD INI 자동 설정'}</button>
-          {fMissing && <span className="muted" style={{ fontSize: 11.5 }}>{fMissing}</span>}
-        </div>
-        {fMsg && <div className={`banner ${fMsg.ok ? 'ok' : 'bad'}`} role={fMsg.ok ? 'status' : 'alert'} style={{ marginTop: 10, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}><BoldText text={fMsg.text} /></div>}
-      </div>
     </div>
   );
 }
