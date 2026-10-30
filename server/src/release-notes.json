@@ -11,6 +11,15 @@
       ]
     },
     {
+      "version": "2.827.1",
+      "date": "2026-10-30",
+      "title": "Bareos 복원 'No FileSet found for client' 수정 — 복원 명령에서 select 키워드 제거",
+      "notes": [
+        "Bareos 복원이 Director 에서 'No FileSet found for client \"<FD>\"' 로 거부되던 문제를 고쳤다. 원인: 포탈의 복원 명령 끝에 붙인 'select all done yes' 의 select — Bareos 22~25 ua_restore.cc 는 select 가 있으면 jobid= 를 무시하고 'client + FileSet 최신 백업'(select current 와 같은 경로)을 고르려고 FileSet 을 묻는데, 콘솔 API 는 비대화형이라 그 질문에서 실패했다.",
+        "이제 명령은 'restore client=… restoreclient=… jobid=체인 restorejob=… pluginoptions=\"…\" all done yes' — jobid 가 선택을 끝내고 all 이 전 파일 표시, done 이 트리 대화를 생략한다. 체인은 예전처럼 이 잡의 카탈로그 이력으로만 계산한다(다른 VM 이 섞이지 않음)."
+      ]
+    },
+    {
       "version": "2.827.0",
       "date": "2026-10-30",
       "title": "엣지 토큰 맞추기 — 독립 메뉴(특수 기능 도구 + 공통 메뉴 설정 그룹)로 추출",
