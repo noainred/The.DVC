@@ -301,3 +301,138 @@ export function thumbprintText(r) {
   if (!r?.thumbprint) return '';
   return `FD 에서 읽은 ${r.vcserver || '—'}:443 인증서 — SHA1 **${r.thumbprint}** · ${r.subject || '주체 —'} · 만료 ${r.notAfter || '—'}. vCenter 화면(또는 브라우저 인증서 정보)의 값과 같은지 확인한 뒤 실행하세요.`;
 }
+
+/* ───────── 작업 결과 요약(v2.822.3 — 작업 로그 끝의 Bareos 보고 블록을 읽는다) ───────── */
+/** 보고 블록의 키 → 화면 이름. 백업·복원 보고 둘 다(Bareos dird backup.cc·restore.cc 의 보고 줄). */
+export const REPORT_KEYS = Object.freeze({
+  'JobId': 'jobid', 'Job': '잡', 'Backup Level': '레벨', 'Client': 'FD 클라이언트', 'FileSet': 'FileSet', 'Pool': '풀', 'Storage': '스토리지',
+  'Start time': '시작', 'End time': '종료', 'Elapsed time': '소요',
+  'FD Files Written': '파일(FD)', 'SD Files Written': '파일(SD)', 'FD Bytes Read': '읽은 양', 'FD Bytes Written': '보낸 양', 'SD Bytes Written': '저장한 양',
+  'Files Expected': '복원 예정 파일', 'Files Restored': '복원 파일', 'Bytes Restored': '복원 양',
+  'Rate': '속도', 'Software Compression': '압축', 'Encryption': '암호화', 'Volume name(s)': '볼륨', 'Last Volume Bytes': '볼륨 크기',
+  'Non-fatal FD errors': 'FD 오류(비치명)', 'FD Errors': 'FD 오류', 'SD Errors': 'SD 오류',
+  'FD termination status': 'FD 종료 상태', 'SD termination status': 'SD 종료 상태', 'Job triggered by': '실행 주체', 'Termination': '결과',
+});
+const TS_RE = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} /;
+// 보고 줄은 들여쓰기 + '키:' + 공백 + 값. 키 길이를 묶어 두고 줄 길이를 먼저 자른다(외부 입력 정규식 규칙 — 선형).
+const KV_RE = /^\s+([A-Za-z][A-Za-z0-9 ()/.-]{0,39}):\s+(.*)$/;
+const ISSUE_RE = /\b(Warning|Error|Fatal error|ERR=)/;
+const MAX_ISSUES = 30;
+
+/** '10,223,626,211 (10.22 GB)' → 10223626211. 못 읽으면 null(0 으로 만들지 않는다). */
+export function reportBytes(v) {
+  const m = /^([\d,]+)/.exec(String(v ?? '').trim());
+  if (!m) return null;
+  const n = Number(m[1].replace(/,/g, ''));
+  return Number.isFinite(n) ? n : null;
+}
+
+/**
+ * 작업 로그 줄(서버 jobLog 의 'YYYY-MM-DD HH:MM:SS 본문') → 마지막 보고 블록 요약. 순수.
+ * @returns {{ found: boolean, fields: Record<string,string>, verdict: {cls:string,label:string}|null, issues: {text:string,count:number}[], issuesMore: number }}
+ */
+export function parseJobReport(lines = []) {
+  const texts = (Array.isArray(lines) ? lines : []).map((l) => String(l ?? '').slice(0, 600).replace(TS_RE, ''));
+  let end = -1;
+  for (let i = texts.length - 1; i >= 0; i--) { const m = KV_RE.exec(texts[i]); if (m && m[1] === 'Termination') { end = i; break; } }
+  const fields = {};
+  if (end >= 0) {
+    let start = 0;
+    for (let i = end; i >= 0; i--) { const m = KV_RE.exec(texts[i]); if (m && (m[1] === 'JobId' || m[1] === 'Build OS')) { start = i; break; } }
+    for (let i = start; i <= end; i++) {
+      const m = KV_RE.exec(texts[i]);
+      if (m && Object.prototype.hasOwnProperty.call(REPORT_KEYS, m[1])) fields[m[1]] = m[2].trim();
+    }
+  }
+  // 경고·오류 줄 — 같은 글(앞의 'bareos-sd JobId N:' 포함)은 한 번만, 몇 번 나왔는지 센다.
+  const seen = new Map();
+  for (const t of texts) {
+    if (!ISSUE_RE.test(t)) continue;
+    const kv = KV_RE.exec(t);   // 보고 블록의 'SD Errors: 0' 같은 줄은 경고가 아니다(수치는 상태 칩이 보여 준다)
+    if (kv && Object.prototype.hasOwnProperty.call(REPORT_KEYS, kv[1])) continue;
+    const key = t.trim();
+    seen.set(key, (seen.get(key) || 0) + 1);
+  }
+  const all = [...seen.entries()].map(([text, count]) => ({ text, count }));
+  return { found: end >= 0, fields, verdict: end >= 0 ? reportVerdict(fields.Termination) : null, issues: all.slice(0, MAX_ISSUES), issuesMore: Math.max(0, all.length - MAX_ISSUES) };
+}
+
+/** 'Backup OK' · 'Backup OK -- with warnings' · 'Backup Error' · '*** Backup Error ***' · 'Backup Canceled' … → 배지. */
+export function reportVerdict(t) {
+  const s = String(t ?? '');
+  if (!s) return { cls: 'gray', label: '—' };
+  if (/cancel/i.test(s)) return { cls: 'gray', label: '취소' };
+  if (/error|fatal|fail/i.test(s)) return { cls: 'red', label: '오류' };
+  if (/warning/i.test(s)) return { cls: 'amber', label: '경고와 함께 성공' };
+  if (/\bOK\b/.test(s)) return { cls: 'green', label: '성공' };
+  return { cls: 'gray', label: '확인 불가' };
+}
+
+/** 요약 카드 — 백업은 읽은 양·저장한 양·압축·속도·소요·볼륨, 복원은 복원 양·복원 파일·속도·소요. 값이 없으면 '—'. */
+export function reportCards(f = {}) {
+  if (f['Bytes Restored'] !== undefined || f['Files Restored'] !== undefined) {
+    return [
+      { k: 'rbytes', label: '복원 양', value: bytesText(reportBytes(f['Bytes Restored'])) },
+      { k: 'rfiles', label: '복원 파일', value: f['Files Restored'] || '—' },
+      { k: 'rate', label: '속도', value: f.Rate || '—' },
+      { k: 'elapsed', label: '소요', value: f['Elapsed time'] || '—' },
+    ];
+  }
+  return [
+    { k: 'read', label: '읽은 양(VM 디스크)', value: bytesText(reportBytes(f['FD Bytes Read'])) },
+    { k: 'stored', label: '저장한 양(볼륨)', value: bytesText(reportBytes(f['SD Bytes Written'])) },
+    { k: 'comp', label: '압축', value: f['Software Compression'] || '—' },
+    { k: 'rate', label: '속도', value: f.Rate || '—' },
+    { k: 'elapsed', label: '소요', value: f['Elapsed time'] || '—' },
+    { k: 'vol', label: '볼륨', value: f['Volume name(s)'] || '—' },
+  ];
+}
+
+/**
+ * 자주 보는 경고·오류 줄의 뜻과 조치(현장 로그 실측 — 2026-10-30). 처음 맞는 규칙 하나만 쓴다. 모르는 줄은 해석하지 않는다(지어내지 않는다).
+ */
+const ISSUE_HINTS = Object.freeze([
+  [/Python 3\.10 or newer is required/i, 'FD 의 pyVmomi 가 9.x 입니다 — Python 3.9 FD 는 pyVmomi 8.x 로 바꾸고 bareos-fd 를 재시작하세요.'],
+  [/Permission denied/i, '저장 경로에 bareos 계정이 쓸 수 없습니다 — 폴더 소유자·NFS 권한·SELinux 를 확인하세요.'],
+  [/Please mount|label a new one/i, 'SD 가 쓸 볼륨을 열지 못해 기다렸습니다 — 바로 위 줄(열기 실패 원인)을 먼저 보세요.'],
+  [/Could not open|Open device .* fail/i, 'SD 가 볼륨 파일을 열지 못했습니다 — 같은 이름의 디렉터리·권한·디스크 여유를 확인하세요.'],
+  [/authenticate|Authorization failed/i, '데몬 사이 인증이 실패했습니다 — 앞선 치명 오류로 잡이 취소된 연쇄일 수 있으니 첫 오류부터 보세요.'],
+  [/No space left on device/i, '디스크가 가득 찼습니다 — 저장 경로와 루트(/) 여유 공간을 확인하세요.'],
+  [/Overriding plugin option/i, '잡의 플러그인 옵션이 FileSet·INI 값을 덮어썼다는 안내입니다(정상 동작).'],
+]);
+
+/** 줄 → 해석 한 줄('' 이면 모름). */
+export function issueHint(text) {
+  const s = String(text ?? '').slice(0, 600);
+  for (const [re, hint] of ISSUE_HINTS) if (re.test(s)) return hint;
+  return '';
+}
+
+/** 저장 효율 — 저장한 양 / 읽은 양(0~1). 둘 중 하나라도 못 읽었으면 null. */
+export function storeRatio(f = {}) {
+  const read = reportBytes(f['FD Bytes Read']);
+  const stored = reportBytes(f['SD Bytes Written']);
+  if (read === null || stored === null || read <= 0) return null;
+  return Math.max(0, Math.min(1, stored / read));
+}
+
+/** 복사용 글(메신저·티켓에 붙이기) — 값이 없으면 '—'. */
+export function reportText(rep, { vmName = '', jobid = '' } = {}) {
+  if (!rep?.found) return '';
+  const f = rep.fields;
+  const lines = [
+    `[Bareos] ${vmName || '—'} · jobid ${jobid || f.JobId || '—'} · ${rep.verdict.label}`,
+    `결과: ${f.Termination || '—'}`,
+    `레벨: ${f['Backup Level'] || '—'} · 시작 ${f['Start time'] || '—'} · 소요 ${f['Elapsed time'] || '—'}`,
+    ...reportCards(f).map((c) => `${c.label}: ${c.value}`),
+    `오류: FD ${f['Non-fatal FD errors'] ?? f['FD Errors'] ?? '—'} · SD ${f['SD Errors'] ?? '—'}`,
+  ];
+  return lines.join('\n');
+}
+
+/** 보고 값의 장식 걷기 — '"Full" (From Job resource)' → 'Full'. 화면 표시용(복사 글·원문은 그대로). */
+export function reportValue(v) {
+  const s = String(v ?? '').trim();
+  if (!s) return '—';
+  return s.replace(/\s*\(From [A-Za-z ]{1,40}\)$/, '').replace(/^"([^"]*)"$/, '$1') || '—';
+}

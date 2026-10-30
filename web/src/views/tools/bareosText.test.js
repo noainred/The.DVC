@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   stateBadge, levelLabel, bytesText, whenText, elapsedText, runCell, directorLine, restoreLine, candidateSummary,
   directorPrepBlock, fdIniTemplate, PREP_CHECKLIST, STATE_LABEL, RESTORE_MODE_LABEL, autoSetupDirectorText, autoSetupFdText, thumbprintText,
+  parseJobReport, reportBytes, reportVerdict, reportCards, issueHint, storeRatio, reportText, reportValue,
   folderOptions, inFolder, pickCap, bulkSummary, NO_FOLDER, diagView,
   driftText, restorePointsNote, directorPatch, outcomeUnknown, missingText,
 } from './bareosText.js';
@@ -162,5 +163,88 @@ describe('사전 준비 체크리스트 — pyVmomi(v2.822.1)', () => {
     expect(t).toBeTruthy();
     expect(t).toContain('Python 3.10 이상');
     expect(t).not.toContain('`');
+  });
+});
+
+describe('작업 결과 요약(v2.822.3 — 현장 jobid 8 로그 모양)', () => {
+  const T = '2026-10-30 09:54:52';
+  const W = '2026-10-30 09:48:00';
+  // 서버 jobLog 는 logtext 의 줄마다 그 행의 시각을 앞에 붙인다(director.js jobLog).
+  const lines = [
+    `${W} bareos-sd JobId 8: Warning: stored/label.cc:359 Open device "FileStorage0001" (/mnt/theDVC/bareos) Volume "Full-0006" failed: ERR=stored/dev.cc:630 Could not open: /mnt/theDVC/bareos/Full-0006, ERR=Permission denied`,
+    `${W} bareos-sd JobId 8: Warning: stored/label.cc:359 Open device "FileStorage0001" (/mnt/theDVC/bareos) Volume "Full-0006" failed: ERR=stored/dev.cc:630 Could not open: /mnt/theDVC/bareos/Full-0006, ERR=Permission denied`,
+    `${W} bareos-sd JobId 8: Please mount append Volume "Full-0006" or label a new one for:`,
+    `${W}     Job:          pv-54220daf-vm-11013.2026-10-30_08.58.44_31`,
+    `${W}     Pool:         Full`,
+    `${T} bareos-dir JobId 8: Bareos bareos-dir 25.1.2~pre73 (26Oct26):`,
+    `${T}   Build OS:               Rocky Linux release 9.4 (Blue Onyx)`,
+    `${T}   JobId:                  8`,
+    `${T}   Backup Level:           Full (upgraded from Incremental)`,
+    `${T}   Pool:                   "Full" (From Job resource)`,
+    `${T}   Storage:                "File" (From Job resource)`,
+    `${T}   Start time:             30-Oct-2026 09:53:45`,
+    `${T}   End time:               30-Oct-2026 09:54:52`,
+    `${T}   Elapsed time:           1 min 7 secs`,
+    `${T}   FD Files Written:       6`,
+    `${T}   FD Bytes Read:          10,223,626,211 (10.22 GB)`,
+    `${T}   SD Bytes Written:       5,833,172,285 (5.833 GB)`,
+    `${T}   Rate:                   87062.0 KB/s`,
+    `${T}   Software Compression:   42.9 % (lz4)`,
+    `${T}   Volume name(s):         Full-0009`,
+    `${T}   Non-fatal FD errors:    0`,
+    `${T}   SD Errors:              6`,
+    `${T}   FD termination status:  OK`,
+    `${T}   SD termination status:  OK`,
+    `${T}   Termination:            Backup OK -- with warnings`,
+  ];
+  it('마지막 보고 블록만 읽는다 — 앞의 Please mount 의 Pool·Job 줄은 보고가 아니다', () => {
+    const r = parseJobReport(lines);
+    expect(r.found).toBe(true);
+    expect(r.fields.Pool).toBe('"Full" (From Job resource)');
+    expect(r.fields.Job).toBeUndefined();
+    expect(r.fields['Volume name(s)']).toBe('Full-0009');
+    expect(r.verdict).toEqual({ cls: 'amber', label: '경고와 함께 성공' });
+  });
+  it('수치 — 쉼표 바이트 · 저장 효율 · 카드 · 못 읽은 값은 — (0 아님)', () => {
+    expect(reportBytes('10,223,626,211 (10.22 GB)')).toBe(10223626211);
+    expect(reportBytes('')).toBeNull();
+    expect(reportBytes(undefined)).toBeNull();
+    const r = parseJobReport(lines);
+    expect(storeRatio(r.fields)).toBeCloseTo(0.5706, 3);
+    expect(storeRatio({})).toBeNull();
+    const cards = Object.fromEntries(reportCards(r.fields).map((c) => [c.k, c.value]));
+    expect(cards.read).toBe('9.5 GB');
+    expect(cards.comp).toBe('42.9 % (lz4)');
+    expect(Object.values(Object.fromEntries(reportCards({}).map((c) => [c.k, c.value])))).toEqual(['—', '—', '—', '—', '—', '—']);
+  });
+  it('경고·오류 줄 — 같은 줄은 한 번 + 횟수 · 아는 줄만 해석', () => {
+    const r = parseJobReport(lines);
+    const perm = r.issues.find((x) => /Permission denied/.test(x.text));
+    expect(perm.count).toBe(2);
+    expect(issueHint(perm.text)).toMatch(/bareos 계정/);
+    expect(issueHint(lines[2])).toMatch(/볼륨을 열지 못해/);
+    expect(issueHint('Exception: Python 3.10 or newer is required (found 3.9)')).toMatch(/pyVmomi 8\.x/);
+    expect(issueHint('something unknown')).toBe('');
+    expect(r.issues.some((x) => /^SD Errors:|Non-fatal FD errors/.test(x.text)), '보고 블록의 오류 수 줄은 경고 목록에 넣지 않는다').toBe(false);
+    expect(reportValue('"Full" (From Job resource)')).toBe('Full');
+    expect(reportValue('')).toBe('—');
+  });
+  it('결과 판정 · 보고 없음(실행 중) · 복원 보고', () => {
+    expect(reportVerdict('Backup OK').cls).toBe('green');
+    expect(reportVerdict('*** Backup Error ***').cls).toBe('red');
+    expect(reportVerdict('Backup Canceled').label).toBe('취소');
+    expect(reportVerdict('').label).toBe('—');
+    const running = parseJobReport(lines.slice(0, 4));
+    expect(running.found).toBe(false);
+    expect(running.issues.length).toBeGreaterThan(0);
+    const rest = parseJobReport([`${T} bareos-dir JobId 9: Bareos x:`, `${T}   JobId:  9`, `${T}   Files Restored:  6`, `${T}   Bytes Restored:  1,000 (1 KB)`, `${T}   Termination:  Restore OK`]);
+    expect(reportCards(rest.fields).map((c) => c.k)).toEqual(['rbytes', 'rfiles', 'rate', 'elapsed']);
+  });
+  it('복사 글 · 문구 규약(백틱 없음) · 긴 줄도 선형', () => {
+    const t = reportText(parseJobReport(lines), { vmName: 'LESAGITPS02', jobid: 8 });
+    expect(t).toMatch(/LESAGITPS02 · jobid 8 · 경고와 함께 성공/);
+    expect(t).not.toContain('`');
+    const long = [`${T}   ${'A'.repeat(50000)}:  x`, `${T} ${' '.repeat(50000)}x`];
+    const t0 = Date.now(); parseJobReport(long); expect(Date.now() - t0).toBeLessThan(200);
   });
 });
