@@ -13,6 +13,7 @@ import {
   stateBadge, levelLabel, bytesText, whenText, runCell, directorLine, RESTORE_MODE_LABEL, restoreLine, candidateSummary, driftText, restorePointsNote,
   folderOptions, inFolder, pickCap, bulkSummary, diagView,
   directorPrepBlock, fdIniTemplate, PREP_CHECKLIST, autoSetupDirectorText, autoSetupFdText, thumbprintText,
+  parseJobReport, reportCards, REPORT_KEYS, issueHint, storeRatio, reportText, reportBytes, reportValue,
 } from './bareosText.js';
 
 /**
@@ -170,7 +171,8 @@ function TargetsTab({ d, reload }) {
                             <button type="button" className="logout-btn" style={BTN} onClick={() => setRunFor(null)}>닫기</button>
                           </>
                           : <button type="button" className="logout-btn" style={BTN} disabled={busy || !j.enabled} onClick={() => { setRunLevel(''); setRunFor(j.id); }}>실행…</button>}
-                      <button type="button" className="logout-btn" style={BTN} disabled={!c.jobid} onClick={() => setLogOf({ job: j, jobid: c.jobid })}>로그</button>
+                      <button type="button" className="logout-btn" style={BTN} disabled={!c.jobid} onClick={() => setLogOf({ job: j, jobid: c.jobid, view: 'summary' })}>결과</button>
+                      <button type="button" className="logout-btn" style={BTN} disabled={!c.jobid} onClick={() => setLogOf({ job: j, jobid: c.jobid, view: 'raw' })}>로그</button>
                       <button type="button" className="logout-btn" style={BTN} disabled={busy} onClick={() => setRestoreOf(j)}>복원…</button>
                       <button type="button" className="logout-btn" style={BTN} disabled={busy || running} onClick={() => toggle(j)}>{j.enabled ? '비활성' : '활성'}</button>
                       <button type="button" className="logout-btn" style={{ ...BTN, color: 'var(--red)' }} disabled={busy || running} onClick={() => remove(j)}>삭제</button>
@@ -186,7 +188,7 @@ function TargetsTab({ d, reload }) {
         스케줄은 Bareos 가 돌립니다(포탈이 꺼져 있어도 백업은 계속됩니다). 레벨·스케줄을 바꾸려면 대상을 지우고 다시 등록하세요 — Bareos 에는 잡 수정 명령이 없습니다.
         활성 대상 VM 은 vCenter 상세(서버 › vCenter)의 VM 행에 <span className="badge blue" style={{ fontSize: 10 }}>Bareos</span> 배지로 표시됩니다.
       </div>
-      {logOf && <LogModal job={logOf.job} jobid={logOf.jobid} onClose={() => setLogOf(null)} />}
+      {logOf && <LogModal job={logOf.job} jobid={logOf.jobid} view={logOf.view} onClose={() => setLogOf(null)} />}
       {restoreOf && <RestoreModal job={restoreOf} onClose={() => setRestoreOf(null)} onDone={(t) => { setRestoreOf(null); setMsg({ ok: true, text: t }); reload(); }} />}
     </div>
   );
@@ -324,22 +326,163 @@ function AddForm({ d, onClose, onChanged }) {
   );
 }
 
-/** 작업 로그 — 서버가 이 대상의 jobid 인지 확인한다. */
-function LogModal({ job, jobid, onClose }) {
+/**
+ * 작업 결과·로그 — 서버가 이 대상의 jobid 인지 확인한다. 요약은 같은 로그의 끝 보고 블록을 읽는다(bareosText.parseJobReport —
+ * 서버 호출을 늘리지 않는다). 요약을 못 만들면(실행 중·보고 없음) 그렇다고 말하고 원문을 보게 한다.
+ */
+function LogModal({ job, jobid, view = 'raw', onClose }) {
   const [r, setR] = useState(null);
   const [err, setErr] = useState(null);
+  const [mode, setMode] = useState(view === 'summary' ? 'summary' : 'raw');
   useEffect(() => { fetchJson(`${BASE}/jobs/${enc(job.id)}/log`, { jobid }, undefined, DIRECTOR_GET).then(setR).catch(setErr); }, [job.id, jobid]);
+  const rep = useMemo(() => (r ? parseJobReport(r.lines) : null), [r]);
   return (
-    <Modal title={`작업 로그 — jobid ${jobid} · ${job.vmName}`} onClose={onClose} width={920}>
+    <Modal title={`${mode === 'summary' ? '작업 결과' : '작업 로그'} — jobid ${jobid} · ${job.vmName}`} onClose={onClose} width={920}>
+      <div style={{ ...ROW, marginBottom: 8 }}>
+        {[['summary', '요약'], ['raw', '원문 로그']].map(([k, l]) => (
+          <button key={k} type="button" className={`tab${mode === k ? ' active' : ''}`} onClick={() => setMode(k)}>{l}</button>
+        ))}
+        {r && <span className="muted" style={{ fontSize: 12 }}>{r.truncated ? `전체 ${r.total}줄 중 마지막 ${r.lines.length}줄` : `${r.total}줄`}</span>}
+      </div>
       {err && <ErrorBox error={err} />}
       {!r && !err && <Loading />}
-      {r && (
+      {r && mode === 'raw' && (
+        <pre style={{ margin: 0, padding: 12, maxHeight: '60vh', overflow: 'auto', fontSize: 12, lineHeight: 1.6, background: 'var(--panel-deep)', borderRadius: 8, whiteSpace: 'pre' }}>{r.lines.join('\n') || '로그가 없습니다.'}</pre>
+      )}
+      {r && mode === 'summary' && <JobReportView rep={rep} truncated={r.truncated} vmName={job.vmName} jobid={jobid} />}
+    </Modal>
+  );
+}
+
+/* 결과 색 — 배지와 같은 계열(styles.css .badge.*). 회색은 결과를 단정하지 못한 경우. */
+const VERDICT_TONE = Object.freeze({
+  green: { fg: '#4ade80', bg: 'rgba(34,197,94,.10)', line: 'rgba(34,197,94,.45)', mark: '✓' },
+  amber: { fg: '#fbbf24', bg: 'rgba(245,158,11,.10)', line: 'rgba(245,158,11,.45)', mark: '!' },
+  red: { fg: '#f87171', bg: 'rgba(239,68,68,.10)', line: 'rgba(239,68,68,.45)', mark: '✕' },
+  gray: { fg: 'var(--text-dim)', bg: 'rgba(139,155,180,.08)', line: 'var(--border)', mark: '?' },
+});
+const SECTION = { fontSize: 12, fontWeight: 600, color: 'var(--text-dim)', margin: '14px 0 6px', letterSpacing: '.02em' };
+const chip = (ok) => ({ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '3px 10px', borderRadius: 999, fontSize: 12,
+  background: ok === null ? 'rgba(139,155,180,.12)' : ok ? 'rgba(34,197,94,.12)' : 'rgba(239,68,68,.12)',
+  color: ok === null ? 'var(--text-dim)' : ok ? '#4ade80' : '#f87171' });
+
+/**
+ * 요약 본문 — ① 결과 띠(크게) ② 핵심 수치 카드 + 저장 효율 막대 ③ 상태 칩(FD·SD 종료·오류 수) ④ 세부 ⑤ 경고·오류 줄(해석 붙임).
+ * 값이 없으면 '—'(0 으로 보이지 않게) · 해석은 아는 줄에만(bareosText.issueHint).
+ */
+function JobReportView({ rep, truncated, vmName, jobid }) {
+  const [copied, setCopied] = useState('');
+  if (!rep?.found) {
+    return (
+      <div>
+        <div className="card" style={{ ...NOTE, borderLeft: '3px solid var(--amber)' }}>
+          아직 끝난 보고가 로그에 없습니다(실행 중이거나 보고 없이 끝났습니다{truncated ? ' · 로그가 길어 앞부분이 잘렸을 수 있습니다' : ''}). ‘원문 로그’ 에서 확인하세요.
+        </div>
+        {rep?.issues?.length ? <IssueList rep={rep} /> : null}
+      </div>
+    );
+  }
+  const f = rep.fields;
+  const tone = VERDICT_TONE[rep.verdict.cls] || VERDICT_TONE.gray;
+  const ratio = storeRatio(f);
+  const errN = reportBytes;
+  const fdErr = errN(f['Non-fatal FD errors'] ?? f['FD Errors']);
+  const sdErr = errN(f['SD Errors']);
+  const okStatus = (v) => (v === undefined ? null : /^OK/i.test(String(v)));
+  const detail = ['Client', 'FileSet', 'Pool', 'Storage', 'FD Files Written', 'SD Files Written', 'Files Expected', 'Last Volume Bytes', 'Encryption', 'Job triggered by']
+    .filter((k) => f[k] !== undefined);
+  const copy = () => {
+    const t = reportText(rep, { vmName, jobid });
+    try { navigator.clipboard.writeText(t).then(() => setCopied('복사했습니다.'), () => setCopied('복사하지 못했습니다.')); } catch { setCopied('복사하지 못했습니다.'); }
+  };
+  return (
+    <div style={{ maxHeight: '66vh', overflow: 'auto', paddingRight: 2 }}>
+      {/* ① 결과 띠 */}
+      <div style={{ display: 'flex', gap: 14, alignItems: 'center', flexWrap: 'wrap', padding: '14px 16px', borderRadius: 10, background: tone.bg, border: `1px solid ${tone.line}` }}>
+        <div aria-hidden style={{ width: 40, height: 40, flex: '0 0 40px', borderRadius: '50%', display: 'grid', placeItems: 'center', fontSize: 20, fontWeight: 800, color: tone.fg, border: `2px solid ${tone.fg}` }}>{tone.mark}</div>
+        <div style={{ minWidth: 0, flex: '1 1 260px' }}>
+          <div style={{ fontSize: 18, fontWeight: 800, color: tone.fg }}>{rep.verdict.label}</div>
+          <div style={{ fontSize: 12.5, color: 'var(--text-dim)', marginTop: 2, wordBreak: 'break-word' }}>
+            {f.Termination} · {levelLabel(f['Backup Level']) !== '—' ? levelLabel(f['Backup Level']) : (f['Backup Level'] || '—')} · {f['Start time'] || '—'} → {f['End time'] || '—'}
+          </div>
+        </div>
+        <span style={{ ...ROW, gap: 6 }}>
+          <button type="button" className="logout-btn" style={BTN} onClick={copy}>요약 복사</button>
+          {copied && <span className="muted" style={{ fontSize: 11.5 }}>{copied}</span>}
+        </span>
+      </div>
+
+      {/* ② 핵심 수치 */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 8, marginTop: 12 }}>
+        {reportCards(f).map((c) => (
+          <div key={c.k} style={{ padding: '10px 12px', minWidth: 0, borderRadius: 8, background: 'var(--panel-deep)', border: '1px solid var(--border-soft)' }}>
+            <div style={{ fontSize: 11.5, color: 'var(--text-faint)' }}>{c.label}</div>
+            <div style={{ fontSize: 16, fontWeight: 700, marginTop: 4, wordBreak: 'break-word', fontVariantNumeric: 'tabular-nums' }}>{c.value}</div>
+          </div>
+        ))}
+      </div>
+      {ratio !== null && (
+        <div style={{ marginTop: 10 }}>
+          <div style={{ ...ROW, justifyContent: 'space-between', fontSize: 12, color: 'var(--text-dim)' }}>
+            <span>저장 효율 — 읽은 양 대비 볼륨에 쓴 양</span>
+            <span style={{ fontVariantNumeric: 'tabular-nums' }}>{Math.round(ratio * 100)}% 저장 · {Math.round((1 - ratio) * 100)}% 절감</span>
+          </div>
+          <div style={{ height: 8, borderRadius: 99, background: 'var(--border-soft)', overflow: 'hidden', marginTop: 4 }}>
+            <div style={{ width: `${Math.round(ratio * 100)}%`, height: '100%', borderRadius: 99, background: 'var(--accent)' }} />
+          </div>
+        </div>
+      )}
+
+      {/* ③ 상태 */}
+      <div style={SECTION}>상태</div>
+      <div style={{ ...ROW, gap: 6 }}>
+        <span style={chip(okStatus(f['FD termination status']))}>FD 종료 {f['FD termination status'] || '—'}</span>
+        <span style={chip(okStatus(f['SD termination status']))}>SD 종료 {f['SD termination status'] || '—'}</span>
+        <span style={chip(fdErr === null ? null : fdErr === 0)}>FD 오류 {fdErr ?? '—'}</span>
+        <span style={chip(sdErr === null ? null : sdErr === 0)}>SD 오류 {sdErr ?? '—'}</span>
+      </div>
+
+      {/* ④ 세부 */}
+      {detail.length > 0 && (
         <>
-          <div className="muted" style={{ fontSize: 12, marginBottom: 6 }}>{r.truncated ? `전체 ${r.total}줄 중 마지막 ${r.lines.length}줄` : `${r.total}줄`}</div>
-          <pre style={{ margin: 0, padding: 12, maxHeight: '60vh', overflow: 'auto', fontSize: 12, lineHeight: 1.6, background: 'var(--panel-deep)', borderRadius: 8, whiteSpace: 'pre' }}>{r.lines.join('\n') || '로그가 없습니다.'}</pre>
+          <div style={SECTION}>세부</div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', columnGap: 18, rowGap: 6, fontSize: 12.5 }}>
+            {detail.map((k) => (
+              <div key={k} style={{ display: 'flex', gap: 10, minWidth: 0, paddingBottom: 4, borderBottom: '1px solid var(--border-soft)' }}>
+                <span style={{ flex: '0 0 112px', color: 'var(--text-faint)' }}>{REPORT_KEYS[k]}</span>
+                <span style={{ minWidth: 0, wordBreak: 'break-word' }}>{reportValue(f[k])}</span>
+              </div>
+            ))}
+          </div>
         </>
       )}
-    </Modal>
+
+      {/* ⑤ 경고·오류 */}
+      <IssueList rep={rep} />
+    </div>
+  );
+}
+
+function IssueList({ rep }) {
+  if (!rep.issues.length) return <><div style={SECTION}>경고·오류</div><div className="muted" style={{ fontSize: 12 }}>경고·오류 줄이 없습니다.</div></>;
+  return (
+    <>
+      <div style={SECTION}>경고·오류 {rep.issues.length}종{rep.issuesMore ? ` (그 밖 ${rep.issuesMore}종은 원문 로그에서)` : ''}</div>
+      <div style={{ display: 'grid', gap: 6 }}>
+        {rep.issues.map((x) => {
+          const hint = issueHint(x.text);
+          const bad = /Fatal|Error/i.test(x.text) && !/^.{0,80}Warning/i.test(x.text);
+          return (
+            <div key={x.text} style={{ padding: '8px 10px', borderRadius: 8, background: 'var(--panel-deep)', borderLeft: `3px solid ${bad ? '#f87171' : '#fbbf24'}`, minWidth: 0 }}>
+              <div style={{ fontFamily: 'var(--mono)', fontSize: 11.5, lineHeight: 1.55, wordBreak: 'break-word' }}>
+                {x.text}{x.count > 1 ? <span className="badge gray" style={{ marginLeft: 6, fontSize: 10.5 }}>×{x.count}</span> : null}
+              </div>
+              {hint && <div style={{ fontSize: 12, color: 'var(--text-dim)', marginTop: 4 }}>→ {hint}</div>}
+            </div>
+          );
+        })}
+      </div>
+    </>
   );
 }
 
@@ -501,7 +644,7 @@ function HistoryTab({ d }) {
                   <td data-sort={r.startedAt ?? ''}>{whenText(r.startedAt)}</td><td data-sort={r.endedAt ?? ''}>{whenText(r.endedAt)}</td>
                   <td className="right" data-sort={r.bytes ?? ''}>{bytesText(r.bytes)}</td><td className="right" data-sort={r.files ?? ''}>{r.files ?? '—'}</td>
                   <td><span className={`badge ${b.cls}`}>{b.label}</span></td>
-                  <td><button type="button" className="logout-btn" style={BTN} disabled={!job} onClick={() => job && setLogOf({ job, jobid: r.jobid })}>보기</button></td>
+                  <td><button type="button" className="logout-btn" style={BTN} disabled={!job} onClick={() => job && setLogOf({ job, jobid: r.jobid, view: 'summary' })}>보기</button></td>
                 </tr>
               ); })}
             </tbody>
@@ -520,13 +663,13 @@ function HistoryTab({ d }) {
                 <td data-sort={r.jobid}>{r.jobid}</td><td>{r.job.vmName}</td>
                 <td style={{ fontSize: 12 }}>{restoreLine(r)}</td><td data-sort={r.at ?? ''}>{whenText(r.at)}</td>
                 <td><span className={`badge ${b.cls}`}>{b.label}</span></td>
-                <td><button type="button" className="logout-btn" style={BTN} onClick={() => setLogOf({ job: r.job, jobid: r.jobid })}>보기</button></td>
+                <td><button type="button" className="logout-btn" style={BTN} onClick={() => setLogOf({ job: r.job, jobid: r.jobid, view: 'summary' })}>보기</button></td>
               </tr>
             ); })}
           </tbody>
         </STable>
       </div>
-      {logOf && <LogModal job={logOf.job} jobid={logOf.jobid} onClose={() => setLogOf(null)} />}
+      {logOf && <LogModal job={logOf.job} jobid={logOf.jobid} view={logOf.view} onClose={() => setLogOf(null)} />}
     </div>
   );
 }
