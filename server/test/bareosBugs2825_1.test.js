@@ -1,5 +1,5 @@
 /**
- * test/bareosBugs2824_1.test.js — v2.824.1 Bareos 전체 버그 점검(사용자 요청 '버그 찾아서 수정' · 5축 + 반증 1인) 확정분 회귀.
+ * test/bareosBugs2825_1.test.js — v2.825.1 Bareos 전체 버그 점검(사용자 요청 '버그 찾아서 수정' · 5축 + 반증 1인) 확정분 회귀.
  *  G1  연결 시험 성공이 '시험하는 사이 바뀐 접속값' 의 인증 정지를 지우지 않는다(엣지 대행·중앙 직접 — clearAuthStopIfSame)
  *  G2  복원: 설정만 보면 아는 전제(Director 접속값 덜 됨)는 OTP 앞에서 — 1회용 코드를 태우지 않는다
  *  G3  엣지 addJobs 성공인데 잡 이름이 없으면 결과 모름(원장에 'undefined' 를 적지 않는다)
@@ -18,12 +18,12 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'bareosbugs28241-'));
+const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'bareosbugs28251-'));
 process.env.CONFIG_DIR = tmp;
 process.env.DATA_SOURCE = 'mock';
 process.env.AUTH_ENABLED = 'true';
 process.env.SSRF_ALLOW_LOOPBACK = 'true';
-process.env.CENTRAL_TOKEN = 'shared-token-for-bareos-bugs-28241-1234567890';
+process.env.CENTRAL_TOKEN = 'shared-token-for-bareos-bugs-28251-1234567890';
 const { generateSecret, generateToken } = await import('../src/auth/totp.js');
 const SECRET = generateSecret();
 fs.writeFileSync(path.join(tmp, 'users.json'), JSON.stringify({ users: [{ username: 'adm', role: 'admin', totpEnabled: true, totpSecret: SECRET }] }));
@@ -45,6 +45,12 @@ const { startFakeDirector } = await import('./_fakeBareosDirector.js');
 const { fakeServer, fakeConsole } = await import('./_fakeBareosSsh.js');
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+/** 기다림에 상한 — 닿지 않으면 파일 시한(120초)까지 멈추지 않고 이 사유로 바로 실패한다. */
+const within = (p, ms, why) => {
+  let t;
+  const limit = new Promise((_, rej) => { t = setTimeout(() => rej(new Error(`${why}(${ms}ms 안에 일어나지 않음)`)), ms); });
+  return Promise.race([p, limit]).finally(() => clearTimeout(t));   // 시한 타이머를 남기지 않는다(파일이 늦게 끝나지 않게)
+};
 let gate = null; let gateHit = null; let gateAny = false;
 let asUser = null;   // G12 — 쓰기 범위 계정으로 바꿔 부른다
 const D = { rows: new Map() };
@@ -60,9 +66,12 @@ before(async () => {
   fd = await startFakeDirector({ name: 'portal', password: 'pw-ok', handle });
   fd2 = await startFakeDirector({ name: 'portal', password: 'pw-ok', handle });   // DR — 같은 주소·콘솔은 다른 Director 와 겹치므로 포트를 달리한다
   tokens.issueAgentToken('PL-Warsaw');
-  DE = S.addDirector({ name: '폴란드(엣지)', host: '127.0.0.1', port: fd.port, consoleName: 'portal', password: 'pw-ok', timeoutMs: 5000, agent: 'PL-Warsaw' }).director.id;
-  DD = S.addDirector({ name: '한국(직접)', host: 'localhost', port: fd.port, consoleName: 'portal', password: 'pw-ok', timeoutMs: 5000 }).director.id;
-  DR = S.addDirector({ name: '미국(복원 시험)', host: '127.0.0.1', port: fd2.port, consoleName: 'portal', password: 'pw-ok', timeoutMs: 5000 }).director.id;
+  DE = S.addDirector({ name: '폴란드(엣지)', host: '127.0.0.1', port: 9101,   // 엣지 대행 — 중앙은 접속하지 않는다
+    consoleName: 'portal', password: 'pw-ok', timeoutMs: 5000, agent: 'PL-Warsaw' }).director.id;
+  // localhost 대신 127.0.0.1 — 가짜 Director 는 127.0.0.1 에서만 듣는다. CI(GitHub 러너)는 /etc/hosts 에 ::1 localhost 가 있어
+  // 접속이 닿지 않으면 게이트를 영영 기다린다(추정 원인 — CI 에서 이 파일이 120초 시한에 걸렸다 · 기다림은 이제 within() 으로 상한)
+  DD = S.addDirector({ name: '한국(직접)', host: '127.0.0.1', port: fd.port, consoleName: 'portal', password: 'pw-ok', timeoutMs: 15_000 }).director.id;
+  DR = S.addDirector({ name: '미국(복원 시험)', host: '127.0.0.1', port: fd2.port, consoleName: 'portal', password: 'pw-ok', timeoutMs: 15_000 }).director.id;
   S.saveSettings({ sites: [
     { vcenterId: 'vc-pl', directorId: DE, vcserver: 'vc-pl.corp', client: 'pl-fd', storage: 'File', pool: 'Full', configFile: '/etc/bareos/vmware/vc-pl.ini' },
     { vcenterId: 'vc-us', directorId: DR, vcserver: 'vc-us.corp', client: 'us-fd', storage: 'File', pool: 'Full', configFile: '/etc/bareos/vmware/vc-us.ini' },
@@ -109,7 +118,11 @@ test('G1 연결 시험(엣지 대행): 옛 접속값의 성공 회신이 새 접
 test('G1 연결 시험(중앙 직접): 시험 중 바뀐 접속값의 정지를 지우지 않는다 · 그대로면 지운다', async () => {
   let release; gate = new Promise((res) => { release = res; }); const hit = new Promise((res) => { gateHit = res; });
   const t = post(`/settings/directors/${DD}/test`, {});
-  await hit;
+  try { await within(hit, 20_000, '연결 시험이 가짜 Director 의 .clients 에 닿지 않았다'); } catch (e) {
+    release(); gate = null;
+    const r = await t.catch((x) => ({ s: 0, t: String(x) }));
+    throw new Error(`${e.message} — 시험 응답 ${r.s}: ${String(r.t).slice(0, 300)}`);   // CI 에서 왜 닿지 않았는지 남긴다
+  }
   S.updateDirector(DD, { password: 'pw-new-wrong' });
   const now = S.directorCred(S.directorById(DD));
   svc.bareosAuthGuard.markAuthStopped(now.id, now, '새 접속값으로 인증 실패(폴러)');
@@ -265,7 +278,7 @@ test('G17 폴러 상태: running 은 지금 조회 중일 때만(타이머 유�
   P._resetPollerForTest();
   let release; gate = new Promise((r) => { release = r; }); const hit = new Promise((r) => { gateHit = r; }); gateAny = true;
   const p = P.pollOnce({ trigger: 'manual', directorId: DR });
-  await Promise.race([hit, sleep(3000)]);
+  await within(hit, 20_000, '상태 조회가 가짜 Director 에 닿지 않았다').catch(() => {});   // 닿지 않으면 아래 단언(mid.running)이 실패를 말한다
   const mid = P.pollerStatus();
   release(); gate = null; gateAny = false;
   await p;

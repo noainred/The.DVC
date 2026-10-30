@@ -120,7 +120,7 @@ export const OPS = Object.freeze({
 
   /**
    * 상태 조회 한 번(폴러) — Director 쪽 일만 한다. 원장 반영은 부르는 쪽.
-   *  ① reconcile(먼저 — v2.824.1 G7): `.jobs`(이름 → enabled) + 최근 2일 실행 행. 원장에서 꺼 둔 잡이 Director 에서 켜져 있으면 다시 끈다
+   *  ① reconcile(먼저 — v2.825.1 G7): `.jobs`(이름 → enabled) + 최근 2일 실행 행. 원장에서 꺼 둔 잡이 Director 에서 켜져 있으면 다시 끈다
    *     (disable 은 Director 메모리 값이라 reload·재시작이면 다시 켜진다 — I3).
    *  ② work: 포탈이 시작한 실행의 행(llist). 한 건의 명령 거부(jsonrpc)는 그 건만 건너뛴다(C5).
    * v2.823 검토(C1·P1 — 재현): 세션째 오류(시한 'aborted'·끊김)는 **던지지 않고** 그때까지 읽은 행과 함께 `fault` 로 돌려준다 —
@@ -136,7 +136,7 @@ export const OPS = Object.freeze({
     let attempted = 0;
     let fault = null;
     const stop = (e) => { fault = { code: e?.code || 'error', message: String(e?.message || e).slice(0, 300) }; };
-    // v2.824.1 버그 점검(G7 — 재현): 대조를 **먼저** 한다. 예전에는 work 를 다 읽어야만 대조해, 끝나지 않은 실행이 Director 예산보다 많은 동안
+    // v2.825.1 버그 점검(G7 — 재현): 대조를 **먼저** 한다. 예전에는 work 를 다 읽어야만 대조해, 끝나지 않은 실행이 Director 예산보다 많은 동안
     //   매 틱 잘려(cut) `.jobs`·다시 끄기·스케줄 실행 반영이 계속 밀렸다(reload 로 다시 켜진 잡이 그대로 돌고 스케줄 실행 결과·실패 메일이 멈췄다).
     //   대조는 명령 2개 + 다시 끌 이름 수만큼이라 예산을 거의 쓰지 않는다. work 가 잘린 것은 회전(attempted)이 이어 간다(C1·P1).
     let states = null;

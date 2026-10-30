@@ -329,7 +329,7 @@ api.get('/tools/bareos-backup', adminOnly, (req, res) => {
   const vmById = new Map((store.get()?.vms || []).map((v) => [v.id, v]));
   const visibleSite = (s) => !scoped || bareosAccess(req.user, s.vcenterId, { write: false }) === 0;
   const mapped = settings.sites.filter(visibleSite).map((s) => s.vcenterId);
-  // v2.824.1 버그 점검(G12): 쓰기 범위(writeVcenters)가 지정된 계정 — 대상마다 쓸 수 있는지 싣는다(화면이 버튼을 잠근다 · 서버는 그대로 403)
+  // v2.825.1 버그 점검(G12): 쓰기 범위(writeVcenters)가 지정된 계정 — 대상마다 쓸 수 있는지 싣는다(화면이 버튼을 잠근다 · 서버는 그대로 403)
   const views = jobs.map((j) => ({ ...viewJob(j, vmById, settings), writable: bareosAccess(req.user, j.vcenterId) === 0 }));
   let settingsWritable = false;
   try { settingsWritable = !scopedVcenterIds(req.user, store.get()) && !writeScopedVcenterIds(req.user, store.get()); } catch { settingsWritable = false; }
@@ -686,7 +686,7 @@ api.get('/tools/bareos-backup/vm-candidates', adminOnly, (req, res) => {
   res.json({
     ok: true, vcenterId, total: all.length, returned: rows.length, items: rows,
     writable: bareosAccess(req.user, vcenterId) === 0, mapped: !!site && !siteMissing(site).length,
-    // v2.824.1 버그 점검(G10): Director 콘솔 접속값이 덜 됐으면(주소 변경으로 비밀번호 폐기 등) 등록은 409 not-configured 로 끝난다 — 화면이 미리 알리고 잠근다
+    // v2.825.1 버그 점검(G10): Director 콘솔 접속값이 덜 됐으면(주소 변경으로 비밀번호 폐기 등) 등록은 409 not-configured 로 끝난다 — 화면이 미리 알리고 잠근다
     director: dir ? { id: dir.id, name: dir.name, ready: isDemoActive() || !!directorConn(dir).conn, missing: isDemoActive() ? [] : (directorConn(dir).missing || []) } : null,
     mappingMissing: site ? siteMissing(site) : null,
     maxBulk: MAX_BULK, jobsLeft: Math.max(0, MAX_JOBS - listJobs().length),
@@ -787,7 +787,7 @@ async function cancelRoute(req, res, job) {
   try {
     const out = await onDirector(jobDir(job), 'cancel', { jobid: want, name: job.bareosJob, pendingJobid: job.pending?.jobid ?? null });
     if (out.final) {
-      // v2.824.1 버그 점검(G6): 백업 행(type B)만 실행 결과로 반영한다 — 같은 이름의 Copy·Migration 행을 lastRun·실패 메일에 넣지 않는다(폴러·로그 라우트와 같은 규칙)
+      // v2.825.1 버그 점검(G6): 백업 행(type B)만 실행 결과로 반영한다 — 같은 이름의 Copy·Migration 행을 lastRun·실패 메일에 넣지 않는다(폴러·로그 라우트와 같은 규칙)
       const isBackup = !out.final.type || out.final.type === 'B';
       if (isBackup) applyRunRow(job.id, out.final);
       return res.status(400).json({ ok: false, code: 'finished', reason: isBackup ? '이미 끝난 실행입니다 — 결과를 반영했습니다.' : '이미 끝난 실행입니다(백업 실행이 아니라 반영하지 않았습니다).' });
@@ -925,7 +925,7 @@ async function restoreRoute(req, res, job) {
   const settings = effectiveSettings();
   const plan = restorePlan({ mode: b.mode, job, snapshot: store.get(), newVm: b.newVm, confirmName: b.confirmName, pluginName: settings.defaults.pluginName });
   if (!plan.ok) return res.status(400).json({ ok: false, reason: plan.issue });
-  // v2.824.1 버그 점검(G2 — 재현): 설정만 보면 아는 전제(그 잡의 Director 가 있고 접속값이 갖춰졌는가)도 OTP **앞에서** 본다 —
+  // v2.825.1 버그 점검(G2 — 재현): 설정만 보면 아는 전제(그 잡의 Director 가 있고 접속값이 갖춰졌는가)도 OTP **앞에서** 본다 —
   //   뒤에서 'not-configured' 로 실패하면 1회용 코드가 이미 쓰여, 설정을 고친 뒤 같은 코드는 '이미 사용됨' 이었다.
   if (!isDemoActive()) {
     const jd = directorById(jobDir(job), settings);

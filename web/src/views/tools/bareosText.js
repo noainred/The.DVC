@@ -82,7 +82,7 @@ export function secText(ms) {
   const m = Math.floor(sec / 60); const r = sec % 60;
   return m ? `${m}분${r ? ` ${r}초` : ''}` : `${r}초`;
 }
-/** v2.824.1 버그 점검(G12): 쓰기 범위(수정 가능 vCenter)가 지정된 계정 — 서버는 403 으로 막는다. 화면은 미리 잠그고 이 사유를 말한다. */
+/** v2.825.1 버그 점검(G12): 쓰기 범위(수정 가능 vCenter)가 지정된 계정 — 서버는 403 으로 막는다. 화면은 미리 잠그고 이 사유를 말한다. */
 export const READ_ONLY_TARGET = '이 대상의 vCenter 는 이 계정의 쓰기 범위 밖입니다 — 조회만 할 수 있습니다.';
 export const SETTINGS_READ_ONLY = '이 계정은 쓰기 범위(수정 가능 vCenter)가 지정돼 Bareos 설정(전 법인 공용)을 바꿀 수 없습니다 — 조회만 합니다.';
 

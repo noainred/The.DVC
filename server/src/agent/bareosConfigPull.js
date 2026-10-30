@@ -38,7 +38,7 @@ export function pullBareosConfigForce() { return pullShared(true); }
 
 let _queuedForce = null;
 /**
- * v2.824.1 버그 점검(G9 — 재현): 진행 중인 pull 을 기다린 강제 호출들은 **뒤따르는 강제 pull 하나**를 같이 쓴다(예전에는 각자 시작해 3중으로 나갔고,
+ * v2.825.1 버그 점검(G9 — 재현): 진행 중인 pull 을 기다린 강제 호출들은 **뒤따르는 강제 pull 하나**를 같이 쓴다(예전에는 각자 시작해 3중으로 나갔고,
  * 먼저 끝난 쪽이 `_running` 을 지워 뒤 호출이 공유하지 못했다). `_running` 은 자기 Promise 일 때만 비운다.
  */
 function pullShared(force) {

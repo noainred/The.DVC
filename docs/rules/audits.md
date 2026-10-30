@@ -6,7 +6,7 @@
 
 ## 목차
 
-- Bareos v2.824.1 버그 점검 확정분(5축 + 반증 1인 — 2026-10-30)
+- Bareos v2.825.1 버그 점검 확정분(5축 + 반증 1인 — 2026-10-30)
 - Bareos v2.824 법인 엣지 대행 검토 확정분(5축 + 반증 2인 — 2026-10-30)
 - Bareos v2.823 법인별 Director 검토 확정분(5축 + 반증 2인 — 2026-10-30)
 - Bareos v2.823 법인별 Director 모듈 규칙(server/src/bareos/CLAUDE.md 에서 옮김 — 2026-10-30, v2.824)
@@ -1817,11 +1817,11 @@
   ⚠ 정정(v2.823): 카탈로그 memo 세대(P9)는 v2.823 에 해소했다(memo 키에 Director id + `settingsRev` — 설정을 저장하면 새로 읽는다). 고아 잡(I7)은 v2.823 검토 C3 에서
   '가리키는 Director 가 설정에 없는 대상은 원장에서만 취소·삭제' 경로로 일부 해소(Director 쪽 고아 잡 탐지는 여전히 없다).
 
-## Bareos v2.824.1 버그 점검 확정분(5축 + 반증 1인 — 2026-10-30)
+## Bareos v2.825.1 버그 점검 확정분(5축 + 반증 1인 — 2026-10-30)
 
 사용자 요청 '버그 찾아서 수정'(범위 = Bareos 전체 v2.820 ~ v2.824 · 검증 = 표준 5축 + 반증 1인) + 진행 중 추가 '스크롤바 생기는거 없애줘'. 기준 cc620cc(v2.824.0).
 5축(보안·정확성·동시성·화면·통합) → 반증 1인: **기각 0건** · 확정 8(G4·G9·G10·G11·G13·G14·G16·G17) · 부분 10(G1·G2·G3·G5·G6·G7·G8·G12·G15·G18 — 대부분 심각도 하향).
-회귀 `server/test/bareosBugs2824_1.test.js`(G1~G8·G12·G15·G17 — 실제 api 라우터 + 가짜 Director TLS-PSK·가짜 SSH · OTP 켬) · `bareosBugs2824_1b.test.js`(G9·G18 — 가짜 중앙 HTTP) ·
+회귀 `server/test/bareosBugs2825_1.test.js`(G1~G8·G12·G15·G17 — 실제 api 라우터 + 가짜 Director TLS-PSK·가짜 SSH · OTP 켬) · `bareosBugs2825_1b.test.js`(G9·G18 — 가짜 중앙 HTTP) ·
 웹 `bareosText.test.js`(targetLocks) · `backupRunText.test.js`(탭 줄). **변이 14건 중 13건 잡힘** — 남은 1건은 G3 의 서비스 층 이름 검사(정제 층이 먼저 막아 관측되지 않는 이중 방어).
 
 - **A. Backup 현황 탭 줄 세로 스크롤바(사용자 스크린샷)**: `VeeamHeader.jsx` 탭 줄이 `overflowX:'auto'`(→ overflow-y 도 auto)인데 탭이 음수 아래 여백(-1px)으로 밑줄을 겹쳐

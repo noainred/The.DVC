@@ -27,7 +27,7 @@ import { runningScans, resumeOutlookText, queuedScans } from '../util/scanJourna
 import { runningBulkDeploys as bulkDeployRuns } from '../agent/bulkDeploy.js';             // v2.742(TIMING-04): 진행 중인 에이전트 대량 배포도 기다린다(읽기만)
 import { runnerStatus as vmcloneRunnerStatus } from '../vmclone/runner.js';  // v2.741(TIMING-01 ③): 실행 중 VM 복제 잡도 기다린다(읽기만)
 import { getJob as vmcloneJob } from '../vmclone/store.js';
-import { runningBareosWork } from '../bareos/inflight.js';   // v2.824.1(G15): 엣지 대행 작업·늦은 회신·자동 설정도 기다린다(재시작하면 결과를 잃는다 · 읽기만)
+import { runningBareosWork } from '../bareos/inflight.js';   // v2.825.1(G15): 엣지 대행 작업·늦은 회신·자동 설정도 기다린다(재시작하면 결과를 잃는다 · 읽기만)
 import { poolSettled } from '../util/pool.js';
 import { numOrNull } from '../util/numOrNull.js';
 import { localStamp } from '../util/dayKey.js';       // v2.740(B-08): 사람이 읽는 시각은 포탈 시각
@@ -71,7 +71,7 @@ export function runningVmClones() {
 export function runningBulkDeploys() {
   try { return bulkDeployRuns(); } catch { return []; }
 }
-/** v2.824.1(G15): 재시작하면 결과를 잃는 Bareos 작업(엣지 대행 상태 변경·늦은 회신 대기·자동 설정 — bareos/inflight.js). 상한은 스캔과 같다. */
+/** v2.825.1(G15): 재시작하면 결과를 잃는 Bareos 작업(엣지 대행 상태 변경·늦은 회신 대기·자동 설정 — bareos/inflight.js). 상한은 스캔과 같다. */
 function bareosWork() { try { return runningBareosWork(); } catch { return []; } }
 /**
  * v2.742(감사 RECENT-02): 자동 적용이 기다리는 **시작하지 못한 '지금 수집' 대기 요청**(util/scanJournal queuedScans).

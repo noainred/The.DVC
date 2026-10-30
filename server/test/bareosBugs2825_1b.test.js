@@ -1,5 +1,5 @@
 /**
- * test/bareosBugs2824_1b.test.js — v2.824.1 Bareos 버그 점검 확정분 중 **엣지 쪽**(가짜 중앙 HTTP 서버).
+ * test/bareosBugs2825_1b.test.js — v2.825.1 Bareos 버그 점검 확정분 중 **엣지 쪽**(가짜 중앙 HTTP 서버).
  *  G9  강제 배정 받기(pullBareosConfigForce)가 진행 중인 받기와 겹치면, 기다린 호출들은 뒤따르는 받기 **하나**를 같이 쓴다(동시 요청 1개)
  *  G18 대행 워커의 마지막 실패는 빈 인출 틱이 ok 로 덮어도 상태(lastError)에 남는다(엣지 로그에 5초만 보이던 것)
  */
@@ -10,7 +10,7 @@ import os from 'node:os';
 import path from 'node:path';
 import http from 'node:http';
 
-const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'bareosbugs28241b-'));
+const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'bareosbugs28251b-'));
 process.env.CONFIG_DIR = tmp;
 process.env.DATA_SOURCE = 'mock';
 process.env.SSRF_ALLOW_LOOPBACK = 'true';

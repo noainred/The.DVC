@@ -110,7 +110,7 @@ export default function SettingsTab({ onSaved, writable = true }) {
     <div>
       {s.demo && <div className="card" style={{ ...NOTE, borderLeft: '3px solid var(--amber)' }}>데모 모드 — 아래 값은 메모리의 데모 설정입니다(지역마다 데모 Director · 편집·저장 안 됨). 실제 Director 를 추가하면 데모가 꺼지고 그쪽 설정으로 바뀝니다.</div>}
       {s.loadError && <div className="banner bad" style={{ marginBottom: 10 }}>설정 파일을 읽지 못했습니다(손상본 보존) — {s.loadError.reason}</div>}
-      {/* v2.824.1 버그 점검(G12): 쓰기 범위가 지정된 계정은 서버(fullWriteOnly)가 403 으로 막는다 — 화면이 미리 잠그고 사유를 말한다 */}
+      {/* v2.825.1 버그 점검(G12): 쓰기 범위가 지정된 계정은 서버(fullWriteOnly)가 403 으로 막는다 — 화면이 미리 잠그고 사유를 말한다 */}
       {!writable && <div className="banner warn" style={{ marginBottom: 10 }}>{SETTINGS_READ_ONLY}</div>}
       {err && <div className="banner bad" role="alert" style={{ marginBottom: 10 }}>설정을 다시 읽지 못했습니다({String(err.message || err).slice(0, 160)}) — 화면 값이 최신이 아닐 수 있어 저장을 잠갔습니다. <button type="button" className="logout-btn" style={BTN} onClick={() => load(true)}>다시 읽기</button></div>}
       <Msg m={msg} />
@@ -588,7 +588,7 @@ function AutoSetupPanel({ s, dir, rows, editCount, cat, unsaved, locked, onDirec
     } catch (e) { onFail(5, e, '지문 읽기', false); } finally { setBusy(''); }
   };
   const runFd = async () => {
-    setBusy('5');   // v2.824.1 버그 점검(G11): 4단계(빈 칸 채우기)와 같은 표지를 써서 서로의 버튼이 '채우는 중…'·'쓰는 중…' 으로 보였다
+    setBusy('5');   // v2.825.1 버그 점검(G11): 4단계(빈 칸 채우기)와 같은 표지를 써서 서로의 버튼이 '채우는 중…'·'쓰는 중…' 으로 보였다
     try {
       const r = await postJson(url('fd'), { ...fdBody(), otp: ssh.otp, vcuser: f.vcuser, vcpass: f.vcpass, vcthumbprint: f.vcthumbprint }, withRelayWait({}, dir, s.relayLimits, 'setup.fdIni', { setup: true }));
       requireChanged(r);

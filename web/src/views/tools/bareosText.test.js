@@ -320,7 +320,7 @@ describe('작업 결과 요약(v2.822.3 — 현장 jobid 8 로그 모양)', () =
     expect(newMappingRow('vc-a', 'd', 'bad host;x').vcserver).toBe('');
   });
 
-  it('v2.824.1 버그 점검 — 행 버튼 잠금 사유(G12 쓰기 범위 밖 · G13 잠긴 버튼은 사유를 말한다)', () => {
+  it('v2.825.1 버그 점검 — 행 버튼 잠금 사유(G12 쓰기 범위 밖 · G13 잠긴 버튼은 사유를 말한다)', () => {
     const ok = targetLocks({ enabled: true, writable: true }, { hasRun: true });
     expect(Object.values(ok).every((v) => v === '')).toBe(true);
     // writable 이 없으면(옛 서버 응답) 막지 않는다

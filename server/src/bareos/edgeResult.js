@@ -43,7 +43,7 @@ export const VALUE = Object.freeze({
     return out;
   },
   // key: 부른 쪽이 준 순번(정수) 그대로 — 글자로 바꾸면 일괄 등록이 결과를 하나도 짝짓지 못했다(v2.824 검토 S1·C1 — 재현: Director 에 잡만 생기고 원장 0)
-  // v2.824.1 버그 점검(G3 — 재현): 성공인데 잡 이름이 없거나 리소스 이름 규칙에 어긋나면 그 항목은 '결과 모름'(원장에 bareosJob 'undefined' 를 적지 않는다 —
+  // v2.825.1 버그 점검(G3 — 재현): 성공인데 잡 이름이 없거나 리소스 이름 규칙에 어긋나면 그 항목은 '결과 모름'(원장에 bareosJob 'undefined' 를 적지 않는다 —
   //   Director 에 잡이 생겼을 수 있다). 필수 값이 없으면 성공으로 받지 않는다(C9 와 같은 규칙).
   addJobs: (v) => arr(v).slice(0, 500).map((x0) => {
     const x = obj(x0);

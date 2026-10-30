@@ -37,7 +37,7 @@ let timer = null;
 let fetching = false;
 let inflight = 0;
 let _last = null;
-// v2.824.1 버그 점검(G18): 마지막 실패는 따로 10분 남긴다 — 5초마다 도는 빈 인출 틱이 `_last` 를 ok 로 덮어 회신 실패가 엣지 로그에 길어야 5초만 보였다
+// v2.825.1 버그 점검(G18): 마지막 실패는 따로 10분 남긴다 — 5초마다 도는 빈 인출 틱이 `_last` 를 ok 로 덮어 회신 실패가 엣지 로그에 길어야 5초만 보였다
 let _lastError = null;
 const ERROR_KEEP_MS = 10 * 60_000;
 const noteError = (msg) => { _lastError = { at: Date.now(), error: msg }; };
@@ -89,7 +89,7 @@ async function postResult(id, result, kind = '') {
   try { r = await resilientFetch(withAgentQuery(`${config.agent.centralUrl}/api/central/bareos-op-result`, config.agent.name), { method: 'POST', headers: headers(), body: JSON.stringify({ id, result }), timeoutMs: 20_000, retries: 1 }); }
   catch (e) { return `결과 회신 실패 — ${String(e?.message || e).slice(0, 200)}`; }
   if (r.ok) {
-    // v2.824.1 버그 점검(G15): 중앙이 모르는 작업(시한으로 닫았거나 중앙이 재시작)이면 결과가 반영되지 않았다 — 상태를 바꾼 작업이면 조용히 넘기지 않는다
+    // v2.825.1 버그 점검(G15): 중앙이 모르는 작업(시한으로 닫았거나 중앙이 재시작)이면 결과가 반영되지 않았다 — 상태를 바꾼 작업이면 조용히 넘기지 않는다
     let b = null; try { b = await r.json(); } catch { b = null; }
     if (b?.stale && EDGE_MUTATING.has(kind) && result?.ok) return `중앙이 ${kind} 결과를 받지 않았습니다(시한이 지났거나 중앙이 재시작) — 이 엣지가 Director 에 바꾼 내용이 포탈에 반영되지 않았을 수 있습니다(백업 대상·Director 확인)`;
     return null;

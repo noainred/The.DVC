@@ -5,7 +5,7 @@ import { visibleTabs, VEEAM_TABS } from './VeeamHeader.jsx';
 // v2.818 Backup 현황 › 백업 실행 — 서버 판정을 글자로만 바꾼다(판정 복제 금지). 못 읽은 값은 '—'.
 const memStore = () => { const m = new Map(); return { setItem: (k, v) => m.set(k, String(v)), getItem: (k) => (m.has(k) ? m.get(k) : null), removeItem: (k) => m.delete(k), m }; };
 
-describe('VeeamHeader 탭 줄(v2.824.1 — 스크롤바)', () => {
+describe('VeeamHeader 탭 줄(v2.825.1 — 스크롤바)', () => {
   it('세로로 넘치지 않는다(음수 아래 여백 없음 · 세로 숨김) · 스크롤바를 그리지 않는다', async () => {
     const fs = await import('node:fs');
     const src = fs.readFileSync(new URL('./VeeamHeader.jsx', import.meta.url), 'utf8');

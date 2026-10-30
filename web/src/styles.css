@@ -1133,7 +1133,7 @@ tr.row-sel > td { background: rgba(59, 130, 246, .10); }
 
 /* 성능점검 설정 — 탭을 한 줄 가로 배열(세로로 접히면 하위 작업 창이 좁아진다) */
 .svc-tabbar { display: flex; gap: 6px; width: 100%; overflow-x: auto; }
-/* v2.824.1: 가로로 넘어가는 탭 줄의 스크롤바를 그리지 않는다(사용자 요청 '스크롤바 생기는거 없애줘' — Backup 현황 탭 줄 · 선례 views/vmDist.css .vmd-panels).
+/* v2.825.1: 가로로 넘어가는 탭 줄의 스크롤바를 그리지 않는다(사용자 요청 '스크롤바 생기는거 없애줘' — Backup 현황 탭 줄 · 선례 views/vmDist.css .vmd-panels).
    넘어가기는 그대로(터치·트랙패드·Shift+휠) — 열린 탭은 화면이 보이는 곳으로 옮긴다(VeeamHeader useLayoutEffect). */
 .tabstrip-noscroll { scrollbar-width: none; }
 .tabstrip-noscroll::-webkit-scrollbar { display: none; }
