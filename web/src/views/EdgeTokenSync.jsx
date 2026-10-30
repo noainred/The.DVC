@@ -87,23 +87,24 @@ export default function EdgeTokenSync() {
 
       <div style={{ fontSize: 13, fontWeight: 600, margin: '4px 0 6px' }}>{syncSummary(rows)}</div>
       {rows.length > 0 && (
+        // 좁은 화면(400px)은 가로 스크롤 — 판단에 필요한 엣지·상태·작업을 앞에 둔다(Chromium 400 판독: 주소가 앞이면 상태·버튼이 화면 밖이었다)
         <STable minWidth={760}>
-          <thead><tr><th>엣지</th><th>수집 서버 주소</th><th>상태</th><th>발급</th><th>마지막 사용</th><th className="right" data-nosort="">작업</th></tr></thead>
+          <thead><tr><th>엣지</th><th>상태</th><th data-nosort="">작업</th><th>발급</th><th>마지막 사용</th><th>수집 서버 주소</th></tr></thead>
           <tbody>
             {rows.map((r) => {
               const st = SYNC_STATE[r.state];
               return (
                 <tr key={r.agent || r.url}>
                   <td><b>{r.agent || '—'}</b></td>
-                  <td className="muted" style={{ overflowWrap: 'anywhere' }}>{r.url || '—'}</td>
-                  <td data-sort={r.state} title={r.hint || undefined}><span style={{ color: TONE[st.tone], fontWeight: 600 }}>{st.text}</span></td>
-                  <td className="muted" data-sort={r.createdAt ?? ''}>{when(r.createdAt)}</td>
-                  <td className="muted" data-sort={r.lastUsedAt ?? ''} title="중앙이 그 토큰을 본 마지막 시각(이름 검사 전 기록 — 받아들였다는 증거는 아닙니다)">{when(r.lastUsedAt)}</td>
-                  <td className="right nowrap">
+                  <td className="nowrap" data-sort={r.state} title={r.hint || undefined}><span style={{ color: TONE[st.tone], fontWeight: 600 }}>{st.text}</span></td>
+                  <td className="nowrap">
                     {r.canApply
                       ? <button className="tab" onClick={() => setSel(sel === r.agent ? '' : r.agent)}>{sel === r.agent ? '닫기' : '자동 적용'}</button>
                       : <span className="muted" style={{ fontSize: 12 }} title={r.hint || undefined}>—</span>}
                   </td>
+                  <td className="muted" data-sort={r.createdAt ?? ''}>{when(r.createdAt)}</td>
+                  <td className="muted" data-sort={r.lastUsedAt ?? ''} title="중앙이 그 토큰을 본 마지막 시각(이름 검사 전 기록 — 받아들였다는 증거는 아닙니다)">{when(r.lastUsedAt)}</td>
+                  <td className="muted" style={{ overflowWrap: 'anywhere' }}>{r.url || '—'}</td>
                 </tr>
               );
             })}
@@ -111,7 +112,7 @@ export default function EdgeTokenSync() {
         </STable>
       )}
       {rows.some((r) => r.state === 'unused') && (
-        <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>‘발급됨 · 사용 기록 없음’: {rows.find((r) => r.state === 'unused').hint}</div>
+        <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>‘사용 기록 없음’(개별 토큰 발급됨): {rows.find((r) => r.state === 'unused').hint}</div>
       )}
       {orphans.length > 0 && (
         <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>등록부에 없는 엣지의 개별 토큰 {orphans.length}건: {orphans.join(', ')} — 지운 수집 서버의 토큰이면 수집 서버(원격) 화면에서 회수하세요.</div>

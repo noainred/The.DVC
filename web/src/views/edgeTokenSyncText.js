@@ -16,8 +16,8 @@ const posMs = (v) => { const n = Number(v); return Number.isFinite(n) && n > 0 ?
 /** 행 상태 → 배지 문구·색. */
 export const SYNC_STATE = Object.freeze({
   ok: { text: '개별 토큰 사용', tone: 'ok' },
-  unused: { text: '발급됨 · 사용 기록 없음', tone: 'warn' },
-  shared: { text: '공유 토큰(개별 토큰 없음)', tone: 'bad' },
+  unused: { text: '사용 기록 없음', tone: 'warn' },   // 좁은 화면에서 상태 열이 한 줄로 보이게 짧게 — 뜻은 행 툴팁(hint)과 아래 설명 줄
+  shared: { text: '공유 토큰', tone: 'bad' },
   off: { text: '수집 꺼짐', tone: 'muted' },
   unknown: { text: '모름', tone: 'muted' },
 });
