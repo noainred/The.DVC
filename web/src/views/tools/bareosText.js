@@ -221,6 +221,8 @@ export function fdIniTemplate(site) {
 export const PREP_CHECKLIST = Object.freeze([
   '사이트 FD 에 bareos-vmware-plugin(VDDK 포함)과 pyVmomi(vSphere 메이저 버전과 맞춤)를 설치합니다.',
   // v2.822.1(현장 실측 — 작업 로그 'Python 3.10 or newer is required (found 3.9)'): FD 의 Python 플러그인은 OS 기본 Python 으로 돈다.
+  // v2.822.3(S2-3 — 반증 확인): 잡을 만들려면 configure 가 필요하고 Bareos 에는 그 하위 명령·리소스 단위 ACL 이 없다 — 숨기지 않고 알린다
+  '포탈 콘솔(Profile portal)은 잡을 만들려고 configure 를 쓰므로 사실상 Director 관리자 등급입니다(모든 FD 에 root 로 닿는다) — 콘솔 비밀번호를 그 등급으로 지키세요.',
   // v2.822.3(W2-7): 셸에 붙여 넣는 명령은 ASCII 작은따옴표 — 굽은 따옴표(‘ ’)는 셸이 따옴표로 보지 않아 > · < 가 리다이렉트가 됐다
   "Rocky·RHEL 9 FD(Python 3.9)는 pyVmomi 8.x 를 씁니다 — python3 -m pip install 'pyvmomi>=8,<9' · 9.x 는 Python 3.10 이상이 필요해 플러그인이 시작하지 못합니다(바꾼 뒤 bareos-fd 재시작).",
   'FD 의 Client 리소스에 Plugin Names = python3 · Plugin Directory 를 지정합니다.',
