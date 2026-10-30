@@ -56,7 +56,7 @@ export function demoSettings(snapshot) {
 //   포탈은 jobid 로 최신을 고른다(director.jobRuns·원장 lastRun). 9000 에서 시작하면 방금 실행이 이력 표 맨 뒤로 밀렸다(v2.822 화면 확인).
 const FIRST_RUN_ID = 200_000;
 const S = { jobs: new Map(), runs: new Map(), nextId: FIRST_RUN_ID };
-export function _resetBareosDemoForTest() { S.jobs.clear(); S.runs.clear(); S.nextId = FIRST_RUN_ID; _seeded = false; }
+export function _resetBareosDemoForTest() { S.jobs.clear(); S.runs.clear(); S.nextId = FIRST_RUN_ID; _seeded = false; _slots = null; _slotsKey = ''; }
 
 /** lib/scan.cc next_arg 와 같은 규칙의 인자 분해. */
 function parseArgs(cmd) {
@@ -89,10 +89,27 @@ function catTime(ms) {
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
 }
 
+/**
+ * 이름 → 이력 jobid 칸(0..3999). v2.824.1 버그 점검(B2-3 — 재현): 해시 칸만 쓰면 두 이름이 같은 칸에 들어가(예: vm-47·vm-250)
+ * 먼저 등록된 이름의 행이 돌아와 복원·로그가 '이 대상의 실행이 아니다' 로 거부됐다. 이름을 **정렬한 순서**로 해시 칸부터 비어 있는
+ * 다음 칸을 쓴다(등록 순서와 무관하게 결정적 · 겹치지 않으면 예전 칸 그대로 · 범위 100000~179999 그대로).
+ */
+let _slots = null; let _slotsKey = '';
+function slotOf(name) {
+  // 칸 표는 잡 목록이 바뀔 때만 다시 만든다(데모 잡은 지워지지 않고 늘기만 한다 — 크기가 열쇠)
+  if (!_slots || _slotsKey !== String(S.jobs.size) || !_slots.has(name)) {
+    const names = [...new Set([...S.jobs.keys(), name])].sort();
+    const used = new Set(); _slots = new Map();
+    for (const n of names) { let k = demoHash(n) % 4000; while (used.has(k)) k = (k + 1) % 4000; used.add(k); _slots.set(n, k); }
+    _slotsKey = String(S.jobs.size);
+  }
+  return _slots.get(name);
+}
+
 /** 이름별 과거 이력(결정적): 최근 14일, 7일마다 Full · 나머지 Incremental · 일부 경고/실패. */
 function historyOf(name, now = Date.now()) {
   const h = demoHash(name);
-  const base = 100_000 + (h % 4000) * 20;
+  const base = 100_000 + slotOf(name) * 20;
   const rows = [];
   const today = Math.floor(now / DAY) * DAY;
   for (let d = 13; d >= 1; d--) {

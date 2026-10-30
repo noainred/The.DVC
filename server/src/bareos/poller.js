@@ -63,7 +63,8 @@ export function pollerStatus() {
     intervalMs = (s.defaults.pollIntervalSec || 60) * 1000;
     enabled = isDemoActive(s) || s.directors.some((d) => !!directorConn(d).conn);
   } catch { /* 위 주석 */ }
-  return { ..._last, busy: _busy, running: !!_timer, enabled, intervalMs, directors: Object.fromEntries(_byDir) };
+  // v2.824.1 버그 점검(G17): running 은 '지금 조회 중' 이다(서비스 점검 pollerCheck 가 '실행 중' 으로 칠한다) — 타이머가 있는지는 started
+  return { ..._last, busy: _busy, running: _busy, started: !!_timer, enabled, intervalMs, directors: Object.fromEntries(_byDir) };
 }
 
 /** Director 하나 조회(시한 안). 원장 반영까지. 던지지 않는다 — 결과 객체. */

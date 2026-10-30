@@ -96,12 +96,30 @@ export async function sessionOn(dir, fn, { trigger = 'manual', signal = null } =
     if (AUTH_CODES.has(e?.code)) bareosAuthGuard.markAuthStopped(cred.id, cred, e.message);
     throw e;
   }
-  bareosAuthGuard.clearAuthStop(cred.id);
+  clearAuthStopIfSame(dir);
   // v2.822(검토 P1·S6 — 재현): 시한 신호를 **세션이 열린 뒤에도** 세션에 잇는다(폴러 예산이 명령 단계를 끊을 수 있게).
   const onAbort = () => s._fail?.(new BareosConsoleError('aborted', '시한·취소로 Director 세션을 끊었습니다.'));
   signal?.addEventListener?.('abort', onAbort, { once: true });
   if (signal?.aborted) onAbort();
   try { return await fn(s); } finally { signal?.removeEventListener?.('abort', onAbort); s.close(); }
+}
+
+/**
+ * 성공한 접속으로 인증 정지를 푼다 — **지금 설정의 접속값이 그 접속에 쓴 값과 같을 때만**(v2.824.1 버그 점검 G1 — 재현).
+ * 정지 해제는 id 로 지우므로, 시험·조회가 도는 사이 다른 화면이 새(틀린) 비밀번호를 저장하고 주기 조회가 그 값으로 정지를 남겼으면
+ * 옛 값으로 성공한 이 접속이 그 정지를 지워 틀린 비밀번호로 다시 붙었다(자동 재시도 금지 위반 — v2.824 R3 와 같은 축).
+ * 엣지 사본(edgeCopy)은 엣지 자기 키(`edge-director:`)라 중앙 설정과 대조하지 않는다.
+ * @param {object} dir 접속에 쓴 Director 항목(그 순간의 사본)
+ */
+export function clearAuthStopIfSame(dir) {
+  const cred = directorCred(dir);
+  if (!dir?.edgeCopy) {
+    let same = false;
+    try { same = directorConnSig(directorById(dir.id)) === directorConnSig(dir); } catch { same = false; }
+    if (!same) return false;
+  }
+  bareosAuthGuard.clearAuthStop(cred.id);
+  return true;
 }
 
 /** 엣지 대행 회신의 실패 봉투 → 이 노드에서 직접 실행했을 때와 같은 모양의 오류(라우트·폴러가 같은 코드로 다룬다). */
@@ -262,7 +280,7 @@ function lateAddJobs(directorId, ready, by, demo) {
   };
 }
 /** 엣지 '결과 모름' 의 사유(등록) — Director 에 잡이 생겼을 수 있다는 사실과 늦은 결과 처리를 밝힌다. */
-const addUnknownText = (why) => `${why} — Director 에 잡이 생겼을 수 있습니다. 결과가 늦게 도착하면 포탈이 원장에 넣거나(이미 대상이면) 그 잡을 끕니다. 다시 등록하기 전에 목록을 새로 고쳐 확인하세요.`;
+const addUnknownText = (why) => `${why} — Director 에 잡이 생겼을 수 있습니다. 결과가 늦게 도착하면(그사이 포탈이 재시작하지 않으면) 포탈이 원장에 넣거나(이미 대상이면) 그 잡을 끕니다. 다시 등록하기 전에 목록을 새로 고쳐 확인하세요.`;
 
 /**
  * 백업 대상 등록(Director 잡 생성 + 원장). 범위 판정은 라우트가 먼저 한다.
@@ -279,6 +297,7 @@ export async function createBackupTarget({ vcenterId, vmId, level, schedule, by,
         { onLate: lateAddJobs(prep.directorId, [{ i: 0, prep }], by, demo) });
     } catch (e) { if (e?.code === 'unknown') throw fail('unknown', addUnknownText(String(e.message || e).slice(0, 300))); throw e; }
     if (!r?.ok) throw fail(r?.code === 'skipped' ? 'connect' : (r?.code || 'error'), r?.message || 'Director 잡을 만들지 못했습니다.');
+    if (!r.name) throw fail('unknown', 'Director 가 잡 이름 없이 성공을 회신했습니다 — 잡이 생겼을 수 있습니다. Director 에서 확인하세요.');   // G3
     try { return recordTarget(prep, r.name, by, demo); } catch (e) {
       const why = await orphanCleanup(prep.directorId, [{ name: r.name, err: e }], demo);
       throw fail('record', why.get(r.name));
@@ -324,6 +343,7 @@ export async function createBackupTargets({ vcenterId, vmIds, level, schedule, b
     for (const { i, prep } of ready) {
       const r = byKey.get(i);
       if (!r?.ok) { out[i].reason = r?.message || '사유 미상'; continue; }
+      if (!r.name) { out[i].reason = 'Director 가 잡 이름 없이 성공을 회신했습니다 — 잡이 생겼을 수 있습니다. Director 에서 확인하세요.'; continue; }   // G3
       try { out[i].job = recordTarget(prep, r.name, by, demo); out[i].ok = true; } catch (e) { orphans.push({ i, name: r.name, err: e }); }
     }
     if (orphans.length) {

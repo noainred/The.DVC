@@ -26,6 +26,7 @@ import { runLocalOp } from '../bareos/service.js';
 import { OPS } from '../bareos/ops.js';
 import { EDGE_MUTATING } from '../bareos/edgeOps.js';
 import { runSetupOp, SETUP_KINDS } from '../bareos/edgeSetup.js';
+import { edgeStoreView } from '../bareos/edgeStore.js';
 import { isSshAuthError, isSshHostKeyError } from '../proxy/sshExec.js';
 import { pullBareosConfigForce } from './bareosConfigPull.js';
 
@@ -36,11 +37,20 @@ let timer = null;
 let fetching = false;
 let inflight = 0;
 let _last = null;
+// v2.824.1 버그 점검(G18): 마지막 실패는 따로 10분 남긴다 — 5초마다 도는 빈 인출 틱이 `_last` 를 ok 로 덮어 회신 실패가 엣지 로그에 길어야 5초만 보였다
+let _lastError = null;
+const ERROR_KEEP_MS = 10 * 60_000;
+const noteError = (msg) => { _lastError = { at: Date.now(), error: msg }; };
 const _logChange = createChangeLogger({ windowMs: 10 * 60_000 });
 const lc = (s) => String(s ?? '').trim().toLowerCase();
 
 /** 마지막 실행 결과 — edgelog/spec.js 가 화면에 싣는다. 비밀은 담지 않는다. */
-export function bareosOpWorkerStatus() { return { pollMs: POLL_MS, ..._last, inflight }; }
+export function bareosOpWorkerStatus() {
+  let copies = null;
+  try { copies = edgeStoreView().count; } catch { copies = null; }
+  const recentError = _lastError && Date.now() - _lastError.at < ERROR_KEEP_MS ? { lastError: _lastError } : {};
+  return { pollMs: POLL_MS, ..._last, inflight, copies, ...recentError };
+}
 
 function headers() {
   return { 'Content-Type': 'application/json', ...agentHeaders(config.agent.name), ...(config.agent.centralToken ? { 'X-Central-Token': config.agent.centralToken } : {}) };
@@ -74,11 +84,16 @@ function failOf(e, kind, secretArgs) {
   };
 }
 
-async function postResult(id, result) {
+async function postResult(id, result, kind = '') {
   let r;
   try { r = await resilientFetch(withAgentQuery(`${config.agent.centralUrl}/api/central/bareos-op-result`, config.agent.name), { method: 'POST', headers: headers(), body: JSON.stringify({ id, result }), timeoutMs: 20_000, retries: 1 }); }
   catch (e) { return `결과 회신 실패 — ${String(e?.message || e).slice(0, 200)}`; }
-  if (r.ok) return null;
+  if (r.ok) {
+    // v2.824.1 버그 점검(G15): 중앙이 모르는 작업(시한으로 닫았거나 중앙이 재시작)이면 결과가 반영되지 않았다 — 상태를 바꾼 작업이면 조용히 넘기지 않는다
+    let b = null; try { b = await r.json(); } catch { b = null; }
+    if (b?.stale && EDGE_MUTATING.has(kind) && result?.ok) return `중앙이 ${kind} 결과를 받지 않았습니다(시한이 지났거나 중앙이 재시작) — 이 엣지가 Director 에 바꾼 내용이 포탈에 반영되지 않았을 수 있습니다(백업 대상·Director 확인)`;
+    return null;
+  }
   let reason = '';
   try { const b = await r.json(); reason = String(b?.reason || '').slice(0, 200); } catch { /* 본문 없음 */ }
   return `결과 회신 HTTP ${r.status}${reason ? ` — ${reason}` : ''}`;
@@ -128,18 +143,23 @@ export async function runBareosOpWorkerOnce() {
   try {
     let r;
     try { r = await resilientFetch(withAgentQuery(`${config.agent.centralUrl}/api/central/bareos-ops?max=${free}`, config.agent.name), { headers: headers(), timeoutMs: 15_000, retries: 1 }); }
-    catch (e) { const msg = `인출 실패 — ${String(e?.message || e).slice(0, 200)}`; _last = { at: Date.now(), ok: false, error: msg }; if (_logChange('인출', msg)) console.warn(`[bareos-edge] ${msg}`); return null; }
+    catch (e) { const msg = `인출 실패 — ${String(e?.message || e).slice(0, 200)}`; _last = { at: Date.now(), ok: false, error: msg }; noteError(msg); if (_logChange('인출', msg)) console.warn(`[bareos-edge] ${msg}`); return null; }
     receivedAt = Date.now();
     if (!r.ok) {
       let reason = '';
       try { const b = await r.json(); reason = String(b?.reason || '').slice(0, 200); } catch { /* */ }
       const msg = `인출 HTTP ${r.status}${reason ? ` — ${reason}` : ''}`;
-      _last = { at: Date.now(), ok: false, error: msg, status: r.status };
+      _last = { at: Date.now(), ok: false, error: msg, status: r.status }; noteError(msg);
       if (_logChange('인출', msg)) console.warn(`[bareos-edge] ${msg}`);
       return null;
     }
     let body;
-    try { body = await readJsonCapped(r, 1_048_576, '인출 응답'); } catch (e) { _last = { at: Date.now(), ok: false, error: `인출 응답 형식 오류 — ${String(e?.message || e).slice(0, 120)}` }; return null; }
+    try { body = await readJsonCapped(r, 1_048_576, '인출 응답'); } catch (e) {
+      const msg = `인출 응답 형식 오류 — ${String(e?.message || e).slice(0, 120)}`;
+      _last = { at: Date.now(), ok: false, error: msg }; noteError(msg);
+      if (_logChange('인출', msg)) console.warn(`[bareos-edge] ${msg}`);   // G18: 콘솔에도(무음 실패 금지)
+      return null;
+    }
     ops = (Array.isArray(body?.ops) ? body.ops : []).filter((o) => o && typeof o.id === 'string' && typeof o.kind === 'string').slice(0, free)
       .sort((a, b) => EDGE_MUTATING.has(b.kind) - EDGE_MUTATING.has(a.kind));
     inflight += ops.length;   // 인출 가드 안에서 자리를 잡는다(다음 틱이 같은 자리를 또 쓰지 않게)
@@ -151,10 +171,11 @@ export async function runBareosOpWorkerOnce() {
       const res = await runBareosEdgeOp(op, { receivedAt });
       op.secretArgs = null;
       console.log(`[bareos-edge] ${op.kind} → ${String(op.directorId).slice(0, 48)}: ${res.ok ? '성공' : `${res.notSent ? '보내지 않음' : '실패'}(${res.code}) — ${String(res.reason || '').slice(0, 160)}`}`);
-      postErr = (await postResult(op.id, res)) || postErr;
+      postErr = (await postResult(op.id, res, op.kind)) || postErr;
     } finally { inflight -= 1; }
   }));
   _last = postErr ? { at: Date.now(), ok: false, ops: ops.length, error: postErr } : { at: Date.now(), ok: true, ops: ops.length };
+  if (postErr) noteError(postErr);
   if (postErr && _logChange('회신', postErr)) console.warn(`[bareos-edge] ${postErr}`);
   return _last;
 }
@@ -167,4 +188,4 @@ export function startBareosOpWorker() {
   console.log(`[bareos-edge] 대행 워커 시작(central=${config.agent.centralUrl}, poll=${POLL_MS}ms)`);
 }
 
-export function _resetBareosOpWorkerForTest() { _last = null; fetching = false; inflight = 0; }
+export function _resetBareosOpWorkerForTest() { _last = null; _lastError = null; fetching = false; inflight = 0; }

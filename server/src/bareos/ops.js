@@ -120,9 +120,9 @@ export const OPS = Object.freeze({
 
   /**
    * 상태 조회 한 번(폴러) — Director 쪽 일만 한다. 원장 반영은 부르는 쪽.
-   *  ① work: 포탈이 시작한 실행의 행(llist). 한 건의 명령 거부(jsonrpc)는 그 건만 건너뛴다(C5).
-   *  ② reconcile: `.jobs`(이름 → enabled) + 최근 2일 실행 행. 원장에서 꺼 둔 잡이 Director 에서 켜져 있으면 다시 끈다
+   *  ① reconcile(먼저 — v2.824.1 G7): `.jobs`(이름 → enabled) + 최근 2일 실행 행. 원장에서 꺼 둔 잡이 Director 에서 켜져 있으면 다시 끈다
    *     (disable 은 Director 메모리 값이라 reload·재시작이면 다시 켜진다 — I3).
+   *  ② work: 포탈이 시작한 실행의 행(llist). 한 건의 명령 거부(jsonrpc)는 그 건만 건너뛴다(C5).
    * v2.823 검토(C1·P1 — 재현): 세션째 오류(시한 'aborted'·끊김)는 **던지지 않고** 그때까지 읽은 행과 함께 `fault` 로 돌려준다 —
    *   던지면 읽은 행이 원장에 하나도 반영되지 않고 회전도 멈춰, 대기 실행이 많은 고RTT 법인이 매 틱 같은 앞부분만 다시 읽었다(라이브락).
    *   `attempted` = 시작한 항목 수(멈춘 항목 포함 — 걸린 한 건이 뒤를 굶기지 않게 회전은 이만큼 나아간다).
@@ -136,37 +136,50 @@ export const OPS = Object.freeze({
     let attempted = 0;
     let fault = null;
     const stop = (e) => { fault = { code: e?.code || 'error', message: String(e?.message || e).slice(0, 300) }; };
-    for (const w of work) {
-      if (signal?.aborted) break;
-      attempted += 1;
-      try { rows.push({ jobid: w.jobid, row: await jobStatus(s, w.jobid) }); } catch (e) {
-        if (e?.code === 'jsonrpc') { itemErrors += 1; continue; }
-        stop(e); break;
-      }
-    }
-    const cut = !!fault || attempted < work.length || !!signal?.aborted;
-    const base = { rows, attempted, itemErrors, redisabled: [], reconciled: false, ...(fault ? { fault } : {}) };
-    if (!reconcile || cut) return { ...base, cut };
-    let states;
-    let recentRows;
-    try {
-      states = await jobStates(s);
-      recentRows = recent ? await recentJobs(s, 2) : [];
-    } catch (e) { stop(e); return { ...base, fault, cut: true }; }
+    // v2.824.1 버그 점검(G7 — 재현): 대조를 **먼저** 한다. 예전에는 work 를 다 읽어야만 대조해, 끝나지 않은 실행이 Director 예산보다 많은 동안
+    //   매 틱 잘려(cut) `.jobs`·다시 끄기·스케줄 실행 반영이 계속 밀렸다(reload 로 다시 켜진 잡이 그대로 돌고 스케줄 실행 결과·실패 메일이 멈췄다).
+    //   대조는 명령 2개 + 다시 끌 이름 수만큼이라 예산을 거의 쓰지 않는다. work 가 잘린 것은 회전(attempted)이 이어 간다(C1·P1).
+    let states = null;
+    let recentRows = [];
     const redisabled = [];
     let rcut = false;
-    let names = disableIfEnabled;
-    if (typeof disableNow === 'function') { try { names = disableNow(states) || []; } catch { names = []; } }
-    for (const name of names) {
-      if (signal?.aborted) { rcut = true; break; }
-      if (states.get(name) !== true) continue;
-      try { await setJobEnabled(s, name, false); redisabled.push(name); } catch (e) {
-        if (e?.code === 'jsonrpc') { itemErrors += 1; continue; }
-        stop(e); rcut = true; break;
+    let reconciled = false;
+    if (reconcile && !signal?.aborted) {
+      try {
+        states = await jobStates(s);
+        recentRows = recent ? await recentJobs(s, 2) : [];
+        reconciled = true;
+      } catch (e) { stop(e); }
+      if (reconciled) {
+        let names = disableIfEnabled;
+        if (typeof disableNow === 'function') { try { names = disableNow(states) || []; } catch { names = []; } }
+        for (const name of names) {
+          if (signal?.aborted) { rcut = true; break; }
+          if (states.get(name) !== true) continue;
+          try { await setJobEnabled(s, name, false); redisabled.push(name); } catch (e) {
+            if (e?.code === 'jsonrpc') { itemErrors += 1; continue; }
+            stop(e); rcut = true; break;
+          }
+        }
       }
     }
-    // `.jobs`·최근 행은 읽었다 — 대조 반영(사라진 잡·스케줄 실행)은 한다. 다시 끄기가 잘렸으면 cut(다음 틱에 이어서).
-    return { rows, attempted, states: [...states], recent: recentRows, redisabled, itemErrors, cut: rcut, reconciled: true, ...(fault ? { fault } : {}) };
+    if (!fault) {
+      for (const w of work) {
+        if (signal?.aborted) break;
+        attempted += 1;
+        try { rows.push({ jobid: w.jobid, row: await jobStatus(s, w.jobid) }); } catch (e) {
+          if (e?.code === 'jsonrpc') { itemErrors += 1; continue; }
+          stop(e); break;
+        }
+      }
+    }
+    // cut = 요청한 대조를 끝내지 못했다(다음 틱에 다시 — P2-5). 대조를 요청하지 않았으면 work 가 잘렸는가(회전이 이어 간다).
+    const cut = reconcile ? (!reconciled || rcut) : (!!fault || attempted < work.length || !!signal?.aborted);
+    return {
+      rows, attempted, redisabled, itemErrors, cut, reconciled,
+      ...(reconciled ? { states: [...states], recent: recentRows } : {}),
+      ...(fault ? { fault } : {}),
+    };
   },
 });
 

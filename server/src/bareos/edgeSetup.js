@@ -31,8 +31,26 @@ function bodyOf(args) {
  * @param {{ password?, vcpass?, consolePassword? }} secretArgs
  * @param {{ signal?: AbortSignal }} [o] 엣지 시한(워커 — 받은 시각 + ttl)
  */
+/**
+ * v2.824.1 버그 점검(G8 — 재현): 이 엣지에서 같은 Director·같은 서버의 자동 설정은 한 번에 하나 — **시한 뒤 되돌리기까지 끝날 때까지**.
+ * 중앙은 회신 시한(RESULT_MS)이 지나면 '결과 모름' 으로 잠금을 푸는데, 엣지의 되돌리기(새 SSH 세션 + reload)는 그보다 오래 걸릴 수 있어
+ * 곧바로 다시 실행한 작업과 겹쳐 옛 되돌리기가 새 콘솔 파일을 지웠다(새 비밀번호만 저장되고 Director 에는 콘솔이 없다).
+ * 중앙 직접 경로는 라우트가 되돌리기 끝까지 잠금을 쥔다(같은 규칙 — S6).
+ */
+const _busyDir = new Set();
+const _busyHost = new Set();
 export async function runSetupOp(kind, dir, args = {}, secretArgs = {}, { signal = null } = {}) {
   if (signal?.aborted) throw Object.assign(new Error('요청 시한이 지나 시작하지 않았습니다.'), { code: 'not-sent', notSent: true });
+  const hostKey = String(args?.body?.host || dir.host || '').trim().toLowerCase();
+  if (_busyDir.has(dir.id) || (hostKey && _busyHost.has(hostKey))) {
+    throw Object.assign(new Error('이 엣지에서 같은 Director·서버의 이전 자동 설정(또는 시한 뒤 되돌리기)이 아직 끝나지 않았습니다 — 끝난 뒤 다시 실행하세요. 아무것도 바꾸지 않았습니다.'), { code: 'conflict' });
+  }
+  _busyDir.add(dir.id);
+  if (hostKey) _busyHost.add(hostKey);
+  try { return await runSetupOne(kind, dir, args, secretArgs, signal); } finally { _busyDir.delete(dir.id); if (hostKey) _busyHost.delete(hostKey); }
+}
+
+async function runSetupOne(kind, dir, args, secretArgs, signal) {
   const b = { ...bodyOf(args), directorId: dir.id, password: String(secretArgs.password ?? '') };
   const site = args?.site && typeof args.site === 'object' ? { ...args.site, directorId: dir.id } : null;
   switch (kind) {

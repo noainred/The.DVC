@@ -57,7 +57,7 @@ function finish(op, result) {
   _ops.delete(op.id);
   // v2.824 검토(P1): 가져간 작업을 '결과 모름' 으로 닫으면 늦은 회신을 잠시 받아 준다(onLate 를 준 작업만 — 등록)
   if (result?.unknown && op.status === 'dispatched' && typeof op.onLate === 'function') {
-    const late = { agent: op.agent, kind: op.kind, onLate: op.onLate, timer: null };
+    const late = { agent: op.agent, kind: op.kind, onLate: op.onLate, timer: null, at: Date.now() };
     late.timer = setTimeout(() => _late.delete(op.id), LATE_KEEP_MS);
     late.timer.unref?.();
     _late.set(op.id, late);
@@ -157,6 +157,8 @@ export function pendingView() {
   const now = Date.now();
   return [..._ops.values()].map((o) => ({ agent: o.agent, directorId: o.directorId, kind: o.kind, status: o.status, ageMs: now - o.at }));
 }
+/** '결과 모름' 뒤 늦은 회신을 기다리는 작업(종류·엣지·나이만 — 업그레이드 대기 bareos/inflight.js). */
+export function lateView(now = Date.now()) { return [..._late.values()].map((l) => ({ agent: l.agent, kind: l.kind, ageMs: now - (l.at || now) })); }
 /** 이 Director 에 아직 끝나지 않은 작업(종류)이 있는가 — 폴러가 엣지 Director 에 poll 을 겹쳐 넣지 않게. */
 export function hasPending(directorId, kind) { return [..._ops.values()].some((o) => o.directorId === directorId && o.kind === kind); }
 

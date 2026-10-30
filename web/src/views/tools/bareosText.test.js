@@ -7,6 +7,7 @@ import {
   driftText, restorePointsNote, directorPatch, outcomeUnknown, missingText,
   directorStatus, preflightView, preflightSummary, autoSetupFdPluginText, fillEmptyMapping, directorFormPatch, WEEKDAYS, newMappingRow,
   isRelayDir, relayWaitMs, withRelayWait, unknownOutcomeText, directorChipTitle, secText, relayKindLabel,
+  targetLocks, READ_ONLY_TARGET, SETTINGS_READ_ONLY,
 } from './bareosText.js';
 
 describe('bareosText (v2.820 Bareos VM 백업)', () => {
@@ -317,5 +318,22 @@ describe('작업 결과 요약(v2.822.3 — 현장 jobid 8 로그 모양)', () =
     const row = newMappingRow('KR_VC01', 'dir_a', 'vc01.kr.corp', ['/etc/bareos/vmware/kr-vc01.ini']);
     expect(row).toMatchObject({ vcenterId: 'KR_VC01', directorId: 'dir_a', vcserver: 'vc01.kr.corp', configFile: '/etc/bareos/vmware/kr-vc01-2.ini' });
     expect(newMappingRow('vc-a', 'd', 'bad host;x').vcserver).toBe('');
+  });
+
+  it('v2.824.1 버그 점검 — 행 버튼 잠금 사유(G12 쓰기 범위 밖 · G13 잠긴 버튼은 사유를 말한다)', () => {
+    const ok = targetLocks({ enabled: true, writable: true }, { hasRun: true });
+    expect(Object.values(ok).every((v) => v === '')).toBe(true);
+    // writable 이 없으면(옛 서버 응답) 막지 않는다
+    expect(targetLocks({ enabled: true }, { hasRun: true }).run).toBe('');
+    const ro = targetLocks({ enabled: true, writable: false }, { hasRun: true });
+    expect(ro.run).toBe(READ_ONLY_TARGET); expect(ro.cancel).toBe(READ_ONLY_TARGET); expect(ro.restore).toBe(READ_ONLY_TARGET);
+    expect(ro.toggle).toBe(READ_ONLY_TARGET); expect(ro.remove).toBe(READ_ONLY_TARGET);
+    expect(ro.view).toBe('', '실행 기록 보기는 조회라 잠그지 않는다');
+    expect(targetLocks({ enabled: false, writable: true }).run).toMatch(/비활성/);
+    expect(targetLocks({ enabled: true }).view).toMatch(/실행 기록이 없/);
+    const run = targetLocks({ enabled: true }, { running: true, hasRun: true });
+    expect(run.toggle).toMatch(/실행 중/); expect(run.remove).toMatch(/실행 중/); expect(run.run).toBe(''); expect(run.cancel).toBe('');
+    expect(targetLocks({ enabled: true }, { busy: true }).cancel).toMatch(/처리 중/);
+    for (const t of [READ_ONLY_TARGET, SETTINGS_READ_ONLY, ...Object.values(ro), ...Object.values(run)]) expect(t).not.toMatch(/`/);
   });
 });

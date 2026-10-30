@@ -56,5 +56,9 @@
   2단계는 중앙 판정·저장 가능 여부(`checkDirectorUpdate`)를 **보내기 전에** 보고, 회신 ok → 중앙 저장 · 엣지는 성공 즉시(시한 안일 때만) 사본 갱신.
   ⑥ 폴러는 엣지 Director 를 **기다리지 않는다**(진행 중 poll 1개 · 회신 때 같은 반영 함수 · 회신 전은 실패로 세지 않는다). 화면은 서버 대기 시간(`relayLimits`)만큼 기다리고 시한·504 는 결과 모름.
   확정분·남긴 것 전문은 `docs/rules/audits.md` 'Bareos v2.824 법인 엣지 대행 검토 확정분'.
+- **v2.824.1 버그 점검**(사용자 요청 '버그 찾아서 수정' · `bareosBugs2824_1`·`_1b`): 성공으로 인증 정지를 풀 때는 **그 접속값이 지금 설정과 같을 때만**(`clearAuthStopIfSame`) ·
+  복원은 설정만 보면 아는 전제를 OTP 앞에서 · 엣지 성공 회신에 유효한 잡 이름이 없으면 결과 모름 · `ops.poll` 은 **대조를 먼저**(work 가 예산을 넘어도 `.jobs`·다시 끄기가 돈다) ·
+  엣지 자동 설정은 Director·서버마다 한 번에 하나(되돌리기까지) · 재시작하면 결과를 잃는 작업은 `inflight.js` → 업그레이드 자동 적용이 기다린다 · 취소의 끝난 행은 type B 만 반영.
+  전문·남긴 것은 `docs/rules/audits.md` 'Bareos v2.824.1 버그 점검 확정분'.
 - 실환경 미확인(추정 — `tools/bareos-probe.js` 로 확인할 것): Node↔Director TLS-PSK 협상 · 잡 수준 FdPluginOptions 와 FileSet 플러그인 문자열 병합 ·
   `.bvfs_get_jobids` JSON 모양 · Profile ACL 지시어 이름 · `list jobs days=N` · 25.x `.jobs` 의 enabled 칸(master 소스 기준 — 없으면 다시 끄기를 하지 않는다) · Migration 행의 시작 시각.
