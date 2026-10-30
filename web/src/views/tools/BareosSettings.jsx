@@ -397,7 +397,8 @@ function DirectorEditor({ s, dir, locked, onReload, onSaved, onClose, onDeleted 
       {!canConnect && <div className="muted" style={{ fontSize: 12, marginBottom: 6 }}>콘솔 접속값이 아직 없어 카탈로그를 읽지 않습니다 — 자동 설정 2단계를 끝내면 드롭다운이 채워집니다.</div>}
       <div className="table-wrap" style={{ maxHeight: '44vh' }}>
         {/* Chromium 1440 확인: '작업' 열이 표 오른쪽 밖(안쪽 가로 스크롤)이라 빼기 버튼이 보이지 않았다 — 버튼을 첫 열(vCenter) 아래로 옮겼다 */}
-        <STable minWidth={1060} sortable={false}>
+        {/* 칸 입력은 고정폭 대신 최소폭 + 100% — 1440 에서 마지막 'FD INI 경로' 칸이 45px 잘렸다(Chromium r2) */}
+        <STable minWidth={1000} sortable={false}>
           <thead><tr><th>vCenter</th>{MAPPING_FIELDS.map(([k, l]) => <th key={k}>{l}</th>)}</tr></thead>
           <tbody>
             {rows.length === 0 && <tr><td colSpan={7} className="center muted" style={{ padding: 16 }}>묶은 vCenter 가 없습니다 — 위에서 이 법인의 vCenter 를 체크하세요.</td></tr>}
@@ -411,16 +412,16 @@ function DirectorEditor({ s, dir, locked, onReload, onSaved, onClose, onDeleted 
                     <button type="button" className="logout-btn" style={{ ...BTN, padding: '2px 7px', fontSize: 11 }} disabled={lockedRow(x.vcenterId) || busy === 'suggest'} title={lockedRow(x.vcenterId) ? '백업 대상이 있어 뺄 수 없습니다 — 대상을 먼저 지우세요' : undefined} onClick={() => toggleVc(x.vcenterId, false)}>빼기</button>
                   </div>
                 </td>
-                <td><input className="input" aria-label="vcserver" value={x.vcserver} onChange={(e) => setRow(x.vcenterId, 'vcserver', e.target.value.trim())} style={{ ...INP, width: 160 }} placeholder={s.vcenters.find((v) => v.id === x.vcenterId)?.host || 'vCenter 주소'} /></td>
+                <td><input className="input" aria-label="vcserver" value={x.vcserver} onChange={(e) => setRow(x.vcenterId, 'vcserver', e.target.value.trim())} style={{ ...INP, minWidth: 130 }} placeholder={s.vcenters.find((v) => v.id === x.vcenterId)?.host || 'vCenter 주소'} /></td>
                 {[['client', 'clients'], ['storage', 'storages'], ['pool', 'pools'], ['schedule', 'schedules']].map(([k, ck]) => (
                   <td key={k}>{cat?.[ck] ? (
-                    <Select className="input" aria-label={k} value={x[k]} onChange={(e) => setRow(x.vcenterId, k, e.target.value)} style={{ ...INP, width: 140 }}>
+                    <Select className="input" aria-label={k} value={x[k]} onChange={(e) => setRow(x.vcenterId, k, e.target.value)} style={{ ...INP, minWidth: 110 }}>
                       <option value="">{k === 'schedule' ? '— (수동)' : '선택…'}</option>
                       {opts(ck, x[k]).map((n) => <option key={n} value={n}>{n}</option>)}
                     </Select>
-                  ) : <input className="input" aria-label={k} value={x[k]} onChange={(e) => setRow(x.vcenterId, k, e.target.value.trim())} style={{ ...INP, width: 120 }} />}</td>
+                  ) : <input className="input" aria-label={k} value={x[k]} onChange={(e) => setRow(x.vcenterId, k, e.target.value.trim())} style={{ ...INP, minWidth: 100 }} />}</td>
                 ))}
-                <td><input className="input" aria-label="INI 경로" value={x.configFile} onChange={(e) => setRow(x.vcenterId, 'configFile', e.target.value.trim())} style={{ ...INP, width: 210 }} placeholder={`/etc/bareos/vmware/${vcSlug(x.vcenterId)}.ini`} /></td>
+                <td><input className="input" aria-label="INI 경로" value={x.configFile} onChange={(e) => setRow(x.vcenterId, 'configFile', e.target.value.trim())} style={{ ...INP, minWidth: 170 }} placeholder={`/etc/bareos/vmware/${vcSlug(x.vcenterId)}.ini`} /></td>
               </tr>
             ); })}
           </tbody>
