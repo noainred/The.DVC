@@ -96,6 +96,7 @@ export const SECRET_FILES = [
   // 넣으면 collectors.json 등의 접속 주소까지 봉인되므로, **이 파일에서만** 추가 필드로 봉인한다(FILE_EXTRA_SECRET_FIELDS).
   'alerts.json',                   // 알림 채널 웹훅 URL(alerts.js — 파일 한정 추가 필드 'url')
   'bareos.json',                   // Bareos Director 콘솔 비밀번호(bareos/settings.js, v2.820)
+  'bareos-edge-directors.json',    // 엣지가 받은 법인 Director 대행 사본 — 콘솔 비밀번호(bareos/edgeStore.js, v2.824)
 ];
 
 /**

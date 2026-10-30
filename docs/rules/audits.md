@@ -7,6 +7,7 @@
 ## 목차
 
 - Bareos v2.823 법인별 Director 검토 확정분(5축 + 반증 2인 — 2026-10-30)
+- Bareos v2.822 모듈 규칙(server/src/bareos/CLAUDE.md 에서 옮김 — 2026-10-30, v2.824)
 - Bareos v2.822 · v2.822.3 검토 확정분(server/src/bareos/CLAUDE.md 에서 옮김 — 2026-10-30, v2.823)
 - (원래 974행) v2.727 — 버그 점검 6축(사이드바·게시판·정직성·엣지·화면·성능) + 상단 메뉴 C안 + 메뉴 아코디언 + iDRAC 통합 추이 A안
 - (원래 1040행) 2026-10-09 검토 보고서 개선(기준 v2.729.0 · 20건) — 되돌리지 말 것
@@ -1844,3 +1845,19 @@
 - **남긴 것**: I9 암호화 정책 잠금 상태에서 경로 변경(`director.password` → `directors.0.password`)이 재사용 기억을 놓칠 수 있다는 추론(재현 안 함) ·
   P2 틱 전체 상한 · Director 쪽 고아 잡 탐지 · 새로 추가한 Director 는 다음 대조 틱(기본 10분)까지 '조회 전'.
 
+## Bareos v2.822 모듈 규칙(server/src/bareos/CLAUDE.md 에서 옮김 — 2026-10-30, v2.824)
+
+원문 그대로(크기 상한으로 옮겼다 — 되돌리지 말 것 규칙은 그대로 유효하다).
+
+- **v2.822 대상별 처리 중 표시**(`bareosBackup.js oneAtATime`): 실행·복원·삭제는 대상마다 한 번에 하나(나머지 409) — pending 검사와 markPending 사이의
+  Director 호출 동안 두 번째 요청이 같은 검사를 통과해 실행이 두 번 나갔다(B2). 수동 조회(`/poll`) 응답도 목록 GET 과 같은 `addrVisible` 로 가린다(B3).
+- **v2.822 일괄 등록**(`POST …/jobs/bulk`, `service.createBackupTargets`): vCenter 하나 · `MAX_BULK`(200 — 화면은 응답의 maxBulk·jobsLeft) ·
+  원장 여유(MAX_JOBS)를 Director 에 닿기 전에 확인 · **Director 세션 1개**로 순차 · 한 대의 실패가 나머지를 막지 않는다 · 세션이 끊기면 남은 VM 은 '건너뜀'.
+  Director 잡은 만들고 원장에 못 넣었으면 그 잡 이름을 사유에 밝힌다(숨기지 않는다).
+- **v2.822 단계별 연결 진단**(`console.diagnoseConsole` — 던지지 않는다): 주소 → DNS(그 주소로 고정 — `pinnedLookup`) → TCP → TLS-PSK → 인증 → JSON 모드 → `.clients`.
+  실패 뒤 단계는 skipped(실패로 세지 않는다). 비밀번호·콘솔 이름이 틀리면 **TLS 단계**에서 실패한다(PSK 가 비밀번호에서 나온다 — hint 가 그렇게 말한다).
+  SSRF 차단 코드는 `'ESSRFBLOCKED'`(util/ssrfLookup) — `blockedCode` 하나로 본다(B1: 'ESSRF' 만 봐서 'connect' 로 분류됐다). TLS 핸드셰이크도 취소를 받는다(B6).
+  연결 시험 감사 대상은 **실제 접속한 주소**(B4 — 저장 비밀번호 시험에서 요청 주소를 적던 것).
+- **v2.822 실패 알림 메일**(`bareos/notify.js`, 메일 종류 `bareos-backup`): 중앙 전용 · 원장만 읽는다(Director 에 닿지 않는다) · 커서는 대상별 **jobid**
+  (카탈로그 시각은 시간대가 없다) · 끝나지 않은 실행으로는 커서를 옮기지 않는다 · 메일 꺼짐이면 커서만 · 발송 실패면 커서 유지 · mock·데모 대상 제외.
+  한계: 스케줄 실행은 대조 틱마다 대상별 최신 1건만 원장에 들어와 그 사이 실패가 2건이면 1건만 알린다.

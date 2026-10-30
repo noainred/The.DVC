@@ -292,9 +292,14 @@ const leftText = (r) => (r.left?.length ? `되돌리지 못한 파일: ${r.left.
  * @param {{ host, sshPort?, username?, password, directorPort?, consoleName?, restoreClient, restoreStorage, restorePool }} b
  * @throws Error(code 'invalid')
  */
-export function planDirector(b = {}) {
-  const cur = loadSettings();
-  const dir = directorById(b.directorId, cur);
+/**
+ * v2.824 엣지 대행: ctx 를 주면 중앙 설정 대신 그 값으로 한다(엣지는 중앙 bareos.json 이 없다 — bareos/edgeSetup.js).
+ *   ctx = { dir, cur?: { directors, defaults }, site?, consolePassword?, save?(conn) → { director, droppedSecrets }, clearAuthStop?() }
+ *   입력 판정(중앙 plan)은 라우트가 중앙에서 먼저 한다 — 엣지에서는 같은 판정을 다시 지난다(받은 값을 믿지 않는다).
+ */
+export function planDirector(b = {}, ctx = null) {
+  const cur = ctx?.cur || loadSettings();
+  const dir = ctx?.dir || directorById(b.directorId, cur);
   if (!dir) throw fail('invalid', '자동 설정할 법인 Director 를 고르세요(설정 › 법인별 Director 에서 먼저 추가합니다).');
   const { ssh, issue } = normSsh(b);
   if (issue) throw fail('invalid', issue);
@@ -323,11 +328,13 @@ export function planDirector(b = {}) {
  * @returns {Promise<{ ok: true, files, test, reload, probe, settings, droppedSecrets }>}
  * @throws Error(code: invalid·conflict·remote·config-test·console-login, message 사람이 읽는 사유)
  */
-export async function setupDirector(b = {}) {
-  const { dir, ssh, directorPort, consoleName, restoreClient, restoreStorage, restorePool, pools, schedule, cur } = planDirector(b);
+export async function setupDirector(b = {}, ctx = null) {
+  const { dir, ssh, directorPort, consoleName, restoreClient, restoreStorage, restorePool, pools, schedule, cur } = planDirector(b, ctx);
   const ri = await resolvedHostIssue(ssh.host);
   if (ri) throw fail('invalid', ri);
-  const password = newConsolePassword();
+  // 엣지 대행은 새 콘솔 비밀번호를 **중앙이 만들어** 보낸다(중앙이 회신 ok 뒤 그 값으로 저장 — 계획서 2-3)
+  const password = typeof ctx?.consolePassword === 'string' && /^[A-Za-z0-9_-]{32}$/.test(ctx.consolePassword) ? ctx.consolePassword : newConsolePassword();
+  const clearStop = () => (ctx?.clearAuthStop ? ctx.clearAuthStop() : clearStaleAuthStop(dir.id));
   const res = directorResources({ defaults: cur.defaults, consoleName, consolePassword: password, restoreClient, restoreStorage, restorePool, pools, schedule })
     .map((r) => ({ ...r, path: `${DIR_CONF_ROOT}/${r.type}/${r.name}.conf`, content: `${MARKER}\n${r.text}\n`, mode: '0640' }));
   // v2.822.3(S2-5 — 재현): SSH 비밀번호를 부분 문자열로 가리면 '****-dir' 처럼 가린 자리가 곧 비밀번호가 됐다(감사·응답).
@@ -419,7 +426,7 @@ export async function setupDirector(b = {}) {
   }
   if (!pr) {
     const rb = await rollbackInNewSession(ssh, placed, { reload: true });
-    clearStaleAuthStop(dir.id);
+    clearStop();
     const undone = !rb.left.length;
     throw fail('console-login', `포탈이 새 콘솔 ‘${consoleName}’ 로 접속하지 못했습니다(${lastErr?.code || 'error'}: ${mask(String(lastErr?.message || lastErr)).slice(0, 300)}). `
       + (undone ? `넣은 파일을 되돌리고 Director 를 다시 읽혔습니다(reload ${rb.reloaded === false ? '실패 — 직접 reload 하세요' : '완료'}). 포탈 설정은 바꾸지 않았습니다.`
@@ -428,10 +435,10 @@ export async function setupDirector(b = {}) {
   // v2.822.3(C2-5·I2-2 — 재현): 저장이 실패하면(비밀 정책 잠금·디스크) Director 만 새 비밀번호가 되고 생성 비밀번호는 잃는다 — 되돌린다.
   let saved;
   try {
-    saved = updateDirector(dir.id, { host: ssh.host, port: directorPort, consoleName, password });
+    saved = ctx?.save ? ctx.save({ host: ssh.host, port: directorPort, consoleName, password }) : updateDirector(dir.id, { host: ssh.host, port: directorPort, consoleName, password });
   } catch (se) {
     const rb = await rollbackInNewSession(ssh, placed, { reload: true });
-    clearStaleAuthStop(dir.id);
+    clearStop();
     // 사유는 코드만(오류 원문에 CONFIG_DIR 경로가 실린다)
     throw fail('save', `새 콘솔 접속은 됐지만 포탈 설정을 저장하지 못했습니다(${se?.code || '저장 오류'}). `
       + (rb.left.length ? `${leftText(rb)}.` : `넣은 파일을 되돌리고 Director 를 다시 읽혔습니다(reload ${rb.reloaded === false ? '실패 — 직접 reload 하세요' : '완료'}). 포탈 설정은 그대로입니다.`), { files: remote.files });
@@ -449,8 +456,8 @@ function clearStaleAuthStop(directorId) {
 
 /* ───────────────────────── ② 사이트 FD INI ───────────────────────── */
 
-function siteOf(vcenterId, directorId = '') {
-  const site = loadSettings().sites.find((s) => s.vcenterId === String(vcenterId || ''));
+function siteOf(vcenterId, directorId = '', ctx = null) {
+  const site = ctx?.site ? (ctx.site.vcenterId === String(vcenterId || '') ? ctx.site : null) : loadSettings().sites.find((s) => s.vcenterId === String(vcenterId || ''));
   if (!site) throw fail('invalid', '이 vCenter 의 사이트 매핑이 없습니다 — 설정 탭에서 매핑(FD·스토리지·풀·INI 경로)을 먼저 저장하세요.');
   // v2.823: 이 Director 편집 화면에서 연 단계는 이 Director 에 묶인 vCenter 만 다룬다(다른 법인 FD 에 쓰지 않게)
   if (directorId && site.directorId !== directorId) throw fail('invalid', '이 vCenter 는 이 Director 에 묶여 있지 않습니다.');
@@ -467,8 +474,8 @@ function siteOf(vcenterId, directorId = '') {
  * planFdIni = 입력 판정(원격 접속 없음 — 라우트가 OTP 전에 부른다).
  * @param {{ vcenterId, host, sshPort?, username?, password, vcuser, vcpass, vcthumbprint }} b
  */
-export function planFdIni(b = {}) {
-  const site = siteOf(b.vcenterId, b.directorId);
+export function planFdIni(b = {}, ctx = null) {
+  const site = siteOf(b.vcenterId, b.directorId, ctx);
   const { ssh, issue } = normSsh(b);
   if (issue) throw fail('invalid', issue);
   const ui = iniValueIssue(b.vcuser, 'vCenter 계정', 128) || iniValueIssue(b.vcpass, 'vCenter 비밀번호', 256);
@@ -478,8 +485,8 @@ export function planFdIni(b = {}) {
   return { site, ssh, vcthumbprint };
 }
 
-export async function setupFdIni(b = {}) {
-  const { site, ssh, vcthumbprint } = planFdIni(b);
+export async function setupFdIni(b = {}, ctx = null) {
+  const { site, ssh, vcthumbprint } = planFdIni(b, ctx);
   const ri = await resolvedHostIssue(ssh.host);
   if (ri) throw fail('invalid', ri);
   const content = fdIniText({ vcserver: site.vcserver, vcuser: b.vcuser, vcpass: b.vcpass, vcthumbprint });
@@ -523,8 +530,8 @@ export function parseOpensslFingerprint(text) {
 }
 
 /** 사이트 FD 에서 그 vCenter(vcserver:443)의 인증서 지문을 읽는다(쓰기 없음). FD 에서 보이는 값이어야 플러그인이 받는 값과 같다. */
-export async function readFdThumbprint(b = {}) {
-  const site = siteOf(b.vcenterId, b.directorId);
+export async function readFdThumbprint(b = {}, ctx = null) {
+  const site = siteOf(b.vcenterId, b.directorId, ctx);
   const { ssh, issue } = normSsh(b);
   if (issue) throw fail('invalid', issue);
   const ri = await resolvedHostIssue(ssh.host);
@@ -646,8 +653,8 @@ export function parsePreflight(text) {
  * 사전 점검 — SSH 로 읽기만 한다(쓰기 없음 · OTP 없음). 출력에 SSH 비밀번호와 같은 글자가 있으면 싣지 않는다(S2-5).
  * @param {{ directorId, host, sshPort?, username?, password }} b
  */
-export async function preflight(b = {}) {
-  const dir = directorById(b.directorId);
+export async function preflight(b = {}, ctx = null) {
+  const dir = ctx?.dir || directorById(b.directorId);
   if (!dir) throw fail('invalid', '점검할 법인 Director 를 고르세요.');
   const { ssh, issue } = normSsh(b);
   if (issue) throw fail('invalid', issue);
@@ -713,8 +720,8 @@ const OWNER_RE = /^[a-z_][a-z0-9_-]{0,31}$/;
 const restoreCmd = (conf, backup) => `${canonDir(conf)} && [ ! -L ${conf} ] && cp -p ${backup} ${conf} && systemctl restart bareos-fd`;
 
 /** FD 플러그인 켜기 입력 판정(원격 접속 없음 — 라우트가 OTP 전에 부른다). */
-export function planFdPlugin(b = {}) {
-  const dir = directorById(b.directorId);
+export function planFdPlugin(b = {}, ctx = null) {
+  const dir = ctx?.dir || directorById(b.directorId);
   if (!dir) throw fail('invalid', '법인 Director 를 고르세요.');
   const { ssh, issue } = normSsh(b);
   if (issue) throw fail('invalid', issue);
@@ -725,8 +732,8 @@ export function planFdPlugin(b = {}) {
  * FD 의 myself.conf 에 python3 플러그인 줄을 넣고 bareos-fd 를 재시작한다. 실패하면 쓰기 전 사본으로 되돌리고 다시 재시작한다.
  * @returns {Promise<{ ok, action, pluginDir, backup?, added }>}
  */
-export async function setupFdPlugin(b = {}) {
-  const { dir, ssh } = planFdPlugin(b);
+export async function setupFdPlugin(b = {}, ctx = null) {
+  const { dir, ssh } = planFdPlugin(b, ctx);
   const ri = await resolvedHostIssue(ssh.host);
   if (ri) throw fail('invalid', ri);
   const conf = FD_CLIENT_CONF;

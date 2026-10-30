@@ -22,8 +22,11 @@ import { parseBanner } from '../../bareos/director.js';
 import { diagnoseConsole, DIAG_STAGES } from '../../bareos/console.js';
 import { secretProvided } from '../../util/secretCarry.js';
 import {
-  onDirector, isDemoActive, effectiveSettings, eligibility, createBackupTarget, createBackupTargets, bareosAuthGuard,
+  onDirector, relayToEdge, isDemoActive, effectiveSettings, eligibility, createBackupTarget, createBackupTargets, bareosAuthGuard,
 } from '../../bareos/service.js';
+import { pendingView } from '../../bareos/edgeOps.js';
+import { pickAgent } from '../../cvp/formChoices.js';
+import { knownAgentNames } from '../../central/knownAgents.js';
 import { pollerStatus, pollOnce, requestReconcile } from '../../bareos/poller.js';
 import { restorePlan, placementDrift } from '../../bareos/restore.js';
 import { summarizeRegistryError } from '../../util/registryCore.js';
@@ -31,7 +34,7 @@ import { normLevel } from '../../bareos/names.js';
 import { authStopView } from '../../util/authGuard.js';
 import { isDemoGuest, isAdminDetailUser } from '../../auth/demoGuest.js';
 import {
-  planDirector, setupDirector, planFdIni, setupFdIni, readFdThumbprint, preflight, planFdPlugin, setupFdPlugin, VMWARE_POOL_FULL, VMWARE_SCHEDULE,
+  planDirector, setupDirector, planFdIni, setupFdIni, readFdThumbprint, preflight, planFdPlugin, setupFdPlugin, VMWARE_POOL_FULL, VMWARE_SCHEDULE, newConsolePassword,
 } from '../../bareos/autoSetup.js';
 import { isSshAuthError, isSshHostKeyError } from '../../proxy/sshExec.js';
 
@@ -91,7 +94,7 @@ const orphanOf = (job) => !job.demo && !isDemoActive() && !directorById(jobDir(j
 function sendErr(res, e) {
   const code = e?.code || '';
   if (code === 'demo-only') return res.status(403).json({ ok: false, code, demoGuest: true, reason: String(e?.message || e) });
-  const status = code === 'invalid' ? 400 : code === 'not-found' ? 404 : code === 'not-configured' || code === 'busy' || code === 'conflict' ? 409 : code === 'unavailable' ? 503
+  const status = code === 'invalid' ? 400 : code === 'not-found' ? 404 : code === 'not-configured' || code === 'busy' || code === 'conflict' || code === 'edge-relay' ? 409 : code === 'unavailable' || code === 'not-sent' ? 503 : code === 'unknown' ? 504
     : ['auth', 'pam', 'tls', 'connect', 'blocked', 'timeout', 'protocol', 'closed', 'too-large', 'jsonrpc', 'auth-stopped'].includes(code) ? 502 : 500;
   res.status(status).json({ ok: false, code: code || 'error', reason: String(e?.message || e).slice(0, 600) });
 }
@@ -216,7 +219,8 @@ function sendSetupErr(res, e) {
   if (isSshHostKeyError(e)) return res.status(502).json({ ok: false, code: 'ssh-hostkey', reason: String(e.message).slice(0, 600) });
   // v2.822.3(I2-3): Rocky·RHEL 9 의 sshd 기본값(PermitRootLogin prohibit-password)은 root 비밀번호 로그인을 막는다(추정 — 배포판 기본값)
   if (isSshAuthError(e)) return res.status(502).json({ ok: false, code: 'ssh-auth', reason: 'SSH 인증 실패 — 계정·비밀번호를 확인하세요(자동으로 다시 시도하지 않습니다). 비밀번호가 맞다면 그 서버의 sshd 가 root 비밀번호 로그인을 막고 있을 수 있습니다(Rocky·RHEL 9 기본값 PermitRootLogin prohibit-password).' });
-  const status = code === 'invalid' ? 400 : code === 'conflict' ? 409 : code === 'config-test' ? 422 : 502;
+  // v2.824 엣지 대행: 보내지 않음(엣지가 가져가지 않음) 503 · 결과 모름(가져갔지만 미회신) 504
+  const status = code === 'invalid' ? 400 : code === 'conflict' ? 409 : code === 'config-test' ? 422 : code === 'not-sent' ? 503 : code === 'unknown' ? 504 : 502;
   res.status(status).json({ ok: false, code: code || 'ssh', reason: String(e?.message || e).slice(0, 1800), ...(e?.paths ? { paths: e.paths } : {}), ...(e?.files ? { files: e.files } : {}) });
 }
 
@@ -328,7 +332,7 @@ api.get('/tools/bareos-backup', adminOnly, (req, res) => {
     const vcs = settings.sites.filter((s) => s.directorId === d.id && visibleSite(s)).map((s) => s.vcenterId);
     const n = views.filter((j) => j.directorId === d.id).length;
     return {
-      id: d.id, name: d.name, ...(showAddr ? { host: d.host, port: d.port, consoleName: d.consoleName } : { masked: true }),
+      id: d.id, name: d.name, ...(showAddr ? { host: d.host, port: d.port, consoleName: d.consoleName, agent: d.agent || '' } : { masked: true, relay: !!d.agent }),
       hasPassword: !!d.password, configured: demo || !!directorConn(d).conn, vcenters: vcs, jobs: n,
       poll: (showAddr ? rawPoller.directors?.[d.id] : maskErr(rawPoller.directors?.[d.id])) || null, authStopped: authStopFor(d, demo, showAddr),
     };
@@ -362,6 +366,8 @@ api.get('/tools/bareos-backup/settings', adminOnly, fullScopeOnly, (req, res) =>
     ...pub,
     directors: pub.directors.map((d) => ({ ...d, jobs: jobsByDir.get(d.id) || 0, busy: _setupBusy.has(d.id) })),
     rev: revToken(),   // 매핑·기본값 저장 때 돌려보낸다(P4 — 다른 화면의 저장을 덮지 않게)
+    agents: (() => { try { return knownAgentNames(); } catch { return []; } })(),   // v2.824 담당 엣지 고르기(중앙이 아는 엣지)
+    relayPending: pendingView(),   // v2.824 엣지 대행 대기·진행 작업(인자·비밀 없음)
     limits: LIMITS,
     vcenters: (snap?.vcenters || []).map((v) => ({ id: v.id, name: v.name || v.id, host: String(v.host || '').replace(/^https?:\/\//, '').replace(/\/.*$/, '') })),
     jobsByVcenter: Object.fromEntries([...listJobs().filter((j) => !j.demo).reduce((m, j) => m.set(j.vcenterId, (m.get(j.vcenterId) || 0) + 1), new Map())]),
@@ -396,10 +402,14 @@ api.put('/tools/bareos-backup/settings', adminOnly, fullScopeOnly, fullWriteOnly
 
 /** 법인 Director 추가 — body { name, host, port?, consoleName, password?, timeoutMs?, tlsMax? }. */
 api.post('/tools/bareos-backup/settings/directors', adminOnly, fullScopeOnly, fullWriteOnly, (req, res) => {
-  const b = req.body || {};
+  const b = { ...(req.body || {}) };
+  // v2.824 담당 엣지 — 중앙이 아는 엣지 이름만(pickAgent — 오타·대소문자 차이 방지). 빈 값 = 중앙 직접.
+  const ag = pickAgent(b.agent, knownAgentNames(), '');
+  if (ag.error) return res.status(400).json({ ok: false, field: 'agent', reason: ag.error });
+  b.agent = ag.value;
   try {
     const r = addDirector(b);
-    audit(req, 'Bareos Director 추가', r.director.name, `${r.director.host || '(주소 없음)'}:${r.director.port} · 콘솔 ${r.director.consoleName || '—'}${r.director.hasPassword ? ' · 비밀번호 있음' : ''}`);
+    audit(req, 'Bareos Director 추가', r.director.name, `${r.director.host || '(주소 없음)'}:${r.director.port} · 콘솔 ${r.director.consoleName || '—'}${r.director.hasPassword ? ' · 비밀번호 있음' : ''} · 담당 ${r.director.agent ? `엣지 ${r.director.agent}` : '중앙 직접'}`);
     res.status(201).json({ ok: true, ...r });
   } catch (e) { res.status(400).json({ ok: false, reason: String(e?.message || e) }); }
 });
@@ -409,11 +419,17 @@ api.put('/tools/bareos-backup/settings/directors/:directorId', adminOnly, fullSc
   const id = String(req.params.directorId || '');
   // v2.821: 자동 설정이 끝에 Director 연결을 저장한다 — 그 사이의 저장을 받으면 어느 한쪽이 조용히 덮인다.
   if (_setupBusy.has(id)) return res.status(409).json({ ok: false, reason: '이 Director 의 자동 설정이 진행 중입니다 — 끝난 뒤 저장하세요.' });
-  const b = req.body || {};
+  const b = { ...(req.body || {}) };
+  if (b.agent !== undefined) {
+    const prev = directorById(id, loadSettings());
+    const ag = pickAgent(b.agent, knownAgentNames(), prev?.agent || '');
+    if (ag.error) return res.status(400).json({ ok: false, field: 'agent', reason: ag.error });
+    b.agent = ag.value;
+  }
   try {
     const r = updateDirector(id, b);
     for (const k of [..._catalogMemo.keys()]) if (k.includes(`|${id}|`)) _catalogMemo.delete(k);
-    audit(req, 'Bareos Director 저장', r.director.name, `${r.director.host || '(주소 없음)'}:${r.director.port} · 콘솔 ${r.director.consoleName || '—'}${secretProvided(b.password) ? ' · 비밀번호 변경' : ''}${r.droppedSecrets.length ? ' · 접속처 변경으로 저장 비밀번호 폐기' : ''}`);
+    audit(req, 'Bareos Director 저장', r.director.name, `${r.director.host || '(주소 없음)'}:${r.director.port} · 콘솔 ${r.director.consoleName || '—'} · 담당 ${r.director.agent ? `엣지 ${r.director.agent}` : '중앙 직접'}${secretProvided(b.password) ? ' · 비밀번호 변경' : ''}${r.droppedSecrets.length ? ' · 접속처 변경으로 저장 비밀번호 폐기' : ''}`);
     res.json({ ok: true, ...r });
   } catch (e) { res.status(e?.code === 'not-found' ? 404 : 400).json({ ok: false, reason: String(e?.message || e) }); }
 });
@@ -451,6 +467,16 @@ api.post('/tools/bareos-backup/settings/directors/:directorId/test', adminOnly, 
       return res.json({ ok: true, ...result, stages, demo: true });
     }
     const fresh = secretProvided(b.password);
+    // v2.824 엣지 대행 Director: 중앙이 접속하지 않는다 — 그 엣지가 자기 사본(저장값 — 저장 뒤 최대 5분 늦게 반영)으로 시험한다.
+    //   입력한 새 비밀번호를 시험용으로 엣지에 보내지 않는다(저장한 뒤 시험 — 비밀은 자동 설정 대행에만 싣는다).
+    if (saved.agent && !isDemoActive()) {
+      if (fresh) return res.status(400).json({ ok: false, reason: `이 Director 는 법인 엣지 '${saved.agent}' 가 대행합니다 — 새 비밀번호는 먼저 저장한 뒤 시험하세요(엣지가 저장된 값으로 시험합니다 · 엣지 반영은 최대 5분).` });
+      target = `${saved.name} (엣지 ${saved.agent} 대행)`;
+      const result = await relayToEdge(saved, 'probe', {});
+      bareosAuthGuard.clearAuthStop(directorCred(saved).id);
+      audit(req, 'Bareos 연결 시험', target, `성공 — ${result.director || '?'} ${result.version || ''}`);
+      return res.json({ ok: true, ...result, stages: null, relay: saved.agent, demo: false });
+    }
     const conn = fresh
       ? { host: String(b.host ?? saved.host), port: b.port ?? saved.port, name: String(b.consoleName ?? saved.consoleName), password: String(b.password), timeoutMs: b.timeoutMs ?? saved.timeoutMs, tlsMaxVersion: b.tlsMax ?? saved.tlsMax }
       : { host: saved.host, port: saved.port, name: saved.consoleName, password: saved.password || '', timeoutMs: saved.timeoutMs, tlsMaxVersion: saved.tlsMax };
@@ -505,12 +531,46 @@ api.get('/tools/bareos-backup/settings/directors/:directorId/suggest', adminOnly
  * 자동 설정(v2.821 · v2.823 Director 마다 — bareos/autoSetup.js). 전부 admin + 전체 범위 + 데모 계정 거부 + Director 마다 동시 1건.
  * 쓰기(Director 리소스·FD 플러그인·FD INI)는 본인 OTP 를 더 건다(원격 root 로 설정 파일을 쓴다). SSH·vCenter 비밀번호는 저장하지 않는다.
  */
+/**
+ * 자동 설정 한 단계 — 중앙 직접(local) 또는 담당 엣지 대행(v2.824 · 사용자 결정 '입력한 SSH·vCenter 비밀번호를 그 작업에만 실어 엣지로 1회 전달').
+ * 엣지 대행이면: 비밀(SSH·vCenter 비밀번호 · 2단계의 새 콘솔 비밀번호 — **중앙이 만든다**)은 secretArgs 로 따로(엣지 인출 즉시 중앙 큐에서 지운다 ·
+ * 인출 전 시한 SECRET_TTL_MS) · args 에는 비밀이 아닌 입력과 그 단계가 쓰는 중앙 값(공통 기본값 · 매핑 한 줄)만.
+ * 2단계 회신이 ok 면 중앙이 그 콘솔 값으로 저장한다(실패하면 사실대로 — 재실행하면 MARKER 파일을 덮는다).
+ */
+async function runSetup(d, kind, b, local) {
+  if (!d.agent || isDemoActive()) return local(b);
+  const { password, vcpass, otp, directorId, ...body } = b;   // eslint-disable-line no-unused-vars
+  const settings = loadSettings();
+  const args = { body };
+  let site = null;
+  if (kind === 'setup.director') args.defaults = { ...settings.defaults };
+  if (kind === 'setup.fdIni' || kind === 'setup.thumbprint') {
+    site = settings.sites.find((x) => x.vcenterId === String(b.vcenterId || '') && x.directorId === d.id) || null;
+    if (!site) throw Object.assign(new Error('이 vCenter 는 이 Director 에 묶여 있지 않습니다.'), { code: 'invalid' });
+    args.site = { ...site };
+  }
+  const consolePassword = kind === 'setup.director' ? newConsolePassword() : '';
+  const secretArgs = { password: String(password ?? ''), ...(kind === 'setup.fdIni' ? { vcpass: String(vcpass ?? '') } : {}), ...(consolePassword ? { consolePassword } : {}) };
+  const value = await relayToEdge(d, kind, args, { secretArgs });
+  if (kind === 'setup.director') {
+    const pl = planDirector(b);
+    let saved;
+    try { saved = updateDirector(d.id, { host: pl.ssh.host, port: pl.directorPort, consoleName: pl.consoleName, password: consolePassword }); }
+    catch (se) {
+      throw Object.assign(new Error(`법인 엣지 '${d.agent}' 의 Director 자동 설정은 끝났지만(새 콘솔 접속 확인까지) 중앙 설정을 저장하지 못했습니다(${se?.code || '저장 오류'}) — 이 Director 의 콘솔 접속값은 바뀌지 않았습니다. 다시 실행하면 같은 파일을 덮어 새 콘솔을 만듭니다.`), { code: 'save', files: value.files });
+    }
+    bareosAuthGuard.clearAuthStop(directorCred(d).id);
+    return { ok: true, directorId: d.id, ...value, director: saved.director, droppedSecrets: saved.droppedSecrets, relay: d.agent };
+  }
+  return { ok: true, directorId: d.id, ...value, relay: d.agent, ...(site ? { vcenterId: site.vcenterId, vcserver: site.vcserver } : {}) };
+}
+
 api.post('/tools/bareos-backup/settings/directors/:directorId/auto-setup/preflight', adminOnly, fullScopeOnly, fullWriteOnly, async (req, res) => {
   const d = directorFor(req, res); if (!d) return;
   if (!setupGate(req, res, d.id, () => {}, { otp: false })) return;
   const b = { ...(req.body || {}), directorId: d.id };
   try {
-    const r = await preflight(b);
+    const r = await runSetup(d, 'setup.preflight', b, (x) => preflight(x));
     const bad = r.items.filter((x) => x.status !== 'ok').length;
     audit(req, 'Bareos 자동 설정(사전 점검)', `${d.name} → ${String(b.host || '')}`, `점검 ${r.items.length}항목 · 확인 필요 ${bad}`);
     res.json(r);
@@ -525,7 +585,7 @@ api.post('/tools/bareos-backup/settings/directors/:directorId/auto-setup/directo
   if (!setupGate(req, res, d.id, planDirector)) return;
   const b = { ...(req.body || {}), directorId: d.id };
   try {
-    const r = await setupDirector(b);
+    const r = await runSetup(d, 'setup.director', b, (x) => setupDirector(x));
     for (const k of [..._catalogMemo.keys()]) if (k.includes(`|${d.id}|`)) _catalogMemo.delete(k);
     audit(req, 'Bareos 자동 설정(Director)', `${d.name} → ${String(b.host || '')}`, `성공 — 콘솔 ${r.director.consoleName} · ${r.files.map((f) => `${f.path}(${f.action})`).join(', ')}`);
     res.json(r);
@@ -544,7 +604,7 @@ api.post('/tools/bareos-backup/settings/directors/:directorId/auto-setup/fd-plug
   if (!setupGate(req, res, d.id, planFdPlugin)) return;
   const b = { ...(req.body || {}), directorId: d.id };
   try {
-    const r = await setupFdPlugin(b);
+    const r = await runSetup(d, 'setup.fdPlugin', b, (x) => setupFdPlugin(x));
     audit(req, 'Bareos 자동 설정(FD 플러그인)', `${d.name} → ${String(b.host || '')}`, r.action === 'unchanged' ? '이미 켜져 있음(바꾸지 않음)' : `성공 — ${r.added.join(' · ')} · 사본 ${r.backup}`);
     res.json(r);
   } catch (e) {
@@ -558,7 +618,7 @@ api.post('/tools/bareos-backup/settings/directors/:directorId/auto-setup/fd', ad
   if (!setupGate(req, res, d.id, planFdIni)) return;
   const b = { ...(req.body || {}), directorId: d.id };
   try {
-    const r = await setupFdIni(b);
+    const r = await runSetup(d, 'setup.fdIni', b, (x) => setupFdIni(x));
     audit(req, 'Bareos 자동 설정(FD INI)', `${d.name} · ${r.vcenterId} → ${b.host}`, `성공 — ${r.path}(${r.action}) · 플러그인 ${r.plugin === 'installed' ? '설치됨' : '미확인'}`);
     res.json(r);
   } catch (e) {
@@ -573,7 +633,7 @@ api.post('/tools/bareos-backup/settings/directors/:directorId/auto-setup/fd-thum
   if (!setupGate(req, res, d.id, () => {}, { otp: false })) return;
   const b = { ...(req.body || {}), directorId: d.id };
   try {
-    const r = await readFdThumbprint(b);
+    const r = await runSetup(d, 'setup.thumbprint', b, (x) => readFdThumbprint(x));
     audit(req, 'Bareos 자동 설정(지문 읽기)', `${d.name} · ${r.vcenterId} → ${b.host}`, `성공 — ${r.vcserver}`);
     res.json(r);
   } catch (e) {

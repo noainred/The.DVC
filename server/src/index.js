@@ -160,6 +160,8 @@ import { startEmPoller } from './veeam/em/poller.js';             // Veeam Enter
 import { startLicenseWatch } from './veeam/licenseWatch.js';       // Veeam 라이선스 이력·만료 알림(v2.788) — 중앙 전용
 import { startVeeamPush } from './veeam/push.js';                   // 〃 엣지→중앙 결과 push(gzip — CENTRAL_URL 없으면 자기기동 안 함)
 import { startVeeamConfigPull } from './agent/veeamConfigPull.js'; // 〃 중앙→엣지 서버 배정 pull(자격증명 포함)
+import { startBareosConfigPull } from './agent/bareosConfigPull.js'; // v2.824 중앙→엣지 Bareos 법인 Director 배정 pull(콘솔 비밀번호 포함)
+import { startBareosOpWorker } from './agent/bareosOpWorker.js';     // v2.824 Bareos 법인 Director 대행 워커 — 엣지 전용
 import { startVeeamSnapWarmup } from './veeam/snapWarm.js';          // 〃 스냅샷 전용 DB(v2.759) — 엣지 요약 복원 + 로그에서 백필
 import { startVeeamSnapCollector } from './veeam/snapCollector.js';  // 〃 Veeam 계정 이벤트 전용 수집(v2.765) — 로그 폴러가 밀려도 백업 시도는 최신
 import { startXferSpeedPoller } from './xferspeed/poller.js';   // 법인 간 전송 속도(v2.735) — 중앙 전용 · 기본 꺼짐(opt-in)
@@ -395,6 +397,7 @@ app.use('/api/central/cvp-data', BIG_JSON);
 app.use('/api/central/isidu-data', BIG_JSON);   // v2.736 — 사용자 폴더 수천 개 × 스캔 여러 건(해제 후 1MB 를 넘는다 — 413 은 조용한 소실)
 app.use('/api/central/veeam-run-result', BIG_JSON);   // v2.818 — 세션 묶음(최대 50 × VM 작업 500)은 1mb 기본을 넘을 수 있다 — 413 은 조용한 소실
 app.use('/api/central/veeam-data', BIG_JSON);   // v2.751 — Veeam 서버별 VM 표(5,850 VM 규모면 해제 후 1MB 를 넘을 수 있다 — 413 은 조용한 소실)
+app.use('/api/central/bareos-op-result', BIG_JSON);   // v2.824 — 법인 Director 대행 회신(대조의 .jobs·최근 실행 행·작업 로그 4000줄은 1mb 기본을 넘을 수 있다 — 413 은 조용한 소실)
 // '현재 사용자' push(v2.520) — 레코드에 계정명 목록이 붙어 대상이 많은 법인은 1MB 기본을 넘을 수
 // 있다. express.json 의 limit 은 **gzip 해제 후 길이**라 gzip 만으로는 413 이 해결되지 않는다.
 app.use('/api/central/curuser', BIG_JSON);
@@ -621,6 +624,7 @@ const stagger = [
   startIsiduPoller, startIsiduPush, startIsiduConfigPull, startIsiduDigest, startIsiduTargetMail, // 아이실론 디렉터리 사용량(v2.736) — 대상이 없으면 틱만 돈다 · push/pull 은 CENTRAL_URL 미설정이면 자기기동 안 함
   startGuestPartMail, // 게스트 파티션 사용률 메일(v2.749) — 엣지는 기동하지 않는다 · 메일 설정이 꺼져 있으면 틱만 돈다
   startVeeamPoller, startVeeamPush, startVeeamConfigPull, startVeeamSnapWarmup, startVeeamSnapCollector, startEmPoller, startLicenseWatch, // Veeam 백업 상태(v2.751) — 서버 0대면 틱만 돈다 · push/pull 은 CENTRAL_URL 미설정이면 자기기동 안 함 · 전용 수집기(v2.765)는 로그 수집 주기로 Veeam 계정 이벤트만
+  startBareosConfigPull, startBareosOpWorker, // Bareos 법인 Director 엣지 대행(v2.824) — CENTRAL_URL 미설정이면 자기기동 안 함
   startVeeamRunTracker, startVeeamRunWorker, // Backup 백업 실행(v2.818) — 중앙: 세션 추적(20초 · 재진입 가드) · 엣지: 대행 워커(CENTRAL_URL 미설정이면 자기기동 안 함)
   startXferSpeedPoller, // 법인 간 전송 속도(v2.735) — 적응형 타이머(기본 30분) + 재진입 가드 + 주기 예산. 중앙 전용·opt-in
   startStorageUsageMail, // 스토리지 사용량 예약 메일(v2.789) — 30초 틱 · 중앙 전용 · 기본 꺼짐(켜지 않으면 할 일 없음)

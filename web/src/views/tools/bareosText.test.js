@@ -272,6 +272,14 @@ describe('작업 결과 요약(v2.822.3 — 현장 jobid 8 로그 모양)', () =
     for (const t of [preflightSummary({ items: [{ status: 'ok' }] }), autoSetupFdPluginText({ action: 'updated', added: ['Plugin Names = "python3"'], backup: '/x' })]) expect(t).not.toMatch(/`/);
   });
 
+  it('v2.824 엣지 대행 — 담당 엣지 바뀐 칸만 · 회신 대기 중 상태', () => {
+    expect(directorPatch({ host: 'a', port: 9101, consoleName: 'p', agent: 'PL' }, { host: 'a', port: 9101, consoleName: 'p', agent: '' })).toEqual({ agent: 'PL' });
+    expect(directorPatch({ host: 'a', port: 9101, consoleName: 'p', agent: '' }, { host: 'a', port: 9101, consoleName: 'p', agent: 'PL' })).toEqual({ agent: '' });
+    expect(directorPatch({ host: 'a', port: 9101, consoleName: 'p' }, { host: 'a', port: 9101, consoleName: 'p', agent: 'PL' })).toBe(null);   // 칸이 없으면 건드리지 않는다
+    expect(directorStatus({ configured: true, poll: { relay: 'sent', ok: null } }).label).toBe('엣지 대행 중');
+    expect(directorStatus({ configured: true, poll: { relay: 'pending', ok: true } }).label).toBe('정상');   // 지난 결과가 있으면 그것
+  });
+
   it('v2.823 검토 — 거부 확정은 결과 모름이 아니다(W7) · 저장 전 행은 이유와 함께 남김(W2) · 새 행은 주소·INI 를 미리 · INI 경로 겹침 접미사', () => {
     const rejected = Object.assign(new Error('이 Director 의 자동 설정이 진행 중입니다.'), { changeRejected: true, body: { ok: false } });
     expect(outcomeUnknown(rejected)).toBe(false);

@@ -12,6 +12,8 @@ import {
   loadSettings, directorConn, directorCred, directorById, siteFor, siteMissing,
 } from './settings.js';
 import { OPS } from './ops.js';
+import { enqueueEdgeOp } from './edgeOps.js';
+import { config } from '../config.js';
 import { addJob as registryAddJob, listJobs, findByVm, registryLoadError, jobCount, retireName, MAX_JOBS } from './registry.js';
 import { backupPluginOptions, jobNameFor, normLevel } from './names.js';
 import { createAuthGuard } from '../util/authGuard.js';
@@ -41,6 +43,8 @@ export function effectiveSettings() {
 }
 
 const AUTH_CODES = new Set(['auth', 'pam', 'tls']);
+/** 엣지 노드(중앙으로 push) — 엣지에서는 대행하지 않는다(엣지 자기 Bareos 설정의 agent 는 쓰지 않는다). */
+const isEdge = () => !!config.agent?.centralUrl;
 
 /**
  * 그 Director 의 세션을 열어 fn(session) 을 돌리고 닫는다.
@@ -68,6 +72,16 @@ export async function withDirector(directorId, fn, { trigger = 'manual', signal 
   }
   const dir = directorById(directorId, settings);
   if (!dir) throw fail('not-configured', '이 백업 대상의 법인 Director 가 설정에 없습니다 — 설정 › 법인별 Director 에서 확인하세요.');
+  // v2.824: 엣지 대행 Director 는 중앙이 세션을 열지 않는다(onDirector 가 작업 표로 엣지에 보낸다) — 세션 함수(fn)는 엣지로 보낼 수 없다.
+  if (dir.agent && !isEdge()) throw fail('edge-relay', `‘${dir.name}’ Director 는 법인 엣지 '${dir.agent}' 가 대행합니다 — 중앙에서 직접 접속하지 않습니다.`);
+  return sessionOn(dir, fn, { trigger, signal });
+}
+
+/**
+ * Director 항목(접속값 포함)으로 세션을 열어 fn(session) 을 돌리고 닫는다 — 중앙 직접(withDirector)과 엣지 대행 워커(엣지 사본)가 같이 쓴다.
+ * 인증 정지 기록은 이 노드의 bareosAuthGuard(그 Director 의 cred). 시한 신호는 세션이 열린 뒤에도 세션에 잇는다.
+ */
+export async function sessionOn(dir, fn, { trigger = 'manual', signal = null } = {}) {
   const { conn, missing } = directorConn(dir);
   if (!conn) throw fail('not-configured', `‘${dir.name}’ Director 설정이 덜 됐습니다(${missing.join('·')}) — 설정 › 법인별 Director 에서 먼저 채우세요.`);
   const cred = directorCred(dir);
@@ -90,8 +104,38 @@ export async function withDirector(directorId, fn, { trigger = 'manual', signal 
   try { return await fn(s); } finally { signal?.removeEventListener?.('abort', onAbort); s.close(); }
 }
 
+/** 엣지 대행 회신의 실패 봉투 → 이 노드에서 직접 실행했을 때와 같은 모양의 오류(라우트·폴러가 같은 코드로 다룬다). */
+function edgeError(r) {
+  const e = fail(r.code || 'error', `법인 엣지 대행 — ${r.reason || '사유 미상'}`);
+  return Object.assign(e, { edge: true, ...(r.unknown ? { unknown: true } : {}), ...(r.notSent ? { notSent: true } : {}), ...(r.paths ? { paths: r.paths } : {}), ...(r.files ? { files: r.files } : {}) });
+}
+
 /**
- * 작업 표(ops.js)의 한 작업을 그 Director 에서 실행한다(1차 릴리스: 중앙이 직접). 결과는 작업이 돌려준 값 그대로.
+ * v2.824 엣지 대행 — 담당 엣지가 있는 Director 의 작업을 그 엣지 큐에 둔다(edgeOps.js). 콘솔 비밀번호는 보내지 않는다.
+ * 인증 정지는 중앙이 그 Director 의 cred 로 기록한다(엣지 회신의 authFailed — 주기 조회는 정지면 큐에 넣지 않는다).
+ * @param {{ secretArgs?: object }} [o] 자동 설정 대행만(1회 전달 — edgeOps 머리말)
+ */
+export async function relayToEdge(dir, kind, args = {}, { trigger = 'manual', signal = null, secretArgs = null } = {}) {
+  const cred = directorCred(dir);
+  if (trigger === 'timer') {
+    const stop = bareosAuthGuard.authStopFor(cred);
+    if (stop) throw fail('auth-stopped', `인증 실패로 ‘${dir.name}’ 주기 조회를 멈췄습니다(${stop.reason}) — 설정을 고치면 다시 시작합니다.`);
+  }
+  const r = await enqueueEdgeOp(dir, kind, args, { secretArgs, signal });
+  if (r.ok) { if (!kind.startsWith('setup.')) bareosAuthGuard.clearAuthStop(cred.id); return r.value; }
+  if (r.authFailed) bareosAuthGuard.markAuthStopped(cred.id, cred, r.reason);
+  throw edgeError(r);
+}
+
+/** 엣지 대행 워커가 자기 사본의 Director 로 작업 표 한 줄을 실행한다(엣지 쪽 — agent/bareosOpWorker.js). */
+export async function runLocalOp(dir, kind, args = {}, { signal = null } = {}) {
+  const op = OPS[kind];
+  if (!op) throw fail('invalid', `알 수 없는 Director 작업입니다(${kind}).`);
+  return sessionOn(dir, (s) => op(s, args, { signal }), { trigger: 'manual', signal });
+}
+
+/**
+ * 작업 표(ops.js)의 한 작업을 그 Director 에서 실행한다 — 중앙 직접, 또는 담당 엣지가 있으면 그 엣지 대행(v2.824). 결과는 작업이 돌려준 값 그대로.
  * @param {string} directorId
  * @param {keyof OPS} kind
  * @param {object} args 직렬화할 수 있는 값만(2차 엣지 대행이 같은 인자를 보낸다)
@@ -99,6 +143,14 @@ export async function withDirector(directorId, fn, { trigger = 'manual', signal 
 export async function onDirector(directorId, kind, args = {}, { trigger = 'manual', signal = null, demoOnly = false, hooks = null } = {}) {
   const op = OPS[kind];
   if (!op) throw fail('invalid', `알 수 없는 Director 작업입니다(${kind}).`);
+  if (demoOnly && !isDemoActive()) throw fail('demo-only', DEMO_ONLY_REASON);
+  if (!_factory && !isEdge()) {
+    const settings = loadSettings();
+    if (!isDemoActive(settings)) {
+      const dir = directorById(directorId, settings);
+      if (dir?.agent) return relayToEdge(dir, kind, args, { trigger, signal });
+    }
+  }
   // hooks: 중앙 직접 실행에서만 쓰는 함수(예: poll 의 disableNow — 그 순간의 원장으로 고른다). 직렬화하지 않는다(엣지 대행에는 없다).
   return withDirector(directorId, (s) => op(s, args, { signal, ...(hooks || {}) }), { trigger, signal, demoOnly });
 }

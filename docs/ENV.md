@@ -1,6 +1,6 @@
 # 환경변수 레퍼런스 (자동 생성)
 
-`server/src` 가 실제로 읽는 환경변수 **695개**를 코드에서 추출한 목록이다.
+`server/src` 가 실제로 읽는 환경변수 **698개**를 코드에서 추출한 목록이다.
 설치본에서는 `/etc/vmware-portal/portal.env` 에 `KEY=값` 으로 넣고 서비스를 재시작한다.
 
 - 생성: `node scripts/env-doc.mjs` (마지막 갱신 2026-10-30)
@@ -54,7 +54,7 @@
 | `WAN_TLS_CA_FILE` | `''` | ✅ | util/resilientFetch.js |
 | `WAN_TLS_INSECURE` | `기본 적용('true' 로 끄기)` | ✅ | util/resilientFetch.js |
 
-## 공통 (211)
+## 공통 (212)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
@@ -70,6 +70,7 @@
 | `AUTH_ENABLED` | `기본 적용('false' 로 끄기)` | ✅ | config.js |
 | `AUTH_SECRET` | `''` | ✅ | config.js |
 | `AUTH_TOKEN_TTL` | `'8h'` | ✅ | config.js |
+| `BAREOS_EDGE_PICKUP_MS` | `120000` |  | bareos/edgeOps.js |
 | `BMUSAGE_ACTIVITY_MAX` | `500` |  | bmusage/activityLog.js |
 | `BMUSAGE_ALERT_MAX` | `40` |  | bmusage/notify.js |
 | `BMUSAGE_CMD_TIMEOUT_MS` |  |  | bmusage/collectors/osSsh.js |
@@ -431,10 +432,11 @@
 | `UPGRADE_TLS_INSECURE` | `기본 적용('true' 로 끄기)` |  | upgrade/upgradeAgent.js |
 | `UPGRADE_VERSIONS_MAX_BYTES` | `1048576` |  | upgrade/versionsDoc.js |
 
-## 엣지 에이전트 (48)
+## 엣지 에이전트 (50)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
+| `AGENT_BAREOS_OP_POLL_MS` | `5000` |  | agent/bareosOpWorker.js |
 | `AGENT_BMSTOR_POLL_MS` | `10000` |  | agent/bmstorWorker.js |
 | `AGENT_BMUSAGE_CONFIG_PULL_MS` | `10` |  | agent/bmUsageConfigPull.js |
 | `AGENT_CAPTURE_POLL_MS` | `4000` |  | agent/captureWorker.js |
@@ -462,6 +464,7 @@
 | `AGENT_VMSERIES_CHUNK_BYTES` | `700000` |  | agent/vmSeriesPush.js |
 | `AGENT_VMSERIES_CONFIG_PULL_MS` | `10` |  | agent/vmSeriesConfigPull.js |
 | `AGENT_VMSERIES_PUSH_TIMEOUT_MS` |  |  | agent/vmSeriesPush.js |
+| `BAREOS_CONFIG_PULL_MS` | `300000` |  | agent/bareosConfigPull.js |
 | `CURUSER_LOCAL` | `''` |  | agent/curUserConfigPull.js, curuser/settings.js |
 | `CVP_CONFIG_PULL_MS` | `5` |  | agent/cvpConfigPull.js |
 | `EDGE_ADVERTISE_URL` | `''` | ✅ | agent/selfRegister.js |
@@ -884,4 +887,4 @@
 
 ---
 
-예시 파일(`packaging/offline/portal.env.example`)에 있는 키: 85 / 695
+예시 파일(`packaging/offline/portal.env.example`)에 있는 키: 85 / 698

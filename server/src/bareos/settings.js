@@ -4,7 +4,8 @@
  * v2.823(사용자 요청 '법인별로 bareos 를 설치 — 법인의 vCenter 가 법인에 설치된 bareos 에 연결해서 백업'):
  * {
  *   version: 2,
- *   directors: [ { id, name, host, port, consoleName, password, timeoutMs, tlsMax } ],   // 법인마다 Director 하나(비밀번호 봉인 — SECRET_FILES)
+ *   directors: [ { id, name, host, port, consoleName, password, timeoutMs, tlsMax, agent } ],   // 법인마다 Director 하나(비밀번호 봉인 — SECRET_FILES)
+ *                                                            // v2.824 agent: '' = 중앙이 직접 · '<엣지명>' = 그 법인 엣지가 대행(bareos/edgeOps.js)
  *   defaults: { jobDefs, fileSet, restoreJob, level, pollIntervalSec, pluginName },      // 전 Director 공통
  *   sites: [ { vcenterId, directorId, vcserver, client, storage, pool, schedule, configFile } ],   // vCenter → 그 법인 Director·FD·SD
  *   director: { …directors[0] 사본… },   // 구버전 호환 — 되돌린 구버전이 첫 Director 는 계속 쓴다(새 코드는 읽지 않는다).
@@ -51,7 +52,7 @@ export const DIRECTOR_ID_RE = /^dir_[a-z0-9_]{1,40}$/;
 const DIRECTOR_NAME_RE = /^[^\u0000-\u001f\u007f<>"'`]{1,64}$/;
 
 export const DEFAULTS = Object.freeze({
-  director: Object.freeze({ name: '', host: '', port: 9101, consoleName: '', timeoutMs: LIMITS.timeoutMs.def, tlsMax: 'TLSv1.3' }),
+  director: Object.freeze({ name: '', host: '', port: 9101, consoleName: '', timeoutMs: LIMITS.timeoutMs.def, tlsMax: 'TLSv1.3', agent: '' }),
   defaults: Object.freeze({ jobDefs: 'PortalVmwareDefaults', fileSet: 'PortalVmwareGeneric', restoreJob: 'PortalVmwareRestore', level: 'Incremental', pollIntervalSec: LIMITS.pollIntervalSec.def, pluginName: 'python3' }),
 });
 
@@ -71,7 +72,8 @@ function emptySettings() {
 /** 설정 세대 — 저장할 때마다 오른다(카탈로그 memo 같은 '설정에서 나온 값' 의 키). */
 export const settingsRev = () => _rev;
 
-function readDirectorRecord(d, id) {
+/** 파일·엣지 사본에서 읽은 Director 원소 → 내부 레코드(모양 정리 — 판정은 directorIssue). 엣지 사본(bareos/edgeStore.js)도 쓴다. */
+export function readDirectorRecord(d, id) {
   if (!d || typeof d !== 'object') return null;
   const out = { ...DEFAULTS.director, ...pickDirector(d), id };
   if (typeof d.password === 'string' && d.password) out.password = d.password;
@@ -141,6 +143,9 @@ function pickDirector(d) {
   if (typeof d.consoleName === 'string') out.consoleName = d.consoleName.trim();
   if (d.timeoutMs !== undefined) out.timeoutMs = clampInt(d.timeoutMs, LIMITS.timeoutMs);
   if (d.tlsMax !== undefined) out.tlsMax = d.tlsMax === 'TLSv1.2' ? 'TLSv1.2' : 'TLSv1.3';
+  // v2.824 담당 엣지 — 여기서는 모양만(문자열 64자). 엣지 목록에 있는 이름인지는 라우트가 pickAgent(knownAgentNames)로 본다.
+  //   담당만 바뀌면 비밀번호는 승계한다(같은 서버 — Veeam registry 규칙과 같다. accessMoved 는 host·port·consoleName 만 본다).
+  if (typeof d.agent === 'string') out.agent = d.agent.trim().slice(0, 64);
   return out;
 }
 function pickDefaults(d) {

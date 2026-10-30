@@ -121,18 +121,19 @@ export default function SettingsTab({ onSaved }) {
           </div>
           <button type="button" className="login-btn" style={{ flex: 'none', padding: '8px 16px' }} disabled={!!err} onClick={() => setAdding((x) => !x)}>{adding ? '닫기' : '+ Director 추가'}</button>
         </div>
-        {adding && <AddDirectorForm onDone={async (r) => { setAdding(false); setMsg({ ok: true, text: `‘${r.director.name}’ Director 를 추가했습니다 — 편집에서 vCenter 를 묶고 자동 설정을 진행하세요.` }); await load(true); setSel(r.director.id); onSaved(); }} />}
+        {adding && <AddDirectorForm agents={s.agents || []} onDone={async (r) => { setAdding(false); setMsg({ ok: true, text: `‘${r.director.name}’ Director 를 추가했습니다 — 편집에서 vCenter 를 묶고 자동 설정을 진행하세요.` }); await load(true); setSel(r.director.id); onSaved(); }} />}
         <div className="table-wrap" style={{ marginTop: 10, maxHeight: '46vh' }}>
-          <STable minWidth={980}>
-            <thead><tr><th>법인</th><th>Director 주소 · 콘솔</th><th>비밀번호</th><th>법인 vCenter</th><th className="right">백업 대상</th><th data-nosort>동작</th></tr></thead>
+          <STable minWidth={1060}>
+            <thead><tr><th>법인</th><th>Director 주소 · 콘솔</th><th>담당</th><th>비밀번호</th><th>법인 vCenter</th><th className="right">백업 대상</th><th data-nosort>동작</th></tr></thead>
             <tbody>
-              {s.directors.length === 0 && <tr><td colSpan={6} className="center muted" style={{ padding: 18 }}>등록한 Director 가 없습니다 — ‘+ Director 추가’ 로 법인 Bareos 서버를 등록하세요.</td></tr>}
+              {s.directors.length === 0 && <tr><td colSpan={7} className="center muted" style={{ padding: 18 }}>등록한 Director 가 없습니다 — ‘+ Director 추가’ 로 법인 Bareos 서버를 등록하세요.</td></tr>}
               {s.directors.map((d) => {
                 const vcs = s.sites.filter((x) => x.directorId === d.id).map((x) => vcName(x.vcenterId));
                 return (
                   <tr key={d.id} style={sel === d.id ? { background: 'var(--hover)' } : undefined}>
                     <td data-sort={d.name}><b>{d.name}</b></td>
                     <td data-sort={d.host || ''} style={{ fontSize: 12.5 }}><span style={{ fontFamily: 'var(--font-mono)' }}>{d.host ? `${d.host}:${d.port}` : '—'}</span><div className="muted" style={{ fontSize: 11.5 }}>콘솔 {d.consoleName || '—'} · {d.tlsMax || '—'}</div></td>
+                    <td data-sort={d.agent || ''} style={{ fontSize: 12.5 }}>{d.agent ? <span className="badge blue">엣지 {d.agent}</span> : <span className="muted">중앙 직접</span>}</td>
                     <td>{d.hasPassword ? <span className="badge green">저장됨</span> : <span className="badge gray">없음</span>}</td>
                     <td data-sort={vcs.length} style={{ fontSize: 12.5 }}><div style={{ maxWidth: 320, whiteSpace: 'normal', overflowWrap: 'anywhere' }}>{vcs.length ? `${vcs.length} · ${vcs.join(' · ')}` : '—'}</div></td>
                     <td className="right" data-sort={d.jobs ?? 0}>{d.jobs ?? 0}</td>
@@ -189,9 +190,22 @@ export default function SettingsTab({ onSaved }) {
   );
 }
 
+/** v2.824 담당 — 중앙 직접('') 또는 그 법인 엣지(중앙이 아는 엣지 이름만 — 서버도 같은 목록으로 거른다). 저장된 값이 목록에 없으면 그대로 보인다. */
+function AgentSelect({ agents, value, onChange }) {
+  const list = [...new Set([...(value ? [value] : []), ...(agents || [])])];
+  return (
+    <label className="muted" style={FIELD}>담당(접속 주체)
+      <Select className="input" style={INP} value={value || ''} onChange={(e) => onChange(e.target.value)} aria-label="담당 엣지">
+        <option value="">중앙 직접</option>
+        {list.map((a) => <option key={a} value={a}>엣지 {a}</option>)}
+      </Select>
+    </label>
+  );
+}
+
 /** Director 추가 — 이름·주소·포트·콘솔 이름·비밀번호(자동 설정을 쓸 거면 비밀번호는 비워 둔다 — 2단계가 만든다). */
-function AddDirectorForm({ onDone }) {
-  const [f, setF] = useState({ name: '', host: '', port: '9101', consoleName: '', password: '' });
+function AddDirectorForm({ agents, onDone }) {
+  const [f, setF] = useState({ name: '', host: '', port: '9101', consoleName: '', password: '', agent: '' });
   const [busy, setBusy] = useState(false);
   const [m, setM] = useState(null);
   const set = (k, v) => setF((x) => ({ ...x, [k]: v }));
@@ -211,6 +225,7 @@ function AddDirectorForm({ onDone }) {
         <label className="muted" style={FIELD}>포트<input className="input" style={INP} inputMode="numeric" value={f.port} onChange={(e) => set('port', e.target.value.replace(/\D/g, '').slice(0, 5))} aria-label="Director 포트" /></label>
         <label className="muted" style={FIELD}>콘솔 이름(있으면)<input className="input" style={INP} value={f.consoleName} onChange={(e) => set('consoleName', e.target.value)} placeholder="자동 설정이 만듭니다" aria-label="콘솔 이름" /></label>
         <label className="muted" style={FIELD}>콘솔 비밀번호(있으면)<input className="input" style={INP} type="password" autoComplete="new-password" value={f.password} onChange={(e) => set('password', e.target.value)} placeholder="자동 설정이 만듭니다" aria-label="콘솔 비밀번호" /></label>
+        <AgentSelect agents={agents} value={f.agent} onChange={(v) => set('agent', v)} />
       </div>
       <div style={{ ...ROW, marginTop: 10 }}>
         <button type="button" className="login-btn" style={{ flex: 'none', padding: '8px 16px' }} disabled={busy || !f.name.trim() || !f.host} onClick={submit}>{busy ? '추가 중…' : '추가'}</button>
@@ -223,7 +238,7 @@ function AddDirectorForm({ onDone }) {
 
 /* ───────────────────────── Director 편집 ───────────────────────── */
 function DirectorEditor({ s, dir, locked, onReload, onSaved, onClose, onDeleted }) {
-  const toForm = (d) => ({ name: d.name, host: d.host, port: d.port, consoleName: d.consoleName, password: '', timeoutMs: d.timeoutMs, tlsMax: d.tlsMax });
+  const toForm = (d) => ({ name: d.name, host: d.host, port: d.port, consoleName: d.consoleName, password: '', timeoutMs: d.timeoutMs, tlsMax: d.tlsMax, agent: d.agent || '' });
   const [form, setForm] = useState(() => toForm(dir));
   const mine = useMemo(() => s.sites.filter((x) => x.directorId === dir.id).map((x) => ({ ...x })), [s.sites, dir.id]);
   const [rows, setRows] = useState(mine);
@@ -237,7 +252,7 @@ function DirectorEditor({ s, dir, locked, onReload, onSaved, onClose, onDeleted 
   const rowsRef = useRef(rows);
   rowsRef.current = rows;
   // 서버가 Director 를 바꿨으면(자동 설정 — 콘솔·비밀번호) 접속 폼을 새 값으로(입력 중인 비밀번호는 비운다)
-  useEffect(() => { setForm(toForm(dir)); }, [dir.host, dir.port, dir.consoleName, dir.hasPassword, dir.name]);
+  useEffect(() => { setForm(toForm(dir)); }, [dir.host, dir.port, dir.consoleName, dir.hasPassword, dir.name, dir.agent]);
   const vcName = (id) => s.vcenters.find((v) => v.id === id)?.name || id;
   const canConnect = !!(dir.host && dir.consoleName && dir.hasPassword) || s.demo;
   const loadCat = (refresh) => {
@@ -352,7 +367,9 @@ function DirectorEditor({ s, dir, locked, onReload, onSaved, onClose, onDeleted 
                 <option value="TLSv1.3">TLS 1.3(기본)</option><option value="TLSv1.2">TLS 1.2</option>
               </Select>
             </label>
+            <AgentSelect agents={s.agents || []} value={form.agent} onChange={(v) => set('agent', v)} />
           </div>
+          {form.agent && <div className="banner" style={{ marginTop: 8, fontSize: 12, lineHeight: 1.6 }}>법인 엣지 ‘{form.agent}’ 가 이 Director 에 대신 접속합니다(중앙은 접속하지 않습니다). 엣지는 저장한 접속값을 최대 5분 뒤 받습니다 — 새 비밀번호는 저장한 뒤 시험하세요. 자동 설정도 그 엣지가 SSH 로 실행하고, 처음 접속하는 서버의 SSH 호스트키 승인은 <b>그 엣지 포탈</b>(설정 › 장비 신뢰)에서 합니다.</div>}
           <div className="muted" style={{ fontSize: 11.5, marginTop: 8, lineHeight: 1.6 }}>주소·포트·콘솔 이름을 바꾸면 이 Director 의 저장 비밀번호는 승계하지 않습니다. 저장된 비밀번호로 하는 연결 시험은 저장된 주소로만 접속합니다.</div>
           <div style={{ ...ROW, marginTop: 10 }}>
             <button type="button" className="login-btn" style={{ flex: 'none', padding: '8px 16px' }} disabled={!!busy || locked || s.demo} onClick={saveConn}>{busy === 'conn' ? '저장 중…' : '연결 저장'}</button>
@@ -576,6 +593,7 @@ function AutoSetupPanel({ s, dir, rows, editCount, cat, unsaved, locked, onDirec
         </div>
       </div>
       {s.demo && <div className="banner warn" style={{ marginTop: 8 }}>데모 모드에서는 자동 설정을 실행하지 않습니다(실제 서버에 접속하는 작업).</div>}
+      {dir.agent && !s.demo && <div className="banner" style={{ marginTop: 8, fontSize: 12, lineHeight: 1.6 }}>법인 엣지 ‘{dir.agent}’ 가 대행합니다 — 아래 SSH 접속·Director 확인은 그 엣지에서 실행합니다. 입력한 SSH·vCenter 비밀번호는 이 요청 한 번에만 엣지로 전달하고(엣지가 가져가면 중앙 메모리에서 바로 지웁니다) 어디에도 저장하지 않습니다. 엣지가 2분 안에 가져가지 않으면 보내지 않은 것으로 끝납니다.</div>}
       <div style={GRID}>
         <label className="muted" style={FIELD}>SSH 주소(Director 서버)<input className="input" id="bareos-auto-host" style={INP} value={ssh.host} onChange={(e) => setS2('host', e.target.value.trim())} placeholder={dir.host || 'bareos.corp'} /></label>
         <label className="muted" style={FIELD}>SSH 포트<input className="input" style={INP} inputMode="numeric" value={ssh.sshPort} onChange={(e) => setS2('sshPort', e.target.value.replace(/\D/g, '').slice(0, 5))} aria-label="SSH 포트" /></label>

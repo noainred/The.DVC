@@ -51,6 +51,8 @@ export function directorPatch(formDir = {}, snapDir = {}) {
     if (cur[k] === undefined) continue;
     if (cur[k] !== snapDir[k]) out[k] = cur[k];
   }
+  // v2.824 담당 엣지('' = 중앙 직접) — 폼에 칸이 있을 때만 비교한다
+  if (formDir.agent !== undefined && String(formDir.agent || '') !== String(snapDir.agent || '')) out.agent = String(formDir.agent || '');
   if (typeof formDir.password === 'string' && formDir.password) out.password = formDir.password;
   return Object.keys(out).length ? out : null;
 }
@@ -125,6 +127,8 @@ export function directorStatus(dir) {
   if (!dir) return { cls: 'gray', label: '—' };
   if (!dir.configured) return { cls: 'gray', label: '설정 덜 됨' };
   if (dir.authStopped) return { cls: 'red', label: '인증 정지' };
+  // v2.824 엣지 대행: 회신을 기다리는 동안(한 번도 결과가 없으면) '엣지 대행 중' — 지난 결과가 있으면 그것을 보인다
+  if ((dir.poll?.relay === 'sent' || dir.poll?.relay === 'pending') && dir.poll?.ok == null) return { cls: 'blue', label: '엣지 대행 중' };
   if (dir.poll?.ok === false) return { cls: 'red', label: '조회 실패' };
   if (dir.poll?.ok) return { cls: 'green', label: '정상' };
   return { cls: 'gray', label: '조회 전' };
