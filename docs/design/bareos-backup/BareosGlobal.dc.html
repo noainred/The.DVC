@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>Bareos 백업 현황 — 통합(28개 법인)</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=Noto+Sans+KR:wght@400;500;700;800&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+body{margin:0;background:#0a0e17;color:#e6edf6;font-family:"Inter","Noto Sans KR","Apple SD Gothic Neo",sans-serif;font-size:13px}
+a{color:#3b82f6}a:hover{color:#60a5fa}
+.card{background:#141b2d;border:1px solid #243049;border-radius:12px}
+.tab{display:inline-flex;align-items:center;gap:6px;min-height:30px;padding:0 12px;border-radius:8px;border:1px solid #243049;background:#1a2236;color:#8b9bb4;font:inherit;font-size:12.5px;font-weight:600;cursor:pointer;white-space:nowrap}
+.tab.active{background:#3b82f6;border-color:#3b82f6;color:#fff}
+.sub{display:inline-flex;align-items:center;min-height:34px;padding:0 14px;border-radius:8px 8px 0 0;color:#8b9bb4;font-weight:600;text-decoration:none;white-space:nowrap}
+.sub.active{color:#fff;background:#141b2d;border:1px solid #243049;border-bottom-color:#141b2d;margin-bottom:-1px}
+.chip{display:inline-flex;align-items:center;height:22px;padding:0 9px;border-radius:999px;border:1px solid currentColor;font-size:11.5px;font-weight:700;white-space:nowrap;background:rgba(255,255,255,.03)}
+.c-bareos{color:#fdba74}.c-ok{color:#4ade80}.c-warn{color:#fbbf24}.c-bad{color:#f87171}.c-run{color:#60a5fa}
+.kpi{background:#141b2d;border:1px solid #243049;border-radius:12px;padding:12px 14px;min-width:0}
+.kpi .l{font-size:12px;font-weight:600;color:#8b9bb4;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.kpi .v{font-size:26px;font-weight:800;letter-spacing:-.01em;margin-top:2px;white-space:nowrap}
+.kpi .m{font-size:11.5px;color:#8b9bb4;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.muted{color:#8b9bb4}.faint{color:#5d6b85}
+.mono{font-family:"JetBrains Mono",ui-monospace,monospace}
+table{border-collapse:collapse;width:100%}
+th{font-size:12px;font-weight:600;color:#8b9bb4;text-align:left;padding:8px 10px;background:#0f1626;border-bottom:1px solid #243049;white-space:nowrap;cursor:pointer}
+th.r,td.r{text-align:right}
+td{padding:8px 10px;border-bottom:1px solid #1f2a40;vertical-align:middle;white-space:nowrap}
+.bar{height:7px;border-radius:4px;background:#1a2236;overflow:hidden;width:170px;display:inline-block;vertical-align:middle}
+.bar i{display:block;height:100%;float:left}
+.btn{display:inline-flex;align-items:center;gap:6px;min-height:30px;padding:0 12px;border-radius:8px;border:1px solid #243049;background:#1a2236;color:#e6edf6;font:inherit;font-size:12.5px;font-weight:600;cursor:pointer;white-space:nowrap}
+.corp{display:inline-flex;align-items:center;gap:6px;height:26px;padding:0 10px;border-radius:999px;border:1px solid #243049;background:#1a2236;color:#c9d4e5;font-size:12px;font-weight:600;text-decoration:none;white-space:nowrap}
+.dot{width:7px;height:7px;border-radius:50%;display:inline-block}
+.st{display:inline-flex;align-items:center;gap:5px;font-size:12px}
+</style>
+</helmet>
+<div style="width:100%;max-width:1440px;margin:0 auto;box-sizing:border-box;padding:18px 22px 28px;display:flex;flex-direction:column;gap:14px;min-width:0">
+
+  <div style="display:flex;flex-wrap:wrap;align-items:flex-end;gap:12px">
+    <div style="min-width:0">
+      <div style="font-size:22px;font-weight:800">Backup 현황</div>
+      <div class="muted" style="font-size:13px">전 법인(28개 vCenter)의 Bareos 백업 — 법인마다 둔 Director 의 상태와 잡 결과를 한 표로 보고, 법인을 누르면 법인별 현황으로 갑니다.</div>
+    </div>
+    <div style="margin-left:auto;display:flex;gap:8px;flex-wrap:wrap">
+      <button class="btn" type="button">새로고침</button>
+      <button class="btn" type="button">CSV</button>
+      <button class="btn" type="button">오래된 백업 기준: 1일 초과 ▾</button>
+    </div>
+  </div>
+  <div role="tablist" aria-label="Backup 현황 보기" style="display:flex;gap:4px;box-shadow:inset 0 -1px 0 #243049">
+    <a href="#x" style="min-width:84px;min-height:40px;display:inline-flex;align-items:center;justify-content:center;padding:0 18px;text-decoration:none;color:#8b9bb4;font-weight:600">Summary</a>
+    <a href="Main.dc.html" style="min-width:84px;min-height:40px;display:inline-flex;align-items:center;justify-content:center;padding:0 18px;text-decoration:none;color:#8b9bb4;font-weight:600">Detail</a>
+    <a href="#x" style="min-width:84px;min-height:40px;display:inline-flex;align-items:center;justify-content:center;padding:0 18px;text-decoration:none;color:#8b9bb4;font-weight:600">EM</a>
+    <a href="#x" style="min-width:84px;min-height:40px;display:inline-flex;align-items:center;justify-content:center;padding:0 18px;text-decoration:none;color:#8b9bb4;font-weight:600">백업 실행</a>
+    <a href="#x" style="min-width:84px;min-height:40px;display:inline-flex;align-items:center;justify-content:center;padding:0 18px;text-decoration:none;color:#fff;font-weight:700;border-bottom:2px solid #fb923c">Bareos</a>
+  </div>
+  <div style="display:flex;gap:2px;flex-wrap:wrap;box-shadow:inset 0 -1px 0 #243049">
+    <a class="sub active" href="#x">통합 현황 <span class="faint" style="margin-left:6px;font-weight:500">28 법인</span></a>
+    <a class="sub" href="BareosCorp.dc.html">법인별 현황</a>
+    <a class="sub" href="#x">백업 대상</a>
+    <a class="sub" href="#x">실행 현황 · 이력</a>
+    <a class="sub" href="#x">설정</a>
+  </div>
+
+  <div style="display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:10px">
+    <div class="kpi"><div class="l">법인 · Director</div><div class="v">28 <span class="faint" style="font-size:16px">/</span> 28</div><div class="m"><span class="c-ok">정상 25</span> · <span class="c-warn">경고 1</span> · <span class="c-bad">인증 정지 1</span> · 미설정 1</div></div>
+    <div class="kpi"><div class="l">Bareos 방식 VM</div><div class="v c-bareos">1,284</div><div class="m">전체 5,850 의 22%</div></div>
+    <div class="kpi"><div class="l">잡 등록</div><div class="v">1,231</div><div class="m">활성 1,218 · 비활성 13</div></div>
+    <div class="kpi" style="border-color:#6b4a1a"><div class="l c-warn">미등록 · 방식 불일치</div><div class="v c-warn">53 <span class="faint" style="font-size:16px">·</span> <span style="color:#e6edf6">4</span></div><div class="m">방식은 Bareos · 잡 없음 / 잡은 있는데 다른 방식</div></div>
+    <div class="kpi"><div class="l">최근 24시간 결과</div><div class="v"><span class="c-ok">1,151</span> <span class="faint" style="font-size:16px">·</span> <span class="c-warn">27</span> <span class="faint" style="font-size:16px">·</span> <span class="c-bad">12</span></div><div class="m">성공 · 경고 · 실패 (결과 모름 3)</div></div>
+    <div class="kpi"><div class="l c-run">지금 백업 중</div><div class="v c-run">7</div><div class="m">7개 법인 · 대기 0</div></div>
+    <div class="kpi"><div class="l c-warn">오래된 백업(1일 초과)</div><div class="v c-warn">31</div><div class="m">9개 법인 · 총 용량 3.9 PB</div></div>
+  </div>
+
+  <div style="display:flex;flex-wrap:wrap;gap:6px;align-items:center">
+    <span class="muted" style="margin-right:4px">바로가기</span>
+    <a class="corp" href="#r-oc2"><span class="dot" style="background:#22c55e"></span>OC2</a><a class="corp" href="#x"><span class="dot" style="background:#22c55e"></span>KR-HQ</a><a class="corp" href="#x"><span class="dot" style="background:#22c55e"></span>KR-DC2</a><a class="corp" href="#x"><span class="dot" style="background:#f59e0b"></span>PL-1</a><a class="corp" href="#x"><span class="dot" style="background:#22c55e"></span>US-E</a><a class="corp" href="#x"><span class="dot" style="background:#ef4444"></span>US-W</a><a class="corp" href="#x"><span class="dot" style="background:#22c55e"></span>MX-1</a><a class="corp" href="#x"><span class="dot" style="background:#22c55e"></span>BR-1</a><a class="corp" href="#x"><span class="dot" style="background:#22c55e"></span>DE-1</a><a class="corp" href="#x"><span class="dot" style="background:#22c55e"></span>CZ-1</a><a class="corp" href="#x"><span class="dot" style="background:#22c55e"></span>HU-1</a><a class="corp" href="#x"><span class="dot" style="background:#5d6b85"></span>IN-1</a><a class="corp" href="#x"><span class="dot" style="background:#22c55e"></span>VN-1</a><a class="corp" href="#x"><span class="dot" style="background:#22c55e"></span>VN-2</a><a class="corp" href="#x"><span class="dot" style="background:#22c55e"></span>CN-1</a><a class="corp" href="#x"><span class="dot" style="background:#22c55e"></span>CN-2</a><a class="corp" href="#x">… 12개 더</a>
+    <span style="margin-left:auto;display:inline-flex;gap:6px;flex-wrap:wrap">
+      <button class="tab active" type="button" aria-pressed="true">전체 28</button><button class="tab" type="button">다빈치 20</button><button class="tab" type="button">IRS 8</button><button class="tab" type="button">주의 4</button>
+    </span>
+  </div>
+
+  <div class="card" style="overflow:hidden;min-width:0">
+    <div style="display:flex;flex-wrap:wrap;align-items:center;gap:10px;padding:10px 14px;border-bottom:1px solid #1f2a40">
+      <b style="font-size:15px">법인별 현황</b>
+      <span class="faint" style="font-size:12px">제목을 누르면 정렬 · 값이 없는 줄은 항상 뒤 · 커버리지 = 성공 · 경고 · 실패 · 진행 / 빈칸 = 미등록</span>
+    </div>
+    <div style="overflow-x:auto">
+    <table>
+      <thead><tr>
+        <th>법인</th><th>Director</th><th class="r">Bareos VM</th><th>커버리지</th><th class="r">성공</th><th class="r">경고·실패</th><th class="r">진행</th><th class="r">미등록</th><th class="r">1일+ 경과</th><th class="r">복원 지점</th><th class="r">용량</th><th>마지막 백업</th><th></th>
+      </tr></thead>
+      <tbody>
+        <tr id="r-oc2"><td><b>OC2</b> <span class="faint">549 VM</span></td><td><span class="st"><span class="dot" style="background:#22c55e"></span>정상 · 엣지 대행</span></td><td class="r c-bareos"><b>109</b></td><td><span class="bar"><i style="width:90%;background:#22c55e"></i><i style="width:3%;background:#f59e0b"></i><i style="width:1%;background:#ef4444"></i><i style="width:2%;background:#3b82f6"></i></span> <span class="mono faint" style="font-size:11px">104/109</span></td><td class="r">98</td><td class="r"><span class="c-warn">3</span> · <span class="c-bad">1</span></td><td class="r c-run">2</td><td class="r c-warn">5</td><td class="r c-warn">4</td><td class="r">14</td><td class="r">310.2 TB</td><td class="mono">10-30 02:10</td><td><a href="BareosCorp.dc.html">열기 →</a></td></tr>
+        <tr><td><b>KR-HQ</b> <span class="faint">612 VM</span></td><td><span class="st"><span class="dot" style="background:#22c55e"></span>정상 · 중앙 직접</span></td><td class="r c-bareos"><b>142</b></td><td><span class="bar"><i style="width:97%;background:#22c55e"></i><i style="width:1%;background:#f59e0b"></i></span> <span class="mono faint" style="font-size:11px">140/142</span></td><td class="r">138</td><td class="r"><span class="c-warn">2</span> · <span class="c-bad">0</span></td><td class="r c-run">0</td><td class="r c-warn">2</td><td class="r">0</td><td class="r">21</td><td class="r">402.7 TB</td><td class="mono">10-30 02:12</td><td><a href="#x">열기 →</a></td></tr>
+        <tr><td><b>KR-DC2</b> <span class="faint">388 VM</span></td><td><span class="st"><span class="dot" style="background:#22c55e"></span>정상 · 중앙 직접</span></td><td class="r c-bareos"><b>96</b></td><td><span class="bar"><i style="width:100%;background:#22c55e"></i></span> <span class="mono faint" style="font-size:11px">96/96</span></td><td class="r">96</td><td class="r"><span class="c-warn">0</span> · <span class="c-bad">0</span></td><td class="r c-run">0</td><td class="r">0</td><td class="r">0</td><td class="r">18</td><td class="r">188.0 TB</td><td class="mono">10-30 02:08</td><td><a href="#x">열기 →</a></td></tr>
+        <tr><td><b>PL-1</b> <span class="faint">204 VM</span> <span class="faint" style="font-size:11px">RTT 820ms</span></td><td><span class="st"><span class="dot" style="background:#f59e0b"></span>경고 · 엣지 대행 · 회신 지연</span></td><td class="r c-bareos"><b>61</b></td><td><span class="bar"><i style="width:72%;background:#22c55e"></i><i style="width:8%;background:#f59e0b"></i><i style="width:5%;background:#ef4444"></i></span> <span class="mono faint" style="font-size:11px">52/61</span></td><td class="r">44</td><td class="r"><span class="c-warn">5</span> · <span class="c-bad">3</span></td><td class="r c-run">0</td><td class="r c-warn">9</td><td class="r c-warn">11</td><td class="r">9</td><td class="r">96.4 TB</td><td class="mono c-warn">10-28 02:30</td><td><a href="#x">열기 →</a></td></tr>
+        <tr><td><b>US-E</b> <span class="faint">310 VM</span> <span class="faint" style="font-size:11px">RTT 860ms</span></td><td><span class="st"><span class="dot" style="background:#22c55e"></span>정상 · 엣지 대행</span></td><td class="r c-bareos"><b>88</b></td><td><span class="bar"><i style="width:94%;background:#22c55e"></i><i style="width:2%;background:#f59e0b"></i><i style="width:2%;background:#3b82f6"></i></span> <span class="mono faint" style="font-size:11px">87/88</span></td><td class="r">83</td><td class="r"><span class="c-warn">2</span> · <span class="c-bad">0</span></td><td class="r c-run">2</td><td class="r c-warn">1</td><td class="r">0</td><td class="r">12</td><td class="r">240.1 TB</td><td class="mono">10-30 09:10</td><td><a href="#x">열기 →</a></td></tr>
+        <tr style="background:rgba(239,68,68,.06)"><td><b>US-W</b> <span class="faint">276 VM</span></td><td><span class="st"><span class="dot" style="background:#ef4444"></span>인증 정지 · 주기 조회 멈춤</span></td><td class="r c-bareos"><b>74</b></td><td><span class="bar"><i style="width:60%;background:#374151"></i></span> <span class="mono faint" style="font-size:11px">모름</span></td><td class="r muted">—</td><td class="r muted">—</td><td class="r muted">—</td><td class="r c-warn">6</td><td class="r muted">—</td><td class="r muted">—</td><td class="r muted">—</td><td class="mono c-bad">10-27 02:00 (정지 전)</td><td><a href="#x">설정 →</a></td></tr>
+        <tr><td><b>MX-1</b> <span class="faint">98 VM</span></td><td><span class="st"><span class="dot" style="background:#22c55e"></span>정상 · 엣지 대행</span></td><td class="r c-bareos"><b>31</b></td><td><span class="bar"><i style="width:100%;background:#22c55e"></i></span> <span class="mono faint" style="font-size:11px">31/31</span></td><td class="r">31</td><td class="r"><span class="c-warn">0</span> · <span class="c-bad">0</span></td><td class="r c-run">0</td><td class="r">0</td><td class="r">0</td><td class="r">14</td><td class="r">41.2 TB</td><td class="mono">10-30 11:02</td><td><a href="#x">열기 →</a></td></tr>
+        <tr><td><b>BR-1</b> <span class="faint">120 VM</span></td><td><span class="st"><span class="dot" style="background:#22c55e"></span>정상 · 엣지 대행</span></td><td class="r c-bareos"><b>40</b></td><td><span class="bar"><i style="width:95%;background:#22c55e"></i><i style="width:5%;background:#f59e0b"></i></span> <span class="mono faint" style="font-size:11px">40/40</span></td><td class="r">38</td><td class="r"><span class="c-warn">2</span> · <span class="c-bad">0</span></td><td class="r c-run">0</td><td class="r">0</td><td class="r c-warn">1</td><td class="r">10</td><td class="r">58.9 TB</td><td class="mono">10-30 10:40</td><td><a href="#x">열기 →</a></td></tr>
+        <tr><td><b>DE-1</b> <span class="faint">233 VM</span></td><td><span class="st"><span class="dot" style="background:#22c55e"></span>정상 · 엣지 대행</span></td><td class="r c-bareos"><b>70</b></td><td><span class="bar"><i style="width:97%;background:#22c55e"></i><i style="width:3%;background:#f59e0b"></i></span> <span class="mono faint" style="font-size:11px">70/70</span></td><td class="r">68</td><td class="r"><span class="c-warn">2</span> · <span class="c-bad">0</span></td><td class="r c-run">0</td><td class="r">0</td><td class="r">0</td><td class="r">16</td><td class="r">171.3 TB</td><td class="mono">10-30 06:15</td><td><a href="#x">열기 →</a></td></tr>
+        <tr><td><b>IN-1</b> <span class="faint">145 VM</span></td><td><span class="st"><span class="dot" style="background:#5d6b85"></span>미설정 · Director 없음</span></td><td class="r c-bareos"><b>12</b></td><td><span class="muted" style="font-size:12px">Director 를 설정하면 보입니다</span></td><td class="r muted">—</td><td class="r muted">—</td><td class="r muted">—</td><td class="r c-warn">12</td><td class="r muted">—</td><td class="r muted">—</td><td class="r muted">—</td><td class="muted">—</td><td><a href="#x">설정 →</a></td></tr>
+        <tr><td colspan="13" class="faint" style="text-align:center;padding:10px">… 18개 법인 더(스크롤)</td></tr>
+      </tbody>
+    </table>
+    </div>
+  </div>
+
+  <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;align-items:start">
+    <div class="card" style="overflow:hidden;min-width:0">
+      <div style="display:flex;align-items:center;gap:10px;padding:10px 14px;border-bottom:1px solid #1f2a40"><b style="font-size:15px">우선 확인 — 실패 · 결과 모름</b><span class="faint" style="font-size:12px">최근 24시간 · 15건</span></div>
+      <div style="overflow-x:auto">
+      <table>
+        <thead><tr><th style="width:34px">#</th><th>VM</th><th>법인 · 폴더</th><th>왜</th><th>마지막 성공</th><th></th></tr></thead>
+        <tbody>
+          <tr><td class="faint">1</td><td><b>PLWDB01</b></td><td>PL-1 · B.PROD/DB</td><td><span class="chip c-bad">실패</span> <span class="muted" style="font-size:12px">FD 연결 끊김 (JobErrors 1)</span></td><td class="mono c-warn">10-27 02:30</td><td><a href="#x">로그</a></td></tr>
+          <tr><td class="faint">2</td><td><b>PLWAPP02</b></td><td>PL-1 · B.PROD/APP</td><td><span class="chip c-bad">실패</span> <span class="muted" style="font-size:12px">스냅샷 생성 실패 (vSphere)</span></td><td class="mono c-warn">10-28 02:30</td><td><a href="#x">로그</a></td></tr>
+          <tr><td class="faint">3</td><td><b>OC2DEV17</b></td><td>OC2 · A.MGMT/개발자VM</td><td><span class="chip c-bad">실패</span> <span class="muted" style="font-size:12px">풀에 볼륨 없음</span></td><td class="mono">10-29 02:10</td><td><a href="#x">로그</a></td></tr>
+          <tr><td class="faint">4</td><td><b>USEAPP04</b></td><td>US-E · PROD/WEB</td><td><span class="chip" style="color:#94a3b8">결과 모름</span> <span class="muted" style="font-size:12px">엣지 대행 회신 시한</span></td><td class="mono">10-29 09:10</td><td><a href="#x">다시 조회</a></td></tr>
+          <tr><td class="faint">5</td><td><b>PLWFS01</b></td><td>PL-1 · B.PROD/FS</td><td><span class="chip c-bad">실패</span> <span class="muted" style="font-size:12px">CBT 재설정 필요</span></td><td class="mono c-warn">10-26 02:30</td><td><a href="#x">로그</a></td></tr>
+        </tbody>
+      </table>
+      </div>
+    </div>
+    <div class="card" style="overflow:hidden;min-width:0">
+      <div style="display:flex;align-items:center;gap:10px;padding:10px 14px;border-bottom:1px solid #1f2a40"><b style="font-size:15px">우선 확인 — 미등록 · 오래된 백업</b><span class="faint" style="font-size:12px">방식은 Bareos 인데 잡 없음 53 · 1일 초과 31</span></div>
+      <div style="overflow-x:auto">
+      <table>
+        <thead><tr><th style="width:34px">#</th><th>VM</th><th>법인 · 폴더</th><th>왜</th><th>중요도</th><th></th></tr></thead>
+        <tbody>
+          <tr><td class="faint">1</td><td><b>INWERP01</b></td><td>IN-1 · PROD/ERP</td><td><span class="chip c-warn">미등록</span> <span class="muted" style="font-size:12px">Director 미설정</span></td><td>상</td><td><a href="#x">설정 →</a></td></tr>
+          <tr><td class="faint">2</td><td><b>USWDB02</b></td><td>US-W · PROD/DB</td><td><span class="chip c-warn">미등록</span> <span class="muted" style="font-size:12px">Director 인증 정지</span></td><td>상</td><td><a href="#x">설정 →</a></td></tr>
+          <tr><td class="faint">3</td><td><b>LESARDSPS04</b></td><td>OC2 · A.MGMT/Admin_Console</td><td><span class="chip c-warn">미등록</span></td><td>하</td><td><a href="#x">등록 →</a></td></tr>
+          <tr><td class="faint">4</td><td><b>PLWDB01</b></td><td>PL-1 · B.PROD/DB</td><td><span class="chip c-warn">3일 경과</span> <span class="muted" style="font-size:12px">마지막 성공 10-27</span></td><td>상</td><td><a href="#x">지금 백업</a></td></tr>
+          <tr><td class="faint">5</td><td><b>BRWAPP01</b></td><td>BR-1 · PROD/APP</td><td><span class="chip c-warn">1일 경과</span> <span class="muted" style="font-size:12px">마지막 성공 10-29</span></td><td>중</td><td><a href="#x">지금 백업</a></td></tr>
+        </tbody>
+      </table>
+      </div>
+    </div>
+  </div>
+  <div class="faint" style="font-size:12px">숫자는 원장(bareos-jobs.json)·백업 표시(backup-marks.json)·폴러가 마지막으로 반영한 Director 카탈로그 값이다 — 이 화면은 Director 에 접속하지 않는다(고지연 법인이 화면을 늦추지 않게). 인증 정지·미설정 법인은 '모름' 으로 따로 센다(0 이 아니다).</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1560}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>Bareos 법인별 현황 — 400px</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=Noto+Sans+KR:wght@400;500;700;800&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+body{margin:0;background:#0a0e17;color:#e6edf6;font-family:"Inter","Noto Sans KR","Apple SD Gothic Neo",sans-serif;font-size:12.5px}
+a{color:#3b82f6}a:hover{color:#60a5fa}
+.card{background:#141b2d;border:1px solid #243049;border-radius:12px}
+.tab{display:inline-flex;align-items:center;min-height:28px;padding:0 10px;border-radius:8px;border:1px solid #243049;background:#1a2236;color:#8b9bb4;font:inherit;font-size:12px;font-weight:600;white-space:nowrap}
+.tab.active{background:#3b82f6;border-color:#3b82f6;color:#fff}
+.chip{display:inline-flex;align-items:center;height:20px;padding:0 8px;border-radius:999px;border:1px solid currentColor;font-size:11px;font-weight:700;white-space:nowrap}
+.c-bareos{color:#fdba74}.c-ok{color:#4ade80}.c-warn{color:#fbbf24}.c-bad{color:#f87171}.c-run{color:#60a5fa}
+.kpi{background:#141b2d;border:1px solid #243049;border-radius:10px;padding:10px 12px;min-width:0}
+.kpi .l{font-size:11px;font-weight:600;color:#8b9bb4;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.kpi .v{font-size:20px;font-weight:800;margin-top:2px;white-space:nowrap}
+.muted{color:#8b9bb4}.faint{color:#5d6b85}
+.mono{font-family:"JetBrains Mono",ui-monospace,monospace}
+.row{display:flex;align-items:center;gap:8px;padding:9px 12px;border-bottom:1px solid #1f2a40;min-width:0}
+.row .n{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.bar{height:6px;border-radius:3px;background:#1a2236;overflow:hidden;width:70px;display:inline-block;vertical-align:middle;flex:0 0 auto}
+.bar i{display:block;height:100%;float:left}
+.strip{display:flex;gap:4px;overflow-x:auto;overflow-y:hidden;box-shadow:inset 0 -1px 0 #243049;scrollbar-width:none}
+.btn{display:inline-flex;align-items:center;min-height:30px;padding:0 10px;border-radius:8px;border:1px solid #243049;background:#1a2236;color:#e6edf6;font:inherit;font-size:12px;font-weight:600;white-space:nowrap}
+.btn.bareos{border-color:#fb923c;color:#fdba74}
+</style>
+</helmet>
+<div style="width:400px;min-height:1240px;box-sizing:border-box;padding:12px 16px 20px;display:flex;flex-direction:column;gap:10px">
+  <div style="font-size:20px;font-weight:800">Backup 현황</div>
+  <div class="strip" role="tablist" aria-label="Backup 현황 보기">
+    <a href="#x" style="flex:0 0 auto;min-width:min(84px,18vw);min-height:40px;display:inline-flex;align-items:center;justify-content:center;padding:0 10px;text-decoration:none;color:#8b9bb4;font-weight:600">Summary</a>
+    <a href="#x" style="flex:0 0 auto;min-width:min(84px,18vw);min-height:40px;display:inline-flex;align-items:center;justify-content:center;padding:0 10px;text-decoration:none;color:#8b9bb4;font-weight:600">Detail</a>
+    <a href="#x" style="flex:0 0 auto;min-width:min(84px,18vw);min-height:40px;display:inline-flex;align-items:center;justify-content:center;padding:0 10px;text-decoration:none;color:#8b9bb4;font-weight:600">EM</a>
+    <a href="#x" style="flex:0 0 auto;min-width:min(84px,18vw);min-height:40px;display:inline-flex;align-items:center;justify-content:center;padding:0 10px;text-decoration:none;color:#8b9bb4;font-weight:600">백업 실행</a>
+    <a href="#x" style="flex:0 0 auto;min-width:min(84px,18vw);min-height:40px;display:inline-flex;align-items:center;justify-content:center;padding:0 10px;text-decoration:none;color:#fff;font-weight:700;border-bottom:2px solid #fb923c">Bareos</a>
+  </div>
+  <div class="strip" style="box-shadow:none">
+    <span class="tab" style="flex:0 0 auto">통합 현황</span><span class="tab active" style="flex:0 0 auto">법인별 현황</span><span class="tab" style="flex:0 0 auto">백업 대상</span><span class="tab" style="flex:0 0 auto">실행 현황 · 이력</span>
+  </div>
+  <div style="display:flex;gap:6px;flex-wrap:wrap">
+    <button class="btn" type="button" style="flex:1 1 auto;justify-content:space-between">법인: OC2 <span class="faint">▾</span></button>
+    <button class="btn" type="button">새로고침</button>
+  </div>
+  <div class="card" style="padding:12px 14px">
+    <div style="font-size:17px;font-weight:800">OC2 <span class="chip c-bareos" style="margin-left:4px">Bareos</span></div>
+    <div class="muted" style="font-size:12px;margin-top:2px;overflow-wrap:anywhere">Director ‘OC2-dir’ · 접속 정상 · 엣지 대행 · 마지막 조회 22:03</div>
+    <div style="margin-top:6px;font-size:12px">방식 Bareos <b class="c-bareos">109</b> · 잡 등록 104 · <span class="c-warn">미등록 5</span></div>
+    <div style="font-size:12px">24시간 <span class="c-ok">성공 98</span> · <span class="c-warn">경고 3</span> · <span class="c-bad">실패 1</span> · <span class="c-run">진행 2</span></div>
+  </div>
+  <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px">
+    <div class="kpi"><div class="l">Bareos 방식 VM</div><div class="v c-bareos">109</div></div>
+    <div class="kpi"><div class="l">잡 등록</div><div class="v">104</div></div>
+    <div class="kpi" style="border-color:#6b4a1a"><div class="l c-warn">미등록</div><div class="v c-warn">5</div></div>
+    <div class="kpi"><div class="l c-warn">오래된 백업(1일 초과)</div><div class="v c-warn">4</div></div>
+  </div>
+  <div class="strip" style="box-shadow:none;padding-bottom:2px">
+    <span class="tab active" style="flex:0 0 auto">전체 109</span><span class="tab" style="flex:0 0 auto">잡 등록 104</span><span class="tab" style="flex:0 0 auto">미등록 5</span><span class="tab" style="flex:0 0 auto">진행 중 2</span><span class="tab" style="flex:0 0 auto">실패·경고 4</span><span class="tab" style="flex:0 0 auto">오래된 백업 4</span>
+  </div>
+  <input type="search" aria-label="VM · 폴더 · 잡 이름" placeholder="VM · 폴더 · 잡 이름" style="width:100%;box-sizing:border-box;height:32px;border-radius:8px;border:1px solid #243049;background:#0f1626;color:#e6edf6;padding:0 10px;font:inherit">
+  <div class="card" style="overflow:hidden">
+    <div class="row" style="background:#111726"><span class="n">▾ <b>OC2 / vm</b> <span class="muted">109</span></span><span class="bar"><i style="width:90%;background:#22c55e"></i><i style="width:3%;background:#f59e0b"></i><i style="width:1%;background:#ef4444"></i></span><span class="mono faint" style="font-size:11px">104/109</span></div>
+    <div class="row" style="background:#111726;padding-left:24px"><span class="n">▾ <b>A.MGMT</b> <span class="muted">61</span></span><span class="bar"><i style="width:90%;background:#22c55e"></i><i style="width:5%;background:#f59e0b"></i></span><span class="mono faint" style="font-size:11px">58/61</span></div>
+    <div class="row" style="background:#111726;padding-left:36px"><span class="n">▾ <b>00.Console</b> <span class="muted">9</span></span><span class="bar"><i style="width:78%;background:#22c55e"></i><i style="width:11%;background:#f59e0b"></i></span><span class="mono faint" style="font-size:11px">8/9</span></div>
+    <div class="row" style="background:#111726;padding-left:48px"><span class="n">▾ <b>Admin_Console</b> <span class="muted">3</span></span><span class="bar"><i style="width:33%;background:#22c55e"></i><i style="width:33%;background:#f59e0b"></i></span><span class="mono faint" style="font-size:11px">2/3</span></div>
+    <div style="padding:9px 12px 9px 60px;border-bottom:1px solid #1f2a40;display:flex;flex-direction:column;gap:3px;min-width:0">
+      <div style="display:flex;gap:6px;align-items:center;min-width:0"><b style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">LESARDSPS02</b><span class="chip c-ok">성공</span><span class="faint" style="margin-left:auto;white-space:nowrap">117 GB</span></div>
+      <div class="muted" style="font-size:11.5px"><span class="mono">10-30 02:10</span> · Incremental · 복원 지점 14</div>
+    </div>
+    <div style="padding:9px 12px 9px 60px;border-bottom:1px solid #1f2a40;display:flex;flex-direction:column;gap:3px;min-width:0">
+      <div style="display:flex;gap:6px;align-items:center;min-width:0"><b style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">LESARDSPS03</b><span class="chip c-warn">경고</span><span class="faint" style="margin-left:auto;white-space:nowrap">30 GB</span></div>
+      <div class="muted" style="font-size:11.5px"><span class="mono c-warn">10-29 02:10</span> · Full · <span class="c-warn">1일 초과</span> · 복원 지점 9</div>
+    </div>
+    <div style="padding:9px 12px 9px 60px;border-bottom:1px solid #1f2a40;display:flex;flex-direction:column;gap:3px;min-width:0">
+      <div style="display:flex;gap:6px;align-items:center;min-width:0"><b style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">LESARDSPS04</b><span class="chip c-warn">미등록</span><span class="faint" style="margin-left:auto;white-space:nowrap">136 GB</span></div>
+      <div class="muted" style="font-size:11.5px">방식은 Bareos · 잡 없음 · <a href="#x">백업 대상에 등록 →</a></div>
+    </div>
+    <div class="row" style="background:#111726;padding-left:48px"><span class="n">▸ <b>DBA</b> <span class="muted">2</span></span><span class="bar"><i style="width:50%;background:#22c55e"></i><i style="width:50%;background:#3b82f6"></i></span><span class="mono faint" style="font-size:11px">2/2</span></div>
+    <div class="row" style="background:#111726;padding-left:48px"><span class="n">▸ <b>개발자VM</b> <span class="muted">35</span></span><span class="bar"><i style="width:97%;background:#22c55e"></i><i style="width:3%;background:#ef4444"></i></span><span class="mono faint" style="font-size:11px">35/35</span></div>
+    <div class="row" style="background:#111726;padding-left:24px"><span class="n">▸ <b>B.PROD</b> <span class="muted">41</span></span><span class="bar"><i style="width:93%;background:#22c55e"></i><i style="width:2%;background:#f59e0b"></i></span><span class="mono faint" style="font-size:11px">39/41</span></div>
+  </div>
+  <div class="faint" style="font-size:11.5px;line-height:1.5">400px 에서는 상세 패널이 표 아래로 내려오고(VM 을 누르면 펼침), 탭 줄은 가로 스크롤(열린 탭이 보이도록 이동). 열은 이름 · 결과 · 용량 · 한 줄 요약으로 줄인다.</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":400,"height":1240}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { fetchJson, postJson, patchJson, delJson, usePolling, getCurrentUser } from '../../api.js';
+import { fetchJson, postJson, patchJson, delJson, usePolling, getCurrentUser, toolAllowed } from '../../api.js';
 import { Loading, ErrorBox, SearchBox, Modal } from '../../components/ui.jsx';
 import { STable } from '../../components/STable.jsx';
 import Select from '../../components/Select.jsx';
@@ -14,6 +14,7 @@ import {
   folderOptions, inFolder, pickCap, bulkSummary,
   parseJobReport, reportCards, REPORT_KEYS, issueHint, storeRatio, reportText, reportBytes, reportValue,
 } from './bareosText.js';
+import { takeBareosHandoff } from './bareosViewText.js';
 
 /**
  * 특수 기능 › Bareos VM 백업(v2.820, 도구 키 bareos-backup — admin 전용 · v2.823 법인별 Director).
@@ -36,6 +37,9 @@ const RESTORE_POINTS_SHOWN = 30;   // 창 높이 때문에 보이는 개수 — 
 
 export default function BareosBackupTool() {
   const [tab, setTab] = useHashTab({ base: ['tools', 'bareos-backup'], valid: TABS.map(([k]) => k), fallback: 'targets' });
+  // v2.828: Backup › Detail 의 'Bareos 백업 대상으로 등록' 이 넘긴 VM(한 번 읽고 지운다 — 10분 · 200대). 있으면 추가 창을 열고 미리 고른다.
+  const handoff = useRef(undefined);
+  if (handoff.current === undefined) handoff.current = takeBareosHandoff();
   const [tick, setTick] = useState(0);
   const { data: polled, error } = usePolling(BASE, { _r: tick }, 10_000);
   // 새로 고침(_r 변경) 때 usePolling 이 data 를 비운다 — 직전 응답을 유지해야 탭이 다시 마운트되지 않는다
@@ -63,11 +67,14 @@ export default function BareosBackupTool() {
       {data.settingsLoadError && <div className="banner bad" style={{ marginBottom: 10 }}>설정 파일을 읽지 못했습니다(손상본 보존) — {data.settingsLoadError.reason}</div>}
       {data.registryLoadError && <div className="banner bad" style={{ marginBottom: 10 }}>백업 대상 원장을 읽지 못했습니다(손상본 보존 — 새 대상 추가를 막았습니다) — {data.registryLoadError.reason}</div>}
       <div style={{ ...ROW, marginBottom: 12 }}>
+        {/* v2.828 조회 전용 화면(통합 · 법인별 — 별도 도구 키)으로 가는 탭. 권한이 없으면 숨긴다(서버가 집행 · 탭은 UX). */}
+        {toolAllowed('bareos-summary') && <a className="tab" href="#/tools/bareos-summary" style={{ textDecoration: 'none' }}>통합 현황</a>}
+        {toolAllowed('bareos-detail') && <a className="tab" href="#/tools/bareos-detail" style={{ textDecoration: 'none' }}>법인별 현황</a>}
         {TABS.filter(([k]) => k !== 'settings' || fullScope).map(([k, l]) => (
           <button key={k} type="button" className={`tab${tab === k ? ' active' : ''}`} onClick={() => setTab(k)}>{l}</button>
         ))}
       </div>
-      {tab === 'targets' && <TargetsTab d={data} reload={reload} />}
+      {tab === 'targets' && <TargetsTab d={data} reload={reload} handoff={handoff} />}
       {tab === 'history' && <HistoryTab d={data} />}
       {tab === 'settings' && fullScope && <SettingsTab onSaved={reload} writable={data.settingsWritable !== false} />}
       {tab === 'settings' && !fullScope && <div className="muted" style={{ padding: 16 }}>Director 설정은 전체 범위 관리자만 볼 수 있습니다 — 백업 대상 탭을 쓰세요.</div>}
@@ -77,11 +84,11 @@ export default function BareosBackupTool() {
 }
 
 /* ───────────────────────── 백업 대상 ───────────────────────── */
-function TargetsTab({ d, reload }) {
+function TargetsTab({ d, reload, handoff }) {
   const [vc, setVc] = useState('');
   const [dirF, setDirF] = useState('');   // v2.823 법인 Director 필터(상단 칩)
   const [q, setQ] = useState('');
-  const [adding, setAdding] = useState(false);
+  const [adding, setAdding] = useState(() => !!handoff?.current);
   const [busyIds, setBusyIds] = useState(() => new Set());   // W11: 처리 중 잠금은 그 대상만
   const [msg, setMsg] = useState(null);
   const [logOf, setLogOf] = useState(null);       // { job, jobid }
@@ -149,7 +156,7 @@ function TargetsTab({ d, reload }) {
         <button type="button" className="login-btn" style={{ flex: 'none', padding: '8px 16px' }} disabled={!d.configured || !!d.registryLoadError} onClick={() => setAdding(true)}>+ 백업 대상 추가</button>
       </div>
       {msg && <div className={`banner ${msg.ok ? 'ok' : 'bad'}`} style={{ marginBottom: 10 }}><BoldText text={msg.text} /></div>}
-      {adding && <AddForm d={d} onClose={() => setAdding(false)} onChanged={reload} />}
+      {adding && <AddForm d={d} initial={handoff?.current || null} onInitialUsed={() => { if (handoff) handoff.current = null; }} onClose={() => setAdding(false)} onChanged={reload} />}
       <ScopeOmitBanner data={d} unit="백업 대상" counter="개" why="조회 범위 밖 vCenter 의" />
 
       <div className="table-wrap" style={{ maxHeight: '58vh' }}>
@@ -219,10 +226,12 @@ function TargetsTab({ d, reload }) {
 }
 
 /** 대상 추가 — vCenter → 등록 후보(서버가 가능 여부·사유를 준다) → 레벨 → 등록. */
-function AddForm({ d, onClose, onChanged }) {
+function AddForm({ d, initial = null, onInitialUsed, onClose, onChanged }) {
   const [vcs, setVcs] = useState(null);
   const [vcErr, setVcErr] = useState(null);
-  const [vc, setVc] = useState('');
+  const [vc, setVc] = useState(() => initial?.vcenterId || '');
+  const initRef = useRef(initial);   // v2.828 Detail 에서 넘겨받은 VM — 첫 후보 목록에만 적용
+  const [initNote, setInitNote] = useState('');
   const [cand, setCand] = useState(null);
   const [candErr, setCandErr] = useState(null);
   const [q, setQ] = useState('');
@@ -249,6 +258,16 @@ function AddForm({ d, onClose, onChanged }) {
   const dirNotReady = cand?.director && cand.director.ready === false;
   const pickable = (x) => !!cand?.writable && !dirNotReady && x.eligible && !x.registered;
   const cap = pickCap(cand);
+  // v2.828: 넘겨받은 VM 중 지금 고를 수 있는 것만(이미 등록·대상 아님·쓰기 범위 밖은 뺀다) — 상한(cap)까지. 몇 대를 뺐는지 밝힌다.
+  useEffect(() => {
+    const init = initRef.current;
+    if (!init || !cand || vc !== init.vcenterId) return;
+    initRef.current = null; onInitialUsed?.();
+    const want = new Set(init.vmIds);
+    const ok = (cand.items || []).filter((x) => want.has(x.id) && !!cand.writable && !(cand.director && cand.director.ready === false) && x.eligible && !x.registered).slice(0, pickCap(cand));
+    setSel(new Set(ok.map((x) => x.id)));
+    setInitNote(`Backup › Detail 에서 고른 VM ${want.size}대 중 ${ok.length}대를 골랐습니다${want.size > ok.length ? ` — ${want.size - ok.length}대는 이미 등록됐거나 지금 등록할 수 없어 뺐습니다` : ''}.`);
+  }, [cand, vc, onInitialUsed]);
   const toggle = (x) => setSel((prev) => {
     const n = new Set(prev);
     if (n.has(x.id)) n.delete(x.id); else if (n.size < cap) n.add(x.id);
@@ -284,6 +303,7 @@ function AddForm({ d, onClose, onChanged }) {
         <button type="button" className="logout-btn" style={BTN} onClick={onClose}>닫기</button>
       </div>
       {vcErr && <ErrorBox error={vcErr} />}
+      {initNote && <div className="banner" style={{ marginBottom: 8 }}>{initNote}</div>}
       <div style={{ ...ROW, marginBottom: 8 }}>
         <label htmlFor="bareos-add-vc" className="muted" style={{ fontSize: 12 }}>vCenter</label>
         <Select id="bareos-add-vc" className="input" value={vc} onChange={(e) => setVc(e.target.value)} style={{ ...INP, width: 'auto', minWidth: 200, maxWidth: '100%' }}>

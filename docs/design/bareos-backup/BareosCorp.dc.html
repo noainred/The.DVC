@@ -1,0 +1,231 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>Bareos 백업 현황 — 법인별(OC2)</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=Noto+Sans+KR:wght@400;500;700;800&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+body{margin:0;background:#0a0e17;color:#e6edf6;font-family:"Inter","Noto Sans KR","Apple SD Gothic Neo",sans-serif;font-size:13px}
+a{color:#3b82f6}a:hover{color:#60a5fa}
+.card{background:#141b2d;border:1px solid #243049;border-radius:12px}
+.tab{display:inline-flex;align-items:center;gap:6px;min-height:30px;padding:0 12px;border-radius:8px;border:1px solid #243049;background:#1a2236;color:#8b9bb4;font:inherit;font-size:12.5px;font-weight:600;cursor:pointer;white-space:nowrap}
+.tab.active{background:#3b82f6;border-color:#3b82f6;color:#fff}
+.sub{display:inline-flex;align-items:center;min-height:34px;padding:0 14px;border-radius:8px 8px 0 0;color:#8b9bb4;font-weight:600;text-decoration:none;white-space:nowrap}
+.sub.active{color:#fff;background:#141b2d;border:1px solid #243049;border-bottom-color:#141b2d;margin-bottom:-1px}
+.chip{display:inline-flex;align-items:center;height:22px;padding:0 9px;border-radius:999px;border:1px solid currentColor;font-size:11.5px;font-weight:700;white-space:nowrap;background:rgba(255,255,255,.03)}
+.c-bareos{color:#fdba74}.c-ok{color:#4ade80}.c-warn{color:#fbbf24}.c-bad{color:#f87171}.c-run{color:#60a5fa}
+.kpi{background:#141b2d;border:1px solid #243049;border-radius:12px;padding:12px 14px;min-width:0}
+.kpi .l{font-size:12px;font-weight:600;color:#8b9bb4;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.kpi .v{font-size:26px;font-weight:800;letter-spacing:-.01em;margin-top:2px;white-space:nowrap}
+.kpi .m{font-size:11.5px;color:#8b9bb4;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.muted{color:#8b9bb4}.faint{color:#5d6b85}
+.mono{font-family:"JetBrains Mono",ui-monospace,monospace}
+table{border-collapse:collapse;width:100%}
+th{font-size:12px;font-weight:600;color:#8b9bb4;text-align:left;padding:8px 10px;background:#0f1626;border-bottom:1px solid #243049;white-space:nowrap}
+td{padding:9px 10px;border-bottom:1px solid #1f2a40;vertical-align:middle;white-space:nowrap}
+tr.folder td{background:#111726}
+tr.sel td{background:rgba(59,130,246,.12)}
+.bar{height:6px;border-radius:3px;background:#1a2236;overflow:hidden;width:150px;display:inline-block;vertical-align:middle}
+.bar i{display:block;height:100%;float:left}
+.cb{display:inline-flex;width:14px;height:14px;border:1.5px solid #5d6b85;border-radius:3px;background:#0f1626;vertical-align:middle}
+.btn{display:inline-flex;align-items:center;gap:6px;min-height:30px;padding:0 12px;border-radius:8px;border:1px solid #243049;background:#1a2236;color:#e6edf6;font:inherit;font-size:12.5px;font-weight:600;cursor:pointer;white-space:nowrap}
+.btn.primary{background:#3b82f6;border-color:#3b82f6;color:#fff}
+.btn.bareos{border-color:#fb923c;color:#fdba74}
+.corp{display:inline-flex;align-items:center;gap:6px;height:26px;padding:0 10px;border-radius:999px;border:1px solid #243049;background:#1a2236;color:#c9d4e5;font-size:12px;font-weight:600;text-decoration:none;white-space:nowrap}
+.corp.on{border-color:#3b82f6;color:#fff;background:rgba(59,130,246,.18)}
+.dot{width:7px;height:7px;border-radius:50%;display:inline-block}
+.kv{display:grid;grid-template-columns:92px minmax(0,1fr);gap:4px 10px;font-size:12.5px}
+.kv dt{color:#8b9bb4;margin:0}.kv dd{margin:0;overflow-wrap:anywhere}
+</style>
+</helmet>
+<div style="width:100%;max-width:1440px;margin:0 auto;box-sizing:border-box;padding:18px 22px 28px;display:flex;flex-direction:column;gap:14px;min-width:0">
+
+  <div style="display:flex;flex-wrap:wrap;align-items:flex-end;gap:12px">
+    <div style="min-width:0">
+      <div style="font-size:22px;font-weight:800">Backup 현황</div>
+      <div class="muted" style="font-size:13px">법인 하나의 Bareos 백업 — 백업 방식이 Bareos 인 VM 만 폴더 › VM 으로 보고, 잡 등록·실행·복원은 '백업 대상' 탭에서 합니다.</div>
+    </div>
+    <div style="margin-left:auto;display:flex;gap:8px;flex-wrap:wrap">
+      <button class="btn" type="button">새로고침</button>
+      <button class="btn" type="button">CSV</button>
+      <button class="btn" type="button">법인: OC2 ▾</button>
+    </div>
+  </div>
+  <div role="tablist" aria-label="Backup 현황 보기" style="display:flex;gap:4px;box-shadow:inset 0 -1px 0 #243049">
+    <a href="#x" style="min-width:84px;min-height:40px;display:inline-flex;align-items:center;justify-content:center;padding:0 18px;text-decoration:none;color:#8b9bb4;font-weight:600">Summary</a>
+    <a href="Main.dc.html" style="min-width:84px;min-height:40px;display:inline-flex;align-items:center;justify-content:center;padding:0 18px;text-decoration:none;color:#8b9bb4;font-weight:600">Detail</a>
+    <a href="#x" style="min-width:84px;min-height:40px;display:inline-flex;align-items:center;justify-content:center;padding:0 18px;text-decoration:none;color:#8b9bb4;font-weight:600">EM</a>
+    <a href="#x" style="min-width:84px;min-height:40px;display:inline-flex;align-items:center;justify-content:center;padding:0 18px;text-decoration:none;color:#8b9bb4;font-weight:600">백업 실행</a>
+    <a href="#x" style="min-width:84px;min-height:40px;display:inline-flex;align-items:center;justify-content:center;padding:0 18px;text-decoration:none;color:#fff;font-weight:700;border-bottom:2px solid #fb923c">Bareos</a>
+  </div>
+
+  <div style="display:flex;gap:2px;flex-wrap:wrap;box-shadow:inset 0 -1px 0 #243049">
+    <a class="sub" href="BareosGlobal.dc.html">통합 현황 <span class="faint" style="margin-left:6px;font-weight:500">28 법인</span></a>
+    <a class="sub active" href="#x">법인별 현황</a>
+    <a class="sub" href="#x">백업 대상</a>
+    <a class="sub" href="#x">실행 현황 · 이력</a>
+    <a class="sub" href="#x">설정</a>
+  </div>
+
+  <div style="display:flex;flex-wrap:wrap;gap:6px;align-items:center">
+    <span class="muted" style="margin-right:4px">바로가기</span>
+    <a class="corp on" href="#x"><span class="dot" style="background:#22c55e"></span>OC2</a>
+    <a class="corp" href="#x"><span class="dot" style="background:#22c55e"></span>KR-HQ</a>
+    <a class="corp" href="#x"><span class="dot" style="background:#22c55e"></span>KR-DC2</a>
+    <a class="corp" href="#x"><span class="dot" style="background:#f59e0b"></span>PL-1</a>
+    <a class="corp" href="#x"><span class="dot" style="background:#22c55e"></span>US-E</a>
+    <a class="corp" href="#x"><span class="dot" style="background:#ef4444"></span>US-W</a>
+    <a class="corp" href="#x"><span class="dot" style="background:#22c55e"></span>MX-1</a>
+    <a class="corp" href="#x"><span class="dot" style="background:#22c55e"></span>BR-1</a>
+    <a class="corp" href="#x"><span class="dot" style="background:#22c55e"></span>DE-1</a>
+    <a class="corp" href="#x"><span class="dot" style="background:#22c55e"></span>CZ-1</a>
+    <a class="corp" href="#x"><span class="dot" style="background:#22c55e"></span>HU-1</a>
+    <a class="corp" href="#x"><span class="dot" style="background:#5d6b85"></span>IN-1</a>
+    <a class="corp" href="#x"><span class="dot" style="background:#22c55e"></span>VN-1</a>
+    <a class="corp" href="#x"><span class="dot" style="background:#22c55e"></span>VN-2</a>
+    <a class="corp" href="#x"><span class="dot" style="background:#22c55e"></span>CN-1</a>
+    <a class="corp" href="#x"><span class="dot" style="background:#22c55e"></span>CN-2</a>
+    <a class="corp" href="#x">… 12개 더</a>
+    <span class="faint" style="margin-left:auto;font-size:12px">점 = Director 상태(정상·경고·인증 정지·미설정)</span>
+  </div>
+
+  <div class="card" style="padding:14px 18px;display:flex;flex-wrap:wrap;gap:18px;align-items:flex-start">
+    <div style="flex:1 1 260px;min-width:0">
+      <div style="font-size:20px;font-weight:800">OC2 <span class="chip c-bareos" style="margin-left:6px">Bareos</span></div>
+      <div class="muted" style="font-size:12.5px;margin-top:2px">Director ‘OC2-dir’ · 접속 정상 · 엣지 대행(oc2-edge) · 마지막 조회 22:03 · 폴링 60초</div>
+      <div class="faint" style="font-size:12px;margin-top:4px">FD oc2-fd · SD oc2-sd · 풀 VM-Full / VM-Incr · 스케줄 Nightly-0200 · 기본 레벨 Incremental</div>
+    </div>
+    <dl class="kv" style="flex:1 1 320px;margin:0">
+      <dt>이 법인 VM</dt><dd>549 (켜짐 471)</dd>
+      <dt>백업 방식 Bareos</dt><dd><b class="c-bareos">109</b> <span class="muted">· 잡 등록 104 · 미등록 5</span></dd>
+      <dt>방식 불일치</dt><dd>0 <span class="muted">(잡은 있는데 방식이 Bareos 가 아닌 VM)</span></dd>
+      <dt>최근 24시간</dt><dd><span class="c-ok">성공 98</span> · <span class="c-warn">경고 3</span> · <span class="c-bad">실패 1</span> · <span class="c-run">진행 2</span></dd>
+    </dl>
+  </div>
+
+  <div style="display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:10px">
+    <div class="kpi"><div class="l">Bareos 방식 VM</div><div class="v c-bareos">109</div><div class="m">전체 549 의 20%</div></div>
+    <div class="kpi"><div class="l">잡 등록</div><div class="v">104</div><div class="m">활성 102 · 비활성 2</div></div>
+    <div class="kpi" style="border-color:#6b4a1a"><div class="l c-warn">미등록</div><div class="v c-warn">5</div><div class="m">방식은 Bareos · 잡 없음</div></div>
+    <div class="kpi"><div class="l">마지막 결과</div><div class="v"><span class="c-ok">98</span> <span class="faint" style="font-size:16px">·</span> <span class="c-warn">3</span> <span class="faint" style="font-size:16px">·</span> <span class="c-bad">1</span></div><div class="m">성공 · 경고 · 실패</div></div>
+    <div class="kpi"><div class="l c-run">지금 백업 중</div><div class="v c-run">2</div><div class="m">Incremental 2 · 대기 0</div></div>
+    <div class="kpi"><div class="l c-warn">오래된 백업(1일 초과)</div><div class="v c-warn">4</div><div class="m">마지막 성공이 1일 전</div></div>
+    <div class="kpi"><div class="l">백업 용량 · 복원 지점</div><div class="v">310.2 <span style="font-size:14px;font-weight:600">TB</span></div><div class="m">복원 지점 평균 14 · 최저 2</div></div>
+  </div>
+
+  <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center">
+    <button class="tab active" type="button" aria-pressed="true">전체 109</button>
+    <button class="tab" type="button">잡 등록 104</button>
+    <button class="tab" type="button">미등록 5</button>
+    <button class="tab" type="button">진행 중 2</button>
+    <button class="tab" type="button">실패·경고 4</button>
+    <button class="tab" type="button">오래된 백업(1일) 4</button>
+    <button class="tab" type="button">비활성 2</button>
+    <button class="tab" type="button">방식 불일치 0</button>
+    <span style="margin-left:auto;display:inline-flex;align-items:center;gap:8px"><span class="muted">검색</span><input type="search" aria-label="VM · 폴더 · 잡 이름" placeholder="VM · 폴더 · 잡 이름" style="min-width:220px;height:30px;border-radius:8px;border:1px solid #243049;background:#0f1626;color:#e6edf6;padding:0 10px;font:inherit"></span>
+  </div>
+
+  <div class="card" style="padding:10px 14px;display:flex;flex-wrap:wrap;gap:10px;align-items:center">
+    <b>선택 1</b><button class="btn" type="button">보이는 VM 전체 선택(109)</button><button class="btn" type="button">선택 반전</button>
+    <span class="faint">|</span>
+    <button class="btn bareos" type="button">지금 백업 ▾ <span class="faint" style="font-weight:500">Full · Incremental · Differential</span></button>
+    <button class="btn" type="button">미등록 VM 을 백업 대상에 등록 →</button>
+    <span class="faint" style="font-size:12px">실행·등록·복원은 관리자 · OTP 재인증 — 조회만 되는 계정은 버튼이 비활성</span>
+  </div>
+
+  <div style="display:grid;grid-template-columns:minmax(0,1fr) 360px;gap:14px;align-items:start">
+    <div class="card" style="overflow:hidden;min-width:0">
+      <div style="overflow-x:auto">
+      <table>
+        <thead><tr>
+          <th style="width:34px"></th><th>vCenter › 폴더 › VM</th><th>전원</th><th style="text-align:right">용량</th>
+          <th>마지막 백업 (레벨 · 결과)</th><th style="text-align:right">복원 지점</th><th>스케줄 · 레벨</th><th>잡 · 상태</th>
+        </tr></thead>
+        <tbody>
+          <tr class="folder"><td><span class="cb"></span></td><td>▾ <b>OC2 / vm</b> <span class="muted">109 VM · Bareos 방식만</span></td><td></td><td style="text-align:right"><b>310.2 TB</b></td>
+            <td><span class="c-bareos mono" style="font-size:11.5px">104/109</span> <span class="bar"><i style="width:90%;background:#22c55e"></i><i style="width:3%;background:#f59e0b"></i><i style="width:1%;background:#ef4444"></i></span> <span class="faint" style="font-size:11.5px">성공·경고·실패 / 빈칸 = 미등록</span></td>
+            <td></td><td></td><td></td></tr>
+          <tr class="folder"><td><span class="cb"></span></td><td style="padding-left:30px">▾ <b>A.MGMT</b> <span class="muted">61 VM</span></td><td></td><td style="text-align:right"><b>188.4 TB</b></td>
+            <td><span class="c-bareos mono" style="font-size:11.5px">58/61</span> <span class="bar"><i style="width:90%;background:#22c55e"></i><i style="width:5%;background:#f59e0b"></i></span></td><td></td><td></td><td></td></tr>
+          <tr class="folder"><td><span class="cb"></span></td><td style="padding-left:54px">▾ <b>00.Console</b> <span class="muted">9 VM</span></td><td></td><td style="text-align:right"><b>2.1 TB</b></td>
+            <td><span class="c-bareos mono" style="font-size:11.5px">8/9</span> <span class="bar"><i style="width:78%;background:#22c55e"></i><i style="width:11%;background:#f59e0b"></i></span></td><td></td><td></td><td></td></tr>
+          <tr class="folder"><td><span class="cb"></span></td><td style="padding-left:78px">▾ <b>Admin_Console</b> <span class="muted">3 VM</span></td><td></td><td style="text-align:right"><b>283 GB</b></td>
+            <td><span class="c-bareos mono" style="font-size:11.5px">2/3</span> <span class="bar"><i style="width:33%;background:#22c55e"></i><i style="width:33%;background:#f59e0b"></i></span></td><td></td><td></td><td></td></tr>
+          <tr class="sel"><td><input type="checkbox" checked aria-label="LESARDSPS02 선택"></td><td style="padding-left:102px"><b>LESARDSPS02</b></td><td class="c-ok">켜짐</td><td style="text-align:right">117 GB</td>
+            <td><span class="mono">10-30 02:10</span> <span class="muted">Incremental</span> <span class="chip c-ok">성공</span> <span class="muted">41.2 GB</span></td><td style="text-align:right">14</td><td>Nightly-0200 · Incr</td><td><span class="mono" style="font-size:11.5px">vm-oc2-lesardsps02</span> <span class="chip c-ok">활성</span></td></tr>
+          <tr><td><span class="cb"></span></td><td style="padding-left:102px"><b>LESARDSPS03</b></td><td class="c-ok">켜짐</td><td style="text-align:right">30 GB</td>
+            <td><span class="mono c-warn">10-29 02:10</span> <span class="muted">Full</span> <span class="chip c-warn">경고</span> <span class="c-warn" style="font-size:12px">1일 초과</span></td><td style="text-align:right">9</td><td>Nightly-0200 · Incr</td><td><span class="mono" style="font-size:11.5px">vm-oc2-lesardsps03</span> <span class="chip c-ok">활성</span></td></tr>
+          <tr><td><span class="cb"></span></td><td style="padding-left:102px"><b>LESARDSPS04</b></td><td class="c-ok">켜짐</td><td style="text-align:right">136 GB</td>
+            <td><span class="c-warn" style="font-size:12px">미등록 — 방식은 Bareos, 백업 대상에 없음</span></td><td style="text-align:right" class="muted">—</td><td class="muted">—</td><td><a href="#x" style="font-size:12px">백업 대상에 등록 →</a></td></tr>
+          <tr class="folder"><td><span class="cb"></span></td><td style="padding-left:78px">▸ <b>DBA</b> <span class="muted">2 VM</span></td><td></td><td style="text-align:right"><b>1.2 TB</b></td>
+            <td><span class="c-bareos mono" style="font-size:11.5px">2/2</span> <span class="bar"><i style="width:50%;background:#22c55e"></i><i style="width:50%;background:#3b82f6"></i></span> <span class="c-run" style="font-size:11.5px">1대 진행 중 37%</span></td><td></td><td></td><td></td></tr>
+          <tr class="folder"><td><span class="cb"></span></td><td style="padding-left:78px">▸ <b>개발자VM</b> <span class="muted">35 VM</span></td><td></td><td style="text-align:right"><b>96.0 TB</b></td>
+            <td><span class="c-bareos mono" style="font-size:11.5px">35/35</span> <span class="bar"><i style="width:97%;background:#22c55e"></i><i style="width:3%;background:#ef4444"></i></span> <span class="c-bad" style="font-size:11.5px">1대 실패</span></td><td></td><td></td><td></td></tr>
+          <tr class="folder"><td><span class="cb"></span></td><td style="padding-left:54px">▸ <b>01.ADnDNS</b> <span class="muted">4 VM</span></td><td></td><td style="text-align:right"><b>640 GB</b></td>
+            <td><span class="c-bareos mono" style="font-size:11.5px">4/4</span> <span class="bar"><i style="width:100%;background:#22c55e"></i></span></td><td></td><td></td><td></td></tr>
+          <tr class="folder"><td><span class="cb"></span></td><td style="padding-left:30px">▸ <b>B.PROD</b> <span class="muted">41 VM</span></td><td></td><td style="text-align:right"><b>118.7 TB</b></td>
+            <td><span class="c-bareos mono" style="font-size:11.5px">39/41</span> <span class="bar"><i style="width:93%;background:#22c55e"></i><i style="width:2%;background:#f59e0b"></i></span></td><td></td><td></td><td></td></tr>
+          <tr class="folder"><td><span class="cb"></span></td><td style="padding-left:30px">▸ <b>C.DEV</b> <span class="muted">7 VM</span></td><td></td><td style="text-align:right"><b>3.1 TB</b></td>
+            <td><span class="c-bareos mono" style="font-size:11.5px">7/7</span> <span class="bar"><i style="width:100%;background:#22c55e"></i></span></td><td></td><td></td><td></td></tr>
+        </tbody>
+      </table>
+      </div>
+      <div class="muted" style="padding:8px 14px;font-size:12px;border-top:1px solid #1f2a40">폴더 줄의 수 = 그 아래 Bareos 방식 VM 중 잡이 등록된 VM / 전체. 막대 = 마지막 결과(성공·경고·실패·진행) · 빈칸 = 미등록. 다른 방식(Veeam·Clone…)의 VM 은 이 화면에 없다 — Detail 탭에서 본다.</div>
+    </div>
+
+    <div style="display:flex;flex-direction:column;gap:12px;min-width:0">
+      <div class="card" style="padding:14px 16px;display:flex;flex-direction:column;gap:10px">
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap"><b style="font-size:15px">LESARDSPS02</b><span class="chip c-bareos">Bareos</span><span class="chip c-ok">활성</span></div>
+        <div class="faint" style="font-size:12px">OC2 › A.MGMT › 00.Console › Admin_Console · Windows Server 2016 · 4vCPU · 16GB · 117 GB</div>
+        <dl class="kv" style="margin:0">
+          <dt>잡</dt><dd class="mono" style="font-size:12px">vm-oc2-lesardsps02</dd>
+          <dt>Director</dt><dd>OC2-dir (엣지 대행 oc2-edge)</dd>
+          <dt>클라이언트</dt><dd>oc2-fd · 스토리지 oc2-sd · 풀 VM-Incr</dd>
+          <dt>스케줄</dt><dd>Nightly-0200 · 기본 Incremental</dd>
+          <dt>복원 지점</dt><dd>14 (Full 2 · Incr 12) · 가장 오래된 10-16</dd>
+          <dt>등록</dt><dd>10-16 by junho</dd>
+        </dl>
+        <div style="display:flex;flex-wrap:wrap;gap:6px">
+          <button class="btn bareos" type="button">지금 백업 ▾</button>
+          <button class="btn" type="button">복원 …</button>
+          <button class="btn" type="button">로그</button>
+          <a class="btn" href="#x" style="text-decoration:none">백업 대상에서 보기</a>
+        </div>
+      </div>
+      <div class="card" style="overflow:hidden">
+        <div style="padding:10px 14px;font-weight:700;border-bottom:1px solid #1f2a40">최근 실행 5건</div>
+        <table>
+          <thead><tr><th>시작</th><th>레벨</th><th>결과</th><th style="text-align:right">바이트</th></tr></thead>
+          <tbody>
+            <tr><td class="mono">10-30 02:10</td><td>Incr</td><td><span class="chip c-ok">성공</span></td><td style="text-align:right">41.2 GB</td></tr>
+            <tr><td class="mono">10-29 02:10</td><td>Incr</td><td><span class="chip c-ok">성공</span></td><td style="text-align:right">38.9 GB</td></tr>
+            <tr><td class="mono">10-28 02:10</td><td>Incr</td><td><span class="chip c-warn">경고</span></td><td style="text-align:right">40.1 GB</td></tr>
+            <tr><td class="mono">10-27 02:10</td><td>Incr</td><td><span class="chip c-ok">성공</span></td><td style="text-align:right">37.4 GB</td></tr>
+            <tr><td class="mono">10-26 02:10</td><td>Full</td><td><span class="chip c-ok">성공</span></td><td style="text-align:right">112.0 GB</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="card" style="padding:12px 14px;font-size:12.5px;line-height:1.55;display:flex;flex-direction:column;gap:6px">
+        <b>칸 읽는 법</b>
+        <div><b class="c-bareos">월-일 시:분 · 레벨 · 결과</b> 이 잡의 마지막 실행(Director 카탈로그 · 폴러가 60초마다 반영)</div>
+        <div><b class="c-warn">미등록</b> 백업 방식은 Bareos 로 정했는데 잡이 없다 — 등록 전까지 백업되지 않는다</div>
+        <div><b class="c-warn">1일 초과</b> 마지막 성공이 기준(Detail 의 '오래된 백업 기준'과 같은 값)보다 오래됐다</div>
+        <div><b class="c-run">진행 중 N%</b> 지금 실행 중 — 바이트 기준 진행률(Director 가 주지 않으면 '진행 중' 만)</div>
+        <div class="faint">값을 못 읽었으면 '—' · 결과 모름(엣지 대행 시한)은 '모름' 으로 따로 센다</div>
+      </div>
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1640}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

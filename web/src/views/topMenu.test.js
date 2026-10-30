@@ -184,7 +184,7 @@ describe('v2.785→v2.787 Veeam — 주소·도구 키는 그대로 · 옛 이�
   const { searchTools } = await import('./toolSearch.js');
   it('서버 › Veeam 하나가 두 도구를 맡는다(Detail 화면에서도 같은 메뉴가 켜진다) · 도구 키 그대로 · 특수 기능 카드 이름', () => {
     const v = MENU_GROUPS.find((x) => x.id === 'server').children.find((c) => c.id === 'veeam');
-    expect([v.label, v.tool, v.also]).toEqual(['Backup', 'backup-summary', ['backup-detail', 'backup-em', 'backup-run', 'bareos-backup']]);   // v2.788 EM 탭 · v2.818 백업 실행 탭 · v2.822 Bareos 탭
+    expect([v.label, v.tool, v.also]).toEqual(['Backup', 'backup-summary', ['backup-detail', 'backup-em', 'backup-run', 'bareos-backup', 'bareos-summary', 'bareos-detail']]);   // v2.828 Bareos 조회 화면 2개도 같은 항목   // v2.788 EM 탭 · v2.818 백업 실행 탭 · v2.822 Bareos 탭
     expect(locate('tools', '#/tools/backup-summary')).toEqual({ group: 'server', child: 'veeam' });
     expect(locate('tools', '#/tools/backup-detail')).toEqual({ group: 'server', child: 'veeam' });
     expect(locate('tools', '#/tools/backup-em')).toEqual({ group: 'server', child: 'veeam' });

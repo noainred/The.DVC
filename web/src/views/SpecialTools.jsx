@@ -37,6 +37,8 @@ const SecretScanTool = React.lazy(() => import('./tools/SecretScanTool.jsx'));
 const CodexCheck = React.lazy(() => import('./CodexCheck.jsx'));
 const VmCloneTool = React.lazy(() => import('./tools/VmCloneTool.jsx'));
 const BareosBackupTool = React.lazy(() => import('./tools/BareosBackupTool.jsx'));
+const BareosSummaryTool = React.lazy(() => import('./tools/BareosSummaryTool.jsx'));   // v2.828 Bareos 통합 현황(조회 전용)
+const BareosDetailTool = React.lazy(() => import('./tools/BareosDetailTool.jsx'));     // v2.828 Bareos 법인별 현황(조회 전용)
 const StorageMonTool = React.lazy(() => import('./tools/StorageMonTool.jsx'));
 const StorageGrowthTool = React.lazy(() => import('./tools/StorageGrowthTool.jsx'));
 const StorageUsageTool = React.lazy(() => import('./tools/StorageUsageTool.jsx')); // v2.789 스토리지 사용량 보고서
@@ -611,6 +613,8 @@ function ToolPanel({ tool, onBack, isAdmin, defaultScope = '', cfg = null }) {
       {tool === 'codex-check' && <CodexCheck />}
       {tool === 'vm-clone' && <VmCloneTool />}
       {tool === 'bareos-backup' && <BareosBackupTool />}
+      {tool === 'bareos-summary' && <BareosSummaryTool />}
+      {tool === 'bareos-detail' && <BareosDetailTool />}
       {tool === 'storage-mon' && <StorageMonTool />}
       {tool === 'storage-growth' && <StorageGrowthTool />}
       {tool === 'storage-usage' && <StorageUsageTool isAdmin={isAdmin} />}

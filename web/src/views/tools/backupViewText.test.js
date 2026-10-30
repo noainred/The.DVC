@@ -46,8 +46,8 @@ describe('v2.779 백업 메뉴 — 순수 헬퍼', () => {
     expect(vmClass(VMS[6])).toMatchObject({ vKnown: false, sKnown: false });
     expect(vmClass(VMS[4])).toMatchObject({ snap: false, stale: true });
     const c = filterCounts(VMS);
-    expect(c).toEqual({ all: 7, veeam: 3, snaponly: 1, none: 2, run: 2, stale: 1, rpo: 1, fail: 0, need: 0, needgap: 0, 'crit-high': 0, 'crit-mid': 0, 'crit-low': 0,
-      'method-veeam': 0, 'method-clone': 0, 'method-config': 0, 'method-none': 0, 'method-check': 0, 'method-unset': 7 });   // v2.803 백업 방식(표시 없음 = 미지정)   // v2.784 표시 필터(표시 없음 = 0)   // v2.780 rpo: dc01 의 lb 1(아주 오래 전)
+    expect(c).toEqual({ all: 7, veeam: 3, snaponly: 1, none: 2, run: 2, stale: 1, rpo: 1, fail: 0, need: 0, needgap: 0, bareos: 0, 'bareos-missing': 0, 'crit-high': 0, 'crit-mid': 0, 'crit-low': 0,
+      'method-veeam': 0, 'method-clone': 0, 'method-bareos': 0, 'method-config': 0, 'method-none': 0, 'method-check': 0, 'method-unset': 7 });   // v2.803 백업 방식(표시 없음 = 미지정)   // v2.784 표시 필터(표시 없음 = 0)   // v2.780 rpo: dc01 의 lb 1(아주 오래 전)
     expect(vmMatches(VMS[6], 'none')).toBe(false);
   });
 
@@ -55,7 +55,7 @@ describe('v2.779 백업 메뉴 — 순수 헬퍼', () => {
     expect(folderParts('DC1/vm/A.MGMT/AD')).toEqual(['DC1', 'A.MGMT', 'AD']);
     const t = buildTree(VMS);
     const dc = t.children[0];
-    expect(dc.name).toBe('DC1'); expect(dc.agg).toEqual({ n: 7, veeam: 3, snap: 3, run: 2, none: 2, clone: 0, gb: 0, gbUnknown: 7 });   // v2.814: 용량 없는 VM 은 gbUnknown
+    expect(dc.name).toBe('DC1'); expect(dc.agg).toEqual({ n: 7, veeam: 3, snap: 3, run: 2, none: 2, clone: 0, bareos: 0, bareosMissing: 0, gb: 0, gbUnknown: 7 });   // v2.814: 용량 없는 VM 은 gbUnknown
     expect(dc.children.map((c) => c.name)).toEqual(['A.MGMT', 'B.Service', 'C.Add-ons']);
     const runOnly = buildTree(VMS, { filter: 'run' });
     expect(runOnly.children[0].children.map((c) => c.name)).toEqual(['A.MGMT']);
@@ -310,7 +310,7 @@ describe('v2.806 백업 방식 단축키 · 우선순위 VM', async () => {
     expect(src).toMatch(/if \(!selVm \|\| !writable\) return undefined;/);
     expect(src).toMatch(/const method = methodKeyOf\(e\);/);
     expect(src).toMatch(/if \(\(selVm\.m\?\.method \|\| ''\) !== method\) saveMarks\(\[selVm\.id\], \{ method \}\);/);
-    expect(src).toMatch(/단축키 V Veeam · C Clone · G Config 백업 · N 백업 안함 · K 확인 필요/);
+    expect(src).toMatch(/단축키 V Veeam · C Clone · B Bareos · G Config 백업 · N 백업 안함 · K 확인 필요/);
   });
   it('우선순위 VM — 백업 안함·Clone 은 Veeam 미백업이 아니다 · Clone 실패·잡 없음은 실패 탭 · Config 는 확인 불가 태그', () => {
     const NOW = 1_800_000_000_000;
@@ -413,8 +413,8 @@ describe('v2.814 디스크 용량(Detail) — 표시 · 폴더 합 · 백업 방
   });
   it('methodGbTotals — 방식별 · 미지정 · 모름 분리 · 표시 파일을 못 읽으면 방식별은 null', () => {
     const vms = [{ gb: 10, m: { method: 'veeam' } }, { gb: 2048, m: { method: 'clone' } }, { gb: 5 }, { gb: null, m: { method: 'veeam' } }, { gb: 1, m: { method: 'bogus' } }];
-    expect(methodGbTotals(vms)).toEqual({ all: 2064, unknown: 1, veeam: 10, clone: 2048, config: 0, none: 0, check: 0, unset: 6 });
-    expect(methodGbTotals(vms, { marksUnreadable: true })).toEqual({ all: 2064, unknown: 1, veeam: null, clone: null, config: null, none: null, check: null, unset: null });
+    expect(methodGbTotals(vms)).toEqual({ all: 2064, unknown: 1, veeam: 10, clone: 2048, bareos: 0, config: 0, none: 0, check: 0, unset: 6 });
+    expect(methodGbTotals(vms, { marksUnreadable: true })).toEqual({ all: 2064, unknown: 1, veeam: null, clone: null, bareos: null, config: null, none: null, check: null, unset: null });
   });
   it('소스 — 표 머리 ‘용량’ · VM·폴더·패널·상단 합계에 fmtGb', () => {
     const det = fs.readFileSync(new URL('./BackupDetailTool.jsx', import.meta.url), 'utf8');

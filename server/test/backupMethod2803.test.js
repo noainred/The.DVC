@@ -47,12 +47,12 @@ test('A 저장소 — method 검증 · 지움 · 다른 표시 유지 · 모두 
   BM.setMarks([vms[1]], { method: 'none' }, U);
   assert.ok(BM.getMarks()['x:2'], 'method 하나만 있어도 남는다');
   const c = BM.markCounts([...vms, { id: 'x:3' }], BM.getMarks(), {}, { veeamKnown: true });
-  assert.deepEqual(c.method, { veeam: 1, clone: 0, config: 0, none: 1, check: 0, unset: 1 });
+  assert.deepEqual(c.method, { veeam: 1, clone: 0, bareos: 0, config: 0, none: 1, check: 0, unset: 1 });
   assert.equal(BM.markView({ crit: 'low', method: 'bogus' }).method, '', '파일의 모르는 값은 미지정');
   // 서머리 합계 — 못 읽은 행이 있으면 null(부분 합 금지)
-  const t = BS.backupTotals([{ vm: 1, marks: { high: 0, mid: 0, low: 0, need: 0, needGap: 0, method: { veeam: 1, clone: 0, config: 0, none: 0, check: 0, unset: 0 } } }, { vm: 1, marks: null }]);
+  const t = BS.backupTotals([{ vm: 1, marks: { high: 0, mid: 0, low: 0, need: 0, needGap: 0, method: { veeam: 1, clone: 0, bareos: 0, config: 0, none: 0, check: 0, unset: 0 } } }, { vm: 1, marks: null }]);
   assert.equal(t.marks.method, null);
-  assert.deepEqual(BS.backupTotals([{ vm: 2, marks: { method: { veeam: 1, clone: 1, config: 0, none: 0, check: 0, unset: 0 } } }]).marks.method, { veeam: 1, clone: 1, config: 0, none: 0, check: 0, unset: 0 });
+  assert.deepEqual(BS.backupTotals([{ vm: 2, marks: { method: { veeam: 1, clone: 1, bareos: 0, config: 0, none: 0, check: 0, unset: 0 } } }]).marks.method, { veeam: 1, clone: 1, bareos: 0, config: 0, none: 0, check: 0, unset: 0 });
 });
 
 test('B 라우트 — PUT method · Detail c 는 Clone VM 에만 · 잡 저장 즉시 반영 · method 보기 · CSV · 내보내기 창 · 엑셀', async () => {
@@ -100,7 +100,7 @@ test('B 라우트 — PUT method · Detail c 는 Clone VM 에만 · 잡 저장 �
     assert.equal(JSON.stringify(by('web01').c).includes('DS1'), false, '대상 경로·잡 이름 원문은 싣지 않는다');
     // 서머리 수 · 보기 필터
     const sum = await (await fetch(`${base}/tools/backup-summary`)).json();
-    assert.deepEqual(sum.rows.find((x) => x.id === VC).marks.method, { veeam: 0, clone: 2, config: 1, none: 0, check: 0, unset: 0 });
+    assert.deepEqual(sum.rows.find((x) => x.id === VC).marks.method, { veeam: 0, clone: 2, bareos: 0, config: 1, none: 0, check: 0, unset: 0 });
     // v2.806 우선순위 VM — Clone 방식 VM 은 복제 잡 상태로(web01 마지막 실패 · db01 잡 없음 → cloneBad) · 방식이 실린다
     const pr = Object.fromEntries((sum.priority?.items || []).map((x) => [x.name, x]));
     assert.deepEqual([pr.web01?.method, pr.web01?.cloneBad, pr.db01?.cloneBad, pr.web01?.gap], ['clone', true, true, false], JSON.stringify(sum.priority));
@@ -165,7 +165,7 @@ test('B 라우트 — PUT method · Detail c 는 Clone VM 에만 · 잡 저장 �
     }
     const sumWs = wb.getWorksheet('요약');
     let line = ''; sumWs.eachRow((row) => { if (row.getCell(1).value === '백업 방식') line = txt(row.getCell(2).value); });
-    assert.equal(line, 'Veeam 0 · Clone 2 · Config 백업 1 · 백업 안함 0 · 확인 필요 0 · 미지정 0');
+    assert.equal(line, 'Veeam 0 · Clone 2 · Bareos 0 · Config 백업 1 · 백업 안함 0 · 확인 필요 0 · 미지정 0');
   } finally { store.snapshot = prev; }
 });
 
@@ -234,10 +234,10 @@ test('F v2.807 엑셀 백업 방식 — 색 표는 방식 키와 같다 · 데�
   }
   assert.equal(XS.cellLook('', 'method', false), null, '미지정 빈칸은 색 없음');
   const txt = (v) => (v && typeof v === 'object' && v.richText ? v.richText.map((x) => x.text).join('') : String(v ?? ''));
-  const a = { method: { veeam: 1200, clone: 3, config: 0, none: 40, check: 0, unset: 0 } };
+  const a = { method: { veeam: 1200, clone: 3, bareos: 0, config: 0, none: 40, check: 0, unset: 0 } };
   assert.equal(txt(XL.methodCountsRich(a, false)), 'Veeam 1,200 · Clone 3 · 백업 안함 40');
-  assert.equal(txt(XL.methodCountsRich({ method: { veeam: 0, clone: 0, config: 0, none: 0, check: 0, unset: 5 } }, false)), '미지정 5');
-  assert.equal(txt(XL.methodCountsRich(a, false, { full: true })), 'Veeam 1,200 · Clone 3 · Config 백업 0 · 백업 안함 40 · 확인 필요 0 · 미지정 0');
+  assert.equal(txt(XL.methodCountsRich({ method: { veeam: 0, clone: 0, bareos: 0, config: 0, none: 0, check: 0, unset: 5 } }, false)), '미지정 5');
+  assert.equal(txt(XL.methodCountsRich(a, false, { full: true })), 'Veeam 1,200 · Clone 3 · Bareos 0 · Config 백업 0 · 백업 안함 40 · 확인 필요 0 · 미지정 0');
   assert.equal(XL.methodCountsRich(a, true), '모름', '표시 파일을 못 읽으면 0 으로 쓰지 않는다');
 });
 
