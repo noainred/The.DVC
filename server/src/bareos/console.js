@@ -37,6 +37,10 @@ export const DEFAULT_PORT = 9101;
 export const DEFAULT_TIMEOUT_MS = 15_000;
 /** 프레임 1개 상한 — Director 의 한 메시지는 수 KB~수백 KB 다. 이보다 크면 프로토콜이 어긋난 것으로 본다. */
 export const MAX_FRAME_BYTES = 4 * 1024 * 1024;
+/** 명령 하나가 요청할 수 있는 응답 상한의 끝(설정 maxResponseBytes 의 상한과 같다). */
+export const HARD_MAX_RESPONSE_BYTES = 64 * 1024 * 1024;
+/** 읽지 않고 쌓인 프레임 수 상한 — 신호 프레임(4바이트)은 바이트 상한에 거의 안 잡힌다(v2.822.3 P8). */
+export const MAX_QUEUED_FRAMES = 100_000;
 /** 명령 1개 응답 상한(기본) — 작업 로그·목록은 호출부가 limit 으로 줄인다. */
 export const DEFAULT_MAX_RESPONSE_BYTES = 8 * 1024 * 1024;
 
@@ -88,7 +92,7 @@ export function normalizeConsoleOptions(o = {}) {
   const tlsMode = o.tls === 'none' ? 'none' : 'psk';
   const tlsMaxVersion = o.tlsMaxVersion === 'TLSv1.2' ? 'TLSv1.2' : 'TLSv1.3';
   const m = Number(o.maxResponseBytes);
-  const maxResponseBytes = Number.isFinite(m) && m > 0 ? Math.min(64 * 1024 * 1024, Math.round(m)) : DEFAULT_MAX_RESPONSE_BYTES;
+  const maxResponseBytes = Number.isFinite(m) && m > 0 ? Math.min(HARD_MAX_RESPONSE_BYTES, Math.round(m)) : DEFAULT_MAX_RESPONSE_BYTES;
   return { host, port, name, password: o.password, timeoutMs, tls: tlsMode, tlsMaxVersion, maxResponseBytes };
 }
 
@@ -110,7 +114,8 @@ export class BareosSession {
     this.closed = false;
     this.info = { tls: null, banner: '', infoMessage: '' };
     this._chunks = []; this._len = 0; this._need = null;
-    this._frames = []; this._waiter = null; this._fatal = null;
+    this._frames = []; this._queuedBytes = 0; this._waiter = null; this._fatal = null;
+    this._callMax = 0;   // 지금 명령이 요청한 응답 상한(callRaw — 기본값보다 크게 요청할 수 있다)
     this._queue = Promise.resolve();
     sock.on('data', (d) => this._onData(d));
     sock.on('error', (e) => this._fail(err('closed', `Director 연결 오류: ${e?.code || e?.message || e}`)));
@@ -121,8 +126,9 @@ export class BareosSession {
     if (this._fatal) return;
     this._chunks.push(d); this._len += d.length;
     // 읽지 않고 쌓인 양도 상한 — 명령 사이에 상대가 계속 보내면 메모리가 무한히 늘지 않게.
-    const queued = this._frames.reduce((s, f) => s + (f.data ? f.data.length : 0), 0);
-    if (this._len + queued > this.opts.maxResponseBytes + MAX_FRAME_BYTES) {
+    //   v2.822.3(P8): 쌓인 바이트는 누적 카운터로 센다(예전에는 청크마다 전부 다시 더해 프레임 수의 제곱 시간이었다).
+    const cap = Math.max(this.opts.maxResponseBytes, this._callMax);
+    if (this._len + this._queuedBytes > cap + MAX_FRAME_BYTES) {
       this._fail(err('too-large', 'Director 응답이 상한을 넘었습니다.'));
       return;
     }
@@ -161,7 +167,10 @@ export class BareosSession {
   }
 
   _emit(f) {
-    if (this._waiter) { const w = this._waiter; this._waiter = null; w.resolve(f); } else this._frames.push(f);
+    if (this._waiter) { const w = this._waiter; this._waiter = null; w.resolve(f); return; }
+    if (this._frames.length >= MAX_QUEUED_FRAMES) { this._fail(err('too-large', 'Director 가 읽지 않은 응답 조각을 너무 많이 보냈습니다.')); return; }
+    this._frames.push(f);
+    this._queuedBytes += f.data ? f.data.length : 0;
   }
 
   _fail(e) {
@@ -174,7 +183,11 @@ export class BareosSession {
 
   /** 다음 프레임(절대 시한). */
   _next(deadlineAt) {
-    if (this._frames.length) return Promise.resolve(this._frames.shift());
+    if (this._frames.length) {
+      const f = this._frames.shift();
+      this._queuedBytes -= f.data ? f.data.length : 0;
+      return Promise.resolve(f);
+    }
     if (this._fatal) return Promise.reject(this._fatal);
     return new Promise((resolve, reject) => {
       const left = deadlineAt - Date.now();
@@ -263,23 +276,27 @@ export class BareosSession {
       if (/[\r\n\0]/.test(text)) throw err('invalid', '명령에 줄바꿈·NUL 을 넣을 수 없습니다.');
       const t = Number(o.timeoutMs);
       const deadlineAt = Date.now() + (Number.isFinite(t) && t > 0 ? t : this.opts.timeoutMs);
-      const max = Math.min(this.opts.maxResponseBytes, Number(o.maxBytes) > 0 ? Number(o.maxBytes) : Infinity);
-      this._send(Buffer.from(text, 'utf8'));
-      const parts = []; let total = 0;
-      for (;;) {
-        const f = await this._next(deadlineAt);
-        if (f.sig !== undefined) {
-          if (END_SIGNALS.has(f.sig)) {
-            if (f.sig === BNET.TERMINATE) { this.closed = true; }
-            break;
+      // v2.822.3(C2-8): 명령이 요청한 상한을 그대로 쓴다(최대 HARD_MAX) — 예전에는 세션 기본값 8MB 와 작은 쪽이라 16MB 요청이 8MB 였다.
+      const max = Number(o.maxBytes) > 0 ? Math.min(HARD_MAX_RESPONSE_BYTES, Number(o.maxBytes)) : this.opts.maxResponseBytes;
+      this._callMax = max;
+      try {
+        this._send(Buffer.from(text, 'utf8'));
+        const parts = []; let total = 0;
+        for (;;) {
+          const f = await this._next(deadlineAt);
+          if (f.sig !== undefined) {
+            if (END_SIGNALS.has(f.sig)) {
+              if (f.sig === BNET.TERMINATE) { this.closed = true; }
+              break;
+            }
+            continue; // MSGS_PENDING·HEARTBEAT 등
           }
-          continue; // MSGS_PENDING·HEARTBEAT 등
+          total += f.data.length;
+          if (total > max) { this._fail(err('too-large', `Director 응답이 상한(${Math.round(max / 1024)}KB)을 넘었습니다.`)); throw this._fatal; }
+          parts.push(f.data);
         }
-        total += f.data.length;
-        if (total > max) { this._fail(err('too-large', `Director 응답이 상한(${Math.round(max / 1024)}KB)을 넘었습니다.`)); throw this._fatal; }
-        parts.push(f.data);
-      }
-      return Buffer.concat(parts).toString('utf8');
+        return Buffer.concat(parts).toString('utf8');
+      } finally { this._callMax = 0; }
     };
     const p = this._queue.then(run, run);
     this._queue = p.catch(() => {});

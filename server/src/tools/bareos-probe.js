@@ -24,7 +24,8 @@
  */
 import process from 'node:process';
 import { openConsole, diagnoseConsole } from '../bareos/console.js';
-import { probe, catalogLists, jobHistory, restoreChain } from '../bareos/director.js';
+import { probe, catalogLists, jobHistory, restoreChain, jobStatus, jobRuns } from '../bareos/director.js';
+import { chainFromHistory } from '../bareos/restore.js';
 
 const argv = process.argv.slice(2);
 const has = (f) => argv.includes(f);
