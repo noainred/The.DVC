@@ -11,6 +11,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { stripComments } from './_stripComments.js';
 
 const DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'tokapply2826-'));
 Object.assign(process.env, { CONFIG_DIR: DIR, DATA_SOURCE: 'mock', AUTH_ENABLED: 'false' });
@@ -194,8 +195,8 @@ test('5 edgeApiVersionState — 충분 true · 낮음 false · 모름 null(낮�
   const webText = fs.readFileSync(new URL('../../web/src/views/edgeTokenSyncText.js', import.meta.url), 'utf8');
   const m = webText.match(/export const MIN_EDGE_API_VERSION = '([^']+)'/);
   assert.ok(m, '웹 상수가 있다'); assert.equal(m[1], J.MIN_EDGE_API_VERSION);
-  // 웹 cmpVersion 사본은 서버 util 과 본문이 같다(주석 제외)
-  const strip = (t) => t.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '').replace(/\s+/g, ' ').trim();
+  // 웹 cmpVersion 사본은 서버 util 과 본문이 같다(주석 제외 — 제거기는 test/_stripComments.js 하나)
+  const strip = (t) => stripComments(t).replace(/\s+/g, ' ').trim();
   const sv = strip(fs.readFileSync(new URL('../src/util/cmpVersion.js', import.meta.url), 'utf8'));
   const wv = strip(fs.readFileSync(new URL('../../web/src/cmpVersion.js', import.meta.url), 'utf8'));
   assert.equal(wv, sv, '웹 cmpVersion 이 서버 util 과 같다');
