@@ -373,6 +373,12 @@ python3 -m pip install --no-index --find-links /root/bareos-offline/wheels 'pyvm
 
 이 환경에서 실제로 있었던 순서(9 설치 → 플러그인 실패 → 8 재설치)다. **9.x 가 한 곳이라도 남아 있으면 같은 오류가 계속 난다.**
 
+현장 기록(2026-10-30, 작업 로그 jobid 4 — Bareos `25.1.2~pre73` · Rocky Linux 9.4):
+pyVmomi 가 root 의 `pip` 로 **`/usr/local/lib/python3.9/site-packages/pyVmomi/`** 에 설치돼 있었고,
+`bareos-fd-vmware.py` line 50 의 `from pyVim.connect import …` 에서 `_init_utils.py` 가 `Exception: Python 3.10 or newer is required (found 3.9)` 를 냈다.
+이어진 `TwoWayAuthenticate failed, because job was canceled` · `Failed to authenticate Storage daemon` · `2902 Bad storage` 는 **플러그인 치명 오류로 잡이 취소된 연쇄**다
+(비밀번호 문제로 오인하지 말 것). 8.x 로 바꾼 뒤 jobid 7 에서 `Successfully connected to VSphere API` 가 확인됐다(설치된 8.x 의 정확한 버전은 기록에 없다).
+
 ```bash
 # ① 시스템 site-packages 의 버전
 python3 -m pip list 2>/dev/null | grep -i pyvmomi
@@ -601,7 +607,7 @@ ls -lh /mnt/bareos/            # (SD 서버) KR-VM-0001 같은 볼륨 파일이 
 | 잡 로그 줄 | 원인 | 조치 |
 |---|---|---|
 | `Python 3.10 or newer is required (found 3.9)` | FD 에 pyVmomi 9.x | 7.4 — 모든 위치에서 9.x 제거 → 8.x → `systemctl restart bareos-fd` |
-| `Permission denied` | `/mnt/bareos` 에 `bareos` 계정이 못 씀 | 3.3 소유자·SELinux, NFS 는 UID/GID 숫자(3.2) |
+| `Permission denied` | `/mnt/bareos` 에 `bareos` 계정이 못 씀(현장: 이전 경로 `/mnt/theDVC/bareos/Full-0006` 에서 실제 발생) | 3.3 소유자·SELinux, NFS 는 UID/GID 숫자(3.2) |
 | `Please mount … label a new one` | SD 가 쓸 볼륨을 열지 못함 | 바로 위 줄(열기 실패 원인) 먼저 · Device `LabelMedia = yes` · Pool `Label Format` |
 | `Could not open` / `Open device … fail` | 볼륨 파일 열기 실패 | 같은 이름의 디렉터리·권한·디스크 여유 |
 | `No space left on device` | 디스크 가득 | `df -h /mnt/bareos /` · 보관 기간·볼륨 수 조정 |
@@ -648,6 +654,7 @@ ls -lh /mnt/bareos/            # (SD 서버) KR-VM-0001 같은 볼륨 파일이 
 | `vmware_cbt_tool.py` 비밀번호 프롬프트 지원 | `[확인 필요]` |
 | Rocky/RHEL 10 FD 로 pyVmomi 9 사용 | `[추정]` — 시험하지 않았다 |
 | 사이트 동시 백업 수 · 볼륨 크기 · 보관 기간 | 예시 값 — 첫 Full 실측 뒤 조정 |
+| 현장 시험 환경의 vCenter·ESXi·VDDK 버전 · 재설치한 pyVmomi 8.x 의 정확한 버전 | 세션 기록에 없음 — `rpm -q bareos-vmware-vix-disklib` · `python3 -m pip show pyvmomi` 로 기록해 둘 것 |
 
 ## 부록 B. 근거
 
