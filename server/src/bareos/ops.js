@@ -31,6 +31,9 @@ async function addOne(s, it) {
   throw fail('invalid', '같은 VM 의 Bareos 잡이 Director 에 이미 여러 개 있습니다 — Director 의 bareos-dir.d/job 아래 pv-… 파일을 정리한 뒤 다시 시도하세요.');
 }
 
+/** v2.830 runJobs 한 번에 보내는 잡 수 상한 — 그룹 상한(groups.MAX_MEMBERS)을 부르는 쪽이 이 크기로 나눠 보낸다. */
+export const RUN_JOBS_MAX = 50;
+
 export const OPS = Object.freeze({
   /** 접속 확인(배너·버전·클라이언트). */
   probe: (s) => probe(s),
@@ -72,6 +75,28 @@ export const OPS = Object.freeze({
   },
 
   runJob: (s, { job, level }) => runJob(s, { job, level }),
+
+  /**
+   * v2.830 백업 그룹 실행 — 세션 하나로 순차(VM 마다 접속하지 않는다 — 고RTT 법인에서 TLS 왕복을 아낀다). 한 잡의 실패는 나머지를 막지 않고,
+   * 세션째 끊기면(SESSION_DEAD) 남은 것은 '건너뜀'(보내지 않았다 — 실행되지 않았다). storage·pool 은 그 실행에만 쓰는 지정.
+   * 옛 엣지는 이 작업 종류를 몰라 '알 수 없는 작업' 으로 거절한다(지정을 조용히 버리고 잡 기본 스토리지로 돌리는 일이 없다).
+   * @param {{ items: { key:number, job:string, level:string, storage?:string, pool?:string }[] }} a
+   * @returns {Promise<{ key, ok, jobid?, code?, message? }[]>}
+   */
+  async runJobs(s, { items = [] } = {}) {
+    const out = [];
+    let dead = '';
+    for (const it of items.slice(0, RUN_JOBS_MAX)) {
+      if (dead) { out.push({ key: it.key, ok: false, code: 'skipped', message: `건너뜀 — ${dead}` }); continue; }
+      try {
+        out.push({ key: it.key, ok: true, jobid: await runJob(s, { job: it.job, level: it.level, storage: it.storage || '', pool: it.pool || '' }) });
+      } catch (e) {
+        out.push({ key: it.key, ok: false, code: e?.code || 'error', message: String(e?.message || e).slice(0, 300) });
+        if (SESSION_DEAD.has(e?.code)) dead = `Director 연결 문제로 멈췄습니다(${e.code})`;
+      }
+    }
+    return out;
+  },
   setEnabled: (s, { name, enabled }) => setJobEnabled(s, name, !!enabled),
   history: (s, { name, limit }) => jobHistory(s, name, limit),
 
@@ -184,4 +209,4 @@ export const OPS = Object.freeze({
 });
 
 /** Director 상태를 바꾸는 작업. */
-export const MUTATING = Object.freeze(new Set(['addJobs', 'disableJobs', 'runJob', 'setEnabled', 'cancel', 'restore', 'poll']));
+export const MUTATING = Object.freeze(new Set(['addJobs', 'disableJobs', 'runJob', 'runJobs', 'setEnabled', 'cancel', 'restore', 'poll']));

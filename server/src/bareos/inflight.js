@@ -14,6 +14,10 @@ const _setups = new Map();   // Director id → { name, since } — 중앙 직�
 export function noteSetupStart(dirId, name) { _setups.set(String(dirId), { name: String(name || dirId).slice(0, 80), since: Date.now() }); }
 export function noteSetupEnd(dirId) { _setups.delete(String(dirId)); }
 
+const _groups = new Map();   // 그룹 id → { name, since } — v2.830 백업 그룹 실행(groupRunner.runGroup — 중앙 직접이면 세션이 이 프로세스 안에서 돈다)
+export function noteGroupRunStart(id, name) { _groups.set(String(id), { name: String(name || id).slice(0, 80), since: Date.now() }); }
+export function noteGroupRunEnd(id) { _groups.delete(String(id)); }
+
 /**
  * 지금 도는(재시작하면 끊기는) Bareos 작업 — upgrade/manager.js 의 다른 대기 목록과 같은 모양.
  * 엣지 대행 상태 조회(poll)는 넣지 않는다(다음 주기에 다시 한다).
@@ -22,6 +26,8 @@ export function noteSetupEnd(dirId) { _setups.delete(String(dirId)); }
 export function runningBareosWork(now = Date.now()) {
   const out = [];
   for (const [id, s] of _setups) out.push({ kind: 'bareos', key: `setup:${id}`, label: `Bareos 자동 설정(${s.name})`, since: s.since, resumable: false });
+  // v2.830: 그룹 실행 도중 재시작하면 그 회차의 남은 VM 은 보내지 못한다(회차는 이미 차지했다 — 다시 보내지 않는다)
+  for (const [id, g] of _groups) out.push({ kind: 'bareos', key: `group:${id}`, label: `Bareos 백업 그룹 실행(${g.name})`, since: g.since, resumable: false });
   let ops = [];
   try { ops = pendingView(); } catch { ops = []; }
   for (const o of ops) {
@@ -35,4 +41,4 @@ export function runningBareosWork(now = Date.now()) {
   return out;
 }
 
-export function _resetInflightForTest() { _setups.clear(); }
+export function _resetInflightForTest() { _setups.clear(); _groups.clear(); }

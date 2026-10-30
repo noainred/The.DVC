@@ -39,6 +39,7 @@ import {
   planDirector, setupDirector, planFdIni, setupFdIni, readFdThumbprint, preflight, planFdPlugin, setupFdPlugin, VMWARE_POOL_FULL, VMWARE_SCHEDULE, newConsolePassword,
 } from '../../bareos/autoSetup.js';
 import { isSshAuthError, isSshHostKeyError } from '../../proxy/sshExec.js';
+import { tryLockJob, unlockJob } from '../../bareos/jobLocks.js';
 
 const adminOnly = requireRole('admin');
 const fullScopeOnly = fullScopeOnlyWith('Bareos Director 설정은 전 법인 공용이라 전체 범위(vCenter 제한 없는) 계정만 볼 수 있습니다.');
@@ -92,7 +93,8 @@ const jobDir = (job) => jobDirectorId(job, effectiveSettings());
  */
 const orphanOf = (job) => !job.demo && !isDemoActive() && !directorById(jobDir(job), loadSettings());
 
-/** 오류 → HTTP 상태(사람이 읽는 사유는 그대로). */
+/** 오류 → HTTP 상태(사람이 읽는 사유는 그대로). v2.830: 백업 그룹 라우트(bareosGroups.js)도 같은 표를 쓴다. */
+export function sendBareosErr(res, e) { return sendErr(res, e); }
 function sendErr(res, e) {
   const code = e?.code || '';
   if (code === 'demo-only') return res.status(403).json({ ok: false, code, demoGuest: true, reason: String(e?.message || e) });
@@ -135,11 +137,10 @@ function addrVisible(req) {
  * v2.822(B2) 대상별 처리 중 표시 — 실행·복원·취소·활성 전환·삭제는 Director 호출(비동기)을 사이에 두고 원장을 바꾼다.
  * 대상마다 한 번에 하나만 받고 나머지는 409(사람이 다시 누르면 된다 — 줄 세우지 않는다).
  */
-const _busyJobs = new Set();
+// v2.830: 잠금은 bareos/jobLocks.js 공용 — 백업 그룹 실행(groupRunner)도 같은 잠금을 잡는다(그룹이 보내는 사이 같은 대상을 지우지 못하게).
 async function oneAtATime(job, res, fn) {
-  if (_busyJobs.has(job.id)) return res.status(409).json({ ok: false, reason: '이 대상의 다른 요청을 처리하는 중입니다 — 잠시 뒤 다시 시도하세요.' });
-  _busyJobs.add(job.id);
-  try { return await fn(); } finally { _busyJobs.delete(job.id); }
+  if (!tryLockJob(job.id)) return res.status(409).json({ ok: false, reason: '이 대상의 다른 요청을 처리하는 중입니다 — 잠시 뒤 다시 시도하세요.' });
+  try { return await fn(); } finally { unlockJob(job.id); }
 }
 
 /** 가린 판본의 폴러 상태 — 접속 오류 문구에는 Director 주소가 실릴 수 있어 코드만 남긴다(Director 별 상태도). */
@@ -315,6 +316,19 @@ export function suggestMapping({ director, sites, catalog, vcenters }) {
     };
   });
 }
+
+/** 매핑 드롭다운 원천(.clients·.storages·.pools·.schedules·.jobdefs·.filesets) — Director 마다 60초 기억(설정을 저장하면 새로 읽는다). */
+async function catalogOf(d, refresh) {
+  const key = `${isDemoActive()}|${d.id}|${settingsRev()}`;
+  const m = _catalogMemo.get(key);
+  if (!refresh && m && Date.now() - m.at < CATALOG_TTL_MS) return { cached: true, ...m.value };
+  const value = await onDirector(d.id, 'catalog');
+  for (const k of [..._catalogMemo.keys()]) if (k.includes(`|${d.id}|`)) _catalogMemo.delete(k);
+  _catalogMemo.set(key, { at: Date.now(), value });
+  return value;
+}
+/** v2.830: 백업 그룹 편집 창(스토리지·풀 목록)도 같은 기억을 쓴다. */
+export function bareosCatalogOf(d, refresh) { return catalogOf(d, refresh); }
 
 export function registerBareosBackup(api) {
 
@@ -511,16 +525,6 @@ api.post('/tools/bareos-backup/settings/directors/:directorId/test', adminOnly, 
   } finally { _testBusy.delete(saved.id); }
 });
 
-/** 매핑 드롭다운 원천(.clients·.storages·.pools·.schedules·.jobdefs·.filesets) — Director 마다 60초 기억(설정을 저장하면 새로 읽는다). */
-async function catalogOf(d, refresh) {
-  const key = `${isDemoActive()}|${d.id}|${settingsRev()}`;
-  const m = _catalogMemo.get(key);
-  if (!refresh && m && Date.now() - m.at < CATALOG_TTL_MS) return { cached: true, ...m.value };
-  const value = await onDirector(d.id, 'catalog');
-  for (const k of [..._catalogMemo.keys()]) if (k.includes(`|${d.id}|`)) _catalogMemo.delete(k);
-  _catalogMemo.set(key, { at: Date.now(), value });
-  return value;
-}
 api.get('/tools/bareos-backup/settings/directors/:directorId/catalog', adminOnly, fullScopeOnly, async (req, res) => {
   const d = directorFor(req, res); if (!d) return;
   try { res.json({ ok: true, directorId: d.id, ...(await catalogOf(d, req.query.refresh === '1')) }); } catch (e) { sendErr(res, e); }

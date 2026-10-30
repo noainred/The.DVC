@@ -53,6 +53,14 @@ export const VALUE = Object.freeze({
   }),
   disableJobs: (v) => arr(v).slice(0, 500).map((x0) => { const x = obj(x0); return { name: str(x.name, 128), ok: bool(x.ok) }; }),
   runJob: (v) => posInt(v),
+  // v2.830 백업 그룹 일괄 실행 — 성공인데 jobid 가 없으면 그 항목은 '결과 모름'(실행됐을 수 있다 · 원장에 jobid 없는 실행을 남기지 않는다 — C9 와 같은 규칙)
+  runJobs: (v) => arr(v).slice(0, 500).map((x0) => {
+    const x = obj(x0);
+    const key = Number.isInteger(x.key) && x.key >= 0 && x.key < 1_000_000 ? x.key : -1;
+    const jobid = posInt(x.jobid);
+    if (bool(x.ok) && !jobid) return { key, ok: false, code: 'unknown', message: '엣지가 jobid 없이 성공을 회신했습니다 — 실행됐을 수 있습니다. Director 에서 확인하세요.' };
+    return { key, ok: bool(x.ok), ...(jobid ? { jobid } : {}), ...(x.code ? { code: str(x.code, 40) } : {}), ...(x.message ? { message: str(x.message, 300) } : {}) };
+  }),
   setEnabled: () => null,
   history: (v) => rows(v, 200),
   cancel: (v) => { const r = obj(v); return r.final ? { final: rowOut(r.final) } : r.cleared ? { cleared: true } : { canceled: bool(r.canceled) }; },
