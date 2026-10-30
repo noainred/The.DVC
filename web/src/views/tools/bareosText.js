@@ -137,14 +137,13 @@ export function driftText(drift) {
   return `등록 뒤 VM 의 ${what}이(가) 바뀌었습니다 — Bareos 잡은 등록 때의 값을 쓰므로 백업이 실패할 수 있고 덮어쓰기 복원은 막힙니다. 대상을 지우고 다시 등록하세요.`;
 }
 
-/** 바이트 → 사람이 읽는 크기. 못 읽은 값은 '—'(0 이 아니다). */
+/**
+ * 바이트 → 사람이 읽는 크기. 못 읽은 값은 '—'(0 이 아니다).
+ * v2.828: Bareos 보고서와 같은 10진 단위(decBytesText 하나로) — 예전에는 1024 로 나누고 'GB' 를 붙여 목록·이력·복원 지점은 177 GB,
+ *   Bareos 보고서는 190.4 GB 로 같은 실행이 다르게 보였다(현장 JobId 13).
+ */
 export function bytesText(v) {
-  const n = numOrNull(v);
-  if (n === null || n < 0) return '—';
-  const u = ['B', 'KB', 'MB', 'GB', 'TB', 'PB'];
-  let x = n; let i = 0;
-  while (x >= 1024 && i < u.length - 1) { x /= 1024; i++; }
-  return `${i === 0 ? x : x.toFixed(x >= 100 ? 0 : 1)} ${u[i]}`;
+  return decBytesText(v);
 }
 
 /** 시각(ms) → 'MM-DD HH:mm'(브라우저 시각). 없으면 '—'. */
@@ -421,7 +420,7 @@ export function thumbprintText(r) {
 /** 보고 블록의 키 → 화면 이름. 백업·복원 보고 둘 다(Bareos dird backup.cc·restore.cc 의 보고 줄). */
 export const REPORT_KEYS = Object.freeze({
   'JobId': 'jobid', 'Job': '잡', 'Backup Level': '레벨', 'Client': 'FD 클라이언트', 'FileSet': 'FileSet', 'Pool': '풀', 'Storage': '스토리지',
-  'Start time': '시작', 'End time': '종료', 'Elapsed time': '소요',
+  'Scheduled time': '예약', 'Start time': '시작', 'End time': '종료', 'Elapsed time': '소요',
   'FD Files Written': '파일(FD)', 'SD Files Written': '파일(SD)', 'FD Bytes Read': '읽은 양', 'FD Bytes Written': '보낸 양', 'SD Bytes Written': '저장한 양',
   'Files Expected': '복원 예정 파일', 'Files Restored': '복원 파일', 'Bytes Restored': '복원 양',
   'Rate': '속도', 'Software Compression': '압축', 'Encryption': '암호화', 'Volume name(s)': '볼륨', 'Last Volume Bytes': '볼륨 크기',
@@ -436,7 +435,7 @@ const MAX_ISSUES = 30;
 
 /** '10,223,626,211 (10.22 GB)' → 10223626211. 못 읽으면 null(0 으로 만들지 않는다). */
 export function reportBytes(v) {
-  const m = /^([\d,]+)/.exec(String(v ?? '').trim());
+  const m = /^(\d[\d,]{0,30})/.exec(String(v ?? '').trim());   // v2.828: 숫자로 시작해야 한다 — ',' 만 있으면 Number('') 가 0 이 되던 함정
   if (!m) return null;
   const n = Number(m[1].replace(/,/g, ''));
   return Number.isFinite(n) ? n : null;
@@ -493,13 +492,21 @@ export function reportCards(f = {}) {
       { k: 'elapsed', label: '소요', value: f['Elapsed time'] || '—' },
     ];
   }
+  // v2.828: 크기는 Bareos 보고서와 같은 10진 단위(예전 bytesText 는 1024 로 나누고 'GB' 를 붙여 622.5 GB 가 580 GB 로 보였다).
+  const read = reportBytes(f['FD Bytes Read']);
+  const stored = reportBytes(f['SD Bytes Written']);
+  const vols = volumeNames(f['Volume name(s)']);
+  const ratio = storeRatio(f);
+  const rate = rateText(f.Rate);
+  const from = clockOf(f['Start time']);
+  const to = clockOf(f['End time']);
   return [
-    { k: 'read', label: '읽은 양(VM 디스크)', value: bytesText(reportBytes(f['FD Bytes Read'])) },
-    { k: 'stored', label: '저장한 양(볼륨)', value: bytesText(reportBytes(f['SD Bytes Written'])) },
-    { k: 'comp', label: '압축', value: f['Software Compression'] || '—' },
-    { k: 'rate', label: '속도', value: f.Rate || '—' },
-    { k: 'elapsed', label: '소요', value: f['Elapsed time'] || '—' },
-    { k: 'vol', label: '볼륨', value: f['Volume name(s)'] || '—' },
+    { k: 'read', label: '읽은 양(VM 디스크)', value: reportSizeText(f['FD Bytes Read']), meta: read === null ? '' : `${read.toLocaleString('en-US')} B` },
+    { k: 'stored', label: '저장한 양(볼륨)', value: reportSizeText(f['SD Bytes Written']), meta: stored === null ? '' : `${stored.toLocaleString('en-US')} B${vols.length ? ` · 볼륨 ${vols.length}개` : ''}` },
+    { k: 'comp', label: '압축', value: f['Software Compression'] || '—', meta: ratio === null ? '' : `저장 ${pctText(ratio)} · 절감 ${decBytesText(read - stored)}` },
+    { k: 'rate', label: '속도', value: rate, meta: f.Rate && rate !== f.Rate ? f.Rate : '' },
+    { k: 'elapsed', label: '소요', value: elapsedKo(f['Elapsed time']), meta: from && to ? `${from} → ${to}` : '' },
+    { k: 'vol', label: '볼륨', value: vols.length ? `${vols.length}개` : '—', meta: vols.join(' · ') },
   ];
 }
 
@@ -514,7 +521,21 @@ const ISSUE_HINTS = Object.freeze([
   [/authenticate|Authorization failed/i, '데몬 사이 인증이 실패했습니다 — 앞선 치명 오류로 잡이 취소된 연쇄일 수 있으니 첫 오류부터 보세요.'],
   [/No space left on device/i, '디스크가 가득 찼습니다 — 저장 경로와 루트(/) 여유 공간을 확인하세요.'],
   [/Overriding plugin option/i, '잡의 플러그인 옵션이 FileSet·INI 값을 덮어썼다는 안내입니다(정상 동작).'],
+  [/is not CBT enabled, enabling it now/i, 'VM 에 CBT(변경 블록 추적)가 꺼져 있어 플러그인이 켰습니다 — 문구는 Error 지만 작업은 계속됩니다. 다음 실행부터 바뀐 블록만 읽을 수 있습니다.'],
 ]);
+
+/**
+ * v2.828 경고·오류 줄의 색 — 'info'(문구에 Error 가 있어도 플러그인이 스스로 처리하고 계속한 안내) · 'err' · 'warn'.
+ * 안내로 내리는 것은 아는 줄만(INFO_ISSUES). 모르는 Error 줄은 오류 그대로 둔다(낮춰 단정하지 않는다).
+ */
+const INFO_ISSUES = Object.freeze([/is not CBT enabled, enabling it now/i]);
+export function issueTone(text) {
+  const s = String(text ?? '').slice(0, 600);
+  if (INFO_ISSUES.some((re) => re.test(s))) return 'info';
+  if (/Fatal error|\bError\b|ERR=/i.test(s) && !/^.{0,80}Warning/i.test(s)) return 'err';
+  return 'warn';
+}
+export const ISSUE_TONE_LABEL = Object.freeze({ info: '안내', warn: '경고', err: '오류' });
 
 /** 줄 → 해석 한 줄('' 이면 모름). */
 export function issueHint(text) {
@@ -550,6 +571,280 @@ export function reportValue(v) {
   const s = String(v ?? '').trim();
   if (!s) return '—';
   return s.replace(/\s*\(From [A-Za-z ]{1,40}\)$/, '').replace(/^"([^"]*)"$/, '$1') || '—';
+}
+
+/* ───────── v2.828 작업 결과 상세 — 크기·속도·소요 표기 · 로그 줄 분류 · 세부(TLS·장치·볼륨·백업 항목) · 타임라인 ─────────
+ * 모두 순수 함수. 입력은 서버 jobLog 의 줄('YYYY-MM-DD HH:MM:SS 본문') — 외부 입력이라 줄마다 길이를 먼저 자르고 정규식은 선형만 쓴다.
+ * 로그 시각은 Director 현지 시각(시간대 없음)이다 — 빼기(소요·대기)에만 쓰고 KST 로 바꾸지 않는다. */
+
+const DEC_UNITS = ['B', 'KB', 'MB', 'GB', 'TB', 'PB'];
+/**
+ * 바이트 → 10진 단위(1 GB = 10^9 B) · 앞 4자리에서 **버림**(622.5 GB · 31.93 GB · 5.833 GB). 못 읽으면 '—'.
+ * Bareos 보고서 괄호 값(edit_uint64_with_suffix — 쉼표 표기의 앞 5글자)과 같은 규칙이다: 190,492,305,747 → 190.4 GB.
+ * 반올림하면 190.5 GB 가 되어 같은 창의 카드(보고서 괄호 값 그대로)와 0.1 씩 어긋났다(v2.828 Chromium 확인).
+ * 정수 나눗셈만 쓴다 — 버림이라 1000 으로 올라가는 경우도 없다.
+ */
+export function decBytesText(v) {
+  const n0 = numOrNull(v);
+  if (n0 === null || n0 < 0) return '—';
+  const n = Math.floor(n0);
+  let p = 1; let i = 0;
+  while (n >= p * 1000 && i < DEC_UNITS.length - 1) { p *= 1000; i++; }
+  if (i === 0) return `${n} B`;
+  const whole = Math.floor(n / p);
+  const d = whole >= 100 ? 1 : whole >= 10 ? 2 : 3;
+  const scale = 10 ** d;
+  const kept = Math.floor(n / (p / scale));   // p/scale 는 정수(p ≥ 1000 · scale ≤ 1000)
+  return `${Math.floor(kept / scale)}.${String(kept % scale).padStart(d, '0')} ${DEC_UNITS[i]}`;
+}
+
+/**
+ * 보고서 크기 값 '622,513,630,072 (622.5 GB)' → '622.5 GB'. 바이트 수에서 decBytesText 로 계산한다 — Bareos 괄호 값과 같은 규칙이라
+ * 실제 보고서에서는 괄호 값과 같고(테스트가 JobId 13 원본의 모든 크기 줄로 대조), 같은 창의 효율 막대·이력 표와 한 함수로 맞물린다. 못 읽으면 '—'.
+ */
+export function reportSizeText(v) {
+  return decBytesText(reportBytes(String(v ?? '').trim().slice(0, 120)));
+}
+
+/** 보고서 Rate '124342.2 KB/s' → '124.3 MB/s'(Bareos 의 KB 는 1000 B). 모르는 모양은 원문 그대로, 없으면 '—'. */
+export function rateText(v) {
+  const s = String(v ?? '').trim().slice(0, 40);
+  if (!s) return '—';
+  const m = /^(\d{1,12}(?:\.\d{1,3})?) KB\/s$/.exec(s);
+  if (!m) return s;
+  const kb = Number(m[1]);
+  if (kb >= 1e6) return `${(kb / 1e6).toFixed(2)} GB/s`;   // 10GbE 백업(초당 1.2 GB 등)이 '1200.0 MB/s' 로 보이지 않게
+  return kb >= 1000 ? `${(kb / 1000).toFixed(1)} MB/s` : `${kb} KB/s`;
+}
+
+/** 보고서 Elapsed time '1 hour 12 mins 24 secs' → '1시간 12분 24초'. 모르는 모양은 원문, 없으면 '—'. */
+export function elapsedKo(v) {
+  const s = String(v ?? '').trim().slice(0, 80);
+  if (!s) return '—';
+  const unit = { day: '일', hour: '시간', min: '분', sec: '초' };
+  const parts = [];
+  for (const m of s.matchAll(/(\d{1,6}) (day|hour|min|sec)s?\b/g)) parts.push(`${Number(m[1])}${unit[m[2]]}`);
+  return parts.length ? parts.join(' ') : s;
+}
+
+/** 초 → '15분 46초' · '41초' · '1시간 2분' · '2일 3시간'. 못 읽거나 음수면 '—'. */
+export function durKo(sec) {
+  const n = numOrNull(sec);
+  if (n === null || n < 0) return '—';
+  const t = Math.round(n);
+  const d = Math.floor(t / 86400); const h = Math.floor((t % 86400) / 3600); const m = Math.floor((t % 3600) / 60); const s = t % 60;
+  if (d) return `${d}일${h ? ` ${h}시간` : ''}`;
+  if (h) return `${h}시간${m ? ` ${m}분` : ''}`;
+  if (m) return `${m}분${s ? ` ${s}초` : ''}`;
+  return `${s}초`;
+}
+
+/** 0~1 → '30.6%'. 못 읽으면 '—'. */
+export function pctText(r) {
+  const n = numOrNull(r);
+  return n === null ? '—' : `${(n * 100).toFixed(1)}%`;
+}
+
+/** 'Full-0010|Full-0011' → ['Full-0010', 'Full-0011']. 없으면 []. */
+export function volumeNames(v) {
+  return String(v ?? '').slice(0, 600).split('|').map((x) => x.trim()).filter(Boolean).slice(0, 100);
+}
+
+/** '30-Oct-2026 22:30:21' · '2026-10-30 22:30:21' → '22:30:21'. 없으면 ''. */
+export function clockOf(v) {
+  const m = /(\d{2}:\d{2}:\d{2})/.exec(String(v ?? '').slice(0, 60));
+  return m ? m[1] : '';
+}
+
+const MON = Object.freeze({ Jan: 0, Feb: 1, Mar: 2, Apr: 3, May: 4, Jun: 5, Jul: 6, Aug: 7, Sep: 8, Oct: 9, Nov: 10, Dec: 11 });
+/**
+ * Director 현지 시각 글 → 초(시간대 없는 값끼리 빼기 전용 — 절대 시각으로 쓰지 말 것). 못 읽으면 null.
+ * 받는 모양: '2026-10-30 22:30:21'(로그 줄) · '30-Oct-2026 22:30:21'(보고 블록).
+ */
+export function clockSec(v) {
+  const s = String(v ?? '').trim().slice(0, 40);
+  let m = /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2}):(\d{2})/.exec(s);
+  if (m) return Date.UTC(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +m[6]) / 1000;
+  m = /^(\d{1,2})-([A-Z][a-z]{2})-(\d{4}) (\d{2}):(\d{2}):(\d{2})/.exec(s);
+  if (m && MON[m[2]] !== undefined) return Date.UTC(+m[3], MON[m[2]], +m[1], +m[4], +m[5], +m[6]) / 1000;
+  return null;
+}
+
+const LOG_TS_RE = /^(\d{4}-\d{2}-\d{2}) (\d{2}:\d{2}:\d{2}) /;
+const LOG_WHO_RE = /^([A-Za-z0-9._-]{1,80})-(dir|sd|fd) JobId \d{1,12}: /;
+const ERR_KEYS = new Set(['Non-fatal FD errors', 'FD Errors', 'SD Errors']);
+export const LOG_WHO_LABEL = Object.freeze({ dir: 'Director', sd: 'SD', fd: 'FD', rep: '보고' });
+
+/**
+ * 로그 한 줄 → { date, time, who: 'dir'|'sd'|'fd'|'rep'|'', host, text, level: 'plain'|'info'|'warn'|'err'|'ok' }.
+ * who: 'xxx-dir JobId N:' 머리말의 데몬, 머리말 없이 들여쓴 '키: 값' 은 보고 블록('rep').
+ * level: 경고·오류 문구는 issueTone · 보고 블록은 Termination 판정과 오류 수(>0 이면 경고) · 그 밖은 'plain'.
+ */
+export function classifyLogLine(line) {
+  const raw = String(line ?? '').slice(0, 2000);
+  const tm = LOG_TS_RE.exec(raw);
+  const body = tm ? raw.slice(tm[0].length) : raw;
+  const wm = LOG_WHO_RE.exec(body);
+  const head = body.slice(0, 600);
+  const kv = wm ? null : KV_RE.exec(head);
+  const who = wm ? wm[2] : (kv ? 'rep' : '');
+  const text = wm ? body.slice(wm[0].length) : body;
+  let level = 'plain';
+  if (kv) {
+    if (kv[1] === 'Termination') {
+      const cls = reportVerdict(kv[2].trim()).cls;
+      level = cls === 'green' ? 'ok' : cls === 'red' ? 'err' : cls === 'amber' ? 'warn' : 'plain';
+    } else if (ERR_KEYS.has(kv[1])) {
+      const n = reportBytes(kv[2]);
+      level = n !== null && n > 0 ? 'warn' : 'plain';
+    }
+  } else if (ISSUE_RE.test(text.slice(0, 600))) {
+    level = issueTone(text);
+  }
+  return { date: tm ? tm[1] : '', time: tm ? tm[2] : '', who, host: wm ? wm[1] : '', text, level };
+}
+
+/** 검색어 강조 — 처음 맞는 곳 하나를 [앞, 맞은 글, 뒤] 로(대소문자 무시). 검색어가 없거나 안 맞으면 [글, '', '']. */
+export function splitHit(text, q) {
+  const s = String(text ?? '');
+  const k = String(q ?? '').trim().slice(0, 100);
+  if (!k) return [s, '', ''];
+  const i = s.toLowerCase().indexOf(k.toLowerCase());
+  return i < 0 ? [s, '', ''] : [s.slice(0, i), s.slice(i, i + k.length), s.slice(i + k.length)];
+}
+
+/** 원문 로그 거르기 — who('all'|'dir'|'sd'|'fd'|'rep') · 경고·오류만 · 검색어(대소문자 무시). 줄 번호(n)는 원래 순서. */
+export function filterLogLines(rows, { who = 'all', issuesOnly = false, q = '' } = {}) {
+  const k = String(q ?? '').trim().slice(0, 100).toLowerCase();
+  return (Array.isArray(rows) ? rows : []).filter((r) => (who === 'all' || r.who === who)
+    && (!issuesOnly || r.level === 'warn' || r.level === 'err' || r.level === 'info')
+    && (!k || r.text.toLowerCase().includes(k)));
+}
+
+const ITEM_RE = /^python3-fd-mod: Starting backup of (\/\S.{0,500})$/;
+const VOL_RE = Object.freeze({
+  created: /^(?:Created new Volume|Labeled new Volume) "([^"]{1,128})"/,
+  moving: /^Moving to end of data on volume "([^"]{1,128})"/,
+  mounted: /^New volume "([^"]{1,128})" mounted/,
+  full: /^End of medium on Volume "([^"]{1,128})" Bytes=([\d,]{1,25})/,
+});
+
+/**
+ * 로그 → 세부. 못 읽은 것은 null·빈 배열(0·'없음' 으로 단정하지 않는다).
+ * @returns {{ tls: {text:string,n:number}[], device: {name:string,path:string}|null, capacity: number|null,
+ *   volumes: {name:string,created:boolean,firstAt:string,mountedAt:string,fullAt:string,fullBytes:number|null}[],
+ *   items: {path:string,name:string,kind:'disk'|'config'|'other'}[], itemDir: string, vsphere: string, cbt: boolean, snapshotAt: string }}
+ */
+export function parseJobDetail(lines = []) {
+  const tls = new Map();
+  const vols = new Map();
+  const items = new Map();
+  const out = { tls: [], device: null, capacity: null, volumes: [], items: [], itemDir: '', vsphere: '', cbt: false, snapshotAt: '' };
+  const vol = (name, at) => { if (!vols.has(name)) vols.set(name, { name, created: false, firstAt: at, mountedAt: '', fullAt: '', fullBytes: null }); return vols.get(name); };
+  for (const line of Array.isArray(lines) ? lines : []) {
+    const c = classifyLogLine(line);
+    if (!c.who || c.who === 'rep') continue;
+    const t = c.text.slice(0, 600);
+    let m;
+    if ((m = /encryption: ([A-Z0-9_]{3,80}) (TLSv[0-9.]{1,6})/.exec(t))) { const k = `${m[1]} · ${m[2]}`; tls.set(k, (tls.get(k) || 0) + 1); }
+    if (!out.device && (m = /^Using Device "([^"]{1,120})" \(([^()]{1,200})\) to write/.exec(t))) out.device = { name: m[1], path: m[2] };
+    if ((m = /maximum volume capacity ([\d,]{1,25}) exceeded/.exec(t))) out.capacity = reportBytes(m[1]);
+    if ((m = VOL_RE.created.exec(t))) vol(m[1], c.time).created = true;
+    else if ((m = VOL_RE.moving.exec(t))) vol(m[1], c.time);
+    else if ((m = VOL_RE.mounted.exec(t))) { const v = vol(m[1], c.time); if (!v.mountedAt) v.mountedAt = c.time; }
+    else if ((m = VOL_RE.full.exec(t))) { const v = vol(m[1], c.time); v.fullAt = c.time; v.fullBytes = reportBytes(m[2]); }
+    if ((m = ITEM_RE.exec(t)) && items.size < 200) {
+      const p = m[1].trim();
+      if (!items.has(p)) items.set(p, p);
+    }
+    if (!out.vsphere && (m = /Successfully connected to VSphere API on host ([A-Za-z0-9.:_-]{1,253})/.exec(t))) out.vsphere = m[1];
+    if (/is not CBT enabled, enabling it now/i.test(t)) out.cbt = true;
+    if (!out.snapshotAt && /^python3-fd-mod: Cleaning up snapshot /.test(t)) out.snapshotAt = c.time;
+  }
+  out.tls = [...tls.entries()].map(([text, n]) => ({ text, n }));
+  out.volumes = [...vols.values()];
+  const paths = [...items.values()];
+  if (paths.length) {
+    // 항목들의 공통 앞부분(VM 폴더)을 떼어 이름만 보인다 — 디스크 경로에는 '[데이터스토어] VM/디스크' 처럼 '/' 가 더 있으므로 마지막 '/' 기준이 아니다.
+    let pre = paths[0];
+    for (const p of paths.slice(1)) { let i = 0; while (i < pre.length && i < p.length && pre[i] === p[i]) i++; pre = pre.slice(0, i); }
+    const cut = pre.lastIndexOf('/');
+    out.itemDir = cut >= 0 ? pre.slice(0, cut + 1) : '';
+    out.items = paths.map((p) => {
+      const name = p.slice(out.itemDir.length) || p;
+      const kind = /^vm_(config|info|meta)/i.test(name) ? 'config' : (/^\[|\.vmdk$/i.test(name) ? 'disk' : 'other');
+      return { path: p, name, kind };
+    });
+  }
+  return out;
+}
+
+/**
+ * 타임라인 — 보고 블록(예약·시작·종료)과 로그 줄(연결·vSphere·CBT·첫 항목·볼륨 가득 참·오류·스냅샷 정리·장치 해제).
+ * 시각은 Director 현지 그대로(HH:MM:SS) · 간격은 clockSec 끼리 뺀다(날짜를 넘겨도 맞다). 못 읽은 단계는 넣지 않는다.
+ * @returns {{ steps: {at:string,sec:number,title:string,sub:string,tone:string}[], segs: {k:string,label:string,sec:number}[],
+ *   waitSec: number|null, runSec: number|null }}
+ */
+export function jobTimeline(lines = [], fields = {}) {
+  const steps = [];
+  const add = (sec, at, title, sub, tone = 'plain') => { if (sec !== null) steps.push({ sec, at, title, sub: String(sub || '').slice(0, 300), tone }); };
+  const schedSec = clockSec(fields['Scheduled time']);
+  const startRep = clockSec(fields['Start time']);
+  const endRep = clockSec(fields['End time']);
+  add(schedSec, clockOf(fields['Scheduled time']), '예약', fields.Job ? `잡 ${fields.Job}` : '');
+  let startSec = null; let firstItem = null; let snapSec = null; let releaseSec = null; let lastSec = null;
+  let pendingFull = null; let errs = 0; let nItems = 0; let connected = false; let vsphere = false;
+  for (const line of Array.isArray(lines) ? lines : []) {
+    const c = classifyLogLine(line);
+    if (!c.who || c.who === 'rep') continue;
+    const sec = clockSec(`${c.date} ${c.time}`);
+    if (sec === null) continue;
+    lastSec = sec;
+    const t = c.text.slice(0, 600);
+    let m;
+    if (startSec === null && (m = /^Start (Backup|Restore|Verify|Copy|Migrat\w{0,6})\b(?: JobId \d{1,12},?)?(?: Job=(\S{1,200}))?/.exec(t))) {
+      startSec = sec; add(sec, c.time, '시작', m[2] ? `${m[1]} · ${m[2]}` : m[1], 'blue');
+    } else if (!connected && /^Connected Client: /.test(t)) {
+      connected = true;
+      const tls = /encryption: ([A-Z0-9_]{3,80} TLSv[0-9.]{1,6})/.exec(t);
+      add(sec, c.time, 'FD 연결', `${t.replace(/, encryption: .*$/, '').replace(/^Connected Client: /, '')}${tls ? ` · ${tls[1]}` : ''}`);
+    } else if (!vsphere && (m = /Successfully connected to VSphere API on host ([A-Za-z0-9.:_-]{1,253})/.exec(t))) {
+      vsphere = true; add(sec, c.time, 'vSphere 접속', m[1]);
+    } else if (/is not CBT enabled, enabling it now/i.test(t)) {
+      add(sec, c.time, 'CBT 켬', 'VM 의 변경 블록 추적이 꺼져 있어 플러그인이 켰습니다', 'info');
+    } else if (ITEM_RE.test(t)) {
+      nItems++;
+      if (firstItem === null) { firstItem = sec; add(sec, c.time, '데이터 백업 시작', '', 'cyan'); }
+    } else if ((m = VOL_RE.full.exec(t))) {
+      pendingFull = { sec, at: c.time, name: m[1], bytes: reportBytes(m[2]) };
+    } else if (pendingFull && (m = VOL_RE.mounted.exec(t))) {
+      add(pendingFull.sec, pendingFull.at, `볼륨 ${pendingFull.name} 가득 참 → ${m[1]}`, `${decBytesText(pendingFull.bytes)} · 교체 ${durKo(sec - pendingFull.sec)}`);
+      pendingFull = null;
+    } else if (c.level === 'err' && errs < 5) {
+      errs++; add(sec, c.time, '오류', t, 'err');
+    } else if (snapSec === null && /^python3-fd-mod: Cleaning up snapshot /.test(t)) {
+      snapSec = sec; add(sec, c.time, '임시 스냅샷 정리', t.replace(/^python3-fd-mod: /, ''), 'green');
+    } else if (releaseSec === null && /^Releasing device /.test(t)) {
+      releaseSec = sec; add(sec, c.time, '장치 해제', t.replace(/^Releasing device /, ''));
+    }
+  }
+  if (pendingFull) add(pendingFull.sec, pendingFull.at, `볼륨 ${pendingFull.name} 가득 참`, decBytesText(pendingFull.bytes));
+  const first = steps.find((s) => s.title === '데이터 백업 시작');
+  if (first) first.sub = `항목 ${nItems}개`;
+  const start = startRep ?? startSec;
+  const end = endRep ?? lastSec;
+  const verdict = reportVerdict(fields.Termination);
+  if (end !== null && fields.Termination) add(end, clockOf(fields['End time']) || '', '종료', fields.Termination, verdict.cls === 'green' ? 'green' : verdict.cls === 'red' ? 'err' : verdict.cls === 'amber' ? 'warn' : 'plain');
+  steps.sort((a, b) => a.sec - b.sec);
+  const span = (a, b) => (a !== null && b !== null && b >= a ? b - a : null);
+  const tail = snapSec ?? releaseSec;
+  const segs = [
+    { k: 'wait', label: '대기', sec: span(schedSec, start) },
+    { k: 'prep', label: '준비', sec: span(start, firstItem) },
+    { k: 'data', label: '데이터 전송', sec: span(firstItem ?? start, tail ?? end) },
+    { k: 'tail', label: '정리', sec: tail !== null ? span(tail, end) : null },
+  ].filter((s) => s.sec !== null && s.sec > 0);
+  return { steps, segs, waitSec: span(schedSec, start), runSec: span(start, end) };
 }
 
 /* ───────── v2.823 법인별 Director — 자동 설정 단계 · 매핑 채움 ───────── */

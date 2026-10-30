@@ -296,13 +296,18 @@ function demoReport(id, row) {
   const bytes = Number(row.jobbytes) || 0;
   const read = Math.round(bytes / 0.571);
   const fmt = (n) => n.toLocaleString('en-US');
-  const gb = (n) => `${(n / 1e9).toFixed(3)} GB`;
+  // Bareos edit_uint64_with_suffix 와 같은 괄호 값 — 쉼표 표기의 앞 두 덩어리를 '.' 로 잇고 5글자에서 자른다(190,492,305,747 → 190.4 GB).
+  //   v2.828: 예전 toFixed(3)('10.230 GB')는 실제 Director 와 모양이 달라 화면 카드(괄호 값)와 계산 값('10.22 GB')이 어긋났다.
+  const gb = (n) => {
+    const parts = fmt(n).split(',');
+    return parts.length < 2 ? `${parts[0]} B` : `${`${parts[0]}.${parts[1]}`.slice(0, 5)} ${'KMGTPE'[parts.length - 2]}B`;
+  };
   const term = row.jobstatus === 'T' ? 'Backup OK' : row.jobstatus === 'W' ? 'Backup OK -- with warnings' : row.jobstatus === 'A' ? 'Backup Canceled' : 'Backup Error';
   const lvl = row.level === 'F' ? 'Full' : row.level === 'D' ? 'Differential' : 'Incremental';
   // 시각 두 개에서 소요·속도(실제 보고와 같은 표기) — 못 읽으면 줄을 비우지 않고 '0 secs'·'0.0 KB/s'(실제 Director 도 0 을 쓴다).
   const secs = Math.max(0, Math.round((Date.parse(String(row.endtime).replace(' ', 'T')) - Date.parse(String(row.starttime).replace(' ', 'T'))) / 1000)) || 0;
   const elapsed = secs >= 60 ? `${Math.floor(secs / 60)} mins ${secs % 60} secs` : `${secs} secs`;
-  const rate = `${secs ? (bytes / 1024 / secs).toFixed(1) : '0.0'} KB/s`;
+  const rate = `${secs ? (bytes / 1000 / secs).toFixed(1) : '0.0'} KB/s`;
   if (row.type === 'R') {
     const ok = row.jobstatus === 'T' || row.jobstatus === 'W';
     return [
