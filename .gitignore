@@ -230,6 +230,7 @@ server/config/cvp.db
 server/config/central-agent-cvp.json
 # v2.820 Bareos VM 백업 — 설정(콘솔 비밀번호 봉인)·백업 대상 원장·인증 정지
 server/config/bareos.json
+server/config/bareos-edge-directors.json
 server/config/bareos-jobs.json
 server/config/bareos-auth-stops.json
 server/config/bareos-mail-state.json

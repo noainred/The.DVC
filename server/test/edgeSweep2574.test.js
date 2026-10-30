@@ -160,6 +160,7 @@ describe('IMP-06 — push/pull 진입 함수를 실제로 호출한다(v2.566 TD
     'agent/svcmonConfigPull.js::pullSvcmonConfigNow', 'agent/svcmonPush.js::pushSvcmonNow', 'agent/usersConfigPull.js::pullUsersConfigNow',
     'agent/vmSeriesConfigPull.js::pullVmSeriesConfigNow',
     'agent/isiduConfigPull.js::pullIsiduConfigNow', // v2.736 — 호출 테스트는 isidu2736.test.js(실제 centralRouter)
+    'agent/bareosConfigPull.js::pullBareosConfigNow', 'agent/bareosOpWorker.js::runBareosOpWorkerOnce', // v2.824 — 호출 테스트는 bareosEdge2824.test.js(실제 centralRouter)
     'agent/veeamConfigPull.js::pullVeeamConfigNow', 'veeam/push.js::pushVeeamNow', // v2.751 — 호출 테스트는 veeam2751.test.js(실제 centralRouter)
     'cvp/push.js::pushCvpNow', 'isidu/push.js::pushIsiduNow', 'pdu/push.js::pushPduNow', 'sanswitch/perfPush.js::pushPerfNow', 'sanswitch/push.js::pushSanSwitchNow', 'storage/push.js::pushStorageNow',
   ];

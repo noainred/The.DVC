@@ -10,7 +10,7 @@ import { requireChanged } from '../changeResult.js';
 import VeeamHeader from './VeeamHeader.jsx';
 import SettingsTab from './BareosSettings.jsx';
 import {
-  stateBadge, levelLabel, bytesText, whenText, runCell, directorLine, directorStatus, RESTORE_MODE_LABEL, restoreLine, candidateSummary, driftText, restorePointsNote,
+  stateBadge, levelLabel, bytesText, whenText, runCell, directorLine, directorStatus, directorChipTitle, outcomeUnknown, unknownOutcomeText, withRelayWait, RESTORE_MODE_LABEL, restoreLine, candidateSummary, driftText, restorePointsNote,
   folderOptions, inFolder, pickCap, bulkSummary,
   parseJobReport, reportCards, REPORT_KEYS, issueHint, storeRatio, reportText, reportBytes, reportValue,
 } from './bareosText.js';
@@ -102,18 +102,20 @@ function TargetsTab({ d, reload }) {
   useEffect(() => { if (dirF && !dirs.some((x) => x.id === dirF)) setDirF(''); }, [dirF, dirs]);
   const rows = d.jobs.filter((j) => (!vc || j.vcenterId === vc) && (!dirF || j.directorId === dirF) && (!q || `${j.vmName} ${j.folder} ${j.bareosJob}`.toLowerCase().includes(q.toLowerCase())));
 
-  const act = async (j, fn, okText) => {
+  // v2.824 검토(W3·W5): 엣지 대행 Director 는 서버가 더 오래 기다린다(API 값) · 결과 모름(시한·504)은 실패로 단정하지 않는다
+  const mut = (j, kind) => withRelayWait({}, dirs.find((x) => x.id === j.directorId), d.relayLimits, kind);
+  const act = async (j, fn, okText, what = '요청') => {
     setBusyIds((b) => new Set(b).add(j.id)); setMsg(null);
     try { const r = await fn(); requireChanged(r); setMsg({ ok: true, text: okText(r) }); reload(); }
-    catch (e) { setMsg({ ok: false, text: `오류: ${e.message}` }); }
+    catch (e) { setMsg({ ok: false, text: outcomeUnknown(e) ? `결과 모름: ${unknownOutcomeText(what, e)}` : `오류: ${e.message}` }); if (outcomeUnknown(e)) reload(); }
     finally { setBusyIds((b) => { const n = new Set(b); n.delete(j.id); return n; }); }
   };
-  const run = (j) => { setRunFor(null); act(j, () => postJson(`${BASE}/jobs/${enc(j.id)}/run`, runLevel ? { level: runLevel } : {}), (r) => `‘${j.vmName}’ 백업을 시작했습니다(jobid ${r.jobid}). 진행은 이 표와 실행 현황 탭에서 보입니다.`); };
-  const cancel = (j, jobid) => { if (window.confirm(`‘${j.vmName}’ 의 실행 중 백업(jobid ${jobid})을 취소할까요?`)) act(j, () => postJson(`${BASE}/jobs/${enc(j.id)}/cancel`, { jobid }), (r) => r.note || '취소를 요청했습니다(Director 가 멈추기까지 시간이 걸릴 수 있습니다).'); };
-  const toggle = (j) => act(j, () => patchJson(`${BASE}/jobs/${enc(j.id)}`, { enabled: !j.enabled }), () => (j.enabled ? '비활성화했습니다 — Bareos 의 비활성화는 Director 를 reload·재시작하면 풀리므로 포탈이 상태 대조 때마다 다시 끕니다.' : '활성화했습니다.'));
+  const run = (j) => { setRunFor(null); act(j, () => postJson(`${BASE}/jobs/${enc(j.id)}/run`, runLevel ? { level: runLevel } : {}, mut(j, 'runJob')), (r) => `‘${j.vmName}’ 백업을 시작했습니다(jobid ${r.jobid}). 진행은 이 표와 실행 현황 탭에서 보입니다.`, '백업 실행'); };
+  const cancel = (j, jobid) => { if (window.confirm(`‘${j.vmName}’ 의 실행 중 백업(jobid ${jobid})을 취소할까요?`)) act(j, () => postJson(`${BASE}/jobs/${enc(j.id)}/cancel`, { jobid }, mut(j, 'cancel')), (r) => r.note || '취소를 요청했습니다(Director 가 멈추기까지 시간이 걸릴 수 있습니다).', '취소'); };
+  const toggle = (j) => act(j, () => patchJson(`${BASE}/jobs/${enc(j.id)}`, { enabled: !j.enabled }, mut(j, 'setEnabled')), () => (j.enabled ? '비활성화했습니다 — Bareos 의 비활성화는 Director 를 reload·재시작하면 풀리므로 포탈이 상태 대조 때마다 다시 끕니다.' : '활성화했습니다.'), j.enabled ? '비활성화' : '활성화');
   const remove = (j) => {
     if (!window.confirm(`‘${j.vmName}’ 을(를) 백업 대상에서 지울까요?\nDirector 의 잡은 비활성화하고 정의 파일은 남습니다(Director 를 reload 하면 다시 켜지므로 포탈이 대조 때마다 다시 끕니다 — 영구히 멈추려면 정의 파일을 지우세요). 백업 데이터는 지우지 않습니다.`)) return;
-    act(j, () => delJson(`${BASE}/jobs/${enc(j.id)}`), (r) => r.note || '지웠습니다.');
+    act(j, () => delJson(`${BASE}/jobs/${enc(j.id)}`, mut(j, 'disableJobs')), (r) => r.note || '지웠습니다.', '삭제');
   };
 
   return (
@@ -126,8 +128,9 @@ function TargetsTab({ d, reload }) {
             const b = directorStatus(x);
             return (
               <button key={x.id} type="button" className={`tab${dirF === x.id ? ' active' : ''}`} style={{ padding: '4px 12px', fontSize: 12, display: 'inline-flex', alignItems: 'center', gap: 6 }}
-                title={x.poll?.error || (x.authStopped ? `인증 정지 — ${x.authStopped.reason || ''}` : '')} onClick={() => setDirF(dirF === x.id ? '' : x.id)}>
-                <span className={`badge ${b.cls}`} style={{ fontSize: 10 }}>{b.label}</span>{x.name} <span className="muted">{x.jobs ?? 0}</span>
+                title={directorChipTitle(x)} onClick={() => setDirF(dirF === x.id ? '' : x.id)}>
+                {/* Chromium 확인: 고른 칩(파란 바탕) 위의 파란·회색 배지가 흐려 읽히지 않았다 — 고른 칩에서는 배지 바탕을 어둡게 */}
+                <span className={`badge ${b.cls}`} style={{ fontSize: 10, ...(dirF === x.id ? { background: 'rgba(15,23,42,.6)' } : {}) }}>{b.label}</span>{x.name} <span className="muted">{x.jobs ?? 0}</span>
               </button>
             );
           })}
@@ -207,8 +210,8 @@ function TargetsTab({ d, reload }) {
         스케줄은 Bareos 가 돌립니다(포탈이 꺼져 있어도 백업은 계속됩니다). 레벨·스케줄을 바꾸려면 대상을 지우고 다시 등록하세요 — Bareos 에는 잡 수정 명령이 없습니다.
         활성 대상 VM 은 vCenter 상세(서버 › vCenter)의 VM 행에 <span className="badge blue" style={{ fontSize: 10 }}>Bareos</span> 배지로 표시됩니다.
       </div>
-      {logOf && <LogModal job={logOf.job} jobid={logOf.jobid} view={logOf.view} onClose={() => setLogOf(null)} onStateChanged={reload} />}
-      {restoreOf && <RestoreModal job={restoreOf} onClose={() => setRestoreOf(null)} onDone={(t) => { setRestoreOf(null); setMsg({ ok: true, text: t }); reload(); }} />}
+      {logOf && <LogModal job={logOf.job} jobid={logOf.jobid} view={logOf.view} onClose={() => setLogOf(null)} onStateChanged={reload} dir={dirs.find((x) => x.id === logOf.job.directorId)} limits={d.relayLimits} />}
+      {restoreOf && <RestoreModal job={restoreOf} dir={dirs.find((x) => x.id === restoreOf.directorId)} limits={d.relayLimits} onClose={() => setRestoreOf(null)} onDone={(t) => { setRestoreOf(null); setMsg({ ok: true, text: t }); reload(); }} />}
     </div>
   );
 }
@@ -256,10 +259,14 @@ function AddForm({ d, onClose, onChanged }) {
   const submit = async () => {
     setBusy(true); setErr(null); setResult(null);
     try {
-      const r = await postJson(`${BASE}/jobs/bulk`, { vcenterId: vc, vmIds: [...sel], level });
+      const dirOfVc = (d.directors || []).find((x) => (x.vcenters || []).includes(vc));
+      const r = await postJson(`${BASE}/jobs/bulk`, { vcenterId: vc, vmIds: [...sel], level }, withRelayWait({}, dirOfVc, d.relayLimits, 'addJobs'));
       setResult(r);
       if (r.created > 0) { setSel(new Set()); setRev((x) => x + 1); onChanged(); }
-    } catch (e) { setErr(e.message); } finally { setBusy(false); }
+    } catch (e) {
+      // W3: 결과 모름(시한·504)이면 Director 에 잡이 생겼을 수 있다 — 목록을 새로 읽고 확인하라고 말한다(실패로 단정하지 않는다)
+      if (outcomeUnknown(e)) { setErr(unknownOutcomeText('등록', e)); setRev((x) => x + 1); onChanged(); } else setErr(e.message);
+    } finally { setBusy(false); }
   };
   const nameOf = new Map(all.map((x) => [x.id, x.name]));
   return (
@@ -349,18 +356,19 @@ function AddForm({ d, onClose, onChanged }) {
  * 작업 결과·로그 — 서버가 이 대상의 jobid 인지 확인한다. 요약은 같은 로그의 끝 보고 블록을 읽는다(bareosText.parseJobReport —
  * 서버 호출을 늘리지 않는다). 요약을 못 만들면(실행 중·보고 없음) 그렇다고 말하고 원문을 보게 한다.
  */
-function LogModal({ job, jobid, view = 'raw', onClose, onStateChanged }) {
+function LogModal({ job, jobid, view = 'raw', onClose, onStateChanged, dir = null, limits = null }) {
   const [r, setR] = useState(null);
   const [err, setErr] = useState(null);
   const [mode, setMode] = useState(view === 'summary' ? 'summary' : 'raw');
   // v2.822.5: 서버가 로그를 주면서 그 실행의 상태를 원장에 반영한다(stateChanged) — 바뀌었으면 목록을 바로 다시 읽는다(폴러 주기를 기다리지 않게).
   const changedRef = useRef(onStateChanged);
   changedRef.current = onStateChanged;
+  const waitMs = withRelayWait(DIRECTOR_GET, dir, limits, 'log').timeoutMs;   // 숫자 — 목록을 다시 읽어도(새 객체) 다시 조회하지 않게
   useEffect(() => {
-    fetchJson(`${BASE}/jobs/${enc(job.id)}/log`, { jobid }, undefined, DIRECTOR_GET)
+    fetchJson(`${BASE}/jobs/${enc(job.id)}/log`, { jobid }, undefined, { ...DIRECTOR_GET, timeoutMs: waitMs })
       .then((x) => { setR(x); if (x?.stateChanged) changedRef.current?.(); })
       .catch(setErr);
-  }, [job.id, jobid]);
+  }, [job.id, jobid, waitMs]);
   const rep = useMemo(() => (r ? parseJobReport(r.lines) : null), [r]);
   return (
     <Modal title={`${mode === 'summary' ? '작업 결과' : '작업 로그'} — jobid ${jobid} · ${job.vmName}`} onClose={onClose} width={920}>
@@ -514,7 +522,8 @@ function IssueList({ rep }) {
 }
 
 /** 복원 — 복원 지점 → 방식 → (덮어쓰기면 이름 재입력) → 본인 OTP. 서버가 전제와 체인을 다시 검사한다. */
-function RestoreModal({ job, onClose, onDone }) {
+function RestoreModal({ job, dir = null, limits = null, onClose, onDone }) {
+  const ptsWaitMs = withRelayWait(DIRECTOR_GET, dir, limits, 'history').timeoutMs;
   const [pts, setPts] = useState(null);
   const [ptsErr, setPtsErr] = useState(null);
   const [jobid, setJobid] = useState(null);
@@ -527,18 +536,18 @@ function RestoreModal({ job, onClose, onDone }) {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState(null);
   useEffect(() => {
-    fetchJson(`${BASE}/jobs/${enc(job.id)}/restore-points`, {}, undefined, DIRECTOR_GET).then((r) => { setPts(r); if (r.items?.length) setJobid(r.items[0].jobid); }).catch(setPtsErr);
+    fetchJson(`${BASE}/jobs/${enc(job.id)}/restore-points`, {}, undefined, { ...DIRECTOR_GET, timeoutMs: ptsWaitMs }).then((r) => { setPts(r); if (r.items?.length) setJobid(r.items[0].jobid); }).catch(setPtsErr);
     fetchJson('/datastores', { vcenterId: job.vcenterId, limit: 2000 }).then((r) => setDss((r.items || []).map((x) => x.name))).catch(() => setDss([]));
     fetchJson('/hosts', { vcenterId: job.vcenterId, limit: 2000 }).then((r) => setClusters([...new Set((r.items || []).map((x) => x.cluster).filter((c) => c && c !== 'standalone'))])).catch(() => setClusters([]));
-  }, [job.id, job.vcenterId]);
+  }, [job.id, job.vcenterId, ptsWaitMs]);
   const submit = async () => {
     setBusy(true); setErr(null);
     try {
       const body = { jobid, mode, otp, ...(mode === 'original' ? { confirmName } : {}), ...(mode === 'newVm' ? { newVm: { name: nv.name, datastore: nv.datastore || undefined, cluster: nv.cluster || undefined } } : {}) };
-      const r = await postJson(`${BASE}/jobs/${enc(job.id)}/restore`, body);
+      const r = await postJson(`${BASE}/jobs/${enc(job.id)}/restore`, body, withRelayWait({}, dir, limits, 'restore'));
       requireChanged(r);
       onDone(`복원을 시작했습니다(jobid ${r.jobid} · 원본 ${r.fromJobids.join(',')}). 진행은 실행 현황 탭에서 보입니다.`);
-    } catch (e) { setErr(e.message); setOtp(''); } finally { setBusy(false); }   // W8: 쓴(또는 틀린) OTP 를 남기면 다시 누를 때 실패 횟수만 오른다
+    } catch (e) { setErr(outcomeUnknown(e) ? unknownOutcomeText('복원', e) : e.message); setOtp(''); } finally { setBusy(false); }   // W8: 쓴(또는 틀린) OTP 를 남기면 다시 누를 때 실패 횟수만 오른다 · W3: 결과 모름이면 다시 누르기 전에 확인하라고
   };
   const ready = jobid && /^\d{6}$/.test(otp) && (mode !== 'original' || confirmName === job.vmName) && (mode !== 'newVm' || nv.name.trim());
   return (
@@ -623,15 +632,16 @@ function HistoryTab({ d }) {
   const gen = useRef(0);
   const [limit, setLimit] = useState(null);
   const job = d.jobs.find((j) => j.id === sel);
+  const histWaitMs = withRelayWait(DIRECTOR_GET, (d.directors || []).find((x) => x.id === job?.directorId), d.relayLimits, 'history').timeoutMs;
   // W10: 고른 대상이 지워지면 첫 대상으로(예전에는 job 이 없어 '보기' 가 화면 오류를 냈다)
   useEffect(() => { if (sel && !job) setSel(d.jobs[0]?.id || ''); }, [sel, job, d.jobs]);
   const load = () => {
     const g = ++gen.current;
     setHist(null); setErr(null);
     if (!sel) return;
-    fetchJson(`${BASE}/jobs/${enc(sel)}/history`, {}, undefined, DIRECTOR_GET).then((r) => { if (g === gen.current) { setHist(r.items || []); setLimit(r.limit ?? null); } }).catch((e) => { if (g === gen.current) setErr(e); });
+    fetchJson(`${BASE}/jobs/${enc(sel)}/history`, {}, undefined, { ...DIRECTOR_GET, timeoutMs: histWaitMs }).then((r) => { if (g === gen.current) { setHist(r.items || []); setLimit(r.limit ?? null); } }).catch((e) => { if (g === gen.current) setErr(e); });
   };
-  useEffect(load, [sel]);
+  useEffect(load, [sel, histWaitMs]);
   // W5: 포탈이 시작한 실행 + Bareos 스케줄이 돌리는 실행(대조가 넣은 lastRun — 대조 주기만큼 늦을 수 있다)
   const running = d.jobs.filter((j) => j.pending?.jobid || ['running', 'queued', 'waiting'].includes(j.lastRun?.state));
   const restores = d.jobs.flatMap((j) => (j.restores || []).map((r) => ({ ...r, job: j }))).sort((a, b) => (b.at || 0) - (a.at || 0)).slice(0, 50);
@@ -696,7 +706,7 @@ function HistoryTab({ d }) {
           </tbody>
         </STable>
       </div>
-      {logOf && <LogModal job={logOf.job} jobid={logOf.jobid} view={logOf.view} onClose={() => setLogOf(null)} />}
+      {logOf && <LogModal job={logOf.job} jobid={logOf.jobid} view={logOf.view} onClose={() => setLogOf(null)} dir={(d.directors || []).find((x) => x.id === logOf.job.directorId)} limits={d.relayLimits} />}
     </div>
   );
 }

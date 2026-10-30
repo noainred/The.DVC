@@ -291,14 +291,17 @@ export async function fetchJson(path, params = {}, signal, opts = {}) {
   } finally { endReq(perfId); }
 }
 
-export async function postJson(path, body = {}) {
+/** 변경 요청 시한 — opts.timeoutMs 가 있으면 그 값(서버가 더 오래 기다리는 호출 — 예: Bareos 엣지 대행 작업), 없으면 기본. */
+const mutTimeout = (opts) => (opts?.timeoutMs > 0 ? opts.timeoutMs : MUT_TIMEOUT_MS);
+
+export async function postJson(path, body = {}, opts = {}) {
   const perfId = startReq(path, 'POST');
   try {
     const res = await fetch(`${BASE}${path}`, {
       method: 'POST',
       headers: authHeaders(ridHeader(perfId, { 'Content-Type': 'application/json' })),
       body: JSON.stringify(body),
-      signal: timeoutSignal(MUT_TIMEOUT_MS),
+      signal: timeoutSignal(mutTimeout(opts)),
     });
     if (res.status === 401) { setToken(null); onUnauthorized(); throw new Error('세션이 만료되었습니다.'); }
     const data = await res.json().catch(() => ({}));
@@ -307,14 +310,14 @@ export async function postJson(path, body = {}) {
   } finally { endReq(perfId); }
 }
 
-export async function sendJson(path, method, body = {}) {
+export async function sendJson(path, method, body = {}, opts = {}) {
   const perfId = startReq(path, method);
   try {
     const res = await fetch(`${BASE}${path}`, {
       method,
       headers: authHeaders(ridHeader(perfId, { 'Content-Type': 'application/json' })),
       body: method === 'DELETE' && !Object.keys(body).length ? undefined : JSON.stringify(body),
-      signal: timeoutSignal(MUT_TIMEOUT_MS),
+      signal: timeoutSignal(mutTimeout(opts)),
     });
     if (res.status === 401) { setToken(null); onUnauthorized(); throw new Error('세션이 만료되었습니다.'); }
     const data = await res.json().catch(() => ({}));
@@ -322,9 +325,9 @@ export async function sendJson(path, method, body = {}) {
     return data;
   } finally { endReq(perfId); }
 }
-export const putJson = (path, body) => sendJson(path, 'PUT', body);
-export const patchJson = (path, body) => sendJson(path, 'PATCH', body);
-export const delJson = (path) => sendJson(path, 'DELETE');
+export const putJson = (path, body, opts) => sendJson(path, 'PUT', body, opts);
+export const patchJson = (path, body, opts) => sendJson(path, 'PATCH', body, opts);
+export const delJson = (path, opts) => sendJson(path, 'DELETE', {}, opts);
 
 /**
  * 인증이 필요한 파일 다운로드 — `<a href="/api/...">` 는 Authorization 헤더를 붙이지 못해

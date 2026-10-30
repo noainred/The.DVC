@@ -8,7 +8,7 @@ import { requireChanged } from '../changeResult.js';
 import { droppedSecretNote } from '../droppedSecretText.js';
 import {
   diagView, directorPrepBlock, fdIniTemplate, PREP_CHECKLIST, autoSetupDirectorText, autoSetupFdText, thumbprintText,
-  outcomeUnknown, missingText, preflightView, preflightSummary, autoSetupFdPluginText, fillEmptyMapping, directorFormPatch,
+  outcomeUnknown, missingText, preflightView, preflightSummary, autoSetupFdPluginText, fillEmptyMapping, directorFormPatch, withRelayWait, secText, relayKindLabel,
   VMWARE_POOL_FULL, VMWARE_SCHEDULE, WEEKDAYS, WEEKDAY_LABEL, MAPPING_FIELDS, newMappingRow, vcSlug,
 } from './bareosText.js';
 
@@ -121,18 +121,19 @@ export default function SettingsTab({ onSaved }) {
           </div>
           <button type="button" className="login-btn" style={{ flex: 'none', padding: '8px 16px' }} disabled={!!err} onClick={() => setAdding((x) => !x)}>{adding ? '닫기' : '+ Director 추가'}</button>
         </div>
-        {adding && <AddDirectorForm onDone={async (r) => { setAdding(false); setMsg({ ok: true, text: `‘${r.director.name}’ Director 를 추가했습니다 — 편집에서 vCenter 를 묶고 자동 설정을 진행하세요.` }); await load(true); setSel(r.director.id); onSaved(); }} />}
+        {adding && <AddDirectorForm agents={s.agents || []} withToken={s.agentsWithToken} onDone={async (r) => { setAdding(false); setMsg({ ok: true, text: `‘${r.director.name}’ Director 를 추가했습니다 — 편집에서 vCenter 를 묶고 자동 설정을 진행하세요.` }); await load(true); setSel(r.director.id); onSaved(); }} />}
         <div className="table-wrap" style={{ marginTop: 10, maxHeight: '46vh' }}>
-          <STable minWidth={980}>
-            <thead><tr><th>법인</th><th>Director 주소 · 콘솔</th><th>비밀번호</th><th>법인 vCenter</th><th className="right">백업 대상</th><th data-nosort>동작</th></tr></thead>
+          <STable minWidth={1060}>
+            <thead><tr><th>법인</th><th>Director 주소 · 콘솔</th><th>담당</th><th>비밀번호</th><th>법인 vCenter</th><th className="right">백업 대상</th><th data-nosort>동작</th></tr></thead>
             <tbody>
-              {s.directors.length === 0 && <tr><td colSpan={6} className="center muted" style={{ padding: 18 }}>등록한 Director 가 없습니다 — ‘+ Director 추가’ 로 법인 Bareos 서버를 등록하세요.</td></tr>}
+              {s.directors.length === 0 && <tr><td colSpan={7} className="center muted" style={{ padding: 18 }}>등록한 Director 가 없습니다 — ‘+ Director 추가’ 로 법인 Bareos 서버를 등록하세요.</td></tr>}
               {s.directors.map((d) => {
                 const vcs = s.sites.filter((x) => x.directorId === d.id).map((x) => vcName(x.vcenterId));
                 return (
                   <tr key={d.id} style={sel === d.id ? { background: 'var(--hover)' } : undefined}>
                     <td data-sort={d.name}><b>{d.name}</b></td>
                     <td data-sort={d.host || ''} style={{ fontSize: 12.5 }}><span style={{ fontFamily: 'var(--font-mono)' }}>{d.host ? `${d.host}:${d.port}` : '—'}</span><div className="muted" style={{ fontSize: 11.5 }}>콘솔 {d.consoleName || '—'} · {d.tlsMax || '—'}</div></td>
+                    <td data-sort={d.agent || ''} style={{ fontSize: 12.5 }}>{d.agent ? <span className="badge blue">엣지 {d.agent}</span> : <span className="muted">중앙 직접</span>}</td>
                     <td>{d.hasPassword ? <span className="badge green">저장됨</span> : <span className="badge gray">없음</span>}</td>
                     <td data-sort={vcs.length} style={{ fontSize: 12.5 }}><div style={{ maxWidth: 320, whiteSpace: 'normal', overflowWrap: 'anywhere' }}>{vcs.length ? `${vcs.length} · ${vcs.join(' · ')}` : '—'}</div></td>
                     <td className="right" data-sort={d.jobs ?? 0}>{d.jobs ?? 0}</td>
@@ -189,9 +190,44 @@ export default function SettingsTab({ onSaved }) {
   );
 }
 
+/**
+ * v2.824 담당 — 중앙 직접('') 또는 그 법인 엣지(중앙이 아는 엣지 이름만 — 서버도 같은 목록으로 거른다).
+ * 검토 W11: 저장된 값은 목록에 없어도 늘 선택지로 남기고 '목록에 없음' 을 붙인다(다른 값으로 바꿨다가 되돌릴 수 있게) ·
+ * 대행 작업 인출은 엣지별 개별 토큰 전용이라 토큰이 없는 이름에 '개별 토큰 없음 — 대행 불가' 를 붙인다(withToken 을 못 받으면 붙이지 않는다).
+ */
+function agentIssue(a, agents, withToken) {
+  if (!a) return '';
+  if (!(agents || []).includes(a)) return 'gone';
+  const tok = Array.isArray(withToken) ? new Set(withToken.map((x) => String(x).toLowerCase())) : null;
+  return tok && !tok.has(a.toLowerCase()) ? 'token' : '';
+}
+function AgentSelect({ agents, value, onChange, saved = '', withToken = null }) {
+  const list = [...new Set([...(saved ? [saved] : []), ...(value ? [value] : []), ...(agents || [])])];
+  // Chromium 확인: 좁은 칸에서 닫힌 선택 상자는 뒤가 잘린다 — 표지는 짧게, 고른 값의 문제는 격자 밖 한 줄(AgentIssueLine)에 풀어 쓴다
+  const label = (a) => { const i = agentIssue(a, agents, withToken); return `엣지 ${a}${i === 'gone' ? ' (목록에 없음)' : i === 'token' ? ' (토큰 없음)' : ''}`; };
+  return (
+    <label className="muted" style={FIELD}>담당(접속 주체)
+      <Select className="input" style={INP} value={value || ''} onChange={(e) => onChange(e.target.value)} aria-label="담당 엣지">
+        <option value="">중앙 직접</option>
+        {list.map((a) => <option key={a} value={a}>{label(a)}</option>)}
+      </Select>
+    </label>
+  );
+}
+/** 고른 담당의 문제(목록에 없음·개별 토큰 없음) — 격자 밖 전체 폭(칸 안에 두면 같은 줄 다른 칸이 밀렸다 · Chromium 1440). 없으면 아무것도 그리지 않는다. */
+function AgentIssueLine({ value, agents, withToken }) {
+  const why = agentIssue(value, agents, withToken);
+  if (!why) return null;
+  return (
+    <div style={{ fontSize: 11.5, lineHeight: 1.6, marginTop: 6, color: 'var(--amber)' }}>{why === 'gone'
+      ? `담당 ‘${value}’ 는 중앙이 아는 엣지 목록에 없습니다 — 엣지 이름이 바뀌었거나 등록에서 빠졌을 수 있습니다.`
+      : `담당 ‘${value}’ 엣지에 개별 토큰이 없어 대행 작업을 가져가지 못합니다 — 중앙 설정 › 수집 서버에서 개별 토큰을 발급하세요.`}</div>
+  );
+}
+
 /** Director 추가 — 이름·주소·포트·콘솔 이름·비밀번호(자동 설정을 쓸 거면 비밀번호는 비워 둔다 — 2단계가 만든다). */
-function AddDirectorForm({ onDone }) {
-  const [f, setF] = useState({ name: '', host: '', port: '9101', consoleName: '', password: '' });
+function AddDirectorForm({ agents, withToken, onDone }) {
+  const [f, setF] = useState({ name: '', host: '', port: '9101', consoleName: '', password: '', agent: '' });
   const [busy, setBusy] = useState(false);
   const [m, setM] = useState(null);
   const set = (k, v) => setF((x) => ({ ...x, [k]: v }));
@@ -211,7 +247,9 @@ function AddDirectorForm({ onDone }) {
         <label className="muted" style={FIELD}>포트<input className="input" style={INP} inputMode="numeric" value={f.port} onChange={(e) => set('port', e.target.value.replace(/\D/g, '').slice(0, 5))} aria-label="Director 포트" /></label>
         <label className="muted" style={FIELD}>콘솔 이름(있으면)<input className="input" style={INP} value={f.consoleName} onChange={(e) => set('consoleName', e.target.value)} placeholder="자동 설정이 만듭니다" aria-label="콘솔 이름" /></label>
         <label className="muted" style={FIELD}>콘솔 비밀번호(있으면)<input className="input" style={INP} type="password" autoComplete="new-password" value={f.password} onChange={(e) => set('password', e.target.value)} placeholder="자동 설정이 만듭니다" aria-label="콘솔 비밀번호" /></label>
+        <AgentSelect agents={agents} withToken={withToken} value={f.agent} onChange={(v) => set('agent', v)} />
       </div>
+      <AgentIssueLine value={f.agent} agents={agents} withToken={withToken} />
       <div style={{ ...ROW, marginTop: 10 }}>
         <button type="button" className="login-btn" style={{ flex: 'none', padding: '8px 16px' }} disabled={busy || !f.name.trim() || !f.host} onClick={submit}>{busy ? '추가 중…' : '추가'}</button>
         <span className="muted" style={{ fontSize: 11.5 }}>{missingText([[f.name.trim(), '법인 이름'], [f.host, 'Director 주소']]) || '초기 설치만 된 서버면 콘솔은 비워 두고 추가한 뒤 자동 설정을 쓰세요.'}</span>
@@ -223,7 +261,7 @@ function AddDirectorForm({ onDone }) {
 
 /* ───────────────────────── Director 편집 ───────────────────────── */
 function DirectorEditor({ s, dir, locked, onReload, onSaved, onClose, onDeleted }) {
-  const toForm = (d) => ({ name: d.name, host: d.host, port: d.port, consoleName: d.consoleName, password: '', timeoutMs: d.timeoutMs, tlsMax: d.tlsMax });
+  const toForm = (d) => ({ name: d.name, host: d.host, port: d.port, consoleName: d.consoleName, password: '', timeoutMs: d.timeoutMs, tlsMax: d.tlsMax, agent: d.agent || '' });
   const [form, setForm] = useState(() => toForm(dir));
   const mine = useMemo(() => s.sites.filter((x) => x.directorId === dir.id).map((x) => ({ ...x })), [s.sites, dir.id]);
   const [rows, setRows] = useState(mine);
@@ -237,13 +275,13 @@ function DirectorEditor({ s, dir, locked, onReload, onSaved, onClose, onDeleted 
   const rowsRef = useRef(rows);
   rowsRef.current = rows;
   // 서버가 Director 를 바꿨으면(자동 설정 — 콘솔·비밀번호) 접속 폼을 새 값으로(입력 중인 비밀번호는 비운다)
-  useEffect(() => { setForm(toForm(dir)); }, [dir.host, dir.port, dir.consoleName, dir.hasPassword, dir.name]);
+  useEffect(() => { setForm(toForm(dir)); }, [dir.host, dir.port, dir.consoleName, dir.hasPassword, dir.name, dir.agent]);
   const vcName = (id) => s.vcenters.find((v) => v.id === id)?.name || id;
   const canConnect = !!(dir.host && dir.consoleName && dir.hasPassword) || s.demo;
   const loadCat = (refresh) => {
     const g = ++catGen.current;
     setCatErr(null);
-    fetchJson(`${BASE}/settings/directors/${enc(dir.id)}/catalog`, refresh ? { refresh: 1 } : {}, undefined, DIRECTOR_GET)
+    fetchJson(`${BASE}/settings/directors/${enc(dir.id)}/catalog`, refresh ? { refresh: 1 } : {}, undefined, withRelayWait(DIRECTOR_GET, dir, s.relayLimits, 'catalog'))
       .then((r) => { if (g === catGen.current) setCat(r); }).catch((e) => { if (g === catGen.current) setCatErr(e); });
   };
   useEffect(() => { if (canConnect) loadCat(false); }, [dir.id, canConnect]);
@@ -272,10 +310,11 @@ function DirectorEditor({ s, dir, locked, onReload, onSaved, onClose, onDeleted 
   const test = async () => {
     setBusy('test'); setMsg(null); setDiag(null);
     try {
-      const r = await postJson(`${BASE}/settings/directors/${enc(dir.id)}/test`, form.password ? { ...form } : {});
+      const r = await postJson(`${BASE}/settings/directors/${enc(dir.id)}/test`, form.password ? { ...form } : {}, withRelayWait({}, dir, s.relayLimits, 'probe'));
       requireChanged(r);
       setDiag(r.stages || null);
-      setMsg({ ok: true, text: `연결 성공 — Director ‘${r.director || '?'}’ ${r.version || ''} · ${r.tls ? `${r.tls.protocol} ${r.tls.cipher}` : '암호화 없음'} · 클라이언트 ${r.clients ? `${r.clients.length}개` : '—'}${form.password ? '' : ' (저장된 주소·비밀번호로 시험)'}` });
+      // W2: 엣지 대행이면 그 엣지가 시험했다고 밝힌다(엣지는 작업의 접속값 표지로 중앙 저장값과 같은 사본인지 확인한 뒤 시험한다)
+      setMsg({ ok: true, text: `연결 성공 — Director ‘${r.director || '?'}’ ${r.version || ''} · ${r.tls ? `${r.tls.protocol} ${r.tls.cipher}` : '암호화 없음'} · 클라이언트 ${r.clients ? `${r.clients.length}개` : '—'}${form.password ? '' : ` (저장된 주소·비밀번호로 시험${r.relay ? ` — 법인 엣지 ‘${r.relay}’ 가 접속` : ''})`}` });
     } catch (e) {
       setDiag(Array.isArray(e?.body?.stages) ? e.body.stages : null);
       setMsg({ ok: false, text: `연결 실패: ${e.message}` });
@@ -314,7 +353,7 @@ function DirectorEditor({ s, dir, locked, onReload, onSaved, onClose, onDeleted 
   const fillMap = async () => {
     setBusy('suggest'); setMapMsg(null);
     try {
-      const r = await fetchJson(`${BASE}/settings/directors/${enc(dir.id)}/suggest`, {}, undefined, DIRECTOR_GET);
+      const r = await fetchJson(`${BASE}/settings/directors/${enc(dir.id)}/suggest`, {}, undefined, withRelayWait(DIRECTOR_GET, dir, s.relayLimits, 'catalog'));
       const out = fillEmptyMapping(rowsRef.current, r.suggestions, vcName);   // W10: 기다리는 동안 고친 칸을 요청 때 사본으로 덮지 않는다
       setRows(out.sites);
       setMapMsg({ ok: true, text: `빈 칸 ${out.filled}개를 채웠습니다(저장 전입니다 — 확인한 뒤 ‘매핑 저장’ 을 누르세요).${out.left.length ? ` 제안이 없어 남은 칸: ${out.left.slice(0, 6).join(', ')}${out.left.length > 6 ? ` 외 ${out.left.length - 6}` : ''}.` : ''}` });
@@ -352,7 +391,15 @@ function DirectorEditor({ s, dir, locked, onReload, onSaved, onClose, onDeleted 
                 <option value="TLSv1.3">TLS 1.3(기본)</option><option value="TLSv1.2">TLS 1.2</option>
               </Select>
             </label>
+            <AgentSelect agents={s.agents || []} withToken={s.agentsWithToken} saved={dir.agent || ''} value={form.agent} onChange={(v) => set('agent', v)} />
           </div>
+          <AgentIssueLine value={form.agent} agents={s.agents || []} withToken={s.agentsWithToken} />
+          {/* W8: 지금 동작은 저장된 담당 기준이다 — 고르기만 하고 저장하지 않았으면 그렇게 말한다 · W9: 주기 숫자를 박지 않는다 */}
+          {(form.agent || '') !== (dir.agent || '') && <div className="banner warn" style={{ marginTop: 8, fontSize: 12, lineHeight: 1.6 }}>담당을 바꿨습니다(저장 전) — 지금 연결 시험·자동 설정은 저장된 담당({dir.agent ? `법인 엣지 ‘${dir.agent}’` : '중앙 직접'})으로 실행합니다. ‘연결 저장’ 을 누르면 {form.agent ? `법인 엣지 ‘${form.agent}’ 가` : '중앙이 직접'} 접속합니다.</div>}
+          {dir.agent && <div className="banner" style={{ marginTop: 8, fontSize: 12, lineHeight: 1.6 }}>법인 엣지 ‘{dir.agent}’ 가 이 Director 에 대신 접속합니다(중앙은 접속하지 않습니다). 엣지는 저장된 접속값으로 접속합니다 — 엣지 사본이 다르면 작업 전에 배정을 다시 받습니다. 새 비밀번호는 저장한 뒤 시험하세요. 자동 설정도 그 엣지가 SSH 로 실행하고, 처음 접속하는 서버의 SSH 호스트키 승인은 <b>그 엣지 포탈</b>(설정 › 장비 신뢰)에서 합니다.</div>}
+          {dir.agent && (s.relayPending || []).some((o) => o.directorId === dir.id) && (
+            <div className="muted" style={{ fontSize: 11.5, marginTop: 6 }}>엣지 대행 작업(이 화면을 연 때 기준): {(s.relayPending || []).filter((o) => o.directorId === dir.id).slice(0, 6).map((o) => `${relayKindLabel(o.kind)} ${o.status === 'queued' ? '인출 대기' : '엣지 실행 중'} ${secText(o.ageMs)}`).join(' · ')}</div>
+          )}
           <div className="muted" style={{ fontSize: 11.5, marginTop: 8, lineHeight: 1.6 }}>주소·포트·콘솔 이름을 바꾸면 이 Director 의 저장 비밀번호는 승계하지 않습니다. 저장된 비밀번호로 하는 연결 시험은 저장된 주소로만 접속합니다.</div>
           <div style={{ ...ROW, marginTop: 10 }}>
             <button type="button" className="login-btn" style={{ flex: 'none', padding: '8px 16px' }} disabled={!!busy || locked || s.demo} onClick={saveConn}>{busy === 'conn' ? '저장 중…' : '연결 저장'}</button>
@@ -495,7 +542,7 @@ function AutoSetupPanel({ s, dir, rows, editCount, cat, unsaved, locked, onDirec
   const runPreflight = async () => {
     setBusy('1');
     try {
-      const r = await postJson(url('preflight'), sshBody);
+      const r = await postJson(url('preflight'), sshBody, withRelayWait({}, dir, s.relayLimits, 'setup.preflight', { setup: true }));
       requireChanged(r);
       setPf(r);
       const rr = r.resources || {};
@@ -510,7 +557,7 @@ function AutoSetupPanel({ s, dir, rows, editCount, cat, unsaved, locked, onDirec
       const body = { ...sshBody, otp: ssh.otp, directorPort: Number(d.directorPort) || 9101, consoleName: d.consoleName, restoreClient: d.restoreClient, restoreStorage: d.restoreStorage, restorePool: d.restorePool,
         ...(d.usePools ? { pools: { fullDays: Number(d.fullDays), incrDays: Number(d.incrDays), maxVolumeGB: Number(d.maxVolumeGB) } } : {}),
         ...(d.useSchedule ? { schedule: { fullDay: d.fullDay, time: d.time } } : {}) };
-      const r = await postJson(url('director'), body);
+      const r = await postJson(url('director'), body, withRelayWait({}, dir, s.relayLimits, 'setup.director', { setup: true }));
       requireChanged(r);
       mark(2, true, autoSetupDirectorText(r));
       setSsh((x) => ({ ...x, otp: '' }));
@@ -520,7 +567,7 @@ function AutoSetupPanel({ s, dir, rows, editCount, cat, unsaved, locked, onDirec
   const runPlugin = async () => {
     setBusy('3');
     try {
-      const r = await postJson(url('fd-plugin'), { ...sshBody, otp: ssh.otp });
+      const r = await postJson(url('fd-plugin'), { ...sshBody, otp: ssh.otp }, withRelayWait({}, dir, s.relayLimits, 'setup.fdPlugin', { setup: true }));
       requireChanged(r);
       mark(3, true, autoSetupFdPluginText(r));
       setSsh((x) => ({ ...x, otp: '' }));
@@ -531,7 +578,7 @@ function AutoSetupPanel({ s, dir, rows, editCount, cat, unsaved, locked, onDirec
     setBusy('4t');
     const want = { vcenterId: f.vcenterId, fdHost: f.fdHost };
     try {
-      const r = await postJson(url('fd-thumbprint'), fdBody());
+      const r = await postJson(url('fd-thumbprint'), fdBody(), withRelayWait({}, dir, s.relayLimits, 'setup.thumbprint', { setup: true }));
       requireChanged(r);
       if (r.vcenterId && r.vcenterId !== want.vcenterId) throw new Error('응답이 고른 vCenter 의 것이 아닙니다 — 다시 읽으세요.');
       setF((x) => (x.vcenterId === want.vcenterId && x.fdHost === want.fdHost ? { ...x, vcthumbprint: r.thumbprint } : x));
@@ -541,7 +588,7 @@ function AutoSetupPanel({ s, dir, rows, editCount, cat, unsaved, locked, onDirec
   const runFd = async () => {
     setBusy('4');
     try {
-      const r = await postJson(url('fd'), { ...fdBody(), otp: ssh.otp, vcuser: f.vcuser, vcpass: f.vcpass, vcthumbprint: f.vcthumbprint });
+      const r = await postJson(url('fd'), { ...fdBody(), otp: ssh.otp, vcuser: f.vcuser, vcpass: f.vcpass, vcthumbprint: f.vcthumbprint }, withRelayWait({}, dir, s.relayLimits, 'setup.fdIni', { setup: true }));
       requireChanged(r);
       mark(5, true, autoSetupFdText(r));
       setF((x) => ({ ...x, vcpass: '' }));
@@ -576,6 +623,7 @@ function AutoSetupPanel({ s, dir, rows, editCount, cat, unsaved, locked, onDirec
         </div>
       </div>
       {s.demo && <div className="banner warn" style={{ marginTop: 8 }}>데모 모드에서는 자동 설정을 실행하지 않습니다(실제 서버에 접속하는 작업).</div>}
+      {dir.agent && !s.demo && <div className="banner" style={{ marginTop: 8, fontSize: 12, lineHeight: 1.6 }}>법인 엣지 ‘{dir.agent}’ 가 대행합니다 — 아래 SSH 접속·Director 확인은 그 엣지에서 실행합니다. 입력한 SSH·vCenter 비밀번호는 이 요청 한 번에만 엣지로 전달하고 어디에도 저장하지 않습니다(중앙 대기열의 사본은 엣지가 가져가는 즉시 지우고, 요청을 처리하는 동안에만 중앙 메모리에 있습니다). 엣지가 {s.relayLimits?.secretPickupMs ? secText(s.relayLimits.secretPickupMs) : '정해진 시간'} 안에 가져가지 않으면 보내지 않은 것으로 끝납니다.</div>}
       <div style={GRID}>
         <label className="muted" style={FIELD}>SSH 주소(Director 서버)<input className="input" id="bareos-auto-host" style={INP} value={ssh.host} onChange={(e) => setS2('host', e.target.value.trim())} placeholder={dir.host || 'bareos.corp'} /></label>
         <label className="muted" style={FIELD}>SSH 포트<input className="input" style={INP} inputMode="numeric" value={ssh.sshPort} onChange={(e) => setS2('sshPort', e.target.value.replace(/\D/g, '').slice(0, 5))} aria-label="SSH 포트" /></label>

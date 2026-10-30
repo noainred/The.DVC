@@ -2234,6 +2234,35 @@ export const DB_GUIDE_DATA = {
       "web/src/views/tools/BareosBackupTool.jsx"
     ]
   },
+  "bareos-edge-directors.json": {
+    "title": "Bareos 법인 Director 대행 사본(엣지)",
+    "summary": "엣지 포탈에만 생기는 파일입니다. 중앙이 이 엣지에 대행을 맡긴 법인 Bareos Director(중앙 설정의 담당 = 이 엣지)의 접속값을 중앙에서 받아 둔 사본입니다. 엣지는 이 사본으로 그 법인 Director 에 로그인해 중앙이 보낸 작업(잡 만들기·실행·상태 조회·복원·자동 설정)을 대신 실행합니다. 콘솔 비밀번호가 들어 있어 봉인합니다.",
+    "stores": [
+      "Director 마다 id·이름(법인)·주소·포트·콘솔 이름·콘솔 비밀번호(봉인)·명령 시한·TLS 최고 버전·담당 엣지 이름.",
+      "중앙에서 받은 것만 담습니다 — 이 엣지 화면에서 고칠 수 없고, 엣지 자기 화면의 Bareos 설정(bareos.json)과 섞지 않습니다."
+    ],
+    "writer": "엣지의 Bareos 배정 인출(agent/bareosConfigPull.js)이 주기마다(기본 5분) 중앙에서 받아 바뀌었을 때만 통째로 바꿉니다(원자적 쓰기, 권한 0600). 중앙 작업의 접속값 표지가 사본과 다르거나 사본에 그 Director 가 없으면 그 자리에서 다시 받습니다. 엣지가 대행한 자동 설정 2단계가 새 콘솔로 접속에 성공하면 그 콘솔 값으로 바로 고칩니다(엣지 시한이 지났으면 고치지 않고 되돌립니다).",
+    "usedBy": [
+      "엣지의 Bareos 대행 워커(agent/bareosOpWorker.js): 중앙 작업의 Director id 가 이 사본에 있고 담당이 이 엣지일 때만 실행합니다."
+    ],
+    "retention": "중앙 배정이 바뀌면 통째로 바뀝니다. 배정에서 빠진 Director 는 사라집니다.",
+    "growth": "Director 수(최대 64)에 비례하는 작은 파일입니다.",
+    "shrink": "줄일 필요가 없습니다.",
+    "ifDeleted": "엣지 포탈이 실행 중이면 메모리 사본으로 계속 동작하고, 다음 작업이 사본과 다르면 배정을 다시 받아 파일을 다시 씁니다. 재시작 뒤 파일이 없으면 첫 배정 인출(기동 45초 뒤) 또는 첫 작업이 다시 만듭니다. 파일이 깨지면 ‘.corrupt.<시각>’ 으로 보존하고 빈 사본으로 시작합니다(다음 인출이 복구합니다).",
+    "cautions": [
+      "콘솔 비밀번호가 들어 있습니다 — 손으로 편집하거나 외부에 공유하지 마세요. 원본은 중앙의 bareos.json 입니다.",
+      "상태 파일이라 백업 '변경 감시'·엣지 설정 push 에서 빠집니다(중앙으로 올라가지 않습니다). 엣지 자기 백업 번들에는 들어갑니다(설정 소유자 전용 · 봉인은 비밀 정책을 따릅니다) — 옛 백업으로 복원해도 작업의 접속값 표지가 다르면 엣지가 배정을 다시 받아 맞춥니다."
+    ],
+    "settings": [
+      "중앙 › 특수 기능 › Bareos VM 백업 › 설정 › 법인별 Director 편집 › 담당(접속 주체)"
+    ],
+    "sources": [
+      "server/src/bareos/edgeStore.js",
+      "server/src/agent/bareosConfigPull.js",
+      "server/src/agent/bareosOpWorker.js",
+      "server/src/routes/central.js"
+    ]
+  },
   "bareos.json": {
     "title": "Bareos 연동 설정",
     "summary": "법인별 Bareos Director(v2.823 — 법인마다 하나) 접속 정보와 백업 잡을 만들 때 쓰는 공통 기본값, 그리고 vCenter 마다 어느 법인 Director 로 백업하는지와 그 법인의 FD·SD 매핑을 담습니다. Director 콘솔 비밀번호가 들어 있어 봉인합니다. vCenter 비밀번호는 여기에 없습니다(법인 FD 의 INI 파일이 갖습니다).",

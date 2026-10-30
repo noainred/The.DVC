@@ -2342,6 +2342,49 @@ centralRouter.post('/veeam-run-result', requireCentral({ notFound: { ok: false }
   res.json(r);
 });
 
+/**
+ * Bareos 법인 Director 엣지 대행(v2.824 — bareos/edgeOps.js · 선례 veeam-run-*). **개별 토큰 전용**(이 파일 머리말 신규 라우트 3규약):
+ *  · GET  /bareos-config     — 이 엣지가 대행하는 Director(설정 agent = 이 엣지)의 접속값(콘솔 비밀번호 포함 — 엣지가 로그인해야 한다 · WAN TLS 검증 ON).
+ *                              설정을 못 읽으면 503(빈 목록을 ok 로 주면 엣지가 사본을 지운다).
+ *  · GET  /bareos-ops        — 자기 몫 작업 인출(콘솔 비밀번호 없음 · 자동 설정 대행만 1회용 secretArgs — 인출 즉시 중앙 메모리에서 지운다).
+ *  · POST /bareos-op-result  — 회신(그 작업의 대상 엣지만 · 결과는 sanitizeEdgeResult).
+ * 키는 req.centralAuth.agent 만(요청의 agent 값으로 고르지 않는다 — 공통 미들웨어가 토큰 ↔ agent 를 대조한다).
+ */
+const BAREOS_AGENT_TOKEN_ONLY = 'Bareos 법인 Director 대행은 엣지별(개별) 토큰으로만 받습니다 — 공유 CENTRAL_TOKEN 으로는 엣지를 가릴 수 없습니다. 중앙 설정 › 수집 서버에서 이 엣지의 개별 토큰을 발급해 엣지 CENTRAL_TOKEN 에 넣으세요.';
+const bareosAgentTokenOnly = (res) => {
+  res.locals.ingestReject = { kind: REJECT_KIND.AUTH, reason: '개별 토큰 필요 — 공유 토큰으로는 Bareos 대행을 받지 않습니다(토큰 자체는 맞습니다)' };
+  return res.status(403).json({ ok: false, reason: BAREOS_AGENT_TOKEN_ONLY, agentTokenRequired: true });
+};
+centralRouter.get('/bareos-config', requireCentral(), async (req, res) => {
+  if (req.centralAuth?.mode !== 'agent') return bareosAgentTokenOnly(res);
+  const agent = req.centralAuth.agent;
+  if (!agent) return res.status(400).json({ ok: false, reason: 'agent가 필요합니다.' });
+  const S = await import('../bareos/settings.js');
+  if (registryUnreadable(res, S.settingsLoadError, 'Bareos Director 설정')) return;
+  const me = String(agent).trim().toLowerCase();
+  res.set('Cache-Control', 'no-store');
+  // connSig: 작업과 사본이 같은 접속값인지 엣지가 대조하는 표지(v2.824 검토 I1 — 비밀번호를 풀 수 없는 HMAC)
+  res.json({ ok: true, agent, directors: S.loadSettings().directors.filter((d) => String(d.agent || '').trim().toLowerCase() === me).map((d) => ({ ...d, connSig: S.directorConnSig(d) })) });
+});
+centralRouter.get('/bareos-ops', requireCentral(), async (req, res) => {
+  if (req.centralAuth?.mode !== 'agent') return bareosAgentTokenOnly(res);
+  const { takeEdgeOps, TAKE_MAX } = await import('../bareos/edgeOps.js');
+  // max: 엣지 워커의 빈 자리(v2.824 검토 P2) — 없거나 틀리면 기본 상한
+  const max = /^[0-9]{1,2}$/.test(String(req.query.max ?? '')) ? Number(req.query.max) : TAKE_MAX;
+  res.set('Cache-Control', 'no-store');
+  res.json({ ok: true, ops: takeEdgeOps(req.centralAuth.agent, max) });
+});
+// Body: { id, result }
+centralRouter.post('/bareos-op-result', requireCentral({ notFound: { ok: false } }), async (req, res) => {
+  if (req.centralAuth?.mode !== 'agent') return bareosAgentTokenOnly(res);
+  const id = typeof req.body?.id === 'string' ? req.body.id.slice(0, 64) : '';
+  if (!id) return res.status(400).json({ ok: false, reason: 'id 가 필요합니다(글자).' });
+  const { completeEdgeOp } = await import('../bareos/edgeOps.js');
+  const r = completeEdgeOp(id, req.centralAuth.agent, req.body?.result);
+  if (!r.ok) return res.status(r.status || 400).json({ ok: false, reason: r.reason });
+  res.json(r);
+});
+
 centralRouter.get('/ping-jobs', requireCentral(), (req, res) => {
   let vcs = String(req.query.vcenters || '').split(',').map((s) => s.trim()).filter(Boolean);
   // 개별 토큰은 자기가 소유한 vCenter 의 대기 ping 작업만 인출(남의 사이트 대상 IP 목록 가로채기 차단).
