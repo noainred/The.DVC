@@ -13,7 +13,7 @@
  */
 import { listGroups, getGroup, claimSlots, recordMisses, recordFire, markSending, groupsLoadError } from './groups.js';
 import { decideFire, CATCHUP_MS } from './groupSchedule.js';
-import { jobDigests, markPending, patchJob, registryLoadError } from './registry.js';
+import { jobDigests, markPending, patchJob, registryLoadError, inBatch } from './registry.js';
 import { onDirector, isDemoActive, effectiveSettings } from './service.js';
 import { jobDirectorId } from './settings.js';
 import { RUN_JOBS_MAX } from './ops.js';
@@ -61,7 +61,31 @@ export function itemState(r) {
 
 const fail = (code, msg) => Object.assign(new Error(msg), { code });
 const _groupBusy = new Set();
-export const groupRunning = (id) => _groupBusy.has(id);
+const _queued = new Map();   // 그룹 id → { since, dir } — Director 차례를 기다리는 중(v2.830 버그 점검 S4: 대기 중이 '재시작' 으로 보였다)
+/** 실행 중이거나 차례를 기다리는 중 — 화면 '실행 중' · 삭제 409 · 같은 그룹 다시 실행 409 가 같은 판정을 쓴다. */
+export const groupRunning = (id) => _groupBusy.has(id) || _queued.has(id);
+/**
+ * Director 마다 하나의 줄(모듈 수준 — v2.830 버그 점검 S8: 틱 안에서만 차례를 지켜 다음 틱의 그룹·수동 실행이 같은 Director 에 세션을 동시에 열었다).
+ * 예약·수동 실행 모두 이 줄로 들어간다. 줄 사이에 한 번 양보한다(S11 — 세션 전에 거부되는 그룹이 연달아 와도 이벤트 루프를 붙잡지 않게).
+ */
+const _dirTail = new Map();   // Director id → 마지막 실행 Promise
+export function queueGroupRun(groupId, opts = {}) {
+  const g = getGroup(groupId);
+  if (!g) return Promise.reject(fail('not-found', '백업 그룹을 찾을 수 없습니다.'));
+  if (groupRunning(groupId)) return Promise.reject(fail('busy', `‘${g.name}’ 그룹을 실행하는 중입니다 — 끝난 뒤 다시 시도하세요.`));
+  const dir = g.directorId || '';
+  _queued.set(groupId, { since: Date.now(), dir });
+  noteGroupRunStart(groupId, g.name);   // 줄을 선 순간부터 업그레이드 자동 적용이 기다린다
+  const prev = _dirTail.get(dir) || Promise.resolve();
+  const run = prev.catch(() => {}).then(() => new Promise((r) => setImmediate(r))).then(() => {
+    _queued.delete(groupId);
+    return runGroup(groupId, opts);
+  }).finally(() => { _queued.delete(groupId); noteGroupRunEnd(groupId); });
+  const tail = run.catch(() => {});
+  _dirTail.set(dir, tail);
+  tail.then(() => { if (_dirTail.get(dir) === tail) _dirTail.delete(dir); });
+  return run;
+}
 
 /** 옛 엣지가 runJobs 를 모르면 '알 수 없는 작업' 으로 거절한다 — 사람이 할 일을 덧붙인다. */
 function reasonOf(e) {
@@ -86,6 +110,8 @@ export async function runGroup(groupId, { trigger = 'manual', by = '', level = n
   noteGroupRunStart(groupId, g.name);   // 업그레이드 자동 적용이 이 실행이 끝나기를 기다린다(inflight.js)
   const locked = [];
   const items = [];
+  let ledgerError = '';
+  let unexpected = '';
   const lvl = level ? normLevel(level) : (slot?.level || g.schedule?.level || 'Incremental');
   try {
     const demo = isDemoActive();
@@ -128,7 +154,9 @@ export async function runGroup(groupId, { trigger = 'manual', by = '', level = n
           continue;
         }
         const byKey = new Map((Array.isArray(res) ? res : []).map((r) => [r.key, r]));
-        chunk.forEach((s, k) => {
+        // v2.830 버그 점검 S1(실측): VM 마다 대상 원장 전체(3,000건 5MB)를 동기로 써 50건 덩어리에 1.4초 정지 — 덩어리 반영은 쓰기 한 번
+        // S3: 그 쓰기가 실패해도(디스크) Director 는 이미 받았다 — 상태는 '시작' 그대로 두고 원장 기록 실패를 실행 기록에 밝힌다(반대로 적지 않는다)
+        try { inBatch(() => chunk.forEach((s, k) => {
           const r = byKey.get(k);
           const st = itemState(r);
           if (st === 'started') {
@@ -143,9 +171,16 @@ export async function runGroup(groupId, { trigger = 'manual', by = '', level = n
             Object.assign(s.it, { state: 'failed', reason: why });
             patchJob(s.job.id, { lastError: { at: Date.now(), message: `그룹 ‘${g.name}’ 실행 실패 — ${why.slice(0, 240)}` } });
           }
-        });
+        })); } catch (e) {
+          ledgerError = `백업 대상 원장에 실행 기록을 쓰지 못했습니다(${String(e?.message || e).slice(0, 160)}) — 시작한 실행의 결과가 목록에 늦게 반영되거나 반영되지 않을 수 있습니다. Director 에서 확인하세요.`;
+          console.warn(`[bareos] 그룹 ‘${g.name}’ ${ledgerError}`);
+        }
       }
     }
+  } catch (e) {
+    // 예상하지 못한 오류 — 여기까지 보낸 것은 그대로 두고 실행 기록은 남긴다(보내는 중 표지만 남아 '재시작' 으로 보이지 않게 — S3)
+    unexpected = String(e?.message || e).slice(0, 300);
+    console.warn(`[bareos] 그룹 ‘${g.name}’ 실행 중 오류: ${unexpected}`);
   } finally {
     for (const id of locked) unlockJob(id);
     _groupBusy.delete(groupId);
@@ -155,6 +190,7 @@ export async function runGroup(groupId, { trigger = 'manual', by = '', level = n
   const fire = {
     key: slot?.key || '', at: Date.now(), trigger, by: String(by || ''), level: lvl, storage: g.storage || '', pool: g.pool || '',
     total: items.length, started: count('started'), skipped: count('skipped'), notSent: count('notsent'), failed: count('failed'), unknown: count('unknown'), items,
+    ...(ledgerError || unexpected ? { error: [unexpected, ledgerError].filter(Boolean).join(' · ') } : {}),
   };
   recordFire(groupId, fire);
   logAudit({
@@ -175,30 +211,29 @@ let _scanning = false;
 export async function groupTick(now = Date.now(), { catchupMs = CATCHUP_MS } = {}) {
   if (_scanning) return { scanned: false, fired: [], missed: [] };
   _scanning = true;
-  let fired = []; let missed = []; const chains = new Map();
+  let fired = []; let missed = []; const runs = [];
   try {
     if (groupsLoadError() || registryLoadError()) return { scanned: false, fired, missed };
     const due = []; const miss = []; const byId = new Map();
     for (const g of listGroups()) {
       const d = decideFire(g, now, catchupMs);
       if (d.action === 'miss') miss.push({ id: g.id, slot: d.slot, reason: 'down' });
-      else if (d.action === 'fire' && !_groupBusy.has(g.id)) { due.push({ id: g.id, key: d.slot.key, trigger: 'timer' }); byId.set(g.id, { g, slot: d.slot }); }
+      else if (d.action === 'fire' && !groupRunning(g.id)) { due.push({ id: g.id, key: d.slot.key, trigger: 'timer' }); byId.set(g.id, { g, slot: d.slot }); }
     }
     missed = recordMisses(miss);
     for (const id of missed) { const m = miss.find((x) => x.id === id); console.warn(`[bareos] 백업 그룹 ${id} 의 ${m.slot.key} 회차를 놓쳤습니다(포탈이 꺼져 있었음 — 따라잡는 범위를 넘김).`); }
     fired = claimSlots(due, now);
     for (const id of fired) {
       const { g, slot } = byId.get(id);
-      const dir = g.directorId || '';
-      const prev = chains.get(dir) || Promise.resolve();
-      chains.set(dir, prev.then(() => runGroup(id, { trigger: 'timer', slot }).catch((e) => {
+      // Director 마다 하나의 줄(queueGroupRun — 틱을 넘어서도·수동 실행과도 차례를 지킨다 · 버그 점검 S8)
+      runs.push(queueGroupRun(id, { trigger: 'timer', slot }).catch((e) => {
         const reason = String(e?.message || e).slice(0, 300);
         console.warn(`[bareos] 백업 그룹 ‘${g.name}’ ${slot.key} 회차 실행 실패: ${reason}`);
         recordFire(id, { key: slot.key, at: Date.now(), trigger: 'timer', by: '', level: slot.level, total: g.vmIds.length, started: 0, skipped: 0, notSent: g.vmIds.length, failed: 0, unknown: 0, error: reason, items: [] });
-      })));
+      }));
     }
   } finally { _scanning = false; }
-  return { scanned: true, fired, missed, done: await Promise.allSettled([...chains.values()]) };
+  return { scanned: true, fired, missed, done: await Promise.allSettled(runs) };
 }
 
 let _timer = null;
@@ -209,4 +244,4 @@ export function startBareosGroupScheduler() {
   _timer.unref?.();
 }
 
-export function _resetGroupRunnerForTest() { _groupBusy.clear(); _scanning = false; if (_timer) { clearInterval(_timer); _timer = null; } }
+export function _resetGroupRunnerForTest() { _groupBusy.clear(); _queued.clear(); _dirTail.clear(); _scanning = false; if (_timer) { clearInterval(_timer); _timer = null; } }

@@ -47,6 +47,8 @@ export default function BareosGroupsTab({ d }) {
   const [vc, setVc] = useState(loadVc);
   const [tree, setTree] = useState(null);
   const [err, setErr] = useState(null);
+  const [refreshErr, setRefreshErr] = useState(null);   // 버그 점검 W8: 이미 보이는 값이 있으면 새로 읽기 실패는 배너로(탭·편집 창을 지우지 않는다)
+  const treeRef = useRef(null);
   const [loading, setLoading] = useState(false);
   const [sel, setSel] = useState(() => new Set());
   const [filter, setFilter] = useState('all');
@@ -80,12 +82,14 @@ export default function BareosGroupsTab({ d }) {
     if (!vc) { setTree(null); return; }
     setLoading(true); setErr(null);
     fetchJson(`${BASE}/groups/tree`, { vcenterId: vc })
-      .then((r) => { if (g === gen.current) setTree(r); })
-      .catch((e) => { if (g === gen.current) { setErr(e); setTree(null); } })
+      .then((r) => { if (g === gen.current) { treeRef.current = r; setTree(r); setRefreshErr(null); } })
+      .catch((e) => { if (g === gen.current) { if (treeRef.current) setRefreshErr(e); else { setErr(e); setTree(null); } } })
       .finally(() => { if (g === gen.current) setLoading(false); });
   };
   // 법인을 바꾸면 이전 법인의 창(편집·실행·결과)과 안내를 닫는다 — 열어 둔 채 바꾸면 새 법인의 트리 위에 이전 법인의 그룹이 다시 떴다
-  useEffect(() => { saveVc(vc); setSel(new Set()); setTree(null); setEditor(null); setRunOf(null); setFireOf(null); setMsg(null); load(); }, [vc]);   // eslint-disable-line react-hooks/exhaustive-deps
+  // 버그 점검 W17: 저장해 둔 법인이 아직 목록에서 확인되지 않았으면(첫 그림) 읽지 않는다 — 없는 법인으로 요청해 404 가 깜빡였다
+  const vcKnown = options.some((o) => o.id === vc);
+  useEffect(() => { saveVc(vc); setSel(new Set()); treeRef.current = null; setTree(null); setRefreshErr(null); setEditor(null); setRunOf(null); setFireOf(null); setMsg(null); if (vcKnown) load(); }, [vc, vcKnown]);   // eslint-disable-line react-hooks/exhaustive-deps
   // 실행 중인 그룹이 있을 때만 다시 읽는다(결과 기록을 보려고) — 그 밖에는 버튼으로
   const running = !!tree?.groups?.some((x) => x.running);
   useEffect(() => {
@@ -154,6 +158,7 @@ export default function BareosGroupsTab({ d }) {
       </div>
       {msg && <div className={`banner ${msg.ok ? 'ok' : 'bad'}`} style={{ marginBottom: 10 }}><BoldText text={msg.text} /></div>}
       {err && <ErrorBox error={err} />}
+      {refreshErr && tree && <div className="banner warn" style={{ marginBottom: 10 }}>새로 읽지 못했습니다({errText(refreshErr)}) — 아래는 마지막으로 읽은 값입니다. 새로고침을 눌러 다시 시도하세요.</div>}
       {tree?.groupsLoadError && <div className="banner bad" style={{ marginBottom: 10 }}>백업 그룹 원장을 읽지 못했습니다(손상본 보존) — 그룹 저장과 예약 실행을 멈췄습니다. 서비스 점검에서 확인하세요.</div>}
       {tree?.registryLoadError && <div className="banner bad" style={{ marginBottom: 10 }}>백업 대상 원장을 읽지 못했습니다(손상본 보존) — 그룹 저장·실행을 멈췄습니다.</div>}
       {sitesNote && <div className="banner warn" style={{ marginBottom: 10 }}>{sitesNote}</div>}
@@ -191,7 +196,7 @@ export default function BareosGroupsTab({ d }) {
                         <td style={{ minWidth: 150 }}>
                           <div style={{ ...ROW, gap: 4 }}>
                             <button type="button" className="logout-btn" style={BTN} disabled={!writable || b} onClick={() => setRunOf(g)}>지금 실행</button>
-                            <button type="button" className="logout-btn" style={BTN} disabled={!writable || b} onClick={() => setEditor({ group: g, vmIds: g.vmIds })}>수정</button>
+                            <button type="button" className="logout-btn" style={BTN} disabled={!writable || b} onClick={() => setEditor({ group: g, vmIds: g.vmIds, vc })}>수정</button>
                             <button type="button" className="logout-btn" style={{ ...BTN, color: '#fca5a5' }} disabled={!writable || b} onClick={() => remove(g)}>삭제</button>
                           </div>
                         </td>
@@ -216,12 +221,12 @@ export default function BareosGroupsTab({ d }) {
             </div>
             <div style={{ ...ROW, padding: '8px 14px', background: sel.size ? 'rgba(59,130,246,.10)' : 'var(--panel-deep)', borderBottom: '1px solid var(--border-soft)' }}>
               <b style={{ fontSize: 13 }}>{sel.size}대 선택</b>
-              <button type="button" className="login-btn" style={{ flex: 'none', padding: '6px 14px' }} disabled={!writable || !sel.size} onClick={() => setEditor({ group: null, vmIds: [...sel] })}>새 그룹 만들기</button>
+              <button type="button" className="login-btn" style={{ flex: 'none', padding: '6px 14px' }} disabled={!writable || !sel.size} onClick={() => setEditor({ group: null, vmIds: [...sel], vc })}>새 그룹 만들기</button>
               {groups.length > 0 && (
                 <Select className="input" sort={false} value="" disabled={!writable || !sel.size} aria-label="기존 그룹에 추가" style={{ minWidth: 0, width: 200, padding: '5px 8px', fontSize: 12 }}
-                  onChange={(e) => { const g = groups.find((x) => x.id === e.target.value); if (g) setEditor({ group: g, vmIds: [...new Set([...g.vmIds, ...sel])] }); }}>
+                  onChange={(e) => { const g = groups.find((x) => x.id === e.target.value); if (g && !g.running) setEditor({ group: g, vmIds: [...new Set([...g.vmIds, ...sel])], vc }); }}>
                   <option value="">기존 그룹에 추가 …</option>
-                  {groups.map((g) => <option key={g.id} value={g.id}>{g.name}({g.vmIds.length}대)</option>)}
+                  {groups.map((g) => <option key={g.id} value={g.id} disabled={g.running}>{g.name}({g.vmIds.length}대){g.running ? ' — 실행 중' : ''}</option>)}
                 </Select>
               )}
               {sel.size > 0 && <button type="button" className="logout-btn" style={BTN} onClick={() => setSel(new Set())}>선택 해제</button>}
@@ -302,7 +307,8 @@ export default function BareosGroupsTab({ d }) {
       {editor && tree && (
         <GroupEditor tree={tree} group={editor.group} initialVmIds={editor.vmIds} byId={byId}
           onClose={() => setEditor(null)}
-          onSaved={(text, ok = true) => { setEditor(null); setSel(new Set()); setMsg({ ok, text }); load(); }} />
+          onSaved={(text, ok = true) => { if (!sameVc(editor.vc)) return; setEditor(null); setSel(new Set()); setMsg({ ok, text }); load(); }}
+          onReload={() => { if (sameVc(editor.vc)) load(); }} />
       )}
       {runOf && <RunModal g={runOf} onClose={() => setRunOf(null)} onRun={(lv) => run(runOf, lv)} />}
       {fireOf && <FireModal g={groups.find((x) => x.id === fireOf.id) || fireOf} onClose={() => setFireOf(null)} />}
@@ -321,7 +327,7 @@ function savedText(r, isNew) {
   return parts.join(' · ');
 }
 
-function GroupEditor({ tree, group, initialVmIds, byId, onClose, onSaved }) {
+function GroupEditor({ tree, group, initialVmIds, byId, onClose, onSaved, onReload }) {
   const [name, setName] = useState(group?.name || '');
   const [sched, setSched] = useState(() => (group ? { ...group.schedule } : { ...NEW_SCHEDULE }));
   const [storage, setStorage] = useState(group?.storage || '');
@@ -333,11 +339,13 @@ function GroupEditor({ tree, group, initialVmIds, byId, onClose, onSaved }) {
   const [result, setResult] = useState(null);   // 실패 응답(사유 · 등록 결과)
   useEffect(() => {
     let live = true;
-    fetchJson(`${BASE}/groups/options`, { vcenterId: tree.vcenterId }, undefined, { timeoutMs: 360_000 })
+    // 버그 점검 W10: Director 에 닿는 조회 — 자동 재시도 없음(DIRECTOR_GET 규약) · 시한은 서버 값(엣지 대행이면 인출 + 회신, 숫자를 박지 않는다)
+    const viaEdge = tree.director?.via === 'edge';
+    fetchJson(`${BASE}/groups/options`, { vcenterId: tree.vcenterId }, undefined, { retries: 0, timeoutMs: (viaEdge && relayWaitMs(tree.relayLimits, 'catalog')) || 60_000 })
       .then((r) => { if (live) setOpts(r); })
       .catch((e) => { if (live) setOptsErr(errText(e)); });
     return () => { live = false; };
-  }, [tree.vcenterId]);
+  }, [tree.vcenterId]);   // eslint-disable-line react-hooks/exhaustive-deps -- 편집 창을 열 때 한 번만(목록 재조회로 tree 가 바뀌어도 Director 에 다시 닿지 않게)
   const members = vmIds.map((id) => byId.get(id) || { id, name: id, folder: '', missing: true });
   const toRegister = members.filter((m) => !m.job && !m.missing).length;
   const doubled = sched.enabled ? members.filter((m) => m.job?.schedule) : [];
@@ -353,7 +361,10 @@ function GroupEditor({ tree, group, initialVmIds, byId, onClose, onSaved }) {
         ? await putJson(`${BASE}/groups/${enc(group.id)}`, body, opts)
         : await postJson(`${BASE}/groups`, { ...body, vcenterId: tree.vcenterId }, opts);
       if (r?.ok) { onSaved(savedText(r, !group)); return; }
+      // 버그 점검 W9: 거부돼도 서버가 VM 을 등록했을 수 있다 — 목록을 다시 읽는다. 다른 화면이 먼저 고쳤으면(409) 창을 닫고 새 값으로 다시 열게 한다
+      if (r?.conflict) { onSaved(`${r.reason} 목록을 새로 읽었습니다 — 다시 ‘수정’ 을 눌러 주세요.`, false); return; }
       setResult(r || { reason: '저장하지 못했습니다.' });
+      onReload?.();
     } catch (e) {
       // 브라우저 시한·504 — 서버는 등록·저장을 끝냈을 수 있다(실패로 단정하지 않는다). 창을 닫고 목록을 새로 읽게 한다
       if (outcomeUnknown(e)) { onSaved(`결과 모름: ${unknownOutcomeText('그룹 저장', e)}`, false); return; }
@@ -453,6 +464,7 @@ function GroupEditor({ tree, group, initialVmIds, byId, onClose, onSaved }) {
         {result && (
           <div className="banner bad" style={{ fontSize: 12.5 }}>
             <div>{result.reason || '저장하지 못했습니다.'}</div>
+            {(result.registered || []).some((x) => x.ok) && <div style={{ marginTop: 4 }}>이번에 백업 대상으로 등록된 VM {result.registered.filter((x) => x.ok).length}대는 남아 있습니다(백업 대상 탭).</div>}
             {(result.excluded || []).length > 0 && <div style={{ marginTop: 4 }}>등록하지 못한 VM: {result.excluded.slice(0, 10).map((x) => `${nameOf(x.vmId)}(${x.reason})`).join(' · ')}{result.excluded.length > 10 ? ` 외 ${result.excluded.length - 10}대` : ''}</div>}
           </div>
         )}

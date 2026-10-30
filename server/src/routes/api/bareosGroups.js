@@ -13,7 +13,7 @@ import { directorById, directorConn, siteMissing } from '../../bareos/settings.j
 import { jobDigests, MAX_JOBS, registryLoadError } from '../../bareos/registry.js';
 import { listGroups, getGroup, addGroup, updateGroup, deleteGroup, checkGroupInput, groupsLoadError, MAX_MEMBERS, MAX_GROUPS } from '../../bareos/groups.js';
 import { nextSlot, scheduleText, CATCHUP_MS, LEVELS } from '../../bareos/groupSchedule.js';
-import { runGroup, groupRunning } from '../../bareos/groupRunner.js';
+import { queueGroupRun, groupRunning } from '../../bareos/groupRunner.js';
 import { bareosVmView } from '../../bareos/vmView.js';
 import { getMarks, marksUnreadable } from '../../veeam/backupMarks.js';
 import { isSystemVm } from '../../veeam/backupStatus.js';
@@ -215,18 +215,26 @@ api.post('/tools/bareos-backup/groups', adminOnly, async (req, res) => {
 /** 그룹 고치기 — body { name, vmIds, schedule, storage?, pool? }(전부 보낸다 — 화면이 편집 창의 값 전체를 보낸다). 새 VM 은 등록 뒤 넣는다. */
 api.put('/tools/bareos-backup/groups/:id', adminOnly, async (req, res) => {
   const g0 = groupFor(req, res); if (!g0) return;
+  const expect = req.body?.updatedAt != null && Number.isFinite(Number(req.body.updatedAt)) ? Number(req.body.updatedAt) : null;
+  // 버그 점검 S10: 대조를 등록(Director 호출) **전에** — 예전에는 새 VM 을 Director 에 등록한 뒤 409 를 돌려 잡만 생기고 그룹에는 없었다
+  if (expect != null && g0.updatedAt !== expect) {
+    return res.status(409).json({ ok: false, reason: `그사이 다른 화면에서 ‘${g0.name}’ 그룹을 고쳤습니다(${g0.updatedBy || '?'}) — 새로 고친 뒤 다시 저장하세요(그대로 덮어쓰면 그쪽에서 넣은 VM 이 빠질 수 있습니다).`, conflict: true });
+  }
   const v = precheck(req, res, g0.vcenterId, { selfId: g0.id }); if (!v) return;
   const reg = await registerMissing(req, g0.vcenterId, v.vmIds, v.schedule.level);
   if (!reg.members.length) return res.status(409).json({ ok: false, reason: '백업 대상으로 등록된 VM 이 하나도 없어 저장하지 않았습니다 — VM 별 사유를 보세요.', registered: reg.registered, excluded: reg.excluded });
   let g;
   try {
-    const expect = Number.isFinite(Number(req.body?.updatedAt)) && req.body?.updatedAt != null ? Number(req.body.updatedAt) : null;
     g = updateGroup(g0.id, { ...v, vmIds: reg.members }, { by: req.user?.username || '', expectUpdatedAt: expect });
   } catch (e) {
     audit(req, 'Bareos 백업 그룹 고치기', `${g0.vcenterId}/${g0.name}`, `실패 — ${String(e?.message || e).slice(0, 160)}`);
     return res.status(e?.code === 'conflict' ? 409 : e?.code === 'unavailable' ? 503 : 400).json({ ok: false, reason: String(e?.message || e).slice(0, 400), registered: reg.registered });
   }
-  if (!g) return res.status(404).json({ ok: false, reason: '그사이 그룹이 지워졌습니다.' });
+  if (!g) {
+    // 버그 점검 S9: 저장하는 사이 그룹이 지워졌다 — 이번에 등록한 백업 대상은 남는다(숨기지 않고 알린다)
+    audit(req, 'Bareos 백업 그룹 고치기', `${g0.vcenterId}/${g0.name}`, '실패 — 저장하는 사이 그룹이 지워짐');
+    return res.status(404).json({ ok: false, reason: `그사이 그룹이 지워졌습니다.${reg.registered.some((r) => r.ok) ? ' 이번에 등록한 백업 대상은 남아 있습니다(백업 대상 탭).' : ''}`, registered: reg.registered });
+  }
   const added = g.vmIds.filter((id) => !g0.vmIds.includes(id)).length;
   const removed = g0.vmIds.filter((id) => !g.vmIds.includes(id)).length;
   audit(req, 'Bareos 백업 그룹 고치기', `${g.vcenterId}/${g.name}`,
@@ -255,7 +263,8 @@ api.post('/tools/bareos-backup/groups/:id/run', adminOnly, (req, res) => {
   if (registryLoadError()) return res.status(503).json({ ok: false, reason: '백업 대상 원장을 읽지 못한 상태라 실행하지 않습니다(손상본 보존).' });
   const level = req.body?.level ? String(req.body.level) : null;
   if (level && !LEVELS.includes(level)) return res.status(400).json({ ok: false, reason: `레벨은 ${LEVELS.join('·')} 중 하나입니다.` });
-  runGroup(g.id, { trigger: 'manual', by: req.user?.username || '', level }).catch((e) => console.warn(`[bareos] 백업 그룹 ‘${g.name}’ 수동 실행 실패: ${String(e?.message || e).slice(0, 200)}`));
+  // 같은 Director 의 다른 그룹(예약)과 같은 줄에 선다(버그 점검 S8 — 수동 실행이 줄 밖에서 같은 Director 에 세션을 동시에 열었다)
+  queueGroupRun(g.id, { trigger: 'manual', by: req.user?.username || '', level }).catch((e) => console.warn(`[bareos] 백업 그룹 ‘${g.name}’ 수동 실행 실패: ${String(e?.message || e).slice(0, 200)}`));
   res.status(202).json({ ok: true, started: true, group: groupView(getGroup(g.id) || g) });
 });
 

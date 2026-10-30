@@ -23,6 +23,7 @@ import { atomicWriteFileSync, preserveCorrupt, safeLoadText } from '../util/atom
 import { makeLoadError } from '../util/registryCore.js';
 import { isResourceName } from './names.js';
 import { normSchedule, decideFire } from './groupSchedule.js';
+import { registerExitFlush } from '../util/exitFlush.js';
 
 export const FILE_NAME = 'bareos-groups.json';
 const FILE = () => path.join(config.configDir, 'bareos-groups.json'); // 문자열 그대로 — scripts/config-doc.mjs 가 이 모양으로 파일을 찾는다
@@ -199,6 +200,7 @@ export function claimSlots(list, now = Date.now()) {
         if (!g || (g.lastKey && c.key <= g.lastKey)) continue;
         g.lastKey = c.key;
         g.sending = { key: c.key, at: now, trigger: c.trigger || 'timer' };
+        if (g.missed && g.missed.key < c.key) g.missed = null;   // 버그 점검 W7: 뒤 회차가 돌면 '돌리지 않은 회차' 안내는 지난 일이다
         got.push(g.id);
       }
       return got;
@@ -262,5 +264,7 @@ export function recordFire(id, fire) {
   return true;
 }
 export function _flushGroupsForTest() { if (_fireTimer) { clearTimeout(_fireTimer); flushFires(); } }
+// 버그 점검 S5: 지연 쓰기는 종료 flush 에 등록한다(util/exitFlush.js 규약 — 실행이 끝나고 1초 안에 재시작하면 기록을 잃고 '재시작' 경고가 남았다)
+registerExitFlush('bareos-groups', () => { if (_fireTimer) { clearTimeout(_fireTimer); flushFires(); } });
 
 export function _resetGroupsForTest() { if (_fireTimer) { clearTimeout(_fireTimer); _fireTimer = null; } _db = null; _loadErr.clear(); _rev = 0; }
