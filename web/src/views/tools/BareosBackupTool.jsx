@@ -13,6 +13,7 @@ import {
   stateBadge, levelLabel, bytesText, whenText, runCell, directorLine, RESTORE_MODE_LABEL, restoreLine, candidateSummary, driftText, restorePointsNote,
   folderOptions, inFolder, pickCap, bulkSummary, diagView,
   directorPrepBlock, fdIniTemplate, PREP_CHECKLIST, autoSetupDirectorText, autoSetupFdText, thumbprintText,
+  directorPatch, outcomeUnknown, missingText,
 } from './bareosText.js';
 
 /**
@@ -589,8 +590,9 @@ function SettingsTab({ onSaved }) {
   const save = async () => {
     setBusy(true); setMsg(null);
     try {
-      const body = { director: { ...form.director, port: Number(form.director.port) || 9101, timeoutMs: Number(form.director.timeoutMs) || undefined }, defaults: { ...form.defaults, pollIntervalSec: Number(form.defaults.pollIntervalSec) || undefined }, sites: form.sites };
-      if (!body.director.password) delete body.director.password;
+      // Director 연결은 읽어 온 값과 달라진 칸만(directorPatch — W2-1·P2-1: 옛 사본을 통째로 보내 새 콘솔 비밀번호를 폐기하던 것)
+      const dir = directorPatch(form.director, s.director);
+      const body = { ...(dir ? { director: dir } : {}), defaults: { ...form.defaults, pollIntervalSec: Number(form.defaults.pollIntervalSec) || undefined }, sites: form.sites };
       const r = await putJson(`${BASE}/settings`, body);
       requireChanged(r);
       const dropped = droppedSecretNote(r);
@@ -618,6 +620,7 @@ function SettingsTab({ onSaved }) {
     <div>
       {s.demo && <div className="card" style={{ ...NOTE, borderLeft: '3px solid var(--amber)' }}>데모 모드 — 아래 값은 메모리의 데모 설정입니다. 실제 Director 를 저장하면 그쪽으로 접속합니다.</div>}
       {s.loadError && <div className="banner bad" style={{ marginBottom: 10 }}>설정 파일을 읽지 못했습니다(손상본 보존) — {s.loadError.reason}</div>}
+      {err && <div className="banner bad" role="alert" style={{ marginBottom: 10 }}>설정을 다시 읽지 못했습니다({String(err.message || err).slice(0, 160)}) — 화면 값이 최신이 아닐 수 있어 저장을 잠갔습니다. <button type="button" className="logout-btn" style={BTN} onClick={load}>다시 읽기</button></div>}
       {msg && <div className={`banner ${msg.ok ? 'ok' : 'bad'}`} style={{ marginBottom: 10 }}><BoldText text={msg.text} /></div>}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))', gap: 12, marginBottom: 12 }}>
         <div className="card" style={{ padding: 14, minWidth: 0 }}>
@@ -707,11 +710,11 @@ function SettingsTab({ onSaved }) {
         </STable>
       </div>
       <div style={{ ...ROW, marginBottom: 14 }}>
-        <button type="button" className="login-btn" style={{ flex: 'none', padding: '8px 18px' }} disabled={busy} onClick={save}>{busy ? '저장 중…' : '저장'}</button>
+        <button type="button" className="login-btn" style={{ flex: 'none', padding: '8px 18px' }} disabled={busy || !!err} title={err ? '설정을 다시 읽은 뒤 저장할 수 있습니다' : undefined} onClick={save}>{busy ? '저장 중…' : '저장'}</button>
         <span className="muted" style={{ fontSize: 12 }}>매핑을 바꿔도 이미 만든 Director 잡은 바뀌지 않습니다(새로 등록하는 대상부터 적용).</span>
       </div>
 
-      <AutoSetupCards s={s} cat={cat} form={form} onDirectorDone={async () => { await fetchSettings(true); loadCat(true); onSaved(); }} />
+      <AutoSetupCards s={s} cat={cat} form={form} onDirectorDone={async () => { await fetchSettings(true); loadCat(true); onSaved(); }} onMaybeChanged={() => fetchSettings(true)} />
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))', gap: 12 }}>
         <div className="card" style={{ padding: 14, minWidth: 0 }}>
@@ -736,7 +739,7 @@ function SettingsTab({ onSaved }) {
  * SSH·vCenter 비밀번호는 요청 1회에만 쓰고 저장하지 않는다 · 쓰기는 본인 OTP · 포탈이 만들지 않은 파일은 덮어쓰지 않는다.
  * FD 쪽은 **저장된** 사이트 매핑(INI 경로·vcserver)을 쓴다 — 표에서 고친 뒤 저장하지 않은 값은 쓰지 않는다.
  */
-function AutoSetupCards({ s, cat, form, onDirectorDone }) {
+function AutoSetupCards({ s, cat, form, onDirectorDone, onMaybeChanged }) {
   const first = s.sites[0] || {};
   const [d, setD] = useState({ host: s.director.host || '', sshPort: '22', username: 'root', password: '', directorPort: String(s.director.port || 9101), consoleName: 'portal', restoreClient: first.client || '', restoreStorage: first.storage || '', restorePool: first.pool || '', otp: '' });
   const [f, setF] = useState({ vcenterId: first.vcenterId || '', host: '', sshPort: '22', username: 'root', password: '', vcuser: '', vcpass: '', vcthumbprint: '', otp: '' });
@@ -746,7 +749,9 @@ function AutoSetupCards({ s, cat, form, onDirectorDone }) {
   const field = { fontSize: 12, display: 'flex', flexDirection: 'column', gap: 4, minWidth: 0 };
   const GRID = { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 8, marginTop: 8 };
   const setDk = (k, v) => setD((x) => ({ ...x, [k]: v }));
-  const setFk = (k, v) => setF((x) => ({ ...x, [k]: v }));
+  // W2-3: 대상 vCenter·FD 주소가 바뀌면 읽어 둔 지문은 그 대상의 것이 아니다 — 비운다
+  const setFk = (k, v) => setF((x) => ({ ...x, [k]: v, ...((k === 'vcenterId' || k === 'host') && x[k] !== v ? { vcthumbprint: '' } : {}) }));
+  useEffect(() => { setFMsg(null); }, [f.vcenterId, f.host]);
   const vcLabel = (id) => s.vcenters.find((v) => v.id === id)?.name || id;
   const site = s.sites.find((x) => x.vcenterId === f.vcenterId);
   const unsaved = JSON.stringify(form.sites) !== JSON.stringify(s.sites);
@@ -780,16 +785,29 @@ function AutoSetupCards({ s, cat, form, onDirectorDone }) {
       setDMsg({ ok: true, text: autoSetupDirectorText(r) });
       setD((x) => ({ ...x, password: '', otp: '' }));
       await onDirectorDone();
-    } catch (e) { setDMsg({ ok: false, text: `Director 자동 설정 실패: ${e.message}` }); setDk('otp', ''); } finally { setBusy(''); }
+    } catch (e) {
+      if (outcomeUnknown(e)) {
+        // 응답을 받지 못했다(연결 끊김·브라우저 시한) — 서버는 끝까지 돌아 연결을 바꿨을 수 있다(W2-2·P2-1). 단정하지 않고 설정을 다시 읽는다.
+        setDMsg({ ok: false, text: `Director 자동 설정 결과를 확인하지 못했습니다(${e.message}) — 서버에서는 계속 진행됐을 수 있습니다. 잠시 뒤 설정을 다시 읽어 Director 연결을 확인하세요(감사 로그에 결과가 남습니다).` });
+        onMaybeChanged?.();
+      } else setDMsg({ ok: false, text: `Director 자동 설정 실패: ${e.message}` });
+      setD((x) => ({ ...x, otp: '', ...(e?.body?.code === 'ssh-auth' ? { password: '' } : {}) }));   // W2-5: 틀린 비밀번호를 남겨 같은 인증을 되풀이하지 않게
+    } finally { setBusy(''); }
   };
   const readThumb = async () => {
     setBusy('thumb'); setFMsg(null);
+    const want = { vcenterId: f.vcenterId, host: f.host };
     try {
       const r = await postJson(`${BASE}/settings/auto-setup/fd-thumbprint`, { vcenterId: f.vcenterId, host: f.host, sshPort: Number(f.sshPort) || 22, username: f.username, password: f.password });
       requireChanged(r);
-      setFk('vcthumbprint', r.thumbprint);
+      // W2-3: 그사이 대상이 바뀌었거나 응답이 다른 vCenter 의 것이면 버린다(다른 vCenter 의 INI 에 엉뚱한 지문이 실리던 것)
+      if (r.vcenterId && r.vcenterId !== want.vcenterId) throw new Error('응답이 고른 vCenter 의 것이 아닙니다 — 다시 읽으세요.');
+      setF((x) => (x.vcenterId === want.vcenterId && x.host === want.host ? { ...x, vcthumbprint: r.thumbprint } : x));
       setFMsg({ ok: true, text: thumbprintText(r) });
-    } catch (e) { setFMsg({ ok: false, text: `지문 읽기 실패: ${e.message}` }); } finally { setBusy(''); }
+    } catch (e) {
+      setFMsg({ ok: false, text: `지문 읽기 실패: ${e.message}` });
+      if (e?.body?.code === 'ssh-auth') setFk('password', '');
+    } finally { setBusy(''); }
   };
   const runFd = async () => {
     setBusy('fd'); setFMsg(null);
@@ -798,11 +816,17 @@ function AutoSetupCards({ s, cat, form, onDirectorDone }) {
       requireChanged(r);
       setFMsg({ ok: true, text: autoSetupFdText(r) });
       setF((x) => ({ ...x, password: '', vcpass: '', otp: '' }));
-    } catch (e) { setFMsg({ ok: false, text: `FD INI 자동 설정 실패: ${e.message}` }); setFk('otp', ''); } finally { setBusy(''); }
+    } catch (e) {
+      setFMsg({ ok: false, text: outcomeUnknown(e) ? `FD INI 자동 설정 결과를 확인하지 못했습니다(${e.message}) — FD 에서 파일이 바뀌었을 수 있습니다(감사 로그 확인).` : `FD INI 자동 설정 실패: ${e.message}` });
+      setF((x) => ({ ...x, otp: '', ...(e?.body?.code === 'ssh-auth' ? { password: '' } : {}) }));
+    } finally { setBusy(''); }
   };
   const dReady = d.host && d.password && d.restoreClient && d.restoreStorage && d.restorePool && /^\d{6}$/.test(d.otp) && !busy;
   const sshReady = f.vcenterId && site && f.host && f.password && !busy;
   const fReady = sshReady && f.vcuser && f.vcpass && f.vcthumbprint && /^\d{6}$/.test(f.otp);
+  // W2-8: 잠긴 버튼은 사유를 말한다
+  const dMissing = busy ? '' : missingText([[d.host, '서버 주소'], [d.password, 'SSH 비밀번호'], [d.restoreClient && d.restoreStorage && d.restorePool, '복원 잡 FD·스토리지·풀'], [/^\d{6}$/.test(d.otp), 'OTP 6자리']]);
+  const fMissing = busy ? '' : missingText([[f.vcenterId && site, '매핑된 vCenter'], [f.host, '서버 주소'], [f.password, 'SSH 비밀번호'], [f.vcuser && f.vcpass, 'vCenter 계정·비밀번호'], [f.vcthumbprint, '지문'], [/^\d{6}$/.test(f.otp), 'OTP 6자리']]);
 
   return (
     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))', gap: 12, marginBottom: 12 }}>
@@ -824,9 +848,9 @@ function AutoSetupCards({ s, cat, form, onDirectorDone }) {
         </div>
         <div style={{ ...ROW, marginTop: 10 }}>
           <button type="button" className="login-btn" style={{ flex: 'none', padding: '8px 16px' }} disabled={!dReady} onClick={runDirector}>{busy === 'director' ? '설정 중…' : 'Director 자동 설정'}</button>
-          <span className="muted" style={{ fontSize: 11.5 }}>root 로 접속합니다 · 비밀번호는 저장하지 않습니다</span>
+          <span className="muted" style={{ fontSize: 11.5 }}>{dMissing || 'root 로 접속합니다 · 비밀번호는 저장하지 않습니다'}</span>
         </div>
-        {dMsg && <div className={`banner ${dMsg.ok ? 'ok' : 'bad'}`} style={{ marginTop: 10, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}><BoldText text={dMsg.text} /></div>}
+        {dMsg && <div className={`banner ${dMsg.ok ? 'ok' : 'bad'}`} role={dMsg.ok ? 'status' : 'alert'} style={{ marginTop: 10, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}><BoldText text={dMsg.text} /></div>}
       </div>
 
       <div className="card" style={{ padding: 14, minWidth: 0 }}>
@@ -854,8 +878,9 @@ function AutoSetupCards({ s, cat, form, onDirectorDone }) {
         <div style={{ ...ROW, marginTop: 10 }}>
           <button type="button" className="logout-btn" style={{ padding: '7px 14px' }} disabled={!sshReady} onClick={readThumb}>{busy === 'thumb' ? '읽는 중…' : 'FD 에서 지문 읽기'}</button>
           <button type="button" className="login-btn" style={{ flex: 'none', padding: '8px 16px' }} disabled={!fReady} onClick={runFd}>{busy === 'fd' ? '쓰는 중…' : 'FD INI 자동 설정'}</button>
+          {fMissing && <span className="muted" style={{ fontSize: 11.5 }}>{fMissing}</span>}
         </div>
-        {fMsg && <div className={`banner ${fMsg.ok ? 'ok' : 'bad'}`} style={{ marginTop: 10, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}><BoldText text={fMsg.text} /></div>}
+        {fMsg && <div className={`banner ${fMsg.ok ? 'ok' : 'bad'}`} role={fMsg.ok ? 'status' : 'alert'} style={{ marginTop: 10, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}><BoldText text={fMsg.text} /></div>}
       </div>
     </div>
   );

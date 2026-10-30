@@ -539,7 +539,7 @@ api.get('/tools/bareos-backup/jobs/:id/restore-points', adminOnly, async (req, r
     const items = rows.filter((r) => r.type === 'B' && (r.state === 'ok' || r.state === 'warning'));
     const site = effectiveSettings().sites.find((x) => x.vcenterId === job.vcenterId);
     // W7: 복원은 지금의 사이트 매핑 FD 로 실행한다(등록 때 FD 와 다를 수 있다) — 화면이 실제 값을 보이게
-    res.json({ ok: true, items, restorePending: (job.restores || []).some(restoreOpen), restoreClient: site?.client || job.client, scanned: RESTORE_POINTS_SCAN });
+    res.json({ ok: true, items, restorePending: (job.restores || []).some(restoreOpen), restoreClient: site?.client || job.client, scanned: rows.length, limit: RESTORE_POINTS_SCAN });   // W2-6: 실제로 본 실행 수(상수가 아니다)
   } catch (e) { sendErr(res, e); }
 });
 

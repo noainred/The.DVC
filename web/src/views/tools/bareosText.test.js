@@ -3,7 +3,7 @@ import {
   stateBadge, levelLabel, bytesText, whenText, elapsedText, runCell, directorLine, restoreLine, candidateSummary,
   directorPrepBlock, fdIniTemplate, PREP_CHECKLIST, STATE_LABEL, RESTORE_MODE_LABEL, autoSetupDirectorText, autoSetupFdText, thumbprintText,
   folderOptions, inFolder, pickCap, bulkSummary, NO_FOLDER, diagView,
-  driftText, restorePointsNote,
+  driftText, restorePointsNote, directorPatch, outcomeUnknown, missingText,
 } from './bareosText.js';
 
 describe('bareosText (v2.820 Bareos VM 백업)', () => {
@@ -111,8 +111,33 @@ describe('bareosText (v2.820 Bareos VM 백업)', () => {
       expect(t).not.toMatch(/`|\*\*/);
     }
     expect(restorePointsNote({ items: Array.from({ length: 40 }, (_, i) => i), scanned: 60 }, 30)).toMatch(/40건 중 최근 30건/);
-    expect(restorePointsNote({ items: [1], scanned: 60 }, 30)).toMatch(/1건\. Director 카탈로그의 최근 실행 60건/);
+    expect(restorePointsNote({ items: [1], scanned: 60, limit: 60 }, 30)).toMatch(/1건\. Director 카탈로그의 이 잡 실행 최근 60건에서 골랐습니다 — 더 오래된/);
+    // W2-6(v2.822.3): 상한에 닿지 않았으면 '더 오래된 지점' 을 말하지 않는다(예전에는 상수 60 으로 늘 그렇게 말했다)
+    expect(restorePointsNote({ items: [1, 2], scanned: 13, limit: 60 }, 30)).toBe('성공한 백업 2건. Director 카탈로그의 이 잡 실행 13건 전부에서 골랐습니다.');
     expect(restorePointsNote({ items: [] }, 30)).toBe('성공한 백업 0건.');
+  });
+
+  it('v2.822.3 directorPatch — 읽어 온 값과 달라진 칸만 + 입력한 비밀번호(옛 사본을 통째로 보내 새 콘솔 비밀번호를 폐기하던 W2-1·P2-1)', () => {
+    const snap = { host: 'dir.corp', port: 9101, consoleName: 'portal2', timeoutMs: 15000, tlsMax: 'TLSv1.3', hasPassword: true };
+    const form = { host: 'dir.corp', port: '9101', consoleName: 'portal2', password: '', timeoutMs: 15000, tlsMax: 'TLSv1.3' };
+    expect(directorPatch(form, snap)).toBe(null);
+    // 자동 설정이 콘솔을 portal2 로 바꾼 뒤 화면이 옛 값(portal)을 들고 있어도 — 화면이 읽어 온 snap 과 같으면 보내지 않는다
+    expect(directorPatch({ ...form, consoleName: 'portal' }, { ...snap, consoleName: 'portal' })).toBe(null);
+    expect(directorPatch({ ...form, host: 'new.corp' }, snap)).toEqual({ host: 'new.corp' });
+    expect(directorPatch({ ...form, password: 'pw' }, snap)).toEqual({ password: 'pw' });
+    expect(directorPatch({ ...form, port: '9102', timeoutMs: 20000 }, snap)).toEqual({ port: 9102, timeoutMs: 20000 });
+    expect(directorPatch({ host: 'a', port: '', consoleName: 'p' }, {})).toEqual({ host: 'a', port: 9101, consoleName: 'p' });
+  });
+
+  it('v2.822.3 결과 미확인 판정 · 잠긴 버튼 사유 · 체크리스트 명령은 ASCII 따옴표', () => {
+    expect(outcomeUnknown({ status: 0, message: 'signal timed out' })).toBe(true);
+    expect(outcomeUnknown(new TypeError('Failed to fetch'))).toBe(true);
+    expect(outcomeUnknown({ status: 502 })).toBe(false);
+    expect(missingText([[true, 'A'], ['', 'B'], [false, 'C']])).toBe('필요: B · C');
+    expect(missingText([[1, 'A']])).toBe('');
+    const pip = PREP_CHECKLIST.find((t) => /pip install/.test(t));
+    expect(pip).toMatch(/pip install 'pyvmomi>=8,<9'/);
+    expect(pip).not.toMatch(/[‘’]pyvmomi/);
   });
 });
 
