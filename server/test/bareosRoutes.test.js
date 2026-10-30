@@ -227,6 +227,27 @@ test('⑤ 실행 202 · 실행 중 409 · 폴링으로 lastRun · 로그는 이 
   assert.equal((await call('admin', 'GET', `/jobs/${jobId}/log?jobid=${jid}`)).j.lines[0], `2026-10-29 02:00:00 log of ${jid}`);
   const other = D.nextId++; D.runs.set(other, { name: 'SomeOtherJob', status: 'T', type: 'B' });
   assert.equal((await call('admin', 'GET', `/jobs/${jobId}/log?jobid=${other}`)).s, 400);
+  // v2.822.5: 로그를 열면 그 실행의 상태가 원장에 반영된다 — 폴러를 기다리지 않는다(Director 명령 수는 그대로: llist + list joblog)
+  const r2 = await call('admin', 'POST', `/jobs/${jobId}/run`, { level: 'Incremental' });
+  assert.equal(r2.s, 202, r2.t);
+  const jid2 = r2.j.jobid;
+  let lg = await call('admin', 'GET', `/jobs/${jobId}/log?jobid=${jid2}`);
+  assert.equal(lg.j.state, 'running');
+  assert.equal(registry.getJob(jobId).lastRun.jobid, jid2, '실행 중인 실행도 최근 실행으로 반영');
+  lg = await call('admin', 'GET', `/jobs/${jobId}/log?jobid=${jid2}`);
+  assert.equal(lg.j.stateChanged, false, '실행 중이고 바뀐 것이 없으면 false(파일을 다시 쓰지 않는다)');
+  assert.equal(registry.getJob(jobId).pending.jobid, jid2);
+  D.runs.get(jid2).status = 'W';
+  const before = D.cmds.length;
+  lg = await call('admin', 'GET', `/jobs/${jobId}/log?jobid=${jid2}`);
+  assert.equal(lg.s, 200, lg.t);
+  assert.equal(lg.j.stateChanged, true);
+  assert.equal(lg.j.state, 'warning');
+  assert.deepEqual(D.cmds.slice(before).map((c) => c.split(' ')[0]), ['llist', 'list'], 'Director 명령은 llist·list joblog 두 개뿐');
+  assert.equal(registry.getJob(jobId).pending, null, '끝난 실행은 추적 해제');
+  assert.equal(registry.getJob(jobId).lastRun.jobid, jid2);
+  assert.equal(registry.getJob(jobId).lastRun.state, 'warning');
+  assert.equal((await call('admin', 'GET', `/jobs/${jobId}/log?jobid=${jid2}`)).j.stateChanged, false, '두 번째는 바뀐 것 없음');
   assert.equal((await call('sadm', 'GET', `/jobs/${registry.listJobs().find((x) => x.vcenterId === 'vc-b').id}/history`)).s, 404);
 });
 
