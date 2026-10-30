@@ -229,8 +229,11 @@ export async function restoreChain(session, jobid) {
 }
 
 /**
- * 복원 실행 — `restore client=… jobid=a,b restorejob=… pluginoptions="…" select all done yes`.
+ * 복원 실행 — `restore client=… jobid=a,b restorejob=… pluginoptions="…" all done yes`.
  * jobid 목록으로만 고른다(범용 FileSet 공유 → 'select current' 는 다른 VM 이 섞인다 — 계획서 R10).
+ * v2.827.1: **`select` 키워드를 넣지 않는다**. Bareos 22~25 의 ua_restore.cc 는 `select` 가 있으면 jobid 를 무시하고
+ *   SelectBackupsBeforeDate(현재 시각 = 'select current' 와 같은 경로)로 들어가 FileSet 을 묻는다 — 비대화형이라
+ *   'No FileSet found for client' 로 복원이 거부됐다(실환경 재현). jobid= 는 그 자체로 선택을 끝내고, all = 전부 표시, done = 트리 대화 생략.
  * @returns jobid(복원 잡)
  */
 export async function runRestore(session, { client, jobids, restoreJob, pluginOptions }) {
@@ -239,6 +242,6 @@ export async function runRestore(session, { client, jobids, restoreJob, pluginOp
   const ids = (Array.isArray(jobids) ? jobids : []).map(asId);
   if (!ids.length || ids.length > 400) throw bad('복원할 백업 jobid 목록이 올바르지 않습니다.');
   if (typeof pluginOptions !== 'string' || !pluginOptions || /["\\;@\r\n\0]/.test(pluginOptions)) throw bad('복원 플러그인 옵션이 올바르지 않습니다.');
-  const cmd = `restore client=${client} restoreclient=${client} jobid=${ids.join(',')} restorejob=${restoreJob} pluginoptions=${consoleQuote(pluginOptions)} select all done yes`;
+  const cmd = `restore client=${client} restoreclient=${client} jobid=${ids.join(',')} restorejob=${restoreJob} pluginoptions=${consoleQuote(pluginOptions)} all done yes`;
   return jobIdOf(await session.call(cmd, { timeoutMs: 120_000 }));
 }
