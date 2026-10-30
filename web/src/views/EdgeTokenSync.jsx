@@ -52,7 +52,7 @@ export default function EdgeTokenSync() {
 
   // 토큰 목록을 못 읽었거나 파일이 손상됐으면 null — 행은 '모름'
   const tokens = tok && !tok.loadError && Array.isArray(tok.tokens) ? tok.tokens : null;
-  const rows = syncRows(cols.collectors, tokens);
+  const rows = syncRows(cols.collectors, tokens, cols.status);   // v2.826: pull 상태의 엣지 판 — 2.776.0 미만이면 수집 토큰 통로가 없다
   const orphans = orphanTokens(cols.collectors, tokens);
   const selRow = rows.find((r) => r.agent === sel) || null;
 
@@ -65,6 +65,7 @@ export default function EdgeTokenSync() {
           공유 토큰 하나만 쓰면 엣지 1대가 침해될 때 다른 사이트의 자격증명까지 인출될 수 있고, Veeam 위임처럼 개별 토큰만 받는 기능은 403 이 됩니다.
           <br />공유 토큰 엣지의 <b>자동 적용</b>은 발급 → 엣지 전달(수집 토큰 통로, 안 되면 SSH) → 중앙 확인 → 배포 기록 맞춤을 한 번에 하고 단계마다 기록을 남깁니다.
           실패해도 공유 토큰은 그대로 받으므로 수집은 끊기지 않습니다. 실행은 설정 소유자만 할 수 있습니다.
+          <br />엣지 판이 2.776.0 미만이면 수집 토큰 통로가 없어(옛 판은 HTTP 401) SSH 배포 기록이 있어야 합니다. 없으면 실패 기록 옆의 <b>엣지 업그레이드 뒤 자동 적용</b>으로 엣지를 중앙 판으로 올리고(엣지 포탈 재시작) 이어서 적용할 수 있습니다.
         </div>
         <div className="flex gap wrap" style={{ marginTop: 8, alignItems: 'center' }}>
           <button className="tab" disabled={loading} onClick={load}>{loading ? '읽는 중…' : '새로 읽기'}</button>
@@ -89,7 +90,7 @@ export default function EdgeTokenSync() {
       {rows.length > 0 && (
         // 좁은 화면(400px)은 가로 스크롤 — 판단에 필요한 엣지·상태·작업을 앞에 둔다(Chromium 400 판독: 주소가 앞이면 상태·버튼이 화면 밖이었다)
         <STable minWidth={760}>
-          <thead><tr><th>엣지</th><th>상태</th><th data-nosort="">작업</th><th>발급</th><th>마지막 사용</th><th>수집 서버 주소</th></tr></thead>
+          <thead><tr><th>엣지</th><th>상태</th><th data-nosort="">작업</th><th>엣지 판</th><th>발급</th><th>마지막 사용</th><th>수집 서버 주소</th></tr></thead>
           <tbody>
             {rows.map((r) => {
               const st = SYNC_STATE[r.state];
@@ -102,6 +103,7 @@ export default function EdgeTokenSync() {
                       ? <button className="tab" onClick={() => setSel(sel === r.agent ? '' : r.agent)}>{sel === r.agent ? '닫기' : '자동 적용'}</button>
                       : <span className="muted" style={{ fontSize: 12 }} title={r.hint || undefined}>—</span>}
                   </td>
+                  <td className="nowrap" data-sort={r.edgeVersion || ''} title={r.versionHint || undefined} style={{ color: r.apiOk === false ? TONE.warn : 'var(--text-dim)', fontWeight: r.apiOk === false ? 600 : 400 }}>{r.edgeVersion || '—'}{r.apiOk === false ? ' ⬆' : ''}</td>
                   <td className="muted" data-sort={r.createdAt ?? ''}>{when(r.createdAt)}</td>
                   <td className="muted" data-sort={r.lastUsedAt ?? ''} title="중앙이 그 토큰을 본 마지막 시각(이름 검사 전 기록 — 받아들였다는 증거는 아닙니다)">{when(r.lastUsedAt)}</td>
                   <td className="muted" style={{ overflowWrap: 'anywhere' }}>{r.url || '—'}</td>
@@ -110,6 +112,9 @@ export default function EdgeTokenSync() {
             })}
           </tbody>
         </STable>
+      )}
+      {rows.some((r) => r.apiOk === false) && (
+        <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>⬆ 표시 엣지({rows.filter((r) => r.apiOk === false).length}대): {rows.find((r) => r.apiOk === false).versionHint}</div>
       )}
       {rows.some((r) => r.state === 'unused') && (
         <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>‘사용 기록 없음’(개별 토큰 발급됨): {rows.find((r) => r.state === 'unused').hint}</div>

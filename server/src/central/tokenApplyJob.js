@@ -14,6 +14,15 @@
  *  7 정리          — 엣지가 새 토큰을 **확실히 쓰지 않을 때만** 발급을 취소(공유 토큰 상태로 원복). 쓰고 있을 수 있으면 취소하지 않고 그 사실을 남긴다.
  * ⚠ 토큰 평문은 기록·응답·콘솔·감사 어디에도 싣지 않는다(tokenFingerprintParts.short 만).
  * ⚠ 엣지 확인(3)이 '중앙이 새 토큰을 거절' 로 끝나면 SSH 로 넘어가지 않는다 — 같은 엣지→중앙 경로라 결과가 같다.
+ *
+ * v2.826(실서버 agent-WA · 엣지 판 2.775.0 — '엣지 응답 HTTP 401' 로 실패):
+ *  · 옛 판 엣지에는 `/api/collector/central-token` 이 없어 요청이 `/api` 로그인 인증으로 떨어져 **401** 이 온다(404 가 아니다). 401 도
+ *    '엣지에 이 기능이 없음' 으로 읽고(확정 — 엣지는 아무것도 받지 않았다) 발급을 취소한다.
+ *  · 사전 점검이 엣지 판을 **다시 당겨**(refreshStatus — pull 상태가 오래됐을 수 있다) 2.776.0 미만이면 그 사실을 말하고, 전달할 통로
+ *    (SSH 배포 기록)도 없으면 **발급하지 않고** 멈춘다(발급→취소 공회전 없음) · 기록에 `hint:'upgrade'` 를 남겨 화면이 다음 수단을 단다.
+ *  · 옵션 `upgradeFirst`(화면 '엣지 업그레이드 뒤 자동 적용'): 판이 낮으면 **0 엣지 업그레이드** 단계 — 중앙 번들을 그 엣지에 push 하고
+ *    (collector/upgradePush — 수집 토큰 통로, 옛 판에도 있다) 엣지가 2.776.0 이상으로 다시 올라올 때까지 기다린 뒤 발급한다.
+ *    엣지 포탈이 재시작되므로 사용자가 고른 때만 한다. 판이 이미 충분하면 건너뛴다. 번들이 없거나 push 가 실패하면 발급 전에 멈춘다.
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -31,10 +40,13 @@ registerStateFile(LOG_FILE_NAME);
 const KEEP = 50;
 export const MIN_EDGE_API_VERSION = '2.776.0';
 export const VERIFY_WAIT_MS = 180_000;
+/** 엣지 업그레이드 뒤 새 판으로 다시 올라올 때까지 기다리는 상한(엣지 재시작 + 중앙 pull 반영). */
+export const UPGRADE_WAIT_MS = 300_000;
+const UPGRADE_POLL_MS = 10_000;
 const DETAIL_MAX = 400;
 
 export const STEP_LABEL = Object.freeze({
-  precheck: '사전 점검', issue: '개별 토큰 발급', 'edge-api': '엣지에 전달(수집 토큰 통로)', ssh: '엣지에 전달(SSH 통로)',
+  precheck: '사전 점검', upgrade: '엣지 업그레이드', issue: '개별 토큰 발급', 'edge-api': '엣지에 전달(수집 토큰 통로)', ssh: '엣지에 전달(SSH 통로)',
   verify: '중앙에서 확인', 'deploy-record': '배포 기록 맞춤', cleanup: '정리',
 });
 
@@ -76,20 +88,23 @@ export function runningJobFor(agent) { return _running.get(String(agent || '').t
 /**
  * 시작 — 검증 가능한 실패(사전 점검)도 기록을 남긴다. 작업은 백그라운드로 돌고 즉시 기록을 돌려준다.
  * @param {string} agent
- * @param {{ by?:string, deps:object, wait?:boolean }} o  deps: issue·revoke·listTokens·tokensLoadError·collectors·statusOf·deployTargets·saveTarget·pushEdge·sshApply·sleep·now
+ * @param {{ by?:string, deps:object, wait?:boolean, upgradeFirst?:boolean }} o  deps: issue·revoke·listTokens·tokensLoadError·findCollector·statusOf·deployTargets·saveTarget·pushEdge·sshApply·sleep·now
+ *   · refreshStatus(name)(선택 — 그 엣지만 즉시 pull) · upgradeEdge(col)(선택 — 중앙 번들 push, `{ok, version, reason}`)
+ *   · upgradeFirst: 엣지 판이 낮으면 먼저 업그레이드한다(엣지 재시작 — 사용자가 고른 때만)
  * @returns {{ ok:boolean, job?:object, reason?:string }}
  */
-export function startTokenApply(agent, { by = '', deps, wait = false } = {}) {
+export function startTokenApply(agent, { by = '', deps, wait = false, upgradeFirst = false } = {}) {
   const name = String(agent || '').trim();
   if (!/^[A-Za-z0-9._-]{1,64}$/.test(name)) return { ok: false, reason: '엣지 이름 형식이 올바르지 않습니다.' };
   if (_running.has(name.toLowerCase())) return { ok: false, reason: '이 엣지에 이미 진행 중인 작업이 있습니다.', jobId: _running.get(name.toLowerCase()) };
   const now = deps.now ? deps.now() : Date.now();
-  const job = { id: `tok_${now.toString(36)}_${crypto.randomBytes(3).toString('hex')}`, agent: name, by: capStr(cut(by), 64), startedAt: now, endedAt: null, state: 'running', path: null, fp: '', edgeHost: '', summary: '', steps: [] };
+  // v2.826: edgeVersion = 사전 점검 때(다시 당긴) 엣지 판 · hint = 실패 뒤 화면이 달 다음 수단('upgrade' — 엣지 업그레이드 뒤 적용) · upgradeFirst = 요청 옵션
+  const job = { id: `tok_${now.toString(36)}_${crypto.randomBytes(3).toString('hex')}`, agent: name, by: capStr(cut(by), 64), startedAt: now, endedAt: null, state: 'running', path: null, fp: '', edgeHost: '', edgeVersion: '', hint: '', upgradeFirst: upgradeFirst === true, summary: '', steps: [] };
   loadJobs().unshift(job);
   if (_jobs.length > KEEP) _jobs.length = KEEP;
   _running.set(name.toLowerCase(), job.id);
   saveJobs();
-  const p = runJob(job, deps).catch((e) => finish(job, 'failed', `예상하지 못한 오류로 멈췄습니다: ${cut(e?.message || e)}`, deps))
+  const p = runJob(job, deps, { upgradeFirst: upgradeFirst === true }).catch((e) => finish(job, 'failed', `예상하지 못한 오류로 멈췄습니다: ${cut(e?.message || e)}`, deps))
     .finally(() => { _running.delete(name.toLowerCase()); });
   if (wait) return p.then(() => ({ ok: true, job: getJob(job.id) }));
   return { ok: true, job: structuredClone(job) };
@@ -132,7 +147,20 @@ function acceptedSince(deps, name, since) {
 }
 const audit = (deps, action, job, detail) => { try { if (deps.audit) deps.audit({ action, target: job.agent, detail: `작업 ${job.id}${detail ? ` · ${detail}` : ''}` }); } catch { /* 감사 실패는 작업을 멈추지 않는다 */ } };
 
-async function runJob(job, deps) {
+/** 엣지 판이 수집 토큰 통로(MIN_EDGE_API_VERSION) 이상인가 — 모르면 null(낮다고 보지 않는다). */
+export function edgeApiVersionState(ver) {
+  const c = cmpVersion(ver, MIN_EDGE_API_VERSION);
+  return c == null ? null : c >= 0;
+}
+/** 그 엣지만 즉시 pull(있으면) — 실패·없음은 조용히(이전 상태로 판단한다). */
+async function refreshEdge(deps, name) {
+  if (typeof deps.refreshStatus !== 'function') return false;
+  try { return (await deps.refreshStatus(name)) === true; } catch { return false; }
+}
+const nowOf = (deps) => (deps.now ? deps.now() : Date.now());
+const sleepOf = (deps, ms) => (deps.sleep ? deps.sleep(ms) : new Promise((ok) => setTimeout(ok, ms)));
+
+async function runJob(job, deps, { upgradeFirst = false } = {}) {
   const name = job.agent;
   /* 1 사전 점검 */
   let s = stepStart(job, 'precheck', deps);
@@ -148,8 +176,16 @@ async function runJob(job, deps) {
       : '이미 개별 토큰이 발급돼 있습니다 — 다시 발급하면 엣지가 쓰는 기존 토큰이 즉시 폐기되므로 자동 적용은 공유 토큰 엣지만 합니다.', deps);
     return finish(job, 'failed', '이미 개별 토큰이 있습니다.', deps);
   }
-  const st = deps.statusOf(col.id) || {};
-  const ver = typeof st.version === 'string' ? st.version : '';
+  // v2.826: pull 상태의 엣지 판은 마지막 주기 것이다 — 판이 낮게 보이면 그 엣지만 다시 당겨 확인한다(업그레이드 직후·오래된 상태로 잘못 안내하지 않게).
+  let st = deps.statusOf(col.id) || {};
+  let ver = typeof st.version === 'string' ? st.version : '';
+  let refreshed = false;
+  if (edgeApiVersionState(ver) !== true) {
+    refreshed = await refreshEdge(deps, name);
+    st = deps.statusOf(col.id) || {};
+    ver = typeof st.version === 'string' ? st.version : '';
+  }
+  job.edgeVersion = capStr(ver, 32);
   // 반증 F4: 엣지가 보고한 이름(AGENT_NAME — pull 응답)이 발급할 이름과 다르면 중앙은 그 토큰의 요청을 403 으로 막는다 — 발급하지 않는다.
   const reported = typeof st.agent === 'string' ? st.agent.trim() : '';
   // v2.777(사용자 요청 '엣지에서 보고하는 호스트네임을 기록해서 검증'): pull 로 받은 엣지의 호스트 이름을 작업 기록에 남기고, 토큰을 받은 장비(수집 토큰 통로 응답·SSH 접속)와 대조한다.
@@ -161,8 +197,63 @@ async function runJob(job, deps) {
   }
   const targets = (deps.deployTargets() || []).filter((t) => String(t.agentName || '').toLowerCase() === name.toLowerCase());
   const target = targets.length === 1 ? targets[0] : null;
-  const edgeNew = !!ver && (cmpVersion(ver, MIN_EDGE_API_VERSION) ?? -1) >= 0;
-  stepEnd(s, 'ok', `수집 서버 ${col.url} · 엣지 판 ${ver || '모름'}${reported ? ` · 보고 이름 ${reported}` : ''} · 보고 호스트 ${reportedHost || '모름(이름으로만 확인)'} · 배포 기록 ${targets.length ? (target ? '있음(SSH 통로 가능)' : `${targets.length}개 — 어느 것인지 몰라 SSH 통로를 쓰지 않습니다`) : '없음(SSH 통로 불가)'}`, deps);
+  let verState = edgeApiVersionState(ver);   // true 충분 · false 낮음 · null 모름
+  let edgeNew = verState === true;
+  const verText = () => `엣지 판 ${ver || '모름'}${verState === false ? `(수집 토큰 통로는 ${MIN_EDGE_API_VERSION} 이상 — 이 판에는 없습니다${refreshed ? ' · 방금 다시 당겨 확인' : ''})` : verState === null ? '(판을 몰라 통로를 직접 시도합니다)' : ''}`;
+  const targetText = targets.length ? (target ? '있음(SSH 통로 가능)' : `${targets.length}개 — 어느 것인지 몰라 SSH 통로를 쓰지 않습니다`) : '없음(SSH 통로 불가)';
+  const canUpgrade = typeof deps.upgradeEdge === 'function';
+  // 판이 낮고 SSH 통로도 없고 업그레이드도 고르지 않았으면 토큰을 전달할 길이 없다 — 발급하지 않는다(발급→취소 공회전·기록 오염 없음).
+  if (verState === false && !target && !upgradeFirst) {
+    job.hint = canUpgrade ? 'upgrade' : '';
+    stepEnd(s, 'bad', `수집 서버 ${col.url} · ${verText()}${reported ? ` · 보고 이름 ${reported}` : ''} · 보고 호스트 ${reportedHost || '모름'} · 배포 기록 ${targetText} — 토큰을 전달할 통로가 없어 발급하지 않았습니다.`, deps);
+    return finish(job, 'failed', `엣지 판 ${ver} 에는 수집 토큰 통로(${MIN_EDGE_API_VERSION} 이상)가 없고 배포 기록(SSH 계정)도 없어 토큰을 전달할 수 없습니다(발급하지 않음). `
+      + (canUpgrade ? `'엣지 업그레이드 뒤 자동 적용' 으로 엣지를 중앙 판으로 올린 뒤 적용하거나(엣지 포탈이 재시작됩니다), ` : '엣지를 먼저 업그레이드하거나(설정 › 수집 서버 › 업그레이드), ')
+      + '설정 › 수집 서버 › 원격 법인(DC)에 Edge 노드 포탈 설치에 이 엣지를 등록해 SSH 통로를 여세요.', deps);
+  }
+  stepEnd(s, 'ok', `수집 서버 ${col.url} · ${verText()}${reported ? ` · 보고 이름 ${reported}` : ''} · 보고 호스트 ${reportedHost || '모름(이름으로만 확인)'} · 배포 기록 ${targetText}`, deps);
+
+  /* 0 엣지 업그레이드(옵션 — 판이 낮을 때만) */
+  if (upgradeFirst) {
+    s = stepStart(job, 'upgrade', deps);
+    if (verState === true) stepEnd(s, 'skip', `엣지 판 ${ver} 은 이미 ${MIN_EDGE_API_VERSION} 이상입니다 — 업그레이드하지 않습니다.`, deps);
+    else if (verState === null) stepEnd(s, 'warn', '엣지 판을 몰라(pull 상태 없음) 업그레이드하지 않고 전달을 시도합니다 — 판이 낮으면 아래 단계가 그 사실을 말합니다.', deps);
+    else if (!canUpgrade) { stepEnd(s, 'bad', '이 중앙에는 엣지 업그레이드 push 가 연결돼 있지 않습니다.', deps); return finish(job, 'failed', '엣지 업그레이드를 할 수 없습니다(발급하지 않음).', deps); }
+    else {
+      const sub = [];
+      let up = null;
+      try { up = await deps.upgradeEdge(col); } catch (e) { up = { ok: false, reason: cut(e) }; }
+      if (!up || !up.ok) {
+        stepEnd(s, 'bad', `번들 push 실패: ${up?.reason || '사유 미상'}`, deps);
+        audit(deps, '엣지 개별 central 토큰 자동 적용 실패', job, '엣지 업그레이드 push 실패');
+        return finish(job, 'failed', `엣지 업그레이드 번들을 보내지 못했습니다(${up?.reason || '사유 미상'}) — 토큰은 발급하지 않았습니다. 설정 › 수집 서버 › 업그레이드에서 번들·수집 토큰을 확인하세요.`, deps);
+      }
+      sub.push(`✓ 번들 v${up.version || '?'} 전달 — 엣지가 설치·재시작합니다`);
+      audit(deps, '엣지 업그레이드 push(개별 토큰 자동 적용)', job, `v${up.version || '?'}`);
+      // 엣지가 새 판으로 다시 올라올 때까지(그 엣지만 즉시 pull + 주기 pull 반영) — 상한 UPGRADE_WAIT_MS
+      const deadline = nowOf(deps) + (deps.upgradeWaitMs ?? UPGRADE_WAIT_MS);
+      let polls = 0;
+      for (;;) {
+        await sleepOf(deps, deps.upgradePollMs ?? UPGRADE_POLL_MS);
+        polls += 1;
+        await refreshEdge(deps, name);
+        st = deps.statusOf(col.id) || {};
+        ver = typeof st.version === 'string' ? st.version : '';
+        verState = edgeApiVersionState(ver);
+        const reached = verState === true && (!up.version || (cmpVersion(ver, up.version) ?? 1) >= 0);
+        if (reached || nowOf(deps) >= deadline) break;
+      }
+      job.edgeVersion = capStr(ver, 32);
+      edgeNew = verState === true;
+      if (!edgeNew) {
+        stepEnd(s, 'bad', `${sub.join(' / ')} / ✗ ${Math.round((deps.upgradeWaitMs ?? UPGRADE_WAIT_MS) / 1000)}초 안에 엣지가 새 판으로 올라오지 않았습니다(지금 보이는 판 ${ver || '모름'} · 확인 ${polls}회)`, deps);
+        audit(deps, '엣지 개별 central 토큰 자동 적용 실패', job, '업그레이드 뒤 엣지 판 미확인');
+        return finish(job, 'failed', `엣지에 업그레이드 번들을 보냈지만 새 판(${MIN_EDGE_API_VERSION} 이상)으로 올라온 것을 확인하지 못했습니다(지금 ${ver || '모름'}) — 토큰은 발급하지 않았습니다. 엣지 포탈이 다시 떴는지 확인한 뒤 자동 적용을 다시 실행하세요.`, deps);
+      }
+      // 업그레이드로 엣지가 보고하는 호스트 이름이 생겼을 수 있다 — 대조 기준을 새 상태로
+      if (!reportedHost && typeof st.hostname === 'string' && st.hostname.trim()) job.edgeHost = capStr(st.hostname.trim(), 128);
+      stepEnd(s, 'ok', `${sub.join(' / ')} / ✓ 엣지 판 ${ver} 확인(${polls}회 당김)`, deps);
+    }
+  }
 
   /* 2 발급 */
   s = stepStart(job, 'issue', deps);
@@ -193,9 +284,12 @@ async function runJob(job, deps) {
   };
   const fail = (summary) => { audit(deps, '엣지 개별 central 토큰 자동 적용 실패', job, summary); return finish(job, 'failed', summary, deps); };
 
-  /* 3 수집 토큰 통로 */
+  /* 3 수집 토큰 통로 — 판이 낮은 것이 확인됐으면(다시 당겨서) 보내지 않는다: 옛 판은 이 주소가 로그인 인증으로 떨어져 401 이고 아무것도 받지 않는다 */
   s = stepStart(job, 'edge-api', deps);
-  const r = await deps.pushEdge(col, token);
+  const hostOf = job.edgeHost || reportedHost;
+  const r = verState === false
+    ? { ok: false, status: null, body: null, skipped: true }
+    : await deps.pushEdge(col, token);
   const b = r.body && typeof r.body === 'object' ? r.body : null;
   // v2.781(점검 G2 A-B1 이중 방어): 엣지의 확정 답 '바뀐 것 없음'(applied:false — 파일·메모리 모두 그대로, centralTokenApply.js) — 이후 SSH 도 쓰지 않았으면 회수는 확정이다.
   const edgeUnchanged = !!(b && b.applied === false);
@@ -203,12 +297,15 @@ async function runJob(job, deps) {
   if (b && b.applied === false) acceptFrom = (deps.now ? deps.now() : Date.now()) + 1;
   const pd = b ? (b.steps || []).map((x) => `${x.ok ? '✓' : '✗'} ${x.detail}`).join(' / ') : '';
   let applied = false; let viaSsh = false; let sshReason = ''; let hostWarn = false;
-  if (r.ok && b && b.applied === true) {
+  if (r.skipped) {
+    sshReason = `엣지 판 ${ver} 에는 수집 토큰 통로가 없습니다(${MIN_EDGE_API_VERSION} 이상 필요)`;
+    stepEnd(s, 'skip', `${sshReason} — 보내지 않고 SSH 통로로 갑니다`, deps);
+  } else if (r.ok && b && b.applied === true) {
     applied = true; job.path = 'edge-api';
     // 엣지 이름은 엣지의 중앙 확인이 이미 맞췄다(다르면 applied:false). 호스트 이름이 보고값과 다르면 같은 이름을 쓰는 다른 장비일 수 있다 — 알린다(되돌리지는 않는다).
-    const hostSame = sameHostName(b.hostname, reportedHost);
+    const hostSame = sameHostName(b.hostname, hostOf);
     if (hostSame === false) hostWarn = true;
-    if (hostSame === false) stepEnd(s, 'warn', `엣지 적용·확인 성공 — 그러나 토큰을 받은 장비의 호스트 이름 '${b.hostname}' 이 이 엣지가 보고한 '${reportedHost}' 과 다릅니다. 같은 엣지 이름(AGENT_NAME)을 쓰는 다른 장비일 수 있으니 수집 서버 주소·포워딩을 확인하세요 — ${pd}`, deps);
+    if (hostSame === false) stepEnd(s, 'warn', `엣지 적용·확인 성공 — 그러나 토큰을 받은 장비의 호스트 이름 '${b.hostname}' 이 이 엣지가 보고한 '${hostOf}' 과 다릅니다. 같은 엣지 이름(AGENT_NAME)을 쓰는 다른 장비일 수 있으니 수집 서버 주소·포워딩을 확인하세요 — ${pd}`, deps);
     else stepEnd(s, 'ok', `엣지 적용·확인 성공 · 받은 장비 호스트 ${b.hostname || '모름'}${hostSame ? '(보고값과 같음)' : ''} — ${pd}`, deps);
   } else if (b && b.applied === false && b.reason === 'probe-failed') {
     // 확정 답: 엣지는 아무것도 바꾸지 않았다 — 같은 엣지→중앙 경로라 SSH 로도 같다
@@ -220,18 +317,21 @@ async function runJob(job, deps) {
     revokeIssued('엣지 사용 중', { definite: true });
     return fail('엣지에서 다른 적용이 진행 중입니다 — 잠시 뒤 다시 실행하세요.');
   } else {
-    const definite = (b && b.applied === false) || r.status === 404 || r.status === 403;
+    // v2.826: 401 = 옛 판 엣지(라우트 없음 → /api 로그인 인증) — 404 와 같이 '기능 없음' 이고 엣지는 아무것도 받지 않았다(확정).
+    const noRoute = r.status === 404 || r.status === 401;
+    const definite = (b && b.applied === false) || noRoute || r.status === 403;
     // 반증 F1: 결과를 모르는 실패(시한·끊김·중계 5xx·본문 없음)에서는 엣지 확인이 이미 받아들여졌는지 본다 — 받아들여졌으면 엣지는 기록했을 수 있다
     if (!definite && acceptedSince(deps, name, acceptFrom)) {
       applied = true; job.path = 'edge-api';
       stepEnd(s, 'warn', `엣지 응답을 받지 못했지만(${r.error || `HTTP ${r.status ?? '—'}`}) 새 토큰의 요청을 중앙이 받아들였습니다 — 적용된 것으로 보고 확인을 이어 갑니다.`, deps);
     } else {
-      sshReason = r.status === 404 ? `엣지에 이 기능이 없습니다(HTTP 404 — 판 ${ver || '모름'}, ${MIN_EDGE_API_VERSION} 이상 필요)`
+      sshReason = noRoute ? `엣지에 이 기능이 없습니다(HTTP ${r.status}${r.status === 401 ? ' — 옛 판 엣지는 이 주소가 로그인 인증으로 떨어집니다' : ''} · 판 ${ver || '모름'}, ${MIN_EDGE_API_VERSION} 이상 필요)`
         : r.status === 403 ? '수집 토큰이 맞지 않습니다(HTTP 403)'
           // v2.781(점검 G2 A-I1): persist-failed 는 권한 말고도 '다음 기동이 읽지 않는 env 파일'(Windows 옛 start-portal.bat)일 수 있다 — 엣지가 남긴 단계 문구를 싣는다.
           : b?.reason === 'persist-failed' ? `엣지가 portal.env 에 쓰지 못했습니다(서비스 계정 권한 등 — 바뀐 것 없음)${pd ? ` · ${pd}` : ''}`
             : r.error ? `엣지에 닿지 못했습니다: ${r.error}` : `엣지 응답 HTTP ${r.status ?? '—'}${b?.reason ? ` · ${b.reason}` : ''}`;
       stepEnd(s, 'bad', `${sshReason}${target ? ' — SSH 통로로 넘어갑니다' : ''}`, deps);
+      if (noRoute && !target && typeof deps.upgradeEdge === 'function') job.hint = 'upgrade';   // 화면이 '엣지 업그레이드 뒤 자동 적용' 을 단다
     }
   }
 
@@ -240,11 +340,12 @@ async function runJob(job, deps) {
     s = stepStart(job, 'ssh', deps);
     if (!target) {
       stepEnd(s, 'skip', targets.length ? '배포 기록이 여러 개라 어느 호스트인지 정할 수 없습니다.' : '배포 기록(SSH 계정)이 없어 SSH 로 적용할 수 없습니다 — 설정 › 수집 서버 › 원격 법인(DC)에 Edge 노드 포탈 설치에 이 엣지를 등록하세요.', deps);
-      revokeIssued('엣지에 전달하지 못함', { definite: edgeUnchanged });
-      return fail(`엣지에 전달하지 못했습니다: ${sshReason}`);
+      // 옛 판 엣지(401·404)는 아무것도 받지 않았다 — 확정 취소. 다른 실패는 예전 판정 그대로.
+      revokeIssued('엣지에 전달하지 못함', { definite: edgeUnchanged || !!r.skipped || r.status === 404 || r.status === 401 });
+      return fail(`엣지에 전달하지 못했습니다: ${sshReason}${job.hint === 'upgrade' ? " — '엣지 업그레이드 뒤 자동 적용' 으로 엣지를 중앙 판으로 올린 뒤 적용할 수 있습니다(엣지 포탈이 재시작됩니다)." : ''}`);
     }
     const sub = []; let wrote = false;
-    const sr = await deps.sshApply(target, token, { urlPort: Number(target.portalPort) || 4000, edgeNew, agent: name, expectHostname: reportedHost, onStep: (k, ok, d) => { if (k === 'write' && ok) wrote = true; sub.push(`${ok ? '✓' : '✗'} ${d}`); } });
+    const sr = await deps.sshApply(target, token, { urlPort: Number(target.portalPort) || 4000, edgeNew, agent: name, expectHostname: hostOf, onStep: (k, ok, d) => { if (k === 'write' && ok) wrote = true; sub.push(`${ok ? '✓' : '✗'} ${d}`); } });
     if (sr && sr.ok) {
       applied = true; viaSsh = true; job.path = 'ssh';
       stepEnd(s, 'ok', sub.join(' / '), deps);

@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { syncRows, syncSummary, orphanTokens, agentNameOf, SYNC_STATE } from './edgeTokenSyncText.js';
+import { syncRows, syncSummary, orphanTokens, agentNameOf, SYNC_STATE, edgeApiOk, MIN_EDGE_API_VERSION } from './edgeTokenSyncText.js';
+import { cmpVersion } from '../cmpVersion.js';
 
 const cols = [
   { id: 'c1', name: 'KR', url: 'https://kr:8443' },
@@ -63,5 +64,35 @@ describe('엣지 토큰 맞추기 — 행 판정(v2.825)', () => {
       expect(SYNC_STATE[k].text).toBeTruthy();
       expect(SYNC_STATE[k].text).not.toMatch(/`/);
     }
+  });
+});
+
+describe('v2.826 엣지 판 — 수집 토큰 통로 유무', () => {
+  it('edgeApiOk — 2.776.0 이상 true · 미만 false · 모름 null(낮다고 보지 않는다)', () => {
+    expect(MIN_EDGE_API_VERSION).toBe('2.776.0');
+    expect(edgeApiOk('2.776.0')).toBe(true);
+    expect(edgeApiOk('v2.826.0')).toBe(true);
+    expect(edgeApiOk('2.775.0')).toBe(false);
+    expect(edgeApiOk('')).toBe(null);
+    expect(edgeApiOk(undefined)).toBe(null);
+    expect(edgeApiOk('dev')).toBe(null);
+  });
+  it('cmpVersion(웹) — 서버 util 과 같은 규칙: v 접두·짧은 세그먼트·숫자 아님 null·부호만', () => {
+    expect(cmpVersion('2.5', '2.5.0')).toBe(0);
+    expect(cmpVersion('v2.826.0', '2.775.0')).toBe(1);
+    expect(cmpVersion('2.775.0', '2.776.0')).toBe(-1);
+    expect(cmpVersion('2.x', '2.0.0')).toBe(null);
+    expect(cmpVersion('', '1')).toBe(null);
+  });
+  it('syncRows 에 pull 상태를 주면 엣지 판·통로 유무·안내가 붙고, 없으면 모름(—)', () => {
+    const cols = [{ id: 'WA', name: 'agent-WA', url: 'http://w:4000', enabled: true }, { id: 'KR', name: 'KR', url: 'http://k:4000', enabled: true }, { id: 'XX', name: 'XX', url: 'http://x:4000' }];
+    const rows = syncRows(cols, [], { WA: { version: '2.775.0' }, KR: { version: '2.826.0' } });
+    const wa = rows.find((r) => r.agent === 'agent-WA'); const kr = rows.find((r) => r.agent === 'KR'); const xx = rows.find((r) => r.agent === 'XX');
+    expect(wa.edgeVersion).toBe('2.775.0'); expect(wa.apiOk).toBe(false); expect(wa.versionHint).toContain('2.776.0'); expect(wa.versionHint).toContain('엣지 업그레이드 뒤 자동 적용');
+    expect(wa.canApply).toBe(true);   // 자동 적용 칸은 연다 — 서버 작업이 통로 유무를 판정하고 다음 수단을 안내한다
+    expect(kr.apiOk).toBe(true); expect(kr.versionHint).toBe('');
+    expect(xx.edgeVersion).toBe(''); expect(xx.apiOk).toBe(null); expect(xx.versionHint).toContain('모릅니다');
+    expect(syncRows(cols, []).every((r) => r.apiOk === null)).toBe(true);   // status 생략(옛 호출) — 모름
+    for (const r of rows) expect(r.versionHint).not.toContain('`');
   });
 });

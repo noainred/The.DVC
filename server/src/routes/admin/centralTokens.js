@@ -80,9 +80,11 @@ adminRouter.post('/central/agent-tokens', adminOnly, fleetOnly, requireSettingsO
 adminRouter.post('/central/agent-tokens/:agent/apply', adminOnly, fleetOnly, requireSettingsOwner, (req, res) => {
   // 반증 F8: 작업 중 발급·회수·결과도 감사 로그에 남긴다(실행자·IP 를 붙여서)
   const auditFn = ({ action, target, detail }) => logAudit({ user: req.user?.username, action, target, detail, ip: req.ip || '' });
-  const r = startTokenApply(req.params.agent, { by: req.user?.username || '', deps: realTokenApplyDeps(auditFn) });
+  // v2.826: upgradeFirst — 엣지 판이 2.776.0 미만이면 중앙 번들을 먼저 push 하고(엣지 재시작) 새 판을 확인한 뒤 발급한다. 불리언 true 만 인정.
+  const upgradeFirst = req.body?.upgradeFirst === true;
+  const r = startTokenApply(req.params.agent, { by: req.user?.username || '', deps: realTokenApplyDeps(auditFn), upgradeFirst });
   if (!r.ok) return res.status(r.jobId ? 409 : 400).json(r);
-  logAudit({ user: req.user?.username, action: '엣지 개별 central 토큰 자동 적용 시작', target: r.job.agent, detail: `작업 ${r.job.id}`, ip: req.ip || '' });
+  logAudit({ user: req.user?.username, action: '엣지 개별 central 토큰 자동 적용 시작', target: r.job.agent, detail: `작업 ${r.job.id}${upgradeFirst ? ' · 엣지 업그레이드 뒤' : ''}`, ip: req.ip || '' });
   res.status(202).json(r);
 });
 adminRouter.get('/central/token-apply/jobs', adminOnly, fleetOnly, (req, res) => {

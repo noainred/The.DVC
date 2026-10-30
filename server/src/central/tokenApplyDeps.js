@@ -12,6 +12,10 @@ import { readJsonCapped } from '../util/readCapped.js';
 import { recordOutbound } from '../util/outboundStats.js';
 import { pullStats } from './pullStats.js';
 import { capStr } from '../util/capStr.js';
+import { pullCollectorByAgent } from '../collector/puller.js';   // v2.826: 사전 점검이 엣지 판을 다시 당긴다
+import { pushUpgradeToCollectors } from '../collector/upgradePush.js';   // v2.826: '엣지 업그레이드 뒤 적용'
+import { resolveBundleBytes, lastBundleReject } from '../upgrade/bundleSource.js';
+import { upgradeManager } from '../upgrade/manager.js';
 
 const PUSH_TIMEOUT_MS = 45_000;   // 엣지는 기록 뒤 중앙 확인(최대 15초)까지 하고 답한다
 const RESP_MAX = 64 * 1024;
@@ -52,6 +56,22 @@ export function sanitizeEdgeReply(b) {
   return { ok: b.ok === true, ...(typeof b.applied === 'boolean' ? { applied: b.applied } : {}), reason: s(b.reason, 64), version: s(b.version, 32), hostname: s(b.hostname, 128), steps, probe: pr };
 }
 
+/**
+ * v2.826: 중앙 번들을 그 엣지 하나에 push(설정 › 수집 서버 › 업그레이드의 단일 push 와 같은 경로 — 서명 manifest 포함). 던지지 않는다.
+ * @returns {Promise<{ok:boolean, version:string|null, reason?:string}>}
+ */
+export async function upgradeEdgeNow(c, { resolve = resolveBundleBytes, push = pushUpgradeToCollectors, settings = () => upgradeManager.settings } = {}) {
+  let bundle = null;
+  try { bundle = await resolve(settings()); } catch (e) { return { ok: false, version: null, reason: capStr(e instanceof Error ? e.message : `${e}`, 300) }; }
+  if (!bundle) return { ok: false, version: null, reason: lastBundleReject() || '업그레이드 번들을 찾을 수 없습니다(감시 폴더/원격 소스 확인).' };
+  try {
+    const results = await push(bundle.bytes, { ids: [c.id], manifest: bundle.manifest || null });
+    const r = Array.isArray(results) ? results.find((x) => x && x.id === c.id) || results[0] : null;
+    if (!r) return { ok: false, version: bundle.version || null, reason: '이 수집 서버는 push 대상이 아닙니다(꺼져 있거나 URL 없음).' };
+    return { ok: r.ok === true, version: bundle.version || null, reason: r.ok ? '' : capStr(String(r.reason || '푸시 실패'), 300) };
+  } catch (e) { return { ok: false, version: bundle.version || null, reason: capStr(e instanceof Error ? e.message : `${e}`, 300) }; }
+}
+
 /** @param {(o:{action:string,target:string,detail:string})=>void} [audit] 라우트가 실행자를 붙여 넘긴다 */
 export function realTokenApplyDeps(audit) {
   return {
@@ -60,6 +80,8 @@ export function realTokenApplyDeps(audit) {
     pushEdge: (c, token) => pushTokenToEdge(c, token),
     sshApply: forceAgentCentralToken,
     pullStats,   // 반증 F4: '받아들인 요청' 확인
+    refreshStatus: (name) => pullCollectorByAgent(name),   // v2.826: 엣지 판 다시 확인(그 엣지만 즉시 pull)
+    upgradeEdge: (c) => upgradeEdgeNow(c),                 // v2.826: 옵션 '엣지 업그레이드 뒤 적용'
     ...(audit ? { audit } : {}),
   };
 }
