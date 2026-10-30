@@ -33,7 +33,7 @@ export const LATE_KEEP_MS = 15 * 60_000;
  * autoSetup 을 import 하지 않는다(service ↔ autoSetup 순환 — 모듈 평가 순서). 값의 관계는 테스트가 대조한다.
  */
 export const RESULT_MS = Object.freeze({
-  probe: 120_000, catalog: 150_000, addJobs: 330_000, disableJobs: 150_000, runJob: 120_000, setEnabled: 120_000, history: 150_000,
+  probe: 120_000, catalog: 150_000, addJobs: 330_000, disableJobs: 150_000, runJob: 120_000, runJobs: 330_000, setEnabled: 120_000, history: 150_000,
   cancel: 120_000, log: 150_000, restore: 210_000, poll: 180_000,
   // 자동 설정: 엣지는 ttl(= 이 값 − MARGIN_MS) 이 지나면 SSH 를 끊고 되돌린다(v2.824 검토 P3 — 시한 신호가 닿지 않아 중앙이 손을 뗀 뒤에도 root 쓰기를 계속했다).
   //   인출 대기(최대 SECRET_TTL_MS) + 이 값 ≤ 포탈 요청 시한(SERVER_REQUEST_TIMEOUT_MS 기본 600초) — 테스트가 대조한다.

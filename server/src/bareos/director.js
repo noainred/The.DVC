@@ -116,10 +116,16 @@ export function jobIdOf(result) {
   return id;
 }
 
-/** 지금 실행 — `run job=… level=… yes`. @returns jobid */
-export async function runJob(session, { job, level }) {
+/**
+ * 지금 실행 — `run job=… level=… [storage=… pool=…] yes`. @returns jobid
+ * v2.830 백업 그룹: storage·pool 은 **그 실행에만** 쓰는 지정이다(Bareos run 의 storage=·pool= — 잡 정의는 바뀌지 않는다). 비면 잡 기본값.
+ */
+export async function runJob(session, { job, level, storage = '', pool = '' }) {
   if (!isResourceName(job)) throw bad('잡 이름이 올바르지 않습니다.');
-  return jobIdOf(await session.call(`run job=${job} level=${normLevel(level, 'Incremental')} yes`));
+  if (storage && !isResourceName(storage)) throw bad('스토리지 이름이 올바르지 않습니다.');
+  if (pool && !isResourceName(pool)) throw bad('풀 이름이 올바르지 않습니다.');
+  const extra = `${storage ? ` storage=${storage}` : ''}${pool ? ` pool=${pool}` : ''}`;
+  return jobIdOf(await session.call(`run job=${job} level=${normLevel(level, 'Incremental')}${extra} yes`));
 }
 
 const asId = (v) => { const n = Number(v); if (!Number.isInteger(n) || n <= 0 || n > 2 ** 31) throw bad('jobid 가 올바르지 않습니다.'); return n; };

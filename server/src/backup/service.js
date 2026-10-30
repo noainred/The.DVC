@@ -94,6 +94,8 @@ export function isRuntimeStateFile(name) {
 export const MIXED_STATE_FILES = new Set(['capture-monitors.json', 'os-scan.json', 'guest-scans.json', 'vm-clone.json',
   // v2.820: Bareos 백업 대상 원장 — 폴러가 실행 결과(lastRun·pending·복원 상태)를 쓴다.
   'bareos-jobs.json',
+  // v2.830: Bareos 백업 그룹 원장 — 예약 틱이 회차마다 lastKey·sending 을, 실행마다 lastFire 를, 놓친 회차에 missed 를 쓴다.
+  'bareos-groups.json',
   // v2.596(감사 R2596-03 — 재현): 엣지 pull 마다 lastUsedAt(엣지당 60초) · 연동 키 useCount · 일일 보고 lastRunTs 를 쓴다.
   'central-agent-tokens.json', 'api-keys.json', 'daily-report.json',
   // v2.601(감사 LO2601-03 — 재현): iDRAC 대역 스캔 폴러가 엔트리마다 lastRun 을, 원격 접속 게이트웨이가 매 접속마다 매핑의
@@ -132,6 +134,13 @@ export const MIXED_EXTRA_RUN_FIELDS = new Map([
     if (!obj || typeof obj !== 'object' || !Array.isArray(obj.jobs)) return obj;
     const BAREOS_RUN = new Set(['pending', 'restores', 'missingInDirector', 'finishedRuns']);
     return { ...obj, jobs: obj.jobs.map((j) => (j && typeof j === 'object' ? Object.fromEntries(Object.entries(j).filter(([k]) => !BAREOS_RUN.has(k))) : j)) };
+  }],
+  // v2.830: 백업 그룹의 실행 상태 — 보내는 중 표지(sending)·놓친 회차(missed). lastKey·lastFire 는 last* 규칙이 뺀다.
+  //   그룹 정의(이름·VM·스케줄·스토리지·anchorAt·고친 사람)만 남긴다 — 예약 회차마다 change 백업이 생기지 않게.
+  ['bareos-groups.json', (obj) => {
+    if (!obj || typeof obj !== 'object' || !Array.isArray(obj.groups)) return obj;
+    const GROUP_RUN = new Set(['sending', 'missed']);
+    return { ...obj, groups: obj.groups.map((g) => (g && typeof g === 'object' ? Object.fromEntries(Object.entries(g).filter(([k]) => !GROUP_RUN.has(k))) : g)) };
   }],
 ]);
 function stripRunFields(v) {
