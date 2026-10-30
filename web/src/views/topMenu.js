@@ -63,6 +63,8 @@ export const MENU_GROUPS = Object.freeze([
   { id: 'settings', label: '설정', children: [
     { id: 'settings', label: '설정', tab: 'settings' },
     { id: 'upgrade', label: '업그레이드', tab: 'upgrade' },
+    // v2.827(사용자 요청 "토큰 맞추는 독립적인 메뉴 · 공통 메뉴로"): 설정 › 수집 서버 하위 탭에 묻혀 있던 엣지 토큰 맞추기를 메뉴 항목으로(도구 edge-tokens — 관리자 전용 도구라 toolOk 가 거른다).
+    { id: 'edge-tokens', label: '엣지 토큰 맞추기', tool: 'edge-tokens' },
   ] },
 ]);
 

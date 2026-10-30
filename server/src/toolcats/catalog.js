@@ -86,7 +86,7 @@ export const PRESET = Object.freeze([
   {
     id: 'ops', label: '운영 작업', icon: '🛠️',
     tools: ['rma', 'vmprovision', 'vm-clone', 'backup-run', 'bareos-backup', 'agent-scans', 'shutdown', 'credentials',
-      'diskadd', 'backup', 'massdeploy', 'service-hub', 'mail-diag', 'edge-log'],
+      'diskadd', 'backup', 'massdeploy', 'service-hub', 'mail-diag', 'edge-log', 'edge-tokens'],
   },
 ]);
 

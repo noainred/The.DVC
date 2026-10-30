@@ -345,6 +345,7 @@ export const TOOL_ENFORCEMENT_NOTES = Object.freeze({
   // aisearch·explore 는 v2.506 검증에서 **게이트가 없는 것으로 확인**되어 TOOL_EXACT_PATHS 로
   // 실제 집행 대상이 됐다(위 표 주석) — 여기에 사유를 남기지 않는다(남기면 거짓 선언이 된다).
   'codex-check': [ENFORCE_OTHER_ROUTER, '/api/admin/codex-check(adminOnly)'],
+  'edge-tokens': [ENFORCE_OTHER_ROUTER, '/api/admin/collectors · /api/admin/central/agent-tokens* · /api/admin/central/token-apply/*(adminOnly·fleetOnly · 적용·회수는 requireSettingsOwner) — v2.827 설정 하위 탭에서 독립 도구로'],
   // ⚠ v2.506 검증 정정: 예전 사유는 '/api/datastores(inv.datastores)' 였는데 `inv:datastores` 는
   //   memoJson **캐시 이름**이고(routes/api/inventory.js:305) 그 라우트에는 requirePerm 이 없다.
   //   데이터 scope(applyFilters+scopeKey)만 걸린다. 게다가 대시보드·콘솔·V3 가 같이 쓰는 공용
