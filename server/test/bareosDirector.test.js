@@ -2,7 +2,7 @@
  * test/bareosDirector.test.js — src/bareos/director.js 가 Director 에 **보내는 명령 문자열**과 응답 해석을 가짜 Director 로 고정한다.
  *  - configure add job: FdPluginOptions 는 값에 따옴표를 남긴다(ALIST_STR) · 자격증명 없음 · 이미 있으면 exists
  *  - run → jobid · llist → 정규화(못 읽은 수치는 null) · joblog 상한(뒤쪽 보존) · .bvfs_get_jobids 여러 모양
- *  - restore 는 jobid 목록 + select all done yes(‘select current’ 없음 — 범용 FileSet 공유)
+ *  - restore 는 jobid 목록 + all done yes(‘select’ 없음 — Bareos 는 select 가 있으면 jobid 를 무시하고 FileSet 을 묻는다 · v2.827.1)
  *  - catalogLists: 하나가 실패해도 나머지 · 실패한 것은 null + errors(빈 목록으로 꾸미지 않는다)
  */
 import { test, after } from 'node:test';
@@ -83,12 +83,14 @@ test('.bvfs_get_jobids: 배열·{jobids:[…]}·쉼표 문자열 모양 모두 �
   assert.equal((await withFake(() => ({ nothing: true }), (s) => restoreChain(s, 1234))).r, null);
 });
 
-test('restore: jobid 목록 + restorejob + pluginoptions + select all done yes', async () => {
+test('restore: jobid 목록 + restorejob + pluginoptions + all done yes(select 없음)', async () => {
   const { r, log } = await withFake(() => ({ run: { jobid: 1300 } }),
     (s) => runRestore(s, { client: 'kr-fd', jobids: [1198, 1234], restoreJob: 'PortalVmwareRestore', pluginOptions: 'python3:restore_powerstate=off:vmname=web r' }));
   assert.equal(r, 1300);
-  assert.equal(log[0], 'restore client=kr-fd restoreclient=kr-fd jobid=1198,1234 restorejob=PortalVmwareRestore pluginoptions="python3:restore_powerstate=off:vmname=web r" select all done yes');
+  assert.equal(log[0], 'restore client=kr-fd restoreclient=kr-fd jobid=1198,1234 restorejob=PortalVmwareRestore pluginoptions="python3:restore_powerstate=off:vmname=web r" all done yes');
   assert.doesNotMatch(log[0], /current/);
+  // v2.827.1 실환경 재현: select 가 있으면 Bareos 22~25 가 jobid 를 무시하고 FileSet 을 물어 'No FileSet found for client' 로 거부한다
+  assert.doesNotMatch(log[0].replace(/pluginoptions="[^"]*"/, ''), /\bselect\b/);
   await assert.rejects(withFake(() => null, (s) => runRestore(s, { client: 'kr-fd', jobids: [], restoreJob: 'R', pluginOptions: 'python3:x=1' })), (e) => e.code === 'invalid');
 });
 

@@ -908,7 +908,7 @@ api.get('/tools/bareos-backup/jobs/:id/restore-points', adminOnly, async (req, r
 /**
  * 복원 — body { jobid, mode:'original'|'newVm'|'localVmdk', newVm?:{name,datastore?,cluster?,esxHost?}, confirmName?, otp }.
  * 범위(404→403) → 복원 판정(restore.js) → 본인 OTP → (그 잡의 Director 에서) jobid 가 이 대상의 성공 백업인지 → 체인(이 잡의 이력으로만 — S1)
- * → restore … select all done yes. 원래 vCenter 로만(플러그인 제약).
+ * → restore … jobid=… all done yes(`select` 금지 — director.js runRestore). 원래 vCenter 로만(플러그인 제약).
  */
 api.post('/tools/bareos-backup/jobs/:id/restore', adminOnly, async (req, res) => {
   const found = jobFor(req, res); if (!found) return;
