@@ -189,7 +189,7 @@ function TargetsTab({ d, reload }) {
         스케줄은 Bareos 가 돌립니다(포탈이 꺼져 있어도 백업은 계속됩니다). 레벨·스케줄을 바꾸려면 대상을 지우고 다시 등록하세요 — Bareos 에는 잡 수정 명령이 없습니다.
         활성 대상 VM 은 vCenter 상세(서버 › vCenter)의 VM 행에 <span className="badge blue" style={{ fontSize: 10 }}>Bareos</span> 배지로 표시됩니다.
       </div>
-      {logOf && <LogModal job={logOf.job} jobid={logOf.jobid} view={logOf.view} onClose={() => setLogOf(null)} />}
+      {logOf && <LogModal job={logOf.job} jobid={logOf.jobid} view={logOf.view} onClose={() => setLogOf(null)} onStateChanged={reload} />}
       {restoreOf && <RestoreModal job={restoreOf} onClose={() => setRestoreOf(null)} onDone={(t) => { setRestoreOf(null); setMsg({ ok: true, text: t }); reload(); }} />}
     </div>
   );
@@ -331,11 +331,18 @@ function AddForm({ d, onClose, onChanged }) {
  * 작업 결과·로그 — 서버가 이 대상의 jobid 인지 확인한다. 요약은 같은 로그의 끝 보고 블록을 읽는다(bareosText.parseJobReport —
  * 서버 호출을 늘리지 않는다). 요약을 못 만들면(실행 중·보고 없음) 그렇다고 말하고 원문을 보게 한다.
  */
-function LogModal({ job, jobid, view = 'raw', onClose }) {
+function LogModal({ job, jobid, view = 'raw', onClose, onStateChanged }) {
   const [r, setR] = useState(null);
   const [err, setErr] = useState(null);
   const [mode, setMode] = useState(view === 'summary' ? 'summary' : 'raw');
-  useEffect(() => { fetchJson(`${BASE}/jobs/${enc(job.id)}/log`, { jobid }, undefined, DIRECTOR_GET).then(setR).catch(setErr); }, [job.id, jobid]);
+  // v2.822.5: 서버가 로그를 주면서 그 실행의 상태를 원장에 반영한다(stateChanged) — 바뀌었으면 목록을 바로 다시 읽는다(폴러 주기를 기다리지 않게).
+  const changedRef = useRef(onStateChanged);
+  changedRef.current = onStateChanged;
+  useEffect(() => {
+    fetchJson(`${BASE}/jobs/${enc(job.id)}/log`, { jobid }, undefined, DIRECTOR_GET)
+      .then((x) => { setR(x); if (x?.stateChanged) changedRef.current?.(); })
+      .catch(setErr);
+  }, [job.id, jobid]);
   const rep = useMemo(() => (r ? parseJobReport(r.lines) : null), [r]);
   return (
     <Modal title={`${mode === 'summary' ? '작업 결과' : '작업 로그'} — jobid ${jobid} · ${job.vmName}`} onClose={onClose} width={920}>
@@ -344,6 +351,7 @@ function LogModal({ job, jobid, view = 'raw', onClose }) {
           <button key={k} type="button" className={`tab${mode === k ? ' active' : ''}`} onClick={() => setMode(k)}>{l}</button>
         ))}
         {r && <span className="muted" style={{ fontSize: 12 }}>{r.truncated ? `전체 ${r.total}줄 중 마지막 ${r.lines.length}줄` : `${r.total}줄`}</span>}
+        {r?.stateChanged && <span className="badge blue" style={{ fontSize: 11 }}>목록 상태를 갱신했습니다</span>}
       </div>
       {err && <ErrorBox error={err} />}
       {!r && !err && <Loading />}

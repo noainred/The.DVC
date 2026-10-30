@@ -13,7 +13,7 @@ import {
   publicSettings, saveSettings, settingsLoadError, directorConn, directorCred, loadSettings, LIMITS,
 } from '../../bareos/settings.js';
 import {
-  listJobs, getJob, patchJob, deleteJob, markPending, addRestore, registryLoadError, jobVmIds, MAX_JOBS, restoreOpen, clearPending, applyRunRow,
+  listJobs, getJob, patchJob, deleteJob, markPending, addRestore, registryLoadError, jobVmIds, MAX_JOBS, restoreOpen, clearPending, applyRunRow, applyRestoreRow,
 } from '../../bareos/registry.js';
 import {
   probe, parseBanner, catalogLists, runJob, cancelJob, setJobEnabled, jobHistory, jobRuns, jobLog, jobStatus, runRestore,
@@ -549,14 +549,32 @@ api.get('/tools/bareos-backup/jobs/:id/log', adminOnly, async (req, res) => {
   if (!Number.isInteger(jobid) || jobid <= 0) return res.status(400).json({ ok: false, reason: 'jobid 가 올바르지 않습니다.' });
   const isRestore = (job.restores || []).some((r) => r.jobid === jobid);
   try {
-    const out = await readDirector({ demoOnly: isDemoGuest(req.user) }, async (s) => {
+    const { log, row } = await readDirector({ demoOnly: isDemoGuest(req.user) }, async (s) => {
+      let st = null;
       if (!isRestore) {
-        const row = await jobStatus(s, jobid);
-        if (!row || row.name !== job.bareosJob) { const e = new Error('이 대상의 실행이 아닙니다.'); e.code = 'invalid'; throw e; }
+        st = await jobStatus(s, jobid);
+        if (!st || st.name !== job.bareosJob) { const e = new Error('이 대상의 실행이 아닙니다.'); e.code = 'invalid'; throw e; }
+      } else {
+        // 복원 상태는 참고용 — 못 읽어도 로그는 보여 준다(한 건의 명령 거부가 로그 열기를 막지 않게)
+        try { st = await jobStatus(s, jobid); } catch (e) { if (e?.code !== 'jsonrpc') throw e; }
       }
-      return jobLog(s, jobid);
+      return { log: await jobLog(s, jobid), row: st };
     });
-    res.json({ ok: true, jobid, ...out });
+    // v2.822.5: 로그를 연 김에 그 실행의 상태를 원장에 반영한다 — 폴러 주기(기본 60초)를 기다리지 않게(사용자 보고 '완료됐는데 실행 중').
+    //   Director 호출은 늘지 않는다(위 jobStatus 는 원래 하던 이 대상 확인). 폴러와 같은 규칙만: 백업은 이 잡 이름의 백업 행(type B)만,
+    //   복원은 복원 행(type R)만(W15 — jobid 재사용으로 남의 행을 반영하지 않게). 반영 결과가 바뀌었으면 stateChanged 로 알린다(화면이 목록을 다시 읽는다).
+    let stateChanged = false;
+    if (row) {
+      // 확인 시각(checkedAt)은 매번 바뀌므로 비교에서 뺀다 — 화면에 보이는 값(추적 중·최근 실행·복원 상태)만
+      const sig = (j) => JSON.stringify([j?.pending?.jobid ?? null, j?.pending?.status ?? null,
+        ...['jobid', 'status', 'bytes', 'files', 'endedAt'].map((k) => j?.lastRun?.[k] ?? null),
+        (j?.restores || []).map((x) => [x.jobid, x.status, x.endedAt ?? null])]);
+      const before = sig(getJob(job.id));
+      if (!isRestore && row.name === job.bareosJob && (!row.type || row.type === 'B')) applyRunRow(job.id, row);
+      else if (isRestore && (!row.type || row.type === 'R')) applyRestoreRow(job.id, row);
+      stateChanged = sig(getJob(job.id)) !== before;
+    }
+    res.json({ ok: true, jobid, ...log, ...(row ? { state: row.state ?? null, status: row.status ?? null } : {}), stateChanged });
   } catch (e) { sendErr(res, e); }
 });
 

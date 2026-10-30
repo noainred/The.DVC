@@ -804,7 +804,7 @@ Prometheus/OTel 익스포터(선택 토큰).
 | GET | `/tools/backup-summary` | 권한 `tools` | [server/src/routes/api/veeam.js:844](../server/src/routes/api/veeam.js#L844) |
 | GET | `/tools/backup-summary.csv` | 권한 `data.csv`, `tools` | [server/src/routes/api/veeam.js:945](../server/src/routes/api/veeam.js#L945) |
 | GET | `/tools/bareos-backup` | 역할 `admin` | [server/src/routes/api/bareosBackup.js:197](../server/src/routes/api/bareosBackup.js#L197) |
-| GET | `/tools/bareos-backup/badges` | 권한 `tools` | [server/src/routes/api/bareosBackup.js:634](../server/src/routes/api/bareosBackup.js#L634) |
+| GET | `/tools/bareos-backup/badges` | 권한 `tools` | [server/src/routes/api/bareosBackup.js:652](../server/src/routes/api/bareosBackup.js#L652) |
 | GET | `/tools/bareos-backup/catalog` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/bareosBackup.js:352](../server/src/routes/api/bareosBackup.js#L352) |
 | POST | `/tools/bareos-backup/jobs` | 역할 `admin` | [server/src/routes/api/bareosBackup.js:383](../server/src/routes/api/bareosBackup.js#L383) |
 | DELETE | `/tools/bareos-backup/jobs/:id` | 역할 `admin` | [server/src/routes/api/bareosBackup.js:511](../server/src/routes/api/bareosBackup.js#L511) |
@@ -812,11 +812,11 @@ Prometheus/OTel 익스포터(선택 토큰).
 | POST | `/tools/bareos-backup/jobs/:id/cancel` | 역할 `admin` | [server/src/routes/api/bareosBackup.js:458](../server/src/routes/api/bareosBackup.js#L458) |
 | GET | `/tools/bareos-backup/jobs/:id/history` | 역할 `admin` | [server/src/routes/api/bareosBackup.js:540](../server/src/routes/api/bareosBackup.js#L540) |
 | GET | `/tools/bareos-backup/jobs/:id/log` | 역할 `admin` | [server/src/routes/api/bareosBackup.js:546](../server/src/routes/api/bareosBackup.js#L546) |
-| POST | `/tools/bareos-backup/jobs/:id/restore` | 역할 `admin` | [server/src/routes/api/bareosBackup.js:580](../server/src/routes/api/bareosBackup.js#L580) |
-| GET | `/tools/bareos-backup/jobs/:id/restore-points` | 역할 `admin` | [server/src/routes/api/bareosBackup.js:564](../server/src/routes/api/bareosBackup.js#L564) |
+| POST | `/tools/bareos-backup/jobs/:id/restore` | 역할 `admin` | [server/src/routes/api/bareosBackup.js:598](../server/src/routes/api/bareosBackup.js#L598) |
+| GET | `/tools/bareos-backup/jobs/:id/restore-points` | 역할 `admin` | [server/src/routes/api/bareosBackup.js:582](../server/src/routes/api/bareosBackup.js#L582) |
 | POST | `/tools/bareos-backup/jobs/:id/run` | 역할 `admin` | [server/src/routes/api/bareosBackup.js:436](../server/src/routes/api/bareosBackup.js#L436) |
 | POST | `/tools/bareos-backup/jobs/bulk` | 역할 `admin` | [server/src/routes/api/bareosBackup.js:404](../server/src/routes/api/bareosBackup.js#L404) |
-| POST | `/tools/bareos-backup/poll` | 역할 `admin` | [server/src/routes/api/bareosBackup.js:626](../server/src/routes/api/bareosBackup.js#L626) |
+| POST | `/tools/bareos-backup/poll` | 역할 `admin` | [server/src/routes/api/bareosBackup.js:644](../server/src/routes/api/bareosBackup.js#L644) |
 | GET | `/tools/bareos-backup/settings` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/bareosBackup.js:225](../server/src/routes/api/bareosBackup.js#L225) |
 | PUT | `/tools/bareos-backup/settings` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/bareosBackup.js:238](../server/src/routes/api/bareosBackup.js#L238) |
 | POST | `/tools/bareos-backup/settings/auto-setup/director` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/bareosBackup.js:303](../server/src/routes/api/bareosBackup.js#L303) |
