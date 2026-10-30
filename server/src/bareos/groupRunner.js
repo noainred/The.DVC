@@ -11,7 +11,8 @@
  *   · 원장(대상·그룹)을 못 읽으면 아무것도 보내지 않는다. 주기 실행은 trigger 'timer' — 인증 정지된 Director 에는 보내지 않는다(service.sessionOn·relayToEdge).
  *   · 엣지 노드는 돌리지 않는다(그룹 원장은 중앙에 있다 — 엣지는 대행 큐로 받는다).
  */
-import { listGroups, getGroup, claimSlots, recordMisses, recordFire, markSending, groupsLoadError } from './groups.js';
+import { listGroups, getGroup, claimSlots, recordMisses, recordFire, recordPrune, markSending, groupsLoadError } from './groups.js';
+import { PRUNE_WAIT_MAX_MS } from './groupRetention.js';
 import { decideFire, CATCHUP_MS, slotKey } from './groupSchedule.js';
 import { jobDigests, markPending, patchJob, registryLoadError, inBatch } from './registry.js';
 import { onDirector, isDemoActive, effectiveSettings } from './service.js';
@@ -62,8 +63,10 @@ export function itemState(r) {
 const fail = (code, msg) => Object.assign(new Error(msg), { code });
 const _groupBusy = new Set();
 const _queued = new Map();   // 그룹 id → { since, dir } — Director 차례를 기다리는 중(v2.830 버그 점검 S4: 대기 중이 '재시작' 으로 보였다)
-/** 실행 중이거나 차례를 기다리는 중 — 화면 '실행 중' · 삭제 409 · 같은 그룹 다시 실행 409 가 같은 판정을 쓴다. */
-export const groupRunning = (id) => _groupBusy.has(id) || _queued.has(id);
+const _pruning = new Set();  // v2.831 보관 개수 정리 중(대기 포함) — 실행과 같은 줄에 서고, 그동안 그 그룹의 실행·삭제는 409
+/** 실행·정리 중이거나 차례를 기다리는 중 — 화면 '실행 중' · 삭제 409 · 같은 그룹 다시 실행 409 가 같은 판정을 쓴다. */
+export const groupRunning = (id) => _groupBusy.has(id) || _queued.has(id) || _pruning.has(id);
+export const groupPruning = (id) => _pruning.has(id);
 /**
  * Director 마다 하나의 줄(모듈 수준 — v2.830 버그 점검 S8: 틱 안에서만 차례를 지켜 다음 틱의 그룹·수동 실행이 같은 Director 에 세션을 동시에 열었다).
  * 예약·수동 실행 모두 이 줄로 들어간다. 줄 사이에 한 번 양보한다(S11 — 세션 전에 거부되는 그룹이 연달아 와도 이벤트 루프를 붙잡지 않게).
@@ -76,11 +79,12 @@ export function queueGroupRun(groupId, opts = {}) {
   const dir = g.directorId || '';
   _queued.set(groupId, { since: Date.now(), dir });
   noteGroupRunStart(groupId, g.name);   // 줄을 선 순간부터 업그레이드 자동 적용이 기다린다
+  return onDirLine(dir, () => { _queued.delete(groupId); return runGroup(groupId, opts); }).finally(() => { _queued.delete(groupId); noteGroupRunEnd(groupId); });
+}
+/** Director 줄 끝에 일 하나를 붙인다(실행·정리 공용). */
+function onDirLine(dir, fn) {
   const prev = _dirTail.get(dir) || Promise.resolve();
-  const run = prev.catch(() => {}).then(() => new Promise((r) => setImmediate(r))).then(() => {
-    _queued.delete(groupId);
-    return runGroup(groupId, opts);
-  }).finally(() => { _queued.delete(groupId); noteGroupRunEnd(groupId); });
+  const run = prev.catch(() => {}).then(() => new Promise((r) => setImmediate(r))).then(fn);
   const tail = run.catch(() => {});
   _dirTail.set(dir, tail);
   tail.then(() => { if (_dirTail.get(dir) === tail) _dirTail.delete(dir); });
@@ -201,6 +205,113 @@ export async function runGroup(groupId, { trigger = 'manual', by = '', level = n
   return fire;
 }
 
+/** 정리 한 번의 Director 호출 시한(덩어리마다) — 실행과 같은 관계(엣지 인출 대기 + 회신 시한보다 길게). */
+export const PRUNE_DEADLINE_MS = PICKUP_MS + RESULT_MS.pruneJobs + 60_000;
+
+/**
+ * v2.831 이 그룹을 지금 정리할 차례인가(순수). 보관 개수가 있고 · 마지막 실행이 무언가를 시작했고 · 그 실행으로 아직 정리하지 않았고 ·
+ * 그 실행이 시작한 백업이 모두 끝났을 때(끝나지 않은 실행은 어차피 지우지 않지만, 끝난 뒤에 세어야 '최근 N개' 에 이번 백업이 들어간다).
+ * 실행 뒤 PRUNE_WAIT_MAX_MS 가 지나면 끝나지 않은 VM 이 있어도 정리한다(사라진 실행이 정리를 영원히 막지 않게).
+ * @param {object} g 그룹 · @param {Map<string,object>} jobsByVm 원장 잡(vmId →) · @param {number} now
+ */
+export function pruneDue(g, jobsByVm, now = Date.now()) {
+  if (g.keep == null || !g.lastFire || !(g.lastFire.started > 0)) return false;
+  // 반증 F5: 그 실행으로 이미 정리했으면 다시 하지 않는다 — 보관 개수를 바꾸기만 해서는 돌지 않는다(다음 그룹 실행이 끝난 뒤 · 화면 안내와 같게)
+  if (g.lastPrune && g.lastPrune.fireAt === g.lastFire.at) return false;
+  if (now - g.lastFire.at >= PRUNE_WAIT_MAX_MS) return true;
+  return !g.vmIds.some((id) => jobsByVm.get(id)?.pending?.jobid);
+}
+
+/**
+ * 그룹 하나 정리 — 그룹 VM 의 잡마다 Director 에서 이력을 읽고 보관 개수 밖의 오래된 실행을 지운다(ops.pruneJobs · groupRetention 규칙).
+ * 잡 잠금(jobLocks)을 잡은 잡만(복원·실행 중인 대상과 겹치지 않게 — 잡힌 대상은 다음 정리로). 결과는 groups.lastPrune · 지운 것이 있으면 감사.
+ */
+export async function pruneGroup(groupId, { trigger = 'timer', signal = null } = {}) {
+  const g = getGroup(groupId);
+  if (!g) throw fail('not-found', '백업 그룹을 찾을 수 없습니다.');
+  if (g.keep == null) return null;
+  if (registryLoadError()) throw fail('unavailable', '백업 대상 원장을 읽지 못한 상태라 정리하지 않습니다(손상본 보존).');
+  noteGroupRunStart(groupId, g.name);
+  const locked = [];
+  const out = { at: 0, fireAt: g.lastFire?.at ?? null, keep: g.keep, jobs: 0, deleted: 0, failed: 0, skipped: 0, notDeleted: 0, unknownDeleted: 0, noBase: 0, keptMin: null, keptMax: null, baseMin: null, baseMax: null, errors: [] };
+  const deletedIds = [];
+  const unknownIds = [];   // delete 를 보냈지만 결과를 모르는 jobid(반증 F4)
+  try {
+    const demo = isDemoActive();
+    const settings = effectiveSettings();
+    const jobs = new Map(jobDigests().filter((j) => j.vcenterId === g.vcenterId).map((j) => [j.vmId, j]));
+    const send = [];
+    for (const vmId of g.vmIds) {
+      const j = jobs.get(vmId);
+      if (!j || !!j.demo !== demo || j.missingInDirector) continue;
+      if (!tryLockJob(j.id)) { out.skipped += 1; continue; }
+      locked.push(j.id);
+      send.push({ job: j, dir: jobDirectorId(j, settings) });
+    }
+    out.jobs = send.length;
+    const byDir = new Map();
+    for (const x of send) { if (!byDir.has(x.dir)) byDir.set(x.dir, []); byDir.get(x.dir).push(x); }
+    for (const [dir, list] of byDir) {
+      for (let i = 0; i < list.length; i += RUN_JOBS_MAX) {
+        const chunk = list.slice(i, i + RUN_JOBS_MAX);
+        let res;
+        try {
+          res = await onDirector(dir, 'pruneJobs', { items: chunk.map((x, k) => ({ key: k, job: x.job.bareosJob, keep: g.keep })) },
+            { trigger: trigger === 'timer' ? 'timer' : 'manual', signal: signal || AbortSignal.timeout(PRUNE_DEADLINE_MS) });
+        } catch (e) {
+          out.failed += chunk.length;
+          const st = chunkErrorState(e);
+          if (out.errors.length < 20) out.errors.push({ vmName: `${chunk.length}대`, reason: st === 'unknown' ? `결과 모름 — ${reasonOf(e)} 지웠는지 알 수 없습니다(Director 에서 확인).` : reasonOf(e) });
+          if (st === 'unknown') out.unknownChunks = (out.unknownChunks || 0) + 1;
+          continue;
+        }
+        const byKey = new Map((Array.isArray(res) ? res : []).map((r) => [r.key, r]));
+        chunk.forEach((x, k) => {
+          const r = byKey.get(k);
+          if (!r || !r.ok) {
+            out.failed += 1;
+            if (Array.isArray(r?.sent) && r.sent.length) { out.unknownDeleted += r.sent.length; for (const id of r.sent) if (unknownIds.length < 500) unknownIds.push(id); }
+            if (out.errors.length < 20) out.errors.push({ vmName: x.job.vmName || x.job.vmId, reason: r?.message || 'Director 회신에 이 항목이 없습니다 — 지웠는지 알 수 없습니다.' });
+            return;
+          }
+          const del = Array.isArray(r.deleted) ? r.deleted : [];
+          out.deleted += del.length;
+          for (const id of del) if (deletedIds.length < 500) deletedIds.push(id);
+          out.notDeleted += Number(r.notDeleted) || 0;
+          if (r.reason && !del.length && r.baseJobid == null && r.good > g.keep) out.noBase += 1;
+          if (Number.isInteger(r.kept)) { out.keptMin = out.keptMin == null ? r.kept : Math.min(out.keptMin, r.kept); out.keptMax = out.keptMax == null ? r.kept : Math.max(out.keptMax, r.kept); }
+          if (Number.isFinite(r.baseAt)) { out.baseMin = out.baseMin == null ? r.baseAt : Math.min(out.baseMin, r.baseAt); out.baseMax = out.baseMax == null ? r.baseAt : Math.max(out.baseMax, r.baseAt); }
+        });
+      }
+    }
+  } catch (e) {
+    out.errors.push({ vmName: '', reason: String(e?.message || e).slice(0, 300) });
+    console.warn(`[bareos] 그룹 ‘${g.name}’ 보관 정리 중 오류: ${String(e?.message || e).slice(0, 200)}`);
+  } finally {
+    for (const id of locked) unlockJob(id);
+    noteGroupRunEnd(groupId);
+  }
+  out.at = Date.now();
+  recordPrune(groupId, out);
+  if (out.deleted || out.failed || out.notDeleted || out.unknownDeleted) {
+    logAudit({
+      user: 'system', action: 'Bareos 그룹 보관 정리', target: `${g.vcenterId}/${g.name}`,
+      detail: `최근 ${g.keep}회 보관 · 잡 ${out.jobs}개 · 카탈로그에서 지운 실행 ${out.deleted}건${deletedIds.length ? `(jobid ${deletedIds.slice(0, 60).join(',')}${deletedIds.length > 60 ? ' …' : ''})` : ''} · 실패 ${out.failed}${out.notDeleted ? ` · 지우지 못함 ${out.notDeleted}` : ''}${unknownIds.length ? ` · 보냈지만 결과 모름 ${out.unknownDeleted}건(jobid ${unknownIds.slice(0, 60).join(',')}${unknownIds.length > 60 ? ' …' : ''})` : ''}${out.unknownChunks ? ` · 결과 모름 묶음 ${out.unknownChunks}` : ''}`,
+      ip: '',
+    });
+  }
+  return out;
+}
+
+/** 정리를 그 Director 의 줄에 세운다(실행과 같은 줄 — 같은 Director 에 세션을 동시에 열지 않는다). */
+export function queueGroupPrune(groupId, opts = {}) {
+  const g = getGroup(groupId);
+  if (!g) return Promise.reject(fail('not-found', '백업 그룹을 찾을 수 없습니다.'));
+  if (groupRunning(groupId)) return Promise.reject(fail('busy', `‘${g.name}’ 그룹을 실행·정리하는 중입니다.`));
+  _pruning.add(groupId);
+  return onDirLine(g.directorId || '', () => pruneGroup(groupId, opts)).finally(() => { _pruning.delete(groupId); });
+}
+
 let _scanning = false;
 const _clockWarned = new Set();
 /**
@@ -236,6 +347,15 @@ export async function groupTick(now = Date.now(), { catchupMs = CATCHUP_MS } = {
         recordFire(id, { key: slot.key, at: Date.now(), trigger: 'timer', by: '', level: slot.level, total: g.vmIds.length, started: 0, skipped: 0, notSent: g.vmIds.length, failed: 0, unknown: 0, error: reason, items: [] });
       }));
     }
+    // v2.831 보관 개수 정리 — 실행이 끝난 그룹(이번 틱에 띄운 그룹은 빼고)
+    const firedSet = new Set(fired);
+    const jobsByVc = new Map();
+    for (const g of listGroups()) {
+      if (firedSet.has(g.id) || groupRunning(g.id) || g.keep == null) continue;
+      if (!jobsByVc.has(g.vcenterId)) jobsByVc.set(g.vcenterId, new Map(jobDigests().filter((j) => j.vcenterId === g.vcenterId).map((j) => [j.vmId, j])));
+      if (!pruneDue(g, jobsByVc.get(g.vcenterId), now)) continue;
+      runs.push(queueGroupPrune(g.id, { trigger: 'timer' }).catch((e) => console.warn(`[bareos] 백업 그룹 ‘${g.name}’ 보관 정리 실패: ${String(e?.message || e).slice(0, 200)}`)));
+    }
   } finally { _scanning = false; }
   return { scanned: true, fired, missed, done: await Promise.allSettled(runs) };
 }
@@ -248,4 +368,4 @@ export function startBareosGroupScheduler() {
   _timer.unref?.();
 }
 
-export function _resetGroupRunnerForTest() { _groupBusy.clear(); _queued.clear(); _dirTail.clear(); _scanning = false; if (_timer) { clearInterval(_timer); _timer = null; } }
+export function _resetGroupRunnerForTest() { _groupBusy.clear(); _queued.clear(); _pruning.clear(); _dirTail.clear(); _scanning = false; if (_timer) { clearInterval(_timer); _timer = null; } }

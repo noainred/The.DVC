@@ -208,6 +208,17 @@ export async function jobLog(session, jobid, { maxBytes = 256 * 1024, maxLines =
 /** 실행 중 잡 취소. */
 export async function cancelJob(session, jobid) { return session.call(`cancel jobid=${asId(jobid)}`); }
 
+/**
+ * v2.831 백업 그룹 보관 개수 — 카탈로그에서 실행 기록 지우기(`delete jobid=a,b,c`). 볼륨의 데이터는 그 볼륨이 재활용될 때 비워진다.
+ * jobid 는 숫자만(asId) · 한 명령에 DELETE_IDS_PER_CMD 개씩. 응답 모양에 기대지 않는다 — 부르는 쪽이 다시 읽어 실제로 사라졌는지 본다
+ * (실환경 미확인(추정): 쉼표 목록 구문 · 확인 질문 없음 — Bareos ua_cmds.cc DeleteJob 기준).
+ */
+export const DELETE_IDS_PER_CMD = 50;
+export async function deleteJobIds(session, jobids) {
+  const ids = (Array.isArray(jobids) ? jobids : []).map(asId);
+  for (let i = 0; i < ids.length; i += DELETE_IDS_PER_CMD) await session.call(`delete jobid=${ids.slice(i, i + DELETE_IDS_PER_CMD).join(',')}`);
+}
+
 /** 잡 활성/비활성(`enable job=` · `disable job=`). Bareos 에는 리소스 삭제 명령이 없다 — 포탈의 '삭제' 는 비활성화다. */
 export async function setJobEnabled(session, job, enabled) {
   if (!isResourceName(job)) throw bad('잡 이름이 올바르지 않습니다.');

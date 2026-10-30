@@ -46,23 +46,21 @@ export function toggleDay(sched, day, key = 'days') {
   return next;
 }
 
-/* ── 트리 필터 ── */
-export const GROUP_FILTERS = Object.freeze([
-  ['all', '전체'], ['bareos', 'Bareos 방식'], ['nojob', '잡 없음'], ['nogroup', '그룹 없음'], ['ingroup', '그룹 있음'],
-]);
-export function groupRowMatches(r, f) {
+/* ── 트리 필터(v2.831 시안 — 전체 · 그룹 없음 · 켜진 VM · 잡 없음) ── */
+export const GROUP_FILTERS = Object.freeze([['all', '전체'], ['nogroup', '그룹 없음'], ['on', '켜진 VM'], ['nojob', '잡 없음']]);
+/** editingId: 편집 중인 그룹 — 그 그룹의 VM 은 '그룹 없음' 에도 보인다(고를 수 있으므로). */
+export function groupRowMatches(r, f, editingId = '') {
   switch (f) {
-    case 'bareos': return r.method === 'bareos';
+    case 'nogroup': return !r.groupId || (!!editingId && r.groupId === editingId);
+    case 'on': return r.power === 'POWERED_ON';
     case 'nojob': return !r.job;
-    case 'nogroup': return !r.groupId;
-    case 'ingroup': return !!r.groupId;
     default: return true;
   }
 }
-export function groupFilterCounts(vms) {
+export function groupFilterCounts(vms, editingId = '') {
   const out = {};
   for (const [k] of GROUP_FILTERS) out[k] = 0;
-  for (const r of Array.isArray(vms) ? vms : []) for (const [k] of GROUP_FILTERS) if (groupRowMatches(r, k)) out[k]++;
+  for (const r of Array.isArray(vms) ? vms : []) for (const [k] of GROUP_FILTERS) if (groupRowMatches(r, k, editingId)) out[k]++;
   return out;
 }
 
@@ -81,7 +79,7 @@ export function pickable(r, { editingId = '', groupName = () => '' } = {}) {
  * 폴더마다 그 아래 **고를 수 있는** VM id 를 모은다(폴더 체크박스).
  */
 export function buildGroupTree(vms, { filter = 'all', q = '', editingId = '', groupName } = {}) {
-  const rows = (Array.isArray(vms) ? vms : []).filter((r) => groupRowMatches(r, filter));
+  const rows = (Array.isArray(vms) ? vms : []).filter((r) => groupRowMatches(r, filter, editingId));
   const tree = buildBareosTree(rows, { filter: 'all', q });
   const fill = (n) => {
     const ids = [];
@@ -130,3 +128,114 @@ export const storageText = (g, siteDefaults) => {
   const pl = g.pool || (siteDefaults?.pool ? `기본(${siteDefaults.pool})` : '기본');
   return `${st} · ${pl}`;
 };
+
+/* ── v2.831 시안 — 스케줄·보관·실행 이력 ── */
+/** 매일(요일 7개)인가. */
+export const isDaily = (sched) => (sched?.days || []).length === 7;
+/** 매일 ↔ 매주 바꾸기 — 매주로 바꾸면 일요일 하나에서 시작(이미 고른 요일이 있으면 그대로). Full 요일은 실행 요일 안에서만. */
+export function setCadence(sched, daily) {
+  const days = daily ? [0, 1, 2, 3, 4, 5, 6] : (isDaily(sched) || !(sched.days || []).length ? [0] : sched.days.slice());
+  return { ...sched, days, fullDays: (sched.fullDays || []).filter((d) => days.includes(d)) };
+}
+/** 카드·상세의 스케줄 두 줄 — main '매일 02:10' · sub 'Incremental · 일요일 Full'. 꺼짐이면 '—' · '수동 실행만'. */
+export function scheduleParts(sched) {
+  if (!sched || !sched.enabled) return { main: '—', sub: '수동 실행만' };
+  const days = isDaily(sched) ? '매일' : `매주 ${(sched.days || []).map((d) => DAY_NAMES[d]).join('·')}`;
+  const full = sched.fullDays?.length ? ` · ${sched.fullDays.map((d) => `${DAY_NAMES[d]}요일`).join('·')} Full` : '';
+  return { main: `${days} ${sched.time}`, sub: `${sched.level}${full}` };
+}
+
+export const KEEP_PRESETS = Object.freeze([3, 7, 14, 30]);
+export const KEEP_DEFAULT = 14;
+/** 서버 groupRetention.keepText 와 같은 글자(시험이 대조). */
+export const keepText = (keep) => (keep == null ? '보관 개수 제한 없음' : `최근 ${keep}회 보관`);
+/** −/+ — 범위 안으로. */
+export const stepKeep = (keep, d, { min = 1, max = 365 } = {}) => Math.min(max, Math.max(min, (Number.isInteger(keep) ? keep : KEEP_DEFAULT) + d));
+/** 보관 개수 풀이 — 매일이면 며칠치, 매주면 몇 주치(스케줄 기준 · 수동 실행도 한 회로 센다). */
+export function keepMeaning(keep, sched) {
+  if (keep == null) return 'Director 의 보존 설정(풀·클라이언트 보존 기간)만 따릅니다.';
+  if (!sched?.enabled) return `수동 실행 ${keep}회분`;
+  const per = (sched.days || []).length;
+  if (!per) return `${keep}회분`;
+  if (per === 7) return `매일이면 ${keep}일치`;
+  const weeks = Math.round((keep / per) * 10) / 10;
+  return `주 ${per}회면 약 ${weeks}주치`;
+}
+/**
+ * 카드·상세의 보관 두 줄 — 마지막 정리 결과(lastPrune) 기준. 보유 수는 VM 마다 다를 수 있어 범위로('3~14').
+ * 체인(기준 Full)을 지키려고 보관 개수보다 많이 남을 수 있다 — 그 사실을 밝힌다.
+ */
+export function keepParts(g) {
+  if (g?.keep == null) return { main: '제한 없음', sub: 'Director 보존 설정을 따름' };
+  const p = g.lastPrune;
+  if (!p) return { main: `최근 ${g.keep}회`, sub: '첫 정리 전 — 그룹 백업이 끝나면 정리합니다' };
+  const lo = p.keptMin; const hi = p.keptMax;
+  const held = lo == null ? '—' : lo === hi ? String(lo) : `${lo}~${hi}`;
+  const parts = [];
+  if (p.failed > 0) parts.push(`정리 실패 ${p.failed}`);
+  if (p.notDeleted > 0) parts.push(`지우지 못함 ${p.notDeleted}`);
+  if (p.unknownDeleted > 0) parts.push(`지웠는지 모름 ${p.unknownDeleted}`);
+  if (p.noBase > 0) parts.push(`기준 Full 없음 ${p.noBase}대(지우지 않음)`);
+  if (hi != null && hi > g.keep) parts.push('Full 체인 유지로 더 남김');
+  parts.push(`마지막 정리 ${shortTs(p.at)}${p.deleted ? ` · ${p.deleted}건 지움` : ''}`);
+  // 체인 때문에 보관 개수보다 많이 남으면 '3개 중 7개' 처럼 읽히지 않게 순서를 바꾼다
+  const main = hi != null && hi > g.keep ? `${held}개 보유 · 보관 ${g.keep}회` : `${g.keep}개 중 ${held}개 보유`;
+  return { main, sub: parts.join(' · '), bad: p.failed > 0 || p.notDeleted > 0 || p.unknownDeleted > 0 };
+}
+/**
+ * 실행 이력 한 줄의 보관 표지 — 마지막 정리의 기준 Full 시작 시각(VM 마다 baseMin~baseMax) 기준(추정 — 카탈로그 시각 = Director 현지 시각).
+ * 한 회차의 백업은 그 회차부터 다음 회차 전까지 시작한다고 본다: 다음 회차가 baseMin 이하 → 전부 정리됨 · 다음 회차가 없거나 baseMax 보다 뒤 → 보관 중 · 그 사이 → 일부 정리.
+ * 보관 개수가 없거나·정리 기록이 없거나·시작한 백업이 없으면 null(표지를 달지 않는다 — 모르는 것을 단정하지 않는다).
+ * @param {object} f  fires[i] · @param {object|null} next  fires[i-1](더 최근 회차) · @param {object} g
+ */
+export function fireKeepBadge(f, next, g) {
+  const p = g?.lastPrune;
+  if (g?.keep == null || !p || !(f?.started > 0) || p.baseMin == null || p.baseMax == null) return null;
+  if (next && next.at <= p.baseMin) return 'pruned';
+  if (!next || next.at > p.baseMax) return 'kept';
+  return 'partial';
+}
+export const KEEP_BADGE_TEXT = Object.freeze({ kept: '보관 중', pruned: '정리됨', partial: '일부 정리' });
+/** 남은 시간 — '17시간 55분 뒤'(음수·모름은 ''). */
+export function untilText(ms) {
+  if (!(ms > 0)) return '';
+  const m = Math.round(ms / 60_000);
+  if (m < 60) return `${m}분 뒤`;
+  const h = Math.floor(m / 60);
+  if (h < 48) return `${h}시간 ${m % 60}분 뒤`;
+  return `${Math.floor(h / 24)}일 ${h % 24}시간 뒤`;
+}
+/** 그룹 VM 들의 마지막 결과(법인별 현황과 같은 판정 — b) → 성공(경고 포함)·실패·진행·기록 없음 수. */
+export function memberResults(rows) {
+  const out = { n: 0, ok: 0, warn: 0, fail: 0, run: 0, never: 0 };
+  for (const r of Array.isArray(rows) ? rows : []) {
+    out.n++;
+    const b = r?.b;
+    if (b?.run) out.run++;
+    if (b?.st === 'ok') out.ok++;
+    else if (b?.st === 'warning') out.warn++;
+    else if (b?.st === 'error' || b?.st === 'canceled') out.fail++;
+    else if (!b?.run) out.never++;
+  }
+  return out;
+}
+/** 카드 오른쪽 위 표지 — 진행 · 실패 · 성공 · 기록 없음. */
+export function resultBadge(m) {
+  if (!m?.n) return { text: 'VM 없음', tone: 'muted' };
+  if (m.run) return { text: `진행 ${m.run}/${m.n}`, tone: 'run' };
+  if (m.fail) return { text: `실패 ${m.fail} · 성공 ${m.ok + m.warn}`, tone: 'bad' };
+  if (m.ok + m.warn) return { text: `성공 ${m.ok + m.warn}/${m.n}${m.warn ? ` (경고 ${m.warn})` : ''}`, tone: m.never ? 'warn' : 'ok' };
+  return { text: '백업 기록 없음', tone: 'muted' };
+}
+/** 멤버 폴더 요약 — 하나면 그 폴더, 여럿이면 '첫 폴더 외 N곳'. */
+export function folderSummary(rows) {
+  const set = [...new Set((Array.isArray(rows) ? rows : []).map((r) => r.folder || '').filter(Boolean))].sort();
+  if (!set.length) return '—';
+  return set.length === 1 ? set[0] : `${set[0]} 외 ${set.length - 1}곳`;
+}
+/** 멤버 용량 합(GB) — 못 읽은 VM 은 빼고 그 수를 따로. */
+export function sizeSum(rows) {
+  let gb = 0; let unknown = 0;
+  for (const r of Array.isArray(rows) ? rows : []) { if (typeof r?.gb === 'number' && Number.isFinite(r.gb)) gb += r.gb; else unknown++; }
+  return { gb, unknown };
+}

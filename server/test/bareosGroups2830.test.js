@@ -23,7 +23,7 @@ fs.writeFileSync(path.join(tmp, 'users.json'), JSON.stringify({ users: [{ userna
 const { startFakeDirector } = await import('./_fakeBareosDirector.js');
 const S = await import('../src/bareos/groupSchedule.js');
 
-const D = { jobs: new Map(), nextId: 900, cmds: [], gate: null, gateFor: null };
+const D = { jobs: new Map(), nextId: 900, cmds: [], gate: null, gateFor: null, hist: new Map(), ignoreDelete: false };
 async function handle(cmd) {
   D.cmds.push(cmd);
   if (D.gate && (!D.gateFor || D.gateFor(cmd))) await D.gate;
@@ -34,7 +34,13 @@ async function handle(cmd) {
   if (cmd === '.jobs') return { jobs: [...D.jobs].map(([name]) => ({ name, enabled: true })) };
   if (cmd.startsWith('configure add job')) { D.jobs.set(kv.name, {}); return { add: { resource: 'Job', name: kv.name } }; }
   if (cmd.startsWith('run ')) { if (D.failRun?.(kv)) return { error: ['Storage resource "nope" not found.'] }; return { run: { jobid: D.nextId++ } }; }
+  if (cmd.startsWith('list jobs job=') && D.hist.has(kv.job)) return { jobs: D.hist.get(kv.job).map((r) => ({ ...r })) };
   if (cmd.startsWith('list jobs')) return { jobs: [] };
+  if (cmd.startsWith('delete jobid=')) {   // v2.831 보관 개수 정리
+    const ids = new Set(kv.jobid.split(',').map(Number));
+    if (!D.ignoreDelete) for (const [n, rows] of D.hist) D.hist.set(n, rows.filter((r) => !ids.has(r.jobid)));
+    return {};
+  }
   if (cmd.startsWith('llist jobid=')) return { jobs: [] };
   return { error: [`unknown command ${cmd}`] };
 }
@@ -486,6 +492,80 @@ test('손상된 그룹 원장 — 보존 · 저장 503 · 예약 틱은 아무�
   fs.writeFileSync(f, good);
   groups._resetGroupsForTest();
   assert.ok(groups.getGroup(G1));
+});
+
+/* ───────── ⑦ v2.831 보관 개수 ───────── */
+const hrow = (jobid, name, level, st = 'T') => ({ jobid, name, type: 'B', level, jobstatus: st, jobbytes: 1000, starttime: `2026-10-${String(jobid).padStart(2, '0')} 02:10:00`, endtime: '' });
+test('⑦ v2.831 보관 개수 — 저장(1~365 · 비우면 제한 없음) · 보내지 않으면 그대로 · 틀린 값 400', async () => {
+  const g = groups.getGroup(G1);
+  const body = (extra) => ({ name: g.name, vmIds: g.vmIds, schedule: g.schedule, storage: g.storage, pool: g.pool, ...extra });
+  let r = await call('admin', 'PUT', `/groups/${G1}`, body({ keep: 2, updatedAt: groups.getGroup(G1).updatedAt }));
+  assert.equal(r.s, 200, r.t);
+  assert.equal(r.j.group.keep, 2);
+  assert.equal(r.j.group.keepText, '최근 2회 보관');
+  r = await call('admin', 'PUT', `/groups/${G1}`, body({}));
+  assert.equal(r.s, 200, r.t);
+  assert.equal(groups.getGroup(G1).keep, 2, '보관 개수를 보내지 않은 저장이 조용히 제한 없음으로 바꾸면 안 된다');
+  for (const bad of [0, 366, 1.5, 'abc', -1]) assert.equal((await call('admin', 'PUT', `/groups/${G1}`, body({ keep: bad }))).s, 400, String(bad));
+  r = await call('admin', 'GET', '/groups/tree?vcenterId=vc-a');
+  assert.deepEqual(r.j.keepLimits, { min: 1, max: 365, presets: [3, 7, 14, 30] });
+});
+
+test('⑦ v2.831 정리 — 기준 Full 앞의 끝난 실행만 지운다 · Full 없는 잡은 지우지 않는다 · 다시 읽어 실제로 사라진 것만 셈 · 감사', async () => {
+  const g = groups.getGroup(G1);
+  const jobs = registry.jobDigests().filter((j) => g.vmIds.includes(j.vmId));
+  assert.ok(jobs.length >= 2);
+  const [A, B] = jobs.map((j) => j.bareosJob);   // 나머지 잡은 이력이 없다(list jobs 가 빈 목록 — 지울 것 없음)
+  D.hist.set(A, [hrow(1, A, 'F'), hrow(2, A, 'I'), hrow(3, A, 'I', 'f'), hrow(4, A, 'F'), hrow(5, A, 'I'), hrow(6, A, 'I'), hrow(7, A, 'I', 'R')]);
+  D.hist.set(B, [hrow(11, B, 'I'), hrow(12, B, 'I'), hrow(13, B, 'I')]);
+  D.cmds.length = 0;
+  const out = await runner.pruneGroup(G1);
+  const dels = D.cmds.filter((c) => c.startsWith('delete '));
+  assert.deepEqual(dels, ['delete jobid=1,2,3'], '기준 Full(4) 앞의 끝난 실행만 · Full 없는 잡 B 는 지우지 않는다');
+  assert.equal(out.deleted, 3);
+  assert.equal(out.noBase, 1);
+  assert.equal(out.keptMax, 3);
+  assert.equal(out.keptMin, 0, '이력이 없는 잡(셋째)은 보유 0 — 숨기지 않는다');
+  assert.deepEqual(D.hist.get(A).map((r) => r.jobid), [4, 5, 6, 7], '끝나지 않은 실행(7)은 남는다');
+  const lp = groups.getGroup(G1).lastPrune;
+  assert.equal(lp.deleted, 3);
+  assert.equal(lp.keep, 2);
+  D.cmds.length = 0;
+  assert.equal((await runner.pruneGroup(G1)).deleted, 0);
+  assert.equal(D.cmds.filter((c) => c.startsWith('delete ')).length, 0, '지울 것이 없으면 delete 를 보내지 않는다');
+  // Director 가 지우지 않았으면(응답은 성공) 다시 읽어 '지우지 못함' 으로 센다
+  D.hist.set(A, [...D.hist.get(A), hrow(8, A, 'F'), hrow(9, A, 'I')]);
+  D.ignoreDelete = true;
+  try {
+    const o2 = await runner.pruneGroup(G1);
+    assert.equal(o2.deleted, 0);
+    assert.equal(o2.notDeleted, 3, '4·5·6 을 보냈지만 남아 있다(7 은 실행 중이라 보내지 않는다)');
+  } finally { D.ignoreDelete = false; }
+  const { listAudit } = await import('../src/audit.js');
+  const audit = listAudit({ limit: 50, q: '보관 정리' }).items || listAudit({ limit: 50, q: '보관 정리' });
+  assert.ok(JSON.stringify(audit).includes('jobid 1,2,3'), '지운 jobid 를 감사에 남긴다');
+});
+
+test('⑦ v2.831 pruneDue — 보관 개수 · 시작한 실행 · 같은 실행으로 한 번(개수만 바꿔서는 안 돎) · 끝날 때까지 기다림(상한 뒤엔 진행)', async () => {
+  const { PRUNE_WAIT_MAX_MS } = await import('../src/bareos/groupRetention.js');
+  const g = { keep: 3, vmIds: ['a', 'b'], lastFire: { at: 1000, started: 2 }, lastPrune: null };
+  const idle = new Map([['a', { pending: null }], ['b', { pending: null }]]);
+  const busy = new Map([['a', { pending: { jobid: 5 } }], ['b', { pending: null }]]);
+  assert.equal(runner.pruneDue(g, idle, 2000), true);
+  assert.equal(runner.pruneDue(g, busy, 2000), false);
+  assert.equal(runner.pruneDue(g, busy, 1000 + PRUNE_WAIT_MAX_MS), true);
+  assert.equal(runner.pruneDue({ ...g, keep: null }, idle, 2000), false);
+  assert.equal(runner.pruneDue({ ...g, lastFire: { at: 1000, started: 0 } }, idle, 2000), false);
+  assert.equal(runner.pruneDue({ ...g, lastPrune: { fireAt: 1000, keep: 3 } }, idle, 2000), false);
+  assert.equal(runner.pruneDue({ ...g, lastPrune: { fireAt: 1000, keep: 7 } }, idle, 2000), false, '반증 F5: 보관 개수를 바꾸기만 해서는 정리하지 않는다(다음 실행이 끝난 뒤)');
+});
+
+test('⑦ v2.831 지문 — 실행 이력(fires)·정리 결과(lastPrune)는 지문을 바꾸지 않고 보관 개수는 바꾼다', async () => {
+  const backup = await import('../src/backup/service.js');
+  const base = { id: 'g', name: 'A', vcenterId: 'v', vmIds: ['x'], schedule: EVERY, storage: '', pool: '', keep: 7, fires: [], lastPrune: null };
+  const fp = (g) => backup.settingsFingerprint({ 'bareos-groups.json': JSON.stringify({ version: 1, groups: [g] }) });
+  assert.equal(fp({ ...base, fires: [{ at: 1 }], lastPrune: { at: 2, deleted: 3 } }), fp(base));
+  assert.notEqual(fp({ ...base, keep: 14 }), fp(base));
 });
 
 test('그룹 지우기 — 그룹만 지우고 백업 대상(잡)은 남긴다', async () => {

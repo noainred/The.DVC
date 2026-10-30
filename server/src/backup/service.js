@@ -139,7 +139,7 @@ export const MIXED_EXTRA_RUN_FIELDS = new Map([
   //   그룹 정의(이름·VM·스케줄·스토리지·anchorAt·고친 사람)만 남긴다 — 예약 회차마다 change 백업이 생기지 않게.
   ['bareos-groups.json', (obj) => {
     if (!obj || typeof obj !== 'object' || !Array.isArray(obj.groups)) return obj;
-    const GROUP_RUN = new Set(['sending', 'missed']);
+    const GROUP_RUN = new Set(['sending', 'missed', 'fires']);   // v2.831 fires = 실행 이력(실행 상태) · lastPrune 은 last* 로 빠진다
     return { ...obj, groups: obj.groups.map((g) => (g && typeof g === 'object' ? Object.fromEntries(Object.entries(g).filter(([k]) => !GROUP_RUN.has(k))) : g)) };
   }],
 ]);
