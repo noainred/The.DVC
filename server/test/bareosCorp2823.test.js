@@ -200,7 +200,8 @@ test('③ 잡 명령은 그 잡의 Director 로만 · 매핑 채움 제안 · �
   let rel; DS.A.gate = new Promise((x) => { rel = x; });
   const bBefore = DS.B.cmds.length;
   const p = poller.pollOnce({ trigger: 'manual' });
-  for (let i = 0; i < 200 && !DS.B.cmds.slice(bBefore).some((c) => c === '.jobs'); i++) await new Promise((x) => setTimeout(x, 15));
+  // v2.825.1(G7): 대조(.jobs)가 먼저, 실행 상태(llist)가 나중이다 — 마지막 명령을 기다린다
+  for (let i = 0; i < 200 && !DS.B.cmds.slice(bBefore).includes(`llist jobid=${rb.j.jobid}`); i++) await new Promise((x) => setTimeout(x, 15));
   assert.ok(DS.B.cmds.slice(bBefore).includes(`llist jobid=${rb.j.jobid}`), 'A 가 붙잡힌 동안 B 의 실행 상태를 읽었다');
   assert.ok(DS.B.cmds.slice(bBefore).includes('.jobs'), 'A 가 붙잡힌 동안 B 의 대조를 끝까지 했다');
   rel(); DS.A.gate = null;

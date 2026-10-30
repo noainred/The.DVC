@@ -82,6 +82,29 @@ export function secText(ms) {
   const m = Math.floor(sec / 60); const r = sec % 60;
   return m ? `${m}분${r ? ` ${r}초` : ''}` : `${r}초`;
 }
+/** v2.825.1 버그 점검(G12): 쓰기 범위(수정 가능 vCenter)가 지정된 계정 — 서버는 403 으로 막는다. 화면은 미리 잠그고 이 사유를 말한다. */
+export const READ_ONLY_TARGET = '이 대상의 vCenter 는 이 계정의 쓰기 범위 밖입니다 — 조회만 할 수 있습니다.';
+export const SETTINGS_READ_ONLY = '이 계정은 쓰기 범위(수정 가능 vCenter)가 지정돼 Bareos 설정(전 법인 공용)을 바꿀 수 없습니다 — 조회만 합니다.';
+
+/**
+ * 백업 대상 행 버튼의 잠금 사유(G12·G13 — 잠긴 버튼은 사유를 말한다). 빈 문자열이면 잠기지 않았다.
+ * @param {{ writable?: boolean, enabled?: boolean }} j 목록 응답의 대상(writable 은 서버가 준다 — 없으면 막지 않는다)
+ * @param {{ busy?: boolean, running?: boolean, hasRun?: boolean }} o
+ */
+export function targetLocks(j, { busy = false, running = false, hasRun = false } = {}) {
+  const ro = j?.writable === false ? READ_ONLY_TARGET : '';
+  const b = busy ? '이 대상의 다른 요청을 처리 중입니다.' : '';
+  const r = running ? '실행 중에는 바꿀 수 없습니다 — 끝나거나 취소한 뒤에 하세요.' : '';
+  return {
+    run: ro || b || (j?.enabled ? '' : '비활성 대상은 실행할 수 없습니다 — 먼저 활성으로 바꾸세요.'),
+    cancel: ro || b,
+    view: hasRun ? '' : '아직 실행 기록이 없습니다.',
+    restore: ro || b,
+    toggle: ro || b || r,
+    remove: ro || b || r,
+  };
+}
+
 /** 엣지 대행 작업 종류 → 화면 이름(영문 키를 그대로 보이지 않게 · Chromium 확인). 모르는 종류는 '작업'. */
 const RELAY_KIND_LABEL = Object.freeze({
   probe: '연결 시험', catalog: '카탈로그', addJobs: '대상 등록', disableJobs: '잡 끄기', runJob: '백업 실행', setEnabled: '켜기·끄기', history: '이력',

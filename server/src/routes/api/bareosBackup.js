@@ -22,9 +22,10 @@ import { parseBanner } from '../../bareos/director.js';
 import { diagnoseConsole, DIAG_STAGES } from '../../bareos/console.js';
 import { secretProvided } from '../../util/secretCarry.js';
 import {
-  onDirector, relayToEdge, isDemoActive, effectiveSettings, eligibility, createBackupTarget, createBackupTargets, bareosAuthGuard,
+  onDirector, relayToEdge, isDemoActive, effectiveSettings, eligibility, createBackupTarget, createBackupTargets, bareosAuthGuard, clearAuthStopIfSame,
 } from '../../bareos/service.js';
 import { pendingView, relayLimits } from '../../bareos/edgeOps.js';
+import { noteSetupStart, noteSetupEnd } from '../../bareos/inflight.js';
 import { listAgentTokens } from '../../central/agentTokens.js';
 import { pickAgent } from '../../cvp/formChoices.js';
 import { knownAgentNames } from '../../central/knownAgents.js';
@@ -208,7 +209,7 @@ const _setupBusy = new Set();
 // v2.823 검토(S6·P10): 잠금이 Director 마다라, 서로 다른 Director 편집에서 **같은 서버**(myself.conf·공용 리소스)를 동시에 고칠 수 있었다 —
 //   원격 대상 주소로도 한 번에 하나(되돌리기가 서로의 파일을 지우거나 덮지 않게).
 const _setupHosts = new Map();   // 주소(소문자) → Director id
-const releaseSetup = (dirId) => { _setupBusy.delete(dirId); for (const [h, id] of _setupHosts) if (id === dirId) _setupHosts.delete(h); };
+const releaseSetup = (dirId) => { _setupBusy.delete(dirId); for (const [h, id] of _setupHosts) if (id === dirId) _setupHosts.delete(h); noteSetupEnd(dirId); };
 const _catalogMemo = new Map();   // `${demo}|${directorId}|${settingsRev}` → { at, value }
 
 /**
@@ -264,6 +265,7 @@ function setupGate(req, res, dirId, plan, { otp = true } = {}) {
   }
   _setupBusy.add(dirId);
   if (hostKey) _setupHosts.set(hostKey, dirId);
+  noteSetupStart(dirId, directorById(dirId, effectiveSettings())?.name || dirId);   // G15: 업그레이드 자동 적용이 기다린다(bareos/inflight.js)
   return true;
 }
 
@@ -327,7 +329,10 @@ api.get('/tools/bareos-backup', adminOnly, (req, res) => {
   const vmById = new Map((store.get()?.vms || []).map((v) => [v.id, v]));
   const visibleSite = (s) => !scoped || bareosAccess(req.user, s.vcenterId, { write: false }) === 0;
   const mapped = settings.sites.filter(visibleSite).map((s) => s.vcenterId);
-  const views = jobs.map((j) => viewJob(j, vmById, settings));
+  // v2.825.1 버그 점검(G12): 쓰기 범위(writeVcenters)가 지정된 계정 — 대상마다 쓸 수 있는지 싣는다(화면이 버튼을 잠근다 · 서버는 그대로 403)
+  const views = jobs.map((j) => ({ ...viewJob(j, vmById, settings), writable: bareosAccess(req.user, j.vcenterId) === 0 }));
+  let settingsWritable = false;
+  try { settingsWritable = !scopedVcenterIds(req.user, store.get()) && !writeScopedVcenterIds(req.user, store.get()); } catch { settingsWritable = false; }
   const rawPoller = pollerStatus();
   const directors = settings.directors.map((d) => {
     const vcs = settings.sites.filter((s) => s.directorId === d.id && visibleSite(s)).map((s) => s.vcenterId);
@@ -350,6 +355,7 @@ api.get('/tools/bareos-backup', adminOnly, (req, res) => {
     ...(scoped ? { scoped: true, omittedOutOfScope: omitted } : {}),
     poller,
     relayLimits: relayLimits(),   // v2.824 엣지 대행 Director 의 화면 시한(서버 대기 시간 — 숫자를 화면에 박지 않는다)
+    settingsWritable,   // G12: 설정(전 법인 공용 쓰기 — fullWriteOnly)을 바꿀 수 있는 계정인가
     settingsLoadError: loadErrorView(settingsLoadError(), detail),
     registryLoadError: loadErrorView(registryLoadError(), detail),
   });
@@ -477,8 +483,8 @@ api.post('/tools/bareos-backup/settings/directors/:directorId/test', adminOnly, 
     if (saved.agent && !isDemoActive()) {
       if (fresh) return res.status(400).json({ ok: false, reason: `이 Director 는 법인 엣지 '${saved.agent}' 가 대행합니다 — 새 비밀번호는 먼저 저장한 뒤 시험하세요(엣지가 저장된 값으로 시험합니다).` });
       target = `${saved.name} (엣지 ${saved.agent} 대행)`;
+      // 정지 해제는 relayToEdge 가 접속값이 그대로일 때만 한다(sameNow) — 여기서 다시 지우지 않는다(G1 — 그 가드를 무력화했다)
       const result = await relayToEdge(saved, 'probe', {});
-      bareosAuthGuard.clearAuthStop(directorCred(saved).id);
       audit(req, 'Bareos 연결 시험', target, `성공 — ${result.director || '?'} ${result.version || ''}`);
       return res.json({ ok: true, ...result, stages: null, relay: saved.agent, demo: false });
     }
@@ -494,7 +500,8 @@ api.post('/tools/bareos-backup/settings/directors/:directorId/test', adminOnly, 
       const f = d.stages.find((x) => x.ok === false);
       return res.status(502).json({ ok: false, code: d.failed?.code || 'error', reason: `${f?.label || '연결'} 단계에서 실패했습니다 — ${d.failed?.detail || ''}`.slice(0, 600), stages: d.stages });
     }
-    if (!fresh) bareosAuthGuard.clearAuthStop(directorCred(saved).id);
+    // G1: 시험하는 사이 접속값이 바뀌었으면(다른 화면의 저장) 그 값의 정지를 풀지 않는다
+    if (!fresh) clearAuthStopIfSame(saved);
     const { director, version } = parseBanner(d.banner);
     audit(req, 'Bareos 연결 시험', target, `성공 — ${director || '?'} ${version || ''}`);
     res.json({ ok: true, director, version, tls: d.tls, clients: d.clients, clientsError: '', stages: d.stages, demo: false });
@@ -679,7 +686,9 @@ api.get('/tools/bareos-backup/vm-candidates', adminOnly, (req, res) => {
   res.json({
     ok: true, vcenterId, total: all.length, returned: rows.length, items: rows,
     writable: bareosAccess(req.user, vcenterId) === 0, mapped: !!site && !siteMissing(site).length,
-    director: dir ? { id: dir.id, name: dir.name } : null, mappingMissing: site ? siteMissing(site) : null,
+    // v2.825.1 버그 점검(G10): Director 콘솔 접속값이 덜 됐으면(주소 변경으로 비밀번호 폐기 등) 등록은 409 not-configured 로 끝난다 — 화면이 미리 알리고 잠근다
+    director: dir ? { id: dir.id, name: dir.name, ready: isDemoActive() || !!directorConn(dir).conn, missing: isDemoActive() ? [] : (directorConn(dir).missing || []) } : null,
+    mappingMissing: site ? siteMissing(site) : null,
     maxBulk: MAX_BULK, jobsLeft: Math.max(0, MAX_JOBS - listJobs().length),
   });
 });
@@ -777,7 +786,12 @@ async function cancelRoute(req, res, job) {
   }
   try {
     const out = await onDirector(jobDir(job), 'cancel', { jobid: want, name: job.bareosJob, pendingJobid: job.pending?.jobid ?? null });
-    if (out.final) { applyRunRow(job.id, out.final); return res.status(400).json({ ok: false, code: 'invalid', reason: '이미 끝난 실행입니다 — 결과를 반영했습니다.' }); }
+    if (out.final) {
+      // v2.825.1 버그 점검(G6): 백업 행(type B)만 실행 결과로 반영한다 — 같은 이름의 Copy·Migration 행을 lastRun·실패 메일에 넣지 않는다(폴러·로그 라우트와 같은 규칙)
+      const isBackup = !out.final.type || out.final.type === 'B';
+      if (isBackup) applyRunRow(job.id, out.final);
+      return res.status(400).json({ ok: false, code: 'finished', reason: isBackup ? '이미 끝난 실행입니다 — 결과를 반영했습니다.' : '이미 끝난 실행입니다(백업 실행이 아니라 반영하지 않았습니다).' });
+    }
     if (out.cleared) {
       // 포탈이 추적 중인 실행을 Director 가 모르면(재시작·다른 Director — P5) 추적만 내린다 — 그대로 두면 실행·삭제·복원이 계속 409 다.
       const note = `Director 카탈로그에 jobid ${want} 가 없어 포탈의 추적만 내렸습니다 — 실제 결과는 Director 에서 확인하세요.`;
@@ -911,6 +925,14 @@ async function restoreRoute(req, res, job) {
   const settings = effectiveSettings();
   const plan = restorePlan({ mode: b.mode, job, snapshot: store.get(), newVm: b.newVm, confirmName: b.confirmName, pluginName: settings.defaults.pluginName });
   if (!plan.ok) return res.status(400).json({ ok: false, reason: plan.issue });
+  // v2.825.1 버그 점검(G2 — 재현): 설정만 보면 아는 전제(그 잡의 Director 가 있고 접속값이 갖춰졌는가)도 OTP **앞에서** 본다 —
+  //   뒤에서 'not-configured' 로 실패하면 1회용 코드가 이미 쓰여, 설정을 고친 뒤 같은 코드는 '이미 사용됨' 이었다.
+  if (!isDemoActive()) {
+    const jd = directorById(jobDir(job), settings);
+    if (!jd) return res.status(409).json({ ok: false, code: 'not-configured', reason: '이 백업 대상의 법인 Director 가 설정에 없습니다 — 설정 › 법인별 Director 에서 확인하세요.' });
+    const miss = directorConn(jd).missing;
+    if (miss?.length) return res.status(409).json({ ok: false, code: 'not-configured', reason: `‘${jd.name}’ Director 설정이 덜 됐습니다(${miss.join('·')}) — 설정 › 법인별 Director 에서 먼저 채우세요.` });
+  }
   // OTP 는 입력·전제 검사를 통과한 뒤에 쓴다(1회용 코드를 입력 실수로 태우지 않게). Director 에 닿기 전이다.
   if (config.auth.enabled) {
     const v = verifyUserOtp(name, b.otp);

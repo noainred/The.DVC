@@ -36,13 +36,26 @@ export async function pullBareosConfigNow() { return pullShared(false); }
  */
 export function pullBareosConfigForce() { return pullShared(true); }
 
-async function pullShared(force) {
-  if (_running) {
-    const r = await _running.catch(() => null);
-    if (!force) return r || { ok: false, reason: '이전 pull 실패' };
+let _queuedForce = null;
+/**
+ * v2.825.1 버그 점검(G9 — 재현): 진행 중인 pull 을 기다린 강제 호출들은 **뒤따르는 강제 pull 하나**를 같이 쓴다(예전에는 각자 시작해 3중으로 나갔고,
+ * 먼저 끝난 쪽이 `_running` 을 지워 뒤 호출이 공유하지 못했다). `_running` 은 자기 Promise 일 때만 비운다.
+ */
+function pullShared(force) {
+  if (!_running) return startPull(force);
+  if (!force) return _running.catch(() => ({ ok: false, reason: '이전 pull 실패' }));
+  if (!_queuedForce) {
+    const after = _running.catch(() => null);
+    _queuedForce = after.then(() => { _queuedForce = null; return _running ? _running.catch(() => null).then(() => startPull(true)) : startPull(true); });
   }
-  _running = _pull({ force });
-  try { return await _running; } finally { _running = null; }
+  return _queuedForce;
+}
+function startPull(force) {
+  const p = _pull({ force });
+  _running = p;
+  const clear = () => { if (_running === p) _running = null; };
+  p.then(clear, clear);
+  return p;
 }
 
 async function _pull({ force = false } = {}) {
@@ -91,4 +104,4 @@ export function startBareosConfigPull() {
   _timer = startAdaptiveTimer(configPullMs, () => pullBareosConfigNow(), { firstDelayMs: 45_000, name: 'Bareos Director 배정 pull' });
 }
 export function bareosConfigPullStatus() { return { ...(_last || {}), ...(_recovered ? { registryRecovered: _recovered } : {}), intervalMs: configPullMs() }; }
-export function _resetForTest() { _last = null; _lastSig = ''; _recovered = null; _running = null; }
+export function _resetForTest() { _last = null; _lastSig = ''; _recovered = null; _running = null; _queuedForce = null; }

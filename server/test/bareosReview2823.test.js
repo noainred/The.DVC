@@ -129,9 +129,10 @@ test('P3: 다시 끄기는 그 순간의 원장으로 — 조회 중 사용자�
   P._resetPollerForTest();
   const x = addTarget(DS.B, DB, 'vc-b', { enabled: false });   // 원장: 꺼 둠 · Director: reload 로 다시 켜짐
   const run = addTarget(DS.B, DB, 'vc-b', { jobid: 51_000, status: 'R' });
-  let release; DS.B.gates.set('llist jobid=51000', new Promise((r) => { release = r; }));
+  // v2.825.1(G7): 대조가 먼저다 — 틱이 시작된 뒤(.jobs 응답 전) 사용자가 다시 켠다. 다시 끌 이름은 .jobs 를 읽은 뒤 그 순간의 원장으로 고른다.
+  let release; DS.B.gates.set('.jobs', new Promise((r) => { release = r; }));
   const p = P.pollOnce({ trigger: 'manual', directorIds: [DB] });
-  for (let i = 0; i < 200 && !DS.B.cmds.includes('llist jobid=51000'); i++) await sleep(10);
+  for (let i = 0; i < 200 && !DS.B.cmds.includes('.jobs'); i++) await sleep(10);
   // 사용자가 '활성' 을 눌렀다(라우트: Director enable → 원장 enabled:true)
   DS.B.jobs.get(x.bareosJob).enabled = true;
   R.patchJob(x.id, { enabled: true });

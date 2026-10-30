@@ -102,7 +102,7 @@ export function updateEdgeDirectorConn(id, { host, port, consoleName, password }
   return true;
 }
 
-/** 엣지 상태(엣지 로그 spec · 진단) — 비밀 없이 개수·id·이름만. */
+/** 엣지 사본 요약(비밀 없이 개수·id·이름 — 대행 워커 상태 bareosOpWorkerStatus 의 copies 가 쓴다 · G18). */
 export function edgeStoreView() {
   const s = loadEdgeDirectors();
   return { count: s.directors.length, directors: s.directors.map((d) => ({ id: d.id, name: d.name, configured: !!(d.host && d.consoleName && d.password) })) };

@@ -6,6 +6,7 @@
 
 ## 목차
 
+- Bareos v2.825.1 버그 점검 확정분(5축 + 반증 1인 — 2026-10-30)
 - Bareos v2.824 법인 엣지 대행 검토 확정분(5축 + 반증 2인 — 2026-10-30)
 - Bareos v2.823 법인별 Director 검토 확정분(5축 + 반증 2인 — 2026-10-30)
 - Bareos v2.823 법인별 Director 모듈 규칙(server/src/bareos/CLAUDE.md 에서 옮김 — 2026-10-30, v2.824)
@@ -1815,6 +1816,51 @@
   목록 memo(P7) · 카탈로그 memo 세대(P9) · 고아 잡(I7) · Migration 새 잡의 일시 lastRun(C2-7).
   ⚠ 정정(v2.823): 카탈로그 memo 세대(P9)는 v2.823 에 해소했다(memo 키에 Director id + `settingsRev` — 설정을 저장하면 새로 읽는다). 고아 잡(I7)은 v2.823 검토 C3 에서
   '가리키는 Director 가 설정에 없는 대상은 원장에서만 취소·삭제' 경로로 일부 해소(Director 쪽 고아 잡 탐지는 여전히 없다).
+
+## Bareos v2.825.1 버그 점검 확정분(5축 + 반증 1인 — 2026-10-30)
+
+사용자 요청 '버그 찾아서 수정'(범위 = Bareos 전체 v2.820 ~ v2.824 · 검증 = 표준 5축 + 반증 1인) + 진행 중 추가 '스크롤바 생기는거 없애줘'. 기준 cc620cc(v2.824.0).
+5축(보안·정확성·동시성·화면·통합) → 반증 1인: **기각 0건** · 확정 8(G4·G9·G10·G11·G13·G14·G16·G17) · 부분 10(G1·G2·G3·G5·G6·G7·G8·G12·G15·G18 — 대부분 심각도 하향).
+회귀 `server/test/bareosBugs2825_1.test.js`(G1~G8·G12·G15·G17 — 실제 api 라우터 + 가짜 Director TLS-PSK·가짜 SSH · OTP 켬) · `bareosBugs2825_1b.test.js`(G9·G18 — 가짜 중앙 HTTP) ·
+웹 `bareosText.test.js`(targetLocks) · `backupRunText.test.js`(탭 줄). **변이 14건 중 13건 잡힘** — 남은 1건은 G3 의 서비스 층 이름 검사(정제 층이 먼저 막아 관측되지 않는 이중 방어).
+
+- **A. Backup 현황 탭 줄 세로 스크롤바(사용자 스크린샷)**: `VeeamHeader.jsx` 탭 줄이 `overflowX:'auto'`(→ overflow-y 도 auto)인데 탭이 음수 아래 여백(-1px)으로 밑줄을 겹쳐
+  내용이 세로로 1px 넘쳤다 — 화살표형 스크롤바 환경(Windows)에서만 보이고 헤드리스 Chromium 은 그리지 않아 지난 확인에서 못 잡았다. 아래 선은 `boxShadow: inset 0 -1px 0`,
+  `overflowY:'hidden'`, 좁은 폭의 가로 스크롤바는 `.tabstrip-noscroll`(scrollbar-width none) — 탭 줄은 여전히 끌기·Shift+휠로 넘어간다.
+- **G1 연결 시험 성공이 '시험하는 사이 바뀐 접속값' 의 인증 정지를 지움(부분 — 낮음, 새 경로)**: 정지 해제는 id 로 지우는데(authGuard), 라우트가 엣지 대행은 `sameNow` 판정 뒤
+  같은 id 를 다시 지우고, 중앙 직접은 시험 시작 때 사본 기준으로 지웠다 → 그사이 저장된 틀린 비밀번호로 1회 더 로그인. `service.clearAuthStopIfSame(dir)` — 엣지 사본이 아니면
+  **지금 설정의 `directorConnSig` 가 그 접속값과 같을 때만** 해제(sessionOn·중앙 직접 시험 둘 다) · 대행 경로의 라우트 해제는 지웠다(relayToEdge 가 이미 함). '수동 성공 = 정지 해제' 는 유지.
+- **G2 복원 OTP 가 로컬 전제 실패 전에 소모(부분 — 낮음)**: Director 가 설정에 없거나 접속값이 덜 됐으면(주소 변경으로 비밀번호 폐기 등) OTP 를 쓴 뒤 409 였다 → 같은 코드 재사용 403.
+  설정만 보면 아는 전제(`directorById`·`directorConn().missing`)만 OTP **앞으로** · Director 에 묻는 확인(jobid)은 OTP 뒤 그대로(라우트 순서 불변조건 유지 · 데모는 건너뜀).
+- **G3 엣지 addJobs 성공인데 잡 이름 없음 → 원장 'undefined'(부분 — 방어 심층)**: 정제(`edgeResult.js`)가 ok 항목의 이름이 `isResourceName` 이 아니면 그 항목을 '결과 모름'(code unknown)으로 ·
+  단건 등록(`createBackupTarget`)도 이름 없는 성공을 unknown 으로 던진다(둘째 층). 현재 엣지 코드는 항상 이름을 돌려준다 — 결함·변조 엣지 대비.
+- **G4 데모 합성 jobid 충돌(확정 — 데모 전용)**: `100000 + (hash % 4000)·20` 이 이름끼리 겹쳐 `llist jobid=` 가 남의 행을 돌려줬다. 이름 정렬 + 선형 탐사 칸(`slotOf` — 잡 수가 바뀔 때만 다시 계산).
+- **G5 엣지 poll 회신 recent 상한이 앞 5000행(부분)**: jobid 내림차순으로 정렬한 뒤 자른다(최신을 남긴다 — 중앙 직접 경로는 행 상한이 없다).
+- **G6 취소의 '이미 끝난 행' 이 Copy·Migration 이어도 lastRun 반영(부분 — API 직접 호출만)**: type B(또는 type 없음)만 `applyRunRow` · 400 `finished` 안내는 유지.
+- **G7 대조 굶주림(부분 — 낮음~중간 · '영영' 은 과장)**: `ops.poll` 은 work(llist)를 다 읽어야만 대조해, 끝나지 않은 포탈 실행이 Director 예산보다 많은 동안 `.jobs`·다시 끄기·스케줄 실행 반영·실패 메일이
+  매 틱 밀렸다. 이제 **대조를 먼저**(명령 2개 + 다시 끌 이름 수) 하고 work 를 이어 읽는다 · `cut` = 대조를 요청했으면 '대조를 못 끝냈다', 아니면 'work 가 잘렸다'(회전은 attempted 가 잇는다 — C1·P1) ·
+  대조 단계 세션 오류면 work 를 건너뛰고 `fault`. 다시 끌 이름은 여전히 `.jobs` 를 읽은 뒤 그 순간의 원장(`hooks.disableNow` — P3). 기존 테스트 2건(`bareosCorp2823` ③ · `bareosReview2823` P3)은
+  명령 순서를 가정해 기다리던 대상을 지금 마지막 명령으로 바꿨다(P3 는 `.jobs` 를 붙잡은 사이 다시 켜는 것으로 — 틱 시작 사본으로 고르는 변이는 여전히 잡힌다).
+- **G8 엣지 자동 설정 되돌리기가 중앙 잠금보다 오래 감(부분 — 조건부)**: 시한 뒤 되돌리기(새 세션, 시한 없음)가 도는 동안 중앙이 '결과 모름' 으로 잠금을 풀면 같은 서버 재실행이 엣지에서 겹쳤다.
+  `edgeSetup.runSetupOp` 가 **Director id·서버 주소마다 한 번에 하나**(되돌리기까지 포함 — try/finally) · 겹치면 code `conflict`.
+- **G9 강제 배정 받기 겹침(확정)**: 진행 중인 받기를 기다린 강제 호출들이 각자 `_pull` 을 시작하고(동시 3) 먼저 끝난 쪽이 `_running` 을 지웠다. 기다린 강제 호출들은 **뒤따르는 받기 하나**를 같이 쓰고,
+  `_running` 은 자기 Promise 일 때만 비운다(진행 중이던 받기는 저장 전 본문일 수 있어 그 결과를 강제 호출에 주지 않는다 — I1·I8).
+- **G10 일괄 등록 409 사유 미표시(확정)**: `postJson` 은 409 를 던지지 않고 돌려준다 — 결과 표 없는 `ok:false` 는 `requireChanged` 로 사유를 띄운다. 후보 응답에 `director: { ready, missing }` ·
+  접속값이 덜 된 Director 의 후보는 고를 수 없고 경고 줄을 보인다(서버는 여전히 409 not-configured).
+- **G11 FD 쓰기·채우기 진행 표시 키 공유(확정 — 표시만)**: runFd 는 `'5'`. **G13 잠긴 버튼 사유(확정)**: 행 버튼·설정 버튼이 잠기면 title 로 사유(`targetLocks`) · Chromium 판독에서 찾은 기존 문구 — 고른 VM 이 없을 때 등록 버튼이 '대 등록' 이던 것을 '등록' 으로.
+- **G12 쓰기 범위 계정에 열린 버튼(부분 — UX)**: 목록 응답에 대상별 `writable`(= `bareosAccess(user, vcenterId) === 0`)·`settingsWritable` — 화면은 서버 표지로 잠그고 범위를 다시 계산하지 않는다.
+  설정 탭은 읽기 전용 안내 줄 + 저장·추가 잠금. 서버 게이트(404→403·fullWriteOnly)가 기준이다.
+- **G14 이미 끝난 실행 취소 뒤 화면 미갱신(확정)**: `act` 는 오류여도 항상 다시 읽는다.
+- **G15 중앙 재시작이 대행 큐·늦은 회신 받기를 잃음(부분 — 같은 설계 한계의 새 경로)**: 비밀을 디스크에 두지 않는 설계(최대 1회 전달)는 유지하고, ① `bareos/inflight.js runningBareosWork()` —
+  엣지 대행 상태 변경(poll 제외)·'결과 모름' 등록의 늦은 회신 받기·중앙 직접/대행 자동 설정 — 를 `upgrade/manager.js` 자동 적용 대기 목록에 넣는다(재개 불가 종류 · 상한은 스캔과 같다) ·
+  ② 엣지 워커는 상태 변경 성공 회신에 중앙이 `stale` 로 답하면 경고(엣지 로그) · ③ 등록 '결과 모름' 문구는 '(그사이 포탈이 재시작하지 않으면)' 을 붙인다.
+- **G16 dbGuide·PURPOSES 부정확(확정 — 문서)**: finishedRuns 10·retired 1000 · 자동 백업 판정(실행 필드만 지문에서 뺀다) · `agent` 필드 · 배정 받기 첫 실행 시각 · `bareos-auth-stops.json`·`bareos-mail-state.json` 등재.
+- **G17 폴러 상태 running = 타이머 유무(확정 — 표시만)**: `running` = 지금 조회 중(`_busy`), 타이머는 `started`.
+- **G18 워커 마지막 실패가 5초 뒤 빈 틱에 덮임(부분)**: `lastError`(10분 보존) 별도 칸 · 인출 응답 형식 오류도 콘솔에(변화 기준 스로틀) · 상태에 사본 수(`copies` — `edgeStoreView`).
+
+**남긴 것**: ① 수동·장애 재시작은 여전히 대행 작업 결과를 잃는다(업그레이드 자동 적용만 기다린다 — 비밀을 디스크에 두지 않는 설계) · Veeam 대행(`veeam/run/edgeOps.js`)·Veeam 워커의 같은 모양은 이번 범위 밖(별건 — 다음 점검 후보)
+② 옛 엣지(v2.824.0)는 업그레이드 전까지 work 먼저 순서로 poll 한다(회신 모양은 같다 — 중앙은 그대로 받는다) ③ `-stops` 파일의 PURPOSES 누락은 광역 기존 패턴(인증 정지 파일 19개 중 Veeam 2개만 등재) — Bareos 2개만 넣었다
+④ runJob·restore 늦은 회신 미반영(v2.824 남긴 것 그대로). **실환경 미확인**: 실제 Bareos·엣지·Windows 스크롤바(헤드리스 Chromium 은 수치로만 확인).
 
 ## Bareos v2.824 법인 엣지 대행 검토 확정분(5축 + 반증 2인 — 2026-10-30)
 

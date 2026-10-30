@@ -7,6 +7,7 @@
  * 새 작업 종류를 더하면 VALUE 표에도 넣는다(없으면 결과를 받지 않는다 — 실패로 닫힌다).
  */
 import { numOrNull } from '../util/numOrNull.js';
+import { isResourceName } from './names.js';
 
 const obj = (v) => (v && typeof v === 'object' && !Array.isArray(v) ? v : {});
 const arr = (v) => (Array.isArray(v) ? v : []);
@@ -42,7 +43,14 @@ export const VALUE = Object.freeze({
     return out;
   },
   // key: 부른 쪽이 준 순번(정수) 그대로 — 글자로 바꾸면 일괄 등록이 결과를 하나도 짝짓지 못했다(v2.824 검토 S1·C1 — 재현: Director 에 잡만 생기고 원장 0)
-  addJobs: (v) => arr(v).slice(0, 500).map((x0) => { const x = obj(x0); return { key: Number.isInteger(x.key) && x.key >= 0 && x.key < 1_000_000 ? x.key : str(x.key, 200), ok: bool(x.ok), ...(x.name ? { name: str(x.name, 128) } : {}), ...(x.code ? { code: str(x.code, 40) } : {}), ...(x.message ? { message: str(x.message, 300) } : {}) }; }),
+  // v2.825.1 버그 점검(G3 — 재현): 성공인데 잡 이름이 없거나 리소스 이름 규칙에 어긋나면 그 항목은 '결과 모름'(원장에 bareosJob 'undefined' 를 적지 않는다 —
+  //   Director 에 잡이 생겼을 수 있다). 필수 값이 없으면 성공으로 받지 않는다(C9 와 같은 규칙).
+  addJobs: (v) => arr(v).slice(0, 500).map((x0) => {
+    const x = obj(x0);
+    const key = Number.isInteger(x.key) && x.key >= 0 && x.key < 1_000_000 ? x.key : str(x.key, 200);
+    if (bool(x.ok) && !isResourceName(x.name)) return { key, ok: false, code: 'unknown', message: '엣지가 잡 이름 없이(또는 형식이 틀린 이름으로) 성공을 회신했습니다 — Director 에 잡이 생겼을 수 있습니다. Director 에서 확인하세요.' };
+    return { key, ok: bool(x.ok), ...(x.name ? { name: str(x.name, 128) } : {}), ...(x.code ? { code: str(x.code, 40) } : {}), ...(x.message ? { message: str(x.message, 300) } : {}) };
+  }),
   disableJobs: (v) => arr(v).slice(0, 500).map((x0) => { const x = obj(x0); return { name: str(x.name, 128), ok: bool(x.ok) }; }),
   runJob: (v) => posInt(v),
   setEnabled: () => null,
@@ -59,7 +67,8 @@ export const VALUE = Object.freeze({
       rows: arr(r.rows).slice(0, 100).map((x0) => { const x = obj(x0); return { jobid: posInt(x.jobid), row: rowOut(x.row) }; }).filter((x) => x.jobid),
       attempted: nonNeg(r.attempted) ?? 0,
       ...(Array.isArray(r.states) ? { states: r.states.slice(0, 20_000).filter((p) => Array.isArray(p) && typeof p[0] === 'string').map((p) => [str(p[0], 128), p[1] === true ? true : p[1] === false ? false : null]) } : {}),
-      ...(Array.isArray(r.recent) ? { recent: rows(r.recent, 5000) } : {}),
+      // G5: 상한은 두되 **최신**을 남긴다(jobid 내림차순으로 자른다 — 앞 5000행만 남기면 넘칠 때 최신 실행을 놓쳤다 · 중앙 직접 경로는 상한이 없다)
+      ...(Array.isArray(r.recent) ? { recent: rows([...r.recent].filter((x) => x && typeof x === 'object').sort((a, b) => (posInt(b.jobid) || 0) - (posInt(a.jobid) || 0)), 5000) } : {}),
       redisabled: arr(r.redisabled).slice(0, 2000).map((x) => str(x, 128)).filter(Boolean),
       itemErrors: nonNeg(r.itemErrors) ?? 0, cut: bool(r.cut), reconciled: bool(r.reconciled),
       ...(r.fault ? { fault: { code: str(f.code, 40) || 'error', message: str(f.message, 300) } } : {}),
