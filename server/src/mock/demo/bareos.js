@@ -187,7 +187,7 @@ export function demoCall(cmd, settings) {
           [row.starttime, `demo-fd JobId ${id}: python-fd: bareos-fd-vmware: (데모) 스냅샷 생성 · CBT 변경 블록 읽기`],
           ...(row.jobstatus === 'f' ? [[row.endtime, `demo-fd JobId ${id}: Fatal error: python-fd: Error creating snapshot (데모)`]] : []),
           ...(row.jobstatus === 'W' ? [[row.endtime, `demo-fd JobId ${id}: Warning: quiesce 실패 — 정지점 없이 진행(데모)`]] : []),
-          ...(row.endtime ? [[row.endtime, `bareos-dir JobId ${id}: Termination: ${row.jobstatus === 'T' ? 'Backup OK' : row.jobstatus === 'W' ? 'Backup OK -- with warnings' : row.jobstatus === 'A' ? 'Backup Canceled' : 'Backup Error'}`]] : []),
+          ...(row.endtime ? [[row.endtime, demoReport(id, row)]] : []),
         ];
         return { joblog: lines.map(([time, logtext]) => ({ time, logtext: `${logtext}\n` })) };
       }
@@ -254,4 +254,66 @@ export async function ensureBareosDemo({ listJobs, createTarget, snapshot }) {
   }
   if (n) console.log(`[mock] Bareos VM 백업 데모 대상 ${n}개 등록`);
   return { added: n };
+}
+
+/**
+ * v2.822.3: 실제 Director 의 잡 끝 보고 블록 모양(dird backup.cc — 들여쓴 '키:  값' 줄)을 만든다. 화면의 '작업 결과' 요약(bareosText.parseJobReport)이
+ * 데모에서도 실제와 같은 글을 읽게. 값은 이 행의 바이트·파일·시각에서만 만든다(지어낸 수치를 늘리지 않는다 — 압축률만 고정 표본).
+ */
+function demoReport(id, row) {
+  const bytes = Number(row.jobbytes) || 0;
+  const read = Math.round(bytes / 0.571);
+  const fmt = (n) => n.toLocaleString('en-US');
+  const gb = (n) => `${(n / 1e9).toFixed(3)} GB`;
+  const term = row.jobstatus === 'T' ? 'Backup OK' : row.jobstatus === 'W' ? 'Backup OK -- with warnings' : row.jobstatus === 'A' ? 'Backup Canceled' : 'Backup Error';
+  const lvl = row.level === 'F' ? 'Full' : row.level === 'D' ? 'Differential' : 'Incremental';
+  // 시각 두 개에서 소요·속도(실제 보고와 같은 표기) — 못 읽으면 줄을 비우지 않고 '0 secs'·'0.0 KB/s'(실제 Director 도 0 을 쓴다).
+  const secs = Math.max(0, Math.round((Date.parse(String(row.endtime).replace(' ', 'T')) - Date.parse(String(row.starttime).replace(' ', 'T'))) / 1000)) || 0;
+  const elapsed = secs >= 60 ? `${Math.floor(secs / 60)} mins ${secs % 60} secs` : `${secs} secs`;
+  const rate = `${secs ? (bytes / 1024 / secs).toFixed(1) : '0.0'} KB/s`;
+  if (row.type === 'R') {
+    const ok = row.jobstatus === 'T' || row.jobstatus === 'W';
+    return [
+      `bareos-dir JobId ${id}: Bareos bareos-dir (demo):`,
+      `  JobId:                  ${id}`,
+      `  Job:                    ${row.job || row.name}`,
+      '  Client:                 "demo-fd"',
+      `  Start time:             ${row.starttime}`,
+      `  End time:               ${row.endtime}`,
+      `  Files Expected:         ${Number(row.jobfiles) || 0}`,
+      `  Files Restored:         ${ok ? Number(row.jobfiles) || 0 : 0}`,
+      `  Bytes Restored:         ${fmt(ok ? bytes : 0)} (${gb(ok ? bytes : 0)})`,
+      '  FD Errors:              0',
+      '  SD Errors:              0',
+      `  FD termination status:  ${ok ? 'OK' : 'Error'}`,
+      `  SD termination status:  ${ok ? 'OK' : 'Error'}`,
+      `  Termination:            ${ok ? 'Restore OK' : row.jobstatus === 'A' ? 'Restore Canceled' : '*** Restore Error ***'}`,
+    ].join('\n');
+  }
+  return [
+    `bareos-dir JobId ${id}: Bareos bareos-dir (demo):`,
+    `  JobId:                  ${id}`,
+    `  Job:                    ${row.job || row.name}`,
+    `  Backup Level:           ${lvl}`,
+    '  Client:                 "demo-fd"',
+    '  Pool:                   "Full" (From Job resource)',
+    '  Storage:                "File" (From Job resource)',
+    `  Start time:             ${row.starttime}`,
+    `  End time:               ${row.endtime}`,
+    `  FD Files Written:       ${Number(row.jobfiles) || 0}`,
+    `  SD Files Written:       ${Number(row.jobfiles) || 0}`,
+    `  FD Bytes Read:          ${fmt(read)} (${gb(read)})`,
+    `  FD Bytes Written:       ${fmt(bytes)} (${gb(bytes)})`,
+    `  SD Bytes Written:       ${fmt(bytes)} (${gb(bytes)})`,
+    `  Elapsed time:           ${elapsed}`,
+    `  Rate:                   ${rate}`,
+    `  Software Compression:   ${bytes ? '42.9 % (lz4)' : 'None'}`,
+    `  Volume name(s):         ${bytes ? 'Full-0009' : ''}`,
+    `  Non-fatal FD errors:    ${Number(row.joberrors) || 0}`,
+    `  SD Errors:              ${row.jobstatus === 'W' ? 1 : 0}`,
+    `  FD termination status:  ${row.jobstatus === 'f' ? 'Fatal Error' : 'OK'}`,
+    `  SD termination status:  ${row.jobstatus === 'f' ? 'Fatal Error' : 'OK'}`,
+    '  Job triggered by:       User',
+    `  Termination:            ${term}`,
+  ].join('\n');
 }
