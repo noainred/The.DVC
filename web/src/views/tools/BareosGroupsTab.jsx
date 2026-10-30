@@ -14,6 +14,7 @@ import DataList from '../../components/DataList.jsx';
 import BoldText from '../../components/boldText.jsx';
 import { MethodBadge } from './BackupMarkIcons.jsx';
 import { fmtGb, flattenBareosTree, initialBareosOpen, shortTs } from './bareosViewText.js';
+import { relayWaitMs, outcomeUnknown, unknownOutcomeText } from './bareosText.js';
 import {
   DAY_NAMES, LEVELS, NEW_SCHEDULE, scheduleText, draftIssues, toggleDay, GROUP_FILTERS, groupFilterCounts, pickable, buildGroupTree, checkState,
   FIRE_STATE_TEXT, FIRE_STATE_TONE, fireText, fireTone, nextText, storageText,
@@ -27,11 +28,11 @@ const BTN = { padding: '4px 10px', fontSize: 12 };
 const WRAP = { whiteSpace: 'normal', overflowWrap: 'anywhere' };   // 표 셀 기본은 한 줄 — 긴 글이 표를 카드 밖으로 밀었다(v2.830 Chromium 1440 확인)
 const TONE = { ok: '#86efac', warn: '#fcd34d', bad: '#fca5a5', muted: 'var(--text-dim)' };
 const GRID = '34px minmax(220px, 2.2fr) 52px 76px 86px minmax(170px, 1.4fr) minmax(110px, 1fr)';
-/** 새 VM 등록이 들어가면 Director 응답을 기다린다 — 엣지 대행 등록 시한(서버 330초)보다 길게. */
-const SAVE_WAIT_MS = 400_000;
 const loadVc = () => { try { return localStorage.getItem(VC_KEY) || ''; } catch { return ''; } };
 const saveVc = (v) => { try { localStorage.setItem(VC_KEY, v); } catch { /* 저장 못 해도 동작 */ } };
 const errText = (e) => e?.body?.reason || e?.message || String(e);
+const MISSED_REASON = { down: '포탈이 꺼져 있었음', edited: '돌 차례에 스케줄을 고쳐 돌리지 않음' };
+const missedReason = (m) => MISSED_REASON[m?.reason] || MISSED_REASON.down;
 
 /** 폴더 체크박스 — 일부만 고르면 가운데 상태(indeterminate). */
 function TriCheck({ state, disabled, onChange, label }) {
@@ -58,6 +59,8 @@ export default function BareosGroupsTab({ d }) {
   const [busy, setBusy] = useState(() => new Set());
   const gen = useRef(0);
   const openedFor = useRef('');
+  const vcRef = useRef(vc);   // v2.830 검토 L7: 늦게 온 실행·삭제·저장 응답의 안내를 법인을 바꾼 뒤의 화면에 띄우지 않는다
+  vcRef.current = vc;
 
   useEffect(() => { fetchJson('/vcenters').then((r) => setVcs(Array.isArray(r) ? r : [])).catch(setVcErr); }, []);
   // 법인 = Director 에 묶인 vCenter(관리 도구 목록의 directors[].vcenters). 이름은 vCenter 목록에서.
@@ -113,22 +116,23 @@ export default function BareosGroupsTab({ d }) {
   const toggleOpen = (key) => setOpen((s) => { const n = new Set(s); if (n.has(key)) n.delete(key); else n.add(key); return n; });
   const mark = (id, on) => setBusy((b) => { const n = new Set(b); if (on) n.add(id); else n.delete(id); return n; });
 
+  const sameVc = (v0) => vcRef.current === v0;
   const remove = async (g) => {
     if (!window.confirm(`‘${g.name}’ 그룹을 지울까요?\n그룹만 지웁니다 — VM ${g.vmIds.length}대의 백업 대상(잡)과 백업 데이터는 그대로 남습니다.`)) return;
-    mark(g.id, true); setMsg(null);
+    const v0 = vc; mark(g.id, true); setMsg(null);
     try {
       const r = await delJson(`${BASE}/groups/${enc(g.id)}`);
       if (r?.ok === false) throw new Error(r.reason || '지우지 못했습니다.');
-      setMsg({ ok: true, text: `‘${g.name}’ 그룹을 지웠습니다(백업 대상은 남김).` });
-    } catch (e) { setMsg({ ok: false, text: `오류: ${errText(e)}` }); } finally { mark(g.id, false); load(); }
+      if (sameVc(v0)) setMsg({ ok: true, text: `‘${g.name}’ 그룹을 지웠습니다(백업 대상은 남김).` });
+    } catch (e) { if (sameVc(v0)) setMsg({ ok: false, text: `오류: ${errText(e)}` }); } finally { mark(g.id, false); if (sameVc(v0)) load(); }
   };
   const run = async (g, level) => {
-    setRunOf(null); mark(g.id, true); setMsg(null);
+    const v0 = vc; setRunOf(null); mark(g.id, true); setMsg(null);
     try {
       const r = await postJson(`${BASE}/groups/${enc(g.id)}/run`, level ? { level } : {});
       if (r?.ok === false) throw new Error(r.reason || '실행하지 못했습니다.');
-      setMsg({ ok: true, text: `‘${g.name}’ 그룹 실행을 보냈습니다 — 결과는 **마지막 실행** 칸에 곧 보입니다.` });
-    } catch (e) { setMsg({ ok: false, text: `오류: ${errText(e)}` }); } finally { mark(g.id, false); load(); }
+      if (sameVc(v0)) setMsg({ ok: true, text: `‘${g.name}’ 그룹 실행을 보냈습니다 — 결과는 **마지막 실행** 칸에 곧 보입니다.` });
+    } catch (e) { if (sameVc(v0)) setMsg({ ok: false, text: outcomeUnknown(e) ? `결과 모름: ${unknownOutcomeText('그룹 실행', e)}` : `오류: ${errText(e)}` }); } finally { mark(g.id, false); if (sameVc(v0)) load(); }
   };
 
   if (vcErr) return <ErrorBox error={vcErr} />;
@@ -177,10 +181,11 @@ export default function BareosGroupsTab({ d }) {
                         <td style={{ ...WRAP, minWidth: 140 }}><b>{g.name}</b>{g.running && <span className="badge blue" style={{ marginLeft: 6, fontSize: 11 }}>실행 중</span>}
                           <div className="muted" style={{ fontSize: 11.5 }}>{g.updatedBy || g.createdBy || '—'} · {shortTs(g.updatedAt)}</div></td>
                         <td className="right" data-sort={g.vmIds.length}>{g.vmIds.length}대</td>
-                        <td style={{ ...WRAP, fontSize: 12.5, minWidth: 150 }}>{g.scheduleText}{g.missed && <div style={{ color: TONE.warn, fontSize: 11.5 }}>놓친 회차 {g.missed.key}(포탈이 꺼져 있었음)</div>}</td>
+                        <td style={{ ...WRAP, fontSize: 12.5, minWidth: 150 }}>{g.scheduleText}{g.missed && <div style={{ color: TONE.warn, fontSize: 11.5 }}>돌리지 않은 회차 {g.missed.key}({missedReason(g.missed)})</div>}</td>
                         <td style={{ fontFamily: 'var(--mono)', fontSize: 12 }} data-sort={g.next?.at ?? ''}>{g.next ? <>{shortTs(g.next.at)}<div className="muted" style={{ fontFamily: 'inherit' }}>{g.next.level}</div></> : nextText(null)}</td>
                         <td style={{ ...WRAP, fontSize: 12.5, minWidth: 130 }}>{storageText(g, tree.siteDefaults).split(' · ').map((x, i) => <div key={i} className={i ? 'muted' : undefined}>{x}</div>)}</td>
                         <td style={{ ...WRAP, fontSize: 12.5, minWidth: 150, color: TONE[fireTone(g.lastFire)] }} data-sort={g.lastFire?.at ?? ''}>
+                          {g.sending && !g.running && <div style={{ color: TONE.warn, fontSize: 11.5 }}>{g.sending.key || '수동'} 실행을 보내는 도중 포탈이 재시작했습니다 — 일부 VM 은 보내지 않았을 수 있습니다(백업 대상 탭에서 확인).</div>}
                           {g.lastFire ? <button type="button" className="linklike" onClick={() => setFireOf(g)} style={{ color: 'inherit', background: 'none', border: 0, padding: 0, cursor: 'pointer', textAlign: 'left', font: 'inherit', textDecoration: 'underline dotted' }}>{fireText(g.lastFire)}</button> : '—'}
                         </td>
                         <td style={{ minWidth: 150 }}>
@@ -297,7 +302,7 @@ export default function BareosGroupsTab({ d }) {
       {editor && tree && (
         <GroupEditor tree={tree} group={editor.group} initialVmIds={editor.vmIds} byId={byId}
           onClose={() => setEditor(null)}
-          onSaved={(text) => { setEditor(null); setSel(new Set()); setMsg({ ok: true, text }); load(); }} />
+          onSaved={(text, ok = true) => { setEditor(null); setSel(new Set()); setMsg({ ok, text }); load(); }} />
       )}
       {runOf && <RunModal g={runOf} onClose={() => setRunOf(null)} onRun={(lv) => run(runOf, lv)} />}
       {fireOf && <FireModal g={groups.find((x) => x.id === fireOf.id) || fireOf} onClose={() => setFireOf(null)} />}
@@ -337,16 +342,23 @@ function GroupEditor({ tree, group, initialVmIds, byId, onClose, onSaved }) {
   const toRegister = members.filter((m) => !m.job && !m.missing).length;
   const doubled = sched.enabled ? members.filter((m) => m.job?.schedule) : [];
   const issues = draftIssues({ name, vmIds, schedule: sched }, { maxMembers: tree.limits?.maxMembers || 200 });
+  // 새 VM 등록이 들어가면 Director 응답을 기다린다 — 서버가 기다리는 시간(인출 대기 + 등록 회신 시한, API 값)만큼(v2.830 검토 M3 — 숫자를 박지 않는다)
+  const waitMs = toRegister > 0 ? relayWaitMs(tree.relayLimits, 'addJobs') : null;
   const save = async () => {
     setSaving(true); setResult(null);
-    const body = { name, vmIds, schedule: sched, storage, pool };
+    const body = { name, vmIds, schedule: sched, storage, pool, ...(group ? { updatedAt: group.updatedAt } : {}) };
+    const opts = waitMs ? { timeoutMs: waitMs } : {};
     try {
       const r = group
-        ? await putJson(`${BASE}/groups/${enc(group.id)}`, body, { timeoutMs: SAVE_WAIT_MS })
-        : await postJson(`${BASE}/groups`, { ...body, vcenterId: tree.vcenterId }, { timeoutMs: SAVE_WAIT_MS });
+        ? await putJson(`${BASE}/groups/${enc(group.id)}`, body, opts)
+        : await postJson(`${BASE}/groups`, { ...body, vcenterId: tree.vcenterId }, opts);
       if (r?.ok) { onSaved(savedText(r, !group)); return; }
       setResult(r || { reason: '저장하지 못했습니다.' });
-    } catch (e) { setResult({ reason: errText(e), ...(e?.body || {}) }); } finally { setSaving(false); }
+    } catch (e) {
+      // 브라우저 시한·504 — 서버는 등록·저장을 끝냈을 수 있다(실패로 단정하지 않는다). 창을 닫고 목록을 새로 읽게 한다
+      if (outcomeUnknown(e)) { onSaved(`결과 모름: ${unknownOutcomeText('그룹 저장', e)}`, false); return; }
+      setResult({ reason: errText(e), ...(e?.body || {}) });
+    } finally { setSaving(false); }
   };
   const dayBtn = (k, day, onState) => (
     <button key={`${k}${day}`} type="button" className={`tab${onState ? ' active' : ''}`} aria-pressed={onState}
@@ -405,10 +417,12 @@ function GroupEditor({ tree, group, initialVmIds, byId, onClose, onSaved }) {
           <DataList id="bareos-group-storages">{(opts?.storages || []).map((s) => <option key={s} value={s} />)}</DataList>
           <DataList id="bareos-group-pools">{(opts?.pools || []).map((s) => <option key={s} value={s} />)}</DataList>
           <span className="muted" style={{ fontSize: 12 }}>
+            {/* v2.830 검토 L5(추정 — 실환경 미확인): Job·JobDefs 의 레벨별 풀(Full·Incremental Backup Pool)이 run 의 pool 지정보다 먼저일 수 있다 */}
             {optsErr ? `Director 목록을 읽지 못했습니다(${optsErr}) — 이름을 직접 적을 수 있습니다.`
               : !opts ? 'Director 의 스토리지·풀 목록을 읽는 중…'
                 : `Director 목록: 스토리지 ${opts.storages?.length ?? '—'}개 · 풀 ${opts.pools?.length ?? '—'}개 · 실행할 때마다 이 값으로 지정합니다(잡 정의는 바뀌지 않습니다).`}
           </span>
+          <span className="muted" style={{ fontSize: 11.5 }}>풀 참고: 잡 정의(JobDefs)에 레벨별 풀(Full·Incremental Backup Pool)이 있으면 Bareos 가 그 풀을 먼저 쓸 수 있습니다(실환경 확인 전 — 첫 실행 뒤 실행 현황에서 풀을 확인하세요).</span>
         </div>
 
         <div className="card" style={{ padding: 12, display: 'grid', gap: 8, minWidth: 0 }}>

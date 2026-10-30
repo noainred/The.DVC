@@ -327,8 +327,6 @@ async function catalogOf(d, refresh) {
   _catalogMemo.set(key, { at: Date.now(), value });
   return value;
 }
-/** v2.830: 백업 그룹 편집 창(스토리지·풀 목록)도 같은 기억을 쓴다. */
-export function bareosCatalogOf(d, refresh) { return catalogOf(d, refresh); }
 
 export function registerBareosBackup(api) {
 

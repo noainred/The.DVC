@@ -44,6 +44,7 @@ const USERS = {
   op: { username: 'op', role: 'operator', scope: null },
   sadm: { username: 'sadm', role: 'admin', scope: { vcenters: ['vc-a'] } },
   wadm: { username: 'wadm', role: 'admin', scope: { writeVcenters: ['vc-b'] } },
+  demo: { username: 'thedvcdemp', role: 'admin', demoGuest: true, scope: null },   // mock 모드 내장 데모 계정(요청 문맥 admin + demoGuest)
 };
 let srv; let base; let fd; let store; let registry; let groups; let runner;
 
@@ -168,6 +169,13 @@ test('② 스토리지·풀 목록 — Director 카탈로그 · 범위 밖 404',
   assert.deepEqual(r.j.pools, ['LongTerm', 'VMwareKR']);
 });
 
+test('② 검토 H1 — 데모 계정은 스토리지·풀 목록으로 사람이 등록한 Director 에 접속하지 못한다(403 · 접속 0)', async () => {
+  D.cmds.length = 0;
+  const r = await call('demo', 'GET', '/groups/options?vcenterId=vc-a');
+  assert.equal(r.s, 403, r.t);
+  assert.equal(D.cmds.length, 0, `Director 에 닿았다: ${D.cmds.join(' | ')}`);
+});
+
 /* ───────── ③ 저장 ───────── */
 let G1 = '';
 test('③ 만들기 — 잡 없는 VM 은 Director 스케줄 없이 등록 · 등록 못 한 VM 은 빼고 사유 · 그룹 저장', async () => {
@@ -203,6 +211,9 @@ test('③ 이름 중복(대소문자 무시)·VM 두 그룹 409 · 등록된 VM 
   assert.equal(r.j.excluded.length, 1);
   r = await call('admin', 'POST', '/groups', { vcenterId: 'vc-a', name: '없는 VM', vmIds: ['vc-a:vm-404'], schedule: EVERY });
   assert.equal(r.s, 400);
+  r = await call('admin', 'POST', '/groups', { vcenterId: 'vc-a', name: 'vCLS', vmIds: ['vc-a:vm-7'], schedule: EVERY });
+  assert.equal(r.s, 400, '검토 L6 — 화면 트리만 거르면 API 로 vCLS 를 넣을 수 있었다');
+  assert.match(r.j.reason, /시스템 VM/);
   r = await call('wadm', 'POST', '/groups', { vcenterId: 'vc-a', name: '쓰기 밖', vmIds: ['vc-a:vm-6'], schedule: EVERY });
   assert.equal(r.s, 403, '조회는 되지만 쓰기 범위 밖');
   r = await call('sadm', 'POST', '/groups', { vcenterId: 'vc-b', name: '조회 밖', vmIds: ['vc-b:vm-9'], schedule: EVERY });
@@ -227,6 +238,14 @@ test('③ 고치기 — 이름·VM·스토리지 · 스케줄을 바꾸면 ancho
   assert.equal(r.j.group.schedule.time, '03:30');
   r = await call('admin', 'PUT', `/groups/${G1}`, { name: '웹 서버', vmIds: ['vc-a:vm-1'], schedule: EVERY, storage: 'bad name!' });
   assert.equal(r.s, 400);
+  // 검토 M2: 열 때의 수정 시각과 다르면(그사이 다른 화면이 고침) 덮어쓰지 않는다 — 그쪽에서 넣은 VM 이 조용히 빠졌다
+  const cur = groups.getGroup(G1);
+  r = await call('admin', 'PUT', `/groups/${G1}`, { name: '웹 서버', vmIds: ['vc-a:vm-1'], schedule: cur.schedule, storage: 'kr-sd2', pool: 'LongTerm', updatedAt: cur.updatedAt - 1 });
+  assert.equal(r.s, 409, r.t);
+  assert.match(r.j.reason, /다른 화면/);
+  assert.equal(groups.getGroup(G1).vmIds.length, 3, '거부한 저장은 아무것도 바꾸지 않는다');
+  r = await call('admin', 'PUT', `/groups/${G1}`, { name: '웹 서버', vmIds: cur.vmIds, schedule: cur.schedule, storage: 'kr-sd2', pool: 'LongTerm', updatedAt: cur.updatedAt });
+  assert.equal(r.s, 200, r.t);
 });
 
 /* ───────── ④ 실행 ───────── */
@@ -331,6 +350,81 @@ test('⑤ 놓친 회차 — 따라잡는 범위를 넘기면 돌리지 않고 mi
   assert.equal(after2.lastKey, slot.key);
 });
 
+test('⑤ 검토 L10 — 같은 Director 의 그룹은 차례로(동시에 세션을 열지 않는다) · 다른 그룹은 앞 그룹이 끝난 뒤 보낸다', async () => {
+  for (const j of registry.listJobs()) registry.patchJob(j.id, { pending: null });
+  const g1 = groups.getGroup(G1);
+  const r = await call('admin', 'POST', '/groups', { vcenterId: 'vc-b', name: '바르샤바', vmIds: ['vc-b:vm-9'], schedule: g1.schedule });
+  assert.equal(r.s, 201, r.t);
+  const G2 = r.j.group.id;
+  const slot = S.nextSlot(g1.schedule, Date.now() + 2 * 86_400_000);   // 아직 아무도 처리하지 않은 회차
+  let release;
+  D.cmds.length = 0;
+  D.gate = new Promise((res) => { release = res; });
+  D.gateFor = (c) => c.startsWith('run ');
+  const w0 = groups._groupsWritesForTest();
+  const tick = runner.groupTick(slot.at + 30_000);
+  assert.ok(await until(() => D.cmds.some((c) => c.startsWith('run '))));
+  assert.equal(groups._groupsWritesForTest() - w0, 1, '두 그룹의 회차 차지가 원장 쓰기 한 번(검토 M1 — 그룹마다 쓰면 300그룹에 3초 정지)');
+  await new Promise((res) => setTimeout(res, 300));
+  assert.equal(D.cmds.filter((c) => c.startsWith('run ')).length, 1, `앞 그룹이 붙잡힌 동안 다른 그룹의 세션이 run 을 보냈다: ${D.cmds.filter((c) => c.startsWith('run ')).join(' | ')}`);
+  D.gate = null; release();
+  const out = await tick;
+  assert.deepEqual(out.fired.sort(), [G1, G2].sort());
+  assert.equal(groups.getGroup(G2).lastFire.started, 1);
+  assert.equal(groups.getGroup(G1).lastFire.key, slot.key);
+  assert.equal(groups.getGroup(G1).sending, null, '실행 기록이 쓰이면 보내는 중 표지를 지운다');
+  await call('admin', 'DELETE', `/groups/${G2}`);
+});
+
+test('⑤ 검토 M1·L2 — 회차 차지는 한 틱에 쓰기 한 번 · 보내는 중 표지 · 실행 기록은 메모리 먼저, 파일은 모아서', () => {
+  const a = groups.addGroup({ vcenterId: 'vc-t', name: 'A', vmIds: ['t:1'], schedule: EVERY }, { now: 1000 });
+  const b = groups.addGroup({ vcenterId: 'vc-t', name: 'B', vmIds: ['t:2'], schedule: EVERY }, { now: 1000 });
+  const rev0 = groups.groupsRev();
+  const got = groups.claimSlots([{ id: a.id, key: '2099-01-01 02:10' }, { id: b.id, key: '2099-01-01 02:10' }, { id: 'nope', key: 'x' }]);
+  assert.deepEqual(got.sort(), [a.id, b.id].sort());
+  assert.equal(groups.groupsRev() - rev0, 1, '두 그룹을 한 번의 쓰기로');
+  const disk = () => JSON.parse(fs.readFileSync(path.join(tmp, 'bareos-groups.json'), 'utf8')).groups.find((x) => x.id === a.id);
+  assert.equal(disk().sending.key, '2099-01-01 02:10', '보내는 중 표지도 같은 쓰기에(재시작하면 남는다)');
+  assert.deepEqual(groups.claimSlots([{ id: a.id, key: '2099-01-01 02:10' }]), [], '같은 회차는 다시 차지하지 않는다');
+  assert.deepEqual(groups.claimSlots([{ id: a.id, key: '2098-12-31 02:10' }]), [], '더 앞선 회차도(시계 역행 — 검토 L1)');
+  groups.recordFire(a.id, { key: '2099-01-01 02:10', at: 5, trigger: 'timer', total: 1, started: 1, items: [] });
+  assert.equal(groups.getGroup(a.id).sending, null);
+  assert.equal(disk().sending?.key, '2099-01-01 02:10', '파일은 아직(모아서 쓴다)');
+  groups._flushGroupsForTest();
+  assert.equal(disk().sending, null);
+  assert.equal(disk().lastFire.started, 1);
+  groups.deleteGroup(a.id); groups.deleteGroup(b.id);
+});
+
+test('⑤ 검토 M4 — 돌 차례인 회차를 틱 전에 스케줄을 고치면 조용히 버리지 않고 남긴다 · 검토 L1 시계 역행', () => {
+  const slot = new Date(2026, 9, 28, 2, 0).getTime();
+  const sched = { ...EVERY, time: '02:00' };
+  const g = groups.addGroup({ vcenterId: 'vc-t', name: 'M4', vmIds: ['t:9'], schedule: sched }, { now: slot - 3_600_000 });
+  const after = groups.updateGroup(g.id, { name: 'M4', vmIds: ['t:9'], schedule: { ...sched, fullDays: [3] } }, { now: slot + 10_000 });
+  assert.equal(after.missed?.reason, 'edited');
+  assert.equal(after.missed.key, '2026-10-28 02:00');
+  assert.equal(after.lastKey, '2026-10-28 02:00');
+  assert.equal(S.decideFire(after, slot + 25_000).action, 'none');
+  // 시계 역행: 이미 오늘 회차를 처리했으면(lastKey) 어제 회차를 '놓침' 으로 다시 보지 않는다(그러면 오늘 회차가 다시 나갔다)
+  assert.equal(S.decideFire({ schedule: S.normSchedule(EVERY), anchorAt: 0, lastKey: '2026-10-28 02:10' }, new Date(2026, 9, 28, 2, 9, 55).getTime()).action, 'none');
+  groups.deleteGroup(g.id);
+});
+
+test('⑥ 검토 L3·L4 — 보내지 못함 · 실패 · 결과 모름을 나눈다(순수)', () => {
+  assert.equal(runner.chunkErrorState({ code: 'auth-stopped' }), 'notsent');
+  assert.equal(runner.chunkErrorState({ code: 'connect' }), 'notsent');
+  assert.equal(runner.chunkErrorState({ code: 'error', notSent: true }), 'notsent');
+  assert.equal(runner.chunkErrorState({ code: 'unknown' }), 'unknown');
+  assert.equal(runner.chunkErrorState({ code: 'timeout' }), 'unknown');
+  assert.equal(runner.chunkErrorState({ code: 'error' }), 'failed');
+  assert.equal(runner.itemState({ ok: true, jobid: 5 }), 'started');
+  assert.equal(runner.itemState({ ok: false, code: 'closed' }), 'unknown', '명령 도중 끊김 — Director 가 받았을 수 있다');
+  assert.equal(runner.itemState({ ok: false, code: 'skipped' }), 'notsent');
+  assert.equal(runner.itemState({ ok: false, code: 'invalid' }), 'failed');
+  assert.equal(runner.itemState({ ok: false, code: 'jsonrpc' }), 'failed', 'Director 가 오류 객체로 거부 = 실행 안 됨');
+  assert.equal(runner.itemState(undefined), 'unknown');
+});
+
 /* ───────── ⑥ 엣지·작업 표 ───────── */
 test('⑥ 엣지 회신 정제 — runJobs 성공인데 jobid 없음은 결과 모름 · 숫자 key 보존', async () => {
   const { sanitizeEdgeResult } = await import('../src/bareos/edgeResult.js');
@@ -344,7 +438,8 @@ test('⑥ 엣지 회신 정제 — runJobs 성공인데 jobid 없음은 결과 �
   const { MUTATING } = await import('../src/bareos/ops.js');
   assert.ok(RESULT_MS.runJobs > RESULT_MS.runJob);
   assert.ok(MUTATING.has('runJobs'), '가져간 뒤 미회신은 결과 모름(다시 보내지 않음)');
-  assert.ok(runner.RUN_DEADLINE_MS > RESULT_MS.runJobs, '중앙 시한은 엣지 회신 시한보다 길다(중앙이 먼저 끊지 않게)');
+  const { PICKUP_MS } = await import('../src/bareos/edgeOps.js');
+  assert.ok(runner.RUN_DEADLINE_MS > PICKUP_MS + RESULT_MS.runJobs, '중앙 시한은 엣지 인출 대기 + 회신 시한보다 길다(검토 M3 — 회신 시한만 보면 인출이 늦을 때 jobid 를 잃었다)');
 });
 
 test('⑥ ops.runJobs — 세션이 끊기면 남은 항목은 보내지 않고 건너뜀 · runJob 은 스토리지·풀 이름을 검사', async () => {
@@ -365,6 +460,7 @@ test('⑥ ops.runJobs — 세션이 끊기면 남은 항목은 보내지 않고 
 /* ───────── 손상·삭제 ───────── */
 test('손상된 그룹 원장 — 보존 · 저장 503 · 예약 틱은 아무것도 보내지 않음 · 트리는 손상 표시', async () => {
   const f = path.join(tmp, 'bareos-groups.json');
+  groups._flushGroupsForTest();
   const good = fs.readFileSync(f, 'utf8');
   fs.writeFileSync(f, '{ broken');
   groups._resetGroupsForTest();

@@ -102,21 +102,23 @@ export function checkState(ids, sel) {
 }
 
 /* ── 실행 결과 문구 ── */
-export const FIRE_STATE_TEXT = Object.freeze({ started: '시작', skipped: '건너뜀', failed: '실패', unknown: '결과 모름' });
-export const FIRE_STATE_TONE = Object.freeze({ started: 'ok', skipped: 'muted', failed: 'bad', unknown: 'warn' });
+// v2.830 검토 L3·L4: '보내지 못함'(Director 에 닿기 전 — 인증 정지·접속 실패·옛 엣지)과 '실패'(Director 가 거부)·'결과 모름'(명령 도중 끊김)을 나눈다
+export const FIRE_STATE_TEXT = Object.freeze({ started: '시작', skipped: '건너뜀', notsent: '보내지 못함', failed: '실패', unknown: '결과 모름' });
+export const FIRE_STATE_TONE = Object.freeze({ started: 'ok', skipped: 'muted', notsent: 'bad', failed: 'bad', unknown: 'warn' });
+const FIRE_COUNT_KEYS = Object.freeze([['started', 'started'], ['skipped', 'skipped'], ['notSent', 'notsent'], ['failed', 'failed'], ['unknown', 'unknown']]);
 /** 마지막 실행 한 줄 — '10-31 02:10 예약 · 시작 3 · 건너뜀 1'(0 인 칸은 뺀다). 실행 기록이 없으면 '—'. */
 export function fireText(f) {
   if (!f) return '—';
   const parts = [`${shortTs(f.at)} ${f.trigger === 'timer' ? '예약' : '수동'}`];
   if (f.error) parts.push(`실패 — ${f.error}`);
-  for (const k of ['started', 'skipped', 'failed', 'unknown']) if (f[k] > 0) parts.push(`${FIRE_STATE_TEXT[k]} ${f[k]}`);
+  for (const [k, st] of FIRE_COUNT_KEYS) if (f[k] > 0) parts.push(`${FIRE_STATE_TEXT[st]} ${f[k]}`);
   if (parts.length === 1) parts.push(`VM ${f.total ?? 0}대`);
   return parts.join(' · ');
 }
 /** 마지막 실행의 색 — 실패가 있으면 bad, 결과 모름이 있으면 warn, 시작이 있으면 ok, 그 밖 muted. */
 export function fireTone(f) {
   if (!f) return 'muted';
-  if (f.error || f.failed > 0) return 'bad';
+  if (f.error || f.failed > 0 || f.notSent > 0) return 'bad';
   if (f.unknown > 0) return 'warn';
   return f.started > 0 ? 'ok' : 'muted';
 }

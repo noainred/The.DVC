@@ -10,7 +10,8 @@
  *   anchorAt,                               // 스케줄을 만들거나 바꾼 시각 — 그 앞의 회차는 돌리지 않는다
  *   lastKey,                                // 마지막으로 처리한 회차 열쇠(돌렸거나 놓침) — 같은 회차를 두 번 돌리지 않는다(**보내기 전에** 기록)
  *   lastFire: { key, at, trigger, by, level, total, started, skipped, failed, unknown, items[] } | null,
- *   missed: { key, at } | null,             // 포탈이 꺼져 있어 따라잡는 범위를 넘긴 회차
+ *   missed: { key, at, reason } | null,     // 돌리지 않은 회차 — reason 'down'(포탈이 꺼져 있어 따라잡는 범위를 넘김) · 'edited'(돌 차례에 스케줄을 고침)
+ *   sending: { key, at, trigger } | null,   // 보내는 중 표지(차지할 때 함께 쓴다) — 실행 기록(lastFire)이 쓰이면 지운다. 남아 있으면 보내는 도중 재시작한 것
  *   createdBy, createdAt, updatedBy, updatedAt,
  * }
  */
@@ -21,7 +22,7 @@ import { config } from '../config.js';
 import { atomicWriteFileSync, preserveCorrupt, safeLoadText } from '../util/atomicWrite.js';
 import { makeLoadError } from '../util/registryCore.js';
 import { isResourceName } from './names.js';
-import { normSchedule } from './groupSchedule.js';
+import { normSchedule, decideFire } from './groupSchedule.js';
 
 export const FILE_NAME = 'bareos-groups.json';
 const FILE = () => path.join(config.configDir, 'bareos-groups.json'); // 문자열 그대로 — scripts/config-doc.mjs 가 이 모양으로 파일을 찾는다
@@ -60,7 +61,11 @@ function load() {
 export function groupsLoadError() { load(); return _loadErr.get(); }
 export function groupsRev() { return _rev; }
 
+let _writes = 0;
+/** 테스트 — 원장 파일 쓰기 횟수(한 틱의 회차 차지가 쓰기 한 번인지 — 검토 M1). */
+export const _groupsWritesForTest = () => _writes;
 function persist() {
+  _writes += 1;
   const db = load();
   atomicWriteFileSync(FILE(), JSON.stringify({ version: 1, groups: db.groups }), { mode: 0o600 });
   _rev += 1;
@@ -144,14 +149,24 @@ export function addGroup(input, { by = '', directorId = '', now = Date.now() } =
  * 고치기 — 이름·VM·스케줄·스토리지·풀. 스케줄이 바뀌면 anchorAt 을 지금으로(그 앞 회차는 새 스케줄의 회차가 아니다).
  * @returns {object|null} 없으면 null
  */
-export function updateGroup(id, input, { by = '', now = Date.now() } = {}) {
+export function updateGroup(id, input, { by = '', now = Date.now(), expectUpdatedAt = null } = {}) {
   return mutate((db) => {
     const g = db.groups.find((x) => x.id === id);
     if (!g) return null;
+    // v2.830 검토 M2: 편집 창은 열 때의 값 전체를 보낸다 — 그사이 다른 화면이 고쳤으면 덮어쓰지 않는다(그쪽에서 넣은 VM 이 조용히 빠졌다)
+    if (expectUpdatedAt != null && g.updatedAt !== expectUpdatedAt) {
+      throw fail('conflict', `그사이 다른 화면에서 ‘${g.name}’ 그룹을 고쳤습니다(${g.updatedBy || '?'}) — 새로 고친 뒤 다시 저장하세요(그대로 덮어쓰면 그쪽에서 넣은 VM 이 빠질 수 있습니다).`);
+    }
     const v = checkGroupInput({ ...input, vcenterId: g.vcenterId }, { selfId: id });
     const schedChanged = JSON.stringify(v.schedule) !== JSON.stringify(g.schedule);
+    if (schedChanged) {
+      // v2.830 검토 M4: 옛 스케줄로 지금 돌 차례였던 회차(틱이 아직 처리하지 않음)를 조용히 버리지 않는다 — 돌리지 않았다고 남긴다
+      const d = decideFire(g, now);
+      if (d.action === 'fire' || d.action === 'miss') { g.lastKey = d.slot.key; g.missed = { key: d.slot.key, at: d.slot.at, reason: d.action === 'fire' ? 'edited' : 'down' }; }
+      else g.missed = null;
+      g.anchorAt = now;
+    }
     Object.assign(g, { name: v.name, vmIds: v.vmIds, schedule: v.schedule, storage: v.storage, pool: v.pool, updatedBy: String(by), updatedAt: now });
-    if (schedChanged) { g.anchorAt = now; g.missed = null; }
     return copy(g);
   });
 }
@@ -166,49 +181,86 @@ export function deleteGroup(id) {
 }
 
 /**
- * 이 회차를 차지한다 — 실행을 **보내기 전에** 파일에 남긴다(보낸 뒤 쓰기 전에 포탈이 죽어도 다시 켜졌을 때 같은 회차를 또 돌리지 않게 — 한 번 이하).
- * 이미 그 회차면·그룹이 없으면·쓰지 못하면 false(그때는 보내지 않는다).
+ * 이번 틱에 돌릴 회차들을 **한 번의 쓰기로** 차지한다 — 실행을 보내기 전에 파일에 남긴다(보낸 뒤 쓰기 전에 포탈이 죽어도 같은 회차를 다시 보내지 않게 — 한 번 이하).
+ * v2.830 검토 M1(실측): 그룹마다 쓰면 같은 분에 300그룹이 몰릴 때 원장(691KB) 동기 쓰기 300번 = 약 3초 이벤트 루프 정지였다.
+ * 이미 그 회차(또는 더 뒤)면·그룹이 없으면 건너뛴다. 쓰지 못하면 [] — 그때는 아무것도 보내지 않는다.
+ * @param {{ id, key, trigger? }[]} list
+ * @returns {string[]} 차지한 그룹 id
  */
-export function claimSlot(id, key) {
+export function claimSlots(list, now = Date.now()) {
+  const db = load();
+  const want = (Array.isArray(list) ? list : []).filter((c) => { const g = db.groups.find((x) => x.id === c.id); return g && !(g.lastKey && c.key <= g.lastKey); });
+  if (!want.length) return [];
   try {
-    return mutate((db) => {
-      const g = db.groups.find((x) => x.id === id);
-      if (!g || g.lastKey === key) return false;
-      g.lastKey = key;
-      return true;
+    return mutate((d) => {
+      const got = [];
+      for (const c of want) {
+        const g = d.groups.find((x) => x.id === c.id);
+        if (!g || (g.lastKey && c.key <= g.lastKey)) continue;
+        g.lastKey = c.key;
+        g.sending = { key: c.key, at: now, trigger: c.trigger || 'timer' };
+        got.push(g.id);
+      }
+      return got;
     });
   } catch (e) {
     console.warn(`[bareos] 백업 그룹 회차 기록 실패 — 이번 회차는 보내지 않습니다: ${String(e?.message || e).slice(0, 200)}`);
-    return false;
+    return [];
   }
 }
+/** 한 그룹 회차 차지(호환 — claimSlots 한 줄). */
+export function claimSlot(id, key) { return claimSlots([{ id, key }]).includes(id); }
 
-/** 따라잡는 범위를 넘긴 회차 — 돌리지 않고 남긴다(lastKey 도 그 회차로 — 틱마다 다시 보지 않게). */
-export function recordMiss(id, slot) {
+/** 돌리지 않은 회차들(포탈이 꺼져 따라잡는 범위를 넘김) — 한 번의 쓰기로. lastKey 도 그 회차로(틱마다 다시 보지 않게). @returns {string[]} 기록한 id */
+export function recordMisses(list) {
+  const db = load();
+  const want = (Array.isArray(list) ? list : []).filter((c) => { const g = db.groups.find((x) => x.id === c.id); return g && !(g.lastKey && c.slot.key <= g.lastKey); });
+  if (!want.length) return [];
   try {
-    return mutate((db) => {
-      const g = db.groups.find((x) => x.id === id);
-      if (!g || g.lastKey === slot.key) return false;
-      g.lastKey = slot.key;
-      g.missed = { key: slot.key, at: slot.at };
-      return true;
+    return mutate((d) => {
+      const got = [];
+      for (const c of want) {
+        const g = d.groups.find((x) => x.id === c.id);
+        if (!g || (g.lastKey && c.slot.key <= g.lastKey)) continue;
+        g.lastKey = c.slot.key;
+        g.missed = { key: c.slot.key, at: c.slot.at, reason: c.reason || 'down' };
+        got.push(g.id);
+      }
+      return got;
     });
-  } catch { return false; }
+  } catch { return []; }
+}
+export function recordMiss(id, slot) { return recordMisses([{ id, slot }]).includes(id); }
+
+/** 수동 실행 시작 표지(보내는 도중 재시작하면 남는다). 쓰지 못해도 실행은 한다(흔적일 뿐 — 실패는 콘솔에). */
+export function markSending(id, sending) {
+  try {
+    return mutate((db) => { const g = db.groups.find((x) => x.id === id); if (!g) return false; g.sending = { ...sending }; return true; });
+  } catch (e) { console.warn(`[bareos] 백업 그룹 실행 표지를 쓰지 못했습니다: ${String(e?.message || e).slice(0, 200)}`); return false; }
 }
 
-/** 실행 결과(예약·수동) — 항목은 FIRE_ITEMS_KEEP 개까지. 쓰기 실패는 삼킨다(실행은 이미 보냈다 — 원장 잡의 pending 이 진실). */
+/**
+ * 실행 결과(예약·수동) — 항목은 FIRE_ITEMS_KEEP 개까지. 메모리에 바로 반영하고 파일은 FIRE_FLUSH_MS 뒤 한 번에 쓴다
+ * (v2.830 검토 M1 — 같은 분에 끝나는 그룹 수백 개가 각자 원장 전체를 동기로 쓰지 않게). 보내는 중 표지(sending)를 지운다.
+ * 실행은 이미 보냈다 — 원장 잡의 pending 이 진실이고, 이 기록은 화면용이다(쓰기 실패는 콘솔에).
+ */
+export const FIRE_FLUSH_MS = 1000;
+let _fireTimer = null;
+function flushFires() {
+  _fireTimer = null;
+  try { if (_db && !_loadErr.get()) persist(); } catch (e) { console.warn(`[bareos] 백업 그룹 실행 결과를 기록하지 못했습니다: ${String(e?.message || e).slice(0, 200)}`); }
+}
 export function recordFire(id, fire) {
-  try {
-    return mutate((db) => {
-      const g = db.groups.find((x) => x.id === id);
-      if (!g) return false;
-      g.lastFire = { ...fire, items: (Array.isArray(fire.items) ? fire.items : []).slice(0, FIRE_ITEMS_KEEP) };
-      return true;
-    });
-  } catch (e) {
-    console.warn(`[bareos] 백업 그룹 실행 결과를 기록하지 못했습니다: ${String(e?.message || e).slice(0, 200)}`);
-    return false;
-  }
+  const db = load();
+  if (_loadErr.get()) return false;
+  const g = db.groups.find((x) => x.id === id);
+  if (!g) return false;
+  g.lastFire = { ...fire, items: (Array.isArray(fire.items) ? fire.items : []).slice(0, FIRE_ITEMS_KEEP) };
+  g.sending = null;
+  _rev += 1;
+  if (!_fireTimer) { _fireTimer = setTimeout(flushFires, FIRE_FLUSH_MS); _fireTimer.unref?.(); }
+  return true;
 }
+export function _flushGroupsForTest() { if (_fireTimer) { clearTimeout(_fireTimer); flushFires(); } }
 
-export function _resetGroupsForTest() { _db = null; _loadErr.clear(); _rev = 0; }
+export function _resetGroupsForTest() { if (_fireTimer) { clearTimeout(_fireTimer); _fireTimer = null; } _db = null; _loadErr.clear(); _rev = 0; }

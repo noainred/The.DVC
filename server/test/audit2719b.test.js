@@ -66,7 +66,9 @@ function liveGetDecls() {
     decls.forEach((d, i) => {
       if (d.method !== 'get') return;
       const body = src.slice(d.at, i + 1 < decls.length ? decls[i + 1].at : src.length);
-      const callees = LIVE_CALLEES.filter((c) => body.includes(c));
+      // v2.830 검토 H1(재현): 대소문자를 구분하면 'bareosCatalogOf(' 같은 감싼 이름(접두어 + 대문자)을 놓쳤다 — 소문자로 비교한다
+      const low = body.toLowerCase();
+      const callees = LIVE_CALLEES.filter((c) => low.includes(c.toLowerCase()));
       if (!callees.length) return;
       const callee = callees[0];
       const ci = body.indexOf(callee);

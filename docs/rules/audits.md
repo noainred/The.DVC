@@ -6,6 +6,7 @@
 
 ## 목차
 
+- Bareos v2.830 백업 그룹 모듈 규칙·검토 확정분(반증 1인 — 2026-10-31)
 - Bareos v2.825.1 버그 점검 확정분(5축 + 반증 1인 — 2026-10-30)
 - Bareos v2.824 법인 엣지 대행 검토 확정분(5축 + 반증 2인 — 2026-10-30)
 - Bareos v2.823 법인별 Director 검토 확정분(5축 + 반증 2인 — 2026-10-30)
@@ -1816,6 +1817,31 @@
   목록 memo(P7) · 카탈로그 memo 세대(P9) · 고아 잡(I7) · Migration 새 잡의 일시 lastRun(C2-7).
   ⚠ 정정(v2.823): 카탈로그 memo 세대(P9)는 v2.823 에 해소했다(memo 키에 Director id + `settingsRev` — 설정을 저장하면 새로 읽는다). 고아 잡(I7)은 v2.823 검토 C3 에서
   '가리키는 Director 가 설정에 없는 대상은 원장에서만 취소·삭제' 경로로 일부 해소(Director 쪽 고아 잡 탐지는 여전히 없다).
+
+## Bareos v2.830 백업 그룹 모듈 규칙·검토 확정분(반증 1인 — 2026-10-31)
+
+사용자 요청 '전체 VM 에서 고른 VM 을 그룹으로 — 이름·스케줄·스토리지 지정, 나중에 수정' · 사용자 결정: 스케줄은 **포탈이 실행** · 관리 도구 새 탭 · 법인 전체 VM · 전체 검증.
+회귀 `server/test/bareosGroups2830.test.js`(22건 · 변이 24건 전부 잡힘) · `web/src/views/tools/bareosGroupText.test.js`.
+
+- **왜 포탈이 실행하나**: Bareos 에는 만든 잡의 Schedule 을 바꾸는 콘솔 명령이 없다(`configure add` 만). 그룹 잡은 **Director 스케줄 없이** 등록하고(`createBackupTargets({ schedule: '' })`),
+  시각이 되면 포탈이 `run job=… level=… [storage=… pool=…] yes` 를 보낸다. 이미 Director 스케줄이 있는 잡을 그룹에 넣으면 두 번 돈다 — 저장 응답(`doubleScheduled`)·편집 창이 경고만 한다(고칠 콘솔 명령이 없다).
+- **회차 판정은 `groupSchedule.js` 하나**(웹 `bareosGroupText.scheduleText` 와 같은 글자 — 테스트 대조). 시각은 **포탈 서버 현지 시각**. 회차 열쇠 'YYYY-MM-DD HH:MM' 은 글자 순서 = 시각 순서 —
+  `lastKey` 보다 앞선 회차는 보지 않는다(L1: 시계 역행 시 어제 회차가 lastKey 를 덮어 오늘 회차가 다시 나갔다). 스케줄을 만들거나 바꾼 시각(`anchorAt`) 앞의 회차는 돌리지 않는다.
+  따라잡기 6시간(`CATCHUP_MS`) — 넘긴 회차는 `missed{reason:'down'}`. 돌 차례인 회차를 틱 전에 스케줄을 고치면 `missed{reason:'edited'}` 로 남긴다(M4 — 조용히 사라졌다).
+- **한 번 이하**: 회차는 실행을 **보내기 전에** 원장 파일에 기록한다(`claimSlots` — 보내는 중 표지 `sending` 도 같은 쓰기). 한 틱의 차지·놓침은 **쓰기 한 번**(M1 실측: 그룹마다 쓰면 300그룹 691KB 에 3초 정지).
+  실행 결과(`recordFire`)는 메모리 먼저, 파일은 `FIRE_FLUSH_MS` 뒤 모아서. `sending` 이 남아 있으면 보내는 도중 재시작한 것(화면이 알린다 — L2).
+- **같은 Director 는 차례로**(L10 — 같은 분에 그룹 수십 개가 한 Director 에 세션을 동시에 열면 콘솔 동시 접속 상한에 걸린다, 상한 값 실환경 미확인) · 한 그룹 안은 `runJobs` 세션 하나 · 50개씩.
+- **결과 상태는 다섯**: started · skipped(이미 실행 중·비활성·Director 에 없음·데모/실제 섞임·잡 없음·잠김) · **notsent**(세션 전 — 인증 정지·접속 실패·옛 엣지: 잡의 lastError 를 덮지 않는다 — L3) ·
+  failed(Director 가 거부 — `jsonrpc` 오류 객체 포함) · **unknown**(엣지 결과 모름 · 명령 도중 timeout·closed·aborted·protocol·too-large — Director 가 받았을 수 있다 · L4). 0 으로 섞지 않고 따로 센다.
+- **시한**: 중앙 시한 `RUN_DEADLINE_MS` = 엣지 **인출 대기 + 회신 시한** + 여유(M3 — 회신 시한만 보면 인출이 늦을 때 jobid 를 잃었다). 화면의 저장 대기는 서버 `relayLimits`(숫자를 박지 않는다) · 브라우저 시한은 '결과 모름'.
+- **원장 `bareos-groups.json`**: 원자적 쓰기 · 손상 보존 · 못 읽으면 저장 503·예약 틱 정지 · 쓰기 실패면 메모리도 되돌린다. VM 하나는 그룹 하나(저장하는 순간 다시 본다 — 동시 저장 경합).
+  수정은 열 때의 `updatedAt` 과 대조해 다르면 409(M2 — 다른 화면이 넣은 VM 이 조용히 빠졌다). 시스템 VM(템플릿·vCLS)은 서버도 거부(L6).
+- **범위·데모**: 6개 라우트 모두 조회 밖 404 → 쓰기 밖 403(`bareosAccess`). 스토리지·풀 목록 GET 은 `readDirector({ demoOnly: isDemoGuest(req.user) })` 모양(**H1 확인** — 처음엔 데모 필터 없이 카탈로그를 읽어 데모 계정이 사람이 등록한 Director 에 닿았다).
+  `audit2719b` 스윕은 실접속 함수 이름을 **대소문자 무시**로 찾는다(감싼 이름 `bareosCatalogOf(` 를 놓쳤다).
+- **잠금**: 대상별 잠금은 `jobLocks.js` 하나(라우트 oneAtATime 과 그룹 실행) — 그룹이 보내는 사이 같은 대상 삭제·실행은 409. 그룹 실행 중에는 업그레이드 자동 적용이 기다린다(`inflight.js`).
+- 남긴 것(정직 기록): ① **풀 지정**은 Job·JobDefs 의 레벨별 풀(Full·Incremental Backup Pool)이 있으면 Bareos 가 그쪽을 먼저 쓸 수 있다(L5 — 실환경 미확인, 화면이 안내한다 · `tools/bareos-probe.js` 로 확인할 것).
+  ② 엣지 '결과 모름' 뒤 늦게 등록된 VM 은 그룹에 들어가지 않는다(L8 — 다시 저장하면 들어간다). ③ 스토리지·풀 목록은 조회 범위 안 법인 Director 의 이름만 범위 계정에도 보인다(L9 — 1:1:1 이라 그 법인의 이름).
+  ④ 포탈이 꺼져 있으면 예약 백업이 돌지 않는다(설계 대가 — 6시간 따라잡기).
 
 ## Bareos v2.825.1 버그 점검 확정분(5축 + 반증 1인 — 2026-10-30)
 

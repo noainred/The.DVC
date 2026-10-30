@@ -3,10 +3,12 @@
 // 스케줄은 포탈이 돌린다(bareos/groupRunner.js — Bareos 에 잡 스케줄 수정 명령이 없어 '나중에 수정' 을 지키려면 이 방식뿐이다).
 // 그룹 VM 중 잡이 없는 VM 은 저장 때 **Director 스케줄 없이** 등록한다(그룹 스케줄과 Director 스케줄이 겹쳐 두 번 돌지 않게).
 import { requireRole } from '../../auth/auth.js';
+import { isDemoGuest } from '../../auth/demoGuest.js';
 import { store } from '../../store.js';
 import { logAudit } from '../../audit.js';
-import { bareosAccess, sendBareosErr, bareosCatalogOf, MAX_BULK } from './bareosBackup.js';
-import { effectiveSettings, isDemoActive, eligibility, createBackupTargets } from '../../bareos/service.js';
+import { bareosAccess, sendBareosErr, MAX_BULK } from './bareosBackup.js';
+import { effectiveSettings, isDemoActive, eligibility, createBackupTargets, onDirector } from '../../bareos/service.js';
+import { relayLimits } from '../../bareos/edgeOps.js';
 import { directorById, directorConn, siteMissing } from '../../bareos/settings.js';
 import { jobDigests, MAX_JOBS, registryLoadError } from '../../bareos/registry.js';
 import { listGroups, getGroup, addGroup, updateGroup, deleteGroup, checkGroupInput, groupsLoadError, MAX_MEMBERS, MAX_GROUPS } from '../../bareos/groups.js';
@@ -17,6 +19,11 @@ import { getMarks, marksUnreadable } from '../../veeam/backupMarks.js';
 import { isSystemVm } from '../../veeam/backupStatus.js';
 
 const adminOnly = requireRole('admin');
+/**
+ * 조회(GET)용 Director 작업 — 데모 계정은 데모 Director 일 때만 접속한다(bareosBackup.js 와 같은 모양 — audit2719b 스윕이 대조).
+ * v2.830 검토 H1(확인): 처음에는 카탈로그 헬퍼를 데모 필터 없이 불러 데모 계정이 사람이 등록한 Director 에 접속할 수 있었다.
+ */
+const readDirector = ({ demoOnly = false } = {}, directorId, kind, args) => onDirector(directorId, kind, args, { demoOnly });
 const READ_ONLY = '조회 전용 범위 — 이 vCenter 는 수정 권한이 없습니다(Bareos 백업 그룹은 쓰기 범위가 필요합니다).';
 const NOT_FOUND = '백업 그룹을 찾을 수 없습니다.';
 const gbOf = (v) => (typeof v === 'number' && Number.isFinite(v) && v >= 0 ? Math.round(v * 10) / 10 : null);
@@ -47,11 +54,13 @@ function siteInfo(vcenterId, settings) {
  * @returns {{ need: string[], unknown: string[] }}
  */
 function membersPlan(vcenterId, vmIds) {
-  const inv = new Set((store.get()?.vms || []).filter((v) => v.vcenterId === vcenterId).map((v) => v.id));
+  const vms = (store.get()?.vms || []).filter((v) => v.vcenterId === vcenterId);
+  const inv = new Set(vms.map((v) => v.id));
+  const system = new Set(vms.filter(isSystemVm).map((v) => v.id));   // v2.830 검토 L6: 화면 트리만 거르면 API 로 vCLS 를 넣을 수 있었다
   const jobs = new Set(jobDigests().filter((j) => j.vcenterId === vcenterId).map((j) => j.vmId));
   const unknown = vmIds.filter((id) => !inv.has(id) && !jobs.has(id));
   const need = vmIds.filter((id) => !jobs.has(id) && inv.has(id));
-  return { need, unknown };
+  return { need, unknown, system: vmIds.filter((id) => system.has(id)) };
 }
 
 /**
@@ -93,7 +102,8 @@ function precheck(req, res, vcenterId, { selfId = '' } = {}) {
   if (registryLoadError()) { res.status(503).json({ ok: false, reason: '백업 대상 원장을 읽지 못한 상태라 저장하지 않습니다(손상본 보존).' }); return null; }
   let v;
   try { v = checkGroupInput({ ...(req.body || {}), vcenterId }, { selfId }); } catch (e) { sendBareosErr(res, e); return null; }
-  const { unknown, need } = membersPlan(vcenterId, v.vmIds);
+  const { unknown, need, system } = membersPlan(vcenterId, v.vmIds);
+  if (system.length) { res.status(400).json({ ok: false, reason: `시스템 VM(템플릿·vCLS) ${system.length}대는 그룹에 넣을 수 없습니다.` }); return null; }
   if (unknown.length) { res.status(400).json({ ok: false, reason: `이 vCenter 의 인벤토리에 없는 VM 이 ${unknown.length}대 있습니다 — 화면을 새로 고친 뒤 다시 고르세요.` }); return null; }
   if (need.length > MAX_BULK) { res.status(400).json({ ok: false, reason: `새로 등록할 VM 이 ${need.length}대입니다 — 한 번에 ${MAX_BULK}대까지 등록할 수 있습니다.` }); return null; }
   const left = MAX_JOBS - jobDigests().length;
@@ -162,19 +172,22 @@ api.get('/tools/bareos-backup/groups/tree', adminOnly, (req, res) => {
     writable: bareosAccess(req.user, vcenterId) === 0, marksKnown,
     groupsLoadError: !!groupsLoadError(), registryLoadError: !!registryLoadError(),
     limits: { maxMembers: MAX_MEMBERS, maxGroups: MAX_GROUPS, maxBulk: MAX_BULK, jobsLeft: Math.max(0, MAX_JOBS - jobDigests().length) },
-    levels: LEVELS,
+    levels: LEVELS, relayLimits: relayLimits(),   // 화면이 저장(등록)·실행을 기다리는 시간 — 숫자를 화면에 박지 않는다
     vms, groups: groups.map((g) => groupView(g, now)),
   });
 });
 
-/** 그룹 편집 창의 스토리지·풀 목록 — 그 법인 Director 의 카탈로그(60초 기억). Director 에 접속한다(편집 창을 열 때 한 번). */
+/**
+ * 그룹 편집 창의 스토리지·풀 목록 — 그 법인 Director 의 카탈로그. Director 에 접속한다(편집 창을 열 때 한 번 · 기억 없음).
+ * 범위: 조회 범위 안 법인의 Director 만(1:1:1 — 그 법인의 이름들). 이름만 돌려주고 클라이언트·잡 목록은 싣지 않는다.
+ */
 api.get('/tools/bareos-backup/groups/options', adminOnly, async (req, res) => {
   const vcenterId = String(req.query.vcenterId || '');
   if (bareosAccess(req.user, vcenterId, { write: false })) return res.status(404).json({ ok: false, reason: 'vCenter 를 찾을 수 없습니다.' });
   const si = siteInfo(vcenterId, effectiveSettings());
   if (!si.site || !si.view) return res.status(409).json({ ok: false, reason: '이 vCenter 가 어느 법인 Director 에도 묶여 있지 않습니다 — 설정 › 법인별 Director 에서 먼저 묶으세요.' });
   try {
-    const c = await bareosCatalogOf(directorById(si.view.id, effectiveSettings()), req.query.refresh === '1');
+    const c = await readDirector({ demoOnly: isDemoGuest(req.user) }, si.view.id, 'catalog');
     res.json({ ok: true, storages: c.storages ?? null, pools: c.pools ?? null, errors: { ...(c.errors?.storages ? { storages: c.errors.storages } : {}), ...(c.errors?.pools ? { pools: c.errors.pools } : {}) } });
   } catch (e) { sendBareosErr(res, e); }
 });
@@ -207,7 +220,8 @@ api.put('/tools/bareos-backup/groups/:id', adminOnly, async (req, res) => {
   if (!reg.members.length) return res.status(409).json({ ok: false, reason: '백업 대상으로 등록된 VM 이 하나도 없어 저장하지 않았습니다 — VM 별 사유를 보세요.', registered: reg.registered, excluded: reg.excluded });
   let g;
   try {
-    g = updateGroup(g0.id, { ...v, vmIds: reg.members }, { by: req.user?.username || '' });
+    const expect = Number.isFinite(Number(req.body?.updatedAt)) && req.body?.updatedAt != null ? Number(req.body.updatedAt) : null;
+    g = updateGroup(g0.id, { ...v, vmIds: reg.members }, { by: req.user?.username || '', expectUpdatedAt: expect });
   } catch (e) {
     audit(req, 'Bareos 백업 그룹 고치기', `${g0.vcenterId}/${g0.name}`, `실패 — ${String(e?.message || e).slice(0, 160)}`);
     return res.status(e?.code === 'conflict' ? 409 : e?.code === 'unavailable' ? 503 : 400).json({ ok: false, reason: String(e?.message || e).slice(0, 400), registered: reg.registered });

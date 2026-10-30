@@ -80,6 +80,8 @@ describe('실행 결과 문구', () => {
     expect(fireTone({ started: 3, unknown: 1 })).toBe('warn');
     expect(fireTone({ started: 3 })).toBe('ok');
     expect(fireTone({ error: 'x' })).toBe('bad');
+    expect(fireTone({ started: 1, notSent: 2 })).toBe('bad');
+    expect(fireText({ at, trigger: 'timer', total: 3, started: 1, notSent: 2 })).toBe('10-31 02:10 예약 · 시작 1 · 보내지 못함 2');
     expect(nextText(null)).toBe('—');
     expect(nextText({ at, level: 'Full' })).toBe('10-31 02:10 Full');
     expect(storageText({ storage: '', pool: 'Long' }, { storage: 'kr-sd', pool: 'P' })).toBe('기본(kr-sd) · Long');

@@ -105,7 +105,9 @@ export function decideFire(g, now, catchupMs = CATCHUP_MS) {
   // 스케줄을 만들거나 바꾼 시각보다 앞선 회차는 이 스케줄의 회차가 아니다(02:05 에 '02:00' 으로 저장하면 내일부터)
   const anchor = Number.isFinite(g.anchorAt) ? g.anchorAt : 0;
   if (slot.at < anchor) return { action: 'none' };
-  if (g.lastKey === slot.key) return { action: 'none' };
+  // 회차 열쇠는 글자 순서 = 시각 순서('YYYY-MM-DD HH:MM'). 이미 처리한 회차보다 앞선 회차는 보지 않는다
+  //   (v2.830 검토 L1 — 재현: 시계가 몇 초 거꾸로 가면 어제 회차가 '놓침' 으로 lastKey 를 덮어 오늘 회차가 다시 나갔다)
+  if (g.lastKey && slot.key <= g.lastKey) return { action: 'none' };
   if (now - slot.at > catchupMs) return { action: 'miss', slot };
   return { action: 'fire', slot };
 }
