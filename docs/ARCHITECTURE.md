@@ -80,7 +80,7 @@
 | `auth/` | 15 | 4,191 | `auth/scope.js` (68) | 사용자 데이터 범위(scope) 해석 — "이 사용자가 볼 수 있는 vCenter"를 계산한다. |
 | `availability/` | 1 | 205 | `availability/analyze.js` (2) | availability/analyze.js — 특수 기능 'VM 가용성(SLA)'(도구 키 `vm-availability`, v2.707 — C6) 판정(순수). |
 | `backup/` | 5 | 980 | `backup/service.js` (3) | 포탈 백업 코어 — 중앙 포탈의 모든 설정(CONFIG_DIR의 *.json / *.env)과, 엣지 포탈(에이전트)이 |
-| `bareos/` | 11 | 2,633 | `bareos/console.js` (3) | bareos/console.js — Bareos Director **콘솔 프로토콜** 클라이언트(Node 표준 net/tls/crypto 만 — 의존성 0). |
+| `bareos/` | 11 | 2,650 | `bareos/console.js` (3) | bareos/console.js — Bareos Director **콘솔 프로토콜** 클라이언트(Node 표준 net/tls/crypto 만 — 의존성 0). |
 | `bmstor/` | 9 | 1,335 | `bmstor/poller.js` (4) | bmstor/poller.js — 베어메탈 스토리지 주기 수집(v2.340). |
 | `bmusage/` | 21 | 4,644 | `bmusage/db.js` (4) | bmusage/db.js — 베어메탈 사용률 DB(v2.550). 파일: `<dbDir>/bm-usage.db` |
 | `bulletin/` | 1 | 807 | `bulletin/store.js` (2) | bulletin/store.js — 접속 공지(팝업)와 게시판 글 저장소(v2.722). |
@@ -148,7 +148,7 @@
 | `system/` | 2 | 315 | `system/nfsMounts.js` (4) | system/nfsMounts.js — Edge 노드 NFS 마운트 관리(v2.299). |
 | `tags/` | 4 | 498 | `tags/analyze.js` (4) | tags/analyze.js — 특수 기능 '태그·사용자 지정 속성 점검'(도구 키 `vm-tags`, v2.703 — A15) 판정(순수). |
 | `toolcats/` | 2 | 362 | `toolcats/settings.js` (3) | toolcats/settings.js — 특수 기능 카테고리 설정 (`tool-categories.json`, v2.455). |
-| `tools/` | 17 | 3,157 | `tools/powerOffPoller.js` (3) | tools/powerOffPoller.js — 전원 꺼짐 점검기(v2.484). 설정 주기(기본 6시간)마다 스냅샷의 꺼진 VM 을 |
+| `tools/` | 17 | 3,158 | `tools/powerOffPoller.js` (3) | tools/powerOffPoller.js — 전원 꺼짐 점검기(v2.484). 설정 주기(기본 6시간)마다 스냅샷의 꺼진 VM 을 |
 | `upgrade/` | 17 | 3,459 | `upgrade/manager.js` (6) | Orchestrates the auto-upgrade feature for the running portal: tracks the last |
 | `usermenu/` | 1 | 355 | `usermenu/store.js` (1) | usermenu/store.js — 계정별 좌측 메뉴(내 메뉴)와 슈퍼 관리자 배포 메뉴 저장소(v2.726, `user-menus.json`). |
 | `util/` | 83 | 8,361 | `util/numOrNull.js` (174) | `numOrNull` — '읽지 못한 수치' 를 0 으로 둔갑시키지 않는 단일 판정 (v2.561). |
@@ -164,7 +164,7 @@
 | `vmtrack/` | 4 | 1,798 | `vmtrack/db.js` (4) | vmtrack/db.js — VM 수량 추이 전용 시계열 DB(v2.345, 사용자 요구: "별도의 DB 를 만들어서 트래킹"). |
 | `xferspeed/` | 7 | 1,946 | `xferspeed/schedule.js` (4) | xferspeed/schedule.js — 전송 속도 측정의 **실행 일정**(순수 — 파일·타이머 없음, v2.735). |
 
-디렉터리 87개 · 파일 1052개 · 230,583줄. 대표 파일은 `index.js` 가 있으면 그것, 없으면 그 디렉터리 밖에서 가장 많이 import 되는 파일이고, 설명은 그 파일 머리말의 첫 줄을 그대로 옮긴 것이다(따라서 머리말이 곧 문서다 — 첫 줄을 잘 쓸 것).
+디렉터리 87개 · 파일 1052개 · 230,601줄. 대표 파일은 `index.js` 가 있으면 그것, 없으면 그 디렉터리 밖에서 가장 많이 import 되는 파일이고, 설명은 그 파일 머리말의 첫 줄을 그대로 옮긴 것이다(따라서 머리말이 곧 문서다 — 첫 줄을 잘 쓸 것).
 <!-- arch-doc:modules:end -->
 
 ### 3-3. 라우트 그룹 → 게이트
