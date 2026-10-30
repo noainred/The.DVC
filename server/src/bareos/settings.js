@@ -7,7 +7,8 @@
  *   directors: [ { id, name, host, port, consoleName, password, timeoutMs, tlsMax } ],   // 법인마다 Director 하나(비밀번호 봉인 — SECRET_FILES)
  *   defaults: { jobDefs, fileSet, restoreJob, level, pollIntervalSec, pluginName },      // 전 Director 공통
  *   sites: [ { vcenterId, directorId, vcserver, client, storage, pool, schedule, configFile } ],   // vCenter → 그 법인 Director·FD·SD
- *   director: { …directors[0] 사본… },   // 구버전 호환 — 되돌린 구버전이 첫 Director 는 계속 쓴다(새 코드는 읽지 않는다)
+ *   director: { …directors[0] 사본… },   // 구버전 호환 — 되돌린 구버전이 첫 Director 는 계속 쓴다(새 코드는 읽지 않는다).
+ *                                        //   한계(검토 C4): 구버전에서 **저장**하면 나머지 Director·법인 묶음이 사라진다 — 그 잡은 원장에서만 정리(라우트 orphanOf).
  * }
  *
  * 규칙(server/CLAUDE.md · bareos/CLAUDE.md):
@@ -226,11 +227,14 @@ const cloneSettings = (cur) => ({ version: 2, directors: cur.directors.map((d) =
 /**
  * 공통 기본값·매핑 저장. body 의 defaults·sites 중 준 것만 바꾼다. sites 는 **통째로** 바꾼다(화면이 표 전체를 보낸다).
  * Director 접속값은 여기서 바꾸지 않는다(addDirector·updateDirector — 비밀번호 폐기 판정이 Director 마다다).
- * @param {{ vcentersWithJobs?: Set<string> }} [o] 백업 대상이 있는 vCenter — 그 Director 를 바꾸거나 매핑을 지우지 않는다
+ * @param {{ jobDirs?: Map<string, Set<string>> }} [o] 백업 대상이 있는 vCenter → 그 대상들의 Director id(`jobDirectorId` 로 푼 값) —
+ *   그 vCenter 는 다른 Director 로 묶거나 매핑을 지우지 않는다. v2.823 검토(S3·C2·I2 — 재현): 예전에는 '지금 매핑' 과만 비교해, v1 시절 매핑을
+ *   지운 vCenter 의 옛 잡(directorId 없음 → dir_default 로 풀림)이 있는데 그 vCenter 를 다른 법인 Director 에 **새로** 묶으면 검사를 건너뛰고
+ *   옛 잡의 실행·폴러·삭제가 엉뚱한 Director 로 갔다. 이제 잡이 실제로 가리키는 Director 와 비교한다.
  * @returns {{ settings: object, droppedSecrets: string[] }}  settings 는 publicSettings 모양
  * @throws Error(message = 사람이 읽는 사유, code invalid|conflict)
  */
-export function saveSettings(body = {}, { vcentersWithJobs = new Set() } = {}) {
+export function saveSettings(body = {}, { jobDirs = new Map() } = {}) {
   if (body.director !== undefined) throw fail('invalid', 'Director 접속값은 법인별 Director 화면(설정 › 법인별 Director)에서 저장합니다.');
   const cur = loadSettings();
   const next = cloneSettings(cur);
@@ -252,12 +256,14 @@ export function saveSettings(body = {}, { vcentersWithJobs = new Set() } = {}) {
       if (!ids.has(r.site.directorId)) throw fail('invalid', `‘${r.site.vcenterId}’: 없는 Director 에 묶으려 했습니다.`);
       seen.add(r.site.vcenterId); sites.push(r.site);
     }
-    for (const vc of vcentersWithJobs) {
+    for (const [vc, dirs] of jobDirs) {
       const was = cur.sites.find((x) => x.vcenterId === vc);
-      if (!was) continue;
       const now = sites.find((x) => x.vcenterId === vc);
-      if (!now) throw fail('conflict', `‘${vc}’ 에 백업 대상이 있어 매핑을 지울 수 없습니다 — 그 vCenter 의 백업 대상을 먼저 지우세요.`);
-      if (now.directorId !== was.directorId) throw fail('conflict', `‘${vc}’ 에 백업 대상이 있어 다른 Director 로 옮길 수 없습니다 — 잡은 지금 Director 의 설정에 있습니다. 백업 대상을 먼저 지우세요.`);
+      if (!now) {
+        if (was) throw fail('conflict', `‘${vc}’ 에 백업 대상이 있어 매핑을 지울 수 없습니다 — 그 vCenter 의 백업 대상을 먼저 지우세요.`);
+        continue;   // 원래 매핑이 없었다(옛 잡) — 그대로 둔다
+      }
+      if ([...dirs].some((id) => id !== now.directorId)) throw fail('conflict', `‘${vc}’ 에 백업 대상이 있어 다른 Director 로 옮길 수 없습니다 — 잡은 지금 Director 의 설정에 있습니다. 백업 대상을 먼저 지우세요.`);
     }
     next.sites = sites;
   }
@@ -343,7 +349,7 @@ export const directorForVcenter = (vcenterId, s = loadSettings()) => { const sit
 
 /**
  * 원장 잡의 Director id — 등록 때 고정한 값. v2.823 이전 잡(값 없음)은 그 vCenter 매핑의 Director, 그것도 없으면 'dir_default'.
- * (백업 대상이 있는 vCenter 는 Director 를 바꿀 수 없으므로 옛 잡의 풀이가 흔들리지 않는다 — saveSettings 의 vcentersWithJobs.)
+ * (백업 대상이 있는 vCenter 는 그 잡들이 가리키는 Director 와 다른 곳에 묶을 수 없으므로 옛 잡의 풀이가 흔들리지 않는다 — saveSettings 의 jobDirs.)
  */
 export function jobDirectorId(job, s = loadSettings()) {
   return (typeof job?.directorId === 'string' && job.directorId) || siteFor(job?.vcenterId, s)?.directorId || DEFAULT_DIRECTOR_ID;

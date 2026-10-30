@@ -56,7 +56,8 @@ export function directorPatch(formDir = {}, snapDir = {}) {
 }
 
 /** HTTP 상태가 없는 실패(연결 끊김·브라우저 시한) — 서버는 끝까지 돌았을 수 있다(W2-2·P2-1). */
-export const outcomeUnknown = (e) => !(Number.isInteger(e?.status) && e.status > 0);
+// v2.823 검토(W7): 서버가 본문으로 거부한 것(requireChanged — 409 진행 중·남의 파일 등)은 결과가 **확정**이다 — '결과 모름' 으로 감싸지 않는다.
+export const outcomeUnknown = (e) => !e?.changeRejected && !(Number.isInteger(e?.status) && e.status > 0);
 
 /** 자동 설정 버튼이 잠긴 사유(W2-8 — 잠긴 버튼은 사유를 말한다). 비어 있으면 잠기지 않았다. */
 export function missingText(pairs) {
@@ -505,7 +506,11 @@ export function fillEmptyMapping(sites = [], suggestions = [], vcName = (id) => 
   const left = [];
   const out = sites.map((s) => {
     const f = by.get(s.vcenterId);
-    if (!f) return s;
+    if (!f) {
+      // v2.823 검토(W2): 제안은 **저장된** 매핑에만 온다 — 체크만 하고 저장하지 않은 vCenter 는 이유와 함께 남긴다('0개 채움' 만 말하지 않게)
+      if (MAPPING_FIELDS.some(([k]) => k !== 'schedule' && !s[k])) left.push(`${vcName(s.vcenterId)}(저장 전 — 매핑을 저장한 뒤 다시 채우세요)`);
+      return s;
+    }
     const next = { ...s };
     for (const [k, label] of MAPPING_FIELDS) {
       if (next[k]) continue;
@@ -515,6 +520,21 @@ export function fillEmptyMapping(sites = [], suggestions = [], vcName = (id) => 
     return next;
   });
   return { sites: out, filled, left };
+}
+
+/** INI 경로·잡 이름에 쓰는 vCenter 조각(서버 bareosBackup.js suggestMapping 과 같은 규칙). */
+export const vcSlug = (id) => String(id || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40) || 'vcenter';
+
+/**
+ * 새로 묶는 vCenter 의 매핑 행(v2.823 검토 W2 — 순수). vcserver 는 vCenter 등록부 주소, INI 경로는 vCenter 조각 —
+ * 같은 경로가 이미 있으면(다른 vCenter 가 같은 조각) 접미사를 붙인다(FD INI 가 서로 덮지 않게 — 검토 C7).
+ */
+export function newMappingRow(vcenterId, directorId, host = '', taken = []) {
+  const used = new Set(taken.filter(Boolean));
+  const stem = `/etc/bareos/vmware/${vcSlug(vcenterId)}`;
+  let configFile = `${stem}.ini`;
+  for (let i = 2; used.has(configFile) && i < 100; i++) configFile = `${stem}-${i}.ini`;
+  return { vcenterId, directorId, vcserver: /^[A-Za-z0-9.-]+$/.test(host) ? host : '', client: '', storage: '', pool: '', schedule: '', configFile };
 }
 
 /**

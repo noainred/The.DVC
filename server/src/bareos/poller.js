@@ -23,7 +23,7 @@ import { store } from '../store.js';
 
 export const RECONCILE_EVERY = 10;
 export const MAX_PENDING_PER_TICK = 100;   // Director 하나에 한 틱
-export const DIRECTOR_CONCURRENCY = 4;
+export const DIRECTOR_CONCURRENCY = 8;   // v2.823 검토(P2): 4 → 8 — 느린 법인 넷이 한 물결을 다 차지해 나머지가 그 시한만큼 밀렸다(28개 법인이면 4물결)
 
 let _busy = false;
 let _tick = 0;
@@ -35,6 +35,7 @@ let _timer = null;
 const _rot = new Map();   // v2.822: 시한으로 잘린 틱이 목록 뒤쪽을 굶기지 않게 시작 위치를 돌린다(Director 마다)
 // v2.822.3(C2-3·P2-5): 대조를 앞당겨야 할 Director(자동 설정의 reload 가 꺼 둔 잡을 다시 켰다 · 시한에 잘려 대조를 못 끝냈다).
 const _reconcileDue = new Set();
+const _dueSeq = new Map();   // v2.823 검토(P9): Director 별 대조 요청 번호 — 조회 중에 들어온 요청을 끝에서 지우지 않게
 let _reconcileAll = false;
 
 /**
@@ -42,7 +43,7 @@ let _reconcileAll = false;
  * @param {string} [directorId] 그 Director 만(자동 설정 뒤). 없으면 전부.
  */
 export function requestReconcile(directorId = '') {
-  if (directorId) _reconcileDue.add(directorId); else _reconcileAll = true;
+  if (directorId) { _reconcileDue.add(directorId); _dueSeq.set(directorId, (_dueSeq.get(directorId) || 0) + 1); } else _reconcileAll = true;
   if (_busy) return;
   const t = setTimeout(() => { pollOnce({ trigger: 'timer' }).catch(() => {}); }, 0);
   t.unref?.();
@@ -64,70 +65,92 @@ export function pollerStatus() {
 }
 
 /** Director 하나 조회(시한 안). 원장 반영까지. 던지지 않는다 — 결과 객체. */
-async function pollDirector(d, { work, mine, retired, doReconcile, trigger, at, demo }) {
+async function pollDirector(d, { work, mine, retired, doReconcile, trigger, at, demo, dirOfJob, modeOk }) {
   const base = { at, name: d.name, trigger };
   const rot = _rot.get(d.id) || 0;
   const off = work.length ? rot % work.length : 0;
   const slice = [...work.slice(off), ...work.slice(0, off)].slice(0, MAX_PENDING_PER_TICK);
   const due = doReconcile || _reconcileDue.has(d.id);
+  const seq = _dueSeq.get(d.id) || 0;
   if (!slice.length && !due) return { ...base, ok: true, checked: 0, updated: 0, reconciled: false, error: '', idle: true };
   const live = new Set(mine.map((j) => j.bareosJob));
   const disableIfEnabled = [...mine.filter((j) => !j.enabled).map((j) => j.bareosJob), ...retired.filter((r) => !live.has(r.name)).map((r) => r.name)];
+  // v2.823 검토(P3 — 재현): 실제로 끌 이름은 `.jobs` 를 읽은 뒤 **그 순간의 원장**에서 고른다(위 목록은 엣지 대행용 사본일 뿐).
+  const disableNow = (states) => {
+    const nowJobs = listJobs().filter((j) => modeOk(j) && dirOfJob(j) === d.id);
+    const nowLive = new Set(nowJobs.map((j) => j.bareosJob));
+    const names = [...nowJobs.filter((j) => !j.enabled).map((j) => j.bareosJob),
+      ...retiredNames().filter((r) => modeOk(r) && r.directorId === d.id && !nowLive.has(r.name)).map((r) => r.name)];
+    return names.filter((n) => states.get(n) === true);
+  };
   const reconcileNow = due && (mine.length > 0 || retired.length > 0);
-  const budget = Math.max(30_000, (d.timeoutMs || 15_000) * 4);
+  const budget = _budgetForTest ?? Math.max(30_000, (d.timeoutMs || 15_000) * 4);
+  let r;
   try {
-    const r = await withDeadline(budget, (signal) => onDirector(d.id, 'poll',
+    r = await withDeadline(budget, (signal) => onDirector(d.id, 'poll',
       { work: slice.map((w) => ({ jobid: w.jobid })), reconcile: reconcileNow, disableIfEnabled, recent: mine.length > 0 },
-      { trigger, signal }), `Bareos 상태 조회 시한(${d.name})`);
-    _rot.set(d.id, rot + r.rows.length);
-    let updated = 0;
-    const byJobid = new Map(slice.map((w) => [w.jobid, w]));
-    inBatch(() => {   // 원장 쓰기는 이 묶음 끝에 한 번(P2·I4)
-      for (const { jobid, row } of r.rows) {
-        const w = byJobid.get(jobid);
-        if (!w) continue;
-        // 카탈로그에 없거나(재시작·다른 Director) 이름이 다른 행은 이 실행이 아니다 — 연속이면 추적을 멈춘다(P5)
-        //   복원은 복원 잡(type R)이어야 한다(W15 — jobid 재사용으로 남의 백업 행을 반영하지 않게)
-        if (!row || (w.kind === 'backup' && row.name && w.job && row.name !== w.job) || (w.kind === 'restore' && row.type && row.type !== 'R')) { notePendingMiss(w.id, w.kind, w.jobid); continue; }
-        if (w.kind === 'backup' ? applyRunRow(w.id, row) : applyRestoreRow(w.id, row)) updated += 1;
-      }
-      if (r.reconciled) {
-        const states = new Map(r.states || []);
-        const newest = new Map();
-        for (const row of r.recent || []) {
-          if (row.type && row.type !== 'B') continue;   // Copy(C)·Migration(M) 행은 같은 이름을 쓰지만 이 잡의 백업 실행이 아니다(C9)
-          const cur = newest.get(row.name); if (!cur || cur.jobid < row.jobid) newest.set(row.name, row);
-        }
-        for (const j of mine) {
-          const missing = !states.has(j.bareosJob);
-          if (states.size > 0 && missing !== !!j.missingInDirector) patchJob(j.id, { missingInDirector: missing });   // 빈 응답으로 전부 '없음' 칠하지 않는다
-          const row = newest.get(j.bareosJob);
-          if (row) applyRunRow(j.id, row);
-        }
-      }
-    });
-    if (r.reconciled) {
-      // v2.822.3(I2-5 — 재현): `.jobs` 가 한 번 비어 오면 지운 잡 기록이 통째로 사라졌다 — 응답을 믿을 수 있을 때만 잊는다
-      const states = new Map(r.states || []);
-      const trusted = states.size > 0 && (!mine.length || mine.some((j) => states.has(j.bareosJob)));
-      const gone = trusted ? retired.filter((x) => !live.has(x.name) && !states.has(x.name)).map((x) => x.name) : [];
-      if (gone.length) forgetRetired(d.id, gone);
-      if (r.redisabled.length) console.warn(`[bareos] ‘${d.name}’ Director 에서 다시 켜진 잡 ${r.redisabled.length}개를 다시 비활성화했습니다(reload·재시작 — disable 은 conf 에 남지 않는다).`);
-    }
-    if (due) { if (r.cut || (reconcileNow && !r.reconciled)) _reconcileDue.add(d.id); else _reconcileDue.delete(d.id); }   // 시한에 잘렸으면 다음 틱에(P2-5)
-    return { ...base, ok: true, checked: r.rows.length, updated, reconciled: !!r.reconciled || (due && !reconcileNow), redisabled: r.redisabled.length, itemErrors: r.itemErrors, error: '', demo };
-  } catch (e) {
+      { trigger, signal, hooks: { disableNow } }), `Bareos 상태 조회 시한(${d.name})`);
+  } catch (e) {   // 세션을 열지 못했다(접속·인증·시한) — 읽은 것이 없다
     if (due) _reconcileDue.add(d.id);
     const error = String(e?.message || e).slice(0, 300);
     if (trigger === 'timer' && e?.code !== 'auth-stopped') console.warn(`[bareos] ‘${d.name}’ 상태 조회 실패: ${error}`);
     return { ...base, ok: false, checked: 0, updated: 0, reconciled: false, error, code: e?.code || '' };
   }
+  // v2.823 검토(C1·P1 — 재현): 시한·끊김이어도 읽은 행은 반영하고 회전은 시작한 항목 수만큼 나아간다(걸린 한 건이 뒤를 굶기지 않게).
+  _rot.set(d.id, rot + (r.attempted ?? r.rows.length));
+  let updated = 0;
+  const byJobid = new Map(slice.map((w) => [w.jobid, w]));
+  inBatch(() => {   // 원장 쓰기는 이 묶음 끝에 한 번(P2·I4)
+    for (const { jobid, row } of r.rows) {
+      const w = byJobid.get(jobid);
+      if (!w) continue;
+      // 카탈로그에 없거나(재시작·다른 Director) 이름이 다른 행은 이 실행이 아니다 — 연속이면 추적을 멈춘다(P5)
+      //   복원은 복원 잡(type R)이어야 한다(W15 — jobid 재사용으로 남의 백업 행을 반영하지 않게)
+      if (!row || (w.kind === 'backup' && row.name && w.job && row.name !== w.job) || (w.kind === 'restore' && row.type && row.type !== 'R')) { notePendingMiss(w.id, w.kind, w.jobid); continue; }
+      if (w.kind === 'backup' ? applyRunRow(w.id, row) : applyRestoreRow(w.id, row)) updated += 1;
+    }
+    if (r.reconciled) {
+      const states = new Map(r.states || []);
+      const newest = new Map();
+      for (const row of r.recent || []) {
+        if (row.type && row.type !== 'B') continue;   // Copy(C)·Migration(M) 행은 같은 이름을 쓰지만 이 잡의 백업 실행이 아니다(C9)
+        const cur = newest.get(row.name); if (!cur || cur.jobid < row.jobid) newest.set(row.name, row);
+      }
+      for (const j of mine) {
+        const missing = !states.has(j.bareosJob);
+        if (states.size > 0 && missing !== !!j.missingInDirector) patchJob(j.id, { missingInDirector: missing });   // 빈 응답으로 전부 '없음' 칠하지 않는다
+        const row = newest.get(j.bareosJob);
+        if (row) applyRunRow(j.id, row);
+      }
+    }
+  });
+  if (r.reconciled) {
+    // v2.822.3(I2-5 — 재현): `.jobs` 가 한 번 비어 오면 지운 잡 기록이 통째로 사라졌다 — 응답을 믿을 수 있을 때만 잊는다
+    const states = new Map(r.states || []);
+    const trusted = states.size > 0 && (!mine.length || mine.some((j) => states.has(j.bareosJob)));
+    const gone = trusted ? retired.filter((x) => !live.has(x.name) && !states.has(x.name)).map((x) => x.name) : [];
+    if (gone.length) forgetRetired(d.id, gone);
+    if (r.redisabled.length) console.warn(`[bareos] ‘${d.name}’ Director 에서 다시 켜진 잡 ${r.redisabled.length}개를 다시 비활성화했습니다(reload·재시작 — disable 은 conf 에 남지 않는다).`);
+  }
+  if (due) {
+    // 시한에 잘렸으면 다음 틱에(P2-5) · v2.823 검토(P9): 이 조회 중에 새로 들어온 요청(자동 설정 뒤 requestReconcile)은 지우지 않는다
+    if (r.cut || (reconcileNow && !r.reconciled) || (_dueSeq.get(d.id) || 0) !== seq) _reconcileDue.add(d.id); else _reconcileDue.delete(d.id);
+  }
+  const out = { ...base, ok: !r.fault, checked: r.rows.length, updated, reconciled: !!r.reconciled || (due && !reconcileNow), redisabled: r.redisabled.length, itemErrors: r.itemErrors, error: '', demo };
+  if (r.fault) {
+    out.code = r.fault.code;
+    out.error = (r.fault.code === 'aborted'
+      ? `상태 조회 시한(${Math.round(budget / 1000)}초)에 잘렸습니다 — 읽은 ${r.rows.length}건은 반영했고 나머지는 다음 조회에서 이어 갑니다(‘${d.name}’)`
+      : `상태 조회가 도중에 끊겼습니다(${r.fault.code}) — 읽은 ${r.rows.length}건은 반영했습니다: ${r.fault.message}`).slice(0, 300);
+    if (trigger === 'timer') console.warn(`[bareos] ‘${d.name}’ ${out.error}`);
+  }
+  return out;
 }
 
 /**
- * 한 번 조회. @param {{ trigger?: 'timer'|'manual', reconcile?: boolean, directorId?: string }} o
+ * 한 번 조회. @param {{ trigger?: 'timer'|'manual', reconcile?: boolean, directorId?: string, directorIds?: string[] }} o
  */
-export async function pollOnce({ trigger = 'timer', reconcile = null, directorId = '' } = {}) {
+export async function pollOnce({ trigger = 'timer', reconcile = null, directorId = '', directorIds = null } = {}) {
   if (_busy) return { ...pollerStatus(), skipped: 'busy' };
   _busy = true;
   const at = Date.now();
@@ -140,7 +163,8 @@ export async function pollOnce({ trigger = 'timer', reconcile = null, directorId
     const eff = demo ? effectiveSettings() : settings;
     const ready = eff.directors.filter((d) => demo || !!directorConn(d).conn);
     // 지운 Director 의 상태는 버린다(화면에 남지 않게)
-    const known = new Set(eff.directors.map((d) => d.id));
+    // v2.823 검토(P8): 접속값이 덜 돼(비밀번호 폐기 등) 조회 대상에서 빠진 Director 의 옛 결과도 버린다(거짓 녹색 칩)
+    const known = new Set(ready.map((d) => d.id));
     for (const id of [..._byDir.keys()]) if (!known.has(id)) _byDir.delete(id);
     if (!ready.length) {
       _last = { ...EMPTY_LAST, at, trigger, configured: false };
@@ -154,15 +178,21 @@ export async function pollOnce({ trigger = 'timer', reconcile = null, directorId
     const work = pendingWork().filter(modeOk);
     const jobs = listJobs().filter(modeOk);
     const retired = retiredNames().filter(modeOk);
-    const targets = directorId ? ready.filter((d) => d.id === directorId) : ready;
+    const only = directorId ? new Set([directorId]) : (Array.isArray(directorIds) ? new Set(directorIds) : null);   // 범위 계정의 수동 조회(S1)
+    const targets = only ? ready.filter((d) => only.has(d.id)) : ready;
     const results = await poolSettled(targets, DIRECTOR_CONCURRENCY, (d) => pollDirector(d, {
       work: work.filter((w) => (w.directorId || dirOfJob(w)) === d.id),
       mine: jobs.filter((j) => dirOfJob(j) === d.id),
       retired: retired.filter((r) => r.directorId === d.id),
-      doReconcile, trigger, at, demo,
+      doReconcile, trigger, at, demo, dirOfJob, modeOk,
     }));
     const per = results.map((x, i) => (x.status === 'fulfilled' ? x.value : { at, name: targets[i].name, ok: false, error: String(x.reason?.message || x.reason).slice(0, 300), checked: 0, updated: 0 }));
-    targets.forEach((d, i) => _byDir.set(d.id, per[i]));
+    // v2.823 검토(W4): 할 일이 없어 접속하지 않은 틱(idle)은 마지막으로 실제 접속한 결과를 그대로 둔다 — 덮으면 접속 실패 뒤
+    //   idle 틱이 칩을 '정상' 으로 바꿨다. 한 번도 접속하지 않았으면 ok:null('조회 전').
+    targets.forEach((d, i) => {
+      const prev = _byDir.get(d.id);
+      _byDir.set(d.id, per[i].idle ? (prev && !prev.idle ? { ...prev, idleAt: at } : { at: null, name: d.name, ok: null, idle: true, idleAt: at }) : per[i]);
+    });
     const bad = per.filter((x) => !x.ok);
     _last = {
       at, trigger, configured: true, demo,
@@ -196,4 +226,7 @@ export function startBareosPoller() {
   );
 }
 
-export function _resetPollerForTest() { _busy = false; _tick = 0; _last = { ...EMPTY_LAST }; _byDir = new Map(); _rot.clear(); _reconcileDue.clear(); _reconcileAll = false; }
+let _budgetForTest = null;
+/** 테스트 전용 — Director 시한 예산(실제 경로의 하한 30초를 기다리지 않게). null 이면 원래 식. */
+export function _setPollBudgetForTest(ms) { _budgetForTest = ms; }
+export function _resetPollerForTest() { _busy = false; _tick = 0; _last = { ...EMPTY_LAST }; _byDir = new Map(); _rot.clear(); _reconcileDue.clear(); _dueSeq.clear(); _reconcileAll = false; }

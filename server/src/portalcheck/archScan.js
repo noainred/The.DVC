@@ -157,7 +157,7 @@ export const ROUTE_GATE_ALLOW = Object.freeze({
   'PATCH /api/tools/bareos-backup/jobs/:id': 'bareosAccess — 대상의 vCenter 쓰기 범위(v2.820)',
   'DELETE /api/tools/bareos-backup/jobs/:id': 'bareosAccess — 대상의 vCenter 쓰기 범위(v2.820)',
   'POST /api/tools/bareos-backup/jobs/:id/restore': 'bareosAccess + 본인 OTP — 대상의 vCenter 쓰기 범위(v2.820)',
-  'POST /api/tools/bareos-backup/poll': '상태 조회만(원장 갱신) — 범위 계정은 자기 범위 결과만 받는다(목록 GET 이 거른다, v2.820)',
+  'POST /api/tools/bareos-backup/poll': '상태 조회만(원장 갱신) — 범위 계정은 자기 법인 Director 만 조회하고 그 상태만 받는다(v2.823 검토 S1 — visibleDirectorIds·scopedPoller)',
 });
 
 /**

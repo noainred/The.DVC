@@ -1,6 +1,17 @@
 {
   "notes": [
     {
+      "version": "2.823.0",
+      "date": "2026-10-30",
+      "title": "Bareos 법인별 Director — 법인 vCenter 는 그 법인 Bareos 로 백업 · 초기 설치 뒤 세부 설정은 포탈 자동 설정으로",
+      "notes": [
+        "Director 여러 대(법인마다 하나)를 등록하고 법인 vCenter 를 묶는다 — 백업 대상의 잡은 등록 때의 Director 에 고정되고 실행·복원·조회 명령은 그 Director 로만 간다. 옛 설정(Director 하나)은 읽을 때 그대로 이어진다",
+        "자동 설정 5단계(Director 편집 화면): 사전 점검(쓰기 없음 — 패키지·서비스·Python·pyVmomi·VDDK·FD 플러그인 줄·설정 구성) → Director 리소스 + VMware 전용 Pool·야간 Schedule → FD 플러그인 켜기(myself.conf — 쓰기 전 사본·검사·실패 시 원복) → 매핑 채움·저장(카탈로그·vCenter 주소로 빈 칸만) → FD INI·지문",
+        "상태 조회는 Director 마다 병렬·Director 별 시한(느린 법인이 나머지를 막지 않는다) · 인증 실패 정지·연결 시험·자동 설정 동시 1건도 Director 마다 · 백업 대상 표·실패 메일에 '법인 Director' 열",
+        "검토(5축 + 반증 2인) 확정분 반영: 조회가 시한에 걸려도 읽은 결과는 반영(고RTT 법인 라이브락 방지) · 상태 대조 중 사용자가 다시 켠 잡을 끄지 않음 · 범위 계정은 자기 법인 Director 상태만 · Director 설정 쓰기는 쓰기 범위 무제한 계정만 · 두 화면의 매핑 저장이 서로 덮지 않음(409) · Director 가 사라진 대상은 원장에서만 정리 가능"
+      ]
+    },
+    {
       "version": "2.822.5",
       "date": "2026-10-30",
       "title": "Bareos 작업 로그·결과를 열면 그 실행의 상태도 바로 갱신",

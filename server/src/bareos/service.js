@@ -9,7 +9,7 @@
  */
 import { openConsole, BareosConsoleError } from './console.js';
 import {
-  loadSettings, directorConn, directorCred, directorById, siteFor, siteMissing, anyDirectorConfigured,
+  loadSettings, directorConn, directorCred, directorById, siteFor, siteMissing,
 } from './settings.js';
 import { OPS } from './ops.js';
 import { addJob as registryAddJob, listJobs, findByVm, registryLoadError, jobCount, retireName, MAX_JOBS } from './registry.js';
@@ -30,7 +30,9 @@ let _factory = null;
 export function _setSessionFactoryForTest(fn) { _factory = fn; }
 
 /** 데모 Director 를 쓰는가 — mock 모드이고 접속할 수 있는 Director 가 하나도 없을 때만. */
-export function isDemoActive(s = loadSettings()) { return !_factory && isMockMode() && !anyDirectorConfigured(s); }
+// v2.823 검토(I4·W9 — 재현): 데모는 **사람이 등록한 Director 가 하나도 없을 때만**. 예전에는 '접속값을 모두 갖춘 Director' 가 없으면 데모라,
+//   자동 설정을 쓰려고 비밀번호 없이 추가한 Director 가 설정 화면에 보이지 않고(데모 Director 만) 그 id 의 라우트가 404 였다 — 빠져나갈 길이 없었다.
+export function isDemoActive(s = loadSettings()) { return !_factory && isMockMode() && !(s.directors || []).length; }
 
 /** 화면·라우트가 쓰는 설정(데모면 메모리 데모 설정 — 파일은 그대로). 비밀번호 포함(내부 전용). */
 export function effectiveSettings() {
@@ -50,7 +52,14 @@ export async function withDirector(directorId, fn, { trigger = 'manual', signal 
   // 데모 계정(mock 모드 내장 계정 — 요청 문맥은 admin)은 **데모 Director 일 때만** 접속한다. 사람이 등록한 Director 에는
   // 닿지 않는다(auth/demoGuest.js '실제 호스트에 닿는 실행은 막는다' 의 GET 판 — audit2719b 가 라우트 호출 모양을 대조한다).
   if (demoOnly && !isDemoActive()) throw fail('demo-only', DEMO_ONLY_REASON);
-  if (_factory) { const s = await _factory(directorId); try { return await fn(s); } finally { s.close?.(); } }
+  if (_factory) {
+    // 테스트 주입 경로도 시한 신호를 세션에 잇는다(v2.823 검토 P1 — 잇지 않아 시한 경로를 테스트가 못 잡았다).
+    const s = await _factory(directorId);
+    const onAbort = () => s._fail?.(new BareosConsoleError('aborted', '시한·취소로 Director 세션을 끊었습니다.'));
+    signal?.addEventListener?.('abort', onAbort, { once: true });
+    if (signal?.aborted) onAbort();
+    try { return await fn(s); } finally { signal?.removeEventListener?.('abort', onAbort); s.close?.(); }
+  }
   const settings = loadSettings();
   if (isDemoActive(settings)) {
     registerDemoJobNames(listJobs().filter((j) => j.demo).map((j) => j.bareosJob));
@@ -87,10 +96,11 @@ export async function withDirector(directorId, fn, { trigger = 'manual', signal 
  * @param {keyof OPS} kind
  * @param {object} args 직렬화할 수 있는 값만(2차 엣지 대행이 같은 인자를 보낸다)
  */
-export async function onDirector(directorId, kind, args = {}, { trigger = 'manual', signal = null, demoOnly = false } = {}) {
+export async function onDirector(directorId, kind, args = {}, { trigger = 'manual', signal = null, demoOnly = false, hooks = null } = {}) {
   const op = OPS[kind];
   if (!op) throw fail('invalid', `알 수 없는 Director 작업입니다(${kind}).`);
-  return withDirector(directorId, (s) => op(s, args, { signal }), { trigger, signal, demoOnly });
+  // hooks: 중앙 직접 실행에서만 쓰는 함수(예: poll 의 disableNow — 그 순간의 원장으로 고른다). 직렬화하지 않는다(엣지 대행에는 없다).
+  return withDirector(directorId, (s) => op(s, args, { signal, ...(hooks || {}) }), { trigger, signal, demoOnly });
 }
 
 /**

@@ -9,14 +9,15 @@ import { droppedSecretNote } from '../droppedSecretText.js';
 import {
   diagView, directorPrepBlock, fdIniTemplate, PREP_CHECKLIST, autoSetupDirectorText, autoSetupFdText, thumbprintText,
   outcomeUnknown, missingText, preflightView, preflightSummary, autoSetupFdPluginText, fillEmptyMapping, directorFormPatch,
-  VMWARE_POOL_FULL, VMWARE_SCHEDULE, WEEKDAYS, WEEKDAY_LABEL, MAPPING_FIELDS,
+  VMWARE_POOL_FULL, VMWARE_SCHEDULE, WEEKDAYS, WEEKDAY_LABEL, MAPPING_FIELDS, newMappingRow, vcSlug,
 } from './bareosText.js';
 
 /**
  * Bareos VM 백업 › 설정(v2.823 법인별 Director — 전체 범위 관리자).
  * 법인마다 Bareos 서버(Director·SD·FD 한 대)를 등록하고 그 법인 vCenter 를 묶는다. 초기 설치만 된 서버는 편집 화면의 자동 설정 5단계
- * (사전 점검 → Director 리소스 · Pool · Schedule → FD 플러그인 → FD INI · 지문 → 매핑 채움)로 포탈이 설정한다(서버 bareos/autoSetup.js).
- * SSH·vCenter 비밀번호는 요청 1회에만 쓰고 저장하지 않는다 · 쓰기 단계는 본인 OTP · 포탈이 만들지 않은 파일은 덮어쓰지 않는다.
+ * (사전 점검 → Director 리소스 · Pool · Schedule → FD 플러그인 → 매핑 채움·저장 → FD INI · 지문)로 포탈이 설정한다(서버 bareos/autoSetup.js).
+ * v2.823 검토(W3): FD INI 는 저장된 매핑의 vcserver·INI 경로를 쓰므로 매핑 채움이 그 앞이다(예전 순서 4·5 는 번호대로 하면 실패했다).
+ * SSH·vCenter 비밀번호는 서버에 저장하지 않는다 · 쓰기 단계는 본인 OTP · 포탈이 만들지 않은 파일은 덮어쓰지 않는다(예외: 3단계 myself.conf — 사본을 남기고 제자리 수정).
  * 문구·판정은 bareosText.js 하나(백틱 금지 · 값이 없으면 '—').
  */
 const BASE = '/tools/bareos-backup';
@@ -30,11 +31,18 @@ const GRID = { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(15
 const enc = encodeURIComponent;
 // W2(v2.822): Director 를 거치는 조회는 자동 재시도하지 않는다(규약 '자동 재시도 금지')
 const DIRECTOR_GET = { retries: 0, timeoutMs: 60_000 };
-const vcSlug = (id) => String(id || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40) || 'vcenter';
+// v2.823 검토(W15): 카드 안 격자 — 400px 에서 칸 최소폭이 카드 내폭보다 커 가로로 넘쳤다
+const CARDS = (min) => ({ display: 'grid', gridTemplateColumns: `repeat(auto-fit, minmax(min(${min}px, 100%), 1fr))`, gap: 12 });
+const hostOf = (v) => String(v?.host || '').replace(/^https?:\/\//, '').replace(/[/:].*$/, '');
+/** 클립보드 복사 + 결과 안내(W13 — 실패를 삼키지 않는다). */
+const copyWith = (say) => (text) => {
+  const fail = () => say({ ok: false, text: '복사하지 못했습니다 — 글을 직접 선택해 복사하세요.' });
+  try { navigator.clipboard.writeText(text).then(() => say({ ok: true, text: '복사했습니다.' }), fail); } catch { fail(); }
+};
 
 function Msg({ m }) {
   if (!m) return null;
-  return <div className={`banner ${m.ok === false ? 'bad' : 'ok'}`} role={m.ok === false ? 'alert' : 'status'} style={{ marginTop: 10, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}><BoldText text={m.text} /></div>;
+  return <div className={`banner ${m.ok === false ? 'bad' : m.ok === 'warn' ? 'warn' : 'ok'}`} role={m.ok === false ? 'alert' : 'status'} style={{ marginTop: 10, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}><BoldText text={m.text} /></div>;
 }
 
 export function DiagStages({ stages }) {
@@ -85,17 +93,21 @@ export default function SettingsTab({ onSaved }) {
   const saveDefaults = async () => {
     setBusy(true); setMsg(null);
     try {
-      const r = await putJson(`${BASE}/settings`, { defaults: { ...defs, pollIntervalSec: Number(defs.pollIntervalSec) || undefined } });
+      // P4: 읽은 설정 세대를 함께 보낸다 — 그사이 다른 화면이 저장했으면 409(덮지 않는다)
+      const r = await putJson(`${BASE}/settings`, { rev: s.rev, defaults: { ...defs, pollIntervalSec: Number(defs.pollIntervalSec) || undefined } });
       requireChanged(r);
       setMsg({ ok: true, text: '공통 기본값을 저장했습니다.' });
       await load(false); onSaved();
-    } catch (e) { setMsg({ ok: false, text: `저장 실패: ${e.message}` }); } finally { setBusy(false); }
+    } catch (e) {
+      setMsg({ ok: false, text: `저장 실패: ${e.message}` });
+      if (e?.body?.code === 'stale') await load(true);
+    } finally { setBusy(false); }
   };
-  const copy = (text) => { try { navigator.clipboard.writeText(text).then(() => setMsg({ ok: true, text: '복사했습니다.' }), () => setMsg({ ok: false, text: '복사하지 못했습니다 — 글을 직접 선택해 복사하세요.' })); } catch { setMsg({ ok: false, text: '복사하지 못했습니다 — 글을 직접 선택해 복사하세요.' }); } };
+  const copy = copyWith(setMsg);
 
   return (
     <div>
-      {s.demo && <div className="card" style={{ ...NOTE, borderLeft: '3px solid var(--amber)' }}>데모 모드 — 아래 값은 메모리의 데모 설정입니다(지역마다 데모 Director). 실제 Director 를 추가하면 그쪽으로 접속합니다.</div>}
+      {s.demo && <div className="card" style={{ ...NOTE, borderLeft: '3px solid var(--amber)' }}>데모 모드 — 아래 값은 메모리의 데모 설정입니다(지역마다 데모 Director · 편집·저장 안 됨). 실제 Director 를 추가하면 데모가 꺼지고 그쪽 설정으로 바뀝니다.</div>}
       {s.loadError && <div className="banner bad" style={{ marginBottom: 10 }}>설정 파일을 읽지 못했습니다(손상본 보존) — {s.loadError.reason}</div>}
       {err && <div className="banner bad" role="alert" style={{ marginBottom: 10 }}>설정을 다시 읽지 못했습니다({String(err.message || err).slice(0, 160)}) — 화면 값이 최신이 아닐 수 있어 저장을 잠갔습니다. <button type="button" className="logout-btn" style={BTN} onClick={() => load(true)}>다시 읽기</button></div>}
       <Msg m={msg} />
@@ -106,7 +118,7 @@ export default function SettingsTab({ onSaved }) {
             <b>법인별 Director</b>
             <div className="muted" style={{ fontSize: 12, marginTop: 2 }}>법인마다 Bareos 서버(Director · SD · FD 한 대)를 등록하고 그 법인의 vCenter 를 묶습니다. 초기 설치만 된 서버는 편집 화면의 자동 설정 5단계로 포탈이 설정합니다.</div>
           </div>
-          <button type="button" className="login-btn" style={{ flex: 'none', padding: '8px 16px' }} disabled={s.demo || !!err} title={s.demo ? '데모 모드에서는 실제 Director 를 추가하면 데모가 꺼집니다 — 추가는 가능합니다' : undefined} onClick={() => setAdding((x) => !x)}>{adding ? '닫기' : '+ Director 추가'}</button>
+          <button type="button" className="login-btn" style={{ flex: 'none', padding: '8px 16px' }} disabled={!!err} onClick={() => setAdding((x) => !x)}>{adding ? '닫기' : '+ Director 추가'}</button>
         </div>
         {adding && <AddDirectorForm onDone={async (r) => { setAdding(false); setMsg({ ok: true, text: `‘${r.director.name}’ Director 를 추가했습니다 — 편집에서 vCenter 를 묶고 자동 설정을 진행하세요.` }); await load(true); setSel(r.director.id); onSaved(); }} />}
         <div className="table-wrap" style={{ marginTop: 10, maxHeight: '46vh' }}>
@@ -139,7 +151,7 @@ export default function SettingsTab({ onSaved }) {
         onReload={() => load(true)} onSaved={onSaved} onClose={() => setSel('')}
         onDeleted={async (name) => { setSel(''); setMsg({ ok: true, text: `‘${name}’ Director 를 포탈 설정에서 지웠습니다(Bareos 서버는 그대로).` }); await load(true); onSaved(); }} />}
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))', gap: 12 }}>
+      <div style={CARDS(340)}>
         <div className="card" style={{ padding: 14, minWidth: 0 }}>
           <b>공통 기본값 — 모든 Director</b>
           <div style={GRID}>
@@ -158,7 +170,7 @@ export default function SettingsTab({ onSaved }) {
             주기 범위는 {s.limits?.pollIntervalSec ? `${s.limits.pollIntervalSec.min}~${s.limits.pollIntervalSec.max}초` : '—'}.
           </div>
           <div style={{ ...ROW, marginTop: 10 }}>
-            <button type="button" className="login-btn" style={{ flex: 'none', padding: '8px 18px' }} disabled={busy || !!err} onClick={saveDefaults}>{busy ? '저장 중…' : '공통 기본값 저장'}</button>
+            <button type="button" className="login-btn" style={{ flex: 'none', padding: '8px 18px' }} disabled={busy || !!err || s.demo} onClick={saveDefaults}>{busy ? '저장 중…' : '공통 기본값 저장'}</button>
           </div>
         </div>
         <div className="card" style={{ padding: 14, minWidth: 0 }}>
@@ -168,7 +180,7 @@ export default function SettingsTab({ onSaved }) {
             <li>포탈 서버에서 그 서버의 Director 9101 과 SSH 22(root 비밀번호 로그인)가 열려 있어야 합니다.</li>
             {PREP_CHECKLIST.map((t) => <li key={t}>{t}</li>)}
           </ul>
-          <div className="muted" style={{ fontSize: 11.5, marginTop: 6 }}>나머지(콘솔 · Profile · FileSet · JobDefs · 복원 잡 · Pool · Schedule · FD 플러그인 · FD INI · 매핑)는 Director 편집 화면의 자동 설정 5단계가 합니다. 손으로 넣으려면 그 화면의 ‘사전 준비 블록’ 을 복사하세요.</div>
+          <div className="muted" style={{ fontSize: 11.5, marginTop: 6 }}>나머지(콘솔 · Profile · FileSet · JobDefs · 복원 잡 · Pool · Schedule · FD 플러그인 · 매핑 · FD INI)는 Director 편집 화면의 자동 설정 5단계가 합니다. 손으로 넣으려면 그 화면 2단계의 ‘사전 준비 블록 복사’ 를 쓰세요.</div>
           <div style={{ ...ROW, marginTop: 8 }}><button type="button" className="logout-btn" style={BTN} onClick={() => copy(fdIniTemplate({}))}>FD INI 틀 복사</button></div>
         </div>
       </div>
@@ -221,6 +233,8 @@ function DirectorEditor({ s, dir, locked, onReload, onSaved, onClose, onDeleted 
   const [msg, setMsg] = useState(null);
   const [mapMsg, setMapMsg] = useState(null);
   const catGen = useRef(0);
+  const rowsRef = useRef(rows);
+  rowsRef.current = rows;
   // 서버가 Director 를 바꿨으면(자동 설정 — 콘솔·비밀번호) 접속 폼을 새 값으로(입력 중인 비밀번호는 비운다)
   useEffect(() => { setForm(toForm(dir)); }, [dir.host, dir.port, dir.consoleName, dir.hasPassword, dir.name]);
   const vcName = (id) => s.vcenters.find((v) => v.id === id)?.name || id;
@@ -234,6 +248,8 @@ function DirectorEditor({ s, dir, locked, onReload, onSaved, onClose, onDeleted 
   useEffect(() => { if (canConnect) loadCat(false); }, [dir.id, canConnect]);
   const unsaved = JSON.stringify(rows) !== JSON.stringify(mine);
   const jobsOn = (vc) => Number(s.jobsByVcenter?.[vc] || 0);
+  const lockedRow = (vc) => jobsOn(vc) > 0 && mine.some((x) => x.vcenterId === vc);
+  const close = () => { if (!unsaved || window.confirm('저장하지 않은 매핑 변경이 있습니다 — 버리고 닫을까요?')) onClose(); };   // W17
 
   const saveConn = async () => {
     const patch = directorFormPatch(form, dir);
@@ -244,7 +260,12 @@ function DirectorEditor({ s, dir, locked, onReload, onSaved, onClose, onDeleted 
       requireChanged(r);
       const dropped = droppedSecretNote(r);
       setMsg({ ok: true, text: `저장했습니다.${dropped ? ` ${dropped}` : ''}` });
-      await onReload(); onSaved(); loadCat(true);
+      // W5: 저장한 비밀번호를 칸에 남기지 않는다(그대로 두면 다음 저장·시험이 그 값을 새 주소로 보낸다)
+      setForm((x) => ({ ...x, password: '' }));
+      await onReload(); onSaved();
+      // W16: 콘솔 접속값이 갖춰졌을 때만 카탈로그를 다시 읽는다(없으면 '읽지 않습니다' 와 빨간 오류가 함께 떴다)
+      const nd = r.director || {};
+      if (nd.host && nd.consoleName && nd.hasPassword) loadCat(true);
     } catch (e) { setMsg({ ok: false, text: `저장 실패: ${e.message}` }); } finally { setBusy(''); }
   };
   const test = async () => {
@@ -267,26 +288,33 @@ function DirectorEditor({ s, dir, locked, onReload, onSaved, onClose, onDeleted 
 
   // vCenter 묶기 — 표의 행이 곧 매핑이다(체크하면 빈 매핑 행을 만든다 · 저장은 아래 '매핑 저장')
   const bound = new Set(rows.map((x) => x.vcenterId));
+  // W2·W17: 새로 묶으면 vcserver(등록부 주소)·INI 경로를 미리 채우고, 저장된 vCenter 를 껐다 켜면 저장본을 되살린다
   const toggleVc = (vc, on) => {
-    if (on) setRows((r) => [...r, { vcenterId: vc, directorId: dir.id, vcserver: '', client: '', storage: '', pool: '', schedule: '', configFile: '' }]);
-    else setRows((r) => r.filter((x) => x.vcenterId !== vc));
+    if (on) {
+      const saved = mine.find((x) => x.vcenterId === vc);
+      setRows((r) => [...r, saved ? { ...saved } : newMappingRow(vc, dir.id, hostOf(s.vcenters.find((v) => v.id === vc)), [...s.sites, ...r].map((x) => x.configFile))]);
+    } else setRows((r) => r.filter((x) => x.vcenterId !== vc));
   };
   const setRow = (vc, k, v) => setRows((r) => r.map((x) => (x.vcenterId === vc ? { ...x, [k]: v } : x)));
   const saveMap = async () => {
     setBusy('map'); setMapMsg(null);
     try {
       const sites = [...s.sites.filter((x) => x.directorId !== dir.id), ...rows];
-      const r = await putJson(`${BASE}/settings`, { sites });
+      // P4·W17: 읽은 설정 세대(rev)를 함께 — 그사이 다른 화면(다른 Director 편집)이 저장했으면 409 로 다시 읽게 한다(조용히 덮지 않는다)
+      const r = await putJson(`${BASE}/settings`, { rev: s.rev, sites });
       requireChanged(r);
       setMapMsg({ ok: true, text: `매핑을 저장했습니다(이 Director ${rows.length}개 vCenter). 이미 만든 Bareos 잡은 바뀌지 않습니다 — 새로 등록하는 대상부터 적용됩니다.` });
       await onReload(); onSaved();
-    } catch (e) { setMapMsg({ ok: false, text: `저장 실패: ${e.message}` }); } finally { setBusy(''); }
+    } catch (e) {
+      setMapMsg({ ok: false, text: `저장 실패: ${e.message}${e?.body?.code === 'stale' ? ' — 최신 설정을 다시 읽었습니다. 표의 변경은 그대로 두었으니 확인한 뒤 다시 저장하세요.' : ''}` });
+      if (e?.body?.code === 'stale') await onReload();
+    } finally { setBusy(''); }
   };
   const fillMap = async () => {
     setBusy('suggest'); setMapMsg(null);
     try {
       const r = await fetchJson(`${BASE}/settings/directors/${enc(dir.id)}/suggest`, {}, undefined, DIRECTOR_GET);
-      const out = fillEmptyMapping(rows, r.suggestions, vcName);
+      const out = fillEmptyMapping(rowsRef.current, r.suggestions, vcName);   // W10: 기다리는 동안 고친 칸을 요청 때 사본으로 덮지 않는다
       setRows(out.sites);
       setMapMsg({ ok: true, text: `빈 칸 ${out.filled}개를 채웠습니다(저장 전입니다 — 확인한 뒤 ‘매핑 저장’ 을 누르세요).${out.left.length ? ` 제안이 없어 남은 칸: ${out.left.slice(0, 6).join(', ')}${out.left.length > 6 ? ` 외 ${out.left.length - 6}` : ''}.` : ''}` });
       return out.filled;
@@ -302,11 +330,11 @@ function DirectorEditor({ s, dir, locked, onReload, onSaved, onClose, onDeleted 
         <span className="badge gray">{dir.hasPassword ? '콘솔 비밀번호 저장됨' : '콘솔 비밀번호 없음'}</span>
         <span className="badge gray">백업 대상 {dir.jobs ?? 0}</span>
         <div style={{ flexGrow: 1 }} />
-        <button type="button" className="logout-btn" style={BTN} onClick={onClose}>닫기</button>
+        <button type="button" className="logout-btn" style={BTN} onClick={close}>닫기</button>
         <button type="button" className="logout-btn" style={{ ...BTN, color: 'var(--red)' }} disabled={!!busy || s.demo || locked} onClick={remove}>Director 삭제</button>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))', gap: 12, marginTop: 10 }}>
+      <div style={{ ...CARDS(340), marginTop: 10 }}>
         <div className="card" style={{ padding: 12, minWidth: 0, background: 'var(--panel-deep)' }}>
           <b>연결</b>
           <div style={GRID}>
@@ -326,7 +354,7 @@ function DirectorEditor({ s, dir, locked, onReload, onSaved, onClose, onDeleted 
           </div>
           <div className="muted" style={{ fontSize: 11.5, marginTop: 8, lineHeight: 1.6 }}>주소·포트·콘솔 이름을 바꾸면 이 Director 의 저장 비밀번호는 승계하지 않습니다. 저장된 비밀번호로 하는 연결 시험은 저장된 주소로만 접속합니다.</div>
           <div style={{ ...ROW, marginTop: 10 }}>
-            <button type="button" className="login-btn" style={{ flex: 'none', padding: '8px 16px' }} disabled={!!busy || locked} onClick={saveConn}>{busy === 'conn' ? '저장 중…' : '연결 저장'}</button>
+            <button type="button" className="login-btn" style={{ flex: 'none', padding: '8px 16px' }} disabled={!!busy || locked || s.demo} onClick={saveConn}>{busy === 'conn' ? '저장 중…' : '연결 저장'}</button>
             <button type="button" className="logout-btn" style={{ padding: '7px 14px' }} disabled={!!busy} onClick={test}>{busy === 'test' ? '시험 중…' : '연결 시험'}</button>
           </div>
           {diag && <DiagStages stages={diag} />}
@@ -340,10 +368,10 @@ function DirectorEditor({ s, dir, locked, onReload, onSaved, onClose, onDeleted 
               const other = s.sites.find((x) => x.vcenterId === v.id && x.directorId !== dir.id);
               const otherName = other ? s.directors.find((d) => d.id === other.directorId)?.name || other.directorId : '';
               const on = bound.has(v.id);
-              const lockedVc = on && jobsOn(v.id) > 0 && mine.some((x) => x.vcenterId === v.id);
+              const lockedVc = on && lockedRow(v.id);
               return (
                 <label key={v.id} style={{ ...ROW, justifyContent: 'space-between', padding: '6px 10px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--panel)', opacity: other ? 0.6 : 1, cursor: other || lockedVc ? 'default' : 'pointer' }}>
-                  <span style={{ ...ROW, gap: 8 }}><input type="checkbox" checked={on} disabled={!!other || lockedVc} onChange={(e) => toggleVc(v.id, e.target.checked)} /><span>{v.name}</span></span>
+                  <span style={{ ...ROW, gap: 8 }}><input type="checkbox" checked={on} disabled={!!other || lockedVc || busy === 'suggest'} onChange={(e) => toggleVc(v.id, e.target.checked)} /><span>{v.name}</span></span>
                   <span className="muted" style={{ fontSize: 11.5 }}>{other ? `${otherName} 에 묶임` : lockedVc ? `백업 대상 ${jobsOn(v.id)} — 대상을 지워야 뺄 수 있습니다` : on ? (mine.some((x) => x.vcenterId === v.id) ? '묶임' : '저장 전') : '—'}</span>
                 </label>
               );
@@ -353,7 +381,7 @@ function DirectorEditor({ s, dir, locked, onReload, onSaved, onClose, onDeleted 
         </div>
       </div>
 
-      <AutoSetupPanel s={s} dir={dir} rows={mine} cat={cat} unsaved={unsaved} locked={locked}
+      <AutoSetupPanel s={s} dir={dir} rows={mine} editCount={rows.length} cat={cat} unsaved={unsaved} locked={locked}
         onDirectorDone={async () => { await onReload(); onSaved(); loadCat(true); }} onMaybeChanged={onReload} onFill={fillMap} busyOuter={busy} />
 
       <div style={{ ...ROW, marginTop: 14, marginBottom: 6 }}>
@@ -361,18 +389,19 @@ function DirectorEditor({ s, dir, locked, onReload, onSaved, onClose, onDeleted 
         <span className="muted" style={{ fontSize: 12 }}>vCenter 마다 백업 데이터가 머무는 FD · SD · 풀(같은 법인 서버)</span>
         <div style={{ flexGrow: 1 }} />
         <button type="button" className="logout-btn" style={BTN} disabled={!canConnect || !!busy} onClick={() => loadCat(true)}>카탈로그 새로 고침</button>
-        <button type="button" className="logout-btn" style={BTN} disabled={!canConnect || !rows.length || !!busy} onClick={fillMap}>{busy === 'suggest' ? '채우는 중…' : '빈 칸 채우기(5단계)'}</button>
+        <button type="button" className="logout-btn" style={BTN} disabled={!canConnect || !rows.length || !!busy} onClick={fillMap}>{busy === 'suggest' ? '채우는 중…' : '빈 칸 채우기(4단계)'}</button>
       </div>
       {catErr && <div className="muted" style={{ fontSize: 12, color: 'var(--red)', marginBottom: 6 }}>카탈로그를 읽지 못했습니다: {catErr.message} — 이름을 직접 적으세요.</div>}
+      {cat?.errors && Object.keys(cat.errors).length > 0 && <div className="muted" style={{ fontSize: 12, color: 'var(--amber)', marginBottom: 6 }}>카탈로그 일부를 읽지 못했습니다({Object.keys(cat.errors).join(' · ')}) — 그 칸은 이름을 직접 적으세요.</div>}
       {!canConnect && <div className="muted" style={{ fontSize: 12, marginBottom: 6 }}>콘솔 접속값이 아직 없어 카탈로그를 읽지 않습니다 — 자동 설정 2단계를 끝내면 드롭다운이 채워집니다.</div>}
       <div className="table-wrap" style={{ maxHeight: '44vh' }}>
         <STable minWidth={1120} sortable={false}>
           <thead><tr><th>vCenter</th>{MAPPING_FIELDS.map(([k, l]) => <th key={k}>{l}</th>)}<th>작업</th></tr></thead>
           <tbody>
             {rows.length === 0 && <tr><td colSpan={8} className="center muted" style={{ padding: 16 }}>묶은 vCenter 가 없습니다 — 위에서 이 법인의 vCenter 를 체크하세요.</td></tr>}
-            {rows.map((x) => (
+            {rows.map((x) => { const gone = !s.vcenters.some((v) => v.id === x.vcenterId); return (
               <tr key={x.vcenterId}>
-                <td><b>{vcName(x.vcenterId)}</b><div className="muted" style={{ fontSize: 11 }}>{x.vcenterId}</div></td>
+                <td><b>{vcName(x.vcenterId)}</b><div className="muted" style={{ fontSize: 11 }}>{x.vcenterId}{gone ? ' · 인벤토리에 없음' : ''}</div></td>
                 <td><input className="input" aria-label="vcserver" value={x.vcserver} onChange={(e) => setRow(x.vcenterId, 'vcserver', e.target.value.trim())} style={{ ...INP, width: 160 }} placeholder={s.vcenters.find((v) => v.id === x.vcenterId)?.host || 'vCenter 주소'} /></td>
                 {[['client', 'clients'], ['storage', 'storages'], ['pool', 'pools'], ['schedule', 'schedules']].map(([k, ck]) => (
                   <td key={k}>{cat?.[ck] ? (
@@ -383,14 +412,18 @@ function DirectorEditor({ s, dir, locked, onReload, onSaved, onClose, onDeleted 
                   ) : <input className="input" aria-label={k} value={x[k]} onChange={(e) => setRow(x.vcenterId, k, e.target.value.trim())} style={{ ...INP, width: 120 }} />}</td>
                 ))}
                 <td><input className="input" aria-label="INI 경로" value={x.configFile} onChange={(e) => setRow(x.vcenterId, 'configFile', e.target.value.trim())} style={{ ...INP, width: 220 }} placeholder={`/etc/bareos/vmware/${vcSlug(x.vcenterId)}.ini`} /></td>
-                <td><button type="button" className="logout-btn" style={BTN} onClick={() => { try { navigator.clipboard.writeText(fdIniTemplate(x)); } catch { /* */ } }}>INI 내용 복사</button></td>
+                <td><div style={{ ...ROW, gap: 6, flexWrap: 'nowrap' }}>
+                  <button type="button" className="logout-btn" style={BTN} onClick={() => copyWith(setMapMsg)(fdIniTemplate(x))}>INI 내용 복사</button>
+                  {/* W1: 인벤토리에서 빠진 vCenter 의 행도 여기서 뺄 수 있다(체크 목록에는 없다 — 남으면 모든 매핑 저장이 400) */}
+                  <button type="button" className="logout-btn" style={BTN} disabled={lockedRow(x.vcenterId) || busy === 'suggest'} title={lockedRow(x.vcenterId) ? '백업 대상이 있어 뺄 수 없습니다 — 대상을 먼저 지우세요' : undefined} onClick={() => toggleVc(x.vcenterId, false)}>빼기</button>
+                </div></td>
               </tr>
-            ))}
+            ); })}
           </tbody>
         </STable>
       </div>
       <div style={{ ...ROW, marginTop: 10 }}>
-        <button type="button" className="login-btn" style={{ flex: 'none', padding: '8px 18px' }} disabled={!!busy || locked || !unsaved} onClick={saveMap}>{busy === 'map' ? '저장 중…' : '매핑 저장'}</button>
+        <button type="button" className="login-btn" style={{ flex: 'none', padding: '8px 18px' }} disabled={!!busy || locked || !unsaved || s.demo} onClick={saveMap}>{busy === 'map' ? '저장 중…' : '매핑 저장'}</button>
         <span className="muted" style={{ fontSize: 12 }}>{unsaved ? '저장하지 않은 변경이 있습니다.' : '저장된 상태입니다.'} 빈 칸이 있는 vCenter 의 VM 은 등록할 수 없습니다(사유가 등록 화면에 나옵니다).</span>
       </div>
       <Msg m={mapMsg} />
@@ -399,25 +432,46 @@ function DirectorEditor({ s, dir, locked, onReload, onSaved, onClose, onDeleted 
 }
 
 /* ───────────────────────── 자동 설정 5단계 ───────────────────────── */
-const STEP_NAMES = ['사전 점검', 'Director 리소스', 'FD 플러그인 켜기', 'FD INI · 지문', '매핑 채움'];
+const STEP_NAMES = ['사전 점검', 'Director 리소스', 'FD 플러그인 켜기', '매핑 채움 · 저장', 'FD INI · 지문'];
 
 /**
  * 자동 설정 5단계(v2.823 — Director 하나). SSH 접속값·OTP 는 위 한 곳에서 넣는다(비밀번호는 저장하지 않는다 · OTP 는 쓰기 단계마다 새 코드).
  * 단계 상태는 **이 화면에서 실행한 결과**다(다시 열면 비어 있다 — 서버에 단계 기록을 두지 않는다).
  */
-function AutoSetupPanel({ s, dir, rows, cat, unsaved, locked, onDirectorDone, onMaybeChanged, onFill, busyOuter }) {
+function AutoSetupPanel({ s, dir, rows, editCount, cat, unsaved, locked, onDirectorDone, onMaybeChanged, onFill, busyOuter }) {
   const [ssh, setSsh] = useState({ host: dir.host || '', sshPort: '22', username: 'root', password: '', otp: '' });
+  // W6: 손대지 않은 SSH 주소·Director 포트는 연결 저장을 따라간다(옛 값으로 2단계를 돌리면 Director 연결을 옛 주소로 되돌렸다)
+  const touched = useRef({});
   const [st, setSt] = useState({});          // 단계 번호 → { ok, at, text }
   const [pf, setPf] = useState(null);        // 사전 점검 결과
+  const [copyMsg, setCopyMsg] = useState(null);
   const [busy, setBusy] = useState('');
   const [d, setD] = useState({ directorPort: String(dir.port || 9101), consoleName: dir.consoleName || 'portal', restoreClient: '', restoreStorage: '', restorePool: '',
     usePools: true, fullDays: '90', incrDays: '30', maxVolumeGB: '50', useSchedule: true, fullDay: 'sun', time: '02:00' });
   const [f, setF] = useState({ vcenterId: rows[0]?.vcenterId || '', fdHost: '', vcuser: '', vcpass: '', vcthumbprint: '' });
-  const setS2 = (k, v) => setSsh((x) => ({ ...x, [k]: v }));
-  const setDk = (k, v) => setD((x) => ({ ...x, [k]: v }));
-  // W2-3: 대상 vCenter·FD 주소가 바뀌면 읽어 둔 지문은 그 대상의 것이 아니다 — 비운다
-  const setFk = (k, v) => setF((x) => ({ ...x, [k]: v, ...((k === 'vcenterId' || k === 'fdHost') && x[k] !== v ? { vcthumbprint: '' } : {}) }));
   const mark = (n, ok, text) => setSt((x) => ({ ...x, [n]: { ok, at: Date.now(), text } }));
+  const unmark = (n) => setSt((x) => { if (!x[n]) return x; const y = { ...x }; delete y[n]; return y; });
+  useEffect(() => { if (!touched.current.host) setSsh((x) => ({ ...x, host: dir.host || '' })); }, [dir.host]);
+  useEffect(() => { if (!touched.current.directorPort) setD((x) => ({ ...x, directorPort: String(dir.port || 9101) })); }, [dir.port]);
+  // W12: FD 주소를 비워 SSH 주소를 쓰는 동안 SSH 주소가 바뀌면 읽어 둔 지문·5단계 결과는 그 서버의 것이 아니다
+  const setS2 = (k, v) => {
+    if (k === 'host') { touched.current.host = true; if (!f.fdHost && v !== ssh.host) { setF((x) => ({ ...x, vcthumbprint: '' })); unmark(5); } }
+    setSsh((x) => ({ ...x, [k]: v }));
+  };
+  const setDk = (k, v) => {
+    if (k === 'directorPort') touched.current.directorPort = true;
+    setD((x) => {
+      const y = { ...x, [k]: v };
+      // W8: 전용 Pool 을 끄면 그 Pool 을 가리키던 복원 풀은 비운다(정의 없는 풀을 참조하면 bareos-dir -t 가 거부한다)
+      if (k === 'usePools' && !v && x.restorePool === VMWARE_POOL_FULL && !(cat?.pools || []).includes(VMWARE_POOL_FULL) && !(pf?.resources?.pool || []).includes(VMWARE_POOL_FULL)) y.restorePool = '';
+      return y;
+    });
+  };
+  // W2-3·W12: 대상 vCenter·FD 주소가 바뀌면 읽어 둔 지문과 그 결과 배너는 그 대상의 것이 아니다 — 비운다
+  const setFk = (k, v) => {
+    if ((k === 'vcenterId' || k === 'fdHost') && f[k] !== v) unmark(5);
+    setF((x) => ({ ...x, [k]: v, ...((k === 'vcenterId' || k === 'fdHost') && x[k] !== v ? { vcthumbprint: '' } : {}) }));
+  };
   const sshBody = { host: ssh.host, sshPort: Number(ssh.sshPort) || 22, username: ssh.username, password: ssh.password };
   const otpOk = /^\d{6}$/.test(ssh.otp);
   const sshOk = !!(ssh.host && ssh.password);
@@ -441,7 +495,8 @@ function AutoSetupPanel({ s, dir, rows, cat, unsaved, locked, onDirectorDone, on
       setPf(r);
       const rr = r.resources || {};
       setD((x) => ({ ...x, restoreClient: x.restoreClient || (rr.client || [])[0] || '', restoreStorage: x.restoreStorage || (rr.storage || [])[0] || '', restorePool: x.restorePool || (x.usePools ? VMWARE_POOL_FULL : (rr.pool || [])[0] || '') }));
-      mark(1, !r.items.some((x) => x.status === 'missing'), preflightSummary(r));
+      // W11: 못 읽음(unknown)·주의(warn)가 있으면 '완료' 가 아니라 '확인 필요'
+      mark(1, r.items.some((x) => x.status === 'missing') ? false : r.items.some((x) => x.status === 'warn' || x.status === 'unknown') ? 'warn' : true, preflightSummary(r));
     } catch (e) { onFail(1, e, '사전 점검', false); } finally { setBusy(''); }
   };
   const runDirector = async () => {
@@ -475,32 +530,34 @@ function AutoSetupPanel({ s, dir, rows, cat, unsaved, locked, onDirectorDone, on
       requireChanged(r);
       if (r.vcenterId && r.vcenterId !== want.vcenterId) throw new Error('응답이 고른 vCenter 의 것이 아닙니다 — 다시 읽으세요.');
       setF((x) => (x.vcenterId === want.vcenterId && x.fdHost === want.fdHost ? { ...x, vcthumbprint: r.thumbprint } : x));
-      mark(4, null, thumbprintText(r));
-    } catch (e) { onFail(4, e, '지문 읽기', false); } finally { setBusy(''); }
+      mark(5, null, thumbprintText(r));
+    } catch (e) { onFail(5, e, '지문 읽기', false); } finally { setBusy(''); }
   };
   const runFd = async () => {
     setBusy('4');
     try {
       const r = await postJson(url('fd'), { ...fdBody(), otp: ssh.otp, vcuser: f.vcuser, vcpass: f.vcpass, vcthumbprint: f.vcthumbprint });
       requireChanged(r);
-      mark(4, true, autoSetupFdText(r));
+      mark(5, true, autoSetupFdText(r));
       setF((x) => ({ ...x, vcpass: '' }));
       setSsh((x) => ({ ...x, otp: '' }));
-    } catch (e) { onFail(4, e, 'FD INI 자동 설정', true); } finally { setBusy(''); }
+    } catch (e) { onFail(5, e, 'FD INI 자동 설정', true); } finally { setBusy(''); }
   };
   const runFill = async () => {
-    setBusy('5');
+    setBusy('4');
     const n = await onFill();
-    if (n !== null) mark(5, true, `매핑 빈 칸 ${n}개를 채웠습니다 — 아래 표에서 확인하고 ‘매핑 저장’ 을 누르세요.`);
-    else mark(5, false, '매핑 채움 실패 — 아래 표의 안내를 보세요.');
+    if (n !== null) mark(4, null, `매핑 빈 칸 ${n}개를 채웠습니다 — 아래 표에서 확인하고 ‘매핑 저장’ 을 누르세요(저장해야 5단계가 그 값을 씁니다).`);
+    else mark(4, false, '매핑 채움 실패 — 아래 표의 안내를 보세요.');
     setBusy('');
   };
 
   const any = !!busy || !!busyOuter || locked || s.demo;
   const dReady = sshOk && otpOk && d.restoreClient && d.restoreStorage && d.restorePool && !any;
   const dMissing = missingText([[sshOk, 'SSH 주소·비밀번호'], [d.restoreClient && d.restoreStorage && d.restorePool, '복원 잡 FD·스토리지·풀'], [otpOk, 'OTP 6자리']]);
-  const fReady = sshOk && site && f.vcuser && f.vcpass && f.vcthumbprint && otpOk && !unsaved && !any;
-  const fMissing = missingText([[site, '저장된 매핑의 vCenter'], [!unsaved, '매핑 저장(표에 저장하지 않은 변경)'], [sshOk, 'SSH 주소·비밀번호'], [f.vcuser && f.vcpass, 'vCenter 계정·비밀번호'], [f.vcthumbprint, '지문'], [otpOk, 'OTP 6자리']]);
+  // W3: FD INI 는 저장된 매핑의 vcserver·INI 경로를 쓴다 — 비어 있으면 4단계(채움 → 저장)가 먼저다
+  const siteReady = !!(site && site.vcserver && site.configFile);
+  const fReady = sshOk && siteReady && f.vcuser && f.vcpass && f.vcthumbprint && otpOk && !unsaved && !any;
+  const fMissing = missingText([[site, '저장된 매핑의 vCenter'], [!site || siteReady, '매핑의 vcserver·INI 경로(4단계 채움 → 저장)'], [!unsaved, '매핑 저장(표에 저장하지 않은 변경)'], [sshOk, 'SSH 주소·비밀번호'], [f.vcuser && f.vcpass, 'vCenter 계정·비밀번호'], [f.vcthumbprint, '지문'], [otpOk, 'OTP 6자리']]);
   const prep = directorPrepBlock({ defaults: s.defaults, consoleName: d.consoleName, anyClient: d.restoreClient || 'bareos-fd', anyStorage: d.restoreStorage || 'File', anyPool: d.restorePool || 'Full',
     pools: d.usePools ? { fullDays: Number(d.fullDays) || 90, incrDays: Number(d.incrDays) || 30, maxVolumeGB: Number(d.maxVolumeGB) || 50 } : null,
     schedule: d.useSchedule ? { fullDay: d.fullDay, time: d.time } : null });
@@ -510,12 +567,12 @@ function AutoSetupPanel({ s, dir, rows, cat, unsaved, locked, onDirectorDone, on
       <div style={ROW}>
         <div style={{ minWidth: 0, flex: '1 1 420px' }}>
           <b>자동 설정 — 초기 설치만 된 서버를 포탈이 설정합니다</b>
-          <div className="muted" style={{ fontSize: 11.5, marginTop: 2, lineHeight: 1.6 }}>SSH root 비밀번호와 본인 OTP 는 실행할 때마다 넣습니다(저장하지 않습니다 · OTP 는 쓰기 단계마다 새 코드). 쓰기 단계는 포탈이 만든 파일만 덮어쓰고, 실패하면 되돌립니다. 처음 접속하는 서버는 SSH 호스트키 승인(설정 › 장비 신뢰)이 먼저 필요할 수 있습니다.</div>
+          <div className="muted" style={{ fontSize: 11.5, marginTop: 2, lineHeight: 1.6 }}>SSH root 비밀번호는 서버에 저장하지 않습니다(이 편집 화면을 닫으면 지워집니다) · 본인 OTP 는 쓰기 단계마다 새 코드. 쓰기 단계는 포탈이 만든 파일만 덮어쓰고(예외: 3단계는 패키지의 myself.conf 를 사본을 남기고 제자리에서 고칩니다), 실패하면 되돌립니다. 처음 접속하는 서버는 SSH 호스트키 승인(설정 › 장비 신뢰)이 먼저 필요할 수 있습니다.</div>
         </div>
       </div>
       {s.demo && <div className="banner warn" style={{ marginTop: 8 }}>데모 모드에서는 자동 설정을 실행하지 않습니다(실제 서버에 접속하는 작업).</div>}
       <div style={GRID}>
-        <label className="muted" style={FIELD}>SSH 주소<input className="input" id="bareos-auto-host" style={INP} value={ssh.host} onChange={(e) => setS2('host', e.target.value.trim())} placeholder={dir.host || 'bareos.corp'} /></label>
+        <label className="muted" style={FIELD}>SSH 주소(Director 서버)<input className="input" id="bareos-auto-host" style={INP} value={ssh.host} onChange={(e) => setS2('host', e.target.value.trim())} placeholder={dir.host || 'bareos.corp'} /></label>
         <label className="muted" style={FIELD}>SSH 포트<input className="input" style={INP} inputMode="numeric" value={ssh.sshPort} onChange={(e) => setS2('sshPort', e.target.value.replace(/\D/g, '').slice(0, 5))} aria-label="SSH 포트" /></label>
         <label className="muted" style={FIELD}>SSH 계정(root)<input className="input" style={INP} value={ssh.username} onChange={(e) => setS2('username', e.target.value.trim())} aria-label="SSH 계정" /></label>
         <label className="muted" style={FIELD}>root 비밀번호<input className="input" id="bareos-auto-pw" style={INP} type="password" autoComplete="new-password" value={ssh.password} onChange={(e) => setS2('password', e.target.value)} placeholder="저장하지 않습니다" /></label>
@@ -525,12 +582,12 @@ function AutoSetupPanel({ s, dir, rows, cat, unsaved, locked, onDirectorDone, on
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 12 }}>
         {STEP_NAMES.map((name, i) => {
           const r = st[i + 1];
-          const tone = !r ? 'gray' : r.ok === true ? 'green' : r.ok === false ? 'red' : 'blue';
+          const tone = !r ? 'gray' : r.ok === true ? 'green' : r.ok === false ? 'red' : r.ok === 'warn' ? 'amber' : 'blue';
           return (
             <div key={name} style={{ flex: '1 1 150px', minWidth: 0, padding: '8px 10px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--panel)' }}>
               <div className="muted" style={{ fontSize: 11 }}>{i + 1}단계</div>
               <div style={{ fontWeight: 600, fontSize: 12.5 }}>{name}</div>
-              <span className={`badge ${tone}`} style={{ fontSize: 10.5, marginTop: 4 }}>{!r ? '실행 전' : r.ok === true ? '완료' : r.ok === false ? '실패' : '진행'}</span>
+              <span className={`badge ${tone}`} style={{ fontSize: 10.5, marginTop: 4 }}>{!r ? '실행 전' : r.ok === true ? '완료' : r.ok === false ? '실패' : r.ok === 'warn' ? '확인 필요' : '진행'}</span>
             </div>
           );
         })}
@@ -557,7 +614,7 @@ function AutoSetupPanel({ s, dir, rows, cat, unsaved, locked, onDirectorDone, on
 
       {/* 2 Director 리소스 */}
       <div style={{ marginTop: 14 }}>
-        <div style={ROW}><b>2 Director 리소스</b><span className="muted" style={{ fontSize: 11.5 }}>콘솔 · Profile · FileSet · JobDefs · 복원 잡 (+ Pool · Schedule) → bareos-dir -t → reload → 새 콘솔로 접속 확인 → 이 Director 의 연결을 그 콘솔로</span></div>
+        <div style={ROW}><b>2 Director 리소스</b><span className="muted" style={{ fontSize: 11.5 }}>콘솔 · Profile · FileSet · JobDefs · 복원 잡 (+ Pool · Schedule) → bareos-dir -t → reload → 새 콘솔로 접속 확인 → 성공하면 이 Director 의 연결을 저장합니다(주소 = 위 SSH 주소 · 포트 = 아래 Director 포트 · 그 콘솔)</span></div>
         <div style={GRID}>
           <label className="muted" style={FIELD}>Director 포트<input className="input" style={INP} inputMode="numeric" value={d.directorPort} onChange={(e) => setDk('directorPort', e.target.value.replace(/\D/g, '').slice(0, 5))} aria-label="Director 포트" /></label>
           <label className="muted" style={FIELD}>만들 콘솔 이름<input className="input" style={INP} value={d.consoleName} onChange={(e) => setDk('consoleName', e.target.value.trim())} aria-label="만들 콘솔 이름" /></label>
@@ -575,7 +632,7 @@ function AutoSetupPanel({ s, dir, rows, cat, unsaved, locked, onDirectorDone, on
             );
           })}
         </div>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 10, marginTop: 10 }}>
+        <div style={{ ...CARDS(280), gap: 10, marginTop: 10 }}>
           <div style={{ padding: 10, borderRadius: 8, border: '1px solid var(--border)', minWidth: 0 }}>
             <label style={{ ...ROW, fontSize: 12.5 }}><input type="checkbox" checked={d.usePools} onChange={(e) => setDk('usePools', e.target.checked)} /> VMware 전용 Pool 만들기({VMWARE_POOL_FULL} · Incr)</label>
             {d.usePools && <div style={GRID}>
@@ -599,6 +656,8 @@ function AutoSetupPanel({ s, dir, rows, cat, unsaved, locked, onDirectorDone, on
         <details style={{ marginTop: 8 }}>
           <summary className="muted" style={{ fontSize: 12, cursor: 'pointer' }}>사전 준비 블록 보기(손으로 넣을 때 · 자동 설정이 넣는 글과 같습니다)</summary>
           <pre style={{ margin: '8px 0 0', padding: 10, maxHeight: 260, overflow: 'auto', fontSize: 11.5, lineHeight: 1.55, background: 'var(--panel)', borderRadius: 8 }}>{prep}</pre>
+          <div style={{ ...ROW, marginTop: 6 }}><button type="button" className="logout-btn" style={BTN} onClick={() => copyWith(setCopyMsg)(prep)}>사전 준비 블록 복사</button></div>
+          <Msg m={copyMsg} />
         </details>
         <div style={{ ...ROW, marginTop: 10 }}>
           <button type="button" className="login-btn" style={{ flex: 'none', padding: '8px 16px' }} disabled={!dReady} onClick={runDirector}>{busy === '2' ? '설정 중…' : 'Director 자동 설정'}</button>
@@ -615,9 +674,15 @@ function AutoSetupPanel({ s, dir, rows, cat, unsaved, locked, onDirectorDone, on
         {st[3] && <Msg m={st[3]} />}
       </div>
 
-      {/* 4 FD INI · 지문 */}
+      {/* 4 매핑 채움 · 저장 */}
       <div style={{ marginTop: 14 }}>
-        <div style={ROW}><b>4 FD INI · vCenter 지문</b><span className="muted" style={{ fontSize: 11.5 }}>저장된 매핑의 INI 경로에 vCenter 자격증명 INI(bareos 소유 0600) — vCenter 비밀번호는 이 요청에서만 FD 로 전달하고 저장하지 않습니다</span></div>
+        <div style={ROW}><b>4 매핑 채움 · 저장</b><span className="muted" style={{ fontSize: 11.5 }}>이 Director 의 카탈로그(FD · SD · 풀 · 스케줄)와 vCenter 등록부 주소로 아래 매핑 표의 빈 칸만 채웁니다(쓰기 없음 — 확인한 뒤 표 아래 ‘매핑 저장’ · 5단계가 저장된 값을 씁니다)</span><div style={{ flexGrow: 1 }} />
+          <button type="button" className="logout-btn" style={{ padding: '7px 14px' }} disabled={!editCount || any || !(dir.hasPassword || s.demo)} onClick={runFill}>{busy === '4' ? '채우는 중…' : '빈 칸 채우기'}</button></div>
+        {st[4] && <Msg m={st[4]} />}
+      </div>
+      {/* 5 FD INI · 지문 — 저장된 매핑의 vcserver·INI 경로를 쓴다(W3) */}
+      <div style={{ marginTop: 14 }}>
+        <div style={ROW}><b>5 FD INI · vCenter 지문</b><span className="muted" style={{ fontSize: 11.5 }}>저장된 매핑의 INI 경로에 vCenter 자격증명 INI(bareos 소유 0600) — vCenter 비밀번호는 이 요청에서만 FD 로 전달하고 저장하지 않습니다</span></div>
         {unsaved && <div className="muted" style={{ fontSize: 11.5, marginTop: 4, color: 'var(--amber)' }}>매핑 표에 저장하지 않은 변경이 있습니다 — 이 단계는 저장된 매핑을 씁니다(먼저 저장하세요).</div>}
         <div style={GRID}>
           <label className="muted" style={FIELD}>vCenter(이 Director 매핑)
@@ -637,15 +702,9 @@ function AutoSetupPanel({ s, dir, rows, cat, unsaved, locked, onDirectorDone, on
           <button type="button" className="login-btn" style={{ flex: 'none', padding: '8px 16px' }} disabled={!fReady} onClick={runFd}>{busy === '4' ? '쓰는 중…' : 'FD INI 자동 설정'}</button>
           {!any && fMissing && <span className="muted" style={{ fontSize: 11.5 }}>{fMissing}</span>}
         </div>
-        {st[4] && <Msg m={st[4]} />}
-      </div>
-
-      {/* 5 매핑 채움 */}
-      <div style={{ marginTop: 14 }}>
-        <div style={ROW}><b>5 매핑 채움</b><span className="muted" style={{ fontSize: 11.5 }}>이 Director 의 카탈로그(FD · SD · 풀 · 스케줄)와 vCenter 등록부 주소로 아래 매핑 표의 빈 칸만 채웁니다(쓰기 없음 — 저장은 직접)</span><div style={{ flexGrow: 1 }} />
-          <button type="button" className="logout-btn" style={{ padding: '7px 14px' }} disabled={!rows.length || any || !(dir.hasPassword || s.demo)} onClick={runFill}>{busy === '5' ? '채우는 중…' : '빈 칸 채우기'}</button></div>
         {st[5] && <Msg m={st[5]} />}
       </div>
+
     </div>
   );
 }

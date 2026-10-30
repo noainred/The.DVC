@@ -5,7 +5,7 @@ import {
   parseJobReport, reportBytes, reportVerdict, reportCards, issueHint, storeRatio, reportText, reportValue,
   folderOptions, inFolder, pickCap, bulkSummary, NO_FOLDER, diagView,
   driftText, restorePointsNote, directorPatch, outcomeUnknown, missingText,
-  directorStatus, preflightView, preflightSummary, autoSetupFdPluginText, fillEmptyMapping, directorFormPatch, WEEKDAYS,
+  directorStatus, preflightView, preflightSummary, autoSetupFdPluginText, fillEmptyMapping, directorFormPatch, WEEKDAYS, newMappingRow,
 } from './bareosText.js';
 
 describe('bareosText (v2.820 Bareos VM 백업)', () => {
@@ -269,5 +269,17 @@ describe('작업 결과 요약(v2.822.3 — 현장 jobid 8 로그 모양)', () =
     expect(directorFormPatch({ name: '폴란드', host: 'a', port: 9101, consoleName: 'p', password: '' }, { name: '한국', host: 'a', port: 9101, consoleName: 'p' })).toEqual({ name: '폴란드' });
     expect(WEEKDAYS).toHaveLength(7);
     for (const t of [preflightSummary({ items: [{ status: 'ok' }] }), autoSetupFdPluginText({ action: 'updated', added: ['Plugin Names = "python3"'], backup: '/x' })]) expect(t).not.toMatch(/`/);
+  });
+
+  it('v2.823 검토 — 거부 확정은 결과 모름이 아니다(W7) · 저장 전 행은 이유와 함께 남김(W2) · 새 행은 주소·INI 를 미리 · INI 경로 겹침 접미사', () => {
+    const rejected = Object.assign(new Error('이 Director 의 자동 설정이 진행 중입니다.'), { changeRejected: true, body: { ok: false } });
+    expect(outcomeUnknown(rejected)).toBe(false);
+    expect(outcomeUnknown(new TypeError('Failed to fetch'))).toBe(true);
+    const r = fillEmptyMapping([{ vcenterId: 'vc-b', vcserver: '', client: '', storage: '', pool: '', schedule: '', configFile: '' }], [], () => 'Warsaw');
+    expect(r.filled).toBe(0);
+    expect(r.left).toEqual(['Warsaw(저장 전 — 매핑을 저장한 뒤 다시 채우세요)']);
+    const row = newMappingRow('KR_VC01', 'dir_a', 'vc01.kr.corp', ['/etc/bareos/vmware/kr-vc01.ini']);
+    expect(row).toMatchObject({ vcenterId: 'KR_VC01', directorId: 'dir_a', vcserver: 'vc01.kr.corp', configFile: '/etc/bareos/vmware/kr-vc01-2.ini' });
+    expect(newMappingRow('vc-a', 'd', 'bad host;x').vcserver).toBe('');
   });
 });

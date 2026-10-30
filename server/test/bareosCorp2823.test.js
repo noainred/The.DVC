@@ -76,9 +76,9 @@ test('② Director 마다: 비밀번호 폐기 · 겹침 거부 · 삭제 409 ·
   assert.deepEqual(S.siteMissing(S.siteFor('vc-b')), ['vcserver', 'FD 클라이언트', '스토리지', '풀', 'INI 경로']);
   assert.throws(() => S.deleteDirector(DB), (e) => e.code === 'conflict' && /vc-b/.test(e.message), '매핑이 있으면 지우지 않는다');
   assert.throws(() => S.deleteDirector(S.DEFAULT_DIRECTOR_ID, { inUseByJobs: 2 }), (e) => e.code === 'conflict', '대상이 있으면 지우지 않는다');
-  const lock = new Set(['vc-a']);
-  assert.throws(() => S.saveSettings({ sites: [{ vcenterId: 'vc-a', directorId: DB }, { vcenterId: 'vc-b', directorId: DB }] }, { vcentersWithJobs: lock }), (e) => e.code === 'conflict' && /옮길 수 없습니다/.test(e.message));
-  assert.throws(() => S.saveSettings({ sites: [{ vcenterId: 'vc-b', directorId: DB }] }, { vcentersWithJobs: lock }), (e) => e.code === 'conflict' && /지울 수 없습니다/.test(e.message));
+  const lock = new Map([['vc-a', new Set([DA])]]);
+  assert.throws(() => S.saveSettings({ sites: [{ vcenterId: 'vc-a', directorId: DB }, { vcenterId: 'vc-b', directorId: DB }] }, { jobDirs: lock }), (e) => e.code === 'conflict' && /옮길 수 없습니다/.test(e.message));
+  assert.throws(() => S.saveSettings({ sites: [{ vcenterId: 'vc-b', directorId: DB }] }, { jobDirs: lock }), (e) => e.code === 'conflict' && /지울 수 없습니다/.test(e.message));
   assert.equal(S.siteFor('vc-a').directorId, DA, '거부된 저장은 아무것도 바꾸지 않았다');
   assert.notEqual(S.directorCred(S.directorById(DA)).id, S.directorCred(S.directorById(DB)).id, '인증 정지는 Director 마다');
   S.deleteDirector(S.DEFAULT_DIRECTOR_ID);
@@ -301,7 +301,7 @@ test('④ FD 플러그인 줄: 없는 줄만 닫는 괄호 앞에 · 같은 값 
 });
 
 /** 가짜 FD 서버 — setupFdPlugin 이 쓰는 명령만. */
-function fakeFd({ content = MYSELF, testCode = 0, active = 'active', plugin = true } = {}) {
+function fakeFd({ content = MYSELF, testCode = 0, active = 'active', plugin = true, mktemp = true } = {}) {
   const F = new Map([['/etc/bareos/bareos-fd.d/client/myself.conf', content]]);
   const st = { cmds: [], restarts: 0, writes: [] };
   const ok = (stdout = '') => ({ code: 0, stdout, stderr: '' });
@@ -311,9 +311,10 @@ function fakeFd({ content = MYSELF, testCode = 0, active = 'active', plugin = tr
     if (cmd === 'id -u') return ok('0\n');
     if (cmd.startsWith('command -v bareos-fd')) return ok(`F\n${plugin ? 'P:/usr/lib64/bareos/plugins\n' : ''}Y\n`);
     if (/^if ! \[ "\$\(readlink -f -- \S+\)" = "\S+" \]; then echo LINK; elif \[ -L (\S+) \]/.test(cmd)) return ok(`FILE\nroot bareos 640\n${F.get('/etc/bareos/bareos-fd.d/client/myself.conf')}`);
-    if ((m = /^\[ "\$\(readlink -f -- \S+\)" = "\S+" \] && cp -p (\S+) (\S+)$/.exec(cmd))) { F.set(m[2], F.get(m[1])); return ok(); }
-    if ((m = /^\[ "\$\(readlink -f -- \S+\)" = "\S+" \] && cp -p (\S+) (\S+) && systemctl restart bareos-fd$/.exec(cmd))) { F.set(m[2], F.get(m[1])); st.restarts += 1; return ok(); }
-    if ((m = /^mktemp -d \/tmp\/([a-z-]+)\.X{10}$/.exec(cmd))) return ok(`/tmp/${m[1]}.Ab3dEf7hIj\n`);
+    // v2.823 검토(S5): 사본·원복은 심링크가 아닐 때만(가짜 파일계에는 심링크가 없다 — 명령 모양만 고정)
+    if ((m = /^\[ "\$\(readlink -f -- \S+\)" = "\S+" \] && \[ ! -L (\S+) \] && \[ ! -e (\S+) \] && cp -p (\S+) (\S+)$/.exec(cmd))) { if (F.has(m[2])) return { code: 1, stdout: '', stderr: '' }; F.set(m[4], F.get(m[3])); return ok(); }
+    if ((m = /^\[ "\$\(readlink -f -- \S+\)" = "\S+" \] && \[ ! -L (\S+) \] && cp -p (\S+) (\S+) && systemctl restart bareos-fd$/.exec(cmd))) { F.set(m[3], F.get(m[2])); st.restarts += 1; return ok(); }
+    if ((m = /^mktemp -d \/tmp\/([a-z-]+)\.X{10}$/.exec(cmd))) return mktemp ? ok(`/tmp/${m[1]}.Ab3dEf7hIj\n`) : { code: 1, stdout: '', stderr: 'mktemp: failed' };
     if (/^test -d \S+ && test ! -L \S+ && test -O \S+ && echo ok$/.test(cmd)) return ok('ok\n');
     if ((m = /^\[ "\$\(readlink -f -- \S+\)" = "\S+" \] && install -o root -g bareos -m 640 (\S+) (\S+) && rm -f \S+$/.exec(cmd))) { F.set(m[2], F.get(m[1])); F.delete(m[1]); return ok(); }
     if (cmd === 'bareos-fd -t 2>&1') return { code: testCode, stdout: testCode ? 'Config error: line 6' : '', stderr: '' };
@@ -362,6 +363,19 @@ test('④ FD 플러그인 켜기: 넣고 재시작 · 이미 있으면 그대로
   f = fakeFd({ plugin: false });
   A._setDepsForTest({ ssh: f.ssh });
   await assert.rejects(A.setupFdPlugin(PB()), (e) => e.code === 'invalid' && /python3-plugin/.test(e.message));
+
+  // v2.823 검토(C6 — 재현): 임시 디렉터리를 못 만들면 아무것도 바꾸지 않았다 — 사본·원복·재시작 없이 끝나고 '세션이 끊겨' 라고 말하지 않는다
+  f = fakeFd({ mktemp: false });
+  A._setDepsForTest({ ssh: f.ssh });
+  await assert.rejects(A.setupFdPlugin(PB()), (e) => !/세션이 끊겨/.test(e.message));
+  assert.equal(f.st.restarts, 0, '바꾼 것이 없으면 재시작하지 않는다');
+  assert.equal(f.st.cmds.filter((c) => c.includes('cp -p')).length, 0, '사본도 만들지 않았다');
+  assert.equal(f.F.get(conf), MYSELF);
+  // S5: 원복 명령은 conf 자리가 심링크가 아닐 때만
+  f = fakeFd({ testCode: 1 });
+  A._setDepsForTest({ ssh: f.ssh });
+  await assert.rejects(A.setupFdPlugin(PB()));
+  assert.ok(f.st.cmds.some((c) => /\[ ! -L \S+myself\.conf \] && cp -p \S+portal-bak\.\d+ \S+myself\.conf && systemctl restart bareos-fd$/.test(c)), '원복은 심링크 확인 뒤');
   A._setDepsForTest();
 });
 

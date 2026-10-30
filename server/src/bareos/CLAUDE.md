@@ -12,8 +12,8 @@
   ② **쓰기 전에 전부 살핀다** — 대상에 파일이 있으면 첫 줄이 `MARKER` 일 때만 덮어쓰고, 남의 파일·심링크가 하나라도 있으면 아무것도 쓰지 않는다(`MARKER` 문구를 바꾸면 예전 파일이 남의 파일이 된다).
   ③ 놓기·`bareos-dir -t`·reload 실패 → 새 파일 삭제 + 바꾼 파일 원복. 세션이 시한으로 끊기면 **새 세션으로** 되돌리고 다시 reload(`BUDGET` 단계 합 < 세션 시한 — 테스트가 산수 고정).
   ④ 새 콘솔로 **포탈이 실제 접속에 성공해야만** 설정을 저장. 실패면 되돌리고 다시 reload(같은 이름 콘솔을 그대로 두면 Director 만 새 비밀번호가 돼 쓰던 연결이 끊긴다).
-  복원 잡에는 `Storage` 가 있다(Bareos 기본 RestoreFiles 모양) · 표지는 ASCII · 상태 판정과 옛 내용 읽기는 root 명령 하나(심링크 바꿔치기 창을 줄인다) · 일반 설정 저장은 진행 중 409.
-  ⑤ 라우트: admin + 전체 범위 + 데모 계정 403 + 동시 1건 + 입력 판정(`planDirector`·`planFdIni`) **뒤에** 본인 OTP(지문 읽기는 쓰기가 없어 OTP 없음).
+  복원 잡에는 `Storage` 가 있다(Bareos 기본 RestoreFiles 모양) · 표지는 ASCII · 상태 판정과 옛 내용 읽기는 root 명령 하나(심링크 바꿔치기 창을 줄인다) · 진행 중에는 **그 Director 의** 접속값 저장·삭제가 409(v2.823 — 공통 설정 저장은 막지 않는다: 자동 설정은 끝에 그 Director 의 4칸만 동기로 저장한다 · 검토 C5).
+  ⑤ 라우트: admin + 전체 범위(조회·**쓰기** 둘 다 — v2.823 S2 `fullWriteOnly`) + 데모 계정 403 + 동시 1건(Director 마다 · 같은 원격 주소도 하나 — S6) + 입력 판정(`planDirector`·`planFdIni`) **뒤에** 본인 OTP(지문 읽기는 쓰기가 없어 OTP 없음).
   ⑥ root 만(`id -u`=0, sudo 경로 없음) · 단일 설정 파일(`bareos-dir.conf`) Director 는 거부 · 원격 명령 값은 화이트리스트(리소스 이름·경로·호스트, 앞 `-` 금지).
   리소스 본문은 웹 `bareosText.js directorPrepBlock` 과 글자까지 같다(테스트 ①이 대조 — 한쪽만 고치지 말 것).
   실환경 미확인(추정): `bconsole reload` 출력 모양(판정에 쓰지 않음 — 접속 시험이 판정). INI 의 `%` 보간은 v2.822.3 에 플러그인 소스로 확인했다(`%%` 로 쓴다).
@@ -53,14 +53,23 @@
 - **v2.823 법인별 Director**(사용자 요청 — 법인마다 Bareos 를 깔고 그 법인 vCenter 는 그 법인 Bareos 로 · 초기 설치 뒤 세부 설정은 포탈에서 · `bareosCorp2823`):
   ① 설정 v2 = `directors[]` + `sites[].directorId`(vCenter 하나 → Director 하나). v1 파일은 **읽을 때만** `dir_default` 로 바꾼다(로드는 파일을 다시 쓰지 않는다) ·
   저장은 v2 + 구버전 호환 `director` 사본(첫 Director). Director id 는 난수 · 바꾸지 않는다. 같은 이름·같은 콘솔(주소:포트·이름) 두 항목 거부.
+  ⚠ 구버전 호환의 한계(검토 C4): 되돌린 구버전은 첫 Director 만 읽고, **구버전에서 저장하면** 나머지 Director·법인 묶음이 사라진다 → 다시 올리면 2.823 에서 만든 잡이
+  없는 Director 를 가리킨다. 그런 잡(덜 됨이 아니라 '없음')은 원장에서만 취소·삭제된다(C3 `orphanOf` — Director 쪽 잡은 그대로라고 문구·감사에 남긴다).
   ② **원장 잡은 등록 때의 `directorId` 를 고정**하고 잡 라우트는 그 Director 로만 보낸다(`settings.jobDirectorId` — 옛 잡은 매핑에서 푼다). 그래서 백업 대상이 있는
-  vCenter 의 Director 를 바꾸거나 매핑을 지우면 409, 매핑·대상이 있는 Director 삭제도 409. 지운 잡 기록(retired)은 (Director, 이름)이 열쇠(같은 이름이 다른 Director 에 생겨도 지우지 않는다).
+  vCenter 를 **그 잡들이 가리키는 Director 와 다른 곳**에 묶거나 매핑을 지우면 409(S3 — 매핑 없는 옛 잡도 비교한다), 매핑·대상이 있는 Director 삭제도 409. 지운 잡 기록(retired)은 (Director, 이름)이 열쇠(같은 이름이 다른 Director 에 생겨도 지우지 않는다).
   ③ Director 일은 작업 표 `ops.js`(직렬화 가능한 인자만 — 2차 엣지 대행이 같은 표를 쓴다) + `service.onDirector`. 조회 GET 은 `readDirector({ demoOnly … }, id, kind, args)` ·
   `onDirector(` 는 `audit2719b` 실접속 목록에 있다. 인증 정지·연결 시험 고정(v2.480)·`accessMoved` 비밀번호 폐기·자동 설정 동시 1건은 **Director 마다**(옛 Director 는 인증 정지 id 'director' 를 잇는다).
-  ④ 폴러는 Director 마다 병렬(동시 4) + **Director 별 시한** — 느린 법인 하나가 나머지를 막지 않는다 · 상태는 `pollerStatus().directors`.
+  ④ 폴러는 Director 마다 병렬(동시 8) + **Director 별 시한** — 느린 법인 하나가 나머지를 막지 않는다 · 상태는 `pollerStatus().directors`.
+  **시한·끊김이어도 읽은 행은 반영하고 회전은 시작한 항목 수만큼 나아간다**(`ops.poll` 은 세션 오류를 던지지 않고 `fault` 로 돌려준다 — C1·P1 라이브락) ·
+  다시 끌 이름은 `.jobs` 를 읽은 **뒤** 그 순간의 원장으로 고른다(`hooks.disableNow` — 틱 시작 사본이면 사용자가 그사이 켠 잡을 껐다, P3) ·
+  idle 틱은 마지막 실제 결과를 덮지 않는다(한 번도 접속 안 했으면 '조회 전' — W4) · 범위 계정의 폴러 상태·`/poll` 은 자기 법인 Director 만(S1).
   ⑤ 자동 설정 확장: 사전 점검(쓰기·OTP 없음 — 못 읽은 항목은 '확인 불가', 없음으로 단정하지 않는다) · Pool·Schedule(MARKER 파일 · JobDefs 의 레벨별 풀 · 웹 블록과 글자까지 같다) ·
   **FD 플러그인 켜기는 패키지 파일 `myself.conf` 를 제자리 수정하는 유일한 예외** — Client 블록 하나·여러 줄일 때만, 없는 줄만 넣고 같은 값이면 그대로,
-  **다른 값이면 거부**, 쓰기 전 사본 → `bareos-fd -t` → 재시작 → 실패면 사본으로 원복·재시작(세션이 끊기면 새 세션으로). 매핑 채움은 쓰기 없음(빈 칸만 · 후보가 여럿이면 비운다).
+  **다른 값이면 거부**(깨진 글자 U+FFFD·Client 블록 안 `@` 포함 지시도 거부 — S7·S8), 임시 디렉터리 → 쓰기 전 사본(심링크 아님 확인) → `bareos-fd -t` → 재시작 →
+  실패면 사본으로 원복(심링크 아님 확인 — S5)·재시작(세션이 끊기면 새 세션으로). 매핑 채움은 쓰기 없음(빈 칸만 · 하나뿐·포탈 이름·설치 기본 이름만 고르고 그 밖은 비운다 ·
+  INI 경로가 다른 vCenter 와 겹치면 해시 접미사 — C7). 화면 단계 순서는 점검 → 리소스 → 플러그인 → **매핑 채움·저장 → FD INI**(FD INI 가 저장된 매핑을 쓴다 — W3).
+  매핑·기본값 저장은 GET 의 `rev` 를 돌려받아 다르면 409 `stale`(다른 화면의 저장을 덮지 않는다 — P4) · 인벤토리에서 빠진 vCenter 의 **저장된** 매핑은 그대로 받는다(W1).
+  데모(mock)는 사람이 등록한 Director 가 **0개**일 때만(I4). 검토 기록 전문은 `docs/rules/audits.md` 'Bareos v2.823 법인별 Director 검토 확정분'.
   실환경 미확인(추정): 플러그인 경로(`/usr/lib64` · `/usr/lib` 의 python3-fd.so) · 기본 리소스 이름을 conf **파일 이름**으로 읽는 것 · VDDK 경로 · 레벨별 풀 지시어가 잡의 pool= 을 덮는 순서.
 - 실환경 미확인(추정 — `tools/bareos-probe.js` 로 확인할 것): Node↔Director TLS-PSK 협상 · 잡 수준 FdPluginOptions 와 FileSet 플러그인 문자열 병합 ·
   `.bvfs_get_jobids` JSON 모양 · Profile ACL 지시어 이름 · `list jobs days=N` · 25.x `.jobs` 의 enabled 칸(master 소스 기준 — 없으면 다시 끄기를 하지 않는다) · Migration 행의 시작 시각.

@@ -44,7 +44,9 @@ export const DIR_CONF_ROOT = '/etc/bareos/bareos-dir.d';
  * 시한 예산(루트 규칙 'SSH 세션 예산 < 장비 시한' — 테스트가 산수를 고정). 세션 시한(withSsh signal)이 끝나면 연결을 끊으므로
  * 그 안에서 되돌리기가 돌 수 없다 — 단계 상한의 합이 세션 시한보다 작아야 한다. 고RTT(800ms+) 왕복 약 30회를 넉넉히 잡는다.
  */
-export const BUDGET = Object.freeze({ sshReadyMs: 60_000, testMs: 60_000, reloadMs: 60_000, roundTrips: 40, roundTripMs: 2_500, sessionMs: 360_000 });
+// v2.823 검토(P5 — 왕복 계수): Pool·Schedule 3개가 늘어 '재실행 + reload 실패 → 세션 안 되돌림(파일마다 쓰기·설치) → 다시 reload' 최악 경로가
+//   reload 2회 + 약 53왕복이 됐다(372.5초 > 옛 세션 시한 360초). reload 를 두 번 세고 왕복을 60으로 잡는다.
+export const BUDGET = Object.freeze({ sshReadyMs: 60_000, testMs: 60_000, reloadMs: 60_000, reloads: 2, roundTrips: 60, roundTripMs: 2_500, sessionMs: 420_000 });
 const SESSION_MS = BUDGET.sessionMs;
 const RELOAD_CMD = "printf 'reload\\n' | timeout 45 bconsole 2>&1";
 const READ_MAX = 1_048_576;
@@ -552,10 +554,11 @@ const PREFLIGHT_SCRIPT = [
   `echo @@pkg; for p in ${PREFLIGHT_PKGS.join(' ')}; do if command -v rpm >/dev/null 2>&1; then v=$(rpm -q --qf '%{VERSION}' "$p" 2>/dev/null) || v=-; else v=$(dpkg-query -W -f='\${Version}' "$p" 2>/dev/null); [ -n "$v" ] || v=-; fi; echo "$p $v"; done`,
   'echo @@svc; for s in bareos-dir bareos-sd bareos-fd; do echo "$s $(systemctl is-active $s 2>/dev/null || true)"; done',
   'echo @@py; python3 -c \'import sys;print("%d.%d.%d" % sys.version_info[:3])\' 2>/dev/null || echo -',
-  'echo @@pyvmomi; python3 -c \'import importlib.metadata as m;print(m.version("pyvmomi"))\' 2>/dev/null || echo -',
+  // v2.823 검토(C8): importlib.metadata 는 Python 3.8+ — 그 전 판에서는 import 로만 확인하고 버전은 '?'(설치됨 · 버전 모름)
+  'echo @@pyvmomi; if python3 -c \'import pyVmomi\' 2>/dev/null; then python3 -c \'import importlib.metadata as m;print(m.version("pyvmomi"))\' 2>/dev/null || echo "?"; else echo -; fi',
   'echo @@vddk; ls -d /usr/lib/vmware-vix-disklib* /usr/lib64/vmware-vix-disklib* /opt/vmware-vix-disklib* 2>/dev/null | head -3',
   `echo @@plugdir; for d in ${FD_PLUGIN_DIRS.join(' ')}; do [ -e "$d/python3-fd.so" ] && echo "$d"; done`,
-  `echo @@fdconf; grep -iE '^[[:space:]]*plugin[[:space:]]*(names|directory)[[:space:]]*=' ${FD_CLIENT_CONF} 2>/dev/null`,
+  `echo @@fdconf; if [ -f ${FD_CLIENT_CONF} ]; then grep -iE '^[[:space:]]*plugin[[:space:]]*(names|directory)[[:space:]]*=' ${FD_CLIENT_CONF} 2>/dev/null; else echo NOFILE; fi`,
   `echo @@layout; test -d ${DIR_CONF_ROOT} && echo D; test -e /etc/bareos/bareos-dir.conf && echo S; command -v bconsole >/dev/null 2>&1 && echo C`,
   `echo @@res; for t in client storage pool schedule; do for f in ${DIR_CONF_ROOT}/$t/*.conf; do [ -f "$f" ] && echo "$t $(basename "$f" .conf)"; done; done`,
   'echo @@end',
@@ -607,6 +610,7 @@ export function parsePreflight(text) {
   if (!py || py === '-') add('python', 'Python 3', py === '-' ? 'missing' : 'unknown', py === '-' ? '없음' : '읽지 못함', 'python3 을 설치하세요(FD 의 VMware 플러그인이 씁니다).');
   else add('python', 'Python 3', 'ok', py);
   if (!pv || pv === '-') add('pyvmomi', 'pyVmomi', pv === '-' ? 'missing' : 'unknown', pv === '-' ? '설치되지 않음' : '읽지 못함', "python3 -m pip install 'pyvmomi>=8,<9' (Python 3.9 FD)");
+  else if (pv === '?') add('pyvmomi', 'pyVmomi', 'warn', '설치됨 — 버전을 읽지 못했습니다(Python 3.8 미만은 importlib.metadata 가 없습니다)', 'python3 -m pip show pyvmomi 로 버전을 확인하세요(Python 3.10 미만이면 9.x 는 플러그인이 시작하지 못합니다).');
   else {
     const old = py && verOk(py) && (verTuple(py)[0] < 3 || (verTuple(py)[0] === 3 && verTuple(py)[1] < 10));
     if (verTuple(pv)[0] >= 9 && old) add('pyvmomi', 'pyVmomi', 'warn', `${pv} — Python ${py} 에서는 플러그인이 시작하지 못합니다`, "python3 -m pip install 'pyvmomi>=8,<9'");
@@ -619,6 +623,7 @@ export function parsePreflight(text) {
   const fdLines = (s.fdconf || []).map((l) => l.replace(/\s+/g, ' '));
   const namesLine = fdLines.find((l) => /plugin ?names/i.test(l));
   if (!s.fdconf) add('fdplugin', 'FD 플러그인 줄', 'unknown', '읽지 못함');
+  else if (fdLines.includes('NOFILE')) add('fdplugin', 'FD 플러그인 줄', 'missing', `${FD_CLIENT_CONF} 없음`, 'FD 설정 구성이 패키지 기본과 다릅니다 — 3단계는 이 파일이 있어야 합니다(직접 확인하세요).');
   else if (!namesLine) add('fdplugin', 'FD 플러그인 줄', 'missing', 'Plugin Names 없음', '3단계 ‘FD 플러그인 켜기’ 가 넣습니다.');
   else add('fdplugin', 'FD 플러그인 줄', /python3/i.test(namesLine) ? 'ok' : 'warn', namesLine, /python3/i.test(namesLine) ? '' : 'python3 이 아닌 값이 있습니다 — 3단계는 사람이 정한 값을 덮지 않습니다.');
   const lay = new Set(s.layout || []);
@@ -666,6 +671,8 @@ const unquote = (v) => String(v ?? '').trim().replace(/^"(.*)"$/, '$1').trim();
  * @returns {{ action: 'unchanged'|'updated', text: string, added: string[] } | { issue: string }}
  */
 export function fdPluginEdit(text, pluginDir, pluginNames = 'python3') {
+  // v2.823 검토(S7): SSH 출력은 UTF-8 로 읽힌다 — 깨진 글자(U+FFFD)가 있으면 되쓰면 원본이 바뀐다. 고치지 않는다.
+  if (String(text ?? '').includes('\uFFFD')) return { issue: 'UTF-8 이 아닌 글자가 있어 그대로 다시 쓸 수 없습니다 — 직접 확인하세요.' };
   const lines = String(text ?? '').split('\n');
   const starts = [];
   lines.forEach((l, i) => { if (/^\s*client\s*\{/i.test(codePart(l))) starts.push(i); });
@@ -684,11 +691,13 @@ export function fdPluginEdit(text, pluginDir, pluginNames = 'python3') {
   if (end === start) return { issue: '한 줄로 된 Client 블록은 자동으로 고치지 않습니다 — 직접 확인하세요.' };
   let names = null; let dirv = null;
   for (let i = start + 1; i < end; i++) {
-    const c = codePart(lines[i]);
+    const c = codePart(lines[i].slice(0, 4096));   // 장비 출력 — 길이를 먼저 자른다(정규식 규약)
+    // v2.823 검토(S8): 포함 파일(@…)의 값은 여기서 볼 수 없다 — 같은 지시어가 거기 있을 수 있어 고치지 않는다
+    if (/^\s*@/.test(c)) return { issue: 'Client 블록 안에 포함 지시(@…)가 있습니다 — 포함된 파일의 값을 확인할 수 없어 자동으로 고치지 않습니다(직접 확인하세요).' };
     let m = /^\s*plugin\s*names\s*=\s*(.*?)\s*$/i.exec(c);
     if (m) { if (names !== null) return { issue: 'Plugin Names 줄이 두 번 있습니다 — 직접 확인하세요.' }; names = unquote(m[1]); continue; }
     m = /^\s*plugin\s*directory\s*=\s*(.*?)\s*$/i.exec(c);
-    if (m) { if (dirv !== null) return { issue: 'Plugin Directory 줄이 두 번 있습니다 — 직접 확인하세요.' }; dirv = unquote(m[1]).replace(/\/+$/, ''); }
+    if (m) { if (dirv !== null) return { issue: 'Plugin Directory 줄이 두 번 있습니다 — 직접 확인하세요.' }; dirv = unquote(m[1]).slice(0, 300); while (dirv.endsWith('/')) dirv = dirv.slice(0, -1); }
   }
   if (names !== null && names !== pluginNames) return { issue: `이미 Plugin Names = "${names.slice(0, 80)}" 가 있습니다 — 사람이 정한 값을 덮지 않습니다(${pluginNames} 를 직접 넣으세요).` };
   if (dirv !== null && dirv !== pluginDir) return { issue: `이미 Plugin Directory = "${dirv.slice(0, 120)}" 가 있습니다 — 이 서버의 플러그인은 ${pluginDir} 에 있습니다(직접 확인하세요).` };
@@ -700,6 +709,8 @@ export function fdPluginEdit(text, pluginDir, pluginNames = 'python3') {
 }
 
 const OWNER_RE = /^[a-z_][a-z0-9_-]{0,31}$/;
+/** 사본으로 되돌리기 — conf 자리가 심링크면 따라 쓰지 않는다(S5 — root 가 링크 너머 파일을 덮지 않게). */
+const restoreCmd = (conf, backup) => `${canonDir(conf)} && [ ! -L ${conf} ] && cp -p ${backup} ${conf} && systemctl restart bareos-fd`;
 
 /** FD 플러그인 켜기 입력 판정(원격 접속 없음 — 라우트가 OTP 전에 부른다). */
 export function planFdPlugin(b = {}) {
@@ -744,15 +755,18 @@ export async function setupFdPlugin(b = {}) {
       const ed = fdPluginEdit(old, pluginDir);
       if (ed.issue) throw fail('conflict', `${ed.issue} 아무것도 바꾸지 않았습니다.`);
       if (ed.action === 'unchanged') return { ok: true, directorId: dir.id, action: 'unchanged', pluginDir, added: [] };
-      backup = `${conf}.portal-bak.${Date.now()}`;
-      const cp = await api.exec(`${canonDir(conf)} && cp -p ${conf} ${backup}`);
-      if (cp?.code !== 0) throw fail('remote', `쓰기 전 사본을 만들지 못했습니다(${tail(mask(cp?.stderr), 200)}) — 아무것도 바꾸지 않았습니다.`);
-      settled = false;
+      // v2.823 검토(C6): 임시 디렉터리를 사본·변경 **전에** 만든다 — 예전에는 그 실패가 '세션이 끊겨 …' 문구로 바뀐 것 없는 conf 를 덮고 FD 를 재시작했다
       const tmp = await remoteTmpDir(api.exec, TMP_PREFIX);
+      try {
+      backup = `${conf}.portal-bak.${Date.now()}`;
+      // v2.823 검토(S5): cp 는 대상 심링크를 따라 쓴다 — 원본·사본 자리가 심링크가 아닐 때만(같은 명령 안에서 확인)
+      const cp = await api.exec(`${canonDir(conf)} && [ ! -L ${conf} ] && [ ! -e ${backup} ] && cp -p ${conf} ${backup}`);
+      if (cp?.code !== 0) throw fail('remote', `쓰기 전 사본을 만들지 못했습니다(${tail(mask(cp?.stderr), 200) || '심링크이거나 사본 자리가 이미 있습니다'}) — 아무것도 바꾸지 않았습니다.`);
+      settled = false;
       let restored = false;
       const restore = async (why) => {
         restored = true;
-        const back = await api.exec(`${canonDir(conf)} && cp -p ${backup} ${conf} && systemctl restart bareos-fd`, BUDGET.reloadMs).catch(() => null);
+        const back = await api.exec(`${restoreCmd(conf, backup)}`, BUDGET.reloadMs).catch(() => null);
         settled = back?.code === 0;
         return `${why} — ${settled ? `사본으로 되돌리고 bareos-fd 를 다시 시작했습니다(사본 ${backup})` : `되돌리지 못했습니다 — ${backup} 를 ${conf} 로 직접 되돌리세요`}.`;
       };
@@ -768,6 +782,7 @@ export async function setupFdPlugin(b = {}) {
       } catch (e) {
         if (!settled && !restored) e.message = await restore(String(e?.message || e));   // 놓기 실패 등 — 반쯤 쓴 파일을 남기지 않는다
         throw e;
+      }
       } finally {
         await api.exec(`rm -rf ${tmp}`).catch(() => {});
       }
@@ -775,7 +790,7 @@ export async function setupFdPlugin(b = {}) {
   } catch (e) {
     // 세션이 끊겨(시한) 세션 안 되돌리기가 돌지 못했다 — 새 세션으로 사본을 되돌리고 다시 시작한다.
     if (!settled && backup) {
-      const rb = await runSsh(ssh, (api) => api.exec(`${canonDir(conf)} && cp -p ${backup} ${conf} && systemctl restart bareos-fd`, BUDGET.reloadMs)).catch(() => null);
+      const rb = await runSsh(ssh, (api) => api.exec(restoreCmd(conf, backup), BUDGET.reloadMs)).catch(() => null);
       e.message = `${mask(String(e?.message || e))} — ${rb?.code === 0 ? '세션이 끊겨 새 세션으로 사본을 되돌리고 bareos-fd 를 다시 시작했습니다' : `되돌리지 못했습니다 — ${backup} 를 ${conf} 로 직접 되돌리세요`}.`;
     }
     throw e;
