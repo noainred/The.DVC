@@ -27,12 +27,13 @@ const BTN = { padding: '4px 9px', fontSize: 12 };
 // 전역 .input 의 min-width 220px 이 격자 칸·표 칸 입력을 밀어낸다 — 칸 안 입력은 이것으로.
 const INP = { minWidth: 0, width: '100%', boxSizing: 'border-box' };
 const FIELD = { fontSize: 12, display: 'flex', flexDirection: 'column', gap: 4, minWidth: 0 };
-const GRID = { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 8, marginTop: 8 };
+// 칸 라벨이 줄바꿈되어도(예: '콘솔 비밀번호 저장됨') 입력칸 아래끝을 맞춘다(Chromium 1440 확인 — 한 칸만 한 줄 내려가 있었다)
+const GRID = { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 8, marginTop: 8, alignItems: 'end' };
 const enc = encodeURIComponent;
 // W2(v2.822): Director 를 거치는 조회는 자동 재시도하지 않는다(규약 '자동 재시도 금지')
 const DIRECTOR_GET = { retries: 0, timeoutMs: 60_000 };
 // v2.823 검토(W15): 카드 안 격자 — 400px 에서 칸 최소폭이 카드 내폭보다 커 가로로 넘쳤다
-const CARDS = (min) => ({ display: 'grid', gridTemplateColumns: `repeat(auto-fit, minmax(min(${min}px, 100%), 1fr))`, gap: 12 });
+const CARDS = (min) => ({ display: 'grid', gridTemplateColumns: `repeat(auto-fit, minmax(min(${min}px, 100%), 1fr))`, gap: 12, alignItems: 'start' });
 const hostOf = (v) => String(v?.host || '').replace(/^https?:\/\//, '').replace(/[/:].*$/, '');
 /** 클립보드 복사 + 결과 안내(W13 — 실패를 삼키지 않는다). */
 const copyWith = (say) => (text) => {
@@ -395,13 +396,21 @@ function DirectorEditor({ s, dir, locked, onReload, onSaved, onClose, onDeleted 
       {cat?.errors && Object.keys(cat.errors).length > 0 && <div className="muted" style={{ fontSize: 12, color: 'var(--amber)', marginBottom: 6 }}>카탈로그 일부를 읽지 못했습니다({Object.keys(cat.errors).join(' · ')}) — 그 칸은 이름을 직접 적으세요.</div>}
       {!canConnect && <div className="muted" style={{ fontSize: 12, marginBottom: 6 }}>콘솔 접속값이 아직 없어 카탈로그를 읽지 않습니다 — 자동 설정 2단계를 끝내면 드롭다운이 채워집니다.</div>}
       <div className="table-wrap" style={{ maxHeight: '44vh' }}>
-        <STable minWidth={1120} sortable={false}>
-          <thead><tr><th>vCenter</th>{MAPPING_FIELDS.map(([k, l]) => <th key={k}>{l}</th>)}<th>작업</th></tr></thead>
+        {/* Chromium 1440 확인: '작업' 열이 표 오른쪽 밖(안쪽 가로 스크롤)이라 빼기 버튼이 보이지 않았다 — 버튼을 첫 열(vCenter) 아래로 옮겼다 */}
+        <STable minWidth={1060} sortable={false}>
+          <thead><tr><th>vCenter</th>{MAPPING_FIELDS.map(([k, l]) => <th key={k}>{l}</th>)}</tr></thead>
           <tbody>
-            {rows.length === 0 && <tr><td colSpan={8} className="center muted" style={{ padding: 16 }}>묶은 vCenter 가 없습니다 — 위에서 이 법인의 vCenter 를 체크하세요.</td></tr>}
+            {rows.length === 0 && <tr><td colSpan={7} className="center muted" style={{ padding: 16 }}>묶은 vCenter 가 없습니다 — 위에서 이 법인의 vCenter 를 체크하세요.</td></tr>}
             {rows.map((x) => { const gone = !s.vcenters.some((v) => v.id === x.vcenterId); return (
               <tr key={x.vcenterId}>
-                <td><b>{vcName(x.vcenterId)}</b><div className="muted" style={{ fontSize: 11 }}>{x.vcenterId}{gone ? ' · 인벤토리에 없음' : ''}</div></td>
+                <td style={{ minWidth: 150 }}>
+                  <b>{vcName(x.vcenterId)}</b><div className="muted" style={{ fontSize: 11 }}>{x.vcenterId}{gone ? ' · 인벤토리에 없음' : ''}</div>
+                  <div style={{ ...ROW, gap: 6, marginTop: 4 }}>
+                    <button type="button" className="logout-btn" style={{ ...BTN, padding: '2px 7px', fontSize: 11 }} onClick={() => copyWith(setMapMsg)(fdIniTemplate(x))}>INI 복사</button>
+                    {/* W1: 인벤토리에서 빠진 vCenter 의 행도 여기서 뺄 수 있다(체크 목록에는 없다 — 남으면 모든 매핑 저장이 400) */}
+                    <button type="button" className="logout-btn" style={{ ...BTN, padding: '2px 7px', fontSize: 11 }} disabled={lockedRow(x.vcenterId) || busy === 'suggest'} title={lockedRow(x.vcenterId) ? '백업 대상이 있어 뺄 수 없습니다 — 대상을 먼저 지우세요' : undefined} onClick={() => toggleVc(x.vcenterId, false)}>빼기</button>
+                  </div>
+                </td>
                 <td><input className="input" aria-label="vcserver" value={x.vcserver} onChange={(e) => setRow(x.vcenterId, 'vcserver', e.target.value.trim())} style={{ ...INP, width: 160 }} placeholder={s.vcenters.find((v) => v.id === x.vcenterId)?.host || 'vCenter 주소'} /></td>
                 {[['client', 'clients'], ['storage', 'storages'], ['pool', 'pools'], ['schedule', 'schedules']].map(([k, ck]) => (
                   <td key={k}>{cat?.[ck] ? (
@@ -411,12 +420,7 @@ function DirectorEditor({ s, dir, locked, onReload, onSaved, onClose, onDeleted 
                     </Select>
                   ) : <input className="input" aria-label={k} value={x[k]} onChange={(e) => setRow(x.vcenterId, k, e.target.value.trim())} style={{ ...INP, width: 120 }} />}</td>
                 ))}
-                <td><input className="input" aria-label="INI 경로" value={x.configFile} onChange={(e) => setRow(x.vcenterId, 'configFile', e.target.value.trim())} style={{ ...INP, width: 220 }} placeholder={`/etc/bareos/vmware/${vcSlug(x.vcenterId)}.ini`} /></td>
-                <td><div style={{ ...ROW, gap: 6, flexWrap: 'nowrap' }}>
-                  <button type="button" className="logout-btn" style={BTN} onClick={() => copyWith(setMapMsg)(fdIniTemplate(x))}>INI 내용 복사</button>
-                  {/* W1: 인벤토리에서 빠진 vCenter 의 행도 여기서 뺄 수 있다(체크 목록에는 없다 — 남으면 모든 매핑 저장이 400) */}
-                  <button type="button" className="logout-btn" style={BTN} disabled={lockedRow(x.vcenterId) || busy === 'suggest'} title={lockedRow(x.vcenterId) ? '백업 대상이 있어 뺄 수 없습니다 — 대상을 먼저 지우세요' : undefined} onClick={() => toggleVc(x.vcenterId, false)}>빼기</button>
-                </div></td>
+                <td><input className="input" aria-label="INI 경로" value={x.configFile} onChange={(e) => setRow(x.vcenterId, 'configFile', e.target.value.trim())} style={{ ...INP, width: 210 }} placeholder={`/etc/bareos/vmware/${vcSlug(x.vcenterId)}.ini`} /></td>
               </tr>
             ); })}
           </tbody>

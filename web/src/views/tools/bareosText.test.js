@@ -43,6 +43,7 @@ describe('bareosText (v2.820 Bareos VM 백업)', () => {
   it('머리 상태 줄 — 데모·미설정·가림·인증 정지·조회 실패', () => {
     expect(directorLine({ demo: true })).toMatch(/데모 Director/);
     expect(directorLine({ configured: false })).toMatch(/설정되지 않았습니다/);
+    expect(directorLine({ configured: false, directors: [{ name: '폴란드 법인', configured: false }] })).toMatch(/1개 — 아직 콘솔 접속값/);   // 추가한 뒤 '추가하고' 라고 하지 않는다
     // v2.823 법인별 Director — 상태별 개수 요약(조회 실패·인증 정지는 굵게) · 가린 판본은 그렇다고 밝힌다
     const masked = directorLine({ configured: true, directors: [{ masked: true, configured: true, poll: { ok: true } }], poller: {} });
     expect(masked).toMatch(/전체 범위 관리자만/);

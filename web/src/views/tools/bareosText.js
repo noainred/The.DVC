@@ -134,7 +134,13 @@ export function directorStatus(dir) {
 export function directorLine(d) {
   if (!d) return '';
   if (d.demo) return '데모 Director(합성 응답 — 어디에도 접속하지 않습니다). 설정 › 법인별 Director 에서 실제 Director 를 추가하면 그쪽으로 바뀝니다.';
-  if (!d.configured) return 'Director 가 설정되지 않았습니다 — 설정 › 법인별 Director 에서 법인 Director 를 추가하고 주소·콘솔 이름·비밀번호를 등록하세요.';
+  if (!d.configured) {
+    const n = Array.isArray(d.directors) ? d.directors.length : 0;
+    // Chromium 확인: Director 를 추가한 뒤에도 '추가하고' 라고 말했다 — 있으면 '접속값이 덜 됐다' 로
+    return n
+      ? `법인 Director ${n}개 — 아직 콘솔 접속값(콘솔 이름·비밀번호)을 갖춘 Director 가 없습니다. 설정 › 법인별 Director 편집에서 자동 설정 2단계(또는 연결 저장)로 채우세요.`
+      : 'Director 가 설정되지 않았습니다 — 설정 › 법인별 Director 에서 법인 Director 를 추가하고 주소·콘솔 이름·비밀번호를 등록하세요.';
+  }
   const list = Array.isArray(d.directors) ? d.directors : [];
   const st = list.map(directorStatus);
   const n = (label) => st.filter((x) => x.label === label).length;
