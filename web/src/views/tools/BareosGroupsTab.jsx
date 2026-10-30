@@ -420,7 +420,7 @@ function GroupEditor({ tree, group, initialVmIds, byId, onClose, onSaved }) {
             {/* v2.830 검토 L5(추정 — 실환경 미확인): Job·JobDefs 의 레벨별 풀(Full·Incremental Backup Pool)이 run 의 pool 지정보다 먼저일 수 있다 */}
             {optsErr ? `Director 목록을 읽지 못했습니다(${optsErr}) — 이름을 직접 적을 수 있습니다.`
               : !opts ? 'Director 의 스토리지·풀 목록을 읽는 중…'
-                : `Director 목록: 스토리지 ${opts.storages?.length ?? '—'}개 · 풀 ${opts.pools?.length ?? '—'}개 · 실행할 때마다 이 값으로 지정합니다(잡 정의는 바뀌지 않습니다).`}
+                : `Director 목록: 스토리지 ${Array.isArray(opts.storages) ? `${opts.storages.length}개` : '모름'} · 풀 ${Array.isArray(opts.pools) ? `${opts.pools.length}개` : '모름'} · 실행할 때마다 이 값으로 지정합니다(잡 정의는 바뀌지 않습니다).`}
           </span>
           <span className="muted" style={{ fontSize: 11.5 }}>풀 참고: 잡 정의(JobDefs)에 레벨별 풀(Full·Incremental Backup Pool)이 있으면 Bareos 가 그 풀을 먼저 쓸 수 있습니다(실환경 확인 전 — 첫 실행 뒤 실행 현황에서 풀을 확인하세요).</span>
         </div>

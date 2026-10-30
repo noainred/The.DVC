@@ -157,6 +157,11 @@ export const ROUTE_GATE_ALLOW = Object.freeze({
   'PATCH /api/tools/bareos-backup/jobs/:id': 'bareosAccess — 대상의 vCenter 쓰기 범위(v2.820)',
   'DELETE /api/tools/bareos-backup/jobs/:id': 'bareosAccess — 대상의 vCenter 쓰기 범위(v2.820)',
   'POST /api/tools/bareos-backup/jobs/:id/restore': 'bareosAccess + 본인 OTP — 대상의 vCenter 쓰기 범위(v2.820)',
+  // v2.830 백업 그룹(routes/api/bareosGroups.js) — 핸들러 안 bareosAccess(조회 밖 404 → 쓰기 밖 403)
+  'POST /api/tools/bareos-backup/groups': 'bareosAccess — 대상 vCenter 조회 404 → 쓰기 403 · VM 이 그 vCenter 인벤토리(또는 원장)인지 membersPlan(v2.830)',
+  'PUT /api/tools/bareos-backup/groups/:id': 'bareosAccess — 그룹의 vCenter 쓰기 범위 · updatedAt 대조(v2.830)',
+  'DELETE /api/tools/bareos-backup/groups/:id': 'bareosAccess — 그룹의 vCenter 쓰기 범위(v2.830)',
+  'POST /api/tools/bareos-backup/groups/:id/run': 'bareosAccess — 그룹의 vCenter 쓰기 범위(v2.830)',
   'POST /api/tools/bareos-backup/poll': '상태 조회만(원장 갱신) — 범위 계정은 자기 법인 Director 만 조회하고 그 상태만 받는다(v2.823 검토 S1 — visibleDirectorIds·scopedPoller)',
 });
 

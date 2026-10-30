@@ -425,6 +425,17 @@ test('⑥ 검토 L3·L4 — 보내지 못함 · 실패 · 결과 모름을 나�
   assert.equal(runner.itemState(undefined), 'unknown');
 });
 
+test('설정 변경 백업 지문 — 예약·실행 필드(lastKey·lastFire·sending·missed)는 지문을 바꾸지 않고, 그룹 정의는 바꾼다', async () => {
+  const backup = await import('../src/backup/service.js');
+  assert.ok(backup.MIXED_STATE_FILES.has('bareos-groups.json'));
+  const base = { id: 'g', name: 'A', vcenterId: 'v', vmIds: ['x'], schedule: EVERY, storage: '', pool: '', anchorAt: 1, lastKey: '', lastFire: null, missed: null, sending: null };
+  const fp = (g) => backup.settingsFingerprint({ 'bareos-groups.json': JSON.stringify({ version: 1, groups: [g] }) });
+  const f0 = fp(base);
+  assert.equal(fp({ ...base, lastKey: 'k', lastFire: { started: 1 }, sending: { key: 'k' }, missed: { key: 'k' } }), f0, '예약 회차마다 change 백업이 생기면 안 된다');
+  assert.notEqual(fp({ ...base, name: 'B' }), f0);
+  assert.notEqual(fp({ ...base, vmIds: ['x', 'y'] }), f0);
+});
+
 /* ───────── ⑥ 엣지·작업 표 ───────── */
 test('⑥ 엣지 회신 정제 — runJobs 성공인데 jobid 없음은 결과 모름 · 숫자 key 보존', async () => {
   const { sanitizeEdgeResult } = await import('../src/bareos/edgeResult.js');
