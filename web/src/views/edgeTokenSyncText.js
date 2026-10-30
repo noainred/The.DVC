@@ -10,8 +10,17 @@
  *  - '마지막 사용' 은 중앙이 그 토큰을 본 시각이다. 이름 검사 전에 찍히므로 '받아들였다' 의 증거는 아니다 — 문구도 그렇게만 쓴다.
  */
 
+import { cmpVersion } from '../cmpVersion.js';
+
 const norm = (v) => String(v ?? '').trim().toLowerCase();
 const posMs = (v) => { const n = Number(v); return Number.isFinite(n) && n > 0 ? n : null; };
+/** v2.826: 수집 토큰 통로(POST /api/collector/central-token)가 있는 최소 엣지 판 — 서버 central/tokenApplyJob.js MIN_EDGE_API_VERSION 과 같은 값(테스트가 대조). */
+export const MIN_EDGE_API_VERSION = '2.776.0';
+/** 엣지 판이 수집 토큰 통로 이상인가 — true/false, 모르면 null(낮다고 보지 않는다). */
+export function edgeApiOk(ver) {
+  const c = cmpVersion(ver, MIN_EDGE_API_VERSION);
+  return c == null ? null : c >= 0;
+}
 
 /** 행 상태 → 배지 문구·색. */
 export const SYNC_STATE = Object.freeze({
@@ -32,14 +41,23 @@ export function agentNameOf(c) {
  * 표의 행(순수).
  * @param {object[]} collectors  GET /admin/collectors 의 collectors
  * @param {object[]|null} tokens GET /admin/central/agent-tokens 의 tokens — 못 읽었으면 null
- * @returns {{ agent:string, url:string, enabled:boolean, state:string, createdAt:number|null, lastUsedAt:number|null, canApply:boolean, hint:string }[]}
+ * @param {Record<string,object>} [status] GET /admin/collectors 의 status(수집 서버 id → pull 상태 — version) · v2.826
+ * @returns {{ agent:string, url:string, enabled:boolean, state:string, createdAt:number|null, lastUsedAt:number|null, canApply:boolean, hint:string,
+ *   edgeVersion:string, apiOk:boolean|null, versionHint:string }[]}
  */
-export function syncRows(collectors, tokens) {
+export function syncRows(collectors, tokens, status = {}) {
   const list = Array.isArray(collectors) ? collectors : [];
   const known = Array.isArray(tokens);
+  const stMap = status && typeof status === 'object' ? status : {};
   return list.filter((c) => c && typeof c === 'object').map((c) => {
     const agent = agentNameOf(c);
     const enabled = c.enabled !== false;
+    const st = stMap[c.id] && typeof stMap[c.id] === 'object' ? stMap[c.id] : null;
+    const edgeVersion = st && typeof st.version === 'string' ? st.version.trim() : '';
+    const apiOk = edgeApiOk(edgeVersion);
+    const versionHint = apiOk === false
+      ? `엣지 판 ${edgeVersion} 에는 수집 토큰 통로(${MIN_EDGE_API_VERSION} 이상)가 없습니다 — 자동 적용은 SSH 배포 기록이 있거나 '엣지 업그레이드 뒤 자동 적용' 으로만 됩니다.`
+      : apiOk === null ? '엣지 판을 모릅니다(마지막 pull 에 판이 없음).' : '';
     const tk = known ? tokens.find((t) => t && norm(t.agent) === norm(agent)) || null : null;
     const createdAt = tk ? posMs(tk.createdAt) : null;
     const lastUsedAt = tk ? posMs(tk.lastUsedAt) : null;
@@ -49,7 +67,7 @@ export function syncRows(collectors, tokens) {
     else if (tk) { state = 'unused'; hint = '발급 뒤 그 토큰으로 들어온 요청이 없습니다 — 엣지가 아직 공유 토큰을 쓰고 있을 수 있습니다. 이전 자동 적용이 중단됐다면 수집 서버(원격) 화면에서 회수한 뒤 다시 자동 적용하세요.'; }
     else if (!enabled) { state = 'off'; hint = '수집이 꺼진 서버는 자동 적용 대상이 아닙니다.'; }
     else state = 'shared';
-    return { agent, url: String(c.url ?? ''), enabled, state, createdAt, lastUsedAt, canApply: known && enabled && !tk && !!agent && !!c.url, hint };
+    return { agent, url: String(c.url ?? ''), enabled, state, createdAt, lastUsedAt, canApply: known && enabled && !tk && !!agent && !!c.url, hint, edgeVersion, apiOk, versionHint };
   }).sort((a, b) => a.agent.localeCompare(b.agent, 'ko'));
 }
 

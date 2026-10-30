@@ -155,7 +155,9 @@ test('B-3 옛 판 엣지(404) → SSH 통로 · 판 모름이면 CENTRAL_TOKEN �
   assert.equal(job.state, 'ok', job.summary); assert.equal(job.path, 'ssh');
   assert.equal(opts.edgeNew, false, '옛 판(2.770) — SSH 본문이 키 구성을 보고 CENTRAL_TOKEN 교체 여부를 정한다');
   assert.equal(opts.urlPort, 4000, '배포 기록의 portalPort(수집 URL 의 포워딩 포트가 아니라)');
-  assert.match(job.steps.find((s) => s.key === 'edge-api').detail, /HTTP 404/);
+  // v2.826: 판이 낮은 것이 pull 상태로 확인되면 보내지 않고(옛 판은 401 로 떨어진다 — 아무것도 받지 않는다) SSH 로 바로 간다
+  const ea = job.steps.find((s) => s.key === 'edge-api');
+  assert.equal(ea.state, 'skip'); assert.match(ea.detail, /수집 토큰 통로가 없습니다/);
 });
 
 test('B-4 404 + 배포 기록 없음 → 발급 취소 · 실패 / SSH 가 쓴 뒤 실패(되돌림 없음) → 취소하지 않고 경고', async () => {

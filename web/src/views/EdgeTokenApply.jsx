@@ -4,11 +4,13 @@
  *  · 작업은 서버에서 돈다(central/tokenApplyJob.js) — 이 화면은 기록을 1.5초마다 읽어 단계별로 그린다(창을 닫아도 작업은 계속).
  *  · 기록은 서버 파일(edge-token-apply-log.json, 최근 50건)에 남는다 — 아래 '작업 기록' 이 그것을 보여 준다. 토큰 평문은 없다(지문만).
  *  · 실행은 설정 소유자만(발급과 같은 경계) — 403 은 권한 안내로.
+ *  · v2.826: 마지막 작업이 '엣지 판이 낮아 전달할 통로가 없음'(hint 'upgrade') 으로 끝났으면 '엣지 업그레이드 뒤 자동 적용' 버튼을 함께 단다
+ *    (서버 옵션 upgradeFirst — 중앙 번들 push → 새 판 확인 → 발급·적용. 엣지 포탈이 재시작되므로 확인 문구가 그 사실을 먼저 말한다).
  * ⚠ 훅은 조기 return 위에. 백틱 금지(BoldText).
  */
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { fetchJson, postJson } from '../api.js';
-import { JOB_STATE, STEP_STATE_ICON, STEP_TONE, stepTimeText, jobLine, confirmText, applyStartOutcome } from './edgeTokenApplyText.js';
+import { JOB_STATE, STEP_STATE_ICON, STEP_TONE, stepTimeText, jobLine, confirmText, applyStartOutcome, upgradeOffered, UPGRADE_BUTTON_TEXT, UPGRADE_HELP_TEXT } from './edgeTokenApplyText.js';
 
 const TONE = { ok: '#4ade80', bad: '#f87171', warn: 'var(--amber)', muted: 'var(--text-dim)' };
 
@@ -67,11 +69,11 @@ export default function EdgeTokenApply({ agent, canRun = true, onDone }) {
     return () => { alive.current = false; if (timer.current) clearTimeout(timer.current); };
   }, [agent, loadHistory, poll]);
 
-  const start = async () => {
-    if (!window.confirm(confirmText(agent))) return;
+  const start = async ({ upgradeFirst = false } = {}) => {
+    if (!window.confirm(confirmText(agent, { upgradeFirst }))) return;
     setBusy(true); setErr('');
     try {
-      const r = await postJson(`/admin/central/agent-tokens/${encodeURIComponent(agent)}/apply`, {});
+      const r = await postJson(`/admin/central/agent-tokens/${encodeURIComponent(agent)}/apply`, upgradeFirst ? { upgradeFirst: true } : {});
       // v2.785(GE A-B2): 409(이미 진행 중)는 던지지 않고 본문으로 온다 — r.job 을 바로 읽지 않는다(applyStartOutcome).
       const o = applyStartOutcome(r);
       if (o.error) setErr(o.error);
@@ -86,13 +88,17 @@ export default function EdgeTokenApply({ agent, canRun = true, onDone }) {
   const running = job?.state === 'running';
   const st = job ? JOB_STATE[job.state] : null;
   const past = (history || []).filter((j) => !job || j.id !== job.id).slice(0, 5);
+  const latest = job || (history && history[0]) || null;
+  const offerUpgrade = canRun && upgradeOffered(latest);
 
   return (
     <div data-edge-token-apply="" style={{ marginTop: 10, padding: 10, borderRadius: 8, border: '1px solid var(--border)', minWidth: 0 }}>
       <div className="flex gap wrap" style={{ alignItems: 'center' }}>
-        {canRun && <button className="login-btn" style={{ flex: 'none', padding: '6px 14px' }} disabled={busy || running} title={running ? '진행 중입니다' : undefined} onClick={start}>{running ? '적용 중…' : '개별 토큰 자동 적용'}</button>}
+        {canRun && <button className="login-btn" style={{ flex: 'none', padding: '6px 14px' }} disabled={busy || running} title={running ? '진행 중입니다' : undefined} onClick={() => start()}>{running ? '적용 중…' : '개별 토큰 자동 적용'}</button>}
+        {offerUpgrade && <button className="tab" style={{ flex: 'none', padding: '6px 12px', borderColor: 'var(--amber)' }} disabled={busy || running} title={UPGRADE_HELP_TEXT} onClick={() => start({ upgradeFirst: true })}>⬆ {UPGRADE_BUTTON_TEXT}</button>}
         <span className="muted" style={{ fontSize: 12 }}>발급 → 엣지 전달(수집 토큰, 안 되면 SSH) → 중앙 확인 → 배포 기록 맞춤. 단계마다 기록이 남습니다.</span>
       </div>
+      {offerUpgrade && <div style={{ color: TONE.warn, fontSize: 12, marginTop: 6, overflowWrap: 'anywhere' }}>{UPGRADE_HELP_TEXT}</div>}
       {err && <div style={{ color: TONE.bad, fontSize: 12, marginTop: 6 }}>{err}</div>}
       {job && (
         <div style={{ marginTop: 8, minWidth: 0 }}>
