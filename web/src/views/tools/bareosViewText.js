@@ -4,7 +4,7 @@
  *   문구에 백틱 금지(BoldText) · 값이 없으면 '—' · 못 읽은 값(null)은 0 으로 그리지 않는다.
  */
 import { shortTs, fmtGb, folderParts, critOf } from './backupViewText.js';
-import { levelLabel } from './bareosText.js';
+import { levelLabel, decBytesText } from './bareosText.js';
 
 const DAY = 86_400_000;
 const isFin = (v) => typeof v === 'number' && Number.isFinite(v);
@@ -78,12 +78,10 @@ export function runLine(b) {
   if (isFin(b.by)) parts.push(bytesText(b.by));
   return parts.join(' · ');
 }
+/** 바이트 — 관리 화면·작업 결과 창과 같은 함수(bareosText.decBytesText — 10진 · 앞 4자리 버림, Bareos 보고서와 같은 숫자).
+ *  v2.829: 이 화면만 1024 로 나누고 GB 를 붙여 같은 백업이 관리 화면 622.5 GB · 여기 579.8 GB 로 달랐다(판정 코어는 하나). */
 export function bytesText(n) {
-  if (!isFin(n) || n < 0) return '—';
-  const u = ['B', 'KB', 'MB', 'GB', 'TB', 'PB'];
-  let v = n; let i = 0;
-  while (v >= 1024 && i < u.length - 1) { v /= 1024; i++; }
-  return `${i ? v.toFixed(1) : v} ${u[i]}`;
+  return isFin(n) ? decBytesText(n) : '—';
 }
 export { shortTs, fmtGb, critOf };
 /** 레벨 — 카탈로그 한 글자(F·I·D)도 낱말로(관리 화면 bareosText.levelLabel 과 같다). 모르는 값은 그대로, 없으면 '—'. */

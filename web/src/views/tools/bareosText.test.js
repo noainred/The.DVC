@@ -14,8 +14,10 @@ describe('bareosText (v2.820 Bareos VM 백업)', () => {
   it('못 읽은 값은 0 이 아니라 —', () => {
     for (const v of [null, undefined, '', 'abc', -1]) expect(bytesText(v)).toBe('—');
     expect(bytesText(0)).toBe('0 B');
-    expect(bytesText(2048)).toBe('2.0 KB');
-    expect(bytesText(42949672960)).toBe('40.0 GB');
+    // v2.828: Bareos 보고서와 같은 10진 단위(예전 '2.0 KB'·'40.0 GB' 는 1024 로 나눈 값에 KB·GB 를 붙인 것)
+    expect(bytesText(2048)).toBe('2.048 KB');
+    expect(bytesText(42949672960)).toBe('42.94 GB');   // Bareos 와 같이 버림(42.949…)
+    expect(bytesText(190492305747)).toBe('190.4 GB');   // 보고서 괄호 값 '(190.4 GB)' 와 같다
     expect(whenText(null)).toBe('—');
     expect(whenText(0)).toBe('—');
     expect(levelLabel('X')).toBe('—');
@@ -221,7 +223,9 @@ describe('작업 결과 요약(v2.822.3 — 현장 jobid 8 로그 모양)', () =
     expect(storeRatio(r.fields)).toBeCloseTo(0.5706, 3);
     expect(storeRatio({})).toBeNull();
     const cards = Object.fromEntries(reportCards(r.fields).map((c) => [c.k, c.value]));
-    expect(cards.read).toBe('9.5 GB');
+    // v2.828: Bareos 보고서와 같은 10진 단위 — 괄호 값 그대로(예전 '9.5 GB' 는 1024 로 나눈 값에 GB 를 붙인 것)
+    expect(cards.read).toBe('10.22 GB');
+    expect(cards.stored).toBe('5.833 GB');
     expect(cards.comp).toBe('42.9 % (lz4)');
     expect(Object.values(Object.fromEntries(reportCards({}).map((c) => [c.k, c.value])))).toEqual(['—', '—', '—', '—', '—', '—']);
   });

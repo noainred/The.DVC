@@ -61,6 +61,8 @@
   복원은 설정만 보면 아는 전제를 OTP 앞에서 · 엣지 성공 회신에 유효한 잡 이름이 없으면 결과 모름 · `ops.poll` 은 **대조를 먼저**(work 가 예산을 넘어도 `.jobs`·다시 끄기가 돈다) ·
   엣지 자동 설정은 Director·서버마다 한 번에 하나(되돌리기까지) · 재시작하면 결과를 잃는 작업은 `inflight.js` → 업그레이드 자동 적용이 기다린다 · 취소의 끝난 행은 type B 만 반영.
   전문·남긴 것은 `docs/rules/audits.md` 'Bareos v2.825.1 버그 점검 확정분'.
+- **v2.828 작업 결과 창(웹 `bareosText`·`BareosBackupTool LogModal`)**: 크기 표기는 `decBytesText` 하나 — 10진 · 앞 4자리 **버림**(Bareos `edit_uint64_with_suffix` 와 같은 규칙.
+  반올림하면 같은 창의 보고서 값과 0.1 씩 어긋났다) · 데모 보고(`mock/demo/bareos.js demoReport`)도 같은 규칙, 속도는 1000 B · 탭 본문 높이 고정(`LOG_PANE_H`). 회귀 `bareosJobDetail2828.test.js`.
 - 실환경 미확인(추정 — `tools/bareos-probe.js` 로 확인할 것): Node↔Director TLS-PSK 협상 · 잡 수준 FdPluginOptions 와 FileSet 플러그인 문자열 병합 ·
   `.bvfs_get_jobids` JSON 모양 · Profile ACL 지시어 이름 · `list jobs days=N` · 25.x `.jobs` 의 enabled 칸(master 소스 기준 — 없으면 다시 끄기를 하지 않는다) · Migration 행의 시작 시각.
 - **v2.828 조회 화면**(통합 `bareos-summary` · 법인별 `bareos-detail` — 조회 전용 키, adminOnly 아님 · `bareosViews2828`): 판정은 `vmView.js` 하나(웹 `bareosViewText.js` 와 대조) ·
