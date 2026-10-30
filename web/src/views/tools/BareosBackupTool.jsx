@@ -10,7 +10,7 @@ import { requireChanged } from '../changeResult.js';
 import VeeamHeader from './VeeamHeader.jsx';
 import SettingsTab from './BareosSettings.jsx';
 import {
-  stateBadge, levelLabel, bytesText, whenText, runCell, directorLine, directorStatus, directorChipTitle, outcomeUnknown, unknownOutcomeText, withRelayWait, RESTORE_MODE_LABEL, restoreLine, candidateSummary, driftText, restorePointsNote,
+  stateBadge, levelLabel, bytesText, whenText, runCell, directorLine, directorStatus, directorChipTitle, outcomeUnknown, unknownOutcomeText, withRelayWait, targetLocks, RESTORE_MODE_LABEL, restoreLine, candidateSummary, driftText, restorePointsNote,
   folderOptions, inFolder, pickCap, bulkSummary,
   parseJobReport, reportCards, REPORT_KEYS, issueHint, storeRatio, reportText, reportBytes, reportValue,
 } from './bareosText.js';
@@ -69,7 +69,7 @@ export default function BareosBackupTool() {
       </div>
       {tab === 'targets' && <TargetsTab d={data} reload={reload} />}
       {tab === 'history' && <HistoryTab d={data} />}
-      {tab === 'settings' && fullScope && <SettingsTab onSaved={reload} />}
+      {tab === 'settings' && fullScope && <SettingsTab onSaved={reload} writable={data.settingsWritable !== false} />}
       {tab === 'settings' && !fullScope && <div className="muted" style={{ padding: 16 }}>Director 설정은 전체 범위 관리자만 볼 수 있습니다 — 백업 대상 탭을 쓰세요.</div>}
       </div>
     </div>
@@ -107,7 +107,8 @@ function TargetsTab({ d, reload }) {
   const act = async (j, fn, okText, what = '요청') => {
     setBusyIds((b) => new Set(b).add(j.id)); setMsg(null);
     try { const r = await fn(); requireChanged(r); setMsg({ ok: true, text: okText(r) }); reload(); }
-    catch (e) { setMsg({ ok: false, text: outcomeUnknown(e) ? `결과 모름: ${unknownOutcomeText(what, e)}` : `오류: ${e.message}` }); if (outcomeUnknown(e)) reload(); }
+    // G14: 실패여도 목록을 다시 읽는다 — 서버가 거부하면서 원장을 바꿨을 수 있다(예: 이미 끝난 실행의 취소는 결과를 반영하고 400)
+    catch (e) { setMsg({ ok: false, text: outcomeUnknown(e) ? `결과 모름: ${unknownOutcomeText(what, e)}` : `오류: ${e.message}` }); reload(); }
     finally { setBusyIds((b) => { const n = new Set(b); n.delete(j.id); return n; }); }
   };
   const run = (j) => { setRunFor(null); act(j, () => postJson(`${BASE}/jobs/${enc(j.id)}/run`, runLevel ? { level: runLevel } : {}, mut(j, 'runJob')), (r) => `‘${j.vmName}’ 백업을 시작했습니다(jobid ${r.jobid}). 진행은 이 표와 실행 현황 탭에서 보입니다.`, '백업 실행'); };
@@ -165,6 +166,7 @@ function TargetsTab({ d, reload }) {
               const liveJobid = j.pending?.jobid || (['running', 'queued', 'waiting'].includes(j.lastRun?.state) ? j.lastRun.jobid : null);
               const running = !!liveJobid;
               const busy = busyIds.has(j.id);
+              const lk = targetLocks(j, { busy, running, hasRun: !!c.jobid });   // G12·G13: 잠긴 버튼은 사유를 말한다(쓰기 범위 밖 포함)
               return (
                 <tr key={j.id} style={{ opacity: j.enabled ? 1 : 0.6 }}>
                   <td data-sort={j.vmName}><b>{j.vmName}</b>{!j.enabled && <span className="badge gray" style={{ marginLeft: 6 }}>비활성</span>}{j.missingInDirector && <span className="badge red" style={{ marginLeft: 6 }} title="Director 의 잡 목록에 없습니다(누가 정의 파일을 지웠을 수 있습니다)">Director 에 없음</span>}{j.demo && <span className="badge amber" style={{ marginLeft: 6 }}>데모</span>}{j.drift && <span className="badge amber" style={{ marginLeft: 6 }} title={driftText(j.drift)}>{j.drift === 'missing' ? '인벤토리에 없음' : '등록 뒤 바뀜'}</span>}</td>
@@ -182,22 +184,22 @@ function TargetsTab({ d, reload }) {
                   <td style={{ minWidth: 236 }}>
                     <span style={{ ...ROW, gap: 6 }}>
                       {running
-                        ? <button type="button" className="logout-btn" style={{ ...BTN, color: 'var(--red)' }} disabled={busy} onClick={() => cancel(j, liveJobid)}>취소</button>
+                        ? <button type="button" className="logout-btn" style={{ ...BTN, color: 'var(--red)' }} disabled={!!lk.cancel} title={lk.cancel || undefined} onClick={() => cancel(j, liveJobid)}>취소</button>
                         : runFor === j.id
                           ? <>
                             <Select className="input" sort={false} value={runLevel} onChange={(e) => setRunLevel(e.target.value)} style={{ minWidth: 0, width: 168, padding: '3px 6px', fontSize: 12 }} aria-label="실행 레벨">
                               <option value="">기본({levelLabel(j.level)})</option>
                               {['Full', 'Incremental', 'Differential'].map((l) => <option key={l} value={l}>{levelLabel(l)}</option>)}
                             </Select>
-                            <button type="button" className="logout-btn" style={BTN} disabled={busy} onClick={() => run(j)}>시작</button>
+                            <button type="button" className="logout-btn" style={BTN} disabled={!!lk.run} title={lk.run || undefined} onClick={() => run(j)}>시작</button>
                             <button type="button" className="logout-btn" style={BTN} onClick={() => setRunFor(null)}>닫기</button>
                           </>
-                          : <button type="button" className="logout-btn" style={BTN} disabled={busy || !j.enabled} onClick={() => { setRunLevel(''); setRunFor(j.id); }}>실행…</button>}
-                      <button type="button" className="logout-btn" style={BTN} disabled={!c.jobid} onClick={() => setLogOf({ job: j, jobid: c.jobid, view: 'summary' })}>결과</button>
-                      <button type="button" className="logout-btn" style={BTN} disabled={!c.jobid} onClick={() => setLogOf({ job: j, jobid: c.jobid, view: 'raw' })}>로그</button>
-                      <button type="button" className="logout-btn" style={BTN} disabled={busy} onClick={() => setRestoreOf(j)}>복원…</button>
-                      <button type="button" className="logout-btn" style={BTN} disabled={busy || running} onClick={() => toggle(j)}>{j.enabled ? '비활성' : '활성'}</button>
-                      <button type="button" className="logout-btn" style={{ ...BTN, color: 'var(--red)' }} disabled={busy || running} onClick={() => remove(j)}>삭제</button>
+                          : <button type="button" className="logout-btn" style={BTN} disabled={!!lk.run} title={lk.run || undefined} onClick={() => { setRunLevel(''); setRunFor(j.id); }}>실행…</button>}
+                      <button type="button" className="logout-btn" style={BTN} disabled={!!lk.view} title={lk.view || undefined} onClick={() => setLogOf({ job: j, jobid: c.jobid, view: 'summary' })}>결과</button>
+                      <button type="button" className="logout-btn" style={BTN} disabled={!!lk.view} title={lk.view || undefined} onClick={() => setLogOf({ job: j, jobid: c.jobid, view: 'raw' })}>로그</button>
+                      <button type="button" className="logout-btn" style={BTN} disabled={!!lk.restore} title={lk.restore || undefined} onClick={() => setRestoreOf(j)}>복원…</button>
+                      <button type="button" className="logout-btn" style={BTN} disabled={!!lk.toggle} title={lk.toggle || undefined} onClick={() => toggle(j)}>{j.enabled ? '비활성' : '활성'}</button>
+                      <button type="button" className="logout-btn" style={{ ...BTN, color: 'var(--red)' }} disabled={!!lk.remove} title={lk.remove || undefined} onClick={() => remove(j)}>삭제</button>
                     </span>
                   </td>
                 </tr>
@@ -243,7 +245,9 @@ function AddForm({ d, onClose, onChanged }) {
   const all = useMemo(() => cand?.items || [], [cand]);
   const folders = useMemo(() => folderOptions(all), [all]);
   const items = all.filter((x) => inFolder(x, folder) && (!q || x.name.toLowerCase().includes(q.toLowerCase())));
-  const pickable = (x) => !!cand?.writable && x.eligible && !x.registered;
+  // G10: 법인 Director 콘솔 접속값이 덜 됐으면 등록이 409 로 끝난다 — 미리 잠근다(서버가 ready·missing 을 준다 · 옛 응답이면 막지 않는다)
+  const dirNotReady = cand?.director && cand.director.ready === false;
+  const pickable = (x) => !!cand?.writable && !dirNotReady && x.eligible && !x.registered;
   const cap = pickCap(cand);
   const toggle = (x) => setSel((prev) => {
     const n = new Set(prev);
@@ -261,6 +265,8 @@ function AddForm({ d, onClose, onChanged }) {
     try {
       const dirOfVc = (d.directors || []).find((x) => (x.vcenters || []).includes(vc));
       const r = await postJson(`${BASE}/jobs/bulk`, { vcenterId: vc, vmIds: [...sel], level }, withRelayWait({}, dirOfVc, d.relayLimits, 'addJobs'));
+      // G10: 409(확정 거부 — 예: Director 접속값 덜 됨)는 본문으로 온다 — 대상별 결과(results)가 없으면 사유를 그대로 보인다(예전엔 '0대' 만 보였다)
+      if (r && r.ok === false && !Array.isArray(r.results)) requireChanged(r);
       setResult(r);
       if (r.created > 0) { setSel(new Set()); setRev((x) => x + 1); onChanged(); }
     } catch (e) {
@@ -304,6 +310,7 @@ function AddForm({ d, onClose, onChanged }) {
       {cand && (
         <>
           <div className="muted" style={{ fontSize: 12, marginBottom: 6 }}>{candidateSummary(cand)}{cand.director ? ` · 잡을 만들 법인 Director ‘${cand.director.name}’` : ' · 이 vCenter 는 어느 법인 Director 에도 묶여 있지 않습니다(설정 › 법인별 Director)'}{cand.director && cand.mappingMissing?.length ? ` · 매핑이 덜 됐습니다(${cand.mappingMissing.join('·')})` : ''}{!cand.writable ? ' · 조회 전용 범위라 등록할 수 없습니다' : ''}</div>
+          {dirNotReady && <div className="banner warn" style={{ marginBottom: 8, fontSize: 12 }}>법인 Director ‘{cand.director.name}’ 의 콘솔 접속값이 덜 됐습니다({(cand.director.missing || []).join('·') || '접속값'}) — 등록할 수 없습니다. 설정 › 법인별 Director 에서 채우세요(주소·포트·콘솔 이름을 바꾸면 저장 비밀번호가 지워집니다).</div>}
           <div style={{ ...ROW, marginBottom: 6 }}>
             <button type="button" className="logout-btn" style={BTN} disabled={!visiblePickable.length || sel.size >= cap} onClick={pickVisible}>보이는 등록 가능 VM 전체 선택({visiblePickable.length}대)</button>
             <button type="button" className="logout-btn" style={BTN} disabled={!sel.size} onClick={() => setSel(new Set())}>선택 해제</button>
@@ -346,7 +353,7 @@ function AddForm({ d, onClose, onChanged }) {
       <div style={{ ...ROW, marginTop: 10 }}>
         <span className="muted" style={{ fontSize: 12 }}>{sel.size ? `${sel.size}대 — VM 마다 Director 에 잡을 만들고(configure add job) 사이트 매핑의 스케줄을 배정합니다. Director 접속은 한 번입니다.` : 'VM 을 고르세요.'}</span>
         <div style={{ flexGrow: 1 }} />
-        <button type="button" className="login-btn" style={{ flex: 'none', padding: '8px 16px' }} disabled={!sel.size || busy} onClick={submit}>{busy ? '등록 중…' : `${sel.size || ''}대 등록`}</button>
+        <button type="button" className="login-btn" style={{ flex: 'none', padding: '8px 16px' }} disabled={!sel.size || busy} title={!sel.size ? '등록할 VM 을 고르세요' : undefined} onClick={submit}>{busy ? '등록 중…' : sel.size ? `${sel.size}대 등록` : '등록'}</button>
       </div>
     </div>
   );

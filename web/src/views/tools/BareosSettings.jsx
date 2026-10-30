@@ -8,7 +8,7 @@ import { requireChanged } from '../changeResult.js';
 import { droppedSecretNote } from '../droppedSecretText.js';
 import {
   diagView, directorPrepBlock, fdIniTemplate, PREP_CHECKLIST, autoSetupDirectorText, autoSetupFdText, thumbprintText,
-  outcomeUnknown, missingText, preflightView, preflightSummary, autoSetupFdPluginText, fillEmptyMapping, directorFormPatch, withRelayWait, secText, relayKindLabel,
+  outcomeUnknown, missingText, preflightView, preflightSummary, autoSetupFdPluginText, fillEmptyMapping, directorFormPatch, withRelayWait, secText, relayKindLabel, SETTINGS_READ_ONLY,
   VMWARE_POOL_FULL, VMWARE_SCHEDULE, WEEKDAYS, WEEKDAY_LABEL, MAPPING_FIELDS, newMappingRow, vcSlug,
 } from './bareosText.js';
 
@@ -66,7 +66,7 @@ export function DiagStages({ stages }) {
 }
 
 /* ───────────────────────── 설정 탭 ───────────────────────── */
-export default function SettingsTab({ onSaved }) {
+export default function SettingsTab({ onSaved, writable = true }) {
   const [s, setS] = useState(null);
   const [err, setErr] = useState(null);
   const [sel, setSel] = useState('');
@@ -110,6 +110,8 @@ export default function SettingsTab({ onSaved }) {
     <div>
       {s.demo && <div className="card" style={{ ...NOTE, borderLeft: '3px solid var(--amber)' }}>데모 모드 — 아래 값은 메모리의 데모 설정입니다(지역마다 데모 Director · 편집·저장 안 됨). 실제 Director 를 추가하면 데모가 꺼지고 그쪽 설정으로 바뀝니다.</div>}
       {s.loadError && <div className="banner bad" style={{ marginBottom: 10 }}>설정 파일을 읽지 못했습니다(손상본 보존) — {s.loadError.reason}</div>}
+      {/* v2.825.1 버그 점검(G12): 쓰기 범위가 지정된 계정은 서버(fullWriteOnly)가 403 으로 막는다 — 화면이 미리 잠그고 사유를 말한다 */}
+      {!writable && <div className="banner warn" style={{ marginBottom: 10 }}>{SETTINGS_READ_ONLY}</div>}
       {err && <div className="banner bad" role="alert" style={{ marginBottom: 10 }}>설정을 다시 읽지 못했습니다({String(err.message || err).slice(0, 160)}) — 화면 값이 최신이 아닐 수 있어 저장을 잠갔습니다. <button type="button" className="logout-btn" style={BTN} onClick={() => load(true)}>다시 읽기</button></div>}
       <Msg m={msg} />
 
@@ -119,7 +121,7 @@ export default function SettingsTab({ onSaved }) {
             <b>법인별 Director</b>
             <div className="muted" style={{ fontSize: 12, marginTop: 2 }}>법인마다 Bareos 서버(Director · SD · FD 한 대)를 등록하고 그 법인의 vCenter 를 묶습니다. 초기 설치만 된 서버는 편집 화면의 자동 설정 5단계로 포탈이 설정합니다.</div>
           </div>
-          <button type="button" className="login-btn" style={{ flex: 'none', padding: '8px 16px' }} disabled={!!err} onClick={() => setAdding((x) => !x)}>{adding ? '닫기' : '+ Director 추가'}</button>
+          <button type="button" className="login-btn" style={{ flex: 'none', padding: '8px 16px' }} disabled={!!err || !writable} title={!writable ? SETTINGS_READ_ONLY : err ? '설정을 다시 읽지 못해 잠갔습니다' : undefined} onClick={() => setAdding((x) => !x)}>{adding ? '닫기' : '+ Director 추가'}</button>
         </div>
         {adding && <AddDirectorForm agents={s.agents || []} withToken={s.agentsWithToken} onDone={async (r) => { setAdding(false); setMsg({ ok: true, text: `‘${r.director.name}’ Director 를 추가했습니다 — 편집에서 vCenter 를 묶고 자동 설정을 진행하세요.` }); await load(true); setSel(r.director.id); onSaved(); }} />}
         <div className="table-wrap" style={{ marginTop: 10, maxHeight: '46vh' }}>
@@ -149,7 +151,7 @@ export default function SettingsTab({ onSaved }) {
         )}
       </div>
 
-      {dir && <DirectorEditor key={dir.id} s={s} dir={dir} locked={!!err}
+      {dir && <DirectorEditor key={dir.id} s={s} dir={dir} locked={!!err || !writable}
         onReload={() => load(true)} onSaved={onSaved} onClose={() => setSel('')}
         onDeleted={async (name) => { setSel(''); setMsg({ ok: true, text: `‘${name}’ Director 를 포탈 설정에서 지웠습니다(Bareos 서버는 그대로).` }); await load(true); onSaved(); }} />}
 
@@ -172,7 +174,7 @@ export default function SettingsTab({ onSaved }) {
             주기 범위는 {s.limits?.pollIntervalSec ? `${s.limits.pollIntervalSec.min}~${s.limits.pollIntervalSec.max}초` : '—'}.
           </div>
           <div style={{ ...ROW, marginTop: 10 }}>
-            <button type="button" className="login-btn" style={{ flex: 'none', padding: '8px 18px' }} disabled={busy || !!err || s.demo} onClick={saveDefaults}>{busy ? '저장 중…' : '공통 기본값 저장'}</button>
+            <button type="button" className="login-btn" style={{ flex: 'none', padding: '8px 18px' }} disabled={busy || !!err || s.demo || !writable} title={!writable ? SETTINGS_READ_ONLY : undefined} onClick={saveDefaults}>{busy ? '저장 중…' : '공통 기본값 저장'}</button>
           </div>
         </div>
         <div className="card" style={{ padding: 14, minWidth: 0 }}>
@@ -586,7 +588,7 @@ function AutoSetupPanel({ s, dir, rows, editCount, cat, unsaved, locked, onDirec
     } catch (e) { onFail(5, e, '지문 읽기', false); } finally { setBusy(''); }
   };
   const runFd = async () => {
-    setBusy('4');
+    setBusy('5');   // v2.825.1 버그 점검(G11): 4단계(빈 칸 채우기)와 같은 표지를 써서 서로의 버튼이 '채우는 중…'·'쓰는 중…' 으로 보였다
     try {
       const r = await postJson(url('fd'), { ...fdBody(), otp: ssh.otp, vcuser: f.vcuser, vcpass: f.vcpass, vcthumbprint: f.vcthumbprint }, withRelayWait({}, dir, s.relayLimits, 'setup.fdIni', { setup: true }));
       requireChanged(r);
@@ -730,7 +732,7 @@ function AutoSetupPanel({ s, dir, rows, editCount, cat, unsaved, locked, onDirec
       {/* 4 매핑 채움 · 저장 */}
       <div style={{ marginTop: 14 }}>
         <div style={ROW}><b>4 매핑 채움 · 저장</b><span className="muted" style={{ fontSize: 11.5 }}>이 Director 의 카탈로그(FD · SD · 풀 · 스케줄)와 vCenter 등록부 주소로 아래 매핑 표의 빈 칸만 채웁니다(쓰기 없음 — 확인한 뒤 표 아래 ‘매핑 저장’ · 5단계가 저장된 값을 씁니다)</span><div style={{ flexGrow: 1 }} />
-          <button type="button" className="logout-btn" style={{ padding: '7px 14px' }} disabled={!editCount || any || !(dir.hasPassword || s.demo)} onClick={runFill}>{busy === '4' ? '채우는 중…' : '빈 칸 채우기'}</button></div>
+          <button type="button" className="logout-btn" style={{ padding: '7px 14px' }} disabled={!editCount || any || !(dir.hasPassword || s.demo)} title={!editCount ? '이 Director 에 묶은 vCenter 가 없습니다' : !(dir.hasPassword || s.demo) ? '콘솔 비밀번호가 없어 Director 카탈로그를 읽을 수 없습니다 — 2단계(또는 연결 저장)를 먼저 하세요' : undefined} onClick={runFill}>{busy === '4' ? '채우는 중…' : '빈 칸 채우기'}</button></div>
         {st[4] && <Msg m={st[4]} />}
       </div>
       {/* 5 FD INI · 지문 — 저장된 매핑의 vcserver·INI 경로를 쓴다(W3) */}
@@ -752,7 +754,7 @@ function AutoSetupPanel({ s, dir, rows, editCount, cat, unsaved, locked, onDirec
         {site && <div className="muted" style={{ fontSize: 11.5, marginTop: 6 }}>쓸 경로 ‘{site.configFile || '—'}’ · FD 가 볼 vCenter ‘{site.vcserver || '—'}’</div>}
         <div style={{ ...ROW, marginTop: 10 }}>
           <button type="button" className="logout-btn" style={{ padding: '7px 14px' }} disabled={!sshOk || !site || any} onClick={readThumb}>{busy === '4t' ? '읽는 중…' : 'FD 에서 지문 읽기'}</button>
-          <button type="button" className="login-btn" style={{ flex: 'none', padding: '8px 16px' }} disabled={!fReady} onClick={runFd}>{busy === '4' ? '쓰는 중…' : 'FD INI 자동 설정'}</button>
+          <button type="button" className="login-btn" style={{ flex: 'none', padding: '8px 16px' }} disabled={!fReady} onClick={runFd}>{busy === '5' ? '쓰는 중…' : 'FD INI 자동 설정'}</button>
           {!any && fMissing && <span className="muted" style={{ fontSize: 11.5 }}>{fMissing}</span>}
         </div>
         {st[5] && <Msg m={st[5]} />}
