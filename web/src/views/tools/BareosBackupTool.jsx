@@ -353,7 +353,7 @@ function AddForm({ d, onClose, onChanged }) {
       <div style={{ ...ROW, marginTop: 10 }}>
         <span className="muted" style={{ fontSize: 12 }}>{sel.size ? `${sel.size}대 — VM 마다 Director 에 잡을 만들고(configure add job) 사이트 매핑의 스케줄을 배정합니다. Director 접속은 한 번입니다.` : 'VM 을 고르세요.'}</span>
         <div style={{ flexGrow: 1 }} />
-        <button type="button" className="login-btn" style={{ flex: 'none', padding: '8px 16px' }} disabled={!sel.size || busy} title={!sel.size ? '등록할 VM 을 고르세요' : undefined} onClick={submit}>{busy ? '등록 중…' : `${sel.size || ''}대 등록`}</button>
+        <button type="button" className="login-btn" style={{ flex: 'none', padding: '8px 16px' }} disabled={!sel.size || busy} title={!sel.size ? '등록할 VM 을 고르세요' : undefined} onClick={submit}>{busy ? '등록 중…' : sel.size ? `${sel.size}대 등록` : '등록'}</button>
       </div>
     </div>
   );
