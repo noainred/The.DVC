@@ -470,3 +470,4 @@
   웹은 받은 `p a mm lok` 을 그린다. Summary · Detail 에 Clone·스냅샷 문구·기능을 다시 넣지 말 것(`backupPolicy2835.test.js` · `backupSummary2836.test.js`). 기록은 `docs/rules/audits.md` v2.835 · v2.836.
   v2.836 Summary 의 법인 › 폴더 › VM 트리는 법인 줄 = 서버 집계(`veeam/backupSummaryAgg.js`), 폴더·VM = 그 법인의 Detail 응답을 `buildTree` 로 — Summary 에서 따로 판정하지 말 것.
   v2.837 Summary 의 선택은 **한 법인 안에서만**(트리 · 찾기 결과가 한 선택 — 다른 법인 칸은 막는다) · 쓰기 가능은 서버 법인 줄 `w` 로만(캐시 키 `writeKeyOf`) · 자료가 없는 칸은 지어내지 않고 출처를 밝히거나 '—(2차)'.
+  v2.838 Summary 아래 두 구획(용량과 일정 · 통합 에러 로그)은 **무거운 집계라 폴링하지 않는다**(처음 · 기간 · 새로고침) · 자료가 없는 칸은 출처를 밝히고 '—(2차)' — 30일 선은 'Veeam 저장소 사용(EM)' 이지 백업 용량 추이가 아니다 · 열기 링크는 권한이 없으면 그리지 않는다(`backupSummaryPlan.errorOpen`).

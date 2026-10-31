@@ -17,6 +17,8 @@ import BackupOptions from './BackupOptions.jsx';
 import BackupSummaryBar from './BackupSummaryBar.jsx';
 import BackupSummaryStale from './BackupSummaryStale.jsx';
 import BackupSummaryTree from './BackupSummaryTree.jsx';
+import BackupSummaryCapSched from './BackupSummaryCapSched.jsx';
+import BackupSummaryErrors from './BackupSummaryErrors.jsx';
 
 export const DETAIL_VC_KEY = 'backup-detail-vc';   // 서머리에서 고른 vCenter 를 세부내용이 이어받는다(이 브라우저에만)
 
@@ -176,11 +178,14 @@ export default function BackupSummaryTool() {
       <BackupSummaryBar sel={sel} rows={rows} onClear={clearSel} onSaved={load} />
       <BackupSummaryStale scope={scope} rows={rows} sel={sel} onPick={pick} onOpenDetail={openDetail} />
       <BackupSummaryTree rows={rows} opts={opts} reloadKey={data.at} onOpenDetail={openDetail} sel={sel} onPick={pick} />
+      <BackupSummaryCapSched rows={rows} em={em} reloadKey={data.at} />
+      <BackupSummaryErrors reloadKey={data.at} onOpenDetail={openDetail} />
 
       <div className="card" data-backup-source="" style={{ padding: '10px 14px', fontSize: 11.5, lineHeight: 1.6, color: 'var(--text-dim)' }}>
         <b style={{ color: 'var(--text)' }}>값 출처</b> — 보호 대상 · 정책 · RPO: 백업 정책(Detail 에서 정한 값)과 실제 백업(Veeam 대조 · Bareos 원장)을 VM 마다 같은 판정으로 센 값 ·
         BackedUp {b ? fmtNum(b.backed) : '—'} = 정책 Veeam · Bareos · SSH 합 · 실행 중: Veeam 결과 + Bareos 원장 · 용량: Veeam 복원 지점 크기 + Bareos 마지막 실행 크기(카탈로그 전체 합이 아니다) ·
-        Veeam 저장소 · 라이선스 · 잡 수: EM(전체 범위 계정만) · 다음 회차: 포탈 그룹 예약(Director 스케줄 · 풀은 2차 수집 뒤) · 한쪽을 못 읽은 법인은 ‘모름’·‘*’ 로 따로 셉니다(0 이 아닙니다).
+        Veeam 저장소 · 라이선스 · 잡 수 · 30일 추이: EM(전체 범위 계정만) · 다음 회차 · 스케줄: Veeam 잡 다음 실행(B&amp;R 결과 — 다음 1회만) + 포탈 그룹 예약(Director 스케줄 · 풀은 2차 수집 뒤) ·
+        에러: Veeam VM 마지막 결과 · EM 세션 + Bareos 원장 · 진행 현황 + 포탈 수집 오류 · 한쪽을 못 읽은 법인은 ‘모름’·‘*’ 로 따로 셉니다(0 이 아닙니다).
       </div>
     </div>
   );
