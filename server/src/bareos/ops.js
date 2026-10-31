@@ -102,7 +102,7 @@ export const OPS = Object.freeze({
    * v2.831 백업 그룹 보관 개수 정리 — 잡마다 이력을 읽고(groupRetention.pruneSelection — 체인 기준 Full 앞의 끝난 실행만) 지운 뒤 **다시 읽어**
    * 실제로 사라진 jobid 만 '지움' 으로 돌려준다(delete 응답 모양에 기대지 않는다). 세션 하나로 순차 · 세션째 끊기면 남은 것은 건너뜀.
    * 옛 엣지는 이 작업 종류를 몰라 '알 수 없는 작업' 으로 거절한다(아무것도 지우지 않는다).
-   * @param {{ items: { key:number, job:string, keep:number }[] }} a
+   * @param {{ items: { key:number, job:string, keep:number, since?:number }[] }} a  since = 원장 잡 등록 시각(그보다 먼저 시작한 행은 지우지 않는다)
    * @returns {Promise<{ key, ok, deleted?:number[], kept?, good?, baseJobid?, baseAt?, reason?, more?, code?, message? }[]>}
    */
   async pruneJobs(s, { items = [] } = {}) {
@@ -114,7 +114,7 @@ export const OPS = Object.freeze({
       try {
         if (!isResourceName(it.job)) throw invalid('잡 이름이 올바르지 않습니다.');
         const runs = (await jobRuns(s, it.job)).filter((r) => r.name === it.job);
-        const sel = pruneSelection(runs, it.keep, it.job);
+        const sel = pruneSelection(runs, it.keep, it.job, { since: Number.isFinite(it.since) ? it.since : null });
         let deleted = [];
         if (sel.deletable.length) {
           sent = sel.deletable;

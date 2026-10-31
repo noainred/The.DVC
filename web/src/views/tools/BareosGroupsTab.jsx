@@ -18,7 +18,7 @@ import { relayWaitMs, outcomeUnknown, unknownOutcomeText } from './bareosText.js
 import {
   DAY_NAMES, LEVELS, NEW_SCHEDULE, scheduleText, draftIssues, toggleDay, GROUP_FILTERS, groupFilterCounts, pickable, buildGroupTree, checkState,
   FIRE_STATE_TEXT, FIRE_STATE_TONE, fireText, fireTone, isDaily, setCadence, scheduleParts,
-  KEEP_PRESETS, KEEP_DEFAULT, keepText, stepKeep, keepMeaning, keepParts, fireKeepBadge, KEEP_BADGE_TEXT, untilText,
+  KEEP_PRESETS, KEEP_DEFAULT, NEW_GROUP_KEEP, keepOtpReasons, keepText, stepKeep, keepMeaning, keepParts, fireKeepBadge, KEEP_BADGE_TEXT, untilText,
   memberResults, resultBadge, folderSummary, sizeSum,
 } from './bareosGroupText.js';
 
@@ -322,7 +322,9 @@ function GroupEdit({ tree, group, initialFilter, vms, byId, groupName, writable,
   const editingId = group?.id || '';
   const [name, setName] = useState(group?.name || '');
   const [sched, setSched] = useState(() => (group ? { ...group.schedule } : { ...NEW_SCHEDULE }));
-  const [keep, setKeep] = useState(() => (group ? group.keep ?? null : KEEP_DEFAULT));
+  const [keep, setKeep] = useState(() => (group ? group.keep ?? null : NEW_GROUP_KEEP));   // v2.831.1 사용자 결정: 새 그룹은 제한 없음
+  const [otp, setOtp] = useState('');
+  const [serverOtp, setServerOtp] = useState(null);   // 서버가 needOtp 로 돌려준 까닭(화면 판정과 어긋날 때 칸을 연다)
   const [storage, setStorage] = useState(group?.storage || '');
   const [pool, setPool] = useState(group?.pool || '');
   const [sel, setSel] = useState(() => new Set(group?.vmIds || []));
@@ -363,6 +365,9 @@ function GroupEdit({ tree, group, initialFilter, vms, byId, groupName, writable,
   const doubled = sched.enabled ? members.filter((m) => m.job?.schedule) : [];
   // 반증 F5: 보관 개수가 있는 그룹에 이력이 있는 VM 을 더하면 그 VM 의 예전 백업도 정리 대상이 된다 — 미리 알린다
   const addedWithHistory = members.filter((m) => !(group?.vmIds || []).includes(m.id) && m.job && m.b?.ok != null).length;
+  // v2.831.1 사용자 결정: 지울 범위가 넓어지는 저장(보관 개수를 정함·줄임·기존 잡 VM 추가)은 본인 OTP — 서버가 다시 판정한다
+  const otpReasons = keepOtpReasons(group, { keep, vmIds }, (id) => !!byId.get(id)?.job);
+  const needOtp = otpReasons.length > 0 || !!serverOtp?.length;
   const issues = draftIssues({ name, vmIds, schedule: sched }, { maxMembers: tree.limits?.maxMembers || 200 });
   // 서버 precheck 와 같은 상한(API 값) — 넘으면 저장 버튼을 열지 않는다(눌러 봐야 400)
   if (tree.limits?.maxBulk && toRegister > tree.limits.maxBulk) issues.push(`잡이 없는 VM 은 한 번에 ${tree.limits.maxBulk}대까지 등록할 수 있습니다(지금 ${toRegister}대) — 나눠서 저장하세요.`);
@@ -373,7 +378,7 @@ function GroupEdit({ tree, group, initialFilter, vms, byId, groupName, writable,
 
   const save = async (runAfter) => {
     setSaving(runAfter ? 'run' : 'save'); setResult(null);
-    const body = { name, vmIds, schedule: sched, storage, pool, keep, ...(group ? { updatedAt: group.updatedAt } : {}) };
+    const body = { name, vmIds, schedule: sched, storage, pool, keep, ...(needOtp ? { otp } : {}), ...(group ? { updatedAt: group.updatedAt } : {}) };
     const o = waitMs ? { timeoutMs: waitMs } : {};
     let r;
     try {
@@ -383,10 +388,14 @@ function GroupEdit({ tree, group, initialFilter, vms, byId, groupName, writable,
       // 브라우저 시한·504 — 서버는 등록·저장을 끝냈을 수 있다(실패로 단정하지 않는다) — 목록으로 돌아가 새로 읽는다
       if (outcomeUnknown(e)) { onSaved(`결과 모름: ${unknownOutcomeText('그룹 저장', e)}`, false, null, v0); return; }
       setResult({ reason: errText(e), ...(e?.body || {}) });
+      if (e?.body?.needOtp) setServerOtp(e.body.reasons || ['본인 OTP 필요']);
+      if (needOtp) setOtp('');   // 반증 F4: 서버가 OTP 를 확인한 뒤 실패했을 수 있다(1회용 — 같은 코드로 다시 누르면 실패 횟수만 올라 잠긴다)
       return;
     }
     if (!r?.ok) {
       setSaving('');
+      if (r?.needOtp) setServerOtp(r.reasons || ['본인 OTP 필요']);
+      if (needOtp) setOtp('');   // 쓴(또는 틀린) 코드를 남기면 다시 누를 때 실패 횟수만 오른다 — OTP 를 확인한 뒤의 실패(등록 0·409)도 같다(반증 F4)
       // 버그 점검 W9: 거부돼도 서버가 VM 을 등록했을 수 있다 — 목록을 다시 읽는다. 다른 화면이 먼저 고쳤으면(409) 목록으로
       if (r?.conflict) { onSaved(`${r.reason} 목록을 새로 읽었습니다 — 다시 ‘수정’ 을 눌러 주세요.`, false, null, v0); return; }
       setResult(r || { reason: '저장하지 못했습니다.' });
@@ -594,6 +603,15 @@ function GroupEdit({ tree, group, initialFilter, vms, byId, groupName, writable,
             <span className="muted" style={{ fontSize: 11.5 }}>풀 참고: 잡 정의(JobDefs)에 레벨별 풀(Full·Incremental Backup Pool)이 있으면 Bareos 가 그 풀을 먼저 쓸 수 있습니다(실환경 확인 전).</span>
           </section>
 
+          {needOtp && (
+            <section className="card" style={{ padding: 14, display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', gap: 6, minWidth: 0, borderColor: 'rgba(245,158,11,.45)' }}>
+              <b style={{ fontSize: 13.5 }}>본인 OTP 확인</b>
+              <span style={{ fontSize: 12.5, lineHeight: 1.5 }}>이 저장은 그룹 백업이 끝난 뒤 오래된 백업을 지울 수 있어 본인 OTP 가 필요합니다 — {(otpReasons.length ? otpReasons : serverOtp || []).join(' · ')}. 코드는 1회용이라 저장이 실패하면 새 코드를 넣으세요.</span>
+              <label style={{ display: 'grid', gap: 4, fontSize: 12, color: 'var(--text-dim)', maxWidth: 220 }}>OTP(6자리)
+                <input className="input" inputMode="numeric" autoComplete="one-time-code" value={otp} disabled={disabledAll} onChange={(e) => setOtp(e.target.value.replace(/\D/g, '').slice(0, 6))} aria-label="본인 OTP 6자리" style={{ minWidth: 0, fontSize: 15, letterSpacing: 2 }} />
+              </label>
+            </section>
+          )}
           {toRegister > 0 && <div className="muted" style={{ fontSize: 12.5 }}>저장하면 잡이 없는 {toRegister}대를 백업 대상으로 등록합니다(Director 스케줄 없이 — 그룹이 실행).</div>}
           {doubled.length > 0 && (
             <div className="banner warn" style={{ fontSize: 12.5 }}>
@@ -609,13 +627,14 @@ function GroupEdit({ tree, group, initialFilter, vms, byId, groupName, writable,
             </div>
           )}
           {issues.length > 0 && <div className="muted" style={{ fontSize: 12 }}>{issues.join(' · ')}</div>}
+          {issues.length === 0 && needOtp && !/^\d{6}$/.test(otp) && <div className="muted" style={{ fontSize: 12 }}>본인 OTP 6자리를 입력하면 저장할 수 있습니다.</div>}
           {saving && <div className="muted" style={{ fontSize: 12 }}>저장 중 — 새 VM 등록은 Director 응답을 기다립니다(엣지 대행 법인은 몇 분 걸릴 수 있습니다)</div>}
           <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', gap: 8 }}>
-            <button type="button" className="login-btn" style={{ padding: '11px 16px', fontSize: 14, fontWeight: 800 }} disabled={disabledAll || issues.length > 0} onClick={() => save(true)}>
+            <button type="button" className="login-btn" style={{ padding: '11px 16px', fontSize: 14, fontWeight: 800 }} disabled={disabledAll || issues.length > 0 || (needOtp && !/^\d{6}$/.test(otp))} onClick={() => save(true)}>
               {saving === 'run' ? '저장 · 백업 보내는 중…' : `저장하고 지금 백업 (${vmIds.length}대)`}
             </button>
             <div style={{ display: 'flex', gap: 8 }}>
-              <button type="button" className="logout-btn" style={{ flex: 1, padding: '9px 12px' }} disabled={disabledAll || issues.length > 0} onClick={() => save(false)}>{saving === 'save' ? '저장 중…' : '저장만'}</button>
+              <button type="button" className="logout-btn" style={{ flex: 1, padding: '9px 12px' }} disabled={disabledAll || issues.length > 0 || (needOtp && !/^\d{6}$/.test(otp))} onClick={() => save(false)}>{saving === 'save' ? '저장 중…' : '저장만'}</button>
               <button type="button" className="logout-btn" style={{ flex: 1, padding: '9px 12px' }} disabled={!!saving} onClick={onBack}>취소</button>
             </div>
           </div>

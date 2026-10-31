@@ -19,7 +19,9 @@ process.env.DATA_SOURCE = 'mock';
 process.env.AUTH_ENABLED = 'true';
 process.env.SSRF_ALLOW_LOOPBACK = 'true';
 
-fs.writeFileSync(path.join(tmp, 'users.json'), JSON.stringify({ users: [{ username: 'adm', role: 'admin' }] }));
+const { generateSecret, generateToken } = await import('../src/auth/totp.js');
+const SECRET = generateSecret();   // v2.831.1 보관 개수 저장의 본인 OTP 시험용(adm 만 등록 · noot 은 미등록)
+fs.writeFileSync(path.join(tmp, 'users.json'), JSON.stringify({ users: [{ username: 'adm', role: 'admin', totpEnabled: true, totpSecret: SECRET }, { username: 'noot', role: 'admin' }] }));
 const { startFakeDirector } = await import('./_fakeBareosDirector.js');
 const S = await import('../src/bareos/groupSchedule.js');
 
@@ -47,12 +49,13 @@ async function handle(cmd) {
 
 const USERS = {
   admin: { username: 'adm', role: 'admin', scope: null },
+  noot: { username: 'noot', role: 'admin', scope: null },
   op: { username: 'op', role: 'operator', scope: null },
   sadm: { username: 'sadm', role: 'admin', scope: { vcenters: ['vc-a'] } },
   wadm: { username: 'wadm', role: 'admin', scope: { writeVcenters: ['vc-b'] } },
   demo: { username: 'thedvcdemp', role: 'admin', demoGuest: true, scope: null },   // mock 모드 내장 데모 계정(요청 문맥 admin + demoGuest)
 };
-let srv; let base; let fd; let store; let registry; let groups; let runner;
+let srv; let base; let fd; let store; let registry; let groups; let runner; let runnerRetention;
 
 before(async () => {
   fd = await startFakeDirector({ name: 'portal', password: 'pw-1', handle });
@@ -62,6 +65,7 @@ before(async () => {
   registry = await import('../src/bareos/registry.js');
   groups = await import('../src/bareos/groups.js');
   runner = await import('../src/bareos/groupRunner.js');
+  runnerRetention = await import('../src/bareos/groupRetention.js');
   store.snapshot = {
     generatedAt: Date.now(), source: 'mock',
     vcenters: [{ id: 'vc-a', name: 'Seoul', host: 'https://vc-a.corp' }, { id: 'vc-b', name: 'Warsaw', host: 'https://vc-b.corp' }],
@@ -495,20 +499,60 @@ test('손상된 그룹 원장 — 보존 · 저장 503 · 예약 틱은 아무�
 });
 
 /* ───────── ⑦ v2.831 보관 개수 ───────── */
-const hrow = (jobid, name, level, st = 'T') => ({ jobid, name, type: 'B', level, jobstatus: st, jobbytes: 1000, starttime: `2026-10-${String(jobid).padStart(2, '0')} 02:10:00`, endtime: '' });
-test('⑦ v2.831 보관 개수 — 저장(1~365 · 비우면 제한 없음) · 보내지 않으면 그대로 · 틀린 값 400', async () => {
+// 카탈로그 시각(현지 · 시간대 없음) — 원장 잡 등록 뒤의 시각이어야 정리 대상이다(v2.831.1 ⑨ since). 실제 시각에서 분 단위로 떨어뜨린다
+const pad2 = (n) => String(n).padStart(2, '0');
+const catAt = (ms) => { const d = new Date(ms); return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())} ${pad2(d.getHours())}:${pad2(d.getMinutes())}:00`; };
+const H0 = Math.floor(Date.now() / 60_000) * 60_000 + 3_600_000;
+const hrow = (jobid, name, level, st = 'T', at = H0 + jobid * 60_000) => ({ jobid, name, type: 'B', level, jobstatus: st, jobbytes: 1000, starttime: catAt(at), endtime: '' });
+test('⑦ v2.831 보관 개수 — 저장(1~365 · 비우면 제한 없음) · 보내지 않으면 그대로 · 틀린 값 400 · v2.831.1 지울 범위가 넓어지는 저장만 본인 OTP', async () => {
   const g = groups.getGroup(G1);
   const body = (extra) => ({ name: g.name, vmIds: g.vmIds, schedule: g.schedule, storage: g.storage, pool: g.pool, ...extra });
-  let r = await call('admin', 'PUT', `/groups/${G1}`, body({ keep: 2, updatedAt: groups.getGroup(G1).updatedAt }));
+  // 코드 셋(now-1·now·now+1)은 검증 창 ±1 단계 안 — 단계 끝 15초 안이면 다음 단계까지 기다린다(bareosAutoSetup ⑤ 와 같은 이유)
+  const left = 30_000 - (Date.now() % 30_000);
+  if (left < 15_000) await new Promise((r) => setTimeout(r, left + 50));
+  const now = Math.floor(Date.now() / 30_000);
+  const [t1, t2, t3] = [now - 1, now, now + 1].map((counter) => generateToken(SECRET, { counter }));
+  // 처음 정함 → OTP 필요: 코드 없음(검증을 부르지 않음) · 틀린 코드 · 미등록 계정은 403 이고 저장하지 않는다
+  let r = await call('admin', 'PUT', `/groups/${G1}`, body({ keep: 2 }));
+  assert.equal(r.s, 403, r.t);
+  assert.equal(r.j.needOtp, true);
+  assert.match(r.j.reasons.join(), /처음 정함/);
+  assert.equal((await call('admin', 'PUT', `/groups/${G1}`, body({ keep: 2, otp: '000000' }))).s, 403);
+  const ne = await call('noot', 'PUT', `/groups/${G1}`, body({ keep: 2, otp: t1 }));
+  assert.equal(ne.s, 403); assert.equal(ne.j.needEnroll, true);
+  assert.equal(groups.getGroup(G1).keep ?? null, null, 'OTP 를 통과하지 못한 저장은 반영하지 않는다');
+  for (const bad of [0, 366, 1.5, 'abc', -1]) assert.equal((await call('admin', 'PUT', `/groups/${G1}`, body({ keep: bad, otp: t1 }))).s, 400, `${bad} — 입력 오류는 OTP 를 쓰기 전에 400`);
+  r = await call('admin', 'PUT', `/groups/${G1}`, body({ keep: 2, otp: t1, updatedAt: groups.getGroup(G1).updatedAt }));
   assert.equal(r.s, 200, r.t);
   assert.equal(r.j.group.keep, 2);
   assert.equal(r.j.group.keepText, '최근 2회 보관');
+  // OTP 없이 되는 저장: keep 을 보내지 않음(그대로) · 늘리기 · 제한 없음으로 풀기
   r = await call('admin', 'PUT', `/groups/${G1}`, body({}));
   assert.equal(r.s, 200, r.t);
   assert.equal(groups.getGroup(G1).keep, 2, '보관 개수를 보내지 않은 저장이 조용히 제한 없음으로 바꾸면 안 된다');
-  for (const bad of [0, 366, 1.5, 'abc', -1]) assert.equal((await call('admin', 'PUT', `/groups/${G1}`, body({ keep: bad }))).s, 400, String(bad));
+  assert.equal((await call('admin', 'PUT', `/groups/${G1}`, body({ keep: 5 }))).s, 200, '늘리기는 OTP 없이');
+  assert.equal((await call('admin', 'PUT', `/groups/${G1}`, body({ keep: 3 }))).s, 403, '줄이기는 OTP');
+  assert.equal((await call('admin', 'PUT', `/groups/${G1}`, body({ keep: 3, otp: t1 }))).s, 403, '쓴 코드는 다시 못 쓴다');
+  assert.equal((await call('admin', 'PUT', `/groups/${G1}`, body({ keep: 3, otp: t2 }))).s, 200);
+  assert.equal((await call('admin', 'PUT', `/groups/${G1}`, body({ keep: null }))).s, 200, '제한 없음으로 풀기는 OTP 없이');
+  assert.equal((await call('admin', 'PUT', `/groups/${G1}`, body({ keep: 2, otp: t3 }))).s, 200);
+  assert.equal(groups.getGroup(G1).keep, 2);
+  // 보관 개수가 있는 새 그룹은 OTP — 코드가 없으면 Director 에 잡을 등록하지 않는다(게이트가 등록 앞)
+  D.cmds.length = 0;
+  r = await call('admin', 'POST', '/groups', { vcenterId: 'vc-b', name: '보관 그룹', vmIds: ['vc-b:vm-9'], schedule: EVERY, keep: 7 });
+  assert.equal(r.s, 403, r.t);
+  assert.equal(r.j.needOtp, true);
+  assert.equal(D.cmds.filter((c) => c.startsWith('configure')).length, 0, 'OTP 를 통과하기 전에는 잡을 만들지 않는다');
   r = await call('admin', 'GET', '/groups/tree?vcenterId=vc-a');
   assert.deepEqual(r.j.keepLimits, { min: 1, max: 365, presets: [3, 7, 14, 30] });
+});
+
+test('⑦ v2.831.1 쓰는 순간에 다시 본다 — 그사이 보관 개수가 늘었으면 OTP 없는 저장을 409', () => {
+  const g = groups.getGroup(G1);
+  const { keepOtpReasons } = runnerRetention;
+  assert.throws(() => groups.updateGroup(G1, { name: g.name, vmIds: g.vmIds, schedule: g.schedule, storage: g.storage, pool: g.pool, keep: 1 },
+    { check: (cur, nv) => (keepOtpReasons(cur, nv).length ? '본인 OTP 가 필요합니다' : '') }), /본인 OTP/);
+  assert.equal(groups.getGroup(G1).keep, 2, '거부하면 바꾸지 않는다');
 });
 
 test('⑦ v2.831 정리 — 기준 Full 앞의 끝난 실행만 지운다 · Full 없는 잡은 지우지 않는다 · 다시 읽어 실제로 사라진 것만 셈 · 감사', async () => {
@@ -541,6 +585,14 @@ test('⑦ v2.831 정리 — 기준 Full 앞의 끝난 실행만 지운다 · Ful
     assert.equal(o2.deleted, 0);
     assert.equal(o2.notDeleted, 3, '4·5·6 을 보냈지만 남아 있다(7 은 실행 중이라 보내지 않는다)');
   } finally { D.ignoreDelete = false; }
+  // 반증 F1(v2.831.1): 원장 잡 등록 시각보다 먼저 시작한 행(같은 이름으로 다시 등록한 잡의 예전 이력)은 지우지 않는다
+  const jA = registry.jobDigests().find((j) => j.bareosJob === A);
+  D.hist.set(B, [hrow(31, B, 'F', 'T', jA.createdAt - 86_400_000), hrow(32, B, 'I', 'T', jA.createdAt - 3_600_000), hrow(33, B, 'F'), hrow(34, B, 'F'), hrow(35, B, 'F')]);
+  D.cmds.length = 0;
+  await runner.pruneGroup(G1);
+  const delB = D.cmds.filter((c) => c.startsWith('delete ')).join(' ');
+  assert.doesNotMatch(delB, /\b3[12]\b/, `등록 전 이력(31·32)은 지우지 않는다: ${delB}`);
+  assert.deepEqual(D.hist.get(B).map((r) => r.jobid).filter((x) => x === 31 || x === 32), [31, 32]);
   const { listAudit } = await import('../src/audit.js');
   const audit = listAudit({ limit: 50, q: '보관 정리' }).items || listAudit({ limit: 50, q: '보관 정리' });
   assert.ok(JSON.stringify(audit).includes('jobid 1,2,3'), '지운 jobid 를 감사에 남긴다');

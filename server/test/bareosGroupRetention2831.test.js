@@ -8,7 +8,7 @@
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { pruneSelection, normKeep, keepText, PRUNE_MAX_PER_JOB } from '../src/bareos/groupRetention.js';
+import { pruneSelection, normKeep, keepText, keepOtpReasons, PRUNE_MAX_PER_JOB } from '../src/bareos/groupRetention.js';
 import { OPS, MUTATING } from '../src/bareos/ops.js';
 import { sanitizeEdgeResult } from '../src/bareos/edgeResult.js';
 import { RESULT_MS } from '../src/bareos/edgeOps.js';
@@ -149,6 +149,11 @@ test('③ ops.pruneJobs — 지운 뒤 다시 읽어 실제로 사라진 jobid �
   assert.equal(out[0].ok, false);
   assert.equal(out[1].code, 'skipped');
   // 반증 F4: delete 를 보낸 뒤 다시 읽기가 끊기면 보낸 jobid 를 돌려준다(지웠는지 모름 — 감사에 남긴다)
+  // since 를 작업 표가 그대로 넘긴다(등록 전 행은 보내지 않는다)
+  const h5 = new Map([['pv-a', [R(1, 'F'), R(2, 'F'), R(3, 'F')]]]);
+  const s5 = fakeSession(h5);
+  out = await OPS.pruneJobs(s5, { items: [{ key: 0, job: 'pv-a', keep: 1, since: Date.parse('2026-10-03T00:00:00') }] });
+  assert.deepEqual(s5.cmds.filter((c) => c.startsWith('delete')), ['delete jobid=2'], `등록(10-03) 전에 시작한 1 은 지우지 않는다: ${s5.cmds.join(' | ')}`);
   const h4 = new Map([['pv-a', [R(1, 'F'), R(2, 'F')]]]);
   out = await OPS.pruneJobs(fakeSession(h4, { dieOn: 'relist' }), { items: [{ key: 0, job: 'pv-a', keep: 1 }] });
   assert.equal(out[0].ok, false);
@@ -171,4 +176,30 @@ test('④ 엣지 회신 정제 — 성공인데 지운 목록이 없으면 결�
   assert.equal(r.value[1].ok, false);
   assert.equal(r.value[1].code, 'unknown');
   assert.equal(r.value[2].message, 'denied');
+});
+
+test('⑤ v2.831.1 본인 OTP 판정 — 지울 범위가 넓어지는 저장만(새 그룹·처음 정함·줄임·기존 잡 VM 추가)', () => {
+  const g = { keep: 7, vmIds: ['a', 'b'] };
+  assert.deepEqual(keepOtpReasons(null, { keep: null, vmIds: ['a'] }), [], '제한 없음 새 그룹은 OTP 없이');
+  assert.deepEqual(keepOtpReasons(null, { keep: 14, vmIds: ['a'] }), ['보관 개수(최근 14회)를 정한 새 그룹']);
+  assert.deepEqual(keepOtpReasons({ keep: null, vmIds: ['a'] }, { keep: 3, vmIds: ['a'] }), ['보관 개수를 처음 정함(최근 3회)']);
+  assert.deepEqual(keepOtpReasons(g, { keep: 3, vmIds: ['a', 'b'] }), ['보관 개수를 줄임(7 → 3회)']);
+  assert.deepEqual(keepOtpReasons(g, { keep: 7, vmIds: ['a', 'b'] }), []);
+  assert.deepEqual(keepOtpReasons(g, { keep: 9, vmIds: ['a', 'b'] }), [], '늘리기는 OTP 없이');
+  assert.deepEqual(keepOtpReasons(g, { keep: null, vmIds: ['a', 'b'] }), [], '제한 없음으로 풀기는 OTP 없이');
+  assert.deepEqual(keepOtpReasons(g, { keep: undefined, vmIds: ['a', 'b'] }), [], 'keep 을 보내지 않으면 그대로');
+  assert.deepEqual(keepOtpReasons(g, { keep: undefined, vmIds: ['a', 'b', 'c', 'd'] }, (id) => id === 'c'), ['백업 기록이 있을 수 있는 VM 1대를 더함'], '잡 없는 새 VM(d)은 세지 않는다');
+  assert.deepEqual(keepOtpReasons(g, { keep: 3, vmIds: ['a', 'c'] }, () => true), ['보관 개수를 줄임(7 → 3회)'], '줄이면 그 까닭 하나로');
+  assert.deepEqual(keepOtpReasons({ keep: null, vmIds: [] }, { keep: undefined, vmIds: ['c'] }), [], '제한 없음 그룹에 VM 추가는 OTP 없이');
+});
+
+test('⑨ v2.831.1 반증 F1 — 원장 잡 등록 시각(since)보다 먼저 시작한 행·시각 모름은 지우지도 세지도 않는다', () => {
+  const t = (d) => 1_700_000_000_000 + d * 86_400_000;
+  const rows = [R(1, 'F', 'T', { startedAt: t(1) }), R(2, 'I', 'T', { startedAt: t(2) }), R(3, 'F', 'f', { startedAt: null }),
+    R(10, 'F', 'T', { startedAt: t(10) }), R(11, 'I', 'T', { startedAt: t(11) }), R(12, 'F', 'T', { startedAt: t(12) })];
+  assert.deepEqual(pruneSelection(rows, 1, 'pv-a').deletable, [1, 2, 3, 10, 11], 'since 가 없으면 예전처럼');
+  const s = pruneSelection(rows, 1, 'pv-a', { since: t(9) });
+  assert.deepEqual(s.deletable, [10, 11], '등록(9일) 전 행 1·2 와 시각 모름 3 은 지우지 않는다');
+  assert.equal(s.good, 3);
+  assert.deepEqual(pruneSelection(rows, 2, 'pv-a', { since: t(11) }).deletable, [], '등록 뒤 성공이 2개뿐이면 지우지 않는다');
 });

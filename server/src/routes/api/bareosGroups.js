@@ -2,7 +2,8 @@
 // 도구 키 bareos-backup(관리자 전용 — 경로 첫 마디 규약)의 '백업 그룹' 탭. 범위: 그룹은 vCenter(= 법인) 귀속 — 조회 밖 404 → 쓰기 밖 403(bareosAccess 하나).
 // 스케줄은 포탈이 돌린다(bareos/groupRunner.js — Bareos 에 잡 스케줄 수정 명령이 없어 '나중에 수정' 을 지키려면 이 방식뿐이다).
 // 그룹 VM 중 잡이 없는 VM 은 저장 때 **Director 스케줄 없이** 등록한다(그룹 스케줄과 Director 스케줄이 겹쳐 두 번 돌지 않게).
-import { requireRole } from '../../auth/auth.js';
+import { requireRole, verifyUserOtp, getUser } from '../../auth/auth.js';
+import { config } from '../../config.js';
 import { isDemoGuest } from '../../auth/demoGuest.js';
 import { store } from '../../store.js';
 import { logAudit } from '../../audit.js';
@@ -14,7 +15,7 @@ import { jobDigests, MAX_JOBS, registryLoadError } from '../../bareos/registry.j
 import { listGroups, getGroup, addGroup, updateGroup, deleteGroup, checkGroupInput, groupsLoadError, MAX_MEMBERS, MAX_GROUPS, FIRES_KEEP } from '../../bareos/groups.js';
 import { nextSlot, scheduleText, slotKey, CATCHUP_MS, LEVELS } from '../../bareos/groupSchedule.js';
 import { queueGroupRun, groupRunning, groupPruning } from '../../bareos/groupRunner.js';
-import { keepText, KEEP_MIN, KEEP_MAX, KEEP_PRESETS } from '../../bareos/groupRetention.js';
+import { keepText, keepOtpReasons, KEEP_MIN, KEEP_MAX, KEEP_PRESETS } from '../../bareos/groupRetention.js';
 import { bareosVmView } from '../../bareos/vmView.js';
 import { getMarks, marksUnreadable } from '../../veeam/backupMarks.js';
 import { isSystemVm } from '../../veeam/backupStatus.js';
@@ -118,6 +119,26 @@ function precheck(req, res, vcenterId, { selfId = '' } = {}) {
   return v;
 }
 
+/**
+ * v2.831.1 보관 개수 저장의 본인 OTP(사용자 결정) — 지워질 수 있는 범위가 넓어지는 저장만(groupRetention.keepOtpReasons).
+ * 입력·범위·원장 검사(precheck)를 **통과한 뒤**, Director 에 닿기 전(잡 등록 전)에 본다 — 1회용 코드를 입력 실수로 태우지 않고,
+ * OTP 가 틀리면 아무것도 등록·저장하지 않는다. 코드를 보내지 않았으면 검증을 부르지 않는다(실패 횟수를 올리지 않게 — 화면이 입력 칸을 연다).
+ * @returns {{ ok: true, used: boolean } | null}  null = 응답을 이미 보냈다
+ */
+function keepOtpGate(req, res, prev, v, vcenterId) {
+  const jobs = new Set(jobDigests().filter((j) => j.vcenterId === vcenterId).map((j) => j.vmId));
+  const reasons = keepOtpReasons(prev, v, (id) => jobs.has(id));
+  if (!reasons.length || !config.auth.enabled) return { ok: true, used: false };
+  const name = req.user?.username || '';
+  const why = reasons.join(' · ');
+  if (!getUser(name)?.totpEnabled) { res.status(403).json({ ok: false, needOtp: true, needEnroll: true, reasons, reason: `이 저장(${why})은 본인 OTP 가 필요합니다 — OTP 가 등록된 계정만 할 수 있습니다. 사용자 관리에서 OTP 를 등록하세요.` }); return null; }
+  const code = String(req.body?.otp ?? '').trim();
+  if (!code) { res.status(403).json({ ok: false, needOtp: true, reasons, reason: `이 저장(${why})은 오래된 백업을 지울 수 있어 본인 OTP 가 필요합니다 — OTP 6자리를 입력하세요.` }); return null; }
+  const r = verifyUserOtp(name, code);
+  if (!r.ok) { res.status(403).json({ ok: false, needOtp: true, reasons, reason: `OTP 인증 실패 — ${r.reason}` }); return null; }
+  return { ok: true, used: true };
+}
+
 /** :id 로 그룹을 찾고 범위를 판정한다(조회 밖 404 → 쓰기 밖 403). 실패면 응답을 보내고 null. */
 function groupFor(req, res, { write = true } = {}) {
   const g = getGroup(String(req.params.id || ''));
@@ -205,6 +226,7 @@ api.post('/tools/bareos-backup/groups', adminOnly, async (req, res) => {
   const v = precheck(req, res, vcenterId); if (!v) return;
   const si = siteInfo(vcenterId, effectiveSettings());
   if (!si.site) return res.status(409).json({ ok: false, reason: '이 vCenter 가 어느 법인 Director 에도 묶여 있지 않습니다 — 설정 › 법인별 Director 에서 먼저 묶으세요.' });
+  const og = keepOtpGate(req, res, null, v, vcenterId); if (!og) return;
   const reg = await registerMissing(req, vcenterId, v.vmIds, v.schedule.level);
   if (!reg.members.length) return res.status(409).json({ ok: false, reason: '백업 대상으로 등록된 VM 이 하나도 없어 그룹을 만들지 않았습니다 — VM 별 사유를 보세요.', registered: reg.registered, excluded: reg.excluded });
   let g;
@@ -215,7 +237,7 @@ api.post('/tools/bareos-backup/groups', adminOnly, async (req, res) => {
     audit(req, 'Bareos 백업 그룹 만들기', `${vcenterId}/${v.name}`, `실패 — ${String(e?.message || e).slice(0, 160)}`);
     return res.status(e?.code === 'conflict' ? 409 : e?.code === 'unavailable' ? 503 : 400).json({ ok: false, reason: `${String(e?.message || e).slice(0, 400)}${reg.registered.some((r) => r.ok) ? ' (이번에 등록한 백업 대상은 남아 있습니다 — 백업 대상 탭)' : ''}`, registered: reg.registered });
   }
-  audit(req, 'Bareos 백업 그룹 만들기', `${vcenterId}/${g.name}`, `VM ${g.vmIds.length}대 · ${scheduleText(g.schedule)} · ${keepText(g.keep)}${g.storage ? ` · 스토리지 ${g.storage}` : ''}${g.pool ? ` · 풀 ${g.pool}` : ''}${reg.excluded.length ? ` · 등록 실패로 뺀 VM ${reg.excluded.length}대` : ''}`);
+  audit(req, 'Bareos 백업 그룹 만들기', `${vcenterId}/${g.name}`, `VM ${g.vmIds.length}대 · ${scheduleText(g.schedule)} · ${keepText(g.keep)}${g.storage ? ` · 스토리지 ${g.storage}` : ''}${g.pool ? ` · 풀 ${g.pool}` : ''}${reg.excluded.length ? ` · 등록 실패로 뺀 VM ${reg.excluded.length}대` : ''}${og.used ? ' · 본인 OTP 확인' : ''}`);
   res.status(201).json({ ok: true, group: groupView(g), registered: reg.registered, excluded: reg.excluded, doubleScheduled: g.schedule.enabled ? doubleScheduled(vcenterId, g.vmIds) : [] });
 });
 
@@ -228,11 +250,15 @@ api.put('/tools/bareos-backup/groups/:id', adminOnly, async (req, res) => {
     return res.status(409).json({ ok: false, reason: `그사이 다른 화면에서 ‘${g0.name}’ 그룹을 고쳤습니다(${g0.updatedBy || '?'}) — 새로 고친 뒤 다시 저장하세요(그대로 덮어쓰면 그쪽에서 넣은 VM 이 빠질 수 있습니다).`, conflict: true });
   }
   const v = precheck(req, res, g0.vcenterId, { selfId: g0.id }); if (!v) return;
+  const og = keepOtpGate(req, res, g0, v, g0.vcenterId); if (!og) return;
   const reg = await registerMissing(req, g0.vcenterId, v.vmIds, v.schedule.level);
   if (!reg.members.length) return res.status(409).json({ ok: false, reason: '백업 대상으로 등록된 VM 이 하나도 없어 저장하지 않았습니다 — VM 별 사유를 보세요.', registered: reg.registered, excluded: reg.excluded });
   let g;
   try {
-    g = updateGroup(g0.id, { ...v, vmIds: reg.members }, { by: req.user?.username || '', expectUpdatedAt: expect });
+    const jobsNow = new Set(jobDigests().filter((j) => j.vcenterId === g0.vcenterId).map((j) => j.vmId));
+    const check = (cur, nv) => (!og.used && config.auth.enabled && keepOtpReasons(cur, nv, (id) => jobsNow.has(id) && !reg.registered.some((r) => r.ok && r.vmId === id)).length
+      ? '그사이 다른 화면에서 이 그룹의 보관 개수·VM 이 바뀌어 이 저장에는 본인 OTP 가 필요합니다 — 새로 고친 뒤 다시 저장하세요.' : '');
+    g = updateGroup(g0.id, { ...v, vmIds: reg.members }, { by: req.user?.username || '', expectUpdatedAt: expect, check });
   } catch (e) {
     audit(req, 'Bareos 백업 그룹 고치기', `${g0.vcenterId}/${g0.name}`, `실패 — ${String(e?.message || e).slice(0, 160)}`);
     return res.status(e?.code === 'conflict' ? 409 : e?.code === 'unavailable' ? 503 : 400).json({ ok: false, reason: String(e?.message || e).slice(0, 400), registered: reg.registered });
@@ -245,7 +271,7 @@ api.put('/tools/bareos-backup/groups/:id', adminOnly, async (req, res) => {
   const added = g.vmIds.filter((id) => !g0.vmIds.includes(id)).length;
   const removed = g0.vmIds.filter((id) => !g.vmIds.includes(id)).length;
   audit(req, 'Bareos 백업 그룹 고치기', `${g.vcenterId}/${g.name}`,
-    `${g0.name !== g.name ? `이름 ${g0.name} → ${g.name} · ` : ''}VM ${g.vmIds.length}대(+${added} −${removed}) · ${scheduleText(g.schedule)} · ${(g0.keep ?? null) !== (g.keep ?? null) ? `보관 ${keepText(g0.keep ?? null)} → ${keepText(g.keep ?? null)}` : keepText(g.keep ?? null)}${g.storage ? ` · 스토리지 ${g.storage}` : ''}${g.pool ? ` · 풀 ${g.pool}` : ''}`);
+    `${g0.name !== g.name ? `이름 ${g0.name} → ${g.name} · ` : ''}VM ${g.vmIds.length}대(+${added} −${removed}) · ${scheduleText(g.schedule)} · ${(g0.keep ?? null) !== (g.keep ?? null) ? `보관 ${keepText(g0.keep ?? null)} → ${keepText(g.keep ?? null)}` : keepText(g.keep ?? null)}${g.storage ? ` · 스토리지 ${g.storage}` : ''}${g.pool ? ` · 풀 ${g.pool}` : ''}${og.used ? ' · 본인 OTP 확인' : ''}`);
   res.json({ ok: true, group: groupView(g), registered: reg.registered, excluded: reg.excluded, doubleScheduled: g.schedule.enabled ? doubleScheduled(g.vcenterId, g.vmIds) : [] });
 });
 

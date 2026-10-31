@@ -63,7 +63,7 @@
   전문·남긴 것은 `docs/rules/audits.md` 'Bareos v2.825.1 버그 점검 확정분'.
 - **v2.828 작업 결과 창(웹 `bareosText`·`BareosBackupTool LogModal`)**: 크기 표기는 `decBytesText` 하나 — 10진 · 앞 4자리 **버림**(Bareos `edit_uint64_with_suffix` 와 같은 규칙.
   반올림하면 같은 창의 보고서 값과 0.1 씩 어긋났다) · 데모 보고(`mock/demo/bareos.js demoReport`)도 같은 규칙, 속도는 1000 B · 탭 본문 높이 고정(`LOG_PANE_H`). 회귀 `bareosJobDetail2828.test.js`.
-- **v2.830 백업 그룹**(`groups`·`groupSchedule`·`groupRunner`·`jobLocks` · `bareosGroups2830`): 스케줄은 포탈이 실행(그룹 잡은 Director 스케줄 없이 등록) · 회차는 **보내기 전에** 한 틱 한 번의 쓰기로 기록 · VM 은 그룹 하나 · 같은 Director 는 차례로 · 대상 잠금 공용. v2.831 보관 개수(`groupRetention` — 카탈로그 삭제)는 실행이 끝난 뒤 기준 Full 앞만·순서 어긋나면 안 지움. 전문은 `docs/rules/audits.md` 'Bareos v2.830'·'v2.831' 절.
+- **v2.830 백업 그룹**(`groups`·`groupSchedule`·`groupRunner`·`jobLocks` · `bareosGroups2830`): 스케줄은 포탈이 실행(그룹 잡은 Director 스케줄 없이 등록) · 회차는 **보내기 전에** 한 틱 한 번의 쓰기로 기록 · VM 은 그룹 하나 · 같은 Director 는 차례로 · 대상 잠금 공용. v2.831 보관 개수(`groupRetention` — 카탈로그 삭제)는 실행이 끝난 뒤 기준 Full 앞만·순서 어긋나면 안 지움 · 넓히는 저장은 본인 OTP(v2.831.1). 전문은 `docs/rules/audits.md` 'Bareos v2.830'·'v2.831' 절.
 - 실환경 미확인(추정 — `tools/bareos-probe.js` 로 확인할 것): Node↔Director TLS-PSK 협상 · 잡 수준 FdPluginOptions 와 FileSet 플러그인 문자열 병합 ·
   `.bvfs_get_jobids` JSON 모양 · Profile ACL 지시어 이름 · `list jobs days=N` · 25.x `.jobs` 의 enabled 칸(master 소스 기준 — 없으면 다시 끄기를 하지 않는다) · Migration 행의 시작 시각.
 - **v2.828 조회 화면**(통합 `bareos-summary` · 법인별 `bareos-detail` — 조회 전용 키, adminOnly 아님 · `bareosViews2828`): 판정은 `vmView.js` 하나(웹 `bareosViewText.js` 와 대조) ·

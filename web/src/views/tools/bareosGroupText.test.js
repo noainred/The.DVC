@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   scheduleText, draftIssues, toggleDay, GROUP_FILTERS, groupRowMatches, groupFilterCounts, pickable, buildGroupTree, checkState,
   fireText, fireTone, nextText, storageText, NEW_SCHEDULE,
-  isDaily, setCadence, scheduleParts, keepText, stepKeep, keepMeaning, keepParts, fireKeepBadge, untilText, memberResults, resultBadge, folderSummary, sizeSum,
+  isDaily, setCadence, scheduleParts, keepText, keepOtpReasons, NEW_GROUP_KEEP, stepKeep, keepMeaning, keepParts, fireKeepBadge, untilText, memberResults, resultBadge, folderSummary, sizeSum,
 } from './bareosGroupText.js';
 
 // 서버 bareosGroups2830 ① 과 같은 입력·같은 글자(두 벌이라 대조한다)
@@ -157,5 +157,23 @@ describe('v2.831 시안 — 스케줄·보관·실행 이력', () => {
     expect(folderSummary([{ folder: 'B' }, { folder: 'A' }, { folder: '' }])).toBe('A 외 1곳');
     expect(folderSummary([])).toBe('—');
     expect(sizeSum([{ gb: 10 }, { gb: null }, { gb: 0 }, {}])).toEqual({ gb: 10, unknown: 2 });
+  });
+});
+
+describe('v2.831.1 본인 OTP 판정 — 서버 groupRetention.keepOtpReasons 와 같은 입력·같은 글자', () => {
+  it('지울 범위가 넓어지는 저장만 · 새 그룹 기본값은 제한 없음', () => {
+    expect(NEW_GROUP_KEEP).toBe(null);
+    const g = { keep: 7, vmIds: ['a', 'b'] };
+    expect(keepOtpReasons(null, { keep: null, vmIds: ['a'] })).toEqual([]);
+    expect(keepOtpReasons(null, { keep: 14, vmIds: ['a'] })).toEqual(['보관 개수(최근 14회)를 정한 새 그룹']);
+    expect(keepOtpReasons({ keep: null, vmIds: ['a'] }, { keep: 3, vmIds: ['a'] })).toEqual(['보관 개수를 처음 정함(최근 3회)']);
+    expect(keepOtpReasons(g, { keep: 3, vmIds: ['a', 'b'] })).toEqual(['보관 개수를 줄임(7 → 3회)']);
+    expect(keepOtpReasons(g, { keep: 7, vmIds: ['a', 'b'] })).toEqual([]);
+    expect(keepOtpReasons(g, { keep: 9, vmIds: ['a', 'b'] })).toEqual([]);
+    expect(keepOtpReasons(g, { keep: null, vmIds: ['a', 'b'] })).toEqual([]);
+    expect(keepOtpReasons(g, { keep: undefined, vmIds: ['a', 'b'] })).toEqual([]);
+    expect(keepOtpReasons(g, { keep: undefined, vmIds: ['a', 'b', 'c', 'd'] }, (id) => id === 'c')).toEqual(['백업 기록이 있을 수 있는 VM 1대를 더함']);
+    expect(keepOtpReasons(g, { keep: 3, vmIds: ['a', 'c'] }, () => true)).toEqual(['보관 개수를 줄임(7 → 3회)']);
+    expect(keepOtpReasons({ keep: null, vmIds: [] }, { keep: undefined, vmIds: ['c'] })).toEqual([]);
   });
 });

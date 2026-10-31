@@ -256,7 +256,7 @@ export async function pruneGroup(groupId, { trigger = 'timer', signal = null } =
         const chunk = list.slice(i, i + RUN_JOBS_MAX);
         let res;
         try {
-          res = await onDirector(dir, 'pruneJobs', { items: chunk.map((x, k) => ({ key: k, job: x.job.bareosJob, keep: g.keep })) },
+          res = await onDirector(dir, 'pruneJobs', { items: chunk.map((x, k) => ({ key: k, job: x.job.bareosJob, keep: g.keep, ...(Number.isFinite(x.job.createdAt) ? { since: x.job.createdAt } : {}) })) },
             { trigger: trigger === 'timer' ? 'timer' : 'manual', signal: signal || AbortSignal.timeout(PRUNE_DEADLINE_MS) });
         } catch (e) {
           out.failed += chunk.length;
