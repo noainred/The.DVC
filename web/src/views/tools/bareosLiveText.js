@@ -48,6 +48,7 @@ export function corpBadge(c) {
   if (!c) return { key: 'none', text: '—', tone: 'muted' };
   if (!(c.running > 0) && !(c.waiting > 0)) return { key: 'idle', text: '실행 없음', tone: 'muted' };
   if (!c.live) return { key: 'pending', text: '조회 전', tone: 'muted' };
+  if (c.stuck > 0) return { key: 'stuck', text: `멈춤 의심 ${c.stuck}`, tone: 'warn' };   // v2.833.1 — FD 조회는 됐고 3시간 넘게 진행 보고 없음
   if (!c.live.ok) return { key: 'fail', text: '조회 실패', tone: 'bad' };
   if (c.slow > 0) return { key: 'slow', text: `느림 ${c.slow}`, tone: 'warn' };
   if (!(c.running > 0)) return { key: 'wait', text: '대기만', tone: 'run' };
@@ -55,12 +56,13 @@ export function corpBadge(c) {
 }
 
 /** 법인 거르기 — 실행 중(대기 포함) · 느림 · 조회 실패 · 전체. */
-export const CORP_FILTERS = Object.freeze([['active', '실행 중'], ['slow', '느림'], ['fail', '조회 실패'], ['all', '전체']]);
+export const CORP_FILTERS = Object.freeze([['active', '실행 중'], ['stuck', '멈춤 의심'], ['slow', '느림'], ['fail', '조회 실패'], ['all', '전체']]);
 export function corpMatches(c, f) {
   const b = corpBadge(c).key;
   switch (f) {
     case 'active': return c.running > 0 || c.waiting > 0;
-    case 'slow': return b === 'slow';
+    case 'stuck': return c.stuck > 0;
+    case 'slow': return b === 'slow' || (c.slow > 0 && b === 'stuck');
     case 'fail': return b === 'fail';
     default: return true;
   }
@@ -133,3 +135,24 @@ export const levelWord = (l) => ({ F: 'Full', I: 'Incremental', D: 'Differential
 /** 실행 주체 — 그룹 예약 · 그룹 · 수동 · Bareos 스케줄. */
 export const triggerText = (r) => ({ 'group-schedule': '그룹 예약', group: '그룹 실행', schedule: 'Bareos 스케줄', manual: '수동' }[r?.trigger] || (r?.by ? '수동' : '—'));
 export const STATE_TEXT = Object.freeze({ running: '실행 중', queued: '대기', waiting: '대기' });
+
+/* ── v2.833.1 Director 상태 문구 · 멈춤 의심 ── */
+/** Director 상태 사유 키(서버 liveParse.dirReasonOf) → 우리말. */
+export const DIR_REASON_TEXT = Object.freeze({
+  running: '실행 중', mount: '마운트 대기', volume: '볼륨 대기', maxjobs: '동시 실행 상한', storage: '스토리지 대기', client: 'FD 대기',
+  priority: '우선순위 대기', starttime: '시작 시각 대기', created: '실행 대기', blocked: '막힘', done: '끝남(반영 전)', other: '기타', unknown: '사유 모름',
+});
+export const reasonText = (k) => DIR_REASON_TEXT[k] || DIR_REASON_TEXT.other;
+/** 사유별 도움말 — 사람이 볼 곳(설정 지시어 이름은 Bareos 문서 기준). */
+export const REASON_HINT = Object.freeze({
+  maxjobs: 'Client·Storage·Job 의 Maximum Concurrent Jobs 를 확인하세요',
+  mount: 'SD 에서 볼륨 마운트를 기다립니다 — Storage 장치·볼륨 상태를 확인하세요',
+  volume: '쓸 수 있는 볼륨이 없습니다 — 풀의 볼륨·라벨·보존 기간을 확인하세요',
+  storage: 'SD 접속·장치를 확인하세요',
+  client: 'FD 접속(방화벽·FD 서비스)을 확인하세요',
+  unknown: 'Director 상태에 없는 대기(조회 실패 · 막 보냄)',
+});
+/** 멈춤 의심 까닭(서버 runningRow.stuck). */
+export const STUCK_TEXT = Object.freeze({ 'no-report': '3시간 넘게 FD 진행 보고 없음', zero: '3시간 넘게 속도 0' });
+/** 대기 행 — 오래 기다린 순(보낸 시각 오름차순 · 모르면 뒤). */
+export const sortWaiting = (rows) => [...(Array.isArray(rows) ? rows : [])].sort((a, b) => (isFin(a.since) ? a.since : Infinity) - (isFin(b.since) ? b.since : Infinity));

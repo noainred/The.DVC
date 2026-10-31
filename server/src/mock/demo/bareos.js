@@ -256,7 +256,24 @@ export function demoCall(cmd, settings) {
   return null;
 }
 
-/** 데모 FD 상태(평문) — 실행 중(C·R) 데모 실행만. 숫자는 천 단위 쉼표(Bareos edit_uint64_with_commas 모양). */
+/** 데모 Director 상태(평문 · v2.833.1) — 실행 중 잡 표(dird ua_status.cc 모양 · 추정). 막 시작한 실행은 'is waiting execution'. */
+export function demoDirStatus(now = Date.now()) {
+  const lines = ['bareos-dir Version: 25.0.4 (데모)', 'Running Jobs:', ' JobId  Type Level     Files     Bytes  Name              Status', '======================================================================'];
+  let any = false;
+  for (const [jobid, r] of S.runs) {
+    if (r.canceled || S.deleted.has(jobid)) continue;
+    const el = now - r.startAt;
+    if (el >= 30_000) continue;
+    any = true;
+    const st = el < 4_000 ? 'is waiting execution' : 'is running';
+    lines.push(`${String(jobid).padStart(6)}  ${r.type === 'R' ? 'Rest' : 'Back'} ${r.level === 'F' ? 'Full' : 'Incr'}          0         0  ${r.name}.${catTime(r.startAt).replace(' ', '_').replace(/:/g, '.')}_01 ${st}`);
+  }
+  if (!any) lines.push('No Jobs running.');
+  lines.push('====');
+  return lines.join('\n');
+}
+
+/** 데모 FD 상태(평문) — 실행 중(R) 데모 실행만(4초 미만은 Director 의 대기). 숫자는 천 단위 쉼표(Bareos edit_uint64_with_commas 모양). */
 export function demoFdStatus(client, now = Date.now()) {
   const comma = (n) => Math.round(n).toLocaleString('en-US');
   const lines = [`${client} Version: 25.0.4 (데모)`, 'Running Jobs:'];
@@ -265,14 +282,14 @@ export function demoFdStatus(client, now = Date.now()) {
     if (r.type !== 'B' || r.canceled || S.deleted.has(jobid)) continue;
     if (r.client && r.client !== client) continue;
     const el = now - r.startAt;
-    if (el >= 30_000) continue;
+    if (el < 4_000 || el >= 30_000) continue;   // 막 보낸 실행은 Director 만 안다('is waiting execution' — demoDirStatus 와 맞춘다)
     any = true;
     const sec = Math.max(1, el / 1000);
-    const bytes = el < 4_000 ? 0 : r.bytes * Math.min(1, el / 30_000);
+    const bytes = r.bytes * Math.min(1, el / 30_000);
     const ave = bytes / sec;
     lines.push(`JobId ${jobid} Job ${r.name}.${catTime(r.startAt).replace(' ', '_').replace(/:/g, '.')}_01 is running.`);
     lines.push(`    ${r.level === 'F' ? 'Full' : r.level === 'D' ? 'Differential' : 'Incremental'} Backup Job started: ${catTime(r.startAt)}`);
-    lines.push(`    Files=${comma(el < 4_000 ? 0 : 3)} Bytes=${comma(bytes)} AveBytes/sec=${comma(ave)} LastBytes/sec=${comma(ave * (0.9 + (jobid % 5) / 20))} Errors=0`);
+    lines.push(`    Files=${comma(3)} Bytes=${comma(bytes)} AveBytes/sec=${comma(ave)} LastBytes/sec=${comma(ave * (0.9 + (jobid % 5) / 20))} Errors=0`);
   }
   if (!any) lines.push('No Jobs running.');
   lines.push('====', '', 'Terminated Jobs:', ' JobId  Level    Files      Bytes   Status   Finished        Name', '====');
@@ -287,6 +304,7 @@ export function demoSession(settings) {
     call: async (cmd) => demoCall(cmd, settings),
     // v2.833 진행 현황판: `status client=` 는 평문(FD 상태)을 돌려준다 — 실제와 같은 모양(filed/status.cc · 추정)으로 데모 실행 중 잡을 쓴다
     callRaw: async (cmd) => {
+      if (String(cmd) === 'status director') return demoDirStatus();
       const m = /^status client=(\S+)$/.exec(String(cmd));
       if (!m) return JSON.stringify({ result: demoCall(cmd, settings) });
       return demoFdStatus(m[1]);

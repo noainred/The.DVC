@@ -63,7 +63,7 @@
   전문·남긴 것은 `docs/rules/audits.md` 'Bareos v2.825.1 버그 점검 확정분'.
 - **v2.828 작업 결과 창**(크기 표기 `decBytesText` 하나 · 버림) — 전문 `docs/rules/audits.md` 'Bareos v2.833' 절 끝.
 - **v2.830 백업 그룹**(`groups`·`groupSchedule`·`groupRunner`·`jobLocks` · `bareosGroups2830`): 스케줄은 포탈이 실행(그룹 잡은 Director 스케줄 없이 등록) · 회차는 **보내기 전에** 한 틱 한 번의 쓰기로 기록 · VM 은 그룹 하나 · 같은 Director 는 차례로 · 대상 잠금 공용. v2.831 보관 개수(`groupRetention` — 카탈로그 삭제)는 실행이 끝난 뒤 기준 Full 앞만·순서 어긋나면 안 지움 · 넓히는 저장은 본인 OTP(v2.831.1). 전문은 `docs/rules/audits.md` 'Bareos v2.830'·'v2.831' 절.
-- **v2.833 진행 현황판**(`liveStatus`·`liveParse` · `bareosLive2833`): 화면이 열린 동안만 `status client=` · Director 마다 시한 · 흐름은 법인마다 · 모름은 null. 전문 audits.md 'v2.833'.
+- **v2.833·834 진행 현황판**(`liveStatus`·`liveParse` · `bareosLive2833`): 화면이 열린 동안만 `status client=`·`status director` · Director 마다 시한 · 흐름은 법인마다 · 모름은 null · 멈춤 의심은 FD 조회 성공일 때만. 전문 audits.md 'v2.833'·'v2.834'.
 - 실환경 미확인(추정 — `tools/bareos-probe.js` 로 확인할 것): Node↔Director TLS-PSK 협상 · 잡 수준 FdPluginOptions 와 FileSet 플러그인 문자열 병합 ·
   `.bvfs_get_jobids` JSON 모양 · Profile ACL 지시어 이름 · `list jobs days=N` · 25.x `.jobs` 의 enabled 칸(master 소스 기준 — 없으면 다시 끄기를 하지 않는다) · Migration 행의 시작 시각.
 - **v2.828 조회 화면**(통합 `bareos-summary` · 법인별 `bareos-detail` — 조회 전용 키, adminOnly 아님 · `bareosViews2828`): 판정은 `vmView.js` 하나(웹 `bareosViewText.js` 와 대조) ·

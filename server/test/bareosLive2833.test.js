@@ -100,12 +100,23 @@ test('② 엣지 회신 정제 — 음수·문자열 숫자는 null · jobid 없
 /* ───────── 원장 · 폴러 · 라우트(가짜 Director) ───────── */
 const NOW = Date.now();
 const MIN = 60_000;
-const D = { cmds: [], fdText: FD_TEXT, failStatus: false };
+const DIR_TEXT = [
+  'bareos-dir Version: 24.0.1',
+  'Running Jobs:',
+  ' JobId  Type Level     Files     Bytes  Name              Status',
+  '======================================================================',
+  '   501  Back Full          0         0  vm-j1.2026-10-31_02.00.00_05 is running',
+  '   502  Back Incr          0         0  vm-j2.2026-10-31_02.00.01_06 is running',
+  '   503  Back Incr          0         0  vm-j3.2026-10-31_02.00.02_07 is waiting on max Client jobs',
+  '====',
+].join('\n');
+const D = { cmds: [], fdText: FD_TEXT, dirText: DIR_TEXT, failStatus: false, failDir: false };
 let fd; let srv; let base; let REG; let LIVE;
 const USERS = {
   admin: { username: 'adm', role: 'admin', scope: null },
   op: { username: 'op', role: 'operator', scope: null },
   sadm: { username: 'sadm', role: 'admin', scope: { vcenters: ['vc-b'] } },
+  sva: { username: 'sva', role: 'admin', scope: { vcenters: ['vc-a'] } },
   demo: { username: 'thedvcdemp', role: 'admin', demoGuest: true, scope: null },
 };
 const job = (id, vmId, vmName, o = {}) => ({
@@ -117,6 +128,7 @@ before(async () => {
   fd = await startFakeDirector({ name: 'portal', password: 'pw-1', handle: async (cmd) => {
     D.cmds.push(cmd);
     if (cmd.startsWith('status client=')) return D.failStatus ? { error: ['Client resource not found'] } : D.fdText;
+    if (cmd === 'status director') return D.failDir ? { error: ['denied'] } : D.dirText;
     if (cmd.startsWith('llist') || cmd.startsWith('list')) return { jobs: [] };
     if (cmd === '.jobs') return { jobs: [] };
     return { error: [`unknown ${cmd}`] };
@@ -192,7 +204,8 @@ test('④ liveTick — 실행 중 잡이 있는 Director 만 FD 상태를 묻고
   const { effectiveSettings } = await import('../src/bareos/service.js');
   assert.ok(!liveTargets(REG.jobDigests(), effectiveSettings(), false).some((t) => t.jobs.some((x) => x.job.demo)), '데모 잡은 실제 Director 에 묻지 않는다');
   assert.ok(liveTargets(REG.jobDigests(), effectiveSettings(), true).every((t) => t.jobs.every((x) => x.job.demo)), '데모 Director 일 때는 데모 잡만');
-  assert.deepEqual(D.cmds.filter((c) => c.startsWith('status')), ['status client=kr-fd'], 'FD 는 하나(잡·법인 FD 가 같다)');
+  assert.deepEqual(D.cmds.filter((c) => c.startsWith('status')), ['status director', 'status client=kr-fd'], 'Director 상태 한 번 + FD 는 하나(잡·법인 FD 가 같다)');
+  assert.equal(LIVE.liveSnapshot('dir_kr', 'vc-a').live.dir.jobs.get(503).reason, 'maxjobs');
   const snap = LIVE.liveSnapshot('dir_kr', 'vc-a');
   assert.equal(snap.live.ok, true);
   assert.equal(snap.live.jobs.get(501).lastRate, 168_000_000);
@@ -257,6 +270,82 @@ test('⑤ 라우트 — admin 전용 · 실행·대기·느림·오늘 합계 ·
   const sc = await get('sadm', '/live');
   assert.equal(sc.s, 200);
   assert.equal(sc.j.corps.length, 0);
+  // v2.833.1 Director 상태 · 대기 사유 묶음 · 진단 원문(전체 범위 관리자만)
+  assert.deepEqual(c.rows.find((x) => x.jobid === 503).dirStatus, { text: 'is waiting on max Client jobs', reason: 'maxjobs' });
+  assert.deepEqual(c.waitGroups.map((g) => [g.reason, g.n]), [['maxjobs', 1]]);
+  assert.match(c.diag.dir.raw, /Running Jobs:/);
+  assert.equal(c.diag.dir.n, 3);
+  assert.equal(c.diag.fd[0].client, 'kr-fd');
+  assert.match(c.diag.fd[0].raw, /JobId 501/);
+  assert.ok(c.diag.fd[0].raw.length <= 4096);
+  const sv = await get('sva', '/live');
+  assert.equal(sv.j.corps.length, 1);
+  assert.equal(sv.j.corps[0].diag, undefined, '범위 계정에는 진단 원문 없음');
+  const dg = await get('demo', '/live');
+  if (dg.s === 200) assert.ok(dg.j.corps.every((x) => x.diag === undefined), '데모 계정에는 진단 원문 없음(캐시로 새지 않음 — 키에 진단 여부)');
+});
+
+test('⑦ v2.833.1 Director 상태 파서 — 형식 두 가지 · 사유 분류 · 실행 중 절만 · 긴 줄 선형', () => {
+  const r = LP.parseDirStatus(DIR_TEXT + '\nTerminated Jobs:\n   400  Back Full 1 1 old.2026-10-30_02.00.00_01 has terminated');
+  assert.deepEqual(r.map((x) => [x.jobid, x.name, x.reason]), [[501, 'vm-j1', 'running'], [502, 'vm-j2', 'running'], [503, 'vm-j3', 'maxjobs']]);
+  assert.deepEqual(LP.parseDirStatus(' JobId Level   Name                       Status\n    62 Increme  pv-x.2026-10-31_08.08.00_05 is waiting for a mount request\n').map((x) => [x.jobid, x.reason]), [[62, 'mount']]);
+  for (const [t, k] of [['is waiting on Storage "File"', 'storage'], ['is waiting for an appendable Volume', 'volume'], ['is waiting on max Storage jobs', 'maxjobs'], ['is waiting execution', 'created'], ['is waiting for higher priority jobs to finish', 'priority'], ['is blocked', 'blocked'], ['is doing something new', 'other']]) assert.equal(LP.dirReasonOf(t), k, t);
+  assert.equal(LP.dirReasonOf(''), '');
+  // 실행 중이 비어 있으면 뒤의 끝난 잡 표를 실행 중으로 읽지 않는다
+  assert.deepEqual(LP.parseDirStatus('Running Jobs:\nNo Jobs running.\n====\n\nTerminated Jobs:\n   400  Back Full  1 1 old.2026-10-30_02.00.00_01 has terminated\n'), []);
+  assert.equal(LP.parseDirStatusRaw(JSON.stringify({ result: { running: [{ jobid: 9, job: 'pv-q.2026-10-31_02.00.00_01', status: 'is waiting on max Client jobs' }] } }))[0].reason, 'maxjobs');
+  const big = `Running Jobs:\n${`    1 ${'a '.repeat(900)}\n`.repeat(300)}`;
+  const a = process.hrtime.bigint(); LP.parseDirStatus(big); assert.ok(Number(process.hrtime.bigint() - a) < 5e8, '긴 줄 300개가 0.5초 안');
+  assert.equal(LP.rawHead('a\u0001b'.repeat(3000)).length, 4096);
+});
+
+test('⑦ v2.833.1 판정 — Director 상태로 실행/대기 · 멈춤 의심 · 지난 평균은 마지막 끝난 실행으로 바로', async () => {
+  const { runningRow, lastGoodRate, rateOfRun, waitGroups } = await import('../src/routes/api/bareosLive.js');
+  const j = { vmId: 'v', vmName: 'x', lastRate: null, lastRun: null };
+  const now = Date.now();
+  const run = { jobid: 1, state: 'running', since: now - 4 * 3_600_000 };
+  assert.equal(runningRow(j, run, null, true, { now, dirRow: { status: 'is waiting on max Client jobs', reason: 'maxjobs' } }).state, 'waiting', '원장이 실행 중이어도 Director 가 시작 전이라고 하면 대기');
+  assert.equal(runningRow(j, { ...run, state: 'queued' }, null, true, { now, dirRow: { status: 'is running', reason: 'running' } }).state, 'running');
+  const st = runningRow(j, run, null, true, { now, dirRow: { status: 'is waiting for a mount request', reason: 'mount' } });
+  assert.equal(st.state, 'running', '마운트 대기는 이미 시작한 잡 — 실행 중 목록에 두고 상태 문구로 알린다');
+  assert.equal(st.stuck, 'no-report', '3시간 넘게 FD 진행 보고 없음 → 멈춤 의심');
+  assert.equal(runningRow(j, run, { jobid: 1, lastRate: 0 }, true, { now }).stuck, 'zero');
+  assert.equal(runningRow(j, run, null, false, { now }).stuck, undefined, 'FD 조회 실패면 판정하지 않는다');
+  assert.equal(runningRow(j, { ...run, since: now - 2 * 3_600_000 }, null, true, { now }).stuck, undefined, '3시간 전에는 판정하지 않는다');
+  assert.equal(runningRow(j, run, { jobid: 1, lastRate: 5 }, true, { now }).stuck, undefined);
+  // 지난 평균 — lastRate 가 없으면 원장의 마지막 끝난 성공으로
+  const L = { jobid: 5, status: 'T', bytes: 600_000_000, startedAt: now - 20 * MIN, endedAt: now - 10 * MIN };
+  assert.deepEqual(lastGoodRate({ lastRun: L }), { bps: 1_000_000, at: now - 10 * MIN });
+  assert.equal(lastGoodRate({ lastRun: { ...L, status: 'R' } }), null, '실행 중 행은 기준이 아니다');
+  assert.equal(lastGoodRate({ lastRun: { ...L, status: 'f' } }), null);
+  assert.equal(lastGoodRate({ lastRun: { ...L, bytes: null } }), null, '바이트를 모르면 지어내지 않는다');
+  assert.equal(lastGoodRate({ lastRate: { bps: 7, at: 1 }, lastRun: L }).bps, 7, 'lastRate 가 먼저');
+  assert.equal(rateOfRun({ ...L, endedAt: L.startedAt }), null);
+  const g = waitGroups([{ since: 30, dirStatus: { reason: 'maxjobs', text: 'a' } }, { since: 10, dirStatus: { reason: 'maxjobs', text: 'a' } }, { since: 20, dirStatus: null }]);
+  assert.deepEqual(g.map((x) => [x.reason, x.n, x.oldest]), [['maxjobs', 2, 10], ['unknown', 1, 20]]);
+});
+
+test('⑦ v2.833.1 ops.liveStatus director — Director 상태 실패가 FD 조회를 막지 않음 · 원문 4KB · 엣지 정제', async () => {
+  const s = { async callRaw(cmd) { if (cmd === 'status director') return JSON.stringify({ jsonrpc: '2.0', error: { code: 1, message: 'denied' } }); return FD_TEXT; } };
+  const out = await OPS.liveStatus(s, { clients: ['kr-fd'], director: true });
+  assert.equal(out.director.ok, false);
+  assert.equal(out.director.code, 'jsonrpc');
+  assert.equal(out.clients[0].ok, true);
+  assert.equal(out.clients[0].jobs.length, 3);
+  // Director 상태에서 세션째 끊기면(closed) FD 는 보내지 않고 건너뜀
+  const sent = [];
+  const s3 = { async callRaw(cmd) { sent.push(cmd); if (cmd === 'status director') { const e = new Error('closed'); e.code = 'closed'; throw e; } return FD_TEXT; } };
+  const o3 = await OPS.liveStatus(s3, { clients: ['kr-fd'], director: true });
+  assert.deepEqual(sent, ['status director']);
+  assert.equal(o3.clients[0].code, 'skipped');
+  const s2 = { async callRaw(cmd) { return cmd === 'status director' ? DIR_TEXT + 'x'.repeat(9000) : FD_TEXT; } };
+  const o2 = await OPS.liveStatus(s2, { clients: ['kr-fd'], director: true });
+  assert.equal(o2.director.jobs.length, 3);
+  assert.equal(o2.director.raw.length, 4096);
+  const r = sanitizeEdgeResult('liveStatus', { ok: true, value: { director: { ok: true, raw: 'y'.repeat(9000), jobs: [{ jobid: 3, status: 'is running', reason: 'running' }, { status: 'x' }] }, clients: [{ client: 'a', ok: true, raw: 'z', jobs: [] }] } });
+  assert.equal(r.value.director.raw.length, 4096);
+  assert.equal(r.value.director.jobs.length, 1);
+  assert.equal(r.value.clients[0].raw, 'z');
 });
 
 test('⑤ 데모 계정은 사람이 등록한 Director 의 상태 조회를 깨우지 않는다', async () => {

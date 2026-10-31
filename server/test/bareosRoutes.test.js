@@ -95,8 +95,8 @@ before(async () => {
     hosts: [{ id: 'vc-a:host-1', vcenterId: 'vc-a', name: 'esx-a1', cluster: 'CL-A' }],
     datastores: [{ id: 'vc-a:ds-1', vcenterId: 'vc-a', name: 'ds-a1' }],
     vms: [
-      { id: 'vc-a:vm-1', vcenterId: 'vc-a', name: 'web-01', powerState: 'POWERED_ON', snapshotCount: 0, vcDcPath: 'DC-A', folderPath: '/web' },
-      { id: 'vc-a:vm-2', vcenterId: 'vc-a', name: 'tpl', template: true, powerState: 'POWERED_OFF', vcDcPath: 'DC-A', folderPath: '/' },
+      { id: 'vc-a:vm-1', vcenterId: 'vc-a', name: 'web-01', powerState: 'POWERED_ON', snapshotCount: 0, vcDcPath: 'DC-A', folderPath: '/web', guestOS: 'Microsoft Windows Server 2022 (64-bit)' },
+      { id: 'vc-a:vm-2', vcenterId: 'vc-a', name: 'tpl', template: true, powerState: 'POWERED_OFF', vcDcPath: 'DC-A', folderPath: '/', guestOS: 'unknown' },
       { id: 'vc-a:vm-3', vcenterId: 'vc-a', name: 'vapp-child', powerState: 'POWERED_ON', vcDcPath: null, folderPath: null },
       { id: 'vc-a:vm-4', vcenterId: 'vc-a', name: 'bad:name', powerState: 'POWERED_ON', vcDcPath: 'DC-A', folderPath: '/' },
       { id: 'vc-b:vm-9', vcenterId: 'vc-b', name: 'db-09', powerState: 'POWERED_ON', snapshotCount: 0, vcDcPath: 'DC-B', folderPath: '/' },
@@ -190,6 +190,10 @@ test('④ 등록 후보: 범위 밖 404 · 템플릿·위치 없음·금지 글�
   assert.match(by.tpl.reason, /템플릿/);
   assert.match(by['vapp-child'].reason, /데이터센터·폴더/);
   assert.match(by['bad:name'].reason, /콜론/);
+  // v2.834 게스트 OS — 분류는 서버 · 'unknown'·빈 값은 모름(null — 기타로 세지 않는다)
+  assert.deepEqual([by['web-01'].os, by['web-01'].guestOS], ['windows', 'Microsoft Windows Server 2022 (64-bit)']);
+  assert.deepEqual([by.tpl.os, by.tpl.guestOS], [null, null]);
+  assert.deepEqual([by['vapp-child'].os, by['vapp-child'].guestOS], [null, null]);
   assert.equal(r.j.writable, true);
   assert.equal((await call('wadm', 'GET', '/vm-candidates?vcenterId=vc-b')).j.writable, false);
 });
@@ -475,6 +479,12 @@ test('⑩ v2.822 확정 결함: C3 동시 등록·원장 못 씀·원장 손상 
   assert.deepEqual(lst.j.jobs.find((x) => x.id === j6.id).drift, ['이름']);
   vm6.name = 'app-06';
   assert.equal((await call('admin', 'GET', '')).j.jobs.find((x) => x.id === j6.id).drift, undefined);
+  // v2.834 — 목록의 OS 는 지금 인벤토리 기준(등록 때 값을 원장에 굳히지 않는다)
+  assert.equal((await call('admin', 'GET', '')).j.jobs.find((x) => x.id === j6.id).os, null);
+  vm6.guestOS = 'Other 4.x or later Linux (64-bit)';
+  const withOs = (await call('admin', 'GET', '')).j.jobs.find((x) => x.id === j6.id);
+  assert.deepEqual([withOs.os, withOs.guestOS], ['linux', 'Other 4.x or later Linux (64-bit)']);
+  delete vm6.guestOS;
 
   // I8 — 실제 원장에 남은 데모 대상: 실제 Director 에 run·enable 을 보내지 않고, 지우기는 원장에서만
   const dj = registry.addJob({ vcenterId: 'vc-a', vmId: 'vc-a:demo-1', vmName: 'demo-1', dc: 'DC-A', folder: '/', bareosJob: 'pv-demo-vm-1', client: 'kr-fd', storage: 'kr-sd', pool: 'P', demo: true });

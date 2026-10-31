@@ -87,25 +87,29 @@ export async function liveTick({ now = Date.now(), deadlineMs = LIVE_DEADLINE_MS
     await poolSettled(targets, LIVE_CONCURRENCY, async (t) => {
       const d = directorById(t.directorId, settings);
       if (!demo && d?.agent && hasPending(t.directorId, 'liveStatus')) { skipped.push(t.directorId); return; }   // ② 엣지 대기열에 쌓지 않는다
-      if (!t.clients.length) { _live.set(t.directorId, { at: now, ok: false, code: 'no-client', clients: {}, jobs: new Map() }); return; }
       asked.push(t.directorId);
       let res;
       try {
-        res = await onDirector(t.directorId, 'liveStatus', { clients: t.clients }, { trigger: 'timer', signal: AbortSignal.timeout(deadlineMs) });
+        // v2.833.1: FD 가 없어도 Director 상태(잡마다 상태 문구)는 묻는다
+        res = await onDirector(t.directorId, 'liveStatus', { clients: t.clients, director: true }, { trigger: 'timer', signal: AbortSignal.timeout(deadlineMs) });
       } catch (e) {
         const prev = _live.get(t.directorId);
-        _live.set(t.directorId, { at: now, ok: false, code: e?.code || 'error', clients: prev?.clients || {}, jobs: new Map() });
+        _live.set(t.directorId, { at: now, ok: false, code: e?.code || 'error', clients: prev?.clients || {}, jobs: new Map(), dir: { ok: false, code: e?.code || 'error', jobs: new Map(), raw: '' } });
         for (const [vc, list] of byVc(t.jobs)) pushHist(vc, { at: now, rate: null, jobs: list.length });
         return;
       }
       const jobs = new Map();
       const clients = {};
       for (const c of res?.clients || []) {
-        clients[c.client] = c.ok ? { ok: true } : { ok: false, code: c.code || 'error' };
+        clients[c.client] = c.ok ? { ok: true, raw: c.raw || '', n: (c.jobs || []).length } : { ok: false, code: c.code || 'error' };
         for (const x of c.jobs || []) if (x?.jobid) jobs.set(x.jobid, x);
       }
       const anyOk = Object.values(clients).some((c) => c.ok);
-      _live.set(t.directorId, { at: Date.now(), ok: anyOk, code: anyOk ? '' : (Object.values(clients)[0]?.code || 'error'), clients, jobs });
+      const d0 = res?.director;
+      const dir = d0?.ok ? { ok: true, code: '', jobs: new Map((d0.jobs || []).filter((x) => x?.jobid).map((x) => [x.jobid, x])), raw: d0.raw || '' }
+        : { ok: false, code: d0?.code || (d0 ? 'error' : 'unknown'), jobs: new Map(), raw: '' };
+      const code = anyOk ? '' : (!t.clients.length ? 'no-client' : (Object.values(clients)[0]?.code || 'error'));
+      _live.set(t.directorId, { at: Date.now(), ok: anyOk, code, clients, jobs, dir });
       // 흐름 점(법인마다): 그 법인의 실행 중 잡 중 FD 가 아는 잡의 지금 속도 합(모르는 잡만 있으면 null — 0 이 아니다)
       for (const [vc, list] of byVc(t.jobs)) {
         let rate = 0; let known = 0;
@@ -132,10 +136,13 @@ export function touchLive(now = Date.now()) {
 }
 export const liveActive = () => !!_timer;
 
-/** 화면용 사본 — Director 의 마지막 조회(jobs: Map) · 그 법인(vCenter)의 흐름. */
+/** 화면용 사본 — Director 의 마지막 조회(FD 행 jobs: Map · Director 상태 dir.jobs: Map · 진단 원문) · 그 법인(vCenter)의 흐름. */
 export function liveSnapshot(dir, vcenterId = '') {
   const l = _live.get(dir);
-  return { live: l ? { at: l.at, ok: l.ok, code: l.code, jobs: l.jobs } : null, hist: (_hist.get(vcenterId) || []).map((p) => ({ ...p })) };
+  return {
+    live: l ? { at: l.at, ok: l.ok, code: l.code, jobs: l.jobs, dir: l.dir || null, clients: l.clients || {} } : null,
+    hist: (_hist.get(vcenterId) || []).map((p) => ({ ...p })),
+  };
 }
 
 export const _liveBusyForTest = () => _busy;

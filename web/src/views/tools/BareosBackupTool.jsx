@@ -14,7 +14,7 @@ import BareosGroupsTab from './BareosGroupsTab.jsx';
 import BareosLiveTab from './BareosLiveTab.jsx';
 import {
   stateBadge, levelLabel, bytesText, whenText, runCell, directorLine, directorStatus, directorChipTitle, outcomeUnknown, unknownOutcomeText, withRelayWait, targetLocks, RESTORE_MODE_LABEL, restoreLine, candidateSummary, driftText, restorePointsNote,
-  folderOptions, inFolder, pickCap, bulkSummary,
+  folderOptions, inFolder, pickCap, bulkSummary, OS_FILTERS, osKey, osLabel, osBadgeCls, osMatches, osCounts,
   parseJobReport, reportCards, REPORT_KEYS, issueHint, storeRatio, reportText, reportBytes, reportValue,
   issueTone, ISSUE_TONE_LABEL, decBytesText, reportSizeText, elapsedKo, durKo, pctText, volumeNames, clockOf,
   classifyLogLine, filterLogLines, splitHit, parseJobDetail, jobTimeline, LOG_WHO_LABEL,
@@ -96,6 +96,7 @@ export default function BareosBackupTool() {
 function TargetsTab({ d, reload, handoff }) {
   const [vc, setVc] = useState('');
   const [dirF, setDirF] = useState('');   // v2.823 법인 Director 필터(상단 칩)
+  const [osF, setOsF] = useState('');     // v2.834 게스트 OS(Windows · Linux · 기타 · 모름)
   const [q, setQ] = useState('');
   const [adding, setAdding] = useState(() => !!handoff?.current);
   const [busyIds, setBusyIds] = useState(() => new Set());   // W11: 처리 중 잠금은 그 대상만
@@ -116,7 +117,9 @@ function TargetsTab({ d, reload, handoff }) {
   const dirs = useMemo(() => d.directors || [], [d.directors]);
   const dirName = (id) => dirs.find((x) => x.id === id)?.name || '—';
   useEffect(() => { if (dirF && !dirs.some((x) => x.id === dirF)) setDirF(''); }, [dirF, dirs]);
-  const rows = d.jobs.filter((j) => (!vc || j.vcenterId === vc) && (!dirF || j.directorId === dirF) && (!q || `${j.vmName} ${j.folder} ${j.bareosJob}`.toLowerCase().includes(q.toLowerCase())));
+  const baseRows = d.jobs.filter((j) => (!vc || j.vcenterId === vc) && (!dirF || j.directorId === dirF) && (!q || `${j.vmName} ${j.folder} ${j.bareosJob}`.toLowerCase().includes(q.toLowerCase())));
+  const osN = osCounts(baseRows);   // 다른 조건으로 거른 뒤의 OS 별 수(칩 숫자)
+  const rows = baseRows.filter((j) => osMatches(j, osF));
 
   // v2.824 검토(W3·W5): 엣지 대행 Director 는 서버가 더 오래 기다린다(API 값) · 결과 모름(시한·504)은 실패로 단정하지 않는다
   const mut = (j, kind) => withRelayWait({}, dirs.find((x) => x.id === j.directorId), d.relayLimits, kind);
@@ -160,6 +163,15 @@ function TargetsTab({ d, reload, handoff }) {
           {vcs.map((v) => <option key={v} value={v}>{v}</option>)}
         </Select>
         <SearchBox value={q} onChange={setQ} placeholder="VM · 폴더 · 잡 이름" style={{ width: 240, maxWidth: '100%' }} />
+        <span style={{ ...ROW, gap: 6 }} role="group" aria-label="게스트 OS 필터">
+          <span className="muted" style={{ fontSize: 12 }}>OS</span>
+          {OS_FILTERS.filter(([k]) => !k || k === 'windows' || k === 'linux' || osN[k] > 0 || osF === k).map(([k, l]) => (
+            <button key={k || 'all'} type="button" className={`tab${osF === k ? ' active' : ''}`} style={{ padding: '4px 12px', fontSize: 12 }} aria-pressed={osF === k} onClick={() => setOsF(osF === k ? '' : k)}>
+              {/* 고른 칩(파란 바탕)에서는 회색 숫자가 흐리다 — 글자색을 따르고 옅게만 */}
+              {l} <span className={osF === k ? undefined : 'muted'} style={osF === k ? { opacity: 0.8 } : undefined}>{osN[k]}</span>
+            </button>
+          ))}
+        </span>
         <span className="muted" style={{ fontSize: 12 }}>백업 대상 {d.jobs.length}대</span>
         <div style={{ flexGrow: 1 }} />
         <button type="button" className="login-btn" style={{ flex: 'none', padding: '8px 16px' }} disabled={!d.configured || !!d.registryLoadError} onClick={() => setAdding(true)}>+ 백업 대상 추가</button>
@@ -185,7 +197,7 @@ function TargetsTab({ d, reload, handoff }) {
               const lk = targetLocks(j, { busy, running, hasRun: !!c.jobid });   // G12·G13: 잠긴 버튼은 사유를 말한다(쓰기 범위 밖 포함)
               return (
                 <tr key={j.id} style={{ opacity: j.enabled ? 1 : 0.6 }}>
-                  <td data-sort={j.vmName}><b>{j.vmName}</b>{!j.enabled && <span className="badge gray" style={{ marginLeft: 6 }}>비활성</span>}{j.missingInDirector && <span className="badge red" style={{ marginLeft: 6 }} title="Director 의 잡 목록에 없습니다(누가 정의 파일을 지웠을 수 있습니다)">Director 에 없음</span>}{j.demo && <span className="badge amber" style={{ marginLeft: 6 }}>데모</span>}{j.drift && <span className="badge amber" style={{ marginLeft: 6 }} title={driftText(j.drift)}>{j.drift === 'missing' ? '인벤토리에 없음' : '등록 뒤 바뀜'}</span>}</td>
+                  <td data-sort={j.vmName}><b>{j.vmName}</b><span className={`badge ${osBadgeCls(osKey(j))}`} style={{ marginLeft: 6, fontSize: 10 }} title={j.guestOS || '게스트 OS 모름(인벤토리에 없거나 vCenter 에 OS 가 비어 있음)'}>{osLabel(osKey(j))}</span>{!j.enabled && <span className="badge gray" style={{ marginLeft: 6 }}>비활성</span>}{j.missingInDirector && <span className="badge red" style={{ marginLeft: 6 }} title="Director 의 잡 목록에 없습니다(누가 정의 파일을 지웠을 수 있습니다)">Director 에 없음</span>}{j.demo && <span className="badge amber" style={{ marginLeft: 6 }}>데모</span>}{j.drift && <span className="badge amber" style={{ marginLeft: 6 }} title={driftText(j.drift)}>{j.drift === 'missing' ? '인벤토리에 없음' : '등록 뒤 바뀜'}</span>}</td>
                   <td data-sort={dirName(j.directorId)} style={{ fontSize: 12.5 }}>{dirName(j.directorId)}</td>
                   <td className="muted">{j.vcenterId}</td>
                   <td className="muted" style={{ fontSize: 12 }}><div style={{ maxWidth: 220, whiteSpace: 'normal', overflowWrap: 'anywhere' }}>{j.dc} · {j.folder}</div></td>
@@ -245,6 +257,7 @@ function AddForm({ d, initial = null, onInitialUsed, onClose, onChanged }) {
   const [candErr, setCandErr] = useState(null);
   const [q, setQ] = useState('');
   const [folder, setFolder] = useState('');
+  const [osF, setOsF] = useState('');   // v2.834 게스트 OS
   const [sel, setSel] = useState(() => new Set());
   const [level, setLevel] = useState(d.defaults?.level || 'Incremental');
   const [busy, setBusy] = useState(false);
@@ -259,10 +272,12 @@ function AddForm({ d, initial = null, onInitialUsed, onClose, onChanged }) {
     if (!vc) return;
     fetchJson(`${BASE}/vm-candidates`, { vcenterId: vc }).then((r) => { if (g === gen.current) setCand(r); }).catch((e) => { if (g === gen.current) setCandErr(e); });
   }, [vc, rev]);
-  useEffect(() => { setSel(new Set()); setFolder(''); setResult(null); setErr(null); }, [vc]);
+  useEffect(() => { setSel(new Set()); setFolder(''); setOsF(''); setResult(null); setErr(null); }, [vc]);
   const all = useMemo(() => cand?.items || [], [cand]);
   const folders = useMemo(() => folderOptions(all), [all]);
-  const items = all.filter((x) => inFolder(x, folder) && (!q || x.name.toLowerCase().includes(q.toLowerCase())));
+  const baseItems = all.filter((x) => inFolder(x, folder) && (!q || x.name.toLowerCase().includes(q.toLowerCase())));
+  const osN = osCounts(baseItems);
+  const items = baseItems.filter((x) => osMatches(x, osF));
   // G10: 법인 Director 콘솔 접속값이 덜 됐으면 등록이 409 로 끝난다 — 미리 잠근다(서버가 ready·missing 을 준다 · 옛 응답이면 막지 않는다)
   const dirNotReady = cand?.director && cand.director.ready === false;
   const pickable = (x) => !!cand?.writable && !dirNotReady && x.eligible && !x.registered;
@@ -326,6 +341,10 @@ function AddForm({ d, initial = null, onInitialUsed, onClose, onChanged }) {
               <option value="">전체 폴더</option>
               {folders.map((f) => <option key={f.value} value={f.value}>{f.label}</option>)}
             </Select>
+            <label htmlFor="bareos-add-os" className="muted" style={{ fontSize: 12 }}>OS</label>
+            <Select id="bareos-add-os" className="input" sort={false} value={osF} onChange={(e) => setOsF(e.target.value)} style={{ ...INP, width: 'auto', minWidth: 130, maxWidth: '100%' }}>
+              {OS_FILTERS.map(([k, l]) => <option key={k || 'all'} value={k}>{l} ({osN[k]})</option>)}
+            </Select>
             <SearchBox value={q} onChange={setQ} placeholder="VM 이름" style={{ width: 200, maxWidth: '100%' }} />
           </>
         )}
@@ -346,14 +365,15 @@ function AddForm({ d, initial = null, onInitialUsed, onClose, onChanged }) {
             <span className="muted" style={{ fontSize: 12 }}>{sel.size}대 선택 · 한 번에 최대 {cap}대{cap < (cand.maxBulk || 0) ? `(원장 남은 자리 ${cand.jobsLeft}개)` : ''}</span>
           </div>
           <div className="table-wrap" style={{ maxHeight: '36vh' }}>
-            <STable minWidth={640} limit={500} wrap={false}>
-              <thead><tr><th data-nosort>선택</th><th>VM</th><th>데이터센터 · 폴더</th><th>상태</th><th>등록 가능</th></tr></thead>
+            <STable minWidth={760} limit={500} wrap={false}>
+              <thead><tr><th data-nosort>선택</th><th>VM</th><th>OS</th><th>데이터센터 · 폴더</th><th>상태</th><th>등록 가능</th></tr></thead>
               <tbody>
-                {items.length === 0 && <tr><td colSpan={5} className="center muted" style={{ padding: 14 }}>조건에 맞는 VM 이 없습니다.</td></tr>}
+                {items.length === 0 && <tr><td colSpan={6} className="center muted" style={{ padding: 14 }}>조건에 맞는 VM 이 없습니다.</td></tr>}
                 {items.map((x) => (
                   <tr key={x.id} style={{ opacity: pickable(x) ? 1 : 0.6 }}>
                     <td><input type="checkbox" id={`bareos-pick-${x.id}`} aria-label={`${x.name} 선택`} disabled={!pickable(x) || (!sel.has(x.id) && sel.size >= cap)} checked={sel.has(x.id)} onChange={() => toggle(x)} /></td>
                     <td><label htmlFor={`bareos-pick-${x.id}`}>{x.name}</label></td>
+                    <td data-sort={`${osKey(x)} ${x.guestOS || ''}`} style={{ fontSize: 12 }}><span className={`badge ${osBadgeCls(osKey(x))}`} style={{ fontSize: 10 }}>{osLabel(osKey(x))}</span> <span className="muted">{x.guestOS || ''}</span></td>
                     <td className="muted" style={{ fontSize: 12 }}>{x.dc ?? '—'} · {x.folder ?? '—'}</td>
                     <td className="muted" style={{ fontSize: 12 }}>{x.template ? '템플릿' : x.powerState === 'POWERED_ON' ? '켜짐' : x.powerState === 'POWERED_OFF' ? '꺼짐' : '—'}</td>
                     <td style={{ fontSize: 12 }}>{x.registered ? <span className="badge blue">이미 대상</span> : x.eligible ? <span className="badge green">가능</span> : <span className="muted">{x.reason}</span>}</td>
