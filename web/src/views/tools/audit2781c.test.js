@@ -110,12 +110,17 @@ describe('v2.781 C-I2 주의가 필요한 곳', () => {
     expect(JSON.stringify(att)).not.toMatch(/`/);
   });
 
-  it('화면 — KPI 는 summaryKpis 하나(백업 중) · v2.836 정책 KPI 는 summaryPolicyKpis 하나', () => {
-    // v2.836(백업 메뉴 개편 1-b — 사용자 요청 + 시안 ①): Summary 의 '주의가 필요한 곳' 목록과 법인별 표(백업 중 칸)는 법인 › 폴더 › VM 트리 표로 바뀌었다.
-    //   attentionList · runningCell 판정은 그대로 남아 위 테스트가 고정한다(다른 화면이 다시 쓸 때를 위해).
+  it('화면 — KPI 는 summaryPolicyKpis 하나 · 결과가 오래된 Veeam 서버가 있으면 실행 수는 하한(≥ — v2.781 B-B1 규칙을 v2.837 칸이 이어받는다)', async () => {
+    // v2.836(백업 메뉴 개편 1-b)·v2.837(시안 ① 6칸): Summary 의 '주의가 필요한 곳' 목록과 법인별 표(백업 중 칸)는 법인 › 폴더 › VM 트리 표로 바뀌었다.
+    //   attentionList · runningCell · summaryKpis 판정은 그대로 남아 위 테스트가 고정한다(다른 화면이 다시 쓸 때를 위해).
     const src = fs.readFileSync(new URL('./BackupSummaryTool.jsx', import.meta.url), 'utf8');
-    expect(src).toMatch(/summaryKpis\(t,/);
     expect(src).toMatch(/summaryPolicyKpis\(t,/);
     expect(src).not.toMatch(/pctOf\(n, t\.vm\)/);
+    const { summaryPolicyKpis } = await import('./backupSummaryText.js');
+    const pa = { n: 3, on: 3, pol: { veeam: 1, bareos: 0, ssh: 0, none: 0, check: 2 }, polUnk: 0, unprot: 0, unver: 0, run: 2, brun: 1, bwait: 0, rpo: {}, r24: { ok: 0, warn: 0, fail: 0 }, win: {} };
+    expect(summaryPolicyKpis({ vcenters: 1, pa, runningUnknown: 0 }).run.value).toBe('3');
+    const k = summaryPolicyKpis({ vcenters: 1, pa, runningUnknown: 2 }).run;
+    expect(k.value).toBe('≥3');
+    expect(k.sub).toMatch(/Veeam ≥2 · Bareos 1 · .*Veeam 모름 2곳/);
   });
 });

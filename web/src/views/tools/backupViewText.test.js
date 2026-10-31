@@ -227,8 +227,9 @@ describe('v2.784 백업 표시 — 중요도·백업 필요·메모', async () =
     expect(det).toMatch(/load\(true\)/);
     expect(det).toMatch(/const r = await putJson\('\/tools\/backup-detail\/marks'[\s\S]{0,120}r\?\.ok === false\)[\s\S]{0,80}r\.reason/);   // 400 본문을 성공으로 삼키지 않는다
     expect(det).toMatch(/const GRID = 'minmax\(230px, 2fr\) 46px 74px minmax\(150px, 1\.2fr\) minmax\(150px, 1\.2fr\) 86px 86px 58px minmax\(118px, 1fr\) 76px'/);   // v2.835 10열(정책 · 실제 · 정책≠실제 · RPO · 마지막 성공·다음 · 실패 24h)
-    const sum = fs.readFileSync(new URL('./BackupSummaryTool.jsx', import.meta.url), 'utf8');
-    expect(sum).toMatch(/data-backup-marks/);
+    // v2.837: Summary 의 업무 중요도 카드는 시안 ① 에 맞춰 뺐다(Detail 의 같은 줄은 그대로) — 표시 저장은 Summary 도구 줄도 같은 PUT
+    const bar = fs.readFileSync(new URL('./BackupSummaryBar.jsx', import.meta.url), 'utf8');
+    expect(bar).toMatch(/const r = await putJson\('\/tools\/backup-detail\/marks'[\s\S]{0,120}r\?\.ok === false\)/);
     const tree = fs.readFileSync(new URL('./BackupSummaryTree.jsx', import.meta.url), 'utf8');
     expect(Number((/export const SUMMARY_GRID_MIN = (\d+);/.exec(tree) || [])[1])).toBeLessThanOrEqual(1100);   // v2.836 트리 표(전폭 — 예전 v2.787 법인별 표 자리)
   });

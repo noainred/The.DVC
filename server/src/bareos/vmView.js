@@ -49,6 +49,7 @@ export function bareosVmView(j, method = '') {
     at: last && isFin(last.endedAt) ? last.endedAt : null,
     lv: last?.level || null,
     by: last && L && last.jobid === L.jobid && isFin(L.bytes) && L.bytes >= 0 ? L.bytes : null,
+    ...(last && L && last.jobid === L.jobid && isFin(L.startedAt) && isFin(L.endedAt) && L.startedAt <= L.endedAt ? { sa: L.startedAt } : {}),   // v2.837 시작 시각(Summary '백업 기간')
     ok: isFin(j.lastOkAt) ? j.lastOkAt : null,
     run: run || null,
     runAt: run && L && isFin(L.startedAt) && !isFinalStatus(L.status) ? L.startedAt : null,

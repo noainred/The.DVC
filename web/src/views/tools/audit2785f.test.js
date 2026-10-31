@@ -62,9 +62,9 @@ describe('R-B2 표시 수 — 못 읽으면 0 이 아니라 모름', () => {
     expect(attentionList([ok, { ...ok, id: 'v3', marks: { need: 0, needGap: 0 } }]).some((a) => a.id === 'marks-unknown')).toBe(false);
   });
   it('화면 소스 — 서머리·세부 상단은 marksLine(…, 못 읽음) · 안내는 marksNotice · 칩은 filterCountText', () => {
+    // v2.837: Summary 는 시안 ① 에 맞춰 업무 중요도 카드를 뺐다(Detail 에 그대로) — 표시 파일을 못 읽으면 안내 한 줄 + 정책 수 '—'(bundlesOf null)
     const sum = read('./BackupSummaryTool.jsx');
-    expect(sum).toMatch(/marksLine\(t\.marks, data\.marksUnreadable\)/);
-    expect(sum).toMatch(/marksNotice\(data\)/);
+    expect(sum).toMatch(/\{data\.marksUnreadable && <div className="card"/);
     expect(sum).not.toMatch(/fmtNum\(t\.marks\[/);
     const det = read('./BackupDetailTool.jsx');
     expect(det).toMatch(/marksLine\(r\.marks, data\.marksUnreadable\)/);

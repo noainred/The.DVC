@@ -96,8 +96,10 @@ export function policyFields(row, { marksKnown = true, bareosKnown = true, now =
   return { p, a, mm: mismatchOf(p, a), lok: lastOkOf(row, { bareosKnown }), ...(e.length ? { e } : {}) };
 }
 
-/** 찾기 기준 — 실제 백업 전부 · Veeam 만 · Bareos 만. */
-export const STALE_SOURCES = Object.freeze(['all', 'veeam', 'bareos']);
+/** 찾기 기준 — 실제 백업 전부 · Veeam 만 · Bareos 만 · 정책에 맞는 백업만(v2.837 시안 — 정책 Veeam 이면 Veeam 결과만, Bareos 면 Bareos 결과만, 그 밖은 전부). */
+export const STALE_SOURCES = Object.freeze(['all', 'veeam', 'bareos', 'policy']);
+/** 'policy' 를 그 VM 의 기준으로 푼다(SSH 는 결과를 읽지 못해 전부로 본다). */
+export const staleSrcOf = (src, p) => (src === 'policy' ? (p === 'veeam' ? 'veeam' : p === 'bareos' ? 'bareos' : 'all') : (STALE_SOURCES.includes(src) ? src : 'all'));
 
 /**
  * '백업 안 된 VM 찾기'(사용자 요청 '지정한 시간만큼 백업되지 않은 VM 찾기') — 한 VM 의 판정. 웹 backupViewText.staleOf 와 한 쌍.
@@ -112,7 +114,7 @@ export function staleOf(vm, { windowMs, now = Date.now(), src = 'all', excludeNo
   if (excludeNone && vm.p === 'none') return null;
   if (onlyOn && vm.power !== 'POWERED_ON') return null;
   const lok = vm.lok || {};
-  const s = STALE_SOURCES.includes(src) ? src : 'all';
+  const s = staleSrcOf(src, vm.p);
   const parts = [];
   if (s !== 'bareos') parts.push({ t: isFin(lok.v) ? lok.v : null, k: lok.vk === true });
   if (s !== 'veeam') parts.push({ t: isFin(lok.b) ? lok.b : null, k: lok.bk === true });

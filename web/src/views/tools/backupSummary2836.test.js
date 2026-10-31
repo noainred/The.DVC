@@ -39,14 +39,15 @@ describe('v2.836 Summary — 세 묶음 · RPO · KPI · 정렬', () => {
     expect(siteRpo(pa, 99).pct).toBe(75);   // 모르는 기준은 1일
     expect(siteRpo(null, 1)).toBe(null);
   });
-  it('KPI — 합계가 없으면 —(0 이 아니다) · 정책을 못 읽은 법인이 있으면 부분 합 *', () => {
-    expect(summaryPolicyKpis({}).backed.value).toBe('—');
-    const t = { vcenters: 2, pa: { ...AG.sumSiteAggs([]), n: 5, on: 4, pol: { veeam: 2, bareos: 1, ssh: 0, none: 1, check: 1 }, polUnkSites: 1 } };
+  it('KPI — 합계가 없으면 —(0 이 아니다) · 정책을 못 읽은 법인이 있으면 부분 합 *(v2.837 시안 6칸)', () => {
+    expect(summaryPolicyKpis({}).unprot.value).toBe('—');
+    const t = { vcenters: 2, pa: { ...AG.sumSiteAggs([]), n: 5, on: 4, pol: { veeam: 2, bareos: 1, ssh: 0, none: 1, check: 1 }, polUnkSites: 1, unprot: 2, unver: 1 } };
     const k = summaryPolicyKpis(t, { rpoDays: 1 });
-    expect([k.backed.value, k.none.value, k.check.value]).toEqual(['3*', '1*', '1*']);
-    expect(k.backed.sub).toMatch(/Veeam 2 · Bareos 1 · SSH 0 · 표시 파일을 못 읽은 법인 1곳 제외/);
-    expect(k.vm.value).toBe('5');
+    expect(k.unprot.value).toBe('3* · 1');   // 보호 안 됨 = BackedUp 인데 결과 없음 2 + 확인 필요 1 · 확인 안 됨 1
+    expect(k.unprot.sub).toMatch(/BackedUp 3\(Veeam 2 · Bareos 1 · SSH 0\) · 백업 안함 1 · 확인 필요 1 — 합 5 · 보호 안 됨 = BackedUp 인데 백업 결과 없음 2 \+ 확인 필요 1 · 표시 파일을 못 읽은 법인 1곳 제외/);
+    expect(k.prot.value).toBe('5');
     expect(k.rpo.value).toBe('—');   // 대상 없음
+    expect(k.bytes.value).toBe('—');   // 크기를 읽은 VM 이 없다(0 이 아니다)
   });
   it('정렬 — 모르는 값은 방향과 무관하게 뒤 · 같은 값은 이름 순', () => {
     const rows = [
@@ -119,7 +120,7 @@ describe('v2.836 화면 소스', () => {
   });
   it('폴더 · VM 은 그 법인의 Detail 응답을 buildTree 로(판정 코어 하나) · 찾기는 서버 API', () => {
     expect(tree).toMatch(/fetchJson\('\/tools\/backup-detail', \{ vcenterId: id, \.\.\.scopeQuery\(opts\) \}\)/);
-    expect(tree).toMatch(/buildTree\(s\.data\.vms, \{ rpoDays: opts\.rpoDays, now: s\.data\.at \}\)/);
+    expect(tree).toMatch(/buildTree\(s\.data\.vms, \{ rpoDays: opts\.rpoDays, now: s\.data\.at, q: nameHit \? '' : needle \}\)/);   // v2.837 펼친 법인 안 폴더 · VM 찾기
     expect(stale).toMatch(/fetchJson\('\/tools\/backup-summary\/stale', params\)/);
   });
   it('Summary 에는 스냅샷 · Clone 문구와 기능이 없다(사용자 요청 — 주석은 빼고 본다)', () => {
