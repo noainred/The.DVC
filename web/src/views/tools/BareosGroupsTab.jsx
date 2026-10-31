@@ -388,12 +388,14 @@ function GroupEdit({ tree, group, initialFilter, vms, byId, groupName, writable,
       // 브라우저 시한·504 — 서버는 등록·저장을 끝냈을 수 있다(실패로 단정하지 않는다) — 목록으로 돌아가 새로 읽는다
       if (outcomeUnknown(e)) { onSaved(`결과 모름: ${unknownOutcomeText('그룹 저장', e)}`, false, null, v0); return; }
       setResult({ reason: errText(e), ...(e?.body || {}) });
-      if (e?.body?.needOtp) { setServerOtp(e.body.reasons || ['본인 OTP 필요']); setOtp(''); }
+      if (e?.body?.needOtp) setServerOtp(e.body.reasons || ['본인 OTP 필요']);
+      if (needOtp) setOtp('');   // 반증 F4: 서버가 OTP 를 확인한 뒤 실패했을 수 있다(1회용 — 같은 코드로 다시 누르면 실패 횟수만 올라 잠긴다)
       return;
     }
     if (!r?.ok) {
       setSaving('');
-      if (r?.needOtp) { setServerOtp(r.reasons || ['본인 OTP 필요']); setOtp(''); }   // 쓴(또는 틀린) 코드를 남기면 다시 누를 때 실패 횟수만 오른다
+      if (r?.needOtp) setServerOtp(r.reasons || ['본인 OTP 필요']);
+      if (needOtp) setOtp('');   // 쓴(또는 틀린) 코드를 남기면 다시 누를 때 실패 횟수만 오른다 — OTP 를 확인한 뒤의 실패(등록 0·409)도 같다(반증 F4)
       // 버그 점검 W9: 거부돼도 서버가 VM 을 등록했을 수 있다 — 목록을 다시 읽는다. 다른 화면이 먼저 고쳤으면(409) 목록으로
       if (r?.conflict) { onSaved(`${r.reason} 목록을 새로 읽었습니다 — 다시 ‘수정’ 을 눌러 주세요.`, false, null, v0); return; }
       setResult(r || { reason: '저장하지 못했습니다.' });
@@ -604,7 +606,7 @@ function GroupEdit({ tree, group, initialFilter, vms, byId, groupName, writable,
           {needOtp && (
             <section className="card" style={{ padding: 14, display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', gap: 6, minWidth: 0, borderColor: 'rgba(245,158,11,.45)' }}>
               <b style={{ fontSize: 13.5 }}>본인 OTP 확인</b>
-              <span style={{ fontSize: 12.5, lineHeight: 1.5 }}>이 저장은 그룹 백업이 끝난 뒤 오래된 백업을 지울 수 있어 본인 OTP 가 필요합니다 — {(otpReasons.length ? otpReasons : serverOtp || []).join(' · ')}</span>
+              <span style={{ fontSize: 12.5, lineHeight: 1.5 }}>이 저장은 그룹 백업이 끝난 뒤 오래된 백업을 지울 수 있어 본인 OTP 가 필요합니다 — {(otpReasons.length ? otpReasons : serverOtp || []).join(' · ')}. 코드는 1회용이라 저장이 실패하면 새 코드를 넣으세요.</span>
               <label style={{ display: 'grid', gap: 4, fontSize: 12, color: 'var(--text-dim)', maxWidth: 220 }}>OTP(6자리)
                 <input className="input" inputMode="numeric" autoComplete="one-time-code" value={otp} disabled={disabledAll} onChange={(e) => setOtp(e.target.value.replace(/\D/g, '').slice(0, 6))} aria-label="본인 OTP 6자리" style={{ minWidth: 0, fontSize: 15, letterSpacing: 2 }} />
               </label>

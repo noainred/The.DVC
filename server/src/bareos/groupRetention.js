@@ -11,6 +11,7 @@
  *  ③ 성공한 복원 지점이 N개 이하면 아무것도 지우지 않는다. 지우는 것은 기준 Full **보다 앞의** 끝난 실행만이다.
  *  ④ 순서는 jobid(카탈로그가 만든 순서 — 시작 시각은 못 읽을 수 있다). 한 번에 지우는 수에 상한(PRUNE_MAX_PER_JOB).
  *  ⑤ 보관 개수가 없으면(null — v2.830 에 만든 그룹·'제한 없음') 정리하지 않는다.
+ *  ⑨ 원장 잡의 등록 시각보다 먼저 시작한 행은 지우지 않는다(같은 이름으로 다시 등록한 잡이 예전 이력을 OTP 없이 정리하지 않게 — v2.831.1 반증 F1).
  *  ⑥~⑧ 반증 검토(F1·F2·F3·F6): 복사·이전 행이 있거나 · jobid 와 시작 시각 순서가 어긋나거나 · 시작 시각을 모르면 지우지 않는다 · 기준 Full 은 바이트가 있는 것만.
  *  정리는 **그룹 실행이 끝난 뒤에만**(보관 개수를 바꾸기만 해서는 돌지 않는다 — 반증 F5 · 화면 안내와 같게).
  * 카탈로그를 지워도 볼륨의 데이터는 그 볼륨이 재활용될 때 비워진다(Bareos 풀 설정 — 화면이 밝힌다).
@@ -43,11 +44,16 @@ export function normKeep(v) {
  * @param {object[]} runs  `list jobs job=<name>` 행(순서 무관)
  * @param {number|null} keep
  * @param {string} name   이 잡 이름 — 다른 이름의 행은 보지 않는다
+ * @param {{ since?: number|null }} [o]  원장 잡의 등록 시각(ms) — 그보다 먼저 시작한 행은 보지 않는다(⑨)
  * @returns {{ deletable: number[], kept: number, good: number, baseJobid: number|null, baseAt: number|null, reason: string }}
  *   kept = 남는 성공 복원 지점 수(기준 Full 부터) · good = 지금 성공 복원 지점 수 · reason = 지우지 않은 까닭(비면 지움 또는 지울 것 없음)
  */
-export function pruneSelection(runs, keep, name) {
-  const mine = (Array.isArray(runs) ? runs : []).filter((r) => r && Number.isInteger(r.jobid) && r.jobid > 0 && (!name || r.name === name));
+export function pruneSelection(runs, keep, name, { since = null } = {}) {
+  // ⑨ v2.831.1 반증 F1(재현): 대상을 지운 뒤 같은 VM 을 다시 등록하면 잡 이름이 같아(names.jobNameFor) 예전 등록 시절의 카탈로그 행이 이 잡의 것으로 보인다 —
+  //   since(원장 잡의 등록 시각)가 있으면 그보다 먼저 시작한 행과 시작 시각을 모르는 행은 **이 잡의 것이 아닌 것으로** 본다(지우지 않는다 · 세지도 않는다)
+  const sinceOk = Number.isFinite(since) && since > 0;
+  const mine = (Array.isArray(runs) ? runs : []).filter((r) => r && Number.isInteger(r.jobid) && r.jobid > 0 && (!name || r.name === name)
+    && (!sinceOk || (Number.isFinite(r.startedAt) && r.startedAt >= since)));
   const rows = mine.filter((r) => r.type === 'B').sort((a, b) => a.jobid - b.jobid);
   const isGood = (r) => { const st = statusOf(r.status); return (st === 'ok' || st === 'warning') && LEVELS.has(r.level); };
   const good = rows.filter(isGood);

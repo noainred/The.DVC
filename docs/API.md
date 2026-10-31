@@ -808,12 +808,12 @@ Prometheus/OTel 익스포터(선택 토큰).
 | GET | `/tools/backup-summary.csv` | 권한 `data.csv`, `tools` | [server/src/routes/api/veeam.js:970](../server/src/routes/api/veeam.js#L970) |
 | GET | `/tools/bareos-backup` | 역할 `admin` | [server/src/routes/api/bareosBackup.js:334](../server/src/routes/api/bareosBackup.js#L334) |
 | GET | `/tools/bareos-backup/badges` | 권한 `tools` | [server/src/routes/api/bareosBackup.js:971](../server/src/routes/api/bareosBackup.js#L971) |
-| POST | `/tools/bareos-backup/groups` | 역할 `admin` | [server/src/routes/api/bareosGroups.js:203](../server/src/routes/api/bareosGroups.js#L203) |
-| DELETE | `/tools/bareos-backup/groups/:id` | 역할 `admin` | [server/src/routes/api/bareosGroups.js:253](../server/src/routes/api/bareosGroups.js#L253) |
-| PUT | `/tools/bareos-backup/groups/:id` | 역할 `admin` | [server/src/routes/api/bareosGroups.js:223](../server/src/routes/api/bareosGroups.js#L223) |
-| POST | `/tools/bareos-backup/groups/:id/run` | 역할 `admin` | [server/src/routes/api/bareosGroups.js:267](../server/src/routes/api/bareosGroups.js#L267) |
-| GET | `/tools/bareos-backup/groups/options` | 역할 `admin` | [server/src/routes/api/bareosGroups.js:191](../server/src/routes/api/bareosGroups.js#L191) |
-| GET | `/tools/bareos-backup/groups/tree` | 역할 `admin` | [server/src/routes/api/bareosGroups.js:137](../server/src/routes/api/bareosGroups.js#L137) |
+| POST | `/tools/bareos-backup/groups` | 역할 `admin` | [server/src/routes/api/bareosGroups.js:224](../server/src/routes/api/bareosGroups.js#L224) |
+| DELETE | `/tools/bareos-backup/groups/:id` | 역할 `admin` | [server/src/routes/api/bareosGroups.js:279](../server/src/routes/api/bareosGroups.js#L279) |
+| PUT | `/tools/bareos-backup/groups/:id` | 역할 `admin` | [server/src/routes/api/bareosGroups.js:245](../server/src/routes/api/bareosGroups.js#L245) |
+| POST | `/tools/bareos-backup/groups/:id/run` | 역할 `admin` | [server/src/routes/api/bareosGroups.js:293](../server/src/routes/api/bareosGroups.js#L293) |
+| GET | `/tools/bareos-backup/groups/options` | 역할 `admin` | [server/src/routes/api/bareosGroups.js:212](../server/src/routes/api/bareosGroups.js#L212) |
+| GET | `/tools/bareos-backup/groups/tree` | 역할 `admin` | [server/src/routes/api/bareosGroups.js:158](../server/src/routes/api/bareosGroups.js#L158) |
 | POST | `/tools/bareos-backup/jobs` | 역할 `admin` | [server/src/routes/api/bareosBackup.js:699](../server/src/routes/api/bareosBackup.js#L699) |
 | DELETE | `/tools/bareos-backup/jobs/:id` | 역할 `admin` | [server/src/routes/api/bareosBackup.js:832](../server/src/routes/api/bareosBackup.js#L832) |
 | PATCH | `/tools/bareos-backup/jobs/:id` | 역할 `admin` | [server/src/routes/api/bareosBackup.js:810](../server/src/routes/api/bareosBackup.js#L810) |

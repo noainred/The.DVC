@@ -499,7 +499,11 @@ test('손상된 그룹 원장 — 보존 · 저장 503 · 예약 틱은 아무�
 });
 
 /* ───────── ⑦ v2.831 보관 개수 ───────── */
-const hrow = (jobid, name, level, st = 'T') => ({ jobid, name, type: 'B', level, jobstatus: st, jobbytes: 1000, starttime: `2026-10-${String(jobid).padStart(2, '0')} 02:10:00`, endtime: '' });
+// 카탈로그 시각(현지 · 시간대 없음) — 원장 잡 등록 뒤의 시각이어야 정리 대상이다(v2.831.1 ⑨ since). 실제 시각에서 분 단위로 떨어뜨린다
+const pad2 = (n) => String(n).padStart(2, '0');
+const catAt = (ms) => { const d = new Date(ms); return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())} ${pad2(d.getHours())}:${pad2(d.getMinutes())}:00`; };
+const H0 = Math.floor(Date.now() / 60_000) * 60_000 + 3_600_000;
+const hrow = (jobid, name, level, st = 'T', at = H0 + jobid * 60_000) => ({ jobid, name, type: 'B', level, jobstatus: st, jobbytes: 1000, starttime: catAt(at), endtime: '' });
 test('⑦ v2.831 보관 개수 — 저장(1~365 · 비우면 제한 없음) · 보내지 않으면 그대로 · 틀린 값 400 · v2.831.1 지울 범위가 넓어지는 저장만 본인 OTP', async () => {
   const g = groups.getGroup(G1);
   const body = (extra) => ({ name: g.name, vmIds: g.vmIds, schedule: g.schedule, storage: g.storage, pool: g.pool, ...extra });
@@ -581,6 +585,14 @@ test('⑦ v2.831 정리 — 기준 Full 앞의 끝난 실행만 지운다 · Ful
     assert.equal(o2.deleted, 0);
     assert.equal(o2.notDeleted, 3, '4·5·6 을 보냈지만 남아 있다(7 은 실행 중이라 보내지 않는다)');
   } finally { D.ignoreDelete = false; }
+  // 반증 F1(v2.831.1): 원장 잡 등록 시각보다 먼저 시작한 행(같은 이름으로 다시 등록한 잡의 예전 이력)은 지우지 않는다
+  const jA = registry.jobDigests().find((j) => j.bareosJob === A);
+  D.hist.set(B, [hrow(31, B, 'F', 'T', jA.createdAt - 86_400_000), hrow(32, B, 'I', 'T', jA.createdAt - 3_600_000), hrow(33, B, 'F'), hrow(34, B, 'F'), hrow(35, B, 'F')]);
+  D.cmds.length = 0;
+  await runner.pruneGroup(G1);
+  const delB = D.cmds.filter((c) => c.startsWith('delete ')).join(' ');
+  assert.doesNotMatch(delB, /\b3[12]\b/, `등록 전 이력(31·32)은 지우지 않는다: ${delB}`);
+  assert.deepEqual(D.hist.get(B).map((r) => r.jobid).filter((x) => x === 31 || x === 32), [31, 32]);
   const { listAudit } = await import('../src/audit.js');
   const audit = listAudit({ limit: 50, q: '보관 정리' }).items || listAudit({ limit: 50, q: '보관 정리' });
   assert.ok(JSON.stringify(audit).includes('jobid 1,2,3'), '지운 jobid 를 감사에 남긴다');
