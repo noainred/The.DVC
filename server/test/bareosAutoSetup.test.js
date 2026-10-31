@@ -347,6 +347,10 @@ test('⑤ 라우트: 권한·범위·데모·OTP 게이트 · 입력 오류는 O
   assert.equal((await call('admin', '/director', { ...DIR_BODY, otp: '000000' })).s, 403);
   assert.equal(srv.st.cmds.length, 0, '게이트에서 막힌 요청은 원격 접속 0');
 
+  // v2.831.0 릴리스 빌드에서 실패(PR CI 에서는 통과): 아래 코드 셋(now-1·now·now+1)은 검증 창 ±1 단계 안이어야 한다 —
+  //   시험 도중 30초 경계를 넘으면 now-1 이 창 밖(-2)이 되어 403. 단계 끝 15초 안이면 다음 단계가 시작될 때까지 기다린다(경계에서 떨어뜨려 고정)
+  const left = 30_000 - (Date.now() % 30_000);
+  if (left < 15_000) await new Promise((r) => setTimeout(r, left + 50));
   const now = Math.floor(Date.now() / 30_000);
   const t1 = generateToken(SECRET, { counter: now - 1 });
   const bad = await call('admin', '/director', { ...DIR_BODY, restoreClient: 'a b', otp: t1 });
