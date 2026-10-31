@@ -8,7 +8,7 @@
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { pruneSelection, normKeep, keepText, PRUNE_MAX_PER_JOB } from '../src/bareos/groupRetention.js';
+import { pruneSelection, normKeep, keepText, keepOtpReasons, PRUNE_MAX_PER_JOB } from '../src/bareos/groupRetention.js';
 import { OPS, MUTATING } from '../src/bareos/ops.js';
 import { sanitizeEdgeResult } from '../src/bareos/edgeResult.js';
 import { RESULT_MS } from '../src/bareos/edgeOps.js';
@@ -171,4 +171,19 @@ test('④ 엣지 회신 정제 — 성공인데 지운 목록이 없으면 결�
   assert.equal(r.value[1].ok, false);
   assert.equal(r.value[1].code, 'unknown');
   assert.equal(r.value[2].message, 'denied');
+});
+
+test('⑤ v2.831.1 본인 OTP 판정 — 지울 범위가 넓어지는 저장만(새 그룹·처음 정함·줄임·기존 잡 VM 추가)', () => {
+  const g = { keep: 7, vmIds: ['a', 'b'] };
+  assert.deepEqual(keepOtpReasons(null, { keep: null, vmIds: ['a'] }), [], '제한 없음 새 그룹은 OTP 없이');
+  assert.deepEqual(keepOtpReasons(null, { keep: 14, vmIds: ['a'] }), ['보관 개수(최근 14회)를 정한 새 그룹']);
+  assert.deepEqual(keepOtpReasons({ keep: null, vmIds: ['a'] }, { keep: 3, vmIds: ['a'] }), ['보관 개수를 처음 정함(최근 3회)']);
+  assert.deepEqual(keepOtpReasons(g, { keep: 3, vmIds: ['a', 'b'] }), ['보관 개수를 줄임(7 → 3회)']);
+  assert.deepEqual(keepOtpReasons(g, { keep: 7, vmIds: ['a', 'b'] }), []);
+  assert.deepEqual(keepOtpReasons(g, { keep: 9, vmIds: ['a', 'b'] }), [], '늘리기는 OTP 없이');
+  assert.deepEqual(keepOtpReasons(g, { keep: null, vmIds: ['a', 'b'] }), [], '제한 없음으로 풀기는 OTP 없이');
+  assert.deepEqual(keepOtpReasons(g, { keep: undefined, vmIds: ['a', 'b'] }), [], 'keep 을 보내지 않으면 그대로');
+  assert.deepEqual(keepOtpReasons(g, { keep: undefined, vmIds: ['a', 'b', 'c', 'd'] }, (id) => id === 'c'), ['백업 기록이 있을 수 있는 VM 1대를 더함'], '잡 없는 새 VM(d)은 세지 않는다');
+  assert.deepEqual(keepOtpReasons(g, { keep: 3, vmIds: ['a', 'c'] }, () => true), ['보관 개수를 줄임(7 → 3회)'], '줄이면 그 까닭 하나로');
+  assert.deepEqual(keepOtpReasons({ keep: null, vmIds: [] }, { keep: undefined, vmIds: ['c'] }), [], '제한 없음 그룹에 VM 추가는 OTP 없이');
 });

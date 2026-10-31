@@ -74,6 +74,31 @@ export function pruneSelection(runs, keep, name) {
   return out;
 }
 
+/**
+ * v2.831.1 보관 개수 저장의 본인 OTP 판정(순수 · 사용자 결정 'OTP 붙이고 기본값은 제한 없음').
+ * 저장한 뒤 정리로 지워질 수 있는 범위가 **넓어지는** 저장만 OTP 를 받는다(복원과 같은 무게 — 지운 회차는 복원할 수 없다):
+ *   보관 개수를 정한 새 그룹 · 보관 개수를 처음 정함 · 보관 개수를 줄임 · 보관 개수가 있는 그룹에 기존 잡(이력이 있을 수 있는) VM 을 더함.
+ * 늘리기·제한 없음으로 풀기·이름·스케줄·저장 위치만 고치기·잡 없는 새 VM 더하기는 OTP 없이.
+ * 웹 bareosGroupText.keepOtpReasons 와 같은 글자(두 벌 — 시험이 같은 입력으로 대조).
+ * @param {object|null} prev  저장 전 그룹(새 그룹이면 null)
+ * @param {{ keep?: number|null, vmIds: string[] }} next  저장할 값(keep 이 undefined 면 그대로 — checkGroupInput 규칙)
+ * @param {(vmId: string) => boolean} hasJob  그 VM 에 이미 백업 대상(잡)이 있는가
+ * @returns {string[]} 까닭(비면 OTP 를 받지 않는다)
+ */
+export function keepOtpReasons(prev, next, hasJob = () => true) {
+  const nk = next?.keep === undefined ? (prev?.keep ?? null) : next.keep;
+  if (nk == null) return [];
+  if (!prev) return [`보관 개수(최근 ${nk}회)를 정한 새 그룹`];
+  const pk = prev.keep ?? null;
+  const out = [];
+  if (pk == null) out.push(`보관 개수를 처음 정함(최근 ${nk}회)`);
+  else if (nk < pk) out.push(`보관 개수를 줄임(${pk} → ${nk}회)`);
+  const had = new Set(Array.isArray(prev.vmIds) ? prev.vmIds : []);
+  const added = (Array.isArray(next?.vmIds) ? next.vmIds : []).filter((id) => !had.has(id) && hasJob(id)).length;
+  if (added && pk != null && nk >= pk) out.push(`백업 기록이 있을 수 있는 VM ${added}대를 더함`);
+  return out;
+}
+
 /** 보관 개수 문구 — 서버·웹이 같은 글자(웹 bareosGroupText.keepText 와 시험이 대조). */
 export function keepText(keep) {
   return keep == null ? '보관 개수 제한 없음' : `최근 ${keep}회 보관`;

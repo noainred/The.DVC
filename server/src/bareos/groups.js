@@ -154,10 +154,10 @@ export function addGroup(input, { by = '', directorId = '', now = Date.now() } =
 }
 
 /**
- * 고치기 — 이름·VM·스케줄·스토리지·풀. 스케줄이 바뀌면 anchorAt 을 지금으로(그 앞 회차는 새 스케줄의 회차가 아니다).
+ * 고치기 — 이름·VM·스케줄·스토리지·풀·보관 개수. 스케줄이 바뀌면 anchorAt 을 지금으로(그 앞 회차는 새 스케줄의 회차가 아니다).
  * @returns {object|null} 없으면 null
  */
-export function updateGroup(id, input, { by = '', now = Date.now(), expectUpdatedAt = null } = {}) {
+export function updateGroup(id, input, { by = '', now = Date.now(), expectUpdatedAt = null, check = null } = {}) {
   return mutate((db) => {
     const g = db.groups.find((x) => x.id === id);
     if (!g) return null;
@@ -166,6 +166,10 @@ export function updateGroup(id, input, { by = '', now = Date.now(), expectUpdate
       throw fail('conflict', `그사이 다른 화면에서 ‘${g.name}’ 그룹을 고쳤습니다(${g.updatedBy || '?'}) — 새로 고친 뒤 다시 저장하세요(그대로 덮어쓰면 그쪽에서 넣은 VM 이 빠질 수 있습니다).`);
     }
     const v = checkGroupInput({ ...input, vcenterId: g.vcenterId }, { selfId: id });
+    // v2.831.1: 라우트가 저장 전 그룹으로 본 판정(본인 OTP 필요 여부)을 **쓰는 순간의** 그룹으로 다시 본다 — 그사이 다른 화면이 보관 개수를 늘렸으면
+    //   OTP 없이 줄이는 저장이 되지 않게(check 가 문자열을 돌려주면 그 사유로 거부)
+    const why = typeof check === 'function' ? check(copy(g), v) : '';
+    if (why) throw fail('conflict', why);
     const schedChanged = JSON.stringify(v.schedule) !== JSON.stringify(g.schedule);
     if (schedChanged) {
       // v2.830 검토 M4: 옛 스케줄로 지금 돌 차례였던 회차(틱이 아직 처리하지 않음)를 조용히 버리지 않는다 — 돌리지 않았다고 남긴다

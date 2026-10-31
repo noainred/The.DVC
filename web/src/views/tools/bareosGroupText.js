@@ -146,7 +146,9 @@ export function scheduleParts(sched) {
 }
 
 export const KEEP_PRESETS = Object.freeze([3, 7, 14, 30]);
+/** '제한 없음' 을 끌 때 처음 보이는 값(시안 14). 새 그룹의 처음 값은 제한 없음(null — v2.831.1 사용자 결정). */
 export const KEEP_DEFAULT = 14;
+export const NEW_GROUP_KEEP = null;
 /** 서버 groupRetention.keepText 와 같은 글자(시험이 대조). */
 export const keepText = (keep) => (keep == null ? '보관 개수 제한 없음' : `최근 ${keep}회 보관`);
 /** −/+ — 범위 안으로. */
@@ -238,4 +240,22 @@ export function sizeSum(rows) {
   let gb = 0; let unknown = 0;
   for (const r of Array.isArray(rows) ? rows : []) { if (typeof r?.gb === 'number' && Number.isFinite(r.gb)) gb += r.gb; else unknown++; }
   return { gb, unknown };
+}
+
+/**
+ * v2.831.1 보관 개수 저장의 본인 OTP 판정 — 서버 groupRetention.keepOtpReasons 와 같은 글자(시험이 같은 입력으로 대조).
+ * 화면은 이 결과로 OTP 칸을 연다(서버가 다시 판정한다 — 어긋나면 서버의 needOtp 응답이 칸을 연다).
+ */
+export function keepOtpReasons(prev, next, hasJob = () => true) {
+  const nk = next?.keep === undefined ? (prev?.keep ?? null) : next.keep;
+  if (nk == null) return [];
+  if (!prev) return [`보관 개수(최근 ${nk}회)를 정한 새 그룹`];
+  const pk = prev.keep ?? null;
+  const out = [];
+  if (pk == null) out.push(`보관 개수를 처음 정함(최근 ${nk}회)`);
+  else if (nk < pk) out.push(`보관 개수를 줄임(${pk} → ${nk}회)`);
+  const had = new Set(Array.isArray(prev.vmIds) ? prev.vmIds : []);
+  const added = (Array.isArray(next?.vmIds) ? next.vmIds : []).filter((id) => !had.has(id) && hasJob(id)).length;
+  if (added && pk != null && nk >= pk) out.push(`백업 기록이 있을 수 있는 VM ${added}대를 더함`);
+  return out;
 }
