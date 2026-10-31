@@ -55,8 +55,8 @@ export function demoSettings(snapshot) {
 // 새 실행 jobid 는 합성 이력(historyOf — 100000 + 최대 80000 + 13)보다 커야 한다: 실제 Director 의 jobid 는 단조 증가이고
 //   포탈은 jobid 로 최신을 고른다(director.jobRuns·원장 lastRun). 9000 에서 시작하면 방금 실행이 이력 표 맨 뒤로 밀렸다(v2.822 화면 확인).
 const FIRST_RUN_ID = 200_000;
-const S = { jobs: new Map(), runs: new Map(), nextId: FIRST_RUN_ID };
-export function _resetBareosDemoForTest() { S.jobs.clear(); S.runs.clear(); S.nextId = FIRST_RUN_ID; _seeded = false; _slots = null; _slotsKey = ''; }
+const S = { jobs: new Map(), runs: new Map(), nextId: FIRST_RUN_ID, deleted: new Set() };   // deleted: v2.831 보관 개수 정리가 지운 jobid(카탈로그에서 사라진 것처럼)
+export function _resetBareosDemoForTest() { S.jobs.clear(); S.runs.clear(); S.nextId = FIRST_RUN_ID; S.deleted.clear(); _seeded = false; _slots = null; _slotsKey = ''; }
 
 /** lib/scan.cc next_arg 와 같은 규칙의 인자 분해. */
 function parseArgs(cmd) {
@@ -127,12 +127,12 @@ function historyOf(name, now = Date.now()) {
       jobbytes: fail ? 0 : bytes, jobfiles: fail ? 0 : 3, joberrors: fail ? 1 : 0, client: '',
     });
   }
-  return rows;
+  return rows.filter((r) => !S.deleted.has(r.jobid));
 }
 
 function liveRow(jobid, now = Date.now()) {
   const r = S.runs.get(jobid);
-  if (!r) return null;
+  if (!r || S.deleted.has(jobid)) return null;
   const el = now - r.startAt;
   const st = r.canceled ? 'A' : el < 4_000 ? 'C' : el < 30_000 ? 'R' : 'T';
   const done = st === 'T' || st === 'A';
@@ -237,6 +237,12 @@ export function demoCall(cmd, settings) {
       // 실제 Director 와 같은 순서 — 시작 시각 오름차순 + LIMIT(가장 오래된 N건, sql_list.cc). 포탈이 받아서 최신 순으로 정렬한다(v2.822 W1).
       rows.sort((a, b) => a.starttime.localeCompare(b.starttime) || a.jobid - b.jobid);
       return { jobs: rows.slice(0, lim) };
+    }
+    case 'delete': {   // v2.831 — delete jobid=a,b,c(카탈로그 행 지우기). 끝나지 않은 실행은 실제처럼 거부하지 않지만 포탈은 보내지 않는다
+      if (!kv.jobid) fail('demo: delete jobid= 만 지원합니다.');
+      const ids = String(kv.jobid).split(',').map(Number).filter((n) => Number.isInteger(n) && n > 0);
+      for (const id of ids) if (rowById(id)) S.deleted.add(id);
+      return { deleted: { jobids: ids } };
     }
     case 'cancel': { const r = S.runs.get(Number(kv.jobid)); if (!r) fail('No Jobs running.'); r.canceled = true; return { cancel: { jobid: Number(kv.jobid) } }; }
     case 'enable': case 'disable': {   // 모르는 잡은 실제처럼 거부한다(ua_cmds.cc — 'Job "X" not found.')

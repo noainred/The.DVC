@@ -431,6 +431,8 @@ const TS_RE = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} /;
 // 보고 줄은 들여쓰기 + '키:' + 공백 + 값. 키 길이를 묶어 두고 줄 길이를 먼저 자른다(외부 입력 정규식 규칙 — 선형).
 const KV_RE = /^\s+([A-Za-z][A-Za-z0-9 ()/.-]{0,39}):\s+(.*)$/;
 const ISSUE_RE = /\b(Warning|Error|Fatal error|ERR=)/;
+/** 실패 보고 블록의 머리줄 'Error: Bareos bareos-dir 25.1.2 (…):' — 보고 블록의 제목이지 오류 한 건이 아니다(버그 점검 W5 — 오류 목록에 한 건 더 셌다). */
+const REPORT_HEAD_RE = /^(?:\S{1,80} JobId \d{1,12}: )?(?:Error|Warning): Bareos \S{1,80} \d/;
 const MAX_ISSUES = 30;
 
 /** '10,223,626,211 (10.22 GB)' → 10223626211. 못 읽으면 null(0 으로 만들지 않는다). */
@@ -462,6 +464,7 @@ export function parseJobReport(lines = []) {
   const seen = new Map();
   for (const t of texts) {
     if (!ISSUE_RE.test(t)) continue;
+    if (REPORT_HEAD_RE.test(t.slice(0, 200))) continue;
     const kv = KV_RE.exec(t);   // 보고 블록의 'SD Errors: 0' 같은 줄은 경고가 아니다(수치는 상태 칩이 보여 준다)
     if (kv && Object.prototype.hasOwnProperty.call(REPORT_KEYS, kv[1])) continue;
     const key = t.trim();
@@ -613,7 +616,8 @@ export function rateText(v) {
   const m = /^(\d{1,12}(?:\.\d{1,3})?) KB\/s$/.exec(s);
   if (!m) return s;
   const kb = Number(m[1]);
-  if (kb >= 1e6) return `${(kb / 1e6).toFixed(2)} GB/s`;   // 10GbE 백업(초당 1.2 GB 등)이 '1200.0 MB/s' 로 보이지 않게
+  // 10GbE 백업(초당 1.2 GB 등)이 '1200.0 MB/s' 로 보이지 않게 · 버그 점검 W6: 반올림 뒤 1000 이 되면(999,950 KB/s → '1000.0 MB/s') 다음 단위로
+  if (kb >= 1e6 || Number((kb / 1000).toFixed(1)) >= 1000) return `${(kb / 1e6).toFixed(2)} GB/s`;
   return kb >= 1000 ? `${(kb / 1000).toFixed(1)} MB/s` : `${kb} KB/s`;
 }
 
@@ -621,9 +625,9 @@ export function rateText(v) {
 export function elapsedKo(v) {
   const s = String(v ?? '').trim().slice(0, 80);
   if (!s) return '—';
-  const unit = { day: '일', hour: '시간', min: '분', sec: '초' };
+  const unit = { year: '년', month: '개월', day: '일', hour: '시간', min: '분', sec: '초' };   // 버그 점검 W6: 30일 넘는 잡의 month·year 를 버렸다
   const parts = [];
-  for (const m of s.matchAll(/(\d{1,6}) (day|hour|min|sec)s?\b/g)) parts.push(`${Number(m[1])}${unit[m[2]]}`);
+  for (const m of s.matchAll(/(\d{1,6}) (year|month|day|hour|min|sec)s?\b/g)) parts.push(`${Number(m[1])}${unit[m[2]]}`);
   return parts.length ? parts.join(' ') : s;
 }
 
@@ -672,8 +676,11 @@ export function clockSec(v) {
 
 const LOG_TS_RE = /^(\d{4}-\d{2}-\d{2}) (\d{2}:\d{2}:\d{2}) /;
 const LOG_WHO_RE = /^([A-Za-z0-9._-]{1,80})-(dir|sd|fd) JobId \d{1,12}: /;
+// 버그 점검 W4: Bareos 는 데몬 이름에 -dir/-sd/-fd 를 강제하지 않는다(패키지 기본 이름만 따른다) — 관례를 안 따르는 이름이면 종류를 'dmn'(데몬)으로 두고
+//   데몬 줄로는 읽는다(예전에는 who 가 비어 세부·타임라인이 통째로 비었다). 종류 거르기는 관례 이름에만 맞는다.
+const LOG_DAEMON_RE = /^([A-Za-z0-9._-]{1,80}) JobId \d{1,12}: /;
 const ERR_KEYS = new Set(['Non-fatal FD errors', 'FD Errors', 'SD Errors']);
-export const LOG_WHO_LABEL = Object.freeze({ dir: 'Director', sd: 'SD', fd: 'FD', rep: '보고' });
+export const LOG_WHO_LABEL = Object.freeze({ dir: 'Director', sd: 'SD', fd: 'FD', dmn: '데몬', rep: '보고' });
 
 /**
  * 로그 한 줄 → { date, time, who: 'dir'|'sd'|'fd'|'rep'|'', host, text, level: 'plain'|'info'|'warn'|'err'|'ok' }.
@@ -684,10 +691,11 @@ export function classifyLogLine(line) {
   const raw = String(line ?? '').slice(0, 2000);
   const tm = LOG_TS_RE.exec(raw);
   const body = tm ? raw.slice(tm[0].length) : raw;
-  const wm = LOG_WHO_RE.exec(body);
+  const wm0 = LOG_WHO_RE.exec(body);
+  const wm = wm0 || LOG_DAEMON_RE.exec(body);
   const head = body.slice(0, 600);
   const kv = wm ? null : KV_RE.exec(head);
-  const who = wm ? wm[2] : (kv ? 'rep' : '');
+  const who = wm0 ? wm0[2] : wm ? 'dmn' : (kv ? 'rep' : '');
   const text = wm ? body.slice(wm[0].length) : body;
   let level = 'plain';
   if (kv) {
@@ -697,6 +705,8 @@ export function classifyLogLine(line) {
     } else if (ERR_KEYS.has(kv[1])) {
       const n = reportBytes(kv[2]);
       level = n !== null && n > 0 ? 'warn' : 'plain';
+    } else if (/termination status$/.test(kv[1]) && /Fatal|Error/i.test(kv[2])) {
+      level = 'err';   // 버그 점검 W5: 'FD termination status: Fatal Error' 를 색 없이 두었다
     }
   } else if (ISSUE_RE.test(text.slice(0, 600))) {
     level = issueTone(text);
@@ -841,7 +851,8 @@ export function jobTimeline(lines = [], fields = {}) {
   const segs = [
     { k: 'wait', label: '대기', sec: span(schedSec, start) },
     { k: 'prep', label: '준비', sec: span(start, firstItem) },
-    { k: 'data', label: '데이터 전송', sec: span(firstItem ?? start, tail ?? end) },
+    // 버그 점검 W5: 백업 항목이 하나도 시작되지 않았으면(실패 잡) 데이터 전송 구간은 없다 — 실행 전체를 '데이터 전송' 으로 그렸다
+    { k: 'data', label: '데이터 전송', sec: firstItem === null ? null : span(firstItem, tail ?? end) },
     { k: 'tail', label: '정리', sec: tail !== null ? span(tail, end) : null },
   ].filter((s) => s.sec !== null && s.sec > 0);
   return { steps, segs, waitSec: span(schedSec, start), runSec: span(start, end) };

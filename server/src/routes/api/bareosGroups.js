@@ -11,9 +11,10 @@ import { effectiveSettings, isDemoActive, eligibility, createBackupTargets, onDi
 import { relayLimits } from '../../bareos/edgeOps.js';
 import { directorById, directorConn, siteMissing } from '../../bareos/settings.js';
 import { jobDigests, MAX_JOBS, registryLoadError } from '../../bareos/registry.js';
-import { listGroups, getGroup, addGroup, updateGroup, deleteGroup, checkGroupInput, groupsLoadError, MAX_MEMBERS, MAX_GROUPS } from '../../bareos/groups.js';
-import { nextSlot, scheduleText, CATCHUP_MS, LEVELS } from '../../bareos/groupSchedule.js';
-import { runGroup, groupRunning } from '../../bareos/groupRunner.js';
+import { listGroups, getGroup, addGroup, updateGroup, deleteGroup, checkGroupInput, groupsLoadError, MAX_MEMBERS, MAX_GROUPS, FIRES_KEEP } from '../../bareos/groups.js';
+import { nextSlot, scheduleText, slotKey, CATCHUP_MS, LEVELS } from '../../bareos/groupSchedule.js';
+import { queueGroupRun, groupRunning, groupPruning } from '../../bareos/groupRunner.js';
+import { keepText, KEEP_MIN, KEEP_MAX, KEEP_PRESETS } from '../../bareos/groupRetention.js';
 import { bareosVmView } from '../../bareos/vmView.js';
 import { getMarks, marksUnreadable } from '../../veeam/backupMarks.js';
 import { isSystemVm } from '../../veeam/backupStatus.js';
@@ -34,7 +35,13 @@ const serverTz = () => { try { return Intl.DateTimeFormat().resolvedOptions().ti
 /** 그룹 → 응답(비밀 없음 — 원장에 비밀이 없다). 다음 회차·실행 중 여부를 덧붙인다. */
 export function groupView(g, now = Date.now()) {
   const next = nextSlot(g.schedule, now);
-  return { ...g, scheduleText: scheduleText(g.schedule), next: next ? { at: next.at, key: next.key, level: next.level } : null, running: groupRunning(g.id) };
+  // 버그 점검 S6: 마지막으로 처리한 회차가 지금보다 미래 — 서버 시계가 앞섰다 돌아왔다. 그 사이 회차는 돌지 않는다(한 번 이하를 지키려고 열쇠를 내리지 않는다) — 화면이 알린다
+  const clockAhead = !!g.lastKey && g.lastKey > slotKey(now);
+  return {
+    ...g, keep: g.keep ?? null, fires: Array.isArray(g.fires) ? g.fires : [], lastPrune: g.lastPrune ?? null, keepText: keepText(g.keep ?? null),
+    scheduleText: scheduleText(g.schedule), next: next ? { at: next.at, key: next.key, level: next.level } : null, running: groupRunning(g.id),
+    ...(groupPruning(g.id) ? { pruning: true } : {}), ...(clockAhead ? { clockAhead: true } : {}),
+  };
 }
 
 /** 법인(vCenter)의 Director 매핑 상태. */
@@ -171,8 +178,8 @@ api.get('/tools/bareos-backup/groups/tree', adminOnly, (req, res) => {
     director: si.view, mapped: !!si.site && !si.mappingMissing?.length, mappingMissing: si.mappingMissing, siteDefaults: si.site ? { storage: si.site.storage, pool: si.site.pool, schedule: si.site.schedule || '' } : null,
     writable: bareosAccess(req.user, vcenterId) === 0, marksKnown,
     groupsLoadError: !!groupsLoadError(), registryLoadError: !!registryLoadError(),
-    limits: { maxMembers: MAX_MEMBERS, maxGroups: MAX_GROUPS, maxBulk: MAX_BULK, jobsLeft: Math.max(0, MAX_JOBS - jobDigests().length) },
-    levels: LEVELS, relayLimits: relayLimits(),   // 화면이 저장(등록)·실행을 기다리는 시간 — 숫자를 화면에 박지 않는다
+    limits: { maxMembers: MAX_MEMBERS, maxGroups: MAX_GROUPS, firesKeep: FIRES_KEEP, maxBulk: MAX_BULK, jobsLeft: Math.max(0, MAX_JOBS - jobDigests().length) },
+    levels: LEVELS, keepLimits: { min: KEEP_MIN, max: KEEP_MAX, presets: KEEP_PRESETS }, relayLimits: relayLimits(),   // 화면이 저장(등록)·실행을 기다리는 시간 — 숫자를 화면에 박지 않는다
     vms, groups: groups.map((g) => groupView(g, now)),
   });
 });
@@ -192,7 +199,7 @@ api.get('/tools/bareos-backup/groups/options', adminOnly, async (req, res) => {
   } catch (e) { sendBareosErr(res, e); }
 });
 
-/** 새 그룹 — body { vcenterId, name, vmIds, schedule, storage?, pool? }. 잡 없는 VM 은 먼저 등록(Director 스케줄 없이)하고, 등록된 VM 만 그룹에 넣는다. */
+/** 새 그룹 — body { vcenterId, name, vmIds, schedule, storage?, pool?, keep? }(keep: 보관 개수 · 비우면 제한 없음). 잡 없는 VM 은 먼저 등록(Director 스케줄 없이)하고, 등록된 VM 만 그룹에 넣는다. */
 api.post('/tools/bareos-backup/groups', adminOnly, async (req, res) => {
   const vcenterId = String(req.body?.vcenterId || '');
   const v = precheck(req, res, vcenterId); if (!v) return;
@@ -208,36 +215,44 @@ api.post('/tools/bareos-backup/groups', adminOnly, async (req, res) => {
     audit(req, 'Bareos 백업 그룹 만들기', `${vcenterId}/${v.name}`, `실패 — ${String(e?.message || e).slice(0, 160)}`);
     return res.status(e?.code === 'conflict' ? 409 : e?.code === 'unavailable' ? 503 : 400).json({ ok: false, reason: `${String(e?.message || e).slice(0, 400)}${reg.registered.some((r) => r.ok) ? ' (이번에 등록한 백업 대상은 남아 있습니다 — 백업 대상 탭)' : ''}`, registered: reg.registered });
   }
-  audit(req, 'Bareos 백업 그룹 만들기', `${vcenterId}/${g.name}`, `VM ${g.vmIds.length}대 · ${scheduleText(g.schedule)}${g.storage ? ` · 스토리지 ${g.storage}` : ''}${g.pool ? ` · 풀 ${g.pool}` : ''}${reg.excluded.length ? ` · 등록 실패로 뺀 VM ${reg.excluded.length}대` : ''}`);
+  audit(req, 'Bareos 백업 그룹 만들기', `${vcenterId}/${g.name}`, `VM ${g.vmIds.length}대 · ${scheduleText(g.schedule)} · ${keepText(g.keep)}${g.storage ? ` · 스토리지 ${g.storage}` : ''}${g.pool ? ` · 풀 ${g.pool}` : ''}${reg.excluded.length ? ` · 등록 실패로 뺀 VM ${reg.excluded.length}대` : ''}`);
   res.status(201).json({ ok: true, group: groupView(g), registered: reg.registered, excluded: reg.excluded, doubleScheduled: g.schedule.enabled ? doubleScheduled(vcenterId, g.vmIds) : [] });
 });
 
 /** 그룹 고치기 — body { name, vmIds, schedule, storage?, pool? }(전부 보낸다 — 화면이 편집 창의 값 전체를 보낸다). 새 VM 은 등록 뒤 넣는다. */
 api.put('/tools/bareos-backup/groups/:id', adminOnly, async (req, res) => {
   const g0 = groupFor(req, res); if (!g0) return;
+  const expect = req.body?.updatedAt != null && Number.isFinite(Number(req.body.updatedAt)) ? Number(req.body.updatedAt) : null;
+  // 버그 점검 S10: 대조를 등록(Director 호출) **전에** — 예전에는 새 VM 을 Director 에 등록한 뒤 409 를 돌려 잡만 생기고 그룹에는 없었다
+  if (expect != null && g0.updatedAt !== expect) {
+    return res.status(409).json({ ok: false, reason: `그사이 다른 화면에서 ‘${g0.name}’ 그룹을 고쳤습니다(${g0.updatedBy || '?'}) — 새로 고친 뒤 다시 저장하세요(그대로 덮어쓰면 그쪽에서 넣은 VM 이 빠질 수 있습니다).`, conflict: true });
+  }
   const v = precheck(req, res, g0.vcenterId, { selfId: g0.id }); if (!v) return;
   const reg = await registerMissing(req, g0.vcenterId, v.vmIds, v.schedule.level);
   if (!reg.members.length) return res.status(409).json({ ok: false, reason: '백업 대상으로 등록된 VM 이 하나도 없어 저장하지 않았습니다 — VM 별 사유를 보세요.', registered: reg.registered, excluded: reg.excluded });
   let g;
   try {
-    const expect = Number.isFinite(Number(req.body?.updatedAt)) && req.body?.updatedAt != null ? Number(req.body.updatedAt) : null;
     g = updateGroup(g0.id, { ...v, vmIds: reg.members }, { by: req.user?.username || '', expectUpdatedAt: expect });
   } catch (e) {
     audit(req, 'Bareos 백업 그룹 고치기', `${g0.vcenterId}/${g0.name}`, `실패 — ${String(e?.message || e).slice(0, 160)}`);
     return res.status(e?.code === 'conflict' ? 409 : e?.code === 'unavailable' ? 503 : 400).json({ ok: false, reason: String(e?.message || e).slice(0, 400), registered: reg.registered });
   }
-  if (!g) return res.status(404).json({ ok: false, reason: '그사이 그룹이 지워졌습니다.' });
+  if (!g) {
+    // 버그 점검 S9: 저장하는 사이 그룹이 지워졌다 — 이번에 등록한 백업 대상은 남는다(숨기지 않고 알린다)
+    audit(req, 'Bareos 백업 그룹 고치기', `${g0.vcenterId}/${g0.name}`, '실패 — 저장하는 사이 그룹이 지워짐');
+    return res.status(404).json({ ok: false, reason: `그사이 그룹이 지워졌습니다.${reg.registered.some((r) => r.ok) ? ' 이번에 등록한 백업 대상은 남아 있습니다(백업 대상 탭).' : ''}`, registered: reg.registered });
+  }
   const added = g.vmIds.filter((id) => !g0.vmIds.includes(id)).length;
   const removed = g0.vmIds.filter((id) => !g.vmIds.includes(id)).length;
   audit(req, 'Bareos 백업 그룹 고치기', `${g.vcenterId}/${g.name}`,
-    `${g0.name !== g.name ? `이름 ${g0.name} → ${g.name} · ` : ''}VM ${g.vmIds.length}대(+${added} −${removed}) · ${scheduleText(g.schedule)}${g.storage ? ` · 스토리지 ${g.storage}` : ''}${g.pool ? ` · 풀 ${g.pool}` : ''}`);
+    `${g0.name !== g.name ? `이름 ${g0.name} → ${g.name} · ` : ''}VM ${g.vmIds.length}대(+${added} −${removed}) · ${scheduleText(g.schedule)} · ${(g0.keep ?? null) !== (g.keep ?? null) ? `보관 ${keepText(g0.keep ?? null)} → ${keepText(g.keep ?? null)}` : keepText(g.keep ?? null)}${g.storage ? ` · 스토리지 ${g.storage}` : ''}${g.pool ? ` · 풀 ${g.pool}` : ''}`);
   res.json({ ok: true, group: groupView(g), registered: reg.registered, excluded: reg.excluded, doubleScheduled: g.schedule.enabled ? doubleScheduled(g.vcenterId, g.vmIds) : [] });
 });
 
 /** 그룹 지우기 — 그룹만 지운다(백업 대상·Director 잡·백업 데이터는 그대로). 실행 중이면 409. */
 api.delete('/tools/bareos-backup/groups/:id', adminOnly, (req, res) => {
   const g = groupFor(req, res); if (!g) return;
-  if (groupRunning(g.id)) return res.status(409).json({ ok: false, reason: '이 그룹을 실행하는 중입니다 — 끝난 뒤 지우세요.' });
+  if (groupRunning(g.id)) return res.status(409).json({ ok: false, reason: '이 그룹을 실행·정리하는 중입니다 — 끝난 뒤 지우세요.' });
   let ok;
   try { ok = deleteGroup(g.id); } catch (e) { return sendBareosErr(res, e); }
   if (!ok) return res.status(404).json({ ok: false, reason: NOT_FOUND });
@@ -255,7 +270,8 @@ api.post('/tools/bareos-backup/groups/:id/run', adminOnly, (req, res) => {
   if (registryLoadError()) return res.status(503).json({ ok: false, reason: '백업 대상 원장을 읽지 못한 상태라 실행하지 않습니다(손상본 보존).' });
   const level = req.body?.level ? String(req.body.level) : null;
   if (level && !LEVELS.includes(level)) return res.status(400).json({ ok: false, reason: `레벨은 ${LEVELS.join('·')} 중 하나입니다.` });
-  runGroup(g.id, { trigger: 'manual', by: req.user?.username || '', level }).catch((e) => console.warn(`[bareos] 백업 그룹 ‘${g.name}’ 수동 실행 실패: ${String(e?.message || e).slice(0, 200)}`));
+  // 같은 Director 의 다른 그룹(예약)과 같은 줄에 선다(버그 점검 S8 — 수동 실행이 줄 밖에서 같은 Director 에 세션을 동시에 열었다)
+  queueGroupRun(g.id, { trigger: 'manual', by: req.user?.username || '', level }).catch((e) => console.warn(`[bareos] 백업 그룹 ‘${g.name}’ 수동 실행 실패: ${String(e?.message || e).slice(0, 200)}`));
   res.status(202).json({ ok: true, started: true, group: groupView(getGroup(g.id) || g) });
 });
 

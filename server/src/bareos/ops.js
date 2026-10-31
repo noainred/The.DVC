@@ -9,8 +9,9 @@
  */
 import { BareosConsoleError } from './console.js';
 import {
-  probe, catalogLists, addJob as directorAddJob, runJob, jobStatus, jobStates, recentJobs, setJobEnabled, cancelJob, jobHistory, jobRuns, jobLog, runRestore,
+  probe, catalogLists, addJob as directorAddJob, runJob, jobStatus, jobStates, recentJobs, setJobEnabled, cancelJob, jobHistory, jobRuns, jobLog, runRestore, deleteJobIds,
 } from './director.js';
+import { pruneSelection } from './groupRetention.js';
 import { jobNameFor, isFinalStatus, isResourceName } from './names.js';
 import { chainFromHistory, chainIssue } from './restore.js';
 
@@ -92,6 +93,42 @@ export const OPS = Object.freeze({
         out.push({ key: it.key, ok: true, jobid: await runJob(s, { job: it.job, level: it.level, storage: it.storage || '', pool: it.pool || '' }) });
       } catch (e) {
         out.push({ key: it.key, ok: false, code: e?.code || 'error', message: String(e?.message || e).slice(0, 300) });
+        if (SESSION_DEAD.has(e?.code)) dead = `Director 연결 문제로 멈췄습니다(${e.code})`;
+      }
+    }
+    return out;
+  },
+  /**
+   * v2.831 백업 그룹 보관 개수 정리 — 잡마다 이력을 읽고(groupRetention.pruneSelection — 체인 기준 Full 앞의 끝난 실행만) 지운 뒤 **다시 읽어**
+   * 실제로 사라진 jobid 만 '지움' 으로 돌려준다(delete 응답 모양에 기대지 않는다). 세션 하나로 순차 · 세션째 끊기면 남은 것은 건너뜀.
+   * 옛 엣지는 이 작업 종류를 몰라 '알 수 없는 작업' 으로 거절한다(아무것도 지우지 않는다).
+   * @param {{ items: { key:number, job:string, keep:number }[] }} a
+   * @returns {Promise<{ key, ok, deleted?:number[], kept?, good?, baseJobid?, baseAt?, reason?, more?, code?, message? }[]>}
+   */
+  async pruneJobs(s, { items = [] } = {}) {
+    const out = [];
+    let dead = '';
+    for (const it of items.slice(0, RUN_JOBS_MAX)) {
+      if (dead) { out.push({ key: it.key, ok: false, code: 'skipped', message: `건너뜀 — ${dead}` }); continue; }
+      let sent = null;   // delete 를 보낸 jobid — 그 뒤 실패하면 '지웠는지 모름' 으로 돌려준다(반증 F4 — 감사에 남기게)
+      try {
+        if (!isResourceName(it.job)) throw invalid('잡 이름이 올바르지 않습니다.');
+        const runs = (await jobRuns(s, it.job)).filter((r) => r.name === it.job);
+        const sel = pruneSelection(runs, it.keep, it.job);
+        let deleted = [];
+        if (sel.deletable.length) {
+          sent = sel.deletable;
+          await deleteJobIds(s, sel.deletable);
+          const left = new Set((await jobRuns(s, it.job)).map((r) => r.jobid));
+          deleted = sel.deletable.filter((id) => !left.has(id));
+        }
+        out.push({
+          key: it.key, ok: true, deleted, kept: sel.kept, good: sel.good, baseJobid: sel.baseJobid, baseAt: sel.baseAt,
+          ...(sel.reason ? { reason: sel.reason } : {}), ...(sel.more ? { more: sel.more } : {}),
+          ...(deleted.length < sel.deletable.length ? { notDeleted: sel.deletable.length - deleted.length } : {}),
+        });
+      } catch (e) {
+        out.push({ key: it.key, ok: false, code: e?.code || 'error', message: String(e?.message || e).slice(0, 300), ...(sent ? { sent } : {}) });
         if (SESSION_DEAD.has(e?.code)) dead = `Director 연결 문제로 멈췄습니다(${e.code})`;
       }
     }
@@ -209,4 +246,4 @@ export const OPS = Object.freeze({
 });
 
 /** Director 상태를 바꾸는 작업. */
-export const MUTATING = Object.freeze(new Set(['addJobs', 'disableJobs', 'runJob', 'runJobs', 'setEnabled', 'cancel', 'restore', 'poll']));
+export const MUTATING = Object.freeze(new Set(['addJobs', 'disableJobs', 'runJob', 'runJobs', 'pruneJobs', 'setEnabled', 'cancel', 'restore', 'poll']));

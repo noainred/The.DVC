@@ -12,6 +12,9 @@
  *   lastFire: { key, at, trigger, by, level, total, started, skipped, failed, unknown, items[] } | null,
  *   missed: { key, at, reason } | null,     // 돌리지 않은 회차 — reason 'down'(포탈이 꺼져 있어 따라잡는 범위를 넘김) · 'edited'(돌 차례에 스케줄을 고침)
  *   sending: { key, at, trigger } | null,   // 보내는 중 표지(차지할 때 함께 쓴다) — 실행 기록(lastFire)이 쓰이면 지운다. 남아 있으면 보내는 도중 재시작한 것
+ *   keep: number|null,                      // v2.831 보관 개수 — VM 마다 최근 N개의 성공 백업을 남기고 오래된 실행을 카탈로그에서 지운다(groupRetention). null = 제한 없음(v2.830 그룹)
+ *   fires: { key, at, trigger, by, level, total, started, skipped, notSent, failed, unknown, error? }[],   // v2.831 실행 이력(최신 먼저 · FIRES_KEEP 개 · 항목 없음)
+ *   lastPrune: { at, fireAt, jobs, deleted, failed, notDeleted, noBase, keptMin, keptMax, baseMin, baseMax, errors[] } | null,   // v2.831 마지막 정리 결과
  *   createdBy, createdAt, updatedBy, updatedAt,
  * }
  */
@@ -23,6 +26,8 @@ import { atomicWriteFileSync, preserveCorrupt, safeLoadText } from '../util/atom
 import { makeLoadError } from '../util/registryCore.js';
 import { isResourceName } from './names.js';
 import { normSchedule, decideFire } from './groupSchedule.js';
+import { normKeep } from './groupRetention.js';
+import { registerExitFlush } from '../util/exitFlush.js';
 
 export const FILE_NAME = 'bareos-groups.json';
 const FILE = () => path.join(config.configDir, 'bareos-groups.json'); // 문자열 그대로 — scripts/config-doc.mjs 가 이 모양으로 파일을 찾는다
@@ -31,6 +36,8 @@ export const MAX_GROUPS = 500;
 export const MAX_MEMBERS = 200;
 export const NAME_MAX = 60;
 export const FIRE_ITEMS_KEEP = 200;
+/** v2.831 실행 이력 칸 수(그룹 상세 '실행 이력'). */
+export const FIRES_KEEP = 30;
 
 let _db = null;
 const _loadErr = makeLoadError();
@@ -97,9 +104,9 @@ const cleanName = (s) => String(s ?? '').replace(/[\u0000-\u001f\u007f]/g, '').s
 
 /**
  * 입력 판정(순수에 가까움 — 지금 원장만 본다). 이름·VM·스케줄·스토리지 형식과 '이름 중복 · VM 은 그룹 하나에만' 을 본다.
- * @param {object} input { name, vcenterId, vmIds, schedule, storage, pool }
+ * @param {object} input { name, vcenterId, vmIds, schedule, storage, pool, keep? }
  * @param {{ selfId?: string }} [o] 수정이면 자기 자신은 빼고 본다
- * @returns {{ name, vmIds, schedule, storage, pool }}
+ * @returns {{ name, vmIds, schedule, storage, pool, keep }}  keep: undefined = 보내지 않음(수정이면 그대로 둔다 — 보관 개수를 조용히 '제한 없음' 으로 바꾸지 않게)
  */
 export function checkGroupInput(input, { selfId = '' } = {}) {
   const b = input && typeof input === 'object' ? input : {};
@@ -115,6 +122,7 @@ export function checkGroupInput(input, { selfId = '' } = {}) {
   if (storage && !isResourceName(storage)) throw fail('invalid', '스토리지 이름이 올바르지 않습니다(영문·숫자·. _ - 만).');
   if (pool && !isResourceName(pool)) throw fail('invalid', '풀 이름이 올바르지 않습니다(영문·숫자·. _ - 만).');
   const schedule = normSchedule(b.schedule);
+  const keep = b.keep === undefined ? undefined : normKeep(b.keep);   // JSON 에 undefined 는 없다 — 보내지 않은 것
   const others = load().groups.filter((g) => g.vcenterId === vcenterId && g.id !== selfId);
   const low = name.toLowerCase();
   if (others.some((g) => String(g.name).toLowerCase() === low)) throw fail('conflict', `같은 법인에 ‘${name}’ 그룹이 이미 있습니다 — 다른 이름을 쓰세요.`);
@@ -125,7 +133,7 @@ export function checkGroupInput(input, { selfId = '' } = {}) {
     const groups = [...new Set(dup.map((id) => taken.get(id)))].slice(0, 5).join(', ');
     throw fail('conflict', `VM ${dup.length}대가 이미 다른 그룹(${groups})에 있습니다 — VM 하나는 그룹 하나에만 넣을 수 있습니다(두 그룹이면 같은 VM 이 두 번 백업됩니다).`);
   }
-  return { name, vmIds, schedule, storage, pool };
+  return { name, vmIds, schedule, storage, pool, keep };
 }
 
 /** 새 그룹. checkGroupInput 을 **저장하는 순간** 다시 본다(그사이 다른 저장이 같은 VM 을 가져갔을 수 있다). */
@@ -136,8 +144,8 @@ export function addGroup(input, { by = '', directorId = '', now = Date.now() } =
     const g = {
       id: `bg_${now.toString(36)}${crypto.randomBytes(3).toString('hex')}`,
       name: v.name, vcenterId: String(input.vcenterId), directorId: String(directorId || ''),
-      vmIds: v.vmIds, schedule: v.schedule, storage: v.storage, pool: v.pool,
-      anchorAt: now, lastKey: '', lastFire: null, missed: null,
+      vmIds: v.vmIds, schedule: v.schedule, storage: v.storage, pool: v.pool, keep: v.keep ?? null,
+      anchorAt: now, lastKey: '', lastFire: null, missed: null, fires: [], lastPrune: null,
       createdBy: String(by), createdAt: now, updatedBy: String(by), updatedAt: now,
     };
     db.groups.push(g);
@@ -167,6 +175,7 @@ export function updateGroup(id, input, { by = '', now = Date.now(), expectUpdate
       g.anchorAt = now;
     }
     Object.assign(g, { name: v.name, vmIds: v.vmIds, schedule: v.schedule, storage: v.storage, pool: v.pool, updatedBy: String(by), updatedAt: now });
+    if (v.keep !== undefined) g.keep = v.keep;
     return copy(g);
   });
 }
@@ -199,6 +208,7 @@ export function claimSlots(list, now = Date.now()) {
         if (!g || (g.lastKey && c.key <= g.lastKey)) continue;
         g.lastKey = c.key;
         g.sending = { key: c.key, at: now, trigger: c.trigger || 'timer' };
+        if (g.missed && g.missed.key < c.key) g.missed = null;   // 버그 점검 W7: 뒤 회차가 돌면 '돌리지 않은 회차' 안내는 지난 일이다
         got.push(g.id);
       }
       return got;
@@ -256,11 +266,29 @@ export function recordFire(id, fire) {
   const g = db.groups.find((x) => x.id === id);
   if (!g) return false;
   g.lastFire = { ...fire, items: (Array.isArray(fire.items) ? fire.items : []).slice(0, FIRE_ITEMS_KEEP) };
+  const summary = { ...fire };
+  delete summary.items;   // 이력에는 VM 항목을 싣지 않는다(원장 크기 — 항목은 lastFire 에만)
+  g.fires = [summary, ...(Array.isArray(g.fires) ? g.fires : [])].slice(0, FIRES_KEEP);
   g.sending = null;
+  touchLater();
+  return true;
+}
+function touchLater() {
   _rev += 1;
   if (!_fireTimer) { _fireTimer = setTimeout(flushFires, FIRE_FLUSH_MS); _fireTimer.unref?.(); }
+}
+/** v2.831 보관 개수 정리 결과 — recordFire 와 같은 지연 쓰기(화면용 기록 · 실제로 지운 것은 Director 카탈로그가 진실). */
+export function recordPrune(id, prune) {
+  const db = load();
+  if (_loadErr.get()) return false;
+  const g = db.groups.find((x) => x.id === id);
+  if (!g) return false;
+  g.lastPrune = { ...prune, errors: (Array.isArray(prune.errors) ? prune.errors : []).slice(0, 20) };
+  touchLater();
   return true;
 }
 export function _flushGroupsForTest() { if (_fireTimer) { clearTimeout(_fireTimer); flushFires(); } }
+// 버그 점검 S5: 지연 쓰기는 종료 flush 에 등록한다(util/exitFlush.js 규약 — 실행이 끝나고 1초 안에 재시작하면 기록을 잃고 '재시작' 경고가 남았다)
+registerExitFlush('bareos-groups', () => { if (_fireTimer) { clearTimeout(_fireTimer); flushFires(); } });
 
 export function _resetGroupsForTest() { if (_fireTimer) { clearTimeout(_fireTimer); _fireTimer = null; } _db = null; _loadErr.clear(); _rev = 0; }

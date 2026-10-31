@@ -113,7 +113,9 @@ export function jobDigests() {
 }
 /** 마지막으로 **백업이 만들어진**(T 성공 · W 경고 — 둘 다 복원 지점이 생긴다) 실행이 끝난 시각. lastRun 이 실패여도 finishedRuns 에 있으면 그 시각. 모르면 null. */
 function lastOkAt(j) {
-  let best = null;
+  // v2.830 버그 점검 S14: 끝난 실행 목록은 최근 FINISHED_KEEP 건뿐이라 성공 뒤 실패가 10번 넘으면 성공 기록이 밀려나 '백업 없음' 이 됐다 —
+  //   원장 칸 lastOkAt(성공·경고가 끝날 때마다 올린다)을 함께 본다
+  let best = Number.isFinite(j.lastOkAt) && j.lastOkAt > 0 ? j.lastOkAt : null;
   for (const r of [j.lastRun, ...(Array.isArray(j.finishedRuns) ? j.finishedRuns : [])]) {
     if (r && (r.status === 'T' || r.status === 'W') && Number.isFinite(r.endedAt) && r.endedAt > 0 && (best == null || r.endedAt > best)) best = r.endedAt;
   }
@@ -126,9 +128,43 @@ export function findByVm(vcenterId, vmId) { return copy(load().jobs.find((j) => 
  * 새 대상 추가(Director 잡을 만든 **뒤**에 부른다). 같은 VM 은 한 번만.
  * @returns {object} 저장한 job
  */
+const LOAD_ERR_ADD = '백업 대상 원장을 읽지 못한 상태라 새 대상을 추가하지 않습니다(손상본 보존 — 다빈치 서비스 점검에서 확인).';
 export function addJob(input) {
   const db = load();
-  if (_loadErr.get()) throw new Error('백업 대상 원장을 읽지 못한 상태라 새 대상을 추가하지 않습니다(손상본 보존 — 다빈치 서비스 점검에서 확인).');
+  if (_loadErr.get()) throw new Error(LOAD_ERR_ADD);
+  const retiredBefore = db.retired;
+  const job = insertJob(db, input);
+  // 파일에 못 쓰면 메모리에도 넣지 않는다(v2.822 — 예전에는 메모리에만 남아 화면은 '등록됨', 재시작하면 사라졌다)
+  try { persist(); } catch (e) { db.jobs.pop(); db.retired = retiredBefore; throw e; }
+  return job;
+}
+
+/**
+ * 여러 대상을 **한 번의 쓰기로** 추가(Director 잡을 만든 뒤 — 일괄 등록·그룹 저장). 항목마다 { ok, job } | { ok:false, err }.
+ * v2.830 버그 점검 S2(실측): 대상마다 addJob 이 원장 전체를 써 원장 2,800건에 200대 = 5.2초 동기 정지였다.
+ * addJob 의 '쓰기 실패면 메모리에도 넣지 않는다' 계약을 **묶음 단위로** 지킨다 — 끝 쓰기가 실패하면 이번에 넣은 것을 전부 되돌리고 던진다
+ * (부르는 쪽이 그 잡들을 원장 밖 잡으로 끈다 — service.orphanCleanup).
+ */
+export function addJobs(inputs) {
+  const db = load();
+  if (_loadErr.get()) throw new Error(LOAD_ERR_ADD);
+  const jobsBefore = db.jobs.slice();
+  const retiredBefore = db.retired;
+  const out = (Array.isArray(inputs) ? inputs : []).map((input) => {
+    try { return { ok: true, job: insertJob(db, input) }; } catch (e) { return { ok: false, err: e }; }
+  });
+  if (out.some((o) => o.ok)) {
+    _rev += 1;
+    if (_batch) _dirty = true;
+    else {
+      try { writeNow(); } catch (e) { db.jobs = jobsBefore; db.retired = retiredBefore; throw e; }
+    }
+  }
+  return out;
+}
+
+/** 원장 메모리에 한 대상을 넣는다(쓰기는 부르는 쪽). 상한·같은 VM 은 거부. */
+function insertJob(db, input) {
   if (db.jobs.length >= MAX_JOBS) throw new Error(`백업 대상은 ${MAX_JOBS}개까지 등록할 수 있습니다.`);
   if (db.jobs.some((j) => j.vcenterId === input.vcenterId && j.vmId === input.vmId)) throw new Error('이 VM 은 이미 백업 대상입니다.');
   const job = {
@@ -142,12 +178,9 @@ export function addJob(input) {
     ...(input.demo ? { demo: true } : {}),
     pending: null, lastRun: null, lastError: null, missingInDirector: false, restores: [],
   };
-  const retiredBefore = db.retired;
   db.jobs.push(job);
   const sameRetired = (r) => r.name === job.bareosJob && retiredDir(r) === (job.directorId || DEFAULT_DIRECTOR_ID);
   if (db.retired?.some(sameRetired)) db.retired = db.retired.filter((r) => !sameRetired(r));   // 같은 Director 에서 같은 이름을 다시 쓰면 '지운 잡' 이 아니다
-  // 파일에 못 쓰면 메모리에도 넣지 않는다(v2.822 — 예전에는 메모리에만 남아 화면은 '등록됨', 재시작하면 사라졌다)
-  try { persist(); } catch (e) { db.jobs.pop(); db.retired = retiredBefore; throw e; }
   return copy(job);
 }
 
@@ -203,6 +236,11 @@ export function applyRunRow(id, row, now = Date.now()) {
     const { jobid, status, state, level, endedAt, errors } = rec;
     j.finishedRuns = [...(Array.isArray(j.finishedRuns) ? j.finishedRuns : []), { jobid, status, state, level, endedAt, errors, checkedAt: now }]
       .sort((a, b) => a.jobid - b.jobid).slice(-FINISHED_KEEP);
+    changed = true;
+  }
+  // 마지막으로 **백업이 만들어진**(T·W) 시각 — 잘린 목록과 무관하게 남긴다(S14 · 더 새 값만)
+  if ((row.status === 'T' || row.status === 'W') && Number.isFinite(rec.endedAt) && rec.endedAt > 0 && !(Number.isFinite(j.lastOkAt) && j.lastOkAt >= rec.endedAt)) {
+    j.lastOkAt = rec.endedAt;
     changed = true;
   }
   if (j.pending && j.pending.jobid === row.jobid) {

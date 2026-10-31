@@ -61,6 +61,18 @@ export const VALUE = Object.freeze({
     if (bool(x.ok) && !jobid) return { key, ok: false, code: 'unknown', message: '엣지가 jobid 없이 성공을 회신했습니다 — 실행됐을 수 있습니다. Director 에서 확인하세요.' };
     return { key, ok: bool(x.ok), ...(jobid ? { jobid } : {}), ...(x.code ? { code: str(x.code, 40) } : {}), ...(x.message ? { message: str(x.message, 300) } : {}) };
   }),
+  // v2.831 보관 개수 정리 — 지운 jobid 는 숫자만(엣지가 다시 읽어 실제로 사라진 것). 성공인데 deleted 가 배열이 아니면 '결과 모름'(지웠는지 모른다)
+  pruneJobs: (v) => arr(v).slice(0, 500).map((x0) => {
+    const x = obj(x0);
+    const key = Number.isInteger(x.key) && x.key >= 0 && x.key < 1_000_000 ? x.key : -1;
+    if (bool(x.ok) && !Array.isArray(x.deleted)) return { key, ok: false, code: 'unknown', message: '엣지가 지운 목록 없이 성공을 회신했습니다 — 지웠는지 알 수 없습니다.' };
+    if (!bool(x.ok)) return { key, ok: false, ...(x.code ? { code: str(x.code, 40) } : {}), ...(x.message ? { message: str(x.message, 300) } : {}), ...(Array.isArray(x.sent) ? { sent: x.sent.slice(0, 1000).map(posInt).filter(Boolean) } : {}) };
+    return {
+      key, ok: true, deleted: arr(x.deleted).slice(0, 1000).map(posInt).filter(Boolean),
+      kept: nonNeg(x.kept), good: nonNeg(x.good), baseJobid: posInt(x.baseJobid), baseAt: timeOf(x.baseAt),
+      ...(x.reason ? { reason: str(x.reason, 300) } : {}), ...(posInt(x.more) ? { more: posInt(x.more) } : {}), ...(posInt(x.notDeleted) ? { notDeleted: posInt(x.notDeleted) } : {}),
+    };
+  }),
   setEnabled: () => null,
   history: (v) => rows(v, 200),
   cancel: (v) => { const r = obj(v); return r.final ? { final: rowOut(r.final) } : r.cleared ? { cleared: true } : { canceled: bool(r.canceled) }; },

@@ -47,6 +47,9 @@ describe('R-B2 표시 수 — 못 읽으면 0 이 아니라 모름', () => {
     expect(filterCountText('crit-high', counts, true)).toBe('—');
     expect(filterCountText('veeam', counts, true)).toBe(2);
     expect(filterCountText('need', counts, false)).toBe(0);
+    expect(filterCountText('bareos', { bareos: 0 }, false, true)).toBe('—');   // v2.830 W2: Bareos 원장을 못 읽으면 Bareos 칩은 모름
+    expect(filterCountText('bareos-missing', { 'bareos-missing': 0 }, false, true)).toBe('—');
+    expect(filterCountText('bareos', { bareos: 3 }, false, false)).toBe(3);
   });
   it('주의 목록 — 표시 수를 모르는 행이 있으면 정보 한 줄(미백업 경고가 소리 없이 사라지지 않게)', () => {
     const ok = { id: 'v1', name: 'VC1', veeamState: 'ok', snap: 1, snapStale: 0 };
@@ -66,7 +69,7 @@ describe('R-B2 표시 수 — 못 읽으면 0 이 아니라 모름', () => {
     const det = read('./BackupDetailTool.jsx');
     expect(det).toMatch(/marksLine\(r\.marks, data\.marksUnreadable\)/);
     expect(det).toMatch(/marksNotice\(data\)/);
-    expect(det).toMatch(/filterCountText\(k, counts, marksUnknown\)/);
+    expect(det).toMatch(/filterCountText\(k, counts, marksUnknown[,)]/);   // v2.830 버그 점검 W2: 뒤에 Bareos 원장 못 읽음 인자가 붙는다
     expect(det).toMatch(/const writable = data\?\.writable === true && !data\?\.marksUnreadable/);
   });
 });

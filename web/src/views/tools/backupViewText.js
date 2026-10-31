@@ -277,8 +277,9 @@ export function marksNotice(d) {
 }
 /** v2.785(GR R-B2): 세부 보기 칩의 수 — 표시 기준 칩(백업 필요·미백업·중요도)은 표시를 모르면 '—'. */
 const MARK_FILTER_KEYS = new Set(['need', 'needgap', 'bareos-missing', 'crit-high', 'crit-mid', 'crit-low', ...METHODS.map((m) => `method-${m.key}`), 'method-unset']);   // v2.828 bareos-missing 도 방식 기준
-export function filterCountText(k, counts, marksUnknown) {
+export function filterCountText(k, counts, marksUnknown, bareosUnknown = false) {
   if (marksUnknown && MARK_FILTER_KEYS.has(k)) return '—';
+  if (bareosUnknown && (k === 'bareos' || k === 'bareos-missing')) return '—';   // 버그 점검 W2: Bareos 원장을 못 읽으면 잡 기준 칩은 모름(0 이 아니다)
   return counts?.[k];
 }
 /** v2.785(GR R-B3): 세부내용 조회 조건 키(vCenter · 전원 · 제외 — 서버가 세는 조건). 저장 직후 재조회가 지금 고른 조건과 같은지 본다. */
