@@ -6,6 +6,7 @@
 
 ## 목차
 
+- Backup v2.836 Summary 개편 — 법인 › 폴더 › VM 트리 표 · BackedUp 세 묶음 · 전체 법인 백업 안 된 VM 찾기(백업 메뉴 개편 1-b — 2026-10-31)
 - Backup v2.835 메뉴 4탭 · 백업 정책 5범주 · Detail 개편 · 백업 안 된 VM 찾기(백업 메뉴 개편 1-a — 2026-10-31)
 - Bareos v2.834 진행 현황 개선(Director 상태 · 멈춤 의심 · 진단 원문) · 백업 대상 OS 구분(2026-10-31)
 - Bareos v2.833 진행 현황판(전체 법인 · 단일 법인 · 속도 상태) 규칙(2026-10-31)
@@ -1822,6 +1823,27 @@
   ⚠ 정정(v2.823): 카탈로그 memo 세대(P9)는 v2.823 에 해소했다(memo 키에 Director id + `settingsRev` — 설정을 저장하면 새로 읽는다). 고아 잡(I7)은 v2.823 검토 C3 에서
   '가리키는 Director 가 설정에 없는 대상은 원장에서만 취소·삭제' 경로로 일부 해소(Director 쪽 고아 잡 탐지는 여전히 없다).
 
+## Backup v2.836 Summary 개편 — 법인 › 폴더 › VM 트리 표 · BackedUp 세 묶음 · 전체 법인 백업 안 된 VM 찾기(백업 메뉴 개편 1-b — 2026-10-31)
+
+사용자 요청 '서머리에는 veeam/bareos/ssh 3개를 합쳐 BackedUp · 백업안함 · 확인필요 3개의 합계' · '서머리 화면에서 폴더를 클릭하면 VM list' · '1의 폴더 구조도 같은 모양으로' · '써머리/detail 화면에서 Clone/snapshot 관련 문구와 기능 제거' · '지정한 시간만큼 백업되지 않은 VM 찾는 기능' + 시안 ① Summary.
+사용자 선택(1-a 와 같다): 검증 '표준' · 결정 D1~D8. 진행 중 질문 'Summary 에도 실제 백업 묶음을 둘지' 는 답이 없어 **정책 기준(사용자 정의 그대로)** 으로 만들었다(실제 · 불일치 · RPO 는 숫자 줄과 솔루션 카드에 따로).
+회귀 `server/test/backupSummary2836.test.js` · 웹 `views/tools/backupSummary2836.test.js` · 갱신 `backupMarks2784`·`backupPriority2787`(캐시 키 · 라우트 수) · `audit2781c`·`audit2782d`·`backupViewText`(예전 Summary 화면 모양). 변이 검증 24/24(`veeam/backupSummaryAgg.js`).
+
+- **법인 줄 수는 Detail 과 같은 VM 행을 센 값**: `routes/api/veeam.js backupVmRows` 하나가 Detail · Summary · 전체 법인 찾기의 VM 행을 만든다(vmBackupView → withBareos → policyFields + 다음 예정). Summary 는 `backupSummaryAgg.addSiteVm` 으로 세기만 한다 —
+  웹 폴더 집계(`buildTree` · `addPolicyAgg`)와 같은 VM 행에 같은 수(웹 테스트 대조). 정책을 하나도 모르면 pol null(0 이 아니다) · 합계는 그 법인을 빼고 `polUnkSites` 로 센다(화면 '*').
+- **RPO**: 백업 안함은 대상 아님 · 정책을 모르면 모름(결과가 있어도 충족으로 세지 않는다 — 백업 안함인지 모른다) · 한쪽 결과를 모르면 모름. 웹 rpoCell 과 같은 갈래(서버 테스트가 같은 입력으로 대조). 1·3·7일을 서버가 한 번에 센다.
+- **트리 표**(`BackupSummaryTree.jsx`): 법인 줄은 서버 집계 · 법인을 펼치면 그 법인의 `GET /tools/backup-detail`(60초 캐시)을 `buildTree` 로 그린다(판정 코어 하나 · 펼칠 때 1회 · 늦은 응답 버림 · 범위 옵션·새로고침이 바뀌면 열린 법인만 다시).
+  처음엔 폴더가 접힌 채(맨 위가 데이터센터 하나면 그것만 연다) — 폴더를 눌러야 VM 이 보인다. Detail 이 거부된 계정은 펼치면 권한 안내(403). 법인 줄 정렬은 머리 버튼(aria-sort · 모르는 값은 늘 뒤).
+- **전체 법인 찾기**(`GET /tools/backup-summary/stale` · `BackupSummaryStale.jsx`): VM 단위 = Detail 도구 데이터라 `detailToolOk` 가 아니면 403 · scope 교집합 · 기간 1~999 정수(아니면 400) · 행 500 상한(수는 전부) · 캐시 60초(키 = 범위·역할·리비전 + 쿼리).
+  판정은 backupPolicy.staleOf(웹 findStale 과 같은 수·같은 순서 — 테스트 대조). 화면은 구획을 처음 펼칠 때와 '찾기' 때만 부른다(폴링 없음) · 조건은 'backup-summary.stale' 에 따로 기억 · 조건이 바뀌면 '지난 조건의 결과' 를 알린다.
+- **Summary 에서 뺀 것**(사용자 요청 '스냅샷 제거' + 시안): 스냅샷 KPI · 커버리지 막대(둘 다·Veeam 만·스냅샷만) · 법인별 표 · 바로가기 줄 · 우선순위 VM 표(스냅샷 잔존 탭 포함) · 주의가 필요한 곳 · '두 기준' 안내.
+  판정 함수(attentionList · quickTone · coverageOf · priorityView)와 서버 priority 응답은 그대로 남아 있다(화면만 바뀜 — 다른 화면이 다시 쓸 때 · 지우면 별건으로).
+- **정정(v2.835 기록)**: 2.835.0 릴리스 노트와 위 v2.835 단락의 'Summary · Detail 에서 Clone · 스냅샷 문구와 기능을 뺐다' 는 **Detail 만** 맞았다 — Summary 는 이번 2.836 에서 뺐다(2.835 웹 테스트도 Detail 만 검사했다).
+- **Chromium**(목 서버 · 1440/400): 오류 0 · 페이지 가로 넘침 0. 1440 에서 트리 표 · 찾기 표 가로 스크롤 0(숫자 카드 4열 × 2줄 — 7+1 로 홀로 남던 배치를 `minmax(min(250px, calc(50% - 5px)), 1fr)` 로) · 400 은 표가 카드 안에서 스크롤.
+  잡은 결함: 숫자 카드 7+1 · '복원 지점' 머리 두 줄 · 법인을 펼치면 첫 단계 폴더가 모두 열려 VM 이 쏟아짐 · 솔루션 카드 링크 대비 낮음 · 찾기 표 300줄 한 번에(→ 50줄 + 전부 보기) · 찾기 표 마지막 'Detail ›' 칸이 1440 에서 가려짐(→ 법인 이름이 Detail 링크).
+- 남긴 것: Summary CSV(`backup-summary.csv`)에는 예전 스냅샷 열이 그대로 있다(화면만 바꿈) · 백업된 용량(Veeam 복원 지점 크기 미수집 — 3차 EM) · 24시간 스케줄 띠(Director 스케줄 2차 · Veeam 잡 일정 3차) ·
+  통합 에러 로그(Bareos joblog 2차 · EM 세션 3차) · Bareos 진행 중 백업 수(진행 현황 탭에만) · SSH 백업 기능 · '이 조건을 알림으로'.
+
 ## Backup v2.835 메뉴 4탭 · 백업 정책 5범주 · Detail 개편 · 백업 안 된 VM 찾기(백업 메뉴 개편 1-a — 2026-10-31)
 
 사용자 요청 '백업 관련 메뉴를 Summary · Detail · Veeam · Bareos 4개로 개편' + 시안(https://claude.ai/artifact/9TZ6rkhZGhKd2hSy696qfm — 정책 5범주 · 백업 정책 아이콘 줄 · 백업 등록 줄 · '지정한 시간만큼 백업되지 않은 VM 찾기' · Summary·Detail 에서 Clone/스냅샷 제거).
@@ -1844,7 +1866,8 @@
   창 안에 아는 성공이 하나라도 있으면 다른 쪽을 몰라도 대상이 아니다 · 판단에 필요한 쪽을 모르면 '모름' 으로 따로 센다(미달로 단정하지 않는다).
   '결과 모두 선택' 은 모름을 빼고 Detail 선택에 더한다 · 조건·펼침은 이 브라우저에 기억(localStorage — 못 써도 동작).
 - **메뉴 4탭**: Summary · Detail · Veeam · Bareos. Veeam = 하위 탭(서버 · EM · 라이선스 / 백업 실행) — **도구 키는 그대로**(`backup-em`·`backup-run` — 라벨만 'Backup 현황 · Veeam', 옛 이름은 aka).
-  Summary · Detail 에는 Clone·스냅샷 문구·기능을 두지 않는다(사용자 요청 — 웹 테스트가 주석을 뺀 코드에서 막는다). 저장값 clone·config 는 '확인 필요' 로 보인다.
+  Detail 에는 Clone·스냅샷 문구·기능을 두지 않는다(사용자 요청 — 웹 테스트가 주석을 뺀 코드에서 막는다). 저장값 clone·config 는 '확인 필요' 로 보인다.
+  ⚠ 정정(v2.836): 처음 이 줄은 'Summary · Detail' 이라 적었지만 2.835 는 Detail 만 바꿨다 — Summary 는 v2.836 에서 뺐다.
 - **Bareos 그룹 등록 넘김**: Detail 에서 고른 VM 을 sessionStorage 로 넘기고(`saveBareosGroupHandoff`) 백업 그룹 탭이 **같은 vCenter 일 때만** 새 그룹 편집으로 연다.
   다른 그룹 소속·고를 수 없는 VM 은 첫 화면부터 뺀다(`pickable` — 정리 효과와 같은 규칙). 'SSH 스크립트 등록' 은 버튼만(준비 중 · 비활성).
 - **Chromium**(목 서버 · 1440/400): 오류 0 · 페이지 가로 넘침 0. 1440 에서 상세 칸을 닫으면 표 가로 스크롤 0, 열면 카드 안 240px 스크롤 —

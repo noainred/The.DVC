@@ -110,12 +110,12 @@ describe('v2.781 C-I2 주의가 필요한 곳', () => {
     expect(JSON.stringify(att)).not.toMatch(/`/);
   });
 
-  it('화면 — 잘림 줄은 주의 필요 보기 버튼 · KPI 는 summaryKpis 하나 · 백업 중 칸은 runningCell', () => {
+  it('화면 — KPI 는 summaryKpis 하나(백업 중) · v2.836 정책 KPI 는 summaryPolicyKpis 하나', () => {
+    // v2.836(백업 메뉴 개편 1-b — 사용자 요청 + 시안 ①): Summary 의 '주의가 필요한 곳' 목록과 법인별 표(백업 중 칸)는 법인 › 폴더 › VM 트리 표로 바뀌었다.
+    //   attentionList · runningCell 판정은 그대로 남아 위 테스트가 고정한다(다른 화면이 다시 쓸 때를 위해).
     const src = fs.readFileSync(new URL('./BackupSummaryTool.jsx', import.meta.url), 'utf8');
-    expect(src).toMatch(/a\.more \?/);
-    expect(src).toMatch(/setFilter\('warn'\)/);
     expect(src).toMatch(/summaryKpis\(t,/);
-    expect(src).toMatch(/runningCell\(r\)/);
+    expect(src).toMatch(/summaryPolicyKpis\(t,/);
     expect(src).not.toMatch(/pctOf\(n, t\.vm\)/);
   });
 });
