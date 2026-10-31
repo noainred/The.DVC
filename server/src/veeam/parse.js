@@ -19,6 +19,13 @@
 
 /** 문자열만 받아 자르고 제어문자를 공백으로(상주 값·화면 값). */
 export const s = (v, max = 200) => (typeof v === 'string' ? v.replace(/[\x00-\x1f\x7f]+/g, ' ').trim().slice(0, max) : ''); // eslint-disable-line no-control-regex
+/**
+ * v2.838 VM 마지막 task 의 메시지(Veeam 작업 결과 원문 ≤300자) — byVm 항목에 **Symbol 키로만** 싣는다.
+ *   byVm 은 /veeam/vcenter 응답(maskOtherVcenter)으로 그대로 나가고 Detail 행에도 펼쳐지는데, 원문에는 프록시·저장소 주소가 들어갈 수 있어
+ *   관리자가 아닌 계정에 가려야 한다(v2.766 publicTaskMessage). JSON 직렬화는 Symbol 키를 싣지 않으므로 어떤 응답에도 원문이 실리지 않는다 —
+ *   통합 에러 로그(routes/api/veeam.js errorsData)만 이 키로 꺼내 비관리자에게는 publicTaskMessage 를 거친다. 일반 속성으로 바꾸지 말 것.
+ */
+export const TASK_MSG = Symbol('veeam.lastTaskMessage');
 const numOrNull = (v) => {
   if (typeof v === 'number') return Number.isFinite(v) ? v : null;
   if (typeof v === 'string' && v.trim() !== '' && Number.isFinite(Number(v))) return Number(v);
@@ -597,7 +604,7 @@ export function matchToVcenter(vc, vms, results, { refsFor = null, otherHosts = 
       const lb = lastBackupOf(e);
       if (lb && (cur.lb == null || lb.t > cur.lb)) { cur.lb = lb.t; cur.lbSrc = lb.src; }
       // v2.780: 그 VM 의 마지막 task 결과(Success·Warning·Failed) — 서버가 여럿이면 가장 늦게 끝난 것(백업 메뉴의 실패·경고 필터)
-      if (e.lt && e.lt.r && Number.isFinite(e.lt.e) && (!lrAt.has(id) || e.lt.e > lrAt.get(id))) { cur.lr = String(e.lt.r); cur.lrt = e.lt.e; cur.lrs = Number.isFinite(e.lt.s) && e.lt.s <= e.lt.e ? e.lt.s : null; lrAt.set(id, e.lt.e); }   // v2.835 lrt = 그 결과가 끝난 시각(Detail '최근 실패' 24시간 창)
+      if (e.lt && e.lt.r && Number.isFinite(e.lt.e) && (!lrAt.has(id) || e.lt.e > lrAt.get(id))) { cur.lr = String(e.lt.r); cur.lrt = e.lt.e; cur.lrs = Number.isFinite(e.lt.s) && e.lt.s <= e.lt.e ? e.lt.s : null; cur[TASK_MSG] = typeof e.lt.m === 'string' ? e.lt.m.slice(0, 300) : ''; lrAt.set(id, e.lt.e); }   // v2.835 lrt = 그 결과가 끝난 시각(Detail '최근 실패' 24시간 창)
       if (refsFor && id === refsFor) (cur.refs || (cur.refs = [])).push({ server, result, entry: e });
       if (Number.isFinite(e.sz) && e.sz >= 0) cur.sz = (cur.sz ?? 0) + e.sz;   // v2.837 복원 지점 크기 합(바이트 — 서버가 여럿이면 더한다 · Summary '백업된 용량')
       for (const jb of okJobs) {

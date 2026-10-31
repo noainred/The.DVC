@@ -14,6 +14,7 @@ import { fmtNum, staleReason, STALE_UNITS, loadStaleOpts, saveStaleOpts, lastOkT
 import { SUMMARY_STALE_KEY, staleQuery, staleQueryMatches, staleAction } from './backupSummaryText.js';
 import { saveHandoff } from './backupRunText.js';
 import { saveBareosHandoff } from './bareosViewText.js';
+import BackupSummaryAlert from './BackupSummaryAlert.jsx';
 
 const SRC = [['all', '실제 백업 전부(Veeam · Bareos)'], ['veeam', 'Veeam 만'], ['bareos', 'Bareos 만'], ['policy', '정책에 맞는 백업만']];
 const KIND = { never: { text: '한 번도 없음', color: '#fca5a5' }, old: { text: '기준 넘음', color: '#fdba74' }, unknown: { text: '모름', color: 'var(--text-dim)' } };
@@ -41,7 +42,10 @@ export default function BackupSummaryStale({ scope, rows, sel, onPick, onOpenDet
   const [loading, setLoading] = useState(false);
   const [all, setAll] = useState(false);   // 표 전부 보기(처음엔 50줄 — 정렬 뒤 자른다)
   const [csvErr, setCsvErr] = useState(null);
+  const [alert, setAlert] = useState(null);   // v2.838 '이 조건을 알림으로(메일)' — 펼칠 때 한 번 읽는다(범위 계정은 hidden)
+  const [alertOpen, setAlertOpen] = useState(false);
   const gen = useRef(0);
+  const loadAlert = useCallback(() => { fetchJson('/tools/backup-summary/alert').then(setAlert).catch(() => setAlert(null)); }, []);
   useEffect(() => { const { vc: _vc, ...keep } = o; saveStaleOpts(keep, undefined, SUMMARY_STALE_KEY); }, [o]);   // 법인 선택은 기억하지 않는다(다음에 열면 전체)
   useEffect(() => { try { localStorage.setItem(OPEN_KEY, open ? '1' : '0'); } catch { /* 저장 못 해도 동작 */ } }, [open]);
   const find = useCallback(() => {
@@ -66,6 +70,7 @@ export default function BackupSummaryStale({ scope, rows, sel, onPick, onOpenDet
   useEffect(() => { if (lastScope.current !== scopeSig) { lastScope.current = scopeSig; gen.current++; setData(null); setLoading(false); } }, [scopeSig]);
   useEffect(() => { if (open && !data && !loading && !error) find(); }, [open, data]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => () => { gen.current++; }, []);
+  useEffect(() => { if (open && !alert) loadAlert(); }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const set = (patch) => setO((cur) => ({ ...cur, ...patch }));
   const bad = staleQuery(o, scope) == null;
@@ -129,8 +134,10 @@ export default function BackupSummaryStale({ scope, rows, sel, onPick, onOpenDet
             <span className="flex" style={{ marginLeft: 'auto', gap: 6 }}>
               <button type="button" className="tab active" disabled={bad || loading} onClick={find} style={{ padding: '3px 14px', fontSize: 12 }}>{loading ? '찾는 중…' : '찾기'}</button>
               {canCsv() && <button type="button" className="tab" disabled={bad} onClick={csv} title="지금 조건으로 찾은 VM 전부(서버 상한 없이) — CSV 권한이 있을 때만" style={{ padding: '3px 12px', fontSize: 12 }}>CSV</button>}
+              {alert && !alert.hidden && <button type="button" className={`tab${alertOpen ? ' active' : ''}`} aria-expanded={alertOpen} onClick={() => setAlertOpen((v) => !v)} title="이 조건으로 하루 한 번 메일을 보냅니다" style={{ padding: '3px 12px', fontSize: 12 }}>이 조건을 알림으로(메일){alert.settings?.enabled ? ' · 켜짐' : ''}</button>}
             </span>
           </div>
+          {alertOpen && alert && <BackupSummaryAlert key={alert.settings?.savedAt ?? 'new'} alert={alert} finder={o} vcName={(id) => (sites.find((r) => r.id === id)?.name || id)} onChanged={loadAlert} />}
           {bad && <div className="muted" style={{ padding: '0 14px 10px', fontSize: 12.5 }}>기간을 1~999 로 적으세요.</div>}
           {csvErr && <div style={{ padding: '0 14px 10px', fontSize: 12.5, color: '#fca5a5' }}>CSV 를 받지 못했습니다 — {csvErr?.status === 403 ? 'CSV 권한이 없습니다.' : String(csvErr?.message || csvErr).slice(0, 160)}</div>}
           {data && !fresh && !loading && <div style={{ padding: '0 14px 10px', fontSize: 12.5, color: '#fcd34d' }}>조건이 바뀌었습니다 — 아래 목록은 지난 조건의 결과입니다. 찾기를 누르세요.</div>}

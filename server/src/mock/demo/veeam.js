@@ -5,6 +5,7 @@
  * 작업 이름은 폴더(없으면 'VMs')에서 만든다 — 실제 운영처럼 폴더 단위 작업이 여러 개 보이게. 배지와 상세 창은 같은 함수(demoEntry)를 쓴다.
  */
 import { demoRand } from './flags.js';
+import { TASK_MSG } from '../../veeam/parse.js';
 
 const DAY = 86_400_000;
 const GB = 1024 ** 3;
@@ -41,7 +42,7 @@ export function demoVeeamMatch(vcenterId, vms, now = Date.now()) {
       jobs: [e.job], run: e.run, pg: e.pg, by: e.run ? 'task' : '', rp: e.rpN, lastRun: e.start, lastResult: e.warn ? 'Warning' : 'Success',
       servers: [SERVER], lb: e.end, lbSrc: 'task',
       sz: Math.round(e.dataGb * GB * (0.35 + e.rpN * 0.04)), nr: e.start + DAY,
-      ...(e.run ? {} : { lr: e.warn ? 'Warning' : 'Success', lrt: e.end, lrs: e.start }),   // 마지막 task 결과(데모 — 도는 중이면 없음)   // v2.837 복원 지점 크기 합 · 다음 실행(데모 — 매일 같은 시각)
+      ...(e.run ? {} : { lr: e.warn ? 'Warning' : 'Success', lrt: e.end, lrs: e.start, ...(e.warn ? { [TASK_MSG]: '데모: 스냅샷 정리 지연 경고' } : {}) }),   // 마지막 task 결과(데모 — 도는 중이면 없음)   // v2.837 복원 지점 크기 합 · 다음 실행(데모 — 매일 같은 시각)
     };
   }
   return { byVm, unmatched: 0, otherVcenter: 0, ambiguous: 0 };

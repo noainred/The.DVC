@@ -5,7 +5,7 @@ import { store } from '../../store.js';
 import { scopedVcenterIds, writeScopedVcenterIds } from '../../auth/scope.js';
 import { serversForVcenter, registryLoadError, listServers } from '../../veeam/registry.js';
 import { getRecord, usableResult } from '../../veeam/store.js';
-import { matchToVcenter, withoutStaleRunning, buildVmDetail } from '../../veeam/parse.js';
+import { matchToVcenter, withoutStaleRunning, buildVmDetail, TASK_MSG } from '../../veeam/parse.js';
 import { pollMs } from '../../veeam/poller.js';
 import { isAdminDetailUser, isDemoGuest } from '../../auth/demoGuest.js';
 import { listRegistry as listVcenters } from '../../vcenter/registry.js';
@@ -45,6 +45,11 @@ import { effectiveSettings as bareosEffectiveSettings } from '../../bareos/servi
 import { directorById as bareosDirectorById } from '../../bareos/settings.js';
 import { pollerStatus as bareosPollerStatus } from '../../bareos/poller.js';
 import { LIVE_IDLE_MS as BAREOS_LIVE_IDLE_MS } from '../../bareos/liveStatus.js';
+import { veeamJobItems, jobsFromRows, groupItems, overlapOf, sevenDays, MAX_ITEMS_PER_SITE } from '../../veeam/backupSchedule.js';   // v2.838 '백업 스케줄 — 다음 24시간'
+import { ERROR_DAYS, veeamVmRows, bareosRows, stuckRows, emSessionRows, collectRows, finishErrors } from '../../veeam/backupErrors.js';   // v2.838 통합 에러 로그
+import { loadAlert, saveAlert, alertLoadError, alertStatus, sendNow as sendStaleAlertNow, setStaleProvider, MAIL_KIND as STALE_MAIL_KIND } from '../../veeam/staleAlert.js';   // v2.838 백업 안 된 VM 일일 메일
+import { load as loadMailSettings } from '../../mail/settings.js';
+import { dayIndex, dayStartMs } from '../../util/dayKey.js';
 export { VM_LIST_MAX_IDS };
 import { logAudit } from '../../audit.js';
 import { csvLine, CSV_BOM } from '../../util/csv.js';
@@ -52,6 +57,7 @@ import { fileStamp } from '../../util/dayKey.js';
 import { acquireExport } from '../../util/exportBusy.js';   // v2.781(점검 G3 B-I2): 백업 CSV 2종 동시 1건
 import { getMarks, setMarks, markCounts, markView, marksRev, marksUnreadable, marksCorruptKept, MAX_IDS_PER_REQUEST } from '../../veeam/backupMarks.js';
 import { fullScopeOnlyWith } from '../admin/shared.js';
+import { pushAll } from '../../util/pushAll.js';
 import { listEms, getEmWithSecret } from '../../veeam/em/registry.js';
 import { getEmRecord } from '../../veeam/em/store.js';
 import { emPollMs, emAuthGuard } from '../../veeam/em/poller.js';
@@ -513,6 +519,17 @@ export function publicTaskMessage(m, { vmName = '' } = {}) {
   const probe = name.length >= 3 ? stripVmName(t, name) : t;
   return ADDR_LIKE.test(probe) || hasFqdn(probe) || UNC_LIKE.test(probe) ? '작업 메시지에 주소가 들어 있어 관리자 화면에서만 보입니다' : t;
 }
+/**
+ * v2.838 통합 에러 로그의 Veeam 메시지 — byVm 항목의 Symbol 키(parse.js TASK_MSG)에서 꺼내, 관리자 판본이 아니면 VM 상세와 같은 가림(publicTaskMessage).
+ * @returns {(row:{id,name}) => string}
+ */
+export function taskMsgOf(byVm, admin) {
+  return (r) => {
+    const m = byVm?.[r?.id]?.[TASK_MSG];
+    if (typeof m !== 'string' || !m) return '';
+    return admin ? m : publicTaskMessage(m, { vmName: r?.name || '' });
+  };
+}
 function maskDetail(detail, admin, vmName = '') {
   if (admin || !detail?.lastTask?.message) return detail;
   return { ...detail, lastTask: { ...detail.lastTask, message: publicTaskMessage(detail.lastTask.message, { vmName }) } };
@@ -884,7 +901,7 @@ async function emSummary(now = Date.now()) {
     for (const r of v?.data?.repositories || []) {
       if (!Number.isFinite(r.capacity) || r.capacity <= 0 || !Number.isFinite(r.free)) continue;
       repoN++; cap += r.capacity; used += r.capacity - r.free;
-      if (Number.isFinite(r.usedPct) && r.usedPct >= 90) over.push({ name: String(r.name || '').slice(0, 64), pct: r.usedPct });
+      if (Number.isFinite(r.usedPct) && r.usedPct >= 90) over.push({ name: String(r.name || '').slice(0, 64), pct: r.usedPct, vc: Array.isArray(r.vcNames) ? r.vcNames.slice(0, 3).map((x) => String(x).slice(0, 64)) : null, daysLeft: repoDaysLeft(d?.history?.repo?.[`em:${v.id}#${r.server || ''}|${r.name}`]) });   // v2.838 남은 일수(추정 — 최근 30일 사용 증가 기울기)
     }
   }
   over.sort((a, b) => b.pct - a.pct);
@@ -895,8 +912,53 @@ async function emSummary(now = Date.now()) {
     lic: lt && Number.isFinite(lt.used) && Number.isFinite(lt.licensed) && lt.licensed > 0 ? { used: lt.used, licensed: lt.licensed, pct: Math.round((lt.used / lt.licensed) * 1000) / 10 } : null,
     auth: views.filter((v) => v?.status?.authStop).map((v) => String(v.name || '').slice(0, 64)).slice(0, 5),
     trend30: repoTrend30(d?.history?.repo, now),
+    series30: repoSeries30(d?.history?.repo),   // v2.838 '30일 추이' 선 — 저장소 사용 합(EM 이력)
   };
 }
+/**
+ * v2.838 저장소 사용 합의 하루 점 — 마지막 날부터 30일 안에서, 그 창에 값이 있는 저장소가 **모두** 값을 가진 날만(일부만 있는 날은 합이 작아 보여 빼낸다 — 부분 합은 추이에 넣지 않는다).
+ *   점이 둘보다 적으면 null(모름).
+ * @returns {Array<[day:number, used:number]>|null}
+ */
+export function repoSeries30(hist) {
+  if (!hist || typeof hist !== 'object') return null;
+  const ss = Object.values(hist).map((x) => (Array.isArray(x) ? x.filter((p) => Array.isArray(p) && Number.isFinite(p[0]) && Number.isFinite(p[1]) && Number.isFinite(p[2])) : []));
+  let last = null;
+  for (const s of ss) for (const p of s) if (last == null || p[0] > last) last = p[0];
+  if (last == null) return null;
+  const by = new Map(); let n = 0;
+  for (const s of ss) {
+    const win = s.filter((p) => p[0] > last - 30);
+    if (!win.length) continue;
+    n++;
+    const seen = new Set();
+    for (const p of win) {
+      if (seen.has(p[0])) continue;
+      seen.add(p[0]);
+      const x = by.get(p[0]) || { used: 0, c: 0 };
+      x.used += p[1] - p[2]; x.c++;
+      by.set(p[0], x);
+    }
+  }
+  const out = [...by].filter(([, x]) => x.c === n).sort((a, b) => a[0] - b[0]).map(([day, x]) => [day, x.used]);
+  return out.length >= 2 ? out : null;
+}
+/**
+ * v2.838 저장소 남은 일수(추정) — 이력 [[day, capacity, free], ...] 의 마지막 날과 그 30일 안 가장 이른 날 사이 사용 증가 기울기로 지금 여유를 나눈다.
+ *   이력이 이틀 미만이거나 사용이 늘지 않았으면 null(모름 — 0 이 아니다).
+ */
+export function repoDaysLeft(series) {
+  if (!Array.isArray(series)) return null;
+  const s = series.filter((x) => Array.isArray(x) && Number.isFinite(x[0]) && Number.isFinite(x[1]) && Number.isFinite(x[2])).sort((a, b) => a[0] - b[0]);
+  if (s.length < 2) return null;
+  const last = s[s.length - 1];
+  const first = s.find((x) => x[0] >= last[0] - 30) || s[0];
+  if (first[0] >= last[0]) return null;
+  const slope = ((last[1] - last[2]) - (first[1] - first[2])) / (last[0] - first[0]);
+  if (!(slope > 0) || !(last[2] >= 0)) return null;
+  return Math.floor(last[2] / slope);
+}
+
 /** 저장소 사용 30일 전 대비(%) — 이력 {key: [[day, capacity, free], ...]} 의 마지막 날과 30일 전(그날 또는 그 앞 가장 가까운 날) 사용 합. 둘 중 하나라도 없으면 null. */
 export function repoTrend30(hist, now = Date.now()) {
   if (!hist || typeof hist !== 'object') return null;
@@ -911,6 +973,95 @@ export function repoTrend30(hist, now = Date.now()) {
     a += old[1] - old[2]; b += last[1] - last[2]; n++;
   }
   return n && a > 0 ? { pct: Math.round(((b - a) / a) * 1000) / 10, now: b, before: a } : null;
+}
+
+/** v2.838 그 법인을 맡는 B&R 서버 결과의 잡(이름 · 다음 실행) — 결과가 없으면(데모 · 연동 없음) 빈 목록. */
+function veeamJobsOf(vcId, req) {
+  const out = [];
+  try { for (const x of resultsFor(vcId, req).results) for (const j of x.result?.jobs || []) if (j?.name) out.push({ name: j.name, nextRun: j.nextRun ?? null }); } catch { /* 모름 — 빈 목록 */ }
+  return out;
+}
+
+/**
+ * v2.838 '백업 스케줄 — 다음 24시간'(시안 ① 용량과 일정) — 법인마다 Veeam 잡 다음 실행 · Bareos 그룹 회차 · 겹침 · 7일 요약.
+ *   Veeam 은 다음 1회만 안다(반복 주기 미수집) · Director 스케줄은 2차 · 그룹 파일을 못 읽으면 groupsUnreadable(Bareos 줄 모름).
+ */
+async function scheduleData(req, snap, scope) {
+  const allowed = scopedVcenterIds(req.user, snap);
+  const vcs = (snap?.vcenters || []).filter((v) => !allowed || allowed.has(v.id));
+  const vmsBy = new Map();
+  for (const vm of snap?.vms || []) { const a = vmsBy.get(vm.vcenterId); if (a) a.push(vm); else vmsBy.set(vm.vcenterId, [vm]); }
+  const maybeYield = createYielder(15);
+  const now = Date.now(); const marks = getMarks(); const unreadable = marksUnreadable();
+  let groups = null;
+  try { if (!bareosGroupsLoadError()) groups = bareosGroups(); } catch { groups = null; }
+  const week = now + 7 * 86_400_000; const h24 = now + 86_400_000;
+  const sites = [];
+  for (const vc of vcs) {
+    await maybeYield();
+    const b = await vcBackup(vc, vmsBy.get(vc.id) || [], req, { initial: snap?.initial === true, scope });
+    const vr = backupVmRows(vc, b, { now, marks, unreadable, withClone: false });
+    const fromResults = veeamJobsOf(vc.id, req);
+    const veeam = veeamJobItems(vr.vms, fromResults.length ? fromResults : jobsFromRows(vr.vms), now).filter((i) => i.at <= week);
+    const bareos = groups ? groupItems(groups.filter((g) => g.vcenterId === vc.id), now, week, bareosNextSlot) : null;
+    sites.push({ id: vc.id, name: vc.name || vc.id, veeam, bareos });
+  }
+  const rows = sites.map((x) => {
+    const v = x.veeam.filter((i) => i.at < h24); const g = (x.bareos || []).filter((i) => i.at < h24);
+    return { id: x.id, name: x.name, veeam: v.slice(0, MAX_ITEMS_PER_SITE), bareos: x.bareos ? g.slice(0, MAX_ITEMS_PER_SITE) : null, overlap: overlapOf(v, g), more: Math.max(0, v.length - MAX_ITEMS_PER_SITE) + Math.max(0, g.length - MAX_ITEMS_PER_SITE) };
+  });
+  return { ok: true, at: now, hours: 24, rows, days: sevenDays(sites.map((x) => ({ veeam: x.veeam, bareos: x.bareos || [] })), dayStartMs(dayIndex(now))), ...(groups ? {} : { groupsUnreadable: true }) };
+}
+
+/**
+ * v2.838 통합 에러 로그(시안 ①) — 최근 N일(1·7·30)의 실패 · 경고 · 수집 오류를 한 모양으로(veeam/backupErrors.js).
+ *   오류 원문은 관리자 판본만(가림 규칙 — Veeam 서버 오류는 serverView 가 이미 가린다 · Bareos Director 오류 · EM 오류도 같다).
+ *   EM 세션 · EM 수집 상태는 전 법인 자료라 전체 범위 계정만.
+ */
+async function errorsData(req, snap, scope, days) {
+  const allowed = scopedVcenterIds(req.user, snap);
+  const admin = isAdminDetailUser(req.user);
+  const vcs = (snap?.vcenters || []).filter((v) => !allowed || allowed.has(v.id));
+  const vmsBy = new Map();
+  for (const vm of snap?.vms || []) { const a = vmsBy.get(vm.vcenterId); if (a) a.push(vm); else vmsBy.set(vm.vcenterId, [vm]); }
+  const maybeYield = createYielder(15);
+  const now = Date.now(); const since = now - days * 86_400_000; const marks = getMarks(); const unreadable = marksUnreadable();
+  let bset = null; try { bset = bareosEffectiveSettings(); } catch { bset = null; }
+  let byDir = {}; try { byDir = bareosPollerStatus().directors || {}; } catch { byDir = {}; }
+  const rows = []; const collect = []; let bareosUnknownSites = 0; const seenDir = new Set();
+  for (const vc of vcs) {
+    await maybeYield();
+    const site = { id: vc.id, name: vc.name || vc.id };
+    const b = await vcBackup(vc, vmsBy.get(vc.id) || [], req, { initial: snap?.initial === true, scope });
+    const vr = backupVmRows(vc, b, { now, marks, unreadable, withClone: false });
+    pushAll(rows, veeamVmRows(vr.vms, site, since, taskMsgOf(b.match?.byVm, admin)));
+    if (vr.bareos) pushAll(rows, bareosRows(vr.bareos, new Set(vr.vms.map((x) => x.id)), site, since)); else bareosUnknownSites++;
+    for (const v of b.views) if (v.ok === false || v.authStopped) collect.push({ at: v.ts, vc: site.id, vcName: site.name, src: 'veeam', name: v.name, error: v.error, auth: !!v.authStopped });
+    const sd = bset?.sites?.find?.((x) => x.vcenterId === vc.id);
+    if (sd && vr.bareos) {   // 멈춤 의심 — 진행 현황이 신선할 때만(Summary 배지와 같은 규칙 · 조회를 새로 일으키지 않는다)
+      try {
+        const cv = bareosCorpView(sd, bset, [...vr.bareos.values()], { now });
+        if (cv?.live?.ok && Number.isFinite(cv.live.at) && now - cv.live.at <= BAREOS_LIVE_IDLE_MS) pushAll(rows, stuckRows(cv.rows, site, cv.live.at));
+      } catch { /* 모름 — 행 없음 */ }
+    }
+    const dr = sd ? byDir[sd.directorId] : null;
+    if (dr && dr.ok === false && !seenDir.has(sd.directorId)) {
+      seenDir.add(sd.directorId);
+      collect.push({ at: dr.at, vc: site.id, vcName: site.name, src: 'bareos', name: dr.name || 'Director', error: admin ? dr.error : (dr.code ? `조회 실패(${String(dr.code).slice(0, 32)})` : '조회 실패'), auth: /auth|pam/.test(String(dr.code || '')) });
+    }
+  }
+  let emIncluded = false;
+  if (!allowed) {
+    try {
+      const d = await emData(admin);
+      emIncluded = true;
+      pushAll(rows, emSessionRows(d.ems, since));
+      for (const v of d.ems || []) if (v?.status && (v.status.ok === false || v.status.authStop)) collect.push({ at: v.status.ts, vc: '', vcName: '', src: 'veeam', name: `EM ${v.name}`, error: admin ? v.status.error : '', auth: !!v.status.authStop });
+    } catch { emIncluded = false; }
+  }
+  pushAll(rows, collectRows(collect, since));
+  const fin = finishErrors(rows);
+  return { ok: true, at: now, days, scope, ...fin, sources: { veeamVm: true, em: emIncluded, bareos: true }, ...(bareosUnknownSites ? { bareosUnknownSites } : {}) };
 }
 
 /**
@@ -1057,6 +1208,9 @@ const EM_DETAIL_TTL_MS = 5 * 60_000;
 
 export function registerBackupStatus(api) {
   const toolsPerm = requirePerm('tools');
+  // v2.838 일일 메일 계산기 — 전 법인 · 시스템 계정(화면 찾기와 같은 staleData · 범위 옵션 = 전체 VM · 템플릿·vCLS 제외)
+  setStaleProvider(async (q) => staleData({ user: { username: 'system', role: 'admin' } }, store.get(), { power: 'all', excl: true },
+    staleQueryOf({ ...q, n: String(q.n), excludeNone: q.excludeNone === false ? '0' : '1', onlyOn: q.onlyOn === false ? '0' : '1', includeNever: q.includeNever === false ? '0' : '1' })));
   const csvPerm = requirePerm('data.csv');
 
   api.get('/tools/backup-summary', toolsPerm, (req, res) => {
@@ -1082,6 +1236,61 @@ export function registerBackupStatus(api) {
     const scope = scopeOf(req);
     return memoJson(req, res, 'backup-summary-stale', async () => staleData(req, snap, scope, o),
       { ttlMs: 60_000, extraKey: `${scopeKey(req.user, snap)}|${admin ? 'admin' : 'user'}|m${marksRev()}|em${emSourcesRev()}|b${bareosRegistryRev()}|g${bareosGroupsRev()}` });
+  });
+
+  /*
+   * v2.838 '백업 스케줄 — 다음 24시간' · 통합 에러 로그(시안 ① 아래 두 구획). 잡 · VM 이름이 있어 Detail 이 거부된 계정은 403(detailToolOk) ·
+   *   범위 = scope 교집합 · 무거운 집계라 화면은 마운트 1회 + 버튼만(폴링 없음) · 응답 캐시 60초(키 = 범위 · 역할 · 리비전 + 쿼리).
+   */
+  api.get('/tools/backup-summary/schedule', toolsPerm, (req, res) => {
+    if (!detailToolOk(req)) return res.status(403).json({ ok: false, reason: '이 계정은 Detail 화면이 허용되지 않아 잡 · 그룹 일정을 볼 수 없습니다(관리자가 정한 도구별 접근).' });
+    const snap = store.get();
+    const admin = isAdminDetailUser(req.user);
+    const scope = scopeOf(req);
+    return memoJson(req, res, 'backup-summary-schedule', async () => scheduleData(req, snap, scope),
+      { ttlMs: 60_000, extraKey: `${scopeKey(req.user, snap)}|${admin ? 'admin' : 'user'}|em${emSourcesRev()}|g${bareosGroupsRev()}` });
+  });
+  api.get('/tools/backup-summary/errors', toolsPerm, (req, res) => {
+    if (!detailToolOk(req)) return res.status(403).json({ ok: false, reason: '이 계정은 Detail 화면이 허용되지 않아 VM 별 에러 로그를 볼 수 없습니다(관리자가 정한 도구별 접근).' });
+    const days = ERROR_DAYS.includes(Number(req.query.days)) ? Number(req.query.days) : 1;
+    const snap = store.get();
+    const admin = isAdminDetailUser(req.user);
+    const scope = scopeOf(req);
+    return memoJson(req, res, 'backup-summary-errors', async () => errorsData(req, snap, scope, days),
+      { ttlMs: 60_000, extraKey: `${scopeKey(req.user, snap)}|${admin ? 'admin' : 'user'}|em${emSourcesRev()}|b${bareosRegistryRev()}` });   // 백업 표시(정책)는 에러 행에 쓰지 않는다 — m 없음
+  });
+
+  /*
+   * v2.838 '이 조건을 알림으로(메일)'(사용자 결정 '일일 메일로 구현') — 전 법인 자료를 메일로 보내므로 **관리자 · 전체 범위**만 저장 · 지금 보내기(데모 계정 403).
+   *   다른 계정은 GET 에 hidden(설정을 싣지 않는다). 저장 · 보내기는 감사에 남긴다. 지금 보내기는 1분에 한 번.
+   */
+  const alertEditor = (req) => isAdminDetailUser(req.user) && !scopedVcenterIds(req.user, store.get());   // 관리자 판본 판정 하나(데모 계정 제외 포함)
+  const alertFullScope = fullScopeOnlyWith('전 법인 자료를 메일로 보내는 설정이라 전체 범위(vCenter 제한 없는) 관리자만 바꾸거나 보낼 수 있습니다.');   // 게이트 태그(archScan route-gate) — 핸들러의 alertEditor 와 이중
+  api.get('/tools/backup-summary/alert', toolsPerm, (req, res) => {
+    if (scopedVcenterIds(req.user, store.get())) return res.json({ ok: true, canEdit: false, hidden: true });
+    let mail = null;
+    try { const m = loadMailSettings(); mail = { enabled: !!m?.enabled, kindEnabled: m?.kinds?.[STALE_MAIL_KIND]?.enabled !== false }; } catch { mail = null; }
+    return res.json({ ok: true, canEdit: alertEditor(req), settings: loadAlert(), unreadable: !!alertLoadError() || undefined, status: alertStatus(), mail });
+  });
+  api.put('/tools/backup-summary/alert', toolsPerm, requireRole('admin'), alertFullScope, (req, res) => {
+    if (!alertEditor(req)) return res.status(403).json({ ok: false, reason: '전 법인 자료를 메일로 보내는 설정이라 전체 범위 관리자만 바꿀 수 있습니다.' });
+    const body = req.body && typeof req.body === 'object' ? req.body : {};
+    const vc = String(body?.q?.vc || '');
+    if (vc && !(store.get()?.vcenters || []).some((v) => v.id === vc)) return res.status(400).json({ ok: false, reason: '없는 법인입니다.' });
+    try {
+      const saved = saveAlert(body, { by: req.user?.username || '' });
+      logAudit({ user: req.user?.username, action: 'backup-stale-alert.save', target: 'backup-summary', detail: `${saved.enabled ? '켬' : '끔'} · 매일 ${saved.time} · 최근 ${saved.q.n}${saved.q.unit} · ${saved.q.src}${saved.q.vc ? ` · ${saved.q.vc}` : ''}`, ip: req.ip });
+      return res.json({ ok: true, settings: saved });
+    } catch (e) { return res.status(e?.code === 'invalid' ? 400 : 409).json({ ok: false, reason: String(e?.message || e).slice(0, 200) }); }
+  });
+  let lastSendNow = 0;
+  api.post('/tools/backup-summary/alert/send', toolsPerm, requireRole('admin'), alertFullScope, async (req, res) => {
+    if (!alertEditor(req)) return res.status(403).json({ ok: false, reason: '전 법인 자료를 메일로 보내는 설정이라 전체 범위 관리자만 보낼 수 있습니다.' });
+    if (Date.now() - lastSendNow < 60_000) return res.status(429).json({ ok: false, reason: '지금 보내기는 1분에 한 번입니다 — 잠시 뒤 다시 누르세요.' });
+    lastSendNow = Date.now();
+    const r = await sendStaleAlertNow({ by: req.user?.username || '' });
+    logAudit({ user: req.user?.username, action: 'backup-stale-alert.send', target: 'backup-summary', detail: r.ok ? `보냄 · ${r.n}대` : `실패 · ${r.reason}`, ip: req.ip });
+    return res.json(r);
   });
 
   /*
