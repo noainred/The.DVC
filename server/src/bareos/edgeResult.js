@@ -73,6 +73,21 @@ export const VALUE = Object.freeze({
       ...(x.reason ? { reason: str(x.reason, 300) } : {}), ...(posInt(x.more) ? { more: posInt(x.more) } : {}), ...(posInt(x.notDeleted) ? { notDeleted: posInt(x.notDeleted) } : {}),
     };
   }),
+  // v2.833 진행 현황판(읽기 전용) — 숫자는 음수·문자열을 버린다(못 읽은 값은 null · 0 이 아니다)
+  liveStatus: (v) => ({
+    clients: arr(obj(v).clients).slice(0, 50).map((c0) => {
+      const c = obj(c0);
+      const client = str(c.client, 64);
+      if (!bool(c.ok)) return { client, ok: false, ...(c.code ? { code: str(c.code, 40) } : {}), ...(c.message ? { message: str(c.message, 300) } : {}) };
+      return {
+        client, ok: true,
+        jobs: arr(c.jobs).slice(0, 300).map((x0) => {
+          const x = obj(x0);
+          return { jobid: posInt(x.jobid), job: str(x.job, 200), name: str(x.name, 128), level: str(x.level, 1), bytes: nonNeg(x.bytes), files: nonNeg(x.files), aveRate: nonNeg(x.aveRate), lastRate: nonNeg(x.lastRate) };
+        }).filter((x) => x.jobid),
+      };
+    }),
+  }),
   setEnabled: () => null,
   history: (v) => rows(v, 200),
   cancel: (v) => { const r = obj(v); return r.final ? { final: rowOut(r.final) } : r.cleared ? { cleared: true } : { canceled: bool(r.canceled) }; },

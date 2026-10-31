@@ -6,6 +6,7 @@
 
 ## 목차
 
+- Bareos v2.833 진행 현황판(전체 법인 · 단일 법인 · 속도 상태) 규칙(2026-10-31)
 - Bareos v2.831 백업 그룹 개편 · 보관 개수(카탈로그 삭제) 규칙·반증 확정분(2026-10-31)
 - Bareos v2.830 백업 그룹 모듈 규칙·검토 확정분(반증 1인 — 2026-10-31)
 - Bareos v2.825.1 버그 점검 확정분(5축 + 반증 1인 — 2026-10-30)
@@ -1818,6 +1819,30 @@
   목록 memo(P7) · 카탈로그 memo 세대(P9) · 고아 잡(I7) · Migration 새 잡의 일시 lastRun(C2-7).
   ⚠ 정정(v2.823): 카탈로그 memo 세대(P9)는 v2.823 에 해소했다(memo 키에 Director id + `settingsRev` — 설정을 저장하면 새로 읽는다). 고아 잡(I7)은 v2.823 검토 C3 에서
   '가리키는 Director 가 설정에 없는 대상은 원장에서만 취소·삭제' 경로로 일부 해소(Director 쪽 고아 잡 탐지는 여전히 없다).
+
+## Bareos v2.833 진행 현황판(전체 법인 · 단일 법인 · 속도 상태) 규칙(2026-10-31)
+
+사용자 요청 'BareOS ui 개선 — 진행 중인 백업 현황판, 클로드 디자인 사용, 전체 법인 · 단일 법인 · 백업 속도 상태' · 사용자 선택: 실시간 값은 **Director 상태 조회** · 시안 뒤 바로 구현 · 검증 표준.
+시안 https://claude.ai/artifact/Bgr8WLF8UdNA1KtWpY5aQX · 회귀 `server/test/bareosLive2833.test.js` · `web/src/views/tools/bareosLiveText.test.js`.
+
+- **왜 상태 조회인가**: 카탈로그(`list jobs`·`llist`)는 백업이 **끝나야** JobBytes 를 채운다(실행 중 0 — normalizeJobRow 가 null). 실행 중 진행량·속도는 FD 가 들고 있어 Director 콘솔 `status client=<FD>` 로 묻는다(`ops.liveStatus` · 읽기 전용 · MUTATING 아님).
+  원문 모양(Bareos filed/status.cc 평문 `JobId N Job X is running.` · `Files= Bytes= AveBytes/sec= LastBytes/sec=`)은 **실환경 미확인(추정)** — `liveParse` 가 평문·JSON 으로 감싼 원문·구조화 JSON 셋 다 받는다.
+  Director 가 JSON-RPC 오류로 거부하면(ACL·FD 이름) 잡 0개 성공으로 보지 않는다(시험 ④). 외부 입력이라 길이를 먼저 자르고 앵커 + 상한 반복만(ReDoS 비율 시험).
+- **부하**: 화면이 열려 있을 때만(라우트 `touchLive` · 닫고 `LIVE_IDLE_MS` 뒤 멈춤) · 실행 중 잡이 있는 Director 만 · Director 들 병렬(`LIVE_CONCURRENCY`) + Director 마다 시한(signal) · 틱 재진입 가드 ·
+  엣지 대행 Director 는 앞 요청이 대기열에 있으면 새로 넣지 않는다 · 주기 조회라 인증 정지된 Director 에는 보내지 않는다 · 데모 계정 요청은 데모 Director 일 때만 깨운다. 결과는 메모리만(파일 쓰기 없음).
+- **판정**: 못 읽은 값은 null(속도 '모름' — 0 아님) · 합계는 아는 값만 더하고 모르는 법인 수를 따로 · 흐름은 **법인(vCenter)마다**(Chromium 확인: Director 단위로 두면 Director 하나가 법인 둘을 맡을 때 합계가 겹쳐 세졌다) ·
+  전체 흐름에서 모르는 법인이 낀 칸은 부분 합이라 선을 끊는다 · FD 가 그 jobid 를 실행 중으로 보고하면 원장 상태(주기 폴러 60초)가 '대기' 여도 실행 중으로 본다 ·
+  느림 = 지금 속도 ≤ 같은 VM 의 지난 성공 평균(원장 `lastRate` — 끝난 T·W 의 바이트 ÷ 소요, 다 읽었을 때만 · 더 새 jobid 만) × 0.5 · 시작 5분 뒤부터 · 기준이 없으면 판정하지 않는다.
+  진척(읽은 양 / VM 용량)은 추정 — Incremental 은 바뀐 블록만 읽는다(화면이 밝힌다).
+- **라우트** `GET /tools/bareos-backup/live`(admin · 관리 도구 bareos-backup — 조회 전용 v2.828 화면은 Director 에 닿지 않는 규칙이라 그쪽에 두지 않았다) · 조회 범위 법인만 · `memoJson` 5초 + scopeKey · 주소·콘솔·오류 원문 없음(코드만).
+- **함께 고친 것(v2.831 결함)**: 자동 설정이 만드는 포탈 콘솔 Profile 의 `Command ACL` 에 **`delete` 가 없어** 보관 개수 정리(`delete jobid=`)가 거부됐다(화면은 '정리 실패'). 서버 `autoSetup.js` · 웹 `directorPrepBlock` 같은 줄에 추가(시험 ⑥이 대조).
+  **이미 자동 설정한 Director 는 자동 설정을 다시 돌리거나 Profile 에 delete 를 직접 넣어야** 정리가 된다(설정 파일은 Director 에 있다 — 포탈이 원격에서 고치지 않는다).
+- 남긴 것: 데모 Director 의 실행은 30초라 조회 주기(30초)와 겹치지 않으면 화면에 잠깐만 보인다(데모 한계 — 실제 백업은 수 분~수 시간). 단일 법인 화면에 '최근 끝난 잡 목록' 은 없다(원장의 끝난 실행에는 바이트가 없다 — 오늘 수·저장량만).
+
+### (옮김) v2.828 작업 결과 창 — server/src/bareos/CLAUDE.md 에서 크기 상한으로 옮김(2026-10-31)
+
+- **v2.828 작업 결과 창(웹 `bareosText`·`BareosBackupTool LogModal`)**: 크기 표기는 `decBytesText` 하나 — 10진 · 앞 4자리 **버림**(Bareos `edit_uint64_with_suffix` 와 같은 규칙.
+  반올림하면 같은 창의 보고서 값과 0.1 씩 어긋났다) · 데모 보고(`mock/demo/bareos.js demoReport`)도 같은 규칙, 속도는 1000 B · 탭 본문 높이 고정(`LOG_PANE_H`). 회귀 `bareosJobDetail2828.test.js`.
 
 ## Bareos v2.831 백업 그룹 개편 · 보관 개수(카탈로그 삭제) 규칙·반증 확정분(2026-10-31)
 

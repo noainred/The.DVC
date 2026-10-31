@@ -107,7 +107,7 @@ export function jobDigests() {
     client: j.client, storage: j.storage, pool: j.pool, schedule: j.schedule, level: j.level, enabled: j.enabled !== false, demo: !!j.demo,
     createdBy: j.createdBy, createdAt: j.createdAt, missingInDirector: !!j.missingInDirector,
     pending: j.pending ? { ...j.pending } : null, lastRun: j.lastRun ? { ...j.lastRun } : null, lastError: j.lastError ? { ...j.lastError } : null,
-    lastOkAt: lastOkAt(j),
+    lastOkAt: lastOkAt(j), lastRate: j.lastRate ? { ...j.lastRate } : null,
     recentRuns: (Array.isArray(j.finishedRuns) ? j.finishedRuns : []).slice(-5).map((r) => ({ ...r })),
   }));
 }
@@ -241,6 +241,13 @@ export function applyRunRow(id, row, now = Date.now()) {
   // 마지막으로 **백업이 만들어진**(T·W) 시각 — 잘린 목록과 무관하게 남긴다(S14 · 더 새 값만)
   if ((row.status === 'T' || row.status === 'W') && Number.isFinite(rec.endedAt) && rec.endedAt > 0 && !(Number.isFinite(j.lastOkAt) && j.lastOkAt >= rec.endedAt)) {
     j.lastOkAt = rec.endedAt;
+    changed = true;
+  }
+  // v2.833 진행 현황판: 마지막으로 끝난 성공(T·W) 백업의 평균 속도(바이트 ÷ 소요) — 실행 중 잡이 느린지 견줄 기준. 실행 중에는 lastRun 이
+  //   그 실행으로 바뀌어 지난 값을 잃으므로 따로 남긴다(더 새 jobid · 값을 다 읽었을 때만 — 못 읽은 값으로 지어내지 않는다)
+  if ((row.status === 'T' || row.status === 'W') && Number.isFinite(rec.bytes) && rec.bytes > 0 && Number.isFinite(rec.startedAt) && Number.isFinite(rec.endedAt)
+    && rec.endedAt > rec.startedAt && !((Number(j.lastRate?.jobid) || 0) >= rec.jobid)) {
+    j.lastRate = { jobid: rec.jobid, level: rec.level, bps: Math.round(rec.bytes / ((rec.endedAt - rec.startedAt) / 1000)), bytes: rec.bytes, at: rec.endedAt };
     changed = true;
   }
   if (j.pending && j.pending.jobid === row.jobid) {

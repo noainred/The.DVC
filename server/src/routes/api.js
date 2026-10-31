@@ -30,7 +30,8 @@ import { registerVmClone } from './api/vmClone.js'; // VM 복제(백업식, v2.2
 import { registerVeeamBadges, registerBackupStatus } from './api/veeam.js'; // Veeam 백업 VM 배지(v2.751) · 백업 메뉴(v2.779)
 import { registerBareosBackup } from './api/bareosBackup.js'; // Bareos VM 백업(v2.820)
 import { registerBareosViews } from './api/bareosViews.js'; // v2.828 Bareos 조회 화면(통합 현황 · 법인별 현황 — 도구 키 bareos-summary·bareos-detail)
-import { registerBareosGroups } from './api/bareosGroups.js'; // v2.830 Bareos 백업 그룹(관리 도구 bareos-backup 의 '백업 그룹' 탭 — 포탈이 스케줄 실행)
+import { registerBareosGroups } from './api/bareosGroups.js';
+import { registerBareosLive } from './api/bareosLive.js'; // v2.833 Bareos 진행 현황판(관리 도구 bareos-backup 의 '진행 현황' 탭 — 화면이 열린 동안만 Director 상태 조회) // v2.830 Bareos 백업 그룹(관리 도구 bareos-backup 의 '백업 그룹' 탭 — 포탈이 스케줄 실행)
 import { registerStorageMon } from './api/storageMon.js'; // 스토리지 모니터링(Isilon 등, v2.302)
 import { registerSanSwitch } from './api/sanSwitch.js';   // SAN 스위치 모니터링(Brocade FOS, v2.410)
 import { registerCvp } from './api/cvp.js';               // Arista CloudVision(CVP) 네트워크 스위치(v2.608)
@@ -135,6 +136,7 @@ registerBackupStatus(api); // v2.779 백업 서머리·세부내용(도구 키 b
 registerBareosBackup(api);
 registerBareosViews(api);
 registerBareosGroups(api);
+registerBareosLive(api);
 registerStorageMon(api);
 registerSanSwitch(api);
 registerCvp(api);
