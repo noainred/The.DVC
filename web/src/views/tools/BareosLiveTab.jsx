@@ -14,7 +14,7 @@ import Select from '../../components/Select.jsx';
 import { shortTs } from './bareosViewText.js';
 import {
   rateText, sizeText, elapsedText, progressPct, liveCodeText, corpBadge, CORP_FILTERS, corpMatches, corpFilterCounts, sortCorps,
-  sparkSegments, totalHist, slowRows, levelWord, triggerText, STATE_TEXT,
+  sparkSegments, totalHist, slowRows, levelWord, triggerText, reasonText, REASON_HINT, STUCK_TEXT, sortWaiting,
 } from './bareosLiveText.js';
 
 const CORP_KEY = 'bareos-live-corp';
@@ -167,54 +167,83 @@ function CorpCard({ c, onOpen }) {
 
 /* ───────── ② 단일 법인 ───────── */
 function CorpView({ corps, c, onPick }) {
+  const [diagOpen, setDiagOpen] = useState(false);
   const b = corpBadge(c);
   const act = c.rows.filter((r) => r.state === 'running');
-  const wait = c.rows.filter((r) => r.state !== 'running');
+  const wait = sortWaiting(c.rows.filter((r) => r.state !== 'running'));
+  const stuck = act.filter((r) => r.stuck);
+  const groups = c.waitGroups || [];
+  const top = groups[0] || null;
+  const oldestWait = wait.find((r) => Number.isFinite(r.since)) || null;
+  const fdSaysNothing = act.length > 0 && c.live?.ok && act.every((r) => r.rateNow === null);
   return (
     <>
       <div style={ROW}>
         <label htmlFor="bareos-live-corp" className="muted" style={{ fontSize: 12 }}>법인</label>
-        <Select id="bareos-live-corp" className="input" value={c.vcenterId} onChange={(e) => onPick(e.target.value)} style={{ minWidth: 0, flex: '1 1 240px', maxWidth: 420 }} aria-label="법인">
-          {corps.map((x) => <option key={x.vcenterId} value={x.vcenterId}>{x.vcName} — Director {x.director?.name || '—'}{x.running ? ` · 실행 ${x.running}` : ''}</option>)}
+        <Select id="bareos-live-corp" className="input" value={c.vcenterId} onChange={(e) => onPick(e.target.value)} style={{ minWidth: 0, flex: '1 1 240px', maxWidth: 440 }} aria-label="법인">
+          {corps.map((x) => <option key={x.vcenterId} value={x.vcenterId}>{x.vcName} — Director {x.director?.name || '—'}{x.running ? ` · 실행 ${x.running}` : ''}{x.waiting ? ` · 대기 ${x.waiting}` : ''}</option>)}
         </Select>
         <Badge tone={b.tone}>{b.text}</Badge>
-        <span className="muted" style={{ fontSize: 12 }}>{c.live ? `상태 조회 ${shortTs(c.live.at)}${c.live.ok ? '' : ` — ${liveCodeText(c.live.code)}`}` : (c.running || c.waiting ? '상태 조회 전(곧 묻습니다)' : '실행 중인 잡이 없어 묻지 않습니다')}</span>
+        <span className="muted" style={{ fontSize: 12 }}>
+          {c.live ? `상태 조회 ${shortTs(c.live.at)} · Director 상태 ${c.live.dirOk ? '읽음' : liveCodeText(c.live.dirCode)} · FD 상태 ${c.live.ok ? '읽음' : liveCodeText(c.live.code)}` : (c.running || c.waiting ? '상태 조회 전(곧 묻습니다)' : '실행 중인 잡이 없어 묻지 않습니다')}
+        </span>
       </div>
       <section aria-label="법인 요약" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 180px), 1fr))', gap: 12 }}>
-        <Kpi label="실행 중" main={c.running} color={TONE.run} sub={c.slow ? `느림 ${c.slow}` : '—'} />
-        <Kpi label="지금 속도" main={c.running ? rateText(c.rateNow) : '—'} color={CYAN} sub={c.rateUnknown ? `모름 ${c.rateUnknown}건 제외` : undefined}>
+        <Kpi label="실행 중" main={c.running} color={TONE.run} sub={stuck.length ? <span style={{ color: TONE.warn }}>멈춤 의심 {stuck.length}</span> : c.slow ? `느림 ${c.slow}` : '—'} />
+        <Kpi label="지금 속도" main={c.running ? rateText(c.rateNow) : '—'} color={c.rateNow === null ? 'var(--text-dim)' : CYAN}
+          sub={fdSaysNothing ? 'FD 가 진행을 보고하지 않음 — 아래 진단' : c.rateUnknown ? `모름 ${c.rateUnknown}건 제외` : undefined}>
           <Spark hist={c.hist} w={200} h={34} label={`${c.vcName} 최근 처리 속도 흐름`} />
         </Kpi>
-        <Kpi label="대기" main={c.waiting} sub="스토리지·차례 대기" />
+        <Kpi label="대기" main={c.waiting} sub={c.waiting ? `가장 오래 ${oldestWait ? elapsedText(oldestWait.elapsed) : '—'} · 사유 ${groups.length}가지` : '대기 없음'} />
         <Kpi label="오늘 성공 / 실패" main={<><span style={{ color: TONE.ok }}>{c.today.ok + c.today.warn}</span> <span className="muted" style={{ fontSize: 15 }}>/</span> <span style={{ color: c.today.fail ? TONE.bad : undefined }}>{c.today.fail}</span></>} sub={`경고 ${c.today.warn} · 저장 ${sizeText(c.today.bytes)}`} />
-        <Kpi label="최근 24시간 평균 속도" main={c.rateSamples ? rateText(c.rateMedian) : '—'} sub={c.rateSamples ? `끝난 성공 ${c.rateSamples}건 · VM 별 평균의 중앙값` : '끝난 성공 기록 없음'} />
+        <Kpi label="최근 24시간 평균 속도" main={c.rateSamples ? rateText(c.rateMedian) : '—'} sub={c.rateSamples ? `끝난 성공 ${c.rateSamples}건 · VM 별 마지막 끝난 실행의 중앙값` : '최근 24시간 끝난 성공 기록 없음'} />
       </section>
+
+      {stuck.length > 0 && (
+        <section aria-label="멈춤 의심" className="banner warn" style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 10, fontSize: 13, lineHeight: 1.6 }}>
+          <b>멈춤 의심 {stuck.length}</b>
+          <span style={{ flex: '1 1 320px', minWidth: 0 }}>
+            <b>{stuck[0].vmName}</b> 백업이 {elapsedText(stuck[0].elapsed)}째 실행 중인데 {stuck[0].stuck === 'no-report' ? 'FD 가 진행을 보고하지 않습니다' : 'FD 가 보고한 속도가 0 입니다'}
+            {stuck[0].dirStatus ? <> · Director 상태: <b>{reasonText(stuck[0].dirStatus.reason)}</b></> : null}
+            {stuck.length > 1 ? ` 외 ${stuck.length - 1}건` : ''}
+            {top && top.n > 0 ? <> · 대기 {c.waiting}건 중 {top.n}건이 <b>{reasonText(top.reason)}</b> 사유입니다.</> : '.'}
+          </span>
+          {c.diag && <button type="button" className="logout-btn" style={{ padding: '6px 12px' }} onClick={() => { setDiagOpen(true); requestAnimationFrame(() => document.getElementById('bareos-live-diag')?.scrollIntoView({ block: 'start', behavior: 'smooth' })); }}>진단 원문</button>}
+        </section>
+      )}
 
       <section className="card" aria-label="실행 중" style={{ padding: 0, overflow: 'hidden', minWidth: 0 }}>
         <div style={{ ...ROW, padding: '10px 14px', borderBottom: '1px solid var(--border-soft)' }}>
           <b>실행 중 {act.length}</b>
-          <span className="muted" style={{ fontSize: 12 }}>읽은 양 / VM 용량은 추정 진척 — Incremental 은 바뀐 블록만 읽어 용량보다 훨씬 작게 끝납니다</span>
+          <span className="muted" style={{ fontSize: 12 }}>Director 상태 = Director 가 그 잡을 어떻게 보는지 · 진행량·속도 = FD 가 보고한 값 · 읽은 양 / VM 용량은 추정 진척(Incremental 은 훨씬 작게 끝남)</span>
         </div>
         {act.length === 0 ? <div className="muted" style={{ padding: 14, fontSize: 13 }}>지금 이 법인에서 도는 백업이 없습니다.</div> : (
-          <STable minWidth={980} limit={300}>
-            <thead><tr><th>VM</th><th>그룹 · 실행</th><th>레벨</th><th>시작 · 경과</th><th data-nosort style={{ minWidth: 220 }}>읽은 양 / VM 용량</th><th className="right">지금 속도</th><th className="right">평균 속도</th><th className="right">지난 평균</th><th>상태</th></tr></thead>
+          <STable minWidth={1100} limit={300}>
+            <thead><tr><th>VM</th><th>그룹 · 실행</th><th>레벨</th><th>시작 · 경과</th><th>Director 상태</th><th data-nosort style={{ minWidth: 200 }}>읽은 양 / VM 용량</th><th className="right">지금 속도</th><th className="right">지난 평균</th><th>판정</th></tr></thead>
             <tbody>
               {act.map((r) => {
                 const pct = progressPct(r.bytes, r.sizeGb);
+                const dirWarn = r.dirStatus && r.dirStatus.reason !== 'running';
                 return (
                   <tr key={r.jobid}>
                     <td style={{ whiteSpace: 'nowrap' }}><b>{r.vmName}</b><div className="muted" style={{ fontSize: 11.5, fontFamily: 'var(--mono)' }}>jobid {r.jobid}</div></td>
                     <td style={{ whiteSpace: 'nowrap', fontSize: 12.5 }}>{r.group || '—'}<div className="muted" style={{ fontSize: 11.5 }}>{triggerText(r)}{r.by ? ` · ${r.by}` : ''}</div></td>
                     <td>{levelWord(r.level)}</td>
-                    <td data-sort={r.since ?? ''} style={{ fontFamily: 'var(--mono)', fontSize: 12 }}>{r.since ? shortTs(r.since) : '—'}<div className="muted">{elapsedText(r.elapsed)}</div></td>
-                    <td>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, fontSize: 12 }}><span>{sizeText(r.bytes)}</span><span className="muted">{r.sizeGb ? sizeText(r.sizeGb * 1024 ** 3) : '용량 모름'}</span></div>
-                      {pct !== null && <div style={{ marginTop: 4 }}><Bar pct={pct} color={r.slow ? '#f59e0b' : '#3b82f6'} label={`추정 진척 ${pct}%`} /></div>}
+                    <td data-sort={r.since ?? ''} style={{ fontFamily: 'var(--mono)', fontSize: 12 }}>{r.since ? shortTs(r.since) : '—'}<div style={{ color: r.stuck ? TONE.warn : 'var(--text-dim)' }}>{elapsedText(r.elapsed)}</div></td>
+                    <td data-sort={r.dirStatus?.reason || ''} style={{ whiteSpace: 'nowrap', fontSize: 12.5 }}>
+                      {r.dirStatus ? <><span style={{ color: dirWarn ? TONE.warn : TONE.ok, fontWeight: 700 }}>{reasonText(r.dirStatus.reason)}</span><div className="muted" style={{ fontSize: 11, fontFamily: 'var(--mono)' }}>{r.dirStatus.text}</div></>
+                        : <span className="muted">{c.live?.dirOk ? 'Director 표에 없음' : '모름'}</span>}
                     </td>
-                    <td className="right" data-sort={r.rateNow ?? ''} style={{ fontWeight: 800, color: r.slow ? TONE.warn : CYAN, fontVariantNumeric: 'tabular-nums' }}>{rateText(r.rateNow)}</td>
-                    <td className="right" data-sort={r.rateAvg ?? ''} style={{ fontVariantNumeric: 'tabular-nums' }}>{rateText(r.rateAvg)}</td>
+                    <td>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, fontSize: 12 }}><span className={r.bytes === null ? 'muted' : undefined}>{r.bytes === null ? (c.live?.ok ? 'FD 보고 없음' : '모름') : sizeText(r.bytes)}</span><span className="muted">{r.sizeGb ? sizeText(r.sizeGb * 1024 ** 3) : '용량 모름'}</span></div>
+                      {pct !== null && <div style={{ marginTop: 4 }}><Bar pct={pct} color={r.slow || r.stuck ? '#f59e0b' : '#3b82f6'} label={`추정 진척 ${pct}%`} /></div>}
+                    </td>
+                    <td className="right" data-sort={r.rateNow ?? ''} style={{ fontWeight: 800, color: r.rateNow === null ? 'var(--text-dim)' : r.slow ? TONE.warn : CYAN, fontVariantNumeric: 'tabular-nums' }}>{rateText(r.rateNow)}</td>
                     <td className="right" data-sort={r.baseline ?? ''} style={{ fontVariantNumeric: 'tabular-nums' }}>{r.baseline ? rateText(r.baseline) : '—'}</td>
-                    <td>{r.slow ? <Badge tone="warn">느림</Badge> : r.rateNow === null ? <Badge tone="muted">속도 모름</Badge> : <Badge tone="ok">정상</Badge>}</td>
+                    <td>
+                      {r.stuck ? <><Badge tone="warn">멈춤 의심</Badge><div className="muted" style={{ fontSize: 11, marginTop: 2 }}>{STUCK_TEXT[r.stuck]}</div></>
+                        : r.slow ? <Badge tone="warn">느림</Badge> : r.rateNow === null ? <Badge tone="muted">속도 모름</Badge> : <Badge tone="ok">정상</Badge>}
+                    </td>
                   </tr>
                 );
               })}
@@ -224,25 +253,67 @@ function CorpView({ corps, c, onPick }) {
       </section>
 
       <section className="card" aria-label="대기 중" style={{ padding: 0, overflow: 'hidden', minWidth: 0 }}>
-        <div style={{ ...ROW, padding: '10px 14px', borderBottom: '1px solid var(--border-soft)' }}><b>대기 {wait.length}</b><span className="muted" style={{ fontSize: 12 }}>Director 가 받았지만 아직 시작하지 않은 실행(스토리지·차례 대기)</span></div>
+        <div style={{ ...ROW, padding: '10px 14px', borderBottom: '1px solid var(--border-soft)' }}><b>대기 {wait.length}</b><span className="muted" style={{ fontSize: 12 }}>사유별로 묶음 · 오래 기다린 순 · 사유 = Director 상태</span></div>
         {wait.length === 0 ? <div className="muted" style={{ padding: 14, fontSize: 13 }}>대기 중인 실행이 없습니다.</div> : (
-          <STable minWidth={600} limit={300}>
-            <thead><tr><th>VM</th><th>그룹 · 실행</th><th>레벨</th><th>보낸 시각 · 대기</th><th>상태</th></tr></thead>
-            <tbody>
-              {wait.map((r) => (
-                <tr key={r.jobid}>
-                  <td><b>{r.vmName}</b><div className="muted" style={{ fontSize: 11.5, fontFamily: 'var(--mono)' }}>jobid {r.jobid}</div></td>
-                  <td style={{ fontSize: 12.5 }}>{r.group || '—'}<div className="muted" style={{ fontSize: 11.5 }}>{triggerText(r)}</div></td>
-                  <td>{levelWord(r.level)}</td>
-                  <td data-sort={r.since ?? ''} style={{ fontFamily: 'var(--mono)', fontSize: 12 }}>{r.since ? shortTs(r.since) : '—'}<div className="muted">{elapsedText(r.elapsed)}</div></td>
-                  <td><Badge tone="run">{STATE_TEXT[r.state] || r.state}</Badge></td>
-                </tr>
+          <>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 260px), 1fr))', gap: 10, padding: '12px 14px' }}>
+              {groups.map((g) => (
+                <div key={g.reason} style={{ border: `1px ${g.reason === 'unknown' ? 'dashed' : 'solid'} ${g.reason === 'maxjobs' || g.reason === 'mount' || g.reason === 'volume' ? 'rgba(245,158,11,.45)' : 'var(--border)'}`, borderRadius: 10, padding: '10px 12px', background: 'var(--panel-deep)', minWidth: 0 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}><b>{reasonText(g.reason)}</b><b style={{ fontSize: 18 }}>{g.n}</b></div>
+                  <div className="muted" style={{ fontSize: 12, overflowWrap: 'anywhere' }}>{g.text ? `${g.text} · ` : ''}가장 오래 {Number.isFinite(g.oldest) ? elapsedText(Date.now() - g.oldest) : '—'}</div>
+                  {REASON_HINT[g.reason] && <div className="muted" style={{ fontSize: 11.5, marginTop: 4 }}>{REASON_HINT[g.reason]}</div>}
+                </div>
               ))}
-            </tbody>
-          </STable>
+            </div>
+            <STable minWidth={760} limit={300}>
+              <thead><tr><th>VM</th><th>그룹 · 실행</th><th>레벨</th><th>보낸 시각 · 대기</th><th>대기 사유</th></tr></thead>
+              <tbody>
+                {wait.map((r) => (
+                  <tr key={r.jobid}>
+                    <td style={{ whiteSpace: 'nowrap' }}><b>{r.vmName}</b><div className="muted" style={{ fontSize: 11.5, fontFamily: 'var(--mono)' }}>jobid {r.jobid}</div></td>
+                    <td style={{ whiteSpace: 'nowrap', fontSize: 12.5 }}>{r.group || '—'}<div className="muted" style={{ fontSize: 11.5 }}>{triggerText(r)}</div></td>
+                    <td>{levelWord(r.level)}</td>
+                    <td data-sort={r.since ?? ''} style={{ fontFamily: 'var(--mono)', fontSize: 12 }}>{r.since ? shortTs(r.since) : '—'}<div className="muted">{elapsedText(r.elapsed)}</div></td>
+                    <td data-sort={r.dirStatus?.reason || 'unknown'} style={{ whiteSpace: 'nowrap', fontSize: 12.5 }}>{r.dirStatus ? reasonText(r.dirStatus.reason) : <span className="muted">{reasonText('unknown')}</span>}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </STable>
+          </>
         )}
       </section>
+
+      {c.diag && (
+        <section id="bareos-live-diag" className="card" aria-label="진단 원문" style={{ padding: 0, overflow: 'hidden', minWidth: 0 }}>
+          <div style={{ ...ROW, padding: '10px 14px', borderBottom: diagOpen ? '1px solid var(--border-soft)' : 0 }}>
+            <b>진단 원문</b>
+            <span className="muted" style={{ fontSize: 12, flex: '1 1 260px', minWidth: 0 }}>전체 범위 관리자만 · 마지막 조회({shortTs(c.diag.at)})의 앞 4KB · 주소·비밀번호는 없지만 VM 이름·파일 경로가 보일 수 있습니다</span>
+            <button type="button" className="logout-btn" style={{ padding: '6px 12px' }} aria-expanded={diagOpen} onClick={() => setDiagOpen((v) => !v)}>{diagOpen ? '접기' : '펼치기'}</button>
+          </div>
+          {diagOpen && (
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 420px), 1fr))', gap: 12, padding: '12px 14px' }}>
+              {(c.diag.fd || []).map((f) => (
+                <DiagBox key={f.client} title={`FD 상태 — ${f.client}`} note={f.ok ? `읽은 실행 ${f.n ?? 0}건` : liveCodeText(f.code)} raw={f.raw} />
+              ))}
+              {(c.diag.fd || []).length === 0 && <DiagBox title="FD 상태" note="법인 FD 미설정" raw="" />}
+              <DiagBox title="Director 상태" note={c.diag.dir.ok ? `읽은 잡 ${c.diag.dir.n ?? 0}건` : liveCodeText(c.diag.dir.code)} raw={c.diag.dir.raw} />
+              <div className="muted" style={{ fontSize: 12, lineHeight: 1.6, gridColumn: '1 / -1' }}>
+                FD 가 실행을 보고하지 않는데 Director 는 실행 중이라고 하면 — FD 이름(설정 › 법인 매핑)·FD 접속·마운트·스토리지를 먼저 확인하세요. 원문 모양이 포탈이 기대한 것과 다르면 이 원문을 보내 주시면 파서를 맞춥니다.
+              </div>
+            </div>
+          )}
+        </section>
+      )}
     </>
+  );
+}
+
+function DiagBox({ title, note, raw }) {
+  return (
+    <div style={{ minWidth: 0 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, fontSize: 12, marginBottom: 6 }}><b>{title}</b><span className="muted">{note}</span></div>
+      <pre style={{ margin: 0, background: 'var(--panel-deep)', border: '1px solid var(--border-soft)', borderRadius: 8, padding: '10px 12px', fontFamily: 'var(--mono)', fontSize: 11.5, lineHeight: 1.55, whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', maxHeight: 320, overflowY: 'auto' }}>{raw || '(원문 없음)'}</pre>
+    </div>
   );
 }
 

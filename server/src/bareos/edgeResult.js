@@ -75,12 +75,17 @@ export const VALUE = Object.freeze({
   }),
   // v2.833 진행 현황판(읽기 전용) — 숫자는 음수·문자열을 버린다(못 읽은 값은 null · 0 이 아니다)
   liveStatus: (v) => ({
+    ...(obj(v).director ? { director: (() => {
+      const d = obj(obj(v).director);
+      if (!bool(d.ok)) return { ok: false, ...(d.code ? { code: str(d.code, 40) } : {}), ...(d.message ? { message: str(d.message, 300) } : {}) };
+      return { ok: true, raw: str(d.raw, 4096), jobs: arr(d.jobs).slice(0, 1000).map((x0) => { const x = obj(x0); return { jobid: posInt(x.jobid), name: str(x.name, 128), status: str(x.status, 200), reason: str(x.reason, 20) }; }).filter((x) => x.jobid) };
+    })() } : {}),
     clients: arr(obj(v).clients).slice(0, 50).map((c0) => {
       const c = obj(c0);
       const client = str(c.client, 64);
       if (!bool(c.ok)) return { client, ok: false, ...(c.code ? { code: str(c.code, 40) } : {}), ...(c.message ? { message: str(c.message, 300) } : {}) };
       return {
-        client, ok: true,
+        client, ok: true, raw: str(c.raw, 4096),
         jobs: arr(c.jobs).slice(0, 300).map((x0) => {
           const x = obj(x0);
           return { jobid: posInt(x.jobid), job: str(x.job, 200), name: str(x.name, 128), level: str(x.level, 1), bytes: nonNeg(x.bytes), files: nonNeg(x.files), aveRate: nonNeg(x.aveRate), lastRate: nonNeg(x.lastRate) };

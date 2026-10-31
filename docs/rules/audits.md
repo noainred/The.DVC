@@ -6,6 +6,7 @@
 
 ## 목차
 
+- Bareos v2.834 진행 현황 개선(Director 상태 · 멈춤 의심 · 진단 원문) · 백업 대상 OS 구분(2026-10-31)
 - Bareos v2.833 진행 현황판(전체 법인 · 단일 법인 · 속도 상태) 규칙(2026-10-31)
 - Bareos v2.831 백업 그룹 개편 · 보관 개수(카탈로그 삭제) 규칙·반증 확정분(2026-10-31)
 - Bareos v2.830 백업 그룹 모듈 규칙·검토 확정분(반증 1인 — 2026-10-31)
@@ -1819,6 +1820,26 @@
   목록 memo(P7) · 카탈로그 memo 세대(P9) · 고아 잡(I7) · Migration 새 잡의 일시 lastRun(C2-7).
   ⚠ 정정(v2.823): 카탈로그 memo 세대(P9)는 v2.823 에 해소했다(memo 키에 Director id + `settingsRev` — 설정을 저장하면 새로 읽는다). 고아 잡(I7)은 v2.823 검토 C3 에서
   '가리키는 Director 가 설정에 없는 대상은 원장에서만 취소·삭제' 경로로 일부 해소(Director 쪽 고아 잡 탐지는 여전히 없다).
+
+## Bareos v2.834 진행 현황 개선(Director 상태 · 멈춤 의심 · 진단 원문) · 백업 대상 OS 구분(2026-10-31)
+
+사용자 요청 ① 실제 OC2 화면(6시간 넘게 '실행 중' · 속도 모름 · 24시간 평균 '—' · 성공 37건) 을 보내며 '개선해줘 — 클로드 디자인도 사용해서' · 사용자 선택: 네 가지 모두(평균 바로 계산 · Director 상태 문구 · 멈춤 의심 · 진단 원문) · 시안 먼저 확인(시안 6판 확정 '진행해').
+② 작업 중 추가 요청 '백업 대상 VM 볼때 windows/linux 구분해서 보는 기능 추가'. 회귀 `server/test/bareosLive2833.test.js`(⑦) · `server/test/osKind2834.test.js` · `bareosRoutes ④⑤` · 웹 `bareosLiveText.test.js` · `bareosText.test.js`.
+
+- **Director 상태(`status director`)**: 같은 조회 틱에 Director 마다 한 번(FD 가 없어도 묻는다 — 'no-client' 여도 Director 표는 보인다). `liveParse.parseDirStatus` 는 'Running Jobs:' 절만 읽고 Terminated·Scheduled 절에서 멈춘다 ·
+  줄마다 `indexOf(' is ')`·`' has '` 로 상태 문구를 자른다(정규식 `(.{0,240}?)\s(is|has)\s(.{1,200}?)` 는 긴 줄에서 역추적 위험 — 300줄 0.5초 미만 시험) · 사유 키(`dirReasonOf`)는 문구 낱말로만 정한다.
+  원문 모양(dird ua_status.cc 표)은 **실환경 미확인(추정)**. JSON-RPC 오류는 'jsonrpc' 실패(잡 0개 성공 아님) · 세션이 끊기면 남은 FD 는 'skipped'.
+- **판정(`routes/api/bareosLive.js runningRow`)**: FD 가 그 jobid 를 보고하거나 Director 가 'is running' 이면 실행 중 · Director 가 아직 시작 전 사유(maxjobs·created·priority·starttime)면 원장이 실행 중이어도 **대기** ·
+  멈춤 의심 = 실행 중 3시간(`STUCK_AFTER_MS`) 이상 + **그 법인 FD 조회가 성공**했는데 그 잡을 보고하지 않음('no-report') 또는 지금 속도 0('zero'). FD 조회가 실패했으면 멈춤으로 단정하지 않는다(모름).
+  대기는 사유별로 묶고(`waitGroups` — Director 표에 없으면 'unknown') 오래 기다린 순. 마운트 대기 등 '실행 중' 이 아닌 Director 문구도 그대로 보여 준다.
+- **24시간 평균을 바로**: v2.833 의 `lastRate` 는 그 뒤에 끝난 실행부터 쌓여 처음엔 비었다(OC2 화면 '—') → `lastGoodRate` 가 `lastRate` 가 없으면 원장 `lastRun`(끝난 T·W · 바이트 > 0 · 시작<끝)으로 계산 · 24시간 안에 끝난 것만.
+- **진단 원문**: 전체 범위 관리자 판본만(`!scopedVcenterIds && isAdminDetailUser` — 데모 계정·범위 계정 없음 · 캐시 키에 `x0/x1`). 마지막 조회 원문의 **앞 4KB**(`rawHead` — 제어 문자는 공백), 메모리만 · 엣지 회신도 4KB 로 자른다(`sanitizeEdgeResult`).
+  주소·비밀번호는 원문에 없지만 VM 이름·경로는 보일 수 있다(화면이 밝힌다). 실환경 원문 모양이 다르면 사용자가 이 원문을 보내 파서를 맞춘다.
+- **데모**: Director 는 4초 미만 실행을 'is waiting execution', FD 는 4초 미만 실행을 보고하지 않는다(둘이 어긋나 '실행 중인데 실행 대기' 로 보였다 — Chromium 확인).
+- **백업 대상 OS 구분**: 분류는 서버 한 곳(`inventory/osKind.js osKind` — vCenter `guestFullName` 문자열 → windows · linux · other · null). 빈 값·'unknown'(soapClient 가 값이 없을 때 넣는 글자)·인벤토리에 없는 VM 은 **모름**(기타로 세지 않는다).
+  목록(`viewJob`)·등록 후보(`vm-candidates`)에 `os`·`guestOS`(200자)를 싣는다 — **지금 인벤토리 기준**(원장에 굳히지 않는다). 웹은 키만 받아 거른다(`bareosText.js OS_FILTERS·osCounts`) — 백업 대상 표의 OS 칩(기타·모름은 있을 때만)·VM 옆 배지 · 추가 창의 OS 선택·열.
+  vCenter 의 게스트 OS 는 **사람이 VM 에 설정한 값**이라 실제 설치 OS 와 다를 수 있다(게스트 안에서 확인한 값이 아니다).
+- 남긴 것: 백업 그룹 탭의 VM 트리에는 OS 구분을 넣지 않았다(요청 범위 = 백업 대상 보기). 멈춤 의심 3시간은 고정값(큰 Full 은 더 걸릴 수 있다 — 'FD 보고 없음/속도 0' 이 함께여야 표시).
 
 ## Bareos v2.833 진행 현황판(전체 법인 · 단일 법인 · 속도 상태) 규칙(2026-10-31)
 

@@ -31,6 +31,7 @@ import { pickAgent } from '../../cvp/formChoices.js';
 import { knownAgentNames } from '../../central/knownAgents.js';
 import { pollerStatus, pollOnce, requestReconcile } from '../../bareos/poller.js';
 import { restorePlan, placementDrift } from '../../bareos/restore.js';
+import { osFields } from '../../inventory/osKind.js';
 import { summarizeRegistryError } from '../../util/registryCore.js';
 import { normLevel } from '../../bareos/names.js';
 import { authStopView } from '../../util/authGuard.js';
@@ -110,8 +111,10 @@ const audit = (req, action, target, detail) => logAudit({ user: req.user?.userna
  * v2.822(S3·I5): 등록 뒤 VM 의 이름·위치가 바뀌었으면 drift 를 단다.
  */
 const viewJob = (j, vmById, settings) => {
-  const drift = vmById ? placementDrift(j, vmById.get(j.vmId)) : null;
-  return { ...j, directorId: jobDirectorId(j, settings), ...(drift ? { drift } : {}) };
+  const vm = vmById ? vmById.get(j.vmId) : undefined;
+  const drift = vmById ? placementDrift(j, vm) : null;
+  // v2.834: 게스트 OS(인벤토리 기준 — 인벤토리에 없는 VM 은 모름)
+  return { ...j, directorId: jobDirectorId(j, settings), ...osFields(vm), ...(drift ? { drift } : {}) };
 };
 
 /**
@@ -681,7 +684,7 @@ api.get('/tools/bareos-backup/vm-candidates', adminOnly, (req, res) => {
   const all = (store.get()?.vms || []).filter((v) => String(v.vcenterId) === vcenterId);
   const rows = all.slice().sort((x, y) => String(x.name).localeCompare(String(y.name))).slice(0, MAX_CANDIDATES).map((v) => {
     const el = eligibility(v, settings);
-    return { id: v.id, name: v.name, powerState: v.powerState, template: !!v.template, dc: v.vcDcPath ?? null, folder: v.folderPath ?? null, eligible: el.ok, reason: el.ok ? '' : el.reason, registered: registered.has(v.id) };
+    return { id: v.id, name: v.name, powerState: v.powerState, template: !!v.template, dc: v.vcDcPath ?? null, folder: v.folderPath ?? null, ...osFields(v), eligible: el.ok, reason: el.ok ? '' : el.reason, registered: registered.has(v.id) };
   });
   const site = settings.sites.find((s) => s.vcenterId === vcenterId);
   const dir = site ? directorById(site.directorId, settings) : null;

@@ -367,6 +367,21 @@ export function inFolder(x, f) {
   return p === f || p.startsWith(`${f}/`);
 }
 
+/* ───────────── v2.834 게스트 OS 구분(Windows · Linux) ───────────── */
+/** OS 거르기 — 분류는 서버(inventory/osKind.js)가 한다. os 가 없으면 '모름'(인벤토리에 없거나 vCenter 에 OS 가 비어 있음 — 기타로 세지 않는다). */
+export const OS_FILTERS = Object.freeze([['', '전체'], ['windows', 'Windows'], ['linux', 'Linux'], ['other', '기타'], ['unknown', '모름']]);
+const OS_BADGE = Object.freeze({ windows: 'blue', linux: 'teal', other: 'purple', unknown: 'gray' });
+export const osKey = (x) => (x?.os === 'windows' || x?.os === 'linux' || x?.os === 'other' ? x.os : 'unknown');
+export const osLabel = (k) => (OS_FILTERS.find(([v]) => v === k) || ['', '모름'])[1];
+export const osBadgeCls = (k) => OS_BADGE[k] || OS_BADGE.unknown;
+export const osMatches = (x, f) => !f || osKey(x) === f;
+/** 거르기별 수 — { '': 전체, windows, linux, other, unknown }. */
+export function osCounts(rows) {
+  const out = Object.fromEntries(OS_FILTERS.map(([k]) => [k, 0]));
+  for (const x of Array.isArray(rows) ? rows : []) { out[''] += 1; out[osKey(x)] += 1; }
+  return out;
+}
+
 /** 한 번에 고를 수 있는 수 — API 의 일괄 상한과 원장 남은 자리 중 작은 값(모르면 상한). */
 export function pickCap(cand) {
   const max = Number.isInteger(cand?.maxBulk) && cand.maxBulk > 0 ? cand.maxBulk : 0;

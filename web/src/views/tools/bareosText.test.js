@@ -341,3 +341,25 @@ describe('작업 결과 요약(v2.822.3 — 현장 jobid 8 로그 모양)', () =
     for (const t of [READ_ONLY_TARGET, SETTINGS_READ_ONLY, ...Object.values(ro), ...Object.values(run)]) expect(t).not.toMatch(/`/);
   });
 });
+
+// v2.834 게스트 OS 구분 — 분류는 서버(inventory/osKind.js) · 화면은 키만 본다 · os 가 없으면 '모름'(기타로 세지 않는다)
+describe('백업 대상 OS 거르기', () => {
+  it('키·문구·배지 · 모르는 값은 모름', async () => {
+    const { osKey, osLabel, osBadgeCls, osMatches, osCounts, OS_FILTERS } = await import('./bareosText.js');
+    expect(OS_FILTERS.map(([k]) => k)).toEqual(['', 'windows', 'linux', 'other', 'unknown']);
+    expect(osKey({ os: 'windows' })).toBe('windows');
+    expect(osKey({ os: null })).toBe('unknown');
+    expect(osKey({ os: 'weird' })).toBe('unknown');
+    expect(osKey(null)).toBe('unknown');
+    expect(osLabel('linux')).toBe('Linux');
+    expect(osLabel('unknown')).toBe('모름');
+    expect(osLabel('zzz')).toBe('모름');
+    expect(osBadgeCls('windows')).not.toBe(osBadgeCls('linux'));
+    expect(osMatches({ os: 'linux' }, '')).toBe(true);
+    expect(osMatches({ os: 'linux' }, 'windows')).toBe(false);
+    expect(osMatches({}, 'unknown')).toBe(true);
+    const rows = [{ os: 'windows' }, { os: 'linux' }, { os: 'linux' }, { os: 'other' }, { os: null }, {}];
+    expect(osCounts(rows)).toEqual({ '': 6, windows: 1, linux: 2, other: 1, unknown: 2 });
+    expect(osCounts(null)).toEqual({ '': 0, windows: 0, linux: 0, other: 0, unknown: 0 });
+  });
+});

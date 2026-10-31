@@ -12,7 +12,7 @@ import {
   probe, catalogLists, addJob as directorAddJob, runJob, jobStatus, jobStates, recentJobs, setJobEnabled, cancelJob, jobHistory, jobRuns, jobLog, runRestore, deleteJobIds,
 } from './director.js';
 import { pruneSelection } from './groupRetention.js';
-import { parseStatusRaw } from './liveParse.js';
+import { parseStatusRaw, parseDirStatusRaw, rawHead } from './liveParse.js';
 import { jobNameFor, isFinalStatus, isResourceName } from './names.js';
 import { chainFromHistory, chainIssue } from './restore.js';
 
@@ -140,28 +140,40 @@ export const OPS = Object.freeze({
   /**
    * v2.833 진행 현황판 — 실행 중 잡의 진행량·속도(FD 가 들고 있다 — 카탈로그는 끝나야 바이트를 채운다). FD 마다 `status client=` 하나(읽기 전용).
    * 원문 모양은 실환경 미확인(추정) — liveParse 가 평문·JSON 둘 다 받는다. FD 하나의 실패는 나머지를 막지 않고, 세션째 끊기면 남은 것은 건너뜀.
-   * @param {{ clients: string[] }} a
-   * @returns {Promise<{ clients: { client, ok, jobs?, code?, message? }[] }>}
+   * @param {{ clients: string[], director?: boolean }} a  director = `status director` 도(잡마다 Director 가 보는 상태 — v2.833.1)
+   * @returns {Promise<{ clients: { client, ok, jobs?, raw?, code?, message? }[], director?: { ok, jobs?, raw?, code?, message? } }>}
    */
-  async liveStatus(s, { clients = [] } = {}) {
+  async liveStatus(s, { clients = [], director = false } = {}) {
     const out = [];
     let dead = '';
+    // `.api json` 에서 Director 가 거부하면(ACL·FD 없음) JSON-RPC 오류 객체가 온다 — 잡 0개 '성공' 으로 보지 않는다(시험 ④)
+    const raw = async (cmd) => {
+      const r = typeof s.callRaw === 'function' ? await s.callRaw(cmd, { timeoutMs: 30_000, maxBytes: 2 * 1024 * 1024 })
+        : JSON.stringify({ result: await s.call(cmd) });
+      const head = String(r || '').trimStart();
+      if (head[0] === '{') { let j = null; try { j = JSON.parse(head); } catch { j = null; } if (j?.error) throw fail('jsonrpc', jsonRpcErrorText(j.error)); }
+      return r;
+    };
+    // v2.833.1: Director 가 보는 잡 상태(실행 중 · 마운트 대기 · 동시 실행 상한 …) — 한 번(법인 FD 수와 무관) · 원문 머리는 진단용
+    let dir = null;
+    if (director) {
+      try { const r = await raw('status director'); dir = { ok: true, jobs: parseDirStatusRaw(r), raw: rawHead(r) }; } catch (e) {
+        dir = { ok: false, code: e?.code || 'error', message: String(e?.message || e).slice(0, 300) };
+        if (SESSION_DEAD.has(e?.code)) dead = `Director 연결 문제로 멈췄습니다(${e.code})`;
+      }
+    }
     for (const c of (Array.isArray(clients) ? clients : []).slice(0, LIVE_CLIENTS_MAX)) {
       if (dead) { out.push({ client: String(c).slice(0, 64), ok: false, code: 'skipped', message: `건너뜀 — ${dead}` }); continue; }
       if (!isResourceName(c)) { out.push({ client: String(c).slice(0, 64), ok: false, code: 'invalid', message: 'FD 이름이 올바르지 않습니다.' }); continue; }
       try {
-        const raw = typeof s.callRaw === 'function' ? await s.callRaw(`status client=${c}`, { timeoutMs: 30_000, maxBytes: 2 * 1024 * 1024 })
-          : JSON.stringify({ result: await s.call(`status client=${c}`) });
-        // `.api json` 에서 Director 가 거부하면(ACL·FD 없음) JSON-RPC 오류 객체가 온다 — 잡 0개 '성공' 으로 보지 않는다(시험 ④)
-        const head = String(raw || '').trimStart();
-        if (head[0] === '{') { let j = null; try { j = JSON.parse(head); } catch { j = null; } if (j?.error) throw fail('jsonrpc', jsonRpcErrorText(j.error)); }
-        out.push({ client: c, ok: true, jobs: parseStatusRaw(raw) });
+        const r = await raw(`status client=${c}`);
+        out.push({ client: c, ok: true, jobs: parseStatusRaw(r), raw: rawHead(r) });
       } catch (e) {
         out.push({ client: c, ok: false, code: e?.code || 'error', message: String(e?.message || e).slice(0, 300) });
         if (SESSION_DEAD.has(e?.code)) dead = `Director 연결 문제로 멈췄습니다(${e.code})`;
       }
     }
-    return { clients: out };
+    return { clients: out, ...(dir ? { director: dir } : {}) };
   },
   setEnabled: (s, { name, enabled }) => setJobEnabled(s, name, !!enabled),
   history: (s, { name, limit }) => jobHistory(s, name, limit),
