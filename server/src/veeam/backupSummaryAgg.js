@@ -83,7 +83,7 @@ export function addSiteVm(agg, row, now = Date.now()) {
     for (const x of row.e) { if (x?.r === 'fail') agg.err.fail++; else if (x?.r === 'warn') agg.err.warn++; }
   }
   if (row?.v?.state === 'run') agg.run++;
-  if (isFin(row?.lok?.at) && (agg.lok == null || row.lok.at < agg.lok)) agg.lok = row.lok.at;
+  if (isFin(row?.lok?.at) && (agg.lok == null || row.lok.at > agg.lok)) agg.lok = row.lok.at;
   const nx = nextAtOf(row, now);
   if (nx != null && (agg.nx == null || nx < agg.nx)) agg.nx = nx;
   // v2.837 보호 안 됨 · 확인 안 됨(시안 ③ — 보호 안 됨 = BackedUp 인데 백업 결과 없음 + 확인 필요는 화면이 더한다)
