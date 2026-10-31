@@ -27,7 +27,7 @@ test('A 저장 · 집계 · 글자 · 색', () => {
   const vms = [{ id: 'x:1', name: 'a', vcenterId: 'x' }, { id: 'x:2', name: 'b', vcenterId: 'x' }];
   assert.equal(BM.setMarks([vms[0]], { method: 'check' }, U).ok, true);
   assert.equal(BM.markView(BM.getMarks()['x:1']).method, 'check');
-  assert.deepEqual(BM.markCounts(vms, BM.getMarks(), {}, { veeamKnown: true }).method, { veeam: 0, clone: 0, bareos: 0, config: 0, none: 0, check: 1, unset: 1 });
+  assert.deepEqual(BM.markCounts(vms, BM.getMarks(), {}, { veeamKnown: true }).method, { veeam: 0, clone: 0, bareos: 0, ssh: 0, config: 0, none: 0, check: 1, unset: 1 });
   assert.equal(BS.backupTotals([{ vm: 2, marks: { method: { veeam: 0, clone: 0, bareos: 0, config: 0, none: 0, check: 1, unset: 1 } } }]).marks.method.check, 1);
   assert.equal(BS.METHOD_TEXT.check, '확인 필요');
   assert.ok(XS.METHOD_LOOK.check?.fg && XS.METHOD_LOOK.check?.bg);

@@ -128,8 +128,9 @@ export function folderSummaryText(a) {
  */
 export function methodCountsRich(a, unknown, { full = false, unknownText = '모름' } = {}) {
   if (unknown) return unknownText;
-  const parts = Object.entries(METHOD_TEXT).filter(([k]) => full || a.method[k] > 0)
-    .map(([k, t]) => ({ text: `${t} ${a.method[k].toLocaleString('en-US')}`, font: { bold: true, color: { argb: METHOD_LOOK[k].fg } } }));
+  const n = (k) => (Number.isFinite(a.method[k]) ? a.method[k] : 0);   // v2.835: 방식이 늘어도(ssh) 예전 모양의 수(키 없음)를 받는다
+  const parts = Object.entries(METHOD_TEXT).filter(([k]) => full || n(k) > 0)
+    .map(([k, t]) => ({ text: `${t} ${n(k).toLocaleString('en-US')}`, font: { bold: true, color: { argb: METHOD_LOOK[k].fg } } }));
   if (full || a.method.unset > 0) parts.push({ text: `미지정 ${a.method.unset.toLocaleString('en-US')}`, font: { color: { argb: C.muted } } });
   if (!parts.length) return '';
   return { richText: parts.flatMap((p, i) => (i ? [{ text: ' · ', font: { color: { argb: C.muted } } }, p] : [p])) };

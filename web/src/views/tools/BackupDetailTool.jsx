@@ -3,13 +3,18 @@
  *   시안: vCenter › 폴더 › 하위 폴더 › VM 표). 메뉴: 서버 › Veeam → 화면 위 Summary | Detail 탭(v2.787 — 예전 'Veeam 현황 › Detail' · 도구 키 그대로). 값은 서버(GET /api/tools/backup-detail — veeam/backupStatus.js).
  * ⚠ 폴링하지 않는다(vCenter 를 고를 때·새로고침 · 서버 60초 캐시) · 늦게 온 이전 응답은 버린다 · 훅은 전부 조기 return 위.
  * ⚠ VM 의 Veeam 키가 없으면 '모름'(서버가 못 읽음), null 이면 '없음' — 둘을 섞지 않는다.
+ * v2.835(사용자 요청 '백업 메뉴 개편 1차' + 시안 ②): 백업 정책(사람이 정한 값 — Veeam · Bareos · SSH · 백업 안함 · 확인 필요)과 실제 백업(포탈이 읽은
+ *   Veeam 대조 · Bareos 잡)을 다른 열로 · 정책≠실제 · RPO · 마지막 성공 · 다음 예정 · 최근 24시간 실패 · 백업 안 된 VM 찾기. 판정은 서버(veeam/backupPolicy.js)가
+ *   행에 실은 필드(p · a · mm · lok · e · nx)이고 화면은 그리며 창(N 일) 비교만 한다. 스냅샷·Clone 문구와 기능은 이 화면에서 뺐다(사용자 요청 — 서버 값·내보내기는 그대로).
  */
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { fetchJson, downloadFile, canCsv, putJson, hasRole, toolAllowed } from '../../api.js';
 import { saveHandoff } from './backupRunText.js';   // v2.818 고른 VM 을 '백업 실행' 탭으로 넘긴다
 import { Loading, ErrorBox } from '../../components/ui.jsx';
 import Select from '../../components/Select.jsx';
-import { fmtNum, pctOf, veeamStateOf, snapReasonText, FILTERS, filterCounts, buildTree, flattenTree, initialOpen, veeamCell, snapCell, shortTs, vmClass, loadOpts, saveOpts, scopeQuery, scopeNote, runningCell, CRIT, critOf, MEMO_MAX, marksLine, marksNotice, filterCountText, detailLoadKey, toggleAllVisible, invertVisible, visibleVmIds, folderVmIdMap, folderCheckState, filterLabel, METHODS, methodOf, backupCell, cloneCell, bareosCell, methodKeyOf, METHOD_KEYS_MAP, fmtGb, methodGbTotals, NOT_VEEAM_GAP } from './backupViewText.js';
+import { fmtNum, pctOf, veeamStateOf, filterCounts, buildTree, flattenTree, initialOpen, veeamCell, shortTs, vmClass, loadOpts, saveOpts, scopeQuery, scopeNote, runningCell, CRIT, critOf, MEMO_MAX, marksLine, marksNotice, filterCountText, detailLoadKey, toggleAllVisible, invertVisible, visibleVmIds, folderVmIdMap, folderCheckState, filterLabel, methodOf, bareosCell, methodKeyOf, METHOD_KEYS_MAP, fmtGb, NOT_VEEAM_GAP,
+  POLICIES, CHIP_GROUPS, rpoCell, mismatchCell, lastOkText, nextText, errText, policyGbTotals, folderRpoPct, saveBareosGroupHandoff } from './backupViewText.js';
+import StaleFinder from './BackupStaleFinder.jsx';   // v2.835 백업 안 된 VM 찾기
 import { CritIcon, NeedIcon, NEED_COLOR, MethodBadge } from './BackupMarkIcons.jsx';
 import BackupOptions from './BackupOptions.jsx';
 import { saveBareosHandoff, HANDOFF_MAX as BAREOS_HANDOFF_MAX, lvText } from './bareosViewText.js';
@@ -39,6 +44,8 @@ const CHIP = {
   bareosWarn: { color: '#fcd34d', background: 'rgba(245,158,11,.16)' },
   bareosBad: { color: '#fca5a5', background: 'rgba(239,68,68,.14)' },
   bareosNone: { color: '#fdba74', background: 'transparent', border: '1px dashed rgba(251,146,60,.55)' },
+  // v2.835 정책≠실제 · RPO 칸
+  bad: { color: '#fca5a5', background: 'rgba(239,68,68,.14)' },
 };
 function Chip({ c }) {
   return <span style={{ display: 'inline-block', padding: '2px 8px', borderRadius: 10, fontSize: 12, fontWeight: 700, whiteSpace: 'nowrap', ...(CHIP[c.tone] || CHIP.none) }}>{c.text}</span>;
@@ -57,7 +64,35 @@ const readSavedVc = () => { try { return localStorage.getItem(DETAIL_VC_KEY) || 
 // 1440px 에서 옆 상세 칸(280px)과 함께 가로 스크롤 없이 들어가는 폭(약 790px) — 좁으면 표만 가로로 스크롤한다
 // v2.803(사용자 요청): '작업' 열을 지우고 'Clone' 열 · 'Veeam 백업'·'스냅샷' 두 열을 '백업' 한 열로(Veeam 이 있으면 Veeam, 없으면 그 자리에 스냅샷)
 // v2.814: 전원 다음 '용량'(디스크 사용 GB) 열
-const GRID = 'minmax(220px, 2fr) 52px 84px minmax(150px, 1.3fr) minmax(140px, 1.1fr) 64px 104px';
+// v2.835(시안 ②): 폴더›VM · 전원 · 용량 · 백업 정책 · 실제 백업 · 정책≠실제 · RPO · 복원 지점 · 마지막 성공·다음 예정 · 최근 실패(24h).
+//   옆 상세 칸은 VM 을 골랐을 때만 연다 — 고르지 않으면 표가 1440 본문을 다 쓴다(열 11개가 가로 스크롤 없이 들어간다)
+//   Chromium 판독(1440 · 상세 칸 열림): VM 이름이 잘려 이름 칸을 넓히고 '복원 지점' 머리가 두 줄이라 그 칸도 넓혔다 — 최소 칸 합 1074
+const GRID = 'minmax(230px, 2fr) 46px 74px minmax(150px, 1.2fr) minmax(150px, 1.2fr) 86px 86px 58px minmax(118px, 1fr) 76px';
+const GRID_MIN = 1080;
+/** 폴더 막대 한 줄 — 'n/전체' + 막대 + 이름(색만으로 구분하지 않게 글자도). */
+function PolBar({ n, of, color, label }) {
+  const p = pctOf(n, of) || 0;
+  return (
+    <div className="flex gap" style={{ alignItems: 'center', minWidth: 0, gap: 6 }}>
+      <span style={{ fontWeight: 700, color, fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap', minWidth: 46, fontSize: 12 }}>{n}/{of}</span>
+      <div style={{ flex: 1, minWidth: 24, height: 5, borderRadius: 3, background: 'var(--panel-deep)' }}><div style={{ height: 5, borderRadius: 3, background: color, width: `${n > 0 ? Math.max(2, p) : 0}%` }} /></div>
+      <span style={{ color, fontSize: 11, whiteSpace: 'nowrap' }}>{label}</span>
+    </div>
+  );
+}
+/** 정책 아이콘(선 그림 — 색과 글자를 함께 쓴다). 모양은 표로(조기 return 이 없게 — 화면 테스트의 '훅은 조기 return 위' 판정). */
+const POLICY_SHAPES = {
+  veeam: <circle cx="8" cy="8" r="6" />,
+  bareos: <rect x="2.5" y="2.5" width="11" height="11" rx="2" />,
+  ssh: <path d="M3 4l4 4-4 4M8 12h5" />,
+  none: <><circle cx="8" cy="8" r="6" /><path d="M4 12L12 4" /></>,
+  check: <><circle cx="8" cy="8" r="6" /><path d="M6.3 6.5a1.7 1.7 0 1 1 2.4 1.6c-.5.3-.7.6-.7 1.1M8 11.3v.2" /></>,
+};
+function PolicyIcon({ k, size = 13 }) {
+  return <svg width={size} height={size} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{POLICY_SHAPES[k] || POLICY_SHAPES.check}</svg>;
+}
+const POLICY_SHORT = Object.fromEntries(Object.entries(METHOD_KEYS_MAP).map(([key, v]) => [v, key.toUpperCase()]));
+const ACT_COLOR = { v: '#86efac', b: '#fdba74', none: '#94a3b8', unk: 'var(--text-dim)' };
 
 export default function BackupDetailTool({ scope }) {
   const [vcs, setVcs] = useState(null);
@@ -123,7 +158,6 @@ export default function BackupDetailTool({ scope }) {
   const now = data?.at || 0;
   const vopts = useMemo(() => ({ rpoDays: opts.rpoDays, now: now || Date.now() }), [opts.rpoDays, now]);
   const counts = useMemo(() => filterCounts(vms, vopts), [vms, vopts]);
-  const hasBareos = useMemo(() => (vms || []).some((v) => 'b' in v), [vms]);   // v2.828 이 vCenter 에 Bareos 칸이 하나라도 있나(없으면 Bareos 칩·막대를 그리지 않는다)
   const tree = useMemo(() => buildTree(vms, { filter, q, ...vopts }), [vms, filter, q, vopts]);
   const openSet = useMemo(() => open || initialOpen(buildTree(vms)), [open, vms]);
   const forceOpen = filter !== 'all' || !!q.trim();
@@ -132,7 +166,10 @@ export default function BackupDetailTool({ scope }) {
   const selVm = useMemo(() => vms.find((v) => v.id === sel) || null, [vms, sel]);
   const writable = data?.writable === true && !data?.marksUnreadable;
   const marksUnknown = data?.marksUnreadable === true;   // v2.785(GR R-B2): 표시 수·칩은 '—'
-  const gbTot = useMemo(() => methodGbTotals(vms, { marksUnreadable: marksUnknown }), [vms, marksUnknown]);   // v2.814 백업 방식별 용량 합
+  const gbTot = useMemo(() => policyGbTotals(vms, { marksUnreadable: marksUnknown }), [vms, marksUnknown]);   // v2.814 · v2.835 백업 정책별 용량 합
+  const bareosUnknown = !!data?.bareosUnreadable;
+  const veeamUnknown = !!data && data.row?.veeam == null && data.row?.veeamState !== 'unlinked';   // Veeam 을 읽지 못함 — 실제 Veeam 수는 '—'
+  const cnt = (k) => filterCountText(k, counts, marksUnknown, bareosUnknown, veeamUnknown);
   const visibleIds = useMemo(() => visibleVmIds(vms, { filter, q, ...vopts }), [vms, filter, q, vopts]);
   useEffect(() => { setMemo(selVm?.m?.memo || ''); setSaveErr(null); }, [sel]); // eslint-disable-line react-hooks/exhaustive-deps
   const saveMarks = useCallback(async (ids, patch) => {
@@ -155,7 +192,7 @@ export default function BackupDetailTool({ scope }) {
       const method = methodKeyOf(e);
       if (!method || saving) return;
       e.preventDefault();
-      if ((selVm.m?.method || '') !== method) saveMarks([selVm.id], { method });
+      if (selVm.p !== method || (selVm.m?.method || '') !== method) saveMarks([selVm.id], { method });
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
@@ -170,19 +207,18 @@ export default function BackupDetailTool({ scope }) {
 
   const r = data?.row || {};
   const vs = veeamStateOf(r.veeamState);
-  const days = data?.snapDays || 7;
 
   return (
     <div data-backup-detail="" style={{ display: 'flex', flexDirection: 'column', gap: 14, minWidth: 0, '--bk-head': `${headH}px`, '--bk-bulk': `${bulkH ? bulkH + 8 : 0}px` }}>
-      <VeeamHeader active="detail" desc="vCenter 하나를 골라 폴더 › VM 마다 Veeam 백업과 스냅샷 흔적을 봅니다."
+      <VeeamHeader active="detail" desc="법인(vCenter) 하나 — 폴더 › VM 마다 백업 정책(사람이 정한 값)과 실제 백업(Veeam · Bareos)을 나란히 봅니다."
         actions={<>
-          <label className="muted" style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12 }}>vCenter
+          <label className="muted" style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12 }}>법인(vCenter)
             <Select className="input" value={vcId} onChange={(e) => setVcId(e.target.value)} style={{ minWidth: 200, fontWeight: 700 }}>
               {(vcs || []).map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}
             </Select>
           </label>
           {canCsv() && <button type="button" className="tab" disabled={!vcId || !data} onClick={() => setExportOpen(true)} style={{ padding: '6px 14px' }}
-            title="지금 화면의 VM(보기·검색 반영) 또는 고른 폴더를 CSV·엑셀로 — Veeam·스냅샷·백업 표시·메모·태그에서 필요한 항목만 고르고 내 계정에 저장해 둘 수 있습니다">CSV · 엑셀…</button>}
+            title="지금 화면의 VM(보기·검색 반영) 또는 고른 폴더를 CSV·엑셀로 — Veeam·백업 표시·메모·태그에서 필요한 항목만 고르고 내 계정에 저장해 둘 수 있습니다">CSV · 엑셀…</button>}
           <button type="button" className="tab" disabled={loading || !vcId} onClick={load} style={{ padding: '6px 14px' }}>{loading ? '읽는 중…' : '새로고침'}</button>
         </>} />
       <div className="flex gap wrap" style={{ alignItems: 'center', rowGap: 6 }}>
@@ -204,21 +240,21 @@ export default function BackupDetailTool({ scope }) {
           <div style={{ minWidth: 0 }}>
             <div style={{ fontSize: 18, fontWeight: 800 }}>{data.vcenter?.name}</div>
             <div className="muted" style={{ fontSize: 12, overflowWrap: 'anywhere' }}>
-              Veeam {vs.text}{(data.servers || []).length ? ` · 서버 ${(data.servers || []).map((s) => s.name).join(', ')}` : ''} · 기준 {shortTs(data.at)}{error ? ' · 최근 새로고침 실패 — 이전 값' : ''}
+              Veeam {vs.text}{(data.servers || []).length ? ` · 서버 ${(data.servers || []).map((x) => x.name).join(', ')}` : ''} · Bareos 원장 {bareosUnknown ? '못 읽음' : '읽음'} · 기준 {shortTs(data.at)}{error ? ' · 최근 새로고침 실패 — 이전 값' : ''}
             </div>
           </div>
           <div className="flex wrap" style={{ gap: '10px 24px', marginLeft: 'auto' }}>
-            <div><div className="muted" style={{ fontSize: 12 }}>VM</div><div style={{ fontSize: 22, fontWeight: 800 }}>{fmtNum(r.vm)}</div></div>
-            <div><div style={{ fontSize: 12, color: '#86efac' }}>Veeam 백업</div><div style={{ fontSize: 22, fontWeight: 800, color: r.veeam == null ? 'var(--text-dim)' : '#4ade80' }}>{fmtNum(r.veeam)}{pctOf(r.veeam, r.vm) != null && <span style={{ fontSize: 13, marginLeft: 6 }}>{pctOf(r.veeam, r.vm)}%</span>}</div></div>
-            <div title={r.snap == null ? snapReasonText(r.snapReason) : undefined}><div style={{ fontSize: 12, color: '#d8b4fe' }}>스냅샷 기준</div><div style={{ fontSize: 22, fontWeight: 800, color: r.snap == null ? 'var(--text-dim)' : '#c084fc' }}>{fmtNum(r.snap)}{pctOf(r.snap, r.vm) != null && <span style={{ fontSize: 13, marginLeft: 6 }}>{pctOf(r.snap, r.vm)}%</span>}</div></div>
-            <div><div className="muted" style={{ fontSize: 12 }}>확인 안 됨</div><div style={{ fontSize: 22, fontWeight: 800 }}>{r.split ? fmtNum(r.split.none) : '—'}</div></div>
+            <Kpi label="VM" value={fmtNum(r.vm)} />
+            <Kpi label="실제 Veeam" color="#86efac" value={fmtNum(cnt('act-veeam'))} onClick={() => setFilter(filter === 'act-veeam' ? 'all' : 'act-veeam')} on={filter === 'act-veeam'} />
+            <Kpi label="실제 Bareos" color="#fdba74" value={fmtNum(cnt('act-bareos'))} onClick={() => setFilter(filter === 'act-bareos' ? 'all' : 'act-bareos')} on={filter === 'act-bareos'} />
+            <Kpi label="실제 백업 없음" value={fmtNum(cnt('act-none'))} onClick={() => setFilter(filter === 'act-none' ? 'all' : 'act-none')} on={filter === 'act-none'} />
+            <Kpi label="정책≠실제" color="#fca5a5" value={fmtNum(cnt('mismatch'))} onClick={() => setFilter(filter === 'mismatch' ? 'all' : 'mismatch')} on={filter === 'mismatch'} />
             {/* v2.781(점검 G3 B-B1): 마지막 읽기가 실패·오래된 서버가 있으면(runningStale) 수는 하한 — 0 은 '—', 그 밖은 '≥N'(서머리 표와 같은 runningCell). */}
             <div title={runningCell(r).title}><div style={{ fontSize: 12, color: '#fcd34d' }}>지금 백업 중</div><div style={{ fontSize: 22, fontWeight: 800, color: '#fbbf24' }}>{runningCell(r).text}<span style={{ fontSize: 13, marginLeft: 6 }}>대기 {runningCell({ running: r.pending, runningStale: r.runningStale }).text}</span></div></div>
-            <div title={r.rpo?.unknown ? `마지막 백업 시각 모름 ${r.rpo.unknown}대` : undefined}><div style={{ fontSize: 12, color: '#fdba74' }}>오래된 백업({opts.rpoDays}일 초과)</div><div style={{ fontSize: 22, fontWeight: 800, color: r.rpo ? '#fb923c' : 'var(--text-dim)' }}>{fmtNum(r.rpo?.[`d${opts.rpoDays}`])}</div></div>
-            <div><div style={{ fontSize: 12, color: '#fca5a5' }}>실패·경고</div><div style={{ fontSize: 22, fontWeight: 800, color: r.results ? '#f87171' : 'var(--text-dim)' }}>{r.results ? `${r.results.failed} · ${r.results.warning}` : '—'}</div></div>
+            <Kpi label={`RPO 미달(${opts.rpoDays}일)`} color="#fdba74" value={fmtNum(cnt('rpo-miss'))} onClick={() => setFilter(filter === 'rpo-miss' ? 'all' : 'rpo-miss')} on={filter === 'rpo-miss'} />
+            <div><div style={{ fontSize: 12, color: '#fca5a5' }}>실패·경고(Veeam)</div><div style={{ fontSize: 22, fontWeight: 800, color: r.results ? '#f87171' : 'var(--text-dim)' }}>{r.results ? `${r.results.failed} · ${r.results.warning}` : '—'}</div></div>
           </div>
-          {/* v2.784: 사람이 정한 표시의 수(같은 범위) — 누르면 그 보기 */}
-          {/* v2.785(GR R-B2): 표시 파일을 못 읽었으면 수는 '—' — 0 으로 보이면 '표시 없음' 으로 읽힌다 */}
+          {/* v2.784: 사람이 정한 표시의 수(같은 범위) — 누르면 그 보기 · v2.785(GR R-B2): 표시 파일을 못 읽었으면 수는 '—' */}
           {marksLine(r.marks, data.marksUnreadable) && (() => { const m = marksLine(r.marks, data.marksUnreadable); return (
             <div data-backup-marks="" className="flex wrap" style={{ flexBasis: '100%', gap: '8px 10px', alignItems: 'center', fontSize: 13, borderTop: '1px solid var(--border-soft)', paddingTop: 10 }}>
               <span className="muted" style={{ fontSize: 12 }}>업무 중요도</span>
@@ -226,107 +262,135 @@ export default function BackupDetailTool({ scope }) {
               <span style={{ width: 1, height: 20, background: 'var(--border)' }} aria-hidden="true" />
               <button type="button" className={`tab${filter === 'need' ? ' active' : ''}`} aria-pressed={filter === 'need'} disabled={!!m.unknown} onClick={() => setFilter(filter === 'need' ? 'all' : 'need')} style={{ padding: '3px 10px', display: 'inline-flex', alignItems: 'center', gap: 6 }}><NeedIcon /><span style={filter === 'need' ? undefined : { color: NEED_COLOR }}>백업 필요</span><b>{fmtNum(m.need)}</b></button>
               {m.need > 0 && <button type="button" className={`tab${filter === 'needgap' ? ' active' : ''}`} aria-pressed={filter === 'needgap'} onClick={() => setFilter(filter === 'needgap' ? 'all' : 'needgap')} title="백업 필요로 표시했는데 Veeam 백업 대상이 아닌 VM" style={{ padding: '3px 10px', color: m.needGap ? '#fca5a5' : undefined }}>그중 Veeam 백업 안 보임 <b>{m.needGap == null ? '모름' : fmtNum(m.needGap)}</b></button>}
-              {/* v2.803 백업 방식(사람이 정한 값) 수 — 누르면 그 VM 만 */}
-              <span data-backup-methods="" className="flex wrap" style={{ flexBasis: '100%', gap: '8px 10px', alignItems: 'center' }}>
-                <span className="muted" style={{ fontSize: 12 }}>백업 방식</span>
-                {METHODS.map((x) => { const k = `method-${x.key}`; const on = filter === k; return <button key={x.key} type="button" className={`tab${on ? ' active' : ''}`} aria-pressed={on} disabled={!!m.unknown} onClick={() => setFilter(on ? 'all' : k)} title={`백업 방식 ${x.text} VM 만 보기`} style={{ padding: '3px 10px', display: 'inline-flex', alignItems: 'center', gap: 6 }}><MethodBadge method={x.key} plain={on} /><b style={{ fontVariantNumeric: 'tabular-nums' }}>{fmtNum(m.method?.[x.key])}</b></button>; })}
-                <button type="button" className={`tab${filter === 'method-unset' ? ' active' : ''}`} aria-pressed={filter === 'method-unset'} disabled={!!m.unknown} onClick={() => setFilter(filter === 'method-unset' ? 'all' : 'method-unset')} title="백업 방식을 정하지 않은 VM 만 보기" style={{ padding: '3px 10px' }}>미지정 <b style={{ fontVariantNumeric: 'tabular-nums' }}>{fmtNum(m.method?.unset)}</b></button>
+              {/* v2.835 백업 정책 5범주 수(정하지 않음·예전 값은 '확인 필요') — 누르면 그 VM 만 */}
+              <span data-backup-policies="" className="flex wrap" style={{ flexBasis: '100%', gap: '8px 10px', alignItems: 'center' }}>
+                <span className="muted" style={{ fontSize: 12 }}>백업 정책</span>
+                {POLICIES.map((x) => { const k = `policy-${x.key}`; const on = filter === k; return <button key={x.key} type="button" className={`tab${on ? ' active' : ''}`} aria-pressed={on} disabled={!!m.unknown} onClick={() => setFilter(on ? 'all' : k)} title={`백업 정책 ${x.text} VM 만 보기`} style={{ padding: '3px 10px', display: 'inline-flex', alignItems: 'center', gap: 6 }}><MethodBadge method={x.key} plain={on} /><b style={{ fontVariantNumeric: 'tabular-nums' }}>{fmtNum(cnt(k))}</b></button>; })}
               </span>
             </div>
           ); })()}
-          {/* v2.814 디스크 용량 합(이 vCenter 전체 — 보기 필터와 무관) · 백업 방식별(0 은 생략) · 용량을 모르는 VM 은 따로 센다 */}
+          {/* v2.814 디스크 용량 합(이 vCenter 전체 — 보기 필터와 무관) · v2.835 백업 정책별(0 은 생략) · 용량을 모르는 VM 은 따로 센다 */}
           {vms.length > 0 && (
             <div data-backup-capacity="" className="flex wrap" style={{ flexBasis: '100%', gap: '6px 12px', alignItems: 'center', fontSize: 13 }}>
               <span className="muted" style={{ fontSize: 12 }}>용량 합계</span>
               <b style={{ fontVariantNumeric: 'tabular-nums' }} title="VM 스토리지 사용(GB, vCenter 인벤토리)의 합">{fmtGb(gbTot.all)}</b>
-              {METHODS.filter((x) => gbTot[x.key] > 0).map((x) => <span key={x.key} style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}><MethodBadge method={x.key} small /><span style={{ fontVariantNumeric: 'tabular-nums' }}>{fmtGb(gbTot[x.key])}</span></span>)}
-              {gbTot.unset > 0 && <span className="muted">미지정 <span style={{ fontVariantNumeric: 'tabular-nums' }}>{fmtGb(gbTot.unset)}</span></span>}
+              {POLICIES.filter((x) => gbTot[x.key] > 0).map((x) => <span key={x.key} style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}><MethodBadge method={x.key} small /><span style={{ fontVariantNumeric: 'tabular-nums' }}>{fmtGb(gbTot[x.key])}</span></span>)}
               {gbTot.unknown > 0 && <span className="muted" title="인벤토리에 디스크 용량이 없는 VM — 합계에 넣지 않았습니다">용량 모름 {fmtNum(gbTot.unknown)}대</span>}
             </div>
           )}
           {marksNotice(data) && <div style={{ flexBasis: '100%', fontSize: 12, color: marksNotice(data).tone === 'bad' ? '#fca5a5' : '#fcd34d' }}>{marksNotice(data).text}</div>}
           {/* v2.782(점검 K4 B-B3): 이 vCenter 의 Veeam 서버 중 첫 수집 전·한 번도 읽지 못한 서버가 있으면 맞지 않은 VM 은 '없음' 이 아니라 '모름' — 이유를 밝힌다. */}
           {r.veeam != null && r.veeamAbsentUnknown && <div style={{ flexBasis: '100%', fontSize: 12, color: '#fcd34d' }}>이 vCenter 를 맡은 Veeam 서버 중 아직 첫 수집 전이거나 한 번도 읽지 못한 서버가 있어, 백업 목록에 없는 VM 의 Veeam 칸은 ‘없음’ 이 아니라 ‘모름’ 입니다 — 그 서버를 읽으면 바로잡힙니다.</div>}
-          {(r.veeam == null && r.veeamState !== 'unlinked') && <div style={{ flexBasis: '100%', fontSize: 12, color: '#fcd34d' }}>Veeam 쪽을 읽지 못해({vs.text}) VM 의 Veeam 칸은 ‘모름’ 입니다 — 설정 › Veeam 백업 서버에서 상태를 확인하세요. 스냅샷 칸은 그대로 보입니다.</div>}
-          {r.snap == null && <div style={{ flexBasis: '100%', fontSize: 12, color: '#fcd34d' }}>스냅샷 기준을 낼 수 없습니다({snapReasonText(r.snapReason) || '모름'}) — VM 의 스냅샷 칸은 지금 임시 스냅샷만 보입니다.</div>}
+          {veeamUnknown && <div style={{ flexBasis: '100%', fontSize: 12, color: '#fcd34d' }}>Veeam 쪽을 읽지 못해({vs.text}) 실제 백업의 Veeam 칸·정책≠실제·RPO 는 ‘모름’ 입니다 — 설정 › Veeam 백업 서버에서 상태를 확인하세요.</div>}
+          {bareosUnknown && <div style={{ flexBasis: '100%', fontSize: 12, color: '#fcd34d' }}>Bareos 원장을 읽지 못해 실제 백업의 Bareos 칸·정책≠실제·RPO 는 ‘모름’ 입니다(0 이 아님) — Bareos › 설정에서 원장 상태를 확인하세요.</div>}
           {Array.isArray(data.aliasHosts) && data.aliasHosts.length > 0 && <div className="muted" style={{ flexBasis: '100%', fontSize: 12 }}>Veeam 이 이 vCenter 를 {data.aliasHosts.map((h) => `‘${h}’`).join(', ')} 로 적었습니다 — VM 의 moref·이름이 맞아 같은 vCenter 로 맞췄습니다.</div>}
         </div>
       )}
 
       {data && (<>
-      <div className="flex gap wrap" style={{ alignItems: 'center', rowGap: 8 }}>
-        <div className="flex gap wrap" role="group" aria-label="보기" style={{ rowGap: 6 }}>
-          {FILTERS.filter(([k]) => hasBareos || (k !== 'bareos' && k !== 'bareos-missing') || filter === k).map(([k, label]) => <button key={k} type="button" className={`tab${filter === k ? ' active' : ''}`} aria-pressed={filter === k} onClick={() => setFilter(k)} style={{ padding: '5px 12px', fontSize: 12 }}>{label}{k === 'rpo' ? `(${opts.rpoDays}일)` : ''} {filterCountText(k, counts, marksUnknown, !!data?.bareosUnreadable)}</button>)}
-          {(filter.startsWith('crit-') || filter.startsWith('method-')) && <button type="button" className="tab active" aria-pressed="true" onClick={() => setFilter('all')} title="중요도·백업 방식 보기 끄기" style={{ padding: '5px 12px', fontSize: 12 }}>{filterLabel(filter)} {filterCountText(filter, counts, marksUnknown, !!data?.bareosUnreadable)} ✕</button>}
-        </div>
-        <label style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 6, minWidth: 0, flex: '0 1 280px' }}>
-          <span className="muted" style={{ fontSize: 12, whiteSpace: 'nowrap' }}>검색</span>
-          <input className="input" type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="VM · 폴더 이름" style={{ flex: 1, minWidth: 0 }} />
-        </label>
-      </div>
+      {/* v2.835 백업 안 된 VM 찾기(사용자 요청 '지정한 시간만큼 백업되지 않은 VM') — 고른 VM 은 아래 도구 줄(정책·등록)로 이어진다 */}
+      <StaleFinder vms={vms} now={now} checked={checked} setChecked={setChecked} writable={writable} onOpen={(id) => setSel(id)} />
 
-      {writable && (
-        <div ref={bulkRef} className="card bk-bulk" data-backup-bulk="" style={{ padding: '8px 12px', display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '6px 10px', fontSize: 12, minWidth: 0 }}>
-          <b style={{ fontSize: 13 }}>{checked.size ? `${fmtNum(checked.size)}대 선택` : '선택 없음'}</b>
-          <button type="button" className="tab" onClick={() => setChecked((cur) => toggleAllVisible(cur, visibleIds))} disabled={!visibleIds.length} style={{ padding: '3px 10px', fontSize: 12 }}>
-            {visibleIds.length && visibleIds.every((id) => checked.has(id)) ? '보이는 VM 선택 해제' : `보이는 VM 전체 선택(${fmtNum(visibleIds.length)})`}
-          </button>
-          <button type="button" className="tab" onClick={() => setChecked((cur) => invertVisible(cur, visibleIds))} disabled={!visibleIds.length} title="보이는 VM 중 고른 것은 풀고 안 고른 것은 고릅니다(필터·검색 밖 VM 의 선택은 그대로)" style={{ padding: '3px 10px', fontSize: 12 }}>선택 반전</button>
-          {checked.size > 0 && <button type="button" className="tab" onClick={() => setChecked(new Set())} style={{ padding: '3px 10px', fontSize: 12 }}>선택 해제</button>}
-          <span style={{ width: 1, height: 18, background: 'var(--border)' }} aria-hidden="true" />
-          {/* v2.803(Chromium 판독): 라벨과 그 버튼을 한 묶음으로 — 줄이 꺾일 때 라벨만 홀로 남지 않게 */}
-          <span className="flex" style={{ gap: 6, alignItems: 'flex-start', flexWrap: 'nowrap', minWidth: 0, maxWidth: '100%' }}>
-          <span className="muted" style={{ paddingTop: 4, whiteSpace: 'nowrap' }}>중요도</span>
-          <span className="flex" style={{ gap: 6, alignItems: 'center', flexWrap: 'wrap', minWidth: 0 }}>
-          {CRIT.map((c) => <button key={c.key} type="button" className="tab" disabled={!checked.size || saving} onClick={() => saveMarks([...checked], { crit: c.key })} style={{ padding: '3px 9px', fontSize: 12, display: 'inline-flex', alignItems: 'center', gap: 4 }}><CritIcon crit={c.key} withText /></button>)}
-          <button type="button" className="tab" disabled={!checked.size || saving} onClick={() => saveMarks([...checked], { crit: '' })} style={{ padding: '3px 9px', fontSize: 12 }}>지움</button>
-          </span></span>
-          <span className="flex" style={{ gap: 6, alignItems: 'flex-start', flexWrap: 'nowrap', minWidth: 0, maxWidth: '100%' }}>
-          <span className="muted" style={{ paddingTop: 4, whiteSpace: 'nowrap' }}>백업 방식</span>
-          <span className="flex" style={{ gap: 6, alignItems: 'center', flexWrap: 'wrap', minWidth: 0 }}>
-          {METHODS.map((x) => <button key={x.key} type="button" className="tab" disabled={!checked.size || saving} onClick={() => saveMarks([...checked], { method: x.key })} style={{ padding: '3px 7px', fontSize: 12 }}><MethodBadge method={x.key} small /></button>)}
-          <button type="button" className="tab" disabled={!checked.size || saving} onClick={() => saveMarks([...checked], { method: '' })} style={{ padding: '3px 9px', fontSize: 12 }}>지움</button>
-          </span></span>
-          <span className="flex" style={{ gap: 6, alignItems: 'flex-start', flexWrap: 'nowrap', minWidth: 0, maxWidth: '100%' }}>
-          <span className="muted" style={{ paddingTop: 4, whiteSpace: 'nowrap' }}>백업 필요</span>
-          <span className="flex" style={{ gap: 6, alignItems: 'center', flexWrap: 'wrap', minWidth: 0 }}>
-          <button type="button" className="tab" disabled={!checked.size || saving} onClick={() => saveMarks([...checked], { need: true })} style={{ padding: '3px 9px', fontSize: 12, display: 'inline-flex', alignItems: 'center', gap: 4 }}><NeedIcon size={13} />표시</button>
-          <button type="button" className="tab" disabled={!checked.size || saving} onClick={() => saveMarks([...checked], { need: false })} style={{ padding: '3px 9px', fontSize: 12 }}>해제</button>
-          </span></span>
-          {/* v2.818: 고른 VM 을 백업 실행 탭으로(관리자 — 실행은 그 화면에서 미리보기·OTP 를 거친다) */}
-          {hasRole('admin') && toolAllowed('backup-run') && (
-            <button type="button" className="tab" disabled={!checked.size} onClick={() => { saveHandoff(vcId, [...checked]); window.location.hash = '#/tools/backup-run'; }} title="고른 VM 을 백업 실행 화면으로 가져갑니다 — 거기서 미리보기·OTP 확인 뒤 Veeam 으로 보냅니다" style={{ padding: '3px 10px', fontSize: 12 }}>Veeam 백업 실행 →</button>
-          )}
-          {/* v2.828: 고른 VM 을 Bareos 백업 대상 추가 창으로(관리자 — 등록은 그 화면에서. 200대까지 — 넘으면 앞 200대이고 그렇다고 말한다) */}
-          {hasRole('admin') && toolAllowed('bareos-backup') && (
-            <button type="button" className="tab" disabled={!checked.size} onClick={() => { saveBareosHandoff(vcId, [...checked]); window.location.hash = '#/tools/bareos-backup/targets'; }}
-              title={`고른 VM 을 Bareos 백업 대상 추가 창으로 가져갑니다 — 거기서 레벨을 고르고 등록합니다${checked.size > BAREOS_HANDOFF_MAX ? `(앞 ${BAREOS_HANDOFF_MAX}대만)` : ''}`} style={{ padding: '3px 10px', fontSize: 12, color: '#fdba74' }}>
-              Bareos 백업 대상으로 등록{checked.size > BAREOS_HANDOFF_MAX ? `(앞 ${BAREOS_HANDOFF_MAX}대)` : ''} →
+      {/* v2.835 도구 줄(시안 ② — 선택·중요도 → 백업 정책 → 백업 방식(실제) 거르기 → 백업 등록). 편집 가능하면 스크롤해도 머리 아래에 붙는다(v2.810). */}
+      <div ref={writable ? bulkRef : undefined} className={`card${writable ? ' bk-bulk' : ''}`} data-backup-bulk="" style={{ padding: '8px 12px', display: 'flex', flexDirection: 'column', gap: 8, fontSize: 12, minWidth: 0 }}>
+        {writable && (
+          <div className="flex wrap" style={{ alignItems: 'center', gap: '6px 10px' }}>
+            <b style={{ fontSize: 13 }}>{checked.size ? `${fmtNum(checked.size)}대 선택` : '선택 없음'}</b>
+            <button type="button" className="tab" onClick={() => setChecked((cur) => toggleAllVisible(cur, visibleIds))} disabled={!visibleIds.length} style={{ padding: '3px 10px', fontSize: 12 }}>
+              {visibleIds.length && visibleIds.every((id) => checked.has(id)) ? '보이는 VM 선택 해제' : `보이는 VM 전체 선택(${fmtNum(visibleIds.length)})`}
             </button>
-          )}
-          {saving && <span className="muted">저장 중…</span>}
-          {saveErr && <span style={{ color: '#fca5a5', overflowWrap: 'anywhere', minWidth: 0 }}>저장 실패 — {saveErr?.status === 403 ? '수정 권한이 없습니다.' : String(saveErr.message || saveErr)}</span>}
+            <button type="button" className="tab" onClick={() => setChecked((cur) => invertVisible(cur, visibleIds))} disabled={!visibleIds.length} title="보이는 VM 중 고른 것은 풀고 안 고른 것은 고릅니다(필터·검색 밖 VM 의 선택은 그대로)" style={{ padding: '3px 10px', fontSize: 12 }}>선택 반전</button>
+            {checked.size > 0 && <button type="button" className="tab" onClick={() => setChecked(new Set())} style={{ padding: '3px 10px', fontSize: 12 }}>선택 해제</button>}
+            <span style={{ width: 1, height: 18, background: 'var(--border)' }} aria-hidden="true" />
+            {/* v2.803(Chromium 판독): 라벨과 그 버튼을 한 묶음으로 — 줄이 꺾일 때 라벨만 홀로 남지 않게 */}
+            <span className="flex" style={{ gap: 6, alignItems: 'center', flexWrap: 'wrap', minWidth: 0, maxWidth: '100%' }}>
+              <span className="muted" style={{ whiteSpace: 'nowrap' }}>중요도</span>
+              {CRIT.map((c) => <button key={c.key} type="button" className="tab" disabled={!checked.size || saving} onClick={() => saveMarks([...checked], { crit: c.key })} style={{ padding: '3px 9px', fontSize: 12, display: 'inline-flex', alignItems: 'center', gap: 4 }}><CritIcon crit={c.key} withText /></button>)}
+              <button type="button" className="tab" disabled={!checked.size || saving} onClick={() => saveMarks([...checked], { crit: '' })} style={{ padding: '3px 9px', fontSize: 12 }}>지움</button>
+            </span>
+            <span className="flex" style={{ gap: 6, alignItems: 'center', flexWrap: 'wrap', minWidth: 0, maxWidth: '100%' }}>
+              <span className="muted" style={{ whiteSpace: 'nowrap' }}>백업 필요</span>
+              <button type="button" className="tab" disabled={!checked.size || saving} onClick={() => saveMarks([...checked], { need: true })} style={{ padding: '3px 9px', fontSize: 12, display: 'inline-flex', alignItems: 'center', gap: 4 }}><NeedIcon size={13} />표시</button>
+              <button type="button" className="tab" disabled={!checked.size || saving} onClick={() => saveMarks([...checked], { need: false })} style={{ padding: '3px 9px', fontSize: 12 }}>해제</button>
+            </span>
+          </div>
+        )}
+        {writable && (
+          <div role="group" aria-label="백업 정책 적용" data-backup-policy-bar="" className="flex wrap" style={{ alignItems: 'center', gap: '6px 8px', padding: '7px 10px', border: '1px solid rgba(34,211,238,.45)', borderRadius: 10, background: 'rgba(34,211,238,.06)' }}>
+            <b style={{ color: '#67e8f9', fontSize: 12.5 }}>백업 정책</b>
+            <span className="muted">{checked.size ? `고른 VM ${fmtNum(checked.size)}대에 — 누르면 바로 저장` : 'VM 을 고르거나(체크·폴더 체크) 표에서 VM 을 누른 뒤'}</span>
+            {POLICIES.map((x) => (
+              <button key={x.key} type="button" className="tab" disabled={!checked.size || saving} onClick={() => saveMarks([...checked], { method: x.key })} aria-label={`고른 VM 의 백업 정책을 ${x.text} 으로`}
+                title={`단축키 ${POLICY_SHORT[x.key] || ''}(VM 하나를 눌러 고른 상태)`} style={{ padding: '3px 10px', fontSize: 12, display: 'inline-flex', alignItems: 'center', gap: 5, color: x.color, borderColor: x.color }}>
+                <PolicyIcon k={x.key} />{x.text}
+              </button>
+            ))}
+            <span className="muted" style={{ marginLeft: 'auto', fontSize: 11.5 }}>단축키 V · B · S · N · K</span>
+          </div>
+        )}
+        <div className="flex wrap" role="group" aria-label="보기" style={{ alignItems: 'center', gap: '6px 8px' }}>
+          <span className="muted" style={{ whiteSpace: 'nowrap' }}>백업 방식(실제로 도는 백업) 거르기</span>
+          {CHIP_GROUPS.map(([label, keys], gi) => (
+            <span key={label} className="flex wrap" style={{ gap: 6, alignItems: 'center', minWidth: 0 }}>
+              {gi > 0 && <span style={{ width: 1, height: 18, background: 'var(--border)' }} aria-hidden="true" />}
+              {gi > 0 && <span className="muted" style={{ fontSize: 11.5, whiteSpace: 'nowrap' }}>{label}</span>}
+              {keys.map((k) => <button key={k} type="button" className={`tab${filter === k ? ' active' : ''}`} aria-pressed={filter === k} onClick={() => setFilter(filter === k && k !== 'all' ? 'all' : k)} style={{ padding: '4px 11px', fontSize: 12 }}>{filterLabel(k)}{k === 'rpo-miss' ? `(${opts.rpoDays}일)` : ''} {cnt(k)}</button>)}
+            </span>
+          ))}
+          {(filter.startsWith('crit-') || filter.startsWith('policy-')) && filter !== 'policy-check' && <button type="button" className="tab active" aria-pressed="true" onClick={() => setFilter('all')} title="중요도·백업 정책 보기 끄기" style={{ padding: '4px 11px', fontSize: 12 }}>{filterLabel(filter)} {cnt(filter)} ✕</button>}
+          <label style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 6, minWidth: 0, flex: '0 1 260px' }}>
+            <span className="muted" style={{ fontSize: 12, whiteSpace: 'nowrap' }}>검색</span>
+            <input className="input" type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="VM · 폴더 이름" style={{ flex: 1, minWidth: 0 }} />
+          </label>
         </div>
-      )}
+        {writable && (hasRole('admin') && (toolAllowed('backup-run') || toolAllowed('bareos-backup'))) && (
+          <div className="flex wrap" role="group" aria-label="백업 등록" data-backup-register="" style={{ alignItems: 'center', gap: '6px 10px' }}>
+            <span className="muted" style={{ whiteSpace: 'nowrap' }}>백업 등록</span>
+            {/* v2.818: 고른 VM 을 백업 실행 탭으로(관리자 — 실행은 그 화면에서 미리보기·OTP 를 거친다) */}
+            {toolAllowed('backup-run') && <button type="button" className="tab" disabled={!checked.size} onClick={() => { saveHandoff(vcId, [...checked]); window.location.hash = '#/tools/backup-run'; }} title="고른 VM 을 백업 실행 화면으로 가져갑니다 — 거기서 미리보기·OTP 확인 뒤 Veeam 으로 보냅니다" style={{ padding: '3px 10px', fontSize: 12, color: '#86efac' }}>Veeam 백업 실행 →</button>}
+            <button type="button" className="tab" disabled title="SSH 백업 기능은 아직 없습니다 — 지금은 백업 정책 값(SSH)만 정할 수 있습니다" style={{ padding: '3px 10px', fontSize: 12, color: '#93c5fd' }}>SSH 스크립트 등록(준비 중)</button>
+            {/* v2.828: 고른 VM 을 Bareos 백업 대상 추가 창으로(관리자 — 등록은 그 화면에서. 200대까지 — 넘으면 앞 200대이고 그렇다고 말한다) */}
+            {toolAllowed('bareos-backup') && (
+              <button type="button" className="tab" disabled={!checked.size} onClick={() => { saveBareosHandoff(vcId, [...checked]); window.location.hash = '#/tools/bareos-backup/targets'; }}
+                title={`고른 VM 을 Bareos 백업 대상 추가 창으로 가져갑니다 — 거기서 레벨을 고르고 등록합니다${checked.size > BAREOS_HANDOFF_MAX ? `(앞 ${BAREOS_HANDOFF_MAX}대만)` : ''}`} style={{ padding: '3px 10px', fontSize: 12, color: '#fdba74' }}>
+                Bareos 대상 등록{checked.size > BAREOS_HANDOFF_MAX ? `(앞 ${BAREOS_HANDOFF_MAX}대)` : ''} →
+              </button>
+            )}
+            {/* v2.835: 고른 VM 을 Bareos › 백업 그룹의 새 그룹 창으로(이름·요일·시각·보관은 그 화면에서 — 저장은 그 화면의 규칙 그대로) */}
+            {toolAllowed('bareos-backup') && (
+              <button type="button" className="tab" disabled={!checked.size} onClick={() => { saveBareosGroupHandoff(vcId, [...checked]); window.location.hash = '#/tools/bareos-backup/groups'; }}
+                title={`고른 VM 으로 Bareos 백업 그룹을 만듭니다 — 그룹 창에서 이름·스케줄·보관 개수를 정하고 저장합니다${checked.size > BAREOS_HANDOFF_MAX ? `(앞 ${BAREOS_HANDOFF_MAX}대만)` : ''}`} style={{ padding: '3px 10px', fontSize: 12, color: '#fdba74' }}>
+                Bareos 그룹 등록{checked.size > BAREOS_HANDOFF_MAX ? `(앞 ${BAREOS_HANDOFF_MAX}대)` : ''} →
+              </button>
+            )}
+          </div>
+        )}
+        {saving && <span className="muted">저장 중…</span>}
+        {saveErr && <span style={{ color: '#fca5a5', overflowWrap: 'anywhere', minWidth: 0 }}>저장 실패 — {saveErr?.status === 403 ? '수정 권한이 없습니다.' : String(saveErr.message || saveErr)}</span>}
+      </div>
 
       <div className="flex wrap" style={{ gap: 14, alignItems: 'flex-start' }}>
         <div className="card" style={{ flex: '999 1 640px', minWidth: 0, padding: 0, overflow: 'hidden' }}>
           <div style={{ overflowX: 'auto' }}>
-            <div role="treegrid" aria-label="폴더 › VM 백업" style={{ minWidth: 840, fontSize: 13 }}>
+            <div role="treegrid" aria-label="폴더 › VM 백업" style={{ minWidth: GRID_MIN, fontSize: 13 }}>
               <div role="row" style={{ display: 'grid', gridTemplateColumns: GRID, gap: 0, background: 'var(--panel-deep)', color: 'var(--text-dim)', fontSize: 12, fontWeight: 600 }}>
                 <div role="columnheader" style={{ padding: '9px 14px' }}>vCenter › 폴더 › VM</div>
                 <div role="columnheader" style={{ padding: '9px 6px' }}>전원</div>
                 <div role="columnheader" style={{ padding: '9px 10px 9px 6px', textAlign: 'right' }} title="VM 스토리지 사용(GB, vCenter 인벤토리) · 폴더 = 그 아래 VM 합">용량</div>
-                <div role="columnheader" style={{ padding: '9px 6px' }}>백업 <span style={{ fontWeight: 400 }}>(Veeam · 스냅샷)</span></div>
-                <div role="columnheader" style={{ padding: '9px 6px' }}>Clone{hasBareos ? ' · Bareos' : ''}</div>
-                <div role="columnheader" style={{ padding: '9px 6px', textAlign: 'right' }}>복원 지점</div>
-                <div role="columnheader" style={{ padding: '9px 14px 9px 6px' }}>마지막 백업</div>
+                <div role="columnheader" style={{ padding: '9px 6px', color: '#67e8f9' }} title="사람이 정한 값 — 위 '백업 정책' 아이콘으로 정합니다">백업 정책</div>
+                <div role="columnheader" style={{ padding: '9px 6px' }} title="포탈이 읽은 것 — Veeam 대조 · Bareos 잡">실제 백업</div>
+                <div role="columnheader" style={{ padding: '9px 6px' }}>정책≠실제</div>
+                <div role="columnheader" style={{ padding: '9px 6px' }} title={`최근 ${opts.rpoDays}일 안에 성공한 백업이 있나(백업 안함은 대상 아님)`}>RPO {opts.rpoDays}일</div>
+                <div role="columnheader" style={{ padding: '9px 6px', textAlign: 'right', whiteSpace: 'nowrap' }} title="Veeam 복원 지점">복원 지점</div>
+                <div role="columnheader" style={{ padding: '9px 6px' }}>마지막 성공 · 다음</div>
+                <div role="columnheader" style={{ padding: '9px 14px 9px 6px' }} title="최근 24시간 실패·경고">실패 24h</div>
               </div>
               {rows.length === 0 && <div className="muted" style={{ padding: '14px' }}>{data ? '조건에 맞는 VM 이 없습니다.' : ''}</div>}
               {rows.map((row) => {
                 const pad = 14 + row.depth * 20;
                 if (row.kind === 'folder') {
                   const a = row.node.agg;
+                  const rp = folderRpoPct(a);
                   return (
                     <div role="row" key={row.key} aria-expanded={row.open} style={{ display: 'grid', gridTemplateColumns: GRID, alignItems: 'center', borderTop: '1px solid var(--border-soft)', background: row.depth === 0 ? 'rgba(59,130,246,.06)' : undefined }}>
                       <div role="gridcell" style={{ minWidth: 0, display: 'flex', alignItems: 'center', paddingLeft: pad }}>
@@ -349,58 +413,91 @@ export default function BackupDetailTool({ scope }) {
                       <div role="gridcell" style={{ padding: '0 10px 0 6px', textAlign: 'right', fontSize: 12, fontVariantNumeric: 'tabular-nums', lineHeight: 1.3 }} title={a.gbUnknown ? `용량을 모르는 VM ${a.gbUnknown}대는 합에 넣지 않았습니다` : undefined}>
                         <b>{a.n > a.gbUnknown ? fmtGb(a.gb) : '—'}</b>{a.gbUnknown ? <div className="muted" style={{ fontSize: 11 }}>+모름 {a.gbUnknown}</div> : null}
                       </div>
-                      <div role="gridcell" style={{ padding: '4px 6px', display: 'flex', flexDirection: 'column', gap: 3, minWidth: 0 }}>
-                        {r.veeam != null ? <AggBar n={a.veeam} of={a.n} color="#22c55e" /> : <span className="muted" style={{ fontSize: 12 }}>Veeam —</span>}
-                        {r.snap != null ? <AggBar n={a.snap} of={a.n} color="#a855f7" /> : <span className="muted" style={{ fontSize: 12 }}>스냅샷 —</span>}
-                        {hasBareos && <AggBar n={a.bareos} of={a.n} color="#fb923c" />}
+                      <div role="gridcell" style={{ padding: '5px 6px', display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 }}>
+                        {marksUnknown ? <span className="muted" style={{ fontSize: 12 }}>정책 모름</span> : POLICIES.map((x) => <PolBar key={x.key} n={a.pol[x.key]} of={a.n} color={x.color} label={x.text} />)}
+                      </div>
+                      <div role="gridcell" style={{ padding: '5px 6px', display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 }}>
+                        {veeamUnknown ? <span className="muted" style={{ fontSize: 12 }}>Veeam 모름</span> : <PolBar n={a.act.v} of={a.n} color={ACT_COLOR.v} label="Veeam" />}
+                        {bareosUnknown ? <span className="muted" style={{ fontSize: 12 }}>Bareos 모름</span> : <PolBar n={a.act.b} of={a.n} color={ACT_COLOR.b} label="Bareos" />}
+                        <PolBar n={a.act.none} of={a.n} color={ACT_COLOR.none} label="없음" />
                         {a.run ? <span style={{ color: '#fbbf24', fontWeight: 700, fontSize: 12 }}>백업 중·대기 {a.run}</span> : null}
                       </div>
-                      <div role="gridcell" style={{ padding: '0 6px', fontSize: 12, display: 'flex', flexDirection: 'column', gap: 2 }}>{a.clone ? <span style={{ color: '#67e8f9', fontWeight: 700 }}>Clone {a.clone}</span> : null}{a.bareos ? <span style={{ color: '#fdba74', fontWeight: 700 }}>Bareos {a.bareos}</span> : null}{a.bareosMissing ? <span style={{ color: '#fcd34d' }}>Bareos 미등록 {a.bareosMissing}</span> : null}</div>
+                      <div role="gridcell" style={{ padding: '0 6px', fontSize: 12.5, fontWeight: 700, color: a.mm ? '#fca5a5' : 'var(--text-dim)' }}>{marksUnknown ? '—' : a.mm ? `${fmtNum(a.mm)}대` : '0'}</div>
+                      <div role="gridcell" style={{ padding: '0 6px', fontSize: 12.5 }}>{rp == null ? <span className="muted">—</span> : <><b style={{ color: rp >= 95 ? '#86efac' : rp >= 80 ? '#fcd34d' : '#fca5a5' }}>{rp}%</b>{a.rpoMiss ? <div className="muted" style={{ fontSize: 11 }}>미달 {a.rpoMiss}</div> : null}</>}</div>
                       <div role="gridcell" />
-                      <div role="gridcell" />
+                      <div role="gridcell" style={{ padding: '0 6px', fontFamily: 'var(--mono)', fontSize: 11.5, lineHeight: 1.45, whiteSpace: 'nowrap' }}>{shortTs(a.lok)}{a.nx != null && <div className="muted">다음 {shortTs(a.nx)}</div>}</div>
+                      <div role="gridcell" style={{ padding: '0 14px 0 6px', fontSize: 12.5, fontWeight: 700, color: a.err ? '#fca5a5' : 'var(--text-dim)' }}>{a.err ? `${fmtNum(a.err)}대` : '—'}</div>
                     </div>
                   );
                 }
-                const vm = row.vm; const bc = backupCell(vm, days); const cc = cloneCell(vm); const bk = bareosCell(vm);
+                const vm = row.vm;
                 const isSel = sel === vm.id;
+                const vc0 = vm.a?.v === true ? veeamCell(vm) : null;
+                const bk = vm.b?.job === true ? bareosCell(vm) : null;
+                const mm = mismatchCell(vm);
+                const rc = rpoCell(vm, vopts);
+                const legacy = vm.m?.method && !POLICIES.some((x) => x.key === vm.m.method) ? methodOf(vm.m.method) : null;
                 return (
                   <div role="row" key={row.key} aria-selected={isSel} style={{ display: 'grid', gridTemplateColumns: GRID, alignItems: 'center', borderTop: '1px solid var(--border-soft)', background: isSel ? 'rgba(59,130,246,.12)' : undefined }}>
                     <div role="gridcell" style={{ minWidth: 0, display: 'flex', alignItems: 'center', paddingLeft: writable ? pad : pad + 20 }}>
-                      {/* v2.784: 일괄 적용용 체크(편집 가능할 때만) · 이름 앞 중요도·백업 필요 아이콘(열을 늘리지 않는다 — 1440 폭 유지) */}
+                      {/* v2.784: 일괄 적용용 체크(편집 가능할 때만) · 이름 앞 중요도·백업 필요 아이콘 */}
                       {writable && <input type="checkbox" aria-label={`${vm.name} 선택`} checked={checked.has(vm.id)} onChange={() => toggleCheck(vm.id)} style={{ width: 15, height: 15, margin: '0 5px 0 0', flex: 'none' }} />}
-                      <button type="button" onClick={() => setSel(isSel ? null : vm.id)} title={vm.m?.memo ? `메모: ${vm.m.memo.slice(0, 200)}` : undefined} style={{ display: 'flex', alignItems: 'center', gap: 6, flex: 1, minWidth: 0, minHeight: 38, padding: '0 8px 0 0', background: 'none', border: 0, color: 'var(--text)', font: 'inherit', cursor: 'pointer', textAlign: 'left' }}>
+                      <button type="button" onClick={() => setSel(isSel ? null : vm.id)} title={`${vm.name}${vm.m?.memo ? ` — 메모: ${vm.m.memo.slice(0, 200)}` : ' — 누르면 오른쪽에 상세 · 백업 정책'}`} style={{ display: 'flex', alignItems: 'center', gap: 6, flex: 1, minWidth: 0, minHeight: 38, padding: '0 8px 0 0', background: 'none', border: 0, color: 'var(--text)', font: 'inherit', cursor: 'pointer', textAlign: 'left' }}>
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true" style={{ color: 'var(--text-dim)', flex: 'none' }}><rect x="3" y="4" width="18" height="12" rx="2" /><path d="M8 20h8" /></svg>
                         <CritIcon crit={vm.m?.crit} size={14} />
                         {vm.m?.need && <NeedIcon size={14} />}
                         <span style={{ fontWeight: 600, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{vm.name}</span>
-                        <MethodBadge method={vm.m?.method} small />
+                        {(vm.os === 'windows' || vm.os === 'linux') && <span style={{ flex: 'none', fontSize: 10.5, fontWeight: 700, padding: '0 6px', borderRadius: 999, color: vm.os === 'windows' ? '#93c5fd' : '#5eead4', background: vm.os === 'windows' ? 'rgba(59,130,246,.18)' : 'rgba(20,184,166,.18)' }}>{vm.os === 'windows' ? 'Windows' : 'Linux'}</span>}
                         {vm.m?.memo && <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-label="메모 있음" style={{ color: 'var(--text-dim)', flex: 'none' }}><path d="M4 4h16v12H8l-4 4z" /></svg>}
                       </button>
                     </div>
                     <div role="gridcell" style={{ padding: '0 6px', fontSize: 12, color: vm.power === 'POWERED_ON' ? '#86efac' : 'var(--text-dim)' }}>{vm.power === 'POWERED_ON' ? '켜짐' : vm.power ? '꺼짐' : '—'}</div>
                     <div role="gridcell" style={{ padding: '0 10px 0 6px', textAlign: 'right', fontSize: 12, fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap', color: vm.gb == null ? 'var(--text-dim)' : undefined }}>{fmtGb(vm.gb)}</div>
-                    <div role="gridcell" style={{ padding: '0 6px', minWidth: 0 }} title={bc.src === 'snap' ? 'Veeam 백업이 없어 스냅샷 흔적을 보입니다' : bc.src === 'veeam' ? 'Veeam 백업이 있어 스냅샷 칸은 숨깁니다(오른쪽 상세에 있습니다)' : undefined}><Chip c={bc} /></div>
-                    <div role="gridcell" style={{ padding: '0 6px', minWidth: 0, display: 'flex', flexDirection: 'column', gap: 3, alignItems: 'flex-start' }}>{cc || bk ? <>{cc && <Chip c={cc} />}{bk && <Chip c={bk} />}</> : <span className="muted">—</span>}</div>
+                    <div role="gridcell" style={{ padding: '0 6px', minWidth: 0, display: 'flex', flexDirection: 'column', gap: 2, alignItems: 'flex-start' }}>
+                      {vm.p ? <MethodBadge method={vm.p} /> : <span className="muted">모름</span>}
+                      {legacy && <span className="muted" style={{ fontSize: 10.5 }} title="예전 백업 방식 값 — 화면에서는 '확인 필요' 로 셉니다. 위 아이콘으로 새 정책을 정하면 바뀝니다">저장값 {legacy.text}</span>}
+                    </div>
+                    <div role="gridcell" style={{ padding: '2px 6px', minWidth: 0, display: 'flex', flexDirection: 'column', gap: 3, alignItems: 'flex-start' }}>
+                      {vc0 && <Chip c={vc0} />}
+                      {bk && <Chip c={bk} />}
+                      {!vc0 && !bk && (vm.a?.v === false && vm.a?.b === false ? <span className="muted" style={{ fontSize: 12 }}>없음</span> : vm.b?.job === false ? <Chip c={bareosCell(vm)} /> : <span className="muted" style={{ fontSize: 12 }}>모름</span>)}
+                    </div>
+                    <div role="gridcell" style={{ padding: '0 6px', minWidth: 0, fontSize: 12 }} title={mm.why || undefined}>
+                      <b style={{ color: mm.tone === 'bad' ? '#fca5a5' : mm.tone === 'ok' ? '#86efac' : 'var(--text-dim)' }}>{mm.text}</b>
+                      {mm.tone === 'bad' && <div className="muted" style={{ fontSize: 10.5, lineHeight: 1.25, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{mm.short}</div>}
+                    </div>
+                    <div role="gridcell" style={{ padding: '0 6px', minWidth: 0 }}><Chip c={rc} /></div>
                     <div role="gridcell" style={{ padding: '0 6px', textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{vm.v && Number.isFinite(vm.v.rp) && vm.v.rp >= 0 ? vm.v.rp : '—'}</div>
-                    <div role="gridcell" style={{ padding: '0 14px 0 6px', fontFamily: 'var(--mono)', fontSize: 12, whiteSpace: 'nowrap' }}>{shortTs(vm.v?.lb)}</div>
+                    <div role="gridcell" style={{ padding: '0 6px', fontFamily: 'var(--mono)', fontSize: 11.5, lineHeight: 1.45, whiteSpace: 'nowrap', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                      <span style={{ color: lastOkText(vm) === '모름' ? 'var(--text-dim)' : undefined }}>{lastOkText(vm)}</span>
+                      {vm.nx && <div className="muted" title={`Bareos 그룹 ‘${vm.nx.g}’ 다음 회차`}>다음 {nextText(vm)}</div>}
+                    </div>
+                    <div role="gridcell" style={{ padding: '0 14px 0 6px', fontSize: 11.5, color: '#fca5a5', fontWeight: 700, lineHeight: 1.3 }}>{errText(vm) || <span className="muted" style={{ fontWeight: 400 }}>—</span>}</div>
                   </div>
                 );
               })}
             </div>
           </div>
-          <div className="muted" style={{ padding: '8px 14px', fontSize: 12, borderTop: '1px solid var(--border-soft)' }}>폴더 줄의 수 = 그 아래 VM 중 Veeam(위)·스냅샷(아래)이 보이는 수 / 전체 · Clone N = 백업 방식을 Clone 으로 정한 VM 수{hasBareos ? ' · Bareos N = Bareos 잡이 있는 VM 수(주황 막대)' : ''} · 용량 = VM 스토리지 사용(vCenter 인벤토리), 폴더는 그 아래 VM 합 · 폴더를 누르면 펼치고 접습니다(검색·보기 필터 중에는 모두 펼침) · VM 을 누르면 오른쪽에 상세</div>
+          <div className="muted" style={{ padding: '8px 14px', fontSize: 12, borderTop: '1px solid var(--border-soft)', lineHeight: 1.65 }}>
+            <b style={{ color: '#67e8f9' }}>백업 정책</b> = 사람이 정한 값(Veeam · Bareos · SSH · 백업 안함 · 확인 필요 — 정하지 않음·예전 값 Clone·Config 백업은 ‘확인 필요’ 로 셉니다) · <b style={{ color: 'var(--text)' }}>실제 백업</b> = 포탈이 읽은 것(Veeam 대조 · Bareos 잡 — SSH 는 아직 읽지 않습니다) · <b style={{ color: '#fca5a5' }}>정책≠실제</b> = 정책이 Veeam·Bareos 인데 그 백업이 없거나, 정책이 백업 안함·확인 필요인데 백업이 돕니다 · RPO = 기준 일수 안에 성공한 백업(Veeam 완료 · Bareos 성공)이 있나(백업 안함은 대상 아님) · 다음 = Bareos 그룹 예약(Veeam 잡 일정은 다음 단계) · ‘모름’ 은 그쪽을 읽지 못함(백업 안 됨이 아님) · 폴더 막대 = 그 아래 VM 수 / 전체 · 폴더를 누르면 펼치고 접습니다 · VM 을 누르면 오른쪽에 상세
+          </div>
         </div>
 
-        {/* 긴 트리를 내려가도 고른 VM 의 상세가 보이게(넓은 화면) — 좁은 화면에서는 표 아래로 내려간다. v2.810: top 은 .bk-side(일괄 표시 바 아래) */}
-        <div className="bk-side" style={{ flex: '1 1 280px', minWidth: 0, display: 'flex', flexDirection: 'column', gap: 12, alignSelf: 'flex-start' }}>
+        {/* VM 을 골랐을 때만 — 긴 트리를 내려가도 상세가 보이게(넓은 화면) · 좁은 화면에서는 표 아래로. v2.810: top 은 .bk-side(도구 줄 아래) */}
+        {selVm && (
+        <div className="bk-side" style={{ flex: '1 1 300px', minWidth: 0, display: 'flex', flexDirection: 'column', gap: 12, alignSelf: 'flex-start' }}>
           <div className="card" style={{ padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 10, minWidth: 0 }}>
-            {!selVm ? <div className="muted" style={{ fontSize: 13 }}>VM 을 누르면 여기에 백업 상세가 보입니다.</div> : (() => {
-              const c = vmClass(selVm, vopts); const v = selVm.v;
+            {(() => {
+              const c = vmClass(selVm, vopts); const v = selVm.v; const mm = mismatchCell(selVm);
+              const legacy = selVm.m?.method && !POLICIES.some((x) => x.key === selVm.m.method) ? methodOf(selVm.m.method) : null;
               return (
                 <>
-                  <div className="muted" style={{ fontSize: 12, overflowWrap: 'anywhere' }}>{selVm.folder || '—'}</div>
+                  <div className="flex" style={{ justifyContent: 'space-between', gap: 8 }}>
+                    <div className="muted" style={{ fontSize: 12, overflowWrap: 'anywhere', minWidth: 0 }}>{selVm.folder || '—'}</div>
+                    <button type="button" className="tab" onClick={() => setSel(null)} aria-label="상세 닫기" style={{ padding: '1px 9px', fontSize: 12, flex: 'none' }}>닫기</button>
+                  </div>
                   <div style={{ fontSize: 17, fontWeight: 800, overflowWrap: 'anywhere' }}>{selVm.name}</div>
-                  <div className="flex gap wrap" style={{ rowGap: 6 }}><Chip c={veeamCell(selVm)} /><Chip c={snapCell(selVm, days)} />{cloneCell(selVm) && <Chip c={cloneCell(selVm)} />}{bareosCell(selVm) && <Chip c={bareosCell(selVm)} />}</div>
+                  <div className="flex gap wrap" style={{ rowGap: 6 }}>{selVm.p && <MethodBadge method={selVm.p} />}<Chip c={veeamCell(selVm)} />{bareosCell(selVm) && <Chip c={bareosCell(selVm)} />}</div>
                   {v && v.state === 'run' && Number.isFinite(v.pg) && (
                     <div>
                       <div className="flex" style={{ justifyContent: 'space-between', fontSize: 12 }}><span>이 VM 진행률</span><b style={{ color: '#fbbf24' }}>{v.pg}%</b></div>
@@ -409,40 +506,43 @@ export default function BackupDetailTool({ scope }) {
                   )}
                   <dl style={{ margin: 0, display: 'grid', gridTemplateColumns: 'auto minmax(0, 1fr)', gap: '6px 12px', fontSize: 13 }}>
                     <dt className="muted">디스크 용량</dt><dd style={{ margin: 0 }}>{fmtGb(selVm.gb)}{selVm.gb == null ? ' (인벤토리에 값 없음)' : ''}</dd>
+                    <dt className="muted">정책≠실제</dt><dd style={{ margin: 0, color: mm.tone === 'bad' ? '#fca5a5' : undefined, overflowWrap: 'anywhere' }}>{mm.text}{mm.why ? ` — ${mm.why}` : ''}</dd>
+                    <dt className="muted">마지막 성공</dt><dd style={{ margin: 0 }}>{lastOkText(selVm)}</dd>
+                    <dt className="muted">RPO {opts.rpoDays}일</dt><dd style={{ margin: 0 }}>{rpoCell(selVm, vopts).text}</dd>
                     <dt className="muted">Veeam 작업</dt><dd style={{ margin: 0, overflowWrap: 'anywhere' }}>{v?.jobs?.length ? v.jobs.join(', ') : (c.vKnown ? '—' : '모름')}</dd>
-                    <dt className="muted">마지막 백업 완료</dt><dd style={{ margin: 0 }}>{shortTs(v?.lb)}{v?.lbSrc === 'rp' ? ' (복원 지점 생성 시각)' : ''}</dd>
-                    <dt className="muted">마지막 결과</dt><dd style={{ margin: 0, overflowWrap: 'anywhere', color: c.fail ? '#fca5a5' : undefined }}>{v?.lr ? `이 VM ${v.lr}${v.lastResult && v.lastResult !== v.lr ? ` · 작업 ${v.lastResult}` : ''}` : (v?.lastResult ? `작업 ${v.lastResult}` : '—')}</dd>
-                    {c.old && <><dt className="muted">오래된 백업</dt><dd style={{ margin: 0, color: '#fdba74' }}>마지막 백업이 {opts.rpoDays}일을 넘었습니다</dd></>}
+                    <dt className="muted">Veeam 마지막 완료</dt><dd style={{ margin: 0 }}>{shortTs(v?.lb)}{v?.lbSrc === 'rp' ? ' (복원 지점 생성 시각)' : ''}</dd>
+                    <dt className="muted">Veeam 마지막 결과</dt><dd style={{ margin: 0, overflowWrap: 'anywhere', color: c.fail ? '#fca5a5' : undefined }}>{v?.lr ? `이 VM ${v.lr}${v.lastResult && v.lastResult !== v.lr ? ` · 작업 ${v.lastResult}` : ''}` : (v?.lastResult ? `작업 ${v.lastResult}` : '—')}</dd>
                     <dt className="muted">복원 지점</dt><dd style={{ margin: 0 }}>{v && Number.isFinite(v.rp) && v.rp >= 0 ? `${v.rp}개` : v?.rp === -1 ? '있음(개수 모름)' : '—'}</dd>
-                    <dt className="muted">스냅샷 흔적</dt><dd style={{ margin: 0 }}>{selVm.s?.ev ? `최근 ${days}일 ${selVm.s.ev.n ?? '?'}회 · 마지막 ${shortTs(selVm.s.ev.ts)}` : ('ev' in (selVm.s || {}) ? '없음' : '모름')}</dd>
-                    <dt className="muted">지금 스냅샷</dt><dd style={{ margin: 0 }}>{selVm.s?.now ? `${selVm.s.now.n}개 · 생성 ${shortTs(selVm.s.now.ts)}${selVm.s.now.stale ? ' — 하루 넘게 남음(정리 실패 의심)' : ''}` : '없음'}</dd>
-                    {selVm.b?.job && <><dt className="muted" style={{ color: '#fdba74' }}>Bareos 마지막 백업</dt><dd style={{ margin: 0 }}>{shortTs(selVm.b.ok)}{selVm.b.lv ? ` · 마지막 실행 ${lvText(selVm.b.lv)}` : ''}</dd></>}
-                    {selVm.b && selVm.b.job === false && <><dt className="muted" style={{ color: '#fdba74' }}>Bareos</dt><dd style={{ margin: 0, color: '#fcd34d' }}>백업 방식은 Bareos 인데 백업 대상(잡)에 없습니다</dd></>}
-                    {cloneCell(selVm) && <><dt className="muted" style={{ color: '#67e8f9' }}>복제 잡</dt><dd style={{ margin: 0, overflowWrap: 'anywhere' }}>{cloneCell(selVm).text.replace(/^Clone ?·? ?/, '') || '—'}</dd></>}
+                    {selVm.b?.job && <><dt className="muted" style={{ color: '#fdba74' }}>Bareos 마지막 성공</dt><dd style={{ margin: 0 }}>{shortTs(selVm.b.ok)}{selVm.b.lv ? ` · 마지막 실행 ${lvText(selVm.b.lv)}` : ''}</dd></>}
+                    {selVm.b && selVm.b.job === false && <><dt className="muted" style={{ color: '#fdba74' }}>Bareos</dt><dd style={{ margin: 0, color: '#fcd34d' }}>백업 정책은 Bareos 인데 백업 대상(잡)에 없습니다</dd></>}
+                    {selVm.nx && <><dt className="muted">다음 예정</dt><dd style={{ margin: 0 }}>{shortTs(selVm.nx.at)} · Bareos 그룹 ‘{selVm.nx.g}’ · {selVm.nx.lv}</dd></>}
+                    {errText(selVm) && <><dt className="muted">최근 24시간</dt><dd style={{ margin: 0, color: '#fca5a5' }}>{errText(selVm)}</dd></>}
                   </dl>
-                  {/* v2.784: 백업 표시 — 편집 가능하면 바로 저장(중요도·백업 필요), 메모는 저장 버튼 */}
+                  {/* v2.784: 백업 표시 — 편집 가능하면 바로 저장(중요도·백업 필요·정책), 메모는 저장 버튼 */}
                   <div data-backup-mark-edit="" style={{ borderTop: '1px solid var(--border-soft)', paddingTop: 10, display: 'flex', flexDirection: 'column', gap: 8, fontSize: 13 }}>
                     <b style={{ fontSize: 13 }}>백업 표시</b>
                     <div className="flex" style={{ gap: 6, alignItems: 'flex-start' }}>
                       <span className="muted" style={{ fontSize: 12, minWidth: 56, paddingTop: 4 }}>업무 중요도</span>
                       <span className="flex wrap" style={{ gap: 6, alignItems: 'center', flex: '1 1 0', minWidth: 0 }}>{/* v2.803: 버튼이 꺾여도 라벨 칸 아래로 내려가지 않게 */}
-                      {writable ? [...CRIT, { key: '', text: '없음' }].map((c) => {
-                        const on = (selVm.m?.crit || '') === c.key;
-                        return <button key={c.key || 'none'} type="button" className={`tab${on ? ' active' : ''}`} aria-pressed={on} disabled={saving} onClick={() => !on && saveMarks([selVm.id], { crit: c.key })} style={{ padding: '3px 9px', fontSize: 12, display: 'inline-flex', alignItems: 'center', gap: 4 }}>{c.key ? <CritIcon crit={c.key} withText plainText={on} /> : '없음'}</button>;
+                      {writable ? [...CRIT, { key: '', text: '없음' }].map((c2) => {
+                        const on = (selVm.m?.crit || '') === c2.key;
+                        return <button key={c2.key || 'none'} type="button" className={`tab${on ? ' active' : ''}`} aria-pressed={on} disabled={saving} onClick={() => !on && saveMarks([selVm.id], { crit: c2.key })} style={{ padding: '3px 9px', fontSize: 12, display: 'inline-flex', alignItems: 'center', gap: 4 }}>{c2.key ? <CritIcon crit={c2.key} withText plainText={on} /> : '없음'}</button>;
                       }) : (critOf(selVm.m?.crit) ? <CritIcon crit={selVm.m.crit} withText /> : <span className="muted">—</span>)}
                       </span>
                     </div>
-                    {/* v2.803 백업 방식(사람이 정한 값) — 업무 중요도 다음 */}
+                    {/* v2.835 백업 정책 5범주(사람이 정한 값) — 업무 중요도 다음 */}
                     <div className="flex" style={{ gap: 6, alignItems: 'flex-start' }} data-backup-method-edit="">
-                      <span className="muted" style={{ fontSize: 12, minWidth: 56, paddingTop: 4 }}>백업 방식</span>
+                      <span className="muted" style={{ fontSize: 12, minWidth: 56, paddingTop: 4 }}>백업 정책</span>
                       <span className="flex wrap" style={{ gap: 6, alignItems: 'center', flex: '1 1 0', minWidth: 0 }}>
-                      {writable ? [...METHODS, { key: '', text: '없음' }].map((x) => {
-                        const on = (selVm.m?.method || '') === x.key;
-                        return <button key={x.key || 'none'} type="button" className={`tab${on ? ' active' : ''}`} aria-pressed={on} disabled={saving} onClick={() => !on && saveMarks([selVm.id], { method: x.key })} title={x.key ? `단축키 ${Object.entries(METHOD_KEYS_MAP).find(([, v]) => v === x.key)?.[0]?.toUpperCase()}` : undefined} style={{ padding: '3px 7px', fontSize: 12, display: 'inline-flex', alignItems: 'center' }}>{x.key ? <MethodBadge method={x.key} plain={on} small /> : '없음'}</button>;
-                      }) : (methodOf(selVm.m?.method) ? <MethodBadge method={selVm.m.method} /> : <span className="muted">—</span>)}
+                      {writable ? POLICIES.map((x) => {
+                        const on = selVm.p === x.key && (selVm.m?.method || '') === x.key;
+                        return <button key={x.key} type="button" className={`tab${on ? ' active' : ''}`} aria-pressed={on} disabled={saving} onClick={() => !on && saveMarks([selVm.id], { method: x.key })} title={`단축키 ${POLICY_SHORT[x.key] || ''}`} style={{ padding: '3px 8px', fontSize: 12, display: 'inline-flex', alignItems: 'center', gap: 4, color: on ? undefined : x.color }}><PolicyIcon k={x.key} />{x.text}</button>;
+                      }) : (selVm.p ? <MethodBadge method={selVm.p} /> : <span className="muted">—</span>)}
                       </span>
                     </div>
-                    {writable && <span className="muted" data-method-keys="" style={{ fontSize: 11.5, paddingLeft: 62 }}>단축키 V Veeam · C Clone · B Bareos · G Config 백업 · N 백업 안함 · K 확인 필요</span>}
+                    {legacy && <span className="muted" style={{ fontSize: 11.5, paddingLeft: 62 }}>저장된 예전 값 ‘{legacy.text}’ — 화면에서는 ‘확인 필요’ 로 셉니다. 위에서 새 정책을 고르면 바뀝니다.</span>}
+                    {!legacy && !selVm.m?.method && selVm.p === 'check' && <span className="muted" style={{ fontSize: 11.5, paddingLeft: 62 }}>아직 정하지 않음 — ‘확인 필요’ 로 셉니다.</span>}
+                    {writable && <span className="muted" data-method-keys="" style={{ fontSize: 11.5, paddingLeft: 62 }}>단축키 V Veeam · B Bareos · S SSH · N 백업 안함 · K 확인 필요</span>}
                     <div className="flex wrap" style={{ gap: 6, alignItems: 'center' }}>
                       <span className="muted" style={{ fontSize: 12, minWidth: 56 }}>백업 필요</span>
                       {writable ? (
@@ -469,20 +569,17 @@ export default function BackupDetailTool({ scope }) {
               );
             })()}
           </div>
-          <div className="card" style={{ padding: '12px 14px', fontSize: 12, lineHeight: 1.7 }}>
-            <b style={{ display: 'block', marginBottom: 2 }}>칸 읽는 법</b>
-            <div><b style={{ color: '#86efac' }}>Veeam 월-일 시:분</b> 백업 대상 · 마지막 완료 시각</div>
-            <div><b style={{ color: '#fcd34d' }}>백업 중 N%</b> 그 VM 의 진행률 · <b style={{ color: '#93c5fd' }}>대기</b> 차례 기다림</div>
-            <div><b style={{ color: '#d8b4fe' }}>{days}일 N회</b> Veeam 이 없는 VM 의 스냅샷 흔적(Veeam 이 있으면 숨김) · <b style={{ color: '#fca5a5' }}>잔존</b> 하루 넘게 남은 임시 스냅샷</div>
-            <div><b style={{ color: '#67e8f9' }}>Clone 월-일 시:분</b> 백업 방식이 Clone 인 VM 의 포탈 복제 잡 마지막 실행(실패 빨강 · <b style={{ color: '#67e8f9' }}>잡 없음</b> = 복제 잡이 없음 · 모름 = 실행 노드 보고 없음)</div>
-            <div><b style={{ color: '#fdba74' }}>Bareos 월-일 시:분</b> Bareos 백업 대상(잡)의 마지막으로 끝난 실행(경고 노랑 · 실패 빨강 · 진행 중 · 잡 꺼짐) · <b style={{ color: '#fdba74' }}>미등록</b> = 백업 방식은 Bareos 인데 잡이 없음</div>
-            <div className="flex" style={{ gap: 4, alignItems: 'center', flexWrap: 'wrap' }}>{METHODS.map((x) => <MethodBadge key={x.key} method={x.key} small />)} 백업 방식(사람이 정한 값)</div>
-            <div className="flex" style={{ gap: 4, alignItems: 'center', flexWrap: 'wrap' }}><CritIcon crit="high" size={13} /><CritIcon crit="mid" size={13} /><CritIcon crit="low" size={13} /> 업무 중요도 상·중·하 · <NeedIcon size={13} /> 백업 필요(사람이 정한 표시)</div>
-            <div className="muted">— 는 없음, ‘모름’ 은 그쪽을 읽지 못함(백업 안 됨이 아님)</div>
-          </div>
         </div>
+        )}
       </div>
       </>)}
     </div>
   );
+}
+
+/** 위 숫자 줄 한 칸 — 누르면 그 보기(같은 칩을 다시 누르면 전체). */
+function Kpi({ label, value, color, onClick, on = false }) {
+  const body = (<><div style={{ fontSize: 12, color: color || 'var(--text-dim)' }}>{label}</div><div style={{ fontSize: 22, fontWeight: 800, color: value === '—' ? 'var(--text-dim)' : color ? undefined : 'var(--text)' }}>{value}</div></>);
+  if (!onClick) return <div>{body}</div>;
+  return <button type="button" onClick={onClick} aria-pressed={on} style={{ background: on ? 'rgba(59,130,246,.14)' : 'none', border: 0, borderRadius: 8, padding: '2px 6px', margin: '-2px -6px', textAlign: 'left', color: 'inherit', font: 'inherit', cursor: 'pointer' }}>{body}</button>;
 }

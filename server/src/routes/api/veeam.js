@@ -36,6 +36,9 @@ import { cloneStateByVm } from '../../vmclone/jobState.js';   // v2.803 백업 �
 import { jobsRev } from '../../vmclone/store.js';
 import { jobDigests as bareosJobDigests, registryLoadError as bareosRegistryLoadError, registryRev as bareosRegistryRev } from '../../bareos/registry.js';   // v2.828 Detail 'Bareos' 칸
 import { bareosVmView } from '../../bareos/vmView.js';   // v2.801 VM 전체 정보 내보내기의 Veeam 묶음(같은 vcBackup → vmBackupView)
+import { listGroups as bareosGroups, groupsLoadError as bareosGroupsLoadError, groupsRev as bareosGroupsRev } from '../../bareos/groups.js';   // v2.835 Detail '다음 예정'(Bareos 그룹 예약)
+import { nextSlot as bareosNextSlot } from '../../bareos/groupSchedule.js';
+import { policyFields } from '../../veeam/backupPolicy.js';   // v2.835 백업 정책 · 실제 · 정책≠실제 · 마지막 성공
 export { VM_LIST_MAX_IDS };
 import { logAudit } from '../../audit.js';
 import { csvLine, CSV_BOM } from '../../util/csv.js';
@@ -770,13 +773,35 @@ async function detailData(req, snap, t, scope) {
   const unreadable = marksUnreadable();   // v2.785(GR R-B2)
   const clones = cloneStatesOf(vc.id);   // v2.803 — 못 읽으면 null(Clone 칸 '모름')
   const bareos = bareosStatesOf(vc.id);   // v2.828 — Bareos 잡(원장) · 못 읽으면 null(Bareos 칸 '모름')
+  const groupNext = bareosGroupNext(vc.id, now);   // v2.835 — VM id → 다음 그룹 회차 { at, lv, g }(못 읽으면 빈 맵 — 칸 '—')
   const vms = b.scopedVms.map((vm) => vmBackupView(vm, b.match?.byVm?.[vm.id], b.ev?.byVm?.[vm.id], { veeamKnown: veeamKnown || !b.linked, snapKnown, absentKnown: !b.row.veeamAbsentUnknown, now, mark: markView(marks[vm.id]),
-    clone: clones ? cloneView(clones.get(vm.id)) : null })).map((row) => withBareos(row, bareos, unreadable));   // v2.782(점검 K4 B-B3) · v2.784 표시 · v2.803 Clone 칸(백업 방식 Clone 인 VM 만 싣는다 — vmBackupView)
+    clone: clones ? cloneView(clones.get(vm.id)) : null })).map((row) => withBareos(row, bareos, unreadable))   // v2.782(점검 K4 B-B3) · v2.784 표시 · v2.803 Clone 칸(백업 방식 Clone 인 VM 만 싣는다 — vmBackupView)
+    // v2.835(백업 메뉴 개편 1차): 정책(p) · 실제(a) · 정책≠실제(mm) · 마지막 성공(lok) · 최근 24시간 실패(e) · 다음 예정(nx — Bareos 그룹 예약만, Veeam 잡 일정은 3차)
+    .map((row) => { const nx = groupNext.get(row.id); return { ...row, ...policyFields(row, { marksKnown: !unreadable, bareosKnown: bareos != null, now }), ...(nx ? { nx } : {}) }; });
   const views = b.views.map((v) => ({ name: v.name, ok: v.ok, lastOkTs: v.lastOkTs, stale: v.stale, error: v.error, authStopped: v.authStopped, via: v.via, ...(admin && v.runningJobs ? { runningJobs: v.runningJobs } : {}) }));
   return { ok: true, at: now, scope, vcenter: { id: vc.id, name: vc.name || vc.id }, row: { ...b.row, veeamReason: b.vcnt?.reason || '', snapReason: b.sc?.reason || '', ...(b.vcnt?.hostMismatch ? { hostMismatch: true } : {}) },
     linked: b.linked, servers: views, snapDays: b.ev?.days ?? null, snapSource: b.ev?.source || '', vms, ...(b.match?.aliasHosts && admin ? { aliasHosts: b.match.aliasHosts } : {}),
     writable: marksWritable(req, snap, vc.id), marksUnreadable: unreadable || undefined, marksCorruptKept: (!unreadable && marksCorruptKept()) || undefined,
     bareosUnreadable: bareos == null || undefined };   // 버그 점검 W2: Bareos 원장을 못 읽었다 — 화면의 Bareos 칩은 '—'(0 이 아니다)
+}
+
+/**
+ * v2.835: 그 vCenter 의 VM → 다음 Bareos 그룹 회차(그룹 예약이 켜진 그룹만 · groupSchedule.nextSlot). 그룹 파일을 못 읽으면 빈 맵(다음 예정 '—' — 없다고 단정하지 않는다).
+ *   VM 은 그룹 하나에만 든다(groups.js) — 한 번 훑어 맵을 만든다(VM 수 + 그룹 수).
+ */
+function bareosGroupNext(vcenterId, now) {
+  const out = new Map();
+  try {
+    if (bareosGroupsLoadError()) return out;
+    for (const g of bareosGroups()) {
+      if (g.vcenterId !== vcenterId) continue;
+      const slot = bareosNextSlot(g.schedule, now);
+      if (!slot) continue;
+      const v = { at: slot.at, lv: slot.level, g: String(g.name || '').slice(0, 64) };
+      for (const id of g.vmIds || []) out.set(id, v);
+    }
+  } catch { /* 모름 — 빈 맵 */ }
+  return out;
 }
 
 /** v2.828: 그 vCenter 의 VM 별 Bareos 잡 요약(원장 — Director 에 접속하지 않는다). 원장을 못 읽었으면 null(모름). */
@@ -926,7 +951,7 @@ export function registerBackupStatus(api) {
     const admin = isAdminDetailUser(req.user);
     const scope = scopeOf(req);
     return memoJson(req, res, `backup-detail:${t.vcenterId}`, async () => detailData(req, snap, t, scope),
-      { ttlMs: 60_000, extraKey: `${scopeKey(req.user, snap)}|${admin ? 'admin' : 'user'}|m${marksRev()}|w${marksWritable(req, snap, t.vcenterId) ? 1 : 0}|em${emSourcesRev()}|c${jobsRev()}|b${bareosRegistryRev()}` });   // 쓰기 가능 여부도 계정마다 다르다 · v2.828 b = Bareos 원장 리비전(Bareos 칸)(writeVcenters) · v2.803 c = 복제 잡 기록 리비전(Clone 칸)
+      { ttlMs: 60_000, extraKey: `${scopeKey(req.user, snap)}|${admin ? 'admin' : 'user'}|m${marksRev()}|w${marksWritable(req, snap, t.vcenterId) ? 1 : 0}|em${emSourcesRev()}|c${jobsRev()}|b${bareosRegistryRev()}|g${bareosGroupsRev()}` });   // 쓰기 가능 여부도 계정마다 다르다 · v2.828 b = Bareos 원장 리비전(Bareos 칸)(writeVcenters) · v2.803 c = 복제 잡 기록 리비전(Clone 칸)
   });
 
   /*

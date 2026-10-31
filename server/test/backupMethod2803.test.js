@@ -38,7 +38,11 @@ test('A 저장소 — method 검증 · 지움 · 다른 표시 유지 · 모두 
   BM._resetMarksForTest();
   const vms = [{ id: 'x:1', name: 'a', vcenterId: 'x' }, { id: 'x:2', name: 'b', vcenterId: 'x' }];
   assert.equal(BM.setMarks(vms, { method: 'tape' }, U).status, 400, '모르는 백업 방식');
-  assert.equal(BM.setMarks(vms, { method: 'clone', crit: 'high' }, U).ok, true);
+  // v2.835(사용자 결정 D2): 예전 값 clone·config 는 새로 저장하지 않는다 — 파일에 남은 값은 읽기·Clone 칸·CSV·엑셀이 그대로 쓴다
+  assert.equal(BM.setMarks(vms, { method: 'clone', crit: 'high' }, U).status, 400, '예전 값 clone 은 새로 저장하지 않는다');
+  assert.equal(BM.setMarks(vms, { method: 'config' }, U).status, 400, '예전 값 config 도');
+  fs.writeFileSync(path.join(DIR, 'backup-marks.json'), JSON.stringify({ 'x:1': { crit: 'high', method: 'clone', need: false, memo: '' }, 'x:2': { crit: 'high', method: 'clone', need: false, memo: '' } }));
+  BM._resetMarksForTest();
   BM.setMarks([vms[0]], { method: 'veeam' }, U);
   assert.deepEqual([BM.getMarks()['x:1'].method, BM.getMarks()['x:1'].crit], ['veeam', 'high'], 'method 만 바꿔도 중요도는 그대로');
   assert.equal(BM.markView(BM.getMarks()['x:2']).method, 'clone');
@@ -47,12 +51,12 @@ test('A 저장소 — method 검증 · 지움 · 다른 표시 유지 · 모두 
   BM.setMarks([vms[1]], { method: 'none' }, U);
   assert.ok(BM.getMarks()['x:2'], 'method 하나만 있어도 남는다');
   const c = BM.markCounts([...vms, { id: 'x:3' }], BM.getMarks(), {}, { veeamKnown: true });
-  assert.deepEqual(c.method, { veeam: 1, clone: 0, bareos: 0, config: 0, none: 1, check: 0, unset: 1 });
+  assert.deepEqual(c.method, { veeam: 1, clone: 0, bareos: 0, ssh: 0, config: 0, none: 1, check: 0, unset: 1 });
   assert.equal(BM.markView({ crit: 'low', method: 'bogus' }).method, '', '파일의 모르는 값은 미지정');
   // 서머리 합계 — 못 읽은 행이 있으면 null(부분 합 금지)
   const t = BS.backupTotals([{ vm: 1, marks: { high: 0, mid: 0, low: 0, need: 0, needGap: 0, method: { veeam: 1, clone: 0, bareos: 0, config: 0, none: 0, check: 0, unset: 0 } } }, { vm: 1, marks: null }]);
   assert.equal(t.marks.method, null);
-  assert.deepEqual(BS.backupTotals([{ vm: 2, marks: { method: { veeam: 1, clone: 1, bareos: 0, config: 0, none: 0, check: 0, unset: 0 } } }]).marks.method, { veeam: 1, clone: 1, bareos: 0, config: 0, none: 0, check: 0, unset: 0 });
+  assert.deepEqual(BS.backupTotals([{ vm: 2, marks: { method: { veeam: 1, clone: 1, bareos: 0, config: 0, none: 0, check: 0, unset: 0 } } }]).marks.method, { veeam: 1, clone: 1, bareos: 0, ssh: 0, config: 0, none: 0, check: 0, unset: 0 });
 });
 
 test('B 라우트 — PUT method · Detail c 는 Clone VM 에만 · 잡 저장 즉시 반영 · method 보기 · CSV · 내보내기 창 · 엑셀', async () => {
@@ -81,9 +85,12 @@ test('B 라우트 — PUT method · Detail c 는 Clone VM 에만 · 잡 저장 �
     assert.equal((await detail()).vms.some((v) => 'c' in v), false, '처음에는 Clone 칸 자료가 없다');
     assert.equal((await put({ vcenterId: VC, vmIds: [`${VC}:vm-1`], method: 'tape' })).status, 400);
     assert.equal((await put({ vcenterId: OUT, vmIds: [`${OUT}:vm-1`], method: 'veeam' })).status, 404, '범위 밖');
-    let r = await put({ vcenterId: VC, vmIds: [`${VC}:vm-1`, `${VC}:vm-2`], method: 'clone' });
+    assert.equal((await put({ vcenterId: VC, vmIds: [`${VC}:vm-1`], method: 'clone' })).status, 400, 'v2.835 예전 값은 새로 저장하지 않는다');
+    // 예전 파일에 남은 clone·config 표시 — 읽기·Clone 칸·CSV·엑셀은 그대로(화면 범주는 backupPolicy.policyOf 가 '확인 필요')
+    fs.writeFileSync(path.join(DIR, 'backup-marks.json'), JSON.stringify({ [`${VC}:vm-1`]: { crit: '', method: 'clone', need: false, memo: '' }, [`${VC}:vm-2`]: { crit: '', method: 'clone', need: false, memo: '' }, [`${VC}:vm-3`]: { crit: '', method: 'config', need: false, memo: '' } }));
+    BM._resetMarksForTest();
+    let r = await put({ vcenterId: VC, vmIds: [`${VC}:vm-1`, `${VC}:vm-2`], need: false });   // 같은 값 저장 — 리비전이 올라 응답 캐시가 비워진다
     assert.equal(r.status, 200, await r.clone().text());
-    assert.equal((await put({ vcenterId: VC, vmIds: [`${VC}:vm-3`], method: 'config' })).status, 200);
     let d = await detail();
     const by = (n) => d.vms.find((v) => v.name === n);
     assert.deepEqual([by('web01').m.method, by('cfg01').m.method], ['clone', 'config']);
@@ -100,7 +107,7 @@ test('B 라우트 — PUT method · Detail c 는 Clone VM 에만 · 잡 저장 �
     assert.equal(JSON.stringify(by('web01').c).includes('DS1'), false, '대상 경로·잡 이름 원문은 싣지 않는다');
     // 서머리 수 · 보기 필터
     const sum = await (await fetch(`${base}/tools/backup-summary`)).json();
-    assert.deepEqual(sum.rows.find((x) => x.id === VC).marks.method, { veeam: 0, clone: 2, bareos: 0, config: 1, none: 0, check: 0, unset: 0 });
+    assert.deepEqual(sum.rows.find((x) => x.id === VC).marks.method, { veeam: 0, clone: 2, bareos: 0, ssh: 0, config: 1, none: 0, check: 0, unset: 0 });
     // v2.806 우선순위 VM — Clone 방식 VM 은 복제 잡 상태로(web01 마지막 실패 · db01 잡 없음 → cloneBad) · 방식이 실린다
     const pr = Object.fromEntries((sum.priority?.items || []).map((x) => [x.name, x]));
     assert.deepEqual([pr.web01?.method, pr.web01?.cloneBad, pr.db01?.cloneBad, pr.web01?.gap], ['clone', true, true, false], JSON.stringify(sum.priority));
@@ -110,7 +117,7 @@ test('B 라우트 — PUT method · Detail c 는 Clone VM 에만 · 잡 저장 �
     // 감사
     const au = listAudit({ limit: 20 });
     const rows = (Array.isArray(au) ? au : au.rows || au.items || []).filter((x) => x.action === 'backup-marks');
-    assert.ok(rows.some((x) => /2대 · 백업 방식=clone/.test(x.detail)), JSON.stringify(rows.map((x) => x.detail)));
+    assert.ok(rows.some((x) => /2대 · 백업 필요=해제/.test(x.detail)), JSON.stringify(rows.map((x) => x.detail)));
     // viewer · 데모 거부
     user = { username: 'v', role: 'viewer', permissions: ['tools'] };
     assert.equal((await put({ vcenterId: VC, vmIds: [`${VC}:vm-3`], method: 'none' })).status, 403);
@@ -165,7 +172,7 @@ test('B 라우트 — PUT method · Detail c 는 Clone VM 에만 · 잡 저장 �
     }
     const sumWs = wb.getWorksheet('요약');
     let line = ''; sumWs.eachRow((row) => { if (row.getCell(1).value === '백업 방식') line = txt(row.getCell(2).value); });
-    assert.equal(line, 'Veeam 0 · Clone 2 · Bareos 0 · Config 백업 1 · 백업 안함 0 · 확인 필요 0 · 미지정 0');
+    assert.equal(line, 'Veeam 0 · Clone 2 · Bareos 0 · SSH 0 · Config 백업 1 · 백업 안함 0 · 확인 필요 0 · 미지정 0');
   } finally { store.snapshot = prev; }
 });
 
@@ -237,7 +244,7 @@ test('F v2.807 엑셀 백업 방식 — 색 표는 방식 키와 같다 · 데�
   const a = { method: { veeam: 1200, clone: 3, bareos: 0, config: 0, none: 40, check: 0, unset: 0 } };
   assert.equal(txt(XL.methodCountsRich(a, false)), 'Veeam 1,200 · Clone 3 · 백업 안함 40');
   assert.equal(txt(XL.methodCountsRich({ method: { veeam: 0, clone: 0, bareos: 0, config: 0, none: 0, check: 0, unset: 5 } }, false)), '미지정 5');
-  assert.equal(txt(XL.methodCountsRich(a, false, { full: true })), 'Veeam 1,200 · Clone 3 · Bareos 0 · Config 백업 0 · 백업 안함 40 · 확인 필요 0 · 미지정 0');
+  assert.equal(txt(XL.methodCountsRich(a, false, { full: true })), 'Veeam 1,200 · Clone 3 · Bareos 0 · SSH 0 · Config 백업 0 · 백업 안함 40 · 확인 필요 0 · 미지정 0');
   assert.equal(XL.methodCountsRich(a, true), '모름', '표시 파일을 못 읽으면 0 으로 쓰지 않는다');
 });
 

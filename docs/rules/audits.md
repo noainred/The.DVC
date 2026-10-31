@@ -6,6 +6,7 @@
 
 ## 목차
 
+- Backup v2.835 메뉴 4탭 · 백업 정책 5범주 · Detail 개편 · 백업 안 된 VM 찾기(백업 메뉴 개편 1-a — 2026-10-31)
 - Bareos v2.834 진행 현황 개선(Director 상태 · 멈춤 의심 · 진단 원문) · 백업 대상 OS 구분(2026-10-31)
 - Bareos v2.833 진행 현황판(전체 법인 · 단일 법인 · 속도 상태) 규칙(2026-10-31)
 - Bareos v2.831 백업 그룹 개편 · 보관 개수(카탈로그 삭제) 규칙·반증 확정분(2026-10-31)
@@ -1820,6 +1821,37 @@
   목록 memo(P7) · 카탈로그 memo 세대(P9) · 고아 잡(I7) · Migration 새 잡의 일시 lastRun(C2-7).
   ⚠ 정정(v2.823): 카탈로그 memo 세대(P9)는 v2.823 에 해소했다(memo 키에 Director id + `settingsRev` — 설정을 저장하면 새로 읽는다). 고아 잡(I7)은 v2.823 검토 C3 에서
   '가리키는 Director 가 설정에 없는 대상은 원장에서만 취소·삭제' 경로로 일부 해소(Director 쪽 고아 잡 탐지는 여전히 없다).
+
+## Backup v2.835 메뉴 4탭 · 백업 정책 5범주 · Detail 개편 · 백업 안 된 VM 찾기(백업 메뉴 개편 1-a — 2026-10-31)
+
+사용자 요청 '백업 관련 메뉴를 Summary · Detail · Veeam · Bareos 4개로 개편' + 시안(https://claude.ai/artifact/9TZ6rkhZGhKd2hSy696qfm — 정책 5범주 · 백업 정책 아이콘 줄 · 백업 등록 줄 · '지정한 시간만큼 백업되지 않은 VM 찾기' · Summary·Detail 에서 Clone/스냅샷 제거).
+사용자 선택: 1-a → 1-b 두 릴리스 · 검증 '표준'(바뀐 모듈 테스트 + 전량 verify + Chromium 1440/400 + 판정 코어 변이 검증 · 반증 에이전트 없음) · 결정 D1~D8 기본값.
+회귀 `server/test/backupPolicy2835.test.js`(판정 코어 · 웹·서버 staleOf 대조 · 쓰기 규칙 · 라우트) · 웹 `views/tools/backupPolicy2835.test.js` · 갱신 `backupMethod2803`·`backupMethodCheck2816`·`backupMarks2784`·`backupViewText`·`backupRunText`·`bulkSticky2810`.
+변이 검증 18/18(판정 코어 `veeam/backupPolicy.js` · 쓰기 값 검증).
+
+- **두 축을 섞지 않는다**: 정책(p) = 사람이 정한 값(backupMarks method) · 실제(a) = 포탈이 읽은 것(Veeam 대조 v · Bareos 잡 b). 판정 코어는 서버 `veeam/backupPolicy.js` 하나 —
+  Detail 응답 VM 행에 `p a mm lok e nx` 를 싣고, 웹은 그리기와 '찾기' 의 창(N 시간·일·주) 비교만 한다(`staleOf` 는 서버·웹 한 쌍 — 테스트가 같은 입력으로 대조).
+- **정책 5범주**(Veeam · Bareos · SSH · 백업 안함 · 확인 필요): 저장값 ''·clone·config 는 화면·집계에서 '확인 필요'(D1·D2 — 저장값은 그대로 둔다).
+  쓰기는 `WRITE_METHOD_VALUES` 5개만(clone·config 저장은 400) · 읽기 `METHOD_VALUES` 는 예전 값을 계속 받는다(되돌릴 수 있게). 아이콘 줄·상세 칸·단축키(V·B·S·N·K) 모두 5개.
+- **정책≠실제(D4)**: 정책 Veeam 인데 대조에 없음 · 정책 Bareos 인데 잡 없음 · 정책 백업 안함·확인 필요인데 Veeam 대조나 Bareos 잡이 있음.
+  판단에 필요한 쪽을 모르면(행에 v 키 없음 · Bareos 원장 못 읽음 · 표시 파일 못 읽음) **모름**(null) — 불일치로 세지 않는다. SSH 는 실제를 읽는 기능이 없어 불일치로 세지 않는다(D3 — 실제 열 '모름').
+- **마지막 성공(D5)** = Veeam 마지막 백업 완료(lb) · Bareos 마지막 성공(T·W) 중 늦은 것. '한 번도 없음' 은 두 쪽 모두 없다고 **확인**됐을 때만(한쪽이라도 모르면 never=null).
+  Veeam 대상인데 완료 시각을 모르면 복원 지점 0 일 때만 '없음' · 지금 도는 실행은 성공으로 치지 않는다.
+- **에러 24h(D7)**: Veeam 마지막 task 결과 fail·warn(끝난 시각 `lrt` — `veeam/parse.js` 가 새로 싣는다) · Bareos 마지막 실행 error·canceled·warning. 시각을 모르는 결과는 넣지 않는다.
+- **다음 예정(D6)** = 그 VM 이 든 Bareos 그룹 예약의 다음 회차(`routes/api/veeam.js bareosGroupNext` — `groupSchedule.nextSlot`). 그룹 파일을 못 읽으면 빈 맵('—' — 없다고 단정하지 않는다).
+  Detail memo 키에 그룹 rev(`g`)를 넣었다(그룹 저장 뒤 묵은 값 방지). Veeam 잡 일정은 3차.
+- **백업 안 된 VM 찾기**(`BackupStaleFinder.jsx`): 최근 N 시간·일·주 · 기준(전부·Veeam·Bareos) · 백업 안함 정책 제외 · 켜진 VM 만 · 한 번도 없음 포함.
+  창 안에 아는 성공이 하나라도 있으면 다른 쪽을 몰라도 대상이 아니다 · 판단에 필요한 쪽을 모르면 '모름' 으로 따로 센다(미달로 단정하지 않는다).
+  '결과 모두 선택' 은 모름을 빼고 Detail 선택에 더한다 · 조건·펼침은 이 브라우저에 기억(localStorage — 못 써도 동작).
+- **메뉴 4탭**: Summary · Detail · Veeam · Bareos. Veeam = 하위 탭(서버 · EM · 라이선스 / 백업 실행) — **도구 키는 그대로**(`backup-em`·`backup-run` — 라벨만 'Backup 현황 · Veeam', 옛 이름은 aka).
+  Summary · Detail 에는 Clone·스냅샷 문구·기능을 두지 않는다(사용자 요청 — 웹 테스트가 주석을 뺀 코드에서 막는다). 저장값 clone·config 는 '확인 필요' 로 보인다.
+- **Bareos 그룹 등록 넘김**: Detail 에서 고른 VM 을 sessionStorage 로 넘기고(`saveBareosGroupHandoff`) 백업 그룹 탭이 **같은 vCenter 일 때만** 새 그룹 편집으로 연다.
+  다른 그룹 소속·고를 수 없는 VM 은 첫 화면부터 뺀다(`pickable` — 정리 효과와 같은 규칙). 'SSH 스크립트 등록' 은 버튼만(준비 중 · 비활성).
+- **Chromium**(목 서버 · 1440/400): 오류 0 · 페이지 가로 넘침 0. 1440 에서 상세 칸을 닫으면 표 가로 스크롤 0, 열면 카드 안 240px 스크롤 —
+  이름 열 230px · 불일치 칸은 짧은 문구 + 말줄임(긴 이유는 title) · '복원 지점' 머리 nowrap 으로 잘림·4줄 줄바꿈을 없앴다(`GRID_MIN` 1080). 400 은 표가 카드 안에서 스크롤.
+- 남긴 것: Summary 법인›폴더›VM 트리 표(BackedUp = Veeam+Bareos+SSH · 백업 안함 · 확인 필요 합계 · 폴더 누르면 VM 목록)와 전체 법인 '백업 안 된 VM 찾기' API 는 **1-b(2.836)**.
+  백업된 용량(Veeam 복원 지점 크기 미수집 — 3차 EM) · 24시간 스케줄 띠(Director 스케줄 2차 · Veeam 잡 일정 3차) · 통합 에러 로그(Bareos joblog 2차 · EM 세션 3차) ·
+  SSH 백업 기능(스크립트·일정·자격증명 — 별도 설계) · '이 조건을 알림으로' 는 그 뒤.
 
 ## Bareos v2.834 진행 현황 개선(Director 상태 · 멈춤 의심 · 진단 원문) · 백업 대상 OS 구분(2026-10-31)
 

@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { gbText, bytesText, elapsedText, avgRate, progressLine, portalMark, pointSource, rpText, rpSort, pickHandoff, RUN_STATUS, RUN_STATUS_ORDER, VM_STATE, powerText, runSummary, ago, saveHandoff, takeHandoff, HANDOFF_KEY } from './backupRunText.js';
-import { visibleTabs, VEEAM_TABS } from './VeeamHeader.jsx';
+import { visibleTabs, VEEAM_TABS, veeamSubTabs, topTabOf } from './VeeamHeader.jsx';
 
 // v2.818 Backup 현황 › 백업 실행 — 서버 판정을 글자로만 바꾼다(판정 복제 금지). 못 읽은 값은 '—'.
 const memStore = () => { const m = new Map(); return { setItem: (k, v) => m.set(k, String(v)), getItem: (k) => (m.has(k) ? m.get(k) : null), removeItem: (k) => m.delete(k), m }; };
@@ -40,14 +40,16 @@ describe('backupRunText', () => {
     s.setItem(HANDOFF_KEY, '{"vcenterId":1}');
     expect(takeHandoff(s)).toBe(null);
   });
-  it('백업 실행 탭은 관리자 + 도구 허용일 때만', () => {
-    expect(visibleTabs({ admin: false, runOk: true })).toEqual(VEEAM_TABS);
-    expect(visibleTabs({ admin: true, runOk: false })).toEqual(VEEAM_TABS);
-    expect(visibleTabs({ admin: true, runOk: true }).map((t) => t[0])).toEqual(['summary', 'detail', 'em', 'run']);
-    // v2.822 Bareos 탭 — 같은 게이트(관리자 + 도구 허용), 백업 실행 탭과 독립
-    expect(visibleTabs({ admin: true, runOk: true, bareosOk: true }).map((t) => t[0])).toEqual(['summary', 'detail', 'em', 'run', 'bareos']);
-    expect(visibleTabs({ admin: true, runOk: false, bareosOk: true }).map((t) => t[0])).toEqual(['summary', 'detail', 'em', 'bareos']);
-    expect(visibleTabs({ admin: false, runOk: true, bareosOk: true })).toEqual(VEEAM_TABS);
+  it('백업 실행 탭은 관리자 + 도구 허용일 때만 — v2.835 위 탭 4개(Summary · Detail · Veeam · Bareos) · 백업 실행은 Veeam 하위 탭', () => {
+    expect(visibleTabs({ admin: false })).toEqual(VEEAM_TABS);
+    expect(VEEAM_TABS.map((t) => t[0])).toEqual(['summary', 'detail', 'veeam']);
+    expect(visibleTabs({ admin: true, bareosOk: true }).map((t) => t[0])).toEqual(['summary', 'detail', 'veeam', 'bareos']);
+    expect(visibleTabs({ admin: false, bareosOk: true })).toEqual(VEEAM_TABS);
+    expect(visibleTabs({ admin: false, bareosViewOk: true }).map((t) => t[0])).toEqual(['summary', 'detail', 'veeam', 'bareos']);
+    expect(veeamSubTabs({ admin: false, runOk: true }).map((t) => t[0])).toEqual(['em']);
+    expect(veeamSubTabs({ admin: true, runOk: false }).map((t) => t[0])).toEqual(['em']);
+    expect(veeamSubTabs({ admin: true, runOk: true }).map((t) => t[0])).toEqual(['em', 'run']);
+    expect(['summary', 'detail', 'em', 'run', 'bareos'].map(topTabOf)).toEqual(['summary', 'detail', 'veeam', 'veeam', 'bareos']);
   });
 });
 
