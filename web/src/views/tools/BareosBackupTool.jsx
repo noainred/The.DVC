@@ -11,6 +11,7 @@ import { numOrNull } from '../../numOrNull.js';
 import VeeamHeader from './VeeamHeader.jsx';
 import SettingsTab from './BareosSettings.jsx';
 import BareosGroupsTab from './BareosGroupsTab.jsx';
+import BareosLiveTab from './BareosLiveTab.jsx';
 import {
   stateBadge, levelLabel, bytesText, whenText, runCell, directorLine, directorStatus, directorChipTitle, outcomeUnknown, unknownOutcomeText, withRelayWait, targetLocks, RESTORE_MODE_LABEL, restoreLine, candidateSummary, driftText, restorePointsNote,
   folderOptions, inFolder, pickCap, bulkSummary,
@@ -28,7 +29,8 @@ import { takeBareosHandoff } from './bareosViewText.js';
  */
 const BASE = '/tools/bareos-backup';
 // v2.830: '백업 그룹' — 전체 VM 트리에서 고른 VM 을 그룹(이름·스케줄·스토리지)으로 — 포탈이 스케줄 실행(BareosGroupsTab.jsx)
-const TABS = [['targets', '백업 대상'], ['groups', '백업 그룹'], ['history', '실행 현황 · 이력'], ['settings', '설정']];
+// v2.833: '진행 현황' — 진행 중인 백업 현황판(전체 법인 · 단일 법인 · 속도 상태 — BareosLiveTab.jsx · 이 탭이 열린 동안만 Director 상태 조회)
+const TABS = [['live', '진행 현황'], ['targets', '백업 대상'], ['groups', '백업 그룹'], ['history', '실행 현황 · 이력'], ['settings', '설정']];
 const ROW = { display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' };
 const NOTE = { padding: '8px 12px', marginBottom: 10, fontSize: 12.5, lineHeight: 1.6 };
 const BTN = { padding: '4px 9px', fontSize: 12 };
@@ -80,6 +82,7 @@ export default function BareosBackupTool() {
         ))}
       </div>
       {tab === 'targets' && <TargetsTab d={data} reload={reload} handoff={handoff} />}
+      {tab === 'live' && <BareosLiveTab />}
       {tab === 'groups' && <BareosGroupsTab d={data} />}
       {tab === 'history' && <HistoryTab d={data} />}
       {tab === 'settings' && fullScope && <SettingsTab onSaved={reload} writable={data.settingsWritable !== false} />}

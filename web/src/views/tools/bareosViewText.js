@@ -204,7 +204,7 @@ export function bareosSubTabs({ summaryOk = false, detailOk = false, manageOk = 
     ...(summaryOk ? [['summary', '통합 현황', '#/tools/bareos-summary']] : []),
     ...(detailOk ? [['detail', '법인별 현황', '#/tools/bareos-detail']] : []),
     // 버그 점검 W11: 관리 도구의 '백업 그룹' 탭(v2.830)도 같은 줄에(통합·법인별 화면에서 바로 간다)
-    ...(admin && manageOk ? [['targets', '백업 대상', '#/tools/bareos-backup/targets'], ['groups', '백업 그룹', '#/tools/bareos-backup/groups'], ['history', '실행 현황 · 이력', '#/tools/bareos-backup/history']] : []),
+    ...(admin && manageOk ? [['live', '진행 현황', '#/tools/bareos-backup/live'], ['targets', '백업 대상', '#/tools/bareos-backup/targets'], ['groups', '백업 그룹', '#/tools/bareos-backup/groups'], ['history', '실행 현황 · 이력', '#/tools/bareos-backup/history']] : []),
     ...(admin && manageOk && fullScope ? [['settings', '설정', '#/tools/bareos-backup/settings']] : []),
   ];
 }

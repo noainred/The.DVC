@@ -256,12 +256,41 @@ export function demoCall(cmd, settings) {
   return null;
 }
 
+/** 데모 FD 상태(평문) — 실행 중(C·R) 데모 실행만. 숫자는 천 단위 쉼표(Bareos edit_uint64_with_commas 모양). */
+export function demoFdStatus(client, now = Date.now()) {
+  const comma = (n) => Math.round(n).toLocaleString('en-US');
+  const lines = [`${client} Version: 25.0.4 (데모)`, 'Running Jobs:'];
+  let any = false;
+  for (const [jobid, r] of S.runs) {
+    if (r.type !== 'B' || r.canceled || S.deleted.has(jobid)) continue;
+    if (r.client && r.client !== client) continue;
+    const el = now - r.startAt;
+    if (el >= 30_000) continue;
+    any = true;
+    const sec = Math.max(1, el / 1000);
+    const bytes = el < 4_000 ? 0 : r.bytes * Math.min(1, el / 30_000);
+    const ave = bytes / sec;
+    lines.push(`JobId ${jobid} Job ${r.name}.${catTime(r.startAt).replace(' ', '_').replace(/:/g, '.')}_01 is running.`);
+    lines.push(`    ${r.level === 'F' ? 'Full' : r.level === 'D' ? 'Differential' : 'Incremental'} Backup Job started: ${catTime(r.startAt)}`);
+    lines.push(`    Files=${comma(el < 4_000 ? 0 : 3)} Bytes=${comma(bytes)} AveBytes/sec=${comma(ave)} LastBytes/sec=${comma(ave * (0.9 + (jobid % 5) / 20))} Errors=0`);
+  }
+  if (!any) lines.push('No Jobs running.');
+  lines.push('====', '', 'Terminated Jobs:', ' JobId  Level    Files      Bytes   Status   Finished        Name', '====');
+  return lines.join('\n');
+}
+
 /** console.js 세션과 같은 모양(call·info·close). */
 export function demoSession(settings) {
   return {
     demo: true,
     info: { tls: { protocol: 'TLSv1.3', cipher: 'TLS_AES_128_GCM_SHA256' }, banner: 'OK: bareos-dir Version: 25.0.4 (데모)', infoMessage: 'Bareos 데모 Director — 접속하지 않는 합성 응답입니다.' },
     call: async (cmd) => demoCall(cmd, settings),
+    // v2.833 진행 현황판: `status client=` 는 평문(FD 상태)을 돌려준다 — 실제와 같은 모양(filed/status.cc · 추정)으로 데모 실행 중 잡을 쓴다
+    callRaw: async (cmd) => {
+      const m = /^status client=(\S+)$/.exec(String(cmd));
+      if (!m) return JSON.stringify({ result: demoCall(cmd, settings) });
+      return demoFdStatus(m[1]);
+    },
     close() {},
   };
 }

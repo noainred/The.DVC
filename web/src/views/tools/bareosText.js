@@ -299,7 +299,7 @@ export function directorPrepBlock({ defaults = {}, consoleName = 'portal', anyCl
     `}`,
     `Profile {`,
     `  Name = "portal"`,
-    `  Command ACL = .api, .jobs, .clients, .storages, .pools, .schedules, .jobdefs, .filesets, .bvfs_get_jobids, configure, run, restore, llist, list, cancel, enable, disable, status, version, !*all*`,
+    `  Command ACL = .api, .jobs, .clients, .storages, .pools, .schedules, .jobdefs, .filesets, .bvfs_get_jobids, configure, run, restore, llist, list, cancel, enable, disable, delete, status, version, !*all*`,
     `  Job ACL = *all*`,
     `  Client ACL = *all*`,
     `  Storage ACL = *all*`,
