@@ -371,19 +371,29 @@ test('⑤ 검토 L10 — 같은 Director 의 그룹은 차례로(동시에 세�
   D.cmds.length = 0;
   D.gate = new Promise((res) => { release = res; });
   D.gateFor = (c) => c.startsWith('run ');
+  // CI 불안정(PR #841 — 문서만 바꾼 PR 에서 2 !== 1): 앞 시험의 실행 기록 지연 쓰기(FIRE_FLUSH_MS)가 이 구간에 떨어지면 쓰기가 하나 더 세졌다 — 먼저 비운다
+  groups._flushGroupsForTest();
   const w0 = groups._groupsWritesForTest();
   const tick = runner.groupTick(slot.at + 30_000);
-  assert.ok(await until(() => D.cmds.some((c) => c.startsWith('run '))));
-  assert.equal(groups._groupsWritesForTest() - w0, 1, '두 그룹의 회차 차지가 원장 쓰기 한 번(검토 M1 — 그룹마다 쓰면 300그룹에 3초 정지)');
-  await new Promise((res) => setTimeout(res, 300));
-  assert.equal(D.cmds.filter((c) => c.startsWith('run ')).length, 1, `앞 그룹이 붙잡힌 동안 다른 그룹의 세션이 run 을 보냈다: ${D.cmds.filter((c) => c.startsWith('run ')).join(' | ')}`);
-  D.gate = null; release();
+  try {
+    assert.ok(await until(() => D.cmds.some((c) => c.startsWith('run '))));
+    assert.equal(groups._groupsWritesForTest() - w0, 1, '두 그룹의 회차 차지가 원장 쓰기 한 번(검토 M1 — 그룹마다 쓰면 300그룹에 3초 정지)');
+    await new Promise((res) => setTimeout(res, 300));
+    assert.equal(D.cmds.filter((c) => c.startsWith('run ')).length, 1, `앞 그룹이 붙잡힌 동안 다른 그룹의 세션이 run 을 보냈다: ${D.cmds.filter((c) => c.startsWith('run ')).join(' | ')}`);
+  } finally {
+    // 실패해도 붙잡은 run 을 풀고 시험 그룹을 지운다 — 예전에는 여기서 멈춘 채 뒤 시험 3건이 '다른 그룹에 있음'·'실행 중' 으로 연달아 깨졌다
+    D.gate = null; release();
+  }
   const out = await tick;
-  assert.deepEqual(out.fired.sort(), [G1, G2].sort());
-  assert.equal(groups.getGroup(G2).lastFire.started, 1);
-  assert.equal(groups.getGroup(G1).lastFire.key, slot.key);
-  assert.equal(groups.getGroup(G1).sending, null, '실행 기록이 쓰이면 보내는 중 표지를 지운다');
-  await call('admin', 'DELETE', `/groups/${G2}`);
+  try {
+    assert.deepEqual(out.fired.sort(), [G1, G2].sort());
+    assert.equal(groups.getGroup(G2).lastFire.started, 1);
+    assert.equal(groups.getGroup(G1).lastFire.key, slot.key);
+    assert.equal(groups.getGroup(G1).sending, null, '실행 기록이 쓰이면 보내는 중 표지를 지운다');
+  } finally {
+    await until(() => !runner.groupRunning(G2));
+    await call('admin', 'DELETE', `/groups/${G2}`);
+  }
 });
 
 test('⑤ 검토 M1·L2 — 회차 차지는 한 틱에 쓰기 한 번 · 보내는 중 표지 · 실행 기록은 메모리 먼저, 파일은 모아서', () => {
