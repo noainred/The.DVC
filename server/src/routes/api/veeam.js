@@ -41,8 +41,9 @@ import { nextSlot as bareosNextSlot } from '../../bareos/groupSchedule.js';
 import { policyFields } from '../../veeam/backupPolicy.js';   // v2.835 백업 정책 · 실제 · 정책≠실제 · 마지막 성공
 import { newSiteAgg, addSiteVm, finishSiteAgg, sumSiteAggs, countVeeamWindow, staleQueryOf, newStaleAcc, addStaleRows, finishStaleRows } from '../../veeam/backupSummaryAgg.js';   // v2.836 Summary 법인 집계 · 전체 법인 찾기
 import { corpView as bareosCorpView } from './bareosLive.js';   // v2.837 Summary '멈춤 의심'(진행 현황과 같은 판정 — 조회를 새로 일으키지 않는다)
-import { effectiveSettings as bareosEffectiveSettings } from '../../bareos/service.js';
-import { directorById as bareosDirectorById } from '../../bareos/settings.js';
+import { effectiveSettings as bareosEffectiveSettings, isDemoActive as bareosIsDemoActive } from '../../bareos/service.js';
+import { directorById as bareosDirectorById, jobDirectorId as bareosJobDirectorId } from '../../bareos/settings.js';
+import { directorNextByJob, policySummary as bareosPolicySummary, directorScheduleItems, policyRev as bareosPolicyRev } from '../../bareos/policy.js';   // v2.839 Director 정책 수집본(접속하지 않는다)
 import { pollerStatus as bareosPollerStatus } from '../../bareos/poller.js';
 import { LIVE_IDLE_MS as BAREOS_LIVE_IDLE_MS } from '../../bareos/liveStatus.js';
 import { veeamJobItems, jobsFromRows, groupItems, overlapOf, sevenDays, MAX_ITEMS_PER_SITE } from '../../veeam/backupSchedule.js';   // v2.838 '백업 스케줄 — 다음 24시간'
@@ -794,7 +795,10 @@ async function summaryData(req, snap, scope) {
     stuck: rows.some((r) => Number.isFinite(r.stuck)) ? rows.reduce((n, r) => n + (Number.isFinite(r.stuck) ? r.stuck : 0), 0) : null };
   // v2.837 두 카드 — EM 은 전 법인 자료라 전체 범위 계정만(범위 계정은 null · 화면 '—' — /tools/backup-em 과 같은 게이트) · Director 조회 상태는 범위 안 법인의 Director 만
   const em = allowed ? null : await emSummary(now);
-  return { ok: true, at: Date.now(), scope, rows, totals, bareosGroups: bareosGroupCounts(new Set(vcs.map((v) => v.id)), now), directors: bareosDirectorHealth(rows, bset), em, priority: prioOk ? { items: prio, total: prioTotal, truncated: prioTotal > prio.length || undefined } : { withheld: 'detail-tool' }, ...(admin ? { runningJobs: jobs } : {}), registryUnreadable: registryBroken() || undefined,
+  // v2.839 Bareos 카드 '풀 사용' · '스케줄' · 용량 카드 'Full 풀 가득 참' — 범위 안 Director 의 정책 수집본(없으면 null — '수집 전')
+  let bareosPolicy = null;
+  try { if (bset) bareosPolicy = bareosPolicySummary(bset, allowed, bareosRegistryLoadError() ? [] : bareosJobDigests(), { now, demo: bareosIsDemoActive() }); } catch { bareosPolicy = null; }
+  return { ok: true, at: Date.now(), scope, rows, totals, bareosGroups: bareosGroupCounts(new Set(vcs.map((v) => v.id)), now), bareosPolicy, directors: bareosDirectorHealth(rows, bset), em, priority: prioOk ? { items: prio, total: prioTotal, truncated: prioTotal > prio.length || undefined } : { withheld: 'detail-tool' }, ...(admin ? { runningJobs: jobs } : {}), registryUnreadable: registryBroken() || undefined,
     marksUnreadable: unreadable || undefined, marksCorruptKept: (!unreadable && marksCorruptKept()) || undefined };
 }
 
@@ -825,7 +829,7 @@ function backupVmRows(vc, b, { now = Date.now(), marks = getMarks(), unreadable 
   const snapKnown = b.row.snap != null;
   const clones = withClone ? cloneStatesOf(vc.id) : null;   // v2.803 — 못 읽으면 null(Clone 칸 '모름')
   const bareos = bareosStatesOf(vc.id);   // v2.828 — Bareos 잡(원장) · 못 읽으면 null(Bareos 칸 '모름')
-  const groupNext = bareosGroupNext(vc.id, now);   // v2.835 — VM id → 다음 그룹 회차 { at, lv, g }(못 읽으면 빈 맵 — 칸 '—')
+  const groupNext = bareosGroupNext(vc.id, now, bareos);   // v2.835 — VM id → 다음 그룹 회차 { at, lv, g } · v2.839 Director 스케줄 { at, lv, s }(못 읽으면 빈 맵 — 칸 '—')
   const vms = b.scopedVms.map((vm) => vmBackupView(vm, b.match?.byVm?.[vm.id], b.ev?.byVm?.[vm.id], { veeamKnown: veeamKnown || !b.linked, snapKnown, absentKnown: !b.row.veeamAbsentUnknown, now, mark: markView(marks[vm.id]),
     clone: withClone ? (clones ? cloneView(clones.get(vm.id)) : null) : undefined })).map((row) => withBareos(row, bareos, unreadable))
     .map((row) => { const nx = groupNext.get(row.id); return { ...row, ...policyFields(row, { marksKnown: !unreadable, bareosKnown: bareos != null, now }), ...(nx ? { nx } : {}) }; });
@@ -996,6 +1000,9 @@ async function scheduleData(req, snap, scope) {
   let groups = null;
   try { if (!bareosGroupsLoadError()) groups = bareosGroups(); } catch { groups = null; }
   const week = now + 7 * 86_400_000; const h24 = now + 86_400_000;
+  // v2.839 Director 스케줄 회차(정책 수집본 — 그 법인의 포탈 잡이 든 회차만 · Director 에 접속하지 않는다)
+  let dirItems = new Map();
+  try { dirItems = directorScheduleItems(bareosEffectiveSettings(), bareosRegistryLoadError() ? [] : bareosJobDigests(), now, week, { demo: bareosIsDemoActive() }); } catch { dirItems = new Map(); }
   const sites = [];
   for (const vc of vcs) {
     await maybeYield();
@@ -1003,7 +1010,9 @@ async function scheduleData(req, snap, scope) {
     const vr = backupVmRows(vc, b, { now, marks, unreadable, withClone: false });
     const fromResults = veeamJobsOf(vc.id, req);
     const veeam = veeamJobItems(vr.vms, fromResults.length ? fromResults : jobsFromRows(vr.vms), now).filter((i) => i.at <= week);
-    const bareos = groups ? groupItems(groups.filter((g) => g.vcenterId === vc.id), now, week, bareosNextSlot) : null;
+    const gi = groups ? groupItems(groups.filter((g) => g.vcenterId === vc.id), now, week, bareosNextSlot) : null;
+    const di = dirItems.get(vc.id) || [];
+    const bareos = gi || di.length ? [...(gi || []), ...di].sort((a, b) => a.at - b.at || a.name.localeCompare(b.name)) : null;   // 그룹 파일을 못 읽어도 Director 회차는 보인다(groupsUnreadable 은 그대로 밝힌다)
     sites.push({ id: vc.id, name: vc.name || vc.id, veeam, bareos });
   }
   const rows = sites.map((x) => {
@@ -1094,18 +1103,35 @@ async function staleData(req, snap, scope, o) {
  * v2.835: 그 vCenter 의 VM → 다음 Bareos 그룹 회차(그룹 예약이 켜진 그룹만 · groupSchedule.nextSlot). 그룹 파일을 못 읽으면 빈 맵(다음 예정 '—' — 없다고 단정하지 않는다).
  *   VM 은 그룹 하나에만 든다(groups.js) — 한 번 훑어 맵을 만든다(VM 수 + 그룹 수).
  */
-function bareosGroupNext(vcenterId, now) {
+function bareosGroupNext(vcenterId, now, bareos = null) {
   const out = new Map();
   try {
-    if (bareosGroupsLoadError()) return out;
-    for (const g of bareosGroups()) {
-      if (g.vcenterId !== vcenterId) continue;
-      const slot = bareosNextSlot(g.schedule, now);
-      if (!slot) continue;
-      const v = { at: slot.at, lv: slot.level, g: String(g.name || '').slice(0, 64) };
-      for (const id of g.vmIds || []) out.set(id, v);
+    if (!bareosGroupsLoadError()) {
+      for (const g of bareosGroups()) {
+        if (g.vcenterId !== vcenterId) continue;
+        const slot = bareosNextSlot(g.schedule, now);
+        if (!slot) continue;
+        const v = { at: slot.at, lv: slot.level, g: String(g.name || '').slice(0, 64) };
+        for (const id of g.vmIds || []) out.set(id, v);
+      }
     }
-  } catch { /* 모름 — 빈 맵 */ }
+  } catch { /* 모름 — 그룹 회차 없음 */ }
+  // v2.839 Director 스케줄의 다음 실행(정책 수집본 — Director 에 접속하지 않는다) — 그룹 회차보다 이르면 그것을(둘 다 돌면 먼저 도는 것)
+  try {
+    if (bareos) {
+      const st = bareosEffectiveSettings();
+      const byDir = new Map();
+      for (const [vmId, j] of bareos) {
+        if (!j?.bareosJob || j.enabled === false) continue;
+        const dirId = bareosJobDirectorId(j, st);
+        if (!byDir.has(dirId)) byDir.set(dirId, directorNextByJob(dirId, now));
+        const n = byDir.get(dirId).get(j.bareosJob);
+        if (!n) continue;
+        const cur = out.get(vmId);
+        if (!cur || n.at < cur.at) out.set(vmId, { at: n.at, lv: n.level, s: String(n.schedule || '').slice(0, 64) });
+      }
+    }
+  } catch { /* 모름 */ }
   return out;
 }
 
@@ -1218,7 +1244,7 @@ export function registerBackupStatus(api) {
     const admin = isAdminDetailUser(req.user);
     const scope = scopeOf(req);
     return memoJson(req, res, 'backup-summary', async () => summaryData(req, snap, scope),
-      { ttlMs: 60_000, extraKey: `${scopeKey(req.user, snap)}|${admin ? 'admin' : 'user'}|m${marksRev()}|d${detailToolOk(req) ? 1 : 0}|em${emSourcesRev()}|c${jobsRev()}|b${bareosRegistryRev()}|g${bareosGroupsRev()}|w${writeKeyOf(req, snap)}` });   // v2.837 w = 쓰기 가능 법인(rows[].w — 같은 범위라도 operator·viewer·writeVcenters 가 다르다)   // v2.787 Detail 접근(우선순위 VM) · 키에 req.originalUrl(전원·제외)도 든다(shared.js) · v2.784 표시 리비전(저장 즉시 수가 바뀐다) · v2.806 c = 복제 잡 기록 리비전(우선순위 VM 의 Clone 상태)
+      { ttlMs: 60_000, extraKey: `${scopeKey(req.user, snap)}|${admin ? 'admin' : 'user'}|m${marksRev()}|d${detailToolOk(req) ? 1 : 0}|em${emSourcesRev()}|c${jobsRev()}|b${bareosRegistryRev()}|g${bareosGroupsRev()}|w${writeKeyOf(req, snap)}|bp${bareosPolicyRev()}` });   // v2.839 bp = 정책 수집본 리비전   // v2.837 w = 쓰기 가능 법인(rows[].w — 같은 범위라도 operator·viewer·writeVcenters 가 다르다)   // v2.787 Detail 접근(우선순위 VM) · 키에 req.originalUrl(전원·제외)도 든다(shared.js) · v2.784 표시 리비전(저장 즉시 수가 바뀐다) · v2.806 c = 복제 잡 기록 리비전(우선순위 VM 의 Clone 상태)
   });
 
   /*
@@ -1248,7 +1274,7 @@ export function registerBackupStatus(api) {
     const admin = isAdminDetailUser(req.user);
     const scope = scopeOf(req);
     return memoJson(req, res, 'backup-summary-schedule', async () => scheduleData(req, snap, scope),
-      { ttlMs: 60_000, extraKey: `${scopeKey(req.user, snap)}|${admin ? 'admin' : 'user'}|em${emSourcesRev()}|g${bareosGroupsRev()}` });
+      { ttlMs: 60_000, extraKey: `${scopeKey(req.user, snap)}|${admin ? 'admin' : 'user'}|em${emSourcesRev()}|g${bareosGroupsRev()}|bp${bareosPolicyRev()}|r${bareosRegistryRev()}` });
   });
   api.get('/tools/backup-summary/errors', toolsPerm, (req, res) => {
     if (!detailToolOk(req)) return res.status(403).json({ ok: false, reason: '이 계정은 Detail 화면이 허용되지 않아 VM 별 에러 로그를 볼 수 없습니다(관리자가 정한 도구별 접근).' });
@@ -1376,7 +1402,7 @@ export function registerBackupStatus(api) {
     const admin = isAdminDetailUser(req.user);
     const scope = scopeOf(req);
     return memoJson(req, res, `backup-detail:${t.vcenterId}`, async () => detailData(req, snap, t, scope),
-      { ttlMs: 60_000, extraKey: `${scopeKey(req.user, snap)}|${admin ? 'admin' : 'user'}|m${marksRev()}|w${marksWritable(req, snap, t.vcenterId) ? 1 : 0}|em${emSourcesRev()}|c${jobsRev()}|b${bareosRegistryRev()}|g${bareosGroupsRev()}` });   // 쓰기 가능 여부도 계정마다 다르다 · v2.828 b = Bareos 원장 리비전(Bareos 칸)(writeVcenters) · v2.803 c = 복제 잡 기록 리비전(Clone 칸)
+      { ttlMs: 60_000, extraKey: `${scopeKey(req.user, snap)}|${admin ? 'admin' : 'user'}|m${marksRev()}|w${marksWritable(req, snap, t.vcenterId) ? 1 : 0}|em${emSourcesRev()}|c${jobsRev()}|b${bareosRegistryRev()}|g${bareosGroupsRev()}|bp${bareosPolicyRev()}` });   // v2.839 bp = 정책 수집본(다음 예정의 Director 스케줄) · 쓰기 가능 여부도 계정마다 다르다 · v2.828 b = Bareos 원장 리비전(Bareos 칸)(writeVcenters) · v2.803 c = 복제 잡 기록 리비전(Clone 칸)
   });
 
   /*

@@ -1,0 +1,8 @@
+{
+  "pools": [
+    { "poolid": "1", "name": "Scratch", "numvols": "0", "maxvols": "0", "pooltype": "Scratch", "labelformat": "*" },
+    { "poolid": "2", "name": "Incremental", "numvols": "1", "maxvols": "100", "pooltype": "Backup", "labelformat": "Incremental-" },
+    { "poolid": "3", "name": "Full", "numvols": "100", "maxvols": "100", "pooltype": "Backup", "labelformat": "Full-" },
+    { "poolid": "4", "name": "Differential", "numvols": "0", "maxvols": "100", "pooltype": "Backup", "labelformat": "Differential-" }
+  ]
+}

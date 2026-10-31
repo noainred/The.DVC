@@ -2261,6 +2261,36 @@ export const DB_GUIDE_DATA = {
       "server/src/util/authGuard.js"
     ]
   },
+  "bareos-policy.json": {
+    "title": "Bareos Director 정책 수집본",
+    "summary": "법인마다 둔 Bareos Director 에서 하루 한 번 읽어 온 정책 · 일정(v2.839)을 담는 상태 파일입니다. Bareos › 정책 · 일정 화면과 Backup › Summary 의 풀 사용 · 스케줄 · 다음 예정 칸이 이 파일만 읽습니다(화면을 열 때 Director 에 접속하지 않습니다).",
+    "stores": [
+      "Director id 마다: 마지막 수집 시각 · 결과 · Director 판(버전) · 명령마다 성공 여부와 실패 코드",
+      "명령마다 마지막으로 성공한 값과 그 시각 — 스케줄 · 7일 예정(status scheduler) · 풀(llist pools) · 풀별 볼륨 요약(list volumes — 볼륨 목록은 저장하지 않습니다) · Run 줄 · JobDefs · FileSet(show)",
+      "하루 1회 수집의 오늘 시도 기록(날짜 · 성공 여부 · 시도 수 · 다음 재시도 시각)"
+    ],
+    "writer": "Bareos 정책 수집 주기 작업(bareos/policy.js — 설정 시각에 하루 한 번 · 실패면 30분 뒤 · 하루 3번까지)과 '지금 수집' 버튼이 씁니다. 한 번 수집에 한 번만 씁니다.",
+    "usedBy": [
+      "Bareos › 정책 · 일정 탭",
+      "Backup › Summary 의 Bareos 카드(풀 사용 · 다음 회차) · 용량 카드(풀 가득 참) · 다음 24시간 띠 · Detail 의 다음 예정(Director 스케줄)"
+    ],
+    "retention": "설정에서 지운 Director 의 값은 다음 수집 때 지웁니다. 실패한 명령은 지난 성공 값을 지우지 않고 그 시각과 함께 둡니다.",
+    "growth": "Director 수와 스케줄 · 풀 수에 비례합니다(볼륨은 풀마다 요약 한 줄 — 법인당 수천 볼륨이어도 작습니다).",
+    "shrink": "줄일 필요가 없습니다.",
+    "ifDeleted": "다음 수집이 다시 채웁니다. 그때까지 정책 · 일정 화면과 Summary 의 풀 · 스케줄 칸은 '수집 전' 으로 보입니다.",
+    "cautions": [
+      "자격증명은 없습니다(Director 주소 · 콘솔 비밀번호는 bareos.json).",
+      "Director 오류 원문은 관리자 판본 화면에만 보입니다."
+    ],
+    "settings": [
+      "설정 › Bareos › 공통 기본값의 'Director 정책 수집'(켜기 · 시각 · 선택 명령 · 수집할 Director)"
+    ],
+    "sources": [
+      "server/src/bareos/policy.js",
+      "server/src/bareos/policyParse.js",
+      "server/src/routes/api/bareosPolicy.js"
+    ]
+  },
   "bareos-mail-state.json": {
     "title": "Bareos 실패 알림 메일 커서",
     "summary": "Bareos 백업 실패 알림 메일(v2.822)이 대상마다 어디까지 판정했는지 남기는 상태 파일입니다. 재시작 뒤 같은 실패를 다시 메일로 보내거나, 그사이 끝난 실패를 놓치지 않게 합니다. 중앙에서만 씁니다(엣지는 메일을 보내지 않습니다).",

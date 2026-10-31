@@ -154,13 +154,115 @@ function rowById(jobid) {
 
 const levelChar = (l) => (/^f/i.test(l) ? 'F' : /^d/i.test(l) ? 'D' : 'I');
 
+/**
+ * v2.839 정책 수집 데모 — 실측 모양(2026-11-01 · Director 25.1.2)과 같은 JSON(status scheduler · show schedules/jobdefs/filesets · llist pools · list volumes).
+ *   그 Director 에 묶인 법인(sites)의 풀·잡만(데모 Director 들은 메모리를 나눠 쓰므로 directorId 로 거른다). 값은 이름 해시로 결정적.
+ */
+const DEMO_RUNS = Object.freeze({
+  VMwareNightly: ['Full Sun at 23:00', 'Incremental Mon-Sat at 23:00'],
+  VMwareWeekly: ['Full Sat at 01:00', 'Incremental Sun-Fri at 01:00'],
+  WeeklyCycle: ['Full 1st Sat at 21:00', 'Differential 2nd-5th Sat at 21:00', 'Incremental Mon-Fri at 21:00'],
+  WeeklyCycleAfterBackup: ['Full Mon-Fri at 21:10'],
+});
+function demoLevelAt(sched, d) {   // d: Date(서버 현지) — 그날 그 스케줄이 도는 레벨과 시각(안 돌면 null)
+  const wd = d.getDay();
+  if (sched === 'VMwareNightly') return { h: 23, m: 0, level: wd === 0 ? 'Full' : 'Incremental' };
+  if (sched === 'VMwareWeekly') return { h: 1, m: 0, level: wd === 6 ? 'Full' : 'Incremental' };
+  if (sched === 'WeeklyCycle') return wd === 6 ? { h: 21, m: 0, level: d.getDate() <= 7 ? 'Full' : 'Differential' } : wd === 0 ? null : { h: 21, m: 0, level: 'Incremental' };
+  if (sched === 'WeeklyCycleAfterBackup') return wd >= 1 && wd <= 5 ? { h: 21, m: 10, level: 'Full' } : null;
+  return null;
+}
+function demoPolicy(head, words, settings, directorId, now = Date.now()) {
+  const sites = (settings?.sites || []).filter((s) => !directorId || s.directorId === directorId);
+  const clients = new Set(sites.map((s) => s.client));
+  const first = !directorId || (settings?.directors || [])[0]?.id === directorId;   // Director 자체 잡(카탈로그 백업)은 첫 데모 Director 에만
+  if (head === 'status' && words[1] === 'scheduler') {
+    const jobsOf = (sched) => [...S.jobs].filter(([, j]) => (j.schedule || '') === sched && clients.has(j.client)).map(([name, j]) => ({ name, enabled: j.enabled !== false }));
+    const schedules = [
+      { name: 'VMwareNightly', enabled: true, jobs: jobsOf('VMwareNightly') },
+      { name: 'VMwareWeekly', enabled: true, jobs: jobsOf('VMwareWeekly') },
+      ...(first ? [{ name: 'WeeklyCycle', enabled: true, jobs: [{ name: 'backup-bareos-fd', enabled: true }] }, { name: 'WeeklyCycleAfterBackup', enabled: true, jobs: [{ name: 'BackupCatalog', enabled: true }] }] : []),
+    ];
+    const preview = [];
+    const p2 = (x) => String(x).padStart(2, '0');
+    const WD = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']; const MO = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    for (let i = 0; i < 8; i++) {
+      const base = new Date(now + i * DAY);
+      for (const s of schedules) {
+        const r = demoLevelAt(s.name, base);
+        if (!r) continue;
+        const at = new Date(base.getFullYear(), base.getMonth(), base.getDate(), r.h, r.m, 0, 0);
+        if (at.getTime() <= now || at.getTime() > now + 7 * DAY) continue;
+        preview.push({ datetime: `${WD[at.getDay()]} ${p2(at.getDate())}-${MO[at.getMonth()]}-${at.getFullYear()} ${p2(r.h)}:${p2(r.m)}`, runtime: Math.floor(at.getTime() / 1000), schedule: s.name, level: r.level });
+      }
+    }
+    preview.sort((a, b) => a.runtime - b.runtime);
+    return { schedules, preview };
+  }
+  if (head === 'show' && words[1] === 'schedules') {
+    return { schedules: Object.fromEntries(Object.entries(DEMO_RUNS).filter(([k]) => first || k.startsWith('VMware')).map(([name, run]) => [name, { name, ...(name === 'WeeklyCycleAfterBackup' ? { description: 'This schedule does the catalog. It starts after the WeeklyCycle.' } : {}), run }])) };
+  }
+  if (head === 'show' && words[1] === 'jobdefs') {
+    const jd = { [DEFAULTS.defaults.jobDefs]: { name: DEFAULTS.defaults.jobDefs, type: 'Backup', level: 'Incremental', messages: 'Standard', fileset: DEFAULTS.defaults.fileSet, writebootstrap: '/var/lib/bareos/%c.bsr' },
+      DefaultJob: { name: 'DefaultJob', type: 'Backup', level: 'Incremental', messages: 'Standard', storage: ['File'], pool: 'Incremental', fullbackuppool: 'Full', incrementalbackuppool: 'Incremental', differentialbackuppool: 'Differential', client: 'bareos-fd', fileset: 'SelfTest', schedule: 'WeeklyCycle', writebootstrap: '/var/lib/bareos/%c.bsr' } };
+    if (!first) jd.AIJob = { name: 'AIJob', type: 'Backup', level: 'Incremental', pool: 'AI-Incremental', fullbackuppool: 'AI-Consolidated', incrementalbackuppool: 'AI-Incremental', alwaysincremental: true, alwaysincrementaljobretention: '7 days', alwaysincrementalkeepnumber: 7, alwaysincrementalmaxfullage: '21 days', priority: 10, maximumconcurrentjobs: 8 };
+    return { jobdefs: jd };
+  }
+  if (head === 'show' && words[1] === 'filesets') {
+    return { filesets: {
+      [DEFAULTS.defaults.fileSet]: { name: DEFAULTS.defaults.fileSet, include: [{ options: [{ signature: 'XXH128', compression: 'LZ4', hardlinks: false, aclsupport: true, xattrsupport: true }], plugin: ['python3:module_name=bareos-fd-vmware'] }] },
+      SelfTest: { name: 'SelfTest', description: 'fileset just to backup some files for selftest', include: [{ options: [{ signature: 'XXH128' }], file: ['/usr/sbin'] }] },
+      LinuxAll: { name: 'LinuxAll', description: 'Backup all regular filesystems, determined by filesystem type.', include: [{ options: [{ signature: 'XXH128', onefs: false, fstype: ['ext4', 'xfs'] }], file: ['/'] }], exclude: [{ file: ['/var/lib/bareos'] }] },
+    } };
+  }
+  const poolsOf = () => {
+    const names = [...new Set(sites.map((s) => s.pool).filter(Boolean))];
+    const rows = [{ name: 'Scratch', pooltype: 'Scratch', maxvols: 0, numvols: 0, volretention: 31536000, maxvolbytes: 0 }];
+    for (const n of names) {
+      const h = demoHash(n);
+      const maxvols = 50 + (h % 4) * 50;
+      const numvols = h % 5 === 0 ? maxvols : Math.min(maxvols, 8 + (h % 37));   // 해시 다섯 중 하나는 '가득 참'(상한 = 개수)
+      rows.push({ name: n, pooltype: 'Backup', maxvols, numvols, volretention: [2592000, 7776000, 31536000][h % 3], maxvolbytes: 53687091200 });
+    }
+    if (first) rows.push({ name: 'Full', pooltype: 'Backup', maxvols: 100, numvols: 12, volretention: 31536000, maxvolbytes: 0 }, { name: 'Incremental', pooltype: 'Backup', maxvols: 100, numvols: 3, volretention: 2592000, maxvolbytes: 1073741824 });
+    return rows.map((r, i) => ({ poolid: String(i + 1), name: r.name, numvols: String(r.numvols), maxvols: String(r.maxvols), useonce: '0', usecatalog: '1', acceptanyvolume: '0', volretention: String(r.volretention),
+      voluseduration: '0', maxvoljobs: '0', maxvolbytes: String(r.maxvolbytes), autoprune: '1', recycle: '1', pooltype: r.pooltype, labelformat: r.pooltype === 'Scratch' ? '*' : `${r.name}-`, enabled: '1',
+      scratchpoolid: '0', recyclepoolid: '0', labeltype: '0', prunablevolumes: '0', prunablejobs: '0', prunablebytes: '0' }));
+  };
+  if ((head === 'llist' || head === 'list') && words[1] === 'pools') {
+    const rows = poolsOf();
+    return { pools: head === 'llist' ? rows : rows.map(({ poolid, name, numvols, maxvols, pooltype, labelformat }) => ({ poolid, name, numvols, maxvols, pooltype, labelformat })) };
+  }
+  if (head === 'list' && words[1] === 'volumes') {
+    const volumes = {}; let id = 1;
+    for (const p of poolsOf()) {
+      const n = Math.min(60, Number(p.numvols));
+      if (!n) continue;
+      const h = demoHash(p.name);
+      const full = Number(p.numvols) >= Number(p.maxvols) && Number(p.maxvols) > 0;
+      const rows = [];
+      for (let i = 0; i < n; i++) {
+        const st = full ? (i % 7 === 0 ? 'Used' : 'Full') : i === n - 1 ? 'Append' : (h + i) % 23 === 0 ? 'Error' : (h + i) % 5 === 0 ? 'Purged' : 'Full';
+        const bytes = Number(p.maxvolbytes) > 0 ? Math.round(Number(p.maxvolbytes) * (st === 'Append' ? 0.3 : st === 'Purged' ? 0 : 0.92)) : 3145942 + i * 1000;
+        rows.push({ mediaid: String(id++), volumename: `${p.name}-${String(i + 1).padStart(4, '0')}`, volstatus: st, enabled: '1', volbytes: String(bytes), volfiles: '0', volretention: p.volretention,
+          recycle: '1', slot: '0', inchanger: '0', mediatype: 'File', lastwritten: catTime(now - (n - i) * DAY / 2), storage: 'File', hasencryptionkey: '0' });
+      }
+      volumes[p.name.toLowerCase()] = rows;
+    }
+    return { volumes };
+  }
+  return undefined;
+}
+
 /** 명령 1개 처리 → JSON-RPC result(오류면 BareosConsoleError('jsonrpc')). */
-export function demoCall(cmd, settings) {
+export function demoCall(cmd, settings, directorId = '') {
   const fail = (m) => { throw new BareosConsoleError('jsonrpc', m); };
   const { kv, words } = parseArgs(cmd);
   const head = words[0] || '';
   const sites = settings?.sites || [];
   const uniq = (a) => [...new Set(a)].sort().map((name) => ({ name }));
+  const pol = demoPolicy(head, words, settings, directorId);   // v2.839 정책 수집 명령
+  if (pol !== undefined) return pol;
   switch (head) {
     case '.clients': return { clients: uniq(sites.map((s) => s.client)) };
     case '.storages': return { storages: uniq(sites.map((s) => s.storage)) };
@@ -297,11 +399,11 @@ export function demoFdStatus(client, now = Date.now()) {
 }
 
 /** console.js 세션과 같은 모양(call·info·close). */
-export function demoSession(settings) {
+export function demoSession(settings, directorId = '') {
   return {
     demo: true,
     info: { tls: { protocol: 'TLSv1.3', cipher: 'TLS_AES_128_GCM_SHA256' }, banner: 'OK: bareos-dir Version: 25.0.4 (데모)', infoMessage: 'Bareos 데모 Director — 접속하지 않는 합성 응답입니다.' },
-    call: async (cmd) => demoCall(cmd, settings),
+    call: async (cmd) => demoCall(cmd, settings, directorId),
     // v2.833 진행 현황판: `status client=` 는 평문(FD 상태)을 돌려준다 — 실제와 같은 모양(filed/status.cc · 추정)으로 데모 실행 중 잡을 쓴다
     callRaw: async (cmd) => {
       if (String(cmd) === 'status director') return demoDirStatus();
@@ -314,7 +416,17 @@ export function demoSession(settings) {
 }
 
 /** 원장에 이미 있는 데모 잡 이름을 데모 Director 에도 알린다(재시작 후 .jobs 대조가 '없음' 으로 보지 않게). */
-export function registerDemoJobNames(names) { for (const n of names) if (n && !S.jobs.has(n)) S.jobs.set(n, { enabled: true }); }
+export function registerDemoJobNames(names) {
+  for (const x of names) {
+    const n = typeof x === 'string' ? x : x?.name;
+    if (!n) continue;
+    const cur = S.jobs.get(n);
+    // v2.839: 원장의 FD·스케줄도 알린다(정책 수집 데모의 status scheduler 가 재시작 뒤에도 잡을 스케줄에 넣게) — 이미 아는 값은 두고 빈 칸만
+    const extra = typeof x === 'object' ? { ...(x.client ? { client: x.client } : {}), ...(x.schedule ? { schedule: x.schedule } : {}) } : {};
+    if (!cur) S.jobs.set(n, { enabled: true, ...extra });
+    else for (const [k, v] of Object.entries(extra)) if (!cur[k]) cur[k] = v;
+  }
+}
 
 let _seeded = false;
 /**

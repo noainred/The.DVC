@@ -8,6 +8,7 @@
  */
 import { numOrNull } from '../util/numOrNull.js';
 import { isResourceName } from './names.js';
+import { normPolicyResult } from './policyParse.js';
 
 const obj = (v) => (v && typeof v === 'object' && !Array.isArray(v) ? v : {});
 const arr = (v) => (Array.isArray(v) ? v : []);
@@ -95,6 +96,8 @@ export const VALUE = Object.freeze({
   }),
   setEnabled: () => null,
   history: (v) => rows(v, 200),
+  // v2.839 정책 수집 — 아는 키 · 아는 필드만 · 상한(policyParse 정규화는 멱등 — 엣지가 이미 거른 값을 중앙이 같은 함수로 다시 거른다)
+  policy: (v) => normPolicyResult(v),
   cancel: (v) => { const r = obj(v); return r.final ? { final: rowOut(r.final) } : r.cleared ? { cleared: true } : { canceled: bool(r.canceled) }; },
   log: (v) => {
     const r = obj(v); const l = obj(r.log);

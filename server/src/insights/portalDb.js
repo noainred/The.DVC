@@ -127,6 +127,7 @@ const PURPOSES = {
   'bareos-jobs.json': 'Bareos VM 백업 대상 원장(vCenter·VM·Director 잡 이름·최근 실행·복원 이력 — 자격증명 없음, v2.820)',
   'bareos-auth-stops.json': 'Bareos Director 인증 실패 정지 기록(상태 — 자격증명이 바뀌면 자동 재개 · 엣지 대행 사본은 edge-director: 키, v2.820)',
   'bareos-mail-state.json': 'Bareos 실패 알림 메일 커서(상태 — 대상별 마지막으로 판정한 jobid · 재시작 뒤 같은 메일을 다시 보내지 않게, v2.822)',
+  'bareos-policy.json': 'Bareos Director 정책 수집본(상태 — 하루 1회: 스케줄 · 7일 예정 · 풀 · 볼륨 요약 · JobDefs · FileSet · 명령마다 마지막 성공 값과 시각 — 자격증명 없음, v2.839)',
   'vm-dns-policy.json': 'VM DNS 승인 정책(법인별 승인 DNS 주소·CIDR · 공인 DNS 판정, v2.696)',
   'bm-storage.json': '베어메탈 스토리지 서버 등록부 + 수집 주기(마운트 경로·SSH 계정 — 비밀 봉인, v2.340)',
   'horizon.json': 'Horizon 커넥션 서버 등록(주소·계정 — 비밀 봉인)',

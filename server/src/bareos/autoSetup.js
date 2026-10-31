@@ -120,7 +120,7 @@ export function directorResources({ defaults = {}, consoleName, consolePassword,
     ].join('\n') },
     { type: 'profile', name: 'portal', text: [
       'Profile {', '  Name = "portal"',
-      '  Command ACL = .api, .jobs, .clients, .storages, .pools, .schedules, .jobdefs, .filesets, .bvfs_get_jobids, configure, run, restore, llist, list, cancel, enable, disable, delete, status, version, !*all*',
+      '  Command ACL = .api, .jobs, .clients, .storages, .pools, .schedules, .jobdefs, .filesets, .bvfs_get_jobids, configure, run, restore, llist, list, cancel, enable, disable, delete, status, show, version, !*all*',
       '  Job ACL = *all*', '  Client ACL = *all*', '  Storage ACL = *all*', '  Pool ACL = *all*', '  Schedule ACL = *all*', '  FileSet ACL = *all*',
       '  Catalog ACL = *all*', '  Where ACL = *all*', '  Plugin Options ACL = *all*', '}',
     ].join('\n') },

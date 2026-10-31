@@ -11,6 +11,8 @@ import { STable } from '../../components/STable.jsx';
 import Select from '../../components/Select.jsx';
 import VeeamHeader from './VeeamHeader.jsx';
 import BareosTabs from './BareosTabs.jsx';
+import BareosPolicyTab from './BareosPolicyTab.jsx';
+import { useHashTab } from '../../hooks/useHashTab.js';
 import { CritIcon } from './BackupMarkIcons.jsx';
 import {
   directorStateOf, numText, resultBar, shortTs, fmtGb, PRIORITY_TEXT, PRIORITY_TONE, BAREOS_RPO_DAYS, BAREOS_DETAIL_VC_KEY, stText,
@@ -52,7 +54,13 @@ function ResultBar({ c }) {
   );
 }
 
+/** v2.839 '정책 · 일정' 탭(#/tools/bareos-summary/policy) — 같은 조회 전용 키(bareos-summary) 아래 하위 탭. 통합 현황(overview)은 아래 화면 그대로. */
 export default function BareosSummaryTool() {
+  const [tab] = useHashTab({ base: ['tools', 'bareos-summary'], valid: ['overview', 'policy'], fallback: 'overview' });
+  return tab === 'policy' ? <BareosPolicyTab /> : <BareosSummaryView />;
+}
+
+function BareosSummaryView() {
   const [tick, setTick] = useState(0);
   const [rpoDays, setRpoDays] = useState(loadRpo);
   const [q, setQ] = useState('');

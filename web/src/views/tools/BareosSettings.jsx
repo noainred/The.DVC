@@ -169,6 +169,40 @@ export default function SettingsTab({ onSaved, writable = true }) {
             </label>
             <label className="muted" style={FIELD}>상태 조회 주기(초)<input className="input" id="bareos-def-poll" style={INP} inputMode="numeric" value={defs.pollIntervalSec} onChange={(e) => setDefs({ ...defs, pollIntervalSec: e.target.value.replace(/\D/g, '').slice(0, 4) })} /></label>
           </div>
+          {/* v2.839 Director 정책 수집(하루 1회 · 읽기 전용 명령) — 공통 기본값과 함께 저장(policy 묶음째) */}
+          <div data-bareos-policy-settings="" style={{ marginTop: 12, paddingTop: 10, borderTop: '1px solid var(--border-soft)', fontSize: 12.5, display: 'flex', flexDirection: 'column', gap: 6 }}>
+            <b style={{ fontSize: 13 }}>Director 정책 수집 — 하루 한 번</b>
+            {(() => {
+              const pol = { enabled: true, time: '06:10', optional: { schedules: true, jobdefs: true, filesets: true }, off: [], ...(defs.policy || {}) };
+              const set = (patch) => setDefs({ ...defs, policy: { ...pol, ...patch } });
+              const opt = { schedules: true, jobdefs: true, filesets: true, ...(pol.optional || {}) };
+              const off = new Set(pol.off || []);
+              return (<>
+                <div style={ROW}>
+                  <label className="flex" style={{ alignItems: 'center', gap: 5 }}><input type="checkbox" checked={pol.enabled !== false} onChange={(e) => set({ enabled: e.target.checked })} /> 켜기</label>
+                  <label className="flex muted" style={{ alignItems: 'center', gap: 6 }}>매일<input className="input" type="time" aria-label="정책 수집 시각" value={pol.time || '06:10'} onChange={(e) => set({ time: e.target.value })} style={{ width: 132, minWidth: 0 }} />(포탈 시각)</label>
+                </div>
+                <div style={ROW}>
+                  <span className="muted">선택 명령(show — 포탈 콘솔 Profile 에 show 가 있어야 합니다)</span>
+                  {[['schedules', 'Run 줄'], ['jobdefs', 'JobDefs'], ['filesets', 'FileSet']].map(([k, l]) => (
+                    <label key={k} className="flex" style={{ alignItems: 'center', gap: 5 }}><input type="checkbox" checked={opt[k] !== false} onChange={(e) => set({ optional: { ...opt, [k]: e.target.checked } })} /> {l}</label>
+                  ))}
+                </div>
+                {(s.directors || []).length > 0 && (
+                  <div style={ROW}>
+                    <span className="muted">수집할 Director</span>
+                    {(s.directors || []).map((d) => (
+                      <label key={d.id} className="flex" style={{ alignItems: 'center', gap: 5 }}><input type="checkbox" checked={!off.has(d.id)} onChange={(e) => { const n = new Set(off); if (e.target.checked) n.delete(d.id); else n.add(d.id); set({ off: [...n] }); }} /> {d.name}</label>
+                    ))}
+                  </div>
+                )}
+                <div className="muted" style={{ fontSize: 11.5, lineHeight: 1.6 }}>
+                  읽기 전용 명령만 보냅니다(status scheduler · llist pools · list volumes · show schedules/jobdefs/filesets) · Director 마다 시한 · 실패하면 30분 뒤 다시(하루 3번까지) ·
+                  결과는 Bareos › 정책 · 일정 과 Backup › Summary 의 풀 · 스케줄 칸에 쓰입니다. 이미 자동 설정한 Director 는 Profile 의 Command ACL 에 show 를 직접 더해야 show 명령이 됩니다.
+                </div>
+              </>);
+            })()}
+          </div>
           <div className="muted" style={{ fontSize: 11.5, marginTop: 8, lineHeight: 1.6 }}>
             이름은 자동 설정 2단계가 만드는 리소스 이름과 같아야 합니다. 상태 조회는 Director 마다 따로(병렬 · Director 별 시한) 하므로 느린 법인 하나가 나머지를 막지 않습니다.
             주기 범위는 {s.limits?.pollIntervalSec ? `${s.limits.pollIntervalSec.min}~${s.limits.pollIntervalSec.max}초` : '—'}.

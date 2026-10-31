@@ -111,7 +111,8 @@ import { startVmCloneScheduler } from './vmclone/scheduler.js'; // VM 복제(백
 import { startVmBackupMail } from './vmclone/notify.js'; // VM 백업 실패 메일(v2.794) — 중앙 전용 · 메일 설정이 꺼져 있으면 기준만 옮긴다
 import { startVmCloneWorker } from './agent/vmCloneWorker.js'; // VM 백업 법인 위임 — 엣지 동기화·보고(v2.793). CENTRAL_URL 미설정이면 자기기동 안 함
 import { startBareosMail } from './bareos/notify.js'; // Bareos 백업 실패 메일(v2.822) — 중앙 전용 · 메일 설정이 꺼져 있으면 커서만 옮긴다
-import { startStaleAlert } from './veeam/staleAlert.js'; // 백업 안 된 VM 일일 메일(v2.838) — 중앙 전용 · 꺼져 있으면 보내지 않는다
+import { startStaleAlert } from './veeam/staleAlert.js';
+import { startBareosPolicy } from './bareos/policy.js'; // Bareos Director 정책 수집(v2.839) — 중앙 전용 · 하루 1회(설정 시각) · 읽기 전용 명령 // 백업 안 된 VM 일일 메일(v2.838) — 중앙 전용 · 꺼져 있으면 보내지 않는다
 import { startBareosGroupScheduler } from './bareos/groupRunner.js'; // v2.830 Bareos 백업 그룹 예약 실행(30초 틱 · 중앙만)
 import { startBareosPoller } from './bareos/poller.js'; // Bareos VM 백업 실행 상태(v2.820) — Director 미설정이면 접속하지 않는다
 import { startStoragePoller } from './storage/poller.js';        // 스토리지 수집(v2.302)
@@ -594,6 +595,7 @@ const stagger = [
   startBareosPoller, // Bareos VM 백업(v2.820) — 설정 주기, 할 일이 없으면 접속 안 함 · 10틱마다 대조
   startBareosMail,   // 〃 실패 메일(v2.822) — 1분 틱, 원장만 읽는다(Director 에 닿지 않는다) · 엣지는 기동하지 않는다
   startStaleAlert,   // 백업 안 된 VM 일일 메일(v2.838) — 1분 틱 · 정한 시각에 하루 한 번 · 데모 · 엣지는 보내지 않는다
+  startBareosPolicy, // Bareos 정책 수집(v2.839) — 1분 틱 · 정한 시각에 하루 한 번(실패 30분 뒤 · 3번) · 엣지는 기동하지 않는다
   startStoragePoller, startStoragePush, startStorageConfigPull, // 스토리지 모니터링(v2.302) — 전부 재진입 가드, push/pull 은 CENTRAL_URL 미설정 시 자기기동 안 함
   startSanSwitchPoller, startSanSwitchPush, startSanSwitchConfigPull, // SAN 스위치(v2.410) — 동일 규약(재진입 가드 + 적응형 타이머)
   startPduPoller, startPduPush, startPduConfigPull, // PDU(v2.424) — 동일 규약(자동 센서 탐지 + 재진입 가드 + 적응형 타이머)

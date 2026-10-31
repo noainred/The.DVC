@@ -1,6 +1,18 @@
 {
   "notes": [
     {
+      "version": "2.839.0",
+      "date": "2026-11-01",
+      "title": "Bareos 정책 · 일정 — Director 에서 하루 한 번 수집해 스케줄 · 풀 · JobDefs · VM 적용 정책을 보여 줍니다",
+      "notes": [
+        "Bareos 에 '정책 · 일정' 탭: Director 수집 상태 · 스케줄(Run 줄 · 쓰는 잡 · 다음 실행 · 그룹 예약과 겹침) · 다음 7일 예정(레벨별) · JobDefs · FileSet · VM 별 적용 정책(정책 있음 · 수동만 · 미등록 · 방식 불일치)",
+        "Director 정책 수집: 하루 한 번(설정 시각 · 실패 30분 뒤 · 3번까지) + '지금 수집' · 읽기 전용 명령만(status scheduler · llist pools · list volumes · show schedules/jobdefs/filesets) · 엣지 대행 Director 도",
+        "Backup › Summary 의 '—(2차)' 칸을 채움: Bareos 카드 풀 사용 · 다음 회차(Director 스케줄 포함) · 용량 카드 풀 가득 참 · 다음 24시간 띠와 7일 칸 · Detail 다음 예정",
+        "자동 설정의 포탈 콘솔 Profile 에 show 추가 — 이미 설정한 Director 는 Profile 의 Command ACL 에 show 를 직접 더해야 JobDefs · FileSet · Run 줄이 보입니다(나머지는 그대로 수집)",
+        "설정 › Bareos 공통 기본값에 '정책 수집'(켜기 · 시각 · 선택 명령 · 수집할 Director)"
+      ]
+    },
+    {
       "version": "2.838.0",
       "date": "2026-10-31",
       "title": "Backup Summary 를 시안대로(2/2) — 용량과 일정 · 통합 에러 로그 · 백업 안 된 VM 일일 메일",

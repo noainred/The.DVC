@@ -1,0 +1,7 @@
+{
+  "pools": [
+    { "poolid": "1", "name": "Scratch", "numvols": "0", "maxvols": "0", "useonce": "0", "usecatalog": "1", "acceptanyvolume": "0", "volretention": "31536000", "voluseduration": "0", "maxvoljobs": "0", "maxvolbytes": "0", "autoprune": "1", "recycle": "1", "pooltype": "Scratch", "labelformat": "*", "enabled": "1", "scratchpoolid": "0", "recyclepoolid": "1", "labeltype": "0", "prunablevolumes": "0", "prunablejobs": "0", "prunablebytes": "0" },
+    { "poolid": "2", "name": "Incremental", "numvols": "1", "maxvols": "100", "useonce": "0", "usecatalog": "1", "acceptanyvolume": "0", "volretention": "2592000", "voluseduration": "0", "maxvoljobs": "0", "maxvolbytes": "1073741824", "autoprune": "1", "recycle": "1", "pooltype": "Backup", "labelformat": "Incremental-", "enabled": "1", "scratchpoolid": "0", "recyclepoolid": "0", "labeltype": "0", "prunablevolumes": "0", "prunablejobs": "0", "prunablebytes": "0" },
+    { "poolid": "3", "name": "Full", "numvols": "100", "maxvols": "100", "useonce": "0", "usecatalog": "1", "acceptanyvolume": "0", "volretention": "31536000", "voluseduration": "0", "maxvoljobs": "0", "maxvolbytes": "0", "autoprune": "1", "recycle": "1", "pooltype": "Backup", "labelformat": "Full-", "enabled": "1", "scratchpoolid": "0", "recyclepoolid": "0", "labeltype": "0", "prunablevolumes": "0", "prunablejobs": "0", "prunablebytes": "0" }
+  ]
+}

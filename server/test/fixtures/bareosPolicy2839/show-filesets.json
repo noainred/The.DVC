@@ -1,0 +1,30 @@
+{
+  "filesets": {
+    "Windows All Drives": {
+      "name": "Windows All Drives",
+      "include": [
+        { "options": [ { "signature": "XXH128", "ignorecase": true, "exclude": true, "hardlinks": false, "aclsupport": true, "xattrsupport": true,
+          "wilddir": [ "[A-Z]:/RECYCLER", "[A-Z]:/$RECYCLE.BIN", "[A-Z]:/System Volume Information" ],
+          "wildfile": [ "[A-Z]:/hiberfil.sys", "[A-Z]:/pagefile.sys", "[A-Z]:/swapfile.sys" ],
+          "drivetype": [ "fixed" ] } ],
+          "file": [ "/" ] }
+      ]
+    },
+    "SelfTest": {
+      "name": "SelfTest",
+      "description": "fileset just to backup some files for selftest",
+      "include": [ { "options": [ { "signature": "XXH128", "hardlinks": false, "aclsupport": true, "xattrsupport": true } ], "file": [ "/usr/sbin" ] } ]
+    },
+    "PortalVmwareGeneric": {
+      "name": "PortalVmwareGeneric",
+      "include": [ { "options": [ { "signature": "XXH128", "compression": "LZ4", "hardlinks": false, "aclsupport": true, "xattrsupport": true } ], "plugin": [ "python3:module_name=bareos-fd-vmware" ] } ]
+    },
+    "LinuxAll": {
+      "name": "LinuxAll",
+      "description": "Backup all regular filesystems, determined by filesystem type.",
+      "include": [ { "options": [ { "signature": "XXH128", "onefs": false, "hardlinks": false, "aclsupport": true, "xattrsupport": true,
+        "fstype": [ "btrfs", "ext2", "ext3", "ext4", "reiserfs", "jfs", "vfat", "xfs", "zfs" ] } ], "file": [ "/" ] } ],
+      "exclude": [ { "file": [ "/var/lib/bareos" ] } ]
+    }
+  }
+}

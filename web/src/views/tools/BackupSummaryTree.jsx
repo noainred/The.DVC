@@ -152,7 +152,7 @@ export default function BackupSummaryTree({ rows, opts, reloadKey, onOpenDetail,
             <Head k="rpo" sort={sort} onSort={onSort} title={`최근 ${opts.rpoDays === 1 ? '24시간' : `${opts.rpoDays}일`} 안에 성공한 백업(Veeam · Bareos)이 있는 VM 비율 — 백업 안함은 빼고 · 결과를 모르는 VM 은 따로`}>RPO</Head>
             <Head sort={sort} onSort={onSort} style={{ textAlign: 'right' }} title="Veeam 복원 지점">복원 지점</Head>
             <Head k="lok" sort={sort} onSort={onSort} title="마지막 성공(Veeam · Bareos 중 늦은 것)">마지막 백업</Head>
-            <Head k="nx" sort={sort} onSort={onSort} title="Veeam 잡 다음 실행 · Bareos 그룹 예약 다음 회차 중 이른 것(Director 스케줄은 2차 수집 뒤)">다음 예정</Head>
+            <Head k="nx" sort={sort} onSort={onSort} title="Veeam 잡 다음 실행 · Bareos 그룹 예약 다음 회차 · Director 스케줄(정책 수집본) 중 이른 것">다음 예정</Head>
             <Head k="err" sort={sort} onSort={onSort} style={{ padding: '9px 14px 9px 6px' }} title="최근 24시간 실패·경고가 있는 VM 수">에러</Head>
           </div>
           {shown.length === 0 && msgRow('empty', 0, rows?.length ? '맞는 법인 · 폴더 · VM 이 없습니다(폴더 · VM 은 펼친 법인에서만 찾습니다).' : '법인이 없습니다.')}

@@ -6,7 +6,8 @@
  *   version: 2,
  *   directors: [ { id, name, host, port, consoleName, password, timeoutMs, tlsMax, agent } ],   // 법인마다 Director 하나(비밀번호 봉인 — SECRET_FILES)
  *                                                            // v2.824 agent: '' = 중앙이 직접 · '<엣지명>' = 그 법인 엣지가 대행(bareos/edgeOps.js)
- *   defaults: { jobDefs, fileSet, restoreJob, level, pollIntervalSec, pluginName },      // 전 Director 공통
+ *   defaults: { jobDefs, fileSet, restoreJob, level, pollIntervalSec, pluginName, policy },      // 전 Director 공통
+ *     v2.839 policy: { enabled, time:'HH:MM'(포탈 시각), optional:{ schedules, jobdefs, filesets }, off:[directorId] } — Director 정책 수집(하루 1회 · bareos/policy.js)
  *   sites: [ { vcenterId, directorId, vcserver, client, storage, pool, schedule, configFile } ],   // vCenter → 그 법인 Director·FD·SD
  *   director: { …directors[0] 사본… },   // 구버전 호환 — 되돌린 구버전이 첫 Director 는 계속 쓴다(새 코드는 읽지 않는다).
  *                                        //   한계(검토 C4): 구버전에서 **저장**하면 나머지 Director·법인 묶음이 사라진다 — 그 잡은 원장에서만 정리(라우트 orphanOf).
@@ -51,9 +52,24 @@ export const DIRECTOR_ID_RE = /^dir_[a-z0-9_]{1,40}$/;
 /** 법인 이름 — 화면·메일·감사에 쓴다(메일은 esc). 제어문자·꺾쇠·따옴표·백틱 금지. */
 const DIRECTOR_NAME_RE = /^[^\u0000-\u001f\u007f<>"'`]{1,64}$/;
 
+/** v2.839 Director 정책 수집 기본값 — 켬 · 06:10(포탈 시각) · show 계열 선택 명령 켬(Profile 에 show 가 없으면 '권한 없음' 으로 남는다) · 끈 Director 없음. */
+export const POLICY_DEFAULTS = Object.freeze({ enabled: true, time: '06:10', optional: Object.freeze({ schedules: true, jobdefs: true, filesets: true }), off: Object.freeze([]) });
+const POLICY_TIME_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
+/** 정책 수집 설정 정규화(순수) — 모르는 값은 기본값(전체를 받는다 — 화면이 묶음째 보낸다). off 는 Director id 모양만(상한 64). */
+export function normPolicySettings(p) {
+  const x = p && typeof p === 'object' && !Array.isArray(p) ? p : {};
+  const opt = x.optional && typeof x.optional === 'object' ? x.optional : {};
+  return {
+    enabled: x.enabled === undefined ? POLICY_DEFAULTS.enabled : x.enabled === true,
+    time: typeof x.time === 'string' && POLICY_TIME_RE.test(x.time) ? x.time : POLICY_DEFAULTS.time,
+    optional: Object.fromEntries(Object.keys(POLICY_DEFAULTS.optional).map((k) => [k, opt[k] === undefined ? POLICY_DEFAULTS.optional[k] : opt[k] === true])),
+    off: [...new Set((Array.isArray(x.off) ? x.off : []).map((v) => String(v)).filter((v) => DIRECTOR_ID_RE.test(v)))].slice(0, MAX_DIRECTORS),
+  };
+}
+
 export const DEFAULTS = Object.freeze({
   director: Object.freeze({ name: '', host: '', port: 9101, consoleName: '', timeoutMs: LIMITS.timeoutMs.def, tlsMax: 'TLSv1.3', agent: '' }),
-  defaults: Object.freeze({ jobDefs: 'PortalVmwareDefaults', fileSet: 'PortalVmwareGeneric', restoreJob: 'PortalVmwareRestore', level: 'Incremental', pollIntervalSec: LIMITS.pollIntervalSec.def, pluginName: 'python3' }),
+  defaults: Object.freeze({ jobDefs: 'PortalVmwareDefaults', fileSet: 'PortalVmwareGeneric', restoreJob: 'PortalVmwareRestore', level: 'Incremental', pollIntervalSec: LIMITS.pollIntervalSec.def, pluginName: 'python3', policy: POLICY_DEFAULTS }),
 });
 
 const clampInt = (v, { min, max, def }) => { const n = Math.round(Number(v)); return Number.isFinite(n) && v !== '' && v !== null ? Math.min(max, Math.max(min, n)) : def; };
@@ -154,6 +170,7 @@ function pickDefaults(d) {
   if (d.level !== undefined) out.level = normLevel(d.level);
   if (d.pollIntervalSec !== undefined) out.pollIntervalSec = clampInt(d.pollIntervalSec, LIMITS.pollIntervalSec);
   if (d.pluginName === 'python' || d.pluginName === 'python3') out.pluginName = d.pluginName;
+  if (d.policy !== undefined) out.policy = normPolicySettings(d.policy);   // v2.839
   return out;
 }
 

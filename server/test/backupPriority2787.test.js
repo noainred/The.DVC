@@ -111,7 +111,7 @@ test('B 라우트 — 범위 안 VM 만 · 연동 없음은 미백업 확정 · 
 
 test('C 소스 — 응답 캐시 키에 Detail 접근 · 상한 상수 · 판정 사용자 하나(toolActorOf)', () => {
   const src = fs.readFileSync(new URL('../src/routes/api/veeam.js', import.meta.url), 'utf8');
-  assert.match(src, /extraKey: `\$\{scopeKey\(req\.user, snap\)\}\|\$\{admin \? 'admin' : 'user'\}\|m\$\{marksRev\(\)\}\|d\$\{detailToolOk\(req\) \? 1 : 0\}(?:\|em\$\{emSourcesRev\(\)\})?(?:\|c\$\{jobsRev\(\)\})?(?:\|b\$\{bareosRegistryRev\(\)\}\|g\$\{bareosGroupsRev\(\)\})?(?:\|w\$\{writeKeyOf\(req, snap\)\})?`/);   // v2.795 EM 출처 리비전 · v2.806 복제 잡 리비전 · v2.836 Bareos 원장·그룹 리비전(법인 집계)
+  assert.match(src, /extraKey: `\$\{scopeKey\(req\.user, snap\)\}\|\$\{admin \? 'admin' : 'user'\}\|m\$\{marksRev\(\)\}\|d\$\{detailToolOk\(req\) \? 1 : 0\}(?:\|em\$\{emSourcesRev\(\)\})?(?:\|c\$\{jobsRev\(\)\})?(?:\|b\$\{bareosRegistryRev\(\)\}\|g\$\{bareosGroupsRev\(\)\})?(?:\|w\$\{writeKeyOf\(req, snap\)\})?(?:\|bp\$\{bareosPolicyRev\(\)\})?`/);   // v2.839 bp = Bareos 정책 수집본 리비전   // v2.795 EM 출처 리비전 · v2.806 복제 잡 리비전 · v2.836 Bareos 원장·그룹 리비전(법인 집계)
   assert.match(src, /const detailToolOk = \(req\) => !issueFor\(toolActorOf\(req\), 'backup-detail'\)/);
   assert.equal(S.PRIORITY_MAX, 500);
   const api = fs.readFileSync(new URL('../src/routes/api.js', import.meta.url), 'utf8');

@@ -1,6 +1,6 @@
 # 설정·데이터 파일 레퍼런스 (자동 생성)
 
-포탈이 `CONFIG_DIR`(설치본 기본 `/etc/vmware-portal`) 아래에 만드는 파일 **244개**의 목록이다.
+포탈이 `CONFIG_DIR`(설치본 기본 `/etc/vmware-portal`) 아래에 만드는 파일 **245개**의 목록이다.
 시계열 DB 는 `db-location.json` 이 가리키는 `dbDir` 로 옮길 수 있다.
 
 - 생성: `node scripts/config-doc.mjs` (마지막 갱신 2026-10-31)
@@ -41,6 +41,7 @@
 | `bareos-groups.json` | 설정 | Bareos 백업 그룹 원장(v2.830 · 사용자 요청 'VM 을 골라 그룹으로 — 이름·스케줄·스토리지 지정, 나중에 수정'). | ✅ | ✅ | ✅ | bareos/groups.js |
 | `bareos-jobs.json` | 설정 | 포탈의 Bareos 백업 대상 원장(v2.820). 파일: CONFIG_DIR/bareos-jobs.json (자격증명 없음 · 원자적 쓰기 · 손상 보존). | ✅ | ✅ | ✅ | bareos/registry.js |
 | `bareos-mail-state.json` | 설정 | Bareos 백업 실패 알림 메일(v2.822, 메일 종류 'bareos-backup'). | ✅ | ✅ | ✅ | bareos/notify.js |
+| `bareos-policy.json` | 설정 | Director 정책 수집(v2.839 백업 메뉴 개편 2차-a · 사용자 결정 '실제 출력 먼저 · show 추가 + 선택 명령 · 표준 검증'). | ✅ | ✅ | ✅ | bareos/policy.js |
 | `bareos.json` | 설정 | Bareos 연동 설정(v2.820 · v2.823 법인별 Director). 파일: CONFIG_DIR/bareos.json (0600 · 원자적 쓰기 · 비밀 봉인). | ✅ | ✅ | ✅ | bareos/settings.js |
 | `bm-storage.json` | 설정 | 베어메탈 스토리지 서버 목록 + 설정(v2.340). | ✅ | ✅ | ✅ | bmstor/registry.js |
 | `bm-usage.db` | DB | 베어메탈 사용률 DB(v2.550). 파일: `<dbDir>/bm-usage.db` |  | ✅ | ✅ | bmusage/db.js, bmusage/poller.js |
