@@ -14,6 +14,7 @@ import Select from '../../components/Select.jsx';
 import DataList from '../../components/DataList.jsx';
 import BoldText from '../../components/boldText.jsx';
 import { fmtGb, flattenBareosTree, initialBareosOpen, shortTs, stText, runLine } from './bareosViewText.js';
+import { takeBareosGroupHandoff } from './backupViewText.js';   // v2.835 Backup › Detail 'Bareos 그룹 등록 →' 이 넘긴 VM
 import { relayWaitMs, outcomeUnknown, unknownOutcomeText } from './bareosText.js';
 import {
   DAY_NAMES, LEVELS, NEW_SCHEDULE, scheduleText, draftIssues, toggleDay, GROUP_FILTERS, groupFilterCounts, pickable, buildGroupTree, checkState,
@@ -81,7 +82,10 @@ function TriCheck({ state, disabled, onChange, label }) {
 export default function BareosGroupsTab({ d }) {
   const [vcs, setVcs] = useState(null);
   const [vcErr, setVcErr] = useState(null);
-  const [vc, setVc] = useState(loadVc);
+  // v2.835: Detail 에서 넘긴 VM(한 번 읽고 지운다 — 10분 · 200대) — 있으면 그 법인을 열고 새 그룹 창에 미리 고른다
+  const handoffRef = useRef(undefined);
+  if (handoffRef.current === undefined) handoffRef.current = takeBareosGroupHandoff();
+  const [vc, setVc] = useState(() => handoffRef.current?.vcenterId || loadVc());
   const [tree, setTree] = useState(null);
   const [err, setErr] = useState(null);
   const [refreshErr, setRefreshErr] = useState(null);   // 버그 점검 W8: 이미 보이는 값이 있으면 새로 읽기 실패는 배너로(화면을 지우지 않는다)
@@ -130,6 +134,14 @@ export default function BareosGroupsTab({ d }) {
     return () => clearTimeout(t);
   }, [running, tree, view.kind]);   // eslint-disable-line react-hooks/exhaustive-deps
 
+  // v2.835: 넘겨받은 VM 의 법인 트리가 오면 새 그룹 창을 연다(그 법인이 아니면 버린다 — 다른 법인 VM 을 섞지 않는다)
+  useEffect(() => {
+    const h = handoffRef.current;
+    if (!h || !tree) return;
+    handoffRef.current = null;
+    if (tree.vcenterId !== h.vcenterId) return;
+    setMsg(null); setView({ kind: 'edit', groupId: '', filter: 'all', initialSel: h.vmIds });
+  }, [tree]);
   const groups = useMemo(() => tree?.groups || [], [tree]);
   const groupName = useMemo(() => { const m = new Map(groups.map((g) => [g.id, g.name])); return (id) => m.get(id) || ''; }, [groups]);
   const vms = useMemo(() => tree?.vms || [], [tree]);
@@ -191,7 +203,7 @@ export default function BareosGroupsTab({ d }) {
           onDetail={(g) => setView({ kind: 'detail', groupId: g.id })} />
       )}
       {tree && view.kind === 'edit' && (view.groupId === '' || current) && (
-        <GroupEdit key={`${vc}:${view.groupId}`} tree={tree} group={current} initialFilter={view.filter || 'all'} vms={vms} byId={byId} groupName={groupName} writable={writable}
+        <GroupEdit key={`${vc}:${view.groupId}`} tree={tree} group={current} initialFilter={view.filter || 'all'} initialSel={view.initialSel} vms={vms} byId={byId} groupName={groupName} writable={writable}
           onBack={() => setView(current ? { kind: 'detail', groupId: current.id } : { kind: 'list' })}
           onSaved={(text, ok, saved, v0) => { if (!sameVc(v0)) return; setMsg({ ok, text }); setView(saved ? { kind: 'detail', groupId: saved.id } : { kind: 'list' }); load(); }}
           onReload={(v0) => { if (sameVc(v0)) load(); }} vcNow={vc} />
@@ -318,7 +330,7 @@ function savedText(r, isNew) {
   return parts.join(' · ');
 }
 
-function GroupEdit({ tree, group, initialFilter, vms, byId, groupName, writable, onBack, onSaved, onReload, vcNow }) {
+function GroupEdit({ tree, group, initialFilter, initialSel, vms, byId, groupName, writable, onBack, onSaved, onReload, vcNow }) {
   const editingId = group?.id || '';
   const [name, setName] = useState(group?.name || '');
   const [sched, setSched] = useState(() => (group ? { ...group.schedule } : { ...NEW_SCHEDULE }));
@@ -327,7 +339,8 @@ function GroupEdit({ tree, group, initialFilter, vms, byId, groupName, writable,
   const [serverOtp, setServerOtp] = useState(null);   // 서버가 needOtp 로 돌려준 까닭(화면 판정과 어긋날 때 칸을 연다)
   const [storage, setStorage] = useState(group?.storage || '');
   const [pool, setPool] = useState(group?.pool || '');
-  const [sel, setSel] = useState(() => new Set(group?.vmIds || []));
+  // v2.835: 새 그룹이면 Detail 이 넘긴 VM 중 이 법인 트리에 있는 것만 미리 고른다(저장할 때 서버가 그룹 하나 규칙 등을 다시 판정한다)
+  const [sel, setSel] = useState(() => new Set(group?.vmIds || (Array.isArray(initialSel) ? initialSel.filter((id) => byId?.has?.(id) && pickable(byId.get(id), { editingId: '', groupName }).ok) : [])));   // 다른 그룹에 든 VM·등록할 수 없는 VM 은 처음부터 뺀다(아래 정리 효과와 같은 규칙 — 첫 화면부터 수가 맞게)
   const [filter, setFilter] = useState(initialFilter);
   const [q, setQ] = useState('');
   const [open, setOpen] = useState(null);

@@ -10,6 +10,8 @@
  */
 import { VEEAM_SNAP_STALE_MS } from './backupCounts.js';
 import { numOrNull } from '../util/numOrNull.js';
+import { osKind } from '../inventory/osKind.js';
+import { staleOf } from './backupPolicy.js';
 
 const isFin = (v) => typeof v === 'number' && Number.isFinite(v);
 
@@ -193,6 +195,7 @@ export function vmBackupView(vm, ve, evEntry, { veeamKnown = true, snapKnown = t
     jobs: Array.isArray(ve.jobs) ? ve.jobs.slice(0, 5) : [], rp: isFin(ve.rp) ? ve.rp : null,
     lb: isFin(ve.lb) ? ve.lb : null, lbSrc: ve.lbSrc || '', lastResult: ve.lastResult || '', ag: ve.ag === 1,
     ...(ve.lr ? { lr: String(ve.lr).slice(0, 32) } : {}),   // v2.780: 그 VM 의 마지막 task 결과(작업 결과보다 먼저 본다)
+    ...(ve.lr && isFin(ve.lrt) ? { lrt: ve.lrt } : {}),   // v2.835: 그 결과가 끝난 시각(backupPolicy.recentErrorsOf — 24시간 창)
   } : null;
   const ev = Array.isArray(evEntry) && isFin(evEntry[0]) ? { ts: evEntry[0], n: Number.isInteger(evEntry[1]) ? evEntry[1] : null } : null;
   return {
@@ -201,6 +204,7 @@ export function vmBackupView(vm, ve, evEntry, { veeamKnown = true, snapKnown = t
     s: { ev: snapKnown ? ev : undefined, now: currentSnapOf(vm, now) },
     // v2.814: 디스크 사용 용량(GB, vCenter 인벤토리 storageGB — 엑셀·CSV '스토리지 사용(GB)' 과 같은 값). 못 읽으면 null(0 으로 두지 않는다)
     gb: gbOf(vm.storageGB),
+    os: osKind(vm.guestOS),   // v2.835 게스트 OS(windows·linux·other·null — inventory/osKind.js) · Detail 의 Windows·Linux 거르기
     ...(mark ? { m: mark } : {}),   // v2.784: 사람이 정한 표시(backupMarks.markView — 있을 때만)
     // v2.803 Clone 칸 — 백업 방식을 Clone 으로 정한 VM 에만(사용자 요청 'Clone 이라고 표시된 항목이면 여기에'). cloneView 결과 그대로:
     //   { job:false }(포탈 복제 잡 없음) | { job:true, on, at, ok, skipped? } | null(잡 목록을 못 읽음 — 모름). 그 밖의 VM 은 키 없음.
@@ -209,14 +213,14 @@ export function vmBackupView(vm, ve, evEntry, { veeamKnown = true, snapKnown = t
 }
 
 /** v2.803 백업 방식 글자(화면·CSV·엑셀 공용 — 웹 backupViewText.METHODS 와 같은 글자, 테스트 대조). v2.828 Bareos(사용자 요청 — Clone 다음). 키 순서 = 화면 순서. */
-export const METHOD_TEXT = Object.freeze({ veeam: 'Veeam', clone: 'Clone', bareos: 'Bareos', config: 'Config 백업', none: '백업 안함', check: '확인 필요' });
+export const METHOD_TEXT = Object.freeze({ veeam: 'Veeam', clone: 'Clone', bareos: 'Bareos', ssh: 'SSH', config: 'Config 백업', none: '백업 안함', check: '확인 필요' });   // v2.835 SSH(정책 값 — 사용자 요청) · clone·config 는 예전 저장값 글자(읽기·내보내기)
 const METHOD_KEYS = Object.freeze(Object.keys(METHOD_TEXT));
 const methodOf = (v) => (METHOD_KEYS.includes(v) ? v : '');
 /**
  * v2.806 · v2.828: 이 방식이면 Veeam 이 없어도 '미백업' 이 아니다 — 백업 안함(의도) · Clone(포탈 복제) · Bareos(Bareos 잡 — 잡이 없으면 Bareos 화면의 '미등록' 이 따로 센다).
  *   우선순위 VM(priorityCandidates) · 보기 필터 needgap · 표시 집계(backupMarks.markCounts needGap) · 웹 vmMatches 가 이 한 규칙을 쓴다.
  */
-export const NOT_VEEAM_GAP = Object.freeze(['none', 'clone', 'bareos']);
+export const NOT_VEEAM_GAP = Object.freeze(['none', 'clone', 'bareos', 'ssh']);   // v2.835 SSH 도(Veeam 이 아니라 SSH 스크립트로 백업한다고 정한 VM)
 
 /*
  * v2.780: 세부내용의 '보기' 필터(VM 한 대 — vmBackupView 모양) — 웹 views/tools/backupViewText.js vmMatches 와 같은 판정이다
@@ -226,7 +230,9 @@ export const NOT_VEEAM_GAP = Object.freeze(['none', 'clone', 'bareos']);
 // v2.784: need(백업 필요 표시) · needgap(백업 필요인데 Veeam 대상이 아님 — Veeam 을 모르는 VM 은 넣지 않는다) · crit-*(중요도)
 // v2.803: method-*(백업 방식 — unset = 정하지 않음)
 export const VIEW_FILTERS = Object.freeze(['all', 'veeam', 'snaponly', 'none', 'run', 'stale', 'rpo', 'fail', 'need', 'needgap', 'bareos', 'bareos-missing', 'crit-high', 'crit-mid', 'crit-low',
-  'method-veeam', 'method-clone', 'method-bareos', 'method-config', 'method-none', 'method-check', 'method-unset']);   // v2.828 bareos(잡 있음)·bareos-missing(방식 Bareos 인데 잡 없음 — b 칸)
+  'method-veeam', 'method-clone', 'method-bareos', 'method-ssh', 'method-config', 'method-none', 'method-check', 'method-unset',   // v2.828 bareos(잡 있음)·bareos-missing(방식 Bareos 인데 잡 없음 — b 칸)
+  // v2.835(백업 메뉴 개편 1차): 실제 백업(a) · 정책≠실제(mm) · 정책 범주(p — 미설정·clone·config 는 check) · RPO 미달(마지막 성공이 기준 일수를 넘음 — staleOf) · 게스트 OS
+  'act-veeam', 'act-bareos', 'act-none', 'mismatch', 'policy-veeam', 'policy-bareos', 'policy-ssh', 'policy-none', 'policy-check', 'rpo-miss', 'os-windows', 'os-linux']);
 export function viewClass(vm, { rpoDays = 1, now = Date.now() } = {}) {
   const vKnown = !!vm && 'v' in vm && vm.v !== undefined;
   const v = vKnown ? vm.v : null;
@@ -345,6 +351,14 @@ export function vmViewMatches(vm, f, opts) {
   if (f === 'bareos-missing') return c.bareosMissing;
   if (f === 'crit-high' || f === 'crit-mid' || f === 'crit-low') return c.crit === f.slice(5);
   if (f.startsWith('method-')) return f === 'method-unset' ? !c.method : c.method === f.slice(7);
+  // v2.835: 서버가 행에 실은 결과 필드(backupPolicy.policyFields)를 읽기만 한다 — 웹 vmMatches 와 한 쌍(대조 테스트)
+  if (f === 'act-veeam') return vm?.a?.v === true;
+  if (f === 'act-bareos') return vm?.a?.b === true;
+  if (f === 'act-none') return vm?.a?.v === false && vm?.a?.b === false;
+  if (f === 'mismatch') return vm?.mm === true;
+  if (f.startsWith('policy-')) return vm?.p === f.slice(7);
+  if (f === 'rpo-miss') { const k = staleOf(vm, { windowMs: (RPO_DAYS.includes(Number(opts?.rpoDays)) ? Number(opts.rpoDays) : 1) * DAY, now: opts?.now ?? Date.now(), onlyOn: false }); return !!k && k.kind !== 'unknown'; }
+  if (f === 'os-windows' || f === 'os-linux') return vm?.os === f.slice(3);
   return true;
 }
 

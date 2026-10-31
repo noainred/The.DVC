@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import fs from 'node:fs';
-import { fmtNum, pctOf, veeamStateOf, filterRows, needsAttention, attentionList, vmClass, vmMatches, filterCounts, folderParts, buildTree, flattenTree, initialOpen, veeamCell, snapCell, shortTs, FILTERS, CRIT_FILTERS, METHOD_FILTERS, METHODS, backupCell, cloneCell, POWER, RPO_DAYS, loadOpts, saveOpts, scopeQuery, scopeNote, fmtGb, methodGbTotals } from './backupViewText.js';
+import { fmtNum, pctOf, veeamStateOf, filterRows, needsAttention, attentionList, vmClass, vmMatches, filterCounts, folderParts, buildTree, flattenTree, initialOpen, veeamCell, snapCell, shortTs, FILTERS, CRIT_FILTERS, METHOD_FILTERS, METHODS, backupCell, cloneCell, POWER, RPO_DAYS, loadOpts, saveOpts, scopeQuery, scopeNote, fmtGb, methodGbTotals, ALL_FILTERS } from './backupViewText.js';
 import { vmViewMatches, VIEW_FILTERS, viewClass as serverViewClass, POWER_VALUES, RPO_DAYS as SERVER_RPO_DAYS } from '../../../../server/src/veeam/backupStatus.js';
 
 const H = 3_600_000;
@@ -47,7 +47,9 @@ describe('v2.779 백업 메뉴 — 순수 헬퍼', () => {
     expect(vmClass(VMS[4])).toMatchObject({ snap: false, stale: true });
     const c = filterCounts(VMS);
     expect(c).toEqual({ all: 7, veeam: 3, snaponly: 1, none: 2, run: 2, stale: 1, rpo: 1, fail: 0, need: 0, needgap: 0, bareos: 0, 'bareos-missing': 0, 'crit-high': 0, 'crit-mid': 0, 'crit-low': 0,
-      'method-veeam': 0, 'method-clone': 0, 'method-bareos': 0, 'method-config': 0, 'method-none': 0, 'method-check': 0, 'method-unset': 7 });   // v2.803 백업 방식(표시 없음 = 미지정)   // v2.784 표시 필터(표시 없음 = 0)   // v2.780 rpo: dc01 의 lb 1(아주 오래 전)
+      'method-veeam': 0, 'method-clone': 0, 'method-bareos': 0, 'method-ssh': 0, 'method-config': 0, 'method-none': 0, 'method-check': 0, 'method-unset': 7,
+      // v2.835 서버 결과 필드(p · a · mm · lok)가 없는 옛 모양 행 — 새 칩은 모두 0(rpo-miss 는 마지막 성공을 몰라 미달로 세지 않는다)
+      'act-veeam': 0, 'act-bareos': 0, 'act-none': 0, mismatch: 0, 'policy-veeam': 0, 'policy-bareos': 0, 'policy-ssh': 0, 'policy-none': 0, 'policy-check': 0, 'rpo-miss': 0, 'os-windows': 0, 'os-linux': 0 });   // v2.803 백업 방식(표시 없음 = 미지정)   // v2.784 표시 필터(표시 없음 = 0)   // v2.780 rpo: dc01 의 lb 1(아주 오래 전)
     expect(vmMatches(VMS[6], 'none')).toBe(false);
   });
 
@@ -55,7 +57,9 @@ describe('v2.779 백업 메뉴 — 순수 헬퍼', () => {
     expect(folderParts('DC1/vm/A.MGMT/AD')).toEqual(['DC1', 'A.MGMT', 'AD']);
     const t = buildTree(VMS);
     const dc = t.children[0];
-    expect(dc.name).toBe('DC1'); expect(dc.agg).toEqual({ n: 7, veeam: 3, snap: 3, run: 2, none: 2, clone: 0, bareos: 0, bareosMissing: 0, gb: 0, gbUnknown: 7 });   // v2.814: 용량 없는 VM 은 gbUnknown
+    expect(dc.name).toBe('DC1'); expect(dc.agg).toEqual({ n: 7, veeam: 3, snap: 3, run: 2, none: 2, clone: 0, bareos: 0, bareosMissing: 0, gb: 0, gbUnknown: 7,   // v2.814: 용량 없는 VM 은 gbUnknown
+      // v2.835 정책·실제 집계 — 결과 필드가 없는 행은 정책 모름(unk) · 실제 모름(unk) · RPO 는 세지 않는다
+      pol: { veeam: 0, bareos: 0, ssh: 0, none: 0, check: 0, unk: 7 }, act: { v: 0, b: 0, none: 0, unk: 7 }, mm: 0, rpoOk: 0, rpoMiss: 0, err: 0, lok: null, nx: null });
     expect(dc.children.map((c) => c.name)).toEqual(['A.MGMT', 'B.Service', 'C.Add-ons']);
     const runOnly = buildTree(VMS, { filter: 'run' });
     expect(runOnly.children[0].children.map((c) => c.name)).toEqual(['A.MGMT']);
@@ -115,7 +119,7 @@ describe('v2.780 백업 옵션 — 전원·제외·오래된 백업·실패·경
   });
 
   it('웹 vmMatches = 서버 vmViewMatches(같은 입력 · CSV 가 화면과 같은 VM 을 낸다) · 값 목록도 같다', () => {
-    expect([...FILTERS, ...CRIT_FILTERS, ...METHOD_FILTERS].map(([k]) => k)).toEqual([...VIEW_FILTERS]);   // v2.803 백업 방식 필터도 칩 줄 밖   // v2.784: 중요도 필터는 칩 줄 밖(상단 수)
+    expect(ALL_FILTERS.map(([k]) => k)).toEqual([...VIEW_FILTERS]);   // v2.835 = FILTERS + CRIT_FILTERS + METHOD_FILTERS + V835_FILTERS(순서까지)   // v2.803 백업 방식 필터도 칩 줄 밖   // v2.784: 중요도 필터는 칩 줄 밖(상단 수)
     expect(POWER.map(([k]) => k)).toEqual([...POWER_VALUES]);
     expect(RPO_DAYS).toEqual([...SERVER_RPO_DAYS]);
     const edge = [{}, { v: undefined, s: {} }, { v: null, s: { ev: undefined } }, { v: { state: 'wait' }, s: { now: { stale: true, ts: NOW } } }, ...X];
@@ -217,7 +221,7 @@ describe('v2.784 백업 표시 — 중요도·백업 필요·메모', async () =
     expect(det).toMatch(/\{writable && <input type="checkbox"/);
     expect(det).toMatch(/load\(true\)/);
     expect(det).toMatch(/const r = await putJson\('\/tools\/backup-detail\/marks'[\s\S]{0,120}r\?\.ok === false\)[\s\S]{0,80}r\.reason/);   // 400 본문을 성공으로 삼키지 않는다
-    expect(det).toMatch(/const GRID = 'minmax\(220px, 2fr\) 52px 84px minmax\(150px, 1\.3fr\) minmax\(140px, 1\.1fr\) 64px 104px'/);   // v2.803 6열(백업 · Clone) · v2.814 용량 열
+    expect(det).toMatch(/const GRID = 'minmax\(230px, 2fr\) 46px 74px minmax\(150px, 1\.2fr\) minmax\(150px, 1\.2fr\) 86px 86px 58px minmax\(118px, 1fr\) 76px'/);   // v2.835 10열(정책 · 실제 · 정책≠실제 · RPO · 마지막 성공·다음 · 실패 24h)
     const sum = fs.readFileSync(new URL('./BackupSummaryTool.jsx', import.meta.url), 'utf8');
     expect(sum).toMatch(/data-backup-marks/);
     expect(Number((/<STable minWidth=\{(\d+)\}/.exec(sum) || [])[1])).toBeLessThanOrEqual(1100);   // v2.787 전폭 표
@@ -293,8 +297,8 @@ describe('v2.806 백업 방식 단축키 · 우선순위 VM', async () => {
   const B = await import('./backupViewText.js');
   const S = await import('../../../../server/src/veeam/backupStatus.js');
   const ev = (key, extra = {}) => ({ key, target: { tagName: 'DIV' }, ...extra });
-  it('단축키 — V·C·G·N(대소문자 무관) · 조합키·IME·반복·입력 칸이면 무시', () => {
-    expect(['v', 'C', 'g', 'N', 'K', 'x'].map((k) => B.methodKeyOf(ev(k)))).toEqual(['veeam', 'clone', 'config', 'none', 'check', null]);   // v2.816 K 확인 필요
+  it('단축키 — V·B·S·N·K(대소문자 무관 · v2.835 정책 5범주 — C·G 는 예전 값이라 없음) · 조합키·IME·반복·입력 칸이면 무시', () => {
+    expect(['v', 'B', 's', 'N', 'K', 'c', 'g', 'x'].map((k) => B.methodKeyOf(ev(k)))).toEqual(['veeam', 'bareos', 'ssh', 'none', 'check', null, null, null]);
     expect(B.methodKeyOf(ev('v', { ctrlKey: true }))).toBe(null);
     expect(B.methodKeyOf(ev('v', { metaKey: true }))).toBe(null);
     expect(B.methodKeyOf(ev('v', { altKey: true }))).toBe(null);
@@ -302,15 +306,15 @@ describe('v2.806 백업 방식 단축키 · 우선순위 VM', async () => {
     expect(B.methodKeyOf(ev('v', { repeat: true }))).toBe(null);
     for (const tagName of ['INPUT', 'TEXTAREA', 'SELECT']) expect(B.methodKeyOf(ev('v', { target: { tagName } })), tagName).toBe(null);
     expect(B.methodKeyOf(ev('v', { target: { tagName: 'DIV', isContentEditable: true } }))).toBe(null);
-    expect(Object.values(B.METHOD_KEYS_MAP).sort()).toEqual([...B.METHODS.map((m) => m.key)].sort(), '모든 방식에 키가 있다');
+    expect(Object.values(B.METHOD_KEYS_MAP).sort()).toEqual([...B.POLICIES.map((m) => m.key)].sort(), '정책 5범주마다 키가 있다');
   });
   it('화면 — keydown 은 고른 VM·편집 가능일 때만 · 같은 값이면 저장하지 않는다 · 안내 한 줄', async () => {
     const fs = await import('node:fs');
     const src = fs.readFileSync(new URL('./BackupDetailTool.jsx', import.meta.url), 'utf8');
     expect(src).toMatch(/if \(!selVm \|\| !writable\) return undefined;/);
     expect(src).toMatch(/const method = methodKeyOf\(e\);/);
-    expect(src).toMatch(/if \(\(selVm\.m\?\.method \|\| ''\) !== method\) saveMarks\(\[selVm\.id\], \{ method \}\);/);
-    expect(src).toMatch(/단축키 V Veeam · C Clone · B Bareos · G Config 백업 · N 백업 안함 · K 확인 필요/);
+    expect(src).toMatch(/if \(selVm\.p !== method \|\| \(selVm\.m\?\.method \|\| ''\) !== method\) saveMarks\(\[selVm\.id\], \{ method \}\);/);   // v2.835 예전 값(clone)이면 같은 범주(확인 필요)여도 저장
+    expect(src).toMatch(/단축키 V Veeam · B Bareos · S SSH · N 백업 안함 · K 확인 필요/);
   });
   it('우선순위 VM — 백업 안함·Clone 은 Veeam 미백업이 아니다 · Clone 실패·잡 없음은 실패 탭 · Config 는 확인 불가 태그', () => {
     const NOW = 1_800_000_000_000;
@@ -413,8 +417,8 @@ describe('v2.814 디스크 용량(Detail) — 표시 · 폴더 합 · 백업 방
   });
   it('methodGbTotals — 방식별 · 미지정 · 모름 분리 · 표시 파일을 못 읽으면 방식별은 null', () => {
     const vms = [{ gb: 10, m: { method: 'veeam' } }, { gb: 2048, m: { method: 'clone' } }, { gb: 5 }, { gb: null, m: { method: 'veeam' } }, { gb: 1, m: { method: 'bogus' } }];
-    expect(methodGbTotals(vms)).toEqual({ all: 2064, unknown: 1, veeam: 10, clone: 2048, bareos: 0, config: 0, none: 0, check: 0, unset: 6 });
-    expect(methodGbTotals(vms, { marksUnreadable: true })).toEqual({ all: 2064, unknown: 1, veeam: null, clone: null, bareos: null, config: null, none: null, check: null, unset: null });
+    expect(methodGbTotals(vms)).toEqual({ all: 2064, unknown: 1, veeam: 10, clone: 2048, bareos: 0, ssh: 0, config: 0, none: 0, check: 0, unset: 6 });
+    expect(methodGbTotals(vms, { marksUnreadable: true })).toEqual({ all: 2064, unknown: 1, veeam: null, clone: null, bareos: null, ssh: null, config: null, none: null, check: null, unset: null });
   });
   it('소스 — 표 머리 ‘용량’ · VM·폴더·패널·상단 합계에 fmtGb', () => {
     const det = fs.readFileSync(new URL('./BackupDetailTool.jsx', import.meta.url), 'utf8');
@@ -423,8 +427,10 @@ describe('v2.814 디스크 용량(Detail) — 표시 · 폴더 합 · 백업 방
     expect(det).toMatch(/fmtGb\(a\.gb\)/);
     expect(det).toMatch(/fmtGb\(selVm\.gb\)/);
     expect(det).toMatch(/data-backup-capacity/);
-    // 1440 폭에서 표 칸(약 860px)보다 넓으면 가로 스크롤이 생긴다(870 일 때 Chromium 실측 10px) — 최소 칸 합(220+52+84+150+140+64+104=814) 이상 · 860 미만
-    const mw = Number((det.match(/aria-label="폴더 › VM 백업" style=\{\{ minWidth: (\d+)/) || [])[1]);
-    expect(mw >= 814 && mw < 860).toBe(true);
+    // v2.835: 옆 상세 칸은 VM 을 골랐을 때만 연다 — 고르지 않으면 표가 1440 본문(Chromium 실측 — 문서 audits.md v2.835)을 다 쓴다.
+    //   최소 칸 합(230+46+74+150+150+86+86+58+118+76=1074) 이상 · 1100 이하(1440 본문 폭 안)
+    expect(det).toMatch(/style=\{\{ minWidth: GRID_MIN, fontSize: 13 \}\}/);
+    const mw = Number((det.match(/const GRID_MIN = (\d+);/) || [])[1]);
+    expect(mw >= 1074 && mw <= 1100).toBe(true);
   });
 });

@@ -243,14 +243,21 @@ export const METHODS = [
   { key: 'veeam', text: 'Veeam', color: '#86efac' },
   { key: 'clone', text: 'Clone', color: '#67e8f9' },
   { key: 'bareos', text: 'Bareos', color: '#fdba74' },   // v2.828 사용자 요청 — Bareos VMware 플러그인 백업(주황 — 다른 다섯 색과 색상·명도 모두 다르다)
+  { key: 'ssh', text: 'SSH', color: '#93c5fd' },   // v2.835 사용자 요청 — SSH 스크립트 백업(정책 값 — 실제 백업을 읽는 기능은 아직 없다)
   { key: 'config', text: 'Config 백업', color: '#a78bfa' },
   { key: 'none', text: '백업 안함', color: '#94a3b8' },
   { key: 'check', text: '확인 필요', color: '#fbbf24' },   // v2.816 사용자 요청 — 방식을 아직 확인하지 못한 VM 표시
 ];
 const METHOD_KEYS = METHODS.map((m) => m.key);
 /** v2.806 · v2.828: 이 방식이면 Veeam 이 없어도 '미백업' 이 아니다(서버 veeam/backupStatus.js NOT_VEEAM_GAP 와 같다 — 테스트 대조). */
-export const NOT_VEEAM_GAP = Object.freeze(['none', 'clone', 'bareos']);
+export const NOT_VEEAM_GAP = Object.freeze(['none', 'clone', 'bareos', 'ssh']);   // v2.835 SSH 도
 export const methodOf = (k) => METHODS.find((m) => m.key === k) || null;
+/**
+ * v2.835 백업 정책 5범주(사용자 결정 — Veeam · Bareos · SSH · 백업 안함 · 확인 필요). 새로 저장할 수 있는 값(서버 backupMarks.WRITE_METHOD_VALUES — 테스트 대조).
+ *   정하지 않음·예전 값(Clone · Config 백업)은 서버가 행의 p 를 'check' 로 실어 '확인 필요' 로 보인다(backupPolicy.policyOf) — 저장값은 그대로.
+ */
+export const POLICIES = Object.freeze(['veeam', 'bareos', 'ssh', 'none', 'check'].map((k) => METHODS.find((m) => m.key === k)));
+export const policyOfKey = (k) => POLICIES.find((m) => m.key === k) || null;
 export const MEMO_MAX = 1000;   // 서버 veeam/backupMarks.js MEMO_MAX 와 같다(테스트 대조)
 /**
  * 상단 지표 — 중요도별 · 백업 필요 · 미백업(needGap 을 모르면 '—').
@@ -276,10 +283,15 @@ export function marksNotice(d) {
   return null;
 }
 /** v2.785(GR R-B2): 세부 보기 칩의 수 — 표시 기준 칩(백업 필요·미백업·중요도)은 표시를 모르면 '—'. */
-const MARK_FILTER_KEYS = new Set(['need', 'needgap', 'bareos-missing', 'crit-high', 'crit-mid', 'crit-low', ...METHODS.map((m) => `method-${m.key}`), 'method-unset']);   // v2.828 bareos-missing 도 방식 기준
-export function filterCountText(k, counts, marksUnknown, bareosUnknown = false) {
+const MARK_FILTER_KEYS = new Set(['need', 'needgap', 'bareos-missing', 'crit-high', 'crit-mid', 'crit-low', ...METHODS.map((m) => `method-${m.key}`), 'method-unset',
+  'mismatch', ...['veeam', 'bareos', 'ssh', 'none', 'check'].map((k) => `policy-${k}`)]);   // v2.828 bareos-missing 도 방식 기준 · v2.835 정책·불일치도
+/** v2.835 Bareos 원장·Veeam 대조를 모르면 그쪽 실제 백업 칩은 모름 — 0 이 아니다. */
+const BAREOS_FILTER_KEYS = new Set(['bareos', 'bareos-missing', 'act-bareos', 'act-none']);
+const VEEAM_FILTER_KEYS = new Set(['act-veeam', 'act-none']);
+export function filterCountText(k, counts, marksUnknown, bareosUnknown = false, veeamUnknown = false) {
   if (marksUnknown && MARK_FILTER_KEYS.has(k)) return '—';
-  if (bareosUnknown && (k === 'bareos' || k === 'bareos-missing')) return '—';   // 버그 점검 W2: Bareos 원장을 못 읽으면 잡 기준 칩은 모름(0 이 아니다)
+  if (bareosUnknown && BAREOS_FILTER_KEYS.has(k)) return '—';   // 버그 점검 W2: Bareos 원장을 못 읽으면 잡 기준 칩은 모름(0 이 아니다)
+  if (veeamUnknown && VEEAM_FILTER_KEYS.has(k)) return '—';
   return counts?.[k];
 }
 /** v2.785(GR R-B3): 세부내용 조회 조건 키(vCenter · 전원 · 제외 — 서버가 세는 조건). 저장 직후 재조회가 지금 고른 조건과 같은지 본다. */
@@ -340,7 +352,24 @@ export const FILTERS = [
 export const CRIT_FILTERS = [['crit-high', '중요도 상'], ['crit-mid', '중요도 중'], ['crit-low', '중요도 하']];
 /** v2.803 백업 방식 필터 — 중요도처럼 칩 줄 밖(상단 백업 방식 수를 누르면 적용). 서버 VIEW_FILTERS = FILTERS + CRIT_FILTERS + 이것. */
 export const METHOD_FILTERS = [...METHODS.map((m) => [`method-${m.key}`, `백업 방식 ${m.text}`]), ['method-unset', '백업 방식 미지정']];
-export const filterLabel = (f) => ([...FILTERS, ...CRIT_FILTERS, ...METHOD_FILTERS].find(([k]) => k === f) || [f, f])[1];
+/**
+ * v2.835(백업 메뉴 개편 1차): 실제 백업(서버가 실은 a) · 정책≠실제(mm) · 정책 범주(p) · RPO 미달(staleOf — 기준 일수) · 게스트 OS.
+ *   서버 VIEW_FILTERS = FILTERS + CRIT_FILTERS + METHOD_FILTERS + 이것(순서까지 — 테스트 대조).
+ */
+export const V835_FILTERS = [
+  ['act-veeam', 'Veeam 실행'], ['act-bareos', 'Bareos 실행'], ['act-none', '실제 백업 없음'], ['mismatch', '정책≠실제'],
+  ...POLICIES.map((m) => [`policy-${m.key}`, m.key === 'check' ? '정책 미정(확인 필요)' : `정책 ${m.text}`]),
+  ['rpo-miss', 'RPO 미달'], ['os-windows', 'Windows'], ['os-linux', 'Linux'],
+];
+/** 화면 칩 줄 — 실제 백업 · 정책 대조 · 상태 · OS 묶음(사용자 요청 '백업 방식(실제로 도는 백업) 거르기'). 스냅샷·Clone 칩은 뺐다(사용자 요청). */
+export const CHIP_GROUPS = [
+  ['실제 백업', ['all', 'act-veeam', 'act-bareos', 'act-none']],
+  ['정책 대조', ['mismatch', 'policy-check']],
+  ['상태', ['run', 'rpo-miss', 'fail', 'need', 'needgap']],
+  ['OS', ['os-windows', 'os-linux']],
+];
+export const ALL_FILTERS = [...FILTERS, ...CRIT_FILTERS, ...METHOD_FILTERS, ...V835_FILTERS];
+export const filterLabel = (f) => (ALL_FILTERS.find(([k]) => k === f) || [f, f])[1];
 
 /** VM 이 보기 필터에 드는가. '확인 안 됨' 은 두 쪽을 다 읽었는데 둘 다 없을 때만(모름은 넣지 않는다). */
 export function vmMatches(vm, f, opts) {
@@ -360,13 +389,21 @@ export function vmMatches(vm, f, opts) {
   if (f === 'needgap') return c.need && c.vKnown && !c.veeam && !NOT_VEEAM_GAP.includes(c.method);   // Veeam 을 모르는 VM 은 넣지 않는다 · v2.806 백업 안함·Clone 은 미백업 아님(서버 vmViewMatches 와 한 쌍)
   if (f === 'crit-high' || f === 'crit-mid' || f === 'crit-low') return c.crit === f.slice(5);
   if (f.startsWith('method-')) return f === 'method-unset' ? !c.method : c.method === f.slice(7);   // 서버 vmViewMatches 와 한 쌍
+  // v2.835: 서버가 실은 결과 필드를 읽기만 한다(서버 vmViewMatches 와 한 쌍)
+  if (f === 'act-veeam') return vm?.a?.v === true;
+  if (f === 'act-bareos') return vm?.a?.b === true;
+  if (f === 'act-none') return vm?.a?.v === false && vm?.a?.b === false;
+  if (f === 'mismatch') return vm?.mm === true;
+  if (f.startsWith('policy-')) return vm?.p === f.slice(7);
+  if (f === 'rpo-miss') { const k = staleOf(vm, { windowMs: (RPO_DAYS.includes(Number(opts?.rpoDays)) ? Number(opts.rpoDays) : 1) * DAY_MS, now: opts?.now ?? Date.now(), onlyOn: false }); return !!k && k.kind !== 'unknown'; }
+  if (f === 'os-windows' || f === 'os-linux') return vm?.os === f.slice(3);
   return true;
 }
 
 /** 필터별 VM 수. */
 export function filterCounts(vms, opts) {
   const out = {};
-  const keys = [...FILTERS, ...CRIT_FILTERS, ...METHOD_FILTERS].map(([k]) => k);
+  const keys = ALL_FILTERS.map(([k]) => k);
   for (const k of keys) out[k] = 0;
   for (const vm of Array.isArray(vms) ? vms : []) for (const k of keys) if (vmMatches(vm, k, opts)) out[k]++;
   return out;
@@ -416,7 +453,7 @@ export function methodGbTotals(vms, { marksUnreadable = false } = {}) {
 }
 
 export function buildTree(vms, { filter = 'all', q = '', rpoDays = 1, now = Date.now() } = {}) {
-  const root = { key: '', name: '', children: new Map(), vms: [], agg: { n: 0, veeam: 0, snap: 0, run: 0, none: 0, clone: 0, bareos: 0, bareosMissing: 0, gb: 0, gbUnknown: 0 }, hit: 0 };
+  const root = { key: '', name: '', children: new Map(), vms: [], agg: { n: 0, veeam: 0, snap: 0, run: 0, none: 0, clone: 0, bareos: 0, bareosMissing: 0, gb: 0, gbUnknown: 0, ...newPolicyAgg() }, hit: 0 };
   const needle = String(q || '').trim().toLowerCase();
   for (const vm of Array.isArray(vms) ? vms : []) {
     const parts = folderParts(vm.folder);
@@ -427,13 +464,14 @@ export function buildTree(vms, { filter = 'all', q = '', rpoDays = 1, now = Date
     for (const p of parts) {
       const key = node.key ? `${node.key}/${p}` : p;
       let next = node.children.get(p);
-      if (!next) { next = { key, name: p, children: new Map(), vms: [], agg: { n: 0, veeam: 0, snap: 0, run: 0, none: 0, clone: 0, bareos: 0, bareosMissing: 0, gb: 0, gbUnknown: 0 }, hit: 0 }; node.children.set(p, next); }
+      if (!next) { next = { key, name: p, children: new Map(), vms: [], agg: { n: 0, veeam: 0, snap: 0, run: 0, none: 0, clone: 0, bareos: 0, bareosMissing: 0, gb: 0, gbUnknown: 0, ...newPolicyAgg() }, hit: 0 }; node.children.set(p, next); }
       node = next; path.push(node);
     }
     for (const n of path) {
       n.agg.n++; if (c.veeam) n.agg.veeam++; if (c.snap) n.agg.snap++; if (c.run) n.agg.run++; if (c.method === 'clone') n.agg.clone++; if (c.bareos) n.agg.bareos++; if (c.bareosMissing) n.agg.bareosMissing++;
       if (c.vKnown && c.sKnown && !c.veeam && !c.snap) n.agg.none++;
       if (gbKnown(vm.gb)) n.agg.gb += vm.gb; else n.agg.gbUnknown++;   // v2.814 디스크 용량 합(모르는 VM 은 따로 센다 — 0 으로 더하지 않는다)
+      addPolicyAgg(n.agg, vm, { rpoDays, now });   // v2.835 정책 5범주 · 실제 · 불일치 · RPO · 실패
       if (show) n.hit++;
     }
     if (show) node.vms.push(vm);
@@ -501,7 +539,7 @@ export function snapCell(vm, days = 7) {
  * v2.806 백업 방식 단축키(사용자 요청 — VM 을 고른 상태에서 V Veeam · C Clone · G Config 백업 · N 백업 안함). 아니면 null.
  *   조합키(Ctrl·Meta·Alt)·IME 조합 중·누르고 있는 반복·입력 칸(input·textarea·select·편집 가능 요소)에 초점이 있으면 null — 메모를 쓰다가 글자가 백업 방식으로 바뀌지 않게.
  */
-export const METHOD_KEYS_MAP = Object.freeze({ v: 'veeam', c: 'clone', b: 'bareos', g: 'config', n: 'none', k: 'check' });   // v2.816 K 확인 필요 · v2.828 B Bareos
+export const METHOD_KEYS_MAP = Object.freeze({ v: 'veeam', b: 'bareos', s: 'ssh', n: 'none', k: 'check' });   // v2.816 K 확인 필요 · v2.828 B Bareos · v2.835 S SSH(C·G 는 예전 값이라 뺐다)
 export function methodKeyOf(e) {
   if (!e || e.ctrlKey || e.metaKey || e.altKey || e.isComposing || e.repeat) return null;
   const t = e.target;
@@ -621,3 +659,178 @@ export function priorityView(items, { rpoDays = 1, now = Date.now() } = {}) {
 export const prioMatches = (x, tab) => (tab === 'all' ? true : tab === 'high' ? x.crit === 'high' : tab === 'fail' ? !!(x.fail || x.cloneBad) : !!x[tab]);   // v2.806 Clone 실패는 '실패' 탭
 /** 폴더 끝 두 조각(‘A.MGMT › AD’) — 긴 경로가 칸을 넘지 않게. */
 export const folderTail = (folder) => folderParts(folder).slice(-2).join(' › ') || '—';
+
+/* ── v2.835 백업 메뉴 개편 1차 — 백업 정책 · 실제 백업 · 정책≠실제 · RPO · 백업 안 된 VM 찾기(사용자 요청 + 시안) ──────────────── */
+const DAY_MS = 86_400_000;
+const finNum = (v) => typeof v === 'number' && Number.isFinite(v);
+/** 찾기 기준 — 서버 backupPolicy.STALE_SOURCES 와 같다(테스트 대조). */
+export const STALE_SOURCES = Object.freeze(['all', 'veeam', 'bareos']);
+/**
+ * '백업 안 된 VM 찾기' 한 VM — 서버 veeam/backupPolicy.staleOf 와 한 쌍(같은 입력으로 대조 · 판정을 바꾸면 둘 다).
+ *   null(대상 아님) | { kind:'never'|'old'|'unknown', last }. 창 안에 아는 성공이 있으면 대상이 아니다 · 한쪽을 모르면 unknown(따로 센다).
+ */
+export function staleOf(vm, { windowMs, now = Date.now(), src = 'all', excludeNone = true, onlyOn = true, includeNever = true } = {}) {
+  if (!vm || !finNum(windowMs) || windowMs <= 0) return null;
+  if (excludeNone && vm.p === 'none') return null;
+  if (onlyOn && vm.power !== 'POWERED_ON') return null;
+  const lok = vm.lok || {};
+  const s = STALE_SOURCES.includes(src) ? src : 'all';
+  const parts = [];
+  if (s !== 'bareos') parts.push({ t: finNum(lok.v) ? lok.v : null, k: lok.vk === true });
+  if (s !== 'veeam') parts.push({ t: finNum(lok.b) ? lok.b : null, k: lok.bk === true });
+  const times = parts.filter((x) => x.t != null).map((x) => x.t);
+  const last = times.length ? Math.max(...times) : null;
+  if (last != null && now - last <= windowMs) return null;
+  if (parts.some((x) => !x.k)) return { kind: 'unknown', last };
+  if (last == null) return includeNever ? { kind: 'never', last: null } : null;
+  return { kind: 'old', last };
+}
+/** 찾기 기간 단위(사용자 요청 '지정한 시간만큼') — 시간 · 일 · 주. */
+export const STALE_UNITS = Object.freeze([['h', '시간', 3_600_000], ['d', '일', DAY_MS], ['w', '주', 7 * DAY_MS]]);
+export const STALE_DEFAULT = Object.freeze({ n: 3, unit: 'd', src: 'all', excludeNone: true, onlyOn: true, includeNever: true });
+/** 찾기 조건 → 창(ms). n 은 1~999 정수만(그 밖은 null — 찾지 않는다). */
+export function staleWindowMs(n, unit) {
+  const k = Number(n);
+  if (!Number.isInteger(k) || k < 1 || k > 999) return null;
+  const u = STALE_UNITS.find(([key]) => key === unit);
+  return u ? k * u[2] : null;
+}
+/** 경과 글자 — '3일 14시간' · '5시간' · '40분'. */
+export function agoText(ms) {
+  if (!finNum(ms) || ms < 0) return '—';
+  const m = Math.floor(ms / 60_000);
+  if (m < 60) return `${m}분`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}시간`;
+  return `${Math.floor(h / 24)}일${h % 24 ? ` ${h % 24}시간` : ''}`;
+}
+/**
+ * 찾기 결과 — { rows:[{ vm, kind, last }], n, never, old, unknown, excluded:{ none, off } }(rows 는 오래 비어 있던 순 · 한 번도 없음 먼저).
+ * @param {object} o { n, unit, src, excludeNone, onlyOn, includeNever, now }
+ */
+export function findStale(vms, o = {}) {
+  const windowMs = staleWindowMs(o.n, o.unit);
+  const out = { rows: [], n: 0, never: 0, old: 0, unknown: 0, excluded: { none: 0, off: 0 }, windowMs };
+  if (windowMs == null) return out;
+  const now = finNum(o.now) ? o.now : Date.now();
+  for (const vm of Array.isArray(vms) ? vms : []) {
+    if (o.excludeNone !== false && vm?.p === 'none') { out.excluded.none++; continue; }
+    if (o.onlyOn !== false && vm?.power !== 'POWERED_ON') { out.excluded.off++; continue; }
+    const k = staleOf(vm, { windowMs, now, src: o.src, excludeNone: false, onlyOn: false, includeNever: o.includeNever !== false });
+    if (!k) continue;
+    out[k.kind]++;
+    if (k.kind !== 'unknown') out.n++;
+    out.rows.push({ vm, kind: k.kind, last: k.last });
+  }
+  const rank = { never: 0, old: 1, unknown: 2 };
+  out.rows.sort((a, b) => rank[a.kind] - rank[b.kind] || (a.last ?? 0) - (b.last ?? 0) || nat.compare(String(a.vm?.name || ''), String(b.vm?.name || '')));
+  return out;
+}
+/** 찾기 행의 이유 한 줄(사람이 읽는 말) — 정책 · 실제 · 마지막 결과로. */
+export function staleReason(row, now = Date.now()) {
+  const vm = row?.vm || {};
+  if (row?.kind === 'unknown') return vm.a?.v == null ? 'Veeam 결과를 읽지 못함 — 미달로 단정하지 않는다' : 'Bareos 원장을 읽지 못함 — 미달로 단정하지 않는다';
+  if (vm.p === 'check') return '정책을 아직 정하지 않음(확인 필요)';
+  if (vm.mm === true && vm.p === 'veeam') return '정책은 Veeam 인데 Veeam 백업 대상에 없음';
+  if (vm.mm === true && vm.p === 'bareos') return '정책은 Bareos 인데 Bareos 잡이 없음';
+  if (vm.p === 'ssh') return 'SSH 백업은 포탈이 아직 결과를 읽지 못함(정책 값만)';
+  if (Array.isArray(vm.e) && vm.e.some((x) => x.r === 'fail')) return `최근 실패 — ${vm.e.filter((x) => x.r === 'fail').map((x) => (x.s === 'veeam' ? 'Veeam' : 'Bareos')).join(' · ')}`;
+  if (row?.kind === 'never') return '성공한 백업이 한 번도 없음';
+  return `마지막 성공이 ${agoText(now - row.last)} 전`;
+}
+/** RPO 칸 — 백업 안함은 대상 아님 · 창 안에 성공이 있으면 충족 · 한쪽을 모르면 모름. */
+export function rpoCell(vm, { rpoDays = 1, now = Date.now() } = {}) {
+  if (!vm?.p) return { text: '—', tone: 'unknown' };
+  if (vm.p === 'none') return { text: '대상 아님', tone: 'none' };
+  const days = RPO_DAYS.includes(Number(rpoDays)) ? Number(rpoDays) : 1;
+  const k = staleOf(vm, { windowMs: days * DAY_MS, now, onlyOn: false });
+  if (!k) return { text: '충족', tone: 'ok' };
+  if (k.kind === 'unknown') return { text: '모름', tone: 'unknown' };
+  if (k.kind === 'never') return { text: '한 번도 없음', tone: 'bad' };
+  return { text: `미달 ${agoText(now - k.last)}`, tone: 'bad' };
+}
+/** 정책≠실제 칸 — 일치 · 불일치(이유 why · 표 칸용 짧은 글 short) · 모름. 정책 SSH 는 실제를 읽지 못해 '—'. */
+export function mismatchCell(vm) {
+  if (vm?.mm == null) return { text: '모름', tone: 'unknown', why: '', short: '' };
+  if (vm.p === 'ssh') return { text: '—', tone: 'none', why: 'SSH 실제 백업은 아직 읽지 않는다', short: '' };
+  if (!vm.mm) return { text: '일치', tone: 'ok', why: '', short: '' };
+  if (vm.p === 'veeam') return { text: '불일치', tone: 'bad', why: 'Veeam 대상에 없음 → Veeam 백업 실행', short: 'Veeam 없음' };
+  if (vm.p === 'bareos') return { text: '불일치', tone: 'bad', why: 'Bareos 잡 없음 → Bareos 대상 등록', short: 'Bareos 잡 없음' };
+  const real = [vm.a?.v ? 'Veeam' : '', vm.a?.b ? 'Bareos' : ''].filter(Boolean).join('·');
+  return { text: '불일치', tone: 'bad', why: `실제는 ${real} → 정책을 ${real.split('·')[0]} 로`, short: `실제 ${real}` };
+}
+/** 마지막 성공 칸 — 시각 · 없음(둘 다 확인) · 모름. */
+export function lastOkText(vm) {
+  const l = vm?.lok;
+  if (l && finNum(l.at)) return shortTs(l.at);
+  return l?.never === true ? '없음' : '모름';
+}
+/** 다음 예정 칸 — Bareos 그룹 예약(1차 — Veeam 잡 일정은 3차). */
+export const nextText = (vm) => (vm?.nx && finNum(vm.nx.at) ? `${shortTs(vm.nx.at)} · ${vm.nx.g || '그룹'}` : '—');
+/** 최근 24시간 실패·경고 — 'Veeam 실패 · Bareos 경고' · 없으면 ''. */
+export const errText = (vm) => (Array.isArray(vm?.e) ? vm.e.map((x) => `${x.s === 'veeam' ? 'Veeam' : 'Bareos'} ${x.r === 'fail' ? '실패' : '경고'}`).join(' · ') : '');
+/**
+ * 정책별 용량 합 — { all, veeam, bareos, ssh, none, check, unknown(용량 모르는 VM 수) } · 정책을 모르면(p null) 정책별 합은 null.
+ */
+export function policyGbTotals(vms, { marksUnreadable = false } = {}) {
+  const out = { all: 0, unknown: 0, ...Object.fromEntries(POLICIES.map((m) => [m.key, marksUnreadable ? null : 0])) };
+  for (const vm of Array.isArray(vms) ? vms : []) {
+    if (!gbKnown(vm?.gb)) { out.unknown++; continue; }
+    out.all += vm.gb;
+    if (marksUnreadable || !policyOfKey(vm?.p)) continue;
+    out[vm.p] += vm.gb;
+  }
+  return out;
+}
+/** 폴더 집계 한 VM 더하기(buildTree — 정책 5범주 · 실제 · 불일치 · RPO · 실패). */
+export function addPolicyAgg(agg, vm, { rpoDays = 1, now = Date.now() } = {}) {
+  if (policyOfKey(vm?.p)) agg.pol[vm.p]++; else agg.pol.unk++;
+  if (vm?.a?.v === true) agg.act.v++;
+  if (vm?.a?.b === true) agg.act.b++;
+  if (vm?.a?.v === false && vm?.a?.b === false) agg.act.none++;
+  if (vm?.a?.v == null || vm?.a?.b == null) agg.act.unk++;
+  if (vm?.mm === true) agg.mm++;
+  const r = rpoCell(vm, { rpoDays, now }).tone;
+  if (r === 'ok') agg.rpoOk++; else if (r === 'bad') agg.rpoMiss++;
+  if (Array.isArray(vm?.e) && vm.e.length) agg.err++;
+  if (finNum(vm?.lok?.at) && (agg.lok == null || vm.lok.at > agg.lok)) agg.lok = vm.lok.at;
+  if (finNum(vm?.nx?.at) && (agg.nx == null || vm.nx.at < agg.nx)) agg.nx = vm.nx.at;
+}
+export const newPolicyAgg = () => ({ pol: { veeam: 0, bareos: 0, ssh: 0, none: 0, check: 0, unk: 0 }, act: { v: 0, b: 0, none: 0, unk: 0 }, mm: 0, rpoOk: 0, rpoMiss: 0, err: 0, lok: null, nx: null });
+/** 폴더 RPO 충족률(%) — 충족 / (충족 + 미달) · 대상이 없으면 null. */
+export const folderRpoPct = (a) => (a && a.rpoOk + a.rpoMiss > 0 ? Math.round((a.rpoOk / (a.rpoOk + a.rpoMiss)) * 1000) / 10 : null);
+
+/** v2.835 Bareos 그룹 등록 handoff(Detail → Bareos › 백업 그룹 새 그룹 창 · 대상 등록 handoff 와 같은 규칙 — 세션 저장 · 10분 · 200대). */
+export const BAREOS_GROUP_HANDOFF_KEY = 'bareos-backup.group-handoff';
+export function saveBareosGroupHandoff(vcenterId, vmIds, store = globalThis.sessionStorage) {
+  try { store?.setItem(BAREOS_GROUP_HANDOFF_KEY, JSON.stringify({ vcenterId: String(vcenterId || ''), vmIds: (Array.isArray(vmIds) ? vmIds : []).slice(0, 200).map(String), at: Date.now() })); return true; } catch { return false; }
+}
+export function takeBareosGroupHandoff(store = globalThis.sessionStorage, now = Date.now()) {
+  let raw = null;
+  try { raw = store?.getItem(BAREOS_GROUP_HANDOFF_KEY); store?.removeItem(BAREOS_GROUP_HANDOFF_KEY); } catch { return null; }
+  if (!raw) return null;
+  try {
+    const j = JSON.parse(raw);
+    if (!j || typeof j.vcenterId !== 'string' || !j.vcenterId || !Array.isArray(j.vmIds)) return null;
+    if (!(now - Number(j.at) <= 10 * 60_000)) return null;
+    return { vcenterId: j.vcenterId, vmIds: j.vmIds.filter((x) => typeof x === 'string').slice(0, 200) };
+  } catch { return null; }
+}
+/** v2.835 찾기 조건 기억(이 브라우저 — 다음에 열 때 그대로). 모르는 값은 기본. */
+const STALE_KEY = 'backup-detail.stale';
+export function loadStaleOpts(storage) {
+  try {
+    const st = storage === undefined ? globalThis.localStorage : storage;
+    const raw = st ? JSON.parse(st.getItem(STALE_KEY) || 'null') : null;
+    if (!raw || typeof raw !== 'object') return { ...STALE_DEFAULT };
+    return {
+      n: staleWindowMs(raw.n, 'h') != null ? Number(raw.n) : STALE_DEFAULT.n,
+      unit: STALE_UNITS.some(([k]) => k === raw.unit) ? raw.unit : STALE_DEFAULT.unit,
+      src: STALE_SOURCES.includes(raw.src) ? raw.src : STALE_DEFAULT.src,
+      excludeNone: raw.excludeNone !== false, onlyOn: raw.onlyOn !== false, includeNever: raw.includeNever !== false,
+    };
+  } catch { return { ...STALE_DEFAULT }; }
+}
+export function saveStaleOpts(o, storage) {
+  try { (storage === undefined ? globalThis.localStorage : storage)?.setItem(STALE_KEY, JSON.stringify(o)); } catch { /* 저장 못 해도 동작 */ }
+}

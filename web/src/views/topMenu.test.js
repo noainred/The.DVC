@@ -190,7 +190,7 @@ describe('v2.785→v2.787 Veeam — 주소·도구 키는 그대로 · 옛 이�
     expect(locate('tools', '#/tools/backup-em')).toEqual({ group: 'server', child: 'veeam' });
     expect(locate('tools', '#/tools/backup-run')).toEqual({ group: 'server', child: 'veeam' });
     expect(locate('tools', '#/tools/bareos-backup/settings')).toEqual({ group: 'server', child: 'veeam' });   // v2.822 — 하위 탭 주소도
-    expect(TOOLS.filter((t) => t.k.startsWith('backup-')).map((t) => [t.k, t.label])).toEqual([['backup-summary', 'Backup 현황 · Summary'], ['backup-detail', 'Backup 현황 · Detail'], ['backup-em', 'Backup 현황 · EM'], ['backup-run', 'Backup 현황 · 백업 실행']]);
+    expect(TOOLS.filter((t) => t.k.startsWith('backup-')).map((t) => [t.k, t.label])).toEqual([['backup-summary', 'Backup 현황 · Summary'], ['backup-detail', 'Backup 현황 · Detail'], ['backup-em', 'Backup 현황 · Veeam'], ['backup-run', 'Backup 현황 · 백업 실행']]);
   });
   it('특수 기능 검색 — 옛 이름(백업 서머리·백업 세부내용)과 새 이름 모두', () => {
     expect(searchTools(TOOLS, '백업 서머리')[0].k).toBe('backup-summary');

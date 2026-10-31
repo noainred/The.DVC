@@ -465,4 +465,6 @@
   (전용 /api/tools 경로가 없고 /api/admin/* 라우터가 집행) · `web/public/special-tools.json` 재생성. 옛 주소 `#/settings/edge-tokens` 는
   `hooks/hashTab.js MOVED_SUBS`(두 조각 이동 규칙 — 첫 조각 `settings` 는 살아 있는 화면이라 MOVED_TABS 에 넣을 수 없다)가 새 주소로 보낸다.
   하위 탭 주소를 통째로 옮길 때는 같은 방식으로 적고 `hashTab.test.js` 에 고정한다.
-
+- **Backup 현황은 큰 탭 4개(Summary · Detail · Veeam · Bareos)다**(v2.835 — 사용자 요청 '백업 메뉴 개편'). Veeam 은 하위 탭(서버 · EM · 라이선스 / 백업 실행 — `VeeamHeader.jsx veeamSubTabs`)이고
+  도구 키(`backup-em`·`backup-run`)는 바꾸지 않았다. **백업 정책(사람이 정한 값)과 실제 백업(포탈이 읽은 것)을 한 칸에 섞지 않는다** — 판정은 서버 `veeam/backupPolicy.js` 하나,
+  웹은 받은 `p a mm lok` 을 그린다. Summary · Detail 에 Clone·스냅샷 문구·기능을 다시 넣지 말 것(`backupPolicy2835.test.js`). 기록은 `docs/rules/audits.md` v2.835.

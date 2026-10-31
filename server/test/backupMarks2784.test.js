@@ -60,7 +60,7 @@ test('A-2 손상 — 원본을 보존하고 쓰기는 503(빈 맵 위에 덮지 
 test('A-3 markCounts — 범위 목록만 · 미백업은 Veeam 대상이 아닌 백업 필요 · Veeam 모르면(또는 대조 부재가 모름이면) null', () => {
   const marks = { a: { crit: 'high', need: true }, b: { crit: 'mid', need: true }, c: { crit: 'low' }, z: { crit: 'high', need: true } };
   const vms = [{ id: 'a' }, { id: 'b' }, { id: 'c' }];
-  assert.deepEqual(BM.markCounts(vms, marks, { a: {} }, { veeamKnown: true }), { high: 1, mid: 1, low: 1, need: 2, needGap: 1, method: { veeam: 0, clone: 0, bareos: 0, config: 0, none: 0, check: 0, unset: 3 } });   // v2.803 백업 방식 — 정하지 않음 3
+  assert.deepEqual(BM.markCounts(vms, marks, { a: {} }, { veeamKnown: true }), { high: 1, mid: 1, low: 1, need: 2, needGap: 1, method: { veeam: 0, clone: 0, bareos: 0, ssh: 0, config: 0, none: 0, check: 0, unset: 3 } });   // v2.803 백업 방식 — 정하지 않음 3
   assert.equal(BM.markCounts(vms, marks, null, { veeamKnown: false }).needGap, null);
   assert.equal(BM.markCounts(vms, marks, { a: {} }, { veeamKnown: true, absentKnown: false }).needGap, null, '첫 수집 전 서버가 있으면 부재는 모름');
 });

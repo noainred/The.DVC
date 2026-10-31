@@ -19,8 +19,13 @@ import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
 
 const FILE = () => path.join(config.configDir, 'backup-marks.json');
 export const CRIT_VALUES = Object.freeze(['high', 'mid', 'low']);
-export const METHOD_VALUES = Object.freeze(['veeam', 'clone', 'bareos', 'config', 'none', 'check']);   // v2.803 백업 방식(화면 순서) · v2.816 'check' 확인 필요 · v2.828 'bareos'(사용자 요청)
-export const NOT_VEEAM_GAP_MARKS = Object.freeze(['none', 'clone', 'bareos']);   // v2.828 — backupStatus.NOT_VEEAM_GAP 사본(테스트 대조)
+export const METHOD_VALUES = Object.freeze(['veeam', 'clone', 'bareos', 'ssh', 'config', 'none', 'check']);   // v2.803 백업 방식(읽기 — 저장된 값) · v2.816 'check' 확인 필요 · v2.828 'bareos' · v2.835 'ssh'(사용자 요청)
+/**
+ * v2.835(사용자 결정 D2 '백업 정책 5범주'): 새로 저장할 수 있는 값 — Veeam · Bareos · SSH · 백업 안함 · 확인 필요.
+ *   예전 값 clone·config 는 읽기만 한다(저장된 표시는 그대로 남고 화면은 '확인 필요' 로 보인다 — backupPolicy.policyOf). 지우기('')는 그대로 받는다.
+ */
+export const WRITE_METHOD_VALUES = Object.freeze(['veeam', 'bareos', 'ssh', 'none', 'check']);
+export const NOT_VEEAM_GAP_MARKS = Object.freeze(['none', 'clone', 'bareos', 'ssh']);   // v2.828 — backupStatus.NOT_VEEAM_GAP 사본(테스트 대조) · v2.835 ssh
 export const MEMO_MAX = 1000;
 export const MAX_IDS_PER_REQUEST = 2000;
 export const MAX_ENTRIES = 50_000;
@@ -70,7 +75,7 @@ export function setMarks(vms, patch = {}, user) {
   const has = (k) => Object.prototype.hasOwnProperty.call(patch || {}, k);
   if (!has('crit') && !has('method') && !has('need') && !has('memo')) return { ok: false, status: 400, reason: '바꿀 값이 없습니다.' };
   if (has('crit') && patch.crit !== '' && patch.crit !== null && !CRIT_VALUES.includes(patch.crit)) return { ok: false, status: 400, reason: '중요도 값이 올바르지 않습니다.' };
-  if (has('method') && patch.method !== '' && patch.method !== null && !METHOD_VALUES.includes(patch.method)) return { ok: false, status: 400, reason: '백업 방식 값이 올바르지 않습니다.' };
+  if (has('method') && patch.method !== '' && patch.method !== null && !WRITE_METHOD_VALUES.includes(patch.method)) return { ok: false, status: 400, reason: '백업 정책 값이 올바르지 않습니다(Veeam · Bareos · SSH · 백업 안함 · 확인 필요).' };
   if (has('need') && typeof patch.need !== 'boolean') return { ok: false, status: 400, reason: '백업 필요 값이 올바르지 않습니다.' };
   if (has('memo') && list.length > 1) return { ok: false, status: 400, reason: '메모는 한 대씩 씁니다.' };
   if (has('memo') && patch.memo != null && typeof patch.memo !== 'string') return { ok: false, status: 400, reason: '메모 값이 올바르지 않습니다.' };

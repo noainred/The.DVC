@@ -12,7 +12,7 @@ const css = read('../../styles.css');
 
 describe('일괄 표시 바 sticky', () => {
   it('바는 .bk-bulk + 높이 측정 ref · 루트가 머리·바 높이를 CSS 변수로 넘긴다', () => {
-    expect(det).toMatch(/<div ref=\{bulkRef\} className="card bk-bulk" data-backup-bulk=""/);
+    expect(det).toMatch(/<div ref=\{writable \? bulkRef : undefined\} className=\{`card\$\{writable \? ' bk-bulk' : ''\}`\} data-backup-bulk=""/);   // v2.835 도구 줄은 늘 보이고 편집 가능할 때만 붙는다
     expect(det).toMatch(/const headH = useStickyHeadH\(\);/);
     expect(det).toMatch(/const \[bulkRef, bulkH\] = useBoxHeight\(\);/);
     expect(det).toMatch(/'--bk-head': `\$\{headH\}px`, '--bk-bulk': `\$\{bulkH \? bulkH \+ 8 : 0\}px`/);
@@ -27,7 +27,7 @@ describe('일괄 표시 바 sticky', () => {
     }
   });
   it('옆 상세 칸은 .bk-side(바 아래) — 인라인 top:56 고정이 남지 않는다', () => {
-    expect(det).toMatch(/<div className="bk-side" style=\{\{ flex: '1 1 280px'/);
+    expect(det).toMatch(/\{selVm && \(\s*<div className="bk-side" style=\{\{ flex: '1 1 300px'/);   // v2.835 VM 을 골랐을 때만
     expect(det).not.toMatch(/position: 'sticky', top: 56/);
   });
   it('CSS — 바는 머리 아래 sticky · 불투명 배경 · 상세 칸은 바 높이만큼 아래 · 720px 이하는 고정하지 않음', () => {
