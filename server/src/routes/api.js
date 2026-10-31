@@ -29,6 +29,7 @@ import { wrapAsyncRouter } from '../util/asyncRoute.js';
 import { registerVmClone } from './api/vmClone.js'; // VM 복제(백업식, v2.299)
 import { registerVeeamBadges, registerBackupStatus } from './api/veeam.js'; // Veeam 백업 VM 배지(v2.751) · 백업 메뉴(v2.779)
 import { registerBareosBackup } from './api/bareosBackup.js'; // Bareos VM 백업(v2.820)
+import { registerBareosPolicy } from './api/bareosPolicy.js'; // v2.839 Bareos 정책 · 일정(수집본 화면 · '지금 수집')
 import { registerBareosViews } from './api/bareosViews.js'; // v2.828 Bareos 조회 화면(통합 현황 · 법인별 현황 — 도구 키 bareos-summary·bareos-detail)
 import { registerBareosGroups } from './api/bareosGroups.js';
 import { registerBareosLive } from './api/bareosLive.js'; // v2.833 Bareos 진행 현황판(관리 도구 bareos-backup 의 '진행 현황' 탭 — 화면이 열린 동안만 Director 상태 조회) // v2.830 Bareos 백업 그룹(관리 도구 bareos-backup 의 '백업 그룹' 탭 — 포탈이 스케줄 실행)
@@ -134,6 +135,7 @@ registerVmClone(api);
 registerVeeamBadges(api);
 registerBackupStatus(api); // v2.779 백업 서머리·세부내용(도구 키 backup-summary·backup-detail)
 registerBareosBackup(api);
+registerBareosPolicy(api);   // ⚠ bareosViews 앞 — /tools/bareos-summary/policy 가 /tools/bareos-summary 보다 먼저(경로가 겹치지는 않지만 순서를 고정)
 registerBareosViews(api);
 registerBareosGroups(api);
 registerBareosLive(api);

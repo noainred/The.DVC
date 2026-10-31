@@ -163,9 +163,9 @@ describe('v2.838 화면 소스', () => {
     expect(st).toMatch(/\{alert && !alert\.hidden && <button type="button"/);
     expect(st).toMatch(/이 조건을 알림으로\(메일\)/);
   });
-  it('출처를 지어내지 않는다 — 2차 항목은 —(2차) · Veeam 은 다음 1회만', () => {
-    expect(cs).toMatch(/Bareos Full 풀 가득 참 —\(2차 수집 뒤\)/);
-    expect(cs).toMatch(/Director 스케줄은 2차 수집 뒤/);
+  it('출처를 지어내지 않는다 — Director 수집본이 없으면 수집 전 · Veeam 은 다음 1회만(v2.839 에 2차 칸을 채웠다)', () => {
+    expect(cs).toMatch(/bp \? '—\(풀 수집 실패\)' : '—\(수집 전\)'/);
+    expect(cs).toMatch(/Bareos 그룹 예약 \+ Director 스케줄\(정책 수집본\)/);
     expect(cs).toMatch(/Veeam \{d\.veeam == null \? '—' : fmtNum\(d\.veeam\)\}/);
   });
 });

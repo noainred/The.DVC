@@ -66,8 +66,8 @@ export async function withDirector(directorId, fn, { trigger = 'manual', signal 
   }
   const settings = loadSettings();
   if (isDemoActive(settings)) {
-    registerDemoJobNames(listJobs().filter((j) => j.demo).map((j) => j.bareosJob));
-    const s = demoSession(demoSettings(store.get?.()));
+    registerDemoJobNames(listJobs().filter((j) => j.demo).map((j) => ({ name: j.bareosJob, client: j.client, schedule: j.schedule })));
+    const s = demoSession(demoSettings(store.get?.()), directorId);   // v2.839 정책 수집 데모는 그 Director 의 법인만
     try { return await fn(s); } finally { s.close(); }
   }
   const dir = directorById(directorId, settings);

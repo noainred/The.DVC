@@ -63,6 +63,8 @@ export const ROUTE_GATE_ALLOW = Object.freeze({
   // routes/admin/backupNetSec.js — denyScopedRun·writeScopedVcenterIds·denyGuestScanOutOfScope(v2.606 AUTHZ2606)
   'PUT /api/admin/vclogs/settings': 'denyScopedRun — 범위 계정 403(v2.606)',
   'POST /api/admin/vclogs/collect': 'denyScopedRun — 범위 계정 403(v2.606)',
+  // routes/api/bareosPolicy.js — v2.839 Bareos 정책 '지금 수집'(읽기 전용 명령) · 범위 안 법인에 묶인 Director 만(scopedDirectors — 밖은 404)
+  'POST /api/tools/bareos-backup/policy/collect': 'scopedDirectors — 조회 범위 법인에 묶인 Director 만 수집(밖 404 · v2.839)',
   'POST /api/admin/guest/add-user': 'writeScopedVcenterIds — 대상 vCenter 쓰기 범위 판정(v2.606)',
   'POST /api/admin/deep-search/probe': 'writeScopedVcenterIds — 대상 vCenter 쓰기 범위 판정(v2.606)',
   'PUT /api/admin/security/login-fails/settings': 'denyScopedRun — 범위 계정 403(v2.606)',

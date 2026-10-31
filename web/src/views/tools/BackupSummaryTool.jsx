@@ -101,6 +101,8 @@ export default function BackupSummaryTool() {
   const bareosAllUnknown = rows.length > 0 && rows.every((r) => r.bareosUnknown);
   const bareosHref = (visibleTabs({ admin: hasRole('admin'), bareosOk: toolAllowed('bareos-backup'), bareosViewOk: toolAllowed('bareos-summary') }).find(([k]) => k === 'bareos') || [])[2];
   const g = data.bareosGroups;
+  const bp = data.bareosPolicy || null;   // v2.839 Director 정책 수집본 요약(범위 안 · 없으면 null — 수집 전)
+  const bNext = [g?.next, bp?.next].filter((x) => Number.isFinite(x)).reduce((a, b) => (a == null || b < a ? b : a), null);
   const dirs = data.directors;
   const scope = { power: opts.power, excl: opts.excl };
   const link = { marginLeft: 'auto', fontSize: 12, fontWeight: 700, color: '#93c5fd', textDecoration: 'none', whiteSpace: 'nowrap' };
@@ -163,8 +165,11 @@ export default function BackupSummaryTool() {
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(110px, 1fr))', gap: 8 }}>
             <Stat label="보호 VM" value={bareosAllUnknown ? '—' : `${fmtNum(pa?.act?.b)}${t.bareosUnknownSites ? '*' : ''}`} />
             <Stat label="7일 성공률" value={pctText(okPct(pa?.b7))} tone="ok" title="최근 7일에 끝난 VM 마지막 실행 중 성공·경고 비율(포탈 원장 기준)" />
-            <Stat label="풀 사용(볼륨)" value="—" extra="2차 수집 뒤" title="Director 풀 · 볼륨 수집은 백업 메뉴 개편 2차에서 합니다" />
-            <Stat label="다음 회차" value={g?.next ? hhmm(g.next) : '—'} extra={g?.next ? `그룹 ${fmtNum(g.nextN)} · 스케줄 —(2차)` : ''} title="포탈 그룹 예약의 다음 회차 · 그 뒤 1시간 안에 도는 그룹 수 · Director 스케줄은 2차 수집 뒤" />
+            <Stat label="풀 사용(볼륨)" value={bp?.pools?.maxPct != null ? `${bp.pools.maxPct}%` : '—'} tone={bp?.pools?.full ? 'bad' : undefined}
+              extra={bp?.pools ? `가득 참 ${fmtNum(bp.pools.full)} · 오류 볼륨 ${fmtNum(bp.pools.errorVols)}` : bp ? '풀 수집 실패' : '수집 전'}
+              title="Director 정책 수집본(하루 1회) — 가장 높은 풀 사용률(MaxVols × MaxVolBytes 를 알 때만) · 새 잡을 받을 볼륨이 없는 풀(가득 참) · 오류 상태 볼륨 — Bareos › 정책 · 일정" />
+            <Stat label="다음 회차" value={bNext ? hhmm(bNext) : '—'} extra={bNext ? `그룹 ${g?.next ? fmtNum(g.nextN) : 0} · 스케줄 ${bp?.schedules == null ? '—' : fmtNum(bp.schedules)}` : ''}
+              title="포탈 그룹 예약의 다음 회차와 Director 스케줄(정책 수집본)의 다음 실행 중 이른 것 · 그룹 수(1시간 안) · Director 스케줄 수" />
           </div>
           <div className="flex wrap" style={{ gap: 6 }}>
             {t.stuck == null ? <Chip tone="muted" title="Bareos › 진행 현황 화면이 열려 최근 조회한 값이 있을 때만 셉니다">멈춤 의심 —</Chip> : <Chip tone={t.stuck ? 'warn' : 'muted'}>멈춤 의심 {fmtNum(t.stuck)}</Chip>}
@@ -178,13 +183,13 @@ export default function BackupSummaryTool() {
       <BackupSummaryBar sel={sel} rows={rows} onClear={clearSel} onSaved={load} />
       <BackupSummaryStale scope={scope} rows={rows} sel={sel} onPick={pick} onOpenDetail={openDetail} />
       <BackupSummaryTree rows={rows} opts={opts} reloadKey={data.at} onOpenDetail={openDetail} sel={sel} onPick={pick} />
-      <BackupSummaryCapSched rows={rows} em={em} reloadKey={data.at} />
+      <BackupSummaryCapSched rows={rows} em={em} bp={bp} reloadKey={data.at} />
       <BackupSummaryErrors reloadKey={data.at} onOpenDetail={openDetail} />
 
       <div className="card" data-backup-source="" style={{ padding: '10px 14px', fontSize: 11.5, lineHeight: 1.6, color: 'var(--text-dim)' }}>
         <b style={{ color: 'var(--text)' }}>값 출처</b> — 보호 대상 · 정책 · RPO: 백업 정책(Detail 에서 정한 값)과 실제 백업(Veeam 대조 · Bareos 원장)을 VM 마다 같은 판정으로 센 값 ·
         BackedUp {b ? fmtNum(b.backed) : '—'} = 정책 Veeam · Bareos · SSH 합 · 실행 중: Veeam 결과 + Bareos 원장 · 용량: Veeam 복원 지점 크기 + Bareos 마지막 실행 크기(카탈로그 전체 합이 아니다) ·
-        Veeam 저장소 · 라이선스 · 잡 수 · 30일 추이: EM(전체 범위 계정만) · 다음 회차 · 스케줄: Veeam 잡 다음 실행(B&amp;R 결과 — 다음 1회만) + 포탈 그룹 예약(Director 스케줄 · 풀은 2차 수집 뒤) ·
+        Veeam 저장소 · 라이선스 · 잡 수 · 30일 추이: EM(전체 범위 계정만) · 다음 회차 · 스케줄: Veeam 잡 다음 실행(B&amp;R 결과 — 다음 1회만) + 포탈 그룹 예약(Director 스케줄 · 풀: 정책 수집본(하루 1회)) ·
         에러: Veeam VM 마지막 결과 · EM 세션 + Bareos 원장 · 진행 현황 + 포탈 수집 오류 · 한쪽을 못 읽은 법인은 ‘모름’·‘*’ 로 따로 셉니다(0 이 아닙니다).
       </div>
     </div>

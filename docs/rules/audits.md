@@ -6,6 +6,7 @@
 
 ## 목차
 
+- Bareos v2.839 Director 정책 수집 · 정책 · 일정 탭 · Summary 2차 칸 채우기(백업 메뉴 개편 2차-a — 2026-11-01)
 - Backup v2.838 Summary 를 시안 ① 에 맞춤 B — 용량과 일정 · 통합 에러 로그 · 백업 안 된 VM 일일 메일(2026-10-31)
 - Backup v2.837 Summary 를 시안 ① 에 맞춤 — 숫자 6칸 · 두 카드 · 도구 줄 · 트리 체크 · 찾기 보강(2026-10-31)
 - Backup v2.836 Summary 개편 — 법인 › 폴더 › VM 트리 표 · BackedUp 세 묶음 · 전체 법인 백업 안 된 VM 찾기(백업 메뉴 개편 1-b — 2026-10-31)
@@ -1824,6 +1825,30 @@
   목록 memo(P7) · 카탈로그 memo 세대(P9) · 고아 잡(I7) · Migration 새 잡의 일시 lastRun(C2-7).
   ⚠ 정정(v2.823): 카탈로그 memo 세대(P9)는 v2.823 에 해소했다(memo 키에 Director id + `settingsRev` — 설정을 저장하면 새로 읽는다). 고아 잡(I7)은 v2.823 검토 C3 에서
   '가리키는 Director 가 설정에 없는 대상은 원장에서만 취소·삭제' 경로로 일부 해소(Director 쪽 고아 잡 탐지는 여전히 없다).
+
+## Bareos v2.839 Director 정책 수집 · 정책 · 일정 탭 · Summary 2차 칸 채우기(백업 메뉴 개편 2차-a — 2026-11-01)
+
+사용자 요청 '2차 계획(Bareos 정책·일정 수집)입니다. 진행' → 계획(Fable) → '구현해줘'(Opus). 사용자 결정: **실제 출력 먼저**(probe 로 7개 명령 실측 — 2026-11-01 Director 25.1.2 커뮤니티 빌드 ·
+고정값 `server/test/fixtures/bareosPolicy2839/`) · 두 릴리스(2.839 = 이 절 · 2.840 = 보존 · 풀 탭 · 그룹 카드 · 대상 행 · 이력 거르기) · **show 추가 + 선택 명령** · 검증 '표준'.
+회귀 `server/test/bareosPolicy2839.test.js`(10건) · 웹 `views/tools/bareosPolicy2839.test.js`(9건) · 갱신 `bareosViewText.test`(하위 탭에 policy) · `backupSummary2838`(2차 칸을 채웠다) · `backupPriority2787`(캐시 키 bp).
+변이 — 판정 코어 32/32(처음 24/30 → 정렬 · 상한 아래 · 원문 가림 · 비포탈 잡 · 범위 계정 빈 스케줄 · 지운 Director 정리 보강 6건 + 폴백 · 꺼진 잡 2건). 변이마다 복원 + sha256 대조(4개 파일 원본 확인).
+
+- **실측이 바꾼 계획**: ① `status scheduler days=7` 은 JSON(`schedules[].jobs` + `preview[].runtime` = **epoch 초 — 절대 시각**)이라 평문 파서를 만들지 않았고 미리보기는 시간대 보정이 필요 없다(datetime 문자열은 쓰지 않는다) ·
+  ② `list pools` 는 6칸뿐(보존 · 상한 없음) → **`llist pools`**(ACL 에 있는 llist · 거부되면 `list pools` 폴백 — 그때 보존 · 상한은 null) · ③ `list volumes` 는 풀 이름(소문자) 아래 행 배열 · 값은 전부 문자열(numOrNull) ·
+  ④ `show jobdefs` 는 **기본값인 칸은 키가 없다** → 화면 '기본'(지어내지 않는다) · ⑤ `show *` 는 포탈 콘솔 Profile 에 show 가 없어 거부된다 — 자동 설정 Command ACL 에 `show` 를 더했고(서버 · 웹 같은 줄 — 시험) **이미 설정한 Director 는 손으로 더해야 한다**(포탈이 원격 설정을 고치지 않는다 · v2.833 delete 와 같은 규칙) ·
+  거부(`denied`)는 그 명령만 '권한 없음' 이고 나머지는 계속 수집한다.
+- **수집(`bareos/policy.js` · 작업 표 `ops.policy`)**: 읽기 전용 명령만(MUTATING 아님 · 엣지 대행 결과 시한 240초 · `edgeResult.VALUE.policy` = 같은 정규화 — **멱등**이라 엣지가 거른 값을 중앙이 다시 거른다) ·
+  Director 병렬 4 · Director 마다 시한 3분(signal) · 세션째 끊기면 남은 명령은 건너뜀 · 재진입 가드 + 전체 시한 15분(결과를 포기해 가드를 푼다) · 하루 1회 설정 시각(기본 06:10 포탈 시각 · 실패 30분 뒤 · 하루 3번) ·
+  '지금 수집'(POST · admin · Director 마다 1분 · 감사 · 범위 밖 Director 404 · 뒤에서 돈다) · 엣지 노드에서는 돌지 않는다 · 데모는 데모 Director(실측 모양 합성 · 그 Director 의 법인만).
+- **저장(`bareos-policy.json` — 상태 파일 · 원자적 쓰기 · 손상 보존 · 0600)**: 명령마다 마지막 성공 값과 시각 — **실패한 명령은 지난 값을 지우지 않는다**(코드 · 시각만 바꾼다) · 볼륨은 풀마다 요약만(목록 저장 안 함) · 설정에서 지운 Director 는 다음 수집 때 지운다.
+  `backup/service.js RUNTIME_STATE_NAMES` · `insights/portalDb PURPOSES` · `dbGuideData` 에 등록(시험이 셋 다 대조한다 — 하나라도 빠지면 '변경 시 자동 백업' 이 하루마다 돌거나 포탈 DB 화면이 경고).
+- **판정(서버 하나)**: 풀 가득 참 = MaxVols > 0 · NumVols ≥ MaxVols · 쓸 볼륨(Append · Recycle · Purged) 0 · Scratch 0(모르면 null) · 사용 % = 볼륨 바이트 ÷ (MaxVols × MaxVolBytes — 둘 다 > 0 일 때만) ·
+  VM 적용 정책 = 불일치(잡 있는데 정책이 Bareos 아님) → 정책 있음(그룹 예약 또는 Director 스케줄의 jobs 에 든 잡) → 모름(수집본 없음) → 수동만 · 미등록 = 정책 Bareos 인데 잡 없음 · **꺼진 잡은 '쓰는 잡' 에 세지 않는다**(변이가 찾음).
+- **범위 · 가림**: 조회 화면은 **Director 에 접속하지 않는다**(수집본만 — v2.828 규칙) · 범위 계정은 범위 안 법인에 묶인 Director 만 · **범위 밖 법인의 잡을 세지 않고**(스케줄 · 7일 · 띠) 자기 법인 잡이 없는 스케줄은 보이지 않는다(Director 자체 잡 포함) · Director 거부 원문은 관리자 판본만.
+- **Summary · Detail 2차 칸**: Bareos 카드 '풀 사용'(가장 높은 % · 가득 참 · 오류 볼륨) · '다음 회차'(그룹 + Director 스케줄 중 이른 것 · 스케줄 수) · 용량 카드 '풀 가득 참' · 24시간 띠의 Director 회차(그 법인의 포탈 잡이 든 회차만 · 길이 60분 추정) ·
+  7일 칸 'Bareos N'(그룹 + Director) · Detail 다음 예정 `nx.s`(Director 스케줄) — 캐시 키에 `bp${policyRev()}`.
+- 남긴 것(2.840 — 2차-b): '보존 · 풀' 탭(풀 표 · 볼륨 목록 즉시 조회) · 그룹 카드(다음 회차 · 마지막 결과 · 적용 풀 · 겹침) · 백업 대상 행 '적용 정책' · 실행 이력 거르기 · 통합 에러 로그에 오류 볼륨 행.
+  3차: 복원 탭 · Veeam 잡 반복 주기 · Director 전용 잡의 VM 매핑 · joblog 원문 요약.
 
 ## Backup v2.838 Summary 를 시안 ① 에 맞춤 B — 용량과 일정 · 통합 에러 로그 · 백업 안 된 VM 일일 메일(2026-10-31)
 

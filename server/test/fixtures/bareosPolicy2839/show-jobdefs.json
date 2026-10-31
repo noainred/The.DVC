@@ -1,0 +1,6 @@
+{
+  "jobdefs": {
+    "PortalVmwareDefaults": { "name": "PortalVmwareDefaults", "type": "Backup", "level": "Incremental", "messages": "Standard", "fileset": "PortalVmwareGeneric", "writebootstrap": "/var/lib/bareos/%c.bsr" },
+    "DefaultJob": { "name": "DefaultJob", "type": "Backup", "level": "Incremental", "messages": "Standard", "storage": [ "File" ], "pool": "Incremental", "fullbackuppool": "Full", "incrementalbackuppool": "Incremental", "differentialbackuppool": "Differential", "client": "bareos-fd", "fileset": "SelfTest", "schedule": "WeeklyCycle", "writebootstrap": "/var/lib/bareos/%c.bsr" }
+  }
+}

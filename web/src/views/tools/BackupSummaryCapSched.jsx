@@ -3,7 +3,7 @@
  *   왼쪽 = 백업된 용량 — 법인별(Summary 응답의 법인 줄 pa · 서버가 센 값) + Veeam 저장소 30일 선 · 여유 경고(EM — 전체 범위 계정만).
  *   오른쪽 = 백업 스케줄 — 다음 24시간(GET /tools/backup-summary/schedule — Veeam 잡 다음 실행 · Bareos 그룹 예약) · 7일 요약 · 겹침 경고.
  *   스케줄은 무거운 집계라 폴링하지 않는다 — 처음 한 번 + 위 '새로고침'(reloadKey) 때만 · 늦게 온 이전 응답은 버린다.
- *   출처를 지어내지 않는다: Veeam 은 잡의 **다음 1회**만 알고(반복 주기 미수집 — 7일 칸은 오늘 · 내일만) · Director 스케줄 · 풀은 2차 수집 뒤 '—'.
+ *   출처를 지어내지 않는다: Veeam 은 잡의 **다음 1회**만 알고(반복 주기 미수집 — 7일 칸은 오늘 · 내일만) · v2.839 Director 스케줄 · 풀은 정책 수집본(하루 1회 — 없으면 '수집 전').
  */
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { fetchJson } from '../../api.js';
@@ -20,7 +20,7 @@ const Legend = ({ items }) => (
 );
 const SITE_N = 8;
 
-function Capacity({ rows, em }) {
+function Capacity({ rows, em, bp }) {
   const [all, setAll] = useState(false);
   const cap = capacityRows(rows, all ? 0 : 5);
   const pts = linePoints(em?.series30);
@@ -62,7 +62,9 @@ function Capacity({ rows, em }) {
             {rw.items.map((x) => <div key={x.text} className="muted" style={{ overflowWrap: 'anywhere' }}>{x.text} — {x.left}{x.vc ? ` · ${x.vc}` : ''}</div>)}
             {rw.more > 0 && <div className="muted">… {fmtNum(rw.more)}곳 더 — Veeam 메뉴</div>}
           </> : <div className="muted">EM 자료는 전체 범위 계정만 봅니다</div>}
-          <div className="muted" title="Director 풀 · 볼륨 수집은 백업 메뉴 개편 2차에서 합니다">Bareos Full 풀 가득 참 —(2차 수집 뒤)</div>
+          <div className={bp?.pools?.full ? undefined : 'muted'} style={bp?.pools?.full ? { color: TONE.bad, fontWeight: 700 } : undefined} title="Director 정책 수집본 — 볼륨 수가 상한에 닿았고 쓸 수 있는 볼륨(Append · Recycle · Purged)과 Scratch 볼륨이 없는 풀 · Bareos › 정책 · 일정">
+            Bareos 풀 가득 참 {bp?.pools ? fmtNum(bp.pools.full) : bp ? '—(풀 수집 실패)' : '—(수집 전)'}{bp?.pools?.errorVols ? ` · 오류 볼륨 ${fmtNum(bp.pools.errorVols)}` : ''}
+          </div>
         </div>
       </div>
     </section>
@@ -73,7 +75,7 @@ function Lane({ items, from, color, full, top }) {
   return items.map((x, i) => {
     const b = barOf(x, from);
     if (!b) return null;
-    return <span key={`${x.name}|${x.at}|${i}`} title={`${x.name} ${hm(x.at)}~${hm(x.end)}${x.est ? '(길이 추정 60분)' : ''}${x.vms ? ` · VM ${x.vms}` : ''}`}
+    return <span key={`${x.name}|${x.at}|${i}`} title={`${x.src === 'director' ? 'Director 스케줄 ' : ''}${x.name} ${hm(x.at)}~${hm(x.end)}${x.est ? '(길이 추정 60분)' : ''}${x.vms ? ` · ${x.src === 'director' ? '잡' : 'VM'} ${x.vms}` : ''}`}
       style={{ position: 'absolute', left: `${b.left}%`, width: `${b.width}%`, top, height: 6, borderRadius: 3, background: full && x.full ? C.full : color, opacity: x.est ? 0.75 : 1 }} />;
   });
 }
@@ -103,7 +105,7 @@ function Schedule({ reloadKey }) {
     <section className="card" aria-label="백업 스케줄 — 다음 24시간" data-backup-schedule="" style={{ ...card, flex: '7 1 560px' }}>
       <div className="flex wrap" style={{ alignItems: 'center', gap: '4px 8px' }}>
         <b style={{ fontSize: 14 }}>백업 스케줄 — 다음 24시간</b>
-        <span className="muted" style={{ fontSize: 12, minWidth: 0, overflowWrap: 'anywhere' }}>Veeam 잡 다음 실행(B&amp;R 결과) + Bareos 그룹 예약 · Director 스케줄은 2차 수집 뒤 · 이 브라우저 시각</span>
+        <span className="muted" style={{ fontSize: 12, minWidth: 0, overflowWrap: 'anywhere' }}>Veeam 잡 다음 실행(B&amp;R 결과) + Bareos 그룹 예약 + Director 스케줄(정책 수집본) · 이 브라우저 시각</span>
         <span style={{ marginLeft: 'auto' }}><Legend items={[['veeam', 'Veeam'], ['bareos', 'Bareos'], ['full', 'Full']]} /></span>
       </div>
       {error ? <div style={{ fontSize: 12.5, color: error?.status === 403 ? 'var(--text-dim)' : TONE.bad }}>{error?.status === 403 ? '이 계정은 Detail 화면이 허용되지 않아 잡 · 그룹 일정을 볼 수 없습니다.' : `일정을 읽지 못했습니다 — ${String(error?.message || error).slice(0, 160)}`}</div>
@@ -142,13 +144,13 @@ function Schedule({ reloadKey }) {
               {(data.days || []).map((d, i) => (
                 <div key={d.day} style={{ background: 'var(--panel-deep)', borderRadius: 8, padding: '6px 8px', minWidth: 0 }}>
                   <div className="muted">{dayLabel(d.day, i)}</div>
-                  <b title={`Bareos 그룹 회차 ${d.groups} · VM ${d.gvms}`}>그룹 {fmtNum(d.groups)}</b>
+                  <b title={`Bareos 회차(그룹 예약 + Director 스케줄) ${d.groups} · 잡 · VM ${d.gvms}`}>Bareos {fmtNum(d.groups)}</b>
                   <div className="muted">Veeam {d.veeam == null ? '—' : fmtNum(d.veeam)}</div>
                   <div style={{ color: d.full ? C.full : 'var(--text-dim)' }}>Full {fmtNum(d.full)}</div>
                 </div>
               ))}
             </div>
-            <div className="muted" style={{ fontSize: 11 }}>7일 칸 = Bareos 그룹 회차 수 · Full 회차 수 · Veeam 잡 수(다음 실행이 그날인 것 — 다음 1회만 알아 오늘 · 내일 밖은 —)</div>
+            <div className="muted" style={{ fontSize: 11 }}>7일 칸 = Bareos 회차 수(그룹 예약 + Director 스케줄) · Full 회차 수 · Veeam 잡 수(다음 실행이 그날인 것 — 다음 1회만 알아 오늘 · 내일 밖은 —)</div>
             {overlaps.length > 0 && (
               <div data-backup-overlap="" style={{ fontSize: 11.5, color: 'var(--text-dim)', overflowWrap: 'anywhere' }}>
                 겹침 경고: {overlaps.slice(0, 3).map((r) => <span key={r.id} style={{ color: TONE.warn }}>{overlapText(r)} · </span>)}
@@ -160,10 +162,10 @@ function Schedule({ reloadKey }) {
   );
 }
 
-export default function BackupSummaryCapSched({ rows, em, reloadKey }) {
+export default function BackupSummaryCapSched({ rows, em, bp = null, reloadKey }) {
   return (
     <div role="group" aria-label="용량과 일정" data-backup-capsched="" style={{ display: 'flex', flexWrap: 'wrap', gap: 12, minWidth: 0 }}>
-      <Capacity rows={rows} em={em} />
+      <Capacity rows={rows} em={em} bp={bp} />
       <Schedule reloadKey={reloadKey} />
     </div>
   );

@@ -1,0 +1,16 @@
+{
+  "schedules": [
+    { "name": "WeeklyCycle", "enabled": true, "jobs": [ { "name": "backup-bareos-fd", "enabled": true } ] },
+    { "name": "WeeklyCycleAfterBackup", "enabled": true, "jobs": [ { "name": "BackupCatalog", "enabled": true } ] }
+  ],
+  "preview": [
+    { "datetime": "Mon 02-Nov-2026 21:00", "runtime": 1793620800, "schedule": "WeeklyCycle", "level": "Incremental" },
+    { "datetime": "Mon 02-Nov-2026 21:10", "runtime": 1793621400, "schedule": "WeeklyCycleAfterBackup", "level": "Full" },
+    { "datetime": "Tue 03-Nov-2026 21:00", "runtime": 1793707200, "schedule": "WeeklyCycle", "level": "Incremental" },
+    { "datetime": "Tue 03-Nov-2026 21:10", "runtime": 1793707800, "schedule": "WeeklyCycleAfterBackup", "level": "Full" },
+    { "datetime": "Wed 04-Nov-2026 21:00", "runtime": 1793793600, "schedule": "WeeklyCycle", "level": "Incremental" },
+    { "datetime": "Wed 04-Nov-2026 21:10", "runtime": 1793794200, "schedule": "WeeklyCycleAfterBackup", "level": "Full" },
+    { "datetime": "Thu 05-Nov-2026 21:00", "runtime": 1793880000, "schedule": "WeeklyCycle", "level": "Incremental" },
+    { "datetime": "Thu 05-Nov-2026 21:10", "runtime": 1793880600, "schedule": "WeeklyCycleAfterBackup", "level": "Full" }
+  ]
+}

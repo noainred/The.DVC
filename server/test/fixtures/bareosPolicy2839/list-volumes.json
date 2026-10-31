@@ -1,0 +1,12 @@
+{
+  "volumes": {
+    "incremental": [
+      { "mediaid": "2", "volumename": "Incremental-0002", "volstatus": "Append", "enabled": "1", "volbytes": "64476", "volfiles": "0", "volretention": "2592000", "recycle": "1", "slot": "0", "inchanger": "0", "mediatype": "File", "lastwritten": "2026-10-29 21:00:03", "storage": "File", "hasencryptionkey": "0" }
+    ],
+    "full": [
+      { "mediaid": "1", "volumename": "Full-0001", "volstatus": "Full", "enabled": "1", "volbytes": "3145942", "volfiles": "0", "volretention": "31536000", "recycle": "1", "slot": "0", "inchanger": "0", "mediatype": "File", "lastwritten": "2026-10-30 08:41:32", "storage": "File", "hasencryptionkey": "0" },
+      { "mediaid": "4", "volumename": "Full-0004", "volstatus": "Full", "enabled": "1", "volbytes": "3145942", "volfiles": "0", "volretention": "31536000", "recycle": "1", "slot": "0", "inchanger": "0", "mediatype": "File", "lastwritten": "2026-10-30 08:41:33", "storage": "File", "hasencryptionkey": "0" },
+      { "mediaid": "5", "volumename": "Full-0005", "volstatus": "Full", "enabled": "1", "volbytes": "2097366", "volfiles": "0", "volretention": "31536000", "recycle": "1", "slot": "0", "inchanger": "0", "mediatype": "File", "lastwritten": "2026-10-30 08:41:33", "storage": "File", "hasencryptionkey": "0" }
+    ]
+  }
+}

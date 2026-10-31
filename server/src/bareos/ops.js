@@ -9,12 +9,13 @@
  */
 import { BareosConsoleError, jsonRpcErrorText } from './console.js';
 import {
-  probe, catalogLists, addJob as directorAddJob, runJob, jobStatus, jobStates, recentJobs, setJobEnabled, cancelJob, jobHistory, jobRuns, jobLog, runRestore, deleteJobIds,
+  parseBanner, probe, catalogLists, addJob as directorAddJob, runJob, jobStatus, jobStates, recentJobs, setJobEnabled, cancelJob, jobHistory, jobRuns, jobLog, runRestore, deleteJobIds,
 } from './director.js';
 import { pruneSelection } from './groupRetention.js';
 import { parseStatusRaw, parseDirStatusRaw, rawHead } from './liveParse.js';
 import { jobNameFor, isFinalStatus, isResourceName } from './names.js';
 import { chainFromHistory, chainIssue } from './restore.js';
+import { POLICY_CMDS, POLICY_KEYS, NORMALIZE as POLICY_NORMALIZE, deniedText } from './policyParse.js';
 
 const fail = (code, msg) => new BareosConsoleError(code, msg);
 const invalid = (msg) => { const e = new Error(msg); e.code = 'invalid'; return e; };
@@ -177,6 +178,40 @@ export const OPS = Object.freeze({
   },
   setEnabled: (s, { name, enabled }) => setJobEnabled(s, name, !!enabled),
   history: (s, { name, limit }) => jobHistory(s, name, limit),
+
+  /**
+   * v2.839 Director 정책 수집(백업 메뉴 개편 2차-a) — 읽기 전용 명령만(policyParse.POLICY_CMDS · MUTATING 아님).
+   *   명령마다 따로 — 하나가 실패해도(권한 없음 · 옛 판) 나머지는 계속 · 세션째 끊기면 남은 것은 건너뜀 · 시한 신호면 남은 것은 시작하지 않는다.
+   *   `llist pools` 를 거부하면 짧은 `list pools` 로 한 번 더(보존 · 상한 칸은 모름).
+   * @param {{ keys?: string[] }} a 수집할 키(필수 3 + 켜 둔 선택 명령)
+   * @returns {Promise<{ results:{ [key]: { ok, ms, value?, code?, message?, fallback? } }, version }>}
+   */
+  async policy(s, { keys = POLICY_KEYS } = {}, { signal } = {}) {
+    const want = new Set((Array.isArray(keys) ? keys : []).filter((k) => POLICY_KEYS.includes(k)));
+    const results = {};
+    let dead = '';
+    for (const c of POLICY_CMDS) {
+      if (!want.has(c.key)) continue;
+      if (!dead && signal?.aborted) dead = '시한이 지나 멈췄습니다';
+      if (dead) { results[c.key] = { ok: false, code: 'skipped', message: `건너뜀 — ${dead}`, ms: 0 }; continue; }
+      const t0 = Date.now();
+      try {
+        let v; let fallback = false;
+        try { v = await s.call(c.cmd, { maxBytes: 16 * 1024 * 1024 }); } catch (e) {
+          if (!c.fallback || e?.code !== 'jsonrpc') throw e;
+          v = await s.call(c.fallback, { maxBytes: 16 * 1024 * 1024 }); fallback = true;
+        }
+        results[c.key] = { ok: true, ms: Date.now() - t0, value: POLICY_NORMALIZE[c.key](v), ...(fallback ? { fallback: true } : {}) };
+      } catch (e) {
+        const code = e?.code === 'jsonrpc' && deniedText(e?.message) ? 'denied' : String(e?.code || 'error');
+        results[c.key] = { ok: false, code, message: String(e?.message || e).slice(0, 300), ms: Date.now() - t0 };
+        if (SESSION_DEAD.has(e?.code)) dead = `Director 연결 문제로 멈췄습니다(${e.code})`;
+      }
+    }
+    let version = '';
+    try { version = parseBanner(s.info?.banner || '').version || ''; } catch { version = ''; }
+    return { results, version };
+  },
 
   /**
    * 취소 — 이 잡의 실행(jobid)만. 포탈이 추적 중인 실행을 Director 가 모르면(재시작·다른 Director — P5) { cleared } 로 추적만 내리게 한다.

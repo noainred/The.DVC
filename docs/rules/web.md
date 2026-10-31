@@ -471,3 +471,4 @@
   v2.836 Summary 의 법인 › 폴더 › VM 트리는 법인 줄 = 서버 집계(`veeam/backupSummaryAgg.js`), 폴더·VM = 그 법인의 Detail 응답을 `buildTree` 로 — Summary 에서 따로 판정하지 말 것.
   v2.837 Summary 의 선택은 **한 법인 안에서만**(트리 · 찾기 결과가 한 선택 — 다른 법인 칸은 막는다) · 쓰기 가능은 서버 법인 줄 `w` 로만(캐시 키 `writeKeyOf`) · 자료가 없는 칸은 지어내지 않고 출처를 밝히거나 '—(2차)'.
   v2.838 Summary 아래 두 구획(용량과 일정 · 통합 에러 로그)은 **무거운 집계라 폴링하지 않는다**(처음 · 기간 · 새로고침) · 자료가 없는 칸은 출처를 밝히고 '—(2차)' — 30일 선은 'Veeam 저장소 사용(EM)' 이지 백업 용량 추이가 아니다 · 열기 링크는 권한이 없으면 그리지 않는다(`backupSummaryPlan.errorOpen`).
+  v2.839 Bareos '정책 · 일정'(`#/tools/bareos-summary/policy` — 조회 전용 키 아래 하위 탭 · `useHashTab`)은 **수집 중일 때만** 5초 뒤 다시 읽는다(평소 폴링 없음) · 기본 `tbody td` 는 nowrap 이라 긴 칸은 `WRAPBOX`(whiteSpace normal + 최대 폭)로 감싼다 — 안 그러면 옆 칸을 덮는다(Chromium 1440 확인) · JobDefs 빈 칸은 '기본'.

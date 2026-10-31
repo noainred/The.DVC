@@ -772,12 +772,13 @@ export function lastOkText(vm) {
  */
 export function nextOf(vm, now = Date.now()) {
   const c = [];
-  if (vm?.nx && finNum(vm.nx.at) && vm.nx.at > now) c.push({ at: vm.nx.at, src: 'bareos', title: `Bareos 그룹 ‘${vm.nx.g || '그룹'}’ 다음 회차` });
+  // v2.839 nx.s = Director 스케줄(정책 수집본) · nx.g = 포탈 그룹 예약
+  if (vm?.nx && finNum(vm.nx.at) && vm.nx.at > now) c.push({ at: vm.nx.at, src: 'bareos', title: vm.nx.s ? `Bareos Director 스케줄 ‘${vm.nx.s}’ 다음 실행` : `Bareos 그룹 ‘${vm.nx.g || '그룹'}’ 다음 회차` });
   if (finNum(vm?.v?.nr) && vm.v.nr > now) c.push({ at: vm.v.nr, src: 'veeam', title: `Veeam 잡 다음 실행${Array.isArray(vm.v.jobs) && vm.v.jobs[0] ? `(‘${vm.v.jobs[0]}’ 등)` : ''}` });
   return c.length ? c.reduce((a, b) => (b.at < a.at ? b : a)) : null;
 }
 /** 다음 예정 칸 글자 — '10-31 23:00 · nightly'(그룹) · '10-31 21:00 · Veeam'. 모르면 '—'. */
-export const nextText = (vm, now = Date.now()) => { const n = nextOf(vm, now); return n ? `${shortTs(n.at)} · ${n.src === 'veeam' ? 'Veeam' : vm.nx.g || '그룹'}` : '—'; };
+export const nextText = (vm, now = Date.now()) => { const n = nextOf(vm, now); return n ? `${shortTs(n.at)} · ${n.src === 'veeam' ? 'Veeam' : vm.nx.s ? `스케줄 ${vm.nx.s}` : vm.nx.g || '그룹'}` : '—'; };
 /** 최근 24시간 실패·경고 — 'Veeam 실패 · Bareos 경고' · 없으면 ''. */
 export const errText = (vm) => (Array.isArray(vm?.e) ? vm.e.map((x) => `${x.s === 'veeam' ? 'Veeam' : 'Bareos'} ${x.r === 'fail' ? '실패' : '경고'}`).join(' · ') : '');
 /**
