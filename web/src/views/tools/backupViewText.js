@@ -818,10 +818,10 @@ export function takeBareosGroupHandoff(store = globalThis.sessionStorage, now = 
 }
 /** v2.835 찾기 조건 기억(이 브라우저 — 다음에 열 때 그대로). 모르는 값은 기본. */
 const STALE_KEY = 'backup-detail.stale';
-export function loadStaleOpts(storage) {
+export function loadStaleOpts(storage, key = STALE_KEY) {   // v2.836 key — Summary 는 'backup-summary.stale'(두 화면 조건을 섞지 않는다)
   try {
     const st = storage === undefined ? globalThis.localStorage : storage;
-    const raw = st ? JSON.parse(st.getItem(STALE_KEY) || 'null') : null;
+    const raw = st ? JSON.parse(st.getItem(key) || 'null') : null;
     if (!raw || typeof raw !== 'object') return { ...STALE_DEFAULT };
     return {
       n: staleWindowMs(raw.n, 'h') != null ? Number(raw.n) : STALE_DEFAULT.n,
@@ -831,6 +831,6 @@ export function loadStaleOpts(storage) {
     };
   } catch { return { ...STALE_DEFAULT }; }
 }
-export function saveStaleOpts(o, storage) {
-  try { (storage === undefined ? globalThis.localStorage : storage)?.setItem(STALE_KEY, JSON.stringify(o)); } catch { /* 저장 못 해도 동작 */ }
+export function saveStaleOpts(o, storage, key = STALE_KEY) {
+  try { (storage === undefined ? globalThis.localStorage : storage)?.setItem(key, JSON.stringify(o)); } catch { /* 저장 못 해도 동작 */ }
 }

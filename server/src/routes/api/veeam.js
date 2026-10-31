@@ -39,6 +39,7 @@ import { bareosVmView } from '../../bareos/vmView.js';   // v2.801 VM 전체 정
 import { listGroups as bareosGroups, groupsLoadError as bareosGroupsLoadError, groupsRev as bareosGroupsRev } from '../../bareos/groups.js';   // v2.835 Detail '다음 예정'(Bareos 그룹 예약)
 import { nextSlot as bareosNextSlot } from '../../bareos/groupSchedule.js';
 import { policyFields } from '../../veeam/backupPolicy.js';   // v2.835 백업 정책 · 실제 · 정책≠실제 · 마지막 성공
+import { newSiteAgg, addSiteVm, finishSiteAgg, sumSiteAggs, staleQueryOf, newStaleAcc, addStaleRows, finishStaleRows } from '../../veeam/backupSummaryAgg.js';   // v2.836 Summary 법인 집계 · 전체 법인 찾기
 export { VM_LIST_MAX_IDS };
 import { logAudit } from '../../audit.js';
 import { csvLine, CSV_BOM } from '../../util/csv.js';
@@ -736,10 +737,15 @@ async function summaryData(req, snap, scope) {
   const maybeYield = createYielder(15);
   const rows = []; const jobs = [];
   const marks = getMarks(); const now = Date.now(); let prio = []; const prioOk = detailToolOk(req);
+  const marksBad = marksUnreadable();
   for (const vc of vcs) {
     await maybeYield();
     const vms = vmsBy.get(vc.id) || [];
     const b = await vcBackup(vc, vms, req, { initial: snap?.initial === true, scope });
+    // v2.836(백업 메뉴 개편 1-b): 법인 줄 집계 — Detail 과 같은 VM 행(backupVmRows)을 세기만 한다(BackedUp · 백업 안함 · 확인 필요 · 실제 · 불일치 · RPO · 실패 · 다음 예정)
+    const vr = backupVmRows(vc, b, { now, marks, unreadable: marksBad, withClone: false });
+    const pa = newSiteAgg();
+    for (const r of vr.vms) addSiteVm(pa, r, now);
     // v2.787(우선순위 VM): 같은 범위(scope 교집합 vCenter · 전원·제외 목록)에서만 — 다른 수와 같은 기준
     // v2.806: Clone 방식 VM 의 복제 잡 상태(Detail 과 같은 실행 노드 기준) — 못 읽으면 null(모름 — cloneBad 로 세지 않는다)
     const clones = prioOk ? cloneStatesOf(vc.id) : null;
@@ -747,7 +753,7 @@ async function summaryData(req, snap, scope) {
     if (prioOk) for (const c of priorityCandidates(b.scopedVms, { byVm: b.match?.byVm || null, marks, veeamKnown: b.row.veeam != null || !b.linked, absentKnown: !b.row.veeamAbsentUnknown, now, cloneOf })) {
       prio.push({ ...c, vcenterId: vc.id, vcName: vc.name || vc.id });
     }
-    rows.push({ id: vc.id, name: vc.name || vc.id, ...b.row,
+    rows.push({ id: vc.id, name: vc.name || vc.id, ...b.row, pa: finishSiteAgg(pa), ...(vr.bareosKnown ? {} : { bareosUnknown: true }),
       veeamReason: b.vcnt?.reason || '', veeamServers: b.views.length, veeamFailed: b.vcnt?.failed || 0, veeamStale: b.vcnt?.stale || 0,
       ...(b.vcnt?.hostMismatch ? { hostMismatch: true } : {}), snapReason: b.sc?.reason || '', ...(isMockMode() && b.linked && !veeamLinked(vc.id) ? { demo: true } : {}) });
     // 지금 도는 작업(작업 전체 진행률) — 작업 이름은 서버 전체 기준이라 관리자 판본만(v2.778.1 과 같은 이유). 범위(전원)와 무관한 작업 단위 값이다.
@@ -758,7 +764,8 @@ async function summaryData(req, snap, scope) {
   const prioTotal = prio.length;
   prio.sort(priorityRank);
   if (prio.length > PRIORITY_MAX) prio = prio.slice(0, PRIORITY_MAX);
-  return { ok: true, at: Date.now(), scope, rows, totals: backupTotals(rows), priority: prioOk ? { items: prio, total: prioTotal, truncated: prioTotal > prio.length || undefined } : { withheld: 'detail-tool' }, ...(admin ? { runningJobs: jobs } : {}), registryUnreadable: registryBroken() || undefined,
+  const totals = { ...backupTotals(rows), pa: sumSiteAggs(rows.map((r) => r.pa)), bareosUnknownSites: rows.filter((r) => r.bareosUnknown).length };
+  return { ok: true, at: Date.now(), scope, rows, totals, bareosGroups: bareosGroupCounts(new Set(vcs.map((v) => v.id))), priority: prioOk ? { items: prio, total: prioTotal, truncated: prioTotal > prio.length || undefined } : { withheld: 'detail-tool' }, ...(admin ? { runningJobs: jobs } : {}), registryUnreadable: registryBroken() || undefined,
     marksUnreadable: unreadable || undefined, marksCorruptKept: (!unreadable && marksCorruptKept()) || undefined };
 }
 
@@ -766,23 +773,70 @@ async function detailData(req, snap, t, scope) {
   const admin = isAdminDetailUser(req.user);
   const vc = (snap?.vcenters || []).find((v) => v.id === t.vcenterId) || { id: t.vcenterId };
   const b = await vcBackup(vc, t.vms, req, { initial: snap?.initial === true, scope });
-  const veeamKnown = b.row.veeam != null;
-  const snapKnown = b.row.snap != null;
   const now = Date.now();
-  const marks = getMarks();
   const unreadable = marksUnreadable();   // v2.785(GR R-B2)
-  const clones = cloneStatesOf(vc.id);   // v2.803 — 못 읽으면 null(Clone 칸 '모름')
-  const bareos = bareosStatesOf(vc.id);   // v2.828 — Bareos 잡(원장) · 못 읽으면 null(Bareos 칸 '모름')
-  const groupNext = bareosGroupNext(vc.id, now);   // v2.835 — VM id → 다음 그룹 회차 { at, lv, g }(못 읽으면 빈 맵 — 칸 '—')
-  const vms = b.scopedVms.map((vm) => vmBackupView(vm, b.match?.byVm?.[vm.id], b.ev?.byVm?.[vm.id], { veeamKnown: veeamKnown || !b.linked, snapKnown, absentKnown: !b.row.veeamAbsentUnknown, now, mark: markView(marks[vm.id]),
-    clone: clones ? cloneView(clones.get(vm.id)) : null })).map((row) => withBareos(row, bareos, unreadable))   // v2.782(점검 K4 B-B3) · v2.784 표시 · v2.803 Clone 칸(백업 방식 Clone 인 VM 만 싣는다 — vmBackupView)
-    // v2.835(백업 메뉴 개편 1차): 정책(p) · 실제(a) · 정책≠실제(mm) · 마지막 성공(lok) · 최근 24시간 실패(e) · 다음 예정(nx — Bareos 그룹 예약만, Veeam 잡 일정은 3차)
-    .map((row) => { const nx = groupNext.get(row.id); return { ...row, ...policyFields(row, { marksKnown: !unreadable, bareosKnown: bareos != null, now }), ...(nx ? { nx } : {}) }; });
+  const vr = backupVmRows(vc, b, { now, marks: getMarks(), unreadable });
+  const vms = vr.vms;
   const views = b.views.map((v) => ({ name: v.name, ok: v.ok, lastOkTs: v.lastOkTs, stale: v.stale, error: v.error, authStopped: v.authStopped, via: v.via, ...(admin && v.runningJobs ? { runningJobs: v.runningJobs } : {}) }));
   return { ok: true, at: now, scope, vcenter: { id: vc.id, name: vc.name || vc.id }, row: { ...b.row, veeamReason: b.vcnt?.reason || '', snapReason: b.sc?.reason || '', ...(b.vcnt?.hostMismatch ? { hostMismatch: true } : {}) },
     linked: b.linked, servers: views, snapDays: b.ev?.days ?? null, snapSource: b.ev?.source || '', vms, ...(b.match?.aliasHosts && admin ? { aliasHosts: b.match.aliasHosts } : {}),
     writable: marksWritable(req, snap, vc.id), marksUnreadable: unreadable || undefined, marksCorruptKept: (!unreadable && marksCorruptKept()) || undefined,
-    bareosUnreadable: bareos == null || undefined };   // 버그 점검 W2: Bareos 원장을 못 읽었다 — 화면의 Bareos 칩은 '—'(0 이 아니다)
+    bareosUnreadable: !vr.bareosKnown || undefined };   // 버그 점검 W2: Bareos 원장을 못 읽었다 — 화면의 Bareos 칩은 '—'(0 이 아니다)
+}
+
+/**
+ * v2.836: Detail · Summary · 전체 법인 찾기가 같은 VM 행을 쓴다(판정 코어 하나 — 따로 세지 않는다).
+ *   vmBackupView(v2.782 Veeam 칸 · v2.784 표시 · v2.803 Clone 칸 — 방식 Clone 인 VM 만) → withBareos(v2.828 Bareos 칸) →
+ *   policyFields(v2.835 정책 p · 실제 a · 정책≠실제 mm · 마지막 성공 lok · 최근 24시간 실패 e) + 다음 예정 nx(Bareos 그룹 예약만 — Veeam 잡 일정은 3차).
+ *   withClone:false 면 복제 잡 상태를 읽지 않는다(Summary 집계에는 Clone 칸이 없다).
+ * @returns {{ vms:object[], bareosKnown:boolean }}
+ */
+function backupVmRows(vc, b, { now = Date.now(), marks = getMarks(), unreadable = marksUnreadable(), withClone = true } = {}) {
+  const veeamKnown = b.row.veeam != null;
+  const snapKnown = b.row.snap != null;
+  const clones = withClone ? cloneStatesOf(vc.id) : null;   // v2.803 — 못 읽으면 null(Clone 칸 '모름')
+  const bareos = bareosStatesOf(vc.id);   // v2.828 — Bareos 잡(원장) · 못 읽으면 null(Bareos 칸 '모름')
+  const groupNext = bareosGroupNext(vc.id, now);   // v2.835 — VM id → 다음 그룹 회차 { at, lv, g }(못 읽으면 빈 맵 — 칸 '—')
+  const vms = b.scopedVms.map((vm) => vmBackupView(vm, b.match?.byVm?.[vm.id], b.ev?.byVm?.[vm.id], { veeamKnown: veeamKnown || !b.linked, snapKnown, absentKnown: !b.row.veeamAbsentUnknown, now, mark: markView(marks[vm.id]),
+    clone: withClone ? (clones ? cloneView(clones.get(vm.id)) : null) : undefined })).map((row) => withBareos(row, bareos, unreadable))
+    .map((row) => { const nx = groupNext.get(row.id); return { ...row, ...policyFields(row, { marksKnown: !unreadable, bareosKnown: bareos != null, now }), ...(nx ? { nx } : {}) }; });
+  return { vms, bareosKnown: bareos != null };
+}
+
+/** v2.836 Summary 의 Bareos 카드 — 범위 안 법인의 백업 그룹 수 · 예약이 켜진 그룹 수. 그룹 파일을 못 읽으면 null(0 이 아니다). */
+function bareosGroupCounts(vcIds) {
+  try {
+    if (bareosGroupsLoadError()) return null;
+    let n = 0; let sched = 0;
+    for (const g of bareosGroups()) if (vcIds.has(g.vcenterId)) { n++; if (g.schedule?.enabled === true) sched++; }
+    return { n, sched };
+  } catch { return null; }
+}
+
+/**
+ * v2.836 전체 법인 '백업 안 된 VM 찾기'(GET /tools/backup-summary/stale) — 범위 안 법인마다 Detail 과 같은 VM 행을 만들어 backupPolicy.staleOf 로 센다.
+ *   행은 상한(STALE_ROWS_MAX)까지만 싣고 수는 전부 센다. 한쪽 결과를 모르는 VM 은 '모름' 으로 따로(미달로 단정하지 않는다).
+ */
+async function staleData(req, snap, scope, o) {
+  const allowed = scopedVcenterIds(req.user, snap);
+  const vcs = (snap?.vcenters || []).filter((v) => !allowed || allowed.has(v.id));
+  const vmsBy = new Map();
+  for (const vm of snap?.vms || []) { const a = vmsBy.get(vm.vcenterId); if (a) a.push(vm); else vmsBy.set(vm.vcenterId, [vm]); }
+  const maybeYield = createYielder(15);
+  const now = Date.now(); const marks = getMarks(); const unreadable = marksUnreadable();
+  const acc = newStaleAcc(); let bareosUnknownSites = 0;
+  for (const vc of vcs) {
+    await maybeYield();
+    const b = await vcBackup(vc, vmsBy.get(vc.id) || [], req, { initial: snap?.initial === true, scope });
+    const vr = backupVmRows(vc, b, { now, marks, unreadable, withClone: false });
+    if (!vr.bareosKnown) bareosUnknownSites++;
+    addStaleRows(acc, vr.vms, { id: vc.id, name: vc.name || vc.id }, o, now);
+  }
+  const fin = finishStaleRows(acc);
+  const sites = new Set(acc.rows.filter((r) => r.kind !== 'unknown').map((r) => r.vc)).size;
+  return { ok: true, at: now, scope, q: { n: o.n, unit: o.unit, src: o.src, excludeNone: o.excludeNone, onlyOn: o.onlyOn, includeNever: o.includeNever },
+    n: acc.n, never: acc.never, old: acc.old, unknown: acc.unknown, excluded: acc.excluded, sites, vcenters: vcs.length, rows: fin.rows, total: fin.total,
+    ...(fin.truncated ? { truncated: true } : {}), ...(bareosUnknownSites ? { bareosUnknownSites } : {}), marksUnreadable: unreadable || undefined };
 }
 
 /**
@@ -896,7 +950,23 @@ export function registerBackupStatus(api) {
     const admin = isAdminDetailUser(req.user);
     const scope = scopeOf(req);
     return memoJson(req, res, 'backup-summary', async () => summaryData(req, snap, scope),
-      { ttlMs: 60_000, extraKey: `${scopeKey(req.user, snap)}|${admin ? 'admin' : 'user'}|m${marksRev()}|d${detailToolOk(req) ? 1 : 0}|em${emSourcesRev()}|c${jobsRev()}` });   // v2.787 Detail 접근(우선순위 VM) · 키에 req.originalUrl(전원·제외)도 든다(shared.js) · v2.784 표시 리비전(저장 즉시 수가 바뀐다) · v2.806 c = 복제 잡 기록 리비전(우선순위 VM 의 Clone 상태)
+      { ttlMs: 60_000, extraKey: `${scopeKey(req.user, snap)}|${admin ? 'admin' : 'user'}|m${marksRev()}|d${detailToolOk(req) ? 1 : 0}|em${emSourcesRev()}|c${jobsRev()}|b${bareosRegistryRev()}|g${bareosGroupsRev()}` });   // v2.787 Detail 접근(우선순위 VM) · 키에 req.originalUrl(전원·제외)도 든다(shared.js) · v2.784 표시 리비전(저장 즉시 수가 바뀐다) · v2.806 c = 복제 잡 기록 리비전(우선순위 VM 의 Clone 상태)
+  });
+
+  /*
+   * v2.836 전체 법인 '백업 안 된 VM 찾기'(Summary — 사용자 요청 '지정한 시간만큼 백업되지 않은 VM 찾기' + 시안 ①).
+   *   VM 단위 백업 상태 = Detail 도구 데이터라 Detail 이 거부된 계정은 403(우선순위 VM 과 같은 판정 detailToolOk) · 범위 = scope 교집합(summaryData 와 같다).
+   *   무거운 집계라 화면은 폴링하지 않고 '찾기' 를 누를 때만 부른다 · 응답 캐시 60초(키에 쿼리 — shared.js memoJson 이 originalUrl 을 넣는다).
+   */
+  api.get('/tools/backup-summary/stale', toolsPerm, (req, res) => {
+    if (!detailToolOk(req)) return res.status(403).json({ ok: false, reason: '이 계정은 Detail 화면이 허용되지 않아 VM 목록을 볼 수 없습니다(관리자가 정한 도구별 접근).' });
+    const o = staleQueryOf(req.query);
+    if (o.windowMs == null) return res.status(400).json({ ok: false, reason: '기간은 1~999 사이 정수로 적으세요.' });
+    const snap = store.get();
+    const admin = isAdminDetailUser(req.user);
+    const scope = scopeOf(req);
+    return memoJson(req, res, 'backup-summary-stale', async () => staleData(req, snap, scope, o),
+      { ttlMs: 60_000, extraKey: `${scopeKey(req.user, snap)}|${admin ? 'admin' : 'user'}|m${marksRev()}|em${emSourcesRev()}|b${bareosRegistryRev()}|g${bareosGroupsRev()}` });
   });
 
   /*

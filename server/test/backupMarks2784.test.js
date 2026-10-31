@@ -164,5 +164,5 @@ test('C 소스 — PUT 순서(역할 → 404 → 403 → 소속) · 응답 캐�
   const at = (re) => body.search(re);
   const w403 = at(/수정 권한이 없습니다/);
   assert.ok(at(/status\(404\)/) > 0 && at(/status\(404\)/) < w403 && w403 < at(/VM 이 아닌 항목/), '조회 밖 404 → 쓰기 밖 403 → 소속');
-  assert.equal((src.match(/\|m\$\{marksRev\(\)\}/g) || []).length, 2, '서머리·세부 둘 다');
+  assert.equal((src.match(/\|m\$\{marksRev\(\)\}/g) || []).length, 3, '서머리·세부·전체 법인 찾기(v2.836) 셋 다');
 });

@@ -48,9 +48,10 @@ describe('v2.782 F-B3 주의가 필요한 곳 — 연동 없음 요약은 잘리
     expect(attentionList(rows).map((a) => a.id)).toEqual(['x', 'unlinked']);
   });
 
-  it('BackupSummaryTool 의 외 N곳 버튼은 주의 필요 보기로 간다(버튼 수와 보기의 행이 맞는다)', () => {
+  it('v2.836 — Summary 는 주의 목록 대신 법인 › 폴더 › VM 트리 표(외 N곳 버튼 · 주의 필요 보기가 함께 없어졌다 — 버튼만 남지 않는다)', () => {
     const src = fs.readFileSync(path.join(path.dirname(new URL(import.meta.url).pathname), 'BackupSummaryTool.jsx'), 'utf8');
-    expect(src).toMatch(/a\.more \? \([\s\S]{0,120}onClick=\{\(\) => setFilter\('warn'\)\}/);
+    expect(src).not.toMatch(/attentionList|setFilter\('warn'\)/);
+    expect(src).toMatch(/<BackupSummaryTree /);
   });
 });
 

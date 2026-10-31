@@ -164,13 +164,18 @@ describe('v2.780 백업 옵션 — 전원·제외·오래된 백업·실패·경
 
   it('v2.780.1 서머리 표는 1440px 카드 폭 안 — 열을 더하며 minWidth 를 올려 오른쪽 열이 스크롤 뒤로 숨던 회귀 · 선택 상자는 .input 최소 폭(220px)을 풀었다', () => {
     // v2.787: 법인별 표는 옆 패널 없이 본문 전폭(1440px 카드 안쪽 폭 안 — Chromium 으로 넘침 확인) · 우선순위 표는 옆 패널과 나란히(≤ 858)
+    // v2.836: 법인별 표 · 우선순위 표는 법인 › 폴더 › VM 트리 표(BackupSummaryTree — 격자 최소 폭) · 전체 법인 찾기 표(BackupSummaryStale)로 바뀌었다.
+    //   둘 다 1440px 카드 안쪽 폭 안(Chromium 으로 넘침 확인) — 1100 을 넘기면 오른쪽 열이 스크롤 뒤로 숨는다.
     const src = fs.readFileSync(new URL('./BackupSummaryTool.jsx', import.meta.url), 'utf8');
-    const mws = [...src.matchAll(/<STable minWidth=\{(\d+)\}/g)].map((m) => Number(m[1]));
-    expect(mws.length).toBe(2);
-    expect(mws[0]).toBeGreaterThan(0);
-    expect(mws[0]).toBeLessThanOrEqual(1100);
-    expect(mws[1]).toBeLessThanOrEqual(858);
-    expect(src).not.toMatch(/minWidth: 1[34]0 \}/);
+    const tree = fs.readFileSync(new URL('./BackupSummaryTree.jsx', import.meta.url), 'utf8');
+    const stale = fs.readFileSync(new URL('./BackupSummaryStale.jsx', import.meta.url), 'utf8');
+    const gm = Number((/export const SUMMARY_GRID_MIN = (\d+);/.exec(tree) || [])[1]);
+    expect(gm).toBeGreaterThan(0);
+    expect(gm).toBeLessThanOrEqual(1100);
+    const sm = Number((/<STable minWidth=\{(\d+)\}/.exec(stale) || [])[1]);
+    expect(sm).toBeGreaterThan(0);
+    expect(sm).toBeLessThanOrEqual(1100);
+    expect(src + tree + stale).not.toMatch(/minWidth: 1[34]0 \}/);
     const opt = fs.readFileSync(new URL('./BackupOptions.jsx', import.meta.url), 'utf8');
     expect(opt).toMatch(/minWidth: 0, width: 'auto'/);
   });
@@ -224,7 +229,8 @@ describe('v2.784 백업 표시 — 중요도·백업 필요·메모', async () =
     expect(det).toMatch(/const GRID = 'minmax\(230px, 2fr\) 46px 74px minmax\(150px, 1\.2fr\) minmax\(150px, 1\.2fr\) 86px 86px 58px minmax\(118px, 1fr\) 76px'/);   // v2.835 10열(정책 · 실제 · 정책≠실제 · RPO · 마지막 성공·다음 · 실패 24h)
     const sum = fs.readFileSync(new URL('./BackupSummaryTool.jsx', import.meta.url), 'utf8');
     expect(sum).toMatch(/data-backup-marks/);
-    expect(Number((/<STable minWidth=\{(\d+)\}/.exec(sum) || [])[1])).toBeLessThanOrEqual(1100);   // v2.787 전폭 표
+    const tree = fs.readFileSync(new URL('./BackupSummaryTree.jsx', import.meta.url), 'utf8');
+    expect(Number((/export const SUMMARY_GRID_MIN = (\d+);/.exec(tree) || [])[1])).toBeLessThanOrEqual(1100);   // v2.836 트리 표(전폭 — 예전 v2.787 법인별 표 자리)
   });
 });
 
@@ -245,15 +251,16 @@ describe('v2.787 Summary — 바로가기 · 법인별 표 · 우선순위', asy
     expect(M.sortRows(rows, 'name').map((r) => r.name)).toEqual(['a', 'b', 'c']);
     expect(M.matchSite({ name: 'APAC-VC01' }, 'vc01')).toBe(true);
   });
-  it('화면 — 바로가기 줄 · 행 앵커 · 우선순위 보류 안내 · 탭 머리', () => {
+  it('화면 — 행 앵커 · 탭 머리 · 대문자 변환 없음(v2.836: 바로가기 줄 · 우선순위 표는 트리 표 · 전체 법인 찾기로 바뀌었다)', () => {
     const sum = fs.readFileSync(new URL('./BackupSummaryTool.jsx', import.meta.url), 'utf8');
-    expect(sum).toMatch(/data-backup-quicknav/);
-    expect(sum).toMatch(/data-vc-row=\{r\.id\}/);
-    expect(sum).toMatch(/priority\?\.withheld === 'detail-tool'/);
+    const tree = fs.readFileSync(new URL('./BackupSummaryTree.jsx', import.meta.url), 'utf8');
+    const stale = fs.readFileSync(new URL('./BackupSummaryStale.jsx', import.meta.url), 'utf8');
+    expect(tree).toMatch(/data-vc-row=\{r\.id\}/);
     expect(sum).toMatch(/<VeeamHeader active="summary"/);
+    expect(stale).toMatch(/error\?\.status === 403/);   // Detail 이 거부된 계정 — 서버 403 을 권한 안내로(목록을 싣지 않는다)
     const det = fs.readFileSync(new URL('./BackupDetailTool.jsx', import.meta.url), 'utf8');
     expect(det).toMatch(/<VeeamHeader active="detail"/);
-    expect(sum + det).not.toMatch(/textTransform/);
+    expect(sum + det + tree + stale).not.toMatch(/textTransform/);
   });
 });
 
