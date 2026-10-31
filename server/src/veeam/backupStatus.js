@@ -196,6 +196,9 @@ export function vmBackupView(vm, ve, evEntry, { veeamKnown = true, snapKnown = t
     lb: isFin(ve.lb) ? ve.lb : null, lbSrc: ve.lbSrc || '', lastResult: ve.lastResult || '', ag: ve.ag === 1,
     ...(ve.lr ? { lr: String(ve.lr).slice(0, 32) } : {}),   // v2.780: 그 VM 의 마지막 task 결과(작업 결과보다 먼저 본다)
     ...(ve.lr && isFin(ve.lrt) ? { lrt: ve.lrt } : {}),   // v2.835: 그 결과가 끝난 시각(backupPolicy.recentErrorsOf — 24시간 창)
+    ...(ve.lr && isFin(ve.lrs) ? { lrs: ve.lrs } : {}),   // v2.837 그 결과의 시작 시각(Summary '백업 기간')
+    ...(isFin(ve.sz) && ve.sz >= 0 ? { sz: ve.sz } : {}),   // v2.837 복원 지점 크기 합(바이트 — 모르면 키 없음, 0 으로 두지 않는다)
+    ...(isFin(ve.nr) ? { nr: ve.nr } : {}),   // v2.837 Veeam 잡 다음 실행(가장 이른 것)
   } : null;
   const ev = Array.isArray(evEntry) && isFin(evEntry[0]) ? { ts: evEntry[0], n: Number.isInteger(evEntry[1]) ? evEntry[1] : null } : null;
   return {

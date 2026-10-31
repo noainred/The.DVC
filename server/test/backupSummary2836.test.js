@@ -88,7 +88,7 @@ test('② RPO · 찾기 — 웹 rpoCell · findStale 과 같은 답(같은 입�
 });
 
 test('② 찾기 조건 정규화 · 상한', () => {
-  assert.deepEqual(AG.staleQueryOf({}), { n: null, unit: 'd', src: 'all', excludeNone: true, onlyOn: true, includeNever: true, windowMs: null }, 'n 이 없으면 찾지 않는다');
+  assert.deepEqual(AG.staleQueryOf({}), { n: null, unit: 'd', src: 'all', excludeNone: true, onlyOn: true, includeNever: true, vc: '', windowMs: null }, 'n 이 없으면 찾지 않는다(v2.837 vc = 법인 하나 · 빈 값 = 전체)');
   assert.equal(AG.staleQueryOf({ n: '3', unit: 'h' }).windowMs, 3 * H);
   for (const bad of ['0', '1000', '2.5', '-1', 'abc']) assert.equal(AG.staleQueryOf({ n: bad }).windowMs, null, bad);
   assert.deepEqual([AG.staleQueryOf({ n: 1, unit: 'y', src: 'x' }).unit, AG.staleQueryOf({ n: 1, unit: 'y', src: 'x' }).src], ['d', 'all'], '모르는 값은 기본');

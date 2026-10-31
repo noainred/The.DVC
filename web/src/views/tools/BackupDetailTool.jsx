@@ -13,7 +13,7 @@ import { saveHandoff } from './backupRunText.js';   // v2.818 고른 VM 을 '백
 import { Loading, ErrorBox } from '../../components/ui.jsx';
 import Select from '../../components/Select.jsx';
 import { fmtNum, pctOf, veeamStateOf, filterCounts, buildTree, flattenTree, initialOpen, veeamCell, shortTs, vmClass, loadOpts, saveOpts, scopeQuery, scopeNote, runningCell, CRIT, critOf, MEMO_MAX, marksLine, marksNotice, filterCountText, detailLoadKey, toggleAllVisible, invertVisible, visibleVmIds, folderVmIdMap, folderCheckState, filterLabel, methodOf, bareosCell, methodKeyOf, METHOD_KEYS_MAP, fmtGb, NOT_VEEAM_GAP,
-  POLICIES, CHIP_GROUPS, rpoCell, mismatchCell, lastOkText, nextText, errText, policyGbTotals, folderRpoPct, saveBareosGroupHandoff } from './backupViewText.js';
+  POLICIES, CHIP_GROUPS, rpoCell, mismatchCell, lastOkText, nextText, nextOf, errText, policyGbTotals, folderRpoPct, saveBareosGroupHandoff } from './backupViewText.js';
 import StaleFinder from './BackupStaleFinder.jsx';   // v2.835 백업 안 된 VM 찾기
 import { CritIcon, NeedIcon, NEED_COLOR, MethodBadge } from './BackupMarkIcons.jsx';
 import BackupOptions from './BackupOptions.jsx';
@@ -470,7 +470,7 @@ export default function BackupDetailTool({ scope }) {
                     <div role="gridcell" style={{ padding: '0 6px', textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{vm.v && Number.isFinite(vm.v.rp) && vm.v.rp >= 0 ? vm.v.rp : '—'}</div>
                     <div role="gridcell" style={{ padding: '0 6px', fontFamily: 'var(--mono)', fontSize: 11.5, lineHeight: 1.45, whiteSpace: 'nowrap', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>
                       <span style={{ color: lastOkText(vm) === '모름' ? 'var(--text-dim)' : undefined }}>{lastOkText(vm)}</span>
-                      {vm.nx && <div className="muted" title={`Bareos 그룹 ‘${vm.nx.g}’ 다음 회차`}>다음 {nextText(vm)}</div>}
+                      {nextOf(vm, data?.at) && <div className="muted" title={nextOf(vm, data?.at).title}>다음 {nextText(vm, data?.at)}</div>}
                     </div>
                     <div role="gridcell" style={{ padding: '0 14px 0 6px', fontSize: 11.5, color: '#fca5a5', fontWeight: 700, lineHeight: 1.3 }}>{errText(vm) || <span className="muted" style={{ fontWeight: 400 }}>—</span>}</div>
                   </div>

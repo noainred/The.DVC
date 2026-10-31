@@ -663,8 +663,9 @@ export const folderTail = (folder) => folderParts(folder).slice(-2).join(' › '
 /* ── v2.835 백업 메뉴 개편 1차 — 백업 정책 · 실제 백업 · 정책≠실제 · RPO · 백업 안 된 VM 찾기(사용자 요청 + 시안) ──────────────── */
 const DAY_MS = 86_400_000;
 const finNum = (v) => typeof v === 'number' && Number.isFinite(v);
-/** 찾기 기준 — 서버 backupPolicy.STALE_SOURCES 와 같다(테스트 대조). */
-export const STALE_SOURCES = Object.freeze(['all', 'veeam', 'bareos']);
+/** 찾기 기준 — 서버 backupPolicy.STALE_SOURCES · staleSrcOf 와 같다(테스트 대조). v2.837 'policy' = 정책에 맞는 백업만. */
+export const STALE_SOURCES = Object.freeze(['all', 'veeam', 'bareos', 'policy']);
+export const staleSrcOf = (src, p) => (src === 'policy' ? (p === 'veeam' ? 'veeam' : p === 'bareos' ? 'bareos' : 'all') : (STALE_SOURCES.includes(src) ? src : 'all'));
 /**
  * '백업 안 된 VM 찾기' 한 VM — 서버 veeam/backupPolicy.staleOf 와 한 쌍(같은 입력으로 대조 · 판정을 바꾸면 둘 다).
  *   null(대상 아님) | { kind:'never'|'old'|'unknown', last }. 창 안에 아는 성공이 있으면 대상이 아니다 · 한쪽을 모르면 unknown(따로 센다).
@@ -674,7 +675,7 @@ export function staleOf(vm, { windowMs, now = Date.now(), src = 'all', excludeNo
   if (excludeNone && vm.p === 'none') return null;
   if (onlyOn && vm.power !== 'POWERED_ON') return null;
   const lok = vm.lok || {};
-  const s = STALE_SOURCES.includes(src) ? src : 'all';
+  const s = staleSrcOf(src, vm.p);
   const parts = [];
   if (s !== 'bareos') parts.push({ t: finNum(lok.v) ? lok.v : null, k: lok.vk === true });
   if (s !== 'veeam') parts.push({ t: finNum(lok.b) ? lok.b : null, k: lok.bk === true });
@@ -765,8 +766,18 @@ export function lastOkText(vm) {
   if (l && finNum(l.at)) return shortTs(l.at);
   return l?.never === true ? '없음' : '모름';
 }
-/** 다음 예정 칸 — Bareos 그룹 예약(1차 — Veeam 잡 일정은 3차). */
-export const nextText = (vm) => (vm?.nx && finNum(vm.nx.at) ? `${shortTs(vm.nx.at)} · ${vm.nx.g || '그룹'}` : '—');
+/**
+ * v2.837 다음 예정 — Bareos 그룹 회차(nx) · Veeam 잡 다음 실행(v.nr) 중 지금 뒤 가장 이른 것. 서버 backupSummaryAgg.nextAtOf 와 한 쌍(테스트 대조).
+ * @returns {null | { at:number, src:'bareos'|'veeam', title:string }}
+ */
+export function nextOf(vm, now = Date.now()) {
+  const c = [];
+  if (vm?.nx && finNum(vm.nx.at) && vm.nx.at > now) c.push({ at: vm.nx.at, src: 'bareos', title: `Bareos 그룹 ‘${vm.nx.g || '그룹'}’ 다음 회차` });
+  if (finNum(vm?.v?.nr) && vm.v.nr > now) c.push({ at: vm.v.nr, src: 'veeam', title: `Veeam 잡 다음 실행${Array.isArray(vm.v.jobs) && vm.v.jobs[0] ? `(‘${vm.v.jobs[0]}’ 등)` : ''}` });
+  return c.length ? c.reduce((a, b) => (b.at < a.at ? b : a)) : null;
+}
+/** 다음 예정 칸 글자 — '10-31 23:00 · nightly'(그룹) · '10-31 21:00 · Veeam'. 모르면 '—'. */
+export const nextText = (vm, now = Date.now()) => { const n = nextOf(vm, now); return n ? `${shortTs(n.at)} · ${n.src === 'veeam' ? 'Veeam' : vm.nx.g || '그룹'}` : '—'; };
 /** 최근 24시간 실패·경고 — 'Veeam 실패 · Bareos 경고' · 없으면 ''. */
 export const errText = (vm) => (Array.isArray(vm?.e) ? vm.e.map((x) => `${x.s === 'veeam' ? 'Veeam' : 'Bareos'} ${x.r === 'fail' ? '실패' : '경고'}`).join(' · ') : '');
 /**
@@ -794,7 +805,8 @@ export function addPolicyAgg(agg, vm, { rpoDays = 1, now = Date.now() } = {}) {
   if (r === 'ok') agg.rpoOk++; else if (r === 'bad') agg.rpoMiss++;
   if (Array.isArray(vm?.e) && vm.e.length) agg.err++;
   if (finNum(vm?.lok?.at) && (agg.lok == null || vm.lok.at > agg.lok)) agg.lok = vm.lok.at;
-  if (finNum(vm?.nx?.at) && (agg.nx == null || vm.nx.at < agg.nx)) agg.nx = vm.nx.at;
+  const nx = nextOf(vm, now)?.at ?? null;   // v2.837 그룹 회차 + Veeam 잡(서버 법인 집계와 같은 규칙)
+  if (nx != null && (agg.nx == null || nx < agg.nx)) agg.nx = nx;
 }
 export const newPolicyAgg = () => ({ pol: { veeam: 0, bareos: 0, ssh: 0, none: 0, check: 0, unk: 0 }, act: { v: 0, b: 0, none: 0, unk: 0 }, mm: 0, rpoOk: 0, rpoMiss: 0, err: 0, lok: null, nx: null });
 /** 폴더 RPO 충족률(%) — 충족 / (충족 + 미달) · 대상이 없으면 null. */

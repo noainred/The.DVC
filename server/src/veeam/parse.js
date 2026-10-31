@@ -597,9 +597,11 @@ export function matchToVcenter(vc, vms, results, { refsFor = null, otherHosts = 
       const lb = lastBackupOf(e);
       if (lb && (cur.lb == null || lb.t > cur.lb)) { cur.lb = lb.t; cur.lbSrc = lb.src; }
       // v2.780: 그 VM 의 마지막 task 결과(Success·Warning·Failed) — 서버가 여럿이면 가장 늦게 끝난 것(백업 메뉴의 실패·경고 필터)
-      if (e.lt && e.lt.r && Number.isFinite(e.lt.e) && (!lrAt.has(id) || e.lt.e > lrAt.get(id))) { cur.lr = String(e.lt.r); cur.lrt = e.lt.e; lrAt.set(id, e.lt.e); }   // v2.835 lrt = 그 결과가 끝난 시각(Detail '최근 실패' 24시간 창)
+      if (e.lt && e.lt.r && Number.isFinite(e.lt.e) && (!lrAt.has(id) || e.lt.e > lrAt.get(id))) { cur.lr = String(e.lt.r); cur.lrt = e.lt.e; cur.lrs = Number.isFinite(e.lt.s) && e.lt.s <= e.lt.e ? e.lt.s : null; lrAt.set(id, e.lt.e); }   // v2.835 lrt = 그 결과가 끝난 시각(Detail '최근 실패' 24시간 창)
       if (refsFor && id === refsFor) (cur.refs || (cur.refs = [])).push({ server, result, entry: e });
+      if (Number.isFinite(e.sz) && e.sz >= 0) cur.sz = (cur.sz ?? 0) + e.sz;   // v2.837 복원 지점 크기 합(바이트 — 서버가 여럿이면 더한다 · Summary '백업된 용량')
       for (const jb of okJobs) {
+        if (Number.isFinite(jb.nextRun) && (cur.nr == null || jb.nextRun < cur.nr)) cur.nr = jb.nextRun;   // v2.837 그 VM 이 든 잡의 다음 실행(가장 이른 것 — 지난 시각인지는 쓰는 쪽이 now 로 본다)
         if (cur.jobs.includes(jb.name)) continue;
         cur.jobs.push(jb.name);
         if (jb.lastRun != null && (cur.lastRun == null || jb.lastRun > cur.lastRun)) { cur.lastRun = jb.lastRun; cur.lastResult = jb.lastResult || ''; }

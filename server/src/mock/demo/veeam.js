@@ -40,6 +40,8 @@ export function demoVeeamMatch(vcenterId, vms, now = Date.now()) {
     byVm[v.id] = {
       jobs: [e.job], run: e.run, pg: e.pg, by: e.run ? 'task' : '', rp: e.rpN, lastRun: e.start, lastResult: e.warn ? 'Warning' : 'Success',
       servers: [SERVER], lb: e.end, lbSrc: 'task',
+      sz: Math.round(e.dataGb * GB * (0.35 + e.rpN * 0.04)), nr: e.start + DAY,
+      ...(e.run ? {} : { lr: e.warn ? 'Warning' : 'Success', lrt: e.end, lrs: e.start }),   // 마지막 task 결과(데모 — 도는 중이면 없음)   // v2.837 복원 지점 크기 합 · 다음 실행(데모 — 매일 같은 시각)
     };
   }
   return { byVm, unmatched: 0, otherVcenter: 0, ambiguous: 0 };
