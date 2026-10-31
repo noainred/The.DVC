@@ -7,6 +7,7 @@
  */
 import React, { useMemo, useState } from 'react';
 import { usePolling } from '../../api.js';
+import { useHashTab } from '../../hooks/useHashTab.js';
 import { Loading, ErrorBox } from '../../components/ui.jsx';
 import { STable } from '../../components/STable.jsx';
 import Select from '../../components/Select.jsx';
@@ -16,7 +17,6 @@ import {
   sparkSegments, totalHist, slowRows, levelWord, triggerText, STATE_TEXT,
 } from './bareosLiveText.js';
 
-const VIEW_KEY = 'bareos-live-view';
 const CORP_KEY = 'bareos-live-corp';
 const load = (k, d) => { try { return localStorage.getItem(k) || d; } catch { return d; } };
 const save = (k, v) => { try { localStorage.setItem(k, v); } catch { /* 저장 못 해도 동작 */ } };
@@ -59,11 +59,11 @@ function Bar({ pct, color = '#3b82f6', label }) {
 
 export default function BareosLiveTab() {
   const { data, error } = usePolling('/tools/bareos-backup/live', {}, 15_000);
-  const [view, setViewS] = useState(() => load(VIEW_KEY, 'all'));
+  // 보기는 주소에(#/tools/bareos-backup/live/<보기> — 새로고침·북마크·뒤로가기에서 유지 · CATALOG2613-06 스윕)
+  const [view, setView] = useHashTab({ base: ['tools', 'bareos-backup', 'live'], valid: VIEWS.map(([k]) => k), fallback: 'all' });
   const [corpId, setCorpS] = useState(() => load(CORP_KEY, ''));
   const [filter, setFilter] = useState('active');
   const [q, setQ] = useState('');
-  const setView = (v) => { setViewS(v); save(VIEW_KEY, v); };
   const setCorp = (v) => { setCorpS(v); save(CORP_KEY, v); };
   const corps = useMemo(() => sortCorps(data?.corps || []), [data]);
   const counts = useMemo(() => corpFilterCounts(corps), [corps]);
