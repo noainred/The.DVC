@@ -473,3 +473,5 @@
   v2.838 Summary 아래 두 구획(용량과 일정 · 통합 에러 로그)은 **무거운 집계라 폴링하지 않는다**(처음 · 기간 · 새로고침) · 자료가 없는 칸은 출처를 밝히고 '—(2차)' — 30일 선은 'Veeam 저장소 사용(EM)' 이지 백업 용량 추이가 아니다 · 열기 링크는 권한이 없으면 그리지 않는다(`backupSummaryPlan.errorOpen`).
   v2.839 Bareos '정책 · 일정'(`#/tools/bareos-summary/policy` — 조회 전용 키 아래 하위 탭 · `useHashTab`)은 **수집 중일 때만** 5초 뒤 다시 읽는다(평소 폴링 없음) · 기본 `tbody td` 는 nowrap 이라 긴 칸은 `WRAPBOX`(whiteSpace normal + 최대 폭)로 감싼다 — 안 그러면 옆 칸을 덮는다(Chromium 1440 확인) · JobDefs 빈 칸은 '기본'.
   v2.840 '보존 · 풀'(`#/tools/bareos-summary/pools` — 같은 키 · 폴링 없음)의 볼륨 즉시 조회는 서버 `canQuery` + `toolAllowed('bareos-backup')` 둘 다일 때만 버튼 · 관리 도구 탭 줄(BareosBackupTool)에도 정책 · 일정 · 보존 · 풀 링크를 백업 그룹 뒤에 둔다(bareosSubTabs 와 같은 순서 — 2.839 에 빠졌었다) · 기존 표의 칸에 줄을 더할 때는 그 칸을 원래 폭 안에서 줄바꿈시킨다(nowrap 한 줄이 길어지면 표가 넓어진다 — 백업 대상 표 A/B 로 확인).
+  v2.840 후속: 버튼이 여러 개인 '작업' 칸을 `min-width` 로 넓히지 말 것 — 백업 대상 표는 그 236px 때문에 1440 에서 '작업' 열이 잘렸다. 고정 폭 2열 격자(`TARGET_ACT_W`) · 선택 상자는 `gridColumn: '1 / -1'` ·
+  격자 안 `.logout-btn` 은 `marginLeft: 0`(전역 6px 가 width 100% 와 겹쳐 칸을 넘는다) · 배지는 이름 아래 줄바꿈 상자(`bareosTargetsWidth.test.js`).
