@@ -60,7 +60,7 @@ async function runSetupOne(kind, dir, args, secretArgs, signal) {
     case 'setup.fdIni': return setupFdIni({ ...b, vcpass: String(secretArgs.vcpass ?? '') }, { site, signal });
     case 'setup.fdPlugin': return setupFdPlugin(b, { dir, signal });
     // v2.845 법인별 설정 — 중앙이 판정한 입력을 엣지가 **같은 함수로 다시** 판정한다(받은 값을 믿지 않는다). 계정 비밀번호는 secretArgs 로만.
-    case 'setup.scan': return applyManage({ action: 'scan' }, b, {}, { signal });
+    case 'setup.scan': return applyManage(planManage('scan', args?.input && typeof args.input === 'object' ? args.input : {}), b, {}, { signal });
     case 'setup.manage': {
       const input = args?.input && typeof args.input === 'object' ? args.input : {};
       const known = args?.known && typeof args.known === 'object' ? args.known : {};

@@ -139,11 +139,15 @@ api.get(`${P}/:directorId/config`, adminOnly, fullScopeOnly, async (req, res) =>
 api.post(`${P}/:directorId/scan`, adminOnly, fullScopeOnly, fullWriteOnly, async (req, res) => {
   const d = directorFor(req, res); if (!d) return;
   if (demoGuestDeny(req, res)) return;
-  let ssh;
-  try { ssh = isDemoActive() ? { host: '', password: '' } : resolveSsh(d, req.body?.ssh); } catch (e) { return sendErr(res, e); }
+  let ssh; let plan;
+  const input = req.body?.input && typeof req.body.input === 'object' ? { path: req.body.input.path } : {};
+  try {
+    plan = planManage('scan', input);
+    ssh = isDemoActive() ? { host: '', password: '' } : resolveSsh(d, req.body?.ssh);
+  } catch (e) { return sendErr(res, e); }
   if (!claimSetup(d.id, ssh.host)) return res.status(409).json({ ok: false, reason: setupBusyReason(d.id, ssh.host) || '진행 중인 작업이 있습니다.' });
   try {
-    const r = await runManage(d, { plan: { action: 'scan' }, known: {}, input: {} }, ssh);
+    const r = await runManage(d, { plan, known: {}, input }, ssh);
     res.json({ ok: true, directorId: d.id, ...r });
   } catch (e) { sendErr(res, e); } finally { releaseSetupLock(d.id, ssh.host); }
 });
@@ -218,7 +222,7 @@ api.get(PA, adminOnly, fullScopeOnly, async (req, res) => {
 
 /**
  * 일괄 — 같은 계정을 고른 법인마다(추가 · 비밀번호 · 삭제). OTP 는 한 번(입력 판정 뒤). 법인마다 잠금 · SSH(등록부 또는 그 법인 입력 — 없으면 '보내지 않음') ·
- * 판정(그 법인 설정으로) · 실행. 한 법인의 실패가 다른 법인을 막지 않는다. 비밀번호는 모든 법인에 같은 값(생성이면 응답에 한 번).
+ * 판정(그 법인 설정으로) · 실행. 한 법인의 실패가 다른 법인을 막지 않는다. 비밀번호: 입력이면 모든 법인 같은 값 · 생성이면 **법인마다 다른 값**(결과 행에 한 번).
  */
 api.post(`${PA}/bulk`, adminOnly, fullScopeOnly, fullWriteOnly, async (req, res) => {
   if (demoGuestDeny(req, res)) return;
@@ -252,10 +256,12 @@ api.post(`${PA}/bulk`, adminOnly, fullScopeOnly, fullWriteOnly, async (req, res)
     try {
       const planned = await planFor(d, action, input);
       sum = planSummary(planned.plan);
-      const r = await runManage(d, { ...planned, input }, ssh, { accountPassword: acct.pw });
+      // 생성이면 **법인마다 다른** 비밀번호(사용자 시안 — 한 법인의 비밀번호가 새도 다른 법인은 그대로) · 결과 행에 한 번만
+      const pw = acct.generated ? newAccountPassword() : acct.pw;
+      const r = await runManage(d, { ...planned, input }, ssh, { accountPassword: pw });
       forgetConfig(d.id);
-      audit(req, `Bareos 계정 통합(${label})`, d.name, `성공 — ${sum} · ${(r.files || []).map((f) => `${f.path}(${f.action})`).join(', ')}${acct.generated ? ' · 비밀번호 생성(응답에 한 번 표시)' : ''}`);
-      return { ...row, ok: true, status: 'done', files: r.files || [], relay: r.relay || '' };
+      audit(req, `Bareos 계정 통합(${label})`, d.name, `성공 — ${sum} · ${(r.files || []).map((f) => `${f.path}(${f.action})`).join(', ')}${acct.generated ? ' · 법인별 비밀번호 생성(응답에 한 번 표시)' : ''}`);
+      return { ...row, ok: true, status: 'done', files: r.files || [], relay: r.relay || '', ...(acct.generated && pw ? { generatedPassword: pw } : {}) };
     } catch (e) {
       audit(req, `Bareos 계정 통합(${label})`, d.name, `실패 — ${sum} · ${auditReason(e)}`);
       const code = isSshAuthError(e) ? 'ssh-auth' : isSshHostKeyError(e) ? 'ssh-hostkey' : (e?.code || 'error');
@@ -266,7 +272,7 @@ api.post(`${PA}/bulk`, adminOnly, fullScopeOnly, fullWriteOnly, async (req, res)
     }
   };
   await Promise.all(Array.from({ length: Math.min(4, dirs.length) }, async () => { while (next < dirs.length) { const k = next++; results[k] = await one(dirs[k]); } }));
-  res.json({ ok: true, action, account: input.name, results, ...(acct.generated && results.some((r) => r.ok) ? { generatedPassword: acct.pw } : {}) });
+  res.json({ ok: true, action, account: input.name, results, passwordMode: acct.generated ? 'per-corp-generated' : (acct.pw ? 'same-input' : 'none') });
 });
 
 }

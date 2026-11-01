@@ -63,7 +63,14 @@ export function planManage(action, a = {}, known = {}) {
   const profiles = Array.isArray(cfg.profiles) ? cfg.profiles : [];
   const name = String(a.name ?? '').trim();
   switch (action) {
-    case 'scan': return { action };
+    case 'scan': {
+      // 선택: 추가하려는 볼륨 경로 점검(읽기만 — 있는지 · 심링크 · 상위 마운트 · 여유 · SELinux). 값은 volumeDirIssue 를 지난 것만 명령에 넣는다.
+      const p = String(a.path ?? '').trim();
+      if (!p) return { action };
+      const vi = volumeDirIssue(p);
+      if (vi) throw fail('invalid', vi);
+      return { action, path: p };
+    }
     case 'storage.add': {
       if (!isResourceName(name)) throw fail('invalid', '스토리지 이름은 영문 · 숫자 · ._- 64자 이하로 적습니다.');
       if (storages.some((s) => s.name.toLowerCase() === name.toLowerCase())) throw fail('invalid', `‘${name}’ 스토리지가 이미 있습니다.`);
@@ -135,13 +142,20 @@ const TEST = {
 const tail = (t, n = 600) => String(t ?? '').slice(-n);
 
 /** 디스크 · 볼륨 · 표지 읽기(쓰기 없음) — 출력 섹션. 경로는 정규식을 지난 것만 명령에 넣는다. */
-export function scanScript() {
+export function scanScript(checkPath = '') {
+  const p = checkPath && !volumeDirIssue(checkPath) ? checkPath : '';
   return [
     'export LC_ALL=C',
     `echo @@sd; for f in ${SD_CONF_ROOT}/device/*.conf; do [ -f "$f" ] || continue; m=$(head -n 1 "$f" | grep -c 'managed-by: vmware-portal'); n=$(sed -n 's/^[[:space:]]*Name[[:space:]]*=[[:space:]]*"\\{0,1\\}\\([A-Za-z0-9._-]*\\).*/\\1/Ip' "$f" | head -n 1); a=$(sed -n 's/^[[:space:]]*Archive[[:space:]]*Device[[:space:]]*=[[:space:]]*"\\{0,1\\}\\([^"]*\\)"\\{0,1\\}[[:space:]]*$/\\1/Ip' "$f" | head -n 1); c=$(sed -n 's/^[[:space:]]*Count[[:space:]]*=[[:space:]]*\\([0-9]*\\).*/\\1/Ip' "$f" | head -n 1); echo "$(basename "$f")|$m|$n|$a|$c"; done`,
     `echo @@files; for d in console storage pool schedule; do for f in ${DIR_CONF_ROOT}/$d/*.conf; do [ -f "$f" ] || continue; echo "$d|$(basename "$f" .conf)|$(head -n 1 "$f" | grep -c 'managed-by: vmware-portal')"; done; done`,
     'echo @@disk',
     `for f in ${SD_CONF_ROOT}/device/*.conf; do sed -n 's/^[[:space:]]*Archive[[:space:]]*Device[[:space:]]*=[[:space:]]*"\\{0,1\\}\\([^"]*\\)"\\{0,1\\}[[:space:]]*$/\\1/Ip' "$f" 2>/dev/null; done | sort -u | while read -r d; do case "$d" in (/*) ;; (*) continue;; esac; if [ -d "$d" ]; then n=$(find "$d" -maxdepth 1 -type f 2>/dev/null | wc -l); u=$(du -sk "$d" 2>/dev/null | cut -f1); df -Pk "$d" 2>/dev/null | awk -v d="$d" -v n="$n" -v u="$u" 'NR==2{print d"|"n"|"u"|"$4"|"$2"|"$6}'; else echo "$d|missing"; fi; done`,
+    ...(p ? [
+      'echo @@path',
+      `if [ -L ${p} ]; then echo KIND=LINK; elif [ -d ${p} ]; then echo KIND=DIR; elif [ -e ${p} ]; then echo KIND=OTHER; else echo KIND=NONE; fi; [ "$(realpath -m -- ${p})" = "${p}" ] && echo CANON=1`,
+      `q=${p}; while [ ! -e "$q" ] && [ "$q" != / ]; do q=$(dirname "$q"); done; echo "PARENT=$q"; df -Pk "$q" 2>/dev/null | awk 'NR==2{print "DF="$4"|"$2"|"$6}'; t=$(findmnt -n -o FSTYPE --target "$q" 2>/dev/null | head -n 1); echo "FS=$t"`,
+      `if [ -d ${p} ]; then echo "FILES=$(find ${p} -maxdepth 1 -type f 2>/dev/null | wc -l)"; fi; if command -v getenforce >/dev/null 2>&1; then echo "SE=$(getenforce 2>/dev/null)"; else echo SE=none; fi`,
+    ] : []),
     'echo @@end',
   ].join('\n');
 }
@@ -156,7 +170,17 @@ export function parseScan(text) {
     const kb = (x) => { const v = numOrNull(x); return v === null ? null : v * 1024; };
     return { path: p, files: numOrNull(n), usedBytes: kb(u), availBytes: kb(av), sizeBytes: kb(sz), mount: mnt || '' };
   });
-  return { complete: Object.prototype.hasOwnProperty.call(sec, 'end'), devices, files, disks };
+  let pathCheck = null;
+  if (sec.path) {
+    const kv = Object.fromEntries(sec.path.map((l) => { const i = l.indexOf('='); return i > 0 ? [l.slice(0, i), l.slice(i + 1)] : [l, '']; }));
+    const [av, sz, mnt] = String(kv.DF || '').split('|');
+    const kb = (x) => { const v = numOrNull(x); return v === null ? null : v * 1024; };
+    pathCheck = {
+      kind: ['DIR', 'NONE', 'LINK', 'OTHER'].includes(kv.KIND) ? kv.KIND.toLowerCase() : 'unknown', canonical: kv.CANON === '1',
+      parent: kv.PARENT || '', availBytes: kb(av), sizeBytes: kb(sz), mount: mnt || '', fsType: kv.FS || '', files: numOrNull(kv.FILES), selinux: kv.SE || '',
+    };
+  }
+  return { complete: Object.prototype.hasOwnProperty.call(sec, 'end'), devices, files, disks, ...(pathCheck ? { pathCheck } : {}) };
 }
 
 /**
@@ -172,7 +196,7 @@ export async function applyManage(plan, b = {}, secret = {}, ctx = {}) {
   const mask = (t) => maskSecrets(String(t ?? '').split('\n').map((l) => (secrets.some((s) => s.length >= 4 && l.includes(s)) ? '(비밀과 같은 글자가 있어 이 줄을 싣지 않습니다)' : l)).join('\n'), secrets)
     .replace(/(password\s*=\s*)("[^"]*"|\S+)/gi, '$1(가림)');
   if (plan.action === 'scan') {
-    const r = await R.runSsh(ssh, async (api) => { await R.requireRoot(api.exec); return { text: String((await api.exec(scanScript(), 90_000))?.stdout || '') }; }, ctx.signal);
+    const r = await R.runSsh(ssh, async (api) => { await R.requireRoot(api.exec); return { text: String((await api.exec(scanScript(plan.path || ''), 90_000))?.stdout || '') }; }, ctx.signal);
     return parseScan(r.text);
   }
   const placed = []; const madeDirs = []; let settled = false; let restarted = false; let reloaded = false;

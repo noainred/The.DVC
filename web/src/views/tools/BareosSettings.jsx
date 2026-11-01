@@ -5,6 +5,8 @@ import { STable } from '../../components/STable.jsx';
 import Select from '../../components/Select.jsx';
 import BoldText from '../../components/boldText.jsx';
 import BareosInstallPanel from './BareosInstall.jsx';
+import BareosCorpPanel from './BareosCorp.jsx';
+import BareosAccountsPanel from './BareosAccounts.jsx';
 import { requireChanged } from '../changeResult.js';
 import { droppedSecretNote } from '../droppedSecretText.js';
 import {
@@ -25,6 +27,8 @@ import {
  */
 const BASE = '/tools/bareos-backup';
 const ROW = { display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' };
+// v2.845 설정 하위 탭(시안 — 완전 설치 · 법인별 Bareos · 계정 통합은 이 탭 안에서만 보인다: 일반 사용자 메뉴에 없음)
+const SUB_TABS = [['base', '기본 설정(Director · 자동 설정)'], ['install', '완전 설치'], ['corp', '법인별 Bareos'], ['accounts', '계정 통합(중앙)']];
 const NOTE = { padding: '8px 12px', marginBottom: 10, fontSize: 12.5, lineHeight: 1.6 };
 const BTN = { padding: '4px 9px', fontSize: 12 };
 // 전역 .input 의 min-width 220px 이 격자 칸·표 칸 입력을 밀어낸다 — 칸 안 입력은 이것으로.
@@ -77,7 +81,8 @@ export default function SettingsTab({ onSaved, writable = true }) {
   const [adding, setAdding] = useState(false);
   const [defs, setDefs] = useState(null);
   const [busy, setBusy] = useState(false);
-  const [installOpen, setInstallOpen] = useState(false);   // v2.844 완전 설치(훅은 조기 return 위)
+  // v2.845 설정 하위 탭 — 기본 설정(Director · 매핑 · 자동 설정) · 완전 설치(v2.844) · 법인별 Bareos · 계정 통합(중앙). 훅은 조기 return 위.
+  const [sub, setSub] = useState('base');
   const gen = useRef(0);
   // W14: 늦게 온 이전 응답은 버린다 · keepDefs: 저장하지 않은 공통 기본값 편집은 버리지 않는다
   const load = (keepDefs = true) => {
@@ -89,8 +94,17 @@ export default function SettingsTab({ onSaved, writable = true }) {
     }).catch((e) => { if (g === gen.current) setErr(e); });
   };
   useEffect(() => { load(false); }, []);
-  if (err && !s) return <ErrorBox error={err} />;
-  if (!s || !defs) return <Loading />;
+  const nav = (
+    <div style={{ ...ROW, marginBottom: 10 }} role="tablist" aria-label="Bareos 설정 하위 탭">
+      {SUB_TABS.map(([k, l]) => <button key={k} type="button" role="tab" aria-selected={sub === k} className={`tab${sub === k ? ' active' : ''}`} onClick={() => setSub(k)}>{l}</button>)}
+      <span className="muted" style={{ fontSize: 11.5 }}>전 법인 범위 관리자에게만 보입니다</span>
+    </div>
+  );
+  if (sub === 'install') return <div>{nav}<BareosInstallPanel writable={writable} /></div>;
+  if (sub === 'corp') return <div>{nav}<BareosCorpPanel writable={writable} /></div>;
+  if (sub === 'accounts') return <div>{nav}<BareosAccountsPanel writable={writable} /></div>;
+  if (err && !s) return <div>{nav}<ErrorBox error={err} /></div>;
+  if (!s || !defs) return <div>{nav}<Loading /></div>;
   const vcName = (id) => s.vcenters.find((v) => v.id === id)?.name || id;
   const unbound = s.vcenters.filter((v) => !s.sites.some((x) => x.vcenterId === v.id));
   const dir = s.directors.find((d) => d.id === sel) || null;
@@ -112,6 +126,7 @@ export default function SettingsTab({ onSaved, writable = true }) {
 
   return (
     <div>
+      {nav}
       {s.demo && <div className="card" style={{ ...NOTE, borderLeft: '3px solid var(--amber)' }}>데모 모드 — 아래 값은 메모리의 데모 설정입니다(지역마다 데모 Director · 편집·저장 안 됨). 실제 Director 를 추가하면 데모가 꺼지고 그쪽 설정으로 바뀝니다.</div>}
       {s.loadError && <div className="banner bad" style={{ marginBottom: 10 }}>설정 파일을 읽지 못했습니다(손상본 보존) — {s.loadError.reason}</div>}
       {/* v2.825.1 버그 점검(G12): 쓰기 범위가 지정된 계정은 서버(fullWriteOnly)가 403 으로 막는다 — 화면이 미리 잠그고 사유를 말한다 */}
@@ -119,17 +134,6 @@ export default function SettingsTab({ onSaved, writable = true }) {
       {err && <div className="banner bad" role="alert" style={{ marginBottom: 10 }}>설정을 다시 읽지 못했습니다({String(err.message || err).slice(0, 160)}) — 화면 값이 최신이 아닐 수 있어 저장을 잠갔습니다. <button type="button" className="logout-btn" style={BTN} onClick={() => load(true)}>다시 읽기</button></div>}
       <Msg m={msg} />
 
-      {/* v2.844 완전 설치(사용자 결정 '설치 기능은 설정에 넣어 일반 유저는 못 보게' — 이 탭 자체가 관리자 · 전 법인 범위만 보인다) */}
-      <div className="card" style={{ padding: 14, marginTop: 10, minWidth: 0 }}>
-        <div style={ROW}>
-          <div style={{ minWidth: 0, flex: '1 1 420px' }}>
-            <b>법인 Bareos 완전 설치</b>
-            <div className="muted" style={{ fontSize: 12, marginTop: 2 }}>법인의 엣지 노드에 오프라인 번들로 Bareos(Director · SD · FD · VMware 플러그인 · WebUI)를 설치하고 Director 를 등록합니다 — 사전 점검(쓰기 없음) → 계획 → 실행 → 마무리. Director 가 이미 있는 법인은 초기화 후 재설치를 고를 수 있습니다.</div>
-          </div>
-          <button type="button" className="login-btn" style={{ flex: 'none', padding: '8px 16px' }} onClick={() => setInstallOpen((x) => !x)} aria-expanded={installOpen}>{installOpen ? '완전 설치 닫기' : '완전 설치 열기'}</button>
-        </div>
-      </div>
-      {installOpen && <BareosInstallPanel writable={writable} />}
 
       <div className="card" style={{ padding: 14, marginTop: 10, marginBottom: 12, minWidth: 0 }}>
         <div style={ROW}>

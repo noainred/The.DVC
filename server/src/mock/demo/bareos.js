@@ -162,12 +162,14 @@ const levelChar = (l) => (/^f/i.test(l) ? 'F' : /^d/i.test(l) ? 'D' : 'I');
  * v2.845 법인별 설정 데모 — Director 마다 메모리 사본(스토리지 · 콘솔 · Profile). 데모 쓰기(추가 · 비밀번호 · 삭제)는 이 사본만 바꾼다(장비에 닿지 않는다).
  */
 const _corpCfg = new Map();
-export function demoCorpConfig(directorId = 'demo', first = true) {
+export function demoCorpConfig(directorId = 'demo', first = true, siteStorages = []) {
   const k = String(directorId || 'demo');
   if (!_corpCfg.has(k)) {
     _corpCfg.set(k, {
       storages: [
         { name: 'File', address: 'bareos-demo.local', device: 'FileStorage', mediaType: 'File', mcj: 10, portal: false },
+        // 매핑이 쓰는 스토리지(사람이 만든 설정 — 데모 매핑과 같은 이름이라 '매핑에 들어 있음' 판정이 보인다)
+        ...[...new Set(siteStorages.filter(Boolean))].slice(0, 6).map((n, i) => ({ name: n, address: 'bareos-demo.local', device: `${n}-dev`, mediaType: `${n}-media`, mcj: 10, portal: false, path: `/srv/bareos/vol${i + 1}` })),
         ...(first ? [{ name: 'PortalFile', address: '10.20.0.14', device: 'PortalFileStorage', mediaType: 'PortalFile', mcj: 10, portal: true, path: '/var/lib/bareos/storage' }] : []),
       ],
       consoles: [
@@ -234,7 +236,7 @@ function demoPolicy(head, words, settings, directorId, kv = {}, now = Date.now()
   }
   // v2.845 법인별 설정 조회 데모 — 실제 Director 처럼 **비밀번호 칸을 싣는다**(포탈 정규화가 버리는지 시험 · 화면에 나오면 안 된다)
   if (head === 'show' && ['storages', 'consoles', 'profiles'].includes(words[1])) {
-    const c = demoCorpConfig(directorId, first);
+    const c = demoCorpConfig(directorId, first, sites.map((x) => x.storage));
     if (words[1] === 'storages') return { storages: Object.fromEntries(c.storages.map((x) => [x.name, { name: x.name, address: x.address, password: 'demo-sd-secret', device: [x.device], mediatype: [x.mediaType], maximumconcurrentjobs: x.mcj, ...(x.description ? { description: x.description } : {}) }])) };
     if (words[1] === 'consoles') return { consoles: Object.fromEntries(c.consoles.map((x) => [x.name, { name: x.name, password: 'demo-console-secret', ...(x.profile ? { profile: [x.profile] } : {}), ...(x.tls === false ? { tlsenable: false } : {}), ...(x.acl ? { commandacl: x.acl } : {}) }])) };
     return { profiles: Object.fromEntries(c.profiles.map((p) => [p.name, { name: p.name, ...(p.description ? { description: p.description } : {}), commandacl: p.acl }])) };

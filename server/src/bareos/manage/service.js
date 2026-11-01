@@ -60,6 +60,7 @@ export function sshSourceFor(d, { settings, inventory = [], deployTargets = [], 
 
 /** 지금 값으로(라우트용). */
 export function sshSource(d) {
+  if (isDemoActive()) return { source: 'demo', host: '', port: 22, username: 'root', why: '데모 모드 — 장비에 접속하지 않습니다(SSH 를 쓰지 않음).' };
   let inventory = []; try { inventory = listInventory(); } catch { inventory = []; }
   let deployTargets = []; try { deployTargets = listTargetsRaw(); } catch { deployTargets = []; }
   let known = new Map(); try { known = knownHostAddrs(); } catch { known = new Map(); }

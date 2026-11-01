@@ -4,6 +4,7 @@
  * 모양: `.api json` 의 `show <종류>` 는 `{ <복수형>: { <이름>: { name, …소문자 키 } } }`(v2.839 실측 — show schedules·jobdefs·filesets).
  *   `show storages`·`show consoles`·`show profiles` 의 칸 모양은 **실측 전(추정)** — 문자열·배열 둘 다 받는다(jobdefs 의 storage 는 배열이었다).
  * ★ 비밀번호 칸(password)은 **고르지 않는다** — 아는 칸만 새 객체에 옮긴다(원문 객체를 그대로 돌려주지 않는다). 시험이 password 가 결과에 없음을 고정한다.
+ * ★ 멱등: 정규화한 결과(camelCase 칸)를 다시 넣어도 같은 결과여야 한다(엣지가 거른 회신을 중앙이 다시 거른다 — maxConcurrentJobs · pam 은 두 이름을 다 받는다 · 시험 고정).
  * 규칙: 외부 입력 — 문자열 자르기 · 제어문자 지우기 · 수는 numOrNull(못 읽으면 null) · 행 수 상한.
  */
 import { numOrNull } from '../../util/numOrNull.js';
@@ -32,7 +33,7 @@ export function normShowStorages(v) {
     return {
       name: str(x.name || k, 64), address: str(first(x.address), 253), port: numOrNull(first(x.port ?? x.sdport)),
       device: list(x.device, 64, 20), mediaType: list(x.mediatype, 64, 20),
-      maxConcurrentJobs: numOrNull(first(x.maximumconcurrentjobs)), description: str(first(x.description), 200),
+      maxConcurrentJobs: numOrNull(first(x.maximumconcurrentjobs ?? x.maxconcurrentjobs)), description: str(first(x.description), 200),
     };
   });
 }
@@ -43,7 +44,7 @@ export function normShowConsoles(v) {
     const x = lowerKeys(raw);
     return {
       name: str(x.name || k, 64), profile: list(x.profile, 64, 10), tlsEnable: tri(x.tlsenable),
-      pam: tri(x.usepamauthentication), description: str(first(x.description), 200),
+      pam: tri(x.usepamauthentication ?? x.pam), description: str(first(x.description), 200),
       // 콘솔 자체에 ACL 이 걸린 경우(bareos-mon 처럼 Profile 없이) — 명령 ACL 몇 개만 보인다
       commandAcl: list(x.commandacl, 40, 20),
     };
@@ -101,5 +102,10 @@ export function normScanResult(v) {
     files: arr(r.files, 2000).filter((f) => ['console', 'storage', 'pool', 'schedule'].includes(f.type)).map((f) => ({ type: f.type, name: str(f.name, 64), portal: f.portal === true })),
     disks: arr(r.disks, 200).map((d) => (d.missing === true ? { path: path(d.path), missing: true }
       : { path: path(d.path), files: size(d.files), usedBytes: size(d.usedBytes), availBytes: size(d.availBytes), sizeBytes: size(d.sizeBytes), mount: path(d.mount) })).filter((d) => d.path),
+    ...(isObj(r.pathCheck) ? { pathCheck: {
+      kind: ['dir', 'none', 'link', 'other'].includes(r.pathCheck.kind) ? r.pathCheck.kind : 'unknown', canonical: r.pathCheck.canonical === true,
+      parent: path(r.pathCheck.parent), availBytes: size(r.pathCheck.availBytes), sizeBytes: size(r.pathCheck.sizeBytes), mount: path(r.pathCheck.mount),
+      fsType: str(r.pathCheck.fsType, 32), files: size(r.pathCheck.files), selinux: str(r.pathCheck.selinux, 20),
+    } } : {}),
   };
 }

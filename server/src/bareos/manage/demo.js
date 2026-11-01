@@ -5,6 +5,7 @@
  */
 import { demoCorpConfig } from '../../mock/demo/bareos.js';
 import { passwordIssue } from './apply.js';
+import { effectiveSettings } from '../service.js';
 
 const fail = (code, message) => Object.assign(new Error(message), { code });
 const lc = (s) => String(s ?? '').toLowerCase();
@@ -31,11 +32,20 @@ function scanOf(directorId, c) {
 
 /** plan(planManage 결과) 적용. @returns scan 이면 scan 모양, 쓰기면 { ok, files, restarted, reloaded, demo } */
 export function applyDemo(directorId, plan, { accountPassword = '' } = {}) {
-  const c = demoCorpConfig(directorId, true);
+  const st = effectiveSettings();   // 조회(demoPolicy)와 같은 인자로 — 먼저 쓰기가 오더라도 같은 데모 설정을 만든다
+  const c = demoCorpConfig(directorId, (st.directors || [])[0]?.id === directorId, (st.sites || []).filter((x) => x.directorId === directorId).map((x) => x.storage));
   const res = (files, restarted = false) => ({ ok: true, files, restarted, reloaded: true, demo: true });
   const cpath = (n) => `/etc/bareos/bareos-dir.d/console/${n}.conf`;
   switch (plan.action) {
-    case 'scan': return scanOf(directorId, c);
+    case 'scan': {
+      const r = scanOf(directorId, c);
+      if (!plan.path) return r;
+      const known = r.disks.find((d) => plan.path.startsWith(d.path));
+      const nfs = plan.path.startsWith('/mnt/') || plan.path.startsWith('/srv/');
+      return { ...r, pathCheck: { kind: known && known.path === plan.path ? 'dir' : 'none', canonical: true, parent: known ? known.path : plan.path.split('/').slice(0, 2).join('/') || '/',
+        availBytes: nfs ? 6.1 * 1024 ** 4 : known?.availBytes ?? 1.2 * 1024 ** 4, sizeBytes: nfs ? 8 * 1024 ** 4 : known?.sizeBytes ?? 2 * 1024 ** 4, mount: nfs ? plan.path.split('/').slice(0, 3).join('/') : '/var',
+        fsType: nfs ? 'nfs4' : 'xfs', files: known && known.path === plan.path ? known.files : null, selinux: 'Enforcing' } };
+    }
     case 'console.add': {
       const pi = passwordIssue(accountPassword); if (pi) throw fail('invalid', pi);
       if (c.consoles.some((x) => lc(x.name) === lc(plan.name))) throw fail('conflict', `${cpath(plan.name)} 가 이미 있습니다 — 아무것도 바꾸지 않았습니다.`);
