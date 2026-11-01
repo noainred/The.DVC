@@ -15,6 +15,8 @@
 # 근거(docs/BAREOS-VMWARE-ROCKY9-INSTALL.md — 현장 실측 포함):
 #   - 패키지 목록은 그 문서 4.2(에어갭) 의 목록 + bareos-tools·SELinux 도구. VDDK 는 bareos-vmware-plugin → bareos-vadp-dumper →
 #     bareos-vmware-vix-disklib 의존으로 함께 받는다(문서 7.1 — 번들을 만들 때 의존 해석이 실제로 확정한다).
+#   - ⚠ download.bareos.org/current 는 **사전 공개판**(예: 25.1.2~pre73 — 'Bareos experimental Signing Key' 서명)이다(CI 1차 실측 2026-11-01).
+#     현장(문서 7.4)도 같은 판을 쓴다. 정식판은 구독 저장소(download.bareos.com — 자격증명 필요)라 BAREOS_REPO 로 바꿀 수 있게 둔다.
 #   - pyVmomi 는 RPM 의존이 아니다(Bareos 21~). Rocky 9 의 Python 3.9 에서 9.x 는 'Python 3.10 or newer is required' 로 플러그인이 시작하지 못했다
 #     (문서 7.4 현장 기록) — 8.x 만 휠로 넣는다(PyPI 에는 8.x 가 sdist 뿐이라 여기서 휠로 만든다).
 #   - --alldeps: 대상 서버에 무엇이 깔려 있는지 모르므로 의존 전체를 받는다. 대상에 이미 있는 판이 요구를 채우면 dnf 는 그것을 쓴다.
@@ -46,7 +48,8 @@ B="$WORK/bareos-bundle"
 mkdir -p "$B/rpms" "$B/wheels" "$B/keys" "$OUT"
 
 echo "== RPM 받기(의존 전체)"
-dnf download --resolve --alldeps --destdir "$B/rpms" "${INSTALL_PKGS[@]}"
+# 저장소에 aarch64 판도 있어 이름만 주면 두 아키텍처가 함께 걸린다(CI 1차 실패 — conflicting requests) → x86_64·noarch 로 한정
+dnf download --arch x86_64 --arch noarch --resolve --alldeps --destdir "$B/rpms" "${INSTALL_PKGS[@]}"
 createrepo_c "$B/rpms"
 
 echo "== 서명 키"
