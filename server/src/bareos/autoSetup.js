@@ -424,9 +424,15 @@ export async function setupDirector(b = {}, ctx = null) {
   //    (그대로 두면 같은 이름 콘솔을 다시 만든 경우 Director 만 새 비밀번호가 되어 쓰던 연결이 끊긴다).
   const conn = { host: ssh.host, port: directorPort, name: consoleName, password, timeoutMs: dir.timeoutMs, tlsMaxVersion: dir.tlsMax };
   let pr = null; let lastErr = null;
-  for (let i = 0; i < 2 && !pr; i++) {
-    if (i) await _sleep(2000);
-    try { const s = await _openConsole(conn); try { pr = await probe(s); } finally { s.close?.(); } } catch (e) { lastErr = e; }
+  if (typeof ctx?.verifyConsole === 'function') {
+    // v2.844 완전 설치: 담당이 엣지인 새 Director 는 중앙이 9101 에 붙지 않는다(한 서버 안에서만 통신 — 방화벽을 열지 않는다).
+    //   서버 안 bconsole 로 새 콘솔 접속을 확인하고(실패면 아래와 같이 되돌림), 포탈(엣지) 접속은 설치 6단계가 엣지 경유로 확인한다.
+    try { pr = await ctx.verifyConsole({ consoleName, password, directorPort }); } catch (e) { lastErr = e; }
+  } else {
+    for (let i = 0; i < 2 && !pr; i++) {
+      if (i) await _sleep(2000);
+      try { const s = await _openConsole(conn); try { pr = await probe(s); } finally { s.close?.(); } } catch (e) { lastErr = e; }
+    }
   }
   if (!pr) {
     const rb = await rollbackInNewSession(ssh, placed, { reload: true });

@@ -10,6 +10,7 @@ import { volumeDirIssue, REMOTE_ROOT, UNIT, DEFAULT_VOLUME_DIR } from './plan.js
 import { numOrNull } from '../../util/numOrNull.js';
 
 const PORTS = [9101, 9102, 9103];
+const WEB_PORT = 80;
 
 /** 읽기 전용 스크립트(섹션 머리 '@@이름'). */
 export function precheckScript(volumeDir = DEFAULT_VOLUME_DIR) {
@@ -20,10 +21,10 @@ export function precheckScript(volumeDir = DEFAULT_VOLUME_DIR) {
     'echo @@os; . /etc/os-release 2>/dev/null; echo "ID=$ID"; echo "VERSION_ID=$VERSION_ID"; echo "PRETTY=$PRETTY_NAME"; echo "ARCH=$(uname -m)"',
     'echo @@tools; for c in systemd-run dnf rpm ss python3 chronyc getenforce semanage bconsole psql; do command -v $c >/dev/null 2>&1 && echo "$c=1" || echo "$c=0"; done',
     'echo @@selinux; getenforce 2>/dev/null || echo unknown',
-    "echo @@pkgs; rpm -qa --qf '%{NAME} %{VERSION}\\n' 2>/dev/null | grep -E '^(bareos|postgresql-server|python3-pyvmomi)( |-)' | sort",
+    "echo @@pkgs; rpm -qa --qf '%{NAME} %{VERSION}\\n' 2>/dev/null | grep -E '^(bareos|postgresql-server|python3-pyvmomi|httpd|nginx)( |-)' | sort",
     'echo @@etc; [ -d /etc/bareos ] && find /etc/bareos -type f 2>/dev/null | wc -l || echo none',
     'echo @@svc; for u in bareos-dir bareos-sd bareos-fd postgresql; do echo "$u=$(systemctl is-active $u 2>/dev/null || true)"; done',
-    `echo @@ports; ss -ltn 2>/dev/null | awk 'NR>1{print $4}' | grep -E '[:.](${PORTS.join('|')})$' || true`,
+    `echo @@ports; ss -ltn 2>/dev/null | awk 'NR>1{print $4}' | grep -E '[:.](${[...PORTS, WEB_PORT].join('|')})$' || true`,
     'echo @@python; python3 -c "import sys; print(\'%d.%d.%d\' % sys.version_info[:3])" 2>/dev/null || echo none',
     'echo @@pyvmomi; python3 -c "import importlib.metadata as m; print(m.version(\'pyvmomi\'))" 2>/dev/null || echo none',
     'echo @@bpp; for d in /usr/lib64/bareos/plugins /usr/lib/bareos/plugins; do ls -d $d/pyVmomi $d/pyvmomi-*.dist-info 2>/dev/null; done; true',
@@ -64,7 +65,7 @@ export function parsePrecheck(text) {
   const pkgs = (s.pkgs || []).map((l) => l.trim().split(/\s+/)).filter((x) => x[0]).map(([name, version]) => ({ name, version: version || '' }));
   const etc = first(s.etc);
   const svc = kv(s.svc);
-  const ports = (s.ports || []).map((l) => Number(/[:.](\d+)$/.exec(l.trim())?.[1])).filter((n) => PORTS.includes(n));
+  const ports = (s.ports || []).map((l) => Number(/[:.](\d+)$/.exec(l.trim())?.[1])).filter((n) => PORTS.includes(n) || n === WEB_PORT);
   const py = first(s.python);
   const pyv = first(s.pyvmomi);
   const bpp = (s.bpp || []).map((l) => l.trim()).filter(Boolean).slice(0, 10);
@@ -132,8 +133,16 @@ export function judgePrecheck(f, { mode = 'install', bundle = null, plan = null 
     add('running', '실행 중 작업', f.runningJobs == null ? 'unknown' : (f.runningJobs > 0 ? 'bad' : 'ok'), f.runningJobs == null ? 'Director 에 묻지 못했습니다(꺼져 있거나 bconsole 없음) — 0 이 아닙니다' : `${f.runningJobs}개`,
       f.runningJobs > 0 ? '실행 중 작업이 끝난 뒤 다시 점검하세요.' : '');
   }
-  const foreignPorts = installed ? [] : f.portsInUse;
+  const foreignPorts = installed ? [] : f.portsInUse.filter((p) => PORTS.includes(p));
   add('ports', '포트 9101 · 9102 · 9103', foreignPorts.length ? 'bad' : 'ok', foreignPorts.length ? `다른 프로그램이 사용 중: ${foreignPorts.join(', ')}` : '비어 있음(같은 서버 안에서만 통신 — 방화벽은 바꾸지 않습니다)', foreignPorts.length ? '그 포트를 쓰는 프로그램을 확인하세요(ss -ltnp).' : '');
+  const web = f.portsInUse.includes(WEB_PORT);
+  const hasHttpd = f.pkgs.some((p) => p.name === 'httpd');
+  const nginx = f.pkgs.some((p) => p.name === 'nginx');
+  if (plan?.webui !== false) {
+    add('web', 'WebUI 웹 포트 80', web && !hasHttpd ? 'bad' : (hasHttpd ? 'warn' : 'ok'),
+      web && !hasHttpd ? `80 포트를 httpd 가 아닌 프로그램이 씁니다${nginx ? '(nginx 설치됨)' : ''}` : (hasHttpd ? '이미 httpd 가 있습니다 — bareos-webui 설정(conf.d)이 더해지고 httpd 를 다시 읽힙니다' : '비어 있음 — httpd 를 켜고 firewalld 에 http 를 엽니다(켜져 있을 때)'),
+      web && !hasHttpd ? '80 포트를 쓰는 프로그램을 확인하거나 계획에서 WebUI 를 끄세요.' : '');
+  }
   const pyMajor = f.python ? f.python.split('.').map(Number) : null;
   add('python', 'Python', f.python ? 'ok' : 'warn', f.python ? `${f.python}${pyMajor && pyMajor[1] < 10 ? ' — pyVmomi 9.x 는 Python 3.10 이상이 필요해 8.x 를 씁니다' : ''}` : 'python3 없음 — 번들에서 함께 설치합니다', '');
   const pv = f.pyvmomi;

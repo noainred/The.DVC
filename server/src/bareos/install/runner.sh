@@ -1,7 +1,7 @@
 #!/bin/bash
 # vmware-portal — Bareos 완전 설치 러너(v2.844). 포탈이 법인 엣지 노드에 올려 systemd-run 으로 **그 서버 안에서** 돌린다. 손으로 고치지 말 것.
 #
-# 단계(포탈 화면 번호와 같다): 0 기존 제거(초기화일 때만 · 되돌리지 않음) · 1 번들 풀기·로컬 저장소 · 2 패키지·pyVmomi·카탈로그 DB · 3 볼륨·SD 장치·서비스
+# 단계(포탈 화면 번호와 같다): 0 기존 제거(초기화일 때만 · 되돌리지 않음) · 1 번들 풀기·로컬 저장소 · 2 패키지·pyVmomi·카탈로그 DB · 3 볼륨·SD 장치·서비스·WebUI
 # 4~7(Director 리소스·FD 플러그인·엣지 경유 확인·매핑)은 포탈이 기존 자동 설정 코드로 한다.
 # 기록(포탈이 SSH 로 읽는다 — 비밀은 쓰지 않는다):
 #   run/state       단계 상태 한 줄씩 '<단계> <상태> <epoch> [메모]'  상태: start ok fail rolledback rollback-fail stopped · 'all done|rolledback'
@@ -254,6 +254,24 @@ EOF
   local v; v="$(printf 'version\n' | timeout 30 bconsole 2>&1)"
   printf '%s\n' "$v" | grep -q 'Version' || { errx "bconsole 접속" "$(printf '%s\n' "$v" | tail -n 20)" 1 bconsole; return 1; }
   log "Director 응답: $(printf '%s\n' "$v" | grep -m1 'Version')"
+  [ "${WEBUI:-0}" = 1 ] || return 0
+  # WebUI(bareos-webui · httpd · php-fpm — 2026-11-01 사용자 결정 '완전 설치에 WebUI 추가'). 브라우저가 붙는 웹 포트(80)만 연다 — Director·SD·FD 포트는 한 서버 안이라 열지 않는다.
+  if command -v getenforce >/dev/null 2>&1 && [ "$(getenforce 2>/dev/null)" != Disabled ]; then
+    local sb; sb="$(getsebool httpd_can_network_connect 2>/dev/null | awk '{print $3}')"
+    if [ "$sb" != on ]; then run "SELinux httpd_can_network_connect on" setsebool -P httpd_can_network_connect on || return 1; jr sebool httpd_can_network_connect "${sb:-off}"; fi
+  fi
+  enable_start php-fpm || return 1
+  if systemctl is-active -q httpd 2>/dev/null; then run "systemctl reload httpd(WebUI 설정 읽기)" systemctl reload httpd || return 1; else enable_start httpd || return 1; fi
+  wait_port 80 || { errx "웹 포트 확인" "httpd 가 80 포트를 30초 안에 열지 않았습니다." 1 port; return 1; }
+  if systemctl is-active -q firewalld 2>/dev/null; then
+    if ! firewall-cmd --query-service=http >/dev/null 2>&1; then
+      run "firewalld http 열기(영구)" firewall-cmd --permanent --add-service=http || return 1
+      jr fw-service http
+      run "firewalld 다시 읽기" firewall-cmd --reload || return 1
+    fi
+  fi
+  local code; code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 http://127.0.0.1/bareos-webui/ 2>/dev/null || true)"
+  case "$code" in (200|301|302|303) log "WebUI 응답 HTTP $code";; (*) errx "WebUI 응답 확인" "http://127.0.0.1/bareos-webui/ 응답이 HTTP ${code:-없음} 입니다." 1 webui; return 1;; esac
 }
 
 # ───────── 되돌리기(그 단계의 journal 을 역순으로)
@@ -274,6 +292,8 @@ undo_line() {
     pginit) systemctl stop postgresql >/dev/null 2>&1 || true; case "$PGDATA" in (*/var/lib/pgsql/data) rm -rf "$PGDATA" ;; esac ;;
     svc-enabled) systemctl disable "$1" >/dev/null 2>&1 || true ;;
     svc-started) systemctl stop "$1" >/dev/null 2>&1 || true ;;
+    sebool) setsebool -P "$1" "$2" >/dev/null 2>&1 || log "SELinux $1 을(를) $2 로 되돌리지 못함" ;;
+    fw-service) firewall-cmd --permanent --remove-service="$1" >/dev/null 2>&1; firewall-cmd --reload >/dev/null 2>&1 || true ;;
     etcnew) rm -rf "$ETC_BAREOS" ;;
     *) log "모르는 되돌리기 항목: $kind" ;;
   esac

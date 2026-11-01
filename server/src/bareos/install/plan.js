@@ -27,7 +27,7 @@ export const STEPS = Object.freeze([
   { n: 0, key: 'reset', label: '기존 제거(초기화)', remote: true },
   { n: 1, key: 'bundle', label: '번들 전송·풀기', remote: true },
   { n: 2, key: 'packages', label: '패키지 · pyVmomi · 카탈로그 DB', remote: true },
-  { n: 3, key: 'services', label: '볼륨 · SD 장치 · 서비스', remote: true },
+  { n: 3, key: 'services', label: '볼륨 · SD 장치 · 서비스 · WebUI', remote: true },
   { n: 4, key: 'director', label: 'Director 리소스 · 포탈 등록', remote: false },
   { n: 5, key: 'fdPlugin', label: 'FD 플러그인', remote: false },
   { n: 6, key: 'edgeProbe', label: '엣지 경유 연결 확인', remote: false },
@@ -85,7 +85,8 @@ export function normPlan(b = {}, { contents, mode, corpName = '' } = {}) {
       throw fail('백업 볼륨까지 지우려면 법인 이름을 정확히 입력해야 합니다.');
     }
   }
-  return { mode: m, pyvmomi, pyvmomiFix: b.pyvmomiFix === true, volumeDir, pools: ex.pools, schedule: ex.schedule, consoleName, directorName, reset };
+  // WebUI 는 기본 설치(사용자 결정) — 끄는 값(false)만 받는다
+  return { mode: m, pyvmomi, pyvmomiFix: b.pyvmomiFix === true, volumeDir, pools: ex.pools, schedule: ex.schedule, consoleName, directorName, reset, webui: b.webui !== false };
 }
 
 const q = (k, v, re) => {
@@ -116,6 +117,7 @@ export function planEnv({ jobId, bundle, install, plan, startStep = 0, runMode =
     q('VOLUME_DIR', plan.volumeDir, PATH_RE),
     q('HOST_ADDR', hostAddr, HOST_ADDR_RE),
     q('SD_DEVICE', SD_DEVICE), q('SD_MEDIA', SD_MEDIA), q('DIR_STORAGE', DIR_STORAGE),
+    q('WEBUI', plan.webui === false ? 0 : 1, /^[01]$/),
     q('RESET', plan.mode === 'reinstall' ? 1 : 0, /^[01]$/),
     q('RESET_DB', plan.reset?.catalog ? 1 : 0, /^[01]$/),
     q('RESET_VOLUMES', plan.reset?.volumes ? 1 : 0, /^[01]$/),
