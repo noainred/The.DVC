@@ -123,6 +123,20 @@ const credsOf = (j) => {
   return c;
 };
 export { credsOf as _credsOfForTest };
+/**
+ * v2.846(Bareos 버그 점검 S-1 · C-3 — 재현): 마무리(FD 지문 읽기 · FD INI)는 다시 · 되돌리기와 같은 규칙으로 — 그 법인의 **가장 새 작업**이고
+ * 배포 등록부 SSH 주소가 작업 시작 때와 같을 때만(M5). 예전에는 `sshCredsFor` 를 바로 써서, 등록부 주소를 바꾸면 사람이 입력한 vCenter INI 가 다른 서버로 갔다.
+ * @returns {{ j, c }} c = SSH 자격(비밀 포함 — 내부 전용)
+ */
+export function finishContext(id) {
+  const j = getJob(String(id || ''));
+  if (!j) throw fail('not-found', '작업을 찾을 수 없습니다.');
+  if (j.status !== 'done') throw fail('conflict', '설치가 끝난 뒤에 할 수 있습니다.');
+  requireLatest(j);
+  const c = credsOf(j);
+  if (!c?.password) throw fail('invalid', '배포 등록부의 SSH 비밀번호가 없습니다.');
+  return { j, c };
+}
 /** 그 법인·같은 서버의 가장 새 작업(다시·되돌리기는 이것만 — 반증 H2). */
 const latestFor = (j) => load().slice().reverse().find((x) => x.vcenterId === j.vcenterId || (x.sshHost && j.sshHost && x.sshHost === j.sshHost)) || null;
 function requireLatest(j) {

@@ -27,7 +27,9 @@ const CARD = { padding: 14, marginTop: 10, minWidth: 0 };
 const DEEP = { padding: 12, marginTop: 10, minWidth: 0, background: 'var(--panel-deep)' };
 const PRE = { margin: '6px 0 0', padding: 10, background: 'var(--panel-deep)', borderRadius: 6, fontSize: 11.5, lineHeight: 1.5, whiteSpace: 'pre-wrap', wordBreak: 'break-word', maxHeight: 260, overflow: 'auto' };
 const WRAP = { whiteSpace: 'normal', overflowWrap: 'anywhere', minWidth: 0 };
-const GET = { retries: 0, timeoutMs: 200_000 };
+// fetchJson(경로, 쿼리, signal, 옵션) — 옵션은 네 번째 자리(v2.846 U-1: 두 번째 자리에 넣어 시한 20초 · 재시도 2회 · 쿼리 오염이 됐다).
+//   엣지 대행 조회는 인출 대기(최대 120초) + 회신 시한(config 150초 · jobNames 120초)까지 기다린다 — 재시도 없음(Director 로그인을 되풀이하지 않게)
+const GET = { retries: 0, timeoutMs: 300_000 };
 const LONG = { timeoutMs: 600_000 };   // 엣지 대행 쓰기(회신 시한 480초 + 인출) — 서버 요청 시한 안
 const TABS = [['overview', '개요'], ['storage', '백업 스토리지'], ['accounts', 'WebUI 계정'], ['pools', '풀 · 스케줄']];
 
@@ -108,14 +110,14 @@ export default function BareosCorpPanel({ writable = true }) {
   const scanGen = useRef(0);
 
   useEffect(() => {
-    fetchJson(P, { retries: 0 }).then((r) => { setList(r); setErr(null); if (!sel && r.directors?.[0]) setSel(r.directors[0].id); }).catch(setErr);
+    fetchJson(P, {}, undefined, { retries: 0 }).then((r) => { setList(r); setErr(null); if (!sel && r.directors?.[0]) setSel(r.directors[0].id); }).catch(setErr);
   }, []);   // eslint-disable-line react-hooks/exhaustive-deps
   const corp = list?.directors?.find((d) => d.id === sel) || null;
   const loadCfg = (refresh = false) => {
     if (!sel) return Promise.resolve();
     const g = ++gen.current;
     setCfgErr(null);
-    return fetchJson(`${P}/${encodeURIComponent(sel)}/config${refresh ? '?refresh=1' : ''}`, GET)
+    return fetchJson(`${P}/${encodeURIComponent(sel)}/config`, refresh ? { refresh: 1 } : {}, undefined, GET)
       .then((r) => { if (g === gen.current) setCfg(r); })
       .catch((e) => { if (g === gen.current) { setCfg(null); setCfgErr(e); } });
   };
@@ -271,7 +273,7 @@ function Reregister({ corp, writable, busyOuter }) {
   const [res, setRes] = useState(null);
   const load = async () => {
     setBusy(true); setM(null); setRes(null);
-    try { const r = await fetchJson(`${P}/${encodeURIComponent(corp.id)}/missing`, GET); setItems(r.items); setPick(Object.fromEntries(r.items.map((x) => [x.id, true]))); }
+    try { const r = await fetchJson(`${P}/${encodeURIComponent(corp.id)}/missing`, {}, undefined, GET); setItems(r.items); setPick(Object.fromEntries(r.items.map((x) => [x.id, true]))); }
     catch (e) { setM({ ok: false, text: `확인하지 못했습니다: ${e.message}` }); } finally { setBusy(false); }
   };
   const run = async () => {
@@ -282,7 +284,7 @@ function Reregister({ corp, writable, busyOuter }) {
       setRes(r.results);
       const ok = r.results.filter((x) => x.ok).length;
       setM({ ok: ok === r.results.length ? true : ok ? 'warn' : false, text: `다시 등록 — 성공 ${ok} · 실패 ${r.results.length - ok}(꺼 둔 대상은 다음 대조에서 다시 끕니다).` });
-      const left = await fetchJson(`${P}/${encodeURIComponent(corp.id)}/missing`, GET).catch(() => null);
+      const left = await fetchJson(`${P}/${encodeURIComponent(corp.id)}/missing`, {}, undefined, GET).catch(() => null);
       if (left) setItems(left.items);
     } catch (e) { setM({ ok: false, text: `실패: ${e.message}` }); } finally { setBusy(false); }
   };

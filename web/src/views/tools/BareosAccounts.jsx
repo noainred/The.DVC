@@ -25,7 +25,8 @@ const GRID = { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(mi
 const CARD = { padding: 14, marginTop: 10, minWidth: 0 };
 const DEEP = { padding: 12, marginTop: 10, minWidth: 0, background: 'var(--panel-deep)' };
 const WRAP = { whiteSpace: 'normal', overflowWrap: 'anywhere', minWidth: 0 };
-const GET = { retries: 0, timeoutMs: 200_000 };
+// 전 법인 조회(법인마다 엣지 대행 · 동시 4) — 서버 요청 시한(600초)까지 한 번만 기다린다(재시도하면 법인마다 Director 로그인이 되풀이된다 — v2.846 U-1)
+const GET = { retries: 0, timeoutMs: 600_000 };
 const CELL_CLS = { has: 'green', none: 'gray', unknown: 'amber', locked: 'blue' };
 
 function Badge({ cls, children }) { return <span className={`badge ${cls}`} style={{ fontSize: 11, whiteSpace: 'nowrap' }}>{children}</span>; }
@@ -45,7 +46,7 @@ export default function BareosAccountsPanel({ writable = true }) {
   const load = (refresh = false) => {
     const g = ++gen.current;
     setBusy(true);
-    return fetchJson(`${PA}${refresh ? '?refresh=1' : ''}`, GET).then((r) => { if (g === gen.current) { setM(r); setErr(null); } })
+    return fetchJson(PA, refresh ? { refresh: 1 } : {}, undefined, GET).then((r) => { if (g === gen.current) { setM(r); setErr(null); } })
       .catch((e) => { if (g === gen.current) setErr(e); }).finally(() => { if (g === gen.current) setBusy(false); });
   };
   useEffect(() => { load(false); }, []);
