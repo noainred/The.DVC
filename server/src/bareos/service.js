@@ -318,6 +318,8 @@ const addUnknownText = (why) => `${why} — Director 에 잡이 생겼을 수 �
 
 /** 등록 회신 한 줄이 '명령 도중 끊김'(Director 가 실행했을 수 있다 — groupRunner.itemState 와 같은 표) · 엣지가 이름 없이 성공한 것(정제가 unknown 으로 바꾼다). */
 const addMidCommand = (r) => !!r && !r.ok && (r.code === 'unknown' || MID_COMMAND_CODES.has(r.code));
+/** v2.847 E2-1: 결과 모름 뒤 `.jobs` 다시 읽기를 기다리는 상한. */
+export const SETTLE_WAIT_MS = 60_000;
 /**
  * v2.847 E2-1(2회차 점검 — 재현): 명령 도중 끊긴 등록은 Director 에 잡이 생겼을 수 있다 — '실패' 로 적으면 사용자가 다시 등록해 `-r2` 가 생기고
  * 첫 잡은 원장 밖에서 켜진 채 스케줄로 돌았다. `.jobs` 를 한 번 읽어 그 VM 의 이름 후보 중 **원장에도 지운 이름에도 없는** 잡을 끄고 지운 이름에 남긴다
@@ -327,7 +329,8 @@ const addMidCommand = (r) => !!r && !r.ok && (r.code === 'unknown' || MID_COMMAN
 async function settleMidCommandAdds(directorId, items, demo) {
   const out = new Map();
   let have = null;
-  try { const r = await onDirector(directorId, 'jobNames', {}); const n = (Array.isArray(r?.names) ? r.names : []).map(String); if (n.length) have = new Set(n); } catch { /* 아래 */ }
+  // 등록 응답을 오래 붙잡지 않게 상한(엣지 대행이면 인출 대기가 길다) — 넘으면 예전처럼 결과 모름
+  try { const r = await onDirector(directorId, 'jobNames', {}, { signal: AbortSignal.timeout(SETTLE_WAIT_MS) }); const n = (Array.isArray(r?.names) ? r.names : []).map(String); if (n.length) have = new Set(n); } catch { /* 아래 */ }
   if (!have) {
     for (const { i } of items) out.set(i, addUnknownText('결과 모름 — 명령 도중 연결이 끊겼고 Director 의 잡 목록도 다시 읽지 못했습니다'));
     return out;

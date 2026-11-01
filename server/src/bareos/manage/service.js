@@ -350,7 +350,7 @@ export async function reregisterTargets(d, ids = [], { startedAt = Date.now() } 
       } catch (e) {
         const why = e?.code === 'unknown' ? `결과 모름 — 법인 엣지가 회신하지 않았습니다. 늦은 회신이 오면 원장에 반영합니다(잠시 뒤 목록을 다시 읽으세요). ${String(e?.message || '').slice(0, 200)}` : String(e?.message || e).slice(0, 300);
         for (const x of part) { x.o.reason = why; if (e?.code === 'unknown' || MID_COMMAND_CODES.has(e?.code)) x.o.unknown = true; }
-        if (MID_COMMAND_CODES.has(e?.code)) unsure.push(...part);   // 중앙 직접 세션이 명령 도중 끊김(엣지 '결과 모름' 은 늦은 회신이 처리한다)
+        if (MID_COMMAND_CODES.has(e?.code)) for (const x of part) unsure.push(x);   // 중앙 직접 세션이 명령 도중 끊김(엣지 '결과 모름' 은 늦은 회신이 처리한다)
         for (const x of ready.slice(i + REREGISTER_BATCH)) Object.assign(x.o, { notSent: true, reason: '보내지 않음 — 앞 묶음이 실패해 멈췄습니다(다시 실행하세요).' });
         break;
       }
