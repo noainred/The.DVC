@@ -100,9 +100,10 @@ const q = (k, v, re) => {
 
 /**
  * 러너 입력(plan.env). 값마다 형식을 다시 본다(던짐 — 부른 쪽 버그를 원격에 보내지 않는다).
- * @param {{ jobId, bundle:{version,sha256}, install:string[], plan, startStep, runMode, hostAddr, resetVolumeDirs?:string[] }} o
+ * @param {{ jobId, bundle:{version,sha256}, install:string[], plan, startStep, runMode, hostAddr, resetVolumeDirs?:string[], runningUnknownOk?:boolean }} o
+ *   runningUnknownOk(v2.846 D-2): 화면의 '확인했음 — 실행 중 작업 확인 없이 진행' 동의 — 그 회차에만(작업 기록의 시도 행) · 0단계가 실행 중 작업을 못 읽었을 때만 쓰인다.
  */
-export function planEnv({ jobId, bundle, install, plan, startStep = 0, runMode = 'install', hostAddr, resetVolumeDirs = [] }) {
+export function planEnv({ jobId, bundle, install, plan, startStep = 0, runMode = 'install', hostAddr, resetVolumeDirs = [], runningUnknownOk = false }) {
   if (!JOB_ID_RE.test(String(jobId))) throw Object.assign(new Error('작업 id 형식이 아닙니다'), { code: 'invalid' });
   if (!Array.isArray(install) || !install.length || !install.every((n) => PKG_NAME_RE.test(n))) throw Object.assign(new Error('설치 패키지 목록이 틀렸습니다'), { code: 'invalid' });
   const vols = (resetVolumeDirs || []).filter((d) => !volumeDirIssue(d));
@@ -124,6 +125,8 @@ export function planEnv({ jobId, bundle, install, plan, startStep = 0, runMode =
     q('RESET_DB', plan.reset?.catalog ? 1 : 0, /^[01]$/),
     q('RESET_VOLUMES', plan.reset?.volumes ? 1 : 0, /^[01]$/),
     q('RESET_VOLUME_DIRS', plan.reset?.volumes ? vols.join(' ') : '', /^[A-Za-z0-9._/ -]{0,2000}$/),
+    // 불리언 true 만 1(문자열 'true' · 1 은 0 — 동의는 화면의 체크 하나에서만 온다)
+    q('RUNNING_UNKNOWN_OK', plan.mode === 'reinstall' && runningUnknownOk === true ? 1 : 0, /^[01]$/),
   ];
   if (volumeDirIssue(plan.volumeDir)) throw Object.assign(new Error('볼륨 경로가 허용 형식이 아닙니다'), { code: 'invalid' });
   return `${lines.join('\n')}\n`;

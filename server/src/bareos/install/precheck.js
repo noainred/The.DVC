@@ -36,7 +36,8 @@ export function precheckScript(volumeDir = DEFAULT_VOLUME_DIR) {
     `echo @@runner; systemctl is-active ${UNIT} 2>/dev/null || true; tail -n 3 ${REMOTE_ROOT}/run/state 2>/dev/null || true`,
     // 초기화용(설치돼 있을 때만 의미): 실행 중 작업 · 카탈로그 DB 크기 · SD 볼륨 경로별 파일 수·크기·마지막 수정
     // 반증 L2: bconsole 이 실패해도 grep -c 가 0 을 내 '실행 중 0개 ✓' 가 됐다 — 접속이 확인될 때만 센다(못 읽으면 none = 확인 불가)
-    "echo @@running; if systemctl is-active -q bareos-dir 2>/dev/null && command -v bconsole >/dev/null; then o=$(printf 'llist jobs jobstatus=R\\n' | timeout 30 bconsole 2>&1); rc=$?; if [ $rc -eq 0 ] && printf '%s\\n' \"$o\" | grep -q 'Connecting to Director' && ! printf '%s\\n' \"$o\" | grep -qiE 'Authorization failed|Failed to connect|ERR='; then printf '%s\\n' \"$o\" | grep -cE '^[[:space:]]*jobid:[[:space:]]*[0-9]+'; else echo none; fi; else echo none; fi",
+    // v2.846 D-2: 러너 0단계(runner.sh running_jobs)와 같은 판정 — Director 꺼짐(inactive·failed)은 'inactive'(실행 중 작업 없음), 그 밖의 못 읽음은 none
+    "echo @@running; s=$(systemctl is-active bareos-dir 2>/dev/null); case \"$s\" in inactive|failed) echo inactive;; active|activating|reloading|deactivating) if command -v bconsole >/dev/null; then o=$(printf 'llist jobs jobstatus=R\\n' | timeout 30 bconsole 2>&1); rc=$?; if [ $rc -eq 0 ] && printf '%s\\n' \"$o\" | grep -q 'Connecting to Director' && ! printf '%s\\n' \"$o\" | grep -qiE 'Authorization failed|Failed to connect|ERR='; then printf '%s\\n' \"$o\" | grep -cE '^[[:space:]]*jobid:[[:space:]]*[0-9]+'; else echo none; fi; else echo none; fi;; *) echo none;; esac",
     "echo @@catalog; if systemctl is-active -q postgresql 2>/dev/null; then su - postgres -c \"psql -tAc \\\"SELECT pg_database_size('bareos')\\\"\" 2>/dev/null | tr -d '[:space:]'; echo; else echo none; fi",
     "echo @@volumes; for f in /etc/bareos/bareos-sd.d/device/*.conf; do [ -f \"$f\" ] || continue; sed -n 's/^[[:space:]]*Archive[[:space:]]*Device[[:space:]]*=[[:space:]]*\"\\{0,1\\}\\([^\"]*\\)\"\\{0,1\\}[[:space:]]*$/\\1/Ip' \"$f\"; done | sort -u | while read -r d; do [ -d \"$d\" ] || { echo \"$d|missing\"; continue; }; n=$(find \"$d\" -maxdepth 1 -type f 2>/dev/null | wc -l); s=$(du -sk \"$d\" 2>/dev/null | cut -f1); t=$(find \"$d\" -maxdepth 1 -type f -printf '%T@\\n' 2>/dev/null | sort -n | tail -1 | cut -d. -f1); echo \"$d|$n|$s|$t\"; done",
     'echo @@end',
@@ -101,11 +102,17 @@ export function parsePrecheck(text) {
     hostname: addrLines.find((x) => !/^\d{1,3}(\.\d{1,3}){3}$/.test(x)) || null,
     runnerActive: runnerLines[0] === 'active' || runnerLines[0] === 'activating',
     runnerState: runnerLines.slice(1),
-    runningJobs: running === 'none' || running === '' ? null : numOrNull(running),
+    // 'inactive' = Director 꺼짐(실행 중 작업 없음 — 읽은 사실) · none/빈 값 = 못 읽음(null — 0 이 아니다)
+    runningJobs: running === 'inactive' ? 0 : (running === 'none' || running === '' ? null : numOrNull(running)),
+    directorInactive: running === 'inactive',
     catalogBytes: catalog === 'none' || catalog === '' ? null : numOrNull(catalog),
     volumes,
   };
 }
+
+/** 실행 중 작업을 못 읽었을 때의 조치 — 화면 계획 단계의 동의 체크(같은 글자)와 이어진다. */
+export const RUNNING_UNKNOWN_OK_LABEL = '확인했음 — 실행 중 작업 확인 없이 진행';
+const RUNNING_UNKNOWN_ACTION = `0단계가 확인하지 못하면 아무것도 지우지 않고 멈춥니다. 실행 중인 백업 · 복원이 없음을 직접 확인했으면 설치 계획에서 ‘${RUNNING_UNKNOWN_OK_LABEL}’ 을 체크하고, 아니면 bconsole 이 붙게 고친 뒤 다시 점검하세요.`;
 
 const GB = 1024 * 1024;
 const MIN_VARLIB_KB = 3 * GB;   // 번들(전송본 + 풀어 둔 것) + 설치 여유
@@ -131,8 +138,12 @@ export function judgePrecheck(f, { mode = 'install', bundle = null, plan = null 
       installed ? '기존 설치를 덮어쓰지 않습니다 — 대상 표에서 ‘초기화 후 재설치’ 를 고르세요.' : '');
   } else {
     add('bareos', '지울 기존 Bareos', installed ? 'warn' : 'ok', installed ? `${bareosPkgs.length}개 패키지 · /etc/bareos 파일 ${f.etcFiles ?? 0}개 — 지우기 전에 /etc/bareos 를 엣지 안에 tar 로 보관합니다` : '설치된 Bareos 가 없습니다(초기화할 것 없음)', '');
-    add('running', '실행 중 작업', f.runningJobs == null ? 'unknown' : (f.runningJobs > 0 ? 'bad' : 'ok'), f.runningJobs == null ? 'Director 에 묻지 못했습니다(꺼져 있거나 bconsole 없음) — 0 이 아닙니다' : `${f.runningJobs}개`,
-      f.runningJobs > 0 ? '실행 중 작업이 끝난 뒤 다시 점검하세요.' : '');
+    // v2.846 D-2: 못 읽음(unknown)은 막지 않지만 러너 0단계도 멈춘다 — 계획의 '확인했음 — 실행 중 작업 확인 없이 진행' 동의가 있어야 진행한다(조치 문구가 그 동의를 가리킨다)
+    add('running', '실행 중 작업', f.runningJobs == null ? 'unknown' : (f.runningJobs > 0 ? 'bad' : 'ok'),
+      f.runningJobs == null ? 'Director 는 켜져 있는데 bconsole 로 묻지 못했습니다(접속·인증 실패 또는 bconsole 없음) — 0 이 아닙니다'
+        : (f.directorInactive ? 'Director 꺼짐 — 실행 중 작업 없음' : `${f.runningJobs}개`),
+      f.runningJobs > 0 ? '실행 중 작업이 끝난 뒤 다시 점검하세요.'
+        : (f.runningJobs == null ? RUNNING_UNKNOWN_ACTION : ''));
   }
   const foreignPorts = installed ? [] : f.portsInUse.filter((p) => PORTS.includes(p));
   add('ports', '포트 9101 · 9102 · 9103', foreignPorts.length ? 'bad' : 'ok', foreignPorts.length ? `다른 프로그램이 사용 중: ${foreignPorts.join(', ')}` : '비어 있음(같은 서버 안에서만 통신 — 방화벽은 바꾸지 않습니다)', foreignPorts.length ? '그 포트를 쓰는 프로그램을 확인하세요(ss -ltnp).' : '');

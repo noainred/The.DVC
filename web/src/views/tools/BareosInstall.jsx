@@ -7,6 +7,7 @@ import BoldText from '../../components/boldText.jsx';
 import {
   checkView, checkCountsText, stepView, jobView, edgeAgeText, targetModeText, uploadText, stepDurText, fixesOrdered, retryLabel,
   defaultPlan, planBody, planIssues, PYVMOMI_REASON, WEEKDAY_KO, bytesText, whenText,
+  RUNNING_UNKNOWN_OK_LABEL, runningUnknown, volumesSizeText, okOrThrow, rollbackCauseText,
 } from './bareosInstallText.js';
 
 /**
@@ -63,8 +64,8 @@ function BundleCard({ ov, onReload, say, writable }) {
           </div>
         </div>
         <div style={{ ...ROW, flex: 'none' }}>
-          <button type="button" className="login-btn" style={BTN} disabled={busy || !writable || (f && !f.doneAt)} onClick={() => act(() => postJson(`${P}/bundle/fetch`, {}), '번들 받기를 시작했습니다 — 아래에 진행이 보입니다.')}>번들 받기(최신)</button>
-          <button type="button" className="logout-btn" style={BTN} disabled={busy || !writable} onClick={() => act(() => postJson(`${P}/bundle/rescan`, {}), '번들 폴더를 다시 확인했습니다(서명·해시).')}>다시 확인</button>
+          <button type="button" className="login-btn" style={BTN} disabled={busy || !writable || (f && !f.doneAt)} onClick={() => act(async () => okOrThrow(await postJson(`${P}/bundle/fetch`, {})), '번들 받기를 시작했습니다 — 아래에 진행이 보입니다.')}>번들 받기(최신)</button>
+          <button type="button" className="logout-btn" style={BTN} disabled={busy || !writable} onClick={() => act(async () => okOrThrow(await postJson(`${P}/bundle/rescan`, {})), '번들 폴더를 다시 확인했습니다(서명·해시).')}>다시 확인</button>
         </div>
       </div>
       {f && <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>받기: {f.doneAt ? (f.phase === 'done' ? `끝 · ${f.version}` : `실패 — ${f.error || '사유 미상'}`) : `${f.phase} · ${f.version || ''} ${f.total ? `${bytesText(f.sent)} / ${bytesText(f.total)}` : ''}`}</div>}
@@ -147,7 +148,7 @@ function ResetStep({ t, pre, plan, setPlan, onBack, onNext, onRecheck, busy }) {
   const r = plan.reset || {};
   const set = (patch) => setPlan({ ...plan, reset: { ...r, ...patch } });
   const vols = (pre?.volumes || []).filter((v) => !v.missing);
-  const volBytes = vols.reduce((a, v) => a + (v.bytes || 0), 0);
+  const volSize = volumesSizeText(vols);   // v2.846 U-12: 못 읽은 크기를 0 으로 더하지 않는다('일부 모름')
   const nameOk = !r.volumes || String(r.confirmName || '').trim() === String(t.vcenterName).trim();
   return (
     <div className="card" style={CARD}>
@@ -169,9 +170,9 @@ function ResetStep({ t, pre, plan, setPlan, onBack, onNext, onRecheck, busy }) {
             <label style={{ ...ROW, fontSize: 13, marginTop: 10 }}><input type="checkbox" checked={r.catalog !== false} onChange={(e) => set({ catalog: e.target.checked })} /> <b>카탈로그 DB 삭제</b> <Badge cls="amber">기본 켬</Badge></label>
             <div className="muted" style={{ fontSize: 12, marginLeft: 24 }}>끄면 재설치 뒤 기존 기록(잡 이력 · 볼륨 목록)을 그대로 쓰고 판만 맞춥니다(update_bareos_tables).</div>
             <label style={{ ...ROW, fontSize: 13, marginTop: 10 }}><input type="checkbox" checked={!!r.volumes} onChange={(e) => set({ volumes: e.target.checked })} /> <b>백업 볼륨 삭제</b> <Badge cls="gray">기본 끔</Badge></label>
-            {!r.volumes ? <div className="muted" style={{ fontSize: 12, marginLeft: 24 }}>끈 상태: 볼륨({vols.length ? bytesText(volBytes) : '—'})은 남고, 재설치 뒤 bscan 으로 다시 읽어 들일 수 있습니다(오래 걸림 — 크기에 비례).</div> : (
+            {!r.volumes ? <div className="muted" style={{ fontSize: 12, marginLeft: 24 }}>끈 상태: 볼륨({volSize.text})은 남고, 재설치 뒤 bscan 으로 다시 읽어 들일 수 있습니다(오래 걸림 — 크기에 비례).</div> : (
               <div style={{ marginLeft: 24, marginTop: 6 }}>
-                <div className="banner bad" style={{ fontSize: 12.5 }}><b>기존 백업 데이터가 모두 지워지고 복원할 수 없습니다.</b> 볼륨 {vols.length}곳 · {bytesText(volBytes)}. 진행하려면 법인 이름을 정확히 입력하세요.</div>
+                <div className="banner bad" style={{ fontSize: 12.5 }}><b>기존 백업 데이터가 모두 지워지고 복원할 수 없습니다.</b> 볼륨 {vols.length}곳 · {volSize.text}. 진행하려면 법인 이름을 정확히 입력하세요.</div>
                 <label style={{ ...FIELD, marginTop: 6, maxWidth: 360 }}>법인 이름 입력 — ‘{t.vcenterName}’ 과 일치해야 진행
                   <input className="input" style={INP} value={r.confirmName || ''} onChange={(e) => set({ confirmName: e.target.value })} aria-label="법인 이름 확인" /></label>
               </div>
@@ -246,7 +247,8 @@ function PlanFields({ plan, setPlan, bundle, pre, compact = false }) {
 }
 
 function PlanStep({ t, pre, bundle, plan, setPlan, onBack, onStart, busy }) {
-  const issues = planIssues(plan, t);
+  const issues = planIssues(plan, t, pre);
+  const unknownRun = runningUnknown(pre, t);
   const b = bundle?.contents || {};
   return (
     <div className="card" style={CARD}>
@@ -269,6 +271,13 @@ function PlanStep({ t, pre, bundle, plan, setPlan, onBack, onStart, busy }) {
         </ul>
       </div>
       <div className="banner" style={{ marginTop: 10, fontSize: 12.5 }}>실행 계정: OTP 를 등록한 관리자(코드 입력 없음) · 감사 로그에 ‘OTP 없이 실행’ 으로 남깁니다. 시작하는 순간 사전 점검을 한 번 더 하고, 결과가 달라졌으면 시작하지 않습니다.</div>
+      {unknownRun && (
+        <div className="banner warn" style={{ marginTop: 8, fontSize: 12.5 }}>
+          사전 점검이 Director 의 <b>실행 중 작업을 확인하지 못했습니다</b>(bconsole 접속 · 인증 실패 또는 bconsole 없음). 0단계도 같은 확인을 하고, 못 읽으면 아무것도 지우지 않고 멈춥니다.
+          진행 현황 탭 · WebUI 에서 실행 중인 백업 · 복원이 없음을 직접 확인했을 때만 체크하세요 — 돌던 작업이 있으면 초기화가 끊습니다(이번 실행에만 적용).
+          <label style={{ ...ROW, marginTop: 6 }}><input type="checkbox" checked={plan.runningUnknownOk === true} onChange={(e) => setPlan({ ...plan, runningUnknownOk: e.target.checked })} /> {RUNNING_UNKNOWN_OK_LABEL}</label>
+        </div>
+      )}
       {issues.length > 0 && <div className="banner warn" style={{ marginTop: 8, fontSize: 12.5 }}>{issues.join(' · ')}</div>}
       <div style={{ ...ROW, marginTop: 10, justifyContent: 'flex-end' }}>
         <button type="button" className="logout-btn" onClick={onBack}>← 사전 점검으로</button>
@@ -284,9 +293,12 @@ function FailureCard({ j, bundle, onRetry, onRollback, busy, say }) {
   const [edit, setEdit] = useState(null);
   const [rbAck, setRbAck] = useState(false);
   const [showOut, setShowOut] = useState(false);
+  const [unknownAck, setUnknownAck] = useState(false);
   if (!f) return null;
   const c = f.cause || {};
-  const fixes = fixesOrdered(c);
+  // v2.846 C-1: 전부 되돌리기를 시도한 작업은 다시 하지 않는다(서버도 거부 — 그 '다시' 가 0단계 초기화부터 돌 수 있었다)
+  const rolledAll = (j.attempts || []).some((a) => a.rollbackAll);
+  const fixes = rolledAll ? [] : fixesOrdered(c);
   return (
     <div className="card" style={{ ...CARD, borderColor: 'var(--red)' }}>
       <div style={ROW}><b style={{ flex: '1 1 auto', color: 'var(--red)' }}>{f.step ?? '—'}단계 실패 — {c.title || '원인 미분류'}</b><span className="muted" style={{ fontSize: 12 }}>{whenText(f.at)}</span></div>
@@ -306,7 +318,8 @@ function FailureCard({ j, bundle, onRetry, onRollback, busy, say }) {
             <Badge cls={x.kind === 'portal' ? 'blue' : x.kind === 'retry' ? 'green' : 'gray'}>{x.kind === 'portal' ? '(a) 포탈에서 고치기' : x.kind === 'retry' ? '그대로 다시' : '(b) 서버에서 직접'}</Badge>
             <span style={{ flex: '1 1 260px', minWidth: 0, fontSize: 12.5 }}>{x.label}{x.detail ? <span className="muted"> — {x.detail}</span> : null}</span>
             {x.kind === 'portal' && x.action === 'edit-plan' && <button type="button" className="logout-btn" style={BTN} onClick={() => setEdit((e) => (e ? null : { ...j.plan }))}>{edit ? '접기' : '계획 값 바꾸기'}</button>}
-            {x.kind === 'portal' && x.action !== 'edit-plan' && <button type="button" className="login-btn" style={BTN} disabled={busy} onClick={() => onRetry({ fix: x.action })}>{retryLabel(x, f.step)}</button>}
+            {x.kind === 'portal' && x.action === 'running-unknown-ok' && <label style={{ ...ROW, fontSize: 12.5 }}><input type="checkbox" checked={unknownAck} onChange={(e) => setUnknownAck(e.target.checked)} /> 실행 중인 백업 · 복원이 없음을 직접 확인했습니다</label>}
+            {x.kind === 'portal' && x.action !== 'edit-plan' && <button type="button" className="login-btn" style={BTN} disabled={busy || (x.action === 'running-unknown-ok' && !unknownAck)} onClick={() => onRetry({ fix: x.action })}>{retryLabel(x, f.step)}</button>}
             {x.kind === 'retry' && <button type="button" className="login-btn" style={BTN} disabled={busy} onClick={() => onRetry({})}>{retryLabel(null, f.step)}</button>}
           </div>
           {x.commands?.length > 0 && <>
@@ -320,14 +333,35 @@ function FailureCard({ j, bundle, onRetry, onRollback, busy, say }) {
           </>}
         </div>
       ))}
-      {c.key === 'ssh-auth' && <div className="banner warn" style={{ marginTop: 8, fontSize: 12.5 }}>SSH 로그인 실패는 자동으로 다시 시도하지 않습니다(계정 잠금). 배포 등록부의 계정을 고친 뒤 아래에서 ‘고쳤음’ 으로 다시 하세요.
+      {rolledAll && <div className="banner warn" style={{ marginTop: 8, fontSize: 12.5 }}>전부 되돌리기를 시도한 작업은 다시 하지 않습니다 — 아래에서 다시 되돌리거나, 대상 표에서 새 작업으로 설치하세요.</div>}
+      {c.key === 'ssh-auth' && !rolledAll && <div className="banner warn" style={{ marginTop: 8, fontSize: 12.5 }}>SSH 로그인 실패는 자동으로 다시 시도하지 않습니다(계정 잠금). 배포 등록부의 계정을 고친 뒤 아래에서 ‘고쳤음’ 으로 다시 하세요.
         <div><button type="button" className="login-btn" style={{ ...BTN, marginTop: 6 }} disabled={busy} onClick={() => onRetry({ sshFixed: true })}>고쳤음 — 다시</button></div></div>}
       <div className="card" style={{ ...DEEP, borderLeft: '3px solid var(--red)' }}>
         <b style={{ fontSize: 13 }}>전부 되돌리기(서버를 설치 전으로)</b>
-        <div className="muted" style={{ fontSize: 12, marginTop: 2 }}>이 설치가 넣은 패키지 · 파일 · 서비스 · 방화벽 규칙 · 로컬 저장소 · 올린 번들, 이 설치가 만든 <b>카탈로그 DB(bareos)</b> · 이 설치가 초기화한 <b>PostgreSQL 데이터 디렉터리(/var/lib/pgsql/data 전체)</b> · /etc/bareos(설치 전에 없었을 때)를 지우고, 원격이 다 되돌려지면 포탈에 새로 만든 등록 · 매핑을 지웁니다. 원래 있던 것은 건드리지 않습니다. 이 설치로 등록한 Director 에 백업 대상이 있으면 되돌리지 않습니다.{j.mode === 'reinstall' ? ' 초기화로 지운 옛 설치는 되살리지 못합니다(보관한 /etc/bareos tar 는 남깁니다).' : ''}</div>
+        <div className="muted" style={{ fontSize: 12, marginTop: 2 }}>이 설치가 넣은 패키지 · 파일 · 서비스 · 방화벽 규칙 · 로컬 저장소 · 올린 번들, 이 설치가 만든 <b>카탈로그 DB(bareos)</b> · 이 설치가 초기화한 <b>PostgreSQL 데이터 디렉터리(/var/lib/pgsql/data 전체)</b> · /etc/bareos(설치 전에 없었을 때)를 지우고, 원격이 다 되돌려지면 포탈에 새로 만든 등록 · 매핑을 지웁니다. 원래 있던 것은 건드리지 않습니다. 이 설치의 Director(재설치면 다시 등록한 기존 Director)에 백업 대상이 있으면 되돌리지 않습니다.{j.mode === 'reinstall' ? ' 초기화로 지운 옛 설치는 되살리지 못합니다(보관한 /etc/bareos tar 는 남깁니다).' : ''}</div>
         <div style={{ ...ROW, marginTop: 6 }}><label style={{ ...ROW, fontSize: 12.5 }}><input type="checkbox" checked={rbAck} onChange={(e) => setRbAck(e.target.checked)} /> 위 목록을 지우는 것을 확인했습니다</label>
           <button type="button" className="logout-btn" style={{ ...BTN, color: 'var(--red)' }} disabled={busy || !rbAck} onClick={onRollback}>전부 되돌리기</button></div>
       </div>
+    </div>
+  );
+}
+
+/** v2.846 C-1 · C-2: 전부 되돌리기 실패 — 원인 · 남은 것 · 다시 되돌리기(SSH 인증 실패면 '고쳤음' 필요). 설치 '다시' 는 두지 않는다. */
+function RollbackFailedCard({ j, onRollback, busy }) {
+  const [ack, setAck] = useState(false);
+  const [fixed, setFixed] = useState(false);
+  const rb = j.rollback || {};
+  const auth = rb.cause === 'ssh-auth';
+  return (
+    <div className="card" style={{ ...CARD, borderColor: 'var(--red)' }}>
+      <div style={ROW}><b style={{ flex: '1 1 auto', color: 'var(--red)' }}>전부 되돌리기 실패</b><span className="muted" style={{ fontSize: 12 }}>{whenText(rb.doneAt)}</span></div>
+      <div style={{ fontSize: 12.5, marginTop: 6 }}>{rollbackCauseText(rb.cause)}</div>
+      {rb.message && <div className="muted" style={{ fontSize: 12, marginTop: 4, overflowWrap: 'anywhere' }}>사유: {rb.message}</div>}
+      {rb.left?.length > 0 && <pre style={PRE}>{rb.left.join('\n')}</pre>}
+      <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>설치를 이어서 다시 하지는 않습니다(되돌리기를 시도한 작업 — 서버도 거부). 포탈의 Director 등록 · 매핑은 원격 되돌리기가 끝난 뒤에만 지웁니다.</div>
+      {auth && <label style={{ ...ROW, fontSize: 12.5, marginTop: 6 }}><input type="checkbox" checked={fixed} onChange={(e) => setFixed(e.target.checked)} /> 배포 등록부의 SSH 계정을 고쳤습니다(자동으로 다시 시도하지 않습니다 — 계정 잠금)</label>}
+      <div style={{ ...ROW, marginTop: 6 }}><label style={{ ...ROW, fontSize: 12.5 }}><input type="checkbox" checked={ack} onChange={(e) => setAck(e.target.checked)} /> 전부 되돌리기 목록을 다시 확인했습니다</label>
+        <button type="button" className="logout-btn" style={{ ...BTN, color: 'var(--red)' }} disabled={busy || !ack || (auth && !fixed)} onClick={() => onRollback(auth ? { sshFixed: true } : {})}>다시 되돌리기</button></div>
     </div>
   );
 }
@@ -364,9 +398,10 @@ function RunStep({ j, bundle, onRetry, onStop, onRollback, onFinish, busy, say }
           {j.status === 'stopped' && <button type="button" className="login-btn" style={BTN} disabled={busy} onClick={() => onRetry({})}>{j.currentStep ?? ''}단계부터 이어서</button>}
           {j.status === 'done' && <button type="button" className="login-btn" onClick={onFinish}>마무리로 →</button>}
         </div>
-        {j.rollback && <div className="banner" style={{ marginTop: 8, fontSize: 12.5 }}>전부 되돌리기: {j.status === 'rolledback' ? '끝' : j.status === 'rollback-failed' ? '일부 실패' : '진행 중'}{j.rollback.notes?.length ? ` · ${j.rollback.notes.join(' · ')}` : ''}{j.rollback.left?.length ? ` · 남은 것: ${j.rollback.left.join(' / ')}` : ''}</div>}
+        {j.rollback && <div className="banner" style={{ marginTop: 8, fontSize: 12.5 }}>전부 되돌리기: {j.status === 'rolledback' ? '끝' : j.status === 'rollback-failed' ? '실패' : j.status === 'rolling-back' ? '진행 중' : '앞 시도 기록'}{j.rollback.notes?.length ? ` · ${j.rollback.notes.join(' · ')}` : ''}{j.status !== 'rollback-failed' && j.rollback.left?.length ? ` · 남은 것: ${j.rollback.left.join(' / ')}` : ''}</div>}
       </div>
       {j.status === 'failed' && <FailureCard j={j} bundle={bundle} onRetry={onRetry} onRollback={onRollback} busy={busy} say={say} />}
+      {j.status === 'rollback-failed' && <RollbackFailedCard j={j} onRollback={onRollback} busy={busy} />}
       {j.status === 'stopped' && <FailureCard j={{ ...j, failure: { step: j.currentStep, at: j.updatedAt, cause: { title: '중단 요청으로 멈춤', why: '요청대로 그 단계 앞에서 멈췄습니다.', fixes: [] } } }} bundle={bundle} onRetry={onRetry} onRollback={onRollback} busy={busy} say={say} />}
       <div className="card" style={CARD}>
         <b style={{ fontSize: 13 }}>실행 로그 — 최근 {j.log?.length || 0}줄</b>
@@ -380,7 +415,7 @@ function RunStep({ j, bundle, onRetry, onStop, onRollback, onFinish, busy, say }
             <STable minWidth={640}>
               <thead><tr><th>회차</th><th>시작</th><th>결과</th><th>시작 단계</th><th>바뀐 값 · 고치기</th></tr></thead>
               <tbody>{j.attempts.map((a) => (
-                <tr key={a.n}><td>{a.n}</td><td>{whenText(a.at)}</td><td>{a.rollbackAll ? '전부 되돌리기' : a.result === 'failed' ? `실패 · ${a.failedStep ?? '—'}단계${a.cause ? ` · ${a.cause}` : ''}` : a.result === 'done' ? '완료' : '진행 중'}</td><td>{a.fromStep ?? '—'}</td><td style={{ fontSize: 12 }}>{[a.fix, a.change].filter(Boolean).join(' · ') || '—'}</td></tr>
+                <tr key={a.n}><td>{a.n}</td><td>{whenText(a.at)}</td><td>{a.rollbackAll ? `전부 되돌리기${a.result === 'rollback-failed' ? ' · 실패' : a.result === 'rolledback' ? ' · 끝' : ''}` : a.result === 'failed' ? `실패 · ${a.failedStep ?? '—'}단계${a.cause ? ` · ${a.cause}` : ''}` : a.result === 'done' ? '완료' : '진행 중'}</td><td>{a.fromStep ?? '—'}</td><td style={{ fontSize: 12 }}>{[a.fix, a.change].filter(Boolean).join(' · ') || '—'}</td></tr>
               ))}</tbody>
             </STable>
           </div>
@@ -397,10 +432,10 @@ function FinishStep({ j, say }) {
   const [thumb, setThumb] = useState('');
   const [busy, setBusy] = useState(false);
   const [res, setRes] = useState(null);
-  const readThumb = async () => { setBusy(true); try { const r = await postJson(`${P}/jobs/${j.id}/fd-thumbprint`, {}); setThumb(r.thumbprint || ''); say({ ok: true, text: `FD 가 읽은 vCenter(${r.vcserver}) 지문을 넣었습니다 — 알고 있는 값과 대조하세요.` }); } catch (e) { say({ ok: false, text: e.message }); } finally { setBusy(false); } };
+  const readThumb = async () => { setBusy(true); try { const r = okOrThrow(await postJson(`${P}/jobs/${j.id}/fd-thumbprint`, {}), '지문을 읽지 못했습니다.'); setThumb(r.thumbprint || ''); say({ ok: true, text: `FD 가 읽은 vCenter(${r.vcserver}) 지문을 넣었습니다 — 알고 있는 값과 대조하세요.` }); } catch (e) { say({ ok: false, text: e.message }); } finally { setBusy(false); } };
   const writeIni = async () => {
     setBusy(true);
-    try { const r = await postJson(`${P}/jobs/${j.id}/fd-ini`, { vcuser, vcpass, vcthumbprint: thumb }); setRes(r); setVcpass(''); say({ ok: true, text: `FD INI 를 썼습니다(${r.path}).` }); }
+    try { const r = okOrThrow(await postJson(`${P}/jobs/${j.id}/fd-ini`, { vcuser, vcpass, vcthumbprint: thumb }), 'FD INI 를 쓰지 못했습니다.'); setRes(r); setVcpass(''); say({ ok: true, text: `FD INI 를 썼습니다(${r.path}).` }); }
     catch (e) { say({ ok: false, text: e.message }); } finally { setBusy(false); }
   };
   return (
@@ -479,7 +514,7 @@ export default function BareosInstallPanel({ writable = true }) {
   const runPre = async () => {
     if (!t) return;
     setBusy(true); setPre(null); setMsg(null);
-    try { const r = await postJson(`${P}/precheck`, { vcenterId: t.vcenterId, ...planBody(plan || defaultPlan(bundle, t)) }); setPre(r); }
+    try { const r = okOrThrow(await postJson(`${P}/precheck`, { vcenterId: t.vcenterId, ...planBody(plan || defaultPlan(bundle, t)) })); setPre(r); }
     catch (e) { setMsg({ ok: false, text: e.message }); } finally { setBusy(false); }
   };
   const goNext = async () => {
@@ -487,14 +522,14 @@ export default function BareosInstallPanel({ writable = true }) {
     setPlan(p); setPre(null);
     setStep(t.mode === 'reinstall' ? 'reset' : 'precheck');
     setBusy(true); setMsg(null);
-    try { const r = await postJson(`${P}/precheck`, { vcenterId: t.vcenterId, ...planBody(p) }); setPre(r); if (r.pluginPathCopies?.length) setPlan({ ...p, pyvmomiFix: true }); }
+    try { const r = okOrThrow(await postJson(`${P}/precheck`, { vcenterId: t.vcenterId, ...planBody(p) })); setPre(r); if (r.pluginPathCopies?.length) setPlan({ ...p, pyvmomiFix: true }); }
     catch (e) { setMsg({ ok: false, text: e.message }); } finally { setBusy(false); }
   };
   const start = async () => {
     setBusy(true); setMsg(null);
     try {
-      const r = await postJson(`${P}/start`, { vcenterId: t.vcenterId, ...planBody(plan) });
-      if (r.ok === false) throw new Error(r.reason || '시작하지 못했습니다.');
+      // v2.846 U-7: 409 precheck 본문을 e.body 로 넘겨야 아래 '점검 표로 돌아가기' 가 돈다(예전에는 new Error 로 바꿔 본문을 버렸다)
+      const r = okOrThrow(await postJson(`${P}/start`, { vcenterId: t.vcenterId, ...planBody(plan) }), '시작하지 못했습니다.');
       setJob(r.job); setJobId(r.job.id); setStep('run');
     } catch (e) {
       setMsg({ ok: false, text: e.message });
@@ -503,7 +538,12 @@ export default function BareosInstallPanel({ writable = true }) {
   };
   const act = async (path, body, okText) => {
     setBusy(true); setMsg(null);
-    try { const r = await postJson(`${P}/jobs/${encodeURIComponent(job.id)}/${path}`, body); if (r.ok === false) throw new Error(r.reason || '실패'); setJob(r.job); setJobId(''); setTimeout(() => setJobId(r.job.id), 0); if (okText) setMsg({ ok: true, text: okText }); }
+    try {
+      const r = okOrThrow(await postJson(`${P}/jobs/${encodeURIComponent(job.id)}/${path}`, body)); setJob(r.job); setJobId(''); setTimeout(() => setJobId(r.job.id), 0);
+      // v2.846 C-1: 잠금에 걸린 되돌리기는 서버가 바로 '되돌리기 실패(busy)' 로 남긴다 — 시작했다고 말하지 않는다
+      if (r.job?.status === 'rollback-failed') setMsg({ ok: false, text: `전부 되돌리기를 시작하지 못했습니다 — ${r.job.rollback?.message || '사유 미상'}` });
+      else if (okText) setMsg({ ok: true, text: okText });
+    }
     catch (e) { setMsg({ ok: false, text: e.message }); } finally { setBusy(false); }
   };
   const openJob = (id) => { setJobId(id); setStep('run'); };
@@ -526,7 +566,7 @@ export default function BareosInstallPanel({ writable = true }) {
       {step === 'plan' && t && plan && <PlanStep t={t} pre={pre} bundle={pre?.bundle || bundle} plan={plan} setPlan={setPlan} busy={busy || !writable} onBack={() => setStep('precheck')} onStart={start} />}
       {step === 'run' && (job ? <RunStep j={job} bundle={bundle} busy={busy || !writable} say={setMsg}
         onRetry={(b) => act('retry', b, '다시 시작했습니다.')} onStop={() => act('stop', {}, '중단을 요청했습니다 — 지금 단계가 끝나면 멈춥니다.')}
-        onRollback={() => act('rollback', { ack: true }, '전부 되돌리기를 시작했습니다.')} onFinish={() => { setMsg(null); setStep('finish'); }} /> : <Loading />)}
+        onRollback={(extra = {}) => act('rollback', { ack: true, ...extra }, '전부 되돌리기를 시작했습니다.')} onFinish={() => { setMsg(null); setStep('finish'); }} /> : <Loading />)}
       {step === 'finish' && job && <FinishStep j={job} say={setMsg} />}
     </div>
   );

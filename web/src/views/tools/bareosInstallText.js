@@ -27,7 +27,8 @@ export const stepView = (st) => STEP_VIEW[st] || STEP_VIEW.pending;
 /** 작업 상태 → 표시. */
 export const JOB_VIEW = Object.freeze({
   running: { text: '진행 중', cls: 'blue' }, failed: { text: '실패', cls: 'red' }, stopped: { text: '멈춤', cls: 'amber' }, done: { text: '설치 완료', cls: 'green' },
-  'rolling-back': { text: '전부 되돌리는 중', cls: 'amber' }, rolledback: { text: '전부 되돌림', cls: 'gray' }, 'rollback-failed': { text: '되돌리기 일부 실패', cls: 'red' },
+  // v2.846 C-1: 잠금에 걸려 아무것도 안 한 되돌리기도 이 상태다 — '일부' 라고 단정하지 않는다(카드가 원인을 밝힌다)
+  'rolling-back': { text: '전부 되돌리는 중', cls: 'amber' }, rolledback: { text: '전부 되돌림', cls: 'gray' }, 'rollback-failed': { text: '되돌리기 실패', cls: 'red' },
 });
 export const jobView = (st) => JOB_VIEW[st] || { text: st || '—', cls: 'gray' };
 
@@ -77,6 +78,7 @@ export function fixesOrdered(cause) {
 export function retryLabel(fix, step) {
   const at = Number.isInteger(step) ? `${step}단계부터` : '그 단계부터';
   if (fix?.action === 'pyvmomi-fix') return `플러그인 경로의 사본을 옮기고 ${at} 다시`;
+  if (fix?.action === 'running-unknown-ok') return `${RUNNING_UNKNOWN_OK_LABEL}(${at} 다시)`;
   if (fix?.action === 'resend-bundle') return '번들을 다시 보내고 1단계부터';
   if (fix?.action === 'edit-plan') return `계획 값을 바꿔 ${at} 다시`;
   return `${at} 그대로 다시`;
@@ -93,10 +95,19 @@ export function defaultPlan(bundle, target) {
   };
 }
 
+/**
+ * v2.846 D-2: 실행 중 작업을 못 읽었을 때의 동의 — 서버 사전 점검의 조치 문구(precheck.js RUNNING_UNKNOWN_OK_LABEL)와 **같은 글자**(시험이 대조).
+ * 동의는 그 회차에만(서버 작업 기록의 시도 행) — 계획 값이 아니라 다시 하기로 이어지지 않는다.
+ */
+export const RUNNING_UNKNOWN_OK_LABEL = '확인했음 — 실행 중 작업 확인 없이 진행';
+/** 재설치이고 사전 점검이 실행 중 작업을 못 읽었나(? 확인 불가). */
+export const runningUnknown = (pre, target) => target?.mode === 'reinstall' && (pre?.items || []).some((i) => i.key === 'running' && i.status === 'unknown');
+
 /** 계획을 서버로 보낼 모양(숫자 칸은 숫자로). */
 export function planBody(p) {
   const n = (v) => (v === '' || v == null ? v : Number(v));
   return {
+    ...(p.runningUnknownOk === true ? { runningUnknownOk: true } : {}),
     pyvmomi: p.pyvmomi, pyvmomiFix: !!p.pyvmomiFix, volumeDir: String(p.volumeDir || '').trim(), webui: p.webui !== false,
     pools: { fullDays: n(p.pools?.fullDays), incrDays: n(p.pools?.incrDays), maxVolumeGB: n(p.pools?.maxVolumeGB) },
     schedule: { fullDay: p.schedule?.fullDay, time: p.schedule?.time }, consoleName: String(p.consoleName || '').trim(), directorName: String(p.directorName || '').trim(),
@@ -104,8 +115,8 @@ export function planBody(p) {
   };
 }
 
-/** 계획 화면에서 바로 막을 것(서버도 같은 판정을 한다 — 여기는 안내용). */
-export function planIssues(p, target) {
+/** 계획 화면에서 바로 막을 것(서버도 같은 판정을 한다 — 여기는 안내용). pre = 사전 점검 결과(실행 중 작업 확인 불가면 동의 필요 — 러너 0단계도 멈춘다). */
+export function planIssues(p, target, pre = null) {
   const out = [];
   if (!p.pyvmomi) out.push('pyVmomi 판을 고르세요.');
   const vd = String(p.volumeDir || '').trim();
@@ -113,8 +124,41 @@ export function planIssues(p, target) {
   if (target?.mode === 'reinstall') {
     if (!p.reset?.ack) out.push('지울 항목을 확인했다는 표시가 필요합니다.');
     if (p.reset?.volumes && String(p.reset.confirmName || '').trim() !== String(target.vcenterName || '').trim()) out.push('백업 볼륨까지 지우려면 법인 이름을 정확히 입력하세요.');
+    if (runningUnknown(pre, target) && p.runningUnknownOk !== true) out.push(`실행 중 작업을 확인하지 못했습니다 — 직접 확인했으면 ‘${RUNNING_UNKNOWN_OK_LABEL}’ 을 체크하세요(체크하지 않으면 0단계가 아무것도 지우지 않고 멈춥니다).`);
   }
   return out;
+}
+
+/**
+ * v2.846 U-12: 초기화 확인의 볼륨 크기 합 — 못 읽은(null) 볼륨을 0 으로 더하지 않는다. 아는 합 + '모름 N곳'.
+ * @returns {{ text, known:number|null, unknown:number }}
+ */
+export function volumesSizeText(vols) {
+  const list = Array.isArray(vols) ? vols : [];
+  const known = list.map((v) => numOrNull(v?.bytes)).filter((b) => b !== null);
+  const unknown = list.length - known.length;
+  if (!list.length) return { text: '—', known: null, unknown: 0 };
+  if (!known.length) return { text: `크기 모름(${unknown}곳)`, known: null, unknown };
+  const sum = known.reduce((a, b) => a + b, 0);
+  return { text: unknown ? `${bytesText(sum)} + 크기 모름 ${unknown}곳(일부 모름)` : bytesText(sum), known: sum, unknown };
+}
+
+/**
+ * v2.846 U-7: postJson 은 409 를 던지지 않고 본문을 돌려준다 — `ok:false` 를 성공으로 보이지 않게 던진다(본문은 e.body — 시작의 precheck 표 되돌림이 쓴다).
+ */
+export function okOrThrow(r, fallback = '실패했습니다.') {
+  if (r && r.ok === false) throw Object.assign(new Error(r.reason || fallback), { body: r });
+  return r;
+}
+
+/** v2.846 C-1: 되돌리기 실패 원인 문구. */
+export function rollbackCauseText(cause) {
+  return ({
+    busy: '같은 서버(또는 같은 Director)의 다른 작업이 진행 중이라 시작하지 않았습니다 — 아무것도 바꾸지 않았습니다.',
+    'ssh-auth': '저장된 SSH 계정으로 로그인하지 못해 멈췄습니다(자동으로 다시 시도하지 않습니다 — 계정 잠금).',
+    remote: '원격 되돌리기가 실패했거나 끝 표시 없이 끝났습니다 — 아래 남은 것을 확인하세요.',
+    timeout: '원격 되돌리기가 시한 안에 끝나지 않았습니다.',
+  })[cause] || '되돌리기를 끝내지 못했습니다 — 사유를 확인하세요.';
 }
 
 export const PYVMOMI_REASON = '권고: 8 계열 — Rocky 9 기본 Python 3.9 에서 pyVmomi 9.x 는 ‘Python 3.10 or newer is required’ 로 플러그인이 시작하지 못했습니다(현장 실측 2026-10-30 · 설치 문서 7.4). 번들에는 8.x 휠만 넣습니다.';

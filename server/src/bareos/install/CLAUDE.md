@@ -36,9 +36,21 @@
   전부 되돌리기는 **원격 먼저 → 성공하면 포탈 등록·매핑**, 이 설치의 Director 에 백업 대상이 있으면 거부(M4) · 배포 등록부의 SSH 주소가 작업 시작 때와 다르면 거부(M5) ·
   원격 단계 시한 4시간(폴링 + 유닛 `RuntimeMaxSec` · M6) · 동시 시작 준비 잠금(L1) · 실행 중 작업은 bconsole 접속이 확인될 때만 센다(못 읽으면 확인 불가 · L2) ·
   출력의 `Password = ...` 값 가림(L4) · `dnf remove --noautoremove` · firewalld 는 `--reload` 없이 런타임·영구를 따로(호스트 접근 제어의 확정 대기 규칙을 버리지 않게 · L5).
-  ✅ L3 는 v2.845 에 고쳤다 — 잠금 표를 `bareos/setupLocks.js` 하나로(자동 설정 · 법인별 설정 · 완전 설치가 Director · 서버 주소로 서로 막는다).
+  L3: v2.845 는 잠금 표를 `bareos/setupLocks.js` 하나로 합쳤지만 ⚠ 완전 설치는 **SSH 주소 하나만** 쥐었다(Director id · 러너가 읽은 서버 주소 hostAddr 는 안 쥠 —
+  예전 문구 '서로 막는다' 는 과장이었다 · v2.846 C-3 재현). ✅ v2.846: 작업이 도는 동안(원격 단계 포함) **Director id(재설치 · 4단계에서 새로 등록하면 그때 더함) +
+  SSH 주소 + 서버 주소**를 한 소유 키로 쥔다(`claimSetupGroup` · `addSetupGroupDirector` — 자동 설정 · 법인별 설정의 단건 API 는 그대로 막힌다 · 진행 중 Director 저장·삭제도 409).
+  마무리(FD 지문 · INI)도 가장 새 작업 · M5 · Director·서버 잠금(`finishContext` · `finishOp`).
   ⚠ v2.845 정정(반증 E1): 4단계 새 콘솔 확인의 임시 bconsole.conf 에 `Port =` 를 썼다 — 번들 bconsole 바이너리의 키워드는 `DirPort`(실측 · `Port` 별칭은 확인 못 함). `DirPort` 로 바꿨다.
   남긴 것: bconsole 접속 문구('Connecting to Director')는 실환경 미확인(다르면 '확인 불가' 쪽으로 — 0 으로 보지 않는다).
+- **v2.846 버그 점검 확정분(되돌리지 말 것 · `bareosInstallBugs2846` — 러너는 실제 bash · 변이 검증)**:
+  ① 전부 되돌리기의 잠금 실패 · 예외 · 인증 실패는 **'rollback-failed'**(`recordRollbackFailed` — cause busy · ssh-auth · remote · timeout)로 남긴다 — 설치 실패('failed')로 적으면
+  그 '그대로 다시' 가 0단계(초기화)부터 돌았다(C-1). 화면은 '다시 되돌리기'. 다시 하기(`retryInstall`)는 **되돌리기를 시도한 작업이면 거부**한다
+  (⚠ 'failure.step 이 없으면 거부' 로 넓히지 말 것 — 첫 시작 잠금 실패의 정상 재시도까지 막는다). 중앙 재시작 뒤 되돌리기 이어 하기는 러너를 **다시 띄우지 않고 상태만 읽는다**.
+  ② 되돌리기 폴링은 SSH 인증 실패면 즉시 멈춘다(자동 재시도 금지 · 다시 되돌리기는 `sshFixed`) · 그 밖 오류는 늘려 가며(C-2).
+  ③ 러너 0단계의 실행 중 작업 판정은 사전 점검 · `manage/apply.js` RUNNING_CMD 와 같은 규칙(rc 0 + 'Connecting to Director' + 오류 문구 없음일 때만 센다 · Director 꺼짐 = 없음 ·
+  그 밖은 unknown → **멈춤**). 화면의 '확인했음 — 실행 중 작업 확인 없이 진행' 동의만 `RUNNING_UNKNOWN_OK=1`(planEnv 화이트리스트 · **그 회차의 시도 행에만** — 계획 값이 아니라 다시 하기로 이어지지 않는다 · D-2).
+  ④ 전부 되돌리기의 M4 는 재설치(기존 Director 를 다시 등록해 쓰는 작업)에도 적용(D-4) · 백업 대상 원장을 못 읽으면 503(대상 수를 0 으로 보지 않는다 · D-7).
+  ⑤ 화면: postJson 은 409 를 던지지 않는다 — `okOrThrow` 로 `ok:false` 를 성공으로 보이지 않는다(U-7 · 시작의 precheck 표 되돌림) · 볼륨 크기 합은 못 읽은 것을 0 으로 더하지 않는다(U-12).
 - **데모**: mock + 실제 Director 미등록이면 `demo.js`(시간으로 진행하는 합성 작업 · 판정은 실제 코드 · 장비에 닿지 않음).
 - 실환경 미확인(추정 — 첫 현장 설치에서 확인할 것): Bareos `current` 사전 공개판 RPM 이 Rocky 9.x 의 각 마이너에서 `--alldeps` 로 풀리는지(CI 는 rockylinux:9 최신에서만 확인) ·
   `bconsole -c`(이름 있는 Console) TLS-PSK 접속 출력 모양 · `update_bareos_tables` 가 카탈로그 유지 재설치에서 판 차이를 맞추는지 · WebUI 첫 화면 응답 코드.

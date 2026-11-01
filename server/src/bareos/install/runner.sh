@@ -87,14 +87,36 @@ safe_voldir() {
   [ "$rp" = "$1" ]
 }
 
+# 실행 중 작업 수 — 출력: 숫자 | inactive(Director 꺼짐 = 실행 중 작업 없음) | unknown(못 읽음 — 0 이 아니다).
+# v2.846 D-2(재현): 예전에는 bconsole 출력에 jobid 줄이 없으면 0 으로 봤다 — 접속·인증이 실패해도 '실행 중 0' 이 돼 돌던 백업·복원을 끊고 DB 를 지웠다.
+# 판정은 사전 점검(precheck.js @@running) · 법인별 설정(manage/apply.js RUNNING_CMD)과 같다: rc 0 + 'Connecting to Director' + 오류 문구 없음일 때만 센다.
+running_jobs() {
+  local s; s="$(systemctl is-active bareos-dir 2>/dev/null)"
+  case "$s" in
+    (inactive|failed) echo inactive; return 0 ;;
+    (active|activating|reloading|deactivating) ;;
+    (*) echo unknown; return 0 ;;
+  esac
+  command -v bconsole >/dev/null 2>&1 || { echo unknown; return 0; }
+  local o rc; o="$(printf 'llist jobs jobstatus=R\n' | timeout 45 bconsole 2>&1)"; rc=$?
+  if [ $rc -eq 0 ] && printf '%s\n' "$o" | grep -q 'Connecting to Director' && ! printf '%s\n' "$o" | grep -qiE 'Authorization failed|Failed to connect|ERR='; then
+    printf '%s\n' "$o" | grep -cE '^[[:space:]]*jobid:[[:space:]]*[0-9]+'
+  else echo unknown; fi
+  return 0
+}
+
 # ───────── 0 기존 제거(초기화) — 되돌리지 않는다(지운 것은 복구할 수 없다). 다시 하면 이미 한 것은 건너뛴다.
 step0() {
-  if systemctl is-active -q bareos-dir 2>/dev/null && command -v bconsole >/dev/null 2>&1; then
-    local out; out="$(printf 'llist jobs jobstatus=R\n' | timeout 45 bconsole 2>&1)"
-    if printf '%s\n' "$out" | grep -Eq '^[[:space:]]*jobid:[[:space:]]*[0-9]+'; then
-      errx "실행 중 작업 확인" "Director 에 실행 중인 작업이 있습니다 — 끝난 뒤 다시 하세요. 아무것도 지우지 않았습니다." 1 running-jobs; return 1
-    fi
-  fi
+  local n; n="$(running_jobs)"
+  case "$n" in
+    (inactive) log "실행 중 작업 확인: Director 꺼짐(실행 중 작업 없음)" ;;
+    (0) log "실행 중 작업 확인: 0개(bconsole 접속 확인)" ;;
+    (unknown|''|*[!0-9]*)
+      # 못 읽으면(숫자가 아닌 출력 포함) 멈춘다 — 화면의 '확인했음 — 실행 중 작업 확인 없이 진행' 동의(plan.env RUNNING_UNKNOWN_OK=1 · 그 회차만)가 있을 때만 진행
+      if [ "${RUNNING_UNKNOWN_OK:-0}" = 1 ]; then log "실행 중 작업을 확인하지 못했습니다 — 화면의 '확인했음 — 실행 중 작업 확인 없이 진행' 동의로 진행"
+      else errx "실행 중 작업 확인" "Director 는 켜져 있는데 bconsole 로 실행 중 작업을 확인하지 못했습니다(접속·인증 실패 또는 bconsole 없음) — 0 으로 보지 않고 멈췄습니다. 아무것도 지우지 않았습니다." 1 running-unknown; return 1; fi ;;
+    (*) errx "실행 중 작업 확인" "Director 에 실행 중인 작업이 ${n}개 있습니다 — 끝난 뒤 다시 하세요. 아무것도 지우지 않았습니다." 1 running-jobs; return 1 ;;
+  esac
   # 볼륨 경로는 설정을 지우기 **전에** 읽는다(포탈이 확인받은 목록과 겹치는 것만 지운다)
   local conf_dirs=""
   if [ -d "$ETC_BAREOS/bareos-sd.d/device" ]; then
