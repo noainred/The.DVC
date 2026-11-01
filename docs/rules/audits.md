@@ -6,6 +6,7 @@
 
 ## 목차
 
+- Bareos v2.844 완전 설치 — 엣지 노드에 오프라인 번들로(초기화 후 재설치 · 실패 원인 · 고쳐서 다시 · WebUI)(2026-11-01)
 - Bareos v2.843 백업은 법인 로컬 — 보관 정리 미리 보기 · Director 담당 엣지 권함 · 하위 탭 줄바꿈(2026-11-01)
 - Bareos v2.828 조회 화면 모듈 규칙(server/src/bareos/CLAUDE.md 에서 옮김 — 2026-11-01, v2.843)
 - Bareos v2.842 자동 설정 쓰기 단계 본인 OTP 재확인 켜고 끄기(세션 보안 `bareosSetupOtp` — 2026-11-01)
@@ -1830,6 +1831,25 @@
   목록 memo(P7) · 카탈로그 memo 세대(P9) · 고아 잡(I7) · Migration 새 잡의 일시 lastRun(C2-7).
   ⚠ 정정(v2.823): 카탈로그 memo 세대(P9)는 v2.823 에 해소했다(memo 키에 Director id + `settingsRev` — 설정을 저장하면 새로 읽는다). 고아 잡(I7)은 v2.823 검토 C3 에서
   '가리키는 Director 가 설정에 없는 대상은 원장에서만 취소·삭제' 경로로 일부 해소(Director 쪽 고아 잡 탐지는 여전히 없다).
+
+## Bareos v2.844 완전 설치 — 엣지 노드에 오프라인 번들로(초기화 후 재설치 · 실패 원인 · 고쳐서 다시 · WebUI)(2026-11-01)
+
+사용자 요청 '엣지 노드의 ip/id/pw 를 알고 있으니 bareos 를 완전히 자동으로 설치' · 시안 먼저(Fable — v1~v13) · '실패하면 구체적으로 오류를 알려주고 고쳐서 다시 시도' ·
+결정 '포탈에서 고치기' · 'OTP 넣지 않고 설치'(실행은 OTP 등록 관리자만) · 'pyVmomi 판 선택, 권고 8' · '설치 기능은 설정에' · 'Director 등록 법인은 완전 초기화 후 재설치(실행 때마다 범위)' ·
+'완전 설치에 WebUI 추가'. 규칙 전문 `server/src/bareos/install/CLAUDE.md`. 회귀 `bareosInstall2844`(8) · `bareosInstallRunner2844`(10 — runner.sh 실제 bash) · 웹 `bareosInstall2844`(12).
+
+- **번들은 CI 가 만든다**(`bareos-bundle` 워크플로 · rockylinux:9) — 이 개발 컨테이너는 download.bareos.org 가 프록시 403 이라 빌드할 수 없다. CI 실측(run 4, 2026-11-01):
+  Bareos **25.1.2~pre73.3e32b07ea(사전 공개판 · 'Bareos experimental Signing Key')** · PostgreSQL 13.23 · RPM 257개(--alldeps) · 186 MB ·
+  VDDK 는 플러그인 의존으로 함께(`bareos-vmware-vix-disklib-9.0.0.0_24742305` · `bareos-vadp-dumper`) — 업로드 불필요(시안 v1~v8 의 'VDDK 업로드' 를 없앴다).
+  CI 실패로 고친 것: ① 저장소에 aarch64 판도 있어 이름만 주면 두 아키텍처가 걸림(conflicting requests) → `--arch x86_64 --arch noarch` ② PyPI 의 pyVmomi 8.x 는 sdist 뿐 → 빌드 컨테이너에 wheel 설치.
+- **변이 검증(러너 6/6)**: etcnew 기록 제거 · safe_voldir 제거 · 남의 파일 검사 제거 · 설치 패키지 기록 제거 · sha 대조 제거 · 중단 파일 무시 — 모두 `bareosInstallRunner2844` 가 잡는다.
+- **Chromium 1440·400(데모)으로 고친 것**: 대상 표 불가 사유 nowrap 으로 1440 에서 '최근 작업' 열 가림 → 칸 안 줄바꿈 · 번들 카드의 긴 주소로 400 가로 넘침 26px(요소를 하나씩 숨겨 측정) →
+  overflowWrap · 실행 단계 3칸 격자에서 상세 칸이 400 에서 몇 글자 폭으로 눌려 세로로 쪼개짐 → 이름·상태 아래 전체 폭 · '다시 시작했습니다' 안내가 마무리 화면까지 남음 → 단계 이동 때 지움.
+  데모 첫 시나리오가 실패하지 않았던 것은 결함이 아니었다(사전 점검이 플러그인 경로 사본을 찾으면 계획이 '옮기기' 를 자동으로 켠다) — 데모 첫 회차를 dnf 잠금 실패로 바꿨다.
+- 시안과 다르게 구현한 것(사실 확인 결과 · 사용자에게 보고): 방화벽은 http(80)만(Director · SD · FD 는 한 서버 안) · 서버 쪽 Director · FD 이름은 패키지 기본(`bareos-dir` · `bareos-fd`) ·
+  재설치 뒤 백업 대상은 Director 에 잡이 없다(초기화가 /etc/bareos 를 지운다 — 시안의 '그룹 자동 재연결' 은 틀린 문구였다) → 마무리 화면이 다시 등록을 안내 · 번들 위치 /var/lib/portal-bareos-install(재부팅에도 남게).
+- 남긴 것: 재설치 뒤 백업 대상 **자동** 다시 등록(지금은 안내만 — 백업 대상 탭에서 지우고 일괄 등록) · 키만 저장된 배포 대상(4·5단계 autoSetup 이 비밀번호 SSH 만) ·
+  실제 엣지 노드에서의 첫 설치(CI 는 의존 해석까지만 — 설치 · 서비스 기동 · WebUI 응답은 현장 미확인).
 
 ## Bareos v2.843 백업은 법인 로컬 — 보관 정리 미리 보기 · Director 담당 엣지 권함 · 하위 탭 줄바꿈(2026-11-01)
 

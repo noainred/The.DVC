@@ -67,5 +67,5 @@
 - 실환경 미확인(추정 — `tools/bareos-probe.js` 로 확인할 것): Node↔Director TLS-PSK 협상 · 잡 수준 FdPluginOptions 와 FileSet 플러그인 문자열 병합 ·
   `.bvfs_get_jobids` JSON 모양 · Profile ACL 지시어 이름 · `list jobs days=N` · 25.x `.jobs` 의 enabled 칸(master 소스 기준 — 없으면 다시 끄기를 하지 않는다) · Migration 행의 시작 시각.
 - **v2.828 조회 화면**(`bareos-summary`·`bareos-detail` — Director 에 접속하지 않는다 · 원장 상한 3,000): 전문은 audits.md 'Bareos v2.828 조회 화면 모듈 규칙'(옮김).
-- **v2.843 법인 로컬**(사용자 원칙 '백업은 법인 로컬, 통합 로그는 중앙' · `bareosLocal2843`): VM 수만큼 Director 를 부르는 일은 작업 하나(`ops.js`)로 법인 쪽에서 —
-  정리 미리 보기 `prunePreview` 는 pruneJobs 와 같은 입력(keep·since)·`pruneSelection` · **delete 없음 · MUTATING 밖** · 설정 응답 `siteAgent` 로 담당 엣지를 권한다. audits.md 'v2.843'.
+- **v2.843 법인 로컬**(`bareosLocal2843`): 정리 미리 보기 `prunePreview`(pruneJobs 와 같은 판정 · delete 없음 · MUTATING 밖) · 설정 응답 `siteAgent` — audits.md 'v2.843'.
+- **v2.844 완전 설치**: 규칙 전문은 `install/CLAUDE.md`(엣지 노드 안 러너 · 그 단계만 되돌림 · 볼륨 삭제 세 겹 · 번들 서명 · OTP 코드 없음).

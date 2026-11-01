@@ -160,8 +160,8 @@ function ResetStep({ t, pre, plan, setPlan, onBack, onNext, onRecheck, busy }) {
             <dt>Bareos 패키지 · 설정</dt><dd style={{ margin: 0 }}>{pre.items.find((i) => i.key === 'bareos')?.detail || '—'}</dd>
             <dt>실행 중 작업</dt><dd style={{ margin: 0 }}>{pre.items.find((i) => i.key === 'running')?.detail || '—'}</dd>
             <dt>카탈로그 DB</dt><dd style={{ margin: 0 }}>{pre.catalogBytes == null ? '읽지 못함(PostgreSQL 꺼짐 또는 DB 없음)' : `bareos · ${bytesText(pre.catalogBytes)}`}</dd>
-            <dt>백업 볼륨</dt><dd style={{ margin: 0 }}>{vols.length ? vols.map((v) => `${v.path} · 파일 ${v.files ?? '—'}개 · ${bytesText(v.bytes)} · 마지막 ${whenText(v.lastAt)}`).join(' / ') : '설정에서 읽은 볼륨 경로 없음'}</dd>
-            <dt>포탈 쪽</dt><dd style={{ margin: 0 }}>Director 등록 ‘{t.director?.name}’ · 이 법인의 백업 대상 {pre.ledgerTargets ?? '—'}개(초기화하면 Director 의 잡 설정이 지워집니다 — 포탈 목록은 남고, 마무리에서 다시 등록합니다)</dd>
+            <dt>백업 볼륨</dt><dd style={{ margin: 0 }}>{vols.length ? vols.map((v) => `${v.path} · ${v.files == null ? '파일 수 —' : `파일 ${v.files}개`} · ${bytesText(v.bytes)} · 마지막 ${whenText(v.lastAt)}`).join(' / ') : '설정에서 읽은 볼륨 경로 없음'}</dd>
+            <dt>포탈 쪽</dt><dd style={{ margin: 0 }}>Director 등록 ‘{t.director?.name}’ · 이 법인의 백업 대상 {pre.ledgerTargets == null ? '—' : `${pre.ledgerTargets}개`}(초기화하면 Director 의 잡 설정이 지워집니다 — 포탈 목록은 남고, 마무리 화면이 다시 등록하는 방법을 안내합니다)</dd>
           </dl>
           <div className="card" style={DEEP}>
             <label style={{ ...ROW, fontSize: 13 }}><input type="checkbox" checked disabled /> <b>패키지 · 설정 삭제</b> <Badge cls="gray">필수 · 끌 수 없음</Badge></label>

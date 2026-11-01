@@ -1,9 +1,9 @@
 # 환경변수 레퍼런스 (자동 생성)
 
-`server/src` 가 실제로 읽는 환경변수 **698개**를 코드에서 추출한 목록이다.
+`server/src` 가 실제로 읽는 환경변수 **699개**를 코드에서 추출한 목록이다.
 설치본에서는 `/etc/vmware-portal/portal.env` 에 `KEY=값` 으로 넣고 서비스를 재시작한다.
 
-- 생성: `node scripts/env-doc.mjs` (마지막 갱신 2026-10-30)
+- 생성: `node scripts/env-doc.mjs` (마지막 갱신 2026-11-01)
 - **이 파일을 직접 고치지 말 것** — 코드가 진실의 원천이며 다음 실행에서 덮어써진다.
 - `portal.env.example` 에 예시가 있는 키는 ✅, 없는 키는 빈칸으로 표시한다.
 - 기본값 칸이 비어 있으면 코드에서 한 줄로 추출하지 못한 것이다(해당 파일을 참조).
@@ -54,7 +54,7 @@
 | `WAN_TLS_CA_FILE` | `''` | ✅ | util/resilientFetch.js |
 | `WAN_TLS_INSECURE` | `기본 적용('true' 로 끄기)` | ✅ | util/resilientFetch.js |
 
-## 공통 (212)
+## 공통 (213)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
@@ -70,6 +70,7 @@
 | `AUTH_ENABLED` | `기본 적용('false' 로 끄기)` | ✅ | config.js |
 | `AUTH_SECRET` | `''` | ✅ | config.js |
 | `AUTH_TOKEN_TTL` | `'8h'` | ✅ | config.js |
+| `BAREOS_BUNDLE_BASE_URL` | `''` |  | bareos/install/bundle.js |
 | `BAREOS_EDGE_PICKUP_MS` | `120000` |  | bareos/edgeOps.js |
 | `BMUSAGE_ACTIVITY_MAX` | `500` |  | bmusage/activityLog.js |
 | `BMUSAGE_ALERT_MAX` | `40` |  | bmusage/notify.js |
@@ -887,4 +888,4 @@
 
 ---
 
-예시 파일(`packaging/offline/portal.env.example`)에 있는 키: 85 / 698
+예시 파일(`packaging/offline/portal.env.example`)에 있는 키: 85 / 699

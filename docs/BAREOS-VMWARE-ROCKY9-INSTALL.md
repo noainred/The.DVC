@@ -29,6 +29,20 @@
 
 ---
 
+### 0.1 포탈 '완전 설치'(v2.844) — 이 문서의 2~7장을 포탈이 자동으로
+
+설정 › Bareos › **법인 Bareos 완전 설치**는 법인의 **엣지 노드 자체**에 Director · SD · FD · VMware 플러그인 · PostgreSQL 카탈로그 · WebUI 를 한 번에 설치하고
+Director 를 포탈에 등록한다(담당 = 그 엣지). 배포 등록부의 SSH root 계정을 쓰고, 패키지는 포탈 릴리스와 같은 키로 서명된 **오프라인 번들**(릴리스 태그 `bareos-bundle`)에서 올린다.
+규칙·되돌리기·초기화 범위는 `server/src/bareos/install/CLAUDE.md`. 이 문서와 다른 점(그 기능 기준):
+
+- 한 서버 구성(1장의 'Director 는 한국 1대' 와 다름 — 사용자 결정 '백업은 법인 로컬'): 법인 · vCenter · Bareos 1:1:1 이라 Director 도 그 법인 엣지 노드에 둔다.
+- 볼륨 경로 기본값은 패키지 기본 `/var/lib/bareos/storage`(계획 화면에서 `/mnt/bareos` 같은 다른 디스크로 바꿀 수 있다 — 3.3 의 SELinux 문맥은 포탈이 `semanage fcontext -e` 로 준다).
+- 번들 실측(CI 2026-11-01): Bareos **25.1.2~pre73(download.bareos.org/current — 사전 공개판, 'experimental' 키 서명)** · PostgreSQL 13.23 ·
+  VDDK `bareos-vmware-vix-disklib-9.0.0.0` 은 플러그인 의존으로 함께 들어온다(7.1 과 같음) · pyVmomi 는 8.x 휠만(7.4 현장 기록 — 9.x 는 Python 3.9 에서 플러그인이 시작하지 못함).
+- 방화벽은 WebUI 의 http(80)만 연다(Director · SD · FD 는 한 서버 안에서만 통신 — 1.1 의 9101~9103 개방은 이 구성에서 필요 없다).
+
+---
+
 ## 1. 구성 — 이 환경에 맞춘 배치
 
 ```
