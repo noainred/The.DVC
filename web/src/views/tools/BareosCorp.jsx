@@ -5,6 +5,7 @@ import { STable } from '../../components/STable.jsx';
 import Select from '../../components/Select.jsx';
 import BoldText from '../../components/boldText.jsx';
 import { bytesText } from './bareosInstallText.js';
+import { unitText } from '../unitText.js';
 import {
   SECRET_SLOT, consoleText, sdDeviceText, dirStorageText, passwordIssue, pwPairIssue, nameIssue, storageRows, portalText, diskText, pathCheckLines,
   accountRows, portalOf, tlsText, profileOptions, DEFAULT_PROFILE, poolFormOf, retentionText, PORTAL_POOLS, PORTAL_SCHEDULE, maskPw, sshSourceText, noSshNeeded,
@@ -251,8 +252,8 @@ function Overview({ corp, cfg, scan, onTab, writable, busy }) {
       <div className="card" style={{ padding: 14, minWidth: 0 }}>
         <b>포탈 풀 · 스케줄</b>
         <div style={{ fontSize: 12.5, marginTop: 6, lineHeight: 1.7 }}>
-          {pf.hasPools ? <div>{PORTAL_POOLS[0]} {pf.fullDays || '—'}일 · {PORTAL_POOLS[1]} {pf.incrDays || '—'}일 · 볼륨 최대 {pf.maxVolumeGB || '—'} GB</div> : <div className="muted">포탈 풀이 없습니다(자동 설정 · 완전 설치에서 만들 때 생깁니다).</div>}
-          {pf.hasSchedule ? <div>{PORTAL_SCHEDULE} Full {pf.fullDay || '—'} {pf.time || ''}(서버 시각)</div> : <div className="muted">포탈 스케줄 없음</div>}
+          {pf.hasPools ? <div>{PORTAL_POOLS[0]} {unitText(pf.fullDays, '일')} · {PORTAL_POOLS[1]} {unitText(pf.incrDays, '일')} · 볼륨 최대 {unitText(pf.maxVolumeGB, ' GB')}</div> : <div className="muted">포탈 풀이 없습니다(자동 설정 · 완전 설치에서 만들 때 생깁니다).</div>}
+          {pf.hasSchedule ? <div>{PORTAL_SCHEDULE} Full {pf.fullDay && pf.time ? `${pf.fullDay} ${pf.time}(서버 시각)` : '—(읽지 못함)'}</div> : <div className="muted">포탈 스케줄 없음</div>}
         </div>
         <button type="button" className="logout-btn" style={{ ...BTN, marginTop: 8 }} onClick={() => onTab('pools')}>풀 · 스케줄</button>
       </div>

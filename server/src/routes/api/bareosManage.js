@@ -17,6 +17,7 @@ import { isSshAuthError, isSshHostKeyError } from '../../proxy/sshExec.js';
 import { directorById } from '../../bareos/settings.js';
 import { isDemoActive, effectiveSettings } from '../../bareos/service.js';
 import { claimSetup, releaseSetupLock, setupBusyReason } from '../../bareos/setupLocks.js';
+import { poolSettled } from '../../util/pool.js';
 import { noteSetupStart, noteSetupEnd } from '../../bareos/inflight.js';
 import { requestReconcile } from '../../bareos/poller.js';
 import { planManage, newAccountPassword, passwordIssue } from '../../bareos/manage/apply.js';
@@ -246,8 +247,6 @@ api.post(`${PA}/bulk`, adminOnly, fullScopeOnly, fullWriteOnly, async (req, res)
   if (![...sshOf.values()].some((x) => x.ssh)) return res.status(400).json({ ok: false, code: 'invalid', needSsh: true, reason: '보낼 수 있는 법인이 없습니다 — 고른 법인 모두 SSH 비밀번호가 필요합니다(배포 등록부 계정 없음). OTP 는 쓰지 않았습니다.' });
   if (!otpVerify(req, res, pre.needOtp)) return;
   const label = LABEL[action];
-  const results = new Array(dirs.length);
-  let next = 0;
   const one = async (d) => {
     const row = { directorId: d.id, name: d.name, ok: false, status: 'failed' };
     const so = sshOf.get(d.id);
@@ -274,7 +273,9 @@ api.post(`${PA}/bulk`, adminOnly, fullScopeOnly, fullWriteOnly, async (req, res)
       requestReconcile(d.id);
     }
   };
-  await Promise.all(Array.from({ length: Math.min(4, dirs.length) }, async () => { while (next < dirs.length) { const k = next++; results[k] = await one(dirs[k]); } }));
+  // 법인마다 동시 4(util/pool — 한 법인의 예외가 다른 법인 결과를 버리지 않는다)
+  const results = (await poolSettled(dirs, 4, one)).map((r, i) => (r.status === 'fulfilled' ? r.value
+    : { directorId: dirs[i].id, name: dirs[i].name, ok: false, status: 'failed', reason: String(r.reason?.message || r.reason).slice(0, 600) }));
   res.json({ ok: true, action, account: input.name, results, passwordMode: acct.generated ? 'per-corp-generated' : (acct.pw ? 'same-input' : 'none') });
 });
 

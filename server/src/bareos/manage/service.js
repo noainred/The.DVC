@@ -17,6 +17,7 @@ import { jobNameFor } from '../names.js';
 import { morefOf } from '../../vcenter/registry.js';
 import { tryLockJob, unlockJob } from '../jobLocks.js';
 import { requestReconcile } from '../poller.js';
+import { poolSettled } from '../../util/pool.js';
 import { knownHostAddrs } from '../install/job.js';
 import { planManage, applyManage, RESERVED_CONSOLES } from './apply.js';
 import { normConfigResult, normScanResult } from './showParse.js';
@@ -163,12 +164,6 @@ export async function runManage(d, { plan, known, input }, ssh, { accountPasswor
 
 /* ───────── 중앙 계정 통합 ───────── */
 const MATRIX_CONCURRENCY = 4;
-async function pool(items, n, fn) {
-  const out = new Array(items.length);
-  let i = 0;
-  await Promise.all(Array.from({ length: Math.min(n, items.length) }, async () => { while (i < items.length) { const k = i++; out[k] = await fn(items[k], k); } }));
-  return out;
-}
 
 /**
  * 법인(Director)마다 WebUI 계정 목록 — 설정 조회(Director 마다 시한 · 동시 4). 실패한 법인은 사유와 함께(다른 법인을 막지 않는다).
@@ -176,7 +171,8 @@ async function pool(items, n, fn) {
  */
 export async function accountsMatrix({ refresh = false, showAddr = true } = {}) {
   const s = effectiveSettings();
-  const rows = await pool(s.directors || [], MATRIX_CONCURRENCY, async (d) => {
+  const dirs = s.directors || [];
+  const settled = await poolSettled(dirs, MATRIX_CONCURRENCY, async (d) => {
     const base = { id: d.id, name: d.name, agent: d.agent || '', ...(showAddr ? { host: d.host } : {}), portalConsole: d.consoleName || '', ssh: publicSsh(sshSource(d)) };
     try {
       const cfg = await readConfig(d, { refresh });
@@ -189,6 +185,8 @@ export async function accountsMatrix({ refresh = false, showAddr = true } = {}) 
       };
     } catch (e) { return { ...base, ok: false, error: `${e?.code || 'error'}: ${String(e?.message || e)}`.slice(0, 300) }; }
   });
+  // 한 법인의 예외가 다른 법인 결과를 버리지 않게(util/pool — 판정 코어 하나)
+  const rows = settled.map((r, i) => (r.status === 'fulfilled' ? r.value : { id: dirs[i].id, name: dirs[i].name, agent: dirs[i].agent || '', ok: false, error: String(r.reason?.message || r.reason).slice(0, 300) }));
   const names = [...new Set(rows.flatMap((r) => (r.consoles || []).filter((c) => !c.reserved && !c.portalConsole).map((c) => c.name)))].sort((a, b) => a.localeCompare(b));
   return { directors: rows, names };
 }
