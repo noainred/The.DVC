@@ -29,7 +29,9 @@ PYVMOMI_VERSIONS="${PYVMOMI_VERSIONS:-8.0.3.0.1 8.0.2.0.1 8.0.1.0.2}"
 PYVMOMI_DEFAULT="${PYVMOMI_DEFAULT:-8.0.3.0.1}"
 RUN_NO="${RUN_NO:-0}"
 # 설치 단계(러너)가 dnf install 에 넘기는 이름 — 여기서 받은 것과 같아야 한다(bundle.json install 로 전달).
+# bareos-webui(2026-11-01 사용자 결정 '완전 설치에 WebUI 추가') — httpd · php-fpm 은 의존으로 함께 받는다.
 INSTALL_PKGS=(bareos bareos-database-postgresql bareos-storage bareos-filedaemon bareos-filedaemon-python3-plugin bareos-vmware-plugin bareos-tools
+  bareos-webui httpd php-fpm
   postgresql-server python3-pip python3-requests python3-urllib3 python3-six policycoreutils-python-utils tar openssl)
 
 case "$RUN_NO" in (*[!0-9]*|'') echo "RUN_NO 는 숫자여야 합니다" >&2; exit 2;; esac
@@ -64,6 +66,8 @@ cp /etc/pki/rpm-gpg/RPM-GPG-KEY-Rocky-9 "$B/keys/" 2>/dev/null || true
 ls "$B/keys" | grep -q . || { echo "서명 키를 하나도 넣지 못했습니다" >&2; exit 1; }
 
 echo "== pyVmomi 휠"
+# PyPI 의 pyVmomi 8.x 는 sdist 뿐 — 휠을 만들려면 빌드 도구(wheel)가 필요하다(CI 2차 실패: invalid command 'bdist_wheel'). 빌드 컨테이너에만 깐다.
+python3 -m pip install --quiet wheel
 for v in $PYVMOMI_VERSIONS; do python3 -m pip wheel --no-deps -w "$B/wheels" "pyvmomi==$v"; done
 
 echo "== 내용 목록"
