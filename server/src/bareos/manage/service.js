@@ -15,12 +15,13 @@ import { onDirector, relayToEdge, isDemoActive, effectiveSettings, eligibility, 
 
 /** 다시 등록 한 번에 보내는 대상 수(엣지 회신 정제의 addJobs 상한 500 보다 작게 — v2.846 E-1). */
 export const REREGISTER_BATCH = 200;
-import { listJobs, rebindJobs } from '../registry.js';
+import { listJobs, rebindJobs, jobDigests } from '../registry.js';
 import { jobNameFor } from '../names.js';
+import { JOB_NAME_SUFFIXES, MID_COMMAND_CODES } from '../ops.js';
 import { morefOf } from '../../vcenter/registry.js';
 import { tryLockJob, unlockJob } from '../jobLocks.js';
 import { requestReconcile } from '../poller.js';
-import { listGroups } from '../groups.js';
+import { listGroups, groupsLoadError } from '../groups.js';
 import { poolSettled } from '../../util/pool.js';
 import { knownHostAddrs } from '../install/job.js';
 import { planManage, applyManage, RESERVED_CONSOLES } from './apply.js';
@@ -146,12 +147,26 @@ export function knownFor(d, cfg, settings = effectiveSettings(), groups = groups
 /**
  * 입력 판정(라우트가 OTP 전에 부른다 — 입력 실수가 1회용 OTP 를 태우지 않게). 설정을 못 읽었으면 판정이 할 수 있는 만큼만(이름 겹침은 원격 파일 · bareos-dir -t 가 다시 막는다).
  */
-export async function planFor(d, action, input) {
+/**
+ * @param {{ waitMs?: number }} [o] v2.847 C2-1(2회차 점검): 설정 조회를 기다리는 최대 시간(라우트의 남은 예산). 넘으면 '못 읽음'(cfg null)으로 판정한다.
+ *   readConfig 에 signal 을 넘기지 않는다 — 진행 중 조회를 여러 호출이 공유하므로(_cfgInflight) 한 호출의 시한이 남의 조회를 끊으면 안 된다(반증 ⚠). 기다림만 끊는다.
+ */
+export async function planFor(d, action, input, { waitMs = Infinity } = {}) {
   let cfg = null;
-  if (action !== 'scan') { try { cfg = await readConfig(d); } catch { cfg = null; } }
+  if (action !== 'scan') {
+    let timer = null;
+    try {
+      const capped = Number.isFinite(waitMs) ? new Promise((resolve) => { timer = setTimeout(() => resolve(null), Math.max(0, waitMs)); }) : null;
+      cfg = await (capped ? Promise.race([readConfig(d), capped]) : readConfig(d));
+    } catch { cfg = null; } finally { if (timer) clearTimeout(timer); }
+  }
   // v2.846 D-5 ③: 스토리지 편집 · 삭제는 Director 설정(목록 · 매핑 판정)을 읽었을 때만 — 못 읽은 목록은 '마지막 스토리지' 판정을 건너뛰게 했다
   if ((action === 'storage.delete' || action === 'storage.edit') && !cfg?.results?.storages?.ok) {
     throw Object.assign(new Error('Director 스토리지 목록을 읽지 못해 판정할 수 없습니다 — 연결을 확인하고 다시 읽은 뒤 하세요(아무것도 바꾸지 않았습니다).'), { code: 'conflict' });
+  }
+  // v2.847 D2-6(2회차 점검 — 재현): 그룹 원장이 손상되면 listGroups 는 빈 목록을 준다 — '그룹 스토리지 없음' 으로 보면 그룹이 쓰는 스토리지를 지울 수 있었다
+  if ((action === 'storage.delete' || action === 'storage.edit') && groupsLoadError()) {
+    throw Object.assign(new Error('백업 그룹 원장을 읽지 못해 이 스토리지를 그룹이 쓰는지 판정할 수 없습니다 — 서비스 점검에서 그룹 원장을 확인한 뒤 하세요(아무것도 바꾸지 않았습니다).'), { code: 'conflict' });
   }
   const known = knownFor(d, cfg);
   return { plan: planManage(action, input, known), known, configRead: !!cfg };
@@ -210,18 +225,53 @@ export async function missingTargets(d) {
   const demoNow = isDemoActive();
   const settings = effectiveSettings();
   const r = await onDirector(d.id, 'jobNames', {});
-  const have = new Set((r?.names || []).map(String));
+  const names = (Array.isArray(r?.names) ? r.names : []).map(String);
+  // v2.847 D2-2(2회차 점검 — 재현): 빈 `.jobs` 를 믿으면 그 Director 의 대상이 전부 '빠짐' 으로 보였다(화면이 전부 미리 체크 → 같은 VM 의 두 번째 잡).
+  //   재설치 직후에도 패키지 기본 잡(BackupClient1 · RestoreFiles · BackupCatalog)이 있다 — 빈 목록은 '못 읽음' 이다(폴러 I2-5 와 같은 규칙).
+  if (!names.length) throw Object.assign(new Error('Director 의 잡 목록(.jobs)이 비어 왔습니다 — 판정할 수 없어 빠진 대상을 보이지 않습니다(재설치 직후에도 패키지 기본 잡이 있어야 합니다). 잠시 뒤 다시 읽으세요.'), { code: 'conflict' });
+  const have = new Set(names);
   return listJobs()
     .filter((j) => (demoNow ? j.demo : !j.demo) && jobDirectorId(j, settings) === d.id && !have.has(j.bareosJob))
     .map((j) => ({ id: j.id, vcenterId: j.vcenterId, vmId: j.vmId, vmName: j.vmName, bareosJob: j.bareosJob, schedule: j.schedule, level: j.level, enabled: j.enabled !== false }));
 }
 
 /**
+ * v2.847 D2-3: 이 Director 카탈로그의 세대가 바뀌었는가(재설치가 카탈로그 DB 를 새로 만들었나). 원장에서 lastRun jobid 가 가장 큰 대상 하나를 골라
+ * 그 잡 이름의 카탈로그 실행 목록(`history` — 이미 있는 작업이라 옛 엣지도 받는다)에 그 jobid 가 있으면 'same', 없으면 'new',
+ * 묻지 못했으면 'unknown', 원장에 실행 기록이 하나도 없으면 'none'(비울 것이 없다). Director 마다 명령 하나.
+ * @returns {Promise<'same'|'new'|'unknown'|'none'>}
+ */
+export async function catalogGeneration(d, settings = effectiveSettings()) {
+  const demoNow = isDemoActive();
+  let best = null;
+  for (const j of jobDigests()) {   // 얕은 요약(lastRun 포함) — 원장 깊은 복사를 하지 않는다
+    if ((demoNow ? j.demo : !j.demo) && jobDirectorId(j, settings) === d.id && Number.isInteger(j.lastRun?.jobid) && j.lastRun.jobid > 0
+      && (!best || j.lastRun.jobid > best.lastRun.jobid)) best = j;
+  }
+  if (!best) return 'none';
+  try {
+    const rows = await onDirector(d.id, 'history', { name: best.bareosJob, limit: 200 });
+    if (!Array.isArray(rows)) return 'unknown';
+    return rows.some((r) => r?.jobid === best.lastRun.jobid) ? 'same' : 'new';
+  } catch { return 'unknown'; }
+}
+
+/** 등록 회신 한 줄이 '결과 모름'(잡이 생겼을 수 있다)인가 — 회신 없음 · 엣지가 이름 없이 성공 · 명령 도중 끊김(E2-1 — groupRunner.itemState 와 같은 표). */
+export const addResultUnknown = (r) => !r || r.code === 'unknown' || MID_COMMAND_CODES.has(r.code);
+
+/**
  * 다시 등록 — 고른 대상 중 **지금 다시 읽은** 빠진 목록에 있는 것만(화면 목록을 믿지 않는다). 세션 하나로 addJobs → 원장 같은 행에 다시 묶기(rebindJobs).
  * 켜짐 · 스케줄 · 레벨은 원장 값 그대로(그룹 잡은 스케줄 없이) — 꺼 둔 대상은 다음 대조가 다시 끈다(부르는 쪽이 requestReconcile).
  * @returns {Promise<{ results: { id, vmName, ok, name?, reason? }[] }>}
  */
-export async function reregisterTargets(d, ids = []) {
+/**
+ * v2.847 C2-5 ②(2회차 점검 — 산수): 다시 등록의 서버 예산(라우트 진입부터) — 화면 시한(600초)보다 짧게. 새 묶음은 남은 시간이 REREGISTER_MIN_BATCH_MS 이상일 때만
+ * 보내고(아니면 '보내지 않음'), 보낸 묶음은 남은 시간까지만 기다린다(엣지 대행이면 결과 모름 → 늦은 회신 처리 · 중앙 직접이면 명령 도중 끊김 → `.jobs` 로 가림).
+ */
+export const REREGISTER_BUDGET_MS = 540_000;
+export const REREGISTER_MIN_BATCH_MS = 120_000;
+export async function reregisterTargets(d, ids = [], { startedAt = Date.now() } = {}) {
+  const left = () => REREGISTER_BUDGET_MS - (Date.now() - startedAt);
   const want = new Set((Array.isArray(ids) ? ids : []).map(String));
   const missing = (await missingTargets(d)).filter((m) => want.has(m.id));
   const snap = store.get();
@@ -239,28 +289,41 @@ export async function reregisterTargets(d, ids = []) {
     if (!jobNameFor(vm.vcenterId, moref)) { o.reason = 'VM 관리 id(moref)로 잡 이름을 만들 수 없습니다.'; continue; }
     if (!tryLockJob(m.id)) { o.reason = '이 대상의 다른 작업(실행 · 삭제 · 복원)이 진행 중입니다.'; continue; }
     locked.push(m.id);
+    // D2-2: 원장 이름 그대로만 만든다(그 이름이 이미 있으면 '이미 있음' 으로 건너뜀 — 접미사로 두 번째 잡을 만들지 않는다)
+    const exactSfx = JOB_NAME_SUFFIXES.find((sfx) => jobNameFor(vm.vcenterId, moref, sfx) === m.bareosJob);
     const base = {
       jobDefs: settings.defaults.jobDefs, client: el.site.client, storage: el.site.storage, pool: el.site.pool,
       schedule: m.schedule || undefined, level: m.level, pluginOptions: el.plugin, description: `VMware Portal ${vm.name}`.replace(/[^\p{L}\p{N} ._-]/gu, ' '),
     };
-    ready.push({ o, vm, key: out.length - 1, item: { key: out.length - 1, vcenterId: vm.vcenterId, moref, base }, site: el.site });
+    ready.push({ o, vm, key: out.length - 1, item: { key: out.length - 1, vcenterId: vm.vcenterId, moref, base, ...(exactSfx !== undefined ? { exactSfx } : {}) }, site: el.site, exactName: exactSfx !== undefined ? m.bareosJob : '' });
   }
+  let generation = 'none';
   try {
-    if (!ready.length) return { results: out };
-    /** 한 묶음의 회신 → 원장 같은 행에 다시 묶기. 회신에 없는 항목은 '결과 모름'(잡이 생겼을 수 있다 — v2.846 E-1) · 묶지 못한 잡은 끄고 지운 이름에 남긴다(E-4 · 일반 등록 orphanCleanup 하나). */
+    if (!ready.length) return { results: out, generation };
+    // v2.847 D2-3: 실행 기록은 카탈로그 세대가 바뀌었거나(new) 판정하지 못했을 때(unknown — D-1 의 '새 실행을 버림' 이 더 큰 손실)만 새로 시작한다
+    generation = await catalogGeneration(d, settings);
+    const restart = generation === 'new' || generation === 'unknown';
+    /** 한 묶음의 회신 → 원장 같은 행에 다시 묶기. 결과 모름(회신 없음 · 명령 도중 끊김 — E-1 · E2-1)은 뒤에서 `.jobs` 로 한 번 가린다 · 묶지 못한 잡은 끄고 지운 이름에 남긴다(E-4 · 일반 등록 orphanCleanup 하나). */
+    const unsure = [];
     const bind = async (part, results) => {
       const byKey = new Map((Array.isArray(results) ? results : []).map((r) => [r.key, r]));
       const list = [];
       for (const x of part) {
         const r = byKey.get(x.key);
-        if (!r) { x.o.reason = '결과 모름 — 회신에 이 항목이 없습니다(Director 에 잡이 생겼을 수 있습니다 — 빠진 대상 목록을 다시 읽으세요).'; x.o.unknown = true; continue; }
-        if (!r.ok || !r.name) { x.o.reason = r.message || (r.ok ? 'Director 가 잡 이름 없이 성공을 회신했습니다.' : '사유 미상'); continue; }
+        if (addResultUnknown(r)) {
+          x.o.reason = `결과 모름 — ${r ? (r.message || '명령 도중 연결이 끊겼습니다') : '회신에 이 항목이 없습니다'}(Director 에 잡이 생겼을 수 있습니다 — 빠진 대상 목록을 다시 읽으세요).`;
+          x.o.unknown = true; unsure.push(x); continue;
+        }
+        if (!r.ok || !r.name) { x.o.reason = r.message || (r.ok ? 'Director 가 잡 이름 없이 성공을 회신했습니다.' : '사유 미상'); if (r.code === 'exists') x.o.exists = true; continue; }
         x.o.name = r.name;
         list.push({ id: x.o.id, bareosJob: r.name, client: x.site.client, storage: x.site.storage, pool: x.site.pool, vmName: x.vm.name, dc: x.vm.vcDcPath, folder: x.vm.folderPath });
       }
+      await bindList(list);
+    };
+    const bindList = async (list) => {
       if (!list.length) return;
       let res;
-      try { res = rebindJobs(list); } catch (e) { res = list.map((x) => ({ id: x.id, ok: false, err: e })); }
+      try { res = rebindJobs(list, { restart }); } catch (e) { res = list.map((x) => ({ id: x.id, ok: false, err: e })); }
       const orphans = [];
       for (const r of res) {
         const o = out.find((y) => y.id === r.id);
@@ -276,19 +339,41 @@ export async function reregisterTargets(d, ids = []) {
     // v2.846 E-1: 엣지 회신 정제는 addJobs 를 500건에서 자른다(엣지 계약) — 묶음 200건으로 차례로 보낸다(중앙 직접도 같은 크기 — 세션 하나가 너무 오래 잡히지 않게)
     for (let i = 0; i < ready.length; i += REREGISTER_BATCH) {
       const part = ready.slice(i, i + REREGISTER_BATCH);
+      if (left() < REREGISTER_MIN_BATCH_MS) {
+        for (const x of ready.slice(i)) Object.assign(x.o, { notSent: true, reason: '보내지 않음 — 이번 요청의 시간 예산이 지나 이 묶음부터 보내지 않았습니다(다시 실행하세요 — 빠진 대상만 다시 만듭니다).' });
+        break;
+      }
       let results;
       try {
         // 늦은 회신(엣지 '결과 모름' 뒤): 같은 규칙으로 묶고, 묶지 못하면 끈다 — 잡 잠금은 이미 풀렸다(남긴 것: 그 사이 같은 대상 작업과 겹칠 수 있다)
-        results = await onDirector(d.id, 'addJobs', { items: part.map((x) => x.item) }, { onLate: (lr) => { if (lr?.ok && Array.isArray(lr.value)) bind(part, lr.value).catch(() => {}); } });
+        results = await onDirector(d.id, 'addJobs', { items: part.map((x) => x.item) }, { signal: AbortSignal.timeout(Math.max(1, left() - 60_000)), onLate: (lr) => { if (lr?.ok && Array.isArray(lr.value)) bind(part, lr.value).catch(() => {}); } });
       } catch (e) {
         const why = e?.code === 'unknown' ? `결과 모름 — 법인 엣지가 회신하지 않았습니다. 늦은 회신이 오면 원장에 반영합니다(잠시 뒤 목록을 다시 읽으세요). ${String(e?.message || '').slice(0, 200)}` : String(e?.message || e).slice(0, 300);
-        for (const x of part) { x.o.reason = why; if (e?.code === 'unknown') x.o.unknown = true; }
-        for (const x of ready.slice(i + REREGISTER_BATCH)) x.o.reason = '보내지 않음 — 앞 묶음이 실패해 멈췄습니다(다시 실행하세요).';
+        for (const x of part) { x.o.reason = why; if (e?.code === 'unknown' || MID_COMMAND_CODES.has(e?.code)) x.o.unknown = true; }
+        if (MID_COMMAND_CODES.has(e?.code)) unsure.push(...part);   // 중앙 직접 세션이 명령 도중 끊김(엣지 '결과 모름' 은 늦은 회신이 처리한다)
+        for (const x of ready.slice(i + REREGISTER_BATCH)) Object.assign(x.o, { notSent: true, reason: '보내지 않음 — 앞 묶음이 실패해 멈췄습니다(다시 실행하세요).' });
         break;
       }
       await bind(part, results);
     }
-    return { results: out };
+    // v2.847 E2-1(2회차 점검 — 재현): 명령 도중 끊긴 항목은 Director 에 잡이 생겼을 수 있다. 실패로 적으면 그 행은 다시 묶이지 않고(다음 '빠진 대상' 에서도 사라짐)
+    //   옛 카탈로그 jobid 기준이 남았다. 원장 이름 그대로 만든 항목(exactName)은 `.jobs` 한 번으로 가린다 — 지금 있으면 우리가 만든 것(바로 앞에서 '없음' 을 읽었다).
+    const exactUnsure = unsure.filter((x) => x.exactName);
+    if (exactUnsure.length && left() > 30_000) {
+      let have = null;
+      try { const r = await onDirector(d.id, 'jobNames', {}, { signal: AbortSignal.timeout(left() - 10_000) }); const n = (Array.isArray(r?.names) ? r.names : []).map(String); if (n.length) have = new Set(n); } catch { /* 결과 모름 그대로 */ }
+      if (have) {
+        const list = [];
+        for (const x of exactUnsure) {
+          if (have.has(x.exactName)) {
+            Object.assign(x.o, { name: x.exactName, unknown: false, reason: undefined });
+            list.push({ id: x.o.id, bareosJob: x.exactName, client: x.site.client, storage: x.site.storage, pool: x.site.pool, vmName: x.vm.name, dc: x.vm.vcDcPath, folder: x.vm.folderPath });
+          } else Object.assign(x.o, { unknown: false, reason: '만들어지지 않았습니다 — 명령 도중 연결이 끊겼고 Director 에 그 잡이 없습니다(다시 등록하세요).' });
+        }
+        await bindList(list);
+      }
+    }
+    return { results: out, generation };
   } finally { for (const id of locked) unlockJob(id); }
 }
 

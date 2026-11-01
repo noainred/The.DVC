@@ -65,9 +65,13 @@ describe('D-2 — 실행 중 작업을 못 읽은 재설치는 그 회차 동의
     expect(planIssues(p, t)).toEqual([]);
   });
   it('보내는 모양 — 동의는 불리언 true 일 때만 싣는다', () => {
-    expect(planBody({ ...p, runningUnknownOk: true }).runningUnknownOk).toBe(true);
-    expect('runningUnknownOk' in planBody(p)).toBe(false);
-    expect('runningUnknownOk' in planBody({ ...p, runningUnknownOk: 'true' })).toBe(false);
+    // v2.847 U2-5: 지금 사전 점검이 '확인 불가' 일 때만(다시 점검해 정상이면 남은 동의를 싣지 않는다)
+    const ctx = { pre: pre('unknown'), target: t };
+    expect(planBody({ ...p, runningUnknownOk: true }, ctx).runningUnknownOk).toBe(true);
+    expect('runningUnknownOk' in planBody({ ...p, runningUnknownOk: true }, { pre: pre('ok'), target: t })).toBe(false);
+    expect('runningUnknownOk' in planBody({ ...p, runningUnknownOk: true })).toBe(false);
+    expect('runningUnknownOk' in planBody(p, ctx)).toBe(false);
+    expect('runningUnknownOk' in planBody({ ...p, runningUnknownOk: 'true' }, ctx)).toBe(false);
   });
   it('실패 카드의 동의 단추 — 문구 · 확인 체크가 있어야 누를 수 있다', () => {
     expect(retryLabel({ action: 'running-unknown-ok' }, 0)).toContain(RUNNING_UNKNOWN_OK_LABEL);

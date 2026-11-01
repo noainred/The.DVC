@@ -294,8 +294,11 @@ function FailureCard({ j, bundle, onRetry, onRollback, busy, say }) {
   const [rbAck, setRbAck] = useState(false);
   const [showOut, setShowOut] = useState(false);
   const [unknownAck, setUnknownAck] = useState(false);
+  const [rbFixed, setRbFixed] = useState(false);
   if (!f) return null;
   const c = f.cause || {};
+  // v2.847 S2-2: SSH 인증 실패로 멈춘 작업은 되돌리기도 같은 저장 계정으로 root 로그인한다 — 계정을 고쳤다는 표시를 받는다(서버도 sshFixed 없으면 거부)
+  const rbAuth = c.key === 'ssh-auth';
   // v2.846 C-1: 전부 되돌리기를 시도한 작업은 다시 하지 않는다(서버도 거부 — 그 '다시' 가 0단계 초기화부터 돌 수 있었다)
   const rolledAll = (j.attempts || []).some((a) => a.rollbackAll);
   const fixes = rolledAll ? [] : fixesOrdered(c);
@@ -339,8 +342,9 @@ function FailureCard({ j, bundle, onRetry, onRollback, busy, say }) {
       <div className="card" style={{ ...DEEP, borderLeft: '3px solid var(--red)' }}>
         <b style={{ fontSize: 13 }}>전부 되돌리기(서버를 설치 전으로)</b>
         <div className="muted" style={{ fontSize: 12, marginTop: 2 }}>이 설치가 넣은 패키지 · 파일 · 서비스 · 방화벽 규칙 · 로컬 저장소 · 올린 번들, 이 설치가 만든 <b>카탈로그 DB(bareos)</b> · 이 설치가 초기화한 <b>PostgreSQL 데이터 디렉터리(/var/lib/pgsql/data 전체)</b> · /etc/bareos(설치 전에 없었을 때)를 지우고, 원격이 다 되돌려지면 포탈에 새로 만든 등록 · 매핑을 지웁니다. 원래 있던 것은 건드리지 않습니다. 이 설치의 Director(재설치면 다시 등록한 기존 Director)에 백업 대상이 있으면 되돌리지 않습니다.{j.mode === 'reinstall' ? ' 초기화로 지운 옛 설치는 되살리지 못합니다(보관한 /etc/bareos tar 는 남깁니다).' : ''}</div>
+        {rbAuth && <label style={{ ...ROW, fontSize: 12.5, marginTop: 6 }}><input type="checkbox" checked={rbFixed} onChange={(e) => setRbFixed(e.target.checked)} /> 배포 등록부의 SSH 계정을 고쳤습니다(되돌리기도 그 계정으로 로그인합니다 — 계정 잠금)</label>}
         <div style={{ ...ROW, marginTop: 6 }}><label style={{ ...ROW, fontSize: 12.5 }}><input type="checkbox" checked={rbAck} onChange={(e) => setRbAck(e.target.checked)} /> 위 목록을 지우는 것을 확인했습니다</label>
-          <button type="button" className="logout-btn" style={{ ...BTN, color: 'var(--red)' }} disabled={busy || !rbAck} onClick={() => onRollback()}>전부 되돌리기</button></div>
+          <button type="button" className="logout-btn" style={{ ...BTN, color: 'var(--red)' }} disabled={busy || !rbAck || (rbAuth && !rbFixed)} onClick={() => onRollback(rbAuth ? { sshFixed: true } : undefined)}>전부 되돌리기</button></div>
       </div>
     </div>
   );
@@ -529,7 +533,7 @@ export default function BareosInstallPanel({ writable = true }) {
     setBusy(true); setMsg(null);
     try {
       // v2.846 U-7: 409 precheck 본문을 e.body 로 넘겨야 아래 '점검 표로 돌아가기' 가 돈다(예전에는 new Error 로 바꿔 본문을 버렸다)
-      const r = okOrThrow(await postJson(`${P}/start`, { vcenterId: t.vcenterId, ...planBody(plan) }), '시작하지 못했습니다.');
+      const r = okOrThrow(await postJson(`${P}/start`, { vcenterId: t.vcenterId, ...planBody(plan, { pre, target: t }) }), '시작하지 못했습니다.');
       setJob(r.job); setJobId(r.job.id); setStep('run');
     } catch (e) {
       setMsg({ ok: false, text: e.message });

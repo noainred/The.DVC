@@ -7,7 +7,7 @@ import DataList from '../../components/DataList.jsx';
 import BoldText from '../../components/boldText.jsx';
 import { call, filesText } from './BareosCorp.jsx';
 import {
-  matrixCell, matrixTotals, mergeBulkRows, BULK_LABEL, bulkEligible, RESULT_TEXT, RESULT_CLS, bulkCounts, bulkSummaryText, passwordCsv, maskPw, pwPairIssue, nameIssue, profileOptions, DEFAULT_PROFILE, sshSourceText, noSshNeeded,
+  matrixCell, matrixTotals, mergeBulkRows, sameBulkJob, BULK_LABEL, bulkEligible, RESULT_TEXT, RESULT_CLS, bulkCounts, bulkSummaryText, passwordCsv, maskPw, pwPairIssue, nameIssue, profileOptions, DEFAULT_PROFILE, sshSourceText, noSshNeeded,
 } from './bareosCorpText.js';
 
 /**
@@ -94,7 +94,7 @@ export default function BareosAccountsPanel({ writable = true }) {
       {!result && <BulkForm dirs={dirs} m={m} writable={writable} say={setMsg} onDone={(r) => { setResult(r); load(true); }} />}
       {result && <BulkResult r={result} say={setMsg} onClose={() => setResult(null)} onRetry={(ids) => setResult((x) => ({ ...x, retry: ids }))} />}
       {/* v2.846 U-6: 다시 시도 결과는 앞 결과에 합친다(첫 실행의 성공 법인 비밀번호를 지우지 않는다) */}
-      {result?.retry && <BulkForm dirs={dirs} m={m} writable={writable} say={setMsg} preset={{ action: result.action, name: result.account, profile: result.profile, ids: result.retry }} onDone={(r) => { setResult((prev) => ({ ...r, results: mergeBulkRows(prev?.results || [], r.results) })); load(true); }} />}
+      {result?.retry && <BulkForm dirs={dirs} m={m} writable={writable} say={setMsg} preset={{ action: result.action, name: result.account, profile: result.profile, ids: result.retry }} onDone={(r) => { setResult((prev) => (sameBulkJob(prev, r) ? { ...r, results: mergeBulkRows(prev?.results || [], r.results) } : r)); load(true); }} />}
     </div>
   );
 }
@@ -137,12 +137,13 @@ function BulkForm({ dirs, m, writable, say, onDone, preset = null }) {
     <div className="card" style={CARD}>
       <b>{preset ? '다시 시도 — ' : ''}일괄 작업</b>
       <div style={{ ...ROW, marginTop: 8 }} role="tablist" aria-label="일괄 작업 종류">
-        {Object.entries(BULK_LABEL).map(([k, l]) => <button key={k} type="button" role="tab" aria-selected={f.action === k} className={`tab${f.action === k ? ' active' : ''}`} onClick={() => { set('action', k); setPick({}); }}>{l}</button>)}
+        {/* v2.847 U2-4: 다시 시도는 같은 작업 · 같은 계정만(이름을 바꾸면 앞 결과의 생성 비밀번호가 새 이름으로 CSV 에 실렸다) */}
+        {Object.entries(BULK_LABEL).map(([k, l]) => <button key={k} type="button" role="tab" aria-selected={f.action === k} disabled={!!preset && k !== f.action} className={`tab${f.action === k ? ' active' : ''}`} onClick={() => { set('action', k); setPick({}); }}>{l}</button>)}
       </div>
       <div style={GRID}>
-        <label className="muted" style={FIELD}>계정 이름<input className="input" style={INP} list="bareos-acc-names" value={f.name} onChange={(e) => { set('name', e.target.value.trim()); setPick({}); }} aria-label="계정 이름" /></label>
+        <label className="muted" style={FIELD}>계정 이름<input className="input" style={INP} list="bareos-acc-names" value={f.name} readOnly={!!preset} disabled={!!preset} onChange={(e) => { set('name', e.target.value.trim()); setPick({}); }} aria-label="계정 이름" /></label>
         <DataList id="bareos-acc-names">{(m.names || []).map((n) => <option key={n} value={n} />)}</DataList>
-        {f.action === 'console.add' && <label className="muted" style={FIELD}>권한 Profile<Select className="input" style={INP} value={f.profile} onChange={(e) => { const v = e.target.value; set('profile', v); }} aria-label="권한 Profile">{(profiles).map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}</Select></label>}
+        {f.action === 'console.add' && <label className="muted" style={FIELD}>권한 Profile<Select className="input" style={INP} value={f.profile} disabled={!!preset} onChange={(e) => { const v = e.target.value; set('profile', v); }} aria-label="권한 Profile">{(profiles).map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}</Select></label>}
         {needPw && <label className="muted" style={FIELD}>비밀번호<Select className="input" style={INP} sort={false} value={f.mode} onChange={(e) => { const v = e.target.value; set('mode', v); }} aria-label="비밀번호 방식">{([{ value: 'generate', label: '법인마다 다른 생성 비밀번호(결과에서 한 번)' }, { value: 'input', label: '모든 법인 같은 비밀번호(2번 입력)' }]).map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}</Select></label>}
         {needPw && f.mode === 'input' && <label className="muted" style={FIELD}>새 비밀번호(12자 이상)<input className="input" style={INP} type="password" autoComplete="new-password" value={f.pw} onChange={(e) => set('pw', e.target.value)} aria-label="새 비밀번호" /></label>}
         {needPw && f.mode === 'input' && <label className="muted" style={FIELD}>한 번 더<input className="input" style={INP} type="password" autoComplete="new-password" value={f.pw2} onChange={(e) => set('pw2', e.target.value)} aria-label="새 비밀번호 확인" /></label>}

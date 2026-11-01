@@ -171,7 +171,7 @@ import { startXferSpeedPoller } from './xferspeed/poller.js';   // 법인 간 �
 import { startLinkCheckWorker } from './agent/linkCheckWorker.js'; // 엣지가 재는 링크(엣지→중앙·엣지↔엣지)
 import { startPowerOffPoller } from './tools/powerOffPoller.js';     // 전원 꺼짐 점검(v2.484)
 import { resumeHostAccessPending } from './hostaccess/service.js';  // 호스트 접근 제어 확정 대기 복구(v2.485)
-import { resumeInstallJobs } from './bareos/install/job.js';  // v2.844 Bareos 완전 설치 — 진행 중이던 작업 이어 읽기(러너는 엣지 노드 안에서 계속 돈다)
+import { resumeInstallJobs, reserveInstallResumeLocks } from './bareos/install/job.js';  // v2.844 Bareos 완전 설치 — 진행 중이던 작업 이어 읽기(러너는 엣지 노드 안에서 계속 돈다)
 import { startStoragePush } from './storage/push.js';            // 엣지→중앙 스냅샷 push(v2.302)
 import { startStorageConfigPull } from './agent/storageConfigPull.js'; // 중앙→엣지 장비 배포 pull(v2.302)
 import { queryNormalizer } from './util/queryNormalize.js'; // v2.575 BUG-22
@@ -692,6 +692,10 @@ function wireListener(server, port) {
   });
 }
 for (const l of server.servers) wireListener(l.server, l.port);
+
+// v2.847 C2-2(Bareos 2회차 점검 — 재현): 진행 중이던 완전 설치(원격 단계 · 되돌리기)의 서버 잠금을 **HTTP 를 열기 전에** 다시 쥔다 — 이어 읽기(resumeInstallJobs)는
+//   기동 스태거로 약 39초 뒤에 돌아, 그 사이 같은 Director 의 법인별 설정 · 자동 설정이 재설치 원격 단계와 겹칠 수 있었다. 이어 읽기의 kick 이 이 잠금을 넘겨받는다.
+try { reserveInstallResumeLocks(); } catch (e) { console.warn(`[bareos] 완전 설치 잠금 선점 실패: ${String(e?.message || e).slice(0, 200)}`); }
 
 server.listen(() => {
   const st = tlsListenerStatus();

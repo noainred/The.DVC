@@ -23,14 +23,24 @@ const invalid = (msg) => { const e = new Error(msg); e.code = 'invalid'; return 
 
 /** 세션째 쓸 수 없게 된 오류(이후 VM 도 같은 이유로 실패한다) — 일괄 등록이 여기서 멈춘다. */
 export const SESSION_DEAD = new Set(['closed', 'timeout', 'aborted', 'protocol', 'too-large', 'connect', 'tls', 'auth', 'pam', 'blocked']);
+/**
+ * 명령을 보낸 뒤 회신 전에 끊긴 오류 — Director 는 그 명령을 실행했을 수 있다(결과 모름). 'jsonrpc' 는 넣지 않는다(Director 가 거부했다 — 실패).
+ * v2.847 E2-1: 그룹 실행(groupRunner)과 등록(addJobs — 일반 · 다시 등록)이 이 판정 하나를 쓴다(예전에는 등록만 '실패' 로 적었다).
+ */
+export const MID_COMMAND_CODES = Object.freeze(new Set(['timeout', 'closed', 'aborted', 'protocol', 'too-large']));
 
 /** 같은 이름이 있으면 접미사(r2…r5)로 다시 — 옛 잡(지운 대상의 비활성 잡)의 옵션은 바뀌었을 수 있어 '입양' 하지 않는다. */
+export const JOB_NAME_SUFFIXES = Object.freeze(['', 'r2', 'r3', 'r4', 'r5']);
 async function addOne(s, it) {
-  for (const sfx of ['', 'r2', 'r3', 'r4', 'r5']) {
+  // v2.847 D2-2(2회차 점검 — 재현): 재설치 뒤 다시 등록은 **원장 이름 그대로**만 만든다(exactSfx). 그 이름이 이미 있으면 빠진 대상이 아니다 —
+  //   예전에는 접미사로 넘어가 같은 VM 의 두 번째 잡(-r2)을 만들고 원래 잡(켜짐 · 스케줄)은 원장 밖에 남겼다. 옛 엣지는 이 칸을 모른다(남긴 것).
+  const exact = typeof it.exactSfx === 'string' && JOB_NAME_SUFFIXES.includes(it.exactSfx);
+  for (const sfx of exact ? [it.exactSfx] : JOB_NAME_SUFFIXES) {
     const name = jobNameFor(it.vcenterId, it.moref, sfx);
     if (!name) throw fail('invalid', 'VM 관리 id(moref)로 잡 이름을 만들 수 없습니다.');
     const r = await directorAddJob(s, { ...it.base, name });
     if (!r.exists) return r;
+    if (exact) throw fail('exists', `Director 에 같은 이름의 잡(‘${name}’)이 이미 있습니다 — 빠진 대상이 아니라 건너뜁니다(빠진 대상 목록을 다시 읽으세요).`);
   }
   throw fail('invalid', '같은 VM 의 Bareos 잡이 Director 에 이미 여러 개 있습니다 — Director 의 bareos-dir.d/job 아래 pv-… 파일을 정리한 뒤 다시 시도하세요.');
 }

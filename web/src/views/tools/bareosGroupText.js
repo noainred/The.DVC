@@ -296,6 +296,8 @@ export function keepOtpReasons(prev, next, hasJob = () => true) {
  */
 export function prunePreviewText(r) {
   if (!r || typeof r !== 'object') return { text: '', tone: 'ok' };
+  // v2.847 U2-3: 거부 응답(ok:false — 진행 중 409 등)은 '지울 것 없음' 이 아니다
+  if (r.ok === false) return { text: `미리 보기를 하지 못했습니다 — ${r.reason || '사유 미상'}. 아무것도 지우지 않았고, 지울 건수를 모릅니다.`, tone: 'bad' };
   const keep = Number.isInteger(r.keep) ? r.keep : null;
   const jobs = Number(r.jobs) || 0;
   const would = Number(r.would) || 0;

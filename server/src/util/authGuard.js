@@ -159,6 +159,19 @@ export function createAuthGuard({ file }) {
       return { since: rec.since, at: rec.at, attempts: rec.attempts, reason: rec.reason };
     },
     /**
+     * v2.847(Bareos S2-1 · E2-4): 신원 문자열의 **모양만** 바뀐 업그레이드에서 옛 모양으로 남긴 기록을 새 모양 해시로 옮긴다(같은 id · 비밀번호는 그대로일 때만).
+     * 옮기지 않으면 authStopFor 가 '자격이 바뀜' 으로 보고 지워 같은 틀린 자격으로 한 번 다시 로그인한다(자동 재시도 금지). 옮겼으면 true.
+     */
+    rekeyAuthStop(fromDev, toDev) {
+      if (!fromDev?.id || fromDev.id !== toDev?.id || fromDev.password !== toDev.password) return false;
+      const db = load();
+      const rec = db[fromDev.id];
+      if (!rec || rec.credHash !== credHashOf(fromDev)) return false;
+      rec.credHash = credHashOf(toDev);
+      _mem = db; save(false);
+      return true;
+    },
+    /**
      * **읽기 전용** 조회(v2.590) — 다른 수집기가 '같은 계정이 이미 멈췄나' 를 볼 때 쓴다.
      * ⚠ `authStopFor` 와 달리 기록을 **지우지 않는다**. 호출자가 넘긴 자격증명이 기록과 다르면 null 을
      *   돌려줄 뿐이다 — 호출자 쪽 값이 조금 달라도(예: 앞뒤 공백을 다듬은 사본) 기록의 주인(주 폴러)의

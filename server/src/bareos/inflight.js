@@ -18,6 +18,12 @@ const _groups = new Map();   // 그룹 id → { name, since } — v2.830 백업 
 export function noteGroupRunStart(id, name) { _groups.set(String(id), { name: String(name || id).slice(0, 80), since: Date.now() }); }
 export function noteGroupRunEnd(id) { _groups.delete(String(id)); }
 
+// v2.847 E2-2(2회차 점검 — 코드 경로): **엣지 쪽** 대행 실행 중인 상태 변경 작업(엣지 워커 — agent/bareosOpWorker.js). 엣지도 자동 업그레이드(EDGE_MODE=all 기본 켬)가
+//   이 목록을 보는데 예전에는 늘 비어 있어, 엣지가 setup.manage · addJobs 를 실행하는 도중 재시작해 SSH 되돌리기 · 회신을 잃었다(v2.825.1 G15 의 엣지 절반).
+const _edgeOps = new Map();   // 작업 id → { kind, directorId, since }(비밀 · 인자 없음)
+export function noteEdgeOpStart(id, kind, directorId) { _edgeOps.set(String(id), { kind: String(kind).slice(0, 40), directorId: String(directorId || '').slice(0, 64), since: Date.now() }); }
+export function noteEdgeOpEnd(id) { _edgeOps.delete(String(id)); }
+
 /**
  * 지금 도는(재시작하면 끊기는) Bareos 작업 — upgrade/manager.js 의 다른 대기 목록과 같은 모양.
  * 엣지 대행 상태 조회(poll)는 넣지 않는다(다음 주기에 다시 한다).
@@ -28,6 +34,7 @@ export function runningBareosWork(now = Date.now()) {
   for (const [id, s] of _setups) out.push({ kind: 'bareos', key: `setup:${id}`, label: `Bareos 자동 설정(${s.name})`, since: s.since, resumable: false });
   // v2.830: 그룹 실행 도중 재시작하면 그 회차의 남은 VM 은 보내지 못한다(회차는 이미 차지했다 — 다시 보내지 않는다)
   for (const [id, g] of _groups) out.push({ kind: 'bareos', key: `group:${id}`, label: `Bareos 백업 그룹 실행(${g.name})`, since: g.since, resumable: false });
+  for (const [id, o] of _edgeOps) out.push({ kind: 'bareos', key: `edge-run:${id}`, label: `Bareos 대행 실행 ${o.kind}(Director ${o.directorId})`.slice(0, 120), since: o.since, resumable: false });
   let ops = [];
   try { ops = pendingView(); } catch { ops = []; }
   for (const o of ops) {
@@ -41,4 +48,4 @@ export function runningBareosWork(now = Date.now()) {
   return out;
 }
 
-export function _resetInflightForTest() { _setups.clear(); _groups.clear(); }
+export function _resetInflightForTest() { _setups.clear(); _groups.clear(); _edgeOps.clear(); }

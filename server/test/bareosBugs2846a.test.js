@@ -90,7 +90,7 @@ test('E-1 · E-4 다시 등록: 200건 묶음 · 회신에 없는 항목은 결�
   const ids = REG.addJobs(vms.map((v) => ({ vcenterId: 'vc-a', vmId: v.id, vmName: v.name, dc: 'DC-A', folder: '/app', directorId: DIR, bareosJob: `pv-x-${v.id.split('-').pop()}`, client: 'c', storage: 's', pool: 'p', schedule: '', level: 'Incremental', createdBy: 'adm' }))).map((x) => x.job.id);
   const victim = ids[5];
   const loop = edgeLoop(async (op) => {
-    if (op.kind === 'jobNames') return { ok: true, value: { names: [] } };
+    if (op.kind === 'jobNames') return { ok: true, value: { names: ['RestoreFiles'] } };   // v2.847 D2-2: 실제 Director 는 패키지 기본 잡이 있다(빈 .jobs = 못 읽음)
     if (op.kind === 'disableJobs') return { ok: true, value: op.args.names.map((name) => ({ name, ok: true })) };
     if (op.kind === 'addJobs') {
       const items = op.args.items;

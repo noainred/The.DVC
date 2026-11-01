@@ -29,14 +29,16 @@ import { registerStateFile } from '../util/stateFiles.js';
 import { sendPortalMail } from '../mail/service.js';
 import { load as loadMailCfg } from '../mail/settings.js';
 import { localStamp } from '../util/dayKey.js';
-import { listJobs, registryLoadError } from './registry.js';
+import { listJobs, registryLoadError, MAX_JOBS } from './registry.js';
 import { loadSettings, directorById, jobDirectorId } from './settings.js';
 import { isFinalStatus } from './names.js';
 
 export const MAIL_KIND = 'bareos-backup';
 export const TICK_MS = 60_000;
 const MAX_ROWS = 50;
-const KEYS_MAX = 2_000;
+// v2.847 D2-4(2회차 점검 — 재현): 원장 상한(MAX_JOBS 3,000)보다 작으면(예전 2,000) 재시작마다 밀려난 대상의 커서가 사라져 같은 실패를 다시 알렸다.
+//   원장 밖 키는 tick 이 지우므로 원장 상한 + 여유면 넘치지 않는다.
+const KEYS_MAX = MAX_JOBS + 500;
 const HISTORY_MAX = 30;
 const LEVEL = { F: 'Full', I: 'Incremental', D: 'Differential' };
 
@@ -194,7 +196,8 @@ export async function tick(now = Date.now()) {
   _busy = true;
   try {
     const st = state();
-    const { rows, marks } = collectBareosFailures(listJobs(), st);
+    const jobs = listJobs();   // v2.847 C2-4: 원장 깊은 복사는 틱마다 한 번(예전 두 번 — 두 번째는 id 만 썼다)
+    const { rows, marks } = collectBareosFailures(jobs, st);
     const advance = () => {
       Object.assign(st.runs, marks.runs); Object.assign(st.restores, marks.restores); st.epochs = Object.assign(st.epochs || {}, marks.epochs);
       st.seen = st.seen || {};
@@ -203,7 +206,7 @@ export async function tick(now = Date.now()) {
     };
     // C2-11: 원장에서 지운 대상의 커서는 정리한다(원장을 읽었을 때만 — 손상으로 빈 목록이면 지우면 안 된다)
     if (!registryLoadError()) {
-      const ids = new Set(listJobs().map((j) => j.id));
+      const ids = new Set(jobs.map((j) => j.id));
       let pruned = false;
       for (const m of [st.runs, st.restores, st.seen || {}, st.epochs || {}]) for (const k of Object.keys(m)) if (!ids.has(k)) { delete m[k]; pruned = true; }
       if (pruned) save();

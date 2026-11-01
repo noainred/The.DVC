@@ -20,6 +20,7 @@ import { claimSetup, releaseSetupLock, setupBusyReason } from '../../bareos/setu
 import { poolSettled } from '../../util/pool.js';
 import { noteSetupStart, noteSetupEnd } from '../../bareos/inflight.js';
 import { requestReconcile } from '../../bareos/poller.js';
+import { relayLimits } from '../../bareos/edgeOps.js';
 import { planManage, newAccountPassword, passwordIssue } from '../../bareos/manage/apply.js';
 import {
   sshSource, publicSsh, resolveSsh, readConfig, knownFor, planFor, runManage, forgetConfig, accountsMatrix, missingTargets, reregisterTargets,
@@ -43,6 +44,11 @@ const PA = '/tools/bareos-backup/settings/accounts';
 export const MANAGE_BUDGET_MS = 560_000;
 export const BULK_BUDGET_MS = 540_000;
 export const BULK_START_CUTOFF_MS = 420_000;   // 이 뒤로는 새 법인을 시작하지 않는다(보내지 않음)
+/**
+ * v2.847 C2-1(2회차 점검 — 산수): 예산은 **라우트에 들어온 시각부터** 센다 — 예전에는 설정 조회(planFor · 엣지 대행이면 최대 270초)가 예산 밖이라
+ *   응답이 화면 시한(600초)을 넘길 수 있었다(단건 최악 약 830초). 설정 조회는 '남은 예산 − 적용 최소 시간' 만 기다리고, 그 뒤 남은 시간이 이보다 짧으면 보내지 않는다.
+ */
+export const MANAGE_MIN_RUN_MS = 90_000;
 export const MANAGE_ACTIONS = Object.freeze(['storage.add', 'storage.edit', 'storage.delete', 'console.add', 'console.password', 'console.delete', 'pools.edit']);
 export const ACCOUNT_ACTIONS = Object.freeze(['console.add', 'console.password', 'console.delete']);
 const LABEL = Object.freeze({
@@ -130,7 +136,8 @@ api.get(P, adminOnly, fullScopeOnly, (req, res) => {
         ssh: showAddr ? ssh : { ...ssh, host: '' }, busy: !!setupBusyReason(d.id),
       };
     });
-    res.json({ ok: true, demo: isDemoActive(), otpRequired: config.auth.enabled && bareosSetupOtpRequired(), directors, actions: MANAGE_ACTIONS });
+    // v2.847 C2-5 ①: 화면 시한은 서버 대기 시간(relayLimits)으로 — 화면이 숫자(200초)를 박아 서버 최악(인출 + 회신 270초)보다 먼저 끊고, 그동안 잠금이 남아 다음 쓰기가 409 였다
+    res.json({ ok: true, demo: isDemoActive(), otpRequired: config.auth.enabled && bareosSetupOtpRequired(), directors, actions: MANAGE_ACTIONS, relayLimits: relayLimits() });
   } catch (e) { sendErr(res, e); }
 });
 
@@ -167,22 +174,25 @@ api.post(`${P}/:directorId/manage`, adminOnly, fullScopeOnly, fullWriteOnly, asy
   if (demoGuestDeny(req, res)) return;
   const action = String(req.body?.action || '');
   if (!MANAGE_ACTIONS.includes(action)) return res.status(400).json({ ok: false, code: 'invalid', reason: '알 수 없는 작업입니다.' });
+  const t0 = Date.now();   // C2-1: 예산 시작
   const pre = otpPrecheck(req, res, true); if (!pre) return;
   const input = req.body?.input && typeof req.body.input === 'object' ? req.body.input : {};
   let ssh; let planned; let acct;
   try {
     ssh = isDemoActive() ? { host: '', password: '' } : resolveSsh(d, req.body?.ssh);
     acct = accountPasswordOf(action, req.body);
-    planned = await planFor(d, action, input);
+    planned = await planFor(d, action, input, { waitMs: MANAGE_BUDGET_MS - MANAGE_MIN_RUN_MS });
   } catch (e) { return sendErr(res, e); }
   if (setupBusyReason(d.id, ssh.host)) return res.status(409).json({ ok: false, reason: setupBusyReason(d.id, ssh.host) });
+  const left = MANAGE_BUDGET_MS - (Date.now() - t0);
+  if (left < MANAGE_MIN_RUN_MS) return res.status(503).json({ ok: false, code: 'not-sent', reason: 'Director 설정을 읽는 데 오래 걸려 이번 요청의 시간 예산이 부족합니다 — 아무것도 바꾸지 않았고 OTP 도 쓰지 않았습니다. 다시 시도하세요.' });
   if (!otpVerify(req, res, pre.needOtp)) return;
   if (!claimSetup(d.id, ssh.host)) return res.status(409).json({ ok: false, reason: setupBusyReason(d.id, ssh.host) || '진행 중인 작업이 있습니다.' });
   noteSetupStart(d.id, d.name);
   const label = LABEL[action];
   const sum = planSummary(planned.plan);
   try {
-    const r = await runManage(d, { ...planned, input }, ssh, { accountPassword: acct.pw, signal: AbortSignal.timeout(MANAGE_BUDGET_MS) });
+    const r = await runManage(d, { ...planned, input }, ssh, { accountPassword: acct.pw, signal: AbortSignal.timeout(Math.max(1, MANAGE_BUDGET_MS - (Date.now() - t0))) });
     forgetConfig(d.id);
     audit(req, `Bareos 법인 설정(${label})`, d.name, `성공 — ${sum} · ${(r.files || []).map((f) => `${f.path}(${f.action})`).join(', ')}${r.restarted ? ' · SD 재시작' : ''}${ssh.registry ? ' · SSH 배포 등록부' : ''}${acct.generated ? ' · 비밀번호 생성(응답에 한 번 표시)' : ''}`);
     res.json({ ok: true, directorId: d.id, action, ...r, ...(acct.generated ? { generatedPassword: acct.pw } : {}) });
@@ -208,13 +218,16 @@ api.get(`${P}/:directorId/missing`, adminOnly, fullScopeOnly, async (req, res) =
 api.post(`${P}/:directorId/reregister`, adminOnly, fullScopeOnly, fullWriteOnly, async (req, res) => {
   const d = directorFor(req, res); if (!d) return;
   if (demoGuestDeny(req, res)) return;
+  const startedAt = Date.now();   // v2.847 C2-5: 서버 예산은 라우트 진입부터
   const ids = Array.isArray(req.body?.ids) ? req.body.ids.slice(0, 3000).map(String) : [];
   if (!ids.length) return res.status(400).json({ ok: false, code: 'invalid', reason: '다시 등록할 대상을 고르세요.' });
   if (setupBusyReason(d.id)) return res.status(409).json({ ok: false, reason: setupBusyReason(d.id) });
   try {
-    const r = await reregisterTargets(d, ids);
+    const r = await reregisterTargets(d, ids, { startedAt });
     const ok = r.results.filter((x) => x.ok).length;
-    audit(req, 'Bareos 대상 다시 등록', d.name, `요청 ${ids.length} · 대상 ${r.results.length} · 성공 ${ok} · 실패 ${r.results.length - ok}`);
+    const unknown = r.results.filter((x) => !x.ok && x.unknown).length;   // v2.847 E2-6: 결과 모름 · 보내지 않음은 실패로 세지 않는다
+    const notSent = r.results.filter((x) => !x.ok && !x.unknown && x.notSent).length;
+    audit(req, 'Bareos 대상 다시 등록', d.name, `요청 ${ids.length} · 대상 ${r.results.length} · 성공 ${ok} · 실패 ${r.results.length - ok - unknown - notSent} · 결과 모름 ${unknown} · 보내지 않음 ${notSent} · 실행 기록 ${r.generation === 'same' ? '이어 감' : r.generation === 'none' ? '없음' : '새로 시작'}`);
     if (ok) requestReconcile(d.id);
     res.json({ ok: true, directorId: d.id, ...r });
   } catch (e) {
@@ -270,8 +283,10 @@ api.post(`${PA}/bulk`, adminOnly, fullScopeOnly, fullWriteOnly, async (req, res)
     let sum = `계정 ${input.name}`;
     let pw = '';
     try {
-      const planned = await planFor(d, action, input);
+      // C2-1: 설정 조회도 일괄 예산 안에서만 기다리고, 적용에 쓸 시간이 모자라면 보내지 않는다(생성 비밀번호도 만들지 않는다)
+      const planned = await planFor(d, action, input, { waitMs: Math.max(0, BULK_BUDGET_MS - (Date.now() - t0) - MANAGE_MIN_RUN_MS) });
       sum = planSummary(planned.plan);
+      if (deadline.aborted || BULK_BUDGET_MS - (Date.now() - t0) < MANAGE_MIN_RUN_MS) return { ...row, status: 'skipped', reason: '보내지 않음 — Director 설정을 읽는 사이 이번 일괄의 시간 예산이 부족해졌습니다(다시 시도하세요).' };
       // 생성이면 **법인마다 다른** 비밀번호(사용자 시안 — 한 법인의 비밀번호가 새도 다른 법인은 그대로) · 결과 행에 한 번만
       pw = acct.generated ? newAccountPassword() : acct.pw;
       const r = await runManage(d, { ...planned, input }, ssh, { accountPassword: pw, signal: deadline });

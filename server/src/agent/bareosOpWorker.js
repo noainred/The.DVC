@@ -25,6 +25,7 @@ import { edgeDirectorById } from '../bareos/edgeStore.js';
 import { runLocalOp } from '../bareos/service.js';
 import { OPS } from '../bareos/ops.js';
 import { EDGE_MUTATING } from '../bareos/edgeOps.js';
+import { noteEdgeOpStart, noteEdgeOpEnd } from '../bareos/inflight.js';
 import { runSetupOp, SETUP_KINDS } from '../bareos/edgeSetup.js';
 import { edgeStoreView } from '../bareos/edgeStore.js';
 import { isSshAuthError, isSshHostKeyError } from '../proxy/sshExec.js';
@@ -167,12 +168,15 @@ export async function runBareosOpWorkerOnce() {
   if (!ops.length) { _last = { at: Date.now(), ok: true, ops: 0 }; return _last; }
   let postErr = null;
   await Promise.all(ops.map(async (op) => {
+    // v2.847 E2-2: 상태 변경 작업은 실행 ~ 회신까지 업그레이드 자동 적용이 기다린다(bareos/inflight.js — 비밀 없이 종류 · Director 만)
+    const track = EDGE_MUTATING.has(op.kind) && op.kind !== 'poll';
+    if (track) noteEdgeOpStart(op.id, op.kind, op.directorId);
     try {
       const res = await runBareosEdgeOp(op, { receivedAt });
       op.secretArgs = null;
       console.log(`[bareos-edge] ${op.kind} → ${String(op.directorId).slice(0, 48)}: ${res.ok ? '성공' : `${res.notSent ? '보내지 않음' : '실패'}(${res.code}) — ${String(res.reason || '').slice(0, 160)}`}`);
       postErr = (await postResult(op.id, res, op.kind)) || postErr;
-    } finally { inflight -= 1; }
+    } finally { inflight -= 1; if (track) noteEdgeOpEnd(op.id); }
   }));
   _last = postErr ? { at: Date.now(), ok: false, ops: ops.length, error: postErr } : { at: Date.now(), ok: true, ops: ops.length };
   if (postErr) noteError(postErr);

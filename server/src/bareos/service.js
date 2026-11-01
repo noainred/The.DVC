@@ -11,10 +11,10 @@ import { openConsole, BareosConsoleError } from './console.js';
 import {
   loadSettings, directorConn, directorCred, directorConnSig, directorById, siteFor, siteMissing,
 } from './settings.js';
-import { OPS } from './ops.js';
+import { OPS, JOB_NAME_SUFFIXES, MID_COMMAND_CODES } from './ops.js';
 import { enqueueEdgeOp } from './edgeOps.js';
 import { config } from '../config.js';
-import { addJob as registryAddJob, addJobs as registryAddJobs, listJobs, findByVm, registryLoadError, jobCount, retireName, MAX_JOBS } from './registry.js';
+import { addJob as registryAddJob, addJobs as registryAddJobs, listJobs, findByVm, registryLoadError, jobCount, retireName, retiredNames, jobDigests, MAX_JOBS } from './registry.js';
 import { backupPluginOptions, jobNameFor, normLevel } from './names.js';
 import { createAuthGuard } from '../util/authGuard.js';
 import { isMockMode } from '../mock/demo/flags.js';
@@ -23,7 +23,30 @@ import { store } from '../store.js';
 import { morefOf } from '../vcenter/registry.js';
 import { DEMO_ONLY_REASON } from '../auth/demoGuest.js';
 
-export const bareosAuthGuard = createAuthGuard({ file: 'bareos-auth-stops.json' });
+const _authGuard = createAuthGuard({ file: 'bareos-auth-stops.json' });
+/**
+ * v2.847 S2-1 · E2-4(2회차 점검 — 재현): v2.846 E-2 가 TLSv1.2 Director 의 신원에 '#tls1.2' 를 붙였다. v2.845 에도 tlsMax 설정이 있었으므로 올리기 전에
+ *   남긴 그 Director 의 인증 정지는 해시가 달라 **업그레이드만으로** 풀렸고 첫 주기 조회가 같은 틀린 비밀번호로 한 번 더 로그인했다(자동 재시도 금지 위반).
+ *   기동 뒤 처음 정지를 볼 때 한 번, 옛 모양(접미사 없음) 기록을 새 신원으로 옮긴다. 그 뒤 사람이 TLS 판을 바꾸면 E-2 대로 한 번 다시 시도한다.
+ */
+let _tlsStopsMigrated = false;
+function migrateTls12Stops() {
+  if (_tlsStopsMigrated) return;
+  _tlsStopsMigrated = true;
+  try {
+    for (const d of loadSettings().directors || []) {
+      if (d?.tlsMax !== 'TLSv1.2') continue;
+      const now = directorCred(d);
+      _authGuard.rekeyAuthStop({ ...now, username: now.username.replace(/#tls1\.2$/, '') }, now);
+    }
+  } catch { _tlsStopsMigrated = false; }   // 설정을 못 읽으면 다음에 다시
+}
+export const bareosAuthGuard = Object.assign(Object.create(_authGuard), {
+  authStopFor(dev) { migrateTls12Stops(); return _authGuard.authStopFor(dev); },
+  peekAuthStop(dev) { migrateTls12Stops(); return _authGuard.peekAuthStop(dev); },
+});
+/** 테스트 — 기동 직후 상태로(이관을 다시 보게). */
+export function _resetTlsStopMigrationForTest() { _tlsStopsMigrated = false; }
 
 const fail = (code, msg) => new BareosConsoleError(code, msg);
 
@@ -293,6 +316,37 @@ function lateAddJobs(directorId, ready, by, demo) {
 /** 엣지 '결과 모름' 의 사유(등록) — Director 에 잡이 생겼을 수 있다는 사실과 늦은 결과 처리를 밝힌다. */
 const addUnknownText = (why) => `${why} — Director 에 잡이 생겼을 수 있습니다. 결과가 늦게 도착하면(그사이 포탈이 재시작하지 않으면) 포탈이 원장에 넣거나(이미 대상이면) 그 잡을 끕니다. 다시 등록하기 전에 목록을 새로 고쳐 확인하세요.`;
 
+/** 등록 회신 한 줄이 '명령 도중 끊김'(Director 가 실행했을 수 있다 — groupRunner.itemState 와 같은 표) · 엣지가 이름 없이 성공한 것(정제가 unknown 으로 바꾼다). */
+const addMidCommand = (r) => !!r && !r.ok && (r.code === 'unknown' || MID_COMMAND_CODES.has(r.code));
+/**
+ * v2.847 E2-1(2회차 점검 — 재현): 명령 도중 끊긴 등록은 Director 에 잡이 생겼을 수 있다 — '실패' 로 적으면 사용자가 다시 등록해 `-r2` 가 생기고
+ * 첫 잡은 원장 밖에서 켜진 채 스케줄로 돌았다. `.jobs` 를 한 번 읽어 그 VM 의 이름 후보 중 **원장에도 지운 이름에도 없는** 잡을 끄고 지운 이름에 남긴다
+ * (입양하지 않는다 — 옛 잡의 옵션은 다를 수 있다 · addOne 규칙). 후보가 없으면 '만들어지지 않음'(확정 실패), `.jobs` 를 못 읽으면 결과 모름 그대로.
+ * @param {{ i, prep }[]} items @returns {Promise<Map<number, string>>} i → 사유
+ */
+async function settleMidCommandAdds(directorId, items, demo) {
+  const out = new Map();
+  let have = null;
+  try { const r = await onDirector(directorId, 'jobNames', {}); const n = (Array.isArray(r?.names) ? r.names : []).map(String); if (n.length) have = new Set(n); } catch { /* 아래 */ }
+  if (!have) {
+    for (const { i } of items) out.set(i, addUnknownText('결과 모름 — 명령 도중 연결이 끊겼고 Director 의 잡 목록도 다시 읽지 못했습니다'));
+    return out;
+  }
+  const mine = new Set(jobDigests().map((j) => j.bareosJob).filter(Boolean));   // 잡 이름은 vCenter · moref 에서 나온다 — 원장 어느 행이든 그 이름이면 우리 것
+  const retired = new Set(retiredNames().filter((r) => r.directorId === directorId).map((r) => r.name));
+  const orphans = [];
+  for (const { i, prep } of items) {
+    const cands = JOB_NAME_SUFFIXES.map((sfx) => jobNameFor(prep.vm.vcenterId, prep.moref, sfx)).filter((n) => n && have.has(n) && !mine.has(n) && !retired.has(n));
+    if (!cands.length) { out.set(i, '만들어지지 않았습니다 — 명령 도중 연결이 끊겼고 Director 에 이 VM 의 새 잡이 없습니다(다시 등록하세요).'); continue; }
+    for (const name of cands) orphans.push({ i, name, err: new Error('명령 도중 연결이 끊겨 원장에 넣지 않았습니다') });
+  }
+  if (orphans.length) {
+    const why = await orphanCleanup(directorId, orphans, demo);
+    for (const o of orphans) out.set(o.i, `${why.get(o.name)} 다시 등록하면 새 이름으로 만듭니다.`);
+  }
+  return out;
+}
+
 /**
  * 백업 대상 등록(Director 잡 생성 + 원장). 범위 판정은 라우트가 먼저 한다.
  * @param {{ vcenterId, vmId, level?, schedule?, by, demo? }} o
@@ -307,6 +361,10 @@ export async function createBackupTarget({ vcenterId, vmId, level, schedule, by,
       [r] = await onDirector(prep.directorId, 'addJobs', { items: [{ key: 0, vcenterId: prep.vm.vcenterId, moref: prep.moref, base: prep.base }] },
         { onLate: lateAddJobs(prep.directorId, [{ i: 0, prep }], by, demo) });
     } catch (e) { if (e?.code === 'unknown') throw fail('unknown', addUnknownText(String(e.message || e).slice(0, 300))); throw e; }
+    if (addMidCommand(r)) {   // v2.847 E2-1: 명령 도중 끊김 — 실패로 단정하지 않고 `.jobs` 로 가린다(원장 밖 잡은 끈다)
+      const why = (await settleMidCommandAdds(prep.directorId, [{ i: 0, prep }], demo)).get(0);
+      throw fail(/^만들어지지 않았습니다/.test(why) ? 'error' : 'unknown', why);
+    }
     if (!r?.ok) throw fail(r?.code === 'skipped' ? 'connect' : (r?.code || 'error'), r?.message || 'Director 잡을 만들지 못했습니다.');
     if (!r.name) throw fail('unknown', 'Director 가 잡 이름 없이 성공을 회신했습니다 — 잡이 생겼을 수 있습니다. Director 에서 확인하세요.');   // G3
     try { return recordTarget(prep, r.name, by, demo); } catch (e) {
@@ -352,9 +410,11 @@ export async function createBackupTargets({ vcenterId, vmIds, level, schedule, b
     const byKey = new Map(results.map((r) => [r.key, r]));
     const orphans = [];
     const made = [];
+    const mid = [];
     for (const { i, prep } of ready) {
       const r = byKey.get(i);
-      if (!r?.ok) { out[i].reason = r?.message || '사유 미상'; continue; }
+      if (addMidCommand(r)) { mid.push({ i, prep }); continue; }   // v2.847 E2-1 — 아래에서 `.jobs` 로 가린다
+      if (!r?.ok) { out[i].reason = r?.message || (r ? '사유 미상' : '결과 모름 — 회신에 이 항목이 없습니다(Director 에 잡이 생겼을 수 있습니다 — 목록을 새로 고쳐 확인하세요).'); if (!r) out[i].unknown = true; continue; }
       if (!r.name) { out[i].reason = 'Director 가 잡 이름 없이 성공을 회신했습니다 — 잡이 생겼을 수 있습니다. Director 에서 확인하세요.'; continue; }   // G3
       made.push({ i, prep, name: r.name });
     }
@@ -367,6 +427,10 @@ export async function createBackupTargets({ vcenterId, vmIds, level, schedule, b
       // Director 잡은 이미 생겼다 — 끄고, 숨기지 않고 이름을 밝힌다.
       const why = await orphanCleanup(directorId, orphans, demo);
       for (const o of orphans) out[o.i].reason = why.get(o.name);
+    }
+    if (mid.length) {
+      const why = await settleMidCommandAdds(directorId, mid, demo);
+      for (const { i } of mid) { out[i].reason = why.get(i); if (/^결과 모름/.test(out[i].reason || '')) out[i].unknown = true; }
     }
   } finally {
     for (const k of claimed) _registering.delete(k);

@@ -8,7 +8,7 @@ import { bytesText } from './bareosInstallText.js';
 import { unitText } from '../unitText.js';
 import {
   SECRET_SLOT, consoleText, sdDeviceText, dirStorageText, passwordIssue, pwPairIssue, nameIssue, storageRows, portalText, diskText, pathCheckLines,
-  accountRows, portalOf, diskTotal, tlsText, profileOptions, DEFAULT_PROFILE, poolFormOf, retentionText, PORTAL_POOLS, PORTAL_SCHEDULE, maskPw, sshSourceText, noSshNeeded,
+  accountRows, portalOf, diskTotal, tlsText, profileOptions, DEFAULT_PROFILE, poolFormOf, retentionText, PORTAL_POOLS, PORTAL_SCHEDULE, maskPw, sshSourceText, noSshNeeded, reregisterSummary, scanWaitMs,
 } from './bareosCorpText.js';
 
 /**
@@ -126,7 +126,7 @@ export default function BareosCorpPanel({ writable = true }) {
     const g = ++scanGen.current;
     setScanErr(null); setBusy((b) => b || 'scan');
     try {
-      const r = await call(`${P}/${encodeURIComponent(corp.id)}/scan`, { ...sshBody(corp, ssh), ...(path ? { input: { path } } : {}) }, { timeoutMs: 200_000 });
+      const r = await call(`${P}/${encodeURIComponent(corp.id)}/scan`, { ...sshBody(corp, ssh), ...(path ? { input: { path } } : {}) }, { timeoutMs: scanWaitMs(list?.relayLimits) });
       if (g === scanGen.current) { if (!path) setScan(r); }
       return r;
     } catch (e) { if (g === scanGen.current) setScanErr(e); throw e; } finally {
@@ -145,7 +145,7 @@ export default function BareosCorpPanel({ writable = true }) {
     loadCfg(false);
     if (c && noSshNeeded(c.ssh)) {
       const g = ++scanGen.current;
-      postJson(`${P}/${encodeURIComponent(sel)}/scan`, {}, { timeoutMs: 200_000 }).then((r) => { if (g === scanGen.current && r?.ok !== false) setScan(r); else if (g === scanGen.current) setScanErr(new Error(r?.reason || '서버 파일을 읽지 못했습니다.')); }).catch((e) => { if (g === scanGen.current) setScanErr(e); });
+      postJson(`${P}/${encodeURIComponent(sel)}/scan`, {}, { timeoutMs: scanWaitMs(list?.relayLimits) }).then((r) => { if (g === scanGen.current && r?.ok !== false) setScan(r); else if (g === scanGen.current) setScanErr(new Error(r?.reason || '서버 파일을 읽지 못했습니다.')); }).catch((e) => { if (g === scanGen.current) setScanErr(e); });
     }
   }, [sel, list]);   // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -162,8 +162,12 @@ export default function BareosCorpPanel({ writable = true }) {
       setMsg({ ok: true, text: `${okText || '적용했습니다'} — ${filesText(r)}${r.restarted ? ' · SD 재시작' : ''}${r.reloaded ? ' · Director reload' : ''}${r.relay ? ` · 법인 엣지 ‘${r.relay}’ 가 적용` : ''}${r.demo ? ' · 데모(장비에 닿지 않음)' : ''}` });
       await loadCfg(true);
       // 바꾼 뒤 서버 파일 정보: SSH 가 필요 없는 출처(등록부 · 데모)면 다시 읽고, 입력 출처면 '오래됨' 표시(비밀번호를 다시 묻지 않는다)
-      if (noSshNeeded(corp.ssh)) postJson(`${P}/${encodeURIComponent(corp.id)}/scan`, {}, { timeoutMs: 200_000 }).then((x) => setScan(x?.ok === false ? (s) => (s ? { ...s, stale: true } : s) : x)).catch(() => setScan((s) => (s ? { ...s, stale: true } : s)));
-      else setScan((s) => (s ? { ...s, stale: true } : s));
+      // v2.847 U2-2(2회차 점검 — 재현): 이 스캔도 세대로 거른다 — 쓰기가 끝나면 법인 잠금이 풀려, 늦게 온 A 법인 스캔이 B 법인 화면(경로 · 여유 · 표지)에 들어갔다
+      if (noSshNeeded(corp.ssh)) {
+        const g = ++scanGen.current;
+        const stale = () => { if (g === scanGen.current) setScan((s) => (s ? { ...s, stale: true } : s)); };
+        postJson(`${P}/${encodeURIComponent(corp.id)}/scan`, {}, { timeoutMs: scanWaitMs(list?.relayLimits) }).then((x) => { if (x?.ok === false) stale(); else if (g === scanGen.current) setScan(x); }).catch(stale);
+      } else setScan((s) => (s ? { ...s, stale: true } : s));
       return r;
     } catch (e) {
       const b = e?.body || {};
@@ -292,8 +296,7 @@ function Reregister({ corp, writable, busyOuter }) {
       const ids = Object.entries(pick).filter(([, v]) => v).map(([k]) => k);
       const r = await call(`${P}/${encodeURIComponent(corp.id)}/reregister`, { ids }, LONG);
       setRes(r.results);
-      const ok = r.results.filter((x) => x.ok).length;
-      setM({ ok: ok === r.results.length ? true : ok ? 'warn' : false, text: `다시 등록 — 성공 ${ok} · 실패 ${r.results.length - ok}(꺼 둔 대상은 다음 대조에서 다시 끕니다).` });
+      setM(reregisterSummary(r.results, r.generation));
       const left = await fetchJson(`${P}/${encodeURIComponent(corp.id)}/missing`, {}, undefined, GET).catch(() => null);
       if (left) setItems(left.items);
     } catch (e) { setM({ ok: false, text: `실패: ${e.message}` }); } finally { setBusy(false); }
@@ -304,7 +307,7 @@ function Reregister({ corp, writable, busyOuter }) {
       <div style={ROW}>
         <div style={{ flex: '1 1 360px', minWidth: 0 }}>
           <b>재설치 뒤 대상 다시 등록</b>
-          <div className="muted" style={{ fontSize: 12, marginTop: 2 }}>완전 설치(초기화 후 재설치) 뒤에는 Director 에 백업 잡이 없습니다. 포탈 원장의 대상 중 Director 에 없는 것을 같은 대상(이력 · 스케줄 · 레벨 · 켜짐 그대로)으로 다시 만듭니다 — Director 콘솔로 만들고 SSH 는 쓰지 않습니다.</div>
+          <div className="muted" style={{ fontSize: 12, marginTop: 2 }}>완전 설치(초기화 후 재설치) 뒤에는 Director 에 백업 잡이 없습니다. 포탈 원장의 대상 중 Director 에 없는 것을 같은 대상(스케줄 · 레벨 · 켜짐 그대로)으로 다시 만듭니다 — Director 콘솔로 만들고 SSH 는 쓰지 않습니다. 카탈로그가 남아 있으면 실행 기록을 이어 가고, 새로 만들어졌으면(재설치 기본) 실행 기록을 새로 시작합니다.</div>
         </div>
         <button type="button" className="logout-btn" style={BTN} disabled={busy || busyOuter} onClick={load}>빠진 대상 확인</button>
       </div>

@@ -75,6 +75,9 @@ function PrunePreview({ tree, groupId, keep, vmsChanged = false }) {
     setSt({ busy: true, r: null, err: null, keep });
     try {
       const r = await postJson(`${BASE}/groups/${enc(groupId)}/prune-preview`, { keep }, { timeoutMs: relayWaitMs(tree.relayLimits, 'prunePreview') || 180_000, retries: 0 });
+      // v2.847 U2-3(2회차 점검 — 재현): postJson 은 409(같은 그룹 미리 보기 진행 중 등)를 던지지 않는다 — 그 본문을 결과로 읽으면 jobs=0 이라
+      //   초록 배너 '지울 실행 기록이 없습니다' 를 그렸다(모름을 0 으로). 거부는 사유로 보인다.
+      if (r && r.ok === false) throw Object.assign(new Error(r.reason || '미리 보기를 하지 못했습니다.'), { body: r });
       if (my === seq.current) setSt({ busy: false, r, err: null, keep });
     } catch (e) { if (my === seq.current) setSt({ busy: false, r: null, err: e, keep }); }
   };

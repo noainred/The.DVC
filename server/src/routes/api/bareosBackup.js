@@ -941,7 +941,11 @@ async function deleteRoute(req, res, job) {
     if (!(e?.code === 'jsonrpc' && /not found|unknown|no job/i.test(e.message))) return sendErr(res, e);
     note = 'Director 에 이 잡이 이미 없습니다 — 원장에서만 지웠습니다.';
   }
-  deleteJob(job.id, { directorId: dir });
+  try { deleteJob(job.id, { directorId: dir }); } catch (e) {
+    // v2.847 D2-7: 원장 쓰기 실패 — 원장은 그대로(되돌림)라 화면이 '삭제됨' 으로 보이지 않게 사실대로 말한다(Director 잡은 이미 껐다)
+    audit(req, 'Bareos 백업 대상 삭제', `${job.vcenterId}/${job.vmName}`, `잡 ${job.bareosJob} 비활성화 · 원장 쓰기 실패 — 원장에 남음`);
+    return res.status(500).json({ ok: false, code: 'registry-write', reason: `Director 의 잡은 비활성화했지만 포탈 원장 파일에 쓰지 못해 대상은 원장에 그대로 남았습니다(${String(e?.message || e).slice(0, 200)}). 디스크 · 권한을 확인한 뒤 다시 지우세요 — 그때까지 이 대상은 백업되지 않습니다.` });
+  }
   audit(req, 'Bareos 백업 대상 삭제', `${job.vcenterId}/${job.vmName}`, `잡 ${job.bareosJob} 비활성화 · 원장 삭제`);
   res.json({ ok: true, note });
 }
@@ -1008,7 +1012,7 @@ async function restoreRoute(req, res, job) {
   const jobid = Number(b.jobid);
   if (!Number.isInteger(jobid) || jobid <= 0) return res.status(400).json({ ok: false, reason: '복원할 백업(jobid)을 고르세요.' });
   const settings = effectiveSettings();
-  const plan = restorePlan({ mode: b.mode, job, snapshot: store.get(), newVm: b.newVm, confirmName: b.confirmName, pluginName: settings.defaults.pluginName });
+  const plan = restorePlan({ mode: b.mode, job, snapshot: store.get(), newVm: b.newVm, confirmName: b.confirmName, pluginName: settings.defaults.pluginName, jobid });   // v2.847 D2-1: 그 지점의 백업 때 위치로 판정
   if (!plan.ok) return res.status(400).json({ ok: false, reason: plan.issue });
   // v2.825.1 버그 점검(G2 — 재현): 설정만 보면 아는 전제(그 잡의 Director 가 있고 접속값이 갖춰졌는가)도 OTP **앞에서** 본다 —
   //   뒤에서 'not-configured' 로 실패하면 1회용 코드가 이미 쓰여, 설정을 고친 뒤 같은 코드는 '이미 사용됨' 이었다.
