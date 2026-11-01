@@ -27,6 +27,13 @@
   일괄 생성 비밀번호는 **법인마다 다르다**(결과 행에 한 번 · CSV 는 화면이 한 번만). 감사에는 작업 · 이름 · 파일 경로만.
 - **재설치 뒤 다시 등록**: 서버가 `.jobs` 를 다시 읽어 지금 빠진 원장 대상만(화면 목록을 믿지 않는다) · 같은 원장 행(`registry.rebindJobs` — 이력 · 스케줄 · 레벨 · 켜짐 그대로, 이 함수만 잡 이름을 바꾼다) ·
   지금 매핑으로 · 원장에 묶지 못한 잡은 끈다(F8 — 일반 등록 orphanCleanup 과 같은 규칙) · 늦은 엣지 회신도 같은 규칙. OTP 없음(대상 등록과 같은 등급 — 콘솔 configure).
+- **v2.846 버그 점검 확정분(되돌리지 말 것 — `bareosBugs2846a` 변이 12/12)**: 다시 묶기(`registry.rebindJobs`)는 **실행 기록을 새로 시작**한다
+  (재설치는 카탈로그 DB 삭제가 기본 → jobid 가 1 부터 — lastRun · finishedRuns · lastRate · restores 를 `beforeRebind` 요약으로 옮기고 `runsEpoch` 를 남긴다 ·
+  notify 는 runsEpoch 가 바뀌면 그 대상의 커서 · seen · 복원 커서를 지운다 · D-1) · 위치 칸(vmName · dc · folder)도 지금 값(D-8) ·
+  다시 등록은 **200건 묶음**(엣지 회신 정제 addJobs 상한 500 — E-1) · 회신에 없는 항목은 '결과 모름' · 묶지 못한 잡은 `service.orphanCleanup`(끄기 + 지운 이름 — E-4) ·
+  스토리지 삭제는 그룹이 지정한 스토리지도 매핑으로 보고 · 볼륨 경로가 없으면 · 설정 목록을 못 읽었으면 멈춘다(D-5) ·
+  서버 시간 예산(단건 560초 · 일괄 540초 · 새 법인 시작 420초까지)이 화면 시한(600초)보다 짧다 — 결과 모름 법인에는 생성 비밀번호를 `maybeApplied` 와 함께 돌려준다(C-4) ·
+  화면 조회는 `fetchJson(경로, 쿼리, undefined, 옵션)`(옵션을 둘째 자리에 넣으면 시한 20초 · 재시도 2회 — U-1 · 웹 `fetchJsonArgs2846` 스윕) · 진행 중에는 법인 선택을 잠근다(U-4).
 - **엣지 회신**: `setup.manage` 는 파일 경로가 `/etc/bareos/bareos-(dir|sd).d/<종류>/<이름>.conf` 모양인 것만 · 파일 목록이 비면 결과 모름(REQUIRED) · `setup.scan` 은 `normScanResult`.
 - **남긴 것(추정 · 실환경 미확인)**: `show storages|consoles|profiles` 의 칸 모양(실측 전 — 문자열 · 배열 둘 다 받는다) · reload 성공을 bconsole 종료 코드로만 본다(E2) ·
   apply 경로 시한 합은 시험으로 고정하지 않았다(E3 — 세션 시한이면 새 세션으로 되돌린다) · 풀 편집은 새 볼륨부터(기존 볼륨은 `update volume … AllFromPool` 을 사람이) ·
