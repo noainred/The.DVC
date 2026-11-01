@@ -222,7 +222,8 @@ adminRouter.put('/security/session', adminOnly, requireSettingsOwner, (req, res)
   let after;
   try {
     after = saveSessionSecurity({ idleLogoutEnabled: req.body?.idleLogoutEnabled, idleLogoutMin: req.body?.idleLogoutMin, settingsOwners: req.body?.settingsOwners, loginPolicy: req.body?.loginPolicy, singleSession: req.body?.singleSession, demoSession: req.body?.demoSession,
-      sessionWarnEnabled: req.body?.sessionWarnEnabled, sessionWarnMin: req.body?.sessionWarnMin, sessionExtendMin: req.body?.sessionExtendMin, sessionMaxHours: req.body?.sessionMaxHours });
+      sessionWarnEnabled: req.body?.sessionWarnEnabled, sessionWarnMin: req.body?.sessionWarnMin, sessionExtendMin: req.body?.sessionExtendMin, sessionMaxHours: req.body?.sessionMaxHours,
+      bareosSetupOtp: req.body?.bareosSetupOtp });
   } catch (e) { return res.status(400).json({ ok: false, reason: e.message }); }
   const fmt = (s) => (s.idleLogoutEnabled ? `${s.idleLogoutMin}분` : '비활성');
   const polLabel = (p) => ({ otp_only: 'OTP 전용', otp_or_password: 'OTP+비밀번호(혼용)', password_only: '비밀번호 전용' }[p] || '기본(고권한 OTP 전용)');
@@ -237,6 +238,8 @@ adminRouter.put('/security/session', adminOnly, requireSettingsOwner, (req, res)
   // 세션 만료 경고·연장(v2.428) — 무제한(0) 전환은 8시간 정책을 사실상 해제하므로 감사에 또렷이 남긴다.
   const warnLabel = (x) => (x.sessionWarnEnabled ? `${x.sessionWarnMin}분 전 경고 · ${x.sessionExtendMin}분 연장 · 총상한 ${x.sessionMaxHours ? `${x.sessionMaxHours}시간` : '무제한'}` : '비활성');
   if (warnLabel(before) !== warnLabel(after)) parts.push(`세션 만료 경고 ${warnLabel(before)} → ${warnLabel(after)}`);
+  // v2.842: Bareos 자동 설정 쓰기 단계의 본인 OTP 재확인 — 끄는 것은 root SSH 쓰기의 2차 확인을 없애므로 또렷이 남긴다
+  if (before.bareosSetupOtp !== after.bareosSetupOtp) parts.push(`Bareos 자동 설정 본인 OTP 재확인 ${before.bareosSetupOtp ? '켬' : '끔'} → ${after.bareosSetupOtp ? '켬' : '끔(OTP 없이 실행)'}`);
   logAudit({ user: username, action: '세션 보안/설정 접근 변경', target: 'security/session', detail: parts.join(' · ') || '변경 없음', ip: req.ip || '' });
   const ownerWarnings = scopedOwnerWarnings(after.settingsOwners);   // v2.744(감사 AUTHZ-02)
   res.json({ ok: true, settings: after, ...(ownerWarnings.length ? { ownerWarnings } : {}) });

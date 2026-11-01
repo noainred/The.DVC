@@ -6,7 +6,11 @@ import { blankOr } from './blankOr.js';
  * 예전에는 세션 총 상한 빈 칸을 `'' → 0` 으로 바꿔 보내 **8시간 강제 로그아웃 정책이 조용히 풀렸고**,
  * 나머지 세 칸은 `Number('') || 기본값` 이라 이전 값이 아니라 기본값(30·10·60)으로 덮였다.
  */
-export function sessionSecurityBody(s, otp) {
+/**
+ * @param {object} s 화면 값 @param {string} otp @param {{ bareosSetupOtp?: boolean }} [orig] 불러온 값 — 주면 바뀐 보안 칸만 싣는다
+ *   (v2.842 반증 F4: 오래 열어 둔 화면이 무관한 항목을 저장하며 그사이 다시 켠 값을 '끔' 으로 되돌리지 않게)
+ */
+export function sessionSecurityBody(s, otp, orig) {
   const owners = String(s.settingsOwners || '').split(/[\s,]+/).map((x) => x.trim()).filter(Boolean);
   return {
     idleLogoutEnabled: s.idleLogoutEnabled,
@@ -20,6 +24,8 @@ export function sessionSecurityBody(s, otp) {
     sessionWarnMin: blankOr(s.sessionWarnMin),
     sessionExtendMin: blankOr(s.sessionExtendMin),
     sessionMaxHours: blankOr(s.sessionMaxHours),
+    // v2.842: Bareos 자동 설정 본인 OTP 재확인 — 불리언일 때만 · 불러온 값(orig)이 있으면 바꿨을 때만 보낸다(없음을 '끔' 으로 · 옛 화면 값을 새 값 위에 덮지 않는다)
+    ...(typeof s.bareosSetupOtp === 'boolean' && (!orig || typeof orig.bareosSetupOtp !== 'boolean' || orig.bareosSetupOtp !== s.bareosSetupOtp) ? { bareosSetupOtp: s.bareosSetupOtp } : {}),
     otp: String(otp || '').trim(),
   };
 }

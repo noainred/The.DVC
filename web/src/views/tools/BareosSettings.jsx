@@ -526,7 +526,8 @@ function DirectorEditor({ s, dir, locked, onReload, onSaved, onClose, onDeleted 
 const STEP_NAMES = ['사전 점검', 'Director 리소스', 'FD 플러그인 켜기', '매핑 채움 · 저장', 'FD INI · 지문'];
 
 /**
- * 자동 설정 5단계(v2.823 — Director 하나). SSH 접속값·OTP 는 위 한 곳에서 넣는다(비밀번호는 저장하지 않는다 · OTP 는 쓰기 단계마다 새 코드).
+ * 자동 설정 5단계(v2.823 — Director 하나). SSH 접속값·OTP 는 위 한 곳에서 넣는다(비밀번호는 저장하지 않는다 · OTP 는 쓰기 단계마다 새 코드 —
+ * v2.842: 설정 › 세션 보안에서 끄면 OTP 칸을 숨긴다).
  * 단계 상태는 **이 화면에서 실행한 결과**다(다시 열면 비어 있다 — 서버에 단계 기록을 두지 않는다).
  */
 function AutoSetupPanel({ s, dir, rows, editCount, cat, unsaved, locked, onDirectorDone, onMaybeChanged, onFill, busyOuter }) {
@@ -545,6 +546,10 @@ function AutoSetupPanel({ s, dir, rows, editCount, cat, unsaved, locked, onDirec
   // v2.841: 2단계 409 가 알려 준 남의 파일(사전 점검보다 새 사실 — 다음 사전 점검이 비운다) · 콘솔 이름을 바꾼 이유
   const [extraOwn, setExtraOwn] = useState([]);
   const [consoleNote, setConsoleNote] = useState('');
+  // v2.842: 쓰기 단계 본인 OTP 재확인은 서버 설정(설정 › 세션 보안)을 따른다 — 꺼져 있으면 OTP 칸을 숨긴다.
+  //   화면을 연 뒤 다시 켜졌으면 서버가 otpRequired 로 거부한다 → 칸을 다시 보인다(otpBack)
+  const [otpBack, setOtpBack] = useState(false);
+  const otpNeeded = s.setupOtp !== false || otpBack;
   const mark = (n, ok, text) => setSt((x) => ({ ...x, [n]: { ok, at: Date.now(), text } }));
   const unmark = (n) => setSt((x) => { if (!x[n]) return x; const y = { ...x }; delete y[n]; return y; });
   useEffect(() => { if (!touched.current.host) setSsh((x) => ({ ...x, host: dir.host || '' })); }, [dir.host]);
@@ -570,7 +575,7 @@ function AutoSetupPanel({ s, dir, rows, editCount, cat, unsaved, locked, onDirec
     setF((x) => ({ ...x, [k]: v, ...((k === 'vcenterId' || k === 'fdHost') && x[k] !== v ? { vcthumbprint: '' } : {}) }));
   };
   const sshBody = { host: ssh.host, sshPort: Number(ssh.sshPort) || 22, username: ssh.username, password: ssh.password };
-  const otpOk = /^\d{6}$/.test(ssh.otp);
+  const otpOk = !otpNeeded || /^\d{6}$/.test(ssh.otp);
   const sshOk = !!(ssh.host && ssh.password);
   const res = pf?.resources || {};
   const pick = (catKey, pfKey) => [...new Set([...(cat?.[catKey] || []), ...(res[pfKey] || []), ...(catKey === 'pools' && d.usePools ? [VMWARE_POOL_FULL] : [])])];
@@ -580,6 +585,7 @@ function AutoSetupPanel({ s, dir, rows, editCount, cat, unsaved, locked, onDirec
     const unknown = outcomeUnknown(e);
     mark(n, false, unknown ? `${label} 결과를 확인하지 못했습니다(${e.message}) — 서버에서는 계속 진행됐을 수 있습니다(감사 로그 확인).` : `${label} 실패: ${e.message}`);
     setSsh((x) => ({ ...x, ...(write ? { otp: '' } : {}), ...(e?.body?.code === 'ssh-auth' ? { password: '' } : {}) }));
+    if (e?.body?.otpRequired) setOtpBack(true);
     if (unknown && n === 2) onMaybeChanged?.();
   };
   const url = (p) => `${BASE}/settings/directors/${enc(dir.id)}/auto-setup/${p}`;
@@ -628,7 +634,7 @@ function AutoSetupPanel({ s, dir, rows, editCount, cat, unsaved, locked, onDirec
           if (next) {
             touched.current.consoleName = false;
             setD((x) => (x.consoleName === body.consoleName ? { ...x, consoleName: next } : x));
-            setConsoleNote(`만들 콘솔 이름을 ‘${next}’ 로 바꿔 두었습니다 — 새 OTP 로 다시 실행하세요(기존 ‘${body.consoleName}’ 콘솔은 그대로 둡니다).`);
+            setConsoleNote(`만들 콘솔 이름을 ‘${next}’ 로 바꿔 두었습니다 — ${otpNeeded ? '새 OTP 로 ' : ''}다시 실행하세요(기존 ‘${body.consoleName}’ 콘솔은 그대로 둡니다).`);
           }
         }
       }
@@ -692,17 +698,20 @@ function AutoSetupPanel({ s, dir, rows, editCount, cat, unsaved, locked, onDirec
       <div style={ROW}>
         <div style={{ minWidth: 0, flex: '1 1 420px' }}>
           <b>자동 설정 — 초기 설치만 된 서버를 포탈이 설정합니다</b>
-          <div className="muted" style={{ fontSize: 11.5, marginTop: 2, lineHeight: 1.6 }}>SSH root 비밀번호는 서버에 저장하지 않습니다(이 편집 화면을 닫으면 지워집니다) · 본인 OTP 는 쓰기 단계마다 새 코드. 쓰기 단계는 포탈이 만든 파일만 덮어쓰고(예외: 3단계는 패키지의 myself.conf 를 사본을 남기고 제자리에서 고칩니다), 실패하면 되돌립니다. 처음 접속하는 서버는 SSH 호스트키 승인(설정 › 장비 신뢰)이 먼저 필요할 수 있습니다.</div>
+          <div className="muted" style={{ fontSize: 11.5, marginTop: 2, lineHeight: 1.6 }}>SSH root 비밀번호는 서버에 저장하지 않습니다(이 편집 화면을 닫으면 지워집니다){otpNeeded ? ' · 본인 OTP 는 쓰기 단계마다 새 코드' : ''}. 쓰기 단계는 포탈이 만든 파일만 덮어쓰고(예외: 3단계는 패키지의 myself.conf 를 사본을 남기고 제자리에서 고칩니다), 실패하면 되돌립니다. 처음 접속하는 서버는 SSH 호스트키 승인(설정 › 장비 신뢰)이 먼저 필요할 수 있습니다.</div>
         </div>
       </div>
       {s.demo && <div className="banner warn" style={{ marginTop: 8 }}>데모 모드에서는 자동 설정을 실행하지 않습니다(실제 서버에 접속하는 작업).</div>}
+      {!otpNeeded && <div className="banner warn" role="status" style={{ marginTop: 8, fontSize: 12, lineHeight: 1.6 }}>{s.setupOtpOff === 'auth-off'
+        ? '이 포탈은 로그인 인증이 꺼져 있어 쓰기 단계에 본인 OTP 를 묻지 않습니다.'
+        : '쓰기 단계(2 · 3 · 5단계)의 본인 OTP 재확인이 꺼져 있습니다 — 설정 › Security › 세션 보안에서 설정 소유자가 바꿉니다. OTP 를 등록한 계정만 실행할 수 있고, 실행 기록에는 감사 로그 ‘[본인 OTP 재확인 꺼짐]’ 표시가 붙습니다.'}</div>}
       {dir.agent && !s.demo && <div className="banner" style={{ marginTop: 8, fontSize: 12, lineHeight: 1.6 }}>법인 엣지 ‘{dir.agent}’ 가 대행합니다 — 아래 SSH 접속·Director 확인은 그 엣지에서 실행합니다. 입력한 SSH·vCenter 비밀번호는 이 요청 한 번에만 엣지로 전달하고 어디에도 저장하지 않습니다(중앙 대기열의 사본은 엣지가 가져가는 즉시 지우고, 요청을 처리하는 동안에만 중앙 메모리에 있습니다). 엣지가 {s.relayLimits?.secretPickupMs ? secText(s.relayLimits.secretPickupMs) : '정해진 시간'} 안에 가져가지 않으면 보내지 않은 것으로 끝납니다.</div>}
       <div style={GRID}>
         <label className="muted" style={FIELD}>SSH 주소(Director 서버)<input className="input" id="bareos-auto-host" style={INP} value={ssh.host} onChange={(e) => setS2('host', e.target.value.trim())} placeholder={dir.host || 'bareos.corp'} /></label>
         <label className="muted" style={FIELD}>SSH 포트<input className="input" style={INP} inputMode="numeric" value={ssh.sshPort} onChange={(e) => setS2('sshPort', e.target.value.replace(/\D/g, '').slice(0, 5))} aria-label="SSH 포트" /></label>
         <label className="muted" style={FIELD}>SSH 계정(root)<input className="input" style={INP} value={ssh.username} onChange={(e) => setS2('username', e.target.value.trim())} aria-label="SSH 계정" /></label>
         <label className="muted" style={FIELD}>root 비밀번호<input className="input" id="bareos-auto-pw" style={INP} type="password" autoComplete="new-password" value={ssh.password} onChange={(e) => setS2('password', e.target.value)} placeholder="저장하지 않습니다" /></label>
-        <label className="muted" style={FIELD}>OTP(본인 · 쓰기 단계)<input className="input" id="bareos-auto-otp" style={INP} inputMode="numeric" autoComplete="one-time-code" value={ssh.otp} onChange={(e) => setS2('otp', e.target.value.replace(/\D/g, '').slice(0, 6))} /></label>
+        {otpNeeded && <label className="muted" style={FIELD}>OTP(본인 · 쓰기 단계)<input className="input" id="bareos-auto-otp" style={INP} inputMode="numeric" autoComplete="one-time-code" value={ssh.otp} onChange={(e) => setS2('otp', e.target.value.replace(/\D/g, '').slice(0, 6))} /></label>}
       </div>
 
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 12 }}>

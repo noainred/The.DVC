@@ -13,7 +13,7 @@
   ③ 놓기·`bareos-dir -t`·reload 실패 → 새 파일 삭제 + 바꾼 파일 원복. 세션이 시한으로 끊기면 **새 세션으로** 되돌리고 다시 reload(`BUDGET` 단계 합 < 세션 시한 — 테스트가 산수 고정).
   ④ 새 콘솔로 **포탈이 실제 접속에 성공해야만** 설정을 저장. 실패면 되돌리고 다시 reload(같은 이름 콘솔을 그대로 두면 Director 만 새 비밀번호가 돼 쓰던 연결이 끊긴다).
   복원 잡에는 `Storage` 가 있다(Bareos 기본 RestoreFiles 모양) · 표지는 ASCII · 상태 판정과 옛 내용 읽기는 root 명령 하나(심링크 바꿔치기 창을 줄인다) · 진행 중에는 **그 Director 의** 접속값 저장·삭제가 409(v2.823 — 공통 설정 저장은 막지 않는다: 자동 설정은 끝에 그 Director 의 4칸만 동기로 저장한다 · 검토 C5).
-  ⑤ 라우트: admin + 전체 범위(조회·**쓰기** 둘 다 — v2.823 S2 `fullWriteOnly`) + 데모 계정 403 + 동시 1건(Director 마다 · 같은 원격 주소도 하나 — S6) + 입력 판정(`planDirector`·`planFdIni`) **뒤에** 본인 OTP(지문 읽기는 쓰기가 없어 OTP 없음).
+  ⑤ 라우트: admin + 전체 범위(조회·**쓰기** 둘 다 — v2.823 S2 `fullWriteOnly`) + 데모 계정 403 + 동시 1건(Director 마다 · 같은 원격 주소도 하나 — S6) + 입력 판정(`planDirector`·`planFdIni`) **뒤에** 본인 OTP(지문 읽기는 OTP 없음 · v2.842 끌 수 있음).
   ⑥ root 만(`id -u`=0, sudo 경로 없음) · 단일 설정 파일(`bareos-dir.conf`) Director 는 거부 · 원격 명령 값은 화이트리스트(리소스 이름·경로·호스트, 앞 `-` 금지).
   리소스 본문은 웹 `bareosText.js directorPrepBlock` 과 글자까지 같다(테스트 ①이 대조 — 한쪽만 고치지 말 것).
   실환경 미확인(추정): `bconsole reload` 출력 모양(판정에 쓰지 않음 — 접속 시험이 판정). INI 의 `%` 보간은 v2.822.3 에 플러그인 소스로 확인했다(`%%` 로 쓴다).
@@ -39,7 +39,7 @@
 - **v2.822 대상별 처리 중 표시 · 일괄 등록 · 단계별 연결 진단 · 실패 알림 메일**의 규칙은 `docs/rules/audits.md` 'Bareos v2.822 모듈 규칙' 절 — 그 기능을 고치기 전에 읽을 것.
 - **v2.822 · v2.822.3 검토 확정분**(되돌리지 말 것 — `list jobs` 오름차순 LIMIT · disable 은 메모리 값 · 원장 선검사 · TLS 분류 · 덮어쓰기 복원 전제 · 로드 오류 요약 ·
   SFTP 채널 닫기 · canonDir · 가림 · reload 뒤 대조 · INI `%%` · 실패 메일 커서 · oneAtATime · 구조상 위험 S2-3 · 남긴 것)은 `docs/rules/audits.md` 의
-  'Bareos v2.822 · v2.822.3 검토 확정분' 절에 원문 그대로 있다 — 이 폴더를 고치기 전에 읽을 것(크기 상한으로 옮겼다 · 2026-10-30).
+  'Bareos v2.822 · v2.822.3 검토 확정분' 절에 원문 그대로 있다 — 이 폴더를 고치기 전에 읽을 것.
 - **v2.823 법인별 Director**(`bareosCorp2823`·`bareosReview2823`): 설정 v2 = `directors[]` + `sites[].directorId`(v1 은 **읽을 때만** `dir_default` — 로드는 파일을 쓰지 않는다) ·
   원장 잡은 등록 때의 `directorId` 고정, 잡 라우트는 그 Director 로만(대상이 있는 vCenter 재매핑·대상·매핑이 있는 Director 삭제 409) · Director 일은 작업 표 `ops.js` + `service.onDirector`
   (조회 GET 은 `readDirector({ demoOnly … })`) · 인증 정지·연결 시험 고정·`accessMoved`·자동 설정 동시 1건은 Director 마다 · 폴러는 Director 별 시한 병렬, 시한이어도 읽은 행 반영
@@ -61,7 +61,7 @@
   복원은 설정만 보면 아는 전제를 OTP 앞에서 · 엣지 성공 회신에 유효한 잡 이름이 없으면 결과 모름 · `ops.poll` 은 **대조를 먼저**(work 가 예산을 넘어도 `.jobs`·다시 끄기가 돈다) ·
   엣지 자동 설정은 Director·서버마다 한 번에 하나(되돌리기까지) · 재시작하면 결과를 잃는 작업은 `inflight.js` → 업그레이드 자동 적용이 기다린다 · 취소의 끝난 행은 type B 만 반영.
   전문·남긴 것은 `docs/rules/audits.md` 'Bareos v2.825.1 버그 점검 확정분'.
-- **v2.828 작업 결과 창**(`decBytesText` 하나) — audits.md 'v2.833' 끝. **v2.841**: 스케줄 목록 `.schedule` · 사전 점검 @@own(job 제외) · 겹침은 화면(OTP 전)·서버 둘 다 막는다 — audits.md 'v2.841'.
+- **v2.828 결과 창**(`decBytesText` 하나) — audits.md 'v2.833' 끝. **v2.841·842**: 목록 `.schedule` · @@own(job 제외) · 겹침은 화면·서버 둘 다 · 쓰기 OTP 는 세션 보안 `bareosSetupOtp`(기본 켬·불리언 false 만·꺼도 OTP 등록 계정만) — audits.md.
 - **v2.830 백업 그룹**(`groups`·`groupSchedule`·`groupRunner`·`jobLocks` · `bareosGroups2830`): 스케줄은 포탈이 실행(그룹 잡은 Director 스케줄 없이 등록) · 회차는 **보내기 전에** 한 틱 한 번의 쓰기로 기록 · VM 은 그룹 하나 · 같은 Director 는 차례로 · 대상 잠금 공용. v2.831 보관 개수(`groupRetention` — 카탈로그 삭제)는 실행이 끝난 뒤 기준 Full 앞만·순서 어긋나면 안 지움 · 넓히는 저장은 본인 OTP(v2.831.1). 전문은 `docs/rules/audits.md` 'Bareos v2.830'·'v2.831' 절.
 - **v2.833·834 진행 현황판**(`liveStatus`·`liveParse` · `bareosLive2833`): 화면이 열린 동안만 `status client=`·`status director` · Director 마다 시한 · 흐름은 법인마다 · 모름은 null · 멈춤 의심은 FD 조회 성공일 때만. 전문 audits.md 'v2.833'·'v2.834'(정책 수집 'v2.839'·'v2.840').
 - 실환경 미확인(추정 — `tools/bareos-probe.js` 로 확인할 것): Node↔Director TLS-PSK 협상 · 잡 수준 FdPluginOptions 와 FileSet 플러그인 문자열 병합 ·

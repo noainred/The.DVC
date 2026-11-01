@@ -4212,14 +4212,16 @@ export const DB_GUIDE_DATA = {
       "설정 소유자 목록(settingsOwners, 기본 ‘noainred’, 최대 20명, 최소 1명).",
       "로그인 정책(loginPolicy): 비어 있으면 기본 방식(관리자·운영자는 OTP 만, 그 밖은 비밀번호와 OTP 혼용), otp_only(전원 OTP 만), otp_or_password(둘 중 하나), password_only(비밀번호만).",
       "단일 세션 강제(singleSession, 기본 꺼짐)와 데모 계정의 세션 방식(demoSession).",
-      "세션 만료 경고(sessionWarnEnabled 기본 켜짐, sessionWarnMin 기본 만료 10분 전, 1~120분), 연장 시간(sessionExtendMin, 기본 60분, 5~720분), 세션 최대 시간(sessionMaxHours, 기본 0 = 무제한, 최대 720시간)."
+      "세션 만료 경고(sessionWarnEnabled 기본 켜짐, sessionWarnMin 기본 만료 10분 전, 1~120분), 연장 시간(sessionExtendMin, 기본 60분, 5~720분), 세션 최대 시간(sessionMaxHours, 기본 0 = 무제한, 최대 720시간).",
+      "Bareos 자동 설정 쓰기 단계의 본인 OTP 재확인(bareosSetupOtp, 기본 켜짐 — 값이 정확히 false 일 때만 꺼짐. 없거나 손상되면 켜진 것으로 봅니다)."
     ],
     "writer": "설정 › Security › 세션 보안 화면에서 저장할 때만 씁니다. 관리자이면서 설정 소유자여야 하고, 인증이 켜져 있으면 본인 OTP 를 다시 확인합니다. 변경 전후 값이 감사 로그에 남습니다. 주기적으로 쓰는 일은 없습니다.",
     "usedBy": [
       "모든 로그인 확인: 로그인 정책과 단일 세션 판정(값은 3초 동안 메모리에 둡니다)",
       "로그인 화면: 유휴 자동 로그아웃·만료 경고 시간",
       "설정 화면 전체: 설정 소유자만 들어갈 수 있게 하는 검사",
-      "설정 › Security › 보안 자가진단: 현재 정책 점검"
+      "설정 › Security › 보안 자가진단: 현재 정책 점검",
+      "Backup 현황 · Bareos › 설정 탭의 자동 설정 2·3·5단계: 본인 OTP 를 다시 확인할지(요청마다 이 파일의 지금 값)"
     ],
     "retention": "설정 파일이라 자동 정리가 없습니다.",
     "growth": "항목이 정해진 작은 파일입니다.",

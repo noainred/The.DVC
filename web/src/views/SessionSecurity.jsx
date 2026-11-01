@@ -31,8 +31,10 @@ export default function SessionSecurity() {
   const [err, setErr] = useState(null);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState(null);
+  // v2.842(반증 F4): 불러온 보안 칸 값 — 저장 본문에 바뀐 것만 싣는다
+  const [orig, setOrig] = useState({});
 
-  const load = () => fetchJson('/admin/security/session').then((r) => { setS({ ...r, ownerWarnings: r.ownerWarnings || [], settingsOwners: (r.settingsOwners || []).join(', ') }); setErr(null); }).catch((e) => setErr(e.message));
+  const load = () => fetchJson('/admin/security/session').then((r) => { setS({ ...r, ownerWarnings: r.ownerWarnings || [], settingsOwners: (r.settingsOwners || []).join(', ') }); setOrig({ bareosSetupOtp: r.bareosSetupOtp }); setErr(null); }).catch((e) => setErr(e.message));
   useEffect(() => { load(); }, []);
   if (err) return <ErrorBox message={err} />;
   if (!s) return <Loading />;
@@ -40,9 +42,9 @@ export default function SessionSecurity() {
   const save = async () => {
     setBusy(true); setMsg(null);
     try {
-      const r = await putJson('/admin/security/session', sessionSecurityBody(s, otp));
+      const r = await putJson('/admin/security/session', sessionSecurityBody(s, otp, orig));
       if (r && r.ok === false) { setMsg(`오류: ${r.reason || '저장 실패'}`); }
-      else { const ns = r.settings || s; setS({ ...ns, ownerWarnings: r.ownerWarnings || [], settingsOwners: (ns.settingsOwners || []).join(', ') }); setOtp(''); setMsg('저장되었습니다. 변경 내역은 감사 로그에 기록됩니다.'); }
+      else { const ns = r.settings || s; setS({ ...ns, ownerWarnings: r.ownerWarnings || [], settingsOwners: (ns.settingsOwners || []).join(', ') }); setOrig({ bareosSetupOtp: ns.bareosSetupOtp }); setOtp(''); setMsg('저장되었습니다. 변경 내역은 감사 로그에 기록됩니다.'); }
     } catch (e) { setMsg(`오류: ${e.message}`); }
     finally { setBusy(false); }
   };
@@ -175,6 +177,28 @@ export default function SessionSecurity() {
             );
           })()}
         </div>
+
+        {/* v2.842(사용자 요청 '설정에서 otp 사용여부 변경' — 범위 'Bareos 자동 설정만'): 기본 켬 · 끄면 경고 · 저장은 위와 같은 소유자 + 본인 OTP + 감사 */}
+        {typeof s.bareosSetupOtp === 'boolean' && (
+          <div style={{ borderTop: '1px solid rgba(255,255,255,.08)', marginTop: 16, paddingTop: 14 }}>
+            <label className="flex gap" style={{ alignItems: 'center', cursor: 'pointer', marginBottom: 6 }}>
+              <input type="checkbox" checked={s.bareosSetupOtp} onChange={(e) => setS({ ...s, bareosSetupOtp: e.target.checked })} aria-label="Bareos 자동 설정 본인 OTP 재확인" />
+              <b>Bareos 자동 설정 — 쓰기 단계마다 본인 OTP 재확인</b>
+            </label>
+            <div className="muted" style={{ fontSize: 12, lineHeight: 1.7 }}>
+              Backup 현황 · Bareos › 설정 탭의 자동 설정 2단계(Director 리소스) · 3단계(FD 플러그인) · 5단계(FD INI)는 root SSH 로 법인 서버의 설정 파일을 씁니다.
+              켜 두면(기본) 단계마다 본인 OTP 6자리를 다시 확인합니다. 끄면 코드 입력만 건너뜁니다 — 실행은 여전히 OTP 를 등록한 관리자(전체 범위)만 할 수 있고,
+              단계마다 SSH root 비밀번호가 필요합니다. 사전 점검 · 지문 읽기는 쓰기가 없어 원래 OTP 를 묻지 않고, 다른 작업(복원 · 보관 정리 · 업그레이드 등)의
+              OTP 확인은 이 설정과 무관합니다. 로그인 인증이 꺼진 설치는 이 값과 무관하게 OTP 를 묻지 않습니다.
+            </div>
+            {!s.bareosSetupOtp && (
+              <div className="muted" style={{ fontSize: 11.5, marginTop: 6, color: 'var(--red,#ef4444)', lineHeight: 1.6 }}>
+                ⚠ 끄면 OTP 6자리 확인 없이 실행됩니다 — 관리자 로그인 세션이 탈취되면, SSH root 비밀번호를 아는 사람이 그 세션으로 법인 Bareos 서버의 설정을 바꿀 수 있습니다.
+                실행 기록에는 감사 로그 ‘[본인 OTP 재확인 꺼짐]’ 표시가 붙습니다. 포탈 백업 복원으로는 꺼지지 않습니다(켬으로 적용).
+              </div>
+            )}
+          </div>
+        )}
 
         <div style={{ borderTop: '1px solid rgba(255,255,255,.08)', marginTop: 16, paddingTop: 14 }}>
           <div className="flex gap wrap" style={{ alignItems: 'center', gap: 10 }}>
