@@ -108,8 +108,9 @@ function sendErr(res, e) {
   res.status(status).json({ ok: false, code: code || 'error', reason: String(e?.message || e).slice(0, 600) });
 }
 
-// v2.842: 본인 OTP 재확인을 설정으로 끈 채 실행한 자동 설정 쓰기 단계는 감사에 그 사실을 붙인다(setupGate 가 req.bareosOtpOff 를 단다)
-const audit = (req, action, target, detail) => logAudit({ user: req.user?.username, action, target, detail: req.bareosOtpOff ? `${detail} · 본인 OTP 재확인 꺼짐(설정 › 세션 보안)` : detail, ip: req.ip || '' });
+// v2.842: 본인 OTP 재확인을 설정으로 끈 채 실행한 자동 설정 쓰기 단계는 감사에 그 사실을 붙인다(setupGate 가 req.bareosOtpOff 를 단다).
+//   반증 F5: 앞에 붙인다 — 감사 detail 은 1000자에서 잘리고(auditClip) 엣지 회신의 파일 목록은 길 수 있다
+const audit = (req, action, target, detail) => logAudit({ user: req.user?.username, action, target, detail: req.bareosOtpOff ? `[본인 OTP 재확인 꺼짐] ${detail}` : detail, ip: req.ip || '' });
 
 /**
  * 원장 job → 응답(비밀 없음). 범위 밖은 호출부가 거른다. directorId 는 풀어서 싣는다(옛 잡도 화면이 법인 열을 채우게).
@@ -266,11 +267,14 @@ function setupGate(req, res, dirId, plan, { otp = true } = {}) {
   // v2.822.3(I2-6 — 재현): 데모 Director 를 쓰는 동안은 화면 매핑이 데모 값이라 실제 서버 설정과 섞인다
   if (isDemoActive()) { res.status(409).json({ ok: false, reason: '데모 Director 를 쓰는 중입니다 — 자동 설정은 실제 Director 를 등록한 뒤(설정 › 법인별 Director 에서 추가) 쓸 수 있습니다.' }); return false; }
   const name = req.user?.username || '';
-  // v2.842: 쓰기 단계의 본인 OTP 재확인은 '설정 › 세션 보안' 값(기본 켬 · 소유자 + OTP 로만 끔)을 따른다 — 요청마다 지금 값을 읽는다.
+  // v2.842: 쓰기 단계의 본인 OTP 재확인은 '설정 › Security › 세션 보안' 값(기본 켬 · 소유자 + OTP 로만 끔)을 따른다 — 요청마다 지금 값을 읽는다.
   //   끈 상태로 지난 요청은 감사에 표시한다(req.bareosOtpOff). 인증이 꺼진 설치(AUTH_ENABLED=false)는 예전처럼 OTP 를 보지 않는다.
-  const needOtp = otp && config.auth.enabled && bareosSetupOtpRequired();
-  if (otp && config.auth.enabled && !needOtp) req.bareosOtpOff = true;
-  if (needOtp && !getUser(name)?.totpEnabled) { res.status(403).json({ ok: false, needEnroll: true, otpRequired: true, reason: '자동 설정은 OTP 가 등록된 계정만 실행할 수 있습니다. 사용자 관리에서 OTP 를 등록하세요.' }); return false; }
+  //   ⚠ 반증 F2(재현): 끄더라도 **OTP 를 등록한 로컬 계정만** 실행한다 — 끄는 것은 코드 입력만 건너뛰는 것이고, 실행할 수 있는 계정을 넓히지 않는다
+  //   (등록 검사까지 끄면 users.json 레코드 없는 AD 매핑 관리자·비밀번호 전용 관리자도 root 쓰기 단계를 실행하게 됐다).
+  const writeStep = otp && config.auth.enabled;
+  const needOtp = writeStep && bareosSetupOtpRequired();
+  if (writeStep && !needOtp) req.bareosOtpOff = true;
+  if (writeStep && !getUser(name)?.totpEnabled) { res.status(403).json({ ok: false, needEnroll: true, ...(needOtp ? { otpRequired: true } : {}), reason: '자동 설정은 OTP 가 등록된 계정만 실행할 수 있습니다(본인 OTP 재확인을 꺼 두어도 같습니다). 사용자 관리에서 OTP 를 등록하세요.' }); return false; }
   try { plan({ ...(req.body || {}), directorId: dirId }); } catch (e) { sendSetupErr(res, e); return false; }
   if (needOtp) {
     const v = verifyUserOtp(name, req.body?.otp);

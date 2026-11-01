@@ -131,7 +131,32 @@ export function reconcileBareosGroupsText(backupText, currentText) {
 }
 
 /** 적용할 내용을 현재 파일과 맞춘다 — 대상이 아니면 그대로. @returns {{ content:string, warning?:{file,reason}, info?:object }} */
+/**
+ * v2.842(반증 F1 — 재현): security-session.json 의 `bareosSetupOtp`(Bareos 자동 설정 쓰기 단계 본인 OTP 재확인)는 복원으로 **켜기만** 한다(순수).
+ *   복원 라우트는 소유자 등급만 보고 OTP 를 묻지 않는다 — 백업 판본(끔)을 그대로 쓰면 소유자가 다시 켠 뒤에도 OTP 없이 '끔' 이 되살아났다
+ *   (설정 변경 시 자동 백업이 켜져 있어 끈 시기의 백업은 거의 늘 있다). 파일 통째 제외(v2.809 서명 끄기 선례)는 같은 파일의 다른 설정까지 막아 쓰지 않는다.
+ *   결과가 끔인 경우는 백업도 끔이고 **지금 파일도 명시적으로 끔**일 때뿐이다(지금 파일이 없거나 못 읽으면 켬 — 재해 복구 새 서버도 켬으로 시작).
+ * @returns {{ text: string, forcedOn: boolean }}
+ */
+export function reconcileSecuritySessionText(backupText, currentText) {
+  let b;
+  try { b = JSON.parse(String(backupText)); } catch { return { text: backupText, forcedOn: false }; }   // 깨진 판본은 로더가 손상 보존 → 기본값(켬)
+  if (!b || typeof b !== 'object' || Array.isArray(b) || b.bareosSetupOtp !== false) return { text: backupText, forcedOn: false };
+  let curOff = false;
+  try { const c = JSON.parse(String(currentText)); curOff = !!c && typeof c === 'object' && c.bareosSetupOtp === false; } catch { curOff = false; }
+  if (curOff) return { text: backupText, forcedOn: false };
+  return { text: JSON.stringify({ ...b, bareosSetupOtp: true }, null, 2), forcedOn: true };
+}
+
 export function reconcileForApply(name, content, configDir) {
+  if (name === 'security-session.json') {
+    let cur = null;
+    try { cur = fs.readFileSync(path.join(configDir, name), 'utf8'); } catch { cur = null; }
+    const r = reconcileSecuritySessionText(content, cur);
+    return r.forcedOn
+      ? { content: r.text, info: { bareosSetupOtpKeptOn: true }, warning: { file: name, reason: '백업에는 Bareos 자동 설정 본인 OTP 재확인이 꺼져 있었지만 복원으로는 끄지 않습니다(켬으로 적용) — 끄려면 설정 › Security › 세션 보안에서 본인 OTP 로 저장하세요.' } }
+      : { content: r.text };
+  }
   if (name === 'bareos-groups.json') {
     let cur = null;
     try { cur = fs.readFileSync(path.join(configDir, name), 'utf8'); } catch { cur = null; }

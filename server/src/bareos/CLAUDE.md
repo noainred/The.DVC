@@ -61,7 +61,7 @@
   복원은 설정만 보면 아는 전제를 OTP 앞에서 · 엣지 성공 회신에 유효한 잡 이름이 없으면 결과 모름 · `ops.poll` 은 **대조를 먼저**(work 가 예산을 넘어도 `.jobs`·다시 끄기가 돈다) ·
   엣지 자동 설정은 Director·서버마다 한 번에 하나(되돌리기까지) · 재시작하면 결과를 잃는 작업은 `inflight.js` → 업그레이드 자동 적용이 기다린다 · 취소의 끝난 행은 type B 만 반영.
   전문·남긴 것은 `docs/rules/audits.md` 'Bareos v2.825.1 버그 점검 확정분'.
-- **v2.828 결과 창**(`decBytesText` 하나) — audits.md 'v2.833' 끝. **v2.841·842**: 목록 `.schedule` · @@own(job 제외) · 겹침은 화면·서버 둘 다 · 쓰기 OTP 는 세션 보안 `bareosSetupOtp`(기본 켬·불리언 false 만·끈 실행 감사 표시) — audits.md.
+- **v2.828 결과 창**(`decBytesText` 하나) — audits.md 'v2.833' 끝. **v2.841·842**: 목록 `.schedule` · @@own(job 제외) · 겹침은 화면·서버 둘 다 · 쓰기 OTP 는 세션 보안 `bareosSetupOtp`(기본 켬·불리언 false 만·꺼도 OTP 등록 계정만) — audits.md.
 - **v2.830 백업 그룹**(`groups`·`groupSchedule`·`groupRunner`·`jobLocks` · `bareosGroups2830`): 스케줄은 포탈이 실행(그룹 잡은 Director 스케줄 없이 등록) · 회차는 **보내기 전에** 한 틱 한 번의 쓰기로 기록 · VM 은 그룹 하나 · 같은 Director 는 차례로 · 대상 잠금 공용. v2.831 보관 개수(`groupRetention` — 카탈로그 삭제)는 실행이 끝난 뒤 기준 Full 앞만·순서 어긋나면 안 지움 · 넓히는 저장은 본인 OTP(v2.831.1). 전문은 `docs/rules/audits.md` 'Bareos v2.830'·'v2.831' 절.
 - **v2.833·834 진행 현황판**(`liveStatus`·`liveParse` · `bareosLive2833`): 화면이 열린 동안만 `status client=`·`status director` · Director 마다 시한 · 흐름은 법인마다 · 모름은 null · 멈춤 의심은 FD 조회 성공일 때만. 전문 audits.md 'v2.833'·'v2.834'(정책 수집 'v2.839'·'v2.840').
 - 실환경 미확인(추정 — `tools/bareos-probe.js` 로 확인할 것): Node↔Director TLS-PSK 협상 · 잡 수준 FdPluginOptions 와 FileSet 플러그인 문자열 병합 ·
