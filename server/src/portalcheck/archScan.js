@@ -164,6 +164,7 @@ export const ROUTE_GATE_ALLOW = Object.freeze({
   'PUT /api/tools/bareos-backup/groups/:id': 'bareosAccess — 그룹의 vCenter 쓰기 범위 · updatedAt 대조(v2.830)',
   'DELETE /api/tools/bareos-backup/groups/:id': 'bareosAccess — 그룹의 vCenter 쓰기 범위(v2.830)',
   'POST /api/tools/bareos-backup/groups/:id/run': 'bareosAccess — 그룹의 vCenter 쓰기 범위(v2.830)',
+  'POST /api/tools/bareos-backup/groups/:id/prune-preview': 'groupFor(write:false) → bareosAccess — 그룹 vCenter 조회 범위(밖 404) · 읽기 전용 정리 미리 보기(지우지 않음 · v2.843)',
   'POST /api/tools/bareos-backup/poll': '상태 조회만(원장 갱신) — 범위 계정은 자기 법인 Director 만 조회하고 그 상태만 받는다(v2.823 검토 S1 — visibleDirectorIds·scopedPoller)',
 });
 

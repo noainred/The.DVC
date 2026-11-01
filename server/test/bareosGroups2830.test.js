@@ -565,6 +565,37 @@ test('⑦ v2.831.1 쓰는 순간에 다시 본다 — 그사이 보관 개수가
   assert.equal(groups.getGroup(G1).keep, 2, '거부하면 바꾸지 않는다');
 });
 
+test('⑦ v2.843 정리 미리 보기 — 같은 입력·같은 판정으로 개수만(delete 0) · 저장 전 keep · 조회 범위 · 실제 정리와 같은 수', async () => {
+  const g = groups.getGroup(G1);
+  const jobs = registry.jobDigests().filter((j) => g.vmIds.includes(j.vmId));
+  const [A, B] = jobs.map((j) => j.bareosJob);
+  // 아래 '⑦ 정리' 시험과 같은 이력 — 미리 보기 수가 실제로 지운 수와 같아야 한다
+  D.hist.set(A, [hrow(1, A, 'F'), hrow(2, A, 'I'), hrow(3, A, 'I', 'f'), hrow(4, A, 'F'), hrow(5, A, 'I'), hrow(6, A, 'I'), hrow(7, A, 'I', 'R')]);
+  D.hist.set(B, [hrow(11, B, 'I'), hrow(12, B, 'I'), hrow(13, B, 'I')]);
+  D.cmds.length = 0;
+  let r = await call('admin', 'POST', `/groups/${G1}/prune-preview`, {});
+  assert.equal(r.s, 200, r.t);
+  assert.equal(r.j.keep, 2);
+  assert.equal(r.j.would, 3, '기준 Full(4) 앞의 끝난 실행 1·2·3');
+  assert.equal(r.j.vms, 1);
+  assert.equal(r.j.noBase, 1, 'Full 없는 잡 B');
+  assert.equal(r.j.failed, 0);
+  assert.equal(r.j.rows[0].would, 3, '지울 것이 많은 VM 먼저');
+  assert.equal(D.cmds.filter((c) => c.startsWith('delete')).length, 0, '미리 보기는 지우지 않는다');
+  assert.deepEqual(D.hist.get(A).map((x) => x.jobid), [1, 2, 3, 4, 5, 6, 7], '카탈로그 그대로');
+  assert.equal(groups.getGroup(G1).lastPrune?.at ?? null, g.lastPrune?.at ?? null, '정리 기록을 남기지 않는다');
+  // 저장 전 값(keep 6) — 같은 판정으로
+  r = await call('admin', 'POST', `/groups/${G1}/prune-preview`, { keep: 6 });
+  assert.equal(r.j.would, 0, '최근 6회면 지울 것 없음');
+  assert.equal((await call('admin', 'POST', `/groups/${G1}/prune-preview`, { keep: 0 })).s, 400, '틀린 값은 400');
+  assert.equal((await call('admin', 'POST', `/groups/${G1}/prune-preview`, { keep: null })).s, 400, '제한 없음이면 미리 볼 것이 없다');
+  // 읽기 전용 — 조회 범위만 본다(쓰기 범위 밖 관리자도 본다) · 조회 범위 밖은 404 · admin 만
+  assert.equal((await call('wadm', 'POST', `/groups/${G1}/prune-preview`, {})).s, 200, '쓰기 범위 밖이어도 읽기 범위면 미리 본다');
+  assert.equal((await call('op', 'POST', `/groups/${G1}/prune-preview`, {})).s, 403);
+  assert.equal((await call('admin', 'POST', '/groups/nope/prune-preview', {})).s, 404);
+  assert.equal(D.cmds.filter((c) => c.startsWith('delete')).length, 0);
+});
+
 test('⑦ v2.831 정리 — 기준 Full 앞의 끝난 실행만 지운다 · Full 없는 잡은 지우지 않는다 · 다시 읽어 실제로 사라진 것만 셈 · 감사', async () => {
   const g = groups.getGroup(G1);
   const jobs = registry.jobDigests().filter((j) => g.vmIds.includes(j.vmId));

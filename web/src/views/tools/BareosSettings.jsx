@@ -11,6 +11,7 @@ import {
   outcomeUnknown, missingText, preflightView, preflightSummary, autoSetupFdPluginText, fillEmptyMapping, directorFormPatch, withRelayWait, secText, relayKindLabel, SETTINGS_READ_ONLY,
   VMWARE_POOL_FULL, VMWARE_SCHEDULE, WEEKDAYS, WEEKDAY_LABEL, MAPPING_FIELDS, newMappingRow, vcSlug,
   fillResultText, directorPlanFiles, directorConflicts, freeConsoleName, consoleTaken, conflictText, ownFromPaths, catalogErrorText,
+  directorAgentAdvice, directorAgentAdviceText,
 } from './bareosText.js';
 
 /**
@@ -433,6 +434,18 @@ function DirectorEditor({ s, dir, locked, onReload, onSaved, onClose, onDeleted 
             <AgentSelect agents={s.agents || []} withToken={s.agentsWithToken} saved={dir.agent || ''} value={form.agent} onChange={(v) => set('agent', v)} />
           </div>
           <AgentIssueLine value={form.agent} agents={s.agents || []} withToken={s.agentsWithToken} />
+          {/* v2.843 사용자 원칙 '백업은 법인 로컬, 통합 로그는 중앙': 그 법인 vCenter 를 수집하는 엣지가 있는데 중앙이 직접 접속하면 권하고(저장은 사람이 누른다), 엣지가 어긋나면 알린다 */}
+          {(() => {
+            const adv = directorAgentAdvice({ agent: dir.agent || '', vcenterIds: rows.map((x) => x.vcenterId), vcenters: s.vcenters });
+            if (!adv) return null;
+            const canSet = adv.kind === 'suggest' && (s.agents || []).includes(adv.edge) && (form.agent || '') !== adv.edge && !locked && !s.demo;
+            return (
+              <div className={`banner${adv.kind === 'suggest' ? '' : ' warn'}`} role="status" data-agent-advice={adv.kind} style={{ marginTop: 8, fontSize: 12, lineHeight: 1.6 }}>
+                {directorAgentAdviceText(adv)}
+                {canSet && <div style={{ marginTop: 6 }}><button type="button" className="logout-btn" style={BTN} onClick={() => set('agent', adv.edge)}>담당을 ‘{adv.edge}’ 로 고르기(저장 전)</button></div>}
+              </div>
+            );
+          })()}
           {/* W8: 지금 동작은 저장된 담당 기준이다 — 고르기만 하고 저장하지 않았으면 그렇게 말한다 · W9: 주기 숫자를 박지 않는다 */}
           {(form.agent || '') !== (dir.agent || '') && <div className="banner warn" style={{ marginTop: 8, fontSize: 12, lineHeight: 1.6 }}>담당을 바꿨습니다(저장 전) — 지금 연결 시험·자동 설정은 저장된 담당({dir.agent ? `법인 엣지 ‘${dir.agent}’` : '중앙 직접'})으로 실행합니다. ‘연결 저장’ 을 누르면 {form.agent ? `법인 엣지 ‘${form.agent}’ 가` : '중앙이 직접'} 접속합니다.</div>}
           {dir.agent && <div className="banner" style={{ marginTop: 8, fontSize: 12, lineHeight: 1.6 }}>법인 엣지 ‘{dir.agent}’ 가 이 Director 에 대신 접속합니다(중앙은 접속하지 않습니다). 엣지는 저장된 접속값으로 접속합니다 — 엣지 사본이 다르면 작업 전에 배정을 다시 받습니다. 새 비밀번호는 저장한 뒤 시험하세요. 자동 설정도 그 엣지가 SSH 로 실행하고, 처음 접속하는 서버의 SSH 호스트키 승인은 <b>그 엣지 포탈</b>(설정 › 장비 신뢰)에서 합니다.</div>}

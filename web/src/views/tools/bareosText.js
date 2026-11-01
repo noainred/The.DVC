@@ -1062,3 +1062,34 @@ export function directorFormPatch(form = {}, snap = {}) {
   if (name && name !== snap.name) p.name = name;
   return Object.keys(p).length ? p : null;
 }
+
+/* ───────── v2.843 Director 담당 — 사용자 원칙 '백업은 법인 로컬, 통합 로그는 중앙' ───────── */
+
+/**
+ * 이 Director 의 담당(접속 주체)이 그 법인 vCenter 를 수집하는 엣지와 맞는가(순수). 서버 설정 응답 vcenters[].siteAgent(인벤토리를 올리는 엣지) 기준.
+ *   suggest — 중앙이 직접 접속 중인데 그 법인에 엣지가 있다(백업 실행·조회·자동 설정 SSH 를 그 엣지가 로컬에서 하게 권한다)
+ *   mismatch — 담당 엣지가 그 법인 vCenter 의 엣지와 다르다 · mixed — 묶인 vCenter 의 엣지가 여럿(1:1:1 과 다름)
+ * 엣지가 수집하지 않는 법인(siteAgent 없음)은 권하지 않는다(null — 중앙 직접이 유일한 길일 수 있다).
+ */
+export function directorAgentAdvice({ agent = '', vcenterIds = [], vcenters = [] } = {}) {
+  const by = new Map((Array.isArray(vcenters) ? vcenters : []).map((v) => [v?.id, String(v?.siteAgent || '')]));
+  const edges = [...new Set((Array.isArray(vcenterIds) ? vcenterIds : []).map((id) => by.get(id) || '').filter(Boolean))];
+  if (!edges.length) return null;
+  if (edges.length > 1) return { kind: 'mixed', edges };
+  const edge = edges[0];
+  if (!agent) return { kind: 'suggest', edge };
+  if (agent !== edge) return { kind: 'mismatch', edge, agent };
+  return null;
+}
+
+/** 위 판정의 문구(순수 · 백틱 없음). */
+export function directorAgentAdviceText(a) {
+  if (!a) return '';
+  if (a.kind === 'suggest') {
+    return `이 법인의 vCenter 는 법인 엣지 ‘${a.edge}’ 가 수집합니다. 백업은 법인 안에서 하는 것이 원칙입니다 — 지금은 중앙이 WAN 으로 이 Director 에 직접 접속합니다`
+      + `(실행 · 조회 · 보관 정리 · 자동 설정 SSH 모두). 담당을 ‘${a.edge}’ 로 두면 그 엣지가 로컬에서 대신하고 결과만 중앙으로 올립니다.`;
+  }
+  if (a.kind === 'mismatch') return `담당 엣지 ‘${a.agent}’ 가 이 법인 vCenter 를 수집하는 엣지 ‘${a.edge}’ 와 다릅니다 — 다른 법인의 엣지가 이 Director 에 접속하고 있을 수 있습니다. 확인하세요.`;
+  if (a.kind === 'mixed') return `묶인 vCenter 를 수집하는 엣지가 여럿입니다(${a.edges.join(', ')}) — 법인 · vCenter · Bareos 1:1:1 과 다릅니다. vCenter 묶기를 확인하세요.`;
+  return '';
+}

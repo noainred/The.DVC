@@ -74,6 +74,18 @@ export const VALUE = Object.freeze({
       ...(x.reason ? { reason: str(x.reason, 300) } : {}), ...(posInt(x.more) ? { more: posInt(x.more) } : {}), ...(posInt(x.notDeleted) ? { notDeleted: posInt(x.notDeleted) } : {}),
     };
   }),
+  // v2.843 보관 정리 미리 보기(읽기 전용) — 개수는 음수·문자열을 버린다(못 읽은 값은 null — 0 이 아니다) · 성공인데 would 가 없으면 그 항목은 실패(모름)
+  prunePreview: (v) => arr(v).slice(0, 500).map((x0) => {
+    const x = obj(x0);
+    const key = Number.isInteger(x.key) && x.key >= 0 && x.key < 1_000_000 ? x.key : -1;
+    if (!bool(x.ok)) return { key, ok: false, ...(x.code ? { code: str(x.code, 40) } : {}), ...(x.message ? { message: str(x.message, 300) } : {}) };
+    const would = nonNeg(x.would);
+    if (would === null) return { key, ok: false, code: 'unknown', message: '엣지가 개수 없이 성공을 회신했습니다 — 지울 개수를 알 수 없습니다.' };
+    return {
+      key, ok: true, would, kept: nonNeg(x.kept), good: nonNeg(x.good), baseJobid: posInt(x.baseJobid), baseAt: timeOf(x.baseAt),
+      ...(x.reason ? { reason: str(x.reason, 300) } : {}), ...(posInt(x.more) ? { more: posInt(x.more) } : {}),
+    };
+  }),
   // v2.833 진행 현황판(읽기 전용) — 숫자는 음수·문자열을 버린다(못 읽은 값은 null · 0 이 아니다)
   liveStatus: (v) => ({
     ...(obj(v).director ? { director: (() => {

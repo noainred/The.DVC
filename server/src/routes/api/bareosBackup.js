@@ -27,6 +27,7 @@ import {
 import { pendingView, relayLimits } from '../../bareos/edgeOps.js';
 import { noteSetupStart, noteSetupEnd } from '../../bareos/inflight.js';
 import { listAgentTokens } from '../../central/agentTokens.js';
+import { listInventory } from '../../central/inventory.js';
 import { pickAgent } from '../../cvp/formChoices.js';
 import { knownAgentNames } from '../../central/knownAgents.js';
 import { pollerStatus, pollOnce, requestReconcile } from '../../bareos/poller.js';
@@ -429,7 +430,13 @@ api.get('/tools/bareos-backup/settings', adminOnly, fullScopeOnly, (req, res) =>
     setupOtp: !!config.auth.enabled && bareosSetupOtpRequired(),
     setupOtpOff: !config.auth.enabled ? 'auth-off' : bareosSetupOtpRequired() ? null : 'setting',   // 묻지 않는 이유(화면이 단정하지 않게)
     limits: LIMITS,
-    vcenters: (snap?.vcenters || []).map((v) => ({ id: v.id, name: v.name || v.id, host: String(v.host || '').replace(/^https?:\/\//, '').replace(/\/.*$/, '') })),
+    // v2.843(사용자 원칙 '백업은 법인 로컬'): 그 vCenter 의 인벤토리를 올리는 법인 엣지(siteAgent — Veeam 서버 화면과 같은 출처 listInventory) —
+    //   화면이 Director 담당(접속 주체)을 그 엣지로 두라고 권한다. 모르면 ''(단정하지 않는다).
+    vcenters: (() => {
+      let owners = new Map();
+      try { owners = new Map(listInventory().map((i) => [i.vcenterId, i.agent || ''])); } catch { owners = new Map(); }
+      return (snap?.vcenters || []).map((v) => ({ id: v.id, name: v.name || v.id, host: String(v.host || '').replace(/^https?:\/\//, '').replace(/\/.*$/, ''), siteAgent: owners.get(v.id) || '' }));
+    })(),
     jobsByVcenter: Object.fromEntries([...listJobs().filter((j) => !j.demo).reduce((m, j) => m.set(j.vcenterId, (m.get(j.vcenterId) || 0) + 1), new Map())]),
     loadError: loadErrorView(settingsLoadError(), isAdminDetailUser(req.user)),
   });

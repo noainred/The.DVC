@@ -20,7 +20,7 @@ import {
   DAY_NAMES, LEVELS, NEW_SCHEDULE, scheduleText, draftIssues, toggleDay, GROUP_FILTERS, groupFilterCounts, pickable, buildGroupTree, checkState,
   FIRE_STATE_TEXT, FIRE_STATE_TONE, fireText, fireTone, isDaily, setCadence, scheduleParts,
   KEEP_PRESETS, KEEP_DEFAULT, NEW_GROUP_KEEP, keepOtpReasons, keepText, stepKeep, keepMeaning, keepParts, fireKeepBadge, KEEP_BADGE_TEXT, untilText,
-  memberResults, resultBadge, folderSummary, sizeSum,
+  memberResults, resultBadge, folderSummary, sizeSum, prunePreviewText,
 } from './bareosGroupText.js';
 import { groupPoolText, overlapLine, retentionText } from './bareosPolicyText.js';   // v2.840 카드 '적용 풀 · 보존' · 겹침
 
@@ -60,6 +60,62 @@ function Cell({ label, main, sub, tone }) {
     </div>
   );
 }
+/**
+ * v2.843 보관 정리 미리 보기(읽기 전용 — 서버 groupRunner.previewPrune). 엣지 대행 법인은 그 엣지가 로컬 Director 에서 센다(사용자 원칙 '백업은 법인 로컬').
+ * keep 이 바뀌면 이전 결과는 그 값의 것이 아니다 — 지운다. 늦게 온 이전 응답은 버린다(seq).
+ */
+function PrunePreview({ tree, groupId, keep, vmsChanged = false }) {
+  const [st, setSt] = useState({ busy: false, r: null, err: null, keep: null });
+  const seq = useRef(0);
+  useEffect(() => { seq.current += 1; setSt({ busy: false, r: null, err: null, keep: null }); }, [keep, groupId]);
+  const run = async () => {
+    const my = ++seq.current;
+    setSt({ busy: true, r: null, err: null, keep });
+    try {
+      const r = await postJson(`${BASE}/groups/${enc(groupId)}/prune-preview`, { keep }, { timeoutMs: relayWaitMs(tree.relayLimits, 'prunePreview') || 180_000, retries: 0 });
+      if (my === seq.current) setSt({ busy: false, r, err: null, keep });
+    } catch (e) { if (my === seq.current) setSt({ busy: false, r: null, err: e, keep }); }
+  };
+  const t = st.r ? prunePreviewText(st.r) : null;
+  const shown = (st.r?.rows || []).filter((x) => x.would > 0 || x.reason);
+  return (
+    <div data-prune-preview="" style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', gap: 6, minWidth: 0 }}>
+      <div style={{ ...ROW, gap: 8 }}>
+        <button type="button" className="logout-btn" style={BTN} disabled={st.busy || keep == null} onClick={run}>{st.busy ? '확인하는 중…' : '정리 미리 보기'}</button>
+        <span className="muted" style={{ fontSize: 11.5, lineHeight: 1.5 }}>지우지 않고 지금 카탈로그에서 셉니다{tree.director?.via === 'edge' ? ' — 법인 엣지가 로컬 Director 에서 확인합니다' : ''}{vmsChanged ? ' · 저장된 그룹의 VM 기준(저장 전 VM 변경은 빠집니다)' : ''}</span>
+      </div>
+      {st.err && <div className="banner bad" role="alert" style={{ fontSize: 12.5 }}>미리 보기 실패: {String(st.err.message || st.err).slice(0, 400)}</div>}
+      {t && (
+        <div className={`banner ${t.tone === 'bad' ? 'bad' : t.tone === 'warn' ? 'warn' : 'ok'}`} role="status" style={{ fontSize: 12.5, lineHeight: 1.6, minWidth: 0 }}>
+          <BoldText text={t.text} />
+          {st.r.errors?.length > 0 && <div style={{ marginTop: 4 }}>확인하지 못한 VM — {st.r.errors.slice(0, 5).map((e) => `${e.vmName ? `${e.vmName}: ` : ''}${e.reason}`).join(' · ')}{st.r.errors.length > 5 ? ` 외 ${st.r.errors.length - 5}` : ''}</div>}
+          {shown.length > 0 && (
+            <details style={{ marginTop: 6 }}>
+              <summary style={{ cursor: 'pointer' }}>VM 별 보기({shown.length}대 — 지울 것이 많은 VM 먼저)</summary>
+              <div className="table-wrap" style={{ marginTop: 6, maxHeight: 260 }}>
+                <STable minWidth={480}>
+                  <thead><tr><th>VM</th><th className="right">지울 실행</th><th className="right">성공 백업</th><th className="right">남길 성공 백업</th><th>지우지 않는 까닭</th></tr></thead>
+                  <tbody>
+                    {shown.map((x) => (
+                      <tr key={x.vmName}>
+                        <td>{x.vmName}</td>
+                        <td className="right" data-sort={x.would + (x.more || 0)}>{x.would}{x.more ? ` + ${x.more}` : ''}</td>
+                        <td className="right" data-sort={x.good ?? ''}>{x.good ?? '—'}</td>
+                        <td className="right" data-sort={x.kept ?? ''}>{x.kept ?? '—'}</td>
+                        <td style={{ whiteSpace: 'normal', fontSize: 12 }}>{x.reason || '—'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </STable>
+              </div>
+            </details>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function Box({ label, main, sub, children }) {
   return (
     <div className="card" style={{ padding: 14, display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', gap: 4, minWidth: 0, alignContent: 'start' }}>
@@ -630,6 +686,8 @@ function GroupEdit({ tree, group, initialFilter, initialSel, vms, byId, groupNam
             {group && (group.keep ?? null) !== keep && keep != null && (group.keep == null || keep < group.keep) && (
               <div className="banner warn" style={{ fontSize: 12.5 }}>보관 개수를 {group.keep == null ? '처음 정하면' : `${group.keep} → ${keep} 로 줄이면`} 이 그룹의 다음 백업이 끝난 뒤 그보다 오래된 백업을 카탈로그에서 지웁니다.</div>
             )}
+            {/* v2.843: 저장 전 값으로 지울 개수를 먼저 본다(저장된 그룹만 — 새 그룹은 저장 뒤 상세에서) */}
+            {group && keep != null && <PrunePreview tree={tree} groupId={group.id} keep={keep} vmsChanged={vmIds.length !== group.vmIds.length || vmIds.some((id) => !group.vmIds.includes(id))} />}
             {keep != null && addedWithHistory > 0 && (
               <div className="banner warn" style={{ fontSize: 12.5 }}>이미 백업 기록이 있는 VM {addedWithHistory}대를 더합니다 — 그룹 백업이 끝나면 이 VM 들의 예전 백업도 보관 개수({keep}회)에 맞춰 정리합니다.</div>
             )}
@@ -731,6 +789,7 @@ function GroupDetail({ tree, g, byId, writable, busy, onBack, onRun, onEdit, onD
         </div>
       )}
 
+      {g.keep != null && <PrunePreview tree={tree} groupId={g.id} keep={g.keep} />}
       <section aria-label="정책 요약" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 220px), 1fr))', gap: 12 }}>
         <Box label="스케줄" main={sp.main} sub={`${sp.sub} · 포탈이 실행`} />
         <Box label="다음 실행" main={g.next ? shortTs(g.next.at) : '—'} sub={g.next ? `${g.next.level}${untilText(g.next.at - (tree.now || Date.now())) ? ` · ${untilText(g.next.at - (tree.now || Date.now()))}` : ''}` : (g.schedule?.enabled ? '—' : '스케줄 꺼짐 — 수동 실행만')} />
