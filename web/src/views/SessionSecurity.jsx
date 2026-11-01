@@ -176,6 +176,27 @@ export default function SessionSecurity() {
           })()}
         </div>
 
+        {/* v2.842(사용자 요청 '설정에서 otp 사용여부 변경' — 범위 'Bareos 자동 설정만'): 기본 켬 · 끄면 경고 · 저장은 위와 같은 소유자 + 본인 OTP + 감사 */}
+        {typeof s.bareosSetupOtp === 'boolean' && (
+          <div style={{ borderTop: '1px solid rgba(255,255,255,.08)', marginTop: 16, paddingTop: 14 }}>
+            <label className="flex gap" style={{ alignItems: 'center', cursor: 'pointer', marginBottom: 6 }}>
+              <input type="checkbox" checked={s.bareosSetupOtp} onChange={(e) => setS({ ...s, bareosSetupOtp: e.target.checked })} aria-label="Bareos 자동 설정 본인 OTP 재확인" />
+              <b>Bareos 자동 설정 — 쓰기 단계마다 본인 OTP 재확인</b>
+            </label>
+            <div className="muted" style={{ fontSize: 12, lineHeight: 1.7 }}>
+              Backup 현황 · Bareos › 설정 탭의 자동 설정 2단계(Director 리소스) · 3단계(FD 플러그인) · 5단계(FD INI)는 root SSH 로 법인 서버의 설정 파일을 씁니다.
+              켜 두면(기본) 단계마다 본인 OTP 6자리를 다시 확인합니다. 사전 점검 · 지문 읽기는 쓰기가 없어 원래 OTP 를 묻지 않습니다.
+              다른 작업(복원 · 보관 정리 · 업그레이드 등)의 OTP 확인은 이 설정과 무관합니다.
+            </div>
+            {!s.bareosSetupOtp && (
+              <div className="muted" style={{ fontSize: 11.5, marginTop: 6, color: 'var(--red,#ef4444)', lineHeight: 1.6 }}>
+                ⚠ 끄면 로그인 세션만으로 자동 설정 쓰기 단계가 실행됩니다 — 세션이 탈취되면 그 세션으로 법인 Bareos 서버의 설정을 바꿀 수 있습니다.
+                실행 기록은 감사 로그에 ‘본인 OTP 재확인 꺼짐’ 으로 남습니다.
+              </div>
+            )}
+          </div>
+        )}
+
         <div style={{ borderTop: '1px solid rgba(255,255,255,.08)', marginTop: 16, paddingTop: 14 }}>
           <div className="flex gap wrap" style={{ alignItems: 'center', gap: 10 }}>
             <span className="muted">변경 확인 — <b>OTP 6자리</b></span>

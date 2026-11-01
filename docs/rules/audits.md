@@ -6,6 +6,7 @@
 
 ## 목차
 
+- Bareos v2.842 자동 설정 쓰기 단계 본인 OTP 재확인 켜고 끄기(세션 보안 `bareosSetupOtp` — 2026-11-01)
 - Bareos v2.841 자동 설정 개선 — 스케줄 목록 명령 `.schedule` · 2단계 콘솔 이름 겹침 · 4단계 문구(2026-11-01)
 - Bareos v2.840 보존 · 풀 탭 · 그룹 카드 · 백업 대상 적용 정책 · 실행 이력 거르기 · 오류 볼륨(백업 메뉴 개편 2차-b — 2026-11-01)
 - Bareos v2.839 Director 정책 수집 · 정책 · 일정 탭 · Summary 2차 칸 채우기(백업 메뉴 개편 2차-a — 2026-11-01)
@@ -1827,6 +1828,22 @@
   목록 memo(P7) · 카탈로그 memo 세대(P9) · 고아 잡(I7) · Migration 새 잡의 일시 lastRun(C2-7).
   ⚠ 정정(v2.823): 카탈로그 memo 세대(P9)는 v2.823 에 해소했다(memo 키에 Director id + `settingsRev` — 설정을 저장하면 새로 읽는다). 고아 잡(I7)은 v2.823 검토 C3 에서
   '가리키는 Director 가 설정에 없는 대상은 원장에서만 취소·삭제' 경로로 일부 해소(Director 쪽 고아 잡 탐지는 여전히 없다).
+
+## Bareos v2.842 자동 설정 쓰기 단계 본인 OTP 재확인 켜고 끄기(세션 보안 `bareosSetupOtp` — 2026-11-01)
+
+사용자 요청 '설정에서 otp 사용여부 변경 기능 추가' — 대상 질문에 **'Bareos 자동 설정만'**(로그인 OTP 는 이미 '설정 › 세션 보안 › 로그인 방식' 에 있다) ·
+검증 **'전체 검증'**(변이 + 반증 1인). 회귀 `bareosSetupOtp2842`(서버 4) · `sessionSecurityBody.test.js`(웹 1 추가).
+
+- **값은 `security-session.json` 의 `bareosSetupOtp`**(설정 › 세션 보안 — 다른 보안 설정과 같은 저장 경로: 소유자 등급 `requireSettingsOwner` + 본인 OTP + 감사 `켬 → 끔(OTP 없이 실행)`).
+  **기본 켬 · 파일의 불리언 false 만 끔**(문자열 'false'·0·null·없음·손상 = 켬 — 약하게 읽지 않는다) · 저장은 **불리언일 때만** 바꾼다(무관한 저장·옛 화면이 끄지 않는다 —
+  웹 `sessionSecurityBody` 도 불리언일 때만 키를 싣는다).
+- **판정은 `setupGate` 하나**(`bareosSetupOtpRequired()` — 요청마다 지금 파일 값 · 캐시 없음 → 다시 켜면 바로 묻는다). 대상은 OTP 를 묻던 쓰기 단계(2 Director · 3 FD 플러그인 · 5 FD INI)뿐이고
+  사전 점검·지문 읽기는 원래 OTP 가 없다. **끄면 OTP 미등록 403(needEnroll)도 함께 건너뛴다**(그 검사는 OTP 를 묻기 위한 것). 나머지 게이트(admin · 전체 범위 · `fullWriteOnly` ·
+  데모 403 · 동시 1건 · 입력 판정)는 그대로다. 복원 · 보관 정리 · 업그레이드 등 다른 OTP 는 이 값을 보지 않는다(테스트 ④ 소스 스윕 — `bareosSetupOtpRequired(` 는 이 라우트와 정의 파일에만).
+- **끈 채 지난 실행은 감사에 '본인 OTP 재확인 꺼짐(설정 › 세션 보안)'** — 모듈 `audit` 도우미가 `req.bareosOtpOff`(setupGate 가 OTP 를 묻는 단계에서만 단다)로 성공·실패 모두에 붙인다.
+- **화면**: 조회 응답 `setupOtp`(묻는가) · `setupOtpOff`(묻지 않는 이유 'setting' · 'auth-off' — 단정하지 않게)로 OTP 칸을 숨기고 이유를 보인다. 화면을 연 뒤 다시 켜졌으면
+  서버가 `otpRequired: true` 로 403 → 화면이 OTP 칸을 다시 보인다(`otpBack`). 인증이 꺼진 설치(AUTH_ENABLED=false)는 예전에도 서버가 OTP 를 보지 않았다 — 이제 화면도 칸을 숨긴다.
+- 변이 14건 중 의미 있는 13건 잡음(M12 '바깥 catch 를 끔으로' 는 `loadConfiguredSecurity` 가 스스로 던지지 않아 도달 불가 — 같은 뜻의 M14 '없음 = 끔' 으로 바꿔 잡음).
 
 ## Bareos v2.841 자동 설정 개선 — 스케줄 목록 명령 `.schedule` · 2단계 콘솔 이름 겹침 · 4단계 문구(2026-11-01)
 

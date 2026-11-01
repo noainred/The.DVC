@@ -20,6 +20,8 @@ export function sessionSecurityBody(s, otp) {
     sessionWarnMin: blankOr(s.sessionWarnMin),
     sessionExtendMin: blankOr(s.sessionExtendMin),
     sessionMaxHours: blankOr(s.sessionMaxHours),
+    // v2.842: Bareos 자동 설정 본인 OTP 재확인 — 불리언일 때만 보낸다(조회 응답에 칸이 없으면 키를 빼서 서버가 지금 값을 유지 · 없음을 '끔' 으로 보내지 않는다)
+    ...(typeof s.bareosSetupOtp === 'boolean' ? { bareosSetupOtp: s.bareosSetupOtp } : {}),
     otp: String(otp || '').trim(),
   };
 }

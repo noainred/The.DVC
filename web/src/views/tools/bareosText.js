@@ -1007,7 +1007,7 @@ export function conflictText(conflicts = []) {
   if (!conflicts.length) return '';
   const what = conflicts.map((c) => `${c.type} ‘${c.name}’${c.state === 'notfile' ? '(일반 파일 아님)' : ''}`).join(' · ');
   const con = conflicts.some((c) => c.type === 'console');
-  return `이미 있는 파일과 겹칩니다: ${what} — 포탈은 남이 만든 파일을 덮지 않으므로 이대로는 2단계가 거부됩니다(OTP 를 쓰기 전에 막았습니다).`
+  return `이미 있는 파일과 겹칩니다: ${what} — 포탈은 남이 만든 파일을 덮지 않으므로 이대로는 2단계가 거부됩니다(서버에 접속하기 전에 막았습니다).`
     + (con ? ' ‘만들 콘솔 이름’ 을 포탈 전용 이름으로 바꾸세요(기존 콘솔은 그대로 둡니다).' : '')
     + (conflicts.some((c) => c.type !== 'console') ? ' 그 밖의 이름은 설정 탭 기본값을 바꾸거나 전용 Pool · Schedule 만들기를 끄세요.' : '')
     + ' 서버에서 파일을 정리했으면 1단계 사전 점검을 다시 하세요.';

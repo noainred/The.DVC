@@ -22,6 +22,9 @@ const DEFAULTS = {
   sessionWarnMin: 10,     // 만료 몇 분 전에 물어볼지
   sessionExtendMin: 60,   // 확인 시 몇 분 연장할지
   sessionMaxHours: 0,     // 로그인 후 총 세션 상한(시간). 0 = 무제한(연장 횟수 제한 없음)
+  // v2.842(사용자 요청 '설정에서 otp 사용여부 변경' — 고른 범위 'Bareos 자동 설정만'): 자동 설정 쓰기 단계(2·3·5단계)마다 본인 OTP 재확인.
+  //   기본 켬 · **명시적 false 만** 끈다(없음·손상·모르는 값 = 켬 — 약하게 읽지 않는다). 바꾸려면 이 파일의 다른 값처럼 소유자 + 본인 OTP + 감사.
+  bareosSetupOtp: true,
 };
 
 // 로그인 자격 정책(전역) — 설정 소유자가 '설정 › 세션 보안'에서 지정. null(미설정)=레거시
@@ -74,7 +77,16 @@ export function loadConfiguredSecurity() {
     sessionExtendMin: clamp(p.sessionExtendMin, 5, 720, DEFAULTS.sessionExtendMin), // 5분~12시간
     // 0 = 무제한. clamp 는 0 을 하한으로 올려버리므로 여기서만 별도 처리한다.
     sessionMaxHours: (p.sessionMaxHours === 0 || p.sessionMaxHours === '0') ? 0 : clamp(p.sessionMaxHours, 0, 720, DEFAULTS.sessionMaxHours),
+    bareosSetupOtp: p.bareosSetupOtp !== false,   // v2.842: 불리언 false 만 끔(문자열 'false'·0·null·없음 = 켬)
   };
+}
+
+/**
+ * v2.842: Bareos 자동 설정 쓰기 단계에 본인 OTP 재확인을 거는가(라우트 setupGate 가 요청마다 부른다 — 캐시 없이 지금 파일 값).
+ * 파일을 못 읽거나 손상이면 켬(loadConfiguredSecurity 가 손상본을 보존하고 기본값 = 켬).
+ */
+export function bareosSetupOtpRequired() {
+  try { return loadConfiguredSecurity().bareosSetupOtp !== false; } catch { return true; }
 }
 
 // 로그인 정책·단일세션 캐시 — resolveTokenUser(매 /api 요청)가 읽는 핫패스라 파일 read 를 매
@@ -358,6 +370,8 @@ export function saveSessionSecurity(partial = {}) {
       // 빈 칸은 이전 값 유지(예전엔 '' → 0 = 무제한이라 8시간 강제 로그아웃이 조용히 풀렸다). 명시적 0 만 무제한.
       ? (numOrNull(partial.sessionMaxHours) === 0 ? 0 : clamp(partial.sessionMaxHours, 0, 720, cur.sessionMaxHours))
       : cur.sessionMaxHours,
+    // v2.842: 불리언일 때만 바꾼다(빠졌거나 'false' 같은 글자면 그대로 — 무관한 저장·옛 화면이 보안 설정을 끄지 않게)
+    bareosSetupOtp: typeof partial.bareosSetupOtp === 'boolean' ? partial.bareosSetupOtp : cur.bareosSetupOtp,
   };
   // 원자적 쓰기 — settingsOwners(설정 편집 권한)를 담는 권한 config. 부분기록으로 손상되면
   // 로드가 DEFAULTS로 조용히 리셋돼 소유자 경계가 무너진다.

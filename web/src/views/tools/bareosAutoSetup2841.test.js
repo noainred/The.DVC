@@ -83,7 +83,7 @@ describe('v2.841 ② 2단계 겹침 · 포탈 전용 콘솔 이름', () => {
   it('안내 문구: 콘솔이면 이름을 바꾸라고 · 그 밖은 기본값·전용 Pool · 백틱 없음', () => {
     const t = conflictText([{ type: 'console', name: 'admin', state: 'foreign' }]);
     expect(t).toMatch(/console ‘admin’/);
-    expect(t).toMatch(/OTP 를 쓰기 전에 막았습니다/);
+    expect(t).toMatch(/서버에 접속하기 전에 막았습니다/);
     expect(t).toMatch(/만들 콘솔 이름/);
     expect(t).toMatch(/사전 점검을 다시 하세요/);
     expect(t).not.toMatch(/설정 탭 기본값/);

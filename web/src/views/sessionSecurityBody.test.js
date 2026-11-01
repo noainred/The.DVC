@@ -18,4 +18,11 @@ describe('sessionSecurityBody (WEB2607-01)', () => {
     expect(b.settingsOwners).toEqual(['a', 'b']);
     expect(b.otp).toBe('1');
   });
+  it('v2.842 Bareos 자동 설정 본인 OTP 재확인 — 불리언일 때만 보낸다(조회에 칸이 없으면 끔으로 보내지 않는다)', () => {
+    expect('bareosSetupOtp' in sessionSecurityBody({}, '1')).toBe(false);
+    expect('bareosSetupOtp' in sessionSecurityBody({ bareosSetupOtp: null }, '1')).toBe(false);
+    expect('bareosSetupOtp' in sessionSecurityBody({ bareosSetupOtp: 'false' }, '1')).toBe(false);
+    expect(sessionSecurityBody({ bareosSetupOtp: false }, '1').bareosSetupOtp).toBe(false);
+    expect(sessionSecurityBody({ bareosSetupOtp: true }, '1').bareosSetupOtp).toBe(true);
+  });
 });
