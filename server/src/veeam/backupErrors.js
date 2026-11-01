@@ -8,6 +8,7 @@
  *   · Bareos = 원장의 끝난 실행(lastRun + 최근 5건 — 오류 E·e·f · 취소 A · 경고 W) · joblog 원문은 2차(지금은 상태 · jobid · 레벨)
  *     + 멈춤 의심(진행 현황이 신선할 때만 — 지금의 상태)
  *   · 수집 오류 = Veeam B&R 서버 읽기 실패·인증 정지 · EM 읽기 실패·인증 정지 · Bareos Director 조회 실패
+ *   · v2.840 오류 볼륨 = Bareos 정책 수집본의 VolStatus Error 볼륨(시각 = 볼륨 목록을 수집한 시각 — 그때 본 상태 · Director 에 접속하지 않는다)
  *   시각을 모르는 결과는 넣지 않는다(창 안인지 모른다). 수집 오류는 마지막 시도 시각.
  */
 
@@ -114,6 +115,26 @@ export function collectRows(items, since) {
   return out;
 }
 
+/**
+ * v2.840 오류 볼륨 — 정책 수집본(bareos/policy.errorVolumeItems)의 VolStatus Error. 볼륨마다 한 줄(이름을 모르는 나머지는 한 줄로 묶는다).
+ *   법인: Director 에 묶인 법인이 하나면 그 법인 · 여럿이면 이름만 잇는다(법인 · vCenter · Bareos 1:1:1 이 기본 — 예외 매핑을 지어내 나누지 않는다).
+ * @param {Array<{ at, director, vcIds, pool, n, names }>} items @param {(id:string) => string} vcName
+ */
+export function volumeRows(items, since, vcName = (x) => x) {
+  const out = [];
+  for (const x of Array.isArray(items) ? items : []) {
+    if (!isFin(x?.at) || x.at < since) continue;
+    const ids = Array.isArray(x.vcIds) ? x.vcIds : [];
+    const base = { at: x.at, vc: ids.length === 1 ? ids[0] : '', vcName: ids.map(vcName).slice(0, 3).join(', ') + (ids.length > 3 ? ` 외 ${ids.length - 3}` : ''), src: 'bareos', kind: 'volume', vm: '', open: 'pools' };
+    const msg = `볼륨 상태 Error · 풀 ${str(x.pool, 64)} · Director ${str(x.director, 64)} — 정책 수집 때 본 상태(Director 에서 확인 후 다시 쓰거나 지우세요)`;
+    const names = (Array.isArray(x.names) ? x.names : []).map((n) => str(n, 128)).filter(Boolean);
+    for (const n of names) out.push({ ...base, job: n, msg });
+    const rest = (Number(x.n) || 0) - names.length;
+    if (rest > 0) out.push({ ...base, job: `그 밖 볼륨 ${rest}개`, msg });
+  }
+  return out;
+}
+
 /** 같은 원인 — 출처 · 결과 · 메시지 앞머리(40자) · 잡이 같은 행 수(시안 '같은 원인'). 각 행에 same 을 단다. */
 export function withSameCause(rows) {
   const key = (r) => `${r.src}|${r.kind}|${r.job}|${String(r.msg || '').slice(0, 40)}`;
@@ -125,7 +146,7 @@ export function withSameCause(rows) {
 /** 정렬(새것 먼저) · 상한 · 수(전부 센다). */
 export function finishErrors(rows, max = ERROR_ROWS_MAX) {
   const all = withSameCause(rows).sort((a, b) => b.at - a.at || String(a.vcName).localeCompare(String(b.vcName)));
-  const counts = { all: all.length, fail: 0, warn: 0, stuck: 0, collect: 0, veeam: 0, bareos: 0 };
+  const counts = { all: all.length, fail: 0, warn: 0, stuck: 0, collect: 0, volume: 0, veeam: 0, bareos: 0 };
   for (const r of all) { counts[r.kind]++; if (r.src === 'veeam' || r.src === 'bareos') counts[r.src]++; }
   return { rows: all.slice(0, max), counts, ...(all.length > max ? { truncated: true } : {}) };
 }

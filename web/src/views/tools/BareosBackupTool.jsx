@@ -17,9 +17,10 @@ import {
   folderOptions, inFolder, pickCap, bulkSummary, OS_FILTERS, osKey, osLabel, osBadgeCls, osMatches, osCounts,
   parseJobReport, reportCards, REPORT_KEYS, issueHint, storeRatio, reportText, reportBytes, reportValue,
   issueTone, ISSUE_TONE_LABEL, decBytesText, reportSizeText, elapsedKo, durKo, pctText, volumeNames, clockOf,
-  classifyLogLine, filterLogLines, splitHit, parseJobDetail, jobTimeline, LOG_WHO_LABEL,
+  classifyLogLine, filterLogLines, splitHit, parseJobDetail, jobTimeline, LOG_WHO_LABEL, HIST_LEVEL_OPTS, HIST_RESULT_OPTS, filterHistory, histResultKey,
 } from './bareosText.js';
 import { takeBareosHandoff } from './bareosViewText.js';
+import { targetPolicyText, VERDICT } from './bareosPolicyText.js';   // v2.840 '적용 정책' 한 줄
 
 /**
  * 특수 기능 › Bareos VM 백업(v2.820, 도구 키 bareos-backup — admin 전용 · v2.823 법인별 Director).
@@ -78,7 +79,16 @@ export default function BareosBackupTool() {
         {toolAllowed('bareos-summary') && <a className="tab" href="#/tools/bareos-summary" style={{ textDecoration: 'none' }}>통합 현황</a>}
         {toolAllowed('bareos-detail') && <a className="tab" href="#/tools/bareos-detail" style={{ textDecoration: 'none' }}>법인별 현황</a>}
         {TABS.filter(([k]) => k !== 'settings' || fullScope).map(([k, l]) => (
-          <button key={k} type="button" className={`tab${tab === k ? ' active' : ''}`} onClick={() => setTab(k)}>{l}</button>
+          <React.Fragment key={k}>
+            <button type="button" className={`tab${tab === k ? ' active' : ''}`} onClick={() => setTab(k)}>{l}</button>
+            {/* v2.840: 통합 현황 쪽 하위 탭(BareosTabs · bareosSubTabs)과 같은 순서 — 정책 · 일정 · 보존 · 풀(조회 전용 키 화면)은 백업 그룹 뒤 */}
+            {k === 'groups' && toolAllowed('bareos-summary') && (
+              <>
+                <a className="tab" href="#/tools/bareos-summary/policy" style={{ textDecoration: 'none' }}>정책 · 일정</a>
+                <a className="tab" href="#/tools/bareos-summary/pools" style={{ textDecoration: 'none' }}>보존 · 풀</a>
+              </>
+            )}
+          </React.Fragment>
         ))}
       </div>
       {tab === 'targets' && <TargetsTab d={data} reload={reload} handoff={handoff} />}
@@ -183,7 +193,7 @@ function TargetsTab({ d, reload, handoff }) {
       <div className="table-wrap" style={{ maxHeight: '58vh' }}>
         <STable minWidth={1160} wrap={false}>
           <thead><tr>
-            <th>VM</th><th>법인 Director</th><th>vCenter</th><th>데이터센터 · 폴더</th><th>FD · 레벨 · 스케줄</th>
+            <th>VM</th><th>법인 Director</th><th>vCenter</th><th>데이터센터 · 폴더</th><th>FD · 레벨 · 적용 정책</th>
             <th>최근 실행</th><th className="right">용량</th><th data-nosort>작업</th>
           </tr></thead>
           <tbody>
@@ -201,7 +211,11 @@ function TargetsTab({ d, reload, handoff }) {
                   <td data-sort={dirName(j.directorId)} style={{ fontSize: 12.5 }}>{dirName(j.directorId)}</td>
                   <td className="muted">{j.vcenterId}</td>
                   <td className="muted" style={{ fontSize: 12 }}><div style={{ maxWidth: 220, whiteSpace: 'normal', overflowWrap: 'anywhere' }}>{j.dc} · {j.folder}</div></td>
-                  <td data-sort={j.client} style={{ fontSize: 12.5 }}>{j.client}<div className="muted" style={{ fontSize: 11 }}>{levelLabel(j.level)} · {j.schedule || '수동'}</div></td>
+                  {/* v2.840: 적용 정책 줄을 더해도 칸이 넓어지지 않게 원래 폭(약 180px) 안에서 줄바꿈한다 — 이 표는 그 전부터 1440px 에서 작업 열이 넘친다(audits.md v2.840 남긴 것) */}
+                  <td data-sort={j.client} style={{ fontSize: 12.5 }}><div style={{ maxWidth: 180, whiteSpace: 'normal', overflowWrap: 'anywhere' }}>{j.client}<div className="muted" style={{ fontSize: 11 }}>{levelLabel(j.level)} · 잡 스케줄 {j.schedule || '없음'}</div>
+                    <div data-target-policy="" title={`${j.policy?.src?.text ? `${j.policy.src.text} — ` : ''}정책 · 일정 탭과 같은 판정(Director 정책 수집본 · 백업 그룹 — 이 화면은 Director 에 접속하지 않습니다)`} style={{ fontSize: 11, color: j.policy?.dup ? '#fcd34d' : j.policy?.verdict && j.policy.verdict !== 'policy' ? VERDICT[j.policy.verdict]?.color : 'var(--text-dim)' }}>
+                      {targetPolicyText(j.policy)}{j.policy?.verdict === 'mismatch' ? ' · 백업 방식이 Bareos 가 아님' : ''}
+                    </div></div></td>
                   <td data-sort={c.when === '—' ? '' : c.when} style={{ fontSize: 12 }}>
                     <span style={{ marginRight: 6 }}>{c.when}</span>
                     {c.badge ? <span className={`badge ${c.badge.cls}`}>{c.badge.label}</span> : null}
@@ -905,26 +919,33 @@ function RestoreModal({ job, dir = null, limits = null, onClose, onDone }) {
 
 /* ───────────────────────── 실행 현황 · 이력 ───────────────────────── */
 function HistoryTab({ d }) {
+  // v2.840 거르기 — Director(대상 목록 · 복원 이력) · 레벨 · 결과(이 대상의 실행 이력 · 복원 이력). 서버를 다시 부르지 않는다(받은 행만 거른다).
+  const [dirF, setDirF] = useState('');
+  const [levelF, setLevelF] = useState('');
+  const [resultF, setResultF] = useState('');
+  const jobsShown = useMemo(() => (dirF ? d.jobs.filter((j) => j.directorId === dirF) : d.jobs), [d.jobs, dirF]);
   const [sel, setSel] = useState(d.jobs[0]?.id || '');
   const [hist, setHist] = useState(null);
   const [err, setErr] = useState(null);
   const [logOf, setLogOf] = useState(null);
   const gen = useRef(0);
   const [limit, setLimit] = useState(null);
-  const job = d.jobs.find((j) => j.id === sel);
+  const job = jobsShown.find((j) => j.id === sel);
   const histWaitMs = withRelayWait(DIRECTOR_GET, (d.directors || []).find((x) => x.id === job?.directorId), d.relayLimits, 'history').timeoutMs;
-  // W10: 고른 대상이 지워지면 첫 대상으로(예전에는 job 이 없어 '보기' 가 화면 오류를 냈다)
-  useEffect(() => { if (sel && !job) setSel(d.jobs[0]?.id || ''); }, [sel, job, d.jobs]);
+  // W10: 고른 대상이 지워지면(또는 Director 거르기 밖이면) 첫 대상으로(예전에는 job 이 없어 '보기' 가 화면 오류를 냈다)
+  useEffect(() => { if (!job && sel !== (jobsShown[0]?.id || '')) setSel(jobsShown[0]?.id || ''); }, [sel, job, jobsShown]);
   const load = () => {
     const g = ++gen.current;
     setHist(null); setErr(null);
-    if (!sel) return;
+    if (!sel) return;   // Director 거르기로 고른 대상이 빠지면 위 효과가 첫 대상으로 바꾸고 다시 읽는다(늦은 응답은 gen 으로 버린다)
     fetchJson(`${BASE}/jobs/${enc(sel)}/history`, {}, undefined, { ...DIRECTOR_GET, timeoutMs: histWaitMs }).then((r) => { if (g === gen.current) { setHist(r.items || []); setLimit(r.limit ?? null); } }).catch((e) => { if (g === gen.current) setErr(e); });
   };
   useEffect(load, [sel, histWaitMs]);
   // W5: 포탈이 시작한 실행 + Bareos 스케줄이 돌리는 실행(대조가 넣은 lastRun — 대조 주기만큼 늦을 수 있다)
   const running = d.jobs.filter((j) => j.pending?.jobid || ['running', 'queued', 'waiting'].includes(j.lastRun?.state));
-  const restores = d.jobs.flatMap((j) => (j.restores || []).map((r) => ({ ...r, job: j }))).sort((a, b) => (b.at || 0) - (a.at || 0)).slice(0, 50);
+  const restores = jobsShown.flatMap((j) => (j.restores || []).map((r) => ({ ...r, job: j }))).filter((r) => !resultF || histResultKey(r.state) === resultF).sort((a, b) => (b.at || 0) - (a.at || 0)).slice(0, 50);
+  const histShown = hist ? filterHistory(hist, { level: levelF, result: resultF }) : null;
+  const dirs = (d.directors || []).filter((x) => d.jobs.some((j) => j.directorId === x.id));
   return (
     <div>
       <div className="muted" style={{ fontSize: 12, fontWeight: 600, marginBottom: 6 }}>실행 중 백업 {running.length}건</div>
@@ -938,24 +959,36 @@ function HistoryTab({ d }) {
         ); })}
       </div>
 
-      <div style={{ ...ROW, marginBottom: 8 }}>
+      <div data-hist-filters="" style={{ ...ROW, marginBottom: 8 }}>
+        {dirs.length > 1 && (
+          <Select className="input" sort={false} value={dirF} onChange={(e) => setDirF(e.target.value)} aria-label="Director" style={{ minWidth: 0, width: 'auto' }}>
+            <option value="">Director 전체</option>
+            {dirs.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
+          </Select>
+        )}
         <label htmlFor="bareos-hist-sel" className="muted" style={{ fontSize: 12 }}>대상</label>
-        <Select id="bareos-hist-sel" className="input" value={sel} onChange={(e) => setSel(e.target.value)} style={{ minWidth: 220 }}>
-          {d.jobs.length === 0 && <option value="">— 대상 없음</option>}
-          {d.jobs.map((j) => <option key={j.id} value={j.id}>{j.vmName} · {j.vcenterId}</option>)}
+        <Select id="bareos-hist-sel" className="input" value={job ? sel : ''} onChange={(e) => setSel(e.target.value)} style={{ minWidth: 0, width: 'min(100%, 260px)' }}>
+          {jobsShown.length === 0 && <option value="">— 대상 없음</option>}
+          {jobsShown.map((j) => <option key={j.id} value={j.id}>{j.vmName} · {j.vcenterId}</option>)}
+        </Select>
+        <Select className="input" sort={false} value={levelF} onChange={(e) => setLevelF(e.target.value)} aria-label="레벨" style={{ minWidth: 0, width: 'auto' }}>
+          {HIST_LEVEL_OPTS.map(([v, t]) => <option key={v || 'all'} value={v}>{t}</option>)}
+        </Select>
+        <Select className="input" sort={false} value={resultF} onChange={(e) => setResultF(e.target.value)} aria-label="결과" style={{ minWidth: 0, width: 'auto' }}>
+          {HIST_RESULT_OPTS.map(([v, t]) => <option key={v || 'all'} value={v}>{t}</option>)}
         </Select>
         <button type="button" className="logout-btn" style={BTN} onClick={load} disabled={!sel}>새로 고침</button>
         <span className="muted" style={{ fontSize: 12 }}>Director 카탈로그 {Number.isInteger(limit) ? `최근 ${limit}건` : '최근 실행'} · 상태 코드 T 성공 · W 경고 · E·f 오류 · A 취소 · R 실행 중 · C 대기</span>
       </div>
       {err && <ErrorBox error={err} />}
-      {sel && !hist && !err && <Loading />}
-      {hist && (
+      {sel && job && !hist && !err && <Loading />}
+      {histShown && (
         <div className="table-wrap" style={{ maxHeight: '40vh', marginBottom: 14 }}>
           <STable minWidth={820} wrap={false}>
             <thead><tr><th>jobid</th><th>레벨</th><th>시작</th><th>종료</th><th className="right">바이트</th><th className="right">파일</th><th>상태</th><th data-nosort>로그</th></tr></thead>
             <tbody>
-              {hist.length === 0 && <tr><td colSpan={8} className="center muted" style={{ padding: 16 }}>실행 이력이 없습니다.</td></tr>}
-              {hist.map((r) => { const b = stateBadge(r.state, r.status); return (
+              {histShown.length === 0 && <tr><td colSpan={8} className="center muted" style={{ padding: 16 }}>{hist.length ? `거르기에 맞는 실행이 없습니다(전체 ${hist.length}건).` : '실행 이력이 없습니다.'}</td></tr>}
+              {histShown.map((r) => { const b = stateBadge(r.state, r.status); return (
                 <tr key={r.jobid}>
                   <td data-sort={r.jobid}>{r.jobid}</td><td>{levelLabel(r.level)}</td>
                   <td data-sort={r.startedAt ?? ''}>{whenText(r.startedAt)}</td><td data-sort={r.endedAt ?? ''}>{whenText(r.endedAt)}</td>

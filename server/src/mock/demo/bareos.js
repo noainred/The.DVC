@@ -172,7 +172,7 @@ function demoLevelAt(sched, d) {   // d: Date(서버 현지) — 그날 그 스�
   if (sched === 'WeeklyCycleAfterBackup') return wd >= 1 && wd <= 5 ? { h: 21, m: 10, level: 'Full' } : null;
   return null;
 }
-function demoPolicy(head, words, settings, directorId, now = Date.now()) {
+function demoPolicy(head, words, settings, directorId, kv = {}, now = Date.now()) {
   const sites = (settings?.sites || []).filter((s) => !directorId || s.directorId === directorId);
   const clients = new Set(sites.map((s) => s.client));
   const first = !directorId || (settings?.directors || [])[0]?.id === directorId;   // Director 자체 잡(카탈로그 백업)은 첫 데모 Director 에만
@@ -249,7 +249,17 @@ function demoPolicy(head, words, settings, directorId, now = Date.now()) {
       }
       volumes[p.name.toLowerCase()] = rows;
     }
+    // v2.840 풀 하나(`list volumes pool=X`) — 실환경 모양은 추정(배열) · 없는 풀은 Director 처럼 거부
+    if (kv.pool !== undefined) {
+      const hit = poolsOf().find((p) => p.name.toLowerCase() === String(kv.pool).toLowerCase());
+      if (!hit) throw new BareosConsoleError('jsonrpc', `Pool "${String(kv.pool).slice(0, 64)}" not found`);
+      return { volumes: volumes[hit.name.toLowerCase()] || [] };
+    }
     return { volumes };
+  }
+  if (head === 'llist' && words[1] === 'clients') {   // v2.840 클라이언트 보존(카탈로그 Client 행 — 실환경 모양 추정)
+    const names = [...new Set([...clients, ...(first ? ['bareos-fd'] : [])])].filter(Boolean).sort();
+    return { clients: names.map((name, i) => { const h = demoHash(name); return { clientid: String(i + 1), name, uname: '25.1.2 (01Oct25) Linux', autoprune: h % 3 ? '1' : '0', fileretention: String([5184000, 2592000, 7776000][h % 3]), jobretention: String([15552000, 7776000, 31536000][h % 3]) }; }) };
   }
   return undefined;
 }
@@ -261,7 +271,7 @@ export function demoCall(cmd, settings, directorId = '') {
   const head = words[0] || '';
   const sites = settings?.sites || [];
   const uniq = (a) => [...new Set(a)].sort().map((name) => ({ name }));
-  const pol = demoPolicy(head, words, settings, directorId);   // v2.839 정책 수집 명령
+  const pol = demoPolicy(head, words, settings, directorId, kv);   // v2.839 정책 수집 명령 · v2.840 풀 하나의 볼륨 · 클라이언트 보존
   if (pol !== undefined) return pol;
   switch (head) {
     case '.clients': return { clients: uniq(sites.map((s) => s.client)) };

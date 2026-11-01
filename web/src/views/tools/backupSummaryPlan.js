@@ -94,6 +94,7 @@ export const ERROR_KIND = Object.freeze({
   warn: { text: '경고', color: '#fcd34d', bg: 'rgba(245,158,11,.16)' },
   stuck: { text: '멈춤 의심', color: '#fcd34d', bg: 'rgba(245,158,11,.16)' },
   collect: { text: '수집 오류', color: '#fca5a5', bg: 'rgba(239,68,68,.10)' },
+  volume: { text: '오류 볼륨', color: '#fdba74', bg: 'rgba(249,115,22,.16)' },   // v2.840 Bareos 정책 수집본의 VolStatus Error(수집 시각)
 });
 export const ERROR_SRC = Object.freeze({
   veeam: { text: 'Veeam', color: '#93c5fd', bg: 'rgba(59,130,246,.18)' },
@@ -121,6 +122,7 @@ export function errorOpen(r, { canBareos = false, canBareosView = false, admin =
   if (r.open === 'live') return canBareos ? { key: 'hash', text: '진행 현황', hash: '#/tools/bareos-backup/live' } : null;
   if (r.open === 'em') return { key: 'hash', text: 'Veeam', hash: '#/tools/backup-em' };
   if (r.open === 'bareos-settings') return canBareos && admin ? { key: 'hash', text: '설정', hash: '#/tools/bareos-backup/settings' } : null;
+  if (r.open === 'pools') return canBareosView ? { key: 'hash', text: '보존 · 풀', hash: '#/tools/bareos-summary/pools' } : null;   // v2.840 오류 볼륨
   return null;
 }
 /** 같은 원인 칸 — 2건 이상이면 'N건' · 아니면 '—'. */

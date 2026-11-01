@@ -43,11 +43,11 @@ import { newSiteAgg, addSiteVm, finishSiteAgg, sumSiteAggs, countVeeamWindow, st
 import { corpView as bareosCorpView } from './bareosLive.js';   // v2.837 Summary '멈춤 의심'(진행 현황과 같은 판정 — 조회를 새로 일으키지 않는다)
 import { effectiveSettings as bareosEffectiveSettings, isDemoActive as bareosIsDemoActive } from '../../bareos/service.js';
 import { directorById as bareosDirectorById, jobDirectorId as bareosJobDirectorId } from '../../bareos/settings.js';
-import { directorNextByJob, policySummary as bareosPolicySummary, directorScheduleItems, policyRev as bareosPolicyRev } from '../../bareos/policy.js';   // v2.839 Director 정책 수집본(접속하지 않는다)
+import { directorNextByJob, policySummary as bareosPolicySummary, directorScheduleItems, policyRev as bareosPolicyRev, errorVolumeItems as bareosErrorVolumeItems } from '../../bareos/policy.js';   // v2.839 Director 정책 수집본(접속하지 않는다)
 import { pollerStatus as bareosPollerStatus } from '../../bareos/poller.js';
 import { LIVE_IDLE_MS as BAREOS_LIVE_IDLE_MS } from '../../bareos/liveStatus.js';
-import { veeamJobItems, jobsFromRows, groupItems, overlapOf, sevenDays, MAX_ITEMS_PER_SITE } from '../../veeam/backupSchedule.js';   // v2.838 '백업 스케줄 — 다음 24시간'
-import { ERROR_DAYS, veeamVmRows, bareosRows, stuckRows, emSessionRows, collectRows, finishErrors } from '../../veeam/backupErrors.js';   // v2.838 통합 에러 로그
+import { veeamJobItems, jobsFromRows, groupItems, overlapOf, groupOverlaps, sevenDays, MAX_ITEMS_PER_SITE } from '../../veeam/backupSchedule.js';   // v2.838 '백업 스케줄 — 다음 24시간' · v2.840 그룹 카드 겹침
+import { ERROR_DAYS, veeamVmRows, bareosRows, stuckRows, emSessionRows, collectRows, volumeRows, finishErrors } from '../../veeam/backupErrors.js';   // v2.838 통합 에러 로그
 import { loadAlert, saveAlert, alertLoadError, alertStatus, sendNow as sendStaleAlertNow, setStaleProvider, MAIL_KIND as STALE_MAIL_KIND } from '../../veeam/staleAlert.js';   // v2.838 백업 안 된 VM 일일 메일
 import { load as loadMailSettings } from '../../mail/settings.js';
 import { dayIndex, dayStartMs } from '../../util/dayKey.js';
@@ -1017,7 +1017,8 @@ async function scheduleData(req, snap, scope) {
   }
   const rows = sites.map((x) => {
     const v = x.veeam.filter((i) => i.at < h24); const g = (x.bareos || []).filter((i) => i.at < h24);
-    return { id: x.id, name: x.name, veeam: v.slice(0, MAX_ITEMS_PER_SITE), bareos: x.bareos ? g.slice(0, MAX_ITEMS_PER_SITE) : null, overlap: overlapOf(v, g), more: Math.max(0, v.length - MAX_ITEMS_PER_SITE) + Math.max(0, g.length - MAX_ITEMS_PER_SITE) };
+    return { id: x.id, name: x.name, veeam: v.slice(0, MAX_ITEMS_PER_SITE), bareos: x.bareos ? g.slice(0, MAX_ITEMS_PER_SITE) : null, overlap: overlapOf(v, g), more: Math.max(0, v.length - MAX_ITEMS_PER_SITE) + Math.max(0, g.length - MAX_ITEMS_PER_SITE),
+      ...(x.bareos ? { groups: groupOverlaps(v, g) } : {}) };
   });
   return { ok: true, at: now, hours: 24, rows, days: sevenDays(sites.map((x) => ({ veeam: x.veeam, bareos: x.bareos || [] })), dayStartMs(dayIndex(now))), ...(groups ? {} : { groupsUnreadable: true }) };
 }
@@ -1069,6 +1070,13 @@ async function errorsData(req, snap, scope, days) {
     } catch { emIncluded = false; }
   }
   pushAll(rows, collectRows(collect, since));
+  // v2.840 오류 볼륨(정책 수집본 — Director 에 접속하지 않는다 · 범위 안 Director 만)
+  if (bset) {
+    try {
+      const names = new Map((snap?.vcenters || []).map((v) => [v.id, v.name || v.id]));
+      pushAll(rows, volumeRows(bareosErrorVolumeItems(bset, allowed), since, (id) => names.get(id) || id));
+    } catch { /* 수집본을 못 읽음 — 행 없음(정책 탭이 손상을 밝힌다) */ }
+  }
   const fin = finishErrors(rows);
   return { ok: true, at: now, days, scope, ...fin, sources: { veeamVm: true, em: emIncluded, bareos: true }, ...(bareosUnknownSites ? { bareosUnknownSites } : {}) };
 }
@@ -1283,7 +1291,7 @@ export function registerBackupStatus(api) {
     const admin = isAdminDetailUser(req.user);
     const scope = scopeOf(req);
     return memoJson(req, res, 'backup-summary-errors', async () => errorsData(req, snap, scope, days),
-      { ttlMs: 60_000, extraKey: `${scopeKey(req.user, snap)}|${admin ? 'admin' : 'user'}|em${emSourcesRev()}|b${bareosRegistryRev()}` });   // 백업 표시(정책)는 에러 행에 쓰지 않는다 — m 없음
+      { ttlMs: 60_000, extraKey: `${scopeKey(req.user, snap)}|${admin ? 'admin' : 'user'}|em${emSourcesRev()}|b${bareosRegistryRev()}|bp${bareosPolicyRev()}` });   // 백업 표시(정책)는 에러 행에 쓰지 않는다 — m 없음 · v2.840 오류 볼륨 = 정책 수집본(bp)
   });
 
   /*

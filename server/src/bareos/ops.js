@@ -15,7 +15,7 @@ import { pruneSelection } from './groupRetention.js';
 import { parseStatusRaw, parseDirStatusRaw, rawHead } from './liveParse.js';
 import { jobNameFor, isFinalStatus, isResourceName } from './names.js';
 import { chainFromHistory, chainIssue } from './restore.js';
-import { POLICY_CMDS, POLICY_KEYS, NORMALIZE as POLICY_NORMALIZE, deniedText } from './policyParse.js';
+import { POLICY_CMDS, POLICY_KEYS, NORMALIZE as POLICY_NORMALIZE, deniedText, normVolumeRows } from './policyParse.js';
 
 const fail = (code, msg) => new BareosConsoleError(code, msg);
 const invalid = (msg) => { const e = new Error(msg); e.code = 'invalid'; return e; };
@@ -211,6 +211,16 @@ export const OPS = Object.freeze({
     let version = '';
     try { version = parseBanner(s.info?.banner || '').version || ''; } catch { version = ''; }
     return { results, version };
+  },
+
+  /**
+   * v2.840 '보존 · 풀' 탭의 볼륨 목록 즉시 조회(관리자 · 1분 1회는 라우트) — `list volumes pool=<풀>` 하나(읽기 전용 · MUTATING 아님).
+   * 풀 이름은 names.js 관문(리소스 이름 모양)을 지난 것만 — 공백 · 따옴표가 든 이름은 거부(콘솔 명령에 그대로 넣는다).
+   * @param {{ pool: string }} a @returns {Promise<{ rows, total, truncated }>}
+   */
+  async volumes(s, { pool } = {}) {
+    if (!isResourceName(pool)) throw invalid('풀 이름이 올바르지 않습니다.');
+    return normVolumeRows(await s.call(`list volumes pool=${pool}`, { maxBytes: 8 * 1024 * 1024 }));
   },
 
   /**

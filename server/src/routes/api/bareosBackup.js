@@ -41,6 +41,9 @@ import {
 } from '../../bareos/autoSetup.js';
 import { isSshAuthError, isSshHostKeyError } from '../../proxy/sshExec.js';
 import { tryLockJob, unlockJob } from '../../bareos/jobLocks.js';
+import { jobPolicyResolver } from '../../bareos/policy.js';
+import { listGroups, groupsLoadError } from '../../bareos/groups.js';
+import { getMarks, marksUnreadable } from '../../veeam/backupMarks.js';
 
 const adminOnly = requireRole('admin');
 const fullScopeOnly = fullScopeOnlyWith('Bareos Director 설정은 전 법인 공용이라 전체 범위(vCenter 제한 없는) 계정만 볼 수 있습니다.');
@@ -345,7 +348,22 @@ api.get('/tools/bareos-backup', adminOnly, (req, res) => {
   const visibleSite = (s) => !scoped || bareosAccess(req.user, s.vcenterId, { write: false }) === 0;
   const mapped = settings.sites.filter(visibleSite).map((s) => s.vcenterId);
   // v2.825.1 버그 점검(G12): 쓰기 범위(writeVcenters)가 지정된 계정 — 대상마다 쓸 수 있는지 싣는다(화면이 버튼을 잠근다 · 서버는 그대로 403)
-  const views = jobs.map((j) => ({ ...viewJob(j, vmById, settings), writable: bareosAccess(req.user, j.vcenterId) === 0 }));
+  // v2.840 '적용 정책' 한 줄(정책 수집본 · 그룹 · 표시 — Director 에 접속하지 않는다). 그룹 · 수집본을 못 읽으면 그 칸은 모름으로(행은 그대로).
+  let resolve = null;
+  try {
+    const groups = groupsLoadError() ? null : listGroups();
+    if (groups) resolve = jobPolicyResolver({ settings, groups });
+  } catch { resolve = null; }
+  const marksBad = (() => { try { return marksUnreadable(); } catch { return true; } })();
+  const marks = marksBad ? {} : getMarks();
+  const policyOf = (j) => {
+    if (!resolve) return null;
+    try {
+      const r = resolve(j, marksBad ? null : (marks[j.vmId]?.method || ''));
+      return { verdict: r.verdict, src: r.src, next: r.next, ...(r.dup ? { dup: r.dup } : {}), pool: r.pool, poolFrom: r.poolFrom, retentionSec: r.retentionSec, keep: r.keep, collected: r.collected };
+    } catch { return null; }
+  };
+  const views = jobs.map((j) => ({ ...viewJob(j, vmById, settings), writable: bareosAccess(req.user, j.vcenterId) === 0, policy: policyOf(j) }));
   let settingsWritable = false;
   try { settingsWritable = !scopedVcenterIds(req.user, store.get()) && !writeScopedVcenterIds(req.user, store.get()); } catch { settingsWritable = false; }
   const rawPoller = pollerStatus();

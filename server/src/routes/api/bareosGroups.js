@@ -19,6 +19,7 @@ import { keepText, keepOtpReasons, KEEP_MIN, KEEP_MAX, KEEP_PRESETS } from '../.
 import { bareosVmView } from '../../bareos/vmView.js';
 import { getMarks, marksUnreadable } from '../../veeam/backupMarks.js';
 import { isSystemVm } from '../../veeam/backupStatus.js';
+import { poolPolicyOf, jobPolicyResolver } from '../../bareos/policy.js';
 
 const adminOnly = requireRole('admin');
 /**
@@ -201,7 +202,24 @@ api.get('/tools/bareos-backup/groups/tree', adminOnly, (req, res) => {
     groupsLoadError: !!groupsLoadError(), registryLoadError: !!registryLoadError(),
     limits: { maxMembers: MAX_MEMBERS, maxGroups: MAX_GROUPS, firesKeep: FIRES_KEEP, maxBulk: MAX_BULK, jobsLeft: Math.max(0, MAX_JOBS - jobDigests().length) },
     levels: LEVELS, keepLimits: { min: KEEP_MIN, max: KEEP_MAX, presets: KEEP_PRESETS }, relayLimits: relayLimits(),   // 화면이 저장(등록)·실행을 기다리는 시간 — 숫자를 화면에 박지 않는다
-    vms, groups: groups.map((g) => groupView(g, now)),
+    // v2.840 그룹 카드 '적용 풀 · 보존' — 그 Director 정책 수집본(접속하지 않는다 · 수집 전이면 null). 풀 = 그룹 풀 → 법인 매핑 풀(잡 기본값).
+    //   dupVms = 그룹 예약이 켜져 있고 잡이 Director 스케줄(수집본)에도 든 멤버 수 — 두 곳에서 돌 수 있다(jobPolicyResolver.dup · 그 Director 수집본이 없으면 0 이 아니라 null)
+    vms, groups: (() => {
+      let resolve = null;
+      try { resolve = jobPolicyResolver({ settings, groups, now }); } catch { resolve = null; }
+      return groups.map((g) => {
+        const poolName = g.pool || si.site?.pool || '';
+        const dirId = g.directorId || si.site?.directorId || '';
+        let pp = null; try { pp = poolPolicyOf(dirId, poolName); } catch { pp = null; }
+        let dupVms = null;
+        if (resolve) {
+          let known = false; let n = 0;
+          for (const id of g.vmIds) { const j = jobs.get(id); if (!j) continue; const r = resolve(j, null); if (r.collected) known = true; if (r.dup) n++; }
+          dupVms = known ? n : null;
+        }
+        return { ...groupView(g, now), poolPolicy: pp ? { ...pp, from: g.pool ? 'group' : 'site' } : null, dupVms };
+      });
+    })(),
   });
 });
 

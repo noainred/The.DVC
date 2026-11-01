@@ -16,7 +16,7 @@ const PAD = { padding: '8px 8px' };
 const Pill = ({ s, children }) => <span style={{ padding: '2px 8px', borderRadius: 999, fontSize: 11, fontWeight: 700, color: s.color, background: s.bg, whiteSpace: 'nowrap' }}>{children ?? s.text}</span>;
 const linkBtn = { background: 'none', border: 0, padding: 0, color: '#93c5fd', font: 'inherit', fontSize: 12, cursor: 'pointer', textDecoration: 'underline', whiteSpace: 'nowrap' };
 const CHIP = { padding: '3px 12px', fontSize: 12, fontWeight: 700 };
-const KINDS = [['', '전체', 'all'], ['fail', '실패', 'fail'], ['warn', '경고', 'warn'], ['stuck', '멈춤 의심', 'stuck'], ['collect', '수집 오류', 'collect']];
+const KINDS = [['', '전체', 'all'], ['fail', '실패', 'fail'], ['warn', '경고', 'warn'], ['stuck', '멈춤 의심', 'stuck'], ['volume', '오류 볼륨', 'volume'], ['collect', '수집 오류', 'collect']];   // v2.840 오류 볼륨(정책 수집본)
 
 export default function BackupSummaryErrors({ reloadKey, onOpenDetail }) {
   const [days, setDays] = useState(1);
@@ -47,9 +47,9 @@ export default function BackupSummaryErrors({ reloadKey, onOpenDetail }) {
     <section className="card" aria-label="통합 에러 로그" data-backup-errors="" style={{ padding: 0, overflow: 'hidden', minWidth: 0 }}>
       <div className="flex wrap" style={{ alignItems: 'center', gap: '6px 8px', padding: '12px 14px', borderBottom: '1px solid var(--border-soft)' }}>
         <b style={{ fontSize: 14 }}>통합 에러 로그 — 최근 {dayText}</b>
-        <span className="muted" style={{ fontSize: 12, minWidth: 0, overflowWrap: 'anywhere' }}>Veeam(VM 마지막 결과 · EM 세션) + Bareos(실패 · 경고 · 취소 실행 · 멈춤 의심) + 포탈 수집 오류 · 같은 모양으로</span>
+        <span className="muted" style={{ fontSize: 12, minWidth: 0, overflowWrap: 'anywhere' }}>Veeam(VM 마지막 결과 · EM 세션) + Bareos(실패 · 경고 · 취소 실행 · 멈춤 의심 · 오류 볼륨) + 포탈 수집 오류 · 같은 모양으로</span>
         <div className="flex wrap" role="group" aria-label="거르기" style={{ marginLeft: 'auto', gap: 6 }}>
-          {KINDS.filter(([k]) => k !== 'stuck' || c.stuck > 0).map(([k, t, ck]) => (
+          {KINDS.filter(([k]) => (k !== 'stuck' || c.stuck > 0) && (k !== 'volume' || c.volume > 0)).map(([k, t, ck]) => (
             <button key={k || 'all'} type="button" className={`tab${kind === k ? ' active' : ''}`} aria-pressed={kind === k} onClick={() => setKind(k)} style={CHIP}>{t} {data ? fmtNum(c[ck] ?? 0) : ''}</button>
           ))}
           {[['veeam', 'Veeam'], ['bareos', 'Bareos']].map(([k, t]) => (
