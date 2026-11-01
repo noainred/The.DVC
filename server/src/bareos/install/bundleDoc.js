@@ -12,7 +12,7 @@
  *  - BV 는 x.y.z(서명 manifest 버전 규칙) — <Bareos 메이저>.<YYYYMMDD>.<실행 번호>.
  *  - pyVmomi 는 8.x 만 고를 수 있다: Rocky 9 의 Python 3.9 에서 9.x 는 플러그인이 시작하지 못했다(docs/BAREOS-VMWARE-ROCKY9-INSTALL.md 7.4 현장 기록).
  */
-import { verifyEnvelopeText, matchArtifact, VERSION_RE } from '../../upgrade/signatureCore.js';
+import { verifyEnvelopeText, matchArtifact, VERSION_RE, MANIFEST_MAX_BYTES } from '../../upgrade/signatureCore.js';
 
 export const BUNDLE_TAG = 'bareos-bundle';
 export const POINTER_NAME = 'bareos-bundle.json';
@@ -27,6 +27,7 @@ const PKG_NAME_RE = /^[A-Za-z0-9][A-Za-z0-9._+-]{0,99}$/;
 const PKG_VER_RE = /^[A-Za-z0-9][A-Za-z0-9._+~^-]{0,99}$/;
 export const PYVMOMI_RE = /^8\.\d{1,3}\.\d{1,3}(\.\d{1,3}){0,2}$/;
 export const POINTER_MAX_BYTES = 8192;
+export const MANIFEST_MAX = MANIFEST_MAX_BYTES;
 export const CONTENTS_MAX_BYTES = 2 * 1024 * 1024;
 export const TAR_MAX_BYTES = 3 * 1024 * 1024 * 1024;
 

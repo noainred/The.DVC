@@ -631,11 +631,18 @@ function sftpReadFile(conn, path, { maxBytes = SFTP_READ_MAX } = {}) {
 }
 export { sftpReadFile as _sftpReadFileForTest };
 
-function sftpPutFile(conn, localPath, remotePath) {
+/**
+ * opts.onProgress(sent, total) — 선택(v2.844 Bareos 완전 설치의 번들 전송 진행률). 주지 않으면 예전과 같다.
+ * opts.mode — 원격 파일 권한(선택).
+ */
+function sftpPutFile(conn, localPath, remotePath, opts = {}) {
   return new Promise((resolve, reject) => {
     conn.sftp((err, sftp) => {
       if (err) return reject(err);
-      sftp.fastPut(localPath, remotePath, (e) => { endSftp(sftp); return e ? reject(e) : resolve(); });
+      const o = {};
+      if (typeof opts.onProgress === 'function') o.step = (sent, _chunk, total) => { try { opts.onProgress(sent, total); } catch { /* 진행률 표시 실패가 전송을 끊지 않게 */ } };
+      if (Number.isInteger(opts.mode)) o.mode = opts.mode;
+      sftp.fastPut(localPath, remotePath, o, (e) => { endSftp(sftp); return e ? reject(e) : resolve(); });
     });
   });
 }
@@ -718,7 +725,7 @@ export async function withSsh(creds, fn, { signal = creds?.signal } = {}) {
     execAnswered: async (cmd, opts) => { const r = await (trace ? traced('answered', cmd, () => execAnswered(conn, cmd, opts)) : execAnswered(conn, cmd, opts)); log.push(r); return r; },
     readFile: (p) => sftpReadFile(conn, p),
     writeFile: (p, c, m) => sftpWriteFile(conn, p, c, m),
-    putFile: (local, remote) => sftpPutFile(conn, local, remote),
+    putFile: (local, remote, opts) => sftpPutFile(conn, local, remote, opts),
     log,
   };
   try {
