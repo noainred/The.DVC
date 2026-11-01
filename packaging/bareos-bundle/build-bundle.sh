@@ -30,7 +30,8 @@ PYVMOMI_DEFAULT="${PYVMOMI_DEFAULT:-8.0.3.0.1}"
 RUN_NO="${RUN_NO:-0}"
 # 설치 단계(러너)가 dnf install 에 넘기는 이름 — 여기서 받은 것과 같아야 한다(bundle.json install 로 전달).
 # bareos-webui(2026-11-01 사용자 결정 '완전 설치에 WebUI 추가') — httpd · php-fpm 은 의존으로 함께 받는다.
-INSTALL_PKGS=(bareos bareos-database-postgresql bareos-storage bareos-filedaemon bareos-filedaemon-python3-plugin bareos-vmware-plugin bareos-tools
+# v2.845: 'bareos' 메타 패키지는 bareos-client → bareos-traymonitor(Qt5 · mesa · X11 GUI)를 끌어온다(번들 RPM 실측) — 서버에 필요한 것만 이름으로 준다.
+INSTALL_PKGS=(bareos-director bareos-bconsole bareos-database-postgresql bareos-storage bareos-filedaemon bareos-filedaemon-python3-plugin bareos-vmware-plugin bareos-tools
   bareos-webui httpd php-fpm
   postgresql-server python3-pip python3-requests python3-urllib3 python3-six policycoreutils-python-utils tar openssl)
 

@@ -26,6 +26,7 @@ import {
 } from '../../bareos/service.js';
 import { pendingView, relayLimits } from '../../bareos/edgeOps.js';
 import { noteSetupStart, noteSetupEnd } from '../../bareos/inflight.js';
+import { claimSetup, releaseSetupLock, isSetupBusy, setupBusyReason } from '../../bareos/setupLocks.js';
 import { listAgentTokens } from '../../central/agentTokens.js';
 import { listInventory } from '../../central/inventory.js';
 import { pickAgent } from '../../cvp/formChoices.js';
@@ -216,11 +217,9 @@ function modeMismatch(job) {
 
 /** Director 마다 한 번에 하나(연결 시험 · 자동 설정) — 다른 법인 Director 의 작업은 막지 않는다. */
 const _testBusy = new Set();
-const _setupBusy = new Set();
 // v2.823 검토(S6·P10): 잠금이 Director 마다라, 서로 다른 Director 편집에서 **같은 서버**(myself.conf·공용 리소스)를 동시에 고칠 수 있었다 —
-//   원격 대상 주소로도 한 번에 하나(되돌리기가 서로의 파일을 지우거나 덮지 않게).
-const _setupHosts = new Map();   // 주소(소문자) → Director id
-const releaseSetup = (dirId) => { _setupBusy.delete(dirId); for (const [h, id] of _setupHosts) if (id === dirId) _setupHosts.delete(h); noteSetupEnd(dirId); };
+//   원격 대상 주소로도 한 번에 하나(되돌리기가 서로의 파일을 지우거나 덮지 않게). v2.845: 표는 bareos/setupLocks.js 하나(법인별 설정·완전 설치와 공유).
+const releaseSetup = (dirId) => { releaseSetupLock(dirId); noteSetupEnd(dirId); };
 const _catalogMemo = new Map();   // `${demo}|${directorId}|${settingsRev}` → { at, value }
 
 /**
@@ -262,9 +261,9 @@ function directorFor(req, res) {
  */
 function setupGate(req, res, dirId, plan, { otp = true } = {}) {
   if (isDemoGuest(req.user)) { res.status(403).json({ ok: false, demoGuest: true, reason: '데모 계정은 실제 서버에 접속할 수 없습니다.' }); return false; }
-  if (_setupBusy.has(dirId)) { res.status(409).json({ ok: false, reason: '이 Director 의 다른 자동 설정이 진행 중입니다 — 끝난 뒤 다시 시도하세요.' }); return false; }
+  if (isSetupBusy(dirId)) { res.status(409).json({ ok: false, reason: '이 Director 의 다른 자동 설정이 진행 중입니다 — 끝난 뒤 다시 시도하세요.' }); return false; }
   const hostKey = String(req.body?.host || '').trim().toLowerCase();
-  if (hostKey && _setupHosts.has(hostKey)) { res.status(409).json({ ok: false, reason: '같은 서버에 다른 Director 의 자동 설정이 진행 중입니다 — 끝난 뒤 다시 시도하세요.' }); return false; }
+  if (hostKey && setupBusyReason(dirId, hostKey)) { res.status(409).json({ ok: false, reason: '같은 서버에 다른 Director 의 자동 설정(또는 설정 변경 · 설치)이 진행 중입니다 — 끝난 뒤 다시 시도하세요.' }); return false; }
   // v2.822.3(I2-6 — 재현): 데모 Director 를 쓰는 동안은 화면 매핑이 데모 값이라 실제 서버 설정과 섞인다
   if (isDemoActive()) { res.status(409).json({ ok: false, reason: '데모 Director 를 쓰는 중입니다 — 자동 설정은 실제 Director 를 등록한 뒤(설정 › 법인별 Director 에서 추가) 쓸 수 있습니다.' }); return false; }
   const name = req.user?.username || '';
@@ -282,8 +281,7 @@ function setupGate(req, res, dirId, plan, { otp = true } = {}) {
     // otpRequired: 화면이 '꺼짐' 으로 알고 OTP 칸을 숨겼는데 그사이 다시 켜졌으면 칸을 다시 보이게 한다
     if (!v.ok) { res.status(403).json({ ok: false, otpRequired: true, reason: `OTP 인증 실패 — ${v.reason}` }); return false; }
   }
-  _setupBusy.add(dirId);
-  if (hostKey) _setupHosts.set(hostKey, dirId);
+  claimSetup(dirId, hostKey);
   noteSetupStart(dirId, directorById(dirId, effectiveSettings())?.name || dirId);   // G15: 업그레이드 자동 적용이 기다린다(bareos/inflight.js)
   return true;
 }
@@ -419,7 +417,7 @@ api.get('/tools/bareos-backup/settings', adminOnly, fullScopeOnly, (req, res) =>
   res.json({
     demo,
     ...pub,
-    directors: pub.directors.map((d) => ({ ...d, jobs: jobsByDir.get(d.id) || 0, busy: _setupBusy.has(d.id) })),
+    directors: pub.directors.map((d) => ({ ...d, jobs: jobsByDir.get(d.id) || 0, busy: isSetupBusy(d.id) })),
     rev: revToken(),   // 매핑·기본값 저장 때 돌려보낸다(P4 — 다른 화면의 저장을 덮지 않게)
     agents: (() => { try { return knownAgentNames(); } catch { return []; } })(),   // v2.824 담당 엣지 고르기(중앙이 아는 엣지)
     // v2.824 검토(W11·I3): 대행 작업 인출은 엣지별 개별 토큰 전용 — 토큰이 있는 엣지 이름(화면이 없는 이름을 '대행 불가' 로 표시)
@@ -485,7 +483,7 @@ api.post('/tools/bareos-backup/settings/directors', adminOnly, fullScopeOnly, fu
 api.put('/tools/bareos-backup/settings/directors/:directorId', adminOnly, fullScopeOnly, fullWriteOnly, (req, res) => {
   const id = String(req.params.directorId || '');
   // v2.821: 자동 설정이 끝에 Director 연결을 저장한다 — 그 사이의 저장을 받으면 어느 한쪽이 조용히 덮인다.
-  if (_setupBusy.has(id)) return res.status(409).json({ ok: false, reason: '이 Director 의 자동 설정이 진행 중입니다 — 끝난 뒤 저장하세요.' });
+  if (isSetupBusy(id)) return res.status(409).json({ ok: false, reason: '이 Director 의 자동 설정이 진행 중입니다 — 끝난 뒤 저장하세요.' });
   const b = { ...(req.body || {}) };
   if (b.agent !== undefined) {
     const prev = directorById(id, loadSettings());
@@ -504,7 +502,7 @@ api.put('/tools/bareos-backup/settings/directors/:directorId', adminOnly, fullSc
 /** Director 지우기 — 매핑·백업 대상이 가리키면 409(잡은 그 Director 의 conf 에 있다). Bareos 서버 쪽은 건드리지 않는다. */
 api.delete('/tools/bareos-backup/settings/directors/:directorId', adminOnly, fullScopeOnly, fullWriteOnly, (req, res) => {
   const id = String(req.params.directorId || '');
-  if (_setupBusy.has(id)) return res.status(409).json({ ok: false, reason: '이 Director 의 자동 설정이 진행 중입니다.' });
+  if (isSetupBusy(id)) return res.status(409).json({ ok: false, reason: '이 Director 의 자동 설정이 진행 중입니다.' });
   const st = loadSettings();
   const inUseByJobs = listJobs().filter((j) => !j.demo && jobDirectorId(j, st) === id).length;
   try {

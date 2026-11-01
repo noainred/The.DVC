@@ -37,6 +37,8 @@ export const RESULT_MS = Object.freeze({
   cancel: 120_000, log: 150_000, restore: 210_000, poll: 180_000,
   policy: 240_000,   // v2.839 정책 수집(읽기 전용 명령 7개 · 볼륨 목록이 크다)
   volumes: 90_000,   // v2.840 풀 하나의 볼륨 목록 즉시 조회(읽기 전용)
+  config: 150_000,   // v2.845 법인별 설정 조회(show 4 + llist pools · 읽기 전용)
+  jobNames: 120_000, // v2.845 재설치 뒤 다시 등록할 대상 고르기(.jobs · 읽기 전용)
   // 자동 설정: 엣지는 ttl(= 이 값 − MARGIN_MS) 이 지나면 SSH 를 끊고 되돌린다(v2.824 검토 P3 — 시한 신호가 닿지 않아 중앙이 손을 뗀 뒤에도 root 쓰기를 계속했다).
   //   인출 대기(최대 SECRET_TTL_MS) + 이 값 ≤ 포탈 요청 시한(SERVER_REQUEST_TIMEOUT_MS 기본 600초) — 테스트가 대조한다.
   'setup.preflight': 210_000, 'setup.director': 480_000, 'setup.fdPlugin': 480_000,

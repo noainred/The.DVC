@@ -21,6 +21,8 @@ export const DIR_STORAGE = 'PortalFile';
 export const FD_CLIENT = 'bareos-fd';          // 패키지 기본 Client 리소스 이름(같은 서버의 FD)
 export const DEFAULT_VOLUME_DIR = '/var/lib/bareos/storage';
 export const DEFAULT_CONSOLE = 'portal';
+/** SD 장치 수 = 동시 백업 수(패키지 기본 FileStorage Count = 10 · Director Storage Maximum Concurrent Jobs = 10 — 번들 RPM 실측 · v2.845). */
+export const SD_COUNT = 10;
 
 /** 화면·감사가 쓰는 단계 표. remote = 엣지 노드 러너가 하는 단계. */
 export const STEPS = Object.freeze([
@@ -116,7 +118,7 @@ export function planEnv({ jobId, bundle, install, plan, startStep = 0, runMode =
     q('PYVMOMI_FIX', plan.pyvmomiFix ? 1 : 0, /^[01]$/),
     q('VOLUME_DIR', plan.volumeDir, PATH_RE),
     q('HOST_ADDR', hostAddr, HOST_ADDR_RE),
-    q('SD_DEVICE', SD_DEVICE), q('SD_MEDIA', SD_MEDIA), q('DIR_STORAGE', DIR_STORAGE),
+    q('SD_DEVICE', SD_DEVICE), q('SD_MEDIA', SD_MEDIA), q('DIR_STORAGE', DIR_STORAGE), q('SD_COUNT', SD_COUNT, /^\d{1,3}$/),
     q('WEBUI', plan.webui === false ? 0 : 1, /^[01]$/),
     q('RESET', plan.mode === 'reinstall' ? 1 : 0, /^[01]$/),
     q('RESET_DB', plan.reset?.catalog ? 1 : 0, /^[01]$/),
