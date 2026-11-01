@@ -144,3 +144,12 @@ export function statusOf(code) {
 }
 /** 끝난 상태인가(폴러가 pending 을 내릴지). */
 export const isFinalStatus = (code) => ['ok', 'warning', 'error', 'canceled'].includes(statusOf(code));
+
+/**
+ * v2.841: 자동 설정 2단계가 파일을 놓는 종류 중 사전 점검이 '포탈 파일인가' 를 읽는 것(autoSetup.js @@own · edgeResult.js 정제가 같이 쓴다 — 잎 모듈에 둔다:
+ * edgeResult 가 autoSetup 을 부르면 autoSetup → service → edgeOps → edgeResult 순환이 된다).
+ * job 은 넣지 않는다 — 포탈이 등록한 VM 잡이 잡마다 job/<이름>.conf 라 수천 줄이 되어 점검 출력 상한을 넘긴다(복원 잡 이름 겹침은 2단계가 쓰기 전에 막는다).
+ */
+export const OWN_TYPES = Object.freeze(['console', 'profile', 'fileset', 'jobdefs', 'pool', 'schedule']);
+/** 종류마다 읽는 파일 수 상한(점검 출력 줄 상한 안에 들게). */
+export const OWN_PER_TYPE = 40;

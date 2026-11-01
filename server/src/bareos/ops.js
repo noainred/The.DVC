@@ -42,7 +42,7 @@ export const LIVE_CLIENTS_MAX = 20;
 export const OPS = Object.freeze({
   /** 접속 확인(배너·버전·클라이언트). */
   probe: (s) => probe(s),
-  /** 매핑 드롭다운 원천(.clients·.storages·.pools·.schedules·.jobdefs·.filesets). */
+  /** 매핑 드롭다운 원천(.clients·.storages·.pools·.schedule·.jobdefs·.filesets). */
   catalog: (s) => catalogLists(s),
 
   /**

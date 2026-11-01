@@ -277,7 +277,7 @@ export function demoCall(cmd, settings, directorId = '') {
     case '.clients': return { clients: uniq(sites.map((s) => s.client)) };
     case '.storages': return { storages: uniq(sites.map((s) => s.storage)) };
     case '.pools': return { pools: uniq([...sites.map((s) => s.pool), 'Scratch']) };
-    case '.schedules': return { schedules: uniq(['VMwareNightly', 'VMwareWeekly']) };
+    case '.schedule': return { schedules: uniq(['VMwareNightly', 'VMwareWeekly']) };
     case '.jobdefs': return { jobdefs: uniq(['DefaultJob', DEFAULTS.defaults.jobDefs]) };
     case '.filesets': return { filesets: uniq(['Catalog', DEFAULTS.defaults.fileSet]) };
     case '.jobs': {   // 실제처럼 {name, enabled}(ua_dotcmds.cc DotJobsCmd — enabled 는 Director 메모리 값)

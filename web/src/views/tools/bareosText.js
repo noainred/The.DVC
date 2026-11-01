@@ -309,7 +309,7 @@ export function directorPrepBlock({ defaults = {}, consoleName = 'portal', anyCl
     `}`,
     `Profile {`,
     `  Name = "portal"`,
-    `  Command ACL = .api, .jobs, .clients, .storages, .pools, .schedules, .jobdefs, .filesets, .bvfs_get_jobids, configure, run, restore, llist, list, cancel, enable, disable, delete, status, show, version, !*all*`,
+    `  Command ACL = .api, .jobs, .clients, .storages, .pools, .schedule, .jobdefs, .filesets, .bvfs_get_jobids, configure, run, restore, llist, list, cancel, enable, disable, delete, status, show, version, !*all*`,
     `  Job ACL = *all*`,
     `  Client ACL = *all*`,
     `  Storage ACL = *all*`,
@@ -915,6 +915,9 @@ export function fillEmptyMapping(sites = [], suggestions = [], vcName = (id) => 
   const by = new Map((suggestions || []).map((x) => [x.vcenterId, x.fields || {}]));
   let filled = 0;
   const left = [];
+  // v2.841: Schedule 은 비워도 되는 칸이라 left 에 넣지 않는다 — 대신 비어 남은 vCenter 와 '목록을 못 읽어서' 인지를 따로 센다(fillResultText)
+  const scheduleBlank = [];
+  let scheduleUnread = false;
   const out = sites.map((s) => {
     const f = by.get(s.vcenterId);
     if (!f) {
@@ -926,11 +929,112 @@ export function fillEmptyMapping(sites = [], suggestions = [], vcName = (id) => 
     for (const [k, label] of MAPPING_FIELDS) {
       if (next[k]) continue;
       const v = f[k]?.value;
-      if (typeof v === 'string' && v) { next[k] = v; filled += 1; } else if (k !== 'schedule') left.push(`${vcName(s.vcenterId)} · ${label}`);
+      if (typeof v === 'string' && v) { next[k] = v; filled += 1; continue; }
+      if (k === 'schedule') { scheduleBlank.push(vcName(s.vcenterId)); if (f[k]?.unread) scheduleUnread = true; continue; }
+      left.push(`${vcName(s.vcenterId)} · ${label}${f[k]?.unread ? '(Director 목록을 읽지 못함)' : ''}`);
     }
     return next;
   });
-  return { sites: out, filled, left };
+  return { sites: out, filled, left, scheduleBlank, scheduleUnread };
+}
+
+/**
+ * 빈 칸 채우기 결과 한 줄(순수 — v2.841 사용자 화면: 채울 칸이 없을 때도 '빈 칸 0개를 채웠습니다 — 확인하고 매핑 저장' 이라 무엇을 하라는지 몰랐다).
+ * @param {{ filled, left, scheduleBlank?, scheduleUnread? }} out fillEmptyMapping 결과 @param {{ unsaved?: boolean }} o 채우기 전 표에 저장하지 않은 변경이 있었나
+ * @returns {{ text: string, tone: true|'warn'|null }} tone — 화면 단계 표지(true 완료 · 'warn' 확인 필요 · null 진행: 저장이 남음)
+ */
+export function fillResultText(out, { unsaved = false } = {}) {
+  const left = out?.left || [];
+  const filled = Number(out?.filled) || 0;
+  const head = filled > 0
+    ? `빈 칸 ${filled}개를 채웠습니다(저장 전입니다 — 아래 표에서 확인하고 ‘매핑 저장’ 을 누르세요. 저장해야 5단계가 그 값을 씁니다).`
+    : left.length ? '채울 수 있는 빈 칸이 없습니다.'
+      : `채울 빈 칸이 없습니다 — 필수 칸(vcserver · FD · SD · 풀 · INI 경로)이 이미 모두 차 있습니다.${unsaved ? ' 표에 저장하지 않은 변경이 있으니 ‘매핑 저장’ 을 누르세요.' : ' 저장된 매핑 그대로 5단계로 넘어가면 됩니다.'}`;
+  const parts = [head];
+  if (left.length) parts.push(`제안이 없어 남은 칸: ${left.slice(0, 6).join(', ')}${left.length > 6 ? ` 외 ${left.length - 6}` : ''} — 직접 고르세요.`);
+  const sb = out?.scheduleBlank || [];
+  if (sb.length) {
+    parts.push(`Schedule 은 ${out?.scheduleUnread ? 'Director 의 스케줄 목록을 읽지 못해' : '고를 후보가 하나로 정해지지 않아'} 비워 두었습니다(${sb.slice(0, 4).join(', ')}${sb.length > 4 ? ` 외 ${sb.length - 4}` : ''}) — 비워 두면 Director 스케줄 없이 등록합니다(수동 실행 · 포탈 백업 그룹 스케줄).`);
+  }
+  const tone = filled > 0 ? null : left.length || unsaved ? 'warn' : true;
+  return { text: parts.join(' '), tone };
+}
+
+/* ───────── v2.841 자동 설정 2단계 — 사람이 만든 파일과의 겹침(사전 점검 confFiles) ───────── */
+
+export const DIR_CONF_ROOT = '/etc/bareos/bareos-dir.d';
+const CATALOG_LABEL = Object.freeze({ clients: 'FD client', storages: 'SD storage', pools: 'Pool', schedules: 'Schedule', jobdefs: 'JobDefs', filesets: 'FileSet' });
+
+/**
+ * 2단계가 놓을 리소스의 종류·이름(순수) — 서버 autoSetup.directorResources 와 같은 목록(bareosAutoSetup 시험이 대조).
+ * @param {{ defaults?, consoleName?, pools?: boolean, schedule?: boolean }} o
+ */
+export function directorPlanFiles({ defaults = {}, consoleName = 'portal', pools = false, schedule = false } = {}) {
+  return [
+    { type: 'fileset', name: defaults.fileSet || 'PortalVmwareGeneric' },
+    { type: 'jobdefs', name: defaults.jobDefs || 'PortalVmwareDefaults' },
+    { type: 'job', name: defaults.restoreJob || 'PortalVmwareRestore' },
+    { type: 'console', name: consoleName || 'portal' },
+    { type: 'profile', name: 'portal' },
+    ...(pools ? [{ type: 'pool', name: VMWARE_POOL_FULL }, { type: 'pool', name: VMWARE_POOL_INCR }] : []),
+    ...(schedule ? [{ type: 'schedule', name: VMWARE_SCHEDULE }] : []),
+  ];
+}
+
+/**
+ * 겹침(순수) — 사전 점검이 '포탈이 만든 것이 아님(foreign)·일반 파일 아님(notfile)' 으로 읽은 파일과 같은 종류·이름.
+ * confFiles 가 없으면(점검 전 · 옛 서버·엣지) null — 겹침이 없다고 단정하지 않는다(서버 2단계가 쓰기 전에 다시 막는다).
+ */
+export function directorConflicts(plan = [], confFiles) {
+  if (!Array.isArray(confFiles)) return null;
+  const bad = new Map(confFiles.filter((f) => f && f.state !== 'managed').map((f) => [`${f.type}/${f.name}`, f.state]));
+  return plan.filter((p) => bad.has(`${p.type}/${p.name}`)).map((p) => ({ ...p, state: bad.get(`${p.type}/${p.name}`), path: `${DIR_CONF_ROOT}/${p.type}/${p.name}.conf` }));
+}
+
+const CONSOLE_CANDIDATES = Object.freeze(['portal', 'portal-vmware', 'portal2', 'portal3', 'portal4', 'portal5']);
+
+/** 포탈 전용 콘솔 이름(순수) — 사람이 만든 콘솔 파일과 겹치지 않는 첫 후보(avoid 는 건너뜀). 점검 결과가 없으면 후보 순서대로. 모두 막히면 ''. */
+export function freeConsoleName(confFiles, avoid = '') {
+  const bad = new Set((Array.isArray(confFiles) ? confFiles : []).filter((f) => f && f.type === 'console' && f.state !== 'managed').map((f) => f.name));
+  return CONSOLE_CANDIDATES.find((n) => n !== avoid && !bad.has(n)) || '';
+}
+
+/** 2단계 409 응답의 paths 에 그 콘솔 파일이 있는가(순수). */
+export const consoleTaken = (paths, consoleName) => Array.isArray(paths) && !!consoleName && paths.includes(`${DIR_CONF_ROOT}/console/${consoleName}.conf`);
+
+/** 겹침 안내 한 줄(순수 · 백틱 없음). */
+export function conflictText(conflicts = []) {
+  if (!conflicts.length) return '';
+  const what = conflicts.map((c) => `${c.type} ‘${c.name}’${c.state === 'notfile' ? '(일반 파일 아님)' : ''}`).join(' · ');
+  const con = conflicts.some((c) => c.type === 'console');
+  return `이미 있는 파일과 겹칩니다: ${what} — 포탈은 남이 만든 파일을 덮지 않으므로 이대로는 2단계가 거부됩니다(OTP 를 쓰기 전에 막았습니다).`
+    + (con ? ' ‘만들 콘솔 이름’ 을 포탈 전용 이름으로 바꾸세요(기존 콘솔은 그대로 둡니다).' : '')
+    + (conflicts.some((c) => c.type !== 'console') ? ' 그 밖의 이름은 설정 탭 기본값을 바꾸거나 전용 Pool · Schedule 만들기를 끄세요.' : '')
+    + ' 서버에서 파일을 정리했으면 1단계 사전 점검을 다시 하세요.';
+}
+
+/** 2단계 409 응답의 paths → 겹친 파일(순수 · 남의 파일로 본다). 모양이 다른 경로는 버린다. */
+export function ownFromPaths(paths) {
+  const out = [];
+  for (const p of Array.isArray(paths) ? paths.slice(0, 20) : []) {
+    const m = /^\/etc\/bareos\/bareos-dir\.d\/([a-z]{1,10})\/([A-Za-z0-9._-]{1,64})\.conf$/.exec(String(p));
+    if (m) out.push({ type: m[1], name: m[2], state: 'foreign' });
+  }
+  return out;
+}
+
+/**
+ * 카탈로그 일부 실패 한 줄(순수 — v2.841). Bareos 는 없는 명령과 Profile ACL 로 막힌 명령을 같은 문구('is an invalid command')로 답한다 —
+ * 어느 쪽인지 단정하지 않고 둘 다 안내한다. Schedule 은 v2.840 까지 포탈이 잘못된 명령(.schedules)을 보내 늘 실패했다.
+ */
+export function catalogErrorText(errors) {
+  const keys = Object.keys(errors || {});
+  if (!keys.length) return '';
+  const names = keys.map((k) => CATALOG_LABEL[k] || k).join(' · ');
+  const sch = keys.includes('schedules')
+    ? ' Schedule 은 콘솔 Profile 의 Command ACL 에 .schedule 이 있어야 읽힙니다 — v2.840 까지의 자동 설정으로 만든 포탈 콘솔이면 2단계를 다시 실행하세요(포탈이 만든 Profile 을 고쳐 씁니다).'
+    : '';
+  return `Director 목록 일부를 읽지 못했습니다(${names}) — 그 칸은 이름을 직접 적으세요.${sch}`;
 }
 
 /** INI 경로·잡 이름에 쓰는 vCenter 조각(서버 bareosBackup.js suggestMapping 과 같은 규칙). */

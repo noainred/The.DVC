@@ -10,6 +10,7 @@ import {
   diagView, directorPrepBlock, fdIniTemplate, PREP_CHECKLIST, autoSetupDirectorText, autoSetupFdText, thumbprintText,
   outcomeUnknown, missingText, preflightView, preflightSummary, autoSetupFdPluginText, fillEmptyMapping, directorFormPatch, withRelayWait, secText, relayKindLabel, SETTINGS_READ_ONLY,
   VMWARE_POOL_FULL, VMWARE_SCHEDULE, WEEKDAYS, WEEKDAY_LABEL, MAPPING_FIELDS, newMappingRow, vcSlug,
+  fillResultText, directorPlanFiles, directorConflicts, freeConsoleName, consoleTaken, conflictText, ownFromPaths, catalogErrorText,
 } from './bareosText.js';
 
 /**
@@ -392,8 +393,10 @@ function DirectorEditor({ s, dir, locked, onReload, onSaved, onClose, onDeleted 
       const r = await fetchJson(`${BASE}/settings/directors/${enc(dir.id)}/suggest`, {}, undefined, withRelayWait(DIRECTOR_GET, dir, s.relayLimits, 'catalog'));
       const out = fillEmptyMapping(rowsRef.current, r.suggestions, vcName);   // W10: 기다리는 동안 고친 칸을 요청 때 사본으로 덮지 않는다
       setRows(out.sites);
-      setMapMsg({ ok: true, text: `빈 칸 ${out.filled}개를 채웠습니다(저장 전입니다 — 확인한 뒤 ‘매핑 저장’ 을 누르세요).${out.left.length ? ` 제안이 없어 남은 칸: ${out.left.slice(0, 6).join(', ')}${out.left.length > 6 ? ` 외 ${out.left.length - 6}` : ''}.` : ''}` });
-      return out.filled;
+      // v2.841: 채울 칸이 없을 때 '0개를 채웠습니다 — 매핑 저장' 대신 무엇이 남았는지(Schedule 을 못 읽은 이유 포함)를 말한다
+      const res = fillResultText(out, { unsaved });
+      setMapMsg({ ok: res.tone === 'warn' ? 'warn' : true, text: res.text });
+      return res;
     } catch (e) { setMapMsg({ ok: false, text: `매핑 채움 실패: ${e.message}` }); return null; } finally { setBusy(''); }
   };
   const opts = (k, cur) => { const list = cat?.[k] || []; return [...new Set([...(cur ? [cur] : []), ...list])]; };
@@ -476,7 +479,7 @@ function DirectorEditor({ s, dir, locked, onReload, onSaved, onClose, onDeleted 
         <button type="button" className="logout-btn" style={BTN} disabled={!canConnect || !rows.length || !!busy} onClick={fillMap}>{busy === 'suggest' ? '채우는 중…' : '빈 칸 채우기(4단계)'}</button>
       </div>
       {catErr && <div className="muted" style={{ fontSize: 12, color: 'var(--red)', marginBottom: 6 }}>카탈로그를 읽지 못했습니다: {catErr.message} — 이름을 직접 적으세요.</div>}
-      {cat?.errors && Object.keys(cat.errors).length > 0 && <div className="muted" style={{ fontSize: 12, color: 'var(--amber)', marginBottom: 6 }}>카탈로그 일부를 읽지 못했습니다({Object.keys(cat.errors).join(' · ')}) — 그 칸은 이름을 직접 적으세요.</div>}
+      {cat?.errors && Object.keys(cat.errors).length > 0 && <div className="muted" style={{ fontSize: 12, color: 'var(--amber)', marginBottom: 6 }}>{catalogErrorText(cat.errors)}</div>}
       {!canConnect && <div className="muted" style={{ fontSize: 12, marginBottom: 6 }}>콘솔 접속값이 아직 없어 카탈로그를 읽지 않습니다 — 자동 설정 2단계를 끝내면 드롭다운이 채워집니다.</div>}
       <div className="table-wrap" style={{ maxHeight: '44vh' }}>
         {/* Chromium 1440 확인: '작업' 열이 표 오른쪽 밖(안쪽 가로 스크롤)이라 빼기 버튼이 보이지 않았다 — 버튼을 첫 열(vCenter) 아래로 옮겼다 */}
@@ -534,9 +537,14 @@ function AutoSetupPanel({ s, dir, rows, editCount, cat, unsaved, locked, onDirec
   const [pf, setPf] = useState(null);        // 사전 점검 결과
   const [copyMsg, setCopyMsg] = useState(null);
   const [busy, setBusy] = useState('');
-  const [d, setD] = useState({ directorPort: String(dir.port || 9101), consoleName: dir.consoleName || 'portal', restoreClient: '', restoreStorage: '', restorePool: '',
+  // v2.841(사용자 화면 — 'admin' 으로 채워져 사람이 만든 console/admin.conf 에 막힘): 2단계는 **새 포탈 전용 콘솔**을 만든다 — 지금 연결 콘솔 이름이
+  //   portal 로 시작할 때만(예전 자동 설정이 만든 이름으로 추정) 그대로 두고, 아니면 'portal'. 사전 점검이 겹침을 보면 빈 이름으로 다시 바꾼다.
+  const [d, setD] = useState({ directorPort: String(dir.port || 9101), consoleName: /^portal/i.test(dir.consoleName || '') ? dir.consoleName : 'portal', restoreClient: '', restoreStorage: '', restorePool: '',
     usePools: true, fullDays: '90', incrDays: '30', maxVolumeGB: '50', useSchedule: true, fullDay: 'sun', time: '02:00' });
   const [f, setF] = useState({ vcenterId: rows[0]?.vcenterId || '', fdHost: '', vcuser: '', vcpass: '', vcthumbprint: '' });
+  // v2.841: 2단계 409 가 알려 준 남의 파일(사전 점검보다 새 사실 — 다음 사전 점검이 비운다) · 콘솔 이름을 바꾼 이유
+  const [extraOwn, setExtraOwn] = useState([]);
+  const [consoleNote, setConsoleNote] = useState('');
   const mark = (n, ok, text) => setSt((x) => ({ ...x, [n]: { ok, at: Date.now(), text } }));
   const unmark = (n) => setSt((x) => { if (!x[n]) return x; const y = { ...x }; delete y[n]; return y; });
   useEffect(() => { if (!touched.current.host) setSsh((x) => ({ ...x, host: dir.host || '' })); }, [dir.host]);
@@ -548,6 +556,7 @@ function AutoSetupPanel({ s, dir, rows, editCount, cat, unsaved, locked, onDirec
   };
   const setDk = (k, v) => {
     if (k === 'directorPort') touched.current.directorPort = true;
+    if (k === 'consoleName') { touched.current.consoleName = true; setConsoleNote(''); }
     setD((x) => {
       const y = { ...x, [k]: v };
       // W8: 전용 Pool 을 끄면 그 Pool 을 가리키던 복원 풀은 비운다(정의 없는 풀을 참조하면 bareos-dir -t 가 거부한다)
@@ -581,6 +590,16 @@ function AutoSetupPanel({ s, dir, rows, editCount, cat, unsaved, locked, onDirec
       const r = await postJson(url('preflight'), sshBody, withRelayWait({}, dir, s.relayLimits, 'setup.preflight', { setup: true }));
       requireChanged(r);
       setPf(r);
+      setExtraOwn([]);
+      // v2.841: 만들 콘솔 이름이 사람이 만든 콘솔과 겹치면(사람이 손대지 않은 칸만) 겹치지 않는 포탈 전용 이름으로 바꾼다 — OTP 를 쓰기 전에
+      const cur = d.consoleName;
+      if (Array.isArray(r.confFiles) && !touched.current.consoleName && r.confFiles.some((x) => x.type === 'console' && x.name === cur && x.state !== 'managed')) {
+        const next = freeConsoleName(r.confFiles, cur);
+        if (next) {
+          setD((x) => (x.consoleName === cur ? { ...x, consoleName: next } : x));
+          setConsoleNote(`콘솔 ‘${cur}’ 은(는) 이미 있고 포탈이 만든 것이 아니어서(사람이 쓰는 콘솔일 수 있습니다) 만들 콘솔 이름을 ‘${next}’ 로 바꿨습니다. 기존 ‘${cur}’ 콘솔은 그대로 두고, 2단계가 성공하면 이 Director 의 연결이 새 콘솔로 바뀝니다.`);
+        }
+      }
       const rr = r.resources || {};
       setD((x) => ({ ...x, restoreClient: x.restoreClient || (rr.client || [])[0] || '', restoreStorage: x.restoreStorage || (rr.storage || [])[0] || '', restorePool: x.restorePool || (x.usePools ? VMWARE_POOL_FULL : (rr.pool || [])[0] || '') }));
       // W11: 못 읽음(unknown)·주의(warn)가 있으면 '완료' 가 아니라 '확인 필요'
@@ -589,16 +608,31 @@ function AutoSetupPanel({ s, dir, rows, editCount, cat, unsaved, locked, onDirec
   };
   const runDirector = async () => {
     setBusy('2');
+    const body = { ...sshBody, otp: ssh.otp, directorPort: Number(d.directorPort) || 9101, consoleName: d.consoleName, restoreClient: d.restoreClient, restoreStorage: d.restoreStorage, restorePool: d.restorePool,
+      ...(d.usePools ? { pools: { fullDays: Number(d.fullDays), incrDays: Number(d.incrDays), maxVolumeGB: Number(d.maxVolumeGB) } } : {}),
+      ...(d.useSchedule ? { schedule: { fullDay: d.fullDay, time: d.time } } : {}) };
     try {
-      const body = { ...sshBody, otp: ssh.otp, directorPort: Number(d.directorPort) || 9101, consoleName: d.consoleName, restoreClient: d.restoreClient, restoreStorage: d.restoreStorage, restorePool: d.restorePool,
-        ...(d.usePools ? { pools: { fullDays: Number(d.fullDays), incrDays: Number(d.incrDays), maxVolumeGB: Number(d.maxVolumeGB) } } : {}),
-        ...(d.useSchedule ? { schedule: { fullDay: d.fullDay, time: d.time } } : {}) };
       const r = await postJson(url('director'), body, withRelayWait({}, dir, s.relayLimits, 'setup.director', { setup: true }));
       requireChanged(r);
       mark(2, true, autoSetupDirectorText(r));
       setSsh((x) => ({ ...x, otp: '' }));
       await onDirectorDone();
-    } catch (e) { onFail(2, e, 'Director 자동 설정', true); } finally { setBusy(''); }
+    } catch (e) {
+      onFail(2, e, 'Director 자동 설정', true);
+      // v2.841: 남의 파일에 막혔으면(409) 그 파일을 기억해 다음 실행을 OTP 전에 막고, 콘솔이 겹친 것이면 겹치지 않는 포탈 전용 이름을 미리 넣어 둔다
+      if (e?.body?.code === 'conflict') {
+        const own = ownFromPaths(e.body.paths);
+        if (own.length) setExtraOwn((x) => [...x, ...own]);
+        if (consoleTaken(e.body.paths, body.consoleName)) {
+          const next = freeConsoleName([...(pf?.confFiles || []), ...extraOwn, ...own], body.consoleName);
+          if (next) {
+            touched.current.consoleName = false;
+            setD((x) => (x.consoleName === body.consoleName ? { ...x, consoleName: next } : x));
+            setConsoleNote(`만들 콘솔 이름을 ‘${next}’ 로 바꿔 두었습니다 — 새 OTP 로 다시 실행하세요(기존 ‘${body.consoleName}’ 콘솔은 그대로 둡니다).`);
+          }
+        }
+      }
+    } finally { setBusy(''); }
   };
   const runPlugin = async () => {
     setBusy('3');
@@ -633,15 +667,18 @@ function AutoSetupPanel({ s, dir, rows, editCount, cat, unsaved, locked, onDirec
   };
   const runFill = async () => {
     setBusy('4');
-    const n = await onFill();
-    if (n !== null) mark(4, null, `매핑 빈 칸 ${n}개를 채웠습니다 — 아래 표에서 확인하고 ‘매핑 저장’ 을 누르세요(저장해야 5단계가 그 값을 씁니다).`);
+    const res = await onFill();   // v2.841: { text, tone } — 채울 칸이 없을 때·Schedule 을 못 읽었을 때를 그대로 말한다
+    if (res) mark(4, res.tone, res.text);
     else mark(4, false, '매핑 채움 실패 — 아래 표의 안내를 보세요.');
     setBusy('');
   };
 
   const any = !!busy || !!busyOuter || locked || s.demo;
-  const dReady = sshOk && otpOk && d.restoreClient && d.restoreStorage && d.restorePool && !any;
-  const dMissing = missingText([[sshOk, 'SSH 주소·비밀번호'], [d.restoreClient && d.restoreStorage && d.restorePool, '복원 잡 FD·스토리지·풀'], [otpOk, 'OTP 6자리']]);
+  // v2.841: 사전 점검(또는 앞선 409)이 알려 준 남의 파일과 2단계가 놓을 파일이 겹치면 OTP 를 쓰기 전에 막는다(서버도 쓰기 전에 다시 막는다)
+  const ownKnown = (pf?.confFiles || extraOwn.length) ? [...(pf?.confFiles || []), ...extraOwn] : null;
+  const conflicts = directorConflicts(directorPlanFiles({ defaults: s.defaults, consoleName: d.consoleName, pools: d.usePools, schedule: d.useSchedule }), ownKnown) || [];
+  const dReady = sshOk && otpOk && d.restoreClient && d.restoreStorage && d.restorePool && !conflicts.length && !any;
+  const dMissing = missingText([[sshOk, 'SSH 주소·비밀번호'], [d.restoreClient && d.restoreStorage && d.restorePool, '복원 잡 FD·스토리지·풀'], [!conflicts.length, '겹치는 파일 정리(위 안내)'], [otpOk, 'OTP 6자리']]);
   // W3: FD INI 는 저장된 매핑의 vcserver·INI 경로를 쓴다 — 비어 있으면 4단계(채움 → 저장)가 먼저다
   const siteReady = !!(site && site.vcserver && site.configFile);
   const fReady = sshOk && siteReady && f.vcuser && f.vcpass && f.vcthumbprint && otpOk && !unsaved && !any;
@@ -706,7 +743,7 @@ function AutoSetupPanel({ s, dir, rows, editCount, cat, unsaved, locked, onDirec
         <div style={ROW}><b>2 Director 리소스</b><span className="muted" style={{ fontSize: 11.5 }}>콘솔 · Profile · FileSet · JobDefs · 복원 잡 (+ Pool · Schedule) → bareos-dir -t → reload → 새 콘솔로 접속 확인 → 성공하면 이 Director 의 연결을 저장합니다(주소 = 위 SSH 주소 · 포트 = 아래 Director 포트 · 그 콘솔)</span></div>
         <div style={GRID}>
           <label className="muted" style={FIELD}>Director 포트<input className="input" style={INP} inputMode="numeric" value={d.directorPort} onChange={(e) => setDk('directorPort', e.target.value.replace(/\D/g, '').slice(0, 5))} aria-label="Director 포트" /></label>
-          <label className="muted" style={FIELD}>만들 콘솔 이름<input className="input" style={INP} value={d.consoleName} onChange={(e) => setDk('consoleName', e.target.value.trim())} aria-label="만들 콘솔 이름" /></label>
+          <label className="muted" style={FIELD} title="포탈 전용 콘솔을 새로 만듭니다 — 사람이 쓰는 콘솔(admin 등)의 이름을 쓰면 그 파일을 덮지 않고 거부합니다">만들 콘솔 이름(포탈 전용)<input className="input" style={INP} value={d.consoleName} onChange={(e) => setDk('consoleName', e.target.value.trim())} aria-label="만들 콘솔 이름" /></label>
           {[['restoreClient', 'clients', 'client', '복원 잡 FD'], ['restoreStorage', 'storages', 'storage', '복원 잡 스토리지'], ['restorePool', 'pools', 'pool', '복원 잡 풀']].map(([k, ck, pk, label]) => {
             const list = pick(ck, pk);
             return (
@@ -748,6 +785,8 @@ function AutoSetupPanel({ s, dir, rows, editCount, cat, unsaved, locked, onDirec
           <div style={{ ...ROW, marginTop: 6 }}><button type="button" className="logout-btn" style={BTN} onClick={() => copyWith(setCopyMsg)(prep)}>사전 준비 블록 복사</button></div>
           <Msg m={copyMsg} />
         </details>
+        {consoleNote && <div className="banner" role="status" style={{ marginTop: 8, fontSize: 12, lineHeight: 1.6 }}>{consoleNote}</div>}
+        {conflicts.length > 0 && <div className="banner warn" role="alert" style={{ marginTop: 8, fontSize: 12, lineHeight: 1.6 }}>{conflictText(conflicts)}</div>}
         <div style={{ ...ROW, marginTop: 10 }}>
           <button type="button" className="login-btn" style={{ flex: 'none', padding: '8px 16px' }} disabled={!dReady} onClick={runDirector}>{busy === '2' ? '설정 중…' : 'Director 자동 설정'}</button>
           <span className="muted" style={{ fontSize: 11.5 }}>{any ? '' : dMissing || 'root 로 접속합니다 · 비밀번호는 저장하지 않습니다'}</span>

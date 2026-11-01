@@ -29,7 +29,7 @@ import { withSsh } from '../proxy/sshExec.js';
 import { remoteTmpDir } from '../agent/deploy.js';
 import { openConsole } from './console.js';
 import { probe } from './director.js';
-import { isResourceName } from './names.js';
+import { isResourceName, OWN_TYPES, OWN_PER_TYPE } from './names.js';
 import { loadSettings, updateDirector, directorIssue, directorCred, directorById } from './settings.js';
 import { bareosAuthGuard } from './service.js';
 import { ipBlockReason, ssrfBlockReasonResolved } from '../util/ssrfBlock.js';
@@ -120,7 +120,7 @@ export function directorResources({ defaults = {}, consoleName, consolePassword,
     ].join('\n') },
     { type: 'profile', name: 'portal', text: [
       'Profile {', '  Name = "portal"',
-      '  Command ACL = .api, .jobs, .clients, .storages, .pools, .schedules, .jobdefs, .filesets, .bvfs_get_jobids, configure, run, restore, llist, list, cancel, enable, disable, delete, status, show, version, !*all*',
+      '  Command ACL = .api, .jobs, .clients, .storages, .pools, .schedule, .jobdefs, .filesets, .bvfs_get_jobids, configure, run, restore, llist, list, cancel, enable, disable, delete, status, show, version, !*all*',
       '  Job ACL = *all*', '  Client ACL = *all*', '  Storage ACL = *all*', '  Pool ACL = *all*', '  Schedule ACL = *all*', '  FileSet ACL = *all*',
       '  Catalog ACL = *all*', '  Where ACL = *all*', '  Plugin Options ACL = *all*', '}',
     ].join('\n') },
@@ -373,8 +373,8 @@ export async function setupDirector(b = {}, ctx = null) {
         if (st.state === 'notfile') throw fail('conflict', `${f.path} 가 일반 파일이 아닙니다(심링크·디렉터리) — 확인 뒤 다시 시도하세요. 아무것도 바꾸지 않았습니다.`);
         plan.push({ ...f, state: st.state, old: st.old ?? null });
       }
-      const foreign = plan.filter((f) => f.state === 'foreign').map((f) => f.path);
-      if (foreign.length) throw fail('conflict', `이미 있는 설정 파일이 포탈이 만든 것이 아닙니다 — 덮어쓰지 않습니다(아무것도 바꾸지 않았습니다): ${foreign.join(', ')}`, { paths: foreign });
+      const foreign = plan.filter((f) => f.state === 'foreign');
+      if (foreign.length) throw fail('conflict', conflictMessage(foreign, consoleName), { paths: foreign.map((f) => f.path) });
 
       // 2) 놓기 → 3) 검사 → 4) reload. 어느 단계든 실패하면 이 세션에서 되돌린다(reload 전이면 Director 는 옛 설정 그대로).
       const tmp = await remoteTmpDir(api.exec, TMP_PREFIX);
@@ -555,6 +555,9 @@ export async function readFdThumbprint(b = {}, ctx = null) {
 /* ───────────────────────── ④ 사전 점검(쓰기 없음 — v2.823) ───────────────────────── */
 
 const PREFLIGHT_PKGS = Object.freeze(['bareos-director', 'bareos-storage', 'bareos-filedaemon', 'bareos-vmware-plugin', 'bareos-filedaemon-python3-plugin']);
+/** v2.841 사전 점검 @@own — 종류·상한은 names.js(OWN_TYPES · OWN_PER_TYPE — 엣지 정제와 같이 쓴다). 첫 글자 → 상태. */
+export { OWN_TYPES };
+const OWN_STATE = Object.freeze({ M: 'managed', F: 'foreign', X: 'notfile' });
 /** python3-fd 플러그인(.so)이 있을 수 있는 곳 — RHEL 계열 lib64 · Debian 계열 lib(추정 — 패키지 배치 기준). 고정 목록만 쓴다. */
 export const FD_PLUGIN_DIRS = Object.freeze(['/usr/lib64/bareos/plugins', '/usr/lib/bareos/plugins']);
 const FD_CLIENT_CONF = '/etc/bareos/bareos-fd.d/client/myself.conf';
@@ -572,6 +575,10 @@ const PREFLIGHT_SCRIPT = [
   `echo @@fdconf; if [ -f ${FD_CLIENT_CONF} ]; then grep -iE '^[[:space:]]*plugin[[:space:]]*(names|directory)[[:space:]]*=' ${FD_CLIENT_CONF} 2>/dev/null; else echo NOFILE; fi`,
   `echo @@layout; test -d ${DIR_CONF_ROOT} && echo D; test -e /etc/bareos/bareos-dir.conf && echo S; command -v bconsole >/dev/null 2>&1 && echo C`,
   `echo @@res; for t in client storage pool schedule; do for f in ${DIR_CONF_ROOT}/$t/*.conf; do [ -f "$f" ] && echo "$t $(basename "$f" .conf)"; done; done`,
+  // v2.841(사용자 화면 — 2단계가 사람이 만든 console/admin.conf 에 막힘): 2단계가 쓸 수 있는 종류의 파일마다 '포탈이 만든 파일(M) · 남의 파일(F) ·
+  //   일반 파일 아님(X)' 만 낸다(내용은 싣지 않는다 — 첫 줄을 표지와 비교한 결과 한 글자). 화면이 OTP 를 쓰기 **전에** 겹침을 알리고 빈 콘솔 이름을 고른다.
+  //   판정은 pathState 와 같다(첫 줄 = MARKER) · 첫 줄이 길어도 200바이트만 읽는다 · 심링크·특수 파일은 읽지 않는다.
+  `echo @@own; for t in ${OWN_TYPES.join(' ')}; do n=0; for f in ${DIR_CONF_ROOT}/$t/*.conf; do if [ -L "$f" ]; then k=X; elif [ ! -e "$f" ]; then continue; elif [ ! -f "$f" ]; then k=X; elif [ "$(head -c 200 "$f" | head -n 1)" = "${MARKER}" ]; then k=M; else k=F; fi; echo "$t $(basename "$f" .conf) $k"; n=$((n+1)); [ $n -ge ${OWN_PER_TYPE} ] && break; done; done`,
   'echo @@end',
 ].join('\n');
 
@@ -579,7 +586,7 @@ const PREFLIGHT_SCRIPT = [
 function sections(text) {
   const out = {};
   let cur = null;
-  for (const raw of String(text ?? '').split('\n').slice(0, 400)) {
+  for (const raw of String(text ?? '').split('\n').slice(0, 700)) {   // v2.841: @@own(종류 6 × 40줄)이 더해져 400 → 700
     const line = raw.slice(0, 400).replace(/\r$/, '');
     const m = /^@@([a-z]+)$/.exec(line.trim());
     if (m) { cur = m[1]; out[cur] = []; continue; }
@@ -650,7 +657,46 @@ export function parsePreflight(text) {
   add('resources', '기본 리소스(파일 이름 기준)', s.res ? 'ok' : 'unknown',
     s.res ? ['client', 'storage', 'pool', 'schedule'].map((t) => `${t} ${resources[t].join(',') || '—'}`).join(' · ') : '읽지 못함',
     '이름은 설정 파일 이름에서 읽었습니다(리소스 Name 과 다를 수 있음 — 추정).');
-  return { items, resources, pluginDir };
+  // v2.841: 2단계가 쓸 수 있는 종류의 파일과 그 주인(포탈 파일·남의 파일). 구역이 없으면(옛 엣지·출력 잘림) null — 겹침을 '없음' 으로 단정하지 않는다.
+  let confFiles = null;
+  if (s.own && s.end) {
+    confFiles = [];
+    for (const l of s.own) {
+      const m = /^([a-z]{1,10}) (\S{1,64}) ([MFX])$/.exec(l);
+      if (!m || !OWN_TYPES.includes(m[1]) || !isResourceName(m[2])) continue;
+      confFiles.push({ type: m[1], name: m[2], state: OWN_STATE[m[3]] });
+      if (confFiles.length >= OWN_TYPES.length * OWN_PER_TYPE) break;
+    }
+    const foreignConsoles = confFiles.filter((f) => f.type === 'console' && f.state !== 'managed').map((f) => f.name);
+    add('consoles', '이미 있는 콘솔(사람이 만든 것)', 'ok', foreignConsoles.length ? foreignConsoles.slice(0, 10).join(', ') : '없음',
+      foreignConsoles.length ? '2단계는 이 이름들을 덮지 않습니다 — 화면이 겹치지 않는 포탈 전용 콘솔 이름을 골라 둡니다.' : '');
+  }
+  return { items, resources, pluginDir, confFiles };
+}
+
+/**
+ * 2단계가 남의 파일에 막혔을 때의 안내(순수 — v2.841 사용자 화면: 'console/admin.conf' 하나로 멈추고 무엇을 바꿔야 하는지 몰랐다).
+ * 콘솔은 사람이 쓰는 이름일 수 있다(webui·bconsole) — 덮지 않고 **포탈 전용 이름**을 쓰게 한다(그 콘솔의 비밀번호를 바꾸면 그 연결이 끊긴다).
+ * @param {{ type, name, path }[]} foreign @param {string} consoleName 이번에 만들려던 콘솔 이름
+ */
+export function conflictMessage(foreign = [], consoleName = '') {
+  const parts = [];
+  const con = foreign.find((f) => f.type === 'console');
+  if (con) {
+    parts.push(`콘솔 ‘${consoleName}’ 은(는) 이미 있고 포탈이 만든 것이 아닙니다(${con.path}) — 사람이 쓰는 콘솔일 수 있어 덮지 않습니다. `
+      // 예시 이름은 싣지 않는다 — 이 세션은 계획한 파일만 봤다(다른 이름이 비었는지 모른다 · 화면은 사전 점검 결과로 빈 이름을 골라 둔다)
+      + '‘만들 콘솔 이름’ 을 사람이 쓰지 않는 포탈 전용 이름으로 바꿔 다시 실행하세요(기존 콘솔과 지금 연결은 그대로 둡니다).');
+  }
+  const prof = foreign.find((f) => f.type === 'profile');
+  if (prof) parts.push(`Profile ‘${prof.name}’ 파일(${prof.path})이 포탈이 만든 것이 아닙니다 — 포탈 콘솔이 쓰는 이름이라 바꿀 수 없습니다. 그 파일을 확인하세요(다른 콘솔이 쓰는 Profile 이면 그대로 두고 그 이름을 바꿔야 합니다).`);
+  const def = foreign.filter((f) => ['fileset', 'jobdefs', 'job'].includes(f.type));
+  if (def.length) parts.push(`${def.map((f) => `${f.type} ‘${f.name}’`).join(' · ')} 파일이 포탈이 만든 것이 아닙니다 — 설정 탭 기본값(FileSet · JobDefs · 복원 잡 이름)을 다른 이름으로 저장한 뒤 다시 실행하세요.`);
+  const ext = foreign.filter((f) => f.type === 'pool' || f.type === 'schedule');
+  if (ext.length) parts.push(`${ext.map((f) => `${f.type} ‘${f.name}’`).join(' · ')} 파일이 포탈이 만든 것이 아닙니다 — 전용 Pool · Schedule 만들기를 끄고 다시 실행하거나 그 파일을 확인하세요.`);
+  const known = new Set([con, prof, ...def, ...ext].filter(Boolean));
+  const rest = foreign.filter((f) => !known.has(f));
+  if (rest.length) parts.push(`포탈이 만든 것이 아닌 파일: ${rest.map((f) => f.path).join(', ')}`);
+  return `이미 있는 설정 파일이 포탈이 만든 것이 아니라 덮어쓰지 않았습니다(아무것도 바꾸지 않았습니다). ${parts.join(' ')}`;
 }
 
 /**

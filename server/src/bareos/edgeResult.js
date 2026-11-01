@@ -7,7 +7,7 @@
  * 새 작업 종류를 더하면 VALUE 표에도 넣는다(없으면 결과를 받지 않는다 — 실패로 닫힌다).
  */
 import { numOrNull } from '../util/numOrNull.js';
-import { isResourceName } from './names.js';
+import { isResourceName, OWN_TYPES, OWN_PER_TYPE } from './names.js';
 import { normPolicyResult, normVolumeRows } from './policyParse.js';
 
 const obj = (v) => (v && typeof v === 'object' && !Array.isArray(v) ? v : {});
@@ -126,6 +126,10 @@ export const VALUE = Object.freeze({
       host: str(r.host, 255), pluginDir: str(r.pluginDir, 120),
       items: arr(r.items).slice(0, 60).map((x0) => { const x = obj(x0); return { key: str(x.key, 60), label: str(x.label, 80), status: ['ok', 'missing', 'warn', 'unknown'].includes(x.status) ? x.status : 'unknown', detail: str(x.detail, 200), hint: str(x.hint, 300) }; }),
       resources: Object.fromEntries(['client', 'storage', 'pool', 'schedule'].map((k) => [k, (names(res[k], 50) || [])])),
+      // v2.841: 2단계가 쓸 종류의 파일 주인(autoSetup.parsePreflight confFiles) — 아는 종류·상태·리소스 이름만. 없으면(옛 엣지) null(겹침 모름)
+      confFiles: Array.isArray(r.confFiles) ? r.confFiles.slice(0, OWN_TYPES.length * OWN_PER_TYPE).map(obj)
+        .filter((x) => OWN_TYPES.includes(x.type) && isResourceName(x.name) && ['managed', 'foreign', 'notfile'].includes(x.state))
+        .map((x) => ({ type: x.type, name: x.name, state: x.state })) : null,
     };
   },
   'setup.director': (v) => {
