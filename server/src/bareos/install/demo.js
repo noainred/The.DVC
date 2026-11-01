@@ -12,9 +12,9 @@ import { classifyFailure } from './causes.js';
 
 const STEP_MS = 4_000;
 const DEMO_BUNDLE = Object.freeze({
-  version: '25.20261101.4', size: 431_000_000, ok: true, reason: '', sha256: 'd'.repeat(64),
-  contents: { version: '25.20261101.4', builtAt: '2026-11-01T10:40:00Z', bareosVersion: '25.1.2~pre73', postgresqlVersion: '13.23', install: ['bareos', 'bareos-webui', 'postgresql-server'], packages: [], keys: ['RPM-GPG-KEY-bareos-demo'],
-    pyvmomi: { versions: ['8.0.3.0.1', '8.0.2.0.1', '8.0.1.0.2'], default: '8.0.3.0.1', python: '3.9' }, vddk: ['bareos-vmware-vix-disklib(데모)'] },
+  version: '25.20261101.4', size: 186_079_765, ok: true, reason: '', sha256: 'd'.repeat(64),
+  contents: { version: '25.20261101.4', builtAt: '2026-11-01T10:40:00Z', bareosVersion: '25.1.2~pre73.3e32b07ea', postgresqlVersion: '13.23', install: ['bareos', 'bareos-webui', 'postgresql-server'], packages: [], keys: ['RPM-GPG-KEY-bareos-experimental'],
+    pyvmomi: { versions: ['8.0.3.0.1', '8.0.2.0.1', '8.0.1.0.2'], default: '8.0.3.0.1', python: '3.9' }, vddk: ['bareos-vadp-dumper-25.1.2~pre73.3e32b07ea', 'bareos-vmware-vix-disklib-9.0.0.0_24742305'] },   // CI 번들 빌드 실측값(2026-11-01 run 4)
 });
 const _jobs = new Map();
 let _seq = 0;
@@ -94,7 +94,9 @@ function view(j, now = Date.now()) {
   for (const s of STEPS) if (s.n >= j.startStep) steps[s.n] = { status: 'pending' };
   // 앞 회차에서 끝난 단계
   for (const s of STEPS) if (s.n >= j.startStep && s.n < a.fromStep) steps[s.n] = { status: 'ok', at: a.at - 60_000, endedAt: a.at - 30_000, msg: '이전 회차에서 끝남(다시 하지 않음)' };
-  const failAt = !j.plan.pyvmomiFix && j.mode === 'install' ? 2 : null;
+  // 데모 실패: 사본 옮기기를 끈 채면 pyVmomi 판 불일치(매 회차) · 켠 채 첫 회차면 dnf 잠금(다른 패키지 작업 — 그대로 다시 하면 통과)
+  const shadow = !j.plan.pyvmomiFix && j.mode === 'install';
+  const failAt = shadow || (j.mode === 'install' && j.attempts.length === 1) ? 2 : null;
   let status = 'running'; let currentStep = a.fromStep; let failure = null;
   let t = a.at + (a.fromStep <= 1 ? 1500 : 0);
   for (let n = a.fromStep; n <= LAST_STEP; n++) {
@@ -103,8 +105,13 @@ function view(j, now = Date.now()) {
     if (now < end) { steps[n] = { status: 'running', at: t }; currentStep = n; break; }
     if (n === failAt) {
       steps[n] = { status: 'failed', at: t, endedAt: end };
-      const output = 'pip show pyvmomi → Version: 8.0.3.0.1 (/usr/local/lib/python3.9/site-packages)\nPYTHONPATH=/usr/lib64/bareos/plugins python3 -c "import pyVmomi"\nException: Python 3.10 or newer is required (found 3.9)';
-      failure = { step: n, at: end, cmd: 'pyVmomi 확인', code: 1, message: '플러그인이 실제로 불러오는 판이 9.1.1 입니다(고른 판 8.0.3.0.1).', output, cause: classifyFailure({ step: n, cause: 'pyvmomi-shadow', output }), rolledBack: true, rollbackFailed: false };
+      if (shadow) {
+        const output = 'pip show pyvmomi → Version: 8.0.3.0.1 (/usr/local/lib/python3.9/site-packages)\nPYTHONPATH=/usr/lib64/bareos/plugins python3 -c "import pyVmomi"\nException: Python 3.10 or newer is required (found 3.9)';
+        failure = { step: n, at: end, cmd: 'pyVmomi 확인', code: 1, message: '플러그인이 실제로 불러오는 판이 9.1.1 입니다(고른 판 8.0.3.0.1).', output, cause: classifyFailure({ step: n, cause: 'pyvmomi-shadow', output }), rolledBack: true, rollbackFailed: false };
+      } else {
+        const output = 'Updating Subscription Management repositories.\nWaiting for process with pid 2231 to finish.\nError: Could not get lock — another dnf process(dnf-automatic, pid 2231) is running(데모)';
+        failure = { step: n, at: end, cmd: 'dnf install(번들 저장소만 · …)', code: 1, message: '', output, cause: classifyFailure({ step: n, output }), rolledBack: true, rollbackFailed: false };
+      }
       status = 'failed'; currentStep = n; break;
     }
     steps[n] = { status: 'ok', at: t, endedAt: end, msg: DEMO_MSG[n] || '' };

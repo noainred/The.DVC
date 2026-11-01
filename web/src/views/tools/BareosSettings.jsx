@@ -4,6 +4,7 @@ import { Loading, ErrorBox } from '../../components/ui.jsx';
 import { STable } from '../../components/STable.jsx';
 import Select from '../../components/Select.jsx';
 import BoldText from '../../components/boldText.jsx';
+import BareosInstallPanel from './BareosInstall.jsx';
 import { requireChanged } from '../changeResult.js';
 import { droppedSecretNote } from '../droppedSecretText.js';
 import {
@@ -76,6 +77,7 @@ export default function SettingsTab({ onSaved, writable = true }) {
   const [adding, setAdding] = useState(false);
   const [defs, setDefs] = useState(null);
   const [busy, setBusy] = useState(false);
+  const [installOpen, setInstallOpen] = useState(false);   // v2.844 완전 설치(훅은 조기 return 위)
   const gen = useRef(0);
   // W14: 늦게 온 이전 응답은 버린다 · keepDefs: 저장하지 않은 공통 기본값 편집은 버리지 않는다
   const load = (keepDefs = true) => {
@@ -116,6 +118,18 @@ export default function SettingsTab({ onSaved, writable = true }) {
       {!writable && <div className="banner warn" style={{ marginBottom: 10 }}>{SETTINGS_READ_ONLY}</div>}
       {err && <div className="banner bad" role="alert" style={{ marginBottom: 10 }}>설정을 다시 읽지 못했습니다({String(err.message || err).slice(0, 160)}) — 화면 값이 최신이 아닐 수 있어 저장을 잠갔습니다. <button type="button" className="logout-btn" style={BTN} onClick={() => load(true)}>다시 읽기</button></div>}
       <Msg m={msg} />
+
+      {/* v2.844 완전 설치(사용자 결정 '설치 기능은 설정에 넣어 일반 유저는 못 보게' — 이 탭 자체가 관리자 · 전 법인 범위만 보인다) */}
+      <div className="card" style={{ padding: 14, marginTop: 10, minWidth: 0 }}>
+        <div style={ROW}>
+          <div style={{ minWidth: 0, flex: '1 1 420px' }}>
+            <b>법인 Bareos 완전 설치</b>
+            <div className="muted" style={{ fontSize: 12, marginTop: 2 }}>법인의 엣지 노드에 오프라인 번들로 Bareos(Director · SD · FD · VMware 플러그인 · WebUI)를 설치하고 Director 를 등록합니다 — 사전 점검(쓰기 없음) → 계획 → 실행 → 마무리. Director 가 이미 있는 법인은 초기화 후 재설치를 고를 수 있습니다.</div>
+          </div>
+          <button type="button" className="login-btn" style={{ flex: 'none', padding: '8px 16px' }} onClick={() => setInstallOpen((x) => !x)} aria-expanded={installOpen}>{installOpen ? '완전 설치 닫기' : '완전 설치 열기'}</button>
+        </div>
+      </div>
+      {installOpen && <BareosInstallPanel writable={writable} />}
 
       <div className="card" style={{ padding: 14, marginTop: 10, marginBottom: 12, minWidth: 0 }}>
         <div style={ROW}>
