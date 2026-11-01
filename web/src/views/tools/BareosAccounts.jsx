@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { fetchJson } from '../../api.js';
+import { fetchJson, canCsv, CSV_DENIED_NOTE } from '../../api.js';
 import { Loading, ErrorBox } from '../../components/ui.jsx';
 import { STable } from '../../components/STable.jsx';
 import Select from '../../components/Select.jsx';
@@ -236,7 +236,8 @@ function BulkResult({ r, say, onClose, onRetry }) {
       <div style={{ ...ROW, marginTop: 10 }}>
         {failedIds.length > 0 && <button type="button" className="logout-btn" style={BTN} onClick={() => onRetry(failedIds)}>실패한 법인만 다시 시도({failedIds.length}곳)</button>}
         {skippedIds.length > 0 && <button type="button" className="logout-btn" style={BTN} onClick={() => onRetry(skippedIds)}>보내지 않은 법인 다시 시도({skippedIds.length}곳)</button>}
-        {hasPw && <button type="button" className="logout-btn" style={BTN} disabled={csvDone} onClick={download}>{csvDone ? 'CSV 내려받음(1회)' : '생성 비밀번호 CSV 내려받기 — 1회'}</button>}
+        {/* CSV 내려받기는 다른 CSV 버튼과 같이 data.csv 권한(canCsv)으로 잠근다(v2.643 — 보기 · 복사는 그대로) */}
+        {hasPw && <button type="button" className="logout-btn" style={BTN} disabled={csvDone || !canCsv()} title={!canCsv() ? CSV_DENIED_NOTE : undefined} onClick={download}>{csvDone ? 'CSV 내려받음(1회)' : '생성 비밀번호 CSV 내려받기 — 1회'}</button>}
         <button type="button" className="login-btn" style={{ flex: 'none', padding: '6px 14px' }} onClick={close}>닫기{hasPw ? '(비밀번호 지움)' : ''}</button>
       </div>
       {hasPw && <div className="muted" style={{ fontSize: 11.5, marginTop: 6 }}>이 창을 닫으면 비밀번호 보기 · 복사 · 내려받기가 모두 불가능합니다. 포탈은 저장하지 않았습니다. 다시 시도는 OTP 를 다시 확인합니다.</div>}

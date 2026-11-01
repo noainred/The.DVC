@@ -455,7 +455,7 @@ function StorageDelete({ corp, row, busy, write, otpRequired, ssh, setSsh, onClo
   return (
     <div className="card" style={{ ...DEEP, borderLeft: '3px solid var(--red)' }}>
       <div style={ROW}><b style={{ flex: 1 }}>삭제 — ‘{row.name}’</b><button type="button" className="logout-btn" style={BTN} onClick={onClose}>취소</button></div>
-      <div style={{ fontSize: 12.5, marginTop: 6 }}><BoldText text={`**지우는 것**: SD 장치 파일(bareos-sd.d/device/${row.device}.conf) · Director Storage 파일(bareos-dir.d/storage/${row.name}.conf). **지우지 않는 것**: 디렉터리 ${row.path || '(경로)'}(원래 있던 · 다른 장치와 나눠 쓰는 디렉터리일 수 있어 그대로 둡니다 — 필요하면 서버에서 직접 지우세요). 서버가 다시 확인합니다: 볼륨 경로를 읽을 수 있는가 · 볼륨 파일 0 · 이 스토리지 · 장치를 가리키는 설정 0 · 실행 중 작업 0(재시작 직전에 한 번 더).`} /></div>
+      <div style={{ fontSize: 12.5, marginTop: 6 }}><b>지우는 것</b>: SD 장치 파일(bareos-sd.d/device/{row.device}.conf) · Director Storage 파일(bareos-dir.d/storage/{row.name}.conf). <b>지우지 않는 것</b>: 디렉터리 {row.path || '(경로)'}(원래 있던 · 다른 장치와 나눠 쓰는 디렉터리일 수 있어 그대로 둡니다 — 필요하면 서버에서 직접 지우세요). 서버가 다시 확인합니다: 볼륨 경로를 읽을 수 있는가 · 볼륨 파일 0 · 이 스토리지 · 장치를 가리키는 설정 0 · 실행 중 작업 0(재시작 직전에 한 번 더).</div>
       <div style={GRID}><label className="muted" style={FIELD}>스토리지 이름 다시 적기<input className="input" style={INP} value={typed} onChange={(e) => setTyped(e.target.value.trim())} aria-label="스토리지 이름 확인" /></label></div>
       <AuthBox corp={corp} ssh={ssh} setSsh={setSsh} otpRequired={otpRequired} />
       <div style={{ ...ROW, marginTop: 10 }}>
