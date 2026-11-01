@@ -88,3 +88,18 @@ export const CONFIG_CMDS = Object.freeze([
   { key: 'pools', cmd: 'llist pools', fallback: 'list pools' },
   { key: 'schedules', cmd: 'show schedules' },
 ]);
+
+/** 디스크 · 표지 읽기 결과(apply.parseScan 모양) 재정제 — 엣지 회신(edgeResult 'setup.scan')과 중앙 직접이 같은 함수. */
+export function normScanResult(v) {
+  const r = isObj(v) ? v : {};
+  const arr = (x, cap) => (Array.isArray(x) ? x.slice(0, cap).filter(isObj) : []);
+  const path = (x) => { const s = str(x, 300); return s.startsWith('/') ? s : ''; };
+  const size = (x) => { const n = numOrNull(x); return n !== null && n >= 0 ? n : null; };
+  return {
+    complete: r.complete === true,
+    devices: arr(r.devices, 200).map((d) => ({ file: str(d.file, 128), portal: d.portal === true, name: str(d.name, 64), archiveDevice: path(d.archiveDevice), count: size(d.count) })),
+    files: arr(r.files, 2000).filter((f) => ['console', 'storage', 'pool', 'schedule'].includes(f.type)).map((f) => ({ type: f.type, name: str(f.name, 64), portal: f.portal === true })),
+    disks: arr(r.disks, 200).map((d) => (d.missing === true ? { path: path(d.path), missing: true }
+      : { path: path(d.path), files: size(d.files), usedBytes: size(d.usedBytes), availBytes: size(d.availBytes), sizeBytes: size(d.sizeBytes), mount: path(d.mount) })).filter((d) => d.path),
+  };
+}

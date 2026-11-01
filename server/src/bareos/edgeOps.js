@@ -43,8 +43,12 @@ export const RESULT_MS = Object.freeze({
   //   인출 대기(최대 SECRET_TTL_MS) + 이 값 ≤ 포탈 요청 시한(SERVER_REQUEST_TIMEOUT_MS 기본 600초) — 테스트가 대조한다.
   'setup.preflight': 210_000, 'setup.director': 480_000, 'setup.fdPlugin': 480_000,
   'setup.fdIni': 270_000, 'setup.thumbprint': 150_000,
+  // v2.845 법인별 설정 쓰기(스토리지 · WebUI 계정 · 풀) · 디스크 읽기 — manage/apply.js(같은 SSH 세션 예산)
+  'setup.manage': 480_000, 'setup.scan': 150_000,
 });
-const SETUP = new Set(['setup.director', 'setup.fdPlugin', 'setup.fdIni']);
+const SETUP = new Set(['setup.director', 'setup.fdPlugin', 'setup.fdIni', 'setup.manage']);
+/** 비밀(SSH 비밀번호)을 싣지만 상태를 바꾸지 않는 대행(읽기). */
+const SETUP_READ = new Set(['setup.preflight', 'setup.thumbprint', 'setup.scan']);
 /** 상태를 바꾸는 작업(회신이 없으면 결과 모름). */
 export const EDGE_MUTATING = new Set([...MUTATING, ...SETUP]);
 const MAX_PER_AGENT = 50;
@@ -91,7 +95,7 @@ export function enqueueEdgeOp(director, kind, args = {}, { secretArgs = null, si
   if (!VALUE[kind]) return Promise.resolve({ ok: false, code: 'error', reason: `알 수 없는 작업 '${String(kind).slice(0, 40)}'` });
   const agent = String(director?.agent || '').trim();
   if (!agent || !director?.id) return Promise.resolve({ ok: false, code: 'not-sent', notSent: true, reason: '담당 엣지가 없는 Director 입니다.' });
-  if (secretArgs && !SETUP.has(kind) && kind !== 'setup.preflight' && kind !== 'setup.thumbprint') return Promise.resolve({ ok: false, code: 'error', reason: '비밀 인자는 자동 설정 대행에만 싣습니다.' });
+  if (secretArgs && !SETUP.has(kind) && !SETUP_READ.has(kind)) return Promise.resolve({ ok: false, code: 'error', reason: '비밀 인자는 자동 설정 대행에만 싣습니다.' });
   const mine = [..._ops.values()].filter((o) => lc(o.agent) === lc(agent)).length;
   if (mine >= MAX_PER_AGENT) return Promise.resolve({ ok: false, code: 'not-sent', notSent: true, reason: `법인 엣지 '${agent}' 의 대기 작업이 ${MAX_PER_AGENT}개를 넘었습니다 — 엣지가 요청을 가져가지 않고 있습니다.` });
   return new Promise((resolve) => {

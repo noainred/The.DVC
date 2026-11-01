@@ -196,6 +196,37 @@ export function patchJob(id, patch) {
 }
 
 /**
+ * v2.845 재설치 뒤 다시 등록 — Director 에 잡이 없어진 대상을 **같은 원장 행**(id · 이력 · 복원 기록 · 스케줄 · 레벨 · 켜짐 그대로)에 새 잡 이름 · 지금 매핑의
+ * client · storage · pool 로 다시 묶는다. patchJob 은 이 칸들을 받지 않는다(일반 수정 경로로 잡 이름을 바꾸지 못하게) — 이 함수만 바꾼다.
+ * 한 번의 쓰기(addJobs 와 같은 묶음 계약 — 끝 쓰기가 실패하면 전부 되돌리고 던진다).
+ * @param {{ id, bareosJob, client, storage, pool }[]} list
+ * @returns {{ id, ok: boolean, job?, err? }[]}
+ */
+export function rebindJobs(list) {
+  const db = load();
+  if (_loadErr.get()) throw new Error('백업 대상 원장을 읽지 못한 상태라 바꾸지 않습니다(손상본 보존 — 서비스 점검에서 확인).');
+  const before = db.jobs.map((j) => ({ ...j }));
+  const retiredBefore = db.retired;
+  const out = (Array.isArray(list) ? list : []).map((x) => {
+    const j = db.jobs.find((y) => y.id === x?.id);
+    if (!j) return { id: x?.id, ok: false, err: new Error('원장에 없는 대상입니다(그사이 지워졌습니다).') };
+    for (const k of ['bareosJob', 'client', 'storage', 'pool']) if (typeof x[k] !== 'string' || !x[k]) return { id: j.id, ok: false, err: new Error(`${k} 값이 없습니다.`) };
+    Object.assign(j, { bareosJob: x.bareosJob, client: x.client, storage: x.storage, pool: x.pool, missingInDirector: false, lastError: null, pending: null });
+    const dir = j.directorId || DEFAULT_DIRECTOR_ID;
+    if (db.retired?.some((r) => r.name === j.bareosJob && retiredDir(r) === dir)) db.retired = db.retired.filter((r) => !(r.name === j.bareosJob && retiredDir(r) === dir));
+    return { id: j.id, ok: true, job: copy(j) };
+  });
+  if (out.some((o) => o.ok)) {
+    _rev += 1;
+    if (_batch) _dirty = true;
+    else {
+      try { writeNow(); } catch (e) { db.jobs = before; db.retired = retiredBefore; throw e; }
+    }
+  }
+  return out;
+}
+
+/**
  * @param {string} id
  * @param {{ directorId?: string }} [o] 이 잡의 Director(옛 잡은 directorId 가 없어 라우트가 settings.jobDirectorId 로 풀어 넘긴다 —
  *   지운 뒤 그 vCenter 를 다른 Director 로 옮겨도 '다시 끄기' 가 옛 Director 로 가게)

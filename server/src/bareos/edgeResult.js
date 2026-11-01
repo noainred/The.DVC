@@ -9,7 +9,7 @@
 import { numOrNull } from '../util/numOrNull.js';
 import { isResourceName, OWN_TYPES, OWN_PER_TYPE } from './names.js';
 import { normPolicyResult, normVolumeRows } from './policyParse.js';
-import { normConfigResult } from './manage/showParse.js';
+import { normConfigResult, normScanResult } from './manage/showParse.js';
 
 const obj = (v) => (v && typeof v === 'object' && !Array.isArray(v) ? v : {});
 const arr = (v) => (Array.isArray(v) ? v : []);
@@ -155,6 +155,12 @@ export const VALUE = Object.freeze({
   'setup.fdPlugin': (v) => { const r = obj(v); return { action: r.action === 'updated' ? 'updated' : 'unchanged', pluginDir: str(r.pluginDir, 120), backup: str(r.backup, 300), added: arr(r.added).slice(0, 4).map((x) => str(x, 120)) }; },
   'setup.fdIni': (v) => { const r = obj(v); return { path: str(r.path, 300), action: str(r.action, 20), plugin: r.plugin === 'installed' ? 'installed' : 'missing', pluginText: str(r.pluginText, 200), ...(r.note ? { note: str(r.note, 200) } : {}) }; },
   'setup.thumbprint': (v) => { const r = obj(v); const tp = str(r.thumbprint, 40); return { thumbprint: /^[0-9A-F]{40}$/.test(tp) ? tp : '', subject: str(r.subject, 300), notAfter: str(r.notAfter, 60) }; },
+  // v2.845 법인별 설정 쓰기 — 파일 경로 · 동작만(내용 · 비밀 없음)
+  'setup.manage': (v) => {
+    const r = obj(v);
+    return { files: arr(r.files).slice(0, 10).map((x0) => { const x = obj(x0); return { path: str(x.path, 300), action: ['created', 'updated', 'deleted', 'unchanged'].includes(x.action) ? x.action : 'unknown' }; }), restarted: bool(r.restarted), reloaded: bool(r.reloaded) };
+  },
+  'setup.scan': (v) => normScanResult(v),
 });
 
 /**
@@ -164,6 +170,7 @@ export const VALUE = Object.freeze({
 const REQUIRED = Object.freeze({
   runJob: (v) => v !== null,
   restore: (v) => v.rid !== null,
+  'setup.manage': (v) => v.files.length > 0,   // v2.845 — 바꾼(또는 그대로 둔) 파일 목록이 없으면 무엇을 했는지 모른다
 });
 
 /** 엣지가 돌려줄 수 있는 오류 코드(그 밖은 'error'). */
