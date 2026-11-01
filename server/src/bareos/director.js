@@ -66,7 +66,9 @@ export async function probe(session) {
   return { director, version, tls: session.info.tls, clients, clientsError };
 }
 
-const LIST_CMDS = Object.freeze({ clients: '.clients', storages: '.storages', pools: '.pools', schedules: '.schedules', jobdefs: '.jobdefs', filesets: '.filesets' });
+// v2.841(사용자 화면 '카탈로그 일부를 읽지 못했습니다(schedules)' — Bareos 소스 확인): 스케줄 목록 명령은 `.schedule`(단수)이다
+//   (ua_cmds.cc 명령 표 — 21.1·22.1·23.0·master 같음). `.schedules` 는 '없는 명령' 이라 Schedule 칸이 늘 비었다. 결과 키는 'schedules'(DotScheduleCmd).
+const LIST_CMDS = Object.freeze({ clients: '.clients', storages: '.storages', pools: '.pools', schedules: '.schedule', jobdefs: '.jobdefs', filesets: '.filesets' });
 
 /** 사이트 매핑 드롭다운 원천. 하나가 실패해도 나머지는 돌려준다(실패한 것은 errors 에 — 빈 목록으로 꾸미지 않는다). */
 export async function catalogLists(session) {

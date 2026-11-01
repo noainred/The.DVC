@@ -35,8 +35,8 @@
 - **로그 열기는 그 실행의 상태도 원장에 반영한다**(v2.822.5 — 폴러 주기를 기다리지 않게). Director 호출은 늘리지 않는다(원래 하던 `llist` 확인 행을 쓴다) · 폴러와 같은 규칙(백업은 이름 일치 + type B, 복원은 type R) · `stateChanged` 는 checkedAt 을 뺀 화면 값만 비교.
 - **원장 lastRun 은 같은 jobid 에서 null 로 덮지 않는다**(`list jobs days=` 행은 바이트가 비어 올 수 있다) · 음수 바이트·개수는 null(`director.js nonNeg`).
 - **카탈로그 시각은 Director 현지 시각(시간대 없음)** 이다 — 포탈 서버 현지 시각으로 읽는다. 포탈과 Director 의 시간대가 다르면 어긋난다(같은 망·같은 시간대 전제 — 다르면 보정이 필요하다).
-  데모 Director 도 현지 시각 문자열을 만든다(`catTime` — UTC 문자열이면 한국 시각 서버에서 9시간 어긋났다, `bareosDirector` 시험).
-- **v2.822 대상별 처리 중 표시 · 일괄 등록 · 단계별 연결 진단 · 실패 알림 메일**의 규칙은 `docs/rules/audits.md` 'Bareos v2.822 모듈 규칙' 절(크기 상한으로 옮김 · 2026-10-30 v2.824) — 그 기능을 고치기 전에 읽을 것.
+  데모 Director 도 현지 시각 문자열(`catTime` — UTC 면 9시간 어긋남 · `bareosDirector`).
+- **v2.822 대상별 처리 중 표시 · 일괄 등록 · 단계별 연결 진단 · 실패 알림 메일**의 규칙은 `docs/rules/audits.md` 'Bareos v2.822 모듈 규칙' 절 — 그 기능을 고치기 전에 읽을 것.
 - **v2.822 · v2.822.3 검토 확정분**(되돌리지 말 것 — `list jobs` 오름차순 LIMIT · disable 은 메모리 값 · 원장 선검사 · TLS 분류 · 덮어쓰기 복원 전제 · 로드 오류 요약 ·
   SFTP 채널 닫기 · canonDir · 가림 · reload 뒤 대조 · INI `%%` · 실패 메일 커서 · oneAtATime · 구조상 위험 S2-3 · 남긴 것)은 `docs/rules/audits.md` 의
   'Bareos v2.822 · v2.822.3 검토 확정분' 절에 원문 그대로 있다 — 이 폴더를 고치기 전에 읽을 것(크기 상한으로 옮겼다 · 2026-10-30).
@@ -61,7 +61,7 @@
   복원은 설정만 보면 아는 전제를 OTP 앞에서 · 엣지 성공 회신에 유효한 잡 이름이 없으면 결과 모름 · `ops.poll` 은 **대조를 먼저**(work 가 예산을 넘어도 `.jobs`·다시 끄기가 돈다) ·
   엣지 자동 설정은 Director·서버마다 한 번에 하나(되돌리기까지) · 재시작하면 결과를 잃는 작업은 `inflight.js` → 업그레이드 자동 적용이 기다린다 · 취소의 끝난 행은 type B 만 반영.
   전문·남긴 것은 `docs/rules/audits.md` 'Bareos v2.825.1 버그 점검 확정분'.
-- **v2.828 작업 결과 창**(크기 표기 `decBytesText` 하나 · 버림) — 전문 `docs/rules/audits.md` 'Bareos v2.833' 절 끝.
+- **v2.828 작업 결과 창**(`decBytesText` 하나) — audits.md 'v2.833' 끝. **v2.841**: 스케줄 목록 `.schedule` · 사전 점검 @@own(job 제외) · 겹침은 화면(OTP 전)·서버 둘 다 막는다 — audits.md 'v2.841'.
 - **v2.830 백업 그룹**(`groups`·`groupSchedule`·`groupRunner`·`jobLocks` · `bareosGroups2830`): 스케줄은 포탈이 실행(그룹 잡은 Director 스케줄 없이 등록) · 회차는 **보내기 전에** 한 틱 한 번의 쓰기로 기록 · VM 은 그룹 하나 · 같은 Director 는 차례로 · 대상 잠금 공용. v2.831 보관 개수(`groupRetention` — 카탈로그 삭제)는 실행이 끝난 뒤 기준 Full 앞만·순서 어긋나면 안 지움 · 넓히는 저장은 본인 OTP(v2.831.1). 전문은 `docs/rules/audits.md` 'Bareos v2.830'·'v2.831' 절.
 - **v2.833·834 진행 현황판**(`liveStatus`·`liveParse` · `bareosLive2833`): 화면이 열린 동안만 `status client=`·`status director` · Director 마다 시한 · 흐름은 법인마다 · 모름은 null · 멈춤 의심은 FD 조회 성공일 때만. 전문 audits.md 'v2.833'·'v2.834'(정책 수집 'v2.839'·'v2.840').
 - 실환경 미확인(추정 — `tools/bareos-probe.js` 로 확인할 것): Node↔Director TLS-PSK 협상 · 잡 수준 FdPluginOptions 와 FileSet 플러그인 문자열 병합 ·

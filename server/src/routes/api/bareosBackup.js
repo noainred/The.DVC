@@ -289,7 +289,9 @@ function authStopFor(d, demo, showAddr) {
  */
 export function suggestMapping({ director, sites, catalog, vcenters }) {
   const pick = (list, prefer) => {
-    const l = Array.isArray(list) ? list : [];
+    // v2.841: 목록을 **못 읽은**(null) 것과 빈 목록을 가른다 — 예전에는 둘 다 'Director 목록이 비어 있음' 이었다(못 읽음은 0 이 아니다)
+    if (!Array.isArray(list)) return { value: '', why: '이 목록을 Director 에서 읽지 못함 — 직접 적으세요', unread: true };
+    const l = list;
     for (const p of prefer) if (l.includes(p)) return { value: p, why: p.startsWith('Portal') ? '포탈 자동 설정이 만든 이름' : '설치 기본 이름' };
     if (l.length === 1) return { value: l[0], why: '하나뿐' };
     return { value: '', why: l.length ? `후보 ${l.length}개 — 직접 고르세요` : 'Director 목록이 비어 있음', choices: l.slice(0, 20) };
@@ -323,7 +325,7 @@ export function suggestMapping({ director, sites, catalog, vcenters }) {
   });
 }
 
-/** 매핑 드롭다운 원천(.clients·.storages·.pools·.schedules·.jobdefs·.filesets) — Director 마다 60초 기억(설정을 저장하면 새로 읽는다). */
+/** 매핑 드롭다운 원천(.clients·.storages·.pools·.schedule·.jobdefs·.filesets) — Director 마다 60초 기억(설정을 저장하면 새로 읽는다). */
 async function catalogOf(d, refresh) {
   const key = `${isDemoActive()}|${d.id}|${settingsRev()}`;
   const m = _catalogMemo.get(key);

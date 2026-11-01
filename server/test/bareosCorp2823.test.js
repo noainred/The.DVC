@@ -95,7 +95,7 @@ const handleFor = (D, base) => async (cmd) => {
   if (cmd === '.clients') return { clients: [{ name: 'bareos-fd' }] };
   if (cmd === '.storages') return { storages: [{ name: 'File' }] };
   if (cmd === '.pools') return { pools: [{ name: 'Full' }, { name: 'PortalVmwareFull' }, { name: 'Incremental' }] };
-  if (cmd === '.schedules') return { schedules: [{ name: 'WeeklyCycle' }, { name: 'PortalVmwareNightly' }] };
+  if (cmd === '.schedule') return { schedules: [{ name: 'WeeklyCycle' }, { name: 'PortalVmwareNightly' }] };
   if (cmd === '.jobdefs' || cmd === '.filesets') return {};
   if (cmd === '.jobs') return { jobs: [...D.jobs].map(([name, j]) => ({ name, enabled: j.enabled !== false })) };
   if (cmd.startsWith('configure add job')) { D.jobs.set(kv.name, { enabled: true }); return { add: { resource: 'Job', name: kv.name } }; }
