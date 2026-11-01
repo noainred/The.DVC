@@ -394,7 +394,10 @@ test('⑥-2 rebindJobs: 같은 원장 행(이력 그대로)에 새 이름 · 매
   const [r] = REG.rebindJobs([{ id: j.id, bareosJob: 'pv-new', client: 'c1', storage: 's1', pool: 'p1' }]);
   assert.equal(r.ok, true);
   const g = REG.getJob(j.id);
-  assert.deepEqual([g.bareosJob, g.client, g.storage, g.pool, g.missingInDirector, g.lastRun.jobid, g.schedule, g.level], ['pv-new', 'c1', 's1', 'p1', false, 7, 'S', 'Full']);
+  assert.deepEqual([g.bareosJob, g.client, g.storage, g.pool, g.missingInDirector, g.schedule, g.level], ['pv-new', 'c1', 's1', 'p1', false, 'S', 'Full']);
+  // v2.846 D-1: 재설치 뒤 새 카탈로그는 jobid 를 1 부터 — jobid 로 비교하는 칸은 새로 시작하고(요약만 beforeRebind) runsEpoch 를 남긴다
+  assert.equal(g.lastRun, null); assert.deepEqual(g.finishedRuns, []); assert.deepEqual(g.restores, []);
+  assert.equal(g.beforeRebind.lastRun.jobid, 7); assert.ok(g.runsEpoch > 0);
   assert.ok(!REG.retiredNames().some((x) => x.name === 'pv-new' && x.directorId === DIR), '같은 Director 에서 다시 쓴 이름은 지운 잡이 아니다');
   assert.equal(REG.rebindJobs([{ id: 'nope', bareosJob: 'a', client: 'b', storage: 'c', pool: 'd' }])[0].ok, false);
   assert.equal(REG.rebindJobs([{ id: j.id, bareosJob: '', client: 'b', storage: 'c', pool: 'd' }])[0].ok, false);
@@ -552,7 +555,7 @@ test('⑥-3 재등록: Director 에 없는 원장 대상만 · 화면 목록을 
     assert.match(add[0], /client=kr-fd storage=File pool=VMwareKR/, '지금 매핑으로');
     assert.ok(!/schedule=/.test(add[0]), '원장 스케줄이 비었으면(그룹 잡) 스케줄 없이');
     const g = REG.getJob(gone.id);
-    assert.deepEqual([g.id, g.client, g.storage, g.pool, g.lastRun.jobid, g.enabled, g.missingInDirector], [gone.id, 'kr-fd', 'File', 'VMwareKR', 41, false, false], '같은 행 · 이력 · 꺼짐 그대로');
+    assert.deepEqual([g.id, g.client, g.storage, g.pool, g.beforeRebind.lastRun.jobid, g.lastRun, g.enabled, g.missingInDirector], [gone.id, 'kr-fd', 'File', 'VMwareKR', 41, null, false, false], '같은 행 · 꺼짐 그대로 · 실행 기록은 새로 시작(D-1)');
     // F8(반증 — 재현): 잡을 만든 사이 원장 행이 사라져 묶지 못하면 그 잡을 끈다(원장 밖 스케줄 잡이 켜진 채 남지 않게)
     REG.deleteJob(here.id, { directorId: DIR });
     const lost = mk('vc-a:vm-11', 'app-11', 'pv-vc-a-vm-11-gone');

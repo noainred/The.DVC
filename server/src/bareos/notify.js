@@ -70,12 +70,12 @@ function state() {
     if (fs.existsSync(FILE())) {
       const raw = JSON.parse(fs.readFileSync(FILE(), 'utf8'));
       if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error('형식 오류');
-      _state = { since: Number(raw.since) || Date.now(), runs: numMap(raw.runs), seen: seenMap(raw.seen), restores: numMap(raw.restores), history: (Array.isArray(raw.history) ? raw.history : []).slice(0, HISTORY_MAX) };
+      _state = { since: Number(raw.since) || Date.now(), runs: numMap(raw.runs), seen: seenMap(raw.seen), restores: numMap(raw.restores), epochs: numMap(raw.epochs), history: (Array.isArray(raw.history) ? raw.history : []).slice(0, HISTORY_MAX) };
       return _state;
     }
   } catch { preserveCorrupt(FILE()); }
   // 처음(또는 손상) — 지금부터 센다. 기준 시각을 바로 남긴다(첫 발송이 실패한 채 재시작해도 since 가 밀리지 않게).
-  _state = { since: Date.now(), runs: {}, seen: {}, restores: {}, history: [] };
+  _state = { since: Date.now(), runs: {}, seen: {}, restores: {}, epochs: {}, history: [] };
   save();
   return _state;
 }
@@ -105,15 +105,20 @@ function judge(rec, mark, since) {
  */
 export function collectBareosFailures(jobs, st) {
   const rows = [];
-  const marks = { runs: {}, seen: {}, restores: {} };
+  const marks = { runs: {}, seen: {}, restores: {}, epochs: {} };
   const since = Number(st?.since) || 0;
   for (const j of jobs || []) {
     if (!j || j.demo) continue;
     // v2.822.3(C2-2 — 재현): lastRun 하나만 보면 포탈이 시작한 실행이 끝날 때 더 큰 jobid(대기 중인 스케줄 실행)가 lastRun 이라 그 실패가 빠졌다.
     //   끝난 실행 목록(registry finishedRuns)과 lastRun 을 jobid 순으로 보고, 판정한 jobid 는 seen 에 둔다. 커서(floor)는 진행 중인
     //   포탈 실행 앞에서 멈춘다(그 실행이 나중에 끝나도 커서보다 커서 판정된다).
-    const floor = Number(st?.runs?.[j.id]) || 0;
-    const seen = new Set(Array.isArray(st?.seen?.[j.id]) ? st.seen[j.id] : []);
+    // v2.846 D-1: 원장이 이 대상의 실행 기록을 새로 시작했으면(재설치 뒤 다시 등록 — jobid 가 1 부터) 커서 · seen · 복원 커서를 지운다.
+    //   지운 뒤 첫 판정은 '처음 보는 대상' 규칙(포탈 시계 since 이후만 알림 — 지난 실패를 쏟지 않는다)
+    const epoch = Number(j.runsEpoch) || 0;
+    const reset = epoch > 0 && (Number(st?.epochs?.[j.id]) || 0) !== epoch;
+    if (reset) { marks.epochs[j.id] = epoch; marks.runs[j.id] = 0; marks.seen[j.id] = []; marks.restores[j.id] = 0; }
+    const floor = reset ? 0 : Number(st?.runs?.[j.id]) || 0;
+    const seen = new Set(!reset && Array.isArray(st?.seen?.[j.id]) ? st.seen[j.id] : []);
     const byId = new Map();
     for (const x of [...(Array.isArray(j.finishedRuns) ? j.finishedRuns : []), j.lastRun]) if (x?.jobid && !byId.has(Number(x.jobid))) byId.set(Number(x.jobid), x);
     let maxJudged = 0; const judged = [];
@@ -134,7 +139,7 @@ export function collectBareosFailures(jobs, st) {
       const keep = [...seen, ...judged].filter((x) => x > newFloor).sort((a, b) => a - b).slice(-SEEN_KEEP);
       if (keep.length || seen.size) marks.seen[j.id] = keep;
     }
-    const restMark = Number(st?.restores?.[j.id]) || 0;
+    const restMark = reset ? 0 : Number(st?.restores?.[j.id]) || 0;
     let restMax = 0;
     for (const x of Array.isArray(j.restores) ? j.restores : []) {
       const jx = judge(x, restMark, since);
@@ -191,7 +196,7 @@ export async function tick(now = Date.now()) {
     const st = state();
     const { rows, marks } = collectBareosFailures(listJobs(), st);
     const advance = () => {
-      Object.assign(st.runs, marks.runs); Object.assign(st.restores, marks.restores);
+      Object.assign(st.runs, marks.runs); Object.assign(st.restores, marks.restores); st.epochs = Object.assign(st.epochs || {}, marks.epochs);
       st.seen = st.seen || {};
       for (const [k, v] of Object.entries(marks.seen || {})) { if (v.length) st.seen[k] = v; else delete st.seen[k]; }
       save();
@@ -200,10 +205,10 @@ export async function tick(now = Date.now()) {
     if (!registryLoadError()) {
       const ids = new Set(listJobs().map((j) => j.id));
       let pruned = false;
-      for (const m of [st.runs, st.restores, st.seen || {}]) for (const k of Object.keys(m)) if (!ids.has(k)) { delete m[k]; pruned = true; }
+      for (const m of [st.runs, st.restores, st.seen || {}, st.epochs || {}]) for (const k of Object.keys(m)) if (!ids.has(k)) { delete m[k]; pruned = true; }
       if (pruned) save();
     }
-    const moved = Object.keys(marks.runs).length + Object.keys(marks.restores).length + Object.keys(marks.seen || {}).length;
+    const moved = Object.keys(marks.runs).length + Object.keys(marks.restores).length + Object.keys(marks.seen || {}).length + Object.keys(marks.epochs || {}).length;
     if (!rows.length) { if (moved) advance(); return; }   // 성공·취소만 새로 끝났다 — 커서만 옮긴다
     const cfg = loadMailCfg();
     if (!cfg?.enabled || cfg?.kinds?.[MAIL_KIND]?.enabled === false) { advance(); _last = { at: now, sent: false, rows: rows.length, reason: '메일 발송 또는 이 종류가 꺼져 있습니다' }; return; }

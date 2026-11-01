@@ -11,12 +11,16 @@ import { listInventory } from '../../central/inventory.js';
 import { listTargetsRaw } from '../../agent/deployRegistry.js';
 import { ipBlockReason } from '../../util/ssrfBlock.js';
 import { directorById, jobDirectorId, settingsRev } from '../settings.js';
-import { onDirector, relayToEdge, isDemoActive, effectiveSettings, eligibility } from '../service.js';
+import { onDirector, relayToEdge, isDemoActive, effectiveSettings, eligibility, orphanCleanup } from '../service.js';
+
+/** 다시 등록 한 번에 보내는 대상 수(엣지 회신 정제의 addJobs 상한 500 보다 작게 — v2.846 E-1). */
+export const REREGISTER_BATCH = 200;
 import { listJobs, rebindJobs } from '../registry.js';
 import { jobNameFor } from '../names.js';
 import { morefOf } from '../../vcenter/registry.js';
 import { tryLockJob, unlockJob } from '../jobLocks.js';
 import { requestReconcile } from '../poller.js';
+import { listGroups } from '../groups.js';
 import { poolSettled } from '../../util/pool.js';
 import { knownHostAddrs } from '../install/job.js';
 import { planManage, applyManage, RESERVED_CONSOLES } from './apply.js';
@@ -122,15 +126,19 @@ export async function readConfig(d, { refresh = false } = {}) {
 }
 const okVal = (cfg, k) => (cfg?.results?.[k]?.ok ? cfg.results[k].value : []);
 
-/** planManage 에 줄 '그 Director 의 지금 설정'(비밀 없음). */
-export function knownFor(d, cfg, settings = effectiveSettings()) {
+const groupsSafe = () => { try { return listGroups(); } catch { return []; } };
+/** planManage 에 줄 '그 Director 의 지금 설정'(비밀 없음). 매핑 스토리지 = 사이트 매핑 + 이 법인 vCenter 의 백업 그룹이 지정한 스토리지(v2.846 D-5 ①). */
+export function knownFor(d, cfg, settings = effectiveSettings(), groups = groupsSafe()) {
   const storages = okVal(cfg, 'storages');
   const prefer = storages.find((s) => s.name === 'File' && s.address) || storages.find((s) => s.address) || null;   // 반증 F9 — 주소가 빈 File 을 고르지 않는다
   return {
     config: { storages, consoles: okVal(cfg, 'consoles'), profiles: okVal(cfg, 'profiles') },
     portalConsole: d.consoleName || '',
     address: prefer?.address || '',
-    mappedStorages: [...new Set((settings.sites || []).filter((s) => s.directorId === d.id).map((s) => s.storage).filter(Boolean))],
+    mappedStorages: (() => {
+      const vcs = new Set((settings.sites || []).filter((s) => s.directorId === d.id).map((s) => s.vcenterId));
+      return [...new Set([...(settings.sites || []).filter((s) => s.directorId === d.id).map((s) => s.storage), ...groups.filter((g) => vcs.has(g.vcenterId)).map((g) => g.storage)].filter(Boolean))];
+    })(),
   };
 }
 
@@ -141,6 +149,10 @@ export function knownFor(d, cfg, settings = effectiveSettings()) {
 export async function planFor(d, action, input) {
   let cfg = null;
   if (action !== 'scan') { try { cfg = await readConfig(d); } catch { cfg = null; } }
+  // v2.846 D-5 ③: 스토리지 편집 · 삭제는 Director 설정(목록 · 매핑 판정)을 읽었을 때만 — 못 읽은 목록은 '마지막 스토리지' 판정을 건너뛰게 했다
+  if ((action === 'storage.delete' || action === 'storage.edit') && !cfg?.results?.storages?.ok) {
+    throw Object.assign(new Error('Director 스토리지 목록을 읽지 못해 판정할 수 없습니다 — 연결을 확인하고 다시 읽은 뒤 하세요(아무것도 바꾸지 않았습니다).'), { code: 'conflict' });
+  }
   const known = knownFor(d, cfg);
   return { plan: planManage(action, input, known), known, configRead: !!cfg };
 }
@@ -149,16 +161,17 @@ export async function planFor(d, action, input) {
  * 실행. ssh = resolveSsh 결과 · accountPassword = 계정 비밀번호(생성은 라우트가) — 응답 · 감사 · 로그에 싣지 않는다.
  * @returns {Promise<object>} scan 이면 normScanResult · 쓰기면 { ok, files, restarted, reloaded, relay? }
  */
-export async function runManage(d, { plan, known, input }, ssh, { accountPassword = '' } = {}) {
+export async function runManage(d, { plan, known, input }, ssh, { accountPassword = '', signal = null } = {}) {
   if (isDemoActive()) return demo.applyDemo(d.id, plan, { accountPassword });
   const isScan = plan.action === 'scan';
   if (d.agent) {
     const kind = isScan ? 'setup.scan' : 'setup.manage';
     const secretArgs = { password: ssh.password, ...(accountPassword ? { accountPassword } : {}) };
-    const v = await relayToEdge(d, kind, { body: { host: ssh.host, sshPort: ssh.sshPort, username: ssh.username }, action: plan.action, input: input || {}, known }, { secretArgs });
+    // signal(v2.846 C-4): 부른 쪽 시간 예산 — 엣지가 아직 가져가지 않았으면 거둔다(보내지 않음) · 가져갔으면 결과 모름(엣지가 실행 중일 수 있다)
+    const v = await relayToEdge(d, kind, { body: { host: ssh.host, sshPort: ssh.sshPort, username: ssh.username }, action: plan.action, input: input || {}, known }, { secretArgs, signal });
     return isScan ? normScanResult(v) : { ok: true, ...v, relay: d.agent };
   }
-  const v = await applyManage(plan, { host: ssh.host, sshPort: ssh.sshPort, username: ssh.username, password: ssh.password }, { accountPassword }, { dirPort: d.port });
+  const v = await applyManage(plan, { host: ssh.host, sshPort: ssh.sshPort, username: ssh.username, password: ssh.password }, { accountPassword }, { dirPort: d.port, signal });
   return isScan ? normScanResult(v) : v;
 }
 
@@ -230,18 +243,20 @@ export async function reregisterTargets(d, ids = []) {
       jobDefs: settings.defaults.jobDefs, client: el.site.client, storage: el.site.storage, pool: el.site.pool,
       schedule: m.schedule || undefined, level: m.level, pluginOptions: el.plugin, description: `VMware Portal ${vm.name}`.replace(/[^\p{L}\p{N} ._-]/gu, ' '),
     };
-    ready.push({ o, key: out.length - 1, item: { key: out.length - 1, vcenterId: vm.vcenterId, moref, base }, site: el.site });
+    ready.push({ o, vm, key: out.length - 1, item: { key: out.length - 1, vcenterId: vm.vcenterId, moref, base }, site: el.site });
   }
   try {
     if (!ready.length) return { results: out };
-    const bind = async (results) => {
-      const byKey = new Map((results || []).map((r) => [r.key, r]));
+    /** 한 묶음의 회신 → 원장 같은 행에 다시 묶기. 회신에 없는 항목은 '결과 모름'(잡이 생겼을 수 있다 — v2.846 E-1) · 묶지 못한 잡은 끄고 지운 이름에 남긴다(E-4 · 일반 등록 orphanCleanup 하나). */
+    const bind = async (part, results) => {
+      const byKey = new Map((Array.isArray(results) ? results : []).map((r) => [r.key, r]));
       const list = [];
-      for (const x of ready) {
+      for (const x of part) {
         const r = byKey.get(x.key);
-        if (!r?.ok || !r.name) { x.o.reason = r?.message || (r?.ok ? 'Director 가 잡 이름 없이 성공을 회신했습니다.' : '사유 미상'); continue; }
+        if (!r) { x.o.reason = '결과 모름 — 회신에 이 항목이 없습니다(Director 에 잡이 생겼을 수 있습니다 — 빠진 대상 목록을 다시 읽으세요).'; x.o.unknown = true; continue; }
+        if (!r.ok || !r.name) { x.o.reason = r.message || (r.ok ? 'Director 가 잡 이름 없이 성공을 회신했습니다.' : '사유 미상'); continue; }
         x.o.name = r.name;
-        list.push({ id: x.o.id, bareosJob: r.name, client: x.site.client, storage: x.site.storage, pool: x.site.pool });
+        list.push({ id: x.o.id, bareosJob: r.name, client: x.site.client, storage: x.site.storage, pool: x.site.pool, vmName: x.vm.name, dc: x.vm.vcDcPath, folder: x.vm.folderPath });
       }
       if (!list.length) return;
       let res;
@@ -249,27 +264,30 @@ export async function reregisterTargets(d, ids = []) {
       const orphans = [];
       for (const r of res) {
         const o = out.find((y) => y.id === r.id);
-        if (o) { o.ok = r.ok; if (!r.ok) o.reason = `Director 잡 ‘${o.name}’ 은 만들었지만 원장에 묶지 못했습니다(${String(r.err?.message || r.err).slice(0, 160)})`; }
-        if (!r.ok) orphans.push(list.find((x) => x.id === r.id)?.bareosJob);
+        if (o) o.ok = r.ok;
+        if (!r.ok) orphans.push({ name: list.find((x) => x.id === r.id)?.bareosJob, err: r.err, o });
       }
-      // 반증 F8: 원장에 묶지 못한 잡은 끈다(일반 등록의 orphanCleanup 과 같은 규칙 — 원장 밖 스케줄 잡이 켜진 채 남지 않게)
-      if (orphans.filter(Boolean).length) {
-        let off = new Set();
-        try { off = new Set((await onDirector(d.id, 'disableJobs', { names: orphans.filter(Boolean) })).filter((x) => x.ok).map((x) => x.name)); } catch { /* 아래 문구 */ }
-        for (const o of out) if (!o.ok && o.name && orphans.includes(o.name)) o.reason += off.has(o.name) ? ' — 그 잡은 비활성화했습니다.' : ' — 그 잡을 비활성화하지도 못했습니다(Director 에서 직접 정리하세요).';
+      if (orphans.some((x) => x.name)) {
+        const why = await orphanCleanup(d.id, orphans.filter((x) => x.name), isDemoActive());
+        for (const x of orphans) if (x.o) x.o.reason = why.get(x.name) || `원장에 묶지 못했습니다(${String(x.err?.message || x.err).slice(0, 160)})`;
       }
       requestReconcile(d.id);
     };
-    let results;
-    try {
-      // 늦은 회신(엣지 '결과 모름' 뒤): 같은 규칙으로 묶고, 묶지 못하면 끈다 — 잡 잠금은 이미 풀렸다(남긴 것: 그 사이 같은 대상 작업과 겹칠 수 있다)
-      results = await onDirector(d.id, 'addJobs', { items: ready.map((x) => x.item) }, { onLate: (lr) => { if (lr?.ok && Array.isArray(lr.value)) bind(lr.value).catch(() => {}); } });
-    } catch (e) {
-      const why = e?.code === 'unknown' ? `결과 모름 — 법인 엣지가 회신하지 않았습니다. 늦은 회신이 오면 원장에 반영합니다(잠시 뒤 목록을 다시 읽으세요). ${String(e?.message || '').slice(0, 200)}` : String(e?.message || e).slice(0, 300);
-      for (const x of ready) x.o.reason = why;
-      return { results: out };
+    // v2.846 E-1: 엣지 회신 정제는 addJobs 를 500건에서 자른다(엣지 계약) — 묶음 200건으로 차례로 보낸다(중앙 직접도 같은 크기 — 세션 하나가 너무 오래 잡히지 않게)
+    for (let i = 0; i < ready.length; i += REREGISTER_BATCH) {
+      const part = ready.slice(i, i + REREGISTER_BATCH);
+      let results;
+      try {
+        // 늦은 회신(엣지 '결과 모름' 뒤): 같은 규칙으로 묶고, 묶지 못하면 끈다 — 잡 잠금은 이미 풀렸다(남긴 것: 그 사이 같은 대상 작업과 겹칠 수 있다)
+        results = await onDirector(d.id, 'addJobs', { items: part.map((x) => x.item) }, { onLate: (lr) => { if (lr?.ok && Array.isArray(lr.value)) bind(part, lr.value).catch(() => {}); } });
+      } catch (e) {
+        const why = e?.code === 'unknown' ? `결과 모름 — 법인 엣지가 회신하지 않았습니다. 늦은 회신이 오면 원장에 반영합니다(잠시 뒤 목록을 다시 읽으세요). ${String(e?.message || '').slice(0, 200)}` : String(e?.message || e).slice(0, 300);
+        for (const x of part) { x.o.reason = why; if (e?.code === 'unknown') x.o.unknown = true; }
+        for (const x of ready.slice(i + REREGISTER_BATCH)) x.o.reason = '보내지 않음 — 앞 묶음이 실패해 멈췄습니다(다시 실행하세요).';
+        break;
+      }
+      await bind(part, results);
     }
-    await bind(results);
     return { results: out };
   } finally { for (const id of locked) unlockJob(id); }
 }

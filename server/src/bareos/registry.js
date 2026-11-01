@@ -35,7 +35,23 @@ const FILE = () => path.join(config.configDir, 'bareos-jobs.json'); // 문자열
 //   listJobs 깊은 복사 47ms 로 폴링 주기마다 이벤트 루프를 오래 잡는다 — 3,000 은 그 6할(약 30ms). 더 올리려면 Director 별 파일 분할이 먼저다.
 export const MAX_JOBS = 3000;
 export const RESTORES_KEEP = 20;
-export const RETIRED_KEEP = 1000;
+export const RETIRED_KEEP = 1000;   // Director 하나에 남기는 지운 잡 이름 수(v2.846 D-6 — 예전에는 28개 Director 합계였다)
+export const RETIRED_TOTAL_MAX = 40_000;   // 파일 전체 안전 상한(Director 30+ × RETIRED_KEEP)
+/**
+ * v2.846 D-6(반증 확정): 상한을 **Director 마다** 둔다 — 합계 1,000 이면 바쁜 법인이 다른 법인의 이름을 밀어내고, 밀려난 이름은 다음 reload 에
+ * conf 값대로 다시 켜져 원장 밖에서 스케줄 백업이 돌았다(포탈 '삭제' 는 disable 뿐이라 conf 가 남는다). 각 Director 안에서는 오래된 것부터 버린다.
+ */
+export function trimRetired(list) {
+  const arr = Array.isArray(list) ? list : [];
+  const per = new Map();
+  const keep = new Array(arr.length).fill(false);
+  for (let i = arr.length - 1; i >= 0; i -= 1) {
+    const d = retiredDir(arr[i]);
+    const n = per.get(d) || 0;
+    if (n < RETIRED_KEEP) { keep[i] = true; per.set(d, n + 1); }
+  }
+  return arr.filter((_, i) => keep[i]).slice(-RETIRED_TOTAL_MAX);
+}
 export const FINISHED_KEEP = 10;
 
 let _db = null;
@@ -49,7 +65,7 @@ function load() {
       if (!p || typeof p !== 'object' || Array.isArray(p)) throw new Error('형식 오류');
       _db = {
         jobs: (Array.isArray(p.jobs) ? p.jobs : []).filter((j) => j && typeof j === 'object' && typeof j.id === 'string'),
-        retired: (Array.isArray(p.retired) ? p.retired : []).filter((r) => r && typeof r.name === 'string' && r.name).slice(-RETIRED_KEEP),
+        retired: trimRetired((Array.isArray(p.retired) ? p.retired : []).filter((r) => r && typeof r.name === 'string' && r.name)),
       };
       _loadErr.clear();
       return _db;
@@ -212,6 +228,15 @@ export function rebindJobs(list) {
     if (!j) return { id: x?.id, ok: false, err: new Error('원장에 없는 대상입니다(그사이 지워졌습니다).') };
     for (const k of ['bareosJob', 'client', 'storage', 'pool']) if (typeof x[k] !== 'string' || !x[k]) return { id: j.id, ok: false, err: new Error(`${k} 값이 없습니다.`) };
     Object.assign(j, { bareosJob: x.bareosJob, client: x.client, storage: x.storage, pool: x.pool, missingInDirector: false, lastError: null, pending: null });
+    // v2.846 D-8: 잡은 지금 인벤토리 값(이름 · 데이터센터 · 폴더)으로 만들었다 — 원장도 같이(옛 값이면 거짓 위치 변경 · 덮어쓰기 복원 거부)
+    for (const k of ['vmName', 'dc', 'folder']) if (typeof x[k] === 'string' && x[k]) j[k] = x[k];
+    // v2.846 D-1(반증 확정 · 높음): 재설치는 카탈로그 DB 를 지우는 것이 기본 — 새 카탈로그는 jobid 를 1 부터 다시 매긴다.
+    //   jobid 로 비교하는 칸(lastRun · finishedRuns · lastRate · restores)을 그대로 두면 새 실행이 '더 작은 jobid' 라 원장 · 실패 메일에서 버려졌고
+    //   옛 복원 jobid 와 같은 새 jobid 의 로그가 복원 로그로 열렸다. 다시 묶을 때 실행 기록을 새로 시작한다(같은 행 · 스케줄 · 레벨 · 켜짐 그대로).
+    //   카탈로그를 유지한 재설치라면 다음 대조(같은 잡 이름의 `list jobs` 행)가 lastRun 을 다시 채운다 — 잃는 것은 화면의 '이전 실행' 몇 줄뿐(beforeRebind 에 요약).
+    //   lastOkAt(시각 기준 — RPO)은 둔다. runsEpoch 가 바뀌면 실패 메일 커서도 지운다(notify.js).
+    j.beforeRebind = { at: Date.now(), lastRun: j.lastRun ? { jobid: j.lastRun.jobid ?? null, status: j.lastRun.status ?? '', endedAt: j.lastRun.endedAt ?? null } : null, restores: Array.isArray(j.restores) ? j.restores.length : 0 };
+    Object.assign(j, { lastRun: null, finishedRuns: [], lastRate: null, restores: [], runsEpoch: Date.now() });
     const dir = j.directorId || DEFAULT_DIRECTOR_ID;
     if (db.retired?.some((r) => r.name === j.bareosJob && retiredDir(r) === dir)) db.retired = db.retired.filter((r) => !(r.name === j.bareosJob && retiredDir(r) === dir));
     return { id: j.id, ok: true, job: copy(j) };
@@ -393,7 +418,8 @@ export const retiredDir = (r) => (typeof r?.directorId === 'string' && r.directo
 function addRetired(db, name, demo, directorId = DEFAULT_DIRECTOR_ID) {
   if (!name) return;
   const dir = directorId || DEFAULT_DIRECTOR_ID;
-  db.retired = [...(db.retired || []).filter((r) => !(r.name === name && retiredDir(r) === dir)), { name: String(name), directorId: dir, at: Date.now(), ...(demo ? { demo: true } : {}) }].slice(-RETIRED_KEEP);
+  db.retired = [...(db.retired || []).filter((r) => !(r.name === name && retiredDir(r) === dir)), { name: String(name), directorId: dir, at: Date.now(), ...(demo ? { demo: true } : {}) }];
+  db.retired = trimRetired(db.retired);
 }
 /** Director 에 잡만 남은 이름을 기록(원장 등록 실패 등) — 원장을 못 읽은 상태면 쓰지 않는다(빈 원장 저장이 보존본을 덮지 않게). */
 export function retireName(name, demo = false, directorId = DEFAULT_DIRECTOR_ID) {

@@ -8,7 +8,7 @@ import { bytesText } from './bareosInstallText.js';
 import { unitText } from '../unitText.js';
 import {
   SECRET_SLOT, consoleText, sdDeviceText, dirStorageText, passwordIssue, pwPairIssue, nameIssue, storageRows, portalText, diskText, pathCheckLines,
-  accountRows, portalOf, tlsText, profileOptions, DEFAULT_PROFILE, poolFormOf, retentionText, PORTAL_POOLS, PORTAL_SCHEDULE, maskPw, sshSourceText, noSshNeeded,
+  accountRows, portalOf, diskTotal, tlsText, profileOptions, DEFAULT_PROFILE, poolFormOf, retentionText, PORTAL_POOLS, PORTAL_SCHEDULE, maskPw, sshSourceText, noSshNeeded,
 } from './bareosCorpText.js';
 
 /**
@@ -124,17 +124,20 @@ export default function BareosCorpPanel({ writable = true }) {
   const runScan = async (path = '') => {
     if (!corp) return null;
     const g = ++scanGen.current;
-    setScanErr(null);
+    setScanErr(null); setBusy((b) => b || 'scan');
     try {
       const r = await call(`${P}/${encodeURIComponent(corp.id)}/scan`, { ...sshBody(corp, ssh), ...(path ? { input: { path } } : {}) }, { timeoutMs: 200_000 });
       if (g === scanGen.current) { if (!path) setScan(r); }
       return r;
     } catch (e) { if (g === scanGen.current) setScanErr(e); throw e; } finally {
+      setBusy((b) => (b === 'scan' ? '' : b));
       setSsh((x) => ({ ...x, password: '' }));   // 사용자 결정 '그때마다 SSH 비밀번호 입력' — 실행마다 비운다
     }
   };
   // 법인을 바꾸면 그 법인 값만(늦게 온 이전 법인 응답은 세대로 버린다) · SSH 입력은 비운다 · 등록부 법인은 서버 파일도 한 번 읽는다(버튼으로 다시)
   useEffect(() => {
+    // v2.846 U-4: 법인을 바꾸면 조회 · 스캔 세대를 올린다 — 이전 법인의 늦은 응답(설정 · 서버 파일)을 이 법인 화면에 넣지 않는다
+    gen.current += 1; scanGen.current += 1;
     setCfg(null); setScan(null); setScanErr(null); setMsg(null); setOneTime('');
     const c = list?.directors?.find((d) => d.id === sel);
     setSsh({ host: c?.ssh?.host || '', sshPort: String(c?.ssh?.port || 22), username: c?.ssh?.username || 'root', password: '', otp: '' });
@@ -164,7 +167,9 @@ export default function BareosCorpPanel({ writable = true }) {
       return r;
     } catch (e) {
       const b = e?.body || {};
-      setMsg({ ok: false, text: `${b.code === 'unknown' ? '결과 모름' : '실패'}: ${e.message}${b.needEnroll ? '' : ''}` });
+      // v2.846 C-4: 결과 모름이면 서버가 생성 비밀번호를 함께 준다(적용됐을 수 있다 — 버리면 계정만 생기고 비밀번호를 잃는다)
+      if (b.generatedPassword) setOneTime(b.generatedPassword);
+      setMsg({ ok: false, text: `${b.code === 'unknown' ? '결과 모름' : '실패'}: ${e.message}${b.maybeApplied ? ' — 적용됐을 수 있어 생성한 비밀번호를 아래에 한 번 보여 드립니다(그 비밀번호로 로그인해 확인하세요).' : ''}` });
       throw e;
     } finally {
       setBusy(''); setSsh((x) => ({ ...x, password: '', otp: '' }));
@@ -177,7 +182,7 @@ export default function BareosCorpPanel({ writable = true }) {
       <div className="card" style={CARD}>
         <div style={ROW}>
           <label className="muted" style={{ ...FIELD, flex: '1 1 320px' }}>법인(= vCenter = Bareos · 1:1:1)
-            <Select className="input" style={INP} sort={false} value={sel} onChange={(e) => { const v = e.target.value; setSel(v); }} aria-label="법인 고르기">{(list.directors.map((d) => ({ value: d.id, label: `${d.name}${d.vcenters.length ? ` — ${d.vcenters.map((v) => v.name).join(', ')}` : ''}` }))).map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}</Select>
+            <Select className="input" style={INP} sort={false} value={sel} disabled={!!busy} title={busy ? '진행 중인 작업이 끝난 뒤 바꿀 수 있습니다(결과가 다른 법인 화면에 섞이지 않게)' : undefined} onChange={(e) => { const v = e.target.value; setSel(v); }} aria-label="법인 고르기">{(list.directors.map((d) => ({ value: d.id, label: `${d.name}${d.vcenters.length ? ` — ${d.vcenters.map((v) => v.name).join(', ')}` : ''}` }))).map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}</Select>
           </label>
           {corp && <Badge cls={corp.agent ? 'blue' : 'gray'}>{corp.agent ? `담당 = 법인 엣지 ‘${corp.agent}’` : '담당 = 중앙 직접'}</Badge>}
           {corp && <Badge cls={noSshNeeded(corp.ssh) ? 'green' : 'amber'}>{sshSourceText(corp.ssh)}</Badge>}
@@ -215,16 +220,20 @@ function ReadFail({ cfg, k, what }) {
 
 /* ───────── 개요 ───────── */
 function Overview({ corp, cfg, scan, onTab, writable, busy }) {
-  const st = resOf(cfg, 'storages') || [];
-  const cons = resOf(cfg, 'consoles') || [];
-  const pools = resOf(cfg, 'pools') || [];
-  const pf = poolFormOf(pools, resOf(cfg, 'schedules') || []);
-  const rows = storageRows(st, scan, cfg.mappedStorages || []);
-  const acc = accountRows(cons, scan, cfg.portalConsole);
+  // v2.846 U-2: 못 읽은 목록(거부 · 세션 끊김)은 null — '0개 · 없음' 으로 그리지 않는다
+  const st = resOf(cfg, 'storages');
+  const cons = resOf(cfg, 'consoles');
+  const pools = resOf(cfg, 'pools');
+  const schedules = resOf(cfg, 'schedules');
+  const pf = poolFormOf(pools || [], schedules || []);
+  const rows = storageRows(st || [], scan, cfg.mappedStorages || []);
+  const acc = accountRows(cons || [], scan, cfg.portalConsole);
   const webui = acc.filter((a) => !a.own && !a.reserved);
-  const free = rows.reduce((a, r) => (r.disk?.availBytes != null ? a + r.disk.availBytes : a), 0);
-  const known = rows.some((r) => r.disk?.availBytes != null);
+  const total = diskTotal(rows);
+  const NA = '—(읽지 못함)';
   return (
+    <>
+    {['storages', 'consoles', 'pools', 'schedules'].map((k) => <ReadFail key={k} cfg={cfg} k={k} what={{ storages: 'Director 스토리지 목록', consoles: 'Director 콘솔 목록', pools: '풀 목록', schedules: '스케줄 목록' }[k]} />)}
     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(300px, 100%), 1fr))', gap: 10, marginTop: 10 }}>
       <div className="card" style={{ padding: 14, minWidth: 0 }}>
         <b>Director</b>
@@ -238,15 +247,15 @@ function Overview({ corp, cfg, scan, onTab, writable, busy }) {
       <div className="card" style={{ padding: 14, minWidth: 0 }}>
         <b>백업 스토리지</b>
         <div style={{ fontSize: 12.5, marginTop: 6, lineHeight: 1.7 }}>
-          <div>{st.length}개{scan ? ` · 포탈 ${rows.filter((r) => r.portal === true).length} · 사람이 만든 ${rows.filter((r) => r.portal === false).length}` : ' · 만든 곳은 서버 파일을 읽은 뒤'}</div>
-          <div>디스크 여유 합계 {known ? bytesText(free) : '—(디스크 읽기 전)'}</div>
+          <div>{st ? `${st.length}개${scan ? ` · 포탈 ${rows.filter((r) => r.portal === true).length} · 사람이 만든 ${rows.filter((r) => r.portal === false).length}` : ' · 만든 곳은 서버 파일을 읽은 뒤'}` : NA}</div>
+          <div>디스크 여유 합계 {total ? `${bytesText(total.availBytes)} / ${bytesText(total.sizeBytes)}(파일시스템 ${total.filesystems}개${total.partial ? ' · 일부 모름' : ''})` : '—(디스크 읽기 전)'}</div>
         </div>
         <button type="button" className="logout-btn" style={{ ...BTN, marginTop: 8 }} onClick={() => onTab('storage')}>스토리지 관리</button>
       </div>
       <div className="card" style={{ padding: 14, minWidth: 0 }}>
         <b>WebUI 계정</b>
         <div style={{ fontSize: 12.5, marginTop: 6, lineHeight: 1.7 }}>
-          <div>{webui.length}개{scan ? ` — 포탈 ${webui.filter((a) => a.portal === true).length} · 사람이 만든 파일 ${webui.filter((a) => a.portal === false).length}` : ''}</div>
+          <div>{cons ? `${webui.length}개${scan ? ` — 포탈 ${webui.filter((a) => a.portal === true).length} · 사람이 만든 파일 ${webui.filter((a) => a.portal === false).length}` : ''}` : NA}</div>
           <div className="muted">로그인 = Director 의 Console + Profile(TLS 끔)</div>
         </div>
         <button type="button" className="logout-btn" style={{ ...BTN, marginTop: 8 }} onClick={() => onTab('accounts')}>WebUI 계정 관리</button>
@@ -254,13 +263,14 @@ function Overview({ corp, cfg, scan, onTab, writable, busy }) {
       <div className="card" style={{ padding: 14, minWidth: 0 }}>
         <b>포탈 풀 · 스케줄</b>
         <div style={{ fontSize: 12.5, marginTop: 6, lineHeight: 1.7 }}>
-          {pf.hasPools ? <div>{PORTAL_POOLS[0]} {unitText(pf.fullDays, '일')} · {PORTAL_POOLS[1]} {unitText(pf.incrDays, '일')} · 볼륨 최대 {unitText(pf.maxVolumeGB, ' GB')}</div> : <div className="muted">포탈 풀이 없습니다(자동 설정 · 완전 설치에서 만들 때 생깁니다).</div>}
-          {pf.hasSchedule ? <div>{PORTAL_SCHEDULE} Full {pf.fullDay && pf.time ? `${pf.fullDay} ${pf.time}(서버 시각)` : '—(읽지 못함)'}</div> : <div className="muted">포탈 스케줄 없음</div>}
+          {!pools ? <div>풀 {NA}</div> : pf.hasPools ? <div>{PORTAL_POOLS[0]} {unitText(pf.fullDays, '일')} · {PORTAL_POOLS[1]} {unitText(pf.incrDays, '일')} · 볼륨 최대 {unitText(pf.maxVolumeGB, ' GB')}</div> : <div className="muted">포탈 풀이 없습니다(자동 설정 · 완전 설치에서 만들 때 생깁니다).</div>}
+          {!schedules ? <div>스케줄 {NA}</div> : pf.hasSchedule ? <div>{PORTAL_SCHEDULE} Full {pf.fullDay && pf.time ? `${pf.fullDay} ${pf.time}(서버 시각)` : '—(읽지 못함)'}</div> : <div className="muted">포탈 스케줄 없음</div>}
         </div>
         <button type="button" className="logout-btn" style={{ ...BTN, marginTop: 8 }} onClick={() => onTab('pools')}>풀 · 스케줄</button>
       </div>
       <Reregister corp={corp} writable={writable} busyOuter={!!busy} />
     </div>
+    </>
   );
 }
 
@@ -587,6 +597,9 @@ function PoolsTab({ corp, cfg, scan, busy, write, writable, otpRequired, ssh, se
   const changedSched = f.fullDay !== init.fullDay || f.time !== init.time;
   const num = (v, lo, hi) => /^\d+$/.test(v) && +v >= lo && +v <= hi;
   const issue = (!changedPools && !changedSched ? '바뀐 값이 없습니다.' : '')
+    // v2.846 U-2: 목록을 못 읽은 것과 '없음' 을 나눈다
+    || (changedPools && !pools ? '풀 목록을 읽지 못했습니다 — 설정 다시 읽기 뒤에 하세요.' : '')
+    || (changedSched && !schedules ? '스케줄 목록을 읽지 못했습니다 — 설정 다시 읽기 뒤에 하세요.' : '')
     || (changedPools && !init.hasPools ? '포탈 풀이 이 Director 에 없습니다(자동 설정 · 완전 설치로 먼저 만듭니다).' : '')
     || (changedSched && !init.hasSchedule ? '포탈 스케줄이 이 Director 에 없습니다.' : '')
     || (changedPools && (!num(f.fullDays, 1, 3650) || !num(f.incrDays, 1, 3650)) ? '보존 기간은 1~3650일입니다.' : '')

@@ -67,6 +67,24 @@ export function storageRows(cfgStorages = [], scan = null, mapped = []) {
     return { name: s.name, device, mediaType: (s.mediaType || [])[0] || '', mcj: s.maxConcurrentJobs ?? null, description: s.description || '', address: s.address || '', path, portal, disk, files: disk?.files ?? null, mapped: isMapped, delIssue };
   });
 }
+/**
+ * 디스크 여유 합계(v2.846 U-3 — 반증 확정): 같은 파일시스템(마운트)을 쓰는 스토리지를 두 번 세지 않는다(완전 설치 기본값은 File · PortalFile 이 같은 디렉터리라
+ * 늘 2배였다). 못 읽은 행이 있으면 partial(부분 합 — 화면이 '일부 모름' 을 붙인다). 아는 값이 하나도 없으면 null.
+ */
+export function diskTotal(rows = []) {
+  const seen = new Map();
+  let unknown = 0;
+  for (const r of rows) {
+    const d = r.disk;
+    if (!d || d.missing || d.availBytes == null || d.sizeBytes == null) { unknown += 1; continue; }
+    const key = d.mount || d.path;
+    if (!seen.has(key)) seen.set(key, d);
+  }
+  if (!seen.size) return null;
+  let avail = 0; let size = 0;
+  for (const d of seen.values()) { avail += d.availBytes; size += d.sizeBytes; }
+  return { availBytes: avail, sizeBytes: size, filesystems: seen.size, partial: unknown > 0 };
+}
 export const portalText = (p) => (p === true ? '포탈' : p === false ? '사람이 만든 파일' : '모름');
 export function diskText(disk) {
   if (!disk) return '—';
@@ -172,6 +190,16 @@ export function bulkSummaryText(results = []) {
   const parts = [`성공 ${c.done}`, `실패 ${c.failed}`, `보내지 않음 ${c.skipped}`, ...(c.unknown ? [`결과 모름 ${c.unknown}`] : [])];
   const partial = c.done && (c.failed || c.skipped || c.unknown);
   return `${partial ? '**부분 성공** — ' : ''}${parts.join(' · ')}`;
+}
+/**
+ * 다시 시도 결과를 앞 결과에 합친다(v2.846 U-6 — 반증 확정): 다시 시도한 법인 행만 새 결과로 바꾸고, 나머지 행(첫 실행의 성공 · 생성 비밀번호)은 그대로 둔다.
+ * 예전에는 결과를 통째로 바꿔 첫 실행에서 성공한 법인의 한 번만 보이는 비밀번호가 '닫기' 없이 사라졌다.
+ */
+export function mergeBulkRows(prev = [], next = []) {
+  const by = new Map(next.map((x) => [x.directorId, x]));
+  const out = prev.map((x) => (by.has(x.directorId) ? by.get(x.directorId) : x));
+  for (const x of next) if (!prev.some((p) => p.directorId === x.directorId)) out.push(x);
+  return out;
 }
 /** 생성 비밀번호 CSV(법인 · 계정 · 비밀번호) — 화면이 한 번만 내려받게 한다. 쉼표 · 따옴표는 따옴표로 감싼다. */
 export function passwordCsv(results = [], account = '') {

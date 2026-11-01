@@ -35,6 +35,14 @@ function fullWriteOnly(req, res, next) {
 }
 const P = '/tools/bareos-backup/settings/corp';
 const PA = '/tools/bareos-backup/settings/accounts';
+/**
+ * v2.846 C-4(반증 확정): 화면은 600초(서버 요청 시한)까지만 기다린다 — 엣지 대행의 최악(인출 120 + 회신 480초)이 그보다 길어 브라우저가 먼저 끊기면
+ * 서버는 끝까지 적용하고 **생성 비밀번호를 아무도 모르게** 됐다. 서버가 그보다 짧은 예산 안에서 끝낸다: 예산이 지나면 아직 엣지가 가져가지 않은 작업은 거두고(보내지 않음)
+ * 가져간 작업은 '결과 모름' 으로 닫는다. 결과 모름 법인에는 생성 비밀번호를 함께 돌려준다(적용됐을 수 있다 — 버리면 계정만 생기고 비밀번호를 잃는다).
+ */
+export const MANAGE_BUDGET_MS = 560_000;
+export const BULK_BUDGET_MS = 540_000;
+export const BULK_START_CUTOFF_MS = 420_000;   // 이 뒤로는 새 법인을 시작하지 않는다(보내지 않음)
 export const MANAGE_ACTIONS = Object.freeze(['storage.add', 'storage.edit', 'storage.delete', 'console.add', 'console.password', 'console.delete', 'pools.edit']);
 export const ACCOUNT_ACTIONS = Object.freeze(['console.add', 'console.password', 'console.delete']);
 const LABEL = Object.freeze({
@@ -68,7 +76,7 @@ function sendErr(res, e) {
   if (isSshHostKeyError(e)) return res.status(502).json({ ok: false, code: 'ssh-hostkey', reason: String(e.message).slice(0, 600) });
   if (isSshAuthError(e)) return res.status(502).json({ ok: false, code: 'ssh-auth', reason: 'SSH 인증 실패 — 계정 · 비밀번호를 확인하세요(자동으로 다시 시도하지 않습니다). 비밀번호가 맞다면 그 서버의 sshd 가 root 비밀번호 로그인을 막고 있을 수 있습니다(Rocky · RHEL 9 기본값 PermitRootLogin prohibit-password).' });
   const status = code === 'invalid' ? 400 : code === 'conflict' ? 409 : code === 'config-test' ? 422 : code === 'not-sent' ? 503 : code === 'unknown' ? 504 : code === 'not-found' ? 404 : 502;
-  res.status(status).json({ ok: false, code: code || 'error', reason: String(e?.message || e).slice(0, 1800), ...(e?.needSsh ? { needSsh: true } : {}), ...(e?.paths ? { paths: e.paths } : {}) });
+  res.status(status).json({ ok: false, code: code || 'error', reason: String(e?.message || e).slice(0, 1800), ...(e?.needSsh ? { needSsh: true } : {}), ...(e?.paths ? { paths: e.paths } : {}), ...(e?.generatedPassword ? { generatedPassword: e.generatedPassword, maybeApplied: true } : {}) });
 }
 
 function directorFor(req, res) {
@@ -174,12 +182,14 @@ api.post(`${P}/:directorId/manage`, adminOnly, fullScopeOnly, fullWriteOnly, asy
   const label = LABEL[action];
   const sum = planSummary(planned.plan);
   try {
-    const r = await runManage(d, { ...planned, input }, ssh, { accountPassword: acct.pw });
+    const r = await runManage(d, { ...planned, input }, ssh, { accountPassword: acct.pw, signal: AbortSignal.timeout(MANAGE_BUDGET_MS) });
     forgetConfig(d.id);
     audit(req, `Bareos 법인 설정(${label})`, d.name, `성공 — ${sum} · ${(r.files || []).map((f) => `${f.path}(${f.action})`).join(', ')}${r.restarted ? ' · SD 재시작' : ''}${ssh.registry ? ' · SSH 배포 등록부' : ''}${acct.generated ? ' · 비밀번호 생성(응답에 한 번 표시)' : ''}`);
     res.json({ ok: true, directorId: d.id, action, ...r, ...(acct.generated ? { generatedPassword: acct.pw } : {}) });
   } catch (e) {
     audit(req, `Bareos 법인 설정(${label})`, d.name, `실패 — ${sum} · ${auditReason(e)}`);
+    // 결과 모름이면 생성 비밀번호를 함께(적용됐을 수 있다 — C-4)
+    if (e?.code === 'unknown' && acct.generated) e.generatedPassword = acct.pw;
     sendErr(res, e);
   } finally {
     releaseSetupLock(d.id, ssh.host); noteSetupEnd(d.id);
@@ -247,27 +257,34 @@ api.post(`${PA}/bulk`, adminOnly, fullScopeOnly, fullWriteOnly, async (req, res)
   if (![...sshOf.values()].some((x) => x.ssh)) return res.status(400).json({ ok: false, code: 'invalid', needSsh: true, reason: '보낼 수 있는 법인이 없습니다 — 고른 법인 모두 SSH 비밀번호가 필요합니다(배포 등록부 계정 없음). OTP 는 쓰지 않았습니다.' });
   if (!otpVerify(req, res, pre.needOtp)) return;
   const label = LABEL[action];
+  const t0 = Date.now();
+  const deadline = AbortSignal.timeout(BULK_BUDGET_MS);
   const one = async (d) => {
     const row = { directorId: d.id, name: d.name, ok: false, status: 'failed' };
+    if (Date.now() - t0 > BULK_START_CUTOFF_MS || deadline.aborted) return { ...row, status: 'skipped', reason: '보내지 않음 — 이번 일괄의 시간 예산이 지나 시작하지 않았습니다(다시 시도하세요).' };
     const so = sshOf.get(d.id);
     if (!so?.ssh) return { ...row, status: 'skipped', needSsh: !!so?.err?.needSsh, reason: `보내지 않음 — ${String(so?.err?.message || so?.err || '').slice(0, 300)}` };
     const { ssh } = so;
     if (!claimSetup(d.id, ssh.host)) return { ...row, status: 'skipped', reason: `보내지 않음 — ${setupBusyReason(d.id, ssh.host) || '진행 중인 작업이 있습니다.'}` };
     noteSetupStart(d.id, d.name);
     let sum = `계정 ${input.name}`;
+    let pw = '';
     try {
       const planned = await planFor(d, action, input);
       sum = planSummary(planned.plan);
       // 생성이면 **법인마다 다른** 비밀번호(사용자 시안 — 한 법인의 비밀번호가 새도 다른 법인은 그대로) · 결과 행에 한 번만
-      const pw = acct.generated ? newAccountPassword() : acct.pw;
-      const r = await runManage(d, { ...planned, input }, ssh, { accountPassword: pw });
+      pw = acct.generated ? newAccountPassword() : acct.pw;
+      const r = await runManage(d, { ...planned, input }, ssh, { accountPassword: pw, signal: deadline });
       forgetConfig(d.id);
       audit(req, `Bareos 계정 통합(${label})`, d.name, `성공 — ${sum} · ${(r.files || []).map((f) => `${f.path}(${f.action})`).join(', ')}${acct.generated ? ' · 법인별 비밀번호 생성(응답에 한 번 표시)' : ''}`);
       return { ...row, ok: true, status: 'done', files: r.files || [], relay: r.relay || '', ...(acct.generated && pw ? { generatedPassword: pw } : {}) };
     } catch (e) {
       audit(req, `Bareos 계정 통합(${label})`, d.name, `실패 — ${sum} · ${auditReason(e)}`);
       const code = isSshAuthError(e) ? 'ssh-auth' : isSshHostKeyError(e) ? 'ssh-hostkey' : (e?.code || 'error');
-      return { ...row, code, status: code === 'unknown' ? 'unknown' : 'failed', reason: code === 'ssh-auth' ? 'SSH 인증 실패 — 계정 · 비밀번호를 확인하세요(자동으로 다시 시도하지 않습니다).' : String(e?.message || e).slice(0, 600) };
+      const status = code === 'unknown' ? 'unknown' : code === 'not-sent' ? 'skipped' : 'failed';
+      return { ...row, code, status, reason: code === 'ssh-auth' ? 'SSH 인증 실패 — 계정 · 비밀번호를 확인하세요(자동으로 다시 시도하지 않습니다).' : String(e?.message || e).slice(0, 600),
+        // 결과 모름: 적용됐을 수 있다 — 생성 비밀번호를 버리지 않는다(C-4)
+        ...(status === 'unknown' && acct.generated && pw ? { generatedPassword: pw, maybeApplied: true } : {}) };
     } finally {
       releaseSetupLock(d.id, ssh.host); noteSetupEnd(d.id);
       requestReconcile(d.id);
