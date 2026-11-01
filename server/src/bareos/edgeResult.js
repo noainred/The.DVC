@@ -158,7 +158,8 @@ export const VALUE = Object.freeze({
   // v2.845 법인별 설정 쓰기 — 파일 경로 · 동작만(내용 · 비밀 없음)
   'setup.manage': (v) => {
     const r = obj(v);
-    return { files: arr(r.files).slice(0, 10).map((x0) => { const x = obj(x0); return { path: str(x.path, 300), action: ['created', 'updated', 'deleted', 'unchanged'].includes(x.action) ? x.action : 'unknown' }; }), restarted: bool(r.restarted), reloaded: bool(r.reloaded) };
+    // 반증 E5: 감사에 들어가는 경로 — 포탈이 쓰는 /etc/bareos 아래 리소스 파일 모양만
+    return { files: arr(r.files).slice(0, 10).map((x0) => { const x = obj(x0); return { path: str(x.path, 300), action: ['created', 'updated', 'deleted', 'unchanged'].includes(x.action) ? x.action : 'unknown' }; }).filter((x) => /^\/etc\/bareos\/bareos-(dir|sd)\.d\/[a-z]+\/[A-Za-z0-9._-]{1,64}\.conf$/.test(x.path)), restarted: bool(r.restarted), reloaded: bool(r.reloaded) };
   },
   'setup.scan': (v) => normScanResult(v),
 });

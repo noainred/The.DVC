@@ -16,6 +16,7 @@ import { listJobs, rebindJobs } from '../registry.js';
 import { jobNameFor } from '../names.js';
 import { morefOf } from '../../vcenter/registry.js';
 import { tryLockJob, unlockJob } from '../jobLocks.js';
+import { requestReconcile } from '../poller.js';
 import { knownHostAddrs } from '../install/job.js';
 import { planManage, applyManage, RESERVED_CONSOLES } from './apply.js';
 import { normConfigResult, normScanResult } from './showParse.js';
@@ -39,16 +40,19 @@ export function sshSourceFor(d, { settings, inventory = [], deployTargets = [], 
   const targetOf = (agent) => (agent ? deployTargets.find((t) => lc(t.agentName) === lc(agent) && t.password && t.enabled !== false) || deployTargets.find((t) => lc(t.agentName) === lc(agent) && t.password) : null);
   const reg = (t, why) => ({ source: 'registry', targetId: t.id, host: t.host, port: Number(t.port) || 22, username: t.username || 'root', why });
   const host = lc(d.host);
-  const agents = [...new Set([d.agent, ...sites.map((s) => agentOf(s.vcenterId))].filter(Boolean))];
+  // v2.845 반증 F1(재현): 담당 엣지가 있으면 **그 엣지의** 등록부 계정만 — 다른 법인 엣지의 root 비밀번호를 이 엣지의 대행 작업에 실어 보내지 않는다.
+  //   담당 엣지가 없으면(중앙 직접) 이 Director 에 묶인 vCenter 를 올리는 엣지의 계정 중 주소가 같은 것.
+  const mine = (t) => !!t && (!d.agent || lc(t.agentName) === lc(d.agent));
+  const agents = d.agent ? [d.agent] : [...new Set(sites.map((s) => agentOf(s.vcenterId)).filter(Boolean))];
   for (const a of agents) {
     const t = targetOf(a);
-    if (!t) continue;
+    if (!mine(t)) continue;
     if (lc(t.host) === host) return reg(t, `Director 주소가 엣지 ‘${a}’ 의 SSH 주소와 같습니다(배포 등록부 계정).`);
   }
   for (const s of sites) {
     const k = known.get(s.vcenterId);
-    const t = targetOf(agentOf(s.vcenterId));
-    if (t && k && lc(k) === host) return reg(t, `완전 설치가 이 엣지 노드에 설치한 Director 입니다(배포 등록부 계정).`);
+    const t = targetOf(d.agent || agentOf(s.vcenterId));
+    if (mine(t) && k && lc(k) === host) return reg(t, `완전 설치가 이 엣지 노드에 설치한 Director 입니다(배포 등록부 계정).`);
   }
   if (d.agent && LOOPBACK.has(host)) {
     const t = targetOf(d.agent);
@@ -89,8 +93,13 @@ export function resolveSsh(d, body = {}) {
 const CONFIG_TTL_MS = 30_000;
 const _cfgMemo = new Map();   // `${demo}|${id}|${rev}` → { at, value }
 const _cfgInflight = new Map();
-export function forgetConfig(directorId) { for (const k of [..._cfgMemo.keys()]) if (k.includes(`|${directorId}|`)) _cfgMemo.delete(k); }
-export function _resetForTest() { _cfgMemo.clear(); _cfgInflight.clear(); }
+const _cfgGen = new Map();   // directorId → 세대(반증 E7 — 쓰기 전에 시작한 조회가 쓰기 뒤에 끝나 옛 값을 다시 기억하지 않게)
+export function forgetConfig(directorId) {
+  _cfgGen.set(directorId, (_cfgGen.get(directorId) || 0) + 1);
+  for (const k of [..._cfgMemo.keys()]) if (k.includes(`|${directorId}|`)) _cfgMemo.delete(k);
+  for (const k of [..._cfgInflight.keys()]) if (k.includes(`|${directorId}|`)) _cfgInflight.delete(k);
+}
+export function _resetForTest() { _cfgMemo.clear(); _cfgInflight.clear(); _cfgGen.clear(); }
 
 /**
  * @returns {Promise<{ results, version, at }>} — 비밀번호 칸 없음(ops.config 가 버리고 normConfigResult 가 다시 거른다).
@@ -100,12 +109,13 @@ export async function readConfig(d, { refresh = false } = {}) {
   const hit = _cfgMemo.get(key);
   if (!refresh && hit && Date.now() - hit.at < CONFIG_TTL_MS) return hit.value;
   if (_cfgInflight.has(key)) return _cfgInflight.get(key);
+  const gen0 = _cfgGen.get(d.id) || 0;
   const p = (async () => {
     const v = normConfigResult(await onDirector(d.id, 'config', {}));
     const value = { ...v, at: Date.now() };
-    _cfgMemo.set(key, { at: value.at, value });
+    if ((_cfgGen.get(d.id) || 0) === gen0) _cfgMemo.set(key, { at: value.at, value });
     return value;
-  })().finally(() => _cfgInflight.delete(key));
+  })().finally(() => { if (_cfgInflight.get(key) === p) _cfgInflight.delete(key); });
   _cfgInflight.set(key, p);
   return p;
 }
@@ -114,7 +124,7 @@ const okVal = (cfg, k) => (cfg?.results?.[k]?.ok ? cfg.results[k].value : []);
 /** planManage 에 줄 '그 Director 의 지금 설정'(비밀 없음). */
 export function knownFor(d, cfg, settings = effectiveSettings()) {
   const storages = okVal(cfg, 'storages');
-  const prefer = storages.find((s) => s.name === 'File') || storages.find((s) => s.address) || null;
+  const prefer = storages.find((s) => s.name === 'File' && s.address) || storages.find((s) => s.address) || null;   // 반증 F9 — 주소가 빈 File 을 고르지 않는다
   return {
     config: { storages, consoles: okVal(cfg, 'consoles'), profiles: okVal(cfg, 'profiles') },
     portalConsole: d.consoleName || '',
@@ -147,7 +157,7 @@ export async function runManage(d, { plan, known, input }, ssh, { accountPasswor
     const v = await relayToEdge(d, kind, { body: { host: ssh.host, sshPort: ssh.sshPort, username: ssh.username }, action: plan.action, input: input || {}, known }, { secretArgs });
     return isScan ? normScanResult(v) : { ok: true, ...v, relay: d.agent };
   }
-  const v = await applyManage(plan, { host: ssh.host, sshPort: ssh.sshPort, username: ssh.username, password: ssh.password }, { accountPassword }, {});
+  const v = await applyManage(plan, { host: ssh.host, sshPort: ssh.sshPort, username: ssh.username, password: ssh.password }, { accountPassword }, { dirPort: d.port });
   return isScan ? normScanResult(v) : v;
 }
 
@@ -226,7 +236,7 @@ export async function reregisterTargets(d, ids = []) {
   }
   try {
     if (!ready.length) return { results: out };
-    const bind = (results) => {
+    const bind = async (results) => {
       const byKey = new Map((results || []).map((r) => [r.key, r]));
       const list = [];
       for (const x of ready) {
@@ -237,18 +247,31 @@ export async function reregisterTargets(d, ids = []) {
       }
       if (!list.length) return;
       let res;
-      try { res = rebindJobs(list); } catch (e) { for (const x of ready) if (x.o.name) x.o.reason = `Director 잡 ‘${x.o.name}’ 은 만들었지만 원장을 쓰지 못했습니다(${String(e?.message || e).slice(0, 160)}) — 다시 실행하면 같은 이름을 씁니다.`; return; }
-      for (const r of res) { const o = out.find((y) => y.id === r.id); if (o) { o.ok = r.ok; if (!r.ok) o.reason = String(r.err?.message || r.err).slice(0, 200); } }
+      try { res = rebindJobs(list); } catch (e) { res = list.map((x) => ({ id: x.id, ok: false, err: e })); }
+      const orphans = [];
+      for (const r of res) {
+        const o = out.find((y) => y.id === r.id);
+        if (o) { o.ok = r.ok; if (!r.ok) o.reason = `Director 잡 ‘${o.name}’ 은 만들었지만 원장에 묶지 못했습니다(${String(r.err?.message || r.err).slice(0, 160)})`; }
+        if (!r.ok) orphans.push(list.find((x) => x.id === r.id)?.bareosJob);
+      }
+      // 반증 F8: 원장에 묶지 못한 잡은 끈다(일반 등록의 orphanCleanup 과 같은 규칙 — 원장 밖 스케줄 잡이 켜진 채 남지 않게)
+      if (orphans.filter(Boolean).length) {
+        let off = new Set();
+        try { off = new Set((await onDirector(d.id, 'disableJobs', { names: orphans.filter(Boolean) })).filter((x) => x.ok).map((x) => x.name)); } catch { /* 아래 문구 */ }
+        for (const o of out) if (!o.ok && o.name && orphans.includes(o.name)) o.reason += off.has(o.name) ? ' — 그 잡은 비활성화했습니다.' : ' — 그 잡을 비활성화하지도 못했습니다(Director 에서 직접 정리하세요).';
+      }
+      requestReconcile(d.id);
     };
     let results;
     try {
-      results = await onDirector(d.id, 'addJobs', { items: ready.map((x) => x.item) }, { onLate: (lr) => { if (lr?.ok && Array.isArray(lr.value)) bind(lr.value); } });
+      // 늦은 회신(엣지 '결과 모름' 뒤): 같은 규칙으로 묶고, 묶지 못하면 끈다 — 잡 잠금은 이미 풀렸다(남긴 것: 그 사이 같은 대상 작업과 겹칠 수 있다)
+      results = await onDirector(d.id, 'addJobs', { items: ready.map((x) => x.item) }, { onLate: (lr) => { if (lr?.ok && Array.isArray(lr.value)) bind(lr.value).catch(() => {}); } });
     } catch (e) {
       const why = e?.code === 'unknown' ? `결과 모름 — 법인 엣지가 회신하지 않았습니다. 늦은 회신이 오면 원장에 반영합니다(잠시 뒤 목록을 다시 읽으세요). ${String(e?.message || '').slice(0, 200)}` : String(e?.message || e).slice(0, 300);
       for (const x of ready) x.o.reason = why;
       return { results: out };
     }
-    bind(results);
+    await bind(results);
     return { results: out };
   } finally { for (const id of locked) unlockJob(id); }
 }

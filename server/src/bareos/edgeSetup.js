@@ -66,7 +66,7 @@ async function runSetupOne(kind, dir, args, secretArgs, signal) {
       const known = args?.known && typeof args.known === 'object' ? args.known : {};
       const plan = planManage(String(args?.action || ''), input, known);
       if (plan.action === 'scan') throw Object.assign(new Error('읽기는 setup.scan 으로 보냅니다.'), { code: 'invalid' });
-      return applyManage(plan, b, { accountPassword: secretArgs.accountPassword == null ? undefined : String(secretArgs.accountPassword) }, { signal });
+      return applyManage(plan, b, { accountPassword: secretArgs.accountPassword == null ? undefined : String(secretArgs.accountPassword) }, { signal, dirPort: dir.port });
     }
     case 'setup.director': {
       const defaults = args?.defaults && typeof args.defaults === 'object' ? args.defaults : {};

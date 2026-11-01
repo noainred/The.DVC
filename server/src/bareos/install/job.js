@@ -418,7 +418,7 @@ function localConsoleCheck(creds) {
       try {
         const dn = String((await api.exec("sed -n 's/^[[:space:]]*Name[[:space:]]*=[[:space:]]*\"\\{0,1\\}\\([A-Za-z0-9._-]*\\).*/\\1/p' /etc/bareos/bareos-dir.d/director/*.conf 2>/dev/null | head -n 1"))?.stdout || '').trim() || 'bareos-dir';
         if (!isResourceName(dn)) throw fail('invalid', 'Director 이름을 읽지 못했습니다.');
-        const conf = `Director {\n  Name = ${dn}\n  Address = localhost\n  Port = ${Number(directorPort) || 9101}\n  Password = "unused-${crypto.randomBytes(8).toString('hex')}"\n}\nConsole {\n  Name = "${consoleName}"\n  Password = "${password}"\n  Director = ${dn}\n}\n`;
+        const conf = `Director {\n  Name = ${dn}\n  Address = localhost\n  DirPort = ${Number(directorPort) || 9101}\n  Password = "unused-${crypto.randomBytes(8).toString('hex')}"\n}\nConsole {\n  Name = "${consoleName}"\n  Password = "${password}"\n  Director = ${dn}\n}\n`;
         await api.writeFile(`${tmp}/bconsole.conf`, conf, 0o600);
         const x = await api.exec(`printf 'version\\n' | timeout 30 bconsole -c ${tmp}/bconsole.conf 2>&1`, 45_000);
         return { code: x?.code, out: String(x?.stdout || '') };

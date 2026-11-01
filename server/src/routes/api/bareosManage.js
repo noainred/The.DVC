@@ -239,17 +239,20 @@ api.post(`${PA}/bulk`, adminOnly, fullScopeOnly, fullWriteOnly, async (req, res)
     planManage(action, input, {});   // 이름 · 권한 모양(법인별 판정은 아래에서 그 법인 설정으로 다시)
     acct = accountPasswordOf(action, req.body);
   } catch (e) { return sendErr(res, e); }
-  if (!otpVerify(req, res, pre.needOtp)) return;
   const sshIn = req.body?.ssh && typeof req.body.ssh === 'object' ? req.body.ssh : {};
+  // 반증 F7: 법인마다 SSH 를 **OTP 전에** 판정 — 보낼 법인이 하나도 없으면 1회용 OTP 를 쓰지 않고 400
+  const sshOf = new Map();
+  for (const d of dirs) { try { sshOf.set(d.id, { ssh: isDemoActive() ? { host: '', password: '' } : resolveSsh(d, sshIn[d.id]) }); } catch (e) { sshOf.set(d.id, { err: e }); } }
+  if (![...sshOf.values()].some((x) => x.ssh)) return res.status(400).json({ ok: false, code: 'invalid', needSsh: true, reason: '보낼 수 있는 법인이 없습니다 — 고른 법인 모두 SSH 비밀번호가 필요합니다(배포 등록부 계정 없음). OTP 는 쓰지 않았습니다.' });
+  if (!otpVerify(req, res, pre.needOtp)) return;
   const label = LABEL[action];
   const results = new Array(dirs.length);
   let next = 0;
   const one = async (d) => {
     const row = { directorId: d.id, name: d.name, ok: false, status: 'failed' };
-    let ssh;
-    try { ssh = isDemoActive() ? { host: '', password: '' } : resolveSsh(d, sshIn[d.id]); } catch (e) {
-      return { ...row, status: 'skipped', needSsh: !!e?.needSsh, reason: `보내지 않음 — ${String(e?.message || e).slice(0, 300)}` };
-    }
+    const so = sshOf.get(d.id);
+    if (!so?.ssh) return { ...row, status: 'skipped', needSsh: !!so?.err?.needSsh, reason: `보내지 않음 — ${String(so?.err?.message || so?.err || '').slice(0, 300)}` };
+    const { ssh } = so;
     if (!claimSetup(d.id, ssh.host)) return { ...row, status: 'skipped', reason: `보내지 않음 — ${setupBusyReason(d.id, ssh.host) || '진행 중인 작업이 있습니다.'}` };
     noteSetupStart(d.id, d.name);
     let sum = `계정 ${input.name}`;

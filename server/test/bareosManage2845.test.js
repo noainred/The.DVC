@@ -50,26 +50,35 @@ function manageServer(o = {}) {
   const srv = fakeServer({ env: 'D S C U', ...o });
   const base = srv.ssh;
   const st = srv.st;
-  Object.assign(st, { all: [], run: o.run ?? '0', sdTestCode: o.sdTestCode ?? 0, sdTestOut: o.sdTestOut ?? 'ok', loginOk: o.loginOk ?? true, volFiles: o.volFiles ?? '0', refs: o.refs ?? '', sdRestarts: 0, made: [], removedDirs: [], pathKind: o.pathKind ?? 'NONE' });
+  Object.assign(st, { all: [], run: o.run ?? '0', run2: o.run2 ?? null, sdTestCode: o.sdTestCode ?? 0, sdTestOut: o.sdTestOut ?? 'ok', loginOk: o.loginOk ?? true, volFiles: o.volFiles ?? '0', volKind: o.volKind ?? 'N',
+    refs: o.refs ?? '', devRefs: o.devRefs ?? '', archUsed: o.archUsed ?? '', se: o.se ?? 'SE=off', writeOk: o.writeOk ?? true, entries: o.entries ?? '0', sdRestarts: 0, made: [], removedDirs: [], seDeleted: [], pathKind: o.pathKind ?? 'NONE', bconf: [] });
   const ok = (stdout = '') => ({ code: 0, stdout, stderr: '' });
   srv.ssh = (creds, fn, opts) => base(creds, (api) => fn({
     ...api,
+    writeFile: async (p, c, mode) => { if (p.endsWith('bconsole.conf')) st.bconf.push(String(c)); return api.writeFile(p, c, mode); },
     exec: async (c) => {
       st.all.push(c);
       if (c.startsWith("o=$(printf 'llist jobs jobstatus=R")) return ok(`RUN=${st.run}\n`);
+      if (c.startsWith("r=$(o=$(printf 'llist jobs jobstatus=R")) {   // 재시작 직전 같은 셸에서 다시 확인(F4)
+        const r2 = st.run2 ?? st.run;
+        if (r2 !== '0') return ok(`RUN=${r2}\n`);
+        st.sdRestarts += 1; return ok('RUN=0\nRESTART=0\n');
+      }
+      if (c.includes('echo "N=$(find')) return ok(st.volKind === 'N' ? `N=${st.volFiles}\n` : `${st.volKind}\n`);
+      if (c.startsWith('grep -rliE') && c.includes('Archive')) return ok(st.archUsed);
+      if (c.startsWith('grep -rliE') && c.includes(')device[')) return ok(st.devRefs);
+      if (c.startsWith('grep -rliE')) return ok(st.refs);
+      if (c.startsWith('semanage fcontext -d')) { st.seDeleted.push(c); return ok(); }
       if (c.startsWith("sed -n 's/^[[:space:]]*Password")) return ok(`${SD_PW}\n`);
       if (c.startsWith("sed -n 's/^[[:space:]]*Name")) return ok('bareos-dir\n');
       if (c.includes('bareos-sd -t')) return { code: st.sdTestCode, stdout: st.sdTestOut, stderr: '' };
       if (c.startsWith('systemctl restart bareos-sd')) { st.sdRestarts += 1; return ok(); }
       if (c.includes('bconsole -c ')) return st.loginOk ? ok('Connecting to Director localhost:9101\nVersion: 25.0.4 (01 Jan 2026)\n') : { code: 1, stdout: 'Authorization failed.', stderr: '' };
-      if (c.startsWith('if [ -L ')) return ok(`${st.pathKind}\nCANON\n`);
+      if (c.startsWith('if [ -L ')) return ok(`${st.pathKind}\n${st.pathKind === 'DIR' ? `ENTRIES=${st.entries}\n` : ''}CANON\n`);
       if (c.startsWith('install -d -o bareos')) { st.made.push(c.split(' ').at(-1)); return ok(); }
-      if (c.startsWith('if command -v getenforce')) return ok();
-      if (c.startsWith('runuser -u bareos -- sh -c')) return ok();
-      if (c.startsWith('[ -d ') && c.includes('find ')) return ok(`${st.volFiles}\n`);
-      if (c.startsWith('grep -rlE')) return ok(st.refs);
+      if (c.startsWith('if command -v getenforce')) return ok(`${st.se}\n`);
+      if (c.startsWith('runuser -u bareos -- sh -c')) return st.writeOk ? ok() : { code: 1, stdout: 'touch: Permission denied', stderr: '' };
       if (c.startsWith('[ -d ') && c.includes('rmdir')) { st.removedDirs.push(c); return ok(); }
-      if (c.startsWith('rmdir ')) { st.removedDirs.push(c); return ok(); }
       return api.exec(c);
     },
   }), opts);
@@ -177,6 +186,10 @@ test('④-1 계정 추가: 새 표지 파일 · 검사 · reload · 새 비밀�
   assert.equal(f.mode, '0640'); assert.equal(f.owner, 'bareos');
   assert.equal(srv.st.reloads, 1);
   assert.ok(srv.st.all.some((c) => c.includes('bconsole -c ')), '새 계정으로 접속 확인');
+  assert.match(srv.st.bconf[0], /\n {2}DirPort = 9101\n/, 'bconsole Director 리소스 키워드는 DirPort(번들 bconsole 바이너리 실측 — 반증 E1)');
+  assert.ok(!/\n {2}Port =/.test(srv.st.bconf[0]));
+  await M.applyManage(M.planManage('console.add', { name: 'ops-kr2', profile: 'webui-readonly' }, {}), SSH, { accountPassword: ACC_PW }, { dirPort: 19101 });
+  assert.match(srv.st.bconf[1], /DirPort = 19101/, 'Director 포트를 따른다');
   noSecretIn(srv.st, [SSH_PW, ACC_PW]);
   assert.equal(srv.st.sdRestarts, 0, '계정은 SD 를 다시 띄우지 않는다');
 });
@@ -233,13 +246,40 @@ test('④-4 스토리지 추가: 실행 중 작업 0 일 때만 · SD 비밀번�
   assert.match(sto, new RegExp(`Password = "${SD_PW}"[\\s\\S]*Maximum Concurrent Jobs = 6`));
   assert.deepEqual(srv.st.made, ['/mnt/nas01/bareos']);
   noSecretIn(srv.st, [SSH_PW, SD_PW]);
-  assert.ok(srv.st.all.findIndex((c) => c.includes('bareos-sd -t')) < srv.st.all.findIndex((c) => c.startsWith('systemctl restart bareos-sd')), '검사 → 재시작 순서');
+  assert.ok(srv.st.all.findIndex((c) => c.includes('bareos-sd -t')) < srv.st.all.findIndex((c) => c.includes('systemctl restart bareos-sd')), '검사 → 재시작 순서');
   srv = manageServer({ sdTestCode: 1, sdTestOut: `Error: Password = "${SD_PW}"` });
   await assert.rejects(M.applyManage(plan, SSH, {}), (e) => e.code === 'config-test' && !e.message.includes(SD_PW) && /되돌렸습니다/.test(e.message));
   assert.equal(srv.F.has('/etc/bareos/bareos-sd.d/device/NasStorage.conf'), false);
   assert.equal(srv.F.has('/etc/bareos/bareos-dir.d/storage/Nas.conf'), false);
   assert.equal(srv.st.sdRestarts, 0, '검사 실패면 재시작하지 않는다');
   assert.ok(srv.st.removedDirs.some((c) => c.includes('rmdir /mnt/nas01/bareos')), '이번에 만든 디렉터리는 지운다(비었을 때만 — rmdir)');
+  // F4(반증 — 재현): 쓰기 전 확인 뒤 · 재시작 직전에 실행 중 작업이 생기면 재시작하지 않고 되돌린다
+  srv = manageServer({ run2: '1' });
+  await assert.rejects(M.applyManage(plan, SSH, {}), (e) => e.code === 'conflict' && /SD 를 다시 띄우지 않았습니다/.test(e.message) && /되돌렸습니다/.test(e.message));
+  assert.equal(srv.st.sdRestarts, 0);
+  assert.equal(srv.F.has('/etc/bareos/bareos-dir.d/storage/Nas.conf'), false);
+  assert.equal(srv.st.reloads, 0, 'reload 전이라 다시 읽히지 않는다');
+  // F5(반증 — 재현): 쓰기 시험 실패(파일을 놓기 전)여도 만든 디렉터리 · 넣은 SELinux 규칙을 되돌린다
+  srv = manageServer({ writeOk: false, se: 'SE=added' });
+  await assert.rejects(M.applyManage(plan, SSH, {}), (e) => e.code === 'remote' && /쓰지 못했습니다/.test(e.message));
+  assert.ok(srv.st.removedDirs.some((c) => c.includes('rmdir /mnt/nas01/bareos')));
+  assert.equal(srv.st.seDeleted.length, 1, '이번에 넣은 SELinux 규칙 지움');
+  srv = manageServer({ writeOk: false, se: 'SE=had' });
+  await assert.rejects(M.applyManage(plan, SSH, {}));
+  assert.equal(srv.st.seDeleted.length, 0, '원래 있던 규칙은 지우지 않는다');
+  // F2(반증 — 재현): 이미 있는 비어 있지 않은 디렉터리 · 데이터 경로는 받지 않는다(재라벨하지 않는다)
+  srv = manageServer({ pathKind: 'DIR', entries: '1' });
+  await assert.rejects(M.applyManage(plan, SSH, {}), (e) => e.code === 'invalid' && /이미 파일/.test(e.message));
+  assert.ok(!srv.st.all.some((c) => c.startsWith('if command -v getenforce')), 'SELinux 명령을 돌리지 않았다');
+  srv = manageServer({ pathKind: 'DIR', entries: '0' });
+  assert.equal((await M.applyManage(plan, SSH, {})).ok, true, '빈 디렉터리는 받는다');
+  assert.equal(srv.st.made.length, 0, '이미 있던 디렉터리는 만들지 않았다');
+  for (const bad of ['/var/lib/pgsql/bk', '/var/log/bareos', '/var/lib/bareos', '/var/spool/x']) assert.throws(() => M.planManage('storage.add', { name: 'Z1', path: bad }, known), /데이터 경로/, bad);
+  assert.equal(M.dataDirIssue('/var/lib/bareos/storage2'), '', 'Bareos 저장 경로 아래는 된다');
+  // F6(반증 — 재현): 다른 SD 장치가 같은 경로를 쓰면 거부
+  srv = manageServer({ archUsed: '/etc/bareos/bareos-sd.d/device/FileStorage.conf\n' });
+  await assert.rejects(M.applyManage(plan, SSH, {}), (e) => e.code === 'conflict' && /FileStorage\.conf/.test(e.message));
+  assert.equal(srv.st.made.length, 0);
 });
 
 test('④-5 스토리지 편집 · 삭제: 포탈 파일만 · SD 비밀번호는 옛 파일 그대로 · 볼륨 · 참조가 있으면 지우지 않음', async () => {
@@ -263,7 +303,19 @@ test('④-5 스토리지 편집 · 삭제: 포탈 파일만 · SD 비밀번호�
   const d = await M.applyManage(M.planManage('storage.delete', { name: 'Nas' }, {}), SSH, {});
   assert.deepEqual(d.files.map((f) => f.action), ['deleted', 'deleted']);
   assert.equal(srv.F.has('/etc/bareos/bareos-sd.d/device/NasStorage.conf'), false);
-  assert.ok(srv.st.removedDirs.some((c) => /\[ ! -L \/mnt\/nas01\/bareos \] && rmdir \/mnt\/nas01\/bareos/.test(c)), '비었을 때만 · 심링크 아님');
+  assert.equal(srv.st.removedDirs.length, 0, '볼륨 디렉터리는 지우지 않는다(F6 — 원래 있던 · 나눠 쓰는 디렉터리일 수 있다)');
+  // F3(반증 — 재현): 주석이 붙은 Archive Device 도 읽어 볼륨 수를 센다 · 못 읽으면 · 심링크면 멈춘다
+  const devC = dev.replace('Archive Device = /mnt/nas01/bareos', 'Archive Device = /mnt/nas01/bareos   # moved disk');
+  srv = manageServer({ files: { ...files, '/etc/bareos/bareos-sd.d/device/NasStorage.conf': devC }, volFiles: '37' });
+  await assert.rejects(M.applyManage(M.planManage('storage.delete', { name: 'Nas' }, {}), SSH, {}), (e) => /볼륨 파일이 37개/.test(e.message));
+  const devX = dev.replace('Archive Device = /mnt/nas01/bareos', 'Archive Device = relative/dir');
+  srv = manageServer({ files: { ...files, '/etc/bareos/bareos-sd.d/device/NasStorage.conf': devX } });
+  await assert.rejects(M.applyManage(M.planManage('storage.delete', { name: 'Nas' }, {}), SSH, {}), (e) => e.code === 'conflict' && /볼륨 경로를 읽지 못했습니다/.test(e.message));
+  srv = manageServer({ files, volKind: 'LINK' });
+  await assert.rejects(M.applyManage(M.planManage('storage.delete', { name: 'Nas' }, {}), SSH, {}), (e) => e.code === 'conflict' && /심링크/.test(e.message));
+  srv = manageServer({ files, devRefs: '/etc/bareos/bareos-dir.d/storage/Other.conf\n' });
+  await assert.rejects(M.applyManage(M.planManage('storage.delete', { name: 'Nas' }, {}), SSH, {}), (e) => e.code === 'conflict' && /Other\.conf/.test(e.message));
+  assert.ok(srv.F.has('/etc/bareos/bareos-sd.d/device/NasStorage.conf'));
 });
 
 test('④-6 포탈 풀 편집: 포탈 파일이 있어야(없으면 아무것도 쓰지 않음) · 바뀐 값만', async () => {
@@ -305,6 +357,10 @@ test('⑤ SSH 출처: 배포 등록부는 Director 가 그 엣지 노드일 때�
   assert.equal(src({ id: 'd1', host: '10.0.0.9', agent: '' }).host, '10.0.0.9', '입력 칸에 Director 주소를 미리 채운다');
   assert.equal(src({ id: 'd1', host: 'bareos-kr.corp', agent: '' }, { known: new Map([['vc-a', 'bareos-kr.corp']]) }).source, 'registry', '완전 설치가 그 엣지에 설치한 Director');
   assert.equal(src({ id: 'd1', host: '127.0.0.1', agent: 'edge-kr' }).source, 'registry', '담당 엣지가 루프백으로 붙는 Director');
+  // F1(반증 — 재현): 담당 엣지가 다르면 다른 엣지의 등록부 계정을 그 엣지로 보내지 않는다
+  assert.equal(src({ id: 'd1', host: '10.0.0.5', agent: 'edge-pl' }).source, 'input');
+  assert.equal(src({ id: 'd1', host: 'bareos-kr.corp', agent: 'edge-pl' }, { known: new Map([['vc-a', 'bareos-kr.corp']]) }).source, 'input');
+  assert.equal(src({ id: 'd1', host: '10.0.0.5', agent: 'edge-kr' }).source, 'registry', '같은 엣지면 된다');
   const lo = src({ id: 'd1', host: '127.0.0.1', agent: '' });
   assert.equal(lo.source, 'input'); assert.equal(lo.host, '', '루프백은 입력 칸에 채우지 않는다');
   assert.equal(SV.sshSourceFor({ id: 'd1', host: '10.0.0.5', agent: '' }, { settings, inventory, deployTargets: [{ ...t, password: '' }] }).source, 'input', '비밀번호 없는 대상은 쓰지 않는다');
@@ -314,14 +370,21 @@ test('⑤ SSH 출처: 배포 등록부는 Director 가 그 엣지 노드일 때�
 
 /* ───────── ⑥ 엣지 회신 · 원장 · 재등록 ───────── */
 test('⑥-1 엣지 회신 정제 · 회신 시한', () => {
-  const m = sanitizeEdgeResult('setup.manage', { ok: true, value: { files: [{ path: '/etc/x.conf', action: 'created', content: 'secret' }], restarted: true, reloaded: 'yes', extra: 1 } });
-  assert.deepEqual(m, { ok: true, value: { files: [{ path: '/etc/x.conf', action: 'created' }], restarted: true, reloaded: false } });
+  const P1 = '/etc/bareos/bareos-dir.d/console/x.conf';
+  const m = sanitizeEdgeResult('setup.manage', { ok: true, value: { files: [{ path: P1, action: 'created', content: 'secret' }, { path: '/etc/x.conf\nforged', action: 'created' }], restarted: true, reloaded: 'yes', extra: 1 } });
+  assert.deepEqual(m, { ok: true, value: { files: [{ path: P1, action: 'created' }], restarted: true, reloaded: false } }, '포탈 리소스 파일 모양이 아닌 경로는 버린다(반증 E5)');
   const empty = sanitizeEdgeResult('setup.manage', { ok: true, value: { files: [] } });
   assert.equal(empty.ok, false, '바꾼 파일 목록이 없으면 성공으로 받지 않는다');
   assert.ok(VALUE['setup.scan']);
   const lim = relayLimits();
   for (const k of ['setup.manage', 'setup.scan']) assert.ok(lim.secretPickupMs + RESULT_MS[k] <= 600_000, `${k}: 인출 대기 + 회신 시한 ≤ 포탈 요청 시한`);
   assert.ok(RESULT_MS['setup.manage'] > A.BUDGET.sessionMs, '회신 시한 > SSH 세션 예산');
+});
+
+test('⑥-0 knownFor: SD 주소는 주소가 있는 스토리지에서(주소가 빈 File 을 고르지 않는다 — 반증 F9)', () => {
+  const cfg = { results: { storages: { ok: true, value: [{ name: 'File', address: '' }, { name: 'Nas', address: 'bareos.corp' }] } } };
+  assert.equal(SV.knownFor({ id: 'x', consoleName: 'portal' }, cfg, { sites: [] }).address, 'bareos.corp');
+  assert.equal(SV.knownFor({ id: 'x' }, null, { sites: [] }).address, '', '설정을 못 읽으면 빈 값(추가 판정이 막는다)');
 });
 
 test('⑥-2 rebindJobs: 같은 원장 행(이력 그대로)에 새 이름 · 매핑 — 한 번의 쓰기', () => {
@@ -434,6 +497,9 @@ test('⑦-3 일괄: 법인마다 다른 생성 비밀번호 · SSH 없는 법인
   const srvs = manageServers(['10.20.30.40', '10.30.0.5']);
   const code = generateToken(SECRET, { counter: Math.floor(Date.now() / 1000 / 30) + 1 });   // ⑦-2 가 이번 창의 코드를 썼다 — 다음 창(허용 오차 안)
   try {
+    // F7(반증 — 재현): 보낼 법인이 없으면(모두 SSH 필요) OTP 를 쓰지 않고 400 — 같은 코드로 아래 일괄이 통과해야 한다
+    const none = await req('admin', '/accounts/bulk', { action: 'console.add', name: 'audit-ro', profile: 'webui-readonly', directorIds: [D3], generate: true, otp: code });
+    assert.equal(none.s, 400); assert.equal(none.j.needSsh, true);
     const r = await req('admin', '/accounts/bulk', { action: 'console.add', name: 'audit-ro', profile: 'webui-readonly', directorIds: [DIR, D2, D3], generate: true, otp: code,
       ssh: { [DIR]: { host: '10.20.30.40', username: 'root', password: SSH_PW }, [D2]: { host: '10.30.0.5', username: 'root', password: SSH_PW } } });
     assert.equal(r.s, 200, r.t);
@@ -487,6 +553,23 @@ test('⑥-3 재등록: Director 에 없는 원장 대상만 · 화면 목록을 
     assert.ok(!/schedule=/.test(add[0]), '원장 스케줄이 비었으면(그룹 잡) 스케줄 없이');
     const g = REG.getJob(gone.id);
     assert.deepEqual([g.id, g.client, g.storage, g.pool, g.lastRun.jobid, g.enabled, g.missingInDirector], [gone.id, 'kr-fd', 'File', 'VMwareKR', 41, false, false], '같은 행 · 이력 · 꺼짐 그대로');
+    // F8(반증 — 재현): 잡을 만든 사이 원장 행이 사라져 묶지 못하면 그 잡을 끈다(원장 밖 스케줄 잡이 켜진 채 남지 않게)
+    REG.deleteJob(here.id, { directorId: DIR });
+    const lost = mk('vc-a:vm-11', 'app-11', 'pv-vc-a-vm-11-gone');
+    svc._setSessionFactoryForTest(async () => ({
+      info: { banner: 'OK: bareos-dir Version: 25.0.4 (01 Jan 2026)' }, close() {},
+      call: async (cmd) => {
+        sent.push(cmd);
+        if (cmd === '.jobs') return { jobs: [] };
+        if (cmd.startsWith('configure add job')) { REG.deleteJob(lost.id, { directorId: DIR }); return { add: { name: /name=(\S+)/.exec(cmd)[1] } }; }
+        if (cmd.startsWith('disable job=')) return {};
+        throw Object.assign(new Error('bad'), { code: 'jsonrpc' });
+      },
+    }));
+    const r2 = await SV.reregisterTargets(S.directorById(DIR), [lost.id]);
+    assert.equal(r2.results[0].ok, false);
+    assert.match(r2.results[0].reason, /비활성화했습니다/);
+    assert.ok(sent.some((c) => c === `disable job=${r2.results[0].name}`), sent.slice(-3).join(' | '));
   } finally {
     REG.deleteJob(gone.id, { directorId: DIR }); REG.deleteJob(here.id, { directorId: DIR });
     store.snapshot = prevSnap;

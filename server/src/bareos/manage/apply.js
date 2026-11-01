@@ -26,6 +26,22 @@ export const PW_MIN = 12;
 const PW_RE = /^[\x21\x23-\x5b\x5d-\x7e]{12,128}$/;   // 출력 가능한 ASCII — 따옴표(")·역슬래시·공백·제어문자 없음(설정 파일 따옴표 안에 그대로 들어간다)
 const DESC_RE = /^[^"\\\r\n\x00-\x1f]{0,120}$/;
 const fail = (code, message, extra = {}) => Object.assign(new Error(message), { code, ...extra });
+/**
+ * v2.845 반증 F2: 다른 프로그램의 데이터 경로는 볼륨 경로로 받지 않는다(install/plan volumeDirIssue 는 시스템 경로만 막는다 —
+ * 그 아래에 스토리지를 만들면 SELinux 문맥을 바꿔 PostgreSQL · 로그 데몬이 다음 재시작부터 막힐 수 있다). 비어 있지 않은 디렉터리는 원격에서 다시 거부한다.
+ */
+export const DATA_DIRS = Object.freeze(['/var/lib/bareos', '/var/log', '/var/lib/pgsql', '/var/lib/postgresql', '/var/lib/mysql', '/var/lib/mariadb', '/var/spool', '/var/www', '/var/cache',
+  '/var/lib/rpm', '/var/lib/dnf', '/var/lib/selinux', '/var/lib/systemd', '/var/lib/containers', '/var/lib/docker']);
+export function dataDirIssue(p) {
+  const s = String(p || '');
+  for (const d of DATA_DIRS) {
+    if (s === d) return `${d} 는 다른 프로그램(또는 Bareos 자신)의 데이터 경로라 볼륨 경로로 쓰지 않습니다.`;
+    if (s.startsWith(`${d}/`) && d !== '/var/lib/bareos') return `${d} 아래는 다른 프로그램의 데이터 경로라 볼륨 경로로 쓰지 않습니다.`;
+  }
+  return '';
+}
+const reEsc = (x) => String(x).replace(/[.]/g, '\\.');   // grep -E 에 넣는 이름 · 경로(정규식을 지난 [A-Za-z0-9._/-] 만) — 점만 문자 그대로
+const ARCHIVE_RE = /^\s*Archive\s+Device\s*=\s*"?([^"\n#]+?)"?\s*(?:#.*)?$/mi;
 
 /** 생성 비밀번호 — base64url 24자(따옴표·역슬래시 없음). */
 export const newAccountPassword = () => crypto.randomBytes(18).toString('base64url');
@@ -80,7 +96,7 @@ export function planManage(action, a = {}, known = {}) {
       if (!isResourceName(mediaType)) throw fail('invalid', 'Media Type 은 영문 · 숫자 · ._- 로 적습니다.');
       if (storages.some((s) => (s.mediaType || []).some((m) => m.toLowerCase() === mediaType.toLowerCase()))) throw fail('invalid', `Media Type ‘${mediaType}’ 를 다른 스토리지가 씁니다 — 스토리지마다 다르게 적습니다(같으면 볼륨이 엉뚱한 장치로 갑니다).`);
       const archiveDevice = String(a.path ?? '').trim();
-      const vi = volumeDirIssue(archiveDevice);
+      const vi = volumeDirIssue(archiveDevice) || dataDirIssue(archiveDevice);
       if (vi) throw fail('invalid', vi);
       const count = numOrNull(a.count ?? 10);
       if (!Number.isInteger(count) || count < 1 || count > 50) throw fail('invalid', '동시 작업 수(장치 수)는 1~50 으로 적습니다.');
@@ -134,6 +150,8 @@ export function planManage(action, a = {}, known = {}) {
 
 /* ───────── 원격 ───────── */
 const RUNNING_CMD = "o=$(printf 'llist jobs jobstatus=R\\n' | timeout 30 bconsole 2>&1); rc=$?; if [ $rc -eq 0 ] && printf '%s\\n' \"$o\" | grep -q 'Connecting to Director' && ! printf '%s\\n' \"$o\" | grep -qiE 'Authorization failed|Failed to connect|ERR='; then echo \"RUN=$(printf '%s\\n' \"$o\" | grep -cE '^[[:space:]]*jobid:[[:space:]]*[0-9]+')\"; else echo RUN=unknown; fi";
+/** v2.845 반증 F4: 재시작 직전 **같은 셸**에서 실행 중 작업을 다시 세고 0 일 때만 재시작한다(쓰기 전 확인과 재시작 사이 검사 · SELinux 가 수 분 걸릴 수 있다). */
+const SD_RESTART_CMD = `r=$(${RUNNING_CMD}); echo "$r"; case "$r" in RUN=0) o2=$(systemctl restart bareos-sd 2>&1); echo "RESTART=$?"; printf '%s\\n' "$o2";; esac`;
 const SD_PW_CMD = `sed -n 's/^[[:space:]]*Password[[:space:]]*=[[:space:]]*"\\([^"]*\\)".*/\\1/p' ${SD_CONF_ROOT}/director/bareos-dir.conf 2>/dev/null | head -n 1`;
 const TEST = {
   dir: "if command -v runuser >/dev/null 2>&1; then runuser -u bareos -- bareos-dir -t 2>&1; else bareos-dir -t 2>&1; fi",
@@ -222,16 +240,18 @@ export async function applyManage(plan, b = {}, secret = {}, ctx = {}) {
       if (plan.action === 'storage.edit') fillEdit(plan, files);
       // 2) 스토리지 삭제 전제 — 볼륨 파일 0 · 참조 0
       if (plan.action === 'storage.delete') await deletePrecheck(api, plan, files);
-      // 3) SD 를 다시 띄우는 작업은 실행 중 작업이 0 일 때만(확인 못 하면 멈춘다)
+      // 3) SD 를 다시 띄우는 작업은 실행 중 작업이 0 일 때만(확인 못 하면 멈춘다) — 쓰기 전에 한 번 · 재시작 직전 같은 셸에서 한 번 더(F4)
+      const runText = (run) => (run === 'unknown' || !run ? '실행 중인 작업이 있는지 확인하지 못했습니다' : `실행 중인 작업이 ${run}개 있습니다`);
       if (needsSd) {
         const run = /RUN=(\S+)/.exec(String((await api.exec(RUNNING_CMD, 45_000))?.stdout || ''))?.[1];
-        if (run !== '0') throw fail('conflict', run === 'unknown' || !run ? 'Director 에 실행 중인 작업이 있는지 확인하지 못했습니다 — SD 를 다시 띄우지 않으려고 멈췄습니다(아무것도 바꾸지 않았습니다).' : `Director 에 실행 중인 작업이 ${run}개 있습니다 — SD 를 다시 띄우면 끊기므로 끝난 뒤 하세요(아무것도 바꾸지 않았습니다).`);
+        if (run !== '0') throw fail('conflict', `Director 에 ${runText(run)} — SD 를 다시 띄우면 백업이 끊기므로 멈췄습니다(아무것도 바꾸지 않았습니다).`);
       }
-      // 4) 스토리지 추가: 경로 준비(없으면 만듦 · SELinux · bareos 쓰기 시험)
-      if (plan.action === 'storage.add') await prepareDir(api, plan, madeDirs, mask);
-      // 5) 놓기 · 지우기
-      const tmp = await remoteTmpDir(api.exec, R.TMP_PREFIX);
+      // 4) 경로 준비 · 놓기 · 검사 · 적용 — 어디서 실패해도 이번에 만든 디렉터리 · SELinux 규칙까지 되돌린다(F5)
+      const made = { dirs: madeDirs, seRule: '' };
+      let tmp = '';
       try {
+        if (plan.action === 'storage.add') await prepareDir(api, plan, made, mask);
+        tmp = await remoteTmpDir(api.exec, R.TMP_PREFIX);
         for (const [i, f] of files.entries()) {
           if (f.content == null) {
             placed.push({ path: f.path, old: f.old, mode: f.mode || '0640' });
@@ -244,26 +264,26 @@ export async function applyManage(plan, b = {}, secret = {}, ctx = {}) {
           placed.push({ path: f.path, old: f.old, mode: f.mode || '0640' });
           await R.placeFile(api, tmp, i, f.content, f.path, f.mode || '0640');
         }
-        // 6) 검사
+        // 5) 검사
         for (const t of needsSd ? ['sd', 'dir'] : ['dir']) {
           const r = await api.exec(TEST[t], BUDGET.testMs);
           if (r?.code !== 0) throw fail('config-test', `${t === 'sd' ? 'SD' : 'Director'} 설정 검사(bareos-${t} -t)가 실패했습니다: ${tail(mask(r?.stdout || r?.stderr), 500)}`);
         }
-        // 7) 적용 — SD 재시작(스토리지) · Director reload
+        // 6) 적용 — SD 재시작(스토리지 · 같은 셸에서 실행 중 작업 0 을 다시 확인한 뒤에만) · Director reload
         if (needsSd) {
+          const r = await api.exec(SD_RESTART_CMD, BUDGET.reloadMs + 45_000);
+          const o = String(r?.stdout || '');
+          const run = /RUN=(\S+)/.exec(o)?.[1];
+          if (run !== '0') throw fail('conflict', `파일을 놓는 사이 Director 에 ${runText(run)} — SD 를 다시 띄우지 않았습니다(작업이 끝난 뒤 다시 하세요).`);
           restarted = true;
-          const r = await api.exec('systemctl restart bareos-sd 2>&1', BUDGET.reloadMs);
-          if (r?.code !== 0) throw fail('remote', `bareos-sd 를 다시 시작하지 못했습니다: ${tail(mask(r?.stdout || r?.stderr), 300)}`);
+          if (!/^RESTART=0$/m.test(o)) throw fail('remote', `bareos-sd 를 다시 시작하지 못했습니다: ${tail(mask(o.replace(/^RUN=.*$/m, '')), 300)}`);
         }
         reloaded = true;
         const rl = await api.exec(R.RELOAD_CMD, BUDGET.reloadMs);
         if (rl?.code !== 0) throw fail('remote', `Director reload(bconsole)가 실패했습니다: ${tail(mask(rl?.stdout || rl?.stderr), 300) || '출력 없음'}`);
-        // 8) 계정 확인 — 새 비밀번호로 bconsole 이 실제로 붙는가(TLS 끔 · 서버 안)
-        if (plan.action === 'console.add' || plan.action === 'console.password') await verifyConsoleLogin(api, plan.name, secret.accountPassword, mask);
-        if (plan.action === 'storage.delete') {
-          const p = files.find((f) => f.archiveDevice)?.archiveDevice;
-          if (p && !volumeDirIssue(p)) await api.exec(`[ -d ${p} ] && [ ! -L ${p} ] && rmdir ${p} 2>/dev/null; true`);
-        }
+        // 7) 계정 확인 — 새 비밀번호로 bconsole 이 실제로 붙는가(TLS 끔 · 서버 안)
+        if (plan.action === 'console.add' || plan.action === 'console.password') await verifyConsoleLogin(api, plan.name, secret.accountPassword, mask, ctx.dirPort);
+        // 스토리지 삭제: 볼륨 디렉터리는 지우지 않는다(F6 — 원래 있던 빈 디렉터리 · 다른 장치와 나눠 쓰는 디렉터리일 수 있다)
         settled = true;
         return { files: files.map((f) => ({ path: f.path, action: f.content == null ? 'deleted' : f.old == null ? 'created' : f.old === f.content ? 'unchanged' : 'updated' })), restarted, reloaded };
       } catch (e) {
@@ -277,9 +297,10 @@ export async function applyManage(plan, b = {}, secret = {}, ctx = {}) {
             e.message = `${e.message} — 바꾼 파일을 되돌렸습니다${again}.`;
           } else e.message = `${e.message} — 되돌리지 못한 파일: ${left.join(', ')}(직접 확인하세요).`;
         } else settled = true;
-        for (const d of madeDirs.reverse()) await api.exec(`rmdir ${d} 2>/dev/null; true`).catch(() => {});
+        const undo = await undoMade(api, made);
+        if (undo) e.message = `${e.message} ${undo}`;
         throw e;
-      } finally { await api.exec(`rm -rf ${tmp}`).catch(() => {}); }
+      } finally { if (tmp) await api.exec(`rm -rf ${tmp}`).catch(() => {}); }
     }, ctx.signal);
     return { ok: true, ...out };
   } catch (e) {
@@ -338,7 +359,7 @@ async function buildFiles(api, plan, secret) {
       if (!device) throw fail('conflict', '스토리지 파일에서 장치 이름을 읽지 못했습니다 — 지우지 않았습니다.');
       const sp = `${SD_CONF_ROOT}/device/${device}.conf`;
       const sst = await R.pathState(api, sp);
-      const archiveDevice = sst.state === 'managed' ? /^\s*Archive\s+Device\s*=\s*"?([^"\n]+?)"?\s*$/mi.exec(sst.old || '')?.[1] || '' : '';
+      const archiveDevice = sst.state === 'managed' ? ARCHIVE_RE.exec(sst.old || '')?.[1]?.trim() || '' : '';
       return [{ path: sp, content: null, archiveDevice }, { path: dp, content: null, device }];
     }
     case 'pools.edit': {
@@ -356,7 +377,7 @@ function fillEdit(plan, files) {
   const get = (t, re) => re.exec(t || '')?.[1] || '';
   const device = get(sd.old, /^\s*Name\s*=\s*"?([A-Za-z0-9._-]{1,64})"?\s*$/m);
   const mediaType = get(sd.old, /^\s*Media\s+Type\s*=\s*"?([A-Za-z0-9._-]{1,64})"?\s*$/mi);
-  const archiveDevice = get(sd.old, /^\s*Archive\s+Device\s*=\s*"?([^"\n]+?)"?\s*$/mi);
+  const archiveDevice = get(sd.old, ARCHIVE_RE).trim();
   const address = get(dir.old, /^\s*Address\s*=\s*"?([A-Za-z0-9.:-]{1,253})"?\s*$/mi);
   const sdPassword = get(dir.old, /^\s*Password\s*=\s*"([^"\n]*)"/mi);
   if (!device || !mediaType || volumeDirIssue(archiveDevice) || !address || !sdPassword) throw fail('conflict', '포탈 스토리지 파일에서 기존 값을 읽지 못했습니다 — 바꾸지 않았습니다.');
@@ -367,40 +388,66 @@ function fillEdit(plan, files) {
 async function deletePrecheck(api, plan, files) {
   const sdFile = files[0]; const dev = files[1]?.device;
   const p = sdFile.archiveDevice;
-  if (p && !volumeDirIssue(p)) {
-    const n = Number(String((await api.exec(`[ -d ${p} ] && find ${p} -maxdepth 1 -type f | wc -l || echo 0`))?.stdout || '').trim());
-    if (!Number.isInteger(n)) throw fail('conflict', '볼륨 디렉터리의 파일 수를 읽지 못했습니다 — 지우지 않았습니다.');
-    if (n > 0) throw fail('conflict', `볼륨 디렉터리(${p})에 볼륨 파일이 ${n}개 있습니다 — 백업 데이터가 있는 스토리지는 지우지 않습니다.`);
-  }
-  // 이 스토리지 이름을 쓰는 풀 · 잡 · JobDefs(Storage = X) — 줄 단위 비교(이름은 정규식을 지났다)
-  const ref = String((await api.exec(`grep -rlE '^[[:space:]]*Storage[[:space:]]*=[[:space:]]*"?${plan.name}"?[[:space:]]*(#.*)?$' ${DIR_CONF_ROOT}/pool ${DIR_CONF_ROOT}/job ${DIR_CONF_ROOT}/jobdefs 2>/dev/null | head -n 5`))?.stdout || '').trim();
+  // F3: 경로를 못 읽었으면 멈춘다(못 읽은 값은 0 이 아니다) · 심링크면 따라가 세지 않고 멈춘다
+  if (!p || volumeDirIssue(p)) throw fail('conflict', `SD 장치 파일에서 볼륨 경로를 읽지 못했습니다${p ? `(${p})` : ''} — 볼륨 파일이 없는지 확인할 수 없어 지우지 않았습니다.`);
+  const o = String((await api.exec(`if [ -L ${p} ]; then echo LINK; elif [ -d ${p} ]; then echo "N=$(find ${p} -maxdepth 1 -type f 2>/dev/null | wc -l)"; elif [ -e ${p} ]; then echo OTHER; else echo N=0; fi`))?.stdout || '');
+  if (/LINK|OTHER/.test(o)) throw fail('conflict', `볼륨 경로(${p})가 심링크이거나 디렉터리가 아닙니다 — 볼륨 파일 수를 확인할 수 없어 지우지 않았습니다.`);
+  const n = Number(/N=\s*(\d+)/.exec(o)?.[1]);
+  if (!Number.isInteger(n)) throw fail('conflict', '볼륨 디렉터리의 파일 수를 읽지 못했습니다 — 지우지 않았습니다.');
+  if (n > 0) throw fail('conflict', `볼륨 디렉터리(${p})에 볼륨 파일이 ${n}개 있습니다 — 백업 데이터가 있는 스토리지는 지우지 않습니다.`);
+  // 이 스토리지 이름을 쓰는 설정(Storage = X — 대소문자 · 한 줄 리소스 · ; 끝) · 이 장치를 가리키는 다른 Director Storage(Device = Y)
+  const own = `${DIR_CONF_ROOT}/storage/${plan.name}.conf`;
+  const refRe = (k, v) => `(^|[;{[:space:]])${k}[[:space:]]*=[[:space:]]*"?${reEsc(v)}"?([[:space:];}#]|$)`;
+  const grep = async (re, dir) => String((await api.exec(`grep -rliE '${re}' ${dir} 2>/dev/null | grep -vxF ${own} | head -n 5`))?.stdout || '').trim();
+  const ref = await grep(refRe('storage', plan.name), DIR_CONF_ROOT);
   if (ref) throw fail('conflict', `이 스토리지를 쓰는 설정이 있습니다(${ref.split('\n').map((x) => path.posix.basename(x)).join(', ')}) — 먼저 그 설정을 바꾸세요.`);
-  void dev;
+  if (dev) {
+    const dref = await grep(refRe('device', dev), `${DIR_CONF_ROOT}/storage`);
+    if (dref) throw fail('conflict', `다른 Director Storage 가 이 SD 장치(${dev})를 가리킵니다(${dref.split('\n').map((x) => path.posix.basename(x)).join(', ')}) — 먼저 그 설정을 바꾸세요.`);
+  }
 }
 
-async function prepareDir(api, plan, madeDirs, mask) {
+async function prepareDir(api, plan, made, mask) {
   const p = plan.archiveDevice;
-  const st = String((await api.exec(`if [ -L ${p} ]; then echo LINK; elif [ -d ${p} ]; then echo DIR; elif [ -e ${p} ]; then echo OTHER; else echo NONE; fi; rp=$(realpath -m -- ${p}); [ "$rp" = "${p}" ] && echo CANON`))?.stdout || '');
+  // F6: 다른 SD 장치가 같은 경로를 쓰면 거부(볼륨이 섞이고 지울 때 판정이 틀린다)
+  const used = String((await api.exec(`grep -rliE '^[[:space:]]*Archive[[:space:]]*Device[[:space:]]*=[[:space:]]*"?${reEsc(p)}"?[[:space:]]*(#.*)?$' ${SD_CONF_ROOT}/device 2>/dev/null | head -n 3`))?.stdout || '').trim();
+  if (used) throw fail('conflict', `다른 SD 장치가 이 경로를 씁니다(${used.split('\n').map((x) => path.posix.basename(x)).join(', ')}) — 스토리지마다 다른 디렉터리를 쓰세요(아무것도 바꾸지 않았습니다).`);
+  const st = String((await api.exec(`if [ -L ${p} ]; then echo LINK; elif [ -d ${p} ]; then echo DIR; echo "ENTRIES=$(find ${p} -mindepth 1 -maxdepth 1 2>/dev/null | head -n 1 | wc -l)"; elif [ -e ${p} ]; then echo OTHER; else echo NONE; fi; rp=$(realpath -m -- ${p}); [ "$rp" = "${p}" ] && echo CANON`))?.stdout || '');
   if (!/CANON/.test(st)) throw fail('invalid', `${p} 경로에 심링크가 섞여 있습니다 — 실제 경로로 적으세요.`);
   if (/LINK|OTHER/.test(st)) throw fail('invalid', `${p} 가 디렉터리가 아닙니다.`);
+  // F2: 이미 있는 디렉터리는 비어 있을 때만(다른 프로그램의 데이터 디렉터리를 재라벨하지 않게)
+  if (/DIR/.test(st) && !/ENTRIES=0/.test(st)) throw fail('invalid', `${p} 에 이미 파일 · 디렉터리가 있습니다 — 새 스토리지는 없는 경로나 빈 디렉터리에만 만듭니다(다른 프로그램의 데이터 디렉터리의 권한 · SELinux 문맥을 바꾸지 않게 · 아무것도 바꾸지 않았습니다).`);
   if (/NONE/.test(st)) {
     const r = await api.exec(`install -d -o bareos -g bareos -m 0750 ${p}`);
     if (r?.code !== 0) throw fail('remote', `볼륨 디렉터리를 만들지 못했습니다: ${tail(mask(r?.stderr || r?.stdout), 200)}`);
-    madeDirs.push(p);
+    made.dirs.push(p);
   }
-  // SELinux: 패키지 기본 저장 경로와 같은 문맥(설치 문서 3.3 · 완전 설치 러너와 같다)
-  await api.exec(`if command -v getenforce >/dev/null 2>&1 && [ "$(getenforce 2>/dev/null)" != Disabled ]; then semanage fcontext -l -C 2>/dev/null | grep -Fq '${p}' || semanage fcontext -a -e /var/lib/bareos/storage ${p} 2>&1; restorecon -R ${p} 2>&1; fi; true`, 60_000);
+  // SELinux: 패키지 기본 저장 경로와 같은 문맥(설치 문서 3.3 · 완전 설치 러너와 같다) — 이번에 넣은 규칙만 기록해 실패하면 지운다(F2)
+  const se = String((await api.exec(`if command -v getenforce >/dev/null 2>&1 && [ "$(getenforce 2>/dev/null)" != Disabled ]; then if semanage fcontext -l -C 2>/dev/null | grep -Fq '${p} = '; then echo SE=had; elif semanage fcontext -a -e /var/lib/bareos/storage ${p} >/dev/null 2>&1; then echo SE=added; else echo SE=fail; fi; restorecon -R ${p} >/dev/null 2>&1; else echo SE=off; fi`, 60_000))?.stdout || '');
+  if (/SE=added/.test(se)) made.seRule = p;
   const w = await api.exec(`runuser -u bareos -- sh -c 'touch ${p}/.portal-write-test && rm -f ${p}/.portal-write-test' 2>&1`);
   if (w?.code !== 0) throw fail('remote', `bareos 계정으로 ${p} 에 쓰지 못했습니다(권한 · SELinux · 마운트): ${tail(mask(w?.stdout || w?.stderr), 200)}`);
 }
 
+/** 이번에 만든 것 되돌리기(SELinux 규칙 → 디렉터리 — 비었을 때만 rmdir). 문제가 있으면 사람이 읽을 문장. */
+async function undoMade(api, made) {
+  const notes = [];
+  if (made.seRule) {
+    const r = await api.exec(`semanage fcontext -d ${made.seRule} >/dev/null 2>&1 && { [ -d ${made.seRule} ] && restorecon -R ${made.seRule} >/dev/null 2>&1; true; }`, 60_000).catch(() => null);
+    if (r?.code !== 0) notes.push(`이번에 넣은 SELinux 규칙(${made.seRule})을 지우지 못했습니다 — semanage fcontext -d ${made.seRule} 로 직접 지우세요.`);
+  }
+  for (const d of [...made.dirs].reverse()) await api.exec(`[ -d ${d} ] && [ ! -L ${d} ] && rmdir ${d} 2>/dev/null; true`).catch(() => {});
+  return notes.join(' ');
+}
+
 /** 새 계정 비밀번호로 서버 안 bconsole 접속(TLS 끔 — WebUI 와 같은 조건). */
-async function verifyConsoleLogin(api, name, password, mask) {
+async function verifyConsoleLogin(api, name, password, mask, dirPort) {
+  const port = Number.isInteger(Number(dirPort)) && Number(dirPort) >= 1 && Number(dirPort) <= 65535 ? Number(dirPort) : 9101;
   const tmp = await remoteTmpDir(api.exec, R.TMP_PREFIX);
   try {
     const dn = String((await api.exec(`sed -n 's/^[[:space:]]*Name[[:space:]]*=[[:space:]]*"\\{0,1\\}\\([A-Za-z0-9._-]*\\).*/\\1/p' ${DIR_CONF_ROOT}/director/*.conf 2>/dev/null | head -n 1`))?.stdout || '').trim() || 'bareos-dir';
     if (!isResourceName(dn)) throw fail('invalid', 'Director 이름을 읽지 못했습니다.');
-    const conf = `Director {\n  Name = ${dn}\n  Address = localhost\n  Port = 9101\n  Password = "unused-${crypto.randomBytes(6).toString('hex')}"\n}\nConsole {\n  Name = "${name}"\n  Password = "${password}"\n  Director = ${dn}\n  TLS Enable = No\n}\n`;
+    const conf = `Director {\n  Name = ${dn}\n  Address = localhost\n  DirPort = ${port}\n  Password = "unused-${crypto.randomBytes(6).toString('hex')}"\n}\nConsole {\n  Name = "${name}"\n  Password = "${password}"\n  Director = ${dn}\n  TLS Enable = No\n}\n`;
     await api.writeFile(`${tmp}/bconsole.conf`, conf, 0o600);
     const x = await api.exec(`printf 'version\\n' | timeout 30 bconsole -c ${tmp}/bconsole.conf 2>&1`, 45_000);
     if (x?.code !== 0 || !/Version/.test(String(x?.stdout || ''))) throw fail('console-login', `새 계정으로 Director 에 붙지 못했습니다: ${tail(mask(x?.stdout), 300)}`);
