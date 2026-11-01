@@ -53,7 +53,7 @@ export const DIRECTOR_ID_RE = /^dir_[a-z0-9_]{1,40}$/;
 const DIRECTOR_NAME_RE = /^[^\u0000-\u001f\u007f<>"'`]{1,64}$/;
 
 /** v2.839 Director 정책 수집 기본값 — 켬 · 06:10(포탈 시각) · show 계열 선택 명령 켬(Profile 에 show 가 없으면 '권한 없음' 으로 남는다) · 끈 Director 없음. */
-export const POLICY_DEFAULTS = Object.freeze({ enabled: true, time: '06:10', optional: Object.freeze({ schedules: true, jobdefs: true, filesets: true }), off: Object.freeze([]) });
+export const POLICY_DEFAULTS = Object.freeze({ enabled: true, time: '06:10', optional: Object.freeze({ schedules: true, jobdefs: true, filesets: true, clients: true }), off: Object.freeze([]) });
 const POLICY_TIME_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
 /** 정책 수집 설정 정규화(순수) — 모르는 값은 기본값(전체를 받는다 — 화면이 묶음째 보낸다). off 는 Director id 모양만(상한 64). */
 export function normPolicySettings(p) {

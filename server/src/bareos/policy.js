@@ -23,6 +23,7 @@ import { localClock, dayIndex, dayStartMs } from '../util/dayKey.js';
 import { poolSettled } from '../util/pool.js';
 import { onDirector, isDemoActive, effectiveSettings } from './service.js';
 import { jobDirectorId } from './settings.js';
+import { isResourceName } from './names.js';
 import { POLICY_CMDS, POLICY_KEYS, normPolicyResult, poolFull, poolUsagePct, str } from './policyParse.js';
 import { nextSlot, scheduleText, slotLevel } from './groupSchedule.js';
 import { osKind } from '../inventory/osKind.js';
@@ -294,6 +295,61 @@ export function vmPolicyVerdict({ job, method, group, inDirSchedule }) {
   return 'manual';
 }
 
+/** 이름으로 풀 행 찾기 — 같은 글자 먼저, 없으면 대소문자 무시(볼륨 목록의 풀 키는 소문자로 온다 — 실측). */
+function findPool(rows, name) {
+  if (!name || !Array.isArray(rows)) return null;
+  return rows.find((p) => p.name === name) || rows.find((p) => p.name.toLowerCase() === String(name).toLowerCase()) || null;
+}
+
+/**
+ * v2.840 잡 하나의 적용 정책(정책 · 일정 탭 VM 표 · 백업 대상 행 '적용 정책' 줄 — 판정은 여기 하나). Director 에 접속하지 않는다(수집본 · 그룹 · 원장만).
+ *   일정 출처: 예약이 켜진 그룹 → Director 스케줄(status scheduler 의 jobs) → 없음. 풀: 그룹 풀 → 잡 풀(등록 때 매핑 풀). 보존: 그 풀의 Volume Retention(llist) → 볼륨 최빈값.
+ * @returns {(j:object, method:string|null) => { dirId, verdict, src, next, dup, jobdefs, fullPool, incPool, pool, poolFrom, retentionSec, keep, group, collected }}
+ *   dup = 그룹 예약과 Director 스케줄 둘 다에 든 잡의 Director 스케줄 이름(두 번 돌 수 있다 — 화면 경고) · 아니면 ''
+ */
+export function jobPolicyResolver({ settings, groups = [], db = loadPolicy(), now = Date.now() }) {
+  const groupOf = new Map();
+  for (const g of groups) for (const id of g.vmIds || []) groupOf.set(`${g.vcenterId}|${id}`, g);
+  const inSched = new Map();   // directorId → Map(jobName → scheduleName) | null(수집 전)
+  const schedOfDir = (dirId) => {
+    if (inSched.has(dirId)) return inSched.get(dirId);
+    const sch = val(db.directors[dirId], 'scheduler');
+    const m = sch ? new Map() : null;
+    if (m) for (const s of sch.schedules || []) if (s.enabled !== false) for (const j of s.jobs || []) if (j.enabled !== false && !m.has(j.name)) m.set(j.name, s.name);
+    inSched.set(dirId, m);
+    return m;
+  };
+  const poolsOf = new Map();
+  const poolsFor = (dirId) => { if (!poolsOf.has(dirId)) poolsOf.set(dirId, poolRows(db.directors[dirId]) || []); return poolsOf.get(dirId); };
+  return (j, method) => {
+    const g = groupOf.get(`${j.vcenterId}|${j.vmId}`) || null;
+    const dirId = jobDirectorId(j, settings);
+    const d = db.directors[dirId];
+    const m = schedOfDir(dirId);
+    const inDir = m ? m.has(j.bareosJob) : null;
+    const verdict = vmPolicyVerdict({ job: j, method, group: g, inDirSchedule: inDir });
+    const jd = (val(d, 'jobdefs') || []).find((x) => x.name === settings.defaults?.jobDefs) || null;
+    const poolName = g?.pool || j.pool || '';
+    const pool = findPool(poolsFor(dirId), poolName);
+    let src = null; let next = null;
+    if (g?.schedule?.enabled === true) { src = { kind: 'group', name: g.name, text: scheduleText(g.schedule) }; const s = nextSlot(g.schedule, now); next = s ? { at: s.at, level: s.level } : null; }
+    else if (inDir) {
+      const sName = m.get(j.bareosJob);
+      const rt = (val(d, 'schedules') || []).find((s) => s.name === sName);
+      src = { kind: 'director', name: sName, text: rt ? rt.run.map((r) => r.text).join(' · ') : '' };
+      const p = (val(d, 'scheduler')?.preview || []).find((x) => x.schedule === sName && x.at >= now);
+      next = p ? { at: p.at, level: p.level } : null;
+    }
+    // 그룹 예약이 켜진 VM 의 잡이 Director 스케줄에도 들어 있으면 두 곳에서 돈다(그룹에 넣기 전에 Director 스케줄로 등록한 잡 — v2.830 은 새로 등록하는 잡만 스케줄 없이 만든다)
+    const dup = g?.schedule?.enabled === true && inDir ? m.get(j.bareosJob) : '';
+    return {
+      dirId, verdict, src, next, dup, jobdefs: settings.defaults?.jobDefs || '', fullPool: jd?.fullPool || '', incPool: jd?.incPool || '',
+      pool: poolName, poolFrom: g?.pool ? 'group' : poolName ? 'job' : '', retentionSec: pool?.volRetentionSec ?? pool?.vol?.retentionSec ?? null,
+      keep: g?.keep ?? null, group: g ? { id: g.id, name: g.name } : null, collected: !!d,
+    };
+  };
+}
+
 /**
  * 정책 · 일정 탭 값(GET /tools/bareos-summary/policy). Director 에 접속하지 않는다.
  * @param {{ settings, digests, digestsKnown, groups, marks, marksKnown, vmsById:Map, allowed:Set|null, admin:boolean, demo:boolean, now:number, vcName:(id)=>string }} o
@@ -404,48 +460,20 @@ export function policyView(o) {
   // ── VM 적용 정책 ──
   const vmRows = []; const counts = { policy: 0, manual: 0, unregistered: 0, mismatch: 0, unknown: 0 };
   if (digestsKnown) {
-    const groupOf = new Map();
-    for (const g of myGroups) for (const id of g.vmIds || []) groupOf.set(`${g.vcenterId}|${id}`, g);
-    const inSched = new Map();   // directorId → Map(jobName → scheduleName) | null(수집 전)
-    const schedOfDir = (dirId) => {
-      if (inSched.has(dirId)) return inSched.get(dirId);
-      const sch = val(db.directors[dirId], 'scheduler');
-      const m = sch ? new Map() : null;
-      if (m) for (const s of sch.schedules || []) if (s.enabled !== false) for (const j of s.jobs || []) if (j.enabled !== false && !m.has(j.name)) m.set(j.name, s.name);
-      inSched.set(dirId, m);
-      return m;
-    };
+    const resolve = jobPolicyResolver({ settings, groups: myGroups, db, now });
     const seenVm = new Set();
     const push = (row) => { counts[row.verdict]++; if (vmRows.length < VM_ROWS_MAX) vmRows.push(row); };
     for (const j of mine) {
-      const key = `${j.vcenterId}|${j.vmId}`;
-      seenVm.add(key);
+      seenVm.add(`${j.vcenterId}|${j.vmId}`);
       const vm = vmsById.get(j.vmId) || null;
       const method = marksKnown ? (marks[j.vmId]?.method || '') : null;
-      const g = groupOf.get(key) || null;
-      const dirId = jobDirectorId(j, settings);
-      const m = schedOfDir(dirId);
-      const inDir = m ? m.has(j.bareosJob) : null;
-      const verdict = vmPolicyVerdict({ job: j, method: method === null ? null : method, group: g, inDirSchedule: inDir });
-      const d = db.directors[dirId];
-      const pools = poolRows(d) || [];
-      const jd = (val(d, 'jobdefs') || []).find((x) => x.name === settings.defaults?.jobDefs) || null;
-      const pool = pools.find((p) => p.name === j.pool) || null;
-      let src = null; let next = null;
-      if (g?.schedule?.enabled === true) { src = { kind: 'group', name: g.name, text: scheduleText(g.schedule) }; const s = nextSlot(g.schedule, now); next = s ? { at: s.at, level: s.level } : null; }
-      else if (inDir) {
-        const sName = m.get(j.bareosJob);
-        const rt = (val(d, 'schedules') || []).find((s) => s.name === sName);
-        src = { kind: 'director', name: sName, text: rt ? rt.run.map((r) => r.text).join(' · ') : '' };
-        const p = (val(d, 'scheduler')?.preview || []).find((x) => x.schedule === sName && x.at >= now);
-        next = p ? { at: p.at, level: p.level } : null;
-      }
+      const r = resolve(j, method);
       push({
         vmId: j.vmId, vm: str(vm?.name || j.vmName, 128), os: vm ? osKind(vm.guestOS) : null,   // inventory/osKind.js(windows·linux·other·null — Detail 과 같은 판정)
-        vc: j.vcenterId, vcName: vcName(j.vcenterId), job: j.bareosJob, enabled: j.enabled !== false, director: scoped.get(dirId)?.dir?.name || '',
-        src, jobdefs: settings.defaults?.jobDefs || '', fullPool: jd?.fullPool || '', incPool: jd?.incPool || '', pool: j.pool || '',
-        retentionSec: pool?.volRetentionSec ?? pool?.vol?.retentionSec ?? null, keep: g?.keep ?? null,
-        lastOk: Number.isFinite(j.lastOkAt) ? j.lastOkAt : null, failing: /^[Eef]/.test(String(j.lastRun?.status || '')), next, verdict,
+        vc: j.vcenterId, vcName: vcName(j.vcenterId), job: j.bareosJob, enabled: j.enabled !== false, director: scoped.get(r.dirId)?.dir?.name || '',
+        src: r.src, ...(r.dup ? { dup: r.dup } : {}), jobdefs: r.jobdefs, fullPool: r.fullPool, incPool: r.incPool, pool: r.pool, poolFrom: r.poolFrom,
+        retentionSec: r.retentionSec, keep: r.keep,
+        lastOk: Number.isFinite(j.lastOkAt) ? j.lastOkAt : null, failing: /^[Eef]/.test(String(j.lastRun?.status || '')), next: r.next, verdict: r.verdict,
       });
     }
     if (marksKnown) {
@@ -546,6 +574,145 @@ export function directorNextByJob(directorId, now = Date.now(), db = loadPolicy(
     const p = first.get(s.name);
     if (!p) continue;
     for (const j of s.jobs || []) if (j.enabled !== false && !out.has(j.name)) out.set(j.name, { at: p.at, level: p.level, schedule: s.name });
+  }
+  return out;
+}
+
+/* ───────────────────────── v2.840 '보존 · 풀' 탭 · 그룹 카드 · 통합 에러 로그(Director 에 접속하지 않는다) ───────────────────────── */
+
+/** 그룹이 쓰는 Director — 그룹에 적힌 것, 없으면 그 법인 매핑. */
+const groupDirId = (g, settings) => g.directorId || (settings.sites || []).find((x) => x.vcenterId === g.vcenterId)?.directorId || '';
+
+/**
+ * 풀마다 쓰는 포탈 잡 수(추정 — 화면이 밝힌다): 잡의 풀 = 그 VM 이 든 그룹의 풀 → 잡 풀(등록 때 매핑 풀). 거기에 JobDefs 의 레벨별 풀(Full · Incremental · Differential Backup Pool)도
+ * 그 잡이 쓰는 풀로 센다(그룹 풀이 없을 때 — 레벨마다 다른 풀로 간다). Director 자체 잡(포탈 원장에 없음)은 풀을 모른다 — 세지 않는다.
+ * @returns {Map<string, { jobs:number, groups:number, jobdefs:string[] }>} 키 = 풀 이름 소문자
+ */
+export function poolUsage(d, jobs, groups, settings) {
+  const out = new Map();
+  const at = (name) => { const k = String(name).toLowerCase(); let x = out.get(k); if (!x) { x = { jobs: 0, groups: 0, jobdefs: [] }; out.set(k, x); } return x; };
+  const jdList = val(d, 'jobdefs');
+  const jd = Array.isArray(jdList) ? jdList.find((x) => x.name === settings.defaults?.jobDefs) || null : null;
+  const levelPools = jd ? [jd.fullPool, jd.incPool, jd.diffPool].filter(Boolean) : [];
+  const groupOf = new Map();
+  for (const g of groups) for (const id of g.vmIds || []) groupOf.set(`${g.vcenterId}|${id}`, g);
+  for (const g of groups) if (g.pool) at(g.pool).groups++;
+  for (const j of jobs) {
+    const g = groupOf.get(`${j.vcenterId}|${j.vmId}`);
+    const set = new Set();
+    if (g?.pool) set.add(g.pool.toLowerCase());
+    else { if (j.pool) set.add(j.pool.toLowerCase()); for (const p of levelPools) set.add(p.toLowerCase()); }
+    for (const k of set) at(k).jobs++;
+  }
+  if (Array.isArray(jdList)) {
+    for (const x of jdList) for (const [k, lab] of [['pool', ''], ['fullPool', 'Full'], ['incPool', 'Incr'], ['diffPool', 'Diff']]) {
+      if (!x[k]) continue;
+      const e = at(x[k]);
+      if (e.jobdefs.length < 10) e.jobdefs.push(lab ? `${x.name}(${lab})` : x.name);
+    }
+  }
+  return out;
+}
+
+const cmdState = (d, k, admin) => {
+  const c = d?.cmds?.[k];
+  const last = d?.data?.[k]?.at ?? null;
+  return c ? { ok: c.ok === true, code: c.ok ? '' : c.code || 'error', last, ...(admin && !c.ok && c.message ? { message: c.message } : {}) } : (last ? { ok: null, code: 'off', last } : null);
+};
+
+/**
+ * '보존 · 풀' 탭 값(GET /tools/bareos-summary/pools). 범위 안 Director 의 수집본만 — 풀 표(보존 · 상한 · 볼륨 상태 · 사용량 · 쓰는 잡) · 클라이언트 보존 · 숫자.
+ *   범위 계정: 클라이언트는 범위 안 잡이 쓰는 FD 만 · 쓰는 잡 수는 범위 안 잡만 센다.
+ * @param {{ settings, digests, digestsKnown, groups, allowed:Set|null, admin:boolean, demo:boolean, now:number, vcName, db? }} o
+ */
+export function poolsView(o) {
+  const { settings, digests = [], digestsKnown = true, groups = [], allowed = null, admin = false, demo = false, now = Date.now(), vcName = (x) => x } = o;
+  const db = o.db || loadPolicy();
+  const scoped = scopedDirectors(settings, allowed);
+  const mine = digests.filter((j) => !!j.demo === demo && (!allowed || allowed.has(j.vcenterId)));
+  const myGroups = groups.filter((g) => !allowed || allowed.has(g.vcenterId));
+  const directors = []; const pools = []; const clients = [];
+  let poolsN = null; let volsN = null; let full = 0; let errorVols = 0; let maxPct = null; let clientsN = null; let unknownFull = 0;
+  for (const [id, { dir, vcIds }] of scoped) {
+    const d = db.directors[id];
+    directors.push({
+      id, name: dir.name, via: dir.agent ? 'edge' : 'central', vcNames: vcIds.map(vcName).slice(0, 10), at: d?.at ?? null, version: d?.version || '',
+      cmds: { pools: cmdState(d, 'pools', admin), volumes: cmdState(d, 'volumes', admin), clients: cmdState(d, 'clients', admin) },
+      fallback: d?.cmds?.pools?.fallback === true || undefined,
+    });
+    if (!d) continue;
+    const jobsHere = mine.filter((j) => jobDirectorId(j, settings) === id);
+    const groupsHere = myGroups.filter((g) => groupDirId(g, settings) === id);
+    const used = poolUsage(d, jobsHere, groupsHere, settings);
+    const pr = poolRows(d);
+    if (pr) {
+      poolsN = (poolsN || 0) + pr.length;
+      for (const p of pr) {
+        if (p.numVols !== null) volsN = (volsN || 0) + p.numVols;
+        if (p.full === true) full++; else if (p.full === null) unknownFull++;
+        errorVols += p.vol?.status?.Error || 0;
+        if (p.pct !== null && (maxPct === null || p.pct > maxPct)) maxPct = p.pct;
+        pools.push({
+          ...p, director: dir.name, directorId: id, poolAt: d.data?.pools?.at ?? null, volAt: d.data?.volumes?.at ?? null,
+          used: used.get(p.name.toLowerCase()) || { jobs: 0, groups: 0, jobdefs: [] }, queryable: isResourceName(p.name),
+        });
+      }
+    }
+    const cl = val(d, 'clients');
+    if (Array.isArray(cl)) {
+      clientsN = clientsN || 0;
+      for (const c of cl) {
+        const jobs = jobsHere.filter((j) => j.client === c.name).length;
+        if (allowed && !jobs) continue;   // 범위 계정 — 자기 법인 잡이 쓰는 FD 만
+        clientsN++;
+        clients.push({ ...c, director: dir.name, directorId: id, jobs, at: d.data?.clients?.at ?? null });
+      }
+    }
+  }
+  pools.sort((a, b) => (b.full === true) - (a.full === true) || (b.vol?.status?.Error || 0) - (a.vol?.status?.Error || 0) || a.director.localeCompare(b.director) || a.name.localeCompare(b.name));
+  clients.sort((a, b) => a.director.localeCompare(b.director) || a.name.localeCompare(b.name));
+  return {
+    ok: true, at: now, directors,
+    kpis: { pools: poolsN, vols: volsN, full: poolsN === null ? null : full, unknownFull: poolsN === null ? null : unknownFull, errorVols: poolsN === null ? null : errorVols, maxPct, clients: clientsN },
+    pools: pools.slice(0, 1000), clients: clients.slice(0, 2000), ...(pools.length > 1000 ? { poolsTruncated: true } : {}),
+    ...(digestsKnown ? {} : { registryUnreadable: true }), loadError: !!policyLoadError() || undefined,
+  };
+}
+
+/**
+ * 그룹 카드의 '적용 풀 · 보존'(v2.840) — 그 Director 수집본에서 풀 하나. 수집본 · 풀 목록이 없으면 null(모름 — 화면 '정책 수집 전').
+ * @returns {null | { name, missing?:true, retentionSec, retentionFrom:'pool'|'volumes'|null, full, pct, errorVols, at }}
+ */
+export function poolPolicyOf(directorId, poolName, db = loadPolicy()) {
+  const d = db.directors[directorId];
+  if (!d || !poolName) return null;
+  const pr = poolRows(d);
+  if (!pr) return null;
+  const at = d.data?.pools?.at ?? null;
+  const p = findPool(pr, poolName);
+  if (!p) return { name: str(poolName, 64), missing: true, retentionSec: null, retentionFrom: null, full: null, pct: null, errorVols: 0, at };
+  const retentionFrom = p.volRetentionSec !== null ? 'pool' : p.vol?.retentionSec != null ? 'volumes' : null;
+  return { name: p.name, retentionSec: p.volRetentionSec ?? p.vol?.retentionSec ?? null, retentionFrom, full: p.full, pct: p.pct, errorVols: p.vol?.status?.Error || 0, at };
+}
+
+/**
+ * 통합 에러 로그의 '오류 볼륨'(v2.840) — 범위 안 Director 의 수집본에서 VolStatus Error 인 볼륨(풀마다 이름 ≤20 + 나머지 수). 시각 = 볼륨 목록을 수집한 시각.
+ * @returns {Array<{ at, directorId, director, vcIds, pool, n, names }>}
+ */
+export function errorVolumeItems(settings, allowed, { db = loadPolicy() } = {}) {
+  const out = [];
+  for (const [id, { dir, vcIds }] of scopedDirectors(settings, allowed)) {
+    const d = db.directors[id];
+    const vol = val(d, 'volumes');
+    const at = d?.data?.volumes?.at;
+    if (!vol || !Number.isFinite(at)) continue;
+    const pr = val(d, 'pools');
+    for (const p of vol.pools || []) {
+      const n = p.status?.Error || 0;
+      if (!n) continue;
+      const name = (Array.isArray(pr) ? findPool(pr, p.pool)?.name : '') || p.pool;
+      out.push({ at, directorId: id, director: dir.name, vcIds, pool: name, n, names: (p.errors || []).slice(0, 20) });
+    }
   }
   return out;
 }

@@ -6,6 +6,7 @@
 
 ## 목차
 
+- Bareos v2.840 보존 · 풀 탭 · 그룹 카드 · 백업 대상 적용 정책 · 실행 이력 거르기 · 오류 볼륨(백업 메뉴 개편 2차-b — 2026-11-01)
 - Bareos v2.839 Director 정책 수집 · 정책 · 일정 탭 · Summary 2차 칸 채우기(백업 메뉴 개편 2차-a — 2026-11-01)
 - Backup v2.838 Summary 를 시안 ① 에 맞춤 B — 용량과 일정 · 통합 에러 로그 · 백업 안 된 VM 일일 메일(2026-10-31)
 - Backup v2.837 Summary 를 시안 ① 에 맞춤 — 숫자 6칸 · 두 카드 · 도구 줄 · 트리 체크 · 찾기 보강(2026-10-31)
@@ -1826,6 +1827,36 @@
   ⚠ 정정(v2.823): 카탈로그 memo 세대(P9)는 v2.823 에 해소했다(memo 키에 Director id + `settingsRev` — 설정을 저장하면 새로 읽는다). 고아 잡(I7)은 v2.823 검토 C3 에서
   '가리키는 Director 가 설정에 없는 대상은 원장에서만 취소·삭제' 경로로 일부 해소(Director 쪽 고아 잡 탐지는 여전히 없다).
 
+## Bareos v2.840 보존 · 풀 탭 · 그룹 카드 · 백업 대상 적용 정책 · 실행 이력 거르기 · 오류 볼륨(백업 메뉴 개편 2차-b — 2026-11-01)
+
+사용자 요청 '2차-b 구현해줘'(2.839 절의 사용자 결정 그대로 — 두 릴리스의 둘째 · 검증 '표준'). 구현은 Opus.
+회귀 `server/test/bareosPolicy2840.test.js`(10건) · 웹 `views/tools/bareosPolicy2840.test.js`(11건) · 갱신 `bareosPolicy2839`(선택 명령 clients · 라우터에 pools) · `backupSummary2838`(오류 로그 수에 volume 칸) · `bareosViewText.test`(하위 탭에 pools) ·
+`bareosLive2833`(기존 결함 — 아래). 변이 — 판정 코어 · 엣지 수신 계약 · 라우트 37/37(처음 35/37 → 잘림 표지만 있는 재정제 · 범위 밖 법인 잡이 범위 안 Director 에 묶인 경우 보강 2건) · 변이마다 복원 + sha256 대조.
+
+- **'보존 · 풀' 탭**(`#/tools/bareos-summary/pools` · `GET /tools/bareos-summary/pools` — 조회 전용 키 · **Director 에 접속하지 않는다** · 소스 스윕이 라우트 본문을 대조): 2.839 수집본의 풀 행(llist) + 볼륨 요약 + 클라이언트 보존.
+  풀 표 = 타입 · Volume Retention(풀 행에 없으면 볼륨 최빈값 '(볼륨)') · AutoPrune · Recycle · Max Vol Jobs · Bytes(0 = 제한 없음) · 볼륨 수/상한 + A·F·U·P·E · 사용량(% 는 용량을 알 때만) · 가장 오래된 · 쓰는 잡 · 표지(가득 참 · 오류 볼륨 · 꺼짐).
+  **쓰는 잡 수는 추정**(`policy.poolUsage`): 잡의 풀 = 그룹 풀 → 잡 풀(등록 때 매핑 풀), 그룹 풀이 없으면 JobDefs 의 레벨별 풀(Full · Incremental · Differential Backup Pool)도 센다 · Director 자체 잡은 풀을 모른다(세지 않는다 — 화면 각주).
+  범위 계정 = 범위 안 법인의 Director 만 · 쓰는 잡은 범위 안 잡만 · **클라이언트는 범위 안 잡이 쓰는 FD 만** · 명령 실패 원문은 관리자 판본만. 아무것도 수집하지 않았으면 숫자는 null('—').
+- **볼륨 목록 즉시 조회**(`GET /tools/bareos-backup/policy/volumes?directorId=&pool=` — 관리 도구 · admin · 작업 표 `ops.volumes` = `list volumes pool=<풀>` 하나 · 읽기 전용 · MUTATING 아님 · 엣지 대행 시한 90초 · `edgeResult.VALUE.volumes` 멱등 정규화):
+  범위 안 Director 만(밖 404) · 풀 이름은 리소스 이름 모양만(400 — **라우트가 먼저 거르고 세션도 열지 않는다** · 작업 표도 다시 거른다) · Director|풀마다 1분 — 그 안에는 기억한 결과(`cached`) · 진행 중 409 · 결과는 저장하지 않는다 ·
+  라우트 본문은 `readDirector({ demoOnly: isDemoGuest(req.user) } …)` 만(audit2719b 데모 필터 스윕). `list volumes pool=` 의 응답 모양은 **실측 아님**(배열 · 풀 키 객체 둘 다 받는다 — 전체 목록 모양은 2.839 실측).
+- **클라이언트 보존 = `llist clients`**(선택 명령 `clients` · 기본 켬): 카탈로그 Client 행의 FileRetention · JobRetention(초) · AutoPrune — **모양은 실측 아님**(Bareos ListClientRecords 열 추정 — 다음 probe 로 확인할 것).
+  카탈로그 값은 그 FD 의 잡이 돌 때 Director 설정으로 갱신된다(설정을 바꾼 뒤 잡이 안 돌았으면 옛 값 — 화면이 밝힌다). 정규화는 이름 · 두 보존 · AutoPrune 만(주소 · uname 은 버린다).
+- **그룹 카드**(관리 도구 '백업 그룹'): 마지막 회차(`fires[0]` — fireText/fireTone) · 적용 정책(`groups/tree` 의 `poolPolicy` = `policy.poolPolicyOf` — 그룹 풀 → 법인 매핑 풀 · 보존 · 가득 참 · 사용 % · 오류 볼륨 · 수집 전 null) ·
+  겹침(`GET /tools/backup-summary/schedule` 행의 `groups` = `backupSchedule.groupOverlaps` — **2.838 `overlapOf` 를 그룹마다 그대로**: Veeam 잡 창 · 같은 법인의 다른 Bareos 회차(다른 그룹 · Director 스케줄) · 다음 24시간 · 60분 추정).
+  겹침은 Summary 권한이 있을 때만 읽고(없으면 줄 없음) 그룹 저장 · 수정으로 일정이 바뀔 때만 다시 읽는다(실행 중 4초 재읽기에 따라가지 않는다). 그룹 상세에 '적용 풀 · 보존' 상자.
+- **백업 대상 행 '적용 정책' 한 줄**(`GET /tools/bareos-backup` 의 `jobs[].policy`): 판정은 `policy.jobPolicyResolver` 하나 — 정책 · 일정 탭 VM 표도 같은 함수로 바꿨다(풀은 그룹 풀 → 잡 풀 · 보존은 그 풀). 그룹 파일을 못 읽으면 null('적용 정책 모름').
+- **두 번 실행 경고(데모 확인 중 발견 — 실제 위험)**: Director 스케줄로 등록된 기존 잡을 예약이 켜진 그룹에 넣으면 그룹 예약과 Director 스케줄 **두 곳에서 돈다**(v2.830 은 그룹 저장 때 *새로* 등록하는 잡만 스케줄 없이 만든다).
+  `jobPolicyResolver.dup`(= 그 Director 스케줄 이름 · 수집본 기준)으로 백업 대상 줄 · 정책 · 일정 VM 표 · 그룹 카드('두 번 실행' — `groups/tree` 의 `dupVms` · 수집본이 없으면 null)에 보인다. 자동으로 고치지는 않는다(잡 스케줄 변경은 Bareos 에 수정 명령이 없다 — 대상 삭제 후 재등록).
+- **관리 도구 탭 줄**: BareosBackupTool 의 탭 줄에 '정책 · 일정' · '보존 · 풀' 링크가 2.839 부터 빠져 있었다(통합 현황 쪽 BareosTabs 에만 있음) — 백업 그룹 뒤에 더했다(bareosSubTabs 와 같은 순서).
+- **실행 이력 거르기**: Director(대상 목록 · 복원 이력) · 레벨 · 결과(실행 중 · 대기는 하나로) — 받은 행만 거른다(Director 를 다시 부르지 않는다 · `bareosText.filterHistory`).
+- **통합 에러 로그 '오류 볼륨'**(kind `volume` · 칩은 1건 이상일 때만 · 열기 → 보존 · 풀): `policy.errorVolumeItems`(범위 안 Director · 볼륨 목록 소문자 키 → 풀 이름) → `backupErrors.volumeRows`(시각 = 볼륨을 수집한 시각 · 이름 ≤20 + '그 밖 N개' 한 줄 ·
+  법인이 여럿이면 이름만 잇는다) · 오류 로그 캐시 키에 `bp${bareosPolicyRev()}`.
+- **기존 결함(이번에 고침 — 테스트만)**: `bareosLive2833` ⑤ 가 끝난 실행을 '지금 30·40분 전' 으로 만들어 **포탈 시각 00:00~00:40 에는 어제가 되어 깨졌다**(2026-11-01 00:19 UTC 실측 — 변경 전 코드에서도 같은 실패). 오늘 0시 아래로 내려가지 않게 자른다.
+- 남긴 것: `llist clients` · `list volumes pool=` 응답 모양 실측(probe) · 3차(복원 탭 · Veeam 잡 반복 주기 · Director 전용 잡의 VM 매핑 · joblog 원문 요약).
+  **백업 대상 표 1440px 넘침(기존 결함)**: 변경 전에도 표 1232px > 카드 1154px 로 '작업' 열이 잘렸다(같은 화면에서 이번 칸만 옛 모양으로 되돌린 A/B — 78px). 이번 칸은 원래 폭 안에서 줄바꿈하게 해 1202px(48px 넘침 — '삭제' 버튼)로 줄었다.
+  남은 원인은 '작업' 칸 최소 236px(실행 레벨 선택 상자 168px 를 넣으려는 값) — 버튼 배치를 바꾸는 별건.
+
 ## Bareos v2.839 Director 정책 수집 · 정책 · 일정 탭 · Summary 2차 칸 채우기(백업 메뉴 개편 2차-a — 2026-11-01)
 
 사용자 요청 '2차 계획(Bareos 정책·일정 수집)입니다. 진행' → 계획(Fable) → '구현해줘'(Opus). 사용자 결정: **실제 출력 먼저**(probe 로 7개 명령 실측 — 2026-11-01 Director 25.1.2 커뮤니티 빌드 ·
@@ -1847,7 +1878,8 @@
 - **범위 · 가림**: 조회 화면은 **Director 에 접속하지 않는다**(수집본만 — v2.828 규칙) · 범위 계정은 범위 안 법인에 묶인 Director 만 · **범위 밖 법인의 잡을 세지 않고**(스케줄 · 7일 · 띠) 자기 법인 잡이 없는 스케줄은 보이지 않는다(Director 자체 잡 포함) · Director 거부 원문은 관리자 판본만.
 - **Summary · Detail 2차 칸**: Bareos 카드 '풀 사용'(가장 높은 % · 가득 참 · 오류 볼륨) · '다음 회차'(그룹 + Director 스케줄 중 이른 것 · 스케줄 수) · 용량 카드 '풀 가득 참' · 24시간 띠의 Director 회차(그 법인의 포탈 잡이 든 회차만 · 길이 60분 추정) ·
   7일 칸 'Bareos N'(그룹 + Director) · Detail 다음 예정 `nx.s`(Director 스케줄) — 캐시 키에 `bp${policyRev()}`.
-- 남긴 것(2.840 — 2차-b): '보존 · 풀' 탭(풀 표 · 볼륨 목록 즉시 조회) · 그룹 카드(다음 회차 · 마지막 결과 · 적용 풀 · 겹침) · 백업 대상 행 '적용 정책' · 실행 이력 거르기 · 통합 에러 로그에 오류 볼륨 행.
+- ~~남긴 것(2.840 — 2차-b)~~ → **v2.840 에서 했다**(아래 'Bareos v2.840' 절): '보존 · 풀' 탭 · 그룹 카드(다음 회차는 v2.831 부터 있었다 — 마지막 회차 · 적용 풀 · 겹침을 더함) · 백업 대상 '적용 정책' · 실행 이력 거르기 · 오류 볼륨 행.
+  계획의 'show clients' 는 **`llist clients`**(카탈로그 Client 행)로 바꿨다 — show 권한이 필요 없고 출력에 비밀번호 칸이 없다(그 대신 '그 FD 의 잡이 돌 때 갱신된 값' 이다).
   3차: 복원 탭 · Veeam 잡 반복 주기 · Director 전용 잡의 VM 매핑 · joblog 원문 요약.
 
 ## Backup v2.838 Summary 를 시안 ① 에 맞춤 B — 용량과 일정 · 통합 에러 로그 · 백업 안 된 VM 일일 메일(2026-10-31)

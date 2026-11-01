@@ -123,7 +123,7 @@ export default function BareosPolicyTab() {
       {msg && <div role="status" className="card" style={{ padding: '8px 12px', fontSize: 12.5, color: TONE[msg.tone] }}>{msg.text}</div>}
 
       <Section title="Director 정책 수집" data-policy-collect=""
-        sub={`하루 1회${data.collect?.time ? ` ${data.collect.time}(포탈 시각)` : ''}${data.collect?.enabled === false ? ' — 꺼짐(설정 › 정책 수집)' : ''} · 읽기 전용 명령(status scheduler · llist pools · list volumes · show schedules/jobdefs/filesets) · Director 마다 시한`}>
+        sub={`하루 1회${data.collect?.time ? ` ${data.collect.time}(포탈 시각)` : ''}${data.collect?.enabled === false ? ' — 꺼짐(설정 › 정책 수집)' : ''} · 읽기 전용 명령(status scheduler · llist pools · list volumes · show schedules/jobdefs/filesets · llist clients) · Director 마다 시한`}>
         {dirs.length ? (
           <div style={{ overflowX: 'auto' }}>
             <STable minWidth={760}>
@@ -268,7 +268,7 @@ export default function BareosPolicyTab() {
                       <td data-sort={r.vm} style={{ ...VPAD, whiteSpace: 'nowrap' }}><div style={{ maxWidth: 150, overflow: 'hidden', textOverflow: 'ellipsis' }} title={r.vm}><b>{r.vm}</b>{r.os === 'windows' || r.os === 'linux' ? <span className="muted" style={{ fontSize: 11 }}> {r.os === 'windows' ? 'Windows' : 'Linux'}</span> : null}</div></td>
                       <td style={{ ...VPAD, fontSize: 12 }}><div title={r.vcName} style={{ maxWidth: 110, overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.vcName}</div></td>
                       <td style={{ ...VPAD, fontSize: 12 }}><div style={{ maxWidth: 120, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={r.job}>{r.job || '—'}{r.enabled === false ? <span className="muted"> 꺼짐</span> : null}</div></td>
-                      <td style={{ ...VPAD, fontSize: 12 }}><div style={WRAPBOX(90, 150)}>{r.verdict === 'unregistered' ? '—' : srcText(r.src)}</div></td>
+                      <td style={{ ...VPAD, fontSize: 12 }}><div style={WRAPBOX(90, 150)}>{r.verdict === 'unregistered' ? '—' : srcText(r.src)}{r.dup && <div style={{ color: TONE.warn, fontSize: 11 }}>Director {r.dup} 에도 — 두 번 돌 수 있음</div>}</div></td>
                       <td style={{ ...VPAD, fontSize: 12 }}><div style={WRAPBOX(130, 180)}>{r.src?.text || '—'}</div></td>
                       <td style={{ ...VPAD, fontSize: 12 }}><div style={WRAPBOX(90, 150)}>{r.verdict === 'unregistered' ? '—' : poolText(r)}</div></td>
                       <td style={{ ...VPAD, fontSize: 12 }}><div style={WRAPBOX(100, 150)}>{keepText(r)}</div></td>

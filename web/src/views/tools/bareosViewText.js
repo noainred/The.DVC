@@ -207,6 +207,8 @@ export function bareosSubTabs({ summaryOk = false, detailOk = false, manageOk = 
     ...(admin && manageOk ? [['live', '진행 현황', '#/tools/bareos-backup/live'], ['targets', '백업 대상', '#/tools/bareos-backup/targets'], ['groups', '백업 그룹', '#/tools/bareos-backup/groups']] : []),
     // v2.839 '정책 · 일정'(조회 전용 키 bareos-summary 아래 — Director 수집본 · 접속하지 않는다)
     ...(summaryOk ? [['policy', '정책 · 일정', '#/tools/bareos-summary/policy']] : []),
+    // v2.840 '보존 · 풀'(같은 조회 전용 키 — 수집본 · 볼륨 목록 즉시 조회만 관리 도구 권한)
+    ...(summaryOk ? [['pools', '보존 · 풀', '#/tools/bareos-summary/pools']] : []),
     ...(admin && manageOk ? [['history', '실행 현황 · 이력', '#/tools/bareos-backup/history']] : []),
     ...(admin && manageOk && fullScope ? [['settings', '설정', '#/tools/bareos-backup/settings']] : []),
   ];

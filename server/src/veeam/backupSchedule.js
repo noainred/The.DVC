@@ -76,7 +76,7 @@ export function groupItems(groups, from, to, nextSlot) {
   for (const g of Array.isArray(groups) ? groups : []) {
     if (g?.schedule?.enabled !== true) continue;
     for (const s of expandSlots(g.schedule, from, to, nextSlot)) {
-      out.push({ name: String(g.name || '').slice(0, 64), at: s.at, end: s.at + DEFAULT_DUR_MS, est: true, full: /^full$/i.test(s.level), level: s.level, vms: Array.isArray(g.vmIds) ? g.vmIds.length : 0 });
+      out.push({ name: String(g.name || '').slice(0, 64), at: s.at, end: s.at + DEFAULT_DUR_MS, est: true, full: /^full$/i.test(s.level), level: s.level, vms: Array.isArray(g.vmIds) ? g.vmIds.length : 0, gid: String(g.id || '').slice(0, 64) });
     }
   }
   return out.sort((a, b) => a.at - b.at || a.name.localeCompare(b.name));
@@ -97,6 +97,24 @@ export function overlapOf(veeam, bareos) {
     }
   }
   return from == null ? null : { from, to, veeam: vs.size, bareos: bs.size };
+}
+
+/**
+ * v2.840 그룹 카드의 겹침 경고 — 한 법인의 다음 24시간에서 그룹마다 overlapOf 를 그대로 쓴다(판정 하나):
+ *   veeam = 그 그룹 회차 ↔ Veeam 잡 창 · bareos = 그 그룹 회차 ↔ 같은 법인의 다른 Bareos 회차(다른 그룹 · Director 스케줄 — 같은 Director 는 차례로 돈다).
+ *   그룹 회차가 24시간 안에 없으면 싣지 않는다(화면 '—'). n = 겹친 상대 수.
+ * @param {Array<{name,at,end}>} veeam @param {Array<{name,at,end,gid?}>} bareos 그룹 회차(gid 있음) + Director 회차(gid 없음)
+ * @returns {Array<{ gid, veeam:{from,to,n}|null, bareos:{from,to,n}|null }>}
+ */
+export function groupOverlaps(veeam, bareos) {
+  const list = Array.isArray(bareos) ? bareos : [];
+  const ids = [...new Set(list.filter((i) => i.gid).map((i) => i.gid))];
+  return ids.map((gid) => {
+    const mine = list.filter((i) => i.gid === gid);
+    const others = list.filter((i) => i.gid !== gid);
+    const ov = overlapOf(veeam, mine); const ob = overlapOf(others, mine);
+    return { gid, veeam: ov ? { from: ov.from, to: ov.to, n: ov.veeam } : null, bareos: ob ? { from: ob.from, to: ob.to, n: ob.veeam } : null };
+  });
 }
 
 /**

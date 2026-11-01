@@ -84,10 +84,10 @@ describe('v2.828 넘기기 · 하위 탭', () => {
   });
   it('하위 탭 — 조회 전용 탭은 권한만 · 관리 탭은 admin + bareos-backup · 설정은 전체 범위', () => {
     // v2.839 '정책 · 일정'(policy) — 조회 전용 키(bareos-summary) 권한만으로 보인다
-    expect(bareosSubTabs({ summaryOk: true, detailOk: true }).map((t) => t[0])).toEqual(['summary', 'detail', 'policy']);
-    expect(bareosSubTabs({ summaryOk: true, detailOk: true, manageOk: true, admin: false }).map((t) => t[0])).toEqual(['summary', 'detail', 'policy']);
-    expect(bareosSubTabs({ summaryOk: true, detailOk: true, manageOk: true, admin: true }).map((t) => t[0])).toEqual(['summary', 'detail', 'live', 'targets', 'groups', 'policy', 'history']);
-    expect(bareosSubTabs({ summaryOk: true, detailOk: true, manageOk: true, admin: true, fullScope: true }).map((t) => t[0])).toEqual(['summary', 'detail', 'live', 'targets', 'groups', 'policy', 'history', 'settings']);
+    expect(bareosSubTabs({ summaryOk: true, detailOk: true }).map((t) => t[0])).toEqual(['summary', 'detail', 'policy', 'pools']);
+    expect(bareosSubTabs({ summaryOk: true, detailOk: true, manageOk: true, admin: false }).map((t) => t[0])).toEqual(['summary', 'detail', 'policy', 'pools']);
+    expect(bareosSubTabs({ summaryOk: true, detailOk: true, manageOk: true, admin: true }).map((t) => t[0])).toEqual(['summary', 'detail', 'live', 'targets', 'groups', 'policy', 'pools', 'history']);
+    expect(bareosSubTabs({ summaryOk: true, detailOk: true, manageOk: true, admin: true, fullScope: true }).map((t) => t[0])).toEqual(['summary', 'detail', 'live', 'targets', 'groups', 'policy', 'pools', 'history', 'settings']);
     expect(bareosSubTabs({ detailOk: true }).map((t) => t[0])).toEqual(['detail'], 'bareos-summary 권한이 없으면 정책 · 일정도 없다');
   });
 });

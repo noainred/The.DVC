@@ -170,13 +170,15 @@ const rpc = (m) => Object.assign(new Error(m), { code: 'jsonrpc' });
 const fullMap = () => ({
   'status scheduler days=7': fx('status-scheduler'), 'llist pools': fx('llist-pools'), 'list volumes': fx('list-volumes'),
   'show schedules': fx('show-schedules'), 'show jobdefs': fx('show-jobdefs'), 'show filesets': fx('show-filesets'),
+  // v2.840 클라이언트 보존 — 실측 아님(카탈로그 Client 열 추정 · bareosPolicy2840 ①)
+  'llist clients': { clients: [{ clientid: '1', name: 'bareos-fd', uname: '25.1.2', autoprune: '1', fileretention: '5184000', jobretention: '15552000' }] },
 });
 
 test('③ ops.policy — 순서 · 읽기 명령만 · llist 거부 → list 폴백 · show 권한 없음은 그 항목만 · 세션째 끊김 · 시한 · 판', async () => {
   const s = fakeSession(fullMap());
   const r = await OPS.policy(s, { keys: PP.POLICY_KEYS });
   assert.deepEqual(s.sent, PP.POLICY_CMDS.map((c) => c.cmd));
-  assert.ok(s.sent.every((c) => /^(status scheduler|llist pools|list (pools|volumes)|show (schedules|jobdefs|filesets))/.test(c)), '읽기 전용 명령만');
+  assert.ok(s.sent.every((c) => /^(status scheduler|llist (pools|clients)|list (pools|volumes)|show (schedules|jobdefs|filesets))/.test(c)), '읽기 전용 명령만');
   assert.ok(Object.values(r.results).every((x) => x.ok));
   assert.equal(r.version, '25.1.2~pre73');
   assert.equal(r.results.scheduler.value.preview.length, 8);
@@ -190,7 +192,7 @@ test('③ ops.policy — 순서 · 읽기 명령만 · llist 거부 → list 폴
   const s3 = fakeSession(dead);
   const r3 = await OPS.policy(s3, { keys: PP.POLICY_KEYS });
   assert.deepEqual(s3.sent, ['status scheduler days=7', 'llist pools'], '세션째 끊기면 남은 명령은 보내지 않는다');
-  assert.deepEqual(['volumes', 'schedules', 'jobdefs', 'filesets'].map((k) => r3.results[k].code), ['skipped', 'skipped', 'skipped', 'skipped']);
+  assert.deepEqual(['volumes', 'schedules', 'jobdefs', 'filesets', 'clients'].map((k) => r3.results[k].code), ['skipped', 'skipped', 'skipped', 'skipped', 'skipped']);
   const ac = new AbortController(); ac.abort();
   const r4 = await OPS.policy(fakeSession(fullMap()), { keys: ['scheduler', 'pools'] }, { signal: ac.signal });
   assert.deepEqual([r4.results.scheduler.code, Object.keys(r4.results).length], ['skipped', 2], '시한 신호면 시작하지 않는다 · 고른 키만');
@@ -326,11 +328,11 @@ test('⑤ 라우트 — 수집본 화면(범위) · 지금 수집(범위 404 · 
 test('⑥ 설정(정책 수집) · Profile Command ACL 에 show(서버 · 웹 같은 줄) · archScan 허용 목록 · 작업 표 등록', async () => {
   const S = await import('../src/bareos/settings.js');
   assert.deepEqual(S.normPolicySettings({ enabled: false, time: '7:00', optional: { jobdefs: false }, off: ['dir_ab', 'x y', 'dir_ab'] }),
-    { enabled: false, time: '06:10', optional: { schedules: true, jobdefs: false, filesets: true }, off: ['dir_ab'] });
+    { enabled: false, time: '06:10', optional: { schedules: true, jobdefs: false, filesets: true, clients: true }, off: ['dir_ab'] });
   S.saveSettings({ defaults: { policy: { enabled: true, time: '05:40', optional: { filesets: false }, off: [] } } });
   S._resetForTest();
-  assert.deepEqual(S.loadSettings().defaults.policy, { enabled: true, time: '05:40', optional: { schedules: true, jobdefs: true, filesets: false }, off: [] });
-  assert.deepEqual(POL.policyKeys(S.loadSettings().defaults.policy), ['scheduler', 'pools', 'volumes', 'schedules', 'jobdefs'], '끈 선택 명령은 보내지 않는다');
+  assert.deepEqual(S.loadSettings().defaults.policy, { enabled: true, time: '05:40', optional: { schedules: true, jobdefs: true, filesets: false, clients: true }, off: [] });
+  assert.deepEqual(POL.policyKeys(S.loadSettings().defaults.policy), ['scheduler', 'pools', 'volumes', 'schedules', 'jobdefs', 'clients'], '끈 선택 명령은 보내지 않는다');
   const read = (p) => fs.readFileSync(new URL(p, import.meta.url), 'utf8');
   const acl = (s) => /Command ACL = ([^'`]+)/.exec(s)?.[1].trim();
   const a = acl(read('../src/bareos/autoSetup.js')); const b = acl(read('../../web/src/views/tools/bareosText.js'));

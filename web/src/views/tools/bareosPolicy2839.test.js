@@ -55,8 +55,9 @@ describe('v2.839 화면 소스', () => {
   const tab = read('./BareosPolicyTab.jsx'); const sum = read('./BareosSummaryTool.jsx'); const summary = read('./BackupSummaryTool.jsx'); const cs = read('./BackupSummaryCapSched.jsx');
   const settings = read('./BareosSettings.jsx'); const vt = read('./backupViewText.js');
   it('라우팅 — 같은 조회 전용 키 아래 하위 탭 · 통합 현황은 그대로', () => {
-    expect(sum).toMatch(/useHashTab\(\{ base: \['tools', 'bareos-summary'\], valid: \['overview', 'policy'\], fallback: 'overview' \}\)/);
-    expect(sum).toMatch(/return tab === 'policy' \? <BareosPolicyTab \/> : <BareosSummaryView \/>;/);
+    // v2.840 '보존 · 풀'(pools) 이 같은 라우터에 더해졌다(bareosPolicy2840 이 고정)
+    expect(sum).toMatch(/useHashTab\(\{ base: \['tools', 'bareos-summary'\], valid: \['overview', 'policy', 'pools'\], fallback: 'overview' \}\)/);
+    expect(sum).toMatch(/return tab === 'policy' \? <BareosPolicyTab \/> : tab === 'pools' \? <BareosPoolsTab \/> : <BareosSummaryView \/>;/);
   });
   it('폴링하지 않는다 — 수집 중일 때만 5초 뒤 다시 · 늦게 온 응답은 버린다 · 같은 API', () => {
     expect(tab).not.toMatch(/usePolling|setInterval/);

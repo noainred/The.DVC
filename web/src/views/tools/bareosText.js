@@ -19,6 +19,16 @@ export function stateBadge(state, status = '') {
 const LEVELS = { F: 'Full', I: 'Incremental', D: 'Differential', Full: 'Full', Incremental: 'Incremental', Differential: 'Differential' };
 export const levelLabel = (v) => LEVELS[v] || '—';
 
+/* ── v2.840 실행 이력 거르기(레벨 · 결과 — Director 는 화면이 대상 목록으로 거른다) ── */
+export const HIST_LEVEL_OPTS = Object.freeze([['', '레벨 전체'], ['Full', 'Full'], ['Incremental', 'Incremental'], ['Differential', 'Differential']]);
+export const HIST_RESULT_OPTS = Object.freeze([['', '결과 전체'], ['ok', '성공'], ['warning', '경고'], ['error', '오류'], ['canceled', '취소'], ['active', '실행 중 · 대기'], ['unknown', '확인 불가']]);
+/** 이력 행 상태 → 결과 거르기 키(실행 중 · 대기는 하나로 · 모르는 상태는 확인 불가). */
+export const histResultKey = (state) => (['running', 'queued', 'waiting'].includes(state) ? 'active' : Object.hasOwn(STATE_LABEL, state || '') ? state : 'unknown');
+/** 레벨 · 결과로 거른다(레벨을 모르는 행은 레벨을 고르면 빠진다). */
+export function filterHistory(rows, { level = '', result = '' } = {}) {
+  return (Array.isArray(rows) ? rows : []).filter((r) => (!level || levelLabel(r?.level) === level) && (!result || histResultKey(r?.state) === result));
+}
+
 /**
  * W13(v2.822): 복원 지점 목록이 잘렸으면 밝힌다. v2.822.3(W2-6): scanned 는 서버가 **실제로 본** 실행 수, limit 는 상한 —
  * '더 오래된 지점' 문장은 상한에 닿았을 때만(예전에는 상수 60 을 보내 이력이 13건뿐이어도 그렇게 말했다).

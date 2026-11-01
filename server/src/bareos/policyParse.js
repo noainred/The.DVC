@@ -8,13 +8,16 @@
  *   · `show filesets`   → { filesets:{ <Name>:{ name, description?, include:[{ options:[{…}], file?:[], plugin?:[] }], exclude?:[…] } } }
  *   · `llist pools`     → { pools:[{ poolid, name, numvols, maxvols, volretention, maxvoljobs, maxvolbytes, autoprune, recycle, pooltype, … }] } — 값은 전부 문자열
  *   · `list volumes`    → { volumes:{ <풀 이름 소문자>:[{ mediaid, volumename, volstatus, volbytes, volretention, lastwritten, … }] } } — 값은 전부 문자열
+ *   · v2.840 `llist clients` → { clients:[{ clientid, name, uname, autoprune, fileretention, jobretention }] } — **실측 아님(추정)**: 카탈로그 Client 표의 열
+ *     (Bareos ListClientRecords 의 llist 열 — 그 FD 의 잡이 돌 때 설정 값으로 갱신된다). show clients 대신 고른 이유: show 권한이 없어도 되고 출력에 비밀번호 칸이 없다.
+ *   · v2.840 `list volumes pool=X` → 풀 하나의 행 — 모양 추정(배열 또는 풀 이름 키의 객체 둘 다 받는다)
  *
  * 규칙: 외부 입력이다 — 아는 필드만 · 문자열은 자르고 제어문자를 지운다 · 수는 numOrNull(못 읽으면 null — 0 이 아니다) · 배열·행 수 상한.
  *   정규화 함수는 **멱등**이다(엣지 대행 회신을 중앙이 같은 함수로 다시 거른다 — edgeResult.VALUE.policy).
  */
 import { numOrNull } from '../util/numOrNull.js';
 
-export const CAP = Object.freeze({ schedules: 500, jobsPerSchedule: 5000, jobsTotal: 20_000, preview: 5000, run: 40, jobdefs: 500, filesets: 500, pools: 500, volumes: 50_000, errorVols: 20 });
+export const CAP = Object.freeze({ schedules: 500, jobsPerSchedule: 5000, jobsTotal: 20_000, preview: 5000, run: 40, jobdefs: 500, filesets: 500, pools: 500, volumes: 50_000, errorVols: 20, clients: 2000, volumeRows: 2000 });
 export const LEVEL_NAMES = Object.freeze(['Full', 'Incremental', 'Differential', 'VirtualFull', 'Base', 'Since', 'Consolidate']);
 /** 볼륨 상태(Bareos VolStatus) — 화면 표 칸 순서. 그 밖은 other. */
 export const VOL_STATUSES = Object.freeze(['Append', 'Full', 'Used', 'Purged', 'Recycle', 'Error', 'Archive', 'Disabled', 'Busy', 'Read-Only', 'Cleaning']);
@@ -205,6 +208,44 @@ function summaryOut(x) {
     errors: arr(x.errors).map((e) => str(e, 128)).filter(Boolean).slice(0, CAP.errorVols) };
 }
 
+/**
+ * v2.840 `llist clients` → [{ name, fileRetentionSec, jobRetentionSec, autoPrune }] — 카탈로그 값(초 · 문자열로 온다). 아는 칸만(주소 · uname 은 싣지 않는다). 멱등.
+ */
+export function normClients(v) {
+  return entries(v, 'clients', CAP.clients).map((c) => ({
+    name: str(c.name, 128),
+    fileRetentionSec: nonNeg(c.fileretention ?? c.fileRetentionSec), jobRetentionSec: nonNeg(c.jobretention ?? c.jobRetentionSec),
+    autoPrune: flag(c.autoprune ?? c.autoPrune),
+  })).filter((c) => c.name);
+}
+
+/**
+ * v2.840 볼륨 목록 즉시 조회(`list volumes pool=X`) → { rows:[{ id, name, status, enabled, bytes, files, retentionSec, recycle, slot, inChanger, mediaType, lastWritten, storage }], total, truncated }.
+ * 행 상한 CAP.volumeRows(넘으면 truncated · total 은 본 행 수). 이미 정규화한 값(rows 배열)도 받는다(멱등 — 엣지 회신 재정제).
+ */
+export function normVolumeRows(v) {
+  const done = isObj(v) && Array.isArray(v.rows);
+  let src = []; let total = 0;
+  if (done) { src = v.rows; total = nonNeg(v.total) ?? src.length; }
+  else if (isObj(v) && Array.isArray(v.volumes)) { src = v.volumes; total = src.length; }
+  else if (isObj(v) && isObj(v.volumes)) for (const rows of Object.values(v.volumes)) { const a = arr(rows); total += a.length; for (const r of a) { if (src.length > CAP.volumeRows) break; src.push(r); } }
+  const rows = [];
+  for (const r of src) {
+    if (rows.length >= CAP.volumeRows) break;
+    if (!isObj(r)) continue;
+    const name = str(r.volumename ?? r.name, 128);
+    if (!name) continue;
+    const st = str(r.volstatus ?? r.status, 20);
+    rows.push({
+      id: nonNeg(r.mediaid ?? r.id), name, status: VOL_STATUSES.find((x) => x.toLowerCase() === st.toLowerCase()) || st,
+      enabled: flag(r.enabled), bytes: nonNeg(r.volbytes ?? r.bytes), files: nonNeg(r.volfiles ?? r.files), retentionSec: nonNeg(r.volretention ?? r.retentionSec),
+      recycle: flag(r.recycle), slot: nonNeg(r.slot), inChanger: flag(r.inchanger ?? r.inChanger), mediaType: str(r.mediatype ?? r.mediaType, 64),
+      lastWritten: done ? (Number.isFinite(r.lastWritten) ? r.lastWritten : null) : catTime(r.lastwritten), storage: str(r.storage, 64),
+    });
+  }
+  return { rows, total: Math.max(total, rows.length), truncated: (done && v.truncated === true) || total > CAP.volumeRows };
+}
+
 /** 수집 명령(키 → Director 명령 · 선택 여부). show 계열은 포탈 콘솔 Profile 에 show 가 있어야 한다(v2.839 자동 설정에 추가 — 옛 설정은 '권한 없음'). */
 export const POLICY_CMDS = Object.freeze([
   { key: 'scheduler', cmd: 'status scheduler days=7', optional: false, label: '스케줄 · 7일 예정' },
@@ -213,9 +254,11 @@ export const POLICY_CMDS = Object.freeze([
   { key: 'schedules', cmd: 'show schedules', optional: true, label: '스케줄 Run 줄' },
   { key: 'jobdefs', cmd: 'show jobdefs', optional: true, label: 'JobDefs' },
   { key: 'filesets', cmd: 'show filesets', optional: true, label: 'FileSet' },
+  // v2.840 클라이언트 보존(File · Job Retention) — 카탈로그 Client 행(show 권한 불필요 · 비밀번호 칸 없음)
+  { key: 'clients', cmd: 'llist clients', optional: true, label: '클라이언트 보존' },
 ]);
 export const POLICY_KEYS = Object.freeze(POLICY_CMDS.map((c) => c.key));
-export const NORMALIZE = Object.freeze({ scheduler: normScheduler, pools: normPools, volumes: normVolumes, schedules: normShowSchedules, jobdefs: normJobdefs, filesets: normFilesets });
+export const NORMALIZE = Object.freeze({ scheduler: normScheduler, pools: normPools, volumes: normVolumes, schedules: normShowSchedules, jobdefs: normJobdefs, filesets: normFilesets, clients: normClients });
 
 /** Director 가 명령을 거부한 사유가 권한(ACL)인가 — 화면 '권한 없음(Profile Command ACL 에 show 추가)'. 문구는 판마다 다르다(추정 — 넓게). */
 export function deniedText(message) {

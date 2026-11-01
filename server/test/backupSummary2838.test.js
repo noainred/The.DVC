@@ -180,7 +180,7 @@ test('② 에러 로그 — 같은 원인 · 새것 먼저 · 수는 전부 · �
   const f = ER.finishErrors(rows, 3);
   assert.deepEqual(f.rows.map((x) => x.at), [NOW - H, NOW - 2 * H, NOW - 3 * H]);
   assert.equal(f.truncated, true);
-  assert.deepEqual(f.counts, { all: 7, fail: 4, warn: 1, stuck: 1, collect: 1, veeam: 4, bareos: 2 }, '수는 상한 밖까지 센다 · 수집 오류는 Veeam/Bareos 에 넣지 않는다');
+  assert.deepEqual(f.counts, { all: 7, fail: 4, warn: 1, stuck: 1, collect: 1, volume: 0, veeam: 4, bareos: 2 }, '수는 상한 밖까지 센다 · 수집 오류는 Veeam/Bareos 에 넣지 않는다 · v2.840 오류 볼륨 칸');
   assert.deepEqual(f.rows.map((x) => x.same), [2, 1, 2], '같은 출처 · 결과 · 잡 · 메시지 앞머리');
   assert.equal('truncated' in ER.finishErrors(rows), false);
   assert.deepEqual(ER.ERROR_DAYS, [1, 7, 30]);

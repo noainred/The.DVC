@@ -7,7 +7,7 @@
  * ⚠ 훅은 조기 return 위 · 늦게 온 이전 법인의 응답은 버린다 · 조회 실패 상태로 저장 버튼을 열지 않는다 · 무거운 조회는 마운트 1회 + 버튼(실행 중일 때만 다시 읽는다).
  */
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { fetchJson, postJson, putJson, delJson } from '../../api.js';
+import { fetchJson, postJson, putJson, delJson, toolAllowed } from '../../api.js';
 import { Loading, ErrorBox, Modal } from '../../components/ui.jsx';
 import { STable } from '../../components/STable.jsx';
 import Select from '../../components/Select.jsx';
@@ -22,8 +22,10 @@ import {
   KEEP_PRESETS, KEEP_DEFAULT, NEW_GROUP_KEEP, keepOtpReasons, keepText, stepKeep, keepMeaning, keepParts, fireKeepBadge, KEEP_BADGE_TEXT, untilText,
   memberResults, resultBadge, folderSummary, sizeSum,
 } from './bareosGroupText.js';
+import { groupPoolText, overlapLine, retentionText } from './bareosPolicyText.js';   // v2.840 카드 '적용 풀 · 보존' · 겹침
 
 const BASE = '/tools/bareos-backup';
+const fin = (v) => typeof v === 'number' && Number.isFinite(v);
 const enc = encodeURIComponent;
 const VC_KEY = 'bareos-groups-vc';
 const ROW = { display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8 };
@@ -143,6 +145,18 @@ export default function BareosGroupsTab({ d }) {
     setMsg(null); setView({ kind: 'edit', groupId: '', filter: 'all', initialSel: h.vmIds });
   }, [tree]);
   const groups = useMemo(() => tree?.groups || [], [tree]);
+  // v2.840 그룹 카드 겹침 — Backup › Summary 의 '다음 24시간' 값(서버 groupOverlaps · 60초 캐시)을 한 번 읽는다(Summary 권한이 있을 때만).
+  //   그룹 저장 · 수정으로 일정이 바뀔 때만 다시 읽는다(실행 중 4초 재읽기에는 따라가지 않는다 — 무거운 조회).
+  const [ovl, setOvl] = useState(null);
+  const schedKey = groups.map((g) => `${g.id}:${g.updatedAt || ''}`).join(',');
+  useEffect(() => {
+    if (!vc || !vcKnown || !toolAllowed('backup-summary')) { setOvl(null); return undefined; }
+    let alive = true;
+    fetchJson('/tools/backup-summary/schedule', {}, undefined, { retries: 0, timeoutMs: 60_000 })
+      .then((r) => { if (!alive) return; const row = (r?.rows || []).find((x) => x.id === vc); setOvl({ vc, rows: Array.isArray(row?.groups) ? new Map(row.groups.map((o) => [o.gid, o])) : null }); })
+      .catch(() => { if (alive) setOvl({ vc, rows: null, failed: true }); });
+    return () => { alive = false; };
+  }, [vc, vcKnown, schedKey]);
   const groupName = useMemo(() => { const m = new Map(groups.map((g) => [g.id, g.name])); return (id) => m.get(id) || ''; }, [groups]);
   const vms = useMemo(() => tree?.vms || [], [tree]);
   const byId = useMemo(() => new Map(vms.map((v) => [v.id, v])), [vms]);
@@ -197,7 +211,7 @@ export default function BareosGroupsTab({ d }) {
       {!tree && !err && <Loading />}
 
       {tree && view.kind === 'list' && (
-        <GroupList tree={tree} groups={groups} byId={byId} q={q} setQ={setQ} writable={writable} busy={busy}
+        <GroupList tree={tree} groups={groups} byId={byId} q={q} setQ={setQ} writable={writable} busy={busy} ovl={ovl?.vc === tree.vcenterId ? ovl : null}
           onRun={setRunOf} onNew={(filter) => { setMsg(null); setView({ kind: 'edit', groupId: '', filter }); }}
           onEdit={(g) => { setMsg(null); setView({ kind: 'edit', groupId: g.id }); }}
           onDetail={(g) => setView({ kind: 'detail', groupId: g.id })} />
@@ -251,7 +265,7 @@ function CorpBar({ vc, setVc, options, tree, vms, loading, onReload }) {
   );
 }
 
-function GroupList({ tree, groups, byId, q, setQ, writable, busy, onRun, onNew, onEdit, onDetail }) {
+function GroupList({ tree, groups, byId, q, setQ, writable, busy, ovl, onRun, onNew, onEdit, onDetail }) {
   const needle = q.trim().toLowerCase();
   const shown = needle
     ? groups.filter((g) => g.name.toLowerCase().includes(needle) || g.vmIds.some((id) => String(byId.get(id)?.name || '').toLowerCase().includes(needle)))
@@ -266,7 +280,7 @@ function GroupList({ tree, groups, byId, q, setQ, writable, busy, onRun, onNew, 
         <button type="button" className="login-btn" style={{ flex: 'none', padding: '8px 16px' }} disabled={!writable} onClick={() => onNew('all')}>＋ 새 그룹</button>
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 360px), 1fr))', gap: 12 }}>
-        {shown.map((g) => <GroupCard key={g.id} g={g} tree={tree} byId={byId} writable={writable} busy={busy.has(g.id) || g.running} onRun={() => onRun(g)} onEdit={() => onEdit(g)} onDetail={() => onDetail(g)} />)}
+        {shown.map((g) => <GroupCard key={g.id} g={g} tree={tree} byId={byId} writable={writable} busy={busy.has(g.id) || g.running} ovl={ovl} onRun={() => onRun(g)} onEdit={() => onEdit(g)} onDetail={() => onDetail(g)} />)}
         {!needle && noGroup > 0 && (
           <button type="button" onClick={() => onNew('nogroup')} disabled={!writable}
             style={{ textAlign: 'left', border: '1.5px dashed var(--border)', borderRadius: 12, background: 'transparent', color: 'var(--text)', padding: 16, cursor: writable ? 'pointer' : 'default', font: 'inherit', display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', gap: 8, alignContent: 'start', minHeight: 150 }}>
@@ -282,12 +296,32 @@ function GroupList({ tree, groups, byId, q, setQ, writable, busy, onRun, onNew, 
   );
 }
 
-function GroupCard({ g, tree, byId, writable, busy, onRun, onEdit, onDetail }) {
+/** v2.840 카드 정보 줄(라벨 + 글자) — 긴 글은 줄바꿈. */
+function InfoLine({ label, children, color }) {
+  return (
+    <div style={{ display: 'flex', gap: 8, fontSize: 12, lineHeight: 1.5, minWidth: 0 }}>
+      <span className="muted" style={{ flex: '0 0 auto', width: 64 }}>{label}</span>
+      <span style={{ minWidth: 0, overflowWrap: 'anywhere', color: color || 'var(--text)' }}>{children}</span>
+    </div>
+  );
+}
+/** v2.840 겹침 줄 — ovl 없음(Summary 권한 없음 · 읽는 중) = 줄 없음 · 못 읽음 = 모름 · 24시간 안 회차 없음 = 줄 없음. */
+function overlapOf(ovl, g) {
+  if (!ovl) return null;
+  if (!ovl.rows) return { text: '모름(다음 24시간 일정을 읽지 못함)', color: 'var(--text-dim)' };
+  const o = ovl.rows.get(g.id);
+  if (!o) return null;
+  const line = overlapLine(o);
+  return line ? { text: line.replace(/^겹침 — /, ''), color: TONE.warn } : { text: '없음(다음 24시간 · Veeam 잡 · 다른 Bareos 회차)', color: 'var(--text-dim)' };
+}
+
+function GroupCard({ g, tree, byId, writable, busy, ovl, onRun, onEdit, onDetail }) {
   const rows = g.vmIds.map((id) => byId.get(id)).filter(Boolean);
   const size = sizeSum(rows);
   const badge = g.running ? { text: g.pruning ? '보관 정리 중' : '실행 중', tone: 'run' } : resultBadge(memberResults(rows));
   const sp = scheduleParts(g.schedule);
   const kp = keepParts(g);
+  const ov = overlapOf(ovl, g);
   const warn = g.clockAhead ? '서버 시계가 마지막 처리 회차보다 뒤에 있습니다 — 그 회차까지 예약 실행이 돌지 않습니다.'
     : g.sending && !g.running ? '실행을 보내는 도중 포탈이 재시작했습니다 — 일부 VM 은 보내지 않았을 수 있습니다.'
       : g.missed ? `돌리지 않은 회차 ${g.missed.key}(${missedReason(g.missed)})` : '';
@@ -304,6 +338,12 @@ function GroupCard({ g, tree, byId, writable, busy, onRun, onEdit, onDetail }) {
         <Cell label="스케줄" main={sp.main} sub={sp.sub} />
         <Cell label="보관" main={kp.main} sub={kp.sub} tone={kp.bad ? 'bad' : undefined} />
         <Cell label="다음 실행" main={g.next ? shortTs(g.next.at) : '—'} sub={g.next ? g.next.level : (g.schedule?.enabled ? '—' : '스케줄 꺼짐')} />
+      </div>
+      <div data-group-card-info="" style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', gap: 4, marginTop: -4 }}>
+        <InfoLine label="마지막 회차" color={g.fires?.[0] ? TONE[fireTone(g.fires[0])] : 'var(--text-dim)'}>{g.fires?.[0] ? fireText(g.fires[0]) : '아직 실행 기록이 없습니다'}</InfoLine>
+        <InfoLine label="적용 정책">{groupPoolText(g.poolPolicy, g.pool || tree.siteDefaults?.pool || '')}{fin(g.keep) ? ` · 보관 Full 체인 ${g.keep}개(포탈)` : ''}</InfoLine>
+        {ov && <InfoLine label="겹침" color={ov.color}>{ov.text}</InfoLine>}
+        {fin(g.dupVms) && g.dupVms > 0 && <InfoLine label="두 번 실행" color={TONE.warn}>VM {g.dupVms}대의 잡이 Director 스케줄에도 들어 있어 그룹 예약과 따로 한 번 더 돌 수 있습니다 — 백업 대상 탭의 적용 정책 줄에서 어느 스케줄인지 보세요</InfoLine>}
       </div>
       <div style={{ ...ROW, gap: 6 }}>
         <button type="button" className="login-btn" style={{ flex: 'none', padding: '6px 14px', fontSize: 12.5 }} disabled={!writable || busy} onClick={onRun}>{g.running ? (g.pruning ? '정리 중' : '실행 중') : '지금 백업'}</button>
@@ -701,6 +741,8 @@ function GroupDetail({ tree, g, byId, writable, busy, onBack, onRun, onEdit, onD
             </div>
           )}
         </Box>
+        <Box label="적용 풀 · 보존" main={g.poolPolicy && !g.poolPolicy.missing ? (g.poolPolicy.retentionSec == null ? '—' : retentionText(g.poolPolicy.retentionSec)) : '—'}
+          sub={`${groupPoolText(g.poolPolicy, g.pool || tree.siteDefaults?.pool || '')} · Director 정책 수집본${g.poolPolicy?.at ? ` ${shortTs(g.poolPolicy.at)}` : ''} — Volume Retention 이 보관 개수보다 짧으면 Director 가 먼저 지웁니다`} />
         <Box label="저장 위치 · VM 용량" main={fmtGb(size.gb)} sub={`스토리지 ${g.storage || `기본${tree.siteDefaults?.storage ? `(${tree.siteDefaults.storage})` : ''}`} · 풀 ${g.pool || `기본${tree.siteDefaults?.pool ? `(${tree.siteDefaults.pool})` : ''}`} · VM 용량 합(백업 사용량 아님)${size.unknown ? ` · 모름 ${size.unknown}대 제외` : ''}`} />
       </section>
 

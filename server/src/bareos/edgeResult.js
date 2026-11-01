@@ -8,7 +8,7 @@
  */
 import { numOrNull } from '../util/numOrNull.js';
 import { isResourceName } from './names.js';
-import { normPolicyResult } from './policyParse.js';
+import { normPolicyResult, normVolumeRows } from './policyParse.js';
 
 const obj = (v) => (v && typeof v === 'object' && !Array.isArray(v) ? v : {});
 const arr = (v) => (Array.isArray(v) ? v : []);
@@ -98,6 +98,8 @@ export const VALUE = Object.freeze({
   history: (v) => rows(v, 200),
   // v2.839 정책 수집 — 아는 키 · 아는 필드만 · 상한(policyParse 정규화는 멱등 — 엣지가 이미 거른 값을 중앙이 같은 함수로 다시 거른다)
   policy: (v) => normPolicyResult(v),
+  // v2.840 볼륨 목록 즉시 조회 — 아는 칸 · 행 상한(멱등 정규화를 중앙이 다시 돈다)
+  volumes: (v) => normVolumeRows(v),
   cancel: (v) => { const r = obj(v); return r.final ? { final: rowOut(r.final) } : r.cleared ? { cleared: true } : { canceled: bool(r.canceled) }; },
   log: (v) => {
     const r = obj(v); const l = obj(r.log);

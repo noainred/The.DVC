@@ -99,6 +99,9 @@ test('② 엣지 회신 정제 — 음수·문자열 숫자는 null · jobid 없
 
 /* ───────── 원장 · 폴러 · 라우트(가짜 Director) ───────── */
 const NOW = Date.now();
+// v2.840: '오늘 합계' 시험의 끝난 실행 — 지금 30·40분 전이 자정을 넘으면(00:00~00:40) 어제가 되어 시험이 깨졌다(실측 00:19). 오늘 0시 아래로 내려가지 않게 자른다.
+const TODAY0 = (() => { const d = new Date(NOW); d.setHours(0, 0, 0, 0); return d.getTime(); })();
+const AGO = (m) => Math.max(NOW - m * 60_000, TODAY0);
 const MIN = 60_000;
 const DIR_TEXT = [
   'bareos-dir Version: 24.0.1',
@@ -150,8 +153,8 @@ before(async () => {
       lastRate: { jobid: 402, level: 'I', bps: 10_000_000, bytes: 1, at: NOW - 3_600_000 } }),
     // 대기 중(FD 가 모름) · 오늘 끝난 성공·실패
     job('j3', 'vc-a:vm-3', 'app-03', { pending: { jobid: 503, since: NOW - MIN, level: 'Incremental', state: 'queued', status: 'C' },
-      lastRun: done(300, 'T', NOW - 30 * MIN, 5_000_000_000), finishedRuns: [done(300, 'T', NOW - 30 * MIN, 5_000_000_000)] }),
-    job('j4', 'vc-a:vm-4', 'app-04', { lastRun: done(301, 'f', NOW - 40 * MIN, null), finishedRuns: [done(301, 'f', NOW - 40 * MIN, null)] }),
+      lastRun: done(300, 'T', AGO(30), 5_000_000_000), finishedRuns: [done(300, 'T', AGO(30), 5_000_000_000)] }),
+    job('j4', 'vc-a:vm-4', 'app-04', { lastRun: done(301, 'f', AGO(40), null), finishedRuns: [done(301, 'f', AGO(40), null)] }),
     job('j5', 'vc-a:vm-5', 'old-05'),   // ③ 원장 시험 전용(사흘 전 실행 — 오늘 합계에 섞이지 않게)
     // 같은 Director 의 다른 법인(vc-b) 실행 — 흐름은 법인마다(Chromium 확인: Director 단위면 두 법인 합계가 겹쳐 세졌다)
     { ...job('j6', 'vc-b:vm-9', 'pl-09', { pending: { jobid: 601, since: NOW - 10 * MIN, level: 'Incremental', state: 'running', status: 'R' } }), vcenterId: 'vc-b' },
