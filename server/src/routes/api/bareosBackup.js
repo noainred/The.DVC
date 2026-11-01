@@ -352,7 +352,8 @@ export function registerBareosBackup(api) {
 /**
  * 목록 + 상태(폴러·설정 요약·법인별 Director).
  * v2.846 버그 점검(C-5 — 측정): 관리 화면이 어느 탭이든 10초마다 부른다 — 3,000 대상이면 원장 깊은 복사·정책 판정·직렬화가 매번 100ms 넘게 돌았다.
- * memoJson(스냅샷 세대 + 아래 열쇠)으로 같은 세대의 다시 부르기는 계산하지 않고(ETag 304), 화면이 쓰지 않는 끝난 실행 원문(finishedRuns)은 싣지 않는다.
+ * memoJson(스냅샷 세대 + 아래 열쇠)으로 같은 열쇠의 다시 부르기는 기억 시한(기본 12초) 안에서만 계산하지 않는다(ETag 는 열쇠로 — 다시 계산해도 304).
+ *   v2.847 C2-3 정정: 화면이 10초마다 부르므로 약 두 번에 한 번은 다시 계산한다(예전 문구 '같은 세대는 계산하지 않고' 는 과장). 화면이 쓰지 않는 끝난 실행 원문(finishedRuns)은 싣지 않는다.
  */
 api.get('/tools/bareos-backup', adminOnly, (req, res) => memoJson(req, res, 'bareos-backup-list', () => bareosListView(req), { extraKey: bareosListKey(req) }));
 

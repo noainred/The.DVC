@@ -363,7 +363,7 @@ export async function createBackupTarget({ vcenterId, vmId, level, schedule, by,
     } catch (e) { if (e?.code === 'unknown') throw fail('unknown', addUnknownText(String(e.message || e).slice(0, 300))); throw e; }
     if (addMidCommand(r)) {   // v2.847 E2-1: 명령 도중 끊김 — 실패로 단정하지 않고 `.jobs` 로 가린다(원장 밖 잡은 끈다)
       const why = (await settleMidCommandAdds(prep.directorId, [{ i: 0, prep }], demo)).get(0);
-      throw fail(/^만들어지지 않았습니다/.test(why) ? 'error' : 'unknown', why);
+      throw fail(/^결과 모름/.test(why) ? 'unknown' : 'error', why);   // 만들어지지 않음 · 원장 밖 잡을 끔 = 결과를 안다(실패) · .jobs 도 못 읽음 = 결과 모름
     }
     if (!r?.ok) throw fail(r?.code === 'skipped' ? 'connect' : (r?.code || 'error'), r?.message || 'Director 잡을 만들지 못했습니다.');
     if (!r.name) throw fail('unknown', 'Director 가 잡 이름 없이 성공을 회신했습니다 — 잡이 생겼을 수 있습니다. Director 에서 확인하세요.');   // G3

@@ -51,6 +51,10 @@
   그 밖은 unknown → **멈춤**). 화면의 '확인했음 — 실행 중 작업 확인 없이 진행' 동의만 `RUNNING_UNKNOWN_OK=1`(planEnv 화이트리스트 · **그 회차의 시도 행에만** — 계획 값이 아니라 다시 하기로 이어지지 않는다 · D-2).
   ④ 전부 되돌리기의 M4 는 재설치(기존 Director 를 다시 등록해 쓰는 작업)에도 적용(D-4) · 백업 대상 원장을 못 읽으면 503(대상 수를 0 으로 보지 않는다 · D-7).
   ⑤ 화면: postJson 은 409 를 던지지 않는다 — `okOrThrow` 로 `ok:false` 를 성공으로 보이지 않는다(U-7 · 시작의 precheck 표 되돌림) · 볼륨 크기 합은 못 읽은 것을 0 으로 더하지 않는다(U-12).
+- **v2.847 2회차 점검(되돌리지 말 것 · `bareosBugs2847b` · 웹 `bareosBugs2847` — 변이 포함)**: 실패 · 중단 카드의 '전부 되돌리기' 는 **아는 칸만**(`sshFixed === true`) 넘긴다 —
+  `onClick={onRollback}` 이 클릭 이벤트를 본문에 펼쳐 요청이 나가지 않았다(U2-1 · v2.846 회귀) · SSH 인증 실패로 멈춘(failed · stopped) 작업의 첫 되돌리기도 `sshFixed` 필요(S2-2) ·
+  M4 는 `jobDirectorId` 로 센다(directorId 없는 옛 대상 — D2-5) · 기동 때 **HTTP 를 열기 전에** 이어 읽을 작업(원격 단계 · 되돌리는 중)의 잠금을 선점하고(`reserveInstallResumeLocks`) kick 이 넘겨받는다 ·
+  이어 읽기가 잠금을 못 잡으면 'failed' 로 적지 않고 30초 뒤 다시(러너는 서버에서 돈다 — C2-2) · 화면 동의 `runningUnknownOk` 는 **지금 사전 점검이 확인 불가일 때만** 시작 본문에 싣는다(U2-5).
 - **데모**: mock + 실제 Director 미등록이면 `demo.js`(시간으로 진행하는 합성 작업 · 판정은 실제 코드 · 장비에 닿지 않음).
 - 실환경 미확인(추정 — 첫 현장 설치에서 확인할 것): Bareos `current` 사전 공개판 RPM 이 Rocky 9.x 의 각 마이너에서 `--alldeps` 로 풀리는지(CI 는 rockylinux:9 최신에서만 확인) ·
   `bconsole -c`(이름 있는 Console) TLS-PSK 접속 출력 모양 · `update_bareos_tables` 가 카탈로그 유지 재설치에서 판 차이를 맞추는지 · WebUI 첫 화면 응답 코드.
