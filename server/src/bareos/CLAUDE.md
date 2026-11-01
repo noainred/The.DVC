@@ -69,3 +69,4 @@
 - **v2.828 조회 화면**(`bareos-summary`·`bareos-detail` — Director 에 접속하지 않는다 · 원장 상한 3,000): 전문은 audits.md 'Bareos v2.828 조회 화면 모듈 규칙'(옮김).
 - **v2.843 법인 로컬**(`bareosLocal2843`): 정리 미리 보기 `prunePreview`(pruneJobs 와 같은 판정 · delete 없음 · MUTATING 밖) · 설정 응답 `siteAgent` — audits.md 'v2.843'.
 - **v2.844 완전 설치**: 규칙 전문은 `install/CLAUDE.md`(엣지 노드 안 러너 · 그 단계만 되돌림 · 볼륨 삭제 세 겹 · 번들 서명 · OTP 코드 없음).
+- **v2.845 법인별 설정 · 계정 통합**: 규칙 전문은 `manage/CLAUDE.md`(표지 파일만 · 재시작 직전 재확인 · 등록부 SSH 는 담당 엣지 것만).

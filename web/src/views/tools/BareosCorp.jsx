@@ -412,7 +412,7 @@ function StorageAdd({ corp, cfg, busy, write, otpRequired, ssh, setSsh, runScan,
       )}
       <details style={{ marginTop: 8 }}>
         <summary className="muted" style={{ fontSize: 12, cursor: 'pointer' }}>무엇을 바꾸나요 — 미리 보기</summary>
-        <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>새 파일 /etc/bareos/bareos-sd.d/device/{device || '…'}.conf · 새 파일 /etc/bareos/bareos-dir.d/storage/{f.name || '…'}.conf(Address = 기존 스토리지 주소{cfg.sdAddress ? ` ${cfg.sdAddress}` : ''} · Password = 기존 SD 비밀번호를 서버 안에서 읽어 넣음) · 경로가 없으면 만듦(bareos:bareos 0750). 순서: 실행 중 작업 0 확인 → 파일 쓰기 → bareos-sd -t → bareos-dir -t → SD 재시작 → Director reload. 실패하면 새 파일 삭제 · 만든 디렉터리 삭제.</div>
+        <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>새 파일 /etc/bareos/bareos-sd.d/device/{device || '…'}.conf · 새 파일 /etc/bareos/bareos-dir.d/storage/{f.name || '…'}.conf(Address = 기존 스토리지 주소{cfg.sdAddress ? ` ${cfg.sdAddress}` : ''} · Password = 기존 SD 비밀번호를 서버 안에서 읽어 넣음) · 경로가 없으면 만듦(bareos:bareos 0750) — 이미 있는 디렉터리는 <b>비어 있을 때만</b>, 다른 장치가 쓰는 경로 · 다른 프로그램의 데이터 경로(/var/log · /var/lib/pgsql 등)는 거부. 순서: 실행 중 작업 0 확인 → 파일 쓰기 → bareos-sd -t → bareos-dir -t → (같은 셸에서 실행 중 작업 0 재확인) SD 재시작 → Director reload. 실패하면 새 파일 삭제 · 이번에 만든 디렉터리 · 이번에 넣은 SELinux 규칙 삭제.</div>
         <pre style={PRE}>{sdDeviceText(prev)}</pre>
         <pre style={PRE}>{dirStorageText({ name: f.name || '…', address: cfg.sdAddress || '(기존 스토리지 주소)', sdPassword: SECRET_SLOT, device: device || '…', mediaType: mediaType || '…', count: f.count || '10', description: f.description })}</pre>
       </details>
@@ -454,7 +454,7 @@ function StorageDelete({ corp, row, busy, write, otpRequired, ssh, setSsh, onClo
   return (
     <div className="card" style={{ ...DEEP, borderLeft: '3px solid var(--red)' }}>
       <div style={ROW}><b style={{ flex: 1 }}>삭제 — ‘{row.name}’</b><button type="button" className="logout-btn" style={BTN} onClick={onClose}>취소</button></div>
-      <div style={{ fontSize: 12.5, marginTop: 6 }}><BoldText text={`**지우는 것**: SD 장치 파일(bareos-sd.d/device/${row.device}.conf) · Director Storage 파일(bareos-dir.d/storage/${row.name}.conf). **지우지 않는 것**: 디렉터리 ${row.path || '(경로)'} — 비어 있을 때만 지웁니다. 서버가 다시 확인합니다: 볼륨 파일 0 · 이 스토리지를 쓰는 풀 · 잡 · JobDefs 0 · 실행 중 작업 0.`} /></div>
+      <div style={{ fontSize: 12.5, marginTop: 6 }}><BoldText text={`**지우는 것**: SD 장치 파일(bareos-sd.d/device/${row.device}.conf) · Director Storage 파일(bareos-dir.d/storage/${row.name}.conf). **지우지 않는 것**: 디렉터리 ${row.path || '(경로)'}(원래 있던 · 다른 장치와 나눠 쓰는 디렉터리일 수 있어 그대로 둡니다 — 필요하면 서버에서 직접 지우세요). 서버가 다시 확인합니다: 볼륨 경로를 읽을 수 있는가 · 볼륨 파일 0 · 이 스토리지 · 장치를 가리키는 설정 0 · 실행 중 작업 0(재시작 직전에 한 번 더).`} /></div>
       <div style={GRID}><label className="muted" style={FIELD}>스토리지 이름 다시 적기<input className="input" style={INP} value={typed} onChange={(e) => setTyped(e.target.value.trim())} aria-label="스토리지 이름 확인" /></label></div>
       <AuthBox corp={corp} ssh={ssh} setSsh={setSsh} otpRequired={otpRequired} />
       <div style={{ ...ROW, marginTop: 10 }}>
