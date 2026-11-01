@@ -43,6 +43,9 @@ const POLL_MAX_MS = 60_000;
 const UPLOAD_SESSION_MS = 2 * 3600_000;
 const SHORT_SESSION_MS = 120_000;
 const PROBE_MS = 6 * 60_000;
+/** 원격 단계 전체 시한 — 러너 유닛도 같은 상한(RuntimeMaxSec)으로 끝난다(반증 M6 — 끝나지 않는 폴링이 그 법인의 새 설치를 영원히 막았다). */
+export const REMOTE_MAX_MS = 4 * 3600_000;
+const runDirOf = (id) => `${RUN_DIR}/${id}`;
 
 const fail = (code, message, extra = {}) => Object.assign(new Error(message), { code, ...extra });
 
@@ -98,24 +101,46 @@ let _onDirector = onDirector;
 let _setupDirector = setupDirector;
 let _setupFdPlugin = setupFdPlugin;
 let _sleep = (ms) => new Promise((r) => { const t = setTimeout(r, ms); t.unref?.(); });
-/** 시험 주입. */
+let _targets = (o) => listInstallTargets(o);
+let _creds = (id) => sshCredsFor(id);
+let _pick = (v) => pickBundle(v);
+/** 시험 주입(server/test/bareosInstallJob2844.test.js — 가짜 SSH 로 업로드 → 러너 → 4~7단계를 끝까지). */
 export function _setDepsForTest(d = {}) {
   _ssh = d.ssh || withSsh; _onDirector = d.onDirector || onDirector; _setupDirector = d.setupDirector || setupDirector; _setupFdPlugin = d.setupFdPlugin || setupFdPlugin;
   _sleep = d.sleep || ((ms) => new Promise((r) => { const t = setTimeout(r, ms); t.unref?.(); }));
+  _targets = d.targets || ((o) => listInstallTargets(o)); _creds = d.creds || ((id) => sshCredsFor(id)); _pick = d.pickBundle || ((v) => pickBundle(v));
 }
-const credsOf = (j) => { const c = sshCredsFor(j.targetId); if (!c) throw fail('invalid', '배포 등록부에서 이 엣지의 SSH 대상을 찾지 못했습니다(지워졌거나 바뀜).'); return c; };
+/** 시험용 — 돌고 있는 작업이 끝날 때까지 기다린다. */
+export async function _settleForTest(ms = 5000) { const t0 = Date.now(); while (_active.size && Date.now() - t0 < ms) await new Promise((r) => setTimeout(r, 5)); return _active.size === 0; }
+const credsOf = (j) => {
+  const c = _creds(j.targetId);
+  if (!c) throw fail('invalid', '배포 등록부에서 이 엣지의 SSH 대상을 찾지 못했습니다(지워졌거나 바뀜).');
+  // 반증 M5: 배포 등록부에서 주소를 바꾸면 다시·되돌리기·INI 가 다른 서버로 갔다 — 작업을 시작한 서버와 같을 때만
+  if (String(c.host || '').toLowerCase() !== String(j.sshHost || '').toLowerCase() || (Number(c.port) || 22) !== (Number(j.sshPort) || 22)) {
+    throw fail('invalid', `배포 등록부의 SSH 주소가 작업 시작 때(${j.sshHost}:${j.sshPort || 22})와 다릅니다 — 이 작업은 다른 서버에 보내지 않습니다.`);
+  }
+  return c;
+};
+export { credsOf as _credsOfForTest };
+/** 그 법인·같은 서버의 가장 새 작업(다시·되돌리기는 이것만 — 반증 H2). */
+const latestFor = (j) => load().slice().reverse().find((x) => x.vcenterId === j.vcenterId || (x.sshHost && j.sshHost && x.sshHost === j.sshHost)) || null;
+function requireLatest(j) {
+  const l = latestFor(j);
+  if (l && l.id !== j.id) throw fail('conflict', `이 법인(또는 같은 서버)에 더 새 작업(${l.id})이 있어 이 작업은 다시 하거나 되돌릴 수 없습니다 — 새 작업에서 하세요.`);
+}
+const _starting = new Set();
 const runSsh = (creds, fn, ms) => _ssh(creds, fn, { signal: AbortSignal.timeout(ms) });
 const secretsOf = (creds) => [creds?.password, creds?.passphrase].filter(Boolean);
 
 /* ───────── 사전 점검(읽기만) ───────── */
 export async function runPrecheck({ vcenterId, body = {} }) {
-  const t = listInstallTargets({ knownHostAddrs: knownHostAddrs() }).find((x) => x.vcenterId === vcenterId);
+  const t = _targets({ knownHostAddrs: knownHostAddrs() }).find((x) => x.vcenterId === vcenterId);
   if (!t) throw fail('not-found', 'vCenter 를 찾을 수 없습니다.');
   if (!t.can) throw fail('invalid', t.why);
-  const bundle = await pickBundle();
+  const bundle = await _pick('');
   let plan = null;
   try { plan = bundle ? normPlan({ ...body, reset: body.reset || { ack: true } }, { contents: bundle.contents, mode: t.mode, corpName: t.vcenterName }) : null; } catch { plan = null; }
-  const creds = sshCredsFor(t.targetId);
+  const creds = _creds(t.targetId);
   const t0 = Date.now();
   let out;
   try {
@@ -132,12 +157,19 @@ export async function runPrecheck({ vcenterId, body = {} }) {
 
 /* ───────── 시작 ───────── */
 export async function startInstall({ vcenterId, body = {}, by = '' }) {
-  const t = listInstallTargets({ knownHostAddrs: knownHostAddrs() }).find((x) => x.vcenterId === vcenterId);
+  const t = _targets({ knownHostAddrs: knownHostAddrs() }).find((x) => x.vcenterId === vcenterId);
   if (!t) throw fail('not-found', 'vCenter 를 찾을 수 없습니다.');
   if (!t.can) throw fail('invalid', t.why);
   const busy = load().find((j) => isActive(j) && (j.vcenterId === vcenterId || (j.sshHost && j.sshHost === t.sshHost)));
   if (busy) throw fail('conflict', `이 법인(또는 같은 서버)의 완전 설치가 진행 중입니다(${busy.id}) — 끝난 뒤 다시 하세요.`);
-  const bundle = await pickBundle(String(body.bundleVersion || ''));
+  // 반증 L1: 점검(await) 중에 같은 요청이 또 오면 둘 다 통과했다 — 시작 준비 중 표시
+  const keys = [`vc:${vcenterId}`, `host:${String(t.sshHost).toLowerCase()}`];
+  if (keys.some((k) => _starting.has(k))) throw fail('conflict', '이 법인(또는 같은 서버)의 완전 설치를 시작하는 중입니다.');
+  keys.forEach((k) => _starting.add(k));
+  try { return await startInner(t, vcenterId, body, by); } finally { keys.forEach((k) => _starting.delete(k)); }
+}
+async function startInner(t, vcenterId, body, by) {
+  const bundle = await _pick(String(body.bundleVersion || ''));
   if (!bundle) throw fail('invalid', '서명·해시가 맞는 번들이 없습니다 — 먼저 번들을 받으세요.');
   const plan = normPlan(body, { contents: bundle.contents, mode: t.mode, corpName: t.vcenterName });
   // 시작 직전 다시 점검(화면 결과는 그 순간의 상태 — 그사이 바뀌었으면 시작하지 않는다)
@@ -160,7 +192,7 @@ export async function startInstall({ vcenterId, body = {}, by = '' }) {
   };
   load().push(j);
   persist();
-  kick(j.id, { fromStep: firstStep, fresh: true });
+  kick(j.id, { fromStep: firstStep });
   return publicJob(j);
 }
 
@@ -178,7 +210,7 @@ function kick(id, opts) {
   }).finally(() => { _active.delete(id); noteSetupEnd(`install:${id}`); });
 }
 
-async function drive(id, { fromStep, fresh = false, resendBundle = false, mode = 'install', resume = false }) {
+async function drive(id, { fromStep, resendBundle = false, mode = 'install', resume = false }) {
   const j = getJob(id);
   if (!j) return;
   const creds = credsOf(j);
@@ -187,14 +219,15 @@ async function drive(id, { fromStep, fresh = false, resendBundle = false, mode =
     if (!resume) {
       noteSetupStart(`install:${id}`, `완전 설치 ${j.vcenterName}`);
       touch(j, { phase: 'upload', currentStep: fromStep });
-      await uploadAndStart(j, creds, { fromStep, fresh, resendBundle });
+      const up = await uploadAndStart(j, creds, { fromStep, resendBundle });
       noteSetupEnd(`install:${id}`);   // 러너가 서버 안에서 돈다 — 중앙 재시작이 끊지 않는다(이어 읽기)
+      if (up?.stopped) { _stopReq.delete(j.id); touch(j, { status: 'stopped', phase: 'idle', currentStep: fromStep }); setStep(j, fromStep, { status: 'stopped', at: Date.now() }); return; }
     }
-    touch(j, { phase: 'remote' });
+    touch(j, { phase: 'remote', ...(resume && j.remoteStartedAt ? {} : { remoteStartedAt: Date.now() }) });
     const r = await pollRemote(j, creds);
     if (!r.ok) return;
-    noteSetupStart(`install:${id}`, `완전 설치 ${j.vcenterName}`);
   }
+  noteSetupStart(`install:${id}`, `완전 설치 ${j.vcenterName}`);   // 반증 L3: 4단계부터 다시 할 때도 업그레이드 자동 적용이 기다린다
   touch(j, { phase: 'central' });
   for (let n = Math.max(fromStep, LAST_REMOTE_STEP + 1); n <= LAST_STEP; n++) {
     if (_stopReq.has(j.id)) { _stopReq.delete(j.id); setStep(j, n, { status: 'stopped', at: Date.now() }); touch(j, { status: 'stopped', phase: 'idle', currentStep: n }); return; }
@@ -214,20 +247,20 @@ async function drive(id, { fromStep, fresh = false, resendBundle = false, mode =
 }
 
 /** 번들(필요하면)·러너·plan.env 를 올리고 러너를 띄운다. */
-async function uploadAndStart(j, creds, { fromStep, fresh, resendBundle }) {
-  const bundle = await pickBundle(j.bundle.version);
+async function uploadAndStart(j, creds, { fromStep, resendBundle }) {
+  const RD = runDirOf(j.id);
+  const bundle = await _pick(j.bundle.version);
   if (!bundle) throw fail('invalid', `번들 ${j.bundle.version} 을(를) 중앙에서 찾지 못했습니다(지워졌거나 검증 실패) — 번들을 다시 받으세요.`);
   const env = planEnv({ jobId: j.id, bundle: j.bundle, install: j.install, plan: j.plan, startStep: Math.min(fromStep, LAST_REMOTE_STEP), runMode: 'install', hostAddr: j.hostAddr, resetVolumeDirs: j.resetVolumeDirs });
   const runner = fs.readFileSync(RUNNER_SRC, 'utf8');
   const remoteTar = `${BUNDLES_DIR}/${tarName(j.bundle.version)}`;
-  await runSsh(creds, async (api) => {
+  const up = await runSsh(creds, async (api) => {
     const idu = await api.exec('id -u');
     if (String(idu?.stdout || '').trim() !== '0') throw fail('invalid', 'root 계정으로 접속해야 합니다(배포 등록부의 SSH 계정).');
     const act = String((await api.exec(`systemctl is-active ${UNIT} 2>/dev/null || true`))?.stdout || '').trim();
     if (act === 'active' || act === 'activating') throw fail('conflict', '이 서버에서 완전 설치 러너가 이미 돌고 있습니다 — 끝난 뒤 다시 하세요.');
-    await api.exec(`install -d -m 0700 ${REMOTE_ROOT} ${BUNDLES_DIR} && chmod 0700 ${REMOTE_ROOT}`);
-    if (fresh) await api.exec(`if [ -d ${RUN_DIR} ]; then mv ${RUN_DIR} ${RUN_DIR}.$(date +%Y%m%d%H%M%S); fi`);
-    await api.exec(`install -d -m 0700 ${RUN_DIR}`);
+    await api.exec(`install -d -m 0700 ${REMOTE_ROOT} ${BUNDLES_DIR} ${RUN_DIR} && chmod 0700 ${REMOTE_ROOT}`);
+    await api.exec(`install -d -m 0700 ${RD}`);
     // 번들: 같은 sha 가 있으면 다시 보내지 않는다(고RTT 회선에서 수백 MB)
     const have = String((await api.exec(`[ -f ${remoteTar} ] && sha256sum ${remoteTar} | cut -d' ' -f1 || true`, 300_000))?.stdout || '').trim();
     if (resendBundle || have !== j.bundle.sha256) {
@@ -243,20 +276,26 @@ async function uploadAndStart(j, creds, { fromStep, fresh, resendBundle }) {
       await api.exec(`mv -f ${part} ${remoteTar}`);
       touch(j, { upload: { sent: j.bundle.size, total: j.bundle.size, at: j.upload?.at || Date.now(), doneAt: Date.now() } });
     } else touch(j, { upload: { sent: j.bundle.size, total: j.bundle.size, reused: true, doneAt: Date.now() } });
-    await api.writeFile(`${RUN_DIR}/runner.sh`, runner, 0o700);
-    await api.writeFile(`${RUN_DIR}/plan.env`, env, 0o600);
-    await api.exec(`rm -f ${RUN_DIR}/stop ${RUN_DIR}/err.${Math.min(fromStep, LAST_REMOTE_STEP)}`);
-    const st = await api.exec(`systemd-run --unit=${UNIT} --collect --quiet /bin/bash ${RUN_DIR}/runner.sh 2>&1`);
+    await api.writeFile(`${RD}/runner.sh`, runner, 0o700);
+    await api.writeFile(`${RD}/plan.env`, env, 0o600);
+    // 반증 M1: 업로드 중에 누른 중단 — 러너를 띄우지 않는다(초기화 0단계가 그대로 돌던 길)
+    if (_stopReq.has(j.id)) return { stopped: true };
+    await api.exec(`rm -f ${RD}/stop ${RD}/err.${Math.min(fromStep, LAST_REMOTE_STEP)}`);
+    const st = await api.exec(`systemd-run --unit=${UNIT} --collect --quiet --property=RuntimeMaxSec=${Math.floor(REMOTE_MAX_MS / 1000)} /bin/bash ${RD}/runner.sh ${RD} 2>&1`);
     if (st?.code !== 0) throw fail('remote', `러너를 띄우지 못했습니다(systemd-run): ${scrubOutput(String(st?.stdout || st?.stderr || ''), secretsOf(creds)).slice(-300)}`);
     return {};
   }, UPLOAD_SESSION_MS);
+  if (up?.stopped) return { stopped: true };
   for (let n = fromStep; n <= LAST_REMOTE_STEP; n++) if (j.steps[n]) setStep(j, n, { status: 'pending', msg: '' });
+  return {};
 }
 
 /** 상태 파일 파싱(순수) — 단계별 마지막 상태. */
 export function parseState(text) {
-  const steps = {}; let all = null;
+  let steps = {}; let all = null;
   for (const l of String(text || '').split('\n')) {
+    // 회차 시작 표지 — 앞 회차의 줄(특히 'all done')은 버린다(반증 M3)
+    if (/^begin /.test(l.trim())) { steps = {}; all = null; continue; }
     const m = /^(\d|all) (start|ok|fail|rolledback|rollback-fail|stopped|done) (\d+)/.exec(l.trim());
     if (!m) continue;
     const at = Number(m[3]) * 1000;
@@ -269,27 +308,54 @@ export function parseState(text) {
   return { steps, all };
 }
 
-const READ_CMD = `cat ${RUN_DIR}/state 2>/dev/null; echo @@log; tail -n 40 ${RUN_DIR}/run.log 2>/dev/null; echo @@err; for f in ${RUN_DIR}/err.?; do [ -f "$f" ] && { echo "@@file $f"; cat "$f"; }; done; echo @@unit; systemctl is-active ${UNIT} 2>/dev/null || true`;
+/**
+ * 상태 읽기 명령(작업마다 실행 디렉터리). 구간 머리는 **줄 하나**(@@log · @@err · @@file <경로> · @@unit) — 줄 단위로 나눈다.
+ * 반증 H1(재현): 예전에는 '\n@@unit\n' 로 잘랐는데 err 파일이 없으면 @@err 바로 뒤에 @@unit 이 와 앞 줄바꿈이 없어 유닛 상태를 못 읽었다
+ * → 정상으로 도는 러너를 세 번째 읽기에 '러너 중단' 으로 기록했다. 시험은 이 명령을 **실제 bash** 로 돌린 출력으로 parseRead 를 본다.
+ */
+export function readCmd(rd) {
+  return `cat ${rd}/state 2>/dev/null; echo; echo @@log; tail -n 40 ${rd}/run.log 2>/dev/null; echo; echo @@err; for f in ${rd}/err.?; do [ -f "$f" ] && { echo "@@file $f"; cat "$f"; echo; }; done; echo @@unit; systemctl is-active ${UNIT} 2>/dev/null || true`;
+}
+/** 읽기 출력 → { steps, all, log, errs, unit }(순수). */
+export function parseRead(text) {
+  const sec = { state: [], log: [], err: [], unit: [] };
+  let cur = 'state';
+  for (const raw of String(text || '').split('\n')) {
+    const l = raw.replace(/\r$/, '');
+    if (l === '@@log') { cur = 'log'; continue; }
+    if (l === '@@err') { cur = 'err'; continue; }
+    if (l === '@@unit') { cur = 'unit'; continue; }
+    sec[cur].push(l);
+  }
+  const errs = {};
+  let n = null;
+  for (const l of sec.err) {
+    const m = /^@@file .*\/err\.(\d)$/.exec(l);
+    if (m) { n = Number(m[1]); errs[n] = ''; continue; }
+    if (n != null) errs[n] += `${l}\n`;
+  }
+  return { ...parseState(sec.state.join('\n')), log: sec.log.filter(Boolean).slice(-40), errs, unit: (sec.unit.find((x) => x.trim()) || '').trim() };
+}
 
 /** 러너 상태를 한 번 읽는다. */
-async function readRemote(creds) {
-  const r = await runSsh(creds, async (api) => ({ text: String((await api.exec(READ_CMD, 60_000))?.stdout || '') }), SHORT_SESSION_MS);
-  const t = r.text;
-  const [stateText, rest = ''] = t.split('\n@@log\n');
-  const [logText, rest2 = ''] = rest.split('\n@@err\n');
-  const [errText, unitText = ''] = rest2.split('\n@@unit\n');
-  const errs = {};
-  for (const part of errText.split('@@file ').slice(1)) { const nl = part.indexOf('\n'); const name = part.slice(0, nl); const n = Number(/err\.(\d)$/.exec(name)?.[1]); if (Number.isInteger(n)) errs[n] = part.slice(nl + 1); }
-  return { ...parseState(stateText), log: logText.split('\n').filter(Boolean).slice(-40), errs, unit: unitText.trim().split('\n')[0] || '' };
+async function readRemote(creds, rd) {
+  const r = await runSsh(creds, async (api) => ({ text: String((await api.exec(readCmd(rd), 60_000))?.stdout || '') }), SHORT_SESSION_MS);
+  return parseRead(r.text);
 }
 
 /** 러너가 끝날 때까지 읽는다. @returns {{ ok }} ok = 0~3 단계 모두 끝(중앙 단계로) */
 async function pollRemote(j, creds) {
   let wait = POLL_MS; let fails = 0; let idleSeen = 0;
+  const rd = runDirOf(j.id);
+  const deadline = (Number(j.remoteStartedAt) || Date.now()) + REMOTE_MAX_MS;
   for (;;) {
     if (!getJob(j.id) || !isActive(j)) return { ok: false };
+    if (Date.now() > deadline) {
+      recordFailure(j, j.currentStep, { cause: 'runner-timeout', message: `원격 단계가 시한(${REMOTE_MAX_MS / 3600_000}시간) 안에 끝나지 않았거나 엣지 노드에 닿지 못했습니다(러너 유닛도 같은 시한에 끝납니다).` }, creds);
+      return { ok: false };
+    }
     let r;
-    try { r = await readRemote(creds); fails = 0; wait = POLL_MS; } catch (e) {
+    try { r = await readRemote(creds, rd); fails = 0; wait = POLL_MS; } catch (e) {
       fails += 1; wait = Math.min(POLL_MAX_MS, wait * 2);
       touch(j, { pollError: { at: Date.now(), count: fails, message: isSshAuthError(e) ? '저장된 SSH 계정으로 로그인하지 못했습니다' : scrubOutput(String(e?.message || e), secretsOf(creds)).slice(0, 200) } });
       if (isSshAuthError(e)) { recordFailure(j, j.currentStep, { message: String(e?.message || e), sshAuth: true }, creds); return { ok: false }; }
@@ -323,7 +389,8 @@ function recordFailure(j, step, e, creds = null) {
   const c = classifyFailure({ ...e, step });
   const output = scrubOutput(e.output || e.message || '', secretsOf(creds));
   const failure = { step, at: Date.now(), cmd: e.cmd || '', code: e.code ?? null, message: scrubOutput(String(e.message || ''), secretsOf(creds)).slice(0, 600),
-    output, cause: c, rolledBack: e.rolledBack ?? (step != null && step >= 4 ? true : null), rollbackFailed: !!e.rollbackFailed };
+    // 4·5단계는 autoSetup 이 그 단계에서 넣은 것을 되돌린다(사유 문구가 결과를 밝힌다) · 6·7단계는 되돌릴 것이 없다(반증 L6)
+    output, cause: c, rolledBack: e.rolledBack ?? (step === 4 || step === 5 ? true : null), rollbackFailed: !!e.rollbackFailed };
   if (step != null && j.steps[step]) j.steps[step] = { ...j.steps[step], status: 'failed', endedAt: Date.now() };
   const a = j.attempts[j.attempts.length - 1]; if (a) { a.endedAt = Date.now(); a.result = 'failed'; a.failedStep = step; a.cause = c.title; }
   touch(j, { status: 'failed', phase: 'idle', failure, currentStep: step });
@@ -418,11 +485,13 @@ export async function retryInstall(id, { body = {}, by = '' } = {}) {
   if (!j) throw fail('not-found', '작업을 찾을 수 없습니다.');
   if (!['failed', 'stopped'].includes(j.status)) throw fail('conflict', `지금 상태(${j.status})에서는 다시 할 수 없습니다.`);
   if (j.failure?.cause?.key === 'ssh-auth' && body.sshFixed !== true) throw fail('invalid', 'SSH 로그인 실패는 배포 등록부의 계정을 고친 뒤 \'고쳤음\' 을 표시하고 다시 하세요(계정 잠금을 막으려고 확인합니다).');
-  const failedStep = j.failure?.step ?? j.currentStep ?? j.startStep;
-  let fromStep = Number.isInteger(body.fromStep) ? body.fromStep : failedStep;
-  if (!Number.isInteger(fromStep) || fromStep < j.startStep || fromStep > LAST_STEP) fromStep = failedStep;
-  if (fromStep > failedStep) throw fail('invalid', '실패한 단계보다 뒤에서 시작할 수 없습니다.');
-  const bundle = await pickBundle(j.bundle.version);
+  requireLatest(j);
+  credsOf(j);   // 주소가 바뀌었으면 여기서 멈춘다(반증 M5)
+  // 다시 하기는 **실패(멈춘) 단계부터만**(반증 M3·M5 — 앞 단계부터 다시 돌리면 끝난 단계·초기화를 확인 없이 되풀이했다)
+  const fromStep = Number.isInteger(j.failure?.step) ? j.failure.step : (Number.isInteger(j.currentStep) ? j.currentStep : j.startStep);
+  if (!Number.isInteger(fromStep) || fromStep < j.startStep || fromStep > LAST_STEP) throw fail('invalid', '다시 시작할 단계를 알 수 없습니다 — 전부 되돌린 뒤 새로 하세요.');
+  _stopReq.delete(j.id);
+  const bundle = await _pick(j.bundle.version);
   if (!bundle) throw fail('invalid', `번들 ${j.bundle.version} 이 중앙에 없습니다 — 번들을 다시 받으세요.`);
   const before = planSummary(j.plan);
   const nextBody = { ...j.plan, ...(body.plan && typeof body.plan === 'object' ? body.plan : {}), reset: j.plan.reset ? { ...j.plan.reset, ack: true, confirmName: j.vcenterName } : undefined };
@@ -447,7 +516,8 @@ export async function stopInstall(id) {
   _stopReq.add(j.id);
   if (j.phase === 'remote' || j.phase === 'upload') {
     const creds = credsOf(j);
-    await runSsh(creds, async (api) => { await api.exec(`[ -d ${RUN_DIR} ] && touch ${RUN_DIR}/stop; true`); return {}; }, SHORT_SESSION_MS);
+    const rd = runDirOf(j.id);
+    await runSsh(creds, async (api) => { await api.exec(`[ -d ${rd} ] && touch ${rd}/stop; true`); return {}; }, SHORT_SESSION_MS);
   }
   touch(j, { stopRequestedAt: Date.now() });
   return publicJob(j);
@@ -463,6 +533,13 @@ export function rollbackAllInstall(id, { ack = false, by = '' } = {}) {
   if (ack !== true) throw fail('invalid', '지울 목록을 확인했다는 표시가 필요합니다.');
   if (isActive(j)) throw fail('conflict', '진행 중에는 되돌릴 수 없습니다 — 먼저 중단하세요.');
   if (j.status === 'rolledback') throw fail('conflict', '이미 되돌렸습니다.');
+  requireLatest(j);
+  credsOf(j);
+  if (j.createdDirector && j.directorId) {
+    const n = listJobs().filter((x) => !x.demo && x.directorId === j.directorId).length;
+    if (n > 0) throw fail('conflict', `이 설치로 등록한 Director 에 백업 대상이 ${n}개 있습니다 — 백업 대상을 먼저 지운 뒤 되돌리세요(원격만 지우고 포탈 등록이 남는 상태를 만들지 않습니다).`);
+  }
+  _stopReq.delete(j.id);
   j.attempts.push({ n: j.attempts.length + 1, at: Date.now(), by, fromStep: null, rollbackAll: true });
   touch(j, { status: 'rolling-back', phase: 'remote', rollback: { at: Date.now(), by } });
   kick(j.id, { mode: 'rollback-all' });
@@ -471,7 +548,37 @@ export function rollbackAllInstall(id, { ack = false, by = '' } = {}) {
 
 async function driveRollbackAll(j, creds) {
   const notes = [];
-  // 포탈 쪽 — 이 작업이 새로 만든 것만
+  const rd = runDirOf(j.id);
+  const env = planEnv({ jobId: j.id, bundle: j.bundle, install: j.install, plan: j.plan, startStep: 1, runMode: 'rollback-all', hostAddr: j.hostAddr });
+  const runner = fs.readFileSync(RUNNER_SRC, 'utf8');
+  // 원격을 먼저(반증 M4b — 포탈 등록을 먼저 지우고 원격이 실패하면 어긋났다). 포탈 쪽은 원격이 다 되돌려진 뒤에만.
+  await runSsh(creds, async (api) => {
+    const act = String((await api.exec(`systemctl is-active ${UNIT} 2>/dev/null || true`))?.stdout || '').trim();
+    if (act === 'active' || act === 'activating') throw fail('conflict', '러너가 아직 돌고 있습니다.');
+    await api.exec(`install -d -m 0700 ${rd}`);
+    await api.writeFile(`${rd}/runner.sh`, runner, 0o700);
+    await api.writeFile(`${rd}/plan.env`, env, 0o600);
+    // 중앙 단계(4·5)가 만든 Director·FD 파일은 /etc/bareos 째로(2단계 etcnew) 지운다 — 설치 전 /etc/bareos 가 없었을 때
+    const st = await api.exec(`rm -f ${rd}/stop; systemd-run --unit=${UNIT} --collect --quiet --property=RuntimeMaxSec=${Math.floor(REMOTE_MAX_MS / 1000)} /bin/bash ${rd}/runner.sh ${rd} 2>&1`);
+    if (st?.code !== 0) throw fail('remote', '러너를 띄우지 못했습니다(systemd-run).');
+    return {};
+  }, SHORT_SESSION_MS);
+  const deadline = Date.now() + REMOTE_MAX_MS;
+  let remote = null; let idle = 0; let last = [];
+  while (Date.now() < deadline) {
+    await _sleep(POLL_MS);
+    let r; try { r = await readRemote(creds, rd); } catch { continue; }
+    last = r.log;
+    touch(j, { log: r.log.map((l) => scrubOutput(l, secretsOf(creds))), lastPollAt: Date.now() });
+    if (r.all?.status === 'rolledback') { remote = 'ok'; break; }
+    if (r.all?.status === 'rollback-fail') { remote = 'fail'; break; }
+    if (r.unit !== 'active' && r.unit !== 'activating') { idle += 1; if (idle >= 3) { remote = 'fail'; break; } } else idle = 0;
+  }
+  if (remote !== 'ok') {
+    notes.push('포탈 쪽 등록 · 매핑은 남겼습니다(원격 되돌리기가 끝나지 않음 — 남은 것을 확인한 뒤 다시 되돌리세요)');
+    touch(j, { status: 'rollback-failed', phase: 'idle', rollback: { ...j.rollback, doneAt: Date.now(), notes, left: (last || []).slice(-15).map((l) => scrubOutput(l, secretsOf(creds))) } });
+    return;
+  }
   try {
     if (j.createdSite) {
       const cur = loadSettings();
@@ -483,30 +590,7 @@ async function driveRollbackAll(j, creds) {
     if (j.createdDirector && j.directorId) { deleteDirector(j.directorId, { inUseByJobs: listJobs().filter((x) => !x.demo && x.directorId === j.directorId).length }); notes.push('Director 등록 삭제'); }
     else if (j.existingDirector) notes.push('기존 Director 등록은 남김 — 재설치 전 설치는 초기화로 지워져 접속되지 않습니다(설정 › 법인별 Director 에서 정리)');
   } catch (e) { notes.push(`포탈 쪽 일부 남음: ${String(e?.message || e).slice(0, 200)}`); }
-  const env = planEnv({ jobId: j.id, bundle: j.bundle, install: j.install, plan: j.plan, startStep: 1, runMode: 'rollback-all', hostAddr: j.hostAddr });
-  const runner = fs.readFileSync(RUNNER_SRC, 'utf8');
-  await runSsh(creds, async (api) => {
-    const act = String((await api.exec(`systemctl is-active ${UNIT} 2>/dev/null || true`))?.stdout || '').trim();
-    if (act === 'active') throw fail('conflict', '러너가 아직 돌고 있습니다.');
-    await api.exec(`install -d -m 0700 ${RUN_DIR}`);
-    await api.writeFile(`${RUN_DIR}/runner.sh`, runner, 0o700);
-    await api.writeFile(`${RUN_DIR}/plan.env`, env, 0o600);
-    // 중앙 단계(4·5)가 만든 Director·FD 파일은 /etc/bareos 째로(2단계 etcnew) 지운다 — 설치 전 /etc/bareos 가 없었을 때
-    const st = await api.exec(`rm -f ${RUN_DIR}/stop; systemd-run --unit=${UNIT} --collect --quiet /bin/bash ${RUN_DIR}/runner.sh 2>&1`);
-    if (st?.code !== 0) throw fail('remote', '러너를 띄우지 못했습니다(systemd-run).');
-    return {};
-  }, SHORT_SESSION_MS);
-  for (let i = 0; i < 400; i++) {
-    await _sleep(POLL_MS);
-    let r; try { r = await readRemote(creds); } catch { continue; }
-    touch(j, { log: r.log.map((l) => scrubOutput(l, secretsOf(creds))), lastPollAt: Date.now() });
-    if (r.all?.status === 'rolledback') { touch(j, { status: 'rolledback', phase: 'idle', rollback: { ...j.rollback, doneAt: Date.now(), notes } }); return; }
-    if (r.all?.status === 'rollback-fail' || (r.unit !== 'active' && r.unit !== 'activating' && i > 3)) {
-      touch(j, { status: 'rollback-failed', phase: 'idle', rollback: { ...j.rollback, doneAt: Date.now(), notes, left: r.log.slice(-15) } });
-      return;
-    }
-  }
-  touch(j, { status: 'rollback-failed', phase: 'idle', rollback: { ...j.rollback, notes, left: ['시한 안에 끝나지 않았습니다'] } });
+  touch(j, { status: 'rolledback', phase: 'idle', rollback: { ...j.rollback, doneAt: Date.now(), notes } });
 }
 
 /** 기동 때 진행 중이던 작업을 이어 읽는다(러너는 서버 안에서 계속 돈다). 업로드·중앙 단계 중이던 것은 '끊김' 으로 실패 처리(다시 시도 가능). */

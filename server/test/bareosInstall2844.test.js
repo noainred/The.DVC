@@ -189,6 +189,9 @@ test('⑥ 상태 파싱', () => {
   const s = JB.parseState('1 start 100\n1 ok 110\n2 start 111\n2 fail 120\n2 rolledback 125\nall done 130\nbad line');
   assert.equal(s.steps[1].status, 'ok'); assert.equal(s.steps[2].status, 'rolledback'); assert.equal(s.all.status, 'done');
   assert.equal(s.steps[2].endedAt, 125_000);
+  // 반증 M3: 앞 회차의 all done 은 다음 회차의 begin 뒤에서 무시한다
+  const t = JB.parseState('1 ok 1\nall done 9\nbegin install 10\n2 start 11\n');
+  assert.equal(t.all, null); assert.equal(t.steps[2].status, 'running'); assert.equal(t.steps[1], undefined);
 });
 
 test('⑥ 라우트 문지기(소스) — 쓰기 전부 fullScopeOnly + fullWriteOnly · 데모가 아니면 installGate · 감사 접두 · 비밀 없음', () => {

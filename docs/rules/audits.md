@@ -1836,7 +1836,7 @@
 
 사용자 요청 '엣지 노드의 ip/id/pw 를 알고 있으니 bareos 를 완전히 자동으로 설치' · 시안 먼저(Fable — v1~v13) · '실패하면 구체적으로 오류를 알려주고 고쳐서 다시 시도' ·
 결정 '포탈에서 고치기' · 'OTP 넣지 않고 설치'(실행은 OTP 등록 관리자만) · 'pyVmomi 판 선택, 권고 8' · '설치 기능은 설정에' · 'Director 등록 법인은 완전 초기화 후 재설치(실행 때마다 범위)' ·
-'완전 설치에 WebUI 추가'. 규칙 전문 `server/src/bareos/install/CLAUDE.md`. 회귀 `bareosInstall2844`(8) · `bareosInstallRunner2844`(10 — runner.sh 실제 bash) · 웹 `bareosInstall2844`(12).
+'완전 설치에 WebUI 추가'. 규칙 전문 `server/src/bareos/install/CLAUDE.md`. 회귀 `bareosInstall2844`(8) · `bareosInstallRunner2844`(13 — runner.sh 실제 bash) · `bareosInstallJob2844`(7 — 중앙 흐름 · 실제 bash 상태 출력) · 웹 `bareosInstall2844`(12).
 
 - **번들은 CI 가 만든다**(`bareos-bundle` 워크플로 · rockylinux:9) — 이 개발 컨테이너는 download.bareos.org 가 프록시 403 이라 빌드할 수 없다. CI 실측(run 4, 2026-11-01):
   Bareos **25.1.2~pre73.3e32b07ea(사전 공개판 · 'Bareos experimental Signing Key')** · PostgreSQL 13.23 · RPM 257개(--alldeps) · 186 MB ·
@@ -1848,6 +1848,13 @@
   데모 첫 시나리오가 실패하지 않았던 것은 결함이 아니었다(사전 점검이 플러그인 경로 사본을 찾으면 계획이 '옮기기' 를 자동으로 켠다) — 데모 첫 회차를 dnf 잠금 실패로 바꿨다.
 - 시안과 다르게 구현한 것(사실 확인 결과 · 사용자에게 보고): 방화벽은 http(80)만(Director · SD · FD 는 한 서버 안) · 서버 쪽 Director · FD 이름은 패키지 기본(`bareos-dir` · `bareos-fd`) ·
   재설치 뒤 백업 대상은 Director 에 잡이 없다(초기화가 /etc/bareos 를 지운다 — 시안의 '그룹 자동 재연결' 은 틀린 문구였다) → 마무리 화면이 다시 등록을 안내 · 번들 위치 /var/lib/portal-bareos-install(재부팅에도 남게).
+- **반증 검토(적대적 재검토 에이전트 1인 — 높음 2 · 중간 6 · 낮음 7) — 모두 고침(L3 만 남김)**. 확정·고친 것은 `server/src/bareos/install/CLAUDE.md` '반증 검토 확정분'.
+  가장 큰 것: **H1 — 정상으로 도는 러너를 20~30초 뒤 '러너 중단' 으로 기록**(상태 읽기를 '\n@@unit\n' 로 잘라 err 파일이 없으면 유닛 상태가 빈 값) ·
+  **H2 — 서버마다 하나인 실행 디렉터리라 옛 작업의 전부 되돌리기가 새 작업의 journal 을 되돌릴 수 있었다**(패키지 제거 · dropdb · rm -rf /etc/bareos).
+  변이 검증: job.js 5/5(줄 구분 · begin · 업로드 중 중단 · 최신 작업 · 주소 대조) · runner.sh 3/3(realpath · 없는 파일 · 작업 id) — 처음 6/6 과 합해 14/14.
+- 정정(내가 틀린 것): ① 중앙 흐름 테스트(`bareosInstallJob2844` 첫 판)가 통과했는데 H1 을 놓쳤다 — **가짜 SSH 가 상태 출력을 손으로 만들면서 실제 bash 와 달리 `@@unit` 앞에 줄바꿈을 넣었다.**
+  지금은 `readCmd` 를 **실제 bash 로 돌린 출력**을 쓴다(원격 경로만 임시 폴더로 바꾼다). 원격 명령 출력을 파싱하는 코드의 시험은 손으로 만든 출력이 아니라 그 명령을 돌린 출력으로 할 것.
+  ② 이 회차 앞부분 보고에서 '재설치 뒤 백업 대상 n개 다시 등록을 넣겠다' 고 했다가 안내로 바꿨다(같은 대화에서 정정 · 아래 남긴 것).
 - 남긴 것: 재설치 뒤 백업 대상 **자동** 다시 등록(지금은 안내만 — 백업 대상 탭에서 지우고 일괄 등록) · 키만 저장된 배포 대상(4·5단계 autoSetup 이 비밀번호 SSH 만) ·
   실제 엣지 노드에서의 첫 설치(CI 는 의존 해석까지만 — 설치 · 서비스 기동 · WebUI 응답은 현장 미확인).
 

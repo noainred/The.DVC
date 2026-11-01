@@ -14,7 +14,9 @@ set -u
 umask 077
 P="${PORTAL_TEST_ROOT:-}"
 W="$P/var/lib/portal-bareos-install"
-R="$W/run"
+# 작업마다 실행 디렉터리를 따로(v2.844 반증 H2 — 서버마다 하나면 옛 작업의 되돌리기가 새 작업의 journal 을 되돌렸다). 인자 = run/<작업 id>
+R="${1:-$W/run}"
+case "$R" in ("$W"/run|"$W"/run/bi_*) ;; (*) echo "잘못된 실행 디렉터리: $R" >&2; exit 2;; esac
 ETC_BAREOS="$P/etc/bareos"
 REPO_FILE="$P/etc/yum.repos.d/portal-bareos-local.repo"
 PGDATA="$P/var/lib/pgsql/data"
@@ -22,6 +24,7 @@ MARKER='# managed-by: vmware-portal bareos auto-setup (rewritten on re-run)'
 DEFAULT_STORE="$P/var/lib/bareos/storage"
 cd / || exit 1
 . "$R/plan.env" || exit 1
+if [ -n "${1:-}" ] && [ "$(basename "$R")" != "$JOB_ID" ]; then echo "plan.env 의 작업 id 가 실행 디렉터리와 다릅니다" >&2; exit 2; fi
 CUR=-
 STATE="$R/state"
 LOG="$R/run.log"
@@ -75,7 +78,10 @@ safe_voldir() {
   case "$x" in (/|/etc|/etc/*|/usr|/usr/*|/bin|/bin/*|/sbin|/sbin/*|/lib|/lib/*|/lib64|/lib64/*|/boot|/boot/*|/dev|/dev/*|/proc|/proc/*|/sys|/sys/*|/run|/run/*|/root|/home|/var|/var/lib|/opt|/tmp|/srv|/mnt|/media) return 1;; esac
   case "$x" in (/*/*) ;; (*) return 1;; esac
   case "$x" in (*..*) return 1;; esac
-  [ -d "$1" ] && [ ! -L "$1" ]
+  [ -d "$1" ] && [ ! -L "$1" ] || return 1
+  # 부모 디렉터리가 심링크여도 안 된다(반증 M2 — /srv/link → / 이면 /srv/link/opt 가 /opt 를 지웠다): 실제 경로가 적힌 경로와 같아야 한다
+  local rp; rp="$(realpath -e -- "$1" 2>/dev/null)" || return 1
+  [ "$rp" = "$1" ]
 }
 
 # ───────── 0 기존 제거(초기화) — 되돌리지 않는다(지운 것은 복구할 수 없다). 다시 하면 이미 한 것은 건너뛴다.
@@ -102,7 +108,7 @@ step0() {
     log "설정 보관: $bk"
   fi
   local pk; pk="$(rpm -qa --qf '%{NAME}\n' 2>/dev/null | grep -E '^bareos(-|$)' | sort -u | tr '\n' ' ')"
-  if [ -n "$pk" ]; then run "dnf remove (Bareos 패키지)" dnf -y --disablerepo='*' remove $pk || return 1; fi
+  if [ -n "$pk" ]; then run "dnf remove (Bareos 패키지 · 의존 자동 제거 없음)" dnf -y --disablerepo='*' --noautoremove remove $pk || return 1; fi
   rm -rf "$ETC_BAREOS"
   if [ "${RESET_DB:-0}" = 1 ]; then
     if [ -f "$PGDATA/PG_VERSION" ]; then
@@ -264,10 +270,14 @@ EOF
   if systemctl is-active -q httpd 2>/dev/null; then run "systemctl reload httpd(WebUI 설정 읽기)" systemctl reload httpd || return 1; else enable_start httpd || return 1; fi
   wait_port 80 || { errx "웹 포트 확인" "httpd 가 80 포트를 30초 안에 열지 않았습니다." 1 port; return 1; }
   if systemctl is-active -q firewalld 2>/dev/null; then
+    # --reload 를 쓰지 않는다(반증 L5 — 런타임 규칙, 예: 호스트 접근 제어의 확정 대기분을 버린다): 런타임 · 영구를 따로 더한다
     if ! firewall-cmd --query-service=http >/dev/null 2>&1; then
-      run "firewalld http 열기(영구)" firewall-cmd --permanent --add-service=http || return 1
+      run "firewalld http 열기(런타임)" firewall-cmd --add-service=http || return 1
       jr fw-service http
-      run "firewalld 다시 읽기" firewall-cmd --reload || return 1
+    fi
+    if ! firewall-cmd --permanent --query-service=http >/dev/null 2>&1; then
+      run "firewalld http 열기(영구)" firewall-cmd --permanent --add-service=http || return 1
+      jr fw-service-perm http
     fi
   fi
   local code; code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 http://127.0.0.1/bareos-webui/ 2>/dev/null || true)"
@@ -278,22 +288,24 @@ EOF
 undo_line() {
   local kind="$1"; shift
   case "$kind" in
-    file) [ -e "$1" ] && is_marker_file "$1" && rm -f "$1" ;;
+    # 이미 없으면 되돌릴 것이 없다(반증 M4a — 끝난 설치의 정리가 지운 저장소 파일을 '실패' 로 셌다) · 포탈 표지가 아닌 파일로 바뀌었으면 지우지 않고 남김
+    file) if [ -e "$1" ]; then if is_marker_file "$1"; then rm -f "$1"; else log "$1 가 포탈 파일이 아니어서 남김"; fi; fi ;;
     file-old) [ -f "$2" ] && cp -p "$2" "$1" ;;
     dir) case "$1" in ("$W"/*) rm -rf "$1" ;; esac ;;
     voldir) rmdir "$1" 2>/dev/null || log "볼륨 디렉터리 $1 가 비어 있지 않아 남김" ;;
     fcontext) semanage fcontext -d "$1" >/dev/null 2>&1 || true ;;
-    pkgs) run "dnf remove(이 단계가 설치한 패키지)" dnf -y --disablerepo='*' remove "$@" || return 1 ;;
+    pkgs) run "dnf remove(이 단계가 설치한 패키지)" dnf -y --disablerepo='*' --noautoremove remove "$@" || return 1 ;;
     pip-new) python3 -m pip uninstall -y pyvmomi >/dev/null 2>&1 || true ;;
     pip-prev) if ls "$(bundle_dir)"/wheels/pyvmomi-"$1"-*.whl >/dev/null 2>&1; then python3 -m pip install --no-index --find-links "$(bundle_dir)/wheels" "pyvmomi==$1" >/dev/null 2>&1 || true
               else log "이전 pyVmomi $1 은 번들에 없어 되돌리지 못함(지금 판 유지)"; fi ;;
-    moved) [ -e "$2" ] && [ ! -e "$1" ] && mv "$2" "$1" ;;
+    moved) if [ -e "$2" ] && [ ! -e "$1" ]; then mv "$2" "$1"; elif [ -e "$1" ]; then log "$1 자리에 이미 무엇이 있어 옮긴 사본($2)을 되돌리지 않음"; fi ;;
     db) su - postgres -c "dropdb --if-exists bareos" >/dev/null 2>&1; su - postgres -c "psql -tAc \"DROP ROLE IF EXISTS bareos\"" >/dev/null 2>&1 || true ;;
     pginit) systemctl stop postgresql >/dev/null 2>&1 || true; case "$PGDATA" in (*/var/lib/pgsql/data) rm -rf "$PGDATA" ;; esac ;;
     svc-enabled) systemctl disable "$1" >/dev/null 2>&1 || true ;;
     svc-started) systemctl stop "$1" >/dev/null 2>&1 || true ;;
     sebool) setsebool -P "$1" "$2" >/dev/null 2>&1 || log "SELinux $1 을(를) $2 로 되돌리지 못함" ;;
-    fw-service) firewall-cmd --permanent --remove-service="$1" >/dev/null 2>&1; firewall-cmd --reload >/dev/null 2>&1 || true ;;
+    fw-service) firewall-cmd --remove-service="$1" >/dev/null 2>&1 || true ;;
+    fw-service-perm) firewall-cmd --permanent --remove-service="$1" >/dev/null 2>&1 || true ;;
     etcnew) rm -rf "$ETC_BAREOS" ;;
     *) log "모르는 되돌리기 항목: $kind" ;;
   esac
@@ -314,6 +326,8 @@ rollback_step() {
 }
 
 main() {
+  # 회차 시작 표지 — 포탈은 마지막 begin 뒤의 줄만 읽는다(반증 M3 — 앞 회차의 'all done' 을 보고 원격 단계를 기다리지 않았다)
+  st begin "${RUN_MODE:-install}"
   case "${RUN_MODE:-install}" in
     rollback-all)
       local s rc=0

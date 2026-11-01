@@ -87,9 +87,13 @@ export const RULES = Object.freeze([
     [{ kind: 'retry', label: '사유를 고친 뒤 5단계 다시', detail: '' }]),
   R('mapping-step', '매핑 저장 실패', (e) => (e.step === 7 ? (e.message || '').slice(0, 300) : null),
     '포탈 설정에 이 vCenter 의 매핑을 저장하지 못했습니다.', [{ kind: 'retry', label: '7단계 다시', detail: '' }]),
+  R('runner-timeout', '원격 단계 시한 초과', causeIs('runner-timeout'),
+    '엣지 노드의 설치 러너가 시한 안에 끝나지 않았거나, 엣지 노드에 계속 닿지 못했습니다(러너 유닛은 같은 시한에 끝납니다).',
+    [{ kind: 'server', label: '러너 · 패키지 작업 확인', commands: ['systemctl status portal-bareos-install --no-pager | head -n 15', 'ps -ef | grep -E "dnf|rpm" | grep -v grep', 'tail -n 60 /var/lib/portal-bareos-install/run/*/run.log'] },
+      { kind: 'retry', label: '확인 뒤 그 단계부터 다시', detail: '' }]),
   R('runner-died', '러너가 중간에 끝남', causeIs('runner-died'),
     '엣지 노드의 설치 러너가 상태를 남기지 않고 끝났습니다(서버 재부팅 · 강제 종료).',
-    [{ kind: 'retry', label: '그 단계부터 다시', detail: '' }, { kind: 'server', label: '러너 로그', commands: ['journalctl -u portal-bareos-install -n 60 --no-pager', 'tail -n 60 /var/lib/portal-bareos-install/run/run.log'] }]),
+    [{ kind: 'retry', label: '그 단계부터 다시', detail: '' }, { kind: 'server', label: '러너 로그', commands: ['journalctl -u portal-bareos-install -n 60 --no-pager', 'tail -n 60 /var/lib/portal-bareos-install/run/*/run.log'] }]),
 ]);
 
 /**
@@ -106,12 +110,15 @@ export function classifyFailure(e = {}) {
   return {
     key: 'unclassified', title: '원인 미분류', why: '아는 규칙에 맞지 않았습니다 — 원인을 추정하지 않고 출력 원문을 보입니다.',
     evidence: '', unclassified: true,
-    fixes: [{ kind: 'retry', label: '원문을 확인한 뒤 그 단계부터 다시', detail: '' }, { kind: 'server', label: '러너 로그', commands: ['tail -n 80 /var/lib/portal-bareos-install/run/run.log'] }],
+    fixes: [{ kind: 'retry', label: '원문을 확인한 뒤 그 단계부터 다시', detail: '' }, { kind: 'server', label: '러너 로그', commands: ['tail -n 80 /var/lib/portal-bareos-install/run/*/run.log'] }],
   };
 }
 
 /** 출력에서 비밀을 가린다(저장 SSH 비밀번호·콘솔 비밀번호 — 같은 글자가 있으면 그 줄을 통째로 뺀다). */
 export function scrubOutput(text, secrets = []) {
   const ss = secrets.filter((s) => typeof s === 'string' && s.length >= 4);
-  return String(text || '').split('\n').map((l) => (ss.some((s) => l.includes(s)) ? '(비밀과 같은 글자가 있어 이 줄을 싣지 않습니다)' : l)).join('\n').slice(-MAX_OUT);
+  return String(text || '').split('\n').map((l) => (ss.some((s) => l.includes(s)) ? '(비밀과 같은 글자가 있어 이 줄을 싣지 않습니다)' : l))
+    // 반증 L4: bareos-*-t 설정 오류 출력에 Password 줄 원문이 실릴 수 있다(SD · Director 비밀번호) — 값을 가린다
+    .map((l) => l.replace(/(password\s*=\s*)("[^"]*"|\S+)/gi, '$1(가림)'))
+    .join('\n').slice(-MAX_OUT);
 }

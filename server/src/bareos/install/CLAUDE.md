@@ -3,7 +3,7 @@
 사용자 요청(2026-11-01): '엣지 노드의 ip/id/pw 를 알고 있으니 bareos 를 완전히 자동으로 설치' · '실패하면 구체적으로 오류를 알려주고 고쳐서 다시 시도' ·
 결정: 엣지 노드에 함께 · 오프라인 번들 · 설치~4단계 자동 + vCenter 비밀번호 1회 · **OTP 코드 없음(OTP 를 등록한 관리자만)** · pyVmomi 판 선택(권고 8) ·
 설정 탭 안 · Director 등록 법인은 **완전 초기화 후 재설치**(실행 때마다 범위 선택 — 패키지·설정 필수, 카탈로그 DB 기본 삭제, 볼륨 기본 보존) · WebUI 포함.
-회귀: `server/test/bareosInstall2844.test.js` · `bareosInstallRunner2844.test.js`(runner.sh 를 가짜 루트 + 명령 대역으로 **실제 bash 실행** — 변이 6/6) ·
+회귀: `server/test/bareosInstall2844.test.js` · `bareosInstallRunner2844.test.js`(runner.sh 를 가짜 루트 + 명령 대역으로 **실제 bash 실행**) · `bareosInstallJob2844.test.js`(중앙 흐름 — 상태 출력은 실제 bash) — 변이 14/14 ·
 웹 `web/src/views/tools/bareosInstall2844.test.js`.
 
 - **구조(사용자 원칙 '백업은 법인 로컬')**: 0~3단계는 `runner.sh` 가 **엣지 노드 안에서** `systemd-run --unit=portal-bareos-install` 으로 돈다 —
@@ -28,6 +28,16 @@
 - **원인 판정은 지어내지 않는다**(`causes.js`): 근거 = 출력에서 실제로 맞은 줄 · 맞는 규칙이 없으면 '원인 미분류' + 원문. 출력은 `scrubOutput`(저장 SSH·콘솔 비밀번호와 같은 글자가 있는 줄은 뺀다).
 - **대상**: 행 = vCenter(법인 · vCenter · Bareos 1:1:1) · 엣지 = 인벤토리를 올리는 엣지 · SSH = 배포 등록부(비밀번호 저장된 것만 — 4·5단계 autoSetup 이 비밀번호 SSH 만 쓴다) ·
   재설치는 Director 주소가 그 엣지(SSH 주소 또는 이 기능이 기록한 서버 주소)일 때만 — 다른 서버의 Bareos 는 지우지 않는다.
+- **반증 검토 확정분(v2.844 — 되돌리지 말 것 · `bareosInstallJob2844` 가 실제 bash 출력으로 고정)**:
+  상태 읽기는 **줄 단위 구간**(`readCmd`·`parseRead` — '\n@@unit\n' 로 자르면 err 파일이 없을 때 유닛 상태를 못 읽어 정상 러너를 '중단' 으로 기록했다 · H1) ·
+  실행 디렉터리는 **작업마다** `run/<작업 id>`(러너가 인자와 plan.env 의 JOB_ID 를 대조 · H2) · 다시·되돌리기는 그 법인·같은 서버의 **가장 새 작업만**(`requireLatest`) ·
+  다시 하기는 **실패한 단계부터만**(앞 단계·초기화를 확인 없이 되풀이하지 않는다) · 러너 회차 시작 표지 `begin`(앞 회차 'all done' 무시 · M3) ·
+  업로드 중 중단이면 러너를 띄우지 않는다(M1) · 볼륨 삭제는 `realpath -e` 결과가 적힌 경로와 같을 때만(부모 심링크 우회 · M2) ·
+  전부 되돌리기는 **원격 먼저 → 성공하면 포탈 등록·매핑**, 이 설치의 Director 에 백업 대상이 있으면 거부(M4) · 배포 등록부의 SSH 주소가 작업 시작 때와 다르면 거부(M5) ·
+  원격 단계 시한 4시간(폴링 + 유닛 `RuntimeMaxSec` · M6) · 동시 시작 준비 잠금(L1) · 실행 중 작업은 bconsole 접속이 확인될 때만 센다(못 읽으면 확인 불가 · L2) ·
+  출력의 `Password = ...` 값 가림(L4) · `dnf remove --noautoremove` · firewalld 는 `--reload` 없이 런타임·영구를 따로(호스트 접근 제어의 확정 대기 규칙을 버리지 않게 · L5).
+  남긴 것: 기존 자동 설정(라우트 `_setupBusy`·`_setupHosts`)과 같은 서버에서 동시에 돌면 막지 않는다(L3 — 관리자가 두 기능을 같은 서버에 동시에 쓸 때만) ·
+  bconsole 접속 문구('Connecting to Director')는 실환경 미확인(다르면 '확인 불가' 쪽으로 — 0 으로 보지 않는다).
 - **데모**: mock + 실제 Director 미등록이면 `demo.js`(시간으로 진행하는 합성 작업 · 판정은 실제 코드 · 장비에 닿지 않음).
 - 실환경 미확인(추정 — 첫 현장 설치에서 확인할 것): Bareos `current` 사전 공개판 RPM 이 Rocky 9.x 의 각 마이너에서 `--alldeps` 로 풀리는지(CI 는 rockylinux:9 최신에서만 확인) ·
   `bconsole -c`(이름 있는 Console) TLS-PSK 접속 출력 모양 · `update_bareos_tables` 가 카탈로그 유지 재설치에서 판 차이를 맞추는지 · WebUI 첫 화면 응답 코드.

@@ -211,6 +211,19 @@ test('④-c 설정이 시스템 경로(/var)를 볼륨으로 가리켜도 지우
   assert.match(r.log, /볼륨 경로 .*\/var 는 지우지 않음/);
 });
 
+test('④-d 부모 디렉터리가 심링크인 볼륨 경로는 지우지 않는다(반증 M2 — /srv/link → 다른 곳)', () => {
+  const e = env({ rpmdb: ['bareos-director'] });
+  const victim = path.join(e.P, 'opt/precious'); fs.mkdirSync(victim, { recursive: true }); fs.writeFileSync(path.join(victim, 'keep'), 'k');
+  fs.mkdirSync(path.join(e.P, 'srv'), { recursive: true });
+  fs.symlinkSync(path.join(e.P, 'opt'), path.join(e.P, 'srv/link'));
+  fs.mkdirSync(path.join(e.P, 'etc/bareos/bareos-sd.d/device'), { recursive: true });
+  fs.writeFileSync(path.join(e.P, 'etc/bareos/bareos-sd.d/device/X.conf'), 'Device {\n  Archive Device = /srv/link/precious\n}\n');
+  planEnv(e, { START_STEP: '0', RESET: '1', RESET_DB: '0', RESET_VOLUMES: '1', RESET_VOLUME_DIRS: '/srv/link/precious' });
+  const r = run(e);
+  assert.equal(r.status, 0, r.log);
+  assert.ok(fs.existsSync(path.join(victim, 'keep')), '심링크를 거친 실제 경로는 지우지 않는다');
+});
+
 test('④-b 볼륨 보존(기본) — RESET_VOLUMES=0 이면 파일을 건드리지 않는다', () => {
   const e = env({ rpmdb: ['bareos-director'] });
   const vol = path.join(e.P, 'srv/bk/vol'); fs.mkdirSync(vol, { recursive: true }); fs.writeFileSync(path.join(vol, 'Full-0001'), 'x');
@@ -246,6 +259,32 @@ test('⑥ 전부 되돌리기 — 새 패키지 · /etc/bareos(설치 전 없음
   assert.ok(!fs.existsSync(path.join(e.P, 'var/lib/pgsql/data')));
   assert.ok(!fs.existsSync(path.join(e.W, 'bundles')), '올린 번들도 지운다');
   assert.ok(!fs.existsSync(path.join(e.FAKE, 'pyvmomi')));
+});
+
+test('⑥-b 끝난 설치의 정리(저장소 파일 삭제) 뒤에도 전부 되돌리기가 성공한다(반증 M4a)', () => {
+  const e = env(); planEnv(e);
+  assert.equal(run(e).status, 0);
+  fs.rmSync(path.join(e.P, 'etc/yum.repos.d/portal-bareos-local.repo'));   // cleanupRemote 가 하는 일
+  planEnv(e, { RUN_MODE: 'rollback-all' });
+  const r = run(e);
+  assert.ok(/^all rolledback /m.test(r.state), r.state + r.log);
+});
+
+test('⑥-c 실행 디렉터리 인자 — 작업 id 와 다르면 실행하지 않는다 · 회차 시작 표지(begin)', () => {
+  const e = env();
+  const rd = path.join(e.W, 'run/bi_abcdef01'); fs.mkdirSync(rd, { recursive: true });
+  const R2 = { ...e, R: rd };
+  planEnv(R2, { JOB_ID: 'bi_other0001' });
+  let r = spawnSync('bash', [RUNNER, rd], { env: { ...process.env, PATH: `${e.BIN}:${process.env.PATH}`, PORTAL_TEST_ROOT: e.P, P: e.P, FAKE: e.FAKE }, encoding: 'utf8' });
+  assert.equal(r.status, 2); assert.match(r.stderr, /작업 id/);
+  r = spawnSync('bash', [RUNNER, '/etc'], { env: { ...process.env, PORTAL_TEST_ROOT: e.P }, encoding: 'utf8' });
+  assert.equal(r.status, 2);
+  planEnv(R2, { JOB_ID: 'bi_abcdef01' });
+  r = spawnSync('bash', [RUNNER, rd], { env: { ...process.env, PATH: `${e.BIN}:${process.env.PATH}`, PORTAL_TEST_ROOT: e.P, P: e.P, FAKE: e.FAKE, WAIT_PORT_SEC: '2' }, encoding: 'utf8' });
+  assert.equal(r.status, 0, r.stderr);
+  const st = fs.readFileSync(path.join(rd, 'state'), 'utf8');
+  assert.match(st, /^begin install /m); assert.match(st, /^all done /m);
+  assert.ok(fs.existsSync(path.join(rd, 'journal.1')), 'journal 은 그 작업의 실행 디렉터리에');
 });
 
 test('⑦ 번들 sha 가 다르면 1단계가 멈춘다(bundle-hash)', () => {
