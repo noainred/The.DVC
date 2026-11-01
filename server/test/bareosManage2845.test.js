@@ -563,7 +563,7 @@ test('⑥-3 재등록: Director 에 없는 원장 대상만 · 화면 목록을 
       info: { banner: 'OK: bareos-dir Version: 25.0.4 (01 Jan 2026)' }, close() {},
       call: async (cmd) => {
         sent.push(cmd);
-        if (cmd === '.jobs') return { jobs: [] };
+        if (cmd === '.jobs') return { jobs: [{ name: 'RestoreFiles' }] };   // v2.847 D2-2: 빈 .jobs 는 '못 읽음'(409)
         if (cmd.startsWith('configure add job')) { REG.deleteJob(lost.id, { directorId: DIR }); return { add: { name: /name=(\S+)/.exec(cmd)[1] } }; }
         if (cmd.startsWith('disable job=')) return {};
         throw Object.assign(new Error('bad'), { code: 'jsonrpc' });

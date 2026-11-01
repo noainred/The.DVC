@@ -195,6 +195,8 @@ export function bulkSummaryText(results = []) {
  * 다시 시도 결과를 앞 결과에 합친다(v2.846 U-6 — 반증 확정): 다시 시도한 법인 행만 새 결과로 바꾸고, 나머지 행(첫 실행의 성공 · 생성 비밀번호)은 그대로 둔다.
  * 예전에는 결과를 통째로 바꿔 첫 실행에서 성공한 법인의 한 번만 보이는 비밀번호가 '닫기' 없이 사라졌다.
  */
+/** v2.847 U2-4: 다시 시도 결과를 앞 결과에 합쳐도 되는가 — 같은 작업 · 같은 계정일 때만(아니면 새 결과로 둔다 — CSV 의 계정 열이 행과 어긋나지 않게). */
+export function sameBulkJob(prev, next) { return !!prev && !!next && prev.action === next.action && prev.account === next.account; }
 export function mergeBulkRows(prev = [], next = []) {
   const by = new Map(next.map((x) => [x.directorId, x]));
   const out = prev.map((x) => (by.has(x.directorId) ? by.get(x.directorId) : x));
@@ -211,3 +213,31 @@ export const maskPw = (pw) => (pw && pw.length > 8 ? `${pw.slice(0, 4)}${'•'.r
 /** SSH 칸이 필요 없는 출처(배포 등록부 · 데모). */
 export const noSshNeeded = (ssh) => ssh?.source === 'registry' || ssh?.source === 'demo';
 export const sshSourceText = (ssh) => (ssh?.source === 'registry' ? `SSH: 배포 등록부(${ssh.username || 'root'}@${ssh.host || '가림'})` : ssh?.source === 'demo' ? 'SSH: 데모(접속 안 함)' : 'SSH: 실행할 때마다 비밀번호 입력(저장하지 않음)');
+
+/**
+ * v2.847 재설치 뒤 다시 등록 결과 요약(D2-3 · E2-6) — 결과 모름은 실패로 세지 않는다 · 실행 기록을 이어 갔는지 새로 시작했는지 서버 판정(generation)대로 말한다.
+ * @param {{ ok, unknown? }[]} results @param {'same'|'new'|'unknown'|'none'} [generation]
+ */
+export function reregisterSummary(results = [], generation = '') {
+  const ok = results.filter((x) => x.ok).length;
+  const unknown = results.filter((x) => !x.ok && x.unknown).length;
+  const notSent = results.filter((x) => !x.ok && !x.unknown && x.notSent).length;
+  const failed = results.length - ok - unknown - notSent;
+  const hist = generation === 'same' ? '카탈로그가 그대로라 실행 기록을 이어 갑니다'
+    : generation === 'new' ? '카탈로그가 새로 만들어져 실행 기록을 새로 시작했습니다(진행 중 복원은 남김)'
+      : generation === 'unknown' ? '카탈로그 세대를 확인하지 못해 실행 기록을 새로 시작했습니다(진행 중 복원은 남김)' : '';
+  return {
+    ok: failed === 0 && unknown === 0 && notSent === 0 && ok > 0 ? true : ok ? 'warn' : (unknown || notSent) && !failed ? 'warn' : false,
+    text: `다시 등록 — 성공 ${ok} · 실패 ${failed}${unknown ? ` · 결과 모름 ${unknown}` : ''}${notSent ? ` · 보내지 않음 ${notSent}` : ''}${ok && hist ? ` · ${hist}` : ''}(꺼 둔 대상은 다음 대조에서 다시 끕니다).`,
+  };
+}
+
+/**
+ * v2.847 C2-5 ①: 서버 파일 읽기(scan) 화면 시한 — 서버 대기 시간(relayLimits: 인출 + 회신 + 여유)으로. 숫자를 박지 않는다(예전 200초 < 서버 최악 270초).
+ * 못 받으면 5분(화면 다른 쓰기 LONG 600초보다 짧게).
+ */
+export function scanWaitMs(limits) {
+  const r = Number(limits?.resultMs?.['setup.scan']);
+  const p = Number(limits?.pickupMs);
+  return Number.isFinite(r) && r > 0 && Number.isFinite(p) && p > 0 ? p + r + 15_000 : 300_000;
+}

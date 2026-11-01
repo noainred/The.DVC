@@ -40,7 +40,21 @@ export function placementDrift(job, vm) {
   return d.length ? d : null;
 }
 
-export function restorePlan({ mode, job, snapshot, newVm = {}, confirmName = '', pluginName = 'python3' }) {
+/**
+ * v2.847 D2-1: 그 복원 지점(jobid)이 백업될 때의 이름 · 위치 — 카탈로그를 유지한 다시 묶기 뒤의 옛 지점은 원장 placements(그 jobid 까지의 옛 위치)를 쓴다.
+ * jobid 를 모르면 지금 원장 값(예전 동작). 카탈로그 시각은 Director 현지 시각이라 jobid 로만 비교한다.
+ */
+export function placementAt(job, jobid) {
+  const id = Number(jobid);
+  if (Number.isInteger(id) && id > 0) {
+    for (const p of (Array.isArray(job?.placements) ? job.placements : []).slice().sort((a, b) => a.upToJobid - b.upToJobid)) {
+      if (Number.isInteger(p?.upToJobid) && id <= p.upToJobid) return { ...job, vmName: p.vmName, dc: p.dc, folder: p.folder };
+    }
+  }
+  return job;
+}
+
+export function restorePlan({ mode, job, snapshot, newVm = {}, confirmName = '', pluginName = 'python3', jobid = null }) {
   if (!RESTORE_MODES.includes(mode)) return { ok: false, issue: '복원 방식을 고르세요(원래 VM 덮어쓰기 · 새 VM · 로컬 VMDK).' };
   const vms = (snapshot?.vms || []).filter((v) => String(v.vcenterId) === String(job.vcenterId));
 
@@ -50,8 +64,13 @@ export function restorePlan({ mode, job, snapshot, newVm = {}, confirmName = '',
     if (!vm) return { ok: false, issue: '원래 VM 이 인벤토리에 없습니다 — 새 VM 으로 복원하세요.' };
     // 플러그인은 vmname·dc·folder 로 VM 을 찾는다 — 등록 때와 같고, 그 자리에 같은 이름의 VM 이 하나뿐일 때만 덮어쓴다(S3)
     if (!vm.vcDcPath || !vm.folderPath) return { ok: false, issue: 'VM 의 데이터센터·폴더 경로를 읽지 못했습니다 — 덮어쓸 대상을 확인할 수 없어 진행하지 않습니다(새 VM 으로 복원하세요).' };
-    const drift = placementDrift(job, vm);
-    if (drift) return { ok: false, issue: `등록 뒤 VM 의 ${drift.join('·')}이(가) 바뀌었습니다 — 백업 잡은 등록 때의 이름·위치를 가리키므로 덮어쓰기를 진행하지 않습니다(새 VM 으로 복원하세요).` };
+    const at = placementAt(job, jobid);
+    const drift = placementDrift(at, vm);
+    if (drift) {
+      return { ok: false, issue: at !== job
+        ? `이 복원 지점은 다시 등록하기 전(VM ${drift.join('·')}이(가) 다를 때)에 백업됐습니다 — 플러그인은 백업 때의 이름·위치를 가리키므로 덮어쓰기를 진행하지 않습니다(새 VM 으로 복원하세요).`
+        : `등록 뒤 VM 의 ${drift.join('·')}이(가) 바뀌었습니다 — 백업 잡은 등록 때의 이름·위치를 가리키므로 덮어쓰기를 진행하지 않습니다(새 VM 으로 복원하세요).` };
+    }
     const twins = vms.filter((v) => v.id !== vm.id && String(v.name) === String(vm.name) && v.vcDcPath === vm.vcDcPath && v.folderPath === vm.folderPath);
     if (twins.length) return { ok: false, issue: `같은 폴더에 ‘${vm.name}’ 이름의 VM 이 ${twins.length + 1}대 있습니다 — 플러그인이 어느 VM 을 덮어쓸지 정할 수 없어 진행하지 않습니다(새 VM 으로 복원하세요).` };
     if (vm.powerState !== 'POWERED_OFF') {

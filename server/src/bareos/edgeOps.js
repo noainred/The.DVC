@@ -71,6 +71,10 @@ function finish(op, result) {
     _late.set(op.id, late);
   }
   op.onLate = null;
+  // v2.847 E2-3(2회차 점검 — 재현): 시한 신호의 abort 리스너를 뗀다 — 남기면 그 리스너가 이 함수 문맥(부른 쪽 secretArgs — SSH root · 생성 계정 비밀번호)을
+  //   신호가 끝날 때(최대 560초)까지 붙잡아 응답 뒤에도 힙에 남았다
+  if (typeof op.unlisten === 'function') { try { op.unlisten(); } catch { /* */ } }
+  op.unlisten = null;
   op.resolve(result);
 }
 function timeoutResult(op) {
@@ -91,7 +95,10 @@ function timeoutResult(op) {
  * @param {{ secretArgs?: object, signal?: AbortSignal }} [o] secretArgs 는 자동 설정 대행만(인출 때 한 번 넘기고 지운다).
  *   signal: 부르는 쪽이 기다림을 그만두면(폴러 시한) 아직 가져가지 않은 작업은 거둔다(notSent) — 가져간 작업은 회신을 기다리지 않고 버린다.
  */
-export function enqueueEdgeOp(director, kind, args = {}, { secretArgs = null, signal = null, onLate = null } = {}) {
+export function enqueueEdgeOp(director, kind, args = {}, opts = {}) {
+  // v2.847 E2-3: secretArgs 는 op 사본으로만 붙잡는다 — 아래 Promise 실행자 · abort 리스너가 부른 쪽 객체를 닫지 않게 여기서 꺼내 바로 놓는다
+  const { signal = null, onLate = null } = opts || {};
+  let secretArgs = opts?.secretArgs && typeof opts.secretArgs === 'object' ? { ...opts.secretArgs } : null;
   if (!VALUE[kind]) return Promise.resolve({ ok: false, code: 'error', reason: `알 수 없는 작업 '${String(kind).slice(0, 40)}'` });
   const agent = String(director?.agent || '').trim();
   if (!agent || !director?.id) return Promise.resolve({ ok: false, code: 'not-sent', notSent: true, reason: '담당 엣지가 없는 Director 입니다.' });
@@ -106,6 +113,7 @@ export function enqueueEdgeOp(director, kind, args = {}, { secretArgs = null, si
       secretArgs: secretArgs && typeof secretArgs === 'object' ? { ...secretArgs } : null, status: 'queued', at: Date.now(), resolve, done: false, timer: null,
       onLate: typeof onLate === 'function' ? onLate : null,
     };
+    secretArgs = null;   // 사본은 op 에만(인출 · finish 가 지운다)
     _ops.set(op.id, op);
     op.timer = setTimeout(() => finish(op, timeoutResult(op)), op.secretArgs ? Math.min(PICKUP_MS, SECRET_TTL_MS) : PICKUP_MS);
     op.timer.unref?.();
@@ -113,7 +121,8 @@ export function enqueueEdgeOp(director, kind, args = {}, { secretArgs = null, si
       const onAbort = () => finish(op, op.status === 'queued'
         ? { ok: false, code: 'not-sent', notSent: true, reason: '기다리는 쪽이 시한으로 그만두었습니다 — 엣지에 보내지 않았습니다.' }
         : (EDGE_MUTATING.has(op.kind) ? { ok: false, code: 'unknown', unknown: true, reason: '기다리는 쪽이 시한으로 그만두었습니다 — 엣지가 실행 중일 수 있습니다.' } : { ok: false, code: 'timeout', reason: '기다리는 쪽이 시한으로 그만두었습니다.' }));
-      if (signal.aborted) onAbort(); else signal.addEventListener('abort', onAbort, { once: true });
+      if (signal.aborted) onAbort();
+      else { signal.addEventListener('abort', onAbort, { once: true }); op.unlisten = () => signal.removeEventListener('abort', onAbort); }
     }
   });
 }

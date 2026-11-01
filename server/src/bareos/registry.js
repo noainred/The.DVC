@@ -34,6 +34,8 @@ const FILE = () => path.join(config.configDir, 'bareos-jobs.json'); // 문자열
 // v2.828(사용자 승인 — 28개 법인 통합 화면): 500 → 3,000. 실측(scratch 벤치 · 대상마다 끝난 실행 10건): 5,000 이면 파일 8MB·한 번 쓰기 54ms·
 //   listJobs 깊은 복사 47ms 로 폴링 주기마다 이벤트 루프를 오래 잡는다 — 3,000 은 그 6할(약 30ms). 더 올리려면 Director 별 파일 분할이 먼저다.
 export const MAX_JOBS = 3000;
+/** v2.847 D2-1: 다시 묶기 전 위치 기록(대상마다 최근 N번 — 위치가 바뀐 다시 묶기만 남는다). */
+export const PLACEMENTS_KEEP = 5;
 export const RESTORES_KEEP = 20;
 export const RETIRED_KEEP = 1000;   // Director 하나에 남기는 지운 잡 이름 수(v2.846 D-6 — 예전에는 28개 Director 합계였다)
 export const RETIRED_TOTAL_MAX = 40_000;   // 파일 전체 안전 상한(Director 30+ × RETIRED_KEEP)
@@ -206,19 +208,23 @@ export function patchJob(id, patch) {
   const j = db.jobs.find((x) => x.id === id);
   if (!j) return null;
   const allowed = ['enabled', 'pending', 'lastRun', 'lastError', 'missingInDirector', 'schedule', 'level'];
-  for (const k of allowed) if (Object.hasOwn(patch, k)) j[k] = patch[k];
-  persist();
+  const before = [];
+  for (const k of allowed) if (Object.hasOwn(patch, k)) { before.push([k, Object.hasOwn(j, k), j[k]]); j[k] = patch[k]; }
+  // v2.847 D2-7(2회차 점검 — 재현): 파일에 못 쓰면 메모리도 되돌린다(addJob 과 같은 계약 — 예전에는 화면은 바뀐 값, 재시작하면 옛 값이었다)
+  try { persist(); } catch (e) { for (const [k, had, v] of before) { if (had) j[k] = v; else delete j[k]; } throw e; }
   return copy(j);
 }
 
 /**
- * v2.845 재설치 뒤 다시 등록 — Director 에 잡이 없어진 대상을 **같은 원장 행**(id · 이력 · 복원 기록 · 스케줄 · 레벨 · 켜짐 그대로)에 새 잡 이름 · 지금 매핑의
+ * v2.845 재설치 뒤 다시 등록 — Director 에 잡이 없어진 대상을 **같은 원장 행**(id · 스케줄 · 레벨 · 켜짐 그대로)에 새 잡 이름 · 지금 매핑의
  * client · storage · pool 로 다시 묶는다. patchJob 은 이 칸들을 받지 않는다(일반 수정 경로로 잡 이름을 바꾸지 못하게) — 이 함수만 바꾼다.
+ * 실행 기록(lastRun · finishedRuns · lastRate · 끝난 복원)은 `restart` 일 때만 새로 시작한다(v2.847 D2-3 — 카탈로그 세대가 바뀌었거나 모를 때).
  * 한 번의 쓰기(addJobs 와 같은 묶음 계약 — 끝 쓰기가 실패하면 전부 되돌리고 던진다).
  * @param {{ id, bareosJob, client, storage, pool }[]} list
+ * @param {{ restart?: boolean }} [o]
  * @returns {{ id, ok: boolean, job?, err? }[]}
  */
-export function rebindJobs(list) {
+export function rebindJobs(list, { restart = true } = {}) {
   const db = load();
   if (_loadErr.get()) throw new Error('백업 대상 원장을 읽지 못한 상태라 바꾸지 않습니다(손상본 보존 — 서비스 점검에서 확인).');
   const before = db.jobs.map((j) => ({ ...j }));
@@ -228,15 +234,25 @@ export function rebindJobs(list) {
     if (!j) return { id: x?.id, ok: false, err: new Error('원장에 없는 대상입니다(그사이 지워졌습니다).') };
     for (const k of ['bareosJob', 'client', 'storage', 'pool']) if (typeof x[k] !== 'string' || !x[k]) return { id: j.id, ok: false, err: new Error(`${k} 값이 없습니다.`) };
     Object.assign(j, { bareosJob: x.bareosJob, client: x.client, storage: x.storage, pool: x.pool, missingInDirector: false, lastError: null, pending: null });
+    // v2.847 D2-1(2회차 점검 — 재현): 카탈로그가 그대로면(restart 아님) 다시 묶기 전 복원 지점은 **그때의** 이름 · 위치로 백업됐다 — 위치가 바뀌면
+    //   그 jobid 까지의 옛 위치를 남긴다(덮어쓰기 복원이 그 지점에는 옛 위치로 판정한다 — restore.placementAt). 새 카탈로그면 옛 지점이 없어 비운다.
+    const moved = ['vmName', 'dc', 'folder'].some((k) => typeof x[k] === 'string' && x[k] && x[k] !== j[k]);
+    if (restart) j.placements = [];
+    else if (moved && Number.isInteger(j.lastRun?.jobid)) {
+      j.placements = [...(Array.isArray(j.placements) ? j.placements : []), { upToJobid: j.lastRun.jobid, vmName: j.vmName, dc: j.dc, folder: j.folder, at: Date.now() }].slice(-PLACEMENTS_KEEP);
+    }
     // v2.846 D-8: 잡은 지금 인벤토리 값(이름 · 데이터센터 · 폴더)으로 만들었다 — 원장도 같이(옛 값이면 거짓 위치 변경 · 덮어쓰기 복원 거부)
     for (const k of ['vmName', 'dc', 'folder']) if (typeof x[k] === 'string' && x[k]) j[k] = x[k];
     // v2.846 D-1(반증 확정 · 높음): 재설치는 카탈로그 DB 를 지우는 것이 기본 — 새 카탈로그는 jobid 를 1 부터 다시 매긴다.
     //   jobid 로 비교하는 칸(lastRun · finishedRuns · lastRate · restores)을 그대로 두면 새 실행이 '더 작은 jobid' 라 원장 · 실패 메일에서 버려졌고
-    //   옛 복원 jobid 와 같은 새 jobid 의 로그가 복원 로그로 열렸다. 다시 묶을 때 실행 기록을 새로 시작한다(같은 행 · 스케줄 · 레벨 · 켜짐 그대로).
-    //   카탈로그를 유지한 재설치라면 다음 대조(같은 잡 이름의 `list jobs` 행)가 lastRun 을 다시 채운다 — 잃는 것은 화면의 '이전 실행' 몇 줄뿐(beforeRebind 에 요약).
-    //   lastOkAt(시각 기준 — RPO)은 둔다. runsEpoch 가 바뀌면 실패 메일 커서도 지운다(notify.js).
-    j.beforeRebind = { at: Date.now(), lastRun: j.lastRun ? { jobid: j.lastRun.jobid ?? null, status: j.lastRun.status ?? '', endedAt: j.lastRun.endedAt ?? null } : null, restores: Array.isArray(j.restores) ? j.restores.length : 0 };
-    Object.assign(j, { lastRun: null, finishedRuns: [], lastRate: null, restores: [], runsEpoch: Date.now() });
+    //   옛 복원 jobid 와 같은 새 jobid 의 로그가 복원 로그로 열렸다. lastOkAt(시각 기준 — RPO)은 둔다. runsEpoch 가 바뀌면 실패 메일 커서도 지운다(notify.js).
+    // v2.847 D2-3(2회차 점검 — 재현 · 1회차 반증 권고를 따르지 않은 메인의 구현 잘못): v2.846 은 **무조건** 비웠다 — 카탈로그가 남은 경우(잡 conf 만 지워짐 ·
+    //   카탈로그 유지 재설치)에도 이미 알린 실패를 다시 메일로 보냈고, 진행 중 복원의 추적(복원 중 409 · 삭제 거부)까지 지웠다.
+    //   이제 부르는 쪽(manage/service.js catalogGeneration)이 카탈로그 세대가 바뀌었거나 판정하지 못했을 때만 restart 를 준다. 비울 때도 **진행 중 복원은 남긴다**.
+    if (restart) {
+      j.beforeRebind = { at: Date.now(), lastRun: j.lastRun ? { jobid: j.lastRun.jobid ?? null, status: j.lastRun.status ?? '', endedAt: j.lastRun.endedAt ?? null } : null, restores: Array.isArray(j.restores) ? j.restores.length : 0 };
+      Object.assign(j, { lastRun: null, finishedRuns: [], lastRate: null, restores: (Array.isArray(j.restores) ? j.restores : []).filter(restoreOpen), runsEpoch: Date.now() });
+    }
     const dir = j.directorId || DEFAULT_DIRECTOR_ID;
     if (db.retired?.some((r) => r.name === j.bareosJob && retiredDir(r) === dir)) db.retired = db.retired.filter((r) => !(r.name === j.bareosJob && retiredDir(r) === dir));
     return { id: j.id, ok: true, job: copy(j) };
@@ -260,9 +276,12 @@ export function deleteJob(id, { directorId = '' } = {}) {
   const db = load();
   const i = db.jobs.findIndex((j) => j.id === id);
   if (i < 0) return false;
+  const retiredBefore = Array.isArray(db.retired) ? db.retired.slice() : db.retired;
   const [j] = db.jobs.splice(i, 1);
   addRetired(db, j.bareosJob, !!j.demo, j.directorId || directorId || DEFAULT_DIRECTOR_ID);
-  persist();
+  // v2.847 D2-7(2회차 점검 — 재현): 쓰기가 실패하면 행 · 지운 이름을 되돌리고 던진다 — 예전에는 화면은 '삭제됨'(Director 잡은 꺼짐),
+  //   재시작하면 원장에 켜짐으로 되살아나 '백업 중' 으로 보였다(지운 이름은 메모리에만 있어 다시 끄지도 않았다)
+  try { persist(); } catch (e) { db.jobs.splice(i, 0, j); db.retired = retiredBefore; throw e; }
   return true;
 }
 

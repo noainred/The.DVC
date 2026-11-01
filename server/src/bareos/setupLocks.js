@@ -66,6 +66,8 @@ export function addSetupGroupDirector(owner, dirId) {
   _busy.add(dirId); g.dirs.add(dirId);
   return true;
 }
+/** v2.847 C2-2: 이 owner 가 그룹 잠금을 쥐고 있나(기동 때 선점한 잠금을 이어 읽기가 넘겨받는다). */
+export const ownsSetupGroup = (owner) => !!owner && _groups.has(owner);
 export function releaseSetupGroup(owner) {
   const g = _groups.get(owner);
   if (!g) return;

@@ -17,7 +17,7 @@ import { decideFire, CATCHUP_MS, slotKey } from './groupSchedule.js';
 import { jobDigests, markPending, patchJob, registryLoadError, inBatch } from './registry.js';
 import { onDirector, isDemoActive, effectiveSettings } from './service.js';
 import { jobDirectorId } from './settings.js';
-import { RUN_JOBS_MAX } from './ops.js';
+import { RUN_JOBS_MAX, MID_COMMAND_CODES } from './ops.js';
 import { PICKUP_MS, RESULT_MS } from './edgeOps.js';
 import { normLevel } from './names.js';
 import { tryLockJob, unlockJob } from './jobLocks.js';
@@ -39,7 +39,7 @@ const NOT_SENT_CODES = new Set(['auth-stopped', 'not-sent', 'not-configured', 'd
  * 명령을 보낸 **도중** 끊김 — Director 가 받았을 수 있다(결과 모름 — v2.830 검토 L4).
  * 'jsonrpc' 는 넣지 않는다 — Director 가 오류 객체로 **거부**한 것이다(실행되지 않았다 — 실패). 시험 ④ 가 잡았다.
  */
-const MID_COMMAND_CODES = new Set(['timeout', 'closed', 'aborted', 'protocol', 'too-large']);
+// v2.847 E2-1: 판정은 ops.js MID_COMMAND_CODES 하나(등록 경로와 같은 표)
 
 /**
  * Director 호출 자체가 던진 오류 → 그 덩어리 VM 들의 상태(순수). unknown(엣지 결과 모름·명령 도중 끊김) · notsent(보내기 전) · failed(그 밖).
@@ -416,10 +416,16 @@ export async function groupTick(now = Date.now(), { catchupMs = CATCHUP_MS } = {
     }
     // v2.831 보관 개수 정리 — 실행이 끝난 그룹(이번 틱에 띄운 그룹은 빼고)
     const firedSet = new Set(fired);
-    const jobsByVc = new Map();
+    // v2.847 C2-4(2회차 점검 — 실측 28 vCenter × 약 7ms): 원장 요약은 **틱마다 한 번만**, 그것도 싼 조건(보관 개수 · 실행 기록 · 이미 정리함)을 지난 그룹이 있을 때만 만든다
+    let jobsByVc = null;
     for (const g of listGroups()) {
       if (firedSet.has(g.id) || groupRunning(g.id) || g.keep == null) continue;
-      if (!jobsByVc.has(g.vcenterId)) jobsByVc.set(g.vcenterId, new Map(jobDigests().filter((j) => j.vcenterId === g.vcenterId).map((j) => [j.vmId, j])));
+      if (!g.lastFire || !(g.lastFire.started > 0) || (g.lastPrune && g.lastPrune.fireAt === g.lastFire.at)) continue;   // pruneDue 의 앞 조건(싸다)
+      if (!jobsByVc) {
+        jobsByVc = new Map();
+        for (const j of jobDigests()) { if (!jobsByVc.has(j.vcenterId)) jobsByVc.set(j.vcenterId, new Map()); jobsByVc.get(j.vcenterId).set(j.vmId, j); }
+      }
+      if (!jobsByVc.has(g.vcenterId)) jobsByVc.set(g.vcenterId, new Map());
       if (!pruneDue(g, jobsByVc.get(g.vcenterId), now)) continue;
       runs.push(queueGroupPrune(g.id, { trigger: 'timer' }).catch((e) => console.warn(`[bareos] 백업 그룹 ‘${g.name}’ 보관 정리 실패: ${String(e?.message || e).slice(0, 200)}`)));
     }

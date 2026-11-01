@@ -158,6 +158,11 @@ test('G3 엣지 addJobs: 성공인데 잡 이름이 없으면 결과 모름 — 
   const [op] = E.takeEdgeOps('PL-Warsaw');
   assert.equal(op.kind, 'addJobs');
   E.completeEdgeOp(op.id, 'PL-Warsaw', { ok: true, value: [{ key: 0, ok: true }] });
+  // v2.847 E2-1: 결과 모름이면 중앙이 `.jobs` 를 한 번 더 묻는다(잡이 생겼으면 원장 밖 잡을 끈다) — 그 조회가 오지 않으면 결과 모름 그대로
+  for (let i = 0; i < 300 && !E.pendingView().length; i++) await sleep(10);
+  const [names] = E.takeEdgeOps('PL-Warsaw');
+  assert.equal(names?.kind, 'jobNames');
+  E.completeEdgeOp(names.id, 'PL-Warsaw', { ok: false, code: 'connect', reason: 'down' });
   await assert.rejects(p, (e) => e.code === 'unknown');
   assert.equal(R.findByVm('vc-pl', 'vc-pl:vm-1'), null, '원장에 bareosJob undefined 를 적지 않았다');
 });

@@ -104,10 +104,15 @@ export const RUNNING_UNKNOWN_OK_LABEL = '확인했음 — 실행 중 작업 확�
 export const runningUnknown = (pre, target) => target?.mode === 'reinstall' && (pre?.items || []).some((i) => i.key === 'running' && i.status === 'unknown');
 
 /** 계획을 서버로 보낼 모양(숫자 칸은 숫자로). */
-export function planBody(p) {
+/**
+ * @param {object} p 계획
+ * @param {{ pre?: object, target?: object }} [o] v2.847 U2-5(2회차 점검 — 재현): 동의는 **지금 사전 점검이 '실행 중 작업 확인 불가' 일 때만** 싣는다 —
+ *   점검을 다시 해 '정상' 이 되면 동의 칸이 사라지는데 값은 남아, 0단계가 다시 확인하지 못해도 확인 없이 초기화했다. pre 를 주지 않으면(다시 하기 계획 편집) 싣지 않는다.
+ */
+export function planBody(p, { pre = null, target = null } = {}) {
   const n = (v) => (v === '' || v == null ? v : Number(v));
   return {
-    ...(p.runningUnknownOk === true ? { runningUnknownOk: true } : {}),
+    ...(p.runningUnknownOk === true && runningUnknown(pre, target) ? { runningUnknownOk: true } : {}),
     pyvmomi: p.pyvmomi, pyvmomiFix: !!p.pyvmomiFix, volumeDir: String(p.volumeDir || '').trim(), webui: p.webui !== false,
     pools: { fullDays: n(p.pools?.fullDays), incrDays: n(p.pools?.incrDays), maxVolumeGB: n(p.pools?.maxVolumeGB) },
     schedule: { fullDay: p.schedule?.fullDay, time: p.schedule?.time }, consoleName: String(p.consoleName || '').trim(), directorName: String(p.directorName || '').trim(),

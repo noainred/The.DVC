@@ -416,8 +416,10 @@ export function directorCred(d) {
   const id = d?.edgeCopy ? `edge-director:${d?.id || ''}` : d?.id === DEFAULT_DIRECTOR_ID ? 'director' : `director:${d?.id || ''}`;
   // v2.846 버그 점검(E-2): TLS 최대 판도 신원에 넣는다 — 'tls' 실패(TLS-PSK 협상 — 비밀번호가 틀려도 이렇게 보인다)로 멈춘 뒤 사람이 TLS 판을 바꾸면
   //   주소·비밀번호를 바꾼 것과 같이 **한 번** 다시 시도한다(또 실패하면 새 값으로 다시 멈춘다 — 사람의 변경 한 번에 시도 한 번).
-  //   기본값(TLSv1.3)은 붙이지 않는다 — 올리기 전 정지 기록(기본값 Director 전부)이 업그레이드만으로 풀려 다시 로그인하지 않게. 시한(timeoutMs)은
+  //   기본값(TLSv1.3)은 붙이지 않는다 — 올리기 전 정지 기록이 업그레이드만으로 풀려 다시 로그인하지 않게. 시한(timeoutMs)은
   //   인증 정지와 무관해(timeout 은 정지 사유가 아니다) 넣지 않는다.
+  //   ⚠ v2.847 정정(S2-1): '올리기 전에는 모두 기본값' 이 아니었다(tlsMax 는 v2.845 에도 있었다) — TLSv1.2 Director 의 옛 모양 정지는 service.js migrateTls12Stops 가
+  //   기동 뒤 한 번 새 신원으로 옮긴다. 이 신원 모양을 다시 바꾸지 말 것(바꾸면 그 판으로 올릴 때 또 1회 재시도가 생긴다).
   const tls = d?.tlsMax === 'TLSv1.2' ? '#tls1.2' : '';
   return { id, username: `${d?.host || ''}:${d?.port || ''}/${d?.consoleName || ''}${tls}`, password: d?.password || '' };
 }

@@ -28,7 +28,7 @@ import { setupDirector, setupFdPlugin, newConsolePassword, VMWARE_POOL_FULL, VMW
 import { onDirector } from '../service.js';
 import { isResourceName } from '../names.js';
 import { noteSetupStart, noteSetupEnd } from '../inflight.js';
-import { setupBusyReason, claimSetupGroup, setupGroupBusyReason, addSetupGroupDirector, releaseSetupGroup, _resetForTest as _resetLocks } from '../setupLocks.js';
+import { setupBusyReason, claimSetupGroup, setupGroupBusyReason, addSetupGroupDirector, releaseSetupGroup, ownsSetupGroup, _resetForTest as _resetLocks } from '../setupLocks.js';
 import { pickBundle } from './bundle.js';
 import { normPlan, planEnv, planSummary, STEPS, REMOTE_ROOT, RUN_DIR, BUNDLES_DIR, UNIT, FD_CLIENT, DIR_STORAGE, LAST_REMOTE_STEP, LAST_STEP } from './plan.js';
 import { precheckScript, parsePrecheck, judgePrecheck } from './precheck.js';
@@ -231,8 +231,16 @@ function kick(id, opts = {}) {
   const j0 = getJob(id);
   // v2.845(v2.844 반증 L3): 같은 서버의 자동 설정 · 법인별 설정 변경과 잠금을 나눈다(bareos/setupLocks.js)
   const owner = `install:${id}`;
-  if (j0 && !claimSetupGroup(owner, lockKeysOf(j0))) {
+  // v2.847 C2-2: 기동 때 선점한 잠금(reserveInstallResumeLocks)은 넘겨받는다 — _active 가 비어 있으니 쥔 drive 가 없다
+  if (j0 && !ownsSetupGroup(owner) && !claimSetupGroup(owner, lockKeysOf(j0))) {
     const why = setupGroupBusyReason(lockKeysOf(j0)) || '같은 서버에 다른 작업이 진행 중입니다.';
+    // v2.847 C2-2(2회차 점검 — 재현): 이어 읽기(resume)는 러너가 서버 안에서 **계속 도는 중**이다 — 잠금을 못 잡았다고 '실패(아무것도 바꾸지 않았습니다)' 로 적으면
+    //   사실이 아니고(러너는 돈다) 더는 원격 상태를 읽지 않았다. 상태 읽기는 안전하므로 잠시 뒤 다시 잡는다.
+    if (opts.resume && isActive(j0)) {
+      const t = setTimeout(() => kick(id, opts), _resumeRetryMs); t.unref?.();
+      if (!opts.waitNoted) { console.warn(`[bareos] 완전 설치 ${id} 이어 읽기 — ${why} 끝나면 이어 읽습니다(${Math.round(_resumeRetryMs / 1000)}초마다 다시).`); opts.waitNoted = true; }
+      return;
+    }
     // v2.846 C-1(재현): 전부 되돌리기의 잠금 실패를 설치 실패('failed')로 적으면 그 '그대로 다시' 가 0단계(초기화)부터 돌았다 — 되돌리기 실패로 남긴다
     if (j0.status === 'rolling-back') recordRollbackFailed(j0, { cause: 'busy', message: `${why}(아무것도 바꾸지 않았습니다 — 그 작업이 끝난 뒤 다시 되돌리세요)` });
     else if (isActive(j0)) recordFailure(j0, j0.currentStep ?? null, { cause: 'busy', output: why, message: why });
@@ -581,14 +589,19 @@ export function rollbackAllInstall(id, { ack = false, by = '', sshFixed = false 
   if (isActive(j)) throw fail('conflict', '진행 중에는 되돌릴 수 없습니다 — 먼저 중단하세요.');
   if (j.status === 'rolledback') throw fail('conflict', '이미 되돌렸습니다.');
   // v2.846 C-2: SSH 인증 실패로 멈춘 되돌리기는 계정을 고쳤다는 표시가 있어야 다시(계정 잠금 — 자동 재시도 금지 규칙과 같은 확인)
-  if (j.status === 'rollback-failed' && j.rollback?.cause === 'ssh-auth' && sshFixed !== true) throw fail('invalid', 'SSH 로그인 실패는 배포 등록부의 계정을 고친 뒤 \'고쳤음\' 을 표시하고 다시 되돌리세요(계정 잠금을 막으려고 확인합니다).');
+  // v2.847 S2-2(2회차 점검 — 재현): 설치가 SSH 인증 실패로 멈춘(failed · stopped) 작업의 첫 되돌리기도 같다 — 예전에는 고치지 않은 같은 저장 계정으로 곧바로 root 로그인했다
+  const authFailed = (j.status === 'rollback-failed' && j.rollback?.cause === 'ssh-auth') || ((j.status === 'failed' || j.status === 'stopped') && j.failure?.cause?.key === 'ssh-auth');
+  if (authFailed && sshFixed !== true) throw fail('invalid', 'SSH 로그인 실패는 배포 등록부의 계정을 고친 뒤 \'고쳤음\' 을 표시하고 다시 되돌리세요(계정 잠금을 막으려고 확인합니다).');
   requireLatest(j);
   credsOf(j);
   // v2.846 D-7: 원장을 못 읽으면 대상 수를 0 으로 보지 않는다(M4 가 통과하고 포탈 쪽 정리가 빈 원장으로 판정했다) — 503
   if (registryLoadError()) throw fail('unavailable', '백업 대상 원장을 읽지 못한 상태라 전부 되돌리지 않습니다(대상 수를 0 으로 보지 않습니다 · 손상본 보존 — 서비스 점검에서 확인).');
   // M4 · v2.846 D-4(재현): 재설치(기존 Director 를 다시 등록해 쓰는 작업)도 본다 — 예전에는 이 설치로 새로 만든 Director 만 봐서, 다시 등록해 쓰던 대상의 카탈로그 · 설정을 지웠다
   if (j.directorId && (j.createdDirector || j.existingDirector)) {
-    const n = listJobs().filter((x) => !x.demo && x.directorId === j.directorId).length;
+    // v2.847 D2-5(2회차 점검 — 재현): v2.823 이전 대상(directorId 칸 없음 — 매핑 · dir_default 로 이 Director)도 센다 — Director 삭제 라우트와 같은 판정(jobDirectorId) 하나
+    let st = null; try { st = loadSettings(); } catch { st = null; }
+    if (!st) throw fail('unavailable', 'Bareos 설정을 읽지 못해 이 Director 의 백업 대상 수를 판정할 수 없습니다 — 되돌리지 않습니다.');
+    const n = listJobs().filter((x) => !x.demo && jobDirectorId(x, st) === j.directorId).length;
     if (n > 0) {
       throw fail('conflict', j.createdDirector
         ? `이 설치로 등록한 Director 에 백업 대상이 ${n}개 있습니다 — 백업 대상을 먼저 지운 뒤 되돌리세요(원격만 지우고 포탈 등록이 남는 상태를 만들지 않습니다).`
@@ -655,7 +668,7 @@ async function driveRollbackAll(j, creds, { resume = false } = {}) {
       saveSettings({ sites: cur.sites.filter((s) => s.vcenterId !== j.vcenterId) }, { jobDirs });
       notes.push('매핑 삭제');
     }
-    if (j.createdDirector && j.directorId) { deleteDirector(j.directorId, { inUseByJobs: listJobs().filter((x) => !x.demo && x.directorId === j.directorId).length }); notes.push('Director 등록 삭제'); }
+    if (j.createdDirector && j.directorId) { const st = loadSettings(); deleteDirector(j.directorId, { inUseByJobs: listJobs().filter((x) => !x.demo && jobDirectorId(x, st) === j.directorId).length }); notes.push('Director 등록 삭제'); }
     else if (j.existingDirector) notes.push('기존 Director 등록은 남김 — 재설치 전 설치는 초기화로 지워져 접속되지 않습니다(설정 › 법인별 Director 에서 정리)');
   } catch (e) { notes.push(`포탈 쪽 일부 남음: ${String(e?.message || e).slice(0, 200)}`); }
   const a = j.attempts[j.attempts.length - 1]; if (a?.rollbackAll) { a.endedAt = Date.now(); a.result = 'rolledback'; }
@@ -674,6 +687,24 @@ function recordRollbackFailed(j, { cause = 'error', message = '', left = null })
 }
 
 /** 기동 때 진행 중이던 작업을 이어 읽는다(러너는 서버 안에서 계속 돈다). 업로드·중앙 단계 중이던 것은 '끊김' 으로 실패 처리(다시 시도 가능). */
+/** v2.847 C2-2: 이어 읽기가 잠금을 못 잡았을 때 다시 잡는 간격. */
+export const RESUME_RETRY_MS = 30_000;
+let _resumeRetryMs = RESUME_RETRY_MS;
+/** 시험 — 다시 잡는 간격을 줄인다. */
+export function _setResumeRetryMsForTest(ms) { _resumeRetryMs = Number.isFinite(ms) ? ms : RESUME_RETRY_MS; }
+/**
+ * v2.847 C2-2: 기동 때(HTTP 를 열기 전) 이어 읽을 작업(원격 단계 · 되돌리는 중)의 서버 잠금을 먼저 쥔다 — 이어 읽기의 kick 이 넘겨받는다.
+ * @returns {number} 선점한 작업 수
+ */
+export function reserveInstallResumeLocks() {
+  let n = 0;
+  for (const j of load()) {
+    if (!isActive(j) || !(j.status === 'rolling-back' || j.phase === 'remote')) continue;
+    if (claimSetupGroup(`install:${j.id}`, lockKeysOf(j))) n += 1;
+  }
+  return n;
+}
+
 export function resumeInstallJobs() {
   for (const j of load()) {
     if (!isActive(j)) continue;
