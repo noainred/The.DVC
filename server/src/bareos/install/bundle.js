@@ -36,20 +36,23 @@ let _trustForTest = null;
 export function _setTrustForTest(t) { _trustForTest = t; }
 const T = () => _trustForTest || trust();
 
-function sha256FileSync(p) {
-  const h = crypto.createHash('sha256');
-  const fd = fs.openSync(p, 'r');
-  const buf = Buffer.alloc(1 << 20);
-  let size = 0;
-  try { for (;;) { const n = fs.readSync(fd, buf, 0, buf.length, null); if (!n) break; size += n; h.update(buf.subarray(0, n)); } } finally { fs.closeSync(fd); }
-  return { sha256: h.digest('hex'), size };
+/** 파일 해시 — 스트림(수백 MB 를 동기로 읽어 이벤트 루프를 막지 않는다 — 루트 규칙 '요청 경로 동기 블로킹 금지'). */
+export function sha256File(p) {
+  return new Promise((resolve, reject) => {
+    const h = crypto.createHash('sha256');
+    let size = 0;
+    fs.createReadStream(p, { highWaterMark: 1 << 20 })
+      .on('data', (c) => { size += c.length; h.update(c); })
+      .on('error', reject)
+      .on('end', () => resolve({ sha256: h.digest('hex'), size }));
+  });
 }
 
 /** 검증 결과 기억(파일 크기·수정 시각이 같으면 다시 해시하지 않는다 — 수백 MB). */
 const _verified = new Map();
 
-/** 폴더의 한 판을 검증한다(동기 해시 — 받기 직후와 '다시 읽기' 에서만 부른다). */
-export function verifyLocal(version, dir = bundleDir()) {
+/** 폴더의 한 판을 검증한다(해시는 스트림 — 같은 파일이면 기억한 결과). */
+export async function verifyLocal(version, dir = bundleDir()) {
   const tarP = path.join(dir, tarName(version));
   const conP = path.join(dir, contentsName(version));
   const manP = path.join(dir, manifestName(version));
@@ -63,7 +66,7 @@ export function verifyLocal(version, dir = bundleDir()) {
     const manifestText = fs.readFileSync(manP, 'utf8');
     const contentsBuf = fs.readFileSync(conP);
     if (contentsBuf.length > CONTENTS_MAX_BYTES) throw new Error('내용 목록이 상한보다 큽니다');
-    const tar = sha256FileSync(tarP);
+    const tar = await sha256File(tarP);
     const pointer = { format: 'portal-bareos-bundle-pointer', v: 1, version, tarball: { name: tarName(version), ...tar }, contents: { name: contentsName(version), size: contentsBuf.length, sha256: crypto.createHash('sha256').update(contentsBuf).digest('hex') }, manifest: manifestName(version) };
     const v = verifyBundle({ pointer, manifestText, contentsBuf, contentsSha256: pointer.contents.sha256, tar }, T());
     result = v.ok ? { ok: true, version, sha256: tar.sha256, size: tar.size, contents: v.contents, keyId: v.keyId, tarPath: tarP } : { ok: false, code: v.code, reason: v.reason };
@@ -75,25 +78,27 @@ export function verifyLocal(version, dir = bundleDir()) {
 }
 
 /** 폴더의 번들 목록(새 판 먼저). verify=false 면 기억한 결과만(없으면 '확인 전'). */
-export function listBundles({ verify = false, dir = bundleDir() } = {}) {
+export async function listBundles({ verify = false, dir = bundleDir() } = {}) {
   let names = [];
-  try { names = fs.readdirSync(dir); } catch { return []; }
+  try { names = await fs.promises.readdir(dir); } catch { return []; }
   const versions = names.map((n) => TAR_RE.exec(n)?.[1]).filter(Boolean).sort(cmpVersionDesc).slice(0, 10);
-  return versions.map((v) => {
-    const r = verify ? verifyLocal(v, dir) : (_verified.get(v)?.result || null);
+  const out = [];
+  for (const v of versions) {
+    const r = verify ? await verifyLocal(v, dir) : (_verified.get(v)?.result || null);
     let size = null; try { size = fs.statSync(path.join(dir, tarName(v))).size; } catch { /* */ }
-    return r ? { version: v, size, ok: r.ok, reason: r.ok ? '' : r.reason, contents: r.ok ? r.contents : null, sha256: r.ok ? r.sha256 : null }
-      : { version: v, size, ok: null, reason: '확인 전', contents: null, sha256: null };
-  });
+    out.push(r ? { version: v, size, ok: r.ok, reason: r.ok ? '' : r.reason, contents: r.ok ? r.contents : null, sha256: r.ok ? r.sha256 : null }
+      : { version: v, size, ok: null, reason: '확인 전', contents: null, sha256: null });
+  }
+  return out;
 }
 
 /** 설치에 쓸 번들(검증된 것 중 가장 새 판 · 또는 지정 판). */
-export function pickBundle(version = '', dir = bundleDir()) {
-  const list = listBundles({ verify: true, dir });
+export async function pickBundle(version = '', dir = bundleDir()) {
+  const list = await listBundles({ verify: true, dir });
   const ok = list.filter((b) => b.ok);
   const b = version ? ok.find((x) => x.version === version) : ok[0];
   if (!b) return null;
-  const r = verifyLocal(b.version, dir);
+  const r = await verifyLocal(b.version, dir);
   return r.ok ? r : null;
 }
 
@@ -143,7 +148,7 @@ export async function fetchLatestBundle({ baseUrl = bundleBaseUrl(), dir = bundl
     if (pi) return fin({ ok: false, reason: `번들 포인터 형식 오류 — ${pi}` });
     const v = pointer.version;
     st.version = v; st.total = pointer.tarball.size;
-    const have = verifyLocal(v, dir);
+    const have = await verifyLocal(v, dir);
     if (have.ok && have.sha256 === pointer.tarball.sha256) return fin({ ok: true, version: v, already: true });
     fs.mkdirSync(dir, { recursive: true, mode: 0o750 });
     st.phase = 'manifest';
@@ -177,7 +182,7 @@ export async function fetchLatestBundle({ baseUrl = bundleBaseUrl(), dir = bundl
     fs.renameSync(part, path.join(dir, tarName(v)));
     part = '';
     _verified.delete(v);
-    const r = verifyLocal(v, dir);
+    const r = await verifyLocal(v, dir);
     return fin(r.ok ? { ok: true, version: v } : { ok: false, reason: r.reason });
   } catch (e) {
     return fin({ ok: false, reason: `번들 받기 실패 — ${String(e?.code || e?.message || e).slice(0, 160)}` });

@@ -112,7 +112,7 @@ export async function runPrecheck({ vcenterId, body = {} }) {
   const t = listInstallTargets({ knownHostAddrs: knownHostAddrs() }).find((x) => x.vcenterId === vcenterId);
   if (!t) throw fail('not-found', 'vCenter 를 찾을 수 없습니다.');
   if (!t.can) throw fail('invalid', t.why);
-  const bundle = pickBundle();
+  const bundle = await pickBundle();
   let plan = null;
   try { plan = bundle ? normPlan({ ...body, reset: body.reset || { ack: true } }, { contents: bundle.contents, mode: t.mode, corpName: t.vcenterName }) : null; } catch { plan = null; }
   const creds = sshCredsFor(t.targetId);
@@ -137,7 +137,7 @@ export async function startInstall({ vcenterId, body = {}, by = '' }) {
   if (!t.can) throw fail('invalid', t.why);
   const busy = load().find((j) => isActive(j) && (j.vcenterId === vcenterId || (j.sshHost && j.sshHost === t.sshHost)));
   if (busy) throw fail('conflict', `이 법인(또는 같은 서버)의 완전 설치가 진행 중입니다(${busy.id}) — 끝난 뒤 다시 하세요.`);
-  const bundle = pickBundle(String(body.bundleVersion || ''));
+  const bundle = await pickBundle(String(body.bundleVersion || ''));
   if (!bundle) throw fail('invalid', '서명·해시가 맞는 번들이 없습니다 — 먼저 번들을 받으세요.');
   const plan = normPlan(body, { contents: bundle.contents, mode: t.mode, corpName: t.vcenterName });
   // 시작 직전 다시 점검(화면 결과는 그 순간의 상태 — 그사이 바뀌었으면 시작하지 않는다)
@@ -215,7 +215,7 @@ async function drive(id, { fromStep, fresh = false, resendBundle = false, mode =
 
 /** 번들(필요하면)·러너·plan.env 를 올리고 러너를 띄운다. */
 async function uploadAndStart(j, creds, { fromStep, fresh, resendBundle }) {
-  const bundle = pickBundle(j.bundle.version);
+  const bundle = await pickBundle(j.bundle.version);
   if (!bundle) throw fail('invalid', `번들 ${j.bundle.version} 을(를) 중앙에서 찾지 못했습니다(지워졌거나 검증 실패) — 번들을 다시 받으세요.`);
   const env = planEnv({ jobId: j.id, bundle: j.bundle, install: j.install, plan: j.plan, startStep: Math.min(fromStep, LAST_REMOTE_STEP), runMode: 'install', hostAddr: j.hostAddr, resetVolumeDirs: j.resetVolumeDirs });
   const runner = fs.readFileSync(RUNNER_SRC, 'utf8');
@@ -413,7 +413,7 @@ async function cleanupRemote(j, creds) {
 /**
  * 실패·중단한 작업을 그 단계부터 다시. body.plan(바꿀 값) · body.fix('pyvmomi-fix' | 'resend-bundle') · body.fromStep(선택 — 실패 단계보다 앞만).
  */
-export function retryInstall(id, { body = {}, by = '' } = {}) {
+export async function retryInstall(id, { body = {}, by = '' } = {}) {
   const j = getJob(id);
   if (!j) throw fail('not-found', '작업을 찾을 수 없습니다.');
   if (!['failed', 'stopped'].includes(j.status)) throw fail('conflict', `지금 상태(${j.status})에서는 다시 할 수 없습니다.`);
@@ -422,7 +422,7 @@ export function retryInstall(id, { body = {}, by = '' } = {}) {
   let fromStep = Number.isInteger(body.fromStep) ? body.fromStep : failedStep;
   if (!Number.isInteger(fromStep) || fromStep < j.startStep || fromStep > LAST_STEP) fromStep = failedStep;
   if (fromStep > failedStep) throw fail('invalid', '실패한 단계보다 뒤에서 시작할 수 없습니다.');
-  const bundle = pickBundle(j.bundle.version);
+  const bundle = await pickBundle(j.bundle.version);
   if (!bundle) throw fail('invalid', `번들 ${j.bundle.version} 이 중앙에 없습니다 — 번들을 다시 받으세요.`);
   const before = planSummary(j.plan);
   const nextBody = { ...j.plan, ...(body.plan && typeof body.plan === 'object' ? body.plan : {}), reset: j.plan.reset ? { ...j.plan.reset, ack: true, confirmName: j.vcenterName } : undefined };
