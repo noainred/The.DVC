@@ -14,8 +14,8 @@ import { directorById, directorConn, siteMissing } from '../../bareos/settings.j
 import { jobDigests, MAX_JOBS, registryLoadError } from '../../bareos/registry.js';
 import { listGroups, getGroup, addGroup, updateGroup, deleteGroup, checkGroupInput, groupsLoadError, MAX_MEMBERS, MAX_GROUPS, FIRES_KEEP } from '../../bareos/groups.js';
 import { nextSlot, scheduleText, slotKey, CATCHUP_MS, LEVELS } from '../../bareos/groupSchedule.js';
-import { queueGroupRun, groupRunning, groupPruning } from '../../bareos/groupRunner.js';
-import { keepText, keepOtpReasons, KEEP_MIN, KEEP_MAX, KEEP_PRESETS } from '../../bareos/groupRetention.js';
+import { queueGroupRun, groupRunning, groupPruning, previewPrune } from '../../bareos/groupRunner.js';
+import { keepText, keepOtpReasons, normKeep, KEEP_MIN, KEEP_MAX, KEEP_PRESETS } from '../../bareos/groupRetention.js';
 import { bareosVmView } from '../../bareos/vmView.js';
 import { getMarks, marksUnreadable } from '../../veeam/backupMarks.js';
 import { isSystemVm } from '../../veeam/backupStatus.js';
@@ -302,6 +302,21 @@ api.delete('/tools/bareos-backup/groups/:id', adminOnly, (req, res) => {
   if (!ok) return res.status(404).json({ ok: false, reason: NOT_FOUND });
   audit(req, 'Bareos 백업 그룹 지우기', `${g.vcenterId}/${g.name}`, `VM ${g.vmIds.length}대 — 백업 대상·Director 잡은 남김`);
   res.json({ ok: true });
+});
+
+/**
+ * v2.843 보관 정리 미리 보기 — body { keep? }(저장 전 화면 값 · 없으면 그룹 값). **읽기 전용**(지우지 않는다 · 감사 없음 · OTP 없음)이라 조회 범위로 보고,
+ * 데모 계정은 데모 Director 에만(readDirector 와 같은 demoOnly). Director 일은 그 법인 쪽에서(엣지 대행이면 엣지가 로컬 Director 로 — 사용자 원칙 '백업은 법인 로컬').
+ * 결과를 기다려 돌려준다(그룹 VM 수만큼 Director 조회 — 대행이면 엣지 인출·회신 대기 포함 · 화면은 relayLimits 만큼 기다린다).
+ */
+api.post('/tools/bareos-backup/groups/:id/prune-preview', adminOnly, async (req, res) => {
+  const g = groupFor(req, res, { write: false }); if (!g) return;
+  let keep;
+  try { keep = req.body && Object.prototype.hasOwnProperty.call(req.body, 'keep') ? normKeep(req.body.keep) : undefined; } catch (e) { return sendBareosErr(res, e); }
+  try {
+    const r = await previewPrune(g.id, { keep, demoOnly: isDemoGuest(req.user) });
+    res.json({ ok: true, groupId: g.id, at: Date.now(), ...r });
+  } catch (e) { sendBareosErr(res, e); }
 });
 
 /**

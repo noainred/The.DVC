@@ -222,6 +222,73 @@ export function pruneDue(g, jobsByVm, now = Date.now()) {
   return !g.vmIds.some((id) => jobsByVm.get(id)?.pending?.jobid);
 }
 
+/** 미리 보기 동시 1건(그룹마다 — 버튼 연타가 같은 Director 에 같은 조회를 겹쳐 보내지 않게). */
+const _previewing = new Set();
+export const groupPreviewing = (id) => _previewing.has(id);
+/** 미리 보기 결과 행 상한(화면 표) — 합계는 전부 센다. */
+export const PREVIEW_ROWS_MAX = 300;
+
+/**
+ * v2.843 보관 정리 **미리 보기**(읽기 전용 — 지우지 않는다 · 잠금·기록·감사 없음). 사용자 원칙 '백업은 법인 로컬':
+ * 엣지 대행 법인은 그 엣지가 로컬 Director 에서 `ops.prunePreview` 를 돌린다(VM 수만큼 WAN 을 왕복하지 않는다 — 요약만 올라온다).
+ * 대상 VM 은 pruneGroup 과 **같은 판정**(원장에 잡이 있고 · 데모 모드 일치 · Director 에 있는 잡) · 같은 입력(keep · since = 잡 등록 시각).
+ * @param {string} groupId
+ * @param {{ keep?: number|null, demoOnly?: boolean, signal?: AbortSignal }} [o] keep 을 주면 그 값으로(저장 전 화면 값) · 없으면 그룹의 값
+ * @returns {Promise<{ keep, jobs, would, vms, noBase, failed, notSent, errors: {vmName, reason}[], rows: {vmName, would, more?, kept, good, reason?}[] }>}
+ */
+export async function previewPrune(groupId, { keep: keepIn, demoOnly = false, signal = null } = {}) {
+  const g = getGroup(groupId);
+  if (!g) throw fail('not-found', '백업 그룹을 찾을 수 없습니다.');
+  const keep = keepIn === undefined ? (g.keep ?? null) : keepIn;
+  if (keep == null) throw fail('invalid', '보관 개수가 없습니다(제한 없음) — 정리하지 않으므로 미리 볼 것이 없습니다.');
+  if (registryLoadError()) throw fail('unavailable', '백업 대상 원장을 읽지 못한 상태라 미리 보지 않습니다(손상본 보존).');
+  if (_previewing.has(groupId)) throw fail('busy', `‘${g.name}’ 그룹의 미리 보기가 진행 중입니다 — 끝난 뒤 다시 시도하세요.`);
+  _previewing.add(groupId);
+  const out = { keep, jobs: 0, would: 0, vms: 0, noBase: 0, failed: 0, notSent: 0, errors: [], rows: [] };
+  try {
+    const demo = isDemoActive();
+    const settings = effectiveSettings();
+    const jobs = new Map(jobDigests().filter((j) => j.vcenterId === g.vcenterId).map((j) => [j.vmId, j]));
+    const byDir = new Map();
+    for (const vmId of g.vmIds) {
+      const j = jobs.get(vmId);
+      if (!j || !!j.demo !== demo || j.missingInDirector) continue;
+      const dir = jobDirectorId(j, settings);
+      if (!byDir.has(dir)) byDir.set(dir, []);
+      byDir.get(dir).push(j);
+      out.jobs += 1;
+    }
+    for (const [dir, list] of byDir) {
+      for (let i = 0; i < list.length; i += RUN_JOBS_MAX) {
+        const chunk = list.slice(i, i + RUN_JOBS_MAX);
+        let res;
+        try {
+          res = await onDirector(dir, 'prunePreview', { items: chunk.map((j, k) => ({ key: k, job: j.bareosJob, keep, ...(Number.isFinite(j.createdAt) ? { since: j.createdAt } : {}) })) },
+            { demoOnly, signal: signal || AbortSignal.timeout(PRUNE_DEADLINE_MS) });
+        } catch (e) {
+          out.failed += chunk.length;
+          if (chunkErrorState(e) === 'notsent') out.notSent += chunk.length;
+          if (out.errors.length < 20) out.errors.push({ vmName: `${chunk.length}대`, reason: /알 수 없는 작업/.test(String(e?.message || '')) ? `${String(e.message).slice(0, 200)} — 법인 엣지가 이 기능(정리 미리 보기)보다 오래된 판입니다. 엣지를 업그레이드한 뒤 다시 보세요.` : String(e?.message || e).slice(0, 300) });
+          continue;
+        }
+        const byKey = new Map((Array.isArray(res) ? res : []).map((r) => [r.key, r]));
+        chunk.forEach((j, k) => {
+          const r = byKey.get(k);
+          const vmName = j.vmName || j.vmId;
+          if (!r || !r.ok) { out.failed += 1; if (out.errors.length < 20) out.errors.push({ vmName, reason: r?.message || 'Director 회신에 이 항목이 없습니다.' }); return; }
+          const would = Number.isInteger(r.would) && r.would >= 0 ? r.would : 0;
+          out.would += would + (Number.isInteger(r.more) ? r.more : 0);
+          if (would > 0) out.vms += 1;
+          if (r.reason && !would && r.baseJobid == null && r.good > keep) out.noBase += 1;
+          if (out.rows.length < PREVIEW_ROWS_MAX) out.rows.push({ vmName, would, ...(r.more ? { more: r.more } : {}), kept: r.kept ?? null, good: r.good ?? null, ...(r.reason ? { reason: r.reason } : {}) });
+        });
+      }
+    }
+  } finally { _previewing.delete(groupId); }
+  out.rows.sort((a, b) => (b.would + (b.more || 0)) - (a.would + (a.more || 0)) || String(a.vmName).localeCompare(String(b.vmName)));
+  return out;
+}
+
 /**
  * 그룹 하나 정리 — 그룹 VM 의 잡마다 Director 에서 이력을 읽고 보관 개수 밖의 오래된 실행을 지운다(ops.pruneJobs · groupRetention 규칙).
  * 잡 잠금(jobLocks)을 잡은 잡만(복원·실행 중인 대상과 겹치지 않게 — 잡힌 대상은 다음 정리로). 결과는 groups.lastPrune · 지운 것이 있으면 감사.

@@ -139,6 +139,33 @@ export const OPS = Object.freeze({
     return out;
   },
   /**
+   * v2.843 보관 정리 **미리 보기**(읽기 전용 — 사용자 원칙 '백업은 법인 로컬': 엣지 대행 법인은 그 엣지가 로컬 Director 에서 돌린다).
+   * pruneJobs 와 **같은 입력(keep·since)·같은 판정(pruneSelection)** 으로 지울 개수만 센다 — `delete` 를 보내지 않는다(MUTATING 아님 · 시험이 고정).
+   * 옛 엣지는 이 작업 종류를 몰라 '알 수 없는 작업'(보내지 않음)으로 돌려준다.
+   * @param {{ items: { key:number, job:string, keep:number, since?:number }[] }} a
+   * @returns {Promise<{ key, ok, would?:number, more?, kept?, good?, baseJobid?, baseAt?, reason?, code?, message? }[]>}
+   */
+  async prunePreview(s, { items = [] } = {}) {
+    const out = [];
+    let dead = '';
+    for (const it of items.slice(0, RUN_JOBS_MAX)) {
+      if (dead) { out.push({ key: it.key, ok: false, code: 'skipped', message: `건너뜀 — ${dead}` }); continue; }
+      try {
+        if (!isResourceName(it.job)) throw invalid('잡 이름이 올바르지 않습니다.');
+        const runs = (await jobRuns(s, it.job)).filter((r) => r.name === it.job);
+        const sel = pruneSelection(runs, it.keep, it.job, { since: Number.isFinite(it.since) ? it.since : null });
+        out.push({
+          key: it.key, ok: true, would: sel.deletable.length, kept: sel.kept, good: sel.good, baseJobid: sel.baseJobid, baseAt: sel.baseAt,
+          ...(sel.reason ? { reason: sel.reason } : {}), ...(sel.more ? { more: sel.more } : {}),
+        });
+      } catch (e) {
+        out.push({ key: it.key, ok: false, code: e?.code || 'error', message: String(e?.message || e).slice(0, 300) });
+        if (SESSION_DEAD.has(e?.code)) dead = `Director 연결 문제로 멈췄습니다(${e.code})`;
+      }
+    }
+    return out;
+  },
+  /**
    * v2.833 진행 현황판 — 실행 중 잡의 진행량·속도(FD 가 들고 있다 — 카탈로그는 끝나야 바이트를 채운다). FD 마다 `status client=` 하나(읽기 전용).
    * 원문 모양은 실환경 미확인(추정) — liveParse 가 평문·JSON 둘 다 받는다. FD 하나의 실패는 나머지를 막지 않고, 세션째 끊기면 남은 것은 건너뜀.
    * @param {{ clients: string[], director?: boolean }} a  director = `status director` 도(잡마다 Director 가 보는 상태 — v2.833.1)

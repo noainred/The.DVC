@@ -259,3 +259,24 @@ export function keepOtpReasons(prev, next, hasJob = () => true) {
   if (added && pk != null && nk >= pk) out.push(`백업 기록이 있을 수 있는 VM ${added}대를 더함`);
   return out;
 }
+
+/**
+ * v2.843 보관 정리 미리 보기 결과 한 줄(순수 — 서버 groupRunner.previewPrune 응답). 지우지 않았다는 것 · 지금 카탈로그 기준이라는 것을 함께 말한다.
+ * 못 읽은 VM 은 개수에 넣지 않았다고 따로 센다(0 으로 섞지 않는다).
+ * @returns {{ text: string, tone: 'warn'|'ok'|'bad' }}
+ */
+export function prunePreviewText(r) {
+  if (!r || typeof r !== 'object') return { text: '', tone: 'ok' };
+  const keep = Number.isInteger(r.keep) ? r.keep : null;
+  const jobs = Number(r.jobs) || 0;
+  const would = Number(r.would) || 0;
+  const failed = Number(r.failed) || 0;
+  if (!jobs) return { text: '이 그룹에는 Bareos 잡이 등록된 VM 이 없습니다 — 지울 실행 기록이 없습니다.', tone: 'ok' };
+  const parts = [];
+  if (would > 0) parts.push(`**지금 정리하면 VM ${Number(r.vms) || 0}대에서 실행 기록 ${would}건을 카탈로그에서 지웁니다**(VM 마다 최근 ${keep ?? '—'}회 성공 백업과 그 체인의 기준 Full 은 남깁니다).`);
+  else parts.push(`지금 정리하면 지울 실행 기록이 없습니다(확인한 잡 ${jobs - failed}개 — 모두 최근 ${keep ?? '—'}회 안이거나 지우지 않는 조건).`);
+  if (failed) parts.push(`${failed}대는 확인하지 못했습니다(아래 사유) — 개수에 넣지 않았습니다.`);
+  if (r.noBase) parts.push(`${r.noBase}대는 기준 Full 을 찾지 못해 지우지 않습니다.`);
+  parts.push('아무것도 지우지 않은 미리 보기이고 지금 카탈로그 기준입니다 — 실제 정리는 그룹 백업이 끝난 뒤라 그사이 백업이 늘면 그만큼 더 지웁니다.');
+  return { text: parts.join(' '), tone: failed ? 'bad' : would > 0 ? 'warn' : 'ok' };
+}

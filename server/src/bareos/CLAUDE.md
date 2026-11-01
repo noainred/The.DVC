@@ -66,7 +66,6 @@
 - **v2.833·834 진행 현황판**(`liveStatus`·`liveParse` · `bareosLive2833`): 화면이 열린 동안만 `status client=`·`status director` · Director 마다 시한 · 흐름은 법인마다 · 모름은 null · 멈춤 의심은 FD 조회 성공일 때만. 전문 audits.md 'v2.833'·'v2.834'(정책 수집 'v2.839'·'v2.840').
 - 실환경 미확인(추정 — `tools/bareos-probe.js` 로 확인할 것): Node↔Director TLS-PSK 협상 · 잡 수준 FdPluginOptions 와 FileSet 플러그인 문자열 병합 ·
   `.bvfs_get_jobids` JSON 모양 · Profile ACL 지시어 이름 · `list jobs days=N` · 25.x `.jobs` 의 enabled 칸(master 소스 기준 — 없으면 다시 끄기를 하지 않는다) · Migration 행의 시작 시각.
-- **v2.828 조회 화면**(통합 `bareos-summary` · 법인별 `bareos-detail` — 조회 전용 키, adminOnly 아님 · `bareosViews2828`): 판정은 `vmView.js` 하나(웹 `bareosViewText.js` 와 대조) ·
-  **Director 에 접속하지 않는다**(원장 `jobDigests`·백업 표시·폴러 메모리만 — 소스 스윕) · 주소·콘솔·오류 원문 없음 · 범위 밖 404 · 캐시 키 = scopeKey + 표시·원장·설정 리비전 + 손상 여부 ·
-  미설정·인증 정지·조회 실패 법인은 결과 수 null(unknown = 잡 수) · 백업 방식 'bareos' 는 사람이 정한 값만(잡이 있다고 추정하지 않는다 — 미등록·방식 불일치를 따로 센다) ·
-  원장 상한 3,000(5,000 은 쓰기 54ms·복사 47ms 실측 — 더 올리려면 Director 별 파일 분할이 먼저).
+- **v2.828 조회 화면**(`bareos-summary`·`bareos-detail` — Director 에 접속하지 않는다 · 원장 상한 3,000): 전문은 audits.md 'Bareos v2.828 조회 화면 모듈 규칙'(옮김).
+- **v2.843 법인 로컬**(사용자 원칙 '백업은 법인 로컬, 통합 로그는 중앙' · `bareosLocal2843`): VM 수만큼 Director 를 부르는 일은 작업 하나(`ops.js`)로 법인 쪽에서 —
+  정리 미리 보기 `prunePreview` 는 pruneJobs 와 같은 입력(keep·since)·`pruneSelection` · **delete 없음 · MUTATING 밖** · 설정 응답 `siteAgent` 로 담당 엣지를 권한다. audits.md 'v2.843'.
