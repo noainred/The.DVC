@@ -16,7 +16,7 @@ import { startAdaptiveTimer } from '../util/adaptiveTimer.js';
 import { withDeadline } from '../util/deadline.js';
 import { poolSettled } from '../util/pool.js';
 import { loadSettings, onSettingsChange, directorConn, jobDirectorId } from './settings.js';
-import { pendingWork, applyRunRow, applyRestoreRow, listJobs, patchJob, inBatch, notePendingMiss, retiredNames, forgetRetired } from './registry.js';
+import { pendingWork, applyRunRow, applyRestoreRow, listJobs, jobDigests, patchJob, inBatch, notePendingMiss, retiredNames, forgetRetired } from './registry.js';
 import { onDirector, relayToEdge, isDemoActive, effectiveSettings, createBackupTarget } from './service.js';
 import { hasPending } from './edgeOps.js';
 import { config } from '../config.js';
@@ -84,8 +84,10 @@ async function pollDirector(d, { work, mine, retired, doReconcile, trigger, at, 
   const live = new Set(mine.map((j) => j.bareosJob));
   const disableIfEnabled = [...mine.filter((j) => !j.enabled).map((j) => j.bareosJob), ...retired.filter((r) => !live.has(r.name)).map((r) => r.name)];
   // v2.823 검토(P3 — 재현): 실제로 끌 이름은 `.jobs` 를 읽은 뒤 **그 순간의 원장**에서 고른다(위 목록은 엣지 대행용 사본일 뿐).
+  // v2.846 버그 점검(C-5 — 측정): '그 순간의 원장' 은 그대로(P3) 읽되 깊은 복사(listJobs — 3,000건 약 100ms)가 아니라 얕은 요약(jobDigests)으로 —
+  //   Director 마다 부르므로 28개 대조 틱이면 깊은 복사 28번이었다. 쓰는 칸(enabled·bareosJob·directorId·vcenterId·demo)은 요약에도 있다.
   const disableNow = (states) => {
-    const nowJobs = listJobs().filter((j) => modeOk(j) && dirOfJob(j) === d.id);
+    const nowJobs = jobDigests().filter((j) => modeOk(j) && dirOfJob(j) === d.id);
     const nowLive = new Set(nowJobs.map((j) => j.bareosJob));
     const names = [...nowJobs.filter((j) => !j.enabled).map((j) => j.bareosJob),
       ...retiredNames().filter((r) => modeOk(r) && r.directorId === d.id && !nowLive.has(r.name)).map((r) => r.name)];
@@ -182,7 +184,7 @@ function applyPoll({ d, base, rot, slice, mine, retired, live, due, seq, reconci
  * 그사이 사용자가 다시 켠 잡을 엣지가 껐으면(회신의 redisabled 중 지금 원장이 켜짐) 그 Director 에 다시 켠다(최선 — 실패는 로그).
  */
 function compensateRedisabled(d, names, { dirOfJob, modeOk }) {
-  const enabledNow = new Set(listJobs().filter((j) => modeOk(j) && dirOfJob(j) === d.id && j.enabled).map((j) => j.bareosJob));
+  const enabledNow = new Set(jobDigests().filter((j) => modeOk(j) && dirOfJob(j) === d.id && j.enabled).map((j) => j.bareosJob));   // C-5: 얕은 요약으로
   for (const name of names.filter((n) => enabledNow.has(n))) {
     relayToEdge(d, 'setEnabled', { name, enabled: true }).then(
       () => console.warn(`[bareos] ‘${d.name}’ 엣지가 조회 중 다시 끈 잡 ${name} 은 그사이 사용자가 켰습니다 — 다시 켰습니다.`),
@@ -220,7 +222,7 @@ export async function pollOnce({ trigger = 'timer', reconcile = null, directorId
     const modeOk = (x) => (demo ? x.demo : !x.demo);
     const dirOfJob = (j) => jobDirectorId(j, eff);
     const work = pendingWork().filter(modeOk);
-    const jobs = listJobs().filter(modeOk);
+    const jobs = jobDigests().filter(modeOk);   // C-5(v2.846): 틱마다 한 번 · 쓰는 칸(id·bareosJob·enabled·missingInDirector·directorId)은 얕은 요약에 있다
     const retired = retiredNames().filter(modeOk);
     const only = directorId ? new Set([directorId]) : (Array.isArray(directorIds) ? new Set(directorIds) : null);   // 범위 계정의 수동 조회(S1)
     const targets = only ? ready.filter((d) => only.has(d.id)) : ready;

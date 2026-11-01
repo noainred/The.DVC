@@ -13,19 +13,21 @@ import { STable } from '../../components/STable.jsx';
 import Select from '../../components/Select.jsx';
 import DataList from '../../components/DataList.jsx';
 import BoldText from '../../components/boldText.jsx';
-import { fmtGb, flattenBareosTree, initialBareosOpen, shortTs, stText, runLine } from './bareosViewText.js';
+import { fmtGb, flattenBareosTree, initialBareosOpen, shortTs, stText, runLine, resultsUnknownText } from './bareosViewText.js';
 import { takeBareosGroupHandoff } from './backupViewText.js';   // v2.835 Backup › Detail 'Bareos 그룹 등록 →' 이 넘긴 VM
 import { relayWaitMs, outcomeUnknown, unknownOutcomeText } from './bareosText.js';
 import {
   DAY_NAMES, LEVELS, NEW_SCHEDULE, scheduleText, draftIssues, toggleDay, GROUP_FILTERS, groupFilterCounts, pickable, buildGroupTree, checkState,
   FIRE_STATE_TEXT, FIRE_STATE_TONE, fireText, fireTone, isDaily, setCadence, scheduleParts,
   KEEP_PRESETS, KEEP_DEFAULT, NEW_GROUP_KEEP, keepOtpReasons, keepText, stepKeep, keepMeaning, keepParts, fireKeepBadge, KEEP_BADGE_TEXT, untilText,
-  memberResults, resultBadge, folderSummary, sizeSum, prunePreviewText,
+  memberResults, resultBadge, folderSummary, sizeSum, prunePreviewText, unscheduledAfter, unscheduledText, groupDeleteConfirmText,
 } from './bareosGroupText.js';
 import { groupPoolText, overlapLine, retentionText } from './bareosPolicyText.js';   // v2.840 카드 '적용 풀 · 보존' · 겹침
 
 const BASE = '/tools/bareos-backup';
 const fin = (v) => typeof v === 'number' && Number.isFinite(v);
+/** v2.846 버그 점검(U-9): 그 법인 Director 의 결과를 믿을 수 있나 — 서버가 통합·법인별 현황과 같은 판정(vmView.directorState)으로 싣는다. 옛 서버(칸 없음)는 예전처럼. */
+const resultsKnownOf = (tree) => tree?.directorState?.resultsKnown !== false;
 const enc = encodeURIComponent;
 const VC_KEY = 'bareos-groups-vc';
 const ROW = { display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8 };
@@ -221,12 +223,14 @@ export default function BareosGroupsTab({ d }) {
   const sameVc = (v0) => vcRef.current === v0;
 
   const remove = async (g) => {
-    if (!window.confirm(`‘${g.name}’ 그룹을 지울까요?\n그룹만 지웁니다 — VM ${g.vmIds.length}대의 백업 대상(잡)과 백업 데이터는 그대로 남습니다.`)) return;
+    // v2.846 버그 점검(D-9): 지운 뒤 어떤 예약에도 없는 잡(그룹이 Director 스케줄 없이 등록한 잡) 수를 확인 창과 결과에 밝힌다
+    if (!window.confirm(groupDeleteConfirmText(g, unscheduledAfter(g.vmIds, byId, g.id)))) return;
     const v0 = vc; mark(g.id, true); setMsg(null);
     try {
       const r = await delJson(`${BASE}/groups/${enc(g.id)}`);
       if (r?.ok === false) throw new Error(r.reason || '지우지 못했습니다.');
-      if (sameVc(v0)) { setMsg({ ok: true, text: `‘${g.name}’ 그룹을 지웠습니다(백업 대상은 남김).` }); setView({ kind: 'list' }); }
+      const un = unscheduledText(r?.unscheduled?.count || 0);
+      if (sameVc(v0)) { setMsg({ ok: true, text: `‘${g.name}’ 그룹을 지웠습니다(백업 대상은 남김).${un ? ` **${un}**` : ''}` }); setView({ kind: 'list' }); }
     } catch (e) { if (sameVc(v0)) setMsg({ ok: false, text: `오류: ${errText(e)}` }); } finally { mark(g.id, false); if (sameVc(v0)) load(); }
   };
   const run = async (g, level) => {
@@ -297,7 +301,7 @@ export default function BareosGroupsTab({ d }) {
 
 function CorpBar({ vc, setVc, options, tree, vms, loading, onReload }) {
   const inGroup = vms.filter((v) => v.groupId).length;
-  const m = memberResults(vms.filter((v) => v.groupId));
+  const m = memberResults(vms.filter((v) => v.groupId), { resultsKnown: resultsKnownOf(tree) });
   const dir = tree?.director;
   return (
     <section className="card" style={{ padding: '12px 14px', marginBottom: 12, display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', gap: 10, minWidth: 0 }}>
@@ -314,7 +318,9 @@ function CorpBar({ vc, setVc, options, tree, vms, loading, onReload }) {
           <span>전체 VM <b>{vms.length}</b></span>
           <span>그룹에 속함 <b>{inGroup}</b></span>
           <span>그룹 없음 <b style={{ color: vms.length - inGroup ? TONE.warn : undefined }}>{vms.length - inGroup}</b></span>
-          <span className="muted">그룹 VM 마지막 결과 <b style={{ color: TONE.ok }}>성공 {m.ok + m.warn}</b> · <b style={{ color: m.fail ? TONE.bad : undefined }}>실패 {m.fail}</b> · <b style={{ color: m.run ? TONE.run : undefined }}>진행 {m.run}</b>{m.never ? ` · 기록 없음 ${m.never}` : ''}</span>
+          {m.unknown
+            ? <span className="muted" title={resultsUnknownText({ ...tree.directorState, resultsKnown: false }) || ''}>그룹 VM 마지막 결과 <b>모름</b>(Director {tree.directorState?.state === 'auth' ? '인증 정지' : tree.directorState?.state === 'error' ? '조회 실패' : '미설정'} — 마지막으로 읽은 값이라 세지 않습니다)</span>
+            : <span className="muted">그룹 VM 마지막 결과 <b style={{ color: TONE.ok }}>성공 {m.ok + m.warn}</b> · <b style={{ color: m.fail ? TONE.bad : undefined }}>실패 {m.fail}</b> · <b style={{ color: m.run ? TONE.run : undefined }}>진행 {m.run}</b>{m.never ? ` · 기록 없음 ${m.never}` : ''}</span>}
         </div>
       )}
     </section>
@@ -374,7 +380,7 @@ function overlapOf(ovl, g) {
 function GroupCard({ g, tree, byId, writable, busy, ovl, onRun, onEdit, onDetail }) {
   const rows = g.vmIds.map((id) => byId.get(id)).filter(Boolean);
   const size = sizeSum(rows);
-  const badge = g.running ? { text: g.pruning ? '보관 정리 중' : '실행 중', tone: 'run' } : resultBadge(memberResults(rows));
+  const badge = g.running ? { text: g.pruning ? '보관 정리 중' : '실행 중', tone: 'run' } : resultBadge(memberResults(rows, { resultsKnown: resultsKnownOf(tree) }));
   const sp = scheduleParts(g.schedule);
   const kp = keepParts(g);
   const ov = overlapOf(ovl, g);
@@ -423,6 +429,7 @@ function savedText(r, isNew) {
   if (reg) parts.push(`새로 등록한 백업 대상 ${reg}대(Director 스케줄 없음)`);
   if (r.excluded?.length) parts.push(`**등록하지 못해 뺀 VM ${r.excluded.length}대**`);
   if (r.doubleScheduled?.length) parts.push(`**Director 스케줄이 있는 잡 ${r.doubleScheduled.length}대 — 그룹 스케줄과 함께 두 번 돕니다**`);
+  if (r.unscheduled?.count) parts.push(`**뺀 VM 중 ${unscheduledText(r.unscheduled.count)}**`);   // D-9(v2.846)
   return parts.join(' · ');
 }
 
@@ -474,6 +481,8 @@ function GroupEdit({ tree, group, initialFilter, initialSel, vms, byId, groupNam
   const doubled = sched.enabled ? members.filter((m) => m.job?.schedule) : [];
   // 반증 F5: 보관 개수가 있는 그룹에 이력이 있는 VM 을 더하면 그 VM 의 예전 백업도 정리 대상이 된다 — 미리 알린다
   const addedWithHistory = members.filter((m) => !(group?.vmIds || []).includes(m.id) && m.job && m.b?.ok != null).length;
+  // v2.846 버그 점검(D-9): 이 저장으로 빠지는 VM 중 이제 어떤 예약에도 없는 잡(그룹이 Director 스케줄 없이 등록) — 미리 알리고 저장 때 확인을 받는다
+  const removedUnscheduled = group ? unscheduledAfter((group.vmIds || []).filter((id) => !sel.has(id)), byId, group.id) : 0;
   // v2.831.1 사용자 결정: 지울 범위가 넓어지는 저장(보관 개수를 정함·줄임·기존 잡 VM 추가)은 본인 OTP — 서버가 다시 판정한다
   const otpReasons = keepOtpReasons(group, { keep, vmIds }, (id) => !!byId.get(id)?.job);
   const needOtp = otpReasons.length > 0 || !!serverOtp?.length;
@@ -486,6 +495,7 @@ function GroupEdit({ tree, group, initialFilter, initialSel, vms, byId, groupNam
   const waitMs = toRegister > 0 ? relayWaitMs(tree.relayLimits, 'addJobs') : null;
 
   const save = async (runAfter) => {
+    if (removedUnscheduled > 0 && !window.confirm(`그룹에서 빼는 VM 중 ${unscheduledText(removedUnscheduled)} — 이 그룹이 돌리던 VM 이라 Director 스케줄이 없습니다. 다른 그룹에 넣거나 지금 백업을 직접 실행해야 합니다.\n그래도 저장할까요?`)) return;
     setSaving(runAfter ? 'run' : 'save'); setResult(null);
     const body = { name, vmIds, schedule: sched, storage, pool, keep, ...(needOtp ? { otp } : {}), ...(group ? { updatedAt: group.updatedAt } : {}) };
     const o = waitMs ? { timeoutMs: waitMs } : {};
@@ -724,6 +734,7 @@ function GroupEdit({ tree, group, initialFilter, initialSel, vms, byId, groupNam
             </section>
           )}
           {toRegister > 0 && <div className="muted" style={{ fontSize: 12.5 }}>저장하면 잡이 없는 {toRegister}대를 백업 대상으로 등록합니다(Director 스케줄 없이 — 그룹이 실행).</div>}
+          {removedUnscheduled > 0 && <div className="banner warn" style={{ fontSize: 12.5 }}>그룹에서 빼는 VM 중 <b>{unscheduledText(removedUnscheduled)}</b> — 이 그룹이 돌리던 VM 이라 Director 스케줄이 없습니다(백업 대상 · 데이터는 남습니다).</div>}
           {doubled.length > 0 && (
             <div className="banner warn" style={{ fontSize: 12.5 }}>
               Director 스케줄이 있는 잡 {doubled.length}대({doubled.slice(0, 3).map((m) => m.name).join(', ')}{doubled.length > 3 ? ' …' : ''}) — 그룹 스케줄과 함께면 두 번 백업됩니다.
@@ -760,7 +771,7 @@ function GroupEdit({ tree, group, initialFilter, initialSel, vms, byId, groupNam
 function GroupDetail({ tree, g, byId, writable, busy, onBack, onRun, onEdit, onDelete, onFire }) {
   const rows = g.vmIds.map((id) => byId.get(id) || { id, name: id, folder: '', missing: true });
   const size = sizeSum(rows.filter((r) => !r.missing));
-  const badge = g.running ? { text: g.pruning ? '보관 정리 중' : '실행 중', tone: 'run' } : resultBadge(memberResults(rows.filter((r) => !r.missing)));
+  const badge = g.running ? { text: g.pruning ? '보관 정리 중' : '실행 중', tone: 'run' } : resultBadge(memberResults(rows.filter((r) => !r.missing), { resultsKnown: resultsKnownOf(tree) }));
   const sp = scheduleParts(g.schedule);
   const kp = keepParts(g);
   const fires = Array.isArray(g.fires) ? g.fires : [];

@@ -9,7 +9,8 @@
  *     그런 Full 이 없으면(카탈로그에 없음·못 읽음) **아무것도 지우지 않는다**(무엇이 기준인지 모르면 지우지 않는다).
  *  ② 끝나지 않은 실행(대기·실행 중)은 지우지 않는다. 이 잡 이름의 백업(type B)만 본다 — 복원·복사·이전 행은 건드리지 않는다.
  *  ③ 성공한 복원 지점이 N개 이하면 아무것도 지우지 않는다. 지우는 것은 기준 Full **보다 앞의** 끝난 실행만이다.
- *  ④ 순서는 jobid(카탈로그가 만든 순서 — 시작 시각은 못 읽을 수 있다). 한 번에 지우는 수에 상한(PRUNE_MAX_PER_JOB).
+ *  ④ 순서는 jobid(카탈로그가 만든 순서 — 시작 시각은 못 읽을 수 있다). 한 번에 지우는 수에 상한(PRUNE_MAX_PER_JOB) — 넘으면 기준 Full 쪽(새 것)부터 고르고
+ *     새 jobid 부터 지운다(⑩ v2.846 D-3 — 중간에 끊겨도 남는 것이 온전한 체인 앞부분).
  *  ⑤ 보관 개수가 없으면(null — v2.830 에 만든 그룹·'제한 없음') 정리하지 않는다.
  *  ⑨ 원장 잡의 등록 시각보다 먼저 시작한 행은 지우지 않는다(같은 이름으로 다시 등록한 잡이 예전 이력을 OTP 없이 정리하지 않게 — v2.831.1 반증 F1).
  *  ⑥~⑧ 반증 검토(F1·F2·F3·F6): 복사·이전 행이 있거나 · jobid 와 시작 시각 순서가 어긋나거나 · 시작 시각을 모르면 지우지 않는다 · 기준 Full 은 바이트가 있는 것만.
@@ -75,7 +76,13 @@ export function pruneSelection(runs, keep, name, { since = null } = {}) {
   if (!base) return none('남기는 백업의 기준 Full 을 카탈로그에서 찾지 못해 지우지 않았습니다(체인을 끊지 않게).');
   const deletable = rows.filter((r) => r.jobid < base.jobid && isFinalStatus(r.status)).map((r) => r.jobid);
   const kept = good.filter((r) => r.jobid >= base.jobid).length;
-  const out = { deletable: deletable.slice(0, PRUNE_MAX_PER_JOB), kept, good: good.length, baseJobid: base.jobid, baseAt: base.startedAt, reason: '' };
+  // ⑩ v2.846 버그 점검(D-3 — 재현): 상한을 넘으면 **기준 Full 쪽(가장 새 것) PRUNE_MAX_PER_JOB 건**을 고른다(예전에는 가장 오래된 200건 —
+  //   자른 자리가 체인 중간이면 그 Full 만 지워지고 딸린 Incremental 이 남아, 복원 지점으로 보이지만 '체인 없음' 이거나 예전 등록 시절 Full 위에 얹혔다).
+  //   새 쪽을 고르면 남는 것은 늘 '오래된 Full + 그 뒤 실행' 의 앞부분(온전한 체인)이고, 지우는 순서도 새 jobid → 옛 jobid(director.deleteJobIds)라
+  //   도중에 끊겨도 같다. 남은 앞부분은 다음 정리 때 다시 새 쪽부터 지운다(⚠ '앞 200건 안의 마지막 F 앞까지만' 은 F 뒤 실행이 200을 넘으면 영원히 0건이다).
+  //   목록은 오름차순 그대로 돌려준다(보내는 순서는 deleteJobIds 가 정한다) · 미리 보기(prunePreview)와 정리(pruneJobs)가 이 함수 하나를 쓴다.
+  const picked = deletable.length > PRUNE_MAX_PER_JOB ? deletable.slice(-PRUNE_MAX_PER_JOB) : deletable;
+  const out = { deletable: picked, kept, good: good.length, baseJobid: base.jobid, baseAt: base.startedAt, reason: '' };
   if (deletable.length > PRUNE_MAX_PER_JOB) out.more = deletable.length - PRUNE_MAX_PER_JOB;
   return out;
 }

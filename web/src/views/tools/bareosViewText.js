@@ -177,6 +177,19 @@ export function initialBareosOpen(tree) {
 /* ── 우선 확인(통합 현황) ── */
 export const PRIORITY_TEXT = { fail: '실패', missing: '미등록', old: '오래된 백업', never: '백업 없음' };
 export const PRIORITY_TONE = { fail: 'bad', missing: 'warn', old: 'warn', never: 'muted' };
+/**
+ * v2.846 버그 점검(U-8): 서버가 VM 단위 목록을 싣지 않은 경우(법인별 현황 권한 없음 — bareosViews summaryData 의 priorityWithheld) —
+ *   칩 수는 '—'(0 이 아니다) · 빈 표 문구는 '확인할 VM 없음' 이 아니라 권한 안내.
+ */
+export const PRIORITY_WITHHELD_TEXT = '법인별 현황(Bareos 법인별) 권한이 있어야 VM 목록이 보입니다 — 이 계정에는 우선 확인 목록을 싣지 않았습니다(확인할 VM 이 없다는 뜻이 아닙니다).';
+/** 우선 확인 칩 글자 — 목록을 받지 못했으면 '—'. */
+export function priorityChips(data) {
+  const held = !!data?.priorityWithheld;
+  const n = (v) => (held ? '—' : String(isFin(v) ? v : 0));
+  return [['all', `전체 ${n(data?.priorityTotal)}`], ...Object.keys(PRIORITY_TEXT).map((k) => [k, `${PRIORITY_TEXT[k]} ${n(data?.priorityByKind?.[k])}`])];
+}
+/** 우선 확인 표가 비었을 때 문구. */
+export const priorityEmptyText = (data) => (data?.priorityWithheld ? PRIORITY_WITHHELD_TEXT : '확인할 VM 이 없습니다.');
 
 /* ── Detail → Bareos 관리 화면 넘기기(Veeam 백업 실행 handoff 와 같은 모양 · 10분 · 200대) ── */
 export const BAREOS_HANDOFF_KEY = 'bareos-backup.handoff';

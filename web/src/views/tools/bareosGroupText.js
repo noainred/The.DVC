@@ -207,8 +207,12 @@ export function untilText(ms) {
   if (h < 48) return `${h}시간 ${m % 60}분 뒤`;
   return `${Math.floor(h / 24)}일 ${h % 24}시간 뒤`;
 }
-/** 그룹 VM 들의 마지막 결과(법인별 현황과 같은 판정 — b) → 성공(경고 포함)·실패·진행·기록 없음 수. */
-export function memberResults(rows) {
+/**
+ * 그룹 VM 들의 마지막 결과(법인별 현황과 같은 판정 — b) → 성공(경고 포함)·실패·진행·기록 없음 수.
+ * v2.846 버그 점검(U-9): resultsKnown=false(그 법인 Director 인증 정지 · 조회 실패 · 미설정 — 서버 tree.director.resultsKnown, 판정은 vmView.directorState 하나)면
+ *   결과 칸은 마지막으로 읽은 값이라 세지 않는다 — ok·warn·fail·run·never 는 null, unknown = VM 수(통합·법인별 현황 corpCounts 와 같은 규칙).
+ */
+export function memberResults(rows, { resultsKnown = true } = {}) {
   const out = { n: 0, ok: 0, warn: 0, fail: 0, run: 0, never: 0 };
   for (const r of Array.isArray(rows) ? rows : []) {
     out.n++;
@@ -219,16 +223,41 @@ export function memberResults(rows) {
     else if (b?.st === 'error' || b?.st === 'canceled') out.fail++;
     else if (!b?.run) out.never++;
   }
+  if (resultsKnown === false) return { n: out.n, ok: null, warn: null, fail: null, run: null, never: null, unknown: out.n };
   return out;
 }
-/** 카드 오른쪽 위 표지 — 진행 · 실패 · 성공 · 기록 없음. */
+/** 카드 오른쪽 위 표지 — 진행 · 실패 · 성공 · 기록 없음 · (Director 결과 모름) 모름. */
 export function resultBadge(m) {
   if (!m?.n) return { text: 'VM 없음', tone: 'muted' };
+  if (m.unknown) return { text: `결과 모름 ${m.unknown}대`, tone: 'muted' };
   if (m.run) return { text: `진행 ${m.run}/${m.n}`, tone: 'run' };
   if (m.fail) return { text: `실패 ${m.fail} · 성공 ${m.ok + m.warn}`, tone: 'bad' };
   if (m.ok + m.warn) return { text: `성공 ${m.ok + m.warn}/${m.n}${m.warn ? ` (경고 ${m.warn})` : ''}`, tone: m.never ? 'warn' : 'ok' };
   return { text: '백업 기록 없음', tone: 'muted' };
 }
+/**
+ * v2.846 버그 점검(D-9): 그룹에서 빠지면(그룹 삭제 · 편집에서 빼기) 어떤 예약에도 걸리지 않는 VM 수 — 서버 bareosGroups.unscheduledAfter 와 같은 판정
+ * (잡 있음 · 켜짐 · Director 스케줄 없음 · 이 그룹 밖의 다른 그룹 아님). 그룹이 등록한 잡은 Director 스케줄 없이 만들어진다.
+ * @param {string[]} vmIds  빠질 VM
+ * @param {Map<string, object>} byId  트리 행(vms — job{ schedule, enabled } · groupId)
+ * @param {string} groupId  지우거나 고치는 그룹
+ */
+export function unscheduledAfter(vmIds, byId, groupId = '') {
+  let n = 0;
+  for (const id of Array.isArray(vmIds) ? vmIds : []) {
+    const r = byId?.get?.(id);
+    if (r?.job && r.job.enabled !== false && !r.job.schedule && (!r.groupId || r.groupId === groupId)) n++;
+  }
+  return n;
+}
+/** 서버 응답·감사와 같은 글자 — 0 이면 ''. */
+export const unscheduledText = (n) => (n > 0 ? `스케줄 없는 잡 ${n}개 — 이후 예약 백업 없음` : '');
+/** 그룹 삭제 확인 창 문구(D-9 — 지운 뒤 예약 백업이 멈추는 VM 수를 밝힌다). */
+export function groupDeleteConfirmText(g, n) {
+  const base = `‘${g?.name || ''}’ 그룹을 지울까요?\n그룹만 지웁니다 — VM ${(g?.vmIds || []).length}대의 백업 대상(잡)과 백업 데이터는 그대로 남습니다.`;
+  return n > 0 ? `${base}\n\n주의: ${unscheduledText(n)} — 이 그룹이 돌리던 VM 이라 Director 스케줄이 없습니다. 다른 그룹에 넣거나 지금 백업을 직접 실행해야 합니다.` : base;
+}
+
 /** 멤버 폴더 요약 — 하나면 그 폴더, 여럿이면 '첫 폴더 외 N곳'. */
 export function folderSummary(rows) {
   const set = [...new Set((Array.isArray(rows) ? rows : []).map((r) => r.folder || '').filter(Boolean))].sort();
@@ -272,6 +301,8 @@ export function prunePreviewText(r) {
   const would = Number(r.would) || 0;
   const failed = Number(r.failed) || 0;
   if (!jobs) return { text: '이 그룹에는 Bareos 잡이 등록된 VM 이 없습니다 — 지울 실행 기록이 없습니다.', tone: 'ok' };
+  // v2.846 버그 점검(U-10): 한 대도 확인하지 못했으면(Director 접속 실패 — failed = jobs) 지울 건수를 **모른다** — '지울 기록 없음' 으로 시작하지 않는다
+  if (failed >= jobs) return { text: `잡 ${jobs}개를 한 대도 확인하지 못했습니다(아래 사유) — 지울 건수를 모릅니다. 아무것도 지우지 않은 미리 보기입니다.`, tone: 'bad' };
   const parts = [];
   if (would > 0) parts.push(`**지금 정리하면 VM ${Number(r.vms) || 0}대에서 실행 기록 ${would}건을 카탈로그에서 지웁니다**(VM 마다 최근 ${keep ?? '—'}회 성공 백업과 그 체인의 기준 Full 은 남깁니다).`);
   else parts.push(`지금 정리하면 지울 실행 기록이 없습니다(확인한 잡 ${jobs - failed}개 — 모두 최근 ${keep ?? '—'}회 안이거나 지우지 않는 조건).`);

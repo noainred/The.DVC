@@ -16,7 +16,7 @@ import BareosPoolsTab from './BareosPoolsTab.jsx';
 import { useHashTab } from '../../hooks/useHashTab.js';
 import { CritIcon } from './BackupMarkIcons.jsx';
 import {
-  directorStateOf, numText, resultBar, shortTs, fmtGb, PRIORITY_TEXT, PRIORITY_TONE, BAREOS_RPO_DAYS, BAREOS_DETAIL_VC_KEY, stText,
+  directorStateOf, numText, resultBar, shortTs, fmtGb, PRIORITY_TEXT, PRIORITY_TONE, BAREOS_RPO_DAYS, BAREOS_DETAIL_VC_KEY, stText, priorityChips, priorityEmptyText,
 } from './bareosViewText.js';
 
 const TONE = { ok: '#86efac', warn: '#fcd34d', bad: '#fca5a5', run: '#93c5fd', muted: 'var(--text-dim)', bareos: '#fdba74' };
@@ -222,7 +222,7 @@ function BareosSummaryView() {
             <div className="muted" style={{ fontSize: 12 }}>중요도 상 먼저 · 실패 → 미등록 → 오래된 백업 → 백업 없음 · 결과를 모르는 법인은 실패·오래됨 판정에서 뺐습니다{data.priorityTotal > prio.length ? ` · 상한으로 ${data.priorityTotal - prio.length}건 생략(CSV·법인별 화면에서 보세요)` : ''}</div>
           </div>
           <div className="flex gap wrap" role="group" aria-label="종류" style={{ marginLeft: 'auto', rowGap: 6 }}>
-            {[['all', `전체 ${data.priorityTotal || 0}`], ...Object.keys(PRIORITY_TEXT).map((k) => [k, `${PRIORITY_TEXT[k]} ${data.priorityByKind?.[k] || 0}`])].map(([k, label]) => (
+            {priorityChips(data).map(([k, label]) => (   // U-8(v2.846): 권한이 없어 목록을 받지 못했으면 수는 '—'
               <button key={k} type="button" className={`tab${pKind === k ? ' active' : ''}`} aria-pressed={pKind === k} onClick={() => setPKind(k)} style={{ padding: '4px 12px', fontSize: 12 }}>{label}</button>
             ))}
           </div>
@@ -252,7 +252,7 @@ function BareosSummaryView() {
                 <td style={{ padding: '7px 14px 7px 6px' }}><button type="button" className="tab" onClick={() => openBareosDetail(x.vcenterId)} style={{ padding: '3px 10px', fontSize: 12 }}>법인별 →</button></td>
               </tr>
             ))}
-            {!pShown.length && <tr><td colSpan={6} className="muted" style={{ padding: 16 }}>확인할 VM 이 없습니다.</td></tr>}
+            {!pShown.length && <tr><td colSpan={6} className="muted" style={{ padding: 16 }}>{priorityEmptyText(data)}</td></tr>}
           </tbody>
         </STable>
         {pShown.length > 20 && <div style={{ padding: '6px 14px 10px' }}><button type="button" className="tab" onClick={() => setPAll((v) => !v)} style={{ padding: '4px 12px', fontSize: 12 }}>{pAll ? '20건만 보기' : `전부 보기(${pShown.length}건)`}</button></div>}

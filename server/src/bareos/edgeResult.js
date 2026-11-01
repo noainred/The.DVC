@@ -22,6 +22,17 @@ const nonNeg = (v) => { const n = numOrNull(v); return n !== null && n >= 0 ? n 
 const timeOf = (v) => { const n = numOrNull(v); return n !== null && n > 946_684_800_000 && n < 4_102_444_800_000 ? n : null; };
 const names = (v, cap = 2000) => (Array.isArray(v) ? v.slice(0, cap).map((x) => str(x, 128)).filter(Boolean) : null);
 
+/*
+ * v2.846(S-4) 자동 설정 대행 회신의 경로 모양 — autoSetup.js 가 만드는 값 그대로(글자를 바꾸면 이 표도 함께):
+ *   setup.director 파일 = DIR_CONF_ROOT/<종류>/<리소스 이름>.conf · FD INI = 사이트 매핑 configFile(settings FD_PATH_RE — 절대 경로 · 영문·숫자·._-/ · '..' 없음) ·
+ *   FD 플러그인 = FD_PLUGIN_DIRS 하나 · 사본 = myself.conf.portal-bak.<ms> · 넣은 줄 = Plugin Directory/Names 두 줄(fdPluginEdit).
+ */
+const SETUP_DIR_FILE_RE = /^\/etc\/bareos\/bareos-dir\.d\/[a-z]+\/[A-Za-z0-9._-]{1,64}\.conf$/;
+const FD_INI_PATH_RE = /^\/[A-Za-z0-9._/-]{1,250}$/;
+const FD_PLUGIN_DIR_RE = /^\/usr\/lib(64)?\/bareos\/plugins$/;
+const FD_BACKUP_RE = /^\/etc\/bareos\/bareos-fd\.d\/client\/myself\.conf\.portal-bak\.\d{10,16}$/;
+const FD_ADDED_RE = /^Plugin (Directory = "\/usr\/lib(64)?\/bareos\/plugins"|Names = "python3")$/;
+
 /** 카탈로그 잡 행(director.js normalizeJobRow 모양). */
 export function rowOut(v) {
   if (!v || typeof v !== 'object') return null;
@@ -148,12 +159,29 @@ export const VALUE = Object.freeze({
         .map((x) => ({ type: x.type, name: x.name, state: x.state })) : null,
     };
   },
+  // v2.846 버그 점검(S-4 — 재현): 감사 detail 에 들어가는 경로·줄은 **그 작업이 만드는 모양만** 받는다(setup.manage 의 반증 E5 와 같은 규칙).
+  //   예전에는 str()(제어문자·길이)만 해서 변조된 엣지가 '(위조) … 승인자 kim' 같은 글을 감사에 넣을 수 있었다. 모양이 틀리면 버린다(경로 '' · 줄 제외).
   'setup.director': (v) => {
     const r = obj(v);
-    return { files: arr(r.files).slice(0, 20).map((x0) => { const x = obj(x0); return { path: str(x.path, 300), action: str(x.action, 20) }; }), test: str(r.test, 600), reload: str(r.reload, 600), probe: VALUE.probe(r.probe) };
+    return {
+      files: arr(r.files).slice(0, 20).map((x0) => { const x = obj(x0); return { path: str(x.path, 300), action: ['created', 'updated', 'unchanged'].includes(x.action) ? x.action : 'unknown' }; }).filter((x) => SETUP_DIR_FILE_RE.test(x.path)),
+      test: str(r.test, 600), reload: str(r.reload, 600), probe: VALUE.probe(r.probe),
+    };
   },
-  'setup.fdPlugin': (v) => { const r = obj(v); return { action: r.action === 'updated' ? 'updated' : 'unchanged', pluginDir: str(r.pluginDir, 120), backup: str(r.backup, 300), added: arr(r.added).slice(0, 4).map((x) => str(x, 120)) }; },
-  'setup.fdIni': (v) => { const r = obj(v); return { path: str(r.path, 300), action: str(r.action, 20), plugin: r.plugin === 'installed' ? 'installed' : 'missing', pluginText: str(r.pluginText, 200), ...(r.note ? { note: str(r.note, 200) } : {}) }; },
+  'setup.fdPlugin': (v) => {
+    const r = obj(v);
+    const pluginDir = str(r.pluginDir, 120);
+    const backup = str(r.backup, 300);
+    return {
+      action: r.action === 'updated' ? 'updated' : 'unchanged', pluginDir: FD_PLUGIN_DIR_RE.test(pluginDir) ? pluginDir : '',
+      backup: FD_BACKUP_RE.test(backup) ? backup : '', added: arr(r.added).slice(0, 4).map((x) => str(x, 120)).filter((x) => FD_ADDED_RE.test(x)),
+    };
+  },
+  'setup.fdIni': (v) => {
+    const r = obj(v);
+    const p = str(r.path, 300);
+    return { path: FD_INI_PATH_RE.test(p) && !/(^|\/)\.\.(\/|$)/.test(p) ? p : '', action: ['created', 'updated'].includes(r.action) ? r.action : 'unknown', plugin: r.plugin === 'installed' ? 'installed' : 'missing', pluginText: str(r.pluginText, 200), ...(r.note ? { note: str(r.note, 200) } : {}) };
+  },
   'setup.thumbprint': (v) => { const r = obj(v); const tp = str(r.thumbprint, 40); return { thumbprint: /^[0-9A-F]{40}$/.test(tp) ? tp : '', subject: str(r.subject, 300), notAfter: str(r.notAfter, 60) }; },
   // v2.845 법인별 설정 쓰기 — 파일 경로 · 동작만(내용 · 비밀 없음)
   'setup.manage': (v) => {
@@ -168,11 +196,15 @@ export const VALUE = Object.freeze({
  * 성공 값에 꼭 있어야 하는 것(v2.824 검토 C9) — 없으면 '성공' 으로 받지 않는다. 상태를 바꾼 작업이라 실패로 단정하지 않고 '결과 모름'.
  * (runJob 의 jobid 가 null 이면 원장에 jobid 없는 실행이, restore 의 rid 가 null 이면 열린 복원이 남았다.)
  */
+// v2.846 버그 점검(E-3): 사유 문구를 작업마다 둔다 — 공용 문구가 setup.manage(jobid 가 없는 작업)에도 '결과 값(jobid) · Director 에서 확인' 이라고 말했다.
 const REQUIRED = Object.freeze({
-  runJob: (v) => v !== null,
-  restore: (v) => v.rid !== null,
-  'setup.manage': (v) => v.files.length > 0,   // v2.845 — 바꾼(또는 그대로 둔) 파일 목록이 없으면 무엇을 했는지 모른다
+  runJob: { check: (v) => v !== null, what: '결과 값(jobid)을 읽지 못했습니다 — 실행됐는지 알 수 없습니다. Director 에서 확인하세요.' },
+  restore: { check: (v) => v.rid !== null, what: '복원 jobid 를 읽지 못했습니다 — 복원이 시작됐는지 알 수 없습니다. Director 에서 확인하세요.' },
+  // v2.845 — 바꾼(또는 그대로 둔) 파일 목록이 없으면 무엇을 했는지 모른다
+  'setup.manage': { check: (v) => v.files.length > 0, what: '바꾼 파일 목록을 읽지 못했습니다 — 무엇을 바꿨는지 알 수 없습니다. 그 서버의 /etc/bareos/bareos-dir.d · bareos-sd.d 파일을 확인하세요.' },
 });
+/** 회신 종류의 '필수 값 없음' 사유(시험용 · 없으면 ''). */
+export const requiredMissingText = (kind) => (REQUIRED[kind] ? `엣지가 성공이라고 회신했지만 ${REQUIRED[kind].what}` : '');
 
 /** 엣지가 돌려줄 수 있는 오류 코드(그 밖은 'error'). */
 const CODES = new Set(['invalid', 'conflict', 'not-configured', 'not-found', 'auth', 'pam', 'tls', 'connect', 'closed', 'timeout', 'aborted', 'protocol', 'too-large',
@@ -188,7 +220,7 @@ export function sanitizeEdgeResult(kind, result) {
   if (!fn) return { ok: false, code: 'error', reason: `알 수 없는 작업 '${str(kind, 40)}'` };
   if (r.ok === true) {
     const value = fn(r.value);
-    if (REQUIRED[kind] && !REQUIRED[kind](value)) return { ok: false, code: 'unknown', unknown: true, reason: '엣지가 성공이라고 회신했지만 결과 값(jobid)을 읽지 못했습니다 — 실행됐는지 알 수 없습니다. Director 에서 확인하세요.' };
+    if (REQUIRED[kind] && !REQUIRED[kind].check(value)) return { ok: false, code: 'unknown', unknown: true, reason: requiredMissingText(kind) };
     return { ok: true, value };
   }
   const code = CODES.has(r.code) ? r.code : 'error';
