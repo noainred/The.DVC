@@ -35,6 +35,15 @@ const TABS = [['live', '진행 현황'], ['targets', '백업 대상'], ['groups'
 const ROW = { display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' };
 const NOTE = { padding: '8px 12px', marginBottom: 10, fontSize: 12.5, lineHeight: 1.6 };
 const BTN = { padding: '4px 9px', fontSize: 12 };
+// 백업 대상 표(TargetsTab) 폭 — v2.840 까지 1440px(카드 1154px)에서 표가 1202~1232px 라 '작업' 열이 잘렸다(audits.md 'Bareos v2.840' 남긴 것).
+//   '작업' 칸 = 2열 × 3행 격자(실행… 결과 / 로그 복원… / 비활성 삭제) · 실행 레벨 상자는 두 열을 가로지른다(예전 칸 최소 236px 은 그 상자 168px 때문이었다).
+//   VM 칸의 배지(OS · 비활성 · 데모 · 드리프트 · Director 에 없음)는 이름 아래 줄에서 줄바꿈한다. 수치 근거는 bareosTargetsWidth.test.js.
+export const TARGET_ACT_W = 140;
+export const TARGET_TABLE_MINW = 1040;
+const ACT_GRID = { display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 6, width: TARGET_ACT_W };
+// .logout-btn 의 전역 margin-left 6px 가 width 100% 와 겹치면 버튼이 격자 칸을 6px 넘는다(Chromium — 레벨 상자와 줄이 어긋났다) — 간격은 격자 gap 이 맡는다.
+const ACT_BTN = { ...BTN, width: '100%', marginLeft: 0 };
+const VM_BADGES = { display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 4 };
 const WRAP = { display: 'flex', flexDirection: 'column', gap: 14, minWidth: 0 };
 // 전역 .input 의 min-width 220px 이 격자 칸·표 칸 입력을 밀어낸다(styles.css 1267 의 v2.636 사례) — 칸 안 입력은 이것으로.
 const INP = { minWidth: 0, width: '100%', boxSizing: 'border-box' };
@@ -191,7 +200,7 @@ function TargetsTab({ d, reload, handoff }) {
       <ScopeOmitBanner data={d} unit="백업 대상" counter="개" why="조회 범위 밖 vCenter 의" />
 
       <div className="table-wrap" style={{ maxHeight: '58vh' }}>
-        <STable minWidth={1160} wrap={false}>
+        <STable minWidth={TARGET_TABLE_MINW} wrap={false}>
           <thead><tr>
             <th>VM</th><th>법인 Director</th><th>vCenter</th><th>데이터센터 · 폴더</th><th>FD · 레벨 · 적용 정책</th>
             <th>최근 실행</th><th className="right">용량</th><th data-nosort>작업</th>
@@ -207,11 +216,14 @@ function TargetsTab({ d, reload, handoff }) {
               const lk = targetLocks(j, { busy, running, hasRun: !!c.jobid });   // G12·G13: 잠긴 버튼은 사유를 말한다(쓰기 범위 밖 포함)
               return (
                 <tr key={j.id} style={{ opacity: j.enabled ? 1 : 0.6 }}>
-                  <td data-sort={j.vmName}><b>{j.vmName}</b><span className={`badge ${osBadgeCls(osKey(j))}`} style={{ marginLeft: 6, fontSize: 10 }} title={j.guestOS || '게스트 OS 모름(인벤토리에 없거나 vCenter 에 OS 가 비어 있음)'}>{osLabel(osKey(j))}</span>{!j.enabled && <span className="badge gray" style={{ marginLeft: 6 }}>비활성</span>}{j.missingInDirector && <span className="badge red" style={{ marginLeft: 6 }} title="Director 의 잡 목록에 없습니다(누가 정의 파일을 지웠을 수 있습니다)">Director 에 없음</span>}{j.demo && <span className="badge amber" style={{ marginLeft: 6 }}>데모</span>}{j.drift && <span className="badge amber" style={{ marginLeft: 6 }} title={driftText(j.drift)}>{j.drift === 'missing' ? '인벤토리에 없음' : '등록 뒤 바뀜'}</span>}</td>
+                  <td data-sort={j.vmName}><b>{j.vmName}</b>
+                    <div data-target-badges="" style={VM_BADGES}>
+                      <span className={`badge ${osBadgeCls(osKey(j))}`} style={{ fontSize: 10 }} title={j.guestOS || '게스트 OS 모름(인벤토리에 없거나 vCenter 에 OS 가 비어 있음)'}>{osLabel(osKey(j))}</span>{!j.enabled && <span className="badge gray">비활성</span>}{j.missingInDirector && <span className="badge red" title="Director 의 잡 목록에 없습니다(누가 정의 파일을 지웠을 수 있습니다)">Director 에 없음</span>}{j.demo && <span className="badge amber">데모</span>}{j.drift && <span className="badge amber" title={driftText(j.drift)}>{j.drift === 'missing' ? '인벤토리에 없음' : '등록 뒤 바뀜'}</span>}
+                    </div></td>
                   <td data-sort={dirName(j.directorId)} style={{ fontSize: 12.5 }}>{dirName(j.directorId)}</td>
                   <td className="muted">{j.vcenterId}</td>
                   <td className="muted" style={{ fontSize: 12 }}><div style={{ maxWidth: 220, whiteSpace: 'normal', overflowWrap: 'anywhere' }}>{j.dc} · {j.folder}</div></td>
-                  {/* v2.840: 적용 정책 줄을 더해도 칸이 넓어지지 않게 원래 폭(약 180px) 안에서 줄바꿈한다 — 이 표는 그 전부터 1440px 에서 작업 열이 넘친다(audits.md v2.840 남긴 것) */}
+                  {/* v2.840: 적용 정책 줄을 더해도 칸이 넓어지지 않게 원래 폭(약 180px) 안에서 줄바꿈한다(표 전체 폭은 TARGET_ACT_W 주석) */}
                   <td data-sort={j.client} style={{ fontSize: 12.5 }}><div style={{ maxWidth: 180, whiteSpace: 'normal', overflowWrap: 'anywhere' }}>{j.client}<div className="muted" style={{ fontSize: 11 }}>{levelLabel(j.level)} · 잡 스케줄 {j.schedule || '없음'}</div>
                     <div data-target-policy="" title={`${j.policy?.src?.text ? `${j.policy.src.text} — ` : ''}정책 · 일정 탭과 같은 판정(Director 정책 수집본 · 백업 그룹 — 이 화면은 Director 에 접속하지 않습니다)`} style={{ fontSize: 11, color: j.policy?.dup ? '#fcd34d' : j.policy?.verdict && j.policy.verdict !== 'policy' ? VERDICT[j.policy.verdict]?.color : 'var(--text-dim)' }}>
                       {targetPolicyText(j.policy)}{j.policy?.verdict === 'mismatch' ? ' · 백업 방식이 Bareos 가 아님' : ''}
@@ -223,26 +235,27 @@ function TargetsTab({ d, reload, handoff }) {
                     {j.lastError && <div style={{ fontSize: 11, color: 'var(--red)' }}>{j.lastError.message}</div>}
                   </td>
                   <td className="right" data-sort={j.lastRun?.bytes ?? ''}>{c.bytes}</td>
-                  <td style={{ minWidth: 236 }}>
-                    <span style={{ ...ROW, gap: 6 }}>
+                  <td>
+                    {/* 2열 격자 — 레벨을 고르는 동안은 상자가 두 열을 가로지르고 시작 · 닫기가 그 아래 한 줄(나머지 버튼은 한 칸씩 밀린다) */}
+                    <div data-target-actions="" style={ACT_GRID}>
                       {running
-                        ? <button type="button" className="logout-btn" style={{ ...BTN, color: 'var(--red)' }} disabled={!!lk.cancel} title={lk.cancel || undefined} onClick={() => cancel(j, liveJobid)}>취소</button>
+                        ? <button type="button" className="logout-btn" style={{ ...ACT_BTN, color: 'var(--red)' }} disabled={!!lk.cancel} title={lk.cancel || undefined} onClick={() => cancel(j, liveJobid)}>취소</button>
                         : runFor === j.id
                           ? <>
-                            <Select className="input" sort={false} value={runLevel} onChange={(e) => setRunLevel(e.target.value)} style={{ minWidth: 0, width: 168, padding: '3px 6px', fontSize: 12 }} aria-label="실행 레벨">
+                            <Select className="input" sort={false} value={runLevel} onChange={(e) => setRunLevel(e.target.value)} style={{ gridColumn: '1 / -1', minWidth: 0, width: '100%', boxSizing: 'border-box', padding: '3px 6px', fontSize: 12 }} aria-label="실행 레벨">
                               <option value="">기본({levelLabel(j.level)})</option>
                               {['Full', 'Incremental', 'Differential'].map((l) => <option key={l} value={l}>{levelLabel(l)}</option>)}
                             </Select>
-                            <button type="button" className="logout-btn" style={BTN} disabled={!!lk.run} title={lk.run || undefined} onClick={() => run(j)}>시작</button>
-                            <button type="button" className="logout-btn" style={BTN} onClick={() => setRunFor(null)}>닫기</button>
+                            <button type="button" className="logout-btn" style={ACT_BTN} disabled={!!lk.run} title={lk.run || undefined} onClick={() => run(j)}>시작</button>
+                            <button type="button" className="logout-btn" style={ACT_BTN} onClick={() => setRunFor(null)}>닫기</button>
                           </>
-                          : <button type="button" className="logout-btn" style={BTN} disabled={!!lk.run} title={lk.run || undefined} onClick={() => { setRunLevel(''); setRunFor(j.id); }}>실행…</button>}
-                      <button type="button" className="logout-btn" style={BTN} disabled={!!lk.view} title={lk.view || undefined} onClick={() => setLogOf({ job: j, jobid: c.jobid, view: 'summary' })}>결과</button>
-                      <button type="button" className="logout-btn" style={BTN} disabled={!!lk.view} title={lk.view || undefined} onClick={() => setLogOf({ job: j, jobid: c.jobid, view: 'raw' })}>로그</button>
-                      <button type="button" className="logout-btn" style={BTN} disabled={!!lk.restore} title={lk.restore || undefined} onClick={() => setRestoreOf(j)}>복원…</button>
-                      <button type="button" className="logout-btn" style={BTN} disabled={!!lk.toggle} title={lk.toggle || undefined} onClick={() => toggle(j)}>{j.enabled ? '비활성' : '활성'}</button>
-                      <button type="button" className="logout-btn" style={{ ...BTN, color: 'var(--red)' }} disabled={!!lk.remove} title={lk.remove || undefined} onClick={() => remove(j)}>삭제</button>
-                    </span>
+                          : <button type="button" className="logout-btn" style={ACT_BTN} disabled={!!lk.run} title={lk.run || undefined} onClick={() => { setRunLevel(''); setRunFor(j.id); }}>실행…</button>}
+                      <button type="button" className="logout-btn" style={ACT_BTN} disabled={!!lk.view} title={lk.view || undefined} onClick={() => setLogOf({ job: j, jobid: c.jobid, view: 'summary' })}>결과</button>
+                      <button type="button" className="logout-btn" style={ACT_BTN} disabled={!!lk.view} title={lk.view || undefined} onClick={() => setLogOf({ job: j, jobid: c.jobid, view: 'raw' })}>로그</button>
+                      <button type="button" className="logout-btn" style={ACT_BTN} disabled={!!lk.restore} title={lk.restore || undefined} onClick={() => setRestoreOf(j)}>복원…</button>
+                      <button type="button" className="logout-btn" style={ACT_BTN} disabled={!!lk.toggle} title={lk.toggle || undefined} onClick={() => toggle(j)}>{j.enabled ? '비활성' : '활성'}</button>
+                      <button type="button" className="logout-btn" style={{ ...ACT_BTN, color: 'var(--red)' }} disabled={!!lk.remove} title={lk.remove || undefined} onClick={() => remove(j)}>삭제</button>
+                    </div>
                   </td>
                 </tr>
               );
