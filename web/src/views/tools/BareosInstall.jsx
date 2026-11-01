@@ -340,7 +340,7 @@ function FailureCard({ j, bundle, onRetry, onRollback, busy, say }) {
         <b style={{ fontSize: 13 }}>전부 되돌리기(서버를 설치 전으로)</b>
         <div className="muted" style={{ fontSize: 12, marginTop: 2 }}>이 설치가 넣은 패키지 · 파일 · 서비스 · 방화벽 규칙 · 로컬 저장소 · 올린 번들, 이 설치가 만든 <b>카탈로그 DB(bareos)</b> · 이 설치가 초기화한 <b>PostgreSQL 데이터 디렉터리(/var/lib/pgsql/data 전체)</b> · /etc/bareos(설치 전에 없었을 때)를 지우고, 원격이 다 되돌려지면 포탈에 새로 만든 등록 · 매핑을 지웁니다. 원래 있던 것은 건드리지 않습니다. 이 설치의 Director(재설치면 다시 등록한 기존 Director)에 백업 대상이 있으면 되돌리지 않습니다.{j.mode === 'reinstall' ? ' 초기화로 지운 옛 설치는 되살리지 못합니다(보관한 /etc/bareos tar 는 남깁니다).' : ''}</div>
         <div style={{ ...ROW, marginTop: 6 }}><label style={{ ...ROW, fontSize: 12.5 }}><input type="checkbox" checked={rbAck} onChange={(e) => setRbAck(e.target.checked)} /> 위 목록을 지우는 것을 확인했습니다</label>
-          <button type="button" className="logout-btn" style={{ ...BTN, color: 'var(--red)' }} disabled={busy || !rbAck} onClick={onRollback}>전부 되돌리기</button></div>
+          <button type="button" className="logout-btn" style={{ ...BTN, color: 'var(--red)' }} disabled={busy || !rbAck} onClick={() => onRollback()}>전부 되돌리기</button></div>
       </div>
     </div>
   );
@@ -566,7 +566,8 @@ export default function BareosInstallPanel({ writable = true }) {
       {step === 'plan' && t && plan && <PlanStep t={t} pre={pre} bundle={pre?.bundle || bundle} plan={plan} setPlan={setPlan} busy={busy || !writable} onBack={() => setStep('precheck')} onStart={start} />}
       {step === 'run' && (job ? <RunStep j={job} bundle={bundle} busy={busy || !writable} say={setMsg}
         onRetry={(b) => act('retry', b, '다시 시작했습니다.')} onStop={() => act('stop', {}, '중단을 요청했습니다 — 지금 단계가 끝나면 멈춥니다.')}
-        onRollback={(extra = {}) => act('rollback', { ack: true, ...extra }, '전부 되돌리기를 시작했습니다.')} onFinish={() => { setMsg(null); setStep('finish'); }} /> : <Loading />)}
+        // v2.847 U2-1(2회차 점검 — 재현): 단추가 onClick={onRollback} 으로 클릭 이벤트를 넘겨 본문에 펼쳐졌다(순환 JSON — 요청이 나가지 않았다). 아는 칸만 고른다
+        onRollback={(extra) => act('rollback', { ack: true, ...(extra && extra.sshFixed === true ? { sshFixed: true } : {}) }, '전부 되돌리기를 시작했습니다.')} onFinish={() => { setMsg(null); setStep('finish'); }} /> : <Loading />)}
       {step === 'finish' && job && <FinishStep j={job} say={setMsg} />}
     </div>
   );
