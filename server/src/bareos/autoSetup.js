@@ -859,3 +859,9 @@ export async function setupFdPlugin(b = {}, ctx = null) {
     throw e;
   }
 }
+
+/**
+ * v2.845 법인별 설정·계정(bareos/manage/apply.js)이 **같은 원격 파일 규칙**(MARKER · 남의 파일 거부 · 부모 심링크 · SFTP 임시 파일 → install · 되돌리기 · 새 세션 되돌리기)을
+ * 그대로 쓰도록 내보낸다 — 규칙을 복제하지 않는다(판정 코어 하나).
+ */
+export const _remote = Object.freeze({ runSsh: (...a) => runSsh(...a), requireRoot, pathState, placeFile, rollback, rollbackInNewSession, canonDir, resolvedHostIssue, RELOAD_CMD, TMP_PREFIX, READ_MAX, FD_PATH_RE, HOST_RE, USER_RE });

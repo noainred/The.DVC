@@ -161,12 +161,22 @@ test('③ 세션 보안 PUT — 소유자 + 본인 OTP · 틀리면 바뀌지 �
   SEC.saveSessionSecurity({ bareosSetupOtp: true });
 });
 
-test('④ 범위 — 이 설정으로 OTP 를 건너뛰는 곳은 Bareos 자동 설정 게이트 하나', () => {
+test('④ 범위 — 이 설정으로 OTP 를 건너뛰는 곳은 Bareos 서버 root 쓰기 게이트(자동 설정 · v2.845 법인별 설정)뿐', () => {
   const root = path.resolve(path.dirname(new URL(import.meta.url).pathname), '../src');
   const hits = [];
   const walk = (d) => { for (const e of fs.readdirSync(d, { withFileTypes: true })) { const p = path.join(d, e.name); if (e.isDirectory()) walk(p); else if (p.endsWith('.js')) { const s = stripComments(fs.readFileSync(p, 'utf8')); if (s.includes('bareosSetupOtpRequired(')) hits.push(path.relative(root, p)); } } };
   walk(root);
-  assert.deepEqual(hits.sort(), ['routes/api/bareosBackup.js', 'security/securitySettings.js']);
+  // v2.845: 법인별 Bareos 설정 · 계정 통합의 SSH root 쓰기도 같은 설정을 따른다(같은 등급의 쓰기 — 설계 결정). 그 밖에 늘리지 않는다.
+  assert.deepEqual(hits.sort(), ['routes/api/bareosBackup.js', 'routes/api/bareosManage.js', 'security/securitySettings.js']);
+  const man = stripComments(fs.readFileSync(path.join(root, 'routes/api/bareosManage.js'), 'utf8'));
+  const pre = /function otpPrecheck\([\s\S]*?\n\}\n/.exec(man)?.[0] || '';
+  assert.match(pre, /bareosSetupOtpRequired\(\)/, 'v2.845 판정은 otpPrecheck 안');
+  assert.match(pre, /writeStep && !getUser\([^)]*\)\?\.totpEnabled/, 'v2.845: 끔이어도 OTP 를 등록한 계정만(반증 F2 와 같은 규칙)');
+  for (const r of ['`${P}/:directorId/manage`', '`${PA}/bulk`']) {
+    const body = man.slice(man.indexOf(`api.post(${r}`), man.indexOf('\n});', man.indexOf(`api.post(${r}`)));
+    assert.ok(body.indexOf('otpPrecheck(') > 0 && body.indexOf('otpPrecheck(') < body.indexOf('otpVerify('), `${r}: 등록 확인 → 입력 판정 → OTP 확인`);
+    assert.ok(body.indexOf('otpVerify(') < body.indexOf('runManage(') || body.indexOf('runManage(') < 0, `${r}: OTP 확인 뒤에만 실행`);
+  }
   // 함수를 거치지 않고 값을 직접 읽는 우회도 없다(반증 F6) — 값을 아는 곳은 정의·저장 라우트(감사)·복원 맞춤뿐
   const direct = [];
   const walk2 = (d) => { for (const e of fs.readdirSync(d, { withFileTypes: true })) { const p = path.join(d, e.name); if (e.isDirectory()) walk2(p); else if (p.endsWith('.js') && /\.bareosSetupOtp\b/.test(stripComments(fs.readFileSync(p, 'utf8')))) direct.push(path.relative(root, p)); } };

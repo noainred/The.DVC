@@ -158,6 +158,38 @@ const levelChar = (l) => (/^f/i.test(l) ? 'F' : /^d/i.test(l) ? 'D' : 'I');
  * v2.839 정책 수집 데모 — 실측 모양(2026-11-01 · Director 25.1.2)과 같은 JSON(status scheduler · show schedules/jobdefs/filesets · llist pools · list volumes).
  *   그 Director 에 묶인 법인(sites)의 풀·잡만(데모 Director 들은 메모리를 나눠 쓰므로 directorId 로 거른다). 값은 이름 해시로 결정적.
  */
+/**
+ * v2.845 법인별 설정 데모 — Director 마다 메모리 사본(스토리지 · 콘솔 · Profile). 데모 쓰기(추가 · 비밀번호 · 삭제)는 이 사본만 바꾼다(장비에 닿지 않는다).
+ */
+const _corpCfg = new Map();
+export function demoCorpConfig(directorId = 'demo', first = true, siteStorages = []) {
+  const k = String(directorId || 'demo');
+  if (!_corpCfg.has(k)) {
+    _corpCfg.set(k, {
+      storages: [
+        { name: 'File', address: 'bareos-demo.local', device: 'FileStorage', mediaType: 'File', mcj: 10, portal: false },
+        // 매핑이 쓰는 스토리지(사람이 만든 설정 — 데모 매핑과 같은 이름이라 '매핑에 들어 있음' 판정이 보인다)
+        ...[...new Set(siteStorages.filter(Boolean))].slice(0, 6).map((n, i) => ({ name: n, address: 'bareos-demo.local', device: `${n}-dev`, mediaType: `${n}-media`, mcj: 10, portal: false, path: `/srv/bareos/vol${i + 1}` })),
+        ...(first ? [{ name: 'PortalFile', address: '10.20.0.14', device: 'PortalFileStorage', mediaType: 'PortalFile', mcj: 10, portal: true, path: '/var/lib/bareos/storage' }] : []),
+      ],
+      consoles: [
+        { name: 'portal', profile: 'portal', portalOwn: true },
+        { name: 'bareos-mon', acl: ['status', '.status'] },
+        { name: 'admin', profile: 'webui-admin', tls: false },
+        ...(first ? [{ name: 'ops-kr', profile: 'webui-readonly', tls: false, portal: true }] : []),
+      ],
+      profiles: [
+        { name: 'webui-admin', acl: ['!.bvfs_clear_cache', '!.exit', '!.sql', '!configure', '*all*'] },
+        { name: 'webui-readonly', acl: ['.api', '.help', 'use', 'version', 'status', 'list', 'llist'] },
+        { name: 'operator', description: 'Profile allowing normal Bareos operations.', acl: ['!configure', '!delete', '*all*'] },
+        { name: 'portal', acl: ['.api', '.jobs', 'run', 'restore', 'llist', 'list', 'status', 'show'] },
+      ],
+    });
+  }
+  return _corpCfg.get(k);
+}
+export function _resetDemoCorpConfig() { _corpCfg.clear(); }
+
 const DEMO_RUNS = Object.freeze({
   VMwareNightly: ['Full Sun at 23:00', 'Incremental Mon-Sat at 23:00'],
   VMwareWeekly: ['Full Sat at 01:00', 'Incremental Sun-Fri at 01:00'],
@@ -201,6 +233,13 @@ function demoPolicy(head, words, settings, directorId, kv = {}, now = Date.now()
   }
   if (head === 'show' && words[1] === 'schedules') {
     return { schedules: Object.fromEntries(Object.entries(DEMO_RUNS).filter(([k]) => first || k.startsWith('VMware')).map(([name, run]) => [name, { name, ...(name === 'WeeklyCycleAfterBackup' ? { description: 'This schedule does the catalog. It starts after the WeeklyCycle.' } : {}), run }])) };
+  }
+  // v2.845 법인별 설정 조회 데모 — 실제 Director 처럼 **비밀번호 칸을 싣는다**(포탈 정규화가 버리는지 시험 · 화면에 나오면 안 된다)
+  if (head === 'show' && ['storages', 'consoles', 'profiles'].includes(words[1])) {
+    const c = demoCorpConfig(directorId, first, sites.map((x) => x.storage));
+    if (words[1] === 'storages') return { storages: Object.fromEntries(c.storages.map((x) => [x.name, { name: x.name, address: x.address, password: 'demo-sd-secret', device: [x.device], mediatype: [x.mediaType], maximumconcurrentjobs: x.mcj, ...(x.description ? { description: x.description } : {}) }])) };
+    if (words[1] === 'consoles') return { consoles: Object.fromEntries(c.consoles.map((x) => [x.name, { name: x.name, password: 'demo-console-secret', ...(x.profile ? { profile: [x.profile] } : {}), ...(x.tls === false ? { tlsenable: false } : {}), ...(x.acl ? { commandacl: x.acl } : {}) }])) };
+    return { profiles: Object.fromEntries(c.profiles.map((p) => [p.name, { name: p.name, ...(p.description ? { description: p.description } : {}), commandacl: p.acl }])) };
   }
   if (head === 'show' && words[1] === 'jobdefs') {
     const jd = { [DEFAULTS.defaults.jobDefs]: { name: DEFAULTS.defaults.jobDefs, type: 'Backup', level: 'Incremental', messages: 'Standard', fileset: DEFAULTS.defaults.fileSet, writebootstrap: '/var/lib/bareos/%c.bsr' },

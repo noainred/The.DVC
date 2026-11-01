@@ -36,8 +36,9 @@
   전부 되돌리기는 **원격 먼저 → 성공하면 포탈 등록·매핑**, 이 설치의 Director 에 백업 대상이 있으면 거부(M4) · 배포 등록부의 SSH 주소가 작업 시작 때와 다르면 거부(M5) ·
   원격 단계 시한 4시간(폴링 + 유닛 `RuntimeMaxSec` · M6) · 동시 시작 준비 잠금(L1) · 실행 중 작업은 bconsole 접속이 확인될 때만 센다(못 읽으면 확인 불가 · L2) ·
   출력의 `Password = ...` 값 가림(L4) · `dnf remove --noautoremove` · firewalld 는 `--reload` 없이 런타임·영구를 따로(호스트 접근 제어의 확정 대기 규칙을 버리지 않게 · L5).
-  남긴 것: 기존 자동 설정(라우트 `_setupBusy`·`_setupHosts`)과 같은 서버에서 동시에 돌면 막지 않는다(L3 — 관리자가 두 기능을 같은 서버에 동시에 쓸 때만) ·
-  bconsole 접속 문구('Connecting to Director')는 실환경 미확인(다르면 '확인 불가' 쪽으로 — 0 으로 보지 않는다).
+  ✅ L3 는 v2.845 에 고쳤다 — 잠금 표를 `bareos/setupLocks.js` 하나로(자동 설정 · 법인별 설정 · 완전 설치가 Director · 서버 주소로 서로 막는다).
+  ⚠ v2.845 정정(반증 E1): 4단계 새 콘솔 확인의 임시 bconsole.conf 에 `Port =` 를 썼다 — 번들 bconsole 바이너리의 키워드는 `DirPort`(실측 · `Port` 별칭은 확인 못 함). `DirPort` 로 바꿨다.
+  남긴 것: bconsole 접속 문구('Connecting to Director')는 실환경 미확인(다르면 '확인 불가' 쪽으로 — 0 으로 보지 않는다).
 - **데모**: mock + 실제 Director 미등록이면 `demo.js`(시간으로 진행하는 합성 작업 · 판정은 실제 코드 · 장비에 닿지 않음).
 - 실환경 미확인(추정 — 첫 현장 설치에서 확인할 것): Bareos `current` 사전 공개판 RPM 이 Rocky 9.x 의 각 마이너에서 `--alldeps` 로 풀리는지(CI 는 rockylinux:9 최신에서만 확인) ·
   `bconsole -c`(이름 있는 Console) TLS-PSK 접속 출력 모양 · `update_bareos_tables` 가 카탈로그 유지 재설치에서 판 차이를 맞추는지 · WebUI 첫 화면 응답 코드.

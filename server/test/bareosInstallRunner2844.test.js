@@ -106,7 +106,7 @@ function env(opts = {}) {
 }
 function planEnv(e, o = {}) {
   const v = { JOB_ID: 'bi_test01', RUN_MODE: 'install', START_STEP: '1', BV, TAR_SHA256: e.sha, INSTALL_PKGS: 'bareos bareos-webui postgresql-server', PYVMOMI: '8.0.3.0.1', PYVMOMI_FIX: '0',
-    VOLUME_DIR: '/var/lib/bareos/storage', HOST_ADDR: '10.20.0.14', SD_DEVICE: 'PortalFileStorage', SD_MEDIA: 'PortalFile', DIR_STORAGE: 'PortalFile', WEBUI: '1',
+    VOLUME_DIR: '/var/lib/bareos/storage', HOST_ADDR: '10.20.0.14', SD_DEVICE: 'PortalFileStorage', SD_MEDIA: 'PortalFile', DIR_STORAGE: 'PortalFile', SD_COUNT: '10', WEBUI: '1',
     RESET: '0', RESET_DB: '0', RESET_VOLUMES: '0', RESET_VOLUME_DIRS: '', ...o };
   fs.writeFileSync(path.join(e.R, 'plan.env'), Object.entries(v).map(([k, x]) => `${k}='${x}'`).join('\n') + '\n');
 }
@@ -130,6 +130,7 @@ test('① 새 설치 1~3단계 성공 — 표지 파일 · SD 비밀번호는 �
   assert.match(dev, /Archive Device = \/var\/lib\/bareos\/storage/);
   const st = fs.readFileSync(path.join(e.P, 'etc/bareos/bareos-dir.d/storage/PortalFile.conf'), 'utf8');
   assert.match(st, /Password = "sd-secret-pw"/); assert.match(st, /Address = 10\.20\.0\.14/);
+  assert.match(dev, /Count = 10/, 'v2.845: 패키지 기본과 같은 장치 수(동시 백업)'); assert.match(st, /Maximum Concurrent Jobs = 10/);
   assert.ok(!r.log.includes('sd-secret-pw'), '로그에 SD 비밀번호가 없어야 한다');
   assert.equal(fs.readFileSync(path.join(e.FAKE, 'pyvmomi'), 'utf8').trim(), '8.0.3.0.1');
   assert.ok(fs.statSync(path.join(e.P, 'var/lib/bareos/storage')).isDirectory());

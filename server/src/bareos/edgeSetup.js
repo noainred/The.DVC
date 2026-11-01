@@ -11,11 +11,12 @@
  * 중앙이 '결과 모름' 으로 손을 뗀 뒤 엣지만 새 비밀번호가 되는 어긋남을 막는다).
  */
 import { preflight, setupDirector, setupFdPlugin, setupFdIni, readFdThumbprint } from './autoSetup.js';
+import { planManage, applyManage } from './manage/apply.js';
 import { updateEdgeDirectorConn } from './edgeStore.js';
 import { bareosAuthGuard } from './service.js';
 import { directorCred } from './settings.js';
 
-export const SETUP_KINDS = new Set(['setup.preflight', 'setup.director', 'setup.fdPlugin', 'setup.fdIni', 'setup.thumbprint']);
+export const SETUP_KINDS = new Set(['setup.preflight', 'setup.director', 'setup.fdPlugin', 'setup.fdIni', 'setup.thumbprint', 'setup.manage', 'setup.scan']);
 
 /** 비밀이 아닌 입력만(중앙이 보낸 body) — 모르는 키는 버린다. */
 const BODY_KEYS = ['host', 'sshPort', 'username', 'directorPort', 'consoleName', 'restoreClient', 'restoreStorage', 'restorePool', 'pools', 'schedule', 'vcenterId', 'vcuser', 'vcthumbprint'];
@@ -58,6 +59,15 @@ async function runSetupOne(kind, dir, args, secretArgs, signal) {
     case 'setup.thumbprint': return readFdThumbprint(b, { site, signal });
     case 'setup.fdIni': return setupFdIni({ ...b, vcpass: String(secretArgs.vcpass ?? '') }, { site, signal });
     case 'setup.fdPlugin': return setupFdPlugin(b, { dir, signal });
+    // v2.845 법인별 설정 — 중앙이 판정한 입력을 엣지가 **같은 함수로 다시** 판정한다(받은 값을 믿지 않는다). 계정 비밀번호는 secretArgs 로만.
+    case 'setup.scan': return applyManage(planManage('scan', args?.input && typeof args.input === 'object' ? args.input : {}), b, {}, { signal });
+    case 'setup.manage': {
+      const input = args?.input && typeof args.input === 'object' ? args.input : {};
+      const known = args?.known && typeof args.known === 'object' ? args.known : {};
+      const plan = planManage(String(args?.action || ''), input, known);
+      if (plan.action === 'scan') throw Object.assign(new Error('읽기는 setup.scan 으로 보냅니다.'), { code: 'invalid' });
+      return applyManage(plan, b, { accountPassword: secretArgs.accountPassword == null ? undefined : String(secretArgs.accountPassword) }, { signal, dirPort: dir.port });
+    }
     case 'setup.director': {
       const defaults = args?.defaults && typeof args.defaults === 'object' ? args.defaults : {};
       return setupDirector(b, {

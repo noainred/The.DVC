@@ -24,6 +24,9 @@ MARKER='# managed-by: vmware-portal bareos auto-setup (rewritten on re-run)'
 DEFAULT_STORE="$P/var/lib/bareos/storage"
 cd / || exit 1
 . "$R/plan.env" || exit 1
+# v2.845: 패키지 기본(FileStorage Count = 10 · Director Storage Maximum Concurrent Jobs = 10)과 같게 — 예전 plan.env 에는 없다
+SD_COUNT="${SD_COUNT:-10}"
+case "$SD_COUNT" in (*[!0-9]*|'') SD_COUNT=10;; esac
 if [ -n "${1:-}" ] && [ "$(basename "$R")" != "$JOB_ID" ]; then echo "plan.env 의 작업 id 가 실행 디렉터리와 다릅니다" >&2; exit 2; fi
 CUR=-
 STATE="$R/state"
@@ -236,6 +239,7 @@ Device {
   RemovableMedia = no
   AlwaysOpen = no
   Description = "vmware-portal full install volume directory"
+  Count = $SD_COUNT
 }
 EOF
   place "$ETC_BAREOS/bareos-dir.d/storage/$DIR_STORAGE.conf" bareos bareos 0640 <<EOF || return 1
@@ -246,6 +250,7 @@ Storage {
   Password = "$SDPW"
   Device = $SD_DEVICE
   Media Type = $SD_MEDIA
+  Maximum Concurrent Jobs = $SD_COUNT
 }
 EOF
   run "bareos-sd -t" runuser -u bareos -- bareos-sd -t || return 1

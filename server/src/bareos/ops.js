@@ -9,8 +9,9 @@
  */
 import { BareosConsoleError, jsonRpcErrorText } from './console.js';
 import {
-  parseBanner, probe, catalogLists, addJob as directorAddJob, runJob, jobStatus, jobStates, recentJobs, setJobEnabled, cancelJob, jobHistory, jobRuns, jobLog, runRestore, deleteJobIds,
+  parseBanner, probe, catalogLists, addJob as directorAddJob, runJob, jobStatus, jobStates, recentJobs, setJobEnabled, cancelJob, jobHistory, jobRuns, jobLog, runRestore, deleteJobIds, jobNames,
 } from './director.js';
+import { CONFIG_CMDS, CONFIG_NORMALIZE } from './manage/showParse.js';
 import { pruneSelection } from './groupRetention.js';
 import { parseStatusRaw, parseDirStatusRaw, rawHead } from './liveParse.js';
 import { jobNameFor, isFinalStatus, isResourceName } from './names.js';
@@ -239,6 +240,38 @@ export const OPS = Object.freeze({
     try { version = parseBanner(s.info?.banner || '').version || ''; } catch { version = ''; }
     return { results, version };
   },
+
+  /**
+   * v2.845 법인별 Bareos 설정 조회 — `show storages|consoles|profiles` · `llist pools` · `show schedules`(읽기 전용 · MUTATING 아님).
+   * ★ 결과는 showParse 정규화를 지난 것만 — 비밀번호 칸(콘솔·스토리지 Password)은 **이 함수 안에서 버린다**(원문을 돌려주지 않는다 — 엣지 회신·중앙 모두).
+   *   명령마다 따로(하나가 거부돼도 나머지는 계속) · 세션째 끊기면 남은 것은 건너뜀 · 시한 신호면 시작하지 않는다(정책 수집과 같은 모양).
+   */
+  async config(s, _a = {}, { signal } = {}) {
+    const results = {};
+    let dead = '';
+    for (const c of CONFIG_CMDS) {
+      if (!dead && signal?.aborted) dead = '시한이 지나 멈췄습니다';
+      if (dead) { results[c.key] = { ok: false, code: 'skipped', message: `건너뜀 — ${dead}` }; continue; }
+      try {
+        let v;
+        try { v = await s.call(c.cmd, { maxBytes: 8 * 1024 * 1024 }); } catch (e) {
+          if (!c.fallback || e?.code !== 'jsonrpc') throw e;
+          v = await s.call(c.fallback, { maxBytes: 8 * 1024 * 1024 });
+        }
+        results[c.key] = { ok: true, value: CONFIG_NORMALIZE[c.key](v) };
+      } catch (e) {
+        const code = e?.code === 'jsonrpc' && deniedText(e?.message) ? 'denied' : String(e?.code || 'error');
+        results[c.key] = { ok: false, code, message: String(e?.message || e).slice(0, 300) };
+        if (SESSION_DEAD.has(e?.code)) dead = `Director 연결 문제로 멈췄습니다(${e.code})`;
+      }
+    }
+    let version = '';
+    try { version = parseBanner(s.info?.banner || '').version || ''; } catch { version = ''; }
+    return { results, version };
+  },
+
+  /** v2.845 Director 의 잡 이름 목록(`.jobs` — 재설치 뒤 다시 등록할 대상을 고른다 · 읽기 전용). */
+  jobNames: async (s) => ({ names: await jobNames(s) }),
 
   /**
    * v2.840 '보존 · 풀' 탭의 볼륨 목록 즉시 조회(관리자 · 1분 1회는 라우트) — `list volumes pool=<풀>` 하나(읽기 전용 · MUTATING 아님).

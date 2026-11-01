@@ -28,6 +28,7 @@ import { setupDirector, setupFdPlugin, newConsolePassword, VMWARE_POOL_FULL, VMW
 import { onDirector } from '../service.js';
 import { isResourceName } from '../names.js';
 import { noteSetupStart, noteSetupEnd } from '../inflight.js';
+import { claimSetup, releaseSetupLock, setupBusyReason, _resetForTest as _resetLocks } from '../setupLocks.js';
 import { pickBundle } from './bundle.js';
 import { normPlan, planEnv, planSummary, STEPS, REMOTE_ROOT, RUN_DIR, BUNDLES_DIR, UNIT, FD_CLIENT, DIR_STORAGE, LAST_REMOTE_STEP, LAST_STEP } from './plan.js';
 import { precheckScript, parsePrecheck, judgePrecheck } from './precheck.js';
@@ -68,7 +69,7 @@ function persist() {
   atomicWriteFileSync(FILE(), JSON.stringify({ v: 1, jobs: list }, null, 1), { mode: 0o600 });
 }
 const getJob = (id) => load().find((j) => j.id === id) || null;
-export function _resetForTest() { _jobs = null; for (const t of _timers.values()) clearTimeout(t); _timers.clear(); _active.clear(); }
+export function _resetForTest() { _jobs = null; for (const t of _timers.values()) clearTimeout(t); _timers.clear(); _active.clear(); _resetLocks(); }
 
 /** 화면용(비밀 없음 — 기록 자체에 비밀이 없다). */
 export function publicJob(j) {
@@ -160,6 +161,8 @@ export async function startInstall({ vcenterId, body = {}, by = '' }) {
   const t = _targets({ knownHostAddrs: knownHostAddrs() }).find((x) => x.vcenterId === vcenterId);
   if (!t) throw fail('not-found', 'vCenter 를 찾을 수 없습니다.');
   if (!t.can) throw fail('invalid', t.why);
+  const lockWhy = setupBusyReason('', t.sshHost) || (t.director?.id ? setupBusyReason(t.director.id) : '');
+  if (lockWhy) throw fail('conflict', lockWhy);
   const busy = load().find((j) => isActive(j) && (j.vcenterId === vcenterId || (j.sshHost && j.sshHost === t.sshHost)));
   if (busy) throw fail('conflict', `이 법인(또는 같은 서버)의 완전 설치가 진행 중입니다(${busy.id}) — 끝난 뒤 다시 하세요.`);
   // 반증 L1: 점검(await) 중에 같은 요청이 또 오면 둘 다 통과했다 — 시작 준비 중 표시
@@ -203,11 +206,18 @@ const _stopReq = new Set();
 
 function kick(id, opts) {
   if (_active.has(id)) return;
+  const j0 = getJob(id);
+  // v2.845(v2.844 반증 L3): 같은 서버의 자동 설정 · 법인별 설정 변경과 잠금을 나눈다(bareos/setupLocks.js) — 작업이 도는 동안(원격 단계 포함) 쥔다
+  const lockKey = `install:${id}`;
+  if (j0 && !claimSetup(lockKey, j0.sshHost)) {
+    if (isActive(j0)) recordFailure(j0, j0.currentStep ?? null, { cause: 'busy', output: setupBusyReason(lockKey, j0.sshHost), message: setupBusyReason(lockKey, j0.sshHost) || '같은 서버에 다른 작업이 진행 중입니다.' });
+    return;
+  }
   _active.add(id);
   drive(id, opts).catch((e) => {
     const j = getJob(id);
     if (j && isActive(j)) recordFailure(j, j.currentStep ?? null, { message: String(e?.message || e), sshAuth: isSshAuthError(e) });
-  }).finally(() => { _active.delete(id); noteSetupEnd(`install:${id}`); });
+  }).finally(() => { _active.delete(id); noteSetupEnd(`install:${id}`); releaseSetupLock(lockKey, j0?.sshHost); });
 }
 
 async function drive(id, { fromStep, resendBundle = false, mode = 'install', resume = false }) {
@@ -408,7 +418,7 @@ function localConsoleCheck(creds) {
       try {
         const dn = String((await api.exec("sed -n 's/^[[:space:]]*Name[[:space:]]*=[[:space:]]*\"\\{0,1\\}\\([A-Za-z0-9._-]*\\).*/\\1/p' /etc/bareos/bareos-dir.d/director/*.conf 2>/dev/null | head -n 1"))?.stdout || '').trim() || 'bareos-dir';
         if (!isResourceName(dn)) throw fail('invalid', 'Director 이름을 읽지 못했습니다.');
-        const conf = `Director {\n  Name = ${dn}\n  Address = localhost\n  Port = ${Number(directorPort) || 9101}\n  Password = "unused-${crypto.randomBytes(8).toString('hex')}"\n}\nConsole {\n  Name = "${consoleName}"\n  Password = "${password}"\n  Director = ${dn}\n}\n`;
+        const conf = `Director {\n  Name = ${dn}\n  Address = localhost\n  DirPort = ${Number(directorPort) || 9101}\n  Password = "unused-${crypto.randomBytes(8).toString('hex')}"\n}\nConsole {\n  Name = "${consoleName}"\n  Password = "${password}"\n  Director = ${dn}\n}\n`;
         await api.writeFile(`${tmp}/bconsole.conf`, conf, 0o600);
         const x = await api.exec(`printf 'version\\n' | timeout 30 bconsole -c ${tmp}/bconsole.conf 2>&1`, 45_000);
         return { code: x?.code, out: String(x?.stdout || '') };

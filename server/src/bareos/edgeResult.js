@@ -9,6 +9,7 @@
 import { numOrNull } from '../util/numOrNull.js';
 import { isResourceName, OWN_TYPES, OWN_PER_TYPE } from './names.js';
 import { normPolicyResult, normVolumeRows } from './policyParse.js';
+import { normConfigResult, normScanResult } from './manage/showParse.js';
 
 const obj = (v) => (v && typeof v === 'object' && !Array.isArray(v) ? v : {});
 const arr = (v) => (Array.isArray(v) ? v : []);
@@ -110,6 +111,9 @@ export const VALUE = Object.freeze({
   history: (v) => rows(v, 200),
   // v2.839 정책 수집 — 아는 키 · 아는 필드만 · 상한(policyParse 정규화는 멱등 — 엣지가 이미 거른 값을 중앙이 같은 함수로 다시 거른다)
   policy: (v) => normPolicyResult(v),
+  // v2.845 법인별 설정 조회 — 같은 정규화를 다시(비밀번호 칸은 정규화가 고르지 않는다 — 엣지가 보냈어도 버린다)
+  config: (v) => normConfigResult(v),
+  jobNames: (v) => { const r = obj(v); return { names: arr(r.names).slice(0, 100_000).map((x) => str(x, 128)).filter((x) => /^[A-Za-z0-9._-]{1,128}$/.test(x)) }; },
   // v2.840 볼륨 목록 즉시 조회 — 아는 칸 · 행 상한(멱등 정규화를 중앙이 다시 돈다)
   volumes: (v) => normVolumeRows(v),
   cancel: (v) => { const r = obj(v); return r.final ? { final: rowOut(r.final) } : r.cleared ? { cleared: true } : { canceled: bool(r.canceled) }; },
@@ -151,6 +155,13 @@ export const VALUE = Object.freeze({
   'setup.fdPlugin': (v) => { const r = obj(v); return { action: r.action === 'updated' ? 'updated' : 'unchanged', pluginDir: str(r.pluginDir, 120), backup: str(r.backup, 300), added: arr(r.added).slice(0, 4).map((x) => str(x, 120)) }; },
   'setup.fdIni': (v) => { const r = obj(v); return { path: str(r.path, 300), action: str(r.action, 20), plugin: r.plugin === 'installed' ? 'installed' : 'missing', pluginText: str(r.pluginText, 200), ...(r.note ? { note: str(r.note, 200) } : {}) }; },
   'setup.thumbprint': (v) => { const r = obj(v); const tp = str(r.thumbprint, 40); return { thumbprint: /^[0-9A-F]{40}$/.test(tp) ? tp : '', subject: str(r.subject, 300), notAfter: str(r.notAfter, 60) }; },
+  // v2.845 법인별 설정 쓰기 — 파일 경로 · 동작만(내용 · 비밀 없음)
+  'setup.manage': (v) => {
+    const r = obj(v);
+    // 반증 E5: 감사에 들어가는 경로 — 포탈이 쓰는 /etc/bareos 아래 리소스 파일 모양만
+    return { files: arr(r.files).slice(0, 10).map((x0) => { const x = obj(x0); return { path: str(x.path, 300), action: ['created', 'updated', 'deleted', 'unchanged'].includes(x.action) ? x.action : 'unknown' }; }).filter((x) => /^\/etc\/bareos\/bareos-(dir|sd)\.d\/[a-z]+\/[A-Za-z0-9._-]{1,64}\.conf$/.test(x.path)), restarted: bool(r.restarted), reloaded: bool(r.reloaded) };
+  },
+  'setup.scan': (v) => normScanResult(v),
 });
 
 /**
@@ -160,6 +171,7 @@ export const VALUE = Object.freeze({
 const REQUIRED = Object.freeze({
   runJob: (v) => v !== null,
   restore: (v) => v.rid !== null,
+  'setup.manage': (v) => v.files.length > 0,   // v2.845 — 바꾼(또는 그대로 둔) 파일 목록이 없으면 무엇을 했는지 모른다
 });
 
 /** 엣지가 돌려줄 수 있는 오류 코드(그 밖은 'error'). */

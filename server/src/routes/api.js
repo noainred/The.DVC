@@ -33,6 +33,7 @@ import { registerBareosPolicy } from './api/bareosPolicy.js'; // v2.839 Bareos �
 import { registerBareosViews } from './api/bareosViews.js'; // v2.828 Bareos 조회 화면(통합 현황 · 법인별 현황 — 도구 키 bareos-summary·bareos-detail)
 import { registerBareosGroups } from './api/bareosGroups.js';
 import { registerBareosInstall } from './api/bareosInstall.js'; // v2.844 Bareos 완전 설치(설정 탭 — 엣지 노드에 오프라인 번들로)
+import { registerBareosManage } from './api/bareosManage.js'; // v2.845 법인별 Bareos 설정 · 중앙 계정 통합(설정 탭)
 import { registerBareosLive } from './api/bareosLive.js'; // v2.833 Bareos 진행 현황판(관리 도구 bareos-backup 의 '진행 현황' 탭 — 화면이 열린 동안만 Director 상태 조회) // v2.830 Bareos 백업 그룹(관리 도구 bareos-backup 의 '백업 그룹' 탭 — 포탈이 스케줄 실행)
 import { registerStorageMon } from './api/storageMon.js'; // 스토리지 모니터링(Isilon 등, v2.302)
 import { registerSanSwitch } from './api/sanSwitch.js';   // SAN 스위치 모니터링(Brocade FOS, v2.410)
@@ -140,6 +141,7 @@ registerBareosPolicy(api);   // ⚠ bareosViews 앞 — /tools/bareos-summary/po
 registerBareosViews(api);
 registerBareosGroups(api);
 registerBareosInstall(api);
+registerBareosManage(api);
 registerBareosLive(api);
 registerStorageMon(api);
 registerSanSwitch(api);
