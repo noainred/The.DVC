@@ -217,7 +217,9 @@ export async function cancelJob(session, jobid) { return session.call(`cancel jo
  */
 export const DELETE_IDS_PER_CMD = 50;
 export async function deleteJobIds(session, jobids) {
-  const ids = (Array.isArray(jobids) ? jobids : []).map(asId);
+  // v2.846 버그 점검(D-3): **새 jobid → 옛 jobid** 순으로 보낸다(묶음 사이도 · 한 명령 안의 목록도). 예전 오름차순은 둘째 묶음이 끊기면
+  //   첫 묶음의 Full 만 지워지고 그 Incremental 이 남았다(체인 없는 복원 지점). 내림차순이면 도중에 끊겨도 남는 것이 체인 앞부분이다.
+  const ids = (Array.isArray(jobids) ? jobids : []).map(asId).sort((a, b) => b - a);
   for (let i = 0; i < ids.length; i += DELETE_IDS_PER_CMD) await session.call(`delete jobid=${ids.slice(i, i + DELETE_IDS_PER_CMD).join(',')}`);
 }
 

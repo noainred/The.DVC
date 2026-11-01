@@ -7,7 +7,7 @@ import DataList from '../../components/DataList.jsx';
 import BoldText from '../../components/boldText.jsx';
 import { call, filesText } from './BareosCorp.jsx';
 import {
-  matrixCell, matrixTotals, BULK_LABEL, bulkEligible, RESULT_TEXT, RESULT_CLS, bulkCounts, bulkSummaryText, passwordCsv, maskPw, pwPairIssue, nameIssue, profileOptions, DEFAULT_PROFILE, sshSourceText, noSshNeeded,
+  matrixCell, matrixTotals, mergeBulkRows, BULK_LABEL, bulkEligible, RESULT_TEXT, RESULT_CLS, bulkCounts, bulkSummaryText, passwordCsv, maskPw, pwPairIssue, nameIssue, profileOptions, DEFAULT_PROFILE, sshSourceText, noSshNeeded,
 } from './bareosCorpText.js';
 
 /**
@@ -25,7 +25,8 @@ const GRID = { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(mi
 const CARD = { padding: 14, marginTop: 10, minWidth: 0 };
 const DEEP = { padding: 12, marginTop: 10, minWidth: 0, background: 'var(--panel-deep)' };
 const WRAP = { whiteSpace: 'normal', overflowWrap: 'anywhere', minWidth: 0 };
-const GET = { retries: 0, timeoutMs: 200_000 };
+// 전 법인 조회(법인마다 엣지 대행 · 동시 4) — 서버 요청 시한(600초)까지 한 번만 기다린다(재시도하면 법인마다 Director 로그인이 되풀이된다 — v2.846 U-1)
+const GET = { retries: 0, timeoutMs: 600_000 };
 const CELL_CLS = { has: 'green', none: 'gray', unknown: 'amber', locked: 'blue' };
 
 function Badge({ cls, children }) { return <span className={`badge ${cls}`} style={{ fontSize: 11, whiteSpace: 'nowrap' }}>{children}</span>; }
@@ -45,7 +46,7 @@ export default function BareosAccountsPanel({ writable = true }) {
   const load = (refresh = false) => {
     const g = ++gen.current;
     setBusy(true);
-    return fetchJson(`${PA}${refresh ? '?refresh=1' : ''}`, GET).then((r) => { if (g === gen.current) { setM(r); setErr(null); } })
+    return fetchJson(PA, refresh ? { refresh: 1 } : {}, undefined, GET).then((r) => { if (g === gen.current) { setM(r); setErr(null); } })
       .catch((e) => { if (g === gen.current) setErr(e); }).finally(() => { if (g === gen.current) setBusy(false); });
   };
   useEffect(() => { load(false); }, []);
@@ -92,7 +93,8 @@ export default function BareosAccountsPanel({ writable = true }) {
       <Msg m={msg} />
       {!result && <BulkForm dirs={dirs} m={m} writable={writable} say={setMsg} onDone={(r) => { setResult(r); load(true); }} />}
       {result && <BulkResult r={result} say={setMsg} onClose={() => setResult(null)} onRetry={(ids) => setResult((x) => ({ ...x, retry: ids }))} />}
-      {result?.retry && <BulkForm dirs={dirs} m={m} writable={writable} say={setMsg} preset={{ action: result.action, name: result.account, profile: result.profile, ids: result.retry }} onDone={(r) => { setResult(r); load(true); }} />}
+      {/* v2.846 U-6: 다시 시도 결과는 앞 결과에 합친다(첫 실행의 성공 법인 비밀번호를 지우지 않는다) */}
+      {result?.retry && <BulkForm dirs={dirs} m={m} writable={writable} say={setMsg} preset={{ action: result.action, name: result.account, profile: result.profile, ids: result.retry }} onDone={(r) => { setResult((prev) => ({ ...r, results: mergeBulkRows(prev?.results || [], r.results) })); load(true); }} />}
     </div>
   );
 }
@@ -222,12 +224,12 @@ function BulkResult({ r, say, onClose, onRetry }) {
               <td><b>{x.name}</b>{x.relay ? <div className="muted" style={{ fontSize: 11 }}>엣지 {x.relay}</div> : null}</td>
               <td data-sort={x.status}><Badge cls={RESULT_CLS[x.status] || 'gray'}>{RESULT_TEXT[x.status] || x.status}</Badge></td>
               <td style={WRAP}>{x.ok ? filesText(x) : x.reason}</td>
-              {hasPw && <td>{x.generatedPassword ? (
+              {hasPw && <td>{x.generatedPassword ? (<>{x.maybeApplied && <div className="muted" style={{ fontSize: 11 }}>결과 모름 — 적용됐을 수 있습니다(이 비밀번호로 로그인해 확인)</div>}
                 <div style={ROW}>
                   <code>{shown[x.directorId] ? x.generatedPassword : maskPw(x.generatedPassword)}</code>
                   <button type="button" className="logout-btn" style={BTN} onClick={() => setShown((s) => ({ ...s, [x.directorId]: !s[x.directorId] }))}>{shown[x.directorId] ? '가리기' : '보기'}</button>
                   <button type="button" className="logout-btn" style={BTN} onClick={() => { try { navigator.clipboard.writeText(x.generatedPassword).then(() => say({ ok: true, text: `${x.name} 비밀번호를 복사했습니다.` })); } catch { say({ ok: false, text: '복사하지 못했습니다.' }); } }}>복사</button>
-                </div>
+                </div></>
               ) : '—'}</td>}
             </tr>
           ))}</tbody>

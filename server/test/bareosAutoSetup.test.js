@@ -123,7 +123,8 @@ test('② bareos-dir -t 실패 → 새 파일 삭제 · 바꾼 파일 원복 · 
   await assert.rejects(A.setupDirector(DIR_BODY), (e) => {
     assert.equal(e.code, 'config-test');
     assert.ok(leaked && !e.message.includes(leaked), '콘솔 비밀번호는 가린다');
-    assert.match(e.message, /\*\*\*\*/);
+    // v2.846(S-5): Password 줄의 값은 maskConfigPasswords 가 '(가림)' 으로 덮는다(콘솔 비밀번호 '****' 가림 뒤에 — 둘 다 원문을 남기지 않는다)
+    assert.match(e.message, /Password = \(가림\)/);
     return true;
   });
   assert.equal(srv.st.reloads, 0);

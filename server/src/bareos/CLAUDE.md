@@ -66,7 +66,7 @@
 - **v2.833·834 진행 현황판**(`liveStatus`·`liveParse` · `bareosLive2833`): 화면이 열린 동안만 `status client=`·`status director` · Director 마다 시한 · 흐름은 법인마다 · 모름은 null · 멈춤 의심은 FD 조회 성공일 때만. 전문 audits.md 'v2.833'·'v2.834'(정책 수집 'v2.839'·'v2.840').
 - 실환경 미확인(추정 — `tools/bareos-probe.js` 로 확인할 것): Node↔Director TLS-PSK 협상 · 잡 수준 FdPluginOptions 와 FileSet 플러그인 문자열 병합 ·
   `.bvfs_get_jobids` JSON 모양 · Profile ACL 지시어 이름 · `list jobs days=N` · 25.x `.jobs` 의 enabled 칸(master 소스 기준 — 없으면 다시 끄기를 하지 않는다) · Migration 행의 시작 시각.
-- **v2.828 조회 화면**(`bareos-summary`·`bareos-detail` — Director 에 접속하지 않는다 · 원장 상한 3,000): 전문은 audits.md 'Bareos v2.828 조회 화면 모듈 규칙'(옮김).
-- **v2.843 법인 로컬**(`bareosLocal2843`): 정리 미리 보기 `prunePreview`(pruneJobs 와 같은 판정 · delete 없음 · MUTATING 밖) · 설정 응답 `siteAgent` — audits.md 'v2.843'.
+- **v2.828 조회 화면 · v2.843 법인 로컬**: audits.md 'Bareos v2.828 조회 화면 모듈 규칙' · 'v2.843'(정리 미리 보기 = pruneJobs 판정 · `siteAgent`).
+- **v2.846 버그 점검**(5축+반증 · `bareosBugs2846a`·`c`·`bareosInstallBugs2846`): 보관 정리는 새 쪽부터 · delete 내림차순 · 목록 GET memoJson 열쇠 · connSig 에 tlsMax — audits.md 'v2.846'.
 - **v2.844 완전 설치**: 규칙 전문은 `install/CLAUDE.md`(엣지 노드 안 러너 · 그 단계만 되돌림 · 볼륨 삭제 세 겹 · 번들 서명 · OTP 코드 없음).
 - **v2.845 법인별 설정 · 계정 통합**: 규칙 전문은 `manage/CLAUDE.md`(표지 파일만 · 재시작 직전 재확인 · 등록부 SSH 는 담당 엣지 것만).

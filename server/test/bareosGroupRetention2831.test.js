@@ -97,7 +97,9 @@ test('① 순서 — 입력 순서와 무관(jobid 와 시각이 같은 순서�
   const s = pruneSelection(many, 1, 'pv-a');
   assert.equal(s.deletable.length, PRUNE_MAX_PER_JOB);
   assert.equal(s.more, 29);
-  assert.equal(s.deletable[0], 1, '오래된 것부터');
+  // v2.846(D-3): 상한을 넘으면 기준 Full 쪽(새 것) 200건 — 남는 것이 오래된 앞부분(온전한 체인)이 되게. 예전 '오래된 것부터' 는 체인 중간을 잘랐다
+  assert.equal(s.deletable[0], 30, '기준 Full 쪽(새 것) 200건 — 오래된 29건(1~29)은 다음 정리로');
+  assert.equal(s.deletable[s.deletable.length - 1], PRUNE_MAX_PER_JOB + 29);
 });
 
 test('② normKeep · keepText', () => {
@@ -136,7 +138,7 @@ test('③ ops.pruneJobs — 지운 뒤 다시 읽어 실제로 사라진 jobid �
   assert.deepEqual(out[0].deleted, [1, 2]);
   assert.deepEqual(out[1].deleted, [11]);
   assert.equal(out[2].ok, false);
-  assert.ok(s.cmds.includes('delete jobid=1,2'));
+  assert.ok(s.cmds.includes('delete jobid=2,1'), 'v2.846(D-3): 새 jobid 부터 보낸다');
   assert.ok(!s.cmds.some((c) => c.includes('bad')), '틀린 이름은 Director 에 보내지 않는다');
   // Director 가 응답만 성공하고 지우지 않음
   const h2 = new Map([['pv-a', [R(1, 'F'), R(2, 'F')]]]);

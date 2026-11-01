@@ -14,7 +14,7 @@ import {
   outcomeUnknown, missingText, preflightView, preflightSummary, autoSetupFdPluginText, fillEmptyMapping, directorFormPatch, withRelayWait, secText, relayKindLabel, SETTINGS_READ_ONLY,
   VMWARE_POOL_FULL, VMWARE_SCHEDULE, WEEKDAYS, WEEKDAY_LABEL, MAPPING_FIELDS, newMappingRow, vcSlug,
   fillResultText, directorPlanFiles, directorConflicts, freeConsoleName, consoleTaken, conflictText, ownFromPaths, catalogErrorText,
-  directorAgentAdvice, directorAgentAdviceText,
+  directorAgentAdvice, directorAgentAdviceText, defaultsPatch, mergeDefaultsOnReload,
 } from './bareosText.js';
 
 /**
@@ -80,6 +80,8 @@ export default function SettingsTab({ onSaved, writable = true }) {
   const [msg, setMsg] = useState(null);
   const [adding, setAdding] = useState(false);
   const [defs, setDefs] = useState(null);
+  // U-5(v2.846): 마지막으로 읽은 공통 기본값(원본) — 저장은 이것과 다른 칸만 보내고, 다시 읽으면 고치지 않은 칸은 새 값으로 바꾼다
+  const defsBase = useRef(null);
   const [busy, setBusy] = useState(false);
   // v2.845 설정 하위 탭 — 기본 설정(Director · 매핑 · 자동 설정) · 완전 설치(v2.844) · 법인별 Bareos · 계정 통합(중앙). 훅은 조기 return 위.
   const [sub, setSub] = useState('base');
@@ -90,7 +92,10 @@ export default function SettingsTab({ onSaved, writable = true }) {
     return fetchJson(`${BASE}/settings`).then((r) => {
       if (g !== gen.current) return;
       setS(r); setErr(null);
-      setDefs((f) => (keepDefs && f ? f : { ...r.defaults }));
+      const prevBase = defsBase.current;
+      defsBase.current = { ...r.defaults };
+      // U-5: 저장하지 않은 편집은 버리지 않되(keepDefs), 고치지 않은 칸은 다시 읽은 값으로 — 옛 값이 새 rev 를 달고 다시 나가지 않게
+      setDefs((f) => (keepDefs && f ? mergeDefaultsOnReload(prevBase, f, r.defaults) : { ...r.defaults }));
     }).catch((e) => { if (g === gen.current) setErr(e); });
   };
   useEffect(() => { load(false); }, []);
@@ -113,7 +118,10 @@ export default function SettingsTab({ onSaved, writable = true }) {
     setBusy(true); setMsg(null);
     try {
       // P4: 읽은 설정 세대를 함께 보낸다 — 그사이 다른 화면이 저장했으면 409(덮지 않는다)
-      const r = await putJson(`${BASE}/settings`, { rev: s.rev, defaults: { ...defs, pollIntervalSec: Number(defs.pollIntervalSec) || undefined } });
+      // U-5: 고친 칸만 보낸다(다른 화면이 그사이 바꾼 칸을 옛 값으로 되돌리지 않게)
+      const patch = defaultsPatch(defsBase.current || {}, { ...defs, pollIntervalSec: Number(defs.pollIntervalSec) || undefined });
+      if (!Object.keys(patch).length) { setMsg({ ok: true, text: '바뀐 공통 기본값이 없습니다.' }); return; }
+      const r = await putJson(`${BASE}/settings`, { rev: s.rev, defaults: patch });
       requireChanged(r);
       setMsg({ ok: true, text: '공통 기본값을 저장했습니다.' });
       await load(false); onSaved();

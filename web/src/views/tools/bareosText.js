@@ -191,12 +191,18 @@ export function runCell(job, now = Date.now()) {
  * Director 하나의 상태 배지(v2.823 법인별 Director) — 설정 덜 됨 · 인증 정지 · 조회 실패 · 정상 · 조회 전.
  * @param {{ configured?, authStopped?, poll? }} dir  목록 응답의 directors[] 한 항목
  */
+/**
+ * v2.846 버그 점검(U-11): 엣지 대행 조회의 회신을 기다리는 중인가(보낸 틱 'sent' · 그 뒤 'pending' · 지난 결과 없음) — 서버 bareos/vmView.relayWaiting 과
+ * 같은 판정이다(통합·법인별 현황의 Director 상태 'relay' 가 이것으로 정해진다 — 시험이 같은 입력으로 대조). 한쪽만 고치지 말 것.
+ */
+export const relayWaiting = (poll) => !!poll && poll.ok == null && (poll.relay === 'sent' || poll.relay === 'pending');
+
 export function directorStatus(dir) {
   if (!dir) return { cls: 'gray', label: '—' };
   if (!dir.configured) return { cls: 'gray', label: '설정 덜 됨' };
   if (dir.authStopped) return { cls: 'red', label: '인증 정지' };
   // v2.824 엣지 대행: 회신을 기다리는 동안(한 번도 결과가 없으면) '엣지 대행 중' — 지난 결과가 있으면 그것을 보인다
-  if ((dir.poll?.relay === 'sent' || dir.poll?.relay === 'pending') && dir.poll?.ok == null) return { cls: 'blue', label: '엣지 대행 중' };
+  if (relayWaiting(dir.poll)) return { cls: 'blue', label: '엣지 대행 중' };
   if (dir.poll?.ok === false) return { cls: 'red', label: '조회 실패' };
   if (dir.poll?.ok) return { cls: 'green', label: '정상' };
   return { cls: 'gray', label: '조회 전' };
@@ -1061,6 +1067,23 @@ export function directorFormPatch(form = {}, snap = {}) {
   const name = String(form.name ?? '').trim();
   if (name && name !== snap.name) p.name = name;
   return Object.keys(p).length ? p : null;
+}
+
+/*
+ * v2.846 버그 점검(U-5): 공통 기본값 저장은 **사람이 고친 칸만** 보낸다(directorPatch 와 같은 방식). 예전에는 409(stale) 뒤 다시 읽어도 폼(defs)을 그대로 두고
+ *   defs 전체를 새 rev 로 다시 보내, 다른 화면이 그사이 바꾼 기본값(정책 수집 시각·주기·JobDefs 이름 …)을 조용히 되돌렸다(서버는 받은 칸을 덮는다).
+ */
+const same = (a, b) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
+/** 읽어 온 원본(base)과 화면 값(draft)의 다른 최상위 칸만(순수). 없으면 {}. */
+export function defaultsPatch(base = {}, draft = {}) {
+  const out = {};
+  for (const k of Object.keys(draft || {})) if (!same(draft[k], base?.[k])) out[k] = draft[k];
+  return out;
+}
+/** 다시 읽었을 때 — 사람이 고친 칸(draft ≠ 예전 원본)은 화면 값을 두고, 고치지 않은 칸은 새로 읽은 값으로(순수). */
+export function mergeDefaultsOnReload(oldBase, draft, fresh = {}) {
+  if (!draft || !oldBase) return { ...fresh };
+  return { ...fresh, ...defaultsPatch(oldBase, draft) };
 }
 
 /* ───────── v2.843 Director 담당 — 사용자 원칙 '백업은 법인 로컬, 통합 로그는 중앙' ───────── */

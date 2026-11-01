@@ -390,8 +390,10 @@ async function deletePrecheck(api, plan, files) {
   const p = sdFile.archiveDevice;
   // F3: 경로를 못 읽었으면 멈춘다(못 읽은 값은 0 이 아니다) · 심링크면 따라가 세지 않고 멈춘다
   if (!p || volumeDirIssue(p)) throw fail('conflict', `SD 장치 파일에서 볼륨 경로를 읽지 못했습니다${p ? `(${p})` : ''} — 볼륨 파일이 없는지 확인할 수 없어 지우지 않았습니다.`);
-  const o = String((await api.exec(`if [ -L ${p} ]; then echo LINK; elif [ -d ${p} ]; then echo "N=$(find ${p} -maxdepth 1 -type f 2>/dev/null | wc -l)"; elif [ -e ${p} ]; then echo OTHER; else echo N=0; fi`))?.stdout || '');
+  const o = String((await api.exec(`if [ -L ${p} ]; then echo LINK; elif [ -d ${p} ]; then echo "N=$(find ${p} -maxdepth 1 -type f 2>/dev/null | wc -l)"; elif [ -e ${p} ]; then echo OTHER; else echo MISSING; fi`))?.stdout || '');
   if (/LINK|OTHER/.test(o)) throw fail('conflict', `볼륨 경로(${p})가 심링크이거나 디렉터리가 아닙니다 — 볼륨 파일 수를 확인할 수 없어 지우지 않았습니다.`);
+  // v2.846 D-5 ②: 경로가 없으면(마운트가 빠졌을 수 있다) 볼륨이 0 이라고 보지 않는다
+  if (/MISSING/.test(o)) throw fail('conflict', `볼륨 경로(${p})가 없습니다 — 디스크 · 마운트가 빠졌을 수 있어 볼륨 파일이 없는지 확인할 수 없습니다(지우지 않았습니다). 경로를 복구하거나 서버에서 직접 정리하세요.`);
   const n = Number(/N=\s*(\d+)/.exec(o)?.[1]);
   if (!Number.isInteger(n)) throw fail('conflict', '볼륨 디렉터리의 파일 수를 읽지 못했습니다 — 지우지 않았습니다.');
   if (n > 0) throw fail('conflict', `볼륨 디렉터리(${p})에 볼륨 파일이 ${n}개 있습니다 — 백업 데이터가 있는 스토리지는 지우지 않습니다.`);

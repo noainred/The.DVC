@@ -414,7 +414,12 @@ export function directorCred(d) {
   // v2.824 검토(S6·I10): 엣지 대행 사본(edgeStore — edgeCopy)은 따로 센다 — 엣지 자기 Director 와 둘 다 dir_default 면 같은 키('director')를 써서
   //   대행 성공이 엣지 자기 Director 의 인증 정지를 지웠다(틀린 자격으로 다시 붙는다 — 자동 재시도 금지 위반).
   const id = d?.edgeCopy ? `edge-director:${d?.id || ''}` : d?.id === DEFAULT_DIRECTOR_ID ? 'director' : `director:${d?.id || ''}`;
-  return { id, username: `${d?.host || ''}:${d?.port || ''}/${d?.consoleName || ''}`, password: d?.password || '' };
+  // v2.846 버그 점검(E-2): TLS 최대 판도 신원에 넣는다 — 'tls' 실패(TLS-PSK 협상 — 비밀번호가 틀려도 이렇게 보인다)로 멈춘 뒤 사람이 TLS 판을 바꾸면
+  //   주소·비밀번호를 바꾼 것과 같이 **한 번** 다시 시도한다(또 실패하면 새 값으로 다시 멈춘다 — 사람의 변경 한 번에 시도 한 번).
+  //   기본값(TLSv1.3)은 붙이지 않는다 — 올리기 전 정지 기록(기본값 Director 전부)이 업그레이드만으로 풀려 다시 로그인하지 않게. 시한(timeoutMs)은
+  //   인증 정지와 무관해(timeout 은 정지 사유가 아니다) 넣지 않는다.
+  const tls = d?.tlsMax === 'TLSv1.2' ? '#tls1.2' : '';
+  return { id, username: `${d?.host || ''}:${d?.port || ''}/${d?.consoleName || ''}${tls}`, password: d?.password || '' };
 }
 
 const _connSigKey = crypto.randomBytes(32);
@@ -424,7 +429,9 @@ const _connSigKey = crypto.randomBytes(32);
  */
 export function directorConnSig(d) {
   if (!d || typeof d !== 'object') return '';
-  const key = `${String(d.host ?? '').trim().toLowerCase()}\n${Number(d.port) || 0}\n${String(d.consoleName ?? '')}\n${String(d.password ?? '')}`;
+  // v2.846 버그 점검(E-2 — 재현): TLS 최대 판·시한도 접속값이다 — 빠져 있으면 저장 직후 '연결 시험' 을 엣지가 **옛 TLS 판·옛 시한**으로 돌려
+  //   다시 실패하고(tls = 인증 정지 기록) 관리자는 '1.2 로도 안 된다' 는 거짓 결론을 얻었다. 바꾸면 표지가 달라져 엣지가 배정을 즉시 다시 받는다.
+  const key = `${String(d.host ?? '').trim().toLowerCase()}\n${Number(d.port) || 0}\n${String(d.consoleName ?? '')}\n${String(d.password ?? '')}\n${String(d.tlsMax ?? '')}\n${Number(d.timeoutMs) || 0}`;
   return crypto.createHmac('sha256', _connSigKey).update(key).digest('hex').slice(0, 16);
 }
 

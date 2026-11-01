@@ -232,7 +232,8 @@ export default function BareosDetailTool() {
                             <div style={{ width: p(a.ok), background: '#22c55e' }} /><div style={{ width: p(a.warn), background: '#f59e0b' }} /><div style={{ width: p(a.fail), background: '#ef4444' }} /><div style={{ width: p(a.run), background: '#3b82f6' }} />
                           </div>
                         ) : null}
-                        {a.fail ? <span style={{ color: TONE.bad, whiteSpace: 'nowrap' }}>실패 {a.fail}</span> : null}
+                        {/* U-13(v2.846): 결과를 모르는 법인(인증 정지·조회 실패)은 막대처럼 '실패 N' 도 그리지 않는다(마지막으로 읽은 값 — KPI·칩은 '—') */}
+                        {known && a.fail ? <span style={{ color: TONE.bad, whiteSpace: 'nowrap' }}>실패 {a.fail}</span> : null}
                         {a.missing ? <span style={{ color: TONE.warn, whiteSpace: 'nowrap' }}>미등록 {a.missing}</span> : null}
                       </div>
                       <div role="gridcell" />

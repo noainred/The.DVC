@@ -473,15 +473,17 @@ test('⑩ v2.822 확정 결함: C3 동시 등록·원장 못 씀·원장 손상 
   assert.equal(registry.getJob(j5.id).pending, null, '한 건의 거부가 다른 대상의 갱신을 막지 않는다');
 
   // S3·I5 — 등록 뒤 이름이 바뀌면 목록에 drift · 덮어쓰기 복원은 OTP 를 쓰기 전에 400
+  // v2.846(C-5): 목록 GET 은 memoJson(스냅샷 세대 열쇠) — 실제 수집은 새 스냅샷(새 generatedAt)을 만든다. 시험은 제자리로 고치므로 세대를 올린다
+  const bumpSnap = () => { store.snapshot.generatedAt = (Number(store.snapshot.generatedAt) || Date.now()) + 1; };
   const vm6 = store.snapshot.vms.find((v) => v.id === 'vc-a:vm-6');
-  vm6.name = 'app-06-old';
+  vm6.name = 'app-06-old'; bumpSnap();
   const lst = await call('admin', 'GET', '');
   assert.deepEqual(lst.j.jobs.find((x) => x.id === j6.id).drift, ['이름']);
-  vm6.name = 'app-06';
+  vm6.name = 'app-06'; bumpSnap();
   assert.equal((await call('admin', 'GET', '')).j.jobs.find((x) => x.id === j6.id).drift, undefined);
   // v2.834 — 목록의 OS 는 지금 인벤토리 기준(등록 때 값을 원장에 굳히지 않는다)
   assert.equal((await call('admin', 'GET', '')).j.jobs.find((x) => x.id === j6.id).os, null);
-  vm6.guestOS = 'Other 4.x or later Linux (64-bit)';
+  vm6.guestOS = 'Other 4.x or later Linux (64-bit)'; bumpSnap();
   const withOs = (await call('admin', 'GET', '')).j.jobs.find((x) => x.id === j6.id);
   assert.deepEqual([withOs.os, withOs.guestOS], ['linux', 'Other 4.x or later Linux (64-bit)']);
   delete vm6.guestOS;

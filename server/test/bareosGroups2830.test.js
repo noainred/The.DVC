@@ -606,7 +606,7 @@ test('⑦ v2.831 정리 — 기준 Full 앞의 끝난 실행만 지운다 · Ful
   D.cmds.length = 0;
   const out = await runner.pruneGroup(G1);
   const dels = D.cmds.filter((c) => c.startsWith('delete '));
-  assert.deepEqual(dels, ['delete jobid=1,2,3'], '기준 Full(4) 앞의 끝난 실행만 · Full 없는 잡 B 는 지우지 않는다');
+  assert.deepEqual(dels, ['delete jobid=3,2,1'], '기준 Full(4) 앞의 끝난 실행만 · Full 없는 잡 B 는 지우지 않는다 · v2.846(D-3) 새 jobid 부터');
   assert.equal(out.deleted, 3);
   assert.equal(out.noBase, 1);
   assert.equal(out.keptMax, 3);

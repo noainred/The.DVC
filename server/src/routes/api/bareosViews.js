@@ -35,8 +35,11 @@ const gbOf = (v) => (typeof v === 'number' && Number.isFinite(v) && v >= 0 ? Mat
 /** 응답 캐시 키 — 표시·원장·설정·폴러가 바뀌면 바로 새로 센다(폴러 at 은 틱마다 바뀐다). */
 const cacheKey = (req, snap) => `${scopeKey(req.user, snap)}|m${marksRev()}|r${registryRev()}|s${settingsRev()}|p${pollerStatus().at || 0}|d${isDemoActive() ? 1 : 0}|e${registryLoadError() ? 1 : 0}${marksUnreadable() ? 1 : 0}`;   // 손상 상태가 바뀌면(재시작 없이 다시 읽은 경우) 캐시를 쓰지 않는다
 
-/** vCenter 별 Director 정보(이름·상태·담당) — 주소·콘솔·오류 원문 없음. */
-function directorInfo(vcenterId, settings, poller, demo) {
+/**
+ * vCenter 별 Director 정보(이름·상태·담당) — 주소·콘솔·오류 원문 없음.
+ * v2.846(U-9): 백업 그룹 트리(bareosGroups.js)도 이 함수 하나로 '결과를 믿을 수 있나'(resultsKnown)를 정한다 — 판정 코어 하나(vmView.directorState).
+ */
+export function directorInfo(vcenterId, settings, poller, demo) {
   const site = settings.sites.find((s) => s.vcenterId === vcenterId) || null;
   const d = site ? settings.directors.find((x) => x.id === site.directorId) || null : null;
   const configured = !!d && (demo || !!directorConn(d).conn);

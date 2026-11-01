@@ -92,13 +92,20 @@ export function bareosClass(b, { rpoDays = 1, now = Date.now() } = {}) {
  *   ok      = 마지막 조회 성공
  * resultsKnown = 원장의 결과(성공·실패·오래됨)를 합계에 넣어도 되나 — unset·auth·error 는 '모름' 으로 따로 센다(0 이 아니다).
  */
+/**
+ * v2.846 버그 점검(U-11): 엣지 대행 조회의 회신을 기다리는 중인가 — 폴러는 보낸 틱을 'sent', 그 뒤 틱을 'pending' 으로 적는다(poller.pollDirector).
+ * 지난 결과가 없을 때(ok == null)만 — 있으면 그 결과를 보인다. 관리 화면(웹 bareosText.relayWaiting)과 같은 판정(시험이 같은 입력으로 대조).
+ * 예전에는 여기만 'pending' 을 보고 'sent' 를 '조회 전' 으로 그려 관리 화면('엣지 대행 중')과 같은 상태가 다르게 보였다.
+ */
+export const relayWaiting = (poll) => !!poll && poll.ok == null && (poll.relay === 'sent' || poll.relay === 'pending');
+
 export function directorState({ mapped, configured, authStopped, poll } = {}) {
   let state;
   if (!mapped || !configured) state = 'unset';
   else if (authStopped) state = 'auth';
   else if (!poll) state = 'pending';
   else if (poll.ok === false) state = 'error';
-  else if (poll.ok == null && poll.relay === 'pending') state = 'relay';
+  else if (relayWaiting(poll)) state = 'relay';
   else if (poll.ok === true) state = 'ok';
   else state = 'pending';
   return { state, resultsKnown: !['unset', 'auth', 'error'].includes(state) };

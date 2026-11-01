@@ -38,6 +38,11 @@ export const RULES = Object.freeze([
   R('running-jobs', 'Director 에 실행 중인 작업', causeIs('running-jobs'),
     '초기화는 실행 중인 백업·복원을 끊지 않으려고 시작하지 않았습니다(아무것도 지우지 않았습니다).',
     [{ kind: 'retry', label: '작업이 끝난 뒤 그대로 다시', detail: '진행 현황 탭에서 작업이 끝났는지 확인하세요.' }]),
+  // v2.846 D-2: 못 읽은 실행 중 작업은 0 이 아니다 — 러너가 멈춘다. 그대로 다시 하면 또 멈추므로 '그대로 다시' 대신 동의(그 회차만)로 진행하거나 bconsole 을 고친다
+  R('running-unknown', 'Director 의 실행 중 작업을 확인하지 못함', causeIs('running-unknown'),
+    'Director 는 켜져 있는데 서버 안 bconsole 로 실행 중 작업을 묻지 못했습니다(접속 · 인증 실패 또는 bconsole 없음). 0 으로 보지 않고 초기화를 시작하지 않았습니다(아무것도 지우지 않았습니다).',
+    [{ kind: 'portal', action: 'running-unknown-ok', label: '확인했음 — 실행 중 작업 확인 없이 진행', detail: '진행 현황 탭 · WebUI 에서 실행 중인 백업 · 복원이 없음을 직접 확인한 뒤에만 고르세요(돌던 작업이 있으면 끊깁니다). 이번 회차에만 적용됩니다.' },
+      { kind: 'server', label: 'bconsole 접속 확인', commands: ['printf "llist jobs jobstatus=R\\n" | bconsole', 'systemctl status bareos-dir --no-pager | head -n 5'] }]),
   R('bundle-hash', '번들 파일이 손상됨', any(causeIs('bundle-hash'), causeIs('bundle-missing'), causeIs('bundle-broken')),
     '엣지 노드에 있는 번들의 sha256 이 포탈 값과 다르거나 파일이 없습니다(전송 중 끊김 · 디스크 오류).',
     [{ kind: 'portal', action: 'resend-bundle', label: '번들을 다시 보내고 1단계부터', detail: '포탈이 번들을 지우고 다시 전송합니다.' }]),

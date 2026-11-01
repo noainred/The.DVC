@@ -175,6 +175,20 @@ export function maskSecrets(text, secrets = []) {
   return out;
 }
 
+/**
+ * v2.846 버그 점검(S-5): `bareos-dir -t`·`bareos-fd -t` 설정 오류 출력에 다른 리소스의 `Password = "…"` 줄 원문이 실릴 수 있다(v2.844 반증 L4) —
+ * 값을 가린다. 규칙은 install/causes.scrubOutput · manage/apply.js mask 와 같은 정규식이다(그 둘은 다른 묶음 파일이라 이번에 이 함수로 바꾸지 않았다 —
+ * 판정을 하나로 모을 때 이 함수를 쓸 것). 줄마다 적용한다(causes.scrubOutput 과 같다).
+ * 장비 출력이라 길이를 먼저 자른다(정규식 규약 — `"[^"]*"` 은 닫는 따옴표가 없으면 줄 끝까지 다시 훑는다): 뒤쪽 MASK_SCAN_MAX 자만 남긴다.
+ * 부르는 쪽은 어차피 뒤쪽 1,800자 이하만 싣는다(tail) — 자른 경계에 걸린 값 조각은 싣는 범위 밖이다.
+ */
+export const MASK_SCAN_MAX = 8192;
+export function maskConfigPasswords(text) {
+  let s = String(text ?? '');
+  if (s.length > MASK_SCAN_MAX) s = `…${s.slice(-MASK_SCAN_MAX)}`;
+  return s.split('\n').map((l) => l.replace(/(password\s*=\s*)("[^"]*"|\S+)/gi, '$1(가림)')).join('\n');
+}
+
 const tail = (s, n = 1500) => { const t = String(s ?? '').trim(); return t.length > n ? `…${t.slice(-n)}` : t; };
 
 /* ───────────────────────── 입력 정규화(순수) ───────────────────────── */
@@ -346,7 +360,7 @@ export async function setupDirector(b = {}, ctx = null) {
   const mask = (t) => {
     const x = String(t ?? '');
     if (ssh.password.length >= 4 && x.includes(ssh.password)) return '(출력을 싣지 않습니다 — SSH 비밀번호와 같은 글자가 들어 있습니다)';
-    return maskSecrets(x, [password]);
+    return maskConfigPasswords(maskSecrets(x, [password]));   // S-5: 다른 리소스(Client·Storage·Director)의 Password 줄 값도
   };
   // 놓은 파일(옛 내용 포함)은 세션 밖에서도 안다 — 세션이 시한으로 끊기면 새 세션으로 되돌린다.
   const placed = [];
@@ -793,7 +807,8 @@ export async function setupFdPlugin(b = {}, ctx = null) {
   const ri = await resolvedHostIssue(ssh.host);
   if (ri) throw fail('invalid', ri);
   const conf = FD_CLIENT_CONF;
-  const mask = (t) => { const x = String(t ?? ''); return ssh.password.length >= 4 && x.includes(ssh.password) ? '(출력을 싣지 않습니다 — SSH 비밀번호와 같은 글자가 들어 있습니다)' : x; };
+  // S-5(v2.846): bareos-fd -t 출력의 Password 줄(Director·Monitor 리소스) 값도 가린다
+  const mask = (t) => { const x = String(t ?? ''); return ssh.password.length >= 4 && x.includes(ssh.password) ? '(출력을 싣지 않습니다 — SSH 비밀번호와 같은 글자가 들어 있습니다)' : maskConfigPasswords(x); };
   let backup = '';
   let settled = true;
   let ownerMode = null;

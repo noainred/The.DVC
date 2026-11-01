@@ -22,13 +22,13 @@ import { config } from '../../config.js';
 import { atomicWriteFileSync, preserveCorrupt } from '../../util/atomicWrite.js';
 import { withSsh, isSshAuthError } from '../../proxy/sshExec.js';
 import { remoteTmpDir } from '../../agent/deploy.js';
-import { listJobs } from '../registry.js';
+import { listJobs, registryLoadError } from '../registry.js';
 import { loadSettings, addDirector, updateDirector, directorById, saveSettings, jobDirectorId, deleteDirector } from '../settings.js';
 import { setupDirector, setupFdPlugin, newConsolePassword, VMWARE_POOL_FULL, VMWARE_SCHEDULE } from '../autoSetup.js';
 import { onDirector } from '../service.js';
 import { isResourceName } from '../names.js';
 import { noteSetupStart, noteSetupEnd } from '../inflight.js';
-import { claimSetup, releaseSetupLock, setupBusyReason, _resetForTest as _resetLocks } from '../setupLocks.js';
+import { setupBusyReason, claimSetupGroup, setupGroupBusyReason, addSetupGroupDirector, releaseSetupGroup, _resetForTest as _resetLocks } from '../setupLocks.js';
 import { pickBundle } from './bundle.js';
 import { normPlan, planEnv, planSummary, STEPS, REMOTE_ROOT, RUN_DIR, BUNDLES_DIR, UNIT, FD_CLIENT, DIR_STORAGE, LAST_REMOTE_STEP, LAST_STEP } from './plan.js';
 import { precheckScript, parsePrecheck, judgePrecheck } from './precheck.js';
@@ -83,7 +83,8 @@ export const lastJobFor = (vcenterId) => load().slice().reverse().find((j) => j.
 /** 이 기능이 설치한 서버 주소(대상 표의 '엣지 위 Director' 판정). */
 export function knownHostAddrs() {
   const m = new Map();
-  for (const j of load()) if (j.hostAddr && ['done', 'failed', 'stopped', 'running'].includes(j.status)) m.set(j.vcenterId, j.hostAddr);
+  // v2.846 C-1: 되돌리기 실패('rollback-failed')도 이 기능이 설치한 서버다(예전에는 잠금에 걸린 되돌리기가 'failed' 로 남아 여기 들어 있었다)
+  for (const j of load()) if (j.hostAddr && ['done', 'failed', 'stopped', 'running', 'rollback-failed'].includes(j.status)) m.set(j.vcenterId, j.hostAddr);
   return m;
 }
 const ACTIVE = new Set(['running', 'rolling-back']);
@@ -123,6 +124,20 @@ const credsOf = (j) => {
   return c;
 };
 export { credsOf as _credsOfForTest };
+/**
+ * v2.846(Bareos 버그 점검 S-1 · C-3 — 재현): 마무리(FD 지문 읽기 · FD INI)는 다시 · 되돌리기와 같은 규칙으로 — 그 법인의 **가장 새 작업**이고
+ * 배포 등록부 SSH 주소가 작업 시작 때와 같을 때만(M5). 예전에는 `sshCredsFor` 를 바로 써서, 등록부 주소를 바꾸면 사람이 입력한 vCenter INI 가 다른 서버로 갔다.
+ * @returns {{ j, c }} c = SSH 자격(비밀 포함 — 내부 전용)
+ */
+export function finishContext(id) {
+  const j = getJob(String(id || ''));
+  if (!j) throw fail('not-found', '작업을 찾을 수 없습니다.');
+  if (j.status !== 'done') throw fail('conflict', '설치가 끝난 뒤에 할 수 있습니다.');
+  requireLatest(j);
+  const c = credsOf(j);
+  if (!c?.password) throw fail('invalid', '배포 등록부의 SSH 비밀번호가 없습니다.');
+  return { j, c };
+}
 /** 그 법인·같은 서버의 가장 새 작업(다시·되돌리기는 이것만 — 반증 H2). */
 const latestFor = (j) => load().slice().reverse().find((x) => x.vcenterId === j.vcenterId || (x.sshHost && j.sshHost && x.sshHost === j.sshHost)) || null;
 function requireLatest(j) {
@@ -190,7 +205,8 @@ async function startInner(t, vcenterId, body, by) {
     directorId: t.director?.id || '', existingDirector: !!t.director, createdDirector: false, createdSite: false,
     by, createdAt: Date.now(), updatedAt: Date.now(), status: 'running', phase: 'upload',
     steps: Object.fromEntries(STEPS.filter((s) => s.n >= firstStep).map((s) => [s.n, { status: 'pending' }])),
-    attempts: [{ n: 1, at: Date.now(), by, fromStep: firstStep, plan: planSummary(plan) }],
+    // v2.846 D-2: '확인했음 — 실행 중 작업 확인 없이 진행' 동의는 그 회차(시도 행)에만 — 계획(plan)에 넣지 않아 다시 하기로 이어지지 않는다
+    attempts: [{ n: 1, at: Date.now(), by, fromStep: firstStep, plan: planSummary(plan), ...(plan.mode === 'reinstall' && body.runningUnknownOk === true ? { runningUnknownOk: true } : {}) }],
     failure: null, upload: null, log: [], startStep: firstStep,
   };
   load().push(j);
@@ -204,27 +220,40 @@ const _active = new Set();    // 지금 이 프로세스가 돌리는 작업 id
 const _timers = new Map();
 const _stopReq = new Set();
 
-function kick(id, opts) {
+/**
+ * 작업이 도는 동안(원격 단계 포함) 쥐는 잠금 키 — v2.846 C-3(재현): 예전에는 SSH 주소 하나만 쥐어 Director id 와 러너가 읽은 서버 주소(hostAddr)로 오는
+ * 자동 설정 · Director 저장·삭제가 통과했다. 재설치면 그 Director id · SSH 주소 · 서버 주소를 함께 쥐고, 4단계가 새 Director 를 등록하면 그때 더한다.
+ */
+const lockKeysOf = (j) => ({ dirIds: [j.directorId], hosts: [j.sshHost, j.hostAddr] });
+
+function kick(id, opts = {}) {
   if (_active.has(id)) return;
   const j0 = getJob(id);
-  // v2.845(v2.844 반증 L3): 같은 서버의 자동 설정 · 법인별 설정 변경과 잠금을 나눈다(bareos/setupLocks.js) — 작업이 도는 동안(원격 단계 포함) 쥔다
-  const lockKey = `install:${id}`;
-  if (j0 && !claimSetup(lockKey, j0.sshHost)) {
-    if (isActive(j0)) recordFailure(j0, j0.currentStep ?? null, { cause: 'busy', output: setupBusyReason(lockKey, j0.sshHost), message: setupBusyReason(lockKey, j0.sshHost) || '같은 서버에 다른 작업이 진행 중입니다.' });
+  // v2.845(v2.844 반증 L3): 같은 서버의 자동 설정 · 법인별 설정 변경과 잠금을 나눈다(bareos/setupLocks.js)
+  const owner = `install:${id}`;
+  if (j0 && !claimSetupGroup(owner, lockKeysOf(j0))) {
+    const why = setupGroupBusyReason(lockKeysOf(j0)) || '같은 서버에 다른 작업이 진행 중입니다.';
+    // v2.846 C-1(재현): 전부 되돌리기의 잠금 실패를 설치 실패('failed')로 적으면 그 '그대로 다시' 가 0단계(초기화)부터 돌았다 — 되돌리기 실패로 남긴다
+    if (j0.status === 'rolling-back') recordRollbackFailed(j0, { cause: 'busy', message: `${why}(아무것도 바꾸지 않았습니다 — 그 작업이 끝난 뒤 다시 되돌리세요)` });
+    else if (isActive(j0)) recordFailure(j0, j0.currentStep ?? null, { cause: 'busy', output: why, message: why });
     return;
   }
   _active.add(id);
   drive(id, opts).catch((e) => {
     const j = getJob(id);
-    if (j && isActive(j)) recordFailure(j, j.currentStep ?? null, { message: String(e?.message || e), sshAuth: isSshAuthError(e) });
-  }).finally(() => { _active.delete(id); noteSetupEnd(`install:${id}`); releaseSetupLock(lockKey, j0?.sshHost); });
+    if (!j || !isActive(j)) return;
+    const auth = isSshAuthError(e);
+    if (j.status === 'rolling-back') recordRollbackFailed(j, { cause: auth ? 'ssh-auth' : (e?.code || 'error'), message: auth ? SSH_AUTH_TEXT : String(e?.message || e) });
+    else recordFailure(j, j.currentStep ?? null, { message: String(e?.message || e), sshAuth: auth });
+  }).finally(() => { _active.delete(id); noteSetupEnd(owner); releaseSetupGroup(owner); });
 }
+const SSH_AUTH_TEXT = '저장된 SSH 계정으로 로그인하지 못했습니다 — 배포 등록부의 계정을 고친 뒤 \'고쳤음\' 을 표시하고 다시 되돌리세요(계정 잠금을 막으려고 자동으로 다시 시도하지 않습니다).';
 
 async function drive(id, { fromStep, resendBundle = false, mode = 'install', resume = false }) {
   const j = getJob(id);
   if (!j) return;
   const creds = credsOf(j);
-  if (mode === 'rollback-all') { noteSetupStart(`install:${id}`, `완전 설치 되돌리기 ${j.vcenterName}`); return driveRollbackAll(j, creds); }
+  if (mode === 'rollback-all') { noteSetupStart(`install:${id}`, `완전 설치 되돌리기 ${j.vcenterName}`); return driveRollbackAll(j, creds, { resume }); }
   if (fromStep <= LAST_REMOTE_STEP) {
     if (!resume) {
       noteSetupStart(`install:${id}`, `완전 설치 ${j.vcenterName}`);
@@ -261,7 +290,9 @@ async function uploadAndStart(j, creds, { fromStep, resendBundle }) {
   const RD = runDirOf(j.id);
   const bundle = await _pick(j.bundle.version);
   if (!bundle) throw fail('invalid', `번들 ${j.bundle.version} 을(를) 중앙에서 찾지 못했습니다(지워졌거나 검증 실패) — 번들을 다시 받으세요.`);
-  const env = planEnv({ jobId: j.id, bundle: j.bundle, install: j.install, plan: j.plan, startStep: Math.min(fromStep, LAST_REMOTE_STEP), runMode: 'install', hostAddr: j.hostAddr, resetVolumeDirs: j.resetVolumeDirs });
+  const cur = j.attempts?.[j.attempts.length - 1];
+  const env = planEnv({ jobId: j.id, bundle: j.bundle, install: j.install, plan: j.plan, startStep: Math.min(fromStep, LAST_REMOTE_STEP), runMode: 'install', hostAddr: j.hostAddr, resetVolumeDirs: j.resetVolumeDirs,
+    runningUnknownOk: cur?.runningUnknownOk === true });
   const runner = fs.readFileSync(RUNNER_SRC, 'utf8');
   const remoteTar = `${BUNDLES_DIR}/${tarName(j.bundle.version)}`;
   const up = await runSsh(creds, async (api) => {
@@ -446,6 +477,7 @@ async function centralStep(j, creds, n) {
         if (existing) return updateDirector(existing.id, v);
         const a = addDirector(v);
         touch(j, { directorId: a.director.id, createdDirector: true });
+        addSetupGroupDirector(`install:${j.id}`, a.director.id);   // v2.846 C-3: 새로 등록한 Director 도 작업이 끝날 때까지 쥔다(방금 만든 id — 남이 쥘 수 없다)
         return a;
       },
     });
@@ -493,6 +525,9 @@ async function cleanupRemote(j, creds) {
 export async function retryInstall(id, { body = {}, by = '' } = {}) {
   const j = getJob(id);
   if (!j) throw fail('not-found', '작업을 찾을 수 없습니다.');
+  // v2.846 C-1(재현): 전부 되돌리기를 시도한 작업의 '다시' 는 0단계(초기화)부터 돌 수 있었다 — 되돌리기 시도가 있었으면 거부(다시 되돌리거나 새 작업으로).
+  //   ⚠ 'failure.step 이 없으면 거부' 로 넓히지 말 것 — 첫 시작의 잠금 실패(아무 단계도 안 돈 작업)는 정상적으로 다시 할 수 있어야 한다
+  if ((j.attempts || []).some((a) => a.rollbackAll)) throw fail('conflict', '전부 되돌리기를 시도한 작업은 다시 할 수 없습니다 — 다시 되돌리거나, 대상 표에서 새 작업으로 설치하세요.');
   if (!['failed', 'stopped'].includes(j.status)) throw fail('conflict', `지금 상태(${j.status})에서는 다시 할 수 없습니다.`);
   if (j.failure?.cause?.key === 'ssh-auth' && body.sshFixed !== true) throw fail('invalid', 'SSH 로그인 실패는 배포 등록부의 계정을 고친 뒤 \'고쳤음\' 을 표시하고 다시 하세요(계정 잠금을 막으려고 확인합니다).');
   requireLatest(j);
@@ -512,7 +547,9 @@ export async function retryInstall(id, { body = {}, by = '' } = {}) {
   const change = planSummary(plan) !== before ? `${before} → ${planSummary(plan)}` : '';
   j.plan = plan; j.planText = planSummary(plan);
   for (let n = fromStep; n <= LAST_STEP; n++) if (j.steps[n]) j.steps[n] = { status: 'pending' };
-  j.attempts.push({ n: j.attempts.length + 1, at: Date.now(), by, fromStep, change, fix: body.fix || '', plan: planSummary(plan) });
+  // v2.846 D-2: '확인했음 — 실행 중 작업 확인 없이 진행' — 0단계부터 다시 할 때 그 회차에만(fix 'running-unknown-ok' · 불리언 true)
+  const unknownOk = fromStep === 0 && j.mode === 'reinstall' && (body.fix === 'running-unknown-ok' || body.runningUnknownOk === true);
+  j.attempts.push({ n: j.attempts.length + 1, at: Date.now(), by, fromStep, change, fix: body.fix || '', plan: planSummary(plan), ...(unknownOk ? { runningUnknownOk: true } : {}) });
   touch(j, { status: 'running', phase: fromStep <= LAST_REMOTE_STEP ? 'upload' : 'central', failure: null, currentStep: fromStep });
   kick(j.id, { fromStep, resendBundle: body.fix === 'resend-bundle' });
   return publicJob(j);
@@ -537,17 +574,26 @@ export async function stopInstall(id) {
  * 전부 되돌리기 — 이 작업이 설치한 것을 지운다(러너 journal 역순) + 포탈에 새로 만든 매핑·Director 등록을 지운다.
  * 초기화(재설치)였다면 지운 옛 설치는 되살리지 못한다(보관한 /etc/bareos tar 는 남긴다 — 응답이 밝힌다).
  */
-export function rollbackAllInstall(id, { ack = false, by = '' } = {}) {
+export function rollbackAllInstall(id, { ack = false, by = '', sshFixed = false } = {}) {
   const j = getJob(id);
   if (!j) throw fail('not-found', '작업을 찾을 수 없습니다.');
   if (ack !== true) throw fail('invalid', '지울 목록을 확인했다는 표시가 필요합니다.');
   if (isActive(j)) throw fail('conflict', '진행 중에는 되돌릴 수 없습니다 — 먼저 중단하세요.');
   if (j.status === 'rolledback') throw fail('conflict', '이미 되돌렸습니다.');
+  // v2.846 C-2: SSH 인증 실패로 멈춘 되돌리기는 계정을 고쳤다는 표시가 있어야 다시(계정 잠금 — 자동 재시도 금지 규칙과 같은 확인)
+  if (j.status === 'rollback-failed' && j.rollback?.cause === 'ssh-auth' && sshFixed !== true) throw fail('invalid', 'SSH 로그인 실패는 배포 등록부의 계정을 고친 뒤 \'고쳤음\' 을 표시하고 다시 되돌리세요(계정 잠금을 막으려고 확인합니다).');
   requireLatest(j);
   credsOf(j);
-  if (j.createdDirector && j.directorId) {
+  // v2.846 D-7: 원장을 못 읽으면 대상 수를 0 으로 보지 않는다(M4 가 통과하고 포탈 쪽 정리가 빈 원장으로 판정했다) — 503
+  if (registryLoadError()) throw fail('unavailable', '백업 대상 원장을 읽지 못한 상태라 전부 되돌리지 않습니다(대상 수를 0 으로 보지 않습니다 · 손상본 보존 — 서비스 점검에서 확인).');
+  // M4 · v2.846 D-4(재현): 재설치(기존 Director 를 다시 등록해 쓰는 작업)도 본다 — 예전에는 이 설치로 새로 만든 Director 만 봐서, 다시 등록해 쓰던 대상의 카탈로그 · 설정을 지웠다
+  if (j.directorId && (j.createdDirector || j.existingDirector)) {
     const n = listJobs().filter((x) => !x.demo && x.directorId === j.directorId).length;
-    if (n > 0) throw fail('conflict', `이 설치로 등록한 Director 에 백업 대상이 ${n}개 있습니다 — 백업 대상을 먼저 지운 뒤 되돌리세요(원격만 지우고 포탈 등록이 남는 상태를 만들지 않습니다).`);
+    if (n > 0) {
+      throw fail('conflict', j.createdDirector
+        ? `이 설치로 등록한 Director 에 백업 대상이 ${n}개 있습니다 — 백업 대상을 먼저 지운 뒤 되돌리세요(원격만 지우고 포탈 등록이 남는 상태를 만들지 않습니다).`
+        : `이 재설치의 Director(기존 등록 — 다시 등록해 씀)에 백업 대상이 ${n}개 있습니다 — 되돌리면 재설치 뒤의 카탈로그 · 설정 · 패키지가 지워져 그 대상의 백업이 멈춥니다. 백업 대상을 먼저 지운 뒤 되돌리세요.`);
+    }
   }
   _stopReq.delete(j.id);
   j.attempts.push({ n: j.attempts.length + 1, at: Date.now(), by, fromStep: null, rollbackAll: true });
@@ -556,13 +602,15 @@ export function rollbackAllInstall(id, { ack = false, by = '' } = {}) {
   return publicJob(j);
 }
 
-async function driveRollbackAll(j, creds) {
+async function driveRollbackAll(j, creds, { resume = false } = {}) {
   const notes = [];
   const rd = runDirOf(j.id);
   const env = planEnv({ jobId: j.id, bundle: j.bundle, install: j.install, plan: j.plan, startStep: 1, runMode: 'rollback-all', hostAddr: j.hostAddr });
   const runner = fs.readFileSync(RUNNER_SRC, 'utf8');
   // 원격을 먼저(반증 M4b — 포탈 등록을 먼저 지우고 원격이 실패하면 어긋났다). 포탈 쪽은 원격이 다 되돌려진 뒤에만.
-  await runSsh(creds, async (api) => {
+  // v2.846 C-1 ⓑ(재현): 중앙 재시작 뒤 이어 하기는 러너를 **다시 띄우지 않고 상태만 읽는다** — 예전에는 처음부터 다시 띄우려다 '러너가 아직 돌고 있습니다' 로
+  //   'failed' 가 됐고(원격은 끝까지 되돌렸는데 중앙은 포탈 등록을 남겼다) 그 '다시' 가 설치를 다시 돌렸다. 끝났으면 그 결과를, 띄우지 못했으면 '실패' 로 읽어 '다시 되돌리기' 를 보인다.
+  if (!resume) await runSsh(creds, async (api) => {
     const act = String((await api.exec(`systemctl is-active ${UNIT} 2>/dev/null || true`))?.stdout || '').trim();
     if (act === 'active' || act === 'activating') throw fail('conflict', '러너가 아직 돌고 있습니다.');
     await api.exec(`install -d -m 0700 ${rd}`);
@@ -573,11 +621,19 @@ async function driveRollbackAll(j, creds) {
     if (st?.code !== 0) throw fail('remote', '러너를 띄우지 못했습니다(systemd-run).');
     return {};
   }, SHORT_SESSION_MS);
-  const deadline = Date.now() + REMOTE_MAX_MS;
-  let remote = null; let idle = 0; let last = [];
+  const deadline = Date.now() + REMOTE_MAX_MS;   // 러너 유닛도 RuntimeMaxSec 로 끝난다 — 이어 하기도 적어도 몇 번은 읽는다(끝난 결과를 놓치지 않게)
+  let remote = null; let idle = 0; let last = []; let wait = POLL_MS; let fails = 0;
   while (Date.now() < deadline) {
-    await _sleep(POLL_MS);
-    let r; try { r = await readRemote(creds, rd); } catch { continue; }
+    await _sleep(wait);
+    let r;
+    try { r = await readRemote(creds, rd); fails = 0; wait = POLL_MS; } catch (e) {
+      // v2.846 C-2(재현): 예전 'catch { continue }' 는 인증 실패도 삼켜 4시간 동안 8초마다 다시 로그인했다(계정 잠금 · fail2ban) — 인증 실패는 즉시 멈춘다
+      if (isSshAuthError(e)) { recordRollbackFailed(j, { cause: 'ssh-auth', message: SSH_AUTH_TEXT, left: (last || []).slice(-15).map((l) => scrubOutput(l, secretsOf(creds))) }); return; }
+      fails += 1; wait = Math.min(POLL_MAX_MS, wait * 2);   // 그 밖의 오류는 pollRemote 처럼 늘려 가며 다시 읽는다
+      touch(j, { pollError: { at: Date.now(), count: fails, message: scrubOutput(String(e?.message || e), secretsOf(creds)).slice(0, 200) } });
+      continue;
+    }
+    if (j.pollError) touch(j, { pollError: null });
     last = r.log;
     touch(j, { log: r.log.map((l) => scrubOutput(l, secretsOf(creds))), lastPollAt: Date.now() });
     if (r.all?.status === 'rolledback') { remote = 'ok'; break; }
@@ -585,11 +641,13 @@ async function driveRollbackAll(j, creds) {
     if (r.unit !== 'active' && r.unit !== 'activating') { idle += 1; if (idle >= 3) { remote = 'fail'; break; } } else idle = 0;
   }
   if (remote !== 'ok') {
-    notes.push('포탈 쪽 등록 · 매핑은 남겼습니다(원격 되돌리기가 끝나지 않음 — 남은 것을 확인한 뒤 다시 되돌리세요)');
-    touch(j, { status: 'rollback-failed', phase: 'idle', rollback: { ...j.rollback, doneAt: Date.now(), notes, left: (last || []).slice(-15).map((l) => scrubOutput(l, secretsOf(creds))) } });
+    recordRollbackFailed(j, { cause: remote === 'fail' ? 'remote' : 'timeout', message: remote === 'fail' ? '원격 되돌리기가 실패했거나 끝 표시 없이 끝났습니다.' : `원격 되돌리기가 시한(${REMOTE_MAX_MS / 3600_000}시간) 안에 끝나지 않았습니다.`,
+      left: (last || []).slice(-15).map((l) => scrubOutput(l, secretsOf(creds))) });
     return;
   }
   try {
+    // v2.846 D-7: 포탈 쪽 정리도 원장이 읽힐 때만(빈 원장으로 Director 삭제 판정을 하지 않는다)
+    if (registryLoadError()) throw fail('unavailable', '백업 대상 원장을 읽지 못해 포탈 쪽 등록 · 매핑을 남겼습니다');
     if (j.createdSite) {
       const cur = loadSettings();
       const jobDirs = new Map();
@@ -600,14 +658,26 @@ async function driveRollbackAll(j, creds) {
     if (j.createdDirector && j.directorId) { deleteDirector(j.directorId, { inUseByJobs: listJobs().filter((x) => !x.demo && x.directorId === j.directorId).length }); notes.push('Director 등록 삭제'); }
     else if (j.existingDirector) notes.push('기존 Director 등록은 남김 — 재설치 전 설치는 초기화로 지워져 접속되지 않습니다(설정 › 법인별 Director 에서 정리)');
   } catch (e) { notes.push(`포탈 쪽 일부 남음: ${String(e?.message || e).slice(0, 200)}`); }
-  touch(j, { status: 'rolledback', phase: 'idle', rollback: { ...j.rollback, doneAt: Date.now(), notes } });
+  const a = j.attempts[j.attempts.length - 1]; if (a?.rollbackAll) { a.endedAt = Date.now(); a.result = 'rolledback'; }
+  touch(j, { status: 'rolledback', phase: 'idle', pollError: null, rollback: { ...j.rollback, doneAt: Date.now(), notes } });
+}
+
+/**
+ * 전부 되돌리기 실패 기록(v2.846 C-1) — 설치 실패('failed')로 적지 않는다(그 '다시' 가 0단계 초기화부터 돌았다). 포탈 등록 · 매핑은 남긴다.
+ * cause: 'busy'(잠금 — 아무것도 바꾸지 않음) · 'ssh-auth'(다시 되돌리기는 '고쳤음' 필요) · 'remote' · 'timeout' · 그 밖 오류 코드.
+ */
+function recordRollbackFailed(j, { cause = 'error', message = '', left = null }) {
+  const a = j.attempts[j.attempts.length - 1]; if (a?.rollbackAll) { a.endedAt = Date.now(); a.result = 'rollback-failed'; a.cause = cause; }
+  const notes = [cause === 'busy' ? '아무것도 바꾸지 않았습니다 — 같은 서버의 다른 작업이 끝난 뒤 다시 되돌리세요' : '포탈 쪽 등록 · 매핑은 남겼습니다(원격 되돌리기가 끝나지 않음 — 남은 것을 확인한 뒤 다시 되돌리세요)'];
+  touch(j, { status: 'rollback-failed', phase: 'idle', pollError: null,
+    rollback: { ...j.rollback, doneAt: Date.now(), cause: String(cause).slice(0, 40), message: String(message || '').slice(0, 600), notes, ...(left ? { left } : {}) } });
 }
 
 /** 기동 때 진행 중이던 작업을 이어 읽는다(러너는 서버 안에서 계속 돈다). 업로드·중앙 단계 중이던 것은 '끊김' 으로 실패 처리(다시 시도 가능). */
 export function resumeInstallJobs() {
   for (const j of load()) {
     if (!isActive(j)) continue;
-    if (j.status === 'rolling-back') { kick(j.id, { mode: 'rollback-all' }); continue; }
+    if (j.status === 'rolling-back') { kick(j.id, { mode: 'rollback-all', resume: true }); continue; }   // v2.846 C-1 ⓑ: 상태만 읽는다(러너를 다시 띄우지 않음)
     if (j.phase === 'remote') { kick(j.id, { fromStep: Number.isInteger(j.currentStep) ? Math.min(j.currentStep, LAST_REMOTE_STEP) : j.startStep, resume: true }); continue; }
     recordFailure(j, j.currentStep ?? null, { cause: 'runner-died', message: `포탈이 재시작해 ${j.phase === 'upload' ? '번들 전송' : '중앙 단계'}가 끊겼습니다 — 그 단계부터 다시 하세요.` });
   }

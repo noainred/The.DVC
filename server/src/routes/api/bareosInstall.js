@@ -14,11 +14,13 @@ import { isDemoActive } from '../../bareos/service.js';
 import { isSshAuthError, isSshHostKeyError } from '../../proxy/sshExec.js';
 import { setupFdIni, readFdThumbprint } from '../../bareos/autoSetup.js';
 import { directorById } from '../../bareos/settings.js';
+import { claimSetup, releaseSetupLock, setupBusyReason } from '../../bareos/setupLocks.js';
+import { setupAuditReason } from './bareosBackup.js';
 import { STEPS } from '../../bareos/install/plan.js';
 import { bundleBaseUrl, listBundles, fetchLatestBundle, bundleFetchStatus, deleteBundle } from '../../bareos/install/bundle.js';
-import { listInstallTargets, sshCredsFor } from '../../bareos/install/targets.js';
+import { listInstallTargets } from '../../bareos/install/targets.js';
 import {
-  runPrecheck, startInstall, retryInstall, stopInstall, rollbackAllInstall, installJob, listInstallJobs, knownHostAddrs, lastJobFor,
+  runPrecheck, startInstall, retryInstall, stopInstall, rollbackAllInstall, installJob, listInstallJobs, knownHostAddrs, lastJobFor, finishContext,
 } from '../../bareos/install/job.js';
 import * as demo from '../../bareos/install/demo.js';
 
@@ -48,11 +50,25 @@ function sendErr(res, e) {
   const code = e?.code || '';
   if (isSshHostKeyError(e)) return res.status(502).json({ ok: false, code: 'ssh-hostkey', reason: String(e.message).slice(0, 600) });
   if (code === 'ssh-auth' || isSshAuthError(e)) return res.status(502).json({ ok: false, code: 'ssh-auth', reason: '저장된 SSH 계정으로 로그인하지 못했습니다 — 배포 등록부의 비밀번호를 확인하세요(자동으로 다시 시도하지 않습니다).' });
-  const status = code === 'invalid' ? 400 : code === 'not-found' ? 404 : code === 'conflict' || code === 'precheck' ? 409 : 502;
+  // v2.846 D-7: 'unavailable'(백업 대상 원장을 못 읽음 — 대상 수를 0 으로 보지 않는다)은 503
+  const status = code === 'invalid' ? 400 : code === 'not-found' ? 404 : code === 'conflict' || code === 'precheck' ? 409 : code === 'unavailable' ? 503 : 502;
   res.status(status).json({ ok: false, code: code || 'error', reason: String(e?.message || e).slice(0, 1800), ...(e?.precheck ? { precheck: e.precheck } : {}) });
 }
 
-const auditReason = (e) => `${e?.code || ''} ${String(e?.message || e).split('\n')[0].slice(0, 200)}`.trim();
+// v2.846 S-2: 원격 출력이 실린 실패(remote · config-test …)는 자동 설정과 같은 함수로 자른다(감사에 원격 출력 원문을 싣지 않는다)
+const auditReason = (e) => setupAuditReason(e);
+/** 마무리 원격 작업 — 판정(가장 새 작업 · M5) → Director · 서버 잠금(자동 설정 · 법인별 설정과 공유 — C-3) → 실행 → 풀기. */
+async function finishOp(req, res, label, fn) {
+  let ctx;
+  try { ctx = finishContext(req.params.id); } catch (e) { return sendErr(res, e); }
+  const { j, c } = ctx;
+  if (!claimSetup(j.directorId || `install:${j.id}`, c.host)) return res.status(409).json({ ok: false, reason: setupBusyReason(j.directorId, c.host) || '같은 Director · 서버에 다른 작업이 진행 중입니다 — 끝난 뒤 다시 시도하세요.' });
+  try {
+    const r = await fn(j, c);
+    audit(req, label, `${j.vcenterName} · ${j.id}`, `성공 — ${r.okText}`);
+    res.json({ ok: true, ...r.body });
+  } catch (e) { audit(req, label, `${j.vcenterName} · ${j.id}`, `실패 — ${auditReason(e)}`); sendErr(res, e); } finally { releaseSetupLock(j.directorId || `install:${j.id}`, c.host); }
+}
 const vcName = (id) => (store.get()?.vcenters || []).find((v) => v.id === id)?.name || id;
 
 export function registerBareosInstall(api) {
@@ -118,7 +134,8 @@ api.post(`${P}/start`, adminOnly, fullScopeOnly, fullWriteOnly, async (req, res)
   if (!installGate(req, res)) return;
   try {
     const j = await startInstall({ vcenterId, body: req.body || {}, by: req.user?.username || '' });
-    audit(req, j.mode === 'reinstall' ? 'Bareos 완전 초기화 후 재설치 시작' : 'Bareos 완전 설치 시작', `${j.vcenterName} · ${j.agent} (${j.sshHost})`, `${j.id} · 번들 ${j.bundle.version} · ${j.planText}`);
+    const unknownOk = j.attempts?.[0]?.runningUnknownOk ? ' · 실행 중 작업 확인 없이 진행(화면 동의)' : '';
+    audit(req, j.mode === 'reinstall' ? 'Bareos 완전 초기화 후 재설치 시작' : 'Bareos 완전 설치 시작', `${j.vcenterName} · ${j.agent} (${j.sshHost})`, `${j.id} · 번들 ${j.bundle.version} · ${j.planText}${unknownOk}`);
     res.json({ ok: true, job: j });
   } catch (e) { audit(req, 'Bareos 완전 설치 시작', vcName(vcenterId), `실패 — ${auditReason(e)}`); sendErr(res, e); }
 });
@@ -138,7 +155,7 @@ api.post(`${P}/jobs/:id/retry`, adminOnly, fullScopeOnly, fullWriteOnly, async (
   try {
     const j = await retryInstall(id, { body: req.body || {}, by: req.user?.username || '' });
     const a = j.attempts[j.attempts.length - 1];
-    audit(req, 'Bareos 완전 설치 다시 시도', `${j.vcenterName} · ${j.id}`, `${a.n}회차 · ${a.fromStep}단계부터${a.fix ? ` · 고치기 ${a.fix}` : ''}${a.change ? ` · 바뀐 값 ${a.change}` : ''}`);
+    audit(req, 'Bareos 완전 설치 다시 시도', `${j.vcenterName} · ${j.id}`, `${a.n}회차 · ${a.fromStep}단계부터${a.fix ? ` · 고치기 ${a.fix}` : ''}${a.runningUnknownOk ? ' · 실행 중 작업 확인 없이 진행(화면 동의)' : ''}${a.change ? ` · 바뀐 값 ${a.change}` : ''}`);
     res.json({ ok: true, job: j });
   } catch (e) { audit(req, 'Bareos 완전 설치 다시 시도', id, `실패 — ${auditReason(e)}`); sendErr(res, e); }
 });
@@ -154,16 +171,18 @@ api.post(`${P}/jobs/:id/stop`, adminOnly, fullScopeOnly, fullWriteOnly, async (r
   } catch (e) { sendErr(res, e); }
 });
 
-/** 전부 되돌리기 — 확인 표시(ack) 필요. */
+/** 전부 되돌리기 — 확인 표시(ack) 필요 · SSH 인증 실패로 멈춘 되돌리기는 '고쳤음'(sshFixed) 도 필요(v2.846 C-2). 되돌리기 실패('rollback-failed')에서 다시 되돌리기. */
 api.post(`${P}/jobs/:id/rollback`, adminOnly, fullScopeOnly, fullWriteOnly, (req, res) => {
   const id = String(req.params.id || '');
   if (isDemoActive()) { const j = demo.rollback(id, req.body || {}); return j ? res.json({ ok: true, job: j }) : res.status(404).json({ ok: false, reason: '작업을 찾을 수 없습니다.' }); }
   if (!installGate(req, res)) return;
   try {
-    const j = rollbackAllInstall(id, { ack: req.body?.ack === true, by: req.user?.username || '' });
-    audit(req, 'Bareos 완전 설치 전부 되돌리기', `${j.vcenterName} · ${j.id}`, '시작');
+    const again = installJob(id)?.status === 'rollback-failed';
+    const j = rollbackAllInstall(id, { ack: req.body?.ack === true, sshFixed: req.body?.sshFixed === true, by: req.user?.username || '' });
+    // 잠금에 걸리면 kick 이 바로 '되돌리기 실패(busy)' 로 남긴다 — 감사는 그 결과를 적는다
+    audit(req, 'Bareos 완전 설치 전부 되돌리기', `${j.vcenterName} · ${j.id}`, j.status === 'rollback-failed' ? `시작하지 못함 — ${String(j.rollback?.message || '').slice(0, 200)}` : (again ? '다시 시작' : '시작'));
     res.json({ ok: true, job: j });
-  } catch (e) { sendErr(res, e); }
+  } catch (e) { audit(req, 'Bareos 완전 설치 전부 되돌리기', id, `거부 — ${auditReason(e)}`); sendErr(res, e); }
 });
 
 /** 마무리 — FD 가 vCenter 지문을 읽는다(쓰기 없음). */
@@ -171,16 +190,10 @@ api.post(`${P}/jobs/:id/fd-thumbprint`, adminOnly, fullScopeOnly, fullWriteOnly,
   const id = String(req.params.id || '');
   if (isDemoActive()) return res.json(demo.thumbprint(id));
   if (!installGate(req, res)) return;
-  const j = installJob(id);
-  if (!j) return res.status(404).json({ ok: false, reason: '작업을 찾을 수 없습니다.' });
-  if (j.status !== 'done') return res.status(409).json({ ok: false, reason: '설치가 끝난 뒤에 할 수 있습니다.' });
-  try {
-    const c = sshCredsFor(j.targetId);
-    if (!c?.password) return res.status(400).json({ ok: false, reason: '배포 등록부의 SSH 비밀번호가 없습니다.' });
+  await finishOp(req, res, 'Bareos 완전 설치(지문 읽기)', async (j, c) => {
     const r = await readFdThumbprint({ host: c.host, sshPort: c.port, username: c.username, password: c.password, vcenterId: j.vcenterId, directorId: j.directorId });
-    audit(req, 'Bareos 완전 설치(지문 읽기)', `${j.vcenterName} · ${j.id}`, `성공 — ${r.vcserver}`);
-    res.json({ ok: true, ...r });
-  } catch (e) { audit(req, 'Bareos 완전 설치(지문 읽기)', `${j.vcenterName} · ${j.id}`, `실패 — ${auditReason(e)}`); sendErr(res, e); }
+    return { okText: r.vcserver, body: r };
+  });
 });
 
 /** 마무리 — vCenter 계정·비밀번호를 FD INI 로 한 번(저장하지 않는다 · 감사·응답에 없음). */
@@ -188,18 +201,12 @@ api.post(`${P}/jobs/:id/fd-ini`, adminOnly, fullScopeOnly, fullWriteOnly, async 
   const id = String(req.params.id || '');
   if (isDemoActive()) return res.json(demo.fdIni(id, req.body || {}));
   if (!installGate(req, res)) return;
-  const j = installJob(id);
-  if (!j) return res.status(404).json({ ok: false, reason: '작업을 찾을 수 없습니다.' });
-  if (j.status !== 'done') return res.status(409).json({ ok: false, reason: '설치가 끝난 뒤에 할 수 있습니다.' });
-  if (!directorById(j.directorId)) return res.status(409).json({ ok: false, reason: '이 설치의 Director 등록을 찾지 못했습니다.' });
-  try {
-    const c = sshCredsFor(j.targetId);
-    if (!c?.password) return res.status(400).json({ ok: false, reason: '배포 등록부의 SSH 비밀번호가 없습니다.' });
+  const j0 = installJob(id);
+  if (j0 && !directorById(j0.directorId)) return res.status(409).json({ ok: false, reason: '이 설치의 Director 등록을 찾지 못했습니다.' });
+  await finishOp(req, res, 'Bareos 완전 설치(FD INI)', async (j, c) => {
     const b = req.body || {};
     const r = await setupFdIni({ host: c.host, sshPort: c.port, username: c.username, password: c.password, vcenterId: j.vcenterId, directorId: j.directorId, vcuser: b.vcuser, vcpass: b.vcpass, vcthumbprint: b.vcthumbprint });
-    audit(req, 'Bareos 완전 설치(FD INI)', `${j.vcenterName} · ${j.id}`, `성공 — ${r.path}(${r.action})`);
-    res.json({ ok: true, ...r });
-  } catch (e) { audit(req, 'Bareos 완전 설치(FD INI)', `${j.vcenterName} · ${j.id}`, `실패 — ${auditReason(e)}`); sendErr(res, e); }
+    return { okText: `${r.path}(${r.action})`, body: r };
+  });
 });
-
 }

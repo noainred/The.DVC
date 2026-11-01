@@ -257,7 +257,7 @@ function recordTargets(list, by, demo) {
  * 원장 기록이 실패한 Director 잡들 — 끄고(스케줄이 돌지 않게) 이름을 남긴다(대조 틱이 다시 켜지면 또 끈다). 사유에 잡 이름을 밝힌다.
  * @returns {Promise<Map<string, string>>} 잡 이름 → 사유
  */
-async function orphanCleanup(directorId, orphans, demo) {
+export async function orphanCleanup(directorId, orphans, demo) {
   const off = new Set();
   try {
     for (const r of await onDirector(directorId, 'disableJobs', { names: orphans.map((o) => o.name) })) if (r.ok) off.add(r.name);

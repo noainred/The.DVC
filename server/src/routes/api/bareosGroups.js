@@ -20,6 +20,8 @@ import { bareosVmView } from '../../bareos/vmView.js';
 import { getMarks, marksUnreadable } from '../../veeam/backupMarks.js';
 import { isSystemVm } from '../../veeam/backupStatus.js';
 import { poolPolicyOf, jobPolicyResolver } from '../../bareos/policy.js';
+import { pollerStatus } from '../../bareos/poller.js';
+import { directorInfo } from './bareosViews.js';
 
 const adminOnly = requireRole('admin');
 /**
@@ -101,6 +103,23 @@ function doubleScheduled(vcenterId, vmIds) {
   const set = new Set(vmIds);
   return jobDigests().filter((j) => j.vcenterId === vcenterId && set.has(j.vmId) && j.schedule).map((j) => ({ vmId: j.vmId, vmName: j.vmName, schedule: j.schedule }));
 }
+
+/**
+ * v2.846 버그 점검(D-9): 그룹에서 빠지면(그룹 삭제 · 편집에서 VM 빼기) **어떤 예약에도 걸리지 않는** VM — 그룹 잡은 Director 스케줄 없이 등록했고(registerMissing),
+ * 다른 그룹에도 없다. 확인 창은 '백업 대상과 데이터는 남는다' 만 말해 백업이 계속되는 것처럼 읽혔다(알아채는 것은 RPO '오래된 백업' 뒤) — 응답·감사·화면이 수를 밝힌다.
+ * 웹 bareosGroupText.unscheduledAfter 와 같은 판정(잡 있음 · 켜짐 · Director 스케줄 없음 · 다른 그룹 아님 — 시험이 같은 입력으로 대조).
+ * @returns {{ count: number, names: string[] }}
+ */
+function unscheduledAfter(vcenterId, vmIds, exceptGroupId) {
+  const others = new Set();
+  for (const g of listGroups()) if (g.id !== exceptGroupId && g.vcenterId === vcenterId) for (const id of g.vmIds || []) others.add(id);
+  const jobs = new Map(jobDigests().filter((j) => j.vcenterId === vcenterId).map((j) => [j.vmId, j]));
+  const hit = [];
+  for (const id of vmIds) { const j = jobs.get(id); if (j && j.enabled !== false && !j.schedule && !others.has(id)) hit.push(j.vmName || id); }
+  return { count: hit.length, names: hit.slice(0, 20) };
+}
+/** 응답·감사 문구(웹 bareosGroupText.unscheduledText 와 같은 글자). */
+export const unscheduledText = (n) => (n > 0 ? `스케줄 없는 잡 ${n}개 — 이후 예약 백업 없음` : '');
 
 /** 저장 요청 판정 공통(범위·원장·입력). 실패면 응답을 보내고 null. */
 function precheck(req, res, vcenterId, { selfId = '' } = {}) {
@@ -195,9 +214,13 @@ api.get('/tools/bareos-backup/groups/tree', adminOnly, (req, res) => {
   vms.sort((x, y) => x.folder.localeCompare(y.folder) || x.name.localeCompare(y.name));
   const si = siteInfo(vcenterId, settings);
   const vc = (snap?.vcenters || []).find((v) => v.id === vcenterId);
+  // v2.846 버그 점검(U-9): Director 상태(인증 정지 · 조회 실패 · 미설정)면 원장의 결과는 마지막으로 읽은 값이다 — 통합·법인별 현황과 같은 판정
+  //   (bareosViews.directorInfo → vmView.directorState)으로 resultsKnown 을 실어 화면이 '성공 n/n'(초록) 대신 '모름' 으로 그리게 한다.
+  let dirSt = null;
+  try { const di = directorInfo(vcenterId, settings, pollerStatus(), isDemoActive()); dirSt = { state: di.state, resultsKnown: di.resultsKnown }; } catch { dirSt = { state: 'error', resultsKnown: false }; }
   res.json({
     ok: true, vcenterId, vcName: vc?.name || vcenterId, now, tz: serverTz(), catchupMs: CATCHUP_MS,
-    director: si.view, mapped: !!si.site && !si.mappingMissing?.length, mappingMissing: si.mappingMissing, siteDefaults: si.site ? { storage: si.site.storage, pool: si.site.pool, schedule: si.site.schedule || '' } : null,
+    director: si.view ? { ...si.view, ...dirSt } : null, directorState: dirSt, mapped: !!si.site && !si.mappingMissing?.length, mappingMissing: si.mappingMissing, siteDefaults: si.site ? { storage: si.site.storage, pool: si.site.pool, schedule: si.site.schedule || '' } : null,
     writable: bareosAccess(req.user, vcenterId) === 0, marksKnown,
     groupsLoadError: !!groupsLoadError(), registryLoadError: !!registryLoadError(),
     limits: { maxMembers: MAX_MEMBERS, maxGroups: MAX_GROUPS, firesKeep: FIRES_KEEP, maxBulk: MAX_BULK, jobsLeft: Math.max(0, MAX_JOBS - jobDigests().length) },
@@ -287,10 +310,12 @@ api.put('/tools/bareos-backup/groups/:id', adminOnly, async (req, res) => {
     return res.status(404).json({ ok: false, reason: `그사이 그룹이 지워졌습니다.${reg.registered.some((r) => r.ok) ? ' 이번에 등록한 백업 대상은 남아 있습니다(백업 대상 탭).' : ''}`, registered: reg.registered });
   }
   const added = g.vmIds.filter((id) => !g0.vmIds.includes(id)).length;
-  const removed = g0.vmIds.filter((id) => !g.vmIds.includes(id)).length;
+  const removedIds = g0.vmIds.filter((id) => !g.vmIds.includes(id));
+  const removed = removedIds.length;
+  const uns = unscheduledAfter(g.vcenterId, removedIds, g.id);   // D-9: 뺀 VM 중 이제 어떤 예약에도 없는 잡
   audit(req, 'Bareos 백업 그룹 고치기', `${g.vcenterId}/${g.name}`,
-    `${g0.name !== g.name ? `이름 ${g0.name} → ${g.name} · ` : ''}VM ${g.vmIds.length}대(+${added} −${removed}) · ${scheduleText(g.schedule)} · ${(g0.keep ?? null) !== (g.keep ?? null) ? `보관 ${keepText(g0.keep ?? null)} → ${keepText(g.keep ?? null)}` : keepText(g.keep ?? null)}${g.storage ? ` · 스토리지 ${g.storage}` : ''}${g.pool ? ` · 풀 ${g.pool}` : ''}${og.used ? ' · 본인 OTP 확인' : ''}`);
-  res.json({ ok: true, group: groupView(g), registered: reg.registered, excluded: reg.excluded, doubleScheduled: g.schedule.enabled ? doubleScheduled(g.vcenterId, g.vmIds) : [] });
+    `${g0.name !== g.name ? `이름 ${g0.name} → ${g.name} · ` : ''}VM ${g.vmIds.length}대(+${added} −${removed}) · ${scheduleText(g.schedule)} · ${(g0.keep ?? null) !== (g.keep ?? null) ? `보관 ${keepText(g0.keep ?? null)} → ${keepText(g.keep ?? null)}` : keepText(g.keep ?? null)}${g.storage ? ` · 스토리지 ${g.storage}` : ''}${g.pool ? ` · 풀 ${g.pool}` : ''}${og.used ? ' · 본인 OTP 확인' : ''}${uns.count ? ` · 뺀 VM 중 ${unscheduledText(uns.count)}` : ''}`);
+  res.json({ ok: true, group: groupView(g), registered: reg.registered, excluded: reg.excluded, doubleScheduled: g.schedule.enabled ? doubleScheduled(g.vcenterId, g.vmIds) : [], unscheduled: uns });
 });
 
 /** 그룹 지우기 — 그룹만 지운다(백업 대상·Director 잡·백업 데이터는 그대로). 실행 중이면 409. */
@@ -300,8 +325,9 @@ api.delete('/tools/bareos-backup/groups/:id', adminOnly, (req, res) => {
   let ok;
   try { ok = deleteGroup(g.id); } catch (e) { return sendBareosErr(res, e); }
   if (!ok) return res.status(404).json({ ok: false, reason: NOT_FOUND });
-  audit(req, 'Bareos 백업 그룹 지우기', `${g.vcenterId}/${g.name}`, `VM ${g.vmIds.length}대 — 백업 대상·Director 잡은 남김`);
-  res.json({ ok: true });
+  const uns = unscheduledAfter(g.vcenterId, g.vmIds, g.id);   // D-9: 지운 뒤(그룹은 이미 없다) 어떤 예약에도 없는 잡
+  audit(req, 'Bareos 백업 그룹 지우기', `${g.vcenterId}/${g.name}`, `VM ${g.vmIds.length}대 — 백업 대상·Director 잡은 남김${uns.count ? ` · ${unscheduledText(uns.count)}` : ''}`);
+  res.json({ ok: true, unscheduled: uns });
 });
 
 /**

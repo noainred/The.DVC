@@ -8,6 +8,7 @@ import crypto from 'node:crypto';
 import { requireRole, requirePerm, verifyUserOtp, getUser } from '../../auth/auth.js';
 import { scopedVcenterIds, writeScopedVcenterIds } from '../../auth/scope.js';
 import { fullScopeOnlyWith } from '../admin/shared.js';
+import { memoJson, scopeKey } from './shared.js';
 import { config } from '../../config.js';
 import { store } from '../../store.js';
 import { logAudit } from '../../audit.js';
@@ -16,7 +17,7 @@ import {
   directorConn, directorCred, directorById, loadSettings, jobDirectorId, siteMissing, anyDirectorConfigured, LIMITS,
 } from '../../bareos/settings.js';
 import {
-  listJobs, getJob, patchJob, deleteJob, markPending, addRestore, registryLoadError, jobVmIds, MAX_JOBS, restoreOpen, clearPending, applyRunRow, applyRestoreRow,
+  listJobs, getJob, patchJob, deleteJob, markPending, addRestore, registryLoadError, jobVmIds, MAX_JOBS, restoreOpen, clearPending, applyRunRow, applyRestoreRow, registryRev,
 } from '../../bareos/registry.js';
 import { parseBanner } from '../../bareos/director.js';
 import { diagnoseConsole, DIAG_STAGES } from '../../bareos/console.js';
@@ -44,9 +45,9 @@ import {
 } from '../../bareos/autoSetup.js';
 import { isSshAuthError, isSshHostKeyError } from '../../proxy/sshExec.js';
 import { tryLockJob, unlockJob } from '../../bareos/jobLocks.js';
-import { jobPolicyResolver } from '../../bareos/policy.js';
-import { listGroups, groupsLoadError } from '../../bareos/groups.js';
-import { getMarks, marksUnreadable } from '../../veeam/backupMarks.js';
+import { jobPolicyResolver, policyRev } from '../../bareos/policy.js';
+import { listGroups, groupsLoadError, groupsRev } from '../../bareos/groups.js';
+import { getMarks, marksUnreadable, marksRev } from '../../veeam/backupMarks.js';
 
 const adminOnly = requireRole('admin');
 const fullScopeOnly = fullScopeOnlyWith('Bareos Director 설정은 전 법인 공용이라 전체 범위(vCenter 제한 없는) 계정만 볼 수 있습니다.');
@@ -348,8 +349,42 @@ async function catalogOf(d, refresh) {
 
 export function registerBareosBackup(api) {
 
-/** 목록 + 상태(폴러·설정 요약·법인별 Director). */
-api.get('/tools/bareos-backup', adminOnly, (req, res) => {
+/**
+ * 목록 + 상태(폴러·설정 요약·법인별 Director).
+ * v2.846 버그 점검(C-5 — 측정): 관리 화면이 어느 탭이든 10초마다 부른다 — 3,000 대상이면 원장 깊은 복사·정책 판정·직렬화가 매번 100ms 넘게 돌았다.
+ * memoJson(스냅샷 세대 + 아래 열쇠)으로 같은 세대의 다시 부르기는 계산하지 않고(ETag 304), 화면이 쓰지 않는 끝난 실행 원문(finishedRuns)은 싣지 않는다.
+ */
+api.get('/tools/bareos-backup', adminOnly, (req, res) => memoJson(req, res, 'bareos-backup-list', () => bareosListView(req), { extraKey: bareosListKey(req) }));
+
+/**
+ * 목록 캐시 열쇠 — '세대가 바뀌면 무엇이 지워지는가'(루트 CLAUDE.md 캐시 규칙)에 대한 답:
+ *  · 사람마다 다른 칸: 조회 범위(scopeKey — 범위 계정이 전체 범위 관리자의 캐시를 받지 않게) · 쓰기 범위(대상별 writable · settingsWritable) ·
+ *    역할 · 관리자 판본(isAdminDetailUser — Director 주소·콘솔·오류 원문을 보이는가) · 데모 모드.
+ *  · 원장 rev(대상 추가·삭제·실행 결과·대기 — 폴러·엣지 회신이 반영할 때마다 오른다) · 설정 rev(Director·매핑·기본값) · 그룹 rev · 정책 수집 rev · 백업 표시 rev ·
+ *    손상 표지(원장·설정·그룹·표시) · 폴러 at·busy 와 Director 별 상태(엣지 회신은 at 없이 ok·relay 만 바꾼다) · 인증 정지(수동 연결 시험이 폴러 없이 바꾼다).
+ *  · 스냅샷 세대(memoJson 이 앞에 붙인다 — VM 이름·위치 drift · 게스트 OS · 그룹 다음 회차 시각). 이 밖의 값이 바뀌어도 늦어야 스냅샷 한 주기다.
+ */
+function bareosListKey(req) {
+  const snap = store.get();
+  let w = 'err';
+  try { const ws = writeScopedVcenterIds(req.user, snap); w = ws ? [...ws].sort().join(',') : 'all'; } catch { w = 'err'; }
+  const p = pollerStatus();
+  const dirs = Object.entries(p.directors || {}).map(([k, v]) => `${k}:${v?.at ?? ''}:${v?.ok}:${v?.relay || ''}:${v?.code || ''}`).join(',');
+  let auth = '';
+  try {
+    const demo = isDemoActive();
+    auth = effectiveSettings().directors.map((d) => { const s = demo ? null : bareosAuthGuard.peekAuthStop(directorCred(d)); return s ? `${d.id}:${s.at}` : ''; }).filter(Boolean).join(',');
+  } catch { auth = 'err'; }
+  const bad = (f) => { try { return f() ? 1 : 0; } catch { return 1; } };
+  return [
+    `s=${scopeKey(req.user, snap)}`, `w=${w}`, `r=${req.user?.role || ''}`, `a=${isAdminDetailUser(req.user) ? 1 : 0}`, `d=${isDemoActive() ? 1 : 0}`,
+    `g=${registryRev()}`, `c=${settingsRev()}`, `gr=${groupsRev()}`, `po=${policyRev()}`, `m=${marksRev()}`,
+    `e=${bad(registryLoadError)}${bad(settingsLoadError)}${bad(groupsLoadError)}${bad(marksUnreadable)}`,
+    `p=${p.at || 0}:${p.busy ? 1 : 0}`, `pd=${dirs}`, `as=${auth}`,
+  ].join('|');
+}
+
+function bareosListView(req) {
   const settings = effectiveSettings();
   const demo = isDemoActive();
   const { jobs, omitted, scoped } = scopedJobs(req.user);
@@ -375,7 +410,8 @@ api.get('/tools/bareos-backup', adminOnly, (req, res) => {
       return { verdict: r.verdict, src: r.src, next: r.next, ...(r.dup ? { dup: r.dup } : {}), pool: r.pool, poolFrom: r.poolFrom, retentionSec: r.retentionSec, keep: r.keep, collected: r.collected };
     } catch { return null; }
   };
-  const views = jobs.map((j) => ({ ...viewJob(j, vmById, settings), writable: bareosAccess(req.user, j.vcenterId) === 0, policy: policyOf(j) }));
+  // C-5: 끝난 실행 원문(finishedRuns — 실패 메일·RPO 용 · 최근 10건)은 화면이 쓰지 않는다(웹 grep 0건) — 싣지 않는다. 복원 이력(restores)은 '실행 현황 · 이력' 탭이 쓴다.
+  const views = jobs.map(({ finishedRuns, ...j }) => ({ ...viewJob(j, vmById, settings), writable: bareosAccess(req.user, j.vcenterId) === 0, policy: policyOf(j) }));   // eslint-disable-line no-unused-vars
   let settingsWritable = false;
   try { settingsWritable = !scopedVcenterIds(req.user, store.get()) && !writeScopedVcenterIds(req.user, store.get()); } catch { settingsWritable = false; }
   const rawPoller = pollerStatus();
@@ -389,7 +425,7 @@ api.get('/tools/bareos-backup', adminOnly, (req, res) => {
     };
   }).filter((d) => !scoped || d.vcenters.length || d.jobs);   // 범위 계정에는 자기 vCenter 의 법인만
   const poller = scoped ? scopedPoller(rawPoller, new Set(directors.map((d) => d.id))) : (showAddr ? rawPoller : maskedPoller(rawPoller));
-  res.json({
+  return {
     demo,
     configured: demo || anyDirectorConfigured(loadSettings()),
     directors,
@@ -403,8 +439,8 @@ api.get('/tools/bareos-backup', adminOnly, (req, res) => {
     settingsWritable,   // G12: 설정(전 법인 공용 쓰기 — fullWriteOnly)을 바꿀 수 있는 계정인가
     settingsLoadError: loadErrorView(settingsLoadError(), detail),
     registryLoadError: loadErrorView(registryLoadError(), detail),
-  });
-});
+  };
+}
 
 /** 설정 전체(전체 범위 관리자) — 법인별 Director(비밀번호 없음)·공통 기본값·매핑·vCenter 목록. */
 api.get('/tools/bareos-backup/settings', adminOnly, fullScopeOnly, (req, res) => {
@@ -446,6 +482,9 @@ api.put('/tools/bareos-backup/settings', adminOnly, fullScopeOnly, fullWriteOnly
   // v2.823 검토(P4·W17 — 재현): 두 화면(다른 Director 편집)이 각자 마지막에 읽은 매핑 전체를 보내 먼저 저장한 쪽이 조용히 사라졌다 —
   //   화면이 읽은 설정 세대(rev)를 함께 보내면 그 뒤 다른 저장이 있었을 때 409 로 다시 읽게 한다.
   if (body.rev !== undefined && String(body.rev) !== revToken()) return res.status(409).json({ ok: false, code: 'stale', reason: '그사이 다른 화면에서 Bareos 설정이 바뀌었습니다 — 다시 읽은 뒤 저장하세요.' });
+  // v2.846 버그 점검(D-7): 매핑 저장은 '백업 대상이 있는 vCenter 의 Director 는 바꾸지 않는다'(jobDirs)를 원장으로 본다 — 원장을 못 읽었으면
+  //   대상 0 으로 보고 다른 Director 로 옮겨 버렸다(그 잡들은 옛 Director 의 conf 에 있다). 못 읽었으면 매핑 저장을 받지 않는다(공통 기본값만은 받는다).
+  if (body.sites !== undefined && registryLoadError()) return res.status(503).json({ ok: false, code: 'registry-unreadable', reason: '백업 대상 원장을 읽지 못한 상태라 매핑을 저장하지 않습니다(어느 vCenter 에 대상이 있는지 모릅니다 — 손상본 보존 · 서비스 점검에서 확인).' });
   if (Array.isArray(body.sites)) {
     // v2.823 검토(W1 — 재현): 인벤토리에서 빠진 vCenter 의 **이미 저장된** 매핑은 그대로 다시 보내도 받는다(다른 Director 편집의 저장이
     //   전부 400 이던 막다른 길). 새로 묶는 vCenter 만 인벤토리에 있어야 한다.
@@ -503,6 +542,8 @@ api.put('/tools/bareos-backup/settings/directors/:directorId', adminOnly, fullSc
 api.delete('/tools/bareos-backup/settings/directors/:directorId', adminOnly, fullScopeOnly, fullWriteOnly, (req, res) => {
   const id = String(req.params.directorId || '');
   if (isSetupBusy(id)) return res.status(409).json({ ok: false, reason: '이 Director 의 자동 설정이 진행 중입니다.' });
+  // v2.846 버그 점검(D-7): 원장을 못 읽었으면 '이 Director 를 쓰는 대상 0' 으로 보지 않는다(지우면 그 잡들이 갈 Director 가 사라진다)
+  if (registryLoadError()) return res.status(503).json({ ok: false, code: 'registry-unreadable', reason: '백업 대상 원장을 읽지 못한 상태라 Director 를 지우지 않습니다(이 Director 를 쓰는 대상이 있는지 모릅니다 — 손상본 보존 · 서비스 점검에서 확인).' });
   const st = loadSettings();
   const inUseByJobs = listJobs().filter((j) => !j.demo && jobDirectorId(j, st) === id).length;
   try {
