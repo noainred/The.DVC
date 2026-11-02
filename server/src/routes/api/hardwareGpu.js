@@ -23,6 +23,10 @@ import { todayStamp } from "../../util/dayKey.js";
 import { acquireExport } from '../../util/exportBusy.js';
 import { waitDrain } from '../../util/waitDrain.js'; // v2.783(점검 Q5): drain 만 기다리면 끊긴 클라이언트에서 영원히 멈춰 내보내기 잠금이 풀리지 않았다
 import { snapMemo } from '../../util/snapCache.js';
+import { buildGpuAllocTree } from '../../gpu/allocTree.js';
+import { renderGpuAllocWorkbook, allocCsvLines, allocExportOpts, allocFileName, ALLOC_DEPTHS, ALLOC_SHEET_KEYS, XLSX_MIME as ALLOC_XLSX_MIME } from '../../gpu/allocTreeXlsx.js';
+import { fileStamp, localStamp, DAY_OFFSET_MIN } from '../../util/dayKey.js';
+import { tzName } from '../../vcenter/vmExportCatalog.js';
 // v2.643: CSV·텍스트 가져오기/내보내기는 관리자 이상 + 'data.csv' 권한(super_admin 항상, admin 은 권한 설정에서 끌 수 있다).
 const csvPerm = requirePerm('data.csv');
 
@@ -484,6 +488,66 @@ api.get('/tools/gpu.csv', csvPerm, requirePerm('tools'), (req, res) => {
       r.utilPct == null ? '' : r.utilPct, r.utilSource || '', r.assignedVms].map(esc).join(','));
   }
   sendMaybeZip(res, `gpu-${todayStamp()}.csv`, '﻿' + lines.join('\r\n'), 'text/csv; charset=utf-8'); // BOM for Excel
+});
+
+/**
+ * v2.852: GPU 할당 계층(법인 › 데이터센터 › 클러스터 › 호스트 › GPU › VM — gpu/allocTree.js) — 화면 · CSV · 엑셀.
+ * v2.857: 특수 기능 'GPU 할당율'(도구 키 gpu-alloc — 사용자 요청)로 독립했다. 경로 첫 세그먼트 = 도구 키 규약(auth/toolAccess.js CATALOG2613-12)이라
+ *   `/tools/gpu/alloc*` → `/tools/gpu-alloc*` 로 옮겼다 — 옛 경로로 두면 'GPU 인벤토리'(gpu) 권한만으로 열려 gpu-alloc 거부가 집행되지 않는다.
+ *   조회 범위(scopedVcenterIds)를 요청 필터(vcenterId)보다 먼저 건다. 범위 밖 vcenterId 는 빈 결과다(존재 여부를 말하지 않는다).
+ *   파일은 data.csv(v2.643 규약 — 형제 gpu.csv 와 같은 게이트) · 엑셀은 동시 1건(exportBusy). 스냅샷만 읽는다(왕복 0).
+ */
+function allocTreeOf(req) {
+  const snap = store.get();
+  const vcenterId = typeof req.query.vcenterId === 'string' && req.query.vcenterId ? req.query.vcenterId.slice(0, 200) : null;
+  // v2.853: 화면 법인 칩에서 고른 법인들(쉼표 목록 · 100개 · 각 200자 상한). 형식이 아니면 버린다(조회 범위가 먼저 — buildGpuAllocTree).
+  const raw = typeof req.query.vcenterIds === 'string' ? req.query.vcenterIds.slice(0, 20_000) : '';
+  const picked = raw ? [...new Set(raw.split(',').map((x) => x.trim()).filter((x) => x && x.length <= 200))].slice(0, 100) : [];
+  const vcenterIds = picked.length ? new Set(picked) : null;
+  const tree = buildGpuAllocTree(snap, { allowed: scopedVcenterIds(req.user, snap), vcenterId, vcenterIds });
+  const names = tree.vcenters.map((v) => v.id);
+  const scopeText = vcenterId ? (tree.vcenters[0]?.name || vcenterId)
+    : vcenterIds ? (names.length ? `법인 ${names.join(', ')}` : '고른 법인(조회 범위 안에 없음)') : '전체 법인';
+  const fileScope = vcenterId || (vcenterIds ? (names.length === 1 ? names[0] : `${names.length}corps`) : 'all');
+  return { snap, tree, vcenterId, scopeText, fileScope: String(fileScope).replace(/[^\w.-]+/g, '_').slice(0, 60) };
+}
+api.get('/tools/gpu-alloc', requirePerm('tools'), (req, res) => {
+  const { snap, tree } = allocTreeOf(req);
+  res.json({ generatedAt: snap.generatedAt || null, ...tree });
+});
+// v2.855: 내보내기 창(승인 시안 '계층 표 엑셀 내보내기')이 그릴 것 — 범위 글자 · 호스트·GPU 수 · 단계별 파일 이름(내려받기와 같은 함수).
+api.get('/tools/gpu-alloc/export-meta', csvPerm, requirePerm('tools'), (req, res) => {
+  const { snap, tree, scopeText, fileScope } = allocTreeOf(req);
+  const stamp = fileStamp(Date.parse(snap.generatedAt || '') || Date.now());
+  res.json({
+    scopeText, vcenters: tree.vcenters.length, hosts: tree.totals.hosts, gpus: tree.totals.gpus,
+    depths: Object.keys(ALLOC_DEPTHS), sheets: [...ALLOC_SHEET_KEYS],
+    fileNames: Object.fromEntries(Object.keys(ALLOC_DEPTHS).map((d) => [d, allocFileName(fileScope, stamp, 'xlsx', d)])),
+    csvFileName: allocFileName(fileScope, fileStamp(), 'csv'),
+  });
+});
+api.get('/tools/gpu-alloc.csv', csvPerm, requirePerm('tools'), (req, res) => {
+  const { tree, fileScope } = allocTreeOf(req);
+  sendMaybeZip(res, allocFileName(fileScope, fileStamp(), 'csv'), '\uFEFF' + allocCsvLines(tree, csvCell).join('\r\n'), 'text/csv; charset=utf-8');
+});
+api.get('/tools/gpu-alloc.xlsx', csvPerm, requirePerm('tools'), async (req, res) => {
+  // v2.855: 넣을 단계(depth)·시트(sheets) — 모르는 값은 잠금을 잡기 전에 400(조용히 버리지 않는다).
+  const opts = allocExportOpts(req.query);
+  if (!opts.ok) return res.status(400).json({ ok: false, error: 'bad_request', reason: opts.reason });
+  const lock = acquireExport('gpu.alloc.xlsx', req);
+  if (!lock.ok) return res.status(lock.status).json(lock.body);
+  try {
+    const { snap, tree, scopeText, fileScope } = allocTreeOf(req);
+    const ts = Date.parse(snap.generatedAt || '') || Date.now();
+    const buf = await renderGpuAllocWorkbook(tree, { stamp: localStamp(ts) || '', tz: tzName(DAY_OFFSET_MIN), scopeText }, { depth: opts.depth, sheets: opts.sheets });
+    const name = allocFileName(fileScope, fileStamp(ts), 'xlsx', opts.depth);
+    res.setHeader('Content-Type', ALLOC_XLSX_MIME);
+    res.setHeader('Content-Disposition', `attachment; filename="${name}"`);
+    res.end(buf);
+  } catch (e) {
+    console.warn(`[gpu] 할당 계층 엑셀 실패: ${e?.message || e}`);
+    if (!res.headersSent) res.status(500).json({ ok: false, error: 'export_failed', reason: '엑셀을 만들지 못했습니다.' });
+  } finally { lock.release(); }
 });
 
 // GPU 사용률 시계열 수집 메타 — '언제부터 데이터가 쌓였는지'(수집 시작/마지막/샘플 수).

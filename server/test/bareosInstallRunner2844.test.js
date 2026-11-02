@@ -33,6 +33,7 @@ if [ "$op" = install ]; then
   [ -f "$P/etc/bareos/bareos-sd.d/director/bareos-dir.conf" ] || printf 'Director {\\n  Name = bareos-dir\\n  Password = "sd-secret-pw"\\n}\\n' > "$P/etc/bareos/bareos-sd.d/director/bareos-dir.conf"
   printf 'Director {\\n  Name = bareos-dir\\n}\\n' > "$P/etc/bareos/bareos-dir.d/director/bareos-dir.conf"
   touch "$FAKE/bareos_user"
+  if [ "\${FAKE_DNF_FAIL:-}" = pin ]; then echo "Package openssl-1:3.0.7-28.el9_4.x86_64 is already installed."; echo "Error: "; echo " Problem: cannot install both openssl-libs-1:3.5.8-2.el9_8.x86_64 from portal-bareos-local and openssl-libs-1:3.0.7-28.el9_4.x86_64 from @System"; echo "  - package openssl-1:3.5.8-2.el9_8.x86_64 from portal-bareos-local requires openssl-libs(x86-64) = 1:3.5.8-2.el9_8, but none of the providers can be installed"; echo "  - package openssl-devel-1:3.0.7-28.el9_4.x86_64 from @System requires openssl-libs(x86-64) = 1:3.0.7-28.el9_4, but none of the providers can be installed"; echo "  - cannot install the best candidate for the job"; exit 1; fi
   if [ -n "\${FAKE_DNF_FAIL:-}" ]; then echo " Problem: conflicting requests"; echo "  - nothing provides libfoo"; exit 1; fi
   echo Complete!; exit 0
 fi
@@ -41,7 +42,8 @@ if [ "$op" = remove ]; then
   echo removed; exit 0
 fi
 exit 0`,
-  rpm: '#!/bin/bash\ncat "$FAKE/rpmdb" 2>/dev/null; exit 0',
+  // v2.851: 'rpm -q [--quiet] 이름…' 은 가짜 rpmdb 로 설치 여부(하나라도 없으면 1) · 그 밖(-qa …)은 목록
+  rpm: '#!/bin/bash\nif [ "$1" = -q ]; then rc=0; for a in "$@"; do case "$a" in (-*) ;; (*) grep -qx "$a" "$FAKE/rpmdb" 2>/dev/null || rc=1;; esac; done; exit $rc; fi\ncat "$FAKE/rpmdb" 2>/dev/null; exit 0',
   systemctl: `#!/bin/bash
 q=0; args=()
 for a in "$@"; do case "$a" in (-q|--quiet|--now) [ "$a" = --now ] && now=1 || q=1;; (*) args+=("$a");; esac; done
@@ -156,6 +158,45 @@ test('② 2단계 dnf 실패 → 그 단계만 되돌림(넣은 패키지 제거
   assert.equal(classifyFailure({ step: 2, ...err }).key, 'dnf-conflict');
 });
 
+// v2.851(2026-11-02 사용자 화면 — 재현): 설치 목록의 이미 설치된 이름(openssl · tar)을 dnf install 에 넘기면 dnf(best)가 번들 판으로 올리려 해 서버의 openssl-devel 고정에 막혔다
+test('②-b 2단계 — 설치 목록 중 이미 설치된 이름은 dnf install 에 넘기지 않는다(서버 판 유지) · 전부 설치돼 있으면 설치 없이 진행', () => {
+  const e = env({ rpmdb: ['glibc', 'python3', 'openssl', 'tar', 'policycoreutils-python-utils'] });
+  planEnv(e, { INSTALL_PKGS: 'bareos bareos-webui postgresql-server policycoreutils-python-utils tar openssl' });
+  const r = run(e);
+  assert.equal(r.status, 0, r.stderr + r.log);
+  assert.ok(has(r.state, 2, 'ok'), r.state);
+  assert.match(r.log, /이미 설치돼 건너뜀\(서버 판 유지\): policycoreutils-python-utils tar openssl/);
+  const dnfLine = r.log.split('\n').find((l) => l.includes('$ dnf install('));
+  assert.equal(dnfLine.slice(dnfLine.indexOf('$ ')), '$ dnf install(번들 저장소만 · bareos bareos-webui postgresql-server)', '넘긴 이름은 설치되지 않은 것만');
+  // 전부 설치돼 있으면 dnf 를 부르지 않고 2단계가 이어진다(pyVmomi · DB)
+  const e2 = env({ rpmdb: ['glibc', 'python3', 'bareos', 'bareos-webui', 'postgresql-server'] });
+  // dnf 대역이 만들던 것(/etc/bareos 뼈대 · bareos 계정)은 이미 설치된 서버에 있어야 하는 것 — 미리 둔다
+  fs.writeFileSync(path.join(e2.FAKE, 'bareos_user'), '');
+  for (const d of ['bareos-sd.d/director', 'bareos-sd.d/device', 'bareos-dir.d/storage', 'bareos-dir.d/director', 'bareos-fd.d/client']) fs.mkdirSync(path.join(e2.P, 'etc/bareos', d), { recursive: true });
+  fs.writeFileSync(path.join(e2.P, 'etc/bareos/bareos-sd.d/director/bareos-dir.conf'), 'Director {\n  Name = bareos-dir\n  Password = "sd-secret-pw"\n}\n');
+  fs.writeFileSync(path.join(e2.P, 'etc/bareos/bareos-dir.d/director/bareos-dir.conf'), 'Director {\n  Name = bareos-dir\n}\n');
+  planEnv(e2);
+  const r2 = run(e2);
+  assert.equal(r2.status, 0, r2.stderr + r2.log);
+  assert.match(r2.log, /설치할 패키지가 없습니다\(설치 목록 전부 설치됨\)/);
+  assert.ok(!r2.log.includes('$ dnf install('), 'dnf install 을 부르지 않는다');
+  assert.ok(has(r2.state, 2, 'ok') && has(r2.state, 3, 'ok'), r2.state);
+  // 실제 사례의 dnf 출력이면 err.2 는 base-pkg-pinned 로 분류되고 그 단계만 되돌린다
+  const e3 = env(); planEnv(e3);
+  const r3 = run(e3, { FAKE_DNF_FAIL: 'pin' });
+  assert.notEqual(r3.status, 0);
+  assert.ok(has(r3.state, 2, 'rolledback'), r3.state);
+  const c = classifyFailure({ step: 2, ...parseErrFile(fs.readFileSync(path.join(e3.R, 'err.2'), 'utf8')) });
+  assert.equal(c.key, 'base-pkg-pinned'); assert.match(c.why, /‘openssl’ 이\(가\) 이미 설치돼 있었고/);
+  // 반증 v2.851: rpm -qa 목록을 못 읽으면(빈 목록) 설치하지 않고 멈춘다(못 읽음 ≠ 설치 안 됨) · 러너는 LC_ALL=C(영어 원문 판정)
+  const e4 = env({ rpmdb: [] }); fs.writeFileSync(path.join(e4.FAKE, 'rpmdb'), ''); planEnv(e4);
+  const r4 = run(e4);
+  assert.notEqual(r4.status, 0); assert.ok(has(r4.state, 2, 'fail'), r4.state);
+  assert.ok(!r4.log.includes('$ dnf install('), 'dnf 를 부르지 않는다');
+  assert.equal(parseErrFile(fs.readFileSync(path.join(e4.R, 'err.2'), 'utf8')).cause, 'rpmdb');
+  assert.match(fs.readFileSync(RUNNER, 'utf8'), /^export LC_ALL=C$/m);
+});
+
 test('③ pyVmomi 사본 → pyvmomi-shadow · 포탈에서 고치기(PYVMOMI_FIX=1)로 다시 하면 옮기고 성공', () => {
   const e = env(); planEnv(e);
   const bpp = path.join(e.P, 'usr/lib64/bareos/plugins/pyVmomi');
@@ -201,7 +242,7 @@ test('④ 초기화(0단계): 보관 tar · bareos 패키지 제거 · DB 삭제
 });
 
 test('④-c 설정이 시스템 경로(/var)를 볼륨으로 가리켜도 지우지 않는다(safe_voldir)', () => {
-  const e = env({ rpmdb: ['bareos-director'] });
+  const e = env({ rpmdb: ['glibc', 'bareos-director'] });   // v2.851: 실제 서버는 rpm 목록이 비지 않는다(빈 목록 = rpmdb 못 읽음 → 2단계가 멈춘다)
   fs.mkdirSync(path.join(e.P, 'etc/bareos/bareos-sd.d/device'), { recursive: true });
   fs.writeFileSync(path.join(e.P, 'etc/bareos/bareos-sd.d/device/Bad.conf'), 'Device {\n  Archive Device = /var\n}\n');
   fs.writeFileSync(path.join(e.P, 'var/keep-me'), 'z');
@@ -213,7 +254,7 @@ test('④-c 설정이 시스템 경로(/var)를 볼륨으로 가리켜도 지우
 });
 
 test('④-d 부모 디렉터리가 심링크인 볼륨 경로는 지우지 않는다(반증 M2 — /srv/link → 다른 곳)', () => {
-  const e = env({ rpmdb: ['bareos-director'] });
+  const e = env({ rpmdb: ['glibc', 'bareos-director'] });   // v2.851: 실제 서버는 rpm 목록이 비지 않는다(빈 목록 = rpmdb 못 읽음 → 2단계가 멈춘다)
   const victim = path.join(e.P, 'opt/precious'); fs.mkdirSync(victim, { recursive: true }); fs.writeFileSync(path.join(victim, 'keep'), 'k');
   fs.mkdirSync(path.join(e.P, 'srv'), { recursive: true });
   fs.symlinkSync(path.join(e.P, 'opt'), path.join(e.P, 'srv/link'));
@@ -226,7 +267,7 @@ test('④-d 부모 디렉터리가 심링크인 볼륨 경로는 지우지 않�
 });
 
 test('④-b 볼륨 보존(기본) — RESET_VOLUMES=0 이면 파일을 건드리지 않는다', () => {
-  const e = env({ rpmdb: ['bareos-director'] });
+  const e = env({ rpmdb: ['glibc', 'bareos-director'] });   // v2.851: 실제 서버는 rpm 목록이 비지 않는다(빈 목록 = rpmdb 못 읽음 → 2단계가 멈춘다)
   const vol = path.join(e.P, 'srv/bk/vol'); fs.mkdirSync(vol, { recursive: true }); fs.writeFileSync(path.join(vol, 'Full-0001'), 'x');
   fs.mkdirSync(path.join(e.P, 'etc/bareos/bareos-sd.d/device'), { recursive: true });
   fs.writeFileSync(path.join(e.P, 'etc/bareos/bareos-sd.d/device/FileStorage.conf'), 'Device {\n  Archive Device = /srv/bk/vol\n}\n');

@@ -35,6 +35,7 @@ import { precheckScript, parsePrecheck, judgePrecheck } from './precheck.js';
 import { parseErrFile, classifyFailure, scrubOutput } from './causes.js';
 import { listInstallTargets, sshCredsFor } from './targets.js';
 import { tarName } from './bundleDoc.js';
+import { registryHosts } from '../vcHost.js';
 
 const FILE = () => path.join(config.configDir, 'bareos-install-jobs.json');
 const RUNNER_SRC = path.join(path.dirname(fileURLToPath(import.meta.url)), 'runner.sh');
@@ -504,9 +505,15 @@ async function centralStep(j, creds, n) {
   }
   if (n === 7) {
     const cur = loadSettings();
-    const ini = `/etc/bareos/vmware/${String(j.vcHost || j.vcenterId).replace(/[^A-Za-z0-9._-]/g, '_').slice(0, 80)}.ini`;
-    const site = { vcenterId: j.vcenterId, directorId: j.directorId, vcserver: j.vcHost, client: FD_CLIENT, storage: DIR_STORAGE, pool: VMWARE_POOL_FULL, schedule: j.plan.schedule ? VMWARE_SCHEDULE : '', configFile: ini };
-    const had = cur.sites.some((s) => s.vcenterId === j.vcenterId);
+    // v2.851.1(2026-11-02 사용자 화면 — 재현): FD 가 접속할 vCenter 주소. 예전에는 작업의 vcHost(수집 스냅샷 — host 칸이 없어 늘 '')를 그대로 써
+    //   빈 vcserver 로 매핑을 저장했고(재설치면 쓰던 매핑의 주소까지 지웠다) 마무리(FD 지문 · INI)가 거부됐다.
+    //   순서: 지금 매핑에 있는 값(사람이 넣은 값 — 재설치) > 작업 시작 때 값 > vCenter 등록부. 셋 다 없으면 **저장하지 않고 멈춘다**(빈 값을 저장하지 않는다).
+    const prev = cur.sites.find((s) => s.vcenterId === j.vcenterId) || null;
+    const vcserver = String(prev?.vcserver || '') || String(j.vcHost || '') || registryHosts().get(String(j.vcenterId)) || '';
+    if (!vcserver) throw fail('invalid', `vCenter ‘${j.vcenterName}’ 의 주소를 vCenter 등록부에서 찾지 못해 매핑을 저장하지 않았습니다 — 설정 › Bareos › 기본 설정의 매핑 표에서 vcserver(호스트 이름 또는 IP)를 넣고 저장한 뒤 7단계를 다시 하세요.`);
+    const ini = `/etc/bareos/vmware/${String(vcserver || j.vcenterId).replace(/[^A-Za-z0-9._-]/g, '_').slice(0, 80)}.ini`;
+    const site = { vcenterId: j.vcenterId, directorId: j.directorId, vcserver, client: FD_CLIENT, storage: DIR_STORAGE, pool: VMWARE_POOL_FULL, schedule: j.plan.schedule ? VMWARE_SCHEDULE : '', configFile: ini };
+    const had = !!prev;
     const sites = [...cur.sites.filter((s) => s.vcenterId !== j.vcenterId), site];
     const jobDirs = new Map();
     for (const x of listJobs()) { if (x.demo) continue; const set = jobDirs.get(x.vcenterId) || new Set(); set.add(jobDirectorId(x, cur)); jobDirs.set(x.vcenterId, set); }

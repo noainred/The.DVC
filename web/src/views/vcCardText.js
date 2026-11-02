@@ -66,6 +66,20 @@ export function vcCardState(s = {}, now = Date.now()) {
  * v2.600(LO2600-01): 스토리지 막대 값. 서버가 사용량을 읽은 데이터스토어가 하나도 없으면 사용률을 null 로 준다 —
  * 예전 `m.storageUsagePct || 0` 은 그것을 **0% 막대**(= '비어 있다')로 그렸다. null 이면 막대는 '—' 이고 툴팁이 이유를 말한다.
  */
+/**
+ * v2.853: '바로가기' 칩의 상태 점 색 — vCenter 화면(VCenters.jsx)과 GPU 할당 계층의 법인 칩이 같이 쓴다(판정 복제 금지).
+ * 장애 = 빨강 · 첫 수집 대기·비활성 = 흐림(빨간 '장애' 로 칠하지 않는다 — v2.583 #39) · 경보·주의 = 호박 · 정상 = 초록.
+ * @returns {{ dot: string, down: boolean }}
+ */
+export function vcQuickDot(s = {}, now = Date.now()) {
+  const tone = vcCardState(s, now).tone;
+  const down = tone === 'bad';
+  const m = s?.metrics || {};
+  const alarms = (m.alarmsCritical || 0) + (m.alarmsWarning || 0);
+  const dot = down ? 'var(--red)' : (tone === 'wait' || tone === 'off') ? 'var(--text-faint)' : (alarms || tone === 'warn') ? 'var(--amber)' : 'var(--green)';
+  return { dot, down };
+}
+
 export function storageBarInfo(m = {}) {
   const pct = typeof m?.storageUsagePct === 'number' && Number.isFinite(m.storageUsagePct) ? m.storageUsagePct : null;
   const unknown = Number(m?.datastoresUsageUnknown) || 0;

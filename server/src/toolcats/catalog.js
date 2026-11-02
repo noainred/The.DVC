@@ -45,7 +45,7 @@ export const PRESET = Object.freeze([
   {
     id: 'server', label: '서버', icon: '🖥️',
     tools: ['fleet', 'hardware', 'serveranalysis', 'idrac-trend', 'serial-lookup', 'esxi', 'host-hygiene', 'esxitemp', 'roomtemp',
-      'powermap', 'pdu', 'gpu', 'hba', 'nic-speed', 'nic-models', 'rma', 'bm-storage', 'part-faults',
+      'powermap', 'pdu', 'gpu', 'gpu-alloc', 'hba', 'nic-speed', 'nic-models', 'rma', 'bm-storage', 'part-faults',
       'bm-usage', 'corp-usage', 'power-total'],
   },
   {
@@ -61,7 +61,7 @@ export const PRESET = Object.freeze([
   {
     id: 'virtualization', label: '가상화', icon: '🧊',
     tools: ['vmfinder', 'vm-track', 'vmtools', 'guestos', 'real-os', 'curuser', 'snapshots', 'vm-clone', 'bareos-backup',
-      'vmprovision', 'vm-export', 'vm-changes', 'vm-lifecycle', 'contention', 'vm-availability', 'cost-showback', 'migration-readiness', 'esxi', 'host-hygiene', 'cluster-check', 'esxitemp', 'vcversion', 'solutions', 'gpu', 'topo3d'],
+      'vmprovision', 'vm-export', 'vm-changes', 'vm-lifecycle', 'contention', 'vm-availability', 'cost-showback', 'migration-readiness', 'esxi', 'host-hygiene', 'cluster-check', 'esxitemp', 'vcversion', 'solutions', 'gpu', 'gpu-alloc', 'topo3d'],
   },
   {
     id: 'capacity', label: '용량·최적화', icon: '📈',

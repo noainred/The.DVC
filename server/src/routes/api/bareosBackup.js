@@ -48,6 +48,7 @@ import { tryLockJob, unlockJob } from '../../bareos/jobLocks.js';
 import { jobPolicyResolver, policyRev } from '../../bareos/policy.js';
 import { listGroups, groupsLoadError, groupsRev } from '../../bareos/groups.js';
 import { getMarks, marksUnreadable, marksRev } from '../../veeam/backupMarks.js';
+import { registryHosts, vcHostOf } from '../../bareos/vcHost.js';
 
 const adminOnly = requireRole('admin');
 const fullScopeOnly = fullScopeOnlyWith('Bareos Director 설정은 전 법인 공용이라 전체 범위(vCenter 제한 없는) 계정만 볼 수 있습니다.');
@@ -470,7 +471,9 @@ api.get('/tools/bareos-backup/settings', adminOnly, fullScopeOnly, (req, res) =>
     vcenters: (() => {
       let owners = new Map();
       try { owners = new Map(listInventory().map((i) => [i.vcenterId, i.agent || ''])); } catch { owners = new Map(); }
-      return (snap?.vcenters || []).map((v) => ({ id: v.id, name: v.name || v.id, host: String(v.host || '').replace(/^https?:\/\//, '').replace(/\/.*$/, ''), siteAgent: owners.get(v.id) || '' }));
+      // v2.851.1: 매핑 미리 채우기의 주소는 등록부에서(vcHost.js) — 스냅샷 vCenter 항목에는 host 가 없어 늘 비어 있었다
+      const hosts = registryHosts();
+      return (snap?.vcenters || []).map((v) => ({ id: v.id, name: v.name || v.id, host: hosts.get(String(v.id)) || vcHostOf(v.host), siteAgent: owners.get(v.id) || '' }));
     })(),
     jobsByVcenter: Object.fromEntries([...listJobs().filter((j) => !j.demo).reduce((m, j) => m.set(j.vcenterId, (m.get(j.vcenterId) || 0) + 1), new Map())]),
     loadError: loadErrorView(settingsLoadError(), isAdminDetailUser(req.user)),

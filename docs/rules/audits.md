@@ -6,7 +6,10 @@
 
 ## 목차
 
-- Bareos v2.850 완전 설치 번들 — 받는 주소 지정 · 서버 디렉터리에 받아 둔 번들 사용(2026-11-02)
+- Bareos v2.852.1 WebUI 계정 만들기 실패 'Failed to connect to Director' — 시험 bconsole 의 TLS 끔(2026-11-02)
+- Bareos v2.851.1 완전 설치 마무리 '사이트 매핑의 vcserver 주소가 올바르지 않습니다' — 매핑 주소를 vCenter 등록부에서(2026-11-02)
+- Bareos v2.851 완전 설치 2단계 '번들 패키지 판 충돌' — 러너 · 원인 판정 · 사전 점검(2026-11-02)
+- Bareos v2.850 완전 설치 번들 — 받는 주소 지정 · 서버 디렉터리에 받아 둔 번들 사용 · 원장 id 충돌(2026-11-02)
 - Bareos v2.849 백업 등록 실패 'Could not find config resource' — 포탈 리소스 안내 · 연결 진단 · 완전 설치 엣지 응답(2026-11-02)
 - Bareos v2.848 백업 등록 실패 'configure: is an invalid command' — 잡 만들기 권한 안내 · 연결 진단(2026-11-02)
 - Bareos v2.847 버그 점검 2회차 — 5축 + 반증 1인(Bareos 전체 · 확정 22 · 2026-11-02)
@@ -1838,7 +1841,58 @@
   ⚠ 정정(v2.823): 카탈로그 memo 세대(P9)는 v2.823 에 해소했다(memo 키에 Director id + `settingsRev` — 설정을 저장하면 새로 읽는다). 고아 잡(I7)은 v2.823 검토 C3 에서
   '가리키는 Director 가 설정에 없는 대상은 원장에서만 취소·삭제' 경로로 일부 해소(Director 쪽 고아 잡 탐지는 여전히 없다).
 
-## Bareos v2.850 완전 설치 번들 — 받는 주소 지정 · 서버 디렉터리에 받아 둔 번들 사용(2026-11-02)
+## Bareos v2.851 완전 설치 2단계 '번들 패키지 판 충돌' — 러너 · 원인 판정 · 사전 점검(2026-11-02)
+
+사용자 화면(완전 설치 2단계 실패 '패키지 의존성·충돌' · 근거 `Problem: cannot install both openssl-libs-1:3.5.8-2.el9_8.x86_64 from portal-bareos-local and openssl-libs-1:3.0.7-28.el9_4.x86_64 from @System` ·
+`package openssl-devel-1:3.0.7-28.el9_4.x86_64 from @System requires openssl-libs(x86-64) = 1:3.0.7-28.el9_4` · `cannot install the best candidate for the job`) · 요청 '버그부터 처리'.
+회귀 `bareosInstallPkgPin2851`(4) · 러너 `bareosInstallRunner2844` ②-b(실제 bash · 가짜 rpmdb) · 변이 8/8(첫 7/8 — newerBasePkgs 의 `>` 를 `>=` 로 바꿔도 픽스처에 같은 판 패키지가 없어 살아남음 → el9_4 tar 추가).
+
+- 원인(번들 RPM 메타데이터를 직접 풀어 확인 — Python 으로 RPM 헤더의 Requires 를 읽었다): 번들(25.20261101.13 · 209개)은 rockylinux:9 컨테이너의 최신 저장소(9.8)에서 `--alldeps` 로 받아
+  시스템 패키지가 el9_8 판이다(openssl-libs 3.5.8 · glibc 2.34-283 · systemd 252-67 · python3 3.9.25 …). **Bareos · httpd · php · postgresql 패키지는 새 OpenSSL 심벌을 요구하지 않는다**(새 심벌 요구는
+  번들 안 시스템 패키지끼리 — openssl · python3-libs · rpm-libs · systemd · libcurl). 서버(9.4 · openssl 3.0.7)에서 올리려 한 까닭은 설치 목록(`INSTALL_PKGS`)의 **이미 설치된 이름**
+  (`openssl` · `tar` · `policycoreutils-python-utils` — 출력의 'is already installed' 세 줄이 그것): dnf(best=True 기본)는 'install <설치된 이름>' 을 그 이름의 최선 후보(번들 3.5.8)로 올리는 일로 본다.
+  openssl 3.5.8 → openssl-libs 3.5.8 필요 → 서버의 openssl-devel 3.0.7(번들에 없음)이 `openssl-libs = 3.0.7` 을 요구 → 거래 전체 실패. 러너의 되돌리기는 정상이었다.
+- 수정: ① 러너 step2 — 설치 목록 중 `rpm -q --quiet` 로 이미 설치된 이름은 넘기지 않는다(로그 '이미 설치돼 건너뜀(서버 판 유지)' · 전부 설치돼 있으면 dnf 없이 진행). 서버 시스템 패키지는 서버 판 그대로 ·
+  의존성이 요구하면 그때는 dnf 가 올린다. ② `causes.js base-pkg-pinned`(dnf-conflict 보다 앞) — 충돌 패키지 · 고정 패키지(+요구) · 올리려 한 설치 목록 이름을 **출력에서 읽어** 적는다('already installed' 줄이 잘려 없으면
+  단정하지 않는다) · 조치 = 2단계부터 그대로 다시(v2.851 러너) · (b) 고정 패키지 확인 · 필요 없으면 제거 · 서버 OS 업데이트. 규칙이 객체를 돌려주면 `classifyFailure` 가 그 why · fixes 를 쓴다.
+  ③ 사전 점검 `osrel` — 번들 패키지 판 태그 최대(el9_N)와 서버 VERSION_ID 마이너 비교 · 새로우면 warn(주요 이름 · 설치된 -devel 고정 추정 `@@devel`) · 막지 않는다 · 비교 못 하면 unknown. 데모 번들에 판 태그를 넣었다.
+  ④ `build-bundle.sh` 주석의 '대상에 이미 있는 판이 요구를 채우면 dnf 는 그것을 쓴다' 는 **의존성에만** 맞다 — 설치 목록 이름에는 틀렸다고 정정.
+- 사용자 서버의 당장 조치(포탈 v2.851 로 올린 뒤): '2단계부터 그대로 다시'(러너를 새로 올린다). 그래도 같은 사유면 의존성이 새 판을 요구하는 것 — `dnf remove openssl-devel`(쓰는 것이 없을 때) 또는 서버 OS 업데이트.
+- **반증 3인(진단 · 코드 · 회귀 — Opus) 결과**: 진단 유지(holds — libdnf `_get_best_selectors` 는 설치본을 보고한 뒤에도 가용본과 한 셀렉터로 묶고, `DNF_FORCE_BEST` → libsolv `solver_addbestrules` →
+  'cannot install the best candidate for the job' = SOLVER_RULE_BEST 로 사용자 출력 마지막 줄과 같다 · 문구 정정: 올리려는 시도는 best 와 무관하고 best=True 는 실패로 만드는 역할) · 회귀 없음(holds) ·
+  코드 partly → 고친 것: 고정 패키지에 다른 Problem 의 무관한 패키지가 들어가 `dnf remove` 명령에 실리던 것(요구가 충돌 이름을 가리키는 줄만) · 러너 로캘(LC_ALL=C) · 명령 이름 선행 '-' ·
+  rpm 목록을 못 읽으면 '설치 안 됨' 으로 보던 것(rpm.before 비면 rpmdb 로 멈춤) · develPins 매핑(lib · -lib · 번들 포함 제외) · @@devel 잘림 표시 · why 의 '되돌렸습니다' 고정 문구 · 까닭 첫 이름만 ·
+  osrel 수가 설치될 수로 읽히던 것 · 규칙 제목('시스템' 단정 → '번들 패키지 판') · 데모 주석. 추가 변이 9/9(누계 17/17). 픽스처 정정: 재설치 러너 테스트 3건의 가짜 rpmdb 가 bareos-director 하나뿐이라
+  0단계 제거 뒤 목록이 비었다 — 실제 서버는 비지 않으므로 glibc 를 더했다(빈 목록 = rpmdb 못 읽음이 새 규칙).
+- 남긴 것: 번들을 서버와 같은 판에서 만드는 옵션(BASE_RELEASE · vault 저장소)은 두지 않았다(요구하는 사용자가 없고 Bareos 자체는 9.4 의 OpenSSL 로 충분) · dnf4 의 'install <설치된 이름>' 동작은 로그 모양 + 문서로 판단했고
+  best=False 환경은 보지 않았다 · 사전 점검의 -devel 고정은 이름 규칙(이름 · 이름-libs)에 의한 추정이다.
+
+## Bareos v2.852.1 WebUI 계정 만들기 실패 'Failed to connect to Director' — 시험 bconsole 의 TLS 끔(2026-11-02)
+
+사용자 화면(법인별 Bareos › OC2 › WebUI 계정 › 계정 추가 · '실패: 법인 엣지 대행 — 새 계정으로 Director 에 붙지 못했습니다: Connecting to Director localhost:9101 · Failed to connect to Director. Giving up.') ·
+사용자가 보낸 Director 로그: `bareos-dir JobId 0: Fatal error: Tls handshake failed.` · `ERROR in dird/authenticate_console.cc:353 Unable to authenticate console "noainred" at client:127.0.0.1:9101.`
+
+- 원인(로그로 확인): 계정 Console 리소스는 `TLS Enable = No`(WebUI 가 TLS-PSK 를 못 쓴다)인데, 만든 뒤 시험용 임시 bconsole.conf 는 TLS 끔을 **Console 칸에만** 적었다 —
+  bconsole 이 Director 칸의 기본값(TLS 켬)으로 TLS-PSK 를 시도했고 Director 는 TLS 를 끈 계정과 핸드셰이크하지 못했다. 시험이 실패하면 계정을 되돌리므로 계정이 남지 않았다(계정 파일 자체는 맞았다).
+  v2.845 부터의 결함 — 시험의 가짜 SSH 가 bconsole 을 흉내만 내 드러나지 않았다(실환경 미확인으로 적어 둔 영역).
+- 수정: `manage/apply.js verifyConsoleLogin` 임시 conf 의 Director 칸에도 `TLS Enable = No` · 회귀 `bareosManage2845`(두 칸 대조 · 변이 1/1).
+- ⚠ 법인 엣지 대행 Director 는 이 코드를 **엣지 포탈**이 돌린다 — 중앙과 그 법인 엣지가 둘 다 v2.852.1 이어야 한다(자동 업그레이드).
+- 남긴 것: 평문 콘솔(WebUI 계정)로 bconsole 이 붙는 것은 이 수정으로 같은 조건이 됐지만 Director 가 평문을 받는지는 사용자 서버에서 다시 시험해 봐야 안다(추정 — 패키지 admin.conf.example 이 같은 설정).
+
+## Bareos v2.851.1 완전 설치 마무리 '사이트 매핑의 vcserver 주소가 올바르지 않습니다' — 매핑 주소를 vCenter 등록부에서(2026-11-02)
+
+사용자 화면(OC2 완전 설치 6 마무리 · 'FD 에서 지문 읽기' 직후) · 고른 것: **바로 고치고 릴리스**. 회귀 `bareosVcHost2851_1`(5) · `bareosInstallJob2844` ⑧ · 변이 7/7.
+
+- 원인(재현 — 코드 경로): 완전 설치 대상(`install/targets.js`)이 vCenter 주소를 수집 스냅샷 `store.get().vcenters[].host` 에서 읽었다. 스냅샷의 vCenter 항목은 수집기가 만든 것이라 host 칸이 **없다**
+  (soapClient · restClient · store.js 병합 어디에도 없음 — 시험 ⑤가 고정) → vcHost 는 늘 '' → 7단계가 vcserver '' 로 매핑을 저장(매핑 정규화는 빈 vcserver 를 허용 — 덜 된 매핑으로 본다) →
+  마무리의 `siteOf` 가 HOST_RE 로 거부. 재설치였다면 쓰던 매핑의 vcserver 까지 지웠다. 같은 출처를 쓴 설정 화면 매핑 미리 채우기(v2.823 W2·W17)도 늘 비어 있었다(사람이 손으로 넣어 드러나지 않았다).
+- 수정: `bareos/vcHost.js`(등록부 vcenters.json 의 host — 'https://…' 형식 필수 — 에서 스킴 · 포트 · 경로를 뺀 호스트 이름 또는 IP · 못 알아보면 넣지 않음) · 대상 표 · 설정 화면 미리 채우기가 등록부 주소 ·
+  7단계 vcserver = 지금 매핑 값(사람이 넣은 값) > 작업 값 > 등록부 · 셋 다 없으면 **매핑을 저장하지 않고 멈춘다** · 마무리의 빈 vcserver 는 '매핑 표에서 넣고 저장' 으로 안내.
+- 사용자 쪽 당장 조치(업그레이드 전에도 된다): 설정 › Bareos › 기본 설정 → OC2 Director 편집 → 매핑 표 OC2 행의 vcserver 에 vCenter 호스트 이름 또는 IP(https:// 없이) → 저장 → 마무리에서 다시.
+  ⚠ INI 경로는 7단계가 vcserver 가 빈 채로 정해 `/etc/bareos/vmware/<vCenter id>.ini` 다(동작에는 문제없다 — FD INI 를 그 경로에 쓰고 잡도 그 경로를 쓴다).
+- 남긴 것: 등록부에 없는 vCenter(스냅샷에만 있음)는 스냅샷 값(데모)만 쓴다 · IPv6 주소 vCenter 는 플러그인 값 규칙(':' 거부) 때문에 여전히 쓸 수 없다.
+
+## Bareos v2.850 완전 설치 번들 — 받는 주소 지정 · 서버 디렉터리에 받아 둔 번들 사용 · 원장 id 충돌(2026-11-02)
 
 사용자 요청 '번들을 받는 별도의 url 을 지정하는 기능, 서버의 특정 디렉터리에 받아두면 적용하는 기능 추가해줘'(앞서 사내 미러에서 번들 받기가 HTTP 503 · 번들 링크 안내 뒤).
 방식 질문은 사용자가 닫고 요청을 다시 적었다 — 요청 두 가지를 그대로 구현. 회귀 `bareosBundleSource2850`(6 · 변이 10/10 — 처음 9/10: 개요 검증을 지워도 '다시 확인' 라우트의 같은 문구에 정규식이 맞았다 → 좁힘) · 웹 `bareosBundleSource2850`.
@@ -1848,6 +1902,13 @@
 - 서버 디렉터리: 절대 경로 · '..' · 루트 금지. **읽기만**(복사 · 삭제 없음) · 같은 서명 · 해시 검증 · 개요가 열 때 검증(받아 두면 적용) · 막 바뀐 본체는 15초 '확인 중' · 심링크 거부 ·
   권한 없음은 사유로(포탈 서비스 계정) · 받기는 서버 디렉터리에 같은 판이 검증돼 있으면 건너뜀 · 화면은 위치 열 · 서버 디렉터리 행에 지우기 없음 · 포탈이 받는 폴더 경로 안내.
 - 남긴 것: 미러 인증(토큰 · 계정)은 지원하지 않는다 · 서버 디렉터리는 자동 감시(타이머)가 아니라 화면을 열거나 '다시 확인' 때 검증한다 · 받는 주소의 DNS 결과는 저장 때 보지 않는다(받을 때 연결 단계).
+- ⚠ **백업 대상 원장 id 충돌**(같은 릴리스 — 릴리스 실행의 단위 테스트가 `bareosBugs2846a` E-1 에서 [200, 200, 49] 로 실패 · PR CI · 로컬 verify 는 통과한 간헐 실패):
+  id 가 `bj_<밀리초><무작위 3바이트>` 라 같은 밀리초 일괄 등록에서 겹칠 수 있었다(450건이면 약 0.6%). 겹친 뒤 항목은 id 로 찾을 수 없다(`getJob` · `patchJob` · `deleteJob` ·
+  결과 반영이 모두 앞 항목으로) — 다시 등록은 같은 id 의 둘째 잡 잠금에 실패해 한 건을 빼고 보냈다. 재현: 수정 전 코드에 무작위 값을 64가지로 줄이면 같은 단언이 실패.
+  → `registry.js newJobId`(무작위 6바이트 + 원장에 없는 id 만 · 그래도 겹치면 뒤에 n) · `dedupeJobIds`(이미 겹친 원장은 **읽을 때** 뒤 항목에 결정적 id `<원래>d<n>` — 재시작해도 같다 ·
+  이미 있는 id 를 피한다 · 읽기만으로 파일을 쓰지 않는다 — 다음 저장 때 기록 · 콘솔 경고 1줄). 회귀 `bareosJobId2850`(2 · 변이 5/5).
+  새 id 를 받은 항목의 실패 메일 커서는 없던 것으로 시작한다(처음 보는 대상 규칙 — 포탈 시계 since 이후만 알림 · 지난 실패를 쏟지 않는다).
+  남긴 것: 같은 '밀리초 + 짧은 무작위' id 모양을 쓰는 다른 원장이 있는지는 이번에 훑지 않았다.
 
 ## Bareos v2.849 백업 등록 실패 'Could not find config resource' — 포탈 리소스 안내 · 연결 진단 · 완전 설치 엣지 응답(2026-11-02)
 

@@ -2,7 +2,7 @@
 import React, { useEffect, useState } from 'react';
 import { useLatest } from '../../hooks/useLatest.js';
 import { useHashTab } from '../../hooks/useHashTab.js';
-import { fetchJson, postJson, downloadFile, canCsv } from '../../api.js';
+import { fetchJson, postJson, downloadFile, canCsv, toolAllowed } from '../../api.js';
 import { downloadFailText } from '../downloadFailText.js';
 import { DataTable, Loading, ErrorBox, UsageCell, Modal, VmLink } from '../../components/ui.jsx';
 import { Card, useTool } from './shared.jsx';
@@ -103,7 +103,9 @@ export function Gpu({ scope }) {
     await downloadFile(`/tools/gpu.${fmt}${q}`);
   };
   // 하위 탭을 URL 에 실어 새로고침·북마크·뒤로가기에서 유지한다(v2.438, hooks/useHashTab.js).
-  const [view, setView] = useHashTab({ base: ['tools', 'gpu'], valid: ['host', 'cluster', 'vc', 'model'], fallback: 'host' });
+  const [view, setView] = useHashTab({ base: ['tools', 'gpu'], valid: ['host', 'cluster', 'vc', 'model', 'alloc'], fallback: 'host' });
+  // v2.857: '할당 계층' 보기는 특수 기능 'GPU 할당율'(#/tools/gpu-alloc)로 독립했다 — 옛 주소(#/tools/gpu/alloc 북마크)는 그쪽으로 넘긴다.
+  useEffect(() => { if (view === 'alloc') window.location.hash = '#/tools/gpu-alloc'; }, [view]);
   const [hist, setHist] = useState(null);   // { level, key, metric } — v2.650: GpuHistModal 이 조회한다
   const [vmList, setVmList] = useState(null); // { title, params } for GpuVmsModal
   const [checkOpen, setCheckOpen] = useState(false); // v2.658 수집 점검 창
@@ -368,6 +370,7 @@ export function Gpu({ scope }) {
               onClick={collectNow} title="vCenter 성능 카운터(gpu.utilization)로 지금 사용률을 즉시 수집합니다(설정 주기 무시).">{collecting ? '수집 중…' : '⟳ 지금 수집'}</button>
             <button className="logout-btn" style={{ flex: 'none', padding: '7px 12px' }}
               onClick={() => setVmList({ title: `GPU 할당 VM${modelFilter ? ` — ${modelFilter}` : ' 전체'}`, params: { ...(scope ? { vcenterId: scope } : {}), ...(mode ? { mode } : {}), ...(modelFilter ? { model: modelFilter } : {}) } })}>🎮 GPU 할당 VM 보기</button>
+            {toolAllowed('gpu-alloc') && <a className="logout-btn" href="#/tools/gpu-alloc" style={{ flex: 'none', padding: '7px 12px', textDecoration: 'none' }} title="법인 › 데이터센터 › 클러스터 › 호스트 › GPU › VM 별 할당량·예비량(특수 기능 'GPU 할당율')">📊 GPU 할당율</a>}
             {canCsv() && <button className="logout-btn" style={{ flex: 'none', padding: '7px 12px' }} onClick={() => setExportOpen(true)} title="수집된 GPU 사용률 데이터(전체/기간)를 CSV·JSON으로 내려받기.">⬇ 내보내기</button>}
             <button className={`logout-btn${whyShown ? ' gpu-check-on' : ''}`} style={{ flex: 'none', padding: '7px 12px' }} aria-expanded={whyShown}
               onClick={() => setWhyShown((v) => !v)}

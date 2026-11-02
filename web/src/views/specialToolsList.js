@@ -123,6 +123,8 @@ export const TOOLS = [
   { k: 'powermap', icon: '⚡', label: '전력 분석 (법인/모델별)', desc: '측정된 모든 서버 소비전력을 법인(vCenter)·모델·지역별로 분해 · 미매핑 포함 · CSV', perm: 'insights' },
   { k: 'hba', icon: '🔌', label: 'HBA 카드 속도', desc: '호스트 FC/iSCSI 어댑터 속도' },
   { k: 'gpu', icon: '🎮', label: 'GPU 인벤토리', desc: '호스트/모델별 GPU + 사용률 최근 5년 추이' },
+  // v2.857: 사용자 요청 'gpu 할당율 이라고 이름 짓고 특수기능에' — GPU 인벤토리의 '할당 계층' 보기를 독립 도구로. 이름은 요청 그대로(표준 표기 '할당률' 은 aka 로 찾힌다).
+  { k: 'gpu-alloc', icon: '📊', label: 'GPU 할당율', desc: '법인 › 데이터센터 › 클러스터 › 호스트 › GPU › VM 별 vGPU/GPU 할당량 · 예비량 · 엑셀·CSV', aka: ['GPU 할당률', 'vGPU 할당', 'GPU 예비', '할당 계층'] },
   { k: 'serveranalysis', icon: '🔬', label: '서버 분석', desc: 'iDRAC 수집 하드웨어 분석 · GPU 찾기(모델별 장수)', adminOnly: true },
   { k: 'fleet', icon: '🗂️', label: '통합 서버 인벤토리', desc: 'iDRAC 태그 + vCenter 조합 → 가상화 호스트 / 베어메탈 자동 분류 · 베어메탈 전력 합계 · 수동 예외 · CSV', perm: 'insights' },
   { k: 'nic-speed', icon: '🔌', label: '서버 NIC 속도 구분', desc: 'iDRAC 수집 서버의 물리 NIC 속도(10G/25G/100G…)별 분류 — DataCenter·가상화/베어메탈 필터 + CSV', adminOnly: true },

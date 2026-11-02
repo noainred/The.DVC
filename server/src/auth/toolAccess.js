@@ -55,6 +55,7 @@ export const TOOL_PATH_KEYS = Object.freeze({
   esxi: 'esxi',
   'esxi-temp': 'esxitemp',
   gpu: 'gpu',
+  'gpu-alloc': 'gpu-alloc',          // v2.857 'GPU 할당율'(GpuAllocTree.jsx 전용 — 세그먼트 = 키)
   'guest-disk': 'guest-disk',
   'guest-partition': 'guest-partition', // v2.749 게스트 파티션 사용률 경보(GuestPartTool.jsx)
   'guest-os': 'guestos',
