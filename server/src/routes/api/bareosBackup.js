@@ -600,7 +600,7 @@ api.post('/tools/bareos-backup/settings/directors/:directorId/test', adminOnly, 
     if (!fresh) clearAuthStopIfSame(saved);
     const { director, version } = parseBanner(d.banner);
     audit(req, 'Bareos 연결 시험', target, `성공 — ${director || '?'} ${version || ''}`);
-    res.json({ ok: true, director, version, tls: d.tls, clients: d.clients, clientsError: '', stages: d.stages, demo: false });
+    res.json({ ok: true, director, version, tls: d.tls, clients: d.clients, clientsError: '', configure: d.configure, stages: d.stages, demo: false });   // v2.848 configure: 잡 만들기 권한
   } catch (e) {
     audit(req, 'Bareos 연결 시험', target, `실패 — ${e?.code || ''} ${String(e?.message || '').slice(0, 120)}`);
     sendErr(res, e);

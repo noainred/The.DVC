@@ -9,6 +9,7 @@
  */
 import { consoleQuote, isResourceName, normLevel, statusOf, isFinalStatus } from './names.js';
 import { BareosConsoleError } from './console.js';
+import { configurePermission } from './configurePerm.js';
 import { numOrNull } from '../util/numOrNull.js';
 
 const bad = (msg) => new BareosConsoleError('invalid', msg);
@@ -63,7 +64,9 @@ export async function probe(session) {
   const { director, version } = parseBanner(session.info.banner);
   let clients = null; let clientsError = '';
   try { clients = namesOf(await session.call('.clients')); } catch (e) { clientsError = e?.message || String(e); }
-  return { director, version, tls: session.info.tls, clients, clientsError };
+  // v2.848: 잡 만들기 권한(configure) — 엣지 대행 연결 시험도 같은 판정(configurePerm.js · 회신 정제 probe.configure)
+  const configure = await configurePermission(session);
+  return { director, version, tls: session.info.tls, clients, clientsError, configure };
 }
 
 // v2.841(사용자 화면 '카탈로그 일부를 읽지 못했습니다(schedules)' — Bareos 소스 확인): 스케줄 목록 명령은 `.schedule`(단수)이다

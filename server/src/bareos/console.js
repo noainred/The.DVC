@@ -23,6 +23,7 @@ import crypto from 'node:crypto';
 import { ssrfLookup, pinnedLookup } from '../util/ssrfLookup.js';
 import { ipBlockReason } from '../util/ssrfBlock.js';
 import { cramResponse, passwordMd5Hex } from './base64.js';
+import { configurePermission, CONFIGURE_FIX_TEXT } from './configurePerm.js';
 
 /** Director 신호(core/src/lib/bsock.h — python-bareos constants.py 와 같은 값). */
 export const BNET = Object.freeze({
@@ -448,6 +449,8 @@ export async function withConsole(opts, fn, deps) {
 export const DIAG_STAGES = Object.freeze([
   ['address', '주소 검사'], ['dns', '이름 해석(DNS)'], ['tcp', 'TCP 연결'], ['tls', 'TLS-PSK 핸드셰이크'],
   ['auth', '콘솔 인증(CRAM-MD5)'], ['api', 'JSON 모드(.api json)'], ['command', '시험 명령(.clients)'],
+  // v2.848: 잡 만들기 권한 — 연결과 따로 본다(막혀 있어도 연결 시험은 성공 · 이 줄만 실패로 보인다 — 등록이 'configure: is an invalid command' 로 실패하던 화면)
+  ['configure', '잡 만들기 권한(configure)'],
 ]);
 const DIAG_LABEL = Object.fromEntries(DIAG_STAGES);
 
@@ -460,6 +463,7 @@ function diagHint(key, code) {
   if (key === 'tls') return 'TLS-PSK 키는 콘솔 이름·비밀번호로 만든다 — 둘 중 하나가 Director 의 Console 리소스와 다르면 여기서 실패합니다. Director 의 TLS 설정(TLS Enable·TLS PSK Require)도 확인하세요.';
   if (key === 'auth') return code === 'pam' ? 'Console 리소스에 PAM 이 켜져 있습니다 — 포탈 전용 콘솔은 PAM 을 쓰지 않게 만드세요.' : '콘솔 비밀번호·이름을 Director 의 Console 리소스와 맞추세요(응답이 맞지 않으면 다른 Director 일 수 있습니다).';
   if (key === 'api') return 'Bareos 15.2 이상이어야 JSON 모드를 씁니다(권장 25.x).';
+  if (key === 'configure') return code === 'acl' ? `이 콘솔로는 백업 대상을 등록할 수 없습니다(조회 · 실행은 됩니다). ${CONFIGURE_FIX_TEXT}` : '권한을 확인하지 못했습니다 — 등록이 실패하면 콘솔 Profile 의 Command ACL 에 configure 가 있는지 확인하세요.';
   if (key === 'command') return code === 'jsonrpc' ? '콘솔 Profile 의 Command ACL 에 .clients 와 포탈이 쓰는 명령(설정 탭 사전 준비 블록)이 있는지 확인하세요.' : '응답이 JSON 이 아니면 JSON 모드가 켜지지 않은 것입니다(Bareos 버전 확인).';
   return '';
 }
@@ -482,7 +486,7 @@ function lookupOnce(lookup, host) {
  */
 export async function diagnoseConsole(opts, { lookup = ssrfLookup, blockReason = ipBlockReason, signal = null } = {}) {
   const stages = [];
-  const out = { ok: false, stages, failed: null, banner: '', tls: null, clients: null, address: '' };
+  const out = { ok: false, stages, failed: null, banner: '', tls: null, clients: null, address: '', configure: null };
   const push = (key, t0, ok, detail = '', code = '') => {
     const row = { key, label: DIAG_LABEL[key], ok, ms: Math.max(0, Date.now() - t0), detail: String(detail || '').slice(0, 300) };
     if (!ok) { row.code = code || 'error'; row.hint = diagHint(key, code); if (!out.failed) out.failed = { key, code: row.code, detail: row.detail }; }
@@ -492,7 +496,8 @@ export async function diagnoseConsole(opts, { lookup = ssrfLookup, blockReason =
   const finish = () => {
     for (const [key] of DIAG_STAGES) if (!stages.some((x) => x.key === key)) skip(key, '앞 단계가 실패해 시도하지 않았습니다.');
     stages.sort((a, b) => DIAG_STAGES.findIndex(([k]) => k === a.key) - DIAG_STAGES.findIndex(([k]) => k === b.key));
-    out.ok = !stages.some((x) => x.ok === false);
+    // v2.848: 권한 단계(configure)는 연결 성공 여부에 넣지 않는다 — 연결 · 인증은 맞다(인증 정지 해제도 그대로)
+    out.ok = !stages.some((x) => x.ok === false && x.key !== 'configure');
     return out;
   };
   let t0 = Date.now();
@@ -554,6 +559,12 @@ export async function diagnoseConsole(opts, { lookup = ssrfLookup, blockReason =
       out.clients = Array.isArray(list) ? list.map((x) => String(x?.name ?? x ?? '')).filter(Boolean).slice(0, 200) : [];
       push('command', t0, true, `클라이언트 ${out.clients.length}개`);
     } catch (e) { push('command', t0, false, e?.message, e?.code); return finish(); }
+    t0 = Date.now();
+    const perm = await configurePermission(s, { timeoutMs: Math.max(1_000, deadlineAt - Date.now()) });
+    out.configure = perm;
+    if (perm.allowed === true) push('configure', t0, true, perm.detail);
+    else if (perm.allowed === false) push('configure', t0, false, perm.detail, 'acl');
+    else stages.push({ key: 'configure', label: DIAG_LABEL.configure, unknown: true, ms: Math.max(0, Date.now() - t0), detail: perm.detail, hint: diagHint('configure', 'unknown') });
     return finish();
   } finally {
     signal?.removeEventListener?.('abort', onAbort);

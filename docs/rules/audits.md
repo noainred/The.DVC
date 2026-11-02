@@ -6,6 +6,7 @@
 
 ## 목차
 
+- Bareos v2.848 백업 등록 실패 'configure: is an invalid command' — 잡 만들기 권한 안내 · 연결 진단(2026-11-02)
 - Bareos v2.847 버그 점검 2회차 — 5축 + 반증 1인(Bareos 전체 · 확정 22 · 2026-11-02)
 - Bareos v2.846 버그 점검 — 5축 + 반증 1인(Bareos 전체 · 확정 35 · 2026-11-02)
 - Bareos v2.845 법인별 설정 · 백업 스토리지 · WebUI 계정 · 중앙 계정 통합 · 재설치 뒤 다시 등록(2026-11-01)
@@ -1834,6 +1835,18 @@
   목록 memo(P7) · 카탈로그 memo 세대(P9) · 고아 잡(I7) · Migration 새 잡의 일시 lastRun(C2-7).
   ⚠ 정정(v2.823): 카탈로그 memo 세대(P9)는 v2.823 에 해소했다(memo 키에 Director id + `settingsRev` — 설정을 저장하면 새로 읽는다). 고아 잡(I7)은 v2.823 검토 C3 에서
   '가리키는 Director 가 설정에 없는 대상은 원장에서만 취소·삭제' 경로로 일부 해소(Director 쪽 고아 잡 탐지는 여전히 없다).
+
+## Bareos v2.848 백업 등록 실패 'configure: is an invalid command' — 잡 만들기 권한 안내 · 연결 진단(2026-11-02)
+
+사용자 화면(백업 대상 추가 · 1대 등록 실패 · 사유 ‘configure: is an invalid command.’) · 고른 것: **안내 + 진단**. 회귀 `bareosConfigurePerm2848`(4) · 기존 `bareosRoutes` ③ 단계 수 갱신.
+
+- 원인(추정 — 근거: Bareos 는 Command ACL 로 막힌 명령을 없는 명령과 같은 문구로 답한다 · v2.841 `.schedule` 에서 확인한 동작 · 데모 모델의 패키지 기본 Profile webui-admin · operator 는 `!configure`):
+  포탈이 그 Director 에 접속하는 콘솔의 Profile 이 configure 를 막는다 — 조회 · 상태는 되고(Director '정상') 등록만 실패. 사용자 쪽 해결은 자동 설정 2단계(포탈 전용 콘솔 · Profile portal — configure 포함) 또는 그 Profile 에 configure 허용 + reload.
+- 판정 하나 `bareos/configurePerm.js`: `CONFIGURE_DENIED_RE`(이어 붙은 오류 문구 안에서도) · `configurePermission(session)` = 인자 없는 `configure`(막힘 false · 사용법 응답 · 성공 true · 그 밖 null — 단정하지 않는다) ·
+  `addJobFailText`(등록 실패 사유에 원인 · 조치 · 원문 끝에 — 중앙에서 바꾸므로 옛 엣지 회신에도) · `normConfigurePerm`(엣지 회신 정제 — 불리언만).
+- 연결 진단 마지막 단계 '잡 만들기 권한(configure)' — **연결 성공(ok) 판정에 넣지 않는다**(연결 · 인증은 맞다 — 인증 정지 해제 그대로) · 막히면 그 줄만 실패 + 조치 · 모름은 '? 모름'.
+  엣지 대행 연결 시험은 `probe` 가 같은 판정을 싣는다(`edgeResult` probe.configure — 옛 엣지는 null → 화면은 말하지 않음). 화면은 연결 성공 문구에 노랑 한 줄(`configurePermNote`).
+- 실환경 미확인(추정): 인자 없는 `configure` 가 사용법 오류만 돌려주고 아무것도 만들지 않는다(ua_configure.cc — 인자 3개 미만이면 사용법) · 응답이 그 모양이 아니면 '모름'.
 
 ## Bareos v2.847 버그 점검 2회차 — 5축 + 반증 1인(Bareos 전체 · 확정 22 · 2026-11-02)
 

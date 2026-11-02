@@ -10,7 +10,7 @@ import BareosAccountsPanel from './BareosAccounts.jsx';
 import { requireChanged } from '../changeResult.js';
 import { droppedSecretNote } from '../droppedSecretText.js';
 import {
-  diagView, directorPrepBlock, fdIniTemplate, PREP_CHECKLIST, autoSetupDirectorText, autoSetupFdText, thumbprintText,
+  diagView, configurePermNote, directorPrepBlock, fdIniTemplate, PREP_CHECKLIST, autoSetupDirectorText, autoSetupFdText, thumbprintText,
   outcomeUnknown, missingText, preflightView, preflightSummary, autoSetupFdPluginText, fillEmptyMapping, directorFormPatch, withRelayWait, secText, relayKindLabel, SETTINGS_READ_ONLY,
   VMWARE_POOL_FULL, VMWARE_SCHEDULE, WEEKDAYS, WEEKDAY_LABEL, MAPPING_FIELDS, newMappingRow, vcSlug,
   fillResultText, directorPlanFiles, directorConflicts, freeConsoleName, consoleTaken, conflictText, ownFromPaths, catalogErrorText,
@@ -378,7 +378,9 @@ function DirectorEditor({ s, dir, locked, onReload, onSaved, onClose, onDeleted 
       requireChanged(r);
       setDiag(r.stages || null);
       // W2: 엣지 대행이면 그 엣지가 시험했다고 밝힌다(엣지는 작업의 접속값 표지로 중앙 저장값과 같은 사본인지 확인한 뒤 시험한다)
-      setMsg({ ok: true, text: `연결 성공 — Director ‘${r.director || '?'}’ ${r.version || ''} · ${r.tls ? `${r.tls.protocol} ${r.tls.cipher}` : '암호화 없음'} · 클라이언트 ${r.clients ? `${r.clients.length}개` : '—'}${form.password ? '' : ` (저장된 주소·비밀번호로 시험${r.relay ? ` — 법인 엣지 ‘${r.relay}’ 가 접속` : ''})`}` });
+      // v2.848: 연결은 됐어도 잡 만들기 권한(configure)이 막혔으면 노랑으로 밝힌다(등록이 'is an invalid command' 로 실패한다)
+      const perm = configurePermNote(r.configure);
+      setMsg({ ok: r.configure?.allowed === false ? 'warn' : true, text: `연결 성공 — Director ‘${r.director || '?'}’ ${r.version || ''} · ${r.tls ? `${r.tls.protocol} ${r.tls.cipher}` : '암호화 없음'} · 클라이언트 ${r.clients ? `${r.clients.length}개` : '—'}${form.password ? '' : ` (저장된 주소·비밀번호로 시험${r.relay ? ` — 법인 엣지 ‘${r.relay}’ 가 접속` : ''})`}${perm ? `\n${perm}` : ''}` });
     } catch (e) {
       setDiag(Array.isArray(e?.body?.stages) ? e.body.stages : null);
       setMsg({ ok: false, text: `연결 실패: ${e.message}` });

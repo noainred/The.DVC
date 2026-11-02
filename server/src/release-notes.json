@@ -1,6 +1,15 @@
 {
   "notes": [
     {
+      "version": "2.848.0",
+      "date": "2026-11-02",
+      "title": "Bareos 백업 등록 실패('configure: is an invalid command') — 원인 · 조치 안내와 연결 진단의 잡 만들기 권한 단계",
+      "notes": [
+        "백업 대상 등록이 'configure: is an invalid command.' 로 실패하면 원인(포탈이 접속하는 콘솔의 Profile 이 잡 만들기 명령 configure 를 막음)과 해결 방법(자동 설정 2단계 또는 Profile 에 configure 허용 뒤 reload)을 함께 보여 줍니다.",
+        "설정 › 기본 설정의 연결 시험에 '잡 만들기 권한(configure)' 단계를 더했습니다 — 등록하기 전에 미리 알 수 있습니다. 막혀 있어도 연결 자체는 성공으로 보고 그 줄만 실패로 표시하며, 확인하지 못하면 '모름' 으로 둡니다(엣지 대행 Director 도 같은 판정)."
+      ]
+    },
+    {
       "version": "2.847.0",
       "date": "2026-11-02",
       "title": "Bareos 버그 점검 2회차 — 5축 + 반증 1인 · 확정 22건 + 추정 1건 수정",
