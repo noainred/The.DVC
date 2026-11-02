@@ -182,7 +182,28 @@ export const WEEKDAYS = Object.freeze(['일', '월', '화', '수', '목', '금',
 export function rehearsalPolicyText(p) {
   if (!p) return '—';
   const when = `매주 ${WEEKDAYS[p.weekday] ?? '—'}요일 ${p.time || '—'}`;
-  return `${p.enabled ? '켜짐' : '꺼짐'} · ${when} · 법인마다 ${unitText(p.perCorp, '대')} · 성공한 검증용 VM ${p.deleteOnOk === false ? '남김' : '지움'} · 실패는 남김`;
+  const dsN = Object.keys(p.datastores || {}).length;
+  return `${p.enabled ? '켜짐' : '꺼짐'} · ${when} · 법인마다 ${unitText(p.perCorp, '대')} · 성공한 검증용 VM ${p.deleteOnOk === false ? '남김' : '지움'} · 실패는 남김${dsN ? ` · 데이터스토어 지정 ${dsN}곳` : ''}`;
+}
+
+/**
+ * v2.863 복원 검증 정책의 vCenter 데이터스토어 선택지(순수). 첫 칸은 '고르지 않음(홈 데이터스토어)'.
+ *   list 가 null 이면 목록을 못 읽었거나(loading 이면 읽는 중) — 지금 값을 그 사유로 남긴다(못 읽은 것을 '없음' 으로 단정하지 않는다).
+ *   지금 값이 쓸 수 있는 목록에 없으면 지우지 않고 그 사유(접근 불가 · 인벤토리에 없음)를 붙여 남긴다 — 저장이 조용히 바꾸지 않게.
+ * @param {{name:string, freeGB?:number|null, capacityGB?:number|null, accessible?:boolean}[]|null} list  그 vCenter 의 데이터스토어
+ * @returns {{ value:string, label:string, warn?:boolean }[]}
+ */
+export function rehearsalDsOptions(list, current = '', { loading = false } = {}) {
+  const all = Array.isArray(list) ? list.filter((x) => x && x.name) : [];
+  const usable = all.filter((x) => x.accessible !== false).sort((a, b) => String(a.name).localeCompare(String(b.name)));
+  const out = [{ value: '', label: '고르지 않음 — VM 의 홈 데이터스토어' }, ...usable.map((x) => ({ value: x.name, label: dsText(x) }))];
+  const cur = String(current || '');
+  if (cur && !usable.some((x) => x.name === cur)) {
+    const known = all.find((x) => x.name === cur);
+    const why = list === null ? (loading ? '목록을 읽는 중' : '목록을 읽지 못함') : known ? '접근 불가(인벤토리 기준)' : '인벤토리에 없음 — 검증 때 건너뜁니다';
+    out.splice(1, 0, { value: cur, label: `${cur} · ${why}`, warn: true });
+  }
+  return out;
 }
 /** Tools 응답 시간 — 모르면 '—'(0 이 아니다). */
 export function toolsText(ms) {

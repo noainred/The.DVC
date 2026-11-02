@@ -307,6 +307,64 @@ export function allNicsDisconnected(deviceXml) {
   });
 }
 
+/**
+ * v2.863 NIC 요약(순수 — bareos-probe 'NIC 끊기 사전 점검'). 연결 칸을 못 읽으면 null(false 로 단정하지 않는다).
+ * @returns {{ type:string, label:string, connected:boolean|null, startConnected:boolean|null, allowGuestControl:boolean|null }[]}
+ */
+export function nicSummary(deviceXml) {
+  return nicBlocksOf(deviceXml).map(({ type, inner }) => {
+    const conn = /<connectable>([\s\S]*?)<\/connectable>/.exec(inner)?.[1] ?? '';
+    const flag = (tag) => { const m = new RegExp(`<${tag}>(true|false)</${tag}>`).exec(conn); return m ? m[1] === 'true' : null; };
+    return { type, label: /<label>([^<]{0,200})<\/label>/.exec(inner)?.[1] || '', connected: flag('connected'), startConnected: flag('startConnected'), allowGuestControl: flag('allowGuestControl') };
+  });
+}
+
+/** PCI 패스스루 장치 수(순수) — NIC 끊기(nicDisconnectSpec)는 VirtualEthernetCard 만 다루므로 패스스루 NIC 는 끊지 못한다(정직 기록 · v2.862 남긴 것). */
+export function passthroughCount(deviceXml) {
+  return (String(deviceXml || '').match(/xsi:type="VirtualPCIPassthrough"/g) || []).length;
+}
+
+/** 검증 복원 마무리(bareos-nic · bareos-verify)가 포탈 vCenter 계정으로 하는 일에 쓰일 수 있는 권한 — 사전 점검용(어느 것이 실제로 요구되는지는 vSphere 판마다 다를 수 있어 함께 본다). */
+export const VERIFY_PRIV_IDS = Object.freeze([
+  'VirtualMachine.Config.EditDevice', 'VirtualMachine.Interact.DeviceConnection',
+  'VirtualMachine.Interact.PowerOn', 'VirtualMachine.Interact.PowerOff', 'VirtualMachine.Inventory.Delete',
+]);
+
+/** HasPrivilegeOnEntities 응답 → [{ entity:'Type:ref', privId, granted }](순수). isGranted 를 못 읽으면 granted null. */
+export function parsePrivilegeAvailability(xml) {
+  const out = [];
+  for (const piece of String(xml || '').split('<returnval>').slice(1)) {
+    const ent = /<entity type="([^"]{1,64})">([^<]{1,128})<\/entity>/.exec(piece);
+    for (const m of piece.matchAll(/<privAvailability>([\s\S]*?)<\/privAvailability>/g)) {
+      const privId = /<privId>([^<]{1,200})<\/privId>/.exec(m[1])?.[1] || '';
+      const g = /<isGranted>(true|false)<\/isGranted>/.exec(m[1])?.[1];
+      out.push({ entity: ent ? `${ent[1]}:${ent[2]}` : '', privId, granted: g === undefined ? null : g === 'true' });
+    }
+  }
+  return out;
+}
+
+/**
+ * 지금 로그인한 세션의 권한(읽기 전용 — HasPrivilegeOnEntities · vSphere 6.0+). entities = [{ type, ref }].
+ * 세션 키는 SessionManager.currentSession.key 다.
+ */
+export async function sessionPrivileges(c, entities, privIds = VERIFY_PRIV_IDS) {
+  if (!c.sc?.authorizationManager || !c.sc?.sessionManager) throw new Error('vCenter 서비스 정보에 AuthorizationManager · SessionManager 가 없습니다');
+  const sx = await c.callRaw(
+    `<RetrieveProperties xmlns="urn:vim25"><_this type="PropertyCollector">${esc(c.sc.propertyCollector)}</_this>` +
+    `<specSet><propSet><type>SessionManager</type><pathSet>currentSession</pathSet></propSet>` +
+    `<objectSet><obj type="SessionManager">${esc(c.sc.sessionManager)}</obj></objectSet></specSet></RetrieveProperties>`,
+  );
+  const key = /<val[^>]*>\s*<key>([^<]{1,200})<\/key>/.exec(sx)?.[1];
+  if (!key) throw new Error('현재 세션 키를 읽지 못했습니다');
+  const xml = await c.callRaw(
+    `<HasPrivilegeOnEntities xmlns="urn:vim25"><_this type="AuthorizationManager">${esc(c.sc.authorizationManager)}</_this>` +
+    entities.map((e) => `<entity type="${esc(e.type)}">${esc(e.ref)}</entity>`).join('') +
+    `<sessionId>${esc(key)}</sessionId>${privIds.map((p) => `<privId>${esc(p)}</privId>`).join('')}</HasPrivilegeOnEntities>`,
+  );
+  return parsePrivilegeAvailability(xml);
+}
+
 /** ReconfigVM_Task 로 spec 내부 XML 적용. */
 export async function reconfigVm(c, vmRef, specInnerXml, { label = 'VM 재구성' } = {}) {
   const xml = await c.callRaw(`<ReconfigVM_Task xmlns="urn:vim25"><_this type="VirtualMachine">${esc(vmRef)}</_this><spec>${specInnerXml}</spec></ReconfigVM_Task>`);

@@ -205,8 +205,12 @@ export async function runRehearsal(dirId, { trigger = 'timer', by = 'rehearsal',
     items: picked.map((j) => ({ id: j.id, jobid: j.lastRun.jobid, mode: 'newVm', nic: 'disconnect', newVm: { name: verifyName(j.vmName, day), ...(policy.datastores[j.vcenterId] ? { datastore: policy.datastores[j.vcenterId] } : {}) } })),
     jobOf: (id) => byId.get(id) || null, dirOf, snapshot: store.get(), pluginName: settings.defaults.pluginName, reservedNames: reserved,
   });
-  const ready = plan.items.filter((x) => x.ok);
+  // v2.863: 정한 데이터스토어의 여유 판정이 '모름'(여유 · VM 용량을 못 읽음)이면 대화형 묶음 복원은 경고만 하지만, 사람이 보지 않는 정기 작업은
+  //   보내지 않는다(홈 데이터스토어 경로와 같은 규칙 — 반증 F5). 정책 화면에서 데이터스토어를 고를 수 있게 되면서 이 경로가 열렸다.
+  const unknownCap = new Set((plan.capacity || []).filter((c) => c.verdict === 'unknown').flatMap((c) => c.ids || []));
+  const ready = plan.items.filter((x) => x.ok && !unknownCap.has(x.id));
   for (const x of plan.items.filter((y) => !y.ok)) run.items.push({ jobId: x.id, vmName: x.vmName, ok: false, reason: x.issue });
+  for (const x of plan.items.filter((y) => y.ok && unknownCap.has(y.id))) run.items.push({ jobId: x.id, vmName: x.vmName, ok: false, reason: `정한 데이터스토어 ‘${x.plan?.target?.datastore || '?'}’ 의 여유 · VM 용량을 읽지 못해 건너뛰었습니다(정기 작업은 모르면 보내지 않습니다)` });
   if (!ready.length) return finishRun({ ok: false, started: 0, reason: '보낼 수 있는 대상이 없습니다(판정에서 모두 막힘)' });
   noteRestoreBatchStart(runId, `복원 검증 ${ready.length}대 · ${directorById(dirId, settings)?.name || dirId}`);
   try {
