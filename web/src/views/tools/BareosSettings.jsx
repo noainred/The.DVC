@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { fetchJson, postJson, putJson, delJson } from '../../api.js';
+import { useHashTab } from '../../hooks/useHashTab.js';
 import { Loading, ErrorBox } from '../../components/ui.jsx';
 import { STable } from '../../components/STable.jsx';
 import Select from '../../components/Select.jsx';
@@ -28,7 +29,9 @@ import {
 const BASE = '/tools/bareos-backup';
 const ROW = { display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' };
 // v2.845 설정 하위 탭(시안 — 완전 설치 · 법인별 Bareos · 계정 통합은 이 탭 안에서만 보인다: 일반 사용자 메뉴에 없음)
-const SUB_TABS = [['base', '기본 설정(Director · 자동 설정)'], ['install', '완전 설치'], ['corp', '법인별 Bareos'], ['accounts', '계정 통합(중앙)']];
+// v2.860(시안 docs/design/bareos-ui-v2 ⑤): 하위 탭 줄 → 왼쪽 목록 5항목 · 주소 넷째 조각(#/tools/bareos-backup/settings/<구획>)이라 새로 고쳐도 그 구획.
+//   예전 '기본 설정' 은 Director(표 · 편집 · 자동 설정)와 공통 기본값 · 수집(펼침 구획)으로 나눴다. 구획 안의 내용 · 판정 · 저장 경로는 그대로다.
+const SUB_TABS = [['director', 'Director'], ['install', '완전 설치'], ['corp', '법인별 설정'], ['accounts', '계정 통합(중앙)'], ['defaults', '공통 기본값 · 수집']];
 const NOTE = { padding: '8px 12px', marginBottom: 10, fontSize: 12.5, lineHeight: 1.6 };
 const BTN = { padding: '4px 9px', fontSize: 12 };
 // 전역 .input 의 min-width 220px 이 격자 칸·표 칸 입력을 밀어낸다 — 칸 안 입력은 이것으로.
@@ -85,7 +88,7 @@ export default function SettingsTab({ onSaved, writable = true }) {
   const defsBase = useRef(null);
   const [busy, setBusy] = useState(false);
   // v2.845 설정 하위 탭 — 기본 설정(Director · 매핑 · 자동 설정) · 완전 설치(v2.844) · 법인별 Bareos · 계정 통합(중앙). 훅은 조기 return 위.
-  const [sub, setSub] = useState('base');
+  const [sub, setSub] = useHashTab({ base: ['tools', 'bareos-backup', 'settings'], valid: SUB_TABS.map(([k]) => k), fallback: 'director' });
   const gen = useRef(0);
   // W14: 늦게 온 이전 응답은 버린다 · keepDefs: 저장하지 않은 공통 기본값 편집은 버리지 않는다
   const load = (keepDefs = true) => {
@@ -100,17 +103,29 @@ export default function SettingsTab({ onSaved, writable = true }) {
     }).catch((e) => { if (g === gen.current) setErr(e); });
   };
   useEffect(() => { load(false); }, []);
-  const nav = (
-    <div style={{ ...ROW, marginBottom: 10 }} role="tablist" aria-label="Bareos 설정 하위 탭">
-      {SUB_TABS.map(([k, l]) => <button key={k} type="button" role="tab" aria-selected={sub === k} className={`tab${sub === k ? ' active' : ''}`} onClick={() => setSub(k)}>{l}</button>)}
-      <span className="muted" style={{ fontSize: 11.5 }}>전 법인 범위 관리자에게만 보입니다</span>
+  const shell = (body) => (
+    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 14, alignItems: 'flex-start', minWidth: 0 }}>
+      <nav className="card" aria-label="Bareos 설정 구획" data-bareos-settings-nav="" style={{ flex: '0 0 220px', maxWidth: '100%', padding: 6, display: 'flex', flexDirection: 'column', gap: 2 }}>
+        {SUB_TABS.map(([k, l]) => {
+          const on = sub === k;
+          const n = k === 'director' ? s?.directors?.length : null;
+          return (
+            <button key={k} type="button" aria-current={on ? 'page' : undefined} onClick={() => setSub(k)}
+              style={{ display: 'flex', alignItems: 'center', gap: 10, minHeight: 40, padding: '0 12px', borderRadius: 8, border: 0, font: 'inherit', fontSize: 13, fontWeight: on ? 800 : 600, cursor: 'pointer', textAlign: 'left', background: on ? 'var(--accent)' : 'transparent', color: on ? '#fff' : 'var(--text-dim)' }}>
+              {l}{n != null ? <span style={{ marginLeft: 'auto', fontSize: 11.5, fontWeight: 700, opacity: 0.85 }}>{n}</span> : null}
+            </button>
+          );
+        })}
+        <span className="muted" style={{ fontSize: 11, padding: '6px 12px 4px' }}>전 법인 범위 관리자에게만 보입니다</span>
+      </nav>
+      <div style={{ flex: '999 1 560px', minWidth: 0 }}>{body}</div>
     </div>
   );
-  if (sub === 'install') return <div>{nav}<BareosInstallPanel writable={writable} /></div>;
-  if (sub === 'corp') return <div>{nav}<BareosCorpPanel writable={writable} /></div>;
-  if (sub === 'accounts') return <div>{nav}<BareosAccountsPanel writable={writable} /></div>;
-  if (err && !s) return <div>{nav}<ErrorBox error={err} /></div>;
-  if (!s || !defs) return <div>{nav}<Loading /></div>;
+  if (sub === 'install') return shell(<BareosInstallPanel writable={writable} />);
+  if (sub === 'corp') return shell(<BareosCorpPanel writable={writable} />);
+  if (sub === 'accounts') return shell(<BareosAccountsPanel writable={writable} />);
+  if (err && !s) return shell(<ErrorBox error={err} />);
+  if (!s || !defs) return shell(<Loading />);
   const vcName = (id) => s.vcenters.find((v) => v.id === id)?.name || id;
   const unbound = s.vcenters.filter((v) => !s.sites.some((x) => x.vcenterId === v.id));
   const dir = s.directors.find((d) => d.id === sel) || null;
@@ -133,9 +148,9 @@ export default function SettingsTab({ onSaved, writable = true }) {
   };
   const copy = copyWith(setMsg);
 
-  return (
+  const pol0 = { enabled: true, time: '06:10', off: [], ...(defs.policy || {}) };
+  return shell(
     <div>
-      {nav}
       {s.demo && <div className="card" style={{ ...NOTE, borderLeft: '3px solid var(--amber)' }}>데모 모드 — 아래 값은 메모리의 데모 설정입니다(지역마다 데모 Director · 편집·저장 안 됨). 실제 Director 를 추가하면 데모가 꺼지고 그쪽 설정으로 바뀝니다.</div>}
       {s.loadError && <div className="banner bad" style={{ marginBottom: 10 }}>설정 파일을 읽지 못했습니다(손상본 보존) — {s.loadError.reason}</div>}
       {/* v2.825.1 버그 점검(G12): 쓰기 범위가 지정된 계정은 서버(fullWriteOnly)가 403 으로 막는다 — 화면이 미리 잠그고 사유를 말한다 */}
@@ -144,6 +159,7 @@ export default function SettingsTab({ onSaved, writable = true }) {
       <Msg m={msg} />
 
 
+      {sub === 'director' && <>
       <div className="card" style={{ padding: 14, marginTop: 10, marginBottom: 12, minWidth: 0 }}>
         <div style={ROW}>
           <div style={{ minWidth: 0, flex: '1 1 420px' }}>
@@ -183,10 +199,15 @@ export default function SettingsTab({ onSaved, writable = true }) {
       {dir && <DirectorEditor key={dir.id} s={s} dir={dir} locked={!!err || !writable}
         onReload={() => load(true)} onSaved={onSaved} onClose={() => setSel('')}
         onDeleted={async (name) => { setSel(''); setMsg({ ok: true, text: `‘${name}’ Director 를 포탈 설정에서 지웠습니다(Bareos 서버는 그대로).` }); await load(true); onSaved(); }} />}
+      </>}
 
-      <div style={CARDS(340)}>
-        <div className="card" style={{ padding: 14, minWidth: 0 }}>
-          <b>공통 기본값 — 모든 Director</b>
+      {sub === 'defaults' && <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: 10 }}>
+        <div className="muted" style={{ fontSize: 12 }}>모든 Director 에 같은 값입니다 — 줄을 눌러 펼쳐 고칩니다(아래 ‘공통 기본값 저장’ 이 앞의 두 구획을 함께 저장합니다).</div>
+        <details className="card" style={{ padding: '10px 14px', minWidth: 0 }}>
+          <summary style={{ cursor: 'pointer', display: 'flex', flexWrap: 'wrap', gap: '4px 12px', alignItems: 'center' }}>
+            <b>JobDefs · FileSet · 복원 잡 · 기본 레벨 · 조회 주기</b>
+            <span className="muted" style={{ fontSize: 12, minWidth: 0, overflowWrap: 'anywhere' }}>{[defs.jobDefs, defs.fileSet, defs.restoreJob].filter(Boolean).join(' · ') || '—'} · {defs.level} · {defs.pollIntervalSec}초</span>
+          </summary>
           <div style={GRID}>
             {[['jobDefs', 'JobDefs'], ['fileSet', 'FileSet(범용)'], ['restoreJob', '복원 잡']].map(([k, l]) => (
               <label key={k} className="muted" style={FIELD}>{l}<input className="input" id={`bareos-def-${k}`} style={INP} value={defs[k] || ''} onChange={(e) => setDefs({ ...defs, [k]: e.target.value.trim() })} /></label>
@@ -198,9 +219,18 @@ export default function SettingsTab({ onSaved, writable = true }) {
             </label>
             <label className="muted" style={FIELD}>상태 조회 주기(초)<input className="input" id="bareos-def-poll" style={INP} inputMode="numeric" value={defs.pollIntervalSec} onChange={(e) => setDefs({ ...defs, pollIntervalSec: e.target.value.replace(/\D/g, '').slice(0, 4) })} /></label>
           </div>
+          <div className="muted" style={{ fontSize: 11.5, marginTop: 8, lineHeight: 1.6 }}>
+            이름은 자동 설정 2단계가 만드는 리소스 이름과 같아야 합니다. 상태 조회는 Director 마다 따로(병렬 · Director 별 시한) 하므로 느린 법인 하나가 나머지를 막지 않습니다.
+            주기 범위는 {s.limits?.pollIntervalSec ? `${s.limits.pollIntervalSec.min}~${s.limits.pollIntervalSec.max}초` : '—'}.
+          </div>
+        </details>
+        <details className="card" style={{ padding: '10px 14px', minWidth: 0 }}>
+          <summary style={{ cursor: 'pointer', display: 'flex', flexWrap: 'wrap', gap: '4px 12px', alignItems: 'center' }}>
+            <b>Director 정책 수집</b>
+            <span className="muted" style={{ fontSize: 12 }}>{pol0.enabled === false ? '꺼짐' : `매일 ${pol0.time || '06:10'}(포탈 시각)`} · 수집할 Director {(s.directors || []).filter((d) => !(pol0.off || []).includes(d.id)).length}/{(s.directors || []).length}</span>
+          </summary>
           {/* v2.839 Director 정책 수집(하루 1회 · 읽기 전용 명령) — 공통 기본값과 함께 저장(policy 묶음째) */}
-          <div data-bareos-policy-settings="" style={{ marginTop: 12, paddingTop: 10, borderTop: '1px solid var(--border-soft)', fontSize: 12.5, display: 'flex', flexDirection: 'column', gap: 6 }}>
-            <b style={{ fontSize: 13 }}>Director 정책 수집 — 하루 한 번</b>
+          <div data-bareos-policy-settings="" style={{ marginTop: 10, fontSize: 12.5, display: 'flex', flexDirection: 'column', gap: 6 }}>
             {(() => {
               const pol = { enabled: true, time: '06:10', optional: { schedules: true, jobdefs: true, filesets: true }, off: [], ...(defs.policy || {}) };
               const set = (patch) => setDefs({ ...defs, policy: { ...pol, ...patch } });
@@ -227,21 +257,21 @@ export default function SettingsTab({ onSaved, writable = true }) {
                 )}
                 <div className="muted" style={{ fontSize: 11.5, lineHeight: 1.6 }}>
                   읽기 전용 명령만 보냅니다(status scheduler · llist pools · list volumes · show schedules/jobdefs/filesets) · Director 마다 시한 · 실패하면 30분 뒤 다시(하루 3번까지) ·
-                  결과는 Bareos › 정책 · 일정 과 Backup › Summary 의 풀 · 스케줄 칸에 쓰입니다. 이미 자동 설정한 Director 는 Profile 의 Command ACL 에 show 를 직접 더해야 show 명령이 됩니다.
+                  결과는 Bareos › 정책 · 보존 과 Backup › Summary 의 풀 · 스케줄 칸에 쓰입니다. 이미 자동 설정한 Director 는 Profile 의 Command ACL 에 show 를 직접 더해야 show 명령이 됩니다.
                 </div>
               </>);
             })()}
           </div>
-          <div className="muted" style={{ fontSize: 11.5, marginTop: 8, lineHeight: 1.6 }}>
-            이름은 자동 설정 2단계가 만드는 리소스 이름과 같아야 합니다. 상태 조회는 Director 마다 따로(병렬 · Director 별 시한) 하므로 느린 법인 하나가 나머지를 막지 않습니다.
-            주기 범위는 {s.limits?.pollIntervalSec ? `${s.limits.pollIntervalSec.min}~${s.limits.pollIntervalSec.max}초` : '—'}.
-          </div>
-          <div style={{ ...ROW, marginTop: 10 }}>
-            <button type="button" className="login-btn" style={{ flex: 'none', padding: '8px 18px' }} disabled={busy || !!err || s.demo || !writable} title={!writable ? SETTINGS_READ_ONLY : undefined} onClick={saveDefaults}>{busy ? '저장 중…' : '공통 기본값 저장'}</button>
-          </div>
+        </details>
+        <div style={{ ...ROW }}>
+          <button type="button" className="login-btn" style={{ flex: 'none', padding: '8px 18px' }} disabled={busy || !!err || s.demo || !writable} title={!writable ? SETTINGS_READ_ONLY : undefined} onClick={saveDefaults}>{busy ? '저장 중…' : '공통 기본값 저장'}</button>
+          <span className="muted" style={{ fontSize: 11.5 }}>자동 설정 · 법인별 설정 쓰기의 본인 OTP 재확인은 설정 › 세션 보안에서 정합니다.</span>
         </div>
-        <div className="card" style={{ padding: 14, minWidth: 0 }}>
-          <b>법인 서버 사전 준비 — 패키지 설치만</b>
+        <details className="card" style={{ padding: '10px 14px', minWidth: 0 }}>
+          <summary style={{ cursor: 'pointer', display: 'flex', flexWrap: 'wrap', gap: '4px 12px', alignItems: 'center' }}>
+            <b>법인 서버 사전 준비 — 패키지 설치만</b>
+            <span className="muted" style={{ fontSize: 12 }}>Rocky · RHEL 9 · bareos-director · storage · filedaemon · vmware-plugin · FD INI 틀 복사</span>
+          </summary>
           <ul style={{ margin: '8px 0 0', paddingLeft: 18, fontSize: 12.5, lineHeight: 1.7 }}>
             <li>Rocky · RHEL 9 서버 한 대에 bareos-director · bareos-storage · bareos-filedaemon · bareos-vmware-plugin(+ python3 FD 플러그인)을 설치하고 서비스를 켭니다.</li>
             <li>포탈 서버에서 그 서버의 Director 9101 과 SSH 22(root 비밀번호 로그인)가 열려 있어야 합니다.</li>
@@ -249,8 +279,8 @@ export default function SettingsTab({ onSaved, writable = true }) {
           </ul>
           <div className="muted" style={{ fontSize: 11.5, marginTop: 6 }}>나머지(콘솔 · Profile · FileSet · JobDefs · 복원 잡 · Pool · Schedule · FD 플러그인 · 매핑 · FD INI)는 Director 편집 화면의 자동 설정 5단계가 합니다. 손으로 넣으려면 그 화면 2단계의 ‘사전 준비 블록 복사’ 를 쓰세요.</div>
           <div style={{ ...ROW, marginTop: 8 }}><button type="button" className="logout-btn" style={BTN} onClick={() => copy(fdIniTemplate({}))}>FD INI 틀 복사</button></div>
-        </div>
-      </div>
+        </details>
+      </div>}
     </div>
   );
 }

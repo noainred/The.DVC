@@ -57,7 +57,11 @@ describe('v2.839 화면 소스', () => {
   it('라우팅 — 같은 조회 전용 키 아래 하위 탭 · 통합 현황은 그대로', () => {
     // v2.840 '보존 · 풀'(pools) 이 같은 라우터에 더해졌다(bareosPolicy2840 이 고정)
     expect(sum).toMatch(/useHashTab\(\{ base: \['tools', 'bareos-summary'\], valid: \['overview', 'policy', 'pools'\], fallback: 'overview' \}\)/);
-    expect(sum).toMatch(/return tab === 'policy' \? <BareosPolicyTab \/> : tab === 'pools' \? <BareosPoolsTab \/> : <BareosSummaryView \/>;/);
+    // v2.860: 정책 · 일정과 보존 · 풀은 한 화면(BareosPolicyPage — '정책 · 보존')의 구획이다(옛 주소 pools 는 풀 구획으로)
+    expect(sum).toMatch(/return tab === 'overview' \? <BareosSummaryView \/> : <BareosPolicyPage focus=\{tab\} \/>;/);
+    const page = read('./BareosPolicyPage.jsx');
+    expect(page).toMatch(/<BareosPolicyTab bare reloadKey=\{reloadKey\} \/>/);
+    expect(page).toMatch(/<BareosPoolsTab bare reloadKey=\{reloadKey\} \/>/);
   });
   it('폴링하지 않는다 — 수집 중일 때만 5초 뒤 다시 · 늦게 온 응답은 버린다 · 같은 API', () => {
     expect(tab).not.toMatch(/usePolling|setInterval/);

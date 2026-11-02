@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>Bareos 복원 검증(리허설)</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=Noto+Sans+KR:wght@400;500;700;800&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+body{margin:0;background:#0a0e17;color:#e6edf6;font-family:"Inter","Noto Sans KR","Apple SD Gothic Neo",sans-serif;font-size:13px}
+a{color:#3b82f6}a:hover{color:#60a5fa}
+.card{background:#141b2d;border:1px solid #243049;border-radius:12px}
+.muted{color:#8b9bb4}
+.mono{font-family:"JetBrains Mono",ui-monospace,monospace}
+.toptab{min-width:84px;min-height:40px;display:inline-flex;align-items:center;justify-content:center;padding:0 18px;text-decoration:none;color:#8b9bb4;font-weight:600;font-size:15px;border-bottom:3px solid transparent}
+.toptab.on{color:#e6edf6;font-weight:800;border-bottom-color:#3b82f6}
+.pill{display:inline-flex;align-items:center;gap:7px;min-height:34px;padding:0 14px;border-radius:8px;text-decoration:none;font-size:13px;font-weight:600;color:#8b9bb4;white-space:nowrap}
+.pill.on{background:#3b82f6;color:#ffffff;font-weight:800}
+.pill .n{font-size:11.5px;font-weight:700;color:#8b9bb4;background:rgba(139,155,180,.14);padding:1px 7px;border-radius:999px}
+.pill.on .n{color:#ffffff;background:rgba(255,255,255,.22)}
+.seg{display:inline-flex;align-items:center;gap:8px;min-height:32px;padding:0 14px;border-radius:8px;border:1px solid #243049;background:#1a2236;color:#8b9bb4;font:inherit;font-size:13px;font-weight:700;cursor:pointer;white-space:nowrap;text-decoration:none}
+.seg.on{background:#e6edf6;border-color:#e6edf6;color:#0a0e17}
+.seg .n{font-size:11.5px;font-weight:700;padding:1px 7px;border-radius:999px;background:rgba(139,155,180,.14);color:#8b9bb4}
+.seg.on .n{background:rgba(10,14,23,.12);color:#0a0e17}
+.sub{display:inline-flex;align-items:center;gap:6px;min-height:28px;padding:0 12px;border-radius:999px;border:1px solid #243049;background:#1a2236;color:#8b9bb4;font:inherit;font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap;text-decoration:none}
+.sub.on{background:#3b82f6;border-color:#3b82f6;color:#ffffff}
+.btn{display:inline-flex;align-items:center;gap:6px;min-height:32px;padding:0 12px;border-radius:8px;border:1px solid #243049;background:#1a2236;color:#e6edf6;font:inherit;font-size:12.5px;font-weight:600;cursor:pointer;white-space:nowrap;text-decoration:none}
+.btn.primary{background:#3b82f6;border-color:#3b82f6;color:#ffffff}
+.btn.sm{min-height:28px;padding:0 10px;font-size:12px}
+.dot{display:inline-block;width:8px;height:8px;border-radius:50%;flex:none}
+.ok{background:#4ade80}.warn{background:#fbbf24}.bad{background:#f87171}.run{background:#60a5fa}
+.tag{display:inline-flex;align-items:center;height:20px;padding:0 8px;border-radius:999px;font-size:11px;font-weight:700;white-space:nowrap}
+.tag.ok{background:rgba(34,197,94,.14);color:#86efac}.tag.bad{background:rgba(239,68,68,.16);color:#fca5a5}.tag.warn{background:rgba(245,158,11,.16);color:#fcd34d}.tag.run{background:rgba(59,130,246,.18);color:#93c5fd}.tag.unk{background:rgba(139,155,180,.14);color:#aebbd0}
+.kpi{display:flex;flex-direction:column;gap:6px;padding:14px 16px;min-width:0}
+.kpi .lbl{font-size:12px;font-weight:600;color:#8b9bb4}
+.kpi .big{font-size:28px;font-weight:800;letter-spacing:-.01em;line-height:1.1}
+.kpi .sub2{font-size:12px;color:#8b9bb4;display:flex;flex-wrap:wrap;gap:4px 10px;align-items:center}
+table{border-collapse:collapse;width:100%}
+th{font-size:12px;font-weight:600;color:#8b9bb4;text-align:left;padding:9px 12px;background:#0f1626;border-bottom:1px solid #243049;white-space:nowrap}
+td{padding:9px 12px;border-bottom:1px solid #1f2a40;vertical-align:middle;white-space:nowrap;font-size:13px}
+td.r,th.r{text-align:right}
+.sm{font-size:11.5px;color:#8b9bb4}
+.sect{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:12px 16px;border-bottom:1px solid #1f2a40}
+.sect h2{margin:0;font-size:14px;font-weight:800}
+.flow{display:flex;flex-wrap:wrap;align-items:center;gap:6px;font-size:12.5px}
+.flow .s{display:inline-flex;align-items:center;gap:6px;padding:5px 10px;border-radius:8px;background:#0f1626;border:1px solid #1f2a40}
+.flow .a{color:#8b9bb4}
+.kv{display:grid;grid-template-columns:110px minmax(0, 1fr);gap:6px 10px;font-size:12.5px}
+.kv dt{color:#8b9bb4;margin:0}.kv dd{margin:0;overflow-wrap:anywhere}
+.m{width:18px;height:18px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-size:11px;font-weight:800;flex:none}
+.m.ok{background:rgba(34,197,94,.18);color:#86efac}.m.bad{background:rgba(239,68,68,.18);color:#fca5a5}.m.unk{background:rgba(139,155,180,.18);color:#aebbd0}
+.ico{width:14px;height:14px;flex:none}
+</style>
+</helmet>
+<div style="width:100%;max-width:1440px;margin:0 auto;box-sizing:border-box;padding:18px 24px 28px;display:flex;flex-direction:column;gap:14px;min-width:0">
+
+  <div style="display:flex;flex-wrap:wrap;align-items:flex-end;gap:12px">
+    <div style="min-width:0">
+      <div style="font-size:22px;font-weight:800">Backup 현황</div>
+      <div class="muted" style="font-size:13px">Bareos — 복원 검증(리허설): 백업이 실제로 되살아나는지 네트워크를 끊은 채 켜서 확인합니다.</div>
+    </div>
+  </div>
+  <div role="tablist" aria-label="Backup 현황 보기" style="display:flex;gap:4px;box-shadow:inset 0 -1px 0 #243049">
+    <a class="toptab" href="Main.dc.html">Summary</a><a class="toptab" href="Main.dc.html">Detail</a><a class="toptab" href="Main.dc.html">Veeam</a><a class="toptab on" href="RestoreVerify.dc.html" aria-current="page">Bareos</a>
+  </div>
+  <div style="display:flex;flex-wrap:wrap;align-items:center;gap:10px 14px">
+    <nav aria-label="Bareos 보기" style="display:inline-flex;flex-wrap:wrap;gap:4px;background:#0f1626;border:1px solid #243049;border-radius:10px;padding:3px;max-width:100%">
+      <a class="pill" href="Main.dc.html">현황</a><a class="pill" href="Corp.dc.html">법인</a><a class="pill on" href="RestoreHub.dc.html" aria-current="page">운영 <span class="n">관리자</span></a><a class="pill" href="Policy.dc.html">정책 · 보존</a><a class="pill" href="Settings.dc.html">설정</a>
+    </nav>
+    <div role="tablist" aria-label="운영 보기" style="display:inline-flex;flex-wrap:wrap;gap:6px">
+      <a class="seg" href="Operate.dc.html" role="tab" aria-selected="false">백업 대상 <span class="n">1,206</span></a>
+      <button class="seg" type="button" role="tab" aria-selected="false">백업 그룹 <span class="n">6</span></button>
+      <a class="seg on" href="RestoreHub.dc.html" role="tab" aria-selected="true">복원 <span class="n">1 진행 중</span></a>
+      <button class="seg" type="button" role="tab" aria-selected="false">진행 · 이력 <span class="n">3 진행 중</span></button>
+    </div>
+    <div style="margin-left:auto;display:flex;flex-wrap:wrap;align-items:center;gap:8px">
+      <button class="btn" type="button">새로고침</button>
+    </div>
+  </div>
+  <div style="display:flex;flex-wrap:wrap;gap:6px" role="tablist" aria-label="복원 보기">
+    <a class="sub" href="RestoreHub.dc.html" role="tab" aria-selected="false">복원하기</a>
+    <a class="sub on" href="RestoreVerify.dc.html" role="tab" aria-selected="true">복원 검증(리허설) <span class="sm" style="color:inherit;opacity:.85">주 1회</span></a>
+  </div>
+
+  <div style="display:grid;grid-template-columns:repeat(4, minmax(0, 1fr));gap:12px">
+    <div class="card kpi"><div class="lbl">최근 30일 검증</div><div class="big">12대</div><div class="sub2"><span><i class="dot ok"></i> 되살아남 11</span><span><i class="dot bad"></i> 실패 1</span><span>건너뜀 0</span></div></div>
+    <div class="card kpi"><div class="lbl">검증한 법인</div><div class="big">4 <span style="font-size:14px;color:#8b9bb4;font-weight:600">/ 28</span></div><div class="sub2"><span>북미 · 유럽 · 아시아 · 중국</span><span class="tag unk">24곳은 아직</span></div></div>
+    <div class="card kpi"><div class="lbl">마지막 검증</div><div class="big" style="font-size:20px">11-02 03:00</div><div class="sub2"><span>Prod / DB 3대 · 1시간 4분</span><span><i class="dot ok"></i> 3 / 3</span></div></div>
+    <div class="card kpi"><div class="lbl">다음 검증</div><div class="big" style="font-size:20px">11-09 03:00</div><div class="sub2"><span>Prod / App 에서 3대(돌아가며)</span><button class="btn sm" type="button">지금 검증</button></div></div>
+  </div>
+
+  <div class="card" style="padding:14px 16px;display:flex;flex-direction:column;gap:10px">
+    <div style="display:flex;flex-wrap:wrap;align-items:center;gap:10px"><b style="font-size:14px">검증 정책 — 북미 법인</b><span class="muted" style="font-size:12px">법인마다 하나 · 백업 그룹처럼 폴더에서 대상 폴더를 고릅니다</span><button class="btn sm" type="button" style="margin-left:auto">정책 수정</button></div>
+    <div class="flow">
+      <span class="s"><b>매주 일 03:00</b></span><span class="a">·</span>
+      <span class="s">대상 폴더 Prod / DB · Prod / App <span class="sm">에서 돌아가며 3대</span></span><span class="a">→</span>
+      <span class="s">마지막 성공 백업으로 <b>새 VM</b> 복원 <span class="sm">이름 {원래}-verify-{날짜}</span></span><span class="a">→</span>
+      <span class="s">네트워크 어댑터 <b>끊음</b></span><span class="a">→</span>
+      <span class="s"><b>켜기</b></span><span class="a">→</span>
+      <span class="s">VMware Tools <b>하트비트</b> 기다림 <span class="sm">최대 10분</span></span><span class="a">→</span>
+      <span class="s"><b>끄기</b></span><span class="a">→</span>
+      <span class="s">검증용 VM <b>지우기</b> <span class="sm">포탈이 만든 이름만</span></span>
+    </div>
+    <div class="sm">Veeam SureBackup 이 하는 ‘격리망에서 켜서 하트비트 · 핑 · 앱 테스트’ 중 하트비트만 합니다 — 네트워크를 끊은 채라 핑 · 앱 테스트는 하지 않습니다(격리 포트그룹을 쓰는 방식은 2차). VMware Tools 가 없는 VM 은 판정할 수 없어 ‘건너뜀’. 검증은 Director 의 백업 창과 겹치지 않는 시각으로.</div>
+  </div>
+
+  <div class="card" style="overflow:hidden">
+    <div class="sect">
+      <h2>검증 결과</h2>
+      <span class="muted" style="font-size:12px">VM 마다 한 줄 — 복원 · 켜짐 · 하트비트 · 정리까지 단계별로</span>
+      <div style="margin-left:auto;display:flex;flex-wrap:wrap;gap:6px;align-items:center">
+        <button class="sub on" type="button">전체 12</button><button class="sub" type="button"><i class="dot ok"></i> 되살아남 11</button><button class="sub" type="button"><i class="dot bad"></i> 실패 1</button>
+        <select class="btn" aria-label="법인"><option>법인 전체</option></select>
+        <button class="btn sm" type="button">CSV</button>
+      </div>
+    </div>
+    <div style="overflow-x:auto">
+    <table>
+      <thead><tr><th>검증 시각</th><th>VM</th><th>법인</th><th>복원 지점</th><th>복원</th><th>켜짐</th><th>Tools 하트비트</th><th class="r">소요</th><th>정리</th><th>결과</th></tr></thead>
+      <tbody>
+        <tr><td>11-02 03:00</td><td><b>erp-db-01</b></td><td>북미</td><td>11-02 01:50 <span class="sm">· 6건 430 GB</span></td><td><span class="m ok">✓</span> <span class="sm">19분</span></td><td><span class="m ok">✓</span></td><td><span class="m ok">✓</span> <span class="sm">2분 10초</span></td><td class="r">24분</td><td><span class="tag ok">지움</span></td><td><span class="tag ok">되살아남</span></td></tr>
+        <tr><td>11-02 03:24</td><td><b>erp-db-03</b></td><td>북미</td><td>11-02 01:52 <span class="sm">· 6건 504 GB</span></td><td><span class="m ok">✓</span> <span class="sm">21분</span></td><td><span class="m ok">✓</span></td><td><span class="m ok">✓</span> <span class="sm">1분 48초</span></td><td class="r">25분</td><td><span class="tag ok">지움</span></td><td><span class="tag ok">되살아남</span></td></tr>
+        <tr><td>11-02 03:49</td><td><b>crm-db-01</b></td><td>북미</td><td>11-01 01:50 <span class="sm">· 5건 476 GB</span></td><td><span class="m ok">✓</span> <span class="sm">18분</span></td><td><span class="m ok">✓</span></td><td><span class="m ok">✓</span> <span class="sm">3분 02초</span></td><td class="r">23분</td><td><span class="tag ok">지움</span></td><td><span class="tag ok">되살아남</span></td></tr>
+        <tr style="background:rgba(239,68,68,.05)"><td>10-26 03:00</td><td><b>legacy-fs-01</b></td><td>북미</td><td>10-26 02:10 <span class="sm">· 1건 1.0 TB</span></td><td><span class="m ok">✓</span> <span class="sm">41분</span></td><td><span class="m ok">✓</span></td><td><span class="m bad">✕</span> <span class="sm">10분 동안 하트비트 없음</span></td><td class="r">52분</td><td><span class="tag warn">남김</span> <span class="sm">실패라 조사용으로 둠</span></td><td><span class="tag bad">실패</span> <span class="sm">· 안에서 부팅 확인 필요</span></td></tr>
+        <tr><td>10-26 03:52</td><td><b>old-ad-02</b></td><td>북미</td><td>10-26 01:05 <span class="sm">· 7건 96 GB</span></td><td><span class="m ok">✓</span> <span class="sm">6분</span></td><td><span class="m ok">✓</span></td><td><span class="m unk">?</span> <span class="sm">VMware Tools 없음</span></td><td class="r">8분</td><td><span class="tag ok">지움</span></td><td><span class="tag unk">건너뜀</span> <span class="sm">· 켜지기는 함</span></td></tr>
+        <tr><td colspan="10" class="sm" style="text-align:center;padding:10px">… 7건 더 · 검증 결과는 법인 화면의 VM 패널과 일일 요약 메일에도 실립니다 · 실패한 검증용 VM 은 지우지 않고 남겨 둡니다(이름 {원래}-verify-{날짜} · 사람이 확인 뒤 vCenter 에서 삭제)</td></tr>
+      </tbody>
+    </table>
+    </div>
+  </div>
+
+  <div style="display:flex;flex-wrap:wrap;align-items:center;gap:10px;font-size:12px;color:#8b9bb4">
+    <span>근거 — Veeam SureBackup 문서(격리 실행 · 하트비트 · 핑 · 앱 테스트) · Veeam 포럼(격리 vSwitch 로 손수 검증하는 운영자들) · IBM 지원 문서(운영망에 붙인 테스트 복원이 DNS 를 바꾼 사고). 포탈은 VM 백업 센터가 이미 쓰는 켜기 · Tools 대기 · 끄기 · 만든 VM 지우기 함수를 그대로 씁니다.</span>
+    <button class="btn" type="button" style="min-height:26px;font-size:11.5px;margin-left:auto">읽는 법 ⓘ</button>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1100}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

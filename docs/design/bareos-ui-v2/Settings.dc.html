@@ -1,0 +1,166 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>Bareos 설정 — Director</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=Noto+Sans+KR:wght@400;500;700;800&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+body{margin:0;background:#0a0e17;color:#e6edf6;font-family:"Inter","Noto Sans KR","Apple SD Gothic Neo",sans-serif;font-size:13px}
+a{color:#3b82f6}a:hover{color:#60a5fa}
+.card{background:#141b2d;border:1px solid #243049;border-radius:12px}
+.muted{color:#8b9bb4}
+.mono{font-family:"JetBrains Mono",ui-monospace,monospace}
+.toptab{min-width:84px;min-height:40px;display:inline-flex;align-items:center;justify-content:center;padding:0 18px;text-decoration:none;color:#8b9bb4;font-weight:600;font-size:15px;border-bottom:3px solid transparent}
+.toptab.on{color:#e6edf6;font-weight:800;border-bottom-color:#3b82f6}
+.pill{display:inline-flex;align-items:center;gap:7px;min-height:34px;padding:0 14px;border-radius:8px;text-decoration:none;font-size:13px;font-weight:600;color:#8b9bb4;white-space:nowrap}
+.pill.on{background:#3b82f6;color:#ffffff;font-weight:800}
+.pill .n{font-size:11.5px;font-weight:700;color:#8b9bb4;background:rgba(139,155,180,.14);padding:1px 7px;border-radius:999px}
+.btn{display:inline-flex;align-items:center;gap:6px;min-height:32px;padding:0 12px;border-radius:8px;border:1px solid #243049;background:#1a2236;color:#e6edf6;font:inherit;font-size:12.5px;font-weight:600;cursor:pointer;white-space:nowrap;text-decoration:none}
+.btn.primary{background:#3b82f6;border-color:#3b82f6;color:#ffffff}
+.btn.sm{min-height:28px;padding:0 10px;font-size:12px}
+.side{display:flex;flex-direction:column;gap:2px;padding:6px}
+.side a{display:flex;align-items:center;gap:10px;min-height:40px;padding:0 12px;border-radius:8px;text-decoration:none;color:#8b9bb4;font-weight:600;font-size:13px}
+.side a.on{background:#3b82f6;color:#ffffff;font-weight:800}
+.side a .n{margin-left:auto;font-size:11.5px;font-weight:700;color:#8b9bb4}
+.side a.on .n{color:#ffffff}
+.dot{display:inline-block;width:8px;height:8px;border-radius:50%;flex:none}
+.ok{background:#4ade80}.warn{background:#fbbf24}.bad{background:#f87171}.unk{background:transparent;border:1.5px dashed #8b9bb4}
+.tag{display:inline-flex;align-items:center;height:20px;padding:0 8px;border-radius:999px;font-size:11px;font-weight:700;white-space:nowrap}
+.tag.ok{background:rgba(34,197,94,.14);color:#86efac}.tag.bad{background:rgba(239,68,68,.16);color:#fca5a5}.tag.warn{background:rgba(245,158,11,.16);color:#fcd34d}.tag.unk{background:rgba(139,155,180,.14);color:#aebbd0}
+table{border-collapse:collapse;width:100%}
+th{font-size:12px;font-weight:600;color:#8b9bb4;text-align:left;padding:9px 12px;background:#0f1626;border-bottom:1px solid #243049;white-space:nowrap}
+td{padding:11px 12px;border-bottom:1px solid #1f2a40;vertical-align:middle;white-space:nowrap;font-size:13px}
+td.r,th.r{text-align:right}
+.sm{font-size:11.5px;color:#8b9bb4}
+.sect{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:12px 16px;border-bottom:1px solid #1f2a40}
+.sect h2{margin:0;font-size:14px;font-weight:800}
+.acc{display:flex;align-items:center;gap:12px;padding:12px 16px;border-top:1px solid #1f2a40;cursor:pointer}
+.acc b{font-size:13px}
+.acc .sum{color:#8b9bb4;font-size:12px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.acc .ch{margin-left:auto;color:#8b9bb4;font-size:12px;flex:none}
+.ico{width:14px;height:14px;flex:none}
+</style>
+</helmet>
+<div style="width:100%;max-width:1440px;margin:0 auto;box-sizing:border-box;padding:18px 24px 28px;display:flex;flex-direction:column;gap:14px;min-width:0">
+
+  <div style="display:flex;flex-wrap:wrap;align-items:flex-end;gap:12px">
+    <div style="min-width:0">
+      <div style="font-size:22px;font-weight:800">Backup 현황</div>
+      <div class="muted" style="font-size:13px">Bareos — 법인마다 Director 를 등록하고 vCenter 를 묶습니다. 설치 · 법인별 설정 · 계정은 왼쪽 목록에서(전체 범위 관리자).</div>
+    </div>
+  </div>
+  <div role="tablist" aria-label="Backup 현황 보기" style="display:flex;gap:4px;box-shadow:inset 0 -1px 0 #243049">
+    <a class="toptab" href="Main.dc.html">Summary</a>
+    <a class="toptab" href="Main.dc.html">Detail</a>
+    <a class="toptab" href="Main.dc.html">Veeam</a>
+    <a class="toptab on" href="Settings.dc.html" aria-current="page">Bareos</a>
+  </div>
+
+  <div style="display:flex;flex-wrap:wrap;align-items:center;gap:10px 14px">
+    <nav aria-label="Bareos 보기" style="display:inline-flex;flex-wrap:wrap;gap:4px;background:#0f1626;border:1px solid #243049;border-radius:10px;padding:3px;max-width:100%">
+      <a class="pill" href="Main.dc.html">현황</a>
+      <a class="pill" href="Corp.dc.html">법인</a>
+      <a class="pill" href="Operate.dc.html">운영 <span class="n">관리자</span></a>
+      <a class="pill" href="Policy.dc.html">정책 · 보존</a>
+      <a class="pill on" href="Settings.dc.html" aria-current="page">설정</a>
+    </nav>
+    <div style="margin-left:auto;display:flex;flex-wrap:wrap;align-items:center;gap:8px">
+      <button class="btn" type="button">새로고침</button>
+      <button class="btn primary" type="button">+ Director 추가</button>
+    </div>
+  </div>
+
+  <div style="display:flex;align-items:center;gap:8px;font-size:12.5px;color:#fcd34d">
+    <svg class="ico" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><circle cx="8" cy="8" r="6.5"></circle><path d="M8 5v3.5M8 11h.01"></path></svg>
+    <span>데모 모드 — 아래 값은 메모리의 데모 설정입니다(편집 · 저장 안 됨). 실제 Director 를 추가하면 데모가 꺼집니다.</span>
+  </div>
+
+  <div style="display:flex;flex-wrap:wrap;gap:14px;align-items:flex-start">
+    <nav class="card side" aria-label="설정 구획" style="flex:0 0 220px;max-width:100%">
+      <a class="on" href="Settings.dc.html" aria-current="page">Director <span class="n">4</span></a>
+      <a href="Settings.dc.html">완전 설치 <span class="n">2 가능</span></a>
+      <a href="Settings.dc.html">법인별 설정 <span class="n">스토리지 · 계정 · 풀</span></a>
+      <a href="Settings.dc.html">계정 통합(중앙) <span class="n">2</span></a>
+      <a href="Settings.dc.html">공통 기본값 · 수집</a>
+    </nav>
+
+    <div style="flex:999 1 560px;min-width:0;display:flex;flex-direction:column;gap:14px">
+      <div class="card" style="overflow:hidden">
+        <div class="sect"><h2>법인별 Director</h2><span class="muted" style="font-size:12px">법인 1 = vCenter 묶음 1 = Director 1 · 접속값이 바뀌면 저장 비밀번호는 지워집니다</span></div>
+        <div style="overflow-x:auto">
+        <table>
+          <thead><tr><th>법인</th><th>Director 주소 · 콘솔</th><th>담당</th><th>상태</th><th>법인 vCenter</th><th class="r">백업 대상</th><th aria-label="동작"></th></tr></thead>
+          <tbody>
+            <tr>
+              <td><b>북미 법인</b></td>
+              <td><span class="mono">bareos-r1.demo:9101</span> <span class="sm">· 콘솔 portal · TLSv1.3</span></td>
+              <td>중앙 직접</td>
+              <td><span style="display:inline-flex;align-items:center;gap:7px"><i class="dot ok"></i>정상 <span class="sm">· 비밀번호 저장됨 · 조회 03:10</span></span></td>
+              <td class="sm">3 · vcenter-us-east-01 · us-west-01 · br-sao-01</td>
+              <td class="r">356</td>
+              <td><span style="display:inline-flex;gap:6px"><button class="btn sm" type="button">편집</button><a class="btn sm" href="Settings.dc.html">법인 설정 →</a></span></td>
+            </tr>
+            <tr>
+              <td><b>유럽 법인</b></td>
+              <td><span class="mono">bareos-r2.demo:9101</span> <span class="sm">· 콘솔 portal · TLSv1.3</span></td>
+              <td>중앙 직접</td>
+              <td><span style="display:inline-flex;align-items:center;gap:7px"><i class="dot bad"></i>인증 정지 <span class="sm">· 10-31 22:10 부터 · 비밀번호 확인 필요</span></span></td>
+              <td class="sm">3 · vcenter-eu-central-01 · eu-west-01 · me-uae-01</td>
+              <td class="r">302</td>
+              <td><span style="display:inline-flex;gap:6px"><button class="btn sm" type="button">편집</button><a class="btn sm" href="Settings.dc.html">법인 설정 →</a></span></td>
+            </tr>
+            <tr>
+              <td><b>아시아 법인</b></td>
+              <td><span class="mono">bareos-r3.demo:9101</span> <span class="sm">· 콘솔 portal · TLSv1.3</span></td>
+              <td>엣지 대행 <span class="sm">edge-demo-3</span></td>
+              <td><span style="display:inline-flex;align-items:center;gap:7px"><i class="dot ok"></i>정상 <span class="sm">· 비밀번호 저장됨 · 조회 03:08</span></span></td>
+              <td class="sm">3 · vcenter-ap-northeast-01 · ap-southeast-01 · ap-south-01</td>
+              <td class="r">311</td>
+              <td><span style="display:inline-flex;gap:6px"><button class="btn sm" type="button">편집</button><a class="btn sm" href="Settings.dc.html">법인 설정 →</a></span></td>
+            </tr>
+            <tr>
+              <td><b>중국 법인</b></td>
+              <td><span class="mono">bareos-r4.demo:9101</span> <span class="sm">· 콘솔 portal · TLSv1.3</span></td>
+              <td>엣지 대행 <span class="sm">edge-demo-4</span></td>
+              <td><span style="display:inline-flex;align-items:center;gap:7px"><i class="dot warn"></i>조회 실패 <span class="sm">· 시한 · 다음 조회 03:20</span></span></td>
+              <td class="sm">2 · vcenter-cn-east-01 · cn-north-01</td>
+              <td class="r">237</td>
+              <td><span style="display:inline-flex;gap:6px"><button class="btn sm" type="button">편집</button><a class="btn sm" href="Settings.dc.html">법인 설정 →</a></span></td>
+            </tr>
+            <tr>
+              <td colspan="7" class="sm" style="padding:10px 12px">묶이지 않은 vCenter 17개 — <a href="Settings.dc.html">완전 설치</a>로 법인 서버에 Bareos 를 설치하고 등록하거나, 이미 있는 Director 를 ‘+ Director 추가’ 로 등록하세요.</td>
+            </tr>
+          </tbody>
+        </table>
+        </div>
+      </div>
+
+      <div class="card" style="overflow:hidden">
+        <div class="sect"><h2>공통 기본값 · 수집</h2><span class="muted" style="font-size:12px">모든 Director 에 같은 값 — 펼쳐서 고칩니다(자동 설정 2단계가 만드는 이름과 같아야 합니다)</span></div>
+        <div class="acc" style="border-top:0"><b>JobDefs · FileSet · 복원 잡</b><span class="sum">PortalVmwareDefaults · PortalVmwareGeneric · PortalVmwareRestore</span><span class="ch">펼치기 ▾</span></div>
+        <div class="acc"><b>기본 레벨 · 상태 대조 주기</b><span class="sum">Incremental · 60초</span><span class="ch">펼치기 ▾</span></div>
+        <div class="acc"><b>Director 정책 수집</b><span class="sum">매일 06:10(포탈 시각) · Run 줄 · JobDefs · FileSet · Director 4곳 전부</span><span class="ch">펼치기 ▾</span></div>
+        <div class="acc"><b>쓰기 OTP</b><span class="sum">켬 — 설정 · 자동 설치 · 법인별 설정 · 계정 변경은 본인 OTP(세션 보안에서 끌 수 있음)</span><span class="ch">펼치기 ▾</span></div>
+        <div class="acc"><b>법인 서버 사전 준비(패키지 설치만) · FD INI 복사</b><span class="sum">Rocky · RHEL 9 · bareos-director · storage · filedaemon · vmware-plugin · python3 FD 플러그인 · pyVmomi 8.x</span><span class="ch">펼치기 ▾</span></div>
+      </div>
+    </div>
+  </div>
+
+  <div style="display:flex;flex-wrap:wrap;align-items:center;gap:10px;font-size:12px;color:#8b9bb4">
+    <span>비밀번호 · SSH 비밀은 서버에 저장하거나 응답에 싣지 않습니다. 포탈이 만들지 않은 파일은 덮어쓰지 않습니다.</span>
+    <button class="btn" type="button" style="min-height:26px;font-size:11.5px;margin-left:auto">읽는 법 ⓘ</button>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1040}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

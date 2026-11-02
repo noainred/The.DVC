@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>Bareos 복원 1/3 — 복원 시점(여러 대)</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=Noto+Sans+KR:wght@400;500;700;800&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+body{margin:0;background:#0a0e17;color:#e6edf6;font-family:"Inter","Noto Sans KR","Apple SD Gothic Neo",sans-serif;font-size:13px}
+a{color:#3b82f6}a:hover{color:#60a5fa}
+.card{background:#141b2d;border:1px solid #243049;border-radius:12px}
+.muted{color:#8b9bb4}
+.mono{font-family:"JetBrains Mono",ui-monospace,monospace}
+.toptab{min-width:84px;min-height:40px;display:inline-flex;align-items:center;justify-content:center;padding:0 18px;text-decoration:none;color:#8b9bb4;font-weight:600;font-size:15px;border-bottom:3px solid transparent}
+.toptab.on{color:#e6edf6;font-weight:800;border-bottom-color:#3b82f6}
+.pill{display:inline-flex;align-items:center;gap:7px;min-height:34px;padding:0 14px;border-radius:8px;text-decoration:none;font-size:13px;font-weight:600;color:#8b9bb4;white-space:nowrap}
+.pill.on{background:#3b82f6;color:#ffffff;font-weight:800}
+.pill .n{font-size:11.5px;font-weight:700;color:#8b9bb4;background:rgba(139,155,180,.14);padding:1px 7px;border-radius:999px}
+.pill.on .n{color:#ffffff;background:rgba(255,255,255,.22)}
+.btn{display:inline-flex;align-items:center;gap:6px;min-height:32px;padding:0 12px;border-radius:8px;border:1px solid #243049;background:#1a2236;color:#e6edf6;font:inherit;font-size:12.5px;font-weight:600;cursor:pointer;white-space:nowrap;text-decoration:none}
+.btn.primary{background:#3b82f6;border-color:#3b82f6;color:#ffffff}
+.btn.sm{min-height:28px;padding:0 10px;font-size:12px}
+.dot{display:inline-block;width:8px;height:8px;border-radius:50%;flex:none}
+.ok{background:#4ade80}.warn{background:#fbbf24}.bad{background:#f87171}.run{background:#60a5fa}
+.tag{display:inline-flex;align-items:center;height:20px;padding:0 8px;border-radius:999px;font-size:11px;font-weight:700;white-space:nowrap}
+.tag.ok{background:rgba(34,197,94,.14);color:#86efac}.tag.bad{background:rgba(239,68,68,.16);color:#fca5a5}.tag.warn{background:rgba(245,158,11,.16);color:#fcd34d}.tag.run{background:rgba(59,130,246,.18);color:#93c5fd}.tag.unk{background:rgba(139,155,180,.14);color:#aebbd0}
+.tag.full{background:rgba(168,85,247,.18);color:#d8b4fe}.tag.diff{background:rgba(34,211,238,.16);color:#67e8f9}.tag.incr{background:rgba(139,155,180,.14);color:#c7d2e3}
+.step{display:flex;align-items:center;gap:10px;padding:10px 14px;border-radius:10px;border:1px solid #243049;background:#0f1626;color:#8b9bb4;font-weight:700;font-size:13px;min-width:0;text-decoration:none}
+.step .k{display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:50%;background:#1a2236;color:#8b9bb4;font-size:12px;flex:none}
+.step.on{border-color:#3b82f6;color:#e6edf6}.step.on .k{background:#3b82f6;color:#ffffff}
+.opt{display:flex;align-items:center;gap:10px;padding:10px 14px;border:1px solid #243049;border-radius:10px;background:#0f1626;cursor:pointer;min-width:0;flex:1 1 260px}
+.opt.sel{border-color:#3b82f6;background:rgba(59,130,246,.10)}
+.opt b{font-size:13px}
+.opt input[type=text]{min-width:0;width:130px;background:#141b2d;border:1px solid #243049;border-radius:6px;color:#e6edf6;padding:4px 8px;font:inherit;font-size:12.5px}
+table{border-collapse:collapse;width:100%}
+th{font-size:12px;font-weight:600;color:#8b9bb4;text-align:left;padding:9px 12px;background:#0f1626;border-bottom:1px solid #243049;white-space:nowrap}
+td{padding:10px 12px;border-bottom:1px solid #1f2a40;vertical-align:middle;white-space:nowrap;font-size:13px}
+td.r,th.r{text-align:right}
+tr.open td{background:rgba(59,130,246,.08)}
+.pt{display:flex;align-items:center;gap:12px;padding:8px 12px;border:1px solid #1f2a40;border-radius:10px;background:#0f1626;cursor:pointer;min-width:0}
+.pt.sel{border-color:#3b82f6;background:rgba(59,130,246,.12)}
+.pt .t{font-weight:700;min-width:96px}
+.pt .sz{margin-left:auto;color:#8b9bb4;font-size:12px;white-space:nowrap}
+.chain{display:flex;flex-wrap:wrap;gap:6px;align-items:center;font-size:12px}
+.chain .c{display:inline-flex;align-items:center;gap:6px;padding:3px 8px;border-radius:8px;background:#0f1626;border:1px solid #1f2a40}
+.chain .arr{color:#8b9bb4}
+.kv{display:grid;grid-template-columns:96px minmax(0, 1fr);gap:6px 10px;font-size:12.5px}
+.kv dt{color:#8b9bb4;margin:0}.kv dd{margin:0;overflow-wrap:anywhere}
+.sm{font-size:11.5px;color:#8b9bb4}
+</style>
+</helmet>
+<div style="width:100%;max-width:1440px;margin:0 auto;box-sizing:border-box;padding:18px 24px 28px;display:flex;flex-direction:column;gap:14px;min-width:0">
+
+  <div style="display:flex;flex-wrap:wrap;align-items:flex-end;gap:12px">
+    <div style="min-width:0">
+      <div style="font-size:22px;font-weight:800">Backup 현황</div>
+      <div class="muted" style="font-size:13px">Bareos — 복원 · 1단계 복원 시점</div>
+    </div>
+  </div>
+  <div role="tablist" aria-label="Backup 현황 보기" style="display:flex;gap:4px;box-shadow:inset 0 -1px 0 #243049">
+    <a class="toptab" href="Main.dc.html">Summary</a><a class="toptab" href="Main.dc.html">Detail</a><a class="toptab" href="Main.dc.html">Veeam</a><a class="toptab on" href="RestoreHub.dc.html" aria-current="page">Bareos</a>
+  </div>
+  <div style="display:flex;flex-wrap:wrap;align-items:center;gap:10px 14px">
+    <nav aria-label="Bareos 보기" style="display:inline-flex;flex-wrap:wrap;gap:4px;background:#0f1626;border:1px solid #243049;border-radius:10px;padding:3px;max-width:100%">
+      <a class="pill" href="Main.dc.html">현황</a><a class="pill" href="Corp.dc.html">법인</a><a class="pill on" href="RestoreHub.dc.html" aria-current="page">운영 <span class="n">관리자</span></a><a class="pill" href="Policy.dc.html">정책 · 보존</a><a class="pill" href="Settings.dc.html">설정</a>
+    </nav>
+    <a class="btn sm" href="RestoreHub.dc.html">← 운영 › 복원</a>
+  </div>
+
+  <div class="card" style="padding:16px 18px;display:flex;flex-direction:column;gap:14px;min-width:0">
+    <div style="display:flex;flex-wrap:wrap;align-items:center;gap:10px 14px">
+      <div style="font-size:18px;font-weight:800">복원 — 3대</div>
+      <span class="muted" style="font-size:12.5px">vcenter-us-east-01 › Prod / DB · erp-db-01 · erp-db-03 · crm-db-01</span>
+      <span style="display:inline-flex;align-items:center;gap:6px;font-size:12.5px"><i class="dot ok"></i>Director ‘북미 법인’ · 중앙 직접 · 복원 FD <span class="mono">bareos-r1-fd</span></span>
+      <a class="btn sm" href="RestoreHub.dc.html" style="margin-left:auto">닫기</a>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(3, minmax(0, 1fr));gap:8px">
+      <div class="step on"><span class="k">1</span>복원 시점 <span class="muted" style="font-weight:500">— 어느 시점으로</span></div>
+      <div class="step"><span class="k">2</span>방식 · 대상 <span class="muted" style="font-weight:500">— 어디에 어떻게</span></div>
+      <div class="step"><span class="k">3</span>확인 · 실행 <span class="muted" style="font-weight:500">— 본인 OTP</span></div>
+    </div>
+
+    <div role="radiogroup" aria-label="복원 시점 정하기" style="display:flex;flex-wrap:wrap;gap:8px">
+      <label class="opt sel" for="t-last"><input type="radio" name="tpick" id="t-last" checked><span><b>각 VM 의 마지막 성공 백업</b><br><span class="sm">기본 — 가장 최근 상태로</span></span></label>
+      <label class="opt" for="t-time"><input type="radio" name="tpick" id="t-time"><span><b>기준 시각 이전의 마지막 성공 백업</b><br><span class="sm">장애 직전으로 — 예: </span><input type="text" value="11-01 02:00" aria-label="기준 시각" disabled></span></label>
+      <label class="opt" for="t-each"><input type="radio" name="tpick" id="t-each"><span><b>VM 마다 직접 고르기</b><br><span class="sm">아래 표의 ‘바꾸기’ 로 한 대씩</span></span></label>
+    </div>
+
+    <div style="display:flex;flex-wrap:wrap;gap:16px;align-items:flex-start">
+      <div class="card" style="flex:999 1 560px;min-width:0;overflow:hidden;background:#0f1626">
+        <div style="overflow-x:auto">
+        <table>
+          <thead><tr><th>VM</th><th>고른 지점</th><th>읽을 백업(체인)</th><th>백업 당시 위치</th><th>판정</th><th aria-label="바꾸기"></th></tr></thead>
+          <tbody>
+            <tr><td><b>erp-db-01</b></td><td>11-02 01:50 <span class="tag incr">Incr</span> <span class="sm mono">48242</span></td><td>6건 · <b>430 GB</b> <span class="sm">Full 10-26 → Diff 10-29 → Incr 4</span></td><td>DC-East › Prod / DB <span class="tag ok">같음</span></td><td><span class="tag ok">복원 가능</span></td><td><button class="btn sm" type="button">바꾸기 ▾</button></td></tr>
+            <tr class="open"><td><b>erp-db-03</b></td><td>11-02 01:52 <span class="tag incr">Incr</span> <span class="sm mono">48244</span></td><td>6건 · <b>504 GB</b> <span class="sm">Full 10-26 → Diff 10-29 → Incr 4</span></td><td>DC-East › Prod / DB <span class="tag ok">같음</span></td><td><span class="tag ok">복원 가능</span></td><td><button class="btn sm" type="button" aria-expanded="true">접기 ▴</button></td></tr>
+            <tr class="open"><td colspan="6" style="white-space:normal;padding:6px 12px 14px 28px">
+              <div class="sm" style="margin-bottom:6px">erp-db-03 의 성공한 백업 41건(카탈로그 최근 60건 중) — 하나를 고르면 체인이 바뀝니다</div>
+              <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(380px, 1fr));gap:6px 12px">
+                <label class="pt sel"><input type="radio" name="rp3" checked aria-label="11-02 01:52"><span class="t">11-02 01:52</span><span class="tag incr">Incr</span><span class="tag ok">성공</span><span class="sm mono">48244</span><span class="sz">14.2 GB</span></label>
+                <label class="pt"><input type="radio" name="rp3" aria-label="11-01 01:52"><span class="t">11-01 01:52</span><span class="tag incr">Incr</span><span class="tag ok">성공</span><span class="sm mono">48190</span><span class="sz">12.8 GB</span></label>
+                <label class="pt"><input type="radio" name="rp3" aria-label="10-31 01:51"><span class="t">10-31 01:51</span><span class="tag incr">Incr</span><span class="tag ok">성공</span><span class="sm mono">48141</span><span class="sz">11.4 GB</span></label>
+                <label class="pt"><input type="radio" name="rp3" aria-label="10-29 01:50"><span class="t">10-29 01:50</span><span class="tag diff">Diff</span><span class="tag ok">성공</span><span class="sm mono">48044</span><span class="sz">38.5 GB</span></label>
+                <label class="pt"><input type="radio" name="rp3" aria-label="10-26 01:50"><span class="t">10-26 01:50</span><span class="tag full">Full</span><span class="tag ok">성공</span><span class="sm mono">47912</span><span class="sz">418 GB</span></label>
+                <label class="pt" style="opacity:.6"><input type="radio" name="rp3" aria-label="10-19 01:50"><span class="t">10-19 01:50</span><span class="tag full">Full</span><span class="tag ok">성공</span><span class="tag warn">등록 전 위치 · 새 VM 만</span><span class="sz">401 GB</span></label>
+              </div>
+              <div class="chain" style="margin-top:10px"><span class="sm">체인</span><span class="c"><span class="tag full">Full</span>10-26 <span class="sm">418 GB</span></span><span class="arr">→</span><span class="c"><span class="tag diff">Diff</span>10-29 <span class="sm">38.5 GB</span></span><span class="arr">→</span><span class="c"><span class="tag incr">Incr</span>10-30 · 10-31 · 11-01 <span class="sm">35.1 GB</span></span><span class="arr">→</span><span class="c" style="border-color:#3b82f6"><span class="tag incr">Incr</span><b>11-02 01:52</b> <span class="sm">14.2 GB</span></span><span class="sm" style="margin-left:auto">6건 · 504 GB</span></div>
+            </td></tr>
+            <tr><td><b>crm-db-01</b></td><td>11-01 01:50 <span class="tag incr">Incr</span> <span class="sm mono">48190</span></td><td>5건 · <b>476 GB</b> <span class="sm">Full 10-26 → Diff 10-29 → Incr 3</span></td><td>DC-East › Prod / DB <span class="tag ok">같음</span></td><td><span class="tag ok">복원 가능</span> <span class="sm">오늘 백업은 실행 중이라 어제가 마지막</span></td><td><button class="btn sm" type="button">바꾸기 ▾</button></td></tr>
+          </tbody>
+        </table>
+        </div>
+        <div class="sm" style="padding:8px 12px">성공(T·W)한 백업만 · 체인은 서버가 VM 마다 자기 잡의 카탈로그 이력으로 계산(다른 VM 의 백업은 섞이지 않습니다) · 시각은 Director 현지.</div>
+      </div>
+
+      <aside class="card" style="flex:1 1 300px;max-width:380px;min-width:0;padding:16px;display:flex;flex-direction:column;gap:12px;background:#0f1626" aria-label="합계">
+        <b style="font-size:15px">이 묶음</b>
+        <dl class="kv">
+          <dt>VM</dt><dd>3대 · 모두 Director ‘북미 법인’</dd>
+          <dt>시점</dt><dd>각 VM 의 마지막 성공 백업</dd>
+          <dt>읽을 백업</dt><dd>체인 17건 · <b>1.41 TB</b></dd>
+          <dt>예상 소요</dt><dd>약 70~110분(추정 — 최근 복원 속도 1.0~1.4 GB/s · Director 가 FD 마다 차례로, 동시 실행 수만큼 겹침)</dd>
+          <dt>제외</dt><dd>없음 <span class="sm">(성공 백업이 없거나 복원 중인 VM 은 앞 화면에서 고를 수 없었습니다)</span></dd>
+        </dl>
+        <div class="sm">기준 시각을 고르면 VM 마다 그 시각 이전의 마지막 성공 백업으로 바뀌고, 없는 VM 은 ‘제외’ 에 이유와 함께 올라옵니다.</div>
+        <a class="btn primary" href="RestoreStep2.dc.html" style="justify-content:center">다음 — 방식 · 대상 →</a>
+      </aside>
+    </div>
+  </div>
+
+  <div style="display:flex;flex-wrap:wrap;align-items:center;gap:10px;font-size:12px;color:#8b9bb4">
+    <span>복원 지점 목록은 이 법인 Director 카탈로그에서 VM 3대 분을 한 번의 세션으로 읽었습니다(엣지 대행이면 엣지가 로컬에서 읽어 회신).</span>
+    <button class="btn" type="button" style="min-height:26px;font-size:11.5px;margin-left:auto">읽는 법 ⓘ</button>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1120}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

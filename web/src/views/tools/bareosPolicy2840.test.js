@@ -65,6 +65,11 @@ describe('v2.840 그룹 카드 · 백업 대상 적용 정책 줄', () => {
     expect(T.targetPolicyText(null)).toBe('적용 정책 모름(그룹 파일을 읽지 못함)');
     expect(T.targetPolicyText({ verdict: 'policy', src: { kind: 'group', name: 'g', text: '' }, next: null, pool: '', poolFrom: '', retentionSec: null, keep: null, collected: true, dup: 'VMwareNightly' }, now))
       .toBe('그룹 g · Director 스케줄 VMwareNightly 에도 있어 두 번 돌 수 있음');
+    // v2.860 표 칸용 짧은 줄 — 다음 실행 또는 판정만(전체 문구는 title · 패널)
+    expect(T.targetPolicyShort({ verdict: 'policy', src: { kind: 'group', name: 'kr-night' }, next }, now)).toBe('다음 오늘 21:00 Incremental');
+    expect(T.targetPolicyShort({ verdict: 'policy', src: { kind: 'director', name: 'N' }, next: null }, now)).toBe('다음 실행 —');
+    expect([T.targetPolicyShort({ verdict: 'manual', src: null }, now), T.targetPolicyShort({ verdict: 'unknown', src: null }, now), T.targetPolicyShort(null, now)]).toEqual(['예약 없음(수동만)', '일정 모름', '정책 모름']);
+    expect(T.targetPolicyShort({ verdict: 'policy', src: { kind: 'group', name: 'g' }, next: null, dup: 'N' }, now)).toBe('다음 실행 — · 두 번 돌 수 있음');
   });
 });
 
@@ -113,7 +118,8 @@ describe('v2.840 화면 소스', () => {
     expect(tool).toMatch(/filterHistory\(hist, \{ level: levelF, result: resultF \}\)/);
     expect(errs).toMatch(/\(k !== 'volume' \|\| c\.volume > 0\)/);
     expect(groups).toMatch(/fin\(g\.dupVms\) && g\.dupVms > 0 && <InfoLine label="두 번 실행"/);
-    expect(tool).toMatch(/k === 'groups' && toolAllowed\('bareos-summary'\)/);
-    expect(tool).toMatch(/href="#\/tools\/bareos-summary\/pools"/);
+    // v2.860: 관리 도구의 탭 줄은 BareosTabs 하나(정책 · 보존 탭은 bareosSubTabs 가 bareos-summary 권한으로 그린다 — 두 벌 그리지 않는다)
+    expect(tool).toMatch(/<BareosTabs active=\{opsTopOf\(tab\)\}/);
+    expect(tool).not.toMatch(/href="#\/tools\/bareos-summary\/pools"/);
   });
 });

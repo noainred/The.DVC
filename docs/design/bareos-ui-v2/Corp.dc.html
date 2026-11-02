@@ -1,0 +1,207 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>Bareos 법인 — 폴더와 VM</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=Noto+Sans+KR:wght@400;500;700;800&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+body{margin:0;background:#0a0e17;color:#e6edf6;font-family:"Inter","Noto Sans KR","Apple SD Gothic Neo",sans-serif;font-size:13px}
+a{color:#3b82f6}a:hover{color:#60a5fa}
+.card{background:#141b2d;border:1px solid #243049;border-radius:12px}
+.muted{color:#8b9bb4}
+.mono{font-family:"JetBrains Mono",ui-monospace,monospace}
+.toptab{min-width:84px;min-height:40px;display:inline-flex;align-items:center;justify-content:center;padding:0 18px;text-decoration:none;color:#8b9bb4;font-weight:600;font-size:15px;border-bottom:3px solid transparent}
+.toptab.on{color:#e6edf6;font-weight:800;border-bottom-color:#3b82f6}
+.pill{display:inline-flex;align-items:center;gap:7px;min-height:34px;padding:0 14px;border-radius:8px;text-decoration:none;font-size:13px;font-weight:600;color:#8b9bb4;white-space:nowrap}
+.pill.on{background:#3b82f6;color:#ffffff;font-weight:800}
+.pill .n{font-size:11.5px;font-weight:700;color:#8b9bb4;background:rgba(139,155,180,.14);padding:1px 7px;border-radius:999px}
+.btn{display:inline-flex;align-items:center;gap:6px;min-height:32px;padding:0 12px;border-radius:8px;border:1px solid #243049;background:#1a2236;color:#e6edf6;font:inherit;font-size:12.5px;font-weight:600;cursor:pointer;white-space:nowrap}
+.btn.primary{background:#3b82f6;border-color:#3b82f6;color:#ffffff}
+.btn.sm{min-height:28px;padding:0 10px;font-size:12px}
+.chip{display:inline-flex;align-items:center;gap:6px;min-height:28px;padding:0 11px;border-radius:999px;border:1px solid #243049;background:#1a2236;color:#8b9bb4;font:inherit;font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap}
+.chip.on{background:#3b82f6;border-color:#3b82f6;color:#ffffff}
+.dot{display:inline-block;width:8px;height:8px;border-radius:50%;flex:none}
+.ok{background:#4ade80}.warn{background:#fbbf24}.bad{background:#f87171}.run{background:#60a5fa}.unk{background:transparent;border:1.5px dashed #8b9bb4}
+.tag{display:inline-flex;align-items:center;height:20px;padding:0 8px;border-radius:999px;font-size:11px;font-weight:700;white-space:nowrap}
+.tag.ok{background:rgba(34,197,94,.14);color:#86efac}.tag.bad{background:rgba(239,68,68,.16);color:#fca5a5}.tag.warn{background:rgba(245,158,11,.16);color:#fcd34d}.tag.run{background:rgba(59,130,246,.18);color:#93c5fd}.tag.unk{background:rgba(139,155,180,.14);color:#aebbd0}.tag.bareos{background:rgba(251,146,60,.16);color:#fdba74}
+.kpi{display:flex;flex-direction:column;gap:6px;padding:14px 16px;min-width:0}
+.kpi .lbl{font-size:12px;font-weight:600;color:#8b9bb4}
+.kpi .big{font-size:28px;font-weight:800;letter-spacing:-.01em;line-height:1.1}
+.kpi .sub{font-size:12px;color:#8b9bb4;display:flex;flex-wrap:wrap;gap:4px 10px;align-items:center}
+.bar{display:flex;height:8px;border-radius:4px;overflow:hidden;background:#1a2236;width:100%}
+.bar i{display:block;height:100%}
+.bar.mini{height:6px;width:90px}
+table{border-collapse:collapse;width:100%}
+th{font-size:12px;font-weight:600;color:#8b9bb4;text-align:left;padding:9px 12px;background:#0f1626;border-bottom:1px solid #243049;white-space:nowrap}
+td{padding:9px 12px;border-bottom:1px solid #1f2a40;vertical-align:middle;white-space:nowrap;font-size:13px}
+td.r,th.r{text-align:right}
+tr.folder td{background:#111726;font-weight:700}
+tr.sel td{background:rgba(59,130,246,.12)}
+.sm{font-size:11.5px;color:#8b9bb4}
+.sect{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:12px 16px;border-bottom:1px solid #1f2a40}
+.sect h2{margin:0;font-size:14px;font-weight:800}
+.ico{width:14px;height:14px;flex:none}
+.kv{display:grid;grid-template-columns:92px minmax(0, 1fr);gap:6px 10px;font-size:12.5px}
+.kv dt{color:#8b9bb4;margin:0}.kv dd{margin:0;overflow-wrap:anywhere}
+.tw{display:inline-flex;width:14px;color:#8b9bb4;font-size:11px}
+</style>
+</helmet>
+<div style="width:100%;max-width:1440px;margin:0 auto;box-sizing:border-box;padding:18px 24px 28px;display:flex;flex-direction:column;gap:14px;min-width:0">
+
+  <div style="display:flex;flex-wrap:wrap;align-items:flex-end;gap:12px">
+    <div style="min-width:0">
+      <div style="font-size:22px;font-weight:800">Backup 현황</div>
+      <div class="muted" style="font-size:13px">Bareos — 법인 하나의 Bareos 방식 VM 과 Bareos 잡이 있는 VM 을 폴더 › VM 으로 봅니다.</div>
+    </div>
+  </div>
+  <div role="tablist" aria-label="Backup 현황 보기" style="display:flex;gap:4px;box-shadow:inset 0 -1px 0 #243049">
+    <a class="toptab" href="Main.dc.html">Summary</a>
+    <a class="toptab" href="Main.dc.html">Detail</a>
+    <a class="toptab" href="Main.dc.html">Veeam</a>
+    <a class="toptab on" href="Corp.dc.html" aria-current="page">Bareos</a>
+  </div>
+
+  <div style="display:flex;flex-wrap:wrap;align-items:center;gap:10px 14px">
+    <nav aria-label="Bareos 보기" style="display:inline-flex;flex-wrap:wrap;gap:4px;background:#0f1626;border:1px solid #243049;border-radius:10px;padding:3px;max-width:100%">
+      <a class="pill" href="Main.dc.html">현황</a>
+      <a class="pill on" href="Corp.dc.html" aria-current="page">법인</a>
+      <a class="pill" href="Operate.dc.html">운영 <span class="n">관리자</span></a>
+      <a class="pill" href="Policy.dc.html">정책 · 보존</a>
+      <a class="pill" href="Settings.dc.html">설정</a>
+    </nav>
+    <div style="margin-left:auto;display:flex;flex-wrap:wrap;align-items:center;gap:8px">
+      <span class="muted" style="font-size:12px">기준 11-02 03:13</span>
+      <button class="btn" type="button">CSV</button>
+      <button class="btn" type="button">새로고침</button>
+      <a class="btn primary" href="Operate.dc.html" style="text-decoration:none">고른 VM 을 백업 대상으로 →</a>
+    </div>
+  </div>
+
+  <div class="card" style="padding:12px 16px;display:flex;flex-wrap:wrap;align-items:center;gap:10px 18px">
+    <div style="display:inline-flex;align-items:center;gap:6px">
+      <button class="btn sm" type="button" aria-label="이전 법인">‹</button>
+      <label for="corp" style="position:absolute;left:-9999px">법인</label>
+      <select id="corp" class="btn" style="min-width:260px;font-weight:800;font-size:14px"><option>vcenter-us-east-01 — 북미 법인</option><option>vcenter-us-west-01 — 북미 법인</option><option>vcenter-eu-central-01 — 유럽 법인</option></select>
+      <button class="btn sm" type="button" aria-label="다음 법인">›</button>
+    </div>
+    <div style="display:inline-flex;align-items:center;gap:8px;font-size:12.5px;flex-wrap:wrap">
+      <i class="dot ok"></i><span>Director ‘북미 법인’ · 정상 · 중앙 직접 · 마지막 조회 03:10</span>
+      <span class="muted">· 기본 스케줄 VMwareNightly · 풀 VMware-vc-us-east · 레벨 Incremental</span>
+    </div>
+    <span class="muted" style="margin-left:auto;font-size:12px">이 법인 VM 225 (템플릿 · vCLS 제외)</span>
+  </div>
+
+  <div style="display:grid;grid-template-columns:repeat(4, minmax(0, 1fr));gap:12px">
+    <div class="card kpi">
+      <div class="lbl">Bareos 방식 VM</div>
+      <div class="big">142</div>
+      <div class="sub"><span>전체 225 중 63%</span><span>용량 18.4 TB</span></div>
+    </div>
+    <div class="card kpi">
+      <div class="lbl">잡 등록</div>
+      <div class="big">138</div>
+      <div class="sub"><span>켜짐 136 · 꺼짐 2</span><span>복원 지점 1,942</span></div>
+    </div>
+    <div class="card kpi">
+      <div class="lbl">마지막 결과 (잡 138)</div>
+      <div class="bar" style="margin-top:6px" role="img" aria-label="성공 130 경고 4 실패 2 진행 1"><i style="width:94%;background:#4ade80"></i><i style="width:3%;background:#fbbf24"></i><i style="width:2%;background:#f87171"></i><i style="width:1%;background:#60a5fa"></i></div>
+      <div class="sub"><span><i class="dot ok"></i> 성공 130</span><span><i class="dot warn"></i> 경고 4</span><span><i class="dot bad"></i> 실패 2</span><span><i class="dot run"></i> 진행 1</span></div>
+    </div>
+    <div class="card kpi" style="border-color:rgba(239,68,68,.45)">
+      <div class="lbl">확인 필요</div>
+      <div class="big" style="color:#fca5a5">9</div>
+      <div class="sub"><span>실패 2</span><span>미등록 4</span><span>오래됨(1일+) 2</span><span>백업 없음 1</span></div>
+    </div>
+  </div>
+
+  <div style="display:flex;flex-wrap:wrap;align-items:center;gap:6px">
+    <button class="chip" type="button">전체 142</button>
+    <button class="chip on" type="button"><i class="dot bad"></i> 확인 필요 9</button>
+    <button class="chip" type="button"><i class="dot run"></i> 진행 중 1</button>
+    <button class="chip" type="button"><i class="dot bad"></i> 실패 · 경고 6</button>
+    <button class="chip" type="button"><i class="dot warn"></i> 미등록 4</button>
+    <button class="chip" type="button"><i class="dot warn"></i> 오래됨 2</button>
+    <button class="chip" type="button">더 보기 ▾ <span class="sm">잡 꺼짐 2 · 방식 불일치 1 · 인벤토리에 없음 0</span></button>
+    <input type="search" aria-label="VM · 폴더 찾기" placeholder="VM · 폴더 이름" class="btn" style="margin-left:auto;width:220px;color:#8b9bb4;font-weight:500">
+  </div>
+
+  <div style="display:flex;flex-wrap:wrap;gap:14px;align-items:flex-start">
+    <div class="card" style="flex:999 1 560px;min-width:0;overflow:hidden">
+      <div style="overflow-x:auto">
+      <table>
+        <thead><tr><th>폴더 › VM</th><th>전원</th><th class="r">용량</th><th>마지막 실행</th><th>마지막 백업</th><th>상태</th></tr></thead>
+        <tbody>
+          <tr class="folder"><td><span class="tw">▾</span>Prod <span class="sm" style="font-weight:500">잡 96 / 98</span></td><td></td><td class="r"><span class="sm" style="font-weight:500">12.1 TB</span></td><td><div class="bar mini" role="img" aria-label="성공 92 경고 2 실패 2"><i style="width:96%;background:#4ade80"></i><i style="width:2%;background:#fbbf24"></i><i style="width:2%;background:#f87171"></i></div></td><td></td><td><span class="sm" style="font-weight:500">미등록 2</span></td></tr>
+          <tr class="folder"><td style="padding-left:28px"><span class="tw">▾</span>DB <span class="sm" style="font-weight:500">잡 12 / 12</span></td><td></td><td class="r"><span class="sm" style="font-weight:500">4.8 TB</span></td><td><div class="bar mini" role="img" aria-label="성공 10 실패 2"><i style="width:83%;background:#4ade80"></i><i style="width:17%;background:#f87171"></i></div></td><td></td><td></td></tr>
+          <tr class="sel"><td style="padding-left:52px"><b>erp-db-02</b> <span class="tag bareos">Bareos</span></td><td>켜짐</td><td class="r">612 GB</td><td><span class="tag bad">실패</span> <span class="sm">Full · 0 B</span></td><td>11-02 01:40</td><td><span class="sm">Fatal error: VDDK read</span></td></tr>
+          <tr><td style="padding-left:52px">erp-db-03</td><td>켜짐</td><td class="r">598 GB</td><td><span class="tag ok">성공</span> <span class="sm">Incremental · 14.2 GB</span></td><td>11-02 01:52</td><td></td></tr>
+          <tr><td style="padding-left:52px">crm-db-01</td><td>켜짐</td><td class="r">420 GB</td><td><span class="tag run">진행 52%</span> <span class="sm">Incremental</span></td><td>11-01 01:50</td><td></td></tr>
+          <tr class="folder"><td style="padding-left:28px"><span class="tw">▸</span>App <span class="sm" style="font-weight:500">잡 44 / 46</span></td><td></td><td class="r"><span class="sm" style="font-weight:500">3.9 TB</span></td><td><div class="bar mini" role="img" aria-label="성공 44"><i style="width:100%;background:#4ade80"></i></div></td><td></td><td><span class="sm" style="font-weight:500">미등록 2</span></td></tr>
+          <tr class="folder"><td style="padding-left:28px"><span class="tw">▸</span>Web <span class="sm" style="font-weight:500">잡 40 / 40</span></td><td></td><td class="r"><span class="sm" style="font-weight:500">3.4 TB</span></td><td><div class="bar mini" role="img" aria-label="성공 38 경고 2"><i style="width:95%;background:#4ade80"></i><i style="width:5%;background:#fbbf24"></i></div></td><td></td><td></td></tr>
+          <tr class="folder"><td><span class="tw">▾</span>Legacy <span class="sm" style="font-weight:500">잡 14 / 16</span></td><td></td><td class="r"><span class="sm" style="font-weight:500">2.2 TB</span></td><td><div class="bar mini" role="img" aria-label="성공 12 경고 2"><i style="width:86%;background:#4ade80"></i><i style="width:14%;background:#fbbf24"></i></div></td><td></td><td><span class="sm" style="font-weight:500">미등록 2 · 오래됨 2</span></td></tr>
+          <tr><td style="padding-left:28px">legacy-fs-01</td><td>켜짐</td><td class="r">1.1 TB</td><td><span class="tag ok">성공</span> <span class="sm">Full · 1.0 TB</span></td><td>10-28 02:10</td><td><span class="tag warn">오래됨 5일</span></td></tr>
+          <tr><td style="padding-left:28px">legacy-app-07</td><td>꺼짐</td><td class="r">220 GB</td><td>—</td><td>—</td><td><span class="tag warn">미등록</span></td></tr>
+          <tr><td style="padding-left:28px">hr-app-03</td><td>켜짐</td><td class="r">180 GB</td><td>—</td><td>—</td><td><span class="tag warn">미등록</span></td></tr>
+          <tr><td style="padding-left:28px">old-ad-02</td><td>켜짐</td><td class="r">96 GB</td><td><span class="tag ok">성공</span> <span class="sm">Incremental · 310 MB</span></td><td>11-02 01:05</td><td><span class="tag unk">잡 꺼짐</span></td></tr>
+          <tr class="folder"><td><span class="tw">▸</span>Dev <span class="sm" style="font-weight:500">잡 28 / 28</span></td><td></td><td class="r"><span class="sm" style="font-weight:500">1.4 TB</span></td><td><div class="bar mini" role="img" aria-label="성공 28"><i style="width:100%;background:#4ade80"></i></div></td><td></td><td></td></tr>
+        </tbody>
+      </table>
+      </div>
+      <div class="sm" style="padding:8px 12px">보기 ‘확인 필요’ 9대 중 9대 표시 · 폴더 줄 = 잡 수 / Bareos 관련 VM 수 · 막대 = 마지막 결과</div>
+    </div>
+
+    <aside class="card" style="flex:1 1 320px;max-width:380px;min-width:0;padding:16px;display:flex;flex-direction:column;gap:12px" aria-label="고른 VM">
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+        <b style="font-size:16px">erp-db-02</b><span class="tag bad">실패</span><span class="tag bareos">Bareos</span>
+      </div>
+      <div style="display:flex;flex-wrap:wrap;gap:6px">
+        <button class="btn sm primary" type="button">지금 백업 ▾</button>
+        <button class="btn sm" type="button">결과</button>
+        <button class="btn sm" type="button">로그</button>
+        <button class="btn sm" type="button">복원…</button>
+        <button class="btn sm" type="button">비활성</button>
+      </div>
+      <dl class="kv">
+        <dt>잡</dt><dd class="mono">vm-erp-db-02-a1b2</dd>
+        <dt>Director</dt><dd>북미 법인 · 중앙 직접</dd>
+        <dt>클라이언트</dt><dd class="mono">bareos-r1-fd</dd>
+        <dt>스케줄 · 레벨</dt><dd>VMwareNightly · Incremental</dd>
+        <dt>적용 정책</dt><dd>Director 스케줄 · 풀 VMware-vc-us-east</dd>
+        <dt>복원 지점</dt><dd>31 (최근 Full 10-30)</dd>
+        <dt>위치</dt><dd>DC-East › Prod / DB <span class="sm">· 등록 때와 같음</span></dd>
+        <dt>등록</dt><dd>10-12 · admin</dd>
+      </dl>
+      <div>
+        <div class="sm" style="font-weight:700;margin-bottom:6px">최근 실행 5건</div>
+        <table>
+          <tbody>
+            <tr><td style="padding:6px 0"><span class="tag bad">실패</span></td><td style="padding:6px 8px">11-02 01:40</td><td style="padding:6px 0" class="sm">Full · 0 B · 2분</td></tr>
+            <tr><td style="padding:6px 0"><span class="tag ok">성공</span></td><td style="padding:6px 8px">11-01 01:41</td><td style="padding:6px 0" class="sm">Incr · 12.8 GB · 9분</td></tr>
+            <tr><td style="padding:6px 0"><span class="tag ok">성공</span></td><td style="padding:6px 8px">10-31 01:40</td><td style="padding:6px 0" class="sm">Incr · 11.4 GB · 8분</td></tr>
+            <tr><td style="padding:6px 0"><span class="tag ok">성공</span></td><td style="padding:6px 8px">10-30 01:40</td><td style="padding:6px 0" class="sm">Full · 604 GB · 3시간 12분</td></tr>
+            <tr><td style="padding:6px 0"><span class="tag warn">경고</span></td><td style="padding:6px 8px">10-29 01:40</td><td style="padding:6px 0" class="sm">Incr · 10.9 GB · 8분</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <a href="Operate.dc.html" style="font-size:12.5px;font-weight:700;text-decoration:none">운영 › 백업 대상에서 보기 →</a>
+    </aside>
+  </div>
+
+  <div style="display:flex;flex-wrap:wrap;align-items:center;gap:10px;font-size:12px;color:#8b9bb4">
+    <span>백업 방식은 사람이 정한 값(Backup › Detail)이고 잡은 포탈 원장입니다 — 둘이 어긋나면 ‘미등록’ · ‘방식 불일치’ 로 따로 셉니다.</span>
+    <button class="btn" type="button" style="min-height:26px;font-size:11.5px;margin-left:auto">읽는 법 ⓘ</button>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1180}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

@@ -1,6 +1,6 @@
 // v2.828 Bareos 조회 화면 · 백업 방식 Bareos — 웹 판정이 서버와 같은가 · 모름은 0 이 아닌가 · 넘기기 · 하위 탭 권한
 import { describe, it, expect } from 'vitest';
-import { bareosClass, detailFilterCounts, rowMatches, buildBareosTree, saveBareosHandoff, takeBareosHandoff, bareosSubTabs, resultBar, numText, BAREOS_HANDOFF_KEY } from './bareosViewText.js';
+import { bareosClass, detailFilterCounts, rowMatches, buildBareosTree, saveBareosHandoff, takeBareosHandoff, bareosSubTabs, resultBar, numText, BAREOS_HANDOFF_KEY, opsTabOf, OPS_SEGMENTS, legacyOpsHash, runsBoardOpen } from './bareosViewText.js';
 import { bareosCell, METHODS, NOT_VEEAM_GAP, METHOD_KEYS_MAP, vmMatches } from './backupViewText.js';
 import { bareosClass as serverClass } from '../../../../server/src/bareos/vmView.js';
 import { METHOD_TEXT, NOT_VEEAM_GAP as SERVER_GAP, vmViewMatches } from '../../../../server/src/veeam/backupStatus.js';
@@ -84,11 +84,24 @@ describe('v2.828 넘기기 · 하위 탭', () => {
   });
   it('하위 탭 — 조회 전용 탭은 권한만 · 관리 탭은 admin + bareos-backup · 설정은 전체 범위', () => {
     // v2.839 '정책 · 일정'(policy) — 조회 전용 키(bareos-summary) 권한만으로 보인다
-    expect(bareosSubTabs({ summaryOk: true, detailOk: true }).map((t) => t[0])).toEqual(['summary', 'detail', 'policy', 'pools']);
-    expect(bareosSubTabs({ summaryOk: true, detailOk: true, manageOk: true, admin: false }).map((t) => t[0])).toEqual(['summary', 'detail', 'policy', 'pools']);
-    expect(bareosSubTabs({ summaryOk: true, detailOk: true, manageOk: true, admin: true }).map((t) => t[0])).toEqual(['summary', 'detail', 'live', 'targets', 'groups', 'policy', 'pools', 'history']);
-    expect(bareosSubTabs({ summaryOk: true, detailOk: true, manageOk: true, admin: true, fullScope: true }).map((t) => t[0])).toEqual(['summary', 'detail', 'live', 'targets', 'groups', 'policy', 'pools', 'history', 'settings']);
-    expect(bareosSubTabs({ detailOk: true }).map((t) => t[0])).toEqual(['detail'], 'bareos-summary 권한이 없으면 정책 · 일정도 없다');
+    // v2.860(시안 docs/design/bareos-ui-v2 ⓪): 9개 → 5개 — 현황 · 법인 · 운영 · 정책 · 보존 · 설정
+    expect(bareosSubTabs({ summaryOk: true, detailOk: true }).map((t) => t[0])).toEqual(['summary', 'detail', 'policy']);
+    expect(bareosSubTabs({ summaryOk: true, detailOk: true, manageOk: true, admin: false }).map((t) => t[0])).toEqual(['summary', 'detail', 'policy']);
+    expect(bareosSubTabs({ summaryOk: true, detailOk: true, manageOk: true, admin: true }).map((t) => t[0])).toEqual(['summary', 'detail', 'ops', 'policy']);
+    expect(bareosSubTabs({ summaryOk: true, detailOk: true, manageOk: true, admin: true, fullScope: true }).map((t) => t[0])).toEqual(['summary', 'detail', 'ops', 'policy', 'settings']);
+    expect(bareosSubTabs({ detailOk: true }).map((t) => t[0])).toEqual(['detail'], 'bareos-summary 권한이 없으면 정책 · 보존도 없다');
+    expect(bareosSubTabs({ summaryOk: true, detailOk: true, manageOk: true, admin: true, fullScope: true }).map((t) => t[2]))
+      .toEqual(['#/tools/bareos-summary', '#/tools/bareos-detail', '#/tools/bareos-backup/targets', '#/tools/bareos-summary/policy', '#/tools/bareos-backup/settings']);
+    // 옛 하위 주소(live · history)는 진행 · 이력(runs) 하나 — 북마크 · 다른 화면의 링크가 살아 있게
+    expect([opsTabOf('live'), opsTabOf('history'), opsTabOf('targets'), opsTabOf('settings')]).toEqual(['runs', 'runs', 'targets', 'settings']);
+    // 옛 주소 → 새 주소(아래 조각 유지) · 옛 주소가 아니면 null
+    expect(legacyOpsHash('#/tools/bareos-backup/live')).toBe('#/tools/bareos-backup/runs');
+    expect(legacyOpsHash('#/tools/bareos-backup/live/corp')).toBe('#/tools/bareos-backup/runs/corp');
+    expect(legacyOpsHash('#/tools/bareos-backup/history')).toBe('#/tools/bareos-backup/runs');
+    expect([legacyOpsHash('#/tools/bareos-backup/runs'), legacyOpsHash('#/tools/bareos-backup/targets'), legacyOpsHash('#/tools/bareos-summary/live'), legacyOpsHash('')]).toEqual([null, null, null, null]);
+    // 현황판 펼침: 옛 진행 현황 주소 · 주소에 보기가 있을 때만
+    expect([runsBoardOpen('#/tools/bareos-backup/live'), runsBoardOpen('#/tools/bareos-backup/runs/corp'), runsBoardOpen('#/tools/bareos-backup/runs'), runsBoardOpen('#/tools/bareos-backup/history'), runsBoardOpen('#/tools/bareos-detail/live')]).toEqual([true, true, false, false, false]);
+    expect(OPS_SEGMENTS.map((x) => x[0])).toEqual(['targets', 'groups', 'runs']);
   });
 });
 
