@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>400px — 그룹 카드 · 취소 창</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=Noto+Sans+KR:wght@400;500;700;800&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+body{margin:0;background:#0a0e17;color:#e6edf6;font-family:"Inter","Noto Sans KR","Apple SD Gothic Neo",sans-serif;font-size:13px}
+a{color:#3b82f6}a:hover{color:#60a5fa}
+.card{background:#141b2d;border:1px solid #243049;border-radius:12px}
+.muted{color:#8b9bb4}
+.mono{font-family:"JetBrains Mono",ui-monospace,monospace}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;min-height:40px;padding:0 14px;border-radius:8px;border:1px solid #243049;background:#1a2236;color:#e6edf6;font:inherit;font-size:13px;font-weight:600;cursor:pointer;white-space:nowrap;text-decoration:none;box-sizing:border-box}
+.btn.danger{color:#fca5a5;border-color:rgba(239,68,68,.45)}
+.btn.solid{background:#ef4444;border-color:#ef4444;color:#ffffff}
+.btn[disabled]{opacity:.55;cursor:not-allowed}
+.tag{display:inline-flex;align-items:center;gap:5px;height:22px;padding:0 9px;border-radius:999px;font-size:11.5px;font-weight:700;white-space:nowrap}
+.tag.run{background:rgba(59,130,246,.18);color:#93c5fd}.tag.stop{background:rgba(251,146,60,.18);color:#fdba74}.tag.unk{background:rgba(139,155,180,.14);color:#aebbd0}
+.sm{font-size:11.5px;color:#8b9bb4}
+.seg{display:inline-flex;align-items:center;gap:6px;min-height:32px;padding:0 12px;border-radius:8px;border:1px solid #243049;background:#1a2236;color:#8b9bb4;font:inherit;font-size:12.5px;font-weight:700;white-space:nowrap;text-decoration:none}
+.seg.on{background:#e6edf6;border-color:#e6edf6;color:#0a0e17}
+.bar{display:flex;height:8px;border-radius:4px;overflow:hidden;background:#1a2236}
+.bar i{display:block;height:100%}
+.line{display:grid;grid-template-columns:64px minmax(0, 1fr);gap:8px;font-size:12px}
+.line .k{color:#8b9bb4}
+.spin{display:inline-block;width:10px;height:10px;border-radius:50%;border:2px solid #fdba74;border-right-color:transparent;flex:none}
+.note{display:grid;grid-template-columns:minmax(0, 1fr);gap:5px;padding:10px 12px;border-radius:10px;border:1px solid rgba(245,158,11,.4);background:rgba(245,158,11,.08);font-size:12px;line-height:1.5}
+</style>
+</helmet>
+<div style="width:390px;height:1180px;box-sizing:border-box;padding:14px 16px 18px;display:flex;flex-direction:column;gap:12px;min-width:0;overflow:hidden">
+
+  <div style="font-size:18px;font-weight:800">Backup 현황 · Bareos</div>
+  <div style="display:flex;flex-wrap:wrap;gap:6px">
+    <a class="seg" href="Main.dc.html">백업 대상</a>
+    <a class="seg on" href="GroupCard.dc.html">백업 그룹</a>
+    <a class="seg" href="Main.dc.html">복원</a>
+    <a class="seg" href="Main.dc.html">진행 · 이력</a>
+  </div>
+
+  <article class="card" style="padding:14px;display:grid;grid-template-columns:minmax(0, 1fr);gap:10px;min-width:0;border-color:rgba(96,165,250,.45)">
+    <div style="display:flex;align-items:flex-start;gap:8px;min-width:0">
+      <div style="min-width:0;flex:1"><b style="font-size:16px">DB-야간</b><div class="sm">VM 50대 · /DB · 2.9 TB</div></div>
+      <span class="tag run">실행 중</span>
+    </div>
+    <div class="line"><span class="k">이번 회차</span><span>02:00 · 예약 · <b style="color:#93c5fd">보내는 중</b></span></div>
+    <div class="bar" aria-label="회차 진행 — 끝남 3 · 실행 중 9 · 대기 38"><i style="width:6%;background:#4ade80"></i><i style="width:18%;background:#60a5fa"></i><i style="width:76%;background:#243049"></i></div>
+    <div class="sm">끝남 3 · Director 실행 중 9 · 시작 대기 38 / 50</div>
+    <div style="display:flex;flex-wrap:wrap;gap:6px">
+      <a class="btn danger" href="CancelGroup.dc.html" style="flex:1 1 140px">회차 중단…</a>
+      <a class="btn" href="Main.dc.html" style="flex:1 1 100px">진행 보기</a>
+      <button class="btn" type="button" disabled style="flex:1 1 80px">수정</button>
+    </div>
+  </article>
+
+  <article class="card" style="padding:14px;display:grid;grid-template-columns:minmax(0, 1fr);gap:10px;min-width:0;border-color:rgba(251,146,60,.5)">
+    <div style="display:flex;align-items:flex-start;gap:8px;min-width:0">
+      <div style="min-width:0;flex:1"><b style="font-size:16px">WEB-일간</b><div class="sm">VM 20대 · /WEB · 640 GB</div></div>
+      <span class="tag stop"><i class="spin" aria-hidden="true"></i> 멈추는 중</span>
+    </div>
+    <div class="line"><span class="k">중단 요청</span><span>01:41 · hong.gd · <b style="color:#fdba74">1분 12초째</b></span></div>
+    <div class="bar" aria-label="중단 진행 — 성공 3 · 취소됨 4 · running 2 · 시작 전 멈춤 11"><i style="width:15%;background:#4ade80"></i><i style="width:20%;background:#8b9bb4"></i><i style="width:10%;background:#fdba74"></i><i style="width:55%;background:#243049"></i></div>
+    <div class="sm">성공 3 · 취소됨 4 · 아직 running 2 · 시작 전 멈춤 11 / 20</div>
+    <div style="display:flex;flex-wrap:wrap;gap:6px">
+      <button class="btn" type="button" disabled style="flex:1 1 140px">중단 보냄</button>
+      <a class="btn" href="Main.dc.html" style="flex:1 1 100px">진행 보기</a>
+    </div>
+  </article>
+
+  <section class="card" role="dialog" aria-labelledby="t" style="padding:16px;display:flex;flex-direction:column;gap:12px;border-color:#2b3a57;margin-top:auto">
+    <div style="display:flex;align-items:flex-start;gap:10px">
+      <div style="min-width:0;flex:1">
+        <h2 id="t" style="margin:0;font-size:16px;font-weight:800;overflow-wrap:anywhere">실행 취소 — db-ora-01</h2>
+        <div class="sm" style="margin-top:3px;overflow-wrap:anywhere">jobid 4812 · DB-야간 · 02:00 회차 · 41분 경과 · 38.2 GB</div>
+      </div>
+      <button class="btn" type="button" aria-label="닫기" style="min-height:32px;padding:0 10px;font-size:12px">닫기</button>
+    </div>
+    <div style="font-size:12.5px;line-height:1.5">Director 에 cancel 명령을 보냅니다. FD 가 멈추기까지 수 초~수 분 걸리고 그동안 ‘멈추는 중’ 으로 보입니다. 결과는 ‘취소’ 로 남고 복원 지점이 되지 않습니다.</div>
+    <div class="note">
+      <div>· VMware 스냅샷이 남을 수 있습니다 — 끝난 뒤 ‘스냅샷 n개’ 칩으로 확인(추정).</div>
+      <div>· 그룹의 다른 VM 은 계속 돕니다. OTP 는 묻지 않습니다.</div>
+    </div>
+    <div style="display:grid;grid-template-columns:minmax(0, 1fr);gap:8px">
+      <a class="btn solid" href="Main.dc.html">취소 보내기</a>
+      <button class="btn" type="button">닫기</button>
+    </div>
+  </section>
+
+  <div class="sm">400px — 카드 버튼은 줄바꿈(flex-wrap) · 확인 창은 전폭 · 표는 가로 스크롤 상자(가로 넘침 0)</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":390,"height":1180}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>
