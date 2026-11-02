@@ -11,9 +11,10 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { useLatest } from '../../hooks/useLatest.js';
 import { fetchJson, downloadFile, canCsv } from '../../api.js';
 import { downloadFailText } from '../downloadFailText.js';
-import { Loading, ErrorBox } from '../../components/ui.jsx';
+import { Loading, ErrorBox, SearchBox } from '../../components/ui.jsx';
+import { vcQuickDot } from '../vcCardText.js';
 import { STable } from '../../components/STable.jsx';
-import { ALLOC_LEVELS, DEFAULT_LEVEL, KIND_TEXT, flattenAlloc, openForLevel, numText, pctText } from './gpuAllocText.js';
+import { ALLOC_LEVELS, DEFAULT_LEVEL, KIND_TEXT, flattenAlloc, openForLevel, numText, pctText, sumTotals, corpChips } from './gpuAllocText.js';
 
 const KIND_BADGE = { vc: 'blue', dc: 'gray', cl: 'gray', host: 'blue', gpu: 'teal', pt: 'amber', vsga: 'gray', unplaced: 'gray', off: 'gray', vm: 'gray' };
 const COLS = [
@@ -44,6 +45,11 @@ export function GpuAllocTree({ scope }) {
   const [query, setQuery] = useState('');
   const [dlMsg, setDlMsg] = useState('');
   const [dlBusy, setDlBusy] = useState('');
+  // v2.853: 법인 칩(바로가기 모양 — 사용자 요청). 빈 Set = 전체. 여러 개 고를 수 있다. vCenter 상태 점은 /vcenters(마운트 1회).
+  const [vcSel, setVcSel] = useState(() => new Set());
+  const [vcs, setVcs] = useState(null);
+  const runVcs = useLatest();
+  useEffect(() => { runVcs(fetchJson('/vcenters'), (d) => setVcs(Array.isArray(d) ? d : []), () => setVcs([])); }, [runVcs]);
 
   const load = () => {
     setLoading(true); setErr(null);
@@ -51,23 +57,29 @@ export function GpuAllocTree({ scope }) {
     run(fetchJson(`/tools/gpu/alloc${q}`), (d) => { setData(d); setLoading(false); }, (e) => { setErr(e); setLoading(false); });
   };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(() => { setData(null); setOpen(null); load(); }, [scope]);
+  useEffect(() => { setData(null); setOpen(null); setVcSel(new Set()); load(); }, [scope]);
   useEffect(() => { if (data && open == null) setOpen(openForLevel(data, level)); }, [data, open, level]);
 
-  const rows = useMemo(() => (data ? flattenAlloc(data, { open: open || new Set(), sort, query }) : []), [data, open, sort, query]);
+  const rows = useMemo(() => (data ? flattenAlloc(data, { open: open || new Set(), sort, query, vcSel }) : []), [data, open, sort, query, vcSel]);
+  const chips = useMemo(() => (data ? corpChips(data, (vcs || []).filter((v) => !scope || String(v.id) === scope)) : []), [data, vcs, scope]);
+  const toggleVc = (id) => setVcSel((prev) => { const n = new Set(prev); if (n.has(id)) n.delete(id); else n.add(id); return n; });
 
   const pickLevel = (lv) => { setLevel(lv); setOpen(openForLevel(data, lv)); };
   const toggle = (id) => setOpen((prev) => { const n = new Set(prev || []); if (n.has(id)) n.delete(id); else n.add(id); return n; });
   const clickSort = (key) => setSort((s) => (!s || s.key !== key ? { key, dir: key === 'name' ? 'asc' : 'desc' } : s.dir === (key === 'name' ? 'asc' : 'desc') ? { key, dir: key === 'name' ? 'desc' : 'asc' } : null));
   const download = async (fmt) => {
     setDlMsg(''); setDlBusy(fmt);
-    const q = scope ? `?vcenterId=${encodeURIComponent(scope)}` : '';
+    // v2.853: 고른 법인만 내려받는다(화면과 같은 범위). 서버가 조회 범위와 교집합을 먼저 낸다.
+    const params = new URLSearchParams();
+    if (scope) params.set('vcenterId', scope);
+    if (vcSel.size) params.set('vcenterIds', [...vcSel].join(','));
+    const q = params.toString() ? `?${params.toString()}` : '';
     try { await downloadFile(`/tools/gpu/alloc.${fmt}${q}`); } catch (e) { setDlMsg(downloadFailText(e)); } finally { setDlBusy(''); }
   };
 
   if (err && !data) return <ErrorBox error={err} />;
   if (!data) return <Loading />;
-  const T = data.totals || {};
+  const T = sumTotals(data, vcSel) || {};
   const kpis = [
     { label: '전체 용량', value: numText(T.capGB), unit: T.capGB != null ? 'GB' : '', sub: `GPU ${T.gpus}장 · 호스트 ${T.hosts}대${T.vsga ? ` · vSGA ${T.vsga}장 제외` : ''}` },
     { label: '할당(켜진 VM)', value: numText(T.allocGB), unit: 'GB', sub: `vGPU·GPU VM ${T.vmsOn}대 켜짐`, tone: 'alloc' },
@@ -84,6 +96,25 @@ export function GpuAllocTree({ scope }) {
         법인(vCenter) › 데이터센터 › 클러스터 › 호스트 › 물리 GPU › VM 순서로 보여 줍니다. <b>할당</b>은 켜진 VM 이 받은 프레임버퍼(vGPU 는 프로파일 GB, 패스스루는 GPU 한 장)이고 <b>예비</b>는 전체 − 할당입니다.
         꺼진 VM 은 GPU 에 올라가 있지 않아 따로 적습니다. 모르는 값이 섞이면 예비를 비웁니다(0 으로 채우지 않습니다). 같은 GPU 에는 같은 vGPU 프로파일만 올라가므로 예비는 그 프로파일 슬롯 단위로만 쓸 수 있습니다.
       </div>
+      <div className="vc-quicknav gpu-alloc-corps" data-gpu-alloc-corps="">
+        <span className="qn-label">🏢 법인</span>
+        {chips.map((c) => {
+          const on = vcSel.has(c.id);
+          const st = c.site ? vcQuickDot(c.site) : { dot: 'var(--text-faint)', down: false };
+          const none = c.hosts === 0;
+          return (
+            <button key={c.id} type="button" className={`qn-btn${on ? ' on' : ''}${st.down || none ? ' down' : ''}`} aria-pressed={on} onClick={() => toggleVc(c.id)}
+              title={`${c.name} — GPU 호스트 ${c.hosts}대 · GPU ${c.gpus}장${none ? '(GPU 가 설치된 호스트 없음)' : ''}\n${on ? '클릭하면 선택 해제' : '클릭하면 이 법인만 표시(여러 개 선택 가능)'}`}>
+              <span className="qn-dot" style={{ background: st.dot }} />{c.id}
+              <span className="muted" style={{ fontWeight: 400, fontSize: 11 }}>{c.hosts}</span>
+            </button>
+          );
+        })}
+        <span className="flex gap" style={{ marginLeft: 'auto', alignItems: 'center', gap: 8 }}>
+          <SearchBox className="input" style={{ maxWidth: 240, minWidth: 170 }} value={query} onChange={setQuery} placeholder="법인 · 호스트 · VM 이름 찾기" />
+          {vcSel.size > 0 && <button type="button" className="qn-btn" onClick={() => setVcSel(new Set())} title="법인 선택을 모두 해제하고 전체를 봅니다.">✕ 전체 법인</button>}
+        </span>
+      </div>
       <div className="gpu-alloc-kpis">
         {kpis.map((k) => (
           <div key={k.label} className={`card gpu-alloc-kpi${k.tone ? ` ${k.tone}` : ''}`}>
@@ -98,10 +129,6 @@ export function GpuAllocTree({ scope }) {
         {ALLOC_LEVELS.map((l) => (
           <button key={l.depth} type="button" className={level === l.depth && !query ? 'login-btn' : 'logout-btn'} style={{ flex: 'none', padding: '6px 11px' }} onClick={() => pickLevel(l.depth)}>{l.label}</button>
         ))}
-        <label className="gpu-alloc-find">
-          <span className="muted">찾기</span>
-          <input className="input" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="호스트·VM 이름" aria-label="호스트·VM 이름 찾기" />
-        </label>
         <span style={{ marginLeft: 'auto' }} />
         <button type="button" className="logout-btn" style={{ flex: 'none', padding: '6px 11px' }} disabled={loading} onClick={load}>{loading ? '불러오는 중…' : '⟳ 새로 고침'}</button>
         {canCsv() && <button type="button" className="logout-btn" style={{ flex: 'none', padding: '6px 11px' }} disabled={!!dlBusy} onClick={() => download('csv')} title="GPU·VM 한 줄씩(계층 열을 모두 채운 평면 표) — UTF-8(BOM)">{dlBusy === 'csv' ? '내려받는 중…' : '⬇ CSV'}</button>}
@@ -112,7 +139,7 @@ export function GpuAllocTree({ scope }) {
       {(data.vcenters || []).length === 0 ? (
         <div className="card" style={{ padding: 16 }}><span className="muted">GPU 가 설치된 호스트가 없습니다.</span></div>
       ) : rows.length === 0 ? (
-        <div className="card" style={{ padding: 16 }}><span className="muted">‘{query}’ 에 맞는 호스트·VM 이 없습니다.</span></div>
+        <div className="card" style={{ padding: 16 }}><span className="muted">{query ? `‘${query}’ 에 맞는 법인·호스트·VM 이 없습니다` : '고른 법인에 GPU 가 설치된 호스트가 없습니다'}{vcSel.size ? ` (법인 ${[...vcSel].join(', ')} 선택 중)` : ''}.</span></div>
       ) : (
         <STable className="gpu-alloc-table" minWidth={1180}>
           <thead>

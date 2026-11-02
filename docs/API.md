@@ -943,15 +943,15 @@ Prometheus/OTel 익스포터(선택 토큰).
 | GET | `/tools/gpu` | 권한 `tools` | [server/src/routes/api/hardwareGpu.js:463](../server/src/routes/api/hardwareGpu.js#L463) |
 | GET | `/tools/gpu.csv` | 권한 `data.csv`, `tools` | [server/src/routes/api/hardwareGpu.js:479](../server/src/routes/api/hardwareGpu.js#L479) |
 | GET | `/tools/gpu.json` | 권한 `data.csv`, `tools` | [server/src/routes/api/hardwareGpu.js:471](../server/src/routes/api/hardwareGpu.js#L471) |
-| GET | `/tools/gpu/alloc` | 권한 `tools` | [server/src/routes/api/hardwareGpu.js:505](../server/src/routes/api/hardwareGpu.js#L505) |
-| GET | `/tools/gpu/alloc.csv` | 권한 `data.csv`, `tools` | [server/src/routes/api/hardwareGpu.js:509](../server/src/routes/api/hardwareGpu.js#L509) |
-| GET | `/tools/gpu/alloc.xlsx` | 권한 `data.csv`, `tools` | [server/src/routes/api/hardwareGpu.js:513](../server/src/routes/api/hardwareGpu.js#L513) |
-| GET | `/tools/gpu/export.csv` | 권한 `data.csv`, `tools` | [server/src/routes/api/hardwareGpu.js:556](../server/src/routes/api/hardwareGpu.js#L556) |
-| GET | `/tools/gpu/export.json` | 권한 `data.csv`, `tools` | [server/src/routes/api/hardwareGpu.js:557](../server/src/routes/api/hardwareGpu.js#L557) |
+| GET | `/tools/gpu/alloc` | 권한 `tools` | [server/src/routes/api/hardwareGpu.js:512](../server/src/routes/api/hardwareGpu.js#L512) |
+| GET | `/tools/gpu/alloc.csv` | 권한 `data.csv`, `tools` | [server/src/routes/api/hardwareGpu.js:516](../server/src/routes/api/hardwareGpu.js#L516) |
+| GET | `/tools/gpu/alloc.xlsx` | 권한 `data.csv`, `tools` | [server/src/routes/api/hardwareGpu.js:520](../server/src/routes/api/hardwareGpu.js#L520) |
+| GET | `/tools/gpu/export.csv` | 권한 `data.csv`, `tools` | [server/src/routes/api/hardwareGpu.js:563](../server/src/routes/api/hardwareGpu.js#L563) |
+| GET | `/tools/gpu/export.json` | 권한 `data.csv`, `tools` | [server/src/routes/api/hardwareGpu.js:564](../server/src/routes/api/hardwareGpu.js#L564) |
 | GET | `/tools/gpu/history` | 권한 `tools` | [server/src/routes/api/toolsAnalytics.js:173](../server/src/routes/api/toolsAnalytics.js#L173) |
-| GET | `/tools/gpu/host` | 권한 `tools` | [server/src/routes/api/hardwareGpu.js:597](../server/src/routes/api/hardwareGpu.js#L597) |
-| GET | `/tools/gpu/series-meta` | 권한 `tools` | [server/src/routes/api/hardwareGpu.js:532](../server/src/routes/api/hardwareGpu.js#L532) |
-| GET | `/tools/gpu/vms` | 권한 `tools` | [server/src/routes/api/hardwareGpu.js:613](../server/src/routes/api/hardwareGpu.js#L613) |
+| GET | `/tools/gpu/host` | 권한 `tools` | [server/src/routes/api/hardwareGpu.js:604](../server/src/routes/api/hardwareGpu.js#L604) |
+| GET | `/tools/gpu/series-meta` | 권한 `tools` | [server/src/routes/api/hardwareGpu.js:539](../server/src/routes/api/hardwareGpu.js#L539) |
+| GET | `/tools/gpu/vms` | 권한 `tools` | [server/src/routes/api/hardwareGpu.js:620](../server/src/routes/api/hardwareGpu.js#L620) |
 | GET | `/tools/groups` | 권한 `tools` | [server/src/routes/api/toolsCapacity.js:429](../server/src/routes/api/toolsCapacity.js#L429) |
 | GET | `/tools/guest-disk` | 권한 `tools` | [server/src/routes/api/toolsGuestDisk.js:42](../server/src/routes/api/toolsGuestDisk.js#L42) |
 | GET | `/tools/guest-disk/export.csv` | 권한 `data.csv`, `tools` | [server/src/routes/api/toolsGuestDisk.js:66](../server/src/routes/api/toolsGuestDisk.js#L66) |
@@ -986,8 +986,8 @@ Prometheus/OTel 익스포터(선택 토큰).
 | GET | `/tools/host-hygiene.csv` | 권한 `data.csv`, `tools` | [server/src/routes/api/hostHygiene.js:88](../server/src/routes/api/hostHygiene.js#L88) |
 | GET | `/tools/host-hygiene/reboots` | 권한 `tools` | [server/src/routes/api/hostHygiene.js:61](../server/src/routes/api/hostHygiene.js#L61) |
 | GET | `/tools/insights` | 권한 `tools` | [server/src/routes/api/toolsAnalytics.js:39](../server/src/routes/api/toolsAnalytics.js#L39) |
-| GET | `/tools/ip-ping` | 권한 `tools` | [server/src/routes/api/hardwareGpu.js:587](../server/src/routes/api/hardwareGpu.js#L587) |
-| POST | `/tools/ip-ping` | 권한 `tools` | [server/src/routes/api/hardwareGpu.js:562](../server/src/routes/api/hardwareGpu.js#L562) |
+| GET | `/tools/ip-ping` | 권한 `tools` | [server/src/routes/api/hardwareGpu.js:594](../server/src/routes/api/hardwareGpu.js#L594) |
+| POST | `/tools/ip-ping` | 권한 `tools` | [server/src/routes/api/hardwareGpu.js:569](../server/src/routes/api/hardwareGpu.js#L569) |
 | GET | `/tools/ipam` | 권한 `tools` | [server/src/routes/api/ipamExport.js:141](../server/src/routes/api/ipamExport.js#L141) |
 | GET | `/tools/ipam.csv` | 권한 `data.csv`, `tools` | [server/src/routes/api/ipamExport.js:513](../server/src/routes/api/ipamExport.js#L513) |
 | GET | `/tools/ipam.xlsx` | 권한 `data.csv`, `tools` | [server/src/routes/api/ipamExport.js:484](../server/src/routes/api/ipamExport.js#L484) |

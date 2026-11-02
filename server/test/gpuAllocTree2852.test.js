@@ -172,3 +172,11 @@ test('엣지가 보낸 gpus·gpu — 배열·객체만, 새 필드는 형식 밖
   assert.deepEqual(h.gpus, []);
   assert.ok(dropped.coerced >= 1);
 });
+
+/* ── v2.853 법인 칩(여러 법인 선택) ─────────────────────────────────────── */
+test('v2.853 vcenterIds — 고른 법인만, 조회 범위가 먼저(범위 밖 id 는 빠진다)', () => {
+  assert.deepEqual(buildGpuAllocTree(snap(), { vcenterIds: new Set(['vc2']) }).vcenters.map((v) => v.id), ['vc2']);
+  assert.deepEqual(buildGpuAllocTree(snap(), { vcenterIds: new Set(['vc1', 'vc2']) }).vcenters.map((v) => v.id), ['vc2', 'vc1']);
+  assert.equal(buildGpuAllocTree(snap(), { allowed: new Set(['vc1']), vcenterIds: new Set(['vc2']) }).vcenters.length, 0);
+  assert.equal(buildGpuAllocTree(snap(), { vcenterIds: new Set() }).vcenters.length, 2, '빈 선택 = 전체');
+});

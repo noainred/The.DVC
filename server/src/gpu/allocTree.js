@@ -192,10 +192,12 @@ export function buildHostAlloc(h, vms) {
 /**
  * 스냅샷 → 계층.
  * @param {object} snap store.get()
- * @param {{ allowed?: Set<string>|null, vcenterId?: string|null }} opt allowed = 사용자 조회 범위(null = 무제한) — 요청 필터보다 먼저.
+ * @param {{ allowed?: Set<string>|null, vcenterId?: string|null, vcenterIds?: Set<string>|null }} opt allowed = 사용자 조회 범위(null = 무제한) — 요청 필터보다 먼저.
  */
-export function buildGpuAllocTree(snap, { allowed = null, vcenterId = null } = {}) {
-  const inScope = (vc) => (!allowed || allowed.has(vc)) && (!vcenterId || vc === vcenterId);
+export function buildGpuAllocTree(snap, { allowed = null, vcenterId = null, vcenterIds = null } = {}) {
+  // v2.853: vcenterIds = 화면 법인 칩에서 고른 법인들(빈 집합·null = 전체). 조회 범위(allowed)가 먼저다 — 범위 밖 id 는 그냥 빠진다.
+  const pick = vcenterIds && vcenterIds.size ? vcenterIds : null;
+  const inScope = (vc) => (!allowed || allowed.has(vc)) && (!vcenterId || vc === vcenterId) && (!pick || pick.has(vc));
   const gpuVmsByHost = new Map();
   for (const v of snap?.vms || []) {
     if (!v || !v.gpu || v.template || !v.host || !inScope(v.vcenterId)) continue;
