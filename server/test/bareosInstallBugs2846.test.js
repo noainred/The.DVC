@@ -375,7 +375,7 @@ if [ "$op" = remove ]; then
   echo removed; exit 0
 fi
 exit 0`,
-  rpm: '#!/bin/bash\ncat "$FAKE/rpmdb" 2>/dev/null; exit 0',
+  rpm: '#!/bin/bash\nif [ "$1" = -q ]; then rc=0; for a in "$@"; do case "$a" in (-*) ;; (*) grep -qx "$a" "$FAKE/rpmdb" 2>/dev/null || rc=1;; esac; done; exit $rc; fi\ncat "$FAKE/rpmdb" 2>/dev/null; exit 0',
   systemctl: `#!/bin/bash
 q=0; args=()
 for a in "$@"; do case "$a" in (-q|--quiet|--now) [ "$a" = --now ] && now=1 || q=1;; (*) args+=("$a");; esac; done

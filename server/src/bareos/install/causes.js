@@ -23,6 +23,60 @@ export function parseErrFile(text) {
 
 const R = (key, title, test, why, fixes) => ({ key, title, test, why, fixes });
 
+/* v2.851 번들 패키지 판 충돌(2026-11-02 사용자 화면 — 2단계 'cannot install both openssl-libs-1:3.5.8-2.el9_8 from portal-bareos-local and
+ *   openssl-libs-1:3.0.7-28.el9_4 from @System … package openssl-devel-1:3.0.7-28.el9_4 from @System requires openssl-libs(x86-64) = 1:3.0.7-28.el9_4').
+ *   번들은 rockylinux:9 최신 저장소의 의존 전체(--alldeps)를 담아 시스템 패키지(openssl-libs · glibc · systemd …)가 서버(9.4)보다 새 판이다. 번들 RPM 메타데이터로 확인한 것:
+ *   Bareos 패키지는 새 OpenSSL 을 요구하지 않는다 — 올리려 한 까닭은 설치 목록의 이미 설치된 이름(openssl · tar)이다. dnf 는 'install <설치된 이름>' 을 그 이름의
+ *   가용 최선 판(번들)을 넣는 작업으로 보고(출력의 'Package … is already installed' 는 보고일 뿐 작업에서 빼지 않는다), best=True(RHEL 9 기본)는 그 작업이 막혔을 때
+ *   설치본으로 물러서지 못하게 해 거래 실패('cannot install the best candidate for the job')로 만든다(반증 검토가 libdnf · libsolv 소스로 확인).
+ *   러너(runner.sh step2)는 v2.851 부터 이미 설치된 이름을 넘기지 않는다. 여기서는 출력에서 이름을 꺼내 원인 · 고정 패키지 · 조치를 그대로 적는다(지어내지 않는다).
+ *   반증 v2.851: 고정 패키지는 **요구가 충돌 패키지 이름을 가리키는 @System 줄만**(Problem 이 둘 이상이면 무관한 패키지가 'dnf remove' 명령에 들어갔다) ·
+ *   명령에 넣는 이름은 첫 글자 영숫자(bundleDoc PKG_NAME_RE 와 같다 — 선행 '-' 가 옵션이 되지 않게). */
+const NEVRA_RE = /^([A-Za-z0-9._+-]+?)-((?:\d+:)?[0-9][A-Za-z0-9._+~^]*)-([A-Za-z0-9._+~]+)$/;
+const SAFE_NAME = /^[A-Za-z0-9][A-Za-z0-9._+-]{0,79}$/;
+/** NEVRA(name-[e:]ver-rel.arch) → 이름('' = 모양이 아님 · 첫 글자 영숫자). */
+export function nevraName(s) { const m = NEVRA_RE.exec(String(s || '')); return m && SAFE_NAME.test(m[1]) ? m[1] : ''; }
+/** 요구 문자열이 그 패키지 이름을 가리키나 — 'openssl-libs(x86-64) = 1:3.0.7-…' · 'openssl-libs = …' · 'openssl-libs'. */
+const reqNames = (req, name) => { const r = String(req || ''); return r === name || r.startsWith(`${name}(`) || r.startsWith(`${name} `); };
+function basePkgPinned(e) {
+  const lines = String(e.output || '').split('\n').map((l) => l.trim());
+  let both = null; let bothLine = '';
+  for (const l of lines) { const m = /cannot install both (\S+) from portal-bareos-local and (\S+) from @System/.exec(l); if (m) { both = m; bothLine = l; break; } }
+  if (!both) return null;
+  const name = nevraName(both[1]);
+  if (!name || nevraName(both[2]) !== name) return null;
+  const pins = []; const fromBundle = [];
+  for (const l of lines) {
+    const m = /package (\S+) from (@System|portal-bareos-local) requires (.+?), but none of the providers can be installed/.exec(l);
+    if (!m) continue;
+    const n = nevraName(m[1]);
+    if (!n || n === name) continue;
+    if (m[2] === '@System' && reqNames(m[3], name) && !pins.some((p) => p.name === n)) pins.push({ name: n, nevra: m[1].slice(0, 120), req: m[3].slice(0, 120) });
+    if (m[2] === 'portal-bareos-local' && !fromBundle.includes(n)) fromBundle.push(n);
+  }
+  const already = lines.map((l) => /^Package (\S+) is already installed\.?$/.exec(l)).filter(Boolean).map((m) => nevraName(m[1])).filter(Boolean);
+  const jobs = fromBundle.filter((n) => already.includes(n)).slice(0, 5);
+  const jobText = jobs.map((n) => `‘${n}’`).join(' · ');
+  const pinText = pins.length ? `이 서버에 설치된 ${pins.map((p) => `${p.nevra}(요구: ${p.req})`).join(' · ')} 이(가) 지금 판을 요구합니다(번들에 없는 패키지로 보입니다)` : '고정하는 패키지 줄은 출력에 없습니다';
+  const why = `번들의 ${both[1].slice(0, 80)} 를 넣으려면 서버의 ${both[2].slice(0, 80)} 를 바꿔야 하는데 올릴 수 없었습니다 — ${pinText}. `
+    + (jobs.length
+      ? `올리려 한 까닭: 설치 목록의 ${jobText} 이(가) 이미 설치돼 있었고, dnf 는 'install <설치된 이름>' 을 번들 판을 넣는 작업으로 봅니다(best=True 라 막히면 거래 전체가 실패) — v2.851 부터 러너는 설치 목록 중 이미 설치된 이름을 넘기지 않습니다.`
+      : '올리려 한 까닭은 출력에 없습니다 — 설치 목록에 이미 설치된 패키지가 있었거나(v2.851 부터 러너가 넘기지 않음), 새로 설치할 패키지(또는 그 의존성)가 그 새 판을 요구한 것입니다(번들을 만든 OS 판이 서버보다 새로움).');
+  const pinNames = pins.map((p) => p.name).join(' ');
+  const fixes = [
+    { kind: 'retry', label: jobs.length ? `v2.851 러너는 이미 설치된 ${jobText} 을(를) 올리지 않습니다` : 'v2.851 러너는 설치 목록 중 이미 설치된 패키지를 올리지 않습니다',
+      detail: '포탈이 v2.851 이상이어야 합니다(다시 할 때 러너를 새로 올립니다). 새로 설치할 패키지가 새 판을 요구하는 경우면 같은 사유로 다시 실패하고, 그때는 아래 (b) 입니다.' },
+    { kind: 'server', label: pins.length ? `고정하는 패키지 — ${pins.map((p) => p.name).join(' · ')}` : `${name} 를 고정하는 패키지 확인`,
+      detail: '서버에 설치된 패키지가 옛 판을 요구합니다. 다른 패키지가 쓰지 않는 개발 패키지(-devel)면 지운 뒤 다시 하거나, 서버 OS 를 번들을 만든 판으로 업데이트하세요(서버 OS 저장소가 닿을 때 · glibc · 커널이 바뀌면 재부팅).',
+      commands: [
+        pins.length ? `rpm -q ${pinNames}` : `rpm -q --whatrequires '${name}(x86-64)'`,
+        ...(pins.length ? [`dnf repoquery --installed --whatrequires ${pinNames}   # 이 패키지를 쓰는 것이 있는지`, `dnf remove ${pinNames}   # 쓰는 것이 없고 필요 없을 때만`] : []),
+        'dnf update   # 또는 서버 OS 를 번들을 만든 판으로(저장소가 닿을 때 · 끝나면 재부팅)',
+      ] },
+  ];
+  return { evidence: bothLine.slice(0, 300), why, fixes };
+}
+
 /** 규칙 — 위에서부터 처음 맞은 것. test(e) → 근거 줄(문자열) 또는 null. */
 const line = (re) => (e) => { const m = String(e.output || '').split('\n').find((l) => re.test(l)); return m ? m.trim().slice(0, 300) : null; };
 const causeIs = (c) => (e) => (e.cause === c ? (String(e.output || '').split('\n').find((l) => l.trim()) || c).trim().slice(0, 300) : null);
@@ -50,6 +104,11 @@ export const RULES = Object.freeze([
     '플러그인이 실제로 불러오는 pyVmomi 가 고른 판과 다릅니다 — Bareos 플러그인 경로(/usr/lib64/bareos/plugins)에 따로 깔린 사본이 먼저 불립니다. 9.x 면 Python 3.9 에서 플러그인이 시작하지 못합니다(문서 7.4 현장 기록).',
     [{ kind: 'portal', action: 'pyvmomi-fix', label: '플러그인 경로의 사본을 옮기고 2단계부터', detail: '지우지 않고 /var/lib/portal-bareos-install/moved/ 로 옮깁니다(되돌릴 수 있음).' },
       { kind: 'server', label: '직접 확인', commands: ['BPP=/usr/lib64/bareos/plugins', 'ls -d "$BPP"/pyVmomi* "$BPP"/pyvmomi* 2>/dev/null', 'PYTHONPATH="$BPP" python3 -c \'import pyVmomi, importlib.metadata as m; print(pyVmomi.__file__, m.version("pyvmomi"))\''] }]),
+  // v2.851 반증: 러너가 설치 여부를 rpm -qa 목록으로 보는데 그 목록이 비었으면(rpmdb 를 못 읽음) 설치하지 않고 멈춘다(못 읽음 ≠ 설치 안 됨)
+  R('rpmdb', '설치된 패키지 목록을 읽지 못함', causeIs('rpmdb'),
+    '서버의 rpm 데이터베이스에서 설치된 패키지 목록을 읽지 못해 무엇이 이미 설치됐는지 알 수 없었습니다 — 아무것도 설치하지 않고 멈췄습니다.',
+    [{ kind: 'server', label: 'rpm 데이터베이스 확인', commands: ['rpm -qa | head -n 5', 'ps -ef | grep -E "dnf|yum|rpm" | grep -v grep'] },
+      { kind: 'retry', label: '확인 뒤 그대로 다시', detail: '' }]),
   R('dnf-lock', '다른 패키지 작업이 잠금을 쥐고 있음', line(/(another app is currently holding|Waiting for process with pid|rpmdb.*lock|Could not get lock|database is locked)/i),
     '같은 서버에서 다른 dnf/rpm 작업이 돌고 있어 설치하지 못했습니다(이 단계가 넣은 것은 되돌렸습니다).',
     [{ kind: 'retry', label: '잠시 뒤 그대로 다시', detail: '' }, { kind: 'server', label: '직접 확인', commands: ['ps -ef | grep -E "dnf|yum|rpm" | grep -v grep'] }]),
@@ -60,6 +119,8 @@ export const RULES = Object.freeze([
   R('gpg', '패키지 서명 확인 실패', line(/(GPG check FAILED|NOKEY|public key .* is not installed|Signature verification failed|signature could not be verified)/i),
     'dnf 가 번들 RPM 의 서명을 확인하지 못했습니다(번들의 키와 패키지 서명 키가 다름). 서명을 끄고 설치하지 않습니다.',
     [{ kind: 'server', label: '키 확인', commands: ['ls /var/lib/portal-bareos-install/bundle/*/bareos-bundle/keys/', 'rpm -q gpg-pubkey --qf "%{NAME}-%{VERSION}-%{RELEASE} %{SUMMARY}\\n"'] }]),
+  // dnf-conflict 보다 앞 — 같은 출력에 'Problem:' · 'cannot install the best candidate' 가 함께 있다
+  R('base-pkg-pinned', '번들 패키지 판이 서버 설치본과 충돌', basePkgPinned, '(출력에서 읽은 이름으로 적는다)', []),
   R('dnf-conflict', '패키지 의존성·충돌', line(/(conflicts with file from package|conflicting requests|nothing provides|cannot install the best candidate|Problem( \d+)?:|is filtered out by)/i),
     '번들 안의 패키지만으로 의존성을 풀지 못했거나, 이미 설치된 패키지와 파일이 겹칩니다(이 단계가 넣은 것은 되돌렸습니다).',
     [{ kind: 'server', label: '충돌 패키지 확인', commands: ['dnf --disablerepo="*" --enablerepo=portal-bareos-local install --assumeno bareos 2>&1 | tail -n 30'] }]),
@@ -113,7 +174,10 @@ export function classifyFailure(e = {}) {
   for (const r of RULES) {
     let ev = null;
     try { ev = r.test(e); } catch { ev = null; }
-    if (ev) return { key: r.key, title: r.title, why: r.why, evidence: ev, fixes: r.fixes, unclassified: false };
+    if (!ev) continue;
+    // v2.851: 규칙이 객체를 돌려주면 출력에서 읽은 값으로 원인 · 조치를 적는다(base-pkg-pinned) — 문자열이면 예전처럼 근거 줄
+    const d = typeof ev === 'object' ? ev : { evidence: ev };
+    return { key: r.key, title: r.title, why: d.why || r.why, evidence: String(d.evidence || '').slice(0, 300), fixes: Array.isArray(d.fixes) && d.fixes.length ? d.fixes : r.fixes, unclassified: false };
   }
   return {
     key: 'unclassified', title: '원인 미분류', why: '아는 규칙에 맞지 않았습니다 — 원인을 추정하지 않고 출력 원문을 보입니다.',

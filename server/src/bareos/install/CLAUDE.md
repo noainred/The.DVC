@@ -59,6 +59,11 @@
   (`bundleSourceInfo` · 저장 `bundleSource.js` — http/https · 계정 정보 · ?# 금지 · `ssrfBlockReason` 차단 대역 거부). **서버 디렉터리**는 읽기만 한다(복사 · 삭제 없음 — 지우기는 받은 번들 폴더만) ·
   같은 서명 · 해시 검증을 지난 판만 쓰고(`listAllBundles` · `pickBundle` 이 두 폴더) · 개요(화면 열기)가 검증(같은 파일은 기억 · 동시 해시 하나) · 막 바뀐 본체는 `SETTLE_MS` 동안 '확인 중'(서버 디렉터리만 — 포탈이 받은 직후 검증을 막지 않게) ·
   심링크 · 일반 파일이 아닌 것 거부 · 받기는 서버 디렉터리에 같은 판이 검증돼 있으면 받지 않는다.
+- **v2.851 2단계 '번들 패키지 판 충돌'**(2026-11-02 사용자 화면 · `bareosInstallPkgPin2851` · 러너 `②-b` · 변이 17/17 · 반증 3인 — 원인 · 근거 전문은 audits.md 'Bareos v2.851'):
+  dnf 는 'install <이미 설치된 이름>' 을 번들 판을 넣는 작업으로 보고 best=True 가 막히면 거래 전체를 실패로 만든다 → 러너 step2 는 **설치 목록 중 이미 설치된 이름을 넘기지 않는다**
+  (`rpm.before` 로 판정 · **비면 rpmdb 못 읽음 — cause rpmdb 로 멈춤**) · 러너 `export LC_ALL=C`(영어 원문 판정) · `base-pkg-pinned`(dnf-conflict 앞 · 고정 = 충돌 이름을 요구하는 @System 줄만 ·
+  명령 이름은 첫 글자 영숫자 · 출력에 없는 까닭은 단정하지 않음) · 사전 점검 `osrel`(경고만 · 수는 번들에 든 것). 남긴 것: 서버에 openssl 이 없을 때 · 9.4 VM `--assumeno` 실측 없음 ·
+  되돌리기 실패 뒤 다시 하기의 config-test 오분류(기존 결함).
 - **데모**: mock + 실제 Director 미등록이면 `demo.js`(시간으로 진행하는 합성 작업 · 판정은 실제 코드 · 장비에 닿지 않음).
 - 실환경 미확인(추정 — 첫 현장 설치에서 확인할 것): Bareos `current` 사전 공개판 RPM 이 Rocky 9.x 의 각 마이너에서 `--alldeps` 로 풀리는지(CI 는 rockylinux:9 최신에서만 확인) ·
   `bconsole -c`(이름 있는 Console) TLS-PSK 접속 출력 모양 · `update_bareos_tables` 가 카탈로그 유지 재설치에서 판 차이를 맞추는지 · WebUI 첫 화면 응답 코드.
