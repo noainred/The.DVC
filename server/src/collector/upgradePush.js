@@ -83,7 +83,8 @@ export async function pushBundleToCollector(c, bytes, { restart = true, force = 
     // 실패: 상태코드 + 서버 사유 + 점검 힌트를 하나의 reason으로 합쳐 UI/로그에서 바로 원인 파악.
     const hint = httpFailHint(res.status);
     const reason = `HTTP ${res.status}${serverMsg ? ` — ${serverMsg}` : ''}${hint ? ` · ${hint}` : ''}`;
-    return { id: c.id, name: c.name, ok: false, status: res.status, reason };
+    // v2.859: 엣지가 '이미 최신(not newer)' 으로 답한 것은 실패가 아니다(엣지가 /dl 로 먼저 올라간 경우) — upToDate 로 밝힌다(엣지 동기화·화면이 구분한다).
+    return { id: c.id, name: c.name, ok: false, status: res.status, reason, ...(body.upToDate === true ? { upToDate: true } : {}) };
   } catch (err) {
     recordOutbound(url, { error: String(err?.message || err), method: 'POST', tag: c.id || c.name || '' });
     return { id: c.id, name: c.name, ok: false, reason: netFailReason(err.message), netError: true };
@@ -117,7 +118,7 @@ export function mergeAutoPushStatus(status, lastResult) {
       const c = cmpVersion(cur?.version, it.version || lastResult.version);
       if (c != null && c >= 0) continue;
     }
-    out[id] = { ...(cur || {}), upgrade: { at, ok: it.ok === true, version: it.version || lastResult.version || undefined, reason: it.reason || '', ...(Number.isFinite(it.status) ? { status: it.status } : {}), auto: true } };
+    out[id] = { ...(cur || {}), upgrade: { at, ok: it.ok === true, version: it.version || lastResult.version || undefined, reason: it.reason || '', ...(Number.isFinite(it.status) ? { status: it.status } : {}), ...(it.upToDate ? { upToDate: true } : {}), auto: true } }; // v2.859: 엣지의 '이미 최신' 응답은 실패가 아니다
   }
   return out;
 }
@@ -132,7 +133,7 @@ export async function pushUpgradeToCollectors(bytes, { ids = null, force = false
   const settled = await poolSettled(list, concurrency, async (c) => {
     const r = await pushBundleToCollector(c, bytes, { force, manifest });
     const prev = getCollectorStatus(c.id) || {};
-    setCollectorStatus(c.id, { ...prev, upgrade: { at: Date.now(), ok: r.ok, version: r.version, reason: r.reason || r.error, ...(Number.isFinite(r.status) ? { status: r.status } : {}), ...(auto ? { auto: true } : {}) } }); // v2.775: 상태코드·자동 여부
+    setCollectorStatus(c.id, { ...prev, upgrade: { at: Date.now(), ok: r.ok, version: r.version, reason: r.reason || r.error, ...(Number.isFinite(r.status) ? { status: r.status } : {}), ...(auto ? { auto: true } : {}), ...(r.upToDate ? { upToDate: true } : {}) } }); // v2.775: 상태코드·자동 여부 · v2.859: 이미 최신
     return r;
   });
   return settled.map((s, i) => (s.status === 'fulfilled' ? s.value

@@ -105,6 +105,7 @@ const PURPOSES = {
   'veeam-backup-run.json': 'Veeam 백업 실행 설정(포탈 전용 잡 접두·서버별 저장소·보존·vCenter 이름, v2.818)',
   'upgrade-signature-override.json': '업그레이드 서명 확인 시한부 끄기(설정 소유자 + OTP · 시한이 지나면 무효 — 엣지로 퍼지지 않게 상태 파일, v2.809)',
   'scan-journal.json': '실행 중 스캔 기록(상태 — 업그레이드·재시작으로 끊긴 아이실론 du·iDRAC·IP 스캔을 다음 기동이 자동으로 다시 시작, v2.737)',
+  'upgrade-kept-bundles.json': '중앙이 패키지 폴더에 보관한 업그레이드 번들 기록(상태 — 엣지 자동 업그레이드가 뒤처진 엣지에 다시 밀고 /dl 이 내주는 번들의 정리 대상, v2.859)',
   'isidu-mail-state.json': '아이실론 디렉터리 사용량 결과 메일 기록(상태 — 대상별 마지막으로 다룬 조사·실패 알림 시각·마지막 발송 결과, v2.738)',
   // ── v2.613 PERSIST2613-02: 신규 기능의 설정·등록부 JSON(화면에서 편집 — 백업 대상).
   'storage-devices.json': '스토리지 장비 등록부(호스트·계정·수집 방식·담당 엣지 — 비밀번호 봉인)',

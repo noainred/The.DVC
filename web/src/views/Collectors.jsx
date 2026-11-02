@@ -431,7 +431,8 @@ export default function Collectors() {
           당겨와(<code>/api/collector/export</code>) 호스트 전력에 병합합니다. 1천대+·13개 DC 같은 대규모 환경에 적합합니다.
           {' '}등록된 수집 에이전트: <b style={{ color: 'var(--text)' }}>{registeredCount}</b>대(정상 {onlineCount}대)
           {' · '}현재 병합된 호스트: <b style={{ color: 'var(--text)' }}>{totalHosts.toLocaleString()}</b>대.
-          <br />🔄 <b>자동 업그레이드</b>: 중앙 포탈이 새 버전으로 업그레이드되면 등록된 모든 에이전트로 자동 푸시됩니다.
+          <br />🔄 <b>자동 업그레이드</b>: 중앙 포탈이 새 버전으로 업그레이드되면 등록된 모든 에이전트로 자동 푸시되고, 그때 닿지 않았거나
+          꺼져 있던 에이전트는 주기 동기화가 구버전을 발견해 다시 밀어 넣습니다(업그레이드 화면 ‘엣지 자동 업그레이드’ — 기본 켬, 거기서 끌 수 있습니다).
           수동으로는 “모두 업그레이드”(또는 행별 “업그레이드”)로 즉시 동일 버전으로 맞출 수 있습니다.
         </div>
       </div>

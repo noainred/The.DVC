@@ -396,6 +396,9 @@ export const config = {
     // When true, a newer version found by the watcher is applied + restarts automatically.
     autoApply: process.env.UPGRADE_AUTO_APPLY === 'true'
       || (EDGE_ALL && !!EDGE_CENTRAL_URL && process.env.UPGRADE_AUTO_APPLY !== 'false'),
+    // v2.859(사용자 요청): 중앙이 업그레이드되면 등록된 엣지(수집 서버)도 **모두** 같은 버전으로 올린다 — 적용 직후 push +
+    //   주기 동기화(upgrade/edgeSync.js — 뒤처진 엣지에 다시 민다). **기본 켬**, UPGRADE_EDGE_AUTO=false 로 끈다(화면에서도 바꿀 수 있다).
+    edgeAutoUpgrade: process.env.UPGRADE_EDGE_AUTO !== 'false',
     // Edge agents this portal pushes new bundles to after self-upgrade.
     // JSON array: [{"url":"https://edge1","token":"..."}]
     edges: parseEdges(process.env.UPGRADE_EDGES),
