@@ -141,6 +141,12 @@ const viewJob = (j, vmById, settings) => {
  * v2.864 마지막 성공 백업(복원 › 폴더 표) — 원장의 lastRun · finishedRuns 중 성공(T·W) · 백업(type 없거나 B) 실행의 가장 늦은 끝(없으면 시작) 시각.
  * 포탈이 본 실행만 안다(등록 전 · 기록 밖 백업은 모른다) — 없으면 null('성공 없음' 이 아니라 '포탈 기록에 없음').
  */
+/** v2.864 복원 명령의 기본 키 값(사이트 매핑 — vCenter 주소 · FD INI 경로). 매핑이 없으면 빈 값(restoreBaseKv 가 거부한다). */
+export const restoreBaseOf = (settings) => (job) => {
+  const site = (settings?.sites || []).find((x) => String(x.vcenterId) === String(job?.vcenterId));
+  return { vcserver: site?.vcserver || '', configFile: site?.configFile || '' };
+};
+
 export function lastOkOf(lastRun, finishedRuns) {
   let best = null;
   for (const r of [lastRun, ...(Array.isArray(finishedRuns) ? finishedRuns : [])]) {
@@ -1065,7 +1071,7 @@ async function restoreRoute(req, res, job) {
   const jobid = Number(b.jobid);
   if (!Number.isInteger(jobid) || jobid <= 0) return res.status(400).json({ ok: false, reason: '복원할 백업(jobid)을 고르세요.' });
   const settings = effectiveSettings();
-  const plan = restorePlan({ mode: b.mode, job, snapshot: store.get(), newVm: b.newVm, confirmName: b.confirmName, pluginName: settings.defaults.pluginName, jobid });   // v2.847 D2-1: 그 지점의 백업 때 위치로 판정
+  const plan = restorePlan({ mode: b.mode, job, snapshot: store.get(), newVm: b.newVm, confirmName: b.confirmName, pluginName: settings.defaults.pluginName, jobid, base: restoreBaseOf(settings)(job) });   // v2.847 D2-1: 그 지점의 백업 때 위치로 판정
   if (!plan.ok) return res.status(400).json({ ok: false, reason: plan.issue });
   // v2.825.1 버그 점검(G2 — 재현): 설정만 보면 아는 전제(그 잡의 Director 가 있고 접속값이 갖춰졌는가)도 OTP **앞에서** 본다 —
   //   뒤에서 'not-configured' 로 실패하면 1회용 코드가 이미 쓰여, 설정을 고친 뒤 같은 코드는 '이미 사용됨' 이었다.
@@ -1180,7 +1186,7 @@ function bulkRestoreGate(req, items) {
       if (r.mode === 'newVm' && r.target?.name && (restoreOpen(r) || (Number(r.at) || 0) >= since)) reservedNames.add(`${j.vcenterId}\u0000${String(r.target.name).toLowerCase()}`);
     }
   }
-  const plan = bulkRestorePlan({ items: list, jobOf: (id) => jobs.get(id) || null, dirOf: jobDir, snapshot: store.get(), pluginName: settings.defaults.pluginName, reservedNames });
+  const plan = bulkRestorePlan({ items: list, jobOf: (id) => jobs.get(id) || null, dirOf: jobDir, snapshot: store.get(), pluginName: settings.defaults.pluginName, reservedNames, baseOf: restoreBaseOf(settings) });
   for (const r of plan.items) if (denied.has(r.id)) { r.ok = false; r.issue = denied.get(r.id); }   // 접근 · 진행 중 사유가 판정 사유보다 앞선다(더 근본적)
   const bad = plan.items.filter((r) => !r.ok).length;
   if (bad && plan.ok) { plan.ok = false; plan.issue = `${bad}대를 복원할 수 없습니다 — 항목별 사유를 확인하세요(묶음 전체를 보내지 않았습니다).`; }

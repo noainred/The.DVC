@@ -97,11 +97,18 @@ export function backupPluginOptions(p = {}) {
  */
 export function restorePluginOptions(kv = {}, plugin = 'python3') {
   if (!PLUGIN_NAME_RE.test(plugin)) return { issue: '플러그인 이름이 올바르지 않습니다.' };
-  const ALLOWED = new Set(['restore_powerstate', 'vmname', 'restore_datastore', 'restore_esxhost', 'restore_cluster', 'restore_resourcepool', 'localvmdk', 'folder', 'dc', 'restore_allow_disks_mismatch']);   // v2.861 디스크 불일치 허용(Bareos 23.1+ · PR #1876)
+  // v2.864(실환경 'Option vcuser not defined' — 복원 실패): vcserver · config_file 도 받는다. 백업 잡의 플러그인 옵션(잡 수준 FdPluginOptions)은
+  //   복원 때 FD 로 다시 오지 않아, 복원 명령이 vCenter 주소 · 자격증명 INI 를 직접 실어야 한다(restore.js restoreBaseKv). 자격증명 값 자체는 여전히 받지 않는다.
+  const ALLOWED = new Set(['vcserver', 'config_file', 'restore_powerstate', 'vmname', 'restore_datastore', 'restore_esxhost', 'restore_cluster', 'restore_resourcepool', 'localvmdk', 'folder', 'dc', 'restore_allow_disks_mismatch']);   // v2.861 디스크 불일치 허용(Bareos 23.1+ · PR #1876)
   const parts = [];
   for (const [k, v] of Object.entries(kv)) {
     if (v === undefined || v === null || v === '') continue;
     if (!ALLOWED.has(k)) return { issue: `복원 옵션 ‘${k}’ 은(는) 받지 않습니다.` };
+    if (k === 'config_file') {
+      if (!FD_PATH_RE.test(String(v)) || /(^|\/)\.\.(\/|$)/.test(String(v))) return { issue: 'FD 자격증명 파일 경로(config_file)가 올바르지 않습니다(절대 경로, 영문·숫자·._-/ 만).' };
+      parts.push(`config_file=${v}`);
+      continue;
+    }
     const val = k === 'folder' ? folderForPlugin(v) : String(v);
     const i = pluginValueIssue(val, k);
     if (i) return { issue: i };

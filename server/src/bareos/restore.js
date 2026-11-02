@@ -59,8 +59,22 @@ export function placementAt(job, jobid) {
  * v2.861 allowDisksMismatch(덮어쓰기만 — 기본 꺼짐): Bareos 23.1+ 의 restore_allow_disks_mismatch=yes(PR #1876 — 지금 VM 의 디스크 수 · 크기가
  *   백업 때와 달라도 덮어쓴다 · vSAN 에서 필요). 새 VM 은 디스크를 백업에서 새로 만들어 해당 없다. 옛 Director 는 모르는 옵션으로 거부한다(추정).
  */
-export function restorePlan({ mode, job, snapshot, newVm = {}, confirmName = '', pluginName = 'python3', jobid = null, allowDisksMismatch = false }) {
+/**
+ * v2.864(실환경 — 복원 잡 'python3-fd-mod: Option vcuser not defined'): 백업 잡의 플러그인 옵션은 잡 수준 FdPluginOptions 라 복원 때 FD 로 다시 오지 않는다.
+ *   그래서 복원 명령에 백업과 같은 기본 키(vcserver · dc · folder · vmname · config_file)를 싣는다 — 값은 **그 복원 지점의 백업 때 위치**(placementAt)와
+ *   사이트 매핑(vCenter 주소 · FD 의 INI 경로). 자격증명 값은 싣지 않는다(INI 가 갖는다). 매핑이 덜 됐으면 복원하지 않는다(그대로 보내면 FD 에서 실패한다).
+ * @param {{ vcserver?: string, configFile?: string }|null} base  null 이면 기본 키 없음(옛 호출 · 순수 판정 시험용 — 실제 라우트는 늘 넘긴다)
+ */
+export function restoreBaseKv(base, at) {
+  if (!base) return { kv: {} };
+  if (!base.vcserver || !base.configFile) return { issue: '이 vCenter 의 사이트 매핑에 vCenter 주소 · FD 자격증명 파일(INI) 경로가 없습니다 — 설정 › 법인별 설정에서 채운 뒤 복원하세요(FD 가 vCenter 계정을 모르면 복원이 실패합니다).' };
+  return { kv: { vcserver: base.vcserver, dc: at?.dc, folder: at?.folder, vmname: at?.vmName, config_file: base.configFile } };
+}
+
+export function restorePlan({ mode, job, snapshot, newVm = {}, confirmName = '', pluginName = 'python3', jobid = null, allowDisksMismatch = false, base = null }) {
   if (!RESTORE_MODES.includes(mode)) return { ok: false, issue: '복원 방식을 고르세요(원래 VM 덮어쓰기 · 새 VM · 로컬 VMDK).' };
+  const baseKv = restoreBaseKv(base, placementAt(job, jobid));
+  if (baseKv.issue) return { ok: false, issue: baseKv.issue };
   const vms = (snapshot?.vms || []).filter((v) => String(v.vcenterId) === String(job.vcenterId));
 
   if (mode === 'original') {
@@ -84,12 +98,12 @@ export function restorePlan({ mode, job, snapshot, newVm = {}, confirmName = '',
     const snaps = numOrNull(vm.snapshotCount);
     if (snaps === null) return { ok: false, issue: 'VM 의 스냅샷 개수를 읽지 못했습니다 — 덮어쓰기를 진행하지 않습니다(0 으로 보지 않습니다).' };
     if (snaps > 0) return { ok: false, issue: `VM 에 스냅샷이 ${snaps}개 있습니다 — 모두 지운 뒤 다시 시도하세요(덮어쓰기 전제).` };
-    const r = restorePluginOptions({ restore_powerstate: 'off', ...(allowDisksMismatch === true ? { restore_allow_disks_mismatch: 'yes' } : {}) }, pluginName);
+    const r = restorePluginOptions({ ...baseKv.kv, restore_powerstate: 'off', ...(allowDisksMismatch === true ? { restore_allow_disks_mismatch: 'yes' } : {}) }, pluginName);
     return r.issue ? { ok: false, issue: r.issue } : { ok: true, pluginOptions: r.value, target: { name: job.vmName, overwrite: true, ...(allowDisksMismatch === true ? { allowDisksMismatch: true } : {}) } };
   }
 
   if (mode === 'localVmdk') {
-    const r = restorePluginOptions({ localvmdk: 'yes' }, pluginName);
+    const r = restorePluginOptions({ ...baseKv.kv, localvmdk: 'yes' }, pluginName);
     return r.issue ? { ok: false, issue: r.issue } : { ok: true, pluginOptions: r.value, target: { localVmdk: true } };
   }
 
@@ -98,7 +112,7 @@ export function restorePlan({ mode, job, snapshot, newVm = {}, confirmName = '',
   const ni = pluginValueIssue(name, '새 VM 이름');
   if (ni) return { ok: false, issue: ni };
   if (vms.some((v) => String(v.name).toLowerCase() === name.toLowerCase())) return { ok: false, issue: `같은 vCenter 에 ‘${name}’ VM 이 이미 있습니다 — 다른 이름을 쓰세요.` };
-  const kv = { vmname: name, restore_powerstate: 'off' };
+  const kv = { ...baseKv.kv, vmname: name, restore_powerstate: 'off' };
   const ds = String(newVm?.datastore ?? '').trim();
   if (ds) {
     const known = (snapshot?.datastores || []).some((d) => String(d.vcenterId) === String(job.vcenterId) && d.name === ds);
@@ -186,7 +200,7 @@ const gbNum = (v) => { const n = numOrNull(v); return n !== null && n >= 0 ? n :
  * @param {Set<string>} [p.reservedNames] `${vcenterId}\u0000${소문자 이름}` — 최근 · 진행 중 새 VM 복원이 쓰는 이름(아직 인벤토리에 없다 — 반증 검토)
  * @returns {{ ok:boolean, issue?:string, directorId?:string, items: object[], capacity: object[] }}
  */
-export function bulkRestorePlan({ items, jobOf, dirOf, snapshot, pluginName = 'python3', reservedNames = null }) {
+export function bulkRestorePlan({ items, jobOf, dirOf, snapshot, pluginName = 'python3', reservedNames = null, baseOf = null }) {
   const list = Array.isArray(items) ? items : [];
   if (!list.length) return { ok: false, issue: '복원할 VM 을 고르세요.', items: [], capacity: [] };
   if (list.length > BULK_RESTORE_MAX) return { ok: false, issue: `한 번에 ${BULK_RESTORE_MAX}대까지 복원할 수 있습니다 — 나눠서 진행하세요.`, items: [], capacity: [] };
@@ -210,7 +224,7 @@ export function bulkRestorePlan({ items, jobOf, dirOf, snapshot, pluginName = 'p
     if (!Number.isInteger(jobid) || jobid <= 0) { out.push({ ...row, ok: false, issue: '복원 지점(jobid)을 고르세요.' }); continue; }
     const nic = it.mode === 'localVmdk' ? null : (it.nic === undefined || it.nic === null || it.nic === '') ? (it.mode === 'newVm' ? 'disconnect' : 'keep') : it.nic;
     if (nic !== null && !NIC_MODES.includes(nic)) { out.push({ ...row, ok: false, issue: '네트워크 어댑터 처리 값이 올바르지 않습니다.' }); continue; }
-    const plan = restorePlan({ mode: it.mode, job, snapshot, newVm: it.newVm, confirmName: it.confirmName, pluginName, jobid, allowDisksMismatch: it.allowDisksMismatch === true });
+    const plan = restorePlan({ mode: it.mode, job, snapshot, newVm: it.newVm, confirmName: it.confirmName, pluginName, jobid, allowDisksMismatch: it.allowDisksMismatch === true, base: baseOf ? baseOf(job) : null });   // v2.864 기본 키(vcserver · config_file …)
     if (!plan.ok) { out.push({ ...row, ok: false, issue: plan.issue }); continue; }
     if (it.mode === 'newVm') {
       const k = String(plan.target.name).toLowerCase();

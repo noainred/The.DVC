@@ -2612,6 +2612,10 @@ server/src/bareos/CLAUDE.md 크기 상한(15,000B)으로 원문 그대로 옮겼
   목록 응답에 `powerState` · `storageGB`(인벤토리 — 없으면 null) · `lastOk`(`lastOkOf` — lastRun · finishedRuns 의 성공 · 경고 중 가장 늦은 끝 · 없으면 null = '포탈 기록에 없음' — 카탈로그의 더 오래된 성공은 모른다) · finishedRuns 원문은 여전히 싣지 않는다.
   VM 마다 복원 지점은 표에서 읽지 않는다(Director 를 VM 수만큼 부르지 않게 — 다음 단계에서 고른 VM 만 한 번에). 시안의 '행마다 복원 지점 칸' 과 다른 점이다(정직 기록).
   재해 복구(vCenter 를 다시 설치한 뒤 · 백업 당시 폴더 기준 · 위치 짝짓기 · 단계 실행)는 시안 ②로 승인됐고 v2.865 에서 만든다.
+  ⚠ **v2.864 실환경 결함 — 복원이 FD 에서 'python3-fd-mod: Option vcuser not defined' 로 실패**(사용자 보고 · jobid 119 로그): 백업 잡의 플러그인 옵션은 잡 수준 FdPluginOptions 라
+  복원 때 FD 로 다시 오지 않는다(CLAUDE.md 실환경 미확인 항목이 실측으로 확정). 복원 명령은 복원용 키만 실어 FD 가 vCenter 주소 · 자격증명 INI 를 몰랐다.
+  이제 `restoreBaseKv` 가 백업과 같은 기본 키(vcserver · dc · folder · vmname · config_file — 위치는 그 복원 지점의 백업 때 값 `placementAt`)를 앞에 싣고 복원 키가 덮어쓴다.
+  단건 · 묶음 · 검증 세 경로 모두(`restoreBaseOf` · `baseOf` — 소스 대조 테스트) · 매핑이 덜 됐으면 보내지 않는다 · 자격증명 값은 여전히 받지 않는다(`bareosRestore.test.js` v2.864).
 
 ## Bareos v2.862 복원 검증(리허설) · 일일 요약 메일 — 모듈 규칙(2026-11-03)
 
