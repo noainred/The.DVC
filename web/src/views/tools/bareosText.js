@@ -581,7 +581,12 @@ const ISSUE_HINTS = Object.freeze([
   [/No space left on device/i, '디스크가 가득 찼습니다 — 저장 경로와 루트(/) 여유 공간을 확인하세요.'],
   [/Overriding plugin option/i, '잡의 플러그인 옵션이 FileSet·INI 값을 덮어썼다는 안내입니다(정상 동작).'],
   [/is not CBT enabled, enabling it now/i, 'VM 에 CBT(변경 블록 추적)가 꺼져 있어 플러그인이 켰습니다 — 문구는 Error 지만 작업은 계속됩니다. 다음 실행부터 바뀐 블록만 읽을 수 있습니다.'],
+  // v2.861 커뮤니티 조사(bareos-users · GitHub PR #1473 — docs/design/bareos-ui-v2 §11 ③): 가장 흔한 두 실패의 해석
+  [/new full level backup of this job is required/i, '디스크가 옮겨졌거나(복원 · Storage vMotion) 변경 블록 추적이 어긋났습니다 — 증분을 만들 수 없으니 다음 실행을 Full 로 돌리세요(백업 대상 패널의 지금 백업 › Full).'],
+  [/quiesc/i, '게스트 정지(quiesce) 스냅샷이 실패했습니다 — 가장 흔한 스냅샷 실패입니다. VMware Tools 상태 · 게스트의 pre-freeze 스크립트 종료 코드 · 남은 스냅샷을 확인하고 다시 실행하세요.'],
 ]);
+/** v2.861 이 줄이 'Full 로 다시' 를 권하는가(결과 창의 'Full 로 지금 실행' 단추). */
+export const issueNeedsFull = (text) => /new full level backup of this job is required/i.test(String(text ?? '').slice(0, 600));
 
 /**
  * v2.828 경고·오류 줄의 색 — 'info'(문구에 Error 가 있어도 플러그인이 스스로 처리하고 계속한 안내) · 'err' · 'warn'.

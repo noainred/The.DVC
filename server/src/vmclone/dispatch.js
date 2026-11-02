@@ -225,6 +225,15 @@ export function createOp({ kind, jobId = '', vcenterId = '', vmName = '', spec =
   return op;
 }
 
+/*
+ * v2.861 작업 종류별 마무리 훅 — 다른 도메인(Bareos 복원 마무리)이 결과를 자기 원장에 남긴다(vmclone 은 bareos 를 import 하지 않는다 — 한쪽 의존).
+ * 훅의 오류는 작업 결과를 바꾸지 않는다(기록만 실패).
+ */
+const _finishHooks = new Map();
+export function onOpFinish(kind, fn) { _finishHooks.set(String(kind), fn); }
+/** 이 프로세스가 아는 작업의 상태('pending'|'running'|'done') — 모르면 null(재시작으로 잃었거나 정리됨). */
+export function opStateOf(id) { return _ops.get(String(id))?.state || null; }
+
 /** 작업 마무리 — 결과 기록(영속) + NFS 연결 결과 반영. 이미 끝났으면 늦은 결과로 결과만 바꾼다. */
 export function finishOp(op, result, now = Date.now(), { late = false } = {}) {
   const r = result && typeof result === 'object' ? result : { ok: false, detail: '빈 결과' };
@@ -238,6 +247,8 @@ export function finishOp(op, result, now = Date.now(), { late = false } = {}) {
   try {
     recordOp({ id: op.id, kind: op.kind, jobId: op.jobId, vcenterId: op.vcenterId, vmName: op.vmName, at: now, ok: op.result.ok, detail: op.result.detail, ms: op.result.ms || (now - op.createdAt), agent: op.agent, by: op.by, target: op.spec?.newName || op.spec?.name || '' });
   } catch (e) { console.warn(`[vmclone] 작업 기록 저장 실패(${e?.message || e})`); }
+  const hook = _finishHooks.get(op.kind);
+  if (hook) { try { hook(op); } catch (e) { console.warn(`[vmclone] ${op.kind} 마무리 기록 실패(${e?.message || e})`); } }
   return op;
 }
 

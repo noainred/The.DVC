@@ -35,6 +35,8 @@ export const LATE_KEEP_MS = 15 * 60_000;
 export const RESULT_MS = Object.freeze({
   probe: 120_000, catalog: 150_000, addJobs: 330_000, disableJobs: 150_000, runJob: 120_000, runJobs: 330_000, pruneJobs: 330_000, prunePreview: 330_000, liveStatus: 90_000, setEnabled: 120_000, history: 150_000,
   cancel: 120_000, log: 150_000, restore: 210_000, poll: 180_000,
+  restorePoints: 240_000,   // v2.861 묶음 복원 지점(VM 50대 · 잡마다 list jobs 한 번 · 읽기 전용)
+  restores: 330_000,        // v2.861 묶음 복원(VM 마다 jobStatus · list jobs · restore — runJobs 와 같은 예산)
   policy: 240_000,   // v2.839 정책 수집(읽기 전용 명령 7개 · 볼륨 목록이 크다)
   volumes: 90_000,   // v2.840 풀 하나의 볼륨 목록 즉시 조회(읽기 전용)
   config: 150_000,   // v2.845 법인별 설정 조회(show 4 + llist pools · 읽기 전용)

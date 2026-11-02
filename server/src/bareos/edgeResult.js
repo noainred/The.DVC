@@ -134,6 +134,26 @@ export const VALUE = Object.freeze({
     return { log: { lines: arr(l.lines).slice(-4000).map((x) => str(x, 2000)), truncated: bool(l.truncated), total: nonNeg(l.total) }, row: rowOut(r.row) };
   },
   restore: (v) => { const r = obj(v); return { rid: posInt(r.rid), chain: arr(r.chain).slice(0, 400).map(posInt).filter(Boolean) }; },
+  // v2.861 묶음 복원 지점(읽기 전용) — 아는 칸만 · 지점 60 · 레벨 한 글자 · 체인 길이는 양의 정수만(못 만들면 null — 그 지점은 고를 수 없다)
+  restorePoints: (v) => arr(v).slice(0, 100).map((x0) => {
+    const x = obj(x0);
+    const key = Number.isInteger(x.key) && x.key >= 0 && x.key < 1_000_000 ? x.key : -1;
+    if (!bool(x.ok)) return { key, ok: false, ...(x.code ? { code: str(x.code, 40) } : {}), ...(x.message ? { message: str(x.message, 300) } : {}) };
+    return {
+      key, ok: true, scanned: nonNeg(x.scanned),
+      points: arr(x.points).slice(0, 60).map((p0) => { const p = obj(p0); return { jobid: posInt(p.jobid), level: /^[FDI]$/.test(p.level) ? p.level : '', state: p.state === 'warning' ? 'warning' : p.state === 'ok' ? 'ok' : '', startedAt: timeOf(p.startedAt), endedAt: timeOf(p.endedAt), bytes: nonNeg(p.bytes), chain: posInt(p.chain) }; })
+        .filter((p) => p.jobid && p.state),
+    };
+  }),
+  // v2.861 묶음 복원 — 성공인데 rid 가 없으면 그 항목은 '결과 모름'(복원이 시작됐을 수 있다 · 열린 복원을 원장에 남기지 않는다 — restore 의 REQUIRED 와 같은 규칙)
+  restores: (v) => arr(v).slice(0, 100).map((x0) => {
+    const x = obj(x0);
+    const key = Number.isInteger(x.key) && x.key >= 0 && x.key < 1_000_000 ? x.key : -1;
+    const rid = posInt(x.rid);
+    if (bool(x.ok) && !rid) return { key, ok: false, code: 'unknown', message: '엣지가 복원 jobid 없이 성공을 회신했습니다 — 복원이 시작됐을 수 있습니다. Director 에서 확인하세요.' };
+    if (!bool(x.ok)) return { key, ok: false, ...(x.code ? { code: str(x.code, 40) } : {}), ...(x.message ? { message: str(x.message, 300) } : {}) };
+    return { key, ok: true, rid, chain: arr(x.chain).slice(0, 400).map(posInt).filter(Boolean) };
+  }),
   poll: (v) => {
     const r = obj(v); const f = obj(r.fault);
     return {

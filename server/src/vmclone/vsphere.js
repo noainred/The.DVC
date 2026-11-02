@@ -236,6 +236,23 @@ export async function vmCommittedBytes(c, vmRef) {
   } catch { return null; }
 }
 
+/**
+ * v2.861 이름으로 VM 찾기(Bareos 복원 마무리 — 새로 만든 VM 은 다음 인벤토리 수집 전이라 스냅샷에 없다). 그 vCenter 의 모든 VM 이름을
+ *   컨테이너 뷰로 읽어(페이지) 같은 이름(vcNameNorm)의 ref 를 **전부** 돌려준다 — 부르는 쪽은 정확히 1대일 때만 손댄다. 템플릿은 뺀다.
+ * @returns {Promise<string[]>}
+ */
+export async function findVmsByName(c, name) {
+  const want = vcNameNorm(name);
+  if (!want) return [];
+  const view = await c.createContainerView(['VirtualMachine']);
+  try {
+    const objs = await c.retrieveProperties(view, [{ type: 'VirtualMachine', paths: ['name', 'config.template'] }]);
+    return objs.filter((o) => vcNameNorm(o.props?.name) === want && String(o.props?.['config.template']) !== 'true').map((o) => o.ref);
+  } finally {
+    try { await c.callRaw(`<DestroyView xmlns="urn:vim25"><_this type="ContainerView">${esc(view)}</_this></DestroyView>`); } catch { /* best effort — 세션이 끝나면 함께 사라진다 */ }
+  }
+}
+
 /** VM 의 이름·전원 상태·장치 XML. 없으면 throw(호출부가 not found 로 다룬다). */
 export async function vmStateOf(c, vmRef) {
   const objs = await c.retrieveObjectProps('VirtualMachine', vmRef, ['name', 'runtime.powerState', 'config.hardware.device']);

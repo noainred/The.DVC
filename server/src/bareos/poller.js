@@ -17,6 +17,7 @@ import { withDeadline } from '../util/deadline.js';
 import { poolSettled } from '../util/pool.js';
 import { loadSettings, onSettingsChange, directorConn, jobDirectorId } from './settings.js';
 import { pendingWork, applyRunRow, applyRestoreRow, listJobs, jobDigests, patchJob, inBatch, notePendingMiss, retiredNames, forgetRetired } from './registry.js';
+import { finishRestores } from './restoreFinish.js';   // v2.861 복원 마무리(NIC 끊기) — Director 에 접속하지 않는다
 import { onDirector, relayToEdge, isDemoActive, effectiveSettings, createBackupTarget } from './service.js';
 import { hasPending } from './edgeOps.js';
 import { config } from '../config.js';
@@ -156,6 +157,7 @@ function applyPoll({ d, base, rot, slice, mine, retired, live, due, seq, reconci
       }
     }
   });
+  if (updated) finishRestores();   // v2.861 방금 끝난 복원의 NIC 끊기(새 VM 복원만)
   if (r.reconciled) {
     // v2.822.3(I2-5 — 재현): `.jobs` 가 한 번 비어 오면 지운 잡 기록이 통째로 사라졌다 — 응답을 믿을 수 있을 때만 잊는다
     const states = new Map(r.states || []);
@@ -201,6 +203,7 @@ export async function pollOnce({ trigger = 'timer', reconcile = null, directorId
   _busy = true;
   const at = Date.now();
   try {
+    finishRestores(at);   // v2.861 재시작 뒤 이어 가기(보낸 작업을 잃었으면 다시 — 같은 VM 을 다시 끊어도 결과가 같다)
     const settings = loadSettings();
     const demo = isDemoActive(settings);
     if (demo) {

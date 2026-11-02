@@ -255,7 +255,7 @@ export function bareosSubTabs({ summaryOk = false, detailOk = false, manageOk = 
   ];
 }
 /** 운영 탭 안의 묶음(관리 도구 bareos-backup 의 하위 주소). 설정은 위 탭 줄의 '설정' 이다. */
-export const OPS_SEGMENTS = Object.freeze([['targets', '백업 대상'], ['groups', '백업 그룹'], ['runs', '진행 · 이력']]);
+export const OPS_SEGMENTS = Object.freeze([['targets', '백업 대상'], ['groups', '백업 그룹'], ['restore', '복원'], ['runs', '진행 · 이력']]);   // v2.861 복원(폴더에서 고르기 · 3단계)
 /** 관리 도구의 하위 주소 → 위 탭 키. */
 export const opsTopOf = (tab) => (tab === 'settings' ? 'settings' : 'ops');
 /**

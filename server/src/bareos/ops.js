@@ -337,6 +337,70 @@ export const OPS = Object.freeze({
   },
 
   /**
+   * v2.861 묶음 복원 지점 — 고른 VM 여러 대의 성공한 백업(T·W, type B)을 **세션 하나로 순차** 읽는다(VM 마다 접속하지 않는다 — 고RTT 법인).
+   *   지점마다 체인 길이(chainFromHistory — 이 잡의 이력으로만)를 함께 돌려준다(체인을 못 만들면 null — 그 지점은 고를 수 없다).
+   *   세션째 끊기면 남은 것은 건너뜀. 읽기 전용(MUTATING 아님). 옛 엣지는 이 작업 종류를 몰라 '알 수 없는 작업' 으로 거절한다.
+   * @param {{ items: { key:number, name:string }[], scan?:number, keep?:number }} a
+   * @returns {Promise<{ key, ok, points?, scanned?, code?, message? }[]>}
+   */
+  async restorePoints(s, { items = [], scan = 60, keep = 30 } = {}) {
+    const out = [];
+    let dead = '';
+    const nScan = Math.max(1, Math.min(200, Math.floor(Number(scan)) || 60));
+    const nKeep = Math.max(1, Math.min(60, Math.floor(Number(keep)) || 30));
+    for (const it of items.slice(0, RUN_JOBS_MAX)) {
+      if (dead) { out.push({ key: it.key, ok: false, code: 'skipped', message: `건너뜀 — ${dead}` }); continue; }
+      try {
+        if (!isResourceName(it.name)) throw invalid('잡 이름이 올바르지 않습니다.');
+        const runs = (await jobRuns(s, it.name)).filter((r) => !r.name || r.name === it.name);
+        const scanned = runs.slice(0, nScan);
+        const points = scanned.filter((r) => r.type === 'B' && (r.state === 'ok' || r.state === 'warning')).slice(0, nKeep).map((r) => {
+          const chain = chainFromHistory(runs, r.jobid);
+          return { jobid: r.jobid, level: r.level, state: r.state, startedAt: r.startedAt, endedAt: r.endedAt, bytes: r.bytes ?? null, chain: chainIssue(chain, r.jobid) ? null : chain.length };
+        });
+        out.push({ key: it.key, ok: true, points, scanned: scanned.length });
+      } catch (e) {
+        out.push({ key: it.key, ok: false, code: e?.code || 'error', message: String(e?.message || e).slice(0, 300) });
+        if (SESSION_DEAD.has(e?.code)) dead = `Director 연결 문제로 멈췄습니다(${e.code})`;
+      }
+    }
+    return out;
+  },
+
+  /**
+   * v2.861 묶음 복원 — 세션 하나로 순차. 항목마다 단건 restore 와 **같은 검사**(고른 jobid 가 이 잡의 성공 백업인가 · 체인은 이 잡의 이력으로만)를 한다.
+   *   한 건의 실패는 나머지를 막지 않는다. 세션째 끊기면 남은 것은 '건너뜀'(보내지 않았다). restore 명령을 **보낸 뒤** 응답 중에 끊기면
+   *   (MID_COMMAND_CODES) 그 건은 'unknown'(복원이 시작됐는지 모른다 — 다시 보내면 두 번 돌 수 있다).
+   * @param {{ items: { key:number, jobid:number, name:string, client:string, restoreJob:string, pluginOptions:string }[] }} a
+   * @returns {Promise<{ key, ok, rid?, chain?, code?, message? }[]>}
+   */
+  async restores(s, { items = [] } = {}) {
+    const out = [];
+    let dead = '';
+    for (const it of items.slice(0, RUN_JOBS_MAX)) {
+      if (dead) { out.push({ key: it.key, ok: false, code: 'skipped', message: `건너뜀 — ${dead}` }); continue; }
+      let sent = false;
+      try {
+        const row = await jobStatus(s, it.jobid);
+        if (!row || row.name !== it.name || row.type !== 'B' || !(row.state === 'ok' || row.state === 'warning')) throw invalid('고른 jobid 는 이 대상의 성공한 백업이 아닙니다.');
+        const runs = (await jobRuns(s, it.name)).filter((r) => !r.name || r.name === it.name);
+        const chain = chainFromHistory(runs, it.jobid);
+        const ci = chainIssue(chain, it.jobid);
+        if (ci) throw invalid(ci);
+        sent = true;
+        const rid = await runRestore(s, { client: it.client, jobids: chain, restoreJob: it.restoreJob, pluginOptions: it.pluginOptions });
+        out.push({ key: it.key, ok: true, rid, chain });
+      } catch (e) {
+        const code = e?.code || 'error';
+        if (sent && MID_COMMAND_CODES.has(code)) out.push({ key: it.key, ok: false, code: 'unknown', message: `복원 명령을 보낸 뒤 응답이 끊겼습니다(${code}) — 시작됐는지 알 수 없습니다. Director 에서 확인하세요.` });
+        else out.push({ key: it.key, ok: false, code, message: String(e?.message || e).slice(0, 300) });
+        if (SESSION_DEAD.has(code)) dead = `Director 연결 문제로 멈췄습니다(${code})`;
+      }
+    }
+    return out;
+  },
+
+  /**
    * 상태 조회 한 번(폴러) — Director 쪽 일만 한다. 원장 반영은 부르는 쪽.
    *  ① reconcile(먼저 — v2.825.1 G7): `.jobs`(이름 → enabled) + 최근 2일 실행 행. 원장에서 꺼 둔 잡이 Director 에서 켜져 있으면 다시 끈다
    *     (disable 은 Director 메모리 값이라 reload·재시작이면 다시 켜진다 — I3).
@@ -402,4 +466,4 @@ export const OPS = Object.freeze({
 });
 
 /** Director 상태를 바꾸는 작업. */
-export const MUTATING = Object.freeze(new Set(['addJobs', 'disableJobs', 'runJob', 'runJobs', 'pruneJobs', 'setEnabled', 'cancel', 'restore', 'poll']));
+export const MUTATING = Object.freeze(new Set(['addJobs', 'disableJobs', 'runJob', 'runJobs', 'pruneJobs', 'setEnabled', 'cancel', 'restore', 'restores', 'poll']));

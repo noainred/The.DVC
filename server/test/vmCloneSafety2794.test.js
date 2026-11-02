@@ -55,6 +55,7 @@ function run(body, { jobs = [JOB()] } = {}) {
       attachNasToHost: async () => ({ ok: true, detail: 'ok' }), detachNasFromHost: async () => ({ ok: true, detail: 'ok' }), validateNfsDsSpec: (s) => s, vmCommittedBytes: async () => null,
       vmFilePaths: async () => ({ vmx: '', files: [] }), parseDsPath: () => null, backupFileFilter: () => true,
       datacenterPathOf: async () => 'DC1', downloadDsFile: async () => 0,
+      findVmsByName: async (c, name) => { step('findByName', name); return globalThis.STATE.byName ?? ['vm-9']; },   // v2.861 Bareos 복원 마무리
     } });
     mock.module(${u('store.js')}, { namedExports: { store: { get: () => ({ datastores: [{ id: 'vcA:datastore-1', vcenterId: 'vcA', name: 'ds1' }], vms: [] }) } } });
     const st = await import(${u('vmclone/store.js')});
@@ -219,4 +220,29 @@ test('S5: 뒷정리가 남은 잡은 지우지 않는다 · 엣지 위임 동기
   `, { jobs: [JOB({ verifying: rec }), JOB({ id: 'j2', vmId: 'vcA:vm-2', origin: 'central', verifying: rec })] });
   assert.match(out.del, /뒷정리가 남아/);
   assert.equal(out.apply.removed, 0); assert.equal(out.still, true);
+});
+
+test('S6(v2.861): Bareos 복원 VM 네트워크 끊기 — 그 이름이 정확히 1대이고 꺼져 있을 때만 · 아니면 손대지 않고 사유', () => {
+  const out = run(`
+    out.ok = await ops.disconnectRestoredVm('vcA', 'web01-r');
+    globalThis.STATE.byName = [];
+    out.none = await ops.disconnectRestoredVm('vcA', 'web01-r');
+    globalThis.STATE.byName = ['vm-9', 'vm-10'];
+    out.two = await ops.disconnectRestoredVm('vcA', 'web01-r');
+    globalThis.STATE.byName = ['vm-9'];
+    globalThis.STATE.powerState = 'poweredOn';
+    out.on = await ops.disconnectRestoredVm('vcA', 'web01-r');
+    globalThis.STATE.powerState = 'poweredOff';
+    globalThis.FAIL = { disconnect: '끊었는지 확인하지 못했습니다' };
+    out.fail = await ops.disconnectRestoredVm('vcA', 'web01-r');
+    out.empty = await ops.disconnectRestoredVm('vcA', '  ');
+  `, { jobs: [] });
+  assert.equal(out.ok.ok, true, out.ok.detail);
+  assert.match(out.ok.detail, /1개 연결을 끊었습니다/);
+  assert.equal(out.none.ok, false); assert.match(out.none.detail, /찾지 못했습니다/);
+  assert.equal(out.two.ok, false); assert.match(out.two.detail, /2대 있어 .*손대지 않았습니다/);
+  assert.equal(out.on.ok, false); assert.match(out.on.detail, /켜져 있어/);
+  assert.equal(out.fail.ok, false); assert.match(out.fail.detail, /직접 끊으세요/);
+  assert.equal(out.empty.ok, false);
+  assert.deepEqual(out.calls.filter((c) => c.startsWith('disconnect')), ['disconnect:vm-9', 'disconnect:vm-9'], '1대 · 꺼짐일 때만 끊으러 간다(정상 · 확인 실패 두 번)');
 });
