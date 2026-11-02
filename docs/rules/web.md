@@ -337,7 +337,7 @@
   · 팝업은 **로그인 뒤에만**(App 의 `<Portal>` 옆 — 모든 셸 위) · 폴링 없음 · '보지 않기' 는 브라우저 저장이고 키가 `rev`(id + 수정 시각)라 고치면 다시 보인다.
   · 쓰기 권한: 공지 = admin + 전체 범위 · 글·댓글 = admin·operator(서버 불변조건 '/api 상태변경은 requireRole(admin, operator)') · 수정·삭제 = 작성자 또는 관리자 · 고정 = 관리자.
   · 상단 탭 'board' 를 더하면 V5 `tree.js`(TAB_NAMES·platform) · V6 `menus.js`(TAB_INFO·platform) · `noFilterTabs` 도 함께. 1600px 한 줄 메뉴는 14개에서도 잘리지 않았다(실측 nav scrollWidth == clientWidth).
-- **이슈 트래커(v2.863)** — `server/src/issues/store.js`(issues.json · 게시판과 같은 디바운스 비동기 원자 쓰기·손상 보존·합계 상한 `ISSUES_MAX_BYTES`) + `routes/api/issues.js`(`/issues*`, 회귀 `server/test/issues2863.test.js` — 실제 api 라우터로 역할별 상태코드) + 웹 `views/issues/`{Issues.jsx,issueText.js}. 디자인 시안: Claude Design 캔버스 https://claude.ai/artifact/DhvGAynr761G6y3arqqU8R:
+- **이슈 트래커(v2.864)** — `server/src/issues/store.js`(issues.json · 게시판과 같은 디바운스 비동기 원자 쓰기·손상 보존·합계 상한 `ISSUES_MAX_BYTES`) + `routes/api/issues.js`(`/issues*`, 회귀 `server/test/issues2864.test.js` — 실제 api 라우터로 역할별 상태코드) + 웹 `views/issues/`{Issues.jsx,issueText.js}. 디자인 시안: Claude Design 캔버스 https://claude.ai/artifact/DhvGAynr761G6y3arqqU8R:
   · 전이 규칙은 서버가 판정한다 — '진행 중' 은 담당자 필수(400) · 보류는 사유 필수 · 완료는 `closedAt`. 화면은 거부 사유를 그대로 보인다(두 벌 판정 금지).
   · 쓰기 권한: 생성·수정·상태·할당·댓글 = admin·operator(협업 도구라 남의 이슈도 고친다) · 삭제 = 본인 또는 **전체 범위** 관리자(게시판 `isBoardModerator` 와 같은 기준). 담당자 후보(`people`)는 쓰기 계정에게만 — viewer 에게 계정명 목록을 주지 않는다.
   · ⚠ `/issues/bulk/assign` 은 `/issues/:key/…` 보다 **먼저** 등록한다 — 뒤에 두면 'bulk' 가 키로 잡혀 404 다(초판 자체 테스트가 잡았다).
@@ -506,3 +506,5 @@
   ① 정책은 꺼짐이 기본 — 화면이 그 사실과 이유(VM 을 만들고 데이터스토어를 쓴다)를 먼저 말한다. 정책 바꾸기 · 지금 검증은 서버가 준 `fullScope` 일 때만 그린다(집행은 서버) · OTP 칸은 6자리 숫자만 · 실패해도 비운다.
   ② 폴링하지 않는다(처음 한 번 + 다시 읽기) · 결과 표의 Tools 응답 시간은 `toolsText`(모르면 '—' — 0 아님) · 정리 칸은 지움/남김/—.
   ③ 최근 묶음 진행(`latestBatchId`)에서 검증 회차는 뺀다 — 사람이 시작한 묶음만. 요약 메일 설정은 공통 기본값 저장과 따로 저장한다.
+  ④ v2.863 vCenter 별 검증 데이터스토어 칸은 정책 편집 안의 접힌 `<details>`(vCenter 가 28곳이어도 기본 화면을 늘리지 않게) · 목록은 편집을 열 때 `/datastores` 한 번(폴링 없음) ·
+     지금 값이 목록에 없으면 지우지 않고 사유를 붙인다(`rehearsalDsOptions` — 읽는 중 · 못 읽음 · 접근 불가 · 인벤토리에 없음을 가른다).

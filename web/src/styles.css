@@ -2293,7 +2293,7 @@ tr.row-sel > td { background: rgba(59, 130, 246, .10); }
   .bk-bulk::before { display: none; }
   .bk-side { top: calc(var(--bk-head, 56px) + 8px); }
 }
-/* ───── 이슈 트래커(v2.863) — views/issues/Issues.jsx. 상태 칩은 명도로도 갈리게(색만으로 구분하지 않는다), 그리드·플렉스 자식 min-width:0 ───── */
+/* ───── 이슈 트래커(v2.864) — views/issues/Issues.jsx. 상태 칩은 명도로도 갈리게(색만으로 구분하지 않는다), 그리드·플렉스 자식 min-width:0 ───── */
 .iss-page { min-width: 0; display: flex; flex-direction: column; gap: 10px; }
 .iss-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .iss-summary { font-size: 12.5px; min-width: 0; }

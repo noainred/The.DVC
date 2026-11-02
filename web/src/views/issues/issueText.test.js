@@ -1,4 +1,4 @@
-// issueText.test.js — 이슈 트래커 화면 판정·문구(v2.863).
+// issueText.test.js — 이슈 트래커 화면 판정·문구(v2.864).
 import { describe, it, expect } from 'vitest';
 import {
   dueInfo, dateText, initialOf, colorIndexOf, groupByStatus, filterRows, myWork, loadPct, toDateInput, fromDateInput, parseLabels,

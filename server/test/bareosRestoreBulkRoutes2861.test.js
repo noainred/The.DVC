@@ -255,6 +255,10 @@ test('⑤ v2.862 복원 검증 · 일일 요약 — 전체 범위 · OTP · 입�
   assert.equal(g.j.policy.savedBy, '');
   assert.ok(g.j.runs.every((x) => (x.items || []).every((it) => it.jobId !== ID.db)));
   assert.match((await call('admin', 'GET', '/rehearsal')).t, /ds-secret-warsaw/, '전체 범위 관리자는 본다');
+  // v2.863 정책 화면의 vCenter 별 데이터스토어 칸 — 활성 대상이 있는 vCenter 목록(전체 범위만 · 범위 계정에는 없다)
+  const gv = (await call('admin', 'GET', '/rehearsal')).j.vcenters;
+  assert.ok(Array.isArray(gv) && gv.some((v) => v.id === 'vc-a' && v.jobs >= 1), JSON.stringify(gv));
+  assert.equal(g.j.vcenters, undefined, '범위 계정에는 vCenter 목록을 싣지 않는다(정책 편집은 전체 범위 전용)');
   assert.equal(g.j.results[0].jobId, ID.web);
   // 일일 요약: 범위 계정 403 · 틀린 시각 400 · 저장
   assert.equal((await call('sadm', 'GET', '/digest')).s, 403);

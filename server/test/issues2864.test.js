@@ -1,5 +1,5 @@
 /**
- * issues2863.test.js — 이슈 트래커(v2.863) 회귀.
+ * issues2864.test.js — 이슈 트래커(v2.864) 회귀.
  *
  * 실제 `api` 라우터를 express 에 마운트하고 역할을 바꿔 가며 상태코드를 본다(소스 grep 이 아니다 — v2.536 규약).
  * 고정하는 것: ① viewer 는 조회만(쓰기 403) · operator 가 만든 이슈는 ISS-1 부터 ② 전이 규칙 — 담당자 없이 '진행 중' 400, 완료는 closedAt,
@@ -20,7 +20,7 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SRC = path.resolve(HERE, '../src');
 
 function run(body, { pre } = {}) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'issues2863-'));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'issues2864-'));
   if (pre) pre(dir);
   const script = `
     const express = (await import('express')).default;

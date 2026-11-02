@@ -90,6 +90,21 @@ describe('v2.861 복원 고르기 · 마법사 판정', () => {
     ];
     for (const s of outs) { expect(s).not.toMatch(/`/); expect(s).not.toMatch(/\*\*/); }
   });
+  it('v2.863 검증 데이터스토어 선택지 — 첫 칸은 고르지 않음 · 이름 순 · 접근 불가는 고르지 못함 · 지금 값은 사유를 붙여 남긴다', () => {
+    const list = [{ name: 'ds-b', freeGB: 2048, capacityGB: 4096 }, { name: 'ds-a', freeGB: null, capacityGB: 100 }, { name: 'ds-x', freeGB: 10, capacityGB: 10, accessible: false }];
+    const o = T.rehearsalDsOptions(list, '');
+    expect(o.map((x) => x.value)).toEqual(['', 'ds-a', 'ds-b']);
+    expect(o[1].label).toBe('ds-a · 여유 — / 100GB');
+    expect(o[2].label).toBe('ds-b · 여유 2.0TB / 4.0TB');
+    expect(T.rehearsalDsOptions(list, 'ds-b').length).toBe(3);
+    expect(T.rehearsalDsOptions(list, 'ds-x')[1]).toEqual({ value: 'ds-x', label: 'ds-x · 접근 불가(인벤토리 기준)', warn: true });
+    expect(T.rehearsalDsOptions(list, 'gone')[1].label).toMatch(/인벤토리에 없음/);
+    expect(T.rehearsalDsOptions([], 'gone')[1].label).toMatch(/인벤토리에 없음/);
+    expect(T.rehearsalDsOptions(null, 'ds-a')[1].label).toBe('ds-a · 목록을 읽지 못함');
+    expect(T.rehearsalDsOptions(null, 'ds-a', { loading: true })[1].label).toBe('ds-a · 목록을 읽는 중');
+    expect(T.rehearsalDsOptions(null, '').map((x) => x.value)).toEqual(['']);
+    expect(T.rehearsalPolicyText({ enabled: true, weekday: 0, time: '02:00', perCorp: 1, deleteOnOk: false, datastores: { a: 'x', b: 'y' } })).toBe('켜짐 · 매주 일요일 02:00 · 법인마다 1대 · 성공한 검증용 VM 남김 · 실패는 남김 · 데이터스토어 지정 2곳');
+  });
   it('v2.862 복원 검증 · 일일 요약 글자 — 모르면 —(0 아님) · 검증 회차는 최근 묶음에서 뺀다', () => {
     expect(T.rehearsalPolicyText({ enabled: false, weekday: 6, time: '03:17', perCorp: 3, deleteOnOk: true })).toBe('꺼짐 · 매주 토요일 03:17 · 법인마다 3대 · 성공한 검증용 VM 지움 · 실패는 남김');
     expect([T.toolsText(null), T.toolsText(undefined), T.toolsText(0), T.toolsText(42_000), T.toolsText(125_000)]).toEqual(['—', '—', '0초', '42초', '2분 5초']);

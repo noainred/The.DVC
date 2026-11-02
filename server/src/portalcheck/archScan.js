@@ -229,7 +229,7 @@ export const KNOWN_CONFIG_FILES = Object.freeze({
   'backup-marks.json': 'VM 별 백업 표시 — 업무 중요도·백업 필요·메모(veeam/backupMarks.js — 사용자 데이터, 원자 쓰기·손상 보존, v2.784). 백업 번들에는 들어가고 변경 감시 지문에서는 뺀다',
   'vm-export-prefs.json': 'VM 전체 정보 내보내기 \'내 저장값\'(계정별 기본값 · 1~5칸 — vcenter/vmExportPrefs.js · util/exportPrefs.js, 원자 쓰기·손상 보존 503, 비밀 없음, v2.799)',
   'board.json': '게시판 글·댓글·공감(bulletin/store.js — 로그인 사용자가 쓰는 사용자 데이터, 디바운스 비동기 쓰기·손상 보존·합계 상한 BOARD_MAX_BYTES, v2.722)',
-  'issues.json': '이슈 트래커 이슈·댓글·이력(issues/store.js — 로그인 사용자가 쓰는 사용자 데이터, 디바운스 비동기 쓰기·손상 보존·합계 상한 ISSUES_MAX_BYTES, v2.863)',
+  'issues.json': '이슈 트래커 이슈·댓글·이력(issues/store.js — 로그인 사용자가 쓰는 사용자 데이터, 디바운스 비동기 쓰기·손상 보존·합계 상한 ISSUES_MAX_BYTES, v2.864)',
 });
 
 /* ── 공용 ─────────────────────────────────────────────────────────────────────── */

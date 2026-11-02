@@ -263,11 +263,15 @@ export async function restoreChain(session, jobid) {
  * @returns jobid(복원 잡)
  */
 export async function runRestore(session, { client, jobids, restoreJob, pluginOptions }) {
+  return jobIdOf(await session.call(restoreCommand({ client, jobids, restoreJob, pluginOptions }), { timeoutMs: 120_000 }));
+}
+
+/** 복원 명령 문자열(순수 — runRestore 와 bareos-probe '--restore-plan' 미리 보기가 같은 글자를 쓴다 · v2.863). 틀린 값은 던진다. */
+export function restoreCommand({ client, jobids, restoreJob, pluginOptions }) {
   if (!isResourceName(client)) throw bad('복원 FD 이름이 올바르지 않습니다.');
   if (!isResourceName(restoreJob)) throw bad('복원 잡 이름이 올바르지 않습니다.');
   const ids = (Array.isArray(jobids) ? jobids : []).map(asId);
   if (!ids.length || ids.length > 400) throw bad('복원할 백업 jobid 목록이 올바르지 않습니다.');
   if (typeof pluginOptions !== 'string' || !pluginOptions || /["\\;@\r\n\0]/.test(pluginOptions)) throw bad('복원 플러그인 옵션이 올바르지 않습니다.');
-  const cmd = `restore client=${client} restoreclient=${client} jobid=${ids.join(',')} restorejob=${restoreJob} pluginoptions=${consoleQuote(pluginOptions)} all done yes`;
-  return jobIdOf(await session.call(cmd, { timeoutMs: 120_000 }));
+  return `restore client=${client} restoreclient=${client} jobid=${ids.join(',')} restorejob=${restoreJob} pluginoptions=${consoleQuote(pluginOptions)} all done yes`;
 }

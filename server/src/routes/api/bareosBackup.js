@@ -1261,8 +1261,17 @@ api.get('/tools/bareos-backup/rehearsal', adminOnly, (req, res) => {
     : st.policy;
   const runs = st.runs.filter((x) => !visDirs || visDirs.has(x.directorId)).slice(0, 20)
     .map((x) => (allowed ? { ...x, items: (x.items || []).filter((it) => allowed.has(vcOfJob.get(it.jobId))) } : x));
+  // v2.863 정책 화면의 vCenter 별 데이터스토어 칸 — 활성 대상이 있는 vCenter(정책 편집은 전체 범위 전용이라 범위 계정에는 싣지 않는다)
+  let vcenters;
+  if (!allowed) {
+    const cnt = new Map();
+    for (const j of allJobs) if (j.enabled !== false) cnt.set(j.vcenterId, (cnt.get(j.vcenterId) || 0) + 1);
+    const vcName = new Map((store.get()?.vcenters || []).map((v) => [v.id, v.name || v.id]));
+    vcenters = [...cnt].map(([id, jobs]) => ({ id, name: vcName.get(id) || id, jobs })).sort((a, b) => String(a.name).localeCompare(String(b.name)));
+  }
   res.json({
     ok: true, policy, loadError: st.loadError, fullScope: !allowed,
+    ...(vcenters ? { vcenters } : {}),
     runs, results: results.slice(0, 100),
     weeks: Object.fromEntries(Object.entries(st.weeks).filter(([k]) => !visDirs || visDirs.has(k))),   // 법인별 마지막 회차 날짜(포탈 시각)
   });
@@ -1276,7 +1285,7 @@ api.put('/tools/bareos-backup/rehearsal', adminOnly, fullScopeOnly, fullWriteOnl
   if (config.auth.enabled) { const v = verifyUserOtp(name, req.body?.otp); if (!v.ok) return res.status(403).json({ ok: false, reason: `OTP 인증 실패 — ${v.reason}` }); }
   try {
     const saved = savePolicy(next, { by: name });
-    audit(req, 'Bareos 복원 검증 정책', '전 법인', `${saved.enabled ? '켬' : '끔'} · 요일 ${saved.weekday} ${saved.time} · 법인마다 ${saved.perCorp}대 · 성공 ${saved.deleteOnOk ? '지움' : '남김'}`);
+    audit(req, 'Bareos 복원 검증 정책', '전 법인', `${saved.enabled ? '켬' : '끔'} · 요일 ${saved.weekday} ${saved.time} · 법인마다 ${saved.perCorp}대 · 성공 ${saved.deleteOnOk ? '지움' : '남김'} · 데이터스토어 지정 ${Object.keys(saved.datastores || {}).length}곳`);
     res.json({ ok: true, policy: saved });
   } catch (e) { res.status(e?.code === 'unreadable' ? 503 : 400).json({ ok: false, reason: String(e?.message || e) }); }
 });

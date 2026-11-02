@@ -143,7 +143,7 @@
 | `isidu-push.json` | 설정 | 아이실론 디렉터리 사용량 엣지 push 커서(상태, v2.736) | ✅ |  | ✅ | isidu/push.js |
 | `isidu-settings.json` | 설정 | 아이실론 디렉터리 사용량 조사 대상(v2.736 — 아이실론·경로·주기·실행 노드·보존일. 비밀 없음) | ✅ | ✅ | ✅ | isidu/settings.js |
 | `isidu.db` | DB | 아이실론 디렉터리 사용량 이력 DB(v2.736). 파일: `<dbDir>/isidu.db` |  |  | ✅ | isidu/db.js |
-| `issues.json` | 설정 | 이슈 트래커 이슈·댓글·이력(v2.863 — 로그인 사용자가 쓰는 사용자 데이터. 비밀 없음) | ✅ | ✅ | ✅ | issues/store.js |
+| `issues.json` | 설정 | 이슈 트래커 이슈·댓글·이력(v2.864 — 로그인 사용자가 쓰는 사용자 데이터. 비밀 없음) | ✅ | ✅ | ✅ | issues/store.js |
 | `link-check.db` | DB | 통신 점검 로그 **3단 DB**(v2.552). 파일: `<dbDir>/link-check.db` |  |  | ✅ | linkcheck/db.js |
 | `linkcheck-settings.json` | 설정 | 통신 점검 설정(v2.552). 파일: `CONFIG_DIR/linkcheck-settings.json` | ✅ | ✅ | ✅ | linkcheck/settings.js |
 | `llm.json` | 설정 | Local LLM (Ollama) settings for natural-language search. Stored in | ✅ | ✅ | ✅ | llm/config.js |

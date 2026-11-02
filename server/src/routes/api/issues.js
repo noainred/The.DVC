@@ -1,5 +1,5 @@
 /**
- * routes/api/issues.js — 이슈 트래커 API(v2.863). 등록·할당·상태·댓글·이력·통계.
+ * routes/api/issues.js — 이슈 트래커 API(v2.864). 등록·할당·상태·댓글·이력·통계.
  *
  * 권한(게시판 v2.722 와 같은 틀 — 서버 불변조건 '/api 상태변경은 requireRole(admin, operator)'):
  *  · 조회(목록·상세·통계·메타): 로그인 사용자 전부. 이슈는 vCenter 축이 없는 포탈 공용 데이터라 범위 계정도 같은 목록을 본다.
@@ -98,7 +98,7 @@ export function registerIssues(api) {
     try { res.json({ ok: true, issue: getIssue(req.params.key, userOf(req)), canWrite: canWrite(req), isMod: isMod(req), me: userOf(req) }); } catch (e) { fail(res, e, next); }
   });
 
-  // ⚠ '/issues/:key/…' 보다 먼저 — 뒤에 두면 'bulk' 가 키로 잡혀 404 가 된다(v2.863 자체 테스트가 잡았다).
+  // ⚠ '/issues/:key/…' 보다 먼저 — 뒤에 두면 'bulk' 가 키로 잡혀 404 가 된다(v2.864 자체 테스트가 잡았다).
   api.post('/issues/bulk/assign', writers, async (req, res, next) => {
     try {
       const r = bulkAssign(req.body?.keys, req.body?.assignee, userOf(req));

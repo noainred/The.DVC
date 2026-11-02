@@ -19,7 +19,7 @@ const Datastores = lazy(() => import('./views/Datastores.jsx'));
 const Networks = lazy(() => import('./views/Networks.jsx'));
 const Alarms = lazy(() => import('./views/Alarms.jsx'));
 const Board = lazy(() => import('./views/board/Board.jsx')); // 게시판(v2.722)
-const Issues = lazy(() => import('./views/issues/Issues.jsx')); // 이슈 트래커(v2.863)
+const Issues = lazy(() => import('./views/issues/Issues.jsx')); // 이슈 트래커(v2.864)
 const NoticePopup = lazy(() => import('./views/board/NoticePopup.jsx')); // 접속 공지 팝업(v2.722)
 // IP관리(구 '센터별 IP 관리대장', v2.274 특수 기능에서 승격) — 단독 래퍼(IpamStandalone)는 IpamCore.jsx 가 소유한다.
 // v2.613 WEB2613-08: 예전에는 SpecialTools.jsx(허브 모듈 전체, gz 40KB)를 경유해 lazy 했다 — 허브를 열면 IPAM 3화면이,
@@ -69,7 +69,7 @@ const TABS = [
   { id: 'tools', label: '특수 기능' },
   // 게시판(v2.722) — 로그인 사용자 전부가 읽는다(글쓰기는 서버가 admin·operator 로 집행). 공지(접속 팝업) 관리도 여기 서브탭이다.
   { id: 'board', label: '게시판' },
-  // 이슈 트래커(v2.863) — 로그인 사용자 전부가 읽는다(등록·할당·상태 변경은 서버가 admin·operator 로 집행).
+  // 이슈 트래커(v2.864) — 로그인 사용자 전부가 읽는다(등록·할당·상태 변경은 서버가 admin·operator 로 집행).
   { id: 'issues', label: '이슈' },
   // 인사이트는 v2.592 에 '특수 기능' 하위로 이동(specialToolsList 'insights-hub' 카드 · #/tools/insights-hub.
   // ⚠ 'insights' 카드는 다른 화면(운영 인사이트)이다).
