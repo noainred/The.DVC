@@ -22,7 +22,7 @@ describe('서버 코드 ↔ 화면 문구 1:1', () => {
     expect(Object.keys(EDGE_KIND_TEXT).sort()).toEqual(listOf('EDGE_SYNC_KINDS').sort());
   });
   it('문구에 백틱·별표 강조가 없다(BoldText 가 글자로 그린다)', () => {
-    const all = JSON.stringify({ EDGE_STATE_TEXT, SYNC_OUTCOME_TEXT, EDGE_KIND_TEXT, EDGE_SYNC_OFF_FIX }) + JSON.stringify(syncRunText({ ok: true, run: { outcome: 'pushed', pushed: 2, ok: 1, version: '2.863.0', failed: [{ id: 'a', reason: 'x' }] } })) + JSON.stringify(edgeSyncLine({ enabled: true, total: 1, counts: { behind: 1 }, lastRun: { at: 1, outcome: 'pushed', ok: 0, pushed: 1, restored: true } })) + edgeAutoCheckboxHint({ edgeSync: { intervalMs: 600_000 } }) + noSyncText({ edgeSync: { enabled: true } });
+    const all = JSON.stringify({ EDGE_STATE_TEXT, SYNC_OUTCOME_TEXT, EDGE_KIND_TEXT, EDGE_SYNC_OFF_FIX }) + JSON.stringify(syncRunText({ ok: true, run: { outcome: 'pushed', pushed: 2, ok: 1, version: '2.865.0', failed: [{ id: 'a', reason: 'x' }] } })) + JSON.stringify(edgeSyncLine({ enabled: true, total: 1, counts: { behind: 1 }, lastRun: { at: 1, outcome: 'pushed', ok: 0, pushed: 1, restored: true } })) + edgeAutoCheckboxHint({ edgeSync: { intervalMs: 600_000 } }) + noSyncText({ edgeSync: { enabled: true } });
     expect(all.includes('`')).toBe(false);
     expect(all.includes('**')).toBe(false);
   });
@@ -74,7 +74,7 @@ describe('엣지 자동 업그레이드 요약', () => {
     expect(edgeAutoCheckboxHint({})).toMatch(/주기적으로/);
     expect(edgeAutoCheckboxHint({})).not.toMatch(/10분/);
   });
-  it('v2.863: 재시작 전 기록 · 옛 방식 엣지 표지 · 설정에서 뺀 엣지', () => {
+  it('v2.865: 재시작 전 기록 · 옛 방식 엣지 표지 · 설정에서 뺀 엣지', () => {
     const s = { enabled: true, edgeAutoUpgrade: true, edgeSync: { enabled: true, armed: true, intervalMs: 600_000, nextRunAt: NOW + 60_000, total: 2, counts: { 'up-to-date': 1, behind: 1, ahead: 0, unknown: 0, unreachable: 0, disabled: 0, waiting: 0, backoff: 0 },
       lastRun: { at: NOW - 5 * 60_000, outcome: 'idle', restored: true }, legacy: 1, legacyDropped: [{ url: 'http://169.254.1.1', reason: '링크로컬 대역' }],
       pending: [{ id: 'edge:https://e1', name: 'https://e1', kind: 'edge', version: '2.860.0', state: 'behind', reason: null, nextAt: null }] } };
@@ -83,17 +83,17 @@ describe('엣지 자동 업그레이드 요약', () => {
     expect(a.rows[0].kind).toBe('옛 방식 엣지');
     expect(a.dropped).toEqual(['http://169.254.1.1 — 링크로컬 대역']);
   });
-  it("v2.863: '지금 동기화' 결과 문구", () => {
-    expect(syncRunText({ ok: true, run: { outcome: 'pushed', pushed: 2, ok: 2, version: '2.863.0', failed: [] } })).toEqual({ ok: true, text: '뒤처진 엣지에 중앙 버전 번들을 밀어 넣었습니다 — 2/2대 성공 (v2.863.0)' });
-    const part = syncRunText({ ok: false, run: { outcome: 'pushed', pushed: 2, ok: 1, version: '2.863.0', failed: [{ id: 'a', name: '부산', reason: 'HTTP 403' }] } });
-    expect(part.ok).toBe(false); expect(part.text).toMatch(/1\/2대 성공 \(v2\.863\.0\) · 실패: 부산: HTTP 403/);
+  it("v2.865: '지금 동기화' 결과 문구", () => {
+    expect(syncRunText({ ok: true, run: { outcome: 'pushed', pushed: 2, ok: 2, version: '2.865.0', failed: [] } })).toEqual({ ok: true, text: '뒤처진 엣지에 중앙 버전 번들을 밀어 넣었습니다 — 2/2대 성공 (v2.865.0)' });
+    const part = syncRunText({ ok: false, run: { outcome: 'pushed', pushed: 2, ok: 1, version: '2.865.0', failed: [{ id: 'a', name: '부산', reason: 'HTTP 403' }] } });
+    expect(part.ok).toBe(false); expect(part.text).toMatch(/1\/2대 성공 \(v2\.865\.0\) · 실패: 부산: HTTP 403/);
     expect(syncRunText({ ok: true, run: { outcome: 'idle' } })).toEqual({ ok: true, text: SYNC_OUTCOME_TEXT.idle });
     expect(syncRunText({ ok: false, run: { outcome: 'no-bundle', behind: 3, reason: '원격 소스의 최신은 v2.864.0' } }).text).toMatch(/뒤처진 3대 · 원격 소스의 최신은/);
     expect(syncRunText({ ok: false, run: { outcome: 'skipped', reason: '업그레이드 확인·적용이 진행 중' } })).toEqual({ ok: false, text: `${SYNC_OUTCOME_TEXT.skipped} — 업그레이드 확인·적용이 진행 중` });
     expect(syncRunText({ ok: false, reason: 'auto-upgrade disabled' }).text).toMatch(/자동 업그레이드 사용이 꺼져/);
     expect(syncRunText(null).ok).toBe(false);
   });
-  it('v2.863: 수집 서버 화면 한 줄', () => {
+  it('v2.865: 수집 서버 화면 한 줄', () => {
     expect(edgeSyncLine(null)).toBe(null);
     const off = edgeSyncLine({ enabled: false });
     expect(off.tone).toBe('muted'); expect(off.canRun).toBe(false); expect(off.text).toMatch(/꺼짐/);

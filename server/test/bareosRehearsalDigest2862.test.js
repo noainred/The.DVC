@@ -148,3 +148,26 @@ test('⑤ 반증 반영 — 빈 인벤토리면 미루고 회차를 차지하지
   const src = fs.readFileSync(new URL('../src/bareos/rehearsal.js', import.meta.url), 'utf8');
   assert.match(src, /st\.weeks\[dirId\] = day;[^\n]*\n\s*saveState\(\);/, '회차 기록 바로 뒤에 파일 저장(보내기 전)');
 });
+
+test('⑥ v2.863 정책에서 고른 데이터스토어 — 여유를 모르면 정기 검증이 보내지 않는다 · 인벤토리에 없으면 건너뜀 · 알면 판정을 지난다', async () => {
+  RH._resetRehearsalForTest();
+  RH.savePolicy({ enabled: false, weekday: 6, time: '03:17', perCorp: 3, deleteOnOk: true, datastores: { 'vc-a': 'shared-01', 'vc-b': 'gone-ds', 'vc-c': 'roomy' } }, { by: 't' });
+  store.snapshot = { generatedAt: Date.now(), vcenters: [{ id: 'vc-a' }, { id: 'vc-b' }, { id: 'vc-c' }], hosts: [],
+    datastores: [{ vcenterId: 'vc-a', name: 'shared-01', freeGB: null, capacityGB: 1000 }, { vcenterId: 'vc-c', name: 'roomy', freeGB: 5000, capacityGB: 8000 }],
+    vms: [{ id: 'vc-a:vm-1', vcenterId: 'vc-a', name: 'app-01', storageGB: 40, vcDcPath: 'DC', folderPath: '/' },
+      { id: 'vc-b:vm-2', vcenterId: 'vc-b', name: 'app-02', storageGB: 40, vcDcPath: 'DC', folderPath: '/' },
+      { id: 'vc-c:vm-3', vcenterId: 'vc-c', name: 'app-03', storageGB: 40, vcDcPath: 'DC', folderPath: '/' }] };
+  fs.writeFileSync(path.join(tmp, registry.FILE_NAME), JSON.stringify({ version: 1, jobs: [
+    { id: 'p1', vcenterId: 'vc-a', vmId: 'vc-a:vm-1', vmName: 'app-01', dc: 'DC', folder: '/', directorId: 'D8', bareosJob: 'pv-11', enabled: true, lastRun: { jobid: 21, state: 'ok' }, restores: [] },
+    { id: 'p2', vcenterId: 'vc-b', vmId: 'vc-b:vm-2', vmName: 'app-02', dc: 'DC', folder: '/', directorId: 'D8', bareosJob: 'pv-12', enabled: true, lastRun: { jobid: 22, state: 'ok' }, restores: [] },
+    { id: 'p3', vcenterId: 'vc-c', vmId: 'vc-c:vm-3', vmName: 'app-03', dc: 'DC', folder: '/', directorId: 'D8', bareosJob: 'pv-13', enabled: true, lastRun: { jobid: 23, state: 'ok' }, restores: [] },
+  ], retired: [] }));
+  registry._resetForTest();
+  const r = await RH.runRehearsal('D8');
+  const why = Object.fromEntries(r.items.map((x) => [x.jobId, x.reason || '']));
+  assert.match(why.p1, /shared-01.*여유 · VM 용량을 읽지 못해 건너뛰었습니다/, '정한 DS 의 여유를 모르면 정기 작업은 보내지 않는다');
+  assert.match(why.p2, /gone-ds.*인벤토리에 없습니다/, '인벤토리에 없는 DS 는 그 VM 만 건너뛴다');
+  assert.doesNotMatch(why.p3, /여유|인벤토리에 없습니다/, '여유를 아는 DS 는 판정을 지나 보내기 단계로 간다');
+  assert.equal(registry.getJob('p1').restores.length, 0);
+  assert.equal(registry.getJob('p2').restores.length, 0);
+});

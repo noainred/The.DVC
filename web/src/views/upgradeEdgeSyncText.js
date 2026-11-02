@@ -4,7 +4,7 @@
  *
  * 판정은 서버(`server/src/upgrade/edgeSync.js`)가 코드로 하고 여기서는 문장만 만든다 — **다시 판정하지 않는다**.
  * 코드 표(EDGE_STATE_TEXT·SYNC_OUTCOME_TEXT·EDGE_KIND_TEXT)는 서버 `EDGE_SYNC_STATES`·`EDGE_SYNC_OUTCOMES`·`EDGE_SYNC_KINDS` 와 1:1(테스트가 서버 소스와 대조한다).
- * v2.863: 재시작 전 기록 표지 · 옛 방식 엣지 표지 · '지금 동기화' 결과 문구 · 수집 서버 화면 한 줄(edgeSyncLine).
+ * v2.865: 재시작 전 기록 표지 · 옛 방식 엣지 표지 · '지금 동기화' 결과 문구 · 수집 서버 화면 한 줄(edgeSyncLine).
  * 문구 규칙: 백틱 금지(BoldText 가 글자로 그린다), 값 인용은 ‘ ’, 주기·시각 숫자는 서버가 준 값만 쓴다.
  */
 import { agoText } from './tools/relTime.js';
@@ -89,7 +89,7 @@ export function edgeSyncSummary(status, now = Date.now()) {
     const kind = EDGE_KIND_TEXT[r.kind] || '';
     return { id: String(r.id || ''), name: String(r.name || r.id || ''), kind, version: r.version ? String(r.version) : null, text: `${t.label}${when}`, tone: t.tone, reason: r.reason ? String(r.reason) : null };
   });
-  // v2.863 B: 설정에서 뺀 옛 방식 엣지(형식 오류·SSRF 차단 대역)는 조용히 빼지 않고 말한다.
+  // v2.865 B: 설정에서 뺀 옛 방식 엣지(형식 오류·SSRF 차단 대역)는 조용히 빼지 않고 말한다.
   const dropped = (Array.isArray(e.legacyDropped) ? e.legacyDropped : []).filter((d) => d && typeof d === 'object').map((d) => `${String(d.url || '')} — ${String(d.reason || '')}`);
   return { label, tone, next, last, lastTone, counts, rows, fix, dropped };
 }
@@ -109,7 +109,7 @@ export function edgeAutoCheckboxHint(status) {
 }
 
 /**
- * v2.863 C: '지금 동기화' 응답(POST /upgrade/edge-sync → { ok, run }) → 버튼 아래 문구 { ok, text }. 결과 코드는 SYNC_OUTCOME_TEXT 와 같다.
+ * v2.865 C: '지금 동기화' 응답(POST /upgrade/edge-sync → { ok, run }) → 버튼 아래 문구 { ok, text }. 결과 코드는 SYNC_OUTCOME_TEXT 와 같다.
  */
 export function syncRunText(resp) {
   const x = resp && typeof resp === 'object' ? resp : {};
@@ -128,7 +128,7 @@ export function syncRunText(resp) {
 }
 
 /**
- * v2.863 C: 설정 › 수집 서버 화면의 한 줄 — 서버가 edgeSync 를 보내지 않으면(구버전) null. { text, tone, canRun }.
+ * v2.865 C: 설정 › 수집 서버 화면의 한 줄 — 서버가 edgeSync 를 보내지 않으면(구버전) null. { text, tone, canRun }.
  */
 export function edgeSyncLine(e, now = Date.now()) {
   if (!e || typeof e !== 'object') return null;

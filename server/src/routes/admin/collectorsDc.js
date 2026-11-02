@@ -142,7 +142,7 @@ adminRouter.get('/collectors', adminOnly, fleetOnly, (_req, res) => {
   const lr = upgradeManager.lastResult;
   const cp = lr?.collectorPush;
   const autoPush = cp && Number.isFinite(Number(lr.at)) ? { at: lr.at, version: lr.version || null, total: cp.total ?? 0, ok: cp.ok ?? 0, ...(cp.skipped ? { skipped: cp.skipped } : {}) } : null;
-  // v2.863 C: 엣지 자동 업그레이드 동기화 상태(켜짐·다음·마지막·뒤처진 엣지) — 수집 서버 화면이 한 줄로 말하고 '구버전 엣지 밀어 넣기' 버튼을 연다.
+  // v2.865 C: 엣지 자동 업그레이드 동기화 상태(켜짐·다음·마지막·뒤처진 엣지) — 수집 서버 화면이 한 줄로 말하고 '구버전 엣지 밀어 넣기' 버튼을 연다.
   res.json({ collectors, loadError: registryLoadErrorSummary(), status: mergeAutoPushStatus(allCollectorStatus(), lr), autoPush, identity: agentIdentitySummary(), transport: transportView(collectors), edgeSync: upgradeManager.edgeSync.status() });
 });
 

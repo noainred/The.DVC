@@ -20,7 +20,7 @@
  *    자기 push 를 한다(manager 가 `inflight` 를 기다린다). 결과는 수집 서버 상태(`upgrade`)와 이 모듈의 lastRun 에 남는다.
  *  - 상태 코드는 서버가 정하고 문장은 웹 `views/upgradeEdgeSyncText.js` 가 만든다(1:1 — 웹 테스트가 이 소스와 대조한다).
  *
- * v2.863(사용자 선택 A·B·C·D — '프로그램 개선'):
+ * v2.865(사용자 선택 A·B·C·D — '프로그램 개선'):
  *  A. lastRun 은 재시작 뒤에도 남는다 — manager 가 upgrade-status.json 에 `lastEdgeSync` 로 쓰고(onRun 훅), 기동 때 되살려 `restored:true`
  *     를 단다(화면이 '재시작 전 기록' 이라 말한다). 모르는 결과 코드는 'error' 로 읽는다(지어내지 않는다).
  *  B. 옛 방식 엣지(upgrade.json `edges` · env UPGRADE_EDGES — `/api/upgrade/bundle` 로 받는 포탈 엣지)도 동기화 대상이다. 버전은 수집 pull 이
@@ -87,7 +87,7 @@ export function backoffMs(attempts, baseMs, maxMs = SYNC_BACKOFF_MAX_MS) {
   const base = Math.max(SYNC_MIN_MS, numOrNull(baseMs) ?? 600_000);
   return Math.min(maxMs, base * 2 ** Math.min(20, n - 1));
 }
-/** v2.863 D: 이 연속 실패 수가 백오프 상한에 닿았는가(= 알림을 보낼 때). */
+/** v2.865 D: 이 연속 실패 수가 백오프 상한에 닿았는가(= 알림을 보낼 때). */
 export const backoffCapped = (attempts, baseMs, maxMs = SYNC_BACKOFF_MAX_MS) => backoffMs(attempts, baseMs, maxMs) >= maxMs;
 
 const txt = (v, n) => (typeof v === 'string' && v ? v.slice(0, n) : null);
@@ -96,7 +96,7 @@ const LEGACY_PREFIX = 'edge:';
 export const isLegacyId = (id) => typeof id === 'string' && id.startsWith(LEGACY_PREFIX);
 
 /**
- * v2.863 B: 옛 방식 엣지 목록(설정 `edges` — url·token) → 동기화 행. origin 으로 이름·id 를 만들고 중복·형식 오류·SSRF 차단 대역은 뺀다
+ * v2.865 B: 옛 방식 엣지 목록(설정 `edges` — url·token) → 동기화 행. origin 으로 이름·id 를 만들고 중복·형식 오류·SSRF 차단 대역은 뺀다
  * (뺀 것은 `dropped` 에 사유와 함께 — 조용히 빼지 않는다).
  * @returns {{ edges:{id:string,name:string,url:string,token?:string,kind:'edge'}[], dropped:{url:string,reason:string}[] }}
  */
@@ -118,7 +118,7 @@ export function legacyEdgesOf(settings) {
 }
 
 /**
- * v2.863 B: 옛 방식 엣지의 버전 — 공개 `/api/health` 의 version(토큰 없이 · 리다이렉트 안 따라감 · 시한). 수집 서버 상태와 같은 모양
+ * v2.865 B: 옛 방식 엣지의 버전 — 공개 `/api/health` 의 version(토큰 없이 · 리다이렉트 안 따라감 · 시한). 수집 서버 상태와 같은 모양
  * ({ at, ok, version, error })으로 돌려 planEdgeSync 가 그대로 판정한다.
  */
 export async function probeEdgeVersion(edge, { fetchImpl = fetch, timeoutMs = EDGE_PROBE_TIMEOUT_MS, now = Date.now } = {}) {
@@ -140,7 +140,7 @@ export async function probeEdgeVersion(edge, { fetchImpl = fetch, timeoutMs = ED
 /**
  * 어느 엣지에 밀 것인가(순수).
  * @param {object} o
- * @param {object[]} o.collectors 등록부(loadCollectors) — id·name·url·enabled(+ v2.863 kind: 'collector'|'edge')
+ * @param {object[]} o.collectors 등록부(loadCollectors) — id·name·url·enabled(+ v2.865 kind: 'collector'|'edge')
  * @param {(id:string)=>object|null} o.statusOf 수집 서버 상태(version·ok·error)
  * @param {(id:string)=>({at:number,ok:boolean,target:string,attempts:number,reason?:string}|null)} o.attemptsOf 이 프로세스의 push 기록
  * @param {string|null} o.currentVersion 중앙 버전
@@ -203,7 +203,7 @@ export async function resolveCurrentBundle(settings, cur, { allowRemote = true }
   return b;
 }
 
-/** v2.863 D: 반복 실패 알림 본문(순수). closed 면 '해소'. */
+/** v2.865 D: 반복 실패 알림 본문(순수). closed 면 '해소'. */
 export function edgeSyncAlert({ id, name, kind, target, attempts, reason, intervalMs, closed = false }) {
   const who = `${name || id}${kind === 'edge' ? ' (옛 방식 엣지)' : ''}`;
   const plain = (x) => String(x ?? '').replace(/\*\*/g, '');
@@ -224,7 +224,7 @@ export class EdgeSyncRunner {
    * @param {object} o
    * @param {() => object} o.settings 유효 업그레이드 설정(enabled·edgeAutoUpgrade·remoteBase·watchDir·token·edges)
    * @param {() => boolean} o.busy 업그레이드 확인·적용이 진행 중인가(그러면 이번 주기는 건너뛴다)
-   * @param {(run:object) => void} [o.onRun] 한 번 돌 때마다(결과 확정 뒤) — manager 가 상태 파일에 쓴다(v2.863 A)
+   * @param {(run:object) => void} [o.onRun] 한 번 돌 때마다(결과 확정 뒤) — manager 가 상태 파일에 쓴다(v2.865 A)
    */
   constructor({ settings = () => ({}), busy = () => false, now = () => Date.now(), currentVersion = readCurrentVersion,
     collectors = loadCollectors, statusOf = getCollectorStatus, pushFn = pushUpgradeToCollectors, pushEdgeFn = pushBundleToEdge,
@@ -235,9 +235,9 @@ export class EdgeSyncRunner {
     this.probeFn = probeFn; this.notifyFn = notifyFn; this.resolveBundle = resolveBundle; this.onRun = onRun;
     this.fixedIntervalMs = intervalMs; this.firstDelayMs = firstDelayMs; this.log = log;
     this.attempts = new Map();     // id → { at, ok, target, attempts, reason }
-    this.legacyStatus = new Map(); // v2.863 B: 옛 방식 엣지 id → { at, ok, version, error }(마지막 health 질의)
-    this.legacyDropped = [];       // v2.863 B: 설정에서 뺀 옛 방식 엣지(사유)
-    this.alerted = new Set();      // v2.863 D: 알린 `${id}|${target}`
+    this.legacyStatus = new Map(); // v2.865 B: 옛 방식 엣지 id → { at, ok, version, error }(마지막 health 질의)
+    this.legacyDropped = [];       // v2.865 B: 설정에서 뺀 옛 방식 엣지(사유)
+    this.alerted = new Set();      // v2.865 D: 알린 `${id}|${target}`
     this.timer = null; this.firstTimer = null; this.armedAt = null; this.intervalMs = 0;
     this.inflight = null; this.lastRun = null; this.lastPlan = null;
     this.remoteAskedAt = null;     // 지금 버전 번들을 원격에 물은 시각(못 구했을 때 1시간 안에 다시 묻지 않는다)
@@ -246,7 +246,7 @@ export class EdgeSyncRunner {
   /** 설정상 지금 동작하는가 — 기능 켬 + edgeAutoUpgrade(기본 켬). */
   enabledNow() { const s = this.settings() || {}; return !!(s.enabled && s.edgeAutoUpgrade !== false); }
 
-  /** v2.863 A: 재시작 전 기록을 되살린다(이 프로세스의 기록이 없을 때만). 모르는 결과 코드는 'error'. */
+  /** v2.865 A: 재시작 전 기록을 되살린다(이 프로세스의 기록이 없을 때만). 모르는 결과 코드는 'error'. */
   restore(prev) {
     if (!prev || typeof prev !== 'object' || this.lastRun) return false;
     this.lastRun = { ...prev, outcome: EDGE_SYNC_OUTCOMES.includes(prev.outcome) ? prev.outcome : 'error', restored: true };
@@ -270,7 +270,7 @@ export class EdgeSyncRunner {
     this.timer = null; this.firstTimer = null; this.armedAt = null; this.intervalMs = 0;
   }
 
-  /** 동기화 행 전부 — 등록 수집 서버 + 옛 방식 엣지(v2.863 B). */
+  /** 동기화 행 전부 — 등록 수집 서버 + 옛 방식 엣지(v2.865 B). */
   rows() {
     const cols = (this.collectors() || []).filter((c) => c && typeof c === 'object').map((c) => ({ ...c, kind: 'collector' }));
     const lg = legacyEdgesOf(this.settings() || {});
@@ -294,7 +294,7 @@ export class EdgeSyncRunner {
     return p;
   }
 
-  /** v2.863 D: push 결과 하나를 기록하고, 백오프 상한에 닿은 연속 실패·그 뒤의 성공을 알린다. */
+  /** v2.865 D: push 결과 하나를 기록하고, 백오프 상한에 닿은 연속 실패·그 뒤의 성공을 알린다. */
   async #recordResult(r, cur, rowsById) {
     const ok = r.ok === true || r.upToDate === true;
     const prev = this.attempts.get(r.id);
@@ -327,7 +327,7 @@ export class EdgeSyncRunner {
         const rows = this.rows();
         if (!rows.length) rec = { at, outcome: 'no-edges' };
         else {
-          // v2.863 B: 옛 방식 엣지는 동기화 때마다 /api/health 로 버전을 묻는다(수집 pull 이 없다). 동시 개수는 push 와 같은 상한.
+          // v2.865 B: 옛 방식 엣지는 동기화 때마다 /api/health 로 버전을 묻는다(수집 pull 이 없다). 동시 개수는 push 와 같은 상한.
           const legacy = rows.filter((r) => r.kind === 'edge');
           if (legacy.length) {
             const probed = await poolSettled(legacy, pushConcurrencyOf(), (e) => this.probeFn(e));
@@ -353,7 +353,7 @@ export class EdgeSyncRunner {
                 for (const r of Array.isArray(rs) ? rs : []) if (r && r.id) results.push(r);
               }
               if (legacyPush.length) {
-                // v2.863 B: 옛 방식 엣지는 번들 **파일**로 민다(pushBundleToEdge) — 파일 경로가 없으면(보관 실패) 그 엣지만 사유와 함께 실패.
+                // v2.865 B: 옛 방식 엣지는 번들 **파일**로 민다(pushBundleToEdge) — 파일 경로가 없으면(보관 실패) 그 엣지만 사유와 함께 실패.
                 if (!bundle.path) {
                   for (const e of legacyPush) results.push({ id: e.id, name: e.name, ok: false, reason: `번들 파일이 패키지 폴더에 없어 옛 방식 엣지에 보낼 수 없습니다(${lastBundleReject() || '보관 실패'})` });
                 } else {
@@ -402,7 +402,7 @@ export class EdgeSyncRunner {
     return {
       enabled, armed, intervalMs: this.intervalMs || 0, nextRunAt, running: !!this.inflight, lastRun: this.lastRun,
       currentVersion: plan?.currentVersion ?? null, total: plan?.total ?? 0, counts: plan?.counts || null, pending,
-      legacy: plan ? plan.edges.filter((e) => e.kind === 'edge').length : 0, legacyDropped: this.legacyDropped.slice(0, 10), // v2.863 B
+      legacy: plan ? plan.edges.filter((e) => e.kind === 'edge').length : 0, legacyDropped: this.legacyDropped.slice(0, 10), // v2.865 B
     };
   }
 }

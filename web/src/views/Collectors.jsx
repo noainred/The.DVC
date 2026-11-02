@@ -19,7 +19,7 @@ const EmptyInvModal = React.lazy(() => import('./collectors/EmptyInvModal.jsx'))
 import TransportPanel from './collectors/TransportPanel.jsx';
 import { transportBadge, formHttpNote, importHttpNote } from './collectors/transportText.js';
 import { upgradeCell, autoPushLine } from './collectorUpgradeText.js'; // v2.775 업그레이드 결과 이유·시각
-import { edgeSyncLine, syncRunText } from './upgradeEdgeSyncText.js'; // v2.863: 엣지 자동 업그레이드 한 줄 + '구버전 엣지 밀어 넣기'
+import { edgeSyncLine, syncRunText } from './upgradeEdgeSyncText.js'; // v2.865: 엣지 자동 업그레이드 한 줄 + '구버전 엣지 밀어 넣기'
 
 // S-09: 새 기본값은 https:// — 평문 http:// 는 사유를 적은 예외로만 등록된다.
 const EMPTY = { id: '', name: '', datacenter: '', url: 'https://', token: '', enabled: true, allowInsecureHttp: false, insecureHttpReason: '' };
@@ -93,7 +93,7 @@ export default function Collectors() {
     return () => { clearInterval(t); if (reloadTimer.current) clearTimeout(reloadTimer.current); };
   }, []);
 
-  // v2.863 C: 엣지 자동 업그레이드 '지금 동기화'(뒤처진 엣지에만 민다 — '모두 업그레이드' 와 달리 최신 엣지는 건드리지 않는다).
+  // v2.865 C: 엣지 자동 업그레이드 '지금 동기화'(뒤처진 엣지에만 민다 — '모두 업그레이드' 와 달리 최신 엣지는 건드리지 않는다).
   const edgeSyncNow = async () => {
     setBusy(true); setBanner(null);
     try {
@@ -332,7 +332,7 @@ export default function Collectors() {
       {autoPushLine(data?.autoPush) && (() => { const a = autoPushLine(data.autoPush); return (
         <div style={{ marginBottom: 10, fontSize: 12, whiteSpace: 'normal', overflowWrap: 'anywhere', color: a.tone === 'ok' ? 'var(--text-dim)' : a.tone === 'warn' ? 'var(--amber)' : '#f87171' }}>{a.text}</div>); })()}
 
-      {/* v2.863 C: 엣지 자동 업그레이드(주기 동기화) 한 줄 + 지금 밀어 넣기 — 서버가 edgeSync 를 보내지 않으면 그리지 않는다. 문구는 upgradeEdgeSyncText.js. */}
+      {/* v2.865 C: 엣지 자동 업그레이드(주기 동기화) 한 줄 + 지금 밀어 넣기 — 서버가 edgeSync 를 보내지 않으면 그리지 않는다. 문구는 upgradeEdgeSyncText.js. */}
       {edgeSyncLine(data?.edgeSync) && (() => { const l = edgeSyncLine(data.edgeSync); return (
         <div data-edge-sync-line="" className="flex gap" style={{ marginBottom: 10, fontSize: 12, alignItems: 'center', flexWrap: 'wrap', whiteSpace: 'normal', overflowWrap: 'anywhere', color: l.tone === 'ok' ? 'var(--text-dim)' : l.tone === 'warn' ? 'var(--amber)' : 'var(--text-dim)' }}>
           <span style={{ minWidth: 0 }}>{l.text}</span>

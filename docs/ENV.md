@@ -1,6 +1,6 @@
 # 환경변수 레퍼런스 (자동 생성)
 
-`server/src` 가 실제로 읽는 환경변수 **703개**를 코드에서 추출한 목록이다.
+`server/src` 가 실제로 읽는 환경변수 **705개**를 코드에서 추출한 목록이다.
 설치본에서는 `/etc/vmware-portal/portal.env` 에 `KEY=값` 으로 넣고 서비스를 재시작한다.
 
 - 생성: `node scripts/env-doc.mjs` (마지막 갱신 2026-11-02)
@@ -54,7 +54,7 @@
 | `WAN_TLS_CA_FILE` | `''` | ✅ | util/resilientFetch.js |
 | `WAN_TLS_INSECURE` | `기본 적용('true' 로 끄기)` | ✅ | util/resilientFetch.js |
 
-## 공통 (214)
+## 공통 (215)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
@@ -161,6 +161,7 @@
 | `ISIDU_PUSH_MS` | `600000` |  | isidu/push.js |
 | `ISIDU_PUSH_ROWS` | `60000` |  | isidu/push.js |
 | `ISIDU_SSH_KEY` | `''` |  | isidu/sshKey.js |
+| `ISSUES_MAX_BYTES` |  |  | issues/store.js |
 | `JSON_BODY_LIMIT` | `'16mb'` |  | index.js |
 | `LEDGER_FULL_CHECK_MS` |  |  | store.js |
 | `LINKCHECK_COUNT_CACHE_MS` | `60000` |  | linkcheck/db.js |
@@ -341,7 +342,7 @@
 | `TLS_PEER_POLICY` | `미지정 — peer-trust.json 정책(새 설치 enforce · 기존 현장 observe)` |  | security/peerTrust.js |
 | `X` |  |  | security/tlsTrust.js, util/dayKey.js 외 1 |
 
-## 분석 도구 (9)
+## 분석 도구 (10)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
@@ -354,6 +355,7 @@
 | `SERVICE_NAME` | `'vmware-portal'` |  | tools/otp-enroll.js, tools/user-admin.js |
 | `SUDO_USER` |  |  | tools/user-admin.js |
 | `USER_ADMIN_CAN_RESTART` | `기본 아님('1' 일 때만 적용)` |  | tools/user-admin.js |
+| `VCENTER_PASSWORD` |  |  | tools/bareos-probe.js |
 
 ## 서비스 모니터 (9)
 
@@ -892,4 +894,4 @@
 
 ---
 
-예시 파일(`packaging/offline/portal.env.example`)에 있는 키: 85 / 703
+예시 파일(`packaging/offline/portal.env.example`)에 있는 키: 85 / 705

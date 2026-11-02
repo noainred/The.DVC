@@ -150,7 +150,7 @@ export function sanitizeTick(t) {
 }
 
 /**
- * v2.863: 엣지 자동 업그레이드 동기화 한 번(edgeSync.run)의 기록 정제 — 쓸 때·읽을 때 공용. 결과 코드 목록은 edgeSync.js 가 가진다
+ * v2.865: 엣지 자동 업그레이드 동기화 한 번(edgeSync.run)의 기록 정제 — 쓸 때·읽을 때 공용. 결과 코드 목록은 edgeSync.js 가 가진다
  * (순환 import 를 피해 여기서는 글자 길이만 자른다 — 되살릴 때 runner 가 모르는 코드를 'error' 로 바꾼다).
  */
 export function sanitizeEdgeSync(r) {
@@ -189,7 +189,7 @@ export function restoreStatus(doc, currentVersion) {
     if (check.remote) check.remote.available = !!(check.remote.ok && check.remote.latest && newerThanNow(check.remote.latest));
     if (check.watch) check.watch.available = !!(check.watch.version && newerThanNow(check.watch.version));
   }
-  return { lastCheck: check, lastResult: mark(sanitizeResult(d.lastResult)), lastTick: mark(sanitizeTick(d.lastTick)), lastEdgeSync: mark(sanitizeEdgeSync(d.lastEdgeSync)) }; // v2.863: 엣지 동기화 기록도
+  return { lastCheck: check, lastResult: mark(sanitizeResult(d.lastResult)), lastTick: mark(sanitizeTick(d.lastTick)), lastEdgeSync: mark(sanitizeEdgeSync(d.lastEdgeSync)) }; // v2.865: 엣지 동기화 기록도
 }
 
 /** 다음 백그라운드 확인 시각 — setInterval(무장 시각 + k × 주기). 꺼져 있거나 모르면 null. */

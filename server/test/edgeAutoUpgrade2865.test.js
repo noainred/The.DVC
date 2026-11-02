@@ -1,5 +1,5 @@
 /**
- * edgeAutoUpgrade2863.test.js — v2.863 사용자 선택 '프로그램 개선' A·B·C·D(엣지 자동 업그레이드 후속).
+ * edgeAutoUpgrade2865.test.js — v2.865 사용자 선택 '프로그램 개선' A·B·C·D(엣지 자동 업그레이드 후속).
  *
  *  A. 동기화 기록 보존 — run 마다 onRun 훅 · 매니저가 upgrade-status.json 에 lastEdgeSync 로 쓰고 재시작(새 매니저) 뒤 restored:true 로 되살린다 ·
  *     모르는 결과 코드는 'error' · 정제(sanitizeEdgeSync)는 아는 필드만
@@ -21,7 +21,7 @@ import express from 'express';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SRC = path.resolve(HERE, '../src');
-const CFG = fs.mkdtempSync(path.join(os.tmpdir(), 'edgeauto2863-'));
+const CFG = fs.mkdtempSync(path.join(os.tmpdir(), 'edgeauto2865-'));
 const PKG = path.join(CFG, 'packages');
 Object.assign(process.env, { CONFIG_DIR: CFG, DATA_SOURCE: 'mock', SSRF_ALLOW_LOOPBACK: 'true', UPGRADE_CHECK_TIMEOUT_MS: '5000', PACKAGE_DIR: PKG });
 for (const k of ['UPGRADE_SIGNATURE_POLICY', 'UPGRADE_ALLOW_UNVERIFIED', 'UPGRADE_WATCH_DIR', 'UPGRADE_ENABLED', 'UPGRADE_REMOTE_BASE', 'UPGRADE_INSTALL_DIR', 'EDGE_MODE', 'CENTRAL_URL', 'UPGRADE_EDGE_AUTO', 'UPGRADE_EDGE_SYNC_INTERVAL_MS', 'UPGRADE_KEEP_BUNDLES', 'UPGRADE_EDGES']) delete process.env[k];
@@ -286,5 +286,5 @@ test('소스 스윕 — 상태 파일에 lastEdgeSync · onRun 훅 · pushBundle
   assert.match(read('upgrade/upgrade.js'), /body\.upToDate === true \? \{ upToDate: true \}/, 'pushBundleToEdge 도 이미 최신을 전한다');
   assert.match(read('upgrade/edgeSync.js'), /ssrfBlockReason\(url\)/, '옛 방식 엣지 주소도 SSRF 차단 대역을 거른다');
   const edgeDoc = fs.readFileSync(path.resolve(HERE, '../../docs/rules/edge.md'), 'utf8');
-  assert.ok(edgeDoc.includes('v2.863'), 'docs/rules/edge.md 에 후속 기록');
+  assert.ok(edgeDoc.includes('v2.865'), 'docs/rules/edge.md 에 후속 기록');
 });

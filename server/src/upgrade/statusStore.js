@@ -16,7 +16,7 @@ import path from 'node:path';
 import { config } from '../config.js';
 import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
 import { registerStateFile } from '../util/stateFiles.js';
-import { sanitizeCheck, sanitizeResult, sanitizeTick, sanitizeEdgeSync } from './autoState.js'; // v2.863: 엣지 동기화 기록(lastEdgeSync)도 남긴다
+import { sanitizeCheck, sanitizeResult, sanitizeTick, sanitizeEdgeSync } from './autoState.js'; // v2.865: 엣지 동기화 기록(lastEdgeSync)도 남긴다
 
 registerStateFile('upgrade-status.json');
 export const upgradeStatusFile = (configDir = config.configDir) => path.join(configDir, 'upgrade-status.json');

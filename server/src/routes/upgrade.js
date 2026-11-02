@@ -245,7 +245,7 @@ upgradeRouter.put('/signature-override', adminOnly, requireSettingsOwner, (req, 
   res.json({ ok: true, verify: false, until: o.until, hours, by: o.by, ...(runningAsRoot() ? { warning: '포탈이 root 로 실행 중이라 이 설정은 적용되지 않습니다(root 확인은 화면 설정을 보지 않습니다).' } : {}) });
 });
 
-// v2.863 C: '지금 동기화' — 등록된 엣지(수집 서버 + 옛 방식 엣지) 가운데 중앙보다 뒤처진 것에 중앙 현재 버전 번들을 지금 민다.
+// v2.865 C: '지금 동기화' — 등록된 엣지(수집 서버 + 옛 방식 엣지) 가운데 중앙보다 뒤처진 것에 중앙 현재 버전 번들을 지금 민다.
 //   주기 실행과 같은 함수(edgeSync.run — 단일 진행이라 겹치면 진행 중인 것을 기다린다). 꺼져 있으면 돌지 않고 그 사실을 답한다(outcome 'off').
 upgradeRouter.post('/edge-sync', adminOnly, async (req, res) => {
   if (!upgradeManager.enabled) return res.status(409).json({ ok: false, reason: 'auto-upgrade disabled' });

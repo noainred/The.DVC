@@ -705,7 +705,7 @@ export async function pushBundleToEdge(edge, archivePath, { timeout = process.en
     const reason = str(body.reason, 500) || str(body.error, 500) || (ok ? '' : `HTTP ${res.status}`);
     // v2.727(감사 D-06): 성패·시각을 outboundStats 에 남긴다(토큰·본문은 싣지 않는다 — 키는 origin + 경로, 쿼리는 버린다).
     recordOutbound(url, { status: ok ? res.status : (res.status < 400 ? 500 : res.status), bytes: data.length, method: 'POST', error: ok ? '' : reason, tag: 'upgrade-edge' });
-    // v2.863: 엣지의 '이미 최신(not newer)' 은 실패가 아니다 — upToDate 로 밝힌다(엣지 자동 업그레이드 동기화가 성공으로 본다).
+    // v2.865: 엣지의 '이미 최신(not newer)' 은 실패가 아니다 — upToDate 로 밝힌다(엣지 자동 업그레이드 동기화가 성공으로 본다).
     return { edge: edge.url, ok, status: res.status, ...(reason ? { reason } : {}), ...(str(body.version, 32) ? { version: str(body.version, 32) } : {}), ...(body.upToDate === true ? { upToDate: true } : {}) };
   } catch (err) {
     // v2.731(G2b A4-01): undici 는 원인을 err.cause 에 둔다 — 'fetch failed' 만 남기면 인증서 거부·연결 거부·시한을 가를 수 없다

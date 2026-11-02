@@ -8,7 +8,7 @@ import { droppedSecretNote } from './droppedSecretText.js'; // v2.731(A3-01 ①)
 import { autoSummary, autoApplyRowText, noTickText, resultSummary, actionMsg, restoredNote, triggerText, remoteSourceLabel, runningScanWarning } from './upgradeAutoText.js';
 import { readFailText } from './readFailText.js'; // v2.741(WEB-04): 재조회 실패는 화면을 지우지 않고 한 줄로 말한다
 // v2.859: 엣지 자동 업그레이드(중앙이 업그레이드되면 등록된 엣지도 모두 — 기본 켬). 판정은 서버 edgeSync.js, 문장은 여기.
-import { edgeSyncSummary, noSyncText, edgeAutoCheckboxHint, syncRunText } from './upgradeEdgeSyncText.js'; // v2.863: '지금 동기화'
+import { edgeSyncSummary, noSyncText, edgeAutoCheckboxHint, syncRunText } from './upgradeEdgeSyncText.js'; // v2.865: '지금 동기화'
 
 /**
  * v2.741(WEB-04): 상태 조회 실패의 표시. 확인·적용·설정 저장 뒤 다시 읽기(await load())가 실패하면 예전에는
@@ -174,7 +174,7 @@ function AutoCard({ status }) {
 function EdgeSyncCard({ status, busy, onSync, msg }) {
   const a = edgeSyncSummary(status);
   if (!a) return null;
-  const syncMsg = msg && msg.action === 'edge-sync' ? syncRunText(msg.r) : null; // v2.863 C
+  const syncMsg = msg && msg.action === 'edge-sync' ? syncRunText(msg.r) : null; // v2.865 C
   const canRun = !!status.edgeSync?.enabled && !status.edgeSync?.running;
   return (
     <div className="card" style={{ marginBottom: 16, minWidth: 0 }} data-edge-sync="">
@@ -206,7 +206,7 @@ function EdgeSyncCard({ status, busy, onSync, msg }) {
           동기화에서 뺀 옛 방식 엣지 {a.dropped.length}곳: {a.dropped.join(' · ')}
         </div>
       )}
-      {/* v2.863 C: 지금 동기화 — 주기를 기다리지 않고 뒤처진 엣지에 바로 민다(서버 run 은 단일 진행). */}
+      {/* v2.865 C: 지금 동기화 — 주기를 기다리지 않고 뒤처진 엣지에 바로 민다(서버 run 은 단일 진행). */}
       <div className="flex gap" style={{ marginTop: 10, flexWrap: 'wrap', alignItems: 'center' }}>
         <button className="logout-btn" style={{ padding: '8px 14px' }} disabled={busy || !canRun} data-edge-sync-run=""
           title={canRun ? '뒤처진 엣지에 중앙 현재 버전 번들을 지금 밀어 넣습니다' : status.edgeSync?.running ? '지금 동기화 중입니다' : '엣지 자동 업그레이드가 꺼져 있습니다'}
