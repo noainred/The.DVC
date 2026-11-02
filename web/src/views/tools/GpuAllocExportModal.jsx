@@ -8,7 +8,7 @@
  */
 import React, { useEffect, useState } from 'react';
 import { useLatest } from '../../hooks/useLatest.js';
-import { fetchJson, downloadFile } from '../../api.js';
+import { fetchJson, downloadFile, canCsv } from '../../api.js';
 import { downloadFailText } from '../downloadFailText.js';
 import { Modal, ErrorBox } from '../../components/ui.jsx';
 import { EXPORT_DEPTHS, EXPORT_SHEETS, allocExportQuery } from './gpuAllocText.js';
@@ -30,7 +30,9 @@ export function GpuAllocExportModal({ scope = '', vcSel = null, onClose }) {
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState('');
   const rangeQ = allocExportQuery({ scope, vcSel });
-  useEffect(() => { setMeta(null); setMetaErr(null); run(fetchJson(`/tools/gpu/alloc/export-meta${rangeQ}`), setMeta, setMetaErr); }, [rangeQ, run]);
+  // 파일 내보내기는 data.csv 권한(v2.643 — 소스 스윕 csvGate2643 가 이 파일에도 요구한다). 부모도 막지만 창 스스로 한 번 더 막는다.
+  const allowed = canCsv();
+  useEffect(() => { if (!allowed) return; setMeta(null); setMetaErr(null); run(fetchJson(`/tools/gpu/alloc/export-meta${rangeQ}`), setMeta, setMetaErr); }, [rangeQ, run, allowed]);
   const toggleSheet = (k) => setSheets((prev) => (prev.includes(k) ? prev.filter((x) => x !== k) : [...prev, k]));
   const noSheet = sheets.length === 0;
   const fileName = meta?.fileNames?.[depth] || '';
@@ -40,6 +42,7 @@ export function GpuAllocExportModal({ scope = '', vcSel = null, onClose }) {
     catch (e) { setMsg(downloadFailText(e)); }
     finally { setBusy(false); }
   };
+  if (!allowed) return null;   // 훅 아래 — 조기 return 이 훅 개수를 바꾸지 않게
   return (
     <Modal title="계층 표 엑셀로 내보내기" onClose={onClose} width={560}>
       <div className="gpu-alloc-export">
