@@ -7,7 +7,8 @@ import { numOrNull } from '../../numOrNull.js';
 export const STATE_LABEL = Object.freeze({
   ok: '성공', warning: '경고', error: '오류', canceled: '취소', running: '실행 중', queued: '대기', waiting: '대기', unknown: '확인 불가',
 });
-const STATE_BADGE = Object.freeze({ ok: 'green', warning: 'amber', error: 'red', canceled: 'gray', running: 'blue', queued: 'blue', waiting: 'blue', unknown: 'gray' });
+// v2.858(승인 시안): 대기는 회색 — 47건 중 실행 1건처럼 대기가 많을 때 실행 중(파랑)이 묻히지 않게
+const STATE_BADGE = Object.freeze({ ok: 'green', warning: 'amber', error: 'red', canceled: 'gray', running: 'blue', queued: 'gray', waiting: 'gray', unknown: 'gray' });
 
 /** 상태 배지 { label, cls } — 상태 코드 글자(T·W·f…)를 함께 보인다(운영자가 Bareos 로그와 대조). */
 export function stateBadge(state, status = '') {

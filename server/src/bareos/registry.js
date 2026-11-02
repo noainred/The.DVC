@@ -11,7 +11,8 @@
  *   lastError: { at, message } | null,
  *   missingInDirector: boolean,                         // Director `.jobs` 에 없으면 true(누가 conf 를 지웠다)
  *   restores: [ { jobid, fromJobids, mode, target, status, state, startedAt, endedAt, by, at } ],   // 최근 RESTORES_KEEP 건
- *   finishedRuns: [ { jobid, status, state, level, endedAt, errors, checkedAt } ],   // v2.822.3 끝난 백업 실행 최근 FINISHED_KEEP 건(실패 메일용)
+ *   finishedRuns: [ { jobid, status, state, level, startedAt, endedAt, bytes, errors, checkedAt } ],   // v2.858 startedAt·bytes 추가(그 전 항목에는 없다)
+ *     // v2.822.3 끝난 백업 실행 최근 FINISHED_KEEP 건(실패 메일용)
  * }
  * retired = [ { name, directorId?, at, demo? } ]   // v2.822(I3): 원장에서 지운 대상의 Director 잡 이름 — 대조 틱이 다시 켜졌으면 disable 을 다시 보낸다
  *                                                  //   v2.823: (directorId, 이름)이 열쇠다 — 같은 이름이 다른 법인 Director 에 다시 생겨도 옛 Director 의 기록을 지우지 않는다
@@ -339,8 +340,9 @@ export function applyRunRow(id, row, now = Date.now()) {
   // v2.822.3(C2-2 — 재현): 끝난 실행을 따로 남긴다(최근 FINISHED_KEEP 건). 포탈이 시작한 실행이 끝날 때 더 큰 jobid(대기 중인 스케줄 실행)가
   //   이미 lastRun 이면 그 결과가 어디에도 남지 않아 실패 메일에서 빠졌다. 실패 메일(notify)이 이 목록도 본다.
   if (isFinalStatus(row.status) && !(j.finishedRuns || []).some((x) => x.jobid === rec.jobid)) {
-    const { jobid, status, state, level, endedAt, errors } = rec;
-    j.finishedRuns = [...(Array.isArray(j.finishedRuns) ? j.finishedRuns : []), { jobid, status, state, level, endedAt, errors, checkedAt: now }]
+    // v2.858: 바이트 · 시작 시각도 남긴다 — 진행 현황의 '지난 같은 레벨 실행' 기준(실행 중이면 lastRun 이 그 실행이라 끝난 값은 여기에만 있다)
+    const { jobid, status, state, level, startedAt, endedAt, bytes, errors } = rec;
+    j.finishedRuns = [...(Array.isArray(j.finishedRuns) ? j.finishedRuns : []), { jobid, status, state, level, startedAt, endedAt, bytes, errors, checkedAt: now }]
       .sort((a, b) => a.jobid - b.jobid).slice(-FINISHED_KEEP);
     changed = true;
   }

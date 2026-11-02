@@ -12,6 +12,11 @@ import VeeamHeader from './VeeamHeader.jsx';
 import SettingsTab from './BareosSettings.jsx';
 import BareosGroupsTab from './BareosGroupsTab.jsx';
 import BareosLiveTab from './BareosLiveTab.jsx';
+import BareosRunDetail from './BareosRunDetail.jsx';
+import {
+  liveRowIndex, waitSummary, runRowOf, progressBasis, rateText as liveRateText, sizeText as liveSizeText, elapsedText as liveElapsedText,
+  reasonText, REASON_HINT, sortWaiting, levelWord,
+} from './bareosLiveText.js';
 import {
   stateBadge, levelLabel, bytesText, whenText, runCell, directorLine, directorStatus, directorChipTitle, outcomeUnknown, unknownOutcomeText, withRelayWait, targetLocks, RESTORE_MODE_LABEL, restoreLine, candidateSummary, driftText, restorePointsNote,
   folderOptions, inFolder, pickCap, bulkSummary, OS_FILTERS, osKey, osLabel, osBadgeCls, osMatches, osCounts,
@@ -944,21 +949,106 @@ function HistoryTab({ d }) {
   useEffect(load, [sel, histWaitMs]);
   // W5: 포탈이 시작한 실행 + Bareos 스케줄이 돌리는 실행(대조가 넣은 lastRun — 대조 주기만큼 늦을 수 있다)
   const running = d.jobs.filter((j) => j.pending?.jobid || ['running', 'queued', 'waiting'].includes(j.lastRun?.state));
+  // v2.858(승인 시안 — 상자 대신 표 + 고른 작업 상세): 진행량·속도·Director 상태는 진행 현황 API(이 탭이 열려 있고 실행이 있을 때만 15초 —
+  //   서버가 그동안만 Director 에 상태를 묻는다). 못 받으면 원장 값만(모름 — 0 이 아니다).
+  const { data: live } = usePolling(running.length ? '/tools/bareos-backup/live' : null, {}, 15_000);
+  const [runF, setRunF] = useState('all');
+  const [runQ, setRunQ] = useState('');
+  const [runSel, setRunSel] = useState('');
+  const liveIdx = useMemo(() => liveRowIndex(live), [live]);
   const restores = jobsShown.flatMap((j) => (j.restores || []).map((r) => ({ ...r, job: j }))).filter((r) => !resultF || histResultKey(r.state) === resultF).sort((a, b) => (b.at || 0) - (a.at || 0)).slice(0, 50);
   const histShown = hist ? filterHistory(hist, { level: levelF, result: resultF }) : null;
   const dirs = (d.directors || []).filter((x) => d.jobs.some((j) => j.directorId === x.id));
+  // 실행 중 표 — 실행 중이 위, 그 안에서 jobid 순(먼저 보낸 것 먼저)
+  const now = Date.now();
+  const runRows = running.map((j) => ({ ...runRowOf(j, liveIdx, now), job: j }))
+    .sort((a, b) => (a.row.state === 'running' ? 0 : 1) - (b.row.state === 'running' ? 0 : 1) || (a.row.jobid || 0) - (b.row.jobid || 0));
+  const nRun = runRows.filter((x) => x.row.state === 'running').length;
+  const q = runQ.trim().toLowerCase();
+  const runShown = runRows.filter((x) => (runF === 'all' || (runF === 'run') === (x.row.state === 'running')) && (!q || String(x.row.vmName).toLowerCase().includes(q) || String(x.row.jobid).includes(q)));
+  const picked = runRows.find((x) => x.key === runSel) || runRows.find((x) => x.row.state === 'running') || runRows[0] || null;
+  const ws = waitSummary(live);
+  // 대기 행의 '앞에서 실행 중' · 순번(추정 — 같은 법인에서 보낸 순)
+  const queueOf = (x) => {
+    if (!x || x.row.state === 'running') return null;
+    const same = runRows.filter((y) => y.row.vcenterId === x.row.vcenterId);
+    const ahead = same.find((y) => y.row.state === 'running')?.row || null;
+    const waits = sortWaiting(same.filter((y) => y.row.state !== 'running').map((y) => y.row));
+    const i = waits.findIndex((y) => y.jobid === x.row.jobid);
+    return { ahead, order: i >= 0 ? i + 1 : null, total: waits.length };
+  };
+  const pick = (x) => { setRunSel(x.key); if (x.job?.id && x.job.id !== sel) setSel(x.job.id); };   // 아래 이력 표도 그 VM 으로
   return (
     <div>
-      <div className="muted" style={{ fontSize: 12, fontWeight: 600, marginBottom: 6 }}>실행 중 백업 {running.length}건</div>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: 10, marginBottom: 14 }}>
-        {running.length === 0 && <div className="muted" style={{ fontSize: 12.5, gridColumn: '1 / -1' }}>없음 — Bareos 스케줄이 돌린 실행은 상태 대조 때 반영됩니다(대조 주기만큼 늦을 수 있습니다).</div>}
-        {running.map((j) => { const c = runCell(j); return (
-          <div key={j.id} className="card" style={{ padding: '10px 12px', minWidth: 0, borderLeft: '3px solid var(--accent-2)' }}>
-            <div style={ROW}><b>{j.vmName}</b><span className="muted" style={{ fontSize: 12 }}>{j.vcenterId}</span>{c.badge && <span className={`badge ${c.badge.cls}`}>{c.badge.label}</span>}</div>
-            <div className="muted" style={{ fontSize: 12 }}>{c.when} 시작 · {c.note} · FD ‘{j.client}’</div>
+      <section className="card" aria-label="실행 중 백업" style={{ padding: 0, overflow: 'hidden', minWidth: 0, marginBottom: 12 }}>
+        <div style={{ ...ROW, padding: '10px 14px', borderBottom: '1px solid var(--border-soft)' }}>
+          <b style={{ fontSize: 13 }}>실행 중 백업 {running.length}건</b>
+          {running.length > 0 && (
+            <div role="group" aria-label="거르기" style={{ display: 'inline-flex', gap: 3, padding: 3, border: '1px solid var(--border)', borderRadius: 10, background: 'var(--panel-deep)' }}>
+              {[['all', '전체', runRows.length], ['run', '실행 중', nRun], ['wait', '대기', runRows.length - nRun]].map(([k, l, n]) => (
+                <button key={k} type="button" aria-pressed={runF === k} onClick={() => setRunF(k)}
+                  style={{ border: 0, font: 'inherit', fontSize: 12.5, fontWeight: 600, padding: '4px 10px', borderRadius: 7, cursor: 'pointer', whiteSpace: 'nowrap', background: runF === k ? 'var(--accent)' : 'none', color: runF === k ? '#fff' : 'var(--text-dim)' }}>
+                  {l} <span style={{ fontVariantNumeric: 'tabular-nums', opacity: 0.85 }}>{n}</span>
+                </button>
+              ))}
+            </div>
+          )}
+          {running.length > 0 && <input className="input" aria-label="실행 중 검색" placeholder="VM · jobid 검색" value={runQ} onChange={(e) => setRunQ(e.target.value)} style={{ ...INP, width: 'min(100%, 220px)', padding: '6px 10px', fontSize: 12.5 }} />}
+          <span className="muted" style={{ fontSize: 12 }}>{running.length ? `진행량 · 속도 = FD 보고${live?.now ? ` · 상태 조회 ${whenText(live.now)}` : ' · 상태 조회 중'} · 행을 누르면 아래에 상세` : ''}</span>
+        </div>
+        {running.length === 0 ? <div className="muted" style={{ padding: 14, fontSize: 12.5 }}>없음 — Bareos 스케줄이 돌린 실행은 상태 대조 때 반영됩니다(대조 주기만큼 늦을 수 있습니다).</div> : (
+          <div style={{ padding: '10px 14px 14px', minWidth: 0 }}>
+            {ws?.top && (
+              <div className="banner warn" style={{ marginBottom: 10, fontSize: 12.5, lineHeight: 1.6, padding: '8px 12px' }}>
+                대기 <b>{ws.waiting}</b>건 중 <b>{ws.top.n}</b>건이 <b>{reasonText(ws.top.reason)}</b> 사유입니다(Director 상태) — 지금 실행 중 {ws.running}건.{REASON_HINT[ws.top.reason] ? ` ${REASON_HINT[ws.top.reason]}.` : ''}
+              </div>
+            )}
+            <div className="table-wrap" style={{ maxHeight: '42vh' }}>
+              <STable minWidth={1080} wrap={false}>
+                <thead><tr><th>VM</th><th>jobid</th><th>레벨</th><th>보냄</th><th>경과</th><th data-nosort style={{ minWidth: 210 }}>진행량 / 기준</th><th className="right">속도</th><th className="right">파일</th><th>상태</th><th>Director 상태</th></tr></thead>
+                <tbody>
+                  {runShown.length === 0 && <tr><td colSpan={10} className="center muted" style={{ padding: 16 }}>거르기 · 검색에 맞는 실행이 없습니다.</td></tr>}
+                  {runShown.map((x) => {
+                    const r = x.row; const on = picked?.key === x.key; const isRun = r.state === 'running';
+                    const pb = progressBasis(r);
+                    const b = stateBadge(r.state, r.status);
+                    return (
+                      <tr key={x.key} onClick={() => pick(x)} aria-selected={on} style={{ cursor: 'pointer', ...(on ? { background: 'rgba(59,130,246,.13)', boxShadow: 'inset 3px 0 0 var(--accent-2)' } : {}) }}>
+                        <td><button type="button" onClick={(e) => { e.stopPropagation(); pick(x); }} style={{ all: 'unset', cursor: 'pointer', fontWeight: 700 }}>{r.vmName}</button>
+                          <div className="muted" style={{ fontSize: 11, color: 'var(--text-faint)' }}>{r.vcenterId}{r.group ? ` · ${r.group}` : ''}</div></td>
+                        <td data-sort={r.jobid ?? ''} style={{ fontFamily: 'var(--mono)', fontSize: 12.5 }}>{r.jobid ?? '—'}</td>
+                        <td>{levelWord(r.level)}</td>
+                        <td data-sort={r.since ?? ''}>{whenText(r.since)}</td>
+                        <td data-sort={r.elapsed ?? ''} style={{ fontVariantNumeric: 'tabular-nums' }}>{isRun ? liveElapsedText(r.elapsed) : <span className="muted">대기 {liveElapsedText(r.elapsed)}</span>}</td>
+                        <td>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, fontSize: 12 }}>
+                            <span className={isRun && r.bytes !== null ? undefined : 'muted'}>{!isRun ? '대기 중' : r.bytes !== null ? liveSizeText(r.bytes) : (x.corp?.live?.ok ? 'FD 보고 없음' : '모름')}</span>
+                            <span className="muted" title={pb.label}>{isRun && pb.pct !== null ? <b style={{ color: 'var(--accent-2)' }}>{pb.pct}% </b> : null}{pb.short}</span>
+                          </div>
+                          {isRun && pb.pct !== null && <div role="img" aria-label={`추정 진척 ${pb.pct}% — ${pb.label}`} style={{ height: 5, borderRadius: 3, background: 'var(--border)', overflow: 'hidden', marginTop: 4 }}><div style={{ height: 5, width: `${pb.pct}%`, background: 'var(--accent-2)' }} /></div>}
+                        </td>
+                        <td className="right" data-sort={r.rateNow ?? ''} style={{ fontVariantNumeric: 'tabular-nums', fontWeight: isRun && r.rateNow !== null ? 800 : 400, color: isRun && r.rateNow !== null ? 'var(--accent-2)' : 'var(--text-faint)' }}>
+                          {isRun ? liveRateText(r.rateNow) : '—'}{isRun && r.rateAvg !== null && r.rateAvg !== undefined ? <div className="muted" style={{ fontSize: 11, fontWeight: 400 }}>평균 {liveRateText(r.rateAvg)}</div> : null}
+                        </td>
+                        <td className="right" data-sort={r.files ?? ''}>{isRun && r.files !== null && r.files !== undefined ? r.files : <span className="muted">—</span>}</td>
+                        <td><span className={`badge ${b.cls}`}>{b.label}</span></td>
+                        <td data-sort={r.dirStatus?.reason || ''} style={{ fontSize: 12.5 }}>
+                          {r.dirStatus ? <><span style={{ fontWeight: 700, color: r.dirStatus.reason === 'running' ? '#4ade80' : '#fbbf24' }}>{reasonText(r.dirStatus.reason)}</span><div className="muted" style={{ fontSize: 11 }}>{r.dirStatus.text}</div></> : <span className="muted">{x.corp?.live?.dirOk ? 'Director 표에 없음' : '모름'}</span>}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </STable>
+            </div>
           </div>
-        ); })}
-      </div>
+        )}
+      </section>
+      {picked && (
+        <section className="card" aria-label="고른 작업 상세" style={{ padding: '14px 16px', minWidth: 0, marginBottom: 14 }}>
+          <BareosRunDetail key={picked.key} row={picked.row} live={picked.corp?.live || null} dir={(d.directors || []).find((x) => x.id === picked.job?.directorId) || null} limits={d.relayLimits} queue={queueOf(picked)} />
+        </section>
+      )}
 
       <div data-hist-filters="" style={{ ...ROW, marginBottom: 8 }}>
         {dirs.length > 1 && (
@@ -979,7 +1069,7 @@ function HistoryTab({ d }) {
           {HIST_RESULT_OPTS.map(([v, t]) => <option key={v || 'all'} value={v}>{t}</option>)}
         </Select>
         <button type="button" className="logout-btn" style={BTN} onClick={load} disabled={!sel}>새로 고침</button>
-        <span className="muted" style={{ fontSize: 12 }}>Director 카탈로그 {Number.isInteger(limit) ? `최근 ${limit}건` : '최근 실행'} · 상태 코드 T 성공 · W 경고 · E·f 오류 · A 취소 · R 실행 중 · C 대기</span>
+        <span className="muted" style={{ fontSize: 12 }}>Director 카탈로그 {Number.isInteger(limit) ? `최근 ${limit}건` : '최근 실행'} · 위 실행 중 표에서 고른 VM 을 따라갑니다 · 상태 코드 T 성공 · W 경고 · E·f 오류 · A 취소 · R 실행 중 · C 대기</span>
       </div>
       {err && <ErrorBox error={err} />}
       {sel && job && !hist && !err && <Loading />}
