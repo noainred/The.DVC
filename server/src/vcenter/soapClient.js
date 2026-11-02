@@ -814,6 +814,23 @@ function vmGateways(ipStackXml) {
   return [...out];
 }
 
+/**
+ * v2.852: HostGraphicsInfo 한 블록의 `<vm type="VirtualMachine">vm-12</vm>` 목록 → { vms: ['vm-12', …] }.
+ * vCenter 는 GPU 를 쓰는 VM 이 0 대면 vm 요소를 싣지 않는다 — 그래서 '0 대' 와 '필드를 모름' 을 블록만으로는 가를 수 없다.
+ * graphicsInfo 를 받은 이상(이 함수가 불렸다) 이 수집기는 vm 을 읽는 판이므로 빈 목록 = 0 대로 둔다. 구버전 수집기·엣지의
+ * 스냅샷에는 키 자체가 없어 소비처(gpu/allocTree.js)가 '배치 정보 없음' 으로 구분한다.
+ * moref 형식(영숫자·-·_)만, 256개 상한(한 GPU 의 vGPU 수는 수십 대가 상한이다).
+ */
+export function graphicsVmRefs(blk) {
+  const refs = [];
+  for (const m of String(blk || '').matchAll(/<vm\b[^>]{0,200}>([^<]{1,64})<\/vm>/g)) {
+    const r = m[1].trim();
+    if (/^[\w.-]{1,64}$/.test(r) && !refs.includes(r)) refs.push(r);
+    if (refs.length >= 256) break;
+  }
+  return { vms: refs };
+}
+
 // Parse host config.graphicsInfo (<HostGraphicsInfo> elements) into GPU list.
 // v2.727(감사 E-12): 테스트가 memGB null 규칙을 고정할 수 있게 export(호출부는 그대로 모듈 내부).
 export function parseGpus(xml) {
@@ -840,6 +857,9 @@ export function parseGpus(xml) {
         mode,
         vgpuMode: mode === 'vgpu',
         pciId,
+        // v2.852(GPU 할당 계층): 이 물리 GPU 를 쓰는 VM moref(HostGraphicsInfo.vm). 'GPU #n 에 어떤 VM' 의 근거다.
+        //   이 판 수집기는 늘 싣는다(0 대면 []). 키가 없는 GPU(구버전 수집기·엣지 스냅샷)는 소비처가 '배치 정보 없음' 으로 센다.
+        ...graphicsVmRefs(blk),
       });
     }
   }
@@ -878,7 +898,8 @@ function parsePassthruGpus(passthruXml, pciDeviceXml, skipIds) {
     const vendorName = /<vendorName>([^<]*)<\/vendorName>/.exec(blk)?.[1] || '';
     const model = deviceName || vendorName || 'Passthrough GPU';
     // 패스쓰루 GPU는 PCI 정보에 VRAM이 없으므로 모델명에서 추론(없으면 0).
-    out.push({ model, vendor: vendorName, memGB: inferGpuMemGB(model), mode: 'passthrough', vgpuMode: false });
+    // v2.852: pciId — VM 의 패스스루 장치(VirtualPCIPassthrough backing id)와 맞춰 'GPU #n 을 어느 VM 이 받았나' 를 가른다.
+    out.push({ model, vendor: vendorName, memGB: inferGpuMemGB(model), mode: 'passthrough', vgpuMode: false, pciId: id });
   }
   return out;
 }
@@ -1084,7 +1105,7 @@ function parseDatastoreStorage(infoXml, summaryType) {
  * `xsi:type="VirtualPCIPassthrough"` (with the closing quote) marks each device
  * and does NOT match the backing type `...VirtualPCIPassthroughVmiopBackingInfo`.
  */
-function parseVmGpu(deviceXml) {
+export function parseVmGpu(deviceXml) {
   if (!deviceXml) return null;
   const total = (deviceXml.match(/xsi:type="VirtualPCIPassthrough"/g) || []).length;
   if (!total) return null;
@@ -1092,7 +1113,29 @@ function parseVmGpu(deviceXml) {
   const passthrough = Math.max(0, total - vgpu);
   const type = vgpu && passthrough ? 'mixed' : (vgpu ? 'vgpu' : 'passthrough');
   const profile = /<vgpu>([^<]+)<\/vgpu>/.exec(deviceXml)?.[1] || '';
-  return { type, count: total, vgpu, passthrough, profile };
+  const out = { type, count: total, vgpu, passthrough, profile };
+  if (passthrough) out.pciIds = vmPassthroughPciIds(deviceXml);
+  return out;
+}
+
+/**
+ * v2.852(GPU 할당 계층): VM 의 패스스루 장치가 가리키는 호스트 PCI 주소 — 호스트 pciPassthruInfo 의 id 와 같은 꼴(0000:3b:00.0).
+ * 장치(`xsi:type="VirtualPCIPassthrough"`)마다 그 장치의 첫 backing 안에서만 읽는다:
+ *   DeviceBackingInfo `<id>`(정적 DirectPath) · DynamicBackingInfo `<assignedId>`(동적 DirectPath — 켜진 VM 에만 값이 있다).
+ * vGPU(VmiopBackingInfo) 장치는 건너뛴다. 못 읽으면 그 장치만 빠진다(지어내지 않는다). 16개 상한.
+ */
+export function vmPassthroughPciIds(deviceXml) {
+  const ids = [];
+  const parts = String(deviceXml || '').split(/xsi:type="VirtualPCIPassthrough"/).slice(1);
+  for (const seg of parts) {
+    const b = /<backing\b[^>]{0,200}>([\s\S]*?)<\/backing>/.exec(seg);
+    if (!b || /VmiopBackingInfo/.test(b[0].slice(0, 200))) continue;
+    const id = /<assignedId>([^<]{1,64})<\/assignedId>/.exec(b[1])?.[1] || /<id>([^<]{1,64})<\/id>/.exec(b[1])?.[1] || '';
+    const v = id.trim();
+    if (/^[0-9a-fA-F:.]{5,32}$/.test(v) && !ids.includes(v)) ids.push(v);
+    if (ids.length >= 16) break;
+  }
+  return ids;
 }
 
 // Snapshot count/size/createTime — soapParse.js의 순수 파서 snapshotInfo를 사용(워커 공유·단위테스트).

@@ -739,6 +739,51 @@ export function sanitizeVcLicenses(v) { return sanitizeVcObjList(v, { strKeys: V
 /** @returns {{ value: object[]|null, dropped: number }} — key 가 없는 원소는 버린다(수집기도 key 없는 확장은 싣지 않는다). */
 export function sanitizeVcSolutions(v) { return sanitizeVcObjList(v, { strKeys: VC_SOLUTION_STR, max: VC_SOLUTIONS_MAX, required: 'key' }); }
 
+/** v2.852: moref 꼴(vm-12) · PCI 주소 꼴(0000:3b:00.0). */
+const MOREF_RE = /^[\w.-]{1,64}$/;
+const PCI_RE = /^[0-9a-fA-F:.]{5,32}$/;
+const GPU_REFS_MAX = 256;
+/** 글자 배열을 형식·상한으로 좁힌다. 배열이 아니면 null(키를 지운다). */
+function refList(v, re, max) {
+  if (!Array.isArray(v)) return { value: null, coerced: 1 };
+  const out = []; let coerced = Math.max(0, v.length - max);
+  for (const x of v.slice(0, max)) {
+    if (typeof x === 'string' && re.test(x)) { if (!out.includes(x)) out.push(x); } else coerced += 1;
+  }
+  return { value: out, coerced };
+}
+/**
+ * v2.852: 호스트 gpus — 배열이 아니면 [](읽지 못함 — 소비처가 배열로 읽는다), 원소는 평범한 객체만(64장 상한).
+ * 새 필드 vms·pciId 만 형식을 본다(그 밖의 필드는 예전처럼 그대로 — 표시 필드 정제는 별건).
+ * @returns {{ value: object[], coerced: number }}
+ */
+export function sanitizeHostGpus(v) {
+  if (!Array.isArray(v)) return { value: [], coerced: 1 };
+  let coerced = Math.max(0, v.length - 64);
+  const out = [];
+  for (const g of v.slice(0, 64)) {
+    if (!isPlainObj(g)) { coerced += 1; continue; }
+    const o = { ...g };
+    if (Object.hasOwn(o, 'vms')) {
+      const r = refList(o.vms, MOREF_RE, GPU_REFS_MAX); coerced += r.coerced;
+      if (r.value == null) delete o.vms; else o.vms = r.value;
+    }
+    if (Object.hasOwn(o, 'pciId') && o.pciId != null && !(typeof o.pciId === 'string' && (o.pciId === '' || PCI_RE.test(o.pciId)))) { o.pciId = null; coerced += 1; }
+    out.push(o);
+  }
+  return { value: out, coerced };
+}
+/** v2.852: VM gpu — 객체가 아니면 null(GPU 모름). pciIds 만 형식을 본다(16개 상한). */
+export function sanitizeVmGpuField(v) {
+  if (!isPlainObj(v)) return { value: null, coerced: 1 };
+  const o = { ...v }; let coerced = 0;
+  if (Object.hasOwn(o, 'pciIds')) {
+    const r = refList(o.pciIds, PCI_RE, 16); coerced += r.coerced;
+    if (r.value == null) delete o.pciIds; else o.pciIds = r.value;
+  }
+  return { value: o, coerced };
+}
+
 export function sanitizeInventoryList(list, vcId, max, dropped) {
   const out = [];
   // v2.727(감사 D-04): 상한(max)으로 넘친 원소 수를 센다 — 예전 `slice(0, max)` 는 셋째 원소가 어디에도 남지 않았다(조용한 상한 금지).
@@ -791,6 +836,17 @@ export function sanitizeInventoryList(list, vcId, max, dropped) {
     if (Object.hasOwn(o, 'vcDatacenter') && o.vcDatacenter != null) {
       if (typeof o.vcDatacenter === 'string') { if (o.vcDatacenter.length > 128) dropped.coerced += 1; o.vcDatacenter = capStr(o.vcDatacenter, 128); }
       else { o.vcDatacenter = null; dropped.coerced += 1; }
+    }
+    // v2.852(GPU 할당 계층): 호스트 GPU 목록(gpus)·VM GPU(gpu)의 새 필드 — gpus[].vms(GPU 를 쓰는 VM moref)·pciId · gpu.pciIds.
+    //   예전에는 gpus·gpu 를 통째로 그대로 받았다. 모양만 좁힌다: gpus 는 배열(아니면 [] — 소비처가 `.map`·`.length` 로 읽는다) ·
+    //   원소는 평범한 객체만 · 새 필드는 형식 밖이면 키를 지운다(= 배치 정보 없음 — 0 대로 지어내지 않는다). gpu 는 객체가 아니면 null.
+    if (Object.hasOwn(o, 'gpus') && o.gpus != null) {
+      const v = sanitizeHostGpus(o.gpus);
+      dropped.coerced += v.coerced; o.gpus = v.value;
+    }
+    if (Object.hasOwn(o, 'gpu') && o.gpu != null) {
+      const v = sanitizeVmGpuField(o.gpu);
+      dropped.coerced += v.coerced; o.gpu = v.value;
     }
     out.push(o);
   }

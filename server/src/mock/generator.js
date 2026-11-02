@@ -349,6 +349,40 @@ function mkVmGpu(hostState, idx, ord = null) {
   }
   return { type: 'passthrough', count: ord != null ? 1 : (idx % 6 === 0 ? 2 : 1), profile: '', model: hg[0].model };
 }
+/**
+ * v2.852: 목 GPU 배치 — 켜진 vGPU VM 을 같은 프로파일끼리 GPU 에 채우고(명목 용량 안에서만 — 실장비는 넘겨 올릴 수 없다),
+ * 패스스루 VM 은 순서대로 GPU 한 장씩(pciId = busId). 들어가지 못한 VM 은 배치 목록에 없다(화면의 '배치 확인 안 됨' 이 그대로 보인다).
+ * GPU 의 vms 는 VM id 에서 vCenter 접두를 뗀 값이다(실수집의 moref 와 같은 자리 — id = `${vcId}:${ref}`).
+ */
+function mockGpuPlacement(siteHosts, siteVms, siteId) {
+  const cap = (g) => { const m = /(\d{2,3})\s*GB/i.exec(g.model || ''); return m ? Number(m[1]) : Number(g.memGB) || 0; };
+  for (const h of siteHosts) {
+    const gpus = h.gpus || [];
+    if (!gpus.length || gpus[0].mode === 'vsga') continue;
+    const onHost = siteVms.filter((v) => v.host === h.name && v.gpu);
+    if (gpus[0].mode === 'passthrough') {
+      gpus.forEach((g) => { g.pciId = g.busId; });
+      let i = 0;
+      for (const v of onHost) {
+        const ids = [];
+        for (let k = 0; k < (v.gpu.count || 1) && i < gpus.length; k++) ids.push(gpus[i++].pciId);
+        v.gpu.pciIds = ids;
+      }
+      continue;
+    }
+    gpus.forEach((g) => { g.vms = []; g._prof = null; g._used = 0; });
+    for (const v of onHost) {
+      if (v.powerState !== 'POWERED_ON') continue;
+      const per = Number(/-(\d{1,3})[a-z]{1,2}$/i.exec(v.gpu.profile || '')?.[1]);
+      if (!(per > 0)) continue;
+      const g = gpus.find((x) => x._prof === v.gpu.profile && x._used + per <= cap(x)) || gpus.find((x) => x._prof == null && per <= cap(x));
+      if (!g) continue;
+      g._prof = v.gpu.profile; g._used += per;
+      g.vms.push(v.id.startsWith(`${siteId}:`) ? v.id.slice(siteId.length + 1) : v.id);
+    }
+    gpus.forEach((g) => { delete g._prof; delete g._used; });
+  }
+}
 function mkLicenses(site) {
   const n = site.hosts;
   return [
@@ -559,6 +593,8 @@ export function generateSnapshot() {
         serviceTag: mockServiceTag(`${site.id}|${h.name}`),
         hbas: mkHbas(h.idx),
         gpus: mkGpus(h.idx, site),
+        // v2.852: vSphere 데이터센터 이름(실수집 soapClient 와 같은 키) — VM 의 vcDcPath 와 같은 값. GPU 할당 계층의 '데이터센터' 단계.
+        vcDatacenter: `DC-${site.id}`,
         // approximate host power draw (W): idle baseline + per-core + load-dependent
         powerWatts: disconnected ? 0 : Math.round(140 + h.cpuCores * 4.5 + cpuLoad * h.cpuCores * 5 + memLoad * 30),
         // 흡기 온도(섭씨): 부하/전원에 따라 22~38℃ 근방.
@@ -699,6 +735,9 @@ export function generateSnapshot() {
         alarms.push(mkAlarm(site.id, ds.name, 'datastore', usedFrac > 0.95 ? 'critical' : 'warning', `Datastore usage at ${Math.round(usedFrac * 100)}%`));
       }
     }
+
+    // v2.852: GPU 별 VM 배치(실수집의 HostGraphicsInfo.vm · 패스스루 pciId 와 같은 모양) — GPU 할당 계층 데모.
+    mockGpuPlacement(hosts.filter((x) => x.vcenterId === site.id), vms.filter((x) => x.vcenterId === site.id), site.id);
 
     // Networks
     for (const net of env.networks) {

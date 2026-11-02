@@ -12,6 +12,7 @@
 - (원래 4632행) GPU 추이 창은 수집 공백을 잇지 않는다
 - (원래 4648행) GPU 메모리·온도·동작(v2.650) — 사용률·메모리 점유·온도는 서로 다른 것을 잰다. 온도는 판정에 쓰지 않는다
 - (원래 4665행) GPU 표 시안 A(v2.653) — 빈 칸은 이유를 말하고, 게스트 값이 없으면 ESXi 카운터로 채우되 출처를 밝힌다
+- v2.852 GPU 할당 계층 — 법인 › 데이터센터 › 클러스터 › 호스트 › GPU › VM 의 할당·예비(화면·CSV·엑셀)
 
 ## 본문
 
@@ -74,3 +75,19 @@
   · v2.769(점검 R4-D5): **호스트 GPU 사용률 = 켜진 GPU VM 의 최댓값**(MIG 제외) — 폴러·sampler·`gpu_util` 이력·엣지 push 가 이 정의이고, 표(`/tools/gpu`)·호스트 상세도 같은 값이다(평균으로 되돌리지 말 것 — 표와 추이가 갈린다).
     일부 GPU 무응답은 `gpuErrors`(0~64, 밖이면 null)로 레코드·store·중앙 `narrowGpuRow`·엣지 push 에 싣고 화면이 'GPU N장 응답 없음' 으로 알린다.
     클러스터 키(`<vcenterId>|<cluster>`)의 소유 vCenter 는 `gpu/clusterKeyScope.js` 최장 프리픽스(스냅샷 id ∪ 허용 id) — `split('|')[0]` 금지.
+- ⚠⚠ **v2.852 GPU 할당 계층 — 법인 › 데이터센터 › 클러스터 › 호스트 › 물리 GPU › VM 의 할당·예비**(승인 시안 https://claude.ai/artifact/GQKnG775UijSAU7aUSFFeB ·
+  사용자 요청 "어떤 GPU 가 설치되어 있고 어떤 VM 에 얼만큼의 vGPU/GPU 가 할당되어 있고 할당량/예비량" + "excel 로 내보내기". `gpu/allocTree.js`(순수) ·
+  `gpu/allocTreeXlsx.js` · `GET /tools/gpu/alloc`(+ `.csv`·`.xlsx` — data.csv · 엑셀 동시 1건) · 웹 `GpuTool` '할당 계층' 보기(`GpuAllocTree.jsx`·`gpuAllocText.js`).
+  회귀 `server/test/gpuAllocTree2852.test.js` + 웹 `gpuAllocText.test.js`):
+  - **할당 = 켜진 VM 만**, 예비 = 용량 − 할당. 용량(명목 — `gpuCapacityOf` 는 hostGpu.js allocCapacityGB 와 같은 규칙)이나 할당(프로파일 해석 불가)을 모르는 것이
+    섞이면 **예비·할당률은 null**(부분 합을 예비로 보이지 않는다). 꺼진 VM 은 `off` 묶음과 `offGB`(켜면 필요한 양). vSGA 는 행만 — 합계 제외.
+  - **GPU 별 배치의 근거**: vGPU = 수집기 `parseGpus` 가 싣는 `gpus[].vms`(HostGraphicsInfo.vm moref — VM id 는 `${vcenterId}:${ref}`),
+    패스스루 = 호스트 GPU `pciId` ↔ VM `gpu.pciIds`(`vmPassthroughPciIds` — 정적 `<id>`·동적 `<assignedId>`). 키가 없는 GPU(구버전 수집기·엣지)는
+    `placement:false` — GPU 단위 할당·예비 null, VM 은 '배치 정보 없음' 묶음(GPU 에 지어내 배치하지 않는다). 호스트 할당은 배치와 무관하게 VM 구성에서.
+  - **엣지 수신**: 세 필드는 `routes/central.js sanitizeHostGpus`·`sanitizeVmGpuField` 가 형식(moref·PCI 주소)·상한으로 좁힌다. gpus 가 배열이 아니면 [] ·
+    새 필드가 형식 밖이면 키를 지운다(= 배치 정보 없음). 예전에는 gpus·gpu 를 통째로 받았다(그 밖 필드는 여전히 그대로 — 별건).
+  - 슬롯은 한 GPU 의 프로파일이 하나일 때만(같은 GPU 에는 같은 프로파일 — NVIDIA 일반 규칙, 혼합 크기 모드면 계산하지 않는다). CSV 슬롯 글자는
+    '사용 N / 전체 M'(엑셀이 '4/4' 를 날짜로 바꾼다). 엑셀은 조건부 서식 없이 글자 막대(█░) · 개요 + 폭 한 장 인쇄라 `xlsxSheetPrOrder.js` 를 불러온다.
+  - 웹 표는 STable 래퍼 + **형제끼리만 정렬**(전체 정렬은 계층을 깬다 — th onClick 이 있어 STable 자체 정렬은 꺼진다).
+  - ⚠ 정직 기록: `HostGraphicsInfo.vm` 이 꺼진 VM 을 싣는지, 이 현장 vCenter 가 동적 DirectPath `assignedId` 를 주는지는 실장비로 확인하지 못했다
+    (꺼진 VM 은 목록에 있어도 할당에 넣지 않으므로 결과는 같다). 한 VM 의 vGPU 장치 둘이 한 GPU 목록에 한 번만 오면 GPU 단위 할당이 한 장치분으로 적게 잡힌다(호스트 합은 정확).

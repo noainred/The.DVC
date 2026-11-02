@@ -23,6 +23,10 @@ import { todayStamp } from "../../util/dayKey.js";
 import { acquireExport } from '../../util/exportBusy.js';
 import { waitDrain } from '../../util/waitDrain.js'; // v2.783(점검 Q5): drain 만 기다리면 끊긴 클라이언트에서 영원히 멈춰 내보내기 잠금이 풀리지 않았다
 import { snapMemo } from '../../util/snapCache.js';
+import { buildGpuAllocTree } from '../../gpu/allocTree.js';
+import { renderGpuAllocWorkbook, allocCsvLines, XLSX_MIME as ALLOC_XLSX_MIME } from '../../gpu/allocTreeXlsx.js';
+import { fileStamp, localStamp, DAY_OFFSET_MIN } from '../../util/dayKey.js';
+import { tzName } from '../../vcenter/vmExportCatalog.js';
 // v2.643: CSV·텍스트 가져오기/내보내기는 관리자 이상 + 'data.csv' 권한(super_admin 항상, admin 은 권한 설정에서 끌 수 있다).
 const csvPerm = requirePerm('data.csv');
 
@@ -484,6 +488,43 @@ api.get('/tools/gpu.csv', csvPerm, requirePerm('tools'), (req, res) => {
       r.utilPct == null ? '' : r.utilPct, r.utilSource || '', r.assignedVms].map(esc).join(','));
   }
   sendMaybeZip(res, `gpu-${todayStamp()}.csv`, '﻿' + lines.join('\r\n'), 'text/csv; charset=utf-8'); // BOM for Excel
+});
+
+/**
+ * v2.852: GPU 할당 계층(법인 › 데이터센터 › 클러스터 › 호스트 › GPU › VM — gpu/allocTree.js) — 화면 · CSV · 엑셀.
+ *   조회 범위(scopedVcenterIds)를 요청 필터(vcenterId)보다 먼저 건다. 범위 밖 vcenterId 는 빈 결과다(존재 여부를 말하지 않는다).
+ *   파일은 data.csv(v2.643 규약 — 형제 gpu.csv 와 같은 게이트) · 엑셀은 동시 1건(exportBusy). 스냅샷만 읽는다(왕복 0).
+ */
+function allocTreeOf(req) {
+  const snap = store.get();
+  const vcenterId = typeof req.query.vcenterId === 'string' && req.query.vcenterId ? req.query.vcenterId.slice(0, 200) : null;
+  const tree = buildGpuAllocTree(snap, { allowed: scopedVcenterIds(req.user, snap), vcenterId });
+  const vcName = vcenterId ? (tree.vcenters[0]?.name || vcenterId) : null;
+  return { snap, tree, vcenterId, scopeText: vcName || '전체 법인', fileScope: (vcenterId || 'all').replace(/[^\w.-]+/g, '_').slice(0, 60) };
+}
+api.get('/tools/gpu/alloc', requirePerm('tools'), (req, res) => {
+  const { snap, tree } = allocTreeOf(req);
+  res.json({ generatedAt: snap.generatedAt || null, ...tree });
+});
+api.get('/tools/gpu/alloc.csv', csvPerm, requirePerm('tools'), (req, res) => {
+  const { tree, fileScope } = allocTreeOf(req);
+  sendMaybeZip(res, `gpu-allocation_${fileScope}_${fileStamp()}.csv`, '\uFEFF' + allocCsvLines(tree, csvCell).join('\r\n'), 'text/csv; charset=utf-8');
+});
+api.get('/tools/gpu/alloc.xlsx', csvPerm, requirePerm('tools'), async (req, res) => {
+  const lock = acquireExport('gpu.alloc.xlsx', req);
+  if (!lock.ok) return res.status(lock.status).json(lock.body);
+  try {
+    const { snap, tree, scopeText, fileScope } = allocTreeOf(req);
+    const ts = Date.parse(snap.generatedAt || '') || Date.now();
+    const buf = await renderGpuAllocWorkbook(tree, { stamp: localStamp(ts) || '', tz: tzName(DAY_OFFSET_MIN), scopeText });
+    const name = `gpu-allocation_${fileScope}_${fileStamp(ts)}.xlsx`;
+    res.setHeader('Content-Type', ALLOC_XLSX_MIME);
+    res.setHeader('Content-Disposition', `attachment; filename="${name}"`);
+    res.end(buf);
+  } catch (e) {
+    console.warn(`[gpu] 할당 계층 엑셀 실패: ${e?.message || e}`);
+    if (!res.headersSent) res.status(500).json({ ok: false, error: 'export_failed', reason: '엑셀을 만들지 못했습니다.' });
+  } finally { lock.release(); }
 });
 
 // GPU 사용률 시계열 수집 메타 — '언제부터 데이터가 쌓였는지'(수집 시작/마지막/샘플 수).
