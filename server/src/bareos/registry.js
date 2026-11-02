@@ -69,6 +69,8 @@ function load() {
         jobs: (Array.isArray(p.jobs) ? p.jobs : []).filter((j) => j && typeof j === 'object' && typeof j.id === 'string'),
         retired: trimRetired((Array.isArray(p.retired) ? p.retired : []).filter((r) => r && typeof r.name === 'string' && r.name)),
       };
+      const fixed = dedupeJobIds(_db.jobs);
+      if (fixed) console.warn(`[bareos] 백업 대상 원장에 같은 id 가 ${fixed}건 있어 뒤 항목에 새 id 를 붙였습니다(옛 판 일괄 등록의 id 충돌 — 다음 저장 때 기록).`);
       _loadErr.clear();
       return _db;
     }
@@ -181,12 +183,41 @@ export function addJobs(inputs) {
   return out;
 }
 
+/*
+ * v2.850(릴리스 단위 테스트 간헐 실패로 발견 — 재현): id 가 `bj_<밀리초><무작위 3바이트>` 라 일괄 등록(같은 밀리초 수백 건)에서 겹칠 수 있었다
+ *   (450건이면 약 0.6%). 겹친 뒤 항목은 id 로 찾을 수 없다(조회 · 실행 · 삭제 · 결과 반영이 모두 앞 항목으로 간다).
+ *   새 id 는 무작위 6바이트 + 원장에 없는 것만 · 이미 겹친 원장은 읽을 때 뒤 항목에 **결정적** id(<원래>d<n>)를 준다(재시작해도 같은 id — 파일은 다음 저장 때).
+ */
+function newJobId(db) {
+  for (let n = 0; ; n += 1) {   // 바로 위 같은 VM 검사와 같은 O(n) 훑기 — 겹칠 때만 한 번 더(뒤 n 으로 반드시 끝난다)
+    const id = `bj_${Date.now().toString(36)}${crypto.randomBytes(6).toString('hex')}${n ? `n${n}` : ''}`;
+    if (!db.jobs.some((j) => j.id === id)) return id;
+  }
+}
+/** @returns {number} 새 id 를 붙인 항목 수 */
+export function dedupeJobIds(jobs) {
+  const all = new Set(jobs.map((j) => j.id));
+  const seen = new Set();
+  let fixed = 0;
+  for (const j of jobs) {
+    if (seen.has(j.id)) {
+      let n = 1;
+      while (all.has(`${j.id}d${n}`)) n += 1;
+      j.id = `${j.id}d${n}`;
+      all.add(j.id);
+      fixed += 1;
+    }
+    seen.add(j.id);
+  }
+  return fixed;
+}
+
 /** 원장 메모리에 한 대상을 넣는다(쓰기는 부르는 쪽). 상한·같은 VM 은 거부. */
 function insertJob(db, input) {
   if (db.jobs.length >= MAX_JOBS) throw new Error(`백업 대상은 ${MAX_JOBS}개까지 등록할 수 있습니다.`);
   if (db.jobs.some((j) => j.vcenterId === input.vcenterId && j.vmId === input.vmId)) throw new Error('이 VM 은 이미 백업 대상입니다.');
   const job = {
-    id: `bj_${Date.now().toString(36)}${crypto.randomBytes(3).toString('hex')}`,
+    id: newJobId(db),
     vcenterId: String(input.vcenterId), vmId: String(input.vmId), vmName: String(input.vmName),
     dc: String(input.dc), folder: String(input.folder),
     ...(input.directorId ? { directorId: String(input.directorId) } : {}),
