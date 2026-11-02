@@ -83,7 +83,7 @@ export function registerBareosInstall(api) {
 
 /** 개요 — 대상 표 · 번들 · 받기 상태 · 최근 작업(비밀 없음). */
 api.get(P, adminOnly, fullScopeOnly, async (req, res) => {
-  if (isDemoActive()) return res.json({ ...demo.overview(), bundleSource: bundleSourceView() });
+  if (isDemoActive()) return res.json({ ...demo.overview(), bundleBaseUrl: bundleSourceInfo().url, bundleSource: bundleSourceView() });   // v2.850: 받는 곳은 데모도 실제 설정값(저장하면 바로 보이게)
   try {
     const known = knownHostAddrs();
     const targets = listInstallTargets({ knownHostAddrs: known }).map((t) => {
