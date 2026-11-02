@@ -1,6 +1,6 @@
 // v2.852 GPU 할당 계층 — 화면 행 펼치기·형제 정렬·찾기·글자(gpuAllocText.js).
 import { describe, it, expect } from 'vitest';
-import { flattenAlloc, openForLevel, sortSiblings, totalsNote, gpuTexts, numText, ALLOC_LEVELS, DEFAULT_LEVEL } from './gpuAllocText.js';
+import { flattenAlloc, openForLevel, sortSiblings, totalsNote, gpuTexts, numText, ALLOC_LEVELS, DEFAULT_LEVEL, pickVcenters, sumTotals, corpChips } from './gpuAllocText.js';
 
 const tot = (o = {}) => ({ hosts: 1, gpus: 1, vsga: 0, capGB: 48, capUnknown: 0, allocGB: 24, allocUnknown: 0, offGB: 0, offUnknown: 0, vmsOn: 1, vmsOff: 0, unplaced: 0, freeGpus: 0, noPlacement: 0, spareGB: 24, allocPct: 50, ...o });
 const vmr = (id, name, gb = 24, extra = {}) => ({ id, name, powerState: 'POWERED_ON', mode: 'vgpu', profile: 'grid_a40-24q', vgpuDevices: 1, passthroughDevices: 0, gb, ...extra });
@@ -60,5 +60,36 @@ describe('gpuAllocText', () => {
     expect(gpuTexts({ mode: 'vgpu', placement: false, vms: [] }).prof).toBe('배치 정보 없음');
     expect(gpuTexts({ mode: 'passthrough', placement: true, vms: [] }).note).toMatch(/1장 예비/);
     expect(numText(null)).toBe('—'); expect(numText(12.25)).toBe('12.3');
+  });
+});
+
+describe('v2.853 법인 칩', () => {
+  const two = () => {
+    const t = tree();
+    const vc2 = { ...t.vcenters[0], id: 'vc2', name: 'vcenter-de', totals: tot({ capGB: 64, allocGB: 16, spareGB: 48, allocPct: 25, hosts: 1 }) };
+    return { ...t, vcenters: [t.vcenters[0], vc2] };
+  };
+  it('선택한 법인만 행으로 · 빈 선택은 전체', () => {
+    const t = two();
+    expect(pickVcenters(t, new Set(['vc2'])).map((v) => v.id)).toEqual(['vc2']);
+    expect(pickVcenters(t, new Set()).length).toBe(2);
+    expect(flattenAlloc(t, { open: new Set(), vcSel: new Set(['vc2']) }).map((r) => r.name)).toEqual(['vcenter-de']);
+  });
+  it('합계 — 고른 법인만 더하고, 모르는 값이 섞이면 예비·할당률은 null', () => {
+    const t = two();
+    const s = sumTotals(t, new Set(['vc1', 'vc2']));
+    expect(s.capGB).toBe(112); expect(s.allocGB).toBe(40); expect(s.spareGB).toBe(72); expect(s.allocPct).toBe(36);
+    t.vcenters[1].totals.allocUnknown = 1;
+    expect(sumTotals(t, new Set(['vc1', 'vc2'])).spareGB).toBe(null);
+    expect(sumTotals(t, null)).toBe(t.totals);
+  });
+  it('칩 — /vcenters 의 법인 전부(GPU 없는 법인은 0), id 순 · 찾기 글자가 법인 id 에 맞으면 그 법인 전체', () => {
+    const t = two();
+    const chips = corpChips(t, [{ id: 'vc2', name: 'vcenter-de' }, { id: 'AZ', name: 'vcenter-az' }, { id: 'vc1', name: 'vcenter-kr' }]);
+    expect(chips.map((c) => [c.id, c.hosts])).toEqual([['AZ', 0], ['vc1', 2], ['vc2', 1]]);
+    expect(corpChips(t, null).map((c) => c.id)).toEqual(['vc1', 'vc2']);
+    const rows = flattenAlloc(t, { query: 'vc2' });
+    expect(rows[0].name).toBe('vcenter-de');
+    expect(rows.some((r) => r.kind === 'host')).toBe(true);
   });
 });

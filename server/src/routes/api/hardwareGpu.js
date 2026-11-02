@@ -498,9 +498,16 @@ api.get('/tools/gpu.csv', csvPerm, requirePerm('tools'), (req, res) => {
 function allocTreeOf(req) {
   const snap = store.get();
   const vcenterId = typeof req.query.vcenterId === 'string' && req.query.vcenterId ? req.query.vcenterId.slice(0, 200) : null;
-  const tree = buildGpuAllocTree(snap, { allowed: scopedVcenterIds(req.user, snap), vcenterId });
-  const vcName = vcenterId ? (tree.vcenters[0]?.name || vcenterId) : null;
-  return { snap, tree, vcenterId, scopeText: vcName || '전체 법인', fileScope: (vcenterId || 'all').replace(/[^\w.-]+/g, '_').slice(0, 60) };
+  // v2.853: 화면 법인 칩에서 고른 법인들(쉼표 목록 · 100개 · 각 200자 상한). 형식이 아니면 버린다(조회 범위가 먼저 — buildGpuAllocTree).
+  const raw = typeof req.query.vcenterIds === 'string' ? req.query.vcenterIds.slice(0, 20_000) : '';
+  const picked = raw ? [...new Set(raw.split(',').map((x) => x.trim()).filter((x) => x && x.length <= 200))].slice(0, 100) : [];
+  const vcenterIds = picked.length ? new Set(picked) : null;
+  const tree = buildGpuAllocTree(snap, { allowed: scopedVcenterIds(req.user, snap), vcenterId, vcenterIds });
+  const names = tree.vcenters.map((v) => v.id);
+  const scopeText = vcenterId ? (tree.vcenters[0]?.name || vcenterId)
+    : vcenterIds ? (names.length ? `법인 ${names.join(', ')}` : '고른 법인(조회 범위 안에 없음)') : '전체 법인';
+  const fileScope = vcenterId || (vcenterIds ? (names.length === 1 ? names[0] : `${names.length}corps`) : 'all');
+  return { snap, tree, vcenterId, scopeText, fileScope: String(fileScope).replace(/[^\w.-]+/g, '_').slice(0, 60) };
 }
 api.get('/tools/gpu/alloc', requirePerm('tools'), (req, res) => {
   const { snap, tree } = allocTreeOf(req);

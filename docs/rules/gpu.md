@@ -89,5 +89,9 @@
   - 슬롯은 한 GPU 의 프로파일이 하나일 때만(같은 GPU 에는 같은 프로파일 — NVIDIA 일반 규칙, 혼합 크기 모드면 계산하지 않는다). CSV 슬롯 글자는
     '사용 N / 전체 M'(엑셀이 '4/4' 를 날짜로 바꾼다). 엑셀은 조건부 서식 없이 글자 막대(█░) · 개요 + 폭 한 장 인쇄라 `xlsxSheetPrOrder.js` 를 불러온다.
   - 웹 표는 STable 래퍼 + **형제끼리만 정렬**(전체 정렬은 계층을 깬다 — th onClick 이 있어 STable 자체 정렬은 꺼진다).
+  - **v2.853 법인 칩**(사용자 요청 — vCenter 화면 '⚡ 바로가기' 와 같은 모양으로 법인 선택): `vc-quicknav`·`qn-btn`(`.on` = 선택) 그대로 ·
+    칩 = `/vcenters` 의 법인 전부(GPU 호스트 0 이면 흐리게) · 상태 점은 `vcCardText.vcQuickDot` 하나(vCenter 화면도 이것으로 바꿨다 — 판정 복제 금지) ·
+    여러 개 선택(빈 선택 = 전체) · 요약 칸은 `gpuAllocText.sumTotals`(서버 finishTotals 와 같은 '모르는 값이 섞이면 예비 null') ·
+    내려받기는 `vcenterIds=a,b`(서버가 조회 범위와 교집합을 먼저 — 범위 밖 id 는 빠진다, 100개·200자 상한) · 찾기 글자가 법인 id·이름에 맞으면 그 법인 전체.
   - ⚠ 정직 기록: `HostGraphicsInfo.vm` 이 꺼진 VM 을 싣는지, 이 현장 vCenter 가 동적 DirectPath `assignedId` 를 주는지는 실장비로 확인하지 못했다
     (꺼진 VM 은 목록에 있어도 할당에 넣지 않으므로 결과는 같다). 한 VM 의 vGPU 장치 둘이 한 GPU 목록에 한 번만 오면 GPU 단위 할당이 한 장치분으로 적게 잡힌다(호스트 합은 정확).
