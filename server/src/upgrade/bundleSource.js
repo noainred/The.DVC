@@ -73,33 +73,62 @@ export function bundleFromArchive(archivePath) {
   return fromArchive(archivePath, archiveVersionOf(archivePath), 'applied');
 }
 
-export async function resolveBundleBytes(settings) {
+/**
+ * @param {object} settings 유효 업그레이드 설정(watchDir·remoteBase·token)
+ * @param {object} [o]
+ * @param {string|null} [o.exactVersion] v2.859(엣지 자동 업그레이드): **정확히 이 버전**의 번들만 — 중앙 현재 버전을 엣지에 맞출 때.
+ *   감시 폴더의 더 새 번들·원격의 더 새 최신은 거절한다(중앙보다 새 버전을 엣지에 먼저 올리지 않는다).
+ * @param {string[]} [o.localDirs] exactVersion 일 때 먼저 보는 폴더들(패키지 폴더 — fleetBundle 보관본·관리자 내려받기). 정확한 이름
+ *   `vmware-portal-<버전>.tar.gz` 만 본다.
+ * @param {boolean} [o.remote] false 면 원격 소스를 묻지 않는다(엣지 동기화가 1시간에 한 번만 묻는다).
+ */
+export async function resolveBundleBytes(settings, { exactVersion = null, localDirs = [], remote = true } = {}) {
   lastReject = null; // 새 시도 — 이전 사유는 버린다
   const s = settings || {};
   const cur = String(currentVersion()).split('.').map(Number);
+  const exact = exactVersion ? String(exactVersion).trim().replace(/^v/i, '') : null;
+  const exactTuple = exact ? exact.split('.').map(Number) : null;
+  const rejects = []; // 로컬 출처의 거부 사유(원격 사유와 함께 남긴다)
 
-  // 1) newest bundle in the watch folder — 단, '중앙 현재 버전 이상'만 사용.
+  // 0) v2.859: 지정한 폴더들의 '정확히 그 버전' 번들(패키지 폴더 — 보관본·관리자 내려받기)
+  if (exact) {
+    for (const d of Array.isArray(localDirs) ? localDirs : []) {
+      if (!d) continue;
+      const p = path.join(d, `vmware-portal-${exact}.tar.gz`);
+      if (!fs.existsSync(p)) continue;
+      const b = fromArchive(p, exact, 'package');
+      if (b) return b;
+      rejects.push(`패키지 폴더 번들 v${exact}: ${lastReject}`);
+      lastReject = null;
+    }
+  }
+
+  // 1) newest bundle in the watch folder — 단, '중앙 현재 버전 이상'만 사용(exactVersion 이면 정확히 그 버전만).
   //    (오래된 잔여 번들(예: v1.1.12)을 수집서버에 푸시해 다운그레이드/거부되는 문제 방지)
   // v2.740(감사 B-03): 감시 폴더 번들의 서명이 틀리면 null 로 끝내지 않고 원격으로 넘어간다(예전에는 원격을 시도하지 않았다).
   //   둘 다 실패하면 감시 폴더 사유를 함께 남긴다.
-  let watchReject = null;
   if (s.watchDir) {
     const found = findNewerArchive(s.watchDir, '0.0.0');
-    if (found?.path && fs.existsSync(found.path) && cmp3(found.version, cur) >= 0) {
+    const fits = found?.path && fs.existsSync(found.path) && (exactTuple ? cmp3(found.version, exactTuple) === 0 : cmp3(found.version, cur) >= 0);
+    if (fits) {
       const b = fromArchive(found.path, vstr(found.version), 'watch');
       if (b) return b;
-      watchReject = `감시 폴더 번들 v${vstr(found.version)}: ${lastReject}`;
+      rejects.push(`감시 폴더 번들 v${vstr(found.version)}: ${lastReject}`);
       lastReject = null;
     }
   }
   const finish = () => {
-    if (watchReject) lastReject = lastReject ? `${watchReject} · 원격 소스: ${lastReject}` : watchReject;
+    if (rejects.length) lastReject = lastReject ? `${rejects.join(' · ')} · 원격 소스: ${lastReject}` : rejects.join(' · ');
     return null;
   };
 
   // 2) download the latest from the remote source
+  if (!remote) { if (!rejects.length) lastReject = exact ? `v${exact} 번들이 패키지 폴더·감시 폴더에 없습니다(원격 소스는 1시간에 한 번만 묻습니다)` : '원격 소스를 묻지 않았습니다'; return finish(); }
   if (s.remoteBase) {
     const info = await checkRemote(s.remoteBase, '0.0.0', { token: s.token }); // v2.736.3: 화면 확인과 같은 시한(META_FETCH_TIMEOUT_MS)
+    // v2.859: 정확한 버전을 찾을 때 원격 최신이 다른 버전이면 받지 않는다(중앙 버전 번들이 아니다 — 엣지를 중앙보다 앞세우지 않는다).
+    if (exact && info.ok && info.latest && String(info.latest).replace(/^v/i, '') !== exact) { lastReject = `원격 소스의 최신은 v${info.latest} — 중앙 현재 버전(v${exact}) 번들이 아니라 받지 않습니다`; return finish(); }
+    if (exact && !info.ok) { lastReject = `원격 소스 확인 실패: ${info.error || '사유 없음'}`; return finish(); }
     if (info.ok && info.downloadUrl) {
       const res = await resilientFetch(info.downloadUrl, {
         dispatcher: upgradeAgent,

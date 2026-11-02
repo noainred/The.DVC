@@ -156,3 +156,109 @@ export const REASON_HINT = Object.freeze({
 export const STUCK_TEXT = Object.freeze({ 'no-report': '3시간 넘게 FD 진행 보고 없음', zero: '3시간 넘게 속도 0' });
 /** 대기 행 — 오래 기다린 순(보낸 시각 오름차순 · 모르면 뒤). */
 export const sortWaiting = (rows) => [...(Array.isArray(rows) ? rows : [])].sort((a, b) => (isFin(a.since) ? a.since : Infinity) - (isFin(b.since) ? b.since : Infinity));
+
+/* ── v2.858 실행 중 작업 상세(사용자 승인 시안 — 진행 현황 행 펼침 · 실행 현황 · 이력 표) ── */
+/** 레벨 글자(F·I·D·V) — 'Full'·'F' 를 한 모양으로(서버 bareosLive.levelKey 와 같은 판정). 모르면 ''. */
+export const levelKey = (v) => { const c = String(v ?? '').trim().charAt(0).toUpperCase(); return c && 'FIDV'.includes(c) ? c : ''; };
+
+/**
+ * 추정 진척의 기준 — ① 지난 같은 레벨 성공 실행의 바이트(서버 prev) ② 없으면 Full 만 VM 용량 ③ 그 밖은 기준 없음(Incremental 을 VM 용량으로 나누면 2% 처럼 뜻 없는 값이 된다).
+ * @returns {{ kind: 'prev'|'size'|null, basis: number|null, pct: number|null, over: boolean, label: string, short: string }}
+ *   pct = 0~100 정수(진행량이 기준을 넘으면 100 · over) · 진행량을 모르면 null.
+ */
+export function progressBasis(r) {
+  const bytes = isFin(r?.bytes) && r.bytes >= 0 ? r.bytes : null;
+  const prevB = isFin(r?.prev?.bytes) && r.prev.bytes > 0 ? r.prev.bytes : null;
+  const lv = levelKey(r?.level);
+  let kind = null; let basis = null; let label; let short;
+  if (prevB !== null) {
+    kind = 'prev'; basis = prevB;
+    label = `지난 ${levelWord(r.prev.level || lv)}(jobid ${r.prev.jobid}) ${sizeText(prevB)} 기준`;
+    short = `지난 ${sizeText(prevB)}`;
+  } else if (lv === 'F' && gbBytes(r?.sizeGb) !== null) {
+    kind = 'size'; basis = gbBytes(r.sizeGb);
+    label = `VM 용량 ${sizeText(basis)} 기준(지난 Full 기록 없음)`;
+    short = `VM ${sizeText(basis)}`;
+  } else {
+    label = lv && lv !== 'F' ? `지난 ${levelWord(lv)} 기록이 없어 진척을 계산하지 않음` : '기준을 몰라 진척을 계산하지 않음';
+    short = gbBytes(r?.sizeGb) !== null ? `VM ${sizeText(gbBytes(r.sizeGb))}` : '기준 모름';
+  }
+  const pct = bytes !== null && basis !== null ? Math.min(100, Math.floor((bytes / basis) * 100)) : null;
+  return { kind, basis, pct, over: bytes !== null && basis !== null && bytes > basis, label, short };
+}
+
+/** 남은 시간(초 · 추정) — (기준 − 진행량) ÷ 지금 속도. 하나라도 모르거나 이미 넘었으면 null. */
+export function etaSec(r, pb = progressBasis(r)) {
+  if (!isFin(r?.bytes) || !isFin(r?.rateNow) || r.rateNow <= 0 || !isFin(pb?.basis) || pb.basis <= r.bytes) return null;
+  return Math.round((pb.basis - r.bytes) / r.rateNow);
+}
+
+/**
+ * 지금 단계 — 지금까지의 로그 단계(bareosText.jobTimeline 의 steps)로. 끝 보고가 있으면 '끝남(반영 전)'.
+ * @returns {{ key: 'done'|'tail'|'data'|'prep'|'start'|'none', text: string }}
+ */
+export function runPhase(steps, ended = false) {
+  const has = (t) => (Array.isArray(steps) ? steps : []).some((s) => s?.title === t || String(s?.title || '').startsWith(t));
+  if (ended) return { key: 'done', text: '끝남 — 목록 반영 전' };
+  if (has('임시 스냅샷 정리') || has('장치 해제')) return { key: 'tail', text: '정리 중' };
+  if (has('데이터 백업 시작')) return { key: 'data', text: '데이터 전송 중' };
+  if (has('FD 연결') || has('vSphere 접속') || has('시작')) return { key: 'prep', text: '준비 중' };
+  return { key: 'none', text: '로그에 단계 없음' };
+}
+/** 아직 오지 않은 단계(흐린 줄) — 지금 단계 다음에 남은 것. */
+export function futurePhases(key) {
+  return ({ none: '시작 · 준비 · 데이터 전송 · 정리 · 종료', start: '준비 · 데이터 전송 · 정리 · 종료', prep: '데이터 전송 · 임시 스냅샷 정리 · 종료', data: '임시 스냅샷 정리 · 장치 해제 · 종료', tail: '종료' })[key] || '';
+}
+
+/** 진행 현황 응답(corps[].rows)을 '법인|jobid' 열쇠로 — 실행 현황 · 이력 표가 원장 실행 목록에 FD·Director 값을 붙인다. */
+export function liveRowIndex(live) {
+  const m = new Map();
+  for (const c of Array.isArray(live?.corps) ? live.corps : []) {
+    for (const r of Array.isArray(c.rows) ? c.rows : []) if (r?.jobid) m.set(`${c.vcenterId}|${r.jobid}`, { row: r, corp: c });
+  }
+  return m;
+}
+
+/**
+ * 대기 사유 요약(실행 현황 · 이력 띠) — 법인들의 waitGroups 를 사유별로 합친다. 대기가 없으면 null.
+ * @returns {{ waiting: number, running: number, top: { reason: string, n: number }|null, kinds: number }|null}
+ */
+export function waitSummary(live) {
+  const corps = Array.isArray(live?.corps) ? live.corps : [];
+  const by = new Map(); let waiting = 0; let running = 0;
+  for (const c of corps) {
+    waiting += c.waiting || 0; running += c.running || 0;
+    for (const g of Array.isArray(c.waitGroups) ? c.waitGroups : []) by.set(g.reason, (by.get(g.reason) || 0) + (g.n || 0));
+  }
+  if (!waiting) return null;
+  const top = [...by.entries()].sort((a, b) => b[1] - a[1])[0] || null;
+  return { waiting, running, top: top ? { reason: top[0], n: top[1] } : null, kinds: by.size };
+}
+
+/**
+ * 실행 현황 · 이력의 한 행 — 원장 잡(pending · lastRun)에 진행 현황 행(FD · Director 상태)을 붙인다. 진행 현황에 없으면(조회 전 · 실패) 원장 값만 —
+ * 진행량 · 속도 · Director 상태는 null(모름 — 0 이 아니다).
+ * @param {object} j  목록 응답의 잡 한 줄 · @param {Map} idx  liveRowIndex 결과 · @returns {{ key: string, row: object, corp: object|null }}
+ */
+export function runRowOf(j, idx, now = Date.now()) {
+  const p = j?.pending?.jobid ? j.pending : null;
+  const L = j?.lastRun || null;
+  const jobid = p?.jobid || L?.jobid || null;
+  const key = `${j?.vcenterId || ''}|${jobid}`;
+  const hit = idx instanceof Map ? idx.get(key) : null;
+  const since = isFin(p?.since) ? p.since : isFin(L?.startedAt) ? L.startedAt : null;
+  const base = {
+    id: j?.id || '', jobid, vmName: j?.vmName || j?.vmId || '', vcenterId: j?.vcenterId || '', directorId: j?.directorId || '',
+    client: j?.client || '', pool: j?.pool || '', storage: j?.storage || '',
+    status: (p ? p.status : L?.status) || '',
+  };
+  if (hit) return { key, row: { ...hit.row, ...base, vmName: hit.row.vmName || base.vmName }, corp: hit.corp };
+  return {
+    key, corp: null,
+    row: {
+      ...base, level: (p ? p.level : L?.level) || '', state: (p ? p.state : L?.state) || 'queued', since, elapsed: since !== null ? Math.max(0, now - since) : null,
+      trigger: p ? (p.trigger || '') : 'schedule', by: p?.by || '', group: '',
+      bytes: null, files: null, rateNow: null, rateAvg: null, baseline: null, dirStatus: null, prev: null, sizeGb: null,
+    },
+  };
+}

@@ -23,6 +23,10 @@ import { loadCollectors } from '../collector/registry.js';
 // v2.736.2(사용자 신고 — 자동 업그레이드가 왜 안 되는지 화면이 말하지 않았다): 상태 판정 + 기록 정제 + 재시작 뒤에도 남는 기록.
 import { autoUpgradeState, sanitizeCheck, sanitizeResult, sanitizeTick, restoreStatus, sanitizeDeferral } from './autoState.js';
 import { upgradeStatusFile, readUpgradeStatus, writeUpgradeStatus } from './statusStore.js';
+// v2.859(사용자 요청 — 중앙이 업그레이드되면 엣지도 모두 자동 업그레이드): 적용한 번들을 패키지 폴더에 보관하고(fleetBundle), 뒤처진 엣지에
+//   주기적으로 다시 민다(edgeSync). 둘 다 설정 edgeAutoUpgrade(기본 켬)를 따른다.
+import { keepBundle } from './fleetBundle.js';
+import { EdgeSyncRunner } from './edgeSync.js';
 import { runningScans, resumeOutlookText, queuedScans } from '../util/scanJournal.js'; // v2.737: 실행 중 스캔이 끝날 때까지 자동 적용을 미룬다 · v2.742: 대기 요청
 import { runningBulkDeploys as bulkDeployRuns } from '../agent/bulkDeploy.js';             // v2.742(TIMING-04): 진행 중인 에이전트 대량 배포도 기다린다(읽기만)
 import { runnerStatus as vmcloneRunnerStatus } from '../vmclone/runner.js';  // v2.741(TIMING-01 ③): 실행 중 VM 복제 잡도 기다린다(읽기만)
@@ -139,6 +143,7 @@ export function summarizeCollectorPush(results) {
     id: typeof r.id === 'string' ? r.id.slice(0, 128) : '', name: typeof r.name === 'string' ? r.name.slice(0, 128) : '',
     ok: r.ok === true, status: Number.isFinite(r.status) ? r.status : null,
     version: typeof r.version === 'string' ? r.version.slice(0, 32) : '', reason: typeof r.reason === 'string' ? r.reason.slice(0, 300) : '',
+    ...(r.upToDate === true ? { upToDate: true } : {}), // v2.859: 엣지의 '이미 최신' 응답은 실패가 아니다
   }));
   return { total: list.length, ok: list.filter((r) => r.ok === true).length, items };
 }
@@ -182,6 +187,8 @@ export class UpgradeManager {
     this.persist = { enabled: false, file: null, error: null, corruptKept: null, restored: false };
     this.deferral = null;       // v2.737: { since, until, latest, scans } — 실행 중 스캔이 끝나기를 기다리는 중
     this.deferTimer = null;
+    // v2.859: 등록된 엣지(수집 서버)를 중앙 버전으로 맞추는 주기 동기화 — 확인·적용 중에는 건너뛰고, 적용은 진행 중인 동기화 push 를 기다린다.
+    this.edgeSync = new EdgeSyncRunner({ settings: () => this.settings, busy: () => !!this._applying || this.#ticking });
   }
 
   // v2.736.2: 적용 결과는 routes(엣지·수집기 push 수신)도 대입한다 — 대입하면 파일에도 남는다.
@@ -243,6 +250,8 @@ export class UpgradeManager {
       // v2.742(RECENT-02): 시작을 기다리는 '지금 수집' — resumable 이면 재시작 뒤 대기열로 돌아온다(아니면 재시작이 지운다).
       queuedScans: queuedScans().slice(0, 20).map((x) => ({ kind: x.kind, label: x.label, since: x.since, trigger: x.trigger, resumable: !!x.resumable })),
       deferral: sanitizeDeferral(this.deferral), scanDeferMaxMs: scanDeferMaxMs(),
+      // v2.859: 엣지 자동 업그레이드 — 켜짐·다음 실행·마지막 실행·엣지별 판정(코드는 edgeSync.js, 문장은 웹 upgradeEdgeSyncText.js).
+      edgeSync: this.edgeSync.status(),
       ticking: this.#ticking,
       applying: !!this._applying,
       persist: { enabled: !!this.persist?.enabled, error: this.persist?.error || null, corruptKept: this.persist?.corruptKept || null },
@@ -254,6 +263,7 @@ export class UpgradeManager {
   updateSettings(partial) {
     this.settings = saveSettings(partial);
     this.#restartTimer();
+    this.edgeSync.arm(); // v2.859: edgeAutoUpgrade·enabled 변경을 바로 반영
     return this.status();
   }
 
@@ -326,16 +336,31 @@ export class UpgradeManager {
     if (res.ok && restart) res.restarting = true; // 재시작 직전에 기록이 파일에 남도록 먼저 표시한다
     this.lastResult = { at: Date.now(), source, trigger, ...res };
     if (res.ok) {
-      // v2.605(감사 LEFT2605-04): 엣지 push 결과를 버리지 않는다 — 예전에는 .catch(() => {}) 로 통째로 버려 실패한 엣지가 구버전으로 남아도
-      //   흔적이 없었다(형제 pushToCollectors 는 '성공 n/m' 을 찍는다). 요약을 lastResult 에 싣고 콘솔에도 남긴다(pushToEdges 안).
-      const edgePush = await this.pushToEdges(res.appliedArchive).catch((e) => { console.warn(`[upgrade] 엣지 업그레이드 푸시 실패: ${e?.message || e}`); return null; });
-      if (Array.isArray(edgePush) && edgePush.length) { this.#lastResult.edgePush = summarizeEdgePush(edgePush); this.#save(); }
-      // v2.740(B-03): 수집기에도 **방금 적용한 번들**을 민다(엣지 push 와 같은 대상) — 예전에는 resolveBundleBytes 를 다시 불러
-      //   감시 폴더의 옛 번들을 고르거나(그 manifest 가 없으면) 조용히 생략했다.
-      // v2.775: 수집 서버 push 결과도 재시작 **전에** lastResult 에 남긴다(파일) — 예전에는 .catch(() => {}) 로 버렸고 메모리 상태는 재시작이 지웠다.
-      const colPush = await this.pushToCollectors(res.appliedArchive).catch((e) => { console.warn(`[upgrade] 수집 에이전트 업그레이드 푸시 실패: ${e?.message || e}`); return null; });
-      if (Array.isArray(colPush) && colPush.length) { this.#lastResult.collectorPush = summarizeCollectorPush(colPush); this.#save(); }
-      else if (this.lastCollectorSkip) { this.#lastResult.collectorPush = { total: 0, ok: 0, items: [], skipped: this.lastCollectorSkip }; this.#save(); }
+      // v2.859: 적용한 번들(+서명 manifest)을 패키지 폴더에 보관한다 — 재시작 뒤 엣지 동기화가 뒤처진 엣지에 다시 밀고, 중앙 /dl 이
+      //   엣지의 자체 확인(1시간 주기)에 새 버전으로 내준다. 실패해도 업그레이드·push 는 그대로(사유만 남긴다). 설정과 무관하게 보관한다.
+      const kept = keepBundle({ archivePath: res.appliedArchive, version: res.version });
+      if (!kept.ok) console.warn(`[upgrade] 적용한 번들을 패키지 폴더에 보관하지 못했습니다: ${kept.reason} — 엣지 동기화는 감시 폴더·원격 소스에서 번들을 찾습니다`);
+      else if (!kept.existing) console.log(`[upgrade] 적용한 번들을 패키지 폴더에 보관: ${kept.path}${kept.pruned.length ? ` (오래된 보관본 ${kept.pruned.length}개 정리)` : ''}`);
+      if (s.edgeAutoUpgrade === false) {
+        // v2.859: 설정으로 끈 것 — 실패가 아니라 '하지 않음' 으로 기록한다(업그레이드·수집 서버 화면이 구분한다).
+        console.log('[upgrade] 엣지 자동 업그레이드가 꺼져 있어 엣지·수집 서버 push 를 하지 않습니다(설정 edgeAutoUpgrade)');
+        this.#lastResult.edgePush = { total: 0, ok: 0, failed: [], skipped: 'edge-auto-off' };
+        this.#lastResult.collectorPush = { total: 0, ok: 0, items: [], skipped: '엣지 자동 업그레이드가 꺼져 있어 보내지 않았습니다(업그레이드 설정에서 켜면 다음 적용부터 보냅니다)' };
+        this.#save();
+      } else {
+        // v2.859: 진행 중인 엣지 동기화 push 가 있으면 끝난 뒤에 — 같은 엣지에 두 번들을 동시에 올리지 않게(동기화는 적용 중에는 시작하지 않는다).
+        if (this.edgeSync?.inflight) await this.edgeSync.inflight.catch(() => {});
+        // v2.605(감사 LEFT2605-04): 엣지 push 결과를 버리지 않는다 — 예전에는 .catch(() => {}) 로 통째로 버려 실패한 엣지가 구버전으로 남아도
+        //   흔적이 없었다(형제 pushToCollectors 는 '성공 n/m' 을 찍는다). 요약을 lastResult 에 싣고 콘솔에도 남긴다(pushToEdges 안).
+        const edgePush = await this.pushToEdges(res.appliedArchive).catch((e) => { console.warn(`[upgrade] 엣지 업그레이드 푸시 실패: ${e?.message || e}`); return null; });
+        if (Array.isArray(edgePush) && edgePush.length) { this.#lastResult.edgePush = summarizeEdgePush(edgePush); this.#save(); }
+        // v2.740(B-03): 수집기에도 **방금 적용한 번들**을 민다(엣지 push 와 같은 대상) — 예전에는 resolveBundleBytes 를 다시 불러
+        //   감시 폴더의 옛 번들을 고르거나(그 manifest 가 없으면) 조용히 생략했다.
+        // v2.775: 수집 서버 push 결과도 재시작 **전에** lastResult 에 남긴다(파일) — 예전에는 .catch(() => {}) 로 버렸고 메모리 상태는 재시작이 지웠다.
+        const colPush = await this.pushToCollectors(res.appliedArchive).catch((e) => { console.warn(`[upgrade] 수집 에이전트 업그레이드 푸시 실패: ${e?.message || e}`); return null; });
+        if (Array.isArray(colPush) && colPush.length) { this.#lastResult.collectorPush = summarizeCollectorPush(colPush); this.#save(); }
+        else if (this.lastCollectorSkip) { this.#lastResult.collectorPush = { total: 0, ok: 0, items: [], skipped: this.lastCollectorSkip }; this.#save(); }
+      }
       if (restart) setTimeout(() => restartProcess(), 250);
     }
     return res;
@@ -468,6 +493,9 @@ export class UpgradeManager {
       console.log(`  ▸ auto-upgrade: enabled (watch=${s.watchDir || '-'}, remote=${s.remoteBase ? 'yes' : 'no'}, autoApply=${s.autoApply})`);
     }
     this.#restartTimer();
+    // v2.859: 엣지 자동 업그레이드 동기화(기본 켬) — 기동 2분 뒤부터 주기마다 뒤처진 수집 서버에 중앙 버전 번들을 민다.
+    if (this.edgeSync.arm()) console.log(`  ▸ edge auto-upgrade: on (every ${Math.round(this.edgeSync.intervalMs / 60_000)}min — registered collectors are brought to v${currentVersion()})`);
+    else if (s.enabled) console.log('  ▸ edge auto-upgrade: off (edgeAutoUpgrade=false)');
   }
 
   // v2.591 L3: 재진입 가드 — 확인이 주기를 넘기면(고RTT 원격 소스) 겹쳐 실행되고, autoApply 면 apply() 가 겹칠 수 있다.

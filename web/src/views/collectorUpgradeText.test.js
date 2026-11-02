@@ -22,6 +22,11 @@ describe('v2.775 수집 서버 업그레이드 결과 문구', () => {
     expect(autoPushLine({ at: T, total: 0, ok: 0 })).toBeNull();
     expect(autoPushLine(null)).toBeNull();
   });
+  it("v2.859: 엣지가 '이미 최신' 으로 답한 push 는 실패가 아니다", () => {
+    expect(upgradeCell({ at: T, ok: false, upToDate: true, version: '2.859.0', auto: true, reason: 'not newer (2.859.0 <= 2.859.0)' }))
+      .toEqual({ text: '이미 최신 (v2.859.0) · 10-24 13:05 (자동)', reason: '', tone: 'ok' });
+    expect(upgradeCell({ at: T, ok: false, upToDate: false, reason: 'HTTP 500' }).tone).toBe('bad');
+  });
   it('문구에 백틱 없음', () => {
     expect(autoPushLine({ at: T, total: 5, ok: 3 }).text).not.toContain('`');
     expect(upgradeCell({ at: T, ok: false, reason: 'x' }).text).not.toContain('`');

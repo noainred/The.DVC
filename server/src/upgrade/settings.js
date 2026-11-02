@@ -18,7 +18,8 @@ import { trimTrailingSlashes } from '../util/trimSlashes.js';
 const FILE = path.join(config.configDir, 'upgrade.json');
 
 // Fields editable from the portal (others, e.g. downloadDir, stay env-only).
-const FIELDS = ['enabled', 'watchDir', 'installDir', 'packageName', 'remoteBase', 'token', 'pollIntervalMs', 'autoApply'];
+// v2.859: edgeAutoUpgrade — 중앙이 업그레이드되면 등록된 엣지도 모두 자동 업그레이드(기본 켬 — config.js UPGRADE_EDGE_AUTO).
+const FIELDS = ['enabled', 'watchDir', 'installDir', 'packageName', 'remoteBase', 'token', 'pollIntervalMs', 'autoApply', 'edgeAutoUpgrade'];
 
 function readFile() {
   if (!fs.existsSync(FILE)) return {};
@@ -43,7 +44,7 @@ export function clampPollMs(v) {
 }
 
 function coerce(field, v) {
-  if (field === 'enabled' || field === 'autoApply') return Boolean(v);
+  if (field === 'enabled' || field === 'autoApply' || field === 'edgeAutoUpgrade') return Boolean(v);
   // v2.591 L3: 0 = 끔. 그 밖은 1분~7일로 클램프한다 — 상한이 없어 24.8일(2^31−1ms)을 넘기면 setInterval 이 1ms 로 바뀌어
   //   원격 릴리스 소스에 초당 수백 요청이 나갔다(재현: 43,200분 저장 → 2초에 1,331회).
   if (field === 'pollIntervalMs') return clampPollMs(v);
@@ -97,6 +98,7 @@ export function redactSettings(s) {
     remoteBase: s.remoteBase || '',
     pollIntervalMs: s.pollIntervalMs || 0,
     autoApply: s.autoApply,
+    edgeAutoUpgrade: s.edgeAutoUpgrade !== false, // v2.859: 저장값이 없으면 기본 켬
     hasToken: Boolean(s.token),
     edges: (s.edges || []).map((e) => e.url),
   };

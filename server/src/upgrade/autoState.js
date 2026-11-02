@@ -95,7 +95,9 @@ function sanitizeEdgePush(e) {
   if (!e || typeof e !== 'object') return null;
   const failed = Array.isArray(e.failed) ? e.failed.filter((f) => f && typeof f === 'object').slice(0, 20)
     .map((f) => ({ edge: urlText(f.edge) || txt(f.edge, 200), status: num(f.status), reason: txt(f.reason, 300) || '' })) : [];
-  return { total: num(e.total) ?? 0, ok: num(e.ok) ?? 0, failed };
+  const out = { total: num(e.total) ?? 0, ok: num(e.ok) ?? 0, failed };
+  if (txt(e.skipped, 40)) out.skipped = txt(e.skipped, 40); // v2.859: 'edge-auto-off' — 설정으로 push 를 하지 않은 것(실패가 아니다)
+  return out;
 }
 
 /** v2.775: 수집 서버 push 요약 정제(manager.summarizeCollectorPush 모양) — 이름·사유는 글자만, 64건 상한. */

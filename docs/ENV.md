@@ -1,6 +1,6 @@
 # 환경변수 레퍼런스 (자동 생성)
 
-`server/src` 가 실제로 읽는 환경변수 **699개**를 코드에서 추출한 목록이다.
+`server/src` 가 실제로 읽는 환경변수 **703개**를 코드에서 추출한 목록이다.
 설치본에서는 `/etc/vmware-portal/portal.env` 에 `KEY=값` 으로 넣고 서비스를 재시작한다.
 
 - 생성: `node scripts/env-doc.mjs` (마지막 갱신 2026-11-02)
@@ -54,7 +54,7 @@
 | `WAN_TLS_CA_FILE` | `''` | ✅ | util/resilientFetch.js |
 | `WAN_TLS_INSECURE` | `기본 적용('true' 로 끄기)` | ✅ | util/resilientFetch.js |
 
-## 공통 (212)
+## 공통 (214)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
@@ -70,6 +70,7 @@
 | `AUTH_ENABLED` | `기본 적용('false' 로 끄기)` | ✅ | config.js |
 | `AUTH_SECRET` | `''` | ✅ | config.js |
 | `AUTH_TOKEN_TTL` | `'8h'` | ✅ | config.js |
+| `BAREOS_DEMO_RUN_MS` |  |  | mock/demo/bareos.js |
 | `BAREOS_EDGE_PICKUP_MS` | `120000` |  | bareos/edgeOps.js |
 | `BMUSAGE_ACTIVITY_MAX` | `500` |  | bmusage/activityLog.js |
 | `BMUSAGE_ALERT_MAX` | `40` |  | bmusage/notify.js |
@@ -218,6 +219,7 @@
 | `TRUST_PROXY` |  | ✅ | index.js |
 | `UPGRADE_AUTO_APPLY` | `기본 아님('true' 일 때만 적용)` | ✅ | config.js |
 | `UPGRADE_DOWNLOAD_DIR` |  |  | config.js |
+| `UPGRADE_EDGE_AUTO` | `기본 적용('false' 로 끄기)` |  | config.js |
 | `UPGRADE_EDGES` |  |  | config.js |
 | `UPGRADE_ENABLED` | `기본 아님('true' 일 때만 적용)` | ✅ | config.js |
 | `UPGRADE_PACKAGE_NAME` | `'vmware-portal'` |  | config.js |
@@ -418,7 +420,7 @@
 |---|---|---|---|
 | `NFS_MOUNT_BASE` | `'/mnt/portal-nfs'` |  | system/nfsMounts.js |
 
-## 업그레이드 (9)
+## 업그레이드 (11)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
@@ -427,6 +429,8 @@
 | `UPGRADE_ALLOW_UNVERIFIED` | `기본 아님('true' 일 때만 적용)` | ✅ | upgrade/bundleSource.js, upgrade/fetchPackage.js 외 1 |
 | `UPGRADE_CHECK_HEDGE_MS` | `3000` | ✅ | upgrade/hedgedFetch.js |
 | `UPGRADE_CHECK_TIMEOUT_MS` | `60000` |  | upgrade/versionsDoc.js |
+| `UPGRADE_EDGE_SYNC_INTERVAL_MS` | `600000` |  | upgrade/edgeSync.js |
+| `UPGRADE_KEEP_BUNDLES` | `3` |  | upgrade/fleetBundle.js |
 | `UPGRADE_PACKAGE_MAX_BYTES` |  |  | upgrade/fetchPackage.js |
 | `UPGRADE_SCAN_DEFER_MAX_MS` |  |  | upgrade/manager.js |
 | `UPGRADE_TLS_INSECURE` | `기본 적용('true' 로 끄기)` |  | upgrade/upgradeAgent.js |
@@ -888,4 +892,4 @@
 
 ---
 
-예시 파일(`packaging/offline/portal.env.example`)에 있는 키: 85 / 699
+예시 파일(`packaging/offline/portal.env.example`)에 있는 키: 85 / 703

@@ -5,15 +5,16 @@
  *   판정·문구는 bareosLiveText.js. 못 읽은 값은 '모름'(0 이 아니다) · 진척(읽은 양 / VM 용량)은 추정이라 화면이 밝힌다.
  * ⚠ 훅은 조기 return 위 · 400px 에서 가로 넘침 없게 그리드 칸은 minmax(0, 1fr) · 표는 STable(자기 가로 스크롤).
  */
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { usePolling } from '../../api.js';
 import { useHashTab } from '../../hooks/useHashTab.js';
 import { Loading, ErrorBox } from '../../components/ui.jsx';
 import { STable } from '../../components/STable.jsx';
 import Select from '../../components/Select.jsx';
 import { shortTs } from './bareosViewText.js';
+import BareosRunDetail from './BareosRunDetail.jsx';
 import {
-  rateText, sizeText, elapsedText, progressPct, liveCodeText, corpBadge, CORP_FILTERS, corpMatches, corpFilterCounts, sortCorps,
+  rateText, sizeText, elapsedText, progressBasis, liveCodeText, corpBadge, CORP_FILTERS, corpMatches, corpFilterCounts, sortCorps,
   sparkSegments, totalHist, slowRows, levelWord, triggerText, reasonText, REASON_HINT, STUCK_TEXT, sortWaiting,
 } from './bareosLiveText.js';
 
@@ -57,6 +58,22 @@ function Bar({ pct, color = '#3b82f6', label }) {
   );
 }
 
+/** 요소의 보이는 폭(px) — 가로 스크롤 표 안의 펼침 칸을 그 폭에 고정한다(sticky left — 표가 넓어도 상세는 화면 안에). */
+function useWidth(ref) {
+  const [w, setW] = useState(0);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return undefined;
+    const read = () => setW(el.clientWidth);
+    read();
+    if (typeof ResizeObserver === 'undefined') { window.addEventListener('resize', read); return () => window.removeEventListener('resize', read); }
+    const ro = new ResizeObserver(read);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [ref]);
+  return w;
+}
+
 export default function BareosLiveTab() {
   const { data, error } = usePolling('/tools/bareos-backup/live', {}, 15_000);
   // 보기는 주소에(#/tools/bareos-backup/live/<보기> — 새로고침·북마크·뒤로가기에서 유지 · CATALOG2613-06 스윕)
@@ -91,7 +108,7 @@ export default function BareosLiveTab() {
       {!corps.length && <div className="card" style={{ padding: 14, fontSize: 13 }}>볼 수 있는 법인이 없습니다 — 설정 탭에서 법인별 Director 를 묶으세요(범위 계정은 자기 법인만 보입니다).</div>}
 
       {corps.length > 0 && view === 'all' && <AllView data={data} corps={corps} counts={counts} filter={filter} setFilter={setFilter} q={q} setQ={setQ} onOpen={open} />}
-      {corps.length > 0 && view === 'corp' && corp && <CorpView corps={corps} c={corp} onPick={setCorp} />}
+      {corps.length > 0 && view === 'corp' && corp && <CorpView corps={corps} c={corp} onPick={setCorp} limits={data.relayLimits} />}
       {corps.length > 0 && view === 'speed' && <SpeedView corps={corps} onOpen={open} />}
     </div>
   );
@@ -166,8 +183,12 @@ function CorpCard({ c, onOpen }) {
 }
 
 /* ───────── ② 단일 법인 ───────── */
-function CorpView({ corps, c, onPick }) {
+function CorpView({ corps, c, onPick, limits = null }) {
   const [diagOpen, setDiagOpen] = useState(false);
+  // v2.858 행 펼침 — 한 번에 하나(로그는 펼친 행만 읽는다). 고르지 않았으면 실행 중이 1건일 때 그 행을 펼친다(승인 시안).
+  const [picked, setPicked] = useState(undefined);
+  const actRef = useRef(null);
+  const actW = useWidth(actRef);
   const b = corpBadge(c);
   const act = c.rows.filter((r) => r.state === 'running');
   const wait = sortWaiting(c.rows.filter((r) => r.state !== 'running'));
@@ -176,6 +197,9 @@ function CorpView({ corps, c, onPick }) {
   const top = groups[0] || null;
   const oldestWait = wait.find((r) => Number.isFinite(r.since)) || null;
   const fdSaysNothing = act.length > 0 && c.live?.ok && act.every((r) => r.rateNow === null);
+  const openId = picked !== undefined ? picked : (act.length === 1 ? act[0].jobid : null);
+  const openDiag = () => { setDiagOpen(true); requestAnimationFrame(() => document.getElementById('bareos-live-diag')?.scrollIntoView({ block: 'start', behavior: 'smooth' })); };
+  const relayDir = c.director?.via === 'edge' ? { relay: true } : null;
   return (
     <>
       <div style={ROW}>
@@ -208,25 +232,35 @@ function CorpView({ corps, c, onPick }) {
             {stuck.length > 1 ? ` 외 ${stuck.length - 1}건` : ''}
             {top && top.n > 0 ? <> · 대기 {c.waiting}건 중 {top.n}건이 <b>{reasonText(top.reason)}</b> 사유입니다.</> : '.'}
           </span>
-          {c.diag && <button type="button" className="logout-btn" style={{ padding: '6px 12px' }} onClick={() => { setDiagOpen(true); requestAnimationFrame(() => document.getElementById('bareos-live-diag')?.scrollIntoView({ block: 'start', behavior: 'smooth' })); }}>진단 원문</button>}
+          {c.diag && <button type="button" className="logout-btn" style={{ padding: '6px 12px' }} onClick={openDiag}>진단 원문</button>}
         </section>
       )}
 
-      <section className="card" aria-label="실행 중" style={{ padding: 0, overflow: 'hidden', minWidth: 0 }}>
+      <section ref={actRef} className="card" aria-label="실행 중" style={{ padding: 0, overflow: 'hidden', minWidth: 0 }}>
         <div style={{ ...ROW, padding: '10px 14px', borderBottom: '1px solid var(--border-soft)' }}>
           <b>실행 중 {act.length}</b>
-          <span className="muted" style={{ fontSize: 12 }}>Director 상태 = Director 가 그 잡을 어떻게 보는지 · 진행량·속도 = FD 가 보고한 값 · 읽은 양 / VM 용량은 추정 진척(Incremental 은 훨씬 작게 끝남)</span>
+          <span className="muted" style={{ fontSize: 12 }}>Director 상태 = Director 가 그 잡을 어떻게 보는지 · 진행량·속도 = FD 가 보고한 값 · 진척은 추정(지난 같은 레벨 실행 기준 — 없으면 Full 만 VM 용량) · <b style={{ color: CYAN }}>행을 누르면 상세</b></span>
         </div>
         {act.length === 0 ? <div className="muted" style={{ padding: 14, fontSize: 13 }}>지금 이 법인에서 도는 백업이 없습니다.</div> : (
           <STable minWidth={1100} limit={300}>
-            <thead><tr><th>VM</th><th>그룹 · 실행</th><th>레벨</th><th>시작 · 경과</th><th>Director 상태</th><th data-nosort style={{ minWidth: 200 }}>읽은 양 / VM 용량</th><th className="right">지금 속도</th><th className="right">지난 평균</th><th>판정</th></tr></thead>
+            <thead><tr><th>VM</th><th>그룹 · 실행</th><th>레벨</th><th>시작 · 경과</th><th>Director 상태</th><th data-nosort style={{ minWidth: 200 }}>진행량 / 기준</th><th className="right">지금 속도</th><th className="right">지난 평균</th><th>판정</th></tr></thead>
             <tbody>
               {act.map((r) => {
-                const pct = progressPct(r.bytes, r.sizeGb);
+                const pb = progressBasis(r);
+                const pct = pb.pct;
                 const dirWarn = r.dirStatus && r.dirStatus.reason !== 'running';
+                const open = openId === r.jobid;
+                const toggle = () => setPicked(open ? null : r.jobid);
                 return (
-                  <tr key={r.jobid}>
-                    <td style={{ whiteSpace: 'nowrap' }}><b>{r.vmName}</b><div className="muted" style={{ fontSize: 11.5, fontFamily: 'var(--mono)' }}>jobid {r.jobid}</div></td>
+                  <React.Fragment key={r.jobid}>
+                  <tr onClick={toggle} style={{ cursor: 'pointer', ...(open ? { background: 'rgba(59,130,246,.10)', boxShadow: `inset 3px 0 0 ${CYAN}` } : {}) }}>
+                    <td style={{ whiteSpace: 'nowrap' }}>
+                      <button type="button" aria-expanded={open} aria-label={`${r.vmName} 상세 ${open ? '닫기' : '열기'}`} onClick={(e) => { e.stopPropagation(); toggle(); }}
+                        style={{ display: 'inline-grid', placeItems: 'center', width: 22, height: 22, marginRight: 8, verticalAlign: 'middle', borderRadius: 5, border: '1px solid var(--border)', background: 'var(--panel-deep)', color: 'var(--text)', cursor: 'pointer', padding: 0 }}>
+                        <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true" style={{ transform: `rotate(${open ? 90 : 0}deg)` }}><path d="M3 1.5 L7 5 L3 8.5" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" /></svg>
+                      </button>
+                      <b>{r.vmName}</b><div className="muted" style={{ fontSize: 11.5, fontFamily: 'var(--mono)', marginLeft: 30 }}>jobid {r.jobid}</div>
+                    </td>
                     <td style={{ whiteSpace: 'nowrap', fontSize: 12.5 }}>{r.group || '—'}<div className="muted" style={{ fontSize: 11.5 }}>{triggerText(r)}{r.by ? ` · ${r.by}` : ''}</div></td>
                     <td>{levelWord(r.level)}</td>
                     <td data-sort={r.since ?? ''} style={{ fontFamily: 'var(--mono)', fontSize: 12 }}>{r.since ? shortTs(r.since) : '—'}<div style={{ color: r.stuck ? TONE.warn : 'var(--text-dim)' }}>{elapsedText(r.elapsed)}</div></td>
@@ -235,8 +269,8 @@ function CorpView({ corps, c, onPick }) {
                         : <span className="muted">{c.live?.dirOk ? 'Director 표에 없음' : '모름'}</span>}
                     </td>
                     <td>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, fontSize: 12 }}><span className={r.bytes === null ? 'muted' : undefined}>{r.bytes === null ? (c.live?.ok ? 'FD 보고 없음' : '모름') : sizeText(r.bytes)}</span><span className="muted">{r.sizeGb ? sizeText(r.sizeGb * 1024 ** 3) : '용량 모름'}</span></div>
-                      {pct !== null && <div style={{ marginTop: 4 }}><Bar pct={pct} color={r.slow || r.stuck ? '#f59e0b' : '#3b82f6'} label={`추정 진척 ${pct}%`} /></div>}
+                      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, fontSize: 12 }}><span className={r.bytes === null ? 'muted' : undefined}>{r.bytes === null ? (c.live?.ok ? 'FD 보고 없음' : '모름') : sizeText(r.bytes)}</span><span className="muted" title={pb.label}>{pct !== null ? `${pct}% · ` : ''}{pb.short}</span></div>
+                      {pct !== null && <div style={{ marginTop: 4 }}><Bar pct={pct} color={r.slow || r.stuck ? '#f59e0b' : '#3b82f6'} label={`추정 진척 ${pct}% — ${pb.label}`} /></div>}
                     </td>
                     <td className="right" data-sort={r.rateNow ?? ''} style={{ fontWeight: 800, color: r.rateNow === null ? 'var(--text-dim)' : r.slow ? TONE.warn : CYAN, fontVariantNumeric: 'tabular-nums' }}>{rateText(r.rateNow)}</td>
                     <td className="right" data-sort={r.baseline ?? ''} style={{ fontVariantNumeric: 'tabular-nums' }}>{r.baseline ? rateText(r.baseline) : '—'}</td>
@@ -245,6 +279,17 @@ function CorpView({ corps, c, onPick }) {
                         : r.slow ? <Badge tone="warn">느림</Badge> : r.rateNow === null ? <Badge tone="muted">속도 모름</Badge> : <Badge tone="ok">정상</Badge>}
                     </td>
                   </tr>
+                  {open && (
+                    <tr data-detail="">
+                      <td colSpan={9} style={{ padding: 0, whiteSpace: 'normal', background: 'var(--bg-soft)' }}>
+                        {/* 표가 가로로 넓어도 상세는 보이는 폭에 고정(sticky left · 폭은 실제 측정값) */}
+                        <div style={{ position: 'sticky', left: 0, boxSizing: 'border-box', width: actW ? actW - 2 : '100%', padding: '12px 14px 14px' }}>
+                          <BareosRunDetail row={r} live={c.live} dir={relayDir} limits={limits} diagAvailable={!!c.diag} onDiag={openDiag} />
+                        </div>
+                      </td>
+                    </tr>
+                  )}
+                  </React.Fragment>
                 );
               })}
             </tbody>
