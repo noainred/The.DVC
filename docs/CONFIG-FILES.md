@@ -1,6 +1,6 @@
 # 설정·데이터 파일 레퍼런스 (자동 생성)
 
-포탈이 `CONFIG_DIR`(설치본 기본 `/etc/vmware-portal`) 아래에 만드는 파일 **247개**의 목록이다.
+포탈이 `CONFIG_DIR`(설치본 기본 `/etc/vmware-portal`) 아래에 만드는 파일 **248개**의 목록이다.
 시계열 DB 는 `db-location.json` 이 가리키는 `dbDir` 로 옮길 수 있다.
 
 - 생성: `node scripts/config-doc.mjs` (마지막 갱신 2026-11-02)
@@ -224,6 +224,7 @@
 | `tool-categories.json` | 설정 | 특수 기능 카테고리 설정 (`tool-categories.json`, v2.455). | ✅ | ✅ | ✅ | toolcats/settings.js |
 | `tool-usage.json` | 설정 | 특수 기능 사용 빈도 집계 — "사람들이 자주 쓰는 메뉴"를 자동 추천하기 위한 카운터. | ✅ |  |  | tool-usage.js |
 | `ui.json` | 설정 | Shared UI settings persisted server-side (CONFIG_DIR/ui.json) so layout | ✅ | ✅ | ✅ | ui-settings.js |
+| `upgrade-kept-bundles.json` | 설정 | 중앙이 패키지 폴더에 보관한 업그레이드 번들 기록(상태, v2.859) | ✅ | ✅ | ✅ | upgrade/fleetBundle.js |
 | `upgrade-signature-log.json` | 설정 | 업그레이드 번들 서명 검증 기록(최근 10건, 상태, v2.736.1) | ✅ | ✅ | ✅ | upgrade/signature.js |
 | `upgrade-status.json` | 설정 | 업그레이드 확인·적용·자동 확인 기록(상태, v2.736.2) | ✅ | ✅ | ✅ | upgrade/statusStore.js |
 | `upgrade.json` | 설정 | Runtime-editable auto-upgrade settings. Env vars provide the defaults; values | ✅ | ✅ | ✅ | upgrade/settings.js |
@@ -281,6 +282,7 @@
 - **`isidu-mail-state.json`** — 상태 파일(백업 감시 제외). 대상마다 마지막으로 다룬 조사·마지막 실패 알림 시각·마지막 발송 결과(받는 사람 수 — 주소는 적지 않는다)를 남긴다. 중앙만 쓴다(엣지는 메일을 보내지 않는다). 지우면 같은 결과가 다시 들어올 때(엣지 재전송) 한 번 더 보낼 수 있고 실패 알림 6시간 묶음이 처음부터 다시 센다
 - **`scan-journal.json`** — 상태 파일(백업 감시 제외). 아이실론 du·iDRAC 대역·IP 스캔이 시작할 때 적고 끝나면 지운다 — 업그레이드·재시작으로 남은 항목은 다음 기동 2분 뒤(SCAN_RESUME_DELAY_MS) 자동으로 다시 시작한다(사슬마다 최대 2번). 비밀은 적지 않는다(대상 id·대역 id·원격 작업 id). 지우면 끊긴 스캔이 다음 주기까지 다시 돌지 않을 뿐 다른 영향은 없다
 - **`upgrade-status.json`** — 상태 파일(백업 감시 제외). 서버 프로세스만 쓴다. 자동 업그레이드로 재시작한 뒤에도 업그레이드 화면이 '언제 무엇을 했는지' 를 보이기 위한 것 — 지우면 그 표시가 다음 확인까지 비고, 업그레이드 동작에는 영향이 없다
+- **`upgrade-kept-bundles.json`** — 상태 파일(백업 감시 제외). 중앙이 자기 업그레이드를 적용한 번들(+서명 manifest)을 패키지 폴더(packages)에 복사해 두고 그 이름을 적는다 — 엣지 자동 업그레이드(뒤처진 엣지에 다시 push)와 /dl(엣지 자체 확인)이 그 번들을 쓴다. 여기 적힌 파일만 UPGRADE_KEEP_BUNDLES(기본 3)개를 넘으면 오래된 것부터 지운다(관리자가 내려받은 패키지는 건드리지 않는다). 지우면 정리 대상에서 빠질 뿐 동작에는 영향이 없다
 - **`upgrade-signature-log.json`** — 상태 파일(백업 감시 제외). 서버 프로세스만 쓴다(오프라인 확인 도구는 쓰지 않는다). 업그레이드 재시작 뒤에도 '마지막 검증' 을 보이기 위한 것 — 지우면 그 표시가 다음 검증까지 비고, 설치 판정에는 영향이 없다
 - **`session-state.json`** — 상태 파일(백업 감시 제외). 지우면 로그아웃·폐기한 토큰이 만료 전까지 다시 유효해질 수 있다
 - **`credentials.json`** — 봉인 저장. API 응답에 값이 실리지 않는다

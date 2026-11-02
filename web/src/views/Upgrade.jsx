@@ -7,6 +7,8 @@ import { droppedSecretNote } from './droppedSecretText.js'; // v2.731(A3-01 ①)
 // v2.736.2: 자동 업그레이드가 지금 동작하는가 · 왜 안 하는가 · 다음 확인은 언제인가(판정은 서버 autoState.js, 문장은 여기).
 import { autoSummary, autoApplyRowText, noTickText, resultSummary, actionMsg, restoredNote, triggerText, remoteSourceLabel, runningScanWarning } from './upgradeAutoText.js';
 import { readFailText } from './readFailText.js'; // v2.741(WEB-04): 재조회 실패는 화면을 지우지 않고 한 줄로 말한다
+// v2.859: 엣지 자동 업그레이드(중앙이 업그레이드되면 등록된 엣지도 모두 — 기본 켬). 판정은 서버 edgeSync.js, 문장은 여기.
+import { edgeSyncSummary, noSyncText, edgeAutoCheckboxHint } from './upgradeEdgeSyncText.js';
 
 /**
  * v2.741(WEB-04): 상태 조회 실패의 표시. 확인·적용·설정 저장 뒤 다시 읽기(await load())가 실패하면 예전에는
@@ -168,6 +170,42 @@ function AutoCard({ status }) {
   );
 }
 
+/** v2.859: 엣지 자동 업그레이드 — 켜짐 · 다음 동기화 · 마지막 동기화 · 뒤처진 엣지. 서버가 edgeSync 를 보내지 않으면 그리지 않는다. */
+function EdgeSyncCard({ status }) {
+  const a = edgeSyncSummary(status);
+  if (!a) return null;
+  return (
+    <div className="card" style={{ marginBottom: 16, minWidth: 0 }} data-edge-sync="">
+      <b>엣지 자동 업그레이드</b>
+      <div style={{ marginTop: 10 }}>
+        <Row label="상태"><span style={{ color: TONE_COLOR[a.tone] || 'inherit', fontWeight: 600, whiteSpace: 'normal' }}>{a.label}</span></Row>
+        <Row label="다음 동기화"><span style={{ whiteSpace: 'normal' }}>{a.next}</span></Row>
+        <Row label="마지막 동기화">
+          {a.last
+            ? <span style={{ color: TONE_COLOR[a.lastTone] || 'inherit', whiteSpace: 'normal' }}>{a.last}</span>
+            : <span className="muted" style={{ whiteSpace: 'normal' }}>{noSyncText(status)}</span>}
+        </Row>
+        {a.counts && <Row label="등록된 수집 서버"><span style={{ whiteSpace: 'normal' }}>{a.counts}</span></Row>}
+      </div>
+      {a.fix && <div className="muted" style={{ marginTop: 8, fontSize: 11.5, whiteSpace: 'normal' }}>{a.fix}</div>}
+      {a.rows.length > 0 && (
+        <ul style={{ margin: '10px 0 0', paddingLeft: 18, fontSize: 12.5, lineHeight: 1.6 }}>
+          {a.rows.map((r) => (
+            <li key={r.id} style={{ whiteSpace: 'normal', wordBreak: 'break-word', marginBottom: 4 }}>
+              <b>{r.name}</b>{r.version ? <span className="muted"> v{r.version}</span> : <span className="muted"> (버전 —)</span>}
+              {' · '}<span style={{ color: TONE_COLOR[r.tone] || 'inherit' }}>{r.text}</span>
+              {r.reason && <div className="muted" style={{ fontSize: 11.5 }}>{r.reason}</div>}
+            </li>
+          ))}
+        </ul>
+      )}
+      <div className="muted" style={{ marginTop: 8, fontSize: 11.5, whiteSpace: 'normal' }}>
+        지금 바로 맞추려면 설정 › 수집 서버 화면의 ‘모두 업그레이드’ 를 누르세요. 엣지별 push 결과는 그 화면의 버전 칸에 남습니다.
+      </div>
+    </div>
+  );
+}
+
 const blankForm = (s) => ({
   enabled: !!s.enabled,
   installDir: s.installDir || '',
@@ -177,6 +215,7 @@ const blankForm = (s) => ({
   // v2.630 WEB2630-01: 0(끔)을 60 으로 채우지 않는다 — 서버 값을 그대로 보인다.
   pollMinutes: pollMinutesOf(s.pollIntervalMs),
   autoApply: !!s.autoApply,
+  edgeAutoUpgrade: s.edgeAutoUpgrade !== false, // v2.859: 서버가 안 주면(구버전) 기본 켬과 같게
 });
 
 export default function Upgrade() {
@@ -227,6 +266,7 @@ export default function Upgrade() {
         watchDir: form.watchDir.trim(),
         remoteBase: form.remoteBase.trim(),
         autoApply: form.autoApply,
+        edgeAutoUpgrade: form.edgeAutoUpgrade, // v2.859
       };
       // v2.596(감사 CLAMP2596-06): 빈 칸('')은 0(=확인 끔)이 아니라 미지정 — 보내지 않으면 서버가 이전 값을 유지한다.
       //   명시적 0 만 '끔' 으로 보낸다.
@@ -274,6 +314,13 @@ export default function Upgrade() {
           <input type="checkbox" checked={form.autoApply} onChange={setChk('autoApply')} />
           <span>새 버전 발견 시 <b>자동 적용 + 재시작</b> (끄면 확인만 하고 수동 적용)</span>
         </label>
+        {/* v2.859: 기본 켬 — 중앙이 업그레이드되면 등록된 엣지(수집 서버)도 모두 같은 버전으로(적용 직후 push + 주기 동기화 + /dl). 실행 줄과 함께 맨 위에. */}
+        <label className="flex gap" style={{ alignItems: 'flex-start', fontSize: 13, marginTop: 10 }}>
+          <input type="checkbox" checked={form.edgeAutoUpgrade} onChange={setChk('edgeAutoUpgrade')} style={{ marginTop: 3 }} data-edge-auto="" />
+          <span style={{ minWidth: 0, whiteSpace: 'normal' }}>중앙 포탈이 업그레이드되면 <b>등록된 엣지(수집 서버)도 모두 자동 업그레이드</b> (기본 켬)
+            <span className="muted" style={{ display: 'block', fontSize: 11.5, marginTop: 2 }}>{edgeAutoCheckboxHint(status)}</span>
+          </span>
+        </label>
 
         {/* v2.580: 버튼 4개가 한 줄에 고정돼 400px 에서 83px 가로 넘침(Chromium A/B 실측 — 기존 결함). 줄바꿈 허용. */}
         <div className="flex gap" style={{ marginTop: 14, flexWrap: 'wrap' }}>
@@ -316,6 +363,8 @@ export default function Upgrade() {
 
       {/* v2.736.2: 자동 업그레이드가 왜 안 되는지·다음 확인은 언제인지 — 실행 줄 바로 아래에 말한다. */}
       <AutoCard status={status} />
+      {/* v2.859: 중앙이 업그레이드되면 등록된 엣지도 모두 — 켜짐·다음 동기화·뒤처진 엣지. */}
+      <EdgeSyncCard status={status} />
 
       {/* 현재 상태 + 최근 확인 결과 — 화면 최상단(설정 위)에 먼저 보여준다. */}
       <div className="grid cols-2" style={{ marginBottom: 16 }}>

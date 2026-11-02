@@ -21,6 +21,7 @@
 - (원래 3525행) 3단 지도(v2.588) — 장비 → 엣지 → 메인. 새 판정을 만들지 않고 두 지도의 조립기를 묶는다
 - (원래 3550행) 법인 간 전송 속도(v2.735) — 측정은 중앙만 하고, 엣지는 같은 수집 URL·토큰의 상대일 뿐이다
 - (원래 3622행) v2.737 — 업그레이드·재시작으로 끊긴 스캔은 '실행 중 스캔 기록' 으로 자동 재개한다. 기록 판정은 `util/scanJournal.js` 하나
+- (v2.859 추가) 엣지 자동 업그레이드 — 중앙이 업그레이드되면 등록된 엣지를 **모두** 같은 버전으로. 판정은 `upgrade/edgeSync.js planEdgeSync` 하나
 - (원래 4692행) 등록 폼의 '담당 엣지'·'DataCenter' 는 자유 입력이 아니라 기존 목록에서 고른다 — 서버도 같은 규칙을 집행한다
 - (원래 4860행) 아키텍처 점검(v2.614) — 포탈 점검 3번째 서브메뉴. 운영 포탈이 자기 라우터 스택·카탈로그·표·파일을 스스로 판정한다
 - (v2.793) VM 백업 센터 법인 위임 — 엣지 위임 vCenter 의 백업은 담당 엣지가 실행한다. 중앙은 정의·화면·이력만
@@ -635,6 +636,26 @@
     그 함수에 시작 시각 `const scanStarted = Date.now()` 가 있어 호출이 TDZ 로 던졌다 — 내 재개 테스트는 중앙 경로만 돌려 놓쳤고 전량 테스트(`audit2607e`)가 잡았다.
     별칭으로 가져오고, `sanPerfPush2566` 스윕을 **일반 선언까지** 넓혔다(예전엔 구조분해만 봤다 — 변이로 확인).
   · ⚠ 정직 기록: 실제 OneFS 에서 분리 실행 명령(nohup·kill -0·find -mtime)을 확인하지 못했다(POSIX sh + FreeBSD 기본 도구만 쓴다 · 검증은 이 컨테이너의 sh 와 가짜 SSH 서버).
+- ⚠⚠ **v2.859 — 엣지 자동 업그레이드: 중앙이 업그레이드되면 등록된 엣지(수집 서버)를 모두 같은 버전으로 맞춘다. 판정은 `upgrade/edgeSync.js planEdgeSync` 하나**
+  (사용자 요청 "중앙 포탈이 자동 업그레이드 되면 엣지도 모두 자동으로 업그레이드 · 기본값 켬". `upgrade/fleetBundle.js` + `upgrade/edgeSync.js` + `upgrade/manager.js` 게이트 +
+  `bundleSource.resolveBundleBytes({exactVersion, localDirs, remote})` + 웹 `upgradeEdgeSyncText.js`. 회귀 `server/test/edgeAutoUpgrade2859.test.js`(7) + 웹 `upgradeEdgeSyncText.test.js`):
+  · 예전에는 적용 **직후 1회** push 뿐이었다 — 그때 닿지 않은 엣지(꺼짐·NAT·시한 초과·토큰 불일치)는 구버전으로 남고 재시작한 중앙은 밀어 줄 번들도 기억도 없었다.
+  · 설정 `edgeAutoUpgrade`(upgrade.json · env `UPGRADE_EDGE_AUTO`, **기본 켬** — `false` 라고 적을 때만 끔)가 ① 적용 직후 push ② 주기 동기화를 함께 다스린다. 끄면 push 를
+    '실패' 가 아니라 `edgePush.skipped:'edge-auto-off'` 로 기록한다. **적용한 번들은 설정과 무관하게 패키지 폴더에 보관한다**(엣지 자체 확인 /dl 경로는 열어 둔다).
+  · 보관(`fleetBundle.keepBundle`)은 패키지 폴더(`getPackageDir` — `/dl` 이 내주는 곳)에 `vmware-portal-<버전>.tar.gz` + manifest. **이 모듈이 넣은 것만** 정리한다
+    (기록 `upgrade-kept-bundles.json` — 상태 파일 · `UPGRADE_KEEP_BUNDLES` 기본 3). 같은 이름의 다른 내용은 덮어쓰지 않는다. tar.gz 만(push 수신·/dl 이 tar.gz 만 다룬다).
+  · 동기화(`EdgeSyncRunner`, `UPGRADE_EDGE_SYNC_INTERVAL_MS` 기본 10분·[1분, 24시간]·기동 2분 뒤 첫 실행)는 pull 이 보고한 엣지 버전(`status.version`)을 중앙 버전과 비교해
+    **뒤처진 + 닿는(status.ok)** 엣지에만 '중앙 현재 버전' 번들을 민다. ⚠ **버전을 모르면 밀지 않는다**(`unknown` — 0 이 아니다) · 중앙보다 새 버전은 내리지 않는다(`ahead`) ·
+    pull 실패 중은 `unreachable`(push 도 같은 길) · 성공 뒤 30분은 `waiting`(엣지가 재시작해 보고할 시간) · 실패는 주기 × 2^(n−1)(상한 6시간) 백오프 ·
+    엣지의 '이미 최신(upToDate)' 응답은 성공이다(`collector/upgradePush.js` 가 upToDate 를 결과·수집 서버 상태에 싣는다 — 빼면 /dl 로 먼저 올라간 엣지가 매번 '실패' 가 된다).
+  · 번들은 패키지 폴더 → 감시 폴더 → 원격 순이고 **정확히 중앙 버전만**(`exactVersion` — 원격 최신이 더 새 버전이면 받지 않는다: 엣지를 중앙보다 앞세우지 않는다).
+    원격은 못 구했을 때 1시간에 한 번만 묻는다(`SYNC_REMOTE_RETRY_MS`) — 로컬은 매번 본다. 원격에서 받은 것은 보관한다.
+  · **적용과 겹치지 않는다**: 확인·적용 중이면 동기화는 `skipped`, 적용은 진행 중인 동기화 `inflight` 를 기다린 뒤 자기 push 를 한다(같은 엣지에 두 번들을 동시에 올리지 않게).
+    둘 다 `pushConcurrencyOf()`(기본 4)로 민다.
+  · 상태 코드(`EDGE_SYNC_STATES`·`EDGE_SYNC_OUTCOMES`)는 서버, 문장은 웹(`EDGE_STATE_TEXT`·`SYNC_OUTCOME_TEXT`) — 웹 테스트가 서버 소스와 1:1 대조한다. 코드를 더하면 둘 다.
+    동기화 기록은 메모리뿐이다(재시작 전 기록은 지어내지 않는다 — 화면이 '기동 2분 뒤 첫 실행' 이라 말한다). 엣지별 push 결과는 수집 서버 상태 `upgrade` 에 남는다.
+  · ⚠ 정직 기록: `UPGRADE_EDGES`(upgrade.json edges — `/api/upgrade/bundle` 로 받는 옛 방식)는 버전을 보고하지 않아 동기화 대상이 아니다(적용 직후 1회 push 만 — 예전과 같다).
+    실제 WAN 엣지로는 확인하지 못했다(가짜 수집 서버 + 실제 서명 번들로 push 경로를 돌렸다).
 - **등록 폼의 '담당 엣지'·'DataCenter' 는 자유 입력이 아니라 기존 목록에서 고른다 — 서버도 같은 규칙을 집행한다**
   (`cvp/formChoices.js pickAgent`·`pickDatacenter` + 웹 `cvpText.choiceOptions`, v2.609 — 사용자 요청 "엣지 이름과 데이터 센터를
   콤보박스로 … 오타/대소문자 방지"):

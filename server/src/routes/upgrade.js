@@ -192,7 +192,7 @@ upgradeRouter.put('/settings', adminOnly, (req, res) => {
   // 경로/URL 형식 검증 — 통과하지 못하면 저장하지 않는다(감사 H16).
   const bad = validateUpgradeSettings(b);
   if (bad) return res.status(400).json({ ok: false, reason: bad });
-  const allowed = ['enabled', 'watchDir', 'installDir', 'packageName', 'remoteBase', 'token', 'pollIntervalMs', 'autoApply'];
+  const allowed = ['enabled', 'watchDir', 'installDir', 'packageName', 'remoteBase', 'token', 'pollIntervalMs', 'autoApply', 'edgeAutoUpgrade']; // v2.859: 엣지 자동 업그레이드
   const partial = {};
   for (const k of allowed) if (b[k] !== undefined) partial[k] = b[k];
   // v2.731(점검 A3-01 ①): 원격 소스 주소가 바뀌었는데 새 토큰이 없으면 저장이 토큰을 버린다(upgrade/settings.js) — 그 사실을

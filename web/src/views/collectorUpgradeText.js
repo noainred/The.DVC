@@ -18,6 +18,8 @@ export function upgradeCell(u) {
   const when = fmt(u.at);
   const tail = `${when ? ` · ${when}` : ''}${u.auto ? ' (자동)' : ''}`;
   if (u.ok === true) return { text: `업그레이드${u.version ? ` v${u.version}` : ''} 적용${tail}`, reason: '', tone: 'ok' };
+  // v2.859: 엣지가 '이미 최신(not newer)' 으로 답한 push 는 실패가 아니다 — 엣지가 중앙 /dl 로 먼저 올라간 경우(엣지 자동 업그레이드).
+  if (u.upToDate === true) return { text: `이미 최신${u.version ? ` (v${u.version})` : ''}${tail}`, reason: '', tone: 'ok' };
   return { text: `업그레이드 실패${tail}`, reason: typeof u.reason === 'string' && u.reason ? u.reason : '사유를 받지 못했습니다', tone: 'bad' };
 }
 
