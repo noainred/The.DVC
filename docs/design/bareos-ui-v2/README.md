@@ -124,12 +124,13 @@ Backup 현황 (VeeamHeader — 그대로: Summary · Detail · Veeam · Bareos)
 | 3 | ② 법인 재배치 + 패널 동작(`BareosDetailTool.jsx` — 관리 동작은 기존 핸들러 호출) | 70분 |
 | 4 | ③ 운영 — 세그먼트 · 진행 띠 · 표 6열 · 패널(`BareosBackupTool.jsx`) · 진행·이력 합치기 | 80분 |
 | 4b | ③ 운영 › 복원(§10) — 서버: `restore-points/bulk` · `restore-check/bulk`(restorePlan dry-run) · `restore/bulk`(OTP 한 번 · 한 세션에서 차례로 · VM 마다 결과 · batchId) · 전 법인 복원 이력 라우트 · 진행 % · 웹: 폴더 트리 고르기(백업 그룹 트리와 같은 모양) + 마법사 3단계 + 묶음 진행 카드(`BareosRestore.jsx` · `bareosRestoreText.js`) · 기존 `RestoreModal` 은 마법사로 대체 · 테스트(서버 라우트 · 웹 판정) · 변이 검증 + 반증 1인 | 180분 |
+| 4c | 커뮤니티 조사로 더한 보조 기능(§11) — 복원 검증(리허설) 정책·러너·결과 표 · ‘스냅샷 남음’ 칩/태그 · issueHint 2줄 + ‘Full 로 실행’ · 복원된 VM 첫 실행 Full · 일일 요약 메일(bareos-digest) · `restore_allow_disks_mismatch` · 템플릿 사유 | 150분 |
 | 5 | ④ 정책·보존 합치기(`BareosPolicyTab.jsx` + `BareosPoolsTab.jsx`) | 50분 |
 | 6 | ⑤ 설정 — 왼쪽 목록 · Director 표 · 아코디언(`BareosSettings.jsx` 틀만) | 50분 |
 | 7 | 테스트 갱신 — 소스 모양을 정규식으로 고정한 테스트가 먼저 깨진다(`bareosPolicy2839`: BareosSummaryTool 의 `useHashTab` 라우팅 줄 · `bareosPolicy2840`: BareosPolicyTab 의 `<STable` 5개 · BareosBackupTool 의 `href="#/tools/bareos-summary/pools"` · `k === 'groups' && toolAllowed('bareos-summary')` · `data-hist-filters` · `bareosBugs2846c` · `bareosBugs2847` · `backupSummary2837/2838` 의 주소 문자열 · `bareosViewText.test.js` 85~92행의 탭 키·순서 · `topMenu.test.js` · `uiText` 백틱 스윕) + 다른 화면에서 들어오는 링크(`backupSummaryPlan.js errorOpen` 의 `/live`·`/history`·`/pools` · `BackupDetailTool`·`BackupSummaryBar`·`BackupSummaryStale` 의 `/targets`·`/groups`·`/live` handoff) 를 새 주소로 + Chromium 1440/400 × 5화면 + `docs/rules/web.md` 항목 | 70분 |
 | 8 | 릴리스(v2.851.0 — 버전 3종 · release-notes · 태그 · versions.json 확인) | 25분 |
 
-합계 약 **9시간 반**(복원 4b 포함 · 토큰 약 4~5M 추정 — 읽을 JSX 약 6,000줄 · 고쳐 쓸 분량 약 4,500줄 · 서버 라우트 3개 · 테스트·빌드·Chromium 3회). 30분을 훨씬 넘으므로 착수 전에 방식을 묻는다(§8).
+합계 약 **12시간**(복원 4b · 보조 기능 4c 포함 · 토큰 약 5~6M 추정 — 읽을 JSX 약 6,500줄 · 고쳐 쓸 분량 약 5,500줄 · 서버 라우트 5개 + 러너 1개 · 테스트·빌드·Chromium 3회). 30분을 훨씬 넘으므로 착수 전에 방식을 묻는다(§8).
 단계 1~4·4b 만 먼저 내고(1차 릴리스) 5~6 을 2차로 나눌 수도 있다 — 그 경우 1차 뒤에도 정책·보존 두 탭과 설정 4탭은 지금 모양으로 BareosNav 아래에 남는다.
 복원(4b)은 쓰기 경로(파괴적 덮어쓰기 · OTP)라 CLAUDE.md '작업 규모 기본값' 대로 **변이 검증 + 반증 1인**을 붙인다(화면만 바꾸는 1~3·5~6 은 관련 테스트 + Chromium).
 
@@ -138,7 +139,8 @@ Backup 현황 (VeeamHeader — 그대로: Summary · Detail · Veeam · Bareos)
 1. 시안 방향 — 탭 9 → 5(운영 안 세그먼트 3 · 정책·보존 합침 · 설정 왼쪽 목록) 그대로 갈지.
 2. 검증 수준 — ① 전체(5화면 전부 · 전량 테스트 + Chromium 1440/400 × 5화면 × A/B) ② 표준(5화면 전부 · 바뀐 테스트 + Chromium 1회) ③ 1차만(단계 1~4 · 표준 검증 · 정책·보존/설정은 2차).
 3. '+ 백업 대상 추가' 를 지금처럼 인라인 카드로 둘지, 모달로 바꿀지(시안은 인라인 유지 전제 — 바꾸지 않으면 작업 0).
-4. 복원(§10) — ⓐ 묶음(2대 이상)에서 '원래 VM 에 덮어쓰기' 를 막고 1대씩만 허용할지(시안 — 되돌릴 수 없는 작업이라 기본값) ⓑ 한 번에 고를 수 있는 VM 상한(시안 50대) ⓒ VM 복원 완료 메일 알림을 둘지(지금은 백업 실패 메일만 — 추가 작업 약 30분) ⓓ 네트워크 기본값 — 새 VM 은 '어댑터 끊은 채로'(시안), 덮어쓰기는 '그대로'(시안).
+4. 복원(§10) — ⓐ 묶음(2대 이상)에서 '원래 VM 에 덮어쓰기' 를 막고 1대씩만 허용할지(시안 — 되돌릴 수 없는 작업이라 기본값) ⓑ 한 번에 고를 수 있는 VM 상한(시안 50대) ⓒ VM 복원 완료 메일 알림을 둘지(§11 의 일일 요약 메일로 대신할 수 있다) ⓓ 네트워크 기본값 — 새 VM 은 '어댑터 끊은 채로'(시안), 덮어쓰기는 '그대로'(시안).
+5. 보조 기능(§11) — ⓔ 복원 검증(리허설)을 넣을지와 기본 주기(시안: 법인마다 주 1회 · 폴더에서 돌아가며 3대 · 성공한 검증용 VM 은 지움 · 실패는 남김) ⓕ 일일 요약 메일을 넣을지(시안: 켬 · 08:30) ⓖ 나머지 넷(스냅샷 남음 · 오류 해석 · Full 권장 · 고급 옵션)은 작아서 함께 넣는 것을 전제로 했다.
 
 ## 9. 남긴 것(정직 기록)
 
@@ -212,3 +214,42 @@ Backup 현황 (VeeamHeader — 그대로: Summary · Detail · Veeam · Bareos)
 ### 10.7 사용자 결정
 
 §8 의 4번 — ⓐ 묶음 덮어쓰기 금지(기본: 1대씩만) ⓑ 묶음 상한(기본 50) ⓒ 복원 완료 메일(기본: 2차) ⓓ 네트워크 기본값(기본: 새 VM 은 '끊은 채로' · 덮어쓰기는 '그대로').
+
+## 11. 커뮤니티 조사로 더한 보조 기능 (사용자 요청 2026-11-03 "레딧에서 검색해서 유용한 기능 추가" — 시안 ⑫ ⑬)
+
+### 11.1 조사 방법과 한계(정직 기록)
+
+- **레딧은 직접 보지 못했다** — reddit.com 이 Anthropic 크롤러를 막아 검색 도구가 400 으로 거부한다(serverfault.com 도 같다). docs.bareos.org 는 이 세션의 허용 도메인 밖이라 페이지를 열지 못했고, 검색 결과에 실린 발췌만 썼다.
+- 대신 같은 성격의 공개 커뮤니티에서 **반복되는 요구**를 모았다: Bareos 사용자 메일링 리스트(bareos-users) · GitHub bareos/bareos PR·이슈 · Veeam R&D 포럼 · Veeam/IBM/Microsoft 문서. 아래 표의 출처 열이 그 근거다. 레딧에서 더 보고 싶으시면 스레드 본문을 붙여 주시면 반영한다.
+
+### 11.2 더한 기능 6가지 — 전부 지금 포탈에 있는 함수·값 위에 얹는다
+
+| # | 기능 | 들어갈 자리 | 근거(출처) | 포탈이 이미 가진 것 |
+|---|---|---|---|---|
+| ① | **복원 검증(리허설) 자동화**(시안 ⑫) — 법인마다 정책(주기 · 대상 폴더 · 대수) · 마지막 성공 백업으로 새 VM 복원 → NIC 끊음 → 켜기 → VMware Tools 하트비트(최대 10분) → 끄기 → 성공이면 검증용 VM 지우기(실패는 남김) · 결과 표(복원 · 켜짐 · 하트비트 · 소요 · 정리 · 결과) · '지금 검증' · 복원 마법사 2/3 의 '복원 뒤 검증' 토글 | 운영 › 복원 › 복원 검증 · VM 패널 · 일일 요약 메일 | Veeam SureBackup 문서(격리 실행 · 하트비트 · 핑 · 앱 테스트 · 안정화 대기) · Veeam 포럼(SureBackup 없이 격리 vSwitch 로 손수 검증 · 네트워크 매핑 실패로 핑 생략) · IBM 지원 문서(운영망에 붙인 테스트 복원이 DNS 를 바꿈) | `vmclone/vsphere.js powerOnVm · waitToolsRunning · powerOffVm · destroyClone(expectedName) · disconnectAllNics` · 그룹 러너의 틱 · 엣지 dispatch |
+| ② | **남은 스냅샷 감지** — 법인 화면 칩 '스냅샷 남음 N' + VM 태그 '스냅샷 n개 — 마지막 백업 실패 뒤 남은 것일 수 있음' · 백업 대상 패널에도 | 법인 · 운영 | bareos-users(quiesce 실패 뒤 스냅샷이 며칠 남아 다음 백업을 막음 — 손으로 지우자 성공) · GitHub PR #1484(플러그인의 남은 스냅샷 정리) | 인벤토리 `snapshotCount`(덮어쓰기 전제 판정에 이미 쓴다) · 원장 `lastRun.state` |
+| ③ | **오류 해석 2줄 + 버튼** — quiesce 오류('가장 흔한 스냅샷 실패 — 재시도 3회 · pre-freeze 스크립트 종료 코드 · 남은 스냅샷') · 'A new full level backup of this job is required'('디스크가 옮겨졌거나 CBT 어긋남 — 다음 실행 Full 로' + **Full 로 지금 실행** 버튼) | 결과 창 '경고 · 오류' | bareos-users 관리자 답변(재시도 · CBT 재설정) · GitHub PR #1473(옮겨진 디스크는 Incr/Diff 불가 · 새 Full 필요) | `bareosText.issueHint` · 실행 라우트의 `level` |
+| ④ | **복원된 VM 의 첫 백업은 Full** — 복원 완료 카드에 '백업 대상으로 등록(첫 실행 Full)' · 덮어쓰기 복원한 원래 VM 도 다음 1회 Full 표시 | 복원 완료 카드 · 백업 대상 패널 | bareos-users(복원 · Storage vMotion 된 VM 은 디스크가 통째로 바뀌어 CBT 증분 불가 → 플러그인이 Full 읽기로) | 원장 `restores[]` · 등록 라우트 · 실행 `level` |
+| ⑤ | **일일 요약 메일**(bareos-digest) — 매일 정해진 시각에 법인별 성공/경고/실패/미등록/오래됨 + 복원 · 검증 결과 · VM 단위 실패 목록 · '결과 모름' 법인은 모름으로 | 설정 › 공통 기본값·수집 아코디언 한 줄 | Veeam 포럼('잡은 성공인데 15대 중 3대만 백업' — VM 단위로 봐야 한다) | `bareos/notify.js`(실패 메일) · `mail/kinds.js` · 통합 현황 집계(`vmView`) |
+| ⑥ | **복원 고급 옵션 · 범위 안내** — '디스크 불일치 허용(VSAN)' 토글 · '데이터스토어 선택은 VM 홈 DS 의 디스크만 옮긴다 — 옮기는 디스크 n / N' · 백업 대상 추가 표의 템플릿 사유 | 복원 2/3 · 백업 대상 추가 | GitHub PR #1876(`restore_allow_disks_mismatch` · Bareos 23.1+) · PR #1473(다중 DS 의 옮기는 범위 · 22.1+) · 이슈 #2118(템플릿 미백업) | `names.js restorePluginOptions` 화이트리스트(한 줄 추가) · 인벤토리 디스크의 데이터스토어 |
+
+### 11.3 서버에 더하는 것
+
+- 복원 검증: 법인마다 정책 파일(`bareos-verify.json` — 주기 · 요일/시각 · 대상 폴더 · 대수 · 삭제 여부) · 러너는 그룹 러너와 같은 틱에서 돈다(한 법인 한 번에 1대 · Director 백업 창과 겹치지 않는 시각만) · 흐름은 복원 마무리 함수에 `verify` 플래그 — `disconnectAllNics → powerOnVm → waitToolsRunning(10분) → powerOffVm → (성공 ∧ 지우기) destroyClone(expectedName)` · 결과는 원장 `restores[]` 의 `verify: 'ok'|'failed'|'skipped'(Tools 없음)|'unknown'` · 담당 엣지가 있으면 엣지가(vCenter 비밀번호는 엣지에만).
+- 검증용 VM 이름은 `{원래}-verify-{날짜}` 로 고정하고 **그 이름이 포탈이 이 검증에서 만든 것일 때만** 지운다(destroyClone 의 expectedName 규칙 · 이름이 둘이면 지우지 않는다). 실패한 검증용 VM 은 지우지 않고 남긴다(조사용) — 다음 검증이 같은 이름을 쓰지 않게 날짜를 붙인다.
+- 일일 요약: 메일 종류 `bareos-digest` · 발송 시각 설정 · 본문은 통합 현황 집계 그대로(법인 단위 '결과 모름' 은 모름) · 발송 실패는 기준을 옮기지 않는다(`vmclone/notify.js` 규칙과 같다).
+- `names.js` 화이트리스트에 `restore_allow_disks_mismatch` 한 줄 · `restorePlan` 에 `allowDisksMismatch` 옵션 · 기본 꺼짐.
+- `issueHint` 두 줄(quiesce · new full required) — 문구는 테스트가 고정 · 백틱 없음.
+- 첫 실행 Full: 등록 라우트의 `firstLevel: 'Full'` — 원장에 `nextLevel` 을 두고 다음 실행이 그 값으로 한 번 돌면 지운다(Bareos 에 잡 수정 명령이 없어 잡 정의를 바꾸지 않고 실행 레벨만).
+
+### 11.4 하지 않는 것(정직 기록)
+
+- 즉시 복구(Instant Recovery) · 파일 단위 복원 · 다른 vCenter 복원 — 플러그인이 지원하지 않는다.
+- 검증의 핑 · 앱 테스트 — 네트워크를 끊은 채라 할 수 없다. 격리 포트그룹을 만들어 붙이는 방식은 vCenter 네트워크를 바꾸는 일이라 2차.
+- 레딧 스레드 자체를 근거로 적지 못했다(위 11.1).
+
+### 11.5 테스트 계획
+
+- 검증 러너: 켜기 전에 NIC 가 전부 끊겼는지(`allNicsDisconnected`) 확인하지 못하면 켜지 않는다 · Tools 하트비트 시한 · 실패면 지우지 않는다 · 성공이어도 이름이 다르면 지우지 않는다 · 백업 창과 겹치면 미룬다 · 한 법인 동시 1대.
+- 일일 요약: '결과 모름' 법인이 0 으로 들어가지 않는다 · 발송 실패 시 기준 유지.
+- issueHint 두 줄 · `restore_allow_disks_mismatch` 화이트리스트 · 첫 실행 Full 이 한 번만 적용되는지.

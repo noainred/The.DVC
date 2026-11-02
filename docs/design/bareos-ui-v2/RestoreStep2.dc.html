@@ -109,7 +109,15 @@ td{padding:7px 10px;border-bottom:1px solid #1f2a40;vertical-align:middle;white-
             <div class="i"><span class="m ok">✓</span><span>전원: 3대 모두 꺼진 채로 만듭니다(고정) — 켜기는 복원 뒤 vCenter 에서.</span></div>
             <div class="i"><span class="m unk">?</span><span>네트워크 끊기는 플러그인 옵션이 아닙니다 — 복원 잡이 끝난 뒤 포탈(담당 엣지가 있으면 엣지)이 vCenter 에서 NIC 를 ‘연결 끊음 · 켤 때 연결 안 함’ 으로 바꿉니다(VM 백업 센터 클론과 같은 처리). 이 단계가 실패하면 ‘네트워크 끊기 실패 — 손으로 확인’ 으로 표시하고 VM 은 켜지 않습니다.</span></div>
             <div class="i"><span class="m ok">✓</span><span>복원 잡 3개가 Director 에서 차례로(동시 실행 수만큼 겹쳐) 돕니다 — 한 대가 실패해도 나머지는 계속됩니다.</span></div>
+            <div class="i"><span class="m unk">?</span><span>데이터스토어 선택은 VM 이 있던 데이터스토어의 디스크만 옮깁니다 — 다른 데이터스토어에 있던 디스크는 원래 자리에 다시 만들어집니다(플러그인 동작). 요약에 ‘옮기는 디스크 n / N’ 으로 적습니다.</span></div>
           </div>
+          <details style="border-top:1px solid #1f2a40;padding-top:8px">
+            <summary style="cursor:pointer;font-size:12.5px;font-weight:700;color:#8b9bb4">고급 옵션</summary>
+            <div style="display:flex;flex-direction:column;gap:8px;margin-top:8px;font-size:12.5px">
+              <label style="display:flex;align-items:center;gap:8px"><input type="checkbox">디스크 불일치 허용 <span class="sm">VSAN 데이터스토어에서 디스크 검사 불일치로 복원이 막힐 때만(restore_allow_disks_mismatch · Bareos 23.1+)</span></label>
+              <label style="display:flex;align-items:center;gap:8px"><input type="checkbox" checked>복원 뒤 검증 <span class="sm">네트워크 끊은 채 켜서 VMware Tools 하트비트를 확인하고 끕니다(최대 10분 · 검증용이 아니라 지우지 않습니다)</span></label>
+            </div>
+          </details>
         </div>
 
         <div class="mode" style="opacity:.85">
