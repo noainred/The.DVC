@@ -47,14 +47,17 @@ export function GpuAllocTree({ scope }) {
   const [dlMsg, setDlMsg] = useState('');
   const [dlBusy, setDlBusy] = useState('');
   const [exportOpen, setExportOpen] = useState(false);   // v2.855: 엑셀은 창에서 단계·시트를 고른 뒤 받는다
-  // v2.853: 법인 칩(바로가기 모양 — 사용자 요청). 빈 Set = 전체. 여러 개 고를 수 있다. vCenter 상태 점은 /vcenters(마운트 1회).
+  // v2.853: 법인 칩(바로가기 모양 — 사용자 요청). 빈 Set = 전체. 여러 개 고를 수 있다.
+  // v2.856(버그 수정 — v2.853 보고의 '한계'): 상태 점(/vcenters)을 마운트에 한 번만 읽어 '⟳ 새로 고침' 을 눌러도 점이 그대로였다.
+  //   이제 load() 가 계층과 함께 다시 읽는다. 다시 읽기가 실패하면 직전 점을 지우지 않는다(처음 실패만 빈 목록 — 점이 흐려진다).
   const [vcSel, setVcSel] = useState(() => new Set());
   const [vcs, setVcs] = useState(null);
   const runVcs = useLatest();
-  useEffect(() => { runVcs(fetchJson('/vcenters'), (d) => setVcs(Array.isArray(d) ? d : []), () => setVcs([])); }, [runVcs]);
+  const loadVcs = () => runVcs(fetchJson('/vcenters'), (d) => setVcs(Array.isArray(d) ? d : []), () => setVcs((prev) => prev ?? []));
 
   const load = () => {
     setLoading(true); setErr(null);
+    loadVcs();
     const q = scope ? `?vcenterId=${encodeURIComponent(scope)}` : '';
     run(fetchJson(`/tools/gpu/alloc${q}`), (d) => { setData(d); setLoading(false); }, (e) => { setErr(e); setLoading(false); });
   };
