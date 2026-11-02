@@ -69,7 +69,8 @@ function BundleCard({ ov, onReload, say, writable }) {
           {src && <div style={{ fontSize: 12, marginTop: 2, overflowWrap: 'anywhere' }}>서버 디렉터리: {src.importDir ? <><code>{src.importDir}</code> <Badge cls={importDirStateText(src.importDirState).cls}>{importDirStateText(src.importDirState).text}</Badge></> : <span className="muted">정하지 않음</span>}</div>}
           {src?.loadError && <div className="banner warn" style={{ marginTop: 4, fontSize: 12 }}>{src.loadError}</div>}
         </div>
-        <div style={{ ...ROW, flex: 'none' }}>
+        {/* v2.850(Chromium 400 — 단추 셋이 줄지 않아 16px 넘쳤다): 단추 묶음도 줄고 줄바꿈한다 */}
+        <div style={{ ...ROW, flex: '0 1 auto', minWidth: 0 }}>
           <button type="button" className="login-btn" style={BTN} disabled={busy || !writable || (f && !f.doneAt)} onClick={() => act(async () => okOrThrow(await postJson(`${P}/bundle/fetch`, {})), '번들 받기를 시작했습니다 — 아래에 진행이 보입니다.')}>번들 받기(최신)</button>
           <button type="button" className="logout-btn" style={BTN} disabled={busy || !writable} onClick={() => act(async () => okOrThrow(await postJson(`${P}/bundle/rescan`, {})), '번들 폴더를 다시 확인했습니다(서명·해시).')}>다시 확인</button>
           {src && <button type="button" className="logout-btn" style={BTN} disabled={busy || !writable} onClick={() => setEdit((e) => (e ? null : { baseUrl: src.savedUrl || '', importDir: src.importDir || '' }))}>{edit ? '받는 곳 닫기' : '받는 곳 · 디렉터리 바꾸기'}</button>}
