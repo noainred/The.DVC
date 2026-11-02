@@ -13,7 +13,7 @@
  *    저장 실패는 5xx 가 아니라 200 + `persist.state:'failed'`(되돌리지 않는다 — 자동 재시도·다음 변경이 이어서 쓴다).
  */
 import { requireRole, listUsers } from '../../auth/auth.js';
-import { isDemoGuest } from '../../auth/demoGuest.js';
+import { isDemoGuest, isAdminDetailUser } from '../../auth/demoGuest.js';
 import { logAudit } from '../../audit.js';
 import { pageArgs } from '../../util/pageArgs.js';
 import { clientIp } from '../../util/rateLimit.js';
@@ -27,7 +27,8 @@ import {
 
 const writers = requireRole('admin', 'operator');
 const userOf = (req) => req.user?.username || 'anonymous';
-const isAdmin = (req) => req.user?.role === 'admin' && !isDemoGuest(req.user);
+/** 관리자(데모 계정 제외) — 판정은 auth/demoGuest.js isAdminDetailUser 하나(role 직접 비교 금지 — audit2744e 스윕). */
+const isAdmin = (req) => isAdminDetailUser(req.user);
 const canWrite = (req) => ['admin', 'operator'].includes(req.user?.role) && !isDemoGuest(req.user);
 /** 관리자 권한(남의 댓글·이슈 삭제) — 관리자(데모 계정 제외) + 전체 범위(게시판 isBoardModerator 와 같은 판정). */
 const isMod = (req) => isAdmin(req) && !scopedVcenterIds(req.user, store.get());

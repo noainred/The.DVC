@@ -343,7 +343,7 @@ function MyWorkView({ rows, stats, meta, onOpen, onWritten }) {
                 <span className="iss-load-n"><b>{a.open}</b>{a.progress ? ` · 진행 ${a.progress}` : ''}{a.review ? ` · 검토 ${a.review}` : ''}{a.overdue ? <span className="iss-due over"> · 초과 {a.overdue}</span> : ''}</span>
               </div>
             ))}
-            <div className="muted" style={{ fontSize: 12, marginTop: 8 }}>막대는 1인당 열린 이슈 {LOAD_CAP}건을 가득으로 그린 표시 기준입니다(제한이 아닙니다). 미할당 {stats?.unassigned ?? '—'}건은 위 대기열에 있습니다.</div>
+            <div className="muted" style={{ fontSize: 12, marginTop: 8 }}>막대는 1인당 열린 이슈 {LOAD_CAP}건을 가득으로 그린 표시 기준입니다(제한이 아닙니다). {stats?.unassigned != null ? `미할당 ${stats.unassigned}건은 위 대기열에 있습니다.` : '미할당 이슈는 위 대기열에 있습니다.'}</div>
           </div>
         </div>
       </div>

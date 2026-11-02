@@ -758,20 +758,20 @@ Prometheus/OTel 익스포터(선택 토큰).
 | GET | `/hosts/checks` | 권한 `inv.hosts` | [server/src/routes/api/hostChecks.js:42](../server/src/routes/api/hostChecks.js#L42) |
 | GET | `/hosts/corp` | 권한 `inv.hosts` | [server/src/routes/api/hostCorp.js:38](../server/src/routes/api/hostCorp.js#L38) |
 | GET | `/idrac/host-power` | 권한 `inv.hosts` | [server/src/routes/api/vmMetrics.js:213](../server/src/routes/api/vmMetrics.js#L213) |
-| GET | `/issues` | — | [server/src/routes/api/issues.js:80](../server/src/routes/api/issues.js#L80) |
-| POST | `/issues` | 역할 `admin/operator` | [server/src/routes/api/issues.js:108](../server/src/routes/api/issues.js#L108) |
-| DELETE | `/issues/:key` | 역할 `admin/operator` | [server/src/routes/api/issues.js:168](../server/src/routes/api/issues.js#L168) |
-| GET | `/issues/:key` | — | [server/src/routes/api/issues.js:95](../server/src/routes/api/issues.js#L95) |
-| PUT | `/issues/:key` | 역할 `admin/operator` | [server/src/routes/api/issues.js:115](../server/src/routes/api/issues.js#L115) |
-| POST | `/issues/:key/assign` | 역할 `admin/operator` | [server/src/routes/api/issues.js:131](../server/src/routes/api/issues.js#L131) |
-| POST | `/issues/:key/block` | 역할 `admin/operator` | [server/src/routes/api/issues.js:139](../server/src/routes/api/issues.js#L139) |
-| POST | `/issues/:key/comments` | 역할 `admin/operator` | [server/src/routes/api/issues.js:152](../server/src/routes/api/issues.js#L152) |
-| DELETE | `/issues/:key/comments/:cid` | 역할 `admin/operator` | [server/src/routes/api/issues.js:160](../server/src/routes/api/issues.js#L160) |
-| POST | `/issues/:key/status` | 역할 `admin/operator` | [server/src/routes/api/issues.js:123](../server/src/routes/api/issues.js#L123) |
-| POST | `/issues/:key/watch` | 역할 `admin/operator` | [server/src/routes/api/issues.js:148](../server/src/routes/api/issues.js#L148) |
-| POST | `/issues/bulk/assign` | 역할 `admin/operator` | [server/src/routes/api/issues.js:101](../server/src/routes/api/issues.js#L101) |
-| GET | `/issues/meta` | — | [server/src/routes/api/issues.js:68](../server/src/routes/api/issues.js#L68) |
-| GET | `/issues/stats` | — | [server/src/routes/api/issues.js:76](../server/src/routes/api/issues.js#L76) |
+| GET | `/issues` | — | [server/src/routes/api/issues.js:81](../server/src/routes/api/issues.js#L81) |
+| POST | `/issues` | 역할 `admin/operator` | [server/src/routes/api/issues.js:109](../server/src/routes/api/issues.js#L109) |
+| DELETE | `/issues/:key` | 역할 `admin/operator` | [server/src/routes/api/issues.js:169](../server/src/routes/api/issues.js#L169) |
+| GET | `/issues/:key` | — | [server/src/routes/api/issues.js:96](../server/src/routes/api/issues.js#L96) |
+| PUT | `/issues/:key` | 역할 `admin/operator` | [server/src/routes/api/issues.js:116](../server/src/routes/api/issues.js#L116) |
+| POST | `/issues/:key/assign` | 역할 `admin/operator` | [server/src/routes/api/issues.js:132](../server/src/routes/api/issues.js#L132) |
+| POST | `/issues/:key/block` | 역할 `admin/operator` | [server/src/routes/api/issues.js:140](../server/src/routes/api/issues.js#L140) |
+| POST | `/issues/:key/comments` | 역할 `admin/operator` | [server/src/routes/api/issues.js:153](../server/src/routes/api/issues.js#L153) |
+| DELETE | `/issues/:key/comments/:cid` | 역할 `admin/operator` | [server/src/routes/api/issues.js:161](../server/src/routes/api/issues.js#L161) |
+| POST | `/issues/:key/status` | 역할 `admin/operator` | [server/src/routes/api/issues.js:124](../server/src/routes/api/issues.js#L124) |
+| POST | `/issues/:key/watch` | 역할 `admin/operator` | [server/src/routes/api/issues.js:149](../server/src/routes/api/issues.js#L149) |
+| POST | `/issues/bulk/assign` | 역할 `admin/operator` | [server/src/routes/api/issues.js:102](../server/src/routes/api/issues.js#L102) |
+| GET | `/issues/meta` | — | [server/src/routes/api/issues.js:69](../server/src/routes/api/issues.js#L69) |
+| GET | `/issues/stats` | — | [server/src/routes/api/issues.js:77](../server/src/routes/api/issues.js#L77) |
 | GET | `/networks` | 권한 `inv.networks` | [server/src/routes/api/inventory.js:517](../server/src/routes/api/inventory.js#L517) |
 | GET | `/notices` | — | [server/src/routes/api/bulletin.js:103](../server/src/routes/api/bulletin.js#L103) |
 | POST | `/notices` | 역할 `admin` · `noticeFleetOnly` | [server/src/routes/api/bulletin.js:107](../server/src/routes/api/bulletin.js#L107) |
