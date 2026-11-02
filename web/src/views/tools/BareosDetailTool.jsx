@@ -14,9 +14,11 @@ import { STable } from '../../components/STable.jsx';
 import VeeamHeader from './VeeamHeader.jsx';
 import BareosTabs from './BareosTabs.jsx';
 import { CritIcon, MethodBadge } from './BackupMarkIcons.jsx';
+import { Note, ReadGuide, Stat, STAT_GRID, Dot, ResultBar, FilterChip } from './BareosBits.jsx';
 import {
   bareosClass, directorStateOf, directorLineText, resultsUnknownText, numText, shortTs, fmtGb, stText, ST_TONE, runLine, bytesText,
-  DETAIL_FILTERS, detailFilterCounts, lvText, buildBareosTree, flattenBareosTree, initialBareosOpen, BAREOS_RPO_DAYS, BAREOS_DETAIL_VC_KEY,
+  DETAIL_FILTERS, DETAIL_FILTERS_MAIN, DETAIL_FILTERS_MORE, detailFilterCounts, lvText, buildBareosTree, flattenBareosTree, initialBareosOpen, BAREOS_RPO_DAYS, BAREOS_DETAIL_VC_KEY,
+  resultBar, corpAttention, saveTargetFocus,
 } from './bareosViewText.js';
 
 const TONE = { ok: '#86efac', warn: '#fcd34d', bad: '#fca5a5', run: '#93c5fd', muted: 'var(--text-dim)', bareos: '#fdba74' };
@@ -31,15 +33,6 @@ const loadRpo = () => { try { const v = Number(localStorage.getItem(RPO_KEY)); r
 
 function Chip({ tone, children }) {
   return <span style={{ display: 'inline-block', padding: '2px 8px', borderRadius: 10, fontSize: 12, fontWeight: 700, whiteSpace: 'nowrap', ...(CHIP[tone] || CHIP.muted) }}>{children}</span>;
-}
-function Kpi({ label, value, sub, color, border }) {
-  return (
-    <div className="card" style={{ padding: '10px 12px', minWidth: 0, border: `1px solid ${border || 'var(--border)'}` }}>
-      <div style={{ fontSize: 12, fontWeight: 600, color: color || 'var(--text-dim)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{label}</div>
-      <div style={{ fontSize: 22, fontWeight: 800, marginTop: 2, fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{value}</div>
-      {sub && <div className="muted" style={{ fontSize: 11.5, marginTop: 2, overflowWrap: 'anywhere' }}>{sub}</div>}
-    </div>
-  );
 }
 /** 마지막 실행 칸 — 결과 칩 + 끝난 시각 + 레벨·바이트. 미등록·모름·아직 실행 안 함은 글로. */
 function RunCell({ b, known }) {
@@ -77,6 +70,7 @@ export default function BareosDetailTool() {
   const [open, setOpen] = useState(null);
   const [sel, setSel] = useState(null);
   const [csvErr, setCsvErr] = useState(null);
+  const [moreChips, setMoreChips] = useState(false);
   useEffect(() => { fetchJson('/vcenters').then((r) => setVcs(Array.isArray(r) ? r : [])).catch(setVcErr); }, []);
   // 저장해 둔 법인이 목록에 없으면(범위가 바뀜·지워짐) 첫 법인
   useEffect(() => {
@@ -111,16 +105,14 @@ export default function BareosDetailTool() {
   const corps = data?.corps || (vcs || []).map((v) => ({ id: v.id, name: v.name || v.id, state: '' }));
   const head = (
     <>
-      <VeeamHeader active="bareos" desc="법인 하나에서 백업 방식이 Bareos 인 VM 과 Bareos 잡이 있는 VM 만 폴더 › VM 으로 봅니다(다른 방식 VM 은 Detail 탭)."
-        actions={<>
-          {data && <span className="muted" style={{ fontSize: 12, alignSelf: 'center' }}>기준 {shortTs(data.at)}{error ? ' · 최근 새로고침 실패 — 이전 값' : ''}</span>}
-          <Select className="input" value={vcId} onChange={(e) => pickVc(e.target.value)} aria-label="법인(vCenter)" style={{ fontSize: 12, padding: '4px 8px', minWidth: 140, width: 'auto', maxWidth: '100%' }}>
-            {(vcs || []).map((v) => <option key={v.id} value={v.id}>{v.name || v.id}</option>)}
-          </Select>
+      <VeeamHeader active="bareos" desc="Bareos — 법인 하나의 Bareos 방식 VM 과 Bareos 잡이 있는 VM 을 폴더 › VM 으로 봅니다(다른 방식 VM 은 Detail 탭)." />
+      <BareosTabs active="detail" right={(
+        <div className="flex gap wrap" style={{ marginLeft: 'auto', alignItems: 'center', rowGap: 6 }}>
+          {data && <span className="muted" style={{ fontSize: 12 }}>기준 {shortTs(data.at)}{error ? ' · 최근 새로고침 실패 — 이전 값' : ''}</span>}
           {canCsv() && <button type="button" className="tab" disabled={!data} onClick={csv} style={{ padding: '6px 14px' }}>CSV</button>}
           <button type="button" className="tab" disabled={loading || !vcId} onClick={load} style={{ padding: '6px 14px' }}>{loading ? '읽는 중…' : '새로고침'}</button>
-        </>} />
-      <BareosTabs active="detail" />
+        </div>
+      )} />
     </>
   );
   const WRAP = { display: 'flex', flexDirection: 'column', gap: 14, minWidth: 0 };
@@ -132,62 +124,61 @@ export default function BareosDetailTool() {
   const c = data.counts || {};
   const dir = data.director || {};
   const unknownNote = resultsUnknownText(dir);
+  const corpIdx = corps.findIndex((v) => v.id === vcId);
+  const attn = corpAttention(c);
   return (
     <div data-bareos-detail="" style={WRAP}>
       {head}
-      {corps.length > 1 && (
-        <div className="vc-quicknav" data-bareos-corps="" style={{ marginBottom: 0 }}>
-          <span className="qn-label">법인</span>
-          {corps.map((v) => (
-            <button key={v.id} type="button" className="qn-btn" aria-pressed={v.id === vcId} onClick={() => pickVc(v.id)}
-              title={v.state ? `Director ${directorStateOf(v.state).text}` : undefined} style={v.id === vcId ? { borderColor: 'var(--accent)', background: 'rgba(59,130,246,.18)', color: '#fff' } : undefined}>
-              {v.state && <span className="qn-dot" style={{ background: directorStateOf(v.state).color }} />}{v.name}
-            </button>
-          ))}
-        </div>
-      )}
-      {data.demo && <div className="banner warn">데모 Director 입니다 — 실제 Bareos 에 접속하지 않은 합성 결과입니다(백업 방식 표시는 실제 파일).</div>}
-      {data.marksUnreadable && <div className="banner bad">백업 표시 파일(backup-marks.json)을 읽지 못해 백업 방식을 모릅니다 — 잡이 있는 VM 만 보이고 미등록·방식 불일치는 셀 수 없습니다(—).</div>}
-      {data.registryUnreadable && <div className="banner bad">Bareos 백업 대상 원장을 읽지 못해 잡·결과를 모릅니다(—) — 손상본은 설정 폴더에 보존돼 있습니다.</div>}
-      {unknownNote && <div className="banner warn">{unknownNote}</div>}
-      {csvErr && <div className="banner bad">CSV 내보내기 실패 — {csvErr?.status === 403 ? 'CSV 권한이 없습니다.' : String(csvErr.message || csvErr)}</div>}
+      {data.demo && <Note>데모 Director 입니다 — 실제 Bareos 에 접속하지 않은 합성 결과입니다(백업 방식 표시는 실제 파일).</Note>}
+      {data.marksUnreadable && <Note tone="bad">백업 표시 파일(backup-marks.json)을 읽지 못해 백업 방식을 모릅니다 — 잡이 있는 VM 만 보이고 미등록·방식 불일치는 셀 수 없습니다(—).</Note>}
+      {data.registryUnreadable && <Note tone="bad">Bareos 백업 대상 원장을 읽지 못해 잡·결과를 모릅니다(—) — 손상본은 설정 폴더에 보존돼 있습니다.</Note>}
+      {unknownNote && <Note>{unknownNote}</Note>}
+      {csvErr && <Note tone="bad">CSV 내보내기 실패 — {csvErr?.status === 403 ? 'CSV 권한이 없습니다.' : String(csvErr.message || csvErr)}</Note>}
 
-      <div className="card" style={{ padding: '12px 16px', display: 'flex', flexWrap: 'wrap', gap: '8px 24px', alignItems: 'flex-start', minWidth: 0 }}>
-        <div style={{ flex: '1 1 300px', minWidth: 0 }}>
-          <div className="flex" style={{ gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-            <b style={{ fontSize: 19 }}>{data.vcenter?.name}</b>
-            <span className="flex" style={{ gap: 6, alignItems: 'center', fontSize: 12 }}><span style={{ width: 8, height: 8, borderRadius: '50%', background: directorStateOf(dir.state).color }} aria-hidden="true" />{directorStateOf(dir.state).text}</span>
-          </div>
-          <div className="muted" style={{ fontSize: 12.5, marginTop: 2, overflowWrap: 'anywhere' }}>{directorLineText(dir)}</div>
-          {(dir.schedule || dir.pool) && <div className="muted" style={{ fontSize: 12, marginTop: 2, overflowWrap: 'anywhere' }}>{[dir.schedule && `기본 스케줄 ${dir.schedule}`, dir.pool && `풀 ${dir.pool}`].filter(Boolean).join(' · ')}</div>}
+      <div className="card" data-bareos-corps="" style={{ padding: '12px 16px', display: 'flex', flexWrap: 'wrap', gap: '10px 18px', alignItems: 'center', minWidth: 0 }}>
+        <div className="flex" style={{ gap: 6, alignItems: 'center', minWidth: 0, maxWidth: '100%' }}>
+          <button type="button" className="tab" aria-label="이전 법인" disabled={corpIdx <= 0} onClick={() => pickVc(corps[corpIdx - 1].id)} style={{ padding: '4px 10px' }}>‹</button>
+          <Select className="input" value={vcId} onChange={(e) => pickVc(e.target.value)} aria-label="법인(vCenter)" style={{ fontSize: 14, fontWeight: 800, padding: '5px 10px', minWidth: 0, width: 'auto', maxWidth: 'min(100%, 340px)' }}>
+            {corps.map((v) => <option key={v.id} value={v.id}>{v.name}{v.state ? ` — ${directorStateOf(v.state).text}` : ''}</option>)}
+          </Select>
+          <button type="button" className="tab" aria-label="다음 법인" disabled={corpIdx < 0 || corpIdx >= corps.length - 1} onClick={() => pickVc(corps[corpIdx + 1].id)} style={{ padding: '4px 10px' }}>›</button>
         </div>
-        <dl style={{ margin: 0, display: 'grid', gridTemplateColumns: 'auto minmax(0, 1fr)', gap: '4px 12px', fontSize: 12.5, flex: '1 1 300px', minWidth: 0 }}>
-          <dt className="muted">이 법인 VM</dt><dd style={{ margin: 0 }}>{numText(data.vm)} <span className="muted">(템플릿·vCLS 제외)</span></dd>
-          <dt className="muted">백업 방식 Bareos</dt><dd style={{ margin: 0 }}><b style={{ color: TONE.bareos }}>{numText(c.bareosMethod)}</b> <span className="muted">· 잡 등록 {numText(c.jobs)} · 미등록 {numText(c.missing)}</span></dd>
-          <dt className="muted">방식 불일치</dt><dd style={{ margin: 0 }}>{numText(c.mismatch)} <span className="muted">(잡은 있는데 방식이 Bareos 가 아닌 VM)</span></dd>
-          <dt className="muted">마지막 결과</dt><dd style={{ margin: 0 }}>{c.ok == null ? <span className="muted">모름(잡 {numText(c.unknown)})</span> : <><span style={{ color: TONE.ok }}>성공 {c.ok}</span> · <span style={{ color: TONE.warn }}>경고 {c.warn}</span> · <span style={{ color: TONE.bad }}>실패 {c.fail}</span> · <span style={{ color: TONE.run }}>진행 {c.run}</span></>}</dd>
-        </dl>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12.5, minWidth: 0, flex: '1 1 360px' }}>
+          <Dot color={directorStateOf(dir.state).color} unknown={dir.state === 'unset'} />
+          <span style={{ minWidth: 0, overflowWrap: 'anywhere' }}>{directorLineText(dir)}{(dir.schedule || dir.pool) ? <span className="muted"> · {[dir.schedule && `기본 스케줄 ${dir.schedule}`, dir.pool && `풀 ${dir.pool}`].filter(Boolean).join(' · ')}</span> : null}</span>
+        </div>
+        <span className="muted" style={{ fontSize: 12, marginLeft: 'auto' }}>이 법인 VM {numText(data.vm)} (템플릿·vCLS 제외)</span>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 10 }}>
-        <Kpi label="Bareos 방식 VM" value={numText(c.bareosMethod)} color={TONE.bareos} border="#6b3d17" sub={data.vm ? `전체 ${numText(data.vm)} 중` : undefined} />
-        <Kpi label="잡 등록" value={numText(c.jobs)} sub={`켜짐 ${numText(c.on)} · 꺼짐 ${numText(c.off)}`} />
-        <Kpi label="미등록" value={numText(c.missing)} color={TONE.warn} border="#5c4513" sub="방식은 Bareos · 잡 없음" />
-        <Kpi label="마지막 결과" value={c.ok == null ? '—' : `${c.ok} · ${c.warn} · ${c.fail}`} sub="성공 · 경고 · 실패" />
-        <Kpi label="지금 백업 중" value={numText(c.run)} color={TONE.run} border="#1e3a5f" />
-        <Kpi label={`오래된 백업(${data.rpoDays}일 초과)`} value={numText(c.old)} color="#fb923c" border="#5c3413" sub={`백업 없음 ${numText(c.never)}`} />
-        <Kpi label="용량" value={c.rows ? fmtGb(c.gb) : '—'} sub={c.gbUnknown ? `용량 모름 ${c.gbUnknown}대 제외` : 'Bareos 관련 VM 디스크 사용 합'} />
+      <div data-bareos-stats="" style={STAT_GRID}>
+        <Stat label="Bareos 방식 VM" value={numText(c.bareosMethod)}
+          sub={<>{data.vm && Number.isFinite(c.bareosMethod) ? <span>전체 {numText(data.vm)} 중 {Math.round((c.bareosMethod / data.vm) * 100)}%</span> : null}<span>용량 {c.rows ? fmtGb(c.gb) : '—'}{c.gbUnknown ? ` · 모름 ${c.gbUnknown}대 제외` : ''}</span></>} />
+        <Stat label="잡 등록" value={numText(c.jobs)} sub={<><span>켜짐 {numText(c.on)} · 꺼짐 {numText(c.off)}</span>{c.mismatch ? <span>방식 불일치 {numText(c.mismatch)}</span> : null}</>} />
+        <Stat label={`마지막 결과 (잡 ${numText(c.jobs)})`}
+          sub={c.ok == null ? <span>모름(잡 {numText(c.unknown)})</span> : <><span style={{ color: TONE.ok }}>성공 {c.ok}</span><span style={{ color: TONE.warn }}>경고 {c.warn}</span><span style={{ color: TONE.bad }}>실패 {c.fail}</span><span style={{ color: TONE.run }}>진행 {c.run}</span></>}>
+          {resultBar(c) ? <ResultBar b={resultBar(c)} label={`성공 ${c.ok} · 경고 ${c.warn} · 실패 ${c.fail} · 진행 ${c.run}`} /> : <span className="muted" style={{ fontSize: 12 }}>{c.jobs ? '모름' : '잡 없음'}</span>}
+        </Stat>
+        <Stat label="확인 필요" value={numText(attn.n)} tone={attn.n ? 'bad' : undefined}
+          sub={<><span>실패 {numText(attn.parts.fail)}</span><span>미등록 {numText(attn.parts.missing)}</span><span>오래됨({data.rpoDays}일+) {numText(attn.parts.old)}</span><span>백업 없음 {numText(attn.parts.never)}</span></>} />
       </div>
 
       <div className="flex gap wrap" style={{ alignItems: 'center', rowGap: 8 }}>
-        <div className="flex gap wrap" role="group" aria-label="보기" style={{ rowGap: 6 }}>
-          {DETAIL_FILTERS.map(([k, label]) => (
-            <button key={k} type="button" className={`tab${filter === k ? ' active' : ''}`} aria-pressed={filter === k} onClick={() => setFilter(k)} style={{ padding: '5px 12px', fontSize: 12 }}>
-              {label}{k === 'old' ? `(${data.rpoDays}일)` : ''} {k === 'all' ? rows.length : numText(counts[k])}
+        <div className="flex gap wrap" role="group" aria-label="보기" style={{ rowGap: 6, alignItems: 'center' }}>
+          {[...DETAIL_FILTERS_MAIN, ...(moreChips || DETAIL_FILTERS_MORE.includes(filter) ? DETAIL_FILTERS_MORE : [])].map((k) => {
+            const label = DETAIL_FILTERS.find((x) => x[0] === k)?.[1] || k;
+            return (
+              <FilterChip key={k} on={filter === k} onClick={() => setFilter(k)}>
+                {label}{k === 'old' ? `(${data.rpoDays}일)` : ''} {k === 'all' ? rows.length : numText(counts[k])}
+              </FilterChip>
+            );
+          })}
+          {!DETAIL_FILTERS_MORE.includes(filter) && (
+            <button type="button" className="tab" aria-expanded={moreChips} onClick={() => setMoreChips((v) => !v)} style={{ padding: '4px 10px', fontSize: 12 }}>
+              {moreChips ? '접기 ▴' : `더 보기 ▾ ${DETAIL_FILTERS_MORE.map((k) => `${DETAIL_FILTERS.find((x) => x[0] === k)?.[1]} ${numText(counts[k])}`).join(' · ')}`}
             </button>
-          ))}
+          )}
         </div>
-        <label style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 6, minWidth: 0, flex: '0 1 280px' }}>
+        <label style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 6, minWidth: 0, flex: '0 1 260px' }}>
           <span className="muted" style={{ fontSize: 12, whiteSpace: 'nowrap' }}>검색</span>
           <input className="input" type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="VM · 폴더 이름" style={{ flex: 1, minWidth: 0 }} />
         </label>
@@ -262,7 +253,6 @@ export default function BareosDetailTool() {
               })}
             </div>
           </div>
-          <div className="muted" style={{ padding: '8px 14px', fontSize: 12, borderTop: '1px solid var(--border-soft)' }}>폴더 줄 = 그 아래 Bareos 관련 VM 중 잡이 있는 수 / 전체 · 막대 = 잡의 마지막 결과(성공 · 경고 · 실패 · 진행) · 마지막 백업 = 백업이 만들어진(성공·경고) 마지막 실행 · 인벤토리에 없는 잡은 등록 때 위치에 보입니다</div>
         </div>
 
         <div style={{ flex: '1 1 280px', minWidth: 0, display: 'flex', flexDirection: 'column', gap: 12, alignSelf: 'flex-start' }}>
@@ -307,24 +297,27 @@ export default function BareosDetailTool() {
                     </STable>
                   </div>
                 )}
-                {manage && (
+                {manage && selRow.job && (
                   <div className="flex gap wrap" style={{ rowGap: 6 }}>
-                    <a className="tab" href="#/tools/bareos-backup/targets" style={{ padding: '4px 12px', fontSize: 12, textDecoration: 'none' }}>백업 대상에서 실행·복원 →</a>
+                    <a className="tab active" href="#/tools/bareos-backup/targets" onClick={() => saveTargetFocus(vcId, selRow.id)} style={{ padding: '5px 12px', fontSize: 12, textDecoration: 'none' }}>운영에서 열기 — 실행 · 결과 · 복원 →</a>
                   </div>
+                )}
+                {manage && !selRow.job && selRow.b?.job === false && (
+                  <div className="muted" style={{ fontSize: 12 }}>잡이 없습니다 — 운영 › 백업 대상의 ‘+ 백업 대상 추가’ 로 등록합니다.</div>
                 )}
               </>
             )}
           </div>
-          <div className="card" style={{ padding: '12px 14px', fontSize: 12, lineHeight: 1.7 }}>
-            <b style={{ display: 'block', marginBottom: 2 }}>칸 읽는 법</b>
-            <div><b style={{ color: TONE.ok }}>성공</b> · <b style={{ color: TONE.warn }}>경고</b> · <b style={{ color: TONE.bad }}>실패</b> 그 잡의 마지막으로 끝난 실행(폴러가 반영한 Director 카탈로그 값)</div>
-            <div><b style={{ color: TONE.bareos }}>미등록</b> 백업 방식은 Bareos 로 정했는데 잡이 없음 — 등록 전까지 백업되지 않습니다</div>
-            <div><b style={{ color: '#fb923c' }}>{data.rpoDays}일+</b> 마지막 백업이 기준(통합 현황의 ‘오래된 백업 기준’)보다 오래됨</div>
-            <div><b>방식 불일치</b> 잡은 있는데 백업 방식이 Bareos 가 아님 — Detail 탭에서 방식을 맞추세요</div>
-            <div className="muted">— 는 없음, ‘모름’ 은 그쪽을 읽지 못함(백업 안 됨이 아님)</div>
-          </div>
         </div>
       </div>
+      <ReadGuide note="백업 방식은 사람이 정한 값(Backup › Detail)이고 잡은 포탈 원장입니다 — 둘이 어긋나면 ‘미등록’ · ‘방식 불일치’ 로 따로 셉니다.">
+        <div><b style={{ color: TONE.ok }}>성공</b> · <b style={{ color: TONE.warn }}>경고</b> · <b style={{ color: TONE.bad }}>실패</b> 그 잡의 마지막으로 끝난 실행(폴러가 반영한 Director 카탈로그 값)</div>
+        <div><b style={{ color: TONE.bareos }}>미등록</b> 백업 방식은 Bareos 로 정했는데 잡이 없음 — 등록 전까지 백업되지 않습니다</div>
+        <div><b style={{ color: '#fb923c' }}>{data.rpoDays}일+</b> 마지막 백업이 기준(현황의 ‘오래된 백업 기준’)보다 오래됨</div>
+        <div><b>방식 불일치</b> 잡은 있는데 백업 방식이 Bareos 가 아님 — Detail 탭에서 방식을 맞추세요</div>
+        <div>폴더 줄 = 그 아래 Bareos 관련 VM 중 잡이 있는 수 / 전체 · 막대 = 잡의 마지막 결과 · 마지막 백업 = 백업이 만들어진(성공·경고) 마지막 실행 · 인벤토리에 없는 잡은 등록 때 위치에 보입니다</div>
+        <div className="muted">— 는 없음, ‘모름’ 은 그쪽을 읽지 못함(백업 안 됨이 아님)</div>
+      </ReadGuide>
     </div>
   );
 }

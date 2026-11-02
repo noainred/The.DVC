@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { fetchJson, postJson, patchJson, delJson, usePolling, getCurrentUser, toolAllowed } from '../../api.js';
+import { fetchJson, postJson, patchJson, delJson, usePolling, getCurrentUser } from '../../api.js';
 import { Loading, ErrorBox, SearchBox, Modal } from '../../components/ui.jsx';
 import { STable } from '../../components/STable.jsx';
 import Select from '../../components/Select.jsx';
@@ -9,10 +9,12 @@ import { useHashTab } from '../../hooks/useHashTab.js';
 import { requireChanged } from '../changeResult.js';
 import { numOrNull } from '../../numOrNull.js';
 import VeeamHeader from './VeeamHeader.jsx';
+import BareosTabs from './BareosTabs.jsx';
 import SettingsTab from './BareosSettings.jsx';
 import BareosGroupsTab from './BareosGroupsTab.jsx';
 import BareosLiveTab from './BareosLiveTab.jsx';
 import BareosRunDetail from './BareosRunDetail.jsx';
+import { Note, ReadGuide, Segs, Dot, FilterChip } from './BareosBits.jsx';
 import {
   liveRowIndex, waitSummary, runRowOf, progressBasis, rateText as liveRateText, sizeText as liveSizeText, elapsedText as liveElapsedText,
   reasonText, REASON_HINT, sortWaiting, levelWord,
@@ -24,19 +26,22 @@ import {
   issueTone, ISSUE_TONE_LABEL, decBytesText, reportSizeText, elapsedKo, durKo, pctText, volumeNames, clockOf,
   classifyLogLine, filterLogLines, splitHit, parseJobDetail, jobTimeline, LOG_WHO_LABEL, HIST_LEVEL_OPTS, HIST_RESULT_OPTS, filterHistory, histResultKey,
 } from './bareosText.js';
-import { takeBareosHandoff } from './bareosViewText.js';
-import { targetPolicyText, VERDICT } from './bareosPolicyText.js';   // v2.840 '적용 정책' 한 줄
+import { takeBareosHandoff, OPS_SEGMENTS, opsTopOf, opsTabOf, LEGACY_OPS_TAB, takeTargetFocus, legacyOpsHash, runsBoardOpen } from './bareosViewText.js';
+import { targetPolicyText, targetPolicyShort, VERDICT } from './bareosPolicyText.js';   // v2.840 '적용 정책' 한 줄
 
 /**
  * 특수 기능 › Bareos VM 백업(v2.820, 도구 키 bareos-backup — admin 전용 · v2.823 법인별 Director).
  * 포탈에서 고른 VM 을 Bareos VMware 플러그인으로 백업·복원한다. 포탈은 법인마다 둔 Director 콘솔(TLS-PSK · JSON)로 잡을 만들고 실행·조회하며,
  * 백업 데이터는 그 법인의 FD → SD 안에서만 흐른다. vCenter 비밀번호는 포탈이 갖지 않는다(FD 의 INI). 설정 탭은 BareosSettings.jsx.
  * 문구·판정은 bareosText.js 하나(백틱 금지 · 값이 없으면 '—').
+ * v2.860(사용자 요청 'Bareos UI 전폭 개선' · 시안 docs/design/bareos-ui-v2 ③⑤): Bareos 탭 줄은 BareosTabs 하나(운영 · 설정이 이 도구 키) ·
+ *   운영 안의 묶음은 백업 대상 · 백업 그룹 · 진행 · 이력 · 백업 대상 표는 6열이고 버튼은 오른쪽 패널로 옮겼다(행마다 버튼 6개 → 고른 대상 하나).
+ *   옛 하위 주소(live · history)는 진행 · 이력(runs)으로 넘긴다(LEGACY_OPS_TAB — 북마크 · 다른 화면 링크).
  */
 const BASE = '/tools/bareos-backup';
 // v2.830: '백업 그룹' — 전체 VM 트리에서 고른 VM 을 그룹(이름·스케줄·스토리지)으로 — 포탈이 스케줄 실행(BareosGroupsTab.jsx)
-// v2.833: '진행 현황' — 진행 중인 백업 현황판(전체 법인 · 단일 법인 · 속도 상태 — BareosLiveTab.jsx · 이 탭이 열린 동안만 Director 상태 조회)
-const TABS = [['live', '진행 현황'], ['targets', '백업 대상'], ['groups', '백업 그룹'], ['history', '실행 현황 · 이력'], ['settings', '설정']];
+// v2.833: '진행 현황' — 진행 중인 백업 현황판(BareosLiveTab.jsx · 이 탭이 열린 동안만 Director 상태 조회) — v2.860 부터 진행 · 이력 묶음 위쪽의 펼침 구획
+const TABS = [...OPS_SEGMENTS, ['settings', '설정']];
 const ROW = { display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' };
 const NOTE = { padding: '8px 12px', marginBottom: 10, fontSize: 12.5, lineHeight: 1.6 };
 const BTN = { padding: '4px 9px', fontSize: 12 };
@@ -47,12 +52,25 @@ const enc = encodeURIComponent;
 // W2(v2.822): Director 를 거치는 조회는 자동 재시도하지 않는다(502·시한마다 Director 인증을 다시 시도하고, 서버는 앞 요청을 계속 돌린다 — 규약 '자동 재시도 금지')
 const DIRECTOR_GET = { retries: 0, timeoutMs: 60_000 };
 const RESTORE_POINTS_SHOWN = 30;   // 창 높이 때문에 보이는 개수 — 잘리면 문구가 밝힌다(restorePointsNote)
+const isRunning = (j) => !!(j.pending?.jobid || ['running', 'queued', 'waiting'].includes(j.lastRun?.state));
 
 export default function BareosBackupTool() {
-  const [tab, setTab] = useHashTab({ base: ['tools', 'bareos-backup'], valid: TABS.map(([k]) => k), fallback: 'targets' });
+  const [tab0, setTab] = useHashTab({ base: ['tools', 'bareos-backup'], valid: [...TABS.map(([k]) => k), ...Object.keys(LEGACY_OPS_TAB)], fallback: 'targets' });
+  const tab = opsTabOf(tab0);
+  // v2.860: 옛 하위 주소(live · history)로 들어오면 주소를 새 이름(runs)으로 바꿔 둔다 — 아래 조각(live/corp 의 보기)은 그대로 · 뒤로가기 이력을 쌓지 않게 replaceState.
+  //   효과(useEffect)가 아니라 렌더 중에 바꾼다: 자식 효과가 먼저 돌아 현황판이 옛 주소를 읽고 보기를 잃는다. 같은 주소면 아무것도 하지 않는다(멱등).
+  //   현황판을 펼칠지는 바꾸기 전 주소로 정한다(옛 진행 현황 링크 = 현황판을 보러 온 것).
+  const boardHint = tab === 'runs' && runsBoardOpen(window.location.hash);
+  if (tab0 !== tab) {
+    const moved = legacyOpsHash(window.location.hash);
+    if (moved) { try { window.history.replaceState(null, '', moved); } catch { /* 주소만 그대로 — 화면은 이미 새 이름 */ } }
+  }
   // v2.828: Backup › Detail 의 'Bareos 백업 대상으로 등록' 이 넘긴 VM(한 번 읽고 지운다 — 10분 · 200대). 있으면 추가 창을 열고 미리 고른다.
   const handoff = useRef(undefined);
   if (handoff.current === undefined) handoff.current = takeBareosHandoff();
+  // v2.860: 법인 화면의 '운영에서 열기' 가 넘긴 VM(그 대상을 골라 패널을 연다 — 한 번 읽고 지운다)
+  const focus = useRef(undefined);
+  if (focus.current === undefined) focus.current = takeTargetFocus();
   const [tick, setTick] = useState(0);
   const { data: polled, error } = usePolling(BASE, { _r: tick }, 10_000);
   // 새로 고침(_r 변경) 때 usePolling 이 data 를 비운다 — 직전 응답을 유지해야 탭이 다시 마운트되지 않는다
@@ -64,51 +82,79 @@ export default function BareosBackupTool() {
   const me = getCurrentUser();
   const fullScope = !me?.scope || (!(me.scope.vcenters || []).length && !(me.scope.regions || []).length);
 
-  // v2.822: Backup 상단 메뉴의 한 탭(Summary·Detail·EM·백업 실행 옆) — 머리는 불러오는 중·오류에도 보인다(탭으로 되돌아갈 수 있게).
-  const head = <VeeamHeader active="bareos" desc="포탈에서 고른 VM 을 Bareos VMware 플러그인으로 백업·복원합니다(관리자)." />;
+  // v2.822: Backup 상단 메뉴의 한 탭 — 머리는 불러오는 중·오류에도 보인다(탭으로 되돌아갈 수 있게).
+  const head = (
+    <>
+      <VeeamHeader active="bareos" desc={tab === 'settings' ? 'Bareos — 법인마다 Director 를 등록하고 vCenter 를 묶습니다. 설치 · 법인별 설정 · 계정은 왼쪽 목록에서(전체 범위 관리자).' : 'Bareos — 포탈에서 고른 VM 을 Bareos VMware 플러그인으로 백업 · 복원합니다(관리자).'} />
+      <BareosTabs active={opsTopOf(tab)} right={tab !== 'settings' && data ? (
+        <div className="flex gap wrap" style={{ alignItems: 'center', rowGap: 6, marginLeft: 'auto' }}>
+          <Segs items={OPS_SEGMENTS.map(([k, l]) => [k, l, k === 'targets' ? data.jobs.length : k === 'runs' ? (data.jobs.filter(isRunning).length ? `${data.jobs.filter(isRunning).length} 진행 중` : '') : null])} active={tab} onPick={setTab} />
+        </div>
+      ) : null} />
+    </>
+  );
   if (error && !data) return <div style={WRAP}>{head}<ErrorBox error={error} /></div>;
   if (!data) return <div style={WRAP}>{head}<Loading /></div>;
+  const dirTone = data.demo ? 'warn' : data.configured && data.poller?.ok !== false && !(data.directors || []).some((x) => x.authStopped) ? 'ok' : 'bad';
 
   return (
     <div style={WRAP}>
       {head}
+      {error && <Note>최근 새로 고침에 실패했습니다 — 아래는 마지막으로 받은 내용입니다({String(error.message || error).slice(0, 160)}).</Note>}
+      {/* 설정의 데모 상태는 설정 화면이 더 자세히 알린다(편집 · 저장 안 됨) — 같은 안내를 두 줄로 쌓지 않는다(Chromium 1440 확인) */}
+      {!(tab === 'settings' && data.demo) && <div data-bareos-dirline="" style={{ display: 'flex', alignItems: 'flex-start', gap: 8, fontSize: 12.5, lineHeight: 1.6, color: dirTone === 'warn' ? '#fcd34d' : dirTone === 'bad' ? '#fca5a5' : 'var(--text-dim)' }}>
+        <span style={{ marginTop: 5 }}><Dot color={dirTone === 'ok' ? '#4ade80' : dirTone === 'warn' ? '#fbbf24' : '#f87171'} /></span>
+        <span style={{ minWidth: 0, overflowWrap: 'anywhere' }}><BoldText text={directorLine(data)} /></span>
+      </div>}
+      {data.settingsLoadError && <Note tone="bad">설정 파일을 읽지 못했습니다(손상본 보존) — {data.settingsLoadError.reason}</Note>}
+      {data.registryLoadError && <Note tone="bad">백업 대상 원장을 읽지 못했습니다(손상본 보존 — 새 대상 추가를 막았습니다) — {data.registryLoadError.reason}</Note>}
       <div>
-      {error && <div className="banner warn" style={{ marginBottom: 10 }}>최근 새로 고침에 실패했습니다 — 아래는 마지막으로 받은 내용입니다({String(error.message || error).slice(0, 160)}).</div>}
-      <div className="card" style={{ ...NOTE, borderLeft: `3px solid var(--${data.demo ? 'amber' : data.configured && data.poller?.ok !== false && !(data.directors || []).some((x) => x.authStopped) ? 'green' : 'red'})` }}>
-        <BoldText text={directorLine(data)} />
-      </div>
-      {data.settingsLoadError && <div className="banner bad" style={{ marginBottom: 10 }}>설정 파일을 읽지 못했습니다(손상본 보존) — {data.settingsLoadError.reason}</div>}
-      {data.registryLoadError && <div className="banner bad" style={{ marginBottom: 10 }}>백업 대상 원장을 읽지 못했습니다(손상본 보존 — 새 대상 추가를 막았습니다) — {data.registryLoadError.reason}</div>}
-      <div style={{ ...ROW, marginBottom: 12 }}>
-        {/* v2.828 조회 전용 화면(통합 · 법인별 — 별도 도구 키)으로 가는 탭. 권한이 없으면 숨긴다(서버가 집행 · 탭은 UX). */}
-        {toolAllowed('bareos-summary') && <a className="tab" href="#/tools/bareos-summary" style={{ textDecoration: 'none' }}>통합 현황</a>}
-        {toolAllowed('bareos-detail') && <a className="tab" href="#/tools/bareos-detail" style={{ textDecoration: 'none' }}>법인별 현황</a>}
-        {TABS.filter(([k]) => k !== 'settings' || fullScope).map(([k, l]) => (
-          <React.Fragment key={k}>
-            <button type="button" className={`tab${tab === k ? ' active' : ''}`} onClick={() => setTab(k)}>{l}</button>
-            {/* v2.840: 통합 현황 쪽 하위 탭(BareosTabs · bareosSubTabs)과 같은 순서 — 정책 · 일정 · 보존 · 풀(조회 전용 키 화면)은 백업 그룹 뒤 */}
-            {k === 'groups' && toolAllowed('bareos-summary') && (
-              <>
-                <a className="tab" href="#/tools/bareos-summary/policy" style={{ textDecoration: 'none' }}>정책 · 일정</a>
-                <a className="tab" href="#/tools/bareos-summary/pools" style={{ textDecoration: 'none' }}>보존 · 풀</a>
-              </>
-            )}
-          </React.Fragment>
-        ))}
-      </div>
-      {tab === 'targets' && <TargetsTab d={data} reload={reload} handoff={handoff} />}
-      {tab === 'live' && <BareosLiveTab />}
+      {tab === 'targets' && <TargetsTab d={data} reload={reload} handoff={handoff} focus={focus} goRuns={() => setTab('runs')} />}
       {tab === 'groups' && <BareosGroupsTab d={data} />}
-      {tab === 'history' && <HistoryTab d={data} />}
+      {tab === 'runs' && <RunsTab d={data} boardHint={boardHint} />}
       {tab === 'settings' && fullScope && <SettingsTab onSaved={reload} writable={data.settingsWritable !== false} />}
-      {tab === 'settings' && !fullScope && <div className="muted" style={{ padding: 16 }}>Director 설정은 전체 범위 관리자만 볼 수 있습니다 — 백업 대상 탭을 쓰세요.</div>}
+      {tab === 'settings' && !fullScope && <div className="muted" style={{ padding: 16 }}>Director 설정은 전체 범위 관리자만 볼 수 있습니다 — 운영 › 백업 대상을 쓰세요.</div>}
       </div>
     </div>
   );
 }
 
+/* ───────────────────────── 진행 · 이력(v2.860 — 진행 현황판 + 실행 현황 · 이력) ───────────────────────── */
+const RUNS_BASE = Object.freeze(['tools', 'bareos-backup', 'runs']);
+function RunsTab({ d, boardHint = false }) {
+  // 법인별 진행 현황판(BareosLiveTab)은 열 때만 그린다 — 열린 동안만 Director 상태를 묻는다(그 탭의 규칙 그대로). 기본은 실행 중 표 + 이력.
+  //   옛 진행 현황 링크(Backup › Summary 의 '진행 현황' 등)나 주소에 현황판 보기가 있으면 펼친 채로 연다(boardHint).
+  //   처음 그릴 때는 부모가 바꾸기 전 주소로 정한 boardHint, 이 화면이 떠 있는 동안 들어온 주소는 hashchange 로 직접 본다 —
+  //   boardHint 를 효과 의존성으로만 보면 한 번 true 가 된 뒤(접었다가 다시 진행 현황 링크로 오면) 값이 그대로라 펼치지 않았다(Chromium 400 확인).
+  //   리스너는 부모가 렌더 중에 주소를 runs 로 바꾸기 전, 이벤트가 도는 동안 실행되므로 옛 live 주소를 그대로 본다.
+  const [board, setBoard] = useState(!!boardHint);
+  useEffect(() => {
+    const onHash = () => { if (runsBoardOpen(window.location.hash)) setBoard(true); };
+    window.addEventListener('hashchange', onHash);
+    return () => window.removeEventListener('hashchange', onHash);
+  }, []);
+  const toggle = () => {
+    // 접으면 주소에서 현황판 보기를 뗀다(새로고침 때 다시 펼쳐지지 않게 — 이력을 쌓지 않는다)
+    if (board) { try { window.history.replaceState(null, '', '#/tools/bareos-backup/runs'); } catch { /* 주소만 그대로 */ } }
+    setBoard(!board);
+  };
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 12, minWidth: 0 }}>
+      <div className="card" style={{ padding: board ? '10px 14px 14px' : '10px 14px', minWidth: 0 }}>
+        <div className="flex gap wrap" style={{ alignItems: 'center', rowGap: 6 }}>
+          <b style={{ fontSize: 13.5 }}>법인별 진행 현황판</b>
+          <span className="muted" style={{ fontSize: 12 }}>전체 법인 · 단일 법인 · 속도 상태 — 펼친 동안만 Director 에 상태를 묻습니다</span>
+          <button type="button" className="tab" aria-expanded={board} onClick={toggle} style={{ padding: '4px 12px', fontSize: 12, marginLeft: 'auto' }}>{board ? '접기 ▴' : '펼치기 ▾'}</button>
+        </div>
+        {board && <div style={{ marginTop: 12 }}><BareosLiveTab hashBase={RUNS_BASE} /></div>}
+      </div>
+      <HistoryTab d={d} />
+    </div>
+  );
+}
+
 /* ───────────────────────── 백업 대상 ───────────────────────── */
-function TargetsTab({ d, reload, handoff }) {
+function TargetsTab({ d, reload, handoff, focus, goRuns }) {
   const [vc, setVc] = useState('');
   const [dirF, setDirF] = useState('');   // v2.823 법인 Director 필터(상단 칩)
   const [osF, setOsF] = useState('');     // v2.834 게스트 OS(Windows · Linux · 기타 · 모름)
@@ -120,6 +166,14 @@ function TargetsTab({ d, reload, handoff }) {
   const [restoreOf, setRestoreOf] = useState(null); // job
   const [runFor, setRunFor] = useState(null);     // W6: 레벨을 고르는 중인 대상 id
   const [runLevel, setRunLevel] = useState('');
+  // v2.860: 고른 대상(오른쪽 패널) — 법인 화면이 넘긴 VM 이 있으면 그 대상
+  const [sel, setSel] = useState(() => {
+    const f = focus?.current;
+    if (!f) return '';
+    const j = d.jobs.find((x) => x.vmId === f.vmId && (!f.vcenterId || x.vcenterId === f.vcenterId));
+    if (focus) focus.current = null;
+    return j?.id || '';
+  });
   const vcs = useMemo(() => [...new Set(d.jobs.map((j) => j.vcenterId))].sort(), [d.jobs]);
   // W10: 고른 vCenter 의 마지막 대상이 사라지면 필터를 풀고(드롭다운은 '전체' 를 보이는데 상태만 남는 어긋남), 보던 대상이 지워지면 창을 닫는다
   useEffect(() => { if (vc && !vcs.includes(vc)) setVc(''); }, [vc, vcs]);
@@ -128,13 +182,19 @@ function TargetsTab({ d, reload, handoff }) {
     if (logOf && !ids.has(logOf.job.id)) setLogOf(null);
     if (restoreOf && !ids.has(restoreOf.id)) setRestoreOf(null);
     if (runFor && !ids.has(runFor)) setRunFor(null);
-  }, [d.jobs, logOf, restoreOf, runFor]);
+    if (sel && !ids.has(sel)) setSel('');
+  }, [d.jobs, logOf, restoreOf, runFor, sel]);
+  // 법인 화면에서 넘어와 고른 대상이 있으면 그 줄로 내려간다(한 번)
+  const selRowRef = useRef(null);
+  const scrolled = useRef(false);
+  useEffect(() => { if (sel && !scrolled.current && selRowRef.current) { scrolled.current = true; selRowRef.current.scrollIntoView({ block: 'center' }); } }, [sel]);
   const dirs = useMemo(() => d.directors || [], [d.directors]);
   const dirName = (id) => dirs.find((x) => x.id === id)?.name || '—';
   useEffect(() => { if (dirF && !dirs.some((x) => x.id === dirF)) setDirF(''); }, [dirF, dirs]);
   const baseRows = d.jobs.filter((j) => (!vc || j.vcenterId === vc) && (!dirF || j.directorId === dirF) && (!q || `${j.vmName} ${j.folder} ${j.bareosJob}`.toLowerCase().includes(q.toLowerCase())));
   const osN = osCounts(baseRows);   // 다른 조건으로 거른 뒤의 OS 별 수(칩 숫자)
   const rows = baseRows.filter((j) => osMatches(j, osF));
+  const running = d.jobs.filter(isRunning);
 
   // v2.824 검토(W3·W5): 엣지 대행 Director 는 서버가 더 오래 기다린다(API 값) · 결과 모름(시한·504)은 실패로 단정하지 않는다
   const mut = (j, kind) => withRelayWait({}, dirs.find((x) => x.id === j.directorId), d.relayLimits, kind);
@@ -145,120 +205,162 @@ function TargetsTab({ d, reload, handoff }) {
     catch (e) { setMsg({ ok: false, text: outcomeUnknown(e) ? `결과 모름: ${unknownOutcomeText(what, e)}` : `오류: ${e.message}` }); reload(); }
     finally { setBusyIds((b) => { const n = new Set(b); n.delete(j.id); return n; }); }
   };
-  const run = (j) => { setRunFor(null); act(j, () => postJson(`${BASE}/jobs/${enc(j.id)}/run`, runLevel ? { level: runLevel } : {}, mut(j, 'runJob')), (r) => `‘${j.vmName}’ 백업을 시작했습니다(jobid ${r.jobid}). 진행은 이 표와 실행 현황 탭에서 보입니다.`, '백업 실행'); };
+  const run = (j) => { setRunFor(null); act(j, () => postJson(`${BASE}/jobs/${enc(j.id)}/run`, runLevel ? { level: runLevel } : {}, mut(j, 'runJob')), (r) => `‘${j.vmName}’ 백업을 시작했습니다(jobid ${r.jobid}). 진행은 이 표와 진행 · 이력에서 보입니다.`, '백업 실행'); };
   const cancel = (j, jobid) => { if (window.confirm(`‘${j.vmName}’ 의 실행 중 백업(jobid ${jobid})을 취소할까요?`)) act(j, () => postJson(`${BASE}/jobs/${enc(j.id)}/cancel`, { jobid }, mut(j, 'cancel')), (r) => r.note || '취소를 요청했습니다(Director 가 멈추기까지 시간이 걸릴 수 있습니다).', '취소'); };
   const toggle = (j) => act(j, () => patchJson(`${BASE}/jobs/${enc(j.id)}`, { enabled: !j.enabled }, mut(j, 'setEnabled')), () => (j.enabled ? '비활성화했습니다 — Bareos 의 비활성화는 Director 를 reload·재시작하면 풀리므로 포탈이 상태 대조 때마다 다시 끕니다.' : '활성화했습니다.'), j.enabled ? '비활성화' : '활성화');
   const remove = (j) => {
     if (!window.confirm(`‘${j.vmName}’ 을(를) 백업 대상에서 지울까요?\nDirector 의 잡은 비활성화하고 정의 파일은 남습니다(Director 를 reload 하면 다시 켜지므로 포탈이 대조 때마다 다시 끕니다 — 영구히 멈추려면 정의 파일을 지우세요). 백업 데이터는 지우지 않습니다.`)) return;
     act(j, () => delJson(`${BASE}/jobs/${enc(j.id)}`, mut(j, 'disableJobs')), (r) => r.note || '지웠습니다.', '삭제');
   };
+  const picked = sel ? d.jobs.find((j) => j.id === sel) || null : null;
 
   return (
-    <div>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 12, minWidth: 0 }}>
+      {running.length > 0 && (
+        <div className="card" data-bareos-running="" style={{ padding: '10px 14px', display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '6px 16px', fontSize: 12.5 }}>
+          <span className="flex" style={{ gap: 8, alignItems: 'center', fontWeight: 700 }}><Dot color="#60a5fa" />지금 {running.length}건 진행 중</span>
+          {running.slice(0, 3).map((j) => { const c = runCell(j); return <span key={j.id} className="muted">{j.vmName} <span className={`badge ${c.badge?.cls || 'gray'}`} style={{ fontSize: 10.5 }}>{c.badge?.label || '진행'}</span></span>; })}
+          {running.length > 3 && <span className="muted">외 {running.length - 3}건</span>}
+          <button type="button" className="tab" onClick={goRuns} style={{ padding: '3px 10px', fontSize: 12, marginLeft: 'auto' }}>진행 · 이력에서 보기 →</button>
+        </div>
+      )}
       {dirs.length > 0 && (
-        <div style={{ ...ROW, marginBottom: 10 }} aria-label="법인 Director 필터">
+        <div style={{ ...ROW }} aria-label="법인 Director 필터">
           <span className="muted" style={{ fontSize: 12 }}>법인 Director</span>
-          <button type="button" className={`tab${!dirF ? ' active' : ''}`} style={{ padding: '4px 12px', fontSize: 12 }} onClick={() => setDirF('')}>전체 {d.jobs.length}</button>
+          <FilterChip on={!dirF} onClick={() => setDirF('')}>전체 {d.jobs.length}</FilterChip>
           {dirs.map((x) => {
             const b = directorStatus(x);
             return (
-              <button key={x.id} type="button" className={`tab${dirF === x.id ? ' active' : ''}`} style={{ padding: '4px 12px', fontSize: 12, display: 'inline-flex', alignItems: 'center', gap: 6 }}
-                title={directorChipTitle(x)} onClick={() => setDirF(dirF === x.id ? '' : x.id)}>
-                {/* Chromium 확인: 고른 칩(파란 바탕) 위의 파란·회색 배지가 흐려 읽히지 않았다 — 고른 칩에서는 배지 바탕을 어둡게 */}
-                <span className={`badge ${b.cls}`} style={{ fontSize: 10, ...(dirF === x.id ? { background: 'rgba(15,23,42,.6)' } : {}) }}>{b.label}</span>{x.name} <span className="muted">{x.jobs ?? 0}</span>
-              </button>
+              <FilterChip key={x.id} on={dirF === x.id} title={directorChipTitle(x)} onClick={() => setDirF(dirF === x.id ? '' : x.id)}>
+                <Dot color={b.cls === 'green' ? '#4ade80' : b.cls === 'red' ? '#f87171' : b.cls === 'amber' ? '#fbbf24' : b.cls === 'blue' ? '#60a5fa' : '#8b9bb4'} />{x.name} <span style={{ opacity: 0.8 }}>{x.jobs ?? 0}</span>
+                {b.cls === 'red' || b.cls === 'amber' ? <span className={`badge ${b.cls}`} style={{ fontSize: 10, ...(dirF === x.id ? { background: 'rgba(15,23,42,.6)' } : {}) }}>{b.label}</span> : null}
+              </FilterChip>
             );
           })}
         </div>
       )}
-      <div style={{ ...ROW, marginBottom: 10 }}>
-        <span className="muted" style={{ fontSize: 12 }}>vCenter</span>
-        <Select className="input" value={vc} onChange={(e) => setVc(e.target.value)} style={{ minWidth: 160 }} aria-label="vCenter 필터">
-          <option value="">전체 ({vcs.length})</option>
+      <div style={{ ...ROW }}>
+        <Select className="input" value={vc} onChange={(e) => setVc(e.target.value)} style={{ minWidth: 0, width: 'auto' }} aria-label="vCenter 필터">
+          <option value="">vCenter 전체 ({vcs.length})</option>
           {vcs.map((v) => <option key={v} value={v}>{v}</option>)}
         </Select>
-        <SearchBox value={q} onChange={setQ} placeholder="VM · 폴더 · 잡 이름" style={{ width: 240, maxWidth: '100%' }} />
         <span style={{ ...ROW, gap: 6 }} role="group" aria-label="게스트 OS 필터">
           <span className="muted" style={{ fontSize: 12 }}>OS</span>
           {OS_FILTERS.filter(([k]) => !k || k === 'windows' || k === 'linux' || osN[k] > 0 || osF === k).map(([k, l]) => (
-            <button key={k || 'all'} type="button" className={`tab${osF === k ? ' active' : ''}`} style={{ padding: '4px 12px', fontSize: 12 }} aria-pressed={osF === k} onClick={() => setOsF(osF === k ? '' : k)}>
-              {/* 고른 칩(파란 바탕)에서는 회색 숫자가 흐리다 — 글자색을 따르고 옅게만 */}
-              {l} <span className={osF === k ? undefined : 'muted'} style={osF === k ? { opacity: 0.8 } : undefined}>{osN[k]}</span>
-            </button>
+            <FilterChip key={k || 'all'} on={osF === k} onClick={() => setOsF(osF === k ? '' : k)}>{l} <span style={{ opacity: 0.8 }}>{osN[k]}</span></FilterChip>
           ))}
         </span>
-        <span className="muted" style={{ fontSize: 12 }}>백업 대상 {d.jobs.length}대</span>
+        <SearchBox value={q} onChange={setQ} placeholder="VM · 폴더 · 잡 이름" style={{ width: 220, maxWidth: '100%' }} />
         <div style={{ flexGrow: 1 }} />
         <button type="button" className="login-btn" style={{ flex: 'none', padding: '8px 16px' }} disabled={!d.configured || !!d.registryLoadError} onClick={() => setAdding(true)}>+ 백업 대상 추가</button>
       </div>
-      {msg && <div className={`banner ${msg.ok ? 'ok' : 'bad'}`} style={{ marginBottom: 10 }}><BoldText text={msg.text} /></div>}
+      {msg && <div className={`banner ${msg.ok ? 'ok' : 'bad'}`}><BoldText text={msg.text} /></div>}
       {adding && <AddForm d={d} initial={handoff?.current || null} onInitialUsed={() => { if (handoff) handoff.current = null; }} onClose={() => setAdding(false)} onChanged={reload} />}
       <ScopeOmitBanner data={d} unit="백업 대상" counter="개" why="조회 범위 밖 vCenter 의" />
 
-      <div className="table-wrap" style={{ maxHeight: '58vh' }}>
-        <STable minWidth={1160} wrap={false}>
-          <thead><tr>
-            <th>VM</th><th>법인 Director</th><th>vCenter</th><th>데이터센터 · 폴더</th><th>FD · 레벨 · 적용 정책</th>
-            <th>최근 실행</th><th className="right">용량</th><th data-nosort>작업</th>
-          </tr></thead>
-          <tbody>
-            {rows.length === 0 && <tr><td colSpan={8} className="center muted" style={{ padding: 22 }}>{d.jobs.length ? '조건에 맞는 대상이 없습니다.' : '백업 대상이 없습니다 — ‘+ 백업 대상 추가’ 로 vCenter 의 VM 을 고르세요.'}</td></tr>}
-            {rows.map((j) => {
-              const c = runCell(j);
-              // W5: 포탈이 시작한 실행(pending)뿐 아니라 Bareos 스케줄이 돌리는 실행(대조가 넣은 lastRun)도 실행 중이다 — 대조 주기만큼 늦을 수 있다
-              const liveJobid = j.pending?.jobid || (['running', 'queued', 'waiting'].includes(j.lastRun?.state) ? j.lastRun.jobid : null);
-              const running = !!liveJobid;
-              const busy = busyIds.has(j.id);
-              const lk = targetLocks(j, { busy, running, hasRun: !!c.jobid });   // G12·G13: 잠긴 버튼은 사유를 말한다(쓰기 범위 밖 포함)
-              return (
-                <tr key={j.id} style={{ opacity: j.enabled ? 1 : 0.6 }}>
-                  <td data-sort={j.vmName}><b>{j.vmName}</b><span className={`badge ${osBadgeCls(osKey(j))}`} style={{ marginLeft: 6, fontSize: 10 }} title={j.guestOS || '게스트 OS 모름(인벤토리에 없거나 vCenter 에 OS 가 비어 있음)'}>{osLabel(osKey(j))}</span>{!j.enabled && <span className="badge gray" style={{ marginLeft: 6 }}>비활성</span>}{j.missingInDirector && <span className="badge red" style={{ marginLeft: 6 }} title="Director 의 잡 목록에 없습니다(누가 정의 파일을 지웠을 수 있습니다)">Director 에 없음</span>}{j.demo && <span className="badge amber" style={{ marginLeft: 6 }}>데모</span>}{j.drift && <span className="badge amber" style={{ marginLeft: 6 }} title={driftText(j.drift)}>{j.drift === 'missing' ? '인벤토리에 없음' : '등록 뒤 바뀜'}</span>}</td>
-                  <td data-sort={dirName(j.directorId)} style={{ fontSize: 12.5 }}>{dirName(j.directorId)}</td>
-                  <td className="muted">{j.vcenterId}</td>
-                  <td className="muted" style={{ fontSize: 12 }}><div style={{ maxWidth: 220, whiteSpace: 'normal', overflowWrap: 'anywhere' }}>{j.dc} · {j.folder}</div></td>
-                  {/* v2.840: 적용 정책 줄을 더해도 칸이 넓어지지 않게 원래 폭(약 180px) 안에서 줄바꿈한다 — 이 표는 그 전부터 1440px 에서 작업 열이 넘친다(audits.md v2.840 남긴 것) */}
-                  <td data-sort={j.client} style={{ fontSize: 12.5 }}><div style={{ maxWidth: 180, whiteSpace: 'normal', overflowWrap: 'anywhere' }}>{j.client}<div className="muted" style={{ fontSize: 11 }}>{levelLabel(j.level)} · 잡 스케줄 {j.schedule || '없음'}</div>
-                    <div data-target-policy="" title={`${j.policy?.src?.text ? `${j.policy.src.text} — ` : ''}정책 · 일정 탭과 같은 판정(Director 정책 수집본 · 백업 그룹 — 이 화면은 Director 에 접속하지 않습니다)`} style={{ fontSize: 11, color: j.policy?.dup ? '#fcd34d' : j.policy?.verdict && j.policy.verdict !== 'policy' ? VERDICT[j.policy.verdict]?.color : 'var(--text-dim)' }}>
-                      {targetPolicyText(j.policy)}{j.policy?.verdict === 'mismatch' ? ' · 백업 방식이 Bareos 가 아님' : ''}
-                    </div></div></td>
-                  <td data-sort={c.when === '—' ? '' : c.when} style={{ fontSize: 12 }}>
-                    <span style={{ marginRight: 6 }}>{c.when}</span>
-                    {c.badge ? <span className={`badge ${c.badge.cls}`}>{c.badge.label}</span> : null}
-                    <div className="muted" style={{ fontSize: 11 }}>{c.note}</div>
-                    {j.lastError && <div style={{ fontSize: 11, color: 'var(--red)' }}>{j.lastError.message}</div>}
-                  </td>
-                  <td className="right" data-sort={j.lastRun?.bytes ?? ''}>{c.bytes}</td>
-                  <td style={{ minWidth: 236 }}>
-                    <span style={{ ...ROW, gap: 6 }}>
-                      {running
-                        ? <button type="button" className="logout-btn" style={{ ...BTN, color: 'var(--red)' }} disabled={!!lk.cancel} title={lk.cancel || undefined} onClick={() => cancel(j, liveJobid)}>취소</button>
-                        : runFor === j.id
-                          ? <>
-                            <Select className="input" sort={false} value={runLevel} onChange={(e) => setRunLevel(e.target.value)} style={{ minWidth: 0, width: 168, padding: '3px 6px', fontSize: 12 }} aria-label="실행 레벨">
-                              <option value="">기본({levelLabel(j.level)})</option>
-                              {['Full', 'Incremental', 'Differential'].map((l) => <option key={l} value={l}>{levelLabel(l)}</option>)}
-                            </Select>
-                            <button type="button" className="logout-btn" style={BTN} disabled={!!lk.run} title={lk.run || undefined} onClick={() => run(j)}>시작</button>
-                            <button type="button" className="logout-btn" style={BTN} onClick={() => setRunFor(null)}>닫기</button>
-                          </>
-                          : <button type="button" className="logout-btn" style={BTN} disabled={!!lk.run} title={lk.run || undefined} onClick={() => { setRunLevel(''); setRunFor(j.id); }}>실행…</button>}
-                      <button type="button" className="logout-btn" style={BTN} disabled={!!lk.view} title={lk.view || undefined} onClick={() => setLogOf({ job: j, jobid: c.jobid, view: 'summary' })}>결과</button>
-                      <button type="button" className="logout-btn" style={BTN} disabled={!!lk.view} title={lk.view || undefined} onClick={() => setLogOf({ job: j, jobid: c.jobid, view: 'raw' })}>로그</button>
-                      <button type="button" className="logout-btn" style={BTN} disabled={!!lk.restore} title={lk.restore || undefined} onClick={() => setRestoreOf(j)}>복원…</button>
-                      <button type="button" className="logout-btn" style={BTN} disabled={!!lk.toggle} title={lk.toggle || undefined} onClick={() => toggle(j)}>{j.enabled ? '비활성' : '활성'}</button>
-                      <button type="button" className="logout-btn" style={{ ...BTN, color: 'var(--red)' }} disabled={!!lk.remove} title={lk.remove || undefined} onClick={() => remove(j)}>삭제</button>
-                    </span>
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </STable>
+      <div className="flex wrap" style={{ gap: 14, alignItems: 'flex-start' }}>
+        <div className="card" style={{ flex: '999 1 620px', minWidth: 0, padding: 0, overflow: 'hidden' }}>
+          <div className="table-wrap" style={{ maxHeight: '62vh' }}>
+            {/* v2.860: 옆에 패널이 열리면 표 폭이 800px 안팎 — 위치는 VM 칸 둘째 줄, 정책은 짧은 줄(전체는 title · 패널)로 5칸(Chromium 1440 에서 용량 칸이 가로 스크롤 뒤로 숨었다) */}
+            <STable minWidth={760} wrap={false}>
+              <thead><tr>
+                <th>VM · 위치</th><th>법인 · Director</th><th>정책</th><th>최근 실행</th><th className="right">용량</th>
+              </tr></thead>
+              <tbody>
+                {rows.length === 0 && <tr><td colSpan={5} className="center muted" style={{ padding: 22 }}>{d.jobs.length ? '조건에 맞는 대상이 없습니다.' : '백업 대상이 없습니다 — ‘+ 백업 대상 추가’ 로 vCenter 의 VM 을 고르세요.'}</td></tr>}
+                {rows.map((j) => {
+                  const c = runCell(j);
+                  const on = sel === j.id;
+                  return (
+                    <tr key={j.id} ref={on ? selRowRef : undefined} aria-selected={on} onClick={() => setSel(on ? '' : j.id)}
+                      style={{ cursor: 'pointer', opacity: j.enabled ? 1 : 0.65, ...(on ? { background: 'rgba(59,130,246,.13)', boxShadow: 'inset 3px 0 0 var(--accent)' } : {}) }}>
+                      <td data-sort={j.vmName}>
+                        <button type="button" onClick={(e) => { e.stopPropagation(); setSel(on ? '' : j.id); }} style={{ all: 'unset', cursor: 'pointer', fontWeight: 700 }}>{j.vmName}</button>
+                        <span className={`badge ${osBadgeCls(osKey(j))}`} style={{ marginLeft: 6, fontSize: 10 }} title={j.guestOS || '게스트 OS 모름(인벤토리에 없거나 vCenter 에 OS 가 비어 있음)'}>{osLabel(osKey(j))}</span>
+                        {!j.enabled && <span className="badge gray" style={{ marginLeft: 6 }}>비활성</span>}
+                        {j.missingInDirector && <span className="badge red" style={{ marginLeft: 6 }} title="Director 의 잡 목록에 없습니다(누가 정의 파일을 지웠을 수 있습니다)">Director 에 없음</span>}
+                        {j.demo && <span className="badge amber" style={{ marginLeft: 6 }}>데모</span>}
+                        {j.drift && <span className="badge amber" style={{ marginLeft: 6 }} title={driftText(j.drift)}>{j.drift === 'missing' ? '인벤토리에 없음' : '등록 뒤 바뀜'}</span>}
+                        <div className="muted" style={{ fontSize: 11.5, maxWidth: 280, whiteSpace: 'normal', overflowWrap: 'anywhere' }}>{j.dc} · {j.folder}</div>
+                      </td>
+                      <td data-sort={`${j.vcenterId} ${dirName(j.directorId)}`} style={{ fontSize: 12.5 }}>{j.vcenterId}<div className="muted" style={{ fontSize: 11.5 }}>{dirName(j.directorId)}</div></td>
+                      {/* v2.840 적용 정책 — 원래 폭 안에서 줄바꿈(nowrap 한 줄이 길어지면 표가 넓어진다) · v2.860 칸에는 짧은 줄, 전체 문구는 title 과 패널 */}
+                      <td data-sort={`${j.level} ${j.schedule || ''}`} style={{ fontSize: 12.5 }}><div style={{ maxWidth: 200, whiteSpace: 'normal', overflowWrap: 'anywhere' }}>{levelLabel(j.level)} <span className="muted" style={{ fontSize: 11.5 }}>· {j.schedule || '스케줄 없음'}</span>
+                        <div data-target-policy="" title={`${targetPolicyText(j.policy)}${j.policy?.src?.text ? ` — ${j.policy.src.text}` : ''} — 정책 · 보존 탭과 같은 판정(Director 정책 수집본 · 백업 그룹 — 이 화면은 Director 에 접속하지 않습니다)`} style={{ fontSize: 11, color: j.policy?.dup ? '#fcd34d' : j.policy?.verdict && j.policy.verdict !== 'policy' ? VERDICT[j.policy.verdict]?.color : 'var(--text-dim)' }}>
+                          {targetPolicyShort(j.policy)}{j.policy?.verdict === 'mismatch' ? ' · 방식 불일치' : ''}
+                        </div></div></td>
+                      <td data-sort={c.when === '—' ? '' : c.when} style={{ fontSize: 12 }}>
+                        {c.badge ? <span className={`badge ${c.badge.cls}`} style={{ marginRight: 6 }}>{c.badge.label}</span> : null}<span>{c.when}</span>
+                        <div className="muted" style={{ fontSize: 11, maxWidth: 220, whiteSpace: 'normal', overflowWrap: 'anywhere' }}>{c.note}</div>
+                        {j.lastError && <div style={{ fontSize: 11, color: 'var(--red)', maxWidth: 260, whiteSpace: 'normal', overflowWrap: 'anywhere' }}>{j.lastError.message}</div>}
+                      </td>
+                      <td className="right" data-sort={j.lastRun?.bytes ?? ''}>{c.bytes}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </STable>
+          </div>
+          <div className="muted" style={{ padding: '8px 12px', fontSize: 12, borderTop: '1px solid var(--border-soft)' }}>백업 대상 {d.jobs.length}대{rows.length !== d.jobs.length ? ` 중 ${rows.length}대 표시` : ''} · 행을 누르면 오른쪽에 상세와 동작(실행 · 결과 · 로그 · 복원 · 비활성 · 삭제)</div>
+        </div>
+
+        <aside className="card" aria-label="고른 백업 대상" data-bareos-target-panel="" style={{ flex: '1 1 320px', maxWidth: 420, minWidth: 0, padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 10, alignSelf: 'flex-start' }}>
+          {!picked ? <div className="muted" style={{ fontSize: 13 }}>대상을 고르면 여기에 상세와 동작이 보입니다.</div> : (() => {
+            const j = picked;
+            const c = runCell(j);
+            // W5: 포탈이 시작한 실행(pending)뿐 아니라 Bareos 스케줄이 돌리는 실행(대조가 넣은 lastRun)도 실행 중이다 — 대조 주기만큼 늦을 수 있다
+            const liveJobid = j.pending?.jobid || (['running', 'queued', 'waiting'].includes(j.lastRun?.state) ? j.lastRun.jobid : null);
+            const isRun = !!liveJobid;
+            const busy = busyIds.has(j.id);
+            const lk = targetLocks(j, { busy, running: isRun, hasRun: !!c.jobid });   // G12·G13: 잠긴 버튼은 사유를 말한다(쓰기 범위 밖 포함)
+            return (
+              <>
+                <div className="flex" style={{ gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                  <b style={{ fontSize: 16, overflowWrap: 'anywhere' }}>{j.vmName}</b>
+                  {c.badge ? <span className={`badge ${c.badge.cls}`}>{c.badge.label}</span> : null}
+                  <span className={`badge ${osBadgeCls(osKey(j))}`} style={{ fontSize: 10 }}>{osLabel(osKey(j))}</span>
+                  <button type="button" className="tab" aria-label="닫기" onClick={() => setSel('')} style={{ padding: '2px 8px', fontSize: 12, marginLeft: 'auto' }}>닫기</button>
+                </div>
+                <div style={{ ...ROW, gap: 6 }}>
+                  {isRun
+                    ? <button type="button" className="logout-btn" style={{ ...BTN, color: 'var(--red)' }} disabled={!!lk.cancel} title={lk.cancel || undefined} onClick={() => cancel(j, liveJobid)}>취소</button>
+                    : runFor === j.id
+                      ? <>
+                        <Select className="input" sort={false} value={runLevel} onChange={(e) => setRunLevel(e.target.value)} style={{ minWidth: 0, width: 168, padding: '3px 6px', fontSize: 12 }} aria-label="실행 레벨">
+                          <option value="">기본({levelLabel(j.level)})</option>
+                          {['Full', 'Incremental', 'Differential'].map((l) => <option key={l} value={l}>{levelLabel(l)}</option>)}
+                        </Select>
+                        <button type="button" className="login-btn" style={{ flex: 'none', padding: '4px 12px', fontSize: 12 }} disabled={!!lk.run} title={lk.run || undefined} onClick={() => run(j)}>시작</button>
+                        <button type="button" className="logout-btn" style={BTN} onClick={() => setRunFor(null)}>닫기</button>
+                      </>
+                      : <button type="button" className="login-btn" style={{ flex: 'none', padding: '4px 12px', fontSize: 12 }} disabled={!!lk.run} title={lk.run || undefined} onClick={() => { setRunLevel(''); setRunFor(j.id); }}>지금 백업 ▾</button>}
+                  <button type="button" className="logout-btn" style={BTN} disabled={!!lk.view} title={lk.view || undefined} onClick={() => setLogOf({ job: j, jobid: c.jobid, view: 'summary' })}>결과</button>
+                  <button type="button" className="logout-btn" style={BTN} disabled={!!lk.view} title={lk.view || undefined} onClick={() => setLogOf({ job: j, jobid: c.jobid, view: 'raw' })}>로그</button>
+                  <button type="button" className="logout-btn" style={BTN} disabled={!!lk.restore} title={lk.restore || undefined} onClick={() => setRestoreOf(j)}>복원…</button>
+                  <button type="button" className="logout-btn" style={BTN} disabled={!!lk.toggle} title={lk.toggle || undefined} onClick={() => toggle(j)}>{j.enabled ? '비활성' : '활성'}</button>
+                  <button type="button" className="logout-btn" style={{ ...BTN, color: 'var(--red)' }} disabled={!!lk.remove} title={lk.remove || undefined} onClick={() => remove(j)}>삭제</button>
+                </div>
+                {Object.values(lk).some(Boolean) && <div className="muted" style={{ fontSize: 11.5 }}>잠긴 버튼은 마우스를 올리면 이유가 보입니다.</div>}
+                <dl style={{ margin: 0, display: 'grid', gridTemplateColumns: 'auto minmax(0, 1fr)', gap: '5px 12px', fontSize: 12.5 }}>
+                  <dt className="muted">최근 실행</dt><dd style={{ margin: 0 }}>{c.when} <span className="muted">· {c.note}{c.bytes !== '—' ? ` · ${c.bytes}` : ''}</span></dd>
+                  {j.lastError && <><dt className="muted">마지막 오류</dt><dd style={{ margin: 0, color: 'var(--red)', overflowWrap: 'anywhere' }}>{j.lastError.message}</dd></>}
+                  <dt className="muted">잡</dt><dd style={{ margin: 0, fontFamily: 'var(--mono)', fontSize: 12, overflowWrap: 'anywhere' }}>{j.bareosJob || '—'}</dd>
+                  <dt className="muted">Director</dt><dd style={{ margin: 0 }}>{dirName(j.directorId)}</dd>
+                  <dt className="muted">클라이언트</dt><dd style={{ margin: 0, fontFamily: 'var(--mono)', fontSize: 12 }}>{j.client || '—'}</dd>
+                  <dt className="muted">레벨 · 스케줄</dt><dd style={{ margin: 0 }}>{levelLabel(j.level)} · {j.schedule || '없음'}</dd>
+                  <dt className="muted">적용 정책</dt><dd style={{ margin: 0, overflowWrap: 'anywhere' }}>{targetPolicyText(j.policy)}{j.policy?.verdict === 'mismatch' ? ' · 백업 방식이 Bareos 가 아님' : ''}</dd>
+                  <dt className="muted">위치</dt><dd style={{ margin: 0, overflowWrap: 'anywhere' }}>{j.vcenterId} · {j.dc} · {j.folder}{j.drift ? <div style={{ color: '#fcd34d', fontSize: 12 }}>{driftText(j.drift)}</div> : null}</dd>
+                  {Number.isFinite(j.createdAt) && <><dt className="muted">등록</dt><dd style={{ margin: 0 }}>{whenText(j.createdAt)}{j.createdBy ? ` · ${j.createdBy}` : ''}</dd></>}
+                </dl>
+              </>
+            );
+          })()}
+        </aside>
       </div>
-      <div className="muted" style={{ fontSize: 11.5, marginTop: 8, lineHeight: 1.6 }}>
-        스케줄은 Bareos 가 돌립니다(포탈이 꺼져 있어도 백업은 계속됩니다). 레벨·스케줄을 바꾸려면 대상을 지우고 다시 등록하세요 — Bareos 에는 잡 수정 명령이 없습니다.
+      <ReadGuide note="스케줄은 Bareos 가 돌립니다(포탈이 꺼져 있어도 백업은 계속됩니다). 레벨 · 스케줄을 바꾸려면 대상을 지우고 다시 등록하세요 — Bareos 에는 잡 수정 명령이 없습니다.">
         활성 대상 VM 은 vCenter 상세(서버 › vCenter)의 VM 행에 <span className="badge blue" style={{ fontSize: 10 }}>Bareos</span> 배지로 표시됩니다.
-      </div>
+        ‘결과 모름’ 은 엣지 대행 · 브라우저 시한으로 응답을 받지 못한 것입니다 — 실패로 단정하지 않으니 목록 · 진행 · 이력에서 확인한 뒤 다시 하세요.
+      </ReadGuide>
       {logOf && <LogModal job={logOf.job} jobid={logOf.jobid} view={logOf.view} onClose={() => setLogOf(null)} onStateChanged={reload} dir={dirs.find((x) => x.id === logOf.job.directorId)} limits={d.relayLimits} />}
       {restoreOf && <RestoreModal job={restoreOf} dir={dirs.find((x) => x.id === restoreOf.directorId)} limits={d.relayLimits} onClose={() => setRestoreOf(null)} onDone={(t) => { setRestoreOf(null); setMsg({ ok: true, text: t }); reload(); }} />}
     </div>

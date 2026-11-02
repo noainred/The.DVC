@@ -50,7 +50,11 @@ const Tag = ({ tone = 'muted', children }) => <span style={{ display: 'inline-bl
 const cmdText = (c) => (!c ? '수집 전' : c.ok === null ? '끔' : c.ok ? `성공 ${shortTs(c.last)}` : `${codeText(c.code)}${c.last ? ` · 마지막 성공 ${shortTs(c.last)}` : ''}${c.message ? ` — ${c.message}` : ''}`);
 const cmdTone = (c) => (!c || c.ok === null ? TONE.muted : c.ok ? TONE.ok : TONE.bad);
 
-export default function BareosPoolsTab() {
+/**
+ * v2.860: bare = '정책 · 보존' 한 화면(BareosPolicyPage)의 풀 구획 — 머리 · 'Director 수집 상태' 표(정책 구획의 수집 표와 같은 회차)는 그리지 않고
+ *   숫자 카드 6장은 한 줄 요약으로. reloadKey 가 바뀌면 다시 읽는다.
+ */
+export default function BareosPoolsTab({ bare = false, reloadKey = 0 } = {}) {
   const [data, setData] = useState(null);
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -66,9 +70,9 @@ export default function BareosPoolsTab() {
       .catch((e) => { if (my === gen.current) setError(e); })
       .finally(() => { if (my === gen.current) setLoading(false); });
   }, []);
-  useEffect(() => { load(); const g = gen; return () => { g.current++; }; }, [load]);
+  useEffect(() => { load(); const g = gen; return () => { g.current++; }; }, [load, reloadKey]);
 
-  const head = (
+  const head = bare ? <b style={{ fontSize: 15 }}>풀 · 볼륨 · 보존</b> : (
     <>
       <VeeamHeader active="bareos" desc="Bareos — 풀 · 볼륨 · 보존을 Director 에서 하루 한 번 수집해 보여 줍니다(이 화면은 Director 에 접속하지 않습니다 · 볼륨 목록 즉시 조회는 관리자만)."
         actions={<>
@@ -92,11 +96,22 @@ export default function BareosPoolsTab() {
   return (
     <div data-bareos-pools="" style={WRAP}>
       {head}
-      {data.demo && <div className="banner warn">데모 Director 입니다 — 실제 Bareos 에 접속하지 않은 합성 결과입니다.</div>}
+      {/* 정책 · 보존 한 화면(bare)에서는 위 정책 구획이 같은 데모 안내를 이미 보인다 — 두 번 쌓지 않는다 */}
+      {data.demo && !bare && <div className="banner warn">데모 Director 입니다 — 실제 Bareos 에 접속하지 않은 합성 결과입니다.</div>}
       {data.loadError && <div className="banner bad">정책 수집본 파일을 읽지 못했습니다(손상본 보존) — 다음 수집이 다시 채웁니다.</div>}
       {data.registryUnreadable && <div className="banner bad">Bareos 백업 대상 원장을 읽지 못해 쓰는 잡 수를 세지 못했습니다(포탈 잡 0 으로 보이는 칸도 모름입니다).</div>}
 
-      <div data-pools-kpis="" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(min(180px, calc(50% - 5px)), 1fr))', gap: 10 }}>
+      {bare && (
+        <div data-pools-kpis="" className="card" style={{ padding: '10px 14px', display: 'flex', flexWrap: 'wrap', gap: '4px 18px', fontSize: 12.5 }}>
+          <span>풀 <b>{k.pools == null ? '—' : fmtNum(k.pools)}</b> <span className="muted">(Director {fmtNum(collected)}/{fmtNum(dirs.length)} 수집)</span></span>
+          <span>볼륨 <b>{k.vols == null ? '—' : fmtNum(k.vols)}</b></span>
+          <span style={{ color: k.full > 0 ? TONE.bad : undefined }}>가득 참 <b>{k.full == null ? '—' : fmtNum(k.full)}</b>{k.unknownFull ? <span className="muted"> · 판정 모름 {fmtNum(k.unknownFull)}</span> : null}</span>
+          <span style={{ color: k.errorVols > 0 ? TONE.bad : undefined }}>오류 볼륨 <b>{k.errorVols == null ? '—' : fmtNum(k.errorVols)}</b></span>
+          <span>최대 사용 <b>{k.maxPct == null ? '—' : `${k.maxPct}%`}</b></span>
+          <span>클라이언트 <b>{k.clients == null ? '—' : fmtNum(k.clients)}</b></span>
+        </div>
+      )}
+      {!bare && <div data-pools-kpis="" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(min(180px, calc(50% - 5px)), 1fr))', gap: 10 }}>
         <Kpi label="풀" value={k.pools == null ? '—' : fmtNum(k.pools)} sub={`Director ${fmtNum(collected)}/${fmtNum(dirs.length)} 수집`} />
         <Kpi label="볼륨" value={k.vols == null ? '—' : fmtNum(k.vols)} sub="풀 행의 NumVols 합" />
         <Kpi label="가득 참" value={k.full == null ? '—' : fmtNum(k.full)} color={k.full > 0 ? TONE.bad : undefined}
@@ -104,9 +119,9 @@ export default function BareosPoolsTab() {
         <Kpi label="오류 볼륨" value={k.errorVols == null ? '—' : fmtNum(k.errorVols)} color={k.errorVols > 0 ? TONE.bad : undefined} sub="VolStatus Error" />
         <Kpi label="최대 사용 %" value={k.maxPct == null ? '—' : `${k.maxPct}%`} sub="MaxVols × MaxVolBytes 를 알 때만" />
         <Kpi label="클라이언트" value={k.clients == null ? '—' : fmtNum(k.clients)} sub={k.clients == null ? '수집 전 · 명령 꺼짐 · 실패' : 'File · Job Retention'} />
-      </div>
+      </div>}
 
-      <Section title="Director 수집 상태" sub="풀 · 볼륨 · 클라이언트 보존 명령의 마지막 결과(정책 · 일정 탭의 수집과 같은 회차)">
+      {!bare && <Section title="Director 수집 상태" sub="풀 · 볼륨 · 클라이언트 보존 명령의 마지막 결과(정책 · 일정 탭의 수집과 같은 회차)">
         {dirs.length ? (
           <div style={{ overflowX: 'auto' }}>
             <STable minWidth={720}>
@@ -125,7 +140,7 @@ export default function BareosPoolsTab() {
             </STable>
           </div>
         ) : <div className="muted" style={{ padding: '10px 14px', fontSize: 12.5 }}>범위 안에 Director 가 없습니다 — 설정 › 법인별 Director 와 매핑을 확인하세요.</div>}
-      </Section>
+      </Section>}
 
       <Section title={`풀 ${fmtNum(pools.length)}개`} data-pools-table=""
         sub="행을 누르면 볼륨 요약 · 볼륨 A Append · F Full · U Used · P Purged · E Error"

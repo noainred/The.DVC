@@ -153,6 +153,16 @@ export function overlapLine(o) {
   return `겹침 — ${out.join(' · ')}(${mdhm(from)}부터 · 다음 24시간 추정)`;
 }
 
+/**
+ * v2.860 백업 대상 표의 정책 칸 둘째 줄(짧게) — 다음 실행 또는 판정만. 전체 문구(targetPolicyText)는 칸 title · 오른쪽 패널에 둔다.
+ *   표 옆에 패널이 열리면 표 폭이 800px 안팎이라 전체 문구(풀 · 보존 · 체인까지)를 칸에 넣으면 6줄로 늘고 오른쪽 칸이 밀려 숨는다(Chromium 1440 확인).
+ */
+export function targetPolicyShort(p, now = Date.now()) {
+  if (!p) return '정책 모름';
+  const head = p.next ? `다음 ${nextRunText(p.next, now)}` : p.src ? '다음 실행 —' : p.verdict === 'unknown' ? '일정 모름' : '예약 없음(수동만)';
+  return p.dup ? `${head} · 두 번 돌 수 있음` : head;
+}
+
 /** 백업 대상 행 '적용 정책' 한 줄 — 서버 jobPolicyResolver 의 값(null = 그룹 · 수집본을 못 읽음). */
 export function targetPolicyText(p, now = Date.now()) {
   if (!p) return '적용 정책 모름(그룹 파일을 읽지 못함)';

@@ -27,6 +27,7 @@
 - (v2.805 추가) ESXi 호스트 화면의 '엑셀 수준 상세' — 열 묶음 9개·점검 열은 `views/hostChecksText.js` + 서버 `/hosts/checks` · 상세는 전체 페이지 `#/hosts/<id>`(모달 구성요소 공용)
 - (v2.811 추가) ESXi 호스트 화면의 '법인별' 보기 — 숫자·판정은 서버 `/hosts/corp`(`vcenter/hostCorp.js`), 글자·색은 `views/hostCorpText.js`
 - (v2.858 추가) Bareos 실행 중 작업 상세 — 진행 현황 행 펼침 · 실행 현황 · 이력 표가 `views/tools/BareosRunDetail.jsx` 하나를 쓴다 · 판정은 `bareosLiveText.js`
+- (v2.860 추가) Bareos 화면 재구성(시안 `docs/design/bareos-ui-v2`) — 탭 5개 · 운영 안 묶음 · 정책 · 보존 한 화면 · 설정 왼쪽 목록 · 옛 주소 이동
 - (원래 5663행) v2.708 — 드롭다운은 공용 `Select`·`DataList` 하나다(자동 정렬)
 - (원래 5801행) 특수 기능 화면(v2.679) — 표시 이름·설명·개발 단계는 '덮어쓰기' 이고 키는 그대로다
 - (원래 5848행) 접속 공지 팝업 · 게시판(v2.722)
@@ -481,3 +482,11 @@
   ④ 저장한 양 · 압축 · 쓰는 중 볼륨 크기는 잡 끝 보고에만 있다 — '끝나면 표시'(점선 칸). FD 보고가 없으면 진행량 · 속도 · 진척 · 남은 시간은 '모름'/'—'(0 아님)이고 타임라인 · 볼륨은 로그로 채운다.
   ⑤ 진행 현황 표 안의 펼침 칸은 `position: sticky; left: 0` + **실측 폭**(ResizeObserver) — 400px 에서 넓은 표(minWidth 1100)를 가로로 밀어도 상세는 화면 안. 정렬 때 행과 펼침 칸이 떨어지지 않게 `React.Fragment` 로 묶는다(`sortChildren` 이 첫 tr 로 정렬).
   ⑥ 대기 배지는 회색(실행 중 파랑과 구분 — `bareosText.STATE_BADGE`). 상세에 취소 단추는 두지 않았다(백업 대상 탭). 데모 실행 길이는 env `BAREOS_DEMO_RUN_MS`(화면 검증용 — 기본 30초는 진행 현황 조회 주기보다 짧다).
+- **v2.860 — Bareos 화면 재구성(사용자 요청 'Bareos UI 전폭 개선 · 직관적이고 복잡하지 않게' · 승인 시안 `docs/design/bareos-ui-v2` ⓪~⑥)**. 도구 키 3개(`bareos-summary`·`bareos-detail`·`bareos-backup`)와 권한은 그대로이고 탭은 주소만 바꾼다:
+  ① 탭은 5개(현황 · 법인 · 운영 · 정책 · 보존 · 설정) — 판정은 `bareosViewText.bareosSubTabs` 하나, 그리는 곳은 `BareosTabs.jsx` 하나(모든 Bareos 화면이 같은 자리 · 오른쪽 `right` 칸에 그 화면의 조작). 두 벌 탭 줄을 되살리지 말 것.
+  ② 운영 안 묶음(백업 대상 · 백업 그룹 · 진행 · 이력)은 `OPS_SEGMENTS`. 옛 하위 주소 `live`·`history` 는 `legacyOpsHash` 로 `runs` 로 바꾼다 — **렌더 중에** 바꾼다(효과에서 바꾸면 자식인 현황판이 옛 주소를 먼저 읽어 보기를 잃는다) · 아래 조각 유지(`live/corp` → `runs/corp`) · 옛 진행 현황 링크로 오면 현황판을 펼친 채로(`runsBoardOpen`). 다른 화면의 `/live`·`/history` 링크는 고치지 않아도 된다(`backupSummary2838` 이 옛 주소를 고정).
+  ③ 현황판(`BareosLiveTab`)은 보기 주소 기준을 부르는 쪽이 준다(`hashBase` — 진행 · 이력 안에서는 `runs`). 펼친 동안만 Director 에 묻는 규칙 그대로 · 접으면 주소에서 보기를 뗀다.
+  ④ 백업 대상은 표 + 오른쪽 패널(동작 · 상세). 패널이 열리면 표 폭이 800px 안팎이라 **표 칸에 긴 문구를 넣지 않는다** — 위치는 VM 칸 둘째 줄, 정책은 `targetPolicyShort`(다음 실행 또는 판정)이고 전체 문구 `targetPolicyText` 는 칸 title · 패널(Chromium 1440 에서 6칸 · 전체 문구일 때 용량 칸이 가로 스크롤 뒤로 숨었다).
+  ⑤ 정책 · 보존은 `BareosPolicyPage` 한 화면에 두 구획(`BareosPolicyTab`·`BareosPoolsTab` 의 `bare`) — 'Director 수집 상태' 표 · 데모 안내는 한 번만. 옛 `#/tools/bareos-summary/pools` 는 풀 구획으로 내려간다.
+  ⑥ 설정은 왼쪽 목록(`#/tools/bareos-backup/settings/<director|install|corp|accounts|defaults>` — `useHashTab` 중첩 base). 데모일 때 운영 머리의 Director 한 줄은 설정에서 빼고 설정 화면의 안내 하나만 둔다.
+  ⑦ 공용 조각은 `BareosBits.jsx`(Note · ReadGuide · Stat · Dot · ResultBar · Segs · FilterChip) — 칸 설명 · 범례는 '읽는 법' 토글로 치우되 지우지 않는다. '확인 필요' 는 실패 · 미등록 · 오래됨 · 켜진 잡의 백업 없음을 합친 것이고 결과를 못 읽으면 '—'(`corpAttention`·`detailFilterCounts`).

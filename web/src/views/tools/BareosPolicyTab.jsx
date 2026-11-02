@@ -35,8 +35,8 @@ function Kpi({ label, value, sub, color }) {
     </div>
   );
 }
-const Section = ({ title, sub, right, children, ...rest }) => (
-  <section className="card" style={{ padding: 0, overflow: 'hidden', minWidth: 0 }} {...rest}>
+const Section = ({ title, sub, right, children, style, ...rest }) => (
+  <section className="card" style={{ padding: 0, overflow: 'hidden', minWidth: 0, scrollMarginTop: 80, ...style }} {...rest}>
     <div className="flex wrap" style={{ alignItems: 'center', gap: '6px 10px', padding: '10px 14px', borderBottom: '1px solid var(--border-soft)' }}>
       <b style={{ fontSize: 14 }}>{title}</b>
       {sub && <span className="muted" style={{ fontSize: 12, minWidth: 0, overflowWrap: 'anywhere' }}>{sub}</span>}
@@ -47,7 +47,9 @@ const Section = ({ title, sub, right, children, ...rest }) => (
 );
 const Chip = ({ on, onClick, children }) => <button type="button" className={`tab${on ? ' active' : ''}`} aria-pressed={on} onClick={onClick} style={{ padding: '3px 11px', fontSize: 12 }}>{children}</button>;
 
-export default function BareosPolicyTab() {
+// v2.860: bare = '정책 · 보존' 한 화면(BareosPolicyPage) 안의 구획으로 그린다 — 머리(VeeamHeader · 탭)는 그 화면이 한 번만 그리고,
+//   이 구획은 기준 시각 · 지금 수집만 한 줄로. reloadKey 가 바뀌면 다시 읽는다(화면 머리의 새로고침).
+export default function BareosPolicyTab({ bare = false, reloadKey = 0 } = {}) {
   const [data, setData] = useState(null);
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -65,7 +67,7 @@ export default function BareosPolicyTab() {
       .catch((e) => { if (my === gen.current) setError(e); })
       .finally(() => { if (my === gen.current) setLoading(false); });
   }, []);
-  useEffect(() => { load(); return () => { gen.current++; }; }, [load]);
+  useEffect(() => { load(); const g = gen; return () => { g.current++; }; }, [load, reloadKey]);
   // 수집 중인 동안만 5초마다 다시 읽는다(끝나면 멈춘다 — 평소 폴링 없음)
   const busy = !!(data?.collect?.busy || (data?.directors || []).some((d) => d.collecting));
   useEffect(() => {
@@ -84,17 +86,21 @@ export default function BareosPolicyTab() {
     } catch (e) { setMsg({ tone: 'bad', text: String(e?.message || e).slice(0, 200) }); }
   };
 
-  const head = (
+  const actions = (
     <>
-      <VeeamHeader active="bareos" desc="Bareos — 법인마다 Director 하나 · 정책 · 일정을 Director 에서 하루 한 번 수집해 보여 줍니다(이 화면은 Director 에 접속하지 않습니다)."
-        actions={<>
-          {data?.at && <span className="muted" style={{ fontSize: 12, alignSelf: 'center' }}>기준 {shortTs(data.at)}</span>}
-          {canCollect && <button type="button" className="tab active" disabled={busy} onClick={() => collect(null)} title="범위 안 Director 전부(수집을 끈 Director 는 빼고) — Director 마다 1분에 한 번" style={{ padding: '6px 14px' }}>{busy ? '수집 중…' : '지금 수집'}</button>}
-          <button type="button" className="tab" disabled={loading} onClick={load} style={{ padding: '6px 14px' }}>{loading ? '읽는 중…' : '새로고침'}</button>
-        </>} />
-      <BareosTabs active="policy" />
+      {data?.at && <span className="muted" style={{ fontSize: 12, alignSelf: 'center' }}>기준 {shortTs(data.at)}{data?.collect?.time ? ` · 다음 수집 ${data.collect.time}` : ''}</span>}
+      {canCollect && <button type="button" className="tab active" disabled={busy} onClick={() => collect(null)} title="범위 안 Director 전부(수집을 끈 Director 는 빼고) — Director 마다 1분에 한 번" style={{ padding: '6px 14px' }}>{busy ? '수집 중…' : '지금 수집'}</button>}
+      {!bare && <button type="button" className="tab" disabled={loading} onClick={load} style={{ padding: '6px 14px' }}>{loading ? '읽는 중…' : '새로고침'}</button>}
     </>
   );
+  const head = bare
+    ? <div className="flex gap wrap" style={{ alignItems: 'center', rowGap: 6 }}><b style={{ fontSize: 15 }}>정책 · 일정</b><span className="flex gap wrap" style={{ marginLeft: 'auto', alignItems: 'center', rowGap: 6 }}>{actions}</span></div>
+    : (
+      <>
+        <VeeamHeader active="bareos" desc="Bareos — 법인마다 Director 하나 · 정책 · 일정을 Director 에서 하루 한 번 수집해 보여 줍니다(이 화면은 Director 에 접속하지 않습니다)." actions={actions} />
+        <BareosTabs active="policy" />
+      </>
+    );
   if (!data && error) return <div style={WRAP}>{head}<ErrorBox error={error} /></div>;
   if (!data) return <div style={WRAP}>{head}<Loading /></div>;
 
@@ -164,7 +170,7 @@ export default function BareosPolicyTab() {
           sub={k.vm?.total == null ? '원장을 읽지 못함' : `수동만 ${fmtNum(k.vm.manual)} · 미등록 ${fmtNum(k.vm.unregistered)} · 불일치 ${fmtNum(k.vm.mismatch)}${k.vm.unknown ? ` · 모름 ${fmtNum(k.vm.unknown)}` : ''}`} />
       </div>
 
-      <Section title="다음 7일 예정" sub="Director 스케줄(status scheduler 미리보기 × 쓰는 잡) + 포탈 그룹 회차(× VM) · 레벨별">
+      <Section id="bp-sched" title="다음 7일 예정" sub="Director 스케줄(status scheduler 미리보기 × 쓰는 잡) + 포탈 그룹 회차(× VM) · 레벨별">
         <div data-policy-week="" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(118px, 1fr))', gap: 8, padding: '10px 14px', fontSize: 12 }}>
           {(data.week || []).map((w, i) => {
             const d = new Date(w.day + 12 * 3_600_000);
@@ -180,7 +186,7 @@ export default function BareosPolicyTab() {
         {collected === 0 && <div className="muted" style={{ padding: '0 14px 10px', fontSize: 12 }}>Director 수집본이 없어 포탈 그룹 회차만 셉니다.</div>}
       </Section>
 
-      <Section title={`스케줄 ${fmtNum(sch.length)}`} sub="Director 스케줄의 Run 줄(show schedules 원문 그대로) + 포탈 그룹 예약 · 쓰는 잡 수 · 다음 실행 · 겹침(같은 Director 의 그룹 회차와 1시간 안)"
+      <Section id="bp-defs" title={`스케줄 ${fmtNum(sch.length)}`} sub="Director 스케줄의 Run 줄(show schedules 원문 그대로) + 포탈 그룹 예약 · 쓰는 잡 수 · 다음 실행 · 겹침(같은 Director 의 그룹 회차와 1시간 안)"
         right={<>{[['all', '전체'], ['director', 'Director 스케줄'], ['group', '포탈 그룹 예약'], ['unused', '아무 잡도 안 씀']].map(([kk, t]) => <Chip key={kk} on={sKind === kk} onClick={() => setSKind(kk)}>{t}</Chip>)}</>}>
         {sch.length ? (
           <div style={{ overflowX: 'auto' }}>
@@ -251,7 +257,7 @@ export default function BareosPolicyTab() {
         ) : <div className="muted" style={{ padding: '10px 14px', fontSize: 12.5 }}>{anyDenied ? 'show 권한이 없어 수집하지 못했습니다 — 위 안내를 보세요.' : '수집 전입니다.'}</div>}
       </Section>
 
-      <Section title={`VM 별 적용 정책 ${k.vm?.total == null ? '' : fmtNum(k.vm.total)}`} sub="잡 → 일정(그룹 예약 또는 Director 스케줄) → JobDefs → 풀 → 보존을 한 줄로 · 판정: 정책 있음 · 수동만 · 미등록 · 방식 불일치"
+      <Section id="bp-vms" title={`VM 별 적용 정책 ${k.vm?.total == null ? '' : fmtNum(k.vm.total)}`} sub="잡 → 일정(그룹 예약 또는 Director 스케줄) → JobDefs → 풀 → 보존을 한 줄로 · 판정: 정책 있음 · 수동만 · 미등록 · 방식 불일치"
         right={<>
           {[['', '전체'], ['manual', `수동만 ${fmtNum(k.vm?.manual)}`], ['unregistered', `미등록 ${fmtNum(k.vm?.unregistered)}`], ['mismatch', `불일치 ${fmtNum(k.vm?.mismatch)}`], ...(k.vm?.unknown ? [['unknown', `모름 ${fmtNum(k.vm.unknown)}`]] : [])].map(([kk, t]) => <Chip key={kk || 'all'} on={verdict === kk} onClick={() => setVerdict(kk)}>{t}</Chip>)}
           {[['windows', 'Windows'], ['linux', 'Linux']].map(([kk, t]) => <Chip key={kk} on={os === kk} onClick={() => setOs((v) => (v === kk ? '' : kk))}>{t}</Chip>)}
