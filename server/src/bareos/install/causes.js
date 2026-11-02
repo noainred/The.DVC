@@ -23,6 +23,54 @@ export function parseErrFile(text) {
 
 const R = (key, title, test, why, fixes) => ({ key, title, test, why, fixes });
 
+/* v2.851 번들의 시스템 패키지 판 충돌(2026-11-02 사용자 화면 — 2단계 'cannot install both openssl-libs-1:3.5.8-2.el9_8 from portal-bareos-local and
+ *   openssl-libs-1:3.0.7-28.el9_4 from @System … package openssl-devel-1:3.0.7-28.el9_4 from @System requires openssl-libs(x86-64) = 1:3.0.7-28.el9_4').
+ *   번들은 Rocky 9.8 저장소의 의존 전체(--alldeps)를 담아 시스템 패키지(openssl-libs · glibc · systemd …)가 서버(9.4)보다 새 판이다. 번들 RPM 메타데이터로 확인한 것:
+ *   Bareos 패키지는 새 OpenSSL 을 요구하지 않는다 — 올리려 한 까닭은 설치 목록의 이미 설치된 이름(openssl · tar)이다: dnf(best=True)는 'install <설치된 이름>' 을
+ *   번들 판으로 올리는 일로 보고(출력의 'Package openssl-… is already installed' 가 그 이름), 서버에 설치된 -devel(번들에 없음)이 옛 판을 고정하면 거래 전체가 실패한다.
+ *   러너(runner.sh step2)는 v2.851 부터 이미 설치된 이름을 넘기지 않는다. 여기서는 출력에서 이름을 꺼내 원인 · 고정 패키지 · 조치를 그대로 적는다(지어내지 않는다). */
+const NEVRA_RE = /^([A-Za-z0-9._+-]+?)-((?:\d+:)?[0-9][A-Za-z0-9._+~^]*)-([A-Za-z0-9._+~]+)$/;
+const SAFE_NAME = /^[A-Za-z0-9._+-]{1,80}$/;
+/** NEVRA(name-[e:]ver-rel.arch) → 이름('' = 모양이 아님). */
+export function nevraName(s) { const m = NEVRA_RE.exec(String(s || '')); return m && SAFE_NAME.test(m[1]) ? m[1] : ''; }
+function basePkgPinned(e) {
+  const lines = String(e.output || '').split('\n').map((l) => l.trim());
+  let both = null; let bothLine = '';
+  for (const l of lines) { const m = /cannot install both (\S+) from portal-bareos-local and (\S+) from @System/.exec(l); if (m) { both = m; bothLine = l; break; } }
+  if (!both) return null;
+  const name = nevraName(both[1]);
+  if (!name || nevraName(both[2]) !== name) return null;
+  const pins = []; const fromBundle = [];
+  for (const l of lines) {
+    const m = /package (\S+) from (@System|portal-bareos-local) requires (.+?), but none of the providers can be installed/.exec(l);
+    if (!m) continue;
+    const n = nevraName(m[1]);
+    if (!n || n === name) continue;
+    if (m[2] === '@System' && !pins.some((p) => p.name === n)) pins.push({ name: n, nevra: m[1].slice(0, 120), req: m[3].slice(0, 120) });
+    if (m[2] === 'portal-bareos-local' && !fromBundle.includes(n)) fromBundle.push(n);
+  }
+  const already = lines.map((l) => /^Package (\S+) is already installed\.?$/.exec(l)).filter(Boolean).map((m) => nevraName(m[1])).filter(Boolean);
+  const job = fromBundle.find((n) => already.includes(n)) || '';
+  const pinText = pins.length ? pins.map((p) => `${p.nevra}(요구: ${p.req})`).join(' · ') : '(고정하는 패키지 줄이 출력에 없습니다)';
+  const why = `번들의 ${both[1].slice(0, 80)} 를 넣으려면 서버의 ${both[2].slice(0, 80)} 를 올려야 하는데, 이 서버에 설치된 ${pinText} — 번들에 없는 패키지가 지금 판을 요구해 올릴 수 없습니다(이 단계가 넣은 것은 되돌렸습니다). `
+    + (job
+      ? `올리려 한 까닭: 설치 목록의 ‘${job}’ 이 이미 설치돼 있었고 dnf 는 'install <설치된 이름>' 을 번들 판으로 올리는 일로 봅니다 — v2.851 부터 러너는 이미 설치된 이름을 넘기지 않습니다(서버 시스템 패키지는 그대로 둡니다).`
+      : '올리려 한 까닭은 출력에 없습니다 — 설치 목록에 이미 설치된 시스템 패키지가 있었거나(v2.851 부터 러너가 넘기지 않음) 설치할 패키지의 의존성이 그 새 판을 요구한 것입니다(번들을 만든 OS 판이 서버보다 새로움).');
+  const pinNames = pins.map((p) => p.name).join(' ');
+  const fixes = [
+    { kind: 'retry', label: job ? `2단계부터 그대로 다시 — v2.851 러너는 이미 설치된 ‘${job}’ 을 올리지 않습니다` : '2단계부터 그대로 다시(v2.851 러너 — 이미 설치된 패키지를 올리지 않음)',
+      detail: '포탈이 v2.851 이상이어야 합니다(다시 할 때 러너를 새로 올립니다). 의존성이 새 판을 요구하는 경우면 같은 사유로 다시 실패하고, 그때는 아래 (b) 입니다.' },
+    { kind: 'server', label: pins.length ? `고정하는 패키지 — ${pins.map((p) => p.name).join(' · ')}` : `${name} 를 고정하는 패키지 확인`,
+      detail: '번들에 없는데 이 서버에 설치된 패키지가 옛 판을 요구합니다. 다른 패키지가 쓰지 않는 개발 패키지(-devel)면 지운 뒤 다시 하거나, 서버 OS 를 번들을 만든 판으로 업데이트하세요(서버 OS 저장소가 닿을 때 · glibc · 커널이 바뀌면 재부팅).',
+      commands: [
+        pins.length ? `rpm -q ${pinNames}` : `rpm -q --whatrequires '${name}(x86-64)'`,
+        ...(pins.length ? [`dnf repoquery --installed --whatrequires ${pinNames}   # 이 패키지를 쓰는 것이 있는지`, `dnf remove ${pinNames}   # 쓰는 것이 없고 필요 없을 때만`] : []),
+        'dnf update   # 또는 서버 OS 를 번들을 만든 판으로(저장소가 닿을 때 · 끝나면 재부팅)',
+      ] },
+  ];
+  return { evidence: bothLine.slice(0, 300), why, fixes };
+}
+
 /** 규칙 — 위에서부터 처음 맞은 것. test(e) → 근거 줄(문자열) 또는 null. */
 const line = (re) => (e) => { const m = String(e.output || '').split('\n').find((l) => re.test(l)); return m ? m.trim().slice(0, 300) : null; };
 const causeIs = (c) => (e) => (e.cause === c ? (String(e.output || '').split('\n').find((l) => l.trim()) || c).trim().slice(0, 300) : null);
@@ -60,6 +108,8 @@ export const RULES = Object.freeze([
   R('gpg', '패키지 서명 확인 실패', line(/(GPG check FAILED|NOKEY|public key .* is not installed|Signature verification failed|signature could not be verified)/i),
     'dnf 가 번들 RPM 의 서명을 확인하지 못했습니다(번들의 키와 패키지 서명 키가 다름). 서명을 끄고 설치하지 않습니다.',
     [{ kind: 'server', label: '키 확인', commands: ['ls /var/lib/portal-bareos-install/bundle/*/bareos-bundle/keys/', 'rpm -q gpg-pubkey --qf "%{NAME}-%{VERSION}-%{RELEASE} %{SUMMARY}\\n"'] }]),
+  // dnf-conflict 보다 앞 — 같은 출력에 'Problem:' · 'cannot install the best candidate' 가 함께 있다
+  R('base-pkg-pinned', '번들의 시스템 패키지 판이 서버 설치본과 충돌', basePkgPinned, '(출력에서 읽은 이름으로 적는다)', []),
   R('dnf-conflict', '패키지 의존성·충돌', line(/(conflicts with file from package|conflicting requests|nothing provides|cannot install the best candidate|Problem( \d+)?:|is filtered out by)/i),
     '번들 안의 패키지만으로 의존성을 풀지 못했거나, 이미 설치된 패키지와 파일이 겹칩니다(이 단계가 넣은 것은 되돌렸습니다).',
     [{ kind: 'server', label: '충돌 패키지 확인', commands: ['dnf --disablerepo="*" --enablerepo=portal-bareos-local install --assumeno bareos 2>&1 | tail -n 30'] }]),
@@ -113,7 +163,10 @@ export function classifyFailure(e = {}) {
   for (const r of RULES) {
     let ev = null;
     try { ev = r.test(e); } catch { ev = null; }
-    if (ev) return { key: r.key, title: r.title, why: r.why, evidence: ev, fixes: r.fixes, unclassified: false };
+    if (!ev) continue;
+    // v2.851: 규칙이 객체를 돌려주면 출력에서 읽은 값으로 원인 · 조치를 적는다(base-pkg-pinned) — 문자열이면 예전처럼 근거 줄
+    const d = typeof ev === 'object' ? ev : { evidence: ev };
+    return { key: r.key, title: r.title, why: d.why || r.why, evidence: String(d.evidence || '').slice(0, 300), fixes: Array.isArray(d.fixes) && d.fixes.length ? d.fixes : r.fixes, unclassified: false };
   }
   return {
     key: 'unclassified', title: '원인 미분류', why: '아는 규칙에 맞지 않았습니다 — 원인을 추정하지 않고 출력 원문을 보입니다.',

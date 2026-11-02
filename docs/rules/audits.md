@@ -6,6 +6,7 @@
 
 ## 목차
 
+- Bareos v2.851 완전 설치 2단계 '번들의 시스템 패키지 판 충돌' — 러너 · 원인 판정 · 사전 점검(2026-11-02)
 - Bareos v2.850 완전 설치 번들 — 받는 주소 지정 · 서버 디렉터리에 받아 둔 번들 사용 · 원장 id 충돌(2026-11-02)
 - Bareos v2.849 백업 등록 실패 'Could not find config resource' — 포탈 리소스 안내 · 연결 진단 · 완전 설치 엣지 응답(2026-11-02)
 - Bareos v2.848 백업 등록 실패 'configure: is an invalid command' — 잡 만들기 권한 안내 · 연결 진단(2026-11-02)
@@ -1837,6 +1838,26 @@
   목록 memo(P7) · 카탈로그 memo 세대(P9) · 고아 잡(I7) · Migration 새 잡의 일시 lastRun(C2-7).
   ⚠ 정정(v2.823): 카탈로그 memo 세대(P9)는 v2.823 에 해소했다(memo 키에 Director id + `settingsRev` — 설정을 저장하면 새로 읽는다). 고아 잡(I7)은 v2.823 검토 C3 에서
   '가리키는 Director 가 설정에 없는 대상은 원장에서만 취소·삭제' 경로로 일부 해소(Director 쪽 고아 잡 탐지는 여전히 없다).
+
+## Bareos v2.851 완전 설치 2단계 '번들의 시스템 패키지 판 충돌' — 러너 · 원인 판정 · 사전 점검(2026-11-02)
+
+사용자 화면(완전 설치 2단계 실패 '패키지 의존성·충돌' · 근거 `Problem: cannot install both openssl-libs-1:3.5.8-2.el9_8.x86_64 from portal-bareos-local and openssl-libs-1:3.0.7-28.el9_4.x86_64 from @System` ·
+`package openssl-devel-1:3.0.7-28.el9_4.x86_64 from @System requires openssl-libs(x86-64) = 1:3.0.7-28.el9_4` · `cannot install the best candidate for the job`) · 요청 '버그부터 처리'.
+회귀 `bareosInstallPkgPin2851`(4) · 러너 `bareosInstallRunner2844` ②-b(실제 bash · 가짜 rpmdb) · 변이 8/8(첫 7/8 — newerBasePkgs 의 `>` 를 `>=` 로 바꿔도 픽스처에 같은 판 패키지가 없어 살아남음 → el9_4 tar 추가).
+
+- 원인(번들 RPM 메타데이터를 직접 풀어 확인 — Python 으로 RPM 헤더의 Requires 를 읽었다): 번들(25.20261101.13 · 209개)은 rockylinux:9 컨테이너의 최신 저장소(9.8)에서 `--alldeps` 로 받아
+  시스템 패키지가 el9_8 판이다(openssl-libs 3.5.8 · glibc 2.34-283 · systemd 252-67 · python3 3.9.25 …). **Bareos · httpd · php · postgresql 패키지는 새 OpenSSL 심벌을 요구하지 않는다**(새 심벌 요구는
+  번들 안 시스템 패키지끼리 — openssl · python3-libs · rpm-libs · systemd · libcurl). 서버(9.4 · openssl 3.0.7)에서 올리려 한 까닭은 설치 목록(`INSTALL_PKGS`)의 **이미 설치된 이름**
+  (`openssl` · `tar` · `policycoreutils-python-utils` — 출력의 'is already installed' 세 줄이 그것): dnf(best=True 기본)는 'install <설치된 이름>' 을 그 이름의 최선 후보(번들 3.5.8)로 올리는 일로 본다.
+  openssl 3.5.8 → openssl-libs 3.5.8 필요 → 서버의 openssl-devel 3.0.7(번들에 없음)이 `openssl-libs = 3.0.7` 을 요구 → 거래 전체 실패. 러너의 되돌리기는 정상이었다.
+- 수정: ① 러너 step2 — 설치 목록 중 `rpm -q --quiet` 로 이미 설치된 이름은 넘기지 않는다(로그 '이미 설치돼 건너뜀(서버 판 유지)' · 전부 설치돼 있으면 dnf 없이 진행). 서버 시스템 패키지는 서버 판 그대로 ·
+  의존성이 요구하면 그때는 dnf 가 올린다. ② `causes.js base-pkg-pinned`(dnf-conflict 보다 앞) — 충돌 패키지 · 고정 패키지(+요구) · 올리려 한 설치 목록 이름을 **출력에서 읽어** 적는다('already installed' 줄이 잘려 없으면
+  단정하지 않는다) · 조치 = 2단계부터 그대로 다시(v2.851 러너) · (b) 고정 패키지 확인 · 필요 없으면 제거 · 서버 OS 업데이트. 규칙이 객체를 돌려주면 `classifyFailure` 가 그 why · fixes 를 쓴다.
+  ③ 사전 점검 `osrel` — 번들 패키지 판 태그 최대(el9_N)와 서버 VERSION_ID 마이너 비교 · 새로우면 warn(주요 이름 · 설치된 -devel 고정 추정 `@@devel`) · 막지 않는다 · 비교 못 하면 unknown. 데모 번들에 판 태그를 넣었다.
+  ④ `build-bundle.sh` 주석의 '대상에 이미 있는 판이 요구를 채우면 dnf 는 그것을 쓴다' 는 **의존성에만** 맞다 — 설치 목록 이름에는 틀렸다고 정정.
+- 사용자 서버의 당장 조치(포탈 v2.851 로 올린 뒤): '2단계부터 그대로 다시'(러너를 새로 올린다). 그래도 같은 사유면 의존성이 새 판을 요구하는 것 — `dnf remove openssl-devel`(쓰는 것이 없을 때) 또는 서버 OS 업데이트.
+- 남긴 것: 번들을 서버와 같은 판에서 만드는 옵션(BASE_RELEASE · vault 저장소)은 두지 않았다(요구하는 사용자가 없고 Bareos 자체는 9.4 의 OpenSSL 로 충분) · dnf4 의 'install <설치된 이름>' 동작은 로그 모양 + 문서로 판단했고
+  best=False 환경은 보지 않았다 · 사전 점검의 -devel 고정은 이름 규칙(이름 · 이름-libs)에 의한 추정이다.
 
 ## Bareos v2.850 완전 설치 번들 — 받는 주소 지정 · 서버 디렉터리에 받아 둔 번들 사용 · 원장 id 충돌(2026-11-02)
 

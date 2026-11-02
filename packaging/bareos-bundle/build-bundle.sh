@@ -19,7 +19,12 @@
 #     현장(문서 7.4)도 같은 판을 쓴다. 정식판은 구독 저장소(download.bareos.com — 자격증명 필요)라 BAREOS_REPO 로 바꿀 수 있게 둔다.
 #   - pyVmomi 는 RPM 의존이 아니다(Bareos 21~). Rocky 9 의 Python 3.9 에서 9.x 는 'Python 3.10 or newer is required' 로 플러그인이 시작하지 못했다
 #     (문서 7.4 현장 기록) — 8.x 만 휠로 넣는다(PyPI 에는 8.x 가 sdist 뿐이라 여기서 휠로 만든다).
-#   - --alldeps: 대상 서버에 무엇이 깔려 있는지 모르므로 의존 전체를 받는다. 대상에 이미 있는 판이 요구를 채우면 dnf 는 그것을 쓴다.
+#   - --alldeps: 대상 서버에 무엇이 깔려 있는지 모르므로 의존 전체를 받는다. **의존성**은 대상에 이미 있는 판이 요구를 채우면 dnf 가 그것을 쓴다.
+#     ⚠ v2.851(2026-11-02 실환경 — 재현): 설치 목록(INSTALL_PKGS)에 적힌 이름은 다르다 — 대상에 이미 있어도 dnf(best=True)는 'install <그 이름>' 을 이 번들 판으로
+#     올리는 일로 본다(서버 openssl 3.0.7-el9_4 → 번들 3.5.8-el9_8). 서버에 설치된 openssl-devel(번들에 없음)이 옛 판을 고정하면 거래 전체가 실패한다.
+#     그래서 러너(server/src/bareos/install/runner.sh step2)는 이미 설치된 이름을 넘기지 않는다. 여기 목록(openssl · tar · policycoreutils-python-utils …)은
+#     대상에 없을 때를 위한 것이고, 번들 안 시스템 패키지(glibc · systemd · openssl-libs …)는 이 컨테이너가 보는 최신 9.x 저장소 판이다 —
+#     사전 점검(precheck.js osrel)이 서버 판과 비교해 경고한다.
 #
 set -euo pipefail
 

@@ -39,6 +39,8 @@ export function precheckScript(volumeDir = DEFAULT_VOLUME_DIR) {
     // v2.846 D-2: 러너 0단계(runner.sh running_jobs)와 같은 판정 — Director 꺼짐(inactive·failed)은 'inactive'(실행 중 작업 없음), 그 밖의 못 읽음은 none
     "echo @@running; s=$(systemctl is-active bareos-dir 2>/dev/null); case \"$s\" in inactive|failed) echo inactive;; active|activating|reloading|deactivating) if command -v bconsole >/dev/null; then o=$(printf 'llist jobs jobstatus=R\\n' | timeout 30 bconsole 2>&1); rc=$?; if [ $rc -eq 0 ] && printf '%s\\n' \"$o\" | grep -q 'Connecting to Director' && ! printf '%s\\n' \"$o\" | grep -qiE 'Authorization failed|Failed to connect|ERR='; then printf '%s\\n' \"$o\" | grep -cE '^[[:space:]]*jobid:[[:space:]]*[0-9]+'; else echo none; fi; else echo none; fi;; *) echo none;; esac",
     "echo @@catalog; if systemctl is-active -q postgresql 2>/dev/null; then su - postgres -c \"psql -tAc \\\"SELECT pg_database_size('bareos')\\\"\" 2>/dev/null | tr -d '[:space:]'; echo; else echo none; fi",
+    // v2.851: 설치된 -devel · -headers 이름(번들의 시스템 패키지가 서버 판보다 새로울 때 옛 판을 고정할 수 있는 것 — 2026-11-02 openssl-devel 사례)
+    "echo @@devel; rpm -qa --qf '%{NAME}\\n' 2>/dev/null | grep -E -- '-(devel|headers)$' | sort | head -n 200",
     "echo @@volumes; for f in /etc/bareos/bareos-sd.d/device/*.conf; do [ -f \"$f\" ] || continue; sed -n 's/^[[:space:]]*Archive[[:space:]]*Device[[:space:]]*=[[:space:]]*\"\\{0,1\\}\\([^\"]*\\)\"\\{0,1\\}[[:space:]]*$/\\1/Ip' \"$f\"; done | sort -u | while read -r d; do [ -d \"$d\" ] || { echo \"$d|missing\"; continue; }; n=$(find \"$d\" -maxdepth 1 -type f 2>/dev/null | wc -l); s=$(du -sk \"$d\" 2>/dev/null | cut -f1); t=$(find \"$d\" -maxdepth 1 -type f -printf '%T@\\n' 2>/dev/null | sort -n | tail -1 | cut -d. -f1); echo \"$d|$n|$s|$t\"; done",
     'echo @@end',
   ].join('\n');
@@ -107,8 +109,43 @@ export function parsePrecheck(text) {
     directorInactive: running === 'inactive',
     catalogBytes: catalog === 'none' || catalog === '' ? null : numOrNull(catalog),
     volumes,
+    develPkgs: (s.devel || []).map((l) => l.trim()).filter((n) => /^[A-Za-z0-9._+-]{1,80}$/.test(n)).slice(0, 200),
   };
 }
+
+/*
+ * v2.851 번들 패키지 판 ↔ 서버 OS 판(2026-11-02 사용자 화면 — 2단계 'cannot install both openssl-libs-1:3.5.8-2.el9_8 … and openssl-libs-1:3.0.7-28.el9_4 from @System').
+ *   번들은 rockylinux:9 최신 저장소의 의존 전체(--alldeps)를 담아 시스템 패키지의 판 태그(el9_8)가 서버(9.4)보다 새로울 수 있다. 러너는 이미 설치된 설치 목록 이름을 올리지 않지만,
+ *   의존성이 새 판을 요구하면 서버에 설치된 -devel(번들에 없음)이 옛 판을 고정해 2단계가 실패한다 — 여기서 미리 경고한다(막지는 않는다 · 추정임을 밝힌다).
+ */
+/** 번들 패키지 판 태그의 최대 마이너(el9_N 의 N · el9 만 있으면 0 · 패키지 목록이 없으면 null). */
+export function bundleMinor(bundle) {
+  let m = null;
+  for (const p of bundle?.packages || []) {
+    const r = /\.el9(?:_(\d+))?(?:\.|$)/.exec(String(p.release || ''));
+    if (!r) continue;
+    const n = r[1] == null ? 0 : Number(r[1]);
+    if (m == null || n > m) m = n;
+  }
+  return m;
+}
+/** 서버 VERSION_ID('9.4') 의 마이너 — '9' 만이면 null(비교하지 않는다). */
+export function serverMinor(versionId) { const m = /^9\.(\d+)/.exec(String(versionId || '')); return m ? Number(m[1]) : null; }
+/** 서버 판(9.N)보다 새 판 태그(el9_M · M>N)인 번들 패키지 이름. */
+export function newerBasePkgs(bundle, sMinor) {
+  const out = [];
+  for (const p of bundle?.packages || []) {
+    const r = /\.el9_(\d+)(?:\.|$)/.exec(String(p.release || ''));
+    if (r && Number(r[1]) > sMinor && !out.includes(p.name)) out.push(p.name);
+  }
+  return out;
+}
+/** 설치된 -devel · -headers 중 그 바탕 패키지(이름 · 이름-libs)가 번들에서 새 판인 것(추정 — -devel 은 바탕 패키지의 같은 판을 요구하는 것이 보통). */
+export function develPins(develPkgs = [], newerNames = []) {
+  const set = new Set(newerNames);
+  return develPkgs.filter((d) => { const b = d.replace(/-(devel|headers)$/, ''); return set.has(b) || set.has(`${b}-libs`); });
+}
+const OSREL_SHOW = /^(openssl-libs|glibc|systemd|python3-libs|libcurl|krb5-libs|libxml2|rpm-libs)$/;
 
 /** 실행 중 작업을 못 읽었을 때의 조치 — 화면 계획 단계의 동의 체크(같은 글자)와 이어진다. */
 export const RUNNING_UNKNOWN_OK_LABEL = '확인했음 — 실행 중 작업 확인 없이 진행';
@@ -131,6 +168,18 @@ export function judgePrecheck(f, { mode = 'install', bundle = null, plan = null 
     f.uid === 0 ? '' : '배포 등록부의 이 엣지 SSH 계정을 root 로 바꾸세요.');
   const osOk = /^(rocky|rhel|almalinux|centos|ol)$/.test(f.os.id) && /^9(\.|$)/.test(f.os.versionId) && f.os.arch === 'x86_64';
   add('os', 'OS', osOk ? 'ok' : (f.os.id ? 'bad' : 'unknown'), `${f.os.pretty || '읽지 못함'} · ${f.os.arch || '?'}${f.selinux ? ` · SELinux ${f.selinux}` : ''}`, osOk ? '' : '이 번들은 Rocky/RHEL 9 x86_64 용입니다.');
+  if (bundle) {
+    const bm = bundleMinor(bundle); const sm = serverMinor(f.os.versionId);
+    if (bm == null || sm == null) add('osrel', 'OS 판 ↔ 번들 패키지 판', 'unknown', `서버 ${f.os.versionId || '읽지 못함'} · 번들 ${bm == null ? '판 태그 없음' : `9.${bm}`} — 비교하지 못했습니다`, '');
+    else if (bm > sm) {
+      const newer = newerBasePkgs(bundle, sm); const pins = develPins(f.develPkgs, newer);
+      const show = newer.filter((n) => OSREL_SHOW.test(n));
+      add('osrel', 'OS 판 ↔ 번들 패키지 판', 'warn',
+        `서버 9.${sm} · 번들 패키지 9.${bm} — 번들 패키지 ${newer.length}개의 판 태그가 서버 판보다 새롭습니다${show.length ? `(${show.join(' · ')}${newer.length > show.length ? ` 외 ${newer.length - show.length}개` : ''})` : ''}`
+          + (pins.length ? ` · 설치된 ${pins.join(' · ')} 이(가) 그 패키지의 지금 판을 고정할 수 있습니다(추정 — 번들에 없음)` : ''),
+        `설치 목록의 이미 설치된 패키지는 올리지 않습니다. 그래도 의존성이 새 판을 요구하면 ${pins.length ? '위 고정 패키지 때문에 ' : ''}2단계가 실패할 수 있습니다 — 미리 막으려면 서버를 업데이트(dnf update → 재부팅)하거나 서버와 같은 판에서 만든 번들을 쓰세요. 설치는 막지 않습니다.`);
+    } else add('osrel', 'OS 판 ↔ 번들 패키지 판', 'ok', `서버 9.${sm} · 번들 패키지 9.${bm}`, '');
+  }
   const toolMiss = ['systemd-run', 'dnf', 'rpm', 'ss'].filter((t) => f.tools[t] === false);
   add('tools', '필수 명령', toolMiss.length ? 'bad' : (Object.keys(f.tools).length ? 'ok' : 'unknown'), toolMiss.length ? `없음: ${toolMiss.join(', ')}` : 'systemd-run · dnf · rpm · ss 있음', toolMiss.length ? 'OS 기본 패키지를 먼저 설치하세요.' : '');
   if (mode === 'install') {

@@ -188,8 +188,15 @@ step2() {
   local B; B="$(bundle_dir)"
   [ -d "$ETC_BAREOS" ] || jr etcnew
   rpm -qa --qf '%{NAME}\n' | sort -u > "$R/rpm.before"
-  run "dnf install(번들 저장소만 · $INSTALL_PKGS)" dnf -y --disablerepo='*' --enablerepo=portal-bareos-local install $INSTALL_PKGS
-  local rc=$?
+  # v2.851(2026-11-02 사용자 화면 — 재현): 설치 목록 중 **이미 설치된 이름은 넘기지 않는다**. dnf(best=True)는 'install <설치된 이름>' 을 번들 판으로 올리는 일로 봐서
+  #   서버의 openssl 3.0.7(el9_4)을 번들의 3.5.8(el9_8)로 올리려 했고, 서버에 설치된 openssl-devel(번들에 없음)이 옛 판을 고정해 거래 전체가 실패했다.
+  #   서버의 시스템 패키지는 서버 판 그대로 둔다 — Bareos 패키지는 새 판을 요구하지 않는다(번들 RPM 메타데이터로 확인). 의존성이 요구하면 그때는 dnf 가 올린다.
+  local want="" have="" n
+  for n in $INSTALL_PKGS; do if rpm -q --quiet "$n" >/dev/null 2>&1; then have="$have $n"; else want="$want $n"; fi; done
+  [ -n "${have// /}" ] && log "이미 설치돼 건너뜀(서버 판 유지):$have"
+  local rc=0
+  if [ -z "${want// /}" ]; then log "설치할 패키지가 없습니다(설치 목록 전부 설치됨)"
+  else run "dnf install(번들 저장소만 ·$want)" dnf -y --disablerepo='*' --enablerepo=portal-bareos-local install $want; rc=$?; fi
   rpm -qa --qf '%{NAME}\n' | sort -u > "$R/rpm.after"
   local new; new="$(comm -13 "$R/rpm.before" "$R/rpm.after" | tr '\n' ' ')"
   [ -n "${new// /}" ] && jr pkgs $new

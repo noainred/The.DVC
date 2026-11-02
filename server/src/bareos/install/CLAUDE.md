@@ -59,6 +59,13 @@
   (`bundleSourceInfo` · 저장 `bundleSource.js` — http/https · 계정 정보 · ?# 금지 · `ssrfBlockReason` 차단 대역 거부). **서버 디렉터리**는 읽기만 한다(복사 · 삭제 없음 — 지우기는 받은 번들 폴더만) ·
   같은 서명 · 해시 검증을 지난 판만 쓰고(`listAllBundles` · `pickBundle` 이 두 폴더) · 개요(화면 열기)가 검증(같은 파일은 기억 · 동시 해시 하나) · 막 바뀐 본체는 `SETTLE_MS` 동안 '확인 중'(서버 디렉터리만 — 포탈이 받은 직후 검증을 막지 않게) ·
   심링크 · 일반 파일이 아닌 것 거부 · 받기는 서버 디렉터리에 같은 판이 검증돼 있으면 받지 않는다.
+- **v2.851 2단계 '번들의 시스템 패키지 판 충돌'**(2026-11-02 사용자 화면 — `cannot install both openssl-libs-1:3.5.8-2.el9_8 from portal-bareos-local and …3.0.7-28.el9_4 from @System` ·
+  `bareosInstallPkgPin2851` · 러너 `②-b` · 변이 8/8): 번들은 rockylinux:9 최신 저장소의 의존 전체라 시스템 패키지 판 태그(el9_8)가 서버(9.4)보다 새로울 수 있다. 번들 RPM 메타데이터로 확인 —
+  Bareos 패키지는 새 OpenSSL 을 요구하지 않는다. 올리려 한 까닭은 **설치 목록의 이미 설치된 이름(openssl · tar)**: dnf(best=True)는 'install <설치된 이름>' 을 번들 판으로 올리는 일로 보고,
+  서버의 openssl-devel(번들에 없음)이 옛 판을 고정하면 거래 전체가 실패한다. → 러너 step2 는 **이미 설치된 이름을 넘기지 않는다**(`rpm -q --quiet` · 서버 시스템 패키지는 서버 판 그대로 ·
+  전부 설치돼 있으면 dnf 없이 진행) · `causes.js base-pkg-pinned`(dnf-conflict 보다 앞 · 이름 · 고정 패키지 · 까닭을 **출력에서 읽어** 적는다 — 'already installed' 줄이 없으면 단정하지 않음 ·
+  명령에는 글자 규칙을 지난 이름만) · 사전 점검 `osrel`(번들 판 태그 최대 vs 서버 VERSION_ID 마이너 · 새로우면 warn + 설치된 -devel 고정 추정(`@@devel`) · 막지 않는다 · 비교 못 하면 unknown).
+  규칙이 객체를 돌려주면 `classifyFailure` 가 그 why · fixes 를 쓴다. 남긴 것: 의존성이 정말 새 판을 요구하는 경우(서버 OS 업데이트 또는 같은 판 번들) · 번들 빌드 판 고정(BASE_RELEASE)은 안 했다.
 - **데모**: mock + 실제 Director 미등록이면 `demo.js`(시간으로 진행하는 합성 작업 · 판정은 실제 코드 · 장비에 닿지 않음).
 - 실환경 미확인(추정 — 첫 현장 설치에서 확인할 것): Bareos `current` 사전 공개판 RPM 이 Rocky 9.x 의 각 마이너에서 `--alldeps` 로 풀리는지(CI 는 rockylinux:9 최신에서만 확인) ·
   `bconsole -c`(이름 있는 Console) TLS-PSK 접속 출력 모양 · `update_bareos_tables` 가 카탈로그 유지 재설치에서 판 차이를 맞추는지 · WebUI 첫 화면 응답 코드.
