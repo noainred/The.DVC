@@ -1,0 +1,183 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>Bareos 운영 — 복원</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=Noto+Sans+KR:wght@400;500;700;800&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+body{margin:0;background:#0a0e17;color:#e6edf6;font-family:"Inter","Noto Sans KR","Apple SD Gothic Neo",sans-serif;font-size:13px}
+a{color:#3b82f6}a:hover{color:#60a5fa}
+.card{background:#141b2d;border:1px solid #243049;border-radius:12px}
+.muted{color:#8b9bb4}
+.mono{font-family:"JetBrains Mono",ui-monospace,monospace}
+.toptab{min-width:84px;min-height:40px;display:inline-flex;align-items:center;justify-content:center;padding:0 18px;text-decoration:none;color:#8b9bb4;font-weight:600;font-size:15px;border-bottom:3px solid transparent}
+.toptab.on{color:#e6edf6;font-weight:800;border-bottom-color:#3b82f6}
+.pill{display:inline-flex;align-items:center;gap:7px;min-height:34px;padding:0 14px;border-radius:8px;text-decoration:none;font-size:13px;font-weight:600;color:#8b9bb4;white-space:nowrap}
+.pill.on{background:#3b82f6;color:#ffffff;font-weight:800}
+.pill .n{font-size:11.5px;font-weight:700;color:#8b9bb4;background:rgba(139,155,180,.14);padding:1px 7px;border-radius:999px}
+.pill.on .n{color:#ffffff;background:rgba(255,255,255,.22)}
+.seg{display:inline-flex;align-items:center;gap:8px;min-height:32px;padding:0 14px;border-radius:8px;border:1px solid #243049;background:#1a2236;color:#8b9bb4;font:inherit;font-size:13px;font-weight:700;cursor:pointer;white-space:nowrap}
+.seg.on{background:#e6edf6;border-color:#e6edf6;color:#0a0e17}
+.seg .n{font-size:11.5px;font-weight:700;padding:1px 7px;border-radius:999px;background:rgba(139,155,180,.14);color:#8b9bb4}
+.seg.on .n{background:rgba(10,14,23,.12);color:#0a0e17}
+.btn{display:inline-flex;align-items:center;gap:6px;min-height:32px;padding:0 12px;border-radius:8px;border:1px solid #243049;background:#1a2236;color:#e6edf6;font:inherit;font-size:12.5px;font-weight:600;cursor:pointer;white-space:nowrap;text-decoration:none}
+.btn.primary{background:#3b82f6;border-color:#3b82f6;color:#ffffff}
+.btn.sm{min-height:28px;padding:0 10px;font-size:12px}
+.chip{display:inline-flex;align-items:center;gap:6px;min-height:28px;padding:0 11px;border-radius:999px;border:1px solid #243049;background:#1a2236;color:#8b9bb4;font:inherit;font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap}
+.chip.on{background:#3b82f6;border-color:#3b82f6;color:#ffffff}
+.dot{display:inline-block;width:8px;height:8px;border-radius:50%;flex:none}
+.ok{background:#4ade80}.warn{background:#fbbf24}.bad{background:#f87171}.run{background:#60a5fa}.unk{background:transparent;border:1.5px dashed #8b9bb4}
+.tag{display:inline-flex;align-items:center;height:20px;padding:0 8px;border-radius:999px;font-size:11px;font-weight:700;white-space:nowrap}
+.tag.ok{background:rgba(34,197,94,.14);color:#86efac}.tag.bad{background:rgba(239,68,68,.16);color:#fca5a5}.tag.warn{background:rgba(245,158,11,.16);color:#fcd34d}.tag.run{background:rgba(59,130,246,.18);color:#93c5fd}.tag.unk{background:rgba(139,155,180,.14);color:#aebbd0}.tag.os{background:rgba(168,85,247,.16);color:#d8b4fe}
+.kpi{display:flex;flex-direction:column;gap:6px;padding:14px 16px;min-width:0}
+.kpi .lbl{font-size:12px;font-weight:600;color:#8b9bb4}
+.kpi .big{font-size:28px;font-weight:800;letter-spacing:-.01em;line-height:1.1}
+.kpi .sub{font-size:12px;color:#8b9bb4;display:flex;flex-wrap:wrap;gap:4px 10px;align-items:center}
+table{border-collapse:collapse;width:100%}
+th{font-size:12px;font-weight:600;color:#8b9bb4;text-align:left;padding:9px 12px;background:#0f1626;border-bottom:1px solid #243049;white-space:nowrap}
+td{padding:10px 12px;border-bottom:1px solid #1f2a40;vertical-align:middle;white-space:nowrap;font-size:13px}
+td.r,th.r{text-align:right}
+.sm{font-size:11.5px;color:#8b9bb4}
+.sect{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:12px 16px;border-bottom:1px solid #1f2a40}
+.sect h2{margin:0;font-size:14px;font-weight:800}
+.prog{display:inline-flex;height:6px;border-radius:3px;overflow:hidden;background:#1a2236;width:90px;vertical-align:middle}
+.prog i{display:block;height:100%;background:#60a5fa}
+.ico{width:14px;height:14px;flex:none}
+</style>
+</helmet>
+<div style="width:100%;max-width:1440px;margin:0 auto;box-sizing:border-box;padding:18px 24px 28px;display:flex;flex-direction:column;gap:14px;min-width:0">
+
+  <div style="display:flex;flex-wrap:wrap;align-items:flex-end;gap:12px">
+    <div style="min-width:0">
+      <div style="font-size:22px;font-weight:800">Backup 현황</div>
+      <div class="muted" style="font-size:13px">Bareos — 백업한 VM 을 그 법인의 Director 에서 복원합니다(관리자 · 본인 OTP).</div>
+    </div>
+  </div>
+  <div role="tablist" aria-label="Backup 현황 보기" style="display:flex;gap:4px;box-shadow:inset 0 -1px 0 #243049">
+    <a class="toptab" href="Main.dc.html">Summary</a>
+    <a class="toptab" href="Main.dc.html">Detail</a>
+    <a class="toptab" href="Main.dc.html">Veeam</a>
+    <a class="toptab on" href="RestoreHub.dc.html" aria-current="page">Bareos</a>
+  </div>
+
+  <div style="display:flex;flex-wrap:wrap;align-items:center;gap:10px 14px">
+    <nav aria-label="Bareos 보기" style="display:inline-flex;flex-wrap:wrap;gap:4px;background:#0f1626;border:1px solid #243049;border-radius:10px;padding:3px;max-width:100%">
+      <a class="pill" href="Main.dc.html">현황</a>
+      <a class="pill" href="Corp.dc.html">법인</a>
+      <a class="pill on" href="RestoreHub.dc.html" aria-current="page">운영 <span class="n">관리자</span></a>
+      <a class="pill" href="Policy.dc.html">정책 · 보존</a>
+      <a class="pill" href="Settings.dc.html">설정</a>
+    </nav>
+    <div role="tablist" aria-label="운영 보기" style="display:inline-flex;flex-wrap:wrap;gap:6px">
+      <a class="seg" href="Operate.dc.html" role="tab" aria-selected="false">백업 대상 <span class="n">1,206</span></a>
+      <button class="seg" type="button" role="tab" aria-selected="false">백업 그룹 <span class="n">6</span></button>
+      <button class="seg on" type="button" role="tab" aria-selected="true">복원 <span class="n">1 진행 중</span></button>
+      <button class="seg" type="button" role="tab" aria-selected="false">진행 · 이력 <span class="n">3 진행 중</span></button>
+    </div>
+    <div style="margin-left:auto;display:flex;flex-wrap:wrap;align-items:center;gap:8px">
+      <span class="muted" style="font-size:12px">기준 11-02 03:20</span>
+      <button class="btn" type="button">새로고침</button>
+    </div>
+  </div>
+
+  <div style="display:flex;align-items:center;gap:8px;font-size:12.5px;color:#fcd34d">
+    <svg class="ico" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><circle cx="8" cy="8" r="6.5"></circle><path d="M8 5v3.5M8 11h.01"></path></svg>
+    <span>데모 Director(합성 응답 — 어디에도 접속하지 않습니다).</span>
+  </div>
+
+  <div style="display:grid;grid-template-columns:repeat(4, minmax(0, 1fr));gap:12px">
+    <div class="card kpi" style="border-color:rgba(96,165,250,.45)">
+      <div class="lbl">지금 진행 중 복원</div>
+      <div class="big" style="color:#93c5fd">1</div>
+      <div class="sub"><span>erp-db-02 → 새 VM · 12%</span></div>
+    </div>
+    <div class="card kpi">
+      <div class="lbl">최근 7일 복원</div>
+      <div class="big">7</div>
+      <div class="sub"><span><i class="dot ok"></i> 성공 6</span><span><i class="dot bad"></i> 실패 1</span><span>취소 0</span></div>
+    </div>
+    <div class="card kpi">
+      <div class="lbl">복원 가능 VM</div>
+      <div class="big">1,196</div>
+      <div class="sub"><span>성공 백업이 있는 대상</span><span>백업 없음 10</span></div>
+    </div>
+    <div class="card kpi">
+      <div class="lbl">Director 상태</div>
+      <div class="big">28</div>
+      <div class="sub"><span><i class="dot ok"></i> 복원 가능 25</span><span><i class="dot bad"></i> 인증 정지 1</span><span><i class="dot warn"></i> 조회 실패 2</span></div>
+    </div>
+  </div>
+
+  <div class="card" style="overflow:hidden">
+    <div class="sect">
+      <h2>복원할 VM 고르기</h2>
+      <span class="muted" style="font-size:12px">이름으로 찾거나 법인을 고르세요 — ‘복원 시작’ 을 누르면 3단계(지점 → 방식·대상 → 확인)</span>
+      <div style="margin-left:auto;display:flex;flex-wrap:wrap;gap:6px;align-items:center">
+        <button class="chip on" type="button">전체 1,206</button>
+        <button class="chip" type="button"><i class="dot ok"></i> 북미 356</button>
+        <button class="chip" type="button"><i class="dot bad"></i> 유럽 302</button>
+        <button class="chip" type="button"><i class="dot ok"></i> 아시아 311</button>
+        <button class="chip" type="button"><i class="dot warn"></i> 중국 237</button>
+        <input type="search" aria-label="VM 찾기" placeholder="VM 이름 · 폴더" value="erp" class="btn" style="width:220px;font-weight:500">
+      </div>
+    </div>
+    <div style="overflow-x:auto">
+    <table>
+      <thead><tr><th>VM</th><th>법인 · 위치</th><th>마지막 성공 백업</th><th>최근 성공(10건 중)</th><th>상태</th><th aria-label="동작"></th></tr></thead>
+      <tbody>
+        <tr><td><b>erp-db-02</b> <span class="tag os">Linux</span></td><td>vcenter-us-east-01 <span class="sm">· DC-East › Prod / DB</span></td><td>11-01 01:41 <span class="sm">· Incremental · 12.8 GB</span></td><td>9건 <span class="sm">· 가장 오래된 Full 10-26</span></td><td><span class="tag run">복원 진행 중</span> <span class="sm">jobid 48310 · 12%</span></td><td><button class="btn sm" type="button" disabled title="이 대상의 다른 복원이 진행 중입니다 — 끝난 뒤 다시">복원 시작</button></td></tr>
+        <tr><td><b>erp-db-03</b> <span class="tag os">Linux</span></td><td>vcenter-us-east-01 <span class="sm">· DC-East › Prod / DB</span></td><td>11-02 01:52 <span class="sm">· Incremental · 14.2 GB</span></td><td>10건 <span class="sm">· 가장 오래된 Full 10-26</span></td><td><span class="tag ok">가능</span></td><td><a class="btn sm primary" href="RestoreStep1.dc.html">복원 시작 →</a></td></tr>
+        <tr><td><b>erp-app-01</b> <span class="tag os">Windows</span></td><td>vcenter-us-east-01 <span class="sm">· DC-East › Prod / App</span></td><td>11-02 02:08 <span class="sm">· Differential · 3.1 GB</span></td><td>10건 <span class="sm">· 가장 오래된 Full 10-25</span></td><td><span class="tag ok">가능</span></td><td><a class="btn sm primary" href="RestoreStep1.dc.html">복원 시작 →</a></td></tr>
+        <tr><td><b>erp-web-02</b> <span class="tag os">Linux</span> <span class="tag unk">잡 꺼짐</span></td><td>vcenter-us-east-01 <span class="sm">· DC-East › Prod / Web</span></td><td>10-20 01:30 <span class="sm">· Full · 88 GB</span></td><td>3건 <span class="sm">· 가장 오래된 Full 10-06</span></td><td><span class="tag ok">가능</span> <span class="sm">잡이 꺼져 있어도 복원은 됩니다</span></td><td><a class="btn sm primary" href="RestoreStep1.dc.html">복원 시작 →</a></td></tr>
+        <tr><td><b>eu-erp-01</b> <span class="tag os">Windows</span></td><td>vcenter-eu-central-01 <span class="sm">· DC-FRA › Prod</span></td><td>10-31 22:05 <span class="sm">· Incremental · 6.4 GB</span></td><td>10건 <span class="sm">· 가장 오래된 Full 10-24</span></td><td><span class="tag bad">Director 인증 정지</span> <span class="sm">설정 › Director 에서 비밀번호 확인</span></td><td><button class="btn sm" type="button" disabled title="Director 인증이 정지돼 복원 지점을 읽을 수 없습니다">복원 시작</button></td></tr>
+        <tr><td><b>erp-test-07</b> <span class="tag os">Linux</span></td><td>vcenter-ap-northeast-01 <span class="sm">· DC-Tokyo › Dev</span></td><td>—</td><td>0건 <span class="sm">· 성공한 백업 없음</span></td><td><span class="tag unk">백업 없음</span></td><td><button class="btn sm" type="button" disabled title="성공한 백업이 없습니다">복원 시작</button></td></tr>
+        <tr><td colspan="6" class="sm" style="padding:10px 12px">‘erp’ 로 좁힌 6대 — 전체 1,206대 · 복원 지점 목록은 ‘복원 시작’ 때 그 법인 Director 카탈로그에서 읽습니다(여기 표는 원장 값만).</td></tr>
+      </tbody>
+    </table>
+    </div>
+  </div>
+
+  <div class="card" style="overflow:hidden">
+    <div class="sect">
+      <h2>진행 중 · 최근 복원</h2>
+      <span class="muted" style="font-size:12px">전 법인 · 포탈이 시작한 복원(Director 에서 손으로 한 복원은 여기 없습니다)</span>
+      <div style="margin-left:auto;display:flex;flex-wrap:wrap;gap:6px;align-items:center">
+        <button class="chip on" type="button">전체 8</button>
+        <button class="chip" type="button"><i class="dot run"></i> 진행 중 1</button>
+        <button class="chip" type="button"><i class="dot ok"></i> 성공 6</button>
+        <button class="chip" type="button"><i class="dot bad"></i> 실패 1</button>
+        <select class="btn" aria-label="법인"><option>법인 전체</option><option>북미 법인</option></select>
+      </div>
+    </div>
+    <div style="overflow-x:auto">
+    <table>
+      <thead><tr><th>복원 jobid</th><th>VM</th><th>법인</th><th>방식 → 대상</th><th>복원 지점</th><th>요청</th><th>상태</th><th class="r">소요</th><th aria-label="동작"></th></tr></thead>
+      <tbody>
+        <tr style="background:rgba(59,130,246,.08)"><td class="mono">48310</td><td><b>erp-db-02</b></td><td>북미</td><td>새 VM → <span class="mono">erp-db-02-restored-1102</span> <span class="sm">· DS-Prod-02 · 꺼진 채</span></td><td>11-01 01:41 <span class="sm">· 체인 7건 · 476 GB</span></td><td>admin <span class="sm">· 03:21</span></td><td><span class="tag run">실행 중</span> <span class="prog" style="margin:0 6px"><i style="width:12%"></i></span><span class="sm">12% · 1.1 GB/s</span></td><td class="r">6분째</td><td><span style="display:inline-flex;gap:6px"><a class="btn sm" href="RestoreStep3.dc.html">진행</a><button class="btn sm" type="button">로그</button></span></td></tr>
+        <tr><td class="mono">48244</td><td><b>fin-app-01</b></td><td>북미</td><td>새 VM → <span class="mono">fin-app-01-restored-1101</span></td><td>10-31 02:08 <span class="sm">· 체인 5건 · 231 GB</span></td><td>admin <span class="sm">· 11-01 14:02</span></td><td><span class="tag ok">성공</span> <span class="sm">· 인벤토리 반영됨</span></td><td class="r">19분</td><td><span style="display:inline-flex;gap:6px"><button class="btn sm" type="button">결과</button><button class="btn sm" type="button">로그</button><a class="btn sm" href="Corp.dc.html">VM 보기</a></span></td></tr>
+        <tr><td class="mono">48201</td><td><b>ap-web-11</b></td><td>아시아</td><td>원래 VM 에 덮어쓰기</td><td>10-30 00:12 <span class="sm">· 체인 6건 · 148 GB</span></td><td>ops.kim <span class="sm">· 10-31 09:40</span></td><td><span class="tag ok">성공</span></td><td class="r">11분</td><td><span style="display:inline-flex;gap:6px"><button class="btn sm" type="button">결과</button><button class="btn sm" type="button">로그</button></span></td></tr>
+        <tr style="background:rgba(239,68,68,.05)"><td class="mono">48177</td><td><b>legacy-fs-01</b></td><td>북미</td><td>FD 로컬 VMDK → <span class="mono">/tmp/bareos-restores/</span></td><td>10-28 02:10 <span class="sm">· 체인 1건 · 1.0 TB</span></td><td>admin <span class="sm">· 10-30 16:11</span></td><td><span class="tag bad">실패</span> <span class="sm">· FD 디스크 여유 부족(로그)</span></td><td class="r">3분</td><td><span style="display:inline-flex;gap:6px"><button class="btn sm" type="button">결과</button><button class="btn sm" type="button">로그</button><a class="btn sm" href="RestoreStep1.dc.html">다시 복원</a></span></td></tr>
+        <tr><td colspan="9" class="sm" style="text-align:center;padding:10px">… 4건 더 — 대상마다 최근 기록만 원장에 남습니다(전체는 Director 카탈로그) · 소요는 Director 보고의 Elapsed time</td></tr>
+      </tbody>
+    </table>
+    </div>
+  </div>
+
+  <div style="display:flex;flex-wrap:wrap;align-items:center;gap:10px;font-size:12px;color:#8b9bb4">
+    <span>복원은 그 법인의 Director · FD 에서 돌고 포탈은 명령과 결과만 주고받습니다(백업 데이터는 법인 밖으로 나가지 않습니다). 다른 vCenter 로는 복원할 수 없습니다(플러그인 제약).</span>
+    <button class="btn" type="button" style="min-height:26px;font-size:11.5px;margin-left:auto">읽는 법 ⓘ</button>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1180}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

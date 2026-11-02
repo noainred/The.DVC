@@ -41,11 +41,11 @@ h2{margin:0;font-size:15px;font-weight:800}
       <div class="box old"><span class="k">1</span>통합 현황 <span class="to">→ <b>① 현황</b></span></div>
       <div class="box old"><span class="k">2</span>법인별 현황 <span class="to">→ <b>② 법인</b></span></div>
       <div class="box old"><span class="k">3</span>진행 현황 <span class="muted" style="font-size:12px">(전체 법인 · 단일 법인 · 속도 상태)</span><span class="to">→ <b>③ 운영 › 진행 · 이력</b></span></div>
-      <div class="box old"><span class="k">4</span>백업 대상 <span class="muted" style="font-size:12px">(행마다 버튼 6개)</span><span class="to">→ <b>③ 운영 › 백업 대상</b></span></div>
+      <div class="box old"><span class="k">4</span>백업 대상 <span class="muted" style="font-size:12px">(행마다 버튼 6개 · ‘복원…’ 은 760px 창 하나)</span><span class="to">→ <b>③ 운영 › 백업 대상 · 복원</b></span></div>
       <div class="box old"><span class="k">5</span>백업 그룹 <span class="to">→ <b>③ 운영 › 백업 그룹</b></span></div>
       <div class="box old"><span class="k">6</span>정책 · 일정 <span class="to">→ <b>④ 정책 · 보존</b></span></div>
       <div class="box old"><span class="k">7</span>보존 · 풀 <span class="muted" style="font-size:12px">(수집 상태 표가 6과 중복)</span><span class="to">→ <b>④ 정책 · 보존</b></span></div>
-      <div class="box old"><span class="k">8</span>실행 현황 · 이력 <span class="to">→ <b>③ 운영 › 진행 · 이력</b></span></div>
+      <div class="box old"><span class="k">8</span>실행 현황 · 이력 <span class="muted" style="font-size:12px">(아래쪽 복원 이력 표 포함)</span><span class="to">→ <b>③ 운영 › 진행 · 이력 / 복원</b></span></div>
       <div class="box old"><span class="k">9</span>설정 <span class="muted" style="font-size:12px">(기본 설정 · 완전 설치 · 법인별 Bareos · 계정 통합)</span><span class="to">→ <b>⑤ 설정</b></span></div>
       <div class="muted" style="font-size:12px;margin-top:4px">같은 탭 줄이 도구 키마다 다른 자리·다른 모양으로 두 번 그려졌고, KPI 카드 7장 · 필터 칩 10개 · 설명 문단이 화면마다 반복됐습니다.</div>
     </div>
@@ -57,7 +57,8 @@ h2{margin:0;font-size:15px;font-weight:800}
       <div class="box new"><span class="k">③</span><b>운영</b><span class="muted" style="font-size:12px">관리자가 하는 일 전부</span><span class="to">관리자</span></div>
       <div class="box sub">백업 대상 — 표는 6열, 버튼은 패널 안(지금 백업 · 결과 · 로그 · 복원 · 비활성 · 삭제)</div>
       <div class="box sub">백업 그룹 — 그대로(법인 고르기 · 새 그룹 · 폴더에서 VM 고르기)</div>
-      <div class="box sub">진행 · 이력 — 지금 도는 백업(열린 동안만 Director 조회) + 끝난 실행 · 복원 이력</div>
+      <div class="box sub">복원 — 허브(복원할 VM 고르기 · 진행 중 · 최근 복원) + 3단계 마법사(지점 → 방식·대상 → 확인·OTP) · 복원 이력은 여기 한 곳</div>
+      <div class="box sub">진행 · 이력 — 지금 도는 백업(열린 동안만 Director 조회) + 끝난 실행</div>
       <div class="box new"><span class="k">④</span><b>정책 · 보존</b><span class="muted" style="font-size:12px">하루 1회 수집본 — 일정 · JobDefs · FileSet · 풀 · 볼륨 · 보존을 한 페이지 구획으로</span><span class="to">조회</span></div>
       <div class="box new"><span class="k">⑤</span><b>설정</b><span class="muted" style="font-size:12px">Director 표가 중심 · 완전 설치 · 법인별 설정 · 계정은 왼쪽 목록</span><span class="to">전체 범위 관리자</span></div>
     </div>

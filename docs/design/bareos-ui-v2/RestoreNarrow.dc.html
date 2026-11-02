@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>Bareos 복원 2/3 — 400px</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=Noto+Sans+KR:wght@400;500;700;800&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+body{margin:0;background:#0a0e17;color:#e6edf6;font-family:"Inter","Noto Sans KR","Apple SD Gothic Neo",sans-serif;font-size:13px}
+a{color:#3b82f6}a:hover{color:#60a5fa}
+.card{background:#141b2d;border:1px solid #243049;border-radius:12px}
+.muted{color:#8b9bb4}
+.mono{font-family:"JetBrains Mono",ui-monospace,monospace}
+.toptab{min-width:72px;min-height:40px;display:inline-flex;align-items:center;justify-content:center;padding:0 10px;text-decoration:none;color:#8b9bb4;font-weight:600;font-size:14px;border-bottom:3px solid transparent;flex:1 1 0}
+.toptab.on{color:#e6edf6;font-weight:800;border-bottom-color:#3b82f6}
+.pill{display:inline-flex;align-items:center;gap:6px;min-height:34px;padding:0 12px;border-radius:8px;text-decoration:none;font-size:13px;font-weight:600;color:#8b9bb4;white-space:nowrap}
+.pill.on{background:#3b82f6;color:#ffffff;font-weight:800}
+.btn{display:inline-flex;align-items:center;gap:6px;min-height:32px;padding:0 12px;border-radius:8px;border:1px solid #243049;background:#1a2236;color:#e6edf6;font:inherit;font-size:12.5px;font-weight:600;cursor:pointer;white-space:nowrap;text-decoration:none}
+.btn.primary{background:#3b82f6;border-color:#3b82f6;color:#ffffff}
+.dot{display:inline-block;width:8px;height:8px;border-radius:50%;flex:none}
+.ok{background:#4ade80}
+.tag{display:inline-flex;align-items:center;height:20px;padding:0 8px;border-radius:999px;font-size:11px;font-weight:700;white-space:nowrap}
+.tag.ok{background:rgba(34,197,94,.14);color:#86efac}.tag.bad{background:rgba(239,68,68,.16);color:#fca5a5}.tag.unk{background:rgba(139,155,180,.14);color:#aebbd0}.tag.incr{background:rgba(139,155,180,.14);color:#c7d2e3}
+.step{display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:10px;border:1px solid #243049;background:#0f1626;color:#8b9bb4;font-weight:700;font-size:12px;min-width:0;text-decoration:none}
+.step .k{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:50%;background:#1a2236;color:#8b9bb4;font-size:11px;flex:none}
+.step.on{border-color:#3b82f6;color:#e6edf6}.step.on .k{background:#3b82f6;color:#ffffff}
+.step.done{color:#e6edf6}.step.done .k{background:#4ade80;color:#0a0e17}
+.mode{border:1px solid #243049;border-radius:12px;background:#0f1626;padding:12px 14px;display:flex;flex-direction:column;gap:10px;min-width:0}
+.mode.sel{border-color:#3b82f6;background:rgba(59,130,246,.08)}
+.mode .h{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.mode .h b{font-size:14px}
+.chk{display:flex;flex-direction:column;gap:6px;font-size:12.5px}
+.chk .i{display:flex;align-items:flex-start;gap:8px}
+.chk .m{width:18px;height:18px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-size:11px;font-weight:800;flex:none}
+.chk .m.ok{background:rgba(34,197,94,.18);color:#86efac}.chk .m.bad{background:rgba(239,68,68,.18);color:#fca5a5}.chk .m.unk{background:rgba(139,155,180,.18);color:#aebbd0}
+.field{display:flex;flex-direction:column;gap:4px;font-size:12px;color:#8b9bb4;min-width:0}
+.field input,.field select{min-width:0;width:100%;box-sizing:border-box;background:#141b2d;border:1px solid #243049;border-radius:8px;color:#e6edf6;padding:8px 10px;font:inherit;font-size:13px}
+.sm{font-size:11.5px;color:#8b9bb4}
+</style>
+</helmet>
+<div style="width:100%;max-width:400px;margin:0 auto;box-sizing:border-box;padding:14px 16px 24px;display:flex;flex-direction:column;gap:12px;min-width:0">
+  <div style="font-size:20px;font-weight:800">Backup 현황</div>
+  <div role="tablist" aria-label="Backup 현황 보기" style="display:flex;gap:2px;box-shadow:inset 0 -1px 0 #243049">
+    <a class="toptab" href="Main.dc.html">Summary</a><a class="toptab" href="Main.dc.html">Detail</a><a class="toptab" href="Main.dc.html">Veeam</a><a class="toptab on" href="RestoreHub.dc.html" aria-current="page">Bareos</a>
+  </div>
+  <nav aria-label="Bareos 보기" style="display:flex;flex-wrap:wrap;gap:4px;background:#0f1626;border:1px solid #243049;border-radius:10px;padding:3px">
+    <a class="pill" href="Main.dc.html">현황</a><a class="pill" href="Corp.dc.html">법인</a><a class="pill on" href="RestoreHub.dc.html" aria-current="page">운영</a><a class="pill" href="Policy.dc.html">정책 · 보존</a><a class="pill" href="Settings.dc.html">설정</a>
+  </nav>
+  <a class="btn" href="RestoreHub.dc.html" style="align-self:flex-start;min-height:28px;font-size:12px">← 운영 › 복원</a>
+
+  <div class="card" style="padding:14px;display:flex;flex-direction:column;gap:12px">
+    <div style="display:flex;flex-direction:column;gap:4px">
+      <div style="font-size:17px;font-weight:800">복원 — erp-db-03</div>
+      <div class="sm">지점 11-01 01:52 <span class="tag incr">Incremental</span> · 체인 5건 · 492 GB</div>
+      <div style="display:inline-flex;align-items:center;gap:6px;font-size:12px"><i class="dot ok"></i>Director ‘북미 법인’ · FD <span class="mono">bareos-r1-fd</span></div>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(3, minmax(0, 1fr));gap:6px">
+      <a class="step done" href="RestoreStep1.dc.html"><span class="k">✓</span>지점</a>
+      <div class="step on"><span class="k">2</span>방식 · 대상</div>
+      <div class="step"><span class="k">3</span>확인</div>
+    </div>
+
+    <div class="mode sel">
+      <label class="h" for="n-new"><input type="radio" name="mode" id="n-new" checked><b>새 VM 으로</b><span class="tag ok">권장</span></label>
+      <div class="sm">새 MAC · UUID · 꺼진 채 — 원래 VM 은 그대로</div>
+      <label class="field">새 VM 이름<input value="erp-db-03-restored-1102"><span class="sm" style="color:#86efac">✓ 같은 이름 없음</span></label>
+      <label class="field">데이터스토어<select><option>DS-Prod-02 — 여유 4.1 TB</option></select></label>
+      <label class="field">놓을 곳<select><option>클러스터 Prod-Cluster-A(백업 당시)</option></select></label>
+    </div>
+    <div class="mode">
+      <label class="h" for="n-orig"><input type="radio" name="mode" id="n-orig" disabled><b>원래 VM 에 덮어쓰기</b><span class="tag bad">지금은 불가</span></label>
+      <div class="chk">
+        <div class="i"><span class="m bad">✕</span><span>VM 이 켜져 있음 — 끈 뒤 ‘다시 확인’</span></div>
+        <div class="i"><span class="m ok">✓</span><span>스냅샷 0 · 위치 같음 · 동명 VM 없음</span></div>
+      </div>
+      <button class="btn" type="button" style="align-self:flex-start;min-height:28px;font-size:12px">다시 확인</button>
+    </div>
+    <div class="mode">
+      <label class="h" for="n-vmdk"><input type="radio" name="mode" id="n-vmdk"><b>FD 로컬 VMDK 파일로</b><span class="tag unk">운영자용</span></label>
+      <div class="sm">FD 의 /tmp/bareos-restores/ 에 풉니다 · 디스크 여유는 포탈이 모릅니다</div>
+    </div>
+
+    <div class="card" style="padding:12px;background:#0f1626;display:flex;flex-direction:column;gap:6px">
+      <b style="font-size:13px">지금까지 고른 것</b>
+      <div class="sm">erp-db-03 · 11-01 01:52 · 5건 492 GB · 새 VM <span class="mono">erp-db-03-restored-1102</span> · DS-Prod-02 · Prod-Cluster-A · 꺼진 채</div>
+    </div>
+    <div style="display:flex;gap:8px"><a class="btn" href="RestoreStep1.dc.html">← 이전</a><a class="btn primary" href="RestoreStep3.dc.html" style="flex:1 1 0;justify-content:center">다음 — 확인 →</a></div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":400,"height":1500}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>
