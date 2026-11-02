@@ -95,6 +95,7 @@ import { numOrNull } from '../util/numOrNull.js';
 import { canonicalAgent } from '../util/agentKey.js';   // v2.611 CEN2611-02 — CVP 수신 저장 키 대소문자 정규화   // v2.600 CEN2600-01·RECENT2600-01 — 엣지가 보낸 수치 좁히기
 import { createChangeLogger } from '../util/logThrottle.js'; // v2.583: 반복 수신 로그 조절
 import { capStr, capTrim } from '../util/capStr.js'; // v2.606 TIM2606-02: 상주 기록 글자 평탄화
+import { noteAgentContact } from '../central/agentContact.js'; // v2.849 — 엣지 마지막 인증 요청 시각(완전 설치 대상의 '엣지 응답')
 const gpuRecvLog = createChangeLogger();
 export const centralRouter = Router();
 let _getPaths = null;
@@ -326,6 +327,8 @@ centralRouter.use((req, res, next) => {
     sharedStats.uses++; sharedStats.lastAt = Date.now();
     sharedStats.lastAgent = want || registerName(req) || '(unknown)'; sharedStats.lastPath = req.path;
   }
+  // v2.849: 엣지 생존 신호 — 개별 토큰은 그 이름, 공유 토큰은 중앙이 이미 아는 이름일 때만(지어낸 이름으로 표를 채우지 못하게)
+  try { noteAgentContact(auth.mode === 'agent' ? String(auth.agent || '') : (want && edgeNameKnown(want) ? want : '')); } catch { /* 기록 실패는 요청을 막지 않는다 */ }
   next();
 });
 

@@ -2,7 +2,8 @@
  * bareos/install/targets.js — 완전 설치 대상 표(v2.844): vCenter(법인)마다 엣지 노드 · 배포 등록부 SSH 계정 · 엣지 응답 · Director 등록 여부.
  *
  * 법인 · vCenter · Bareos 는 1:1:1(루트 CLAUDE.md) — 행 하나 = vCenter 하나.
- *  - 엣지: 그 vCenter 의 인벤토리를 올리는 엣지(listInventory().agent — Veeam·Bareos 설정 화면과 같은 출처) · 응답 = 마지막 인벤토리 수신 시각.
+ *  - 엣지: 그 vCenter 의 인벤토리를 올리는 엣지(listInventory().agent — Veeam·Bareos 설정 화면과 같은 출처) · 응답 = 마지막 인벤토리 수신 시각과
+ *    그 엣지의 마지막 인증된 중앙 요청(v2.849 central/agentContact.js) 중 최근 값.
  *  - SSH: 배포 등록부(agent-deploy-targets.json)에서 agentName 이 그 엣지인 항목. 비밀번호(또는 키)가 저장돼 있어야 한다(다시 묻지 않는다).
  *  - Director: 그 vCenter 의 매핑(sites)이 가리키는 Director. 있으면 '초기화 후 재설치' — 단 Director 주소가 그 엣지 노드(SSH 주소 또는
  *    이 기능이 기록한 서버 주소)일 때만(다른 서버의 Bareos 는 이 기능이 지우지 않는다).
@@ -12,6 +13,7 @@ import { store } from '../../store.js';
 import { listInventory } from '../../central/inventory.js';
 import { listTargetsRaw } from '../../agent/deployRegistry.js';
 import { loadSettings, siteFor, directorById } from '../settings.js';
+import { agentLastContact } from '../../central/agentContact.js';
 
 export const EDGE_STALE_MS = 30 * 60_000;
 const lc = (s) => String(s ?? '').trim().toLowerCase();
@@ -20,7 +22,7 @@ const lc = (s) => String(s ?? '').trim().toLowerCase();
  * 순수 판정(시험용 주입). knownHostAddrs: vcenterId → 이 기능이 설치한 서버 주소(작업 기록).
  * @returns {{ vcenterId, vcenterName, vcHost, agent, edgeAt, edgeAgeMs, targetId, sshHost, sshPort, sshUser, hasPassword, director, mode, can, why }[]}
  */
-export function buildTargets({ vcenters = [], inventory = [], deployTargets = [], settings = { directors: [], sites: [] }, knownHostAddrs = new Map(), now = Date.now() } = {}) {
+export function buildTargets({ vcenters = [], inventory = [], deployTargets = [], settings = { directors: [], sites: [] }, knownHostAddrs = new Map(), now = Date.now(), contactOf = () => null } = {}) {
   const inv = new Map(inventory.map((i) => [i.vcenterId, i]));
   return vcenters.map((v) => {
     const i = inv.get(v.id) || null;
@@ -28,7 +30,11 @@ export function buildTargets({ vcenters = [], inventory = [], deployTargets = []
     const t = agent ? deployTargets.find((x) => lc(x.agentName) === lc(agent) && x.enabled !== false) || deployTargets.find((x) => lc(x.agentName) === lc(agent)) : null;
     const site = siteFor(v.id, settings);
     const dir = site ? directorById(site.directorId, settings) : null;
-    const edgeAt = Number(i?.at) || null;
+    // v2.849(사용자 화면 — 엣지가 살아 있어도 '응답 없음(55153분 전)'): 인벤토리 수신 시각만 보면 중앙이 직접 수집하는 vCenter 의 엣지는
+    //   오래전 시각이 남는다 — 그 엣지가 중앙에 보낸 **마지막 인증된 요청**(central/agentContact.js)과 둘 중 최근 값으로 본다.
+    const invAt = Number(i?.at) || null;
+    const contactAt = agent ? Number(contactOf(agent)) || null : null;
+    const edgeAt = invAt && contactAt ? Math.max(invAt, contactAt) : (invAt || contactAt);
     const edgeAgeMs = edgeAt ? Math.max(0, now - edgeAt) : null;
     const row = {
       vcenterId: v.id, vcenterName: v.name || v.id, vcHost: String(v.host || '').replace(/^https?:\/\//, '').replace(/\/.*$/, ''),
@@ -58,7 +64,7 @@ export function listInstallTargets({ knownHostAddrs = new Map() } = {}) {
   const snap = store.get();
   let inventory = []; try { inventory = listInventory(); } catch { inventory = []; }
   let deployTargets = []; try { deployTargets = listTargetsRaw(); } catch { deployTargets = []; }
-  return buildTargets({ vcenters: snap?.vcenters || [], inventory, deployTargets, settings: loadSettings(), knownHostAddrs });
+  return buildTargets({ vcenters: snap?.vcenters || [], inventory, deployTargets, settings: loadSettings(), knownHostAddrs, contactOf: agentLastContact });
 }
 
 /** 공개용(비밀·내부 id 정리). */
