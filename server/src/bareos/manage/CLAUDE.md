@@ -18,6 +18,7 @@
 - **스토리지 삭제**: 볼륨 경로를 못 읽으면 · 심링크면 멈춘다(못 읽은 값은 0 이 아니다 — F3) · 볼륨 파일 0 · 이 스토리지(`Storage =`) · 이 장치(`Device =`)를 가리키는 설정 0(대소문자 · 한 줄 리소스) ·
   매핑에 쓰는 스토리지 · 마지막 스토리지 거부 · **디렉터리는 지우지 않는다**(원래 있던 · 나눠 쓰는 디렉터리일 수 있다 — F6).
 - **WebUI 계정**: `TLS Enable = No`(bareos-webui(php)는 TLS-PSK 를 못 쓴다 — 패키지 admin.conf.example) · Profile 은 Director 에 있는 것만 · 포탈 전용 콘솔(d.consoleName) · 패키지 콘솔(bareos-mon)은 바꾸지 않는다.
+  만든 뒤 시험(`verifyConsoleLogin`)의 임시 bconsole.conf 는 **Director 칸 · Console 칸 둘 다 `TLS Enable = No`**(v2.852.1 실환경 — Console 칸에만 두면 bconsole 이 Director 칸 기본값으로 TLS 를 시도해 'Tls handshake failed' · 계정이 되돌려졌다).
   비밀번호는 입력(12자 이상 · `"` `\` 공백 없음) 또는 생성(24자) — **생성한 것만 그 응답에 한 번**(감사 · 로그 · 저장 없음). 웹 `bareosCorpText.js` 의 본문 · 판정이 서버와 글자까지 같다(시험 ③).
 - **SSH 출처**(`service.sshSourceFor`): 배포 등록부 계정은 Director 주소가 그 엣지 노드(SSH 주소 · 완전 설치 기록 · 담당 엣지의 루프백)일 때만 ·
   **담당 엣지가 있으면 그 엣지의 계정만**(다른 법인 엣지의 root 비밀번호를 이 엣지 대행 작업에 싣지 않는다 — F1) · 등록부 출처면 요청 host 를 받지 않는다(저장 비밀은 저장 주소로만 — v2.480).

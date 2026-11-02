@@ -6,6 +6,7 @@
 
 ## 목차
 
+- Bareos v2.852.1 WebUI 계정 만들기 실패 'Failed to connect to Director' — 시험 bconsole 의 TLS 끔(2026-11-02)
 - Bareos v2.851.1 완전 설치 마무리 '사이트 매핑의 vcserver 주소가 올바르지 않습니다' — 매핑 주소를 vCenter 등록부에서(2026-11-02)
 - Bareos v2.851 완전 설치 2단계 '번들 패키지 판 충돌' — 러너 · 원인 판정 · 사전 점검(2026-11-02)
 - Bareos v2.850 완전 설치 번들 — 받는 주소 지정 · 서버 디렉터리에 받아 둔 번들 사용 · 원장 id 충돌(2026-11-02)
@@ -1865,6 +1866,18 @@
   0단계 제거 뒤 목록이 비었다 — 실제 서버는 비지 않으므로 glibc 를 더했다(빈 목록 = rpmdb 못 읽음이 새 규칙).
 - 남긴 것: 번들을 서버와 같은 판에서 만드는 옵션(BASE_RELEASE · vault 저장소)은 두지 않았다(요구하는 사용자가 없고 Bareos 자체는 9.4 의 OpenSSL 로 충분) · dnf4 의 'install <설치된 이름>' 동작은 로그 모양 + 문서로 판단했고
   best=False 환경은 보지 않았다 · 사전 점검의 -devel 고정은 이름 규칙(이름 · 이름-libs)에 의한 추정이다.
+
+## Bareos v2.852.1 WebUI 계정 만들기 실패 'Failed to connect to Director' — 시험 bconsole 의 TLS 끔(2026-11-02)
+
+사용자 화면(법인별 Bareos › OC2 › WebUI 계정 › 계정 추가 · '실패: 법인 엣지 대행 — 새 계정으로 Director 에 붙지 못했습니다: Connecting to Director localhost:9101 · Failed to connect to Director. Giving up.') ·
+사용자가 보낸 Director 로그: `bareos-dir JobId 0: Fatal error: Tls handshake failed.` · `ERROR in dird/authenticate_console.cc:353 Unable to authenticate console "noainred" at client:127.0.0.1:9101.`
+
+- 원인(로그로 확인): 계정 Console 리소스는 `TLS Enable = No`(WebUI 가 TLS-PSK 를 못 쓴다)인데, 만든 뒤 시험용 임시 bconsole.conf 는 TLS 끔을 **Console 칸에만** 적었다 —
+  bconsole 이 Director 칸의 기본값(TLS 켬)으로 TLS-PSK 를 시도했고 Director 는 TLS 를 끈 계정과 핸드셰이크하지 못했다. 시험이 실패하면 계정을 되돌리므로 계정이 남지 않았다(계정 파일 자체는 맞았다).
+  v2.845 부터의 결함 — 시험의 가짜 SSH 가 bconsole 을 흉내만 내 드러나지 않았다(실환경 미확인으로 적어 둔 영역).
+- 수정: `manage/apply.js verifyConsoleLogin` 임시 conf 의 Director 칸에도 `TLS Enable = No` · 회귀 `bareosManage2845`(두 칸 대조 · 변이 1/1).
+- ⚠ 법인 엣지 대행 Director 는 이 코드를 **엣지 포탈**이 돌린다 — 중앙과 그 법인 엣지가 둘 다 v2.852.1 이어야 한다(자동 업그레이드).
+- 남긴 것: 평문 콘솔(WebUI 계정)로 bconsole 이 붙는 것은 이 수정으로 같은 조건이 됐지만 Director 가 평문을 받는지는 사용자 서버에서 다시 시험해 봐야 안다(추정 — 패키지 admin.conf.example 이 같은 설정).
 
 ## Bareos v2.851.1 완전 설치 마무리 '사이트 매핑의 vcserver 주소가 올바르지 않습니다' — 매핑 주소를 vCenter 등록부에서(2026-11-02)
 
