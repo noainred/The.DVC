@@ -2628,3 +2628,14 @@ server/src/bareos/CLAUDE.md 크기 상한(15,000B)으로 원문 그대로 옮겼
      F6 bareos-nic · bareos-verify 는 vmclone 전역 직렬 큐 대신 **vCenter 마다 한 줄**(execOp `perVcenter`) · F7 다시 보낸 검증의 사유(앞 시도가 지웠을 수 있음 · 켠 채 끊겼을 수 있음 · NIC 경고) ·
      F8 위치 바뀜은 원장 칸이 아니라 인벤토리 `placementDrift` · F9 지금 검증의 바쁨 · Director 접속값을 OTP 앞에서 · F10 틱 실패 로그 · '지금 보내 보기' 1분 1회 · finishOp toolsMs 는 수만.
      남긴 것(추정 — 확인 못 함): 게스트가 allowGuestControl 로 NIC 를 다시 연결할 수 있는지 · PCI 패스스루 NIC 는 끊기 대상 밖 · Director 별 회차 시한(명령마다 120초 시한은 있다).
+     → v2.863: 앞의 둘은 여전히 실환경 미확인이지만 `bareos-probe --vcenter … --vm` 이 그 VM 의 '게스트 제어 허용' NIC 와 PCI 패스스루 수를 보여 준다(⑥).
+  ⑥ **v2.863 후속**(사용자 '프로그램 개선' → 'Bareos 후속 마무리' · `bareosRehearsalDigest2862` ⑥ · `bareosRestoreBulkRoutes2861` ⑤ · `bareosProbe2863`):
+     · 정책 화면에서 vCenter 마다 검증용 데이터스토어를 고른다(`BareosRehearsal.jsx` 펼침 · 선택지는 `rehearsalDsOptions` — 지금 값이 목록에 없으면 지우지 않고
+       '인벤토리에 없음' · '접근 불가' · '목록을 읽지 못함' 사유를 붙여 남긴다). GET /rehearsal 의 `vcenters`(활성 대상이 있는 vCenter)는 **전체 범위에만** 싣는다.
+     · **정한 데이터스토어의 여유 판정이 '모름'이면 정기 검증은 그 VM 을 보내지 않는다** — `bulkRestorePlan` 은 '모름' 을 막지 않는다(대화형은 경고만).
+       화면이 생기며 열린 경로라 이번에 막았다(홈 데이터스토어 경로와 같은 규칙 — 반증 F5). 변이(이 거르기 제거)를 ⑥ 이 잡는다.
+     · `bareos-probe --restore-plan <jobid>`: 포탈이 보낼 복원 명령을 **같은 함수**로 만든다(`director.restoreCommand` — `runRestore` 가 보내는 글자 그대로 ·
+       `bareos/probePlan.js restorePreview`) · 보내지 않는다 · `.jobs type=R` 로 복원 잡 리소스 · `status client=` 로 FD 판. 플러그인이 옵션을 받아들이는지는 실제 복원으로만 확정(추정 금지).
+     · `bareos-probe --vcenter … --vc-user … --vm …`(VCENTER_PASSWORD): 포탈 vCenter 계정으로 **읽기만** — 같은 이름 VM 수 · 전원 · `nicSummary`(못 읽은 칸 null) ·
+       `passthroughCount` · `sessionPrivileges`(HasPrivilegeOnEntities — 현재 세션 키 · VM 과 상위 폴더 · `VERIFY_PRIV_IDS`). 로그인 재시도 없음 · SSRF 규칙.
+       probe 는 복원 · 재구성 · 켜기 · 지우기 함수를 부르지 않는다(테스트가 소스로 고정). ReconfigVM 의 NIC 연결 변경에 장치 권한 둘 중 무엇이 요구되는지는 판마다 다를 수 있어 둘 다 본다(추정).
