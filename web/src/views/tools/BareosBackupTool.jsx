@@ -407,7 +407,8 @@ function AddForm({ d, initial = null, onInitialUsed, onClose, onChanged }) {
             <div className="table-wrap" style={{ maxHeight: '24vh' }}>
               <STable minWidth={520} wrap={false}>
                 <thead><tr><th>VM</th><th>사유</th></tr></thead>
-                <tbody>{(result.results || []).filter((x) => !x.ok).map((x) => <tr key={x.vmId}><td>{x.vmName || nameOf.get(x.vmId) || x.vmId}</td><td style={{ fontSize: 12 }}>{x.reason}</td></tr>)}</tbody>
+                {/* v2.848(Chromium 1440 — 사유가 한 줄 2,000px 로 잘렸다 · configure 안내처럼 긴 사유): 사유 칸은 줄바꿈한다 */}
+                <tbody>{(result.results || []).filter((x) => !x.ok).map((x) => <tr key={x.vmId}><td>{x.vmName || nameOf.get(x.vmId) || x.vmId}</td><td style={{ fontSize: 12, whiteSpace: 'normal', overflowWrap: 'anywhere', minWidth: 260 }}>{x.reason}</td></tr>)}</tbody>
               </STable>
             </div>
           )}

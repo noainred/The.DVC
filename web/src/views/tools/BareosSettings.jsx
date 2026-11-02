@@ -59,12 +59,13 @@ export function DiagStages({ stages }) {
       {stages.map((x) => {
         const v = diagView(x);
         return (
-          <li key={x.key} style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 17em) minmax(0, 1fr)', gap: 8, alignItems: 'baseline', fontSize: 12 }}>
+          // v2.848(Chromium 400 — 라벨 칸 17em 고정이라 상세 칸이 84px 로 좁아 조치 문구가 한 줄에 몇 글자씩): 라벨 칸은 폭의 45% 까지 · 조치는 두 칸을 다 쓴다
+          <li key={x.key} style={{ display: 'grid', gridTemplateColumns: 'minmax(0, min(17em, 45%)) minmax(0, 1fr)', gap: '2px 8px', alignItems: 'baseline', fontSize: 12 }}>
             <span style={{ minWidth: 0, wordBreak: 'keep-all' }}><span className={`badge ${v.cls}`} style={{ fontSize: 10.5 }}>{v.mark}</span> {x.label}</span>
             <span style={{ minWidth: 0, overflowWrap: 'anywhere' }}>
               <span className={x.ok === false ? '' : 'muted'}>{x.detail || '—'}</span>{v.ms && <span className="muted"> · {v.ms}</span>}
-              {x.hint && <div style={{ color: 'var(--amber)', marginTop: 2 }}>조치: {x.hint}</div>}
             </span>
+            {x.hint && <div style={{ gridColumn: '1 / -1', minWidth: 0, overflowWrap: 'anywhere', color: 'var(--amber)' }}>조치: {x.hint}</div>}
           </li>
         );
       })}
