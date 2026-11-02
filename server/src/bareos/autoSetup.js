@@ -489,6 +489,8 @@ function siteOf(vcenterId, directorId = '', ctx = null) {
   // v2.822.3(S2-2 — 재현): root 로 쓰는 경로는 /etc/bareos/ 아래 .ini 만(예전에는 /etc/cron.d·/etc/sudoers.d 같은 아무 절대 경로나 됐다).
   //   매핑 저장(normalizeSite)은 그대로 둔다 — 넣으면 예전 매핑이 로드 때 조용히 사라진다. 자동 설정만 거부한다.
   if (!/^\/etc\/bareos\/[A-Za-z0-9._/-]+\.ini$/.test(site.configFile)) throw fail('invalid', `자동 설정은 /etc/bareos/ 아래 .ini 경로에만 씁니다(지금 매핑: ${site.configFile}) — 매핑의 INI 경로를 바꾸거나 직접 넣으세요.`);
+  // v2.851.1: 비어 있으면 무엇을 고칠지 말한다(완전 설치 7단계가 빈 값을 저장하던 결함의 흔적 — 2026-11-02 사용자 화면)
+  if (!site.vcserver) throw fail('invalid', '이 vCenter 매핑의 vcserver(FD 가 접속할 vCenter 주소)가 비어 있습니다 — 설정 › Bareos › 기본 설정의 매핑 표에서 vCenter 호스트 이름 또는 IP 를 넣고 저장한 뒤 다시 하세요.');
   if (!HOST_RE.test(site.vcserver)) throw fail('invalid', '사이트 매핑의 vcserver 주소가 올바르지 않습니다.');
   return site;
 }
