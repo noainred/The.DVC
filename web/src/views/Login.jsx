@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { login, getToken } from '../api.js';
 import { THEMES, THEMES_CSS } from './loginThemes.jsx';
+import { loadLoginId, saveLoginId } from './loginIdMemory.js';
 
 // 브라우저에 남아있는 SSO 토큰(JWT)의 payload를 디코드해 표시 이름을 추출(서명검증 아님 — 인사말 표시용).
 function nameFromToken() {
@@ -23,7 +24,9 @@ export default function Login({ onSuccess, notice, setup }) {
   const [setupPopup, setSetupPopup] = useState(false);
   useEffect(() => { if (setup?.setupPending && setup?.initialPasswordFile) setSetupPopup(true); },
     [setup?.setupPending, setup?.initialPasswordFile]);
-  const [username, setUsername] = useState('');
+  // 마지막으로 로그인에 성공한 ID 를 미리 채운다(비밀번호·OTP 는 저장하지 않음 — loginIdMemory.js).
+  const [savedId] = useState(loadLoginId);
+  const [username, setUsername] = useState(savedId);
   const [password, setPassword] = useState('');
   const [showPw, setShowPw] = useState(false);
   const [keep, setKeep] = useState(true);
@@ -40,7 +43,9 @@ export default function Login({ onSuccess, notice, setup }) {
     setBusy(true);
     setError(null);
     try {
-      const user = await login(username.trim(), password, { keep });
+      const id = username.trim();
+      const user = await login(id, password, { keep });
+      saveLoginId(id); // 성공한 ID 만 기억(실패한 입력은 남기지 않는다)
       setFails(0);
       onSuccess(user);
     } catch (err) {
@@ -60,6 +65,7 @@ export default function Login({ onSuccess, notice, setup }) {
     username, setUsername, password, setPassword, showPw, setShowPw, keep, setKeep,
     forgotInfo, toggleForgot: () => setForgotInfo((v) => !v),
     error, busy, submit, welcome, notice,
+    idRemembered: !!savedId, // ID 가 미리 채워졌으면 비밀번호 칸에 바로 포커스
   };
 
   const { Comp, name } = THEMES[themeIdx];

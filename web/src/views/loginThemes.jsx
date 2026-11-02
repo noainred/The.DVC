@@ -25,13 +25,16 @@ export function AuthFields({ f, title = 'Operator Sign In', sub = 'Authenticate 
         {f.notice && <div className="lt-notice">{f.notice}</div>}
 
         <label className="lt-lab">{idLabel}</label>
-        <input className="lt-input" autoFocus autoComplete="username" value={f.username}
+        {/* name 이 있어야 크롬이 이 칸의 입력값을 기억해 다음에 제안한다(자동완성 기록은 name/id 로 묶인다).
+            비밀번호 칸은 OTP 를 받으므로 one-time-code 를 유지 — 만료된 OTP 를 크롬이 저장·자동입력하면
+            로그인 실패가 쌓인다. ID 는 로그인 성공 시 loginIdMemory.js 로도 저장해 브라우저 설정과 무관하게 채운다. */}
+        <input className="lt-input" name="username" autoFocus={!f.idRemembered} autoComplete="username" value={f.username}
           onChange={(e) => f.setUsername(e.target.value)} placeholder="admin" />
 
         <label className="lt-lab">{pwLabel}</label>
         <div className="lt-pw">
           <input className="lt-input" style={{ paddingRight: 62 }} type={f.showPw ? 'text' : 'password'}
-            autoComplete="one-time-code" value={f.password}
+            autoFocus={!!f.idRemembered} autoComplete="one-time-code" value={f.password}
             onChange={(e) => f.setPassword(e.target.value)} placeholder="비밀번호 또는 6자리 OTP" />
           <button type="button" className="lt-show" onClick={() => f.setShowPw((v) => !v)}>{f.showPw ? 'HIDE' : 'SHOW'}</button>
         </div>
