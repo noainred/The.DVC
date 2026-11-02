@@ -86,16 +86,17 @@ td.r,th.r{text-align:right}
         <b style="font-size:15px">이렇게 복원합니다 — 3대</b>
         <div style="overflow-x:auto">
         <table>
-          <thead><tr><th>VM</th><th>복원 지점</th><th>읽을 백업</th><th>새 VM</th><th>대상</th></tr></thead>
+          <thead><tr><th>VM</th><th>복원 지점</th><th>읽을 백업</th><th>새 VM</th><th>데이터스토어</th><th>놓을 곳 · 전원 · 네트워크</th></tr></thead>
           <tbody>
-            <tr><td><b>erp-db-01</b></td><td>11-02 01:50 <span class="tag incr">Incr</span> <span class="sm mono">48242</span></td><td>6건 · 430 GB</td><td class="mono">erp-db-01-restored-1102</td><td class="sm">DS-Prod-02 · Prod-Cluster-A · 꺼진 채</td></tr>
-            <tr><td><b>erp-db-03</b></td><td>11-02 01:52 <span class="tag incr">Incr</span> <span class="sm mono">48244</span></td><td>6건 · 504 GB</td><td class="mono">erp-db-03-restored-1102</td><td class="sm">DS-Prod-02 · Prod-Cluster-A · 꺼진 채</td></tr>
-            <tr><td><b>crm-db-01</b></td><td>11-01 01:50 <span class="tag incr">Incr</span> <span class="sm mono">48190</span></td><td>5건 · 476 GB</td><td class="mono">crm-db-01-restored-1102</td><td class="sm">DS-Prod-02 · Prod-Cluster-A · 꺼진 채</td></tr>
+            <tr><td><b>erp-db-01</b></td><td>11-02 01:50 <span class="tag incr">Incr</span> <span class="sm mono">48242</span></td><td>6건 · 430 GB</td><td class="mono">erp-db-01-restored-1102</td><td>DS-Prod-02 <span class="sm">(여유 4.1 TB ✓)</span></td><td class="sm">Prod-Cluster-A · 꺼진 채 · NIC 끊음</td></tr>
+            <tr><td><b>erp-db-03</b></td><td>11-02 01:52 <span class="tag incr">Incr</span> <span class="sm mono">48244</span></td><td>6건 · 504 GB</td><td class="mono">erp-db-03-restored-1102</td><td>DS-Prod-02 <span class="sm">(✓)</span></td><td class="sm">Prod-Cluster-A · 꺼진 채 · NIC 끊음</td></tr>
+            <tr><td><b>crm-db-01</b></td><td>11-01 01:50 <span class="tag incr">Incr</span> <span class="sm mono">48190</span></td><td>5건 · 476 GB</td><td class="mono">crm-db-01-restored-1102</td><td>DS-Prod-01 <span class="sm">(여유 1.2 TB ✓ · 바꿈)</span></td><td class="sm">Prod-Cluster-A · 꺼진 채 · NIC 끊음</td></tr>
           </tbody>
         </table>
         </div>
         <dl class="kv">
           <dt>실행 위치</dt><dd>Director ‘북미 법인’(중앙 직접) · 복원 FD <span class="mono">bareos-r1-fd</span> · 복원 잡 PortalVmwareRestore · 복원 잡 3개(VM 마다 따로 jobid)</dd>
+          <dt>마무리</dt><dd>복원 잡이 끝난 VM 마다 포탈이 vCenter 에서 네트워크 어댑터를 ‘연결 끊음 · 켤 때 연결 안 함’ 으로 바꿉니다(백업 센터 클론과 같은 함수). 실패하면 그 VM 은 ‘네트워크 끊기 실패 — 손으로 확인’ · 켜지 않습니다</dd>
           <dt>예상 소요</dt><dd>약 70~110분(추정 — 최근 복원 속도 기준 · Director 동시 실행 수에 따라 겹침)</dd>
           <dt>기록</dt><dd>실행자 admin · VM 마다 대상 · 원본 체인 · 결과 · 묶음 번호가 감사 로그에 남습니다</dd>
         </dl>
@@ -119,15 +120,15 @@ td.r,th.r{text-align:right}
         <div><div class="bar" role="img" aria-label="전체 41%"><i style="width:30%;background:#4ade80"></i><i style="width:11%;background:#60a5fa"></i></div><div style="display:flex;justify-content:space-between;font-size:12.5px;margin-top:6px"><span><b>41%</b> · 읽음 578 GB / 1.41 TB</span><span class="sm">1.2 GB/s · 남은 약 45분(추정)</span></div></div>
         <table>
           <tbody>
-            <tr><td style="padding:8px 0"><b>erp-db-01</b></td><td style="padding:8px 6px"><span class="tag ok">성공</span></td><td class="sm" style="padding:8px 6px">19분 · 430 GB · jobid 48311</td><td style="padding:8px 0;text-align:right"><button class="btn sm" type="button">결과</button></td></tr>
-            <tr><td style="padding:8px 0"><b>erp-db-03</b></td><td style="padding:8px 6px"><span class="tag run">실행 중</span></td><td class="sm" style="padding:8px 6px"><span class="prog"><i style="width:38%"></i></span> 38% · jobid 48312</td><td style="padding:8px 0;text-align:right;white-space:nowrap"><button class="btn sm" type="button">로그</button> <button class="btn sm danger" type="button">취소</button></td></tr>
-            <tr><td style="padding:8px 0"><b>crm-db-01</b></td><td style="padding:8px 6px"><span class="tag unk">대기</span></td><td class="sm" style="padding:8px 6px">Director 차례 대기 · jobid 48313</td><td style="padding:8px 0;text-align:right"><button class="btn sm danger" type="button">취소</button></td></tr>
+            <tr><td style="padding:8px 0"><b>erp-db-01</b></td><td style="padding:8px 6px"><span class="tag ok">성공</span></td><td class="sm" style="padding:8px 6px">19분 · 430 GB · jobid 48311 · <span style="color:#86efac">NIC 끊김 ✓</span></td><td style="padding:8px 0;text-align:right"><button class="btn sm" type="button">결과</button></td></tr>
+            <tr><td style="padding:8px 0"><b>erp-db-03</b></td><td style="padding:8px 6px"><span class="tag run">실행 중</span></td><td class="sm" style="padding:8px 6px"><span class="prog"><i style="width:38%"></i></span> 38% · jobid 48312 · 끝나면 NIC 끊기</td><td style="padding:8px 0;text-align:right;white-space:nowrap"><button class="btn sm" type="button">로그</button> <button class="btn sm danger" type="button">취소</button></td></tr>
+            <tr><td style="padding:8px 0"><b>crm-db-01</b></td><td style="padding:8px 6px"><span class="tag unk">대기</span></td><td class="sm" style="padding:8px 6px">Director 차례 대기 · jobid 48313 · DS-Prod-01</td><td style="padding:8px 0;text-align:right"><button class="btn sm danger" type="button">취소</button></td></tr>
           </tbody>
         </table>
         <div class="sm">진행률 = FD 가 보고한 읽은 바이트 ÷ 체인 바이트 합(추정) · 진행 현황판이 열려 있을 때만 30초마다 Director 에 묻습니다 · 대기는 Director 의 동시 실행 수 때문입니다.</div>
         <div style="border-top:1px solid #243049;padding-top:10px;display:flex;flex-direction:column;gap:6px">
-          <div style="display:flex;align-items:center;gap:8px"><span class="tag ok">끝나면</span><b>성공 3 / 3 · 1시간 12분 · 1.41 TB</b></div>
-          <div class="sm">새 VM 3대 — 인벤토리 반영 대기(다음 수집) → 반영되면 각 줄에 <a href="Corp.dc.html">VM 보기</a>. 실패한 대가 있으면 그 줄에 원인(결과 창의 경고 · 오류 해석)과 ‘다시 복원’.</div>
+          <div style="display:flex;align-items:center;gap:8px"><span class="tag ok">끝나면</span><b>성공 3 / 3 · NIC 끊김 3 / 3 · 1시간 12분 · 1.41 TB</b></div>
+          <div class="sm">새 VM 3대 — 인벤토리 반영 대기(다음 수집) → 반영되면 각 줄에 <a href="Corp.dc.html">VM 보기</a>. 켜기와 네트워크 연결은 안을 확인한 뒤 vCenter 에서. 실패한 대가 있으면 그 줄에 원인(결과 창의 경고 · 오류 해석)과 ‘다시 복원’. NIC 끊기만 실패한 대는 ‘손으로 확인’ 태그.</div>
         </div>
       </aside>
     </div>

@@ -88,19 +88,26 @@ td{padding:7px 10px;border-bottom:1px solid #1f2a40;vertical-align:middle;white-
           <label class="h" for="m-new"><input type="radio" name="mode" id="m-new" checked><b>새 VM 으로</b><span class="tag ok">권장 · 원래 VM 은 그대로</span><span class="sm">새 MAC · UUID 로 만들고 꺼진 채로 둡니다(원래 VM 과 IP 충돌 방지)</span></label>
           <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(220px, 1fr));gap:10px">
             <label class="field">새 VM 이름 규칙<input value="{원래 이름}-restored-1102" aria-describedby="nm-note"><span id="nm-note" class="sm">{원래 이름} · {날짜} 를 쓸 수 있습니다 · 아래 표에서 한 대씩 고칠 수 있습니다</span></label>
-            <label class="field">데이터스토어<select><option>DS-Prod-02 — 여유 4.1 TB</option><option>DS-Prod-01 — 여유 1.2 TB</option><option>— 백업 당시 그대로(VM 마다)</option></select><span class="sm" style="color:#86efac">✓ 3대 합 1.41 TB 가 들어갑니다(여유는 마지막 수집값)</span></label>
+            <label class="field">데이터스토어 — 전체에 적용<select><option>DS-Prod-02 — 여유 4.1 TB / 20 TB</option><option>DS-Prod-01 — 여유 1.2 TB / 8 TB</option><option>DS-Prod-03 — 여유 320 GB / 4 TB</option><option>— 백업 당시 그대로(VM 마다 다름)</option></select><span class="sm">아래 표에서 VM 마다 다르게 고를 수 있습니다 · 여유는 마지막 수집값</span></label>
             <label class="field">놓을 곳<select><option>클러스터 Prod-Cluster-A(백업 당시)</option><option>클러스터 Prod-Cluster-B</option><option>호스트 esx-east-03</option></select><span class="sm">클러스터 또는 호스트 하나 — 3대 같은 곳</span></label>
+            <fieldset class="field" style="border:0;padding:0;margin:0"><legend style="padding:0;margin-bottom:4px">네트워크</legend>
+              <label style="display:flex;align-items:center;gap:8px;color:#e6edf6;font-size:12.5px"><input type="radio" name="net" checked>어댑터를 끊은 채로 만들기 <span class="tag ok">권장</span></label>
+              <label style="display:flex;align-items:center;gap:8px;color:#e6edf6;font-size:12.5px"><input type="radio" name="net">백업 당시 포트그룹에 연결된 채로</label>
+              <span class="sm">끊으면 켜도 네트워크에 붙지 않습니다 — 원래 VM 과 IP 충돌 없이 안에서 확인한 뒤 vCenter 에서 연결합니다</span>
+            </fieldset>
           </div>
           <table>
-            <thead><tr><th>VM</th><th>새 VM 이름</th><th>같은 이름 없음</th><th>데이터스토어</th><th>놓을 곳</th><th>판정</th></tr></thead>
+            <thead><tr><th>VM</th><th>새 VM 이름</th><th>같은 이름 없음</th><th>백업 당시 DS</th><th>복원할 데이터스토어</th><th>여유</th><th>네트워크</th><th>판정</th></tr></thead>
             <tbody>
-              <tr><td><b>erp-db-01</b></td><td class="mono">erp-db-01-restored-1102</td><td><span class="m ok">✓</span></td><td>DS-Prod-02</td><td>Prod-Cluster-A</td><td><span class="tag ok">진행</span></td></tr>
-              <tr><td><b>erp-db-03</b></td><td class="mono">erp-db-03-restored-1102</td><td><span class="m ok">✓</span></td><td>DS-Prod-02</td><td>Prod-Cluster-A</td><td><span class="tag ok">진행</span></td></tr>
-              <tr><td><b>crm-db-01</b></td><td class="mono">crm-db-01-restored-1102 <button class="btn sm" type="button" style="margin-left:6px">고치기</button></td><td><span class="m ok">✓</span></td><td>DS-Prod-02</td><td>Prod-Cluster-A</td><td><span class="tag ok">진행</span></td></tr>
+              <tr><td><b>erp-db-01</b> <span class="sm">430 GB</span></td><td class="mono">erp-db-01-restored-1102</td><td><span class="m ok">✓</span></td><td class="sm">DS-Prod-01</td><td><select class="btn" aria-label="erp-db-01 데이터스토어" style="min-height:26px;font-size:12px"><option>DS-Prod-02 — 여유 4.1 TB</option><option>DS-Prod-01 — 여유 1.2 TB</option><option>DS-Prod-03 — 여유 320 GB</option></select></td><td><span class="m ok">✓</span></td><td class="sm">끊음</td><td><span class="tag ok">진행</span></td></tr>
+              <tr><td><b>erp-db-03</b> <span class="sm">504 GB</span></td><td class="mono">erp-db-03-restored-1102</td><td><span class="m ok">✓</span></td><td class="sm">DS-Prod-01</td><td><select class="btn" aria-label="erp-db-03 데이터스토어" style="min-height:26px;font-size:12px"><option>DS-Prod-02 — 여유 4.1 TB</option><option>DS-Prod-01 — 여유 1.2 TB</option><option>DS-Prod-03 — 여유 320 GB</option></select></td><td><span class="m ok">✓</span></td><td class="sm">끊음</td><td><span class="tag ok">진행</span></td></tr>
+              <tr><td><b>crm-db-01</b> <span class="sm">476 GB</span></td><td class="mono">crm-db-01-restored-1102 <button class="btn sm" type="button" style="margin-left:6px">고치기</button></td><td><span class="m ok">✓</span></td><td class="sm">DS-Prod-02</td><td><select class="btn" aria-label="crm-db-01 데이터스토어" style="min-height:26px;font-size:12px;border-color:#f59e0b"><option>DS-Prod-03 — 여유 320 GB</option><option>DS-Prod-02 — 여유 4.1 TB</option><option>DS-Prod-01 — 여유 1.2 TB</option></select></td><td><span class="m bad">✕</span> <span class="sm">476 GB 가 안 들어갑니다</span></td><td class="sm">끊음</td><td><span class="tag bad">막힘</span> <span class="sm">다른 DS 로</span></td></tr>
             </tbody>
           </table>
           <div class="chk">
-            <div class="i"><span class="m ok">✓</span><span>전원: 3대 모두 꺼진 채로 만듭니다(고정) — 켜기는 복원 뒤 vCenter 에서. 네트워크 어댑터는 백업 당시 포트그룹으로 붙습니다.</span></div>
+            <div class="i"><span class="m ok">✓</span><span>데이터스토어 여유 검사: DS-Prod-02 에 2대 934 GB → 남는 여유 3.2 TB ✓ · DS-Prod-03 에 476 GB → 320 GB 뿐이라 막힘(남겨 둘 하한 = max(10 GiB, 전체의 5%) — 백업 센터 클론과 같은 규칙). 여유를 못 읽은 데이터스토어는 검사하지 않고 ‘모름’ 으로 둡니다.</span></div>
+            <div class="i"><span class="m ok">✓</span><span>전원: 3대 모두 꺼진 채로 만듭니다(고정) — 켜기는 복원 뒤 vCenter 에서.</span></div>
+            <div class="i"><span class="m unk">?</span><span>네트워크 끊기는 플러그인 옵션이 아닙니다 — 복원 잡이 끝난 뒤 포탈(담당 엣지가 있으면 엣지)이 vCenter 에서 NIC 를 ‘연결 끊음 · 켤 때 연결 안 함’ 으로 바꿉니다(VM 백업 센터 클론과 같은 처리). 이 단계가 실패하면 ‘네트워크 끊기 실패 — 손으로 확인’ 으로 표시하고 VM 은 켜지 않습니다.</span></div>
             <div class="i"><span class="m ok">✓</span><span>복원 잡 3개가 Director 에서 차례로(동시 실행 수만큼 겹쳐) 돕니다 — 한 대가 실패해도 나머지는 계속됩니다.</span></div>
           </div>
         </div>
@@ -116,7 +123,7 @@ td{padding:7px 10px;border-bottom:1px solid #1f2a40;vertical-align:middle;white-
               <tr><td><b>crm-db-01</b></td><td><span class="m ok">✓</span></td><td><span class="m ok">✓</span></td><td><span class="m ok">✓</span></td><td><span class="m ok">✓</span></td><td><span class="tag ok">가능</span> <span class="sm">1대만 고르면</span></td></tr>
             </tbody>
           </table>
-          <div><button class="btn sm" type="button">다시 확인</button> <span class="sm">전제는 서버가 인벤토리로 판정합니다 — 못 읽은 전원 · 스냅샷 값은 0 으로 보지 않고 거부합니다. 포탈은 VM 을 끄지 않습니다.</span></div>
+          <div><button class="btn sm" type="button">다시 확인</button> <span class="sm">전제는 서버가 인벤토리로 판정합니다 — 못 읽은 전원 · 스냅샷 값은 0 으로 보지 않고 거부합니다. 포탈은 VM 을 끄지 않습니다. 덮어쓰기에도 ‘네트워크 끊은 채로’ 를 고를 수 있습니다(기본은 그대로 — 데이터스토어는 원래 자리라 고르지 않습니다).</span></div>
         </div>
 
         <div class="mode">
@@ -135,12 +142,14 @@ td{padding:7px 10px;border-bottom:1px solid #1f2a40;vertical-align:middle;white-
           <dt>복원 시점</dt><dd>각 VM 의 마지막 성공 백업</dd>
           <dt>읽을 백업</dt><dd>체인 17건 · 1.41 TB</dd>
           <dt>방식</dt><dd>새 VM 으로 · <span class="mono">*-restored-1102</span></dd>
-          <dt>대상</dt><dd>DS-Prod-02 · Prod-Cluster-A · 꺼진 채</dd>
+          <dt>데이터스토어</dt><dd>DS-Prod-02 (2대) · crm-db-01 은 DS-Prod-03 — <span style="color:#fca5a5">여유 부족</span></dd>
+          <dt>놓을 곳 · 전원</dt><dd>Prod-Cluster-A · 꺼진 채</dd>
+          <dt>네트워크</dt><dd>어댑터 끊은 채로(복원 뒤 마무리)</dd>
           <dt>실행 위치</dt><dd>Director ‘북미 법인’ · 중앙 직접</dd>
-          <dt>진행 / 제외</dt><dd>3 / 0</dd>
+          <dt>진행 / 막힘</dt><dd>2 / 1 <span class="sm">— 막힌 VM 의 데이터스토어를 바꾸면 3 / 0</span></dd>
         </dl>
         <div class="sm">사전 점검(✓ ✕)은 OTP 를 쓰기 전에 서버가 미리 판정한 것입니다 — 3단계에서 같은 판정을 VM 마다 다시 한 번 합니다.</div>
-        <div style="display:flex;gap:8px"><a class="btn" href="RestoreStep1.dc.html">← 이전</a><a class="btn primary" href="RestoreStep3.dc.html" style="flex:1 1 0;justify-content:center">다음 — 확인 · 실행 →</a></div>
+        <div style="display:flex;gap:8px"><a class="btn" href="RestoreStep1.dc.html">← 이전</a><a class="btn primary" href="RestoreStep3.dc.html" style="flex:1 1 0;justify-content:center" title="막힌 VM 이 있으면 데이터스토어를 바꾸거나 빼야 넘어갑니다">다음 — 확인 · 실행 →</a></div>
       </aside>
     </div>
   </div>
