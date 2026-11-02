@@ -1,6 +1,6 @@
 // v2.852 GPU 할당 계층 — 화면 행 펼치기·형제 정렬·찾기·글자(gpuAllocText.js).
 import { describe, it, expect } from 'vitest';
-import { flattenAlloc, openForLevel, sortSiblings, totalsNote, gpuTexts, numText, ALLOC_LEVELS, DEFAULT_LEVEL, pickVcenters, sumTotals, corpChips } from './gpuAllocText.js';
+import { flattenAlloc, openForLevel, sortSiblings, totalsNote, gpuTexts, numText, ALLOC_LEVELS, DEFAULT_LEVEL, pickVcenters, sumTotals, corpChips, allocExportQuery, EXPORT_DEPTHS, EXPORT_SHEETS } from './gpuAllocText.js';
 
 const tot = (o = {}) => ({ hosts: 1, gpus: 1, vsga: 0, capGB: 48, capUnknown: 0, allocGB: 24, allocUnknown: 0, offGB: 0, offUnknown: 0, vmsOn: 1, vmsOff: 0, unplaced: 0, freeGpus: 0, noPlacement: 0, spareGB: 24, allocPct: 50, ...o });
 const vmr = (id, name, gb = 24, extra = {}) => ({ id, name, powerState: 'POWERED_ON', mode: 'vgpu', profile: 'grid_a40-24q', vgpuDevices: 1, passthroughDevices: 0, gb, ...extra });
@@ -91,5 +91,17 @@ describe('v2.853 법인 칩', () => {
     const rows = flattenAlloc(t, { query: 'vc2' });
     expect(rows[0].name).toBe('vcenter-de');
     expect(rows.some((r) => r.kind === 'host')).toBe(true);
+  });
+});
+
+describe('v2.855 내보내기 창 쿼리', () => {
+  it('기본(VM 까지 · 시트 셋)은 싣지 않고, 범위·단계·시트만 싣는다', () => {
+    expect(allocExportQuery({})).toBe('');
+    expect(allocExportQuery({ scope: 'vc1' })).toBe('?vcenterId=vc1');
+    expect(allocExportQuery({ vcSel: new Set(['AZ', 'GM1']), depth: 'host' })).toBe('?vcenterIds=AZ%2CGM1&depth=host');
+    expect(allocExportQuery({ depth: 'vm', sheets: ['info', 'tree'] })).toBe('?sheets=tree%2Cinfo');
+    expect(allocExportQuery({ sheets: ['tree', 'flat', 'info'] })).toBe('');
+    expect(EXPORT_DEPTHS.map((d) => d.key)).toEqual(['host', 'gpu', 'vm']);
+    expect(EXPORT_SHEETS.map((s) => s.key)).toEqual(['tree', 'flat', 'info']);
   });
 });

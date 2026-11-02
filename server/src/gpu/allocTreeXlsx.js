@@ -17,6 +17,29 @@ import { FLAT_COLUMNS, MODE_TEXT, UNPLACED_TEXT, locationText, dcText, gpuNoteTe
 
 export const XLSX_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 export const ALLOC_XLSX_SHEETS = Object.freeze(['계층 표', '평면 표', '안내']);
+/**
+ * v2.855: 내보내기 창(승인 시안 '계층 표 엑셀 내보내기')의 선택 — 계층 표에 넣을 단계 · 넣을 시트.
+ * depth 는 계층 표 행의 깊이 상한(법인 0 · 데이터센터 1 · 클러스터 2 · 호스트 3 · GPU 4 · VM 5)이고 평면 표·안내에는 영향이 없다.
+ */
+export const ALLOC_DEPTHS = Object.freeze({ host: 4, gpu: 5, vm: 6 });
+export const ALLOC_SHEET_KEYS = Object.freeze(['tree', 'flat', 'info']);
+/**
+ * 쿼리 → 선택. 모르는 값은 400(조용히 버리지 않는다). 안 주면 기본(VM 까지 · 시트 셋 다).
+ * @returns {{ ok: true, depth: string, sheets: string[] } | { ok: false, reason: string }}
+ */
+export function allocExportOpts(q = {}) {
+  const depth = q.depth == null || q.depth === '' ? 'vm' : String(q.depth);
+  if (!Object.hasOwn(ALLOC_DEPTHS, depth)) return { ok: false, reason: '넣을 단계가 잘못됐습니다(host · gpu · vm).' };
+  let sheets = [...ALLOC_SHEET_KEYS];
+  if (q.sheets != null && q.sheets !== '') {
+    const raw = String(q.sheets).slice(0, 100).split(',').map((x) => x.trim()).filter(Boolean);
+    if (!raw.length || raw.some((x) => !ALLOC_SHEET_KEYS.includes(x))) return { ok: false, reason: '시트 선택이 잘못됐습니다(tree · flat · info).' };
+    sheets = ALLOC_SHEET_KEYS.filter((k) => raw.includes(k));
+  }
+  return { ok: true, depth, sheets };
+}
+/** 파일 이름 — 화면 창의 미리보기와 실제 내려받기가 같은 함수를 쓴다(VM 까지가 아니면 단계를 붙인다). */
+export const allocFileName = (fileScope, stamp, ext, depth = 'vm') => `gpu-allocation_${fileScope}_${stamp}${depth !== 'vm' ? `_${depth}` : ''}.${ext}`;
 const PRINT = Object.freeze({ orientation: 'landscape', fitToPage: true, fitToWidth: 1, fitToHeight: 0, paperSize: 9, margins: { left: 0.4, right: 0.4, top: 0.5, bottom: 0.5, header: 0.2, footer: 0.2 } });
 const yieldLoop = () => new Promise((r) => setImmediate(r));
 const C = Object.freeze({
@@ -91,13 +114,16 @@ export function treeLines(tree) {
  * @param {{ stamp: string, tz: string, scopeText: string }} meta
  * @returns {Promise<Buffer>}
  */
-export async function renderGpuAllocWorkbook(tree, meta) {
+export async function renderGpuAllocWorkbook(tree, meta, { depth = 'vm', sheets = ALLOC_SHEET_KEYS } = {}) {
   const wb = new ExcelJS.Workbook();
   wb.creator = 'VMware Global Monitoring Portal';
   wb.created = new Date();
   const T = tree.totals;
+  const maxDepth = ALLOC_DEPTHS[depth] ?? ALLOC_DEPTHS.vm;
+  const DEPTH_TEXT = { host: '호스트까지', gpu: 'GPU 까지', vm: 'VM 까지' };
 
   /* ① 계층 표 */
+  if (sheets.includes('tree')) {
   const ws = wb.addWorksheet(ALLOC_XLSX_SHEETS[0], {
     views: [{ state: 'frozen', ySplit: 5, xSplit: 1, showGridLines: false }],
     properties: { outlineLevelRow: 0 },
@@ -107,7 +133,7 @@ export async function renderGpuAllocWorkbook(tree, meta) {
   ws.columns = HEADS.map((x) => ({ width: x.w }));
   const t1 = ws.addRow([`GPU 할당 계층 — ${meta.scopeText}`]);
   t1.getCell(1).font = { bold: true, size: 15, color: { argb: C.title } }; t1.height = 26;
-  ws.addRow([`기준 ${meta.stamp} ${meta.tz} · 단위 GB · 할당 = 켜진 VM · 예비 = 전체 − 할당 · 왼쪽 위 1~6 단추로 단계별 접기`]).getCell(1).font = { color: { argb: C.muted } };
+  ws.addRow([`기준 ${meta.stamp} ${meta.tz} · 단위 GB · 할당 = 켜진 VM · 예비 = 전체 − 할당 · ${DEPTH_TEXT[depth] || ''} · 왼쪽 위 1~${maxDepth} 단추로 단계별 접기`]).getCell(1).font = { color: { argb: C.muted } };
   // 요약 칸 — 두 칸씩(이름 / 값)
   const kpis = [
     ['전체 용량(GB)', num(T.capGB), C.title, C.kpiBg], ['할당(GB)', num(T.allocGB), C.alloc, C.kpiBg], ['예비(GB)', num(T.spareGB), C.spare, C.spareBg],
@@ -128,7 +154,7 @@ export async function renderGpuAllocWorkbook(tree, meta) {
   styleHeadRow(head, { height: 24 });
   head.eachCell((c, i) => { if (i >= 4 && i <= 10 && i !== 8) c.alignment = { vertical: 'middle', horizontal: 'right' }; });
   let i = 0; let maxLevel = 0;
-  for (const ln of treeLines(tree)) {
+  for (const ln of treeLines(tree).filter((x) => x.depth < maxDepth)) {
     const lv = LEVEL[ln.depth];
     const r = ws.addRow(ln.cells);
     r.outlineLevel = ln.depth;
@@ -152,7 +178,10 @@ export async function renderGpuAllocWorkbook(tree, meta) {
   ws.properties.outlineLevelRow = maxLevel;
   if (tree.truncated) ws.addRow([`※ GPU 호스트가 많아 ${tree.truncated}대를 넣지 않았습니다.`]).getCell(1).font = { color: { argb: C.warn } };
 
+  }
+
   /* ② 평면 표 */
+  if (sheets.includes('flat')) {
   const wf = wb.addWorksheet(ALLOC_XLSX_SHEETS[1], { views: [{ state: 'frozen', ySplit: 1, xSplit: 0 }], pageSetup: { ...PRINT, printTitlesRow: '1:1' } });
   const FW = { vcenter: 26, location: 20, datacenter: 16, cluster: 18, host: 22, gpuIdx: 6, gpuModel: 22, gpuMode: 10, gpuCapGB: 12, gpuAllocGB: 12, gpuSpareGB: 12, slots: 12, vm: 24, power: 7, profile: 20, vmGB: 12, note: 36 };
   wf.columns = FLAT_COLUMNS.map(([k]) => ({ key: k, width: FW[k] || 14 }));
@@ -176,15 +205,18 @@ export async function renderGpuAllocWorkbook(tree, meta) {
   }
   wf.autoFilter = { from: { row: 1, column: 1 }, to: { row: Math.max(1, j + 1), column: FLAT_COLUMNS.length } };
 
+  }
+
   /* ③ 안내 */
+  if (sheets.includes('info')) {
   const wi = wb.addWorksheet(ALLOC_XLSX_SHEETS[2]);
   wi.columns = [{ width: 18 }, { width: 110 }];
   const ti = wi.addRow(['이 파일을 읽는 법']);
   ti.getCell(1).font = { bold: true, size: 14, color: { argb: C.title } };
   wi.addRow([]);
   const info = [
-    ['기준', `${meta.stamp} ${meta.tz} · 범위 ${meta.scopeText}`],
-    ['계층', '법인(vCenter) › 데이터센터 › 클러스터 › 호스트 › 물리 GPU › VM. 계층 표 시트는 행 그룹(개요)으로 묶여 있어 왼쪽 위 1~6 단추로 접고 펼칩니다.'],
+    ['기준', `${meta.stamp} ${meta.tz} · 범위 ${meta.scopeText} · 계층 표 ${DEPTH_TEXT[depth] || ''}`],
+    ['계층', `법인(vCenter) › 데이터센터 › 클러스터 › 호스트 › 물리 GPU › VM. 계층 표 시트는 행 그룹(개요)으로 묶여 있어 왼쪽 위 1~${maxDepth} 단추로 접고 펼칩니다. 넣을 단계(호스트까지 · GPU 까지 · VM 까지)는 계층 표에만 적용되고 평면 표는 늘 GPU·VM 한 줄씩입니다.`],
     ['전체', 'GPU 한 장의 명목 용량 × 장수(vGPU 프로파일 GB 가 명목 단위라 vCenter 보고값보다 크면 명목값). 패스스루 GPU 는 PCI 정보에 메모리가 없어 모델명으로 추정합니다.'],
     ['할당', '켜진 VM 이 받은 프레임버퍼 — vGPU 는 프로파일 이름 끝 숫자(GB) × 장치 수, 패스스루는 GPU 한 장 전체.'],
     ['예비', '전체 − 할당. 용량이나 할당을 모르는 것이 섞이면 비웁니다(부분 합을 예비로 적지 않습니다). 프로파일이 올라간 GPU 의 예비는 같은 프로파일 슬롯 단위로만 쓸 수 있습니다(혼합 크기 모드 제외).'],
@@ -199,6 +231,7 @@ export async function renderGpuAllocWorkbook(tree, meta) {
     r.getCell(1).fill = fill('FFEEF4FF'); r.getCell(1).font = { bold: true, color: { argb: C.title } };
     r.getCell(2).alignment = { wrapText: true, vertical: 'top' };
     r.eachCell((c) => { c.border = BORDER; });
+  }
   }
   return Buffer.from(await wb.xlsx.writeBuffer());
 }

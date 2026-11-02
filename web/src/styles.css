@@ -1369,6 +1369,14 @@ tr.row-sel > td { background: rgba(59, 130, 246, .10); }
 .gpu-alloc-kpi.off .val { color: #fbbf24; }
 .gpu-alloc-ctl { align-items: center; margin-bottom: 10px; }
 .gpu-alloc-corps { margin-bottom: 12px; }
+.gpu-alloc-export { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.gpu-alloc-export-sec { padding: 12px 14px; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.gpu-alloc-export-sec .lbl { font-size: 12px; }
+.gpu-alloc-export-chk { display: flex; align-items: flex-start; gap: 10px; font-size: 13px; line-height: 1.5; cursor: pointer; min-width: 0; }
+.gpu-alloc-export-chk input { width: 18px; height: 18px; flex: none; margin-top: 1px; accent-color: var(--accent); }
+.gpu-alloc-export-warn { font-size: 12px; color: #fbbf24; }
+.gpu-alloc-export-list { margin: 0; padding-left: 18px; font-size: 12px; line-height: 1.7; color: var(--text-dim); }
+.gpu-alloc-export-file { font-family: var(--mono); font-size: 12px; color: var(--text-dim); word-break: break-all; }
 .gpu-alloc-table td { vertical-align: middle; white-space: nowrap; }
 .gpu-alloc-table td.num, .gpu-alloc-table th.num { text-align: right; font-family: var(--mono); font-size: 12px; }
 .gpu-alloc-table td.alloc { color: #60a5fa; font-weight: 600; }

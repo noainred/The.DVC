@@ -93,5 +93,9 @@
     칩 = `/vcenters` 의 법인 전부(GPU 호스트 0 이면 흐리게) · 상태 점은 `vcCardText.vcQuickDot` 하나(vCenter 화면도 이것으로 바꿨다 — 판정 복제 금지) ·
     여러 개 선택(빈 선택 = 전체) · 요약 칸은 `gpuAllocText.sumTotals`(서버 finishTotals 와 같은 '모르는 값이 섞이면 예비 null') ·
     내려받기는 `vcenterIds=a,b`(서버가 조회 범위와 교집합을 먼저 — 범위 밖 id 는 빠진다, 100개·200자 상한) · 찾기 글자가 법인 id·이름에 맞으면 그 법인 전체.
+  - **v2.855 엑셀 내보내기 창**(`GpuAllocExportModal.jsx` — 시안 '계층 표 엑셀 내보내기'): 계층 표에 넣을 단계 `depth=host|gpu|vm`(계층 표 행 깊이 상한 —
+    평면 표·안내에는 영향 없음, 개요 단추 수도 맞춘다) · 시트 `sheets=tree,flat,info`(하나 이상) — 모르는 값은 `allocExportOpts` 가 **잠금을 잡기 전에** 400.
+    범위 글자·호스트·GPU 수·단계별 파일 이름은 `GET /tools/gpu/alloc/export-meta`(data.csv)가 내려받기와 **같은 `allocFileName`** 으로 준다(화면이 이름을 지어내지 않는다).
+    웹 쿼리는 `gpuAllocText.allocExportQuery` 하나(CSV·창·내려받기 공용 — 기본값은 싣지 않는다).
   - ⚠ 정직 기록: `HostGraphicsInfo.vm` 이 꺼진 VM 을 싣는지, 이 현장 vCenter 가 동적 DirectPath `assignedId` 를 주는지는 실장비로 확인하지 못했다
     (꺼진 VM 은 목록에 있어도 할당에 넣지 않으므로 결과는 같다). 한 VM 의 vGPU 장치 둘이 한 GPU 목록에 한 번만 오면 GPU 단위 할당이 한 장치분으로 적게 잡힌다(호스트 합은 정확).
