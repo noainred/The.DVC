@@ -92,3 +92,15 @@ describe('Director 상태 · 멈춤 의심', () => {
     expect(sortWaiting(null)).toEqual([]);
   });
 });
+
+describe('v2.864 이력 표 대상이 진행 중 VM 을 따라간다', () => {
+  it('사람이 바꾸기 전까지만 · 거르기 밖이면 그대로', async () => {
+    const { historyFollowTarget } = await import('./bareosLiveText.js');
+    expect(historyFollowTarget({ pickedJobId: 'run', sel: 'first', ids: ['first', 'run'] })).toBe('run');
+    expect(historyFollowTarget({ byHand: true, pickedJobId: 'run', sel: 'first', ids: ['first', 'run'] })).toBe(null);
+    expect(historyFollowTarget({ pickedJobId: 'run', sel: 'run', ids: ['run'] })).toBe(null);
+    expect(historyFollowTarget({ pickedJobId: 'run', sel: 'first', ids: ['first'] })).toBe(null);
+    expect(historyFollowTarget({ pickedJobId: '', sel: 'first', ids: ['first'] })).toBe(null);
+    expect(historyFollowTarget()).toBe(null);
+  });
+});

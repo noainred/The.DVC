@@ -266,3 +266,33 @@ test('⑤ v2.862 복원 검증 · 일일 요약 — 전체 범위 · OTP · 입�
   r = await call('admin', 'PUT', '/digest', { enabled: true, time: '08:31' });
   assert.deepEqual([r.s, r.j.config.time], [200, '08:31']);
 });
+
+test('⑥ v2.864 복원 › 폴더 표 — 목록에 전원 · 용량 · 마지막 성공 · 폴더 VM 수는 조회 범위 안 vCenter 만', async () => {
+  const { lastOkOf, restoreFolderCounts } = await import('../src/routes/api/bareosBackup.js');
+  // 마지막 성공: 성공 · 경고만 · 가장 늦은 끝(없으면 시작) · 없으면 null(포탈 기록에 없음)
+  assert.deepEqual(lastOkOf({ jobid: 5, state: 'error', level: 'I', endedAt: 900 }, [{ jobid: 3, state: 'ok', level: 'F', endedAt: 500 }, { jobid: 4, state: 'warning', level: 'I', startedAt: 700 }]), { at: 700, level: 'I', jobid: 4 });
+  assert.equal(lastOkOf(null, []), null);
+  assert.equal(lastOkOf({ state: 'ok', endedAt: 0 }, null), null, '시각을 모르는 성공은 시각을 지어내지 않는다');
+  // 폴더 VM 수: 대상이 있는 vCenter 만 · 템플릿 제외
+  const cnt = restoreFolderCounts([{ vcenterId: 'vc-a' }], [
+    { vcenterId: 'vc-a', vcDcPath: 'DC', folderPath: '/x' }, { vcenterId: 'vc-a', vcDcPath: 'DC', folderPath: '/x' },
+    { vcenterId: 'vc-a', vcDcPath: 'DC', folderPath: '/x', template: true }, { vcenterId: 'vc-z', vcDcPath: 'DC', folderPath: '/x' },
+  ]);
+  assert.deepEqual(cnt, [{ vcenterId: 'vc-a', dc: 'DC', folder: '/x', vms: 2 }]);
+  // 목록: finishedRuns 원문은 싣지 않고 lastOk 만 · 전원 · 용량(인벤토리)
+  const list = await call('admin', 'GET', '');
+  assert.equal(list.s, 200, list.t);
+  const web = list.j.jobs.find((j) => j.id === ID.web);
+  assert.deepEqual([web.powerState, web.storageGB], ['POWERED_ON', 200]);
+  assert.ok('lastOk' in web);
+  assert.ok(list.j.jobs.every((j) => !('finishedRuns' in j)));
+  // 폴더 수: 전체 범위는 두 vCenter · 범위 계정은 자기 vCenter 만(다른 vCenter 의 이름 · 폴더를 싣지 않는다)
+  const a = await call('admin', 'GET', '/restore-folders');
+  assert.equal(a.s, 200, a.t);
+  assert.deepEqual(a.j.folders.map((f) => `${f.vcenterId}${f.folder}:${f.vms}`).sort(), ['vc-a/app:1', 'vc-a/web:1', 'vc-b/:1']);
+  assert.equal(a.j.vcNames['vc-b'], 'Warsaw');
+  const s = await call('sadm', 'GET', '/restore-folders');
+  assert.equal(s.s, 200, s.t);
+  assert.ok(s.j.folders.every((f) => f.vcenterId === 'vc-a'));
+  assert.doesNotMatch(s.t, /Warsaw|vc-b/);
+});
