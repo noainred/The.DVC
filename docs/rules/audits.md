@@ -6,6 +6,7 @@
 
 ## 목차
 
+- Bareos v2.849 백업 등록 실패 'Could not find config resource' — 포탈 리소스 안내 · 연결 진단(2026-11-02)
 - Bareos v2.848 백업 등록 실패 'configure: is an invalid command' — 잡 만들기 권한 안내 · 연결 진단(2026-11-02)
 - Bareos v2.847 버그 점검 2회차 — 5축 + 반증 1인(Bareos 전체 · 확정 22 · 2026-11-02)
 - Bareos v2.846 버그 점검 — 5축 + 반증 1인(Bareos 전체 · 확정 35 · 2026-11-02)
@@ -1835,6 +1836,19 @@
   목록 memo(P7) · 카탈로그 memo 세대(P9) · 고아 잡(I7) · Migration 새 잡의 일시 lastRun(C2-7).
   ⚠ 정정(v2.823): 카탈로그 memo 세대(P9)는 v2.823 에 해소했다(memo 키에 Director id + `settingsRev` — 설정을 저장하면 새로 읽는다). 고아 잡(I7)은 v2.823 검토 C3 에서
   '가리키는 Director 가 설정에 없는 대상은 원장에서만 취소·삭제' 경로로 일부 해소(Director 쪽 고아 잡 탐지는 여전히 없다).
+
+## Bareos v2.849 백업 등록 실패 'Could not find config resource' — 포탈 리소스 안내 · 연결 진단(2026-11-02)
+
+사용자 화면(v2.848 안내대로 webui-admin Profile 에 configure 를 허용한 뒤 · 사유 ‘configure error: Could not find config resource "PortalVmwareDefaults" referenced on line 3: JobDefs = …’) ·
+고른 것: **안내 + 리소스 점검**. 회귀 `bareosPortalRes2849`(4) · `bareosConfigurePerm2848` · `bareosRoutes` ③ 단계 수 갱신.
+
+- 원인: 잡이 참조하는 포탈 리소스(공통 기본값 JobDefs ‘PortalVmwareDefaults’ · FileSet ‘PortalVmwareGeneric’ · 복원 잡 ‘PortalVmwareRestore’)는 자동 설정 2단계나
+  사전 준비 블록이 만든다 — 직접 구성한 Director 에는 없다. 사용자 쪽 해결은 자동 설정 2단계(포탈 전용 콘솔도 함께 — webui-admin 에 넣은 configure 는 되돌려도 된다) 또는 블록을 넣고 reload.
+- 같은 판정 모듈 `configurePerm.js` 에: `missingResourceOf`(앞 2,000자만 · 선형) → `addJobFailText` 가 포탈 리소스(JobDefs · FileSet)면 자동 설정 · 사전 준비 블록 · 공통 기본값 안내,
+  매핑 값(Client · Storage · Pool · Schedule)이면 vCenter 매핑 안내 · `portalResources(session, expect)` = 목록 명령(.jobdefs · .filesets · .jobs — 읽기 전용)으로 있음 · 없음 · 모름(명령 실패 — 단정하지 않는다).
+- 연결 진단 마지막 단계 '포탈 리소스(JobDefs · FileSet · 복원 잡)' — configure 와 같이 **점검 단계**(연결 성공 · 첫 실패 기록에 넣지 않는다 — `ADVISORY_STAGES`) ·
+  부르는 쪽이 이름(expect — 공통 기본값)을 줄 때만(CLI 도구 · 옛 호출은 '시도 안 함') · 엣지 대행 연결 시험은 `probe` 작업 인자 expect(옛 엣지는 점검 없음 → null) · 회신 정제 `normPortalResources`.
+- 함께 알린 것(추정 — 실환경 미확인): 사용자의 webui-admin Profile 에는 Plugin Options ACL 줄이 없다 — 포탈 Profile 은 `*all*`. 복원의 pluginoptions 가 이 ACL 에 걸릴 수 있다.
 
 ## Bareos v2.848 백업 등록 실패 'configure: is an invalid command' — 잡 만들기 권한 안내 · 연결 진단(2026-11-02)
 

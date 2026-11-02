@@ -565,6 +565,9 @@ api.post('/tools/bareos-backup/settings/directors/:directorId/test', adminOnly, 
   _testBusy.add(saved.id);
   const b = req.body?.director || req.body || {};
   let target = '';
+  // v2.849: 포탈 리소스 점검에 쓸 공통 기본값 이름(잡이 참조하는 JobDefs · FileSet · 복원 잡)
+  const dfl = effectiveSettings().defaults || {};
+  const expect = { jobDefs: dfl.jobDefs, fileSet: dfl.fileSet, restoreJob: dfl.restoreJob };
   try {
     if (isDemoActive() && !secretProvided(b.password)) {
       target = `${saved.name}(데모)`;
@@ -580,7 +583,7 @@ api.post('/tools/bareos-backup/settings/directors/:directorId/test', adminOnly, 
       if (fresh) return res.status(400).json({ ok: false, reason: `이 Director 는 법인 엣지 '${saved.agent}' 가 대행합니다 — 새 비밀번호는 먼저 저장한 뒤 시험하세요(엣지가 저장된 값으로 시험합니다).` });
       target = `${saved.name} (엣지 ${saved.agent} 대행)`;
       // 정지 해제는 relayToEdge 가 접속값이 그대로일 때만 한다(sameNow) — 여기서 다시 지우지 않는다(G1 — 그 가드를 무력화했다)
-      const result = await relayToEdge(saved, 'probe', {});
+      const result = await relayToEdge(saved, 'probe', { expect });
       audit(req, 'Bareos 연결 시험', target, `성공 — ${result.director || '?'} ${result.version || ''}`);
       return res.json({ ok: true, ...result, stages: null, relay: saved.agent, demo: false });
     }
@@ -590,7 +593,7 @@ api.post('/tools/bareos-backup/settings/directors/:directorId/test', adminOnly, 
     // v2.822(B4): 감사 대상은 **실제로 접속한 주소** — 저장 비밀번호로 시험하면 요청의 주소는 무시되므로 그것을 적으면 거짓 기록이다.
     target = `${saved.name} ${conn.host || '(미설정)'}:${conn.port || ''}`;
     if (!conn.host || !conn.name || !conn.password) return res.status(400).json({ ok: false, reason: '주소·콘솔 이름·비밀번호를 모두 채우세요(저장된 비밀번호로 시험하면 저장된 주소로만 접속합니다).' });
-    const d = await diagnoseConsole(conn);
+    const d = await diagnoseConsole(conn, { expect });
     if (!d.ok) {
       audit(req, 'Bareos 연결 시험', target, `실패 — ${d.failed?.key || '?'} ${d.failed?.code || ''} ${String(d.failed?.detail || '').slice(0, 120)}`);
       const f = d.stages.find((x) => x.ok === false);
@@ -600,7 +603,7 @@ api.post('/tools/bareos-backup/settings/directors/:directorId/test', adminOnly, 
     if (!fresh) clearAuthStopIfSame(saved);
     const { director, version } = parseBanner(d.banner);
     audit(req, 'Bareos 연결 시험', target, `성공 — ${director || '?'} ${version || ''}`);
-    res.json({ ok: true, director, version, tls: d.tls, clients: d.clients, clientsError: '', configure: d.configure, stages: d.stages, demo: false });   // v2.848 configure: 잡 만들기 권한
+    res.json({ ok: true, director, version, tls: d.tls, clients: d.clients, clientsError: '', configure: d.configure, resources: d.resources, stages: d.stages, demo: false });   // v2.848 configure: 잡 만들기 권한
   } catch (e) {
     audit(req, 'Bareos 연결 시험', target, `실패 — ${e?.code || ''} ${String(e?.message || '').slice(0, 120)}`);
     sendErr(res, e);

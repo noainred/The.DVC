@@ -6,7 +6,7 @@
  * 모양: 성공 `{ ok:true, value }` · 실패 `{ ok:false, code, reason, authFailed?, notSent?, unknown?, paths?, files? }`.
  * 새 작업 종류를 더하면 VALUE 표에도 넣는다(없으면 결과를 받지 않는다 — 실패로 닫힌다).
  */
-import { normConfigurePerm } from './configurePerm.js';
+import { normConfigurePerm, normPortalResources } from './configurePerm.js';
 import { numOrNull } from '../util/numOrNull.js';
 import { isResourceName, OWN_TYPES, OWN_PER_TYPE } from './names.js';
 import { normPolicyResult, normVolumeRows } from './policyParse.js';
@@ -48,7 +48,7 @@ const rows = (v, cap) => arr(v).slice(0, cap).map(rowOut).filter((x) => x && x.j
 
 /** 작업 종류 → 성공 값 정제. */
 export const VALUE = Object.freeze({
-  probe: (v) => { const r = obj(v); const t = obj(r.tls); return { director: str(r.director, 64), version: str(r.version, 40), tls: r.tls ? { protocol: str(t.protocol, 20), cipher: str(t.cipher, 80) } : null, clients: names(r.clients), clientsError: str(r.clientsError, 300), configure: normConfigurePerm(r.configure) }; },   // v2.848 configure: 옛 엣지는 없음 → null(모름)
+  probe: (v) => { const r = obj(v); const t = obj(r.tls); return { director: str(r.director, 64), version: str(r.version, 40), tls: r.tls ? { protocol: str(t.protocol, 20), cipher: str(t.cipher, 80) } : null, clients: names(r.clients), clientsError: str(r.clientsError, 300), configure: normConfigurePerm(r.configure), resources: normPortalResources(r.resources) }; },   // v2.848 configure: 옛 엣지는 없음 → null(모름)
   catalog: (v) => {
     const r = obj(v); const out = {};
     for (const k of ['clients', 'storages', 'pools', 'schedules', 'jobdefs', 'filesets']) out[k] = names(r[k]);

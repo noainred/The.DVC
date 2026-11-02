@@ -45,7 +45,7 @@ test('① configurePermission — 막힘 · 허용(사용법 응답 · 성공) �
 });
 
 test('② 연결 진단 — 잡 만들기 권한 단계(막혀도 연결 성공 · 그 줄만 실패 · 조치 안내)', async () => {
-  assert.deepEqual(DIAG_STAGES.at(-1), ['configure', '잡 만들기 권한(configure)']);
+  assert.deepEqual(DIAG_STAGES.find(([k]) => k === 'configure'), ['configure', '잡 만들기 권한(configure)']);   // v2.849 뒤에 '포탈 리소스' 단계가 붙었다
   const mk = async (cfg) => {
     const fd = await startFakeDirector({ name: 'portal', password: 'pw-1', handle: (cmd) => (cmd === '.clients' ? { clients: [{ name: 'kr-fd' }] } : cmd === 'configure' ? cfg : {}) });
     servers.push(fd);
@@ -78,7 +78,7 @@ test('③ 엣지 대행 연결 시험 — probe 가 권한도 보고 · 회신 �
   assert.equal(sanitizeEdgeResult('probe', { ok: true, value: { director: 'd', version: '25' } }).value.configure, null);
   assert.deepEqual(sanitizeEdgeResult('probe', { ok: true, value: { configure: { allowed: 'yes', detail: 'x\ny', extra: 1 } } }).value.configure, { allowed: null, detail: 'x y' }, '아는 칸만 · 불리언만');
   const route = fs.readFileSync(new URL('../src/routes/api/bareosBackup.js', import.meta.url), 'utf8');
-  assert.match(route, /clientsError: '', configure: d\.configure, stages: d\.stages/);
+  assert.match(route, /clientsError: '', configure: d\.configure, resources: d\.resources, stages: d\.stages/);
 });
 
 test('④ 등록 실패 사유 — configure 가 막혔으면 원인 · 조치(원문은 끝에) · 그 밖 원문 그대로', async () => {
