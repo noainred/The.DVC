@@ -150,6 +150,32 @@ export function sanitizeTick(t) {
 }
 
 /**
+ * v2.865: 엣지 자동 업그레이드 동기화 한 번(edgeSync.run)의 기록 정제 — 쓸 때·읽을 때 공용. 결과 코드 목록은 edgeSync.js 가 가진다
+ * (순환 import 를 피해 여기서는 글자 길이만 자른다 — 되살릴 때 runner 가 모르는 코드를 'error' 로 바꾼다).
+ */
+export function sanitizeEdgeSync(r) {
+  if (!r || typeof r !== 'object') return null;
+  const at = ts(r.at);
+  if (at == null) return null;
+  const out = {
+    at, finishedAt: ts(r.finishedAt), outcome: txt(r.outcome, 20) || 'error', version: ver(r.version), source: txt(r.source, 20),
+    pushed: num(r.pushed), ok: num(r.ok), behind: num(r.behind), reason: txt(r.reason, 600),
+    failed: Array.isArray(r.failed) ? r.failed.filter((f) => f && typeof f === 'object').slice(0, 20)
+      .map((f) => ({ id: txt(f.id, 128) || '', name: txt(f.name, 120) || '', reason: txt(f.reason, 300) || '' })) : [],
+  };
+  if (r.counts && typeof r.counts === 'object') {
+    const c = {};
+    for (const k of Object.keys(r.counts).slice(0, 16)) { const v = num(r.counts[k]); if (v != null && /^[a-z-]{1,20}$/.test(k)) c[k] = v; }
+    out.counts = c;
+  }
+  if (r.restored === true) out.restored = true;
+  if (!out.failed.length) delete out.failed; // 실패가 없으면 싣지 않는다(파일·응답을 짧게)
+  for (const k of Object.keys(out)) if (out[k] === undefined || out[k] === null) delete out[k];
+  out.at = at; out.outcome = txt(r.outcome, 20) || 'error';
+  return out;
+}
+
+/**
  * 재시작 전 기록을 되살린다 — `restored:true` 를 달고, 확인 결과의 '새 버전 있음' 은 지금 버전 기준으로 다시 계산한다.
  * @param {object} doc 파일 내용 {lastCheck,lastResult,lastTick}
  * @param {string} currentVersion 지금 실행 중인 버전
@@ -163,7 +189,7 @@ export function restoreStatus(doc, currentVersion) {
     if (check.remote) check.remote.available = !!(check.remote.ok && check.remote.latest && newerThanNow(check.remote.latest));
     if (check.watch) check.watch.available = !!(check.watch.version && newerThanNow(check.watch.version));
   }
-  return { lastCheck: check, lastResult: mark(sanitizeResult(d.lastResult)), lastTick: mark(sanitizeTick(d.lastTick)) };
+  return { lastCheck: check, lastResult: mark(sanitizeResult(d.lastResult)), lastTick: mark(sanitizeTick(d.lastTick)), lastEdgeSync: mark(sanitizeEdgeSync(d.lastEdgeSync)) }; // v2.865: 엣지 동기화 기록도
 }
 
 /** 다음 백그라운드 확인 시각 — setInterval(무장 시각 + k × 주기). 꺼져 있거나 모르면 null. */
