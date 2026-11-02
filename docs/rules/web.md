@@ -28,6 +28,7 @@
 - (v2.811 추가) ESXi 호스트 화면의 '법인별' 보기 — 숫자·판정은 서버 `/hosts/corp`(`vcenter/hostCorp.js`), 글자·색은 `views/hostCorpText.js`
 - (v2.858 추가) Bareos 실행 중 작업 상세 — 진행 현황 행 펼침 · 실행 현황 · 이력 표가 `views/tools/BareosRunDetail.jsx` 하나를 쓴다 · 판정은 `bareosLiveText.js`
 - (v2.860 추가) Bareos 화면 재구성(시안 `docs/design/bareos-ui-v2`) — 탭 5개 · 운영 안 묶음 · 정책 · 보존 한 화면 · 설정 왼쪽 목록 · 옛 주소 이동
+- (v2.861 추가) Bareos 운영 › 복원 — 폴더 트리에서 고르기 · 3단계 · 묶음 진행 · 복원 뒤 네트워크 끊기 · 남은 스냅샷 칩
 - (원래 5663행) v2.708 — 드롭다운은 공용 `Select`·`DataList` 하나다(자동 정렬)
 - (원래 5801행) 특수 기능 화면(v2.679) — 표시 이름·설명·개발 단계는 '덮어쓰기' 이고 키는 그대로다
 - (원래 5848행) 접속 공지 팝업 · 게시판(v2.722)
@@ -490,3 +491,9 @@
   ⑤ 정책 · 보존은 `BareosPolicyPage` 한 화면에 두 구획(`BareosPolicyTab`·`BareosPoolsTab` 의 `bare`) — 'Director 수집 상태' 표 · 데모 안내는 한 번만. 옛 `#/tools/bareos-summary/pools` 는 풀 구획으로 내려간다.
   ⑥ 설정은 왼쪽 목록(`#/tools/bareos-backup/settings/<director|install|corp|accounts|defaults>` — `useHashTab` 중첩 base). 데모일 때 운영 머리의 Director 한 줄은 설정에서 빼고 설정 화면의 안내 하나만 둔다.
   ⑦ 공용 조각은 `BareosBits.jsx`(Note · ReadGuide · Stat · Dot · ResultBar · Segs · FilterChip) — 칸 설명 · 범례는 '읽는 법' 토글로 치우되 지우지 않는다. '확인 필요' 는 실패 · 미등록 · 오래됨 · 켜진 잡의 백업 없음을 합친 것이고 결과를 못 읽으면 '—'(`corpAttention`·`detailFilterCounts`).
+- **v2.861 — Bareos 운영 › 복원(사용자 요청 '백업처럼 폴더에서 선택해서 복원' · '네트워크 연결 끊고 시작' · '데이터스토어 선택' — 시안 ⑦~⑪)**. 화면 `BareosRestore.jsx` · 글자 · 빠른 확인 `bareosRestoreText.js`(+ test):
+  ① 판정은 서버 `bulkRestorePlan` 하나 — 화면은 같은 규칙을 먼저 말할 뿐(`wizardIssue`) · 3단계 미리 보기는 POST `restore-check/bulk`(Director · OTP 안 씀). 고르기는 **한 법인(Director)만 · 50대**(`pickBlock`) · 덮어쓰기는 1대일 때만 목록에 나온다.
+  ② 복원 지점 · 실행은 Director 를 거친다 — `withRelayWait(…, 'restorePoints' | 'restores')`(서버 RESULT_MS — 숫자를 화면에 박지 않는다) · 늦게 온 이전 응답은 `gen` 으로 버린다 · 실패한 OTP 는 비운다.
+  ③ 네트워크 끊기 기본(새 VM 끊기 · 덮어쓰기 그대로 — `withMode`) · 상태는 원장 `restores[].nic · finish` 를 `finishText` 로(옛 복원은 '—'). 진행 · 이력의 복원 이력 표에 '네트워크' 칸.
+  ④ 데이터스토어 목록은 `/datastores`(vCenter 마다 한 번 — `dsAsked` ref · 렌더마다 다시 묻지 않는다) · 남은 스냅샷 칩은 인벤토리 `snapshotCount`(못 읽으면 칩 없음 — 0 으로 보지 않는다).
+  ⑤ 백업 대상 패널의 '복원…' 은 이 화면으로 그 VM 을 골라 넘긴다(옛 단건 RestoreModal 은 지웠다). 결과 창의 'Full 로 지금 실행' 은 해석이 Full 을 권하는 줄(`issueNeedsFull`)에만 · 쓰기 범위일 때만.

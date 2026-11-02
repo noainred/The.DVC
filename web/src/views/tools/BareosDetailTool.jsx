@@ -15,6 +15,7 @@ import VeeamHeader from './VeeamHeader.jsx';
 import BareosTabs from './BareosTabs.jsx';
 import { CritIcon, MethodBadge } from './BackupMarkIcons.jsx';
 import { Note, ReadGuide, Stat, STAT_GRID, Dot, ResultBar, FilterChip } from './BareosBits.jsx';
+import { snapshotChip, SNAPSHOT_TITLE } from './bareosRestoreText.js';   // v2.861 남은 스냅샷 칩
 import {
   bareosClass, directorStateOf, directorLineText, resultsUnknownText, numText, shortTs, fmtGb, stText, ST_TONE, runLine, bytesText,
   DETAIL_FILTERS, DETAIL_FILTERS_MAIN, DETAIL_FILTERS_MORE, detailFilterCounts, lvText, buildBareosTree, flattenBareosTree, initialBareosOpen, BAREOS_RPO_DAYS, BAREOS_DETAIL_VC_KEY,
@@ -241,6 +242,7 @@ export default function BareosDetailTool() {
                         <CritIcon crit={r.crit} size={14} />
                         <span style={{ fontWeight: 600, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: r.gone ? 'var(--text-dim)' : undefined }}>{r.name}</span>
                         <MethodBadge method={r.method || ''} small />
+                        {snapshotChip(r.snaps) && <span className="badge amber" style={{ fontSize: 10, flex: 'none' }} title={SNAPSHOT_TITLE}>{snapshotChip(r.snaps)}</span>}
                       </button>
                     </div>
                     <div role="gridcell" style={{ padding: '0 6px', fontSize: 12, color: r.power === 'POWERED_ON' ? '#86efac' : 'var(--text-dim)' }}>{r.power === 'POWERED_ON' ? '켜짐' : r.power ? '꺼짐' : '—'}</div>
@@ -263,6 +265,7 @@ export default function BareosDetailTool() {
                 <div className="flex" style={{ gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
                   <b style={{ fontSize: 16, overflowWrap: 'anywhere' }}>{selRow.name}</b><MethodBadge method={selRow.method || ''} small />
                 </div>
+                {snapshotChip(selRow.snaps) && <Note tone="warn">{snapshotChip(selRow.snaps)} — {SNAPSHOT_TITLE}</Note>}
                 <RunCell b={selRow.b} known={known} />
                 <dl style={{ margin: 0, display: 'grid', gridTemplateColumns: 'auto minmax(0, 1fr)', gap: '5px 12px', fontSize: 12.5 }}>
                   <dt className="muted">잡</dt><dd style={{ margin: 0, fontFamily: 'var(--mono)', fontSize: 12, overflowWrap: 'anywhere' }}>{selRow.job?.name || (selRow.b?.job === false ? '없음(미등록)' : '—')}</dd>

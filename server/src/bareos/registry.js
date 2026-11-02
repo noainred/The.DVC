@@ -10,7 +10,8 @@
  *   lastRun: { jobid, status, state, level, startedAt, endedAt, bytes, files, errors, checkedAt } | null,
  *   lastError: { at, message } | null,
  *   missingInDirector: boolean,                         // Director `.jobs` 에 없으면 true(누가 conf 를 지웠다)
- *   restores: [ { jobid, fromJobids, mode, target, status, state, startedAt, endedAt, by, at } ],   // 최근 RESTORES_KEEP 건
+ *   restores: [ { jobid, fromJobids, mode, target, status, state, startedAt, endedAt, by, at, batchId?, nic?, finish? } ],   // 최근 RESTORES_KEEP 건
+ *     v2.861 batchId(묶음 복원) · nic('disconnect'|'keep' — 새 VM 은 끊기가 기본) · finish{ nic:'pending'|'ok'|'failed'|'skipped', detail, at, opId?, tries? }
  *   finishedRuns: [ { jobid, status, state, level, startedAt, endedAt, bytes, errors, checkedAt } ],   // v2.858 startedAt·bytes 추가(그 전 항목에는 없다)
  *     // v2.822.3 끝난 백업 실행 최근 FINISHED_KEEP 건(실패 메일용)
  * }
@@ -395,6 +396,41 @@ export function applyRestoreRow(id, row, now = Date.now()) {
   Object.assign(r, { status: row.status, state: statusOf(row.status), startedAt: row.startedAt ?? r.startedAt ?? null, endedAt: row.endedAt ?? null, checkedAt: now, misses: 0 });
   if (changed) persist();
   return copy(j);
+}
+
+/**
+ * v2.861 복원 마무리(NIC 끊기)를 볼 복원 — 끊기를 고른 복원이고(nic === 'disconnect' — 새 VM 기본 · 덮어쓰기는 고를 때만) 끝났거나 추적을 놓쳤고 마무리가 없거나 아직 '보냄' 인 것.
+ *   원장 사본을 통째로 만들지 않는다(폴러 주기마다 부른다) — 필요한 칸만.
+ * @returns {{ jobId, vcenterId, rid, name, state, finish }[]}
+ */
+export function restoresToFinish() {
+  const out = [];
+  for (const j of load().jobs) {
+    for (const r of Array.isArray(j.restores) ? j.restores : []) {
+      // 추적을 놓친(abandoned) 복원도 넣는다 — 결과를 모르니 '직접 확인' 으로 남긴다(반증 검토 L1: 예전에는 화면이 영원히 '끊기 대기')
+      if (r?.nic !== 'disconnect' || !r.jobid || (!isFinalStatus(r.status) && !r.abandoned)) continue;
+      const f = r.finish && typeof r.finish === 'object' ? r.finish : null;
+      if (f && f.nic !== 'pending') continue;
+      out.push({ jobId: j.id, vcenterId: j.vcenterId, rid: r.jobid, name: String(r.target?.name || ''), state: r.state, abandoned: !!r.abandoned && !isFinalStatus(r.status), finish: f ? { ...f } : null });
+    }
+  }
+  return out;
+}
+
+/**
+ * v2.861 복원 마무리 기록 — guard(지금 finish) 가 false 면 쓰지 않는다(늦게 온 보냄 기록이 이미 끝난 결과를 덮지 않게).
+ * @returns {boolean} 썼는가
+ */
+export function patchRestoreFinish(jobId, rid, finish, guard = null) {
+  const db = load();
+  const j = db.jobs.find((x) => x.id === jobId);
+  const r = j?.restores?.find((x) => x.jobid === rid);
+  if (!r) return false;
+  const cur = r.finish && typeof r.finish === 'object' ? r.finish : null;
+  if (guard && !guard(cur)) return false;
+  r.finish = { ...finish };
+  persist();
+  return true;
 }
 
 /** 아직 끝나지 않은(추적 중인) 복원인가 — 진행 중 409·복원 지점 화면·삭제 거부가 같은 판정을 쓴다. */

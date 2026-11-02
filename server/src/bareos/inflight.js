@@ -18,6 +18,12 @@ const _groups = new Map();   // 그룹 id → { name, since } — v2.830 백업 
 export function noteGroupRunStart(id, name) { _groups.set(String(id), { name: String(name || id).slice(0, 80), since: Date.now() }); }
 export function noteGroupRunEnd(id) { _groups.delete(String(id)); }
 
+// v2.861 묶음 복원(라우트 restore/bulk) — 중앙 직접이면 VM 마다 세 번(jobStatus · list jobs · restore) 묻는 세션이 이 프로세스 안에서 돈다(50대 · 고RTT 면 몇 분).
+//   도중에 재시작하면 남은 VM 은 보내지 못하고, 보낸 복원의 rid 를 원장에 남기지 못한다(열린 복원이 화면에 없다).
+const _restores = new Map();   // 묶음 id → { name, since }
+export function noteRestoreBatchStart(id, name) { _restores.set(String(id), { name: String(name || id).slice(0, 80), since: Date.now() }); }
+export function noteRestoreBatchEnd(id) { _restores.delete(String(id)); }
+
 // v2.847 E2-2(2회차 점검 — 코드 경로): **엣지 쪽** 대행 실행 중인 상태 변경 작업(엣지 워커 — agent/bareosOpWorker.js). 엣지도 자동 업그레이드(EDGE_MODE=all 기본 켬)가
 //   이 목록을 보는데 예전에는 늘 비어 있어, 엣지가 setup.manage · addJobs 를 실행하는 도중 재시작해 SSH 되돌리기 · 회신을 잃었다(v2.825.1 G15 의 엣지 절반).
 const _edgeOps = new Map();   // 작업 id → { kind, directorId, since }(비밀 · 인자 없음)
@@ -34,6 +40,7 @@ export function runningBareosWork(now = Date.now()) {
   for (const [id, s] of _setups) out.push({ kind: 'bareos', key: `setup:${id}`, label: `Bareos 자동 설정(${s.name})`, since: s.since, resumable: false });
   // v2.830: 그룹 실행 도중 재시작하면 그 회차의 남은 VM 은 보내지 못한다(회차는 이미 차지했다 — 다시 보내지 않는다)
   for (const [id, g] of _groups) out.push({ kind: 'bareos', key: `group:${id}`, label: `Bareos 백업 그룹 실행(${g.name})`, since: g.since, resumable: false });
+  for (const [id, r] of _restores) out.push({ kind: 'bareos', key: `restore:${id}`, label: `Bareos 묶음 복원(${r.name})`, since: r.since, resumable: false });
   for (const [id, o] of _edgeOps) out.push({ kind: 'bareos', key: `edge-run:${id}`, label: `Bareos 대행 실행 ${o.kind}(Director ${o.directorId})`.slice(0, 120), since: o.since, resumable: false });
   let ops = [];
   try { ops = pendingView(); } catch { ops = []; }
@@ -48,4 +55,4 @@ export function runningBareosWork(now = Date.now()) {
   return out;
 }
 
-export function _resetInflightForTest() { _setups.clear(); _groups.clear(); _edgeOps.clear(); }
+export function _resetInflightForTest() { _setups.clear(); _groups.clear(); _restores.clear(); _edgeOps.clear(); }

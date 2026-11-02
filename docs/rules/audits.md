@@ -6,6 +6,7 @@
 
 ## 목차
 
+- Bareos v2.861 묶음 복원 · 복원 뒤 NIC 끊기 — 모듈 규칙 · 반증 1인 확정분(server/src/bareos/CLAUDE.md 에서 옮김 — 2026-11-03)
 - Bareos v2.852.1 WebUI 계정 만들기 실패 'Failed to connect to Director' — 시험 bconsole 의 TLS 끔(2026-11-02)
 - Bareos v2.851.1 완전 설치 마무리 '사이트 매핑의 vcserver 주소가 올바르지 않습니다' — 매핑 주소를 vCenter 등록부에서(2026-11-02)
 - Bareos v2.851 완전 설치 2단계 '번들 패키지 판 충돌' — 러너 · 원인 판정 · 사전 점검(2026-11-02)
@@ -2593,3 +2594,14 @@ server/src/bareos/CLAUDE.md 크기 상한(15,000B)으로 원문 그대로 옮겼
 - **v2.822 실패 알림 메일**(`bareos/notify.js`, 메일 종류 `bareos-backup`): 중앙 전용 · 원장만 읽는다(Director 에 닿지 않는다) · 커서는 대상별 **jobid**
   (카탈로그 시각은 시간대가 없다) · 끝나지 않은 실행으로는 커서를 옮기지 않는다 · 메일 꺼짐이면 커서만 · 발송 실패면 커서 유지 · mock·데모 대상 제외.
   한계: 스케줄 실행은 대조 틱마다 대상별 최신 1건만 원장에 들어와 그 사이 실패가 2건이면 1건만 알린다.
+
+## Bareos v2.861 묶음 복원 · 복원 뒤 NIC 끊기 — 모듈 규칙 · 반증 1인 확정분(server/src/bareos/CLAUDE.md 에서 옮김 — 2026-11-03)
+
+**v2.861 묶음 복원 · 복원 뒤 NIC 끊기**(`bareosRestoreBulk2861`·`bareosRestoreBulkRoutes2861`·`vmCloneSafety2794` S6 · 변이 22건): 판정은 `restore.js bulkRestorePlan` 하나(미리 보기 `restore-check/bulk` 와 실행이 같은
+  `bulkRestoreGate`) — 1~50대 · **2대 이상이면 덮어쓰기 금지** · **한 Director(법인)만** · 묶음 안 새 VM 이름 겹침 금지 · 하나라도 막히면 아무것도 보내지 않는다 · DS 여유는 같은 DS 로 가는 committed 합(못 읽으면 unknown — 막지 않는다).
+  실행 순서는 단건과 같다(OTP 등록 → 조회 밖 404 → 쓰기 밖 403 → 판정 400 → 잠금 → Director 전제 → **OTP 한 번** → `ops.restores` 세션 하나 → 항목마다 원장 · 감사 · `inflight` 묶음).
+  `ops.restores` 는 항목마다 단건과 같은 검사(성공 백업 · 이 잡의 이력 체인) · 보낸 뒤 끊기면 그 항목 unknown · 끊기면 남은 것 skipped · 엣지 회신의 rid 없는 성공은 unknown.
+  NIC 끊기는 `restoreFinish.js` → vmclone `bareos-nic`(`opDispatch.dispatchVmOp` — 실행 위치 판정을 복제하지 않는다) · 그 vCenter 에 **이름이 정확히 1대 · 꺼짐**일 때만 손댄다 · 재시작으로 작업을 잃으면 다시(최대 3) · 옛 작업의 늦은 결과는 새 시도를 덮지 않는다.
+  `restore_allow_disks_mismatch=yes` 는 덮어쓰기에서 `=== true` 일 때만(Bareos 23.1+ — 옛 Director 는 거부, 추정).
+  반증 1인 반영(재현 4 · 판단 5): DS 여유 키는 **vCenter + 이름**(한 Director 에 vCenter 여럿) · 마무리 원장 쓰기는 `inBatch` 한 번 · 추적 놓친 복원은 failed(직접 확인) · 엣지 미인출 작업은 `reapOps` 로 시한 ·
+  본문 상한을 항목 순회 전에 · 새 VM 이름은 최근 24시간 · 진행 중 복원 이름과도 겹치면 거부 · 원장 저장이 실패해도 응답(saveError) · 접근 · 진행 중 사유가 판정 사유보다 앞선다.

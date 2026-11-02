@@ -9,16 +9,17 @@
  *   verify        — 복원 지점 검증(vsOps.verifyClone)
  *   restore       — 복원 지점에서 새 VM(vsOps.restoreFromClone)
  *   nfsds-attach  — ESXi 호스트에 NFS 데이터스토어 연결(vsOps.attachNfsDatastore)
+ *   bareos-nic    — v2.861 Bareos 복원으로 만든 VM 의 NIC 끊기(vsOps.disconnectRestoredVm — vmclone 잡 없음)
  * 결과: { ok, detail, ms?, hosts?, newName? } — 비밀을 담지 않는다(중앙으로 그대로 올라간다).
  */
 
 import { getJob, patchClone, recordJobEvent } from './store.js';
 import { enqueueRun, enqueueOp } from './runner.js';
-import { verifyClone, restoreFromClone, attachNfsDatastore, detachNfsDatastore } from './vsOps.js';
+import { verifyClone, restoreFromClone, attachNfsDatastore, detachNfsDatastore, disconnectRestoredVm } from './vsOps.js';
 import { logAudit } from '../audit.js';
 
-export const OP_KINDS = Object.freeze(['run', 'verify', 'restore', 'nfsds-attach', 'nfsds-detach']);
-export const OP_LABEL = Object.freeze({ run: '지금 실행', verify: '검증', restore: '복구', 'nfsds-attach': 'NFS 데이터스토어 연결', 'nfsds-detach': 'NFS 데이터스토어 떼어 내기' });
+export const OP_KINDS = Object.freeze(['run', 'verify', 'restore', 'nfsds-attach', 'nfsds-detach', 'bareos-nic']);
+export const OP_LABEL = Object.freeze({ run: '지금 실행', verify: '검증', restore: '복구', 'nfsds-attach': 'NFS 데이터스토어 연결', 'nfsds-detach': 'NFS 데이터스토어 떼어 내기', 'bareos-nic': 'Bareos 복원 VM 네트워크 끊기' });
 
 /**
  * @param {{id:string, kind:string, jobId?:string, vcenterId?:string, spec?:object, by?:string}} op
@@ -37,6 +38,17 @@ export async function executeOp(op) {
       const r = await (detach ? detachNfsDatastore : attachNfsDatastore)(vcenterId, spec, spec.hostIds, { setPhase });
       logAudit({ user: by, action: `${OP_LABEL[kind]}${r.ok ? '' : ' 실패'}`, target: `${vcenterId}/${String(spec.name || '').slice(0, 60)}`, detail: String(r.detail).slice(0, 200) });
       return { ok: r.ok, detail: r.detail, ms: r.ms, hosts: r.hosts };
+    });
+  }
+
+  // v2.861 Bareos 복원 마무리 — vmclone 잡이 아니다(spec.name = 복원으로 만든 VM 이름). 그 vCenter 에 로그인하는 노드에서 돈다(위임이면 담당 엣지).
+  if (kind === 'bareos-nic') {
+    const vcenterId = String(op.vcenterId || '');
+    const name = String(spec.name || '').slice(0, 200);
+    return enqueueOp({ id: op.id, kind, label: OP_LABEL[kind] }, async (setPhase) => {
+      const r = await disconnectRestoredVm(vcenterId, name, { setPhase });
+      logAudit({ user: by, action: r.ok ? 'Bareos 복원 VM 네트워크 끊기' : 'Bareos 복원 VM 네트워크 끊기 실패', target: `${vcenterId}/${name.slice(0, 60)}`, detail: String(r.detail).slice(0, 200) });
+      return { ok: r.ok, detail: r.detail, ms: r.ms };
     });
   }
 

@@ -97,7 +97,7 @@ export function backupPluginOptions(p = {}) {
  */
 export function restorePluginOptions(kv = {}, plugin = 'python3') {
   if (!PLUGIN_NAME_RE.test(plugin)) return { issue: '플러그인 이름이 올바르지 않습니다.' };
-  const ALLOWED = new Set(['restore_powerstate', 'vmname', 'restore_datastore', 'restore_esxhost', 'restore_cluster', 'restore_resourcepool', 'localvmdk', 'folder', 'dc']);
+  const ALLOWED = new Set(['restore_powerstate', 'vmname', 'restore_datastore', 'restore_esxhost', 'restore_cluster', 'restore_resourcepool', 'localvmdk', 'folder', 'dc', 'restore_allow_disks_mismatch']);   // v2.861 디스크 불일치 허용(Bareos 23.1+ · PR #1876)
   const parts = [];
   for (const [k, v] of Object.entries(kv)) {
     if (v === undefined || v === null || v === '') continue;

@@ -159,6 +159,10 @@ export const ROUTE_GATE_ALLOW = Object.freeze({
   'PATCH /api/tools/bareos-backup/jobs/:id': 'bareosAccess — 대상의 vCenter 쓰기 범위(v2.820)',
   'DELETE /api/tools/bareos-backup/jobs/:id': 'bareosAccess — 대상의 vCenter 쓰기 범위(v2.820)',
   'POST /api/tools/bareos-backup/jobs/:id/restore': 'bareosAccess + 본인 OTP — 대상의 vCenter 쓰기 범위(v2.820)',
+  // v2.861 묶음 복원 — 항목마다 bareosAccess(조회 밖 = 없는 것과 같은 답 · 쓰기 밖 403) · 실행은 본인 OTP 한 번(bareosRestoreBulkRoutes2861 · 변이 M12·M13·M15)
+  'POST /api/tools/bareos-backup/restore-points/bulk': 'bareosAccess(조회) — 항목마다 범위 밖은 없는 대상과 같은 답 · 읽기 전용 지점 조회(v2.861)',
+  'POST /api/tools/bareos-backup/restore-check/bulk': 'bulkRestoreGate → bareosAccess(쓰기) — 항목마다 조회 밖 제외 · 쓰기 밖 사유 · Director · OTP 안 씀(v2.861)',
+  'POST /api/tools/bareos-backup/restore/bulk': 'bulkRestoreGate → bareosAccess — 조회 밖 404 → 쓰기 밖 403 → 판정 400 → 본인 OTP(v2.861)',
   // v2.830 백업 그룹(routes/api/bareosGroups.js) — 핸들러 안 bareosAccess(조회 밖 404 → 쓰기 밖 403)
   'POST /api/tools/bareos-backup/groups': 'bareosAccess — 대상 vCenter 조회 404 → 쓰기 403 · VM 이 그 vCenter 인벤토리(또는 원장)인지 membersPlan(v2.830)',
   'PUT /api/tools/bareos-backup/groups/:id': 'bareosAccess — 그룹의 vCenter 쓰기 범위 · updatedAt 대조(v2.830)',

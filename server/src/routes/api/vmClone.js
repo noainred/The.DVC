@@ -10,17 +10,13 @@ import { requireRole, requirePerm } from '../../auth/auth.js'; // v2.479(감사 
 import { scopedVcenterIds, inUserWriteScope, inUserScope } from '../../auth/scope.js';
 import { store } from '../../store.js';
 import { logAudit } from '../../audit.js';
-import { loadVcenterConfig } from '../../config.js';
-import { getDataSource } from '../../runtime-settings.js';
-import { listInventory } from '../../central/inventory.js';
 import { listJobs, saveJob, deleteJob, jobVmIds, getJob, isDelegatedJob, HISTORY_MAX } from '../../vmclone/store.js';
 import { enqueueRun } from '../../vmclone/runner.js';
 import { schedulerStatus } from '../../vmclone/scheduler.js';
 import { listMounts } from '../../system/nfsMounts.js';
 import { isAdminReq } from '../../auth/addressMask.js';
-import { demoSiteVcenters } from '../../mock/demo/edge.js'; // v2.793: 데모 법인 묶음(mock 전용 — live 는 빈 배열)
 import { listNfsDs, getNfsDs, createNfsDs, deleteNfsDs } from '../../vmclone/nfsDs.js';
-import { executeOp } from '../../vmclone/execOp.js';
+import { targetsNow, dispatchVmOp } from '../../vmclone/opDispatch.js';
 import { mountUseView, mountUseDenied, setMountUse, corpMountsLoadError } from '../../vmclone/corpMounts.js';
 import { rpoOf } from '../../vmclone/rpo.js';
 
@@ -33,7 +29,7 @@ export function jobRpoView(v, edge, now = Date.now()) {
 }
 import { validateRestoreSpec, VERIFY_TIMEOUT_MIN } from '../../vmclone/vsOps.js';
 import {
-  execTargets, corpsOf, corpKeyOfTarget, edgeStateOf, createOp, finishOp, listOpsView, pendingOpFor, PENDING_TTL_MS, CLAIM_MS,
+  corpsOf, corpKeyOfTarget, edgeStateOf, listOpsView, pendingOpFor, PENDING_TTL_MS, CLAIM_MS,
 } from '../../vmclone/dispatch.js';
 
 const adminOnly = requireRole('admin');
@@ -107,39 +103,11 @@ function accessOf(req, vcenterId) {
   return null;
 }
 
-const mockNow = () => { try { return getDataSource() === 'mock'; } catch { return false; } };
-/**
- * 등록부 vCenter + 실행 위치. 데모(mock)는 등록부 파일이 비어 있으므로 수집 스냅샷의 vCenter 로 채우고, 데모 엣지가 맡는 vCenter 는
- * 위임(site)·담당 엣지로 표시한다(portalCheck 의 demoSiteVcenters 와 같은 판정 — 실행은 이 노드가 시뮬레이션한다).
- */
-function targetsNow() {
-  const cfg = loadVcenterConfig();
-  let vcenters = cfg.vcenters || [];
-  const mock = mockNow();
-  if (mock) {
-    const snapVcs = store.get()?.vcenters || [];
-    const have = new Set(vcenters.map((v) => String(v.id)));
-    const site = new Map(demoSiteVcenters(snapVcs).map((v) => [String(v.id), v]));
-    vcenters = [...vcenters, ...snapVcs.filter((v) => !have.has(String(v.id))).map((v) => site.get(String(v.id)) || { id: v.id, name: v.name || v.id, collectMode: 'direct', demo: true })];
-  }
-  return { vcenters, targets: execTargets(vcenters, listInventory(), { mock }) };
-}
-
-/** 실행 위치에 작업을 보낸다 — 중앙(직접)이면 바로 실행, 엣지면 대기(엣지가 인출). conflict·none 이면 409 를 쓰고 null. */
-function dispatchOp(res, { kind, job = null, vcenterId, vmName = '', spec = {}, by }) {
-  const tg = targetsNow().targets.get(String(vcenterId));
-  if (!tg || tg.where === 'conflict' || tg.where === 'none') {
-    res.status(409).json({ ok: false, reason: tg?.reason || '이 vCenter 의 실행 위치를 정할 수 없습니다.' });
-    return null;
-  }
-  const op = createOp({ kind, jobId: job?.id || '', vcenterId, vmName: vmName || job?.vmName || '', spec, by, target: tg });
-  if (tg.where === 'local') {
-    op.state = 'running'; op.claimedAt = Date.now();
-    executeOp({ id: op.id, kind, jobId: op.jobId, vcenterId, spec, by })
-      .then((r) => finishOp(op, r))
-      .catch((e) => finishOp(op, { ok: false, detail: String(e?.message || e) }));
-  }
-  return op;
+/** 실행 위치에 작업을 보낸다 — 판정 · 실행은 vmclone/opDispatch.js(v2.861 — Bareos 복원 마무리도 같은 길). 실행 위치를 정할 수 없으면 409 를 쓰고 null. */
+function dispatchOp(res, args) {
+  const r = dispatchVmOp(args);
+  if (r.issue) { res.status(409).json({ ok: false, reason: r.issue }); return null; }
+  return r.op;
 }
 
 /** 잡의 원장 — 엣지 위임 잡은 엣지가 보고한 원장(중앙 정의에는 원장이 없다). */

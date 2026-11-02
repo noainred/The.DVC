@@ -101,7 +101,7 @@ describe('v2.828 넘기기 · 하위 탭', () => {
     expect([legacyOpsHash('#/tools/bareos-backup/runs'), legacyOpsHash('#/tools/bareos-backup/targets'), legacyOpsHash('#/tools/bareos-summary/live'), legacyOpsHash('')]).toEqual([null, null, null, null]);
     // 현황판 펼침: 옛 진행 현황 주소 · 주소에 보기가 있을 때만
     expect([runsBoardOpen('#/tools/bareos-backup/live'), runsBoardOpen('#/tools/bareos-backup/runs/corp'), runsBoardOpen('#/tools/bareos-backup/runs'), runsBoardOpen('#/tools/bareos-backup/history'), runsBoardOpen('#/tools/bareos-detail/live')]).toEqual([true, true, false, false, false]);
-    expect(OPS_SEGMENTS.map((x) => x[0])).toEqual(['targets', 'groups', 'runs']);
+    expect(OPS_SEGMENTS.map((x) => x[0])).toEqual(['targets', 'groups', 'restore', 'runs']);
   });
 });
 

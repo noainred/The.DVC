@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   stateBadge, levelLabel, bytesText, whenText, elapsedText, runCell, directorLine, restoreLine, candidateSummary,
   directorPrepBlock, fdIniTemplate, PREP_CHECKLIST, STATE_LABEL, RESTORE_MODE_LABEL, autoSetupDirectorText, autoSetupFdText, thumbprintText,
-  parseJobReport, reportBytes, reportVerdict, reportCards, issueHint, storeRatio, reportText, reportValue,
+  parseJobReport, reportBytes, reportVerdict, reportCards, issueHint, issueNeedsFull, storeRatio, reportText, reportValue,
   folderOptions, inFolder, pickCap, bulkSummary, NO_FOLDER, diagView,
   driftText, restorePointsNote, directorPatch, outcomeUnknown, missingText,
   directorStatus, preflightView, preflightSummary, autoSetupFdPluginText, fillEmptyMapping, directorFormPatch, WEEKDAYS, newMappingRow,
@@ -237,6 +237,12 @@ describe('작업 결과 요약(v2.822.3 — 현장 jobid 8 로그 모양)', () =
     expect(issueHint(lines[2])).toMatch(/볼륨을 열지 못해/);
     expect(issueHint('Exception: Python 3.10 or newer is required (found 3.9)')).toMatch(/pyVmomi 8\.x/);
     expect(issueHint('something unknown')).toBe('');
+    // v2.861 커뮤니티 조사 — quiesce 실패 · 새 Full 필요(뒤의 것만 'Full 로 지금 실행')
+    const full = 'Fatal error: python3-fd-mod: A new full level backup of this job is required. Use run level=Full';
+    expect(issueHint(full)).toMatch(/Full 로 돌리세요/);
+    expect(issueNeedsFull(full)).toBe(true);
+    expect(issueHint('Error: CreateSnapshot_Task failed: An error occurred while quiescing the virtual machine')).toMatch(/quiesce/);
+    expect(issueNeedsFull('An error occurred while quiescing')).toBe(false);
     expect(r.issues.some((x) => /^SD Errors:|Non-fatal FD errors/.test(x.text)), '보고 블록의 오류 수 줄은 경고 목록에 넣지 않는다').toBe(false);
     expect(reportValue('"Full" (From Job resource)')).toBe('Full');
     expect(reportValue('')).toBe('—');

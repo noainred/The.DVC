@@ -27,7 +27,7 @@ import { fileStamp } from '../util/dayKey.js';
 import { demoHash } from '../mock/demo/flags.js';
 import {
   VimSoapClient, createSnapshot, removeSnapshot, parentFolderOf, cloneFromSnapshot, vmStateOf, disconnectAllNics,
-  powerOnVm, powerOffVm, waitToolsRunning, revertToSnapshot, attachNasToHost, detachNasFromHost, validateNfsDsSpec, vmCommittedBytes, nicDisconnectSpec,
+  powerOnVm, powerOffVm, waitToolsRunning, revertToSnapshot, attachNasToHost, detachNasFromHost, validateNfsDsSpec, vmCommittedBytes, nicDisconnectSpec, findVmsByName,
 } from './vsphere.js';
 import {
   getJob, setVerifying, patchVerifying, clearVerifying, handOffVerifying, interruptedVerifyOf, patchClone, recordJobEvent,
@@ -306,6 +306,45 @@ export async function restoreFromClone(job, ref, spec, { setPhase } = {}) {
     return fin(true, `복구 완료 — ${led.name} → 새 VM '${s.newName}' [${s.datastoreName}]${s.nicDisconnect ? ' · 네트워크 끊김' : ''}${s.powerOn ? ' · 켜짐' : ' · 꺼진 상태'}`, { newRef, newName: s.newName });
   } catch (e) {
     return fin(false, newRef ? `새 VM '${s.newName}' 을 만든 뒤 실패했습니다(${e.message})` : e.message, newRef ? { newRef, newName: s.newName } : {});
+  } finally { await c.logout().catch(() => {}); }
+}
+
+/**
+ * v2.861 Bareos 복원 마무리 — 복원으로 새로 만든 VM 의 네트워크 카드를 모두 끊는다(사용자 요청 '복원할 때 네트워크 연결 끊고 시작').
+ *   Bareos 플러그인은 복원 VM 을 꺼진 채(restore_powerstate=off)로 만들지만 NIC 는 백업 때 그대로(연결 · 켤 때 연결)다 — 원본이 살아 있는 망에
+ *   같은 IP · 호스트명 · AD 계정으로 붙지 않게 켜기 **전에** 끊는다. 손대는 조건(하나라도 아니면 손대지 않고 사유를 돌려준다):
+ *   ① 그 vCenter 에 그 이름의 VM 이 **정확히 1대**(템플릿 제외 — 같은 이름이 둘이면 어느 것인지 모른다) ② 꺼져 있다(켜져 있으면 사람이 이미 쓰는 중일 수 있다)
+ *   끊은 뒤 다시 읽어 실제로 끊겼는지 확인한다(disconnectAllNics). 결과는 비밀을 담지 않는다(엣지에서 돌면 중앙으로 그대로 올라간다).
+ * @returns {Promise<{ok:boolean, detail:string, ms:number, nics?:number}>}
+ */
+export async function disconnectRestoredVm(vcenterId, name, { setPhase } = {}) {
+  const t0 = Date.now();
+  const ph = phaseRecorder(setPhase);
+  const fin = (ok, detail, extra = {}) => ({ ok, detail, ms: Date.now() - t0, phases: ph.end(ok), ...extra });
+  const vmName = String(name || '').trim();
+  if (!vmName) return fin(false, '복원한 VM 이름이 없습니다');
+  if (getDataSource() === 'mock') {
+    ph.step('VM 찾기'); await sleep(300);
+    ph.step('네트워크 끊기'); await sleep(300);
+    return fin(true, `새 VM '${vmName}' 의 네트워크 카드 연결을 끊었습니다(데모)`, { nics: 1 });
+  }
+  let vc;
+  try { vc = vcOf(vcenterId); } catch (e) { return fin(false, e.message); }
+  const c = new VimSoapClient(vc);
+  ph.step('로그인');
+  await onDemandLogin(c, vc);
+  try {
+    ph.step('VM 찾기');
+    const refs = await findVmsByName(c, vmName);
+    if (!refs.length) return fin(false, `vCenter 에서 '${vmName}' VM 을 찾지 못했습니다 — 복원이 다른 이름으로 만들었거나 지워졌습니다. 켜기 전에 직접 확인하세요`);
+    if (refs.length > 1) return fin(false, `vCenter 에 '${vmName}' 이름의 VM 이 ${refs.length}대 있어 어느 것인지 정할 수 없습니다 — 손대지 않았습니다. 켜기 전에 직접 끊으세요`);
+    const st = await vmStateOf(c, refs[0]);
+    if (st.powerState !== 'poweredOff') return fin(false, `'${vmName}' 이 이미 켜져 있어(${st.powerState}) 손대지 않았습니다 — 누군가 쓰는 중일 수 있습니다. 네트워크 연결을 직접 확인하세요`);
+    ph.step('네트워크 끊기');
+    const n = await disconnectAllNics(c, refs[0]);
+    return fin(true, n ? `새 VM '${vmName}' 의 네트워크 카드 ${n}개 연결을 끊었습니다(켤 때도 연결하지 않음)` : `새 VM '${vmName}' 에 네트워크 카드가 없습니다`, { nics: n });
+  } catch (e) {
+    return fin(false, `'${vmName}' 네트워크 끊기 실패(${e?.message || e}) — 켜기 전에 vCenter 에서 직접 끊으세요`);
   } finally { await c.logout().catch(() => {}); }
 }
 

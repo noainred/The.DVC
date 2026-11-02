@@ -11,6 +11,7 @@
  *   · 못 읽은 값은 0 이 아니다(vmView.corpCounts) — 표시 파일 손상·원장 손상·Director 조회 정지는 null + 사유.
  *   · 쓰기(지금 백업·복원·등록)는 여기 없다 — 관리 화면(bareos-backup)의 기존 POST 라우트(admin · OTP)만.
  */
+import { numOrNull } from '../../util/numOrNull.js';
 import { requirePerm, toolActorOf } from '../../auth/auth.js';
 import { issueFor } from '../../auth/toolAccess.js';
 import { scopedVcenterIds } from '../../auth/scope.js';
@@ -72,6 +73,7 @@ function corpRows(vcenterId, vms, byVm, marks, { marksKnown, registryKnown }, { 
     rows.push({
       id: vm.id, name: String(vm.name || ''), folder: String(vm.folder || ''), power: vm.powerState || '', gb: gbOf(vm.storageGB),
       method: marksKnown ? method : null, crit: m?.crit || '', need: m?.need === true,
+      snaps: numOrNull(vm.snapshotCount),   // v2.861 남은 스냅샷(못 읽으면 null — 0 이 아니다)
       b: registryKnown ? bareosVmView(j, method) : null,
       ...(withJob && j ? jobExtra(j) : {}),
     });
