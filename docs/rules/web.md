@@ -337,6 +337,10 @@
   · 팝업은 **로그인 뒤에만**(App 의 `<Portal>` 옆 — 모든 셸 위) · 폴링 없음 · '보지 않기' 는 브라우저 저장이고 키가 `rev`(id + 수정 시각)라 고치면 다시 보인다.
   · 쓰기 권한: 공지 = admin + 전체 범위 · 글·댓글 = admin·operator(서버 불변조건 '/api 상태변경은 requireRole(admin, operator)') · 수정·삭제 = 작성자 또는 관리자 · 고정 = 관리자.
   · 상단 탭 'board' 를 더하면 V5 `tree.js`(TAB_NAMES·platform) · V6 `menus.js`(TAB_INFO·platform) · `noFilterTabs` 도 함께. 1600px 한 줄 메뉴는 14개에서도 잘리지 않았다(실측 nav scrollWidth == clientWidth).
+- **이슈 트래커(v2.864)** — `server/src/issues/store.js`(issues.json · 게시판과 같은 디바운스 비동기 원자 쓰기·손상 보존·합계 상한 `ISSUES_MAX_BYTES`) + `routes/api/issues.js`(`/issues*`, 회귀 `server/test/issues2864.test.js` — 실제 api 라우터로 역할별 상태코드) + 웹 `views/issues/`{Issues.jsx,issueText.js}. 디자인 시안: Claude Design 캔버스 https://claude.ai/artifact/DhvGAynr761G6y3arqqU8R:
+  · 전이 규칙은 서버가 판정한다 — '진행 중' 은 담당자 필수(400) · 보류는 사유 필수 · 완료는 `closedAt`. 화면은 거부 사유를 그대로 보인다(두 벌 판정 금지).
+  · 쓰기 권한: 생성·수정·상태·할당·댓글 = admin·operator(협업 도구라 남의 이슈도 고친다) · 삭제 = 본인 또는 **전체 범위** 관리자(게시판 `isBoardModerator` 와 같은 기준). 담당자 후보(`people`)는 쓰기 계정에게만 — viewer 에게 계정명 목록을 주지 않는다.
+  · ⚠ `/issues/bulk/assign` 은 `/issues/:key/…` 보다 **먼저** 등록한다 — 뒤에 두면 'bulk' 가 키로 잡혀 404 다(초판 자체 테스트가 잡았다).
 - **게시판 답글·공감(v2.723)** — 답글은 댓글 배열에 `parentId`(최상위 댓글 id)로 묶는 **한 단계**다(답글에 단 답글은 최상위 아래로 옮기고 `replyTo`).
   답글이 달린 댓글을 지우면 **자리를 남기고**(`deleted` — 내용·작성자 지움, 세지 않음) 마지막 답글이 지워지면 자리도 치운다. 공감은 이름 목록 `likes` 이고
   요청은 상태를 명시한다(`POST …/like {on:true|false}` — 연타·재전송이 두 번 세지 않는다). 응답에는 개수·내 공감·앞 30명만(`likeView`) — `likes` 배열을 내보내지 말 것.

@@ -22,14 +22,14 @@
 
 | 항목 | 값 |
 |---|---|
-| 엔드포인트 | **1169개** |
+| 엔드포인트 | **1183개** |
 | 마운트 그룹 | 14개 |
-| 라우트 파일 | 118개 |
-| GET | 620개 |
-| POST | 371개 |
-| PUT | 115개 |
+| 라우트 파일 | 119개 |
+| GET | 624개 |
+| POST | 378개 |
+| PUT | 116개 |
 | PATCH | 3개 |
-| DELETE | 60개 |
+| DELETE | 62개 |
 
 | 그룹 | 엔드포인트 | 설명 |
 |---|---:|---|
@@ -45,7 +45,7 @@
 | [`/api/ping`](#apiping) | 14 | 네트워크 Ping 모니터링(조회=인증, 대상 관리=관리자). |
 | [`/metrics`](#metrics) | 1 | Prometheus/OTel 익스포터(선택 토큰). |
 | [`/api/v1`](#apiv1) | 10 | **외부 포탈용 공개 조회 API**(v2.562). 전용 API 키(`X-Api-Key`)로 인증하고 조회 전용이다. 상세는 [API-PUBLIC.md](API-PUBLIC.md). |
-| [`/api`](#api) | 590 | 포탈 화면이 쓰는 **주 조회·작업 API**. `authMiddleware + requireEnrolled` 뒤이고, `/tools/*` 는 `toolGate` 가 사용자별 도구 권한을 집행한다. |
+| [`/api`](#api) | 604 | 포탈 화면이 쓰는 **주 조회·작업 API**. `authMiddleware + requireEnrolled` 뒤이고, `/tools/*` 는 `toolGate` 가 사용자별 도구 권한을 집행한다. |
 | [`/dl`](#dl) | 2 | 중앙 업그레이드 소스(`versions.json` + 번들). **공개**다. |
 
 ---
@@ -758,6 +758,20 @@ Prometheus/OTel 익스포터(선택 토큰).
 | GET | `/hosts/checks` | 권한 `inv.hosts` | [server/src/routes/api/hostChecks.js:42](../server/src/routes/api/hostChecks.js#L42) |
 | GET | `/hosts/corp` | 권한 `inv.hosts` | [server/src/routes/api/hostCorp.js:38](../server/src/routes/api/hostCorp.js#L38) |
 | GET | `/idrac/host-power` | 권한 `inv.hosts` | [server/src/routes/api/vmMetrics.js:213](../server/src/routes/api/vmMetrics.js#L213) |
+| GET | `/issues` | — | [server/src/routes/api/issues.js:81](../server/src/routes/api/issues.js#L81) |
+| POST | `/issues` | 역할 `admin/operator` | [server/src/routes/api/issues.js:109](../server/src/routes/api/issues.js#L109) |
+| DELETE | `/issues/:key` | 역할 `admin/operator` | [server/src/routes/api/issues.js:169](../server/src/routes/api/issues.js#L169) |
+| GET | `/issues/:key` | — | [server/src/routes/api/issues.js:96](../server/src/routes/api/issues.js#L96) |
+| PUT | `/issues/:key` | 역할 `admin/operator` | [server/src/routes/api/issues.js:116](../server/src/routes/api/issues.js#L116) |
+| POST | `/issues/:key/assign` | 역할 `admin/operator` | [server/src/routes/api/issues.js:132](../server/src/routes/api/issues.js#L132) |
+| POST | `/issues/:key/block` | 역할 `admin/operator` | [server/src/routes/api/issues.js:140](../server/src/routes/api/issues.js#L140) |
+| POST | `/issues/:key/comments` | 역할 `admin/operator` | [server/src/routes/api/issues.js:153](../server/src/routes/api/issues.js#L153) |
+| DELETE | `/issues/:key/comments/:cid` | 역할 `admin/operator` | [server/src/routes/api/issues.js:161](../server/src/routes/api/issues.js#L161) |
+| POST | `/issues/:key/status` | 역할 `admin/operator` | [server/src/routes/api/issues.js:124](../server/src/routes/api/issues.js#L124) |
+| POST | `/issues/:key/watch` | 역할 `admin/operator` | [server/src/routes/api/issues.js:149](../server/src/routes/api/issues.js#L149) |
+| POST | `/issues/bulk/assign` | 역할 `admin/operator` | [server/src/routes/api/issues.js:102](../server/src/routes/api/issues.js#L102) |
+| GET | `/issues/meta` | — | [server/src/routes/api/issues.js:69](../server/src/routes/api/issues.js#L69) |
+| GET | `/issues/stats` | — | [server/src/routes/api/issues.js:77](../server/src/routes/api/issues.js#L77) |
 | GET | `/networks` | 권한 `inv.networks` | [server/src/routes/api/inventory.js:517](../server/src/routes/api/inventory.js#L517) |
 | GET | `/notices` | — | [server/src/routes/api/bulletin.js:103](../server/src/routes/api/bulletin.js#L103) |
 | POST | `/notices` | 역할 `admin` · `noticeFleetOnly` | [server/src/routes/api/bulletin.js:107](../server/src/routes/api/bulletin.js#L107) |

@@ -59,6 +59,7 @@ export const MENU_GROUPS = Object.freeze([
     { id: 'idrac', label: 'iDRAC 통합 추이', tool: 'idrac-trend' },
   ] },
   { id: 'tools', label: '특수 기능', tab: 'tools' },
+  { id: 'issues', label: '이슈', tab: 'issues' },
   { id: 'board', label: '게시판', tab: 'board' },
   { id: 'settings', label: '설정', children: [
     { id: 'settings', label: '설정', tab: 'settings' },
