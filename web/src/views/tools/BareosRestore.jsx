@@ -11,6 +11,7 @@ import { Loading, ErrorBox } from '../../components/ui.jsx';
 import { STable } from '../../components/STable.jsx';
 import Select from '../../components/Select.jsx';
 import { requireChanged } from '../changeResult.js';
+import BareosRehearsal from './BareosRehearsal.jsx';
 import { Note, ReadGuide, FilterChip } from './BareosBits.jsx';
 import { stateBadge, withRelayWait, outcomeUnknown, unknownOutcomeText, driftText, levelLabel } from './bareosText.js';
 import {
@@ -377,6 +378,8 @@ export default function BareosRestore({ d, reload, preselect = '', onPreselectUs
           </div>
         </div>
       )}
+      {/* v2.862 복원 검증(리허설) — 정책 · 지금 검증 · 결과 */}
+      <BareosRehearsal directors={d.directors || []} />
       <ReadGuide note="복원은 등록 때 vCenter 로만 됩니다(Bareos VMware 플러그인 제약). 덮어쓰기는 1대씩 — VM 이 꺼져 있고 스냅샷이 없어야 합니다.">
         <div>① 왼쪽 트리는 백업 대상으로 등록된 VM 만 보입니다. 한 번에 한 법인(그 법인의 Director)만 고를 수 있습니다 — 법인 · vCenter · Bareos 는 1:1:1 입니다.</div>
         <div>② 복원 지점은 성공한 백업(정상 · 경고)이고, 증분 · 차등은 Full 부터의 체인을 서버가 이 잡의 카탈로그 이력으로 계산합니다.</div>

@@ -35,6 +35,8 @@ import { knownAgentNames } from '../../central/knownAgents.js';
 import { pollerStatus, pollOnce, requestReconcile } from '../../bareos/poller.js';
 import { restorePlan, placementDrift, bulkRestorePlan, BULK_RESTORE_MAX } from '../../bareos/restore.js';
 import { finishRestores } from '../../bareos/restoreFinish.js';
+import { savePolicy, policyLoadError, rehearsalStatus, runNow as runRehearsalNow, normPolicy, rehearsalBusy } from '../../bareos/rehearsal.js';
+import { loadDigest, saveDigest, digestLoadError, digestStatus, sendDigestNow, normDigest } from '../../bareos/digest.js';
 import { osFields } from '../../inventory/osKind.js';
 import { numOrNull } from '../../util/numOrNull.js';
 import { summarizeRegistryError } from '../../util/registryCore.js';
@@ -1232,6 +1234,91 @@ api.post('/tools/bareos-backup/restore/bulk', adminOnly, async (req, res) => {
     for (const id of locked) unlockJob(id);
     if (noted) noteRestoreBatchEnd(batchId);
   }
+});
+
+/* ───────────────────────── v2.862 복원 검증(리허설) · 일일 요약 메일 ───────────────────────── */
+
+/**
+ * 복원 검증 — 정책 · 최근 회차 · 결과(검증용 복원의 끝맺음). 정책은 전 법인 공용이라 저장 · 지금 검증은 전체 범위 관리자 + 본인 OTP(검증은 VM 을 만들고 데이터스토어를 쓴다).
+ * 결과 목록은 조회 범위 안 대상만(범위 계정은 자기 법인 검증만 본다).
+ */
+api.get('/tools/bareos-backup/rehearsal', adminOnly, (req, res) => {
+  const allowed = scopedVcenterIds(req.user, store.get());
+  const st = rehearsalStatus();
+  const results = [];
+  for (const j of listJobs()) {
+    if (allowed && !allowed.has(j.vcenterId)) continue;
+    for (const r of j.restores || []) if (r.verify) results.push({ jobId: j.id, vmName: j.vmName, vcenterId: j.vcenterId, directorId: jobDir(j), rid: r.jobid, at: r.at ?? null, state: r.state, name: r.target?.name || '', finish: r.finish || null, run: r.rehearsal || '' });
+  }
+  results.sort((a, b) => (b.at || 0) - (a.at || 0));
+  // 반증 F1(재현): Director 하나에 vCenter 가 여럿이면 회차 항목 · 정책 데이터스토어에 범위 밖 vCenter 의 VM 이름 · 사유 · DS 이름이 실렸다 —
+  //   범위 계정에는 회차 항목을 자기 vCenter 대상만 · 정책 DS 는 자기 vCenter 만 · 저장한 계정은 싣지 않는다(restore-points 와 같은 규칙)
+  const allJobs = listJobs();
+  const vcOfJob = new Map(allJobs.map((j) => [j.id, j.vcenterId]));
+  const visDirs = allowed ? new Set(allJobs.filter((j) => allowed.has(j.vcenterId)).map(jobDir)) : null;
+  const policy = allowed
+    ? { ...st.policy, savedBy: '', datastores: Object.fromEntries(Object.entries(st.policy.datastores || {}).filter(([vc]) => allowed.has(vc))) }
+    : st.policy;
+  const runs = st.runs.filter((x) => !visDirs || visDirs.has(x.directorId)).slice(0, 20)
+    .map((x) => (allowed ? { ...x, items: (x.items || []).filter((it) => allowed.has(vcOfJob.get(it.jobId))) } : x));
+  res.json({
+    ok: true, policy, loadError: st.loadError, fullScope: !allowed,
+    runs, results: results.slice(0, 100),
+    weeks: Object.fromEntries(Object.entries(st.weeks).filter(([k]) => !visDirs || visDirs.has(k))),   // 법인별 마지막 회차 날짜(포탈 시각)
+  });
+});
+api.put('/tools/bareos-backup/rehearsal', adminOnly, fullScopeOnly, fullWriteOnly, (req, res) => {
+  const name = req.user?.username || '';
+  if (config.auth.enabled && !getUser(name)?.totpEnabled) return res.status(403).json({ ok: false, needEnroll: true, reason: '복원 검증 정책은 OTP 가 등록된 계정만 저장할 수 있습니다.' });
+  let next;
+  try { next = normPolicy(req.body || {}); } catch (e) { return res.status(400).json({ ok: false, reason: String(e?.message || e) }); }   // 입력 확인을 OTP 앞에서
+  if (policyLoadError()) return res.status(503).json({ ok: false, code: 'settingsUnreadable', reason: '복원 검증 정책 파일을 읽지 못해 저장하지 않습니다 — 손상본을 확인하세요.' });
+  if (config.auth.enabled) { const v = verifyUserOtp(name, req.body?.otp); if (!v.ok) return res.status(403).json({ ok: false, reason: `OTP 인증 실패 — ${v.reason}` }); }
+  try {
+    const saved = savePolicy(next, { by: name });
+    audit(req, 'Bareos 복원 검증 정책', '전 법인', `${saved.enabled ? '켬' : '끔'} · 요일 ${saved.weekday} ${saved.time} · 법인마다 ${saved.perCorp}대 · 성공 ${saved.deleteOnOk ? '지움' : '남김'}`);
+    res.json({ ok: true, policy: saved });
+  } catch (e) { res.status(e?.code === 'unreadable' ? 503 : 400).json({ ok: false, reason: String(e?.message || e) }); }
+});
+api.post('/tools/bareos-backup/rehearsal/run', adminOnly, fullScopeOnly, fullWriteOnly, async (req, res) => {
+  const name = req.user?.username || '';
+  if (config.auth.enabled && !getUser(name)?.totpEnabled) return res.status(403).json({ ok: false, needEnroll: true, reason: '복원 검증은 OTP 가 등록된 계정만 실행할 수 있습니다.' });
+  const dirId = String(req.body?.directorId || '');
+  const settings = effectiveSettings();
+  if (!directorById(dirId, settings)) return res.status(404).json({ ok: false, reason: '그 Director 를 찾을 수 없습니다.' });
+  if (policyLoadError()) return res.status(503).json({ ok: false, code: 'settingsUnreadable', reason: '복원 검증 정책 파일을 읽지 못했습니다.' });
+  // 반증 F9: 설정만 보면 아는 전제(돌고 있음 · Director 접속값)는 OTP 앞에서 — 1회용 코드를 태우지 않게(단건 복원과 같은 규칙)
+  if (rehearsalBusy()) return res.status(409).json({ ok: false, code: 'busy', reason: '다른 복원 검증이 진행 중입니다 — 끝난 뒤 다시 누르세요.' });
+  if (!isDemoActive()) {
+    const miss = directorConn(directorById(dirId, settings)).missing;
+    if (miss?.length) return res.status(409).json({ ok: false, code: 'not-configured', reason: `그 Director 설정이 덜 됐습니다(${miss.join('·')}) — 설정 › 법인별 Director 에서 먼저 채우세요.` });
+  }
+  if (config.auth.enabled) { const v = verifyUserOtp(name, req.body?.otp); if (!v.ok) return res.status(403).json({ ok: false, reason: `OTP 인증 실패 — ${v.reason}` }); }
+  try {
+    const r = await runRehearsalNow(dirId, { by: name });
+    res.status(r.started ? 202 : 200).json({ ok: r.ok, ...r });
+  } catch (e) { sendErr(res, e); }
+});
+
+/** 일일 요약 메일 — 설정 · 마지막 발송 · 지금 보내 보기(전 법인 요약이라 전체 범위 관리자). */
+api.get('/tools/bareos-backup/digest', adminOnly, fullScopeOnly, (req, res) => {
+  res.json({ ok: true, config: loadDigest(), loadError: !!digestLoadError(), status: digestStatus() });
+});
+api.put('/tools/bareos-backup/digest', adminOnly, fullScopeOnly, fullWriteOnly, (req, res) => {
+  try {
+    normDigest(req.body || {});
+    const saved = saveDigest(req.body || {}, { by: req.user?.username || '' });
+    audit(req, 'Bareos 일일 요약 메일 설정', '전 법인', `${saved.enabled ? '켬' : '끔'} · ${saved.time}`);
+    res.json({ ok: true, config: saved });
+  } catch (e) { res.status(e?.code === 'unreadable' ? 503 : 400).json({ ok: false, reason: String(e?.message || e) }); }
+});
+let _digestSentAt = 0;   // '지금 보내 보기' 는 1분에 한 번(반증 F10 — 메일 폭주 방지)
+api.post('/tools/bareos-backup/digest/send', adminOnly, fullScopeOnly, async (req, res) => {
+  if (Date.now() - _digestSentAt < 60_000) return res.status(429).json({ ok: false, reason: '방금 보냈습니다 — 1분 뒤 다시 누르세요.' });
+  _digestSentAt = Date.now();
+  const r = await sendDigestNow({ by: req.user?.username || '' });
+  audit(req, 'Bareos 일일 요약 메일 보내 보기', '전 법인', r.ok ? (r.skipped ? '대상 없음' : '보냄') : `실패 — ${r.reason}`);
+  res.status(r.ok ? 200 : 502).json(r);
 });
 
 /** 지금 상태 조회(폴러와 같은 가드 — 모든 Director). */

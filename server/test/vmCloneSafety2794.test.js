@@ -48,10 +48,10 @@ function run(body, { jobs = [JOB()] } = {}) {
       disconnectAllNics: async (c, ref) => { step('disconnect', ref); return 1; },
       powerOnVm: async (c, ref) => { calls.push('powerOn'); if (globalThis.POWER_ON_BUT_FAIL) { globalThis.STATE.powerState = 'poweredOn'; throw new Error('전원 켜기 시간 초과(10분)'); } globalThis.STATE.powerState = 'poweredOn'; },
       powerOffVm: async (c, ref) => { step('powerOff', ref); globalThis.STATE.powerState = 'poweredOff'; },
-      waitToolsRunning: async () => { step('tools'); return 30_000; },
+      waitToolsRunning: async () => { step('tools'); return globalThis.TOOLS_NULL ? null : 30_000; },
       nicDisconnectSpec: () => ({ specXml: '<deviceChange>X</deviceChange>', count: 1 }),
       cloneFromSnapshot: async (c, o) => { step('clone', o.configXml || '(none)'); return 'vm-77'; },
-      parentFolderOf: async () => 'group-v1', destroyClone: async () => ({ gone: true }),
+      parentFolderOf: async () => 'group-v1', destroyClone: async (c, ref, o) => { step('destroy', ref + '|' + (o?.expectedName || '')); return { gone: true }; },
       attachNasToHost: async () => ({ ok: true, detail: 'ok' }), detachNasFromHost: async () => ({ ok: true, detail: 'ok' }), validateNfsDsSpec: (s) => s, vmCommittedBytes: async () => null,
       vmFilePaths: async () => ({ vmx: '', files: [] }), parseDsPath: () => null, backupFileFilter: () => true,
       datacenterPathOf: async () => 'DC1', downloadDsFile: async () => 0,
@@ -245,4 +245,44 @@ test('S6(v2.861): Bareos 복원 VM 네트워크 끊기 — 그 이름이 정확�
   assert.equal(out.fail.ok, false); assert.match(out.fail.detail, /직접 끊으세요/);
   assert.equal(out.empty.ok, false);
   assert.deepEqual(out.calls.filter((c) => c.startsWith('disconnect')), ['disconnect:vm-9', 'disconnect:vm-9'], '1대 · 꺼짐일 때만 끊으러 간다(정상 · 확인 실패 두 번)');
+});
+
+test('S7(v2.862): Bareos 복원 검증 — 끊기 확인 뒤에만 켠다 · Tools 없으면 지우지 않는다 · 지울 때 이름 대조 · 1대 · 꺼짐일 때만', () => {
+  const out = run(`
+    globalThis.STATE.powerState = 'poweredOff';
+    out.ok = await ops.verifyRestoredVm('vcA', 'web01-verify-20261103');
+    out.c1 = [...calls]; calls.length = 0;
+    globalThis.STATE.powerState = 'poweredOff';
+    out.keep = await ops.verifyRestoredVm('vcA', 'web01-verify-20261103', { deleteOnOk: false });
+    out.c2 = [...calls]; calls.length = 0;
+    globalThis.STATE.powerState = 'poweredOff';
+    globalThis.TOOLS_NULL = true;
+    out.noTools = await ops.verifyRestoredVm('vcA', 'web01-verify-20261103');
+    out.c3 = [...calls]; calls.length = 0;
+    globalThis.TOOLS_NULL = false;
+    globalThis.STATE.powerState = 'poweredOff';
+    globalThis.FAIL = { disconnect: '끊었는지 확인하지 못했습니다' };
+    out.nicFail = await ops.verifyRestoredVm('vcA', 'web01-verify-20261103');
+    out.c4 = [...calls]; calls.length = 0;
+    globalThis.FAIL = {};
+    globalThis.STATE.byName = ['vm-9', 'vm-10'];
+    out.two = await ops.verifyRestoredVm('vcA', 'web01-verify-20261103');
+    globalThis.STATE.byName = ['vm-9'];
+    globalThis.STATE.powerState = 'poweredOn';
+    out.on = await ops.verifyRestoredVm('vcA', 'web01-verify-20261103');
+    out.c5 = [...calls];
+  `, { jobs: [] });
+  const idx = (c, n) => c.findIndex((x) => x.startsWith(n));
+  assert.equal(out.ok.ok, true, out.ok.detail);
+  assert.ok(idx(out.c1, 'disconnect') >= 0 && idx(out.c1, 'disconnect') < idx(out.c1, 'powerOn'), `끊기 → 켜기 순서 — ${out.c1}`);
+  assert.ok(idx(out.c1, 'powerOff') > idx(out.c1, 'tools'));
+  assert.ok(out.c1.includes('destroy:vm-9|web01-verify-20261103'), '지울 때 이름을 대조한다');
+  assert.equal(out.ok.deleted, true);
+  assert.equal(out.keep.deleted, false); assert.equal(idx(out.c2, 'destroy'), -1, '설정이 남김이면 지우지 않는다');
+  assert.equal(out.noTools.ok, false); assert.equal(idx(out.c3, 'destroy'), -1, 'Tools 를 못 받으면 지우지 않는다(조사용)'); assert.ok(idx(out.c3, 'powerOff') > idx(out.c3, 'powerOn'), '켠 것은 끈다');
+  assert.equal(out.noTools.toolsMs, null);
+  assert.equal(out.nicFail.ok, false); assert.equal(idx(out.c4, 'powerOn'), -1, '끊기를 확인 못 하면 켜지 않는다');
+  assert.equal(out.two.ok, false);
+  assert.equal(out.on.ok, false);
+  assert.equal(idx(out.c5, 'powerOn'), -1, '2대 · 켜짐이면 손대지 않는다');
 });

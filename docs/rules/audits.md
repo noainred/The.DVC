@@ -6,6 +6,7 @@
 
 ## 목차
 
+- Bareos v2.862 복원 검증(리허설) · 일일 요약 메일 — 모듈 규칙(2026-11-03)
 - Bareos v2.861 묶음 복원 · 복원 뒤 NIC 끊기 — 모듈 규칙 · 반증 1인 확정분(server/src/bareos/CLAUDE.md 에서 옮김 — 2026-11-03)
 - Bareos v2.852.1 WebUI 계정 만들기 실패 'Failed to connect to Director' — 시험 bconsole 의 TLS 끔(2026-11-02)
 - Bareos v2.851.1 완전 설치 마무리 '사이트 매핑의 vcserver 주소가 올바르지 않습니다' — 매핑 주소를 vCenter 등록부에서(2026-11-02)
@@ -2605,3 +2606,25 @@ server/src/bareos/CLAUDE.md 크기 상한(15,000B)으로 원문 그대로 옮겼
   `restore_allow_disks_mismatch=yes` 는 덮어쓰기에서 `=== true` 일 때만(Bareos 23.1+ — 옛 Director 는 거부, 추정).
   반증 1인 반영(재현 4 · 판단 5): DS 여유 키는 **vCenter + 이름**(한 Director 에 vCenter 여럿) · 마무리 원장 쓰기는 `inBatch` 한 번 · 추적 놓친 복원은 failed(직접 확인) · 엣지 미인출 작업은 `reapOps` 로 시한 ·
   본문 상한을 항목 순회 전에 · 새 VM 이름은 최근 24시간 · 진행 중 복원 이름과도 겹치면 거부 · 원장 저장이 실패해도 응답(saveError) · 접근 · 진행 중 사유가 판정 사유보다 앞선다.
+
+## Bareos v2.862 복원 검증(리허설) · 일일 요약 메일 — 모듈 규칙(2026-11-03)
+
+**v2.862 복원 검증(리허설) · 일일 요약 메일**(사용자 결정 ⓔ · ⓕ — `bareosRehearsalDigest2862` · `bareosRestoreBulkRoutes2861` ⑤ · `vmCloneSafety2794` S7):
+  ① 검증 정책(`bareos/rehearsal.js` · `bareos-rehearsal.json`)은 **기본 꺼짐** — 켜기 · 지금 검증은 전체 범위 관리자(`fullScopeOnly`·`fullWriteOnly`) + 본인 OTP, 입력 확인은 OTP 앞에서(1회용 코드를 태우지 않게).
+     사용자 결정의 주기 · 대수(토요일 · 법인마다 3대 · 성공 지움 · 실패 남김)는 기본값으로만 채운다 — 검증은 VM 을 만들고 데이터스토어를 쓰므로 업그레이드만으로 돌기 시작하지 않는다.
+  ② 회차는 **보내기 전에** 기록(`st.weeks[dir] = day`) — 같은 날 다시 돌지 않는다. 고르기는 그 Director · 활성 · 마지막 백업 성공 · 진행 중 복원 없음 · 위치 바뀜 없음 · 가장 오래 검증 안 한 순서.
+     판정 · 보내기는 묶음 복원과 같은 `bulkRestorePlan` · `ops.restores`(검증용 이름 '원래-verify-YYYYMMDD' · 새 VM · 꺼진 채 · 최근 이름 예약). 막힌 VM 만 빼고 보낸다(자동 작업).
+  ③ 끝난 검증 복원은 vmclone `bareos-verify`(`vsOps.verifyRestoredVm`) — 이름 정확히 1대 · 꺼짐일 때만 · **NIC 끊기를 다시 읽어 확인한 뒤에만 켠다** · Tools 대기 · 늘 끈다 ·
+     성공이고 설정이면 `destroyClone(expectedName)`(이름 대조 · 켜져 있으면 안 지움) · 실패는 남긴다(조사용). 결과는 원장 `restores[].finish{ verify, toolsMs(모르면 없음), deleted }`.
+     엣지 회신에 `toolsMs`·`deleted` 를 받는다(dispatch `sanitizeReport` · `finishOp` 화이트리스트). 핑 · 앱 시험은 하지 않는다(네트워크를 끊었으니 — 정직 기록).
+  ④ 일일 요약(`bareos/digest.js` — 메일 종류 `bareos-digest` · 기본 켬 08:30)은 `veeam/staleAlert.js` 와 같은 틱(그날 한 번 · 실패 30분 뒤 · 3번 · 데모 · 엣지 제외 · 메일 꺼짐이면 계산 안 함).
+     **Director 조회가 실패 중인 법인은 '모름'**(성공 · 실패 수를 만들지 않고 합에도 넣지 않는다) · 원장과 폴러 상태만 읽는다(Director 에 닿지 않는다 · 폴러 상태는 기동 때 `setDigestPoller` — 순환 방지).
+  ⑤ 반증 1인 반영(재현 4 · 판독 5 — 모두 이번 판에서 고침):
+     F1 범위 계정의 GET /rehearsal 에 다른 vCenter 의 회차 항목 · 정책 DS · 저장 계정이 실렸다 → 자기 vCenter 만 · savedBy 비움 ·
+     F2 '보내기 전에 기록' 이 메모리뿐이었다 → `st.weeks` 직후 `saveState()`(시험이 글자로 고정) · 상태 파일 손상이면 보존하고 그 프로세스에서 검증을 멈춘다 · 원장 저장 실패도 회차에 사유 ·
+     F3 검증용 이름을 끝에서 잘라 80자 VM 이 원래 이름과 같아졌다 → 날짜 꼬리를 지키고 앞을 자른다 · 빈 인벤토리(initial)면 회차를 차지하지 않고 미룬다 ·
+     F4 요약의 '안다' 는 조회 성공(ok === true)만 · 취소를 따로 센다 · 모두 모름이면 제목에 0 을 앞세우지 않는다 ·
+     F5 DS 를 정하지 않으면 여유 판정이 없었다 → VM 의 홈 데이터스토어(첫 디스크) 여유를 합산해 보고, 모르면 그 VM 을 건너뛴다(자동 작업은 보내지 않는 쪽) · 화면 저장이 정책 DS 를 지우지 않게 ·
+     F6 bareos-nic · bareos-verify 는 vmclone 전역 직렬 큐 대신 **vCenter 마다 한 줄**(execOp `perVcenter`) · F7 다시 보낸 검증의 사유(앞 시도가 지웠을 수 있음 · 켠 채 끊겼을 수 있음 · NIC 경고) ·
+     F8 위치 바뀜은 원장 칸이 아니라 인벤토리 `placementDrift` · F9 지금 검증의 바쁨 · Director 접속값을 OTP 앞에서 · F10 틱 실패 로그 · '지금 보내 보기' 1분 1회 · finishOp toolsMs 는 수만.
+     남긴 것(추정 — 확인 못 함): 게스트가 allowGuestControl 로 NIC 를 다시 연결할 수 있는지 · PCI 패스스루 NIC 는 끊기 대상 밖 · Director 별 회차 시한(명령마다 120초 시한은 있다).

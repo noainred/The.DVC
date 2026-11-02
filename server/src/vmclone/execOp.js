@@ -15,11 +15,26 @@
 
 import { getJob, patchClone, recordJobEvent } from './store.js';
 import { enqueueRun, enqueueOp } from './runner.js';
-import { verifyClone, restoreFromClone, attachNfsDatastore, detachNfsDatastore, disconnectRestoredVm } from './vsOps.js';
+import { verifyClone, restoreFromClone, attachNfsDatastore, detachNfsDatastore, disconnectRestoredVm, verifyRestoredVm } from './vsOps.js';
 import { logAudit } from '../audit.js';
 
-export const OP_KINDS = Object.freeze(['run', 'verify', 'restore', 'nfsds-attach', 'nfsds-detach', 'bareos-nic']);
-export const OP_LABEL = Object.freeze({ run: '지금 실행', verify: '검증', restore: '복구', 'nfsds-attach': 'NFS 데이터스토어 연결', 'nfsds-detach': 'NFS 데이터스토어 떼어 내기', 'bareos-nic': 'Bareos 복원 VM 네트워크 끊기' });
+export const OP_KINDS = Object.freeze(['run', 'verify', 'restore', 'nfsds-attach', 'nfsds-detach', 'bareos-nic', 'bareos-verify']);
+export const OP_LABEL = Object.freeze({ run: '지금 실행', verify: '검증', restore: '복구', 'nfsds-attach': 'NFS 데이터스토어 연결', 'nfsds-detach': 'NFS 데이터스토어 떼어 내기', 'bareos-nic': 'Bareos 복원 VM 네트워크 끊기', 'bareos-verify': 'Bareos 복원 검증(리허설)' });
+
+/*
+ * v2.862 Bareos 마무리(bareos-nic · bareos-verify)는 vmclone 전역 직렬 큐(runner.enqueueOp)에 서지 않는다 — 검증 한 건이 Tools 대기 · 삭제로
+ * 수십 분 걸려 그날 VM 백업 · 다른 복원의 NIC 끊기가 몇 시간 밀렸다(반증 F6). 대신 **vCenter 마다 한 줄**로 차례로 돈다(같은 vCenter 에 동시에 손대지 않게).
+ */
+const _bareosChains = new Map();
+function perVcenter(vcenterId, fn) {
+  const key = String(vcenterId || '');
+  const prev = _bareosChains.get(key) || Promise.resolve();
+  const run = prev.catch(() => {}).then(() => fn(() => {}));
+  const tailP = run.catch(() => {});
+  _bareosChains.set(key, tailP);
+  tailP.then(() => { if (_bareosChains.get(key) === tailP) _bareosChains.delete(key); });
+  return run;
+}
 
 /**
  * @param {{id:string, kind:string, jobId?:string, vcenterId?:string, spec?:object, by?:string}} op
@@ -45,10 +60,21 @@ export async function executeOp(op) {
   if (kind === 'bareos-nic') {
     const vcenterId = String(op.vcenterId || '');
     const name = String(spec.name || '').slice(0, 200);
-    return enqueueOp({ id: op.id, kind, label: OP_LABEL[kind] }, async (setPhase) => {
+    return perVcenter(vcenterId, async (setPhase) => {
       const r = await disconnectRestoredVm(vcenterId, name, { setPhase });
       logAudit({ user: by, action: r.ok ? 'Bareos 복원 VM 네트워크 끊기' : 'Bareos 복원 VM 네트워크 끊기 실패', target: `${vcenterId}/${name.slice(0, 60)}`, detail: String(r.detail).slice(0, 200) });
       return { ok: r.ok, detail: r.detail, ms: r.ms };
+    });
+  }
+
+  // v2.862 Bareos 복원 검증(리허설) — 검증용으로 복원한 새 VM 을 끊고 · 켜고 · Tools 확인 · 끄고 · (성공이면) 지운다
+  if (kind === 'bareos-verify') {
+    const vcenterId = String(op.vcenterId || '');
+    const name = String(spec.name || '').slice(0, 200);
+    return perVcenter(vcenterId, async (setPhase) => {
+      const r = await verifyRestoredVm(vcenterId, name, { deleteOnOk: spec.deleteOnOk !== false, retry: spec.retry === true, setPhase });
+      logAudit({ user: by, action: r.ok ? 'Bareos 복원 검증 성공' : 'Bareos 복원 검증 실패', target: `${vcenterId}/${name.slice(0, 60)}`, detail: String(r.detail).slice(0, 200) });
+      return { ok: r.ok, detail: r.detail, ms: r.ms, toolsMs: r.toolsMs ?? null, deleted: !!r.deleted };
     });
   }
 
