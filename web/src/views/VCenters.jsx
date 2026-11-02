@@ -6,7 +6,7 @@ import { Loading, ErrorBox, StateBadge, usageColor, SearchBox } from '../compone
 const VCenterDetail = lazy(() => import('./VCenterDetail.jsx'));
 // v2.671: VM 이름 검색 결과를 누르면 여는 상세 — 목록 화면이 그 청크를 받지 않게 열 때만 받는다.
 const EntityDetail = lazy(() => import('../components/EntityDetail.jsx').then((m) => ({ default: m.EntityDetail })));
-import { vcCardState, storageBarInfo, staleSinceText } from './vcCardText.js';
+import { vcCardState, vcQuickDot, storageBarInfo, staleSinceText } from './vcCardText.js';
 import { dsTrendMeta } from './dsTrendKpiText.js'; // v2.631(감사 WEB2631-09)
 import BoldText from '../components/boldText.jsx';
 import { alarmsUnknown, restFallbackBadge } from './restFallbackText.js'; // v2.607 WEB2607-06
@@ -264,11 +264,7 @@ export default function VCenters({ onSelectSite, resetSignal }) {
         <div className="vc-quicknav">
           <span className="qn-label">⚡ 바로가기</span>
           {shown.map((s) => {
-            const m = s.metrics || {};
-            const tone = vcCardState(s).tone; // v2.583 #39: 첫 수집 대기·비활성을 빨간 '장애' 로 칠하지 않는다
-            const down = tone === 'bad';
-            const alarms = (m.alarmsCritical || 0) + (m.alarmsWarning || 0);
-            const dot = down ? 'var(--red)' : (tone === 'wait' || tone === 'off') ? 'var(--text-faint)' : (alarms || tone === 'warn') ? 'var(--amber)' : 'var(--green)';
+            const { dot, down } = vcQuickDot(s); // v2.853: GPU 할당 계층의 법인 칩과 같은 판정(vcCardText.js) — v2.583 #39 규칙 그대로
             return (
               <button key={s.id} className={`qn-btn${down ? ' down' : ''}`} title={`${s.name} 카드로 이동`} onClick={() => gotoCard(s.id)}>
                 <span className="qn-dot" style={{ background: dot }} />{s.id}

@@ -83,6 +83,40 @@ export function sortSiblings(list, sort) {
 }
 
 const lc = (s) => String(s || '').toLowerCase();
+
+/** v2.853: 법인 칩 선택(빈 Set·null = 전체)으로 vCenter 를 고른다. */
+export function pickVcenters(tree, vcSel) {
+  const all = tree?.vcenters || [];
+  return vcSel && vcSel.size ? all.filter((vc) => vcSel.has(vc.id)) : all;
+}
+
+const TOT_KEYS = ['hosts', 'gpus', 'vsga', 'capGB', 'capUnknown', 'allocGB', 'allocUnknown', 'offGB', 'offUnknown', 'vmsOn', 'vmsOff', 'unplaced', 'freeGpus', 'noPlacement'];
+const r1 = (n) => Math.round(n * 10) / 10;
+/**
+ * v2.853: 고른 법인들의 합계 — 서버 합계(allocTree.js finishTotals)와 같은 규칙: 용량·할당 중 모르는 것이 섞이면 예비·할당률은 null
+ * (부분 합을 예비로 보이지 않는다). 하나도 안 고르면 서버 전체 합계를 그대로 쓴다.
+ */
+export function sumTotals(tree, vcSel) {
+  if (!vcSel || !vcSel.size) return tree?.totals || null;
+  const t = Object.fromEntries(TOT_KEYS.map((k) => [k, 0]));
+  for (const vc of pickVcenters(tree, vcSel)) for (const k of TOT_KEYS) t[k] += numOrNull(vc.totals?.[k]) || 0;
+  const known = t.capUnknown === 0 && t.allocUnknown === 0;
+  return { ...t, capGB: r1(t.capGB), allocGB: r1(t.allocGB), offGB: r1(t.offGB),
+    spareGB: known ? r1(t.capGB - t.allocGB) : null, allocPct: known && t.capGB > 0 ? Math.round((t.allocGB / t.capGB) * 100) : null };
+}
+
+/**
+ * v2.853: 법인 칩(사용자 요청 '바로가기 칩처럼 법인을 고르게') — 조회 범위의 vCenter 전부(GPU 호스트가 없으면 0 · 흐리게).
+ * 상태 점은 호출부가 vcCardText.vcQuickDot 으로 칠한다(vCenter 화면과 같은 판정). 순서는 vCenter id 순.
+ * @param {object[]} vcs /vcenters 응답(없거나 못 읽으면 계층의 법인만)
+ */
+export function corpChips(tree, vcs) {
+  const byId = new Map((tree?.vcenters || []).map((vc) => [vc.id, vc]));
+  const list = Array.isArray(vcs) && vcs.length ? vcs.map((v) => ({ id: String(v.id), name: v.name || String(v.id), site: v })) : [...byId.values()].map((vc) => ({ id: vc.id, name: vc.name, site: null }));
+  for (const vc of byId.values()) if (!list.some((x) => x.id === vc.id)) list.push({ id: vc.id, name: vc.name, site: null });
+  return list.map((x) => ({ ...x, hosts: byId.get(x.id)?.totals?.hosts || 0, gpus: byId.get(x.id)?.totals?.gpus || 0 }))
+    .sort((a, b) => a.id.localeCompare(b.id));
+}
 /** 찾기 — 호스트 이름 또는 그 호스트의 VM 이름이 맞으면 그 호스트를 남긴다. */
 function hostMatches(h, q) {
   if (!q) return true;
@@ -94,7 +128,7 @@ function hostMatches(h, q) {
  * 계층 → 화면 행. open = 펼친 노드 id 집합(찾기 중이면 맞는 경로를 모두 펼친다).
  * @returns {object[]} { id, depth, kind, name, sub, prof, cap, alloc, spare, pct, off, vms, note, tone, hasKids, isOpen }
  */
-export function flattenAlloc(tree, { open = new Set(), sort = null, query = '' } = {}) {
+export function flattenAlloc(tree, { open = new Set(), sort = null, query = '', vcSel = null } = {}) {
   const rows = [];
   const q = lc(query).trim();
   const isOpen = (id) => !!q || open.has(id);
@@ -109,8 +143,10 @@ export function flattenAlloc(tree, { open = new Set(), sort = null, query = '' }
     note: note || (on && v.gb == null ? '프로파일 해석 불가 — 0 으로 넣지 않음' : on && v.gbEstimated ? 'GB 는 모델명 추정' : ''),
     tone: tone || (on && v.gb == null ? 'warn' : ''), hasKids: false, isOpen: false,
   });
-  for (const vc of sortSiblings(tree?.vcenters || [], sort)) {
-    const hostsOf = (cl) => cl.hosts.filter((h) => hostMatches(h, q));
+  for (const vc of sortSiblings(pickVcenters(tree, vcSel), sort)) {
+    // v2.853: 찾기 글자가 법인(vCenter) id·이름에 맞으면 그 법인을 통째로 보인다(바로가기 찾기 상자와 같은 뜻).
+    const vcHit = !!q && (lc(vc.id).includes(q) || lc(vc.name).includes(q));
+    const hostsOf = (cl) => cl.hosts.filter((h) => vcHit || hostMatches(h, q));
     const dcs = vc.datacenters.filter((dc) => dc.clusters.some((cl) => hostsOf(cl).length));
     if (!dcs.length) continue;
     const vid = `v:${vc.id}`;
