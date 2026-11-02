@@ -1,6 +1,6 @@
 {
-  "generatedAt": "2026-10-30T13:49:58.780Z",
-  "count": 119,
+  "generatedAt": "2026-11-02T12:41:05.303Z",
+  "count": 120,
   "tools": [
     {
       "k": "service-hub",
@@ -756,6 +756,14 @@
     },
     {
       "k": "gpu",
+      "adminOnly": false,
+      "perm": null,
+      "external": null,
+      "topTab": false,
+      "comingSoon": false
+    },
+    {
+      "k": "gpu-alloc",
       "adminOnly": false,
       "perm": null,
       "external": null,

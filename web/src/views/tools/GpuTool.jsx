@@ -2,7 +2,7 @@
 import React, { useEffect, useState } from 'react';
 import { useLatest } from '../../hooks/useLatest.js';
 import { useHashTab } from '../../hooks/useHashTab.js';
-import { fetchJson, postJson, downloadFile, canCsv } from '../../api.js';
+import { fetchJson, postJson, downloadFile, canCsv, toolAllowed } from '../../api.js';
 import { downloadFailText } from '../downloadFailText.js';
 import { DataTable, Loading, ErrorBox, UsageCell, Modal, VmLink } from '../../components/ui.jsx';
 import { Card, useTool } from './shared.jsx';
@@ -11,7 +11,6 @@ import { activityOf, memText, memMainText, gbText, tempText, allocText, allocTit
 import { numOrNull } from '../../numOrNull.js'; // v2.727(E-12): VRAM 결측(null)을 0 으로 접지 않는다
 import { whyChip, whyBannerItems, vmChips, activityBar, srcText, collectCheckGroups, readCell } from './gpuWhyText.js';
 import Select from '../../components/Select.jsx';
-import { GpuAllocTree } from './GpuAllocTree.jsx';   // v2.852 '할당 계층' 보기
 const GpuHistModal = React.lazy(() => import('./GpuHistModal.jsx'));
 
 
@@ -105,6 +104,8 @@ export function Gpu({ scope }) {
   };
   // 하위 탭을 URL 에 실어 새로고침·북마크·뒤로가기에서 유지한다(v2.438, hooks/useHashTab.js).
   const [view, setView] = useHashTab({ base: ['tools', 'gpu'], valid: ['host', 'cluster', 'vc', 'model', 'alloc'], fallback: 'host' });
+  // v2.857: '할당 계층' 보기는 특수 기능 'GPU 할당율'(#/tools/gpu-alloc)로 독립했다 — 옛 주소(#/tools/gpu/alloc 북마크)는 그쪽으로 넘긴다.
+  useEffect(() => { if (view === 'alloc') window.location.hash = '#/tools/gpu-alloc'; }, [view]);
   const [hist, setHist] = useState(null);   // { level, key, metric } — v2.650: GpuHistModal 이 조회한다
   const [vmList, setVmList] = useState(null); // { title, params } for GpuVmsModal
   const [checkOpen, setCheckOpen] = useState(false); // v2.658 수집 점검 창
@@ -340,11 +341,11 @@ export function Gpu({ scope }) {
       {data.items.length === 0 ? <div className="card"><span className="muted">GPU가 설치된 호스트가 없습니다.</span></div> : (
         <>
           <div className="flex gap wrap" style={{ marginBottom: 8 }}>
-            {[['host', '호스트별'], ['cluster', '클러스터별'], ['vc', '법인별'], ['model', '법인·모델별'], ['alloc', '할당 계층']].map(([k, l]) => (
+            {[['host', '호스트별'], ['cluster', '클러스터별'], ['vc', '법인별'], ['model', '법인·모델별']].map(([k, l]) => (
               <button key={k} className={view === k ? 'login-btn' : 'logout-btn'} style={{ flex: 'none', padding: '7px 14px' }} onClick={() => setView(k)}>{l}</button>
             ))}
             <span style={{ width: 12 }} />
-            {view !== 'alloc' && [['', '전체'], ['vgpu', 'vGPU'], ['passthrough', '패스쓰루'], ['vsga', 'vSGA']].map(([k, l]) => {
+            {[['', '전체'], ['vgpu', 'vGPU'], ['passthrough', '패스쓰루'], ['vsga', 'vSGA']].map(([k, l]) => {
               const cnt = k ? (data.byMode?.[k] ?? 0) : data.totalGpus;
               const off = !!k && cnt === 0;
               return (
@@ -355,7 +356,6 @@ export function Gpu({ scope }) {
                 </button>
               );
             })}
-            {view !== 'alloc' && <>
             <span style={{ width: 8 }} />
             <Select className="select" style={{ flex: 'none', maxWidth: 240 }} value={modelFilter} onChange={(e) => setModelFilter(e.target.value)} title="GPU 종류(모델)별로 보기">
               <option value="">GPU 종류: 전체</option>
@@ -366,11 +366,11 @@ export function Gpu({ scope }) {
               <option value="on">🟢 켜진 VM 있는 호스트</option>
               <option value="off">⚫ 꺼진 VM 있는 호스트</option>
             </Select>
-            </>}
             <button className="logout-btn" style={{ flex: 'none', padding: '7px 12px', marginLeft: 'auto' }} disabled={collecting}
               onClick={collectNow} title="vCenter 성능 카운터(gpu.utilization)로 지금 사용률을 즉시 수집합니다(설정 주기 무시).">{collecting ? '수집 중…' : '⟳ 지금 수집'}</button>
             <button className="logout-btn" style={{ flex: 'none', padding: '7px 12px' }}
               onClick={() => setVmList({ title: `GPU 할당 VM${modelFilter ? ` — ${modelFilter}` : ' 전체'}`, params: { ...(scope ? { vcenterId: scope } : {}), ...(mode ? { mode } : {}), ...(modelFilter ? { model: modelFilter } : {}) } })}>🎮 GPU 할당 VM 보기</button>
+            {toolAllowed('gpu-alloc') && <a className="logout-btn" href="#/tools/gpu-alloc" style={{ flex: 'none', padding: '7px 12px', textDecoration: 'none' }} title="법인 › 데이터센터 › 클러스터 › 호스트 › GPU › VM 별 할당량·예비량(특수 기능 'GPU 할당율')">📊 GPU 할당율</a>}
             {canCsv() && <button className="logout-btn" style={{ flex: 'none', padding: '7px 12px' }} onClick={() => setExportOpen(true)} title="수집된 GPU 사용률 데이터(전체/기간)를 CSV·JSON으로 내려받기.">⬇ 내보내기</button>}
             <button className={`logout-btn${whyShown ? ' gpu-check-on' : ''}`} style={{ flex: 'none', padding: '7px 12px' }} aria-expanded={whyShown}
               onClick={() => setWhyShown((v) => !v)}
@@ -392,7 +392,7 @@ export function Gpu({ scope }) {
               <button type="button" className="gpu-why-more" onClick={() => setCheckOpen(true)} title="수집 점검 창에서 법인별 상태를 봅니다">법인별 상태 보기</button>
             </div>
           ))}
-          {view === 'alloc' ? <GpuAllocTree scope={scope} /> : rows.length === 0 && data.items.length > 0 ? (
+          {rows.length === 0 && data.items.length > 0 ? (
             <div className="card" style={{ padding: 16 }}>
               <span className="muted">현재 필터에 해당하는 GPU 호스트가 없습니다{mode ? ` (사용 방식: ${{ vgpu: 'vGPU', passthrough: '패스쓰루', vsga: 'vSGA' }[mode] || mode})` : ''}{modelFilter ? ` (모델: ${modelFilter})` : ''}. GPU는 총 {data.totalGpus}장 있습니다.</span>
               <button className="tab" style={{ marginLeft: 10, padding: '4px 10px' }} onClick={() => { setMode(''); setModelFilter(''); setPower(''); }}>필터 초기화</button>

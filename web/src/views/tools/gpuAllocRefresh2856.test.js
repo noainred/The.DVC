@@ -14,7 +14,7 @@ describe('GPU 할당 계층 새로 고침(v2.856)', () => {
     expect(at).toBeGreaterThan(0);
     const body = src.slice(at, src.indexOf('};', at));
     expect(body).toMatch(/loadVcs\(\)/);
-    expect(body).toMatch(/\/tools\/gpu\/alloc/);
+    expect(body).toMatch(/\/tools\/gpu-alloc/);
     expect(src).toMatch(/const loadVcs = \(\) => runVcs\(fetchJson\('\/vcenters'\)/);
   });
   it('상태 점을 마운트에 한 번만 읽던 별도 효과가 없다', () => {

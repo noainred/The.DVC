@@ -1,7 +1,7 @@
 /**
  * gpuAllocText.js — GPU '할당 계층' 보기의 행 펼치기·정렬·글자(순수, v2.852 — 승인 시안 https://claude.ai/artifact/GQKnG775UijSAU7aUSFFeB '계층 표').
  *
- * 숫자와 판정(용량·할당·예비·슬롯·배치 정보 없음)은 서버 /tools/gpu/alloc(server/src/gpu/allocTree.js)이 만든다 — 여기서는
+ * 숫자와 판정(용량·할당·예비·슬롯·배치 정보 없음)은 서버 /tools/gpu-alloc(server/src/gpu/allocTree.js)이 만든다 — 여기서는
  * 계층을 화면 행으로 펼치고 글자·색만 고른다. 못 읽은 값은 '—'(단위를 붙이지 않는다).
  * 정렬은 **형제끼리만**(같은 부모 아래) — 표 전체를 한 줄로 정렬하면 계층이 깨진다. 값이 없는 형제는 항상 뒤.
  */

@@ -138,6 +138,7 @@ const LicenseExpiry = React.lazy(() => import('./tools/LicenseTools.jsx').then((
 const Licenses = React.lazy(() => import('./tools/LicenseTools.jsx').then((m) => ({ default: m.Licenses })));
 const Solutions = React.lazy(() => import('./tools/LicenseTools.jsx').then((m) => ({ default: m.Solutions })));
 const Gpu = React.lazy(() => import('./tools/GpuTool.jsx').then((m) => ({ default: m.Gpu })));
+const GpuAllocTree = React.lazy(() => import('./tools/GpuAllocTree.jsx').then((m) => ({ default: m.GpuAllocTree })));   // v2.857 'GPU 할당율'
 
 
 // URL 해시(#/tools/<기능키>)에서 현재 도구 키를 읽는다(바로가기/북마크 지원).
@@ -692,6 +693,8 @@ function ToolPanel({ tool, onBack, isAdmin, defaultScope = '', cfg = null }) {
       {tool === 'license-expiry' && <LicenseExpiry scope={scope} isAdmin={isAdmin} />}
       {tool === 'hba' && <Hba scope={scope} />}
       {tool === 'gpu' && <Gpu scope={scope} />}
+      {/* v2.857: 법인은 화면 안의 법인 칩으로 고른다(scope 콤보를 두지 않는다 — 두 선택이 겹치면 어느 것이 범위인지 헷갈린다). */}
+      {tool === 'gpu-alloc' && <GpuAllocTree scope="" />}
       {tool === 'serveranalysis' && <ServerAnalysis />}
       {tool === 'orphanvmdk' && <OrphanVmdk scope={scope} />}
       {tool === 'curuser' && <CurrentUsers scope={scope} />}
