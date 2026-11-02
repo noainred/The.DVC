@@ -54,7 +54,7 @@
 | `WAN_TLS_CA_FILE` | `''` | ✅ | util/resilientFetch.js |
 | `WAN_TLS_INSECURE` | `기본 적용('true' 로 끄기)` | ✅ | util/resilientFetch.js |
 
-## 공통 (213)
+## 공통 (212)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
@@ -70,7 +70,6 @@
 | `AUTH_ENABLED` | `기본 적용('false' 로 끄기)` | ✅ | config.js |
 | `AUTH_SECRET` | `''` | ✅ | config.js |
 | `AUTH_TOKEN_TTL` | `'8h'` | ✅ | config.js |
-| `BAREOS_BUNDLE_BASE_URL` | `''` |  | bareos/install/bundle.js |
 | `BAREOS_EDGE_PICKUP_MS` | `120000` |  | bareos/edgeOps.js |
 | `BMUSAGE_ACTIVITY_MAX` | `500` |  | bmusage/activityLog.js |
 | `BMUSAGE_ALERT_MAX` | `40` |  | bmusage/notify.js |
@@ -689,10 +688,11 @@
 |---|---|---|---|
 | `HEALTH_PROBE_TIMEOUT_MS` |  |  | health/network.js |
 
-## API 라우트 (36)
+## API 라우트 (37)
 
 | 키 | 기본값 | 예시 | 정의 위치 |
 |---|---|---|---|
+| `BAREOS_BUNDLE_BASE_URL` | `''` |  | bareos/install/bundle.js, routes/api/bareosInstall.js |
 | `BMUSAGE_PULL_BUDGET_MS` |  |  | routes/api/bmUsage.js |
 | `BMUSAGE_PULL_CONCURRENCY` | `4` |  | routes/api/bmUsage.js |
 | `CENTRAL_INVENTORY_OWNER_HANDOVER_HOURS` |  |  | routes/central.js |

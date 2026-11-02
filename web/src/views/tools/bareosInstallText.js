@@ -168,3 +168,22 @@ export function rollbackCauseText(cause) {
 
 export const PYVMOMI_REASON = '권고: 8 계열 — Rocky 9 기본 Python 3.9 에서 pyVmomi 9.x 는 ‘Python 3.10 or newer is required’ 로 플러그인이 시작하지 못했습니다(현장 실측 2026-10-30 · 설치 문서 7.4). 번들에는 8.x 휠만 넣습니다.';
 export const WEEKDAY_KO = Object.freeze({ sun: '일', mon: '월', tue: '화', wed: '수', thu: '목', fri: '금', sat: '토' });
+
+/* ───────── v2.850 번들 받는 곳 · 서버 디렉터리(서버 bareos/install/bundleSource.js · bundle.js) ───────── */
+/** 받는 주소의 출처 글자(서버 bundleSourceInfo().from). */
+export const BUNDLE_FROM_TEXT = Object.freeze({ ui: '화면에서 정한 주소', env: '환경 변수 BAREOS_BUNDLE_BASE_URL', package: '업그레이드 패키지 주소에서 만든 주소', '': '정해지지 않음' });
+export const bundleFromText = (from) => BUNDLE_FROM_TEXT[from] ?? BUNDLE_FROM_TEXT[''];
+/** 서버 디렉터리 상태 글자(서버 importDirState). */
+export function importDirStateText(s) {
+  return ({ ok: { text: '있음 · 읽을 수 있음', cls: 'green' }, missing: { text: '없음 — 디렉터리를 만들어 두세요', cls: 'amber' }, 'not-dir': { text: '디렉터리가 아닙니다', cls: 'red' },
+    unreadable: { text: '읽을 수 없습니다 — 포탈 서비스 계정에 읽기 · 실행 권한을 주세요', cls: 'red' } })[s] || { text: '정하지 않음', cls: 'gray' };
+}
+/** 번들 행의 위치 글자 — 받은 번들 폴더(지우기 가능) · 서버 디렉터리(읽기만). */
+export const bundleWhereText = (w) => (w === 'import' ? '서버 디렉터리' : '받은 번들');
+/** 번들 행의 상태 — 확인됨 · 사용 불가 · 확인 중(막 바뀐 파일) · 확인 전. */
+export function bundleStateView(x) {
+  if (x?.ok === true) return { cls: 'green', text: '✓ 서명·해시 확인' };
+  if (x?.ok === false) return { cls: 'red', text: `사용 불가 — ${x.reason || '사유 미상'}` };
+  if (x?.reason && x.reason !== '확인 전') return { cls: 'amber', text: `확인 중 — ${x.reason}` };
+  return { cls: 'gray', text: '확인 전' };
+}
