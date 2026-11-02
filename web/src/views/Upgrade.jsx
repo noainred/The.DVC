@@ -8,7 +8,7 @@ import { droppedSecretNote } from './droppedSecretText.js'; // v2.731(A3-01 ①)
 import { autoSummary, autoApplyRowText, noTickText, resultSummary, actionMsg, restoredNote, triggerText, remoteSourceLabel, runningScanWarning } from './upgradeAutoText.js';
 import { readFailText } from './readFailText.js'; // v2.741(WEB-04): 재조회 실패는 화면을 지우지 않고 한 줄로 말한다
 // v2.859: 엣지 자동 업그레이드(중앙이 업그레이드되면 등록된 엣지도 모두 — 기본 켬). 판정은 서버 edgeSync.js, 문장은 여기.
-import { edgeSyncSummary, noSyncText, edgeAutoCheckboxHint } from './upgradeEdgeSyncText.js';
+import { edgeSyncSummary, noSyncText, edgeAutoCheckboxHint, syncRunText } from './upgradeEdgeSyncText.js'; // v2.865: '지금 동기화'
 
 /**
  * v2.741(WEB-04): 상태 조회 실패의 표시. 확인·적용·설정 저장 뒤 다시 읽기(await load())가 실패하면 예전에는
@@ -171,9 +171,11 @@ function AutoCard({ status }) {
 }
 
 /** v2.859: 엣지 자동 업그레이드 — 켜짐 · 다음 동기화 · 마지막 동기화 · 뒤처진 엣지. 서버가 edgeSync 를 보내지 않으면 그리지 않는다. */
-function EdgeSyncCard({ status }) {
+function EdgeSyncCard({ status, busy, onSync, msg }) {
   const a = edgeSyncSummary(status);
   if (!a) return null;
+  const syncMsg = msg && msg.action === 'edge-sync' ? syncRunText(msg.r) : null; // v2.865 C
+  const canRun = !!status.edgeSync?.enabled && !status.edgeSync?.running;
   return (
     <div className="card" style={{ marginBottom: 16, minWidth: 0 }} data-edge-sync="">
       <b>엣지 자동 업그레이드</b>
@@ -192,16 +194,35 @@ function EdgeSyncCard({ status }) {
         <ul style={{ margin: '10px 0 0', paddingLeft: 18, fontSize: 12.5, lineHeight: 1.6 }}>
           {a.rows.map((r) => (
             <li key={r.id} style={{ whiteSpace: 'normal', wordBreak: 'break-word', marginBottom: 4 }}>
-              <b>{r.name}</b>{r.version ? <span className="muted"> v{r.version}</span> : <span className="muted"> (버전 —)</span>}
+              <b>{r.name}</b>{r.kind && <span className="badge gray" style={{ marginLeft: 6 }}>{r.kind}</span>}{r.version ? <span className="muted"> v{r.version}</span> : <span className="muted"> (버전 —)</span>}
               {' · '}<span style={{ color: TONE_COLOR[r.tone] || 'inherit' }}>{r.text}</span>
               {r.reason && <div className="muted" style={{ fontSize: 11.5 }}>{r.reason}</div>}
             </li>
           ))}
         </ul>
       )}
-      <div className="muted" style={{ marginTop: 8, fontSize: 11.5, whiteSpace: 'normal' }}>
-        지금 바로 맞추려면 설정 › 수집 서버 화면의 ‘모두 업그레이드’ 를 누르세요. 엣지별 push 결과는 그 화면의 버전 칸에 남습니다.
+      {a.dropped.length > 0 && (
+        <div style={{ marginTop: 6, fontSize: 11.5, color: TONE_COLOR.warn, whiteSpace: 'normal', wordBreak: 'break-word' }}>
+          동기화에서 뺀 옛 방식 엣지 {a.dropped.length}곳: {a.dropped.join(' · ')}
+        </div>
+      )}
+      {/* v2.865 C: 지금 동기화 — 주기를 기다리지 않고 뒤처진 엣지에 바로 민다(서버 run 은 단일 진행). */}
+      <div className="flex gap" style={{ marginTop: 10, flexWrap: 'wrap', alignItems: 'center' }}>
+        <button className="logout-btn" style={{ padding: '8px 14px' }} disabled={busy || !canRun} data-edge-sync-run=""
+          title={canRun ? '뒤처진 엣지에 중앙 현재 버전 번들을 지금 밀어 넣습니다' : status.edgeSync?.running ? '지금 동기화 중입니다' : '엣지 자동 업그레이드가 꺼져 있습니다'}
+          onClick={onSync}>
+          {busy === 'edge-sync' ? '동기화 중…' : '지금 동기화'}
+        </button>
+        <span className="muted" style={{ fontSize: 11.5, whiteSpace: 'normal' }}>
+          수동으로 전부 맞추려면 설정 › 수집 서버 화면의 ‘모두 업그레이드’ 를 누르세요. 엣지별 push 결과는 그 화면의 버전 칸에 남습니다.
+        </span>
       </div>
+      {syncMsg && (
+        <div data-edge-sync-msg="" style={{ marginTop: 10, padding: '8px 12px', borderRadius: 8, fontSize: 12.5, whiteSpace: 'normal', wordBreak: 'break-word',
+          background: syncMsg.ok ? 'rgba(34,197,94,.12)' : 'rgba(245,158,11,.12)', color: syncMsg.ok ? '#4ade80' : '#fbbf24' }}>
+          <b>지금 동기화</b> · {syncMsg.text}
+        </div>
+      )}
     </div>
   );
 }
@@ -364,7 +385,7 @@ export default function Upgrade() {
       {/* v2.736.2: 자동 업그레이드가 왜 안 되는지·다음 확인은 언제인지 — 실행 줄 바로 아래에 말한다. */}
       <AutoCard status={status} />
       {/* v2.859: 중앙이 업그레이드되면 등록된 엣지도 모두 — 켜짐·다음 동기화·뒤처진 엣지. */}
-      <EdgeSyncCard status={status} />
+      <EdgeSyncCard status={status} busy={busy} msg={msg} onSync={() => run('edge-sync', () => postJson('/upgrade/edge-sync'))} />
 
       {/* 현재 상태 + 최근 확인 결과 — 화면 최상단(설정 위)에 먼저 보여준다. */}
       <div className="grid cols-2" style={{ marginBottom: 16 }}>

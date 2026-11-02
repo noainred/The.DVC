@@ -953,7 +953,7 @@ function HistoryTab({ d }) {
   const [levelF, setLevelF] = useState('');
   const [resultF, setResultF] = useState('');
   const jobsShown = useMemo(() => (dirF ? d.jobs.filter((j) => j.directorId === dirF) : d.jobs), [d.jobs, dirF]);
-  // v2.864: 처음 대상은 진행 중인 VM(없으면 첫 대상) — 아래 효과가 위 실행 중 표에서 골라진 VM 을 따라간다(사람이 바꾸기 전까지)
+  // v2.866: 처음 대상은 진행 중인 VM(없으면 첫 대상) — 아래 효과가 위 실행 중 표에서 골라진 VM 을 따라간다(사람이 바꾸기 전까지)
   const [sel, setSel] = useState(() => (d.jobs.find((j) => j.pending?.jobid || ['running', 'queued', 'waiting'].includes(j.lastRun?.state)) || d.jobs[0])?.id || '');
   const [selByHand, setSelByHand] = useState(false);
   const [hist, setHist] = useState(null);
@@ -1003,7 +1003,7 @@ function HistoryTab({ d }) {
     return { ahead, order: i >= 0 ? i + 1 : null, total: waits.length };
   };
   const pick = (x) => { setRunSel(x.key); setSelByHand(false); if (x.job?.id && x.job.id !== sel) setSel(x.job.id); };   // 아래 이력 표도 그 VM 으로(다시 따라가기)
-  // v2.864(사용자 요청 '진행 중인 백업 VM 이 자동으로 선택되게'): 이력 표 대상이 위 표의 고른(기본: 실행 중) 작업 VM 을 따라간다
+  // v2.866(사용자 요청 '진행 중인 백업 VM 이 자동으로 선택되게'): 이력 표 대상이 위 표의 고른(기본: 실행 중) 작업 VM 을 따라간다
   const pickedJobId = picked?.job?.id || '';
   const shownIds = useMemo(() => jobsShown.map((j) => j.id), [jobsShown]);
   useEffect(() => {

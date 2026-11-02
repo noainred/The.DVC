@@ -188,7 +188,8 @@ export class UpgradeManager {
     this.deferral = null;       // v2.737: { since, until, latest, scans } — 실행 중 스캔이 끝나기를 기다리는 중
     this.deferTimer = null;
     // v2.859: 등록된 엣지(수집 서버)를 중앙 버전으로 맞추는 주기 동기화 — 확인·적용 중에는 건너뛰고, 적용은 진행 중인 동기화 push 를 기다린다.
-    this.edgeSync = new EdgeSyncRunner({ settings: () => this.settings, busy: () => !!this._applying || this.#ticking });
+    // v2.865 A: 동기화 한 번이 끝날 때마다 상태 파일에 남긴다(onRun) — 재시작 뒤에도 '마지막 동기화' 가 보인다.
+    this.edgeSync = new EdgeSyncRunner({ settings: () => this.settings, busy: () => !!this._applying || this.#ticking, onRun: () => this.#save() });
   }
 
   // v2.736.2: 적용 결과는 routes(엣지·수집기 push 수신)도 대입한다 — 대입하면 파일에도 남는다.
@@ -206,6 +207,7 @@ export class UpgradeManager {
     if (!this.lastCheck && prev.lastCheck) this.lastCheck = prev.lastCheck;
     if (!this.#lastResult && prev.lastResult) this.#lastResult = prev.lastResult;
     if (!this.lastTick && prev.lastTick) this.lastTick = prev.lastTick;
+    if (prev.lastEdgeSync) this.edgeSync.restore(prev.lastEdgeSync); // v2.865 A
     this.persist = { enabled: true, file, error: r.error || null, corruptKept: r.corruptKept || null, restored: !!(prev.lastCheck || prev.lastResult || prev.lastTick) };
     if (r.error) console.warn(`[upgrade] ${r.error}${r.corruptKept ? ` — 원본은 ${r.corruptKept}` : ''}`);
     return this.persist;
@@ -213,7 +215,7 @@ export class UpgradeManager {
 
   #save() {
     if (!this.persist?.enabled || !this.persist.file) return;
-    const err = writeUpgradeStatus(this.persist.file, { lastCheck: this.lastCheck, lastResult: this.#lastResult, lastTick: this.lastTick });
+    const err = writeUpgradeStatus(this.persist.file, { lastCheck: this.lastCheck, lastResult: this.#lastResult, lastTick: this.lastTick, lastEdgeSync: this.edgeSync?.lastRun || null }); // v2.865 A
     if (err && err !== this.persist.error) console.warn(`[upgrade] ${err}`);
     this.persist.error = err;
   }

@@ -337,6 +337,10 @@
   · 팝업은 **로그인 뒤에만**(App 의 `<Portal>` 옆 — 모든 셸 위) · 폴링 없음 · '보지 않기' 는 브라우저 저장이고 키가 `rev`(id + 수정 시각)라 고치면 다시 보인다.
   · 쓰기 권한: 공지 = admin + 전체 범위 · 글·댓글 = admin·operator(서버 불변조건 '/api 상태변경은 requireRole(admin, operator)') · 수정·삭제 = 작성자 또는 관리자 · 고정 = 관리자.
   · 상단 탭 'board' 를 더하면 V5 `tree.js`(TAB_NAMES·platform) · V6 `menus.js`(TAB_INFO·platform) · `noFilterTabs` 도 함께. 1600px 한 줄 메뉴는 14개에서도 잘리지 않았다(실측 nav scrollWidth == clientWidth).
+- **이슈 트래커(v2.864)** — `server/src/issues/store.js`(issues.json · 게시판과 같은 디바운스 비동기 원자 쓰기·손상 보존·합계 상한 `ISSUES_MAX_BYTES`) + `routes/api/issues.js`(`/issues*`, 회귀 `server/test/issues2864.test.js` — 실제 api 라우터로 역할별 상태코드) + 웹 `views/issues/`{Issues.jsx,issueText.js}. 디자인 시안: Claude Design 캔버스 https://claude.ai/artifact/DhvGAynr761G6y3arqqU8R:
+  · 전이 규칙은 서버가 판정한다 — '진행 중' 은 담당자 필수(400) · 보류는 사유 필수 · 완료는 `closedAt`. 화면은 거부 사유를 그대로 보인다(두 벌 판정 금지).
+  · 쓰기 권한: 생성·수정·상태·할당·댓글 = admin·operator(협업 도구라 남의 이슈도 고친다) · 삭제 = 본인 또는 **전체 범위** 관리자(게시판 `isBoardModerator` 와 같은 기준). 담당자 후보(`people`)는 쓰기 계정에게만 — viewer 에게 계정명 목록을 주지 않는다.
+  · ⚠ `/issues/bulk/assign` 은 `/issues/:key/…` 보다 **먼저** 등록한다 — 뒤에 두면 'bulk' 가 키로 잡혀 404 다(초판 자체 테스트가 잡았다).
 - **게시판 답글·공감(v2.723)** — 답글은 댓글 배열에 `parentId`(최상위 댓글 id)로 묶는 **한 단계**다(답글에 단 답글은 최상위 아래로 옮기고 `replyTo`).
   답글이 달린 댓글을 지우면 **자리를 남기고**(`deleted` — 내용·작성자 지움, 세지 않음) 마지막 답글이 지워지면 자리도 치운다. 공감은 이름 목록 `likes` 이고
   요청은 상태를 명시한다(`POST …/like {on:true|false}` — 연타·재전송이 두 번 세지 않는다). 응답에는 개수·내 공감·앞 30명만(`likeView`) — `likes` 배열을 내보내지 말 것.
@@ -484,7 +488,7 @@
   ④ 저장한 양 · 압축 · 쓰는 중 볼륨 크기는 잡 끝 보고에만 있다 — '끝나면 표시'(점선 칸). FD 보고가 없으면 진행량 · 속도 · 진척 · 남은 시간은 '모름'/'—'(0 아님)이고 타임라인 · 볼륨은 로그로 채운다.
   ⑤ 진행 현황 표 안의 펼침 칸은 `position: sticky; left: 0` + **실측 폭**(ResizeObserver) — 400px 에서 넓은 표(minWidth 1100)를 가로로 밀어도 상세는 화면 안. 정렬 때 행과 펼침 칸이 떨어지지 않게 `React.Fragment` 로 묶는다(`sortChildren` 이 첫 tr 로 정렬).
   ⑥ 대기 배지는 회색(실행 중 파랑과 구분 — `bareosText.STATE_BADGE`). 상세에 취소 단추는 두지 않았다(백업 대상 탭). 데모 실행 길이는 env `BAREOS_DEMO_RUN_MS`(화면 검증용 — 기본 30초는 진행 현황 조회 주기보다 짧다).
-  ⑨ v2.864(사용자 요청 '진행 중인 백업 VM 이 자동으로 선택되게'): 아래 카탈로그 최근 실행 표의 대상은 처음에 진행 중 VM 이고, 위 실행 중 표에서 골라진(기본: 실행 중) 작업 VM 을 따라간다(`historyFollowTarget`) ·
+  ⑨ v2.866(사용자 요청 '진행 중인 백업 VM 이 자동으로 선택되게'): 아래 카탈로그 최근 실행 표의 대상은 처음에 진행 중 VM 이고, 위 실행 중 표에서 골라진(기본: 실행 중) 작업 VM 을 따라간다(`historyFollowTarget`) ·
      사람이 대상 칸을 직접 바꾸면 따라가지 않고, 위 표의 행을 누르면 다시 따라간다 · Director 거르기 밖 VM 이면 바꾸지 않는다.
 - **v2.860 — Bareos 화면 재구성(사용자 요청 'Bareos UI 전폭 개선 · 직관적이고 복잡하지 않게' · 승인 시안 `docs/design/bareos-ui-v2` ⓪~⑥)**. 도구 키 3개(`bareos-summary`·`bareos-detail`·`bareos-backup`)와 권한은 그대로이고 탭은 주소만 바꾼다:
   ① 탭은 5개(현황 · 법인 · 운영 · 정책 · 보존 · 설정) — 판정은 `bareosViewText.bareosSubTabs` 하나, 그리는 곳은 `BareosTabs.jsx` 하나(모든 Bareos 화면이 같은 자리 · 오른쪽 `right` 칸에 그 화면의 조작). 두 벌 탭 줄을 되살리지 말 것.
@@ -500,7 +504,7 @@
   ③ 네트워크 끊기 기본(새 VM 끊기 · 덮어쓰기 그대로 — `withMode`) · 상태는 원장 `restores[].nic · finish` 를 `finishText` 로(옛 복원은 '—'). 진행 · 이력의 복원 이력 표에 '네트워크' 칸.
   ④ 데이터스토어 목록은 `/datastores`(vCenter 마다 한 번 — `dsAsked` ref · 렌더마다 다시 묻지 않는다) · 남은 스냅샷 칩은 인벤토리 `snapshotCount`(못 읽으면 칩 없음 — 0 으로 보지 않는다).
   ⑤ 백업 대상 패널의 '복원…' 은 이 화면으로 그 VM 을 골라 넘긴다(옛 단건 RestoreModal 은 지웠다). 결과 창의 'Full 로 지금 실행' 은 해석이 Full 을 권하는 줄(`issueNeedsFull`)에만 · 쓰기 범위일 때만.
-  ⑨ v2.864 폴더 표(`BareosRestoreTable.jsx` · 트리 `bareosRestoreTree.js` + test): 고르는 방식 칩 두 개(간단 목록 · 폴더 표 — 브라우저에 기억, 못 읽으면 간단 목록) · 표는 div 격자(role=table · 열 머리 고정)이고 트리라 정렬하지 않는다 ·
+  ⑨ v2.866 폴더 표(`BareosRestoreTable.jsx` · 트리 `bareosRestoreTree.js` + test): 고르는 방식 칩 두 개(간단 목록 · 폴더 표 — 브라우저에 기억, 못 읽으면 간단 목록) · 표는 div 격자(role=table · 열 머리 고정)이고 트리라 정렬하지 않는다 ·
      아래 고정 줄(선택 수 · 용량 · 다음) · 폴더 체크는 고를 수 있는 VM 만(일부만 고르면 중간 표시) · 모르는 값은 '—' · 부분 합은 '+' · 폴더 VM 수는 열 때 한 번(폴링 없음).
 - **v2.862 — Bareos 복원 검증(리허설) · 일일 요약 메일**(`BareosRehearsal.jsx` — 운영 › 복원 아래 카드 · 설정 › 공통 기본값 · 수집의 '일일 요약 메일' 펼침). 글자는 `bareosRestoreText.js`:
   ① 정책은 꺼짐이 기본 — 화면이 그 사실과 이유(VM 을 만들고 데이터스토어를 쓴다)를 먼저 말한다. 정책 바꾸기 · 지금 검증은 서버가 준 `fullScope` 일 때만 그린다(집행은 서버) · OTP 칸은 6자리 숫자만 · 실패해도 비운다.

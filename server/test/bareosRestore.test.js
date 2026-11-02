@@ -158,7 +158,7 @@ test('원장: 같은 실행을 덜 자세한 행으로 받아도 값 유지 · �
   assert.ok(fs.readdirSync(tmp).some((f) => f.startsWith('bareos-jobs.json.corrupt.')));
 });
 
-test('v2.864 실환경 \'Option vcuser not defined\' — 복원 명령에 백업과 같은 기본 키(vcserver · dc · folder · vmname · config_file)', async () => {
+test('v2.866 실환경 \'Option vcuser not defined\' — 복원 명령에 백업과 같은 기본 키(vcserver · dc · folder · vmname · config_file)', async () => {
   const { restoreBaseKv } = await import('../src/bareos/restore.js');
   const { restorePluginOptions } = await import('../src/bareos/names.js');
   const base = { vcserver: 'vc-a.corp', configFile: '/etc/bareos/vmware/vc-a.ini' };

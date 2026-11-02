@@ -129,7 +129,7 @@ const viewJob = (j, vmById, settings) => {
   const drift = vmById ? placementDrift(j, vm) : null;
   // v2.834: 게스트 OS(인벤토리 기준 — 인벤토리에 없는 VM 은 모름)
   // v2.861 남은 스냅샷(인벤토리 — 못 읽으면 null · 0 이 아니다): 백업 실패 뒤 남은 스냅샷이 다음 백업을 막는다(bareos-users · PR #1484)
-  // v2.864 복원 › 폴더 표: 전원 · 용량(인벤토리 — 인벤토리에 없거나 못 읽으면 null · 0 이 아니다)
+  // v2.866 복원 › 폴더 표: 전원 · 용량(인벤토리 — 인벤토리에 없거나 못 읽으면 null · 0 이 아니다)
   return {
     ...j, directorId: jobDirectorId(j, settings), ...osFields(vm), snapshotCount: vm ? numOrNull(vm.snapshotCount) : null,
     powerState: vm && typeof vm.powerState === 'string' ? vm.powerState.slice(0, 32) : null, storageGB: vm ? numOrNull(vm.storageGB) : null,
@@ -138,10 +138,10 @@ const viewJob = (j, vmById, settings) => {
 };
 
 /**
- * v2.864 마지막 성공 백업(복원 › 폴더 표) — 원장의 lastRun · finishedRuns 중 성공(T·W) · 백업(type 없거나 B) 실행의 가장 늦은 끝(없으면 시작) 시각.
+ * v2.866 마지막 성공 백업(복원 › 폴더 표) — 원장의 lastRun · finishedRuns 중 성공(T·W) · 백업(type 없거나 B) 실행의 가장 늦은 끝(없으면 시작) 시각.
  * 포탈이 본 실행만 안다(등록 전 · 기록 밖 백업은 모른다) — 없으면 null('성공 없음' 이 아니라 '포탈 기록에 없음').
  */
-/** v2.864 복원 명령의 기본 키 값(사이트 매핑 — vCenter 주소 · FD INI 경로). 매핑이 없으면 빈 값(restoreBaseKv 가 거부한다). */
+/** v2.866 복원 명령의 기본 키 값(사이트 매핑 — vCenter 주소 · FD INI 경로). 매핑이 없으면 빈 값(restoreBaseKv 가 거부한다). */
 export const restoreBaseOf = (settings) => (job) => {
   const site = (settings?.sites || []).find((x) => String(x.vcenterId) === String(job?.vcenterId));
   return { vcserver: site?.vcserver || '', configFile: site?.configFile || '' };
@@ -159,7 +159,7 @@ export function lastOkOf(lastRun, finishedRuns) {
 }
 
 /**
- * v2.864 복원 › 폴더 표 — 백업 대상이 있는 vCenter 의 폴더마다 VM 수(인벤토리 · 템플릿 제외). 폴더 칸의 '대상 / 전체' 막대에 쓴다.
+ * v2.866 복원 › 폴더 표 — 백업 대상이 있는 vCenter 의 폴더마다 VM 수(인벤토리 · 템플릿 제외). 폴더 칸의 '대상 / 전체' 막대에 쓴다.
  *   조회 범위 안 vCenter 만(요청 필터보다 먼저) · 대상이 없는 vCenter 는 싣지 않는다 · Director 에 닿지 않는다.
  *   화면은 폴더 표를 열 때 한 번 읽는다(폴링하지 않는다). 상시 폴링 라우트가 아니어도 같은 열쇠 규칙(scopeKey)으로 기억한다.
  */
@@ -464,7 +464,7 @@ function bareosListView(req) {
     } catch { return null; }
   };
   // C-5: 끝난 실행 원문(finishedRuns — 실패 메일·RPO 용 · 최근 10건)은 화면이 쓰지 않는다(웹 grep 0건) — 싣지 않는다. 복원 이력(restores)은 '실행 현황 · 이력' 탭이 쓴다.
-  // v2.864: finishedRuns 원문은 싣지 않고 마지막 성공(lastOk — 복원 › 폴더 표)만 계산해 싣는다
+  // v2.866: finishedRuns 원문은 싣지 않고 마지막 성공(lastOk — 복원 › 폴더 표)만 계산해 싣는다
   const views = jobs.map(({ finishedRuns, ...j }) => ({ ...viewJob(j, vmById, settings), lastOk: lastOkOf(j.lastRun, finishedRuns), writable: bareosAccess(req.user, j.vcenterId) === 0, policy: policyOf(j) }));
   let settingsWritable = false;
   try { settingsWritable = !scopedVcenterIds(req.user, store.get()) && !writeScopedVcenterIds(req.user, store.get()); } catch { settingsWritable = false; }
@@ -1110,7 +1110,7 @@ const idsOf = (v) => [...new Set((Array.isArray(v) ? v : []).map((x) => String(x
  * 묶음 복원 지점 — body { ids:[원장 job id] } (1~50). 조회(범위 밖 항목은 '찾을 수 없음' — 존재를 흘리지 않는다).
  *   Director 마다 세션 하나(ops.restorePoints — 잡마다 list jobs 한 번 · 지점마다 체인 길이). 법인이 여럿이면 Director 끼리는 나란히.
  */
-// v2.864 폴더별 VM 수 — restoreFolderCounts(모듈 위쪽) · 폴더 표를 열 때 한 번 읽는다(폴링 없음 · 조회 범위 안 vCenter 만)
+// v2.866 폴더별 VM 수 — restoreFolderCounts(모듈 위쪽) · 폴더 표를 열 때 한 번 읽는다(폴링 없음 · 조회 범위 안 vCenter 만)
 api.get('/tools/bareos-backup/restore-folders', adminOnly, (req, res) => memoJson(req, res, 'bareos-restore-folders', (snap) => {
   const { jobs } = scopedJobs(req.user);
   const allowed = scopedVcenterIds(req.user, snap);

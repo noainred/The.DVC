@@ -12,7 +12,7 @@ import { STable } from '../../components/STable.jsx';
 import Select from '../../components/Select.jsx';
 import { requireChanged } from '../changeResult.js';
 import BareosRehearsal from './BareosRehearsal.jsx';
-import BareosRestoreTable from './BareosRestoreTable.jsx';   // v2.864 폴더 표(시안 ① 일반 복원)
+import BareosRestoreTable from './BareosRestoreTable.jsx';   // v2.866 폴더 표(시안 ① 일반 복원)
 import { RESTORE_VIEWS, loadRestoreView, saveRestoreView } from './bareosRestoreTree.js';
 import { Note, ReadGuide, FilterChip } from './BareosBits.jsx';
 import { stateBadge, withRelayWait, outcomeUnknown, unknownOutcomeText, driftText, levelLabel } from './bareosText.js';
@@ -135,7 +135,7 @@ export default function BareosRestore({ d, reload, preselect = '', onPreselectUs
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12, minWidth: 0 }}>
       {done && <Note tone={done.ok ? 'ok' : 'bad'}>{done.text}</Note>}
-      {/* v2.864 고르는 방식 — 간단 목록(지금 방식 그대로) · 폴더 표(vCenter › 폴더 › VM 트리 표). 다음 단계는 둘 다 같은 마법사다 */}
+      {/* v2.866 고르는 방식 — 간단 목록(지금 방식 그대로) · 폴더 표(vCenter › 폴더 › VM 트리 표). 다음 단계는 둘 다 같은 마법사다 */}
       <div style={ROW}>
         <span className="muted" style={{ fontSize: 12 }}>고르는 방식</span>
         <div role="group" aria-label="고르는 방식" className="flex gap wrap" style={{ rowGap: 6 }}>

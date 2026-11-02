@@ -21,7 +21,7 @@
 - (원래 3525행) 3단 지도(v2.588) — 장비 → 엣지 → 메인. 새 판정을 만들지 않고 두 지도의 조립기를 묶는다
 - (원래 3550행) 법인 간 전송 속도(v2.735) — 측정은 중앙만 하고, 엣지는 같은 수집 URL·토큰의 상대일 뿐이다
 - (원래 3622행) v2.737 — 업그레이드·재시작으로 끊긴 스캔은 '실행 중 스캔 기록' 으로 자동 재개한다. 기록 판정은 `util/scanJournal.js` 하나
-- (v2.859 추가) 엣지 자동 업그레이드 — 중앙이 업그레이드되면 등록된 엣지를 **모두** 같은 버전으로. 판정은 `upgrade/edgeSync.js planEdgeSync` 하나
+- (v2.859 추가) 엣지 자동 업그레이드 — 중앙이 업그레이드되면 등록된 엣지를 **모두** 같은 버전으로. 판정은 `upgrade/edgeSync.js planEdgeSync` 하나(v2.865: 기록 보존 · 옛 방식 엣지 · 지금 동기화 · 반복 실패 알림)
 - (원래 4692행) 등록 폼의 '담당 엣지'·'DataCenter' 는 자유 입력이 아니라 기존 목록에서 고른다 — 서버도 같은 규칙을 집행한다
 - (원래 4860행) 아키텍처 점검(v2.614) — 포탈 점검 3번째 서브메뉴. 운영 포탈이 자기 라우터 스택·카탈로그·표·파일을 스스로 판정한다
 - (v2.793) VM 백업 센터 법인 위임 — 엣지 위임 vCenter 의 백업은 담당 엣지가 실행한다. 중앙은 정의·화면·이력만
@@ -656,6 +656,18 @@
     동기화 기록은 메모리뿐이다(재시작 전 기록은 지어내지 않는다 — 화면이 '기동 2분 뒤 첫 실행' 이라 말한다). 엣지별 push 결과는 수집 서버 상태 `upgrade` 에 남는다.
   · ⚠ 정직 기록: `UPGRADE_EDGES`(upgrade.json edges — `/api/upgrade/bundle` 로 받는 옛 방식)는 버전을 보고하지 않아 동기화 대상이 아니다(적용 직후 1회 push 만 — 예전과 같다).
     실제 WAN 엣지로는 확인하지 못했다(가짜 수집 서버 + 실제 서명 번들로 push 경로를 돌렸다).
+  · **v2.865 후속(사용자 선택 A·B·C·D — '프로그램 개선', 회귀 `server/test/edgeAutoUpgrade2865.test.js`)**:
+    A. 동기화 기록은 `upgrade-status.json` 의 `lastEdgeSync` 로 남는다(`autoState.sanitizeEdgeSync` 쓰기·읽기 공용 · runner `onRun` 훅 → manager `#save`) — 재시작 뒤
+       `restored:true` 로 되살리고 모르는 결과 코드는 'error' 로 읽는다(화면 '재시작 전 기록'). 되살림 표지는 파일에 쓰지 않는다.
+    B. **옛 방식 엣지(`edges`·`UPGRADE_EDGES`)도 동기화 대상** — 버전은 공개 `/api/health` 의 version 을 동기화 때마다 직접 묻는다(`probeEdgeVersion` — 토큰 없이·10초·
+       리다이렉트 안 따라감). 행 id 는 `edge:<origin>`(같은 origin 은 하나 — 경로가 달라도 같은 엣지다) · kind 'edge' · SSRF 차단 대역·스킴 아님은 `legacyDropped` 로 **말하고** 뺀다.
+       push 는 `pushBundleToEdge`(번들 **파일**) — 그래서 `resolveBundleBytes` 가 `path` 를 돌려주고 원격에서 받은 것은 보관본 경로를 쓴다(파일이 없으면 그 엣지만 사유와 함께 실패,
+       수집 서버는 그대로 민다). `pushBundleToEdge` 도 `upToDate` 를 전한다. 웹 `EDGE_KIND_TEXT` ↔ 서버 `EDGE_SYNC_KINDS` 1:1.
+    C. `POST /api/upgrade/edge-sync`(관리자·전체 범위 · 꺼져 있으면 409 · 감사 로그)가 같은 `run()` 을 부른다(단일 진행 — 주기 실행과 겹치면 같은 약속). 업그레이드 화면 '지금 동기화' ·
+       수집 서버 화면 '구버전 엣지 밀어 넣기'(한 줄 상태는 `GET /admin/collectors` 의 `edgeSync`). ⚠ 수집 서버 화면의 기존 '지금 동기화' 는 pull 이다 — 이름을 겹치지 않게 했다.
+    D. 같은 엣지가 같은 대상 버전으로 **백오프 상한(6시간)에 닿을 만큼 연속 실패**(10분 주기면 7번째)하면 `alerts.js notify` 로 한 번 알리고(key `edgesync:<id>|<버전>`), 그 뒤
+       성공하면 `:close` 로 해소를 한 번 알린다(`edgeSyncAlert` 순수 — 백틱·별표 없음). 알린 사실은 메모리뿐 — 재시작하면 연속 실패 수가 0 부터라 같은 장애를 한 번 더 알릴 수 있다(정직 기록).
+       알림 발송이 던져도 동기화는 계속된다.
 - **등록 폼의 '담당 엣지'·'DataCenter' 는 자유 입력이 아니라 기존 목록에서 고른다 — 서버도 같은 규칙을 집행한다**
   (`cvp/formChoices.js pickAgent`·`pickDatacenter` + 웹 `cvpText.choiceOptions`, v2.609 — 사용자 요청 "엣지 이름과 데이터 센터를
   콤보박스로 … 오타/대소문자 방지"):

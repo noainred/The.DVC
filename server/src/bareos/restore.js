@@ -60,7 +60,7 @@ export function placementAt(job, jobid) {
  *   백업 때와 달라도 덮어쓴다 · vSAN 에서 필요). 새 VM 은 디스크를 백업에서 새로 만들어 해당 없다. 옛 Director 는 모르는 옵션으로 거부한다(추정).
  */
 /**
- * v2.864(실환경 — 복원 잡 'python3-fd-mod: Option vcuser not defined'): 백업 잡의 플러그인 옵션은 잡 수준 FdPluginOptions 라 복원 때 FD 로 다시 오지 않는다.
+ * v2.866(실환경 — 복원 잡 'python3-fd-mod: Option vcuser not defined'): 백업 잡의 플러그인 옵션은 잡 수준 FdPluginOptions 라 복원 때 FD 로 다시 오지 않는다.
  *   그래서 복원 명령에 백업과 같은 기본 키(vcserver · dc · folder · vmname · config_file)를 싣는다 — 값은 **그 복원 지점의 백업 때 위치**(placementAt)와
  *   사이트 매핑(vCenter 주소 · FD 의 INI 경로). 자격증명 값은 싣지 않는다(INI 가 갖는다). 매핑이 덜 됐으면 복원하지 않는다(그대로 보내면 FD 에서 실패한다).
  * @param {{ vcserver?: string, configFile?: string }|null} base  null 이면 기본 키 없음(옛 호출 · 순수 판정 시험용 — 실제 라우트는 늘 넘긴다)
@@ -224,7 +224,7 @@ export function bulkRestorePlan({ items, jobOf, dirOf, snapshot, pluginName = 'p
     if (!Number.isInteger(jobid) || jobid <= 0) { out.push({ ...row, ok: false, issue: '복원 지점(jobid)을 고르세요.' }); continue; }
     const nic = it.mode === 'localVmdk' ? null : (it.nic === undefined || it.nic === null || it.nic === '') ? (it.mode === 'newVm' ? 'disconnect' : 'keep') : it.nic;
     if (nic !== null && !NIC_MODES.includes(nic)) { out.push({ ...row, ok: false, issue: '네트워크 어댑터 처리 값이 올바르지 않습니다.' }); continue; }
-    const plan = restorePlan({ mode: it.mode, job, snapshot, newVm: it.newVm, confirmName: it.confirmName, pluginName, jobid, allowDisksMismatch: it.allowDisksMismatch === true, base: baseOf ? baseOf(job) : null });   // v2.864 기본 키(vcserver · config_file …)
+    const plan = restorePlan({ mode: it.mode, job, snapshot, newVm: it.newVm, confirmName: it.confirmName, pluginName, jobid, allowDisksMismatch: it.allowDisksMismatch === true, base: baseOf ? baseOf(job) : null });   // v2.866 기본 키(vcserver · config_file …)
     if (!plan.ok) { out.push({ ...row, ok: false, issue: plan.issue }); continue; }
     if (it.mode === 'newVm') {
       const k = String(plan.target.name).toLowerCase();

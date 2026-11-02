@@ -97,7 +97,7 @@ export function backupPluginOptions(p = {}) {
  */
 export function restorePluginOptions(kv = {}, plugin = 'python3') {
   if (!PLUGIN_NAME_RE.test(plugin)) return { issue: '플러그인 이름이 올바르지 않습니다.' };
-  // v2.864(실환경 'Option vcuser not defined' — 복원 실패): vcserver · config_file 도 받는다. 백업 잡의 플러그인 옵션(잡 수준 FdPluginOptions)은
+  // v2.866(실환경 'Option vcuser not defined' — 복원 실패): vcserver · config_file 도 받는다. 백업 잡의 플러그인 옵션(잡 수준 FdPluginOptions)은
   //   복원 때 FD 로 다시 오지 않아, 복원 명령이 vCenter 주소 · 자격증명 INI 를 직접 실어야 한다(restore.js restoreBaseKv). 자격증명 값 자체는 여전히 받지 않는다.
   const ALLOWED = new Set(['vcserver', 'config_file', 'restore_powerstate', 'vmname', 'restore_datastore', 'restore_esxhost', 'restore_cluster', 'restore_resourcepool', 'localvmdk', 'folder', 'dc', 'restore_allow_disks_mismatch']);   // v2.861 디스크 불일치 허용(Bareos 23.1+ · PR #1876)
   const parts = [];

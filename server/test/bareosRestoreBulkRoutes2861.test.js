@@ -267,7 +267,7 @@ test('⑤ v2.862 복원 검증 · 일일 요약 — 전체 범위 · OTP · 입�
   assert.deepEqual([r.s, r.j.config.time], [200, '08:31']);
 });
 
-test('⑥ v2.864 복원 › 폴더 표 — 목록에 전원 · 용량 · 마지막 성공 · 폴더 VM 수는 조회 범위 안 vCenter 만', async () => {
+test('⑥ v2.866 복원 › 폴더 표 — 목록에 전원 · 용량 · 마지막 성공 · 폴더 VM 수는 조회 범위 안 vCenter 만', async () => {
   const { lastOkOf, restoreFolderCounts } = await import('../src/routes/api/bareosBackup.js');
   // 마지막 성공: 성공 · 경고만 · 가장 늦은 끝(없으면 시작) · 없으면 null(포탈 기록에 없음)
   assert.deepEqual(lastOkOf({ jobid: 5, state: 'error', level: 'I', endedAt: 900 }, [{ jobid: 3, state: 'ok', level: 'F', endedAt: 500 }, { jobid: 4, state: 'warning', level: 'I', startedAt: 700 }]), { at: 700, level: 'I', jobid: 4 });

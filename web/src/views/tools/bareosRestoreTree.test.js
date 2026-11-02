@@ -4,7 +4,7 @@ import * as T from './bareosRestoreTree.js';
 const J = (id, vmName, folder, o = {}) => ({ id, vmName, folder, dc: 'NJ-DC', vcenterId: 'vc-nj', directorId: 'D1', writable: true, restores: [], storageGB: 100, powerState: 'POWERED_ON', lastRun: { state: 'ok', level: 'I' }, lastOk: { at: Date.parse('2026-11-03T04:00:00') }, ...o });
 const F = (folder, vms, o = {}) => ({ vcenterId: 'vc-nj', dc: 'NJ-DC', folder, vms, ...o });
 
-describe('v2.864 복원 › 폴더 표', () => {
+describe('v2.866 복원 › 폴더 표', () => {
   const jobs = [
     J('a', 'ADMCON01', '/A.MGMT/Admin_Console'),
     J('b', 'GLUE01', '/B.Service/GLUE', { storageGB: null }),
