@@ -171,7 +171,9 @@ test('③ 연결 시험: 저장 비밀번호로 시험하면 요청의 주소를
   const st = Object.fromEntries(r.j.stages.map((x) => [x.key, x]));
   assert.equal(st.address.ok, true); assert.equal(st.tcp.ok, false); assert.ok(st.tcp.hint); assert.equal(st.tls.skipped, true);
   const good = await call('admin', 'POST', `/settings/directors/${DIR}/test`, {});
-  assert.deepEqual(good.j.stages.map((x) => x.ok ?? 'skip'), [true, 'skip', true, true, true, true, true, true]);   // v2.848: 마지막 = 잡 만들기 권한(configure)
+  // v2.848: 잡 만들기 권한(configure) · v2.849: 포탈 리소스 — 이 가짜 Director 에는 포탈 리소스가 없어 마지막 줄만 실패(연결은 성공 200)
+  assert.deepEqual(good.j.stages.map((x) => x.ok ?? 'skip'), [true, 'skip', true, true, true, true, true, true, false]);
+  assert.equal(good.j.resources.ok, false);
   // v2.822(B4) 감사 대상은 실제 접속한 주소 — 저장 비밀번호 시험은 요청 주소를 무시한다
   const { listAudit } = await import('../src/audit.js');
   const last = listAudit({ limit: 20, q: 'Bareos 연결 시험' }).items[0];

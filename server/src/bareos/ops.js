@@ -52,7 +52,7 @@ export const LIVE_CLIENTS_MAX = 20;
 
 export const OPS = Object.freeze({
   /** 접속 확인(배너·버전·클라이언트). */
-  probe: (s) => probe(s),
+  probe: (s, a = {}) => probe(s, { expect: a && typeof a.expect === 'object' ? a.expect : null }),   // v2.849 expect: 공통 기본값 이름(포탈 리소스 점검)
   /** 매핑 드롭다운 원천(.clients·.storages·.pools·.schedule·.jobdefs·.filesets). */
   catalog: (s) => catalogLists(s),
 

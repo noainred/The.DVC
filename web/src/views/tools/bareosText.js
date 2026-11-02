@@ -435,6 +435,18 @@ export function configurePermNote(c) {
   return '';
 }
 
+/**
+ * v2.849 연결 시험 결과의 포탈 리소스(JobDefs · FileSet · 복원 잡) 한 줄 — 서버 configurePerm.portalResources(ok true · false · null).
+ * 없으면 등록이 'Could not find config resource' 로 실패한다(사용자 화면). 못 받았으면(옛 엣지 · 데모) 빈 문자열.
+ */
+export function resourcesNote(r) {
+  if (!r || typeof r !== 'object') return '';
+  const names = (xs) => (Array.isArray(xs) ? xs : []).map((x) => `${x.label} ‘${x.name}’`).join(' · ');
+  if (r.ok === false) return `**포탈 리소스가 Director 에 없습니다(${names(r.missing)})** — 이대로는 백업 대상을 등록할 수 없습니다. 설정 › 기본 설정의 자동 설정 2단계를 실행하거나, 사전 준비 블록의 FileSet · JobDefs · 복원 잡을 Director 에 넣고 reload 하세요(다른 이름을 쓰려면 공통 기본값을 바꾸세요).`;
+  if (r.ok === null && (r.unknown || []).length) return `포탈 리소스를 다 확인하지 못했습니다(${names(r.unknown)}) — 등록이 실패하면 Director 에 그 이름이 있는지 확인하세요.`;
+  return '';
+}
+
 /* ───────── 자동 설정(v2.821 — 서버 bareos/autoSetup.js) ───────── */
 const FILE_ACTION_LABEL = Object.freeze({ created: '새로 만듦', updated: '덮어씀(포탈 파일)', unchanged: '그대로' });
 

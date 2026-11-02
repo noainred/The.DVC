@@ -1,6 +1,16 @@
 {
   "notes": [
     {
+      "version": "2.849.0",
+      "date": "2026-11-02",
+      "title": "Bareos 백업 등록 실패('Could not find config resource') 안내 · 포탈 리소스 점검 · 완전 설치 대상의 엣지 응답 판정",
+      "notes": [
+        "configure 를 허용한 뒤에도 등록이 'Could not find config resource \"PortalVmwareDefaults\" … JobDefs' 로 실패하면, 포탈 리소스(JobDefs · FileSet · 복원 잡)가 그 Director 에 없다는 원인과 해결 방법(자동 설정 2단계 · 사전 준비 블록 · 공통 기본값)을 함께 보여 줍니다. 매핑 값(Client · Storage · Pool)이 없을 때는 매핑을 고치라고 안내합니다.",
+        "설정 › 기본 설정의 연결 시험에 '포탈 리소스(JobDefs · FileSet · 복원 잡)' 단계를 더했습니다 — 등록하기 전에 미리 알 수 있습니다(목록 조회만 하고 아무것도 바꾸지 않습니다 · 엣지 대행 Director 도 같은 판정).",
+        "설정 › 완전 설치의 대상 표가 살아 있는 엣지도 '엣지 응답 없음(마지막 수신 수만 분 전)' 으로 막던 것을 고쳤습니다 — vCenter 를 중앙이 직접 수집하면 엣지가 인벤토리를 올리지 않아 오래전 시각이 남았습니다. 이제 그 엣지가 중앙에 보낸 마지막 인증된 요청 시각도 함께 봅니다(포탈 재시작 직후 몇 분은 엣지가 다시 접속할 때까지 예전처럼 보일 수 있습니다)."
+      ]
+    },
+    {
       "version": "2.848.0",
       "date": "2026-11-02",
       "title": "Bareos 백업 등록 실패('configure: is an invalid command') — 원인 · 조치 안내와 연결 진단의 잡 만들기 권한 단계",

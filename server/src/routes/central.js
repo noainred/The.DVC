@@ -95,6 +95,7 @@ import { numOrNull } from '../util/numOrNull.js';
 import { canonicalAgent } from '../util/agentKey.js';   // v2.611 CEN2611-02 — CVP 수신 저장 키 대소문자 정규화   // v2.600 CEN2600-01·RECENT2600-01 — 엣지가 보낸 수치 좁히기
 import { createChangeLogger } from '../util/logThrottle.js'; // v2.583: 반복 수신 로그 조절
 import { capStr, capTrim } from '../util/capStr.js'; // v2.606 TIM2606-02: 상주 기록 글자 평탄화
+import { noteAgentContact } from '../central/agentContact.js'; // v2.849 — 엣지 마지막 인증 요청 시각(완전 설치 대상의 '엣지 응답')
 const gpuRecvLog = createChangeLogger();
 export const centralRouter = Router();
 let _getPaths = null;
@@ -326,6 +327,8 @@ centralRouter.use((req, res, next) => {
     sharedStats.uses++; sharedStats.lastAt = Date.now();
     sharedStats.lastAgent = want || registerName(req) || '(unknown)'; sharedStats.lastPath = req.path;
   }
+  // v2.849: 엣지 생존 신호 — 개별 토큰은 그 이름, 공유 토큰은 중앙이 이미 아는 이름일 때만(지어낸 이름으로 표를 채우지 못하게)
+  try { noteAgentContact(auth.mode === 'agent' ? String(auth.agent || '') : (want && edgeNameKnown(want, _contactKnownNames) ? want : '')); } catch { /* 기록 실패는 요청을 막지 않는다 */ }
   next();
 });
 
@@ -497,7 +500,7 @@ centralRouter.post('/register-collector', requireCentral({ notFound: { ok: false
   if (!r.ok && r.code === 'insecure-http') console.warn(`[central] 엣지 자기등록 거부(평문 HTTP): ${name} → ${url} — ${r.reason}`);
   if (!r.ok && r.code === 'registry-unreadable') return registryUnreadable(res, () => collectorsRegistryLoadError() || { at: r.registryUnreadable?.at ?? Date.now(), reason: '' }, '수집 서버'); // 검사 뒤(검증 ping 동안) 손상된 경합
   if (!r.ok && r.capped) { console.warn(`[central] 엣지 자기등록 상한: ${name} — ${r.reason}`); return res.status(429).json({ ok: false, reason: r.reason, capped: true }); }
-  if (r.ok) _knownNames = { at: 0, set: null }; // 등록부가 바뀌었다 — '아는 엣지' 캐시를 버린다
+  if (r.ok) { _knownNames = { at: 0, set: null }; _contactKnownNames.at = 0; _contactKnownNames.set = null; } // 등록부가 바뀌었다 — '아는 엣지' 캐시를 버린다(v2.849 생존 기록용도)
   if (r.ok) console.log(`[central] 엣지 자기등록: ${name} → ${url}${regVer ? ` (v${regVer})` : ''}${unverified ? ` ⚠ 미검증: ${unverified}` : ''}`);
   if (r.ok && (unverified || regVer)) {
     // v2.548: 자기등록이 보낸 버전을 상태에 심어 둔다 — pull 이 한 번도 성공하지 못한 엣지(OC2SDBX 사례)는
@@ -1231,9 +1234,15 @@ centralRouter.post('/fleet', requireCentral(), (req, res) => {
  * ⚠ knownAgentNames() 를 쓰지 않는다 — 그 합집합은 스캔 결과·설정 pull 처럼 **공유 토큰이 이름을 만들어 넣을 수 있는 소스**를 포함한다.
  */
 let _knownNames = { at: 0, set: null };
-function edgeNameKnown(name) {
+/**
+ * v2.849 정정(회귀 — audit2601c CEN2601-02): 인증 미들웨어의 엣지 생존 기록(noteAgentContact)은 **이 캐시를 쓰지 않는다**. 같은 캐시를 쓰면
+ *   미들웨어가 요청 처리 **전에** 캐시를 채워, 그 요청(인벤토리 push)으로 새로 '아는 이름' 이 된 엣지가 5초 동안 /fleet 에서 미검증으로 판정됐다.
+ */
+const _contactKnownNames = { at: 0, set: null };
+function edgeNameKnown(name, holder = null) {
   const now = Date.now();
-  if (!_knownNames.set || now - _knownNames.at > 5_000) {
+  const c = holder || _knownNames;
+  if (!c.set || now - c.at > 5_000) {
     const set = new Set();
     const add = (v) => { if (typeof v === 'string' && v.trim()) set.add(v.trim().toLowerCase()); };
     try { for (const t of listAgentTokens()) add(t.agent); } catch { /* 소스 미초기화 */ }
@@ -1248,9 +1257,9 @@ function edgeNameKnown(name) {
     } catch { /* */ }
     try { for (const x of listInventory()) add(x.agent); } catch { /* */ }
     try { for (const x of listScanAssignments()) add(x.agent); } catch { /* */ }
-    _knownNames = { at: now, set };
+    c.at = now; c.set = set;
   }
-  return _knownNames.set.has(String(name || '').trim().toLowerCase());
+  return c.set.has(String(name || '').trim().toLowerCase());
 }
 
 /** v2.605(RECENT2605-02): 수집 서버 등록부에 있는 이름인가(자기등록 미검증 포함) — edge-log-result 의 acked 회신 전용. */
