@@ -1,6 +1,6 @@
 # 설정·데이터 파일 레퍼런스 (자동 생성)
 
-포탈이 `CONFIG_DIR`(설치본 기본 `/etc/vmware-portal`) 아래에 만드는 파일 **248개**의 목록이다.
+포탈이 `CONFIG_DIR`(설치본 기본 `/etc/vmware-portal`) 아래에 만드는 파일 **252개**의 목록이다.
 시계열 DB 는 `db-location.json` 이 가리키는 `dbDir` 로 옮길 수 있다.
 
 - 생성: `node scripts/config-doc.mjs` (마지막 갱신 2026-11-02)
@@ -38,12 +38,16 @@
 | `backups` | 디렉터리 | 포탈 백업 코어 — 중앙 포탈의 모든 설정(CONFIG_DIR의 *.json / *.env)과, 엣지 포탈(에이전트)이 | ✅ | ✅ | ✅ | backup/service.js, backup/stagedRestore.js |
 | `bareos-auth-stops.json` | 설정 | 인증 실패(자격증명 거부) 주기 수집 정지 기록 — util/authGuard.js | ✅ |  | ✅ | bareos/service.js |
 | `bareos-bundle-source.json` | 설정 | Bareos 완전 설치 번들의 **받는 주소 · 서버 디렉터리** 설정(v2.850 · 사용자 요청 | ✅ | ✅ | ✅ | bareos/install/bundleSource.js |
+| `bareos-digest-state.json` | 설정 | Bareos 일일 요약 메일 마지막 발송(상태, v2.862) | ✅ | ✅ | ✅ | bareos/digest.js |
+| `bareos-digest.json` | 설정 | Bareos 일일 요약 메일 설정(v2.862 — 켜기 · 시각. 비밀 없음) | ✅ | ✅ | ✅ | bareos/digest.js |
 | `bareos-edge-directors.json` | 설정 | **엣지 쪽** 법인 Director 사본(v2.824 엣지 대행). 파일: CONFIG_DIR/bareos-edge-directors.json (0600 · 원자적 쓰기 · 비밀 봉인). | ✅ | ✅ | ✅ | bareos/edgeStore.js |
 | `bareos-groups.json` | 설정 | Bareos 백업 그룹 원장(v2.830 · 사용자 요청 'VM 을 골라 그룹으로 — 이름·스케줄·스토리지 지정, 나중에 수정'). | ✅ | ✅ | ✅ | bareos/groups.js |
 | `bareos-install-jobs.json` | 설정 | Bareos 완전 설치 작업(v2.844): 시작 · 진행 읽기 · 4~7단계 · 다시 시도 · 중단 · 전부 되돌리기. | ✅ | ✅ | ✅ | bareos/install/job.js |
 | `bareos-jobs.json` | 설정 | 포탈의 Bareos 백업 대상 원장(v2.820). 파일: CONFIG_DIR/bareos-jobs.json (자격증명 없음 · 원자적 쓰기 · 손상 보존). | ✅ | ✅ | ✅ | bareos/registry.js |
 | `bareos-mail-state.json` | 설정 | Bareos 백업 실패 알림 메일(v2.822, 메일 종류 'bareos-backup'). | ✅ | ✅ | ✅ | bareos/notify.js |
 | `bareos-policy.json` | 설정 | Director 정책 수집(v2.839 백업 메뉴 개편 2차-a · 사용자 결정 '실제 출력 먼저 · show 추가 + 선택 명령 · 표준 검증'). | ✅ | ✅ | ✅ | bareos/policy.js |
+| `bareos-rehearsal-state.json` | 설정 | Bareos 복원 검증 회차 · 마지막 검증 시각 · 최근 회차 20건(상태, v2.862) | ✅ | ✅ | ✅ | bareos/rehearsal.js |
+| `bareos-rehearsal.json` | 설정 | Bareos 복원 검증(리허설) 정책(v2.862 — 켜기 · 요일 · 시각 · 법인마다 대수 · 성공한 검증용 VM 지우기 · 법인별 데이터스토어. 비밀 없음) | ✅ | ✅ | ✅ | bareos/rehearsal.js |
 | `bareos.json` | 설정 | Bareos 연동 설정(v2.820 · v2.823 법인별 Director). 파일: CONFIG_DIR/bareos.json (0600 · 원자적 쓰기 · 비밀 봉인). | ✅ | ✅ | ✅ | bareos/settings.js |
 | `bm-storage.json` | 설정 | 베어메탈 스토리지 서버 목록 + 설정(v2.340). | ✅ | ✅ | ✅ | bmstor/registry.js |
 | `bm-usage.db` | DB | 베어메탈 사용률 DB(v2.550). 파일: `<dbDir>/bm-usage.db` |  | ✅ | ✅ | bmusage/db.js, bmusage/poller.js |
@@ -283,6 +287,10 @@
 - **`scan-journal.json`** — 상태 파일(백업 감시 제외). 아이실론 du·iDRAC 대역·IP 스캔이 시작할 때 적고 끝나면 지운다 — 업그레이드·재시작으로 남은 항목은 다음 기동 2분 뒤(SCAN_RESUME_DELAY_MS) 자동으로 다시 시작한다(사슬마다 최대 2번). 비밀은 적지 않는다(대상 id·대역 id·원격 작업 id). 지우면 끊긴 스캔이 다음 주기까지 다시 돌지 않을 뿐 다른 영향은 없다
 - **`upgrade-status.json`** — 상태 파일(백업 감시 제외). 서버 프로세스만 쓴다. 자동 업그레이드로 재시작한 뒤에도 업그레이드 화면이 '언제 무엇을 했는지' 를 보이기 위한 것 — 지우면 그 표시가 다음 확인까지 비고, 업그레이드 동작에는 영향이 없다
 - **`upgrade-kept-bundles.json`** — 상태 파일(백업 감시 제외). 중앙이 자기 업그레이드를 적용한 번들(+서명 manifest)을 패키지 폴더(packages)에 복사해 두고 그 이름을 적는다 — 엣지 자동 업그레이드(뒤처진 엣지에 다시 push)와 /dl(엣지 자체 확인)이 그 번들을 쓴다. 여기 적힌 파일만 UPGRADE_KEEP_BUNDLES(기본 3)개를 넘으면 오래된 것부터 지운다(관리자가 내려받은 패키지는 건드리지 않는다). 지우면 정리 대상에서 빠질 뿐 동작에는 영향이 없다
+- **`bareos-rehearsal.json`** — 기본은 꺼짐(검증은 VM 을 만들고 데이터스토어를 쓴다 — 전체 범위 관리자 + 본인 OTP 로 켠다). 손상이면 보존하고 검증 · 저장을 멈춘다. 지우면 꺼진 기본값
+- **`bareos-rehearsal-state.json`** — 상태 파일(백업 감시 제외). 회차는 보내기 전에 적는다(같은 날 다시 돌지 않게). 지우면 오늘 차례가 지난 법인이 한 번 더 돌 수 있고 돌아가며 고르는 순서가 처음부터 다시 시작한다
+- **`bareos-digest.json`** — 기본은 켬 08:30(사용자 결정). 손상이면 보존하고 발송 · 저장을 멈춘다. 지우면 기본값
+- **`bareos-digest-state.json`** — 상태 파일(백업 감시 제외). 지우면 오늘 정한 시각이 지났을 때 한 번 더 보낼 수 있다
 - **`upgrade-signature-log.json`** — 상태 파일(백업 감시 제외). 서버 프로세스만 쓴다(오프라인 확인 도구는 쓰지 않는다). 업그레이드 재시작 뒤에도 '마지막 검증' 을 보이기 위한 것 — 지우면 그 표시가 다음 검증까지 비고, 설치 판정에는 영향이 없다
 - **`session-state.json`** — 상태 파일(백업 감시 제외). 지우면 로그아웃·폐기한 토큰이 만료 전까지 다시 유효해질 수 있다
 - **`credentials.json`** — 봉인 저장. API 응답에 값이 실리지 않는다

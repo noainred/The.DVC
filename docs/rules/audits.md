@@ -6,6 +6,7 @@
 
 ## 목차
 
+- Bareos v2.862 복원 검증(리허설) · 일일 요약 메일 — 모듈 규칙(2026-11-03)
 - Bareos v2.861 묶음 복원 · 복원 뒤 NIC 끊기 — 모듈 규칙 · 반증 1인 확정분(server/src/bareos/CLAUDE.md 에서 옮김 — 2026-11-03)
 - Bareos v2.852.1 WebUI 계정 만들기 실패 'Failed to connect to Director' — 시험 bconsole 의 TLS 끔(2026-11-02)
 - Bareos v2.851.1 완전 설치 마무리 '사이트 매핑의 vcserver 주소가 올바르지 않습니다' — 매핑 주소를 vCenter 등록부에서(2026-11-02)
@@ -2605,3 +2606,16 @@ server/src/bareos/CLAUDE.md 크기 상한(15,000B)으로 원문 그대로 옮겼
   `restore_allow_disks_mismatch=yes` 는 덮어쓰기에서 `=== true` 일 때만(Bareos 23.1+ — 옛 Director 는 거부, 추정).
   반증 1인 반영(재현 4 · 판단 5): DS 여유 키는 **vCenter + 이름**(한 Director 에 vCenter 여럿) · 마무리 원장 쓰기는 `inBatch` 한 번 · 추적 놓친 복원은 failed(직접 확인) · 엣지 미인출 작업은 `reapOps` 로 시한 ·
   본문 상한을 항목 순회 전에 · 새 VM 이름은 최근 24시간 · 진행 중 복원 이름과도 겹치면 거부 · 원장 저장이 실패해도 응답(saveError) · 접근 · 진행 중 사유가 판정 사유보다 앞선다.
+
+## Bareos v2.862 복원 검증(리허설) · 일일 요약 메일 — 모듈 규칙(2026-11-03)
+
+**v2.862 복원 검증(리허설) · 일일 요약 메일**(사용자 결정 ⓔ · ⓕ — `bareosRehearsalDigest2862` · `bareosRestoreBulkRoutes2861` ⑤ · `vmCloneSafety2794` S7):
+  ① 검증 정책(`bareos/rehearsal.js` · `bareos-rehearsal.json`)은 **기본 꺼짐** — 켜기 · 지금 검증은 전체 범위 관리자(`fullScopeOnly`·`fullWriteOnly`) + 본인 OTP, 입력 확인은 OTP 앞에서(1회용 코드를 태우지 않게).
+     사용자 결정의 주기 · 대수(토요일 · 법인마다 3대 · 성공 지움 · 실패 남김)는 기본값으로만 채운다 — 검증은 VM 을 만들고 데이터스토어를 쓰므로 업그레이드만으로 돌기 시작하지 않는다.
+  ② 회차는 **보내기 전에** 기록(`st.weeks[dir] = day`) — 같은 날 다시 돌지 않는다. 고르기는 그 Director · 활성 · 마지막 백업 성공 · 진행 중 복원 없음 · 위치 바뀜 없음 · 가장 오래 검증 안 한 순서.
+     판정 · 보내기는 묶음 복원과 같은 `bulkRestorePlan` · `ops.restores`(검증용 이름 '원래-verify-YYYYMMDD' · 새 VM · 꺼진 채 · 최근 이름 예약). 막힌 VM 만 빼고 보낸다(자동 작업).
+  ③ 끝난 검증 복원은 vmclone `bareos-verify`(`vsOps.verifyRestoredVm`) — 이름 정확히 1대 · 꺼짐일 때만 · **NIC 끊기를 다시 읽어 확인한 뒤에만 켠다** · Tools 대기 · 늘 끈다 ·
+     성공이고 설정이면 `destroyClone(expectedName)`(이름 대조 · 켜져 있으면 안 지움) · 실패는 남긴다(조사용). 결과는 원장 `restores[].finish{ verify, toolsMs(모르면 없음), deleted }`.
+     엣지 회신에 `toolsMs`·`deleted` 를 받는다(dispatch `sanitizeReport` · `finishOp` 화이트리스트). 핑 · 앱 시험은 하지 않는다(네트워크를 끊었으니 — 정직 기록).
+  ④ 일일 요약(`bareos/digest.js` — 메일 종류 `bareos-digest` · 기본 켬 08:30)은 `veeam/staleAlert.js` 와 같은 틱(그날 한 번 · 실패 30분 뒤 · 3번 · 데모 · 엣지 제외 · 메일 꺼짐이면 계산 안 함).
+     **Director 조회가 실패 중인 법인은 '모름'**(성공 · 실패 수를 만들지 않고 합에도 넣지 않는다) · 원장과 폴러 상태만 읽는다(Director 에 닿지 않는다 · 폴러 상태는 기동 때 `setDigestPoller` — 순환 방지).

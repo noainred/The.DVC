@@ -27,7 +27,7 @@ import { fileStamp } from '../util/dayKey.js';
 import { demoHash } from '../mock/demo/flags.js';
 import {
   VimSoapClient, createSnapshot, removeSnapshot, parentFolderOf, cloneFromSnapshot, vmStateOf, disconnectAllNics,
-  powerOnVm, powerOffVm, waitToolsRunning, revertToSnapshot, attachNasToHost, detachNasFromHost, validateNfsDsSpec, vmCommittedBytes, nicDisconnectSpec, findVmsByName,
+  powerOnVm, powerOffVm, waitToolsRunning, revertToSnapshot, attachNasToHost, detachNasFromHost, validateNfsDsSpec, vmCommittedBytes, nicDisconnectSpec, findVmsByName, destroyClone,
 } from './vsphere.js';
 import {
   getJob, setVerifying, patchVerifying, clearVerifying, handOffVerifying, interruptedVerifyOf, patchClone, recordJobEvent,
@@ -345,6 +345,67 @@ export async function disconnectRestoredVm(vcenterId, name, { setPhase } = {}) {
     return fin(true, n ? `새 VM '${vmName}' 의 네트워크 카드 ${n}개 연결을 끊었습니다(켤 때도 연결하지 않음)` : `새 VM '${vmName}' 에 네트워크 카드가 없습니다`, { nics: n });
   } catch (e) {
     return fin(false, `'${vmName}' 네트워크 끊기 실패(${e?.message || e}) — 켜기 전에 vCenter 에서 직접 끊으세요`);
+  } finally { await c.logout().catch(() => {}); }
+}
+
+/**
+ * v2.862 Bareos 복원 검증(리허설 — 사용자 결정 ⓔ · 시안 ⑫): 검증용으로 복원한 새 VM 을 켜서 VMware Tools 가 응답하는지 본다.
+ *   흐름: 이름으로 찾기(정확히 1대 · 꺼짐) → **NIC 를 모두 끊고 다시 읽어 확인**(확인 못 하면 켜지 않는다 — 원본과 같은 IP · 호스트명으로 망에 붙지 않게)
+ *   → 켜기 → Tools 대기(VERIFY_TIMEOUT_MIN) → 끄기(늘 시도) → 성공이고 deleteOnOk 면 지우기(destroyClone — 이름 대조 · 켜져 있으면 지우지 않는다).
+ *   실패한 검증용 VM 은 지우지 않고 남긴다(조사용). 핑 · 앱 시험은 하지 않는다(네트워크를 끊었으니 — 정직 기록).
+ * @returns {Promise<{ok:boolean, detail:string, ms:number, toolsMs?:number|null, deleted?:boolean}>}
+ */
+export async function verifyRestoredVm(vcenterId, name, { deleteOnOk = true, setPhase } = {}) {
+  const t0 = Date.now();
+  const ph = phaseRecorder(setPhase);
+  const fin = (ok, detail, extra = {}) => ({ ok, detail, ms: Date.now() - t0, phases: ph.end(ok), ...extra });
+  const vmName = String(name || '').trim();
+  if (!vmName) return fin(false, '검증할 VM 이름이 없습니다');
+  if (getDataSource() === 'mock') {
+    ph.step('VM 찾기'); await sleep(200);
+    ph.step('네트워크 끊기'); await sleep(200);
+    ph.step('전원 켜기 · Tools 대기'); await sleep(800);
+    const bad = demoHash(`bareos-verify|${vmName}`) % 5 === 0;
+    ph.step('끄기'); await sleep(200);
+    if (bad) return fin(false, `VMware Tools 가 ${VERIFY_TIMEOUT_MIN}분 안에 응답하지 않았습니다(데모) — 검증용 VM '${vmName}' 을 남겼습니다(조사용)`, { toolsMs: null, deleted: false });
+    const toolsMs = (20 + (demoHash(vmName) % 60)) * 1000;
+    if (deleteOnOk) { ph.step('검증용 VM 지우기'); await sleep(200); }
+    return fin(true, `부팅 확인 — VMware Tools 응답 ${Math.round(toolsMs / 1000)}초(데모)${deleteOnOk ? ' · 검증용 VM 을 지웠습니다' : ''}`, { toolsMs, deleted: !!deleteOnOk });
+  }
+  let vc;
+  try { vc = vcOf(vcenterId); } catch (e) { return fin(false, e.message); }
+  const c = new VimSoapClient(vc);
+  ph.step('로그인');
+  await onDemandLogin(c, vc);
+  let ref = null; let powered = false;
+  try {
+    ph.step('VM 찾기');
+    const refs = await findVmsByName(c, vmName);
+    if (refs.length !== 1) return fin(false, refs.length ? `vCenter 에 '${vmName}' 이 ${refs.length}대 있어 어느 것인지 정할 수 없습니다 — 손대지 않았습니다` : `vCenter 에서 '${vmName}' 을 찾지 못했습니다`);
+    ref = refs[0];
+    const st = await vmStateOf(c, ref);
+    if (st.powerState !== 'poweredOff') return fin(false, `'${vmName}' 이 이미 켜져 있어(${st.powerState}) 검증하지 않았습니다 — 누군가 쓰는 중일 수 있습니다`);
+    ph.step('네트워크 끊기');
+    await disconnectAllNics(c, ref);   // 확인 못 하면 throw — 아래 켜기에 닿지 않는다
+    ph.step('전원 켜기');
+    powered = true;
+    await powerOnVm(c, ref);
+    ph.step('Tools 대기');
+    const toolsMs = await waitToolsRunning(c, ref, { timeoutMs: VERIFY_TIMEOUT_MIN * 60_000 });
+    ph.step('끄기');
+    await powerOffVm(c, ref);
+    powered = false;
+    if (toolsMs === null) return fin(false, `VMware Tools 가 ${VERIFY_TIMEOUT_MIN}분 안에 응답하지 않았습니다 — 검증용 VM '${vmName}' 을 남겼습니다(조사용 · 꺼 둠)`, { toolsMs: null, deleted: false });
+    let deleted = false; let delNote = '';
+    if (deleteOnOk) {
+      ph.step('검증용 VM 지우기');
+      try { await destroyClone(c, ref, { expectedName: vmName }); deleted = true; } catch (e) { delNote = ` · 지우지 못했습니다(${e?.message || e}) — 직접 지우세요`; }
+    }
+    return fin(true, `부팅 확인 — VMware Tools 응답 ${Math.round(toolsMs / 1000)}초${deleted ? ' · 검증용 VM 을 지웠습니다' : delNote || ' · 검증용 VM 을 남겼습니다(설정)'}`, { toolsMs, deleted });
+  } catch (e) {
+    let off = '';
+    if (powered && ref) { try { await powerOffVm(c, ref); off = ' · 꺼 두었습니다'; } catch { off = ' · 끄지 못했습니다 — 직접 끄세요'; } }
+    return fin(false, `검증 실패(${e?.message || e})${off} — 검증용 VM '${vmName}' 을 남겼습니다(조사용)`, { toolsMs: null, deleted: false });
   } finally { await c.logout().catch(() => {}); }
 }
 

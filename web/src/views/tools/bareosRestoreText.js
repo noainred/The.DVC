@@ -150,7 +150,7 @@ export function batchView(jobs, batchId) {
 /** 가장 최근 묶음 id(복원 시작 시각 기준) — 없으면 ''. */
 export function latestBatchId(jobs) {
   let best = null;
-  for (const j of Array.isArray(jobs) ? jobs : []) for (const r of j.restores || []) if (r.batchId && (!best || (r.at || 0) > (best.at || 0))) best = r;
+  for (const j of Array.isArray(jobs) ? jobs : []) for (const r of j.restores || []) if (r.batchId && !r.rehearsal && (!best || (r.at || 0) > (best.at || 0))) best = r;   // 검증 회차는 복원 검증 표에서
   return best?.batchId || '';
 }
 
@@ -174,3 +174,34 @@ export function snapshotChip(n) {
   return `스냅샷 ${v}개`;
 }
 export const SNAPSHOT_TITLE = '스냅샷이 남아 있습니다 — 백업이 실패한 뒤 남은 것일 수 있고, 남은 스냅샷은 다음 백업과 덮어쓰기 복원을 막습니다. vCenter 에서 확인하세요.';
+
+/* ───────── v2.862 복원 검증(리허설) · 일일 요약 메일 ───────── */
+export const WEEKDAYS = Object.freeze(['일', '월', '화', '수', '목', '금', '토']);
+/** 정책 한 줄 — '꺼짐' 이면 그 사실부터. */
+export function rehearsalPolicyText(p) {
+  if (!p) return '—';
+  const when = `매주 ${WEEKDAYS[p.weekday] ?? '—'}요일 ${p.time || '—'}`;
+  return `${p.enabled ? '켜짐' : '꺼짐'} · ${when} · 법인마다 ${p.perCorp ?? '—'}대 · 성공한 검증용 VM ${p.deleteOnOk === false ? '남김' : '지움'} · 실패는 남김`;
+}
+/** Tools 응답 시간 — 모르면 '—'(0 이 아니다). */
+export function toolsText(ms) {
+  const n = Number(ms);
+  if (ms === null || ms === undefined || ms === '' || !Number.isFinite(n) || n < 0) return '—';
+  return n < 60_000 ? `${Math.round(n / 1000)}초` : `${Math.floor(n / 60_000)}분 ${Math.round((n % 60_000) / 1000)}초`;
+}
+/** 검증 결과 한 칸 — 복원 진행 · 켜 보는 중 · 성공 · 실패 · 복원 실패. */
+export function verifyText(row) {
+  const f = row?.finish;
+  if (f?.verify === 'ok') return '성공 — VMware Tools 응답';
+  if (f?.verify === 'failed') return '실패';
+  if (f?.nic === 'skipped' || row?.state === 'error' || row?.state === 'canceled') return '복원 실패 — 켜 보지 못함';
+  if (f?.nic === 'failed') return '실패';
+  if (f?.nic === 'pending') return '켜 보는 중';
+  return restoreIsOpen({ jobid: row?.rid, state: row?.state }) ? '복원 중' : '켜 보기 대기';
+}
+export const verifyTone = (row) => (row?.finish?.verify === 'ok' ? 'ok' : (row?.finish?.verify === 'failed' || row?.finish?.nic === 'failed' || row?.state === 'error') ? 'bad' : 'info');
+/** 일일 요약 마지막 발송 한 줄. */
+export function digestStatusText(st) {
+  if (!st || !st.day) return '아직 보낸 적 없음';
+  return `${st.day} ${st.ok ? '보냄' : `실패(${st.tries || 0}번 — ${st.reason || '사유 미상'})`}`;
+}

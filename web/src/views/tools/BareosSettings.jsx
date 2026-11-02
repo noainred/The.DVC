@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { fetchJson, postJson, putJson, delJson } from '../../api.js';
 import { useHashTab } from '../../hooks/useHashTab.js';
+import { BareosDigestSettings } from './BareosRehearsal.jsx';   // v2.862 일일 요약 메일
 import { Loading, ErrorBox } from '../../components/ui.jsx';
 import { STable } from '../../components/STable.jsx';
 import Select from '../../components/Select.jsx';
@@ -267,6 +268,14 @@ export default function SettingsTab({ onSaved, writable = true }) {
           <button type="button" className="login-btn" style={{ flex: 'none', padding: '8px 18px' }} disabled={busy || !!err || s.demo || !writable} title={!writable ? SETTINGS_READ_ONLY : undefined} onClick={saveDefaults}>{busy ? '저장 중…' : '공통 기본값 저장'}</button>
           <span className="muted" style={{ fontSize: 11.5 }}>자동 설정 · 법인별 설정 쓰기의 본인 OTP 재확인은 설정 › 세션 보안에서 정합니다.</span>
         </div>
+        {/* v2.862 일일 요약 메일(따로 저장 — 공통 기본값 저장과 섞지 않는다) */}
+        <details className="card" style={{ padding: '10px 14px', minWidth: 0 }}>
+          <summary style={{ cursor: 'pointer', display: 'flex', flexWrap: 'wrap', gap: '4px 12px', alignItems: 'center' }}>
+            <b>일일 요약 메일</b>
+            <span className="muted" style={{ fontSize: 12 }}>법인별 최근 24시간 결과 · 실패한 VM · 복원 · 복원 검증</span>
+          </summary>
+          <div style={{ marginTop: 10 }}><BareosDigestSettings /></div>
+        </details>
         <details className="card" style={{ padding: '10px 14px', minWidth: 0 }}>
           <summary style={{ cursor: 'pointer', display: 'flex', flexWrap: 'wrap', gap: '4px 12px', alignItems: 'center' }}>
             <b>법인 서버 사전 준비 — 패키지 설치만</b>

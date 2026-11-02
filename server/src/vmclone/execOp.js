@@ -15,11 +15,11 @@
 
 import { getJob, patchClone, recordJobEvent } from './store.js';
 import { enqueueRun, enqueueOp } from './runner.js';
-import { verifyClone, restoreFromClone, attachNfsDatastore, detachNfsDatastore, disconnectRestoredVm } from './vsOps.js';
+import { verifyClone, restoreFromClone, attachNfsDatastore, detachNfsDatastore, disconnectRestoredVm, verifyRestoredVm } from './vsOps.js';
 import { logAudit } from '../audit.js';
 
-export const OP_KINDS = Object.freeze(['run', 'verify', 'restore', 'nfsds-attach', 'nfsds-detach', 'bareos-nic']);
-export const OP_LABEL = Object.freeze({ run: '지금 실행', verify: '검증', restore: '복구', 'nfsds-attach': 'NFS 데이터스토어 연결', 'nfsds-detach': 'NFS 데이터스토어 떼어 내기', 'bareos-nic': 'Bareos 복원 VM 네트워크 끊기' });
+export const OP_KINDS = Object.freeze(['run', 'verify', 'restore', 'nfsds-attach', 'nfsds-detach', 'bareos-nic', 'bareos-verify']);
+export const OP_LABEL = Object.freeze({ run: '지금 실행', verify: '검증', restore: '복구', 'nfsds-attach': 'NFS 데이터스토어 연결', 'nfsds-detach': 'NFS 데이터스토어 떼어 내기', 'bareos-nic': 'Bareos 복원 VM 네트워크 끊기', 'bareos-verify': 'Bareos 복원 검증(리허설)' });
 
 /**
  * @param {{id:string, kind:string, jobId?:string, vcenterId?:string, spec?:object, by?:string}} op
@@ -49,6 +49,17 @@ export async function executeOp(op) {
       const r = await disconnectRestoredVm(vcenterId, name, { setPhase });
       logAudit({ user: by, action: r.ok ? 'Bareos 복원 VM 네트워크 끊기' : 'Bareos 복원 VM 네트워크 끊기 실패', target: `${vcenterId}/${name.slice(0, 60)}`, detail: String(r.detail).slice(0, 200) });
       return { ok: r.ok, detail: r.detail, ms: r.ms };
+    });
+  }
+
+  // v2.862 Bareos 복원 검증(리허설) — 검증용으로 복원한 새 VM 을 끊고 · 켜고 · Tools 확인 · 끄고 · (성공이면) 지운다
+  if (kind === 'bareos-verify') {
+    const vcenterId = String(op.vcenterId || '');
+    const name = String(spec.name || '').slice(0, 200);
+    return enqueueOp({ id: op.id, kind, label: OP_LABEL[kind] }, async (setPhase) => {
+      const r = await verifyRestoredVm(vcenterId, name, { deleteOnOk: spec.deleteOnOk !== false, setPhase });
+      logAudit({ user: by, action: r.ok ? 'Bareos 복원 검증 성공' : 'Bareos 복원 검증 실패', target: `${vcenterId}/${name.slice(0, 60)}`, detail: String(r.detail).slice(0, 200) });
+      return { ok: r.ok, detail: r.detail, ms: r.ms, toolsMs: r.toolsMs ?? null, deleted: !!r.deleted };
     });
   }
 

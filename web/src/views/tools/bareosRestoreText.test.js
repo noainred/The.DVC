@@ -90,4 +90,17 @@ describe('v2.861 복원 고르기 · 마법사 판정', () => {
     ];
     for (const s of outs) { expect(s).not.toMatch(/`/); expect(s).not.toMatch(/\*\*/); }
   });
+  it('v2.862 복원 검증 · 일일 요약 글자 — 모르면 —(0 아님) · 검증 회차는 최근 묶음에서 뺀다', () => {
+    expect(T.rehearsalPolicyText({ enabled: false, weekday: 6, time: '03:17', perCorp: 3, deleteOnOk: true })).toBe('꺼짐 · 매주 토요일 03:17 · 법인마다 3대 · 성공한 검증용 VM 지움 · 실패는 남김');
+    expect([T.toolsText(null), T.toolsText(undefined), T.toolsText(0), T.toolsText(42_000), T.toolsText(125_000)]).toEqual(['—', '—', '0초', '42초', '2분 5초']);
+    expect(T.verifyText({ finish: { verify: 'ok' } })).toMatch(/성공/);
+    expect(T.verifyText({ finish: { verify: 'failed' } })).toBe('실패');
+    expect(T.verifyText({ state: 'error', finish: { nic: 'skipped' } })).toMatch(/복원 실패/);
+    expect(T.verifyText({ rid: 9, state: 'running' })).toBe('복원 중');
+    expect(T.verifyText({ rid: 9, state: 'ok', finish: { nic: 'pending' } })).toBe('켜 보는 중');
+    expect(T.digestStatusText(null)).toBe('아직 보낸 적 없음');
+    expect(T.digestStatusText({ day: '2026-11-03', ok: false, tries: 2, reason: 'SMTP' })).toBe('2026-11-03 실패(2번 — SMTP)');
+    const jobs = [J('1', 'a', '/', { restores: [{ jobid: 1, batchId: 'rv-9', rehearsal: 'rv-9', at: 9 }, { jobid: 2, batchId: 'rb-1', at: 5 }] })];
+    expect(T.latestBatchId(jobs)).toBe('rb-1');
+  });
 });

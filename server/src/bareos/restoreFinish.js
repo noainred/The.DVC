@@ -52,7 +52,10 @@ function finishList(list, now) {
           continue;
         }
       }
-      const d = dispatchVmOp({ kind: 'bareos-nic', vcenterId: r.vcenterId, vmName: r.name, spec: { name: r.name, bareosJobId: r.jobId, rid: r.rid }, by: 'bareos-restore' });
+      // v2.862 복원 검증(리허설)은 끊기 + 켜 보기 + (성공이면) 지우기를 한 작업으로(bareos-verify — 끊기를 확인 못 하면 켜지 않는다)
+      const d = r.verify
+        ? dispatchVmOp({ kind: 'bareos-verify', vcenterId: r.vcenterId, vmName: r.name, spec: { name: r.name, bareosJobId: r.jobId, rid: r.rid, deleteOnOk: r.deleteOnOk !== false }, by: 'bareos-rehearsal' })
+        : dispatchVmOp({ kind: 'bareos-nic', vcenterId: r.vcenterId, vmName: r.name, spec: { name: r.name, bareosJobId: r.jobId, rid: r.rid }, by: 'bareos-restore' });
       if (d.issue) {
         patchRestoreFinish(r.jobId, r.rid, { nic: 'failed', detail: `네트워크 끊기를 보내지 못했습니다(${d.issue}) — 켜기 전에 vCenter 에서 직접 끊으세요`, at: now }, (cur) => !done(cur));
         continue;
@@ -64,11 +67,23 @@ function finishList(list, now) {
   return sent;
 }
 
+const sameOp = (op) => (cur) => (!cur || cur.nic === 'pending' ? (!cur?.opId || cur.opId === op.id) : false);
+/** v2.862 복원 검증 결과 — 끊기 · 켜 보기 · 지우기를 한 기록에(Tools 응답 시간은 모르면 없음 — 0 이 아니다). */
+onOpFinish('bareos-verify', (op) => {
+  const { bareosJobId, rid } = op.spec || {};
+  if (!bareosJobId || !rid) return;
+  const ok = !!op.result?.ok;
+  patchRestoreFinish(String(bareosJobId), Number(rid), {
+    nic: ok ? 'ok' : 'failed', verify: ok ? 'ok' : 'failed', detail: String(op.result?.detail || '').slice(0, 400), at: op.doneAt || Date.now(), opId: op.id,
+    ...(Number.isFinite(op.result?.toolsMs) ? { toolsMs: op.result.toolsMs } : {}), ...(op.result?.deleted === true ? { deleted: true } : {}), ...(op.result?.late ? { late: true } : {}),
+  }, sameOp(op));
+});
+
 /** vmclone 작업이 끝나면 원장에 남긴다 — 그 작업이 지금 기록된 작업일 때만(옛 작업의 늦은 결과가 새 시도를 덮지 않게). */
 onOpFinish('bareos-nic', (op) => {
   const { bareosJobId, rid } = op.spec || {};
   if (!bareosJobId || !rid) return;
   patchRestoreFinish(String(bareosJobId), Number(rid), {
     nic: op.result?.ok ? 'ok' : 'failed', detail: String(op.result?.detail || '').slice(0, 400), at: op.doneAt || Date.now(), opId: op.id, ...(op.result?.late ? { late: true } : {}),
-  }, (cur) => !cur || cur.nic === 'pending' ? (!cur?.opId || cur.opId === op.id) : false);
+  }, sameOp(op));
 });

@@ -411,7 +411,8 @@ export function restoresToFinish() {
       if (r?.nic !== 'disconnect' || !r.jobid || (!isFinalStatus(r.status) && !r.abandoned)) continue;
       const f = r.finish && typeof r.finish === 'object' ? r.finish : null;
       if (f && f.nic !== 'pending') continue;
-      out.push({ jobId: j.id, vcenterId: j.vcenterId, rid: r.jobid, name: String(r.target?.name || ''), state: r.state, abandoned: !!r.abandoned && !isFinalStatus(r.status), finish: f ? { ...f } : null });
+      out.push({ jobId: j.id, vcenterId: j.vcenterId, rid: r.jobid, name: String(r.target?.name || ''), state: r.state, abandoned: !!r.abandoned && !isFinalStatus(r.status), finish: f ? { ...f } : null,
+        ...(r.verify === true ? { verify: true, deleteOnOk: r.deleteOnOk !== false } : {}) });   // v2.862 복원 검증(리허설)
     }
   }
   return out;

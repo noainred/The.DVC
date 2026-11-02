@@ -160,7 +160,9 @@ export function sanitizeReport(b) {
   const acks = (Array.isArray(body.acks) ? body.acks.slice(0, 50) : []).map((a) => {
     const id = t(a?.id, 80); if (!id) return null;
     const hosts = (Array.isArray(a.hosts) ? a.hosts.slice(0, 500) : []).map((h) => ({ hostId: t(h?.hostId, 300), ok: bool(h?.ok), detail: t(h?.detail, 300) })).filter((h) => h.hostId);
-    return { id, ok: bool(a.ok), detail: t(a.detail, 400), ms: Math.max(0, numOr(a.ms) || 0), ...(hosts.length ? { hosts } : {}), ...(t(a.newName, 80) ? { newName: t(a.newName, 80) } : {}) };
+    const toolsMs = numOr(a.toolsMs);
+    return { id, ok: bool(a.ok), detail: t(a.detail, 400), ms: Math.max(0, numOr(a.ms) || 0), ...(hosts.length ? { hosts } : {}), ...(t(a.newName, 80) ? { newName: t(a.newName, 80) } : {}),
+      ...(toolsMs != null && toolsMs >= 0 ? { toolsMs } : {}), ...(a.deleted === true ? { deleted: true } : {}) };   // v2.862 Bareos 복원 검증
   }).filter(Boolean);
   const s = body.sync && typeof body.sync === 'object' ? body.sync : {};
   const list = (v) => (Array.isArray(v) ? v.slice(0, 20).map((x) => t(x, 200)).filter(Boolean) : []);
@@ -238,7 +240,9 @@ export function opStateOf(id) { return _ops.get(String(id))?.state || null; }
 export function finishOp(op, result, now = Date.now(), { late = false } = {}) {
   const r = result && typeof result === 'object' ? result : { ok: false, detail: '빈 결과' };
   op.state = 'done'; op.doneAt = now;
-  op.result = { ok: !!r.ok, detail: t(String(r.detail ?? ''), 400), ...(r.ms != null ? { ms: Math.max(0, Number(r.ms) || 0) } : {}), ...(r.newName ? { newName: t(r.newName, 80) } : {}), ...(late ? { late: true } : {}) };
+  op.result = { ok: !!r.ok, detail: t(String(r.detail ?? ''), 400), ...(r.ms != null ? { ms: Math.max(0, Number(r.ms) || 0) } : {}), ...(r.newName ? { newName: t(r.newName, 80) } : {}), ...(late ? { late: true } : {}),
+    // v2.862 Bareos 복원 검증 — Tools 응답 시간(모르면 없음 · 0 이 아니다) · 검증용 VM 을 지웠는가
+    ...(Number.isFinite(Number(r.toolsMs)) && r.toolsMs !== null && Number(r.toolsMs) >= 0 ? { toolsMs: Number(r.toolsMs) } : {}), ...(r.deleted === true ? { deleted: true } : {}) };
   if ((op.kind === 'nfsds-attach' || op.kind === 'nfsds-detach') && Array.isArray(r.hosts) && op.spec?.nfsDsId) {
     // 요청한 호스트의 결과만 받는다 — 엣지가 다른 호스트를 '연결됨' 으로 보내 연결 수를 부풀리지 못하게(반증 검토 F6). 떼어 내기도 같다.
     const asked = new Set((op.spec.hostIds || []).map(String));
