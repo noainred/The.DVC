@@ -112,7 +112,7 @@ export default function BareosRestore({ d, reload, preselect = '', onPreselectUs
     try {
       const r = await postJson(`${BASE}/restore/bulk`, { items: list.map(itemBody), otp }, withRelayWait({}, dir, d.relayLimits, 'restores'));
       requireChanged(r);
-      setDone({ ok: true, text: `복원을 시작했습니다 — ${r.started} / ${r.total}대${r.started < r.total ? '(시작하지 못한 VM 은 아래 진행 표의 사유를 보세요)' : ''}. 끝나면 네트워크 끊기를 고른 새 VM 은 포탈이 연결을 끊습니다.`, items: r.items });
+      setDone({ ok: !r.saveError, text: `복원을 시작했습니다 — ${r.started} / ${r.total}대${r.started < r.total ? '(시작하지 못한 VM 은 아래 진행 표의 사유를 보세요)' : ''}. 끝나면 네트워크 끊기를 고른 VM 은 포탈이 연결을 끊습니다 — 끊음 표시가 나오기 전에는 켜지 마세요.${r.saveError ? ` ${r.saveError}` : ''}`, items: r.items });
       setBatchId(r.batchId || '');
       setPicked([]); setItems({}); resetWizard();
       reload();
@@ -279,7 +279,7 @@ export default function BareosRestore({ d, reload, preselect = '', onPreselectUs
                           </label>
                         )}
                         {it.mode !== 'localVmdk' && (
-                          <label className="muted" style={FIELD}>네트워크 어댑터
+                          <label className="muted" style={FIELD} title={it.mode === 'original' && it.nic === 'disconnect' ? '덮어쓴 원래 VM 의 네트워크 어댑터가 모두 끊깁니다(켤 때도 연결 안 함)' : undefined}>네트워크 어댑터{it.mode === 'original' && it.nic === 'disconnect' ? ' — 원래 VM 이 끊깁니다' : ''}
                             <Select className="input" style={INP} value={it.nic} onChange={(e) => setItem(j.id, { nic: e.target.value })} aria-label={`${j.vmName} 네트워크`}>
                               <option value="disconnect">{NIC_LABEL.disconnect}</option>
                               <option value="keep">{NIC_LABEL.keep}</option>
@@ -353,6 +353,9 @@ export default function BareosRestore({ d, reload, preselect = '', onPreselectUs
             <span className="muted" style={{ fontSize: 12 }}>{batch.total}대 · 진행 {batch.open} · 성공 {batch.ok} · 실패 {batch.bad}{batch.nicFailed ? ` · 네트워크 끊기 실패 ${batch.nicFailed}` : ''}</span>
             <span className="muted" style={{ fontSize: 11.5, marginLeft: 'auto' }}>상태는 목록을 다시 읽을 때 바뀝니다(폴러)</span>
           </div>
+          {batch.rows.some(({ r }) => r.nic === 'disconnect' && (!r.finish || r.finish.nic === 'pending')) && (
+            <Note tone="warn">네트워크 끊기가 끝나기 전(끊음 표시 전)에는 새 VM 을 켜지 마세요 — 끊기는 복원이 끝난 뒤 그 vCenter 의 작업 순서대로 돕니다. 켜진 VM 은 포탈이 손대지 않습니다.</Note>
+          )}
           <div className="table-wrap">
             <STable minWidth={640} wrap={false}>
               <thead><tr><th>VM</th><th>복원 jobid</th><th>대상</th><th>상태</th><th>네트워크</th></tr></thead>

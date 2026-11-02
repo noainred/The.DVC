@@ -245,3 +245,38 @@ test('⑥ finishRestores — 실패 복원 skipped · 성공 새 VM 은 bareos-n
   assert.equal(rs()[901].nic, 'failed');
   assert.match(rs()[901].detail, /직접 확인/);
 });
+
+test('⑦ 반증 검토 반영 — 다른 vCenter 의 같은 이름 DS(M1) · 예약 이름 · 추적 놓친 복원(L1) · 엣지 미인출 시한(L3) · 원장 묶어 쓰기(M2)', async () => {
+  // M1: Director 하나에 vCenter 둘 — 이름이 같은 DS 를 따로 판정한다
+  const J2 = { a: JOBS.a, e: { id: 'e', vcenterId: 'vc-b', vmId: 'vc-b:vm-7', vmName: 'b-07', dc: 'DC-B', folder: '/', dir: 'D1' } };
+  const snap = {
+    vms: [{ ...SNAP.vms[0], storageGB: 10 }, { id: 'vc-b:vm-7', vcenterId: 'vc-b', name: 'b-07', powerState: 'POWERED_OFF', snapshotCount: 0, vcDcPath: 'DC-B', folderPath: '/', storageGB: 50 }],
+    hosts: [], datastores: [{ vcenterId: 'vc-a', name: 'ds-x', freeGB: 1000, capacityGB: 2000 }, { vcenterId: 'vc-b', name: 'ds-x', freeGB: 20, capacityGB: 200 }],
+  };
+  const p = R.bulkRestorePlan({ items: [nv('a', 'web-01-r', { datastore: 'ds-x' }), nv('e', 'b-07-r', { datastore: 'ds-x' })], jobOf: (id) => J2[id] || null, dirOf: (j) => j.dir, snapshot: snap });
+  assert.deepEqual(p.capacity.map((c) => [c.vcenterId, c.verdict]).sort(), [['vc-a', 'ok'], ['vc-b', 'short']]);
+  assert.deepEqual([p.items[0].ok, p.items[1].ok], [true, false]);
+  // 예약 이름(최근 · 진행 중 새 VM 복원 — 아직 인벤토리에 없다)
+  const r2 = R.bulkRestorePlan({ items: [nv('a', 'Web-01-R')], jobOf: (id) => JOBS[id], dirOf: (j) => j.dir, snapshot: SNAP, reservedNames: new Set(['vc-a\u0000web-01-r']) });
+  assert.match(r2.items[0].issue, /최근 복원이/);
+  // L1 · L3: 원장에 둔다
+  const now = Date.now();
+  const op = dispatch.createOp({ kind: 'bareos-nic', vcenterId: 'vc-a', vmName: 'x', spec: { name: 'x', bareosJobId: 'j2', rid: 951 }, by: 't', target: { where: 'edge', agent: 'edge-1' } }, now - dispatch.PENDING_TTL_MS - 60_000);
+  fs.writeFileSync(path.join(tmp, registry.FILE_NAME), JSON.stringify({ version: 1, jobs: [
+    { id: 'j2', vcenterId: 'vc-a', vmId: 'vc-a:vm-1', vmName: 'web-01', bareosJob: 'pv-a', restores: [
+      { jobid: 950, status: 'R', state: 'running', abandoned: true, nic: 'disconnect', target: { name: 'lost-r' }, at: now },
+      { jobid: 951, status: 'T', state: 'ok', nic: 'disconnect', target: { name: 'x' }, at: now, finish: { nic: 'pending', opId: op.id, tries: 1, at: now } },
+      { jobid: 952, status: 'f', state: 'error', nic: 'disconnect', target: { name: 'half-r' }, at: now },
+    ] },
+  ], retired: [] }));
+  registry._resetForTest();
+  finishRestores(now);
+  const f = Object.fromEntries(registry.getJob('j2').restores.map((x) => [x.jobid, x.finish]));
+  assert.equal(f[950].nic, 'failed'); assert.match(f[950].detail, /추적을 놓쳐/);
+  assert.equal(f[951].nic, 'failed', '엣지가 가져가지 않은 작업은 시한(reapOps)으로 실패 기록 — 끊는 중에 머물지 않는다');
+  assert.match(f[951].detail, /가져가지 않았습니다/);
+  assert.equal(f[952].nic, 'skipped'); assert.match(f[952].detail, /일부 만들었을 수/);
+  // M2: 원장 쓰기는 한 번에 묶는다(구조 — 3,000 대상 원장에서 건마다 동기 저장이면 수 초 블로킹)
+  const src = fs.readFileSync(new URL('../src/bareos/restoreFinish.js', import.meta.url), 'utf8');
+  assert.match(src, /return inBatch\(\(\) => finishList\(list, now\)\);/);
+});

@@ -1100,8 +1100,11 @@ api.post('/tools/bareos-backup/restore-points/bulk', adminOnly, async (req, res)
  * 묶음 복원 판정 · 접근 · 진행 중 — 미리 보기(check)와 실행이 같은 함수를 쓴다(판정을 두 벌 두지 않는다).
  * @returns {{ status?:number, reason?:string, plan?:object, jobs?:Map }}
  */
+const RESERVE_MS = 24 * 3600_000;   // 새 VM 복원 이름을 예약해 두는 시간(진행 중 + 끝난 뒤 하루 — 다음 인벤토리 수집 전 같은 이름을 막는다)
 function bulkRestoreGate(req, items) {
-  const list = Array.isArray(items) ? items : [];
+  const raw = Array.isArray(items) ? items : [];
+  // 상한을 먼저 — 항목마다 원장 조회(깊은 복사)를 돌기 전에(반증 검토 L2: 큰 본문 하나가 요청 경로를 1초 넘게 막았다). 판정은 bulkRestorePlan 이 같은 상한으로 한다.
+  const list = raw.length > BULK_RESTORE_MAX ? raw.slice(0, BULK_RESTORE_MAX + 1) : raw;
   const jobs = new Map();
   const denied = new Map();
   let missing = 0; let readOnly = 0;
@@ -1118,8 +1121,16 @@ function bulkRestoreGate(req, items) {
     jobs.set(id, job);
   }
   const settings = effectiveSettings();
-  const plan = bulkRestorePlan({ items: list, jobOf: (id) => jobs.get(id) || null, dirOf: jobDir, snapshot: store.get(), pluginName: settings.defaults.pluginName });
-  for (const r of plan.items) if (denied.has(r.id) && r.ok) { r.ok = false; r.issue = denied.get(r.id); }
+  // 최근 · 진행 중 새 VM 복원이 쓰는 이름(아직 인벤토리에 없다 — 반증 검토: 같은 이름 VM 이 둘이 되면 NIC 끊기도 손대지 못한다)
+  const reservedNames = new Set();
+  const since = Date.now() - RESERVE_MS;
+  for (const j of listJobs()) {
+    for (const r of j.restores || []) {
+      if (r.mode === 'newVm' && r.target?.name && (restoreOpen(r) || (Number(r.at) || 0) >= since)) reservedNames.add(`${j.vcenterId}\u0000${String(r.target.name).toLowerCase()}`);
+    }
+  }
+  const plan = bulkRestorePlan({ items: list, jobOf: (id) => jobs.get(id) || null, dirOf: jobDir, snapshot: store.get(), pluginName: settings.defaults.pluginName, reservedNames });
+  for (const r of plan.items) if (denied.has(r.id)) { r.ok = false; r.issue = denied.get(r.id); }   // 접근 · 진행 중 사유가 판정 사유보다 앞선다(더 근본적)
   const bad = plan.items.filter((r) => !r.ok).length;
   if (bad && plan.ok) { plan.ok = false; plan.issue = `${bad}대를 복원할 수 없습니다 — 항목별 사유를 확인하세요(묶음 전체를 보내지 않았습니다).`; }
   // 실행 응답 코드: 조회 범위 밖(없음) 404 → 쓰기 범위 밖 403 → 그 밖의 판정 400(규약 — 조회 밖 404 · 쓰기 밖 403)
@@ -1189,6 +1200,8 @@ api.post('/tools/bareos-backup/restore/bulk', adminOnly, async (req, res) => {
     }
     const byKey = new Map((Array.isArray(out) ? out : []).map((x) => [x.key, x]));
     const results = [];
+    let saveErr = '';
+    try {
     inBatch(() => {
       plan.items.forEach((r, i) => {
         const x = byKey.get(i);
@@ -1205,9 +1218,16 @@ api.post('/tools/bareos-backup/restore/bulk', adminOnly, async (req, res) => {
         }
       });
     });
+    } catch (e) {
+      // 반증 검토 L5: 원장 저장(inBatch 끝)이 실패해도 복원은 이미 시작됐다 — 응답은 돌려준다(진행 추적이 안 될 수 있다고 밝힌다)
+      saveErr = String(e?.message || e).slice(0, 200);
+      console.warn(`[bareos] 묶음 복원 ${batchId} 원장 저장 실패: ${saveErr}`);
+      audit(req, 'Bareos 묶음 복원', batchId, `원장 저장 실패 — 시작한 복원의 진행이 화면에 없을 수 있습니다(${saveErr})`);
+    }
     const started = results.filter((x) => x.ok).length;
     audit(req, 'Bareos 묶음 복원', `${plan.items[0].vcenterId}/${plan.items[0].vmName}${plan.items.length > 1 ? ` 외 ${plan.items.length - 1}대` : ''}`, `묶음 ${batchId} · 시작 ${started} / ${results.length}대`);
-    res.status(started ? 202 : 502).json({ ok: started > 0, batchId, started, total: results.length, items: results, ...(started ? {} : { reason: '한 대도 시작하지 못했습니다 — 항목별 사유를 확인하세요.' }) });
+    res.status(started ? 202 : 502).json({ ok: started > 0, batchId, started, total: results.length, items: results, ...(started ? {} : { reason: '한 대도 시작하지 못했습니다 — 항목별 사유를 확인하세요.' }),
+      ...(saveErr ? { saveError: '복원은 시작했지만 원장에 남기지 못했습니다 — 진행 · 네트워크 끊기가 화면에 나오지 않을 수 있습니다. Director 와 vCenter 에서 확인하세요.' } : {}) });
   } finally {
     for (const id of locked) unlockJob(id);
     if (noted) noteRestoreBatchEnd(batchId);

@@ -158,6 +158,9 @@ test('② 미리 보기 — Director 에 닿지 않고 OTP 를 쓰지 않는다 
   assert.equal(r.j.plan.ok, true, r.t);
   assert.deepEqual(r.j.plan.items.map((x) => x.nic), ['disconnect', null]);
   assert.equal(D.cmds.length, before, 'Director 명령 0');
+  // 상한은 항목을 돌기 전에(반증 L2) — 판정 문구는 같은 상한
+  r = await call('admin', 'POST', '/restore-check/bulk', { items: Array.from({ length: 60 }, (_, i) => ({ id: ID.web, jobid: 1, mode: 'newVm', newVm: { name: `n${i}` } })) });
+  assert.match(r.j.plan.issue, /50대까지/);
 });
 
 test('③ 실행 — OTP 미등록 403 · 조회 밖 404 · 쓰기 밖 403 · 판정 400 은 OTP 를 태우지 않는다 · 202 · 원장 · 진행 중 거부', async () => {
@@ -204,4 +207,7 @@ test('④ 복원이 끝나면 새 VM 의 NIC 끊기 마무리 — 끊기를 고�
   for (let i = 0; i < 40 && job('web').restores[0].finish?.nic !== 'ok'; i++) await new Promise((r) => setTimeout(r, 100));
   assert.equal(job('web').restores[0].finish?.nic, 'ok', JSON.stringify(job('web').restores[0].finish));
   assert.equal(job('app').restores[0].finish, undefined, 'nic=keep 은 손대지 않는다');
+  // 끝난 뒤에도 하루 동안 그 이름은 예약(다음 인벤토리 수집 전 같은 이름 VM 이 둘이 되지 않게)
+  const r = await call('admin', 'POST', '/restore-check/bulk', { items: [{ id: ID.app, jobid: H('app', 130), mode: 'newVm', newVm: { name: 'WEB-01-R' } }] });
+  assert.match(r.j.plan.items[0].issue, /최근 복원이/);
 });

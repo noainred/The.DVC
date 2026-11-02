@@ -399,7 +399,7 @@ export function applyRestoreRow(id, row, now = Date.now()) {
 }
 
 /**
- * v2.861 복원 마무리(NIC 끊기)를 볼 복원 — 새 VM 복원이고(nic === 'disconnect') 끝났고(final) 마무리가 없거나 아직 '보냄' 인 것.
+ * v2.861 복원 마무리(NIC 끊기)를 볼 복원 — 끊기를 고른 복원이고(nic === 'disconnect' — 새 VM 기본 · 덮어쓰기는 고를 때만) 끝났거나 추적을 놓쳤고 마무리가 없거나 아직 '보냄' 인 것.
  *   원장 사본을 통째로 만들지 않는다(폴러 주기마다 부른다) — 필요한 칸만.
  * @returns {{ jobId, vcenterId, rid, name, state, finish }[]}
  */
@@ -407,10 +407,11 @@ export function restoresToFinish() {
   const out = [];
   for (const j of load().jobs) {
     for (const r of Array.isArray(j.restores) ? j.restores : []) {
-      if (r?.nic !== 'disconnect' || !r.jobid || !isFinalStatus(r.status) || r.abandoned) continue;
+      // 추적을 놓친(abandoned) 복원도 넣는다 — 결과를 모르니 '직접 확인' 으로 남긴다(반증 검토 L1: 예전에는 화면이 영원히 '끊기 대기')
+      if (r?.nic !== 'disconnect' || !r.jobid || (!isFinalStatus(r.status) && !r.abandoned)) continue;
       const f = r.finish && typeof r.finish === 'object' ? r.finish : null;
       if (f && f.nic !== 'pending') continue;
-      out.push({ jobId: j.id, vcenterId: j.vcenterId, rid: r.jobid, name: String(r.target?.name || ''), state: r.state, finish: f ? { ...f } : null });
+      out.push({ jobId: j.id, vcenterId: j.vcenterId, rid: r.jobid, name: String(r.target?.name || ''), state: r.state, abandoned: !!r.abandoned && !isFinalStatus(r.status), finish: f ? { ...f } : null });
     }
   }
   return out;

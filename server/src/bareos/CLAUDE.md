@@ -70,6 +70,8 @@
   `ops.restores` 는 항목마다 단건과 같은 검사(성공 백업 · 이 잡의 이력 체인) · 보낸 뒤 끊기면 그 항목 unknown · 끊기면 남은 것 skipped · 엣지 회신의 rid 없는 성공은 unknown.
   NIC 끊기는 `restoreFinish.js` → vmclone `bareos-nic`(`opDispatch.dispatchVmOp` — 실행 위치 판정을 복제하지 않는다) · 그 vCenter 에 **이름이 정확히 1대 · 꺼짐**일 때만 손댄다 · 재시작으로 작업을 잃으면 다시(최대 3) · 옛 작업의 늦은 결과는 새 시도를 덮지 않는다.
   `restore_allow_disks_mismatch=yes` 는 덮어쓰기에서 `=== true` 일 때만(Bareos 23.1+ — 옛 Director 는 거부, 추정).
+  반증 1인 반영(재현 4 · 판단 5): DS 여유 키는 **vCenter + 이름**(한 Director 에 vCenter 여럿) · 마무리 원장 쓰기는 `inBatch` 한 번 · 추적 놓친 복원은 failed(직접 확인) · 엣지 미인출 작업은 `reapOps` 로 시한 ·
+  본문 상한을 항목 순회 전에 · 새 VM 이름은 최근 24시간 · 진행 중 복원 이름과도 겹치면 거부 · 원장 저장이 실패해도 응답(saveError) · 접근 · 진행 중 사유가 판정 사유보다 앞선다.
 - 실환경 미확인(추정 — `tools/bareos-probe.js` 로 확인할 것): Node↔Director TLS-PSK 협상 · 잡 수준 FdPluginOptions 와 FileSet 플러그인 문자열 병합 ·
   `.bvfs_get_jobids` JSON 모양 · Profile ACL 지시어 이름 · `list jobs days=N` · 25.x `.jobs` 의 enabled 칸(master 소스 기준 — 없으면 다시 끄기를 하지 않는다) · Migration 행의 시작 시각.
 - **v2.828 조회 화면 · v2.843 법인 로컬**: audits.md 'Bareos v2.828 조회 화면 모듈 규칙' · 'v2.843'(정리 미리 보기 = pruneJobs 판정 · `siteAgent`).
