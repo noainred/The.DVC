@@ -40,7 +40,7 @@ export function precheckScript(volumeDir = DEFAULT_VOLUME_DIR) {
     "echo @@running; s=$(systemctl is-active bareos-dir 2>/dev/null); case \"$s\" in inactive|failed) echo inactive;; active|activating|reloading|deactivating) if command -v bconsole >/dev/null; then o=$(printf 'llist jobs jobstatus=R\\n' | timeout 30 bconsole 2>&1); rc=$?; if [ $rc -eq 0 ] && printf '%s\\n' \"$o\" | grep -q 'Connecting to Director' && ! printf '%s\\n' \"$o\" | grep -qiE 'Authorization failed|Failed to connect|ERR='; then printf '%s\\n' \"$o\" | grep -cE '^[[:space:]]*jobid:[[:space:]]*[0-9]+'; else echo none; fi; else echo none; fi;; *) echo none;; esac",
     "echo @@catalog; if systemctl is-active -q postgresql 2>/dev/null; then su - postgres -c \"psql -tAc \\\"SELECT pg_database_size('bareos')\\\"\" 2>/dev/null | tr -d '[:space:]'; echo; else echo none; fi",
     // v2.851: 설치된 -devel · -headers 이름(번들의 시스템 패키지가 서버 판보다 새로울 때 옛 판을 고정할 수 있는 것 — 2026-11-02 openssl-devel 사례)
-    "echo @@devel; rpm -qa --qf '%{NAME}\\n' 2>/dev/null | grep -E -- '-(devel|headers)$' | sort | head -n 200",
+    "echo @@devel; rpm -qa --qf '%{NAME}\\n' 2>/dev/null | grep -E -- '-(devel|headers)$' | sort | head -n 201",
     "echo @@volumes; for f in /etc/bareos/bareos-sd.d/device/*.conf; do [ -f \"$f\" ] || continue; sed -n 's/^[[:space:]]*Archive[[:space:]]*Device[[:space:]]*=[[:space:]]*\"\\{0,1\\}\\([^\"]*\\)\"\\{0,1\\}[[:space:]]*$/\\1/Ip' \"$f\"; done | sort -u | while read -r d; do [ -d \"$d\" ] || { echo \"$d|missing\"; continue; }; n=$(find \"$d\" -maxdepth 1 -type f 2>/dev/null | wc -l); s=$(du -sk \"$d\" 2>/dev/null | cut -f1); t=$(find \"$d\" -maxdepth 1 -type f -printf '%T@\\n' 2>/dev/null | sort -n | tail -1 | cut -d. -f1); echo \"$d|$n|$s|$t\"; done",
     'echo @@end',
   ].join('\n');
@@ -109,7 +109,9 @@ export function parsePrecheck(text) {
     directorInactive: running === 'inactive',
     catalogBytes: catalog === 'none' || catalog === '' ? null : numOrNull(catalog),
     volumes,
-    develPkgs: (s.devel || []).map((l) => l.trim()).filter((n) => /^[A-Za-z0-9._+-]{1,80}$/.test(n)).slice(0, 200),
+    // 반증 v2.851: 200개를 넘으면 잘렸다고 표시한다(뒤쪽 이름이 빠진 것을 '고정 후보 없음' 으로 보이지 않게)
+    develPkgs: (s.devel || []).map((l) => l.trim()).filter((n) => /^[A-Za-z0-9][A-Za-z0-9._+-]{0,79}$/.test(n)).slice(0, 200),
+    develTruncated: (s.devel || []).filter((l) => l.trim()).length > 200,
   };
 }
 
@@ -140,10 +142,17 @@ export function newerBasePkgs(bundle, sMinor) {
   }
   return out;
 }
-/** 설치된 -devel · -headers 중 그 바탕 패키지(이름 · 이름-libs)가 번들에서 새 판인 것(추정 — -devel 은 바탕 패키지의 같은 판을 요구하는 것이 보통). */
-export function develPins(develPkgs = [], newerNames = []) {
-  const set = new Set(newerNames);
-  return develPkgs.filter((d) => { const b = d.replace(/-(devel|headers)$/, ''); return set.has(b) || set.has(`${b}-libs`); });
+/**
+ * 설치된 -devel · -headers 중 그 바탕 패키지(이름 · 이름-libs · 이름-lib · lib이름)가 번들에서 새 판인 것(추정 — -devel 은 바탕 패키지의 같은 판을 요구하는 것이 보통).
+ * 반증 v2.851: 그 -devel 자체가 번들에 있으면 함께 올라가므로 고정이 아니다(bundleNames 로 뺀다) · cyrus-sasl-devel → cyrus-sasl-lib · brotli-devel → libbrotli 매핑.
+ */
+export function develPins(develPkgs = [], newerNames = [], bundleNames = []) {
+  const set = new Set(newerNames); const inBundle = new Set(bundleNames);
+  return develPkgs.filter((d) => {
+    if (inBundle.has(d)) return false;
+    const b = d.replace(/-(devel|headers)$/, '');
+    return [b, `${b}-libs`, `${b}-lib`, `lib${b}`].some((x) => set.has(x));
+  });
 }
 const OSREL_SHOW = /^(openssl-libs|glibc|systemd|python3-libs|libcurl|krb5-libs|libxml2|rpm-libs)$/;
 
@@ -172,12 +181,15 @@ export function judgePrecheck(f, { mode = 'install', bundle = null, plan = null 
     const bm = bundleMinor(bundle); const sm = serverMinor(f.os.versionId);
     if (bm == null || sm == null) add('osrel', 'OS 판 ↔ 번들 패키지 판', 'unknown', `서버 ${f.os.versionId || '읽지 못함'} · 번들 ${bm == null ? '판 태그 없음' : `9.${bm}`} — 비교하지 못했습니다`, '');
     else if (bm > sm) {
-      const newer = newerBasePkgs(bundle, sm); const pins = develPins(f.develPkgs, newer);
+      const newer = newerBasePkgs(bundle, sm);
+      const pins = develPins(f.develPkgs, newer, (bundle.packages || []).map((p) => p.name));
       const show = newer.filter((n) => OSREL_SHOW.test(n));
+      // 반증 v2.851: 숫자는 **번들에 든** 패키지 수다 — 설치될 수가 아니다(이미 설치된 것은 건드리지 않는다)
       add('osrel', 'OS 판 ↔ 번들 패키지 판', 'warn',
-        `서버 9.${sm} · 번들 패키지 9.${bm} — 번들 패키지 ${newer.length}개의 판 태그가 서버 판보다 새롭습니다${show.length ? `(${show.join(' · ')}${newer.length > show.length ? ` 외 ${newer.length - show.length}개` : ''})` : ''}`
-          + (pins.length ? ` · 설치된 ${pins.join(' · ')} 이(가) 그 패키지의 지금 판을 고정할 수 있습니다(추정 — 번들에 없음)` : ''),
-        `설치 목록의 이미 설치된 패키지는 올리지 않습니다. 그래도 의존성이 새 판을 요구하면 ${pins.length ? '위 고정 패키지 때문에 ' : ''}2단계가 실패할 수 있습니다 — 미리 막으려면 서버를 업데이트(dnf update → 재부팅)하거나 서버와 같은 판에서 만든 번들을 쓰세요. 설치는 막지 않습니다.`);
+        `서버 9.${sm} · 번들 패키지 9.${bm} — 번들에 든 패키지 중 ${newer.length}개의 판 태그가 서버 판보다 새롭습니다${show.length ? `(${show.join(' · ')}${newer.length > show.length ? ` 외 ${newer.length - show.length}개` : ''})` : ''} · 설치될 수가 아닙니다`
+          + (pins.length ? ` · 설치된 ${pins.join(' · ')} 이(가) 그 패키지의 지금 판을 고정할 수 있습니다(추정 — 이름으로 짐작)` : '')
+          + (f.develTruncated ? ' · 설치된 -devel 이 200개를 넘어 일부만 봤습니다' : ''),
+        `설치 목록 중 이미 설치된 패키지는 올리지 않습니다. 새로 설치할 패키지가 새 판을 요구하면 ${pins.length ? '위 고정 패키지 때문에 ' : ''}2단계가 실패할 수 있습니다 — 미리 막으려면 서버를 업데이트(dnf update → 재부팅)하거나 서버와 같은 판에서 만든 번들을 쓰세요. 설치는 막지 않습니다.`);
     } else add('osrel', 'OS 판 ↔ 번들 패키지 판', 'ok', `서버 9.${sm} · 번들 패키지 9.${bm}`, '');
   }
   const toolMiss = ['systemd-run', 'dnf', 'rpm', 'ss'].filter((t) => f.tools[t] === false);

@@ -12,6 +12,8 @@
 # 시험: PORTAL_TEST_ROOT 를 주면 모든 경로 앞에 붙는다(server/test 가 가짜 루트 + 명령 대역으로 돌린다).
 set -u
 umask 077
+# v2.851 반증: 명령 출력(dnf · rpm)을 영어 원문 규칙(causes.js)으로 판정한다 — 서버 로캘(예: ko_KR)로 번역되면 원인 판정이 전부 빗나간다(사전 점검과 같게 고정)
+export LC_ALL=C
 P="${PORTAL_TEST_ROOT:-}"
 W="$P/var/lib/portal-bareos-install"
 # 작업마다 실행 디렉터리를 따로(v2.844 반증 H2 — 서버마다 하나면 옛 작업의 되돌리기가 새 작업의 journal 을 되돌렸다). 인자 = run/<작업 id>
@@ -188,11 +190,14 @@ step2() {
   local B; B="$(bundle_dir)"
   [ -d "$ETC_BAREOS" ] || jr etcnew
   rpm -qa --qf '%{NAME}\n' | sort -u > "$R/rpm.before"
-  # v2.851(2026-11-02 사용자 화면 — 재현): 설치 목록 중 **이미 설치된 이름은 넘기지 않는다**. dnf(best=True)는 'install <설치된 이름>' 을 번들 판으로 올리는 일로 봐서
-  #   서버의 openssl 3.0.7(el9_4)을 번들의 3.5.8(el9_8)로 올리려 했고, 서버에 설치된 openssl-devel(번들에 없음)이 옛 판을 고정해 거래 전체가 실패했다.
-  #   서버의 시스템 패키지는 서버 판 그대로 둔다 — Bareos 패키지는 새 판을 요구하지 않는다(번들 RPM 메타데이터로 확인). 의존성이 요구하면 그때는 dnf 가 올린다.
+  # v2.851(2026-11-02 사용자 화면 — 재현): 설치 목록 중 **이미 설치된 이름은 넘기지 않는다**. dnf 는 'install <설치된 이름>' 을 그 이름의 가용 최선 판(번들)을 넣는
+  #   작업으로 보고('is already installed' 는 보고일 뿐), best=True(RHEL 9 기본)는 그 작업이 막히면 거래 전체를 실패로 만든다 — 서버의 openssl 3.0.7(el9_4)을 번들의
+  #   3.5.8(el9_8)로 올리려다 서버에 설치된 openssl-devel 이 옛 판을 고정해 실패했다. 설치 목록 중 이미 설치된 것은 서버 판 그대로 둔다 — Bareos 패키지는 새 판을
+  #   요구하지 않는다(번들 RPM 메타데이터로 확인). 새로 설치할 패키지의 의존성이 요구하면 그때는 dnf 가 올린다(그 경우는 원인 판정 base-pkg-pinned 가 밝힌다).
+  #   설치 여부는 바로 위 rpm.before(rpm -qa 이름 목록)로 본다 — 비었으면 rpmdb 를 못 읽은 것이다(못 읽음 ≠ 설치 안 됨 · 반증 v2.851).
+  [ -s "$R/rpm.before" ] || { errx "설치된 패키지 확인" "설치된 패키지 목록(rpm -qa)을 읽지 못했습니다 — rpmdb 잠금 · 손상을 확인하세요. 아무것도 설치하지 않았습니다." 1 rpmdb; return 1; }
   local want="" have="" n
-  for n in $INSTALL_PKGS; do if rpm -q --quiet "$n" >/dev/null 2>&1; then have="$have $n"; else want="$want $n"; fi; done
+  for n in $INSTALL_PKGS; do if grep -qxF -- "$n" "$R/rpm.before"; then have="$have $n"; else want="$want $n"; fi; done
   [ -n "${have// /}" ] && log "이미 설치돼 건너뜀(서버 판 유지):$have"
   local rc=0
   if [ -z "${want// /}" ]; then log "설치할 패키지가 없습니다(설치 목록 전부 설치됨)"

@@ -96,7 +96,7 @@ function view(j, now = Date.now()) {
   for (const s of STEPS) if (s.n >= j.startStep) steps[s.n] = { status: 'pending' };
   // 앞 회차에서 끝난 단계
   for (const s of STEPS) if (s.n >= j.startStep && s.n < a.fromStep) steps[s.n] = { status: 'ok', at: a.at - 60_000, endedAt: a.at - 30_000, msg: '이전 회차에서 끝남(다시 하지 않음)' };
-  // 데모 실패: 사본 옮기기를 끈 채면 pyVmomi 판 불일치(매 회차) · 켠 채 첫 회차면 dnf 잠금(다른 패키지 작업 — 그대로 다시 하면 통과)
+  // 데모 실패: 사본 옮기기를 끈 채면 pyVmomi 판 불일치(매 회차) · 켠 채 첫 회차면 번들 패키지 판 충돌(v2.851 실사례 출력 — 그대로 다시 하면 통과)
   const shadow = !j.plan.pyvmomiFix && j.mode === 'install';
   const failAt = shadow || (j.mode === 'install' && j.attempts.length === 1) ? 2 : null;
   let status = 'running'; let currentStep = a.fromStep; let failure = null;

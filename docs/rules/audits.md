@@ -6,7 +6,7 @@
 
 ## 목차
 
-- Bareos v2.851 완전 설치 2단계 '번들의 시스템 패키지 판 충돌' — 러너 · 원인 판정 · 사전 점검(2026-11-02)
+- Bareos v2.851 완전 설치 2단계 '번들 패키지 판 충돌' — 러너 · 원인 판정 · 사전 점검(2026-11-02)
 - Bareos v2.850 완전 설치 번들 — 받는 주소 지정 · 서버 디렉터리에 받아 둔 번들 사용 · 원장 id 충돌(2026-11-02)
 - Bareos v2.849 백업 등록 실패 'Could not find config resource' — 포탈 리소스 안내 · 연결 진단 · 완전 설치 엣지 응답(2026-11-02)
 - Bareos v2.848 백업 등록 실패 'configure: is an invalid command' — 잡 만들기 권한 안내 · 연결 진단(2026-11-02)
@@ -1839,7 +1839,7 @@
   ⚠ 정정(v2.823): 카탈로그 memo 세대(P9)는 v2.823 에 해소했다(memo 키에 Director id + `settingsRev` — 설정을 저장하면 새로 읽는다). 고아 잡(I7)은 v2.823 검토 C3 에서
   '가리키는 Director 가 설정에 없는 대상은 원장에서만 취소·삭제' 경로로 일부 해소(Director 쪽 고아 잡 탐지는 여전히 없다).
 
-## Bareos v2.851 완전 설치 2단계 '번들의 시스템 패키지 판 충돌' — 러너 · 원인 판정 · 사전 점검(2026-11-02)
+## Bareos v2.851 완전 설치 2단계 '번들 패키지 판 충돌' — 러너 · 원인 판정 · 사전 점검(2026-11-02)
 
 사용자 화면(완전 설치 2단계 실패 '패키지 의존성·충돌' · 근거 `Problem: cannot install both openssl-libs-1:3.5.8-2.el9_8.x86_64 from portal-bareos-local and openssl-libs-1:3.0.7-28.el9_4.x86_64 from @System` ·
 `package openssl-devel-1:3.0.7-28.el9_4.x86_64 from @System requires openssl-libs(x86-64) = 1:3.0.7-28.el9_4` · `cannot install the best candidate for the job`) · 요청 '버그부터 처리'.
@@ -1856,6 +1856,12 @@
   ③ 사전 점검 `osrel` — 번들 패키지 판 태그 최대(el9_N)와 서버 VERSION_ID 마이너 비교 · 새로우면 warn(주요 이름 · 설치된 -devel 고정 추정 `@@devel`) · 막지 않는다 · 비교 못 하면 unknown. 데모 번들에 판 태그를 넣었다.
   ④ `build-bundle.sh` 주석의 '대상에 이미 있는 판이 요구를 채우면 dnf 는 그것을 쓴다' 는 **의존성에만** 맞다 — 설치 목록 이름에는 틀렸다고 정정.
 - 사용자 서버의 당장 조치(포탈 v2.851 로 올린 뒤): '2단계부터 그대로 다시'(러너를 새로 올린다). 그래도 같은 사유면 의존성이 새 판을 요구하는 것 — `dnf remove openssl-devel`(쓰는 것이 없을 때) 또는 서버 OS 업데이트.
+- **반증 3인(진단 · 코드 · 회귀 — Opus) 결과**: 진단 유지(holds — libdnf `_get_best_selectors` 는 설치본을 보고한 뒤에도 가용본과 한 셀렉터로 묶고, `DNF_FORCE_BEST` → libsolv `solver_addbestrules` →
+  'cannot install the best candidate for the job' = SOLVER_RULE_BEST 로 사용자 출력 마지막 줄과 같다 · 문구 정정: 올리려는 시도는 best 와 무관하고 best=True 는 실패로 만드는 역할) · 회귀 없음(holds) ·
+  코드 partly → 고친 것: 고정 패키지에 다른 Problem 의 무관한 패키지가 들어가 `dnf remove` 명령에 실리던 것(요구가 충돌 이름을 가리키는 줄만) · 러너 로캘(LC_ALL=C) · 명령 이름 선행 '-' ·
+  rpm 목록을 못 읽으면 '설치 안 됨' 으로 보던 것(rpm.before 비면 rpmdb 로 멈춤) · develPins 매핑(lib · -lib · 번들 포함 제외) · @@devel 잘림 표시 · why 의 '되돌렸습니다' 고정 문구 · 까닭 첫 이름만 ·
+  osrel 수가 설치될 수로 읽히던 것 · 규칙 제목('시스템' 단정 → '번들 패키지 판') · 데모 주석. 추가 변이 9/9(누계 17/17). 픽스처 정정: 재설치 러너 테스트 3건의 가짜 rpmdb 가 bareos-director 하나뿐이라
+  0단계 제거 뒤 목록이 비었다 — 실제 서버는 비지 않으므로 glibc 를 더했다(빈 목록 = rpmdb 못 읽음이 새 규칙).
 - 남긴 것: 번들을 서버와 같은 판에서 만드는 옵션(BASE_RELEASE · vault 저장소)은 두지 않았다(요구하는 사용자가 없고 Bareos 자체는 9.4 의 OpenSSL 로 충분) · dnf4 의 'install <설치된 이름>' 동작은 로그 모양 + 문서로 판단했고
   best=False 환경은 보지 않았다 · 사전 점검의 -devel 고정은 이름 규칙(이름 · 이름-libs)에 의한 추정이다.
 

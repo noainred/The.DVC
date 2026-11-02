@@ -30,12 +30,15 @@ test('① base-pkg-pinned — 실제 출력 · dnf-conflict 보다 앞 · 이름
   assert.equal(c.key, 'base-pkg-pinned');
   assert.equal(c.unclassified, false);
   assert.match(c.evidence, /^Problem: cannot install both openssl-libs-1:3\.5\.8-2\.el9_8\.x86_64 from portal-bareos-local and openssl-libs-1:3\.0\.7-28\.el9_4\.x86_64 from @System$/, '근거 = 실제로 맞은 줄');
-  assert.match(c.why, /openssl-libs-1:3\.5\.8-2\.el9_8\.x86_64 를 넣으려면 서버의 openssl-libs-1:3\.0\.7-28\.el9_4\.x86_64 를 올려야/);
+  assert.match(c.why, /openssl-libs-1:3\.5\.8-2\.el9_8\.x86_64 를 넣으려면 서버의 openssl-libs-1:3\.0\.7-28\.el9_4\.x86_64 를 바꿔야 하는데 올릴 수 없었습니다/);
+  assert.equal(c.title, '번들 패키지 판이 서버 설치본과 충돌');
+  assert.ok(!/되돌렸습니다/.test(c.why), '되돌림 여부는 카드가 따로 보인다(고정 문구로 단정하지 않는다)');
   assert.match(c.why, /openssl-devel-1:3\.0\.7-28\.el9_4\.x86_64\(요구: openssl-libs\(x86-64\) = 1:3\.0\.7-28\.el9_4\)/, '고정하는 패키지와 그 요구를 출력에서 읽는다');
-  assert.match(c.why, /설치 목록의 ‘openssl’ 이 이미 설치돼 있었고/, "올리려 한 까닭 — 'already installed' 이름 중 번들 판이 요구에 나온 것");
+  assert.match(c.why, /설치 목록의 ‘openssl’ 이\(가\) 이미 설치돼 있었고/, "올리려 한 까닭 — 'already installed' 이름 중 번들 판이 요구에 나온 것");
+  assert.match(c.why, /번들에 없는 패키지로 보입니다/, '번들 포함 여부는 확인하지 않으므로 단정하지 않는다');
   assert.ok(!/openssl-libs’ 이 이미/.test(c.why), '충돌 패키지 자신(openssl-libs)은 까닭이 아니다');
   const retry = c.fixes.find((f) => f.kind === 'retry'); const srv = c.fixes.find((f) => f.kind === 'server');
-  assert.match(retry.label, /‘openssl’ 을 올리지 않습니다/);
+  assert.equal(retry.label, 'v2.851 러너는 이미 설치된 ‘openssl’ 을(를) 올리지 않습니다', '단추 문구(‘2단계부터 그대로 다시’)와 겹치지 않게');
   assert.match(srv.label, /openssl-devel/);
   assert.deepEqual(srv.commands.filter((x) => /^(rpm -q|dnf remove|dnf repoquery)/.test(x)).map((x) => x.split('   #')[0].trim()),
     ['rpm -q openssl-devel', 'dnf repoquery --installed --whatrequires openssl-devel', 'dnf remove openssl-devel'], '명령에는 출력에서 읽은 이름만(글자 규칙 통과)');
@@ -47,12 +50,12 @@ test("② 잘린 출력(already installed 없음)은 까닭을 단정하지 않�
   const cut = CA.classifyFailure({ step: 2, output: LOG.slice(3).join('\n') });
   assert.equal(cut.key, 'base-pkg-pinned');
   assert.match(cut.why, /올리려 한 까닭은 출력에 없습니다/);
-  assert.ok(!/‘openssl’ 이 이미/.test(cut.why));
-  assert.match(cut.fixes.find((f) => f.kind === 'retry').label, /이미 설치된 패키지를 올리지 않음/);
+  assert.ok(!/‘openssl’ 이\(가\) 이미/.test(cut.why));
+  assert.match(cut.fixes.find((f) => f.kind === 'retry').label, /설치 목록 중 이미 설치된 패키지를 올리지 않습니다/);
   // 고정 줄이 없으면 '없다' 고 적고 whatrequires 로 찾게 한다
   const noPin = CA.classifyFailure({ step: 2, output: [LOG[4], LOG[9]].join('\n') });
   assert.equal(noPin.key, 'base-pkg-pinned');
-  assert.match(noPin.why, /고정하는 패키지 줄이 출력에 없습니다/);
+  assert.match(noPin.why, /고정하는 패키지 줄은 출력에 없습니다/);
   assert.ok(noPin.fixes.find((f) => f.kind === 'server').commands.some((x) => x === "rpm -q --whatrequires 'openssl-libs(x86-64)'"));
   // 다른 저장소 · 다른 이름 두 패키지면 이 규칙이 아니다
   const other = CA.classifyFailure({ step: 2, output: ' Problem: cannot install both foo-1.0-1.el9.x86_64 from appstream and foo-0.9-1.el9.x86_64 from @System\n  - cannot install the best candidate for the job' });
@@ -61,6 +64,24 @@ test("② 잘린 출력(already installed 없음)은 까닭을 단정하지 않�
   assert.equal(diff.key, 'dnf-conflict');
   // 예전 규칙은 그대로
   assert.equal(CA.classifyFailure({ step: 2, output: 'Error:\n Problem: conflicting requests\n  - nothing provides libfoo' }).key, 'dnf-conflict');
+});
+
+test('①-b 반증 — Problem 이 둘이면 충돌 이름을 요구하는 @System 줄만 고정 · 선행 \'-\' 이름은 명령에 넣지 않음 · 까닭 여럿 · rpmdb', () => {
+  const two = [...LOG.slice(0, 9), ' Problem 2: package php-pecl-zip-1.19.2-7.el9_4.x86_64 from @System requires php(api) = 20200930-64, but none of the providers can be installed',
+    '  - package php-pecl-zip-1.19.2-7.el9_4.x86_64 from @System requires php(api) = 20200930-64, but none of the providers can be installed',
+    '  - package -rf-1.0-1.el9.x86_64 from @System requires openssl-libs(x86-64) = 1:3.0.7-28.el9_4, but none of the providers can be installed'].join('\n');
+  const c = CA.classifyFailure({ step: 2, output: two });
+  const srv = c.fixes.find((f) => f.kind === 'server');
+  assert.match(srv.label, /^고정하는 패키지 — openssl-devel$/, '다른 Problem 의 php-pecl-zip 은 고정 패키지가 아니다');
+  assert.ok(!srv.commands.join('\n').includes('php-pecl-zip'), '무관한 패키지를 dnf remove 명령에 넣지 않는다');
+  assert.ok(!srv.commands.join('\n').includes('-rf'), "선행 '-' 이름은 옵션이 되므로 버린다");
+  assert.equal(CA.nevraName('-rf-1.0-1.el9.x86_64'), ''); assert.equal(CA.nevraName('.x-1.0-1.el9.x86_64'), '');
+  // 까닭이 둘(openssl · tar 둘 다 번들 판을 요구에 냄)
+  const both2 = [LOG[1], LOG[2], LOG[4], '  - package tar-2:1.34-13.el9_8.x86_64 from portal-bareos-local requires openssl-libs(x86-64) >= 1:3.5.8, but none of the providers can be installed', LOG[7], LOG[8], LOG[9]].join('\n');
+  assert.match(CA.classifyFailure({ step: 2, output: both2 }).why, /설치 목록의 ‘tar’ · ‘openssl’ 이\(가\) 이미 설치돼/);
+  // 러너가 rpm -qa 목록을 못 읽으면 rpmdb(설치 안 함)
+  const r = CA.classifyFailure({ step: 2, cause: 'rpmdb', output: '설치된 패키지 목록(rpm -qa)을 읽지 못했습니다' });
+  assert.equal(r.key, 'rpmdb'); assert.ok(r.fixes.some((f) => f.kind === 'server'));
 });
 
 test('③ nevraName — 숫자 · 하이픈 · epoch · 틀린 모양', () => {
@@ -94,11 +115,16 @@ test('④ 사전 점검 osrel — 새 판 태그면 warn(+devel 고정 추정) �
   assert.deepEqual(PC.newerBasePkgs(bundle(PKGS), 4), ['openssl-libs', 'glibc', 'libsemanage', 'krb5-libs'], '같은 판(el9_4) · 판 태그 없음(el9)은 새 판이 아니다');
   assert.deepEqual(PC.newerBasePkgs(bundle(PKGS), 8), []);
   assert.deepEqual(PC.develPins(f.develPkgs, ['openssl-libs', 'glibc', 'krb5-libs']), ['openssl-devel', 'krb5-devel'], '바탕 이름 · 이름-libs 로 잇는다(zlib · kernel 은 번들에 없음)');
+  assert.deepEqual(PC.develPins(['cyrus-sasl-devel', 'brotli-devel'], ['cyrus-sasl-lib', 'libbrotli']), ['cyrus-sasl-devel', 'brotli-devel'], '반증: 이름-lib · lib이름 매핑');
+  assert.deepEqual(PC.develPins(['openssl-devel'], ['openssl-devel', 'openssl-libs'], ['openssl-devel', 'openssl-libs']), [], '반증: -devel 이 번들에 있으면 함께 올라가므로 고정이 아니다');
+  const many = PC.parsePrecheck(PRE({ devel: Array.from({ length: 201 }, (_, i) => `p${String(i).padStart(3, '0')}-devel`) }));
+  assert.equal(many.develPkgs.length, 200); assert.equal(many.develTruncated, true); assert.equal(f.develTruncated, false);
   const warn = PC.judgePrecheck(f, { mode: 'install', bundle: bundle(PKGS) });
   const w = item(warn, 'osrel');
   assert.equal(w.status, 'warn');
-  assert.match(w.detail, /서버 9\.4 · 번들 패키지 9\.8 — 번들 패키지 4개의 판 태그가 서버 판보다 새롭습니다\(openssl-libs · glibc · krb5-libs 외 1개\)/);
-  assert.match(w.detail, /설치된 openssl-devel · krb5-devel 이\(가\) 그 패키지의 지금 판을 고정할 수 있습니다\(추정/);
+  assert.match(w.detail, /서버 9\.4 · 번들 패키지 9\.8 — 번들에 든 패키지 중 4개의 판 태그가 서버 판보다 새롭습니다\(openssl-libs · glibc · krb5-libs 외 1개\) · 설치될 수가 아닙니다/);
+  assert.match(w.detail, /설치된 openssl-devel · krb5-devel 이\(가\) 그 패키지의 지금 판을 고정할 수 있습니다\(추정 — 이름으로 짐작\)/);
+  assert.match(item(PC.judgePrecheck(many, { mode: 'install', bundle: bundle(PKGS) }), 'osrel').detail, /200개를 넘어 일부만 봤습니다/);
   assert.match(w.action, /위 고정 패키지 때문에 2단계가 실패할 수 있습니다/); assert.match(w.action, /설치는 막지 않습니다/);
   assert.equal(warn.blocked, false, '경고일 뿐 막지 않는다');
   const noDevel = item(PC.judgePrecheck(PC.parsePrecheck(PRE()), { mode: 'install', bundle: bundle(PKGS) }), 'osrel');
@@ -109,5 +135,5 @@ test('④ 사전 점검 osrel — 새 판 태그면 warn(+devel 고정 추정) �
   assert.equal(unk.status, 'unknown'); assert.match(unk.detail, /서버 9 · 번들 9\.8 — 비교하지 못했습니다/);
   assert.equal(item(PC.judgePrecheck(f, { mode: 'install', bundle: bundle([]) }), 'osrel').status, 'unknown', '패키지 목록이 없는 번들(옛 데모)도 unknown');
   assert.equal(item(PC.judgePrecheck(f, { mode: 'install', bundle: null }), 'osrel'), undefined, '번들이 없으면 항목 자체가 없다(번들 항목이 bad)');
-  assert.match(PC.precheckScript(), /echo @@devel; rpm -qa --qf '%\{NAME\}\\n' 2>\/dev\/null \| grep -E -- '-\(devel\|headers\)\$' \| sort \| head -n 200/, '읽기만 하는 고정 문자열');
+  assert.match(PC.precheckScript(), /echo @@devel; rpm -qa --qf '%\{NAME\}\\n' 2>\/dev\/null \| grep -E -- '-\(devel\|headers\)\$' \| sort \| head -n 201/, '읽기만 하는 고정 문자열(201 = 잘림 표시)');
 });
