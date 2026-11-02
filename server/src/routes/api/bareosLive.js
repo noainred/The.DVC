@@ -16,6 +16,7 @@ import { rateNowOf } from '../../bareos/liveParse.js';
 import { isFinalStatus } from '../../bareos/names.js';
 import { numOrNull } from '../../util/numOrNull.js';
 import { memoJson, scopeKey } from './shared.js';
+import { relayLimits } from '../../bareos/edgeOps.js';
 
 const adminOnly = requireRole('admin');
 /** 느림 판정 — 지난 성공 평균의 이 비율 이하 · 시작하고 이만큼 지난 뒤(막 시작한 잡은 스냅샷 준비로 느리다). */
@@ -47,6 +48,26 @@ export function lastGoodRate(j) {
   return b !== null ? { bps: b, at: numOrNull(L.endedAt) } : null;
 }
 
+/** 레벨 글자(F·I·D·V) — 'Full'·'F'·'Incremental' 을 한 모양으로. 모르면 ''. */
+export const levelKey = (v) => { const c = String(v ?? '').trim().charAt(0).toUpperCase(); return 'FIDV'.includes(c) && c ? c : ''; };
+/**
+ * v2.858 지난 같은 레벨의 끝난 성공(T·W) 실행 — 진행 현황 상세의 추정 진척 기준(사용자 승인 시안 'Incremental 은 지난 같은 레벨 기준').
+ * 원장 lastRun · finishedRuns(v2.858 부터 바이트를 남긴다)에서 지금 실행이 아닌 것 중 jobid 가 가장 큰 것. 바이트를 모르면 null(지어내지 않는다).
+ * @returns {{ jobid:number, level:string, status:string, bytes:number, startedAt:number|null, endedAt:number|null }|null}
+ */
+export function prevSameLevel(j, level, nowJobid = null) {
+  const lv = levelKey(level);
+  if (!lv) return null;
+  let best = null;
+  for (const r of [j?.lastRun, ...(Array.isArray(j?.recentRuns) ? j.recentRuns : [])]) {
+    if (!r?.jobid || r.jobid === nowJobid || !(r.status === 'T' || r.status === 'W') || levelKey(r.level) !== lv) continue;
+    const b = numOrNull(r.bytes);
+    if (b === null || b <= 0) continue;
+    if (!best || r.jobid > best.jobid) best = { jobid: r.jobid, level: lv, status: r.status, bytes: b, startedAt: numOrNull(r.startedAt), endedAt: numOrNull(r.endedAt) };
+  }
+  return best;
+}
+
 /**
  * 잡 하나의 진행 행(순수에 가까움 — 시험이 직접 부른다).
  * @param {object} j  jobDigests 한 줄 · @param {object} run0  liveStatus.runningRunOf · @param {object|null} live  FD 상태 행(모르면 null) · @param {boolean} liveOk FD 조회 성공
@@ -67,6 +88,9 @@ export function runningRow(j, run0, live, liveOk, { now = Date.now(), vm = null,
   const stuckWhy = state === 'running' && elapsed !== null && elapsed >= STUCK_AFTER_MS && liveOk
     ? (!live ? 'no-report' : rateNow === 0 ? 'zero' : '') : '';
   return {
+    // v2.858 실행 중 상세: id(로그 라우트 열쇠) · 잡 구성(Client·Pool·Storage) · 지난 같은 레벨 실행(추정 진척 기준) — 관리자 전용 라우트(Director 주소·비밀 없음)
+    id: j.id, client: j.client || '', pool: j.pool || '', storage: j.storage || '',
+    prev: prevSameLevel(j, run.level || live?.level || '', run.jobid),
     vmId: j.vmId, vmName: j.vmName || vm?.name || j.vmId, folder: j.folder || vm?.folder || '', group,
     jobid: run.jobid, state, level: run.level || live?.level || '', since: run.since ?? null, elapsed, trigger: run.trigger, by: run.by,
     sizeGb: numOrNull(vm?.storageGB),
@@ -174,6 +198,7 @@ export function registerBareosLive(api) {
       const sum = (k) => corps.reduce((a, c) => a + (c.today[k] || 0), 0);
       return {
         ok: true, now, liveMs: LIVE_MS, idleMs: LIVE_IDLE_MS, demo: isDemoActive(), registryLoadError: !!registryLoadError(),
+        relayLimits: relayLimits(),   // v2.858 실행 중 상세가 로그를 읽을 때 엣지 대행 Director 의 화면 시한(숫자를 화면에 박지 않는다)
         totals: {
           corps: corps.length, active: act.length, running: corps.reduce((a, c) => a + c.running, 0), waiting: corps.reduce((a, c) => a + c.waiting, 0),
           rateNow: act.length ? (knownRate.length ? knownRate.reduce((a, c) => a + c.rateNow, 0) : null) : 0, rateUnknownCorps: act.length - knownRate.length,

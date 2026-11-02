@@ -55,6 +55,14 @@ export function demoSettings(snapshot) {
 // 새 실행 jobid 는 합성 이력(historyOf — 100000 + 최대 80000 + 13)보다 커야 한다: 실제 Director 의 jobid 는 단조 증가이고
 //   포탈은 jobid 로 최신을 고른다(director.jobRuns·원장 lastRun). 9000 에서 시작하면 방금 실행이 이력 표 맨 뒤로 밀렸다(v2.822 화면 확인).
 const FIRST_RUN_ID = 200_000;
+/**
+ * 데모 실행 한 건의 길이(기본 30초). v2.858: 화면 검증용으로 env BAREOS_DEMO_RUN_MS 로 늘릴 수 있다(5초~1시간 — 그 밖·숫자 아님은 기본값).
+ * 진행 현황 조회 주기(LIVE_MS 30초)보다 짧으면 실행 중 행을 화면에서 거의 볼 수 없다 — 실행 중 상세를 확인할 때 늘려 쓴다.
+ */
+export function demoRunMs() {
+  const n = Number(process.env.BAREOS_DEMO_RUN_MS);
+  return Number.isFinite(n) && n >= 5_000 && n <= 3_600_000 ? Math.round(n) : 30_000;
+}
 const S = { jobs: new Map(), runs: new Map(), nextId: FIRST_RUN_ID, deleted: new Set() };   // deleted: v2.831 보관 개수 정리가 지운 jobid(카탈로그에서 사라진 것처럼)
 export function _resetBareosDemoForTest() { S.jobs.clear(); S.runs.clear(); S.nextId = FIRST_RUN_ID; S.deleted.clear(); _seeded = false; _slots = null; _slotsKey = ''; }
 
@@ -134,13 +142,14 @@ function liveRow(jobid, now = Date.now()) {
   const r = S.runs.get(jobid);
   if (!r || S.deleted.has(jobid)) return null;
   const el = now - r.startAt;
-  const st = r.canceled ? 'A' : el < 4_000 ? 'C' : el < 30_000 ? 'R' : 'T';
+  const runMs = demoRunMs();
+  const st = r.canceled ? 'A' : el < 4_000 ? 'C' : el < runMs ? 'R' : 'T';
   const done = st === 'T' || st === 'A';
-  const bytes = st === 'C' ? 0 : Math.round(r.bytes * Math.min(1, el / 30_000));
+  const bytes = st === 'C' ? 0 : Math.round(r.bytes * Math.min(1, el / runMs));
   return {
     jobid, job: `${r.name}.demo`, name: r.name, type: r.type, level: r.level, jobstatus: st,
     starttime: catTime(r.startAt),
-    endtime: done ? catTime(r.startAt + Math.min(el, 30_000)) : '',
+    endtime: done ? catTime(r.startAt + Math.min(el, runMs)) : '',
     jobbytes: bytes, jobfiles: done ? 3 : 0, joberrors: 0, client: r.client || '',
   };
 }
@@ -364,10 +373,21 @@ export function demoCall(cmd, settings, directorId = '') {
         const row = rowById(id);
         if (!row) return { joblog: [] };
         // 카탈로그 Log 행 모양 — 시각은 time 칸, logtext 는 'daemon JobId N: …'(시각을 logtext 에 겹쳐 넣지 않는다).
+        // v2.858: 백업은 FD 연결 · vSphere 접속 · 백업 항목 줄도(실제 로그 모양 — 실행 중 상세의 타임라인이 데모에서도 단계를 보이게).
+        //   시각은 시작 + 몇 초이고, 아직 오지 않은 시각의 줄은 넣지 않는다(실행 중 로그는 지금까지의 줄뿐이다).
+        const t0 = Date.parse(String(row.starttime).replace(' ', 'T'));
+        const at = (sec) => (Number.isFinite(t0) && t0 + sec * 1000 <= Date.now() ? catTime(t0 + sec * 1000) : null);
+        const vmName = String(row.name || '').slice(0, 64);
+        const steps = row.type === 'B' ? [
+          [at(1), `bareos-dir JobId ${id}: Connected Client: ${row.client || 'demo-fd'} at localhost:9102, encryption: TLS_CHACHA20_POLY1305_SHA256 TLSv1.3`],
+          [at(2), `demo-fd JobId ${id}: python3-fd-mod: Successfully connected to VSphere API on host vcenter.demo.local`],
+          [at(3), `demo-fd JobId ${id}: python3-fd-mod: Starting backup of /VMS/Datacenter/${vmName}/[datastore1] ${vmName}/${vmName}.vmdk`],
+        ].filter(([t]) => t) : [];
         const lines = [
           [row.starttime, `bareos-dir JobId ${id}: Start ${row.type === 'R' ? 'Restore' : 'Backup'} JobId ${id}, Job=${row.job}`],
           [row.starttime, `bareos-dir JobId ${id}: Using Device "FileStorage" to write.`],
           [row.starttime, `demo-fd JobId ${id}: python-fd: bareos-fd-vmware: (데모) 스냅샷 생성 · CBT 변경 블록 읽기`],
+          ...steps,
           ...(row.jobstatus === 'f' ? [[row.endtime, `demo-fd JobId ${id}: Fatal error: python-fd: Error creating snapshot (데모)`]] : []),
           ...(row.jobstatus === 'W' ? [[row.endtime, `demo-fd JobId ${id}: Warning: quiesce 실패 — 정지점 없이 진행(데모)`]] : []),
           ...(row.endtime ? [[row.endtime, demoReport(id, row)]] : []),
@@ -414,7 +434,7 @@ export function demoDirStatus(now = Date.now()) {
   for (const [jobid, r] of S.runs) {
     if (r.canceled || S.deleted.has(jobid)) continue;
     const el = now - r.startAt;
-    if (el >= 30_000) continue;
+    if (el >= demoRunMs()) continue;
     any = true;
     const st = el < 4_000 ? 'is waiting execution' : 'is running';
     lines.push(`${String(jobid).padStart(6)}  ${r.type === 'R' ? 'Rest' : 'Back'} ${r.level === 'F' ? 'Full' : 'Incr'}          0         0  ${r.name}.${catTime(r.startAt).replace(' ', '_').replace(/:/g, '.')}_01 ${st}`);
@@ -433,10 +453,10 @@ export function demoFdStatus(client, now = Date.now()) {
     if (r.type !== 'B' || r.canceled || S.deleted.has(jobid)) continue;
     if (r.client && r.client !== client) continue;
     const el = now - r.startAt;
-    if (el < 4_000 || el >= 30_000) continue;   // 막 보낸 실행은 Director 만 안다('is waiting execution' — demoDirStatus 와 맞춘다)
+    if (el < 4_000 || el >= demoRunMs()) continue;   // 막 보낸 실행은 Director 만 안다('is waiting execution' — demoDirStatus 와 맞춘다)
     any = true;
     const sec = Math.max(1, el / 1000);
-    const bytes = r.bytes * Math.min(1, el / 30_000);
+    const bytes = r.bytes * Math.min(1, el / demoRunMs());
     const ave = bytes / sec;
     lines.push(`JobId ${jobid} Job ${r.name}.${catTime(r.startAt).replace(' ', '_').replace(/:/g, '.')}_01 is running.`);
     lines.push(`    ${r.level === 'F' ? 'Full' : r.level === 'D' ? 'Differential' : 'Incremental'} Backup Job started: ${catTime(r.startAt)}`);

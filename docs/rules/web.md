@@ -26,6 +26,7 @@
 - (v2.764 추가) ESXi 호스트(`#/hosts`) 화면은 시안 B '이상 우선' 배치다 — 판정은 `views/hostTriage.js` 하나
 - (v2.805 추가) ESXi 호스트 화면의 '엑셀 수준 상세' — 열 묶음 9개·점검 열은 `views/hostChecksText.js` + 서버 `/hosts/checks` · 상세는 전체 페이지 `#/hosts/<id>`(모달 구성요소 공용)
 - (v2.811 추가) ESXi 호스트 화면의 '법인별' 보기 — 숫자·판정은 서버 `/hosts/corp`(`vcenter/hostCorp.js`), 글자·색은 `views/hostCorpText.js`
+- (v2.858 추가) Bareos 실행 중 작업 상세 — 진행 현황 행 펼침 · 실행 현황 · 이력 표가 `views/tools/BareosRunDetail.jsx` 하나를 쓴다 · 판정은 `bareosLiveText.js`
 - (원래 5663행) v2.708 — 드롭다운은 공용 `Select`·`DataList` 하나다(자동 정렬)
 - (원래 5801행) 특수 기능 화면(v2.679) — 표시 이름·설명·개발 단계는 '덮어쓰기' 이고 키는 그대로다
 - (원래 5848행) 접속 공지 팝업 · 게시판(v2.722)
@@ -473,3 +474,10 @@
   v2.838 Summary 아래 두 구획(용량과 일정 · 통합 에러 로그)은 **무거운 집계라 폴링하지 않는다**(처음 · 기간 · 새로고침) · 자료가 없는 칸은 출처를 밝히고 '—(2차)' — 30일 선은 'Veeam 저장소 사용(EM)' 이지 백업 용량 추이가 아니다 · 열기 링크는 권한이 없으면 그리지 않는다(`backupSummaryPlan.errorOpen`).
   v2.839 Bareos '정책 · 일정'(`#/tools/bareos-summary/policy` — 조회 전용 키 아래 하위 탭 · `useHashTab`)은 **수집 중일 때만** 5초 뒤 다시 읽는다(평소 폴링 없음) · 기본 `tbody td` 는 nowrap 이라 긴 칸은 `WRAPBOX`(whiteSpace normal + 최대 폭)로 감싼다 — 안 그러면 옆 칸을 덮는다(Chromium 1440 확인) · JobDefs 빈 칸은 '기본'.
   v2.840 '보존 · 풀'(`#/tools/bareos-summary/pools` — 같은 키 · 폴링 없음)의 볼륨 즉시 조회는 서버 `canQuery` + `toolAllowed('bareos-backup')` 둘 다일 때만 버튼 · 관리 도구 탭 줄(BareosBackupTool)에도 정책 · 일정 · 보존 · 풀 링크를 백업 그룹 뒤에 둔다(bareosSubTabs 와 같은 순서 — 2.839 에 빠졌었다) · 기존 표의 칸에 줄을 더할 때는 그 칸을 원래 폭 안에서 줄바꿈시킨다(nowrap 한 줄이 길어지면 표가 넓어진다 — 백업 대상 표 A/B 로 확인).
+- **v2.858 — Bareos 실행 중 작업 상세(승인 시안 — 진행 현황 › 단일 법인 행 펼침 · 실행 현황 · 이력의 상자 격자를 표 + 고른 작업 상세로)**. 회귀 `web/.../bareosRunDetail2858.test.js` + `server/test/bareosRunDetail2858.test.js`:
+  ① 상세는 **한 조각**(`BareosRunDetail.jsx`)을 두 화면이 쓴다 — 복제하지 말 것. 판정(추정 진척 기준 · 남은 시간 · 지금 단계 · 원장+진행 행 합치기 · 대기 사유 요약)은 `bareosLiveText.js` 하나.
+  ② 추정 진척 기준 = 지난 같은 레벨 성공 실행의 바이트(서버 `bareosLive.prevSameLevel` — 원장 `finishedRuns` 가 v2.858 부터 bytes·startedAt 를 남긴다) → 없으면 **Full 만** VM 용량 → 그 밖은 % 를 만들지 않는다(Incremental 을 VM 용량으로 나눈 2% 는 뜻이 없다).
+  ③ 잡 로그는 **펼칠 때 한 번 + '로그 다시 읽기'**(Director 조회 — 진행 현황이 15초마다 와도 다시 읽지 않는다). 로그 시각(Director 현지 글)은 브라우저 시각과 빼지 않는다 — 지금 단계 구간은 끝이 열린 막대로 그린다.
+  ④ 저장한 양 · 압축 · 쓰는 중 볼륨 크기는 잡 끝 보고에만 있다 — '끝나면 표시'(점선 칸). FD 보고가 없으면 진행량 · 속도 · 진척 · 남은 시간은 '모름'/'—'(0 아님)이고 타임라인 · 볼륨은 로그로 채운다.
+  ⑤ 진행 현황 표 안의 펼침 칸은 `position: sticky; left: 0` + **실측 폭**(ResizeObserver) — 400px 에서 넓은 표(minWidth 1100)를 가로로 밀어도 상세는 화면 안. 정렬 때 행과 펼침 칸이 떨어지지 않게 `React.Fragment` 로 묶는다(`sortChildren` 이 첫 tr 로 정렬).
+  ⑥ 대기 배지는 회색(실행 중 파랑과 구분 — `bareosText.STATE_BADGE`). 상세에 취소 단추는 두지 않았다(백업 대상 탭). 데모 실행 길이는 env `BAREOS_DEMO_RUN_MS`(화면 검증용 — 기본 30초는 진행 현황 조회 주기보다 짧다).
