@@ -3,7 +3,7 @@
  *   사용자 요청 "법인의 vcenter - 데이터센터 - 클러스터 - 가상화 호스트에 어떤 GPU 가 설치되어 있고 … 어떤 VM 에 얼만큼의 vGPU/GPU 가
  *   할당되어 있고 할당량/예비량이 얼마다는 표" + "결과를 excel 로").
  *
- * 숫자·판정은 서버 /tools/gpu/alloc(server/src/gpu/allocTree.js) — 이 화면은 펼치기·정렬·찾기만 한다(gpuAllocText.js).
+ * 숫자·판정은 서버 /tools/gpu-alloc(server/src/gpu/allocTree.js) — 이 화면은 펼치기·정렬·찾기만 한다(gpuAllocText.js).
  * 조회는 마운트 1회 + '새로 고침'(무거운 집계는 15초 폴링 금지 — 스냅샷만 읽지만 GPU VM 전부를 행으로 만든다). 늦게 온 이전 응답은 버린다(useLatest).
  * 내려받기는 data.csv 권한(canCsv)일 때만 보이고, 실패는 파일로 저장하지 않고 화면에 말한다(downloadFailText).
  */
@@ -59,7 +59,7 @@ export function GpuAllocTree({ scope }) {
     setLoading(true); setErr(null);
     loadVcs();
     const q = scope ? `?vcenterId=${encodeURIComponent(scope)}` : '';
-    run(fetchJson(`/tools/gpu/alloc${q}`), (d) => { setData(d); setLoading(false); }, (e) => { setErr(e); setLoading(false); });
+    run(fetchJson(`/tools/gpu-alloc${q}`), (d) => { setData(d); setLoading(false); }, (e) => { setErr(e); setLoading(false); });
   };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { setData(null); setOpen(null); setVcSel(new Set()); load(); }, [scope]);
@@ -76,7 +76,7 @@ export function GpuAllocTree({ scope }) {
     setDlMsg(''); setDlBusy(fmt);
     // v2.853: 고른 법인만 내려받는다(화면과 같은 범위). 서버가 조회 범위와 교집합을 먼저 낸다. v2.855: 쿼리는 allocExportQuery 하나.
     const q = allocExportQuery({ scope, vcSel });
-    try { await downloadFile(`/tools/gpu/alloc.${fmt}${q}`); } catch (e) { setDlMsg(downloadFailText(e)); } finally { setDlBusy(''); }
+    try { await downloadFile(`/tools/gpu-alloc.${fmt}${q}`); } catch (e) { setDlMsg(downloadFailText(e)); } finally { setDlBusy(''); }
   };
 
   if (err && !data) return <ErrorBox error={err} />;

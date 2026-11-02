@@ -492,6 +492,8 @@ api.get('/tools/gpu.csv', csvPerm, requirePerm('tools'), (req, res) => {
 
 /**
  * v2.852: GPU 할당 계층(법인 › 데이터센터 › 클러스터 › 호스트 › GPU › VM — gpu/allocTree.js) — 화면 · CSV · 엑셀.
+ * v2.857: 특수 기능 'GPU 할당율'(도구 키 gpu-alloc — 사용자 요청)로 독립했다. 경로 첫 세그먼트 = 도구 키 규약(auth/toolAccess.js CATALOG2613-12)이라
+ *   `/tools/gpu/alloc*` → `/tools/gpu-alloc*` 로 옮겼다 — 옛 경로로 두면 'GPU 인벤토리'(gpu) 권한만으로 열려 gpu-alloc 거부가 집행되지 않는다.
  *   조회 범위(scopedVcenterIds)를 요청 필터(vcenterId)보다 먼저 건다. 범위 밖 vcenterId 는 빈 결과다(존재 여부를 말하지 않는다).
  *   파일은 data.csv(v2.643 규약 — 형제 gpu.csv 와 같은 게이트) · 엑셀은 동시 1건(exportBusy). 스냅샷만 읽는다(왕복 0).
  */
@@ -509,12 +511,12 @@ function allocTreeOf(req) {
   const fileScope = vcenterId || (vcenterIds ? (names.length === 1 ? names[0] : `${names.length}corps`) : 'all');
   return { snap, tree, vcenterId, scopeText, fileScope: String(fileScope).replace(/[^\w.-]+/g, '_').slice(0, 60) };
 }
-api.get('/tools/gpu/alloc', requirePerm('tools'), (req, res) => {
+api.get('/tools/gpu-alloc', requirePerm('tools'), (req, res) => {
   const { snap, tree } = allocTreeOf(req);
   res.json({ generatedAt: snap.generatedAt || null, ...tree });
 });
 // v2.855: 내보내기 창(승인 시안 '계층 표 엑셀 내보내기')이 그릴 것 — 범위 글자 · 호스트·GPU 수 · 단계별 파일 이름(내려받기와 같은 함수).
-api.get('/tools/gpu/alloc/export-meta', csvPerm, requirePerm('tools'), (req, res) => {
+api.get('/tools/gpu-alloc/export-meta', csvPerm, requirePerm('tools'), (req, res) => {
   const { snap, tree, scopeText, fileScope } = allocTreeOf(req);
   const stamp = fileStamp(Date.parse(snap.generatedAt || '') || Date.now());
   res.json({
@@ -524,11 +526,11 @@ api.get('/tools/gpu/alloc/export-meta', csvPerm, requirePerm('tools'), (req, res
     csvFileName: allocFileName(fileScope, fileStamp(), 'csv'),
   });
 });
-api.get('/tools/gpu/alloc.csv', csvPerm, requirePerm('tools'), (req, res) => {
+api.get('/tools/gpu-alloc.csv', csvPerm, requirePerm('tools'), (req, res) => {
   const { tree, fileScope } = allocTreeOf(req);
   sendMaybeZip(res, allocFileName(fileScope, fileStamp(), 'csv'), '\uFEFF' + allocCsvLines(tree, csvCell).join('\r\n'), 'text/csv; charset=utf-8');
 });
-api.get('/tools/gpu/alloc.xlsx', csvPerm, requirePerm('tools'), async (req, res) => {
+api.get('/tools/gpu-alloc.xlsx', csvPerm, requirePerm('tools'), async (req, res) => {
   // v2.855: 넣을 단계(depth)·시트(sheets) — 모르는 값은 잠금을 잡기 전에 400(조용히 버리지 않는다).
   const opts = allocExportOpts(req.query);
   if (!opts.ok) return res.status(400).json({ ok: false, error: 'bad_request', reason: opts.reason });

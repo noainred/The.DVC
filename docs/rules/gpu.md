@@ -99,5 +99,9 @@
     웹 쿼리는 `gpuAllocText.allocExportQuery` 하나(CSV·창·내려받기 공용 — 기본값은 싣지 않는다).
   - **v2.856 버그 수정 — 새로 고침이 상태 점도 다시 읽는다**: 법인 칩 상태 점(`/vcenters`)은 `load()` 가 계층과 함께 읽는다(예전에는 마운트 1회라
     '⟳ 새로 고침' 뒤에도 점이 그대로였다 — v2.853 보고의 한계). 다시 읽기가 실패하면 직전 점을 유지한다(처음 실패만 빈 목록). 회귀 `web gpuAllocRefresh2856.test.js`(소스 계약 — 수정 전 3건 실패 확인).
+  - **v2.857 특수 기능 'GPU 할당율'(도구 키 `gpu-alloc`)로 독립**(사용자 요청 — 이름은 요청 그대로, 표준 표기 '할당률' 은 `aka`): API 는 `/tools/gpu-alloc*`
+    (경로 첫 세그먼트 = 도구 키 규약 — 옛 `/tools/gpu/alloc*` 는 지웠다: 남기면 'GPU 인벤토리' 권한만으로 열려 gpu-alloc 거부가 집행되지 않는다) ·
+    `auth/toolAccess.js` 매핑 · `toolcats/catalog.js` PRESET(서버·가상화) · `SpecialTools.jsx` 는 scope 콤보 없이(법인은 화면 안 칩).
+    GPU 인벤토리의 옛 해시 `#/tools/gpu/alloc` 는 새 도구로 넘기고, 바로가기 단추는 `toolAllowed('gpu-alloc')` 일 때만 보인다.
   - ⚠ 정직 기록: `HostGraphicsInfo.vm` 이 꺼진 VM 을 싣는지, 이 현장 vCenter 가 동적 DirectPath `assignedId` 를 주는지는 실장비로 확인하지 못했다
     (꺼진 VM 은 목록에 있어도 할당에 넣지 않으므로 결과는 같다). 한 VM 의 vGPU 장치 둘이 한 GPU 목록에 한 번만 오면 GPU 단위 할당이 한 장치분으로 적게 잡힌다(호스트 합은 정확).

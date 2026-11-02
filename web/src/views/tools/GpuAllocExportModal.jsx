@@ -3,7 +3,7 @@
  *   '계층 표 엑셀 내보내기' · 사용자 요청 "만들어줘").
  *
  * 범위는 화면 그대로(scope · 고른 법인) — 창에서 바꾸지 않는다. 고르는 것은 계층 표에 넣을 단계와 시트뿐이다.
- * 범위 글자 · 호스트·GPU 수 · 파일 이름은 서버 /tools/gpu/alloc/export-meta 가 준다(내려받기와 같은 함수 — 이름을 화면에서 지어내지 않는다).
+ * 범위 글자 · 호스트·GPU 수 · 파일 이름은 서버 /tools/gpu-alloc/export-meta 가 준다(내려받기와 같은 함수 — 이름을 화면에서 지어내지 않는다).
  * 실패(409 동시 내보내기 · 403 · 400)는 파일로 저장하지 않고 창 안에 말한다(downloadFailText).
  */
 import React, { useEffect, useState } from 'react';
@@ -32,13 +32,13 @@ export function GpuAllocExportModal({ scope = '', vcSel = null, onClose }) {
   const rangeQ = allocExportQuery({ scope, vcSel });
   // 파일 내보내기는 data.csv 권한(v2.643 — 소스 스윕 csvGate2643 가 이 파일에도 요구한다). 부모도 막지만 창 스스로 한 번 더 막는다.
   const allowed = canCsv();
-  useEffect(() => { if (!allowed) return; setMeta(null); setMetaErr(null); run(fetchJson(`/tools/gpu/alloc/export-meta${rangeQ}`), setMeta, setMetaErr); }, [rangeQ, run, allowed]);
+  useEffect(() => { if (!allowed) return; setMeta(null); setMetaErr(null); run(fetchJson(`/tools/gpu-alloc/export-meta${rangeQ}`), setMeta, setMetaErr); }, [rangeQ, run, allowed]);
   const toggleSheet = (k) => setSheets((prev) => (prev.includes(k) ? prev.filter((x) => x !== k) : [...prev, k]));
   const noSheet = sheets.length === 0;
   const fileName = meta?.fileNames?.[depth] || '';
   const download = async () => {
     setMsg(''); setBusy(true);
-    try { await downloadFile(`/tools/gpu/alloc.xlsx${allocExportQuery({ scope, vcSel, depth, sheets })}`); onClose?.(); }
+    try { await downloadFile(`/tools/gpu-alloc.xlsx${allocExportQuery({ scope, vcSel, depth, sheets })}`); onClose?.(); }
     catch (e) { setMsg(downloadFailText(e)); }
     finally { setBusy(false); }
   };
