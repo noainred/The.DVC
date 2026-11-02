@@ -55,6 +55,10 @@
   `onClick={onRollback}` 이 클릭 이벤트를 본문에 펼쳐 요청이 나가지 않았다(U2-1 · v2.846 회귀) · SSH 인증 실패로 멈춘(failed · stopped) 작업의 첫 되돌리기도 `sshFixed` 필요(S2-2) ·
   M4 는 `jobDirectorId` 로 센다(directorId 없는 옛 대상 — D2-5) · 기동 때 **HTTP 를 열기 전에** 이어 읽을 작업(원격 단계 · 되돌리는 중)의 잠금을 선점하고(`reserveInstallResumeLocks`) kick 이 넘겨받는다 ·
   이어 읽기가 잠금을 못 잡으면 'failed' 로 적지 않고 30초 뒤 다시(러너는 서버에서 돈다 — C2-2) · 화면 동의 `runningUnknownOk` 는 **지금 사전 점검이 확인 불가일 때만** 시작 본문에 싣는다(U2-5).
+- **v2.850 번들 받는 곳 · 서버 디렉터리**(사용자 요청 · `bareosBundleSource2850` 변이 10/10 · 웹 `bareosBundleSource2850`): 받는 주소는 화면 저장값 > env `BAREOS_BUNDLE_BASE_URL` > 업그레이드 패키지 주소에서 유도
+  (`bundleSourceInfo` · 저장 `bundleSource.js` — http/https · 계정 정보 · ?# 금지 · `ssrfBlockReason` 차단 대역 거부). **서버 디렉터리**는 읽기만 한다(복사 · 삭제 없음 — 지우기는 받은 번들 폴더만) ·
+  같은 서명 · 해시 검증을 지난 판만 쓰고(`listAllBundles` · `pickBundle` 이 두 폴더) · 개요(화면 열기)가 검증(같은 파일은 기억 · 동시 해시 하나) · 막 바뀐 본체는 `SETTLE_MS` 동안 '확인 중'(서버 디렉터리만 — 포탈이 받은 직후 검증을 막지 않게) ·
+  심링크 · 일반 파일이 아닌 것 거부 · 받기는 서버 디렉터리에 같은 판이 검증돼 있으면 받지 않는다.
 - **데모**: mock + 실제 Director 미등록이면 `demo.js`(시간으로 진행하는 합성 작업 · 판정은 실제 코드 · 장비에 닿지 않음).
 - 실환경 미확인(추정 — 첫 현장 설치에서 확인할 것): Bareos `current` 사전 공개판 RPM 이 Rocky 9.x 의 각 마이너에서 `--alldeps` 로 풀리는지(CI 는 rockylinux:9 최신에서만 확인) ·
   `bconsole -c`(이름 있는 Console) TLS-PSK 접속 출력 모양 · `update_bareos_tables` 가 카탈로그 유지 재설치에서 판 차이를 맞추는지 · WebUI 첫 화면 응답 코드.

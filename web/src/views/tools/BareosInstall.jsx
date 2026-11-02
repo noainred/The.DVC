@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { fetchJson, postJson, delJson } from '../../api.js';
+import { fetchJson, postJson, putJson, delJson } from '../../api.js';
 import { Loading, ErrorBox } from '../../components/ui.jsx';
 import { STable } from '../../components/STable.jsx';
 import Select from '../../components/Select.jsx';
@@ -8,6 +8,7 @@ import {
   checkView, checkCountsText, stepView, jobView, edgeAgeText, targetModeText, uploadText, stepDurText, fixesOrdered, retryLabel,
   defaultPlan, planBody, planIssues, PYVMOMI_REASON, WEEKDAY_KO, bytesText, whenText,
   RUNNING_UNKNOWN_OK_LABEL, runningUnknown, volumesSizeText, okOrThrow, rollbackCauseText,
+  bundleFromText, importDirStateText, bundleWhereText, bundleStateView, bundleSourceHelp,
 } from './bareosInstallText.js';
 
 /**
@@ -51,6 +52,8 @@ function Stepper({ step, reinstall }) {
 /* ───────── 번들 ───────── */
 function BundleCard({ ov, onReload, say, writable }) {
   const [busy, setBusy] = useState(false);
+  const src = ov.bundleSource || null;
+  const [edit, setEdit] = useState(null);   // v2.850 받는 곳 · 서버 디렉터리 편집({ baseUrl, importDir })
   const b = (ov.bundles || []).find((x) => x.ok) || null;
   const f = ov.fetch;
   const act = async (fn, okText) => { setBusy(true); try { await fn(); if (okText) say({ ok: true, text: okText }); await onReload(); } catch (e) { say({ ok: false, text: e.message }); } finally { setBusy(false); } };
@@ -60,28 +63,54 @@ function BundleCard({ ov, onReload, say, writable }) {
         <div style={{ flex: '1 1 380px', minWidth: 0 }}>
           <b>오프라인 번들</b>
           <div className="muted" style={{ fontSize: 12, marginTop: 2, overflowWrap: 'anywhere' }}>
-            Rocky/RHEL 9 용 Bareos · PostgreSQL · WebUI · VMware 플러그인(VDDK 포함) · pyVmomi 8.x 휠 묶음입니다. 포탈 릴리스와 <b>같은 서명 키</b>로 서명된 번들만 씁니다. 받는 곳: {ov.bundleBaseUrl || '—'}
+            Rocky/RHEL 9 용 Bareos · PostgreSQL · WebUI · VMware 플러그인(VDDK 포함) · pyVmomi 8.x 휠 묶음입니다. 포탈 릴리스와 <b>같은 서명 키</b>로 서명된 번들만 씁니다(어디서 받든 같은 검증).
           </div>
+          <div style={{ fontSize: 12, marginTop: 4, overflowWrap: 'anywhere' }}>받는 곳: <code>{ov.bundleBaseUrl || '—'}</code>{src ? <span className="muted"> · {bundleFromText(src.from)}</span> : null}</div>
+          {src && <div style={{ fontSize: 12, marginTop: 2, overflowWrap: 'anywhere' }}>서버 디렉터리: {src.importDir ? <><code>{src.importDir}</code> <Badge cls={importDirStateText(src.importDirState).cls}>{importDirStateText(src.importDirState).text}</Badge></> : <span className="muted">정하지 않음</span>}</div>}
+          {src?.loadError && <div className="banner warn" style={{ marginTop: 4, fontSize: 12 }}>{src.loadError}</div>}
         </div>
-        <div style={{ ...ROW, flex: 'none' }}>
+        {/* v2.850(Chromium 400 — 단추 셋이 줄지 않아 16px 넘쳤다): 단추 묶음도 줄고 줄바꿈한다 */}
+        <div style={{ ...ROW, flex: '0 1 auto', minWidth: 0 }}>
           <button type="button" className="login-btn" style={BTN} disabled={busy || !writable || (f && !f.doneAt)} onClick={() => act(async () => okOrThrow(await postJson(`${P}/bundle/fetch`, {})), '번들 받기를 시작했습니다 — 아래에 진행이 보입니다.')}>번들 받기(최신)</button>
           <button type="button" className="logout-btn" style={BTN} disabled={busy || !writable} onClick={() => act(async () => okOrThrow(await postJson(`${P}/bundle/rescan`, {})), '번들 폴더를 다시 확인했습니다(서명·해시).')}>다시 확인</button>
+          {src && <button type="button" className="logout-btn" style={BTN} disabled={busy || !writable} onClick={() => setEdit((e) => (e ? null : { baseUrl: src.savedUrl || '', importDir: src.importDir || '' }))}>{edit ? '받는 곳 닫기' : '받는 곳 · 디렉터리 바꾸기'}</button>}
         </div>
       </div>
+      {edit && src && (
+        <div className="card" style={{ ...DEEP, marginTop: 8 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(320px, 100%), 1fr))', gap: 10 }}>
+            <label className="muted" style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12, minWidth: 0 }}>번들 받는 주소(비우면 기본)
+              <input className="input" value={edit.baseUrl} onChange={(e) => setEdit({ ...edit, baseUrl: e.target.value })} placeholder={src.envUrl || 'https://미러/…/releases/download/bareos-bundle'} aria-label="번들 받는 주소" />
+            </label>
+            <label className="muted" style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12, minWidth: 0 }}>서버 디렉터리(비우면 쓰지 않음)
+              <input className="input" value={edit.importDir} onChange={(e) => setEdit({ ...edit, importDir: e.target.value })} placeholder="/data/bareos-bundle" aria-label="서버 디렉터리" />
+            </label>
+          </div>
+          <div className="muted" style={{ fontSize: 12, marginTop: 6, overflowWrap: 'anywhere' }}>
+            <BoldText text={bundleSourceHelp(src)} />
+          </div>
+          <div style={{ ...ROW, marginTop: 8 }}>
+            <button type="button" className="login-btn" style={BTN} disabled={busy || !writable} onClick={() => act(async () => { okOrThrow(await putJson(`${P}/bundle/source`, { baseUrl: edit.baseUrl.trim(), importDir: edit.importDir.trim() }), '저장하지 못했습니다.'); setEdit(null); }, '번들 받는 곳 · 서버 디렉터리를 저장했습니다.')}>저장</button>
+            <button type="button" className="logout-btn" style={BTN} disabled={busy} onClick={() => setEdit(null)}>취소</button>
+          </div>
+        </div>
+      )}
       {f && <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>받기: {f.doneAt ? (f.phase === 'done' ? `끝 · ${f.version}` : `실패 — ${f.error || '사유 미상'}`) : `${f.phase} · ${f.version || ''} ${f.total ? `${bytesText(f.sent)} / ${bytesText(f.total)}` : ''}`}</div>}
       <div className="table-wrap" style={{ marginTop: 8 }}>
         <STable minWidth={760}>
-          <thead><tr><th>번들</th><th>상태</th><th>Bareos</th><th>PostgreSQL</th><th>pyVmomi(휠)</th><th>VDDK</th><th className="right">크기</th><th data-nosort>동작</th></tr></thead>
+          <thead><tr><th>번들</th><th>위치</th><th>상태</th><th>Bareos</th><th>PostgreSQL</th><th>pyVmomi(휠)</th><th>VDDK</th><th className="right">크기</th><th data-nosort>동작</th></tr></thead>
           <tbody>
-            {(ov.bundles || []).length === 0 && <tr><td colSpan={8} className="center muted" style={{ padding: 14 }}>받아 둔 번들이 없습니다 — ‘번들 받기’ 를 누르세요.</td></tr>}
+            {(ov.bundles || []).length === 0 && <tr><td colSpan={9} className="center muted" style={{ padding: 14 }}>받아 둔 번들이 없습니다 — ‘번들 받기’ 를 누르거나, 서버 디렉터리에 번들 파일 3개를 두세요.</td></tr>}
             {(ov.bundles || []).map((x) => (
-              <tr key={x.version}>
+              <tr key={`${x.where || 'bundle'}:${x.version}`}>
                 <td><code>{x.version}</code></td>
-                <td>{x.ok === true ? <Badge cls="green">✓ 서명·해시 확인</Badge> : x.ok === false ? <Badge cls="red">사용 불가 — {x.reason}</Badge> : <Badge cls="gray">확인 전</Badge>}</td>
+                <td>{bundleWhereText(x.where)}</td>
+                <td><Badge cls={bundleStateView(x).cls}>{bundleStateView(x).text}</Badge></td>
                 <td>{x.contents?.bareosVersion || '—'}</td><td>{x.contents?.postgresqlVersion || '—'}</td>
                 <td style={WRAP}>{x.contents?.pyvmomi?.versions?.join(' · ') || '—'}</td><td style={{ ...WRAP, fontSize: 12 }}>{x.contents?.vddk?.join(' · ') || '—'}</td>
                 <td className="right">{bytesText(x.size)}</td>
-                <td><button type="button" className="logout-btn" style={BTN} disabled={busy || !writable || ov.demo} onClick={() => act(() => delJson(`${P}/bundle/${encodeURIComponent(x.version)}`), `번들 ${x.version} 을(를) 지웠습니다.`)}>지우기</button></td>
+                {/* v2.850: 서버 디렉터리의 번들은 사람의 파일 — 포탈이 지우지 않는다 */}
+                <td>{x.where === 'import' ? <span className="muted" title="서버 디렉터리의 파일은 포탈이 지우지 않습니다">—</span> : <button type="button" className="logout-btn" style={BTN} disabled={busy || !writable || ov.demo} onClick={() => act(() => delJson(`${P}/bundle/${encodeURIComponent(x.version)}`), `번들 ${x.version} 을(를) 지웠습니다.`)}>지우기</button>}</td>
               </tr>
             ))}
           </tbody>

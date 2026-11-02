@@ -17,7 +17,8 @@ import { directorById } from '../../bareos/settings.js';
 import { claimSetup, releaseSetupLock, setupBusyReason } from '../../bareos/setupLocks.js';
 import { setupAuditReason } from './bareosBackup.js';
 import { STEPS } from '../../bareos/install/plan.js';
-import { bundleBaseUrl, listBundles, fetchLatestBundle, bundleFetchStatus, deleteBundle } from '../../bareos/install/bundle.js';
+import { bundleSourceInfo, listAllBundles, fetchLatestBundle, bundleFetchStatus, deleteBundle, bundleDir, importDirState } from '../../bareos/install/bundle.js';
+import { getBundleSource, saveBundleSource } from '../../bareos/install/bundleSource.js';
 import { listInstallTargets } from '../../bareos/install/targets.js';
 import {
   runPrecheck, startInstall, retryInstall, stopInstall, rollbackAllInstall, installJob, listInstallJobs, knownHostAddrs, lastJobFor, finishContext,
@@ -71,11 +72,18 @@ async function finishOp(req, res, label, fn) {
 }
 const vcName = (id) => (store.get()?.vcenters || []).find((v) => v.id === id)?.name || id;
 
+/** v2.850 번들 받는 곳 · 서버 디렉터리(화면 안내 — 전체 범위 관리자만 보는 라우트). */
+function bundleSourceView() {
+  const info = bundleSourceInfo();
+  const src = getBundleSource();
+  return { url: info.url, from: info.from, savedUrl: src.baseUrl, envUrl: String(process.env.BAREOS_BUNDLE_BASE_URL || '').trim(), importDir: src.importDir, importDirState: importDirState(src.importDir), bundleDir: bundleDir(), loadError: src.loadError || '' };
+}
+
 export function registerBareosInstall(api) {
 
 /** 개요 — 대상 표 · 번들 · 받기 상태 · 최근 작업(비밀 없음). */
 api.get(P, adminOnly, fullScopeOnly, async (req, res) => {
-  if (isDemoActive()) return res.json(demo.overview());
+  if (isDemoActive()) return res.json({ ...demo.overview(), bundleBaseUrl: bundleSourceInfo().url, bundleSource: bundleSourceView() });   // v2.850: 받는 곳은 데모도 실제 설정값(저장하면 바로 보이게)
   try {
     const known = knownHostAddrs();
     const targets = listInstallTargets({ knownHostAddrs: known }).map((t) => {
@@ -83,7 +91,8 @@ api.get(P, adminOnly, fullScopeOnly, async (req, res) => {
       return { ...t, lastJob: j ? { id: j.id, status: j.status, mode: j.mode, updatedAt: j.updatedAt, currentStep: j.currentStep ?? null } : null };
     });
     res.json({
-      ok: true, demo: false, targets, bundles: await listBundles({ verify: false }), fetch: bundleFetchStatus(), bundleBaseUrl: bundleBaseUrl(),
+      // v2.850: 두 폴더(받은 번들 폴더 · 서버 디렉터리)를 화면을 열 때 검증한다(같은 파일은 기억 — 해시는 새 · 바뀐 파일만) — '받아 두면 적용'
+      ok: true, demo: false, targets, bundles: await listAllBundles({ verify: true }), fetch: bundleFetchStatus(), bundleBaseUrl: bundleSourceInfo().url, bundleSource: bundleSourceView(),
       jobs: listInstallJobs().slice(0, 20).map((j) => ({ id: j.id, vcenterId: j.vcenterId, vcenterName: j.vcenterName, mode: j.mode, status: j.status, by: j.by, createdAt: j.createdAt, updatedAt: j.updatedAt })),
       steps: STEPS, otpOff: true,
     });
@@ -103,7 +112,28 @@ api.post(`${P}/bundle/fetch`, adminOnly, fullScopeOnly, fullWriteOnly, (req, res
 /** 폴더 다시 읽기(손으로 넣은 번들 검증 — 해시는 스트림). */
 api.post(`${P}/bundle/rescan`, adminOnly, fullScopeOnly, fullWriteOnly, async (req, res) => {
   if (isDemoActive()) return res.json(demo.overview());
-  try { res.json({ ok: true, bundles: await listBundles({ verify: true }) }); } catch (e) { sendErr(res, e); }
+  try { res.json({ ok: true, bundles: await listAllBundles({ verify: true }), bundleSource: bundleSourceView() }); } catch (e) { sendErr(res, e); }
+});
+
+/**
+ * v2.850 번들 받는 주소 · 서버 디렉터리 저장(사용자 요청). 번들은 어느 곳에서 오든 **같은 서명 · 해시 검증**을 지나야 쓴다 — 주소 · 디렉터리를 바꿔도
+ * 서명 없는 번들이 설치에 쓰이지 않는다. 주소는 차단 대역 거부(SSRF) · 계정 정보 금지, 디렉터리는 절대 경로 · 읽기만. 감사에 값(비밀 없음).
+ */
+api.put(`${P}/bundle/source`, adminOnly, fullScopeOnly, fullWriteOnly, (req, res) => {
+  if (!installGate(req, res)) return;   // 데모 계정 403 · OTP 를 등록한 계정만(이 모듈의 쓰기 규칙 — 설치에 쓸 번들의 출처를 바꾼다)
+  const b = req.body && typeof req.body === 'object' ? req.body : {};
+  const body = {};
+  if (b.baseUrl !== undefined) { if (typeof b.baseUrl !== 'string') return res.status(400).json({ ok: false, code: 'invalid', reason: '번들 주소는 글자로 보내세요.' }); body.baseUrl = b.baseUrl; }
+  if (b.importDir !== undefined) { if (typeof b.importDir !== 'string') return res.status(400).json({ ok: false, code: 'invalid', reason: '디렉터리는 글자로 보내세요.' }); body.importDir = b.importDir; }
+  if (!Object.keys(body).length) return res.status(400).json({ ok: false, code: 'invalid', reason: '바꿀 값(baseUrl · importDir)이 없습니다.' });
+  try {
+    const saved = saveBundleSource(body);
+    audit(req, 'Bareos 완전 설치 번들 받는 곳', '', `주소 ${saved.baseUrl || '(기본)'} · 서버 디렉터리 ${saved.importDir || '(없음)'}`);
+    res.json({ ok: true, bundleSource: bundleSourceView() });
+  } catch (e) {
+    if (e?.code === 'invalid') return res.status(400).json({ ok: false, code: 'invalid', reason: String(e.message).slice(0, 300) });
+    sendErr(res, e);
+  }
 });
 
 api.delete(`${P}/bundle/:version`, adminOnly, fullScopeOnly, fullWriteOnly, (req, res) => {
