@@ -1,6 +1,14 @@
 {
   "notes": [
     {
+      "version": "2.852.1",
+      "date": "2026-11-02",
+      "title": "Bareos WebUI 계정 만들기 실패('Failed to connect to Director') 수정",
+      "notes": [
+        "법인별 Bareos › WebUI 계정 › 계정 추가가 '새 계정으로 Director 에 붙지 못했습니다 — Failed to connect to Director' 로 실패하고 계정이 되돌려지던 것을 고쳤습니다. 계정은 맞게 만들었지만, 만든 뒤 하는 접속 시험이 TLS 를 끈 계정에 TLS 로 붙으려다 실패했습니다(Director 로그 'Tls handshake failed'). 법인 엣지가 대행하는 법인은 중앙과 그 엣지 포탈이 모두 이 판으로 올라간 뒤 다시 만드세요."
+      ]
+    },
+    {
       "version": "2.852.0",
       "date": "2026-11-02",
       "title": "GPU 할당 계층 — 법인 › 데이터센터 › 클러스터 › 호스트 › GPU › VM 의 vGPU/GPU 할당량·예비량 + CSV·엑셀 내보내기",
