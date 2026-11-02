@@ -14,6 +14,7 @@ import { listInventory } from '../../central/inventory.js';
 import { listTargetsRaw } from '../../agent/deployRegistry.js';
 import { loadSettings, siteFor, directorById } from '../settings.js';
 import { agentLastContact } from '../../central/agentContact.js';
+import { registryHosts, vcHostOf } from '../vcHost.js';
 
 export const EDGE_STALE_MS = 30 * 60_000;
 const lc = (s) => String(s ?? '').trim().toLowerCase();
@@ -22,7 +23,7 @@ const lc = (s) => String(s ?? '').trim().toLowerCase();
  * 순수 판정(시험용 주입). knownHostAddrs: vcenterId → 이 기능이 설치한 서버 주소(작업 기록).
  * @returns {{ vcenterId, vcenterName, vcHost, agent, edgeAt, edgeAgeMs, targetId, sshHost, sshPort, sshUser, hasPassword, director, mode, can, why }[]}
  */
-export function buildTargets({ vcenters = [], inventory = [], deployTargets = [], settings = { directors: [], sites: [] }, knownHostAddrs = new Map(), now = Date.now(), contactOf = () => null } = {}) {
+export function buildTargets({ vcenters = [], inventory = [], deployTargets = [], settings = { directors: [], sites: [] }, knownHostAddrs = new Map(), now = Date.now(), contactOf = () => null, vcHosts = new Map() } = {}) {
   const inv = new Map(inventory.map((i) => [i.vcenterId, i]));
   return vcenters.map((v) => {
     const i = inv.get(v.id) || null;
@@ -37,7 +38,8 @@ export function buildTargets({ vcenters = [], inventory = [], deployTargets = []
     const edgeAt = invAt && contactAt ? Math.max(invAt, contactAt) : (invAt || contactAt);
     const edgeAgeMs = edgeAt ? Math.max(0, now - edgeAt) : null;
     const row = {
-      vcenterId: v.id, vcenterName: v.name || v.id, vcHost: String(v.host || '').replace(/^https?:\/\//, '').replace(/\/.*$/, ''),
+      // v2.851.1(사용자 화면 — 재현): 주소는 등록부에서(vcHost.js) — 수집 스냅샷의 vCenter 항목에는 host 가 없어 늘 빈 값이었다
+      vcenterId: v.id, vcenterName: v.name || v.id, vcHost: vcHosts.get(String(v.id)) || vcHostOf(v.host),
       agent, edgeAt, edgeAgeMs,
       targetId: t?.id || '', sshHost: t?.host || '', sshPort: Number(t?.port) || 22, sshUser: t?.username || '',
       // 4·5단계(autoSetup)가 비밀번호 SSH 만 쓴다 — 키만 저장된 대상은 아직 고를 수 없다
@@ -64,7 +66,7 @@ export function listInstallTargets({ knownHostAddrs = new Map() } = {}) {
   const snap = store.get();
   let inventory = []; try { inventory = listInventory(); } catch { inventory = []; }
   let deployTargets = []; try { deployTargets = listTargetsRaw(); } catch { deployTargets = []; }
-  return buildTargets({ vcenters: snap?.vcenters || [], inventory, deployTargets, settings: loadSettings(), knownHostAddrs, contactOf: agentLastContact });
+  return buildTargets({ vcenters: snap?.vcenters || [], inventory, deployTargets, settings: loadSettings(), knownHostAddrs, contactOf: agentLastContact, vcHosts: registryHosts() });
 }
 
 /** 공개용(비밀·내부 id 정리). */

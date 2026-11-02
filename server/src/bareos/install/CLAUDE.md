@@ -64,6 +64,9 @@
   (`rpm.before` 로 판정 · **비면 rpmdb 못 읽음 — cause rpmdb 로 멈춤**) · 러너 `export LC_ALL=C`(영어 원문 판정) · `base-pkg-pinned`(dnf-conflict 앞 · 고정 = 충돌 이름을 요구하는 @System 줄만 ·
   명령 이름은 첫 글자 영숫자 · 출력에 없는 까닭은 단정하지 않음) · 사전 점검 `osrel`(경고만 · 수는 번들에 든 것). 남긴 것: 서버에 openssl 이 없을 때 · 9.4 VM `--assumeno` 실측 없음 ·
   되돌리기 실패 뒤 다시 하기의 config-test 오분류(기존 결함).
+- **v2.851.1 매핑 vcserver 는 vCenter 등록부에서**(2026-11-02 사용자 화면 — 마무리 '사이트 매핑의 vcserver 주소가 올바르지 않습니다' · `bareosVcHost2851_1` · `bareosInstallJob2844` ⑧ · 변이 7/7):
+  수집 스냅샷의 vCenter 항목에는 host 가 **없다** — 주소는 `bareos/vcHost.js registryHosts()`(vcenters.json · 스킴 · 포트 · 경로 제거)에서만. 7단계 vcserver = 지금 매핑 값 > 작업 값 > 등록부 ·
+  **셋 다 없으면 저장하지 않고 멈춘다**(빈 값 저장 금지) · 설정 화면 매핑 미리 채우기도 같은 출처 · 마무리의 빈 vcserver 는 고칠 곳을 말한다.
 - **데모**: mock + 실제 Director 미등록이면 `demo.js`(시간으로 진행하는 합성 작업 · 판정은 실제 코드 · 장비에 닿지 않음).
 - 실환경 미확인(추정 — 첫 현장 설치에서 확인할 것): Bareos `current` 사전 공개판 RPM 이 Rocky 9.x 의 각 마이너에서 `--alldeps` 로 풀리는지(CI 는 rockylinux:9 최신에서만 확인) ·
   `bconsole -c`(이름 있는 Console) TLS-PSK 접속 출력 모양 · `update_bareos_tables` 가 카탈로그 유지 재설치에서 판 차이를 맞추는지 · WebUI 첫 화면 응답 코드.

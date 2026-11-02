@@ -232,3 +232,28 @@ test('⑦ 반증 고친 것 — 더 새 작업 · 주소 바뀜 · 업로드 중
   assert.equal(jc.status, 'stopped', JSON.stringify(jc.failure));
   assert.equal(R2.runs, runsBefore, '러너를 띄우지 않았다');
 });
+
+// v2.851.1(2026-11-02 사용자 화면 '사이트 매핑의 vcserver 주소가 올바르지 않습니다' — 재현): 7단계가 작업의 vcHost(수집 스냅샷 — host 칸이 없어 늘 '')로
+//   매핑을 저장해 마무리(FD 지문 · INI)가 거부됐다. 지금 매핑 값 > 작업 값 > vCenter 등록부 · 셋 다 없으면 저장하지 않고 멈춘다.
+test('⑧ 7단계 vcserver — 등록부에서 채운다 · 쓰던 매핑 값은 지키고 · 모르면 빈 값을 저장하지 않고 멈춘다', async () => {
+  // ⓐ 작업 vcHost 가 비어도(스냅샷) 등록부 주소로 저장
+  reset();
+  fs.writeFileSync(path.join(tmp, 'vcenters.json'), JSON.stringify({ vcenters: [{ id: 'vc1', name: '법인1', host: 'https://vc1-reg.corp:443/sdk', username: 'u' }] }));
+  let R = fakeRemote(); deps(R, target({ vcHost: '' }));
+  let j0 = await J.startInstall({ vcenterId: 'vc1', body: {}, by: 'admin' });
+  assert.ok(await J._settleForTest());
+  let j = J.installJob(j0.id);
+  assert.equal(j.status, 'done', JSON.stringify(j.failure));
+  let site = loadSettings().sites.find((x) => x.vcenterId === 'vc1');
+  assert.equal(site.vcserver, 'vc1-reg.corp', '스킴 · 포트 · 경로를 뺀 등록부 주소');
+  assert.equal(site.configFile, '/etc/bareos/vmware/vc1-reg.corp.ini');
+  // ⓑ 등록부에도 없으면 7단계가 멈추고 매핑을 저장하지 않는다
+  reset();
+  R = fakeRemote(); deps(R, target({ vcHost: '' }));
+  j0 = await J.startInstall({ vcenterId: 'vc1', body: {}, by: 'admin' });
+  assert.ok(await J._settleForTest());
+  j = J.installJob(j0.id);
+  assert.equal(j.status, 'failed'); assert.equal(j.failure.step, 7);
+  assert.match(j.failure.message, /주소를 vCenter 등록부에서 찾지 못해 매핑을 저장하지 않았습니다/);
+  assert.equal(loadSettings().sites.some((x) => x.vcenterId === 'vc1'), false, '빈 vcserver 매핑을 저장하지 않는다');
+});
