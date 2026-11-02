@@ -126,10 +126,15 @@ function RunsTab({ d, boardHint = false }) {
   //   옛 진행 현황 링크(Backup › Summary 의 '진행 현황' 등)나 주소에 현황판 보기가 있으면 펼친 채로 연다(boardHint).
   //   처음 그릴 때는 부모가 바꾸기 전 주소로 정한 boardHint, 이 화면이 떠 있는 동안 들어온 주소는 hashchange 로 직접 본다 —
   //   boardHint 를 효과 의존성으로만 보면 한 번 true 가 된 뒤(접었다가 다시 진행 현황 링크로 오면) 값이 그대로라 펼치지 않았다(Chromium 400 확인).
-  //   리스너는 부모가 렌더 중에 주소를 runs 로 바꾸기 전, 이벤트가 도는 동안 실행되므로 옛 live 주소를 그대로 본다.
+  //   지금 주소(location.hash)가 아니라 이벤트의 newURL 을 본다 — 앞서 등록된 리스너의 갱신이 먼저 그려지면 부모가 렌더 중에 주소를 runs 로 바꿔
+  //   이 리스너가 돌 때는 옛 live 주소가 이미 없다(Chromium 3회차 — 접은 뒤 같은 화면에서 진행 현황 링크로 오면 펼치지 않았다).
   const [board, setBoard] = useState(!!boardHint);
   useEffect(() => {
-    const onHash = () => { if (runsBoardOpen(window.location.hash)) setBoard(true); };
+    const onHash = (e) => {
+      const url = String(e?.newURL || window.location.href);
+      const i = url.indexOf('#');
+      if (runsBoardOpen(i >= 0 ? url.slice(i) : '')) setBoard(true);
+    };
     window.addEventListener('hashchange', onHash);
     return () => window.removeEventListener('hashchange', onHash);
   }, []);
