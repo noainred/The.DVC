@@ -1853,6 +1853,8 @@
   → `central/agentContact.js`(중앙 인증 미들웨어가 모든 인증된 요청에서 기록 · 개별 토큰은 그 이름 · 공유 토큰은 아는 이름만 · 인메모리 2,000 상한) · `install/targets.js` 는 두 시각 중 최근 값.
   남긴 것: 재시작 직후에는 엣지가 다시 접속할 때까지 예전 값 · 인벤토리를 올린 적이 없는 vCenter(화면의 MI)는 엣지를 몰라 '엣지 노드 없음' 그대로(이름으로 추측하지 않는다) ·
   같은 '인벤토리 수신 시각' 판정을 쓰는 다른 화면이 있는지는 이번에 훑지 않았다.
+  ⚠ 정정(내 회귀 — 전량 verify 로 드러남): 첫 구현은 미들웨어에서 판정용 '아는 엣지' 5초 캐시(`edgeNameKnown` 의 `_knownNames`)를 불러 **요청 처리 전에** 채웠다 —
+  그 요청(인벤토리 push)으로 새로 아는 이름이 된 엣지가 5초 동안 /fleet 에서 미검증(`unverifiedAgent`)이었다(`audit2601c` CEN2601-02 실패). 미들웨어는 자기 캐시(`_contactKnownNames`)를 쓴다.
 - 함께 알린 것(추정 — 실환경 미확인): 사용자의 webui-admin Profile 에는 Plugin Options ACL 줄이 없다 — 포탈 Profile 은 `*all*`. 복원의 pluginoptions 가 이 ACL 에 걸릴 수 있다.
 
 ## Bareos v2.848 백업 등록 실패 'configure: is an invalid command' — 잡 만들기 권한 안내 · 연결 진단(2026-11-02)

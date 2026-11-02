@@ -48,7 +48,8 @@ test('② buildTargets — 최근 인증 요청이 있으면 엣지 응답으로
 
 test('③ 중앙 인증 미들웨어가 기록한다 — 개별 토큰은 그 이름 · 공유 토큰은 아는 이름만', () => {
   const src = fs.readFileSync(new URL('../src/routes/central.js', import.meta.url), 'utf8');
-  assert.match(src, /noteAgentContact\(auth\.mode === 'agent' \? String\(auth\.agent \|\| ''\) : \(want && edgeNameKnown\(want\) \? want : ''\)\)/);
+  // v2.849 정정(회귀): 미들웨어는 판정용 캐시(_knownNames)를 쓰지 않고 자기 캐시를 쓴다 — 같은 캐시를 미리 채우면 /fleet 이 새 소유 엣지를 미검증으로 봤다(audit2601c CEN2601-02)
+  assert.match(src, /noteAgentContact\(auth\.mode === 'agent' \? String\(auth\.agent \|\| ''\) : \(want && edgeNameKnown\(want, _contactKnownNames\) \? want : ''\)\)/);
   const i = src.indexOf('noteAgentContact(auth.mode');
   assert.ok(i > src.indexOf("return res.status(403).json({ ok: false, reason: `이 토큰은 '${auth.agent}' 전용입니다"), '토큰 ↔ 이름 대조(거부) 뒤에만 기록한다');
   const route = fs.readFileSync(new URL('../src/bareos/install/targets.js', import.meta.url), 'utf8');
