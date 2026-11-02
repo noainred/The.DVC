@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>구조 — 9탭에서 5탭으로</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=Noto+Sans+KR:wght@400;500;700;800&display=swap">
+<style>
+body{margin:0;background:#0a0e17;color:#e6edf6;font-family:"Inter","Noto Sans KR","Apple SD Gothic Neo",sans-serif;font-size:13px}
+a{color:#3b82f6}a:hover{color:#60a5fa}
+.muted{color:#8b9bb4}
+.box{background:#141b2d;border:1px solid #243049;border-radius:10px;padding:10px 14px;display:flex;align-items:center;gap:10px;min-height:44px}
+.box.old{background:#111726;color:#aebbd0}
+.box.sub{margin-left:22px;background:#0f1626;border-style:dashed;min-height:36px;font-size:12.5px}
+.box .k{display:inline-flex;align-items:center;justify-content:center;min-width:22px;height:22px;border-radius:6px;background:#1a2236;color:#8b9bb4;font-size:11.5px;font-weight:800;flex:none}
+.box.new{border-color:#3b82f6}
+.box.new .k{background:#3b82f6;color:#ffffff}
+.to{display:inline-flex;align-items:center;gap:6px;color:#8b9bb4;font-size:12px;white-space:nowrap;margin-left:auto}
+.to b{color:#93c5fd}
+.rule{background:#141b2d;border:1px solid #243049;border-radius:10px;padding:12px 14px;display:flex;flex-direction:column;gap:6px;min-width:0}
+.rule b{font-size:13px}
+.rule span{font-size:12px;color:#8b9bb4;line-height:1.5}
+h2{margin:0;font-size:15px;font-weight:800}
+</style>
+</helmet>
+<div style="width:1440px;height:820px;box-sizing:border-box;padding:28px 32px;display:flex;flex-direction:column;gap:22px">
+  <div style="display:flex;align-items:flex-end;gap:14px;flex-wrap:wrap">
+    <div>
+      <div style="font-size:22px;font-weight:800">Bareos 탭 9개 → 5개</div>
+      <div class="muted">기능은 하나도 빼지 않습니다 — 같은 성격끼리 묶고, 한 화면은 한 질문에만 답합니다. 도구 키(권한)와 서버 API 는 그대로입니다.</div>
+    </div>
+  </div>
+
+  <div style="display:grid;grid-template-columns:minmax(0, 1.15fr) minmax(0, 1fr);gap:40px;align-items:start">
+    <div style="display:flex;flex-direction:column;gap:8px;min-width:0">
+      <h2 class="muted">지금 — 탭 9개 · 그 아래 또 탭(최대 3단계)</h2>
+      <div class="box old"><span class="k">1</span>통합 현황 <span class="to">→ <b>① 현황</b></span></div>
+      <div class="box old"><span class="k">2</span>법인별 현황 <span class="to">→ <b>② 법인</b></span></div>
+      <div class="box old"><span class="k">3</span>진행 현황 <span class="muted" style="font-size:12px">(전체 법인 · 단일 법인 · 속도 상태)</span><span class="to">→ <b>③ 운영 › 진행 · 이력</b></span></div>
+      <div class="box old"><span class="k">4</span>백업 대상 <span class="muted" style="font-size:12px">(행마다 버튼 6개)</span><span class="to">→ <b>③ 운영 › 백업 대상</b></span></div>
+      <div class="box old"><span class="k">5</span>백업 그룹 <span class="to">→ <b>③ 운영 › 백업 그룹</b></span></div>
+      <div class="box old"><span class="k">6</span>정책 · 일정 <span class="to">→ <b>④ 정책 · 보존</b></span></div>
+      <div class="box old"><span class="k">7</span>보존 · 풀 <span class="muted" style="font-size:12px">(수집 상태 표가 6과 중복)</span><span class="to">→ <b>④ 정책 · 보존</b></span></div>
+      <div class="box old"><span class="k">8</span>실행 현황 · 이력 <span class="to">→ <b>③ 운영 › 진행 · 이력</b></span></div>
+      <div class="box old"><span class="k">9</span>설정 <span class="muted" style="font-size:12px">(기본 설정 · 완전 설치 · 법인별 Bareos · 계정 통합)</span><span class="to">→ <b>⑤ 설정</b></span></div>
+      <div class="muted" style="font-size:12px;margin-top:4px">같은 탭 줄이 도구 키마다 다른 자리·다른 모양으로 두 번 그려졌고, KPI 카드 7장 · 필터 칩 10개 · 설명 문단이 화면마다 반복됐습니다.</div>
+    </div>
+
+    <div style="display:flex;flex-direction:column;gap:8px;min-width:0">
+      <h2 style="color:#93c5fd">개편 — 탭 5개 · 한 컴포넌트 · 한 자리</h2>
+      <div class="box new"><span class="k">①</span><b>현황</b><span class="muted" style="font-size:12px">28개 법인 한 표 + 지금 확인할 것</span><span class="to">조회 · 운영자도</span></div>
+      <div class="box new"><span class="k">②</span><b>법인</b><span class="muted" style="font-size:12px">폴더 › VM 트리 + 오른쪽 상세 패널</span><span class="to">조회 · 운영자도</span></div>
+      <div class="box new"><span class="k">③</span><b>운영</b><span class="muted" style="font-size:12px">관리자가 하는 일 전부</span><span class="to">관리자</span></div>
+      <div class="box sub">백업 대상 — 표는 6열, 버튼은 패널 안(지금 백업 · 결과 · 로그 · 복원 · 비활성 · 삭제)</div>
+      <div class="box sub">백업 그룹 — 그대로(법인 고르기 · 새 그룹 · 폴더에서 VM 고르기)</div>
+      <div class="box sub">진행 · 이력 — 지금 도는 백업(열린 동안만 Director 조회) + 끝난 실행 · 복원 이력</div>
+      <div class="box new"><span class="k">④</span><b>정책 · 보존</b><span class="muted" style="font-size:12px">하루 1회 수집본 — 일정 · JobDefs · FileSet · 풀 · 볼륨 · 보존을 한 페이지 구획으로</span><span class="to">조회</span></div>
+      <div class="box new"><span class="k">⑤</span><b>설정</b><span class="muted" style="font-size:12px">Director 표가 중심 · 완전 설치 · 법인별 설정 · 계정은 왼쪽 목록</span><span class="to">전체 범위 관리자</span></div>
+    </div>
+  </div>
+
+  <div style="display:grid;grid-template-columns:repeat(5, minmax(0, 1fr));gap:12px">
+    <div class="rule"><b>한 자리, 한 모양</b><span>Bareos 탭 5개는 컴포넌트 하나(BareosNav)로 — 어느 도구 키로 들어와도 같은 자리·같은 모양</span></div>
+    <div class="rule"><b>큰 숫자는 4개까지</b><span>상태 띠 카드 4장(법인 · 보호 VM · 마지막 결과 막대 · 확인 필요). 나머지 수치는 카드 안 작은 글자</span></div>
+    <div class="rule"><b>버튼은 패널로</b><span>표 행에 버튼을 늘어놓지 않고, 행을 누르면 오른쪽 패널에 상세 + 동작. 표 열은 6~8개</span></div>
+    <div class="rule"><b>설명은 접는다</b><span>‘읽는 법’ 토글 하나. 데모·범위·오류 알림은 얇은 한 줄. 각주는 한 문장</span></div>
+    <div class="rule"><b>정직한 값은 그대로</b><span>못 읽은 값은 — · ‘결과 모름’은 합계에서 빼고 표시 · 범위·데모 가림 · 옛 주소는 새 자리로 넘김</span></div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":820}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>
