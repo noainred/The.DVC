@@ -178,6 +178,18 @@ export function importDirStateText(s) {
   return ({ ok: { text: '있음 · 읽을 수 있음', cls: 'green' }, missing: { text: '없음 — 디렉터리를 만들어 두세요', cls: 'amber' }, 'not-dir': { text: '디렉터리가 아닙니다', cls: 'red' },
     unreadable: { text: '읽을 수 없습니다 — 포탈 서비스 계정에 읽기 · 실행 권한을 주세요', cls: 'red' } })[s] || { text: '정하지 않음', cls: 'gray' };
 }
+/**
+ * 받는 곳 · 디렉터리 바꾸기 안내(BoldText 로 그린다). JSX 안 템플릿에 두면 uiText 스윕이 `${…}` 뒤 별표를 JSX 텍스트로 오인한다(v2.850 verify).
+ * @param {{ envUrl?: string, bundleDir?: string }} src 서버 bundleSource 응답
+ */
+export function bundleSourceHelp(src = {}) {
+  const def = src.envUrl ? '환경 변수 주소' : '업그레이드 패키지 주소에서 만든 주소';
+  return '**받는 주소**: 그 주소 아래의 bareos-bundle.json(포인터)과 판별 파일 3개를 받습니다. 사내 미러 주소를 넣으세요(http/https · 계정 정보 없이). '
+    + `비우면 ${def}를 씁니다.\n`
+    + '**서버 디렉터리**: 포탈 서버의 이 디렉터리에 번들 파일 3개(bareos-bundle-<판>.tar.gz · bareos-bundle-<판>.json · bareos-bundle-<판>.manifest.json)를 두면 '
+    + '화면을 열거나 ‘다시 확인’ 을 누를 때 서명 · 해시를 확인하고 설치에 씁니다(복사 · 삭제하지 않습니다). 포탈 서비스 계정이 읽을 수 있어야 하고, 막 복사한 파일은 잠시 뒤 확인합니다.\n'
+    + `포탈이 받은 번들은 ${src.bundleDir || '—'} 에 있습니다(이 폴더에 파일 3개를 직접 넣어도 됩니다).`;
+}
 /** 번들 행의 위치 글자 — 받은 번들 폴더(지우기 가능) · 서버 디렉터리(읽기만). */
 export const bundleWhereText = (w) => (w === 'import' ? '서버 디렉터리' : '받은 번들');
 /** 번들 행의 상태 — 확인됨 · 사용 불가 · 확인 중(막 바뀐 파일) · 확인 전. */

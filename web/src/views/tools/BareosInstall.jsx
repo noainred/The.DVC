@@ -8,7 +8,7 @@ import {
   checkView, checkCountsText, stepView, jobView, edgeAgeText, targetModeText, uploadText, stepDurText, fixesOrdered, retryLabel,
   defaultPlan, planBody, planIssues, PYVMOMI_REASON, WEEKDAY_KO, bytesText, whenText,
   RUNNING_UNKNOWN_OK_LABEL, runningUnknown, volumesSizeText, okOrThrow, rollbackCauseText,
-  bundleFromText, importDirStateText, bundleWhereText, bundleStateView,
+  bundleFromText, importDirStateText, bundleWhereText, bundleStateView, bundleSourceHelp,
 } from './bareosInstallText.js';
 
 /**
@@ -87,7 +87,7 @@ function BundleCard({ ov, onReload, say, writable }) {
             </label>
           </div>
           <div className="muted" style={{ fontSize: 12, marginTop: 6, overflowWrap: 'anywhere' }}>
-            <BoldText text={`**받는 주소**: 그 주소 아래의 bareos-bundle.json(포인터)과 판별 파일 3개를 받습니다. 사내 미러 주소를 넣으세요(http/https · 계정 정보 없이). 비우면 ${src.envUrl ? '환경 변수 주소' : '업그레이드 패키지 주소에서 만든 주소'}를 씁니다.\n**서버 디렉터리**: 포탈 서버의 이 디렉터리에 번들 파일 3개(bareos-bundle-<판>.tar.gz · bareos-bundle-<판>.json · bareos-bundle-<판>.manifest.json)를 두면 화면을 열거나 ‘다시 확인’ 을 누를 때 서명 · 해시를 확인하고 설치에 씁니다(복사 · 삭제하지 않습니다). 포탈 서비스 계정이 읽을 수 있어야 하고, 막 복사한 파일은 잠시 뒤 확인합니다.\n포탈이 받은 번들은 ${src.bundleDir} 에 있습니다(이 폴더에 파일 3개를 직접 넣어도 됩니다).`} />
+            <BoldText text={bundleSourceHelp(src)} />
           </div>
           <div style={{ ...ROW, marginTop: 8 }}>
             <button type="button" className="login-btn" style={BTN} disabled={busy || !writable} onClick={() => act(async () => { okOrThrow(await putJson(`${P}/bundle/source`, { baseUrl: edit.baseUrl.trim(), importDir: edit.importDir.trim() }), '저장하지 못했습니다.'); setEdit(null); }, '번들 받는 곳 · 서버 디렉터리를 저장했습니다.')}>저장</button>

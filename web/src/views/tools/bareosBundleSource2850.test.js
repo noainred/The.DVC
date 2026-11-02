@@ -2,7 +2,7 @@
 import { describe, it, expect } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
-import { importDirStateText, bundleWhereText, bundleStateView, bundleFromText } from './bareosInstallText.js';
+import { importDirStateText, bundleWhereText, bundleStateView, bundleFromText, bundleSourceHelp } from './bareosInstallText.js';
 
 const here = path.dirname(new URL(import.meta.url).pathname);
 const src = fs.readFileSync(path.join(here, 'BareosInstall.jsx'), 'utf8');
@@ -19,6 +19,12 @@ describe('v2.850 번들 받는 곳 · 서버 디렉터리', () => {
     expect(bundleStateView({ ok: null, reason: '파일이 막 바뀌었습니다' }).cls).toBe('amber');
     expect(bundleStateView({ ok: null, reason: '확인 전' }).cls).toBe('gray');
     expect(bundleStateView({ ok: false, reason: 'x' }).text).toBe('사용 불가 — x');
+  });
+  it('안내 문구 — 기본 출처 · 받은 번들 폴더 · 백틱 없음(BoldText) · 화면은 이 함수로만 그린다', () => {
+    expect(bundleSourceHelp({ envUrl: 'https://e/b', bundleDir: '/etc/vmware-portal/packages/bareos-bundle' })).toMatch(/비우면 환경 변수 주소를 씁니다[\s\S]*\/etc\/vmware-portal\/packages\/bareos-bundle 에 있습니다/);
+    expect(bundleSourceHelp({})).toMatch(/업그레이드 패키지 주소에서 만든 주소[\s\S]*— 에 있습니다/);
+    expect(bundleSourceHelp({})).not.toMatch(/`/);
+    expect(src).toMatch(/<BoldText text=\{bundleSourceHelp\(src\)\} \/>/);
   });
   it('화면 — 서버 디렉터리의 번들은 지우기 단추가 없다 · 저장은 PUT bundle/source', () => {
     expect(src).toMatch(/x\.where === 'import' \? <span className="muted"[^>]*>—<\/span> : <button[^>]*>/);
