@@ -24,7 +24,7 @@ import { acquireExport } from '../../util/exportBusy.js';
 import { waitDrain } from '../../util/waitDrain.js'; // v2.783(점검 Q5): drain 만 기다리면 끊긴 클라이언트에서 영원히 멈춰 내보내기 잠금이 풀리지 않았다
 import { snapMemo } from '../../util/snapCache.js';
 import { buildGpuAllocTree } from '../../gpu/allocTree.js';
-import { renderGpuAllocWorkbook, allocCsvLines, XLSX_MIME as ALLOC_XLSX_MIME } from '../../gpu/allocTreeXlsx.js';
+import { renderGpuAllocWorkbook, allocCsvLines, allocExportOpts, allocFileName, ALLOC_DEPTHS, ALLOC_SHEET_KEYS, XLSX_MIME as ALLOC_XLSX_MIME } from '../../gpu/allocTreeXlsx.js';
 import { fileStamp, localStamp, DAY_OFFSET_MIN } from '../../util/dayKey.js';
 import { tzName } from '../../vcenter/vmExportCatalog.js';
 // v2.643: CSV·텍스트 가져오기/내보내기는 관리자 이상 + 'data.csv' 권한(super_admin 항상, admin 은 권한 설정에서 끌 수 있다).
@@ -513,18 +513,32 @@ api.get('/tools/gpu/alloc', requirePerm('tools'), (req, res) => {
   const { snap, tree } = allocTreeOf(req);
   res.json({ generatedAt: snap.generatedAt || null, ...tree });
 });
+// v2.855: 내보내기 창(승인 시안 '계층 표 엑셀 내보내기')이 그릴 것 — 범위 글자 · 호스트·GPU 수 · 단계별 파일 이름(내려받기와 같은 함수).
+api.get('/tools/gpu/alloc/export-meta', csvPerm, requirePerm('tools'), (req, res) => {
+  const { snap, tree, scopeText, fileScope } = allocTreeOf(req);
+  const stamp = fileStamp(Date.parse(snap.generatedAt || '') || Date.now());
+  res.json({
+    scopeText, vcenters: tree.vcenters.length, hosts: tree.totals.hosts, gpus: tree.totals.gpus,
+    depths: Object.keys(ALLOC_DEPTHS), sheets: [...ALLOC_SHEET_KEYS],
+    fileNames: Object.fromEntries(Object.keys(ALLOC_DEPTHS).map((d) => [d, allocFileName(fileScope, stamp, 'xlsx', d)])),
+    csvFileName: allocFileName(fileScope, fileStamp(), 'csv'),
+  });
+});
 api.get('/tools/gpu/alloc.csv', csvPerm, requirePerm('tools'), (req, res) => {
   const { tree, fileScope } = allocTreeOf(req);
-  sendMaybeZip(res, `gpu-allocation_${fileScope}_${fileStamp()}.csv`, '\uFEFF' + allocCsvLines(tree, csvCell).join('\r\n'), 'text/csv; charset=utf-8');
+  sendMaybeZip(res, allocFileName(fileScope, fileStamp(), 'csv'), '\uFEFF' + allocCsvLines(tree, csvCell).join('\r\n'), 'text/csv; charset=utf-8');
 });
 api.get('/tools/gpu/alloc.xlsx', csvPerm, requirePerm('tools'), async (req, res) => {
+  // v2.855: 넣을 단계(depth)·시트(sheets) — 모르는 값은 잠금을 잡기 전에 400(조용히 버리지 않는다).
+  const opts = allocExportOpts(req.query);
+  if (!opts.ok) return res.status(400).json({ ok: false, error: 'bad_request', reason: opts.reason });
   const lock = acquireExport('gpu.alloc.xlsx', req);
   if (!lock.ok) return res.status(lock.status).json(lock.body);
   try {
     const { snap, tree, scopeText, fileScope } = allocTreeOf(req);
     const ts = Date.parse(snap.generatedAt || '') || Date.now();
-    const buf = await renderGpuAllocWorkbook(tree, { stamp: localStamp(ts) || '', tz: tzName(DAY_OFFSET_MIN), scopeText });
-    const name = `gpu-allocation_${fileScope}_${fileStamp(ts)}.xlsx`;
+    const buf = await renderGpuAllocWorkbook(tree, { stamp: localStamp(ts) || '', tz: tzName(DAY_OFFSET_MIN), scopeText }, { depth: opts.depth, sheets: opts.sheets });
+    const name = allocFileName(fileScope, fileStamp(ts), 'xlsx', opts.depth);
     res.setHeader('Content-Type', ALLOC_XLSX_MIME);
     res.setHeader('Content-Disposition', `attachment; filename="${name}"`);
     res.end(buf);

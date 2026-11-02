@@ -213,3 +213,27 @@ export function openForLevel(tree, level) {
   }
   return open;
 }
+
+/* ── v2.855 내보내기 창(승인 시안 '계층 표 엑셀 내보내기') ──────────────────── */
+export const EXPORT_DEPTHS = Object.freeze([
+  { key: 'host', label: '호스트까지' }, { key: 'gpu', label: 'GPU 까지' }, { key: 'vm', label: 'VM 까지(전부)' },
+]);
+export const EXPORT_SHEETS = Object.freeze([
+  { key: 'tree', label: '계층 표', sub: '읽기용 — 들여쓰기 · 행 그룹 · 단계 색' },
+  { key: 'flat', label: '평면 표', sub: '필터·피벗용 — GPU·VM 한 줄마다 계층 열을 모두 채움' },
+  { key: 'info', label: '안내', sub: '용어 · 기준 · 빈 칸의 뜻' },
+]);
+/**
+ * 내보내기·창 미리보기의 쿼리 — 화면 범위(scope · 고른 법인)를 그대로 싣는다. 단계는 VM 까지(기본)면 싣지 않고,
+ * 시트는 셋 다(기본)면 싣지 않는다(서버 allocExportOpts 의 기본과 같다).
+ * @returns {string} '' 또는 '?…'
+ */
+export function allocExportQuery({ scope = '', vcSel = null, depth = 'vm', sheets = null } = {}) {
+  const p = new URLSearchParams();
+  if (scope) p.set('vcenterId', scope);
+  if (vcSel && vcSel.size) p.set('vcenterIds', [...vcSel].join(','));
+  if (depth && depth !== 'vm') p.set('depth', depth);
+  if (sheets && sheets.length && sheets.length < EXPORT_SHEETS.length) p.set('sheets', EXPORT_SHEETS.map((s) => s.key).filter((k) => sheets.includes(k)).join(','));
+  const q = p.toString();
+  return q ? `?${q}` : '';
+}

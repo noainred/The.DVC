@@ -14,7 +14,8 @@ import { downloadFailText } from '../downloadFailText.js';
 import { Loading, ErrorBox, SearchBox } from '../../components/ui.jsx';
 import { vcQuickDot } from '../vcCardText.js';
 import { STable } from '../../components/STable.jsx';
-import { ALLOC_LEVELS, DEFAULT_LEVEL, KIND_TEXT, flattenAlloc, openForLevel, numText, pctText, sumTotals, corpChips } from './gpuAllocText.js';
+import { ALLOC_LEVELS, DEFAULT_LEVEL, KIND_TEXT, flattenAlloc, openForLevel, numText, pctText, sumTotals, corpChips, allocExportQuery } from './gpuAllocText.js';
+import { GpuAllocExportModal } from './GpuAllocExportModal.jsx';   // v2.855 내보내기 창(시안)
 
 const KIND_BADGE = { vc: 'blue', dc: 'gray', cl: 'gray', host: 'blue', gpu: 'teal', pt: 'amber', vsga: 'gray', unplaced: 'gray', off: 'gray', vm: 'gray' };
 const COLS = [
@@ -45,6 +46,7 @@ export function GpuAllocTree({ scope }) {
   const [query, setQuery] = useState('');
   const [dlMsg, setDlMsg] = useState('');
   const [dlBusy, setDlBusy] = useState('');
+  const [exportOpen, setExportOpen] = useState(false);   // v2.855: 엑셀은 창에서 단계·시트를 고른 뒤 받는다
   // v2.853: 법인 칩(바로가기 모양 — 사용자 요청). 빈 Set = 전체. 여러 개 고를 수 있다. vCenter 상태 점은 /vcenters(마운트 1회).
   const [vcSel, setVcSel] = useState(() => new Set());
   const [vcs, setVcs] = useState(null);
@@ -69,11 +71,8 @@ export function GpuAllocTree({ scope }) {
   const clickSort = (key) => setSort((s) => (!s || s.key !== key ? { key, dir: key === 'name' ? 'asc' : 'desc' } : s.dir === (key === 'name' ? 'asc' : 'desc') ? { key, dir: key === 'name' ? 'desc' : 'asc' } : null));
   const download = async (fmt) => {
     setDlMsg(''); setDlBusy(fmt);
-    // v2.853: 고른 법인만 내려받는다(화면과 같은 범위). 서버가 조회 범위와 교집합을 먼저 낸다.
-    const params = new URLSearchParams();
-    if (scope) params.set('vcenterId', scope);
-    if (vcSel.size) params.set('vcenterIds', [...vcSel].join(','));
-    const q = params.toString() ? `?${params.toString()}` : '';
+    // v2.853: 고른 법인만 내려받는다(화면과 같은 범위). 서버가 조회 범위와 교집합을 먼저 낸다. v2.855: 쿼리는 allocExportQuery 하나.
+    const q = allocExportQuery({ scope, vcSel });
     try { await downloadFile(`/tools/gpu/alloc.${fmt}${q}`); } catch (e) { setDlMsg(downloadFailText(e)); } finally { setDlBusy(''); }
   };
 
@@ -132,9 +131,10 @@ export function GpuAllocTree({ scope }) {
         <span style={{ marginLeft: 'auto' }} />
         <button type="button" className="logout-btn" style={{ flex: 'none', padding: '6px 11px' }} disabled={loading} onClick={load}>{loading ? '불러오는 중…' : '⟳ 새로 고침'}</button>
         {canCsv() && <button type="button" className="logout-btn" style={{ flex: 'none', padding: '6px 11px' }} disabled={!!dlBusy} onClick={() => download('csv')} title="GPU·VM 한 줄씩(계층 열을 모두 채운 평면 표) — UTF-8(BOM)">{dlBusy === 'csv' ? '내려받는 중…' : '⬇ CSV'}</button>}
-        {canCsv() && <button type="button" className="login-btn" style={{ flex: 'none', padding: '6px 13px' }} disabled={!!dlBusy} onClick={() => download('xlsx')} title="계층 표(행 그룹 · 단계 색) · 평면 표(자동 필터) · 안내 — 3장">{dlBusy === 'xlsx' ? '만드는 중…' : '⬇ 엑셀(.xlsx)'}</button>}
+        {canCsv() && <button type="button" className="login-btn" style={{ flex: 'none', padding: '6px 13px' }} disabled={!!dlBusy} onClick={() => setExportOpen(true)} title="넣을 단계(호스트 · GPU · VM)와 시트(계층 표 · 평면 표 · 안내)를 고른 뒤 내려받습니다">⬇ 엑셀(.xlsx)…</button>}
       </div>
       {dlMsg && <div className="error-box" style={{ marginBottom: 8 }}>{dlMsg}</div>}
+      {canCsv() && exportOpen && <GpuAllocExportModal scope={scope} vcSel={vcSel} onClose={() => setExportOpen(false)} />}
       {err && <ErrorBox error={err} />}
       {(data.vcenters || []).length === 0 ? (
         <div className="card" style={{ padding: 16 }}><span className="muted">GPU 가 설치된 호스트가 없습니다.</span></div>

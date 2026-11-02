@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import ExcelJS from 'exceljs';
 import { buildGpuAllocTree, buildHostAlloc, gpuCapacityOf, flatRows, FLAT_COLUMNS } from '../src/gpu/allocTree.js';
-import { renderGpuAllocWorkbook, allocCsvLines, ALLOC_XLSX_SHEETS, treeLines } from '../src/gpu/allocTreeXlsx.js';
+import { renderGpuAllocWorkbook, allocCsvLines, ALLOC_XLSX_SHEETS, treeLines, allocExportOpts, allocFileName } from '../src/gpu/allocTreeXlsx.js';
 import { graphicsVmRefs, parseGpus, parseVmGpu, vmPassthroughPciIds } from '../src/vcenter/soapClient.js';
 import { sanitizeHostGpus, sanitizeVmGpuField, sanitizeInventoryList } from '../src/routes/central.js';
 import { csvCell } from '../src/util/csv.js';
@@ -179,4 +179,30 @@ test('v2.853 vcenterIds — 고른 법인만, 조회 범위가 먼저(범위 밖
   assert.deepEqual(buildGpuAllocTree(snap(), { vcenterIds: new Set(['vc1', 'vc2']) }).vcenters.map((v) => v.id), ['vc2', 'vc1']);
   assert.equal(buildGpuAllocTree(snap(), { allowed: new Set(['vc1']), vcenterIds: new Set(['vc2']) }).vcenters.length, 0);
   assert.equal(buildGpuAllocTree(snap(), { vcenterIds: new Set() }).vcenters.length, 2, '빈 선택 = 전체');
+});
+
+/* ── v2.855 내보내기 창(넣을 단계 · 시트) ───────────────────────────────── */
+test('v2.855 내보내기 선택 — 기본은 VM 까지 · 시트 셋, 모르는 값은 거부(조용히 버리지 않는다)', () => {
+  assert.deepEqual(allocExportOpts({}), { ok: true, depth: 'vm', sheets: ['tree', 'flat', 'info'] });
+  assert.deepEqual(allocExportOpts({ depth: 'host', sheets: 'info,tree' }), { ok: true, depth: 'host', sheets: ['tree', 'info'] });
+  assert.equal(allocExportOpts({ depth: 'cluster' }).ok, false);
+  assert.equal(allocExportOpts({ sheets: 'tree,evil' }).ok, false);
+  assert.equal(allocExportOpts({ sheets: ',' }).ok, false, '시트를 하나도 안 고르면 거부');
+  assert.equal(allocFileName('all', '20261102-1800', 'xlsx'), 'gpu-allocation_all_20261102-1800.xlsx');
+  assert.equal(allocFileName('AZ', '20261102-1800', 'xlsx', 'gpu'), 'gpu-allocation_AZ_20261102-1800_gpu.xlsx');
+});
+
+test('v2.855 엑셀 — 호스트까지면 계층 표에 GPU·VM 행이 없고, 고른 시트만 만든다', async () => {
+  const t = buildGpuAllocTree(snap());
+  const meta = { stamp: '2026-11-02 18:00', tz: 'KST', scopeText: '전체 법인' };
+  const wb = new ExcelJS.Workbook();
+  await wb.xlsx.load(await renderGpuAllocWorkbook(t, meta, { depth: 'host', sheets: ['tree', 'info'] }));
+  assert.deepEqual(wb.worksheets.map((w) => w.name), ['계층 표', '안내']);
+  const ws = wb.worksheets[0];
+  const hostLines = treeLines(t).filter((x) => x.depth < 4).length;
+  assert.equal(ws.properties.outlineLevelRow, 3);
+  assert.equal(ws.rowCount, 5 + hostLines, '머리 5행 + 호스트까지의 행');
+  const wb2 = new ExcelJS.Workbook();
+  await wb2.xlsx.load(await renderGpuAllocWorkbook(t, meta, { sheets: ['flat'] }));
+  assert.deepEqual(wb2.worksheets.map((w) => w.name), ['평면 표']);
 });
