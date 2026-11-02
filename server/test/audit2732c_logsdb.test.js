@@ -17,6 +17,25 @@ import os from 'node:os';
 import path from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
 
+import { DatabaseSync } from 'node:sqlite';
+
+/*
+ * v2.863(CI 릴리스 run 941 실패 원인 — 조각 266.7ms vs 한 번에 702.2ms 로 ③ 의 1/4 비율을 넘었다): 조각 판의 '최장 정지' 는 조각 적재가 아니라
+ * **WAL 자동 체크포인트**(커밋이 1000쪽을 넘기면 그 커밋이 WAL→DB 복사 + fsync 를 동기로 한다)가 좌우했다 — 실측(strace, 4만 행):
+ * 체크포인트 켬 = 조각 판 멈춤이 정확히 2번 110~118ms 로 튐(비율 0.125~0.13) · 끔 = 최대 58ms · 튐 없음(0.067~0.073). 체크포인트 비용은 디스크 I/O 라
+ * CI 처럼 디스크가 느리면 커지고, 한 번에 넣는 판에도 똑같이 생긴다(제품 회귀가 아니다 — 조각이 없앨 수 있는 정지도 아니다).
+ * 그래서 ③ 은 두 DB 의 자동 체크포인트를 끄고 **조각 나누기 자체** 만 잰다(이 시험의 연결에만 — noAutoCkpt 가 켜진 동안 연 연결).
+ * ⚠ 다른 '최장 정지 비율' 시험도 WAL 쓰기를 재면 같은 함정이다 — 비율은 CPU 가 아니라 디스크에 따라 흔들린다.
+ */
+let noAutoCkpt = false;
+const _exec = DatabaseSync.prototype.exec;
+DatabaseSync.prototype.exec = function exec(sql) {
+  const r = _exec.call(this, sql);
+  if (noAutoCkpt && /synchronous\s*=\s*NORMAL/i.test(String(sql))) _exec.call(this, 'PRAGMA wal_autocheckpoint=0');
+  return r;
+};
+after(() => { DatabaseSync.prototype.exec = _exec; });
+
 const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'audit2732c-logsdb-'));
 process.env.CONFIG_DIR = TMP;
 after(() => { try { fs.rmSync(TMP, { recursive: true, force: true }); } catch { /* */ } });
@@ -124,6 +143,7 @@ function makeRowsPerVc() {
 test('B6-01 ③ insertManyAsync: insertMany 와 같은 행·같은 순서(rowid 포함) · 조각이 여럿 · 최장 정지가 한 트랜잭션 판의 1/4 미만', async () => {
   const perVc = makeRowsPerVc();
   const total = perVc.reduce((n, r) => n + r.length, 0);
+  noAutoCkpt = true;   // 두 DB 모두 자동 체크포인트 끔(머리말 v2.863) — 연 뒤에는 꺼도 그 연결에 남는다
   const a = await openDbAt('ins-sync');
   await settle();
   let stop = probe();
@@ -135,6 +155,7 @@ test('B6-01 ③ insertManyAsync: insertMany 와 같은 행·같은 순서(rowid 
   const countA = a.count({});
 
   const b = await openDbAt('ins-async');
+  noAutoCkpt = false;
   assert.equal(typeof b.insertManyAsync, 'function', '조각 적재 API 가 있어야 한다');
   await settle();
   stop = probe();
