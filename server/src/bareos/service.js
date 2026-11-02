@@ -12,6 +12,7 @@ import {
   loadSettings, directorConn, directorCred, directorConnSig, directorById, siteFor, siteMissing,
 } from './settings.js';
 import { OPS, JOB_NAME_SUFFIXES, MID_COMMAND_CODES } from './ops.js';
+import { addJobFailText } from './configurePerm.js';
 import { enqueueEdgeOp } from './edgeOps.js';
 import { config } from '../config.js';
 import { addJob as registryAddJob, addJobs as registryAddJobs, listJobs, findByVm, registryLoadError, jobCount, retireName, retiredNames, jobDigests, MAX_JOBS } from './registry.js';
@@ -368,7 +369,8 @@ export async function createBackupTarget({ vcenterId, vmId, level, schedule, by,
       const why = (await settleMidCommandAdds(prep.directorId, [{ i: 0, prep }], demo)).get(0);
       throw fail(/^결과 모름/.test(why) ? 'unknown' : 'error', why);   // 만들어지지 않음 · 원장 밖 잡을 끔 = 결과를 안다(실패) · .jobs 도 못 읽음 = 결과 모름
     }
-    if (!r?.ok) throw fail(r?.code === 'skipped' ? 'connect' : (r?.code || 'error'), r?.message || 'Director 잡을 만들지 못했습니다.');
+    // v2.848: configure 가 콘솔 Profile 에 막혔으면 원인 · 조치를 밝힌다(원문 'configure: is an invalid command.' 만으로는 알 수 없었다)
+    if (!r?.ok) throw fail(r?.code === 'skipped' ? 'connect' : (r?.code || 'error'), addJobFailText(r?.message) || 'Director 잡을 만들지 못했습니다.');
     if (!r.name) throw fail('unknown', 'Director 가 잡 이름 없이 성공을 회신했습니다 — 잡이 생겼을 수 있습니다. Director 에서 확인하세요.');   // G3
     try { return recordTarget(prep, r.name, by, demo); } catch (e) {
       const why = await orphanCleanup(prep.directorId, [{ name: r.name, err: e }], demo);
@@ -417,7 +419,7 @@ export async function createBackupTargets({ vcenterId, vmIds, level, schedule, b
     for (const { i, prep } of ready) {
       const r = byKey.get(i);
       if (addMidCommand(r)) { mid.push({ i, prep }); continue; }   // v2.847 E2-1 — 아래에서 `.jobs` 로 가린다
-      if (!r?.ok) { out[i].reason = r?.message || (r ? '사유 미상' : '결과 모름 — 회신에 이 항목이 없습니다(Director 에 잡이 생겼을 수 있습니다 — 목록을 새로 고쳐 확인하세요).'); if (!r) out[i].unknown = true; continue; }
+      if (!r?.ok) { out[i].reason = addJobFailText(r?.message) || (r ? '사유 미상' : '결과 모름 — 회신에 이 항목이 없습니다(Director 에 잡이 생겼을 수 있습니다 — 목록을 새로 고쳐 확인하세요).'); if (!r) out[i].unknown = true; continue; }
       if (!r.name) { out[i].reason = 'Director 가 잡 이름 없이 성공을 회신했습니다 — 잡이 생겼을 수 있습니다. Director 에서 확인하세요.'; continue; }   // G3
       made.push({ i, prep, name: r.name });
     }

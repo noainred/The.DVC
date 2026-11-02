@@ -18,6 +18,7 @@ export const REREGISTER_BATCH = 200;
 import { listJobs, rebindJobs, jobDigests } from '../registry.js';
 import { jobNameFor } from '../names.js';
 import { JOB_NAME_SUFFIXES, MID_COMMAND_CODES } from '../ops.js';
+import { addJobFailText } from '../configurePerm.js';
 import { morefOf } from '../../vcenter/registry.js';
 import { tryLockJob, unlockJob } from '../jobLocks.js';
 import { requestReconcile } from '../poller.js';
@@ -314,7 +315,7 @@ export async function reregisterTargets(d, ids = [], { startedAt = Date.now() } 
           x.o.reason = `결과 모름 — ${r ? (r.message || '명령 도중 연결이 끊겼습니다') : '회신에 이 항목이 없습니다'}(Director 에 잡이 생겼을 수 있습니다 — 빠진 대상 목록을 다시 읽으세요).`;
           x.o.unknown = true; unsure.push(x); continue;
         }
-        if (!r.ok || !r.name) { x.o.reason = r.message || (r.ok ? 'Director 가 잡 이름 없이 성공을 회신했습니다.' : '사유 미상'); if (r.code === 'exists') x.o.exists = true; continue; }
+        if (!r.ok || !r.name) { x.o.reason = addJobFailText(r.message) || (r.ok ? 'Director 가 잡 이름 없이 성공을 회신했습니다.' : '사유 미상'); if (r.code === 'exists') x.o.exists = true; continue; }
         x.o.name = r.name;
         list.push({ id: x.o.id, bareosJob: r.name, client: x.site.client, storage: x.site.storage, pool: x.site.pool, vmName: x.vm.name, dc: x.vm.vcDcPath, folder: x.vm.folderPath });
       }

@@ -420,7 +420,19 @@ export function bulkSummary(r) {
 export function diagView(st) {
   if (!st || st.skipped) return { mark: '시도 안 함', cls: 'gray', ms: '' };
   const ms = Number.isFinite(st.ms) && st.ms >= 0 ? `${st.ms < 1000 ? `${Math.round(st.ms)}ms` : `${(st.ms / 1000).toFixed(1)}초`}` : '';
+  if (st.unknown) return { mark: '? 모름', cls: 'amber', ms };   // v2.848 권한 단계 — 확인하지 못함(통과도 실패도 아니다)
   return st.ok ? { mark: '✓ 통과', cls: 'green', ms } : { mark: '✗ 실패', cls: 'red', ms };
+}
+
+/**
+ * v2.848 연결 시험 결과의 잡 만들기 권한(configure) 한 줄 — 서버 configurePerm.js 판정(allowed true · false · null).
+ * 막혔으면 등록이 'configure: is an invalid command' 로 실패한다(사용자 화면). 못 받았으면(옛 엣지 · 데모) 빈 문자열.
+ */
+export function configurePermNote(c) {
+  if (!c || typeof c !== 'object') return '';
+  if (c.allowed === false) return '**다만 이 콘솔은 잡 만들기 권한(configure)이 없어 백업 대상을 등록할 수 없습니다** — 콘솔 Profile 의 Command ACL 이 configure 를 막고 있습니다. 설정 › 기본 설정의 자동 설정 2단계(포탈 전용 콘솔 · Profile ‘portal’)를 실행하거나, 그 Profile 에 configure 를 허용한 뒤 Director 를 reload 하세요.';
+  if (c.allowed === null) return '잡 만들기 권한(configure)은 확인하지 못했습니다 — 등록이 실패하면 콘솔 Profile 의 Command ACL 을 확인하세요.';
+  return '';
 }
 
 /* ───────── 자동 설정(v2.821 — 서버 bareos/autoSetup.js) ───────── */
