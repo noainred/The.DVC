@@ -230,7 +230,7 @@
 | `ui.json` | 설정 | Shared UI settings persisted server-side (CONFIG_DIR/ui.json) so layout | ✅ | ✅ | ✅ | ui-settings.js |
 | `upgrade-kept-bundles.json` | 설정 | 중앙이 패키지 폴더에 보관한 업그레이드 번들 기록(상태, v2.859) | ✅ | ✅ | ✅ | upgrade/fleetBundle.js |
 | `upgrade-signature-log.json` | 설정 | 업그레이드 번들 서명 검증 기록(최근 10건, 상태, v2.736.1) | ✅ | ✅ | ✅ | upgrade/signature.js |
-| `upgrade-status.json` | 설정 | 업그레이드 확인·적용·자동 확인 기록(상태, v2.736.2) | ✅ | ✅ | ✅ | upgrade/statusStore.js |
+| `upgrade-status.json` | 설정 | 업그레이드 확인·적용·자동 확인·엣지 동기화 기록(상태, v2.736.2 · v2.863 lastEdgeSync) | ✅ | ✅ | ✅ | upgrade/statusStore.js |
 | `upgrade.json` | 설정 | Runtime-editable auto-upgrade settings. Env vars provide the defaults; values | ✅ | ✅ | ✅ | upgrade/settings.js |
 | `user-menus.json` | 설정 | 계정별 좌측 메뉴(내 메뉴)와 슈퍼 관리자 배포 메뉴 저장소(v2.726, `user-menus.json`). | ✅ | ✅ | ✅ | usermenu/store.js |
 | `users.json` | 설정 | 포탈 계정(역할·비밀번호 해시·TOTP 시크릿) | ✅ | ✅ | ✅ | auth/auth.js |

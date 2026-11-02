@@ -16,7 +16,7 @@ import path from 'node:path';
 import { config } from '../config.js';
 import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
 import { registerStateFile } from '../util/stateFiles.js';
-import { sanitizeCheck, sanitizeResult, sanitizeTick } from './autoState.js';
+import { sanitizeCheck, sanitizeResult, sanitizeTick, sanitizeEdgeSync } from './autoState.js'; // v2.863: 엣지 동기화 기록(lastEdgeSync)도 남긴다
 
 registerStateFile('upgrade-status.json');
 export const upgradeStatusFile = (configDir = config.configDir) => path.join(configDir, 'upgrade-status.json');
@@ -34,14 +34,14 @@ export function readUpgradeStatus(file) {
     const kept = preserveCorrupt(file, 'upgrade-status');
     return { doc: {}, error: '업그레이드 기록 파일이 손상되어 새로 시작했습니다', corruptKept: kept ? path.basename(kept) : null };
   }
-  return { doc: { lastCheck: sanitizeCheck(doc.lastCheck), lastResult: sanitizeResult(doc.lastResult), lastTick: sanitizeTick(doc.lastTick) } };
+  return { doc: { lastCheck: sanitizeCheck(doc.lastCheck), lastResult: sanitizeResult(doc.lastResult), lastTick: sanitizeTick(doc.lastTick), lastEdgeSync: sanitizeEdgeSync(doc.lastEdgeSync) } };
 }
 
 /** 쓴다 — 성공이면 null, 실패면 사유 문구. */
-export function writeUpgradeStatus(file, { lastCheck, lastResult, lastTick }) {
+export function writeUpgradeStatus(file, { lastCheck, lastResult, lastTick, lastEdgeSync = null }) {
   try {
     const strip = (o) => { if (!o) return null; const { restored, ...rest } = o; return rest; }; // 되살렸다는 표지는 파일에 쓰지 않는다
-    const doc = { v: 1, lastCheck: strip(sanitizeCheck(lastCheck)), lastResult: strip(sanitizeResult(lastResult)), lastTick: strip(sanitizeTick(lastTick)) };
+    const doc = { v: 1, lastCheck: strip(sanitizeCheck(lastCheck)), lastResult: strip(sanitizeResult(lastResult)), lastTick: strip(sanitizeTick(lastTick)), lastEdgeSync: strip(sanitizeEdgeSync(lastEdgeSync)) };
     atomicWriteFileSync(file, JSON.stringify(doc), { mode: 0o600 });
     return null;
   } catch (e) {

@@ -61,7 +61,7 @@ function fromArchive(archivePath, version, source) {
   const manifest = readManifestFile(manifestPathForArchive(archivePath));
   const sig = decideSignature({ manifestText: manifest, bytes, name: path.basename(archivePath), kind: 'bundle', expectVersion: version || undefined, where: 'bundle-source' });
   if (!sig.ok) { lastReject = sig.reason; console.error(`[upgrade] ${lastReject}`); return null; }
-  return { bytes, version: version || null, source, manifest, signature: sig };
+  return { bytes, version: version || null, source, manifest, signature: sig, path: archivePath }; // v2.863: 파일 경로 — 옛 방식 엣지 push(pushBundleToEdge)가 쓴다
 }
 
 /**
