@@ -120,7 +120,6 @@ export default function BareosBackupTool() {
 }
 
 /* ───────────────────────── 진행 · 이력(v2.860 — 진행 현황판 + 실행 현황 · 이력) ───────────────────────── */
-const RUNS_BASE = Object.freeze(['tools', 'bareos-backup', 'runs']);
 function RunsTab({ d, boardHint = false }) {
   // 법인별 진행 현황판(BareosLiveTab)은 열 때만 그린다 — 열린 동안만 Director 상태를 묻는다(그 탭의 규칙 그대로). 기본은 실행 중 표 + 이력.
   //   옛 진행 현황 링크(Backup › Summary 의 '진행 현황' 등)나 주소에 현황판 보기가 있으면 펼친 채로 연다(boardHint).
@@ -151,7 +150,7 @@ function RunsTab({ d, boardHint = false }) {
           <span className="muted" style={{ fontSize: 12 }}>전체 법인 · 단일 법인 · 속도 상태 — 펼친 동안만 Director 에 상태를 묻습니다</span>
           <button type="button" className="tab" aria-expanded={board} onClick={toggle} style={{ padding: '4px 12px', fontSize: 12, marginLeft: 'auto' }}>{board ? '접기 ▴' : '펼치기 ▾'}</button>
         </div>
-        {board && <div style={{ marginTop: 12 }}><BareosLiveTab hashBase={RUNS_BASE} /></div>}
+        {board && <div style={{ marginTop: 12 }}><BareosLiveTab hashSub="runs" /></div>}
       </div>
       <HistoryTab d={d} />
     </div>

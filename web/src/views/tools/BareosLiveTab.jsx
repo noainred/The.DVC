@@ -74,13 +74,12 @@ function useWidth(ref) {
   return w;
 }
 
-// v2.860: 운영 › 진행 · 이력 안에 접어 넣었다 — 보기 주소의 기준은 부르는 쪽이 준다(#/tools/bareos-backup/runs/<보기>).
-//   기준을 옛 live 로 두면 보기를 바꿀 때마다 옛 주소로 갔다가 runs 로 되돌려져 보기가 주소에 남지 않고 뒤로가기가 헛돈다.
-const LIVE_BASE = Object.freeze(['tools', 'bareos-backup', 'live']);
-export default function BareosLiveTab({ hashBase = LIVE_BASE } = {}) {
+// v2.860: 운영 › 진행 · 이력 안에 접어 넣었다 — 보기 주소의 마지막 조각은 부르는 쪽이 준다(#/tools/bareos-backup/runs/<보기>).
+//   옛 live 로 두면 보기를 바꿀 때마다 옛 주소로 갔다가 runs 로 되돌려져 보기가 주소에 남지 않고 뒤로가기가 헛돈다.
+export default function BareosLiveTab({ hashSub = 'live' } = {}) {
   const { data, error } = usePolling('/tools/bareos-backup/live', {}, 15_000);
   // 보기는 주소에(#/tools/bareos-backup/runs/<보기> — 새로고침·북마크·뒤로가기에서 유지 · CATALOG2613-06 스윕)
-  const [view, setView] = useHashTab({ base: hashBase, valid: VIEWS.map(([k]) => k), fallback: 'all' });
+  const [view, setView] = useHashTab({ base: ['tools', 'bareos-backup', hashSub], valid: VIEWS.map(([k]) => k), fallback: 'all' });
   const [corpId, setCorpS] = useState(() => load(CORP_KEY, ''));
   const [filter, setFilter] = useState('active');
   const [q, setQ] = useState('');
