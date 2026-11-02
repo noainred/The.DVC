@@ -442,14 +442,19 @@ async function undoMade(api, made) {
   return notes.join(' ');
 }
 
-/** 새 계정 비밀번호로 서버 안 bconsole 접속(TLS 끔 — WebUI 와 같은 조건). */
+/**
+ * 새 계정 비밀번호로 서버 안 bconsole 접속(TLS 끔 — WebUI 와 같은 조건).
+ * v2.851.2(2026-11-02 실환경 — Director 로그 'Fatal error: Tls handshake failed' · 'Unable to authenticate console "noainred" at client:127.0.0.1'):
+ *   TLS 끔을 Console 칸에만 적으면 bconsole 이 Director 칸의 기본값(TLS 켬)으로 TLS-PSK 를 시도해, TLS 를 끈 계정과 핸드셰이크가 실패했다
+ *   (계정 자체는 맞는데 시험이 실패해 계정을 되돌렸다). **Director 칸에도 TLS Enable = No** — WebUI(php)가 붙는 조건과 같게.
+ */
 async function verifyConsoleLogin(api, name, password, mask, dirPort) {
   const port = Number.isInteger(Number(dirPort)) && Number(dirPort) >= 1 && Number(dirPort) <= 65535 ? Number(dirPort) : 9101;
   const tmp = await remoteTmpDir(api.exec, R.TMP_PREFIX);
   try {
     const dn = String((await api.exec(`sed -n 's/^[[:space:]]*Name[[:space:]]*=[[:space:]]*"\\{0,1\\}\\([A-Za-z0-9._-]*\\).*/\\1/p' ${DIR_CONF_ROOT}/director/*.conf 2>/dev/null | head -n 1`))?.stdout || '').trim() || 'bareos-dir';
     if (!isResourceName(dn)) throw fail('invalid', 'Director 이름을 읽지 못했습니다.');
-    const conf = `Director {\n  Name = ${dn}\n  Address = localhost\n  DirPort = ${port}\n  Password = "unused-${crypto.randomBytes(6).toString('hex')}"\n}\nConsole {\n  Name = "${name}"\n  Password = "${password}"\n  Director = ${dn}\n  TLS Enable = No\n}\n`;
+    const conf = `Director {\n  Name = ${dn}\n  Address = localhost\n  DirPort = ${port}\n  Password = "unused-${crypto.randomBytes(6).toString('hex')}"\n  TLS Enable = No\n}\nConsole {\n  Name = "${name}"\n  Password = "${password}"\n  Director = ${dn}\n  TLS Enable = No\n}\n`;
     await api.writeFile(`${tmp}/bconsole.conf`, conf, 0o600);
     const x = await api.exec(`printf 'version\\n' | timeout 30 bconsole -c ${tmp}/bconsole.conf 2>&1`, 45_000);
     if (x?.code !== 0 || !/Version/.test(String(x?.stdout || ''))) throw fail('console-login', `새 계정으로 Director 에 붙지 못했습니다: ${tail(mask(x?.stdout), 300)}`);

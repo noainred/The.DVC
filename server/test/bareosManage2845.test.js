@@ -188,6 +188,11 @@ test('④-1 계정 추가: 새 표지 파일 · 검사 · reload · 새 비밀�
   assert.ok(srv.st.all.some((c) => c.includes('bconsole -c ')), '새 계정으로 접속 확인');
   assert.match(srv.st.bconf[0], /\n {2}DirPort = 9101\n/, 'bconsole Director 리소스 키워드는 DirPort(번들 bconsole 바이너리 실측 — 반증 E1)');
   assert.ok(!/\n {2}Port =/.test(srv.st.bconf[0]));
+  // v2.851.2(실환경 Director 로그 'Tls handshake failed' · 'Unable to authenticate console'): TLS 끔은 Director 칸 · Console 칸 둘 다(bconsole 이 Director 칸 기본값으로 TLS 를 시도했다)
+  const dirBlock = /^Director \{[\s\S]*?\n\}/m.exec(srv.st.bconf[0])?.[0] || '';
+  const conBlock = /^Console \{[\s\S]*?\n\}/m.exec(srv.st.bconf[0])?.[0] || '';
+  assert.match(dirBlock, /\n {2}TLS Enable = No\n/, 'Director 칸에도 TLS 끔');
+  assert.match(conBlock, /\n {2}TLS Enable = No\n/, 'Console 칸 TLS 끔');
   await M.applyManage(M.planManage('console.add', { name: 'ops-kr2', profile: 'webui-readonly' }, {}), SSH, { accountPassword: ACC_PW }, { dirPort: 19101 });
   assert.match(srv.st.bconf[1], /DirPort = 19101/, 'Director 포트를 따른다');
   noSecretIn(srv.st, [SSH_PW, ACC_PW]);
