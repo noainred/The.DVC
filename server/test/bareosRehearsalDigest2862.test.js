@@ -51,11 +51,17 @@ test('② 고르기 — 조건 · 돌아가며', () => {
   const jobs = [
     ok('a'), ok('b'), ok('c', { lastRun: { jobid: 100, state: 'warning' } }),
     ok('d', { lastRun: { jobid: 100, state: 'error' } }), ok('e', { enabled: false }), ok('f', { directorId: 'D2' }),
-    ok('g', { restores: [{ jobid: 9, state: 'running' }] }), ok('h', { drift: ['이름'] }), ok('i', { lastRun: { jobid: null, state: 'ok' } }),
+    ok('g', { restores: [{ jobid: 9, state: 'running' }] }), ok('h'), ok('i', { lastRun: { jobid: null, state: 'ok' } }),
   ];
   const dirOf = (j) => j.directorId;
-  assert.deepEqual(RH.pickCandidates(jobs, 'D1', 10, dirOf).map((j) => j.id), ['a', 'b', 'c']);
-  assert.deepEqual(RH.pickCandidates(jobs, 'D1', 2, dirOf, { a: 5, b: 1 }).map((j) => j.id), ['c', 'b'], '가장 오래 검증 안 한 것부터');
+  const driftOf = (j) => (j.id === 'h' ? ['이름'] : null);   // 위치 바뀜은 인벤토리로(원장에는 drift 칸이 없다 — 반증 F8)
+  assert.deepEqual(RH.pickCandidates(jobs, 'D1', 10, dirOf, {}, driftOf).map((j) => j.id), ['a', 'b', 'c']);
+  assert.deepEqual(RH.pickCandidates(jobs, 'D1', 2, dirOf, { a: 5, b: 1 }, driftOf).map((j) => j.id), ['c', 'b'], '가장 오래 검증 안 한 것부터');
+  // 반증 F3: 이름을 자를 때 날짜 꼬리를 지킨다(80자 VM 이 원래 이름과 같아지지 않게)
+  const long = 'v'.repeat(80);
+  const vn = RH.verifyName(long, '2026-11-03');
+  assert.equal(vn.length, 80); assert.ok(vn.endsWith('-verify-20261103')); assert.notEqual(vn, long);
+  assert.notEqual(RH.verifyName('x'.repeat(70), '2026-11-03'), RH.verifyName('x'.repeat(70), '2026-11-10'), '주마다 다른 이름');
 });
 
 test('③ 요약 — 모름은 수를 만들지 않는다 · 24시간 · 실패 목록 · 이스케이프', () => {
@@ -69,7 +75,7 @@ test('③ 요약 — 모름은 수를 만들지 않는다 · 24시간 · 실패 
       restores: [{ jobid: 31, at: now - 1000, verify: true, state: 'ok', finish: { verify: 'failed' } }, { jobid: 32, at: now - 1000, state: 'error' }] },
     { id: '5', vcenterId: 'vc-a', directorId: 'D1', vmName: 'demo', enabled: true, demo: true, lastRun: { jobid: 1, state: 'error', endedAt: now } },
   ];
-  const d = DG.digestData(jobs, settings, { D2: { ok: false, code: 'auth' } }, now);
+  const d = DG.digestData(jobs, settings, { D1: { ok: true }, D2: { ok: false, code: 'auth' } }, now);
   const kr = d.rows.find((x) => x.id === 'D1');
   assert.deepEqual([kr.targets, kr.ok, kr.fail, kr.stale], [3, 1, 1, 1]);
   const pl = d.rows.find((x) => x.id === 'D2');
@@ -79,11 +85,20 @@ test('③ 요약 — 모름은 수를 만들지 않는다 · 24시간 · 실패 
   assert.equal(d.fails.length, 1);
   const m = DG.renderDigest(d, now);
   assert.match(m.subject, /실패 1 · 경고 0 · 성공 1 · 결과 모름 법인 1/);
-  assert.match(m.html, /&lt;폴란드&gt; \(Director 조회 실패 · auth\)/);
+  assert.match(m.html, /&lt;폴란드&gt; \(Director 조회 실패 또는 조회 전 · auth\)/);
   assert.match(m.html, /db&lt;1&gt;/);
   assert.match(m.html, /quiesce &lt;fail&gt;/);
   assert.doesNotMatch(m.html, /<폴란드>|db<1>/);
   assert.match(m.html, /<td [^>]*>모름<\/td>/);
+  // 반증 F4: 조회 기록이 없거나 ok:null 이면 '모름'(안다고 세지 않는다) · 취소는 따로 센다 · 모두 모름이면 0 을 앞세우지 않는다
+  const jobs2 = [...jobs, { id: '6', vcenterId: 'vc-a', directorId: 'D1', vmName: 'cx', enabled: true, lastRun: { jobid: 14, state: 'canceled', endedAt: now - 1000 } }];
+  const d2 = DG.digestData(jobs2, settings, { D1: { ok: true } }, now);
+  assert.equal(d2.rows.find((x) => x.id === 'D2').known, false, '기록 없음 = 모름');
+  assert.equal(d2.rows.find((x) => x.id === 'D1').cancel, 1);
+  const d3 = DG.digestData(jobs, settings, { D1: { ok: null } }, now);
+  assert.equal(d3.total.unknown, 2);
+  assert.match(DG.renderDigest(d3, now).subject, /모든 법인 결과 모름/);
+  assert.doesNotMatch(DG.renderDigest(d3, now).subject, /실패 0/);
   // 차례(staleAlert 와 같은 규칙) · 기본 켬 08:30
   assert.deepEqual([DG.DEFAULTS.enabled, DG.DEFAULTS.time], [true, '08:30']);
   assert.throws(() => DG.normDigest({ time: '8:30' }), /HH:MM/);
@@ -105,4 +120,31 @@ test('④ 검증 복원 마무리 — bareos-verify 결과(Tools 시간 · 지�
   assert.ok(['ok', 'failed'].includes(fin.verify), JSON.stringify(fin));
   if (fin.verify === 'ok') { assert.ok(fin.toolsMs > 0); assert.equal(fin.deleted, true); assert.match(fin.detail, /Tools 응답/); }
   else { assert.equal(fin.toolsMs, undefined, 'Tools 를 못 받으면 시간을 만들지 않는다(0 아님)'); assert.equal(fin.deleted, undefined, '실패한 검증용 VM 은 지우지 않는다'); }
+});
+
+test('⑤ 반증 반영 — 빈 인벤토리면 미루고 회차를 차지하지 않는다(F3) · 홈 데이터스토어 여유를 본다(F5) · 회차는 보내기 전에 파일로(F2)', async () => {
+  RH._resetRehearsalForTest();
+  const today = RH.clockOf(Date.now()).day;
+  store.snapshot = { initial: true, vms: [], hosts: [], datastores: [], vcenters: [] };
+  const r0 = await RH.runRehearsal('D9');
+  assert.equal(r0.deferred, true);
+  assert.equal(RH.rehearsalStatus().weeks.D9, undefined, '미룬 회차는 차지하지 않는다');
+  // 홈 데이터스토어: 여유 부족 · 정보 없음은 건너뛴다(보내지 않음 — Director 에 닿지 않는다)
+  store.snapshot = { generatedAt: Date.now(), vcenters: [{ id: 'vc-a' }], hosts: [], datastores: [{ vcenterId: 'vc-a', name: 'tiny', freeGB: 50, capacityGB: 100 }],
+    vms: [{ id: 'vc-a:vm-1', vcenterId: 'vc-a', name: 'web-01', storageGB: 200, vcDcPath: 'DC', folderPath: '/', dev: { disks: [{ datastore: 'tiny' }] } },
+      { id: 'vc-a:vm-2', vcenterId: 'vc-a', name: 'db-02', storageGB: 10, vcDcPath: 'DC', folderPath: '/' }] };
+  fs.writeFileSync(path.join(tmp, registry.FILE_NAME), JSON.stringify({ version: 1, jobs: [
+    { id: 'k1', vcenterId: 'vc-a', vmId: 'vc-a:vm-1', vmName: 'web-01', dc: 'DC', folder: '/', directorId: 'D9', bareosJob: 'pv-1', enabled: true, lastRun: { jobid: 10, state: 'ok' }, restores: [] },
+    { id: 'k2', vcenterId: 'vc-a', vmId: 'vc-a:vm-2', vmName: 'db-02', dc: 'DC', folder: '/', directorId: 'D9', bareosJob: 'pv-2', enabled: true, lastRun: { jobid: 11, state: 'ok' }, restores: [] },
+  ], retired: [] }));
+  registry._resetForTest();
+  const r1 = await RH.runRehearsal('D9');
+  assert.equal(r1.started, 0);
+  const why = Object.fromEntries(r1.items.map((x) => [x.jobId, x.reason]));
+  assert.match(why.k1, /여유가 부족/);
+  assert.match(why.k2, /읽지 못해 건너뛰었습니다/);
+  const saved = JSON.parse(fs.readFileSync(path.join(tmp, 'bareos-rehearsal-state.json'), 'utf8'));
+  assert.equal(saved.weeks.D9, today);
+  const src = fs.readFileSync(new URL('../src/bareos/rehearsal.js', import.meta.url), 'utf8');
+  assert.match(src, /st\.weeks\[dirId\] = day;[^\n]*\n\s*saveState\(\);/, '회차 기록 바로 뒤에 파일 저장(보내기 전)');
 });

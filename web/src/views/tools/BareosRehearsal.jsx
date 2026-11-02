@@ -5,6 +5,7 @@
  *   무거운 조회가 아니어도 폴링하지 않는다(처음 한 번 + 다시 읽기 단추) — 운영 › 복원 화면의 목록 폴링이 진행 상태를 따로 바꾼다.
  */
 import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { unitText } from '../unitText.js';
 import { fetchJson, postJson, putJson } from '../../api.js';
 import { Loading, ErrorBox } from '../../components/ui.jsx';
 import { STable } from '../../components/STable.jsx';
@@ -62,7 +63,7 @@ export default function BareosRehearsal({ directors = [] }) {
         <b style={{ fontSize: 13.5 }}>복원 검증(리허설)</b>
         <span className="muted" style={{ fontSize: 12, minWidth: 0, overflowWrap: 'anywhere' }}>{rehearsalPolicyText(p)}</span>
         <button type="button" className="tab" style={{ padding: '3px 10px', fontSize: 12, marginLeft: 'auto' }} onClick={load}>다시 읽기</button>
-        {d.fullScope && !edit && <button type="button" className="tab" style={{ padding: '3px 10px', fontSize: 12 }} onClick={() => { setEdit({ enabled: !!p.enabled, weekday: p.weekday ?? 6, time: p.time || '03:17', perCorp: p.perCorp ?? 3, deleteOnOk: p.deleteOnOk !== false }); setMsg(null); }}>정책 바꾸기</button>}
+        {d.fullScope && !edit && <button type="button" className="tab" style={{ padding: '3px 10px', fontSize: 12 }} onClick={() => { setEdit({ enabled: !!p.enabled, weekday: p.weekday ?? 6, time: p.time || '03:17', perCorp: p.perCorp ?? 3, deleteOnOk: p.deleteOnOk !== false, datastores: { ...(p.datastores || {}) } }); /* 법인별 데이터스토어(화면에 칸은 없다)를 저장이 지우지 않게(반증 F5) */ setMsg(null); }}>정책 바꾸기</button>}
       </div>
       {d.loadError && <Note tone="bad">복원 검증 정책 파일을 읽지 못했습니다(손상본 보존) — 검증을 돌리지 않고 저장을 막았습니다.</Note>}
       {!p.enabled && <Note tone="info">꺼져 있습니다 — 검증은 VM 을 새로 만들고 데이터스토어를 씁니다. 전체 범위 관리자가 정책을 켜야 정한 요일 · 시각에 돕니다.</Note>}
@@ -101,7 +102,7 @@ export default function BareosRehearsal({ directors = [] }) {
             {directors.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
           </Select>
           <input className="input" style={{ width: 130 }} inputMode="numeric" autoComplete="one-time-code" placeholder="본인 OTP" value={otp} onChange={(e) => setOtp(e.target.value.replace(/\D/g, '').slice(0, 6))} aria-label="지금 검증 OTP" />
-          <button type="button" className="tab" style={{ padding: '5px 12px', fontSize: 12 }} disabled={busy || !runDir || !/^\d{6}$/.test(otp)} onClick={runNow}>{busy ? '보내는 중…' : `지금 검증 · 법인마다 ${p.perCorp ?? '—'}대`}</button>
+          <button type="button" className="tab" style={{ padding: '5px 12px', fontSize: 12 }} disabled={busy || !runDir || !/^\d{6}$/.test(otp)} onClick={runNow}>{busy ? '보내는 중…' : `지금 검증 · 법인마다 ${unitText(p.perCorp, '대')}`}</button>
         </div>
       )}
       <div className="table-wrap" style={{ maxHeight: '40vh' }}>

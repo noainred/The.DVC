@@ -242,7 +242,7 @@ export function finishOp(op, result, now = Date.now(), { late = false } = {}) {
   op.state = 'done'; op.doneAt = now;
   op.result = { ok: !!r.ok, detail: t(String(r.detail ?? ''), 400), ...(r.ms != null ? { ms: Math.max(0, Number(r.ms) || 0) } : {}), ...(r.newName ? { newName: t(r.newName, 80) } : {}), ...(late ? { late: true } : {}),
     // v2.862 Bareos 복원 검증 — Tools 응답 시간(모르면 없음 · 0 이 아니다) · 검증용 VM 을 지웠는가
-    ...(Number.isFinite(Number(r.toolsMs)) && r.toolsMs !== null && Number(r.toolsMs) >= 0 ? { toolsMs: Number(r.toolsMs) } : {}), ...(r.deleted === true ? { deleted: true } : {}) };
+    ...(typeof r.toolsMs === 'number' && Number.isFinite(r.toolsMs) && r.toolsMs >= 0 ? { toolsMs: r.toolsMs } : {}), ...(r.deleted === true ? { deleted: true } : {}) };   // 수만(Number('')·Number(null) 은 0 — 못 읽은 값은 0 이 아니다)
   if ((op.kind === 'nfsds-attach' || op.kind === 'nfsds-detach') && Array.isArray(r.hosts) && op.spec?.nfsDsId) {
     // 요청한 호스트의 결과만 받는다 — 엣지가 다른 호스트를 '연결됨' 으로 보내 연결 수를 부풀리지 못하게(반증 검토 F6). 떼어 내기도 같다.
     const asked = new Set((op.spec.hostIds || []).map(String));

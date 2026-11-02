@@ -317,8 +317,10 @@ function mkVmCfg(vm, powered) {
     question: powered && i % 97 === 0 ? { text: 'msg.uuid.altered: This virtual machine might have been moved or copied.' } : null,
   };
 }
-function mkVmDev(vm) {
+// v2.862: 디스크의 데이터스토어는 그 사이트의 실제 데이터스토어 이름(데모 — Bareos 복원 검증이 홈 데이터스토어 여유를 인벤토리로 본다). 이름을 모르면 예전 값.
+function mkVmDev(vm, dsNames = []) {
   const i = vm.idx;
+  const dsAt = (k, fb) => (dsNames.length ? dsNames[(i + k) % dsNames.length] : fb);
   const cdConnected = i % 13 === 0;
   return {
     at: Date.now() - (i % 360) * 60_000,
@@ -326,9 +328,9 @@ function mkVmDev(vm) {
       host: cdConnected && i % 2 === 1, file: cdConnected && i % 2 === 0 ? '[iso-lib] os/rhel-8.9-x86_64-dvd.iso' : null }],
     floppies: i % 53 === 0 ? [{ label: 'Floppy drive 1', connected: false }] : [],
     disks: [
-      { label: 'Hard disk 1', mode: 'persistent', sharing: 'sharingNone', rdm: false, rdmMode: null, datastore: 'ds-01', capacityGB: 80 },
-      ...(i % 7 === 0 ? [{ label: 'Hard disk 2', mode: i % 49 === 0 ? 'independent_nonpersistent' : 'independent_persistent', sharing: i % 35 === 0 ? 'sharingMultiWriter' : 'sharingNone', rdm: false, rdmMode: null, datastore: 'ds-02', capacityGB: 200 }] : []),
-      ...(i % 59 === 0 ? [{ label: 'Hard disk 3', mode: 'independent_persistent', sharing: 'sharingNone', rdm: true, rdmMode: 'physicalMode', datastore: 'ds-01', capacityGB: 500 }] : []),
+      { label: 'Hard disk 1', mode: 'persistent', sharing: 'sharingNone', rdm: false, rdmMode: null, datastore: dsAt(0, 'ds-01'), capacityGB: 80 },
+      ...(i % 7 === 0 ? [{ label: 'Hard disk 2', mode: i % 49 === 0 ? 'independent_nonpersistent' : 'independent_persistent', sharing: i % 35 === 0 ? 'sharingMultiWriter' : 'sharingNone', rdm: false, rdmMode: null, datastore: dsAt(1, 'ds-02'), capacityGB: 200 }] : []),
+      ...(i % 59 === 0 ? [{ label: 'Hard disk 3', mode: 'independent_persistent', sharing: 'sharingNone', rdm: true, rdmMode: 'physicalMode', datastore: dsAt(0, 'ds-01'), capacityGB: 500 }] : []),
     ],
     usb: i % 67 === 0 ? 1 : 0, serial: 0, parallel: 0, omitted: 0,
   };
@@ -694,7 +696,7 @@ export function generateSnapshot() {
         orphanDeltaGB: vm.idx % 6 === 0 ? null : (vm.idx % 71 === 0 ? 12.5 : 0), // v2.698(A3): 스냅샷 0개인데 델타 파일(유령 스냅샷)
         gpu: vm.idx % 17 === 0 ? null : mkVmGpu(hostState, vm.idx, ord), // 템플릿은 GPU 를 받지 않는다
         // v2.697(B10): 구성 속성·장치 위생 — 일부(idx%41)는 아직 수집 전(키 없음)이라 화면의 '수집 중' 을 보인다.
-        ...(vm.idx % 41 === 0 ? {} : { cfg: mkVmCfg(vm, powered), dev: mkVmDev(vm) }),
+        ...(vm.idx % 41 === 0 ? {} : { cfg: mkVmCfg(vm, powered), dev: mkVmDev(vm, env.datastores.map((d) => d.name)) }),
         ...((() => { const pc = powered ? mkVmPerfc(vm.idx) : null; return pc ? { perfc: pc } : {}; })()),
       });
     }

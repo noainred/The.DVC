@@ -2619,3 +2619,12 @@ server/src/bareos/CLAUDE.md 크기 상한(15,000B)으로 원문 그대로 옮겼
      엣지 회신에 `toolsMs`·`deleted` 를 받는다(dispatch `sanitizeReport` · `finishOp` 화이트리스트). 핑 · 앱 시험은 하지 않는다(네트워크를 끊었으니 — 정직 기록).
   ④ 일일 요약(`bareos/digest.js` — 메일 종류 `bareos-digest` · 기본 켬 08:30)은 `veeam/staleAlert.js` 와 같은 틱(그날 한 번 · 실패 30분 뒤 · 3번 · 데모 · 엣지 제외 · 메일 꺼짐이면 계산 안 함).
      **Director 조회가 실패 중인 법인은 '모름'**(성공 · 실패 수를 만들지 않고 합에도 넣지 않는다) · 원장과 폴러 상태만 읽는다(Director 에 닿지 않는다 · 폴러 상태는 기동 때 `setDigestPoller` — 순환 방지).
+  ⑤ 반증 1인 반영(재현 4 · 판독 5 — 모두 이번 판에서 고침):
+     F1 범위 계정의 GET /rehearsal 에 다른 vCenter 의 회차 항목 · 정책 DS · 저장 계정이 실렸다 → 자기 vCenter 만 · savedBy 비움 ·
+     F2 '보내기 전에 기록' 이 메모리뿐이었다 → `st.weeks` 직후 `saveState()`(시험이 글자로 고정) · 상태 파일 손상이면 보존하고 그 프로세스에서 검증을 멈춘다 · 원장 저장 실패도 회차에 사유 ·
+     F3 검증용 이름을 끝에서 잘라 80자 VM 이 원래 이름과 같아졌다 → 날짜 꼬리를 지키고 앞을 자른다 · 빈 인벤토리(initial)면 회차를 차지하지 않고 미룬다 ·
+     F4 요약의 '안다' 는 조회 성공(ok === true)만 · 취소를 따로 센다 · 모두 모름이면 제목에 0 을 앞세우지 않는다 ·
+     F5 DS 를 정하지 않으면 여유 판정이 없었다 → VM 의 홈 데이터스토어(첫 디스크) 여유를 합산해 보고, 모르면 그 VM 을 건너뛴다(자동 작업은 보내지 않는 쪽) · 화면 저장이 정책 DS 를 지우지 않게 ·
+     F6 bareos-nic · bareos-verify 는 vmclone 전역 직렬 큐 대신 **vCenter 마다 한 줄**(execOp `perVcenter`) · F7 다시 보낸 검증의 사유(앞 시도가 지웠을 수 있음 · 켠 채 끊겼을 수 있음 · NIC 경고) ·
+     F8 위치 바뀜은 원장 칸이 아니라 인벤토리 `placementDrift` · F9 지금 검증의 바쁨 · Director 접속값을 OTP 앞에서 · F10 틱 실패 로그 · '지금 보내 보기' 1분 1회 · finishOp toolsMs 는 수만.
+     남긴 것(추정 — 확인 못 함): 게스트가 allowGuestControl 로 NIC 를 다시 연결할 수 있는지 · PCI 패스스루 NIC 는 끊기 대상 밖 · Director 별 회차 시한(명령마다 120초 시한은 있다).

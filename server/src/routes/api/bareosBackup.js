@@ -35,7 +35,7 @@ import { knownAgentNames } from '../../central/knownAgents.js';
 import { pollerStatus, pollOnce, requestReconcile } from '../../bareos/poller.js';
 import { restorePlan, placementDrift, bulkRestorePlan, BULK_RESTORE_MAX } from '../../bareos/restore.js';
 import { finishRestores } from '../../bareos/restoreFinish.js';
-import { loadPolicy, savePolicy, policyLoadError, rehearsalStatus, runNow as runRehearsalNow, normPolicy } from '../../bareos/rehearsal.js';
+import { savePolicy, policyLoadError, rehearsalStatus, runNow as runRehearsalNow, normPolicy, rehearsalBusy } from '../../bareos/rehearsal.js';
 import { loadDigest, saveDigest, digestLoadError, digestStatus, sendDigestNow, normDigest } from '../../bareos/digest.js';
 import { osFields } from '../../inventory/osKind.js';
 import { numOrNull } from '../../util/numOrNull.js';
@@ -1251,10 +1251,19 @@ api.get('/tools/bareos-backup/rehearsal', adminOnly, (req, res) => {
     for (const r of j.restores || []) if (r.verify) results.push({ jobId: j.id, vmName: j.vmName, vcenterId: j.vcenterId, directorId: jobDir(j), rid: r.jobid, at: r.at ?? null, state: r.state, name: r.target?.name || '', finish: r.finish || null, run: r.rehearsal || '' });
   }
   results.sort((a, b) => (b.at || 0) - (a.at || 0));
-  const visDirs = allowed ? new Set(listJobs().filter((j) => allowed.has(j.vcenterId)).map(jobDir)) : null;
+  // 반증 F1(재현): Director 하나에 vCenter 가 여럿이면 회차 항목 · 정책 데이터스토어에 범위 밖 vCenter 의 VM 이름 · 사유 · DS 이름이 실렸다 —
+  //   범위 계정에는 회차 항목을 자기 vCenter 대상만 · 정책 DS 는 자기 vCenter 만 · 저장한 계정은 싣지 않는다(restore-points 와 같은 규칙)
+  const allJobs = listJobs();
+  const vcOfJob = new Map(allJobs.map((j) => [j.id, j.vcenterId]));
+  const visDirs = allowed ? new Set(allJobs.filter((j) => allowed.has(j.vcenterId)).map(jobDir)) : null;
+  const policy = allowed
+    ? { ...st.policy, savedBy: '', datastores: Object.fromEntries(Object.entries(st.policy.datastores || {}).filter(([vc]) => allowed.has(vc))) }
+    : st.policy;
+  const runs = st.runs.filter((x) => !visDirs || visDirs.has(x.directorId)).slice(0, 20)
+    .map((x) => (allowed ? { ...x, items: (x.items || []).filter((it) => allowed.has(vcOfJob.get(it.jobId))) } : x));
   res.json({
-    ok: true, policy: st.policy, loadError: st.loadError, fullScope: !allowed,
-    runs: st.runs.filter((x) => !visDirs || visDirs.has(x.directorId)).slice(0, 20), results: results.slice(0, 100),
+    ok: true, policy, loadError: st.loadError, fullScope: !allowed,
+    runs, results: results.slice(0, 100),
     weeks: Object.fromEntries(Object.entries(st.weeks).filter(([k]) => !visDirs || visDirs.has(k))),   // 법인별 마지막 회차 날짜(포탈 시각)
   });
 });
@@ -1278,6 +1287,12 @@ api.post('/tools/bareos-backup/rehearsal/run', adminOnly, fullScopeOnly, fullWri
   const settings = effectiveSettings();
   if (!directorById(dirId, settings)) return res.status(404).json({ ok: false, reason: '그 Director 를 찾을 수 없습니다.' });
   if (policyLoadError()) return res.status(503).json({ ok: false, code: 'settingsUnreadable', reason: '복원 검증 정책 파일을 읽지 못했습니다.' });
+  // 반증 F9: 설정만 보면 아는 전제(돌고 있음 · Director 접속값)는 OTP 앞에서 — 1회용 코드를 태우지 않게(단건 복원과 같은 규칙)
+  if (rehearsalBusy()) return res.status(409).json({ ok: false, code: 'busy', reason: '다른 복원 검증이 진행 중입니다 — 끝난 뒤 다시 누르세요.' });
+  if (!isDemoActive()) {
+    const miss = directorConn(directorById(dirId, settings)).missing;
+    if (miss?.length) return res.status(409).json({ ok: false, code: 'not-configured', reason: `그 Director 설정이 덜 됐습니다(${miss.join('·')}) — 설정 › 법인별 Director 에서 먼저 채우세요.` });
+  }
   if (config.auth.enabled) { const v = verifyUserOtp(name, req.body?.otp); if (!v.ok) return res.status(403).json({ ok: false, reason: `OTP 인증 실패 — ${v.reason}` }); }
   try {
     const r = await runRehearsalNow(dirId, { by: name });
@@ -1297,7 +1312,10 @@ api.put('/tools/bareos-backup/digest', adminOnly, fullScopeOnly, fullWriteOnly, 
     res.json({ ok: true, config: saved });
   } catch (e) { res.status(e?.code === 'unreadable' ? 503 : 400).json({ ok: false, reason: String(e?.message || e) }); }
 });
+let _digestSentAt = 0;   // '지금 보내 보기' 는 1분에 한 번(반증 F10 — 메일 폭주 방지)
 api.post('/tools/bareos-backup/digest/send', adminOnly, fullScopeOnly, async (req, res) => {
+  if (Date.now() - _digestSentAt < 60_000) return res.status(429).json({ ok: false, reason: '방금 보냈습니다 — 1분 뒤 다시 누르세요.' });
+  _digestSentAt = Date.now();
   const r = await sendDigestNow({ by: req.user?.username || '' });
   audit(req, 'Bareos 일일 요약 메일 보내 보기', '전 법인', r.ok ? (r.skipped ? '대상 없음' : '보냄') : `실패 — ${r.reason}`);
   res.status(r.ok ? 200 : 502).json(r);

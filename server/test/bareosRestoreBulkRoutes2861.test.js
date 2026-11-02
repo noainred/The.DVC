@@ -79,7 +79,7 @@ before(async () => {
     hosts: [{ id: 'vc-a:host-1', vcenterId: 'vc-a', name: 'esx-a1', cluster: 'CL-A' }],
     datastores: [{ id: 'vc-a:ds-1', vcenterId: 'vc-a', name: 'ds-a1', freeGB: 5000, capacityGB: 10000 }, { id: 'vc-a:ds-2', vcenterId: 'vc-a', name: 'ds-tight', freeGB: 300, capacityGB: 1000 }],
     vms: [
-      { id: 'vc-a:vm-1', vcenterId: 'vc-a', name: 'web-01', powerState: 'POWERED_ON', snapshotCount: 0, vcDcPath: 'DC-A', folderPath: '/web', storageGB: 200 },
+      { id: 'vc-a:vm-1', vcenterId: 'vc-a', name: 'web-01', powerState: 'POWERED_ON', snapshotCount: 0, vcDcPath: 'DC-A', folderPath: '/web', storageGB: 200, dev: { disks: [{ datastore: 'ds-a1' }] } },   // 홈 DS(검증 여유 판정 — v2.862)
       { id: 'vc-a:vm-5', vcenterId: 'vc-a', name: 'app-05', powerState: 'POWERED_OFF', snapshotCount: 0, vcDcPath: 'DC-A', folderPath: '/app', storageGB: 150 },
       { id: 'vc-b:vm-9', vcenterId: 'vc-b', name: 'db-09', powerState: 'POWERED_ON', snapshotCount: 0, vcDcPath: 'DC-B', folderPath: '/', storageGB: 50 },
     ],
@@ -224,7 +224,7 @@ test('⑤ v2.862 복원 검증 · 일일 요약 — 전체 범위 · OTP · 입�
   let r = await call('admin', 'PUT', '/rehearsal', { enabled: true, weekday: 9, otp: 'x' });
   assert.equal(r.s, 400);
   assert.equal((await call('admin', 'PUT', '/rehearsal', { enabled: true, otp: '000000' })).s, 403);
-  r = await call('adm2', 'PUT', '/rehearsal', { enabled: false, weekday: 6, time: '03:17', perCorp: 2, deleteOnOk: true, otp: otpNow() });
+  r = await call('adm2', 'PUT', '/rehearsal', { enabled: false, weekday: 6, time: '03:17', perCorp: 2, deleteOnOk: true, datastores: { 'vc-b': 'ds-secret-warsaw' }, otp: otpNow() });
   assert.equal(r.s, 200, r.t);
   // 지금 검증: 마지막 백업이 성공한 대상만 — web 만 성공 처리
   registry.patchJob(ID.web, { lastRun: { jobid: H('web', 130), state: 'ok', status: 'T', endedAt: Date.now() } });
@@ -250,6 +250,11 @@ test('⑤ v2.862 복원 검증 · 일일 요약 — 전체 범위 · OTP · 입�
   const g = await call('sadm', 'GET', '/rehearsal');
   assert.equal(g.s, 200);
   assert.ok(g.j.results.every((x) => x.vcenterId === 'vc-a'));
+  // 반증 F1: 범위 밖 vCenter 의 정책 DS · 저장한 계정 · 회차 항목을 싣지 않는다
+  assert.doesNotMatch(g.t, /ds-secret-warsaw|db-09/);
+  assert.equal(g.j.policy.savedBy, '');
+  assert.ok(g.j.runs.every((x) => (x.items || []).every((it) => it.jobId !== ID.db)));
+  assert.match((await call('admin', 'GET', '/rehearsal')).t, /ds-secret-warsaw/, '전체 범위 관리자는 본다');
   assert.equal(g.j.results[0].jobId, ID.web);
   // 일일 요약: 범위 계정 403 · 틀린 시각 400 · 저장
   assert.equal((await call('sadm', 'GET', '/digest')).s, 403);

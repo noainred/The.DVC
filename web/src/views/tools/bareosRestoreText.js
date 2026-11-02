@@ -4,6 +4,7 @@
  *   값이 없으면 '—'(0 이 아니다) · 문구에 백틱 금지(BoldText 는 강조만 해석).
  */
 import { levelLabel, whenText } from './bareosText.js';
+import { unitText } from '../unitText.js';
 
 /** 한 번에 고를 수 있는 VM(서버 BULK_RESTORE_MAX 와 같다 — 사용자 결정 ⓑ). */
 export const RESTORE_MAX = 50;
@@ -181,7 +182,7 @@ export const WEEKDAYS = Object.freeze(['일', '월', '화', '수', '목', '금',
 export function rehearsalPolicyText(p) {
   if (!p) return '—';
   const when = `매주 ${WEEKDAYS[p.weekday] ?? '—'}요일 ${p.time || '—'}`;
-  return `${p.enabled ? '켜짐' : '꺼짐'} · ${when} · 법인마다 ${p.perCorp ?? '—'}대 · 성공한 검증용 VM ${p.deleteOnOk === false ? '남김' : '지움'} · 실패는 남김`;
+  return `${p.enabled ? '켜짐' : '꺼짐'} · ${when} · 법인마다 ${unitText(p.perCorp, '대')} · 성공한 검증용 VM ${p.deleteOnOk === false ? '남김' : '지움'} · 실패는 남김`;
 }
 /** Tools 응답 시간 — 모르면 '—'(0 이 아니다). */
 export function toolsText(ms) {

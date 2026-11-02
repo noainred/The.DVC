@@ -23,7 +23,8 @@ import { registerStateFile } from '../util/stateFiles.js';
 import { DAY_OFFSET_MIN } from '../util/dayKey.js';
 import { listJobs, addRestore, inBatch, restoreOpen } from './registry.js';
 import { loadSettings, jobDirectorId, directorById } from './settings.js';
-import { bulkRestorePlan } from './restore.js';
+import { bulkRestorePlan, placementDrift } from './restore.js';
+import { capacityShortfall } from '../vmclone/capacity.js';
 import { onDirector, isDemoActive, effectiveSettings } from './service.js';
 import { noteRestoreBatchStart, noteRestoreBatchEnd } from './inflight.js';
 import { logAudit } from '../audit.js';
@@ -41,7 +42,7 @@ const isEdge = () => !!(config.agent?.centralUrl && config.agent?.centralToken);
 const DS_RE = /^[^"\\:;@\r\n\0]{1,80}$/;
 
 let _cfg = null; const _loadErr = makeLoadError();
-let _state = null; let _busy = false; let _timer = null;
+let _state = null; let _busy = false; let _timer = null; let _stateBad = '';
 
 /** 정책 정규화 — 틀린 값은 거부(조용히 기본값으로 바꾸지 않는다). */
 export function normPolicy(body = {}) {
@@ -95,7 +96,11 @@ export function savePolicy(body, { by = '', now = Date.now() } = {}) {
 
 function state() {
   if (_state) return _state;
-  try { _state = fs.existsSync(STATE_FILE()) ? JSON.parse(fs.readFileSync(STATE_FILE(), 'utf8')) : {}; } catch { _state = {}; }
+  try { _state = fs.existsSync(STATE_FILE()) ? JSON.parse(fs.readFileSync(STATE_FILE(), 'utf8')) : {}; } catch (e) {
+    // 반증 F2: 조용히 비우면 오늘 회차 기록이 사라져 같은 날 다시 돈다 — 보존하고 이 프로세스에서는 검증을 멈춘다(재시작하면 새 상태로)
+    preserveCorrupt(STATE_FILE(), e?.message); _stateBad = '복원 검증 상태 파일이 손상돼 보존했습니다 — 같은 날 두 번 돌지 않게 이 프로세스에서는 검증을 멈췄습니다(재시작하면 새로 시작)';
+    console.warn(`[bareos] ${_stateBad}`); _state = {};
+  }
   if (!_state || typeof _state !== 'object' || Array.isArray(_state)) _state = {};
   if (!_state.weeks || typeof _state.weeks !== 'object') _state.weeks = {};
   if (!_state.lastAt || typeof _state.lastAt !== 'object') _state.lastAt = {};
@@ -105,7 +110,9 @@ function state() {
 function saveState() {
   try { atomicWriteFileSync(STATE_FILE(), JSON.stringify(_state), { mode: 0o600 }); } catch (e) { console.warn(`[bareos] 복원 검증 상태를 저장하지 못했습니다(${e?.message || e})`); }
 }
-export function _resetRehearsalForTest() { _cfg = null; _state = null; _busy = false; _loadErr.clear(); }
+export function _resetRehearsalForTest() { _cfg = null; _state = null; _busy = false; _stateBad = ''; _loadErr.clear(); }
+/** 지금 돌고 있는가(라우트가 OTP 를 쓰기 전에 본다 — 반증 F9). */
+export const rehearsalBusy = () => _busy;
 
 /** 포탈 시각의 요일 · 날짜 · 분(순수). */
 export function clockOf(now = Date.now()) {
@@ -121,17 +128,22 @@ export function dueOf(policy, lastDay, now = Date.now()) {
   return lastDay !== c.day;
 }
 /** 검증용 VM 이름(날짜 — 실패한 검증용 VM 을 남겨도 다음 회차와 겹치지 않게). */
-export const verifyName = (vmName, day) => `${String(vmName)}-verify-${String(day).replace(/-/g, '')}`.slice(0, 80);
+export const verifyName = (vmName, day) => {
+  // 반증 F3(재현): 끝을 자르면 80자 VM 은 원래 이름과 같아지고 65~79자는 날짜가 잘려 매주 같은 이름이 됐다 — 날짜 꼬리를 지키고 원래 이름 쪽을 자른다
+  const tail = `-verify-${String(day).replace(/-/g, '')}`;
+  return `${String(vmName).slice(0, 80 - tail.length)}${tail}`;
+};
 
 /**
  * 고르기(순수) — 그 Director 의 활성 대상 중 마지막 백업이 성공이고 진행 중 복원이 없는 것, 가장 오래 검증하지 않은 순서로 n 대.
  * @param {object[]} jobs 원장
  * @param {(job)=>string} dirOf
  * @param {Record<string, number>} lastAt  대상 id → 마지막 검증 시각
+ * @param {(job)=>any} driftOf  등록 뒤 위치 바뀜(인벤토리 — placementDrift. 원장에는 drift 칸이 없다 · 반증 F8)
  */
-export function pickCandidates(jobs, dirId, n, dirOf, lastAt = {}) {
+export function pickCandidates(jobs, dirId, n, dirOf, lastAt = {}, driftOf = () => null) {
   return (Array.isArray(jobs) ? jobs : [])
-    .filter((j) => dirOf(j) === dirId && j.enabled !== false && !j.missingInDirector && !j.drift
+    .filter((j) => dirOf(j) === dirId && j.enabled !== false && !j.missingInDirector && !driftOf(j)
       && (j.lastRun?.state === 'ok' || j.lastRun?.state === 'warning') && Number.isInteger(j.lastRun?.jobid) && j.lastRun.jobid > 0
       && !(j.restores || []).some(restoreOpen))
     .sort((a, b) => ((lastAt[a.id] || 0) - (lastAt[b.id] || 0)) || String(a.vmName).localeCompare(String(b.vmName)))
@@ -146,15 +158,45 @@ export async function runRehearsal(dirId, { trigger = 'timer', by = 'rehearsal',
   const policy = loadPolicy();
   const settings = effectiveSettings();
   const st = state();
+  if (_stateBad) throw fail('unavailable', _stateBad);
   const day = clockOf(now).day;
   const runId = `rv-${now.toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
-  st.weeks[dirId] = day;   // 보내기 전에 회차를 차지한다(재시작 · 실패로 같은 날 다시 돌지 않게)
+  // 반증 F3: 기동 직후 빈 인벤토리(initial)에서는 이름 겹침 검사가 비어 통과한다 — 회차를 차지하지 않고 미룬다(다음 틱에 다시)
+  const snap = store.get();
+  if (!snap || snap.initial || !(snap.vms || []).length) return { ok: false, started: 0, deferred: true, runId, items: [], reason: '인벤토리 수집 전이라 미뤘습니다(다음 확인에서 다시)' };
+  st.weeks[dirId] = day;   // 보내기 전에 회차를 차지하고 **파일에 남긴다**(반증 F2 — 메모리에만 두면 송신 중 재시작에 같은 날 다시 돌았다)
+  saveState();
   const jobs = listJobs();
   const dirOf = (j) => jobDirectorId(j, settings);
-  const picked = pickCandidates(jobs, dirId, policy.perCorp, dirOf, st.lastAt);
+  const vmById = new Map((snap.vms || []).map((v) => [v.id, v]));
+  const picked0 = pickCandidates(jobs, dirId, policy.perCorp, dirOf, st.lastAt, (j) => placementDrift(j, vmById.get(j.vmId)));
   const run = { id: runId, directorId: dirId, at: now, trigger, items: [] };
   const finishRun = (r) => { run.reason = r.reason || ''; st.runs = [run, ...st.runs].slice(0, RUNS_KEEP); saveState(); return { ...r, runId, items: run.items }; };
-  if (!picked.length) return finishRun({ ok: true, started: 0, reason: '검증할 대상이 없습니다(마지막 백업이 성공한 활성 대상 없음)' });
+  // 반증 F5: 데이터스토어를 정하지 않으면(백업 당시 자리) 복원 판정이 여유를 보지 않는다 — 사람이 보지 않는 정기 작업이라 VM 의 홈 데이터스토어(첫 디스크)
+  //   여유를 직접 본다. 모르면(디스크 정보 · 여유 · 용량을 못 읽음) 그 VM 은 건너뛴다(막지도 통과로 단정하지도 않는 대화형과 달리 — 자동 작업은 보내지 않는 쪽).
+  const dsUse = new Map();
+  const picked = [];
+  for (const j of picked0) {
+    if (policy.datastores[j.vcenterId]) { picked.push(j); continue; }   // 정한 DS 는 bulkRestorePlan 이 합산 검사
+    const vm = vmById.get(j.vmId);
+    const home = String(vm?.dev?.disks?.[0]?.datastore || '');
+    const ds = home ? (snap.datastores || []).find((x) => String(x.vcenterId) === String(j.vcenterId) && x.name === home) : null;
+    const need = Number(vm?.storageGB); const free = Number(ds?.freeGB); const cap = Number(ds?.capacityGB);
+    if (!ds || !Number.isFinite(need) || need < 0 || vm?.storageGB == null || !Number.isFinite(free) || ds?.freeGB == null) {
+      run.items.push({ jobId: j.id, vmName: j.vmName, ok: false, reason: '홈 데이터스토어 · 여유 · VM 용량을 읽지 못해 건너뛰었습니다(가득 차면 그 위의 VM 이 멈춥니다)' });
+      continue;
+    }
+    const key = `${j.vcenterId}\u0000${home}`;
+    const used = (dsUse.get(key) || 0) + need;
+    const GIB = 1024 ** 3;
+    if (capacityShortfall({ free: free * GIB, capacity: Number.isFinite(cap) && ds?.capacityGB != null ? cap * GIB : null, need: used * GIB })) {
+      run.items.push({ jobId: j.id, vmName: j.vmName, ok: false, reason: `홈 데이터스토어 ‘${home}’ 여유가 부족해 건너뛰었습니다` });
+      continue;
+    }
+    dsUse.set(key, used);
+    picked.push(j);
+  }
+  if (!picked.length) return finishRun({ ok: true, started: 0, reason: run.items.length ? '보낼 수 있는 대상이 없습니다(여유 · 정보 부족으로 건너뜀)' : '검증할 대상이 없습니다(마지막 백업이 성공한 활성 대상 없음)' });
   // 판정은 묶음 복원과 같은 함수 — 이름 겹침 · 여유 · 덮어쓰기 없음(새 VM 만)
   const reserved = new Set();
   for (const j of jobs) for (const r of j.restores || []) if (r.mode === 'newVm' && r.target?.name) reserved.add(`${j.vcenterId}\u0000${String(r.target.name).toLowerCase()}`);
@@ -182,6 +224,7 @@ export async function runRehearsal(dirId, { trigger = 'timer', by = 'rehearsal',
     }
     const byKey = new Map((Array.isArray(out) ? out : []).map((x) => [x.key, x]));
     let started = 0;
+    try {
     inBatch(() => {
       ready.forEach((x, i) => {
         const r = byKey.get(i);
@@ -196,8 +239,13 @@ export async function runRehearsal(dirId, { trigger = 'timer', by = 'rehearsal',
         }
       });
     });
+    } catch (e) {
+      // 원장 저장 실패 — 복원은 이미 시작됐다(묶음 라우트와 같은 처리 · 반증 F2 계열)
+      console.warn(`[bareos] 복원 검증 ${runId} 원장 저장 실패: ${e?.message || e}`);
+      run.reason = `원장 저장 실패 — 시작한 검증 복원의 끝맺음(끊기 · 켜 보기 · 지우기)이 돌지 않을 수 있습니다. vCenter 에서 '-verify-' VM 을 확인하세요`;
+    }
     logAudit({ user: by, action: 'Bareos 복원 검증', target: directorById(dirId, settings)?.name || dirId, detail: `회차 ${runId} · 시작 ${started} / ${ready.length}대${trigger === 'timer' ? ' · 정기' : ' · 지금 검증'}` });
-    return finishRun({ ok: started > 0, started });
+    return finishRun({ ok: started > 0, started, ...(run.reason ? { reason: run.reason } : {}) });
   } finally { noteRestoreBatchEnd(runId); }
 }
 
@@ -214,6 +262,8 @@ export async function tick(now = Date.now()) {
   try {
     const policy = loadPolicy();
     if (policyLoadError() || !policy.enabled) return null;
+    state();
+    if (_stateBad) return null;
     const settings = isDemoActive() ? effectiveSettings() : loadSettings();
     const st = state();
     const out = [];
@@ -233,6 +283,6 @@ export async function runNow(dirId, { by = '' } = {}) {
 
 export function startRehearsal() {
   if (_timer || isEdge()) return;
-  _timer = setInterval(() => { tick().catch(() => {}); }, TICK_MS);
+  _timer = setInterval(() => { tick().catch((e) => console.warn(`[bareos] 복원 검증 틱 실패: ${e?.message || e}`)); }, TICK_MS);
   _timer.unref?.();
 }

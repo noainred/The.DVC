@@ -355,7 +355,7 @@ export async function disconnectRestoredVm(vcenterId, name, { setPhase } = {}) {
  *   실패한 검증용 VM 은 지우지 않고 남긴다(조사용). 핑 · 앱 시험은 하지 않는다(네트워크를 끊었으니 — 정직 기록).
  * @returns {Promise<{ok:boolean, detail:string, ms:number, toolsMs?:number|null, deleted?:boolean}>}
  */
-export async function verifyRestoredVm(vcenterId, name, { deleteOnOk = true, setPhase } = {}) {
+export async function verifyRestoredVm(vcenterId, name, { deleteOnOk = true, retry = false, setPhase } = {}) {
   const t0 = Date.now();
   const ph = phaseRecorder(setPhase);
   const fin = (ok, detail, extra = {}) => ({ ok, detail, ms: Date.now() - t0, phases: ph.end(ok), ...extra });
@@ -381,10 +381,12 @@ export async function verifyRestoredVm(vcenterId, name, { deleteOnOk = true, set
   try {
     ph.step('VM 찾기');
     const refs = await findVmsByName(c, vmName);
-    if (refs.length !== 1) return fin(false, refs.length ? `vCenter 에 '${vmName}' 이 ${refs.length}대 있어 어느 것인지 정할 수 없습니다 — 손대지 않았습니다` : `vCenter 에서 '${vmName}' 을 찾지 못했습니다`);
+    // 반증 F7: 다시 보낸 검증(재시작 뒤)은 앞 시도가 이미 지웠거나 켠 채 끊겼을 수 있다 — 사유가 그 가능성을 말한다 · NIC 가 아직 연결일 수 있음을 알린다
+    const NIC_WARN = ' — 네트워크 어댑터가 연결된 채일 수 있으니 켜기 전에 확인하세요';
+    if (refs.length !== 1) return fin(false, refs.length ? `vCenter 에 '${vmName}' 이 ${refs.length}대 있어 어느 것인지 정할 수 없습니다 — 손대지 않았습니다${NIC_WARN}` : retry ? `vCenter 에서 '${vmName}' 을 찾지 못했습니다 — 앞 시도(재시작 전)가 검증을 마치고 지웠을 수 있습니다(결과 모름)` : `vCenter 에서 '${vmName}' 을 찾지 못했습니다`);
     ref = refs[0];
     const st = await vmStateOf(c, ref);
-    if (st.powerState !== 'poweredOff') return fin(false, `'${vmName}' 이 이미 켜져 있어(${st.powerState}) 검증하지 않았습니다 — 누군가 쓰는 중일 수 있습니다`);
+    if (st.powerState !== 'poweredOff') return fin(false, retry ? `'${vmName}' 이 켜져 있습니다 — 앞 검증(재시작 전)이 켠 채 끊겼을 수 있습니다. 네트워크가 끊겼는지 확인한 뒤 끄고 지우세요` : `'${vmName}' 이 이미 켜져 있어(${st.powerState}) 검증하지 않았습니다 — 누군가 쓰는 중일 수 있습니다${NIC_WARN}`);
     ph.step('네트워크 끊기');
     await disconnectAllNics(c, ref);   // 확인 못 하면 throw — 아래 켜기에 닿지 않는다
     ph.step('전원 켜기');

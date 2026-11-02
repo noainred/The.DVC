@@ -54,7 +54,7 @@ function finishList(list, now) {
       }
       // v2.862 복원 검증(리허설)은 끊기 + 켜 보기 + (성공이면) 지우기를 한 작업으로(bareos-verify — 끊기를 확인 못 하면 켜지 않는다)
       const d = r.verify
-        ? dispatchVmOp({ kind: 'bareos-verify', vcenterId: r.vcenterId, vmName: r.name, spec: { name: r.name, bareosJobId: r.jobId, rid: r.rid, deleteOnOk: r.deleteOnOk !== false }, by: 'bareos-rehearsal' })
+        ? dispatchVmOp({ kind: 'bareos-verify', vcenterId: r.vcenterId, vmName: r.name, spec: { name: r.name, bareosJobId: r.jobId, rid: r.rid, deleteOnOk: r.deleteOnOk !== false, ...((f?.tries || 0) > 0 ? { retry: true } : {}) }, by: 'bareos-rehearsal' })
         : dispatchVmOp({ kind: 'bareos-nic', vcenterId: r.vcenterId, vmName: r.name, spec: { name: r.name, bareosJobId: r.jobId, rid: r.rid }, by: 'bareos-restore' });
       if (d.issue) {
         patchRestoreFinish(r.jobId, r.rid, { nic: 'failed', detail: `네트워크 끊기를 보내지 못했습니다(${d.issue}) — 켜기 전에 vCenter 에서 직접 끊으세요`, at: now }, (cur) => !done(cur));
