@@ -14,6 +14,7 @@ import { listGroups } from '../../bareos/groups.js';
 import { touchLive, liveSnapshot, runningRunOf, LIVE_MS, LIVE_IDLE_MS } from '../../bareos/liveStatus.js';
 import { cancelInfo, CANCEL_WAIT_MS } from '../../bareos/cancelState.js';
 import { cancelPlan, groupCanceling } from '../../bareos/groupRunner.js';
+import { nextSlot } from '../../bareos/groupSchedule.js';
 import { rateNowOf } from '../../bareos/liveParse.js';
 import { isFinalStatus } from '../../bareos/names.js';
 import { numOrNull } from '../../util/numOrNull.js';
@@ -178,7 +179,8 @@ export function corpView(site, settings, digests, { now = Date.now(), vms = new 
         const plan = cancelPlan(g, byVm, now);
         const canceling = groupCanceling(g.id);
         if (!plan.phase && !plan.sent && !canceling) continue;
-        out.push({ id: g.id, name: g.name, total: g.vmIds.length, plan, canceling, lastFire: g.lastFire ? { at: g.lastFire.at, key: g.lastFire.key || '', trigger: g.lastFire.trigger, level: g.lastFire.level || '', started: g.lastFire.started || 0, canceled: g.lastFire.canceled || null } : null });
+        const nx = nextSlot(g.schedule, now);   // 확인 창 '다음 회차 1회 건너뛰기'(그룹 탭과 같은 값)
+        out.push({ id: g.id, name: g.name, total: g.vmIds.length, plan, canceling, next: nx ? { at: nx.at, key: nx.key, level: nx.level, ...(g.skipKey === nx.key ? { skip: true } : {}) } : null, lastFire: g.lastFire ? { at: g.lastFire.at, key: g.lastFire.key || '', trigger: g.lastFire.trigger, level: g.lastFire.level || '', started: g.lastFire.started || 0, canceled: g.lastFire.canceled || null } : null });
       }
       return out;
     })(),

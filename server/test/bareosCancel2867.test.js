@@ -262,6 +262,7 @@ test('⑤ Director 실행 중 — 이번 회차 실행을 한 번에 취소 · �
   r = await call('admin', 'GET', '/live');
   const corp = r.j.corps.find((c) => c.vcenterId === 'vc-a');
   assert.ok(corp.groupRuns.some((x) => x.id === g.id && x.plan.sent === 2));
+  assert.ok('next' in corp.groupRuns.find((x) => x.id === g.id), '확인 창의 다음 회차 값(스케줄 꺼짐이면 null)');
   assert.equal(corp.writable, true);
   for (const id of ids) D.runs.get(id).status = 'A';
   D.cancelTo = 'A';

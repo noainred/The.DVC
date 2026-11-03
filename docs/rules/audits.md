@@ -2649,3 +2649,28 @@ server/src/bareos/CLAUDE.md 크기 상한(15,000B)으로 원문 그대로 옮겼
      · `bareos-probe --vcenter … --vc-user … --vm …`(VCENTER_PASSWORD): 포탈 vCenter 계정으로 **읽기만** — 같은 이름 VM 수 · 전원 · `nicSummary`(못 읽은 칸 null) ·
        `passthroughCount` · `sessionPrivileges`(HasPrivilegeOnEntities — 현재 세션 키 · VM 과 상위 폴더 · `VERIFY_PRIV_IDS`). 로그인 재시도 없음 · SSRF 규칙.
        probe 는 복원 · 재구성 · 켜기 · 지우기 함수를 부르지 않는다(테스트가 소스로 고정). ReconfigVM 의 NIC 연결 변경에 장치 권한 둘 중 무엇이 요구되는지는 판마다 다를 수 있어 둘 다 본다(추정).
+
+## Bareos v2.867 백업 중단 · 취소 — 모듈 규칙(2026-11-03 · 시안 docs/design/bareos-cancel/ · 사용자 컨펌 '좋아 구현해' · 기본값 5가지)
+
+- **판정 하나 `bareos/cancelState.js`**: `runningRunOf`(지금 도는 실행 — pending 먼저, 없으면 끝나지 않은 lastRun · v2.833 liveStatus 에서 옮김) ·
+  `cancelInfo`(원장 `cancelReq` 의 jobid 가 **지금 도는 실행일 때만** '멈추는 중' · `CANCEL_WAIT_MS` 10분 뒤 `stuck` '멈추지 않음') · `cancelGate`(보냈으면 멈추지 않음일 때만 다시) ·
+  `cancelTracked`(pending 없는 실행의 취소는 폴러가 `CANCEL_TRACK_MS` 1시간 따로 묻는다 — `pendingWork` 의 `cancelOnly` 줄). 화면 셋(백업 대상 · 진행 현황판 · 그룹)이 이 값을 그대로 쓴다.
+- **원장 `cancelReq{jobid, at, by, via}`**: 그 실행이 끝나면(`applyRunRow` — A 든 T 든) · 추적 해제(`clearPending`) · 추적 포기(`notePendingMiss`)에서 지운다. 목록 응답에는 원장 칸이 아니라 `cancel`(판정값)만 싣는다.
+- **`ops.cancelJobs`** 는 항목마다 단건 `cancelOne` 과 같은 검사(행 확인 · 잡 이름 대조 · 끝난 행 `final` · 모르는 행 `cleared`) · 세션 하나 · `SESSION_DEAD` 면 남은 것 건너뜀 · `MUTATING` ·
+  엣지 TTL 150초 · 회신 정제는 '성공인데 canceled · final · cleared 가 없음 = 결과 모름'. 옛 엣지(모르는 작업)는 '엣지 업그레이드' 안내 — **단건 취소 N번으로 돌려보내지 않는다**(사용자 결정 ⑤ · WAN 왕복).
+- **그룹 회차 중단(`groupRunner.cancelGroupRun`) — 단계마다 다르다**:
+  · 줄 대기: 실행 표(`_runs`)에 `halted` · 줄에서 뺀다 · **차례가 와도 runGroup 을 부르지 않는다**(회차를 두 번 기록하지 않는다) · 회차 기록은 바로(전부 `halted` '시작 전 멈춤').
+  · 보내는 중: `AbortController` 신호만 — 러너가 **덩어리 사이에서만** 본다(보내던 덩어리를 끊으면 결과 모름 — v2.830 L4). 마지막 회신 뒤 검사부터 `_groupBusy` 를 지우기까지 다른 await 은 취소뿐이고
+    그동안 `_cancelling` 이 두 번째 요청을 막는다. 러너가 이번 회차 jobid 를 자기 잠금으로 취소하고 기록한다.
+  · Director 실행 중: lastFire 의 started·canceled 항목 중 **그 jobid 가 지금 도는 실행인 것만** 묶음 취소(`liveTargets` — 이미 보냈고 멈추지 않음이 아니면 뺀다) · 결과는 `recordFireCancel`(그사이 새 회차면 쓰지 않는다).
+  · 범위 확대(`includeScheduled`) = 그룹 VM 의 그 밖 실행(Bareos 스케줄 · 수동)도 · 다음 회차 건너뛰기(`skipKey` — `decideFire` 가 'skipped' 로 넘기고 기록 때 지운다 · 스케줄을 고치면 지운다).
+  · `groupRunning` 에 `_cancelling` 포함(중단 처리 중 지금 백업 · 지우기 409). 실행 표 · 줄 자리는 **객체로 맞춰** 지운다(중단 뒤 같은 그룹 새 실행의 표를 옛 줄 자리가 지우지 않게).
+- **중단된 회차로는 보관 정리를 하지 않는다**(`pruneDue` — 사용자 결정 ④). 다음 정상 회차가 끝난 뒤 돈다.
+- **라우트**: `POST groups/:id/cancel` — admin · 쓰기 범위(`groupFor`) · 이름 재입력(정확히 같아야 — 앞뒤 공백만 무시) · OTP 없음(멈춤은 데이터를 지우지 않는다 — 사용자 결정 ②) · 202 + 뒤에서 취소 ·
+  멈출 것 없음 409(`idle`). 단건 `jobs/:id/cancel` 은 보낸 뒤 409(`sent`) — 멈추지 않음이면 다시. 감사: '그룹 회차 중단 요청'(라우트) + '그룹 회차 중단'(결과 수).
+- **진행 현황판 캐시 열쇠에 쓰기 범위**(`w=`) — 법인별 `writable` 이 사람마다 다르다.
+- 데모 Director `BAREOS_DEMO_CANCEL_MS`(1초~10분 · 기본 0) — 취소가 끝나기까지 'is waiting for client to cancel'(dird 문구 모양 · 추정).
+- 시험 `bareosCancel2867`(12건) · 변이 11건 전부 잡힘(덩어리 사이 검사 · 보관 정리 제외 · 줄 대기 건너뜀 · 이름 재입력 · 단건 재전송 막기 · 러너 끝 취소 · cancelReq 지우기 · 지금 실행 대조 · 엣지 정제 · skipKey · 이미 보낸 실행 제외).
+- 남긴 것(정직 기록): ① 취소 뒤 VMware 스냅샷 잔류 · Director 상태 원문 · A 로 끝나기까지 시간 · 취소 뒤 증분 기준은 **실환경 미확인**(화면은 추정으로 안내 — `tools/bareos-probe.js` 로 확인할 것).
+  ② 복원 작업 취소는 범위 밖(다음 과제 후보). ③ '일시 정지 · 재개' 없음(Bareos 에 명령 없음). ④ 그 밖 실행(Bareos 스케줄)만 도는 그룹에는 '회차 중단…' 을 열지 않는다 — 행마다 '취소…'.
+  ⑤ 포탈이 재시작하면 중단 처리 중 표(메모리)는 사라진다 — 보낸 취소는 원장 `cancelReq` 로 남고, 보내기 전이면 그 회차는 v2.830 '보내는 도중 재시작' 안내로 보인다.
