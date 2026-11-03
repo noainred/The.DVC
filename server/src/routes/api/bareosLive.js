@@ -16,7 +16,7 @@ import { pollerStatus } from '../../bareos/poller.js';
 import { cancelInfo, CANCEL_WAIT_MS } from '../../bareos/cancelState.js';
 import { cancelPlan, groupCanceling, cancellingKey } from '../../bareos/groupRunner.js';
 import { nextSlot } from '../../bareos/groupSchedule.js';
-import { rateNowOf } from '../../bareos/liveParse.js';
+import { rateNowOf, jobFdState } from '../../bareos/liveParse.js';
 import { isFinalStatus } from '../../bareos/names.js';
 import { numOrNull } from '../../util/numOrNull.js';
 import { memoJson, scopeKey } from './shared.js';
@@ -125,7 +125,6 @@ export function corpView(site, settings, digests, { now = Date.now(), vms = new 
   const demo = isDemoActive();
   const mine = digests.filter((j) => j.vcenterId === site.vcenterId && !!j.demo === demo);
   const { live, hist } = liveSnapshot(site.directorId, site.vcenterId);
-  const liveOk = !!live?.ok;
   const dirOk = !!live?.dir?.ok;
   const t0 = startOfToday(now);
   const running = []; let ok = 0; let warn = 0; let fail = 0; let canceled = 0; let bytes = 0; let bytesUnknown = 0;
@@ -133,9 +132,11 @@ export function corpView(site, settings, digests, { now = Date.now(), vms = new 
   for (const j of mine) {
     const run = runningRunOf(j);
     if (run) {
-      running.push(runningRow(j, run, live?.jobs?.get(run.jobid) || null, liveOk, {
+      // v2.869: FD 판정은 그 잡의 FD 답으로(Director 의 FD 하나라도 답하면 전부 '보고 없음' 으로 보이던 것 — 사용자 보고)
+      const fd = jobFdState(live, j, site);
+      running.push({ ...runningRow(j, run, fd.ok ? live?.jobs?.get(run.jobid) || null : null, fd.ok, {
         now, vm: vms.get(j.vmId), group: groupOf.get(j.vmId) || '', dirRow: dirOk ? live.dir.jobs.get(run.jobid) || null : null,
-      }));
+      }), fd });
     }
     // 오늘 끝난 실행 — 원장의 최근 끝난 실행 + lastRun(jobid 로 하나씩)
     const seen = new Set();

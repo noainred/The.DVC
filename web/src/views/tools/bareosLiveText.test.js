@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
-  rateText, sizeText, elapsedText, progressPct, liveCodeText, corpBadge, corpMatches, corpFilterCounts, sortCorps,
+  fdLineOf, rateText, sizeText, elapsedText, progressPct, liveCodeText, corpBadge, corpMatches, corpFilterCounts, sortCorps,
   sparkSegments, totalHist, slowRows, levelWord, triggerText, reasonText, REASON_HINT, STUCK_TEXT, sortWaiting,
 } from './bareosLiveText.js';
 
@@ -102,5 +102,22 @@ describe('v2.866 이력 표 대상이 진행 중 VM 을 따라간다', () => {
     expect(historyFollowTarget({ pickedJobId: 'run', sel: 'first', ids: ['first'] })).toBe(null);
     expect(historyFollowTarget({ pickedJobId: '', sel: 'first', ids: ['first'] })).toBe(null);
     expect(historyFollowTarget()).toBe(null);
+  });
+});
+
+describe('v2.869 사용자 보고 — 실행 중 상세의 FD 한 줄은 그 잡의 FD 답으로', () => {
+  const ts = () => '20:05';
+  it('FD 가 답했는데 잡이 없을 때만 보고 없음(언제 · 어느 FD) · FD 실패는 상태 모름 · 진행량을 알면 보고 시각', () => {
+    const live = { at: 1, ok: true };
+    expect(fdLineOf({ bytes: null, fd: { client: 'bareos-fd', ok: true, code: '' } }, live, ts)).toEqual({ known: false, missing: true, text: 'FD 진행 보고 없음 · 20:05 조회 · bareos-fd' });
+    const f = fdLineOf({ bytes: null, fd: { client: 'bareos-fd', ok: false, code: 'fd-connect' } }, live, ts);
+    expect(f.missing).toBe(false);
+    expect(f.text).toBe('FD 상태 Director 가 FD 에 접속하지 못함 · bareos-fd');
+    expect(fdLineOf({ bytes: null, fd: { client: 'x', ok: false, code: 'not-asked' } }, live, ts).text).toMatch(/이번 조회에 이 FD 가 없음/);
+    expect(fdLineOf({ bytes: 5, fd: { client: 'bareos-fd', ok: true } }, live, ts)).toEqual({ known: true, missing: false, text: 'FD 진행 보고 20:05 · bareos-fd' });
+    expect(fdLineOf({ bytes: null }, null, ts).text).toBe('FD 상태 조회 전');
+    // 구버전 서버(row.fd 없음) — 법인 단위 live 로
+    expect(fdLineOf({ bytes: null }, { at: 1, ok: true }, ts).missing).toBe(true);
+    expect(fdLineOf({ bytes: null }, { at: 1, ok: false, code: 'timeout' }, ts).text).toBe('FD 상태 시한 초과(응답 느림)');
   });
 });

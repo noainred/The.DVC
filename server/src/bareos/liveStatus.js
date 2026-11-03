@@ -15,7 +15,7 @@ import { onDirector, isDemoActive, effectiveSettings } from './service.js';
 import { jobDirectorId, directorById } from './settings.js';
 import { hasPending } from './edgeOps.js';
 import { runningRunOf } from './cancelState.js';
-import { rateNowOf } from './liveParse.js';
+import { rateNowOf, fdAnswerIssue } from './liveParse.js';
 import { LIVE_CLIENTS_MAX } from './ops.js';
 import { poolSettled } from '../util/pool.js';
 
@@ -96,8 +96,10 @@ export async function liveTick({ now = Date.now(), deadlineMs = LIVE_DEADLINE_MS
       const jobs = new Map();
       const clients = {};
       for (const c of res?.clients || []) {
-        clients[c.client] = c.ok ? { ok: true, raw: c.raw || '', n: (c.jobs || []).length } : { ok: false, code: c.code || 'error' };
-        for (const x of c.jobs || []) if (x?.jobid) jobs.set(x.jobid, x);
+        // v2.869: Director 가 FD 에 닿지 못한 답('Failed to connect to Client')은 실패로(옛 엣지 회신도 여기서 — 판정은 중앙 한 곳)
+        const issue = c.ok ? fdAnswerIssue(c.raw) : '';
+        clients[c.client] = c.ok && !issue ? { ok: true, raw: c.raw || '', n: (c.jobs || []).length } : { ok: false, code: issue || c.code || 'error', ...(issue ? { raw: c.raw || '' } : {}) };
+        if (c.ok && !issue) for (const x of c.jobs || []) if (x?.jobid) jobs.set(x.jobid, x);
       }
       const anyOk = Object.values(clients).some((c) => c.ok);
       const d0 = res?.director;

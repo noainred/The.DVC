@@ -387,3 +387,44 @@ test('v2.869 감사 A5-02 · A5-03 — 같은 스냅샷이어도 원장이 바�
     assert.equal((await etagGet('/restore-folders', f1.etag)).s, 200, '원장 세대가 바뀌면 복원 폴더 수도 새로');
   } finally { REG.patchJob('j1', { cancelReq: null }); }
 });
+
+test('v2.869 사용자 보고 — FD 가 답하지 못하면 \'보고 없음\' 이 아니다(Failed to connect · 그 잡의 FD 만 실패 · 묻지 않은 FD)', async () => {
+  const LP2 = await import('../src/bareos/liveParse.js');
+  const { corpView } = await import('../src/routes/api/bareosLive.js');
+  const { effectiveSettings } = await import('../src/bareos/service.js');
+  // ① 순수 판정
+  const failText = 'Connecting to Client kr-fd at localhost:9102\n\nFailed to connect to Client kr-fd.\n====\n';
+  assert.equal(LP2.fdAnswerIssue(failText), 'fd-connect');
+  assert.equal(LP2.fdAnswerIssue(JSON.stringify({ result: { lines: failText } })), 'fd-connect', 'JSON 에 싸여 와도');
+  assert.equal(LP2.fdAnswerIssue(FD_TEXT), '');
+  assert.equal(LP2.fdAnswerIssue(`${failText}Running Jobs:\nNo Jobs running.\n`), '', 'FD 의 실행 중 절이 있으면 FD 가 답한 것');
+  const live = { ok: true, clients: { 'kr-fd': { ok: false, code: 'fd-connect' }, 'other-fd': { ok: true } } };
+  assert.deepEqual(LP2.jobFdState(live, { client: 'kr-fd' }, null), { client: 'kr-fd', ok: false, code: 'fd-connect' });
+  assert.deepEqual(LP2.jobFdState(live, { client: '' }, { client: 'other-fd' }), { client: 'other-fd', ok: true, code: '' }, '잡에 FD 가 없으면 법인 FD');
+  assert.equal(LP2.jobFdState(live, { client: 'gone-fd' }, null).code, 'not-asked');
+  assert.equal(LP2.jobFdState(null, { client: 'kr-fd' }, null).ok, false);
+  // ② 실제 조회(가짜 Director 가 Director 의 접속 실패 문구를 돌려줌) — 실행 중 행이 '보고 없음'(FD 는 답했는데 잡 없음)으로 보이지 않는다
+  const idle = async () => { for (let i = 0; i < 200 && LIVE._liveBusyForTest(); i++) await new Promise((res) => setTimeout(res, 20)); };   // 앞 시험의 /live 가 깨운 조회가 끝난 뒤
+  const saved = D.fdText;
+  D.fdText = failText;
+  try {
+    await idle();
+    await LIVE.liveTick();
+    const s = LIVE.liveSnapshot('dir_kr', 'vc-a');
+    assert.equal(s.live.clients['kr-fd'].ok, false);
+    assert.equal(s.live.clients['kr-fd'].code, 'fd-connect');
+    const st = effectiveSettings();
+    const cv = corpView(st.sites[0], st, REG.jobDigests(), { now: Date.now() });
+    const r = cv.rows.find((x) => x.jobid === 501);
+    assert.deepEqual(r.fd, { client: 'kr-fd', ok: false, code: 'fd-connect' });
+    assert.equal(r.bytes, null);
+    assert.equal(r.stuck, undefined, 'FD 를 못 읽었으면 멈춤 의심(no-report)으로 단정하지 않는다');
+  } finally { D.fdText = saved; }
+  await idle();
+  await LIVE.liveTick();
+  // ③ FD 가 답하면 예전처럼 진행량 · fd.ok
+  const st = effectiveSettings();
+  const ok = corpView(st.sites[0], st, REG.jobDigests(), { now: Date.now() }).rows.find((x) => x.jobid === 501);
+  assert.equal(ok.fd.ok, true);
+  assert.equal(ok.bytes, 412345678912);
+});
