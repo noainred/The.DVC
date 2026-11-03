@@ -23,7 +23,8 @@ export function bareosClass(b, { rpoDays = 1, now = Date.now() } = {}) {
     off: job && b.on === false,
     ok: st === 'ok',
     warn: st === 'warning',
-    fail: st === 'error' || st === 'canceled',
+    fail: st === 'error',
+    cancel: st === 'canceled',   // v2.869 사람이 멈춘 실행 — 실패와 따로(서버 vmView.bareosClass 와 같다)
     run: job && !!b.run,
     never: job && !isFin(b.ok),
     old: job && b.on !== false && isFin(b.ok) && now - b.ok > days * DAY,
@@ -64,9 +65,9 @@ export function resultBar(c) {
   if (!c || !isFin(c.jobs) || c.jobs <= 0 || c.ok == null) return null;
   // 버그 점검 W3: 성공·경고·실패는 '마지막으로 끝난 실행', 진행은 '지금 도는 실행' 이라 한 잡이 둘 다 셀 수 있다(지난번 성공 + 지금 실행) —
   //   분모를 잡 수로만 두면 합이 100% 를 넘어 막대가 비율을 잃었다. 분모 = max(잡 수, 조각 합)
-  const den = Math.max(c.jobs, (c.ok || 0) + (c.warn || 0) + (c.fail || 0) + (c.run || 0));
-  const p = (n) => Math.round((n / den) * 1000) / 10;
-  return { ok: p(c.ok), warn: p(c.warn), fail: p(c.fail), run: p(c.run) };
+  const den = Math.max(c.jobs, (c.ok || 0) + (c.warn || 0) + (c.fail || 0) + (c.cancel || 0) + (c.run || 0));
+  const p = (n) => Math.round(((n || 0) / den) * 1000) / 10;
+  return { ok: p(c.ok), warn: p(c.warn), fail: p(c.fail), cancel: p(c.cancel), run: p(c.run) };
 }
 
 /**
@@ -112,7 +113,7 @@ export const lvText = (v) => (v ? (levelLabel(v) !== '—' ? levelLabel(v) : Str
 
 /* ── 보기 필터(법인별 현황) ── */
 export const DETAIL_FILTERS = [
-  ['all', '전체'], ['attn', '확인 필요'], ['job', '잡 등록'], ['missing', '미등록'], ['run', '진행 중'], ['bad', '실패·경고'], ['old', '오래된 백업'], ['never', '백업 없음'], ['off', '잡 꺼짐'], ['mismatch', '방식 불일치'], ['gone', '인벤토리에 없음'],
+  ['all', '전체'], ['attn', '확인 필요'], ['job', '잡 등록'], ['missing', '미등록'], ['run', '진행 중'], ['bad', '실패·경고·취소'], ['old', '오래된 백업'], ['never', '백업 없음'], ['off', '잡 꺼짐'], ['mismatch', '방식 불일치'], ['gone', '인벤토리에 없음'],
 ];
 /**
  * v2.860(사용자 요청 'Bareos UI 전폭 개선 — 직관적이고 복잡하지 않게' · docs/design/bareos-ui-v2 시안 ②): 법인 화면은 칩 6개만 먼저 보이고
@@ -132,7 +133,7 @@ export function rowMatches(r, f, { rpoDays = 1, now = Date.now(), resultsKnown =
   if (f === 'attn') return k.missing || (resultsKnown && (k.fail || k.old || (k.never && k.on)));
   if (!resultsKnown) return f === 'all';
   if (f === 'run') return k.run;
-  if (f === 'bad') return k.fail || k.warn;
+  if (f === 'bad') return k.fail || k.warn || k.cancel;
   if (f === 'old') return k.old;
   if (f === 'never') return k.never && k.on;
   return true;
@@ -156,7 +157,7 @@ const nat = new Intl.Collator('en', { numeric: true, sensitivity: 'base' });
  *   인벤토리에 없는 잡(gone)은 원장의 등록 때 위치로 놓인다.
  */
 export function buildBareosTree(rows, { filter = 'all', q = '', rpoDays = 1, now = Date.now(), resultsKnown = true } = {}) {
-  const mk = (key, name) => ({ key, name, children: new Map(), rows: [], agg: { n: 0, job: 0, ok: 0, warn: 0, fail: 0, run: 0, missing: 0, gb: 0 }, hit: 0 });
+  const mk = (key, name) => ({ key, name, children: new Map(), rows: [], agg: { n: 0, job: 0, ok: 0, warn: 0, fail: 0, cancel: 0, run: 0, missing: 0, gb: 0 }, hit: 0 });
   const root = mk('', '');
   const needle = String(q || '').trim().toLowerCase();
   for (const r of Array.isArray(rows) ? rows : []) {
@@ -172,7 +173,7 @@ export function buildBareosTree(rows, { filter = 'all', q = '', rpoDays = 1, now
     }
     for (const n of path) {
       n.agg.n++; if (k.job) n.agg.job++; if (k.missing) n.agg.missing++;
-      if (k.ok) n.agg.ok++; if (k.warn) n.agg.warn++; if (k.fail) n.agg.fail++; if (k.run) n.agg.run++;
+      if (k.ok) n.agg.ok++; if (k.warn) n.agg.warn++; if (k.fail) n.agg.fail++; if (k.cancel) n.agg.cancel++; if (k.run) n.agg.run++;
       if (isFin(r.gb)) n.agg.gb += r.gb;
       if (show) n.hit++;
     }

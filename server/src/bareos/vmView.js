@@ -61,6 +61,8 @@ export function bareosVmView(j, method = '') {
  * 칸 b 하나의 분류(화면 필터·수 세기 공용 — 웹 bareosViewText.bareosClass 와 한 쌍).
  *   b undefined(무관) · null(원장을 못 읽음 — 모름)이면 전부 false 이고 unknown 만 b===null.
  *   old = 마지막 백업이 기준 일수보다 오래됨(잡이 켜져 있고 백업이 한 번이라도 있을 때만 — 한 번도 없으면 never).
+ *   v2.869: cancel = 마지막 실행을 사람이 멈췄다(Bareos A) — 실패(fail = error)와 따로 센다(회차 중단 뒤 '실패 n' 으로 보이지 않게 · 그룹 카드 memberResults 와 같은 뜻).
+ *     우선 확인(priorityKind)에도 넣지 않는다 — 멈춘 뒤 백업이 비면 old · never 가 잡는다.
  */
 export function bareosClass(b, { rpoDays = 1, now = Date.now() } = {}) {
   const days = BAREOS_RPO_DAYS.includes(Number(rpoDays)) ? Number(rpoDays) : 1;
@@ -74,7 +76,8 @@ export function bareosClass(b, { rpoDays = 1, now = Date.now() } = {}) {
     off: job && b.on === false,
     ok: st === 'ok',
     warn: st === 'warning',
-    fail: st === 'error' || st === 'canceled',
+    fail: st === 'error',
+    cancel: st === 'canceled',
     run: job && !!b.run,
     never: job && !isFin(b.ok),
     old: job && b.on !== false && isFin(b.ok) && now - b.ok > days * DAY,
@@ -118,26 +121,26 @@ export function directorState({ mapped, configured, authStopped, poll } = {}) {
  *   잡 수(jobs·on·off·gone)는 원장만 보면 알므로 늘 센다. 원장을 못 읽었으면(registryKnown=false) 잡 기준 수도 null.
  */
 export function corpCounts(rows, { marksKnown = true, resultsKnown = true, registryKnown = true, rpoDays = 1, now = Date.now() } = {}) {
-  const c = { rows: 0, bareosMethod: 0, jobs: 0, on: 0, off: 0, gone: 0, missing: 0, mismatch: 0, ok: 0, warn: 0, fail: 0, never: 0, old: 0, run: 0, unknown: 0, gb: 0, gbUnknown: 0 };
+  const c = { rows: 0, bareosMethod: 0, jobs: 0, on: 0, off: 0, gone: 0, missing: 0, mismatch: 0, ok: 0, warn: 0, fail: 0, cancel: 0, never: 0, old: 0, run: 0, unknown: 0, gb: 0, gbUnknown: 0 };
   for (const r of Array.isArray(rows) ? rows : []) {
     c.rows++;
     const k = bareosClass(r.b, { rpoDays, now });
     if (r.method === 'bareos') c.bareosMethod++;
     if (k.job) { c.jobs++; if (k.on) c.on++; else c.off++; if (k.gone) c.gone++; else if (r.method !== 'bareos') c.mismatch++; }   // 인벤토리에 없는 VM 은 방식을 정할 수 없어 불일치로 세지 않는다
     if (k.missing) c.missing++;
-    if (k.ok) c.ok++; if (k.warn) c.warn++; if (k.fail) c.fail++; if (k.never && k.on) c.never++;   /* 버그 점검 S16: 웹 칩·우선 목록과 같은 판정(꺼진 잡은 '백업 없음' 으로 세지 않는다) */ if (k.old) c.old++; if (k.run) c.run++;
+    if (k.ok) c.ok++; if (k.warn) c.warn++; if (k.fail) c.fail++; if (k.cancel) c.cancel++; if (k.never && k.on) c.never++;   /* 버그 점검 S16: 웹 칩·우선 목록과 같은 판정(꺼진 잡은 '백업 없음' 으로 세지 않는다) */ if (k.old) c.old++; if (k.run) c.run++;
     if (isFin(r.gb) && r.gb >= 0) c.gb += r.gb; else if (!r.gone) c.gbUnknown++;
   }
   c.gb = Math.round(c.gb * 10) / 10;
   if (!marksKnown) { c.bareosMethod = null; c.missing = null; c.mismatch = null; }
   if (!registryKnown) { for (const k of ['jobs', 'on', 'off', 'gone', 'missing', 'mismatch']) c[k] = null; }
-  if (!resultsKnown || !registryKnown) { c.unknown = registryKnown ? c.jobs : null; for (const k of ['ok', 'warn', 'fail', 'never', 'old', 'run']) c[k] = null; }
+  if (!resultsKnown || !registryKnown) { c.unknown = registryKnown ? c.jobs : null; for (const k of ['ok', 'warn', 'fail', 'cancel', 'never', 'old', 'run']) c[k] = null; }
   return c;
 }
 
 /** 합계(여러 법인) — null 은 더하지 않고 그 칸을 '일부 모름' 으로 알린다(partial). 부분 합은 그렇다고 밝힌다(루트 CLAUDE.md). */
 export function sumCounts(list) {
-  const keys = ['rows', 'bareosMethod', 'jobs', 'on', 'off', 'gone', 'missing', 'mismatch', 'ok', 'warn', 'fail', 'never', 'old', 'run', 'unknown', 'gb', 'gbUnknown'];
+  const keys = ['rows', 'bareosMethod', 'jobs', 'on', 'off', 'gone', 'missing', 'mismatch', 'ok', 'warn', 'fail', 'cancel', 'never', 'old', 'run', 'unknown', 'gb', 'gbUnknown'];
   const out = Object.fromEntries(keys.map((k) => [k, 0]));
   const partial = {};
   for (const c of Array.isArray(list) ? list : []) for (const k of keys) { if (c?.[k] == null) partial[k] = true; else out[k] += c[k]; }
