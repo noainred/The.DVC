@@ -101,6 +101,20 @@ export function dueOf(cfg, st, now = Date.now()) {
 
 const OKS = new Set(['ok', 'warning']);
 /**
+ * 복원 검증(리허설) 한 행의 결과 — 'ok' | 'failed' | 'pending'(v2.869 감사 A2-02 — 판정 코어 하나).
+ *   웹 bareosRestoreText.verifyOutcome 과 한 쌍(server/test/bareosVerifyOutcome2869.test.js 가 같은 입력으로 대조).
+ *   failed = 훅이 실패를 썼거나(verify 'failed') · 끊기 · 켜 보기를 못 했거나(nic 'failed' — 추적 놓침 · 재시도 소진 · 보내지 못함 · 이름 모름) ·
+ *            복원이 성공으로 끝나지 않았거나(nic 'skipped' · state error · canceled) · 추적을 놓친 복원(abandoned).
+ *   ⚠ 실패 경로에 verify:'failed' 를 써 넣지 않는다 — 리허설 표 '남김' 칸이 finish.verify 유무로 판정한다(VM 이 없는데 '남김' 으로 보인다).
+ */
+export function verifyOutcome(r) {
+  const f = r?.finish;
+  if (f?.verify === 'ok') return 'ok';
+  if (f?.verify === 'failed' || f?.nic === 'failed' || f?.nic === 'skipped' || r?.state === 'error' || r?.state === 'canceled' || r?.abandoned) return 'failed';
+  return 'pending';
+}
+
+/**
  * 요약 계산(순수) — 법인(Director)마다 최근 24시간. 그 Director 조회가 실패 중이면 known:false(수를 만들지 않는다).
  * @param {object[]} jobs 원장 · @param {object} settings · @param {Record<string,{ok?:boolean, code?:string}>} dirStatus
  */
@@ -128,7 +142,7 @@ export function digestData(jobs, settings, dirStatus = {}, now = Date.now()) {
     } else c.stale += 1;
     for (const r of j.restores || []) {
       if ((Number(r.at) || 0) < since) continue;
-      if (r.verify) { if (r.finish?.verify === 'ok') c.verifyOk += 1; else if (r.finish?.verify === 'failed' || r.state === 'error') c.verifyFail += 1; continue; }
+      if (r.verify) { const v = verifyOutcome(r); if (v === 'ok') c.verifyOk += 1; else if (v === 'failed') c.verifyFail += 1; continue; }
       c.restores += 1;
       if (r.state === 'error') c.restoreFail += 1;
       if (r.finish?.nic === 'failed') c.nicFail += 1;

@@ -221,7 +221,18 @@ export function verifyText(row) {
   if (f?.nic === 'pending') return '켜 보는 중';
   return restoreIsOpen({ jobid: row?.rid, state: row?.state }) ? '복원 중' : '켜 보기 대기';
 }
-export const verifyTone = (row) => (row?.finish?.verify === 'ok' ? 'ok' : (row?.finish?.verify === 'failed' || row?.finish?.nic === 'failed' || row?.state === 'error') ? 'bad' : 'info');
+/**
+ * 복원 검증 한 행의 결과 — 'ok' | 'failed' | 'pending'(v2.869 감사 A2-02 — 판정 코어 하나).
+ *   서버 bareos/digest.js verifyOutcome 과 한 쌍(server/test/bareosVerifyOutcome2869.test.js 가 같은 입력으로 대조).
+ *   리허설 표(verifyTone) · 복원 › 폴더 표(restoreStateText) · 일일 요약 메일이 같은 판정을 쓴다(예전에는 켜 보는 중 · 재시도 소진이 폴더 표에서 '검증 성공').
+ */
+export function verifyOutcome(r) {
+  const f = r?.finish;
+  if (f?.verify === 'ok') return 'ok';
+  if (f?.verify === 'failed' || f?.nic === 'failed' || f?.nic === 'skipped' || r?.state === 'error' || r?.state === 'canceled' || r?.abandoned) return 'failed';
+  return 'pending';
+}
+export const verifyTone = (row) => ({ ok: 'ok', failed: 'bad' }[verifyOutcome(row)] || 'info');
 /** 일일 요약 마지막 발송 한 줄. */
 export function digestStatusText(st) {
   if (!st || !st.day) return '아직 보낸 적 없음';

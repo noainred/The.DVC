@@ -4,7 +4,7 @@
  *   VM 행은 백업 대상(원장)만 — 복원은 백업 대상만 할 수 있다. 폴더의 '전체 VM' 수는 인벤토리 폴더 집계(GET restore-folders)에서 온다 —
  *   못 읽었으면 null('—' · 0 이 아니다). 고를 수 있는지는 pickBlock(지금 복원 화면과 같은 판정) 하나로 본다.
  */
-import { pickBlock, restoreIsOpen } from './bareosRestoreText.js';
+import { pickBlock, restoreIsOpen, verifyOutcome } from './bareosRestoreText.js';
 import { whenText, levelLabel } from './bareosText.js';
 
 const cmp = (a, b) => String(a).localeCompare(String(b), 'ko');
@@ -172,10 +172,16 @@ export function restoreStateText(job, now = Date.now()) {
   const rs = Array.isArray(job?.restores) ? job.restores : [];
   if (rs.some(restoreIsOpen)) return { text: '복원 진행 중', tone: 'info' };
   const recent = rs.filter((r) => Number(r.at) >= now - 7 * 86_400_000).sort((a, b) => Number(b.at) - Number(a.at))[0];
-  if (recent?.verify && recent.finish?.verify === 'failed') return { text: `검증 실패 · ${whenText(recent.at)}`, tone: 'bad' };
+  if (recent?.verify) {
+    // v2.869 감사 A2-02: 검증 판정은 verifyOutcome 하나(켜 보는 중 · 재시도 소진을 '검증 성공' 으로 보이던 것)
+    const v = verifyOutcome(recent);
+    if (v === 'ok') return { text: `검증 성공 · ${whenText(recent.at)}`, tone: 'ok' };
+    if (v === 'failed') return { text: `검증 실패 · ${whenText(recent.at)}`, tone: 'bad' };
+    return { text: `검증 중 · ${whenText(recent.at)}`, tone: 'info' };
+  }
   if (recent) {
     const ok = okState(recent.state);
-    return { text: `${recent.verify ? '검증' : '복원'} ${ok ? '성공' : recent.state === 'error' ? '실패' : '끝남'} · ${whenText(recent.at)}`, tone: ok ? 'ok' : recent.state === 'error' ? 'bad' : 'muted' };
+    return { text: `복원 ${ok ? '성공' : recent.state === 'error' ? '실패' : '끝남'} · ${whenText(recent.at)}`, tone: ok ? 'ok' : recent.state === 'error' ? 'bad' : 'muted' };
   }
   return { text: '—', tone: 'muted' };
 }
