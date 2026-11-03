@@ -90,12 +90,14 @@ export function finishTotals(t) {
 
 const pos = (v) => { const n = numOrNull(v); return n != null && n > 0 ? n : null; };
 const pctOrNull = (v) => { const n = numOrNull(v); return n != null && n >= 0 && n <= 1000 ? Math.round(n) : null; };
+/** 끊긴 호스트 — store.usageReadable 과 같은 규칙(DISCONNECTED · NOT_RESPONDING). v2.869 감사 A1-01: 예전에는 DISCONNECTED 만(잠재 — SOAP 는 접어 보낸다). */
+export const hostDown = (h) => h?.connectionState === 'DISCONNECTED' || h?.connectionState === 'NOT_RESPONDING';
 /**
  * v2.868(사용자 요청 '호스트의 CPU/Memory 와 VM 의 CPU/Memory 도 포함'): 스냅샷 값만 읽는다(새 수집 없음).
  * 호스트: 코어 · 메모리 GB · 사용률(끊긴 호스트는 사용률 null — 수집기가 0 을 싣는다). VM: vCPU · 메모리 GB · 사용률(꺼진 VM 은 null — 0 이 아니라 모름).
  */
 export function hostResOf(h) {
-  const down = h?.connectionState === 'DISCONNECTED';
+  const down = hostDown(h);
   const memMB = pos(h?.memTotalMB);
   return { cores: pos(h?.cpuCores), memGB: memMB == null ? null : r1(memMB / 1024),
     cpuPct: down ? null : pctOrNull(h?.cpuUsagePct), memPct: down ? null : pctOrNull(h?.memUsagePct) };
@@ -144,7 +146,7 @@ export function buildHostAlloc(h, vms) {
   if (hr.cores == null || hr.memGB == null) t.hostResUnknown += 1; else { t.hostCores += hr.cores; t.hostMemGB += hr.memGB; }
   const cpuT = pos(h?.cpuTotalMhz); const memT = pos(h?.memTotalMB);
   const cpuU = numOrNull(h?.cpuUsageMhz); const memU = numOrNull(h?.memUsageMB);
-  if (h?.connectionState === 'DISCONNECTED' || cpuT == null || memT == null || cpuU == null || memU == null || cpuU < 0 || memU < 0) t.hostUseUnknown += 1;
+  if (hostDown(h) || cpuT == null || memT == null || cpuU == null || memU == null || cpuU < 0 || memU < 0) t.hostUseUnknown += 1;
   else { t.cpuMhzTotal += cpuT; t.cpuMhzUsed += cpuU; t.memMbTotal += memT; t.memMbUsed += memU; }
   // ① GPU 별 배치 — 켜진 VM 만(꺼진 VM 은 GPU 에 올라가 있지 않다)
   for (const g of gpus) {
@@ -313,6 +315,16 @@ export function slotsText(s) {
   if (s.total != null) return `사용 ${s.used} / 전체 ${s.total}`;
   return s.used ? `사용 ${s.used} / 전체 ?` : '';
 }
+/** GPU 한 장의 프로파일 · 슬롯 칸 — 웹 gpuAllocText.gpuTexts().prof 와 같은 말(v2.869 감사 A4-05: 엑셀이 배치 모르는 vGPU 를 '비어 있음' 으로 적었다). */
+export function gpuProfText(g) {
+  if (g.mode === 'vsga') return 'vSGA';
+  if (!g.placement) return '배치 정보 없음';
+  if (g.mode === 'passthrough') return g.vms.length ? '패스스루 · 1장 할당' : '패스스루 · 미할당';
+  if (!g.vms.length) return '비어 있음';
+  return g.slots?.profile ? `${g.slots.profile} · ${g.slots.used}/${g.slots.total ?? '?'} 슬롯` : '여러 프로파일';
+}
+/** GPU 한 장의 VM 칸 — 배치를 모르면 '—'(0 이 아니다 · v2.869 감사 A4-05) · vSGA 는 빈 칸. */
+export const gpuVmsText = (g) => (g.mode === 'vsga' ? '' : !g.placement ? '—' : `${g.vms.length} / 0`);
 export function gpuNoteText(g) {
   if (g.mode === 'vsga') return 'vSGA — 할당형 아님(합계 제외)';
   if (!g.placement) return 'GPU 배치 정보 없음 — 할당·예비 모름';

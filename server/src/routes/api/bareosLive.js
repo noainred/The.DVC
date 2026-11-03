@@ -9,11 +9,12 @@ import { store } from '../../store.js';
 import { bareosAccess } from './bareosBackup.js';
 import { effectiveSettings, isDemoActive } from '../../bareos/service.js';
 import { directorById, directorConn } from '../../bareos/settings.js';
-import { jobDigests, registryLoadError } from '../../bareos/registry.js';
-import { listGroups } from '../../bareos/groups.js';
-import { touchLive, liveSnapshot, runningRunOf, LIVE_MS, LIVE_IDLE_MS } from '../../bareos/liveStatus.js';
+import { jobDigests, registryLoadError, registryRev } from '../../bareos/registry.js';
+import { listGroups, groupsRev } from '../../bareos/groups.js';
+import { touchLive, liveSnapshot, runningRunOf, liveRev, LIVE_MS, LIVE_IDLE_MS } from '../../bareos/liveStatus.js';
+import { pollerStatus } from '../../bareos/poller.js';
 import { cancelInfo, CANCEL_WAIT_MS } from '../../bareos/cancelState.js';
-import { cancelPlan, groupCanceling } from '../../bareos/groupRunner.js';
+import { cancelPlan, groupCanceling, cancellingKey } from '../../bareos/groupRunner.js';
 import { nextSlot } from '../../bareos/groupSchedule.js';
 import { rateNowOf } from '../../bareos/liveParse.js';
 import { isFinalStatus } from '../../bareos/names.js';
@@ -199,6 +200,15 @@ function writeKey(user, snap) {
   try { const w = writeScopedVcenterIds(user, snap); return w ? [...w].sort().join(',') : 'all'; } catch { return 'err'; }
 }
 
+/**
+ * v2.869 감사 A5-02: 응답 세대 — 원장(취소 표지 · 실행 결과) · 그룹 · 폴러 · 진행 조회 · 멈추는 중인 그룹. memoJson 의 ETag 는 키(스냅샷 세대 + 이 값)라
+ *   여기 없는 변화는 304 로 옛 화면이 남는다(재현 — 스냅샷 세대(30초)마다 한 번만 새로 보였다 · 다른 사람 화면의 '멈추는 중' 이 늦었다).
+ */
+export function liveGen() {
+  const v = (f) => { try { return f(); } catch { return 'e'; } };
+  return `g=${v(registryRev)}|gr=${v(groupsRev)}|p=${v(() => pollerStatus().at || 0)}|l=${v(liveRev)}|cx=${v(cancellingKey)}`;
+}
+
 export function registerBareosLive(api) {
   /** 진행 현황(전체 법인 — 화면이 법인 하나를 고르면 그 행만 쓴다). 부를 때마다 상태 조회를 깨운다(화면이 열린 동안만 · LIVE_IDLE_MS). */
   api.get('/tools/bareos-backup/live', adminOnly, (req, res) => {
@@ -234,6 +244,6 @@ export function registerBareosLive(api) {
         },
         corps,
       };
-    }, { ttlMs: 5_000, extraKey: `${scopeKey(req.user, snap)}|w${writeKey(req.user, snap)}|d${isDemoActive() ? 1 : 0}|x${diag ? 1 : 0}` });   // x = 진단 원문 공개 여부(키에 없으면 캐시로 샌다) · w = 쓰기 범위(법인별 writable)
+    }, { ttlMs: 5_000, extraKey: `${scopeKey(req.user, snap)}|w${writeKey(req.user, snap)}|d${isDemoActive() ? 1 : 0}|x${diag ? 1 : 0}|${liveGen()}` });   // x = 진단 원문 공개 여부(키에 없으면 캐시로 샌다) · w = 쓰기 범위(법인별 writable) · 세대(liveGen)
   });
 }

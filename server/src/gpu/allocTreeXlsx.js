@@ -13,7 +13,7 @@
 import ExcelJS from 'exceljs';
 import '../util/xlsxSheetPrOrder.js';
 import { BORDER, PAL, fill, styleHeadRow, barText } from '../vcenter/vmXlsxStyle.js';
-import { FLAT_COLUMNS, MODE_TEXT, UNPLACED_TEXT, locationText, dcText, gpuNoteText, flatRows } from './allocTree.js';
+import { FLAT_COLUMNS, MODE_TEXT, UNPLACED_TEXT, locationText, dcText, gpuNoteText, gpuProfText, gpuVmsText, flatRows } from './allocTree.js';
 
 export const XLSX_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 export const ALLOC_XLSX_SHEETS = Object.freeze(['계층 표', '평면 표', '안내']);
@@ -70,6 +70,7 @@ function totalsCells(t) {
   if (t.capUnknown) notes.push(`용량 모르는 GPU ${t.capUnknown}장`);
   if (t.allocUnknown) notes.push(`할당 모르는 VM ${t.allocUnknown}대`);
   if (t.noPlacement) notes.push(`배치 정보 없는 GPU ${t.noPlacement}장`);
+  if (t.offUnknown) notes.push(`꺼진 VM 용량 모름 ${t.offUnknown}대`);   // v2.869 감사 A4-01: 꺼진 VM 합에서 빠진 수(예전에는 어디에도 없었다)
   if (t.hostUseUnknown && t.hosts > 1) notes.push(`CPU·메모리 사용률은 ${t.hostUseUnknown}대 제외(못 읽음·끊김)`);
   if (num(t.spareGB) != null && t.spareGB < 0) notes.push('할당이 용량을 넘음 — 확인 필요');
   else if (pct != null && pct >= 90) notes.push('포화(90% 이상)');
@@ -98,10 +99,8 @@ export function treeLines(tree) {
           push(3, h.name, '호스트', `${h.models.join(', ')} ×${h.gpus.length} · ${modes}`, totalsCells(h.totals));
           for (const g of h.gpus) {
             const pct = g.allocGB != null && g.capGB ? Math.round((g.allocGB / g.capGB) * 100) : null;
-            const prof = g.mode === 'passthrough' ? (g.vms.length ? '패스스루 · 1장 할당' : '패스스루 · 미할당')
-              : g.mode === 'vsga' ? 'vSGA' : g.slots?.profile ? `${g.slots.profile} · ${g.slots.used}/${g.slots.total ?? '?'} 슬롯` : g.vms.length ? '여러 프로파일' : '비어 있음';
-            push(4, `GPU #${g.idx} · ${g.model}`, MODE_TEXT[g.mode] || 'GPU', prof,
-              { cap: num(g.capGB), alloc: num(g.allocGB), spare: num(g.spareGB), pct, bar: pct == null ? '' : barText(pct / 100, 10), off: null, vms: g.mode === 'vsga' ? '' : `${g.vms.length} / 0`, note: gpuNoteText(g) + (g.capBasis === 'model' ? ' · GB 는 모델명 추정' : '') });
+            push(4, `GPU #${g.idx} · ${g.model}`, MODE_TEXT[g.mode] || 'GPU', gpuProfText(g),
+              { cap: num(g.capGB), alloc: num(g.allocGB), spare: num(g.spareGB), pct, bar: pct == null ? '' : barText(pct / 100, 10), off: null, vms: gpuVmsText(g), note: gpuNoteText(g) + (g.capBasis === 'model' ? ' · GB 는 모델명 추정' : '') });
             for (const v of g.vms) push(5, v.name, 'VM', v.mode === 'passthrough' ? '패스스루 1장' : v.profile, { res: vmResCells(v), cap: null, alloc: num(v.gb), spare: null, pct: null, bar: '', off: null, vms: '켜짐', note: v.gb == null ? '프로파일 해석 불가 — 빈 칸(0 아님)' : v.gbEstimated ? 'GB 는 모델명 추정' : '' });
           }
           if (h.unplaced.length) {

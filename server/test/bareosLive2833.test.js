@@ -369,3 +369,21 @@ test('⑥ Command ACL 에 delete(보관 정리) · status(진행 현황) — 서
   assert.equal(acl(srvSrc), acl(webSrc));
   for (const c of ['delete', 'status', 'list', 'run']) assert.ok(acl(srvSrc).split(/,\s*/).includes(c), c);
 });
+
+test('v2.869 감사 A5-02 · A5-03 — 같은 스냅샷이어도 원장이 바뀌면 첫 ETag 재요청이 304 가 아니라 200(새 값)', async () => {
+  const etagGet = async (p, etag) => { const r = await fetch(base + p, { headers: { 'x-u': 'admin', ...(etag ? { 'if-none-match': etag } : {}) } }); const t = await r.text(); let j = null; try { j = JSON.parse(t); } catch { /* */ } return { s: r.status, etag: r.headers.get('etag'), j }; };
+  const a = await etagGet('/live');
+  assert.equal(a.s, 200); assert.ok(a.etag, 'ETag 가 있어야 시험이 성립한다');
+  assert.equal((await etagGet('/live', a.etag)).s, 304, '바뀐 것이 없으면 304(전제)');
+  REG.markCancelReq('j1', { jobid: 501, by: 'kim' });
+  try {
+    const b = await etagGet('/live', a.etag);
+    assert.equal(b.s, 200, '취소 표지가 생겼는데 304 면 옛 화면이 남는다');
+    const row = b.j.corps.find((x) => x.vcenterId === 'vc-a').rows.find((x) => x.jobid === 501);
+    assert.equal(row.cancel?.by, 'kim');
+    const f1 = await etagGet('/restore-folders');
+    assert.equal(f1.s, 200); assert.ok(f1.etag);
+    REG.patchJob('j1', { cancelReq: null });
+    assert.equal((await etagGet('/restore-folders', f1.etag)).s, 200, '원장 세대가 바뀌면 복원 폴더 수도 새로');
+  } finally { REG.patchJob('j1', { cancelReq: null }); }
+});

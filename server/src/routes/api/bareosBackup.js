@@ -1132,7 +1132,7 @@ api.get('/tools/bareos-backup/restore-folders', adminOnly, (req, res) => memoJso
   const vms = allowed ? (snap?.vms || []).filter((v) => allowed.has(String(v.vcenterId))) : (snap?.vms || []);
   const vcNames = Object.fromEntries((snap?.vcenters || []).filter((v) => !allowed || allowed.has(String(v.id))).map((v) => [v.id, v.name || v.id]));
   return { ok: true, folders: restoreFolderCounts(jobs, vms), vcNames, inventoryAt: snap?.generatedAt ?? null };
-}, { extraKey: scopeKey(req.user, store.get()) }));
+}, { extraKey: `${scopeKey(req.user, store.get())}|g=${registryRev()}` }));   // v2.869 감사 A5-03: 원장 세대(대상을 더하고 빼면 304 로 옛 수가 남지 않게)
 api.post('/tools/bareos-backup/restore-points/bulk', adminOnly, async (req, res) => {
   const ids = idsOf(req.body?.ids);
   if (!ids.length) return res.status(400).json({ ok: false, reason: '복원 지점을 볼 VM 을 고르세요.' });
@@ -1392,7 +1392,8 @@ api.put('/tools/bareos-backup/digest', adminOnly, fullScopeOnly, fullWriteOnly, 
   } catch (e) { res.status(e?.code === 'unreadable' ? 503 : 400).json({ ok: false, reason: String(e?.message || e) }); }
 });
 let _digestSentAt = 0;   // '지금 보내 보기' 는 1분에 한 번(반증 F10 — 메일 폭주 방지)
-api.post('/tools/bareos-backup/digest/send', adminOnly, fullScopeOnly, async (req, res) => {
+// v2.869 감사 A3-03: 형제 PUT digest · 리허설 쓰기와 같이 fullWriteOnly(쓰기 제한 관리자가 전 법인 메일을 보내고 1분 제한을 써 버리지 않게)
+api.post('/tools/bareos-backup/digest/send', adminOnly, fullScopeOnly, fullWriteOnly, async (req, res) => {
   if (Date.now() - _digestSentAt < 60_000) return res.status(429).json({ ok: false, reason: '방금 보냈습니다 — 1분 뒤 다시 누르세요.' });
   _digestSentAt = Date.now();
   const r = await sendDigestNow({ by: req.user?.username || '' });
