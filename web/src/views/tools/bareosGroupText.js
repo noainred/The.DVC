@@ -214,17 +214,18 @@ export function untilText(ms) {
  *   결과 칸은 마지막으로 읽은 값이라 세지 않는다 — ok·warn·fail·run·never 는 null, unknown = VM 수(통합·법인별 현황 corpCounts 와 같은 규칙).
  */
 export function memberResults(rows, { resultsKnown = true } = {}) {
-  const out = { n: 0, ok: 0, warn: 0, fail: 0, run: 0, never: 0 };
+  const out = { n: 0, ok: 0, warn: 0, fail: 0, cancel: 0, run: 0, never: 0 };
   for (const r of Array.isArray(rows) ? rows : []) {
     out.n++;
     const b = r?.b;
     if (b?.run) out.run++;
     if (b?.st === 'ok') out.ok++;
     else if (b?.st === 'warning') out.warn++;
-    else if (b?.st === 'error' || b?.st === 'canceled') out.fail++;
+    else if (b?.st === 'error') out.fail++;
+    else if (b?.st === 'canceled') out.cancel++;   // v2.867: 사람이 멈춘 실행은 실패와 따로(회차 중단 뒤 '실패 n' 으로 보이지 않게 · Chromium 확인)
     else if (!b?.run) out.never++;
   }
-  if (resultsKnown === false) return { n: out.n, ok: null, warn: null, fail: null, run: null, never: null, unknown: out.n };
+  if (resultsKnown === false) return { n: out.n, ok: null, warn: null, fail: null, cancel: null, run: null, never: null, unknown: out.n };
   return out;
 }
 /** 카드 오른쪽 위 표지 — 진행 · 실패 · 성공 · 기록 없음 · (Director 결과 모름) 모름. */
@@ -233,6 +234,7 @@ export function resultBadge(m) {
   if (m.unknown) return { text: `결과 모름 ${m.unknown}대`, tone: 'muted' };
   if (m.run) return { text: `진행 ${m.run}/${m.n}`, tone: 'run' };
   if (m.fail) return { text: `실패 ${m.fail} · 성공 ${m.ok + m.warn}`, tone: 'bad' };
+  if (m.cancel) return { text: `취소 ${m.cancel} · 성공 ${m.ok + m.warn}`, tone: 'warn' };
   if (m.ok + m.warn) return { text: `성공 ${m.ok + m.warn}/${m.n}${m.warn ? ` (경고 ${m.warn})` : ''}`, tone: m.never ? 'warn' : 'ok' };
   return { text: '백업 기록 없음', tone: 'muted' };
 }

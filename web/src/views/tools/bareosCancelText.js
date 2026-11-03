@@ -24,11 +24,13 @@ export const waitMinText = (ms) => (typeof ms === 'number' && ms > 0 ? `${Math.r
 export function cancelChip(cancel, { now = Date.now(), waitMs = null } = {}) {
   if (!cancel) return null;
   const who = `${cancel.by || '?'}${cancel.via === 'group' ? ' · 그룹 중단' : ''}`;
+  const age = ageText(now - cancel.at);
+  // short · sub = 좁은 칸용(배지는 짧게, 경과 · 누가는 아래 줄 — 진행 현황판 판정 칸이 넓어지지 않게)
   if (cancel.stuck) {
-    return { text: '멈추지 않음', tone: 'warn', title: `취소를 보낸 지 ${ageText(now - cancel.at)} 지났는데 아직 돕니다(${who}) — Director 에서 확인하세요. 취소를 다시 보낼 수 있습니다.` };
+    return { text: '멈추지 않음', short: '멈추지 않음', sub: `${age}째 · ${who}`, tone: 'warn', title: `취소를 보낸 지 ${age} 지났는데 아직 돕니다(${who}) — Director 에서 확인하세요. 취소를 다시 보낼 수 있습니다.` };
   }
   const lim = waitMinText(waitMs);
-  return { text: `멈추는 중 ${ageText(now - cancel.at)}`, tone: 'stop', title: `취소를 보냈습니다(${who}) — FD 가 멈추기까지 수 초~수 분 걸립니다${lim ? `. ${lim} 넘게 돌면 ‘멈추지 않음’ 으로 바뀝니다` : ''}.` };
+  return { text: `멈추는 중 ${age}`, short: '멈추는 중', sub: `${age}째 · ${who}`, tone: 'stop', title: `취소를 보냈습니다(${who}) — FD 가 멈추기까지 수 초~수 분 걸립니다${lim ? `. ${lim} 넘게 돌면 ‘멈추지 않음’ 으로 바뀝니다` : ''}.` };
 }
 
 /**
@@ -108,12 +110,13 @@ export function cancelAcceptedText(r, name) {
 
 /**
  * 회차 기록의 중단 요약(lastFire.canceled) → 한 줄. 없으면 ''.
- *   '중단됨 11-01 23:48 kim.ys · 취소 14 · 시작 전 멈춤 9' (0 인 칸은 뺀다)
+ *   '중단 요청 11-01 23:48 kim.ys · 취소 14 · 시작 전 멈춤 9' (0 인 칸은 뺀다)
  */
 export function canceledText(c, tsText = (x) => String(x)) {
   if (!c) return '';
   // 반증 F2: 취소가 한 건도 가지 않은 시도는 '중단됨' 이 아니다 — 사유(옛 엣지면 업그레이드 안내)를 끝에 붙인다
-  const parts = [`${c.effective === false ? '중단하지 못함' : '중단됨'} ${tsText(c.at)}${c.by ? ` ${c.by}` : ''}`];
+  // '중단 요청' — 멈추는 중에도 다 멈춘 뒤에도 맞는 말(띠 · 카드의 '멈추는 중' 배지와 어긋나지 않게 · Chromium 확인)
+  const parts = [`${c.effective === false ? '중단하지 못함' : '중단 요청'} ${tsText(c.at)}${c.by ? ` ${c.by}` : ''}`];
   for (const [k, t] of [['canceled', '취소'], ['finished', '이미 끝남'], ['cleared', '추적만 해제'], ['halted', '시작 전 멈춤'], ['failed', '취소 실패'], ['unknown', '취소 결과 모름'], ['busy', '다른 요청 중']]) if (c[k] > 0) parts.push(`${t} ${c[k]}`);
   if (c.extra && (c.extra.canceled || c.extra.failed || c.extra.unknown || c.extra.busy)) parts.push(`그 밖 실행 취소 ${c.extra.canceled}`);
   if (c.scope === 'all') parts.push('범위 그룹 VM 전부');

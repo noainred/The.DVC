@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   ageText, cancelChip, cancelButton, jobCancelNotes, groupPlanView, groupCancelNotes, nameMatches, cancelAcceptedText, canceledText, groupStopState, progressSegments,
 } from './bareosCancelText.js';
-import { fireText, fireTone, FIRE_STATE_TEXT } from './bareosGroupText.js';
+import { fireText, fireTone, FIRE_STATE_TEXT, memberResults, resultBadge } from './bareosGroupText.js';
 
 const NOW = 1_800_000_000_000;
 const all = (o) => JSON.stringify(o);
@@ -23,6 +23,8 @@ describe('v2.867 취소 문구 — 판정은 서버 cancelInfo 값 그대로', (
     expect(c.tone).toBe('stop');
     expect(c.title).toContain('그룹 중단');
     expect(c.title).toContain('10분');
+    expect(c.short).toBe('멈추는 중');
+    expect(c.sub).toBe('1분 12초째 · hong · 그룹 중단');
     const s = cancelChip({ at: NOW - 700_000, by: 'hong', via: 'single', stuck: true }, { now: NOW });
     expect(s.text).toBe('멈추지 않음');
     expect(s.tone).toBe('warn');
@@ -73,7 +75,7 @@ describe('v2.867 취소 문구 — 판정은 서버 cancelInfo 값 그대로', (
   it('canceledText · cancelAcceptedText · fireText — 0 인 칸은 빼고 중단 표시', () => {
     const c = { at: NOW, by: 'kim', phase: 'running', scope: 'all', canceled: 14, finished: 0, cleared: 0, failed: 1, unknown: 0, busy: 0, halted: 9, extra: { canceled: 1, finished: 0, cleared: 0, failed: 0, unknown: 0, busy: 0 }, skipKey: '2026-11-08 23:00' };
     const t = canceledText(c, () => '11-01 23:48');
-    expect(t).toBe('중단됨 11-01 23:48 kim · 취소 14 · 시작 전 멈춤 9 · 취소 실패 1 · 그 밖 실행 취소 1 · 범위 그룹 VM 전부 · 2026-11-08 23:00 회차 건너뜀');
+    expect(t).toBe('중단 요청 11-01 23:48 kim · 취소 14 · 시작 전 멈춤 9 · 취소 실패 1 · 그 밖 실행 취소 1 · 범위 그룹 VM 전부 · 2026-11-08 23:00 회차 건너뜀');
     expect(cancelAcceptedText({ phase: 'queued', fire: 0, extra: 0, halted: 20, skipKey: '' }, 'WEB')).toContain('시작 전 멈춤 20대');
     const f = { at: NOW, trigger: 'timer', started: 23, halted: 9, canceled: c };
     expect(fireText(f)).toContain('중단됨');
@@ -87,5 +89,18 @@ describe('v2.867 취소 문구 — 판정은 서버 cancelInfo 값 그대로', (
     const texts = [...jobCancelNotes({ group: 'G', waitMs: 600_000 }), ...groupCancelNotes({ waitMs: 600_000 }), ...groupPlanView({ phase: 'sending', progress: { toSend: 2, sent: 1 } }).lines,
       all(cancelChip({ at: NOW, by: 'a', stuck: false }, { now: NOW, waitMs: 1 })), all(cancelChip({ at: NOW, by: 'a', stuck: true }, { now: NOW })), all(cancelButton({ running: true, cancel: { stuck: false } }))];
     for (const t of texts) expect(t).not.toContain('`');
+  });
+
+  it('memberResults — 사람이 멈춘 실행(canceled)은 실패와 따로 센다 · 표지', () => {
+    const m = memberResults([{ b: { st: 'canceled' } }, { b: { st: 'canceled' } }, { b: { st: 'ok' } }, { b: { st: 'error' } }]);
+    expect(m).toMatchObject({ n: 4, ok: 1, fail: 1, cancel: 2 });
+    expect(resultBadge(memberResults([{ b: { st: 'canceled' } }, { b: { st: 'ok' } }]))).toEqual({ text: '취소 1 · 성공 1', tone: 'warn' });
+    expect(memberResults([{ b: { st: 'canceled' } }], { resultsKnown: false }).cancel).toBe(null);
+  });
+
+  it('canceledText — 멈추지 못한 시도는 중단하지 못함 + 사유', () => {
+    const t = canceledText({ at: NOW, by: 'kim', effective: false, failed: 2, reason: '취소 실패 — 엣지를 업그레이드' }, () => 'T');
+    expect(t).toBe('중단하지 못함 T kim · 취소 실패 2 · 사유: 취소 실패 — 엣지를 업그레이드');
+    expect(groupStopState({ stop: { phase: 'running', fire: 2 }, lastFire: { canceled: { effective: false } } })).toMatchObject({ kind: 'stopfail', canStop: true });
   });
 });

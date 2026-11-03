@@ -297,7 +297,7 @@ function TargetsTab({ d, reload, handoff, focus, goRuns, goRestore }) {
                         {j.demo && <span className="badge amber" style={{ marginLeft: 6 }}>데모</span>}
                         {j.drift && <span className="badge amber" style={{ marginLeft: 6 }} title={driftText(j.drift)}>{j.drift === 'missing' ? '인벤토리에 없음' : '등록 뒤 바뀜'}</span>}
                         {snapshotChip(j.snapshotCount) && <span className="badge amber" style={{ marginLeft: 6 }} title={SNAPSHOT_TITLE}>{snapshotChip(j.snapshotCount)}</span>}
-                        {j.cancel && (() => { const ch = cancelChip(j.cancel, { waitMs: d.cancelWaitMs }); return <span className="badge amber" style={{ marginLeft: 6 }} title={ch.title}>{ch.text}</span>; })()}
+                        {j.cancel && (() => { const ch = cancelChip(j.cancel, { waitMs: d.cancelWaitMs }); return <span className="badge amber" style={{ marginLeft: 6 }} title={ch.title}>{ch.short}</span>; })()}
                         <div className="muted" style={{ fontSize: 11.5, maxWidth: 280, whiteSpace: 'normal', overflowWrap: 'anywhere' }}>{j.dc} · {j.folder}</div>
                       </td>
                       <td data-sort={`${j.vcenterId} ${dirName(j.directorId)}`} style={{ fontSize: 12.5 }}>{j.vcenterId}<div className="muted" style={{ fontSize: 11.5 }}>{dirName(j.directorId)}</div></td>
@@ -335,10 +335,11 @@ function TargetsTab({ d, reload, handoff, focus, goRuns, goRestore }) {
                 <div className="flex" style={{ gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
                   <b style={{ fontSize: 16, overflowWrap: 'anywhere' }}>{j.vmName}</b>
                   {c.badge ? <span className={`badge ${c.badge.cls}`}>{c.badge.label}</span> : null}
-                  {(() => { const ch = cancelChip(j.cancel, { waitMs: d.cancelWaitMs }); return ch ? <span className="badge amber" title={ch.title}>{ch.text}</span> : null; })()}
                   <span className={`badge ${osBadgeCls(osKey(j))}`} style={{ fontSize: 10 }}>{osLabel(osKey(j))}</span>
                   <button type="button" className="tab" aria-label="닫기" onClick={() => setSel('')} style={{ padding: '2px 8px', fontSize: 12, marginLeft: 'auto' }}>닫기</button>
                 </div>
+                {/* v2.867 멈추는 중 — 머리 줄에 두면 줄이 넘쳐 닫기가 내려갔다(Chromium 1440 확인) — 따로 한 줄 */}
+                {(() => { const ch = cancelChip(j.cancel, { waitMs: d.cancelWaitMs }); return ch ? <div style={{ ...ROW, gap: 6, marginTop: -4 }} title={ch.title}><span className="badge amber">{ch.short}</span><span className="muted" style={{ fontSize: 12 }}>{ch.sub}</span></div> : null; })()}
                 <div style={{ ...ROW, gap: 6 }}>
                   {isRun
                     ? (() => { const cb = cancelButton({ running: true, cancel: j.cancel, lockReason: lk.cancel }); return <button type="button" className="logout-btn" style={{ ...BTN, color: cb.disabled ? undefined : 'var(--red)' }} disabled={cb.disabled} title={cb.title} onClick={() => cancel(j, liveJobid)}>{cb.label}</button>; })()

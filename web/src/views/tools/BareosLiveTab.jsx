@@ -284,7 +284,7 @@ function CorpView({ corps, c, onPick, limits = null, waitMs = null, onChanged = 
         </div>
         {act.length === 0 ? <div className="muted" style={{ padding: 14, fontSize: 13 }}>지금 이 법인에서 도는 백업이 없습니다.</div> : (
           <STable minWidth={1100} limit={300}>
-            <thead><tr><th>VM</th><th>그룹 · 실행</th><th>레벨</th><th>시작 · 경과</th><th>Director 상태</th><th data-nosort style={{ minWidth: 200 }}>진행량 / 기준</th><th className="right">지금 속도</th><th className="right">지난 평균</th><th>판정</th><th data-nosort className="right">동작</th></tr></thead>
+            <thead><tr><th>VM</th><th>그룹 · 실행</th><th>레벨</th><th>시작 · 경과</th><th>Director 상태</th><th data-nosort style={{ minWidth: 200 }}>진행량 / 기준</th><th className="right">지금 속도</th><th className="right">지난 평균</th><th>판정 · 동작</th></tr></thead>
             <tbody>
               {act.map((r) => {
                 const pb = progressBasis(r);
@@ -316,17 +316,18 @@ function CorpView({ corps, c, onPick, limits = null, waitMs = null, onChanged = 
                     <td className="right" data-sort={r.rateNow ?? ''} style={{ fontWeight: 800, color: r.rateNow === null ? 'var(--text-dim)' : r.slow ? TONE.warn : CYAN, fontVariantNumeric: 'tabular-nums' }}>{rateText(r.rateNow)}</td>
                     <td className="right" data-sort={r.baseline ?? ''} style={{ fontVariantNumeric: 'tabular-nums' }}>{r.baseline ? rateText(r.baseline) : '—'}</td>
                     <td>
-                      {(() => { const ch = cancelChip(r.cancel, { waitMs }); return ch ? <><span title={ch.title}><Badge tone={ch.tone === 'stop' ? 'stop' : 'warn'}>{ch.text}</Badge></span><div className="muted" style={{ fontSize: 11, marginTop: 2 }}>{r.cancel.by || '?'}{r.cancel.via === 'group' ? ' · 그룹 중단' : ''}</div></> : null; })()}
+                      {/* v2.867: 판정 칸 하나에 상태 + 취소 단추(따로 열을 두면 1440 에서 표가 칸을 넘어 단추가 가로 스크롤 뒤로 숨었다 — Chromium 확인) */}
+                      {(() => { const ch = cancelChip(r.cancel, { waitMs }); return ch ? <><span title={ch.title}><Badge tone={ch.tone === 'stop' ? 'stop' : 'warn'}>{ch.short}</Badge></span><div className="muted" style={{ fontSize: 11, marginTop: 2 }}>{ch.sub}</div></> : null; })()}
                       {!r.cancel && (r.stuck ? <><Badge tone="warn">멈춤 의심</Badge><div className="muted" style={{ fontSize: 11, marginTop: 2 }}>{STUCK_TEXT[r.stuck]}</div></>
                         : r.slow ? <Badge tone="warn">느림</Badge> : r.rateNow === null ? <Badge tone="muted">속도 모름</Badge> : <Badge tone="ok">정상</Badge>)}
-                    </td>
-                    <td className="right" onClick={(e) => e.stopPropagation()}>
-                      {(() => { const cb = cancelButton({ running: true, cancel: r.cancel, lockReason: ro }); return <button type="button" className="logout-btn" style={{ padding: '4px 10px', fontSize: 12, color: cb.disabled ? undefined : 'var(--red)' }} disabled={cb.disabled} title={cb.title} onClick={() => openCancel(r)}>{cb.label}</button>; })()}
+                      <div style={{ marginTop: 4 }} onClick={(e) => e.stopPropagation()}>
+                        {(() => { const cb = cancelButton({ running: true, cancel: r.cancel, lockReason: ro }); return <button type="button" className="logout-btn" style={{ padding: '2px 9px', fontSize: 11.5, color: cb.disabled ? undefined : 'var(--red)' }} disabled={cb.disabled} title={cb.title} onClick={() => openCancel(r)}>{cb.label}</button>; })()}
+                      </div>
                     </td>
                   </tr>
                   {open && (
                     <tr data-detail="">
-                      <td colSpan={10} style={{ padding: 0, whiteSpace: 'normal', background: 'var(--bg-soft)' }}>
+                      <td colSpan={9} style={{ padding: 0, whiteSpace: 'normal', background: 'var(--bg-soft)' }}>
                         {/* 표가 가로로 넓어도 상세는 보이는 폭에 고정(sticky left · 폭은 실제 측정값) */}
                         <div style={{ position: 'sticky', left: 0, boxSizing: 'border-box', width: actW ? actW - 2 : '100%', padding: '12px 14px 14px' }}>
                           <BareosRunDetail row={r} live={c.live} dir={relayDir} limits={limits} diagAvailable={!!c.diag} onDiag={openDiag} />
@@ -365,7 +366,7 @@ function CorpView({ corps, c, onPick, limits = null, waitMs = null, onChanged = 
                     <td>{levelWord(r.level)}</td>
                     <td data-sort={r.since ?? ''} style={{ fontFamily: 'var(--mono)', fontSize: 12 }}>{r.since ? shortTs(r.since) : '—'}<div className="muted">{elapsedText(r.elapsed)}</div></td>
                     <td data-sort={r.dirStatus?.reason || 'unknown'} style={{ whiteSpace: 'nowrap', fontSize: 12.5 }}>{r.dirStatus ? reasonText(r.dirStatus.reason) : <span className="muted">{reasonText('unknown')}</span>}
-                      {(() => { const ch = cancelChip(r.cancel, { waitMs }); return ch ? <div title={ch.title}><Badge tone={ch.tone === 'stop' ? 'stop' : 'warn'}>{ch.text}</Badge></div> : null; })()}</td>
+                      {(() => { const ch = cancelChip(r.cancel, { waitMs }); return ch ? <div title={ch.title}><Badge tone={ch.tone === 'stop' ? 'stop' : 'warn'}>{ch.short}</Badge> <span className="muted" style={{ fontSize: 11 }}>{ch.sub}</span></div> : null; })()}</td>
                     <td className="right">
                       {(() => { const cb = cancelButton({ running: true, cancel: r.cancel, lockReason: ro }); return <button type="button" className="logout-btn" style={{ padding: '4px 10px', fontSize: 12, color: cb.disabled ? undefined : 'var(--red)' }} disabled={cb.disabled} title={cb.title} onClick={() => openCancel(r)}>{cb.label}</button>; })()}
                     </td>

@@ -338,7 +338,7 @@ function CorpBar({ vc, setVc, options, tree, vms, loading, onReload }) {
           <span>그룹 없음 <b style={{ color: vms.length - inGroup ? TONE.warn : undefined }}>{vms.length - inGroup}</b></span>
           {m.unknown
             ? <span className="muted" title={resultsUnknownText({ ...tree.directorState, resultsKnown: false }) || ''}>그룹 VM 마지막 결과 <b>모름</b>(Director {tree.directorState?.state === 'auth' ? '인증 정지' : tree.directorState?.state === 'error' ? '조회 실패' : '미설정'} — 마지막으로 읽은 값이라 세지 않습니다)</span>
-            : <span className="muted">그룹 VM 마지막 결과 <b style={{ color: TONE.ok }}>성공 {m.ok + m.warn}</b> · <b style={{ color: m.fail ? TONE.bad : undefined }}>실패 {m.fail}</b> · <b style={{ color: m.run ? TONE.run : undefined }}>진행 {m.run}</b>{m.never ? ` · 기록 없음 ${m.never}` : ''}</span>}
+            : <span className="muted">그룹 VM 마지막 결과 <b style={{ color: TONE.ok }}>성공 {m.ok + m.warn}</b> · <b style={{ color: m.fail ? TONE.bad : undefined }}>실패 {m.fail}</b>{m.cancel ? <> · <b style={{ color: TONE.warn }}>취소 {m.cancel}</b></> : null} · <b style={{ color: m.run ? TONE.run : undefined }}>진행 {m.run}</b>{m.never ? ` · 기록 없음 ${m.never}` : ''}</span>}
         </div>
       )}
     </section>
