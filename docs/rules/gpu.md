@@ -103,5 +103,10 @@
     (경로 첫 세그먼트 = 도구 키 규약 — 옛 `/tools/gpu/alloc*` 는 지웠다: 남기면 'GPU 인벤토리' 권한만으로 열려 gpu-alloc 거부가 집행되지 않는다) ·
     `auth/toolAccess.js` 매핑 · `toolcats/catalog.js` PRESET(서버·가상화) · `SpecialTools.jsx` 는 scope 콤보 없이(법인은 화면 안 칩).
     GPU 인벤토리의 옛 해시 `#/tools/gpu/alloc` 는 새 도구로 넘기고, 바로가기 단추는 `toolAllowed('gpu-alloc')` 일 때만 보인다.
+  - **v2.868 호스트·VM CPU/메모리**(사용자 요청 '호스트의 CPU/Memory 와 VM 의 CPU/Memory 도 포함'): 스냅샷 값만(`allocTree.hostResOf`·`vmResOf` — 새 수집 없음).
+    호스트 = 코어 · 메모리 GB · 사용률(끊긴 호스트는 null) · VM = vCPU · 메모리 GB · 사용률(꺼진 VM 은 null — 수집기가 0 을 싣는다).
+    합계: 코어·메모리 **합** 은 모르는 호스트가 섞이면 null(부분 합 금지) · **사용률** 은 비율이라 읽은 호스트의 MHz·MB 합으로 내고 뺀 대수(`hostUseUnknown`)를
+    비고에 적는다(한 대가 끊겼다고 법인 사용률을 지우지 않는다 — 처음 판은 null 로 지워 목 데이터 법인 행이 비었다) · 켜진 GPU VM 의 vCPU·메모리 합(`vmVcpu`·`vmMemGB`).
+    엑셀 계층 표는 열이 6개 늘어 비고가 17번째 열이다(`treeLines` cells 17개 — 테스트가 고정).
   - ⚠ 정직 기록: `HostGraphicsInfo.vm` 이 꺼진 VM 을 싣는지, 이 현장 vCenter 가 동적 DirectPath `assignedId` 를 주는지는 실장비로 확인하지 못했다
     (꺼진 VM 은 목록에 있어도 할당에 넣지 않으므로 결과는 같다). 한 VM 의 vGPU 장치 둘이 한 GPU 목록에 한 번만 오면 GPU 단위 할당이 한 장치분으로 적게 잡힌다(호스트 합은 정확).

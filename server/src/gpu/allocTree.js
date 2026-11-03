@@ -59,7 +59,10 @@ function vgpuGBOf(gpu) {
 
 export function zeroTotals() {
   return { hosts: 0, gpus: 0, vsga: 0, capGB: 0, capUnknown: 0, allocGB: 0, allocUnknown: 0, offGB: 0, offUnknown: 0,
-    vmsOn: 0, vmsOff: 0, unplaced: 0, freeGpus: 0, noPlacement: 0 };
+    vmsOn: 0, vmsOff: 0, unplaced: 0, freeGpus: 0, noPlacement: 0,
+    // v2.868: 호스트 CPU·메모리(코어·GB 합, 사용률은 MHz·MB 합으로) · 켜진 GPU VM 의 vCPU·메모리 합. *Unknown = 그 값을 못 읽은 호스트·VM 수.
+    hostCores: 0, hostMemGB: 0, hostResUnknown: 0, cpuMhzTotal: 0, cpuMhzUsed: 0, memMbTotal: 0, memMbUsed: 0, hostUseUnknown: 0,
+    vmVcpu: 0, vmMemGB: 0, vmResUnknown: 0 };
 }
 function addTotals(a, b) {
   for (const k of Object.keys(a)) a[k] += b[k] || 0;
@@ -73,7 +76,35 @@ export function finishTotals(t) {
     capGB: r1(t.capGB), allocGB: r1(t.allocGB), offGB: r1(t.offGB),
     spareGB: known ? r1(t.capGB - t.allocGB) : null,
     allocPct: known && t.capGB > 0 ? Math.round((t.allocGB / t.capGB) * 100) : null,
+    // v2.868: 코어·메모리 '합' 은 모르는 호스트가 섞이면 null(부분 합을 전체로 보이지 않는다 — 예비와 같은 규칙).
+    //   사용률은 '비율' 이라 사용률을 읽은 호스트(끊긴 호스트 제외)만으로 MHz·MB 가중으로 내고, 못 읽은 호스트 수(hostUseUnknown)를 함께 싣는다 —
+    //   화면·엑셀 비고가 'N대 제외' 를 말한다(한 대가 끊겼다고 법인 사용률 전체를 지우지 않는다). 읽은 호스트가 0 이면 null.
+    hostCores: t.hostResUnknown ? null : t.hostCores,
+    hostMemGB: t.hostResUnknown ? null : r1(t.hostMemGB),
+    hostCpuPct: t.cpuMhzTotal > 0 ? Math.round((t.cpuMhzUsed / t.cpuMhzTotal) * 100) : null,
+    hostMemPct: t.memMbTotal > 0 ? Math.round((t.memMbUsed / t.memMbTotal) * 100) : null,
+    vmVcpu: t.vmResUnknown ? null : t.vmVcpu,
+    vmMemGB: t.vmResUnknown ? null : r1(t.vmMemGB),
   };
+}
+
+const pos = (v) => { const n = numOrNull(v); return n != null && n > 0 ? n : null; };
+const pctOrNull = (v) => { const n = numOrNull(v); return n != null && n >= 0 && n <= 1000 ? Math.round(n) : null; };
+/**
+ * v2.868(사용자 요청 '호스트의 CPU/Memory 와 VM 의 CPU/Memory 도 포함'): 스냅샷 값만 읽는다(새 수집 없음).
+ * 호스트: 코어 · 메모리 GB · 사용률(끊긴 호스트는 사용률 null — 수집기가 0 을 싣는다). VM: vCPU · 메모리 GB · 사용률(꺼진 VM 은 null — 0 이 아니라 모름).
+ */
+export function hostResOf(h) {
+  const down = h?.connectionState === 'DISCONNECTED';
+  const memMB = pos(h?.memTotalMB);
+  return { cores: pos(h?.cpuCores), memGB: memMB == null ? null : r1(memMB / 1024),
+    cpuPct: down ? null : pctOrNull(h?.cpuUsagePct), memPct: down ? null : pctOrNull(h?.memUsagePct) };
+}
+export function vmResOf(v) {
+  const on = v?.powerState === ON;
+  const memMB = pos(v?.memMB);
+  return { vcpu: pos(v?.cpuCount), memGB: memMB == null ? null : r1(memMB / 1024),
+    cpuPct: on ? pctOrNull(v?.cpuUsagePct) : null, memPct: on ? pctOrNull(v?.memUsagePct) : null };
 }
 
 function vmRowOf(v, gb, extra = {}) {
@@ -83,6 +114,7 @@ function vmRowOf(v, gb, extra = {}) {
     mode: str(v.gpu?.type) || (dev.vgpu ? 'vgpu' : 'passthrough'),
     profile: str(v.gpu?.profile), vgpuDevices: dev.vgpu, passthroughDevices: dev.passthrough,
     gb: gb == null ? null : r1(gb),
+    res: vmResOf(v),
     ...extra,
   };
 }
@@ -107,6 +139,13 @@ export function buildHostAlloc(h, vms) {
   const placed = new Set();
   const t = zeroTotals();
   t.hosts = 1;
+  // v2.868: 호스트 CPU·메모리
+  const hr = hostResOf(h);
+  if (hr.cores == null || hr.memGB == null) t.hostResUnknown += 1; else { t.hostCores += hr.cores; t.hostMemGB += hr.memGB; }
+  const cpuT = pos(h?.cpuTotalMhz); const memT = pos(h?.memTotalMB);
+  const cpuU = numOrNull(h?.cpuUsageMhz); const memU = numOrNull(h?.memUsageMB);
+  if (h?.connectionState === 'DISCONNECTED' || cpuT == null || memT == null || cpuU == null || memU == null || cpuU < 0 || memU < 0) t.hostUseUnknown += 1;
+  else { t.cpuMhzTotal += cpuT; t.cpuMhzUsed += cpuU; t.memMbTotal += memT; t.memMbUsed += memU; }
   // ① GPU 별 배치 — 켜진 VM 만(꺼진 VM 은 GPU 에 올라가 있지 않다)
   for (const g of gpus) {
     if (g.mode === 'vgpu' && g._vmIds) {
@@ -166,6 +205,8 @@ export function buildHostAlloc(h, vms) {
     const gb = vg == null || pt == null ? null : vg + pt;
     if (v.powerState === ON) {
       t.vmsOn += 1;
+      const vr = vmResOf(v);
+      if (vr.vcpu == null || vr.memGB == null) t.vmResUnknown += 1; else { t.vmVcpu += vr.vcpu; t.vmMemGB += vr.memGB; }
       if (gb == null) t.allocUnknown += 1; else t.allocGB += gb;
       if (!placed.has(str(v.id))) {
         const anyPlacement = gpus.some((g) => g.placement && (dev.vgpu ? g.mode === 'vgpu' : g.mode === 'passthrough'));
@@ -183,7 +224,7 @@ export function buildHostAlloc(h, vms) {
   unplaced.sort(byName); off.sort(byName);
   return {
     id: str(h.id), name: str(h.name), cluster: str(h.cluster), vcDatacenter: str(h.vcDatacenter),
-    connectionState: str(h.connectionState),
+    connectionState: str(h.connectionState), res: hr,
     models: [...new Set(gpus.map((g) => g.model).filter(Boolean))],
     gpus, unplaced, off, totals: finishTotals(t), _t: t,
   };
@@ -253,7 +294,11 @@ export function buildGpuAllocTree(snap, { allowed = null, vcenterId = null, vcen
 export const FLAT_COLUMNS = Object.freeze([
   ['vcenter', '법인(vCenter)'], ['location', '위치'], ['datacenter', '데이터센터'], ['cluster', '클러스터'], ['host', '호스트'],
   ['gpuIdx', 'GPU#'], ['gpuModel', 'GPU 모델'], ['gpuMode', '방식'], ['gpuCapGB', 'GPU 용량(GB)'], ['gpuAllocGB', 'GPU 할당(GB)'], ['gpuSpareGB', 'GPU 예비(GB)'],
-  ['slots', '슬롯(사용/전체)'], ['vm', 'VM'], ['power', '전원'], ['profile', '프로파일'], ['vmGB', 'VM 할당(GB)'], ['note', '비고'],
+  ['slots', '슬롯(사용/전체)'], ['vm', 'VM'], ['power', '전원'], ['profile', '프로파일'], ['vmGB', 'VM 할당(GB)'],
+  // v2.868: 호스트·VM CPU/메모리
+  ['hostCores', '호스트 코어'], ['hostCpuPct', '호스트 CPU(%)'], ['hostMemGB', '호스트 메모리(GB)'], ['hostMemPct', '호스트 메모리(%)'],
+  ['vmVcpu', 'VM vCPU'], ['vmCpuPct', 'VM CPU(%)'], ['vmMemGB', 'VM 메모리(GB)'], ['vmMemPct', 'VM 메모리(%)'],
+  ['note', '비고'],
 ]);
 export const MODE_TEXT = Object.freeze({ vgpu: 'vGPU', passthrough: '패스스루', vsga: 'vSGA', mixed: 'vGPU+패스스루' });
 export const UNPLACED_TEXT = Object.freeze({
@@ -284,16 +329,20 @@ const numCell = (v) => (v == null ? '' : v);
 export function flatRows(tree) {
   const out = [];
   for (const vc of tree.vcenters) for (const dc of vc.datacenters) for (const cl of dc.clusters) for (const h of cl.hosts) {
-    const base = { vcenter: vc.name, location: locationText(vc), datacenter: dcText(dc.name), cluster: cl.name, host: h.name };
+    const hr = h.res || {};
+    const base = { vcenter: vc.name, location: locationText(vc), datacenter: dcText(dc.name), cluster: cl.name, host: h.name,
+      hostCores: numCell(hr.cores), hostCpuPct: numCell(hr.cpuPct), hostMemGB: numCell(hr.memGB), hostMemPct: numCell(hr.memPct) };
+    const vres = (v) => { const r = v.res || {}; return { vmVcpu: numCell(r.vcpu), vmCpuPct: numCell(r.cpuPct), vmMemGB: numCell(r.memGB), vmMemPct: numCell(r.memPct) }; };
+    const noVm = { vmVcpu: '', vmCpuPct: '', vmMemGB: '', vmMemPct: '' };
     for (const g of h.gpus) {
       const gb = { ...base, gpuIdx: g.idx, gpuModel: g.model, gpuMode: MODE_TEXT[g.mode] || g.mode || '', gpuCapGB: numCell(g.capGB),
         gpuAllocGB: numCell(g.allocGB), gpuSpareGB: numCell(g.spareGB), slots: slotsText(g.slots) };
-      if (!g.vms.length) out.push({ ...gb, vm: '', power: '', profile: '', vmGB: '', note: gpuNoteText(g) });
-      for (const v of g.vms) out.push({ ...gb, vm: v.name, power: '켜짐', profile: v.mode === 'passthrough' ? '패스스루 1장' : v.profile, vmGB: numCell(v.gb), note: v.gb == null ? '프로파일 해석 불가' : v.gbEstimated ? 'GB 는 모델명 추정' : '' });
+      if (!g.vms.length) out.push({ ...gb, ...noVm, vm: '', power: '', profile: '', vmGB: '', note: gpuNoteText(g) });
+      for (const v of g.vms) out.push({ ...gb, ...vres(v), vm: v.name, power: '켜짐', profile: v.mode === 'passthrough' ? '패스스루 1장' : v.profile, vmGB: numCell(v.gb), note: v.gb == null ? '프로파일 해석 불가' : v.gbEstimated ? 'GB 는 모델명 추정' : '' });
     }
     const noGpu = { ...base, gpuIdx: '', gpuModel: '', gpuMode: '', gpuCapGB: '', gpuAllocGB: '', gpuSpareGB: '', slots: '' };
-    for (const v of h.unplaced) out.push({ ...noGpu, vm: v.name, power: '켜짐', profile: v.profile || (v.passthroughDevices ? `패스스루 ${v.passthroughDevices}장` : ''), vmGB: numCell(v.gb), note: UNPLACED_TEXT[v.reason] || '' });
-    for (const v of h.off) out.push({ ...noGpu, vm: v.name, power: '꺼짐', profile: v.profile || (v.passthroughDevices ? `패스스루 ${v.passthroughDevices}장` : ''), vmGB: numCell(v.gb), note: `꺼짐 — 할당에서 제외(켜면 ${v.gb == null ? '?' : v.gb} GB 필요)` });
+    for (const v of h.unplaced) out.push({ ...noGpu, ...vres(v), vm: v.name, power: '켜짐', profile: v.profile || (v.passthroughDevices ? `패스스루 ${v.passthroughDevices}장` : ''), vmGB: numCell(v.gb), note: UNPLACED_TEXT[v.reason] || '' });
+    for (const v of h.off) out.push({ ...noGpu, ...vres(v), vm: v.name, power: '꺼짐', profile: v.profile || (v.passthroughDevices ? `패스스루 ${v.passthroughDevices}장` : ''), vmGB: numCell(v.gb), note: `꺼짐 — 할당에서 제외(켜면 ${v.gb == null ? '?' : v.gb} GB 필요)` });
   }
   return out;
 }

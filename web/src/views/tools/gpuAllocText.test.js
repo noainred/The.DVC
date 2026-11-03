@@ -105,3 +105,23 @@ describe('v2.855 내보내기 창 쿼리', () => {
     expect(EXPORT_SHEETS.map((s) => s.key)).toEqual(['tree', 'flat', 'info']);
   });
 });
+
+describe('v2.868 CPU/메모리 칸', () => {
+  it('법인~호스트 행은 호스트 합, VM 행은 그 VM, GPU 행은 빈 칸 · 정렬 키', () => {
+    const t = tree();
+    const hostT = { hostCores: 32, hostCpuPct: 25, hostMemGB: 512, hostMemPct: 50, vmVcpu: 8, vmMemGB: 32 };
+    t.vcenters[0].totals = { ...t.vcenters[0].totals, ...hostT, hostCores: 64 };
+    const h = t.vcenters[0].datacenters[0].clusters[0].hosts[0];
+    h.totals = { ...h.totals, ...hostT };
+    h.gpus[0].vms[0].res = { vcpu: 8, memGB: 32, cpuPct: 40, memPct: null };
+    const rows = flattenAlloc(t, { open: openForLevel(t, 6) });
+    expect(rows[0].cores).toBe(64);
+    const hr = rows.find((r) => r.name === 'esx-b');
+    expect([hr.cores, hr.cpuPct, hr.memGB, hr.memPct, hr.gvmVcpu, hr.gvmMemGB]).toEqual([32, 25, 512, 50, 8, 32]);
+    const vr = rows.find((r) => r.name === 'cad-01');
+    expect([vr.cores, vr.cpuPct, vr.memGB, vr.memPct, vr.gvmVcpu]).toEqual([8, 40, 32, null, null]);
+    const gr = rows.find((r) => r.kind === 'gpu');
+    expect(gr.cores ?? null).toBe(null);
+    expect(sortSiblings([{ name: 'x', res: { vcpu: 2 } }, { name: 'y', res: { vcpu: 16 } }, { name: 'z' }], { key: 'cores', dir: 'desc' }).map((x) => x.name)).toEqual(['y', 'x', 'z']);
+  });
+});

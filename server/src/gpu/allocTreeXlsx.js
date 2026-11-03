@@ -57,7 +57,10 @@ const LEVEL = Object.freeze([
 ]);
 const HEADS = Object.freeze([
   { h: '이름', w: 44 }, { h: '구분', w: 11 }, { h: 'GPU 모델 · 프로파일', w: 30 }, { h: '전체(GB)', w: 10 }, { h: '할당(GB)', w: 10 },
-  { h: '예비(GB)', w: 10 }, { h: '할당률(%)', w: 10 }, { h: '할당률 막대', w: 14 }, { h: '꺼진 VM(GB)', w: 14 }, { h: 'VM 켜짐/꺼짐', w: 15 }, { h: '비고', w: 44 },
+  { h: '예비(GB)', w: 10 }, { h: '할당률(%)', w: 10 }, { h: '할당률 막대', w: 14 }, { h: '꺼진 VM(GB)', w: 14 }, { h: 'VM 켜짐/꺼짐', w: 15 },
+  // v2.868: 호스트·VM CPU/메모리(호스트 행 = 호스트 값 · VM 행 = VM 값 · 법인~클러스터 = 호스트 합과 MHz·MB 가중 사용률) + 켜진 GPU VM 의 vCPU·메모리 합
+  { h: '코어 · vCPU', w: 11 }, { h: 'CPU(%)', w: 9 }, { h: '메모리(GB)', w: 12 }, { h: '메모리(%)', w: 10 }, { h: 'GPU VM vCPU 합', w: 14 }, { h: 'GPU VM 메모리 합(GB)', w: 17 },
+  { h: '비고', w: 44 },
 ]);
 const num = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
 
@@ -67,15 +70,22 @@ function totalsCells(t) {
   if (t.capUnknown) notes.push(`용량 모르는 GPU ${t.capUnknown}장`);
   if (t.allocUnknown) notes.push(`할당 모르는 VM ${t.allocUnknown}대`);
   if (t.noPlacement) notes.push(`배치 정보 없는 GPU ${t.noPlacement}장`);
+  if (t.hostUseUnknown && t.hosts > 1) notes.push(`CPU·메모리 사용률은 ${t.hostUseUnknown}대 제외(못 읽음·끊김)`);
   if (num(t.spareGB) != null && t.spareGB < 0) notes.push('할당이 용량을 넘음 — 확인 필요');
   else if (pct != null && pct >= 90) notes.push('포화(90% 이상)');
-  return { cap: num(t.capGB), alloc: num(t.allocGB), spare: num(t.spareGB), pct, bar: pct == null ? '' : barText(pct / 100, 10), off: t.offGB ? t.offGB : null, vms: `${t.vmsOn} / ${t.vmsOff}`, note: notes.join(' · ') };
+  return { cap: num(t.capGB), alloc: num(t.allocGB), spare: num(t.spareGB), pct, bar: pct == null ? '' : barText(pct / 100, 10), off: t.offGB ? t.offGB : null, vms: `${t.vmsOn} / ${t.vmsOff}`, note: notes.join(' · '),
+    res: { cores: num(t.hostCores), cpuPct: num(t.hostCpuPct), memGB: num(t.hostMemGB), memPct: num(t.hostMemPct), vmVcpu: num(t.vmVcpu), vmMemGB: num(t.vmMemGB) } };
 }
+/** v2.868: VM 행의 CPU/메모리 — 꺼진 VM 의 사용률은 빈 칸(allocTree.vmResOf 가 null 로 둔다). */
+const vmResCells = (v) => { const r = v.res || {}; return { cores: num(r.vcpu), cpuPct: num(r.cpuPct), memGB: num(r.memGB), memPct: num(r.memPct), vmVcpu: null, vmMemGB: null }; };
 
 /** 계층 → 행 목록(depth·셀). 화면 표와 같은 순서. */
 export function treeLines(tree) {
   const L = [];
-  const push = (depth, name, kind, model, c) => L.push({ depth, cells: [name, kind, model, c.cap, c.alloc, c.spare, c.pct, c.bar, c.off, c.vms, c.note] });
+  const push = (depth, name, kind, model, c) => {
+    const r = c.res || {};
+    L.push({ depth, cells: [name, kind, model, c.cap, c.alloc, c.spare, c.pct, c.bar, c.off, c.vms, r.cores ?? null, r.cpuPct ?? null, r.memGB ?? null, r.memPct ?? null, r.vmVcpu ?? null, r.vmMemGB ?? null, c.note] });
+  };
   for (const vc of tree.vcenters) {
     const loc = locationText(vc);
     push(0, loc ? `${vc.name}  (${loc})` : vc.name, '법인', `GPU ${vc.totals.gpus}장 · 호스트 ${vc.totals.hosts}대`, totalsCells(vc.totals));
@@ -92,15 +102,15 @@ export function treeLines(tree) {
               : g.mode === 'vsga' ? 'vSGA' : g.slots?.profile ? `${g.slots.profile} · ${g.slots.used}/${g.slots.total ?? '?'} 슬롯` : g.vms.length ? '여러 프로파일' : '비어 있음';
             push(4, `GPU #${g.idx} · ${g.model}`, MODE_TEXT[g.mode] || 'GPU', prof,
               { cap: num(g.capGB), alloc: num(g.allocGB), spare: num(g.spareGB), pct, bar: pct == null ? '' : barText(pct / 100, 10), off: null, vms: g.mode === 'vsga' ? '' : `${g.vms.length} / 0`, note: gpuNoteText(g) + (g.capBasis === 'model' ? ' · GB 는 모델명 추정' : '') });
-            for (const v of g.vms) push(5, v.name, 'VM', v.mode === 'passthrough' ? '패스스루 1장' : v.profile, { cap: null, alloc: num(v.gb), spare: null, pct: null, bar: '', off: null, vms: '켜짐', note: v.gb == null ? '프로파일 해석 불가 — 빈 칸(0 아님)' : v.gbEstimated ? 'GB 는 모델명 추정' : '' });
+            for (const v of g.vms) push(5, v.name, 'VM', v.mode === 'passthrough' ? '패스스루 1장' : v.profile, { res: vmResCells(v), cap: null, alloc: num(v.gb), spare: null, pct: null, bar: '', off: null, vms: '켜짐', note: v.gb == null ? '프로파일 해석 불가 — 빈 칸(0 아님)' : v.gbEstimated ? 'GB 는 모델명 추정' : '' });
           }
           if (h.unplaced.length) {
             push(4, '배치 안 된 켜진 VM', '미배치', '', { cap: null, alloc: null, spare: null, pct: null, bar: '', off: null, vms: `${h.unplaced.length} / 0`, note: '할당은 호스트 합계에 들어감 — 어느 GPU 인지 모름' });
-            for (const v of h.unplaced) push(5, v.name, 'VM', v.profile || `패스스루 ${v.passthroughDevices}장`, { cap: null, alloc: num(v.gb), spare: null, pct: null, bar: '', off: null, vms: '켜짐', note: UNPLACED_TEXT[v.reason] || '' });
+            for (const v of h.unplaced) push(5, v.name, 'VM', v.profile || `패스스루 ${v.passthroughDevices}장`, { res: vmResCells(v), cap: null, alloc: num(v.gb), spare: null, pct: null, bar: '', off: null, vms: '켜짐', note: UNPLACED_TEXT[v.reason] || '' });
           }
           if (h.off.length) {
             push(4, '꺼진 VM', '꺼짐', '', { cap: null, alloc: null, spare: null, pct: null, bar: '', off: num(h.totals.offGB), vms: `0 / ${h.off.length}`, note: 'GPU 에 올라가 있지 않음 — 할당에서 제외' });
-            for (const v of h.off) push(5, v.name, 'VM', v.profile || `패스스루 ${v.passthroughDevices}장`, { cap: null, alloc: null, spare: null, pct: null, bar: '', off: num(v.gb), vms: '꺼짐', note: `켜면 ${v.gb == null ? '?' : v.gb} GB 필요` });
+            for (const v of h.off) push(5, v.name, 'VM', v.profile || `패스스루 ${v.passthroughDevices}장`, { res: vmResCells(v), cap: null, alloc: null, spare: null, pct: null, bar: '', off: num(v.gb), vms: '꺼짐', note: `켜면 ${v.gb == null ? '?' : v.gb} GB 필요` });
           }
         }
       }
@@ -151,8 +161,8 @@ export async function renderGpuAllocWorkbook(tree, meta, { depth = 'vm', sheets 
   });
   kVal.height = 22;
   const head = ws.addRow(HEADS.map((x) => x.h));
-  styleHeadRow(head, { height: 24 });
-  head.eachCell((c, i) => { if (i >= 4 && i <= 10 && i !== 8) c.alignment = { vertical: 'middle', horizontal: 'right' }; });
+  styleHeadRow(head, { height: 32 });   // v2.868: CPU/메모리 열 머리가 두 줄이 될 수 있다
+  head.eachCell((c, i) => { if (i >= 4 && i <= 16 && i !== 8) c.alignment = { vertical: 'middle', horizontal: 'right', wrapText: true }; });
   let i = 0; let maxLevel = 0;
   for (const ln of treeLines(tree).filter((x) => x.depth < maxDepth)) {
     const lv = LEVEL[ln.depth];
@@ -164,14 +174,14 @@ export async function renderGpuAllocWorkbook(tree, meta, { depth = 'vm', sheets 
       c.fill = fill(lv.bg);
       c.border = BORDER;
       c.font = { bold: lv.bold && col <= 3, color: { argb: lv.fg }, size: ln.depth >= 4 ? 10 : 11 };
-      c.alignment = { vertical: 'middle', ...(col === 1 ? { indent: ln.depth * 2 } : {}), ...(col >= 4 && col <= 10 && col !== 8 ? { horizontal: 'right' } : {}) };
+      c.alignment = { vertical: 'middle', ...(col === 1 ? { indent: ln.depth * 2 } : {}), ...(col >= 4 && col <= 16 && col !== 8 ? { horizontal: 'right' } : {}) };
     });
     const dark = ln.depth === 0;
     r.getCell(5).font = { ...r.getCell(5).font, bold: true, color: { argb: dark ? 'FFFFFFFF' : C.alloc } };
     r.getCell(6).font = { ...r.getCell(6).font, bold: true, color: { argb: dark ? 'FFA7F3D0' : C.spare } };
     r.getCell(9).font = { ...r.getCell(9).font, color: { argb: dark ? 'FFFDE68A' : C.off } };
     r.getCell(8).font = { name: 'Consolas', size: 9, color: { argb: (num(ln.cells[6]) ?? 0) >= 90 ? (dark ? 'FFFDBA74' : C.warn) : (dark ? 'FF93C5FD' : C.alloc) } };
-    r.getCell(11).font = { size: 9, color: { argb: dark ? 'FFDBE6FB' : C.muted } };
+    r.getCell(17).font = { size: 9, color: { argb: dark ? 'FFDBE6FB' : C.muted } };
     if (++i % 500 === 0) await yieldLoop();
   }
   // 개요 단추(왼쪽 위 1~N) 개수 — 0 이면 Excel 이 단추를 그리지 않는다(vmListXlsx.js 와 같다).
@@ -183,10 +193,11 @@ export async function renderGpuAllocWorkbook(tree, meta, { depth = 'vm', sheets 
   /* ② 평면 표 */
   if (sheets.includes('flat')) {
   const wf = wb.addWorksheet(ALLOC_XLSX_SHEETS[1], { views: [{ state: 'frozen', ySplit: 1, xSplit: 0 }], pageSetup: { ...PRINT, printTitlesRow: '1:1' } });
-  const FW = { vcenter: 26, location: 20, datacenter: 16, cluster: 18, host: 22, gpuIdx: 6, gpuModel: 22, gpuMode: 10, gpuCapGB: 12, gpuAllocGB: 12, gpuSpareGB: 12, slots: 12, vm: 24, power: 7, profile: 20, vmGB: 12, note: 36 };
+  const FW = { vcenter: 26, location: 20, datacenter: 16, cluster: 18, host: 22, gpuIdx: 6, gpuModel: 22, gpuMode: 10, gpuCapGB: 12, gpuAllocGB: 12, gpuSpareGB: 12, slots: 12, vm: 24, power: 7, profile: 20, vmGB: 12,
+    hostCores: 10, hostCpuPct: 12, hostMemGB: 15, hostMemPct: 14, vmVcpu: 9, vmCpuPct: 10, vmMemGB: 13, vmMemPct: 12, note: 36 };
   wf.columns = FLAT_COLUMNS.map(([k]) => ({ key: k, width: FW[k] || 14 }));
   styleHeadRow(wf.addRow(FLAT_COLUMNS.map(([, h]) => h)), { height: 24 });
-  const NUMK = new Set(['gpuIdx', 'gpuCapGB', 'gpuAllocGB', 'gpuSpareGB', 'vmGB']);
+  const NUMK = new Set(['gpuIdx', 'gpuCapGB', 'gpuAllocGB', 'gpuSpareGB', 'vmGB', 'hostCores', 'hostCpuPct', 'hostMemGB', 'hostMemPct', 'vmVcpu', 'vmCpuPct', 'vmMemGB', 'vmMemPct']);
   let j = 0;
   for (const fr of flatRows(tree)) {
     const r = wf.addRow(FLAT_COLUMNS.map(([k]) => (fr[k] === '' ? null : fr[k])));
@@ -224,6 +235,7 @@ export async function renderGpuAllocWorkbook(tree, meta, { depth = 'vm', sheets 
     ['배치 안 된 VM', '켜져 있는데 GPU 별 목록에서 찾지 못한 VM 입니다. 할당은 호스트 합계에 들어갑니다. 수집기가 GPU 별 배치를 아직 보내지 않는 경우(구버전) 그 호스트 GPU 의 할당·예비는 비웁니다.'],
     ['빈 칸', '못 읽은 값입니다. 0 으로 채우지 않습니다.'],
     ['vSGA', '공유 그래픽이라 할당형이 아닙니다. 행으로만 보이고 합계에 넣지 않습니다.'],
+    ['CPU · 메모리', '호스트 행은 그 호스트의 코어 · 메모리 · 사용률, VM 행은 그 VM 의 vCPU · 메모리 · 사용률입니다. 법인 · 데이터센터 · 클러스터 행은 호스트 코어 · 메모리 합이고 사용률은 사용률을 읽은 호스트의 MHz · MB 합으로 낸 값입니다(끊긴 호스트는 빼고 비고에 대수를 적습니다). ‘GPU VM vCPU · 메모리 합’ 은 켜진 GPU VM 만 더합니다. 꺼진 VM · 끊긴 호스트의 사용률과 모르는 값이 섞인 합은 빈 칸입니다(0 이 아님).'],
     ['평면 표', 'GPU·VM 한 줄마다 모든 계층 열을 채운 시트 — 자동 필터와 피벗 테이블용입니다.'],
   ];
   for (const [k, v] of info) {

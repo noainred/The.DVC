@@ -21,7 +21,11 @@ const KIND_BADGE = { vc: 'blue', dc: 'gray', cl: 'gray', host: 'blue', gpu: 'tea
 const COLS = [
   { key: 'name', label: '이름' }, { key: null, label: '구분' }, { key: null, label: 'GPU 모델 · 프로파일' },
   { key: 'cap', label: '전체 GB', num: true }, { key: 'alloc', label: '할당 GB', num: true }, { key: 'spare', label: '예비 GB', num: true },
-  { key: 'pct', label: '할당률' }, { key: 'off', label: '꺼진 VM GB', num: true }, { key: null, label: 'VM 켜짐/꺼짐', num: true }, { key: null, label: '비고' },
+  { key: 'pct', label: '할당률' }, { key: 'off', label: '꺼진 VM GB', num: true }, { key: null, label: 'VM 켜짐/꺼짐', num: true },
+  // v2.868: 호스트·VM CPU/메모리(법인~호스트 = 호스트 합 · VM = 그 VM) · 켜진 GPU VM 의 vCPU·메모리 합
+  { key: 'cores', label: '코어·vCPU', num: true }, { key: 'cpuPct', label: 'CPU', num: true }, { key: 'memGB', label: '메모리 GB', num: true },
+  { key: 'memPct', label: '메모리', num: true }, { key: null, label: 'GPU VM vCPU·GB', num: true },
+  { key: null, label: '비고' },
 ];
 
 function Bar({ pct }) {
@@ -144,7 +148,7 @@ export function GpuAllocTree({ scope }) {
       ) : rows.length === 0 ? (
         <div className="card" style={{ padding: 16 }}><span className="muted">{query ? `‘${query}’ 에 맞는 법인·호스트·VM 이 없습니다` : '고른 법인에 GPU 가 설치된 호스트가 없습니다'}{vcSel.size ? ` (법인 ${[...vcSel].join(', ')} 선택 중)` : ''}.</span></div>
       ) : (
-        <STable className="gpu-alloc-table" minWidth={1180}>
+        <STable className="gpu-alloc-table" minWidth={1620}>
           <thead>
             <tr>
               {COLS.map((c) => (c.key ? (
@@ -173,6 +177,11 @@ export function GpuAllocTree({ scope }) {
                 <td>{r.pct != null || r.depth < 5 ? <Bar pct={r.pct} /> : ''}</td>
                 <td className="num off">{r.off != null ? numText(r.off) : ''}</td>
                 <td className="num">{r.vms}</td>
+                <td className="num">{r.cores != null ? numText(r.cores) : ''}</td>
+                <td className="num">{r.cpuPct != null ? pctText(r.cpuPct) : ''}</td>
+                <td className="num">{r.memGB != null ? numText(r.memGB) : ''}</td>
+                <td className="num">{r.memPct != null ? pctText(r.memPct) : ''}</td>
+                <td className="num">{r.gvmVcpu != null || r.gvmMemGB != null ? `${numText(r.gvmVcpu)} · ${numText(r.gvmMemGB)}` : ''}</td>
                 <td className={`note${r.tone ? ` t-${r.tone}` : ''}`}>{r.note}</td>
               </tr>
             ))}
