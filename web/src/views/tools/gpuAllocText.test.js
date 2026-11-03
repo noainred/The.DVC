@@ -143,3 +143,13 @@ describe('v2.869 내보내기 창 — 법인 모두 선택이 기본 · 법인�
     expect(exportFileName(null, 'vm', true)).toBe('');
   });
 });
+
+describe('v2.871 버그 점검', () => {
+  it('VM 행 정렬 — 꺼진 VM 은 꺼진 VM GB 로, 할당 정렬에서는 값 없음(뒤로)', () => {
+    const offs = [vmr('a', 'a', 8, { powerState: 'POWERED_OFF' }), vmr('b', 'b', 48, { powerState: 'POWERED_OFF' }), vmr('c', 'c', 24, { powerState: 'POWERED_OFF' })];
+    expect(sortSiblings(offs, { key: 'off', dir: 'desc' }).map((x) => x.name)).toEqual(['b', 'c', 'a']);
+    const mix = [vmr('x', 'off', 48, { powerState: 'POWERED_OFF' }), vmr('y', 'on', 8)];
+    expect(sortSiblings(mix, { key: 'alloc', dir: 'desc' }).map((x) => x.name)).toEqual(['on', 'off']);
+    expect(sortSiblings(mix, { key: 'off', dir: 'desc' }).map((x) => x.name)).toEqual(['off', 'on']);
+  });
+});

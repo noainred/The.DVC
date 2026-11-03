@@ -53,9 +53,9 @@ export function bareosRows(digests, vmIds, site, since) {
       const c = String(r.status || '').slice(0, 1);
       if (!B_KIND[c]) continue;
       seen.add(r.jobid);
-      // v2.871 jobKey = 원장 잡 id — 화면의 '로그' 서랍 · '이력 →' 이 그 실행을 바로 연다(로그 라우트가 원장 id 를 받는다 · 예전에는 고정 주소로만 갔다)
+      // v2.872 jobKey = 원장 잡 id — 화면의 '로그' 서랍 · '이력 →' 이 그 실행을 바로 연다(로그 라우트가 원장 id 를 받는다 · 예전에는 고정 주소로만 갔다)
       out.push({ at: r.endedAt, vc: site.id, vcName: site.name, src: 'bareos', kind: B_KIND[c], job: str(j.bareosJob, 128), vm: str(j.vmName, 128), vmId: j.vmId, jobKey: str(j.id, 64), ...(site.relay ? { relay: true } : {}),
-        jobid: Number(r.jobid) || null, msg: `${B_TEXT[c]}${r.level ? ` · ${B_LEVEL[r.level] || str(r.level, 16)}` : ''}${isFin(r.errors) && r.errors > 0 ? ` · 오류 ${r.errors}건` : ''}`, open: 'bareos' });   // v2.871: '— joblog 원문은 Bareos › 실행 이력' 꼬리 뗌 — 원문은 이 행의 [로그] 서랍(꼬리가 열기 칸을 가로 스크롤 뒤로 밀었다 · Chromium 1440)
+        jobid: Number(r.jobid) || null, msg: `${B_TEXT[c]}${r.level ? ` · ${B_LEVEL[r.level] || str(r.level, 16)}` : ''}${isFin(r.errors) && r.errors > 0 ? ` · 오류 ${r.errors}건` : ''}`, open: 'bareos' });   // v2.872: '— joblog 원문은 Bareos › 실행 이력' 꼬리 뗌 — 원문은 이 행의 [로그] 서랍(꼬리가 열기 칸을 가로 스크롤 뒤로 밀었다 · Chromium 1440)
     }
   }
   return out;
@@ -136,10 +136,10 @@ export function volumeRows(items, since, vcName = (x) => x) {
   return out;
 }
 
-/** v2.871 Bareos 실행 묶음 창 — 같은 모양이어도 1시간 넘게 떨어지면 다른 묶음(다른 회차가 섞이지 않게 · 시안 기본값 ①). */
+/** v2.872 Bareos 실행 묶음 창 — 같은 모양이어도 1시간 넘게 떨어지면 다른 묶음(다른 회차가 섞이지 않게 · 시안 기본값 ①). */
 export const SHAPE_WINDOW_MS = 3_600_000;
 /**
- * 같은 모양 묶음(v2.871 — 예전 '같은 원인'). 각 행에 group(묶음 id) · same(묶음 크기)을 단다. 순수.
+ * 같은 모양 묶음(v2.872 — 예전 '같은 원인'). 각 행에 group(묶음 id) · same(묶음 크기)을 단다. 순수.
  *  · Bareos 끝난 실행(jobKey 가 있는 실패 · 경고 · 취소) = 법인 · 결과 · 메시지(레벨 · 오류 수 — VM 이름이 없다)가 같고, 새것부터 훑어 묶음의 가장 옛 행과
  *    SHAPE_WINDOW_MS 안이면 같은 묶음. 잡 이름은 VM 마다 달라 예전 키로는 한 번도 묶이지 않았다(사용자 스크린샷 — OC2 15건이 '—').
  *  · 그 밖(Veeam · 멈춤 의심 · 오류 볼륨 · 수집 오류) = 예전과 같은 키(출처 · 결과 · 잡 · 메시지 앞머리 40자) · 창 없음.

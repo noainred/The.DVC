@@ -1,5 +1,5 @@
 /**
- * Backup › Summary 통합 에러 로그의 로그 서랍(v2.871 · 시안 docs/design/bareos-errlog ①②④ · 사용자 컨펌 2026-11-04 '구현해').
+ * Backup › Summary 통합 에러 로그의 로그 서랍(v2.872 · 시안 docs/design/bareos-errlog ①②④ · 사용자 컨펌 2026-11-04 '구현해').
  *   ErrorLogDrawer — 실패한 Bareos 실행 하나의 작업 로그(운영 화면 LogModal 과 같은 본문 JobLogPanel — 요약 · 타임라인 · 원문). ‹ › 로 지금 목록(따로 보기)
  *     또는 그 묶음(묶어 보기)의 다음 실행으로 옮긴다 · 늦게 온 이전 응답은 본문이 버린다 · '이력 →' 은 진행 · 이력에서 그 VM · jobid 를 연다.
  *   BulkLogDrawer — 같은 모양 묶음의 로그를 서버가 차례로 읽어(POST /tools/bareos-backup/logs/bulk — Director 세션 하나 · 15건) 첫 오류 줄을 대조한 결과.

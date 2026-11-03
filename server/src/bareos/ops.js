@@ -63,7 +63,7 @@ async function cancelOne(s, { jobid, name, pendingJobid = null } = {}) {
 
 /** v2.830 runJobs 한 번에 보내는 잡 수 상한 — 그룹 상한(groups.MAX_MEMBERS)을 부르는 쪽이 이 크기로 나눠 보낸다. */
 export const RUN_JOBS_MAX = 50;
-/** v2.871 묶음 로그 상한(시안 기본값 ② — Director 세션 하나에서 차례로 · 명령마다 콘솔 시한). */
+/** v2.872 묶음 로그 상한(시안 기본값 ② — Director 세션 하나에서 차례로 · 명령마다 콘솔 시한). */
 export const LOGS_MAX = 15;
 /** v2.833 진행 현황판 한 번에 묻는 FD 수(법인 하나 = 보통 FD 하나). */
 export const LIVE_CLIENTS_MAX = 20;
@@ -368,7 +368,7 @@ export const OPS = Object.freeze({
   },
 
   /**
-   * v2.871 통합 에러 로그 '묶음 로그'(시안 docs/design/bareos-errlog ②) — 실패한 실행 여러 건의 작업 로그를 **세션 하나로 순차** 읽어
+   * v2.872 통합 에러 로그 '묶음 로그'(시안 docs/design/bareos-errlog ②) — 실패한 실행 여러 건의 작업 로그를 **세션 하나로 순차** 읽어
    *   **첫 오류 줄만** 돌려준다(원문은 낱건 '로그' 에서 — WAN 으로 수 MB 를 옮기지 않는다). 항목마다 단건 log 와 같은 검사(그 jobid 가 이 잡의 실행인가).
    *   읽기 전용(MUTATING 아님) · 세션째 끊기면 남은 것은 건너뜀 · 시한 신호가 서면 남은 것을 시작하지 않는다. 옛 엣지는 '알 수 없는 작업' 으로 거절한다.
    * @param {{ items: { key:number, jobid:number, name:string }[] }} a

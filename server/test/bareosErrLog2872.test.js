@@ -1,5 +1,5 @@
 /**
- * test/bareosErrLog2871.test.js — v2.871 통합 에러 로그 '로그 서랍 · 묶어 보기'(시안 docs/design/bareos-errlog · 사용자 컨펌 2026-11-04 '구현해').
+ * test/bareosErrLog2872.test.js — v2.872 통합 에러 로그 '로그 서랍 · 묶어 보기'(시안 docs/design/bareos-errlog · 사용자 컨펌 2026-11-04 '구현해').
  *  ① logFirstError — 첫 오류 줄(Fatal error 먼저 · 보고 머리줄 · 보고 칸 제외 · 없으면 null) · 서명(VM · 숫자 지움) · 대조(같은 · 다른 · 없음 · 못 읽음 · 전부 제각각이면 same 없음)
  *  ② withShapeGroups — Bareos 실행은 법인 · 결과 · 메시지가 같고 1시간 안이면 한 묶음(잡 이름이 달라도 — 예전 키로는 한 번도 묶이지 않았다) · 그 밖은 예전 키
  *  ③ bareosRows 에 jobKey(원장 잡 id) · relay
@@ -13,7 +13,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'bareos2871-'));
+const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'bareos2872-'));
 process.env.CONFIG_DIR = tmp;
 process.env.DATA_SOURCE = 'mock';
 process.env.AUTH_ENABLED = 'true';

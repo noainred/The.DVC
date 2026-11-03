@@ -27,7 +27,7 @@ import {
   targetLocks, restoreLine, candidateSummary, driftText, folderOptions, inFolder, pickCap, bulkSummary, OS_FILTERS, osKey, osLabel, osBadgeCls, osMatches,
   osCounts, parseJobReport, parseJobDetail, jobTimeline, HIST_LEVEL_OPTS, HIST_RESULT_OPTS, filterHistory, histResultKey,
 } from './bareosText.js';
-import { LogModal } from './BareosJobLog.jsx';   // v2.871 작업 로그 창 — 통합 에러 로그 서랍과 같은 본문
+import { LogModal } from './BareosJobLog.jsx';   // v2.872 작업 로그 창 — 통합 에러 로그 서랍과 같은 본문
 import { takeBareosHandoff, OPS_SEGMENTS, opsTopOf, opsTabOf, LEGACY_OPS_TAB, takeTargetFocus, legacyOpsHash, runsBoardOpen } from './bareosViewText.js';
 import { targetPolicyText, targetPolicyShort, VERDICT } from './bareosPolicyText.js';   // v2.840 '적용 정책' 한 줄
 
@@ -177,7 +177,7 @@ function TargetsTab({ d, reload, handoff, focus, goRuns, goRestore }) {
   // v2.860: 고른 대상(오른쪽 패널) — 법인 화면이 넘긴 VM 이 있으면 그 대상
   const [sel, setSel] = useState(() => {
     const f = focus?.current;
-    if (!f || f.tab === 'runs') return '';   // v2.871 '이력 →' 넘기기는 진행 · 이력(HistoryTab)이 읽는다
+    if (!f || f.tab === 'runs') return '';   // v2.872 '이력 →' 넘기기는 진행 · 이력(HistoryTab)이 읽는다
     const j = d.jobs.find((x) => x.vmId === f.vmId && (!f.vcenterId || x.vcenterId === f.vcenterId));
     if (focus) focus.current = null;
     return j?.id || '';
@@ -570,7 +570,7 @@ function HistoryTab({ d, focus = null }) {
   const [resultF, setResultF] = useState('');
   const jobsShown = useMemo(() => (dirF ? d.jobs.filter((j) => j.directorId === dirF) : d.jobs), [d.jobs, dirF]);
   // v2.866: 처음 대상은 진행 중인 VM(없으면 첫 대상) — 아래 효과가 위 실행 중 표에서 골라진 VM 을 따라간다(사람이 바꾸기 전까지)
-  // v2.871 통합 에러 로그 '이력 →' — 넘겨받은 VM 을 대상으로(사람이 고른 것과 같이 — 실행 중 표를 따라가지 않는다) · 그 jobid 의 로그를 요약으로 연다
+  // v2.872 통합 에러 로그 '이력 →' — 넘겨받은 VM 을 대상으로(사람이 고른 것과 같이 — 실행 중 표를 따라가지 않는다) · 그 jobid 의 로그를 요약으로 연다
   const [arrived] = useState(() => {
     const f = focus?.current;
     if (!f || f.tab !== 'runs') return null;

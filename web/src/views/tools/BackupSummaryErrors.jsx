@@ -3,8 +3,8 @@
  *   GET /tools/backup-summary/errors?days=1|7|30 — Veeam VM 마지막 결과 · EM 세션(전체 범위 계정만) · Bareos 원장의 끝난 실행 · 멈춤 의심(진행 현황이 신선할 때만) ·
  *   포탈 수집 오류를 서버가 한 모양으로 모은다(veeam/backupErrors.js). 화면은 거르고 그린다.
  *   무거운 집계라 폴링하지 않는다 — 처음 한 번 · 기간을 바꿀 때 · 위 '새로고침'(reloadKey) 때만 · 늦게 온 이전 응답은 버린다.
- *   오류 원문은 관리자 판본만(서버가 가린다) · joblog 원문은 행의 [로그] 서랍(v2.871)에서.
- *   v2.871(시안 docs/design/bareos-errlog · 사용자 컨펌 2026-11-04): Bareos 실행 행의 [로그] = 이 화면의 서랍(BackupErrorDrawer — 운영 화면과 같은 작업 로그 본문) ·
+ *   오류 원문은 관리자 판본만(서버가 가린다) · joblog 원문은 행의 [로그] 서랍(v2.872)에서.
+ *   v2.872(시안 docs/design/bareos-errlog · 사용자 컨펌 2026-11-04): Bareos 실행 행의 [로그] = 이 화면의 서랍(BackupErrorDrawer — 운영 화면과 같은 작업 로그 본문) ·
  *   [이력 →] = 진행 · 이력에서 그 VM · jobid 를 연 채로(예전 고정 주소는 대상 목록의 첫 VM 을 보였다) · 보기 [따로 보기 | 묶어 보기](서버 묶음 id) · 묶음 로그(첫 오류 줄 대조).
  */
 import React, { useCallback, useEffect, useRef, useState } from 'react';

@@ -1171,7 +1171,7 @@ api.post('/tools/bareos-backup/restore-points/bulk', adminOnly, async (req, res)
 });
 
 /**
- * v2.871 통합 에러 로그 '묶음 로그'(시안 docs/design/bareos-errlog ② · 사용자 컨펌 2026-11-04) — body { items:[{ id, jobid }] }(1~LOGS_MAX).
+ * v2.872 통합 에러 로그 '묶음 로그'(시안 docs/design/bareos-errlog ② · 사용자 컨펌 2026-11-04) — body { items:[{ id, jobid }] }(1~LOGS_MAX).
  *   항목마다 범위(조회 — 밖은 없는 대상과 같은 답) · Director 마다 세션 하나(ops.logs — 단건 로그와 같은 '이 잡의 실행인가' 검사) · 법인끼리는 나란히 ·
  *   응답은 첫 오류 줄 + 대조(compareFirstErrors — 같은 오류 · 다른 오류 · 오류 줄 없음 · 못 읽음)만. 원문은 낱건 GET jobs/:id/log 에서.
  *   전체 시한 LOGS_DEADLINE_MS(엣지 인출 + 회신 + 여유) — 중앙 직접 Director 도 끝없이 붙잡지 않는다(v2.870 A5-01 과 같은 규칙).
@@ -1205,7 +1205,7 @@ api.post('/tools/bareos-backup/logs/bulk', adminOnly, async (req, res) => {
       });
     } catch (e) {
       // 옛 엣지는 '알 수 없는 작업' — 낱건 로그 15번으로 돌려보내지 않는다(WAN 왕복 · v2.867 묶음 취소와 같은 규칙) · 낱건 '로그' 는 지금도 된다
-      const why = oldEdgeHint(String(e?.message || e).slice(0, 300), '묶음 로그(v2.871)');
+      const why = oldEdgeHint(String(e?.message || e).slice(0, 300), '묶음 로그(v2.872)');
       for (const i of idx) out[i] = { ...out[i], ok: false, code: e?.code || 'error', reason: why };
     }
   }));

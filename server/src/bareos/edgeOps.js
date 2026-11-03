@@ -37,7 +37,7 @@ export const RESULT_MS = Object.freeze({
   cancel: 120_000, log: 150_000, restore: 210_000, poll: 180_000,
   cancelJobs: 150_000,      // v2.867 그룹 회차 중단(VM 50대 · 잡마다 llist jobid + cancel — 단건 cancel 120초보다 조금 길게)
   restorePoints: 240_000,   // v2.861 묶음 복원 지점(VM 50대 · 잡마다 list jobs 한 번 · 읽기 전용)
-  logs: 240_000,            // v2.871 묶음 로그(실행 15건 · 건마다 llist jobid + list joblog · 첫 오류 줄만 회신 · 읽기 전용)
+  logs: 240_000,            // v2.872 묶음 로그(실행 15건 · 건마다 llist jobid + list joblog · 첫 오류 줄만 회신 · 읽기 전용)
   restores: 330_000,        // v2.861 묶음 복원(VM 마다 jobStatus · list jobs · restore — runJobs 와 같은 예산)
   policy: 240_000,   // v2.839 정책 수집(읽기 전용 명령 7개 · 볼륨 목록이 크다)
   volumes: 90_000,   // v2.840 풀 하나의 볼륨 목록 즉시 조회(읽기 전용)
@@ -178,7 +178,7 @@ export function completeEdgeOp(id, agentName, result) {
  *   시한이 끊으면 ops.restores 의 기존 분류를 탄다(보낸 뒤 끊김 = 'unknown' · 남은 항목 = 'skipped').
  */
 export const RESTORES_DEADLINE_MS = PICKUP_MS + RESULT_MS.restores + MARGIN_MS;
-/** v2.871 묶음 로그 전체 시한 — 같은 모양(엣지 인출 + 회신 + 여유 · 중앙 직접은 이 시한이 세션을 끊는다). */
+/** v2.872 묶음 로그 전체 시한 — 같은 모양(엣지 인출 + 회신 + 여유 · 중앙 직접은 이 시한이 세션을 끊는다). */
 export const LOGS_DEADLINE_MS = PICKUP_MS + RESULT_MS.logs + MARGIN_MS;
 export function relayLimits() { return { pickupMs: PICKUP_MS, secretPickupMs: Math.min(PICKUP_MS, SECRET_TTL_MS), resultMs: { ...RESULT_MS } }; }
 

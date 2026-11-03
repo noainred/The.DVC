@@ -109,8 +109,7 @@ export function vmResOf(v) {
     cpuPct: on ? pctOrNull(v?.cpuUsagePct) : null, memPct: on ? pctOrNull(v?.memUsagePct) : null };
 }
 
-function vmRowOf(v, gb, extra = {}) {
-  const dev = vmGpuDevices(v.gpu);
+function vmRowOf(v, gb, extra = {}, dev = vmGpuDevices(v.gpu)) {
   return {
     id: str(v.id), name: str(v.name), powerState: str(v.powerState),
     mode: str(v.gpu?.type) || (dev.vgpu ? 'vgpu' : 'passthrough'),
@@ -124,9 +123,10 @@ function vmRowOf(v, gb, extra = {}) {
 /**
  * 호스트 한 대 → GPU 행·VM 배치·합계.
  * @param {object} h 스냅샷 호스트
- * @param {object[]} vms 이 호스트의 GPU VM(템플릿 제외)
+ * @param {object[]} vmsIn 이 호스트의 GPU VM(템플릿 제외 — GPU 아닌 패스스루만 가진 VM 은 여기서 뺀다)
  */
-export function buildHostAlloc(h, vms) {
+export function buildHostAlloc(h, vmsIn) {
+  let vms = vmsIn;
   const vcId = str(h.vcenterId);
   const gpus = (Array.isArray(h.gpus) ? h.gpus : []).filter((g) => g && typeof g === 'object').map((g, idx) => {
     const mode = gpuModeOf(g);
@@ -137,6 +137,26 @@ export function buildHostAlloc(h, vms) {
       placement: mode === 'vgpu' ? vmIds != null : mode === 'passthrough' ? pciId != null : false,
       _vmIds: vmIds, vms: [] };
   });
+  // v2.871(버그 점검): VM 의 패스스루 장치 수(parseVmGpu)는 GPU 가 아닌 DirectPath 장치(NIC · HBA 등)까지 센다 — 호스트 패스스루 GPU 목록은
+  //   PCI 디스플레이 클래스(0x03)만이다(soapClient parsePassthruGpus). 그대로 두면 NIC 를 받은 VM 이 'GPU VM' 으로 잡히고 GB 를 몰라
+  //   (allocUnknown) 호스트~법인 예비·할당률이 통째로 비었다. 호스트 패스스루 GPU 가 모두 pciId 를 갖고 VM 의 장치 주소를 모두 읽었을 때만
+  //   주소로 가른다: 호스트 GPU 와 맞는 장치만 GPU 다. 하나라도 모르면(구버전 수집기 · 꺼진 VM 의 동적 DirectPath) 예전처럼 전부 GPU 로 본다(지어내지 않는다).
+  const pciKey = (x) => String(x).toLowerCase();
+  const ptGpuIds = new Set(gpus.filter((g) => g.mode === 'passthrough' && g.pciId).map((g) => pciKey(g.pciId)));
+  const ptAllKnown = gpus.every((g) => g.mode !== 'passthrough' || g.pciId);
+  const devOf = (v) => {
+    const dev = vmGpuDevices(v.gpu);
+    const ids = Array.isArray(v.gpu?.pciIds) ? v.gpu.pciIds.map(pciKey) : null;
+    if (dev.passthrough > 0 && ptAllKnown && ids && ids.length === dev.passthrough) {
+      const gpuPt = ids.filter((id) => ptGpuIds.has(id)).length;
+      return { vgpu: dev.vgpu, passthrough: gpuPt, other: dev.passthrough - gpuPt };
+    }
+    return { ...dev, other: 0 };
+  };
+  const devs = new Map(vms.map((v) => [v, devOf(v)]));
+  // GPU 장치가 하나도 없는 VM(패스스루가 전부 NIC 등)은 이 계층의 대상이 아니다 — 켜짐·꺼짐·미배치 어디에도 넣지 않는다.
+  vms = vms.filter((v) => { const d = devs.get(v); return d.vgpu > 0 || d.passthrough > 0 || !(d.other > 0); });
+  const hasPci = (v, id) => Array.isArray(v.gpu?.pciIds) && v.gpu.pciIds.some((x) => pciKey(x) === pciKey(id));
   const byId = new Map(vms.map((v) => [str(v.id), v]));
   const placed = new Set();
   const t = zeroTotals();
@@ -155,13 +175,13 @@ export function buildHostAlloc(h, vms) {
         const v = byId.get(id);
         if (!v || v.powerState !== ON || placed.has(`${id}|${g.idx}`)) continue;
         const per = vgpuProfileGB(v.gpu?.profile);
-        g.vms.push(vmRowOf(v, per));   // 이 GPU 위의 장치 하나 = 프로파일 GB 하나
+        g.vms.push(vmRowOf(v, per, {}, devs.get(v)));   // 이 GPU 위의 장치 하나 = 프로파일 GB 하나
         placed.add(`${id}|${g.idx}`); placed.add(id);
       }
     } else if (g.mode === 'passthrough' && g.pciId) {
       for (const v of vms) {
-        if (v.powerState !== ON || !Array.isArray(v.gpu?.pciIds) || !v.gpu.pciIds.includes(g.pciId)) continue;
-        g.vms.push(vmRowOf(v, g.capGB, { gbEstimated: true }));
+        if (v.powerState !== ON || !hasPci(v, g.pciId)) continue;
+        g.vms.push(vmRowOf(v, g.capGB, { gbEstimated: true }, devs.get(v)));
         placed.add(str(v.id));
       }
     }
@@ -196,11 +216,11 @@ export function buildHostAlloc(h, vms) {
   const ptUniform = ptCaps.length && ptCaps.every((c) => c != null && c === ptCaps[0]) ? ptCaps[0] : null;
   const unplaced = []; const off = [];
   for (const v of vms) {
-    const dev = vmGpuDevices(v.gpu);
+    const dev = devs.get(v);
     const vg = vgpuGBOf(v.gpu);
     let pt = 0;
     if (dev.passthrough > 0) {
-      const matched = gpus.filter((g) => g.mode === 'passthrough' && g.pciId && Array.isArray(v.gpu?.pciIds) && v.gpu.pciIds.includes(g.pciId));
+      const matched = gpus.filter((g) => g.mode === 'passthrough' && g.pciId && hasPci(v, g.pciId));
       pt = matched.length === dev.passthrough && matched.every((g) => g.capGB != null) ? matched.reduce((s, g) => s + g.capGB, 0)
         : ptUniform != null ? ptUniform * dev.passthrough : null;
     }
@@ -212,13 +232,13 @@ export function buildHostAlloc(h, vms) {
       if (gb == null) t.allocUnknown += 1; else t.allocGB += gb;
       if (!placed.has(str(v.id))) {
         const anyPlacement = gpus.some((g) => g.placement && (dev.vgpu ? g.mode === 'vgpu' : g.mode === 'passthrough'));
-        unplaced.push(vmRowOf(v, gb, { reason: anyPlacement ? 'not-listed' : 'no-placement', gbEstimated: dev.passthrough > 0 }));
+        unplaced.push(vmRowOf(v, gb, { reason: anyPlacement ? 'not-listed' : 'no-placement', gbEstimated: dev.passthrough > 0 }, dev));
         t.unplaced += 1;
       }
     } else {
       t.vmsOff += 1;
       if (gb == null) t.offUnknown += 1; else t.offGB += gb;
-      off.push(vmRowOf(v, gb, { gbEstimated: dev.passthrough > 0 }));
+      off.push(vmRowOf(v, gb, { gbEstimated: dev.passthrough > 0 }, dev));
     }
   }
   const byName = (a, b) => a.name.localeCompare(b.name);
@@ -314,6 +334,20 @@ export function allocCorpRoster(snap, opt = {}, tree = null) {
   }
   for (const v of byId.values()) if (!out.has(v.id) && inScope(v.id)) out.set(v.id, { id: v.id, name: v.name, city: v.city, country: v.country, vc: v });
   return [...out.values()].sort((a, b) => a.id.localeCompare(b.id));
+}
+
+/**
+ * 범위 글자(제목 · 창) · 파일 이름의 범위 부분. v2.871(버그 점검): 고른 법인은 '범위 안에서 고른 법인'(GPU 호스트 없는 법인 포함 —
+ * allocCorpRoster 의 id)으로 센다. 예전에는 계층(GPU 호스트가 있는 법인)만 세어 GPU 없는 법인만 고르면 '조회 범위 안에 없음' 이라고
+ * 거짓으로 적었고 3곳을 골라도 파일 이름이 2corps 였다. 많이 고르면 앞 3곳 + '외 N곳'(제목이 끝없이 길어지지 않게).
+ * @param {{ vcenterId?: string|null, picked?: boolean, tree: object, rosterIds?: string[] }} o
+ */
+export function allocScopeOf({ vcenterId = null, picked = false, tree, rosterIds = [] }) {
+  const list = (ids) => (ids.length <= 4 ? ids.join(', ') : `${ids.slice(0, 3).join(', ')} 외 ${ids.length - 3}곳`);
+  const scopeText = vcenterId ? (tree?.vcenters?.[0]?.name || vcenterId)
+    : picked ? (rosterIds.length ? `법인 ${rosterIds.length}곳 — ${list(rosterIds)}` : '고른 법인(조회 범위 안에 없음)') : '전체 법인';
+  const fileScope = vcenterId || (picked ? (rosterIds.length === 1 ? rosterIds[0] : `${rosterIds.length}corps`) : 'all');
+  return { scopeText, fileScope: String(fileScope).replace(/[^\w.-]+/g, '_').slice(0, 60) };
 }
 
 /** 평면 행(CSV·엑셀 '평면 표') — GPU × VM 한 줄(VM 없는 GPU 도 한 줄) + 배치 안 된 켜진 VM + 꺼진 VM. */

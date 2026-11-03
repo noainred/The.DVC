@@ -118,7 +118,7 @@ export function errorTarget(r) {
  */
 export function errorOpen(r, { canBareos = false, canBareosView = false, admin = false } = {}) {
   if (r.open === 'detail') return { key: 'detail', text: 'Detail' };
-  // v2.871(시안 docs/design/bareos-errlog ①): 그 실행의 로그를 이 화면 서랍에서 — 예전 고정 주소 '실행 이력' 은 대상 목록의 첫 VM 을 보였다(사용자 스크린샷)
+  // v2.872(시안 docs/design/bareos-errlog ①): 그 실행의 로그를 이 화면 서랍에서 — 예전 고정 주소 '실행 이력' 은 대상 목록의 첫 VM 을 보였다(사용자 스크린샷)
   if (r.open === 'bareos') return canBareos ? (r.jobKey && r.jobid ? { key: 'log', text: '로그' } : { key: 'hash', text: '진행 · 이력', hash: '#/tools/bareos-backup/runs' }) : canBareosView ? { key: 'hash', text: 'Bareos', hash: '#/tools/bareos-summary' } : null;
   if (r.open === 'live') return canBareos ? { key: 'hash', text: '진행 현황', hash: '#/tools/bareos-backup/live' } : null;
   if (r.open === 'em') return { key: 'hash', text: 'Veeam', hash: '#/tools/backup-em' };
@@ -126,10 +126,10 @@ export function errorOpen(r, { canBareos = false, canBareosView = false, admin =
   if (r.open === 'pools') return canBareosView ? { key: 'hash', text: '보존 · 풀', hash: '#/tools/bareos-summary/pools' } : null;   // v2.840 오류 볼륨
   return null;
 }
-/** 같은 모양 칸(v2.871 — 예전 '같은 원인') — 2건 이상이면 'N건' · 아니면 '—'. 같은 원인인지는 묶음 로그가 로그를 읽은 뒤에만 말한다. */
+/** 같은 모양 칸(v2.872 — 예전 '같은 원인') — 2건 이상이면 'N건' · 아니면 '—'. 같은 원인인지는 묶음 로그가 로그를 읽은 뒤에만 말한다. */
 export const sameText = (n) => (fin(n) && n > 1 ? `${n}건` : '—');
 
-/* ── v2.871 로그 서랍 · 묶어 보기(시안 docs/design/bareos-errlog · 사용자 컨펌 2026-11-04 — 따로 보기와 묶어 보기 둘 다) ── */
+/* ── v2.872 로그 서랍 · 묶어 보기(시안 docs/design/bareos-errlog · 사용자 컨펌 2026-11-04 — 따로 보기와 묶어 보기 둘 다) ── */
 
 /** '이력 →' — 진행 · 이력에서 그 VM · 그 jobid 의 로그를 연 채로(bareosViewText.saveRunFocus). 운영 권한 · 원장 잡이 있을 때만. */
 export function errorHistory(r, { canBareos = false } = {}) {

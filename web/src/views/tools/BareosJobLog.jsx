@@ -1,5 +1,5 @@
 /**
- * Bareos 작업 로그 보기 — 요약 · 타임라인 · 볼륨 · 원문 세 보기(v2.828~ · v2.871 에 BareosBackupTool.jsx 에서 떼어 냈다).
+ * Bareos 작업 로그 보기 — 요약 · 타임라인 · 볼륨 · 원문 세 보기(v2.828~ · v2.872 에 BareosBackupTool.jsx 에서 떼어 냈다).
  *   쓰는 곳: 운영(백업 대상 패널 · 진행 · 이력)의 LogModal · Backup › Summary 통합 에러 로그의 로그 서랍(BareosLogDrawer — 같은 본문을 서랍에 담는다).
  *   판정 · 문구는 bareosText.js 하나(백틱 금지 · 값이 없으면 '—').
  */
@@ -28,7 +28,7 @@ export const LOG_VIEWS = LOG_TABS;
 export const logViewOf = (v) => (LOG_TABS.some(([k]) => k === v) ? v : 'raw');
 
 /**
- * 작업 로그 본문(v2.871 — 모달 · 서랍이 같은 본문) — 조회 · 보기 줄(요약 · 타임라인 · 원문) · 내용. 보기는 부르는 쪽이 쥔다(mode · onMode — 모달 제목이 보기를 따라간다).
+ * 작업 로그 본문(v2.872 — 모달 · 서랍이 같은 본문) — 조회 · 보기 줄(요약 · 타임라인 · 원문) · 내용. 보기는 부르는 쪽이 쥔다(mode · onMode — 모달 제목이 보기를 따라간다).
  *   job = { id(원장 잡 id), vmName, writable? } · jobid = 그 실행. paneH = 본문 높이(모달 68vh · 서랍은 남은 높이).
  *   늦게 온 이전 응답은 버린다 — 서랍이 ‹ › 로 다른 실행으로 옮기면 앞 요청의 답이 새 실행 위에 그려지지 않게(gen).
  */
@@ -217,7 +217,7 @@ function JobReportView({ rep, detail, truncated, vmName, jobid, onRunFull = null
         <span style={chip(sdErr === null ? null : sdErr === 0)}>SD 오류 {sdErr ?? '—'}</span>
       </div>
 
-      {/* v2.871 서랍(좁은 폭)은 경고·오류를 세부보다 먼저 — 실패 원인을 보러 온 화면이다(시안 docs/design/bareos-errlog ① · Chromium 확인: 640px 에서 세부 아래로 밀려 스크롤해야 보였다) */}
+      {/* v2.872 서랍(좁은 폭)은 경고·오류를 세부보다 먼저 — 실패 원인을 보러 온 화면이다(시안 docs/design/bareos-errlog ① · Chromium 확인: 640px 에서 세부 아래로 밀려 스크롤해야 보였다) */}
       {issuesFirst && <IssueList rep={rep} onRunFull={onRunFull} runBusy={runBusy} />}
 
       {/* ④ 세부 · 백업한 항목 · 볼륨 */}

@@ -1,5 +1,5 @@
 /**
- * bareos/logFirstError.js — v2.871 통합 에러 로그 '묶음 로그'(시안 docs/design/bareos-errlog · 사용자 컨펌 2026-11-04 '구현해').
+ * bareos/logFirstError.js — v2.872 통합 에러 로그 '묶음 로그'(시안 docs/design/bareos-errlog · 사용자 컨펌 2026-11-04 '구현해').
  * 순수 함수 — 작업 로그(jobLog 의 'YYYY-MM-DD HH:MM:SS 본문' 줄)에서 **첫 오류 줄**을 고르고, 여러 실행의 첫 오류 줄을 대조한다.
  *
  *  · 첫 오류 줄 = 첫 'Fatal error:' · 없으면 첫 'Error:'(보고 블록 머리줄 'Error: Bareos bareos-dir 25.1.2 (…):' 와 보고 칸 'SD Errors: 0' 은 제외 —

@@ -1,4 +1,4 @@
-// v2.871 통합 에러 로그 — 로그 서랍 · 따로 보기 · 묶어 보기 · '이력 →' 넘기기(시안 docs/design/bareos-errlog · 사용자 컨펌 2026-11-04 '구현해')
+// v2.872 통합 에러 로그 — 로그 서랍 · 따로 보기 · 묶어 보기 · '이력 →' 넘기기(시안 docs/design/bareos-errlog · 사용자 컨펌 2026-11-04 '구현해')
 import { describe, it, expect } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -13,7 +13,7 @@ const T = Date.UTC(2026, 10, 4, 2, 48);
 const run = (k, at, o = {}) => ({ at, vc: 'oc2', vcName: 'OC2', src: 'bareos', kind: 'fail', job: `pv-54220daf-vm-${k}`, vm: `VM${k}`, vmId: `oc2:vm-${k}`, jobKey: `j${k}`, jobid: 20600 + k, msg: '치명 오류 · Full · 오류 1건', open: 'bareos', ...o });
 const mem = () => { const m = new Map(); return { getItem: (k) => (m.has(k) ? m.get(k) : null), setItem: (k, v) => m.set(k, String(v)), removeItem: (k) => m.delete(k) }; };
 
-describe('v2.871 열기 — 로그 서랍 · 이력 →', () => {
+describe('v2.872 열기 — 로그 서랍 · 이력 →', () => {
   it('Bareos 실행 행은 [로그] + [이력 →] · 권한 · 원장 잡이 없으면 없음', () => {
     const o = { canBareos: true };
     expect(P.errorOpen(run(1, T), o)).toEqual({ key: 'log', text: '로그' });
@@ -47,7 +47,7 @@ describe('v2.871 열기 — 로그 서랍 · 이력 →', () => {
   });
 });
 
-describe('v2.871 묶어 보기', () => {
+describe('v2.872 묶어 보기', () => {
   const rows = [];
   for (let k = 0; k < 17; k++) rows.push(run(k, T - k * 20_000));
   rows.push({ at: T - 30_000, vc: '', vcName: '', src: 'veeam', kind: 'fail', job: '11. H/W Monitoring', vm: 'HM', msg: 'EM 세션 결과 Failed · HM', open: 'em' });
