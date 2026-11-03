@@ -53,7 +53,8 @@ export function bareosRows(digests, vmIds, site, since) {
       const c = String(r.status || '').slice(0, 1);
       if (!B_KIND[c]) continue;
       seen.add(r.jobid);
-      out.push({ at: r.endedAt, vc: site.id, vcName: site.name, src: 'bareos', kind: B_KIND[c], job: str(j.bareosJob, 128), vm: str(j.vmName, 128), vmId: j.vmId,
+      // v2.871 jobKey = 원장 잡 id — 화면의 '로그' 서랍 · '이력 →' 이 그 실행을 바로 연다(로그 라우트가 원장 id 를 받는다 · 예전에는 고정 주소로만 갔다)
+      out.push({ at: r.endedAt, vc: site.id, vcName: site.name, src: 'bareos', kind: B_KIND[c], job: str(j.bareosJob, 128), vm: str(j.vmName, 128), vmId: j.vmId, jobKey: str(j.id, 64), ...(site.relay ? { relay: true } : {}),
         jobid: Number(r.jobid) || null, msg: `${B_TEXT[c]}${r.level ? ` · ${B_LEVEL[r.level] || str(r.level, 16)}` : ''}${isFin(r.errors) && r.errors > 0 ? ` · 오류 ${r.errors}건` : ''} — joblog 원문은 Bareos › 실행 이력`, open: 'bareos' });
     }
   }
@@ -135,17 +136,37 @@ export function volumeRows(items, since, vcName = (x) => x) {
   return out;
 }
 
-/** 같은 원인 — 출처 · 결과 · 메시지 앞머리(40자) · 잡이 같은 행 수(시안 '같은 원인'). 각 행에 same 을 단다. */
-export function withSameCause(rows) {
-  const key = (r) => `${r.src}|${r.kind}|${r.job}|${String(r.msg || '').slice(0, 40)}`;
-  const n = new Map();
-  for (const r of rows) n.set(key(r), (n.get(key(r)) || 0) + 1);
-  return rows.map((r) => ({ ...r, same: n.get(key(r)) }));
+/** v2.871 Bareos 실행 묶음 창 — 같은 모양이어도 1시간 넘게 떨어지면 다른 묶음(다른 회차가 섞이지 않게 · 시안 기본값 ①). */
+export const SHAPE_WINDOW_MS = 3_600_000;
+/**
+ * 같은 모양 묶음(v2.871 — 예전 '같은 원인'). 각 행에 group(묶음 id) · same(묶음 크기)을 단다. 순수.
+ *  · Bareos 끝난 실행(jobKey 가 있는 실패 · 경고 · 취소) = 법인 · 결과 · 메시지(레벨 · 오류 수 — VM 이름이 없다)가 같고, 새것부터 훑어 묶음의 가장 옛 행과
+ *    SHAPE_WINDOW_MS 안이면 같은 묶음. 잡 이름은 VM 마다 달라 예전 키로는 한 번도 묶이지 않았다(사용자 스크린샷 — OC2 15건이 '—').
+ *  · 그 밖(Veeam · 멈춤 의심 · 오류 볼륨 · 수집 오류) = 예전과 같은 키(출처 · 결과 · 잡 · 메시지 앞머리 40자) · 창 없음.
+ *  ⚠ 같은 모양 ≠ 같은 원인 — 원장에는 오류 원문이 없다. 원인 대조는 '묶음 로그'(ops.logs · compareFirstErrors)가 로그를 읽은 뒤에만 한다.
+ */
+export function withShapeGroups(rows) {
+  const list = (Array.isArray(rows) ? rows : []).map((r, i) => ({ r, i })).sort((a, b) => (b.r.at - a.r.at) || (a.i - b.i));
+  const open = new Map();   // 키 → { id, oldest }
+  const gid = new Array(list.length);
+  let seq = 0;
+  for (const { r, i } of list) {
+    const run = r.src === 'bareos' && !!r.jobKey;
+    const key = run ? `run|${r.vc}|${r.kind}|${String(r.msg || '').slice(0, 120)}` : `${r.src}|${r.kind}|${r.job}|${String(r.msg || '').slice(0, 40)}`;
+    const g = open.get(key);
+    if (g && (!run || (isFin(g.oldest) && isFin(r.at) && g.oldest - r.at <= SHAPE_WINDOW_MS))) { gid[i] = g.id; g.oldest = r.at; continue; }
+    const id = `g${++seq}`;
+    open.set(key, { id, oldest: r.at });
+    gid[i] = id;
+  }
+  const size = new Map();
+  for (const id of gid) size.set(id, (size.get(id) || 0) + 1);
+  return (Array.isArray(rows) ? rows : []).map((r, i) => ({ ...r, group: gid[i], same: size.get(gid[i]) }));
 }
 
 /** 정렬(새것 먼저) · 상한 · 수(전부 센다). */
 export function finishErrors(rows, max = ERROR_ROWS_MAX) {
-  const all = withSameCause(rows).sort((a, b) => b.at - a.at || String(a.vcName).localeCompare(String(b.vcName)));
+  const all = withShapeGroups(rows).sort((a, b) => b.at - a.at || String(a.vcName).localeCompare(String(b.vcName)));
   const counts = { all: all.length, fail: 0, warn: 0, stuck: 0, collect: 0, volume: 0, veeam: 0, bareos: 0 };
   for (const r of all) { counts[r.kind]++; if (r.src === 'veeam' || r.src === 'bareos') counts[r.src]++; }
   return { rows: all.slice(0, max), counts, ...(all.length > max ? { truncated: true } : {}) };

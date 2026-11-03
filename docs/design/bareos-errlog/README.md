@@ -1,6 +1,6 @@
 # 설계: 통합 에러 로그 — 실패한 Bareos 실행의 로그를 그 자리에서 보기(따로 · 묶어서)
 
-작성 2026-11-04 (v2.870.0 기준) · 상태 **컨펌 대기** · 시안 캔버스: https://claude.ai/artifact/GdjFFGbUFnFqj8T7pNJCWU
+작성 2026-11-04 (v2.870.0 기준) · 상태 **구현됨 v2.871.0**(컨펌 2026-11-04 '구현해' · 기본값 5가지 그대로 · 검증 표준 — §7) · 시안 캔버스: https://claude.ai/artifact/GdjFFGbUFnFqj8T7pNJCWU
 (아트보드 4장 — 이 폴더의 `*.dc.html` 이 같은 내용의 레퍼런스. 법인명 · VM 이름 · jobid · 오류 글은 가상이고 색 · 글자는 `web/src/styles.css` `:root` 토큰 그대로.
 계정의 ‘Design System’ 아티팩트는 앞 시안(bareos-cancel)과 같이 내용이 비어 있어 쓰지 않았다.)
 
@@ -68,3 +68,16 @@ Backup › Summary › 통합 에러 로그
 3. '같은 원인' 칸 이름 → **'같은 모양'**(대조 전에는 원인이 아니다).
 4. 서랍 폭 640px · 400px 은 전체 화면 시트.
 5. '이력 →' 는 남긴다(이력 표 · 복원 지점이 거기 있다) — 다만 VM · jobid 를 넘긴다.
+
+## 7. 구현(v2.871.0 · 2026-11-04) — 시안과 다른 점(정직 기록)
+
+- 서버: `bareos/logFirstError.js`(첫 오류 줄 · 서명 · 대조 — 순수) · `ops.logs`(LOGS_MAX 15 · 세션 하나 · 이 잡의 실행 검사 · 시한 신호) · `edgeOps RESULT_MS.logs 240초` · `LOGS_DEADLINE_MS` ·
+  `edgeResult.logs`(첫 오류 줄 칸이 없으면 못 읽음) · `POST /tools/bareos-backup/logs/bulk`(조회 범위 — 밖은 없는 대상과 같은 답 · 옛 엣지 안내) · `backupErrors.withShapeGroups`(group · same · 1시간 창) ·
+  에러 행에 `jobKey` · `relay` · 응답에 `relayLimits`. 아키텍처 허용 목록 `portalcheck/archScan.js` 에 새 POST 등재.
+- 웹: 작업 로그 본문을 `BareosJobLog.jsx`(JobLogPanel · LogModal)로 떼어 운영 화면과 서랍이 같이 쓴다 · `BackupErrorDrawer.jsx`(낱건 서랍 · 묶음 로그 서랍) · `BackupSummaryErrors.jsx`(열기 칸 · 보기 세그먼트 · 묶어 보기 표) ·
+  `bareosViewText.saveRunFocus`(VM · jobid) → 진행 · 이력 HistoryTab 이 그 VM 을 고르고 그 jobid 행을 표시하고 로그를 요약으로 연다.
+- **시안과 다른 점**: ① 서랍에 'Full 로 지금 실행' 단추를 두지 않았다 — 에러 행에는 사람별 쓰기 범위가 없다(캐시 키에 쓰기 범위를 넣지 않으려고). '이력에서 열기 →' 로 가면 거기 있다.
+  ② 묶음 로그는 한 번의 요청으로 받아 **진행 막대가 없다**(읽는 중 → 결과) — 건별 진행을 보이려면 스트리밍이 필요해서. ③ 400px 목록은 카드가 아니라 지금 표(가로 스크롤) — 서랍만 전체 화면 시트.
+  ④ ↑↓ 키 이동은 넣지 않았다(전역 키 처리를 두지 않는다) — ‹ › 단추와 Esc 만. ⑤ '원문 복사' 는 서랍 꼬리가 아니라 본문의 원문 보기 · 요약 복사 단추(운영 화면과 같은 자리).
+- 묶어 보기 표는 공용 STable 대신 묶음 단위 정렬(행을 낱개로 섞으면 묶음이 깨진다 — GPU 계층 표와 같은 방식 · 머리 단추 · ▲▼).
+

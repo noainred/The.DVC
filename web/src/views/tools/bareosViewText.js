@@ -289,6 +289,14 @@ export const TARGET_FOCUS_KEY = 'bareos-backup.focus';
 export function saveTargetFocus(vcenterId, vmId, store = globalThis.sessionStorage) {
   try { store?.setItem(TARGET_FOCUS_KEY, JSON.stringify({ vcenterId: String(vcenterId || ''), vmId: String(vmId || ''), at: Date.now() })); return true; } catch { return false; }
 }
+/**
+ * v2.871 통합 에러 로그 '이력 →'(시안 docs/design/bareos-errlog ③) — 진행 · 이력에서 그 VM 을 대상으로 고르고 그 실행(jobid)의 작업 로그를 요약으로 연 채 뜬다.
+ *   예전에는 고정 주소로만 가서 대상 목록의 첫 VM(실패한 VM 과 무관)이 보였다(사용자 스크린샷 2026-11-04). 같은 열쇠 · 한 번 읽고 지운다 · 10분.
+ */
+export function saveRunFocus(vcenterId, vmId, jobid, store = globalThis.sessionStorage) {
+  const n = Number(jobid);
+  try { store?.setItem(TARGET_FOCUS_KEY, JSON.stringify({ vcenterId: String(vcenterId || ''), vmId: String(vmId || ''), jobid: Number.isInteger(n) && n > 0 ? n : null, tab: 'runs', at: Date.now() })); return true; } catch { return false; }
+}
 export function takeTargetFocus(store = globalThis.sessionStorage, now = Date.now()) {
   let raw = null;
   try { raw = store?.getItem(TARGET_FOCUS_KEY); store?.removeItem(TARGET_FOCUS_KEY); } catch { return null; }
@@ -296,7 +304,8 @@ export function takeTargetFocus(store = globalThis.sessionStorage, now = Date.no
   try {
     const j = JSON.parse(raw);
     if (!j || typeof j.vmId !== 'string' || !j.vmId || !(now - Number(j.at) <= HANDOFF_TTL_MS)) return null;
-    return { vcenterId: String(j.vcenterId || ''), vmId: j.vmId };
+    const n = Number(j.jobid);
+    return { vcenterId: String(j.vcenterId || ''), vmId: j.vmId, tab: j.tab === 'runs' ? 'runs' : 'targets', jobid: Number.isInteger(n) && n > 0 ? n : null };
   } catch { return null; }
 }
 /** 법인별 현황이 이어받을 vCenter(통합 표에서 고른 것 — 이 브라우저에만). */

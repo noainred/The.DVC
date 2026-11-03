@@ -91,7 +91,9 @@ describe('v2.838 에러 로그 — 거르기 · 열기 · 서버와 같은 종�
   it('열기 — 권한이 없으면 없음(링크로 막힌 화면에 보내지 않는다)', () => {
     const o = { canBareos: true, canBareosView: true, admin: true };
     expect(P.errorOpen({ open: 'detail' }, {})).toEqual({ key: 'detail', text: 'Detail' });
-    expect(P.errorOpen({ open: 'bareos' }, o).hash).toBe('#/tools/bareos-backup/history');
+    // v2.871: 원장 잡 id · jobid 가 있으면 이 화면의 로그 서랍 · 없으면 진행 · 이력(예전 고정 주소 history 는 대상 목록의 첫 VM 을 보였다 — 사용자 스크린샷)
+    expect(P.errorOpen({ open: 'bareos', jobKey: 'j1', jobid: 7 }, o)).toEqual({ key: 'log', text: '로그' });
+    expect(P.errorOpen({ open: 'bareos' }, o).hash).toBe('#/tools/bareos-backup/runs');
     expect(P.errorOpen({ open: 'bareos' }, { canBareosView: true }).hash).toBe('#/tools/bareos-summary');
     expect(P.errorOpen({ open: 'bareos' }, {})).toBe(null);
     expect(P.errorOpen({ open: 'live' }, {})).toBe(null);

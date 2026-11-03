@@ -16,6 +16,7 @@ import { pruneSelection } from './groupRetention.js';
 import { parseStatusRaw, parseDirStatusRaw, rawHead } from './liveParse.js';
 import { jobNameFor, isFinalStatus, isResourceName } from './names.js';
 import { chainFromHistory, chainIssue } from './restore.js';
+import { firstErrorLine } from './logFirstError.js';
 import { POLICY_CMDS, POLICY_KEYS, NORMALIZE as POLICY_NORMALIZE, deniedText, normVolumeRows } from './policyParse.js';
 
 const fail = (code, msg) => new BareosConsoleError(code, msg);
@@ -62,6 +63,8 @@ async function cancelOne(s, { jobid, name, pendingJobid = null } = {}) {
 
 /** v2.830 runJobs 한 번에 보내는 잡 수 상한 — 그룹 상한(groups.MAX_MEMBERS)을 부르는 쪽이 이 크기로 나눠 보낸다. */
 export const RUN_JOBS_MAX = 50;
+/** v2.871 묶음 로그 상한(시안 기본값 ② — Director 세션 하나에서 차례로 · 명령마다 콘솔 시한). */
+export const LOGS_MAX = 15;
 /** v2.833 진행 현황판 한 번에 묻는 FD 수(법인 하나 = 보통 FD 하나). */
 export const LIVE_CLIENTS_MAX = 20;
 
@@ -362,6 +365,33 @@ export const OPS = Object.freeze({
     if (ci) throw invalid(ci);
     const rid = await runRestore(s, { client, jobids: chain, restoreJob, pluginOptions });
     return { rid, chain };
+  },
+
+  /**
+   * v2.871 통합 에러 로그 '묶음 로그'(시안 docs/design/bareos-errlog ②) — 실패한 실행 여러 건의 작업 로그를 **세션 하나로 순차** 읽어
+   *   **첫 오류 줄만** 돌려준다(원문은 낱건 '로그' 에서 — WAN 으로 수 MB 를 옮기지 않는다). 항목마다 단건 log 와 같은 검사(그 jobid 가 이 잡의 실행인가).
+   *   읽기 전용(MUTATING 아님) · 세션째 끊기면 남은 것은 건너뜀 · 시한 신호가 서면 남은 것을 시작하지 않는다. 옛 엣지는 '알 수 없는 작업' 으로 거절한다.
+   * @param {{ items: { key:number, jobid:number, name:string }[] }} a
+   * @returns {Promise<{ key, ok, firstError?: string|null, lines?: number, state?, status?, code?, message? }[]>}
+   */
+  async logs(s, { items = [] } = {}, { signal = null } = {}) {
+    const out = [];
+    let dead = '';
+    for (const it of (Array.isArray(items) ? items : []).slice(0, LOGS_MAX)) {
+      if (!dead && signal?.aborted) dead = '시한이 지나 남은 실행은 읽지 않았습니다';
+      if (dead) { out.push({ key: it.key, ok: false, code: 'skipped', message: `건너뜀 — ${dead}` }); continue; }
+      try {
+        if (!isResourceName(it.name)) throw invalid('잡 이름이 올바르지 않습니다.');
+        const row = await jobStatus(s, it.jobid);
+        if (!row || row.name !== it.name) throw invalid('이 대상의 실행이 아닙니다.');
+        const log = await jobLog(s, it.jobid, { maxBytes: 128 * 1024, maxLines: 2000 });
+        out.push({ key: it.key, ok: true, firstError: firstErrorLine(log.lines), lines: log.total, state: row.state ?? null, status: row.status ?? null });
+      } catch (e) {
+        out.push({ key: it.key, ok: false, code: e?.code || 'error', message: String(e?.message || e).slice(0, 300) });
+        if (SESSION_DEAD.has(e?.code)) dead = `Director 연결 문제로 멈췄습니다(${e.code})`;
+      }
+    }
+    return out;
   },
 
   /**
