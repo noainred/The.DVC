@@ -3,7 +3,7 @@
  *   GET /tools/backup-summary/errors?days=1|7|30 — Veeam VM 마지막 결과 · EM 세션(전체 범위 계정만) · Bareos 원장의 끝난 실행 · 멈춤 의심(진행 현황이 신선할 때만) ·
  *   포탈 수집 오류를 서버가 한 모양으로 모은다(veeam/backupErrors.js). 화면은 거르고 그린다.
  *   무거운 집계라 폴링하지 않는다 — 처음 한 번 · 기간을 바꿀 때 · 위 '새로고침'(reloadKey) 때만 · 늦게 온 이전 응답은 버린다.
- *   오류 원문은 관리자 판본만(서버가 가린다) · joblog 원문은 열기(Bareos 실행 이력)에서.
+ *   오류 원문은 관리자 판본만(서버가 가린다) · joblog 원문은 행의 [로그] 서랍(v2.871)에서.
  *   v2.871(시안 docs/design/bareos-errlog · 사용자 컨펌 2026-11-04): Bareos 실행 행의 [로그] = 이 화면의 서랍(BackupErrorDrawer — 운영 화면과 같은 작업 로그 본문) ·
  *   [이력 →] = 진행 · 이력에서 그 VM · jobid 를 연 채로(예전 고정 주소는 대상 목록의 첫 VM 을 보였다) · 보기 [따로 보기 | 묶어 보기](서버 묶음 id) · 묶음 로그(첫 오류 줄 대조).
  */
@@ -110,9 +110,9 @@ export default function BackupSummaryErrors({ reloadKey, onOpenDetail }) {
               {/* 공용 STable(규칙 — raw table 금지) · 정렬은 묶음 단위로 이 화면이 한다(sortable=false — STable 은 행을 낱개로 섞어 묶음이 깨진다) */}
               <STable sortable={false} minWidth={1000} wrap={false} style={{ width: '100%' }} data-err-groups="">
                 <thead><tr>{GH.map(([k, h]) => (
-                  <th key={k} style={{ ...PAD, ...(k === 'msg' ? { minWidth: 280 } : {}) }} aria-sort={gsort.key === k ? (gsort.dir === 'asc' ? 'ascending' : 'descending') : 'none'}>
-                    {/* 칸 전체가 단추(글자 폭만 누를 수 있으면 넓은 열은 가운데를 눌러도 정렬되지 않았다 — Chromium 확인) */}
-                    <button type="button" onClick={() => sortBy(k)} style={{ display: 'block', width: '100%', textAlign: 'left', background: 'none', border: 0, padding: 0, color: 'inherit', font: 'inherit', cursor: 'pointer', whiteSpace: 'nowrap' }}>{h}{gsort.key === k ? (gsort.dir === 'asc' ? ' ▲' : ' ▼') : ''}</button>
+                  <th key={k} style={{ padding: 0, ...(k === 'msg' ? { minWidth: 280 } : {}) }} aria-sort={gsort.key === k ? (gsort.dir === 'asc' ? 'ascending' : 'descending') : 'none'}>
+                    {/* 칸 전체가 단추 — th 여백을 0 으로 두고 여백은 단추가 가진다(글자 폭만 · 여백 밖은 눌러도 정렬되지 않았다 — Chromium 2회 확인) */}
+                    <button type="button" onClick={() => sortBy(k)} style={{ display: 'block', width: '100%', boxSizing: 'border-box', textAlign: 'left', background: 'none', border: 0, padding: PAD.padding, color: 'inherit', font: 'inherit', cursor: 'pointer', whiteSpace: 'nowrap' }}>{h}{gsort.key === k ? (gsort.dir === 'asc' ? ' ▲' : ' ▼') : ''}</button>
                   </th>
                 ))}<th style={PAD}>열기</th></tr></thead>
                 <tbody>
@@ -146,7 +146,7 @@ export default function BackupSummaryErrors({ reloadKey, onOpenDetail }) {
                               <td style={PAD} /><td style={PAD} />
                               <td style={{ ...PAD, fontSize: 12 }}><div style={{ maxWidth: 230, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={[tg.main, tg.sub].filter(Boolean).join(' · ')}>{tg.main}{tg.sub ? <span className="muted"> {tg.sub}</span> : null}</div></td>
                               <td style={PAD}><Pill s={ERROR_KIND[m.kind] || ERROR_KIND.collect} /></td>
-                              <td className="muted" style={{ ...PAD, fontSize: 12 }}>{m.msg}</td>
+                              <td className="muted" style={{ ...PAD, fontSize: 12 }}><div style={{ minWidth: 200, whiteSpace: 'normal', overflowWrap: 'anywhere' }}>{m.msg}</div></td>
                               <td style={PAD} />
                               <td style={PAD}>{(() => { const o = errorOpen(m, opt); const h = errorHistory(m, opt);
                                 if (!o) return <span className="muted">—</span>;
@@ -207,7 +207,7 @@ export default function BackupSummaryErrors({ reloadKey, onOpenDetail }) {
         <div className="muted" style={{ padding: '8px 14px', fontSize: 11.5, borderTop: '1px solid var(--border-soft)', lineHeight: 1.6 }}>
           {data.truncated ? `서버가 새것부터 ${fmtNum(data.rows.length)}건만 보냈습니다(수는 전부 셉니다) · ` : ''}
           Veeam VM = 그 VM 의 마지막 task 결과만(그 앞 실패는 B&amp;R 결과에 없습니다) · EM 세션 = {data.sources?.em ? 'EM 이 읽은 최근 실패 · 경고 세션(EM 이 최근 7일만 읽습니다)' : '전체 범위 계정만 봅니다'} ·
-          Bareos = 포탈 원장의 끝난 실행(잡마다 최근 5건 — joblog 원문은 실행 이력에서) · 멈춤 의심 = Bareos 진행 현황이 최근 조회된 법인만 ·
+          Bareos = 포탈 원장의 끝난 실행(잡마다 최근 5건 — 원문은 행의 로그 서랍에서) · 멈춤 의심 = Bareos 진행 현황이 최근 조회된 법인만 ·
           로그 = 그 실행의 작업 로그를 Director 에서 읽어 옆 서랍에(엣지 대행 법인은 엣지가 대신) · 이력 → = 진행 · 이력에서 그 VM · 그 실행을 골라 엽니다 ·
           같은 모양 = Bareos 는 법인 · 결과 · 레벨 · 오류 수가 같고 1시간 안인 실행 수(그 밖은 출처 · 결과 · 잡 · 메시지 앞머리) — 같은 원인인지는 묶어 보기의 묶음 로그가 첫 오류 줄로 대조합니다{data.bareosUnknownSites ? ` · Bareos 원장을 못 읽은 법인 ${fmtNum(data.bareosUnknownSites)}곳은 Bareos 행이 없습니다(모름)` : ''}.
         </div>

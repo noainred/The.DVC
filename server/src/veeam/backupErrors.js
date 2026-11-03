@@ -55,7 +55,7 @@ export function bareosRows(digests, vmIds, site, since) {
       seen.add(r.jobid);
       // v2.871 jobKey = 원장 잡 id — 화면의 '로그' 서랍 · '이력 →' 이 그 실행을 바로 연다(로그 라우트가 원장 id 를 받는다 · 예전에는 고정 주소로만 갔다)
       out.push({ at: r.endedAt, vc: site.id, vcName: site.name, src: 'bareos', kind: B_KIND[c], job: str(j.bareosJob, 128), vm: str(j.vmName, 128), vmId: j.vmId, jobKey: str(j.id, 64), ...(site.relay ? { relay: true } : {}),
-        jobid: Number(r.jobid) || null, msg: `${B_TEXT[c]}${r.level ? ` · ${B_LEVEL[r.level] || str(r.level, 16)}` : ''}${isFin(r.errors) && r.errors > 0 ? ` · 오류 ${r.errors}건` : ''} — joblog 원문은 Bareos › 실행 이력`, open: 'bareos' });
+        jobid: Number(r.jobid) || null, msg: `${B_TEXT[c]}${r.level ? ` · ${B_LEVEL[r.level] || str(r.level, 16)}` : ''}${isFin(r.errors) && r.errors > 0 ? ` · 오류 ${r.errors}건` : ''}`, open: 'bareos' });   // v2.871: '— joblog 원문은 Bareos › 실행 이력' 꼬리 뗌 — 원문은 이 행의 [로그] 서랍(꼬리가 열기 칸을 가로 스크롤 뒤로 밀었다 · Chromium 1440)
     }
   }
   return out;

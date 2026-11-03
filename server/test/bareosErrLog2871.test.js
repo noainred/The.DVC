@@ -70,7 +70,7 @@ test('① ReDoS — 따옴표 · 공백 긴 줄도 선형(길이 2배에 시간 
 
 test('② 같은 모양 묶음 — Bareos 실행은 1시간 창 · 잡 이름 무관 · 그 밖은 예전 키', () => {
   const T = Date.UTC(2026, 10, 4, 2, 48);
-  const run = (k, at, o = {}) => ({ at, vc: 'oc2', vcName: 'OC2', src: 'bareos', kind: 'fail', job: `pv-54220daf-vm-${k}`, vm: `VM${k}`, vmId: `oc2:vm-${k}`, jobKey: `j${k}`, jobid: 20600 + k, msg: '치명 오류 · Full · 오류 1건 — joblog 원문은 Bareos › 실행 이력', open: 'bareos', ...o });
+  const run = (k, at, o = {}) => ({ at, vc: 'oc2', vcName: 'OC2', src: 'bareos', kind: 'fail', job: `pv-54220daf-vm-${k}`, vm: `VM${k}`, vmId: `oc2:vm-${k}`, jobKey: `j${k}`, jobid: 20600 + k, msg: '치명 오류 · Full · 오류 1건', open: 'bareos', ...o });
   const rows = [];
   for (let k = 0; k < 15; k++) rows.push(run(k, T - k * 25_000));
   rows.push(run(20, T - 3 * 3_600_000));                          // 같은 모양이지만 3시간 전 — 다른 묶음
@@ -102,6 +102,7 @@ test('③ bareosRows — jobKey(원장 잡 id) · relay(엣지 대행 법인)', 
   const digests = new Map([['vc-a:vm-1', { id: 'job-1', vmId: 'vc-a:vm-1', vmName: 'web-01', bareosJob: 'pv-a-web', lastRun: { jobid: 31, status: 'f', level: 'F', endedAt: now - 1000 } }]]);
   const [r] = ER.bareosRows(digests, null, { id: 'vc-a', name: 'Seoul', relay: true }, now - 86_400_000);
   assert.deepEqual([r.jobKey, r.jobid, r.relay, r.open], ['job-1', 31, true, 'bareos']);
+  assert.equal(r.msg, '치명 오류 · Full', '원문 안내 꼬리 없음 — 원문은 [로그] 서랍(열기 칸이 가로 스크롤 뒤로 밀렸다)');
   const [r2] = ER.bareosRows(digests, null, { id: 'vc-a', name: 'Seoul' }, now - 86_400_000);
   assert.equal('relay' in r2, false);
 });
