@@ -101,14 +101,15 @@ export function checkState(ids, sel) {
 
 /* ── 실행 결과 문구 ── */
 // v2.830 검토 L3·L4: '보내지 못함'(Director 에 닿기 전 — 인증 정지·접속 실패·옛 엣지)과 '실패'(Director 가 거부)·'결과 모름'(명령 도중 끊김)을 나눈다
-export const FIRE_STATE_TEXT = Object.freeze({ started: '시작', skipped: '건너뜀', notsent: '보내지 못함', failed: '실패', unknown: '결과 모름' });
-export const FIRE_STATE_TONE = Object.freeze({ started: 'ok', skipped: 'muted', notsent: 'bad', failed: 'bad', unknown: 'warn' });
-const FIRE_COUNT_KEYS = Object.freeze([['started', 'started'], ['skipped', 'skipped'], ['notSent', 'notsent'], ['failed', 'failed'], ['unknown', 'unknown']]);
+export const FIRE_STATE_TEXT = Object.freeze({ started: '시작', skipped: '건너뜀', notsent: '보내지 못함', failed: '실패', unknown: '결과 모름', canceled: '취소', halted: '시작 전 멈춤' });
+export const FIRE_STATE_TONE = Object.freeze({ started: 'ok', skipped: 'muted', notsent: 'bad', failed: 'bad', unknown: 'warn', canceled: 'warn', halted: 'muted' });
+const FIRE_COUNT_KEYS = Object.freeze([['started', 'started'], ['skipped', 'skipped'], ['notSent', 'notsent'], ['failed', 'failed'], ['unknown', 'unknown'], ['halted', 'halted']]);
 /** 마지막 실행 한 줄 — '10-31 02:10 예약 · 시작 3 · 건너뜀 1'(0 인 칸은 뺀다). 실행 기록이 없으면 '—'. */
 export function fireText(f) {
   if (!f) return '—';
   const parts = [`${shortTs(f.at)} ${f.trigger === 'timer' ? '예약' : '수동'}`];
   if (f.error) parts.push(`실패 — ${f.error}`);
+  if (f.canceled) parts.push('중단됨');   // v2.865 회차 중단(자세한 수는 canceledText — 카드의 중단 줄)
   for (const [k, st] of FIRE_COUNT_KEYS) if (f[k] > 0) parts.push(`${FIRE_STATE_TEXT[st]} ${f[k]}`);
   if (parts.length === 1) parts.push(`VM ${f.total ?? 0}대`);
   return parts.join(' · ');
@@ -117,7 +118,7 @@ export function fireText(f) {
 export function fireTone(f) {
   if (!f) return 'muted';
   if (f.error || f.failed > 0 || f.notSent > 0) return 'bad';
-  if (f.unknown > 0) return 'warn';
+  if (f.unknown > 0 || f.canceled) return 'warn';   // v2.865 중단된 회차는 경고 색(실패는 아니다 — 사람이 멈췄다)
   return f.started > 0 ? 'ok' : 'muted';
 }
 /** 다음 실행 — 서버가 준 next(서버 현지 시각 기준 ms). */

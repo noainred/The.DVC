@@ -63,6 +63,16 @@ export function demoRunMs() {
   const n = Number(process.env.BAREOS_DEMO_RUN_MS);
   return Number.isFinite(n) && n >= 5_000 && n <= 3_600_000 ? Math.round(n) : 30_000;
 }
+/**
+ * v2.865 데모 취소가 끝나기까지(기본 0 — 바로 A). 화면 검증용 env BAREOS_DEMO_CANCEL_MS(1초~10분) — 실제 FD 는 멈추기까지 수 초~수 분 걸린다(추정).
+ * 그동안 Director 상태는 'is waiting for client to cancel'(dird 문구 모양 · 추정) 이고 카탈로그 행은 아직 R 이다.
+ */
+export function demoCancelMs() {
+  const n = Number(process.env.BAREOS_DEMO_CANCEL_MS);
+  return Number.isFinite(n) && n >= 1_000 && n <= 600_000 ? Math.round(n) : 0;
+}
+/** 취소가 끝났나(데모) — 취소를 받았고 지연이 지났다. */
+const canceledNow = (r, now = Date.now()) => !!r.canceled && now - (r.canceledAt || 0) >= demoCancelMs();
 const S = { jobs: new Map(), runs: new Map(), nextId: FIRST_RUN_ID, deleted: new Set() };   // deleted: v2.831 보관 개수 정리가 지운 jobid(카탈로그에서 사라진 것처럼)
 export function _resetBareosDemoForTest() { S.jobs.clear(); S.runs.clear(); S.nextId = FIRST_RUN_ID; S.deleted.clear(); _seeded = false; _slots = null; _slotsKey = ''; }
 
@@ -143,13 +153,13 @@ function liveRow(jobid, now = Date.now()) {
   if (!r || S.deleted.has(jobid)) return null;
   const el = now - r.startAt;
   const runMs = demoRunMs();
-  const st = r.canceled ? 'A' : el < 4_000 ? 'C' : el < runMs ? 'R' : 'T';
+  const st = canceledNow(r, now) ? 'A' : el < 4_000 ? 'C' : el < runMs || r.canceled ? 'R' : 'T';
   const done = st === 'T' || st === 'A';
   const bytes = st === 'C' ? 0 : Math.round(r.bytes * Math.min(1, el / runMs));
   return {
     jobid, job: `${r.name}.demo`, name: r.name, type: r.type, level: r.level, jobstatus: st,
     starttime: catTime(r.startAt),
-    endtime: done ? catTime(r.startAt + Math.min(el, runMs)) : '',
+    endtime: done ? catTime(st === 'A' ? r.canceledAt + demoCancelMs() : r.startAt + Math.min(el, runMs)) : '',
     jobbytes: bytes, jobfiles: done ? 3 : 0, joberrors: 0, client: r.client || '',
   };
 }
@@ -415,7 +425,7 @@ export function demoCall(cmd, settings, directorId = '') {
       for (const id of ids) if (rowById(id)) S.deleted.add(id);
       return { deleted: { jobids: ids } };
     }
-    case 'cancel': { const r = S.runs.get(Number(kv.jobid)); if (!r) fail('No Jobs running.'); r.canceled = true; return { cancel: { jobid: Number(kv.jobid) } }; }
+    case 'cancel': { const r = S.runs.get(Number(kv.jobid)); if (!r) fail('No Jobs running.'); if (!r.canceled) { r.canceled = true; r.canceledAt = Date.now(); } return { cancel: { jobid: Number(kv.jobid) } }; }
     case 'enable': case 'disable': {   // 모르는 잡은 실제처럼 거부한다(ua_cmds.cc — 'Job "X" not found.')
       const j = S.jobs.get(kv.job);
       if (!j) fail(`Job "${kv.job}" not found.`);
@@ -432,11 +442,11 @@ export function demoDirStatus(now = Date.now()) {
   const lines = ['bareos-dir Version: 25.0.4 (데모)', 'Running Jobs:', ' JobId  Type Level     Files     Bytes  Name              Status', '======================================================================'];
   let any = false;
   for (const [jobid, r] of S.runs) {
-    if (r.canceled || S.deleted.has(jobid)) continue;
+    if (canceledNow(r, now) || S.deleted.has(jobid)) continue;
     const el = now - r.startAt;
-    if (el >= demoRunMs()) continue;
+    if (el >= demoRunMs() && !r.canceled) continue;
     any = true;
-    const st = el < 4_000 ? 'is waiting execution' : 'is running';
+    const st = r.canceled ? 'is waiting for client to cancel' : el < 4_000 ? 'is waiting execution' : 'is running';
     lines.push(`${String(jobid).padStart(6)}  ${r.type === 'R' ? 'Rest' : 'Back'} ${r.level === 'F' ? 'Full' : 'Incr'}          0         0  ${r.name}.${catTime(r.startAt).replace(' ', '_').replace(/:/g, '.')}_01 ${st}`);
   }
   if (!any) lines.push('No Jobs running.');
@@ -450,7 +460,7 @@ export function demoFdStatus(client, now = Date.now()) {
   const lines = [`${client} Version: 25.0.4 (데모)`, 'Running Jobs:'];
   let any = false;
   for (const [jobid, r] of S.runs) {
-    if (r.type !== 'B' || r.canceled || S.deleted.has(jobid)) continue;
+    if (r.type !== 'B' || canceledNow(r, now) || S.deleted.has(jobid)) continue;
     if (r.client && r.client !== client) continue;
     const el = now - r.startAt;
     if (el < 4_000 || el >= demoRunMs()) continue;   // 막 보낸 실행은 Director 만 안다('is waiting execution' — demoDirStatus 와 맞춘다)

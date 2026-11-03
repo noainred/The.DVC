@@ -14,7 +14,8 @@ import { directorById, directorConn, siteMissing } from '../../bareos/settings.j
 import { jobDigests, MAX_JOBS, registryLoadError } from '../../bareos/registry.js';
 import { listGroups, getGroup, addGroup, updateGroup, deleteGroup, checkGroupInput, groupsLoadError, MAX_MEMBERS, MAX_GROUPS, FIRES_KEEP } from '../../bareos/groups.js';
 import { nextSlot, scheduleText, slotKey, CATCHUP_MS, LEVELS } from '../../bareos/groupSchedule.js';
-import { queueGroupRun, groupRunning, groupPruning, previewPrune } from '../../bareos/groupRunner.js';
+import { queueGroupRun, groupRunning, groupPruning, previewPrune, cancelGroupRun, cancelPlan, groupCanceling, groupProgress } from '../../bareos/groupRunner.js';
+import { cancelInfo, CANCEL_WAIT_MS } from '../../bareos/cancelState.js';
 import { keepText, keepOtpReasons, normKeep, KEEP_MIN, KEEP_MAX, KEEP_PRESETS } from '../../bareos/groupRetention.js';
 import { bareosVmView } from '../../bareos/vmView.js';
 import { getMarks, marksUnreadable } from '../../veeam/backupMarks.js';
@@ -43,8 +44,10 @@ export function groupView(g, now = Date.now()) {
   const clockAhead = !!g.lastKey && g.lastKey > slotKey(now);
   return {
     ...g, keep: g.keep ?? null, fires: Array.isArray(g.fires) ? g.fires : [], lastPrune: g.lastPrune ?? null, keepText: keepText(g.keep ?? null),
-    scheduleText: scheduleText(g.schedule), next: next ? { at: next.at, key: next.key, level: next.level } : null, running: groupRunning(g.id),
+    scheduleText: scheduleText(g.schedule), next: next ? { at: next.at, key: next.key, level: next.level, ...(g.skipKey && g.skipKey === next.key ? { skip: true } : {}) } : null, running: groupRunning(g.id),
     ...(groupPruning(g.id) ? { pruning: true } : {}), ...(clockAhead ? { clockAhead: true } : {}),
+    // v2.865 회차 중단 — 처리 중 요청 · 보내는 진행(보냄 n / N · 줄 대기)
+    canceling: groupCanceling(g.id), progress: groupProgress(g.id),
   };
 }
 
@@ -202,6 +205,7 @@ api.get('/tools/bareos-backup/groups/tree', adminOnly, (req, res) => {
       job: j ? { id: j.id, schedule: j.schedule || '', level: j.level || '', enabled: j.enabled !== false } : null,
       eligible: j ? true : el.ok, ...(j || el.ok ? {} : { reason: el.reason }),
       groupId: groupOf.get(vm.id) || '',
+      ...(j && cancelInfo(j, now) ? { cancel: cancelInfo(j, now) } : {}),   // v2.865 멈추는 중(취소를 보낸 실행)
     });
   }
   // 잡은 있는데 인벤토리에 없는 VM(지워졌거나 옮겨짐) — 그룹에서 빼거나 원장을 정리할 수 있게 보인다
@@ -224,7 +228,7 @@ api.get('/tools/bareos-backup/groups/tree', adminOnly, (req, res) => {
     writable: bareosAccess(req.user, vcenterId) === 0, marksKnown,
     groupsLoadError: !!groupsLoadError(), registryLoadError: !!registryLoadError(),
     limits: { maxMembers: MAX_MEMBERS, maxGroups: MAX_GROUPS, firesKeep: FIRES_KEEP, maxBulk: MAX_BULK, jobsLeft: Math.max(0, MAX_JOBS - jobDigests().length) },
-    levels: LEVELS, keepLimits: { min: KEEP_MIN, max: KEEP_MAX, presets: KEEP_PRESETS }, relayLimits: relayLimits(),   // 화면이 저장(등록)·실행을 기다리는 시간 — 숫자를 화면에 박지 않는다
+    levels: LEVELS, keepLimits: { min: KEEP_MIN, max: KEEP_MAX, presets: KEEP_PRESETS }, relayLimits: relayLimits(), cancelWaitMs: CANCEL_WAIT_MS,   // 화면이 저장(등록)·실행을 기다리는 시간 — 숫자를 화면에 박지 않는다
     // v2.840 그룹 카드 '적용 풀 · 보존' — 그 Director 정책 수집본(접속하지 않는다 · 수집 전이면 null). 풀 = 그룹 풀 → 법인 매핑 풀(잡 기본값).
     //   dupVms = 그룹 예약이 켜져 있고 잡이 Director 스케줄(수집본)에도 든 멤버 수 — 두 곳에서 돌 수 있다(jobPolicyResolver.dup · 그 Director 수집본이 없으면 0 이 아니라 null)
     vms, groups: (() => {
@@ -240,7 +244,8 @@ api.get('/tools/bareos-backup/groups/tree', adminOnly, (req, res) => {
           for (const id of g.vmIds) { const j = jobs.get(id); if (!j) continue; const r = resolve(j, null); if (r.collected) known = true; if (r.dup) n++; }
           dupVms = known ? n : null;
         }
-        return { ...groupView(g, now), poolPolicy: pp ? { ...pp, from: g.pool ? 'group' : 'site' } : null, dupVms };
+        // v2.865 회차 중단 계획(확인 창의 수 · '회차 중단…' 버튼을 열지) — 원장 · 실행 표만(Director 에 접속하지 않는다)
+        return { ...groupView(g, now), poolPolicy: pp ? { ...pp, from: g.pool ? 'group' : 'site' } : null, dupVms, stop: cancelPlan(g, jobs, now) };
       });
     })(),
   });
@@ -343,6 +348,31 @@ api.post('/tools/bareos-backup/groups/:id/prune-preview', adminOnly, async (req,
     const r = await previewPrune(g.id, { keep, demoOnly: isDemoGuest(req.user) });
     res.json({ ok: true, groupId: g.id, at: Date.now(), ...r });
   } catch (e) { sendBareosErr(res, e); }
+});
+
+/**
+ * v2.865 회차 중단 — body { confirmName, includeScheduled?, skipNext? }(시안 docs/design/bareos-cancel/ ③ · 사용자 결정 기본값: 이번 회차만 · 이름 재입력 · OTP 없음).
+ * 멈춤은 데이터를 지우지 않는다(취소 · 보내지 않음만) — 그래서 본인 OTP 는 묻지 않고 그룹 이름을 다시 적게 한다(잘못 누름 방지).
+ * 단계(줄 대기 · 보내는 중 · Director 실행 중)마다 하는 일이 다르다(groupRunner.cancelGroupRun). 취소는 뒤에서 보내고 바로 202 — 화면이 다시 읽어 따라간다.
+ * 범위: 쓰기 범위(조회 밖 404 → 쓰기 밖 403 — groupFor). 데모 계정은 관리자 라우트(adminOnly)라 닿지 않는다.
+ */
+api.post('/tools/bareos-backup/groups/:id/cancel', adminOnly, (req, res) => {
+  const g = groupFor(req, res); if (!g) return;
+  const name = String(req.body?.confirmName ?? '').trim();
+  if (name !== g.name) return res.status(400).json({ ok: false, reason: `확인을 위해 그룹 이름(‘${g.name}’)을 그대로 적으세요.` });
+  const includeScheduled = req.body?.includeScheduled === true;
+  const skipNext = req.body?.skipNext === true;
+  let r;
+  try {
+    r = cancelGroupRun(g.id, { by: req.user?.username || '', includeScheduled, skipNext });
+  } catch (e) {
+    const code = e?.code === 'not-found' ? 404 : e?.code === 'unavailable' ? 503 : e?.code === 'busy' || e?.code === 'idle' ? 409 : 400;
+    return res.status(code).json({ ok: false, reason: String(e?.message || e).slice(0, 400), ...(e?.code === 'idle' ? { idle: true } : {}) });
+  }
+  audit(req, 'Bareos 그룹 회차 중단 요청', `${g.vcenterId}/${g.name}`,
+    `단계 ${({ queued: '줄 대기', sending: '보내는 중', running: 'Director 실행 중' })[r.phase] || r.phase} · ${includeScheduled ? '그룹 VM 의 실행 중 전부' : '이번 회차만'} · 취소 대상 ${r.fire}${r.extra ? ` + 그 밖 ${r.extra}` : ''}${r.halted ? ` · 시작 전 멈춤 ${r.halted}` : ''}${r.skipKey ? ` · 다음 회차 ${r.skipKey} 건너뜀` : skipNext ? ' · 다음 회차 없음(스케줄 꺼짐)' : ''}`);
+  r.done.catch((e) => console.warn(`[bareos] 백업 그룹 ‘${g.name}’ 회차 중단 실패: ${String(e?.message || e).slice(0, 200)}`));
+  res.status(202).json({ ok: true, phase: r.phase, fire: r.fire, extra: r.extra, halted: r.halted, skipKey: r.skipKey || '', group: groupView(getGroup(g.id) || g) });
 });
 
 /**

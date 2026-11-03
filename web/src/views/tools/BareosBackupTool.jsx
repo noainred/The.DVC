@@ -15,6 +15,8 @@ import BareosGroupsTab from './BareosGroupsTab.jsx';
 import BareosLiveTab from './BareosLiveTab.jsx';
 import BareosRunDetail from './BareosRunDetail.jsx';
 import BareosRestore from './BareosRestore.jsx';
+import { JobCancelModal } from './BareosCancelModals.jsx';
+import { cancelChip, cancelButton } from './bareosCancelText.js';
 import { finishText, restoreIsOpen, snapshotChip, SNAPSHOT_TITLE, fullAfterRestoreHint } from './bareosRestoreText.js';
 import { Note, ReadGuide, Segs, Dot, FilterChip } from './BareosBits.jsx';
 import {
@@ -213,7 +215,13 @@ function TargetsTab({ d, reload, handoff, focus, goRuns, goRestore }) {
     finally { setBusyIds((b) => { const n = new Set(b); n.delete(j.id); return n; }); }
   };
   const run = (j) => { setRunFor(null); act(j, () => postJson(`${BASE}/jobs/${enc(j.id)}/run`, runLevel ? { level: runLevel } : {}, mut(j, 'runJob')), (r) => `‘${j.vmName}’ 백업을 시작했습니다(jobid ${r.jobid}). 진행은 이 표와 진행 · 이력에서 보입니다.`, '백업 실행'); };
-  const cancel = (j, jobid) => { if (window.confirm(`‘${j.vmName}’ 의 실행 중 백업(jobid ${jobid})을 취소할까요?`)) act(j, () => postJson(`${BASE}/jobs/${enc(j.id)}/cancel`, { jobid }, mut(j, 'cancel')), (r) => r.note || '취소를 요청했습니다(Director 가 멈추기까지 시간이 걸릴 수 있습니다).', '취소'); };
+  // v2.865 취소 확인 창(시안 ②) — 창은 확인만, 요청은 act(처리 중 잠금 · 결과 모름 문구가 다른 동작과 같다)
+  const [cancelOf, setCancelOf] = useState(null);
+  const cancel = (j, jobid) => setCancelOf({ j, jobid });
+  const sendCancel = () => {
+    const { j, jobid } = cancelOf; setCancelOf(null);
+    act(j, () => postJson(`${BASE}/jobs/${enc(j.id)}/cancel`, { jobid }, mut(j, 'cancel')), (r) => r.note || `‘${j.vmName}’ 실행(jobid ${jobid})에 취소를 보냈습니다 — Director 가 멈추면 결과가 ‘취소’ 로 남습니다(수 초~수 분).`, '취소');
+  };
   const toggle = (j) => act(j, () => patchJson(`${BASE}/jobs/${enc(j.id)}`, { enabled: !j.enabled }, mut(j, 'setEnabled')), () => (j.enabled ? '비활성화했습니다 — Bareos 의 비활성화는 Director 를 reload·재시작하면 풀리므로 포탈이 상태 대조 때마다 다시 끕니다.' : '활성화했습니다.'), j.enabled ? '비활성화' : '활성화');
   const remove = (j) => {
     if (!window.confirm(`‘${j.vmName}’ 을(를) 백업 대상에서 지울까요?\nDirector 의 잡은 비활성화하고 정의 파일은 남습니다(Director 를 reload 하면 다시 켜지므로 포탈이 대조 때마다 다시 끕니다 — 영구히 멈추려면 정의 파일을 지우세요). 백업 데이터는 지우지 않습니다.`)) return;
@@ -289,6 +297,7 @@ function TargetsTab({ d, reload, handoff, focus, goRuns, goRestore }) {
                         {j.demo && <span className="badge amber" style={{ marginLeft: 6 }}>데모</span>}
                         {j.drift && <span className="badge amber" style={{ marginLeft: 6 }} title={driftText(j.drift)}>{j.drift === 'missing' ? '인벤토리에 없음' : '등록 뒤 바뀜'}</span>}
                         {snapshotChip(j.snapshotCount) && <span className="badge amber" style={{ marginLeft: 6 }} title={SNAPSHOT_TITLE}>{snapshotChip(j.snapshotCount)}</span>}
+                        {j.cancel && (() => { const ch = cancelChip(j.cancel, { waitMs: d.cancelWaitMs }); return <span className="badge amber" style={{ marginLeft: 6 }} title={ch.title}>{ch.text}</span>; })()}
                         <div className="muted" style={{ fontSize: 11.5, maxWidth: 280, whiteSpace: 'normal', overflowWrap: 'anywhere' }}>{j.dc} · {j.folder}</div>
                       </td>
                       <td data-sort={`${j.vcenterId} ${dirName(j.directorId)}`} style={{ fontSize: 12.5 }}>{j.vcenterId}<div className="muted" style={{ fontSize: 11.5 }}>{dirName(j.directorId)}</div></td>
@@ -326,12 +335,13 @@ function TargetsTab({ d, reload, handoff, focus, goRuns, goRestore }) {
                 <div className="flex" style={{ gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
                   <b style={{ fontSize: 16, overflowWrap: 'anywhere' }}>{j.vmName}</b>
                   {c.badge ? <span className={`badge ${c.badge.cls}`}>{c.badge.label}</span> : null}
+                  {(() => { const ch = cancelChip(j.cancel, { waitMs: d.cancelWaitMs }); return ch ? <span className="badge amber" title={ch.title}>{ch.text}</span> : null; })()}
                   <span className={`badge ${osBadgeCls(osKey(j))}`} style={{ fontSize: 10 }}>{osLabel(osKey(j))}</span>
                   <button type="button" className="tab" aria-label="닫기" onClick={() => setSel('')} style={{ padding: '2px 8px', fontSize: 12, marginLeft: 'auto' }}>닫기</button>
                 </div>
                 <div style={{ ...ROW, gap: 6 }}>
                   {isRun
-                    ? <button type="button" className="logout-btn" style={{ ...BTN, color: 'var(--red)' }} disabled={!!lk.cancel} title={lk.cancel || undefined} onClick={() => cancel(j, liveJobid)}>취소</button>
+                    ? (() => { const cb = cancelButton({ running: true, cancel: j.cancel, lockReason: lk.cancel }); return <button type="button" className="logout-btn" style={{ ...BTN, color: cb.disabled ? undefined : 'var(--red)' }} disabled={cb.disabled} title={cb.title} onClick={() => cancel(j, liveJobid)}>{cb.label}</button>; })()
                     : runFor === j.id
                       ? <>
                         <Select className="input" sort={false} value={runLevel} onChange={(e) => setRunLevel(e.target.value)} style={{ minWidth: 0, width: 168, padding: '3px 6px', fontSize: 12 }} aria-label="실행 레벨">
@@ -372,6 +382,11 @@ function TargetsTab({ d, reload, handoff, focus, goRuns, goRestore }) {
         ‘결과 모름’ 은 엣지 대행 · 브라우저 시한으로 응답을 받지 못한 것입니다 — 실패로 단정하지 않으니 목록 · 진행 · 이력에서 확인한 뒤 다시 하세요.
       </ReadGuide>
       {logOf && <LogModal job={logOf.job} jobid={logOf.jobid} view={logOf.view} onClose={() => setLogOf(null)} onStateChanged={reload} dir={dirs.find((x) => x.id === logOf.job.directorId)} limits={d.relayLimits} />}
+      {cancelOf && (() => {
+        const j = cancelOf.j;
+        const run = j.pending?.jobid === cancelOf.jobid ? j.pending : j.lastRun;
+        return <JobCancelModal vmName={j.vmName} jobid={cancelOf.jobid} level={levelLabel(run?.level || '')} since={run?.since ?? run?.startedAt ?? null} stuck={!!j.cancel?.stuck} waitMs={d.cancelWaitMs} onConfirm={sendCancel} onClose={() => setCancelOf(null)} />;
+      })()}
     </div>
   );
 }

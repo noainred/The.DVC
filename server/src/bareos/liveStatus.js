@@ -14,7 +14,7 @@ import { jobDigests } from './registry.js';
 import { onDirector, isDemoActive, effectiveSettings } from './service.js';
 import { jobDirectorId, directorById } from './settings.js';
 import { hasPending } from './edgeOps.js';
-import { isFinalStatus } from './names.js';
+import { runningRunOf } from './cancelState.js';
 import { rateNowOf } from './liveParse.js';
 import { LIVE_CLIENTS_MAX } from './ops.js';
 import { poolSettled } from '../util/pool.js';
@@ -33,15 +33,8 @@ const _live = new Map();
 /** 법인(vCenter id) → [{ at, rate|null, jobs }] — Director 하나가 법인 여럿을 맡아도 법인마다 따로(합계가 겹쳐 세지지 않게 · Chromium 확인) */
 const _hist = new Map();
 
-/** 이 잡이 지금 도는가(포탈이 시작한 실행 pending · Director 스케줄이 돌린 실행은 lastRun 이 끝나지 않은 상태). */
-export function runningRunOf(j) {
-  if (j?.pending?.jobid) return { jobid: j.pending.jobid, state: j.pending.state || 'queued', level: j.pending.level || '', since: j.pending.since || null, trigger: j.pending.trigger || '', by: j.pending.by || '' };
-  const L = j?.lastRun;
-  if (L?.jobid && L.status && !isFinalStatus(L.status) && ['running', 'queued', 'waiting'].includes(L.state)) {
-    return { jobid: L.jobid, state: L.state, level: L.level || '', since: L.startedAt ?? null, trigger: 'schedule', by: '' };
-  }
-  return null;
-}
+/** 이 잡이 지금 도는가 — v2.865 판정은 cancelState.js 하나(취소 · 그룹 중단이 같은 판정을 쓴다). 예전 import 경로를 위해 다시 내보낸다. */
+export { runningRunOf };
 
 /** Director 마다 실행 중 잡과 물을 FD 목록(설정의 법인 FD + 잡의 FD). 데모 잡은 데모 Director 일 때만(③). */
 export function liveTargets(jobs, settings, demo) {

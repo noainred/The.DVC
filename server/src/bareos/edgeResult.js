@@ -129,6 +129,16 @@ export const VALUE = Object.freeze({
   // v2.840 볼륨 목록 즉시 조회 — 아는 칸 · 행 상한(멱등 정규화를 중앙이 다시 돈다)
   volumes: (v) => normVolumeRows(v),
   cancel: (v) => { const r = obj(v); return r.final ? { final: rowOut(r.final) } : r.cleared ? { cleared: true } : { canceled: bool(r.canceled) }; },
+  // v2.865 묶음 취소 — 항목마다 단건과 같은 모양. 성공인데 canceled · final · cleared 가 하나도 없으면 그 항목은 '결과 모름'(취소가 갔는지 모른다)
+  cancelJobs: (v) => arr(v).slice(0, 500).map((x0) => {
+    const x = obj(x0);
+    const key = Number.isInteger(x.key) && x.key >= 0 && x.key < 1_000_000 ? x.key : -1;
+    if (!bool(x.ok)) return { key, ok: false, ...(x.code ? { code: str(x.code, 40) } : {}), ...(x.message ? { message: str(x.message, 300) } : {}) };
+    if (x.final) { const row = rowOut(x.final); if (row?.jobid) return { key, ok: true, final: row }; }
+    if (x.cleared === true) return { key, ok: true, cleared: true };
+    if (x.canceled === true) return { key, ok: true, canceled: true };
+    return { key, ok: false, code: 'unknown', message: '엣지가 결과 없이 성공을 회신했습니다 — 취소가 갔는지 알 수 없습니다. Director 에서 확인하세요.' };
+  }),
   log: (v) => {
     const r = obj(v); const l = obj(r.log);
     return { log: { lines: arr(l.lines).slice(-4000).map((x) => str(x, 2000)), truncated: bool(l.truncated), total: nonNeg(l.total) }, row: rowOut(r.row) };

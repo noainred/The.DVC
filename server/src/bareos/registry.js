@@ -7,6 +7,7 @@
  *   bareosJob, client, storage, pool, schedule, level, // Director 에 만든 잡(이름은 names.jobNameFor)
  *   enabled, createdBy, createdAt, demo?,
  *   pending: { jobid, since, level, by, trigger } | null,   // 포탈이 실행했고 아직 끝나지 않은 백업
+ *   cancelReq: { jobid, at, by, via:'single'|'group' } | null,   // v2.865 그 실행에 취소를 보냈다(판정은 cancelState.js — 지금 도는 실행일 때만 유효)
  *   lastRun: { jobid, status, state, level, startedAt, endedAt, bytes, files, errors, checkedAt } | null,
  *   lastError: { at, message } | null,
  *   missingInDirector: boolean,                         // Director `.jobs` 에 없으면 true(누가 conf 를 지웠다)
@@ -29,6 +30,7 @@ import { config } from '../config.js';
 import { atomicWriteFileSync, preserveCorrupt, safeLoadText } from '../util/atomicWrite.js';
 import { makeLoadError } from '../util/registryCore.js';
 import { isFinalStatus, statusOf } from './names.js';
+import { cancelTracked } from './cancelState.js';
 import { DEFAULT_DIRECTOR_ID } from './settings.js';
 
 export const FILE_NAME = 'bareos-jobs.json';
@@ -129,6 +131,7 @@ export function jobDigests() {
     client: j.client, storage: j.storage, pool: j.pool, schedule: j.schedule, level: j.level, enabled: j.enabled !== false, demo: !!j.demo,
     createdBy: j.createdBy, createdAt: j.createdAt, missingInDirector: !!j.missingInDirector,
     pending: j.pending ? { ...j.pending } : null, lastRun: j.lastRun ? { ...j.lastRun } : null, lastError: j.lastError ? { ...j.lastError } : null,
+    cancelReq: j.cancelReq ? { ...j.cancelReq } : null,
     lastOkAt: lastOkAt(j), lastRate: j.lastRate ? { ...j.lastRate } : null,
     recentRuns: (Array.isArray(j.finishedRuns) ? j.finishedRuns : []).slice(-5).map((r) => ({ ...r })),
   }));
@@ -240,7 +243,7 @@ export function patchJob(id, patch) {
   const db = load();
   const j = db.jobs.find((x) => x.id === id);
   if (!j) return null;
-  const allowed = ['enabled', 'pending', 'lastRun', 'lastError', 'missingInDirector', 'schedule', 'level'];
+  const allowed = ['enabled', 'pending', 'lastRun', 'lastError', 'missingInDirector', 'schedule', 'level', 'cancelReq'];
   const before = [];
   for (const k of allowed) if (Object.hasOwn(patch, k)) { before.push([k, Object.hasOwn(j, k), j[k]]); j[k] = patch[k]; }
   // v2.847 D2-7(2회차 점검 — 재현): 파일에 못 쓰면 메모리도 되돌린다(addJob 과 같은 계약 — 예전에는 화면은 바뀐 값, 재시작하면 옛 값이었다)
@@ -324,6 +327,14 @@ export function markPending(id, { jobid, level, by, trigger = 'manual' }) {
 }
 
 /**
+ * v2.865 취소를 보냈다(Director 가 cancel 을 받았다) — 그 실행이 끝나면(applyRunRow) 지운다. 화면의 '멈추는 중' · '멈추지 않음' 은 cancelState.cancelInfo 가 판정한다.
+ * @param {{ jobid:number, by?:string, via?:'single'|'group', at?:number }} c
+ */
+export function markCancelReq(id, { jobid, by = '', via = 'single', at = Date.now() }) {
+  return patchJob(id, { cancelReq: { jobid, at, by: String(by || '').slice(0, 80), via: via === 'group' ? 'group' : 'single' } });
+}
+
+/**
  * 카탈로그 행으로 결과 반영(폴러). 끝난 상태면 pending 을 내리고 lastRun 으로 옮긴다.
  * lastRun 은 **더 새 jobid 만** 덮는다(오래된 행이 최신 결과를 되돌리지 않게).
  * @param {object} row  director.normalizeJobRow 결과
@@ -359,6 +370,8 @@ export function applyRunRow(id, row, now = Date.now()) {
     j.lastRate = { jobid: rec.jobid, level: rec.level, bps: Math.round(rec.bytes / ((rec.endedAt - rec.startedAt) / 1000)), bytes: rec.bytes, at: rec.endedAt };
     changed = true;
   }
+  // v2.865 취소를 보낸 실행이 끝났다(A 든 T 든) — 취소 기록을 내린다(지난 기록은 cancelInfo 가 어차피 무시하지만 원장에 남기지 않는다)
+  if (j.cancelReq && j.cancelReq.jobid === row.jobid && isFinalStatus(row.status)) { j.cancelReq = null; changed = true; }
   if (j.pending && j.pending.jobid === row.jobid) {
     if (isFinalStatus(row.status)) { j.pending = null; changed = true; }
     else if (j.pending.status !== row.status || j.pending.misses) { j.pending = { ...j.pending, status: row.status, state: rec.state, misses: 0 }; changed = true; }
@@ -438,11 +451,13 @@ export function patchRestoreFinish(jobId, rid, finish, guard = null) {
 export const restoreOpen = (r) => !!r?.jobid && !isFinalStatus(r.status) && !r.abandoned;
 
 /** 아직 끝나지 않은 실행(백업·복원) — 폴러가 이것만 조회한다. */
-export function pendingWork() {
+export function pendingWork(now = Date.now()) {
   const out = [];
   for (const j of load().jobs) {
     const dir = j.directorId || '';   // 옛 잡('')은 폴러가 settings.jobDirectorId 로 푼다
     if (j.pending?.jobid) out.push({ id: j.id, jobid: j.pending.jobid, kind: 'backup', job: j.bareosJob, demo: !!j.demo, directorId: dir, vcenterId: j.vcenterId });
+    // v2.865 취소를 보낸 Bareos 스케줄 실행(포탈이 시작하지 않아 pending 이 없다)도 결과가 나올 때까지 묻는다(CANCEL_TRACK_MS 동안 — 그 뒤는 대조 틱)
+    if (cancelTracked(j, now)) out.push({ id: j.id, jobid: j.cancelReq.jobid, kind: 'backup', job: j.bareosJob, demo: !!j.demo, directorId: dir, vcenterId: j.vcenterId, cancelOnly: true });
     for (const r of j.restores || []) if (restoreOpen(r)) out.push({ id: j.id, jobid: r.jobid, kind: 'restore', demo: !!j.demo, directorId: dir, vcenterId: j.vcenterId });
   }
   return out;
@@ -464,6 +479,7 @@ export function notePendingMiss(id, kind, jobid, now = Date.now()) {
     if (j.pending?.jobid !== jobid) return null;
     const misses = (Number(j.pending.misses) || 0) + 1;
     if (misses >= MISS_LIMIT && now - (Number(j.pending.since) || now) >= MISS_MIN_AGE_MS) {
+      if (j.cancelReq?.jobid === jobid) j.cancelReq = null;
       j.pending = null;
       j.lastError = { at: now, message: msg(misses) };
       persist();
@@ -490,6 +506,7 @@ export function clearPending(id, message, now = Date.now()) {
   const db = load();
   const j = db.jobs.find((x) => x.id === id);
   if (!j?.pending) return null;
+  if (j.cancelReq?.jobid === j.pending.jobid) j.cancelReq = null;   // v2.865 추적을 내린 실행의 취소 기록도 함께
   j.pending = null;
   j.lastError = { at: now, message: String(message || '').slice(0, 300) };
   persist();

@@ -45,6 +45,21 @@ async function addOne(s, it) {
   throw fail('invalid', '같은 VM 의 Bareos 잡이 Director 에 이미 여러 개 있습니다 — Director 의 bareos-dir.d/job 아래 pv-… 파일을 정리한 뒤 다시 시도하세요.');
 }
 
+/**
+ * 취소 하나 — 이 잡의 실행(jobid)만. 포탈이 추적 중인 실행을 Director 가 모르면(재시작·다른 Director — P5) { cleared } 로 추적만 내리게 한다.
+ * 이미 끝난 실행이면 { final: row } (부르는 쪽이 결과를 원장에 반영하고 '이미 끝남' 을 알린다). 단건(cancel)과 묶음(cancelJobs)이 이 함수 하나를 쓴다.
+ */
+async function cancelOne(s, { jobid, name, pendingJobid = null } = {}) {
+  if (!Number.isInteger(jobid) || jobid <= 0) throw invalid('jobid 가 올바르지 않습니다.');
+  if (!isResourceName(name)) throw invalid('잡 이름이 올바르지 않습니다.');
+  const row = await jobStatus(s, jobid);
+  if (!row && jobid === pendingJobid) return { cleared: true };
+  if (!row || row.name !== name) throw invalid('이 대상의 실행이 아닙니다.');
+  if (isFinalStatus(row.status)) return { final: row };
+  await cancelJob(s, jobid);
+  return { canceled: true };
+}
+
 /** v2.830 runJobs 한 번에 보내는 잡 수 상한 — 그룹 상한(groups.MAX_MEMBERS)을 부르는 쪽이 이 크기로 나눠 보낸다. */
 export const RUN_JOBS_MAX = 50;
 /** v2.833 진행 현황판 한 번에 묻는 FD 수(법인 하나 = 보통 FD 하나). */
@@ -293,17 +308,30 @@ export const OPS = Object.freeze({
     return normVolumeRows(await s.call(`list volumes pool=${pool}`, { maxBytes: 8 * 1024 * 1024 }));
   },
 
+  /** 취소 — 이 잡의 실행(jobid)만(cancelOne). */
+  cancel: (s, a) => cancelOne(s, a),
+
   /**
-   * 취소 — 이 잡의 실행(jobid)만. 포탈이 추적 중인 실행을 Director 가 모르면(재시작·다른 Director — P5) { cleared } 로 추적만 내리게 한다.
-   * 이미 끝난 실행이면 { final: row } (부르는 쪽이 결과를 원장에 반영하고 '이미 끝남' 을 알린다).
+   * v2.865 묶음 취소(그룹 회차 중단) — 항목마다 단건 취소(cancelOne)와 **같은 검사**(행 확인 · 잡 이름 대조 · 끝난 행 · 모르는 행)를 세션 하나로 차례로.
+   * 법인 쪽(엣지 대행이면 그 엣지)에서 한 번에 돈다(VM 수만큼 WAN 을 왕복하지 않는다 — 루트 CLAUDE.md '백업은 법인 로컬').
+   * 한 항목의 실패는 나머지를 막지 않고, 세션째 끊기면(SESSION_DEAD) 남은 것은 '건너뜀'(보내지 않았다).
+   * 옛 엣지는 이 작업 종류를 몰라 '알 수 없는 작업' 으로 거절한다(부르는 쪽이 엣지 업그레이드를 안내 — 단건 취소를 N번 돌려보내지 않는다).
+   * @param {{ items: { key:number, jobid:number, name:string, pendingJobid?:number|null }[] }} a
+   * @returns {Promise<{ key, ok, canceled?, final?, cleared?, code?, message? }[]>}
    */
-  async cancel(s, { jobid, name, pendingJobid }) {
-    const row = await jobStatus(s, jobid);
-    if (!row && jobid === pendingJobid) return { cleared: true };
-    if (!row || row.name !== name) throw invalid('이 대상의 실행이 아닙니다.');
-    if (isFinalStatus(row.status)) return { final: row };
-    await cancelJob(s, jobid);
-    return { canceled: true };
+  async cancelJobs(s, { items = [] } = {}) {
+    const out = [];
+    let dead = '';
+    for (const it of items.slice(0, RUN_JOBS_MAX)) {
+      if (dead) { out.push({ key: it.key, ok: false, code: 'skipped', message: `건너뜀 — ${dead}` }); continue; }
+      try {
+        out.push({ key: it.key, ok: true, ...(await cancelOne(s, it)) });
+      } catch (e) {
+        out.push({ key: it.key, ok: false, code: e?.code || 'error', message: String(e?.message || e).slice(0, 300) });
+        if (SESSION_DEAD.has(e?.code)) dead = `Director 연결 문제로 멈췄습니다(${e.code})`;
+      }
+    }
+    return out;
   },
 
   /**
@@ -466,4 +494,4 @@ export const OPS = Object.freeze({
 });
 
 /** Director 상태를 바꾸는 작업. */
-export const MUTATING = Object.freeze(new Set(['addJobs', 'disableJobs', 'runJob', 'runJobs', 'pruneJobs', 'setEnabled', 'cancel', 'restore', 'restores', 'poll']));
+export const MUTATING = Object.freeze(new Set(['addJobs', 'disableJobs', 'runJob', 'runJobs', 'pruneJobs', 'setEnabled', 'cancel', 'cancelJobs', 'restore', 'restores', 'poll']));

@@ -9,8 +9,11 @@
  *   storage, pool,                          // '' = 잡 기본값(등록 때 매핑 값). 값이 있으면 실행 때 `run … storage= pool=` 로 지정
  *   anchorAt,                               // 스케줄을 만들거나 바꾼 시각 — 그 앞의 회차는 돌리지 않는다
  *   lastKey,                                // 마지막으로 처리한 회차 열쇠(돌렸거나 놓침) — 같은 회차를 두 번 돌리지 않는다(**보내기 전에** 기록)
- *   lastFire: { key, at, trigger, by, level, total, started, skipped, failed, unknown, items[] } | null,
- *   missed: { key, at, reason } | null,     // 돌리지 않은 회차 — reason 'down'(포탈이 꺼져 있어 따라잡는 범위를 넘김) · 'edited'(돌 차례에 스케줄을 고침)
+ *   lastFire: { key, at, trigger, by, level, total, started, skipped, failed, unknown, halted?, canceled?, items[] } | null,
+ *     v2.865 canceled = { at, by, phase:'queued'|'sending'|'running', scope:'fire'|'all', canceled, finished, cleared, failed, unknown, busy, halted, extra } — 회차 중단
+ *     items[].state 에 'canceled'(취소를 보냄) · 'halted'(중단으로 보내지 않음)
+ *   missed: { key, at, reason } | null,     // 돌리지 않은 회차 — reason 'down'(포탈이 꺼져 있어 따라잡는 범위를 넘김) · 'edited'(돌 차례에 스케줄을 고침) · 'skipped'(v2.865 중단 때 건너뛰기로 고름)
+ *   skipKey: string,                        // v2.865 회차 중단 때 고른 '다음 회차 1회 건너뛰기' — 그 회차 열쇠(돌 차례에 'skipped' 로 남기고 지운다)
  *   sending: { key, at, trigger } | null,   // 보내는 중 표지(차지할 때 함께 쓴다) — 실행 기록(lastFire)이 쓰이면 지운다. 남아 있으면 보내는 도중 재시작한 것
  *   keep: number|null,                      // v2.831 보관 개수 — VM 마다 최근 N개의 성공 백업을 남기고 오래된 실행을 카탈로그에서 지운다(groupRetention). null = 제한 없음(v2.830 그룹)
  *   fires: { key, at, trigger, by, level, total, started, skipped, notSent, failed, unknown, error? }[],   // v2.831 실행 이력(최신 먼저 · FIRES_KEEP 개 · 항목 없음)
@@ -172,6 +175,7 @@ export function updateGroup(id, input, { by = '', now = Date.now(), expectUpdate
     if (why) throw fail('conflict', why);
     const schedChanged = JSON.stringify(v.schedule) !== JSON.stringify(g.schedule);
     if (schedChanged) {
+      g.skipKey = '';   // v2.865 건너뛰기는 옛 스케줄의 회차였다 — 새 스케줄에 옮기지 않는다
       // v2.830 검토 M4: 옛 스케줄로 지금 돌 차례였던 회차(틱이 아직 처리하지 않음)를 조용히 버리지 않는다 — 돌리지 않았다고 남긴다
       const d = decideFire(g, now);
       if (d.action === 'fire' || d.action === 'miss') { g.lastKey = d.slot.key; g.missed = { key: d.slot.key, at: d.slot.at, reason: d.action === 'fire' ? 'edited' : 'down' }; }
@@ -212,6 +216,7 @@ export function claimSlots(list, now = Date.now()) {
         if (!g || (g.lastKey && c.key <= g.lastKey)) continue;
         g.lastKey = c.key;
         g.sending = { key: c.key, at: now, trigger: c.trigger || 'timer' };
+        if (g.skipKey && g.skipKey <= c.key) g.skipKey = '';   // v2.865 지난 건너뛰기 표지
         if (g.missed && g.missed.key < c.key) g.missed = null;   // 버그 점검 W7: 뒤 회차가 돌면 '돌리지 않은 회차' 안내는 지난 일이다
         got.push(g.id);
       }
@@ -238,6 +243,7 @@ export function recordMisses(list) {
         if (!g || (g.lastKey && c.slot.key <= g.lastKey)) continue;
         g.lastKey = c.slot.key;
         g.missed = { key: c.slot.key, at: c.slot.at, reason: c.reason || 'down' };
+        if (g.skipKey && g.skipKey <= c.slot.key) g.skipKey = '';   // v2.865 건너뛴(또는 지난) 회차의 표지
         got.push(g.id);
       }
       return got;
@@ -281,6 +287,31 @@ function touchLater() {
   _rev += 1;
   if (!_fireTimer) { _fireTimer = setTimeout(flushFires, FIRE_FLUSH_MS); _fireTimer.unref?.(); }
 }
+/**
+ * v2.865 다음 회차 1회 건너뛰기(회차 중단 때 고름) — 그 회차 열쇠를 남긴다(돌 차례에 decideFire 가 'skipped' 로 넘긴다). 쓰기 실패는 던진다(화면이 알린다).
+ * @returns {string} 남긴 열쇠('' = 없음 — 스케줄 꺼짐)
+ */
+export function setSkipKey(id, key) {
+  return mutate((db) => { const g = db.groups.find((x) => x.id === id); if (!g) return ''; g.skipKey = String(key || ''); return g.skipKey; });
+}
+
+/**
+ * v2.865 회차 중단 결과를 **이미 기록한** 마지막 실행(lastFire)에 덧붙인다(보낸 뒤 Director 에서 도는 실행을 멈춘 경우 — 러너는 이미 끝났다).
+ * fireAt 이 지금 lastFire 와 다르면(그사이 새 회차) 바꾸지 않는다. 항목 상태는 vmId 로 맞춘다. recordFire 와 같은 지연 쓰기.
+ * @param {{ [vmId: string]: { state?: string, reason?: string } }} itemPatch
+ */
+export function recordFireCancel(id, fireAt, canceled, itemPatch = {}) {
+  const db = load();
+  if (_loadErr.get()) return false;
+  const g = db.groups.find((x) => x.id === id);
+  if (!g?.lastFire || g.lastFire.at !== fireAt) return false;
+  g.lastFire.canceled = { ...canceled };
+  if (Array.isArray(g.lastFire.items)) g.lastFire.items = g.lastFire.items.map((it) => (itemPatch[it.vmId] ? { ...it, ...itemPatch[it.vmId] } : it));
+  if (Array.isArray(g.fires) && g.fires[0]?.at === fireAt) g.fires[0] = { ...g.fires[0], canceled: { ...canceled } };
+  touchLater();
+  return true;
+}
+
 /** v2.831 보관 개수 정리 결과 — recordFire 와 같은 지연 쓰기(화면용 기록 · 실제로 지운 것은 Director 카탈로그가 진실). */
 export function recordPrune(id, prune) {
   const db = load();
