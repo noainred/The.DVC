@@ -46,11 +46,16 @@
 
 ## 4. 시안 ② — 내보내기 창(`ExportModal.dc.html`)
 
+- **법인(vCenter) 칸 추가 — 창을 열면 항상 모든 법인이 선택**(사용자 요청 2026-11-03 "엑셀 export 할때 기본적으로 모든 vcenter 를 선택").
+  지금은 창이 화면의 칩 선택을 그대로 따르고 창에서 못 바꾸는데(`GpuAllocExportModal.jsx` 머리 주석), 이를 뒤집는다 — 창은 **화면 선택과 무관하게 전체 법인**으로
+  시작하고, 칩으로 줄일 수 있다. 단추 ‘모두’ · ‘모두 해제’ · ‘화면 선택대로’(화면 칩 선택을 가져옴). 칩의 점은 GPU 호스트 유무(초록/회색).
+  범위 계정은 자기 범위의 법인만 칩으로 보이고 그 전부가 기본 선택(서버 `allocTreeOf` 가 scope 교집합을 먼저 하므로 그 밖은 어차피 안 나간다).
+  고른 법인이 0 이면 내려받기 버튼을 잠근다. 범위 글자 ‘모든 법인 N곳 · 호스트 · GPU’ 는 고른 칩에 따라 `export-meta` 를 다시 읽어 채운다(화면에서 더하지 않음).
 - ‘시트’ 칸에 **법인별 시트** 체크 한 줄 추가(기본 **켬** — 사용자가 요청한 기능이라 기본값으로 둔다. 끄면 지금과 같은 3시트 파일).
   바로 아래 작은 상자: ‘법인 N곳 가운데 GPU 호스트가 있는 M곳 → 시트 M장’ + 시트 이름 칩(줄인 이름은 주황) — 값은 `export-meta` 가 준다(화면에서 지어내지 않음).
 - 단계 설명에 ‘법인별 시트에도 같은 단계’ 한 구절, 서식 목록에 링크·탭 색 두 줄.
-- 파일 이름 끝에 `_percorp`(끄면 없음) · 옆에 ‘시트 N장’.
-- 그 밖(범위 글자·단계 칩·서식 목록·버튼)은 지금 창 그대로.
+- 파일 이름 끝에 `_percorp`(끄면 없음) · 옆에 ‘시트 N장’. 파일 이름의 범위 부분은 지금 규칙 그대로(`all` · 법인 1곳 이름 · `Ncorps`).
+- 그 밖(단계 칩·서식 목록·버튼)은 지금 창 그대로.
 
 ## 5. 구현 메모(컨펌 뒤 Opus) — 손댈 곳
 
@@ -58,7 +63,7 @@
 |---|---|---|
 | 서버 | `gpu/allocTreeXlsx.js` | `ALLOC_SHEET_KEYS` 에 `corp` · `ALLOC_XLSX_SHEETS` 에 `목차` · 계층 표 그리기를 `renderTreeSheet(wb, name, tree, meta, …)` 로 뽑아 전체·법인 둘이 호출 · `renderTocSheet` · `sheetNameOf(name, taken)` 공용화 · `allocFileName(…, { percorp })` · 안내 1줄 |
 | 서버 | `routes/api/hardwareGpu.js` | `export-meta` 에 `corpSheets: [{ id, name, sheet, cut, hosts }]`·`corpSheetCount` 추가(범위 안 법인 전부 — GPU 없는 법인은 `snap` 의 vCenter 목록에서) · `.xlsx` 에 `sheets=corp` 전달 · 법인 시트마다 `yieldLoop` |
-| 웹 | `gpuAllocText.js` · `GpuAllocExportModal.jsx` | `EXPORT_SHEETS` 에 `corp` · 체크 아래 상자 · 파일 이름 키(`fileNames` 를 `{depth}` → `{depth, percorp}` 로) |
+| 웹 | `gpuAllocText.js` · `GpuAllocExportModal.jsx` | 창 안 법인 칩(`corpChips` 재사용 — 기본 전부 선택 · ‘화면 선택대로’ 는 부모 `vcSel` 복사) · `allocExportQuery` 는 창의 선택으로(전부면 `vcenterIds` 를 싣지 않음) · `EXPORT_SHEETS` 에 `corp` · 체크 아래 상자 · 파일 이름 키(`fileNames` 를 `{depth}` → `{depth, percorp}` 로) |
 | 테스트 | `server/test/gpuAllocTree2852.test.js` · `web/src/views/tools/gpuAllocText.test.js` | 시트 이름 규칙(금지 문자·31자·뒤 `-` 제거·겹침 `~2`) · 법인 시트 수 = GPU 호스트 있는 법인 수 · 목차 링크 대상 시트가 실제로 있음 · 범위 계정은 자기 법인만 · 창 쿼리 `sheets=corp` |
 | 문서 | `docs/rules/gpu.md` · `docs/API.md` 재생성 | 시트 규칙 한 단락 |
 
@@ -70,3 +75,4 @@
 2. 평면 표도 법인마다 — **아니오**(§3.1) / 예.
 3. GPU 호스트 없는 법인 — **시트 없이 목차에만** / 빈 시트도 만든다.
 4. 파일 이름 접미사 — **`_percorp`** / 없음.
+5. 창의 법인 기본 선택 — **모든 법인(화면 선택과 무관)** / 화면 선택을 가져오되 바꿀 수 있게. (사용자 지시로 전자가 확정 — 2026-11-03 "기본적으로 모든 vcenter 를 선택")

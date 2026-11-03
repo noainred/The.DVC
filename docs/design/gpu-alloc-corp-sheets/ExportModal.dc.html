@@ -15,7 +15,7 @@ a{color:#60a5fa}a:hover{color:#93c5fd}
 button{font-family:inherit}
 </style>
 </helmet>
-<div style="width: 640px; height: 1120px; box-sizing: border-box; background: #0a0e17; color: #e6edf6; font-family: Inter, 'Noto Sans KR', 'Apple SD Gothic Neo', system-ui, sans-serif; font-size: 13px; padding: 40px; display: flex; flex-direction: column; align-items: center;">
+<div style="width: 640px; height: 1400px; box-sizing: border-box; background: #0a0e17; color: #e6edf6; font-family: Inter, 'Noto Sans KR', 'Apple SD Gothic Neo', system-ui, sans-serif; font-size: 13px; padding: 40px; display: flex; flex-direction: column; align-items: center;">
 
 <div style="width: 560px; background: #141b2d; border: 1px solid #243049; border-radius: 12px; box-shadow: 0 4px 24px rgba(0, 0, 0, 0.4); display: flex; flex-direction: column;">
   <div style="display: flex; align-items: center; justify-content: space-between; padding: 16px 20px; border-bottom: 1px solid #1f2a40;">
@@ -24,7 +24,26 @@ button{font-family:inherit}
   </div>
 
   <div style="padding: 16px 20px 20px; display: flex; flex-direction: column; gap: 14px;">
-    <div style="font-size: 13px; color: #8b9bb4; line-height: 1.6;">화면의 법인 선택을 그대로 따릅니다. 지금 범위: <b style="color: #e6edf6;">전체 법인 · 호스트 15대 · GPU 34장</b></div>
+    <div style="background: #111726; border: 1px solid #243049; border-radius: 12px; padding: 14px 16px; display: flex; flex-direction: column; gap: 10px;">
+      <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+        <span style="font-size: 12px; color: #8b9bb4;">법인(vCenter)</span>
+        <span style="background: #1d4ed8; color: #ffffff; font-size: 10px; font-weight: 600; padding: 1px 6px; border-radius: 10px;">기본 — 모두 선택</span>
+        <span style="margin-left: auto; display: flex; gap: 6px;">
+          <button type="button" onClick="{{selAll}}" style="height: 28px; padding: 0 10px; border-radius: 6px; border: 1px solid #243049; background: #141b2d; color: #c7d2e3; font-size: 12px; cursor: pointer;">모두</button>
+          <button type="button" onClick="{{selNone}}" style="height: 28px; padding: 0 10px; border-radius: 6px; border: 1px solid #243049; background: #141b2d; color: #c7d2e3; font-size: 12px; cursor: pointer;">모두 해제</button>
+          <button type="button" onClick="{{selScreen}}" style="height: 28px; padding: 0 10px; border-radius: 6px; border: 1px solid #243049; background: #141b2d; color: #c7d2e3; font-size: 12px; cursor: pointer;">화면 선택대로</button>
+        </span>
+      </div>
+      <div style="display: flex; flex-wrap: wrap; gap: 6px;">
+        <sc-for list="{{corpChips}}" as="c" hint-placeholder-count="9">
+          <button type="button" onClick="{{c.pick}}" aria-pressed="{{c.on}}" style="{{c.style}}"><span style="{{c.dot}}"></span>{{c.label}}</button>
+        </sc-for>
+      </div>
+      <div style="font-size: 12px; color: #8b9bb4; line-height: 1.6;">{{rangeText}} <span style="color: #5d6b85;">— 화면에서 법인을 골라 두었어도 이 창은 <b style="color: #c7d2e3;">모든 법인</b>으로 시작합니다. ‘화면 선택대로’ 를 누르면 화면의 칩 선택을 가져옵니다.</span></div>
+      <sc-if value="{{noneSel}}" hint-placeholder-val="{{false}}">
+      <div style="font-size: 12px; color: #fbbf24;">법인을 하나 이상 고르세요.</div>
+      </sc-if>
+    </div>
 
     <div style="background: #111726; border: 1px solid #243049; border-radius: 12px; padding: 14px 16px; display: flex; flex-direction: column; gap: 10px;">
       <div style="font-size: 12px; color: #8b9bb4;">행을 어디까지 넣을까요</div>
@@ -48,7 +67,7 @@ button{font-family:inherit}
 
       <sc-if value="{{percorp}}" hint-placeholder-val="{{true}}">
       <div style="margin: 0 -2px; padding: 10px 12px; border-radius: 8px; background: #0f1626; border: 1px solid #1f2a40; display: flex; flex-direction: column; gap: 8px; font-size: 12px; line-height: 1.6; color: #c7d2e3;">
-        <div><b style="color: #e6edf6;">법인 9곳</b> 가운데 GPU 호스트가 있는 <b style="color: #e6edf6;">6곳 → 시트 6장</b>. 없는 3곳은 목차에만 적습니다(빈 시트를 만들지 않음).</div>
+        <div>{{corpSheetText}}</div>
         <div style="display: flex; flex-wrap: wrap; gap: 6px;">
           <sc-for list="{{sheetChips}}" as="s" hint-placeholder-count="6">
             <span style="{{s.style}}">{{s.label}}</span>
@@ -77,33 +96,61 @@ button{font-family:inherit}
 </div>
 
 <div style="width: 560px; margin-top: 18px; font-size: 12px; color: #8b9bb4; line-height: 1.6; display: flex; flex-direction: column; gap: 4px;">
-  <div><b style="color: #e6edf6;">바뀌는 것은 이 창의 ‘시트’ 칸 한 줄</b> — 나머지(범위 · 단계 · 서식 · 파일 이름 자리)는 지금 창 그대로입니다.</div>
-  <div>법인별 시트를 끄면 파일 이름 끝의 ‘_percorp’ 도 빠져 지금과 같은 파일이 됩니다. 법인을 칩으로 골랐거나 범위 계정이면 그 법인들만 시트가 됩니다.</div>
+  <div><b style="color: #e6edf6;">바뀌는 것 두 가지</b> — ① 맨 위 ‘법인(vCenter)’ 칸: 창을 열면 <b style="color: #e6edf6;">항상 모든 법인이 선택</b>돼 있고 여기서 줄일 수 있습니다(지금은 화면 선택을 그대로 따르고 창에서 못 바꿈). ② ‘시트’ 칸의 ‘법인별 시트’ 한 줄.</div>
+  <div>범위 계정은 자기 범위의 법인만 칩으로 보이고 그 전부가 기본 선택입니다. 법인별 시트를 끄면 파일 이름 끝의 ‘_percorp’ 도 빠져 지금과 같은 3시트 파일이 됩니다.</div>
 </div>
 
 </div>
 </x-dc>
-<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":640,"height":1120}}'>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":640,"height":1400}}'>
 class Component extends DCLogic {
-  constructor(p) { super(p); this.state = { percorp: true, depth: 'vm' }; }
+  constructor(p) { super(p); this.state = { percorp: true, depth: 'vm', sel: null }; }
   renderVals() {
     const S = this.state;
+    const corps = [
+      { id: 'vc-ap-northeast', name: 'vcenter-ap-northeast-01', hosts: 4, gpus: 10, sheet: 'vcenter-ap-northeast-01' },
+      { id: 'vc-us-east', name: 'vcenter-us-east-01', hosts: 3, gpus: 6, sheet: 'vcenter-us-east-01' },
+      { id: 'vc-us-west', name: 'vcenter-us-west-01', hosts: 2, gpus: 4, sheet: 'vcenter-us-west-01' },
+      { id: 'vc-br-sao', name: 'vcenter-br-sao-01', hosts: 0, gpus: 0, sheet: null },
+      { id: 'vc-eu-central', name: 'vcenter-eu-central-01', hosts: 3, gpus: 8, sheet: 'vcenter-eu-central-01' },
+      { id: 'vc-eu-west', name: 'vcenter-eu-west-01', hosts: 1, gpus: 2, sheet: 'vcenter-eu-west-01' },
+      { id: 'vc-me-uae', name: 'vcenter-me-uae-01', hosts: 0, gpus: 0, sheet: null },
+      { id: 'vc-ap-southeast', name: 'vcenter-ap-southeast-singapore-01', hosts: 2, gpus: 4, sheet: 'vcenter-ap-southeast-singapore', cut: true },
+      { id: 'vc-ap-south', name: 'vcenter-ap-south-01', hosts: 0, gpus: 0, sheet: null },
+    ];
+    const screenSel = ['vc-ap-northeast', 'vc-eu-central'];
+    const sel = S.sel == null ? corps.map((c) => c.id) : S.sel;
+    const isOn = (id) => sel.indexOf(id) >= 0;
+    const corpChips = corps.map((c) => {
+      const on = isOn(c.id);
+      return { label: c.name, on,
+        pick: () => this.setState({ sel: on ? sel.filter((x) => x !== c.id) : sel.concat([c.id]) }),
+        style: 'height: 30px; padding: 0 10px 0 8px; display: inline-flex; align-items: center; gap: 6px; border-radius: 8px; border: 1px solid ' + (on ? '#3b82f6' : '#243049') + '; background: ' + (on ? 'rgba(59, 130, 246, 0.18)' : '#141b2d') + '; color: ' + (on ? '#e6edf6' : '#8b9bb4') + '; font-size: 12px; font-family: \'JetBrains Mono\', monospace; cursor: pointer;',
+        dot: 'width: 8px; height: 8px; border-radius: 50%; background: ' + (c.hosts ? '#22c55e' : '#5d6b85') + ';' };
+    });
+    const picked = corps.filter((c) => isOn(c.id));
+    const withGpu = picked.filter((c) => c.sheet);
+    const hosts = picked.reduce((a, c) => a + c.hosts, 0);
+    const gpus = picked.reduce((a, c) => a + c.gpus, 0);
+    const allOn = picked.length === corps.length;
+    const rangeText = picked.length === 0 ? '고른 법인 없음' : (allOn ? '모든 법인 ' + corps.length + '곳' : '법인 ' + picked.length + '곳') + ' · 호스트 ' + hosts + '대 · GPU ' + gpus + '장';
+    const corpSheetText = picked.length === 0 ? '고른 법인이 없어 시트를 만들 수 없습니다.'
+      : '고른 법인 ' + picked.length + '곳 가운데 GPU 호스트가 있는 ' + withGpu.length + '곳 → 시트 ' + withGpu.length + '장. 없는 ' + (picked.length - withGpu.length) + '곳은 목차에만 적습니다(빈 시트를 만들지 않음).';
     const depths = [{ key: 'host', label: '호스트까지' }, { key: 'gpu', label: 'GPU 까지' }, { key: 'vm', label: 'VM 까지(전부)' }];
     const depthChips = depths.map((d) => {
       const on = d.key === S.depth;
       return { label: d.label, on, pick: () => this.setState({ depth: d.key }),
         style: 'height: 32px; padding: 0 12px; border-radius: 8px; border: 1px solid ' + (on ? '#3b82f6' : '#243049') + '; background: ' + (on ? 'rgba(59, 130, 246, 0.18)' : '#141b2d') + '; color: ' + (on ? '#e6edf6' : '#c7d2e3') + '; font-size: 13px; font-weight: ' + (on ? 600 : 500) + '; cursor: pointer;' };
     });
-    const sheets = [
-      { label: 'vcenter-ap-northeast-01' }, { label: 'vcenter-us-east-01' }, { label: 'vcenter-us-west-01' },
-      { label: 'vcenter-eu-central-01' }, { label: 'vcenter-eu-west-01' }, { label: 'vcenter-ap-southeast-singapore', cut: true },
-    ];
-    const sheetChips = sheets.map((s) => ({ label: s.label, style: 'font-family: \'JetBrains Mono\', monospace; font-size: 11px; padding: 3px 8px; border-radius: 6px; border: 1px solid ' + (s.cut ? '#b45309' : '#243049') + '; background: #141b2d; color: ' + (s.cut ? '#fbbf24' : '#c7d2e3') + ';' }));
+    const sheetChips = withGpu.map((s) => ({ label: s.sheet, style: 'font-family: \'JetBrains Mono\', monospace; font-size: 11px; padding: 3px 8px; border-radius: 6px; border: 1px solid ' + (s.cut ? '#b45309' : '#243049') + '; background: #141b2d; color: ' + (s.cut ? '#fbbf24' : '#c7d2e3') + ';' }));
     const suffix = (S.depth !== 'vm' ? '_' + S.depth : '') + (S.percorp ? '_percorp' : '');
+    const scopePart = allOn ? 'all' : picked.length === 1 ? picked[0].name : picked.length + 'corps';
     return {
       percorp: S.percorp, togglePercorp: () => this.setState({ percorp: !S.percorp }), depthChips, sheetChips,
-      fileName: 'gpu-allocation_all_20261103-1930' + suffix + '.xlsx',
-      sheetCount: S.percorp ? '시트 10장(기본 3 + 목차 1 + 법인 6)' : '시트 3장',
+      corpChips, rangeText, corpSheetText, noneSel: picked.length === 0,
+      selAll: () => this.setState({ sel: null }), selNone: () => this.setState({ sel: [] }), selScreen: () => this.setState({ sel: screenSel.slice() }),
+      fileName: 'gpu-allocation_' + scopePart + '_20261103-1930' + suffix + '.xlsx',
+      sheetCount: S.percorp ? '시트 ' + (4 + withGpu.length) + '장(기본 3 + 목차 1 + 법인 ' + withGpu.length + ')' : '시트 3장',
     };
   }
 }
