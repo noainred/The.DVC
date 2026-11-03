@@ -415,11 +415,11 @@ function GroupRunBand({ g, lock = '', onStop }) {
   const c = g.lastFire?.canceled;
   return (
     <section aria-label={`그룹 회차 — ${g.name}`} style={{ ...ROW, padding: '10px 14px', borderRadius: 10, border: `1px solid ${stopping ? 'rgba(251,146,60,.45)' : 'rgba(96,165,250,.35)'}`, background: stopping ? 'rgba(251,146,60,.08)' : 'rgba(59,130,246,.08)', gap: '6px 14px' }}>
-      <Badge tone={stopping ? 'stop' : 'run'}>{stopping ? st.text : '그룹 회차'}</Badge>
+      <Badge tone={stopping ? 'stop' : st.kind === 'stopfail' ? 'warn' : 'run'}>{stopping || st.kind === 'stopfail' ? st.text : '그룹 회차'}</Badge>
       <b style={{ overflowWrap: 'anywhere' }}>{g.name}</b>
       <span className="muted" style={{ fontSize: 12, minWidth: 0 }}>
         {g.plan?.phase ? `단계 ${PHASE_TEXT[g.plan.phase]}` : stopping ? '취소를 보낸 실행이 아직 돕니다' : ''}
-        {p && !p.queued ? ` · 보냄 ${p.sent ?? 0} / ${p.toSend ?? 0} · 시작 ${p.started ?? 0}` : p?.queued ? ` · ${shortTs(p.since)} 부터 차례 대기` : ''}
+        {p && !p.queued ? ` · 보냄 ${p.sent ?? 0} / ${p.toSend ?? 0} · 시작 ${p.started ?? 0}${p.inflight ? ` · 회신 기다림 ${p.inflight}` : ''}` : p?.queued ? ` · ${shortTs(p.since)} 부터 차례 대기` : ''}
         {g.plan?.fire ? ` · 이번 회차 실행 중 ${g.plan.fire}` : ''}{g.plan?.sent ? ` · 멈추는 중 ${g.plan.sent}` : ''}{g.plan?.stuck ? ` · 멈추지 않음 ${g.plan.stuck}` : ''} · VM {g.total}대
       </span>
       {c && <span className="muted" style={{ fontSize: 12, minWidth: 0, overflowWrap: 'anywhere' }}>{canceledText(c, shortTs)}</span>}

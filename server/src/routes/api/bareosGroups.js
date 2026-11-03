@@ -370,9 +370,9 @@ api.post('/tools/bareos-backup/groups/:id/cancel', adminOnly, (req, res) => {
     return res.status(code).json({ ok: false, reason: String(e?.message || e).slice(0, 400), ...(e?.code === 'idle' ? { idle: true } : {}) });
   }
   audit(req, 'Bareos 그룹 회차 중단 요청', `${g.vcenterId}/${g.name}`,
-    `단계 ${({ queued: '줄 대기', sending: '보내는 중', running: 'Director 실행 중' })[r.phase] || r.phase} · ${includeScheduled ? '그룹 VM 의 실행 중 전부' : '이번 회차만'} · 취소 대상 ${r.fire}${r.extra ? ` + 그 밖 ${r.extra}` : ''}${r.halted ? ` · 시작 전 멈춤 ${r.halted}` : ''}${r.skipKey ? ` · 다음 회차 ${r.skipKey} 건너뜀` : skipNext ? ' · 다음 회차 없음(스케줄 꺼짐)' : ''}`);
+    `단계 ${({ queued: '줄 대기', sending: '보내는 중', running: 'Director 실행 중', extra: '그 밖 실행만' })[r.phase] || r.phase} · ${includeScheduled ? '그룹 VM 의 실행 중 전부' : '이번 회차만'} · 취소 대상 ${r.fire}${r.extra ? ` + 그 밖 ${r.extra}` : ''}${r.halted ? ` · 시작 전 멈춤 ${r.halted}` : ''}${r.dueKey ? ` · 차례였던 회차 ${r.dueKey} 돌리지 않음` : ''}${r.skipKey ? ` · 다음 회차 ${r.skipKey} 건너뜀` : skipNext ? ' · 다음 회차 없음(스케줄 꺼짐)' : ''}`);
   r.done.catch((e) => console.warn(`[bareos] 백업 그룹 ‘${g.name}’ 회차 중단 실패: ${String(e?.message || e).slice(0, 200)}`));
-  res.status(202).json({ ok: true, phase: r.phase, fire: r.fire, extra: r.extra, halted: r.halted, skipKey: r.skipKey || '', group: groupView(getGroup(g.id) || g) });
+  res.status(202).json({ ok: true, phase: r.phase, fire: r.fire, extra: r.extra, halted: r.halted, skipKey: r.skipKey || '', dueKey: r.dueKey || '', group: groupView(getGroup(g.id) || g) });
 });
 
 /**

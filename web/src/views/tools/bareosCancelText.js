@@ -52,7 +52,13 @@ export function jobCancelNotes({ group = '', waitMs = null } = {}) {
   ];
 }
 
-export const PHASE_TEXT = Object.freeze({ queued: '줄 대기', sending: '보내는 중', running: 'Director 실행 중' });
+/** 아직 보내지 않은 수(회신 대기 덩어리는 빼고 — 그 덩어리는 시작한 뒤 취소된다). 모르면 null. */
+export function sendLeft(pr) {
+  if (!pr || pr.queued || !Number.isFinite(pr.toSend)) return null;
+  return Math.max(0, pr.toSend - (pr.sent || 0) - (pr.inflight || 0));
+}
+
+export const PHASE_TEXT = Object.freeze({ queued: '줄 대기', sending: '보내는 중', running: 'Director 실행 중', extra: '그 밖 실행만' });
 
 /**
  * 그룹 회차 중단 확인 창의 단계별 설명 — 서버 cancelPlan({ phase, fire, extra, sent, stuck, progress }) 을 문구로.
@@ -64,9 +70,9 @@ export function groupPlanView(plan) {
   const lines = [];
   if (p.phase === 'queued') lines.push('Director 차례를 기다리는 중입니다 — 줄에서 빼고 아무것도 보내지 않습니다(전부 ‘시작 전 멈춤’).');
   if (p.phase === 'sending') {
-    const left = pr && Number.isFinite(pr.toSend) ? Math.max(0, pr.toSend - (pr.sent || 0)) : null;
+    const left = sendLeft(pr);
     lines.push(`보내는 중입니다${pr ? `(보냄 ${pr.sent ?? 0} / ${pr.toSend ?? 0})` : ''} — 다음 덩어리를 보내지 않습니다${left !== null ? `(시작 전 멈춤 약 ${left}대)` : ''}.`);
-    lines.push('보내는 중이던 덩어리는 끊지 않고 회신을 받은 뒤 그 실행을 취소합니다(도중에 끊으면 시작됐는지 알 수 없게 됩니다).');
+    lines.push(`보내는 중이던 덩어리${pr?.inflight ? ` ${pr.inflight}대` : ''}는 끊지 않고 회신을 받은 뒤 그 실행을 취소합니다(도중에 끊으면 시작됐는지 알 수 없게 됩니다).`);
   }
   if (p.phase === 'running') lines.push(`이번 회차가 시작해 아직 도는 실행 ${p.fire ?? 0}대에 취소를 한 번에 보냅니다(법인 쪽에서 묶어서).`);
   if (p.sent > 0) lines.push(`이미 취소를 보내 멈추는 중인 실행 ${p.sent}대${p.stuck ? `(멈추지 않음 ${p.stuck})` : ''}는 ${p.stuck ? '멈추지 않은 것만 다시 보냅니다' : '다시 보내지 않습니다'}.`);
@@ -95,6 +101,7 @@ export function cancelAcceptedText(r, name) {
   if (r.fire) parts.push(`취소 대상 ${r.fire}대`);
   if (r.extra) parts.push(`그 밖 실행 ${r.extra}대`);
   if (r.halted) parts.push(`시작 전 멈춤 ${r.halted}대`);
+  if (r.dueKey) parts.push(`차례였던 회차 ${r.dueKey} 돌리지 않음`);
   if (r.skipKey) parts.push(`다음 회차 ${r.skipKey} 건너뜀`);
   return `${parts.join(' · ')} — 결과는 이 화면에 곧 반영됩니다.`;
 }
@@ -105,11 +112,14 @@ export function cancelAcceptedText(r, name) {
  */
 export function canceledText(c, tsText = (x) => String(x)) {
   if (!c) return '';
-  const parts = [`중단됨 ${tsText(c.at)}${c.by ? ` ${c.by}` : ''}`];
+  // 반증 F2: 취소가 한 건도 가지 않은 시도는 '중단됨' 이 아니다 — 사유(옛 엣지면 업그레이드 안내)를 끝에 붙인다
+  const parts = [`${c.effective === false ? '중단하지 못함' : '중단됨'} ${tsText(c.at)}${c.by ? ` ${c.by}` : ''}`];
   for (const [k, t] of [['canceled', '취소'], ['finished', '이미 끝남'], ['cleared', '추적만 해제'], ['halted', '시작 전 멈춤'], ['failed', '취소 실패'], ['unknown', '취소 결과 모름'], ['busy', '다른 요청 중']]) if (c[k] > 0) parts.push(`${t} ${c[k]}`);
   if (c.extra && (c.extra.canceled || c.extra.failed || c.extra.unknown || c.extra.busy)) parts.push(`그 밖 실행 취소 ${c.extra.canceled}`);
   if (c.scope === 'all') parts.push('범위 그룹 VM 전부');
+  if (c.dueKey) parts.push(`차례였던 ${c.dueKey} 회차 돌리지 않음`);
   if (c.skipKey) parts.push(`${c.skipKey} 회차 건너뜀`);
+  if (c.effective === false && c.reason) parts.push(`사유: ${c.reason}`);
   return parts.join(' · ');
 }
 
@@ -119,17 +129,20 @@ export function canceledText(c, tsText = (x) => String(x)) {
  *   stopping   = 중단 처리 중이거나, 회차 중단으로 취소를 보낸 실행이 아직 돈다(멈추지 않음이 아닌 것)
  *   cancelable = 멈출 수 있는 회차가 있다(줄 대기 · 보내는 중 · 이번 회차 실행 중) — '회차 중단…'
  *   stopped    = 마지막 회차가 중단됐다(다 멈췄다)
+ *   stopfail   = 중단을 시도했지만 아무것도 멈추지 못했다(취소 실패 · 옛 엣지 — 사유는 canceledText)
  *   canStop    = '회차 중단…' 을 열 수 있나 — 중단 처리 중이 아니고 이번 회차에 멈출 것(줄 대기 · 보내는 중 · 도는 실행)이 있다.
  *                그 밖 실행(Bareos 스케줄)만 도는 그룹에는 열지 않는다 — 그 실행은 진행 현황판의 행마다 '취소…' 로(확인 창의 범위 확대는 회차가 있을 때만).
  */
 export function groupStopState(g) {
   const st = g?.stop || {};
   const canStop = !g?.canceling && !st.pruning && !!st.phase;
-  if (g?.canceling || ((st.sent ?? 0) > (st.stuck ?? 0) && g?.lastFire?.canceled)) {
+  const c = g?.lastFire?.canceled;
+  if (g?.canceling || ((st.sent ?? 0) > (st.stuck ?? 0) && c && c.effective !== false)) {
     return { kind: 'stopping', text: st.stuck ? `멈추는 중 · 멈추지 않음 ${st.stuck}` : '멈추는 중', tone: 'stop', canStop };
   }
-  if (st.phase) return { kind: 'cancelable', text: st.phase === 'queued' ? '차례 대기' : st.phase === 'sending' ? '보내는 중' : '실행 중', tone: 'run', canStop };
-  if (g?.lastFire?.canceled) return { kind: 'stopped', text: '중단됨', tone: 'muted', canStop };
+  if (st.phase && !(c && c.effective === false)) return { kind: 'cancelable', text: st.phase === 'queued' ? '차례 대기' : st.phase === 'sending' ? '보내는 중' : '실행 중', tone: 'run', canStop };
+  if (c && c.effective === false) return { kind: 'stopfail', text: '중단하지 못함', tone: 'warn', canStop };
+  if (c) return { kind: 'stopped', text: '중단됨', tone: 'muted', canStop };
   return { kind: null, text: '', tone: 'muted', canStop };
 }
 
@@ -139,10 +152,12 @@ export function progressSegments(g) {
   if (!p || p.queued || !Number.isFinite(p.toSend)) return [];
   const started = p.started ?? 0;
   const failedOrSkipped = Math.max(0, (p.sent ?? 0) - started);
-  const left = Math.max(0, p.toSend - (p.sent ?? 0));
+  const inflight = p.inflight ?? 0;
+  const left = sendLeft(p) ?? 0;
   return [
     { n: started, tone: 'run', label: `시작 ${started}` },
     { n: failedOrSkipped, tone: 'bad', label: `보냈지만 시작 못 함 ${failedOrSkipped}` },
+    { n: inflight, tone: 'wait', label: `회신 기다림 ${inflight}` },
     { n: left, tone: 'muted', label: `보낼 차례 ${left}` },
   ].filter((x) => x.n > 0);
 }

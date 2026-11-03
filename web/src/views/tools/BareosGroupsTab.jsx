@@ -40,7 +40,7 @@ const GRID = '34px minmax(200px, 2fr) 52px 78px minmax(160px, 1.3fr)';
 const loadVc = () => { try { return localStorage.getItem(VC_KEY) || ''; } catch { return ''; } };
 const saveVc = (v) => { try { localStorage.setItem(VC_KEY, v); } catch { /* 저장 못 해도 동작 */ } };
 const errText = (e) => e?.body?.reason || e?.message || String(e);
-const MISSED_REASON = { down: '포탈이 꺼져 있었음', edited: '돌 차례에 스케줄을 고쳐 돌리지 않음', skipped: '회차 중단 때 건너뛰기로 고름' };
+const MISSED_REASON = { down: '포탈이 꺼져 있었음', edited: '돌 차례에 스케줄을 고쳐 돌리지 않음', skipped: '회차 중단 때 건너뛰기로 고름', stopped: '회차 중단 때 차례였던 회차라 돌리지 않음' };
 const missedReason = (m) => MISSED_REASON[m?.reason] || MISSED_REASON.down;
 const FolderIcon = () => (
   <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#fbbf24" strokeWidth="2" strokeLinejoin="round" aria-hidden="true" style={{ flex: 'none' }}><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" /></svg>
@@ -933,22 +933,22 @@ function StopLines({ g, ss }) {
   const total = segs.reduce((a, x) => a + x.n, 0);
   const st = g.stop || {};
   const c = g.lastFire?.canceled;
-  const showC = c && (ss.kind === 'stopping' || ss.kind === 'stopped');
+  const showC = c && (ss.kind === 'stopping' || ss.kind === 'stopped' || ss.kind === 'stopfail');
   if (!segs.length && !g.progress?.queued && !st.phase && !st.sent && !showC) return null;
   return (
     <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', gap: 4 }}>
       {g.progress?.queued && <InfoLine label="이번 회차" color={TONE.run}>Director 차례를 기다리는 중({shortTs(g.progress.since)} 부터)</InfoLine>}
       {segs.length > 0 && (
         <>
-          <InfoLine label="이번 회차" color={TONE.run}>보내는 중 · 보냄 {g.progress.sent ?? 0} / {g.progress.toSend ?? 0} · 시작 {g.progress.started ?? 0}</InfoLine>
+          <InfoLine label="이번 회차" color={TONE.run}>보내는 중 · 보냄 {g.progress.sent ?? 0} / {g.progress.toSend ?? 0} · 시작 {g.progress.started ?? 0}{g.progress.inflight ? ` · 회신 기다림 ${g.progress.inflight}` : ''}</InfoLine>
           <div role="img" aria-label={segs.map((x) => x.label).join(' · ')} style={{ display: 'flex', height: 8, borderRadius: 4, overflow: 'hidden', background: 'var(--border)' }}>
-            {segs.map((x) => <span key={x.label} style={{ width: `${(x.n / total) * 100}%`, background: x.tone === 'run' ? '#60a5fa' : x.tone === 'bad' ? '#f87171' : 'var(--border)' }} />)}
+            {segs.map((x) => <span key={x.label} style={{ width: `${(x.n / total) * 100}%`, background: x.tone === 'run' ? '#60a5fa' : x.tone === 'bad' ? '#f87171' : x.tone === 'wait' ? 'rgba(96,165,250,.45)' : 'var(--border)' }} />)}
           </div>
         </>
       )}
       {!segs.length && st.phase === 'running' && <InfoLine label="이번 회차" color={TONE.run}>Director 에서 도는 실행 {st.fire}대{st.extra ? ` · 그 밖 실행 ${st.extra}대` : ''}</InfoLine>}
       {st.sent > 0 && <InfoLine label="멈추는 중" color={TONE.stop}>취소를 보낸 실행 {st.sent}대가 아직 돕니다{st.stuck ? ` · 멈추지 않음 ${st.stuck}대 — Director 에서 확인하세요` : ' — FD 가 멈추기까지 수 초~수 분'}</InfoLine>}
-      {showC && <InfoLine label="중단" color={TONE.stop}>{canceledText(c, shortTs)} · 이 회차로는 보관 정리를 하지 않습니다</InfoLine>}
+      {showC && <InfoLine label="중단" color={c.effective === false ? TONE.warn : TONE.stop}>{canceledText(c, shortTs)}{c.effective === false ? '' : ' · 이 회차로는 보관 정리를 하지 않습니다'}</InfoLine>}
     </div>
   );
 }

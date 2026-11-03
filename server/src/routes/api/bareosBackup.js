@@ -950,6 +950,11 @@ async function cancelRoute(req, res, job) {
       audit(req, 'Bareos 백업 취소', `${job.vcenterId}/${job.vmName}`, `jobid ${want} · Director 에 없음 — 포탈 추적 해제`);
       return res.json({ ok: true, jobid: want, cleared: true, note });
     }
+    // 반증 F8: 엣지 회신이 정제에서 canceled 없이 떨어지면(성공인데 결과 없음) 취소가 갔는지 모른다 — 묶음 취소(cancelJobs)와 같게 '결과 모름'
+    if (out.canceled !== true) {
+      audit(req, 'Bareos 백업 취소', `${job.vcenterId}/${job.vmName}`, `jobid ${want} · 결과 모름(회신에 결과 없음)`);
+      return res.status(502).json({ ok: false, unknown: true, reason: '결과 모름 — 회신에 취소 결과가 없습니다. 취소가 갔는지 알 수 없으니 Director 에서 확인하세요.' });
+    }
     // v2.867 '멈추는 중' — 그 실행이 끝나면(폴러 · 로그 열기) 지운다. 기록을 못 써도 취소는 Director 에 갔다(화면 표시만 늦다)
     let marked = true;
     try { markCancelReq(job.id, { jobid: want, by: req.user?.username || '', via: 'single' }); } catch (e) { marked = false; console.warn(`[bareos] 취소 표시를 원장에 쓰지 못했습니다(${String(e?.message || e).slice(0, 160)}) — 취소는 Director 에 갔습니다.`); }

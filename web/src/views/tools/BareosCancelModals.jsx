@@ -5,7 +5,7 @@
  */
 import React, { useState } from 'react';
 import { Modal } from '../../components/ui.jsx';
-import { jobCancelNotes, groupPlanView, groupCancelNotes, nameMatches, ageText } from './bareosCancelText.js';
+import { jobCancelNotes, groupPlanView, groupCancelNotes, nameMatches, ageText, sendLeft } from './bareosCancelText.js';
 import { shortTs } from './bareosViewText.js';
 
 const ROW = { display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8 };
@@ -64,8 +64,8 @@ export function GroupCancelModal({ g, waitMs = null, busy = false, error = '', o
           그룹 VM {g.vmIds?.length ?? '—'}대{g.lastFire?.at ? ` · 마지막 회차 ${shortTs(g.lastFire.at)}${g.lastFire.key ? `(${g.lastFire.key})` : ''}` : ''} · {pv.head}
         </div>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 130px), 1fr))', gap: 8 }}>
-          <Count label="이번 회차 실행 중" n={plan.phase === 'running' ? plan.fire : plan.progress?.started} hint="취소를 한 번에 보냄" tone="#93c5fd" />
-          <Count label="보낼 차례" n={plan.progress && !plan.progress.queued ? Math.max(0, (plan.progress.toSend ?? 0) - (plan.progress.sent ?? 0)) : plan.phase === 'queued' ? g.vmIds?.length : 0} hint="보내지 않음 → 시작 전 멈춤" />
+          <Count label="이번 회차 실행 중" n={plan.phase === 'sending' ? (plan.progress?.started ?? 0) + (plan.progress?.inflight ?? 0) : plan.fire} hint={plan.progress?.inflight ? `회신 대기 ${plan.progress.inflight} 포함 — 시작한 뒤 취소` : '취소를 한 번에 보냄'} tone="#93c5fd" />
+          <Count label="보낼 차례" n={plan.phase === 'queued' ? g.vmIds?.length : plan.phase === 'sending' ? sendLeft(plan.progress) : 0} hint="보내지 않음 → 시작 전 멈춤" />
           <Count label="그 밖 실행 중" n={plan.extra} hint="Bareos 스케줄 · 수동(아래에서 고르면)" />
           <Count label="멈추는 중" n={plan.sent} hint={plan.stuck ? `멈추지 않음 ${plan.stuck} — 다시 보냄` : '다시 보내지 않음'} tone="#fdba74" />
         </div>

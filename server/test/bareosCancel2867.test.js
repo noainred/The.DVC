@@ -29,7 +29,7 @@ const { sanitizeEdgeResult } = await import('../src/bareos/edgeResult.js');
 const { RESULT_MS } = await import('../src/bareos/edgeOps.js');
 
 /** 가짜 Director — run 은 R 로 남고(끝나지 않는다) cancel 은 cancelTo 상태로 바꾼다(기본 A — 바로 멈춤). */
-const D = { jobs: new Map(), runs: new Map(), nextId: 5000, cmds: [], gate: null, gateFor: null, cancelTo: 'A' };
+const D = { jobs: new Map(), runs: new Map(), nextId: 5000, cmds: [], gate: null, gateFor: null, cancelTo: 'A', cancelFail: false };
 async function handle(cmd) {
   D.cmds.push(cmd);
   if (D.gate && (!D.gateFor || D.gateFor(cmd))) await D.gate;
@@ -44,7 +44,7 @@ async function handle(cmd) {
     const r = D.runs.get(Number(kv.jobid));
     return { jobs: r ? [{ jobid: Number(kv.jobid), job: `${r.name}.2026`, name: r.name, type: 'B', level: 'I', jobstatus: r.status, starttime: '2026-11-03 01:00:00', endtime: r.status === 'R' ? '' : '2026-11-03 01:05:00', jobbytes: 0, jobfiles: 0, joberrors: 0 }] : [] };
   }
-  if (cmd.startsWith('cancel jobid=')) { const r = D.runs.get(Number(kv.jobid)); if (!r) return { error: ['No Jobs running.'] }; r.status = D.cancelTo; return { cancel: { jobid: Number(kv.jobid) } }; }
+  if (cmd.startsWith('cancel jobid=')) { const r = D.runs.get(Number(kv.jobid)); if (!r || D.cancelFail) return { error: ['No Jobs running.'] }; r.status = D.cancelTo; return { cancel: { jobid: Number(kv.jobid) } }; }
   if (cmd.startsWith('list jobs')) return { jobs: [] };
   return { error: [`unknown command ${cmd}`] };
 }
@@ -58,7 +58,7 @@ const USERS = {
 let srv; let base; let fd; let store; let registry; let groups; let runner; let poller;
 
 const VMS = [];
-for (let i = 1; i <= 14; i++) VMS.push({ id: `vc-a:vm-${i}`, vcenterId: 'vc-a', name: `a-${String(i).padStart(2, '0')}`, folder: 'DC-A / g', powerState: 'POWERED_ON', storageGB: 10, vcDcPath: 'DC-A', folderPath: '/g' });
+for (let i = 1; i <= 20; i++) VMS.push({ id: `vc-a:vm-${i}`, vcenterId: 'vc-a', name: `a-${String(i).padStart(2, '0')}`, folder: 'DC-A / g', powerState: 'POWERED_ON', storageGB: 10, vcDcPath: 'DC-A', folderPath: '/g' });
 VMS.push({ id: 'vc-b:vm-1', vcenterId: 'vc-b', name: 'b-01', folder: 'DC-B', powerState: 'POWERED_ON', storageGB: 10, vcDcPath: 'DC-B', folderPath: '/' });
 
 before(async () => {
@@ -286,16 +286,29 @@ test('⑤ 이미 단건 취소를 보낸 실행에는 묶음 취소를 다시 �
 });
 
 test('⑤ 보내는 중 — 보내던 덩어리는 끊지 않고 회신 뒤 그 실행을 취소한다', async () => {
-  const g = await makeGroup('SEND', ['vc-a:vm-4', 'vc-a:vm-5']);
+  const g = await makeGroup('SEND', ['vc-a:vm-4', 'vc-a:vm-5', 'vc-a:vm-15']);
   const names = new Set(['vc-a:vm-4', 'vc-a:vm-5'].map((id) => jobOf(id).bareosJob));
+  // vm-15 는 이미 돌고 있다(Bareos 스케줄 — 러너가 '이미 실행 중' 으로 건너뛴다) → 그 밖 실행 1
+  const pj = jobOf('vc-a:vm-15');
+  const pid = D.nextId++;
+  D.runs.set(pid, { name: pj.bareosJob, status: 'R' });
+  registry.markPending(pj.id, { jobid: pid, level: 'Incremental', by: 'bareos', trigger: 'schedule' });
   let release; D.gate = new Promise((r) => { release = r; }); D.gateFor = (cmd) => cmd.startsWith('run ') && names.has(/job=(\S+)/.exec(cmd)?.[1]);
   D.cancelTo = 'R';
   let r = await call('admin', 'POST', `/groups/${g.id}/run`, {});
   assert.equal(r.s, 202, r.t);
   assert.ok(await until(() => D.cmds.some((c) => c.startsWith('run ') && names.has(/job=(\S+)/.exec(c)?.[1]))), '첫 run 이 Director 에 닿음(회신 대기)');
+  // 반증 F3: 보내는 중 계획 — 회신 대기 덩어리(2)는 '그 밖' 도 '시작 전 멈춤' 도 아니다
+  const tr = await call('admin', 'GET', '/groups/tree?vcenterId=vc-a');
+  const plan = tr.j.groups.find((x) => x.id === g.id).stop;
+  assert.equal(plan.phase, 'sending');
+  assert.equal(plan.extra, 1, '그 밖 실행은 이미 돌던 vm-15 하나뿐');
+  assert.equal(plan.progress.inflight, 2);
   r = await call('admin', 'POST', `/groups/${g.id}/cancel`, { confirmName: 'SEND' });
   assert.equal(r.s, 202, r.t);
   assert.equal(r.j.phase, 'sending');
+  assert.equal(r.j.halted, 0, '회신 대기 덩어리는 시작 전 멈춤이 아니다');
+  assert.equal(r.j.fire, 2, '회신 대기 2대는 시작한 뒤 취소된다');
   r = await call('admin', 'POST', `/groups/${g.id}/run`, {});
   assert.equal(r.s, 409, '멈추는 동안 같은 그룹 실행은 409');
   D.gate = null; release();
@@ -304,8 +317,10 @@ test('⑤ 보내는 중 — 보내던 덩어리는 끊지 않고 회신 뒤 그 
   assert.equal(lf.canceled.phase, 'sending');
   assert.equal(lf.canceled.canceled, 2, '보낸 덩어리의 실행은 회신을 받은 뒤 취소');
   assert.equal(lf.started, 2);
-  for (const it of lf.items) assert.ok(D.cmds.includes(`cancel jobid=${it.jobid}`));
-  for (const it of lf.items) D.runs.get(it.jobid).status = 'A';
+  for (const it of lf.items.filter((x) => x.jobid)) assert.ok(D.cmds.includes(`cancel jobid=${it.jobid}`));
+  assert.ok(!D.cmds.includes(`cancel jobid=${pid}`), '범위 확대를 고르지 않으면 그 밖 실행은 그대로');
+  for (const it of lf.items.filter((x) => x.jobid)) D.runs.get(it.jobid).status = 'A';
+  D.runs.get(pid).status = 'T';
   D.cancelTo = 'A';
 });
 
@@ -404,5 +419,60 @@ test('⑥ 범위 확대 · 다음 회차 건너뛰기 — 그 밖 실행(Bareos 
   r = await call('admin', 'PUT', `/groups/${g.id}`, { name: cur.name, vmIds: cur.vmIds, schedule: { ...DAILY, time: '03:20' }, storage: '', pool: '', updatedAt: cur.updatedAt });
   assert.equal(r.s, 200, r.t);
   assert.equal(groups.getGroup(g.id).skipKey, '');
+  D.cancelTo = 'A';
+});
+
+test('⑦ 반증 F1 — 실행 중이라 차지하지 못한 예약 회차는 중단 때 돌리지 않음으로 남긴다(중단 직후 다시 출발하지 않게)', async () => {
+  const g = await makeGroup('DUE', ['vc-a:vm-16'], { schedule: DAILY });
+  D.cancelTo = 'R';
+  await runAndWait(g);
+  const nx = S.nextSlot(groups.getGroup(g.id).schedule, Date.now());
+  const nowF = nx.at + 30_000;   // 그 회차 시각이 지났다(틱은 실행 중이라 차지하지 못했다고 본다)
+  const r = runner.cancelGroupRun(g.id, { by: 'adm', now: nowF });
+  assert.equal(r.dueKey, nx.key);
+  await r.done;
+  const g2 = groups.getGroup(g.id);
+  assert.equal(g2.missed.reason, 'stopped');
+  assert.equal(g2.lastKey, nx.key);
+  const t = await runner.groupTick(nowF + 1_000);
+  assert.ok(!t.fired.includes(g.id), '그 회차를 다시 보내지 않는다');
+  assert.match(g2.lastFire.canceled.dueKey, /\d{4}-/);
+  for (const it of g2.lastFire.items.filter((x) => x.jobid)) D.runs.get(it.jobid).status = 'A';
+  D.cancelTo = 'A';
+});
+
+test('⑦ 반증 F2 — 취소가 한 건도 가지 않으면 중단하지 못함(effective false · 사유) · 보관 정리를 막지 않는다', async () => {
+  const g0 = await makeGroup('FAIL', ['vc-a:vm-17', 'vc-a:vm-18']);
+  groups.updateGroup(g0.id, { name: g0.name, vmIds: g0.vmIds, schedule: g0.schedule, storage: '', pool: '', keep: 3 }, { by: 'adm' });
+  D.cancelTo = 'R'; D.cancelFail = true;
+  const fire = await runAndWait(g0);
+  let r = await call('admin', 'POST', `/groups/${g0.id}/cancel`, { confirmName: 'FAIL' });
+  assert.equal(r.s, 202, r.t);
+  assert.ok(await until(() => groups.getGroup(g0.id).lastFire?.canceled));
+  const c = groups.getGroup(g0.id).lastFire.canceled;
+  assert.equal(c.effective, false);
+  assert.equal(c.failed, 2);
+  assert.match(c.reason, /취소 실패/);
+  assert.equal(runner.pruneDue(groups.getGroup(g0.id), new Map(), Date.now() + 365 * 86_400_000), true, '멈추지 못한 회차는 보관 정리를 막지 않는다');
+  // 다시 시도할 수 있다(이번 회차 실행이 그대로 돈다)
+  r = await call('admin', 'GET', '/groups/tree?vcenterId=vc-a');
+  assert.equal(r.j.groups.find((x) => x.id === g0.id).stop.phase, 'running');
+  D.cancelFail = false;
+  for (const it of fire.items) D.runs.get(it.jobid).status = 'A';
+  D.cancelTo = 'A';
+});
+
+test('⑦ 반증 F7 — 회차 뒤 그룹에서 뺀 VM 의 이번 회차 실행도 취소한다', async () => {
+  const g = await makeGroup('MOVE', ['vc-a:vm-19', 'vc-a:vm-20']);
+  D.cancelTo = 'R';
+  const fire = await runAndWait(g);
+  const cur = groups.getGroup(g.id);
+  groups.updateGroup(g.id, { name: cur.name, vmIds: ['vc-a:vm-19'], schedule: cur.schedule, storage: '', pool: '' }, { by: 'adm' });
+  const r = await call('admin', 'POST', `/groups/${g.id}/cancel`, { confirmName: 'MOVE' });
+  assert.equal(r.s, 202, r.t);
+  assert.equal(r.j.fire, 2);
+  assert.ok(await until(() => groups.getGroup(g.id).lastFire?.canceled));
+  for (const it of fire.items) assert.ok(D.cmds.includes(`cancel jobid=${it.jobid}`));
+  for (const it of fire.items) D.runs.get(it.jobid).status = 'A';
   D.cancelTo = 'A';
 });

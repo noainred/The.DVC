@@ -173,13 +173,19 @@ export async function runGroup(groupId, { trigger = 'manual', by = '', level = n
     // Director 마다 차례로(법인 하나 = 보통 Director 하나), RUN_JOBS_MAX 씩
     const byDir = new Map();
     for (const s of send) { if (!byDir.has(s.dir)) byDir.set(s.dir, []); byDir.get(s.dir).push(s); }
-    if (ctl) ctl.progress = { total: items.length, toSend: send.length, sent: 0, started: 0 };
+    if (ctl) {
+      ctl.progress = { total: items.length, toSend: send.length, sent: 0, started: 0, inflight: 0 };
+      // v2.867 반증 F3: 중단 계획이 '이번 회차' 와 '그 밖 실행' 을 가르는 근거(보내는 중에는 lastFire 가 아직 이번 회차가 아니다)
+      ctl.sendJobIds = new Set(send.map((s) => s.job.id));
+      ctl.startedJobids = new Set();
+    }
     for (const [dir, list] of byDir) {
       for (let i = 0; i < list.length; i += RUN_JOBS_MAX) {
         const chunk = list.slice(i, i + RUN_JOBS_MAX);
         // v2.867 회차 중단 — 다음 덩어리를 보내지 않는다(보내는 중이던 덩어리는 회신을 받았다 — 그 실행은 아래에서 취소)
         if (stopped()) { for (const s of chunk) Object.assign(s.it, { state: 'halted', reason: HALT_REASON }); continue; }
         let res;
+        if (ctl?.progress) ctl.progress.inflight = chunk.length;   // 회신을 기다리는 덩어리(중단해도 끊지 않는다 — 시작한 뒤 취소)
         try {
           const sig = signal || AbortSignal.timeout(RUN_DEADLINE_MS);
           res = await onDirector(dir, 'runJobs', {
@@ -188,6 +194,7 @@ export async function runGroup(groupId, { trigger = 'manual', by = '', level = n
         } catch (e) {
           // Director 호출이 통째로 실패 — 잡마다 lastError 를 덮지 않는다(잡이 아니라 Director·전달의 문제다 · v2.830 검토 L3)
           const st = chunkErrorState(e);
+          if (ctl?.progress) { ctl.progress.inflight = 0; ctl.progress.sent += chunk.length; }
           for (const s of chunk) {
             s.it.state = st;
             s.it.reason = st === 'unknown' ? `결과 모름 — ${reasonOf(e)} Director 에서 실행 여부를 확인하세요.` : st === 'notsent' ? `보내지 못함 — ${reasonOf(e)}` : reasonOf(e);
@@ -216,7 +223,12 @@ export async function runGroup(groupId, { trigger = 'manual', by = '', level = n
           ledgerError = `백업 대상 원장에 실행 기록을 쓰지 못했습니다(${String(e?.message || e).slice(0, 160)}) — 시작한 실행의 결과가 목록에 늦게 반영되거나 반영되지 않을 수 있습니다. Director 에서 확인하세요.`;
           console.warn(`[bareos] 그룹 ‘${g.name}’ ${ledgerError}`);
         }
-        if (ctl?.progress) { ctl.progress.sent += chunk.length; ctl.progress.started = items.filter((x) => x.state === 'started').length; }
+        if (ctl?.progress) {
+          ctl.progress.inflight = 0;
+          ctl.progress.sent += chunk.length;
+          ctl.progress.started = items.filter((x) => x.state === 'started').length;
+          for (const x of chunk) if (x.it.state === 'started' && Number.isInteger(x.it.jobid)) ctl.startedJobids.add(x.it.jobid);
+        }
       }
     }
     // v2.867 회차 중단 — 이번 회차가 시작한 실행을 법인 쪽에서 한 번에 취소한다(잠금은 이 실행이 이미 잡고 있다). 마지막 덩어리 회신 뒤
@@ -225,7 +237,9 @@ export async function runGroup(groupId, { trigger = 'manual', by = '', level = n
       const c = ctl.cancel || { at: Date.now(), by: '', includeScheduled: false };
       const mine = send.filter((s) => s.it.state === 'started' && Number.isInteger(s.it.jobid));
       const r = await cancelLive(mine.map((s) => ({ job: s.job, jobid: s.it.jobid, it: s.it })), { by: c.by, held: true });
-      const extra = c.includeScheduled ? await cancelLive(extraTargets(g, new Set(send.map((s) => s.job.id)), jobs), { by: c.by }) : null;
+      // 반증 F5: 그 밖 실행은 지금 원장으로 다시 고른다(시작 때 사본은 그사이 단건 취소 · 새 실행을 모른다)
+      const fresh = c.includeScheduled ? new Map(jobDigests().filter((j) => j.vcenterId === g.vcenterId).map((j) => [j.vmId, j])) : null;
+      const extra = c.includeScheduled ? await cancelLive(extraTargets(g, new Set(send.map((s) => s.job.id)), fresh), { by: c.by }) : null;
       canceled = cancelSummary(c, 'sending', r, extra, items.filter((x) => x.state === 'halted').length);
     }
   } catch (e) {
@@ -261,29 +275,43 @@ export async function runGroup(groupId, { trigger = 'manual', by = '', level = n
 export const HALT_REASON = '회차 중단으로 보내지 않았습니다.';
 /** 묶음 취소 한 번의 Director 호출 시한(덩어리마다) — 실행과 같은 관계(엣지 인출 대기 + 회신 시한보다 길게). */
 export const CANCEL_DEADLINE_MS = PICKUP_MS + RESULT_MS.cancelJobs + 60_000;
-const PHASE_TEXT = Object.freeze({ queued: '줄 대기', sending: '보내는 중', running: 'Director 실행 중' });
+const PHASE_TEXT = Object.freeze({ queued: '줄 대기', sending: '보내는 중', running: 'Director 실행 중', extra: '그 밖 실행만' });
 
 /** 감사 · 회차 기록 한 줄(사람이 읽는다). */
 export function cancelAuditText(c) {
-  const parts = [`회차 중단(${PHASE_TEXT[c.phase] || c.phase} · ${c.scope === 'all' ? '그룹 VM 의 실행 중 전부' : '이번 회차만'}${c.by ? ` · ${c.by}` : ''})`];
+  const parts = [`${c.effective === false ? '회차 중단 못 함' : '회차 중단'}(${PHASE_TEXT[c.phase] || c.phase} · ${c.scope === 'all' ? '그룹 VM 의 실행 중 전부' : '이번 회차만'}${c.by ? ` · ${c.by}` : ''})`];
   for (const [k, t] of [['canceled', '취소 보냄'], ['finished', '이미 끝남'], ['cleared', '추적만 해제'], ['halted', '시작 전 멈춤'], ['failed', '취소 실패'], ['unknown', '결과 모름'], ['busy', '다른 요청 중']]) if (c[k] > 0) parts.push(`${t} ${c[k]}`);
   if (c.extra) {
     const bad = c.extra.failed + c.extra.unknown + c.extra.busy;
     parts.push(`그 밖 실행 취소 ${c.extra.canceled}${bad ? `(실패·모름 ${bad})` : ''}`);
   }
+  if (c.dueKey) parts.push(`차례였던 회차 ${c.dueKey} 돌리지 않음`);
   if (c.skipKey) parts.push(`다음 회차 ${c.skipKey} 건너뜀`);
+  if (c.effective === false && c.reason) parts.push(`사유 ${c.reason}`);
   return parts.join(' · ');
 }
 
-const ZERO = Object.freeze({ canceled: 0, finished: 0, cleared: 0, failed: 0, unknown: 0, busy: 0 });
-/** 결과 합(순수) — 중단 기록 lastFire.canceled 의 모양. */
+const ZERO = Object.freeze({ canceled: 0, finished: 0, cleared: 0, failed: 0, unknown: 0, busy: 0, vms: {} });
+/** 실패 · 다른 요청 중 · 결과 모름 항목의 첫 사유(화면이 '중단하지 못함' 의 까닭으로 보인다 — 옛 엣지면 업그레이드 안내). */
+const firstReason = (...rs) => {
+  for (const r of rs) for (const v of Object.values(r?.vms || {})) if (['failed', 'busy', 'unknown'].includes(v.state) && v.reason) return String(v.reason).slice(0, 300);
+  return '';
+};
+/**
+ * 결과 합(순수) — 중단 기록 lastFire.canceled 의 모양.
+ * effective = 실제로 무언가 멈췄거나 멈췄을 수 있다(취소 보냄 · 시작 전 멈춤 · 결과 모름) — 반증 F2: 취소가 한 건도 가지 않은 시도(옛 엣지 · 전부 실패)를
+ *   '중단됨' 으로 보이거나 보관 정리를 막지 않게. 보관 정리는 effective 일 때만 건너뛴다(pruneDue).
+ */
 export function cancelSummary(c, phase, r, extra, halted = 0) {
   const x = r || ZERO;
+  const effective = x.canceled + halted + x.unknown + (extra ? extra.canceled + extra.unknown : 0) > 0;
+  const reason = effective ? '' : firstReason(x, extra);
   return {
     at: c.at, by: String(c.by || ''), phase, scope: c.includeScheduled ? 'all' : 'fire',
     canceled: x.canceled, finished: x.finished, cleared: x.cleared, failed: x.failed, unknown: x.unknown, busy: x.busy, halted,
     extra: extra ? { canceled: extra.canceled, finished: extra.finished, cleared: extra.cleared, failed: extra.failed, unknown: extra.unknown, busy: extra.busy } : null,
-    ...(c.skipKey ? { skipKey: c.skipKey } : {}),
+    effective, ...(reason ? { reason } : {}),
+    ...(c.skipKey ? { skipKey: c.skipKey } : {}), ...(c.dueKey ? { dueKey: c.dueKey } : {}),
   };
 }
 
@@ -298,9 +326,11 @@ const fireJobids = (lf) => new Set((lf?.items || []).filter((it) => (it.state ==
  */
 function liveTargets(g, jobsByVm, { exceptJobIds = new Set(), onlyJobids = null, skipJobids = null, now = Date.now() } = {}) {
   const out = [];
-  for (const vmId of g.vmIds) {
+  const demo = isDemoActive();
+  for (const vmId of targetVmIds(g, !!onlyJobids)) {
     const j = jobsByVm.get(vmId);
     if (!j || exceptJobIds.has(j.id)) continue;
+    if (!!j.demo !== demo) continue;   // 반증 F6: 데모/실제가 섞인 잡은 다루지 않는다(runGroup · 단건 modeMismatch 와 같은 규칙)
     const run = runningRunOf(j);
     if (!run) continue;
     if (onlyJobids && !onlyJobids.has(run.jobid)) continue;
@@ -310,6 +340,13 @@ function liveTargets(g, jobsByVm, { exceptJobIds = new Set(), onlyJobids = null,
     out.push({ job: j, jobid: run.jobid });
   }
   return out;
+}
+/**
+ * 볼 VM — 지금 그룹 VM, 이번 회차 실행을 고를 때는 회차 기록의 VM 도(반증 F7: 회차 뒤 그룹에서 뺀 VM 의 이번 회차 실행을 놓치지 않게).
+ */
+function targetVmIds(g, withFire) {
+  if (!withFire) return g.vmIds;
+  return [...new Set([...g.vmIds, ...(g.lastFire?.items || []).map((it) => it.vmId).filter(Boolean)])];
 }
 /** 그 밖 실행(Bareos 스케줄 · 수동) — 러너가 이번에 다룬 잡을 뺀 나머지. */
 const extraTargets = (g, exceptJobIds, jobsByVm, now = Date.now()) => liveTargets(g, jobsByVm, { exceptJobIds, now });
@@ -407,15 +444,21 @@ export function cancelPlan(g, jobsByVm, now = Date.now()) {
   const e = _runs.get(g.id);
   const queued = !!e && _queued.get(g.id) === e;
   const sending = !queued && !!e && _groupBusy.has(g.id);
-  const mine = queued || sending ? new Set() : fireJobids(g.lastFire);
+  // 반증 F3: 보내는 중에는 이번 회차 실행 = 러너가 시작한 jobid · 이번에 보내는 잡은 '그 밖' 이 아니다(시작 전이거나 회신 대기)
+  const mine = queued ? new Set() : sending ? (e.startedJobids || new Set()) : fireJobids(g.lastFire);
+  const sendIds = sending ? (e.sendJobIds || new Set()) : new Set();
+  const members = new Set(g.vmIds);
+  const demo = isDemoActive();
   let fire = 0; let extra = 0; let sent = 0; let stuck = 0;
-  for (const vmId of g.vmIds) {
+  for (const vmId of targetVmIds(g, true)) {
     const j = jobsByVm.get(vmId);
-    const run = j ? runningRunOf(j) : null;
+    const run = j && !!j.demo === demo ? runningRunOf(j) : null;
     if (!run) continue;
+    const isFire = mine.has(run.jobid);
+    if (!isFire && !members.has(vmId)) continue;   // 그룹에서 뺀 VM 의 그 밖 실행은 이 그룹 일이 아니다
     const ci = cancelInfo(j, now);
     if (ci) { sent += 1; if (ci.stuck) stuck += 1; else continue; }
-    if (mine.has(run.jobid)) fire += 1; else extra += 1;
+    if (isFire) fire += 1; else if (!sendIds.has(j.id)) extra += 1;
   }
   const phase = queued ? 'queued' : sending ? 'sending' : fire > 0 ? 'running' : null;
   return { phase, fire, extra, sent, stuck, progress: groupProgress(g.id), pruning: _pruning.has(g.id) };
@@ -437,8 +480,7 @@ export function cancelGroupRun(groupId, { by = '', includeScheduled = false, ski
   if (registryLoadError()) throw fail('unavailable', '백업 대상 원장을 읽지 못한 상태라 멈추지 않습니다(손상본 보존 — Director 에서 직접 취소하세요).');
   const jobs = new Map(jobDigests().filter((j) => j.vcenterId === g.vcenterId).map((j) => [j.vmId, j]));
   const plan = cancelPlan(g, jobs, now);
-  const e = _runs.get(groupId);
-  if (plan.phase === 'sending' && !e) throw fail('busy', `‘${g.name}’ 그룹을 보내는 중입니다 — 끝난 뒤 다시 시도하세요.`);
+  const e = _runs.get(groupId);   // queued · sending 이면 반드시 있다(cancelPlan 이 그 표로 판정했다)
   const mine = plan.phase === 'running' ? fireJobids(g.lastFire) : new Set();
   // 그 밖 실행 — 보내는 중이면 러너가 끝에서 따로 고른다(러너가 이번에 다룬 잡을 빼야 한다)
   const extraList = includeScheduled && plan.phase !== 'sending' ? liveTargets(g, jobs, { skipJobids: mine, now }) : [];
@@ -446,6 +488,10 @@ export function cancelGroupRun(groupId, { by = '', includeScheduled = false, ski
     throw fail('idle', plan.sent ? `‘${g.name}’ 그룹의 실행에는 이미 취소를 보냈습니다 — Director 가 멈추기를 기다리는 중입니다.` : `‘${g.name}’ 그룹에서 멈출 실행이 없습니다 — 회차가 이미 끝났습니다.`);
   }
   const c = { at: now, by: String(by || ''), includeScheduled: !!includeScheduled };
+  // 반증 F1: 실행 중이라 틱이 차지하지 못한 예약 회차(지금 차례 — 따라잡는 범위 안)가 있으면, 중단이 끝나자마자 그 회차가 다시 출발했다.
+  //   멈추라고 했으므로 그 회차는 '중단으로 돌리지 않음' 으로 남긴다(건너뛰기를 고르면 그다음 회차를 건너뛴다).
+  const due = decideFire(g, now);
+  if (due.action === 'fire' && recordMisses([{ id: groupId, slot: due.slot, reason: 'stopped' }]).includes(groupId)) c.dueKey = due.slot.key;
   if (skipNext) {
     const nx = nextSlot(g.schedule, now);
     if (nx) {
@@ -456,15 +502,18 @@ export function cancelGroupRun(groupId, { by = '', includeScheduled = false, ski
     e.cancel = c; e.ctrl.abort();
     _cancelling.set(groupId, { ...c, phase: 'sending', entry: e });
     const p = e.progress;
-    return { phase: 'sending', fire: p?.started ?? 0, extra: 0, halted: p ? Math.max(0, p.toSend - p.sent) : 0, skipKey: c.skipKey || '', done: Promise.resolve(null) };
+    // 반증 F3: 회신을 기다리는 덩어리(inflight)는 시작한 뒤 취소된다 — 시작 전 멈춤에 넣지 않는다
+    return { phase: 'sending', fire: p ? (p.started || 0) + (p.inflight || 0) : 0, extra: includeScheduled ? plan.extra : 0, halted: p ? Math.max(0, p.toSend - p.sent - (p.inflight || 0)) : 0,
+      skipKey: c.skipKey || '', dueKey: c.dueKey || '', done: Promise.resolve(null) };
   }
-  const phase = plan.phase || 'running';
+  const phase = plan.phase || 'extra';
   if (phase === 'queued') {
     // 줄에서 뺀다 — 차례가 와도 아무것도 하지 않는다. 회차 기록은 지금(전부 시작 전 멈춤)
     e.halted = true; e.cancel = c; e.ctrl.abort();
     if (_queued.get(groupId) === e) _queued.delete(groupId);
     const items = g.vmIds.map((vmId) => ({ vmId, vmName: jobs.get(vmId)?.vmName || vmId, state: 'halted', reason: HALT_REASON }));
     _cancelling.set(groupId, { ...c, phase });
+    noteGroupRunStart(`${groupId}#cancel`, `${g.name} 회차 중단`);   // 반증 F4: 뒤에서 도는 중단도 업그레이드 자동 적용이 기다린다
     const done = (async () => {
       const extra = extraList.length ? await cancelLive(extraList, { by: c.by }) : null;
       const canceled = cancelSummary(c, 'queued', null, extra, items.length);
@@ -474,17 +523,18 @@ export function cancelGroupRun(groupId, { by = '', includeScheduled = false, ski
       });
       logAudit({ user: c.by || 'system', action: 'Bareos 그룹 회차 중단', target: `${g.vcenterId}/${g.name}`, detail: `${e.key ? `회차 ${e.key} · ` : ''}${cancelAuditText(canceled)}`, ip: '' });
       return canceled;
-    })().finally(() => { if (_cancelling.get(groupId)?.at === c.at) _cancelling.delete(groupId); });
-    return { phase, fire: 0, extra: extraList.length, halted: items.length, skipKey: c.skipKey || '', done };
+    })().finally(() => { if (_cancelling.get(groupId)?.at === c.at) _cancelling.delete(groupId); noteGroupRunEnd(`${groupId}#cancel`); });
+    return { phase, fire: 0, extra: extraList.length, halted: items.length, skipKey: c.skipKey || '', dueKey: c.dueKey || '', done };
   }
-  // running — 이번 회차가 시작해 아직 도는 실행(+ 고르면 그 밖 실행)
+  // running — 이번 회차가 시작해 아직 도는 실행(+ 고르면 그 밖 실행) · extra — 그 밖 실행만(이번 회차 실행은 없다)
   const fireAt = g.lastFire?.at ?? null;
-  const fireTargets = liveTargets(g, jobs, { onlyJobids: mine, now });
+  const fireTargets = phase === 'running' ? liveTargets(g, jobs, { onlyJobids: mine, now }) : [];
   _cancelling.set(groupId, { ...c, phase });
+  noteGroupRunStart(`${groupId}#cancel`, `${g.name} 회차 중단`);   // 반증 F4
   const done = (async () => {
     const r = await cancelLive(fireTargets, { by: c.by });
     const extra = extraList.length ? await cancelLive(extraList, { by: c.by }) : null;
-    const canceled = cancelSummary(c, 'running', r, extra, 0);
+    const canceled = cancelSummary(c, phase, r, extra, 0);
     if (fireAt != null && fireTargets.length) {
       const patch = {};
       for (const [vmId, v] of Object.entries(r.vms)) patch[vmId] = v.state === 'canceled' ? { state: 'canceled', reason: v.reason } : { reason: v.reason };
@@ -492,8 +542,8 @@ export function cancelGroupRun(groupId, { by = '', includeScheduled = false, ski
     }
     logAudit({ user: c.by || 'system', action: 'Bareos 그룹 회차 중단', target: `${g.vcenterId}/${g.name}`, detail: `${g.lastFire?.key ? `회차 ${g.lastFire.key} · ` : ''}${cancelAuditText(canceled)}`, ip: '' });
     return canceled;
-  })().finally(() => { if (_cancelling.get(groupId)?.at === c.at) _cancelling.delete(groupId); });
-  return { phase, fire: fireTargets.length, extra: extraList.length, halted: 0, skipKey: c.skipKey || '', done };
+  })().finally(() => { if (_cancelling.get(groupId)?.at === c.at) _cancelling.delete(groupId); noteGroupRunEnd(`${groupId}#cancel`); });
+  return { phase, fire: fireTargets.length, extra: extraList.length, halted: 0, skipKey: c.skipKey || '', dueKey: c.dueKey || '', done };
 }
 
 
@@ -509,7 +559,7 @@ export const PRUNE_DEADLINE_MS = PICKUP_MS + RESULT_MS.pruneJobs + 60_000;
 export function pruneDue(g, jobsByVm, now = Date.now()) {
   if (g.keep == null || !g.lastFire || !(g.lastFire.started > 0)) return false;
   // v2.867 중단된 회차로는 정리하지 않는다(사용자 결정 ④ — 성공이 덜 쌓인 회차를 기준으로 오래된 실행을 지우지 않게). 다음 정상 회차가 끝난 뒤 돈다
-  if (g.lastFire.canceled) return false;
+  if (g.lastFire.canceled && g.lastFire.canceled.effective !== false) return false;   // 반증 F2: 아무것도 멈추지 못한 시도는 막지 않는다
   // 반증 F5: 그 실행으로 이미 정리했으면 다시 하지 않는다 — 보관 개수를 바꾸기만 해서는 돌지 않는다(다음 그룹 실행이 끝난 뒤 · 화면 안내와 같게)
   if (g.lastPrune && g.lastPrune.fireAt === g.lastFire.at) return false;
   if (now - g.lastFire.at >= PRUNE_WAIT_MAX_MS) return true;
