@@ -230,15 +230,20 @@ export function buildHostAlloc(h, vms) {
   };
 }
 
+/** 범위 판정 하나 — 계층(buildGpuAllocTree)과 법인 목록(allocCorpRoster)이 같은 것을 쓴다. 조회 범위(allowed)가 먼저다. */
+function scopeTest({ allowed = null, vcenterId = null, vcenterIds = null } = {}) {
+  // v2.853: vcenterIds = 화면 법인 칩에서 고른 법인들(빈 집합·null = 전체). 범위 밖 id 는 그냥 빠진다.
+  const pick = vcenterIds && vcenterIds.size ? vcenterIds : null;
+  return (vc) => (!allowed || allowed.has(vc)) && (!vcenterId || vc === vcenterId) && (!pick || pick.has(vc));
+}
+
 /**
  * 스냅샷 → 계층.
  * @param {object} snap store.get()
  * @param {{ allowed?: Set<string>|null, vcenterId?: string|null, vcenterIds?: Set<string>|null }} opt allowed = 사용자 조회 범위(null = 무제한) — 요청 필터보다 먼저.
  */
 export function buildGpuAllocTree(snap, { allowed = null, vcenterId = null, vcenterIds = null } = {}) {
-  // v2.853: vcenterIds = 화면 법인 칩에서 고른 법인들(빈 집합·null = 전체). 조회 범위(allowed)가 먼저다 — 범위 밖 id 는 그냥 빠진다.
-  const pick = vcenterIds && vcenterIds.size ? vcenterIds : null;
-  const inScope = (vc) => (!allowed || allowed.has(vc)) && (!vcenterId || vc === vcenterId) && (!pick || pick.has(vc));
+  const inScope = scopeTest({ allowed, vcenterId, vcenterIds });
   const gpuVmsByHost = new Map();
   for (const v of snap?.vms || []) {
     if (!v || !v.gpu || v.template || !v.host || !inScope(v.vcenterId)) continue;
@@ -288,6 +293,25 @@ export function buildGpuAllocTree(snap, { allowed = null, vcenterId = null, vcen
     return { id: vc.id, name: vc.name, city: vc.city, country: vc.country, region: vc.region, totals: finishTotals(vt), datacenters };
   }).sort(byName);
   return { totals: finishTotals(all), vcenters, truncated };
+}
+
+/**
+ * v2.869: 범위 안 법인(vCenter) 전부 — GPU 호스트가 없는 법인도(엑셀 '목차' 시트 · 내보내기 창의 법인별 시트 안내).
+ * 계층(tree)에 있는 법인은 그 노드(vc)를 붙이고, 없는 법인은 vc = null. id 순(화면 법인 칩과 같은 순서).
+ * @returns {{ id: string, name: string, city: string, country: string, vc: object|null }[]}
+ */
+export function allocCorpRoster(snap, opt = {}, tree = null) {
+  const inScope = scopeTest(opt);
+  const byId = new Map((tree?.vcenters || []).map((v) => [v.id, v]));
+  const out = new Map();
+  for (const m of snap?.vcenters || []) {
+    if (!m) continue;
+    const id = str(m.id);
+    if (!id || out.has(id) || !inScope(id)) continue;
+    out.set(id, { id, name: str(m.name) || id, city: str(m.location?.city), country: str(m.location?.country), vc: byId.get(id) || null });
+  }
+  for (const v of byId.values()) if (!out.has(v.id) && inScope(v.id)) out.set(v.id, { id: v.id, name: v.name, city: v.city, country: v.country, vc: v });
+  return [...out.values()].sort((a, b) => a.id.localeCompare(b.id));
 }
 
 /** 평면 행(CSV·엑셀 '평면 표') — GPU × VM 한 줄(VM 없는 GPU 도 한 줄) + 배치 안 된 켜진 VM + 꺼진 VM. */

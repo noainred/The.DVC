@@ -23,8 +23,8 @@ import { todayStamp } from "../../util/dayKey.js";
 import { acquireExport } from '../../util/exportBusy.js';
 import { waitDrain } from '../../util/waitDrain.js'; // v2.783(점검 Q5): drain 만 기다리면 끊긴 클라이언트에서 영원히 멈춰 내보내기 잠금이 풀리지 않았다
 import { snapMemo } from '../../util/snapCache.js';
-import { buildGpuAllocTree } from '../../gpu/allocTree.js';
-import { renderGpuAllocWorkbook, allocCsvLines, allocExportOpts, allocFileName, ALLOC_DEPTHS, ALLOC_SHEET_KEYS, XLSX_MIME as ALLOC_XLSX_MIME } from '../../gpu/allocTreeXlsx.js';
+import { buildGpuAllocTree, allocCorpRoster } from '../../gpu/allocTree.js';
+import { renderGpuAllocWorkbook, allocCsvLines, allocExportOpts, allocFileName, corpSheetNames, CORP_SHEETS_MAX, ALLOC_DEPTHS, ALLOC_SHEET_KEYS, XLSX_MIME as ALLOC_XLSX_MIME } from '../../gpu/allocTreeXlsx.js';
 import { fileStamp, localStamp, DAY_OFFSET_MIN } from '../../util/dayKey.js';
 import { tzName } from '../../vcenter/vmExportCatalog.js';
 // v2.643: CSV·텍스트 가져오기/내보내기는 관리자 이상 + 'data.csv' 권한(super_admin 항상, admin 은 권한 설정에서 끌 수 있다).
@@ -504,12 +504,15 @@ function allocTreeOf(req) {
   const raw = typeof req.query.vcenterIds === 'string' ? req.query.vcenterIds.slice(0, 20_000) : '';
   const picked = raw ? [...new Set(raw.split(',').map((x) => x.trim()).filter((x) => x && x.length <= 200))].slice(0, 100) : [];
   const vcenterIds = picked.length ? new Set(picked) : null;
-  const tree = buildGpuAllocTree(snap, { allowed: scopedVcenterIds(req.user, snap), vcenterId, vcenterIds });
+  const opt = { allowed: scopedVcenterIds(req.user, snap), vcenterId, vcenterIds };
+  const tree = buildGpuAllocTree(snap, opt);
   const names = tree.vcenters.map((v) => v.id);
   const scopeText = vcenterId ? (tree.vcenters[0]?.name || vcenterId)
     : vcenterIds ? (names.length ? `법인 ${names.join(', ')}` : '고른 법인(조회 범위 안에 없음)') : '전체 법인';
   const fileScope = vcenterId || (vcenterIds ? (names.length === 1 ? names[0] : `${names.length}corps`) : 'all');
-  return { snap, tree, vcenterId, scopeText, fileScope: String(fileScope).replace(/[^\w.-]+/g, '_').slice(0, 60) };
+  // v2.869: 범위 안 법인 전부(GPU 호스트 없는 법인 포함 — 엑셀 '목차' · 창의 법인별 시트 안내). 범위 판정은 계층과 같은 함수.
+  const roster = () => allocCorpRoster(snap, opt, tree);
+  return { snap, tree, vcenterId, scopeText, roster, fileScope: String(fileScope).replace(/[^\w.-]+/g, '_').slice(0, 60) };
 }
 api.get('/tools/gpu-alloc', requirePerm('tools'), (req, res) => {
   const { snap, tree } = allocTreeOf(req);
@@ -517,12 +520,18 @@ api.get('/tools/gpu-alloc', requirePerm('tools'), (req, res) => {
 });
 // v2.855: 내보내기 창(승인 시안 '계층 표 엑셀 내보내기')이 그릴 것 — 범위 글자 · 호스트·GPU 수 · 단계별 파일 이름(내려받기와 같은 함수).
 api.get('/tools/gpu-alloc/export-meta', csvPerm, requirePerm('tools'), (req, res) => {
-  const { snap, tree, scopeText, fileScope } = allocTreeOf(req);
+  const { snap, tree, scopeText, fileScope, roster } = allocTreeOf(req);
   const stamp = fileStamp(Date.parse(snap.generatedAt || '') || Date.now());
+  // v2.869: 법인별 시트 안내 — 범위 안 법인 수 · GPU 호스트가 있는 법인의 시트 이름(엑셀과 같은 함수 corpSheetNames). 상한을 넘는 법인은 시트가 없다.
+  const corps = roster();
+  const gpuCorps = corps.filter((c) => c.vc);
+  const names = corpSheetNames(gpuCorps.slice(0, CORP_SHEETS_MAX));
   res.json({
     scopeText, vcenters: tree.vcenters.length, hosts: tree.totals.hosts, gpus: tree.totals.gpus,
     depths: Object.keys(ALLOC_DEPTHS), sheets: [...ALLOC_SHEET_KEYS],
+    corpSheets: { corps: corps.length, withGpu: gpuCorps.length, sheets: gpuCorps.filter((c) => names.has(c.id)).map((c) => ({ id: c.id, name: c.name, ...names.get(c.id) })) },
     fileNames: Object.fromEntries(Object.keys(ALLOC_DEPTHS).map((d) => [d, allocFileName(fileScope, stamp, 'xlsx', d)])),
+    fileNamesPercorp: Object.fromEntries(Object.keys(ALLOC_DEPTHS).map((d) => [d, allocFileName(fileScope, stamp, 'xlsx', d, true)])),
     csvFileName: allocFileName(fileScope, fileStamp(), 'csv'),
   });
 });
@@ -537,10 +546,11 @@ api.get('/tools/gpu-alloc.xlsx', csvPerm, requirePerm('tools'), async (req, res)
   const lock = acquireExport('gpu.alloc.xlsx', req);
   if (!lock.ok) return res.status(lock.status).json(lock.body);
   try {
-    const { snap, tree, scopeText, fileScope } = allocTreeOf(req);
+    const { snap, tree, scopeText, fileScope, roster } = allocTreeOf(req);
     const ts = Date.parse(snap.generatedAt || '') || Date.now();
-    const buf = await renderGpuAllocWorkbook(tree, { stamp: localStamp(ts) || '', tz: tzName(DAY_OFFSET_MIN), scopeText }, { depth: opts.depth, sheets: opts.sheets });
-    const name = allocFileName(fileScope, fileStamp(ts), 'xlsx', opts.depth);
+    const percorp = opts.sheets.includes('corp');
+    const buf = await renderGpuAllocWorkbook(tree, { stamp: localStamp(ts) || '', tz: tzName(DAY_OFFSET_MIN), scopeText }, { depth: opts.depth, sheets: opts.sheets, roster: percorp ? roster() : null });
+    const name = allocFileName(fileScope, fileStamp(ts), 'xlsx', opts.depth, percorp);
     res.setHeader('Content-Type', ALLOC_XLSX_MIME);
     res.setHeader('Content-Disposition', `attachment; filename="${name}"`);
     res.end(buf);

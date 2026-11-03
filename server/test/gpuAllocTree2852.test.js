@@ -2,8 +2,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import ExcelJS from 'exceljs';
-import { buildGpuAllocTree, buildHostAlloc, gpuCapacityOf, flatRows, FLAT_COLUMNS } from '../src/gpu/allocTree.js';
-import { renderGpuAllocWorkbook, allocCsvLines, ALLOC_XLSX_SHEETS, treeLines, allocExportOpts, allocFileName } from '../src/gpu/allocTreeXlsx.js';
+import { buildGpuAllocTree, buildHostAlloc, gpuCapacityOf, flatRows, FLAT_COLUMNS, allocCorpRoster } from '../src/gpu/allocTree.js';
+import { renderGpuAllocWorkbook, allocCsvLines, ALLOC_XLSX_SHEETS, treeLines, allocExportOpts, allocFileName, corpSheetNames, SHEET_NAME_MAX, backLinkCol } from '../src/gpu/allocTreeXlsx.js';
+import { internalLinkState } from '../src/util/xlsxInternalLink.js';
 import { graphicsVmRefs, parseGpus, parseVmGpu, vmPassthroughPciIds } from '../src/vcenter/soapClient.js';
 import { sanitizeHostGpus, sanitizeVmGpuField, sanitizeInventoryList } from '../src/routes/central.js';
 import { csvCell } from '../src/util/csv.js';
@@ -145,9 +146,10 @@ test('평면 행 · CSV — 계층 열을 모두 채우고 빈 GPU 도 한 줄',
 
 test('엑셀 — 시트 3장 · 계층 표 개요 단계 · 평면 표 자동 필터', async () => {
   const t = buildGpuAllocTree(snap());
-  const buf = await renderGpuAllocWorkbook(t, { stamp: '2026-11-02 16:00', tz: 'KST', scopeText: '전체 법인' });
+  // v2.869: 기본에 법인별 시트(corp)가 들어갔다 — 여기서는 옛 3시트 구성(옛 화면이 보내는 sheets)을 본다.
+  const buf = await renderGpuAllocWorkbook(t, { stamp: '2026-11-02 16:00', tz: 'KST', scopeText: '전체 법인' }, { sheets: ['tree', 'flat', 'info'] });
   const wb = new ExcelJS.Workbook(); await wb.xlsx.load(buf);
-  assert.deepEqual(wb.worksheets.map((w) => w.name), [...ALLOC_XLSX_SHEETS]);
+  assert.deepEqual(wb.worksheets.map((w) => w.name), ALLOC_XLSX_SHEETS.slice(0, 3));
   const ws = wb.worksheets[0];
   assert.equal(ws.properties.outlineLevelRow, 5);
   const lines = treeLines(t);
@@ -183,7 +185,7 @@ test('v2.853 vcenterIds — 고른 법인만, 조회 범위가 먼저(범위 밖
 
 /* ── v2.855 내보내기 창(넣을 단계 · 시트) ───────────────────────────────── */
 test('v2.855 내보내기 선택 — 기본은 VM 까지 · 시트 셋, 모르는 값은 거부(조용히 버리지 않는다)', () => {
-  assert.deepEqual(allocExportOpts({}), { ok: true, depth: 'vm', sheets: ['tree', 'flat', 'info'] });
+  assert.deepEqual(allocExportOpts({}), { ok: true, depth: 'vm', sheets: ['tree', 'flat', 'info', 'corp'] }, 'v2.869: 법인별 시트 기본 켬');
   assert.deepEqual(allocExportOpts({ depth: 'host', sheets: 'info,tree' }), { ok: true, depth: 'host', sheets: ['tree', 'info'] });
   assert.equal(allocExportOpts({ depth: 'cluster' }).ok, false);
   assert.equal(allocExportOpts({ sheets: 'tree,evil' }).ok, false);
@@ -246,4 +248,100 @@ test('v2.868 CPU/메모리 — 호스트·VM 값 · 법인 합(MHz·MB 가중 �
   assert.deepEqual(lines[0].cells.slice(10, 16), [48, T.hostCpuPct, 768, T.hostMemPct, 8, 32]);
   const vmLine = lines.find((l) => l.cells[0] === 'a');
   assert.deepEqual(vmLine.cells.slice(10, 16), [8, 40, 32, 60, null, null]);
+});
+
+/* ── v2.869 법인별 시트(승인 시안 docs/design/gpu-alloc-corp-sheets) ───────────────── */
+test('v2.869 시트 이름 — 금지 문자 · 31자 · 끝의 - . 제거 · 고정 시트·대소문자 겹침은 ~2', () => {
+  const m = corpSheetNames([
+    { id: 'a', name: 'vc:01/[x]' }, { id: 'b', name: 'vcenter-ap-southeast-singapore-01' }, { id: 'c', name: '목차' },
+    { id: 'd', name: 'VC:01/[X]' }, { id: 'e', name: "'quoted'" }, { id: 'f', name: '' }, { id: 'g', name: 'abcdefghijklmnopqrstuvwxyz-1234-zz' },
+  ]);
+  assert.deepEqual(m.get('a'), { sheet: 'vc_01__x_', renamed: true });
+  assert.equal(m.get('b').sheet, 'vcenter-ap-southeast-singapore', '31자로 자르고 끝의 - 를 뗀다');
+  assert.equal(m.get('b').renamed, true);
+  assert.equal(m.get('c').sheet, '목차~2', '고정 시트 이름과 겹치지 않는다');
+  assert.equal(m.get('d').sheet, 'VC_01__X_~2', '대소문자만 다른 이름도 겹침');
+  assert.equal(m.get('e').sheet, 'quoted', '작은따옴표로 시작·끝 금지');
+  assert.equal(m.get('f').sheet, 'f', '이름이 없으면 id');
+  for (const v of m.values()) { assert.ok(v.sheet.length <= SHEET_NAME_MAX); assert.doesNotMatch(v.sheet, /[\\/?*[\]:]/); }
+  assert.equal(corpSheetNames([{ id: 'x', name: 'vcenter-kr' }]).get('x').renamed, false);
+});
+
+test('v2.869 법인 목록 — GPU 호스트 없는 법인도 · 조회 범위가 먼저 · 고른 법인만 · id 순', () => {
+  const s = snap(); s.vcenters.push({ id: 'vc0', name: 'vcenter-br', location: { city: 'Sao Paulo' } });
+  const t = buildGpuAllocTree(s);
+  const r = allocCorpRoster(s, {}, t);
+  assert.deepEqual(r.map((c) => c.id), ['vc0', 'vc1', 'vc2']);
+  assert.equal(r[0].vc, null, 'GPU 호스트 없는 법인은 노드 없음');
+  assert.equal(r[1].vc, t.vcenters.find((v) => v.id === 'vc1'));
+  const allowed = new Set(['vc1', 'vc0']);
+  assert.deepEqual(allocCorpRoster(s, { allowed, vcenterIds: new Set(['vc0', 'vc2']) }, buildGpuAllocTree(s, { allowed })).map((c) => c.id), ['vc0'], '범위 밖 vc2 는 골라도 빠진다');
+  assert.deepEqual(allocCorpRoster(s, { vcenterId: 'vc2' }, null).map((c) => c.id), ['vc2']);
+});
+
+test('v2.869 엑셀 — 고정 3장 + 목차 + GPU 법인마다 한 장 · 목차 링크 · ← 목차 · 탭 색 · 파일 이름', async () => {
+  const s = snap(); s.vcenters.push({ id: 'vc0', name: 'vcenter-br' });
+  const t = buildGpuAllocTree(s);
+  const roster = allocCorpRoster(s, {}, t);
+  const meta = { stamp: '2026-11-03 20:00', tz: 'KST', scopeText: '전체 법인' };
+  const wb = new ExcelJS.Workbook();
+  const buf = await renderGpuAllocWorkbook(t, meta, { roster });
+  await wb.xlsx.load(buf);
+  assert.equal(internalLinkState(), 'patched');
+  // 시트 안 링크는 읽어 들일 때 exceljs 가 값으로 되살리지 않는다(관계 없는 location) — 파일 XML 을 직접 본다.
+  const zip = await (await import('jszip')).default.loadAsync(buf);
+  const tocXml = await zip.file('xl/worksheets/sheet4.xml').async('string');
+  assert.match(tocXml, /<hyperlink ref="A5" location="&apos;vcenter-kr&apos;!A1"\/>/, '목차 → 법인 시트');
+  assert.match(tocXml, /<hyperlink ref="A6" location="&apos;vcenter-de&apos;!A1"\/>/);
+  assert.doesNotMatch(tocXml, /ref="A4"/, 'GPU 없는 법인은 링크 없음');
+  const krXml = await zip.file('xl/worksheets/sheet5.xml').async('string');
+  assert.match(krXml, /<hyperlink ref="[A-Z]+1" location="&apos;목차&apos;!A1"\/>/, '법인 시트 → 목차');
+  assert.deepEqual(wb.worksheets.map((w) => w.name), ['계층 표', '평면 표', '안내', '목차', 'vcenter-kr', 'vcenter-de'], '법인 시트는 id 순 · GPU 없는 vc0 은 시트 없음');
+  const toc = wb.getWorksheet('목차');
+  const names = [4, 5, 6].map((r) => { const v = toc.getRow(r).getCell(1).value; return typeof v === 'object' ? v.text : v; });
+  assert.deepEqual(names, ['vcenter-br', 'vcenter-kr', 'vcenter-de'], '목차는 범위 안 법인 전부');
+  assert.match(String(toc.getRow(4).getCell(10).value), /GPU 호스트 없음/);
+  assert.equal(toc.getRow(4).getCell(5).value, null, 'GPU 없는 법인의 용량은 빈 칸(0 아님)');
+  assert.equal(toc.getRow(5).getCell(1).text, 'vcenter-kr');
+  assert.equal(toc.properties.tabColor.argb, 'FF64748B');
+  const kr = wb.getWorksheet('vcenter-kr');
+  assert.match(String(kr.getRow(1).getCell(1).value), /vcenter-kr\s+\(Seoul · South Korea\)/);
+  const bc = backLinkCol(kr.getRow(1).getCell(1).value);
+  assert.equal(kr.getRow(1).getCell(bc).text, '← 목차');
+  for (let c = 2; c < bc; c++) assert.equal(kr.getRow(1).getCell(c).value, null, '제목이 넘쳐 보일 칸은 비워 둔다');
+  assert.ok(backLinkCol('GPU 할당 계층 — vcenter-ap-southeast-singapore-01  (Singapore · Singapore)') > backLinkCol('GPU 할당 계층 — kr'), '긴 제목이면 링크가 더 오른쪽');
+  assert.ok(String(kr.getRow(6).getCell(1).value).startsWith('vcenter-kr'), '법인 시트는 그 법인 줄부터');
+  const krLines = treeLines({ vcenters: [t.vcenters.find((v) => v.id === 'vc1')] });
+  assert.equal(kr.rowCount, 5 + krLines.length, '전체 계층 표에서 그 법인 줄부터 아래 그대로');
+  assert.equal(kr.getRow(4).getCell(2).value, 12, 'KPI 는 그 법인 값(할당 12 GB)');
+  assert.equal(kr.properties.tabColor.argb, 'FF3B82F6');
+  assert.equal(kr.properties.outlineLevelRow, 5);
+  const de = wb.getWorksheet('vcenter-de');
+  assert.equal(de.properties.tabColor.argb, 'FF3B82F6');
+  assert.ok(wb.getWorksheet('안내').getColumn(1).values.includes('법인별 시트'));
+  assert.equal(allocFileName('all', '20261103-2000', 'xlsx', 'vm', true), 'gpu-allocation_all_20261103-2000_percorp.xlsx');
+  assert.equal(allocFileName('all', '20261103-2000', 'xlsx', 'host', true), 'gpu-allocation_all_20261103-2000_host_percorp.xlsx');
+  // 단계는 법인 시트에도 — 호스트까지면 GPU·VM 행이 없다
+  const wb2 = new ExcelJS.Workbook();
+  await wb2.xlsx.load(await renderGpuAllocWorkbook(t, meta, { roster, depth: 'host', sheets: ['corp'] }));
+  assert.deepEqual(wb2.worksheets.map((w) => w.name), ['목차', 'vcenter-kr', 'vcenter-de']);
+  const kr2 = wb2.getWorksheet('vcenter-kr');
+  for (let r = 6; r <= kr2.rowCount; r++) assert.ok(kr2.getRow(r).outlineLevel <= 3);
+});
+
+test('v2.869 엑셀 — 할당률 90% 이상 법인 탭은 주황 · 시트 링크는 규격 모양(location 만, 외부 관계 없음)', async () => {
+  const s = snap();
+  s.vms.push(vm('vm-2', 'kr-vm2', vg('nvidia_l4-12q'), ON, 'esx1', 'vc1'));
+  const t = buildGpuAllocTree(s, { vcenterId: 'vc1' });
+  // esx1 L4 24 GB 에 12q 두 대 = 24/72 → 33%: 주황 아님. vc2 는 16 GB 에 4 GB → 25%.
+  const wb = new ExcelJS.Workbook();
+  const hot = { ...t, vcenters: t.vcenters.map((v) => ({ ...v, totals: { ...v.totals, allocPct: 95 } })) };
+  const buf = await renderGpuAllocWorkbook(hot, { stamp: 'x', tz: 'KST', scopeText: 'vcenter-kr' }, { sheets: ['corp'] });
+  await wb.xlsx.load(buf);
+  assert.equal(wb.getWorksheet('vcenter-kr').properties.tabColor.argb, 'FFF59E0B');
+  const JSZip = (await import('jszip')).default;
+  const zip = await JSZip.loadAsync(buf);
+  const tocXml1 = await zip.file('xl/worksheets/sheet1.xml').async('string');
+  assert.match(tocXml1, /<hyperlink ref="A4" location="&apos;vcenter-kr&apos;!A1"\/>/);
+  assert.equal(zip.file('xl/worksheets/_rels/sheet1.xml.rels'), null, '시트 안 링크는 외부 관계를 만들지 않는다');
 });
