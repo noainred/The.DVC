@@ -108,6 +108,8 @@ export const rateNowOf = (x) => (x?.lastRate ?? x?.aveRate ?? null);
  */
 const DIR_REASONS = [
   ['running', /\bis running\b/i],
+  // v2.867 취소를 받아 멈추는 중(예: 'is waiting for client to cancel' — 문구는 추정 · 'FD 대기' 로 오해하지 않게 client 보다 먼저)
+  ['canceling', /\bto cancel\b|\bcancel(l)?ing\b|being cancel(l)?ed/i],
   ['mount', /mount request|waiting for (a )?mount|waiting to mount/i],
   ['volume', /appendable volume|waiting for (a )?(new )?volume|media/i],
   ['maxjobs', /waiting on max|max(imum)? (concurrent|total|client|storage|job)/i],

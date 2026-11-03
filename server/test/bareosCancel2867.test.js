@@ -138,6 +138,14 @@ test('① cancelInfo — 지금 도는 실행일 때만 · CANCEL_WAIT_MS 뒤 �
   assert.equal(C.cancelTracked(sched, now - 1000 + C.CANCEL_TRACK_MS), false, '추적 기간이 지나면 대조 틱에 맡긴다');
 });
 
+test('① Director 상태 문구 — 취소를 받아 멈추는 중은 FD 대기가 아니라 canceling(진행 현황판 사유)', async () => {
+  const { dirReasonOf } = await import('../src/bareos/liveParse.js');
+  assert.equal(dirReasonOf('is waiting for client to cancel'), 'canceling');
+  assert.equal(dirReasonOf('is being canceled'), 'canceling');
+  assert.equal(dirReasonOf('is waiting for Client kr-fd to connect'), 'client');
+  assert.equal(dirReasonOf('has been canceled'), 'done');
+});
+
 /* ───────── ② 건너뛰기 ───────── */
 test('② decideFire — skipKey 회차는 skipped 로 넘기고 그 뒤 회차는 돈다', () => {
   const sched = S.normSchedule(DAILY);
