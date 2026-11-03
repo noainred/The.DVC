@@ -101,7 +101,7 @@ export default function BareosRestoreTable({ jobs, directors = [], picked, toggl
                   <span role="cell" style={{ paddingLeft: Math.min(pad, 60) }}><FolderBox ids={r.ids} picked={picked} toggle={toggle} label={r.label} /></span>
                   <span role="cell" style={{ paddingLeft: pad, paddingRight: 8, display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
                     {r.hasKids
-                      ? <button type="button" onClick={() => flip(r.key)} aria-expanded={r.isOpen} aria-label={`${r.label} ${r.isOpen ? '접기' : '펼치기'}`} style={{ background: 'none', border: 0, color: 'var(--text-dim)', cursor: 'pointer', padding: 0, width: 18, fontSize: 11 }}>{r.isOpen ? '▾' : '▸'}</button>
+                      ? <button type="button" onClick={() => flip(r.key)} aria-expanded={r.isOpen} aria-label={`${r.label} ${r.isOpen ? '접기' : '펼치기'}`} style={{ background: 'none', border: 0, color: 'var(--text)', cursor: 'pointer', padding: 0, width: 22, minHeight: 28, fontSize: 13, lineHeight: 1 }}>{r.isOpen ? '▼' : '▶'}</button>
                       : <span style={{ width: 18 }} />}
                     <b style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0, fontSize: r.kind === 'vc' ? 13.5 : 12.5 }}>{r.label}</b>
                     {r.kind === 'vc' && <span className="muted" style={{ fontSize: 11.5, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{[r.dc, r.director].filter(Boolean).join(' · ')}</span>}
@@ -122,7 +122,8 @@ export default function BareosRestoreTable({ jobs, directors = [], picked, toggl
         </div>
       </div>
 
-      <div data-bareos-restore-pickbar="" style={{ position: 'sticky', bottom: 8, zIndex: 2, display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'center', padding: '10px 14px', borderRadius: 12, border: '1px solid #3b82f6', background: 'var(--panel-deep)', boxShadow: '0 8px 24px rgba(0,0,0,.35)' }}>
+      {/* v2.867(Chromium 판독): 포탈 하단 상태바(fixed)에 '다음' 버튼이 가렸다 — 상태바 위에 붙인다(styles.css .pickbar-sticky) */}
+      <div data-bareos-restore-pickbar="" className="pickbar-sticky" style={{ display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'center', padding: '10px 14px', borderRadius: 12, border: '1px solid #3b82f6', background: 'var(--panel-deep)', boxShadow: '0 8px 24px rgba(0,0,0,.35)' }}>
         <b style={{ fontSize: 13.5 }}>선택 {picked.length}대</b>
         <span className="muted" style={{ fontSize: 12, minWidth: 0, overflowWrap: 'anywhere' }}>
           {picked.length ? `${dirNames[lockedDir] || lockedDir || '—'} · 용량 ${pickedSize(pickedJobs)} · 다음 단계에서 방식(새 VM · 덮어쓰기)과 위치를 고릅니다` : 'VM 이나 폴더를 고르세요'}
