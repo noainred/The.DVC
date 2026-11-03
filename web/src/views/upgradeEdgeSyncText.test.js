@@ -103,4 +103,15 @@ describe('엣지 자동 업그레이드 요약', () => {
     const clean = edgeSyncLine({ enabled: true, total: 2, running: true, counts: { 'up-to-date': 2 }, lastRun: { at: NOW - 60_000, outcome: 'idle', restored: true } }, NOW);
     expect(clean.tone).toBe('ok'); expect(clean.canRun).toBe(false); expect(clean.text).toMatch(/지금 동기화 중 · 마지막 1분 전 뒤처진 엣지가 없었습니다\(재시작 전\)/);
   });
+  it('v2.870 감사 A4-02 · A2-01: 판정 모름은 0 이 아니다 · 동기화 오류는 warn · 효과 없음은 구버전 + warn', () => {
+    const unk = edgeSyncLine({ enabled: true, total: 0, counts: null, lastRun: { at: NOW - 60_000, outcome: 'error', reason: 'boom' } }, NOW);
+    expect(unk.text).toMatch(/엣지 판정 모름/);
+    expect(unk.text).not.toMatch(/등록 0대|최신 0/);
+    expect(unk.tone).toBe('warn');
+    expect(edgeSyncLine({ enabled: true, total: 2, counts: { 'up-to-date': 2 }, lastRun: { at: NOW - 60_000, outcome: 'error' } }, NOW).tone).toBe('warn');
+    const ne = edgeSyncLine({ enabled: true, total: 2, counts: { 'up-to-date': 1, 'no-effect': 1 } }, NOW);
+    expect(ne.text).toMatch(/구버전 1/); expect(ne.tone).toBe('warn');
+    expect(edgeSyncSummary({ enabled: true, edgeSync: { enabled: true, total: 1, counts: { 'no-effect': 1 }, pending: [{ id: 'pl', state: 'no-effect', reason: 'r' }] } }, NOW).counts).toMatch(/구버전 1/);
+    expect(EDGE_STATE_TEXT['no-effect'].tone).toBe('bad');
+  });
 });

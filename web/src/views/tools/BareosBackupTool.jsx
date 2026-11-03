@@ -290,19 +290,22 @@ function TargetsTab({ d, reload, handoff, focus, goRuns, goRestore }) {
                     <tr key={j.id} ref={on ? selRowRef : undefined} aria-selected={on} onClick={() => setSel(on ? '' : j.id)}
                       style={{ cursor: 'pointer', opacity: j.enabled ? 1 : 0.65, ...(on ? { background: 'rgba(59,130,246,.13)', boxShadow: 'inset 3px 0 0 var(--accent)' } : {}) }}>
                       <td data-sort={j.vmName}>
-                        <button type="button" onClick={(e) => { e.stopPropagation(); setSel(on ? '' : j.id); }} style={{ all: 'unset', cursor: 'pointer', fontWeight: 700 }}>{j.vmName}</button>
-                        <span className={`badge ${osBadgeCls(osKey(j))}`} style={{ marginLeft: 6, fontSize: 10 }} title={j.guestOS || '게스트 OS 모름(인벤토리에 없거나 vCenter 에 OS 가 비어 있음)'}>{osLabel(osKey(j))}</span>
-                        {!j.enabled && <span className="badge gray" style={{ marginLeft: 6 }}>비활성</span>}
-                        {j.missingInDirector && <span className="badge red" style={{ marginLeft: 6 }} title="Director 의 잡 목록에 없습니다(누가 정의 파일을 지웠을 수 있습니다)">Director 에 없음</span>}
-                        {j.demo && <span className="badge amber" style={{ marginLeft: 6 }}>데모</span>}
-                        {j.drift && <span className="badge amber" style={{ marginLeft: 6 }} title={driftText(j.drift)}>{j.drift === 'missing' ? '인벤토리에 없음' : '등록 뒤 바뀜'}</span>}
-                        {snapshotChip(j.snapshotCount) && <span className="badge amber" style={{ marginLeft: 6 }} title={SNAPSHOT_TITLE}>{snapshotChip(j.snapshotCount)}</span>}
-                        {j.cancel && (() => { const ch = cancelChip(j.cancel, { waitMs: d.cancelWaitMs }); return <span className="badge amber" style={{ marginLeft: 6 }} title={ch.title}>{ch.short}</span>; })()}
-                        <div className="muted" style={{ fontSize: 11.5, maxWidth: 280, whiteSpace: 'normal', overflowWrap: 'anywhere' }}>{j.dc} · {j.folder}</div>
+                        {/* v2.870: 이름 · 칩은 줄바꿈되는 묶음(폭 상한) — 칩이 한 줄로 이어지면 VM 칸이 넓어져 정책 칸이 한 글자 폭까지 눌렸다(Chromium 1440) */}
+                        <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '3px 6px', maxWidth: 230, whiteSpace: 'normal' }}>
+                          <button type="button" onClick={(e) => { e.stopPropagation(); setSel(on ? '' : j.id); }} style={{ all: 'unset', cursor: 'pointer', fontWeight: 700, overflowWrap: 'anywhere' }}>{j.vmName}</button>
+                          <span className={`badge ${osBadgeCls(osKey(j))}`} style={{ fontSize: 10 }} title={j.guestOS || '게스트 OS 모름(인벤토리에 없거나 vCenter 에 OS 가 비어 있음)'}>{osLabel(osKey(j))}</span>
+                          {!j.enabled && <span className="badge gray">비활성</span>}
+                          {j.missingInDirector && <span className="badge red" title="Director 의 잡 목록에 없습니다(누가 정의 파일을 지웠을 수 있습니다)">Director 에 없음</span>}
+                          {j.demo && <span className="badge amber">데모</span>}
+                          {j.drift && <span className="badge amber" title={driftText(j.drift)}>{j.drift === 'missing' ? '인벤토리에 없음' : '등록 뒤 바뀜'}</span>}
+                          {snapshotChip(j.snapshotCount) && <span className="badge amber" title={SNAPSHOT_TITLE}>{snapshotChip(j.snapshotCount)}</span>}
+                          {j.cancel && (() => { const ch = cancelChip(j.cancel, { waitMs: d.cancelWaitMs }); return <span className="badge amber" title={ch.title}>{ch.short}</span>; })()}
+                        </div>
+                        <div className="muted" style={{ fontSize: 11.5, maxWidth: 230, whiteSpace: 'normal', overflowWrap: 'anywhere' }}>{j.dc} · {j.folder}</div>
                       </td>
                       <td data-sort={`${j.vcenterId} ${dirName(j.directorId)}`} style={{ fontSize: 12.5 }}>{j.vcenterId}<div className="muted" style={{ fontSize: 11.5 }}>{dirName(j.directorId)}</div></td>
                       {/* v2.840 적용 정책 — 원래 폭 안에서 줄바꿈(nowrap 한 줄이 길어지면 표가 넓어진다) · v2.860 칸에는 짧은 줄, 전체 문구는 title 과 패널 */}
-                      <td data-sort={`${j.level} ${j.schedule || ''}`} style={{ fontSize: 12.5 }}><div style={{ maxWidth: 200, whiteSpace: 'normal', overflowWrap: 'anywhere' }}>{levelLabel(j.level)} <span className="muted" style={{ fontSize: 11.5 }}>· {j.schedule || '스케줄 없음'}</span>
+                      <td data-sort={`${j.level} ${j.schedule || ''}`} style={{ fontSize: 12.5 }}><div style={{ minWidth: 120, maxWidth: 180, whiteSpace: 'normal', overflowWrap: 'break-word' }}>{levelLabel(j.level)} <span className="muted" style={{ fontSize: 11.5 }}>· {j.schedule || '스케줄 없음'}</span>
                         <div data-target-policy="" title={`${targetPolicyText(j.policy)}${j.policy?.src?.text ? ` — ${j.policy.src.text}` : ''} — 정책 · 보존 탭과 같은 판정(Director 정책 수집본 · 백업 그룹 — 이 화면은 Director 에 접속하지 않습니다)`} style={{ fontSize: 11, color: j.policy?.dup ? '#fcd34d' : j.policy?.verdict && j.policy.verdict !== 'policy' ? VERDICT[j.policy.verdict]?.color : 'var(--text-dim)' }}>
                           {targetPolicyShort(j.policy)}{j.policy?.verdict === 'mismatch' ? ' · 방식 불일치' : ''}
                         </div></div></td>

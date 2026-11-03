@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { vcCardState, storageBarInfo } from './vcCardText.js';
+import { vcCardState, storageBarInfo, vcQuickDot } from './vcCardText.js';
 
 describe('vcCardState (v2.583 #39)', () => {
   it('pending 을 연결 실패라 말하지 않는다', () => {
@@ -60,5 +60,15 @@ describe('v2.600 LO2600-01 storageBarInfo', () => {
     const src = fs.readFileSync(new URL('./VCenters.jsx', import.meta.url), 'utf8');
     expect(src).not.toMatch(/storageUsagePct \|\| 0/);
     expect(src).toMatch(/storageBarInfo\(m\)/);
+  });
+});
+
+describe('v2.870 감사 A4-04 — 바로가기 점은 경보를 모르면 초록이 아니다', () => {
+  it('REST 폴백(alarmsUnknown) · 경보 0 → 흐림 · 경보가 있으면 호박 · 아는 0 은 초록', () => {
+    const base = { status: 'connected', lastSuccess: Date.now(), metrics: {} };
+    expect(vcQuickDot({ ...base, alarmsUnknown: true }).dot).not.toBe('var(--green)');
+    expect(vcQuickDot({ ...base, collectSource: 'rest' }).dot).toBe('var(--text-faint)');
+    expect(vcQuickDot({ ...base, alarmsUnknown: true, metrics: { alarmsWarning: 1 } }).dot).toBe('var(--amber)');
+    expect(vcQuickDot(base).dot).toBe('var(--green)');   // 전제: 경보를 아는 정상 vCenter 는 초록
   });
 });

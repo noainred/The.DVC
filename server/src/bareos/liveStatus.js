@@ -15,7 +15,7 @@ import { onDirector, isDemoActive, effectiveSettings } from './service.js';
 import { jobDirectorId, directorById } from './settings.js';
 import { hasPending } from './edgeOps.js';
 import { runningRunOf } from './cancelState.js';
-import { rateNowOf } from './liveParse.js';
+import { rateNowOf, fdAnswerIssue } from './liveParse.js';
 import { LIVE_CLIENTS_MAX } from './ops.js';
 import { poolSettled } from '../util/pool.js';
 
@@ -28,6 +28,8 @@ export const HIST_KEEP = 60;
 let _touchedAt = 0;
 let _timer = null;
 let _busy = false;
+let _rev = 0;   // v2.870 감사 A5-02: 조회 한 번마다 오른다 — 진행 현황 응답 캐시 키(ETag)에 넣는다(스냅샷 세대만으로는 304 로 옛 값이 보였다)
+export const liveRev = () => _rev;
 /** Director id → { at, ok, code, clients: { client → { ok, code } }, jobs: Map<jobid, row> } */
 const _live = new Map();
 /** 법인(vCenter id) → [{ at, rate|null, jobs }] — Director 하나가 법인 여럿을 맡아도 법인마다 따로(합계가 겹쳐 세지지 않게 · Chromium 확인) */
@@ -94,8 +96,10 @@ export async function liveTick({ now = Date.now(), deadlineMs = LIVE_DEADLINE_MS
       const jobs = new Map();
       const clients = {};
       for (const c of res?.clients || []) {
-        clients[c.client] = c.ok ? { ok: true, raw: c.raw || '', n: (c.jobs || []).length } : { ok: false, code: c.code || 'error' };
-        for (const x of c.jobs || []) if (x?.jobid) jobs.set(x.jobid, x);
+        // v2.870: Director 가 FD 에 닿지 못한 답('Failed to connect to Client')은 실패로(옛 엣지 회신도 여기서 — 판정은 중앙 한 곳)
+        const issue = c.ok ? fdAnswerIssue(c.raw) : '';
+        clients[c.client] = c.ok && !issue ? { ok: true, raw: c.raw || '', n: (c.jobs || []).length } : { ok: false, code: issue || c.code || 'error', ...(issue ? { raw: c.raw || '' } : {}) };
+        if (c.ok && !issue) for (const x of c.jobs || []) if (x?.jobid) jobs.set(x.jobid, x);
       }
       const anyOk = Object.values(clients).some((c) => c.ok);
       const d0 = res?.director;
@@ -112,7 +116,7 @@ export async function liveTick({ now = Date.now(), deadlineMs = LIVE_DEADLINE_MS
     });
   } catch (e) {
     console.warn(`[bareos] 진행 현황 조회 오류: ${String(e?.message || e).slice(0, 200)}`);
-  } finally { _busy = false; }
+  } finally { _busy = false; _rev += 1; }
   return { asked, skipped };
 }
 
@@ -139,4 +143,4 @@ export function liveSnapshot(dir, vcenterId = '') {
 }
 
 export const _liveBusyForTest = () => _busy;
-export function _resetLiveForTest() { if (_timer) { clearInterval(_timer); _timer = null; } _touchedAt = 0; _busy = false; _live.clear(); _hist.clear(); }
+export function _resetLiveForTest() { if (_timer) { clearInterval(_timer); _timer = null; } _touchedAt = 0; _busy = false; _live.clear(); _hist.clear(); _rev += 1; }

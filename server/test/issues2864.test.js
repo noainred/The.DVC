@@ -238,3 +238,20 @@ test('⑦ 손상 파일은 보존하고 빈 목록으로 시작한다 — 덮어
   assert.equal(kept.length, 1, '손상본이 옆에 보존된다');
   assert.equal(JSON.parse(fs.readFileSync(path.join(dir, 'issues.json'), 'utf8')).issues.length, 1);
 });
+
+test('v2.870 감사 A2-05 — 진행 중 이슈의 담당자는 비울 수 없다(단건 400 · 일괄은 그 키만 실패) · 다른 상태는 해제 가능', () => {
+  const { out } = run(`
+    as({ username: 'op', role: 'operator', scope: null });
+    const a = (await call('POST', '/issues', { title: 'A', assignee: 'park' })).j.issue.key;
+    const b = (await call('POST', '/issues', { title: 'B', assignee: 'park' })).j.issue.key;
+    out.prog = await call('POST', '/issues/' + a + '/status', { status: 'progress' });
+    out.unassign = await call('POST', '/issues/' + a + '/assign', { assignee: '' });
+    out.bulk = await call('POST', '/issues/bulk/assign', { keys: [a, b], assignee: '' });
+    out.after = await call('GET', '/issues/' + a);
+  `);
+  assert.equal(out.prog.s, 200, JSON.stringify(out.prog.j));
+  assert.equal(out.unassign.s, 400);
+  assert.match(out.unassign.j.reason || out.unassign.j.error || JSON.stringify(out.unassign.j), /진행 중 이슈의 담당자는 비울 수 없습니다/);
+  assert.deepEqual(out.bulk.j.results.map((r) => r.ok), [false, true]);
+  assert.equal(out.after.j.issue.assignee, 'park');
+});

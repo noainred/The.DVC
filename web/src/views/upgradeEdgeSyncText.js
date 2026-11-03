@@ -21,6 +21,7 @@ export const EDGE_STATE_TEXT = {
   disabled: { label: '수집 중지', tone: 'muted' },
   waiting: { label: '밀어 넣음 — 엣지가 재시작해 새 버전을 보고하기를 기다립니다', tone: 'muted' },
   backoff: { label: '최근 push 실패 — 잠시 뒤 다시', tone: 'bad' },
+  'no-effect': { label: '받았다고 답했지만 버전이 그대로 — 간격을 늘려 다시', tone: 'bad' },   // v2.870 감사 A2-01
 };
 
 /** 동기화 한 번의 결과 → 문구. 서버 EDGE_SYNC_OUTCOMES 와 1:1. */
@@ -78,7 +79,7 @@ export function edgeSyncSummary(status, now = Date.now()) {
   const n = (k) => numOrNull(c?.[k]) ?? 0;
   const counts = c ? [
     `등록 ${numOrNull(e.total) ?? 0}대`, `최신 ${n('up-to-date')}`,
-    n('behind') + n('waiting') + n('backoff') ? `구버전 ${n('behind') + n('waiting') + n('backoff')}` : '',
+    n('behind') + n('waiting') + n('backoff') + n('no-effect') ? `구버전 ${n('behind') + n('waiting') + n('backoff') + n('no-effect')}` : '',
     n('ahead') ? `중앙보다 새 버전 ${n('ahead')}` : '', n('unknown') ? `버전 모름 ${n('unknown')}` : '',
     n('unreachable') ? `닿지 않음 ${n('unreachable')}` : '', n('disabled') ? `중지 ${n('disabled')}` : '',
   ].filter(Boolean).join(' · ') : null;
@@ -133,10 +134,12 @@ export function syncRunText(resp) {
 export function edgeSyncLine(e, now = Date.now()) {
   if (!e || typeof e !== 'object') return null;
   if (!e.enabled) return { text: '엣지 자동 업그레이드: 꺼짐 — 업그레이드 화면에서 켜면 중앙이 업그레이드될 때 등록된 엣지도 모두 따라옵니다.', tone: 'muted', canRun: false };
-  const c = e.counts && typeof e.counts === 'object' ? e.counts : {};
+  // v2.870 감사 A4-02: 서버가 판정을 못 했으면(counts 없음 — plan 이 던짐) '등록 0대 · 최신 0' 이 아니라 모름이다
+  const known = !!(e.counts && typeof e.counts === 'object');
+  const c = known ? e.counts : {};
   const n = (k) => numOrNull(c[k]) ?? 0;
-  const behind = n('behind') + n('waiting') + n('backoff');
-  const parts = [`등록 ${numOrNull(e.total) ?? 0}대`, `최신 ${n('up-to-date')}`];
+  const behind = n('behind') + n('waiting') + n('backoff') + n('no-effect');
+  const parts = known ? [`등록 ${numOrNull(e.total) ?? 0}대`, `최신 ${n('up-to-date')}`] : ['엣지 판정 모름'];
   if (behind) parts.push(`구버전 ${behind}`);
   if (n('unreachable')) parts.push(`닿지 않음 ${n('unreachable')}`);
   if (n('unknown')) parts.push(`버전 모름 ${n('unknown')}`);
@@ -144,6 +147,6 @@ export function edgeSyncLine(e, now = Date.now()) {
   const next = e.running ? '지금 동기화 중' : numOrNull(e.nextRunAt) != null ? `다음 ${inText(e.nextRunAt, now)}` : '';
   const lr = e.lastRun;
   const last = lr && numOrNull(lr.at) != null ? `마지막 ${agoText(lr.at, now)} ${SYNC_OUTCOME_TEXT[lr.outcome] || SYNC_OUTCOME_TEXT.error}${lr.outcome === 'pushed' ? ` ${lr.ok ?? 0}/${lr.pushed ?? 0}` : ''}${lr.restored ? '(재시작 전)' : ''}` : '';
-  const tone = n('unreachable') || n('backoff') || (lr && lr.outcome === 'no-bundle') ? 'warn' : behind ? 'warn' : 'ok';
+  const tone = !known || n('unreachable') || n('backoff') || n('no-effect') || (lr && (lr.outcome === 'no-bundle' || lr.outcome === 'error')) ? 'warn' : behind ? 'warn' : 'ok';
   return { text: `엣지 자동 업그레이드: 켬 · ${parts.join(' · ')}${next ? ` · ${next}` : ''}${last ? ` · ${last}` : ''}`, tone, canRun: !e.running };
 }

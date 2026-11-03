@@ -9,13 +9,14 @@ import { store } from '../../store.js';
 import { bareosAccess } from './bareosBackup.js';
 import { effectiveSettings, isDemoActive } from '../../bareos/service.js';
 import { directorById, directorConn } from '../../bareos/settings.js';
-import { jobDigests, registryLoadError } from '../../bareos/registry.js';
-import { listGroups } from '../../bareos/groups.js';
-import { touchLive, liveSnapshot, runningRunOf, LIVE_MS, LIVE_IDLE_MS } from '../../bareos/liveStatus.js';
+import { jobDigests, registryLoadError, registryRev } from '../../bareos/registry.js';
+import { listGroups, groupsRev } from '../../bareos/groups.js';
+import { touchLive, liveSnapshot, runningRunOf, liveRev, LIVE_MS, LIVE_IDLE_MS } from '../../bareos/liveStatus.js';
+import { pollerStatus } from '../../bareos/poller.js';
 import { cancelInfo, CANCEL_WAIT_MS } from '../../bareos/cancelState.js';
-import { cancelPlan, groupCanceling } from '../../bareos/groupRunner.js';
+import { cancelPlan, groupCanceling, cancellingKey } from '../../bareos/groupRunner.js';
 import { nextSlot } from '../../bareos/groupSchedule.js';
-import { rateNowOf } from '../../bareos/liveParse.js';
+import { rateNowOf, jobFdState } from '../../bareos/liveParse.js';
 import { isFinalStatus } from '../../bareos/names.js';
 import { numOrNull } from '../../util/numOrNull.js';
 import { memoJson, scopeKey } from './shared.js';
@@ -124,7 +125,6 @@ export function corpView(site, settings, digests, { now = Date.now(), vms = new 
   const demo = isDemoActive();
   const mine = digests.filter((j) => j.vcenterId === site.vcenterId && !!j.demo === demo);
   const { live, hist } = liveSnapshot(site.directorId, site.vcenterId);
-  const liveOk = !!live?.ok;
   const dirOk = !!live?.dir?.ok;
   const t0 = startOfToday(now);
   const running = []; let ok = 0; let warn = 0; let fail = 0; let canceled = 0; let bytes = 0; let bytesUnknown = 0;
@@ -132,9 +132,11 @@ export function corpView(site, settings, digests, { now = Date.now(), vms = new 
   for (const j of mine) {
     const run = runningRunOf(j);
     if (run) {
-      running.push(runningRow(j, run, live?.jobs?.get(run.jobid) || null, liveOk, {
+      // v2.870: FD 판정은 그 잡의 FD 답으로(Director 의 FD 하나라도 답하면 전부 '보고 없음' 으로 보이던 것 — 사용자 보고)
+      const fd = jobFdState(live, j, site);
+      running.push({ ...runningRow(j, run, fd.ok ? live?.jobs?.get(run.jobid) || null : null, fd.ok, {
         now, vm: vms.get(j.vmId), group: groupOf.get(j.vmId) || '', dirRow: dirOk ? live.dir.jobs.get(run.jobid) || null : null,
-      }));
+      }), fd });
     }
     // 오늘 끝난 실행 — 원장의 최근 끝난 실행 + lastRun(jobid 로 하나씩)
     const seen = new Set();
@@ -199,6 +201,15 @@ function writeKey(user, snap) {
   try { const w = writeScopedVcenterIds(user, snap); return w ? [...w].sort().join(',') : 'all'; } catch { return 'err'; }
 }
 
+/**
+ * v2.870 감사 A5-02: 응답 세대 — 원장(취소 표지 · 실행 결과) · 그룹 · 폴러 · 진행 조회 · 멈추는 중인 그룹. memoJson 의 ETag 는 키(스냅샷 세대 + 이 값)라
+ *   여기 없는 변화는 304 로 옛 화면이 남는다(재현 — 스냅샷 세대(30초)마다 한 번만 새로 보였다 · 다른 사람 화면의 '멈추는 중' 이 늦었다).
+ */
+export function liveGen() {
+  const v = (f) => { try { return f(); } catch { return 'e'; } };
+  return `g=${v(registryRev)}|gr=${v(groupsRev)}|p=${v(() => pollerStatus().at || 0)}|l=${v(liveRev)}|cx=${v(cancellingKey)}`;
+}
+
 export function registerBareosLive(api) {
   /** 진행 현황(전체 법인 — 화면이 법인 하나를 고르면 그 행만 쓴다). 부를 때마다 상태 조회를 깨운다(화면이 열린 동안만 · LIVE_IDLE_MS). */
   api.get('/tools/bareos-backup/live', adminOnly, (req, res) => {
@@ -234,6 +245,6 @@ export function registerBareosLive(api) {
         },
         corps,
       };
-    }, { ttlMs: 5_000, extraKey: `${scopeKey(req.user, snap)}|w${writeKey(req.user, snap)}|d${isDemoActive() ? 1 : 0}|x${diag ? 1 : 0}` });   // x = 진단 원문 공개 여부(키에 없으면 캐시로 샌다) · w = 쓰기 범위(법인별 writable)
+    }, { ttlMs: 5_000, extraKey: `${scopeKey(req.user, snap)}|w${writeKey(req.user, snap)}|d${isDemoActive() ? 1 : 0}|x${diag ? 1 : 0}|${liveGen()}` });   // x = 진단 원문 공개 여부(키에 없으면 캐시로 샌다) · w = 쓰기 범위(법인별 writable) · 세대(liveGen)
   });
 }

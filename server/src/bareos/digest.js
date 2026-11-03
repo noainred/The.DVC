@@ -101,6 +101,20 @@ export function dueOf(cfg, st, now = Date.now()) {
 
 const OKS = new Set(['ok', 'warning']);
 /**
+ * 복원 검증(리허설) 한 행의 결과 — 'ok' | 'failed' | 'pending'(v2.870 감사 A2-02 — 판정 코어 하나).
+ *   웹 bareosRestoreText.verifyOutcome 과 한 쌍(server/test/bareosVerifyOutcome2870.test.js 가 같은 입력으로 대조).
+ *   failed = 훅이 실패를 썼거나(verify 'failed') · 끊기 · 켜 보기를 못 했거나(nic 'failed' — 추적 놓침 · 재시도 소진 · 보내지 못함 · 이름 모름) ·
+ *            복원이 성공으로 끝나지 않았거나(nic 'skipped' · state error · canceled) · 추적을 놓친 복원(abandoned).
+ *   ⚠ 실패 경로에 verify:'failed' 를 써 넣지 않는다 — 리허설 표 '남김' 칸이 finish.verify 유무로 판정한다(VM 이 없는데 '남김' 으로 보인다).
+ */
+export function verifyOutcome(r) {
+  const f = r?.finish;
+  if (f?.verify === 'ok') return 'ok';
+  if (f?.verify === 'failed' || f?.nic === 'failed' || f?.nic === 'skipped' || r?.state === 'error' || r?.state === 'canceled' || r?.abandoned) return 'failed';
+  return 'pending';
+}
+
+/**
  * 요약 계산(순수) — 법인(Director)마다 최근 24시간. 그 Director 조회가 실패 중이면 known:false(수를 만들지 않는다).
  * @param {object[]} jobs 원장 · @param {object} settings · @param {Record<string,{ok?:boolean, code?:string}>} dirStatus
  */
@@ -128,7 +142,7 @@ export function digestData(jobs, settings, dirStatus = {}, now = Date.now()) {
     } else c.stale += 1;
     for (const r of j.restores || []) {
       if ((Number(r.at) || 0) < since) continue;
-      if (r.verify) { if (r.finish?.verify === 'ok') c.verifyOk += 1; else if (r.finish?.verify === 'failed' || r.state === 'error') c.verifyFail += 1; continue; }
+      if (r.verify) { const v = verifyOutcome(r); if (v === 'ok') c.verifyOk += 1; else if (v === 'failed') c.verifyFail += 1; continue; }
       c.restores += 1;
       if (r.state === 'error') c.restoreFail += 1;
       if (r.finish?.nic === 'failed') c.nicFail += 1;
@@ -157,7 +171,7 @@ export function renderDigest(d, now = Date.now()) {
   const corpRows = d.rows.map((c) => `<tr><td ${td}>${esc(c.name)}${c.known ? '' : ` (Director 조회 실패 또는 조회 전${c.code ? ` · ${esc(c.code)}` : ''})`}</td><td ${td}>${c.targets}</td><td ${td}>${n(c, c.ok)}</td><td ${td}>${n(c, c.warn)}</td><td ${td}>${n(c, c.fail)}</td><td ${td}>${n(c, c.cancel)}</td><td ${td}>${n(c, c.stale)}</td><td ${td}>${c.restores}${c.restoreFail ? ` (실패 ${c.restoreFail})` : ''}${c.nicFail ? ` · 네트워크 끊기 실패 ${c.nicFail}` : ''}</td><td ${td}>${c.verifyOk + c.verifyFail ? `성공 ${c.verifyOk} · 실패 ${c.verifyFail}` : '—'}</td></tr>`).join('');
   const failRows = d.fails.map((f) => `<tr><td ${td}>${esc(f.corp)}</td><td ${td}>${esc(f.vmName)}</td><td ${td}>${esc(f.jobid ?? '—')}</td><td ${td}>${esc(localStamp(f.at) || '—')}</td><td ${td}>${esc(f.message || '—')}</td></tr>`).join('');
   const html = `<div style="font-family:sans-serif;color:#111827"><h3 style="margin:0 0 6px">${esc(head)}</h3>`
-    + `<p style="margin:0 0 10px;color:#4b5563;font-size:13px">최근 24시간(${esc(localStamp(now - WINDOW_MS))} ~ ${esc(localStamp(now))}) · 법인 ${t.corps}곳 · 백업 대상 ${t.targets}대 · 24시간 안에 실행 없음 ${t.stale}대${t.verifyFail ? ` · 복원 검증 실패 ${t.verifyFail}` : ''}</p>`
+    + `<p style="margin:0 0 10px;color:#4b5563;font-size:13px">최근 24시간(${esc(localStamp(now - WINDOW_MS))} ~ ${esc(localStamp(now))}) · 법인 ${t.corps}곳 · 백업 대상 ${t.targets}대 · 24시간 안에 실행 없음 ${t.stale}대${t.unknown ? '(결과 모름 법인 제외)' : ''}${t.verifyFail ? ` · 복원 검증 실패 ${t.verifyFail}` : ''}</p>`
     + `<table style="border-collapse:collapse"><thead><tr><th ${th}>법인</th><th ${th}>대상</th><th ${th}>성공</th><th ${th}>경고</th><th ${th}>실패</th><th ${th}>취소</th><th ${th}>실행 없음</th><th ${th}>복원</th><th ${th}>복원 검증</th></tr></thead><tbody>${corpRows}</tbody></table>`
     + (failRows ? `<h4 style="margin:14px 0 6px">실패한 VM</h4><table style="border-collapse:collapse"><thead><tr><th ${th}>법인</th><th ${th}>VM</th><th ${th}>jobid</th><th ${th}>끝난 시각</th><th ${th}>오류</th></tr></thead><tbody>${failRows}</tbody></table>` : '')
     + `<p style="font-size:11px;color:#6b7280">결과는 포탈 원장(폴러가 Director 카탈로그로 갱신한 마지막 실행) 기준입니다 · Director 조회가 실패 중인 법인은 수를 만들지 않고 '모름' 으로 적습니다 · 포탈 › 서버 › Backup › Bareos 에서 자세히 볼 수 있습니다 · 설정 › 공통 기본값 · 수집에서 끄거나 시각을 바꿉니다.</p></div>`;

@@ -37,6 +37,7 @@ export function totalsNote(t) {
   if (t.allocUnknown) { notes.push(`할당 모르는 VM ${t.allocUnknown}`); tone = 'warn'; }
   if (t.capUnknown) { notes.push(`용량 모르는 GPU ${t.capUnknown}`); tone = 'warn'; }
   if (t.noPlacement) notes.push(`배치 정보 없는 GPU ${t.noPlacement}`);
+  if (t.offUnknown) notes.push(`꺼진 VM 용량 모름 ${t.offUnknown}대`);   // v2.870 감사 A4-01: 꺼진 VM 합에서 빠진 수(엑셀 totalsCells 와 같은 말)
   if (t.unplaced) notes.push(`미배치 VM ${t.unplaced}`);
   if (t.hostUseUnknown && t.hosts > 1) notes.push(`CPU·메모리 사용률 ${t.hostUseUnknown}대 제외`);   // v2.868: 끊김·못 읽음 — 읽은 호스트 기준
   if (!notes.length && t.vmsOn === 0 && t.gpus > 0) { notes.push('할당 VM 없음 — 전부 예비'); tone = 'free'; }
@@ -181,7 +182,7 @@ export function flattenAlloc(tree, { open = new Set(), sort = null, query = '', 
             const pct = g.allocGB != null && g.capGB ? Math.round((g.allocGB / g.capGB) * 100) : null;
             rows.push({ id: gid, depth: 4, kind: g.mode === 'passthrough' ? 'pt' : g.mode === 'vsga' ? 'vsga' : 'gpu', name: `GPU #${g.idx} · ${g.model}`, sub: '',
               prof: tx.prof, cap: g.capGB, alloc: g.allocGB, spare: g.spareGB, pct, off: null,
-              vms: g.mode === 'vsga' ? '' : `${g.vms.length} / 0`, note: tx.note + (g.capBasis === 'model' ? ' · GB 는 모델명 추정' : ''), tone: tx.tone,
+              vms: g.mode === 'vsga' ? '' : !g.placement ? '—' : `${g.vms.length} / 0`, note: tx.note + (g.capBasis === 'model' ? ' · GB 는 모델명 추정' : ''), tone: tx.tone,
               hasKids: g.vms.length > 0, isOpen: g.vms.length > 0 && isOpen(gid) });
             if (g.vms.length && isOpen(gid)) for (const v of sortSiblings(g.vms, sort)) vmRow(`m:${gid}|${v.id}`, 5, v);
           }

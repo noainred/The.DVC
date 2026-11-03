@@ -68,7 +68,7 @@ export function ResultBar({ b, label, width = '100%', height = 8 }) {
   return (
     <div role="img" aria-label={label} style={{ display: 'flex', height, width, borderRadius: height / 2, overflow: 'hidden', background: 'var(--panel-deep)' }}>
       <div style={{ width: `${b.ok}%`, background: '#4ade80' }} /><div style={{ width: `${b.warn}%`, background: '#fbbf24' }} />
-      <div style={{ width: `${b.fail}%`, background: '#f87171' }} /><div style={{ width: `${b.run}%`, background: '#60a5fa' }} />
+      <div style={{ width: `${b.fail}%`, background: '#f87171' }} /><div style={{ width: `${b.cancel || 0}%`, background: '#94a3b8' }} /><div style={{ width: `${b.run}%`, background: '#60a5fa' }} />
     </div>
   );
 }

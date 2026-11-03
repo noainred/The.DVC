@@ -87,11 +87,11 @@ export function GpuAllocTree({ scope }) {
   if (!data) return <Loading />;
   const T = sumTotals(data, vcSel) || {};
   const kpis = [
-    { label: '전체 용량', value: numText(T.capGB), unit: T.capGB != null ? 'GB' : '', sub: `GPU ${T.gpus}장 · 호스트 ${T.hosts}대${T.vsga ? ` · vSGA ${T.vsga}장 제외` : ''}` },
-    { label: '할당(켜진 VM)', value: numText(T.allocGB), unit: 'GB', sub: `vGPU·GPU VM ${T.vmsOn}대 켜짐`, tone: 'alloc' },
+    { label: '전체 용량', value: numText(T.capGB), unit: T.capGB != null ? 'GB' : '', sub: `GPU ${T.gpus}장 · 호스트 ${T.hosts}대${T.vsga ? ` · vSGA ${T.vsga}장 제외` : ''}${T.capUnknown ? ` · 모름 ${T.capUnknown}장` : ''}` },
+    { label: '할당(켜진 VM)', value: numText(T.allocGB), unit: 'GB', sub: `vGPU·GPU VM ${T.vmsOn}대 켜짐${T.allocUnknown ? ` · 모름 ${T.allocUnknown}대` : ''}`, tone: 'alloc' },
     { label: '예비', value: numText(T.spareGB), unit: T.spareGB != null ? 'GB' : '', sub: `빈 GPU ${T.freeGpus}장${T.spareGB == null ? ' · 모르는 값이 섞여 계산 안 함' : ''}`, tone: 'spare' },
     { label: '할당률', value: pctText(T.allocPct), unit: '', sub: T.allocPct != null && T.allocPct >= 90 ? '포화에 가깝습니다' : '전체 대비 할당' },
-    { label: '꺼진 VM', value: numText(T.offGB), unit: T.offGB != null ? 'GB' : '', sub: `${T.vmsOff}대 — 켜면 필요한 양`, tone: 'off' },
+    { label: '꺼진 VM', value: numText(T.offGB), unit: T.offGB != null ? 'GB' : '', sub: `${T.vmsOff}대 — 켜면 필요한 양${T.offUnknown ? ` · 모름 ${T.offUnknown}대` : ''}`, tone: 'off' },
     { label: '확인할 것', value: String((T.allocUnknown || 0) + (T.capUnknown || 0) + (T.unplaced || 0)), unit: '건', sub: `할당 모름 ${T.allocUnknown || 0} · 용량 모름 ${T.capUnknown || 0} · 미배치 VM ${T.unplaced || 0}` },
   ];
   const arrow = (key) => (sort && sort.key === key ? (sort.dir === 'asc' ? ' ▲' : ' ▼') : '');

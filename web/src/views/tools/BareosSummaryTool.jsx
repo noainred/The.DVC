@@ -104,7 +104,7 @@ function BareosSummaryView() {
   const totAttn = corpAttention(t);
   const totAttnText = totAttn.n === null ? (['fail', 'missing', 'old', 'never'].every((k) => Number.isFinite(t[k])) ? numText((t.fail || 0) + (t.missing || 0) + (t.old || 0) + (t.never || 0)) : '—') : numText(totAttn.n);
   const attnPartial = ['fail', 'missing', 'old', 'never'].some((k) => t.partial?.[k]);
-  const totBar = resultBar({ jobs: t.jobs, ok: t.ok, warn: t.warn, fail: t.fail, run: t.run });
+  const totBar = resultBar({ jobs: t.jobs, ok: t.ok, warn: t.warn, fail: t.fail, cancel: t.cancel, run: t.run });
 
   return (
     <div data-bareos-summary="" style={WRAP}>
@@ -173,8 +173,8 @@ function BareosSummaryView() {
                   <td style={{ padding: '8px 10px' }}>
                     {bar ? (
                       <>
-                        <ResultBar b={bar} label={`성공 ${c.ok} · 경고 ${c.warn} · 실패 ${c.fail} · 진행 ${c.run} / 잡 ${c.jobs}`} />
-                        <div className="muted" style={{ fontSize: 11.5, marginTop: 4, whiteSpace: 'nowrap' }}>성공 {c.ok} · 경고 {c.warn} · 실패 {c.fail}{c.run ? ` · 진행 ${c.run}` : ''}</div>
+                        <ResultBar b={bar} label={`성공 ${c.ok} · 경고 ${c.warn} · 실패 ${c.fail}${c.cancel ? ` · 취소 ${c.cancel}` : ''} · 진행 ${c.run} / 잡 ${c.jobs}`} />
+                        <div className="muted" style={{ fontSize: 11.5, marginTop: 4, whiteSpace: 'nowrap' }}>성공 {c.ok} · 경고 {c.warn} · 실패 {c.fail}{c.cancel ? ` · 취소 ${c.cancel}` : ''}{c.run ? ` · 진행 ${c.run}` : ''}</div>
                       </>
                     ) : <span className="muted" style={{ fontSize: 12 }}>{bucket === 'unknown' ? `결과 모름 — ${UNKNOWN_WHY[r.director.state] || '조회 전입니다'}` : c.jobs > 0 ? '모름' : '잡 없음'}</span>}
                   </td>

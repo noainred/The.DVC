@@ -58,6 +58,7 @@ export const EDGE_SYNC_STATES = Object.freeze([
   'disabled',     // 수집 중지(enabled:false) 또는 URL 없음
   'waiting',      // 방금 밀었다 — 엣지가 재시작해 새 버전을 보고할 시간(settle)
   'backoff',      // 최근 push 가 실패했다 — 백오프 뒤 다시
+  'no-effect',    // v2.870 감사 A2-01: 받았다고(성공) 답했는데 settle 뒤에도 옛 버전을 보고한다 — 간격을 늘려 다시(번들 전송 + 엣지 재시작을 30분마다 거듭하지 않게)
 ]);
 /** 동기화 한 번의 결과 — 웹 `SYNC_OUTCOME_TEXT` 의 키와 1:1. */
 export const EDGE_SYNC_OUTCOMES = Object.freeze(['off', 'skipped', 'no-edges', 'idle', 'pushed', 'no-bundle', 'error']);
@@ -86,6 +87,10 @@ export function backoffMs(attempts, baseMs, maxMs = SYNC_BACKOFF_MAX_MS) {
   const n = Math.max(1, Math.floor(numOrNull(attempts) ?? 1));
   const base = Math.max(SYNC_MIN_MS, numOrNull(baseMs) ?? 600_000);
   return Math.min(maxMs, base * 2 ** Math.min(20, n - 1));
+}
+/** v2.870 감사 A2-01: '효과 없는 성공' n 회 뒤 다음 push 까지 — settle × 2^n, 상한 6시간(n=1 → 60분 · 2 → 2시간 · 3 → 4시간 · 4 → 6시간). */
+export function noEffectWaitMs(n, settleMs = SYNC_SETTLE_MS, maxMs = SYNC_BACKOFF_MAX_MS) {
+  return Math.max(settleMs, backoffMs((Math.floor(numOrNull(n) ?? 0)) + 1, settleMs, maxMs));
 }
 /** v2.865 D: 이 연속 실패 수가 백오프 상한에 닿았는가(= 알림을 보낼 때). */
 export const backoffCapped = (attempts, baseMs, maxMs = SYNC_BACKOFF_MAX_MS) => backoffMs(attempts, baseMs, maxMs) >= maxMs;
@@ -173,7 +178,15 @@ export function planEdgeSync({ collectors = [], statusOf = () => null, attemptsO
       else if (st.ok === false) { state = 'unreachable'; row.reason = txt(st.error, 300); }
       else {
         const a = attemptsOf(id);
-        if (a && a.target === cur && a.ok && now - a.at < settleMs) { state = 'waiting'; row.nextAt = a.at + settleMs; }
+        // v2.870 감사 A2-01: 성공이라 답한 push 를 같은 대상 버전으로 다시 밀었는데도(=효과 없음 noEffect 회) 뒤처져 있으면 settle 을 밑으로
+        // settle × 2^n(상한 6시간)까지 기다린다. 예전에는 settle(30분)이 지나면 매번 'behind' 로 다시 밀어 번들 전송 + 엣지 재시작이 영구 반복됐다
+        // (재현 — 엣지 설치 경로가 실행 경로와 다르거나 재시작 뒤 롤백). 성공이면 attempts 를 0 으로 돌리므로 실패 백오프가 걸리지 않았다.
+        const ne = a && a.target === cur && a.ok ? Math.max(0, Math.floor(numOrNull(a.noEffect) ?? 0)) : 0;
+        if (ne > 0) {
+          const wait = noEffectWaitMs(ne, settleMs, maxBackoffMs);
+          if (now - a.at < wait) { state = 'no-effect'; row.nextAt = a.at + wait; row.reason = `번들을 받았다고 ${ne + 1}번 답했지만 ${Math.round(settleMs / 60_000)}분 뒤에도 v${v} 를 보고합니다 — 엣지의 설치 경로(UPGRADE_INSTALL_DIR) · 서비스 재시작을 확인하세요`; }
+        }
+        else if (a && a.target === cur && a.ok && now - a.at < settleMs) { state = 'waiting'; row.nextAt = a.at + settleMs; }
         else if (a && a.target === cur && !a.ok) {
           const wait = backoffMs(a.attempts, intervalMs, maxBackoffMs);
           if (now - a.at < wait) { state = 'backoff'; row.nextAt = a.at + wait; row.reason = txt(a.reason, 300); }
@@ -204,9 +217,18 @@ export async function resolveCurrentBundle(settings, cur, { allowRemote = true }
 }
 
 /** v2.865 D: 반복 실패 알림 본문(순수). closed 면 '해소'. */
-export function edgeSyncAlert({ id, name, kind, target, attempts, reason, intervalMs, closed = false }) {
+export function edgeSyncAlert({ id, name, kind, target, attempts, reason, intervalMs, closed = false, noEffect = 0 }) {
   const who = `${name || id}${kind === 'edge' ? ' (옛 방식 엣지)' : ''}`;
   const plain = (x) => String(x ?? '').replace(/\*\*/g, '');
+  // v2.870 감사 A2-01: '받았다고 답했지만 버전이 그대로' 반복 — 실패 알림과 key 를 나눈다(해소 판정 · 억제 창이 섞이지 않게)
+  if (noEffect > 0) {
+    const nl = closed
+      ? [`엣지: ${who}`, `대상 버전: v${target}`, '상태: 해소됨 — 엣지가 대상 버전을 보고합니다.']
+      : [`엣지: ${who}`, `대상 버전: v${target}`, `번들을 받았다고 ${noEffect + 1}번 답했지만 ${Math.round(SYNC_SETTLE_MS / 60_000)}분 뒤에도 옛 버전을 보고합니다 — 다시 밀기 간격이 상한(${Math.round(SYNC_BACKOFF_MAX_MS / 3_600_000)}시간)에 닿았습니다.`,
+        `마지막 사유: ${reason || '사유 없음'}`, '조치: 그 엣지에서 설치 경로(UPGRADE_INSTALL_DIR)가 실행 중인 경로와 같은지, 재시작 뒤 이전 버전으로 되돌아가지 않았는지 확인하세요.'];
+    return { key: `edgesync:${id}|${target}:noeffect${closed ? ':close' : ''}`, severity: closed ? 'info' : 'warning',
+      title: plain(closed ? `엣지 자동 업그레이드 해소 — ${who} v${target}` : `엣지 자동 업그레이드 효과 없음 반복 — ${who} v${target}`), detail: plain(nl.join('\n')) };
+  }
   const lines = closed
     ? [`엣지: ${who}`, `대상 버전: v${target}`, '상태: 해소됨 — 중앙 버전 번들을 받았습니다(또는 이미 최신이라고 답했습니다).']
     : [`엣지: ${who}`, `대상 버전: v${target}`, `연속 실패: ${attempts}회 — 다음 시도까지 백오프 상한(${Math.round(SYNC_BACKOFF_MAX_MS / 3_600_000)}시간)에 닿았습니다(주기 ${Math.round((numOrNull(intervalMs) ?? 600_000) / 60_000)}분).`,
@@ -300,7 +322,9 @@ export class EdgeSyncRunner {
     const prev = this.attempts.get(r.id);
     const attempts = ok ? 0 : (prev && prev.target === cur ? (prev.attempts || 0) + 1 : 1);
     const reason = ok ? null : (txt(r.reason, 300) || 'push 실패');
-    this.attempts.set(r.id, { at: this.now(), ok, target: cur, attempts, reason });
+    // v2.870 감사 A2-01: 직전도 같은 대상 버전의 성공이었는데 다시 밀었다 = 그 성공이 효과가 없었다(0 으로 되돌리지 않고 센다)
+    const noEffect = ok && prev && prev.target === cur && prev.ok ? (prev.noEffect || 0) + 1 : 0;
+    this.attempts.set(r.id, { at: this.now(), ok, target: cur, attempts, reason, ...(noEffect ? { noEffect } : {}) });
     const row = rowsById.get(r.id) || {};
     const mark = `${r.id}|${cur}`;
     const base = this.intervalMs || this.fixedIntervalMs || edgeSyncIntervalMs();
@@ -313,8 +337,30 @@ export class EdgeSyncRunner {
         this.alerted.delete(mark);
         await this.notifyFn(edgeSyncAlert({ id: r.id, name: row.name, kind: row.kind, target: cur, attempts: 0, intervalMs: base, closed: true }));
       }
+      // v2.870 감사 A2-01: 효과 없는 성공이 간격 상한에 닿으면 한 번 알린다(해소는 엣지가 대상 버전을 보고할 때 — #closeNoEffect)
+      const neMark = `${mark}|ne`;
+      if (noEffect > 0 && !this.alerted.has(neMark) && noEffectWaitMs(noEffect) >= SYNC_BACKOFF_MAX_MS) {
+        this.alerted.add(neMark);
+        const v = (() => { try { return this.#statusOfRow(r.id)?.version || ''; } catch { return ''; } })();
+        await this.notifyFn(edgeSyncAlert({ id: r.id, name: row.name, kind: row.kind, target: cur, noEffect, reason: v ? `엣지가 보고하는 버전 v${String(v).slice(0, 32)}` : '', intervalMs: base }));
+        this.log.warn?.(`[upgrade] 엣지 자동 업그레이드 효과 없음 반복 알림: ${row.name || r.id} v${cur} (${noEffect + 1}회 성공 응답)`);
+      }
     } catch (e) { this.log.warn?.(`[upgrade] 엣지 자동 업그레이드 알림 발송 실패: ${e?.message || e}`); }
     return ok;
+  }
+
+  /** v2.870 감사 A2-01: '효과 없음' 알림을 낸 엣지가 이제 대상 버전(또는 그보다 새 버전)을 보고하면 해소를 한 번 알린다. */
+  async #closeNoEffect(plan, rows) {
+    const cur = plan.currentVersion;
+    const byId = new Map(rows.map((r) => [String(r.id), r]));
+    for (const e of plan.edges) {
+      const neMark = `${e.id}|${cur}|ne`;
+      if (!this.alerted.has(neMark) || !(e.state === 'up-to-date' || e.state === 'ahead')) continue;
+      this.alerted.delete(neMark);
+      const row = byId.get(e.id) || {};
+      try { await this.notifyFn(edgeSyncAlert({ id: e.id, name: row.name, kind: row.kind, target: cur, noEffect: 1, closed: true })); }
+      catch (err) { this.log.warn?.(`[upgrade] 엣지 자동 업그레이드 알림 발송 실패: ${err?.message || err}`); }
+    }
   }
 
   async #runInner() {
@@ -334,6 +380,7 @@ export class EdgeSyncRunner {
             probed.forEach((p, i) => this.legacyStatus.set(legacy[i].id, p.status === 'fulfilled' ? p.value : { at: this.now(), ok: false, error: String(p.reason?.message || p.reason || 'health 질의 실패').slice(0, 200) }));
           }
           const plan = this.plan(at, rows); this.lastPlan = plan;
+          await this.#closeNoEffect(plan, rows);
           if (!plan.push.length) rec = { at, outcome: 'idle', counts: plan.counts };
           else {
             const cur = plan.currentVersion;

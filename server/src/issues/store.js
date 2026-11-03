@@ -574,6 +574,8 @@ export function assignIssue(key, assignee, user, { reason = '' } = {}) {
   const x = findRaw(key);
   const a = nameField(assignee, 'assignee');
   if (a === (x.assignee || '')) return viewIssue(x, user);
+  // v2.870 감사 A2-05: '진행 중 ⇒ 담당자' 불변조건(setStatus · createIssue 와 같은 규칙) — 할당 해제(일괄 포함)가 담당자 없는 진행 중 이슈를 만들지 않게
+  if (!a && x.status === 'progress') throw fieldError('assignee', '진행 중 이슈의 담당자는 비울 수 없습니다 — 상태를 먼저 바꾸세요');
   const why = text(reason, LIMITS.blockReason, 'reason');
   const now = Date.now();
   const next = { ...x, assignee: a };
