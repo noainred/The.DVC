@@ -37,3 +37,12 @@ test('priorityKind — 멈춘 실행은 실패 우선 확인이 아니다(오래
   assert.equal(VV.priorityKind({ b: canceled }, { now: NOW }), '');
   assert.equal(VV.priorityKind({ b: { ...canceled, ok: NOW - 3 * 86_400_000 } }, { now: NOW, rpoDays: 1 }), 'old');
 });
+
+test('v2.869 감사 A1-05 — cancelSummary 시작 결과 모름 수(취소를 보낼 수 없는 항목) · 감사 문구', async () => {
+  const GR = await import('../src/bareos/groupRunner.js');
+  const r = { canceled: 3, finished: 0, cleared: 0, failed: 0, unknown: 0, busy: 0, vms: {} };
+  const c = GR.cancelSummary({ at: NOW, by: 'kim' }, 'sending', r, null, 1, 2);
+  assert.equal(c.startUnknown, 2);
+  assert.match(GR.cancelAuditText(c), /시작 결과 모름 2\(취소 못 함\)/);
+  assert.equal('startUnknown' in GR.cancelSummary({ at: NOW, by: 'kim' }, 'sending', r, null, 1, 0), false, '0 이면 칸을 두지 않는다');
+});

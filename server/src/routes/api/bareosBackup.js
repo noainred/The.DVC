@@ -26,7 +26,7 @@ import { secretProvided } from '../../util/secretCarry.js';
 import {
   onDirector, relayToEdge, isDemoActive, effectiveSettings, eligibility, createBackupTarget, createBackupTargets, bareosAuthGuard, clearAuthStopIfSame,
 } from '../../bareos/service.js';
-import { pendingView, relayLimits } from '../../bareos/edgeOps.js';
+import { pendingView, relayLimits, RESTORES_DEADLINE_MS } from '../../bareos/edgeOps.js';
 import { noteSetupStart, noteSetupEnd, noteRestoreBatchStart, noteRestoreBatchEnd } from '../../bareos/inflight.js';
 import { claimSetup, releaseSetupLock, isSetupBusy, setupBusyReason } from '../../bareos/setupLocks.js';
 import { listAgentTokens } from '../../central/agentTokens.js';
@@ -1263,7 +1263,7 @@ api.post('/tools/bareos-backup/restore/bulk', adminOnly, async (req, res) => {
     });
     let out;
     try {
-      out = await onDirector(dir, 'restores', { items: sendItems });
+      out = await onDirector(dir, 'restores', { items: sendItems }, { signal: AbortSignal.timeout(RESTORES_DEADLINE_MS) });   // v2.869 감사 A5-01
     } catch (e) {
       // 엣지가 가져간 뒤 회신이 없으면 결과 모름 — 시작됐을 수 있다(다시 보내면 두 번 돈다)
       const unknown = !!e?.unknown || e?.code === 'unknown';

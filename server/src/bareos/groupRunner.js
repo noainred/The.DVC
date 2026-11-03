@@ -242,7 +242,7 @@ export async function runGroup(groupId, { trigger = 'manual', by = '', level = n
       // 반증 F5: 그 밖 실행은 지금 원장으로 다시 고른다(시작 때 사본은 그사이 단건 취소 · 새 실행을 모른다)
       const fresh = c.includeScheduled ? new Map(jobDigests().filter((j) => j.vcenterId === g.vcenterId).map((j) => [j.vmId, j])) : null;
       const extra = c.includeScheduled ? await cancelLive(extraTargets(g, new Set(send.map((s) => s.job.id)), fresh), { by: c.by }) : null;
-      canceled = cancelSummary(c, 'sending', r, extra, items.filter((x) => x.state === 'halted').length);
+      canceled = cancelSummary(c, 'sending', r, extra, items.filter((x) => x.state === 'halted').length, items.filter((x) => x.state === 'unknown').length);
     }
   } catch (e) {
     // 예상하지 못한 오류 — 여기까지 보낸 것은 그대로 두고 실행 기록은 남긴다(보내는 중 표지만 남아 '재시작' 으로 보이지 않게 — S3)
@@ -287,6 +287,7 @@ export function cancelAuditText(c) {
     const bad = c.extra.failed + c.extra.unknown + c.extra.busy;
     parts.push(`그 밖 실행 취소 ${c.extra.canceled}${bad ? `(실패·모름 ${bad})` : ''}`);
   }
+  if (c.startUnknown > 0) parts.push(`시작 결과 모름 ${c.startUnknown}(취소 못 함)`);
   if (c.dueKey) parts.push(`차례였던 회차 ${c.dueKey} 돌리지 않음`);
   if (c.skipKey) parts.push(`다음 회차 ${c.skipKey} 건너뜀`);
   if (c.effective === false && c.reason) parts.push(`사유 ${c.reason}`);
@@ -304,7 +305,7 @@ const firstReason = (...rs) => {
  * effective = 실제로 무언가 멈췄거나 멈췄을 수 있다(취소 보냄 · 시작 전 멈춤 · 결과 모름) — 반증 F2: 취소가 한 건도 가지 않은 시도(옛 엣지 · 전부 실패)를
  *   '중단됨' 으로 보이거나 보관 정리를 막지 않게. 보관 정리는 effective 일 때만 건너뛴다(pruneDue).
  */
-export function cancelSummary(c, phase, r, extra, halted = 0) {
+export function cancelSummary(c, phase, r, extra, halted = 0, startUnknown = 0) {
   const x = r || ZERO;
   const effective = x.canceled + halted + x.unknown + (extra ? extra.canceled + extra.unknown : 0) > 0;
   const reason = effective ? '' : firstReason(x, extra);
@@ -314,6 +315,8 @@ export function cancelSummary(c, phase, r, extra, halted = 0) {
     extra: extra ? { canceled: extra.canceled, finished: extra.finished, cleared: extra.cleared, failed: extra.failed, unknown: extra.unknown, busy: extra.busy } : null,
     effective, ...(reason ? { reason } : {}),
     ...(c.skipKey ? { skipKey: c.skipKey } : {}), ...(c.dueKey ? { dueKey: c.dueKey } : {}),
+    // v2.869 감사 A1-05: 시작 결과를 모르는 항목(jobid 없음)은 취소를 보낼 수 없다 — 중단 요약에 수를 남겨 사람이 Director 에서 확인하게(예전에는 회차 기록에만)
+    ...(startUnknown > 0 ? { startUnknown } : {}),
   };
 }
 
@@ -536,7 +539,7 @@ export function cancelGroupRun(groupId, { by = '', includeScheduled = false, ski
   const done = (async () => {
     const r = await cancelLive(fireTargets, { by: c.by });
     const extra = extraList.length ? await cancelLive(extraList, { by: c.by }) : null;
-    const canceled = cancelSummary(c, phase, r, extra, 0);
+    const canceled = cancelSummary(c, phase, r, extra, 0, phase === 'running' ? (g.lastFire?.items || []).filter((it) => it?.state === 'unknown').length : 0);
     if (fireAt != null && fireTargets.length) {
       const patch = {};
       for (const [vmId, v] of Object.entries(r.vms)) patch[vmId] = v.state === 'canceled' ? { state: 'canceled', reason: v.reason } : { reason: v.reason };

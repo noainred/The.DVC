@@ -72,3 +72,16 @@ test('리허설 표 verifyTone — 복원 실패 · 취소는 bad(문구 ‘복�
   assert.equal(W.verifyTone({ state: 'ok', finish: { verify: 'ok' } }), 'ok');
   assert.equal(W.verifyText({ state: 'canceled', finish: { nic: 'skipped' } }), '복원 실패 — 켜 보지 못함');
 });
+
+test('A4-06 요약 문단 — 결과 모름 법인이 있으면 ‘실행 없음’ 수에 한정어(아는 법인만 셌다)', () => {
+  const now = Date.now();
+  const settings = { directors: [{ id: 'D1', name: '한국' }, { id: 'D2', name: '폴란드' }], sites: [] };
+  const jobs = [
+    { id: '1', vcenterId: 'vc-a', directorId: 'D1', vmName: 'a', enabled: true, lastRun: { jobid: 1, state: 'ok', endedAt: now - 3 * 86400_000 } },
+    { id: '2', vcenterId: 'vc-b', directorId: 'D2', vmName: 'b', enabled: true },
+  ];
+  const withUnknown = DG.renderDigest(DG.digestData(jobs, settings, { D1: { ok: true }, D2: { ok: false } }, now), now).html;
+  assert.match(withUnknown, /24시간 안에 실행 없음 1대\(결과 모름 법인 제외\)/);
+  const allKnown = DG.renderDigest(DG.digestData(jobs, settings, { D1: { ok: true }, D2: { ok: true } }, now), now).html;
+  assert.doesNotMatch(allKnown, /결과 모름 법인 제외/);
+});

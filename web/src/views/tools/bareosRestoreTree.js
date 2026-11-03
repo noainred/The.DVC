@@ -98,7 +98,8 @@ export function restoreFolderRows(jobs, folders, { q = '', open = null, onlyTarg
       n.own += Number(c.vms) || 0;
     }
     for (const j of v.jobs) walk(root, segsOf(j.dc, j.folder, showDc)).jobs.push(j);
-    aggregate(root, { countsKnown: countsKnown && !needle, lockedDir });
+    // v2.869 감사 A4-03: 인벤토리에 VM 이 하나도 없는 vCenter(첫 수집 전 · 비활성)는 폴더 VM 수를 모른다 — '3/0' 이 아니라 '3/—'
+    aggregate(root, { countsKnown: countsKnown && !needle && v.counts.length > 0, lockedDir });
     const dirs = [...new Set(v.jobs.map((j) => j.directorId || ''))].filter(Boolean);
     const isOpen = (n) => !!needle || (open ? open.has(n.key) : n.targets > 0);
     const push = (n, depth) => {

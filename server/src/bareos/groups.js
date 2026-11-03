@@ -10,7 +10,7 @@
  *   anchorAt,                               // 스케줄을 만들거나 바꾼 시각 — 그 앞의 회차는 돌리지 않는다
  *   lastKey,                                // 마지막으로 처리한 회차 열쇠(돌렸거나 놓침) — 같은 회차를 두 번 돌리지 않는다(**보내기 전에** 기록)
  *   lastFire: { key, at, trigger, by, level, total, started, skipped, failed, unknown, halted?, canceled?, items[] } | null,
- *     v2.867 canceled = { at, by, phase:'queued'|'sending'|'running', scope:'fire'|'all', canceled, finished, cleared, failed, unknown, busy, halted, extra } — 회차 중단
+ *     v2.867 canceled = { at, by, phase:'queued'|'sending'|'running', scope:'fire'|'all', canceled, finished, cleared, failed, unknown, busy, halted, extra, startUnknown? } — 회차 중단
  *     items[].state 에 'canceled'(취소를 보냄) · 'halted'(중단으로 보내지 않음)
  *   missed: { key, at, reason } | null,     // 돌리지 않은 회차 — reason 'down'(포탈이 꺼져 있어 따라잡는 범위를 넘김) · 'edited'(돌 차례에 스케줄을 고침) · 'skipped'(v2.867 중단 때 건너뛰기로 고름)
  *   skipKey: string,                        // v2.867 회차 중단 때 고른 '다음 회차 1회 건너뛰기' — 그 회차 열쇠(돌 차례에 'skipped' 로 남기고 지운다)
