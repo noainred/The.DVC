@@ -61,7 +61,7 @@ export function GroupCancelModal({ g, waitMs = null, busy = false, error = '', o
     <Modal title={`회차 중단 — ${g.name}`} onClose={busy ? () => {} : onClose} width={640}>
       <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', gap: 12 }}>
         <div className="muted" style={{ fontSize: 12, overflowWrap: 'anywhere' }}>
-          그룹 VM {g.vmIds?.length ?? '—'}대{g.lastFire?.at ? ` · 마지막 회차 ${shortTs(g.lastFire.at)}${g.lastFire.key ? `(${g.lastFire.key})` : ''}` : ''} · {pv.head}
+          {Number.isFinite(g.vmIds?.length) ? `그룹 VM ${g.vmIds.length}대` : '그룹 VM 수 모름'}{g.lastFire?.at ? ` · 마지막 회차 ${shortTs(g.lastFire.at)}${g.lastFire.key ? `(${g.lastFire.key})` : ''}` : ''} · {pv.head}
         </div>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 130px), 1fr))', gap: 8 }}>
           <Count label="이번 회차 실행 중" n={plan.phase === 'sending' ? (plan.progress?.started ?? 0) + (plan.progress?.inflight ?? 0) : plan.fire} hint={plan.progress?.inflight ? `회신 대기 ${plan.progress.inflight} 포함 — 시작한 뒤 취소` : '취소를 한 번에 보냄'} tone="#93c5fd" />
