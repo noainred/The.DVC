@@ -752,9 +752,27 @@ function refList(v, re, max) {
   }
   return { value: out, coerced };
 }
+/*
+ * v2.871(감사 A3-06 — v2.870 '별건 다음 점검 첫 후보'): 호스트 gpus 원소 · VM gpu 를 **아는 키만** 받는다.
+ *   예전에는 `{ ...g }` 로 원소를 통째로 복사하고 새 필드(vms · pciId · pciIds)만 형식을 봤다 — 엣지가 보낸 아무 키(큰 글자 · 객체 ·
+ *   중첩 배열)가 중앙 스냅샷에 그대로 남아 응답·엑셀·캐시로 흘렀다(엣지 수신 계약: 아는 필드만 · 객체만 · 상한 · 문자열 수치는 수로).
+ *   아는 키는 수집기(vcenter/soapClient.js parseGpus · parsePassthruGpus · parseVmGpu)와 데모 생성기(mock/generator.js mkGpus)가 만드는 것이다.
+ *   형식 밖 값은 키를 지우거나 null(모름)로 두고 coerced 로 센다 — 0 이나 빈 배열로 지어내지 않는다. 모르는 키도 coerced 로 센다.
+ *   ⚠ 수집기가 GPU 원소에 새 필드를 더하면 여기(GPU_HOST_KEYS · GPU_VM_KEYS)에도 넣을 것 — 빠지면 중앙에서 조용히 사라진다(시험이 수집기 출력과 대조한다).
+ */
+export const GPU_HOST_KEYS = Object.freeze(['model', 'vendor', 'memGB', 'mode', 'vgpuMode', 'pciId', 'busId', 'vms']);
+// VM gpu 의 model 은 수집기가 만들지 않지만 데모 생성기가 싣고 화면 배지(components/primitives.jsx GpuBadge)가 툴팁으로 읽는다 — 글자로 받는다.
+export const GPU_VM_KEYS = Object.freeze(['type', 'count', 'vgpu', 'passthrough', 'profile', 'model', 'pciIds']);
+const GPU_MODES = Object.freeze(['vgpu', 'passthrough', 'vsga']);
+const VM_GPU_TYPES = Object.freeze(['vgpu', 'passthrough', 'mixed']);
+const GPU_TEXT_MAX = 128;
+/** 글자 칸: 글자면 상한으로 자르고, 아니면 null(모름). */
+function gpuText(v, max = GPU_TEXT_MAX) { return typeof v === 'string' ? capStr(v, max) : null; }
+/** 정수 칸: 0..max 정수만(문자열 수치는 수로), 아니면 null. */
+function gpuInt(v, max) { const n = numOrNull(v); return n != null && n >= 0 && n <= max && Number.isInteger(n) ? n : null; }
+
 /**
- * v2.852: 호스트 gpus — 배열이 아니면 [](읽지 못함 — 소비처가 배열로 읽는다), 원소는 평범한 객체만(64장 상한).
- * 새 필드 vms·pciId 만 형식을 본다(그 밖의 필드는 예전처럼 그대로 — 표시 필드 정제는 별건).
+ * 호스트 gpus — 배열이 아니면 [](읽지 못함 — 소비처가 배열로 읽는다), 원소는 평범한 객체만(64장 상한), 키는 GPU_HOST_KEYS 만.
  * @returns {{ value: object[], coerced: number }}
  */
 export function sanitizeHostGpus(v) {
@@ -763,23 +781,46 @@ export function sanitizeHostGpus(v) {
   const out = [];
   for (const g of v.slice(0, 64)) {
     if (!isPlainObj(g)) { coerced += 1; continue; }
-    const o = { ...g };
-    if (Object.hasOwn(o, 'vms')) {
-      const r = refList(o.vms, MOREF_RE, GPU_REFS_MAX); coerced += r.coerced;
-      if (r.value == null) delete o.vms; else o.vms = r.value;
+    const o = {};
+    for (const k of Object.keys(g)) if (!GPU_HOST_KEYS.includes(k)) coerced += 1;
+    for (const k of ['model', 'vendor']) {
+      if (!Object.hasOwn(g, k)) continue;
+      o[k] = gpuText(g[k]); if (o[k] == null && g[k] != null) coerced += 1;
     }
-    if (Object.hasOwn(o, 'pciId') && o.pciId != null && !(typeof o.pciId === 'string' && (o.pciId === '' || PCI_RE.test(o.pciId)))) { o.pciId = null; coerced += 1; }
+    if (Object.hasOwn(g, 'memGB')) {
+      const n = numOrNull(g.memGB); o.memGB = n != null && n >= 0 && n <= 4096 ? n : null;
+      if (o.memGB == null && g.memGB != null) coerced += 1;
+    }
+    if (Object.hasOwn(g, 'mode')) { o.mode = GPU_MODES.includes(g.mode) ? g.mode : null; if (o.mode == null && g.mode != null) coerced += 1; }
+    if (Object.hasOwn(g, 'vgpuMode')) { if (typeof g.vgpuMode === 'boolean') o.vgpuMode = g.vgpuMode; else coerced += 1; }
+    if (Object.hasOwn(g, 'vms')) {
+      const r = refList(g.vms, MOREF_RE, GPU_REFS_MAX); coerced += r.coerced;
+      if (r.value != null) o.vms = r.value;
+    }
+    for (const k of ['pciId', 'busId']) {
+      if (!Object.hasOwn(g, k)) continue;
+      const x = g[k];
+      if (x == null || (typeof x === 'string' && (x === '' || PCI_RE.test(x)))) o[k] = x ?? null; else { o[k] = null; coerced += 1; }
+    }
     out.push(o);
   }
   return { value: out, coerced };
 }
-/** v2.852: VM gpu — 객체가 아니면 null(GPU 모름). pciIds 만 형식을 본다(16개 상한). */
+/** VM gpu — 객체가 아니면 null(GPU 모름). 키는 GPU_VM_KEYS 만 · pciIds 16개 상한. */
 export function sanitizeVmGpuField(v) {
   if (!isPlainObj(v)) return { value: null, coerced: 1 };
-  const o = { ...v }; let coerced = 0;
-  if (Object.hasOwn(o, 'pciIds')) {
-    const r = refList(o.pciIds, PCI_RE, 16); coerced += r.coerced;
-    if (r.value == null) delete o.pciIds; else o.pciIds = r.value;
+  const o = {}; let coerced = 0;
+  for (const k of Object.keys(v)) if (!GPU_VM_KEYS.includes(k)) coerced += 1;
+  if (Object.hasOwn(v, 'type')) { o.type = VM_GPU_TYPES.includes(v.type) ? v.type : null; if (o.type == null && v.type != null) coerced += 1; }
+  for (const k of ['count', 'vgpu', 'passthrough']) {
+    if (!Object.hasOwn(v, k)) continue;
+    o[k] = gpuInt(v[k], 64); if (o[k] == null && v[k] != null) coerced += 1;
+  }
+  if (Object.hasOwn(v, 'profile')) { o.profile = gpuText(v.profile, 64); if (o.profile == null && v.profile != null) coerced += 1; }
+  if (Object.hasOwn(v, 'model')) { o.model = gpuText(v.model); if (o.model == null && v.model != null) coerced += 1; }
+  if (Object.hasOwn(v, 'pciIds')) {
+    const r = refList(v.pciIds, PCI_RE, 16); coerced += r.coerced;
+    if (r.value != null) o.pciIds = r.value;
   }
   return { value: o, coerced };
 }
