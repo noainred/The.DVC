@@ -107,10 +107,12 @@ export default function BackupSummaryErrors({ reloadKey, onOpenDetail }) {
         : !data ? <div className="muted" style={{ padding: '10px 14px', fontSize: 12.5 }}>{loading ? '읽는 중…' : ''}</div>
           : rows.length && view === 'groups' ? (
             <div style={{ overflowX: 'auto' }}>
-              <table style={{ minWidth: 1000, width: '100%' }} data-err-groups="">
+              {/* 공용 STable(규칙 — raw table 금지) · 정렬은 묶음 단위로 이 화면이 한다(sortable=false — STable 은 행을 낱개로 섞어 묶음이 깨진다) */}
+              <STable sortable={false} minWidth={1000} wrap={false} style={{ width: '100%' }} data-err-groups="">
                 <thead><tr>{GH.map(([k, h]) => (
                   <th key={k} style={{ ...PAD, ...(k === 'msg' ? { minWidth: 280 } : {}) }} aria-sort={gsort.key === k ? (gsort.dir === 'asc' ? 'ascending' : 'descending') : 'none'}>
-                    <button type="button" onClick={() => sortBy(k)} style={{ background: 'none', border: 0, padding: 0, color: 'inherit', font: 'inherit', cursor: 'pointer', whiteSpace: 'nowrap' }}>{h}{gsort.key === k ? (gsort.dir === 'asc' ? ' ▲' : ' ▼') : ''}</button>
+                    {/* 칸 전체가 단추(글자 폭만 누를 수 있으면 넓은 열은 가운데를 눌러도 정렬되지 않았다 — Chromium 확인) */}
+                    <button type="button" onClick={() => sortBy(k)} style={{ display: 'block', width: '100%', textAlign: 'left', background: 'none', border: 0, padding: 0, color: 'inherit', font: 'inherit', cursor: 'pointer', whiteSpace: 'nowrap' }}>{h}{gsort.key === k ? (gsort.dir === 'asc' ? ' ▲' : ' ▼') : ''}</button>
                   </th>
                 ))}<th style={PAD}>열기</th></tr></thead>
                 <tbody>
@@ -162,7 +164,7 @@ export default function BackupSummaryErrors({ reloadKey, onOpenDetail }) {
                     );
                   })}
                 </tbody>
-              </table>
+              </STable>
             </div>
           ) : rows.length ? (
             <div style={{ overflowX: 'auto' }}>

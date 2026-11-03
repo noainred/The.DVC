@@ -32,7 +32,7 @@ export const logViewOf = (v) => (LOG_TABS.some(([k]) => k === v) ? v : 'raw');
  *   job = { id(원장 잡 id), vmName, writable? } · jobid = 그 실행. paneH = 본문 높이(모달 68vh · 서랍은 남은 높이).
  *   늦게 온 이전 응답은 버린다 — 서랍이 ‹ › 로 다른 실행으로 옮기면 앞 요청의 답이 새 실행 위에 그려지지 않게(gen).
  */
-export function JobLogPanel({ job, jobid, mode, onMode, onStateChanged, dir = null, limits = null, paneH = LOG_PANE_H, canRunFull = true }) {
+export function JobLogPanel({ job, jobid, mode, onMode, onStateChanged, dir = null, limits = null, paneH = LOG_PANE_H, canRunFull = true, issuesFirst = false }) {
   const [r, setR] = useState(null);
   const [err, setErr] = useState(null);
   // v2.822.5: 서버가 로그를 주면서 그 실행의 상태를 원장에 반영한다(stateChanged) — 바뀌었으면 목록을 바로 다시 읽는다(폴러 주기를 기다리지 않게).
@@ -86,7 +86,7 @@ export function JobLogPanel({ job, jobid, mode, onMode, onStateChanged, dir = nu
         {err && <ErrorBox error={err} />}
         {!r && !err && <Loading />}
         {runMsg && <Note tone={runMsg.ok ? 'ok' : 'bad'}>{runMsg.text}</Note>}
-        {r && mode === 'summary' && <JobReportView rep={rep} detail={detail} truncated={r.truncated} vmName={job.vmName} jobid={jobid} onRunFull={runFull} runBusy={runBusy} paneH={paneH} />}
+        {r && mode === 'summary' && <JobReportView rep={rep} detail={detail} truncated={r.truncated} vmName={job.vmName} jobid={jobid} onRunFull={runFull} runBusy={runBusy} paneH={paneH} issuesFirst={issuesFirst} />}
         {r && mode === 'timeline' && <TimelineView lines={lines} rep={rep} detail={detail} truncated={r.truncated} paneH={paneH} />}
         {r && mode === 'raw' && <RawLogView rows={rows} lines={lines} paneH={paneH} />}
       </div>
@@ -131,7 +131,7 @@ const ITEM_KIND = Object.freeze({ config: '구성', disk: '디스크', other: '�
  * 요약 본문 — ① 결과 띠 ② 핵심 수치 카드(값 + 부제) + 저장 효율 막대 ③ 상태 칩 ④ 세부 · 백업한 항목 · 볼륨 ⑤ 경고·오류(해석·색 구분).
  * 값이 없으면 '—'(0 으로 보이지 않게) · 해석은 아는 줄에만(bareosText.issueHint) · 로그에서 못 읽은 세부는 칸을 만들지 않는다.
  */
-function JobReportView({ rep, detail, truncated, vmName, jobid, onRunFull = null, runBusy = false, paneH = LOG_PANE_H }) {
+function JobReportView({ rep, detail, truncated, vmName, jobid, onRunFull = null, runBusy = false, paneH = LOG_PANE_H, issuesFirst = false }) {
   const [copied, setCopied] = useState('');
   if (!rep?.found) {
     return (
@@ -217,6 +217,9 @@ function JobReportView({ rep, detail, truncated, vmName, jobid, onRunFull = null
         <span style={chip(sdErr === null ? null : sdErr === 0)}>SD 오류 {sdErr ?? '—'}</span>
       </div>
 
+      {/* v2.871 서랍(좁은 폭)은 경고·오류를 세부보다 먼저 — 실패 원인을 보러 온 화면이다(시안 docs/design/bareos-errlog ① · Chromium 확인: 640px 에서 세부 아래로 밀려 스크롤해야 보였다) */}
+      {issuesFirst && <IssueList rep={rep} onRunFull={onRunFull} runBusy={runBusy} />}
+
       {/* ④ 세부 · 백업한 항목 · 볼륨 */}
       <div style={{ ...TWO_COL, marginTop: 14 }}>
         {detailRows.length > 0 && (
@@ -255,7 +258,7 @@ function JobReportView({ rep, detail, truncated, vmName, jobid, onRunFull = null
       </div>
 
       {/* ⑤ 경고·오류 */}
-      <IssueList rep={rep} onRunFull={onRunFull} runBusy={runBusy} />
+      {!issuesFirst && <IssueList rep={rep} onRunFull={onRunFull} runBusy={runBusy} />}
     </div>
   );
 }

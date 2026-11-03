@@ -50,7 +50,7 @@ export function ErrorLogDrawer({ list, index, onIndex, onClose, limits = null, c
         <button type="button" className="logout-btn" style={BTN} onClick={onClose} aria-label="닫기">닫기</button>
       </div>
       <div style={{ flex: '1 1 0', overflow: 'auto', padding: '10px 16px 12px', minWidth: 0 }}>
-        <JobLogPanel key={`${r.jobKey}|${r.jobid}`} job={logJobOf(r)} jobid={r.jobid} mode={mode} onMode={setMode} dir={logDirOf(r)} limits={limits} paneH="calc(100vh - 280px)" canRunFull={false} />
+        <JobLogPanel key={`${r.jobKey}|${r.jobid}`} job={logJobOf(r)} jobid={r.jobid} mode={mode} onMode={setMode} dir={logDirOf(r)} limits={limits} paneH="calc(100vh - 280px)" canRunFull={false} issuesFirst />
       </div>
       <div style={FOOT}>
         <button type="button" className="logout-btn" style={BTN} disabled={index <= 0} onClick={() => onIndex(index - 1)} aria-label="이전 실행">‹ 이전</button>
