@@ -46,6 +46,7 @@ const FILE_SIZE_CAP = 8 * 1024 * 1024; // 파일당 8MB 상한(대용량 데이�
  * 백업 **내용**은 바꾸지 않는다(복원 의미 유지) — 트리거와 중복 판정에서만 뺀다.
  */
 export const RUNTIME_STATE_NAMES = new Set([
+  'issue-notify-state.json', // v2.871 이슈 기한 알림 기록(issues/notify.js — registerStateFile 과 이중 안전망)
   'backup.json', 'central-agent-config.json', 'central-inventory.json', 'central-fleet.json', 'central-pdu.json',
   'central-agent-storage.json', 'central-agent-sanswitch.json', 'central-agent-sanswitch-perf.json',
   'central-agent-gpu-guest.json', 'central-unsupported-servers.json', 'agent-results.json',

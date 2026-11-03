@@ -53,6 +53,8 @@ export const PERMISSION_CATALOG = [
   //   **관리자 전용 키**다 — operator·viewer 행에는 넣을 수 없고(sanitizeRow 가 버린다), admin 은 기본 허용이며
   //   권한 설정에서 끌 수 있다(`adminDenied`). super_admin 은 항상 허용(끌 수 없다 — 잠김 방지).
   { key: 'data.csv', label: 'CSV 가져오기/내보내기', group: '관리', adminOnly: true, adminToggle: true },
+  // v2.871(사용자 선택 'viewer 의 요청 등록'): 이슈 › '요청' 유형만 등록(백로그 · 담당자·상태 지정 없음). 운영자·관리자는 역할로 이미 이슈를 쓴다.
+  { key: 'issues.request', label: '이슈 요청 등록(요청 유형만)', group: '이슈' },
 ];
 /** 관리자 전용 키 — operator·viewer 에게 줄 수 없다. */
 export const ADMIN_ONLY_KEYS = Object.freeze(PERMISSION_CATALOG.filter((p) => p.adminOnly).map((p) => p.key));
@@ -75,12 +77,14 @@ const CATALOG_SET = new Set(ALL_PERMISSION_KEYS);
  * 합친다(가산만 — 관리자가 이미 내린 결정은 건드리지 않는다). 한 번 저장되면 버전이 찍혀
  * 이후로는 마이그레이션이 돌지 않는다.
  */
-const SCHEMA_VERSION = 3;
+const SCHEMA_VERSION = 4;
 const KEYS_ADDED_IN = Object.freeze({
   2: ['svcmon'],   // v2.506 — 서비스 모니터 조회 권한 분리
   // v2.643 — CSV 가져오기/내보내기. operator·viewer 기본값에 없으므로 가산되는 것이 없다(관리자 전용 키).
   //   admin 은 adminDenied 가 비어 있으면 허용이라 옛 파일도 그대로 허용이다(조용한 거부 없음).
   3: ['data.csv'],
+  // v2.871 — 이슈 요청 등록. operator·viewer 기본값에 있으므로 예전 파일에도 가산된다(사용자가 viewer 요청 등록을 요청했다 — 끄려면 권한 화면에서).
+  4: ['issues.request'],
 });
 
 // 기본 매트릭스(admin 은 항상 전체라 매트릭스에 담지 않는다).
@@ -92,11 +96,11 @@ const KEYS_ADDED_IN = Object.freeze({
 const DEFAULT_MATRIX = {
   operator: [
     'dashboard', 'inv.hosts', 'inv.vms', 'inv.datastores', 'inv.networks', 'inv.nsx', 'inv.alarms',
-    'tools', 'insights', 'svcmon', 'remote.access', 'vm.console',
+    'tools', 'insights', 'svcmon', 'remote.access', 'vm.console', 'issues.request',
   ],
   viewer: [
     'dashboard', 'inv.hosts', 'inv.vms', 'inv.datastores', 'inv.networks', 'inv.nsx', 'inv.alarms',
-    'insights', 'vm.console',
+    'insights', 'vm.console', 'issues.request',
   ],
 };
 

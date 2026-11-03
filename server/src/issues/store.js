@@ -19,6 +19,15 @@
  *   · 담당자는 1명(책임 명확). 함께 보는 사람은 관찰자. 재할당은 이력에 남고 라우트가 감사 로그를 적는다.
  *   · 수정 권한은 라우트가 정한다(쓰기 계정 전부 — 협업 도구). 삭제는 보고자 본인 또는 관리자(라우트가 `isMod` 로 넘긴다).
  *   · 시각은 epoch ms 숫자 하나. 문자열 값은 `capStr` 로 평탄화한다(원문 SlicedString 을 붙잡지 않게).
+ *
+ * v2.871(사용자 선택 — 감사 A3-02 '법인(vCenter) 축 추가'):
+ *   · 이슈마다 `vcenterId`(법인 — '' = 공용). 접근은 라우트가 만든 `access = { read, write }`(Set|null — null 은 제한 없음,
+ *     auth/scope.js scopedVcenterIds · writeScopedVcenterIds)로 판정한다. 범위 계정은 자기 조회 범위의 법인 이슈만 보고
+ *     **공용(법인 없음) 이슈는 보지 않는다**(서버 불변조건 '귀속 없는 데이터는 범위 계정에 노출하지 않는다'). 단건은 조회 밖 404 →
+ *     쓰기 밖 403 순서(`findFor`). 범위 계정이 만드는 이슈는 쓰기 범위 안의 법인을 반드시 고른다(400 · 밖이면 403).
+ *   · 이벤트 훅 `onIssueEvent` — 생성·할당·상태·댓글이 저장 뒤에 알린다(알림 모듈이 구독). 훅의 실패는 변경을 되돌리지 않는다(콘솔).
+ *   · `createIssue(…, { auto })` — 담당자를 비운 생성에 자동 할당 결과를 싣는다(이력에 '자동 할당: 근거'). `{ requestOnly }` — viewer 의
+ *     요청 등록(유형 '요청' · 백로그 · 관찰자·상태 지정 없음).
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -32,6 +41,10 @@ import { registerExitFlush } from '../util/exitFlush.js';
 export const KEY_PREFIX = 'ISS';
 export const KEY_RE = /^ISS-\d{1,9}$/;
 export const ID_RE = /^[a-f0-9]{16}$/;
+/** 법인(vCenter) id 꼴 — 공백·제어 문자 없는 1~128자(vCenter id 에 콜론이 들어간다). */
+export const VC_ID_RE = /^[^\s\u0000-\u001f\u007f]{1,128}$/;
+/** 제한 없는 접근(전체 범위). 라우트는 사용자마다 access 를 만들어 넘긴다. */
+export const FULL_ACCESS = Object.freeze({ read: null, write: null });
 
 export const STATUSES = Object.freeze(['backlog', 'todo', 'progress', 'review', 'done']);
 export const TYPES = Object.freeze(['incident', 'task', 'request', 'improve']);
@@ -315,6 +328,43 @@ export function issuesPersist({ admin = false, now = Date.now() } = {}) {
   };
 }
 
+/* ───── 이벤트(v2.871) ───── */
+const listeners = new Set();
+/** 이슈 변경 이벤트 구독 — 해제 함수를 돌려준다. 이벤트는 저장(메모리 반영) 뒤에 동기로 온다. */
+export function onIssueEvent(fn) { if (typeof fn === 'function') listeners.add(fn); return () => listeners.delete(fn); }
+function emit(ev) {
+  for (const fn of listeners) {
+    try { fn(ev); } catch (e) { console.warn(`[issues] 이벤트 처리 실패(${ev?.type}): ${String(e?.message || e).slice(0, 160)}`); }
+  }
+}
+/** 이벤트에 싣는 이슈 요약(본문 제외 — 알림 문구에 필요한 것만). */
+const evIssue = (x) => ({
+  key: x.key, title: x.title, type: x.type, status: x.status, priority: x.priority, vcenterId: x.vcenterId || '',
+  assignee: x.assignee || '', reporter: x.reporter || '', watchers: Array.isArray(x.watchers) ? [...x.watchers] : [], dueAt: x.dueAt ?? null,
+});
+/** 댓글의 @멘션 — 공백·@·쉼표가 아닌 1~64자, 10명까지(중복 제거). */
+export function mentionsOf(body) {
+  const out = [];
+  for (const m of String(body || '').slice(0, LIMITS.commentBody).matchAll(/(?:^|[\s(])@([^\s@,()]{1,64})/g)) {
+    if (!out.includes(m[1])) out.push(m[1]);
+    if (out.length >= 10) break;
+  }
+  return out;
+}
+
+/* ───── 범위(v2.871) ───── */
+const canSee = (x, a) => !a?.read || (!!x.vcenterId && a.read.has(x.vcenterId));
+const canEdit = (x, a) => !a?.write || (!!x.vcenterId && a.write.has(x.vcenterId));
+/** 이 사용자가 이 이슈를 고칠 수 있는가(화면 버튼 잠금용 — 판정은 findFor 와 같다). */
+export function writableBy(x, access = FULL_ACCESS) { return canSee(x, access) && canEdit(x, access); }
+/** 단건 — 조회 밖 404(존재 은닉) → 쓰기 밖 403. */
+function findFor(key, access = FULL_ACCESS, { write = false } = {}) {
+  const x = load().issues.find((i) => i.key === key);
+  if (!x || !canSee(x, access)) throw notFound();
+  if (write && !canEdit(x, access)) throw forbidden('이 이슈의 법인은 쓰기 범위 밖입니다 — 조회만 할 수 있습니다');
+  return x;
+}
+
 /* ───── 검증 ───── */
 const newId = () => crypto.randomBytes(8).toString('hex');
 function fieldError(field, msg) { const e = new Error(`${field}: ${msg}`); e.status = 400; e.field = field; return e; }
@@ -375,6 +425,25 @@ function watchersField(v) {
   return out;
 }
 
+/**
+ * 법인 칸 — '' = 공용. known(Set|null)은 지금 등록된 vCenter id(null 이면 존재 검사를 건너뛴다 — 시험·스냅샷 없음).
+ * 범위 계정(access.write 가 Set)은 공용을 고를 수 없고 쓰기 범위 안이어야 한다(밖이면 403 — 존재가 보이는 vCenter 다).
+ */
+function vcenterField(v, access, known) {
+  const id = v == null ? '' : v;
+  if (typeof id !== 'string') throw fieldError('vcenterId', '문자열이어야 합니다');
+  const s = id.trim();
+  if (!s) {
+    if (access?.write) throw fieldError('vcenterId', '범위가 지정된 계정은 법인(vCenter)을 골라야 합니다');
+    return '';
+  }
+  if (!VC_ID_RE.test(s)) throw fieldError('vcenterId', '법인(vCenter) id 형식이 아닙니다');
+  if (known && !known.has(s)) throw fieldError('vcenterId', '등록되지 않은 법인(vCenter)입니다');
+  if (access?.read && !access.read.has(s)) throw fieldError('vcenterId', '등록되지 않은 법인(vCenter)입니다'); // 조회 밖 — 존재를 흘리지 않는다
+  if (access?.write && !access.write.has(s)) throw forbidden('그 법인은 쓰기 범위 밖입니다 — 조회만 할 수 있습니다');
+  return capStr(s, 128);
+}
+
 /* ───── 조회 ───── */
 const commentsOf = (x) => (Array.isArray(x?.comments) ? x.comments.filter((c) => c && typeof c === 'object' && typeof c.id === 'string') : []);
 const historyOf = (x) => (Array.isArray(x?.history) ? x.history.filter((h) => h && typeof h === 'object') : []);
@@ -383,7 +452,7 @@ const isOpen = (x) => x.status !== 'done';
 /** 목록용 요약(본문·댓글·이력 제외). */
 export function summary(x) {
   return {
-    id: x.id, key: x.key, num: x.num, type: x.type, title: x.title, status: x.status, priority: x.priority,
+    id: x.id, key: x.key, num: x.num, type: x.type, title: x.title, status: x.status, priority: x.priority, vcenterId: x.vcenterId || '',
     blocked: x.blocked ? { reason: x.blocked.reason, at: x.blocked.at, by: x.blocked.by } : null,
     assignee: x.assignee || '', reporter: x.reporter || '', labels: Array.isArray(x.labels) ? x.labels : [], component: x.component || '',
     dueAt: x.dueAt ?? null, createdAt: x.createdAt, updatedAt: x.updatedAt || x.createdAt, closedAt: x.closedAt ?? null,
@@ -407,8 +476,8 @@ const needleOf = (q) => (typeof q === 'string' ? q.trim().toLowerCase().slice(0,
  * 목록 — 필터는 서버가 건다. `done`: 'open'(기본 — 완료 제외) · 'recent'(최근 RECENT_DONE_MS 안의 완료 포함) · 'all'.
  * 정렬: 우선순위 → 기한(없는 것은 뒤) → 갱신 최신. 페이지 인자는 호출부가 pageArgs 로 좁혀 넘긴다.
  */
-export function listIssues({ q = '', status = '', assignee = null, priority = '', type = '', label = '', done = 'open', offset = 0, limit = 200, now = Date.now() } = {}) {
-  const all = load().issues;
+export function listIssues({ q = '', status = '', assignee = null, priority = '', type = '', label = '', vcenterId = null, done = 'open', offset = 0, limit = 200, now = Date.now(), access = FULL_ACCESS } = {}) {
+  const all = load().issues.filter((x) => canSee(x, access)); // 범위가 요청 필터보다 먼저
   const needle = needleOf(q);
   const hit = all.filter((x) => {
     if (status) { if (x.status !== status) return false; } else if (done === 'open') { if (!isOpen(x)) return false; } else if (done === 'recent') { if (!isOpen(x) && !(x.closedAt && now - x.closedAt <= RECENT_DONE_MS)) return false; }
@@ -416,6 +485,7 @@ export function listIssues({ q = '', status = '', assignee = null, priority = ''
     if (priority && x.priority !== priority) return false;
     if (type && x.type !== type) return false;
     if (label && !(Array.isArray(x.labels) && x.labels.includes(label))) return false;
+    if (vcenterId != null && (x.vcenterId || '') !== vcenterId) return false;
     if (needle && !`${x.key}\n${x.title}\n${x.body || ''}\n${x.assignee || ''}\n${x.reporter || ''}\n${(x.labels || []).join(' ')}\n${x.component || ''}`.toLowerCase().includes(needle)) return false;
     return true;
   });
@@ -424,18 +494,17 @@ export function listIssues({ q = '', status = '', assignee = null, priority = ''
   return { total: rows.length, all: all.length, offset, limit, rows: rows.slice(offset, offset + limit) };
 }
 
-export function getIssue(key, me = '') {
-  const x = load().issues.find((i) => i.key === key);
-  if (!x) throw notFound();
-  return viewIssue(x, me);
+export function getIssue(key, me = '', access = FULL_ACCESS) {
+  const x = findFor(key, access);
+  return { ...viewIssue(x, me), writable: canEdit(x, access) };
 }
 
 /**
  * 통계 — 상태별·우선순위별 열린 건수, 미할당·기한 초과·오늘/내일 마감, 담당자별 부하(열린·진행·검토·초과), 최근 7일 완료.
  * 전부 '열린 이슈' 기준이다(완료는 세지 않는다).
  */
-export function issueStats({ now = Date.now() } = {}) {
-  const all = load().issues;
+export function issueStats({ now = Date.now(), access = FULL_ACCESS } = {}) {
+  const all = load().issues.filter((x) => canSee(x, access));
   const open = all.filter(isOpen);
   const byStatus = Object.fromEntries(STATUSES.map((s) => [s, 0]));
   const byPriority = Object.fromEntries(PRIORITIES.map((p) => [p, 0]));
@@ -462,9 +531,10 @@ export function issueStats({ now = Date.now() } = {}) {
 }
 
 /** 담당자 후보에 더할 이름 — 이슈에 이미 보이는 담당자·보고자·관찰자(AD 계정처럼 목록에 없는 사람도 다시 고를 수 있게). */
-export function knownNames() {
+export function knownNames(access = FULL_ACCESS) {
   const s = new Set();
   for (const x of load().issues) {
+    if (!canSee(x, access)) continue;
     if (x.assignee) s.add(x.assignee); if (x.reporter) s.add(x.reporter);
     for (const n of Array.isArray(x.watchers) ? x.watchers : []) s.add(n);
   }
@@ -497,14 +567,23 @@ function replace(c, x, entries, user, { touch = true } = {}) {
   commit(issues, { changed: y });
   return y;
 }
-const findRaw = (key) => { const x = load().issues.find((i) => i.key === key); if (!x) throw notFound(); return x; };
 
-export function createIssue(body, user) {
+/**
+ * @param {object} body
+ * @param {string} user
+ * @param {{ access?: object, known?: Set<string>|null, auto?: { assignee: string, reason: string }|null, requestOnly?: boolean }} [opts]
+ */
+export function createIssue(body, user, { access = FULL_ACCESS, known = null, auto = null, requestOnly = false } = {}) {
   const c = load();
   if (c.issues.length >= LIMITS.issueMax) throw limitError(`이슈는 ${LIMITS.issueMax}건까지 보관합니다 — 관리자에게 지난 이슈 정리를 요청하세요`);
   const now = Date.now();
-  const b = body || {};
-  const assignee = nameField(b.assignee, 'assignee');
+  const b = requestOnly
+    ? { title: body?.title, body: body?.body, priority: body?.priority, dueAt: body?.dueAt, labels: body?.labels, component: body?.component, vcenterId: body?.vcenterId, type: 'request', status: 'backlog' }
+    : (body || {});
+  const vcenterId = vcenterField(b.vcenterId, access, known);
+  let assignee = nameField(b.assignee, 'assignee');
+  const autoAssignee = !assignee && auto?.assignee ? nameField(auto.assignee, 'assignee') : '';
+  if (autoAssignee) assignee = autoAssignee;
   const status = enumField(b.status, STATUSES, 'status', 'backlog');
   if (status === 'progress' && !assignee) throw fieldError('status', '진행 중으로 두려면 담당자가 있어야 합니다');
   const num = c.nextSeq;
@@ -513,24 +592,28 @@ export function createIssue(body, user) {
     type: enumField(b.type, TYPES, 'type', 'task'),
     title: text(b.title, LIMITS.title, 'title', { required: true }),
     body: text(b.body, LIMITS.body, 'body'),
-    status, blocked: null,
+    status, blocked: null, vcenterId,
     priority: enumField(b.priority, PRIORITIES, 'priority', 'p2'),
     assignee, reporter: user,
     watchers: watchersField(b.watchers), labels: labelsField(b.labels), component: text(b.component, LIMITS.component, 'component'),
     dueAt: timeField(b.dueAt, 'dueAt'),
     createdAt: now, createdBy: user, updatedAt: now, updatedBy: user, closedAt: status === 'done' ? now : null,
     comments: [],
-    history: [{ at: now, by: user, field: 'created', from: '', to: `${KEY_PREFIX}-${num}` }, ...(assignee ? [{ at: now, by: user, field: 'assignee', from: '', to: assignee }] : [])],
+    history: [
+      { at: now, by: user, field: 'created', from: '', to: `${KEY_PREFIX}-${num}`, ...(requestOnly ? { note: '요청 등록' } : {}) },
+      ...(assignee ? [{ at: now, by: user, field: 'assignee', from: '', to: assignee, ...(autoAssignee ? { note: `자동 할당: ${capStr(String(auto.reason || ''), 80)}` } : {}) }] : []),
+    ],
   };
   assertRoom(c, x);
   commit([...c.issues, x], { changed: x, nextSeq: num + 1 });
-  return viewIssue(x, user);
+  emit({ type: 'created', actor: user, issue: evIssue(x), auto: !!autoAssignee });
+  return { ...viewIssue(x, user), writable: canEdit(x, access) };
 }
 
 /** 제목·본문·유형·우선순위·기한·라벨·컴포넌트·관찰자 — 보낸 칸만 바꾼다. 상태·담당자·보류는 전용 함수로. */
-export function updateIssue(key, body, user) {
+export function updateIssue(key, body, user, { access = FULL_ACCESS, known = null } = {}) {
   const c = load();
-  const x = findRaw(key);
+  const x = findFor(key, access, { write: true });
   const b = body || {};
   const has = (k) => Object.hasOwn(b, k);
   const entries = [];
@@ -550,6 +633,7 @@ export function updateIssue(key, body, user) {
   if (has('labels')) set('labels', labelsField(b.labels));
   if (has('component')) set('component', text(b.component, LIMITS.component, 'component'));
   if (has('watchers')) set('watchers', watchersField(b.watchers));
+  if (has('vcenterId')) set('vcenterId', vcenterField(b.vcenterId, access, known));
   if (has('body') && x.body !== next.body) entries.push({ at: now, by: user, field: 'body', from: '', to: '(본문 수정)' });
   const changed = entries.length > 0 || (has('body') && x.body !== next.body);
   if (!changed) return viewIssue(x, user);
@@ -557,21 +641,23 @@ export function updateIssue(key, body, user) {
 }
 
 /** 상태 전이. progress 는 담당자 필수 · done 은 closedAt · done 에서 나오면 closedAt 해제. 같은 상태면 그대로. */
-export function setStatus(key, status, user) {
+export function setStatus(key, status, user, { access = FULL_ACCESS } = {}) {
   const c = load();
-  const x = findRaw(key);
+  const x = findFor(key, access, { write: true });
   const s = enumField(status, STATUSES, 'status');
   if (s === x.status) return viewIssue(x, user);
   if (s === 'progress' && !x.assignee) throw fieldError('status', '진행 중으로 옮기려면 담당자가 있어야 합니다 — 먼저 할당하세요');
   const now = Date.now();
   const next = { ...x, status: s, closedAt: s === 'done' ? now : null };
-  return viewIssue(replace(c, next, [{ at: now, by: user, field: 'status', from: x.status, to: s }], user), user);
+  const y = replace(c, next, [{ at: now, by: user, field: 'status', from: x.status, to: s }], user);
+  emit({ type: 'status', actor: user, issue: evIssue(y), from: x.status, to: s });
+  return viewIssue(y, user);
 }
 
 /** 담당자 변경('' = 할당 해제). 재할당 이력 + 선택 사유. 같은 담당자면 그대로. */
-export function assignIssue(key, assignee, user, { reason = '' } = {}) {
+export function assignIssue(key, assignee, user, { reason = '', access = FULL_ACCESS } = {}) {
   const c = load();
-  const x = findRaw(key);
+  const x = findFor(key, access, { write: true });
   const a = nameField(assignee, 'assignee');
   if (a === (x.assignee || '')) return viewIssue(x, user);
   // v2.870 감사 A2-05: '진행 중 ⇒ 담당자' 불변조건(setStatus · createIssue 와 같은 규칙) — 할당 해제(일괄 포함)가 담당자 없는 진행 중 이슈를 만들지 않게
@@ -579,26 +665,28 @@ export function assignIssue(key, assignee, user, { reason = '' } = {}) {
   const why = text(reason, LIMITS.blockReason, 'reason');
   const now = Date.now();
   const next = { ...x, assignee: a };
-  return viewIssue(replace(c, next, [{ at: now, by: user, field: 'assignee', from: x.assignee || '', to: a, ...(why ? { note: why } : {}) }], user), user);
+  const y = replace(c, next, [{ at: now, by: user, field: 'assignee', from: x.assignee || '', to: a, ...(why ? { note: why } : {}) }], user);
+  emit({ type: 'assigned', actor: user, issue: evIssue(y), from: x.assignee || '', to: a });
+  return viewIssue(y, user);
 }
 
 /** 여러 이슈에 같은 담당자 — 결과는 키마다 밝힌다(없는 키·오류는 건너뛰고 사유를 적는다 — 조용히 넘기지 않는다). */
-export function bulkAssign(keys, assignee, user) {
+export function bulkAssign(keys, assignee, user, { access = FULL_ACCESS } = {}) {
   if (!Array.isArray(keys)) throw fieldError('keys', '배열이어야 합니다');
   if (keys.length > LIMITS.bulkMax) throw fieldError('keys', `한 번에 ${LIMITS.bulkMax}건까지입니다`);
   const a = nameField(assignee, 'assignee');
   const results = [];
   for (const k of keys) {
     if (typeof k !== 'string' || !KEY_RE.test(k)) { results.push({ key: String(k).slice(0, 20), ok: false, reason: '키 형식이 아닙니다' }); continue; }
-    try { assignIssue(k, a, user); results.push({ key: k, ok: true }); } catch (e) { results.push({ key: k, ok: false, reason: e.message }); }
+    try { assignIssue(k, a, user, { access }); results.push({ key: k, ok: true }); } catch (e) { results.push({ key: k, ok: false, reason: e.message }); }
   }
   return { assignee: a, results, done: results.filter((r) => r.ok).length, failed: results.filter((r) => !r.ok).length };
 }
 
 /** 보류 표지 — on 이면 사유 필수. off 면 해제. */
-export function setBlocked(key, on, user, { reason = '' } = {}) {
+export function setBlocked(key, on, user, { reason = '', access = FULL_ACCESS } = {}) {
   const c = load();
-  const x = findRaw(key);
+  const x = findFor(key, access, { write: true });
   if (typeof on !== 'boolean') throw fieldError('on', 'true 또는 false 여야 합니다');
   const now = Date.now();
   if (on) {
@@ -612,11 +700,11 @@ export function setBlocked(key, on, user, { reason = '' } = {}) {
 }
 
 /** 관찰 켜기/끄기(본인). 상태를 명시한다(재전송이 두 번 바꾸지 않게). 이력·갱신 시각은 건드리지 않는다. */
-export function setWatch(key, user, on) {
+export function setWatch(key, user, on, { access = FULL_ACCESS } = {}) {
   if (!user) throw forbidden('로그인한 사용자만 관찰할 수 있습니다');
   if (typeof on !== 'boolean') throw fieldError('on', 'true 또는 false 여야 합니다');
   const c = load();
-  const x = findRaw(key);
+  const x = findFor(key, access); // 관찰은 본인 표지라 조회 범위면 된다
   const cur = Array.isArray(x.watchers) ? x.watchers : [];
   if (cur.includes(user) === on) return viewIssue(x, user);
   if (on && cur.length >= LIMITS.watcherMax) throw limitError(`관찰자는 ${LIMITS.watcherMax}명까지입니다`);
@@ -624,21 +712,22 @@ export function setWatch(key, user, on) {
   return viewIssue(replace(c, next, [], user, { touch: false }), user);
 }
 
-export function addComment(key, body, user) {
+export function addComment(key, body, user, { access = FULL_ACCESS } = {}) {
   const c = load();
-  const x = findRaw(key);
+  const x = findFor(key, access, { write: true });
   const comments = commentsOf(x);
   if (comments.length >= LIMITS.commentMax) throw limitError(`댓글은 이슈마다 ${LIMITS.commentMax}개까지입니다`);
   const cm = { id: newId(), author: user, body: text(body?.body, LIMITS.commentBody, 'body', { required: true }), createdAt: Date.now() };
   const next = { ...x, comments: [...comments, cm] };
-  replace(c, next, [], user);
+  const y = replace(c, next, [], user);
+  emit({ type: 'comment', actor: user, issue: evIssue(y), commentId: cm.id, excerpt: capStr(cm.body, 200), mentions: mentionsOf(cm.body) });
   return cm;
 }
 
 /** 댓글 삭제 — 작성자 본인 또는 관리자(isMod). */
-export function deleteComment(key, commentId, user, { isMod = false } = {}) {
+export function deleteComment(key, commentId, user, { isMod = false, access = FULL_ACCESS } = {}) {
   const c = load();
-  const x = findRaw(key);
+  const x = findFor(key, access, { write: true });
   const comments = commentsOf(x);
   const cm = comments.find((y) => y.id === commentId);
   if (!cm) throw notFound();
@@ -648,9 +737,9 @@ export function deleteComment(key, commentId, user, { isMod = false } = {}) {
 }
 
 /** 이슈 삭제 — 보고자 본인 또는 관리자(isMod). 댓글·이력이 함께 사라진다. */
-export function deleteIssue(key, user, { isMod = false } = {}) {
+export function deleteIssue(key, user, { isMod = false, access = FULL_ACCESS } = {}) {
   const c = load();
-  const x = findRaw(key);
+  const x = findFor(key, access, { write: true });
   if (!isMod && x.reporter !== user) throw forbidden('보고자 본인이나 관리자만 지울 수 있습니다');
   commit(c.issues.filter((y) => y.id !== x.id), { removedId: x.id });
   return summary(x);
