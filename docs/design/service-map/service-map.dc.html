@@ -3,24 +3,22 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>서비스 맵 — VM + 베어메탈 통합 (시안 A)</title>
+<title>서비스 맵 — VM + 베어메탈 통합 (시안 A · 2차: 폴더 트리 · 법인별 관리 · iDRAC 서버 추가)</title>
 <style>
 /* 포탈 web/src/styles.css :root 토큰과 같은 값만 쓴다(새 hex 를 흩뿌리지 않는다). */
 :root{--bg:#0a0e17;--bg-soft:#111726;--panel:#141b2d;--panel-2:#1a2236;--border:#243049;--border-soft:#1f2a40;--panel-deep:#0f1626;
   --text:#e6edf6;--text-dim:#8b9bb4;--text-faint:#5d6b85;--accent:#3b82f6;--accent-2:#22d3ee;--green:#22c55e;--amber:#f59e0b;--red:#ef4444;--purple:#a855f7;--mint:#34e0b4;
-  --mono:'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;--radius:12px}
+  --hover:rgba(59,130,246,.10);--mono:'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;--radius:12px}
 *{box-sizing:border-box}
 html,body{margin:0;background:var(--bg);color:var(--text);font-family:Inter,"Noto Sans KR","Apple SD Gothic Neo",system-ui,sans-serif;font-size:13px;overflow-x:hidden}
-a{color:var(--accent)}
 .wrap{width:100%;max-width:1440px;margin:0 auto;padding:16px 16px 40px;display:flex;flex-direction:column;gap:12px;min-width:0}
 @media(min-width:900px){.wrap{padding:18px 24px 48px}}
 .card{background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);min-width:0}
-.muted{color:var(--text-dim)}.faint{color:var(--text-faint)}
-.mono{font-family:var(--mono)}
+.muted{color:var(--text-dim)}.faint{color:var(--text-faint)}.mono{font-family:var(--mono)}
 .hdr{display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:10px 14px;border-bottom:1px solid var(--border-soft)}
 .hdr .back{color:var(--text-dim);text-decoration:none;font-weight:600}
-.hdr h1{margin:0;font-size:16px;font-weight:800;display:flex;align-items:center;gap:8px;min-width:0}
-.hdr .sp{flex:1}
+.hdr h1{margin:0;font-size:16px;font-weight:800;display:flex;align-items:center;gap:8px;min-width:0;flex-wrap:wrap}
+.sp{flex:1}
 .badge{display:inline-flex;align-items:center;height:20px;padding:0 8px;border-radius:999px;font-size:11px;font-weight:700;white-space:nowrap;border:1px solid var(--border)}
 .badge.blue{background:rgba(59,130,246,.16);color:#93c5fd;border-color:transparent}
 .badge.amber{background:rgba(245,158,11,.16);color:#fcd34d;border-color:transparent}
@@ -30,35 +28,49 @@ a{color:var(--accent)}
 .badge.teal{background:rgba(45,212,191,.16);color:#5eead4;border-color:transparent}
 .badge.purple{background:rgba(168,85,247,.16);color:#d8b4fe;border-color:transparent}
 select,input{background:var(--panel-2);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:7px 10px;font:inherit;min-width:0;max-width:100%}
+input[type=checkbox]{width:15px;height:15px;padding:0;accent-color:var(--accent)}
 .btn{display:inline-flex;align-items:center;gap:6px;min-height:32px;padding:0 12px;border-radius:8px;border:1px solid var(--border);background:var(--panel-2);color:var(--text);font:inherit;font-size:12.5px;font-weight:600;cursor:pointer;white-space:nowrap}
 .btn.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+.btn.sm{min-height:26px;padding:0 9px;font-size:12px}
 .btn[disabled]{opacity:.5;cursor:not-allowed}
 .info{padding:10px 14px;border-left:3px solid var(--accent-2);font-size:13px;line-height:1.5}
-.info b{font-weight:700}
-.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px}
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(165px,1fr));gap:10px}
 .kpi{padding:12px 14px;display:flex;flex-direction:column;gap:5px;cursor:pointer;border-left:3px solid var(--border)}
 .kpi.on{outline:1px solid var(--accent)}
 .kpi .lbl{font-size:12px;font-weight:600;color:var(--text-dim)}
 .kpi .big{font-size:26px;font-weight:800;letter-spacing:-.01em;line-height:1.1}
 .kpi .sub{font-size:11.5px;color:var(--text-dim)}
-.tool{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.layout{display:grid;grid-template-columns:1fr;gap:12px;min-width:0}
+@media(min-width:1100px){.layout{grid-template-columns:240px minmax(0,1fr)}}
+.tree{padding:6px 4px}
+.tn{display:flex;align-items:center;gap:6px;padding:5px 8px;cursor:pointer;border-radius:6px;margin:1px 4px;min-width:0;font-size:12.5px}
+.tn:hover{background:var(--hover)} .tn.on{background:rgba(59,130,246,.18);outline:1px solid var(--accent)}
+.tn .tw{width:12px;color:var(--text-faint);flex:none;font-size:10px;text-align:center}
+.tn .ic{flex:none}
+.tn .nm{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tn .cnt{font-size:11px;color:var(--text-dim);background:rgba(139,155,180,.14);padding:0 6px;border-radius:999px;flex:none}
+.tn.d1{padding-left:22px}.tn.d2{padding-left:36px}.tn.d3{padding-left:50px}.tn.d4{padding-left:64px}
+.tn.un .nm{color:#fcd34d}
+.crumb{display:flex;gap:6px;align-items:center;flex-wrap:wrap;font-size:13px;min-width:0}
+.crumb b{font-weight:800}.crumb .sep{color:var(--text-faint)}
+.tool{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:10px 14px;border-bottom:1px solid var(--border-soft)}
 .seg{display:inline-flex;background:var(--panel-deep);border:1px solid var(--border);border-radius:8px;padding:2px;flex-wrap:wrap}
 .seg button{border:0;background:transparent;color:var(--text-dim);font:inherit;font-weight:600;padding:6px 12px;border-radius:6px;cursor:pointer}
 .seg button.on{background:var(--accent);color:#fff;font-weight:800}
 .chips{display:flex;gap:6px;flex-wrap:wrap}
 .chip{display:inline-flex;align-items:center;gap:6px;min-height:28px;padding:0 11px;border-radius:999px;border:1px solid var(--border);background:var(--panel-2);color:var(--text-dim);font:inherit;font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap}
 .chip.on{background:var(--accent);border-color:var(--accent);color:#fff}
-.chip .n{font-size:11px;background:rgba(139,155,180,.14);padding:1px 6px;border-radius:999px}
-.chip.on .n{background:rgba(255,255,255,.22)}
 .sect{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:10px 14px;border-bottom:1px solid var(--border-soft)}
 .sect h2{margin:0;font-size:14px;font-weight:800}
 .tscroll{overflow-x:auto;max-width:100%}
 table{border-collapse:collapse;width:100%}
-th{font-size:12px;font-weight:600;color:var(--text-dim);text-align:left;padding:8px 10px;background:var(--panel-deep);border-bottom:1px solid var(--border);white-space:nowrap;cursor:pointer;user-select:none}
+th{font-size:12px;font-weight:600;color:var(--text-dim);text-align:left;padding:8px 6px;background:var(--panel-deep);border-bottom:1px solid var(--border);white-space:nowrap;cursor:pointer;user-select:none}
 th[data-nosort]{cursor:default}
 th .arr{color:var(--accent);margin-left:4px;font-size:10px}
-td{padding:9px 10px;border-bottom:1px solid var(--border-soft);vertical-align:middle;white-space:nowrap;font-size:13px}
+td{padding:9px 6px;border-bottom:1px solid var(--border-soft);vertical-align:middle;white-space:nowrap;font-size:13px}
 td.r,th.r{text-align:right}
+/* 클래스 이름이 .rule(판정 순서 카드) 과 겹치지 않게 src- 접두 */
+td.src .k{font-weight:700}td.src .src-tag{color:#93c5fd}td.src .src-scan{color:#5eead4}td.src .src-manual{color:#d8b4fe}td.src .src-rule{color:#aebbd0}
 tr.sel td{background:rgba(59,130,246,.10)}
 tbody tr.row{cursor:pointer}
 tbody tr.row:hover td{background:rgba(59,130,246,.06)}
@@ -67,19 +79,25 @@ tr.unassigned td{background:rgba(245,158,11,.05)}
 .bar i{display:block;height:100%;background:var(--accent)}
 .bar i.hot{background:var(--amber)}.bar i.crit{background:var(--red)}
 .dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px;vertical-align:middle}
-.dot.on{background:#4ade80}.dot.off{background:var(--text-faint)}.dot.unk{background:transparent;border:1.5px dashed var(--text-dim)}
+.dot.on{background:#4ade80}.dot.off{background:var(--text-faint)}
 .foot{padding:8px 14px;font-size:11.5px;color:var(--text-dim);border-top:1px solid var(--border-soft);display:flex;gap:6px 14px;flex-wrap:wrap}
 .note{padding:8px 12px;border-left:3px solid var(--amber);font-size:12.5px}
+.ok-note{padding:8px 12px;border-left:3px solid var(--green);font-size:12.5px}
+.inline{display:flex;gap:6px;align-items:center;padding:8px 14px;flex-wrap:wrap;border-bottom:1px solid var(--border-soft);background:var(--panel-deep)}
 .rule{display:grid;grid-template-columns:28px minmax(0,1fr);gap:10px;padding:10px 14px;border-bottom:1px solid var(--border-soft);align-items:start}
 .rule .no{width:24px;height:24px;border-radius:50%;background:var(--accent);color:#fff;font-weight:800;display:flex;align-items:center;justify-content:center;font-size:12px}
 .rule h3{margin:0 0 3px;font-size:13px;font-weight:700}
 .rule p{margin:0;font-size:12px;color:var(--text-dim);line-height:1.5}
 .grid2{display:grid;grid-template-columns:1fr;gap:12px}
-/* 서비스별 표는 1440px 에서 12열이 다 보여야 하므로 구성원 패널은 아래로(가로 스크롤 뒤로 열을 숨기지 않는다). 규칙 뷰만 1:1. */
 @media(min-width:1100px){.grid2.rules{grid-template-columns:minmax(0,2fr) minmax(0,3fr)}}
 .hide{display:none!important}
 .sm{font-size:11.5px;color:var(--text-dim)}
 .empty{padding:24px;text-align:center;color:var(--text-dim)}
+.modal-bg{position:fixed;inset:0;background:rgba(0,0,0,.62);display:flex;align-items:center;justify-content:center;z-index:50;padding:10px}
+.modal{background:var(--panel);border:1px solid var(--border);border-radius:12px;width:100%;max-width:1120px;max-height:94vh;display:flex;flex-direction:column;min-width:0}
+.modal .body{overflow:auto;min-height:0;flex:1}
+.modal .mfoot{display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:10px 14px;border-top:1px solid var(--border-soft)}
+.right{text-align:right}
 </style>
 </head>
 <body>
@@ -87,80 +105,130 @@ tr.unassigned td{background:rgba(245,158,11,.05)}
   <div class="card">
     <div class="hdr">
       <a class="back" href="#">← 특수 기능</a>
-      <h1>🧩 서비스 맵 <span class="badge gray">시안 A · 목 데이터</span></h1>
+      <h1>🧩 서비스 맵 <span class="badge gray">시안 A · 2차 · 목 데이터</span> <span class="badge purple">관리자 판본</span></h1>
       <span class="sp"></span>
       <label class="sm">범위 <select id="scopeSel"><option value="">전체 법인(vCenter)</option></select></label>
     </div>
     <div class="info">
-      VM(vCenter)·베어메탈(iDRAC/OS)·ESXi 호스트를 <b>서비스 단위</b>로 묶어 봅니다. 소속은 <b>vSphere 태그 → iDRAC 스캔 엔트리 서비스명 → 수동 지정 → 이름 규칙</b> 순으로 한 판정 코어가 정하고,
-      어디에도 안 걸리면 <b>(미지정)</b> 으로 <b>따로</b> 셉니다. 숫자는 모두 이미 수집된 스냅샷·캐시의 조인이라 vCenter·iDRAC 왕복이 없습니다.
-      <div class="muted" style="font-size:12px;margin-top:3px">못 읽은 값은 0 이 아니라 '—' 이고 합계에서 빠지며 <b>못 읽음</b> 열에 개수로 밝힙니다. 사용률 합산은 서버마다 사용률 × 용량(법인별 서버 사용량과 같은 규약)입니다. 갱신 시각·주기는 API 값(아래 각주).</div>
+      VM(vCenter)·베어메탈(iDRAC/OS)·ESXi 호스트를 <b>법인 › 폴더 › 서비스</b> 트리로 묶어 봅니다. 소속은 <b>vSphere 태그 → iDRAC 스캔 엔트리 서비스명 → 수동 지정 → 이름 규칙</b> 순으로 한 판정 코어가 정하고,
+      어디에도 안 걸리면 <b>(미지정)</b> 으로 <b>따로</b> 셉니다. <b>iDRAC 에서 식별된 서버</b>는 '서버 추가' 로 골라 서비스에 넣습니다(수동 지정 — 태그·스캔 라벨보다 우선, 감사 로그).
+      <div class="muted" style="font-size:12px;margin-top:3px">법인별 관리: 범위 계정은 자기 법인 노드만 보고, 쓰기 범위가 있는 법인 관리자는 자기 법인의 폴더·서비스·구성원을 바꿉니다. 태그 카테고리·이름 규칙 설정은 전체 범위 관리자만. 못 읽은 값은 '—'(0 아님)이고 합계에서 빠지며 개수로 밝힙니다.</div>
     </div>
   </div>
 
   <div class="kpis" id="kpis"></div>
 
-  <div class="tool">
-    <div class="seg" id="viewSeg">
-      <button data-v="svc" class="on">서비스별</button>
-      <button data-v="mem">구성원 전체</button>
-      <button data-v="rules">소속 규칙</button>
+  <div class="layout">
+    <!-- 왼쪽: 트리 -->
+    <div class="card" style="align-self:start">
+      <div class="sect"><h2>법인 › 폴더 › 서비스</h2><span class="sp"></span><button class="btn sm" id="btnExpand" title="전부 펼치기/접기">펼침</button></div>
+      <div class="tree" id="tree"></div>
+      <div class="foot"><span>폴더 경로 구분자 '\' · 최대 10단계(성능점검 트리와 같은 규약)</span></div>
     </div>
-    <div class="chips" id="corpChips"></div>
-    <span class="sp" style="flex:1"></span>
-    <input id="q" placeholder="서비스/구성원/서비스태그 검색" style="width:220px">
-    <button class="btn" disabled title="시안 — 구현 시 /tools/service-map.csv">CSV</button>
-  </div>
 
-  <div id="noteUnread" class="card note hide"></div>
-
-  <!-- 서비스별 -->
-  <div id="vSvc" class="grid2">
-    <div class="card">
-      <div class="sect"><h2>서비스별 현황</h2><span class="sm" id="svcCount"></span><span class="sp" style="flex:1"></span><span class="sm">행 클릭 → 아래 구성원</span></div>
-      <div class="tscroll"><table id="svcTable" style="min-width:1080px">
-        <thead><tr>
-          <th>서비스</th><th>법인</th><th class="r">VM</th><th class="r">베어메탈</th><th class="r">호스트</th><th class="r">켜짐/전체</th>
-          <th>CPU(가중)</th><th>메모리(가중)</th><th class="r">부품 장애</th><th>백업 24h</th><th>소속 근거</th><th class="r">못 읽음</th>
-        </tr></thead><tbody></tbody></table></div>
-      <div class="foot"><span>CPU·메모리 = Σ(사용률×용량)÷Σ용량 · 못 읽은 서버는 분자·분모 모두 제외</span><span>백업 = 그 법인 Bareos·Veeam 의 최근 24시간 잡 결과(법인:vCenter:Bareos 1:1:1)</span></div>
-    </div>
-    <div class="card" id="memPanel">
-      <div class="sect"><h2 id="memTitle">구성원</h2><span class="sm" id="memSub"></span></div>
-      <div id="memBody" class="empty">위 표에서 서비스를 고르면 VM · 베어메탈 · 호스트 구성원이 여기 나옵니다.</div>
-    </div>
-  </div>
-
-  <!-- 구성원 전체 -->
-  <div id="vMem" class="card hide">
-    <div class="sect"><h2>구성원 전체</h2><span class="sm" id="memAllCount"></span>
-      <span class="sp" style="flex:1"></span>
-      <div class="chips" id="kindChips">
-        <button class="chip on" data-k="">전체</button><button class="chip" data-k="VM">VM</button><button class="chip" data-k="BM">베어메탈</button><button class="chip" data-k="HOST">ESXi 호스트</button>
+    <!-- 오른쪽: 내용 -->
+    <div style="display:flex;flex-direction:column;gap:12px;min-width:0">
+      <div class="card">
+        <div class="tool">
+          <div class="crumb" id="crumb"></div>
+          <span class="sp"></span>
+          <div class="seg" id="viewSeg"><button data-v="svc" class="on">서비스별</button><button data-v="mem">구성원</button><button data-v="rules">소속 규칙</button></div>
+        </div>
+        <div class="tool" style="border-bottom:0">
+          <input id="q" placeholder="서비스/구성원/서비스태그 검색" style="width:220px">
+          <span class="sp"></span>
+          <button class="btn" id="btnFolder">＋ 폴더</button>
+          <button class="btn" id="btnSvc">＋ 서비스</button>
+          <button class="btn" id="btnMove">이동</button>
+          <button class="btn primary" id="btnAdd">⊕ 서버 추가(iDRAC)</button>
+          <button class="btn" disabled title="시안 — 구현 시 /tools/service-map.csv">CSV</button>
+        </div>
+        <div class="inline hide" id="formFolder">
+          <span class="sm">새 폴더</span><select id="ffCorp"></select><input id="ffPath" placeholder="경로 예: 업무시스템\개발" style="width:240px"><button class="btn sm primary" id="ffOk">만들기</button><button class="btn sm" data-close="formFolder">취소</button>
+          <span class="sm">· 법인 안에서만 만든다. 빈 폴더도 유지된다.</span>
+        </div>
+        <div class="inline hide" id="formSvc">
+          <span class="sm">새 서비스</span><select id="fsCorp"></select><select id="fsPath"></select><input id="fsName" placeholder="서비스명(1~64자)" style="width:200px"><button class="btn sm primary" id="fsOk">만들기</button><button class="btn sm" data-close="formSvc">취소</button>
+        </div>
+        <div class="inline hide" id="formMove">
+          <span class="sm">서비스 이동</span><b id="fmName"></b><span class="sm">→ 폴더</span><select id="fmPath"></select><button class="btn sm primary" id="fmOk">이동</button><button class="btn sm" data-close="formMove">취소</button>
+          <span class="sm">· 같은 법인 안에서만. 구성원·소속 근거는 그대로.</span>
+        </div>
+        <div id="flash" class="ok-note hide" style="margin:8px 14px"></div>
       </div>
-    </div>
-    <div class="tscroll"><table id="memTable" style="min-width:1180px">
-      <thead><tr><th>이름</th><th>종류</th><th>서비스</th><th>법인</th><th>소속 근거</th><th>전원</th><th>CPU</th><th>메모리</th><th>지표 출처</th><th class="r">부품 장애</th><th>백업</th><th>IP</th></tr></thead>
-      <tbody></tbody></table></div>
-    <div class="foot"><span>지표 출처: VM = vCenter quickStats · 베어메탈 = iDRAC 텔레메트리 또는 OS(SSH) · 호스트 = iDRAC(받침) 또는 vCenter</span><span>'—' = 이번 주기에 못 읽음(0 아님)</span></div>
-  </div>
 
-  <!-- 소속 규칙 -->
-  <div id="vRules" class="grid2 rules hide">
-    <div class="card">
-      <div class="sect"><h2>소속 판정 순서</h2><span class="sm">판정 코어 하나 · 위가 이긴다</span></div>
-      <div id="rules"></div>
-      <div class="foot"><span>설정은 '설정 › 서비스 맵' 에서 관리자만 바꾼다(태그 카테고리 이름 · 이름 규칙 · 수동 지정). 저장은 service-assign.json, 변경은 감사 로그.</span></div>
-    </div>
-    <div class="card">
-      <div class="sect"><h2>(미지정) 구성원</h2><span class="sm" id="unCount"></span></div>
-      <div class="tscroll"><table id="unTable" style="min-width:780px">
-        <thead><tr><th>이름</th><th>종류</th><th>법인</th><th>왜 미지정인가</th><th data-nosort>수동 지정</th></tr></thead><tbody></tbody></table></div>
-      <div class="foot"><span>미지정은 다른 서비스에 넣지 않는다. 지정은 관리자 · 서비스태그/VM id 기준 저장 · 범위 계정은 자기 법인만.</span></div>
+      <div id="noteUnread" class="card note hide"></div>
+
+      <!-- 서비스별 -->
+      <div id="vSvc" style="display:flex;flex-direction:column;gap:12px;min-width:0">
+        <div class="card">
+          <div class="sect"><h2>서비스별 현황</h2><span class="sm" id="svcCount"></span><span class="sp"></span><span class="sm">행 클릭 → 아래 구성원</span></div>
+          <div class="tscroll"><table id="svcTable" style="min-width:1040px">
+            <thead><tr>
+              <th>서비스</th><th>폴더</th><th>법인</th><th class="r">VM</th><th class="r">베어메탈</th><th class="r">호스트</th><th class="r">켜짐/전체</th>
+              <th>CPU(가중)</th><th>메모리(가중)</th><th class="r">부품 장애</th><th>백업 24h</th><th class="r">못 읽음</th><th>소속 근거</th>
+            </tr></thead><tbody></tbody></table></div>
+          <div class="foot"><span>CPU·메모리 = Σ(사용률×용량)÷Σ용량 · 못 읽은 서버는 분자·분모 모두 제외</span><span>백업 = 그 법인 Bareos·Veeam 의 최근 24시간 잡 결과(법인:vCenter:Bareos 1:1:1)</span></div>
+        </div>
+        <div class="card" id="memPanel">
+          <div class="sect"><h2 id="memTitle">구성원</h2><span class="sm" id="memSub"></span></div>
+          <div id="memBody" class="empty">트리나 위 표에서 서비스를 고르면 VM · 베어메탈 · 호스트 구성원이 여기 나옵니다.</div>
+        </div>
+      </div>
+
+      <!-- 구성원 -->
+      <div id="vMem" class="card hide">
+        <div class="sect"><h2>구성원</h2><span class="sm" id="memAllCount"></span><span class="sp"></span>
+          <div class="chips" id="kindChips"><button class="chip on" data-k="">전체</button><button class="chip" data-k="VM">VM</button><button class="chip" data-k="BM">베어메탈</button><button class="chip" data-k="HOST">ESXi 호스트</button></div>
+        </div>
+        <div class="tscroll"><table id="memTable" style="min-width:1100px">
+          <thead><tr><th>이름</th><th>종류</th><th>서비스</th><th>법인</th><th>소속 근거</th><th>전원</th><th>CPU</th><th>메모리</th><th>지표 출처</th><th class="r">부품 장애</th><th>백업</th><th>IP</th></tr></thead>
+          <tbody></tbody></table></div>
+        <div class="foot"><span>지표 출처: VM = vCenter quickStats · 베어메탈 = iDRAC 텔레메트리 또는 OS(SSH) · 호스트 = iDRAC(받침) 또는 vCenter</span><span>'—' = 이번 주기에 못 읽음(0 아님)</span></div>
+      </div>
+
+      <!-- 소속 규칙 -->
+      <div id="vRules" class="grid2 rules hide">
+        <div class="card">
+          <div class="sect"><h2>소속 판정 순서</h2><span class="sm">판정 코어 하나 · 위가 이긴다</span></div>
+          <div id="rules"></div>
+          <div class="foot"><span>태그 카테고리·이름 규칙은 '설정 › 서비스 맵'(전체 범위 관리자). 폴더·서비스·수동 지정은 이 화면에서 법인 관리자가.</span></div>
+        </div>
+        <div class="card">
+          <div class="sect"><h2>(미지정) 구성원</h2><span class="sm" id="unCount"></span></div>
+          <div class="tscroll"><table id="unTable" style="min-width:780px">
+            <thead><tr><th>이름</th><th>종류</th><th>법인</th><th>왜 미지정인가</th><th data-nosort>수동 지정</th></tr></thead><tbody></tbody></table></div>
+          <div class="foot"><span>미지정은 다른 서비스에 넣지 않는다. 지정은 관리자 · 서비스태그/VM id 기준 저장 · 범위 계정은 자기 법인만.</span></div>
+        </div>
+      </div>
     </div>
   </div>
 
   <div class="sm faint" id="apiNote"></div>
+</div>
+
+<!-- 서버 추가 모달 -->
+<div class="modal-bg hide" id="modal">
+  <div class="modal">
+    <div class="sect"><h2>⊕ 서버 추가 — iDRAC 에서 식별된 서버</h2><span class="sm">등록부(idrac.json)·스캔·OME·엣지 보고에서 서비스태그로 식별된 물리 서버</span><span class="sp"></span><button class="btn sm" id="mClose">닫기</button></div>
+    <div class="tool">
+      <div class="seg" id="mKind"><button data-k="phys" class="on">iDRAC 서버</button><button data-k="VM">VM(vCenter)</button></div>
+      <select id="mCorp"></select>
+      <div class="chips" id="mCls"><button class="chip on" data-c="">전체</button><button class="chip" data-c="BM">베어메탈</button><button class="chip" data-c="HOST">가상화 호스트</button></div>
+      <label class="sm" style="display:inline-flex;gap:6px;align-items:center"><input type="checkbox" id="mUnOnly" checked> 미소속만</label>
+      <input id="mQ" placeholder="이름/서비스태그/모델/주소" style="width:200px">
+      <span class="sp"></span><span class="sm" id="mCount"></span>
+    </div>
+    <div class="body tscroll"><table id="mTable" style="min-width:1000px">
+      <thead><tr><th data-nosort><input type="checkbox" id="mAll"></th><th>이름</th><th>서비스태그</th><th>모델</th><th>iDRAC 주소</th><th>법인</th><th>구분</th><th>식별 경로</th><th>현재 소속</th></tr></thead><tbody></tbody></table></div>
+    <div class="mfoot">
+      <span class="sm">선택 <b id="mSel">0</b>대</span>
+      <span class="sm">→ 대상 서비스</span><select id="mTarget"></select>
+      <button class="btn primary" id="mAdd" disabled>추가</button>
+      <span class="sp"></span>
+      <span class="sm">추가 = 수동 지정(service-map.json) · 태그·스캔 라벨보다 우선 · 감사 로그 1건 · 법인 귀속이 없던 서버는 그 법인으로 귀속(fleet-assign 과 한 동작)</span>
+    </div>
+  </div>
 </div>
 
 <script>
@@ -173,134 +241,157 @@ const CORPS=[
   {id:'vc-eu-central',name:'vcenter-eu-central-01',city:'Frankfurt',region:'유럽'},
   {id:'vc-eu-west',name:'vcenter-eu-west-01',city:'Dublin',region:'유럽'},
 ];
-const corpName=(id)=>id?(CORPS.find(c=>c.id===id)||{}).name||id:'(미지정)';
+const corpName=(id)=>id?(CORPS.find(c=>c.id===id)||{}).name||id:'(법인 미지정)';
+const corpShort=(id)=>id?id.replace('vc-',''):'none';
 const SRC_LABEL={tag:'vSphere 태그',scan:'iDRAC 스캔 엔트리',manual:'수동 지정',rule:'이름 규칙',none:'없음'};
 const SRC_CLS={tag:'blue',scan:'teal',manual:'purple',rule:'gray',none:'amber'};
 const KIND_LABEL={VM:'VM',BM:'베어메탈',HOST:'ESXi 호스트'};
-// 서비스 사양: [이름, {법인: [VM수, BM수, HOST수]}]
-const SPEC=[
-  ['ERP',{ 'vc-ap-northeast':[6,2,0],'vc-us-east':[3,1,0],'vc-eu-central':[4,1,0] }],
-  ['MES',{ 'vc-ap-northeast':[4,3,0],'vc-eu-central':[2,2,0] }],
-  ['그룹웨어',{ 'vc-ap-northeast':[5,0,0],'vc-us-east':[2,0,0],'vc-eu-west':[2,0,0] }],
-  ['DB-Oracle',{ 'vc-ap-northeast':[1,2,0],'vc-us-east':[0,2,0] }],
-  ['CI/CD',{ 'vc-ap-northeast':[3,0,0] }],
-  ['AD/DNS',{ 'vc-ap-northeast':[2,0,0],'vc-us-east':[2,0,0],'vc-eu-central':[2,0,0],'vc-eu-west':[2,0,0] }],
-  ['파일서버',{ 'vc-eu-central':[1,1,0],'vc-eu-west':[1,1,0] }],
-  ['백업 인프라',{ 'vc-ap-northeast':[0,1,0],'vc-us-east':[0,1,0],'vc-eu-central':[0,1,0],'vc-eu-west':[0,1,0] }],
-  ['가상화 기반',{ 'vc-ap-northeast':[0,0,4],'vc-us-east':[0,0,3],'vc-eu-central':[0,0,4],'vc-eu-west':[0,0,2] }],
-  ['',{ 'vc-ap-northeast':[2,1,0],'vc-us-east':[1,1,0],'vc-eu-west':[0,1,0],'':[0,2,0] }],
-];
 const SLUG={'ERP':'erp','MES':'mes','그룹웨어':'gw','DB-Oracle':'db-oracle','CI/CD':'cicd','AD/DNS':'ad-dns','파일서버':'fileserver','백업 인프라':'bareos','가상화 기반':'esxi','':'misc'};
-const MEMBERS=[];let seq=1;
-const tagOf=(c)=>`${c.slice(3,5).toUpperCase()}${String(1000+Math.floor(R()*9000))}`;
-for(const [svc,byCorp] of SPEC){
-  for(const [corp,[nv,nb,nh]] of Object.entries(byCorp)){
-    const short=corp?corp.replace('vc-',''):'none';
-    for(let i=0;i<nv;i++){
-      const on=R()>0.12, unread=R()<0.06;
-      MEMBERS.push({key:`${corp}:vm-${seq}`,name:`${SLUG[svc]||'misc'}-${short}-vm${String(i+1).padStart(2,'0')}`,kind:'VM',svc,corp,
-        src:svc?(R()<0.85?'tag':(R()<0.5?'manual':'rule')):'none',reason:svc?'':'태그 카테고리 Service 없음',
-        on,cores:[2,4,8,16][Math.floor(R()*4)],memGB:[8,16,32,64][Math.floor(R()*4)],
-        cpu:on&&!unread?Math.round(5+R()*70):null,mem:on&&!unread?Math.round(20+R()*70):null,msrc:on&&!unread?'vcenter':null,
-        faults:0,backup:R()<0.9?'ok':(R()<0.5?'fail':'none'),ip:`10.${20+CORPS.findIndex(c=>c.id===corp)}.${Math.floor(R()*200)}.${Math.floor(R()*250)+2}`});
-      seq++;
-    }
-    for(let i=0;i<nb;i++){
-      const hasOs=R()<0.55, unread=R()<0.1, forced=R()<0.15;
-      const srcK=svc?(forced?'manual':'scan'):'none';
-      MEMBERS.push({key:`st:${tagOf(corp||'vc-none')}`,name:`${SLUG[svc]||'misc'}-${short}-bm${String(i+1).padStart(2,'0')}`,kind:'BM',svc,corp,
-        src:srcK,reason:svc?'':(corp?'스캔 엔트리 service 비어 있음':'법인 귀속 없음(fleet-assign 없음)'),
-        on:true,cores:[16,32,48,64][Math.floor(R()*4)],memGB:[128,256,512][Math.floor(R()*3)],
-        cpu:unread?null:Math.round(3+R()*60),mem:unread?null:Math.round(15+R()*70),msrc:unread?null:(hasOs?'os':'idrac'),
-        faults:R()<0.12?1:0,backup:svc==='백업 인프라'?'n/a':(R()<0.3?'ok':'none'),ip:corp?`10.${20+CORPS.findIndex(c=>c.id===corp)}.${Math.floor(R()*200)}.${Math.floor(R()*250)+2}`:'—'});
-      seq++;
-    }
-    for(let i=0;i<nh;i++){
-      MEMBERS.push({key:`st:${tagOf(corp)}`,name:`esxi-${short}-${String(i+1).padStart(2,'0')}.corp.local`,kind:'HOST',svc,corp,src:'tag',reason:'',
-        on:true,cores:[32,48,64][Math.floor(R()*3)],memGB:[384,512,768][Math.floor(R()*3)],
-        cpu:Math.round(10+R()*55),mem:Math.round(30+R()*55),msrc:R()<0.7?'idrac':'vcenter',faults:R()<0.1?1:0,backup:'n/a',ip:`10.${20+CORPS.findIndex(c=>c.id===corp)}.1.${10+i}`});
-      seq++;
-    }
-  }
+const MODELS=['PowerEdge R750','PowerEdge R760','PowerEdge R6525','PowerEdge R940','HPE DL380 Gen11'];
+// 서비스 사양: 법인 → [폴더 경로, 서비스명, [VM수, BM수, HOST수]]
+const SVC_SPEC={
+  'vc-ap-northeast':[['업무시스템','ERP',[6,2,0]],['업무시스템','MES',[4,3,0]],['업무시스템','그룹웨어',[5,0,0]],['DB','DB-Oracle',[1,2,0]],['공통','AD/DNS',[2,0,0]],['공통','CI/CD',[3,0,0]],['인프라','백업 인프라',[0,1,0]],['인프라','가상화 기반',[0,0,4]]],
+  'vc-us-east':[['업무시스템','ERP',[3,1,0]],['업무시스템','그룹웨어',[2,0,0]],['DB','DB-Oracle',[0,2,0]],['공통','AD/DNS',[2,0,0]],['인프라','백업 인프라',[0,1,0]],['인프라','가상화 기반',[0,0,3]]],
+  'vc-eu-central':[['업무시스템','ERP',[4,1,0]],['업무시스템','MES',[2,2,0]],['공통','AD/DNS',[2,0,0]],['공통\\파일','파일서버',[1,1,0]],['인프라','백업 인프라',[0,1,0]],['인프라','가상화 기반',[0,0,4]]],
+  'vc-eu-west':[['업무시스템','그룹웨어',[2,0,0]],['공통','AD/DNS',[2,0,0]],['공통\\파일','파일서버',[1,1,0]],['인프라','백업 인프라',[0,1,0]],['인프라','가상화 기반',[0,0,2]]],
+};
+// (미지정): 법인별 [VM, BM, HOST] — iDRAC 에서는 식별됐지만 어느 규칙에도 안 걸린 서버가 '서버 추가' 후보다.
+const UN_SPEC={'vc-ap-northeast':[2,3,1],'vc-us-east':[1,2,0],'vc-eu-central':[0,1,1],'vc-eu-west':[0,1,0],'':[0,2,0]};
+const SERVICES=[]; const FOLDERS=[]; const MEMBERS=[]; let sid=1, seq=1;
+const tagOf=(c)=>`${corpShort(c).slice(0,2).toUpperCase()}${String(1000+Math.floor(R()*9000))}`;
+function mkMember(kind,svc,corp,i){
+  const short=corpShort(corp), slug=SLUG[svc?svc.name:'']||'misc', ci=Math.max(0,CORPS.findIndex(c=>c.id===corp));
+  const ip=corp?`10.${20+ci}.${Math.floor(R()*200)}.${Math.floor(R()*250)+2}`:'—';
+  if(kind==='VM'){const on=R()>0.12,unread=R()<0.06;
+    return {key:`${corp}:vm-${seq++}`,name:`${slug}-${short}-vm${String(i+1).padStart(2,'0')}`,kind,svcId:svc?svc.id:null,corp,
+      src:svc?(R()<0.85?'tag':(R()<0.5?'manual':'rule')):'none',reason:svc?'':'태그 카테고리 Service 없음',on,cores:[2,4,8,16][Math.floor(R()*4)],memGB:[8,16,32,64][Math.floor(R()*4)],
+      cpu:on&&!unread?Math.round(5+R()*70):null,mem:on&&!unread?Math.round(20+R()*70):null,msrc:on&&!unread?'vcenter':null,faults:0,backup:R()<0.9?'ok':(R()<0.5?'fail':'none'),ip,idrac:false};}
+  if(kind==='BM'){const hasOs=R()<0.55,unread=R()<0.1,forced=R()<0.15; const st=tagOf(corp||'vc-none');
+    return {key:`st:${st.toLowerCase()}`,st,name:`${slug}-${short}-bm${String(i+1).padStart(2,'0')}`,kind,svcId:svc?svc.id:null,corp,
+      src:svc?(forced?'manual':'scan'):'none',reason:svc?'':(corp?'스캔 엔트리 service 비어 있음':'법인 귀속 없음(fleet-assign 없음)'),on:true,cores:[16,32,48,64][Math.floor(R()*4)],memGB:[128,256,512][Math.floor(R()*3)],
+      cpu:unread?null:Math.round(3+R()*60),mem:unread?null:Math.round(15+R()*70),msrc:unread?null:(hasOs?'os':'idrac'),faults:R()<0.12?1:0,backup:svc&&svc.name==='백업 인프라'?'n/a':(R()<0.3?'ok':'none'),ip,
+      idrac:true,model:MODELS[Math.floor(R()*MODELS.length)],addr:`https://10.${20+ci}.9.${Math.floor(R()*200)+10}`,found:corp?(R()<0.7?'스캔(엔트리)':'수동 등록'):'엣지 보고'};}
+  const st=tagOf(corp);
+  return {key:`st:${st.toLowerCase()}`,st,name:`esxi-${short}-${String(i+1).padStart(2,'0')}.corp.local`,kind,svcId:svc?svc.id:null,corp,src:svc?'tag':'none',reason:svc?'':'호스트 태그 없음',
+    on:true,cores:[32,48,64][Math.floor(R()*3)],memGB:[384,512,768][Math.floor(R()*3)],cpu:Math.round(10+R()*55),mem:Math.round(30+R()*55),msrc:R()<0.7?'idrac':'vcenter',faults:R()<0.1?1:0,backup:'n/a',ip:`10.${20+ci}.1.${10+i}`,
+    idrac:true,model:MODELS[Math.floor(R()*4)],addr:`https://10.${20+ci}.9.${100+i}`,found:'스캔(엔트리)'};
 }
-const META={tagsAt:'06:00',tagRefresh:'6시간',bmAt:'06:12',bmPeriod:'5분',snapAt:'06:14',snapPeriod:'60초',faultsAt:'06:10',edgeStale:1};
+for(const [corp,list] of Object.entries(SVC_SPEC)){
+  for(const [path,name,[nv,nb,nh]] of list){const svc={id:`s${sid++}`,corp,path,name};SERVICES.push(svc);
+    for(let i=0;i<nv;i++)MEMBERS.push(mkMember('VM',svc,corp,i));for(let i=0;i<nb;i++)MEMBERS.push(mkMember('BM',svc,corp,i));for(let i=0;i<nh;i++)MEMBERS.push(mkMember('HOST',svc,corp,i));}
+}
+for(const [corp,[nv,nb,nh]] of Object.entries(UN_SPEC)){for(let i=0;i<nv;i++)MEMBERS.push(mkMember('VM',null,corp,i));for(let i=0;i<nb;i++)MEMBERS.push(mkMember('BM',null,corp,i));for(let i=0;i<nh;i++)MEMBERS.push(mkMember('HOST',null,corp,i+8));}
+FOLDERS.push({corp:'vc-ap-northeast',path:'업무시스템\\개발'}); // 빈 폴더 예시(명시 폴더는 서비스가 없어도 유지)
+const META={tagsAt:'06:00',tagRefresh:'6시간',bmAt:'06:12',bmPeriod:'5분',snapAt:'06:14',snapPeriod:'60초',faultsAt:'06:10',staleCorp:'vc-eu-west'};
 
 // ───────── 상태 ─────────
-const S={view:'svc',corp:'*',q:'',selSvc:null,kind:'',sort:{}};
+const S={view:'svc',sel:{type:'all'},q:'',selSvc:null,kind:'',sort:{},open:new Set(CORPS.map(c=>c.id)),m:{kind:'phys',corp:'',cls:'',unOnly:true,q:'',checked:new Set(),target:''}};
 const $=(s)=>document.querySelector(s);
 const esc=(s)=>String(s).replace(/[&<>"]/g,(c)=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
-const pct=(v)=>v==null?'—':`${v}%`;
+const svcOf=(m)=>m.svcId?SERVICES.find(s=>s.id===m.svcId):null;
+const svcName=(m)=>{const s=svcOf(m);return s?s.name:'';};
 const barCell=(v)=>v==null?'<span class="muted">—</span>':`<span class="bar"><i class="${v>=90?'crit':v>=75?'hot':''}" style="width:${v}%"></i></span>${v}%`;
 const srcBadge=(s)=>`<span class="badge ${SRC_CLS[s]}">${SRC_LABEL[s]}</span>`;
 const kindBadge=(k)=>`<span class="badge ${k==='VM'?'blue':k==='BM'?'amber':'teal'}">${KIND_LABEL[k]}</span>`;
 const bkBadge=(b)=>b==='ok'?'<span class="badge green">성공</span>':b==='fail'?'<span class="badge red">실패</span>':b==='none'?'<span class="badge gray">잡 없음</span>':b==='n/a'?'<span class="muted">해당 없음</span>':'<span class="muted">—</span>';
 const msrcLabel=(m)=>m==='vcenter'?'vCenter':m==='idrac'?'iDRAC':m==='os'?'OS(SSH)':'—';
+const under=(p,base)=>p===base||p.startsWith(base+'\\');
+const corpFolders=(corp)=>{const set=new Set(FOLDERS.filter(f=>f.corp===corp).map(f=>f.path));for(const s of SERVICES.filter(s=>s.corp===corp)){const parts=s.path.split('\\');for(let i=1;i<=parts.length;i++)set.add(parts.slice(0,i).join('\\'));}return [...set].sort((a,b)=>a.localeCompare(b,'ko'));};
 
-function filtered(){
-  const q=S.q.trim().toLowerCase();
-  return MEMBERS.filter(m=>(S.corp==='*'||(S.corp==='' ? !m.corp : m.corp===S.corp))
-    &&(!q||m.name.toLowerCase().includes(q)||(m.svc||'(미지정)').toLowerCase().includes(q)||m.key.toLowerCase().includes(q)));
+function inSel(m,sel=S.sel){
+  if(sel.type==='all')return true;
+  if(sel.type==='corp')return m.corp===sel.corp;
+  if(sel.type==='un')return m.corp===sel.corp&&!m.svcId;
+  if(sel.type==='folder'){const s=svcOf(m);return m.corp===sel.corp&&!!s&&under(s.path,sel.path);}
+  if(sel.type==='svc')return m.svcId===sel.id;
+  return true;
 }
+function filtered(){const q=S.q.trim().toLowerCase();return MEMBERS.filter(m=>inSel(m)&&(!q||m.name.toLowerCase().includes(q)||(svcName(m)||'(미지정)').toLowerCase().includes(q)||m.key.toLowerCase().includes(q)));}
 // corpusage/build.js 규약: 사용률×용량 합 ÷ 용량 합. 못 읽은 서버는 분자·분모 둘 다 제외.
 function agg(ms){
   const a={vm:0,bm:0,host:0,on:0,cpuU:0,cpuC:0,memU:0,memC:0,unread:0,faults:0,bkOk:0,bkFail:0,bkNone:0,src:{tag:0,scan:0,manual:0,rule:0,none:0}};
-  for(const m of ms){
-    a[m.kind==='VM'?'vm':m.kind==='BM'?'bm':'host']++; if(m.on)a.on++; a.faults+=m.faults; a.src[m.src]++;
-    if(m.backup==='ok')a.bkOk++; else if(m.backup==='fail')a.bkFail++; else if(m.backup==='none')a.bkNone++;
-    if(!m.on)continue;
-    if(m.cpu==null&&m.mem==null){a.unread++;continue;}
-    if(m.cpu!=null){a.cpuU+=m.cpu/100*m.cores;a.cpuC+=m.cores;}
-    if(m.mem!=null){a.memU+=m.mem/100*m.memGB;a.memC+=m.memGB;}
-  }
-  a.cpu=a.cpuC?Math.round(a.cpuU/a.cpuC*100):null; a.mem=a.memC?Math.round(a.memU/a.memC*100):null; a.total=ms.length;
-  return a;
+  for(const m of ms){a[m.kind==='VM'?'vm':m.kind==='BM'?'bm':'host']++;if(m.on)a.on++;a.faults+=m.faults;a.src[m.src]++;
+    if(m.backup==='ok')a.bkOk++;else if(m.backup==='fail')a.bkFail++;else if(m.backup==='none')a.bkNone++;
+    if(!m.on)continue;if(m.cpu==null&&m.mem==null){a.unread++;continue;}
+    if(m.cpu!=null){a.cpuU+=m.cpu/100*m.cores;a.cpuC+=m.cores;}if(m.mem!=null){a.memU+=m.mem/100*m.memGB;a.memC+=m.memGB;}}
+  a.cpu=a.cpuC?Math.round(a.cpuU/a.cpuC*100):null;a.mem=a.memC?Math.round(a.memU/a.memC*100):null;a.total=ms.length;return a;
 }
 function groupSvc(ms){
   const g=new Map();
-  for(const m of ms){const k=JSON.stringify([m.svc,m.corp]);if(!g.has(k))g.set(k,{svc:m.svc,corp:m.corp,ms:[]});g.get(k).ms.push(m);}
-  return [...g.values()].map(x=>({...x,a:agg(x.ms)})).sort((x,y)=>(x.svc===''?1:0)-(y.svc===''?1:0)||x.svc.localeCompare(y.svc,'ko')||x.corp.localeCompare(y.corp));
+  for(const m of ms){const k=m.svcId||`un:${m.corp}`;if(!g.has(k))g.set(k,{svc:svcOf(m),corp:m.corp,ms:[],key:k});g.get(k).ms.push(m);}
+  return [...g.values()].map(x=>({...x,a:agg(x.ms)})).sort((x,y)=>(x.svc?0:1)-(y.svc?0:1)||(x.svc?x.svc.path+'\\'+x.svc.name:'').localeCompare(y.svc?y.svc.path+'\\'+y.svc.name:'','ko')||x.corp.localeCompare(y.corp));
 }
 
+// ───────── 트리 ─────────
+function buildTree(){
+  const rows=[];const cnt=(f)=>MEMBERS.filter(f).length;
+  const sel=S.sel;const isOn=(t,corp,extra)=>sel.type===t&&sel.corp===corp&&(t==='folder'?sel.path===extra:t==='svc'?sel.id===extra:true);
+  rows.push({d:0,t:'all',ic:'🌐',nm:'전체 법인',n:MEMBERS.length,on:sel.type==='all'});
+  for(const c of [...CORPS,{id:'',name:'(법인 미지정)'}]){
+    const open=S.open.has(c.id||'__none');const corpMs=MEMBERS.filter(m=>m.corp===c.id);
+    rows.push({d:0,t:'corp',corp:c.id,ic:c.id?'🏢':'❔',tw:open?'▾':'▸',nm:c.id?c.name.replace('vcenter-','').replace('-01',''):c.name,n:corpMs.length,on:isOn('corp',c.id),un:!c.id});
+    if(!open)continue;
+    if(c.id){
+      const folders=corpFolders(c.id);const rendered=new Set();
+      const walk=(base,d)=>{
+        for(const p of folders){const parent=p.includes('\\')?p.slice(0,p.lastIndexOf('\\')):'';if(parent!==base||rendered.has(p))continue;rendered.add(p);
+          const fo=S.open.has(`f:${c.id}:${p}`);const n=cnt(m=>m.corp===c.id&&svcOf(m)&&under(svcOf(m).path,p));
+          rows.push({d,t:'folder',corp:c.id,path:p,ic:'📁',tw:fo?'▾':'▸',nm:p.slice(p.lastIndexOf('\\')+1),n,on:isOn('folder',c.id,p),empty:n===0});
+          if(fo){walk(p,d+1);for(const s of SERVICES.filter(s=>s.corp===c.id&&s.path===p))rows.push({d:d+1,t:'svc',corp:c.id,id:s.id,ic:'🧩',nm:s.name,n:cnt(m=>m.svcId===s.id),on:isOn('svc',c.id,s.id)});}}
+      };
+      walk('',1);
+      for(const s of SERVICES.filter(s=>s.corp===c.id&&s.path===''))rows.push({d:1,t:'svc',corp:c.id,id:s.id,ic:'🧩',nm:s.name,n:cnt(m=>m.svcId===s.id),on:isOn('svc',c.id,s.id)});
+    }
+    const un=cnt(m=>m.corp===c.id&&!m.svcId);if(un||!c.id)rows.push({d:1,t:'un',corp:c.id,ic:'⚠',nm:'(미지정)',n:un,on:isOn('un',c.id),un:true});
+  }
+  $('#tree').innerHTML=rows.map((r,i)=>`<div class="tn d${Math.min(r.d,4)}${r.on?' on':''}${r.un?' un':''}" data-i="${i}" title="${r.t==='folder'?esc(r.path):''}"><span class="tw">${r.tw||''}</span><span class="ic">${r.ic}</span><span class="nm">${esc(r.nm)}${r.empty?' <span class="faint">(빈 폴더)</span>':''}</span><span class="cnt">${r.n}</span></div>`).join('');
+  $('#tree').dataset.rows=JSON.stringify(rows.map(r=>({t:r.t,corp:r.corp,path:r.path,id:r.id})));
+}
+function crumb(){
+  const s=S.sel;const parts=['<b>전체 법인</b>'];
+  if(s.type!=='all')parts.push(esc(corpName(s.corp)));
+  if(s.type==='folder')parts.push(...s.path.split('\\').map(esc));
+  if(s.type==='svc'){const sv=SERVICES.find(x=>x.id===s.id);if(sv){if(sv.path)parts.push(...sv.path.split('\\').map(esc));parts.push(`<b>${esc(sv.name)}</b>`);}}
+  if(s.type==='un')parts.push('<b style="color:#fcd34d">(미지정)</b>');
+  $('#crumb').innerHTML=parts.join('<span class="sep">›</span>');
+}
+
+// ───────── 렌더 ─────────
 function renderKpis(){
-  const ms=filtered(); const a=agg(ms); const svcs=new Set(ms.filter(m=>m.svc).map(m=>m.svc)); const un=ms.filter(m=>!m.svc).length;
-  const stale=S.corp==='*'||S.corp==='vc-eu-west'?META.edgeStale:0;
+  const ms=filtered();const a=agg(ms);const svcs=new Set(ms.filter(m=>m.svcId).map(m=>m.svcId));const un=ms.filter(m=>!m.svcId).length;
+  const stale=(S.sel.type==='all'||S.sel.corp===META.staleCorp)?1:0;
   $('#kpis').innerHTML=[
-    ['서비스',svcs.size,`${CORPS.length}개 법인 · 법인별 묶음 ${groupSvc(ms).filter(g=>g.svc).length}`,'var(--accent)','svc'],
+    ['서비스',svcs.size,`폴더 ${new Set(ms.map(m=>svcOf(m)).filter(Boolean).map(s=>s.corp+'|'+s.path)).size}개 · 법인 ${new Set(ms.map(m=>m.corp).filter(Boolean)).size}`,'var(--accent)','svc'],
     ['구성원',a.total,`VM ${a.vm} · 베어메탈 ${a.bm} · 호스트 ${a.host}`,'var(--accent-2)','mem'],
     ['(미지정)',un,un?'어느 규칙에도 안 걸림 — 따로 센다':'모두 소속됨',un?'var(--amber)':'var(--green)','rules'],
     ['열린 부품 장애',a.faults,'부품 장애(part-faults) 조인',a.faults?'var(--red)':'var(--green)','mem'],
     ['못 읽음',a.unread+stale,`사용률 못 읽음 ${a.unread}${stale?` · 엣지 보고 오래됨 ${stale}법인`:''}`,(a.unread+stale)?'var(--amber)':'var(--green)','mem'],
   ].map(([l,v,s,c,view])=>`<div class="card kpi${S.view===view?' on':''}" style="border-left-color:${c}" data-v="${view}"><div class="lbl">${l}</div><div class="big" style="color:${c}">${v}</div><div class="sub">${s}</div></div>`).join('');
   $('#noteUnread').classList.toggle('hide',!stale);
-  if(stale)$('#noteUnread').innerHTML=`⚠ 엣지 보고가 오래된 법인 <b>${corpName('vc-eu-west')}</b> — 베어메탈 사용률·부품 장애는 직전 보고 값이 아니라 '—' 로 표시합니다(TTL 초과). 보고가 다시 오면 자동으로 채워집니다.`;
-}
-function renderChips(){
-  const all=MEMBERS; const cnt=(id)=>all.filter(m=>id==='*'||(id===''?!m.corp:m.corp===id)).length;
-  $('#corpChips').innerHTML=[['*','전체 법인'],...CORPS.map(c=>[c.id,c.name.replace('vcenter-','').replace('-01','')]),['','(법인 미지정)']]
-    .map(([id,l])=>`<button class="chip${S.corp===id?' on':''}" data-c="${id}">${l}<span class="n">${cnt(id)}</span></button>`).join('');
+  if(stale)$('#noteUnread').innerHTML=`⚠ 엣지 보고가 오래된 법인 <b>${corpName(META.staleCorp)}</b> — 베어메탈 사용률·부품 장애는 직전 보고 값이 아니라 '—' 로 표시합니다(TTL 초과). 보고가 다시 오면 자동으로 채워집니다.`;
 }
 function renderSvc(){
-  const groups=groupSvc(filtered()); $('#svcCount').textContent=`${groups.length}묶음`;
-  const tb=$('#svcTable tbody');
-  tb.innerHTML=groups.map(g=>{const a=g.a;const key=JSON.stringify([g.svc,g.corp]);const un=g.svc==='';
-    const srcTxt=['tag','scan','manual','rule'].filter(k=>a.src[k]).map(k=>`<span class="badge ${SRC_CLS[k]}" title="${SRC_LABEL[k]}">${SRC_LABEL[k].slice(0,2)} ${a.src[k]}</span>`).join(' ')||'<span class="muted">—</span>';
+  const groups=groupSvc(filtered());$('#svcCount').textContent=`${groups.length}묶음`;
+  $('#svcTable tbody').innerHTML=groups.map(g=>{const a=g.a;const un=!g.svc;
+    const SRC_SHORT={tag:'태그',scan:'스캔',manual:'수동',rule:'규칙'};
+    const srcTxt=['manual','tag','scan','rule'].filter(k=>a.src[k]).map(k=>`<span class="src-${k}" title="${SRC_LABEL[k]}">${SRC_SHORT[k]}<span class="k">${a.src[k]}</span></span>`).join('<span class="faint">·</span>')||'<span class="muted">—</span>';
     const bk=(a.bkOk+a.bkFail+a.bkNone)?`<span class="badge green">${a.bkOk}</span> ${a.bkFail?`<span class="badge red">${a.bkFail}</span> `:''}${a.bkNone?`<span class="badge gray">잡 없음 ${a.bkNone}</span>`:''}`:'<span class="muted">해당 없음</span>';
-    return `<tr class="row${S.selSvc===key?' sel':''}${un?' unassigned':''}" data-key="${esc(key)}">
-      <td data-sort="${esc(un?'￿':g.svc)}"><b>${un?'(미지정)':esc(g.svc)}</b>${un?' <span class="badge amber">규칙 없음</span>':''}</td>
-      <td data-sort="${esc(corpName(g.corp))}">${esc(corpName(g.corp))}</td>
+    return `<tr class="row${S.selSvc===g.key?' sel':''}${un?' unassigned':''}" data-key="${esc(g.key)}">
+      <td data-sort="${esc(un?'\uffff':g.svc.name)}"><b>${un?'(미지정)':esc(g.svc.name)}</b>${un?' <span class="badge amber">규칙 없음</span>':''}</td>
+      <td data-sort="${esc(un?'\uffff':g.svc.path)}" class="muted">${un?'—':esc(g.svc.path||'(루트)')}</td>
+      <td data-sort="${esc(corpName(g.corp))}" title="${esc(corpName(g.corp))}">${g.corp?esc(corpShort(g.corp)):'(법인 미지정)'}</td>
       <td class="r" data-sort="${a.vm}">${a.vm||'<span class="faint">0</span>'}</td><td class="r" data-sort="${a.bm}">${a.bm||'<span class="faint">0</span>'}</td><td class="r" data-sort="${a.host}">${a.host||'<span class="faint">0</span>'}</td>
       <td class="r" data-sort="${a.on}">${a.on}/${a.total}</td>
       <td data-sort="${a.cpu==null?-1:a.cpu}">${barCell(a.cpu)}</td><td data-sort="${a.mem==null?-1:a.mem}">${barCell(a.mem)}</td>
       <td class="r" data-sort="${a.faults}">${a.faults?`<span class="badge red">${a.faults}</span>`:'<span class="faint">0</span>'}</td>
-      <td data-sort="${a.bkFail}">${bk}</td><td data-sort="${a.src.tag}">${srcTxt}</td>
-      <td class="r" data-sort="${a.unread}">${a.unread?`<span class="badge amber">${a.unread}</span>`:'<span class="faint">0</span>'}</td></tr>`;}).join('');
-  applySort('svcTable');
-  renderMembersPanel();
+      <td data-sort="${a.bkFail}">${bk}</td>
+      <td class="r" data-sort="${a.unread}">${a.unread?`<span class="badge amber">${a.unread}</span>`:'<span class="faint">0</span>'}</td><td class="src" data-sort="${a.src.tag}">${srcTxt}</td></tr>`;}).join('');
+  applySort('svcTable');renderMembersPanel();
 }
-function memberRows(ms){
-  return ms.map(m=>`<tr class="${!m.svc?'unassigned':''}">
-    <td data-sort="${esc(m.name)}"><b>${esc(m.name)}</b>${m.kind==='BM'?`<div class="sm mono">${esc(m.key)}</div>`:''}</td><td data-sort="${m.kind}">${kindBadge(m.kind)}</td>
-    <td data-sort="${esc(m.svc||'￿')}">${m.svc?esc(m.svc):'<span class="badge amber">(미지정)</span>'}</td><td data-sort="${esc(corpName(m.corp))}">${esc(corpName(m.corp))}</td>
+function memberRows(ms,compact=false){
+  return ms.map(m=>`<tr class="${!m.svcId?'unassigned':''}">
+    <td data-sort="${esc(m.name)}"><b>${esc(m.name)}</b>${m.kind!=='VM'?`<div class="sm mono">${esc(m.key)}</div>`:''}</td><td data-sort="${m.kind}">${kindBadge(m.kind)}</td>
+    ${compact?'':`<td data-sort="${esc(svcName(m)||'\uffff')}">${m.svcId?esc(svcName(m)):'<span class="badge amber">(미지정)</span>'}</td><td data-sort="${esc(corpName(m.corp))}" title="${esc(corpName(m.corp))}">${m.corp?esc(corpShort(m.corp)):'(법인 미지정)'}</td>`}
     <td data-sort="${m.src}">${srcBadge(m.src)}</td><td data-sort="${m.on?1:0}"><span class="dot ${m.on?'on':'off'}"></span>${m.on?'켜짐':'꺼짐'}</td>
     <td data-sort="${m.cpu==null?-1:m.cpu}">${barCell(m.cpu)}</td><td data-sort="${m.mem==null?-1:m.mem}">${barCell(m.mem)}</td>
     <td data-sort="${m.msrc||''}">${m.msrc?msrcLabel(m.msrc):'<span class="badge amber">못 읽음</span>'}</td>
@@ -308,66 +399,147 @@ function memberRows(ms){
     <td data-sort="${m.backup}">${bkBadge(m.backup)}</td><td class="mono" data-sort="${esc(m.ip)}">${esc(m.ip)}</td></tr>`).join('');
 }
 function renderMembersPanel(){
-  const body=$('#memBody'); if(!S.selSvc){body.className='empty';body.textContent='위 표에서 서비스를 고르면 VM · 베어메탈 · 호스트 구성원이 여기 나옵니다.';$('#memTitle').textContent='구성원';$('#memSub').textContent='';return;}
-  const [svc,corp]=JSON.parse(S.selSvc); const ms=filtered().filter(m=>m.svc===svc&&m.corp===corp);
+  const body=$('#memBody');
+  if(!S.selSvc){body.className='empty';body.textContent='트리나 위 표에서 서비스를 고르면 VM · 베어메탈 · 호스트 구성원이 여기 나옵니다.';$('#memTitle').textContent='구성원';$('#memSub').textContent='';return;}
+  const ms=filtered().filter(m=>(m.svcId||`un:${m.corp}`)===S.selSvc);
   if(!ms.length){S.selSvc=null;return renderMembersPanel();}
-  $('#memTitle').textContent=`${svc||'(미지정)'} · ${corpName(corp)}`; $('#memSub').textContent=`${ms.length}대`;
+  const sv=svcOf(ms[0]);$('#memTitle').textContent=`${sv?sv.name:'(미지정)'} · ${corpName(ms[0].corp)}`;$('#memSub').textContent=`${ms.length}대${sv&&sv.path?` · 폴더 ${sv.path}`:''}`;
   body.className='tscroll';
-  body.innerHTML=`<table id="memSel" style="min-width:1180px"><thead><tr><th>이름</th><th>종류</th><th>서비스</th><th>법인</th><th>소속 근거</th><th>전원</th><th>CPU</th><th>메모리</th><th>지표 출처</th><th class="r">부품 장애</th><th>백업</th><th>IP</th></tr></thead><tbody>${memberRows(ms)}</tbody></table>`;
+  body.innerHTML=`<table id="memSel" style="min-width:900px"><thead><tr><th>이름</th><th>종류</th><th>소속 근거</th><th>전원</th><th>CPU</th><th>메모리</th><th>지표 출처</th><th class="r">부품 장애</th><th>백업</th><th>IP</th></tr></thead><tbody>${memberRows(ms,true)}</tbody></table>`;
   applySort('memSel');
 }
 function renderMemAll(){
-  const ms=filtered().filter(m=>!S.kind||m.kind===S.kind);
-  $('#memAllCount').textContent=`${ms.length}대`; $('#memTable tbody').innerHTML=memberRows(ms); applySort('memTable');
+  const ms=filtered().filter(m=>!S.kind||m.kind===S.kind);$('#memAllCount').textContent=`${ms.length}대`;$('#memTable tbody').innerHTML=memberRows(ms);applySort('memTable');
   document.querySelectorAll('#kindChips .chip').forEach(b=>b.classList.toggle('on',b.dataset.k===S.kind));
 }
 function renderRules(){
-  const ms=filtered(); const a=agg(ms);
+  const ms=filtered();const a=agg(ms);
   const rules=[
-    ['vSphere 태그 카테고리 "Service"','VM·ESXi 호스트. tag-policy.json 의 serviceCategory 가 가리키는 카테고리의 태그 이름이 서비스명. 이미 6시간마다 수집되는 tagInv.vmTags·hostTags 를 읽는다(vCenter 왕복 없음). 태그를 못 읽은 vCenter 의 구성원은 "확인 안 됨" 이지 미지정이 아니다.',a.src.tag,'blue'],
-    ['iDRAC 스캔 엔트리 service 라벨','베어메탈. idrac.json 항목의 scanRangeId 로 idrac-scan-ranges.json 엔트리를 조인해 service 를 읽는다(복사하지 않는다). 수동 등록 서버는 scanRangeId 가 없어 이 규칙을 타지 않는다.',a.src.scan,'teal'],
-    ['수동 지정 (service-assign.json)','키 = 서비스태그 소문자(물리) 또는 vcenterId:moref(VM). fleet-assign.json 과 같은 저장 규약(원자적 쓰기·손상 보존·mtime 무효화). 위 두 규칙을 덮는 예외용. 관리자 + 감사 로그.',a.src.manual,'purple'],
-    ['이름 규칙 (선택)','정규식 → 서비스명. 길이 상한 뒤 선형 매칭(ReDoS 금지 규약). 켜지 않으면 적용되지 않는다. 근거 열에 "이름 규칙" 으로 밝혀 태그·수동과 구분한다.',a.src.rule,'gray'],
+    ['vSphere 태그 카테고리 "Service"','VM·ESXi 호스트. tag-policy.json 의 serviceCategory 가 가리키는 카테고리의 태그 이름이 서비스명(같은 이름의 서비스가 그 법인 트리에 없으면 루트에 자동 생성 — 폴더는 사람이 옮긴다). 태그를 못 읽은 vCenter 의 구성원은 "확인 안 됨" 이지 미지정이 아니다.',a.src.tag,'blue'],
+    ['iDRAC 스캔 엔트리 service 라벨','베어메탈. idrac.json 항목의 scanRangeId 로 idrac-scan-ranges.json 엔트리를 조인해 service 를 읽는다(복사하지 않는다). 수동 등록·엣지 보고 서버는 이 규칙을 타지 않는다.',a.src.scan,'teal'],
+    ['수동 지정 — 이 화면의 "서버 추가"·"수동 지정"','키 = 서비스태그 소문자(물리) 또는 vcenterId:moref(VM). service-map.json 의 members 에 저장(원자적 쓰기·손상 보존·mtime 무효화). 위 두 규칙을 덮는다. 법인 관리자(쓰기 범위) + 감사 로그.',a.src.manual,'purple'],
+    ['이름 규칙 (선택)','정규식 → 서비스명. 길이 상한 뒤 선형 매칭(ReDoS 금지 규약). 켜지 않으면 적용되지 않는다. 전체 범위 관리자만 설정.',a.src.rule,'gray'],
     ['(미지정)','위 넷 다 아니면 여기. 다른 서비스에 넣거나 숨기지 않는다. 범위 계정에는 자기 법인의 미지정만 보이고, 법인 귀속이 없는 베어메탈은 범위 계정에 보이지 않는다(기존 불변조건).',a.src.none,'amber'],
   ];
   $('#rules').innerHTML=rules.map(([t,d,n,c],i)=>`<div class="rule"><div class="no" style="background:${i===4?'var(--amber)':'var(--accent)'}">${i===4?'·':i+1}</div><div><h3>${t} <span class="badge ${c}">${n}대</span></h3><p>${d}</p></div></div>`).join('');
-  const un=ms.filter(m=>!m.svc); $('#unCount').textContent=`${un.length}대`;
-  $('#unTable tbody').innerHTML=un.map(m=>`<tr class="unassigned"><td data-sort="${esc(m.name)}"><b>${esc(m.name)}</b>${m.kind==='BM'?`<div class="sm mono">${esc(m.key)}</div>`:''}</td><td data-sort="${m.kind}">${kindBadge(m.kind)}</td><td data-sort="${esc(corpName(m.corp))}">${esc(corpName(m.corp))}</td><td>${esc(m.reason)}</td>
-    <td><select disabled title="시안 — 구현 시 PUT /admin/service-map/assign"><option>서비스 선택…</option>${[...new Set(MEMBERS.filter(x=>x.svc).map(x=>x.svc))].map(s=>`<option>${esc(s)}</option>`).join('')}</select></td></tr>`).join('');
+  const un=ms.filter(m=>!m.svcId);$('#unCount').textContent=`${un.length}대`;
+  $('#unTable tbody').innerHTML=un.map(m=>`<tr class="unassigned"><td data-sort="${esc(m.name)}"><b>${esc(m.name)}</b>${m.kind!=='VM'?`<div class="sm mono">${esc(m.key)}</div>`:''}</td><td data-sort="${m.kind}">${kindBadge(m.kind)}</td><td data-sort="${esc(corpName(m.corp))}">${esc(corpName(m.corp))}</td><td>${esc(m.reason)}</td>
+    <td><select data-assign="${esc(m.key)}"><option value="">서비스 선택…</option>${SERVICES.filter(s=>!m.corp||s.corp===m.corp).map(s=>`<option value="${s.id}">${esc(corpShort(s.corp))} · ${esc(s.path?s.path+'\\':'')}${esc(s.name)}</option>`).join('')}</select></td></tr>`).join('');
   applySort('unTable');
 }
-function renderApiNote(){
-  $('#apiNote').innerHTML=`갱신(API 값 · 목): vSphere 태그 ${META.tagsAt}(주기 ${META.tagRefresh}) · 베어메탈 사용률 ${META.bmAt}(주기 ${META.bmPeriod}) · 인벤토리 스냅샷 ${META.snapAt}(주기 ${META.snapPeriod}) · 부품 장애 ${META.faultsAt}. 화면은 주기·상한 숫자를 박지 않고 API 가 준 값을 적는다.`;
-}
+function renderApiNote(){$('#apiNote').innerHTML=`갱신(API 값 · 목): vSphere 태그 ${META.tagsAt}(주기 ${META.tagRefresh}) · 베어메탈 사용률 ${META.bmAt}(주기 ${META.bmPeriod}) · 인벤토리 스냅샷 ${META.snapAt}(주기 ${META.snapPeriod}) · 부품 장애 ${META.faultsAt}. 화면은 주기·상한 숫자를 박지 않고 API 가 준 값을 적는다.`;}
 // STable 과 같은 동작: asc → desc → 해제, data-sort 우선, '—'/빈값은 항상 뒤.
 function applySort(id){
-  const t=document.getElementById(id); if(!t)return; const st=S.sort[id]; const ths=[...t.tHead.rows[0].cells];
-  ths.forEach((th,i)=>{th.querySelector('.arr')?.remove(); if(st&&st.col===i){const s=document.createElement('span');s.className='arr';s.textContent=st.dir==='asc'?'▲':'▼';th.appendChild(s);}
+  const t=document.getElementById(id);if(!t)return;const st=S.sort[id];const ths=[...t.tHead.rows[0].cells];
+  ths.forEach((th,i)=>{th.querySelector('.arr')?.remove();if(st&&st.col===i){const s=document.createElement('span');s.className='arr';s.textContent=st.dir==='asc'?'▲':'▼';th.appendChild(s);}
     if(!th.dataset.bound){th.dataset.bound='1';if(th.hasAttribute('data-nosort'))return;th.addEventListener('click',()=>{const cur=S.sort[id];S.sort[id]=!cur||cur.col!==i?{col:i,dir:'asc'}:cur.dir==='asc'?{col:i,dir:'desc'}:null;applySort(id);});}});
-  const tb=t.tBodies[0]; const rows=[...tb.rows]; rows.forEach((r,i)=>r.dataset.i=r.dataset.i??i);
+  const tb=t.tBodies[0];const rows=[...tb.rows];rows.forEach((r,i)=>r.dataset.i=r.dataset.i??i);
   if(!st){rows.sort((a,b)=>a.dataset.i-b.dataset.i);}else{
     const val=(r)=>{const c=r.cells[st.col];const v=c.dataset.sort??c.textContent.trim();const n=Number(v);return {n:v!==''&&!isNaN(n)?n:null,s:v};};
-    rows.sort((a,b)=>{const x=val(a),y=val(b);const nullA=x.s===''||x.s==='—'||x.n===-1,nullB=y.s===''||y.s==='—'||y.n===-1;if(nullA!==nullB)return nullA?1:-1;
-      const c=(x.n!=null&&y.n!=null)?x.n-y.n:x.s.localeCompare(y.s,'ko');return st.dir==='asc'?c:-c;});}
+    rows.sort((a,b)=>{const x=val(a),y=val(b);const nullA=x.s===''||x.s==='—'||x.n===-1,nullB=y.s===''||y.s==='—'||y.n===-1;if(nullA!==nullB)return nullA?1:-1;const c=(x.n!=null&&y.n!=null)?x.n-y.n:x.s.localeCompare(y.s,'ko');return st.dir==='asc'?c:-c;});}
   rows.forEach(r=>tb.appendChild(r));
 }
+function selCorp(){return S.sel.type==='all'?'':S.sel.corp;}
 function render(){
-  renderKpis(); renderChips();
-  $('#vSvc').classList.toggle('hide',S.view!=='svc'); $('#vMem').classList.toggle('hide',S.view!=='mem'); $('#vRules').classList.toggle('hide',S.view!=='rules');
+  renderKpis();buildTree();crumb();
+  $('#vSvc').classList.toggle('hide',S.view!=='svc');$('#vMem').classList.toggle('hide',S.view!=='mem');$('#vRules').classList.toggle('hide',S.view!=='rules');
   document.querySelectorAll('#viewSeg button').forEach(b=>b.classList.toggle('on',b.dataset.v===S.view));
-  if(S.view==='svc')renderSvc(); else if(S.view==='mem')renderMemAll(); else renderRules();
+  $('#btnMove').disabled=S.sel.type!=='svc';
+  if(S.view==='svc')renderSvc();else if(S.view==='mem')renderMemAll();else renderRules();
   renderApiNote();
 }
+function flash(msg){const f=$('#flash');f.textContent=`✓ ${msg}`;f.classList.remove('hide');clearTimeout(f._t);f._t=setTimeout(()=>f.classList.add('hide'),6000);}
+
+// ───────── 서버 추가 모달 ─────────
+function mCandidates(){
+  const m=S.m;const q=m.q.trim().toLowerCase();
+  return MEMBERS.filter(x=>(m.kind==='VM'?x.kind==='VM':x.kind!=='VM'&&x.idrac)
+    &&(!m.corp||x.corp===m.corp||(m.corp&&!x.corp))        // 법인 귀속이 없는 서버도 그 법인 관리자가 가져올 수 있다
+    &&(!m.cls||x.kind===m.cls)&&(!m.unOnly||!x.svcId)
+    &&(!q||x.name.toLowerCase().includes(q)||(x.st||'').toLowerCase().includes(q)||(x.model||'').toLowerCase().includes(q)||(x.addr||'').includes(q)));
+}
+function openModal(){
+  const m=S.m;m.corp=selCorp();m.checked.clear();m.target=S.sel.type==='svc'?S.sel.id:'';m.q='';m.unOnly=true;m.cls='';m.kind='phys';
+  $('#mCorp').innerHTML=`<option value="">전체 법인</option>${CORPS.map(c=>`<option value="${c.id}">${c.name}</option>`).join('')}`;$('#mCorp').value=m.corp;$('#mQ').value='';$('#mUnOnly').checked=true;
+  $('#modal').classList.remove('hide');renderModal();
+}
+function renderModal(){
+  const m=S.m;const list=mCandidates();$('#mCount').textContent=`${list.length}대 후보`;
+  document.querySelectorAll('#mKind button').forEach(b=>b.classList.toggle('on',b.dataset.k===m.kind));
+  document.querySelectorAll('#mCls .chip').forEach(b=>b.classList.toggle('on',b.dataset.c===m.cls));
+  $('#mCls').classList.toggle('hide',m.kind==='VM');
+  $('#mTable thead th:nth-child(3)').textContent=m.kind==='VM'?'VM id':'서비스태그';$('#mTable thead th:nth-child(4)').textContent=m.kind==='VM'?'게스트 OS':'모델';$('#mTable thead th:nth-child(5)').textContent=m.kind==='VM'?'IP':'iDRAC 주소';$('#mTable thead th:nth-child(8)').textContent=m.kind==='VM'?'폴더(vCenter)':'식별 경로';
+  $('#mTable tbody').innerHTML=list.map(x=>`<tr><td><input type="checkbox" data-ck="${esc(x.key)}"${m.checked.has(x.key)?' checked':''}></td><td><b>${esc(x.name)}</b></td><td class="mono">${esc(x.st||x.key)}</td><td>${esc(x.kind==='VM'?'RHEL 9':x.model)}</td><td class="mono">${esc(x.kind==='VM'?x.ip:x.addr)}</td>
+    <td>${esc(corpName(x.corp))}</td><td>${kindBadge(x.kind)}</td><td class="muted">${esc(x.kind==='VM'?'vm\\prod':x.found)}</td><td>${x.svcId?`${esc(svcName(x))} ${srcBadge(x.src)}`:'<span class="badge amber">(미지정)</span>'}</td></tr>`).join('')||'<tr><td colspan="9" class="empty">조건에 맞는 후보가 없습니다.</td></tr>';
+  const tcorp=m.corp||(m.checked.size?MEMBERS.find(x=>m.checked.has(x.key))?.corp:'');
+  const targets=SERVICES.filter(s=>!tcorp||s.corp===tcorp);
+  $('#mTarget').innerHTML=`<option value="">대상 서비스 선택…</option>${targets.map(s=>`<option value="${s.id}">${esc(corpShort(s.corp))} · ${esc(s.path?s.path+'\\':'')}${esc(s.name)}</option>`).join('')}`;$('#mTarget').value=targets.some(s=>s.id===m.target)?m.target:'';m.target=$('#mTarget').value;
+  $('#mSel').textContent=m.checked.size;$('#mAdd').disabled=!(m.checked.size&&m.target);$('#mAll').checked=list.length>0&&list.every(x=>m.checked.has(x.key));
+  applySort('mTable');
+}
+function doAdd(){
+  const m=S.m;const target=SERVICES.find(s=>s.id===m.target);if(!target)return;let n=0,crossCorp=0;
+  for(const x of MEMBERS){if(!m.checked.has(x.key))continue;if(x.corp&&x.corp!==target.corp){crossCorp++;continue;}
+    if(!x.corp)x.corp=target.corp;x.svcId=target.id;x.src='manual';x.reason='';n++;}
+  $('#modal').classList.add('hide');m.checked.clear();
+  flash(`${n}대를 '${target.name}'(${corpName(target.corp)}) 에 수동 지정했습니다 — 감사 로그 1건, 소속 근거 '수동 지정'.${crossCorp?` 다른 법인에 귀속된 ${crossCorp}대는 넣지 않았습니다(법인을 넘는 이동은 fleet-assign 에서 귀속을 먼저 바꿔야 합니다).`:''}`);
+  render();
+}
+
+// ───────── 이벤트 ─────────
 document.addEventListener('click',(e)=>{
-  const seg=e.target.closest('#viewSeg button'); if(seg){S.view=seg.dataset.v;return render();}
-  const k=e.target.closest('.kpi'); if(k){S.view=k.dataset.v;return render();}
-  const chip=e.target.closest('#corpChips .chip'); if(chip){S.corp=chip.dataset.c;S.selSvc=null;$('#scopeSel').value=S.corp==='*'?'':S.corp;return render();}
-  const kc=e.target.closest('#kindChips .chip'); if(kc){S.kind=kc.dataset.k;return renderMemAll();}
-  const row=e.target.closest('#svcTable tbody tr.row'); if(row){S.selSvc=S.selSvc===row.dataset.key?null:row.dataset.key;return renderSvc();}
+  const tn=e.target.closest('#tree .tn');if(tn){const rows=JSON.parse($('#tree').dataset.rows);const r=rows[tn.dataset.i];
+    if(r.t==='all')S.sel={type:'all'};else if(r.t==='corp'){const k=r.corp||'__none';if(S.sel.type==='corp'&&S.sel.corp===r.corp){S.open.has(k)?S.open.delete(k):S.open.add(k);}else S.open.add(k);S.sel={type:'corp',corp:r.corp};}
+    else if(r.t==='folder'){const k=`f:${r.corp}:${r.path}`;if(S.sel.type==='folder'&&S.sel.path===r.path&&S.sel.corp===r.corp){S.open.has(k)?S.open.delete(k):S.open.add(k);}else S.open.add(k);S.sel={type:'folder',corp:r.corp,path:r.path};}
+    else if(r.t==='svc'){S.sel={type:'svc',corp:r.corp,id:r.id};S.selSvc=r.id;}else if(r.t==='un'){S.sel={type:'un',corp:r.corp};S.selSvc=`un:${r.corp}`;}
+    if(r.t!=='svc'&&r.t!=='un')S.selSvc=null;$('#scopeSel').value=S.sel.type==='all'?'':(S.sel.corp||'');return render();}
+  if(e.target.closest('#btnExpand')){const all=['__none',...CORPS.map(c=>c.id)];for(const c of CORPS)for(const p of corpFolders(c.id))all.push(`f:${c.id}:${p}`);
+    if(S.open.size>=all.length){S.open.clear();}else{S.open=new Set(all);}return render();}
+  const seg=e.target.closest('#viewSeg button');if(seg){S.view=seg.dataset.v;return render();}
+  const k=e.target.closest('.kpi');if(k){S.view=k.dataset.v;return render();}
+  const kc=e.target.closest('#kindChips .chip');if(kc){S.kind=kc.dataset.k;return renderMemAll();}
+  const row=e.target.closest('#svcTable tbody tr.row');if(row){S.selSvc=S.selSvc===row.dataset.key?null:row.dataset.key;return renderSvc();}
+  const cl=e.target.closest('[data-close]');if(cl){$('#'+cl.dataset.close).classList.add('hide');return;}
+  if(e.target.closest('#btnFolder')){const c=selCorp();$('#ffCorp').innerHTML=CORPS.map(x=>`<option value="${x.id}">${x.name}</option>`).join('');if(c)$('#ffCorp').value=c;$('#ffCorp').disabled=!!c;
+    $('#ffPath').value=S.sel.type==='folder'?S.sel.path+'\\':'';$('#formSvc').classList.add('hide');$('#formMove').classList.add('hide');$('#formFolder').classList.remove('hide');$('#ffPath').focus();return;}
+  if(e.target.closest('#ffOk')){const corp=$('#ffCorp').value,p=$('#ffPath').value.trim().replace(/^\\+|\\+$/g,'');
+    if(!corp||!p||p.split('\\').length>10||/[\u0000-\u001f]/.test(p))return flash('경로가 비어 있거나 형식이 맞지 않습니다(구분자 \\, 최대 10단계).');
+    if(!corpFolders(corp).includes(p))FOLDERS.push({corp,path:p});S.open.add(corp);p.split('\\').forEach((_,i,a)=>S.open.add(`f:${corp}:${a.slice(0,i+1).join('\\')}`));
+    S.sel={type:'folder',corp,path:p};$('#formFolder').classList.add('hide');flash(`폴더 '${p}' 를 ${corpName(corp)} 에 만들었습니다(service-map.json folders · 감사 로그).`);return render();}
+  if(e.target.closest('#btnSvc')){const c=selCorp();$('#fsCorp').innerHTML=CORPS.map(x=>`<option value="${x.id}">${x.name}</option>`).join('');if(c)$('#fsCorp').value=c;$('#fsCorp').disabled=!!c;
+    const fill=()=>{const cc=$('#fsCorp').value;$('#fsPath').innerHTML=`<option value="">(루트)</option>${corpFolders(cc).map(p=>`<option value="${esc(p)}">${esc(p)}</option>`).join('')}`;if(S.sel.type==='folder'&&S.sel.corp===cc)$('#fsPath').value=S.sel.path;};fill();$('#fsCorp').onchange=fill;
+    $('#fsName').value='';$('#formFolder').classList.add('hide');$('#formMove').classList.add('hide');$('#formSvc').classList.remove('hide');$('#fsName').focus();return;}
+  if(e.target.closest('#fsOk')){const corp=$('#fsCorp').value,path=$('#fsPath').value,name=$('#fsName').value.trim();
+    if(!name||name.length>64)return flash('서비스명은 1~64자입니다.');if(SERVICES.some(s=>s.corp===corp&&s.name.toLowerCase()===name.toLowerCase()))return flash(`'${name}' 은 이 법인에 이미 있습니다(법인 안에서 서비스명은 유일).`);
+    const svc={id:`s${sid++}`,corp,path,name};SERVICES.push(svc);S.open.add(corp);if(path)path.split('\\').forEach((_,i,a)=>S.open.add(`f:${corp}:${a.slice(0,i+1).join('\\')}`));
+    S.sel={type:'svc',corp,id:svc.id};S.selSvc=svc.id;$('#formSvc').classList.add('hide');flash(`서비스 '${name}' 을 ${corpName(corp)} › ${path||'(루트)'} 에 만들었습니다. 이제 '서버 추가' 로 구성원을 넣습니다.`);return render();}
+  if(e.target.closest('#btnMove')){const sv=SERVICES.find(s=>s.id===S.sel.id);if(!sv)return;$('#fmName').textContent=`${sv.name} (${corpName(sv.corp)})`;
+    $('#fmPath').innerHTML=`<option value="">(루트)</option>${corpFolders(sv.corp).map(p=>`<option value="${esc(p)}"${p===sv.path?' selected':''}>${esc(p)}</option>`).join('')}`;
+    $('#formFolder').classList.add('hide');$('#formSvc').classList.add('hide');$('#formMove').classList.remove('hide');return;}
+  if(e.target.closest('#fmOk')){const sv=SERVICES.find(s=>s.id===S.sel.id);if(!sv)return;const to=$('#fmPath').value;const from=sv.path;sv.path=to;if(to)to.split('\\').forEach((_,i,a)=>S.open.add(`f:${sv.corp}:${a.slice(0,i+1).join('\\')}`));
+    $('#formMove').classList.add('hide');flash(`'${sv.name}' 을 '${from||'(루트)'}' → '${to||'(루트)'}' 로 옮겼습니다(구성원·소속 근거 그대로 · 감사 로그).`);return render();}
+  if(e.target.closest('#btnAdd'))return openModal();
+  if(e.target.closest('#mClose'))return $('#modal').classList.add('hide');
+  const mk=e.target.closest('#mKind button');if(mk){S.m.kind=mk.dataset.k;S.m.cls='';S.m.checked.clear();return renderModal();}
+  const mc=e.target.closest('#mCls .chip');if(mc){S.m.cls=mc.dataset.c;return renderModal();}
+  if(e.target.closest('#mAdd'))return doAdd();
+});
+document.addEventListener('change',(e)=>{
+  if(e.target.id==='mCorp'){S.m.corp=e.target.value;S.m.checked.clear();return renderModal();}
+  if(e.target.id==='mUnOnly'){S.m.unOnly=e.target.checked;return renderModal();}
+  if(e.target.id==='mTarget'){S.m.target=e.target.value;$('#mAdd').disabled=!(S.m.checked.size&&S.m.target);return;}
+  if(e.target.id==='mAll'){const list=mCandidates();if(e.target.checked)list.forEach(x=>S.m.checked.add(x.key));else S.m.checked.clear();return renderModal();}
+  if(e.target.dataset.ck){e.target.checked?S.m.checked.add(e.target.dataset.ck):S.m.checked.delete(e.target.dataset.ck);$('#mSel').textContent=S.m.checked.size;
+    const tcorp=S.m.corp||MEMBERS.find(x=>S.m.checked.has(x.key))?.corp||'';const targets=SERVICES.filter(s=>!tcorp||s.corp===tcorp);
+    $('#mTarget').innerHTML=`<option value="">대상 서비스 선택…</option>${targets.map(s=>`<option value="${s.id}">${esc(corpShort(s.corp))} · ${esc(s.path?s.path+'\\':'')}${esc(s.name)}</option>`).join('')}`;$('#mTarget').value=targets.some(s=>s.id===S.m.target)?S.m.target:'';S.m.target=$('#mTarget').value;
+    $('#mAdd').disabled=!(S.m.checked.size&&S.m.target);return;}
+  if(e.target.dataset.assign){const m=MEMBERS.find(x=>x.key===e.target.dataset.assign);const sv=SERVICES.find(s=>s.id===e.target.value);if(!m||!sv)return;if(!m.corp)m.corp=sv.corp;m.svcId=sv.id;m.src='manual';m.reason='';
+    flash(`'${m.name}' 을 '${sv.name}'(${corpName(sv.corp)}) 에 수동 지정했습니다 — 감사 로그 1건.`);return render();}
+  if(e.target.id==='scopeSel'){S.sel=e.target.value?{type:'corp',corp:e.target.value}:{type:'all'};S.selSvc=null;if(e.target.value)S.open.add(e.target.value);return render();}
 });
 $('#q').addEventListener('input',(e)=>{S.q=e.target.value;render();});
-const sc=$('#scopeSel'); CORPS.forEach(c=>{const o=document.createElement('option');o.value=c.id;o.textContent=`${c.name} · ${c.region}`;sc.appendChild(o);});
-sc.addEventListener('change',(e)=>{S.corp=e.target.value||'*';S.selSvc=null;render();});
+$('#mQ').addEventListener('input',(e)=>{S.m.q=e.target.value;renderModal();});
+const sc=$('#scopeSel');CORPS.forEach(c=>{const o=document.createElement('option');o.value=c.id;o.textContent=`${c.name} · ${c.region}`;sc.appendChild(o);});
 render();
 </script>
 </body>
