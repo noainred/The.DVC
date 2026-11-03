@@ -19,7 +19,7 @@ import { finishText, restoreIsOpen, snapshotChip, SNAPSHOT_TITLE, fullAfterResto
 import { Note, ReadGuide, Segs, Dot, FilterChip } from './BareosBits.jsx';
 import {
   liveRowIndex, waitSummary, runRowOf, progressBasis, rateText as liveRateText, sizeText as liveSizeText, elapsedText as liveElapsedText,
-  reasonText, REASON_HINT, sortWaiting, levelWord,
+  reasonText, REASON_HINT, sortWaiting, levelWord, historyFollowTarget,
 } from './bareosLiveText.js';
 import {
   stateBadge, levelLabel, bytesText, whenText, runCell, directorLine, directorStatus, directorChipTitle, outcomeUnknown, unknownOutcomeText, withRelayWait, targetLocks, restoreLine, candidateSummary, driftText,
@@ -953,7 +953,9 @@ function HistoryTab({ d }) {
   const [levelF, setLevelF] = useState('');
   const [resultF, setResultF] = useState('');
   const jobsShown = useMemo(() => (dirF ? d.jobs.filter((j) => j.directorId === dirF) : d.jobs), [d.jobs, dirF]);
-  const [sel, setSel] = useState(d.jobs[0]?.id || '');
+  // v2.866: 처음 대상은 진행 중인 VM(없으면 첫 대상) — 아래 효과가 위 실행 중 표에서 골라진 VM 을 따라간다(사람이 바꾸기 전까지)
+  const [sel, setSel] = useState(() => (d.jobs.find((j) => j.pending?.jobid || ['running', 'queued', 'waiting'].includes(j.lastRun?.state)) || d.jobs[0])?.id || '');
+  const [selByHand, setSelByHand] = useState(false);
   const [hist, setHist] = useState(null);
   const [err, setErr] = useState(null);
   const [logOf, setLogOf] = useState(null);
@@ -1000,7 +1002,14 @@ function HistoryTab({ d }) {
     const i = waits.findIndex((y) => y.jobid === x.row.jobid);
     return { ahead, order: i >= 0 ? i + 1 : null, total: waits.length };
   };
-  const pick = (x) => { setRunSel(x.key); if (x.job?.id && x.job.id !== sel) setSel(x.job.id); };   // 아래 이력 표도 그 VM 으로
+  const pick = (x) => { setRunSel(x.key); setSelByHand(false); if (x.job?.id && x.job.id !== sel) setSel(x.job.id); };   // 아래 이력 표도 그 VM 으로(다시 따라가기)
+  // v2.866(사용자 요청 '진행 중인 백업 VM 이 자동으로 선택되게'): 이력 표 대상이 위 표의 고른(기본: 실행 중) 작업 VM 을 따라간다
+  const pickedJobId = picked?.job?.id || '';
+  const shownIds = useMemo(() => jobsShown.map((j) => j.id), [jobsShown]);
+  useEffect(() => {
+    const next = historyFollowTarget({ byHand: selByHand, pickedJobId, sel, ids: shownIds });
+    if (next) setSel(next);
+  }, [selByHand, pickedJobId, sel, shownIds]);
   return (
     <div>
       <section className="card" aria-label="실행 중 백업" style={{ padding: 0, overflow: 'hidden', minWidth: 0, marginBottom: 12 }}>
@@ -1081,7 +1090,7 @@ function HistoryTab({ d }) {
           </Select>
         )}
         <label htmlFor="bareos-hist-sel" className="muted" style={{ fontSize: 12 }}>대상</label>
-        <Select id="bareos-hist-sel" className="input" value={job ? sel : ''} onChange={(e) => setSel(e.target.value)} style={{ minWidth: 0, width: 'min(100%, 260px)' }}>
+        <Select id="bareos-hist-sel" className="input" value={job ? sel : ''} onChange={(e) => { setSelByHand(true); setSel(e.target.value); }} style={{ minWidth: 0, width: 'min(100%, 260px)' }}>
           {jobsShown.length === 0 && <option value="">— 대상 없음</option>}
           {jobsShown.map((j) => <option key={j.id} value={j.id}>{j.vmName} · {j.vcenterId}</option>)}
         </Select>

@@ -281,7 +281,7 @@ test('⑥ 복원: OTP 없는 계정 403 · 전제 실패는 OTP 를 쓰기 전�
   assert.equal(r.s, 202, r.t);
   assert.deepEqual(r.j.fromJobids, [100, 110, 130]);
   const cmd = D.cmds.find((c) => c.startsWith('restore '));
-  assert.equal(cmd, 'restore client=kr-fd restoreclient=kr-fd jobid=100,110,130 restorejob=PortalVmwareRestore pluginoptions="python3:vmname=web-01-r:restore_powerstate=off:restore_datastore=ds-a1" all done yes');
+  assert.equal(cmd, 'restore client=kr-fd restoreclient=kr-fd jobid=100,110,130 restorejob=PortalVmwareRestore pluginoptions="python3:vcserver=vc-a.corp:dc=DC-A:folder=/web:vmname=web-01-r:config_file=/etc/bareos/vmware/vc-a.ini:restore_powerstate=off:restore_datastore=ds-a1" all done yes');   // v2.866 백업과 같은 기본 키(복원 때 잡 수준 옵션이 오지 않는다 — 실환경 vcuser not defined)
   assert.equal(D.cmds.filter((c) => c.startsWith('.bvfs_get_jobids')).length, 0, 'S1: 체인은 이 잡의 이력으로만 — bvfs 는 같은 FD 의 다른 VM(90·105)을 섞는다');
   assert.equal(registry.getJob(jobId).restores[0].jobid, r.j.jobid);
   assert.equal((await call('admin', 'POST', `/jobs/${jobId}/restore`, { jobid: 130, mode: 'localVmdk', otp: 'x' })).s, 409);
