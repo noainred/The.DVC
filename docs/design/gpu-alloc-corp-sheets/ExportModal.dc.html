@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>엑셀로 내보내기 창 — 법인별 시트 항목</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=Noto+Sans+KR:wght@400;500;700&amp;family=JetBrains+Mono:wght@400;500&amp;display=swap">
+<style>
+body{margin:0;background:#0a0e17}
+a{color:#60a5fa}a:hover{color:#93c5fd}
+button{font-family:inherit}
+</style>
+</helmet>
+<div style="width: 640px; height: 1120px; box-sizing: border-box; background: #0a0e17; color: #e6edf6; font-family: Inter, 'Noto Sans KR', 'Apple SD Gothic Neo', system-ui, sans-serif; font-size: 13px; padding: 40px; display: flex; flex-direction: column; align-items: center;">
+
+<div style="width: 560px; background: #141b2d; border: 1px solid #243049; border-radius: 12px; box-shadow: 0 4px 24px rgba(0, 0, 0, 0.4); display: flex; flex-direction: column;">
+  <div style="display: flex; align-items: center; justify-content: space-between; padding: 16px 20px; border-bottom: 1px solid #1f2a40;">
+    <h1 style="margin: 0; font-size: 16px; font-weight: 700;">계층 표 엑셀로 내보내기</h1>
+    <button type="button" aria-label="닫기" style="width: 32px; height: 32px; border: 0; background: transparent; color: #8b9bb4; font-size: 18px; cursor: pointer;">×</button>
+  </div>
+
+  <div style="padding: 16px 20px 20px; display: flex; flex-direction: column; gap: 14px;">
+    <div style="font-size: 13px; color: #8b9bb4; line-height: 1.6;">화면의 법인 선택을 그대로 따릅니다. 지금 범위: <b style="color: #e6edf6;">전체 법인 · 호스트 15대 · GPU 34장</b></div>
+
+    <div style="background: #111726; border: 1px solid #243049; border-radius: 12px; padding: 14px 16px; display: flex; flex-direction: column; gap: 10px;">
+      <div style="font-size: 12px; color: #8b9bb4;">행을 어디까지 넣을까요</div>
+      <div style="display: flex; flex-wrap: wrap; gap: 6px;">
+        <sc-for list="{{depthChips}}" as="c" hint-placeholder-count="3">
+          <button type="button" onClick="{{c.pick}}" aria-pressed="{{c.on}}" style="{{c.style}}">{{c.label}}</button>
+        </sc-for>
+      </div>
+      <div style="font-size: 12px; color: #8b9bb4; line-height: 1.6;">고른 단계까지 계층 표 행을 만들고 엑셀의 <b style="color: #e6edf6;">행 그룹(개요)</b>으로 묶습니다. <b style="color: #e6edf6;">법인별 시트에도 같은 단계</b>가 적용됩니다. 평면 표는 단계와 무관하게 GPU·VM 한 줄씩입니다.</div>
+    </div>
+
+    <div style="background: #111726; border: 1px solid #243049; border-radius: 12px; padding: 14px 16px; display: flex; flex-direction: column; gap: 10px;">
+      <div style="font-size: 12px; color: #8b9bb4;">시트</div>
+      <label style="display: flex; align-items: flex-start; gap: 10px; font-size: 13px; line-height: 1.5; min-height: 24px;"><input type="checkbox" checked="checked" style="width: 18px; height: 18px; margin-top: 1px; accent-color: #3b82f6; flex: none;"><span><b>계층 표</b> <span style="color: #8b9bb4;">— 전체 법인 한 시트 · 읽기용(들여쓰기 · 행 그룹 · 단계 색)</span></span></label>
+      <label style="display: flex; align-items: flex-start; gap: 10px; font-size: 13px; line-height: 1.5; min-height: 24px;"><input type="checkbox" checked="checked" style="width: 18px; height: 18px; margin-top: 1px; accent-color: #3b82f6; flex: none;"><span><b>평면 표</b> <span style="color: #8b9bb4;">— 필터·피벗용(GPU·VM 한 줄마다 계층 열을 모두 채움)</span></span></label>
+      <label style="display: flex; align-items: flex-start; gap: 10px; font-size: 13px; line-height: 1.5; min-height: 24px;"><input type="checkbox" checked="checked" style="width: 18px; height: 18px; margin-top: 1px; accent-color: #3b82f6; flex: none;"><span><b>안내</b> <span style="color: #8b9bb4;">— 용어 · 기준 · 빈 칸의 뜻</span></span></label>
+      <label style="display: flex; align-items: flex-start; gap: 10px; font-size: 13px; line-height: 1.5; min-height: 24px; padding: 8px 10px; margin: 2px -10px 0; border-radius: 8px; background: rgba(59, 130, 246, 0.10); border: 1px solid #2c4a86;">
+        <input type="checkbox" checked="{{percorp}}" onChange="{{togglePercorp}}" style="width: 18px; height: 18px; margin-top: 1px; accent-color: #3b82f6; flex: none;">
+        <span><b>법인별 시트</b> <span style="background: #1d4ed8; color: #ffffff; font-size: 10px; font-weight: 600; padding: 1px 6px; border-radius: 10px; margin-left: 4px; vertical-align: 1px;">새로 추가</span> <span style="color: #8b9bb4;">— 법인(vCenter)마다 계층 표를 시트 한 장으로 + 목차 시트</span></span>
+      </label>
+
+      <sc-if value="{{percorp}}" hint-placeholder-val="{{true}}">
+      <div style="margin: 0 -2px; padding: 10px 12px; border-radius: 8px; background: #0f1626; border: 1px solid #1f2a40; display: flex; flex-direction: column; gap: 8px; font-size: 12px; line-height: 1.6; color: #c7d2e3;">
+        <div><b style="color: #e6edf6;">법인 9곳</b> 가운데 GPU 호스트가 있는 <b style="color: #e6edf6;">6곳 → 시트 6장</b>. 없는 3곳은 목차에만 적습니다(빈 시트를 만들지 않음).</div>
+        <div style="display: flex; flex-wrap: wrap; gap: 6px;">
+          <sc-for list="{{sheetChips}}" as="s" hint-placeholder-count="6">
+            <span style="{{s.style}}">{{s.label}}</span>
+          </sc-for>
+        </div>
+        <div style="color: #8b9bb4;">시트 이름은 vCenter 이름을 엑셀 제한(31자 · <span style="font-family: 'JetBrains Mono', monospace;">: \ / ? * [ ]</span> 금지)에 맞춰 바꾼 것입니다. 주황은 줄인 이름 — 원래 이름은 목차와 시트 첫 줄에 있습니다.</div>
+      </div>
+      </sc-if>
+    </div>
+
+    <div style="background: #111726; border: 1px solid #243049; border-radius: 12px; padding: 14px 16px; display: flex; flex-direction: column; gap: 6px; font-size: 12px; color: #c7d2e3; line-height: 1.6;">
+      <div style="font-size: 12px; color: #8b9bb4;">파일에 들어가는 서식</div>
+      <div>· 맨 위 요약 칸(전체 · 할당 · 예비 · 할당률 · 꺼진 VM) — 법인 시트는 그 법인 값</div>
+      <div>· 머리글 고정 · 평면 표 자동 필터 · 목차 ↔ 법인 시트 링크</div>
+      <div>· 단계별 색 띠 · 할당률 막대(90% 이상 주황) · 법인 시트 탭 색(90% 이상 주황)</div>
+      <div>· 숫자는 숫자 서식 — 합계·피벗을 바로 낼 수 있음</div>
+      <div>· 인쇄: A4 가로 한 쪽 너비 맞춤 · 머리글 반복(법인 시트도 같음)</div>
+    </div>
+
+    <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
+      <span style="font-size: 11px; color: #8b9bb4; font-family: 'JetBrains Mono', monospace; word-break: break-all; flex: 1; min-width: 0;">{{fileName}}</span>
+      <span style="font-size: 11px; color: #8b9bb4;">{{sheetCount}}</span>
+    </div>
+    <button type="button" style="height: 44px; border-radius: 8px; border: 1px solid #3b82f6; background: #1d4ed8; color: #ffffff; font-size: 14px; font-weight: 600; cursor: pointer;">엑셀 내려받기</button>
+  </div>
+</div>
+
+<div style="width: 560px; margin-top: 18px; font-size: 12px; color: #8b9bb4; line-height: 1.6; display: flex; flex-direction: column; gap: 4px;">
+  <div><b style="color: #e6edf6;">바뀌는 것은 이 창의 ‘시트’ 칸 한 줄</b> — 나머지(범위 · 단계 · 서식 · 파일 이름 자리)는 지금 창 그대로입니다.</div>
+  <div>법인별 시트를 끄면 파일 이름 끝의 ‘_percorp’ 도 빠져 지금과 같은 파일이 됩니다. 법인을 칩으로 골랐거나 범위 계정이면 그 법인들만 시트가 됩니다.</div>
+</div>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":640,"height":1120}}'>
+class Component extends DCLogic {
+  constructor(p) { super(p); this.state = { percorp: true, depth: 'vm' }; }
+  renderVals() {
+    const S = this.state;
+    const depths = [{ key: 'host', label: '호스트까지' }, { key: 'gpu', label: 'GPU 까지' }, { key: 'vm', label: 'VM 까지(전부)' }];
+    const depthChips = depths.map((d) => {
+      const on = d.key === S.depth;
+      return { label: d.label, on, pick: () => this.setState({ depth: d.key }),
+        style: 'height: 32px; padding: 0 12px; border-radius: 8px; border: 1px solid ' + (on ? '#3b82f6' : '#243049') + '; background: ' + (on ? 'rgba(59, 130, 246, 0.18)' : '#141b2d') + '; color: ' + (on ? '#e6edf6' : '#c7d2e3') + '; font-size: 13px; font-weight: ' + (on ? 600 : 500) + '; cursor: pointer;' };
+    });
+    const sheets = [
+      { label: 'vcenter-ap-northeast-01' }, { label: 'vcenter-us-east-01' }, { label: 'vcenter-us-west-01' },
+      { label: 'vcenter-eu-central-01' }, { label: 'vcenter-eu-west-01' }, { label: 'vcenter-ap-southeast-singapore', cut: true },
+    ];
+    const sheetChips = sheets.map((s) => ({ label: s.label, style: 'font-family: \'JetBrains Mono\', monospace; font-size: 11px; padding: 3px 8px; border-radius: 6px; border: 1px solid ' + (s.cut ? '#b45309' : '#243049') + '; background: #141b2d; color: ' + (s.cut ? '#fbbf24' : '#c7d2e3') + ';' }));
+    const suffix = (S.depth !== 'vm' ? '_' + S.depth : '') + (S.percorp ? '_percorp' : '');
+    return {
+      percorp: S.percorp, togglePercorp: () => this.setState({ percorp: !S.percorp }), depthChips, sheetChips,
+      fileName: 'gpu-allocation_all_20261103-1930' + suffix + '.xlsx',
+      sheetCount: S.percorp ? '시트 10장(기본 3 + 목차 1 + 법인 6)' : '시트 3장',
+    };
+  }
+}
+</script>
+</body>
+</html>

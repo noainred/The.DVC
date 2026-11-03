@@ -1,0 +1,375 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>GPU 할당율 엑셀 — 법인별 시트 미리보기</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=Noto+Sans+KR:wght@400;500;700&amp;family=JetBrains+Mono:wght@400;500&amp;display=swap">
+<style>
+body{margin:0;background:#0a0e17}
+a{color:#1d4ed8}a:hover{color:#1e40af}
+button{font-family:inherit}
+</style>
+</helmet>
+<div style="width: 1640px; height: 1120px; box-sizing: border-box; background: #0a0e17; color: #e6edf6; font-family: Inter, 'Noto Sans KR', 'Apple SD Gothic Neo', system-ui, sans-serif; font-size: 13px; padding: 28px 32px; display: flex; flex-direction: column; gap: 14px;">
+
+<div style="display: flex; align-items: baseline; gap: 16px; flex-wrap: wrap;">
+  <h1 style="margin: 0; font-size: 20px; font-weight: 700;">{{fileName}}</h1>
+  <span style="font-size: 12px; color: #8b9bb4;">아래 시트 탭을 누르면 그 시트가 보입니다 · 예시 데이터(법인 9곳 중 GPU 호스트가 있는 6곳)</span>
+</div>
+
+<div style="flex: 1; min-height: 0; display: flex; flex-direction: column; background: #ffffff; border-radius: 10px; overflow: hidden; color: #111827; font-family: Inter, 'Noto Sans KR', system-ui, sans-serif;">
+
+  <div style="height: 34px; flex: none; display: flex; align-items: center; gap: 10px; padding: 0 14px; background: #f3f4f6; border-bottom: 1px solid #d1d5db; font-size: 12px; color: #374151;">
+    <span style="font-weight: 600;">{{sheetTitle}}</span>
+    <span style="color: #4b5563;">{{sheetSub}}</span>
+  </div>
+
+  <sc-if value="{{isCorp}}" hint-placeholder-val="{{true}}">
+  <div style="flex: 1; min-height: 0; overflow: auto; background: #ffffff;">
+    <div style="min-width: max-content;">
+      <div style="display: flex; align-items: center; gap: 3px; height: 26px; padding-left: 4px; background: #f3f4f6; border-bottom: 1px solid #d1d5db;">
+        <sc-for list="{{outlineBtns}}" as="b" hint-placeholder-count="5">
+          <span style="{{b.style}}">{{b.label}}</span>
+        </sc-for>
+        <span style="font-size: 11px; color: #4b5563; margin-left: 8px;">개요 단계 — 1 법인 · 2 데이터센터 · 3 클러스터 · 4 호스트 · 5 GPU · 6 VM (전체 계층 표와 같은 단계)</span>
+      </div>
+
+      <div style="{{gridTitle}}">
+        <span style="text-align: center; color: #4b5563; background: #f3f4f6; border-right: 1px solid #d1d5db; line-height: 44px; font-size: 12px;">1</span>
+        <span style="background: #f9fafb; border-right: 1px solid #e5e7eb;"></span>
+        <span style="padding: 0 12px; display: flex; align-items: center; gap: 16px;">
+          <span style="font-size: 18px; font-weight: 700; color: #0f2a5f;">GPU 할당 계층 — {{corp.name}}</span>
+          <span style="font-size: 12px; color: #4b5563;">{{corp.loc}}</span>
+          <button type="button" onClick="{{goToc}}" style="margin-left: auto; border: 0; background: transparent; padding: 0 8px; height: 28px; font-size: 12px; color: #1d4ed8; text-decoration: underline; cursor: pointer;">← 목차</button>
+        </span>
+      </div>
+      <div style="{{gridSub}}">
+        <span style="text-align: center; color: #4b5563; background: #f3f4f6; border-right: 1px solid #d1d5db; font-size: 12px; line-height: 24px;">2</span>
+        <span style="background: #f9fafb; border-right: 1px solid #e5e7eb;"></span>
+        <span style="padding: 0 12px; font-size: 12px; color: #4b5563; line-height: 24px;">기준 2026-11-03 19:30 KST · 이 법인만 · 단위 GB · 전체 계층 표 시트의 같은 행과 값이 같음</span>
+      </div>
+      <div style="{{gridKpi}}">
+        <span style="text-align: center; color: #4b5563; background: #f3f4f6; border-right: 1px solid #d1d5db; font-size: 12px; line-height: 64px;">3</span>
+        <span style="background: #f9fafb; border-right: 1px solid #e5e7eb;"></span>
+        <span style="display: flex; gap: 10px; padding: 8px 12px;">
+          <sc-for list="{{kpis}}" as="k" hint-placeholder-count="5">
+            <span style="{{k.style}}"><span style="font-size: 11px; color: #4b5563;">{{k.label}}</span><span style="{{k.valStyle}}">{{k.value}}</span></span>
+          </sc-for>
+        </span>
+      </div>
+      <div style="{{gridBlank}}">
+        <span style="text-align: center; color: #4b5563; background: #f3f4f6; border-right: 1px solid #d1d5db; font-size: 12px; line-height: 12px;">4</span>
+        <span style="background: #f9fafb; border-right: 1px solid #e5e7eb;"></span>
+        <span></span>
+      </div>
+      <div style="{{headStyle}}">
+        <span style="text-align: center; color: #4b5563; background: #f3f4f6; border-right: 1px solid #d1d5db; font-weight: 400;">5</span>
+        <span style="background: #f9fafb; border-right: 1px solid #e5e7eb;"></span>
+        <sc-for list="{{heads}}" as="h" hint-placeholder-count="14">
+          <span style="{{h.style}}">{{h.label}}</span>
+        </sc-for>
+      </div>
+      <sc-for list="{{rows}}" as="r" hint-placeholder-count="16">
+        <div style="{{r.style}}">
+          <span style="text-align: center; color: #4b5563; background: #f3f4f6; border-right: 1px solid #d1d5db; font-size: 11px; line-height: 24px;">{{r.no}}</span>
+          <span style="background: #f9fafb; border-right: 1px solid #e5e7eb; display: flex; align-items: center; justify-content: center;"><span style="{{r.outlineStyle}}">{{r.caret}}</span></span>
+          <span style="{{r.nameStyle}}">{{r.name}}</span>
+          <span style="{{r.cellStyle}}">{{r.kind}}</span>
+          <span style="{{r.cellStyle}}">{{r.gpu}}</span>
+          <span style="{{r.numStyle}}">{{r.cap}}</span>
+          <span style="{{r.allocStyle}}">{{r.alloc}}</span>
+          <span style="{{r.spareStyle}}">{{r.spare}}</span>
+          <span style="position: relative; border-right: 1px solid #e5e7eb; display: flex; align-items: center;"><span style="{{r.bar}}"></span><span style="{{r.pctStyle}}">{{r.pct}}</span></span>
+          <span style="{{r.offStyle}}">{{r.off}}</span>
+          <span style="{{r.numStyle}}">{{r.vms}}</span>
+          <span style="{{r.numStyle}}">{{r.cores}}</span>
+          <span style="{{r.numStyle}}">{{r.cpu}}</span>
+          <span style="{{r.numStyle}}">{{r.mem}}</span>
+          <span style="{{r.numStyle}}">{{r.memp}}</span>
+          <span style="{{r.noteStyle}}">{{r.note}}</span>
+        </div>
+      </sc-for>
+    </div>
+  </div>
+  </sc-if>
+
+  <sc-if value="{{isToc}}" hint-placeholder-val="{{false}}">
+  <div style="flex: 1; min-height: 0; overflow: auto; background: #ffffff;">
+    <div style="min-width: max-content;">
+      <div style="{{tocTitle}}">
+        <span style="text-align: center; color: #4b5563; background: #f3f4f6; border-right: 1px solid #d1d5db; line-height: 44px; font-size: 12px;">1</span>
+        <span style="padding: 0 12px; display: flex; align-items: center; gap: 16px;">
+          <span style="font-size: 18px; font-weight: 700; color: #0f2a5f;">목차 — 법인별 시트</span>
+          <span style="font-size: 12px; color: #4b5563;">법인 이름을 누르면 그 법인 시트로 갑니다 · GPU 호스트가 없는 법인은 시트가 없고 여기에만 적힙니다</span>
+        </span>
+      </div>
+      <div style="{{tocSub}}">
+        <span style="text-align: center; color: #4b5563; background: #f3f4f6; border-right: 1px solid #d1d5db; font-size: 12px; line-height: 24px;">2</span>
+        <span style="padding: 0 12px; font-size: 12px; color: #4b5563; line-height: 24px;">기준 2026-11-03 19:30 KST · 범위 전체 법인 · 법인 9곳 — 시트 6장 · 단위 GB</span>
+      </div>
+      <div style="{{tocHead}}">
+        <span style="text-align: center; color: #4b5563; background: #f3f4f6; border-right: 1px solid #d1d5db; font-weight: 400;">3</span>
+        <sc-for list="{{tocHeads}}" as="h" hint-placeholder-count="10">
+          <span style="{{h.style}}">{{h.label}}</span>
+        </sc-for>
+      </div>
+      <sc-for list="{{tocRows}}" as="t" hint-placeholder-count="9">
+        <div style="{{t.style}}">
+          <span style="text-align: center; color: #4b5563; background: #f3f4f6; border-right: 1px solid #d1d5db; font-size: 11px; line-height: 26px;">{{t.no}}</span>
+          <span style="padding: 0 10px; border-right: 1px solid #e5e7eb; display: flex; align-items: center;">
+            <sc-if value="{{t.hasSheet}}" hint-placeholder-val="{{true}}">
+              <button type="button" onClick="{{t.go}}" style="border: 0; background: transparent; padding: 0; height: 26px; font-size: 12px; font-weight: 600; color: #1d4ed8; text-decoration: underline; cursor: pointer; font-family: inherit;">{{t.name}}</button>
+            </sc-if>
+            <sc-if value="{{t.noSheet}}" hint-placeholder-val="{{false}}">
+              <span style="font-size: 12px; font-weight: 600; color: #374151;">{{t.name}}</span>
+            </sc-if>
+          </span>
+          <span style="{{t.cellStyle}}">{{t.loc}}</span>
+          <span style="{{t.numStyle}}">{{t.hosts}}</span>
+          <span style="{{t.numStyle}}">{{t.gpus}}</span>
+          <span style="{{t.numStyle}}">{{t.cap}}</span>
+          <span style="{{t.numStyle}}">{{t.alloc}}</span>
+          <span style="{{t.numStyle}}">{{t.spare}}</span>
+          <span style="position: relative; border-right: 1px solid #e5e7eb; display: flex; align-items: center;"><span style="{{t.bar}}"></span><span style="{{t.pctStyle}}">{{t.pct}}</span></span>
+          <span style="{{t.sheetStyle}}">{{t.sheet}}</span>
+        </div>
+      </sc-for>
+      <div style="padding: 14px 12px 0 48px; font-size: 11px; color: #4b5563; line-height: 1.7; max-width: 1100px;">
+        시트 이름은 엑셀 제한(31자 · <span style="font-family: 'JetBrains Mono', monospace;">: \ / ? * [ ]</span> 금지)에 맞춰 vCenter 이름을 바꿔 만듭니다. 잘린 이름이나 같은 이름이 생기면 목차의 ‘시트’ 열에 실제 시트 이름을 적습니다(‘~2’ 처럼 번호를 붙여 구별).
+      </div>
+    </div>
+  </div>
+  </sc-if>
+
+  <sc-if value="{{isTree}}" hint-placeholder-val="{{false}}">
+  <div style="flex: 1; min-height: 0; overflow: auto; background: #ffffff;">
+    <div style="min-width: max-content;">
+      <div style="display: flex; align-items: center; gap: 3px; height: 26px; padding-left: 4px; background: #f3f4f6; border-bottom: 1px solid #d1d5db;">
+        <sc-for list="{{outlineBtns}}" as="b" hint-placeholder-count="5">
+          <span style="{{b.style}}">{{b.label}}</span>
+        </sc-for>
+        <span style="font-size: 11px; color: #4b5563; margin-left: 8px;">전체 법인 한 시트 — 지금과 같습니다(바뀌지 않음) · 여기서는 법인 단계(1)로 접은 모습</span>
+      </div>
+      <div style="{{gridTitle}}">
+        <span style="text-align: center; color: #4b5563; background: #f3f4f6; border-right: 1px solid #d1d5db; line-height: 44px; font-size: 12px;">1</span>
+        <span style="background: #f9fafb; border-right: 1px solid #e5e7eb;"></span>
+        <span style="padding: 0 12px; display: flex; align-items: center;"><span style="font-size: 18px; font-weight: 700; color: #0f2a5f;">GPU 할당 계층 — 전체 법인</span></span>
+      </div>
+      <div style="{{gridBlank}}">
+        <span style="text-align: center; color: #4b5563; background: #f3f4f6; border-right: 1px solid #d1d5db; font-size: 12px; line-height: 12px;">2</span>
+        <span style="background: #f9fafb; border-right: 1px solid #e5e7eb;"></span>
+        <span></span>
+      </div>
+      <div style="{{headStyle}}">
+        <span style="text-align: center; color: #4b5563; background: #f3f4f6; border-right: 1px solid #d1d5db; font-weight: 400;">5</span>
+        <span style="background: #f9fafb; border-right: 1px solid #e5e7eb;"></span>
+        <sc-for list="{{heads}}" as="h" hint-placeholder-count="14">
+          <span style="{{h.style}}">{{h.label}}</span>
+        </sc-for>
+      </div>
+      <sc-for list="{{treeRows}}" as="r" hint-placeholder-count="6">
+        <div style="{{r.style}}">
+          <span style="text-align: center; color: #4b5563; background: #f3f4f6; border-right: 1px solid #d1d5db; font-size: 11px; line-height: 24px;">{{r.no}}</span>
+          <span style="background: #f9fafb; border-right: 1px solid #e5e7eb; display: flex; align-items: center; justify-content: center;"><span style="{{r.outlineStyle}}">{{r.caret}}</span></span>
+          <span style="{{r.nameStyle}}">{{r.name}}</span>
+          <span style="{{r.cellStyle}}">{{r.kind}}</span>
+          <span style="{{r.cellStyle}}">{{r.gpu}}</span>
+          <span style="{{r.numStyle}}">{{r.cap}}</span>
+          <span style="{{r.allocStyle}}">{{r.alloc}}</span>
+          <span style="{{r.spareStyle}}">{{r.spare}}</span>
+          <span style="position: relative; border-right: 1px solid #e5e7eb; display: flex; align-items: center;"><span style="{{r.bar}}"></span><span style="{{r.pctStyle}}">{{r.pct}}</span></span>
+          <span style="{{r.offStyle}}">{{r.off}}</span>
+          <span style="{{r.numStyle}}">{{r.vms}}</span>
+          <span style="{{r.numStyle}}">{{r.cores}}</span>
+          <span style="{{r.numStyle}}">{{r.cpu}}</span>
+          <span style="{{r.numStyle}}">{{r.mem}}</span>
+          <span style="{{r.numStyle}}">{{r.memp}}</span>
+          <span style="{{r.noteStyle}}">{{r.note}}</span>
+        </div>
+      </sc-for>
+    </div>
+  </div>
+  </sc-if>
+
+  <sc-if value="{{isOther}}" hint-placeholder-val="{{false}}">
+  <div style="flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center; background: #ffffff;">
+    <div style="max-width: 560px; padding: 24px; border: 1px dashed #9ca3af; border-radius: 8px; font-size: 13px; color: #374151; line-height: 1.7; text-align: center;">{{otherText}}</div>
+  </div>
+  </sc-if>
+
+  <div style="height: 34px; flex: none; display: flex; align-items: stretch; background: #f3f4f6; border-top: 1px solid #d1d5db; font-size: 12px; color: #374151; overflow: hidden;">
+    <span style="display: flex; align-items: center; gap: 6px; padding: 0 10px; color: #6b7280; border-right: 1px solid #d1d5db;">◀ ▶</span>
+    <sc-for list="{{tabs}}" as="t" hint-placeholder-count="10">
+      <button type="button" onClick="{{t.pick}}" aria-pressed="{{t.on}}" style="{{t.style}}">{{t.label}}</button>
+    </sc-for>
+    <span style="display: flex; align-items: center; padding: 0 10px; color: #6b7280; border-left: 1px solid #d1d5db;">⊕</span>
+    <span style="margin-left: auto; display: flex; align-items: center; padding: 0 14px; color: #4b5563; font-size: 11px;">시트 10장 — 계층 표 · 평면 표 · 안내 · 목차 · 법인 6</span>
+  </div>
+</div>
+
+<div style="display: flex; gap: 18px; font-size: 12px; color: #8b9bb4; line-height: 1.6; flex-wrap: wrap;">
+  <span><b style="color: #e6edf6;">탭 색</b> — 목차 회색 · 법인 파랑 · 할당률 90% 이상 법인 주황(시트 탭 색은 엑셀이 지원)</span>
+  <span><b style="color: #e6edf6;">법인 시트 행</b> — 전체 계층 표에서 그 법인 줄부터 아래를 그대로(값 · 단계 색 · 행 그룹 같음)</span>
+  <span><b style="color: #e6edf6;">넣을 단계</b>(호스트 · GPU · VM 까지) — 전체 시트와 법인 시트에 같이 적용</span>
+</div>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1640,"height":1120}}'>
+class Component extends DCLogic {
+  constructor(p) { super(p); this.state = { tab: 'corp:vc-ap-northeast' }; }
+  renderVals() {
+    const S = this.state;
+    const corps = [
+      { id: 'vc-ap-northeast', name: 'vcenter-ap-northeast-01', loc: 'Seoul · South Korea', hosts: 4, gpus: 10, cap: 480, alloc: 432, offGB: 48, vmsOn: 18, vmsOff: 2, sheet: 'vcenter-ap-northeast-01' },
+      { id: 'vc-us-east', name: 'vcenter-us-east-01', loc: 'Ashburn · USA', hosts: 3, gpus: 6, cap: 288, alloc: 168, offGB: 0, vmsOn: 7, vmsOff: 0, sheet: 'vcenter-us-east-01' },
+      { id: 'vc-us-west', name: 'vcenter-us-west-01', loc: 'San Jose · USA', hosts: 2, gpus: 4, cap: 192, alloc: 72, offGB: 24, vmsOn: 3, vmsOff: 1, sheet: 'vcenter-us-west-01' },
+      { id: 'vc-br-sao', name: 'vcenter-br-sao-01', loc: 'São Paulo · Brazil', hosts: 0, gpus: 0, cap: null, alloc: null, offGB: 0, vmsOn: 0, vmsOff: 0, sheet: null },
+      { id: 'vc-eu-central', name: 'vcenter-eu-central-01', loc: 'Frankfurt · Germany', hosts: 3, gpus: 8, cap: 384, alloc: 240, offGB: 0, vmsOn: 10, vmsOff: 0, sheet: 'vcenter-eu-central-01' },
+      { id: 'vc-eu-west', name: 'vcenter-eu-west-01', loc: 'Dublin · Ireland', hosts: 1, gpus: 2, cap: 96, alloc: null, offGB: 0, vmsOn: 2, vmsOff: 0, sheet: 'vcenter-eu-west-01', unknown: 1 },
+      { id: 'vc-me-uae', name: 'vcenter-me-uae-01', loc: 'Dubai · UAE', hosts: 0, gpus: 0, cap: null, alloc: null, offGB: 0, vmsOn: 0, vmsOff: 0, sheet: null },
+      { id: 'vc-ap-southeast', name: 'vcenter-ap-southeast-singapore-01', loc: 'Singapore · Singapore', hosts: 2, gpus: 4, cap: 192, alloc: 96, offGB: 0, vmsOn: 4, vmsOff: 0, sheet: 'vcenter-ap-southeast-singapore', cut: true },
+      { id: 'vc-ap-south', name: 'vcenter-ap-south-01', loc: 'Mumbai · India', hosts: 0, gpus: 0, cap: null, alloc: null, offGB: 0, vmsOn: 0, vmsOff: 0, sheet: null },
+    ];
+    const pctOf = (c) => (c.cap && c.alloc != null ? Math.round((c.alloc / c.cap) * 100) : null);
+    const spareOf = (c) => (c.cap && c.alloc != null ? c.cap - c.alloc : null);
+    const tab = S.tab;
+    const isCorp = tab.indexOf('corp:') === 0;
+    const corp = isCorp ? corps.find((c) => c.id === tab.slice(5)) : corps[0];
+    const isToc = tab === 'toc';
+    const isTree = tab === 'tree';
+    const isOther = tab === 'flat' || tab === 'info';
+    const otherText = tab === 'flat'
+      ? '평면 표 — 바뀌지 않습니다. GPU·VM 한 줄마다 법인(vCenter) 열이 있어 자동 필터로 한 법인만 볼 수 있습니다. 법인마다 평면 표 시트를 더 만들지는 않습니다(시트 수가 두 배가 되고, 필터가 같은 일을 합니다).'
+      : '안내 — 한 줄만 더합니다: “법인별 시트 — 목차 시트의 법인 이름을 누르면 그 법인 시트로 갑니다. 시트 이름은 vCenter 이름을 엑셀 제한(31자)에 맞춰 바꾼 것이고 실제 이름은 목차와 시트 첫 줄에 있습니다.”';
+
+    const LV = [
+      { bg: '#1e3a8a', fg: '#ffffff', bold: true }, { bg: '#d6e2fa', fg: '#0f2a5f', bold: true }, { bg: '#e3ebfc', fg: '#0f2a5f', bold: true },
+      { bg: '#f1f5fd', fg: '#111827', bold: true }, { bg: '#ffffff', fg: '#0f766e', bold: true }, { bg: '#ffffff', fg: '#1f2937', bold: false },
+    ];
+    const COLS = '36px 22px 250px 80px 196px 72px 72px 72px 100px 80px 76px 68px 58px 78px 58px 220px';
+    const gridBase = 'display: grid; grid-template-columns: ' + COLS + '; border-bottom: 1px solid #e5e7eb; font-size: 12px;';
+    const gridTitle = gridBase + ' grid-template-columns: 36px 22px 1fr; height: 44px;';
+    const gridSub = gridBase + ' grid-template-columns: 36px 22px 1fr; height: 24px;';
+    const gridKpi = gridBase + ' grid-template-columns: 36px 22px 1fr; height: 64px;';
+    const gridBlank = gridBase + ' grid-template-columns: 36px 22px 1fr; height: 12px;';
+    const headStyle = gridBase + ' height: 32px; background: #1e3a8a; color: #ffffff; font-weight: 600; border-bottom: 1px solid #0f2a5f;';
+    const headLabels = ['이름', '구분', 'GPU 모델 · 프로파일', '전체(GB)', '할당(GB)', '예비(GB)', '할당률', '꺼진 VM(GB)', 'VM 켜짐/꺼짐', '코어 · vCPU', 'CPU(%)', '메모리(GB)', '메모리(%)', '비고'];
+    const heads = headLabels.map((label, i) => ({ label, style: 'padding: 0 8px; display: flex; align-items: center; border-right: 1px solid #2d4a9e; ' + (i >= 3 && i !== 6 && i !== 13 ? 'justify-content: flex-end;' : '') }));
+    const outlineBtns = [1, 2, 3, 4, 5, 6].map((n) => ({ label: String(n), style: 'width: 18px; height: 18px; display: inline-flex; align-items: center; justify-content: center; border: 1px solid #9ca3af; border-radius: 2px; background: #ffffff; font-size: 11px; color: #111827;' }));
+    const fmt = (v) => (v == null ? '' : String(v));
+
+    const mkRow = (no, depth, name, kind, gpu, cap, alloc, spare, pct, off, vms, cores, cpu, mem, memp, note, caret) => {
+      const lv = LV[depth];
+      const cell = 'padding: 0 8px; border-right: 1px solid #e5e7eb; display: flex; align-items: center; white-space: nowrap; overflow: hidden;';
+      const num = cell + ' justify-content: flex-end; font-variant-numeric: tabular-nums;';
+      const p = pct == null ? null : Math.min(100, pct);
+      return {
+        no, name, kind, gpu, cap: fmt(cap), alloc: fmt(alloc), spare: fmt(spare), pct: pct == null ? '' : pct + '%', off: fmt(off), vms, cores: fmt(cores), cpu: fmt(cpu), mem: fmt(mem), memp: fmt(memp), note, caret: caret || '',
+        style: gridBase + ' min-height: 24px; background: ' + lv.bg + '; color: ' + lv.fg + '; font-weight: ' + (lv.bold ? 600 : 400) + ';',
+        outlineStyle: 'font-size: 10px; color: #6b7280;',
+        nameStyle: cell + ' padding-left: ' + (8 + depth * 16) + 'px;',
+        cellStyle: cell, numStyle: num,
+        allocStyle: num + (depth >= 4 ? '' : ' color: ' + (depth === 0 ? '#bfdbfe' : '#1d4ed8') + ';'),
+        spareStyle: num + (spare != null && spare < 0 ? ' color: #b45309;' : depth === 0 ? ' color: #a7f3d0;' : ' color: #047857;'),
+        offStyle: num + (off ? ' color: #b45309;' : ''),
+        noteStyle: cell + ' font-weight: 400; color: ' + (depth === 0 ? '#dbeafe' : '#4b5563') + ';',
+        bar: 'position: absolute; left: 4px; top: 5px; bottom: 5px; width: ' + (p == null ? 0 : Math.round(p * 0.9)) + '%; background: ' + (p != null && p >= 90 ? '#fcd34d' : '#bfdbfe') + '; border-radius: 2px;',
+        pctStyle: 'position: relative; margin-left: auto; padding-right: 8px; font-variant-numeric: tabular-nums;',
+      };
+    };
+
+    const kpiSrc = [
+      { label: '전체', value: corp.cap == null ? '—' : corp.cap + ' GB', fg: '#0f2a5f', bg: '#f5f8ff', line: '#d6e2fa' },
+      { label: '할당(켜진 VM)', value: corp.alloc == null ? '—' : corp.alloc + ' GB', fg: '#1d4ed8', bg: '#f5f8ff', line: '#d6e2fa' },
+      { label: '예비', value: spareOf(corp) == null ? '—' : spareOf(corp) + ' GB', fg: '#047857', bg: '#f0fdf9', line: '#a7f3d0' },
+      { label: '할당률', value: pctOf(corp) == null ? '—' : pctOf(corp) + '%', fg: pctOf(corp) >= 90 ? '#b45309' : '#0f2a5f', bg: pctOf(corp) >= 90 ? '#fffbeb' : '#f5f8ff', line: pctOf(corp) >= 90 ? '#fcd34d' : '#d6e2fa' },
+      { label: '꺼진 VM', value: corp.offGB ? corp.offGB + ' GB' : '0 GB', fg: '#b45309', bg: '#fffbeb', line: '#fde68a' },
+    ];
+    const kpis = kpiSrc.map((k) => ({ label: k.label, value: k.value, style: 'display: flex; flex-direction: column; gap: 2px; padding: 6px 14px; min-width: 120px; background: ' + k.bg + '; border: 1px solid ' + k.line + '; border-radius: 4px;', valStyle: 'font-size: 16px; font-weight: 700; color: ' + k.fg + ';' }));
+
+    const corpRows = (c) => {
+      const R = [];
+      let no = 6;
+      const sp = spareOf(c);
+      R.push(mkRow(no++, 0, c.name + '  (' + c.loc + ')', '법인', 'GPU ' + c.gpus + '장 · 호스트 ' + c.hosts + '대', c.cap, c.alloc, sp, pctOf(c), c.offGB || null, c.vmsOn + ' / ' + c.vmsOff, c.hosts * 32, 41, c.hosts * 512, 57, c.unknown ? '할당 모르는 VM 1대' : pctOf(c) >= 90 ? '포화(90% 이상)' : '', '−'));
+      R.push(mkRow(no++, 1, 'DC-' + c.id.slice(3).toUpperCase(), '데이터센터', 'GPU ' + c.gpus + '장 · 호스트 ' + c.hosts + '대', c.cap, c.alloc, sp, pctOf(c), c.offGB || null, c.vmsOn + ' / ' + c.vmsOff, c.hosts * 32, 41, c.hosts * 512, 57, '', '−'));
+      R.push(mkRow(no++, 2, 'CL-GPU-A', '클러스터', 'GPU ' + c.gpus + '장 · 호스트 ' + c.hosts + '대', c.cap, c.alloc, sp, pctOf(c), c.offGB || null, c.vmsOn + ' / ' + c.vmsOff, c.hosts * 32, 41, c.hosts * 512, 57, '', '−'));
+      const per = Math.max(1, Math.round(c.gpus / Math.max(1, c.hosts)));
+      for (let h = 0; h < c.hosts; h++) {
+        const hcap = per * 48;
+        const halloc = c.alloc == null ? null : Math.min(hcap, Math.round(c.alloc / c.hosts / 24) * 24);
+        const hp = halloc == null ? null : Math.round((halloc / hcap) * 100);
+        R.push(mkRow(no++, 3, 'esx-gpu-' + String(h + 1).padStart(2, '0') + '.' + c.id.slice(3) + '.local', '호스트', 'NVIDIA A40 ×' + per + ' · vGPU', hcap, halloc, halloc == null ? null : hcap - halloc, hp, h === 0 && c.offGB ? c.offGB : null, Math.ceil(c.vmsOn / c.hosts) + ' / ' + (h === 0 ? c.vmsOff : 0), 32, 35 + h * 6, 512, 52 + h * 5, h === 1 && c.unknown ? 'CPU·메모리 사용률은 1대 제외(끊김)' : '', '−'));
+        if (h === 0) {
+          const used = halloc == null ? 1 : Math.min(2, Math.max(1, Math.round(halloc / per / 24)));
+          R.push(mkRow(no++, 4, 'GPU #0 · NVIDIA A40', 'vGPU', 'grid_a40-24q · ' + used + '/2 슬롯', 48, used * 24, 48 - used * 24, used * 50, null, used + ' / 0', null, null, null, null, used === 2 ? '' : '같은 프로파일 1 슬롯 예비', '−'));
+          R.push(mkRow(no++, 5, 'cad-' + c.id.slice(3, 5) + '-01', 'VM', 'grid_a40-24q', null, 24, null, null, null, '켜짐', 8, 42, 32, 61, '', ''));
+          if (used === 2) R.push(mkRow(no++, 5, 'cad-' + c.id.slice(3, 5) + '-02', 'VM', 'grid_a40-24q', null, 24, null, null, null, '켜짐', 8, 37, 32, 48, '', ''));
+          if (per > 1) {
+            R.push(mkRow(no++, 4, 'GPU #1 · NVIDIA A40', 'vGPU', c.unknown ? '여러 프로파일' : '비어 있음', 48, c.unknown ? null : 0, c.unknown ? null : 48, c.unknown ? null : 0, null, c.unknown ? '1 / 0' : '0 / 0', null, null, null, null, c.unknown ? '프로파일 해석 불가 VM 1대 — 할당 빈 칸(0 아님)' : '모든 프로파일 가능', '−'));
+            if (c.unknown) R.push(mkRow(no++, 5, 'render-' + c.id.slice(3, 5) + '-01', 'VM', 'grid_a40-custom', null, null, null, null, null, '켜짐', 16, 71, 64, 80, '프로파일 해석 불가 — 빈 칸(0 아님)', ''));
+          }
+          if (c.offGB) {
+            R.push(mkRow(no++, 4, '꺼진 VM', '꺼짐', '', null, null, null, null, c.offGB, '0 / ' + c.vmsOff, null, null, null, null, 'GPU 에 올라가 있지 않음 — 할당에서 제외', '−'));
+            R.push(mkRow(no++, 5, 'cad-' + c.id.slice(3, 5) + '-09', 'VM', 'grid_a40-24q', null, null, null, null, 24, '꺼짐', 8, null, 32, null, '켜면 24 GB 필요', ''));
+          }
+        } else {
+          R.push(mkRow(no++, 4, 'GPU #0 · NVIDIA A40', 'vGPU', 'grid_a40-24q · 1/2 슬롯', 48, 24, 24, 50, null, '1 / 0', null, null, null, null, '같은 프로파일 1 슬롯 예비', '+'));
+        }
+      }
+      return R;
+    };
+    const rows = isCorp ? corpRows(corp) : [];
+
+    const treeRows = corps.filter((c) => c.sheet).map((c, i) => mkRow(6 + i, 0, c.name + '  (' + c.loc + ')', '법인', 'GPU ' + c.gpus + '장 · 호스트 ' + c.hosts + '대', c.cap, c.alloc, spareOf(c), pctOf(c), c.offGB || null, c.vmsOn + ' / ' + c.vmsOff, c.hosts * 32, 41, c.hosts * 512, 57, c.unknown ? '할당 모르는 VM 1대' : pctOf(c) >= 90 ? '포화(90% 이상)' : '', '+'));
+
+    const TCOLS = '36px 270px 200px 70px 70px 84px 84px 84px 120px 300px';
+    const tocBase = 'display: grid; grid-template-columns: ' + TCOLS + '; border-bottom: 1px solid #e5e7eb; font-size: 12px;';
+    const tocTitle = tocBase + ' grid-template-columns: 36px 1fr; height: 44px;';
+    const tocSub = tocBase + ' grid-template-columns: 36px 1fr; height: 24px;';
+    const tocHead = tocBase + ' height: 32px; background: #1e3a8a; color: #ffffff; font-weight: 600;';
+    const tocHeads = ['법인(vCenter)', '위치', '호스트', 'GPU', '전체(GB)', '할당(GB)', '예비(GB)', '할당률', '시트'].map((label, i) => ({ label, style: 'padding: 0 10px; display: flex; align-items: center; border-right: 1px solid #2d4a9e; ' + (i >= 2 && i <= 6 ? 'justify-content: flex-end;' : '') }));
+    const tocRows = corps.map((c, i) => {
+      const cell = 'padding: 0 10px; border-right: 1px solid #e5e7eb; display: flex; align-items: center; white-space: nowrap;';
+      const num = cell + ' justify-content: flex-end; font-variant-numeric: tabular-nums;';
+      const p = pctOf(c);
+      const has = !!c.sheet;
+      return {
+        no: 4 + i, name: c.name, loc: c.loc, hasSheet: has, noSheet: !has,
+        hosts: fmt(c.hosts), gpus: fmt(c.gpus), cap: fmt(c.cap), alloc: fmt(c.alloc), spare: fmt(spareOf(c)), pct: p == null ? (has ? '' : '') : p + '%',
+        sheet: has ? (c.cut ? c.sheet + '  (31자로 줄임)' : c.sheet) : '— GPU 호스트 없음(시트 없음)',
+        go: () => this.setState({ tab: 'corp:' + c.id }),
+        style: tocBase + ' min-height: 26px; background: ' + (has ? (i % 2 ? '#f8fafc' : '#ffffff') : '#f3f4f6') + '; color: ' + (has ? '#111827' : '#6b7280') + ';',
+        cellStyle: cell, numStyle: num,
+        sheetStyle: cell + ' font-family: \'JetBrains Mono\', monospace; font-size: 11px; color: ' + (has ? (c.cut ? '#b45309' : '#374151') : '#6b7280') + ';',
+        bar: 'position: absolute; left: 4px; top: 6px; bottom: 6px; width: ' + (p == null ? 0 : Math.round(Math.min(100, p) * 0.9)) + '%; background: ' + (p != null && p >= 90 ? '#fcd34d' : '#bfdbfe') + '; border-radius: 2px;',
+        pctStyle: 'position: relative; margin-left: auto; padding-right: 10px; font-variant-numeric: tabular-nums;',
+      };
+    });
+
+    const fixed = [{ key: 'tree', label: '계층 표', color: '#1e3a8a' }, { key: 'flat', label: '평면 표', color: '#1e3a8a' }, { key: 'info', label: '안내', color: '#1e3a8a' }, { key: 'toc', label: '목차', color: '#64748b' }];
+    const corpTabs = corps.filter((c) => c.sheet).map((c) => ({ key: 'corp:' + c.id, label: c.sheet, color: pctOf(c) >= 90 ? '#f59e0b' : '#3b82f6' }));
+    const tabs = fixed.concat(corpTabs).map((t) => {
+      const on = t.key === tab;
+      return { label: t.label, on, pick: () => this.setState({ tab: t.key }),
+        style: 'border: 0; border-right: 1px solid #d1d5db; border-bottom: 3px solid ' + t.color + '; padding: 0 12px; background: ' + (on ? '#ffffff' : '#e5e7eb') + '; color: ' + (on ? '#111827' : '#374151') + '; font-size: 12px; font-weight: ' + (on ? 700 : 500) + '; cursor: pointer; white-space: nowrap; height: 34px;' };
+    });
+    const sheetTitle = isCorp ? '시트 ‘' + corp.sheet + '’' : isToc ? '시트 ‘목차’' : isTree ? '시트 ‘계층 표’' : tab === 'flat' ? '시트 ‘평면 표’' : '시트 ‘안내’';
+    const sheetSub = isCorp ? '— 법인 하나 · 머리글 고정 · 행 그룹 · A1 에 목차로 가는 링크' : isToc ? '— 법인별 합계와 시트 링크 · 모든 법인(GPU 없는 곳 포함)' : isTree ? '— 전체 법인 한 시트(지금과 같음)' : '— 바뀌지 않음';
+    return {
+      fileName: 'gpu-allocation_all_20261103-1930_percorp.xlsx',
+      isCorp, isToc, isTree, isOther, otherText, corp, goToc: () => this.setState({ tab: 'toc' }),
+      gridTitle, gridSub, gridKpi, gridBlank, headStyle, heads, outlineBtns, kpis, rows, treeRows,
+      tocTitle, tocSub, tocHead, tocHeads, tocRows, tabs, sheetTitle, sheetSub,
+    };
+  }
+}
+</script>
+</body>
+</html>
