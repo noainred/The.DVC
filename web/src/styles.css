@@ -340,6 +340,10 @@ body {
   .statusbar .sb-cell { flex: 1 1 50%; padding: 4px 8px; gap: 6px; border-bottom: 1px solid var(--border-soft); }
   .statusbar .sb-label, .statusbar .sb-val { white-space: nowrap; }
 }
+/* v2.867 아래 고정 줄(Bareos 복원 › 폴더 표의 '선택 · 다음')은 하단 상태바(fixed) 위에 붙인다 — bottom: 8 이면 상태바가 버튼을 가렸다(Chromium 판독).
+   상태바는 720px 이하에서 두 줄로 접혀 실측 52px(넓은 폭 32px) — 좁은 폭은 --statusbar-h 두 줄 몫으로 띄운다. */
+.pickbar-sticky { position: sticky; bottom: calc(var(--statusbar-h, 34px) + 8px); z-index: 2; }
+@media (max-width: 720px) { .pickbar-sticky { bottom: calc(var(--statusbar-h, 34px) * 2 + 8px); } }
 .grid { display: grid; gap: 16px; }
 .section-title { font-size: 13px; letter-spacing: 1px; color: var(--text-faint); margin: 26px 0 12px; font-weight: 700; }
 
