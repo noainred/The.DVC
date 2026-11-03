@@ -287,7 +287,7 @@ export function rebindJobs(list, { restart = true } = {}) {
     //   이제 부르는 쪽(manage/service.js catalogGeneration)이 카탈로그 세대가 바뀌었거나 판정하지 못했을 때만 restart 를 준다. 비울 때도 **진행 중 복원은 남긴다**.
     if (restart) {
       j.beforeRebind = { at: Date.now(), lastRun: j.lastRun ? { jobid: j.lastRun.jobid ?? null, status: j.lastRun.status ?? '', endedAt: j.lastRun.endedAt ?? null } : null, restores: Array.isArray(j.restores) ? j.restores.length : 0 };
-      Object.assign(j, { lastRun: null, finishedRuns: [], lastRate: null, restores: (Array.isArray(j.restores) ? j.restores : []).filter(restoreOpen), runsEpoch: Date.now() });
+      Object.assign(j, { lastRun: null, finishedRuns: [], lastRate: null, restores: (Array.isArray(j.restores) ? j.restores : []).filter((r) => restoreOpen(r) || restoreFinishing(r) || restoreUnknownHeld(r)), runsEpoch: Date.now() });   // v2.872 B2-04 마무리 중도 남긴다
     }
     const dir = j.directorId || DEFAULT_DIRECTOR_ID;
     if (db.retired?.some((r) => r.name === j.bareosJob && retiredDir(r) === dir)) db.retired = db.retired.filter((r) => !(r.name === j.bareosJob && retiredDir(r) === dir));
@@ -394,7 +394,9 @@ export function addRestore(id, rec) {
   const db = load();
   const j = db.jobs.find((x) => x.id === id);
   if (!j) return null;
-  j.restores = [{ ...rec, status: 'C', state: 'queued', at: Date.now() }, ...(Array.isArray(j.restores) ? j.restores : [])].slice(0, RESTORES_KEEP);
+  // v2.872(점검 B5-01): 결과 모름(명령을 보낸 뒤 회신이 끊김 — jobid 없음)도 남긴다 — 같은 복원을 다시 보내 두 번 돌지 않게(restoreHeld · 새 VM 이름 예약)
+  const st = rec?.unknown === true ? { jobid: null, status: '', state: 'unknown' } : { status: 'C', state: 'queued' };
+  j.restores = [{ ...rec, ...st, at: Date.now() }, ...(Array.isArray(j.restores) ? j.restores : [])].slice(0, RESTORES_KEEP);
   persist();
   return copy(j);
 }
@@ -405,6 +407,8 @@ export function applyRestoreRow(id, row, now = Date.now()) {
   const j = db.jobs.find((x) => x.id === id);
   const r = j?.restores?.find((x) => x.jobid === row?.jobid);
   if (!r) return null;
+  // v2.872(점검 B2-03 — 재현): 끝난 상태(T)를 늦게 온 옛 행(R — 다른 경로의 조회 결과)이 되돌려 열린 복원으로 만들었다 — 끝난 뒤의 끝나지 않은 행은 받지 않는다
+  if (isFinalStatus(r.status) && !isFinalStatus(row?.status)) return null;
   const changed = r.status !== row.status || (r.endedAt ?? null) !== (row.endedAt ?? null) || !!r.misses;
   Object.assign(r, { status: row.status, state: statusOf(row.status), startedAt: row.startedAt ?? r.startedAt ?? null, endedAt: row.endedAt ?? null, checkedAt: now, misses: 0 });
   if (changed) persist();
@@ -449,6 +453,19 @@ export function patchRestoreFinish(jobId, rid, finish, guard = null) {
 
 /** 아직 끝나지 않은(추적 중인) 복원인가 — 진행 중 409·복원 지점 화면·삭제 거부가 같은 판정을 쓴다. */
 export const restoreOpen = (r) => !!r?.jobid && !isFinalStatus(r.status) && !r.abandoned;
+/** v2.872(점검 B5-01) 결과 모름 복원을 붙잡아 두는 시간 — Director 에서 확인할 시간. 웹 bareosRestoreText.RESTORE_UNKNOWN_HOLD_MS 와 같다(시험 대조). */
+export const RESTORE_UNKNOWN_HOLD_MS = 6 * 3600_000;
+/** 결과 모름 복원(jobid 없음)이 아직 붙잡는 중인가. */
+export const restoreUnknownHeld = (r, now = Date.now()) => r?.unknown === true && !r.jobid && now - (Number(r.at) || 0) < RESTORE_UNKNOWN_HOLD_MS;
+/** 이 대상에 새 복원을 보내면 안 되는가 — 진행 중이거나, 직전 복원의 결과를 모른다(두 번 돌 수 있다). */
+export const restoreHeld = (r, now = Date.now()) => restoreOpen(r) || restoreUnknownHeld(r, now);
+/**
+ * v2.872(점검 B2-04 — 재현): 복원은 끝났지만 마무리(NIC 끊기 · 검증)가 아직인 복원 — restoresToFinish 와 같은 조건. 재설치 다시 묶기 · 삭제가
+ *   restoreOpen 만 봐 이 행을 지웠다 → 마무리 결과를 쓸 곳이 없어 새 VM 이 연결된 채 '끊기 대기' 로 사라졌다.
+ */
+export const RESTORE_FINISH_HOLD_MS = 24 * 3600_000;   // 마무리가 이만큼 넘게 걸려 있으면 붙잡지 않는다(마무리를 다시 부를 폴러 갱신이 없을 때 삭제가 영영 막히지 않게)
+export const restoreFinishing = (r, now = Date.now()) => r?.nic === 'disconnect' && !!r.jobid && (isFinalStatus(r.status) || !!r.abandoned) && (!r.finish || r.finish.nic === 'pending')
+  && now - (Number(r.finish?.at || r.endedAt || r.at) || 0) < RESTORE_FINISH_HOLD_MS;
 
 /** 아직 끝나지 않은 실행(백업·복원) — 폴러가 이것만 조회한다. */
 export function pendingWork(now = Date.now()) {

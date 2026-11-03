@@ -81,7 +81,7 @@ onOpFinish('bareos-verify', (op) => {
   const ok = !!op.result?.ok;
   patchRestoreFinish(String(bareosJobId), Number(rid), {
     nic: ok ? 'ok' : 'failed', verify: ok ? 'ok' : 'failed', detail: String(op.result?.detail || '').slice(0, 400), at: op.doneAt || Date.now(), opId: op.id,
-    ...(Number.isFinite(op.result?.toolsMs) ? { toolsMs: op.result.toolsMs } : {}), ...(op.result?.deleted === true ? { deleted: true } : {}), ...(op.result?.late ? { late: true } : {}),
+    ...(Number.isFinite(op.result?.toolsMs) ? { toolsMs: op.result.toolsMs } : {}), ...(typeof op.result?.deleted === 'boolean' ? { deleted: op.result.deleted } : {}), ...(op.result?.late ? { late: true } : {}),   // v2.872 B3-01 남김(false)도 — 없으면 화면이 '모름'
   }, sameOp(op));
 });
 

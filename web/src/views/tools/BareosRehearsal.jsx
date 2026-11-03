@@ -13,12 +13,12 @@ import Select from '../../components/Select.jsx';
 import { Note, ReadGuide } from './BareosBits.jsx';
 import { requireChanged } from '../changeResult.js';   // putJson 은 400 · 409 를 던지지 않고 본문을 돌려준다 — 실패를 '저장됨' 으로 보이지 않게
 import { whenText } from './bareosText.js';
-import { WEEKDAYS, rehearsalPolicyText, rehearsalDsOptions, toolsText, verifyText, verifyTone, digestStatusText } from './bareosRestoreText.js';
+import { WEEKDAYS, rehearsalPolicyText, rehearsalDsOptions, toolsText, verifyText, verifyTone, digestStatusText, rehearsalLastRuns, rehearsalRunText, rehearsalRunTone, cleanupText } from './bareosRestoreText.js';
 
 const BASE = '/tools/bareos-backup';
 const ROW = { display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' };
 const FIELD = { display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12, minWidth: 0 };
-const TONE_COLOR = { ok: '#86efac', bad: '#fca5a5', info: 'var(--text-dim)' };
+const TONE_COLOR = { ok: '#86efac', bad: '#fca5a5', warn: '#fcd34d', info: 'var(--text-dim)' };
 
 export default function BareosRehearsal({ directors = [] }) {
   const [d, setD] = useState(null);
@@ -71,6 +71,7 @@ export default function BareosRehearsal({ directors = [] }) {
   if (!d) return <div className="card" style={{ padding: 12 }}><Loading /></div>;
   const p = d.policy || {};
   const dirName = (id) => directors.find((x) => x.id === id)?.name || id || '—';
+  const lastRuns = rehearsalLastRuns(d.runs, directors);
 
   return (
     <div className="card" data-bareos-rehearsal="" style={{ padding: 12, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -140,6 +141,28 @@ export default function BareosRehearsal({ directors = [] }) {
           <button type="button" className="tab" style={{ padding: '5px 12px', fontSize: 12 }} disabled={busy || !runDir || !/^\d{6}$/.test(otp)} onClick={runNow}>{busy ? '보내는 중…' : `지금 검증 · 법인마다 ${unitText(p.perCorp, '대')}`}</button>
         </div>
       )}
+      {/* v2.872(점검 B4-02): 법인별 마지막 회차 — 0대로 끝난 정기 검증도 사유와 함께 보인다(예전에는 회차 기록을 그리지 않았다) */}
+      {lastRuns.length > 0 && (
+        <details data-rehearsal-runs="" style={{ minWidth: 0 }} open={lastRuns.some((x) => rehearsalRunTone(x.run) !== 'ok')}>
+          <summary className="muted" style={{ fontSize: 12, cursor: 'pointer' }}>법인별 마지막 회차 · {lastRuns.length}곳{lastRuns.some((x) => rehearsalRunTone(x.run) === 'bad') ? ' · 시작 0대 있음' : ''}</summary>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 6, minWidth: 0 }}>
+            {lastRuns.map(({ directorId, run, older }) => {
+              const miss = (run.items || []).filter((x) => x && !x.ok);
+              return (
+                <div key={directorId} style={{ fontSize: 12, minWidth: 0, borderLeft: `3px solid ${TONE_COLOR[rehearsalRunTone(run)]}`, paddingLeft: 8 }}>
+                  <div style={{ overflowWrap: 'anywhere' }}><b>{dirName(directorId)}</b> <span className="muted">{rehearsalRunText(run)}{older ? ` · 이전 기록 ${older}건` : ''}</span></div>
+                  {miss.length > 0 && (
+                    <ul style={{ margin: '2px 0 0', paddingLeft: 18, color: 'var(--text-dim)' }}>
+                      {miss.slice(0, 10).map((x, i) => <li key={`${x.jobId}-${i}`} style={{ overflowWrap: 'anywhere' }}>{x.vmName || x.jobId} — {String(x.reason || '사유 미상').slice(0, 200)}</li>)}
+                      {miss.length > 10 && <li>외 {miss.length - 10}대</li>}
+                    </ul>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </details>
+      )}
       {/* v2.863: 결과가 없으면 표 대신 문구만 — 760px 표 가운데 칸에 두면 좁은 화면(400px)에서 가로 스크롤 밖으로 잘렸다(Chromium 판독) */}
       {!d.results.length && <div className="muted" style={{ fontSize: 12.5, padding: '10px 4px' }}>아직 검증 결과가 없습니다.</div>}
       {d.results.length > 0 && <div className="table-wrap" style={{ maxHeight: '40vh' }}>
@@ -153,7 +176,7 @@ export default function BareosRehearsal({ directors = [] }) {
                 <td data-sort={x.at ?? ''}>{whenText(x.at)}</td>
                 <td style={{ fontSize: 12, whiteSpace: 'normal', maxWidth: 320, color: TONE_COLOR[verifyTone(x)] }} title={x.finish?.detail || undefined}>{verifyText(x)}{x.finish?.detail && x.finish?.verify !== 'ok' ? <div className="muted" style={{ fontSize: 11 }}>{String(x.finish.detail).slice(0, 160)}</div> : null}</td>
                 <td data-sort={x.finish?.toolsMs ?? ''}>{toolsText(x.finish?.toolsMs)}</td>
-                <td style={{ fontSize: 12 }}>{x.finish?.deleted ? '지움' : x.finish?.verify ? '남김' : '—'}</td>
+                <td style={{ fontSize: 12, whiteSpace: 'normal', maxWidth: 220 }}>{cleanupText(x.finish)}</td>
               </tr>
             ))}
           </tbody>

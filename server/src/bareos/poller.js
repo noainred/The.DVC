@@ -132,15 +132,17 @@ function applyPoll({ d, base, rot, slice, mine, retired, live, due, seq, reconci
   _rot.set(d.id, rot + (r.attempted ?? r.rows.length));
   if (r.redisabled?.length && relayed(d, demo)) compensateRedisabled(d, r.redisabled, { dirOfJob, modeOk });
   let updated = 0;
-  const byJobid = new Map(slice.map((w) => [w.jobid, w]));
+  // v2.872(점검 B2-06): 같은 jobid 를 기다리는 항목이 둘이면(재설치 뒤 옛 복원과 새 실행이 겹침) Map 이 하나를 접어 다른 쪽이 갱신되지 않았다 — 목록으로
+  const byJobid = new Map();
+  for (const w of slice) { const a = byJobid.get(w.jobid); if (a) a.push(w); else byJobid.set(w.jobid, [w]); }
   inBatch(() => {   // 원장 쓰기는 이 묶음 끝에 한 번(P2·I4)
     for (const { jobid, row } of r.rows) {
-      const w = byJobid.get(jobid);
-      if (!w) continue;
-      // 카탈로그에 없거나(재시작·다른 Director) 이름이 다른 행은 이 실행이 아니다 — 연속이면 추적을 멈춘다(P5)
-      //   복원은 복원 잡(type R)이어야 한다(W15 — jobid 재사용으로 남의 백업 행을 반영하지 않게)
-      if (!row || (w.kind === 'backup' && row.name && w.job && row.name !== w.job) || (w.kind === 'restore' && row.type && row.type !== 'R')) { notePendingMiss(w.id, w.kind, w.jobid); continue; }
-      if (w.kind === 'backup' ? applyRunRow(w.id, row) : applyRestoreRow(w.id, row)) updated += 1;
+      for (const w of byJobid.get(jobid) || []) {
+        // 카탈로그에 없거나(재시작·다른 Director) 이름이 다른 행은 이 실행이 아니다 — 연속이면 추적을 멈춘다(P5)
+        //   복원은 복원 잡(type R)이어야 한다(W15 — jobid 재사용으로 남의 백업 행을 반영하지 않게)
+        if (!row || (w.kind === 'backup' && row.name && w.job && row.name !== w.job) || (w.kind === 'restore' && row.type && row.type !== 'R')) { notePendingMiss(w.id, w.kind, w.jobid); continue; }
+        if (w.kind === 'backup' ? applyRunRow(w.id, row) : applyRestoreRow(w.id, row)) updated += 1;
+      }
     }
     if (r.reconciled) {
       const states = new Map(r.states || []);

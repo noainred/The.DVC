@@ -328,6 +328,32 @@ test('엣지 워커 왕복 — 가짜 중앙에서 정의·작업을 받아 로�
   assert.ok(store.getJob('cj-w'), '담당 미확정(빈 vcenters)으로는 지우지 않는다');
 });
 
+test('v2.872 B3-01 엣지 워커 — Bareos 복원 검증 회신에 Tools 시간 · 지움 여부를 싣고, 중앙 정제 · 마무리가 남김(false)도 지킨다', async () => {
+  const { syncVmCloneNow } = await import('../src/agent/vmCloneWorker.js');
+  central.syncBody = { ok: true, vcenters: ['vc-site'], jobs: [], ops: [
+    { id: 'vco-bv1', kind: 'bareos-verify', vcenterId: 'vc-site', spec: { name: 'web-01-verify-20261104', deleteOnOk: true } },
+    { id: 'vco-bv2', kind: 'bareos-verify', vcenterId: 'vc-site', spec: { name: 'app-02-verify-20261104', deleteOnOk: false } },
+  ] };
+  const r = await syncVmCloneNow();
+  assert.equal(r.ok, true, JSON.stringify(r));
+  const ackOf = (id) => central.reports.flatMap((b) => b.acks || []).find((a) => a.id === id);
+  for (let i = 0; i < 80 && !(ackOf('vco-bv1') && ackOf('vco-bv2')); i++) await new Promise((res) => setTimeout(res, 100));
+  for (const id of ['vco-bv1', 'vco-bv2']) {
+    const a = ackOf(id);
+    assert.ok(a, `${id} 회신`);
+    assert.equal(typeof a.deleted, 'boolean', '지움 여부(남김 = false)를 싣는다 — 예전 회신에는 없어 화면이 늘 남김이었다');
+    if (a.ok) assert.ok(Number.isFinite(a.toolsMs) && a.toolsMs > 0, 'Tools 응답 시간');
+  }
+  const a2 = ackOf('vco-bv2');
+  if (a2.ok) assert.equal(a2.deleted, false, 'deleteOnOk:false 면 남김');
+  // 중앙 정제 · 마무리가 false 를 지운 '모름' 으로 바꾸지 않는다
+  const clean = dispatch.sanitizeReport({ proto: 1, acks: [{ id: 'x1', ok: true, detail: 'd', ms: 1, toolsMs: 31000, deleted: false }, { id: 'x2', ok: true, detail: 'd', ms: 1, deleted: 'yes' }] });
+  assert.deepEqual(clean.acks.map((x) => [x.id, x.deleted, x.toolsMs]), [['x1', false, 31000], ['x2', undefined, undefined]], '불리언만 · 글자는 버린다');
+  const op = { id: 'o-z', kind: 'none', state: 'running' };
+  dispatch.finishOp(op, { ok: true, detail: 'x', toolsMs: 5000, deleted: false });
+  assert.deepEqual([op.result.deleted, op.result.toolsMs], [false, 5000]);
+});
+
 // ── v2.793 반증 검토(F1~F6) 회귀 ─────────────────────────────────────────────
 test('F1 — 점검중·꺼진 위임 vCenter 도 위임이다(중앙 스케줄러가 넣지 않는다)', async () => {
   const src = fs.readFileSync(new URL('../src/vmclone/scheduler.js', import.meta.url), 'utf8');

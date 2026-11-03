@@ -13,7 +13,7 @@
  *   BAREOS_PASSWORD='…' node server/src/tools/bareos-probe.js --host … --name portal --chain <jobid>
  *   BAREOS_PASSWORD='…' node server/src/tools/bareos-probe.js --host … --name portal --cmd '.jobs'
  *   v2.863 — 복원 · 검증 전에 실환경에서 먼저 볼 것(둘 다 읽기 전용 — 복원 명령을 보내지 않고 VM 을 바꾸지 않는다):
- *   BAREOS_PASSWORD='…' node server/src/tools/bareos-probe.js --host … --name portal --restore-plan <jobid> [--vm-name 새이름] [--datastore DS]
+ *   BAREOS_PASSWORD='…' node server/src/tools/bareos-probe.js --host … --name portal --restore-plan <jobid> --vcserver <주소> --config-file <INI> --dc <DC> --folder <폴더> [--vm-name 새이름] [--datastore DS]
  *   VCENTER_PASSWORD='…' node server/src/tools/bareos-probe.js --vcenter vc.corp --vc-user portal@vsphere.local --vm <VM 이름>
  *
  * 옵션:
@@ -51,7 +51,7 @@ Bareos Director 연결 점검
 
   BAREOS_PASSWORD='콘솔 비밀번호' node server/src/tools/bareos-probe.js --host <주소> --name <콘솔 이름> [--port 9101]
       [--catalog] [--history <잡 이름>] [--chain <jobid>] [--cmd '<명령>'] [--tls12] [--insecure-plain] [--timeout 초]
-      [--restore-plan <jobid> [--vm-name 새이름] [--datastore DS] [--restore-job 이름] [--plugin python3]]
+      [--restore-plan <jobid> --vcserver 주소 --config-file INI --dc DC --folder 폴더 [--vm-name 새이름] [--datastore DS] [--restore-job 이름] [--plugin python3]]
 
   NIC 끊기 사전 점검(포탈의 vCenter 계정 — 읽기 전용):
   VCENTER_PASSWORD='비밀번호' node server/src/tools/bareos-probe.js --vcenter <주소> --vc-user <계정> --vm <VM 이름>
@@ -137,7 +137,8 @@ async function restorePlanCheck(s) {
   const row = await jobStatus(s, id);
   const runs = row?.name ? await jobRuns(s, row.name) : [];
   const restoreJob = val('--restore-job') || 'PortalVmwareRestore';
-  const pv = restorePreview({ row, runs, jobid: id, restoreJob, pluginName: val('--plugin') || 'python3', newName: val('--vm-name') || '', datastore: val('--datastore') || '' });
+  const pv = restorePreview({ row, runs, jobid: id, restoreJob, pluginName: val('--plugin') || 'python3', newName: val('--vm-name') || '', datastore: val('--datastore') || '',
+    base: { vcserver: val('--vcserver') || '', configFile: val('--config-file') || '', dc: val('--dc') || '', folder: val('--folder') || '' } });   // v2.872 B1-04 포탈과 같은 기본 키
   if (!pv.ok) { console.log(`  ✖ ${pv.issue}`); return; }
   console.log(`  ✔ 잡 ‘${pv.name}’ · FD ‘${pv.client}’ · 체인 ${pv.chain.length}개: ${pv.chain.join(', ')}`);
   console.log(`  ✔ 플러그인 옵션: ${pv.pluginOptions}`);

@@ -378,13 +378,30 @@ export async function reconfigVm(c, vmRef, specInnerXml, { label = 'VM 재구성
  * (원본이 살아 있는 망에 같은 IP·호스트명·AD 컴퓨터 계정으로 붙는 사고를 막는 유일한 문이다).
  * @returns {Promise<number>} 끊은 NIC 수
  */
+/**
+ * v2.872(점검 B3-04 — 재현): 장치 목록을 믿을 수 있는가(순수). 빈 장치 XML 이면 allNicsDisconnected 가 true(NIC 0개)라 재구성 없이 켰다(fail-open) ·
+ *   모르는 NIC 종류(NIC_TYPE_RE 밖인데 macAddress 가 있는 장치)는 끊었는지 판정할 수 없다. 사유('' = 믿을 수 있음).
+ */
+export function deviceListIssue(deviceXml) {
+  const x = String(deviceXml || '');
+  if (!/<VirtualDevice(?=[ >])/.test(x)) return '장치 목록을 읽지 못했습니다';
+  const unknown = [];
+  for (const piece of x.split(/<VirtualDevice(?=[ >])/).slice(1)) {
+    const type = /^[^>]*xsi:type="([^"]+)"/.exec(piece)?.[1] || '';
+    if (!NIC_TYPE_RE.test(type) && piece.slice(0, piece.indexOf('</VirtualDevice>') >>> 0).includes('<macAddress>')) unknown.push(type || '?');
+  }
+  return unknown.length ? `모르는 네트워크 카드 종류(${[...new Set(unknown)].slice(0, 3).join(' · ').slice(0, 120)})라 끊었는지 확인할 수 없습니다` : '';
+}
+
 export async function disconnectAllNics(c, vmRef) {
   const st = await vmStateOf(c, vmRef);
+  const bad = deviceListIssue(st.deviceXml);
+  if (bad) throw new Error(`${bad} — 안전을 위해 이 VM 을 켜지 않습니다`);
   const { specXml, count } = nicDisconnectSpec(st.deviceXml);
   // v2.794: 이미 끊겨 태어난 VM(복구 — cloneFromSnapshot configXml)은 다시 재구성하지 않는다. 확인(다시 읽기)은 그대로 한다.
   if (count && !allNicsDisconnected(st.deviceXml)) await reconfigVm(c, vmRef, specXml, { label: '네트워크 카드 연결 끊기' });
   const after = await vmStateOf(c, vmRef);
-  if (!allNicsDisconnected(after.deviceXml)) throw new Error('네트워크 카드 연결을 끊었는지 확인하지 못했습니다 — 안전을 위해 이 VM 을 켜지 않습니다');
+  if (deviceListIssue(after.deviceXml) || !allNicsDisconnected(after.deviceXml)) throw new Error('네트워크 카드 연결을 끊었는지 확인하지 못했습니다 — 안전을 위해 이 VM 을 켜지 않습니다');
   return count;
 }
 
