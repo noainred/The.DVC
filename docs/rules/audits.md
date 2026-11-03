@@ -2687,3 +2687,37 @@ server/src/bareos/CLAUDE.md 크기 상한(15,000B)으로 원문 그대로 옮겼
   ③ 같은 띠에 '멈추는 중' 배지와 '중단됨 …' 문구가 함께 보였다 → 기록 문구는 '중단 요청 …'. ④ 그룹 카드 · 머리 KPI 가 사람이 멈춘 실행을 '실패' 로 셌다(v2.828 판정 그대로) → `memberResults.cancel` 따로.
   남긴 것: 백업 대상 표 + 오른쪽 패널을 함께 열면 1440 에서 '정책' 칸이 좁아 글자가 잘게 끊긴다 — 취소 칩이 없는 화면에서도 같아 이번 변경 전부터의 배치로 판단(A/B 미실행 · 별건 후보).
   통합 · 법인별 현황(vmView.bareosClass)은 지금도 canceled 를 실패로 센다(판정 코어 — 바꾸면 웹 bareosViewText 와 함께 · 별건 후보).
+  ✅ **v2.869 에 둘 다 고쳤다**(아래 v2.869 절). ⚠ 정정: '정책 칸이 좁은 것은 이번 변경 전부터' 는 일부 틀렸다 — v2.867 이 VM 칸에 넣은 '멈추는 중' 칩도 그 칸을 넓혀 정책 칸을 눌렀다(A/B 를 돌리지 않고 판단한 탓).
+
+## v2.869 프로그램 개선 · 전체 점검(최근 2주 — v2.847 f70088c 기준 · 5축 + 반증 1인 — 2026-11-03)
+
+사용자 선택(AskUserQuestion): 현황 화면 '취소' 분리 · 복원 작업 취소(시안 먼저 — Fable) · 백업 대상 표 배치 · 전체 점검(다중 에이전트) · 검증 표준 · 범위 최근 2주.
+5축(A1 화면 · 표시 / A2 데이터 · 상태 / A3 보안 · 범위 / A4 '모름' · 수치 / A5 성능 · 캐시 · 시한) 39건 → 반증 1인이 코드를 다시 읽고 node 로 재현.
+high 0 · 반증 1(A3-01 — 경로 오독, 데모 계정은 READ_DENY 하위라 403 · 재현) · 등급 조정 다수(A1-01 · A4-02 · A5-01 내림, A2-02 올림 — 폴더 표 거짓 '검증 성공' 을 새로 찾음).
+
+- **현황 화면 취소 분리**: `vmView.bareosClass`(서버) · `bareosViewText.bareosClass`(웹)가 `fail = error` · `cancel = canceled` 로 나눈다(한 쌍 — 같은 입력 대조) · `corpCounts` · `sumCounts` 에 cancel(모르면 null) ·
+  `priorityKind` 는 멈춘 실행을 '실패 우선 확인' 에 넣지 않는다(백업이 비면 old · never 가 잡는다) · 막대 회색 칸 · 필터 '실패 · 경고 · 취소'. 시험 `bareosCancelSplit2869`.
+- **A2-02(medium) 복원 검증 판정 하나 `verifyOutcome`**(서버 `digest.js` · 웹 `bareosRestoreText.js` — `bareosVerifyOutcome2869` 가 10가지 입력으로 대조): failed = verify 'failed' · nic 'failed'(추적 놓침 · 재시도 소진 ·
+  보내지 못함 · 이름 모름) · nic 'skipped' · state error · canceled · abandoned. 폴더 표는 켜 보는 중을 '검증 중'(info)으로. ⚠ 실패 경로에 `verify:'failed'` 를 써 넣지 말 것 — 리허설 표 '남김' 칸이 그 유무로 판정한다.
+- **A2-01(medium · 업그레이드 경로) 엣지 동기화 '효과 없는 성공'**: 성공이면 attempts 를 0 으로 돌려 settle(30분) 뒤 매번 다시 밀었다(재현 — 번들 전송 + 엣지 재시작 30~40분마다 영구).
+  이제 같은 대상 버전의 성공이 거듭되면 `noEffect` 를 세고 상태 'no-effect'(웹 표와 1:1) · settle × 2^n(상한 6시간 — `noEffectWaitMs`) · 상한에서 알림 1회(key `…:noeffect`, 실패 알림과 나눔) ·
+  엣지가 대상 버전을 보고하면 해소 1회(`#closeNoEffect`). 시험 `edgeSyncNoEffect2869`(48시간 모의 — push ≤ 14회) · 변이 5/5.
+- **A4-01 · A4-05 · A1-01 GPU 모름**: offUnknown 비고(웹 · 엑셀 같은 말) · KPI 모름 수 · 배치 모르는 GPU 의 VM 칸 '—' · 엑셀 프로파일 `gpuProfText`(웹 gpuTexts.prof 와 대조) ·
+  `hostDown` = DISCONNECTED · NOT_RESPONDING(store.usageReadable 과 같은 규칙 — 잠재: SOAP 는 접어 보내고 REST 호스트에는 GPU 가 없다). 시험 `gpuAllocUnknown2869`.
+- **A5-02 · A5-03 응답 캐시 세대**: memoJson 의 ETag = 키(스냅샷 세대 + extraKey)라 키에 없는 변화는 304 로 옛 화면이 남는다(재현). bareos-live 에 `liveGen()`(원장 · 그룹 · 폴러 · `liveRev` · `cancellingKey`) ·
+  restore-folders 에 원장 세대. `w=`(쓰기 범위)는 그대로. 시험 `bareosLive2833` 끝(같은 스냅샷에서 취소 표지 → 첫 ETag 재요청 200) · 변이 2/2.
+- **A3-03 `POST digest/send` 에 fullWriteOnly**(형제 PUT 과 같이) — 시험이 **거부 사유가 fullWriteOnly 의 것인지** 본다 · 변이 확인.
+- **A5-01 묶음 복원 · 복원 검증 전체 시한 `RESTORES_DEADLINE_MS`**(= 엣지 인출 + 회신 + 여유 — 엣지 경로를 먼저 끊지 않는다). ⚠ 행동 시험이 아니라 산수 + 소스 스윕이다
+  (지연하는 가짜 Director 가 없다 — 시한이 끊은 뒤 분류는 ops.restores 기존 코드). 변이 확인.
+- **A2-03 늦은 검증 회신**: `sameOp` 가 시한으로 닫힌(`reapOps`) **같은 작업**의 늦은 회신(`late`)을 받는다 · 재시도(다른 opId) 뒤 옛 회신 · 늦지 않은 두 번째 결과는 버린다. 시험 `bareosVerifyLate2869` · 변이 3/3.
+- **A1-04 · A1-05 회차 중단 표시**: 줄 대기 · 보내는 중에는 lastFire(이전 회차)의 중단 기록을 보지 않는다 · `cancelSummary.startUnknown`(시작 결과 모름 — jobid 가 없어 취소를 못 보낸 수 · 문구 '취소 못 함 — Director 에서 확인').
+  남긴 것: 직전 중단 없이 그룹 VM 하나를 단건 취소한 '실행 중' 회차는 `cancelPlan.sent` 가 회차 · 그 밖을 나누지 않아 구분하지 못한다(서버가 `sentFire` 를 따로 내야 정확 — 별건).
+- **저위험 묶음**: A4-02 엣지 동기화 한 줄(counts 없음 '엣지 판정 모름' · 마지막 오류 warn) · A1-02 픽바 CSS 이중 오프셋 제거(`--statusbar-h` 는 App 이 실측) · A4-03 폴더 표 vCenter 단위 모름 ·
+  A4-04 바로가기 점은 REST 폴백(경보 미조회)이면 흐림 · A2-05 진행 중 이슈 담당자 해제 400(일괄은 그 키만) · A2-06 `finishRestores` 던지지 않음(시험 없음 — try/catch 한 줄) · A4-06 요약 '실행 없음' 한정어.
+- **고치지 않음(사유)**: A1-06(설계 — 반증 F1 주석) · A1-07(admin 전용 응답 · 비밀 아님) · A1-08 · A1-09(피벗용 비정규화 · 같은 원천 반올림) · A2-04(시나리오 2 '주 1회' 설계 · 1 은 재시도 상한 설계 필요) ·
+  A2-07(문구가 모호함을 밝힘 — `verify:'unknown'` 은 다음 판정 정리 때) · A3-04 · A3-05(신뢰 모델 · 최고 권한) · A4-08~10 · A5-04~06(현재 규모 근거 없음) · A5-07(상한이 동시 push 방지와 충돌 — A2-01 뒤 재검토).
+- **사용자 판단으로 남긴 것**: A3-02 이슈 트래커에 범위 축이 없다 — 범위 계정도 모든 이슈를 읽고 고친다 · `/issues/meta` people 이 전 계정 이름(반증 권고: 최소한 전체 범위 작성자만).
+- **별건(다음 점검 첫 후보)**: A3-06 중앙 GPU 수신(`routes/central.js` `{ ...g }`)이 아는 키 화이트리스트 없이 나머지를 통과시킨다(엣지 계약 — 변이 검증 대상).
+- 작업 방식 교훈: ① v2.867 에서 웹 시험 2개만 돌려 CI 가 깨졌다 → 커밋 전 웹 vitest **전량**. ② 감사 보고서의 등급 · 주기는 반증이 자주 고친다(A2-01 '10분마다' → 30~40분 · 대신 재시작 동반) —
+  보고를 그대로 옮기지 말고 반증 문서로 정정해 적는다. ③ 시험 고정값이 틀려(GPU cpuUsagePct 누락) 코드 결함처럼 보인 적이 있다 — 실패하면 고정값부터 의심한다.
+
