@@ -93,7 +93,7 @@ export function groupByStatus(rows) {
  * 화면 필터(보드·목록 공용) — 서버가 준 목록을 다시 거른다. 값이 '' 이면 그 축은 거르지 않는다.
  *  assignee: '' 전체 · '__none' 미할당 · 그 밖은 그 사람 · mine=true 면 me 에게 할당된 것만.
  */
-export function filterRows(rows, { q = '', assignee = '', priority = '', type = '', status = '', mine = false, me = '' } = {}) {
+export function filterRows(rows, { q = '', assignee = '', priority = '', type = '', status = '', vcenterId = '', mine = false, me = '' } = {}) {
   const needle = String(q || '').trim().toLowerCase();
   return (Array.isArray(rows) ? rows : []).filter((r) => {
     if (!r) return false;
@@ -102,6 +102,7 @@ export function filterRows(rows, { q = '', assignee = '', priority = '', type = 
     if (priority && r.priority !== priority) return false;
     if (type && r.type !== type) return false;
     if (status && r.status !== status) return false;
+    if (vcenterId === '__none' ? !!r.vcenterId : (vcenterId && r.vcenterId !== vcenterId)) return false;
     if (needle && !`${r.key} ${r.title} ${r.assignee || ''} ${r.reporter || ''} ${(r.labels || []).join(' ')} ${r.component || ''}`.toLowerCase().includes(needle)) return false;
     return true;
   });
@@ -195,4 +196,31 @@ export function peopleOptions(people, current = '') {
 export function makeLatest() {
   let n = 0;
   return { next: () => ++n, isLatest: (k) => k === n, invalidate: () => { n += 1; } };
+}
+
+/** 법인(vCenter) 이름 — 메타의 선택지에서 찾고, 없으면 id 그대로(범위 밖·삭제된 vCenter). 빈 값은 '공용'. */
+export function vcName(meta, id) {
+  if (!id) return '공용';
+  return (meta?.vcenters || []).find((v) => v.id === id)?.name || id;
+}
+
+/** 새 이슈 창의 법인 선택지 — 쓰기 가능한 것만. 범위 계정은 공용을 고를 수 없다(서버가 400). */
+export function vcenterOptions(meta) {
+  const out = (meta?.vcenters || []).filter((v) => v.writable !== false).map((v) => ({ id: v.id, label: v.name }));
+  return meta?.scoped ? out : [{ id: '', label: '공용(법인 없음)' }, ...out];
+}
+
+/** 알림 발송 상태 한 줄 — 서버 issueNotifyStatus(). 값이 없으면 '아직 없음'. */
+export function notifyStatusText(st) {
+  if (!st || typeof st !== 'object') return '';
+  const parts = [];
+  parts.push(st.lastFlushAt ? `마지막 발송 ${timeText(st.lastFlushAt)}` : '아직 보낸 묶음이 없습니다');
+  parts.push(`메일 ${st.mails ?? 0}통`);
+  if (st.mailFail) parts.push(`실패 ${st.mailFail}`);
+  if (st.mailSkip) parts.push(`건너뜀 ${st.mailSkip}`);
+  if (st.noEmail) parts.push(`주소 없는 사람 ${st.noEmail}회`);
+  if (st.chat || st.chatFail) parts.push(`채팅 ${st.chat ?? 0}${st.chatFail ? ` · 실패 ${st.chatFail}` : ''}`);
+  if (st.dropped) parts.push(`묶음 상한으로 뺀 사람 ${st.dropped}`);
+  if (st.pendingRecipients) parts.push(`대기 ${st.pendingRecipients}명`);
+  return parts.join(' · ');
 }

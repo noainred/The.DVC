@@ -23,7 +23,6 @@ import { pageArgs } from '../../util/pageArgs.js';
 import { clientIp } from '../../util/rateLimit.js';
 import { scopedVcenterIds, writeScopedVcenterIds } from '../../auth/scope.js';
 import { store } from '../../store.js';
-import { config } from '../../config.js';
 import { fullScopeOnlyWith } from '../admin/shared.js';
 import {
   listIssues, getIssue, createIssue, updateIssue, setStatus, assignIssue, bulkAssign, setBlocked, setWatch, addComment, deleteComment, deleteIssue,
@@ -40,12 +39,11 @@ const userOf = (req) => req.user?.username || 'anonymous';
 /** 관리자(데모 계정 제외) — 판정은 auth/demoGuest.js isAdminDetailUser 하나(role 직접 비교 금지 — audit2744e 스윕). */
 const isAdmin = (req) => isAdminDetailUser(req.user);
 const canWrite = (req) => ['admin', 'operator'].includes(req.user?.role) && !isDemoGuest(req.user);
-/** 요청 등록 권한(v2.871) — 쓰기 역할이 아니어도 issues.request 가 있으면. 인증을 끈 설치는 대체 역할로 판정(requirePerm 과 같다). */
-const canRequest = (req) => {
-  if (isDemoGuest(req.user)) return false;
-  const who = !config.auth.enabled ? { role: req.user?.role || 'admin' } : req.user;
-  return !!who && userHasPermission(who, 'issues.request');
-};
+/**
+ * 요청 등록 권한(v2.871) — 쓰기 역할이 아니어도 issues.request 가 있으면. 인증을 끈 설치는 authMiddleware 가 req.user 를 대체 역할
+ * (AUTH_DISABLED_ROLE)로 채우므로 같은 판정이 그대로 맞는다 — 인증 여부로 따로 가르지 않는다(가르면 대체 역할 viewer 가 요청 전용 제한을 벗어난다).
+ */
+const canRequest = (req) => !!req.user && !isDemoGuest(req.user) && userHasPermission(req.user, 'issues.request');
 /** 관리자 권한(남의 댓글·이슈 삭제) — 관리자(데모 계정 제외) + 전체 범위(게시판 isBoardModerator 와 같은 판정). */
 const isMod = (req) => isAdmin(req) && !scopedVcenterIds(req.user, store.get());
 const SCOPED_MOD_NOTE = '범위 관리자는 이슈 관리 권한(다른 사람의 이슈·댓글 삭제)이 없습니다 — 전체 범위(vCenter 제한 없는) 관리자만 할 수 있습니다';
@@ -131,7 +129,7 @@ function people(req, access) {
 
 /** POST /issues 게이트 — 쓰기 역할 또는 요청 등록 권한. 판정 종류를 archScan 이 읽게 태그를 단다. */
 const creators = (req, res, next) => {
-  if (!config.auth.enabled || canWrite(req) || canRequest(req)) return next();
+  if (canWrite(req) || canRequest(req)) return next();
   return res.status(403).json({ error: 'forbidden', requiredRole: ['admin', 'operator'], requiredPerm: ['issues.request'] });
 };
 creators.gate = Object.freeze({ kind: 'perm', arg: Object.freeze(['issues.request']) });
@@ -200,7 +198,7 @@ export function registerIssues(api) {
 
   api.post('/issues', creators, async (req, res, next) => {
     try {
-      const requestOnly = config.auth.enabled && !canWrite(req);
+      const requestOnly = !canWrite(req);
       const body = req.body || {};
       const wantAuto = !str(body.assignee).trim() && loadIssueSettings().autoAssign.enabled;
       const auto = wantAuto ? suggestionFor({ component: str(body.component), vcenterId: str(body.vcenterId) }) : null;

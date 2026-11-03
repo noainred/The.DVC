@@ -2,7 +2,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   dueInfo, dateText, initialOf, colorIndexOf, groupByStatus, filterRows, myWork, loadPct, toDateInput, fromDateInput, parseLabels,
-  saveFailText, persistNote, historyText, peopleOptions, STATUS_ORDER, makeLatest,
+  saveFailText, persistNote, historyText, peopleOptions, STATUS_ORDER, makeLatest, vcName, vcenterOptions, notifyStatusText,
 } from './issueText.js';
 
 // 기준 시각은 실제 시각에서 정시 경계로 떨어뜨려 고정한다(docs/rules/common.md — Date.now 직접·고정 epoch 둘 다 깨진다).
@@ -123,5 +123,33 @@ describe('문구', () => {
     expect(l.isLatest(b)).toBe(true);
     l.invalidate();
     expect(l.isLatest(b)).toBe(false);
+  });
+});
+
+describe('v2.871 법인 축 · 알림 상태', () => {
+  const meta = { vcenters: [{ id: 'vc-a', name: '서울', writable: true }, { id: 'vc-b', name: '바르샤바', writable: false }] };
+  it('vcName — 빈 값은 공용 · 모르는 id 는 그대로', () => {
+    expect(vcName(meta, '')).toBe('공용');
+    expect(vcName(meta, 'vc-a')).toBe('서울');
+    expect(vcName(meta, 'vc-zz')).toBe('vc-zz');
+  });
+  it('vcenterOptions — 쓰기 가능한 법인만 · 범위 계정은 공용 선택지가 없다', () => {
+    expect(vcenterOptions(meta).map((o) => o.id)).toEqual(['', 'vc-a']);
+    expect(vcenterOptions({ ...meta, scoped: true }).map((o) => o.id)).toEqual(['vc-a']);
+  });
+  it('filterRows — 법인 필터(__none = 공용)', () => {
+    const rows = [{ key: 'a', vcenterId: 'vc-a' }, { key: 'b', vcenterId: '' }, { key: 'c', vcenterId: 'vc-b' }];
+    expect(filterRows(rows, { vcenterId: 'vc-a' }).map((r) => r.key)).toEqual(['a']);
+    expect(filterRows(rows, { vcenterId: '__none' }).map((r) => r.key)).toEqual(['b']);
+    expect(filterRows(rows, {}).length).toBe(3);
+  });
+  it('notifyStatusText — 실패·주소 없음·대기를 숨기지 않는다', () => {
+    expect(notifyStatusText(null)).toBe('');
+    expect(notifyStatusText({ lastFlushAt: null, mails: 0 })).toMatch(/아직 보낸 묶음이 없습니다/);
+    const t = notifyStatusText({ lastFlushAt: Date.now(), mails: 3, mailFail: 1, noEmail: 2, pendingRecipients: 1 });
+    expect(t).toMatch(/메일 3통/);
+    expect(t).toMatch(/실패 1/);
+    expect(t).toMatch(/주소 없는 사람 2회/);
+    expect(t).toMatch(/대기 1명/);
   });
 });

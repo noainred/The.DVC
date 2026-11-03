@@ -2397,3 +2397,13 @@ tr.row-sel > td { background: rgba(59, 130, 246, .10); }
 .iss-label { display: inline-flex; align-items: center; height: 22px; padding: 0 8px; border-radius: 11px; border: 1px solid var(--border); font-size: 12px; }
 .iss-stamp { font-size: 12px; display: flex; flex-direction: column; gap: 2px; padding-top: 10px; border-top: 1px solid var(--border); }
 @media (max-width: 720px) { .iss-side { max-width: none; } }
+/* v2.871 이슈 트래커 — 법인 표지 · 담당자 제안 · 설정 편집 행 */
+.iss-vc { font-size: 11px; color: var(--text-dim); border: 1px solid var(--border); border-radius: 5px; padding: 0 6px; max-width: 120px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-left: auto; }
+.iss-suggest { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 8px 10px; border-radius: 8px; background: color-mix(in srgb, var(--accent) 10%, transparent); font-size: 12.5px; min-width: 0; }
+.iss-suggest > span { min-width: 0; overflow-wrap: anywhere; flex: 1 1 220px; }
+.iss-settings { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.iss-rows { display: flex; flex-direction: column; gap: 6px; align-items: flex-start; }
+.iss-row-edit { display: flex; flex-wrap: wrap; gap: 6px; width: 100%; min-width: 0; }
+.iss-row-edit .input { flex: 1 1 200px; min-width: 0; }
+.iss-checks { display: flex; flex-wrap: wrap; gap: 6px 16px; }
+.iss-checks .iss-check { white-space: normal; }

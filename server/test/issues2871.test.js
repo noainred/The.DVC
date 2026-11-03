@@ -16,7 +16,7 @@ import { fileURLToPath } from 'node:url';
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SRC = path.resolve(HERE, '../src');
 
-function run(body, { pre } = {}) {
+function run(body, { pre, env = {} } = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'issues2871-'));
   if (pre) pre(dir);
   const script = `
@@ -45,7 +45,7 @@ function run(body, { pre } = {}) {
     console.log('@@' + JSON.stringify(out));
   `;
   const r = spawnSync(process.execPath, ['--input-type=module', '-e', script], {
-    env: { ...process.env, CONFIG_DIR: dir, DATA_SOURCE: 'mock', AUTH_ENABLED: 'true' },
+    env: { ...process.env, CONFIG_DIR: dir, DATA_SOURCE: 'mock', AUTH_ENABLED: 'true', ...env },
     encoding: 'utf8', cwd: path.resolve(SRC, '..'), timeout: 120_000,
   });
   assert.equal(r.status, 0, `자식 프로세스 실패: ${r.stderr}`);
@@ -163,6 +163,17 @@ test('③ viewer 요청 등록 — 요청 유형·백로그만 · 담당자·상
     out.req = await call('POST', '/issues', { title: 'x' });
   `, { pre: (dir) => fs.writeFileSync(path.join(dir, 'permissions.json'), JSON.stringify({ schemaVersion: 3, matrix: { operator: ['dashboard'], viewer: ['dashboard'] } })) });
   assert.equal(old.out.req.s, 200, '이 키가 생기기 전(스키마 3) 파일에는 기본값으로 가산된다(KEYS_ADDED_IN 4)');
+
+  // 인증을 끈 설치 + 대체 역할 viewer — authMiddleware 가 req.user 를 그 역할로 채운다. 인증 여부로 가르지 않으므로 요청 전용 제한이 그대로다.
+  const anon = run(`
+    as({ username: 'anonymous', role: 'viewer', name: 'Anonymous' });
+    out.req = await call('POST', '/issues', { title: 'x', type: 'incident', assignee: 'kim', status: 'progress' });
+    out.assign = await call('POST', '/issues/' + out.req.j.issue.key + '/assign', { assignee: 'kim' });
+  `, { env: { AUTH_ENABLED: 'false', AUTH_DISABLED_ROLE: 'viewer' } });
+  assert.equal(anon.out.req.s, 200);
+  assert.equal(anon.out.req.j.requestOnly, true, '대체 역할 viewer 는 요청 유형만');
+  assert.equal(anon.out.req.j.issue.assignee, '');
+  assert.equal(anon.out.assign.s, 403);
 });
 
 test('④ 자동 할당 — 설정은 전체 범위 관리자만 · 컴포넌트 기본 담당자 → 부하 최소 · 이력에 근거', () => {
