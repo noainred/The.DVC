@@ -1,5 +1,5 @@
 /**
- * test/bareosCancel2865.test.js — v2.865 Bareos 백업 중단 · 취소(사용자 요청 '단일 백업 중단 · 그룹 백업 중단' · 시안 docs/design/bareos-cancel/).
+ * test/bareosCancel2867.test.js — v2.867 Bareos 백업 중단 · 취소(사용자 요청 '단일 백업 중단 · 그룹 백업 중단' · 시안 docs/design/bareos-cancel/).
  *  ① 판정(cancelState — 순수): 지금 도는 실행일 때만 '멈추는 중' · CANCEL_WAIT_MS 뒤 '멈추지 않음' · 다시 보내기 문 · 폴러 추적 기간
  *  ② 스케줄 건너뛰기(skipKey): 그 회차만 'skipped' 로 넘김 · 기록하면 지움 · 스케줄을 고치면 지움
  *  ③ 작업 표 · 엣지 회신: ops.cancelJobs 가 항목마다 단건과 같은 검사 · 세션이 끊기면 남은 것 건너뜀 · 정제(성공인데 결과 없음 = 결과 모름 · 숫자 key)

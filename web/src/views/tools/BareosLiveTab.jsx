@@ -80,7 +80,7 @@ function useWidth(ref) {
 // v2.860: 운영 › 진행 · 이력 안에 접어 넣었다 — 보기 주소의 마지막 조각은 부르는 쪽이 준다(#/tools/bareos-backup/runs/<보기>).
 //   옛 live 로 두면 보기를 바꿀 때마다 옛 주소로 갔다가 runs 로 되돌려져 보기가 주소에 남지 않고 뒤로가기가 헛돈다.
 export default function BareosLiveTab({ hashSub = 'live' } = {}) {
-  // v2.865 취소 · 회차 중단 뒤 바로 다시 읽는다(_r) — usePolling 이 새 열쇠에서 data 를 비우므로 직전 응답을 들고 있는다(BareosBackupTool 과 같은 방식)
+  // v2.867 취소 · 회차 중단 뒤 바로 다시 읽는다(_r) — usePolling 이 새 열쇠에서 data 를 비우므로 직전 응답을 들고 있는다(BareosBackupTool 과 같은 방식)
   const [tick, setTick] = useState(0);
   const { data: polled, error } = usePolling('/tools/bareos-backup/live', { _r: tick }, 15_000);
   const lastRef = useRef(null);
@@ -196,7 +196,7 @@ function CorpCard({ c, onOpen }) {
 /* ───────── ② 단일 법인 ───────── */
 function CorpView({ corps, c, onPick, limits = null, waitMs = null, onChanged = () => {} }) {
   const [diagOpen, setDiagOpen] = useState(false);
-  // v2.865 취소(행) · 회차 중단(그룹 띠) — 확인 창 · 처리 중 · 결과 한 줄
+  // v2.867 취소(행) · 회차 중단(그룹 띠) — 확인 창 · 처리 중 · 결과 한 줄
   const [cancelRow, setCancelRow] = useState(null);
   const [stopGroup, setStopGroup] = useState(null);
   const [sending, setSending] = useState(false);
@@ -407,7 +407,7 @@ function CorpView({ corps, c, onPick, limits = null, waitMs = null, onChanged = 
   );
 }
 
-/** v2.865 그룹 회차 띠(시안 ①) — 줄 대기 · 보내는 중 · 이번 회차 실행 중 · 멈추는 중. 서버 corpView.groupRuns 한 줄. */
+/** v2.867 그룹 회차 띠(시안 ①) — 줄 대기 · 보내는 중 · 이번 회차 실행 중 · 멈추는 중. 서버 corpView.groupRuns 한 줄. */
 function GroupRunBand({ g, lock = '', onStop }) {
   const st = groupStopState({ canceling: g.canceling, stop: g.plan, lastFire: g.lastFire });
   const p = g.plan?.progress;

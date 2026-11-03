@@ -100,7 +100,7 @@ export function runningRow(j, run0, live, liveOk, { now = Date.now(), vm = null,
     rateNow, rateAvg: liveOk && live ? live.aveRate ?? null : null,
     baseline: base, ...(slow ? { slow: true } : {}), ...(stuckWhy ? { stuck: stuckWhy } : {}),
     dirStatus: dirRow ? { text: String(dirRow.status || '').slice(0, 200), reason: dirRow.reason || 'other' } : null,
-    cancel: cancelInfo(j, now),   // v2.865 멈추는 중(취소를 보낸 실행) · 멈추지 않음(stuck)
+    cancel: cancelInfo(j, now),   // v2.867 멈추는 중(취소를 보낸 실행) · 멈추지 않음(stuck)
   };
 }
 
@@ -167,7 +167,7 @@ export function corpView(site, settings, digests, { now = Date.now(), vms = new 
     live: live ? { at: live.at, ok: live.ok, code: live.code || '', dirOk, dirCode: live.dir?.code || '' } : null,
     hist: hist.map((p) => [p.at, p.rate]),
     rows: running,
-    // v2.865 회차 중단 — 이 법인 그룹 중 줄 대기 · 보내는 중 · 이번 회차가 Director 에서 도는 · 멈추는 중인 것(그룹 회차 띠)
+    // v2.867 회차 중단 — 이 법인 그룹 중 줄 대기 · 보내는 중 · 이번 회차가 Director 에서 도는 · 멈추는 중인 것(그룹 회차 띠)
     writable,
     stopping: running.filter((r) => r.cancel).length,
     groupRuns: (() => {
@@ -192,7 +192,7 @@ export function corpView(site, settings, digests, { now = Date.now(), vms = new 
   };
 }
 
-/** v2.865 쓰기 범위 열쇠(법인별 writable 이 사람마다 다르다 — 캐시로 다른 계정의 값을 받지 않게). */
+/** v2.867 쓰기 범위 열쇠(법인별 writable 이 사람마다 다르다 — 캐시로 다른 계정의 값을 받지 않게). */
 function writeKey(user, snap) {
   try { const w = writeScopedVcenterIds(user, snap); return w ? [...w].sort().join(',') : 'all'; } catch { return 'err'; }
 }
@@ -223,7 +223,7 @@ export function registerBareosLive(api) {
       return {
         ok: true, now, liveMs: LIVE_MS, idleMs: LIVE_IDLE_MS, demo: isDemoActive(), registryLoadError: !!registryLoadError(),
         relayLimits: relayLimits(),   // v2.858 실행 중 상세가 로그를 읽을 때 엣지 대행 Director 의 화면 시한(숫자를 화면에 박지 않는다)
-        cancelWaitMs: CANCEL_WAIT_MS,  // v2.865 '멈추지 않음' 기준(화면 문구 — 숫자를 박지 않는다)
+        cancelWaitMs: CANCEL_WAIT_MS,  // v2.867 '멈추지 않음' 기준(화면 문구 — 숫자를 박지 않는다)
         totals: {
           corps: corps.length, active: act.length, running: corps.reduce((a, c) => a + c.running, 0), waiting: corps.reduce((a, c) => a + c.waiting, 0),
           rateNow: act.length ? (knownRate.length ? knownRate.reduce((a, c) => a + c.rateNow, 0) : null) : 0, rateUnknownCorps: act.length - knownRate.length,

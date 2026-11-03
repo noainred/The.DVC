@@ -66,18 +66,18 @@ const _groupBusy = new Set();
 const _queued = new Map();   // 그룹 id → 실행 표(_runs 와 같은 객체) — Director 차례를 기다리는 중(v2.830 버그 점검 S4: 대기 중이 '재시작' 으로 보였다)
 const _pruning = new Set();  // v2.831 보관 개수 정리 중(대기 포함) — 실행과 같은 줄에 서고, 그동안 그 그룹의 실행·삭제는 409
 /**
- * v2.865 그룹 실행 표 — 줄을 선 순간부터 실행이 끝날 때까지. { since, dir, ctrl: AbortController(회차 중단 — Director 호출에는 넘기지 않는다),
+ * v2.867 그룹 실행 표 — 줄을 선 순간부터 실행이 끝날 때까지. { since, dir, ctrl: AbortController(회차 중단 — Director 호출에는 넘기지 않는다),
  * cancel: 중단 요청(at·by·includeScheduled) | null, halted: 줄 대기 중 중단(차례가 와도 아무것도 하지 않는다), progress: { total, toSend, sent, started } }
  */
 const _runs = new Map();
-/** v2.865 회차 중단을 처리하는 중(취소 명령을 보내는 동안) — 그룹 id → { at, by, phase, includeScheduled, entry? }. */
+/** v2.867 회차 중단을 처리하는 중(취소 명령을 보내는 동안) — 그룹 id → { at, by, phase, includeScheduled, entry? }. */
 const _cancelling = new Map();
 /** 실행·정리·중단 중이거나 차례를 기다리는 중 — 화면 '실행 중' · 삭제 409 · 같은 그룹 다시 실행 409 가 같은 판정을 쓴다. */
 export const groupRunning = (id) => _groupBusy.has(id) || _queued.has(id) || _pruning.has(id) || _cancelling.has(id);
 export const groupPruning = (id) => _pruning.has(id);
-/** v2.865 회차 중단 처리 중이면 그 요청(화면 '멈추는 중'), 아니면 null. */
+/** v2.867 회차 중단 처리 중이면 그 요청(화면 '멈추는 중'), 아니면 null. */
 export function groupCanceling(id) { const c = _cancelling.get(id); return c ? { at: c.at, by: c.by, phase: c.phase, includeScheduled: !!c.includeScheduled } : null; }
-/** v2.865 실행 진행(화면 '보냄 n / N') — 줄 대기 중이면 { queued:true } · 실행 중이 아니면 null. */
+/** v2.867 실행 진행(화면 '보냄 n / N') — 줄 대기 중이면 { queued:true } · 실행 중이 아니면 null. */
 export function groupProgress(id) {
   const e = _runs.get(id);
   if (!e) return null;
@@ -101,7 +101,7 @@ export function queueGroupRun(groupId, opts = {}) {
   _queued.set(groupId, entry);
   _runs.set(groupId, entry);
   noteGroupRunStart(groupId, g.name);   // 줄을 선 순간부터 업그레이드 자동 적용이 기다린다
-  // v2.865: 표는 객체로 맞춰 지운다 — 줄 대기 중 중단한 뒤 같은 그룹을 다시 실행하면 새 표가 생긴다(옛 줄 자리는 차례가 와도 아무것도 하지 않는다)
+  // v2.867: 표는 객체로 맞춰 지운다 — 줄 대기 중 중단한 뒤 같은 그룹을 다시 실행하면 새 표가 생긴다(옛 줄 자리는 차례가 와도 아무것도 하지 않는다)
   return onDirLine(dir, () => {
     if (_queued.get(groupId) === entry) _queued.delete(groupId);
     return entry.halted ? null : runGroup(groupId, { ...opts, ctl: entry });
@@ -130,7 +130,7 @@ function reasonOf(e, what = '그룹 일괄 실행') {
  * 그룹 하나 실행.
  * @param {string} groupId
  * @param {{ trigger?: 'manual'|'timer', by?: string, level?: string|null, slot?: {key,at,level}|null, signal?: AbortSignal|null, ctl?: object|null }} o
- *   ctl = 실행 표(queueGroupRun) — v2.865 회차 중단 신호(ctl.ctrl)는 **덩어리 사이에서만** 본다(보내는 중인 덩어리를 끊으면 결과 모름 — v2.830 L4).
+ *   ctl = 실행 표(queueGroupRun) — v2.867 회차 중단 신호(ctl.ctrl)는 **덩어리 사이에서만** 본다(보내는 중인 덩어리를 끊으면 결과 모름 — v2.830 L4).
  *   signal = Director 호출 시한(덩어리마다) — 중단 신호와 다르다.
  * @returns {Promise<object>} 실행 기록(groups.lastFire 와 같은 모양)
  */
@@ -177,7 +177,7 @@ export async function runGroup(groupId, { trigger = 'manual', by = '', level = n
     for (const [dir, list] of byDir) {
       for (let i = 0; i < list.length; i += RUN_JOBS_MAX) {
         const chunk = list.slice(i, i + RUN_JOBS_MAX);
-        // v2.865 회차 중단 — 다음 덩어리를 보내지 않는다(보내는 중이던 덩어리는 회신을 받았다 — 그 실행은 아래에서 취소)
+        // v2.867 회차 중단 — 다음 덩어리를 보내지 않는다(보내는 중이던 덩어리는 회신을 받았다 — 그 실행은 아래에서 취소)
         if (stopped()) { for (const s of chunk) Object.assign(s.it, { state: 'halted', reason: HALT_REASON }); continue; }
         let res;
         try {
@@ -219,7 +219,7 @@ export async function runGroup(groupId, { trigger = 'manual', by = '', level = n
         if (ctl?.progress) { ctl.progress.sent += chunk.length; ctl.progress.started = items.filter((x) => x.state === 'started').length; }
       }
     }
-    // v2.865 회차 중단 — 이번 회차가 시작한 실행을 법인 쪽에서 한 번에 취소한다(잠금은 이 실행이 이미 잡고 있다). 마지막 덩어리 회신 뒤
+    // v2.867 회차 중단 — 이번 회차가 시작한 실행을 법인 쪽에서 한 번에 취소한다(잠금은 이 실행이 이미 잡고 있다). 마지막 덩어리 회신 뒤
     //   이 검사부터 _groupBusy 를 지우기까지 중단 요청이 빠지지 않는다(그사이 await 은 취소뿐이고, 그동안은 _cancelling 이 두 번째 요청을 막는다).
     if (stopped()) {
       const c = ctl.cancel || { at: Date.now(), by: '', includeScheduled: false };
@@ -256,7 +256,7 @@ export async function runGroup(groupId, { trigger = 'manual', by = '', level = n
   return fire;
 }
 
-/* ───────── v2.865 회차 중단(시안 docs/design/bareos-cancel/ §4.2) ───────── */
+/* ───────── v2.867 회차 중단(시안 docs/design/bareos-cancel/ §4.2) ───────── */
 
 export const HALT_REASON = '회차 중단으로 보내지 않았습니다.';
 /** 묶음 취소 한 번의 Director 호출 시한(덩어리마다) — 실행과 같은 관계(엣지 인출 대기 + 회신 시한보다 길게). */
@@ -508,7 +508,7 @@ export const PRUNE_DEADLINE_MS = PICKUP_MS + RESULT_MS.pruneJobs + 60_000;
  */
 export function pruneDue(g, jobsByVm, now = Date.now()) {
   if (g.keep == null || !g.lastFire || !(g.lastFire.started > 0)) return false;
-  // v2.865 중단된 회차로는 정리하지 않는다(사용자 결정 ④ — 성공이 덜 쌓인 회차를 기준으로 오래된 실행을 지우지 않게). 다음 정상 회차가 끝난 뒤 돈다
+  // v2.867 중단된 회차로는 정리하지 않는다(사용자 결정 ④ — 성공이 덜 쌓인 회차를 기준으로 오래된 실행을 지우지 않게). 다음 정상 회차가 끝난 뒤 돈다
   if (g.lastFire.canceled) return false;
   // 반증 F5: 그 실행으로 이미 정리했으면 다시 하지 않는다 — 보관 개수를 바꾸기만 해서는 돌지 않는다(다음 그룹 실행이 끝난 뒤 · 화면 안내와 같게)
   if (g.lastPrune && g.lastPrune.fireAt === g.lastFire.at) return false;

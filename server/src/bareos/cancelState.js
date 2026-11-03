@@ -1,5 +1,5 @@
 /**
- * bareos/cancelState.js — 실행 취소(중단)의 **판정 하나**(v2.865 · 사용자 요청 '단일 백업 중단 · 그룹 백업 중단' — 시안 docs/design/bareos-cancel/).
+ * bareos/cancelState.js — 실행 취소(중단)의 **판정 하나**(v2.867 · 사용자 요청 '단일 백업 중단 · 그룹 백업 중단' — 시안 docs/design/bareos-cancel/).
  *
  * 순수 함수만 둔다(파일·타이머·Director 없음) — 백업 대상 화면 · 진행 현황판 · 그룹 카드 · 폴러가 같은 판정을 쓴다(판정 코어 하나).
  *

@@ -1,5 +1,5 @@
 /**
- * Bareos 실행 취소 · 그룹 회차 중단의 화면 문구 · 판정(v2.865 · 시안 docs/design/bareos-cancel/ · 승인 2026-11-03).
+ * Bareos 실행 취소 · 그룹 회차 중단의 화면 문구 · 판정(v2.867 · 시안 docs/design/bareos-cancel/ · 승인 2026-11-03).
  *   '멈추는 중' · '멈추지 않음' 판정 자체는 서버 cancelState.cancelInfo 가 한다(cancel = { jobid, at, by, via, stuck }) — 여기서는 그 값을 문구로만 바꾼다.
  *   백업 대상 패널 · 진행 현황판 · 그룹 카드가 같은 함수를 쓴다(같은 상태가 화면마다 다르게 보이지 않게).
  * ⚠ 문구에 백틱 금지(BoldText) — 값 인용은 ‘ ’.

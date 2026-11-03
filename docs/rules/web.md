@@ -488,6 +488,8 @@
   ④ 저장한 양 · 압축 · 쓰는 중 볼륨 크기는 잡 끝 보고에만 있다 — '끝나면 표시'(점선 칸). FD 보고가 없으면 진행량 · 속도 · 진척 · 남은 시간은 '모름'/'—'(0 아님)이고 타임라인 · 볼륨은 로그로 채운다.
   ⑤ 진행 현황 표 안의 펼침 칸은 `position: sticky; left: 0` + **실측 폭**(ResizeObserver) — 400px 에서 넓은 표(minWidth 1100)를 가로로 밀어도 상세는 화면 안. 정렬 때 행과 펼침 칸이 떨어지지 않게 `React.Fragment` 로 묶는다(`sortChildren` 이 첫 tr 로 정렬).
   ⑥ 대기 배지는 회색(실행 중 파랑과 구분 — `bareosText.STATE_BADGE`). 상세에 취소 단추는 두지 않았다(백업 대상 탭). 데모 실행 길이는 env `BAREOS_DEMO_RUN_MS`(화면 검증용 — 기본 30초는 진행 현황 조회 주기보다 짧다).
+  ⑨ v2.866(사용자 요청 '진행 중인 백업 VM 이 자동으로 선택되게'): 아래 카탈로그 최근 실행 표의 대상은 처음에 진행 중 VM 이고, 위 실행 중 표에서 골라진(기본: 실행 중) 작업 VM 을 따라간다(`historyFollowTarget`) ·
+     사람이 대상 칸을 직접 바꾸면 따라가지 않고, 위 표의 행을 누르면 다시 따라간다 · Director 거르기 밖 VM 이면 바꾸지 않는다.
 - **v2.860 — Bareos 화면 재구성(사용자 요청 'Bareos UI 전폭 개선 · 직관적이고 복잡하지 않게' · 승인 시안 `docs/design/bareos-ui-v2` ⓪~⑥)**. 도구 키 3개(`bareos-summary`·`bareos-detail`·`bareos-backup`)와 권한은 그대로이고 탭은 주소만 바꾼다:
   ① 탭은 5개(현황 · 법인 · 운영 · 정책 · 보존 · 설정) — 판정은 `bareosViewText.bareosSubTabs` 하나, 그리는 곳은 `BareosTabs.jsx` 하나(모든 Bareos 화면이 같은 자리 · 오른쪽 `right` 칸에 그 화면의 조작). 두 벌 탭 줄을 되살리지 말 것.
   ② 운영 안 묶음(백업 대상 · 백업 그룹 · 진행 · 이력)은 `OPS_SEGMENTS`. 옛 하위 주소 `live`·`history` 는 `legacyOpsHash` 로 `runs` 로 바꾼다 — **렌더 중에** 바꾼다(효과에서 바꾸면 자식인 현황판이 옛 주소를 먼저 읽어 보기를 잃는다) · 아래 조각 유지(`live/corp` → `runs/corp`) · 옛 진행 현황 링크로 오면 현황판을 펼친 채로(`runsBoardOpen` — 처음 그릴 때는 바꾸기 전 주소, 떠 있는 동안 들어온 주소는 **hashchange 의 `newURL`** 로 본다: 앞 리스너의 갱신이 먼저 그려지면 부모가 주소를 이미 runs 로 바꿔 놓아 `location.hash` 로는 놓친다 — Chromium 재현). 다른 화면의 `/live`·`/history` 링크는 고치지 않아도 된다(`backupSummary2838` 이 옛 주소를 고정).
@@ -502,6 +504,8 @@
   ③ 네트워크 끊기 기본(새 VM 끊기 · 덮어쓰기 그대로 — `withMode`) · 상태는 원장 `restores[].nic · finish` 를 `finishText` 로(옛 복원은 '—'). 진행 · 이력의 복원 이력 표에 '네트워크' 칸.
   ④ 데이터스토어 목록은 `/datastores`(vCenter 마다 한 번 — `dsAsked` ref · 렌더마다 다시 묻지 않는다) · 남은 스냅샷 칩은 인벤토리 `snapshotCount`(못 읽으면 칩 없음 — 0 으로 보지 않는다).
   ⑤ 백업 대상 패널의 '복원…' 은 이 화면으로 그 VM 을 골라 넘긴다(옛 단건 RestoreModal 은 지웠다). 결과 창의 'Full 로 지금 실행' 은 해석이 Full 을 권하는 줄(`issueNeedsFull`)에만 · 쓰기 범위일 때만.
+  ⑨ v2.866 폴더 표(`BareosRestoreTable.jsx` · 트리 `bareosRestoreTree.js` + test): 고르는 방식 칩 두 개(간단 목록 · 폴더 표 — 브라우저에 기억, 못 읽으면 간단 목록) · 표는 div 격자(role=table · 열 머리 고정)이고 트리라 정렬하지 않는다 ·
+     아래 고정 줄(선택 수 · 용량 · 다음) · 폴더 체크는 고를 수 있는 VM 만(일부만 고르면 중간 표시) · 모르는 값은 '—' · 부분 합은 '+' · 폴더 VM 수는 열 때 한 번(폴링 없음).
 - **v2.862 — Bareos 복원 검증(리허설) · 일일 요약 메일**(`BareosRehearsal.jsx` — 운영 › 복원 아래 카드 · 설정 › 공통 기본값 · 수집의 '일일 요약 메일' 펼침). 글자는 `bareosRestoreText.js`:
   ① 정책은 꺼짐이 기본 — 화면이 그 사실과 이유(VM 을 만들고 데이터스토어를 쓴다)를 먼저 말한다. 정책 바꾸기 · 지금 검증은 서버가 준 `fullScope` 일 때만 그린다(집행은 서버) · OTP 칸은 6자리 숫자만 · 실패해도 비운다.
   ② 폴링하지 않는다(처음 한 번 + 다시 읽기) · 결과 표의 Tools 응답 시간은 `toolsText`(모르면 '—' — 0 아님) · 정리 칸은 지움/남김/—.

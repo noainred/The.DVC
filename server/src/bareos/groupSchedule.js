@@ -109,7 +109,7 @@ export function decideFire(g, now, catchupMs = CATCHUP_MS) {
   //   (v2.830 검토 L1 — 재현: 시계가 몇 초 거꾸로 가면 어제 회차가 '놓침' 으로 lastKey 를 덮어 오늘 회차가 다시 나갔다)
   if (g.lastKey && slot.key <= g.lastKey) return { action: 'none' };
   if (now - slot.at > catchupMs) return { action: 'miss', slot };
-  // v2.865 회차 중단 때 고른 '다음 회차 1회 건너뛰기' — 돌리지 않고 '건너뜀' 으로 남긴다(lastKey 를 그 회차로 — 다시 보지 않게)
+  // v2.867 회차 중단 때 고른 '다음 회차 1회 건너뛰기' — 돌리지 않고 '건너뜀' 으로 남긴다(lastKey 를 그 회차로 — 다시 보지 않게)
   if (g.skipKey && slot.key === g.skipKey) return { action: 'miss', slot, reason: 'skipped' };
   return { action: 'fire', slot };
 }

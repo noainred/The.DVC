@@ -129,7 +129,7 @@ export const VALUE = Object.freeze({
   // v2.840 볼륨 목록 즉시 조회 — 아는 칸 · 행 상한(멱등 정규화를 중앙이 다시 돈다)
   volumes: (v) => normVolumeRows(v),
   cancel: (v) => { const r = obj(v); return r.final ? { final: rowOut(r.final) } : r.cleared ? { cleared: true } : { canceled: bool(r.canceled) }; },
-  // v2.865 묶음 취소 — 항목마다 단건과 같은 모양. 성공인데 canceled · final · cleared 가 하나도 없으면 그 항목은 '결과 모름'(취소가 갔는지 모른다)
+  // v2.867 묶음 취소 — 항목마다 단건과 같은 모양. 성공인데 canceled · final · cleared 가 하나도 없으면 그 항목은 '결과 모름'(취소가 갔는지 모른다)
   cancelJobs: (v) => arr(v).slice(0, 500).map((x0) => {
     const x = obj(x0);
     const key = Number.isInteger(x.key) && x.key >= 0 && x.key < 1_000_000 ? x.key : -1;

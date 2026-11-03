@@ -12,6 +12,8 @@ import { STable } from '../../components/STable.jsx';
 import Select from '../../components/Select.jsx';
 import { requireChanged } from '../changeResult.js';
 import BareosRehearsal from './BareosRehearsal.jsx';
+import BareosRestoreTable from './BareosRestoreTable.jsx';   // v2.866 폴더 표(시안 ① 일반 복원)
+import { RESTORE_VIEWS, loadRestoreView, saveRestoreView } from './bareosRestoreTree.js';
 import { Note, ReadGuide, FilterChip } from './BareosBits.jsx';
 import { stateBadge, withRelayWait, outcomeUnknown, unknownOutcomeText, driftText, levelLabel } from './bareosText.js';
 import {
@@ -43,6 +45,8 @@ export default function BareosRestore({ d, reload, preselect = '', onPreselectUs
   const [err, setErr] = useState(null);
   const [done, setDone] = useState(null);
   const [batchId, setBatchId] = useState(() => latestBatchId(jobs));
+  const [view, setViewState] = useState(() => (typeof window === 'undefined' ? 'list' : loadRestoreView(window.localStorage)));
+  const setView = (v) => { setViewState(v); saveRestoreView(v, typeof window === 'undefined' ? null : window.localStorage); };
   const gen = useRef(0);
   const usedRef = useRef(onPreselectUsed);
   usedRef.current = onPreselectUsed;
@@ -126,14 +130,26 @@ export default function BareosRestore({ d, reload, preselect = '', onPreselectUs
   const issue2 = step >= 2 ? wizardIssue(list, jobsById) : '';
   const planOk = !!check?.plan?.ok;
   const many = picked.length > 1;
+  const tableMode = view === 'table';
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12, minWidth: 0 }}>
       {done && <Note tone={done.ok ? 'ok' : 'bad'}>{done.text}</Note>}
+      {/* v2.866 고르는 방식 — 간단 목록(지금 방식 그대로) · 폴더 표(vCenter › 폴더 › VM 트리 표). 다음 단계는 둘 다 같은 마법사다 */}
+      <div style={ROW}>
+        <span className="muted" style={{ fontSize: 12 }}>고르는 방식</span>
+        <div role="group" aria-label="고르는 방식" className="flex gap wrap" style={{ rowGap: 6 }}>
+          {RESTORE_VIEWS.map(([k, l]) => <FilterChip key={k} on={view === k} onClick={() => setView(k)}>{l}</FilterChip>)}
+        </div>
+        {tableMode && step > 0 && <button type="button" className="tab" style={{ padding: '3px 10px', fontSize: 12 }} onClick={resetWizard}>← 폴더 표로(고른 VM 은 그대로)</button>}
+      </div>
+      {tableMode && step === 0 && (
+        <BareosRestoreTable jobs={jobs} directors={d.directors || []} picked={picked} toggle={toggle} lockedDir={lockedDir} onNext={loadPoints} onClear={() => { setPicked([]); resetWizard(); }} />
+      )}
       {/* 트리는 좁게(최대 420px) · 마법사가 나머지 — 1440 에서 2단계 칸(데이터스토어 · 네트워크)이 가로 스크롤 뒤로 숨지 않게(Chromium 확인) · 좁으면 위아래로 */}
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, alignItems: 'flex-start', minWidth: 0 }}>
-        {/* ── 왼쪽: 법인 › 폴더 › VM ── */}
-        <div className="card" data-bareos-restore-tree="" style={{ padding: 12, minWidth: 0, flex: '1 1 300px', maxWidth: '100%', display: 'flex', flexDirection: 'column', gap: 8, boxSizing: 'border-box' }}>
+      {(!tableMode || step > 0) && <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, alignItems: 'flex-start', minWidth: 0 }}>
+        {/* ── 왼쪽: 법인 › 폴더 › VM ── (폴더 표 보기에서는 표가 대신한다) */}
+        {!tableMode && <div className="card" data-bareos-restore-tree="" style={{ padding: 12, minWidth: 0, flex: '1 1 300px', maxWidth: '100%', display: 'flex', flexDirection: 'column', gap: 8, boxSizing: 'border-box' }}>
           <div style={ROW}>
             <b style={{ fontSize: 13.5 }}>복원할 VM 고르기</b>
             <span className="muted" style={{ fontSize: 12 }}>백업 대상만 · 한 번에 한 법인 · {RESTORE_MAX}대까지</span>
@@ -172,7 +188,7 @@ export default function BareosRestore({ d, reload, preselect = '', onPreselectUs
               </div>
             ))}
           </div>
-        </div>
+        </div>}
 
         {/* ── 오른쪽: 3단계 ── */}
         <div className="card" data-bareos-restore-wizard="" style={{ padding: 14, minWidth: 0, flex: '999 1 520px', display: 'flex', flexDirection: 'column', gap: 10, boxSizing: 'border-box' }}>
@@ -344,7 +360,7 @@ export default function BareosRestore({ d, reload, preselect = '', onPreselectUs
             </div>
           )}
         </div>
-      </div>
+      </div>}
 
       {/* ── 최근 묶음 진행 ── */}
       {batch.total > 0 && (

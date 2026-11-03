@@ -33,7 +33,7 @@ const _live = new Map();
 /** 법인(vCenter id) → [{ at, rate|null, jobs }] — Director 하나가 법인 여럿을 맡아도 법인마다 따로(합계가 겹쳐 세지지 않게 · Chromium 확인) */
 const _hist = new Map();
 
-/** 이 잡이 지금 도는가 — v2.865 판정은 cancelState.js 하나(취소 · 그룹 중단이 같은 판정을 쓴다). 예전 import 경로를 위해 다시 내보낸다. */
+/** 이 잡이 지금 도는가 — v2.867 판정은 cancelState.js 하나(취소 · 그룹 중단이 같은 판정을 쓴다). 예전 import 경로를 위해 다시 내보낸다. */
 export { runningRunOf };
 
 /** Director 마다 실행 중 잡과 물을 FD 목록(설정의 법인 FD + 잡의 FD). 데모 잡은 데모 Director 일 때만(③). */

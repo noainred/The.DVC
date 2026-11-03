@@ -109,7 +109,7 @@ export function fireText(f) {
   if (!f) return '—';
   const parts = [`${shortTs(f.at)} ${f.trigger === 'timer' ? '예약' : '수동'}`];
   if (f.error) parts.push(`실패 — ${f.error}`);
-  if (f.canceled) parts.push('중단됨');   // v2.865 회차 중단(자세한 수는 canceledText — 카드의 중단 줄)
+  if (f.canceled) parts.push('중단됨');   // v2.867 회차 중단(자세한 수는 canceledText — 카드의 중단 줄)
   for (const [k, st] of FIRE_COUNT_KEYS) if (f[k] > 0) parts.push(`${FIRE_STATE_TEXT[st]} ${f[k]}`);
   if (parts.length === 1) parts.push(`VM ${f.total ?? 0}대`);
   return parts.join(' · ');
@@ -118,7 +118,7 @@ export function fireText(f) {
 export function fireTone(f) {
   if (!f) return 'muted';
   if (f.error || f.failed > 0 || f.notSent > 0) return 'bad';
-  if (f.unknown > 0 || f.canceled) return 'warn';   // v2.865 중단된 회차는 경고 색(실패는 아니다 — 사람이 멈췄다)
+  if (f.unknown > 0 || f.canceled) return 'warn';   // v2.867 중단된 회차는 경고 색(실패는 아니다 — 사람이 멈췄다)
   return f.started > 0 ? 'ok' : 'muted';
 }
 /** 다음 실행 — 서버가 준 next(서버 현지 시각 기준 ms). */

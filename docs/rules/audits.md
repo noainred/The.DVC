@@ -2606,6 +2606,16 @@ server/src/bareos/CLAUDE.md 크기 상한(15,000B)으로 원문 그대로 옮겼
   `restore_allow_disks_mismatch=yes` 는 덮어쓰기에서 `=== true` 일 때만(Bareos 23.1+ — 옛 Director 는 거부, 추정).
   반증 1인 반영(재현 4 · 판단 5): DS 여유 키는 **vCenter + 이름**(한 Director 에 vCenter 여럿) · 마무리 원장 쓰기는 `inBatch` 한 번 · 추적 놓친 복원은 failed(직접 확인) · 엣지 미인출 작업은 `reapOps` 로 시한 ·
   본문 상한을 항목 순회 전에 · 새 VM 이름은 최근 24시간 · 진행 중 복원 이름과도 겹치면 거부 · 원장 저장이 실패해도 응답(saveError) · 접근 · 진행 중 사유가 판정 사유보다 앞선다.
+  **v2.866 폴더 표**(사용자 '기존 복원 방식 그대로 유지하고, 신규로 VM 백업할 때 쓰는 폴더 리스트 형태로 복원' · 시안 캔버스 ① · `bareosRestoreTree.test.js` · `bareosRestoreBulkRoutes2861` ⑥):
+  고르는 방식 두 가지(간단 목록 = 지금 화면 그대로 · 폴더 표)이고 다음 단계는 같은 마법사다. 고를 수 있는지는 `pickBlock` 하나(복제 금지 — 트리 함수 `restoreFolderRows` 가 그것을 부른다).
+  폴더 VM 수는 `GET restore-folders`(`restoreFolderCounts` — 대상이 있는 vCenter · 템플릿 제외 · **조회 범위 안만** · memoJson + scopeKey)를 표를 열 때 한 번 — 못 읽으면 전체는 null('—').
+  목록 응답에 `powerState` · `storageGB`(인벤토리 — 없으면 null) · `lastOk`(`lastOkOf` — lastRun · finishedRuns 의 성공 · 경고 중 가장 늦은 끝 · 없으면 null = '포탈 기록에 없음' — 카탈로그의 더 오래된 성공은 모른다) · finishedRuns 원문은 여전히 싣지 않는다.
+  VM 마다 복원 지점은 표에서 읽지 않는다(Director 를 VM 수만큼 부르지 않게 — 다음 단계에서 고른 VM 만 한 번에). 시안의 '행마다 복원 지점 칸' 과 다른 점이다(정직 기록).
+  재해 복구(vCenter 를 다시 설치한 뒤 · 백업 당시 폴더 기준 · 위치 짝짓기 · 단계 실행)는 시안 ②로 승인됐고 v2.865 에서 만든다.
+  ⚠ **v2.866 실환경 결함 — 복원이 FD 에서 'python3-fd-mod: Option vcuser not defined' 로 실패**(사용자 보고 · jobid 119 로그): 백업 잡의 플러그인 옵션은 잡 수준 FdPluginOptions 라
+  복원 때 FD 로 다시 오지 않는다(CLAUDE.md 실환경 미확인 항목이 실측으로 확정). 복원 명령은 복원용 키만 실어 FD 가 vCenter 주소 · 자격증명 INI 를 몰랐다.
+  이제 `restoreBaseKv` 가 백업과 같은 기본 키(vcserver · dc · folder · vmname · config_file — 위치는 그 복원 지점의 백업 때 값 `placementAt`)를 앞에 싣고 복원 키가 덮어쓴다.
+  단건 · 묶음 · 검증 세 경로 모두(`restoreBaseOf` · `baseOf` — 소스 대조 테스트) · 매핑이 덜 됐으면 보내지 않는다 · 자격증명 값은 여전히 받지 않는다(`bareosRestore.test.js` v2.866).
 
 ## Bareos v2.862 복원 검증(리허설) · 일일 요약 메일 — 모듈 규칙(2026-11-03)
 

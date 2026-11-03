@@ -24,7 +24,7 @@ import {
 } from './bareosGroupText.js';
 import { groupPoolText, overlapLine, retentionText } from './bareosPolicyText.js';
 import { GroupCancelModal } from './BareosCancelModals.jsx';
-import { groupStopState, cancelAcceptedText, canceledText, progressSegments, PHASE_TEXT } from './bareosCancelText.js';   // v2.865 회차 중단   // v2.840 카드 '적용 풀 · 보존' · 겹침
+import { groupStopState, cancelAcceptedText, canceledText, progressSegments, PHASE_TEXT } from './bareosCancelText.js';   // v2.867 회차 중단   // v2.840 카드 '적용 풀 · 보존' · 겹침
 
 const BASE = '/tools/bareos-backup';
 const fin = (v) => typeof v === 'number' && Number.isFinite(v);
@@ -159,7 +159,7 @@ export default function BareosGroupsTab({ d }) {
   const [view, setView] = useState({ kind: 'list' });   // list · edit{ groupId, filter } · detail{ groupId }
   const [q, setQ] = useState('');
   const [runOf, setRunOf] = useState(null);
-  const [stopOf, setStopOf] = useState(null);   // v2.865 회차 중단 확인 창
+  const [stopOf, setStopOf] = useState(null);   // v2.867 회차 중단 확인 창
   const [stopErr, setStopErr] = useState('');
   const [fireOf, setFireOf] = useState(null);
   const [msg, setMsg] = useState(null);
@@ -194,7 +194,7 @@ export default function BareosGroupsTab({ d }) {
   const vcKnown = options.some((o) => o.id === vc);
   useEffect(() => { saveVc(vc); treeRef.current = null; setTree(null); setRefreshErr(null); setView({ kind: 'list' }); setRunOf(null); setFireOf(null); setMsg(null); if (vcKnown) load(); }, [vc, vcKnown]);   // eslint-disable-line react-hooks/exhaustive-deps
   // 실행·정리 중인 그룹이 있을 때만 다시 읽는다(결과 기록을 보려고) — 만들기 화면에서는 읽지 않는다(고르던 트리가 바뀌지 않게)
-  //   v2.865: 이번 회차가 Director 에서 돌거나 취소를 보낸 실행이 아직 돌 때도(멈추는 중 → 중단됨 을 따라간다)
+  //   v2.867: 이번 회차가 Director 에서 돌거나 취소를 보낸 실행이 아직 돌 때도(멈추는 중 → 중단됨 을 따라간다)
   const running = !!tree?.groups?.some((x) => x.running || x.stop?.phase || x.stop?.sent > 0);
   useEffect(() => {
     if (!running || view.kind === 'edit') return undefined;
@@ -398,7 +398,7 @@ function overlapOf(ovl, g) {
 function GroupCard({ g, tree, byId, writable, busy, marking = false, ovl, onRun, onStop, onEdit, onDetail }) {
   const rows = g.vmIds.map((id) => byId.get(id)).filter(Boolean);
   const size = sizeSum(rows);
-  const ss = groupStopState(g);   // v2.865 회차 중단 상태(멈추는 중 · 이번 회차 실행 중 · 중단됨)
+  const ss = groupStopState(g);   // v2.867 회차 중단 상태(멈추는 중 · 이번 회차 실행 중 · 중단됨)
   const badge = ss.kind === 'stopping' || ss.kind === 'cancelable' ? { text: g.pruning ? '보관 정리 중' : ss.text, tone: ss.tone }
     : g.running ? { text: g.pruning ? '보관 정리 중' : '실행 중', tone: 'run' } : resultBadge(memberResults(rows, { resultsKnown: resultsKnownOf(tree) }));
   const sp = scheduleParts(g.schedule);
@@ -915,7 +915,7 @@ function GroupDetail({ tree, g, byId, writable, busy, marking = false, onBack, o
   );
 }
 
-/* ───────── v2.865 회차 중단 — 카드 · 상세 공용 ───────── */
+/* ───────── v2.867 회차 중단 — 카드 · 상세 공용 ───────── */
 
 /** '지금 백업' 자리 — 이번 회차가 돌면 '회차 중단…', 멈추는 중이면 잠긴 '중단 보냄', 그 밖은 지금처럼. */
 function RunOrStop({ g, ss, writable, busy, marking, onRun, onStop, small = false }) {

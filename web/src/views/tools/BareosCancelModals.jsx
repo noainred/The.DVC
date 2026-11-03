@@ -1,5 +1,5 @@
 /**
- * Bareos 실행 취소 · 그룹 회차 중단 확인 창(v2.865 · 시안 docs/design/bareos-cancel/ ② ③ · 승인 2026-11-03).
+ * Bareos 실행 취소 · 그룹 회차 중단 확인 창(v2.867 · 시안 docs/design/bareos-cancel/ ② ③ · 승인 2026-11-03).
  *   백업 대상 패널 · 진행 현황판 · 그룹 카드가 같은 창을 쓴다(같은 동작이 화면마다 다르게 묻지 않게). 요청은 부르는 쪽이 보낸다(onConfirm — 엣지 대행 시한은 부르는 쪽이 안다).
  *   문구 · 판정은 bareosCancelText.js. ⚠ 문구에 백틱 금지 · 400px 에서 줄바꿈(버튼 줄 flexWrap).
  */

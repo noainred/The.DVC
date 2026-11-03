@@ -7,7 +7,7 @@ import { fireText, fireTone, FIRE_STATE_TEXT } from './bareosGroupText.js';
 const NOW = 1_800_000_000_000;
 const all = (o) => JSON.stringify(o);
 
-describe('v2.865 취소 문구 — 판정은 서버 cancelInfo 값 그대로', () => {
+describe('v2.867 취소 문구 — 판정은 서버 cancelInfo 값 그대로', () => {
   it('ageText — 초 · 분 초 · 시간 분 · 모름', () => {
     expect(ageText(8_000)).toBe('8초');
     expect(ageText(72_000)).toBe('1분 12초');

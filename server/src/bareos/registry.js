@@ -7,7 +7,7 @@
  *   bareosJob, client, storage, pool, schedule, level, // Director 에 만든 잡(이름은 names.jobNameFor)
  *   enabled, createdBy, createdAt, demo?,
  *   pending: { jobid, since, level, by, trigger } | null,   // 포탈이 실행했고 아직 끝나지 않은 백업
- *   cancelReq: { jobid, at, by, via:'single'|'group' } | null,   // v2.865 그 실행에 취소를 보냈다(판정은 cancelState.js — 지금 도는 실행일 때만 유효)
+ *   cancelReq: { jobid, at, by, via:'single'|'group' } | null,   // v2.867 그 실행에 취소를 보냈다(판정은 cancelState.js — 지금 도는 실행일 때만 유효)
  *   lastRun: { jobid, status, state, level, startedAt, endedAt, bytes, files, errors, checkedAt } | null,
  *   lastError: { at, message } | null,
  *   missingInDirector: boolean,                         // Director `.jobs` 에 없으면 true(누가 conf 를 지웠다)
@@ -327,7 +327,7 @@ export function markPending(id, { jobid, level, by, trigger = 'manual' }) {
 }
 
 /**
- * v2.865 취소를 보냈다(Director 가 cancel 을 받았다) — 그 실행이 끝나면(applyRunRow) 지운다. 화면의 '멈추는 중' · '멈추지 않음' 은 cancelState.cancelInfo 가 판정한다.
+ * v2.867 취소를 보냈다(Director 가 cancel 을 받았다) — 그 실행이 끝나면(applyRunRow) 지운다. 화면의 '멈추는 중' · '멈추지 않음' 은 cancelState.cancelInfo 가 판정한다.
  * @param {{ jobid:number, by?:string, via?:'single'|'group', at?:number }} c
  */
 export function markCancelReq(id, { jobid, by = '', via = 'single', at = Date.now() }) {
@@ -370,7 +370,7 @@ export function applyRunRow(id, row, now = Date.now()) {
     j.lastRate = { jobid: rec.jobid, level: rec.level, bps: Math.round(rec.bytes / ((rec.endedAt - rec.startedAt) / 1000)), bytes: rec.bytes, at: rec.endedAt };
     changed = true;
   }
-  // v2.865 취소를 보낸 실행이 끝났다(A 든 T 든) — 취소 기록을 내린다(지난 기록은 cancelInfo 가 어차피 무시하지만 원장에 남기지 않는다)
+  // v2.867 취소를 보낸 실행이 끝났다(A 든 T 든) — 취소 기록을 내린다(지난 기록은 cancelInfo 가 어차피 무시하지만 원장에 남기지 않는다)
   if (j.cancelReq && j.cancelReq.jobid === row.jobid && isFinalStatus(row.status)) { j.cancelReq = null; changed = true; }
   if (j.pending && j.pending.jobid === row.jobid) {
     if (isFinalStatus(row.status)) { j.pending = null; changed = true; }
@@ -456,7 +456,7 @@ export function pendingWork(now = Date.now()) {
   for (const j of load().jobs) {
     const dir = j.directorId || '';   // 옛 잡('')은 폴러가 settings.jobDirectorId 로 푼다
     if (j.pending?.jobid) out.push({ id: j.id, jobid: j.pending.jobid, kind: 'backup', job: j.bareosJob, demo: !!j.demo, directorId: dir, vcenterId: j.vcenterId });
-    // v2.865 취소를 보낸 Bareos 스케줄 실행(포탈이 시작하지 않아 pending 이 없다)도 결과가 나올 때까지 묻는다(CANCEL_TRACK_MS 동안 — 그 뒤는 대조 틱)
+    // v2.867 취소를 보낸 Bareos 스케줄 실행(포탈이 시작하지 않아 pending 이 없다)도 결과가 나올 때까지 묻는다(CANCEL_TRACK_MS 동안 — 그 뒤는 대조 틱)
     if (cancelTracked(j, now)) out.push({ id: j.id, jobid: j.cancelReq.jobid, kind: 'backup', job: j.bareosJob, demo: !!j.demo, directorId: dir, vcenterId: j.vcenterId, cancelOnly: true });
     for (const r of j.restores || []) if (restoreOpen(r)) out.push({ id: j.id, jobid: r.jobid, kind: 'restore', demo: !!j.demo, directorId: dir, vcenterId: j.vcenterId });
   }
@@ -506,7 +506,7 @@ export function clearPending(id, message, now = Date.now()) {
   const db = load();
   const j = db.jobs.find((x) => x.id === id);
   if (!j?.pending) return null;
-  if (j.cancelReq?.jobid === j.pending.jobid) j.cancelReq = null;   // v2.865 추적을 내린 실행의 취소 기록도 함께
+  if (j.cancelReq?.jobid === j.pending.jobid) j.cancelReq = null;   // v2.867 추적을 내린 실행의 취소 기록도 함께
   j.pending = null;
   j.lastError = { at: now, message: String(message || '').slice(0, 300) };
   persist();

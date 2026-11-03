@@ -64,7 +64,7 @@ export function demoRunMs() {
   return Number.isFinite(n) && n >= 5_000 && n <= 3_600_000 ? Math.round(n) : 30_000;
 }
 /**
- * v2.865 데모 취소가 끝나기까지(기본 0 — 바로 A). 화면 검증용 env BAREOS_DEMO_CANCEL_MS(1초~10분) — 실제 FD 는 멈추기까지 수 초~수 분 걸린다(추정).
+ * v2.867 데모 취소가 끝나기까지(기본 0 — 바로 A). 화면 검증용 env BAREOS_DEMO_CANCEL_MS(1초~10분) — 실제 FD 는 멈추기까지 수 초~수 분 걸린다(추정).
  * 그동안 Director 상태는 'is waiting for client to cancel'(dird 문구 모양 · 추정) 이고 카탈로그 행은 아직 R 이다.
  */
 export function demoCancelMs() {

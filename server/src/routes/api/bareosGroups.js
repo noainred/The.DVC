@@ -46,7 +46,7 @@ export function groupView(g, now = Date.now()) {
     ...g, keep: g.keep ?? null, fires: Array.isArray(g.fires) ? g.fires : [], lastPrune: g.lastPrune ?? null, keepText: keepText(g.keep ?? null),
     scheduleText: scheduleText(g.schedule), next: next ? { at: next.at, key: next.key, level: next.level, ...(g.skipKey && g.skipKey === next.key ? { skip: true } : {}) } : null, running: groupRunning(g.id),
     ...(groupPruning(g.id) ? { pruning: true } : {}), ...(clockAhead ? { clockAhead: true } : {}),
-    // v2.865 회차 중단 — 처리 중 요청 · 보내는 진행(보냄 n / N · 줄 대기)
+    // v2.867 회차 중단 — 처리 중 요청 · 보내는 진행(보냄 n / N · 줄 대기)
     canceling: groupCanceling(g.id), progress: groupProgress(g.id),
   };
 }
@@ -205,7 +205,7 @@ api.get('/tools/bareos-backup/groups/tree', adminOnly, (req, res) => {
       job: j ? { id: j.id, schedule: j.schedule || '', level: j.level || '', enabled: j.enabled !== false } : null,
       eligible: j ? true : el.ok, ...(j || el.ok ? {} : { reason: el.reason }),
       groupId: groupOf.get(vm.id) || '',
-      ...(j && cancelInfo(j, now) ? { cancel: cancelInfo(j, now) } : {}),   // v2.865 멈추는 중(취소를 보낸 실행)
+      ...(j && cancelInfo(j, now) ? { cancel: cancelInfo(j, now) } : {}),   // v2.867 멈추는 중(취소를 보낸 실행)
     });
   }
   // 잡은 있는데 인벤토리에 없는 VM(지워졌거나 옮겨짐) — 그룹에서 빼거나 원장을 정리할 수 있게 보인다
@@ -244,7 +244,7 @@ api.get('/tools/bareos-backup/groups/tree', adminOnly, (req, res) => {
           for (const id of g.vmIds) { const j = jobs.get(id); if (!j) continue; const r = resolve(j, null); if (r.collected) known = true; if (r.dup) n++; }
           dupVms = known ? n : null;
         }
-        // v2.865 회차 중단 계획(확인 창의 수 · '회차 중단…' 버튼을 열지) — 원장 · 실행 표만(Director 에 접속하지 않는다)
+        // v2.867 회차 중단 계획(확인 창의 수 · '회차 중단…' 버튼을 열지) — 원장 · 실행 표만(Director 에 접속하지 않는다)
         return { ...groupView(g, now), poolPolicy: pp ? { ...pp, from: g.pool ? 'group' : 'site' } : null, dupVms, stop: cancelPlan(g, jobs, now) };
       });
     })(),
@@ -351,7 +351,7 @@ api.post('/tools/bareos-backup/groups/:id/prune-preview', adminOnly, async (req,
 });
 
 /**
- * v2.865 회차 중단 — body { confirmName, includeScheduled?, skipNext? }(시안 docs/design/bareos-cancel/ ③ · 사용자 결정 기본값: 이번 회차만 · 이름 재입력 · OTP 없음).
+ * v2.867 회차 중단 — body { confirmName, includeScheduled?, skipNext? }(시안 docs/design/bareos-cancel/ ③ · 사용자 결정 기본값: 이번 회차만 · 이름 재입력 · OTP 없음).
  * 멈춤은 데이터를 지우지 않는다(취소 · 보내지 않음만) — 그래서 본인 OTP 는 묻지 않고 그룹 이름을 다시 적게 한다(잘못 누름 방지).
  * 단계(줄 대기 · 보내는 중 · Director 실행 중)마다 하는 일이 다르다(groupRunner.cancelGroupRun). 취소는 뒤에서 보내고 바로 202 — 화면이 다시 읽어 따라간다.
  * 범위: 쓰기 범위(조회 밖 404 → 쓰기 밖 403 — groupFor). 데모 계정은 관리자 라우트(adminOnly)라 닿지 않는다.
