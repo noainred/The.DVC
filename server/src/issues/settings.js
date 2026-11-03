@@ -18,14 +18,14 @@ import { atomicWriteFileSync, preserveCorrupt, safeLoadText } from '../util/atom
 import { capStr } from '../util/capStr.js';
 
 export const SETTINGS_LIMITS = Object.freeze({ components: 100, pool: 100, people: 500, name: 64, component: 60, email: 254 });
-export const NOTIFY_EVENTS = Object.freeze(['assigned', 'status', 'comment', 'due']);
+export const NOTIFY_EVENTS = Object.freeze(['assigned', 'status', 'progress', 'comment', 'due']);
 
 const fileOf = () => path.join(config.configDir, 'issue-settings.json');
 
 export function defaultIssueSettings() {
   return {
     autoAssign: { enabled: false, components: [], pool: [] },
-    notify: { enabled: false, mail: true, chat: false, events: { assigned: true, status: true, comment: true, due: true }, people: [] },
+    notify: { enabled: false, mail: true, chat: false, events: { assigned: true, status: true, progress: true, comment: true, due: true }, people: [] },
   };
 }
 
@@ -149,7 +149,7 @@ export function suggestAssignee(issue, settings, load = [], canSee = () => true)
   const vc = issue?.vcenterId || '';
   const comp = String(issue?.component || '').trim().toLowerCase();
   if (comp) {
-    const rule = (a.components || []).find((c) => c.name.toLowerCase() === comp);
+    const rule = (a.components || []).find((x) => x.name.toLowerCase() === comp);
     if (rule && canSee(rule.assignee, vc)) return { assignee: rule.assignee, reason: `컴포넌트 ‘${rule.name}’ 기본 담당자`, via: 'component' };
   }
   const open = new Map((Array.isArray(load) ? load : []).map((x) => [x.assignee, Number(x.open) || 0]));

@@ -1,6 +1,7 @@
 /**
  * Issues — 상단 메뉴 '이슈'(v2.864). 이슈를 등록하고 담당자에게 할당해 끝날 때까지 추적한다.
- * 서브탭 셋: 보드(칸반) · 목록(표 · 일괄 할당) · 내 작업(내 이슈 · 미할당 대기열 · 팀 할당 현황). 상세는 #/issues/<sub>/<키>.
+ * 서브탭: 보드(칸반) · 목록(표 · 일괄 할당) · 내 작업(내 이슈 · 내 요청 진행 현황 · 미할당 대기열 · 팀 할당 현황) · 활동(v2.871 팀 활동 피드). 상세는 #/issues/<sub>/<키>.
+ *  · v2.871 진행 공유: 진행률(0~100)·진행 메모·'N일 갱신 없음' 표시·링크 복사 — 보는 것은 조회 권한, 고치는 것은 쓰기 범위.
  *  · 읽기는 로그인 사용자 전부, 쓰기(생성·수정·상태·할당·댓글)는 admin·operator(서버가 집행). 삭제는 본인 또는 전체 범위 관리자.
  *  · 전이 규칙(진행 중은 담당자 필수 · 보류는 사유 필수)은 서버가 판정하고 화면은 거부 사유를 그대로 보인다.
  * 폴링하지 않는다(마운트 1회 + 동작 뒤 다시 읽기 + 새로고침 버튼). 늦게 온 이전 응답은 버린다(makeLatest).
@@ -16,10 +17,10 @@ import { useHashTab } from '../../hooks/useHashTab.js';
 import {
   STATUS_ORDER, STATUS_TEXT, TYPE_TEXT, PRIORITY_TEXT, statusText, typeText, priorityText, dueInfo, timeText, dateText, initialOf, colorIndexOf,
   groupByStatus, filterRows, myWork, loadPct, LOAD_CAP, toDateInput, fromDateInput, parseLabels, saveFailText, persistNote, historyText,
-  peopleOptions, makeLatest, vcName, vcenterOptions, notifyStatusText,
+  peopleOptions, makeLatest, vcName, vcenterOptions, notifyStatusText, progressOf, staleInfo, myRequests, activityText, issueLink, STALE_DAYS,
 } from './issueText.js';
 
-const SUBS = [['board', '보드'], ['list', '목록'], ['mine', '내 작업']];
+const SUBS = [['board', '보드'], ['list', '목록'], ['mine', '내 작업'], ['activity', '활동']];
 /** v2.871: 설정 탭은 전체 범위 관리자에게만 보인다(서버가 같은 기준으로 막는다). 해시 키는 늘 유효 — 권한이 없으면 안내만. */
 const SETTINGS_SUB = ['settings', '설정'];
 const EMPTY_FILTERS = Object.freeze({ q: '', assignee: '', priority: '', type: '', status: '', vcenterId: '', mine: false });
@@ -111,11 +112,12 @@ export default function Issues() {
         ? <IssueDetail key={openKey} issueKey={openKey} meta={meta} onBack={() => openIssue('')} onWritten={onWritten} />
         : (
           <>
-            {sub !== 'mine' && <FilterBar filters={filters} setF={setF} meta={meta} sub={sub} onReset={() => setFilters(EMPTY_FILTERS)} />}
+            {sub !== 'mine' && sub !== 'activity' && <FilterBar filters={filters} setF={setF} meta={meta} sub={sub} onReset={() => setFilters(EMPTY_FILTERS)} />}
             {meta.scoped && <div className="muted" style={{ fontSize: 12 }}>범위가 지정된 계정이라 내 법인(vCenter)의 이슈만 보입니다 — 법인이 없는 공용 이슈는 보이지 않습니다.</div>}
             {sub === 'board' && <BoardView rows={shown} meta={meta} onOpen={openIssue} recentDays={Math.round((meta.recentDoneMs || 0) / 86400000)} />}
             {sub === 'list' && <ListView rows={shown} total={rows.length} meta={meta} onOpen={openIssue} onWritten={onWritten} />}
             {sub === 'mine' && <MyWorkView rows={rows} stats={stats} meta={meta} onOpen={openIssue} onWritten={onWritten} />}
+            {sub === 'activity' && <ActivityView meta={meta} onOpen={openIssue} />}
           </>
         )}
     </div>
@@ -222,6 +224,7 @@ function IssueCard({ r, meta, onOpen }) {
         {(meta?.vcenters || []).length > 0 && <span className="iss-vc" title="법인(vCenter)">{vcName(meta, r.vcenterId)}</span>}
       </span>
       <span className="iss-card-title">{r.title}</span>
+      <ProgressLine r={r} />
       <span className="iss-card-foot">
         <PrioTag p={r.priority} />
         <Due r={r} />
@@ -276,11 +279,11 @@ function ListView({ rows, total, meta, onOpen, onWritten }) {
       {rows.length === 0
         ? <div className="muted" style={{ padding: 16 }}>{total ? '조건에 맞는 이슈가 없습니다.' : '아직 이슈가 없습니다.'}</div>
         : (
-          <STable className="v3-table" minWidth={1080}>
+          <STable className="v3-table" minWidth={1160}>
             <thead>
               <tr>
                 {canWrite && <th data-nosort style={{ width: 34 }}><input type="checkbox" checked={allOn} onChange={toggleAll} aria-label="보이는 이슈 전체 선택" /></th>}
-                <th>키</th><th>유형</th><th>제목</th><th>법인</th><th>상태</th><th>우선순위</th><th>담당자</th><th>보고자</th><th>기한</th><th>갱신</th>
+                <th>키</th><th>유형</th><th>제목</th><th>법인</th><th>상태</th><th>진행</th><th>우선순위</th><th>담당자</th><th>보고자</th><th>기한</th><th>갱신</th>
               </tr>
             </thead>
             <tbody>
@@ -295,6 +298,7 @@ function ListView({ rows, total, meta, onOpen, onWritten }) {
                   </td>
                   <td data-sort={r.vcenterId ? vcName(meta, r.vcenterId) : '~'}>{r.vcenterId ? <span className="iss-vc-cell" title={vcName(meta, r.vcenterId)}>{vcName(meta, r.vcenterId)}</span> : <span className="muted">공용</span>}</td>
                   <td data-sort={STATUS_ORDER.indexOf(r.status)}><StatusChip s={r.status} /></td>
+                  <td data-sort={progressOf(r) ?? ''}><ProgressLine r={r} compact /></td>
                   <td data-sort={r.priority}><PrioTag p={r.priority} /></td>
                   <td data-sort={r.assignee || '~'}>{r.assignee ? <span className="iss-who"><Avatar name={r.assignee} size={22} />{r.assignee}</span> : <span className="iss-unassigned">미할당</span>}</td>
                   <td>{r.reporter}</td>
@@ -334,7 +338,7 @@ function MyWorkView({ rows, stats, meta, onOpen, onWritten }) {
       <div className="iss-mine-grid">
         <div className="iss-mine-col">
           <MiniList title={`내 이슈 · ${w.mine.length}건 · 기한순`} rows={w.mine} onOpen={onOpen} empty="나에게 할당된 열린 이슈가 없습니다." />
-          <MiniList title={`내가 등록한 이슈 · ${w.reported.length}건`} rows={w.reported} onOpen={onOpen} empty="내가 등록했고 다른 사람이 맡은(또는 미할당) 열린 이슈가 없습니다." showAssignee />
+          <MyRequests rows={rows} me={meta.me} recentDays={Math.round((meta.recentDoneMs || 0) / 86400000)} onOpen={onOpen} />
         </div>
         <div className="iss-mine-col">
           <div className="card iss-queue">
@@ -388,6 +392,166 @@ function MiniList({ title, rows, onOpen, empty, showAssignee = false }) {
         </div>
       ))}
     </div>
+  );
+}
+
+/* ───────────── 진행 공유(v2.871) ───────────── */
+
+/** 진행률 막대 + 멈춤 표시. 보고가 없으면 막대를 그리지 않는다(0% 로 그리지 않는다 — 없음과 0 은 다르다). */
+function ProgressLine({ r, compact = false }) {
+  const pct = progressOf(r);
+  const st = r.status === 'done' ? null : staleInfo(r);
+  if (pct == null && !st) return compact ? <span className="muted">—</span> : null;
+  return (
+    <span className={`iss-prog${compact ? ' compact' : ''}`}>
+      {pct != null && (
+        <>
+          <span className="iss-prog-bar" role="img" aria-label={`진행률 ${pct}%`}><span style={{ width: `${pct}%` }} /></span>
+          <span className="iss-prog-n">{pct}%</span>
+        </>
+      )}
+      {st && <span className="iss-stale" title={`진행 중·검토 중인데 ${st.days}일 동안 상태·진행률·댓글 갱신이 없습니다`}>{st.text}</span>}
+    </span>
+  );
+}
+
+/** 내 요청 진행 현황 — 내가 등록한 이슈를 누가 맡아 어디까지 왔는지(최근 완료 포함). */
+function MyRequests({ rows, me, recentDays, onOpen }) {
+  const { open, done } = useMemo(() => myRequests(rows, me), [rows, me]);
+  const row = (r) => (
+    <div key={r.key} className="iss-req">
+      <div className="iss-req-top">
+        <span className="iss-key">{r.key}</span>
+        <button type="button" className="iss-link iss-row-title" onClick={() => onOpen(r.key)}>{r.title}</button>
+        <StatusChip s={r.status} />
+      </div>
+      <div className="iss-req-foot">
+        {r.assignee ? <span className="iss-who"><Avatar name={r.assignee} size={20} />{r.assignee}</span> : <span className="iss-unassigned">담당자 배정 대기</span>}
+        <ProgressLine r={r} />
+        {r.progressNote && r.status !== 'done' && <span className="muted iss-req-note" title={r.progressNote}>{r.progressNote}</span>}
+        <span className="iss-grow" />
+        <span className="muted" style={{ fontSize: 11.5, whiteSpace: 'nowrap' }} title={timeText(r.status === 'done' ? (r.closedAt || r.updatedAt) : r.updatedAt)}>
+          {r.status === 'done' ? `완료 ${dateText(r.closedAt || r.updatedAt)}` : `갱신 ${dateText(r.updatedAt)}`}
+        </span>
+      </div>
+    </div>
+  );
+  return (
+    <div className="card">
+      <h3 className="iss-h3">내 요청 진행 현황 · 진행 {open.length}건 · 최근 완료 {done.length}건</h3>
+      {open.length + done.length === 0 && <div className="muted">내가 등록한 이슈가 없습니다(완료는 최근 {recentDays}일 것만 보입니다).</div>}
+      {open.map(row)}
+      {done.length > 0 && <div className="muted iss-req-sep">최근 {recentDays}일 안에 완료</div>}
+      {done.slice(0, 10).map(row)}
+      {done.length > 10 && <div className="muted" style={{ fontSize: 12 }}>완료 앞 10건만 표시 — 나머지는 목록에서 ‘상태: 완료’ 로 보세요.</div>}
+    </div>
+  );
+}
+
+const ACTIVITY_PAGE = 100;
+/** 팀 활동 피드 — 서버가 볼 수 있는 이슈의 변경만 준다. 폴링하지 않는다(마운트 1회 + 새로고침). */
+function ActivityView({ meta, onOpen }) {
+  const [d, setD] = useState(null);
+  const [err, setErr] = useState(null);
+  const [who, setWho] = useState('');
+  const latest = useLatest();
+  const load = useCallback(() => {
+    const k = latest.next();
+    fetchJson('/issues/activity', { limit: ACTIVITY_PAGE }).then((r) => { if (latest.isLatest(k)) { setD(r); setErr(null); } }).catch((e) => { if (latest.isLatest(k)) setErr(e); });
+  }, [latest]);
+  useEffect(() => { load(); }, [load]);
+  if (err && !d) return <ErrorBox error={err} />;
+  if (!d) return <Loading label="활동" />;
+  const items = (d.items || []).filter((a) => !who || a.by === who);
+  const people = [...new Set((d.items || []).map((a) => a.by).filter(Boolean))].sort();
+  let lastDay = '';
+  return (
+    <div className="card iss-activity">
+      <div className="iss-filters">
+        <Select className="select" value={who} onChange={(e) => setWho(e.target.value)} aria-label="사람">
+          <option value="">사람: 전체</option>
+          {people.map((p) => <option key={p} value={p}>{p}</option>)}
+        </Select>
+        <button className="btn" onClick={load}>새로고침</button>
+        <span className="muted" style={{ fontSize: 12 }}>할당·상태·진행률·보류·댓글을 최신순으로 보여 줍니다{meta.scoped ? ' — 내 법인 이슈만' : ''}.</span>
+      </div>
+      {err && <div className="banner">새로 읽지 못했습니다 — 아래는 직전에 읽은 활동입니다.</div>}
+      {items.length === 0 && <div className="muted" style={{ padding: 12 }}>표시할 활동이 없습니다.</div>}
+      <ol className="iss-feed">
+        {items.map((a, i) => {
+          const day = dateText(a.at);
+          const head = day !== lastDay ? day : '';
+          lastDay = day;
+          return (
+            <li key={`${a.key}-${a.at}-${i}`}>
+              {head && <div className="iss-feed-day">{head}</div>}
+              <div className="iss-feed-row">
+                <Avatar name={a.by} size={24} />
+                <div className="iss-feed-main">
+                  <div><button type="button" className="iss-link" onClick={() => onOpen(a.key)}><span className="iss-key">{a.key}</span> {a.title}</button></div>
+                  <div className="iss-feed-text">{activityText(a)}</div>
+                </div>
+                <span className="muted iss-feed-at" title={timeText(a.at)}>{timeText(a.at).slice(-5)}</span>
+              </div>
+            </li>
+          );
+        })}
+      </ol>
+      {d.truncated && <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>최근 {d.limit}건만 보입니다. 이슈마다 최근 이력 20건·댓글 5건까지 훑습니다.</div>}
+    </div>
+  );
+}
+
+/** 상세 옆 진행률 상자 — 누구나 보고, 쓰기 가능한 사람만 고친다(서버가 쓰기 범위를 다시 판정). */
+function ProgressBox({ it, canWrite, busy, act, noteMax }) {
+  const pct = progressOf(it);
+  const [open, setOpen] = useState(false);
+  const [v, setV] = useState('');
+  const [note, setNote] = useState('');
+  const st = it.status === 'done' ? null : staleInfo(it);
+  const start = () => { setV(pct == null ? '' : String(pct)); setNote(it.progressNote || ''); setOpen(true); };
+  const n = v === '' ? null : Number(v);
+  const bad = v !== '' && !(Number.isInteger(n) && n >= 0 && n <= 100);
+  return (
+    <div className="iss-prop">
+      <span className="iss-prop-l">진행률</span>
+      {pct != null
+        ? <span className="iss-prog big"><span className="iss-prog-bar"><span style={{ width: `${pct}%` }} /></span><b>{pct}%</b></span>
+        : <span className="muted">보고 없음</span>}
+      {it.progressNote && <span className="iss-prog-note">{it.progressNote}</span>}
+      {it.progressAt && <span className="muted" style={{ fontSize: 11.5 }}>{it.progressBy} · {timeText(it.progressAt)}</span>}
+      {st && <span className="iss-stale">{st.text} — {STALE_DAYS}일 넘게 갱신이 없습니다</span>}
+      {canWrite && !open && <button className="btn" disabled={busy} onClick={start}>진행 상황 갱신</button>}
+      {canWrite && open && (
+        <div className="iss-prog-edit">
+          <label className="iss-inline">진행률(%)
+            <input className="input" type="number" min={0} max={100} step={5} value={v} onChange={(e) => setV(e.target.value)} style={{ width: 80 }} aria-label="진행률" />
+          </label>
+          <textarea className="input" rows={2} value={note} maxLength={noteMax} onChange={(e) => setNote(e.target.value)} placeholder="진행 메모 — 예: ESXi 3대 중 2대 완료, 내일 마무리" aria-label="진행 메모" />
+          {bad && <span className="iss-due over" style={{ fontSize: 12 }}>0~100 의 정수를 넣으세요(비우면 ‘보고 없음’).</span>}
+          <div className="flex" style={{ gap: 6 }}>
+            <button className="btn primary" disabled={busy || bad} onClick={() => act(() => postJson(`/issues/${it.key}/progress`, { progress: n, note }), '진행 상황을 갱신했습니다.').then((ok) => { if (ok) setOpen(false); })}>저장</button>
+            <button className="btn" disabled={busy} onClick={() => setOpen(false)}>취소</button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** 공유 링크 복사 — 받는 사람도 로그인해야 열리고, 볼 수 없는 법인의 이슈면 서버가 404 를 준다. */
+function CopyLink({ issueKey }) {
+  const [state, setState] = useState('');
+  const url = issueLink(issueKey);
+  const copy = async () => {
+    try { await navigator.clipboard.writeText(url); setState('ok'); setTimeout(() => setState(''), 2000); } catch { setState('manual'); }
+  };
+  if (!url) return null;
+  return (
+    <>
+      <button className="btn" onClick={copy} title="이 이슈 주소를 복사합니다 — 받는 사람도 로그인해야 열립니다">{state === 'ok' ? '복사했습니다' : '링크 복사'}</button>
+      {state === 'manual' && <input className="input iss-linkbox" readOnly value={url} onFocus={(e) => e.target.select()} aria-label="이슈 링크 — 직접 복사하세요" />}
+    </>
   );
 }
 
@@ -542,6 +706,7 @@ function IssueDetail({ issueKey, meta, onBack, onWritten }) {
                       </>
                     )
                     : <><StatusChip s={it.status} /><span className="muted" style={{ fontSize: 12 }}>{roScope ? '이 법인은 쓰기 범위 밖이라 조회만 할 수 있습니다' : '상태 변경·할당은 운영자·관리자만 할 수 있습니다'}</span></>}
+                  <CopyLink issueKey={it.key} />
                 </div>
                 {blockOpen && !it.blocked && (
                   <div className="iss-blockbox">
@@ -610,6 +775,7 @@ function IssueDetail({ issueKey, meta, onBack, onWritten }) {
             </>
           )}
         </div>
+        <ProgressBox it={it} canWrite={canWrite} busy={busy} act={act} noteMax={meta.limits?.progressNote || 300} />
         <div className="iss-prop-grid">
           <div className="iss-prop"><span className="iss-prop-l">우선순위</span><PrioTag p={it.priority} /></div>
           <div className="iss-prop"><span className="iss-prop-l">기한</span><Due r={it} /></div>
@@ -639,7 +805,7 @@ function IssueDetail({ issueKey, meta, onBack, onWritten }) {
 
 /* ───────────── 설정(v2.871 — 자동 할당 · 알림 · 사람별 메일 주소) ───────────── */
 
-const EVENT_TEXT = Object.freeze({ assigned: '할당(새 담당자 · 이전 담당자)', status: '상태 변경(담당자 · 보고자 · 관찰자)', comment: '댓글 · @멘션(담당자 · 보고자 · 관찰자 · 언급된 사람)', due: '기한 24시간 전 · 지남(담당자 — 하루 한 번)' });
+const EVENT_TEXT = Object.freeze({ assigned: '할당(새 담당자 · 이전 담당자)', status: '상태 변경(담당자 · 보고자 · 관찰자)', progress: '진행률·진행 메모(담당자 · 보고자 · 관찰자)', comment: '댓글 · @멘션(담당자 · 보고자 · 관찰자 · 언급된 사람)', due: '기한 24시간 전 · 지남(담당자 — 하루 한 번)' });
 const splitNames = (s) => String(s || '').split(/[,\s]+/).map((x) => x.trim()).filter(Boolean);
 
 /** 전체 범위 관리자 전용 — 서버가 같은 기준으로 막는다(GET·PUT /issues/settings). 조회 실패면 저장 버튼을 열지 않는다. */

@@ -176,6 +176,7 @@ export function historyText(h) {
   if (f === 'type') return `${who}유형 ${typeText(h.from)} → ${typeText(h.to)}`;
   if (f === 'blocked') return h.to ? `${who}보류: ${h.to}` : `${who}보류 해제${h.from ? ` (${h.from})` : ''}`;
   if (f === 'dueAt') return `${who}기한 ${h.from ? dateText(Number(h.from)) : '없음'} → ${h.to ? dateText(Number(h.to)) : '없음'}`;
+  if (f === 'progress') return `${who}진행률 ${h.from !== '' && h.from != null ? `${h.from}%` : '없음'} → ${h.to !== '' && h.to != null ? `${h.to}%` : '없음'}${h.note ? ` — ${h.note}` : ''}`;
   if (f === 'body') return `${who}본문 수정`;
   if (f === 'title') return `${who}제목 ‘${h.from}’ → ‘${h.to}’`;
   const label = FIELD_TEXT[f] || f || '';
@@ -223,4 +224,49 @@ export function notifyStatusText(st) {
   if (st.dropped) parts.push(`묶음 상한으로 뺀 사람 ${st.dropped}`);
   if (st.pendingRecipients) parts.push(`대기 ${st.pendingRecipients}명`);
   return parts.join(' · ');
+}
+
+/* ───────────── v2.871 진행 공유(사용자 요청 '진행상태를 다른 사람이 볼 수 있게') ───────────── */
+
+/** 진행률 — 0~100 정수만 값이다. 보고가 없으면 null(0 이 아니다 — '못 읽은 값은 0 이 아니다'). */
+export function progressOf(r) {
+  const n = r?.progress;
+  return Number.isInteger(n) && n >= 0 && n <= 100 ? n : null;
+}
+
+/** 이 일수 동안 아무 갱신이 없으면 '멈춤' 으로 표시한다(진행 중·검토 중인 이슈만 — 할 일·백로그는 대기가 정상이다). */
+export const STALE_DAYS = 3;
+/** @returns {{ days: number, text: string }|null} */
+export function staleInfo(r, now = Date.now(), days = STALE_DAYS) {
+  if (!r || (r.status !== 'progress' && r.status !== 'review')) return null;
+  const last = Math.max(Number(r.updatedAt) || 0, Number(r.progressAt) || 0);
+  if (!last) return null;
+  const d = Math.floor((now - last) / DAY_MS);
+  return d >= days ? { days: d, text: `${d}일 갱신 없음` } : null;
+}
+
+/**
+ * 내 요청 진행 현황 — 내가 등록한 이슈 전부(최근 완료 포함). 열린 것 먼저(최근 갱신순), 완료는 뒤(최근 완료순).
+ * 담당자가 나여도 넣는다(요청자가 스스로 맡은 경우도 '내 요청' 이다).
+ */
+export function myRequests(rows, me) {
+  if (!me) return { open: [], done: [] };
+  const mine = (Array.isArray(rows) ? rows : []).filter((r) => r && r.reporter === me);
+  const open = mine.filter((r) => r.status !== 'done').sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+  const done = mine.filter((r) => r.status === 'done').sort((a, b) => (b.closedAt || b.updatedAt || 0) - (a.closedAt || a.updatedAt || 0));
+  return { open, done };
+}
+
+/** 활동 피드 한 줄(누가 · 무엇을). 이슈 키·제목은 화면이 따로 붙인다. */
+export function activityText(a) {
+  if (!a || typeof a !== 'object') return '';
+  if (a.field === 'comment') return `${a.by || '?'} · 댓글: ${a.to || ''}`;
+  if (a.field === 'created') return `${a.by || '?'} · 이슈 생성`;
+  return historyText(a);
+}
+
+/** 공유 링크 — 지금 포탈 주소의 #/issues/board/<키>. 받는 사람도 로그인해야 열리고 권한·범위는 서버가 다시 판정한다. */
+export function issueLink(key, loc = (typeof window !== 'undefined' ? window.location : null)) {
+  if (!/^ISS-\d{1,9}$/.test(String(key || '')) || !loc) return '';
+  return `${loc.origin}${loc.pathname}#/issues/board/${key}`;
 }

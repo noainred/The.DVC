@@ -3,6 +3,7 @@ import { describe, it, expect } from 'vitest';
 import {
   dueInfo, dateText, initialOf, colorIndexOf, groupByStatus, filterRows, myWork, loadPct, toDateInput, fromDateInput, parseLabels,
   saveFailText, persistNote, historyText, peopleOptions, STATUS_ORDER, makeLatest, vcName, vcenterOptions, notifyStatusText,
+  progressOf, staleInfo, myRequests, activityText, issueLink, STALE_DAYS,
 } from './issueText.js';
 
 // 기준 시각은 실제 시각에서 정시 경계로 떨어뜨려 고정한다(docs/rules/common.md — Date.now 직접·고정 epoch 둘 다 깨진다).
@@ -151,5 +152,50 @@ describe('v2.871 법인 축 · 알림 상태', () => {
     expect(t).toMatch(/실패 1/);
     expect(t).toMatch(/주소 없는 사람 2회/);
     expect(t).toMatch(/대기 1명/);
+  });
+});
+
+describe('v2.871 진행 공유 — 진행률 · 멈춤 · 내 요청 · 활동 · 링크', () => {
+  it('progressOf — 0~100 정수만 값 · 없음은 null(0 이 아니다)', () => {
+    expect(progressOf({ progress: 0 })).toBe(0);
+    expect(progressOf({ progress: 100 })).toBe(100);
+    expect(progressOf({ progress: null })).toBeNull();
+    expect(progressOf({ progress: '40' })).toBeNull();
+    expect(progressOf({ progress: 101 })).toBeNull();
+    expect(progressOf({})).toBeNull();
+  });
+  it('staleInfo — 진행 중·검토 중만 · 진행률 갱신도 갱신이다', () => {
+    const old = NOW - (STALE_DAYS + 1) * DAY;
+    expect(staleInfo({ status: 'progress', updatedAt: old }, NOW).days).toBe(STALE_DAYS + 1);
+    expect(staleInfo({ status: 'review', updatedAt: old }, NOW).text).toMatch(/일 갱신 없음/);
+    expect(staleInfo({ status: 'todo', updatedAt: old }, NOW)).toBeNull();
+    expect(staleInfo({ status: 'progress', updatedAt: old, progressAt: NOW - HOUR }, NOW)).toBeNull();
+    expect(staleInfo({ status: 'progress', updatedAt: NOW - DAY }, NOW)).toBeNull();
+    expect(staleInfo({ status: 'progress' }, NOW)).toBeNull();
+  });
+  it('myRequests — 내가 등록한 것 전부 · 열린 것 최근순 · 완료는 뒤', () => {
+    const rows = [
+      { key: 'a', reporter: 'me', status: 'todo', updatedAt: 1 },
+      { key: 'b', reporter: 'me', status: 'progress', assignee: 'me', updatedAt: 5 },
+      { key: 'c', reporter: 'me', status: 'done', updatedAt: 9, closedAt: 9 },
+      { key: 'd', reporter: 'x', status: 'todo', updatedAt: 7 },
+    ];
+    const r = myRequests(rows, 'me');
+    expect(r.open.map((x) => x.key)).toEqual(['b', 'a']);
+    expect(r.done.map((x) => x.key)).toEqual(['c']);
+    expect(myRequests(rows, '')).toEqual({ open: [], done: [] });
+  });
+  it('activityText — 진행률 · 댓글 · 생성', () => {
+    expect(activityText({ by: 'kim', field: 'progress', from: '40', to: '70', note: '2대 완료' })).toBe('kim · 진행률 40% → 70% — 2대 완료');
+    expect(activityText({ by: 'kim', field: 'progress', from: '', to: '10' })).toBe('kim · 진행률 없음 → 10%');
+    expect(activityText({ by: 'lee', field: 'comment', to: '확인했습니다' })).toBe('lee · 댓글: 확인했습니다');
+    expect(activityText({ by: 'lee', field: 'created', to: 'ISS-3' })).toBe('lee · 이슈 생성');
+    expect(activityText(null)).toBe('');
+  });
+  it('issueLink — 키 형식이 아니면 빈 값 · 해시 경로', () => {
+    const loc = { origin: 'https://portal.local', pathname: '/' };
+    expect(issueLink('ISS-12', loc)).toBe('https://portal.local/#/issues/board/ISS-12');
+    expect(issueLink('ISS-12/../x', loc)).toBe('');
+    expect(issueLink('', loc)).toBe('');
   });
 });

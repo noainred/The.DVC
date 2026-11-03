@@ -51,7 +51,7 @@ export const TYPES = Object.freeze(['incident', 'task', 'request', 'improve']);
 export const PRIORITIES = Object.freeze(['p0', 'p1', 'p2', 'p3']);
 export const LIMITS = Object.freeze({
   issueMax: 2000, title: 200, body: 10000, commentMax: 200, commentBody: 2000,
-  labelMax: 10, label: 30, component: 60, watcherMax: 50, historyMax: 300, name: 64, blockReason: 500,
+  labelMax: 10, label: 30, component: 60, watcherMax: 50, historyMax: 300, name: 64, blockReason: 500, progressNote: 300, activityMax: 300,
   bulkMax: 200,
 });
 /** 최근 완료로 보여 주는 기간(ms) — 보드의 '완료' 열. */
@@ -457,6 +457,7 @@ export function summary(x) {
     assignee: x.assignee || '', reporter: x.reporter || '', labels: Array.isArray(x.labels) ? x.labels : [], component: x.component || '',
     dueAt: x.dueAt ?? null, createdAt: x.createdAt, updatedAt: x.updatedAt || x.createdAt, closedAt: x.closedAt ?? null,
     comments: commentsOf(x).length, watchers: Array.isArray(x.watchers) ? x.watchers.length : 0,
+    progress: Number.isInteger(x.progress) ? x.progress : null, progressNote: x.progressNote || '', progressAt: x.progressAt ?? null, progressBy: x.progressBy || '',
   };
 }
 /** 상세 — 댓글·이력 포함. `me` 는 보는 사람(관찰 여부). */
@@ -710,6 +711,58 @@ export function setWatch(key, user, on, { access = FULL_ACCESS } = {}) {
   if (on && cur.length >= LIMITS.watcherMax) throw limitError(`관찰자는 ${LIMITS.watcherMax}명까지입니다`);
   const next = { ...x, watchers: on ? [...cur, user] : cur.filter((n) => n !== user) };
   return viewIssue(replace(c, next, [], user, { touch: false }), user);
+}
+
+/**
+ * 진행률·진행 메모(v2.871 — 사용자 요청 '진행상태를 다른 사람이 볼 수 있게'). pct 는 0~100 정수 · null 이면 '보고 없음' 으로 되돌린다.
+ * 메모는 300자. 쓰기 범위가 필요하다(조회 밖 404 → 쓰기 밖 403). 이력·이벤트에 남는다. 값이 그대로면 아무것도 하지 않는다.
+ */
+export function setProgress(key, body, user, { access = FULL_ACCESS } = {}) {
+  const c = load();
+  const x = findFor(key, access, { write: true });
+  const b = body || {};
+  let pct = Number.isInteger(x.progress) ? x.progress : null;
+  if (Object.hasOwn(b, 'progress')) {
+    if (b.progress === null || b.progress === '') pct = null;
+    else {
+      const n = typeof b.progress === 'number' ? b.progress : (/^\d{1,3}$/.test(String(b.progress)) ? Number(b.progress) : NaN);
+      if (!Number.isInteger(n) || n < 0 || n > 100) throw fieldError('progress', '0~100 의 정수여야 합니다');
+      pct = n;
+    }
+  }
+  const note = Object.hasOwn(b, 'note') ? text(b.note, LIMITS.progressNote, 'note') : (x.progressNote || '');
+  const prevPct = Number.isInteger(x.progress) ? x.progress : null;
+  if (pct === prevPct && note === (x.progressNote || '')) return viewIssue(x, user);
+  const now = Date.now();
+  const next = { ...x, progress: pct, progressNote: note, progressAt: now, progressBy: user };
+  const y = replace(c, next, [{ at: now, by: user, field: 'progress', from: prevPct == null ? '' : String(prevPct), to: pct == null ? '' : String(pct), ...(note ? { note: capStr(note, 120) } : {}) }], user);
+  emit({ type: 'progress', actor: user, issue: evIssue(y), from: prevPct, to: pct, note: capStr(note, 160) });
+  return { ...viewIssue(y, user), writable: canEdit(y, access) };
+}
+
+/**
+ * 팀 활동 피드(v2.871) — 이 사용자가 볼 수 있는 이슈의 최근 변경(할당·상태·진행·보류·생성)과 댓글을 최신순으로.
+ * 비용을 묶으려고 이슈마다 최근 이력 20건 · 댓글 5건만 훑는다(이슈 2,000건이면 5만 항목). 본문·댓글 전문은 싣지 않는다(120자 발췌).
+ * @returns {{ items: object[], truncated: boolean }}
+ */
+export function activityFeed({ access = FULL_ACCESS, limit = 100, since = 0 } = {}) {
+  const lim = Math.max(1, Math.min(LIMITS.activityMax, Math.trunc(Number(limit)) || 100));
+  const out = [];
+  const FIELDS = new Set(['created', 'assignee', 'status', 'progress', 'blocked', 'priority', 'dueAt']);
+  for (const x of load().issues) {
+    if (!canSee(x, access)) continue;
+    const base = { key: x.key, title: capStr(x.title || '', 120), vcenterId: x.vcenterId || '' };
+    for (const h of historyOf(x).slice(-20)) {
+      if (!FIELDS.has(h.field) || !(h.at > since)) continue;
+      out.push({ ...base, at: h.at, by: h.by || '', field: h.field, from: h.from ?? '', to: h.to ?? '', note: h.note ? capStr(String(h.note), 120) : '' });
+    }
+    for (const cm of commentsOf(x).slice(-5)) {
+      if (!(cm.createdAt > since)) continue;
+      out.push({ ...base, at: cm.createdAt, by: cm.author || '', field: 'comment', from: '', to: capStr(String(cm.body || ''), 120), note: '' });
+    }
+  }
+  out.sort((a, b) => b.at - a.at);
+  return { items: out.slice(0, lim), truncated: out.length > lim, limit: lim };
 }
 
 export function addComment(key, body, user, { access = FULL_ACCESS } = {}) {

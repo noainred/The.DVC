@@ -78,6 +78,8 @@ const CATALOG_SET = new Set(ALL_PERMISSION_KEYS);
  * 이후로는 마이그레이션이 돌지 않는다.
  */
 const SCHEMA_VERSION = 4;
+/** 테스트·진단용 — '현재 버전 파일' 을 숫자로 박지 않게(v2.871: 2 를 박아 둔 audit2506 이 버전 4 에서 깨졌다). */
+export const PERMISSION_SCHEMA_VERSION = SCHEMA_VERSION;
 const KEYS_ADDED_IN = Object.freeze({
   2: ['svcmon'],   // v2.506 — 서비스 모니터 조회 권한 분리
   // v2.643 — CSV 가져오기/내보내기. operator·viewer 기본값에 없으므로 가산되는 것이 없다(관리자 전용 키).

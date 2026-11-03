@@ -2408,3 +2408,25 @@ tr.row-sel > td { background: rgba(59, 130, 246, .10); }
 .iss-checks { display: flex; flex-wrap: wrap; gap: 6px 16px; }
 .iss-checks .iss-check { white-space: normal; }
 .iss-vc-cell { display: inline-block; max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: bottom; }
+.iss-prog { display: flex; align-items: center; gap: 6px; min-width: 0; flex-wrap: wrap; font-size: 11.5px; }
+.iss-prog-bar { flex: 1 1 60px; min-width: 48px; max-width: 160px; height: 6px; border-radius: 3px; background: color-mix(in srgb, var(--border) 70%, transparent); overflow: hidden; }
+.iss-prog-bar > span { display: block; height: 100%; border-radius: 3px; background: var(--accent); }
+.iss-prog.compact .iss-prog-bar { flex: 0 0 56px; }
+.iss-prog.big .iss-prog-bar { height: 8px; max-width: none; }
+.iss-prog-n { font-variant-numeric: tabular-nums; }
+.iss-prog-note { font-size: 12.5px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.iss-prog-edit { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.iss-stale { font-size: 11.5px; color: var(--amber); font-weight: 600; white-space: nowrap; }
+.iss-req { padding: 7px 0; border-bottom: 1px solid var(--border); display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.iss-req:last-child { border-bottom: 0; }
+.iss-req-top, .iss-req-foot { display: flex; align-items: center; gap: 8px; min-width: 0; flex-wrap: wrap; }
+.iss-req-note { font-size: 11.5px; min-width: 0; max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.iss-req-sep { font-size: 12px; margin-top: 10px; padding-top: 6px; border-top: 1px dashed var(--border); }
+.iss-feed { list-style: none; margin: 8px 0 0; padding: 0; }
+.iss-feed-day { font-size: 12px; font-weight: 600; margin: 12px 0 4px; color: var(--muted); }
+.iss-feed-row { display: flex; align-items: flex-start; gap: 8px; padding: 6px 0; border-bottom: 1px solid var(--border); min-width: 0; }
+.iss-feed-main { flex: 1 1 auto; min-width: 0; }
+.iss-feed-main .iss-link { text-align: left; overflow-wrap: anywhere; }
+.iss-feed-text { font-size: 12.5px; overflow-wrap: anywhere; }
+.iss-feed-at { font-size: 11.5px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.iss-linkbox { flex: 1 1 220px; min-width: 0; font-size: 12px; }

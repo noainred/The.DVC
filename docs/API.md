@@ -22,11 +22,11 @@
 
 | 항목 | 값 |
 |---|---|
-| 엔드포인트 | **1189개** |
+| 엔드포인트 | **1191개** |
 | 마운트 그룹 | 14개 |
 | 라우트 파일 | 119개 |
-| GET | 627개 |
-| POST | 380개 |
+| GET | 628개 |
+| POST | 381개 |
 | PUT | 117개 |
 | PATCH | 3개 |
 | DELETE | 62개 |
@@ -45,7 +45,7 @@
 | [`/api/ping`](#apiping) | 14 | 네트워크 Ping 모니터링(조회=인증, 대상 관리=관리자). |
 | [`/metrics`](#metrics) | 1 | Prometheus/OTel 익스포터(선택 토큰). |
 | [`/api/v1`](#apiv1) | 10 | **외부 포탈용 공개 조회 API**(v2.562). 전용 API 키(`X-Api-Key`)로 인증하고 조회 전용이다. 상세는 [API-PUBLIC.md](API-PUBLIC.md). |
-| [`/api`](#api) | 609 | 포탈 화면이 쓰는 **주 조회·작업 API**. `authMiddleware + requireEnrolled` 뒤이고, `/tools/*` 는 `toolGate` 가 사용자별 도구 권한을 집행한다. |
+| [`/api`](#api) | 611 | 포탈 화면이 쓰는 **주 조회·작업 API**. `authMiddleware + requireEnrolled` 뒤이고, `/tools/*` 는 `toolGate` 가 사용자별 도구 권한을 집행한다. |
 | [`/dl`](#dl) | 2 | 중앙 업그레이드 소스(`versions.json` + 번들). **공개**다. |
 
 ---
@@ -759,18 +759,20 @@ Prometheus/OTel 익스포터(선택 토큰).
 | GET | `/hosts/checks` | 권한 `inv.hosts` | [server/src/routes/api/hostChecks.js:42](../server/src/routes/api/hostChecks.js#L42) |
 | GET | `/hosts/corp` | 권한 `inv.hosts` | [server/src/routes/api/hostCorp.js:38](../server/src/routes/api/hostCorp.js#L38) |
 | GET | `/idrac/host-power` | 권한 `inv.hosts` | [server/src/routes/api/vmMetrics.js:213](../server/src/routes/api/vmMetrics.js#L213) |
-| GET | `/issues` | — | [server/src/routes/api/issues.js:178](../server/src/routes/api/issues.js#L178) |
-| POST | `/issues` | `creators` | [server/src/routes/api/issues.js:199](../server/src/routes/api/issues.js#L199) |
-| DELETE | `/issues/:key` | 역할 `admin/operator` | [server/src/routes/api/issues.js:271](../server/src/routes/api/issues.js#L271) |
-| GET | `/issues/:key` | — | [server/src/routes/api/issues.js:194](../server/src/routes/api/issues.js#L194) |
-| PUT | `/issues/:key` | 역할 `admin/operator` | [server/src/routes/api/issues.js:218](../server/src/routes/api/issues.js#L218) |
-| POST | `/issues/:key/assign` | 역할 `admin/operator` | [server/src/routes/api/issues.js:234](../server/src/routes/api/issues.js#L234) |
-| POST | `/issues/:key/block` | 역할 `admin/operator` | [server/src/routes/api/issues.js:242](../server/src/routes/api/issues.js#L242) |
-| POST | `/issues/:key/comments` | 역할 `admin/operator` | [server/src/routes/api/issues.js:255](../server/src/routes/api/issues.js#L255) |
-| DELETE | `/issues/:key/comments/:cid` | 역할 `admin/operator` | [server/src/routes/api/issues.js:263](../server/src/routes/api/issues.js#L263) |
-| POST | `/issues/:key/status` | 역할 `admin/operator` | [server/src/routes/api/issues.js:226](../server/src/routes/api/issues.js#L226) |
-| POST | `/issues/:key/watch` | 역할 `admin/operator` | [server/src/routes/api/issues.js:251](../server/src/routes/api/issues.js#L251) |
-| POST | `/issues/bulk/assign` | 역할 `admin/operator` | [server/src/routes/api/issues.js:211](../server/src/routes/api/issues.js#L211) |
+| GET | `/issues` | — | [server/src/routes/api/issues.js:185](../server/src/routes/api/issues.js#L185) |
+| POST | `/issues` | `creators` | [server/src/routes/api/issues.js:206](../server/src/routes/api/issues.js#L206) |
+| DELETE | `/issues/:key` | 역할 `admin/operator` | [server/src/routes/api/issues.js:287](../server/src/routes/api/issues.js#L287) |
+| GET | `/issues/:key` | — | [server/src/routes/api/issues.js:201](../server/src/routes/api/issues.js#L201) |
+| PUT | `/issues/:key` | 역할 `admin/operator` | [server/src/routes/api/issues.js:225](../server/src/routes/api/issues.js#L225) |
+| POST | `/issues/:key/assign` | 역할 `admin/operator` | [server/src/routes/api/issues.js:250](../server/src/routes/api/issues.js#L250) |
+| POST | `/issues/:key/block` | 역할 `admin/operator` | [server/src/routes/api/issues.js:258](../server/src/routes/api/issues.js#L258) |
+| POST | `/issues/:key/comments` | 역할 `admin/operator` | [server/src/routes/api/issues.js:271](../server/src/routes/api/issues.js#L271) |
+| DELETE | `/issues/:key/comments/:cid` | 역할 `admin/operator` | [server/src/routes/api/issues.js:279](../server/src/routes/api/issues.js#L279) |
+| POST | `/issues/:key/progress` | 역할 `admin/operator` | [server/src/routes/api/issues.js:242](../server/src/routes/api/issues.js#L242) |
+| POST | `/issues/:key/status` | 역할 `admin/operator` | [server/src/routes/api/issues.js:233](../server/src/routes/api/issues.js#L233) |
+| POST | `/issues/:key/watch` | 역할 `admin/operator` | [server/src/routes/api/issues.js:267](../server/src/routes/api/issues.js#L267) |
+| GET | `/issues/activity` | — | [server/src/routes/api/issues.js:179](../server/src/routes/api/issues.js#L179) |
+| POST | `/issues/bulk/assign` | 역할 `admin/operator` | [server/src/routes/api/issues.js:218](../server/src/routes/api/issues.js#L218) |
 | GET | `/issues/meta` | — | [server/src/routes/api/issues.js:138](../server/src/routes/api/issues.js#L138) |
 | GET | `/issues/settings` | 역할 `admin` · `issueSettingsFleetOnly` | [server/src/routes/api/issues.js:165](../server/src/routes/api/issues.js#L165) |
 | PUT | `/issues/settings` | 역할 `admin` · `issueSettingsFleetOnly` | [server/src/routes/api/issues.js:170](../server/src/routes/api/issues.js#L170) |

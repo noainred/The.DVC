@@ -62,6 +62,7 @@ function lineOf(ev, who) {
       if (who === ev.to) return `${head} — 담당자로 지정됐습니다 · ${ev.actor}`;
       return `${head} — 담당자가 ${ev.from || '미할당'} → ${ev.to || '미할당'} 로 바뀌었습니다 · ${ev.actor}`;
     case 'status': return `${head} — 상태 ${st(ev.from)} → ${st(ev.to)} · ${ev.actor}`;
+    case 'progress': return `${head} — 진행 ${ev.to == null ? '보고 없음' : `${ev.to}%`}${ev.note ? ` · ${capStr(ev.note, 120)}` : ''} · ${ev.actor}`;
     case 'comment': return `${head} — ${ev.mentions?.includes(who) ? '댓글에서 언급했습니다' : '새 댓글'} · ${ev.actor}: ${capStr(ev.excerpt || '', 160)}`;
     case 'due': return `${head} — ${ev.overdue ? '기한이 지났습니다' : '기한이 24시간 안입니다'}(${new Date(i.dueAt).toISOString().slice(0, 10)})`;
     default: return head;
@@ -78,7 +79,7 @@ export function recipientsOf(ev, settings = loadIssueSettings()) {
   const set = new Set();
   if (ev.type === 'created') { if (i.assignee) set.add(i.assignee); }
   else if (ev.type === 'assigned') { if (ev.to) set.add(ev.to); if (ev.from) set.add(ev.from); }
-  else if (ev.type === 'status') { for (const x of [i.assignee, i.reporter, ...(i.watchers || [])]) if (x) set.add(x); }
+  else if (ev.type === 'status' || ev.type === 'progress') { for (const x of [i.assignee, i.reporter, ...(i.watchers || [])]) if (x) set.add(x); }
   else if (ev.type === 'comment') { for (const x of [i.assignee, i.reporter, ...(i.watchers || []), ...(ev.mentions || [])]) if (x) set.add(x); }
   else if (ev.type === 'due') { if (i.assignee) set.add(i.assignee); }
   set.delete(ev.actor);

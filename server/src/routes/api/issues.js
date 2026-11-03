@@ -25,7 +25,7 @@ import { scopedVcenterIds, writeScopedVcenterIds } from '../../auth/scope.js';
 import { store } from '../../store.js';
 import { fullScopeOnlyWith } from '../admin/shared.js';
 import {
-  listIssues, getIssue, createIssue, updateIssue, setStatus, assignIssue, bulkAssign, setBlocked, setWatch, addComment, deleteComment, deleteIssue,
+  listIssues, getIssue, createIssue, updateIssue, setStatus, assignIssue, bulkAssign, setBlocked, setWatch, addComment, deleteComment, deleteIssue, setProgress, activityFeed,
   issueStats, knownNames, issuesSeq, waitIssuesPersist, issuesPersist, PERSIST_WAIT_MS,
   LIMITS, STATUSES, TYPES, PRIORITIES, KEY_RE, ID_RE, RECENT_DONE_MS, KEY_PREFIX,
 } from '../../issues/store.js';
@@ -175,6 +175,13 @@ export function registerIssues(api) {
       res.json({ ok: true, settings: s, loadError: null, notifyStatus: issueNotifyStatus() });
     } catch (e) { fail(res, e, next); }
   });
+  // 팀 활동 피드(v2.871) — 로그인 사용자 전부 · 범위 안 이슈만(요청 필터보다 먼저). 폴링하지 않는다(화면이 마운트·버튼으로).
+  api.get('/issues/activity', (req, res) => {
+    res.set('Cache-Control', 'no-store');
+    const { limit } = pageArgs(req.query, { def: 100, max: LIMITS.activityMax });
+    const since = Number(req.query.since);
+    res.json({ ok: true, ...activityFeed({ access: accessOf(req), limit, since: Number.isFinite(since) && since > 0 ? since : 0 }) });
+  });
   api.get('/issues', (req, res) => {
     const { offset, limit } = pageArgs(req.query, { def: 500, max: LIMITS.issueMax });
     const done = ['open', 'recent', 'all'].includes(req.query.done) ? req.query.done : 'open';
@@ -228,6 +235,15 @@ export function registerIssues(api) {
     try {
       const x = setStatus(req.params.key, req.body?.status, userOf(req), { access: accessOf(req) });
       audit(req, 'issue.status', x.key, x.status);
+      res.json({ ok: true, issue: x, persist: await persistView(req) });
+    } catch (e) { fail(res, e, next, req); }
+  });
+  // 진행률·진행 메모(v2.871) — 쓰기 계정 · 쓰기 범위.
+  api.post('/issues/:key/progress', writers, async (req, res, next) => {
+    if (!KEY_RE.test(req.params.key)) return badKey(res);
+    try {
+      const x = setProgress(req.params.key, req.body || {}, userOf(req), { access: accessOf(req) });
+      audit(req, 'issue.progress', x.key, `${x.progress == null ? '보고 없음' : `${x.progress}%`}${x.progressNote ? ` · ${x.progressNote.slice(0, 80)}` : ''}`);
       res.json({ ok: true, issue: x, persist: await persistView(req) });
     } catch (e) { fail(res, e, next, req); }
   });

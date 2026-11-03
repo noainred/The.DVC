@@ -170,6 +170,8 @@ export const STATUS_SPEC = Object.freeze([
    */
   { key: 'service.mail', label: '메일 발송(알림)', group: 'service', mod: '../mail/service.js', fn: 'mailStatus' },
   { key: 'service.runtime', label: 'Node 런타임 호환성', group: 'service', mod: '../util/runtimeCheck.js', fn: 'runtimeStatus' }, // 2026-10-09 검토 I-06
+  // v2.871: 이슈 알림 — 묶음 발송 수·실패·주소 없는 사람 수·대기 인원(계정명·주소 없음). 엣지 포탈도 자기 이슈 알림을 보낸다.
+  { key: 'service.issueNotify', label: '이슈 알림(메일·팀 채팅)', group: 'service', mod: '../issues/notify.js', fn: 'issueNotifyStatus' },
 ]);
 
 /** 표의 키 집합 — 중앙 수신이 모르는 키를 조용히 받아들이지 않게 한다. */

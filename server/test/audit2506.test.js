@@ -95,7 +95,7 @@ test('① 가산 마이그레이션(순수) — operator 는 기능을 잃지 �
   for (const k of opRow) assert.ok(PERM.migrateRow(opRow, 'operator', 1).includes(k), `기존 키 ${k} 가 사라졌다`);
 
   // 현재 버전 파일: 마이그레이션이 돌지 않는다 — 관리자의 명시적 거부를 되살리면 안 된다.
-  const denied = PERM.migrateRow(['dashboard'], 'operator', 2);
+  const denied = PERM.migrateRow(['dashboard'], 'operator', PERM.PERMISSION_SCHEMA_VERSION);
   assert.ok(!denied.includes('svcmon'), '현재 버전 파일에 가산이 일어났다 — 관리자가 내린 결정을 덮어쓴다');
   assert.deepEqual(denied, ['dashboard']);
 });
