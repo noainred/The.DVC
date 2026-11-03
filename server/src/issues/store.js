@@ -37,6 +37,7 @@ import { atomicWriteFileSync, preserveCorrupt, safeLoadText } from '../util/atom
 import { capStr } from '../util/capStr.js';
 import { numOrNull } from '../util/numOrNull.js';
 import { registerExitFlush } from '../util/exitFlush.js';
+import { dayKey, DAY_MS } from '../util/dayKey.js';
 
 export const KEY_PREFIX = 'ISS';
 export const KEY_RE = /^ISS-\d{1,9}$/;
@@ -52,6 +53,8 @@ export const PRIORITIES = Object.freeze(['p0', 'p1', 'p2', 'p3']);
 export const LIMITS = Object.freeze({
   issueMax: 2000, title: 200, body: 10000, commentMax: 200, commentBody: 2000,
   labelMax: 10, label: 30, component: 60, watcherMax: 50, historyMax: 300, name: 64, blockReason: 500, progressNote: 300, activityMax: 300,
+  // v2.871 감사 A3-02: 요청 등록(viewer)은 전체 상한에서 운영자 몫(requestReserve)을 남기고, 한 사람이 열어 둔 요청은 requestOpenPerUser 건까지.
+  requestReserve: 200, requestOpenPerUser: 20,
   bulkMax: 200,
 });
 /** 최근 완료로 보여 주는 기간(ms) — 보드의 '완료' 열. */
@@ -490,7 +493,8 @@ export function listIssues({ q = '', status = '', assignee = null, priority = ''
     if (needle && !`${x.key}\n${x.title}\n${x.body || ''}\n${x.assignee || ''}\n${x.reporter || ''}\n${(x.labels || []).join(' ')}\n${x.component || ''}`.toLowerCase().includes(needle)) return false;
     return true;
   });
-  const rows = hit.map(summary).sort((a, b) => (PRIO_RANK[a.priority] ?? 9) - (PRIO_RANK[b.priority] ?? 9)
+  // 감사 A1-02: 행마다 쓰기 가능 여부 — 화면이 '나에게 할당'·일괄 선택을 쓰기 범위 밖 행에서 잠근다(공용 이슈도 범위 계정에는 false).
+  const rows = hit.map((x) => ({ ...summary(x), writable: canEdit(x, access) })).sort((a, b) => (PRIO_RANK[a.priority] ?? 9) - (PRIO_RANK[b.priority] ?? 9)
     || ((a.dueAt ?? Infinity) - (b.dueAt ?? Infinity)) || (b.updatedAt - a.updatedAt));
   return { total: rows.length, all: all.length, offset, limit, rows: rows.slice(offset, offset + limit) };
 }
@@ -504,6 +508,21 @@ export function getIssue(key, me = '', access = FULL_ACCESS) {
  * 통계 — 상태별·우선순위별 열린 건수, 미할당·기한 초과·오늘/내일 마감, 담당자별 부하(열린·진행·검토·초과), 최근 7일 완료.
  * 전부 '열린 이슈' 기준이다(완료는 세지 않는다).
  */
+/**
+ * 기한까지 남은 날(포탈 날짜 — util/dayKey 하나). 오늘이 기한이면 0, 지났으면 음수, 기한이 없거나 못 읽으면 null.
+ * 감사 A4-03: '기한 초과' 를 시각(dueAt < now)으로 보던 서버와 날짜로 보던 화면(issueText.js dueInfo)이 기한 당일에 어긋났다 —
+ * 기한은 날짜로 고르므로(화면은 그 날 09:00 로 저장) 날짜 기준 하나로 맞춘다. 화면과의 대조는 test/issuesAudit2871.test.js.
+ */
+export function dueDays(dueAt, now = Date.now()) {
+  const t = numOrNull(dueAt);
+  if (t == null) return null;
+  const a = dayKey(t); const b = dayKey(now);
+  if (!a || !b) return null;
+  return Math.round((Date.parse(`${a}T00:00:00Z`) - Date.parse(`${b}T00:00:00Z`)) / DAY_MS);
+}
+/** 화면 dueInfo 의 '곧'(오늘·내일·모레)과 같은 날 수. */
+export const DUE_SOON_DAYS = 2;
+
 export function issueStats({ now = Date.now(), access = FULL_ACCESS } = {}) {
   const all = load().issues.filter((x) => canSee(x, access));
   const open = all.filter(isOpen);
@@ -511,12 +530,12 @@ export function issueStats({ now = Date.now(), access = FULL_ACCESS } = {}) {
   const byPriority = Object.fromEntries(PRIORITIES.map((p) => [p, 0]));
   const byAssignee = new Map();
   let unassigned = 0; let overdue = 0; let dueSoon = 0; let blocked = 0;
-  const soonEnd = now + 2 * 24 * 3600_000;
   for (const x of open) {
     byStatus[x.status] = (byStatus[x.status] || 0) + 1;
     byPriority[x.priority] = (byPriority[x.priority] || 0) + 1;
-    const late = x.dueAt != null && x.dueAt < now;
-    if (late) overdue += 1; else if (x.dueAt != null && x.dueAt <= soonEnd) dueSoon += 1;
+    const dd = dueDays(x.dueAt, now);
+    const late = dd != null && dd < 0;
+    if (late) overdue += 1; else if (dd != null && dd <= DUE_SOON_DAYS) dueSoon += 1;
     if (x.blocked) blocked += 1;
     if (!x.assignee) { unassigned += 1; continue; }
     let a = byAssignee.get(x.assignee);
@@ -577,6 +596,12 @@ function replace(c, x, entries, user, { touch = true } = {}) {
 export function createIssue(body, user, { access = FULL_ACCESS, known = null, auto = null, requestOnly = false } = {}) {
   const c = load();
   if (c.issues.length >= LIMITS.issueMax) throw limitError(`이슈는 ${LIMITS.issueMax}건까지 보관합니다 — 관리자에게 지난 이슈 정리를 요청하세요`);
+  if (requestOnly) {
+    // 요청 등록이 상한을 채워 운영자가 장애 이슈를 못 만드는 일을 막는다(감사 A3-02 — 실서버에서 1~2분에 채울 수 있었다).
+    if (c.issues.length >= LIMITS.issueMax - LIMITS.requestReserve) throw limitError(`요청 등록 몫이 찼습니다(전체 ${LIMITS.issueMax}건 중 ${LIMITS.requestReserve}건은 운영자 몫) — 관리자에게 지난 이슈 정리를 요청하세요`);
+    const mine = c.issues.filter((x) => x.reporter === user && x.type === 'request' && isOpen(x)).length;
+    if (mine >= LIMITS.requestOpenPerUser) throw limitError(`열린 요청은 한 사람당 ${LIMITS.requestOpenPerUser}건까지입니다 — 처리된 뒤 다시 등록하세요`);
+  }
   const now = Date.now();
   const b = requestOnly
     ? { title: body?.title, body: body?.body, priority: body?.priority, dueAt: body?.dueAt, labels: body?.labels, component: body?.component, vcenterId: body?.vcenterId, type: 'request', status: 'backlog' }
@@ -634,7 +659,8 @@ export function updateIssue(key, body, user, { access = FULL_ACCESS, known = nul
   if (has('labels')) set('labels', labelsField(b.labels));
   if (has('component')) set('component', text(b.component, LIMITS.component, 'component'));
   if (has('watchers')) set('watchers', watchersField(b.watchers));
-  if (has('vcenterId')) set('vcenterId', vcenterField(b.vcenterId, access, known));
+  // 감사 A1-05·A2-01: 값이 그대로면 다시 검사하지 않는다 — 등록에서 빠진 vCenter 의 이슈도 제목·본문 수정은 저장된다(법인을 바꿀 때만 검사).
+  if (has('vcenterId') && !(typeof b.vcenterId === 'string' && b.vcenterId.trim() === (x.vcenterId || ''))) set('vcenterId', vcenterField(b.vcenterId, access, known));
   if (has('body') && x.body !== next.body) entries.push({ at: now, by: user, field: 'body', from: '', to: '(본문 수정)' });
   const changed = entries.length > 0 || (has('body') && x.body !== next.body);
   if (!changed) return viewIssue(x, user);

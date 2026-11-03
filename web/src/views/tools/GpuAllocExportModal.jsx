@@ -15,7 +15,7 @@ import { useLatest } from '../../hooks/useLatest.js';
 import { fetchJson, downloadFile, canCsv } from '../../api.js';
 import { downloadFailText } from '../downloadFailText.js';
 import { Modal, ErrorBox } from '../../components/ui.jsx';
-import { EXPORT_DEPTHS, EXPORT_SHEETS, allocExportQuery, exportPick, exportFileName } from './gpuAllocText.js';
+import { EXPORT_DEPTHS, EXPORT_SHEETS, allocExportQuery, exportPick, exportFileName, corpChipText } from './gpuAllocText.js';
 
 const FORMATS = [
   '맨 위 요약 칸(전체 · 할당 · 예비 · 할당률 · 꺼진 VM) — 법인 시트는 그 법인 값',
@@ -86,8 +86,8 @@ export function GpuAllocExportModal({ scope = '', vcSel = null, chips = [], onCl
               {chips.map((c) => {
                 const on = isOn(c.id);
                 return (
-                  <button key={c.id} type="button" className={`qn-btn${on ? ' on' : ''}${c.hosts === 0 ? ' down' : ''}`} aria-pressed={on} onClick={() => toggleCorp(c.id)}
-                    title={`${c.name} — GPU 호스트 ${c.hosts}대 · GPU ${c.gpus}장${c.hosts === 0 ? '(시트 없이 목차에만)' : ''}`}>
+                  <button key={c.id} type="button" className={`qn-btn${on ? ' on' : ''}${!c.hosts ? ' down' : ''}`} aria-pressed={on} onClick={() => toggleCorp(c.id)}
+                    title={`${c.name} — ${corpChipText(c).title}${!c.hosts ? '(시트 없이 목차에만)' : ''}`}>
                     <span className="qn-dot" style={{ background: c.hosts ? 'var(--green)' : 'var(--text-faint)' }} />{c.id}
                   </button>
                 );

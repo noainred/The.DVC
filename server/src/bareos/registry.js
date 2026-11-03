@@ -96,12 +96,15 @@ export function registryLoadError() { load(); return _loadErr.get(); }
  *   막았다. inBatch(fn) 안의 쓰기는 끝에 **한 번만** 쓴다 — fn 은 동기여야 한다(await 를 넘어 묶으면 그 사이 라우트의 저장이 늦어진다).
  */
 let _batch = 0;
+// v2.871 감사 A2-09: '메모리 원장이 디스크보다 앞서 있다' 표지 — 쓰기에 **성공해야만** 내린다(writeNow). 예전에는 inBatch 가 writeNow 전에
+//   false 로 내려, 디스크 쓰기가 실패하면 메모리 변경(복원 마무리의 pending + opId 등)이 다음 원장 변경 때까지 다시 쓰이지 않았다.
+//   이제 실패하면 표지가 남아 다음 inBatch 끝(폴러 틱 · 복원 마무리 틱)에서 다시 쓴다.
 let _dirty = false;
 export function inBatch(fn) {
   _batch += 1;
   try { return fn(); } finally {
     _batch -= 1;
-    if (!_batch && _dirty) { _dirty = false; writeNow(); }
+    if (!_batch && _dirty) writeNow();
   }
 }
 let _rev = 0;
@@ -110,14 +113,17 @@ export function registryRev() { return _rev; }
 function persist() {
   _rev += 1;
   if (_batch) { _dirty = true; return; }
-  writeNow();
+  writeNow();   // 묶음 밖 단건 쓰기는 실패하면 호출부가 메모리를 되돌린다(patchJob · addJob — v2.847 D2-7) — 표지를 올리지 않는다
 }
 function writeNow() {
   const db = load();
   // v2.828: 들여쓰기 없이 쓴다(3,000개에서 크기·직렬화 시간이 약 절반 — 위 MAX_JOBS 실측). 읽기는 예전 들여쓴 파일도 같다.
   atomicWriteFileSync(FILE(), JSON.stringify({ version: 1, jobs: db.jobs, retired: db.retired }), { mode: 0o600 });
+  _dirty = false;
   _loadErr.clear();
 }
+/** v2.871 A2-09 시험용 — 디스크에 아직 못 쓴 메모리 변경이 있나. */
+export const _dirtyForTest = () => _dirty;
 
 const copy = (j) => (j ? JSON.parse(JSON.stringify(j)) : null);
 export function listJobs() { return load().jobs.map(copy); }
@@ -551,4 +557,4 @@ export function jobVmIds(vcenterId) {
   return load().jobs.filter((j) => j.vcenterId === vcenterId && j.enabled).map((j) => j.vmId);
 }
 
-export function _resetForTest() { _db = null; _loadErr.clear(); }
+export function _resetForTest() { _db = null; _dirty = false; _loadErr.clear(); }

@@ -206,10 +206,17 @@ export function vcName(meta, id) {
 }
 
 /** 새 이슈 창의 법인 선택지 — 쓰기 가능한 것만. 범위 계정은 공용을 고를 수 없다(서버가 400). */
-export function vcenterOptions(meta) {
+export function vcenterOptions(meta, current = null) {
   const out = (meta?.vcenters || []).filter((v) => v.writable !== false).map((v) => ({ id: v.id, label: v.name }));
-  return meta?.scoped ? out : [{ id: '', label: '공용(법인 없음)' }, ...out];
+  // 감사 A1-01: 쓰기 범위만 지정된 계정(조회 무제한 + writeVcenters)도 공용 이슈를 만들 수 없다 — 서버 vcenterField 와 같은 기준(writeScoped).
+  const needVc = !!(meta?.scoped || meta?.writeScoped);
+  const list = needVc ? out : [{ id: '', label: '공용(법인 없음)' }, ...out];
+  // 감사 A1-05: 수정 창은 지금 값을 선택지에 남긴다(등록에서 빠졌거나 쓰기 밖이어도 — 값이 그대로면 서버가 다시 검사하지 않는다).
+  if (current != null && !list.some((o) => o.id === current)) list.unshift({ id: current, label: current ? `${vcName(meta, current)}(지금 값)` : '공용(지금 값)' });
+  return list;
 }
+/** 법인을 반드시 골라야 하는 계정인가(범위·쓰기 범위 중 하나라도 지정). */
+export const vcenterRequired = (meta) => !!(meta?.scoped || meta?.writeScoped);
 
 /** 알림 발송 상태 한 줄 — 서버 issueNotifyStatus(). 값이 없으면 '아직 없음'. */
 export function notifyStatusText(st) {
@@ -220,8 +227,10 @@ export function notifyStatusText(st) {
   if (st.mailFail) parts.push(`실패 ${st.mailFail}`);
   if (st.mailSkip) parts.push(`건너뜀 ${st.mailSkip}`);
   if (st.noEmail) parts.push(`주소 없는 사람 ${st.noEmail}회`);
+  if (st.mailDeferred) parts.push(`시간당 몫 초과로 미룸 ${st.mailDeferred}회`);
+  if (st.outOfScope) parts.push(`법인을 볼 수 없어 뺀 수신 ${st.outOfScope}회`);
   if (st.chat || st.chatFail) parts.push(`채팅 ${st.chat ?? 0}${st.chatFail ? ` · 실패 ${st.chatFail}` : ''}`);
-  if (st.dropped) parts.push(`묶음 상한으로 뺀 사람 ${st.dropped}`);
+  if (st.dropped) parts.push(`묶음 인원 상한으로 뺀 사람 ${st.dropped}명(묶음마다 센 합)`);
   if (st.pendingRecipients) parts.push(`대기 ${st.pendingRecipients}명`);
   return parts.join(' · ');
 }

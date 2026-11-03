@@ -31,10 +31,18 @@ import {
 } from '../../issues/store.js';
 import { loadIssueSettings, saveIssueSettings, issueSettingsLoadError, suggestAssignee, SETTINGS_LIMITS, NOTIFY_EVENTS } from '../../issues/settings.js';
 import { issueNotifyStatus } from '../../issues/notify.js';
+import { issueViewers } from '../../issues/visibility.js';
 
 const writers = requireRole('admin', 'operator');
 const adminOnly = requireRole('admin');
 const issueSettingsFleetOnly = fullScopeOnlyWith('이슈 설정(자동 할당 · 알림 · 메일 주소)은 전 법인 공용이라 전체 범위(vCenter 제한 없는) 관리자만 보고 바꿀 수 있습니다.');
+/** v2.871 감사 A3-05: 전 법인 공용 쓰기 — 조회가 무제한이어도 쓰기 범위(writeVcenters)가 지정된 계정은 403(bareosManage.js fullWriteOnly 와 같은 판정). */
+function fullWriteOnly(req, res, next) {
+  let w = null;
+  try { w = writeScopedVcenterIds(req.user, store.get()); } catch { w = new Set(); } // 판정이 던지면 거부 기본값
+  if (w) return res.status(403).json({ ok: false, error: 'forbidden', reason: '이슈 설정은 전 법인 공용 쓰기라 쓰기 범위(수정 가능 vCenter)가 지정되지 않은 관리자만 바꿀 수 있습니다.' });
+  next();
+}
 const userOf = (req) => req.user?.username || 'anonymous';
 /** 관리자(데모 계정 제외) — 판정은 auth/demoGuest.js isAdminDetailUser 하나(role 직접 비교 금지 — audit2744e 스윕). */
 const isAdmin = (req) => isAdminDetailUser(req.user);
@@ -69,23 +77,12 @@ function vcenterChoices(access) {
 }
 
 /**
- * 담당자 후보가 그 법인을 볼 수 있는가(자동 할당 · 제안) — 로컬 계정이면 그 계정의 조회 범위로, 모르는 이름(AD 등)은 볼 수 있다고 본다.
- * 법인 없는(공용) 이슈는 범위 계정이 보지 못하므로 범위 계정 후보를 고르지 않는다.
+ * 담당자 후보가 그 법인을 볼 수 있는가(자동 할당 · 제안) — 판정은 issues/visibility.js 하나(알림 수신자 거르기와 같은 함수).
+ * 로컬 계정은 그 계정의 조회 범위로, 로컬이 아닌 이름은 AD 사용자(범위 축 없음 = 전체)로 본다.
  */
-function candidateCanSee() {
-  const snap = store.get();
-  const users = new Map(listUsers().map((u) => [u.username, u]));
-  return (name, vcenterId) => {
-    const u = users.get(name);
-    if (!u) return true;
-    const read = scopedVcenterIds(u, snap);
-    if (!read) return true;
-    return !!vcenterId && read.has(vcenterId);
-  };
-}
 function suggestionFor(issue) {
   const settings = loadIssueSettings();
-  return suggestAssignee(issue, settings, issueStats().byAssignee, candidateCanSee());
+  return suggestAssignee(issue, settings, issueStats().byAssignee, issueViewers().canSee);
 }
 
 async function persistView(req, { wait = true } = {}) {
@@ -117,7 +114,8 @@ const str = (v) => (typeof v === 'string' ? v : '');
  */
 function people(req, access) {
   const out = new Map();
-  if (!access.read) {
+  // v2.871 반증 N1: 바깥 조건은 조회·쓰기 둘 다 무제한일 때만(조회 무제한 + writeVcenters 계정을 '전체' 로 읽지 않는다 — server/CLAUDE.md v2.733 함정).
+  if (!access.read && !access.write) {
     for (const u of listUsers()) if (!u.demo && u.username) out.set(u.username, { username: u.username, name: u.name || u.username });
   } else {
     const me = userOf(req);
@@ -141,7 +139,7 @@ export function registerIssues(api) {
     const access = accessOf(req);
     res.json({
       ok: true, me: userOf(req), canWrite: write, canRequest: write || canRequest(req), isMod: isMod(req), isAdmin: isAdmin(req),
-      canSettings: isAdmin(req) && !access.read, scoped: !!access.read,
+      canSettings: isAdmin(req) && !access.read && !access.write, scoped: !!access.read, writeScoped: !!access.write,
       limits: LIMITS, statuses: STATUSES, types: TYPES, priorities: PRIORITIES,
       keyPrefix: KEY_PREFIX, recentDoneMs: RECENT_DONE_MS, people: write ? people(req, access) : [], vcenters: vcenterChoices(access),
       components: write ? loadIssueSettings().autoAssign.components.map((c) => c.name) : [],
@@ -159,15 +157,17 @@ export function registerIssues(api) {
     const vcenterId = str(req.query.vcenterId).slice(0, 128);
     const access = accessOf(req);
     if (vcenterId && access.read && !access.read.has(vcenterId)) return res.json({ ok: true, suggestion: null, autoAssign: false });
-    const s = suggestionFor({ component: str(req.query.component).slice(0, LIMITS.component), vcenterId });
-    res.json({ ok: true, suggestion: s, autoAssign: loadIssueSettings().autoAssign.enabled });
+    const s = suggestionFor({ component: str(req.query.component).slice(0, LIMITS.component), vcenterId: vcenterId.trim() });
+    // v2.871 감사 A3-04: 제안 이름은 이 사용자의 담당자 후보(people)에 있을 때만 싣는다 — 요청 계정·범위 계정에게 계정명을 새로 알려 주지 않는다.
+    const visible = !!s && canWrite(req) && ((!access.read && !access.write) || people(req, access).some((p) => p.username === s.assignee));
+    res.json({ ok: true, suggestion: visible ? s : null, ...(s && !visible ? { hidden: true } : {}), autoAssign: loadIssueSettings().autoAssign.enabled });
   });
   api.get('/issues/settings', adminOnly, issueSettingsFleetOnly, (req, res) => {
     if (!isAdmin(req)) return res.status(403).json({ ok: false, reason: '데모 계정은 이슈 설정을 볼 수 없습니다' });
     res.set('Cache-Control', 'no-store');
     res.json({ ok: true, settings: loadIssueSettings(), loadError: issueSettingsLoadError(), limits: SETTINGS_LIMITS, events: NOTIFY_EVENTS, notifyStatus: issueNotifyStatus() });
   });
-  api.put('/issues/settings', adminOnly, issueSettingsFleetOnly, (req, res, next) => {
+  api.put('/issues/settings', adminOnly, issueSettingsFleetOnly, fullWriteOnly, (req, res, next) => {
     if (!isAdmin(req)) return res.status(403).json({ ok: false, reason: '데모 계정은 이슈 설정을 바꿀 수 없습니다' });
     try {
       const s = saveIssueSettings(req.body || {});
@@ -208,7 +208,7 @@ export function registerIssues(api) {
       const requestOnly = !canWrite(req);
       const body = req.body || {};
       const wantAuto = !str(body.assignee).trim() && loadIssueSettings().autoAssign.enabled;
-      const auto = wantAuto ? suggestionFor({ component: str(body.component), vcenterId: str(body.vcenterId) }) : null;
+      const auto = wantAuto ? suggestionFor({ component: str(body.component).trim(), vcenterId: str(body.vcenterId).trim() }) : null; // 저장(vcenterField)과 같은 트림 — 감사 A2-10
       const x = createIssue(body, userOf(req), { access: accessOf(req), known: knownVcenters(), auto, requestOnly });
       audit(req, requestOnly ? 'issue.request' : 'issue.create', x.key, `${x.title}${x.vcenterId ? ` [${x.vcenterId}]` : ''}${x.assignee ? ` → ${x.assignee}${auto?.assignee === x.assignee ? '(자동)' : ''}` : ''}`);
       res.json({ ok: true, issue: x, requestOnly, persist: await persistView(req) });

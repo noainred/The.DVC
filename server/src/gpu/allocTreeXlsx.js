@@ -16,7 +16,7 @@ import ExcelJS from 'exceljs';
 import '../util/xlsxSheetPrOrder.js';
 import { BORDER, PAL, fill, styleHeadRow, barText } from '../vcenter/vmXlsxStyle.js';
 import { sheetLink } from '../util/xlsxInternalLink.js';   // 목차 ↔ 법인 시트 링크를 규격 모양(location 만)으로 — 워커가 아니어도 같은 모듈이 건다
-import { FLAT_COLUMNS, MODE_TEXT, UNPLACED_TEXT, locationText, dcText, gpuNoteText, gpuProfText, gpuVmsText, flatRows } from './allocTree.js';
+import { FLAT_COLUMNS, MODE_TEXT, UNPLACED_TEXT, locationText, dcText, gpuNoteText, gpuProfText, gpuVmsText, flatRows, CORP_UNKNOWN_TEXT } from './allocTree.js';
 
 export const XLSX_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 export const ALLOC_XLSX_SHEETS = Object.freeze(['계층 표', '평면 표', '안내', '목차']);
@@ -231,22 +231,29 @@ function addTocSheet(wb, roster, names, meta, skipped) {
     properties: { tabColor: { argb: TAB.toc } },
     pageSetup: { ...PRINT, printTitlesRow: '3:3' },
   });
-  ws.columns = [{ width: 34 }, { width: 24 }, { width: 11 }, { width: 8 }, { width: 11 }, { width: 11 }, { width: 11 }, { width: 11 }, { width: 14 }, { width: 40 }];
+  ws.columns = [{ width: 34 }, { width: 24 }, { width: 11 }, { width: 8 }, { width: 13 }, { width: 13 }, { width: 11 }, { width: 11 }, { width: 14 }, { width: 40 }, { width: 44 }];
   const withSheet = roster.filter((c) => names.has(c.id)).length;
   const t1 = ws.addRow(['목차 — 법인별 시트']);
   t1.getCell(1).font = { bold: true, size: 15, color: { argb: C.title } }; t1.height = 26;
   ws.addRow([`기준 ${meta.stamp} ${meta.tz} · 범위 ${meta.scopeText} · 법인 ${roster.length}곳 — 시트 ${withSheet}장 · 단위 GB · 법인 이름을 누르면 그 법인 시트로 갑니다`]).getCell(1).font = { color: { argb: C.muted } };
-  const head = ws.addRow(['법인(vCenter)', '위치', 'GPU 호스트', 'GPU', '전체(GB)', '할당(GB)', '예비(GB)', '할당률(%)', '할당률 막대', '시트']);
+  const head = ws.addRow(['법인(vCenter)', '위치', 'GPU 호스트', 'GPU', '전체(GB)', '할당(GB)', '예비(GB)', '할당률(%)', '할당률 막대', '시트', '비고']);
   styleHeadRow(head, { height: 24 });
   head.eachCell((c, i) => { if (i >= 3 && i <= 8) c.alignment = { vertical: 'middle', horizontal: 'right' }; });
   roster.forEach((c, j) => {
     const t = c.vc?.totals || null;
     const nm = names.get(c.id);
     const pct = t ? num(t.allocPct) : null;
+    // v2.871 감사 A4-02: 노드가 없는 이유를 모르면(수집 전 · 접속 불가 · 상한으로 잘림) 호스트·GPU 를 0 으로 적지 않는다 — 빈 칸 + 사유
+    const why = !t && c.unknown ? (CORP_UNKNOWN_TEXT[c.unknown] || '모름') : '';
     const sheetText = nm ? (nm.renamed ? `${nm.sheet}  (시트 이름을 줄이거나 바꿈)` : nm.sheet)
-      : t ? '— 시트 상한을 넘어 넣지 않음' : '— GPU 호스트 없음(시트 없음)';
-    const r = ws.addRow([c.name, locationText(c), t ? t.hosts : 0, t ? t.gpus : 0, t ? num(t.capGB) : null, t ? num(t.allocGB) : null, t ? num(t.spareGB) : null,
-      pct, pct == null ? '' : barText(pct / 100, 10), sheetText]);
+      : t ? '— 시트 상한을 넘어 넣지 않음' : why ? `— ${why}(GPU 호스트 수 모름 · 시트 없음)` : '— GPU 호스트 없음(시트 없음)';
+    // v2.871 감사 A4-04: 용량·할당을 모르는 GPU·VM 이 섞이면 전체·할당은 부분 합이다 — 숫자만 적으면 전체처럼 읽힌다.
+    //   '48 + 모름 1장' 처럼 모르는 수를 칸에 함께 적고, 비고에 법인 시트 요약(totalsCells)과 같은 문구를 싣는다(예비·할당률은 이미 빈 칸).
+    const partial = (v, n, unit) => (n ? `${v ?? 0} + 모름 ${n}${unit}` : v);
+    const r = ws.addRow([c.name, locationText(c), t ? t.hosts : why ? null : 0, t ? t.gpus : why ? null : 0,
+      t ? partial(num(t.capGB), t.capUnknown, '장') : null, t ? partial(num(t.allocGB), t.allocUnknown, '대') : null, t ? num(t.spareGB) : null,
+      pct, pct == null ? '' : barText(pct / 100, 10), sheetText,
+      t ? totalsCells(t).note : why ? `${why} — 인벤토리를 읽지 못해 GPU 호스트가 있는지 모릅니다(0 이 아님)` : '']);
     r.height = 20;
     r.eachCell({ includeEmpty: true }, (cell, col) => {
       cell.border = BORDER;
@@ -261,7 +268,8 @@ function addTocSheet(wb, roster, names, meta, skipped) {
       r.getCell(7).font = { bold: true, color: { argb: C.spare } };
       r.getCell(9).font = { name: 'Consolas', size: 9, color: { argb: (pct ?? 0) >= 90 ? C.warn : C.alloc } };
     }
-    r.getCell(10).font = { size: 10, color: { argb: nm?.renamed ? C.warn : C.muted } };
+    r.getCell(10).font = { size: 10, color: { argb: nm?.renamed || why ? C.warn : C.muted } };
+    r.getCell(11).font = { size: 10, color: { argb: why || t?.capUnknown || t?.allocUnknown ? C.warn : C.muted } };
   });
   if (skipped) ws.addRow([`※ 법인 시트는 ${CORP_SHEETS_MAX}장까지입니다 — ${skipped}곳은 목차에만 적었습니다(법인을 골라 다시 내보내세요).`]).getCell(1).font = { color: { argb: C.warn } };
   return ws;
@@ -332,7 +340,7 @@ export async function renderGpuAllocWorkbook(tree, meta, { depth = 'vm', sheets 
     ['vSGA', '공유 그래픽이라 할당형이 아닙니다. 행으로만 보이고 합계에 넣지 않습니다.'],
     ['CPU · 메모리', '호스트 행은 그 호스트의 코어 · 메모리 · 사용률, VM 행은 그 VM 의 vCPU · 메모리 · 사용률입니다. 법인 · 데이터센터 · 클러스터 행은 호스트 코어 · 메모리 합이고 사용률은 사용률을 읽은 호스트의 MHz · MB 합으로 낸 값입니다(끊긴 호스트는 빼고 비고에 대수를 적습니다). ‘GPU VM vCPU · 메모리 합’ 은 켜진 GPU VM 만 더합니다. 꺼진 VM · 끊긴 호스트의 사용률과 모르는 값이 섞인 합은 빈 칸입니다(0 이 아님).'],
     ['평면 표', 'GPU·VM 한 줄마다 모든 계층 열을 채운 시트 — 자동 필터와 피벗 테이블용입니다.'],
-    ['법인별 시트', '목차 시트에 범위 안 법인이 한 줄씩 있고, 법인 이름을 누르면 그 법인 시트로 갑니다(법인 시트 1행의 ‘← 목차’ 로 돌아옵니다). 법인 시트는 전체 계층 표에서 그 법인 줄부터 아래를 그대로 옮긴 것이라 값이 같습니다. GPU 호스트가 없는 법인은 시트를 만들지 않고 목차에만 적습니다. 시트 이름은 vCenter 이름을 엑셀 제한(31자 · 일부 기호 금지)에 맞춰 바꾼 것이고, 실제 이름은 목차와 시트 1행에 있습니다. 탭 색: 목차 회색 · 법인 파랑 · 할당률 90% 이상 법인 주황.'],
+    ['법인별 시트', '목차 시트에 범위 안 법인이 한 줄씩 있고, 법인 이름을 누르면 그 법인 시트로 갑니다(법인 시트 1행의 ‘← 목차’ 로 돌아옵니다). 법인 시트는 전체 계층 표에서 그 법인 줄부터 아래를 그대로 옮긴 것이라 값이 같습니다. GPU 호스트가 없는 법인은 시트를 만들지 않고 목차에만 적습니다(수집 전 · 접속 불가처럼 인벤토리를 읽지 못한 법인은 호스트 · GPU 수를 0 이 아니라 빈 칸으로 두고 사유를 적습니다 · 용량이나 할당을 모르는 GPU · VM 이 섞인 법인의 전체 · 할당은 ‘48 + 모름 1장’ 처럼 모르는 수를 함께 적습니다). 시트 이름은 vCenter 이름을 엑셀 제한(31자 · 일부 기호 금지)에 맞춰 바꾼 것이고, 실제 이름은 목차와 시트 1행에 있습니다. 탭 색: 목차 회색 · 법인 파랑 · 할당률 90% 이상 법인 주황.'],
   ];
   for (const [k, v] of info.filter(([k0]) => k0 !== '법인별 시트' || sheets.includes('corp'))) {
     const r = wi.addRow([k, v]);

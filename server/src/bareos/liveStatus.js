@@ -88,8 +88,14 @@ export async function liveTick({ now = Date.now(), deadlineMs = LIVE_DEADLINE_MS
         // v2.833.1: FD 가 없어도 Director 상태(잡마다 상태 문구)는 묻는다
         res = await onDirector(t.directorId, 'liveStatus', { clients: t.clients, director: true }, { trigger: 'timer', signal: AbortSignal.timeout(deadlineMs) });
       } catch (e) {
+        // v2.871 감사 A4-01: 이번 틱에 FD 를 하나도 읽지 못했다 — 직전 틱의 clients(ok:true)를 그대로 이월하면 jobFdState 가 '답했다' 로 읽고
+        //   jobs 는 비어 있어 모든 실행 중 행이 'FD 진행 보고 없음' · 멈춤 의심(no-report)이 됐다(고RTT 법인 Director 시한에서 재현).
+        //   이번에 물으려던 FD(+ 직전 틱의 FD)를 모두 이번 실패 코드로 덮는다 — 첫 틱부터 실패해도 'not-asked' 가 아니라 실제 사유(timeout 등)가 남는다.
         const prev = _live.get(t.directorId);
-        _live.set(t.directorId, { at: now, ok: false, code: e?.code || 'error', clients: prev?.clients || {}, jobs: new Map(), dir: { ok: false, code: e?.code || 'error', jobs: new Map(), raw: '' } });
+        const code = e?.code || 'error';
+        const clients = {};
+        for (const c of [...Object.keys(prev?.clients || {}), ...t.clients]) clients[c] = { ok: false, code };
+        _live.set(t.directorId, { at: now, ok: false, code, clients, jobs: new Map(), dir: { ok: false, code, jobs: new Map(), raw: '' } });
         for (const [vc, list] of byVc(t.jobs)) pushHist(vc, { at: now, rate: null, jobs: list.length });
         return;
       }

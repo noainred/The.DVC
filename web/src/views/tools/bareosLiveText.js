@@ -56,6 +56,17 @@ export function fdLineOf(row, live, ts = (x) => String(x)) {
   return { known, missing: false, text: `FD 상태 ${liveCodeText(row?.fd ? row.fd.code : live.code)}${who}` };
 }
 export const liveCodeText = (code) => LIVE_CODE_TEXT[code] || '상태 조회 실패';
+/**
+ * v2.871 감사 A1-08: 실행 중 상세 '진행량' 카드의 아래 줄. 진행 조회가 아직 없으면(live null) 'FD 상태 조회 전' 만 —
+ *   예전에는 'FD 상태를 읽지 못함 — 조회 전' 으로 '실패' 와 '아직 묻지 않음' 을 한 줄에 함께 말했다.
+ * @param {object} fdl fdLineOf(row, live) 결과
+ */
+export function fdProgressMeta(row, live, fdl) {
+  if (fdl.known) return `${Number.isFinite(row?.files) ? `파일 ${row.files}개 · ` : ''}FD 가 보고한 바이트`;
+  if (fdl.missing) return 'FD 가 이 잡의 진행을 보고하지 않음';
+  if (!live) return fdl.text;
+  return `FD 상태를 읽지 못함 — ${fdl.text.replace(/^FD 상태 /, '')}`;
+}
 
 /**
  * 법인 카드의 표지 — 실행 없음 · 조회 전 · 조회 실패 · 느림 · 정상.

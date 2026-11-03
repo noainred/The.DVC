@@ -25,8 +25,10 @@ import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
 import { registerStateFile } from '../util/stateFiles.js';
 import { dayKey } from '../util/dayKey.js';
 import { capStr } from '../util/capStr.js';
-import { onIssueEvent, listIssues } from './store.js';
+import { onIssueEvent, listIssues, dueDays } from './store.js';
 import { loadIssueSettings, emailOf } from './settings.js';
+import { issueViewers } from './visibility.js';
+import { load as loadMailSettings } from '../mail/settings.js';
 
 export const BATCH_MS = 60_000;
 export const DUE_SCAN_MS = 30 * 60_000;
@@ -35,6 +37,7 @@ export const LINES_MAX = 30;
 export const RECIP_MAX = 500;
 const STATE_NAME = registerStateFile('issue-notify-state.json');
 const STATE_KEEP_DAYS = 3;
+const STARTUP_SCAN_MS = 90_000;
 
 const STATUS_TEXT = { backlog: '백로그', todo: '할 일', progress: '진행 중', review: '검토', done: '완료' };
 const st = (s) => STATUS_TEXT[s] || s || '—';
@@ -51,7 +54,34 @@ const pending = new Map(); // username → { lines: string[], extra: number }
 let chatLines = [];
 let chatExtra = 0;
 let timer = null;
-const status = { lastFlushAt: null, mails: 0, mailFail: 0, mailSkip: 0, noEmail: 0, chat: 0, chatFail: 0, dropped: 0, lastError: null, dueSent: 0, lastDueScanAt: null };
+let flushing = null; // 진행 중인 flush(감사 A5-03 — 겹쳐 돌지 않게)
+const droppedNow = new Set(); // 이번 묶음에서 사람 수 상한으로 뺀 사람(감사 A4-08 — '사람' 단위로 센다)
+const pendingDue = new Map(); // 이슈 키 → 포탈 날짜 — 보낸 뒤에야 기록 파일에 쓴다(감사 A2-02·A5-04)
+const mailSentAt = []; // 이슈 메일 발송 시각(최근 1시간 — 감사 A5-01 이슈 몫 예산)
+const status = { lastFlushAt: null, mails: 0, mailFail: 0, mailSkip: 0, mailDeferred: 0, noEmail: 0, outOfScope: 0, chat: 0, chatFail: 0, dropped: 0, lastError: null, dueSent: 0, lastDueScanAt: null };
+
+/**
+ * 이슈 메일의 시간당 몫 — 메일 설정의 시간당 한도(공용 — 장애 알림과 같이 쓴다)의 절반. 0(제한 없음)이면 제한 없음.
+ * 넘는 묶음은 버리지 않고 다음 묶음으로 미룬다(mailDeferred) — 이슈 알림 폭주가 장애 알림 메일의 몫을 다 쓰지 않게(감사 A5-01).
+ */
+export function issueMailBudget() {
+  let per = 60;
+  try { per = Number(loadMailSettings()?.rateLimitPerHour); } catch { per = 60; }
+  if (!Number.isFinite(per) || per <= 0) return Infinity;
+  return Math.max(1, Math.floor(per / 2));
+}
+function mailRoom(now = Date.now()) {
+  while (mailSentAt.length && now - mailSentAt[0] > 3600_000) mailSentAt.shift();
+  return issueMailBudget() - mailSentAt.length;
+}
+
+/**
+ * 팀 채팅 문구 정리(감사 A3-03) — 이슈 제목·댓글은 사람이 쓴 값이다. Slack 의 제어 표기(<!channel>·<url|글자>)와 Teams 마크다운 링크([글자](url))가
+ * 그대로 실리지 않게 꺾쇠·대괄호를 비슷한 모양의 다른 글자로 바꾼다(뜻은 남고 채널 전체 호출·위장 링크는 생기지 않는다).
+ */
+export function chatSafe(t) {
+  return String(t ?? '').replace(/</g, '‹').replace(/>/g, '›').replace(/\[/g, '［').replace(/\]/g, '］');
+}
 
 function lineOf(ev, who) {
   const i = ev.issue || {};
@@ -64,26 +94,65 @@ function lineOf(ev, who) {
     case 'status': return `${head} — 상태 ${st(ev.from)} → ${st(ev.to)} · ${ev.actor}`;
     case 'progress': return `${head} — 진행 ${ev.to == null ? '보고 없음' : `${ev.to}%`}${ev.note ? ` · ${capStr(ev.note, 120)}` : ''} · ${ev.actor}`;
     case 'comment': return `${head} — ${ev.mentions?.includes(who) ? '댓글에서 언급했습니다' : '새 댓글'} · ${ev.actor}: ${capStr(ev.excerpt || '', 160)}`;
-    case 'due': return `${head} — ${ev.overdue ? '기한이 지났습니다' : '기한이 24시간 안입니다'}(${new Date(i.dueAt).toISOString().slice(0, 10)})`;
+    // 날짜는 포탈 날짜(dayKey — 하루 한 번 판정과 같은 기준). UTC 로 자르면 KST 09:00 이전 기한이 하루 앞으로 적혔다(감사 A2-07·A4-06).
+    case 'due': {
+      const d = dueDays(i.dueAt);
+      const what = d == null ? '기한 확인 필요' : d < 0 ? '기한이 지났습니다' : d === 0 ? '오늘이 기한입니다' : '내일이 기한입니다';
+      return `${head} — ${what}(${dayKey(i.dueAt) || '날짜 모름'})`;
+    }
     default: return head;
   }
 }
 
-/** 이 이벤트를 받을 사람(변경한 본인 제외). 설정에서 끈 종류면 []. */
-export function recipientsOf(ev, settings = loadIssueSettings()) {
+/** 이 이벤트 종류가 켜져 있는가(알림 전체 · 종류별). */
+function eventOn(ev, settings) {
   const n = settings?.notify;
-  if (!n?.enabled) return [];
+  if (!n?.enabled) return false;
   const kind = ev.type === 'created' ? 'assigned' : ev.type;
-  if (n.events?.[kind] === false) return [];
+  return n.events?.[kind] !== false;
+}
+
+// 이름이 이어지는 글자: 영숫자·_·-·\ 또는 '.' 뒤에 영숫자('kim.lee'). 문장 끝 '.'·',' 와 조사('님')는 이름이 아니다.
+const NAME_TAIL_RE = /^(?:[A-Za-z0-9_\\-]|\.[A-Za-z0-9])/;
+/**
+ * 댓글의 @멘션 토큰 → 실제 이름(감사 A2-06·A5-02). 토큰은 '@kim님'·'@park.' 처럼 조사·구두점이 붙어 온다 — 알려진 이름(로컬 계정 ·
+ * 메일 주소 표 · 이 이슈의 담당자·보고자·관찰자) 중 **가장 긴 접두**로 맞춘다. 이름 뒤가 이름이 이어지는 글자(NAME_TAIL_RE — 영숫자·_·-·\, 또는 '.' 다음 영숫자)면 다른 이름이라
+ * 맞지 않는다. 맞는 이름이 없는 토큰은 버린다(수신자 자리를 차지하지 않는다).
+ */
+export function resolveMentions(tokens, known) {
+  const names = [...known].filter(Boolean).sort((a, b) => b.length - a.length);
+  const out = [];
+  for (const t of Array.isArray(tokens) ? tokens.slice(0, 10) : []) {
+    const tok = String(t || '');
+    const hit = names.find((n) => tok === n || (tok.startsWith(n) && !NAME_TAIL_RE.test(tok.slice(n.length))));
+    if (hit && !out.includes(hit)) out.push(hit);
+  }
+  return out;
+}
+
+/**
+ * 이 이벤트를 받을 사람(변경한 본인 제외). 설정에서 끈 종류면 [].
+ * 감사 A3-01: **그 이슈의 법인을 볼 수 있는 사람만** — 판정은 issues/visibility.js(자동 할당과 같은 함수). 범위 밖이면 빼고 센다(outOfScope).
+ */
+export function recipientsOf(ev, settings = loadIssueSettings(), viewers = issueViewers()) {
+  if (!eventOn(ev, settings)) return [];
   const i = ev.issue || {};
   const set = new Set();
   if (ev.type === 'created') { if (i.assignee) set.add(i.assignee); }
   else if (ev.type === 'assigned') { if (ev.to) set.add(ev.to); if (ev.from) set.add(ev.from); }
   else if (ev.type === 'status' || ev.type === 'progress') { for (const x of [i.assignee, i.reporter, ...(i.watchers || [])]) if (x) set.add(x); }
-  else if (ev.type === 'comment') { for (const x of [i.assignee, i.reporter, ...(i.watchers || []), ...(ev.mentions || [])]) if (x) set.add(x); }
-  else if (ev.type === 'due') { if (i.assignee) set.add(i.assignee); }
+  else if (ev.type === 'comment') {
+    const parts = [i.assignee, i.reporter, ...(i.watchers || [])].filter(Boolean);
+    const known = new Set([...viewers.localNames, ...(settings.notify.people || []).map((p) => p.username), ...parts]);
+    for (const x of [...parts, ...resolveMentions(ev.mentions, known)]) set.add(x);
+  } else if (ev.type === 'due') { if (i.assignee) set.add(i.assignee); }
   set.delete(ev.actor);
-  return [...set];
+  const out = [];
+  for (const u of set) {
+    if (viewers.canSee(u, i.vcenterId || '')) out.push(u);
+    else status.outOfScope += 1;
+  }
+  return out;
 }
 
 function schedule() {
@@ -95,22 +164,24 @@ function schedule() {
 /** 이벤트 하나를 묶음에 넣는다(라우트·기한 검사가 부른다 — 저장소 훅이 연결한다). */
 export function queueIssueEvent(ev) {
   const settings = loadIssueSettings();
+  if (!eventOn(ev, settings)) return 0;
   const who = recipientsOf(ev, settings);
-  if (!who.length) return 0;
   for (const u of who) {
     let p = pending.get(u);
     if (!p) {
-      if (pending.size >= RECIP_MAX) { status.dropped += 1; continue; }
+      if (pending.size >= RECIP_MAX) { if (!droppedNow.has(u)) { droppedNow.add(u); status.dropped += 1; } continue; }
       p = { lines: [], extra: 0 }; pending.set(u, p);
     }
     p.lines.push(lineOf(ev, u));
     if (p.lines.length > LINES_MAX) { p.extra += p.lines.length - LINES_MAX; p.lines = p.lines.slice(-LINES_MAX); }
   }
+  // 팀 채팅은 개인 수신자와 따로다(감사 A2-03 — 받을 사람이 없는 이벤트(예: 담당자 없는 새 요청)도 팀 채널에는 간다). 문구는 chatSafe(A3-03).
   if (settings.notify.chat) {
-    chatLines.push(lineOf(ev, ''));
+    chatLines.push(chatSafe(lineOf(ev, '')));
     if (chatLines.length > LINES_MAX) { chatExtra += chatLines.length - LINES_MAX; chatLines = chatLines.slice(-LINES_MAX); }
   }
-  schedule();
+  if (ev.type === 'due' && ev.dueDay && ev.issue?.key) pendingDue.set(ev.issue.key, ev.dueDay);
+  if (who.length || settings.notify.chat || pendingDue.size) schedule();
   return who.length;
 }
 
@@ -125,21 +196,38 @@ function mailBody(username, lines, extra) {
   return { text, html };
 }
 
-/** 쌓인 묶음을 지금 보낸다(타이머·시험). 던지지 않는다. */
+/** 쌓인 묶음을 지금 보낸다(타이머·시험). 던지지 않는다. 겹쳐 부르면 진행 중인 것을 기다린 뒤 한 번 더 돈다(감사 A5-03). */
 export async function flushIssueNotify() {
+  if (flushing) { await flushing.catch(() => {}); }
+  flushing = flushOnce();
+  try { return await flushing; } finally { flushing = null; }
+}
+async function flushOnce() {
   if (timer) { clearTimeout(timer); timer = null; }
   const settings = loadIssueSettings();
   const batch = [...pending.entries()];
-  pending.clear();
+  pending.clear(); droppedNow.clear();
   const chat = chatLines; const cExtra = chatExtra;
   chatLines = []; chatExtra = 0;
+  const dueMarks = new Map(pendingDue); pendingDue.clear();
   status.lastFlushAt = Date.now();
+  // 감사 A2-05: 쌓인 뒤 알림을 껐으면 보내지 않는다(버린다 — 끈 사람의 뜻이 우선).
+  if (!settings.notify?.enabled) { if (dueMarks.size) writeDueMarks(dueMarks); return { recipients: 0, chat: 0, discarded: batch.length }; }
+  let deferred = 0;
   if (settings.notify?.mail !== false) {
     for (const [u, p] of batch) {
       const email = emailOf(settings, u);
       if (!email) { status.noEmail += 1; continue; }
+      if (mailRoom() <= 0) {
+        // 이슈 몫을 다 썼다 — 버리지 않고 다음 묶음으로 미룬다(새로 쌓인 줄 앞에 붙인다).
+        const q = pending.get(u) || { lines: [], extra: 0 };
+        const lines = [...p.lines, ...q.lines];
+        pending.set(u, { lines: lines.slice(-LINES_MAX), extra: p.extra + q.extra + Math.max(0, lines.length - LINES_MAX) });
+        deferred += 1; continue;
+      }
       const { text, html } = mailBody(u, p.lines, p.extra);
       try {
+        mailSentAt.push(Date.now());
         const r = await senders.mail({ kind: 'issues', to: [email], subject: `[이슈] ${p.lines.length + p.extra}건 — ${capStr(p.lines[p.lines.length - 1] || '', 80)}`, html, text });
         if (r?.ok) status.mails += 1;
         else if (r?.skipped) { status.mailSkip += 1; status.lastError = r.reason || '메일 발송을 건너뛰었습니다'; }
@@ -152,12 +240,21 @@ export async function flushIssueNotify() {
     try {
       const res = await senders.chat(text, '이슈 트래커');
       const lines = Array.isArray(res) ? res.map(String) : [];
-      if (lines.some((l) => /^[a-z]+:2\d\d\b/i.test(l))) status.chat += 1;
-      else if (lines.length) { status.chatFail += 1; status.lastError = `채팅: ${lines.join(' · ').slice(0, 200)}`; console.warn(`[issues] 이슈 채팅 알림 실패: ${status.lastError}`); }
-      else { status.lastError = '채팅 채널이 꺼져 있어 보내지 않았습니다(설정 › 알림)'; }
+      const okN = lines.filter((l) => /^[a-z]+:2\d\d\b/i.test(l)).length;
+      // 감사 A4-05: 채널마다 센다 — 하나라도 실패면 실패도 센다(부분 성공을 전체 성공으로 보이지 않게).
+      if (okN) status.chat += 1;
+      if (lines.length && okN < lines.length) { status.chatFail += 1; status.lastError = `채팅: ${lines.filter((l) => !/^[a-z]+:2\d\d\b/i.test(l)).join(' · ').slice(0, 200)}`; console.warn(`[issues] 이슈 채팅 알림 실패: ${status.lastError}`); }
+      else if (!lines.length) { status.lastError = '채팅 채널이 꺼져 있어 보내지 않았습니다(설정 › 알림)'; }
     } catch (e) { status.chatFail += 1; status.lastError = String(e?.message || e).slice(0, 200); }
   }
-  return { recipients: batch.length, chat: chat.length };
+  if (deferred) {
+    status.mailDeferred += deferred;
+    status.lastError = `이슈 메일 시간당 몫(${issueMailBudget()}통 — 메일 설정 한도의 절반)을 다 써서 ${deferred}명의 메일을 다음 묶음으로 미뤘습니다`;
+    schedule();
+  }
+  // 기한 알림 기록은 보낸 뒤에 쓴다 — 보내기 전에 포탈이 멈추면 기록이 없어 다음 기동 검사가 다시 보낸다(감사 A2-02).
+  if (dueMarks.size) writeDueMarks(dueMarks);
+  return { recipients: batch.length, chat: chat.length, deferred };
 }
 
 /* ───── 기한 ───── */
@@ -184,18 +281,27 @@ export function scanDue(now = Date.now()) {
   const s = loadDueState();
   let n = 0; let changed = false;
   for (const r of listIssues({ done: 'open', limit: 100_000 }).rows) {
-    if (!r.assignee || r.dueAt == null || r.dueAt > now + DUE_WINDOW_MS) continue;
-    if (s[r.key] === today) continue;
-    s[r.key] = today; changed = true;
-    queueIssueEvent({ type: 'due', actor: '', overdue: r.dueAt < now, issue: { key: r.key, title: r.title, assignee: r.assignee, dueAt: r.dueAt } });
+    const d = dueDays(r.dueAt, now);
+    // 기한이 오늘·내일(포탈 날짜)이거나 지났을 때 — 화면의 '오늘'·'내일'·'초과' 와 같은 기준(감사 A4-03).
+    if (!r.assignee || d == null || d > 1) continue;
+    if (s[r.key] === today || pendingDue.get(r.key) === today) continue;
+    queueIssueEvent({ type: 'due', actor: '', overdue: d < 0, dueDay: today, issue: { key: r.key, title: r.title, assignee: r.assignee, dueAt: r.dueAt, vcenterId: r.vcenterId || '' } });
     n += 1;
   }
   // 오래된 기록 정리(며칠 지난 날짜) — 표가 끝없이 자라지 않게.
   const cut = dayKey(now - STATE_KEEP_DAYS * 86_400_000);
   for (const [k, v] of Object.entries(s)) if (v < cut) { delete s[k]; changed = true; }
-  if (changed) { try { atomicWriteFileSync(stateFile(), JSON.stringify({ sent: s }), { mode: 0o600 }); } catch (e) { console.warn(`[issues] 기한 알림 기록을 쓰지 못했습니다: ${e?.code || e?.message}`); } }
+  if (changed) saveDueState(s);
   status.dueSent += n;
   return n;
+}
+function saveDueState(s) {
+  try { atomicWriteFileSync(stateFile(), JSON.stringify({ sent: s }), { mode: 0o600 }); } catch (e) { console.warn(`[issues] 기한 알림 기록을 쓰지 못했습니다: ${e?.code || e?.message}`); }
+}
+function writeDueMarks(marks) {
+  const s = loadDueState();
+  for (const [k, v] of marks) s[k] = v;
+  saveDueState(s);
 }
 
 /** 화면용 상태(계정명·주소 없음). */
@@ -211,12 +317,17 @@ export function startIssueNotify() {
   if (started) return;
   started = true;
   onIssueEvent((ev) => queueIssueEvent(ev));
-  dueTimer = setInterval(() => { try { scanDue(); } catch (e) { console.warn(`[issues] 기한 알림 검사 실패: ${e?.message || e}`); } }, DUE_SCAN_MS);
+  const scan = () => { try { scanDue(); } catch (e) { console.warn(`[issues] 기한 알림 검사 실패: ${e?.message || e}`); } };
+  dueTimer = setInterval(scan, DUE_SCAN_MS);
   dueTimer.unref?.();
+  // 기동 뒤 한 번(감사 A2-02·A5-04) — 30분을 기다리지 않는다. 재기동 직전 묶음에 있던 일반 이벤트(할당·상태·댓글)는 메모리에만 있어
+  // 되살릴 수 없다(종료 때 비동기 발송을 기다릴 수 없다) — 기한 알림만 기록이 '보낸 뒤' 라 다시 보낸다.
+  const first = setTimeout(scan, STARTUP_SCAN_MS);
+  first.unref?.();
 }
 /** 테스트 전용. */
 export function _resetIssueNotifyForTest() {
-  pending.clear(); chatLines = []; chatExtra = 0; dueState = null;
+  pending.clear(); chatLines = []; chatExtra = 0; dueState = null; pendingDue.clear(); droppedNow.clear(); mailSentAt.length = 0;
   if (timer) { clearTimeout(timer); timer = null; }
   for (const k of Object.keys(status)) status[k] = typeof status[k] === 'number' ? 0 : null;
 }

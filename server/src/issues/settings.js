@@ -16,6 +16,7 @@ import path from 'node:path';
 import { config } from '../config.js';
 import { atomicWriteFileSync, preserveCorrupt, safeLoadText } from '../util/atomicWrite.js';
 import { capStr } from '../util/capStr.js';
+import { makeLoadError } from '../util/registryCore.js';
 
 export const SETTINGS_LIMITS = Object.freeze({ components: 100, pool: 100, people: 500, name: 64, component: 60, email: 254 });
 export const NOTIFY_EVENTS = Object.freeze(['assigned', 'status', 'progress', 'comment', 'due']);
@@ -30,7 +31,8 @@ export function defaultIssueSettings() {
 }
 
 let cache = null;
-let loadError = null;
+// 감사 A2-04: 손상 표지는 등록부 공용 판정(makeLoadError.checkCorruptOnly) — 재기동 뒤 파일이 없고 보존본만 남아 있어도 '못 읽음' 을 말한다.
+const loadErr = makeLoadError();
 
 function fieldError(field, msg) { const e = new Error(`${field}: ${msg}`); e.status = 400; e.field = field; return e; }
 // eslint-disable-next-line no-control-regex
@@ -102,7 +104,7 @@ export function normalizeIssueSettings(raw, { strict = true } = {}) {
 export function loadIssueSettings() {
   if (cache) return cache;
   const f = fileOf();
-  loadError = null;
+  loadErr.clear();
   try {
     if (fs.existsSync(f)) {
       const j = JSON.parse(fs.readFileSync(f, 'utf8'));
@@ -113,23 +115,24 @@ export function loadIssueSettings() {
     }
   } catch (e) {
     preserveCorrupt(f, e.message);
-    loadError = safeLoadText(e) || '사유 미상';
-    console.warn(`[issues] issue-settings.json 을 읽지 못해 기본값(자동 할당·알림 꺼짐)으로 시작합니다: ${loadError}`);
+    loadErr.set(safeLoadText(e) || '사유 미상');
+    console.warn(`[issues] issue-settings.json 을 읽지 못해 기본값(자동 할당·알림 꺼짐)으로 시작합니다: ${loadErr.get().reason}`);
   }
+  loadErr.checkCorruptOnly(f);
   cache = defaultIssueSettings();
   return cache;
 }
 /** 설정 파일을 못 읽었는가(손상 — 보존본이 남는다). 화면이 말한다. */
-export function issueSettingsLoadError() { loadIssueSettings(); return loadError; }
+export function issueSettingsLoadError() { loadIssueSettings(); return loadErr.get()?.reason || null; }
 
 export function saveIssueSettings(body) {
   const { value } = normalizeIssueSettings(body, { strict: true });
   atomicWriteFileSync(fileOf(), JSON.stringify(value, null, 1), { mode: 0o600 });
-  cache = value; loadError = null;
+  cache = value; loadErr.clear();
   return value;
 }
 /** 테스트 전용. */
-export function _resetIssueSettingsCache() { cache = null; loadError = null; }
+export function _resetIssueSettingsCache() { cache = null; loadErr.clear(); }
 
 /** 사람 → 메일 주소. */
 export function emailOf(settings, username) {

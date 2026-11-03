@@ -26,7 +26,10 @@ export function finishRestores(now = Date.now()) {
   let list = [];
   try { list = restoresToFinish(); } catch { return 0; }
   if (!list.length) return 0;
-  // v2.870 감사 A2-06: '던지지 않는다' 계약 — 묶음 저장(디스크 오류)이 던지면 보낸 수 0 으로 돌려준다(다음 틱에 다시 — 원장은 그대로)
+  // v2.870 감사 A2-06: '던지지 않는다' 계약 — 묶음 저장(디스크 오류)이 던지면 0 을 돌려준다.
+  // v2.871 감사 A2-09(주석 정정 + 동작): 이때 메모리 원장은 이미 바뀌었고(pending + opId) vmclone 작업도 이미 나갔다 — '원장은 그대로' 가 아니다.
+  //   registry 의 미저장 표지(_dirty)가 쓰기 성공 때만 내려가므로 다음 틱의 inBatch 끝에서 같은 메모리 원장을 다시 쓴다(작업을 다시 보내지는 않는다 —
+  //   메모리의 pending + opId 를 보고 '도는 중' 으로 건너뛴다). 다시 쓰기 전에 재시작하면 디스크본 기준으로 다시 보낸다(끊기는 멱등 — 피해 작음).
   try { return inBatch(() => finishList(list, now)); } catch (e) { console.warn(`[bareos] 복원 마무리 원장 저장 실패: ${String(e?.message || e).slice(0, 200)}`); return 0; }
 }
 

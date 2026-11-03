@@ -16,7 +16,7 @@ import {
   parseJobReport, parseJobDetail, jobTimeline, decBytesText, durKo, withRelayWait,
 } from './bareosText.js';
 import {
-  rateText, sizeText, elapsedText, levelWord, triggerText, reasonText, REASON_HINT, STUCK_TEXT, fdLineOf,
+  rateText, sizeText, elapsedText, levelWord, triggerText, reasonText, REASON_HINT, STUCK_TEXT, fdLineOf, fdProgressMeta,
   progressBasis, etaSec, runPhase, futurePhases,
 } from './bareosLiveText.js';
 
@@ -183,7 +183,7 @@ export default function BareosRunDetail({ row, live = null, dir = null, limits =
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 150px), 1fr))', gap: 8, marginTop: 12 }}>
         <Card label="진행량(FD 보고)" value={bytesKnown ? sizeText(row.bytes) : (fdMissing ? '보고 없음' : '모름')}
-          meta={bytesKnown ? `${Number.isFinite(row.files) ? `파일 ${row.files}개 · ` : ''}FD 가 보고한 바이트` : fdMissing ? 'FD 가 이 잡의 진행을 보고하지 않음' : `FD 상태를 읽지 못함 — ${fdl.text.replace(/^FD 상태 /, '')}`} />
+          meta={fdProgressMeta(row, live, fdl)} />
         <Card label={<>진척<Est /></>} value={pb.pct !== null ? `${pb.pct} %` : '—'} meta={pb.over ? `${pb.label} — 기준을 넘음` : pb.label} />
         <Card label="속도" value={rateText(row.rateNow)}
           meta={[Number.isFinite(row.rateAvg) ? `평균 ${rateText(row.rateAvg)}` : '', Number.isFinite(row.baseline) ? `지난 실행 평균 ${rateText(row.baseline)}` : ''].filter(Boolean).join(' · ') || '지금(최근) 속도'} />

@@ -1,6 +1,6 @@
 // v2.852 GPU 할당 계층 — 화면 행 펼치기·형제 정렬·찾기·글자(gpuAllocText.js).
 import { describe, it, expect } from 'vitest';
-import { flattenAlloc, openForLevel, sortSiblings, totalsNote, gpuTexts, numText, ALLOC_LEVELS, DEFAULT_LEVEL, pickVcenters, sumTotals, corpChips, allocExportQuery, EXPORT_DEPTHS, EXPORT_SHEETS, exportPick, exportFileName } from './gpuAllocText.js';
+import { flattenAlloc, openForLevel, sortSiblings, totalsNote, gpuTexts, numText, ALLOC_LEVELS, DEFAULT_LEVEL, pickVcenters, sumTotals, corpChips, corpChipText, allocExportQuery, EXPORT_DEPTHS, EXPORT_SHEETS, exportPick, exportFileName } from './gpuAllocText.js';
 
 const tot = (o = {}) => ({ hosts: 1, gpus: 1, vsga: 0, capGB: 48, capUnknown: 0, allocGB: 24, allocUnknown: 0, offGB: 0, offUnknown: 0, vmsOn: 1, vmsOff: 0, unplaced: 0, freeGpus: 0, noPlacement: 0, spareGB: 24, allocPct: 50, ...o });
 const vmr = (id, name, gb = 24, extra = {}) => ({ id, name, powerState: 'POWERED_ON', mode: 'vgpu', profile: 'grid_a40-24q', vgpuDevices: 1, passthroughDevices: 0, gb, ...extra });
@@ -88,6 +88,11 @@ describe('v2.853 법인 칩', () => {
     const chips = corpChips(t, [{ id: 'vc2', name: 'vcenter-de' }, { id: 'AZ', name: 'vcenter-az' }, { id: 'vc1', name: 'vcenter-kr' }]);
     expect(chips.map((c) => [c.id, c.hosts])).toEqual([['AZ', 0], ['vc1', 2], ['vc2', 1]]);
     expect(corpChips(t, null).map((c) => c.id)).toEqual(['vc1', 'vc2']);
+    // v2.871 A4-02: 인벤토리 없이 status 만 있는 법인(첫 수집 전 · 접속 불가)은 0 이 아니라 모름(null · '—')
+    const u = corpChips(t, [{ id: 'PL', name: 'vc-pl', status: 'unreachable' }, { id: 'US', name: 'vc-us', status: 'pending' }, { id: 'ST', name: 'vc-st', status: 'unreachable', stale: true }]);
+    expect(u.filter((c) => ['PL', 'US', 'ST'].includes(c.id)).map((c) => [c.id, c.unknown, c.hosts])).toEqual([['PL', 'unreachable', null], ['ST', '', 0], ['US', 'pending', null]]);
+    expect(corpChipText(u.find((c) => c.id === 'PL')).count).toBe('—');
+    expect(corpChipText(u.find((c) => c.id === 'ST')).count).toBe('0');
     const rows = flattenAlloc(t, { query: 'vc2' });
     expect(rows[0].name).toBe('vcenter-de');
     expect(rows.some((r) => r.kind === 'host')).toBe(true);

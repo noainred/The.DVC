@@ -14,7 +14,7 @@ import { downloadFailText } from '../downloadFailText.js';
 import { Loading, ErrorBox, SearchBox } from '../../components/ui.jsx';
 import { vcQuickDot } from '../vcCardText.js';
 import { STable } from '../../components/STable.jsx';
-import { ALLOC_LEVELS, DEFAULT_LEVEL, KIND_TEXT, flattenAlloc, openForLevel, numText, pctText, sumTotals, corpChips, allocExportQuery } from './gpuAllocText.js';
+import { ALLOC_LEVELS, DEFAULT_LEVEL, KIND_TEXT, flattenAlloc, openForLevel, numText, pctText, sumTotals, corpChips, corpChipText, allocExportQuery } from './gpuAllocText.js';
 import { GpuAllocExportModal } from './GpuAllocExportModal.jsx';   // v2.855 내보내기 창(시안)
 
 const KIND_BADGE = { vc: 'blue', dc: 'gray', cl: 'gray', host: 'blue', gpu: 'teal', pt: 'amber', vsga: 'gray', unplaced: 'gray', off: 'gray', vm: 'gray' };
@@ -108,11 +108,12 @@ export function GpuAllocTree({ scope }) {
           const on = vcSel.has(c.id);
           const st = c.site ? vcQuickDot(c.site) : { dot: 'var(--text-faint)', down: false };
           const none = c.hosts === 0;
+          const ct = corpChipText(c);   // v2.871 A4-02: 수집 전 · 접속 불가 법인은 0 이 아니라 '—'
           return (
-            <button key={c.id} type="button" className={`qn-btn${on ? ' on' : ''}${st.down || none ? ' down' : ''}`} aria-pressed={on} onClick={() => toggleVc(c.id)}
-              title={`${c.name} — GPU 호스트 ${c.hosts}대 · GPU ${c.gpus}장${none ? '(GPU 가 설치된 호스트 없음)' : ''}\n${on ? '클릭하면 선택 해제' : '클릭하면 이 법인만 표시(여러 개 선택 가능)'}`}>
+            <button key={c.id} type="button" className={`qn-btn${on ? ' on' : ''}${st.down || none || c.unknown ? ' down' : ''}`} aria-pressed={on} onClick={() => toggleVc(c.id)}
+              title={`${c.name} — ${ct.title}${none ? '(GPU 가 설치된 호스트 없음)' : ''}\n${on ? '클릭하면 선택 해제' : '클릭하면 이 법인만 표시(여러 개 선택 가능)'}`}>
               <span className="qn-dot" style={{ background: st.dot }} />{c.id}
-              <span className="muted" style={{ fontWeight: 400, fontSize: 11 }}>{c.hosts}</span>
+              <span className="muted" style={{ fontWeight: 400, fontSize: 11 }}>{ct.count}</span>
             </button>
           );
         })}

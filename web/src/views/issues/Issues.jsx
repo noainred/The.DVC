@@ -17,7 +17,7 @@ import { useHashTab } from '../../hooks/useHashTab.js';
 import {
   STATUS_ORDER, STATUS_TEXT, TYPE_TEXT, PRIORITY_TEXT, statusText, typeText, priorityText, dueInfo, timeText, dateText, initialOf, colorIndexOf,
   groupByStatus, filterRows, myWork, loadPct, LOAD_CAP, toDateInput, fromDateInput, parseLabels, saveFailText, persistNote, historyText,
-  peopleOptions, makeLatest, vcName, vcenterOptions, notifyStatusText, progressOf, staleInfo, myRequests, activityText, issueLink, STALE_DAYS,
+  peopleOptions, makeLatest, vcName, vcenterOptions, vcenterRequired, notifyStatusText, progressOf, staleInfo, myRequests, activityText, issueLink, STALE_DAYS,
 } from './issueText.js';
 
 const SUBS = [['board', '보드'], ['list', '목록'], ['mine', '내 작업'], ['activity', '활동']];
@@ -244,7 +244,8 @@ function ListView({ rows, total, meta, onOpen, onWritten }) {
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState('');
   const canWrite = !!meta.canWrite;
-  const visibleKeys = rows.map((r) => r.key);
+  // 감사 A1-02: 쓰기 범위 밖 행(서버 writable:false)은 일괄 선택에서 뺀다 — 누르면 403 이 되는 선택을 만들지 않는다.
+  const visibleKeys = rows.filter((r) => r.writable !== false).map((r) => r.key);
   const picked = visibleKeys.filter((k) => sel.has(k));
   const allOn = picked.length > 0 && picked.length === visibleKeys.length;
   const toggle = (k) => setSel((s) => { const n = new Set(s); if (n.has(k)) n.delete(k); else n.add(k); return n; });
@@ -289,7 +290,7 @@ function ListView({ rows, total, meta, onOpen, onWritten }) {
             <tbody>
               {rows.map((r) => (
                 <tr key={r.key} className={sel.has(r.key) ? 'iss-sel' : ''}>
-                  {canWrite && <td><input type="checkbox" checked={sel.has(r.key)} onChange={() => toggle(r.key)} aria-label={`${r.key} 선택`} /></td>}
+                  {canWrite && <td>{r.writable !== false ? <input type="checkbox" checked={sel.has(r.key)} onChange={() => toggle(r.key)} aria-label={`${r.key} 선택`} /> : <span className="muted" title="쓰기 범위 밖 법인 — 조회만">—</span>}</td>}
                   <td data-sort={r.num} className="iss-key">{r.key}</td>
                   <td><TypeTag t={r.type} /></td>
                   <td style={{ whiteSpace: 'normal' }}>
@@ -350,7 +351,7 @@ function MyWorkView({ rows, stats, meta, onOpen, onWritten }) {
                 <button type="button" className="iss-link iss-row-title" onClick={() => onOpen(r.key)}>{r.title}</button>
                 <PrioTag p={r.priority} />
                 <Due r={r} />
-                {canWrite && <button className="btn btn-sm" onClick={() => assignMe(r.key)}>나에게 할당</button>}
+                {canWrite && r.writable !== false && <button className="btn btn-sm" onClick={() => assignMe(r.key)}>나에게 할당</button>}
               </div>
             ))}
             {w.unassigned.length > 20 && <div className="muted" style={{ fontSize: 12 }}>앞 20건만 표시 — 나머지는 목록에서 ‘담당자: 미할당’ 으로 보세요.</div>}
@@ -558,11 +559,12 @@ function CopyLink({ issueKey }) {
 /* ───────────── 새 이슈 · 수정 ───────────── */
 
 function IssueEditor({ meta, initial = null, requestOnly = false, onCancel, onSaved }) {
-  const vcOpts = vcenterOptions(meta);
+  const vcOpts = vcenterOptions(meta, initial ? (initial.vcenterId || '') : null);
+  const needVc = vcenterRequired(meta);
   const [f, setF] = useState(() => ({
     title: initial?.title || '', body: initial?.body || '', type: initial?.type || (requestOnly ? 'request' : 'task'), priority: initial?.priority || 'p2',
     assignee: initial ? (initial.assignee || '') : '', dueAt: toDateInput(initial?.dueAt), labels: (initial?.labels || []).join(', '), component: initial?.component || '',
-    vcenterId: initial ? (initial.vcenterId || '') : (meta.scoped ? (vcOpts[0]?.id || '') : ''),
+    vcenterId: initial ? (initial.vcenterId || '') : (needVc ? (vcOpts[0]?.id || '') : ''),
   }));
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState('');
@@ -600,7 +602,7 @@ function IssueEditor({ meta, initial = null, requestOnly = false, onCancel, onSa
       <label className="iss-field">설명<textarea className="input" rows={5} value={f.body} onChange={set('body')} maxLength={meta.limits?.body || 10000} placeholder="재현 절차 · 기대 결과 · 관련 장비" /></label>
       <div className="iss-form-grid">
         {vcOpts.length > 0 && (
-          <label className="iss-field">법인(vCenter){meta.scoped ? ' *' : ''}<Select className="select" value={f.vcenterId} onChange={set('vcenterId')}>
+          <label className="iss-field">법인(vCenter){needVc ? ' *' : ''}<Select className="select" value={f.vcenterId} onChange={set('vcenterId')}>
             {vcOpts.map((v) => <option key={v.id || '__pub'} value={v.id} data-pin={v.id === '' ? true : undefined}>{v.label}</option>)}
           </Select></label>
         )}
@@ -624,10 +626,12 @@ function IssueEditor({ meta, initial = null, requestOnly = false, onCancel, onSa
           <button type="button" className="btn btn-sm" onClick={() => setF((x) => ({ ...x, assignee: s.assignee }))}>적용</button>
         </div>
       )}
+      {!initial && needVc && vcOpts.length === 0 && <div className="banner warn">쓰기 가능한 법인(vCenter)이 없어 이슈를 만들 수 없습니다 — 관리자에게 수정 가능 vCenter 지정을 요청하세요.</div>}
+      {!initial && !requestOnly && sug?.hidden && !f.assignee && <div className="muted" style={{ fontSize: 12 }}>{sug.autoAssign ? '담당자를 비워 두면 자동 할당 규칙이 정합니다.' : '자동 할당 규칙에 이 법인의 담당자 후보가 있습니다.'}</div>}
       {msg && <div className="banner">{msg}</div>}
       <div className="flex" style={{ gap: 6, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
         <button className="btn" onClick={onCancel} disabled={busy}>취소</button>
-        <button className="btn primary" onClick={save} disabled={busy || !f.title.trim() || (meta.scoped && !f.vcenterId)}>{busy ? '저장 중…' : initial ? '저장' : requestOnly ? '요청 등록' : '이슈 만들기'}</button>
+        <button className="btn primary" onClick={save} disabled={busy || !f.title.trim() || (needVc && !f.vcenterId)}>{busy ? '저장 중…' : initial ? '저장' : requestOnly ? '요청 등록' : '이슈 만들기'}</button>
       </div>
     </div>
   );
@@ -747,7 +751,7 @@ function IssueDetail({ issueKey, meta, onBack, onWritten }) {
                       <button className="btn primary" disabled={busy || !comment.trim()} onClick={() => act(() => postJson(`/issues/${it.key}/comments`, { body: comment })).then((ok) => { if (ok) setComment(''); })}>댓글 달기</button>
                     </div>
                   )
-                  : <div className="muted" style={{ fontSize: 12, marginTop: 8 }}>댓글은 운영자·관리자만 쓸 수 있습니다.</div>}
+                  : <div className="muted" style={{ fontSize: 12, marginTop: 8 }}>{roScope ? '이 법인은 쓰기 범위 밖이라 댓글을 쓸 수 없습니다.' : '댓글은 운영자·관리자만 쓸 수 있습니다.'}</div>}
               </>
             )
             : (
@@ -805,7 +809,7 @@ function IssueDetail({ issueKey, meta, onBack, onWritten }) {
 
 /* ───────────── 설정(v2.871 — 자동 할당 · 알림 · 사람별 메일 주소) ───────────── */
 
-const EVENT_TEXT = Object.freeze({ assigned: '할당(새 담당자 · 이전 담당자)', status: '상태 변경(담당자 · 보고자 · 관찰자)', progress: '진행률·진행 메모(담당자 · 보고자 · 관찰자)', comment: '댓글 · @멘션(담당자 · 보고자 · 관찰자 · 언급된 사람)', due: '기한 24시간 전 · 지남(담당자 — 하루 한 번)' });
+const EVENT_TEXT = Object.freeze({ assigned: '할당(새 담당자 · 이전 담당자)', status: '상태 변경(담당자 · 보고자 · 관찰자)', progress: '진행률·진행 메모(담당자 · 보고자 · 관찰자)', comment: '댓글 · @멘션(담당자 · 보고자 · 관찰자 · 언급된 사람)', due: '기한 내일 · 오늘 · 지남(담당자 — 포탈 날짜로 하루 한 번)' });
 const splitNames = (s) => String(s || '').split(/[,\s]+/).map((x) => x.trim()).filter(Boolean);
 
 /** 전체 범위 관리자 전용 — 서버가 같은 기준으로 막는다(GET·PUT /issues/settings). 조회 실패면 저장 버튼을 열지 않는다. */
@@ -850,6 +854,7 @@ function IssueSettings() {
   const st = data.notifyStatus;
   return (
     <div className="iss-settings">
+      {err && <div className="banner bad" style={{ whiteSpace: 'normal' }}>설정을 다시 읽지 못했습니다 — 아래는 직전에 읽은 값이라 최신이 아닐 수 있습니다. 저장하기 전에 다시 읽기를 눌러 확인하세요. ({err.message || String(err)})</div>}
       {data.loadError && <div className="banner bad" style={{ whiteSpace: 'normal' }}>설정 파일(issue-settings.json)을 읽지 못해 기본값(자동 할당·알림 꺼짐)으로 동작 중입니다 — 손상본은 옆에 보존했습니다. 저장하면 지금 화면의 값으로 새로 씁니다. 원인: {data.loadError}</div>}
       <div className="card iss-editor">
         <h3 className="iss-h3">자동 할당</h3>
@@ -896,7 +901,7 @@ function IssueSettings() {
       {msg && <div className="banner">{msg}</div>}
       <div className="flex" style={{ gap: 6, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
         <button className="btn" onClick={load} disabled={busy}>다시 읽기</button>
-        <button className="btn primary" onClick={save} disabled={busy}>{busy ? '저장 중…' : '저장'}</button>
+        <button className="btn primary" onClick={save} disabled={busy || !!err} title={err ? '최신 설정을 읽지 못해 저장을 잠갔습니다 — 다시 읽기' : undefined}>{busy ? '저장 중…' : '저장'}</button>
       </div>
     </div>
   );
