@@ -78,7 +78,8 @@ describe('v2.867 취소 문구 — 판정은 서버 cancelInfo 값 그대로', (
     expect(t).toBe('중단 요청 11-01 23:48 kim · 취소 14 · 시작 전 멈춤 9 · 취소 실패 1 · 그 밖 실행 취소 1 · 범위 그룹 VM 전부 · 2026-11-08 23:00 회차 건너뜀');
     expect(cancelAcceptedText({ phase: 'queued', fire: 0, extra: 0, halted: 20, skipKey: '' }, 'WEB')).toContain('시작 전 멈춤 20대');
     const f = { at: NOW, trigger: 'timer', started: 23, halted: 9, canceled: c };
-    expect(fireText(f)).toContain('중단됨');
+    expect(fireText(f)).toContain(' · 중단 · ');
+    expect(fireText({ ...f, canceled: { ...c, effective: false } })).toContain('중단 못 함');
     expect(fireText(f)).toContain('시작 전 멈춤 9');
     expect(fireTone(f)).toBe('warn');
     expect(FIRE_STATE_TEXT.canceled).toBe('취소');

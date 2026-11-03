@@ -317,7 +317,7 @@ function CorpView({ corps, c, onPick, limits = null, waitMs = null, onChanged = 
                     <td className="right" data-sort={r.baseline ?? ''} style={{ fontVariantNumeric: 'tabular-nums' }}>{r.baseline ? rateText(r.baseline) : '—'}</td>
                     <td>
                       {/* v2.867: 판정 칸 하나에 상태 + 취소 단추(따로 열을 두면 1440 에서 표가 칸을 넘어 단추가 가로 스크롤 뒤로 숨었다 — Chromium 확인) */}
-                      {(() => { const ch = cancelChip(r.cancel, { waitMs }); return ch ? <><span title={ch.title}><Badge tone={ch.tone === 'stop' ? 'stop' : 'warn'}>{ch.short}</Badge></span><div className="muted" style={{ fontSize: 11, marginTop: 2 }}>{ch.sub}</div></> : null; })()}
+                      {(() => { const ch = cancelChip(r.cancel, { waitMs }); return ch ? <><span title={ch.title}><Badge tone={ch.tone === 'stop' ? 'stop' : 'warn'}>{ch.short}</Badge></span><div className="muted" style={{ fontSize: 11, marginTop: 2, whiteSpace: 'normal', overflowWrap: 'anywhere', maxWidth: 120 }}>{ch.sub}</div></> : null; })()}
                       {!r.cancel && (r.stuck ? <><Badge tone="warn">멈춤 의심</Badge><div className="muted" style={{ fontSize: 11, marginTop: 2 }}>{STUCK_TEXT[r.stuck]}</div></>
                         : r.slow ? <Badge tone="warn">느림</Badge> : r.rateNow === null ? <Badge tone="muted">속도 모름</Badge> : <Badge tone="ok">정상</Badge>)}
                       <div style={{ marginTop: 4 }} onClick={(e) => e.stopPropagation()}>
@@ -366,7 +366,7 @@ function CorpView({ corps, c, onPick, limits = null, waitMs = null, onChanged = 
                     <td>{levelWord(r.level)}</td>
                     <td data-sort={r.since ?? ''} style={{ fontFamily: 'var(--mono)', fontSize: 12 }}>{r.since ? shortTs(r.since) : '—'}<div className="muted">{elapsedText(r.elapsed)}</div></td>
                     <td data-sort={r.dirStatus?.reason || 'unknown'} style={{ whiteSpace: 'nowrap', fontSize: 12.5 }}>{r.dirStatus ? reasonText(r.dirStatus.reason) : <span className="muted">{reasonText('unknown')}</span>}
-                      {(() => { const ch = cancelChip(r.cancel, { waitMs }); return ch ? <div title={ch.title}><Badge tone={ch.tone === 'stop' ? 'stop' : 'warn'}>{ch.short}</Badge> <span className="muted" style={{ fontSize: 11 }}>{ch.sub}</span></div> : null; })()}</td>
+                      {(() => { const ch = cancelChip(r.cancel, { waitMs }); return ch ? <div title={ch.title}><Badge tone={ch.tone === 'stop' ? 'stop' : 'warn'}>{ch.short}</Badge><div className="muted" style={{ fontSize: 11, whiteSpace: 'normal', overflowWrap: 'anywhere', maxWidth: 160 }}>{ch.sub}</div></div> : null; })()}</td>
                     <td className="right">
                       {(() => { const cb = cancelButton({ running: true, cancel: r.cancel, lockReason: ro }); return <button type="button" className="logout-btn" style={{ padding: '4px 10px', fontSize: 12, color: cb.disabled ? undefined : 'var(--red)' }} disabled={cb.disabled} title={cb.title} onClick={() => openCancel(r)}>{cb.label}</button>; })()}
                     </td>

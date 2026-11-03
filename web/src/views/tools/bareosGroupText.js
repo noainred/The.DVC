@@ -109,7 +109,7 @@ export function fireText(f) {
   if (!f) return '—';
   const parts = [`${shortTs(f.at)} ${f.trigger === 'timer' ? '예약' : '수동'}`];
   if (f.error) parts.push(`실패 — ${f.error}`);
-  if (f.canceled) parts.push('중단됨');   // v2.867 회차 중단(자세한 수는 canceledText — 카드의 중단 줄)
+  if (f.canceled) parts.push(f.canceled.effective === false ? '중단 못 함' : '중단');   // v2.867 회차 중단(자세한 수는 canceledText — 카드의 중단 줄 · '중단 요청' 과 어긋나지 않게 '중단')
   for (const [k, st] of FIRE_COUNT_KEYS) if (f[k] > 0) parts.push(`${FIRE_STATE_TEXT[st]} ${f[k]}`);
   if (parts.length === 1) parts.push(`VM ${f.total ?? 0}대`);
   return parts.join(' · ');
