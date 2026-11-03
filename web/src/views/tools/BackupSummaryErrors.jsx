@@ -70,7 +70,7 @@ export default function BackupSummaryErrors({ reloadKey, onOpenDetail }) {
     const o = errorOpen(r, opt); const h = errorHistory(r, opt);
     if (!o) return <span className="muted">—</span>;
     return (
-      <div className="flex" style={{ gap: 6, alignItems: 'center', flexWrap: 'nowrap' }}>
+      <div className="flex" style={{ gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
         {o.key === 'log'
           ? <button type="button" className={isOpen(r) ? 'login-btn' : 'logout-btn'} aria-pressed={isOpen(r)} onClick={() => openLog(r)} style={{ padding: '3px 10px', fontSize: 12 }}>{isOpen(r) ? '로그 열림' : '로그'}</button>
           : <button type="button" onClick={() => go(r, o)} style={linkBtn}>{o.text}</button>}
@@ -110,7 +110,7 @@ export default function BackupSummaryErrors({ reloadKey, onOpenDetail }) {
               {/* 공용 STable(규칙 — raw table 금지) · 정렬은 묶음 단위로 이 화면이 한다(sortable=false — STable 은 행을 낱개로 섞어 묶음이 깨진다) */}
               <STable sortable={false} minWidth={1000} wrap={false} style={{ width: '100%' }} data-err-groups="">
                 <thead><tr>{GH.map(([k, h]) => (
-                  <th key={k} style={{ padding: 0, ...(k === 'msg' ? { minWidth: 280 } : {}) }} aria-sort={gsort.key === k ? (gsort.dir === 'asc' ? 'ascending' : 'descending') : 'none'}>
+                  <th key={k} style={{ padding: 0, ...(k === 'msg' ? { minWidth: 240 } : {}) }} aria-sort={gsort.key === k ? (gsort.dir === 'asc' ? 'ascending' : 'descending') : 'none'}>
                     {/* 칸 전체가 단추 — th 여백을 0 으로 두고 여백은 단추가 가진다(글자 폭만 · 여백 밖은 눌러도 정렬되지 않았다 — Chromium 2회 확인) */}
                     <button type="button" onClick={() => sortBy(k)} style={{ display: 'block', width: '100%', boxSizing: 'border-box', textAlign: 'left', background: 'none', border: 0, padding: PAD.padding, color: 'inherit', font: 'inherit', cursor: 'pointer', whiteSpace: 'nowrap' }}>{h}{gsort.key === k ? (gsort.dir === 'asc' ? ' ▲' : ' ▼') : ''}</button>
                   </th>
@@ -128,10 +128,10 @@ export default function BackupSummaryErrors({ reloadKey, onOpenDetail }) {
                           <td style={PAD}><Pill s={s} /></td>
                           <td style={{ ...PAD, fontSize: 12 }}><div style={{ maxWidth: 230, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={g.target}><b>{g.target}</b>{g.n > 1 && g.vms > 1 ? <span className="muted"> {fmtNum(g.vms)}대</span> : null}</div></td>
                           <td style={PAD}><Pill s={ERROR_KIND[r.kind] || ERROR_KIND.collect} /></td>
-                          <td style={{ ...PAD, fontSize: 12 }}><div style={{ minWidth: 260, whiteSpace: 'normal', overflowWrap: 'anywhere' }}>{r.msg}</div></td>
+                          <td style={{ ...PAD, fontSize: 12 }}><div style={{ minWidth: 220, whiteSpace: 'normal', overflowWrap: 'anywhere' }}>{r.msg}</div></td>
                           <td style={{ ...PAD, whiteSpace: 'nowrap' }}><span style={{ display: 'inline-flex', minWidth: 22, justifyContent: 'center', padding: '1px 8px', borderRadius: 999, fontSize: 11.5, fontWeight: 800, background: g.n > 1 ? 'var(--accent)' : 'var(--border)', color: g.n > 1 ? '#fff' : 'var(--text-dim)' }}>{fmtNum(g.n)}</span></td>
                           <td style={PAD}>
-                            <div className="flex" style={{ gap: 6, alignItems: 'center', flexWrap: 'nowrap' }}>
+                            <div className="flex" style={{ gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
                               {g.n > 1 && <button type="button" className="logout-btn" aria-expanded={isOpenG} onClick={() => toggle(g.id)} style={{ padding: '3px 10px', fontSize: 12 }}>{isOpenG ? '접기 ▴' : '펼치기 ▾'}</button>}
                               {g.runs > 1 ? <button type="button" className={bulkOn ? 'login-btn' : 'logout-btn'} aria-pressed={bulkOn} onClick={() => setDrawer({ kind: 'bulk', group: g })} style={{ padding: '3px 10px', fontSize: 12 }} title="이 묶음의 로그를 차례로 읽어 첫 오류 줄을 대조합니다">{bulkOn ? '묶음 로그 열림' : '묶음 로그'}</button>
                                 : g.n === 1 ? actions(r) : null}
@@ -151,7 +151,7 @@ export default function BackupSummaryErrors({ reloadKey, onOpenDetail }) {
                               <td style={PAD}>{(() => { const o = errorOpen(m, opt); const h = errorHistory(m, opt);
                                 if (!o) return <span className="muted">—</span>;
                                 return (
-                                  <div className="flex" style={{ gap: 6, alignItems: 'center', flexWrap: 'nowrap' }}>
+                                  <div className="flex" style={{ gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
                                     {o.key === 'log' ? <button type="button" className={isOpen(m) ? 'login-btn' : 'logout-btn'} onClick={() => openLog(m, g.rows, '이 묶음')} style={{ padding: '3px 10px', fontSize: 12 }}>{isOpen(m) ? '로그 열림' : '로그'}</button>
                                       : <button type="button" onClick={() => go(m, o)} style={linkBtn}>{o.text}</button>}
                                     {h && <button type="button" onClick={() => goHistory(m)} style={linkBtn}>{h.text}</button>}
