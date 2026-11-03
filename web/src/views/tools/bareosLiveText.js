@@ -139,7 +139,7 @@ export const STATE_TEXT = Object.freeze({ running: '실행 중', queued: '대기
 /* ── v2.833.1 Director 상태 문구 · 멈춤 의심 ── */
 /** Director 상태 사유 키(서버 liveParse.dirReasonOf) → 우리말. */
 export const DIR_REASON_TEXT = Object.freeze({
-  running: '실행 중', mount: '마운트 대기', volume: '볼륨 대기', maxjobs: '동시 실행 상한', storage: '스토리지 대기', client: 'FD 대기',
+  running: '실행 중', canceling: '취소 처리 중', mount: '마운트 대기', volume: '볼륨 대기', maxjobs: '동시 실행 상한', storage: '스토리지 대기', client: 'FD 대기',
   priority: '우선순위 대기', starttime: '시작 시각 대기', created: '실행 대기', blocked: '막힘', done: '끝남(반영 전)', other: '기타', unknown: '사유 모름',
 });
 export const reasonText = (k) => DIR_REASON_TEXT[k] || DIR_REASON_TEXT.other;

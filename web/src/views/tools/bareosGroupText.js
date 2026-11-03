@@ -101,14 +101,15 @@ export function checkState(ids, sel) {
 
 /* ── 실행 결과 문구 ── */
 // v2.830 검토 L3·L4: '보내지 못함'(Director 에 닿기 전 — 인증 정지·접속 실패·옛 엣지)과 '실패'(Director 가 거부)·'결과 모름'(명령 도중 끊김)을 나눈다
-export const FIRE_STATE_TEXT = Object.freeze({ started: '시작', skipped: '건너뜀', notsent: '보내지 못함', failed: '실패', unknown: '결과 모름' });
-export const FIRE_STATE_TONE = Object.freeze({ started: 'ok', skipped: 'muted', notsent: 'bad', failed: 'bad', unknown: 'warn' });
-const FIRE_COUNT_KEYS = Object.freeze([['started', 'started'], ['skipped', 'skipped'], ['notSent', 'notsent'], ['failed', 'failed'], ['unknown', 'unknown']]);
+export const FIRE_STATE_TEXT = Object.freeze({ started: '시작', skipped: '건너뜀', notsent: '보내지 못함', failed: '실패', unknown: '결과 모름', canceled: '취소', halted: '시작 전 멈춤' });
+export const FIRE_STATE_TONE = Object.freeze({ started: 'ok', skipped: 'muted', notsent: 'bad', failed: 'bad', unknown: 'warn', canceled: 'warn', halted: 'muted' });
+const FIRE_COUNT_KEYS = Object.freeze([['started', 'started'], ['skipped', 'skipped'], ['notSent', 'notsent'], ['failed', 'failed'], ['unknown', 'unknown'], ['halted', 'halted']]);
 /** 마지막 실행 한 줄 — '10-31 02:10 예약 · 시작 3 · 건너뜀 1'(0 인 칸은 뺀다). 실행 기록이 없으면 '—'. */
 export function fireText(f) {
   if (!f) return '—';
   const parts = [`${shortTs(f.at)} ${f.trigger === 'timer' ? '예약' : '수동'}`];
   if (f.error) parts.push(`실패 — ${f.error}`);
+  if (f.canceled) parts.push(f.canceled.effective === false ? '중단 못 함' : '중단');   // v2.867 회차 중단(자세한 수는 canceledText — 카드의 중단 줄 · '중단 요청' 과 어긋나지 않게 '중단')
   for (const [k, st] of FIRE_COUNT_KEYS) if (f[k] > 0) parts.push(`${FIRE_STATE_TEXT[st]} ${f[k]}`);
   if (parts.length === 1) parts.push(`VM ${f.total ?? 0}대`);
   return parts.join(' · ');
@@ -117,7 +118,7 @@ export function fireText(f) {
 export function fireTone(f) {
   if (!f) return 'muted';
   if (f.error || f.failed > 0 || f.notSent > 0) return 'bad';
-  if (f.unknown > 0) return 'warn';
+  if (f.unknown > 0 || f.canceled) return 'warn';   // v2.867 중단된 회차는 경고 색(실패는 아니다 — 사람이 멈췄다)
   return f.started > 0 ? 'ok' : 'muted';
 }
 /** 다음 실행 — 서버가 준 next(서버 현지 시각 기준 ms). */
@@ -213,17 +214,18 @@ export function untilText(ms) {
  *   결과 칸은 마지막으로 읽은 값이라 세지 않는다 — ok·warn·fail·run·never 는 null, unknown = VM 수(통합·법인별 현황 corpCounts 와 같은 규칙).
  */
 export function memberResults(rows, { resultsKnown = true } = {}) {
-  const out = { n: 0, ok: 0, warn: 0, fail: 0, run: 0, never: 0 };
+  const out = { n: 0, ok: 0, warn: 0, fail: 0, cancel: 0, run: 0, never: 0 };
   for (const r of Array.isArray(rows) ? rows : []) {
     out.n++;
     const b = r?.b;
     if (b?.run) out.run++;
     if (b?.st === 'ok') out.ok++;
     else if (b?.st === 'warning') out.warn++;
-    else if (b?.st === 'error' || b?.st === 'canceled') out.fail++;
+    else if (b?.st === 'error') out.fail++;
+    else if (b?.st === 'canceled') out.cancel++;   // v2.867: 사람이 멈춘 실행은 실패와 따로(회차 중단 뒤 '실패 n' 으로 보이지 않게 · Chromium 확인)
     else if (!b?.run) out.never++;
   }
-  if (resultsKnown === false) return { n: out.n, ok: null, warn: null, fail: null, run: null, never: null, unknown: out.n };
+  if (resultsKnown === false) return { n: out.n, ok: null, warn: null, fail: null, cancel: null, run: null, never: null, unknown: out.n };
   return out;
 }
 /** 카드 오른쪽 위 표지 — 진행 · 실패 · 성공 · 기록 없음 · (Director 결과 모름) 모름. */
@@ -232,6 +234,7 @@ export function resultBadge(m) {
   if (m.unknown) return { text: `결과 모름 ${m.unknown}대`, tone: 'muted' };
   if (m.run) return { text: `진행 ${m.run}/${m.n}`, tone: 'run' };
   if (m.fail) return { text: `실패 ${m.fail} · 성공 ${m.ok + m.warn}`, tone: 'bad' };
+  if (m.cancel) return { text: `취소 ${m.cancel} · 성공 ${m.ok + m.warn}`, tone: 'warn' };
   if (m.ok + m.warn) return { text: `성공 ${m.ok + m.warn}/${m.n}${m.warn ? ` (경고 ${m.warn})` : ''}`, tone: m.never ? 'warn' : 'ok' };
   return { text: '백업 기록 없음', tone: 'muted' };
 }

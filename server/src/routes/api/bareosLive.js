@@ -4,7 +4,7 @@
 // 응답에 Director 주소·콘솔 이름·오류 원문 없음(오류는 코드만 — 화면이 문구로 바꾼다).
 import { requireRole } from '../../auth/auth.js';
 import { isDemoGuest, isAdminDetailUser } from '../../auth/demoGuest.js';
-import { scopedVcenterIds } from '../../auth/scope.js';
+import { scopedVcenterIds, writeScopedVcenterIds } from '../../auth/scope.js';
 import { store } from '../../store.js';
 import { bareosAccess } from './bareosBackup.js';
 import { effectiveSettings, isDemoActive } from '../../bareos/service.js';
@@ -12,6 +12,9 @@ import { directorById, directorConn } from '../../bareos/settings.js';
 import { jobDigests, registryLoadError } from '../../bareos/registry.js';
 import { listGroups } from '../../bareos/groups.js';
 import { touchLive, liveSnapshot, runningRunOf, LIVE_MS, LIVE_IDLE_MS } from '../../bareos/liveStatus.js';
+import { cancelInfo, CANCEL_WAIT_MS } from '../../bareos/cancelState.js';
+import { cancelPlan, groupCanceling } from '../../bareos/groupRunner.js';
+import { nextSlot } from '../../bareos/groupSchedule.js';
 import { rateNowOf } from '../../bareos/liveParse.js';
 import { isFinalStatus } from '../../bareos/names.js';
 import { numOrNull } from '../../util/numOrNull.js';
@@ -98,6 +101,7 @@ export function runningRow(j, run0, live, liveOk, { now = Date.now(), vm = null,
     rateNow, rateAvg: liveOk && live ? live.aveRate ?? null : null,
     baseline: base, ...(slow ? { slow: true } : {}), ...(stuckWhy ? { stuck: stuckWhy } : {}),
     dirStatus: dirRow ? { text: String(dirRow.status || '').slice(0, 200), reason: dirRow.reason || 'other' } : null,
+    cancel: cancelInfo(j, now),   // v2.867 멈추는 중(취소를 보낸 실행) · 멈추지 않음(stuck)
   };
 }
 
@@ -115,7 +119,7 @@ export function waitGroups(rows) {
 }
 
 /** 법인(vCenter) 하나의 현황. diag = 진단 원문을 실을지(전체 범위 관리자만 — 라우트가 정한다). */
-export function corpView(site, settings, digests, { now = Date.now(), vms = new Map(), groupOf = new Map(), vcName = '', diag = false } = {}) {
+export function corpView(site, settings, digests, { now = Date.now(), vms = new Map(), groupOf = new Map(), vcName = '', diag = false, groups = [], writable = false } = {}) {
   const dir = directorById(site.directorId, settings);
   const demo = isDemoActive();
   const mine = digests.filter((j) => j.vcenterId === site.vcenterId && !!j.demo === demo);
@@ -164,6 +168,22 @@ export function corpView(site, settings, digests, { now = Date.now(), vms = new 
     live: live ? { at: live.at, ok: live.ok, code: live.code || '', dirOk, dirCode: live.dir?.code || '' } : null,
     hist: hist.map((p) => [p.at, p.rate]),
     rows: running,
+    // v2.867 회차 중단 — 이 법인 그룹 중 줄 대기 · 보내는 중 · 이번 회차가 Director 에서 도는 · 멈추는 중인 것(그룹 회차 띠)
+    writable,
+    stopping: running.filter((r) => r.cancel).length,
+    groupRuns: (() => {
+      const byVm = new Map(mine.map((j) => [j.vmId, j]));
+      const out = [];
+      for (const g of groups) {
+        if (g.vcenterId !== site.vcenterId) continue;
+        const plan = cancelPlan(g, byVm, now);
+        const canceling = groupCanceling(g.id);
+        if (!plan.phase && !plan.sent && !canceling) continue;
+        const nx = nextSlot(g.schedule, now);   // 확인 창 '다음 회차 1회 건너뛰기'(그룹 탭과 같은 값)
+        out.push({ id: g.id, name: g.name, total: g.vmIds.length, plan, canceling, next: nx ? { at: nx.at, key: nx.key, level: nx.level, ...(g.skipKey === nx.key ? { skip: true } : {}) } : null, lastFire: g.lastFire ? { at: g.lastFire.at, key: g.lastFire.key || '', trigger: g.lastFire.trigger, level: g.lastFire.level || '', started: g.lastFire.started || 0, canceled: g.lastFire.canceled || null } : null });
+      }
+      return out;
+    })(),
     ...(diag && live ? {
       diag: {
         at: live.at,
@@ -172,6 +192,11 @@ export function corpView(site, settings, digests, { now = Date.now(), vms = new 
       },
     } : {}),
   };
+}
+
+/** v2.867 쓰기 범위 열쇠(법인별 writable 이 사람마다 다르다 — 캐시로 다른 계정의 값을 받지 않게). */
+function writeKey(user, snap) {
+  try { const w = writeScopedVcenterIds(user, snap); return w ? [...w].sort().join(',') : 'all'; } catch { return 'err'; }
 }
 
 export function registerBareosLive(api) {
@@ -190,15 +215,17 @@ export function registerBareosLive(api) {
       const digests = jobDigests().filter((j) => allow.has(j.vcenterId));
       const vms = new Map((snap?.vms || []).filter((v) => allow.has(v.vcenterId)).map((v) => [v.id, v]));
       const groupOf = new Map();
-      for (const g of listGroups()) if (allow.has(g.vcenterId)) for (const id of g.vmIds) groupOf.set(id, g.name);
+      const groups = listGroups().filter((g) => allow.has(g.vcenterId));
+      for (const g of groups) for (const id of g.vmIds) groupOf.set(id, g.name);
       const vcName = new Map((snap?.vcenters || []).map((v) => [v.id, v.name || v.id]));
-      const corps = sites.map((s) => corpView(s, settings, digests, { now, vms, groupOf, vcName: vcName.get(s.vcenterId), diag }));
+      const corps = sites.map((s) => corpView(s, settings, digests, { now, vms, groupOf, vcName: vcName.get(s.vcenterId), diag, groups, writable: bareosAccess(req.user, s.vcenterId) === 0 }));
       const act = corps.filter((c) => c.running > 0);
       const knownRate = act.filter((c) => c.rateNow !== null);
       const sum = (k) => corps.reduce((a, c) => a + (c.today[k] || 0), 0);
       return {
         ok: true, now, liveMs: LIVE_MS, idleMs: LIVE_IDLE_MS, demo: isDemoActive(), registryLoadError: !!registryLoadError(),
         relayLimits: relayLimits(),   // v2.858 실행 중 상세가 로그를 읽을 때 엣지 대행 Director 의 화면 시한(숫자를 화면에 박지 않는다)
+        cancelWaitMs: CANCEL_WAIT_MS,  // v2.867 '멈추지 않음' 기준(화면 문구 — 숫자를 박지 않는다)
         totals: {
           corps: corps.length, active: act.length, running: corps.reduce((a, c) => a + c.running, 0), waiting: corps.reduce((a, c) => a + c.waiting, 0),
           rateNow: act.length ? (knownRate.length ? knownRate.reduce((a, c) => a + c.rateNow, 0) : null) : 0, rateUnknownCorps: act.length - knownRate.length,
@@ -207,6 +234,6 @@ export function registerBareosLive(api) {
         },
         corps,
       };
-    }, { ttlMs: 5_000, extraKey: `${scopeKey(req.user, snap)}|d${isDemoActive() ? 1 : 0}|x${diag ? 1 : 0}` });   // x = 진단 원문 공개 여부(키에 없으면 캐시로 샌다)
+    }, { ttlMs: 5_000, extraKey: `${scopeKey(req.user, snap)}|w${writeKey(req.user, snap)}|d${isDemoActive() ? 1 : 0}|x${diag ? 1 : 0}` });   // x = 진단 원문 공개 여부(키에 없으면 캐시로 샌다) · w = 쓰기 범위(법인별 writable)
   });
 }

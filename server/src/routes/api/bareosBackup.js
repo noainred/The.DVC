@@ -17,8 +17,9 @@ import {
   directorConn, directorCred, directorById, loadSettings, jobDirectorId, siteMissing, anyDirectorConfigured, LIMITS,
 } from '../../bareos/settings.js';
 import {
-  listJobs, getJob, patchJob, deleteJob, markPending, addRestore, registryLoadError, jobVmIds, MAX_JOBS, restoreOpen, clearPending, applyRunRow, applyRestoreRow, registryRev, inBatch,
+  listJobs, getJob, patchJob, deleteJob, markPending, addRestore, registryLoadError, jobVmIds, MAX_JOBS, restoreOpen, clearPending, applyRunRow, applyRestoreRow, registryRev, inBatch, markCancelReq,
 } from '../../bareos/registry.js';
+import { cancelInfo, cancelGate, CANCEL_WAIT_MS } from '../../bareos/cancelState.js';
 import { parseBanner } from '../../bareos/director.js';
 import { diagnoseConsole, DIAG_STAGES } from '../../bareos/console.js';
 import { secretProvided } from '../../util/secretCarry.js';
@@ -464,8 +465,10 @@ function bareosListView(req) {
     } catch { return null; }
   };
   // C-5: 끝난 실행 원문(finishedRuns — 실패 메일·RPO 용 · 최근 10건)은 화면이 쓰지 않는다(웹 grep 0건) — 싣지 않는다. 복원 이력(restores)은 '실행 현황 · 이력' 탭이 쓴다.
+  const now = Date.now();
   // v2.866: finishedRuns 원문은 싣지 않고 마지막 성공(lastOk — 복원 › 폴더 표)만 계산해 싣는다
-  const views = jobs.map(({ finishedRuns, ...j }) => ({ ...viewJob(j, vmById, settings), lastOk: lastOkOf(j.lastRun, finishedRuns), writable: bareosAccess(req.user, j.vcenterId) === 0, policy: policyOf(j) }));
+  // v2.867 cancel = 멈추는 중(취소를 보낸 실행 — cancelState.cancelInfo · 지금 도는 실행일 때만). 원장 칸 cancelReq 는 그대로 싣지 않는다(판정 한 곳)
+  const views = jobs.map(({ finishedRuns, cancelReq, ...j }) => ({ ...viewJob(j, vmById, settings), lastOk: lastOkOf(j.lastRun, finishedRuns), writable: bareosAccess(req.user, j.vcenterId) === 0, policy: policyOf(j), cancel: cancelInfo({ ...j, cancelReq }, now) }));
   let settingsWritable = false;
   try { settingsWritable = !scopedVcenterIds(req.user, store.get()) && !writeScopedVcenterIds(req.user, store.get()); } catch { settingsWritable = false; }
   const rawPoller = pollerStatus();
@@ -490,6 +493,7 @@ function bareosListView(req) {
     ...(scoped ? { scoped: true, omittedOutOfScope: omitted } : {}),
     poller,
     relayLimits: relayLimits(),   // v2.824 엣지 대행 Director 의 화면 시한(서버 대기 시간 — 숫자를 화면에 박지 않는다)
+    cancelWaitMs: CANCEL_WAIT_MS,   // v2.867 '멈추지 않음' 기준(화면 문구 — 숫자를 박지 않는다)
     settingsWritable,   // G12: 설정(전 법인 공용 쓰기 — fullWriteOnly)을 바꿀 수 있는 계정인가
     settingsLoadError: loadErrorView(settingsLoadError(), detail),
     registryLoadError: loadErrorView(registryLoadError(), detail),
@@ -922,6 +926,9 @@ async function cancelRoute(req, res, job) {
   const mm = modeMismatch(job); if (mm) return res.status(409).json({ ok: false, reason: mm });
   const want = Number(req.body?.jobid || job.pending?.jobid || job.lastRun?.jobid || 0);
   if (!Number.isInteger(want) || want <= 0) return res.status(409).json({ ok: false, reason: '취소할 실행이 없습니다.' });
+  // v2.867: 이미 취소를 보낸 실행은 '멈추지 않음'(CANCEL_WAIT_MS 경과)일 때만 다시 보낸다 — 연타로 같은 cancel 을 겹쳐 보내지 않게
+  const ci = cancelInfo(job);
+  if (ci && ci.jobid === want && !ci.stuck) return res.status(409).json({ ok: false, code: 'sent', reason: cancelGate(job).reason || '취소를 이미 보냈습니다.' });
   if (orphanOf(job) && job.pending?.jobid) {   // C3: 물어볼 Director 가 없다 — 포탈의 추적만 내린다
     const note = `이 대상의 Director(${jobDir(job)})가 설정에 없어 포탈의 추적만 내렸습니다 — 실제 실행 결과는 그 Bareos 서버에서 확인하세요.`;
     clearPending(job.id, note);
@@ -943,8 +950,16 @@ async function cancelRoute(req, res, job) {
       audit(req, 'Bareos 백업 취소', `${job.vcenterId}/${job.vmName}`, `jobid ${want} · Director 에 없음 — 포탈 추적 해제`);
       return res.json({ ok: true, jobid: want, cleared: true, note });
     }
-    audit(req, 'Bareos 백업 취소', `${job.vcenterId}/${job.vmName}`, `jobid ${want}`);
-    res.json({ ok: true, jobid: want });
+    // 반증 F8: 엣지 회신이 정제에서 canceled 없이 떨어지면(성공인데 결과 없음) 취소가 갔는지 모른다 — 묶음 취소(cancelJobs)와 같게 '결과 모름'
+    if (out.canceled !== true) {
+      audit(req, 'Bareos 백업 취소', `${job.vcenterId}/${job.vmName}`, `jobid ${want} · 결과 모름(회신에 결과 없음)`);
+      return res.status(502).json({ ok: false, unknown: true, reason: '결과 모름 — 회신에 취소 결과가 없습니다. 취소가 갔는지 알 수 없으니 Director 에서 확인하세요.' });
+    }
+    // v2.867 '멈추는 중' — 그 실행이 끝나면(폴러 · 로그 열기) 지운다. 기록을 못 써도 취소는 Director 에 갔다(화면 표시만 늦다)
+    let marked = true;
+    try { markCancelReq(job.id, { jobid: want, by: req.user?.username || '', via: 'single' }); } catch (e) { marked = false; console.warn(`[bareos] 취소 표시를 원장에 쓰지 못했습니다(${String(e?.message || e).slice(0, 160)}) — 취소는 Director 에 갔습니다.`); }
+    audit(req, 'Bareos 백업 취소', `${job.vcenterId}/${job.vmName}`, `jobid ${want}${ci?.stuck ? ' · 다시 보냄(멈추지 않음)' : ''}`);
+    res.json({ ok: true, jobid: want, canceling: true, ...(marked ? {} : { note: '취소는 보냈지만 포탈의 표시를 쓰지 못했습니다 — 결과는 다음 조회에 반영됩니다.' }) });
   } catch (e) { sendErr(res, e); }
 }
 
