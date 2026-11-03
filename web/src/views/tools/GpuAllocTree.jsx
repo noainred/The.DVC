@@ -138,10 +138,10 @@ export function GpuAllocTree({ scope }) {
         <span style={{ marginLeft: 'auto' }} />
         <button type="button" className="logout-btn" style={{ flex: 'none', padding: '6px 11px' }} disabled={loading} onClick={load}>{loading ? '불러오는 중…' : '⟳ 새로 고침'}</button>
         {canCsv() && <button type="button" className="logout-btn" style={{ flex: 'none', padding: '6px 11px' }} disabled={!!dlBusy} onClick={() => download('csv')} title="GPU·VM 한 줄씩(계층 열을 모두 채운 평면 표) — UTF-8(BOM)">{dlBusy === 'csv' ? '내려받는 중…' : '⬇ CSV'}</button>}
-        {canCsv() && <button type="button" className="login-btn" style={{ flex: 'none', padding: '6px 13px' }} disabled={!!dlBusy} onClick={() => setExportOpen(true)} title="넣을 단계(호스트 · GPU · VM)와 시트(계층 표 · 평면 표 · 안내)를 고른 뒤 내려받습니다">⬇ 엑셀(.xlsx)…</button>}
+        {canCsv() && <button type="button" className="login-btn" style={{ flex: 'none', padding: '6px 13px' }} disabled={!!dlBusy} onClick={() => setExportOpen(true)} title="법인(기본 모두) · 넣을 단계(호스트 · GPU · VM) · 시트(계층 표 · 평면 표 · 안내 · 법인별 시트)를 고른 뒤 내려받습니다">⬇ 엑셀(.xlsx)…</button>}
       </div>
       {dlMsg && <div className="error-box" style={{ marginBottom: 8 }}>{dlMsg}</div>}
-      {canCsv() && exportOpen && <GpuAllocExportModal scope={scope} vcSel={vcSel} onClose={() => setExportOpen(false)} />}
+      {canCsv() && exportOpen && <GpuAllocExportModal scope={scope} vcSel={vcSel} chips={chips} onClose={() => setExportOpen(false)} />}
       {err && <ErrorBox error={err} />}
       {(data.vcenters || []).length === 0 ? (
         <div className="card" style={{ padding: 16 }}><span className="muted">GPU 가 설치된 호스트가 없습니다.</span></div>

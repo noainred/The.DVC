@@ -108,5 +108,15 @@
     합계: 코어·메모리 **합** 은 모르는 호스트가 섞이면 null(부분 합 금지) · **사용률** 은 비율이라 읽은 호스트의 MHz·MB 합으로 내고 뺀 대수(`hostUseUnknown`)를
     비고에 적는다(한 대가 끊겼다고 법인 사용률을 지우지 않는다 — 처음 판은 null 로 지워 목 데이터 법인 행이 비었다) · 켜진 GPU VM 의 vCPU·메모리 합(`vmVcpu`·`vmMemGB`).
     엑셀 계층 표는 열이 6개 늘어 비고가 17번째 열이다(`treeLines` cells 17개 — 테스트가 고정).
+  - **v2.869 법인별 시트 · 창은 모든 법인으로 시작**(사용자 요청 '전체 vCenter 한 시트는 유지하면서 1개 vCenter 를 1개 시트에' · '기본적으로 모든 vcenter 를 선택' —
+    승인 시안 `docs/design/gpu-alloc-corp-sheets/`): 시트 키 `corp`(기본 켬 — `ALLOC_SHEET_KEYS` 넷) = **'목차'** + GPU 호스트가 있는 법인마다 계층 표 한 장.
+    법인 시트는 전체 계층 표와 **같은 함수**(`addTreeSheet`)에 `{ totals: vc.totals, vcenters: [vc] }` 를 준 것 — 값을 새로 내지 않는다. 목차는 범위 안 법인 **전부**
+    (`allocTree.allocCorpRoster` — 계층과 같은 범위 판정 `scopeTest` · GPU 없는 법인은 '시트 없음' · 용량 빈 칸). 시트 이름 `corpSheetNames`(31자 · 금지 문자 · 끝 `-.` ·
+    고정 시트·대소문자 겹침은 `~2` — `hostExport.hostSheetNames` 와 같은 규칙) · 링크는 `util/xlsxInternalLink.js`(location 만 — 외부 관계 없음, 테스트가 XML 을 본다) ·
+    '← 목차' 는 제목이 끝나는 칸 뒤(`backLinkCol` — 값이 있는 칸은 제목 넘침을 자른다) · 탭 색 목차 회색 · 법인 파랑 · 할당률 90% 이상 주황 · 법인 시트 상한 100(`CORP_SHEETS_MAX`).
+    파일 이름 `_percorp`(`allocFileName` 다섯째 인자) · `export-meta` 가 `corpSheets`·`fileNamesPercorp` 를 같은 함수로 준다.
+    창(`GpuAllocExportModal`)은 화면 칩 선택과 무관하게 **모든 법인(sel = null)** 으로 시작 · 칩으로 줄임 · '화면 선택대로' · 빈 선택은 내려받기 잠금(빈 `vcenterIds` 는 '전체' 로 읽히므로 보내지 않는다) ·
+    전부 고르면 `vcenterIds` 를 싣지 않는다(`gpuAllocText.exportPick`). 옛 화면이 `sheets=tree,flat,info` 를 보내면 지금처럼 3시트다.
+    실측(합성 28법인 × GPU 호스트 10대 · GPU 560장, 같은 프로세스): 3시트 0.64~0.86초 · 215KB → 법인별 포함 1.1~1.2초 · 373KB. 목 서버 첫 요청 두 번이 5.6~5.8초였는데 원인은 가리지 못했다(이후 0.17~0.53초).
   - ⚠ 정직 기록: `HostGraphicsInfo.vm` 이 꺼진 VM 을 싣는지, 이 현장 vCenter 가 동적 DirectPath `assignedId` 를 주는지는 실장비로 확인하지 못했다
     (꺼진 VM 은 목록에 있어도 할당에 넣지 않으므로 결과는 같다). 한 VM 의 vGPU 장치 둘이 한 GPU 목록에 한 번만 오면 GPU 단위 할당이 한 장치분으로 적게 잡힌다(호스트 합은 정확).

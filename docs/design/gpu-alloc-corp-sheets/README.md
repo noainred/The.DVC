@@ -1,6 +1,6 @@
 # 설계: GPU 할당율 엑셀 — 전체 시트는 그대로, 법인(vCenter)마다 시트 하나 추가
 
-작성 2026-11-03 (v2.868.0 기준) · 상태 **시안 — 컨펌 대기** · 시안 캔버스: https://claude.ai/artifact/6LcrjcPjNw5n5jinDCHppa
+작성 2026-11-03 (v2.868.0 기준) · 상태 **구현됨 v2.869.0**(컨펌 2026-11-03 '구현해' · 기본안 4가지 · 표준 검증) · 시안 캔버스: https://claude.ai/artifact/6LcrjcPjNw5n5jinDCHppa
 (아트보드 2장 — 이 폴더의 `*.dc.html` 이 같은 내용의 레퍼런스. 법인명·수치는 가상(목 서버의 vCenter 9곳 이름을 빌림)이고
 색·글자는 `web/src/styles.css` `:root` 토큰과 `server/src/gpu/allocTreeXlsx.js` 의 `C`·`LEVEL` 색 그대로.
 계정에 등록된 ‘Design System’ 아티팩트는 앞선 시안(bareos-cancel) 때와 같이 내용이 비어 있어 쓰지 않았다.)
@@ -19,7 +19,7 @@
 | 내보내기 창 — 범위 글자·단계 칩·시트 체크 3개·서식 목록·파일 이름(`/tools/gpu-alloc/export-meta`) | `web/src/views/tools/GpuAllocExportModal.jsx` · `gpuAllocText.js EXPORT_SHEETS` | 체크 항목 1개 추가(시안 ②) |
 | 범위 — `allocTreeOf(req)`: scope 교집합 → `vcenterId`/`vcenterIds` → `scopeText`·`fileScope` | `server/src/routes/api/hardwareGpu.js:500~512` | 법인 시트는 **이 범위 안의 법인만** 만든다(범위 계정·칩 선택 모두 자동으로 맞음) |
 | 파일 이름 `allocFileName(fileScope, stamp, ext, depth)` — 창 미리보기와 내려받기가 같은 함수 | `allocTreeXlsx.js:42` | 끝에 `_percorp` 를 붙이는 인자 하나 추가 |
-| 시트 이름 정리 `replace(/[\\/?*[\]:]/g, '_').slice(0, 31)` | `server/src/ipam/excel.js:34` · `tools/wasteExportXlsx.js:28` | 같은 규칙을 쓰되 **공용 함수로 뽑아** 세 곳이 같은 코드를 쓴다(뒤 `-`·`.`·공백 제거 · 겹치면 `~2`) |
+| 시트 이름 정리 `replace(/[\\/?*[\]:]/g, '_').slice(0, 31)` | `server/src/ipam/excel.js:34` · `tools/wasteExportXlsx.js:28` · `vcenter/hostExport.js hostSheetNames` | 구현 정정: 공용 함수로 뽑지 않았다 — `allocTreeXlsx.corpSheetNames` 가 `hostSheetNames` 와 같은 규칙(겹침 `~2`)으로 따로 있다. 세 곳 통합은 별건(다른 두 곳은 겹침 처리가 없다) |
 | 무거운 내보내기 동시 1건(`exportBusy`) · 큰 문서는 `yieldLoop` 로 양보 | `hardwareGpu.js:378` · `allocTreeXlsx.js:44` | 시트가 30장이 돼도 요청 경로를 막지 않게 법인마다 양보 |
 
 ## 3. 시안 ① — 통합 문서의 시트 구성(`Main.dc.html`, 탭을 눌러 본다)

@@ -1,6 +1,6 @@
 // v2.852 GPU 할당 계층 — 화면 행 펼치기·형제 정렬·찾기·글자(gpuAllocText.js).
 import { describe, it, expect } from 'vitest';
-import { flattenAlloc, openForLevel, sortSiblings, totalsNote, gpuTexts, numText, ALLOC_LEVELS, DEFAULT_LEVEL, pickVcenters, sumTotals, corpChips, allocExportQuery, EXPORT_DEPTHS, EXPORT_SHEETS } from './gpuAllocText.js';
+import { flattenAlloc, openForLevel, sortSiblings, totalsNote, gpuTexts, numText, ALLOC_LEVELS, DEFAULT_LEVEL, pickVcenters, sumTotals, corpChips, allocExportQuery, EXPORT_DEPTHS, EXPORT_SHEETS, exportPick, exportFileName } from './gpuAllocText.js';
 
 const tot = (o = {}) => ({ hosts: 1, gpus: 1, vsga: 0, capGB: 48, capUnknown: 0, allocGB: 24, allocUnknown: 0, offGB: 0, offUnknown: 0, vmsOn: 1, vmsOff: 0, unplaced: 0, freeGpus: 0, noPlacement: 0, spareGB: 24, allocPct: 50, ...o });
 const vmr = (id, name, gb = 24, extra = {}) => ({ id, name, powerState: 'POWERED_ON', mode: 'vgpu', profile: 'grid_a40-24q', vgpuDevices: 1, passthroughDevices: 0, gb, ...extra });
@@ -100,9 +100,10 @@ describe('v2.855 내보내기 창 쿼리', () => {
     expect(allocExportQuery({ scope: 'vc1' })).toBe('?vcenterId=vc1');
     expect(allocExportQuery({ vcSel: new Set(['AZ', 'GM1']), depth: 'host' })).toBe('?vcenterIds=AZ%2CGM1&depth=host');
     expect(allocExportQuery({ depth: 'vm', sheets: ['info', 'tree'] })).toBe('?sheets=tree%2Cinfo');
-    expect(allocExportQuery({ sheets: ['tree', 'flat', 'info'] })).toBe('');
+    expect(allocExportQuery({ sheets: ['tree', 'flat', 'info', 'corp'] })).toBe('');
+    expect(allocExportQuery({ sheets: ['tree', 'flat', 'info'] })).toBe('?sheets=tree%2Cflat%2Cinfo', 'v2.869: 법인별 시트를 끄면 옛 3시트를 명시');
     expect(EXPORT_DEPTHS.map((d) => d.key)).toEqual(['host', 'gpu', 'vm']);
-    expect(EXPORT_SHEETS.map((s) => s.key)).toEqual(['tree', 'flat', 'info']);
+    expect(EXPORT_SHEETS.map((s) => s.key)).toEqual(['tree', 'flat', 'info', 'corp']);
   });
 });
 
@@ -123,5 +124,22 @@ describe('v2.868 CPU/메모리 칸', () => {
     const gr = rows.find((r) => r.kind === 'gpu');
     expect(gr.cores ?? null).toBe(null);
     expect(sortSiblings([{ name: 'x', res: { vcpu: 2 } }, { name: 'y', res: { vcpu: 16 } }, { name: 'z' }], { key: 'cores', dir: 'desc' }).map((x) => x.name)).toEqual(['y', 'x', 'z']);
+  });
+});
+
+describe('v2.869 내보내기 창 — 법인 모두 선택이 기본 · 법인별 시트 파일 이름', () => {
+  const chips = [{ id: 'AZ' }, { id: 'GM1' }, { id: 'KR' }];
+  it('창은 모든 법인(null)으로 시작 · 칩을 전부 고르면 다시 전체 · 일부면 그 집합 · 빈 집합은 그대로(호출 쪽이 잠금)', () => {
+    expect(exportPick(null, chips)).toBe(null);
+    expect(exportPick(new Set(['AZ', 'GM1', 'KR']), chips)).toBe(null);
+    expect([...exportPick(new Set(['GM1']), chips)]).toEqual(['GM1']);
+    expect(exportPick(new Set(), chips).size).toBe(0);
+    expect(allocExportQuery({ vcSel: exportPick(null, chips) })).toBe('', '모든 법인이면 vcenterIds 를 싣지 않는다(서버 조회 범위 전부)');
+  });
+  it('파일 이름은 서버가 준 것 — 법인별 시트가 들어가면 _percorp 판', () => {
+    const meta = { fileNames: { vm: 'a.xlsx', host: 'a_host.xlsx' }, fileNamesPercorp: { vm: 'a_percorp.xlsx', host: 'a_host_percorp.xlsx' } };
+    expect(exportFileName(meta, 'vm', true)).toBe('a_percorp.xlsx');
+    expect(exportFileName(meta, 'host', false)).toBe('a_host.xlsx');
+    expect(exportFileName(null, 'vm', true)).toBe('');
   });
 });
