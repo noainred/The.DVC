@@ -64,10 +64,12 @@ const keyVal = (x, key) => {
   if (key === 'name') return x.name || '';
   const t = x.totals || x;
   if (key === 'cap') return numOrNull(t.capGB);
-  if (key === 'alloc') return numOrNull(t.allocGB ?? x.gb);
+  // v2.871(버그 점검): VM 행은 켜진 VM 만 할당 칸에, 꺼진 VM 만 '꺼진 VM GB' 칸에 값이 보인다 — 정렬도 보이는 값으로(예전에는 꺼진 VM 을
+  //   보이지 않는 할당 값으로 정렬하고, 꺼진 VM GB 정렬은 값이 늘 비어 움직이지 않았다).
+  if (key === 'alloc') return numOrNull(x.totals ? t.allocGB : x.powerState && x.powerState !== 'POWERED_ON' ? null : (t.allocGB ?? x.gb));
   if (key === 'spare') return numOrNull(t.spareGB);
   if (key === 'pct') return numOrNull(t.allocPct ?? (x.allocGB != null && x.capGB ? Math.round((x.allocGB / x.capGB) * 100) : null));
-  if (key === 'off') return numOrNull(t.offGB);
+  if (key === 'off') return numOrNull(x.totals ? t.offGB : x.powerState && x.powerState !== 'POWERED_ON' ? x.gb : null);
   // v2.868: CPU/메모리 — 법인~호스트는 합계, VM 은 그 VM(res)
   if (key === 'cores') return numOrNull(x.totals ? t.hostCores : x.res?.vcpu);
   if (key === 'cpuPct') return numOrNull(x.totals ? t.hostCpuPct : x.res?.cpuPct);

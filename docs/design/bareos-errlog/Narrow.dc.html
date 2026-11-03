@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>400px — 에러 로그 목록과 전체 화면 로그 시트</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=Noto+Sans+KR:wght@400;500;700;800&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+body{margin:0;background:#0a0e17;color:#e6edf6;font-family:"Inter","Noto Sans KR","Apple SD Gothic Neo",sans-serif;font-size:13px}
+a{color:#93c5fd}a:hover{color:#bfdbfe}
+.muted{color:#8b9bb4}
+.mono{font-family:"JetBrains Mono",ui-monospace,monospace}
+.sm{font-size:11px;color:#8b9bb4}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;min-height:36px;padding:0 12px;border-radius:8px;border:1px solid #243049;background:#1a2236;color:#e6edf6;font:inherit;font-size:12.5px;font-weight:600;cursor:pointer;white-space:nowrap;text-decoration:none}
+.btn.primary{background:#3b82f6;border-color:#3b82f6;color:#ffffff}
+.btn.ghost{background:transparent;border-color:transparent;color:#93c5fd;text-decoration:underline;padding:0 4px}
+.tag{display:inline-flex;align-items:center;gap:5px;height:20px;padding:0 8px;border-radius:999px;font-size:11px;font-weight:700;white-space:nowrap}
+.tag.bad{background:rgba(239,68,68,.16);color:#fca5a5}.tag.gray{background:rgba(139,155,180,.14);color:#aebbd0}.tag.bareos{background:rgba(20,184,166,.18);color:#5eead4}.tag.veeam{background:rgba(59,130,246,.18);color:#93c5fd}
+.chip{display:inline-flex;align-items:center;min-height:30px;padding:0 10px;border-radius:8px;border:1px solid #243049;background:#1a2236;color:#8b9bb4;font-size:12px;font-weight:700;text-decoration:none;white-space:nowrap}
+.chip.on{background:#e6edf6;border-color:#e6edf6;color:#0a0e17}
+.seg{display:inline-flex;border:1px solid #243049;border-radius:8px;overflow:hidden;background:#0f1626}
+.seg a{display:inline-flex;align-items:center;min-height:30px;padding:0 10px;font-size:12px;font-weight:700;color:#8b9bb4;text-decoration:none}
+.seg a.on{background:#3b82f6;color:#ffffff}
+.item{display:flex;flex-direction:column;gap:5px;padding:10px 12px;border-bottom:1px solid #1f2a40;min-width:0}
+.item.sel{background:rgba(59,130,246,.10);box-shadow:inset 3px 0 0 #3b82f6}
+.sheet{position:absolute;left:0;right:0;top:300px;bottom:0;background:#0f1626;border-top:1px solid #243049;border-radius:14px 14px 0 0;box-shadow:0 -18px 40px rgba(0,0,0,.5);display:flex;flex-direction:column;min-width:0}
+.dtab{display:inline-flex;align-items:center;min-height:32px;padding:0 12px;border-radius:8px;border:1px solid #243049;background:#1a2236;color:#8b9bb4;font:inherit;font-size:12px;font-weight:700;cursor:pointer}
+.dtab.on{background:#e6edf6;border-color:#e6edf6;color:#0a0e17}
+.band{display:flex;align-items:center;gap:8px;padding:9px 12px;border-radius:10px;border:1px solid rgba(239,68,68,.45);background:rgba(239,68,68,.10);color:#fca5a5;font-weight:700;font-size:12.5px}
+.issue{border:1px solid rgba(239,68,68,.35);border-left:3px solid #f87171;border-radius:8px;background:#141b2d;padding:8px 10px;min-width:0}
+.hint{border:1px solid #243049;border-radius:8px;background:rgba(59,130,246,.08);padding:8px 10px;font-size:11.5px;line-height:1.5;color:#cbd5e1}
+</style>
+</helmet>
+<div style="position:relative;width:400px;height:900px;box-sizing:border-box;overflow:hidden;background:#0a0e17">
+  <div style="padding:14px 16px 0;display:flex;flex-direction:column;gap:10px">
+    <div style="font-size:18px;font-weight:800">통합 에러 로그 <span class="sm">최근 24시간</span></div>
+    <div style="display:flex;gap:6px;overflow:hidden">
+      <a class="chip on" href="Narrow.dc.html">전체 83</a><a class="chip" href="Narrow.dc.html">실패 62</a><a class="chip" href="Narrow.dc.html">경고 20</a><a class="chip" href="Narrow.dc.html">Bareos</a>
+    </div>
+    <div style="display:flex;gap:6px;align-items:center">
+      <nav class="seg" aria-label="보기"><a class="on" href="Narrow.dc.html" aria-current="page">따로 보기</a><a href="Narrow.dc.html">묶어 보기 8</a></nav>
+      <span class="sm" style="margin-left:auto">열 제목 정렬은 표 보기에서</span>
+    </div>
+  </div>
+  <div style="margin-top:10px;border-top:1px solid #243049">
+    <div class="item">
+      <div style="display:flex;gap:6px;align-items:center"><span class="mono sm" style="color:#e6edf6">11-04 02:48</span><span class="sm">OC2</span><span class="tag bareos">Bareos</span><span class="tag bad">실패</span><span class="sm" style="margin-left:auto">같은 모양 15</span></div>
+      <div style="display:flex;gap:8px;align-items:center;min-width:0"><div style="min-width:0;flex:1 1 0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"><b>pv-54220daf-vm-159435</b> <span class="sm">LESASHSP07</span><br><span class="sm">치명 오류 · Full · 오류 1건</span></div><a class="btn" href="Narrow.dc.html">로그</a></div>
+    </div>
+    <div class="item sel">
+      <div style="display:flex;gap:6px;align-items:center"><span class="mono sm" style="color:#e6edf6">11-04 02:44</span><span class="sm">OC2</span><span class="tag bareos">Bareos</span><span class="tag bad">실패</span><span class="sm" style="margin-left:auto">같은 모양 15</span></div>
+      <div style="display:flex;gap:8px;align-items:center;min-width:0"><div style="min-width:0;flex:1 1 0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"><b>pv-54220daf-vm-16895</b> <span class="sm">LESASHSPO04</span><br><span class="sm">치명 오류 · Full · 오류 1건</span></div><a class="btn primary" href="Narrow.dc.html" aria-current="true">열림</a></div>
+    </div>
+  </div>
+
+  <section class="sheet" aria-label="작업 로그 시트">
+    <div style="display:flex;justify-content:center;padding:6px 0 0"><span style="width:36px;height:4px;border-radius:2px;background:#243049" aria-hidden="true"></span></div>
+    <div style="display:flex;align-items:flex-start;gap:8px;padding:8px 14px 10px;border-bottom:1px solid #243049;min-width:0">
+      <div style="min-width:0;flex:1 1 0">
+        <div style="font-size:13.5px;font-weight:800;white-space:normal;overflow-wrap:anywhere">작업 로그 — jobid 20612<br><span class="mono" style="font-weight:500;font-size:12px">pv-54220daf-vm-16895</span></div>
+        <div style="display:flex;flex-wrap:wrap;gap:5px;margin-top:5px"><span class="tag bareos">Bareos</span><span class="tag gray">OC2 · 엣지 대행</span><span class="tag bad">치명 오류</span><span class="tag gray">Full</span></div>
+      </div>
+      <button type="button" class="btn" aria-label="닫기" style="min-width:44px">닫기</button>
+    </div>
+    <div style="display:flex;gap:6px;padding:8px 14px;align-items:center">
+      <button type="button" class="dtab on" aria-pressed="true">요약</button><button type="button" class="dtab">타임라인</button><button type="button" class="dtab">원문</button>
+      <span class="sm" style="margin-left:auto">142줄</span>
+    </div>
+    <div style="flex:1 1 0;overflow:auto;padding:0 14px 12px;display:flex;flex-direction:column;gap:10px;min-width:0">
+      <div class="band"><span aria-hidden="true">✕</span><span style="white-space:normal">오류 — *** Backup Error ***</span></div>
+      <div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px">
+        <div style="border:1px solid #243049;border-radius:8px;background:#141b2d;padding:7px 8px;min-width:0"><span class="sm">읽은 양</span><b style="display:block;font-size:14px">—</b></div>
+        <div style="border:1px solid #243049;border-radius:8px;background:#141b2d;padding:7px 8px;min-width:0"><span class="sm">소요</span><b style="display:block;font-size:14px">2분 11초</b></div>
+        <div style="border:1px solid #243049;border-radius:8px;background:#141b2d;padding:7px 8px;min-width:0"><span class="sm">볼륨</span><b style="display:block;font-size:14px">—</b></div>
+      </div>
+      <div class="issue"><div class="mono" style="font-size:11.5px;color:#fca5a5;white-space:normal;overflow-wrap:anywhere">Fatal error: python-fd: Error creating snapshot for VM LESASHSPO04: A general system error occurred: Operation timed out (1회)</div><div class="sm" style="margin-top:3px">02:44:21 · bareos-fd</div></div>
+      <div class="hint"><b style="color:#e6edf6">해석</b> — vCenter 가 스냅샷 만들기에 시간을 넘겼습니다. 같은 시각 OC2 14대가 같은 오류면 VM 이 아니라 vCenter 쪽입니다.</div>
+      <div class="sm">원문 끝부분은 ‘원문’ 보기에서 — 좁은 폭에서는 줄을 바꿔 보입니다(가로 스크롤 없음)</div>
+    </div>
+    <div style="display:flex;gap:6px;padding:10px 14px;border-top:1px solid #243049;align-items:center">
+      <button type="button" class="btn" aria-label="이전 실패" style="min-width:44px">‹</button>
+      <span class="sm" style="white-space:nowrap">5 / 15</span>
+      <button type="button" class="btn" aria-label="다음 실패" style="min-width:44px">›</button>
+      <span style="flex:1 1 0"></span>
+      <a class="btn" href="States.dc.html">이력 →</a>
+      <button type="button" class="btn primary">Full 실행</button>
+    </div>
+  </section>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":400,"height":900}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

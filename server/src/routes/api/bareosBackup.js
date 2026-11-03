@@ -26,7 +26,9 @@ import { secretProvided } from '../../util/secretCarry.js';
 import {
   onDirector, relayToEdge, isDemoActive, effectiveSettings, eligibility, createBackupTarget, createBackupTargets, bareosAuthGuard, clearAuthStopIfSame,
 } from '../../bareos/service.js';
-import { pendingView, relayLimits, RESTORES_DEADLINE_MS } from '../../bareos/edgeOps.js';
+import { pendingView, relayLimits, RESTORES_DEADLINE_MS, LOGS_DEADLINE_MS } from '../../bareos/edgeOps.js';
+import { LOGS_MAX } from '../../bareos/ops.js';
+import { compareFirstErrors } from '../../bareos/logFirstError.js';
 import { noteSetupStart, noteSetupEnd, noteRestoreBatchStart, noteRestoreBatchEnd } from '../../bareos/inflight.js';
 import { claimSetup, releaseSetupLock, isSetupBusy, setupBusyReason } from '../../bareos/setupLocks.js';
 import { listAgentTokens } from '../../central/agentTokens.js';
@@ -1118,7 +1120,7 @@ async function restoreRoute(req, res, job) {
 
 const RESTORE_POINTS_KEEP = 30;   // 화면에 보이는 복원 지점(VM 마다) — 단건 화면과 같은 수
 /** 옛 엣지는 새 작업 종류(restorePoints · restores)를 '알 수 없는 작업' 으로 거절한다 — 사람이 할 일을 덧붙인다(groupRunner.reasonOf 와 같은 뜻). */
-const oldEdgeHint = (msg) => (/알 수 없는 (Director )?작업/.test(msg) ? `${msg} — 법인 엣지가 묶음 복원(v2.861)보다 오래된 판일 수 있습니다. 엣지를 업그레이드한 뒤 다시 하세요(엣지는 보내지 않았습니다).` : msg);
+const oldEdgeHint = (msg, what = '묶음 복원(v2.861)') => (/알 수 없는 (Director )?작업/.test(msg) ? `${msg} — 법인 엣지가 ${what}보다 오래된 판일 수 있습니다. 엣지를 업그레이드한 뒤 다시 하세요(엣지는 보내지 않았습니다).` : msg);
 const idsOf = (v) => [...new Set((Array.isArray(v) ? v : []).map((x) => String(x ?? '')).filter(Boolean))];
 
 /**
@@ -1166,6 +1168,49 @@ api.post('/tools/bareos-backup/restore-points/bulk', adminOnly, async (req, res)
     }
   }));
   res.json({ ok: true, items: ids.map((id) => items.get(id)), limit: RESTORE_POINTS_SCAN, keep: RESTORE_POINTS_KEEP });
+});
+
+/**
+ * v2.872 통합 에러 로그 '묶음 로그'(시안 docs/design/bareos-errlog ② · 사용자 컨펌 2026-11-04) — body { items:[{ id, jobid }] }(1~LOGS_MAX).
+ *   항목마다 범위(조회 — 밖은 없는 대상과 같은 답) · Director 마다 세션 하나(ops.logs — 단건 로그와 같은 '이 잡의 실행인가' 검사) · 법인끼리는 나란히 ·
+ *   응답은 첫 오류 줄 + 대조(compareFirstErrors — 같은 오류 · 다른 오류 · 오류 줄 없음 · 못 읽음)만. 원문은 낱건 GET jobs/:id/log 에서.
+ *   전체 시한 LOGS_DEADLINE_MS(엣지 인출 + 회신 + 여유) — 중앙 직접 Director 도 끝없이 붙잡지 않는다(v2.870 A5-01 과 같은 규칙).
+ */
+api.post('/tools/bareos-backup/logs/bulk', adminOnly, async (req, res) => {
+  const raw = Array.isArray(req.body?.items) ? req.body.items : [];
+  if (!raw.length) return res.status(400).json({ ok: false, reason: '읽을 실행을 고르세요.' });
+  if (raw.length > LOGS_MAX) return res.status(400).json({ ok: false, reason: `한 번에 ${LOGS_MAX}건까지 읽을 수 있습니다.` });
+  const out = [];
+  const byDir = new Map();
+  raw.forEach((x, i) => {
+    const id = typeof x?.id === 'string' ? x.id.slice(0, 64) : '';
+    const jobid = Number(x?.jobid);
+    if (!id || !Number.isInteger(jobid) || jobid <= 0) { out[i] = { id, jobid: Number.isInteger(jobid) ? jobid : null, ok: false, code: 'invalid', reason: '대상 · jobid 가 올바르지 않습니다.' }; return; }
+    const job = getJob(id);
+    if (!job || bareosAccess(req.user, job.vcenterId, { write: false }) === 404) { out[i] = { id, jobid, ok: false, code: 'not-found', reason: '백업 대상을 찾을 수 없습니다.' }; return; }
+    out[i] = { id, jobid, vmName: job.vmName, jobName: job.bareosJob };
+    const d = jobDir(job);
+    if (!byDir.has(d)) byDir.set(d, []);
+    byDir.get(d).push(i);
+  });
+  await Promise.all([...byDir.entries()].map(async ([dir, idx]) => {
+    try {
+      const r0 = await onDirector(dir, 'logs', { items: idx.map((i, k) => ({ key: k, jobid: out[i].jobid, name: out[i].jobName })) }, { demoOnly: isDemoGuest(req.user), signal: AbortSignal.timeout(LOGS_DEADLINE_MS) });
+      const byKey = new Map((Array.isArray(r0) ? r0 : []).map((r) => [r.key, r]));
+      idx.forEach((i, k) => {
+        const r = byKey.get(k);
+        if (!r) out[i] = { ...out[i], ok: false, code: 'unknown', reason: 'Director 회신에 이 실행이 없습니다 — 다시 읽으세요.' };
+        else if (!r.ok) out[i] = { ...out[i], ok: false, code: r.code || 'error', reason: r.message || '로그를 읽지 못했습니다.' };
+        else out[i] = { ...out[i], ok: true, firstError: r.firstError ?? null, lines: r.lines ?? null };
+      });
+    } catch (e) {
+      // 옛 엣지는 '알 수 없는 작업' — 낱건 로그 15번으로 돌려보내지 않는다(WAN 왕복 · v2.867 묶음 취소와 같은 규칙) · 낱건 '로그' 는 지금도 된다
+      const why = oldEdgeHint(String(e?.message || e).slice(0, 300), '묶음 로그(v2.872)');
+      for (const i of idx) out[i] = { ...out[i], ok: false, code: e?.code || 'error', reason: why };
+    }
+  }));
+  const cmp = compareFirstErrors(out);
+  res.json({ ok: true, items: cmp.items.map(({ jobName, ...x }) => x), summary: cmp.summary, limit: LOGS_MAX });
 });
 
 /**

@@ -23,7 +23,7 @@ import { todayStamp } from "../../util/dayKey.js";
 import { acquireExport } from '../../util/exportBusy.js';
 import { waitDrain } from '../../util/waitDrain.js'; // v2.783(점검 Q5): drain 만 기다리면 끊긴 클라이언트에서 영원히 멈춰 내보내기 잠금이 풀리지 않았다
 import { snapMemo } from '../../util/snapCache.js';
-import { buildGpuAllocTree, allocCorpRoster } from '../../gpu/allocTree.js';
+import { buildGpuAllocTree, allocCorpRoster, allocScopeOf } from '../../gpu/allocTree.js';
 import { renderGpuAllocWorkbook, allocCsvLines, allocExportOpts, allocFileName, corpSheetNames, CORP_SHEETS_MAX, ALLOC_DEPTHS, ALLOC_SHEET_KEYS, XLSX_MIME as ALLOC_XLSX_MIME } from '../../gpu/allocTreeXlsx.js';
 import { fileStamp, localStamp, DAY_OFFSET_MIN } from '../../util/dayKey.js';
 import { tzName } from '../../vcenter/vmExportCatalog.js';
@@ -506,13 +506,13 @@ function allocTreeOf(req) {
   const vcenterIds = picked.length ? new Set(picked) : null;
   const opt = { allowed: scopedVcenterIds(req.user, snap), vcenterId, vcenterIds };
   const tree = buildGpuAllocTree(snap, opt);
-  const names = tree.vcenters.map((v) => v.id);
-  const scopeText = vcenterId ? (tree.vcenters[0]?.name || vcenterId)
-    : vcenterIds ? (names.length ? `법인 ${names.join(', ')}` : '고른 법인(조회 범위 안에 없음)') : '전체 법인';
-  const fileScope = vcenterId || (vcenterIds ? (names.length === 1 ? names[0] : `${names.length}corps`) : 'all');
   // v2.869: 범위 안 법인 전부(GPU 호스트 없는 법인 포함 — 엑셀 '목차' · 창의 법인별 시트 안내). 범위 판정은 계층과 같은 함수.
-  const roster = () => allocCorpRoster(snap, opt, tree);
-  return { snap, tree, vcenterId, scopeText, roster, fileScope: String(fileScope).replace(/[^\w.-]+/g, '_').slice(0, 60) };
+  let rosterMemo = null;
+  const roster = () => (rosterMemo ??= allocCorpRoster(snap, opt, tree));
+  // v2.871(버그 점검): 고른 법인 글자·파일 이름은 '범위 안에서 고른 법인'(GPU 호스트 없는 법인 포함)으로 센다 — 예전에는 GPU 가 있는 법인만 세어
+  //   GPU 없는 법인만 고르면 '조회 범위 안에 없음' 이라고 거짓으로 적었고, 3곳을 골라도 파일 이름이 2corps 였다. 많이 고르면 앞 3곳 + '외 N곳'.
+  const { scopeText, fileScope } = allocScopeOf({ vcenterId, picked: !!vcenterIds, tree, rosterIds: vcenterIds ? roster().map((c) => c.id) : [] });
+  return { snap, tree, vcenterId, scopeText, roster, fileScope };
 }
 api.get('/tools/gpu-alloc', requirePerm('tools'), (req, res) => {
   const { snap, tree } = allocTreeOf(req);
