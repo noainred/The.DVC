@@ -206,3 +206,44 @@ test('v2.855 엑셀 — 호스트까지면 계층 표에 GPU·VM 행이 없고, 
   await wb2.xlsx.load(await renderGpuAllocWorkbook(t, meta, { sheets: ['flat'] }));
   assert.deepEqual(wb2.worksheets.map((w) => w.name), ['평면 표']);
 });
+
+/* ── v2.868 호스트·VM CPU/메모리 ─────────────────────────────────────────── */
+test('v2.868 CPU/메모리 — 호스트·VM 값 · 법인 합(MHz·MB 가중 사용률) · 꺼진 VM 사용률·모르는 값은 null', () => {
+  const host = (id, name, o = {}) => ({ id: `vc1:${id}`, vcenterId: 'vc1', name, cluster: 'CL', vcDatacenter: 'DC1', connectionState: 'CONNECTED',
+    cpuCores: 32, cpuTotalMhz: 64000, cpuUsageMhz: 16000, cpuUsagePct: 25, memTotalMB: 524288, memUsageMB: 262144, memUsagePct: 50,
+    gpus: [{ model: 'NVIDIA L4', memGB: 24, mode: 'vgpu', vms: ['vm-1'] }], ...o });
+  const vmx = (id, name, hostName, o = {}) => ({ ...vm(id, name, vg('nvidia_l4-12q'), ON, hostName, 'vc1'), cpuCount: 8, memMB: 32768, cpuUsagePct: 40, memUsagePct: 60, ...o });
+  const s = {
+    vcenters: [{ id: 'vc1', name: 'vc' }],
+    hosts: [host('h1', 'esx1'), host('h2', 'esx2', { cpuCores: 16, cpuTotalMhz: 32000, cpuUsageMhz: 24000, memTotalMB: 262144, memUsageMB: 196608, gpus: [{ model: 'NVIDIA L4', memGB: 24, mode: 'vgpu', vms: [] }] })],
+    vms: [vmx('vm-1', 'a', 'esx1'), vmx('vm-2', 'off', 'esx1', { powerState: OFF, cpuUsagePct: 0, memUsagePct: 0 })],
+  };
+  const t = buildGpuAllocTree(s);
+  const h1 = t.vcenters[0].datacenters[0].clusters[0].hosts.find((h) => h.name === 'esx1');
+  assert.deepEqual(h1.res, { cores: 32, memGB: 512, cpuPct: 25, memPct: 50 });
+  assert.deepEqual(h1.gpus[0].vms[0].res, { vcpu: 8, memGB: 32, cpuPct: 40, memPct: 60 });
+  assert.deepEqual(h1.off[0].res, { vcpu: 8, memGB: 32, cpuPct: null, memPct: null }, '꺼진 VM 의 사용률은 0 이 아니라 모름');
+  const T = t.totals;
+  assert.equal(T.hostCores, 48); assert.equal(T.hostMemGB, 768);
+  assert.equal(T.hostCpuPct, Math.round((40000 / 96000) * 100), 'MHz 합으로 낸 가중 사용률');
+  assert.equal(T.hostMemPct, Math.round((458752 / 786432) * 100));
+  assert.equal(T.vmVcpu, 8, '켜진 GPU VM 만 더한다'); assert.equal(T.vmMemGB, 32);
+  // 끊긴 호스트 — 그 호스트 사용률은 null · 합 사용률은 읽은 호스트만으로(대수는 hostUseUnknown) · 코어·메모리 합은 그대로
+  const s2 = { ...s, hosts: [s.hosts[0], { ...s.hosts[1], connectionState: 'DISCONNECTED' }] };
+  const t2 = buildGpuAllocTree(s2);
+  assert.equal(t2.totals.hostCpuPct, 25, '끊긴 호스트를 빼고 읽은 호스트 기준'); assert.equal(t2.totals.hostUseUnknown, 1);
+  assert.equal(t2.totals.hostCores, 48);
+  assert.ok(treeLines(t2)[0].cells[16].includes('1대 제외'), '비고가 뺀 대수를 말한다');
+  assert.equal(buildGpuAllocTree({ ...s, hosts: s.hosts.map((h) => ({ ...h, connectionState: 'DISCONNECTED' })) }).totals.hostCpuPct, null, '읽은 호스트가 0 이면 null');
+  // 코어를 모르는 호스트 — 코어·메모리 합은 null
+  const t3 = buildGpuAllocTree({ ...s, hosts: [s.hosts[0], { ...s.hosts[1], cpuCores: null }] });
+  assert.equal(t3.totals.hostCores, null);
+  // 평면 행 · 엑셀 계층 줄에 값이 실린다
+  const fr = flatRows(t).find((r) => r.vm === 'a');
+  assert.equal(fr.hostCores, 32); assert.equal(fr.vmVcpu, 8); assert.equal(fr.vmMemGB, 32); assert.equal(fr.vmCpuPct, 40);
+  const lines = treeLines(t);
+  assert.equal(lines[0].cells.length, 17);
+  assert.deepEqual(lines[0].cells.slice(10, 16), [48, T.hostCpuPct, 768, T.hostMemPct, 8, 32]);
+  const vmLine = lines.find((l) => l.cells[0] === 'a');
+  assert.deepEqual(vmLine.cells.slice(10, 16), [8, 40, 32, 60, null, null]);
+});

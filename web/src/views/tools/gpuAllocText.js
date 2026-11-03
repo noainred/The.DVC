@@ -18,7 +18,7 @@ export const UNPLACED_TEXT = Object.freeze({
   'no-placement': 'GPU 배치 정보 없음(수집기 갱신 전)',
   'not-listed': '켜져 있으나 어느 GPU 목록에도 없음',
 });
-export const SORT_KEYS = Object.freeze(['name', 'cap', 'alloc', 'spare', 'pct', 'off']);
+export const SORT_KEYS = Object.freeze(['name', 'cap', 'alloc', 'spare', 'pct', 'off', 'cores', 'cpuPct', 'memGB', 'memPct']);
 
 export function numText(v) {
   const n = numOrNull(v);
@@ -38,6 +38,7 @@ export function totalsNote(t) {
   if (t.capUnknown) { notes.push(`용량 모르는 GPU ${t.capUnknown}`); tone = 'warn'; }
   if (t.noPlacement) notes.push(`배치 정보 없는 GPU ${t.noPlacement}`);
   if (t.unplaced) notes.push(`미배치 VM ${t.unplaced}`);
+  if (t.hostUseUnknown && t.hosts > 1) notes.push(`CPU·메모리 사용률 ${t.hostUseUnknown}대 제외`);   // v2.868: 끊김·못 읽음 — 읽은 호스트 기준
   if (!notes.length && t.vmsOn === 0 && t.gpus > 0) { notes.push('할당 VM 없음 — 전부 예비'); tone = 'free'; }
   if (!t.gpus && t.vsga) notes.push('vSGA 만 — 할당형 GPU 없음(합계 제외)');
   return { note: notes.join(' · '), tone };
@@ -66,6 +67,11 @@ const keyVal = (x, key) => {
   if (key === 'spare') return numOrNull(t.spareGB);
   if (key === 'pct') return numOrNull(t.allocPct ?? (x.allocGB != null && x.capGB ? Math.round((x.allocGB / x.capGB) * 100) : null));
   if (key === 'off') return numOrNull(t.offGB);
+  // v2.868: CPU/메모리 — 법인~호스트는 합계, VM 은 그 VM(res)
+  if (key === 'cores') return numOrNull(x.totals ? t.hostCores : x.res?.vcpu);
+  if (key === 'cpuPct') return numOrNull(x.totals ? t.hostCpuPct : x.res?.cpuPct);
+  if (key === 'memGB') return numOrNull(x.totals ? t.hostMemGB : x.res?.memGB);
+  if (key === 'memPct') return numOrNull(x.totals ? t.hostMemPct : x.res?.memPct);
   return null;
 };
 /** 형제 정렬 — 값이 없으면 방향과 무관하게 뒤. sort 가 없으면 원래 순서(서버가 이름순). */
@@ -83,6 +89,8 @@ export function sortSiblings(list, sort) {
 }
 
 const lc = (s) => String(s || '').toLowerCase();
+/** v2.868: CPU/메모리 칸 — 법인~호스트 행은 호스트 합(코어·GB, 사용률은 MHz·MB 가중), VM 행은 그 VM. GPU·묶음 행은 빈 칸. */
+const resCells = (cores, cpuPct, memGB, memPct) => ({ cores: cores ?? null, cpuPct: cpuPct ?? null, memGB: memGB ?? null, memPct: memPct ?? null });
 
 /** v2.853: 법인 칩 선택(빈 Set·null = 전체)으로 vCenter 를 고른다. */
 export function pickVcenters(tree, vcSel) {
@@ -135,13 +143,15 @@ export function flattenAlloc(tree, { open = new Set(), sort = null, query = '', 
   const agg = (id, depth, kind, name, sub, prof, t, hasKids) => {
     const n = totalsNote(t);
     rows.push({ id, depth, kind, name, sub, prof, cap: t.capGB, alloc: t.allocGB, spare: t.spareGB, pct: t.allocPct, off: t.offGB || null,
-      vms: `${t.vmsOn} / ${t.vmsOff}`, note: n.note, tone: n.tone, hasKids, isOpen: hasKids && isOpen(id) });
+      vms: `${t.vmsOn} / ${t.vmsOff}`, note: n.note, tone: n.tone, hasKids, isOpen: hasKids && isOpen(id),
+      ...resCells(t.hostCores, t.hostCpuPct, t.hostMemGB, t.hostMemPct), gvmVcpu: t.vmVcpu ?? null, gvmMemGB: t.vmMemGB ?? null });
   };
   const vmRow = (id, depth, v, { on = true, note = '', tone = '' } = {}) => rows.push({
     id, depth, kind: 'vm', name: v.name, sub: '', prof: v.mode === 'passthrough' ? '패스스루 1장' : v.profile || (v.passthroughDevices ? `패스스루 ${v.passthroughDevices}장` : ''),
     cap: null, alloc: on ? v.gb : null, spare: null, pct: null, off: on ? null : v.gb, vms: on ? '켜짐' : '꺼짐',
     note: note || (on && v.gb == null ? '프로파일 해석 불가 — 0 으로 넣지 않음' : on && v.gbEstimated ? 'GB 는 모델명 추정' : ''),
     tone: tone || (on && v.gb == null ? 'warn' : ''), hasKids: false, isOpen: false,
+    ...resCells(v.res?.vcpu, v.res?.cpuPct, v.res?.memGB, v.res?.memPct), gvmVcpu: null, gvmMemGB: null,
   });
   for (const vc of sortSiblings(pickVcenters(tree, vcSel), sort)) {
     // v2.853: 찾기 글자가 법인(vCenter) id·이름에 맞으면 그 법인을 통째로 보인다(바로가기 찾기 상자와 같은 뜻).
