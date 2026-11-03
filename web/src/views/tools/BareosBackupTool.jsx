@@ -290,7 +290,7 @@ function TargetsTab({ d, reload, handoff, focus, goRuns, goRestore }) {
                     <tr key={j.id} ref={on ? selRowRef : undefined} aria-selected={on} onClick={() => setSel(on ? '' : j.id)}
                       style={{ cursor: 'pointer', opacity: j.enabled ? 1 : 0.65, ...(on ? { background: 'rgba(59,130,246,.13)', boxShadow: 'inset 3px 0 0 var(--accent)' } : {}) }}>
                       <td data-sort={j.vmName}>
-                        {/* v2.869: 이름 · 칩은 줄바꿈되는 묶음(폭 상한) — 칩이 한 줄로 이어지면 VM 칸이 넓어져 정책 칸이 한 글자 폭까지 눌렸다(Chromium 1440) */}
+                        {/* v2.870: 이름 · 칩은 줄바꿈되는 묶음(폭 상한) — 칩이 한 줄로 이어지면 VM 칸이 넓어져 정책 칸이 한 글자 폭까지 눌렸다(Chromium 1440) */}
                         <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '3px 6px', maxWidth: 230, whiteSpace: 'normal' }}>
                           <button type="button" onClick={(e) => { e.stopPropagation(); setSel(on ? '' : j.id); }} style={{ all: 'unset', cursor: 'pointer', fontWeight: 700, overflowWrap: 'anywhere' }}>{j.vmName}</button>
                           <span className={`badge ${osBadgeCls(osKey(j))}`} style={{ fontSize: 10 }} title={j.guestOS || '게스트 OS 모름(인벤토리에 없거나 vCenter 에 OS 가 비어 있음)'}>{osLabel(osKey(j))}</span>

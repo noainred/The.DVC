@@ -37,11 +37,11 @@ const LIVE_CODE_TEXT = {
   timeout: '시한 초과(응답 느림)', aborted: '시한 초과(응답 느림)', jsonrpc: 'Director 가 거부(콘솔 권한 · FD 이름 확인)',
   'auth-stopped': '인증 실패로 주기 조회 정지', auth: '인증 실패', connect: '접속 실패', tls: 'TLS 협상 실패', 'not-configured': 'Director 접속값 없음',
   'no-client': '법인 FD 미설정', 'edge-relay': '엣지 대행 실패', unknown: '결과 모름(엣지 회신 없음)', skipped: '건너뜀',
-  'fd-connect': 'Director 가 FD 에 접속하지 못함', 'not-asked': '이번 조회에 이 FD 가 없음',   // v2.869
+  'fd-connect': 'Director 가 FD 에 접속하지 못함', 'not-asked': '이번 조회에 이 FD 가 없음',   // v2.870
 };
 
 /**
- * v2.869 실행 중 상세의 FD 한 줄 — 그 잡의 FD 답으로(row.fd · 서버 jobFdState). 구버전 서버(row.fd 없음)는 법인 단위 live 로.
+ * v2.870 실행 중 상세의 FD 한 줄 — 그 잡의 FD 답으로(row.fd · 서버 jobFdState). 구버전 서버(row.fd 없음)는 법인 단위 live 로.
  *   '보고 없음' 에는 언제 · 어느 FD 에 물었는지를 붙인다(사용자 보고 — 오래된 조회인지 화면에서 알 수 없었다).
  * @returns {{ known: boolean, missing: boolean, text: string }}  known = 진행량을 안다 · missing = FD 는 답했는데 이 잡이 없다
  */

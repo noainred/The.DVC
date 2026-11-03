@@ -105,7 +105,7 @@ describe('v2.867 취소 문구 — 판정은 서버 cancelInfo 값 그대로', (
     expect(groupStopState({ stop: { phase: 'running', fire: 2 }, lastFire: { canceled: { effective: false } } })).toMatchObject({ kind: 'stopfail', canStop: true });
   });
 
-  it('v2.869 감사 A1-04 · A1-05 — 줄 대기 · 보내는 중은 이전 회차의 중단 기록을 보지 않는다 · 시작 결과 모름 수', () => {
+  it('v2.870 감사 A1-04 · A1-05 — 줄 대기 · 보내는 중은 이전 회차의 중단 기록을 보지 않는다 · 시작 결과 모름 수', () => {
     // 직전 회차 중단이 실패했어도 새 회차가 보내는 중이면 '보내는 중'(예전: '중단하지 못함')
     expect(groupStopState({ stop: { phase: 'sending' }, lastFire: { canceled: { effective: false } } })).toMatchObject({ kind: 'cancelable', text: '보내는 중', canStop: true });
     expect(groupStopState({ stop: { phase: 'queued' }, lastFire: { canceled: { at: NOW } } })).toMatchObject({ kind: 'cancelable', text: '차례 대기' });

@@ -24,7 +24,7 @@ export function bareosClass(b, { rpoDays = 1, now = Date.now() } = {}) {
     ok: st === 'ok',
     warn: st === 'warning',
     fail: st === 'error',
-    cancel: st === 'canceled',   // v2.869 사람이 멈춘 실행 — 실패와 따로(서버 vmView.bareosClass 와 같다)
+    cancel: st === 'canceled',   // v2.870 사람이 멈춘 실행 — 실패와 따로(서버 vmView.bareosClass 와 같다)
     run: job && !!b.run,
     never: job && !isFin(b.ok),
     old: job && b.on !== false && isFin(b.ok) && now - b.ok > days * DAY,

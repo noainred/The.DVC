@@ -58,7 +58,7 @@ export const EDGE_SYNC_STATES = Object.freeze([
   'disabled',     // 수집 중지(enabled:false) 또는 URL 없음
   'waiting',      // 방금 밀었다 — 엣지가 재시작해 새 버전을 보고할 시간(settle)
   'backoff',      // 최근 push 가 실패했다 — 백오프 뒤 다시
-  'no-effect',    // v2.869 감사 A2-01: 받았다고(성공) 답했는데 settle 뒤에도 옛 버전을 보고한다 — 간격을 늘려 다시(번들 전송 + 엣지 재시작을 30분마다 거듭하지 않게)
+  'no-effect',    // v2.870 감사 A2-01: 받았다고(성공) 답했는데 settle 뒤에도 옛 버전을 보고한다 — 간격을 늘려 다시(번들 전송 + 엣지 재시작을 30분마다 거듭하지 않게)
 ]);
 /** 동기화 한 번의 결과 — 웹 `SYNC_OUTCOME_TEXT` 의 키와 1:1. */
 export const EDGE_SYNC_OUTCOMES = Object.freeze(['off', 'skipped', 'no-edges', 'idle', 'pushed', 'no-bundle', 'error']);
@@ -88,7 +88,7 @@ export function backoffMs(attempts, baseMs, maxMs = SYNC_BACKOFF_MAX_MS) {
   const base = Math.max(SYNC_MIN_MS, numOrNull(baseMs) ?? 600_000);
   return Math.min(maxMs, base * 2 ** Math.min(20, n - 1));
 }
-/** v2.869 감사 A2-01: '효과 없는 성공' n 회 뒤 다음 push 까지 — settle × 2^n, 상한 6시간(n=1 → 60분 · 2 → 2시간 · 3 → 4시간 · 4 → 6시간). */
+/** v2.870 감사 A2-01: '효과 없는 성공' n 회 뒤 다음 push 까지 — settle × 2^n, 상한 6시간(n=1 → 60분 · 2 → 2시간 · 3 → 4시간 · 4 → 6시간). */
 export function noEffectWaitMs(n, settleMs = SYNC_SETTLE_MS, maxMs = SYNC_BACKOFF_MAX_MS) {
   return Math.max(settleMs, backoffMs((Math.floor(numOrNull(n) ?? 0)) + 1, settleMs, maxMs));
 }
@@ -178,7 +178,7 @@ export function planEdgeSync({ collectors = [], statusOf = () => null, attemptsO
       else if (st.ok === false) { state = 'unreachable'; row.reason = txt(st.error, 300); }
       else {
         const a = attemptsOf(id);
-        // v2.869 감사 A2-01: 성공이라 답한 push 를 같은 대상 버전으로 다시 밀었는데도(=효과 없음 noEffect 회) 뒤처져 있으면 settle 을 밑으로
+        // v2.870 감사 A2-01: 성공이라 답한 push 를 같은 대상 버전으로 다시 밀었는데도(=효과 없음 noEffect 회) 뒤처져 있으면 settle 을 밑으로
         // settle × 2^n(상한 6시간)까지 기다린다. 예전에는 settle(30분)이 지나면 매번 'behind' 로 다시 밀어 번들 전송 + 엣지 재시작이 영구 반복됐다
         // (재현 — 엣지 설치 경로가 실행 경로와 다르거나 재시작 뒤 롤백). 성공이면 attempts 를 0 으로 돌리므로 실패 백오프가 걸리지 않았다.
         const ne = a && a.target === cur && a.ok ? Math.max(0, Math.floor(numOrNull(a.noEffect) ?? 0)) : 0;
@@ -220,7 +220,7 @@ export async function resolveCurrentBundle(settings, cur, { allowRemote = true }
 export function edgeSyncAlert({ id, name, kind, target, attempts, reason, intervalMs, closed = false, noEffect = 0 }) {
   const who = `${name || id}${kind === 'edge' ? ' (옛 방식 엣지)' : ''}`;
   const plain = (x) => String(x ?? '').replace(/\*\*/g, '');
-  // v2.869 감사 A2-01: '받았다고 답했지만 버전이 그대로' 반복 — 실패 알림과 key 를 나눈다(해소 판정 · 억제 창이 섞이지 않게)
+  // v2.870 감사 A2-01: '받았다고 답했지만 버전이 그대로' 반복 — 실패 알림과 key 를 나눈다(해소 판정 · 억제 창이 섞이지 않게)
   if (noEffect > 0) {
     const nl = closed
       ? [`엣지: ${who}`, `대상 버전: v${target}`, '상태: 해소됨 — 엣지가 대상 버전을 보고합니다.']
@@ -322,7 +322,7 @@ export class EdgeSyncRunner {
     const prev = this.attempts.get(r.id);
     const attempts = ok ? 0 : (prev && prev.target === cur ? (prev.attempts || 0) + 1 : 1);
     const reason = ok ? null : (txt(r.reason, 300) || 'push 실패');
-    // v2.869 감사 A2-01: 직전도 같은 대상 버전의 성공이었는데 다시 밀었다 = 그 성공이 효과가 없었다(0 으로 되돌리지 않고 센다)
+    // v2.870 감사 A2-01: 직전도 같은 대상 버전의 성공이었는데 다시 밀었다 = 그 성공이 효과가 없었다(0 으로 되돌리지 않고 센다)
     const noEffect = ok && prev && prev.target === cur && prev.ok ? (prev.noEffect || 0) + 1 : 0;
     this.attempts.set(r.id, { at: this.now(), ok, target: cur, attempts, reason, ...(noEffect ? { noEffect } : {}) });
     const row = rowsById.get(r.id) || {};
@@ -337,7 +337,7 @@ export class EdgeSyncRunner {
         this.alerted.delete(mark);
         await this.notifyFn(edgeSyncAlert({ id: r.id, name: row.name, kind: row.kind, target: cur, attempts: 0, intervalMs: base, closed: true }));
       }
-      // v2.869 감사 A2-01: 효과 없는 성공이 간격 상한에 닿으면 한 번 알린다(해소는 엣지가 대상 버전을 보고할 때 — #closeNoEffect)
+      // v2.870 감사 A2-01: 효과 없는 성공이 간격 상한에 닿으면 한 번 알린다(해소는 엣지가 대상 버전을 보고할 때 — #closeNoEffect)
       const neMark = `${mark}|ne`;
       if (noEffect > 0 && !this.alerted.has(neMark) && noEffectWaitMs(noEffect) >= SYNC_BACKOFF_MAX_MS) {
         this.alerted.add(neMark);
@@ -349,7 +349,7 @@ export class EdgeSyncRunner {
     return ok;
   }
 
-  /** v2.869 감사 A2-01: '효과 없음' 알림을 낸 엣지가 이제 대상 버전(또는 그보다 새 버전)을 보고하면 해소를 한 번 알린다. */
+  /** v2.870 감사 A2-01: '효과 없음' 알림을 낸 엣지가 이제 대상 버전(또는 그보다 새 버전)을 보고하면 해소를 한 번 알린다. */
   async #closeNoEffect(plan, rows) {
     const cur = plan.currentVersion;
     const byId = new Map(rows.map((r) => [String(r.id), r]));

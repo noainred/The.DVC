@@ -370,7 +370,7 @@ test('⑥ Command ACL 에 delete(보관 정리) · status(진행 현황) — 서
   for (const c of ['delete', 'status', 'list', 'run']) assert.ok(acl(srvSrc).split(/,\s*/).includes(c), c);
 });
 
-test('v2.869 감사 A5-02 · A5-03 — 같은 스냅샷이어도 원장이 바뀌면 첫 ETag 재요청이 304 가 아니라 200(새 값)', async () => {
+test('v2.870 감사 A5-02 · A5-03 — 같은 스냅샷이어도 원장이 바뀌면 첫 ETag 재요청이 304 가 아니라 200(새 값)', async () => {
   const etagGet = async (p, etag) => { const r = await fetch(base + p, { headers: { 'x-u': 'admin', ...(etag ? { 'if-none-match': etag } : {}) } }); const t = await r.text(); let j = null; try { j = JSON.parse(t); } catch { /* */ } return { s: r.status, etag: r.headers.get('etag'), j }; };
   const a = await etagGet('/live');
   assert.equal(a.s, 200); assert.ok(a.etag, 'ETag 가 있어야 시험이 성립한다');
@@ -388,7 +388,7 @@ test('v2.869 감사 A5-02 · A5-03 — 같은 스냅샷이어도 원장이 바�
   } finally { REG.patchJob('j1', { cancelReq: null }); }
 });
 
-test('v2.869 사용자 보고 — FD 가 답하지 못하면 \'보고 없음\' 이 아니다(Failed to connect · 그 잡의 FD 만 실패 · 묻지 않은 FD)', async () => {
+test('v2.870 사용자 보고 — FD 가 답하지 못하면 \'보고 없음\' 이 아니다(Failed to connect · 그 잡의 FD 만 실패 · 묻지 않은 FD)', async () => {
   const LP2 = await import('../src/bareos/liveParse.js');
   const { corpView } = await import('../src/routes/api/bareosLive.js');
   const { effectiveSettings } = await import('../src/bareos/service.js');

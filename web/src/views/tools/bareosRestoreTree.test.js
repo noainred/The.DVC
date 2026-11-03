@@ -36,7 +36,7 @@ describe('v2.866 복원 › 폴더 표', () => {
     expect(rows.find((r) => r.label === 'GLUE').openRestores).toBe(1);
   });
 
-  it('v2.869 감사 A4-03 — 인벤토리에 VM 이 없는 vCenter 는 그 법인만 전체 모름(3/0 이 아니다)', () => {
+  it('v2.870 감사 A4-03 — 인벤토리에 VM 이 없는 vCenter 는 그 법인만 전체 모름(3/0 이 아니다)', () => {
     const rows = T.restoreFolderRows(jobs, [F('/B.Service/GLUE', 5)]);
     const pl = rows.find((r) => r.kind === 'vc' && r.label === 'vc-pl');
     expect(pl.total).toBe(null);

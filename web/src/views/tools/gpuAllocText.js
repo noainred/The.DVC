@@ -37,7 +37,7 @@ export function totalsNote(t) {
   if (t.allocUnknown) { notes.push(`할당 모르는 VM ${t.allocUnknown}`); tone = 'warn'; }
   if (t.capUnknown) { notes.push(`용량 모르는 GPU ${t.capUnknown}`); tone = 'warn'; }
   if (t.noPlacement) notes.push(`배치 정보 없는 GPU ${t.noPlacement}`);
-  if (t.offUnknown) notes.push(`꺼진 VM 용량 모름 ${t.offUnknown}대`);   // v2.869 감사 A4-01: 꺼진 VM 합에서 빠진 수(엑셀 totalsCells 와 같은 말)
+  if (t.offUnknown) notes.push(`꺼진 VM 용량 모름 ${t.offUnknown}대`);   // v2.870 감사 A4-01: 꺼진 VM 합에서 빠진 수(엑셀 totalsCells 와 같은 말)
   if (t.unplaced) notes.push(`미배치 VM ${t.unplaced}`);
   if (t.hostUseUnknown && t.hosts > 1) notes.push(`CPU·메모리 사용률 ${t.hostUseUnknown}대 제외`);   // v2.868: 끊김·못 읽음 — 읽은 호스트 기준
   if (!notes.length && t.vmsOn === 0 && t.gpus > 0) { notes.push('할당 VM 없음 — 전부 예비'); tone = 'free'; }
@@ -233,10 +233,24 @@ export const EXPORT_SHEETS = Object.freeze([
   { key: 'tree', label: '계층 표', sub: '읽기용 — 들여쓰기 · 행 그룹 · 단계 색' },
   { key: 'flat', label: '평면 표', sub: '필터·피벗용 — GPU·VM 한 줄마다 계층 열을 모두 채움' },
   { key: 'info', label: '안내', sub: '용어 · 기준 · 빈 칸의 뜻' },
+  // v2.869(승인 시안 docs/design/gpu-alloc-corp-sheets): 기본 켬 — 끄면 지금까지와 같은 3시트 파일
+  { key: 'corp', label: '법인별 시트', sub: '법인(vCenter)마다 계층 표를 시트 한 장으로 + 목차 시트' },
 ]);
 /**
+ * v2.869: 내보내기 창의 법인 선택 → 쿼리의 vcSel. 창은 '모든 법인' 으로 시작한다(sel = null — 사용자 지시 "기본적으로 모든 vcenter 를 선택").
+ * 모든 칩을 골랐으면 null(= 범위 전부 — 서버가 조회 범위로 자른다), 아니면 고른 집합. 빈 집합은 '고른 법인 없음' 이라 내려받기를 잠근다(호출 쪽).
+ */
+export function exportPick(sel, chips) {
+  if (sel == null) return null;
+  const ids = (chips || []).map((c) => c.id);
+  if (ids.length && ids.every((id) => sel.has(id))) return null;
+  return sel;
+}
+/** v2.869: 창의 파일 이름 — 서버 export-meta 가 준 이름(법인별 시트가 들어가면 _percorp 판)을 고른다. 지어내지 않는다. */
+export const exportFileName = (meta, depth, percorp) => (percorp ? meta?.fileNamesPercorp?.[depth] : meta?.fileNames?.[depth]) || '';
+/**
  * 내보내기·창 미리보기의 쿼리 — 화면 범위(scope · 고른 법인)를 그대로 싣는다. 단계는 VM 까지(기본)면 싣지 않고,
- * 시트는 셋 다(기본)면 싣지 않는다(서버 allocExportOpts 의 기본과 같다).
+ * 시트는 넷 다(기본 — v2.869 법인별 시트 포함)면 싣지 않는다(서버 allocExportOpts 의 기본과 같다).
  * @returns {string} '' 또는 '?…'
  */
 export function allocExportQuery({ scope = '', vcSel = null, depth = 'vm', sheets = null } = {}) {

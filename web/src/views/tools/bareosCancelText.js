@@ -119,7 +119,7 @@ export function canceledText(c, tsText = (x) => String(x)) {
   const parts = [`${c.effective === false ? '중단하지 못함' : '중단 요청'} ${tsText(c.at)}${c.by ? ` ${c.by}` : ''}`];
   for (const [k, t] of [['canceled', '취소'], ['finished', '이미 끝남'], ['cleared', '추적만 해제'], ['halted', '시작 전 멈춤'], ['failed', '취소 실패'], ['unknown', '취소 결과 모름'], ['busy', '다른 요청 중']]) if (c[k] > 0) parts.push(`${t} ${c[k]}`);
   if (c.extra && (c.extra.canceled || c.extra.failed || c.extra.unknown || c.extra.busy)) parts.push(`그 밖 실행 취소 ${c.extra.canceled}`);
-  // v2.869 감사 A1-05: 시작 결과를 모르는 실행은 jobid 가 없어 취소를 보내지 못했다 — Director 에서 확인할 수
+  // v2.870 감사 A1-05: 시작 결과를 모르는 실행은 jobid 가 없어 취소를 보내지 못했다 — Director 에서 확인할 수
   if (c.startUnknown > 0) parts.push(`시작 결과 모름 ${c.startUnknown}(취소 못 함 — Director 에서 확인)`);
   if (c.scope === 'all') parts.push('범위 그룹 VM 전부');
   if (c.dueKey) parts.push(`차례였던 ${c.dueKey} 회차 돌리지 않음`);
@@ -141,7 +141,7 @@ export function canceledText(c, tsText = (x) => String(x)) {
 export function groupStopState(g) {
   const st = g?.stop || {};
   const canStop = !g?.canceling && !st.pruning && !!st.phase;
-  // v2.869 감사 A1-04: 줄 대기 · 보내는 중의 lastFire 는 정의상 **이전** 회차다 — 그 중단 기록으로 새 회차를 '중단하지 못함' · '멈추는 중' 으로 보이지 않는다
+  // v2.870 감사 A1-04: 줄 대기 · 보내는 중의 lastFire 는 정의상 **이전** 회차다 — 그 중단 기록으로 새 회차를 '중단하지 못함' · '멈추는 중' 으로 보이지 않는다
   const c = st.phase === 'queued' || st.phase === 'sending' ? null : g?.lastFire?.canceled;
   if (g?.canceling || ((st.sent ?? 0) > (st.stuck ?? 0) && c && c.effective !== false)) {
     return { kind: 'stopping', text: st.stuck ? `멈추는 중 · 멈추지 않음 ${st.stuck}` : '멈추는 중', tone: 'stop', canStop };

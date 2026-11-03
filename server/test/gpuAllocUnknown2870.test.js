@@ -1,5 +1,5 @@
 /**
- * test/gpuAllocUnknown2869.test.js — v2.869 감사 GPU 할당 '모름' 표시(A4-01 · A4-05 · A1-01).
+ * test/gpuAllocUnknown2870.test.js — v2.870 감사 GPU 할당 '모름' 표시(A4-01 · A4-05 · A1-01).
  *  · A4-01: 꺼진 VM 의 용량을 모르면(offUnknown) 합계 비고에 '꺼진 VM 용량 모름 N대'(웹 totalsNote · 엑셀 totalsCells 같은 말).
  *    예전(재현): offGB 는 아는 것만 더하고 offUnknown 소비처가 0 이라 모름 1대가 어디에도 보이지 않았다.
  *  · A4-05: 배치 정보 없는 GPU 의 VM 칸은 '0 / 0' 이 아니라 '—' · 엑셀 프로파일 칸은 '비어 있음' 이 아니라 '배치 정보 없음'(웹 gpuTexts.prof 와 대조).

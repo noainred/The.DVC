@@ -239,7 +239,7 @@ test('⑦ 손상 파일은 보존하고 빈 목록으로 시작한다 — 덮어
   assert.equal(JSON.parse(fs.readFileSync(path.join(dir, 'issues.json'), 'utf8')).issues.length, 1);
 });
 
-test('v2.869 감사 A2-05 — 진행 중 이슈의 담당자는 비울 수 없다(단건 400 · 일괄은 그 키만 실패) · 다른 상태는 해제 가능', () => {
+test('v2.870 감사 A2-05 — 진행 중 이슈의 담당자는 비울 수 없다(단건 400 · 일괄은 그 키만 실패) · 다른 상태는 해제 가능', () => {
   const { out } = run(`
     as({ username: 'op', role: 'operator', scope: null });
     const a = (await call('POST', '/issues', { title: 'A', assignee: 'park' })).j.issue.key;

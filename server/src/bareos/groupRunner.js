@@ -76,7 +76,7 @@ const _cancelling = new Map();
 export const groupRunning = (id) => _groupBusy.has(id) || _queued.has(id) || _pruning.has(id) || _cancelling.has(id);
 export const groupPruning = (id) => _pruning.has(id);
 /** v2.867 회차 중단 처리 중이면 그 요청(화면 '멈추는 중'), 아니면 null. */
-/** v2.869 감사 A5-02: 지금 멈추는 중인 그룹 · 단계 — 진행 현황 응답 캐시 키에 넣는다(바뀌면 ETag 도 바뀌게). */
+/** v2.870 감사 A5-02: 지금 멈추는 중인 그룹 · 단계 — 진행 현황 응답 캐시 키에 넣는다(바뀌면 ETag 도 바뀌게). */
 export const cancellingKey = () => [..._cancelling.entries()].map(([id, c]) => `${id}:${c.phase || ''}`).join(',');
 export function groupCanceling(id) { const c = _cancelling.get(id); return c ? { at: c.at, by: c.by, phase: c.phase, includeScheduled: !!c.includeScheduled } : null; }
 /** v2.867 실행 진행(화면 '보냄 n / N') — 줄 대기 중이면 { queued:true } · 실행 중이 아니면 null. */
@@ -315,7 +315,7 @@ export function cancelSummary(c, phase, r, extra, halted = 0, startUnknown = 0) 
     extra: extra ? { canceled: extra.canceled, finished: extra.finished, cleared: extra.cleared, failed: extra.failed, unknown: extra.unknown, busy: extra.busy } : null,
     effective, ...(reason ? { reason } : {}),
     ...(c.skipKey ? { skipKey: c.skipKey } : {}), ...(c.dueKey ? { dueKey: c.dueKey } : {}),
-    // v2.869 감사 A1-05: 시작 결과를 모르는 항목(jobid 없음)은 취소를 보낼 수 없다 — 중단 요약에 수를 남겨 사람이 Director 에서 확인하게(예전에는 회차 기록에만)
+    // v2.870 감사 A1-05: 시작 결과를 모르는 항목(jobid 없음)은 취소를 보낼 수 없다 — 중단 요약에 수를 남겨 사람이 Director 에서 확인하게(예전에는 회차 기록에만)
     ...(startUnknown > 0 ? { startUnknown } : {}),
   };
 }

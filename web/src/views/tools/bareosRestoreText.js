@@ -222,8 +222,8 @@ export function verifyText(row) {
   return restoreIsOpen({ jobid: row?.rid, state: row?.state }) ? '복원 중' : '켜 보기 대기';
 }
 /**
- * 복원 검증 한 행의 결과 — 'ok' | 'failed' | 'pending'(v2.869 감사 A2-02 — 판정 코어 하나).
- *   서버 bareos/digest.js verifyOutcome 과 한 쌍(server/test/bareosVerifyOutcome2869.test.js 가 같은 입력으로 대조).
+ * 복원 검증 한 행의 결과 — 'ok' | 'failed' | 'pending'(v2.870 감사 A2-02 — 판정 코어 하나).
+ *   서버 bareos/digest.js verifyOutcome 과 한 쌍(server/test/bareosVerifyOutcome2870.test.js 가 같은 입력으로 대조).
  *   리허설 표(verifyTone) · 복원 › 폴더 표(restoreStateText) · 일일 요약 메일이 같은 판정을 쓴다(예전에는 켜 보는 중 · 재시도 소진이 폴더 표에서 '검증 성공').
  */
 export function verifyOutcome(r) {

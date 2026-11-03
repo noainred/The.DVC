@@ -28,7 +28,7 @@ export const HIST_KEEP = 60;
 let _touchedAt = 0;
 let _timer = null;
 let _busy = false;
-let _rev = 0;   // v2.869 감사 A5-02: 조회 한 번마다 오른다 — 진행 현황 응답 캐시 키(ETag)에 넣는다(스냅샷 세대만으로는 304 로 옛 값이 보였다)
+let _rev = 0;   // v2.870 감사 A5-02: 조회 한 번마다 오른다 — 진행 현황 응답 캐시 키(ETag)에 넣는다(스냅샷 세대만으로는 304 로 옛 값이 보였다)
 export const liveRev = () => _rev;
 /** Director id → { at, ok, code, clients: { client → { ok, code } }, jobs: Map<jobid, row> } */
 const _live = new Map();
@@ -96,7 +96,7 @@ export async function liveTick({ now = Date.now(), deadlineMs = LIVE_DEADLINE_MS
       const jobs = new Map();
       const clients = {};
       for (const c of res?.clients || []) {
-        // v2.869: Director 가 FD 에 닿지 못한 답('Failed to connect to Client')은 실패로(옛 엣지 회신도 여기서 — 판정은 중앙 한 곳)
+        // v2.870: Director 가 FD 에 닿지 못한 답('Failed to connect to Client')은 실패로(옛 엣지 회신도 여기서 — 판정은 중앙 한 곳)
         const issue = c.ok ? fdAnswerIssue(c.raw) : '';
         clients[c.client] = c.ok && !issue ? { ok: true, raw: c.raw || '', n: (c.jobs || []).length } : { ok: false, code: issue || c.code || 'error', ...(issue ? { raw: c.raw || '' } : {}) };
         if (c.ok && !issue) for (const x of c.jobs || []) if (x?.jobid) jobs.set(x.jobid, x);

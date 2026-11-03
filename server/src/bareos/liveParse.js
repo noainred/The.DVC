@@ -98,7 +98,7 @@ export function parseStatusRaw(raw) {
 }
 
 /**
- * v2.869(사용자 보고 '실행 중인데 FD 진행 보고 없음이 나올 때가 있다'): Director 가 FD 에 닿지 못했다는 답(Bareos dird 의 client 상태 —
+ * v2.870(사용자 보고 '실행 중인데 FD 진행 보고 없음이 나올 때가 있다'): Director 가 FD 에 닿지 못했다는 답(Bareos dird 의 client 상태 —
  *   'Connecting to Client … / Failed to connect to Client <name>.' · Bacula 계열 같은 문구 — 소스 문구 기억 기반 · 실환경 원문 미확인)은
  *   잡 0개 '성공' 이 아니다. 예전에는 콘솔 응답이 JSON 오류가 아니면 성공으로 받아 '그 잡을 보고하지 않음' 으로 보였다.
  *   FD 의 실행 중 절('Running Jobs:')이 함께 있으면 FD 가 답한 것이므로 문제로 보지 않는다. @returns {'fd-connect'|''}
@@ -109,7 +109,7 @@ export function fdAnswerIssue(raw) {
 }
 
 /**
- * v2.869: 잡 하나의 FD 조회 상태 — 그 잡의 FD(잡의 client · 없으면 법인 FD)의 답으로만 판정한다.
+ * v2.870: 잡 하나의 FD 조회 상태 — 그 잡의 FD(잡의 client · 없으면 법인 FD)의 답으로만 판정한다.
  *   예전에는 Director 의 FD 중 **하나라도** 답하면(live.ok) 모든 실행에 'FD 가 이 잡을 보고하지 않음' 을 적었다 — 그 잡의 FD 조회가 실패했거나
  *   묻지 않았는데도(상한 밖) '보고 없음' · '멈춤 의심(no-report)' 으로 보였다.
  * @param {{ clients?: Record<string, { ok:boolean, code?:string }> }|null} live liveSnapshot().live

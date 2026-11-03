@@ -26,7 +26,7 @@ export function finishRestores(now = Date.now()) {
   let list = [];
   try { list = restoresToFinish(); } catch { return 0; }
   if (!list.length) return 0;
-  // v2.869 감사 A2-06: '던지지 않는다' 계약 — 묶음 저장(디스크 오류)이 던지면 보낸 수 0 으로 돌려준다(다음 틱에 다시 — 원장은 그대로)
+  // v2.870 감사 A2-06: '던지지 않는다' 계약 — 묶음 저장(디스크 오류)이 던지면 보낸 수 0 으로 돌려준다(다음 틱에 다시 — 원장은 그대로)
   try { return inBatch(() => finishList(list, now)); } catch (e) { console.warn(`[bareos] 복원 마무리 원장 저장 실패: ${String(e?.message || e).slice(0, 200)}`); return 0; }
 }
 
@@ -70,7 +70,7 @@ function finishList(list, now) {
 
 /**
  * 이 결과를 원장에 쓸 것인가 — 지금 기록된 시도의 결과일 때만(옛 작업의 늦은 결과가 새 시도를 덮지 않게).
- * v2.869 감사 A2-03: 시한이 지나 닫힌(reapOps → 'failed') **같은 작업**의 늦은 회신(ackOp → late)은 받는다 — 예전에는 cur.nic 이 'failed' 라
+ * v2.870 감사 A2-03: 시한이 지나 닫힌(reapOps → 'failed') **같은 작업**의 늦은 회신(ackOp → late)은 받는다 — 예전에는 cur.nic 이 'failed' 라
  *   버려져 훅의 late 칸이 죽은 코드였고, 엣지가 실제로 끝낸 검증이 '실패' 로 남았다. 재시도(다른 opId)가 나간 뒤의 늦은 회신은 여전히 버린다.
  */
 export const sameOp = (op) => (cur) => !cur || (cur.nic === 'pending' ? (!cur.opId || cur.opId === op.id) : (!!op.result?.late && !!cur.opId && cur.opId === op.id));

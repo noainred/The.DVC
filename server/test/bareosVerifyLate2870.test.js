@@ -1,5 +1,5 @@
 /**
- * test/bareosVerifyLate2869.test.js — v2.869 감사 A2-03: 시한으로 닫힌 복원 검증 작업의 늦은 회신을 원장에 반영한다.
+ * test/bareosVerifyLate2870.test.js — v2.870 감사 A2-03: 시한으로 닫힌 복원 검증 작업의 늦은 회신을 원장에 반영한다.
  *   예전(추론 · 코드): reapOps 가 실패로 닫으면 훅이 { nic:'failed', verify:'failed' } 를 쓰고, 엣지의 늦은 회신(ackOp → finishOp late)은
  *   sameOp 가 cur.nic !== 'pending' 이라 버렸다 — 엣지가 실제로 성공한 검증이 '실패' 로 남았다(안전 방향이지만 거짓).
  *   재시도(다른 opId)가 나간 뒤에 온 옛 작업의 늦은 회신은 여전히 버린다(새 시도를 덮지 않게).

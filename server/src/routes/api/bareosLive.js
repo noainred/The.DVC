@@ -132,7 +132,7 @@ export function corpView(site, settings, digests, { now = Date.now(), vms = new 
   for (const j of mine) {
     const run = runningRunOf(j);
     if (run) {
-      // v2.869: FD 판정은 그 잡의 FD 답으로(Director 의 FD 하나라도 답하면 전부 '보고 없음' 으로 보이던 것 — 사용자 보고)
+      // v2.870: FD 판정은 그 잡의 FD 답으로(Director 의 FD 하나라도 답하면 전부 '보고 없음' 으로 보이던 것 — 사용자 보고)
       const fd = jobFdState(live, j, site);
       running.push({ ...runningRow(j, run, fd.ok ? live?.jobs?.get(run.jobid) || null : null, fd.ok, {
         now, vm: vms.get(j.vmId), group: groupOf.get(j.vmId) || '', dirRow: dirOk ? live.dir.jobs.get(run.jobid) || null : null,
@@ -202,7 +202,7 @@ function writeKey(user, snap) {
 }
 
 /**
- * v2.869 감사 A5-02: 응답 세대 — 원장(취소 표지 · 실행 결과) · 그룹 · 폴러 · 진행 조회 · 멈추는 중인 그룹. memoJson 의 ETag 는 키(스냅샷 세대 + 이 값)라
+ * v2.870 감사 A5-02: 응답 세대 — 원장(취소 표지 · 실행 결과) · 그룹 · 폴러 · 진행 조회 · 멈추는 중인 그룹. memoJson 의 ETag 는 키(스냅샷 세대 + 이 값)라
  *   여기 없는 변화는 304 로 옛 화면이 남는다(재현 — 스냅샷 세대(30초)마다 한 번만 새로 보였다 · 다른 사람 화면의 '멈추는 중' 이 늦었다).
  */
 export function liveGen() {

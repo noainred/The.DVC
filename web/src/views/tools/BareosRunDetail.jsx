@@ -148,7 +148,7 @@ export default function BareosRunDetail({ row, live = null, dir = null, limits =
   const eta = etaSec(row, pb);
   const ended = !!rep?.found;
   const phase = runPhase(tl?.steps, ended);
-  const fdl = fdLineOf(row, live, shortTs);   // v2.869: 그 잡의 FD 답으로(법인 단위 live.ok 가 아니라)
+  const fdl = fdLineOf(row, live, shortTs);   // v2.870: 그 잡의 FD 답으로(법인 단위 live.ok 가 아니라)
   const bytesKnown = fdl.known;
   const fdMissing = fdl.missing;
   const vols = detail?.volumes || [];

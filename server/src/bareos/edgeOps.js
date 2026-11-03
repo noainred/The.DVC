@@ -171,7 +171,7 @@ export function completeEdgeOp(id, agentName, result) {
 
 /** 화면 시한용(v2.824 검토 W3·W4·W9) — 서버가 엣지 대행 작업을 기다리는 시간. 화면이 숫자를 박지 않고 이 값으로 기다린다. */
 /**
- * v2.869 감사 A5-01: 묶음 복원 · 복원 검증(restores) 전체 시한 — 중앙 직접 Director 는 항목마다 jobStatus · list jobs · restore 를 차례로 보내
+ * v2.870 감사 A5-01: 묶음 복원 · 복원 검증(restores) 전체 시한 — 중앙 직접 Director 는 항목마다 jobStatus · list jobs · restore 를 차례로 보내
  *   (명령마다 콘솔 시한 15초 · 설정 상한 120초) 50대면 수십 분까지 대상 잠금 · 업그레이드 대기 표지 · 리허설 busy 를 붙잡았다.
  *   엣지 대행은 인출 + 회신 시한이 이미 있으므로 그보다 길게(엣지 경로를 먼저 끊지 않게) — 그룹 실행 RUN_DEADLINE_MS 와 같은 모양.
  *   시한이 끊으면 ops.restores 의 기존 분류를 탄다(보낸 뒤 끊김 = 'unknown' · 남은 항목 = 'skipped').

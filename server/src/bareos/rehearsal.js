@@ -222,7 +222,7 @@ export async function runRehearsal(dirId, { trigger = 'timer', by = 'rehearsal',
       return { key: i, jobid: x.jobid, name: job.bareosJob, client: site?.client || job.client, restoreJob: settings.defaults.restoreJob, pluginOptions: x.plan.pluginOptions };
     });
     let out;
-    try { out = await onDirector(dirId, 'restores', { items: sendItems }, { trigger, signal: AbortSignal.timeout(RESTORES_DEADLINE_MS) }); } catch (e) {   // v2.869 감사 A5-01
+    try { out = await onDirector(dirId, 'restores', { items: sendItems }, { trigger, signal: AbortSignal.timeout(RESTORES_DEADLINE_MS) }); } catch (e) {   // v2.870 감사 A5-01
       const why = String(e?.message || e).slice(0, 300);
       for (const x of ready) run.items.push({ jobId: x.id, vmName: x.vmName, ok: false, reason: e?.unknown || e?.code === 'unknown' ? `결과 모름 — ${why}` : why });
       logAudit({ user: by, action: 'Bareos 복원 검증', target: directorById(dirId, settings)?.name || dirId, detail: `실패 — ${why}` });

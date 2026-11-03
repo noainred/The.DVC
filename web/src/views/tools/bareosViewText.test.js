@@ -56,7 +56,7 @@ describe('v2.828 Bareos 칸 · 필터 · 트리', () => {
     expect(numText(null)).toBe('—'); expect(numText(0)).toBe('0');
     expect(resultBar({ jobs: 4, ok: null })).toBe(null);
     expect(resultBar({ jobs: 4, ok: 2, warn: 1, fail: 1, run: 0 })).toEqual({ ok: 50, warn: 25, fail: 25, cancel: 0, run: 0 });
-    // v2.869 사람이 멈춘 실행은 실패와 따로(취소 조각) · '실패·경고·취소' 필터에는 든다
+    // v2.870 사람이 멈춘 실행은 실패와 따로(취소 조각) · '실패·경고·취소' 필터에는 든다
     expect(resultBar({ jobs: 4, ok: 2, warn: 0, fail: 1, cancel: 1, run: 0 })).toEqual({ ok: 50, warn: 0, fail: 25, cancel: 25, run: 0 });
     const cr = { method: 'bareos', b: { job: true, on: true, st: 'canceled', ok: NOW } };
     expect(rowMatches(cr, 'bad', { now: NOW })).toBe(true);

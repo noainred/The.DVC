@@ -141,7 +141,7 @@ describe('좌측 사이드바 셸 (v2.726)', () => {
   });
 });
 
-describe('v2.869 감사 A1-02 — 복원 픽바 고정 줄', () => {
+describe('v2.870 감사 A1-02 — 복원 픽바 고정 줄', () => {
   it('상태바 실제 높이(--statusbar-h)를 한 번만 더한다 — 좁은 폭에서 두 배로 띄우지 않는다', () => {
     const rules = [...BODY.matchAll(/\.pickbar-sticky\s*\{([^}]*)\}/g)].map((m) => m[1]);
     expect(rules.length).toBe(1);

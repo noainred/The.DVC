@@ -77,7 +77,7 @@ export function vcQuickDot(s = {}, now = Date.now()) {
   const down = tone === 'bad';
   const m = s?.metrics || {};
   const alarms = (m.alarmsCritical || 0) + (m.alarmsWarning || 0);
-  // v2.869 감사 A4-04: REST 폴백은 경보를 조회하지 않았다 — 경보 0 으로 보고 초록을 칠하지 않는다(카드의 '알람(미조회)' 와 같은 판정)
+  // v2.870 감사 A4-04: REST 폴백은 경보를 조회하지 않았다 — 경보 0 으로 보고 초록을 칠하지 않는다(카드의 '알람(미조회)' 와 같은 판정)
   const noAlarmData = !alarms && alarmsUnknown(s);
   const dot = down ? 'var(--red)' : (tone === 'wait' || tone === 'off') ? 'var(--text-faint)' : (alarms || tone === 'warn') ? 'var(--amber)' : noAlarmData ? 'var(--text-faint)' : 'var(--green)';
   return { dot, down };

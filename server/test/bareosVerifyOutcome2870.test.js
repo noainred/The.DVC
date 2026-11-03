@@ -1,5 +1,5 @@
 /**
- * test/bareosVerifyOutcome2869.test.js — v2.869 감사 A2-02: 복원 검증(리허설) 판정 코어 하나.
+ * test/bareosVerifyOutcome2870.test.js — v2.870 감사 A2-02: 복원 검증(리허설) 판정 코어 하나.
  *   예전에는 같은 판정이 세 벌이었고 서로 달랐다(재현):
  *    · 일일 요약(digest.js) — finish.verify 'failed' 또는 state error 만 실패로 셌다(재시도 소진 · 추적 놓침 · 취소가 메일에서 사라짐)
  *    · 복원 › 폴더 표(restoreStateText) — 켜 보는 중(nic pending) · 재시도 소진(nic failed)을 '검증 성공'(tone ok)으로 보였다

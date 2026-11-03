@@ -21,7 +21,7 @@ export const EDGE_STATE_TEXT = {
   disabled: { label: '수집 중지', tone: 'muted' },
   waiting: { label: '밀어 넣음 — 엣지가 재시작해 새 버전을 보고하기를 기다립니다', tone: 'muted' },
   backoff: { label: '최근 push 실패 — 잠시 뒤 다시', tone: 'bad' },
-  'no-effect': { label: '받았다고 답했지만 버전이 그대로 — 간격을 늘려 다시', tone: 'bad' },   // v2.869 감사 A2-01
+  'no-effect': { label: '받았다고 답했지만 버전이 그대로 — 간격을 늘려 다시', tone: 'bad' },   // v2.870 감사 A2-01
 };
 
 /** 동기화 한 번의 결과 → 문구. 서버 EDGE_SYNC_OUTCOMES 와 1:1. */
@@ -134,7 +134,7 @@ export function syncRunText(resp) {
 export function edgeSyncLine(e, now = Date.now()) {
   if (!e || typeof e !== 'object') return null;
   if (!e.enabled) return { text: '엣지 자동 업그레이드: 꺼짐 — 업그레이드 화면에서 켜면 중앙이 업그레이드될 때 등록된 엣지도 모두 따라옵니다.', tone: 'muted', canRun: false };
-  // v2.869 감사 A4-02: 서버가 판정을 못 했으면(counts 없음 — plan 이 던짐) '등록 0대 · 최신 0' 이 아니라 모름이다
+  // v2.870 감사 A4-02: 서버가 판정을 못 했으면(counts 없음 — plan 이 던짐) '등록 0대 · 최신 0' 이 아니라 모름이다
   const known = !!(e.counts && typeof e.counts === 'object');
   const c = known ? e.counts : {};
   const n = (k) => numOrNull(c[k]) ?? 0;

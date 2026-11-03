@@ -61,7 +61,7 @@ export function bareosVmView(j, method = '') {
  * 칸 b 하나의 분류(화면 필터·수 세기 공용 — 웹 bareosViewText.bareosClass 와 한 쌍).
  *   b undefined(무관) · null(원장을 못 읽음 — 모름)이면 전부 false 이고 unknown 만 b===null.
  *   old = 마지막 백업이 기준 일수보다 오래됨(잡이 켜져 있고 백업이 한 번이라도 있을 때만 — 한 번도 없으면 never).
- *   v2.869: cancel = 마지막 실행을 사람이 멈췄다(Bareos A) — 실패(fail = error)와 따로 센다(회차 중단 뒤 '실패 n' 으로 보이지 않게 · 그룹 카드 memberResults 와 같은 뜻).
+ *   v2.870: cancel = 마지막 실행을 사람이 멈췄다(Bareos A) — 실패(fail = error)와 따로 센다(회차 중단 뒤 '실패 n' 으로 보이지 않게 · 그룹 카드 memberResults 와 같은 뜻).
  *     우선 확인(priorityKind)에도 넣지 않는다 — 멈춘 뒤 백업이 비면 old · never 가 잡는다.
  */
 export function bareosClass(b, { rpoDays = 1, now = Date.now() } = {}) {

@@ -1,5 +1,5 @@
 /**
- * test/bareosRestoresDeadline2869.test.js — v2.869 감사 A5-01: 묶음 복원 · 복원 검증(restores)에 전체 시한.
+ * test/bareosRestoresDeadline2870.test.js — v2.870 감사 A5-01: 묶음 복원 · 복원 검증(restores)에 전체 시한.
  *   예전: 두 호출(routes/api/bareosBackup.js 묶음 복원 · bareos/rehearsal.js 검증)이 signal 없이 onDirector 를 불러, 중앙 직접 Director 에서
  *   항목마다 명령을 차례로 보내는 동안(명령마다 콘솔 시한) 대상 잠금 · 업그레이드 대기 표지 · 리허설 busy 가 수십 분 남았다(그룹 실행은 이미 시한이 있다).
  *   ⚠ 행동 시험이 아니라 산수 + 소스 스윕이다 — 지연하는 가짜 Director 가 없고 시한이 7분대라 실제로 끊기는 것은 돌려 보지 않았다(정직 기록).

@@ -341,7 +341,7 @@ body {
   .statusbar .sb-label, .statusbar .sb-val { white-space: nowrap; }
 }
 /* v2.867 아래 고정 줄(Bareos 복원 › 폴더 표의 '선택 · 다음')은 하단 상태바(fixed) 위에 붙인다 — bottom: 8 이면 상태바가 버튼을 가렸다(Chromium 판독).
-   --statusbar-h 는 App.jsx 가 상태바의 **실제** 높이를 재서 넘긴다(좁은 폭에서 두 줄로 접힌 높이 52px 포함) — v2.869 감사 A1-02: 좁은 폭에서 그 값을 두 배로 하던
+   --statusbar-h 는 App.jsx 가 상태바의 **실제** 높이를 재서 넘긴다(좁은 폭에서 두 줄로 접힌 높이 52px 포함) — v2.870 감사 A1-02: 좁은 폭에서 그 값을 두 배로 하던
    미디어 쿼리를 지웠다(400px 에서 112px — 상태바 위 52px 틈 · 고정 줄이 표 행을 더 가렸다). */
 .pickbar-sticky { position: sticky; bottom: calc(var(--statusbar-h, 34px) + 8px); z-index: 2; }
 .grid { display: grid; gap: 16px; }
@@ -1381,6 +1381,12 @@ tr.row-sel > td { background: rgba(59, 130, 246, .10); }
 .gpu-alloc-export-warn { font-size: 12px; color: #fbbf24; }
 .gpu-alloc-export-list { margin: 0; padding-left: 18px; font-size: 12px; line-height: 1.7; color: var(--text-dim); }
 .gpu-alloc-export-file { font-family: var(--mono); font-size: 12px; color: var(--text-dim); word-break: break-all; }
+/* v2.869 내보내기 창 — 법인 선택(기본 모두) · 법인별 시트 안내 */
+.gpu-alloc-export-badge { background: #1d4ed8; color: #fff; font-size: 11px; font-weight: 600; padding: 1px 8px; border-radius: 10px; }
+.gpu-alloc-export-corps { gap: 6px; min-width: 0; }
+.gpu-alloc-export-corpbox { margin-top: 2px; padding: 10px 12px; border-radius: 8px; background: var(--panel-deep); border: 1px solid var(--border-soft); display: flex; flex-direction: column; gap: 8px; font-size: 12px; line-height: 1.6; min-width: 0; }
+.gpu-alloc-export-sheet { font-family: var(--mono); font-size: 11px; padding: 2px 8px; border-radius: 6px; border: 1px solid var(--border); color: var(--text-dim); max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.gpu-alloc-export-sheet.renamed { border-color: #b45309; color: #fbbf24; }
 .gpu-alloc-table td { vertical-align: middle; white-space: nowrap; }
 .gpu-alloc-table td.num, .gpu-alloc-table th.num { text-align: right; font-family: var(--mono); font-size: 12px; }
 .gpu-alloc-table td.alloc { color: #60a5fa; font-weight: 600; }

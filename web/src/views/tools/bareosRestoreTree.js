@@ -98,7 +98,7 @@ export function restoreFolderRows(jobs, folders, { q = '', open = null, onlyTarg
       n.own += Number(c.vms) || 0;
     }
     for (const j of v.jobs) walk(root, segsOf(j.dc, j.folder, showDc)).jobs.push(j);
-    // v2.869 감사 A4-03: 인벤토리에 VM 이 하나도 없는 vCenter(첫 수집 전 · 비활성)는 폴더 VM 수를 모른다 — '3/0' 이 아니라 '3/—'
+    // v2.870 감사 A4-03: 인벤토리에 VM 이 하나도 없는 vCenter(첫 수집 전 · 비활성)는 폴더 VM 수를 모른다 — '3/0' 이 아니라 '3/—'
     aggregate(root, { countsKnown: countsKnown && !needle && v.counts.length > 0, lockedDir });
     const dirs = [...new Set(v.jobs.map((j) => j.directorId || ''))].filter(Boolean);
     const isOpen = (n) => !!needle || (open ? open.has(n.key) : n.targets > 0);
@@ -174,7 +174,7 @@ export function restoreStateText(job, now = Date.now()) {
   if (rs.some(restoreIsOpen)) return { text: '복원 진행 중', tone: 'info' };
   const recent = rs.filter((r) => Number(r.at) >= now - 7 * 86_400_000).sort((a, b) => Number(b.at) - Number(a.at))[0];
   if (recent?.verify) {
-    // v2.869 감사 A2-02: 검증 판정은 verifyOutcome 하나(켜 보는 중 · 재시도 소진을 '검증 성공' 으로 보이던 것)
+    // v2.870 감사 A2-02: 검증 판정은 verifyOutcome 하나(켜 보는 중 · 재시도 소진을 '검증 성공' 으로 보이던 것)
     const v = verifyOutcome(recent);
     if (v === 'ok') return { text: `검증 성공 · ${whenText(recent.at)}`, tone: 'ok' };
     if (v === 'failed') return { text: `검증 실패 · ${whenText(recent.at)}`, tone: 'bad' };

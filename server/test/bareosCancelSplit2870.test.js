@@ -1,5 +1,5 @@
 /**
- * test/bareosCancelSplit2869.test.js — v2.869 통합 · 법인별 현황에서 사람이 멈춘 실행(canceled)을 실패와 따로 센다
+ * test/bareosCancelSplit2870.test.js — v2.870 통합 · 법인별 현황에서 사람이 멈춘 실행(canceled)을 실패와 따로 센다
  * (사용자 요청 '프로그램 개선' — v2.867 남긴 것 '통합 · 법인별 현황은 지금도 canceled 를 실패로 센다').
  *  · bareosClass: fail = error 만 · cancel = canceled(웹 bareosViewText.bareosClass 와 한 쌍 — 웹 시험이 같은 입력으로 대조)
  *  · corpCounts · sumCounts: cancel 칸(결과를 모르면 null — 0 이 아니다)
@@ -38,7 +38,7 @@ test('priorityKind — 멈춘 실행은 실패 우선 확인이 아니다(오래
   assert.equal(VV.priorityKind({ b: { ...canceled, ok: NOW - 3 * 86_400_000 } }, { now: NOW, rpoDays: 1 }), 'old');
 });
 
-test('v2.869 감사 A1-05 — cancelSummary 시작 결과 모름 수(취소를 보낼 수 없는 항목) · 감사 문구', async () => {
+test('v2.870 감사 A1-05 — cancelSummary 시작 결과 모름 수(취소를 보낼 수 없는 항목) · 감사 문구', async () => {
   const GR = await import('../src/bareos/groupRunner.js');
   const r = { canceled: 3, finished: 0, cleared: 0, failed: 0, unknown: 0, busy: 0, vms: {} };
   const c = GR.cancelSummary({ at: NOW, by: 'kim' }, 'sending', r, null, 1, 2);

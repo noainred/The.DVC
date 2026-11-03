@@ -63,7 +63,7 @@ describe('v2.600 LO2600-01 storageBarInfo', () => {
   });
 });
 
-describe('v2.869 감사 A4-04 — 바로가기 점은 경보를 모르면 초록이 아니다', () => {
+describe('v2.870 감사 A4-04 — 바로가기 점은 경보를 모르면 초록이 아니다', () => {
   it('REST 폴백(alarmsUnknown) · 경보 0 → 흐림 · 경보가 있으면 호박 · 아는 0 은 초록', () => {
     const base = { status: 'connected', lastSuccess: Date.now(), metrics: {} };
     expect(vcQuickDot({ ...base, alarmsUnknown: true }).dot).not.toBe('var(--green)');
