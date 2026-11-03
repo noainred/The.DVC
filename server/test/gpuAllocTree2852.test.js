@@ -2,7 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import ExcelJS from 'exceljs';
-import { buildGpuAllocTree, buildHostAlloc, gpuCapacityOf, flatRows, FLAT_COLUMNS, allocCorpRoster } from '../src/gpu/allocTree.js';
+import { buildGpuAllocTree, buildHostAlloc, gpuCapacityOf, flatRows, FLAT_COLUMNS, allocCorpRoster, allocScopeOf } from '../src/gpu/allocTree.js';
 import { renderGpuAllocWorkbook, allocCsvLines, ALLOC_XLSX_SHEETS, treeLines, allocExportOpts, allocFileName, corpSheetNames, SHEET_NAME_MAX, backLinkCol } from '../src/gpu/allocTreeXlsx.js';
 import { internalLinkState } from '../src/util/xlsxInternalLink.js';
 import { graphicsVmRefs, parseGpus, parseVmGpu, vmPassthroughPciIds } from '../src/vcenter/soapClient.js';
@@ -344,4 +344,41 @@ test('v2.869 엑셀 — 할당률 90% 이상 법인 탭은 주황 · 시트 링�
   const tocXml1 = await zip.file('xl/worksheets/sheet1.xml').async('string');
   assert.match(tocXml1, /<hyperlink ref="A4" location="&apos;vcenter-kr&apos;!A1"\/>/);
   assert.equal(zip.file('xl/worksheets/_rels/sheet1.xml.rels'), null, '시트 안 링크는 외부 관계를 만들지 않는다');
+});
+
+/* ── v2.871 버그 점검 ─────────────────────────────────────────────────── */
+test('v2.871 GPU 아닌 패스스루(NIC · HBA) — 주소를 다 읽었으면 GPU 로 세지 않는다 · 예비가 비지 않는다', () => {
+  const pt = (pciIds, n = pciIds.length, extra = {}) => ({ type: 'passthrough', count: n, vgpu: 0, passthrough: n, profile: '', pciIds, ...extra });
+  // ① vGPU 호스트 + NIC 만 패스스루로 받은 VM → 계층 대상이 아니다(예전: 할당 모름 → 예비·할당률 null)
+  const hv = { vcenterId: 'vc1', name: 'esx1', gpus: [{ model: 'NVIDIA L4', memGB: 24, mode: 'vgpu', vms: ['vm-1'] }] };
+  const r1 = buildHostAlloc(hv, [vm('vm-1', 'cad', vg('nvidia_l4-12q')), vm('vm-2', 'rdma-only', pt(['0000:af:00.0']))]);
+  assert.equal(r1.totals.allocUnknown, 0); assert.equal(r1.totals.spareGB, 12); assert.equal(r1.totals.allocPct, 50);
+  assert.equal(r1.totals.vmsOn, 1, 'NIC 만 가진 VM 은 GPU VM 이 아니다');
+  assert.equal(r1.unplaced.length, 0);
+  // ② vGPU + NIC 패스스루를 함께 가진 VM → vGPU GB 만
+  const mixed = { type: 'mixed', count: 2, vgpu: 1, passthrough: 1, profile: 'nvidia_l4-12q', pciIds: ['0000:af:00.0'] };
+  const r2 = buildHostAlloc(hv, [vm('vm-1', 'ai', mixed)]);
+  assert.equal(r2.totals.allocGB, 12); assert.equal(r2.totals.spareGB, 12);
+  assert.equal(r2.gpus[0].vms[0].passthroughDevices, 0, '표시도 GPU 장치 수만');
+  // ③ 패스스루 GPU 1장 + NIC 1장(주소 대소문자 달라도 같은 장치)
+  const hp = { vcenterId: 'vc1', name: 'esx1', gpus: [{ model: 'NVIDIA A100 80GB', memGB: 80, mode: 'passthrough', pciId: '0000:3b:00.0' }] };
+  const r3 = buildHostAlloc(hp, [vm('vm-1', 'train', pt(['0000:3B:00.0', '0000:af:00.0']))]);
+  assert.equal(r3.gpus[0].vms.length, 1); assert.equal(r3.totals.allocGB, 80); assert.equal(r3.totals.spareGB, 0);
+  assert.equal(r3.gpus[0].vms[0].passthroughDevices, 1);
+  // ④ 주소를 다 못 읽으면(구버전 수집기 · 꺼진 VM 의 동적 DirectPath) 예전처럼 전부 GPU 로 본다 — 지어내지 않는다
+  const r4 = buildHostAlloc(hv, [vm('vm-2', 'old', pt(undefined, 1))]);
+  assert.equal(r4.totals.allocUnknown, 1); assert.equal(r4.totals.spareGB, null);
+  const r5 = buildHostAlloc(hp, [vm('vm-3', 'half', pt(['0000:af:00.0'], 2))]);
+  assert.equal(r5.totals.allocGB, 160, '두 장 중 하나만 읽었으면 GPU 2장으로(같은 모델 균일 추정) — 예전 그대로');
+});
+
+test('v2.871 범위 글자 · 파일 이름 — GPU 없는 법인도 고른 법인으로 센다 · 많으면 외 N곳', () => {
+  const tree = { vcenters: [{ id: 'vc1', name: 'kr' }] };
+  assert.deepEqual(allocScopeOf({ picked: true, tree, rosterIds: ['vc0', 'vc1', 'vc2'] }), { scopeText: '법인 3곳 — vc0, vc1, vc2', fileScope: '3corps' });
+  assert.deepEqual(allocScopeOf({ picked: true, tree: { vcenters: [] }, rosterIds: ['vc0'] }), { scopeText: '법인 1곳 — vc0', fileScope: 'vc0' }, 'GPU 없는 법인만 골라도 범위 밖이 아니다');
+  assert.equal(allocScopeOf({ picked: true, tree, rosterIds: [] }).scopeText, '고른 법인(조회 범위 안에 없음)');
+  assert.equal(allocScopeOf({ picked: true, tree, rosterIds: ['a', 'b', 'c', 'd', 'e', 'f'] }).scopeText, '법인 6곳 — a, b, c 외 3곳');
+  assert.deepEqual(allocScopeOf({ tree }), { scopeText: '전체 법인', fileScope: 'all' });
+  assert.deepEqual(allocScopeOf({ vcenterId: 'vc1', tree }), { scopeText: 'kr', fileScope: 'vc1' });
+  assert.equal(allocScopeOf({ vcenterId: 'a b/c', tree: { vcenters: [] } }).fileScope, 'a_b_c', '파일 이름에 쓸 수 없는 글자는 _');
 });
