@@ -14,7 +14,7 @@ import Select from '../../components/Select.jsx';
 import DataList from '../../components/DataList.jsx';
 import { useHashTab } from '../../hooks/useHashTab.js';
 import {
-  STATUS_ORDER, STATUS_TEXT, TYPE_TEXT, PRIORITY_TEXT, statusText, typeText, priorityText, dueInfo, timeText, initialOf, colorIndexOf,
+  STATUS_ORDER, STATUS_TEXT, TYPE_TEXT, PRIORITY_TEXT, statusText, typeText, priorityText, dueInfo, timeText, dateText, initialOf, colorIndexOf,
   groupByStatus, filterRows, myWork, loadPct, LOAD_CAP, toDateInput, fromDateInput, parseLabels, saveFailText, persistNote, historyText,
   peopleOptions, makeLatest, vcName, vcenterOptions, notifyStatusText,
 } from './issueText.js';
@@ -293,13 +293,13 @@ function ListView({ rows, total, meta, onOpen, onWritten }) {
                     <button type="button" className="iss-link" onClick={() => onOpen(r.key)}>{r.title}</button>
                     {r.blocked && <span className="iss-chip s-blocked" style={{ marginLeft: 6 }} title={r.blocked.reason}>보류</span>}
                   </td>
-                  <td data-sort={r.vcenterId ? vcName(meta, r.vcenterId) : '~'} style={{ whiteSpace: 'nowrap' }}>{r.vcenterId ? vcName(meta, r.vcenterId) : <span className="muted">공용</span>}</td>
+                  <td data-sort={r.vcenterId ? vcName(meta, r.vcenterId) : '~'}>{r.vcenterId ? <span className="iss-vc-cell" title={vcName(meta, r.vcenterId)}>{vcName(meta, r.vcenterId)}</span> : <span className="muted">공용</span>}</td>
                   <td data-sort={STATUS_ORDER.indexOf(r.status)}><StatusChip s={r.status} /></td>
                   <td data-sort={r.priority}><PrioTag p={r.priority} /></td>
                   <td data-sort={r.assignee || '~'}>{r.assignee ? <span className="iss-who"><Avatar name={r.assignee} size={22} />{r.assignee}</span> : <span className="iss-unassigned">미할당</span>}</td>
                   <td>{r.reporter}</td>
                   <td data-sort={r.dueAt ?? ''}><Due r={r} /></td>
-                  <td data-sort={r.updatedAt} className="muted" style={{ whiteSpace: 'nowrap' }}>{timeText(r.updatedAt)}</td>
+                  <td data-sort={r.updatedAt} className="muted" style={{ whiteSpace: 'nowrap' }} title={timeText(r.updatedAt)}>{dateText(r.updatedAt)}</td>
                 </tr>
               ))}
             </tbody>
