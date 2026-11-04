@@ -33,6 +33,8 @@ export function precheckScript(volumeDir = DEFAULT_VOLUME_DIR) {
     "echo @@varlib; df -Pk /var/lib 2>/dev/null | awk 'NR==2{print $4}'",
     "echo @@clock; chronyc tracking 2>/dev/null | awk -F': *' '/^System time/{print $2}' | head -1",
     "echo @@addr; ip -4 -o route get 1.1.1.1 2>/dev/null | sed -n 's/.* src \\([0-9.]*\\).*/\\1/p' | head -1; hostname -f 2>/dev/null || hostname",
+    // v2.876(반증 A): 이 서버의 모든 주소 — '포탈 미등록 Bareos 초기화' 가 다른 이름 · 다른 NIC 로 등록된 Director 를 알아보게(지우지 않는 쪽 판정에만 쓴다)
+    "echo @@addrs; hostname -I 2>/dev/null | tr ' ' '\\n' | sed '/^$/d' | head -32",
     `echo @@runner; systemctl is-active ${UNIT} 2>/dev/null || true; tail -n 3 ${REMOTE_ROOT}/run/state 2>/dev/null || true`,
     // 초기화용(설치돼 있을 때만 의미): 실행 중 작업 · 카탈로그 DB 크기 · SD 볼륨 경로별 파일 수·크기·마지막 수정
     // 반증 L2: bconsole 이 실패해도 grep -c 가 0 을 내 '실행 중 0개 ✓' 가 됐다 — 접속이 확인될 때만 센다(못 읽으면 none = 확인 불가)
@@ -102,6 +104,7 @@ export function parsePrecheck(text) {
     clockOffsetSec: clockSec ? Number(clockSec[1]) : null,
     hostAddr: /^\d{1,3}(\.\d{1,3}){3}$/.test(addrLines[0] || '') ? addrLines[0] : null,
     hostname: addrLines.find((x) => !/^\d{1,3}(\.\d{1,3}){3}$/.test(x)) || null,
+    addrs: (s.addrs || []).map((l) => l.trim()).filter((x) => /^[0-9A-Fa-f.:]{2,45}$/.test(x)).slice(0, 32),
     runnerActive: runnerLines[0] === 'active' || runnerLines[0] === 'activating',
     runnerState: runnerLines.slice(1),
     // 'inactive' = Director 꺼짐(실행 중 작업 없음 — 읽은 사실) · none/빈 값 = 못 읽음(null — 0 이 아니다)

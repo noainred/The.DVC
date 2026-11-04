@@ -23,7 +23,7 @@ import { atomicWriteFileSync, preserveCorrupt } from '../../util/atomicWrite.js'
 import { withSsh, isSshAuthError } from '../../proxy/sshExec.js';
 import { remoteTmpDir } from '../../agent/deploy.js';
 import { listJobs, registryLoadError } from '../registry.js';
-import { loadSettings, addDirector, updateDirector, directorById, saveSettings, jobDirectorId, deleteDirector } from '../settings.js';
+import { loadSettings, settingsLoadError, addDirector, updateDirector, directorById, saveSettings, jobDirectorId, deleteDirector } from '../settings.js';
 import { setupDirector, setupFdPlugin, newConsolePassword, VMWARE_POOL_FULL, VMWARE_SCHEDULE } from '../autoSetup.js';
 import { onDirector } from '../service.js';
 import { isResourceName } from '../names.js';
@@ -150,11 +150,26 @@ const runSsh = (creds, fn, ms) => _ssh(creds, fn, { signal: AbortSignal.timeout(
 const secretsOf = (creds) => [creds?.password, creds?.passphrase].filter(Boolean);
 
 /* ───────── 사전 점검(읽기만) ───────── */
+/**
+ * v2.876 반증 D·A·B·C·E: '포탈 미등록 Bareos 초기화' 판정 하나 — 사전 점검(SSH 전 · 뒤) · 시작 · 0단계 다시 하기 · 러너 띄우기 직전에 같은 것을 부른다.
+ *   Director 등록부를 못 읽으면 거부한다(빈 목록이면 모든 등록이 '없음' 으로 보여 남의 Bareos 를 지울 수 있었다 — 반증 D 재현).
+ */
+function resetChecked(t, body, ids = []) {
+  if (!(body && body.resetExisting === true) || !t || t.mode !== 'install') return t;
+  if (settingsLoadError()) throw fail('unavailable', 'Bareos 설정(Director 등록부)을 읽지 못했습니다 — 이 서버가 다른 법인의 Director 로 등록돼 있는지 확인할 수 없어 지우지 않습니다.');
+  return resetTarget(t, body, loadSettings(), { ids, jobs: load() });
+}
+/** 작업 기록으로 다시 판정(다시 하기 · 러너 띄우기 직전) — 던지면 0단계를 띄우지 않는다. */
+function guardResetJob(j) {
+  if (!j?.resetUnregistered) return;
+  resetChecked({ vcenterId: j.vcenterId, sshHost: j.sshHost, agent: j.agent, mode: 'install' }, { resetExisting: true }, [j.hostAddr, ...(Array.isArray(j.hostIds) ? j.hostIds : [])]);
+}
+
 export async function runPrecheck({ vcenterId, body = {} }) {
   const t0r = _targets({ knownHostAddrs: knownHostAddrs() }).find((x) => x.vcenterId === vcenterId);
   if (!t0r) throw fail('not-found', 'vCenter 를 찾을 수 없습니다.');
   if (!t0r.can) throw fail('invalid', t0r.why);
-  const t = resetTarget(t0r, body, loadSettings());
+  const t = resetChecked(t0r, body);
   const bundle = await _pick('');
   let plan = null;
   try { plan = bundle ? normPlan({ ...body, reset: body.reset || { ack: true } }, { contents: bundle.contents, mode: t.mode, corpName: t.vcenterName }) : null; } catch { plan = null; }
@@ -169,9 +184,10 @@ export async function runPrecheck({ vcenterId, body = {} }) {
   }
   const facts = parsePrecheck(out.text);
   const judged = judgePrecheck(facts, { mode: t.mode, bundle: bundle?.contents || null, plan });
-  if (t.resetUnregistered) resetTarget(t0r, body, loadSettings(), judged.hostAddr);   // 러너가 읽은 서버 주소로 한 번 더(다른 법인 Director 면 던진다)
+  const hostIds = [facts.hostAddr, facts.hostname, ...(facts.addrs || [])].filter(Boolean);
+  if (t.resetUnregistered) resetChecked(t0r, body, hostIds);   // 러너가 읽은 서버 주소 · 이름 · 모든 주소로 한 번 더(등록된 Director · 다른 법인 작업이면 던진다)
   const ledger = t.director ? listJobs().filter((x) => !x.demo && x.vcenterId === vcenterId).length : 0;
-  return { at: Date.now(), ms: Date.now() - t0, target: t, mode: t.mode, ...(t.resetUnregistered ? { resetUnregistered: true } : {}), ...judged, ledgerTargets: ledger, bundle: bundle ? { version: bundle.version, contents: bundle.contents, size: bundle.size } : null };
+  return { at: Date.now(), ms: Date.now() - t0, target: t, mode: t.mode, ...(t.resetUnregistered ? { resetUnregistered: true, hostIds } : {}), ...judged, ledgerTargets: ledger, bundle: bundle ? { version: bundle.version, contents: bundle.contents, size: bundle.size } : null };
 }
 
 /* ───────── 시작 ───────── */
@@ -179,7 +195,7 @@ export async function startInstall({ vcenterId, body = {}, by = '' }) {
   const t0r = _targets({ knownHostAddrs: knownHostAddrs() }).find((x) => x.vcenterId === vcenterId);
   if (!t0r) throw fail('not-found', 'vCenter 를 찾을 수 없습니다.');
   if (!t0r.can) throw fail('invalid', t0r.why);
-  const t = resetTarget(t0r, body, loadSettings());
+  const t = resetChecked(t0r, body);
   const lockWhy = setupBusyReason('', t.sshHost) || (t.director?.id ? setupBusyReason(t.director.id) : '');
   if (lockWhy) throw fail('conflict', lockWhy);
   const busy = load().find((j) => isActive(j) && (j.vcenterId === vcenterId || (j.sshHost && j.sshHost === t.sshHost)));
@@ -208,7 +224,7 @@ async function startInner(t, vcenterId, body, by) {
     bundle: { version: bundle.version, sha256: bundle.sha256, size: bundle.size, bareosVersion: bundle.contents.bareosVersion },
     install: bundle.contents.install,
     directorId: t.director?.id || '', existingDirector: !!t.director, createdDirector: false, createdSite: false,
-    ...(t.resetUnregistered ? { resetUnregistered: true } : {}),   // v2.876 포탈 미등록 Bareos 를 지우고 설치(4단계가 Director 를 새로 등록)
+    ...(t.resetUnregistered ? { resetUnregistered: true, hostIds: (pre.hostIds || []).slice(0, 34) } : {}),   // v2.876 포탈 미등록 Bareos 를 지우고 설치(4단계가 Director 를 새로 등록)
     by, createdAt: Date.now(), updatedAt: Date.now(), status: 'running', phase: 'upload',
     steps: Object.fromEntries(STEPS.filter((s) => s.n >= firstStep).map((s) => [s.n, { status: 'pending' }])),
     // v2.846 D-2: '확인했음 — 실행 중 작업 확인 없이 진행' 동의는 그 회차(시도 행)에만 — 계획(plan)에 넣지 않아 다시 하기로 이어지지 않는다
@@ -335,6 +351,8 @@ async function uploadAndStart(j, creds, { fromStep, resendBundle }) {
     await api.writeFile(`${RD}/plan.env`, env, 0o600);
     // 반증 M1: 업로드 중에 누른 중단 — 러너를 띄우지 않는다(초기화 0단계가 그대로 돌던 길)
     if (_stopReq.has(j.id)) return { stopped: true };
+    // v2.876 반증 E: 업로드가 길어지는 동안 이 서버가 Director 로 등록됐을 수 있다 — 0단계(초기화)를 띄우기 직전에 다시 판정
+    if (Math.min(fromStep, LAST_REMOTE_STEP) === 0) guardResetJob(j);
     await api.exec(`rm -f ${RD}/stop ${RD}/err.${Math.min(fromStep, LAST_REMOTE_STEP)}`);
     const st = await api.exec(`systemd-run --unit=${UNIT} --collect --quiet --property=RuntimeMaxSec=${Math.floor(REMOTE_MAX_MS / 1000)} /bin/bash ${RD}/runner.sh ${RD} 2>&1`);
     if (st?.code !== 0) throw fail('remote', `러너를 띄우지 못했습니다(systemd-run): ${scrubOutput(String(st?.stdout || st?.stderr || ''), secretsOf(creds)).slice(-300)}`);
@@ -555,6 +573,7 @@ export async function retryInstall(id, { body = {}, by = '' } = {}) {
   // 다시 하기는 **실패(멈춘) 단계부터만**(반증 M3·M5 — 앞 단계부터 다시 돌리면 끝난 단계·초기화를 확인 없이 되풀이했다)
   const fromStep = Number.isInteger(j.failure?.step) ? j.failure.step : (Number.isInteger(j.currentStep) ? j.currentStep : j.startStep);
   if (!Number.isInteger(fromStep) || fromStep < j.startStep || fromStep > LAST_STEP) throw fail('invalid', '다시 시작할 단계를 알 수 없습니다 — 전부 되돌린 뒤 새로 하세요.');
+  if (fromStep === 0) guardResetJob(j);   // v2.876 반증 B: 0단계를 다시 띄우기 전에 같은 판정(그사이 이 서버가 Director 로 등록됐을 수 있다)
   _stopReq.delete(j.id);
   const bundle = await _pick(j.bundle.version);
   if (!bundle) throw fail('invalid', `번들 ${j.bundle.version} 이 중앙에 없습니다 — 번들을 다시 받으세요.`);

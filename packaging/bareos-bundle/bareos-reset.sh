@@ -8,6 +8,8 @@
 #   규칙은 포탈 설치 러너의 0단계(초기화 — server/src/bareos/install/runner.sh step0)와 같다:
 #     · 실행 중 작업이 있거나 확인하지 못하면 멈춘다(못 읽음을 0 으로 보지 않는다 — bconsole 접속이 확인될 때만 센다)
 #     · 볼륨은 SD 설정의 Archive Device 경로만, 시스템 경로 · 얕은 경로 · '..' · 심링크(부모 포함)는 지우지 않는다 — 디렉터리 안의 파일만 지운다
+#       (v2.876 반증: /var/log · /var/lib/pgsql · /var/spool · 홈 바로 아래 · /tmp 아래 · 공백 · 글롭 글자가 든 경로도 — safe_voldir 는 러너와 같은 글자, 시험이 대조)
+#     · --dry-run 은 아무것도 바꾸지 않는다(PostgreSQL 이 꺼져 있으면 켜지 않고 카탈로그를 '모름' 으로 보인다)
 #     · 패키지는 dnf remove --noautoremove(의존 자동 제거 없음 · 저장소에 접속하지 않음)
 #   ⚠ 되돌릴 수 없다. 기본은 아무것도 보관하지 않는다(사용자 결정). 남기려면 --keep-catalog · --keep-volumes.
 #
@@ -56,6 +58,10 @@ die() { log "멈춤: $*"; exit 1; }
 safe_voldir() {
   local x="${1#$P}"
   case "$x" in (/|/etc|/etc/*|/usr|/usr/*|/bin|/bin/*|/sbin|/sbin/*|/lib|/lib/*|/lib64|/lib64/*|/boot|/boot/*|/dev|/dev/*|/proc|/proc/*|/sys|/sys/*|/run|/run/*|/root|/home|/var|/var/lib|/opt|/tmp|/srv|/mnt|/media) return 1;; esac
+  # v2.876(반증 I — 재현: Archive Device 가 /var/log 면 그 안의 로그를 지웠다): 볼륨이 아닌 것이 분명한 곳 · 사람의 홈 바로 아래 · 글자 밖 경로(공백 · 글롭)도 지우지 않는다
+  case "$x" in (/var/log|/var/log/*|/var/spool|/var/spool/*|/var/cache|/var/cache/*|/var/tmp|/var/tmp/*|/var/mail|/var/mail/*|/var/lib/pgsql|/var/lib/pgsql/*|/var/lib/mysql|/var/lib/mysql/*|/var/lib/rpm|/var/lib/rpm/*|/var/lib/dnf|/var/lib/dnf/*|/var/lib/portal-bareos-install|/var/lib/portal-bareos-install/*|/tmp/*) return 1;; esac
+  case "$x" in (/home/*/*|/root/*/*) ;; (/home/*|/root/*) return 1;; esac
+  case "$x" in (*[!A-Za-z0-9._/-]*) return 1;; esac
   case "$x" in (/*/*) ;; (*) return 1;; esac
   case "$x" in (*..*) return 1;; esac
   [ -d "$1" ] && [ ! -L "$1" ] || return 1
@@ -84,13 +90,17 @@ pg_q() { su - postgres -c "psql -tAc \"$1\"" 2>/dev/null | tr -d '[:space:]'; }
 PKGS="$(rpm -qa --qf '%{NAME}\n' 2>/dev/null | grep -E '^(bareos(-|$)|python3-bareos$)' | sort -u | tr '\n' ' ')"
 ETC_N="없음"; [ -d "$ETC" ] && ETC_N="$(find "$ETC" -type f 2>/dev/null | wc -l | tr -d ' ')개 파일"
 # 볼륨 경로는 설정을 지우기 **전에** 읽는다(Archive Device) — 설정이 없으면 기본 경로
-VOLDIRS=""
+# v2.876(반증 H — 재현: 따옴표 없이 펼쳐 '/data/bareos vol' 이 '/data/bareos' 로 갈라졌다): 한 줄 = 한 경로(배열) · 쓸 때는 늘 "${VOLARR[@]}"
+VOLARR=()
 if [ -d "$ETC/bareos-sd.d/device" ]; then
-  VOLDIRS="$(sed -n 's/^[[:space:]]*Archive[[:space:]]*Device[[:space:]]*=[[:space:]]*"\{0,1\}\([^"]*\)"\{0,1\}[[:space:]]*$/\1/Ip' "$ETC"/bareos-sd.d/device/*.conf 2>/dev/null | sort -u)"
+  mapfile -t VOLARR < <(sed -n 's/^[[:space:]]*Archive[[:space:]]*Device[[:space:]]*=[[:space:]]*"\{0,1\}\([^"]*\)"\{0,1\}[[:space:]]*$/\1/Ip' "$ETC"/bareos-sd.d/device/*.conf 2>/dev/null | sed '/^$/d' | sort -u)
 fi
-[ -n "$VOLDIRS" ] || VOLDIRS="$DEFAULT_VOLDIR"
-DB_STATE="PostgreSQL 데이터 없음"; DB_EXISTS=0
-if [ -f "$PGDATA/PG_VERSION" ]; then
+[ ${#VOLARR[@]} -gt 0 ] || VOLARR=("$DEFAULT_VOLDIR")
+DB_STATE="PostgreSQL 데이터 없음"; DB_EXISTS=0; DB_UNKNOWN=0
+if [ -f "$PGDATA/PG_VERSION" ] && [ $DRY = 1 ] && ! systemctl is-active -q postgresql >/dev/null 2>&1; then
+  # v2.876(반증 G): --dry-run 은 아무것도 바꾸지 않는다 — PostgreSQL 을 켜지 않는다(카탈로그는 '모름')
+  DB_STATE="모름(PostgreSQL 꺼짐 — --dry-run 은 켜지 않습니다. 실제 실행 때 켜서 확인합니다)"; DB_UNKNOWN=1
+elif [ -f "$PGDATA/PG_VERSION" ]; then
   systemctl start postgresql >/dev/null 2>&1 || true
   if [ "$(pg_q "SELECT 1 FROM pg_database WHERE datname='bareos'")" = 1 ]; then
     DB_EXISTS=1
@@ -104,7 +114,7 @@ log "== Bareos 완전 초기화 — $(hostname -f 2>/dev/null || hostname) =="
 log "패키지: ${PKGS:-없음}"
 log "/etc/bareos: $ETC_N · /etc/bareos-webui: $([ -d "$WEBUI_ETC" ] && echo 있음 || echo 없음)"
 log "카탈로그 DB(bareos): $DB_STATE$([ $KEEP_DB = 1 ] && echo ' — 남김(--keep-catalog)')"
-for d in $VOLDIRS; do
+for d in "${VOLARR[@]}"; do
   dd="$P$d"
   if [ ! -d "$dd" ]; then log "볼륨 경로 $d: 없음"
   elif ! safe_voldir "$dd"; then log "볼륨 경로 $d: 지우지 않음(시스템 경로 · 얕은 경로 · 심링크)"
@@ -124,8 +134,8 @@ NEED=0
 [ -n "$PKGS" ] && NEED=1
 [ -d "$ETC" ] && NEED=1
 [ -d "$WEBUI_ETC" ] && NEED=1
-[ $KEEP_DB = 0 ] && [ $DB_EXISTS = 1 ] && NEED=1
-if [ $KEEP_VOL = 0 ]; then for d in $VOLDIRS; do dd="$P$d"; if safe_voldir "$dd" && [ -n "$(find "$dd" -mindepth 1 -maxdepth 1 2>/dev/null | head -1)" ]; then NEED=1; fi; done; fi
+[ $KEEP_DB = 0 ] && { [ $DB_EXISTS = 1 ] || [ $DB_UNKNOWN = 1 ]; } && NEED=1
+if [ $KEEP_VOL = 0 ]; then for d in "${VOLARR[@]}"; do dd="$P$d"; if safe_voldir "$dd" && [ -n "$(find "$dd" -mindepth 1 -maxdepth 1 2>/dev/null | head -1)" ]; then NEED=1; fi; done; fi
 [ $NEED = 1 ] || { log "지울 Bareos 가 없습니다 — 이미 초기화된 상태입니다."; exit 0; }
 
 if [ $DRY = 1 ]; then log "--dry-run: 아무것도 바꾸지 않았습니다."; exit 0; fi
@@ -151,7 +161,7 @@ if [ $KEEP_DB = 0 ] && [ -f "$PGDATA/PG_VERSION" ]; then
 fi
 
 if [ $KEEP_VOL = 0 ]; then
-  for d in $VOLDIRS; do
+  for d in "${VOLARR[@]}"; do
     dd="$P$d"
     if safe_voldir "$dd"; then
       find "$dd" -mindepth 1 -maxdepth 1 -exec rm -rf {} + || die "볼륨을 지우지 못했습니다($d)."

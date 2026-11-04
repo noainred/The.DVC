@@ -73,7 +73,7 @@ function facts(t, mode) {
 /** v2.876 실제 코드와 같은 규칙(resetTarget — 데모 Director 등록부는 대상 표의 데모 Director 뿐). 던지면 { ok:false } 로. */
 function demoTarget(t0, body) {
   const dirs = targets().map((x) => x.director).filter(Boolean);
-  return resetTarget(t0, body, { directors: dirs }, t0.sshHost);
+  return resetTarget(t0, body, { directors: dirs }, { ids: [t0.sshHost], jobs: [] });
 }
 
 export function precheck(vcenterId, body = {}) {

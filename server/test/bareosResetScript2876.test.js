@@ -23,8 +23,9 @@ const STUBS = {
   systemctl: `#!/bin/bash
 cmd="$1"; for a in "$@"; do u="$a"; done
 case "$cmd" in
-  is-active) if [ -f "$FAKE/dir_active" ] && [ "$u" = bareos-dir ]; then echo active; exit 0; fi; echo inactive; exit 3 ;;
+  is-active) if [ -f "$FAKE/dir_active" ] && [ "$u" = bareos-dir ]; then echo active; exit 0; fi; if [ -f "$FAKE/pg_active" ] && [ "$u" = postgresql ]; then echo active; exit 0; fi; echo inactive; exit 3 ;;
   disable) echo "disable $*" >> "$FAKE/svc.log"; rm -f "$FAKE/dir_active"; exit 0 ;;
+  start) echo "start $*" >> "$FAKE/svc.log"; exit 0 ;;
 esac
 exit 0`,
   su: `#!/bin/bash
@@ -77,6 +78,7 @@ const untouched = (e) => {
 
 test('① --dry-run — 지울 것을 보여 주고 아무것도 바꾸지 않는다', () => {
   const e = env0();
+  fs.writeFileSync(path.join(e.FAKE, 'pg_active'), '');   // PostgreSQL 이 켜져 있으면 카탈로그를 읽는다(꺼져 있으면 켜지 않는다 — ⑩)
   const r = run(e, ['--dry-run']);
   assert.equal(r.status, 0, r.stdout + r.stderr);
   assert.match(r.stdout, /패키지: bareos bareos-common bareos-database-postgresql bareos-director python3-bareos/);
@@ -174,4 +176,58 @@ test('⑥ 남길 옵션 — --keep-catalog · --keep-volumes', () => {
   assert.ok(has(e, 'var/lib/bareos/storage/Full-0001'), '볼륨 남김');
   assert.ok(!has(e, 'etc/bareos'), '설정은 지운다(사전 점검이 /etc/bareos 유무를 본다)');
   assert.ok(!pkgs(e).includes('bareos'), '패키지는 지운다');
+});
+
+/* ── v2.876 반증 1인 확정분(G · H · I — 재현 → 고침) ── */
+const RUNNER = path.join(path.dirname(SCRIPT), '../../server/src/bareos/install/runner.sh');
+// 함수 본문(주석 줄은 빼고) — 두 파일의 판정 글자가 같아야 한다
+const fnOf = (file, name) => { const t = fs.readFileSync(file, 'utf8'); const i = t.indexOf(`${name}() {`); return t.slice(i, t.indexOf('\n}\n', i) + 2).split('\n').filter((l) => !/^\s*#/.test(l)).join('\n'); };
+
+test('⑩ 반증 G — --dry-run 은 PostgreSQL 을 켜지 않는다(카탈로그는 모름 · 지울 것 있음으로 본다)', () => {
+  const e = env0();
+  fs.rmSync(path.join(e.P, 'etc/bareos'), { recursive: true }); fs.rmSync(path.join(e.P, 'etc/bareos-webui'), { recursive: true });
+  fs.writeFileSync(path.join(e.FAKE, 'rpmdb'), 'httpd\n');
+  fs.rmSync(path.join(e.P, 'var/lib/bareos/storage'), { recursive: true });
+  const r = run(e, ['--dry-run']);
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.ok(!fs.existsSync(path.join(e.FAKE, 'svc.log')) || !/start/.test(fs.readFileSync(path.join(e.FAKE, 'svc.log'), 'utf8')), 'systemctl start 를 부르지 않는다');
+  assert.match(r.stdout, /카탈로그 DB\(bareos\): 모름/);
+  assert.doesNotMatch(r.stdout, /지울 Bareos 가 없습니다/, '카탈로그를 모르면 없다고 말하지 않는다');
+  assert.match(r.stdout, /--dry-run: 아무것도 바꾸지 않았습니다/);
+});
+
+test('⑪ 반증 H — 공백 · 글롭이 든 Archive Device 는 갈라지지 않고 지우지도 않는다', () => {
+  const e = env0({ device: '"/data/bareos vol"' });
+  fs.mkdirSync(path.join(e.P, 'data/bareos vol'), { recursive: true });
+  fs.writeFileSync(path.join(e.P, 'data/bareos vol/Full-1'), 'v');
+  fs.mkdirSync(path.join(e.P, 'data/bareos'), { recursive: true }); fs.writeFileSync(path.join(e.P, 'data/bareos/sibling'), 'keep');
+  let r = run(e, ['--yes', '--keep-catalog']);
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.ok(has(e, 'data/bareos/sibling'), '형제 디렉터리를 지우지 않는다');
+  assert.ok(has(e, 'data/bareos vol/Full-1'), '글자 밖 경로는 지우지 않는다(로그에 남김)');
+  assert.match(r.stdout, /볼륨 경로 \/data\/bareos vol 는 지우지 않음/);
+  const e2 = env0({ device: '/data/*' });
+  fs.mkdirSync(path.join(e2.P, 'data/x'), { recursive: true }); fs.writeFileSync(path.join(e2.P, 'data/x/f'), 'keep');
+  r = run(e2, ['--yes', '--keep-catalog']);
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.ok(has(e2, 'data/x/f'), '글롭으로 펼치지 않는다');
+});
+
+test('⑫ 반증 I — 볼륨이 아닌 곳(/var/log · /var/lib/pgsql · 홈 바로 아래 · /tmp 아래)은 지우지 않는다 · 러너와 같은 함수', () => {
+  assert.equal(fnOf(SCRIPT, 'safe_voldir'), fnOf(RUNNER, 'safe_voldir'), '스크립트와 설치 러너 0단계의 판정이 같은 글자');
+  const P = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'safevol-')));
+  const ok = ['/data/bareos/storage', '/var/lib/bareos/storage', '/home/backup/bareos', '/srv/bareos'];
+  const no = ['/var/log', '/var/log/bareos', '/var/lib/pgsql/data', '/var/spool/mail', '/var/tmp/x', '/home/user', '/root/x', '/tmp/vols', '/var/lib/portal-bareos-install/run', '/data/a b', '/data/x*', '/var/lib', '/etc/bareos'];
+  for (const d of [...ok, ...no]) fs.mkdirSync(path.join(P, d), { recursive: true });
+  for (const [list, want] of [[ok, 0], [no, 1]]) {
+    for (const d of list) {
+      const r = spawnSync('bash', ['-c', `P='${P}'\n${fnOf(SCRIPT, 'safe_voldir')}\nsafe_voldir "$P$1"`, 'x', d], { encoding: 'utf8' });
+      assert.equal(r.status, want, `${d} → ${want ? '거부' : '허용'}`);
+    }
+  }
+  const e = env0({ device: '/var/log' });
+  fs.writeFileSync(path.join(e.P, 'var/log/messages'), 'keep');
+  const r = run(e, ['--yes', '--keep-catalog']);
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.ok(has(e, 'var/log/messages'), '/var/log 안의 로그는 그대로');
 });

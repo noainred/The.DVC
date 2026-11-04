@@ -81,6 +81,10 @@ bundle_dir() { printf '%s' "$W/bundle/$BV/bareos-bundle"; }
 safe_voldir() {
   local x="${1#$P}"
   case "$x" in (/|/etc|/etc/*|/usr|/usr/*|/bin|/bin/*|/sbin|/sbin/*|/lib|/lib/*|/lib64|/lib64/*|/boot|/boot/*|/dev|/dev/*|/proc|/proc/*|/sys|/sys/*|/run|/run/*|/root|/home|/var|/var/lib|/opt|/tmp|/srv|/mnt|/media) return 1;; esac
+  # v2.876(반증 I — 재현: Archive Device 가 /var/log 면 그 안의 로그를 지웠다): 볼륨이 아닌 것이 분명한 곳 · 사람의 홈 바로 아래 · 글자 밖 경로(공백 · 글롭)도 지우지 않는다
+  case "$x" in (/var/log|/var/log/*|/var/spool|/var/spool/*|/var/cache|/var/cache/*|/var/tmp|/var/tmp/*|/var/mail|/var/mail/*|/var/lib/pgsql|/var/lib/pgsql/*|/var/lib/mysql|/var/lib/mysql/*|/var/lib/rpm|/var/lib/rpm/*|/var/lib/dnf|/var/lib/dnf/*|/var/lib/portal-bareos-install|/var/lib/portal-bareos-install/*|/tmp/*) return 1;; esac
+  case "$x" in (/home/*/*|/root/*/*) ;; (/home/*|/root/*) return 1;; esac
+  case "$x" in (*[!A-Za-z0-9._/-]*) return 1;; esac
   case "$x" in (/*/*) ;; (*) return 1;; esac
   case "$x" in (*..*) return 1;; esac
   [ -d "$1" ] && [ ! -L "$1" ] || return 1
