@@ -26,6 +26,7 @@ import { isDemoGuest, isAdminDetailUser } from '../../auth/demoGuest.js';
 import { todayStamp } from '../../util/dayKey.js';   // 파일명 날짜 = 설정 오프셋의 '오늘'(UTC 날짜 금지 — v2.582 BUG-3)
 import { addressMatcher, maskedAddressName } from '../../auth/addressMask.js';
 import { store } from '../../store.js';
+import { loadVcenterConfig } from '../../config.js';
 import { memoJson, scopeKey } from './shared.js';
 import { logAudit } from '../../audit.js';
 import { numOrNull } from '../../util/numOrNull.js';
@@ -128,15 +129,20 @@ async function gatherNow(snap, tagCategory) {
   let bareosBy = null;
   let bareosCorps = new Set();
   let bareosSettingsUnreadable = false;
-  try { bareosCorps = new Set((bareosSet.loadSettings().sites || []).map((s) => t(s?.vcenterId)).filter(Boolean)); }
-  catch (e) { bareosSettingsUnreadable = true; sourceErrors.push(`Bareos 설정: ${String(e?.message || e).slice(0, 160)}`); }
+  // ⚠ loadSettings 는 손상이어도 던지지 않고 빈 설정을 준다 — 손상은 settingsLoadError 로만 안다(5차 1차 반증 2: 손상이 '해당 없음' 으로 보였다).
+  try {
+    if (bareosSet.settingsLoadError()) throw new Error('Bareos 설정 파일을 읽지 못했습니다');
+    bareosCorps = new Set((bareosSet.loadSettings().sites || []).map((s) => t(s?.vcenterId)).filter(Boolean));
+  } catch (e) { bareosSettingsUnreadable = true; sourceErrors.push(`Bareos 설정: ${String(e?.message || e).slice(0, 160)}`); }
   try {
     if (bareosSettingsUnreadable) backupMeta = { used: true, unreadable: true };
-    else if (!bareosCorps.size) backupMeta = { used: false };
-    else if (bareosReg.registryLoadError()) backupMeta = { used: true, unreadable: true, corps: bareosCorps.size };
+    else if (bareosReg.registryLoadError()) backupMeta = bareosCorps.size ? { used: true, unreadable: true, corps: bareosCorps.size } : { used: false };
     else {
-      bareosBy = new Map(bareosReg.jobDigests().map((j) => [`${t(j.vcenterId)}|${t(j.vmId)}`, j]));
-      backupMeta = { used: true, corps: bareosCorps.size };
+      const jobs = bareosReg.jobDigests();
+      // 매핑이 지워졌어도 원장에 잡이 남은 법인은 센다(반증 10 — 옛 잡이 '해당 없음' 으로 가려지지 않게)
+      for (const j of jobs) if (t(j.vcenterId)) bareosCorps.add(t(j.vcenterId));
+      bareosBy = new Map(jobs.map((j) => [`${t(j.vcenterId)}|${t(j.vmId)}`, j]));
+      backupMeta = bareosCorps.size ? { used: true, corps: bareosCorps.size } : { used: false };
     }
   } catch (e) { backupMeta = { used: true, unreadable: true }; sourceErrors.push(`Bareos 원장: ${String(e?.message || e).slice(0, 160)}`); }
   const backupOfVm = (vm) => {
@@ -255,8 +261,21 @@ function writeKeyOf(user, snap) {
 // 등록 해제된 vCenter(스냅샷에 없음)는 쓰기 연산이 전부 404 라 버튼을 열지 않는다(5차 반증 R2 — 예전에는 writable:true 로 버튼이 열렸다).
 const inSnap = (snap, vc) => (snap?.vcenters || []).some((v) => t(v.id) === t(vc));
 const writableOf = (user, snap, vc) => writerOk(user) && inSnap(snap, vc) && inUserWriteScope(user, snap, vc);
-/** 스냅샷 vCenter 집합 — 0개(기동 직후·수집 전)면 null: 그때는 어느 법인도 '등록 해제' 로 보지 않는다. */
-const knownCorpsOf = (snap) => { const l = (snap?.vcenters || []).map((v) => t(v?.id)).filter(Boolean); return l.length ? new Set(l) : null; };
+/** vCenter 등록부(vcenters.json)의 id — 못 읽었거나 비었으면 null(모른다). 비밀은 쓰지 않고 id 만 본다. */
+function registryIds() {
+  try { const l = (loadVcenterConfig().vcenters || []).map((v) => t(v?.id)).filter(Boolean); return l.length ? new Set(l) : null; } catch { return null; }
+}
+/**
+ * '알려진 법인' = 스냅샷 vCenter ∪ 등록부 vCenter. 둘 중 하나라도 비었거나 못 읽었으면 null — 그때는 어느 법인도 '등록 해제' 로 보지 않는다.
+ * ⚠ 스냅샷만 보면 안 된다(5차 1차 반증 1 — 재현): 등록 직후 스냅샷이 갱신되기 전(수 초~수십 초)과 mock 데이터 소스(등록부를 무시)에서
+ *   등록된 vCenter 가 '등록 해제' 로 보이고 법인 항목 정리가 그 법인 서비스·규칙을 지웠다.
+ */
+function knownCorpsOf(snap) {
+  const s = (snap?.vcenters || []).map((v) => t(v?.id)).filter(Boolean);
+  const reg = registryIds();
+  if (!s.length || !reg) return null;
+  return new Set([...s, ...reg]);
+}
 const fleetAdmin = (user, snap) => isAdminDetailUser(user) && !scopedVcenterIds(user, snap);   // 관리자 판본 판정은 isAdminDetailUser 하나(role 직접 비교 금지)
 
 // ───────── 응답 조립 ─────────
@@ -457,13 +476,16 @@ export function registerSvcInventory(api) {
           const corp = t(b.corp);
           if (!corp) return res.status(400).json({ ok: false, reason: '법인(vCenter)을 지정하십시오.' });
           if (storeLoadError()) return res.status(503).json({ ok: false, error: 'registryUnreadable', reason: '저장소를 읽지 못해 쓰기를 막았습니다.' });
-          if (!knownCorpsOf(snap)) return res.status(409).json({ ok: false, reason: '인벤토리 스냅샷이 아직 없어 등록 해제 여부를 판단할 수 없습니다 — 수집 뒤 다시 시도하십시오.' });
-          if (inSnap(snap, corp)) return res.status(409).json({ ok: false, reason: '이 vCenter 는 아직 등록돼 있습니다 — 법인 항목 정리는 등록 해제된 vCenter 에만 씁니다.' });
+          const known = knownCorpsOf(snap);
+          if (!known) return res.status(409).json({ ok: false, reason: '인벤토리 스냅샷이나 vCenter 등록부를 읽지 못해 등록 해제 여부를 판단할 수 없습니다 — 수집 뒤 다시 시도하십시오.' });
+          if (known.has(corp)) return res.status(409).json({ ok: false, reason: '이 vCenter 는 아직 등록돼 있습니다(등록부 또는 인벤토리) — 법인 항목 정리는 등록 해제된 vCenter 에만 씁니다.' });
           const c = getMap().corps[corp] || null;
           const pinKeys = Object.entries(getPins().pins).filter(([, p]) => p.corp === corp).map(([k]) => k);
           if (!c && !pinKeys.length) return res.status(404).json({ ok: false, reason: '그 법인 항목이 없습니다.' });
           const counts = { services: c?.services.length || 0, folders: c?.folders.length || 0, folderRules: c?.folderRules.length || 0, aliases: c?.aliases.length || 0, nameRules: c?.nameRules.length || 0, pins: pinKeys.length };
           if (b.dry === true) return res.json({ ok: true, result: { corp, counts } });
+          // 화면이 본 개수와 지금 개수가 다르면 지우지 않는다(미리보기 뒤 다른 법인을 골랐거나 그 사이 바뀜 — 반증 7)
+          if (b.expect && typeof b.expect === 'object' && Object.keys(counts).some((k) => Number(b.expect[k]) !== counts[k])) return res.status(409).json({ ok: false, reason: '지울 개수가 미리보기와 다릅니다 — 다시 확인하십시오.', result: { counts } });
           if (c) { const r1 = mutateMap((d) => { delete d.corps[corp]; return { result: {} }; }); if (!r1.ok) return res.status(r1.status).json({ ok: false, reason: r1.error }); }
           if (pinKeys.length) {
             const r2 = mutatePins((d) => { for (const k of pinKeys) delete d.pins[k]; return { result: {} }; });
@@ -512,8 +534,12 @@ export function registerSvcInventory(api) {
         const g = await gather(snap, map.settings.tagCategory || '');
         const corpOfKey = new Map(g.members.map((m) => [m.key, m.corp]));
         // '고정 유지' 는 지금의 자동 판정을 함께 적는다 — 자동 판정이 다른 서비스로 바뀌면 다시 드리프트로 묻는다(5차 반증 R8).
-        const autoNow = op === 'pins.review' ? (await inventoryFor(req, snap)).inv.resolved : null;
-        let changed = 0; let skipped = 0;
+        // 화면이 본 자동 판정(expectAuto)과 지금 판정이 다르면 그 키는 검토하지 않는다 — 사람이 보지 못한 새 드리프트를 숨기지 않게(5차 1차 반증 3).
+        // pins.clear + onlyIfRedundant: 지금도 '고정 = 자동 판정' 인 키만 지운다(반증 8 — 그 사이 바뀐 고정을 지우면 소속이 조용히 바뀐다).
+        const needNow = op === 'pins.review' || (op === 'pins.clear' && b.onlyIfRedundant === true);
+        const autoNow = needNow ? (await inventoryFor(req, snap)).inv.resolved : null;
+        const expectAuto = op === 'pins.review' && b.expectAuto && typeof b.expectAuto === 'object' && !Array.isArray(b.expectAuto) ? b.expectAuto : null;
+        let changed = 0; let skipped = 0; let stale = 0;
         const r = mutatePins((d) => {
           for (const k of keys) {
             if (op === 'pins.set') {
@@ -523,10 +549,19 @@ export function registerSvcInventory(api) {
             } else {
               const p = d.pins[k];
               if (!p || p.corp !== corp) { skipped += 1; continue; }
-              if (op === 'pins.clear') { delete d.pins[k]; changed += 1; } else { p.reviewed = true; p.reviewedAuto = autoNow?.get(k)?.auto?.serviceId ?? null; changed += 1; }
+              const cur = autoNow?.get(k);
+              if (op === 'pins.clear') {
+                if (b.onlyIfRedundant === true && !(cur?.src === 'pin' && cur.redundant)) { stale += 1; continue; }
+                delete d.pins[k]; changed += 1;
+              } else {
+                const now = cur?.auto?.serviceId ?? null;
+                if (expectAuto && Object.prototype.hasOwnProperty.call(expectAuto, k) && (expectAuto[k] ?? null) !== now) { stale += 1; continue; }
+                p.reviewed = true; p.reviewedAuto = now; changed += 1;
+              }
             }
           }
-          return { result: { changed, skipped } };
+          if (!changed && stale) return { error: op === 'pins.review' ? '자동 판정이 화면과 달라졌습니다 — 새로 고쳐 다시 확인하십시오.' : '지금은 불필요한 고정이 아닙니다(자동 판정이 바뀜) — 새로 고쳐 다시 확인하십시오.', status: 409 };
+          return { result: { changed, skipped, ...(stale ? { stale } : {}) } };
         });
         if (!r.ok) return res.status(r.status).json({ ok: false, reason: r.error });
         audit(corp, `${op} ${changed}건${serviceId ? ` → ${serviceId}` : ''}${skipped ? ` · 건너뜀 ${skipped}(다른 법인·없는 키)` : ''} · ${keys.slice(0, 20).join(',')}`);

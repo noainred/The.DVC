@@ -314,7 +314,8 @@ function AttrCard({ s, d, writable, op, busy, folderOptions, onDeleted }) {
 function OrphanBar({ corp, corpName, canFleet, busy, op, onPurged }) {
   const [plan, setPlan] = useState(null);
   const [err, setErr] = useState('');
-  useEffect(() => { setPlan(null); setErr(''); }, [corp]);
+  const cur = useRef(corp);
+  useEffect(() => { cur.current = corp; setPlan(null); setErr(''); }, [corp]);
   const c = plan?.counts;
   return (
     <span className="flex wrap gap" style={{ alignItems: 'center', fontSize: 12, minWidth: 0 }}>
@@ -322,13 +323,14 @@ function OrphanBar({ corp, corpName, canFleet, busy, op, onPurged }) {
       {!canFleet ? <span className="muted">정리는 전체 범위 관리자가 합니다.</span> : !plan ? (
         <button type="button" className="logout-btn" style={btn} disabled={busy} onClick={async () => {
           setErr('');
-          try { const r = await postJson('/tools/svc-inventory/op', { op: 'corp.purge', corp, dry: true }); if (r?.ok) setPlan(r.result); else setErr(r?.reason || '개수를 읽지 못했습니다.'); }
-          catch (e) { setErr(opErrorText(e)); }
+          const asked = corp;   // 늦게 온 응답은 버린다 — 응답 전에 다른 법인을 고르면 그 법인 화면에 이 개수를 띄우지 않는다(5차 1차 반증 7)
+          try { const r = await postJson('/tools/svc-inventory/op', { op: 'corp.purge', corp: asked, dry: true }); if (cur.current !== asked) return; if (r?.ok) setPlan(r.result); else setErr(r?.reason || '개수를 읽지 못했습니다.'); }
+          catch (e) { if (cur.current === asked) setErr(opErrorText(e)); }
         }}>법인 항목 정리…</button>
       ) : (
         <>
-          <span>서비스 {c.services} · 폴더 {c.folders} · 폴더 규칙 {c.folderRules} · 별칭 {c.aliases} · 이름 규칙 {c.nameRules} · 고정 {c.pins} 를 지웁니다(설정 백업에는 남습니다).</span>
-          <button type="button" className="logout-btn" style={{ ...btn, color: 'var(--red)' }} disabled={busy} onClick={async () => { const r = await op({ op: 'corp.purge', corp }, `${corpName(corp)} 의 법인 항목을 정리했습니다.`); if (r) onPurged(); }}>지우기</button>
+          <span>서비스 {c.services} · 폴더 {c.folders} · 폴더 규칙 {c.folderRules} · 별칭 {c.aliases} · 이름 규칙 {c.nameRules} · 고정 {c.pins} 를 지웁니다. 되돌릴 수 없습니다(서비스·규칙은 설정 변경 백업에 남고, 고정은 남지 않을 수 있습니다).</span>
+          <button type="button" className="logout-btn" style={{ ...btn, color: 'var(--red)' }} disabled={busy || plan.corp !== corp} onClick={async () => { const r = await op({ op: 'corp.purge', corp, expect: plan.counts }, `${corpName(corp)} 의 법인 항목을 정리했습니다.`); if (r) onPurged(); }}>지우기</button>
           <button type="button" className="logout-btn" style={btn} disabled={busy} onClick={() => setPlan(null)}>취소</button>
         </>
       )}

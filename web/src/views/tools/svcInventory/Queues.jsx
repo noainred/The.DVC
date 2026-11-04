@@ -145,7 +145,7 @@ export function ReviewView({ corp, reloadKey, svcName, writableOf, op, busy, cor
                 <td>{writableOf(x.corp) ? (
                   <span className="flex wrap gap">
                     <button type="button" className="logout-btn" style={btn} disabled={busy} onClick={() => op({ op: 'pins.clear', corp: x.corp, keys: [x.key] }, '고정을 지웠습니다 — 자동 판정으로 돌아갑니다.')}>자동으로 되돌리기</button>
-                    <button type="button" className="logout-btn" style={btn} disabled={busy} onClick={() => op({ op: 'pins.review', corp: x.corp, keys: [x.key] }, '고정을 유지합니다 — 자동 판정이 지금과 같으면 다시 묻지 않습니다(다른 서비스로 바뀌면 다시 묻습니다).')}>고정 유지</button>
+                    <button type="button" className="logout-btn" style={btn} disabled={busy} onClick={() => op({ op: 'pins.review', corp: x.corp, keys: [x.key], expectAuto: { [x.key]: x.auto.serviceId ?? null } }, '고정을 유지합니다 — 자동 판정이 지금과 같으면 다시 묻지 않습니다(다른 서비스로 바뀌면 다시 묻습니다).')}>고정 유지</button>
                   </span>) : <span className="muted">조회 전용</span>}</td>
               </tr>
             ))}</tbody>
@@ -207,7 +207,7 @@ function RedundantCard({ q, svcName, writableOf, op, busy, corpName }) {
       <div className="flex wrap gap" style={{ padding: '0 14px 10px' }}>
         {[...byCorp.entries()].filter(([c]) => writableOf(c)).map(([c, list]) => (
           <button key={c} type="button" className="logout-btn" style={btn} disabled={busy}
-            onClick={() => op({ op: 'pins.clear', corp: c, keys: list.map((x) => x.key) }, `${corpName(c)} 의 불필요한 고정 ${list.length}건을 지웠습니다 — 자동 판정 그대로 소속됩니다.`)}>
+            onClick={() => op({ op: 'pins.clear', corp: c, keys: list.map((x) => x.key), onlyIfRedundant: true }, `${corpName(c)} 의 불필요한 고정을 지웠습니다 — 자동 판정 그대로 소속됩니다(그 사이 자동 판정이 바뀐 고정은 남깁니다).`)}>
             {corpName(c)} 불필요한 고정 {list.length}건 지우기
           </button>
         ))}

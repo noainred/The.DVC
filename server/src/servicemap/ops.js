@@ -63,8 +63,13 @@ export const CORP_OPS = {
     if (b.name !== undefined) {
       const n = cleanText(b.name, LIMITS.name, { label: '서비스명' }); if (n.error) return err(n.error);
       if (nameTaken(c, n.value, s.id)) return err(`'${n.value}' 은(는) 이 법인에 이미 있습니다`, 409);
-      const ac = aliasConflict(c, n.value, s.id); if (ac) return ac;
       const old = s.name;
+      if (!sameName(old, n.value)) {   // 이름이 실제로 바뀔 때만 — 등급·담당자만 저장할 때 옛 충돌 데이터로 막히지 않게(5차 1차 반증 5)
+        const ac = aliasConflict(c, n.value, s.id); if (ac) return ac;
+        // 옛 이름이 다른 서비스의 별칭이기도 하면(검사 전 옛 데이터) 개명하는 순간 그 별칭이 살아나 구성원이 그 서비스로 옮겨 간다(반증 4) — 사람이 먼저 정리한다.
+        const shadow = aliasOwnerOf(c, old, s.id);
+        if (shadow) return err(`옛 이름 '${old}' 은(는) 서비스 '${svcIn(c, shadow.serviceId)?.name || '?'}' 의 ${KIND_TEXT[shadow.kind] || ''} 별칭이기도 합니다 — 이름을 바꾸면 그 별칭이 살아나 '${old}' 로 걸리던 구성원이 그 서비스로 옮겨 갑니다. 소속 규칙 탭에서 그 별칭을 먼저 정리하십시오`, 409);
+      }
       s.name = n.value;
       // 개명하면 옛 이름으로 걸리던 스캔 라벨·태그 값 소속이 끊긴다(5차 반증 R3) — 화면이 영향 대수를 보이고 사람이 고른 종류만 별칭으로 남긴다.
       const kinds = Array.isArray(b.keepAlias) ? [...new Set(b.keepAlias)].filter((k) => k === 'scan' || k === 'tag') : [];

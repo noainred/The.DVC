@@ -44,7 +44,8 @@ export function faultsView(f, available) {
 /** 백업 칸 — Bareos 를 쓰지 않으면 null('해당 없음'). */
 export function backupView(b, meta) {
   if (!meta?.used) return null;
-  if (meta.unreadable) return { unknown: true };
+  // 원장을 못 읽어도 Bareos 를 쓰지 않는 법인(na 만 있는 칸)은 '해당 없음' 그대로 — 구성원 표와 같은 말(5차 1차 반증 6)
+  if (meta.unreadable) return n0(b?.na) && !n0(b?.ok) && !n0(b?.fail) && !n0(b?.none) && !n0(b?.unknown) ? { ok: 0, fail: 0, none: 0, unknown: 0, na: n0(b.na) } : { unknown: true };
   // na = 이 법인에 Bareos Director 매핑이 없는 VM(해당 없음 — 5차 검토 M1). 잡 없음(none)·모름(unknown)과 섞지 않는다.
   return { ok: n0(b?.ok), fail: n0(b?.fail), none: n0(b?.none), unknown: n0(b?.unknown), na: n0(b?.na) };
 }

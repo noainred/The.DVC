@@ -15,13 +15,18 @@
 - **고정**: 법인이 있는 구성원만(법인 없는 서버는 통합 서버 인벤토리에서 법인을 먼저 정한다). 자동 판정과 다르면 드리프트 큐. 법인이 바뀌면 무시(pinMismatch).
   '고정 유지'(`pins.review`)는 그 순간의 자동 판정을 `reviewedAuto` 로 저장하고 **그와 같은 드리프트만** 가린다 — 자동 판정이 다른 서비스로 바뀌면 다시 묻는다.
   `reviewedAuto` 가 없는 옛 표지는 같다고 보지 않는다(5차 반증 R8 — 예전에는 검토 한 번이 이후 모든 드리프트를 숨겼다).
+  화면은 '고정 유지' 에 **자기가 본 자동 판정(`expectAuto`)** 을 보내고, 지금 판정과 다르면 서버가 409 로 막는다(사람이 보지 못한 새 드리프트를 숨기지 않게 — 1차 반증 3).
+  '불필요한 고정 지우기' 는 `onlyIfRedundant` — 지금도 고정 = 자동 판정인 키만 지운다(1차 반증 8).
   고정 파일(`service-map-pins.json`)은 **설정 변경 감시 밖**(`backup/service.js CHANGE_WATCH_EXCLUDE` — 번들에는 들어간다). 빼면 고정 한 번이 '설정 변경' 백업을 만든다(R1).
   유령 키는 그 법인을 못 읽었거나 베어메탈 출처를 못 읽었으면 **판정 보류**로 따로 둔다(지우지 않는다).
-- **등록 해제된 vCenter**(스냅샷에 없는 법인 키): 법인 행 `orphan` · 쓰기 버튼 잠금(`writable:false` — 법인 쓰기는 `corpWriteAccess` 404) · 그 법인 고정은 유령이 아니라 `orphaned`.
-  지우는 길은 전체 범위 관리자 `corp.purge`(dry 로 개수 먼저 · 아직 등록된 vCenter·스냅샷 vCenter 0개면 거부) 하나다(5차 반증 R2). 스냅샷 vCenter 0개(기동 직후)면 아무것도 orphan 으로 보지 않는다.
-- **별칭 ↔ 서비스명**: 판정은 서비스명을 별칭보다 먼저 본다 — 다른 서비스 이름과 같은 별칭, 다른 서비스 별칭과 같은 서비스명은 409(R4). 개명은 옛 이름으로 걸리던 대수(`stat.byName`)를
+- **등록 해제된 vCenter** = **스냅샷에도 등록부(vcenters.json)에도 없는** 법인 키: 법인 행 `orphan` · 쓰기 버튼 잠금(`writable:false` — 법인 쓰기는 `corpWriteAccess` 404) · 그 법인 고정은 유령이 아니라 `orphaned`.
+  지우는 길은 전체 범위 관리자 `corp.purge`(dry 로 개수 먼저 · `expect` 개수가 다르면 409) 하나다(5차 반증 R2). **스냅샷만 보지 말 것** — 등록 직후 스냅샷 갱신 전·mock 데이터 소스에서
+  등록된 vCenter 를 지웠다(5차 1차 반증 1 — 재현). 스냅샷이나 등록부가 비었거나 못 읽으면 아무것도 orphan 으로 보지 않고 purge 는 409(fail-closed).
+- **별칭 ↔ 서비스명**: 판정은 서비스명을 별칭보다 먼저 본다 — 다른 서비스 이름과 같은 별칭, 다른 서비스 별칭과 같은 서비스명은 409(R4). 검사는 이름이 실제로 바뀔 때만 하고,
+  옛 이름이 다른 서비스의 별칭이기도 하면(검사 전 옛 데이터) 개명을 409 로 막는다 — 그 별칭이 살아나 구성원이 조용히 옮겨 간다(1차 반증 4·5). 개명은 옛 이름으로 걸리던 대수(`stat.byName`)를
   화면이 보이고 사람이 고른 종류만 `keepAlias` 로 별칭을 남긴다(R3 — 자동으로 쌓지 않는다).
-- **백업 칸은 법인 Director 매핑(`bareos.json sites[].vcenterId`) 기준** — 매핑 없는 법인 VM 은 `undefined`(해당 없음, `stat.backup.na`). 함대 잡 수로 판단하지 않는다(M1).
+- **백업 칸은 법인 Director 매핑(`bareos.json sites[].vcenterId`) ∪ 원장에 잡이 있는 법인 기준** — 그 밖의 법인 VM 은 `undefined`(해당 없음, `stat.backup.na`). 함대 잡 수로 판단하지 않는다(M1).
+  설정 손상은 `settingsLoadError()` 로만 안다(`loadSettings` 는 던지지 않는다) — 손상이면 모름(null)이지 해당 없음이 아니다(1차 반증 2). 범위 계정 `meta.backup` 은 자기 법인 기준(`backupMetaFor`).
 - **키**: VM = `iu:<vcenterId>:<instanceUuid>`(없으면 `vm:<moref id>`) · 베어메탈 = `st:<서비스태그>`(없으면 `fl:<fleetId sha1 16자>` — 주소 원문을 키에 싣지 않는다).
 - **의존 방향**: 도메인 모듈(`servicemap/*`)은 `routes/` 를 import 하지 않는다(arch 테스트) — 스냅샷·fleet·장애·백업 입력 수집은 라우트 층에서 한다.
 - **라우트(`routes/api/svcInventory.js`)·이 폴더를 고치면 커밋 전에 `node scripts/api-doc.mjs` · `node scripts/arch-doc.mjs`** — 줄 번호가 바뀌어 `apiDoc2563`·`audit2613h` 가 깨진다(v2.887·v2.890 두 번 전량 verify 에서 처음 잡혔다).

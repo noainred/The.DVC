@@ -159,10 +159,20 @@ test('R2: 법인 항목 정리(corp.purge) — 전체 범위 관리자 · 등록
   writeStore(mapOf({ 'vc-a': { services: [S('s1', 'ERP')] }, 'vc-gone': { services: [S('g1', 'Old'), S('g2', 'Old2')], folders: ['x'], folderRules: [{ prefix: '/Old', serviceId: 'g1' }] } }),
     { 'vm:1': { serviceId: 'g1', corp: 'vc-gone', by: 'u', at: 1 }, 'vm:2': { serviceId: 's1', corp: 'vc-a', by: 'u', at: 1 } });
   const prev = store.snapshot;
+  const regFile = path.join(tmp, 'vcenters.json');
   try {
+    fs.writeFileSync(regFile, JSON.stringify({ vcenters: [{ id: 'vc-a', name: 'vcenter-a', host: 'vc-a.corp' }, { id: 'vc-new', name: 'vcenter-new', host: 'vc-new.corp' }] }));
     store.snapshot = { ...prev, vcenters: [], vms: [], hosts: [] };
     assert.equal((await call('POST /tools/svc-inventory/op', { body: { op: 'corp.purge', corp: 'vc-gone' } })).statusCode, 409, '스냅샷이 비면 등록 해제를 판단하지 않는다');
     store.snapshot = { ...prev, vcenters: [{ id: 'vc-a', name: 'vcenter-a' }], vms: [], hosts: [] };
+    // 반증 1(재현): 등록 직후 스냅샷이 갱신되기 전 — 등록부에 있으면 '아직 등록됨'
+    sm.mutateMap((d) => { d.corps['vc-new'] = { folders: [], services: [{ id: 'n1', name: 'New', path: '', tier: 2, owner: '', note: '', globalId: '' }], folderRules: [], aliases: [], nameRules: [], tagEnabled: false }; return { result: {} }; });
+    assert.equal((await call('POST /tools/svc-inventory/op', { body: { op: 'corp.purge', corp: 'vc-new', dry: true } })).statusCode, 409, '등록부에 있는 vCenter 는 스냅샷에 아직 없어도 지우지 않는다');
+    const gi = buildInventory({ members: [], map: sm.getMap(), pins: {}, knownCorps: new Set(['vc-a', 'vc-new']) });
+    assert.equal(gi.corps.find((c) => c.vcenterId === 'vc-new').orphan, false);
+    fs.rmSync(regFile);
+    assert.equal((await call('POST /tools/svc-inventory/op', { body: { op: 'corp.purge', corp: 'vc-gone', dry: true } })).statusCode, 409, '등록부를 못 읽거나 비었으면 판단하지 않는다(fail-closed)');
+    fs.writeFileSync(regFile, JSON.stringify({ vcenters: [{ id: 'vc-a', name: 'vcenter-a', host: 'vc-a.corp' }, { id: 'vc-new', name: 'vcenter-new', host: 'vc-new.corp' }] }));
     const scoped = { username: 'op1', role: 'admin', scope: { vcenters: ['vc-a'], regions: [], writeVcenters: [] } };
     assert.equal((await call('POST /tools/svc-inventory/op', { user: scoped, body: { op: 'corp.purge', corp: 'vc-gone' } })).statusCode, 403, '범위 관리자는 못 한다');
     assert.equal((await call('POST /tools/svc-inventory/op', { body: { op: 'corp.purge', corp: 'vc-a' } })).statusCode, 409, '아직 등록된 vCenter 는 거부');
@@ -170,13 +180,39 @@ test('R2: 법인 항목 정리(corp.purge) — 전체 범위 관리자 · 등록
     const dry = await call('POST /tools/svc-inventory/op', { body: { op: 'corp.purge', corp: 'vc-gone', dry: true } });
     assert.deepEqual(dry.body.result.counts, { services: 2, folders: 1, folderRules: 1, aliases: 0, nameRules: 0, pins: 1 });
     assert.ok(sm.getMap().corps['vc-gone'], 'dry 는 지우지 않는다');
-    const real = await call('POST /tools/svc-inventory/op', { body: { op: 'corp.purge', corp: 'vc-gone' } });
+    const wrong = await call('POST /tools/svc-inventory/op', { body: { op: 'corp.purge', corp: 'vc-gone', expect: { ...dry.body.result.counts, services: 1 } } });
+    assert.equal(wrong.statusCode, 409, '미리보기 개수와 다르면 지우지 않는다(다른 법인 미리보기·그 사이 변경)');
+    assert.ok(sm.getMap().corps['vc-gone']);
+    const real = await call('POST /tools/svc-inventory/op', { body: { op: 'corp.purge', corp: 'vc-gone', expect: dry.body.result.counts } });
     assert.equal(real.statusCode, 200);
     assert.equal(sm.getMap().corps['vc-gone'], undefined);
     assert.deepEqual(Object.keys(sm.getPins().pins), ['vm:2'], '다른 법인 고정은 그대로');
     // 등록 해제 법인은 법인 쓰기가 404 — 그래서 화면이 버튼을 잠근다(writable:false)
     assert.equal((await call('POST /tools/svc-inventory/op', { body: { op: 'service.add', corp: 'vc-gone', name: 'X' } })).statusCode, 404);
-  } finally { store.snapshot = prev; }
+  } finally { store.snapshot = prev; fs.rmSync(regFile, { force: true }); }
+});
+
+test('M1(1차 반증 2): bareos.json 이 손상이면 백업은 모름(null) — 해당 없음(undefined)으로 보이지 않는다', async () => {
+  writeStore(mapOf({ 'vc-a': { services: [S('s1', 'ERP')], folderRules: [{ prefix: '/ERP', serviceId: 's1' }] } }));
+  fs.writeFileSync(path.join(tmp, 'bareos.json'), '{ "version": 2, "directors": [ 손상');
+  const prev = store.snapshot;
+  try {
+    store.snapshot = { ...prev, generatedAt: Date.now() + 7, vcenters: [{ id: 'vc-a', name: 'vcenter-a' }], hosts: [],
+      vms: [{ id: 'vm-9', vcenterId: 'vc-a', name: 'erp9', folderPath: '/ERP', powerState: 'POWERED_ON', cpuCount: 2, memMB: 4096 }] };
+    const r = await call('GET /tools/svc-inventory/members', { query: { corp: 'vc-a' } });
+    assert.equal(r.statusCode, 200, JSON.stringify(r.body));
+    assert.deepEqual(r.body.backup, { used: true, unreadable: true });
+    assert.equal(r.body.members[0].backup, null, '모름 — 손상을 \'Bareos 미사용\' 으로 읽지 않는다');
+  } finally { store.snapshot = prev; fs.rmSync(path.join(tmp, 'bareos.json'), { force: true }); }
+});
+
+test('R4(1차 반증 4·5): 옛 이름이 다른 서비스 별칭이면 개명 409(구성원이 조용히 옮겨 가지 않게) · 이름을 그대로 둔 속성 저장은 옛 충돌 데이터로 막히지 않는다', () => {
+  const d = mapOf({ A: { services: [S('a', 'Web'), S('b', 'App')], aliases: [{ kind: 'tag', value: 'Web', serviceId: 'b' }] } });   // 검사 전 옛 데이터
+  const r = CORP_OPS['service.update'](d, { corp: 'A', id: 'a', name: 'Web2', keepAlias: ['tag'] });
+  assert.equal(r.status, 409); assert.match(r.error, /서비스 'App' 의 태그 값 별칭이기도/);
+  assert.equal(CORP_OPS['service.update'](d, { corp: 'A', id: 'a', name: 'Web', owner: 'kim' }).error, undefined, '이름 그대로 — 담당자 저장은 된다');
+  assert.equal(CORP_OPS['service.update'](d, { corp: 'A', id: 'a', name: 'WEB', owner: 'kim' }).error, undefined, '대소문자만 바뀌면 같은 이름');
+  assert.equal(CORP_OPS['service.update'](d, { corp: 'A', id: 'b', name: 'Web' }).status, 409, '그 별칭과 같은 이름이 남아 있는 쪽으로의 이름 충돌은 그대로 막는다(서비스명 유일)');
 });
 
 test('R8: 검토(pins.review) 라우트는 그 순간의 자동 판정을 reviewedAuto 로 저장하고, 고정(pins.set)은 검토 표지를 지운다', async () => {
@@ -192,6 +228,19 @@ test('R8: 검토(pins.review) 라우트는 그 순간의 자동 판정을 review
     assert.equal(rv.statusCode, 200, JSON.stringify(rv.body));
     assert.equal(sm.getPins().pins['vm:vm-1'].reviewed, true);
     assert.equal(sm.getPins().pins['vm:vm-1'].reviewedAuto, 's1', '검토 당시 자동 판정(폴더 규칙 /ERP → s1)');
+    // 1차 반증 3: 화면이 본 자동 판정과 지금 판정이 다르면 검토하지 않는다(사람이 보지 못한 새 드리프트를 숨기지 않게)
+    await call('POST /tools/svc-inventory/op', { body: { op: 'pins.set', corp: 'vc-a', keys: ['vm:vm-1'], serviceId: 's2' } });
+    const stale = await call('POST /tools/svc-inventory/op', { body: { op: 'pins.review', corp: 'vc-a', keys: ['vm:vm-1'], expectAuto: { 'vm:vm-1': 's3-old' } } });
+    assert.equal(stale.statusCode, 409, JSON.stringify(stale.body));
+    assert.equal(sm.getPins().pins['vm:vm-1'].reviewed, false);
+    const ok = await call('POST /tools/svc-inventory/op', { body: { op: 'pins.review', corp: 'vc-a', keys: ['vm:vm-1'], expectAuto: { 'vm:vm-1': 's1' } } });
+    assert.equal(ok.statusCode, 200); assert.equal(sm.getPins().pins['vm:vm-1'].reviewedAuto, 's1');
+    // 1차 반증 8: '불필요한 고정 지우기' 는 지금도 고정 = 자동 판정인 키만 — s2 고정은 불필요하지 않다
+    const notRed = await call('POST /tools/svc-inventory/op', { body: { op: 'pins.clear', corp: 'vc-a', keys: ['vm:vm-1'], onlyIfRedundant: true } });
+    assert.equal(notRed.statusCode, 409); assert.ok(sm.getPins().pins['vm:vm-1'], '지우지 않았다');
+    await call('POST /tools/svc-inventory/op', { body: { op: 'pins.set', corp: 'vc-a', keys: ['vm:vm-1'], serviceId: 's1' } });
+    const red = await call('POST /tools/svc-inventory/op', { body: { op: 'pins.clear', corp: 'vc-a', keys: ['vm:vm-1'], onlyIfRedundant: true } });
+    assert.equal(red.statusCode, 200); assert.equal(sm.getPins().pins['vm:vm-1'], undefined, '고정 = 자동 판정이라 지웠다');
     await call('POST /tools/svc-inventory/op', { body: { op: 'pins.set', corp: 'vc-a', keys: ['vm:vm-1'], serviceId: 's2' } });
     assert.equal('reviewedAuto' in sm.getPins().pins['vm:vm-1'], false, '다시 고정하면 검토 표지가 없다');
   } finally { store.snapshot = prev; }
