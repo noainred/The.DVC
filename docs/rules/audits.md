@@ -2908,3 +2908,31 @@ high 0 · 반증 1(A3-01 — 경로 오독, 데모 계정은 READ_DENY 하위라
   L5 작업 로그는 화면에서 관리자만 보지만 첫 오류 줄(vCenter 주소 · FD 호스트 · 경로가 있을 수 있음)이 'Bareos 백업 실패' 메일 수신자 전원에게 간다(사용자 요청 기능 — 수신자 범위는 메일 설정에서).
 - 변이 22/22(처음 10/12 — '회신 ok 확인' · '요약 호출부' 생존 → 단언 추가 · 반증 반영 뒤 '세대 키' · 'L2' · 'L3(ops)' · 'L6' 생존 → 세대만 다른 단언 + 배선 소스 단언).
 - server/src/bareos/CLAUDE.md 크기 상한(15000B) 때문에 옮긴 문구: 실환경 미확인 목록의 '25.x `.jobs` 의 enabled 칸(master 소스 기준 — 없으면 다시 끄기를 하지 않는다)'.
+
+## v2.890 Bareos 사전 점검 — FD → vCenter:443 매일 점검 · SD 디스크 여유 감시(2026-11-04 · 시안 docs/design/bareos-precheck · 사용자 컨펌 '구현해' · 검증 표준)
+
+- 배경: v2.877 사용자 로그(JobId 32)의 실패 원인은 FD 가 vCenter:443 에 못 붙은 것이었는데, 백업이 실패한 **뒤에야** 알았다. SD 디스크가 차는 것도 실패 메일로만 알았다.
+  사용자 결정(시안 README §8): 매일 20:00 · 기본 켬 · 디스크 경고 15%/14일 · 위험 5%/3일 · 메일은 나빠질 때 1통 + 회복 1통 + 일일 요약 절 · 현황 KPI '확인 필요' 칸은 그대로(띠 + 표 열만).
+- 규칙(`bareos/health.js` · `healthProbe.js` · `ops.health` · 시험 `bareosHealth2890` 서버 11 · 웹 9):
+  ① **판정은 `judgeCorp` 하나**(웹 `bareosHealthText.js` 는 글자만 고른다). 항목 dir · vc · thumb · disk, 법인 판정은 bad·warn 중 가장 나쁜 것 · 없으면 **vc 나 disk 가 ok 일 때만 정상**, 아니면 모름
+  (중앙 직접 법인이 지문만 같다고 '정상' 이 되던 것을 시험 중에 고쳤다). 모름·참고(info)는 수에 넣지 않는다.
+  ② **vCenter 접속은 엣지 시점만 판정**한다 — 포탈 완전 설치(v2.844)는 FD · SD 가 엣지 노드에 같이 있어서 엣지에서 잰 값이 FD 시점이다. 중앙 직접 Director 는 중앙에서 잰 값을 '참고' 로만 보인다(FD 시점이 아니다).
+  접속은 `tls.connect(vcserver, 443)` 핸드셰이크까지만(아무것도 보내지 않는다 · 인증서 검증 없이 SHA1 지문만) · SSRF 는 IP 리터럴 `ipBlockReason` + 이름 `lookup: ssrfLookup`(해석한 주소로 접속) · RFC1918 허용.
+  ③ **디스크는 엣지 + Director 주소가 그 서버일 때만**(`isThisHost` — 루프백 · 인터페이스 주소 · 호스트 이름) `statfs`. 다른 서버의 경로를 이 서버에서 재면 엉뚱한 디스크다. 경로는 원장 잡의 `plan.volumeDir`(`volumeDirIssue` 통과)
+  아니면 기본 `/var/lib/bareos/storage` · 형식 `^\/[A-Za-z0-9._/-]{1,200}$` + `..` 거부 · 최대 8개. 며칠 남았나는 최근 7일 일별 표본 3개 이상의 선형 기울기(> 0 일 때만 — 아니면 null, '모름').
+  ④ **`trigger: 'timer'`** — 인증 정지된 Director 에 닿지 않는다(자동 재시도 금지 규칙). 화면의 '지금 점검' 만 manual. 동시 6 Director(`poolSettled`) · Director 마다 진행 중 1개 · 시한 `HEALTH_DEADLINE_MS`(엣지 인출 + 회신 90초 + 여유).
+  ⑤ **지문 기준은 첫 관측**이고 바뀌면 경고 · 기준은 `POST /health/:vcenterId/thumb-accept`(조회 밖 404 → 쓰기 밖 403 · 감사)로만 바꾼다 — 점검이 스스로 기준을 옮기지 않는다.
+  ⑥ 메일(`bareos-precheck` 종류)은 **전이에만**: 법인마다 `notified` 커서 · 나빠짐(worse) 1통 · 회복(recover) 1통 · 나아짐(불가 → 경고)은 메일 없이 커서만 · **모름은 커서를 옮기지 않는다** · 첫 점검은 커서 null 을 정상으로 본다.
+  보내기 실패는 10분 뒤 다시(`nextTry`) · 메일 종류가 꺼졌거나 보낼 행이 없으면 커서만 옮긴다. 일일 요약 메일(`digest.js`)은 상태 파일만 읽어 절을 붙인다(Director 에 다시 묻지 않는다 · 정상 법인은 뺀다).
+  ⑦ 상태 파일 `bareos-health-state.json`: 원자적 쓰기 · 법인 키 300 · 이력 7 · 디스크 표본 Director+경로마다 하루 1개 30일. 비밀(콘솔 비밀번호 · vCenter 계정)은 싣지 않는다 — 오류는 코드 문자열만(원문 메시지 없음).
+  ⑧ 엣지 회신은 `edgeResult.js VALUE.health` 로 정제(from 두 값 · vcs·disks 8개 · host 253 · path 200 · 코드 `[A-Za-z_]{1,24}` · 지문은 SHA1 콜론 모양만 · 바이트는 음수 아닌 수 · diskSkipped 세 값).
+  ⑨ 라우트: GET `/tools/bareos-backup/health`(관리자 · 조회 범위로 법인을 거른다 · 설정 · 마지막 실행 · 메일 상태는 전체 범위만) · POST `/health/run`(vcenterId 없으면 전 법인 — 전체 범위만 · 있으면 `bareosAccess` 쓰기) ·
+  GET·PUT `/health/settings`(fullScopeOnly · 쓰기는 fullWriteOnly · 감사). 데모 계정은 실행 403 · 데모 모드는 `demoHealth` 합성(사람이 등록한 Director 에 닿지 않는다). 엣지에서는 스케줄도 실행 라우트도 돌지 않는다(409).
+- 변이 26/27 — 생존 1건 '모름은 커서를 옮기지 않음' 은 등가 변이(그 줄을 지워도 `RANK.unknown` 이 undefined 라 뒤의 크기 비교가 모두 거짓 — 같은 null)로 판단했다. 처음 생존한 '인증 정지 문구' · '전 법인 점검 범위 사유' 는 단언을 더해 잡았다.
+- 반증 1인 확정분: (검토 결과를 받은 뒤 적는다)
+- 남긴 것(정직 기록): ① FD 가 엣지 노드에 없는 법인(수동 설치 Bareos)은 엣지 시점이 FD 시점이 아니다 — 같은 망이라고 **추정**하고 판정한다(화면 '엣지 노드에서').
+  ② 지문 변경이 실제로 플러그인 오류('certificate verify failed' 류)로 이어지는지는 실환경 미확인(추정 — FD INI 의 `vcthumbprint` 를 쓰는 경우에만 해당).
+  ③ 며칠 남았나는 직선 외삽이다(백업 주기 · 보관 정리로 톱니 모양이면 크게 어긋날 수 있다 — 화면은 '약 N일' 로만 적고 '추정' 이라는 말은 없다). ④ v2.845 관리 스캔이 읽은 Storage 경로는 쓰지 않는다(원장 잡 `volumeDir` · 기본 경로만).
+  ⑤ Veeam B&R 은 범위 밖. ⑥ '정상' 은 백업 성공을 보장하지 않는다 — vCenter 계정 · 권한 · 스냅샷 · 플러그인 오류는 보지 않는다(화면 문구 `HEALTH_LIMIT_TEXT`).
+- server/src/bareos/CLAUDE.md 크기 상한(15000B) 때문에 줄인 줄의 원문(v2.830): 
+  - **v2.830 백업 그룹**(`groups`·`groupSchedule`·`groupRunner`·`jobLocks` · `bareosGroups2830`): 스케줄은 포탈이 실행(그룹 잡은 Director 스케줄 없이 등록) · 회차는 **보내기 전에** 한 틱 한 번의 쓰기로 기록 · VM 은 그룹 하나 · 같은 Director 는 차례로 · 대상 잠금 공용. v2.831 보관 개수(`groupRetention` — 카탈로그 삭제)는 실행이 끝난 뒤 기준 Full 앞만·순서 어긋나면 안 지움 · 넓히는 저장은 본인 OTP(v2.831.1). 전문은 audits.md 'Bareos v2.830'·'v2.831' 절.
