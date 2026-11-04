@@ -96,6 +96,17 @@ export function defaultPlan(bundle, target) {
 }
 
 /**
+ * v2.876(2026-11-04 사용자 화면 — 사전 점검 '이미 설치된 Bareos ✗' 에서 막다른 길): 포탈에 Director 가 없는 법인(새 설치)의 서버에 Bareos 가 이미 있으면
+ *   그 자리에서 '초기화 후 재설치로 진행' 을 고를 수 있다. 서버(targets.js resetTarget)가 같은 바꿈을 한다 — 이 서버가 다른 법인의 Director 로 등록돼 있으면 서버가 거부한다.
+ */
+export const canResetExisting = (pre, target) => target?.mode === 'install' && target?.can === true && pre?.mode === 'install'
+  && (pre?.items || []).some((i) => i.key === 'bareos' && i.status === 'bad');
+/** 화면이 쓰는 대상 — 계획에 resetExisting 이 켜졌으면 재설치로 본다(서버 resetTarget 과 같은 바꿈 · 기존 재설치 대상은 그대로). */
+export const effectiveTarget = (t, plan) => (t && t.mode === 'install' && plan?.resetExisting === true ? { ...t, mode: 'reinstall', resetUnregistered: true } : t);
+/** '초기화 후 재설치로 진행' 을 고른 계획(초기화 확인 칸 기본값은 재설치와 같다 — 카탈로그 기본 삭제 · 볼륨 기본 보존 · 확인 체크 필요). */
+export const resetExistingPlan = (bundle, target) => ({ ...defaultPlan(bundle, { ...target, mode: 'reinstall' }), resetExisting: true });
+
+/**
  * v2.846 D-2: 실행 중 작업을 못 읽었을 때의 동의 — 서버 사전 점검의 조치 문구(precheck.js RUNNING_UNKNOWN_OK_LABEL)와 **같은 글자**(시험이 대조).
  * 동의는 그 회차에만(서버 작업 기록의 시도 행) — 계획 값이 아니라 다시 하기로 이어지지 않는다.
  */
@@ -113,6 +124,7 @@ export function planBody(p, { pre = null, target = null } = {}) {
   const n = (v) => (v === '' || v == null ? v : Number(v));
   return {
     ...(p.runningUnknownOk === true && runningUnknown(pre, target) ? { runningUnknownOk: true } : {}),
+    ...(p.resetExisting === true ? { resetExisting: true } : {}),   // v2.876 포탈 미등록 Bareos 를 지우고 설치(서버가 다시 판정)
     pyvmomi: p.pyvmomi, pyvmomiFix: !!p.pyvmomiFix, volumeDir: String(p.volumeDir || '').trim(), webui: p.webui !== false,
     pools: { fullDays: n(p.pools?.fullDays), incrDays: n(p.pools?.incrDays), maxVolumeGB: n(p.pools?.maxVolumeGB) },
     schedule: { fullDay: p.schedule?.fullDay, time: p.schedule?.time }, consoleName: String(p.consoleName || '').trim(), directorName: String(p.directorName || '').trim(),

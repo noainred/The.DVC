@@ -78,3 +78,19 @@ export function sshCredsFor(targetId) {
   if (!t) return null;
   return { host: t.host, port: Number(t.port) || 22, username: t.username, password: t.password || undefined, privateKey: t.privateKey || undefined, passphrase: t.passphrase || undefined };
 }
+
+const lcHost = (s) => String(s ?? '').trim().toLowerCase();
+/**
+ * v2.876(2026-11-04 사용자 화면 — 사전 점검 '이미 설치된 Bareos ✗' 에서 막다른 길): 포탈에 Director 가 등록되지 않은 법인의 엣지 노드에 Bareos 가 이미 있으면
+ *   (사람이 직접 설치 · 이전 설치가 남김) 대상 표는 '새 설치' 이고 사전 점검이 막는데, 조치 문구가 가리키는 '초기화 후 재설치' 는 Director 가 있어야 열렸다.
+ *   이제 화면이 resetExisting 을 보내면 그 대상만 재설치(0단계 초기화 → 설치 → 4단계가 Director 를 새로 등록)로 다룬다. 지우는 규칙 · 확인은 기존 재설치와 같다.
+ *   ⚠ 다른 법인의 등록을 지우지 않는다: 이 서버(SSH 주소 · 러너가 읽은 서버 주소)가 이미 어떤 Director 로 등록돼 있으면 거부한다(그 법인에서 재설치).
+ * @returns {object} 대상 행(재설치로 바꿨으면 mode 'reinstall' · resetUnregistered true)
+ */
+export function resetTarget(t, body, settings, hostAddr = '') {
+  if (!(body && body.resetExisting === true) || !t || t.mode !== 'install') return t;
+  const hosts = [lcHost(t.sshHost), lcHost(hostAddr)].filter(Boolean);
+  const other = (settings?.directors || []).find((d) => hosts.includes(lcHost(d.host)));
+  if (other) throw Object.assign(new Error(`이 서버의 Bareos 는 Director ‘${other.name}’ 로 포탈에 등록돼 있습니다 — 다른 법인의 등록을 지우지 않습니다. 그 Director 의 법인에서 '초기화 후 재설치' 를 고르세요.`), { code: 'invalid' });
+  return { ...t, mode: 'reinstall', resetUnregistered: true };
+}

@@ -33,7 +33,7 @@ import { pickBundle } from './bundle.js';
 import { normPlan, planEnv, planSummary, STEPS, REMOTE_ROOT, RUN_DIR, BUNDLES_DIR, UNIT, FD_CLIENT, DIR_STORAGE, LAST_REMOTE_STEP, LAST_STEP } from './plan.js';
 import { precheckScript, parsePrecheck, judgePrecheck } from './precheck.js';
 import { parseErrFile, classifyFailure, scrubOutput } from './causes.js';
-import { listInstallTargets, sshCredsFor } from './targets.js';
+import { listInstallTargets, sshCredsFor, resetTarget } from './targets.js';
 import { tarName } from './bundleDoc.js';
 import { registryHosts } from '../vcHost.js';
 
@@ -151,9 +151,10 @@ const secretsOf = (creds) => [creds?.password, creds?.passphrase].filter(Boolean
 
 /* ───────── 사전 점검(읽기만) ───────── */
 export async function runPrecheck({ vcenterId, body = {} }) {
-  const t = _targets({ knownHostAddrs: knownHostAddrs() }).find((x) => x.vcenterId === vcenterId);
-  if (!t) throw fail('not-found', 'vCenter 를 찾을 수 없습니다.');
-  if (!t.can) throw fail('invalid', t.why);
+  const t0r = _targets({ knownHostAddrs: knownHostAddrs() }).find((x) => x.vcenterId === vcenterId);
+  if (!t0r) throw fail('not-found', 'vCenter 를 찾을 수 없습니다.');
+  if (!t0r.can) throw fail('invalid', t0r.why);
+  const t = resetTarget(t0r, body, loadSettings());
   const bundle = await _pick('');
   let plan = null;
   try { plan = bundle ? normPlan({ ...body, reset: body.reset || { ack: true } }, { contents: bundle.contents, mode: t.mode, corpName: t.vcenterName }) : null; } catch { plan = null; }
@@ -168,15 +169,17 @@ export async function runPrecheck({ vcenterId, body = {} }) {
   }
   const facts = parsePrecheck(out.text);
   const judged = judgePrecheck(facts, { mode: t.mode, bundle: bundle?.contents || null, plan });
+  if (t.resetUnregistered) resetTarget(t0r, body, loadSettings(), judged.hostAddr);   // 러너가 읽은 서버 주소로 한 번 더(다른 법인 Director 면 던진다)
   const ledger = t.director ? listJobs().filter((x) => !x.demo && x.vcenterId === vcenterId).length : 0;
-  return { at: Date.now(), ms: Date.now() - t0, target: t, mode: t.mode, ...judged, ledgerTargets: ledger, bundle: bundle ? { version: bundle.version, contents: bundle.contents, size: bundle.size } : null };
+  return { at: Date.now(), ms: Date.now() - t0, target: t, mode: t.mode, ...(t.resetUnregistered ? { resetUnregistered: true } : {}), ...judged, ledgerTargets: ledger, bundle: bundle ? { version: bundle.version, contents: bundle.contents, size: bundle.size } : null };
 }
 
 /* ───────── 시작 ───────── */
 export async function startInstall({ vcenterId, body = {}, by = '' }) {
-  const t = _targets({ knownHostAddrs: knownHostAddrs() }).find((x) => x.vcenterId === vcenterId);
-  if (!t) throw fail('not-found', 'vCenter 를 찾을 수 없습니다.');
-  if (!t.can) throw fail('invalid', t.why);
+  const t0r = _targets({ knownHostAddrs: knownHostAddrs() }).find((x) => x.vcenterId === vcenterId);
+  if (!t0r) throw fail('not-found', 'vCenter 를 찾을 수 없습니다.');
+  if (!t0r.can) throw fail('invalid', t0r.why);
+  const t = resetTarget(t0r, body, loadSettings());
   const lockWhy = setupBusyReason('', t.sshHost) || (t.director?.id ? setupBusyReason(t.director.id) : '');
   if (lockWhy) throw fail('conflict', lockWhy);
   const busy = load().find((j) => isActive(j) && (j.vcenterId === vcenterId || (j.sshHost && j.sshHost === t.sshHost)));
@@ -195,6 +198,7 @@ async function startInner(t, vcenterId, body, by) {
   const pre = await runPrecheck({ vcenterId, body });
   if (pre.blocked) throw fail('precheck', `사전 점검에 ✗ 항목이 있어 시작하지 않았습니다: ${pre.items.filter((i) => i.status === 'bad').map((i) => i.label).join(', ')}`, { precheck: pre });
   if (!pre.hostAddr) throw fail('precheck', '서버 주소를 읽지 못해 시작하지 않았습니다.');
+  if (t.resetUnregistered && !pre.resetUnregistered) throw fail('precheck', '사전 점검이 초기화 후 재설치로 돌지 않았습니다 — 다시 점검하세요.');
   const resetVolumeDirs = plan.reset?.volumes ? (pre.volumes || []).filter((v) => !v.missing).map((v) => v.path) : [];
   const id = `bi_${crypto.randomBytes(6).toString('hex')}`;
   const firstStep = plan.mode === 'reinstall' ? 0 : 1;
@@ -204,6 +208,7 @@ async function startInner(t, vcenterId, body, by) {
     bundle: { version: bundle.version, sha256: bundle.sha256, size: bundle.size, bareosVersion: bundle.contents.bareosVersion },
     install: bundle.contents.install,
     directorId: t.director?.id || '', existingDirector: !!t.director, createdDirector: false, createdSite: false,
+    ...(t.resetUnregistered ? { resetUnregistered: true } : {}),   // v2.876 포탈 미등록 Bareos 를 지우고 설치(4단계가 Director 를 새로 등록)
     by, createdAt: Date.now(), updatedAt: Date.now(), status: 'running', phase: 'upload',
     steps: Object.fromEntries(STEPS.filter((s) => s.n >= firstStep).map((s) => [s.n, { status: 'pending' }])),
     // v2.846 D-2: '확인했음 — 실행 중 작업 확인 없이 진행' 동의는 그 회차(시도 행)에만 — 계획(plan)에 넣지 않아 다시 하기로 이어지지 않는다

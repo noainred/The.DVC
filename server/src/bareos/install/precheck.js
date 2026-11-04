@@ -196,7 +196,8 @@ export function judgePrecheck(f, { mode = 'install', bundle = null, plan = null 
   add('tools', '필수 명령', toolMiss.length ? 'bad' : (Object.keys(f.tools).length ? 'ok' : 'unknown'), toolMiss.length ? `없음: ${toolMiss.join(', ')}` : 'systemd-run · dnf · rpm · ss 있음', toolMiss.length ? 'OS 기본 패키지를 먼저 설치하세요.' : '');
   if (mode === 'install') {
     add('bareos', '이미 설치된 Bareos', installed ? 'bad' : 'ok', installed ? `${bareosPkgs.map((p) => `${p.name} ${p.version}`).slice(0, 6).join(' · ') || '패키지 없음'}${f.etcFiles != null ? ` · /etc/bareos 파일 ${f.etcFiles}개` : ''}` : 'bareos 패키지 · /etc/bareos 없음',
-      installed ? '기존 설치를 덮어쓰지 않습니다 — 대상 표에서 ‘초기화 후 재설치’ 를 고르세요.' : '');
+      // v2.876: 예전 문구는 '대상 표에서 초기화 후 재설치' 였지만 포탈에 Director 가 없는 법인은 그 선택지가 없었다(막다른 길) — 이 화면의 단추 · 서버 스크립트를 가리킨다
+      installed ? '기존 설치를 덮어쓰지 않습니다 — 아래 ‘초기화 후 재설치로 진행’ 으로 지우고 설치하거나, 서버에서 bareos-reset.sh 로 지운 뒤 다시 점검하세요.' : '');
   } else {
     add('bareos', '지울 기존 Bareos', installed ? 'warn' : 'ok', installed ? `${bareosPkgs.length}개 패키지 · /etc/bareos 파일 ${f.etcFiles ?? 0}개 — 지우기 전에 /etc/bareos 를 엣지 안에 tar 로 보관합니다` : '설치된 Bareos 가 없습니다(초기화할 것 없음)', '');
     // v2.846 D-2: 못 읽음(unknown)은 막지 않지만 러너 0단계도 멈춘다 — 계획의 '확인했음 — 실행 중 작업 확인 없이 진행' 동의가 있어야 진행한다(조치 문구가 그 동의를 가리킨다)
