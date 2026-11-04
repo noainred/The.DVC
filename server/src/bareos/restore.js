@@ -113,6 +113,14 @@ export function restorePlan({ mode, job, snapshot, newVm = {}, confirmName = '',
   if (ni) return { ok: false, issue: ni };
   if (vms.some((v) => String(v.name).toLowerCase() === name.toLowerCase())) return { ok: false, issue: `같은 vCenter 에 ‘${name}’ VM 이 이미 있습니다 — 다른 이름을 쓰세요.` };
   const kv = { ...baseKv.kv, vmname: name, restore_powerstate: 'off' };
+  const hosts = (snapshot?.hosts || []).filter((h) => String(h.vcenterId) === String(job.vcenterId));
+  // 재해 복구(DR 1차): 다시 설치한 vCenter 의 데이터센터 이름이 백업 때와 다르면 바꿔 보낸다. 폴더는 백업 때 경로 그대로 — 플러그인이 없으면 만든다
+  //   (bareos-fd-vmware find_or_create_vm_folder · 23~25 원문). 데이터센터는 만들지 않으므로 인벤토리에 있는 이름만 받는다(호스트의 vcDatacenter).
+  const dcTo = String(newVm?.dc ?? '').trim();
+  if (dcTo) {
+    if (!hosts.some((h) => h.vcDatacenter === dcTo)) return { ok: false, issue: `데이터센터 ‘${dcTo}’ 이(가) 이 vCenter 인벤토리에 없습니다(호스트의 데이터센터 이름 기준).` };
+    kv.dc = dcTo;
+  }
   const ds = String(newVm?.datastore ?? '').trim();
   if (ds) {
     const known = (snapshot?.datastores || []).some((d) => String(d.vcenterId) === String(job.vcenterId) && d.name === ds);
@@ -122,18 +130,17 @@ export function restorePlan({ mode, job, snapshot, newVm = {}, confirmName = '',
   const cluster = String(newVm?.cluster ?? '').trim();
   const esx = String(newVm?.esxHost ?? '').trim();
   if (cluster && esx) return { ok: false, issue: '클러스터와 호스트 중 하나만 고르세요.' };
-  const hosts = (snapshot?.hosts || []).filter((h) => String(h.vcenterId) === String(job.vcenterId));
   if (cluster) {
-    if (!hosts.some((h) => h.cluster === cluster)) return { ok: false, issue: `클러스터 ‘${cluster}’ 이(가) 이 vCenter 인벤토리에 없습니다.` };
+    if (!hosts.some((h) => h.cluster === cluster && (!dcTo || h.vcDatacenter === dcTo))) return { ok: false, issue: `클러스터 ‘${cluster}’ 이(가) 이 vCenter 인벤토리${dcTo ? `의 데이터센터 ‘${dcTo}’` : ''}에 없습니다.` };
     kv.restore_cluster = cluster;
   }
   if (esx) {
-    if (!hosts.some((h) => h.name === esx)) return { ok: false, issue: `호스트 ‘${esx}’ 이(가) 이 vCenter 인벤토리에 없습니다.` };
+    if (!hosts.some((h) => h.name === esx && (!dcTo || h.vcDatacenter === dcTo))) return { ok: false, issue: `호스트 ‘${esx}’ 이(가) 이 vCenter 인벤토리${dcTo ? `의 데이터센터 ‘${dcTo}’` : ''}에 없습니다.` };
     kv.restore_esxhost = esx;
   }
   const r = restorePluginOptions(kv, pluginName);
   if (r.issue) return { ok: false, issue: r.issue };
-  return { ok: true, pluginOptions: r.value, target: { name, ...(ds ? { datastore: ds } : {}), ...(cluster ? { cluster } : {}), ...(esx ? { esxHost: esx } : {}), powerOn: false } };
+  return { ok: true, pluginOptions: r.value, target: { name, ...(dcTo ? { dc: dcTo } : {}), ...(ds ? { datastore: ds } : {}), ...(cluster ? { cluster } : {}), ...(esx ? { esxHost: esx } : {}), powerOn: false } };
 }
 
 const okRow = (r) => r && r.type === 'B' && (r.state === 'ok' || r.state === 'warning');

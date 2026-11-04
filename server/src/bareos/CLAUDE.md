@@ -64,7 +64,7 @@
 - **v2.833·834 진행 현황판**(`liveStatus`·`liveParse` · `bareosLive2833`): 화면이 열린 동안만 `status client=`·`status director` · Director 마다 시한 · 흐름은 법인마다 · 모름은 null · 멈춤 의심은 FD 조회 성공일 때만. 전문 audits.md 'v2.833'·'v2.834'(정책 수집 'v2.839'·'v2.840').
 - 실환경 미확인(추정 — `tools/bareos-probe.js` 로 확인할 것): Node↔Director TLS-PSK 협상 · 잡 수준 FdPluginOptions 병합(복원엔 안 옴 — v2.866 실측) ·
   `.bvfs_get_jobids` JSON 모양 · Profile ACL 지시어 이름 · `list jobs days=N` · 25.x `.jobs` 의 enabled 칸(master 소스 기준 — 없으면 다시 끄기를 하지 않는다) · Migration 행의 시작 시각.
-- **v2.828 조회 · v2.843 법인 로컬**(pruneJobs · `siteAgent`) · **v2.861 묶음 복원 · v2.862 검증 · 요약**: audits.md. **v2.874**: pluginoptions 는 literalQuotes · 보낸 뒤 끊김 = 결과 모름 기록 · `restoreHeld` — audits.md.
+- **v2.828 조회 · v2.843 법인 로컬**(pruneJobs · `siteAgent`) · **v2.861 묶음 복원 · v2.862 검증 · 요약**: audits.md. **v2.874**: literalQuotes · 결과 모름 기록 · `restoreHeld`. **재해 복구**(`drPlan`): 규칙은 서버 — audits.md.
 - **v2.846~848**(`bareosBugs2846a`·`c`·`2847a`~`c`·`bareosConfigurePerm2848`): 보관 정리 새 쪽부터 · 옛 TLS 정지 이관 · 등록 도중 끊김 = 결과 모름 · configure 권한 · 포탈 리소스 판정은 `configurePerm.js` 하나 — audits.md.
 - **v2.867 중단 · 취소**(`cancelState`·`bareosCancel2867`): 판정은 `cancelState.js` 하나 · `cancelJobs` = 단건 `cancelOne` · 그룹 중단은 덩어리 사이에서만 · 중단 회차는 보관 정리 안 함 — audits.md 'v2.867'.
 - **v2.872 묶음 로그**(`logFirstError`·`ops.logs` · `bareosErrLog2872`): 첫 오류 줄만 · 15건 · 이 잡의 실행 검사 · 범위 밖 = 없는 대상 — audits.md 'v2.872'.
