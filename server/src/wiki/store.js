@@ -449,6 +449,16 @@ export function backrefs(issueKey, access = FULL_ACCESS) {
   return load().pages.filter((p) => canSeeSpace(p.spaceId, access) && (p.issueKeys || []).includes(key)).map(metaOf).sort((a, b) => b.updatedAt - a.updatedAt).slice(0, 50);
 }
 
+/** 이슈 키 → 그 키를 적은 문서 제목(보이는 스페이스만 · 키마다 20개) — 이슈 검색식 `doc` 필드(v2.882). */
+export function issueDocIndex(access = FULL_ACCESS) {
+  const m = new Map();
+  for (const p of load().pages) {
+    if (!canSeeSpace(p.spaceId, access)) continue;
+    for (const k of p.issueKeys || []) { const a = m.get(k); if (!a) m.set(k, [p.title]); else if (a.length < 20) a.push(p.title); }
+  }
+  return m;
+}
+
 /** 대문(시안 ①) — 자동 영역은 손으로 적지 않고 여기서 모은다. */
 export function homeOf(spaceId, { access = FULL_ACCESS, me = '', now = Date.now() } = {}) {
   if (!canSeeSpace(spaceId, access)) throw notFound();

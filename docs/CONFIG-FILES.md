@@ -1,6 +1,6 @@
 # 설정·데이터 파일 레퍼런스 (자동 생성)
 
-포탈이 `CONFIG_DIR`(설치본 기본 `/etc/vmware-portal`) 아래에 만드는 파일 **257개**의 목록이다.
+포탈이 `CONFIG_DIR`(설치본 기본 `/etc/vmware-portal`) 아래에 만드는 파일 **259개**의 목록이다.
 시계열 DB 는 `db-location.json` 이 가리키는 `dbDir` 로 옮길 수 있다.
 
 - 생성: `node scripts/config-doc.mjs` (마지막 갱신 2026-11-04)
@@ -144,8 +144,10 @@
 | `isidu-settings.json` | 설정 | 아이실론 디렉터리 사용량 조사 대상(v2.736 — 아이실론·경로·주기·실행 노드·보존일. 비밀 없음) | ✅ | ✅ | ✅ | isidu/settings.js |
 | `isidu.db` | DB | 아이실론 디렉터리 사용량 이력 DB(v2.736). 파일: `<dbDir>/isidu.db` |  |  | ✅ | isidu/db.js |
 | `issue-autocreate.json` | 설정 | 파트 장애 → 이슈 자동 등록 설정(v2.880 — 켜기 · 부품 종류 × 장비군 칸(끔/fault/fault+warn) · 우선순위 · 라벨 · 제목 틀 · 폭주 묶음 · 하루 상한 · 해소 처리 · 법인 예외. 비밀 없음) | ✅ | ✅ | ✅ | issues/autoCreate.js |
+| `issue-filters.json` | 설정 | 이슈 저장 필터(v2.882 — 사람마다 검색식 50개 · 공유 여부. 비밀 없음) | ✅ | ✅ | ✅ | issues/filters.js |
 | `issue-notify-state.json` | 설정 | 이슈 기한 알림 기록(상태, v2.871) |  |  |  | (외부/설치 스크립트) |
 | `issue-settings.json` | 설정 | 이슈 트래커 설정(v2.871 — 자동 할당 규칙 · 알림 켜기·이벤트 · 사람별 메일 주소. 비밀 없음) | ✅ | ✅ | ✅ | issues/settings.js |
+| `issue-sprints.json` | 설정 | 이슈 스프린트(v2.882 — 이름 · 기간(포탈 날짜) · 목표 · 상태 예정/진행 중/끝남. 비밀 없음) | ✅ | ✅ | ✅ | issues/sprints.js |
 | `issues.json` | 설정 | 이슈 트래커 이슈·댓글·이력(v2.864 — 로그인 사용자가 쓰는 사용자 데이터. 비밀 없음) | ✅ | ✅ | ✅ | issues/store.js |
 | `link-check.db` | DB | 통신 점검 로그 **3단 DB**(v2.552). 파일: `<dbDir>/link-check.db` |  |  | ✅ | linkcheck/db.js |
 | `linkcheck-settings.json` | 설정 | 통신 점검 설정(v2.552). 파일: `CONFIG_DIR/linkcheck-settings.json` | ✅ | ✅ | ✅ | linkcheck/settings.js |
@@ -309,6 +311,8 @@
 - **`ipscan-agent-state.json`** — 상태 파일(백업 감시 제외). 지우면 다음 기동의 첫 확인이 주기와 무관하게 한 번 다시 스캔한다
 - **`bmusage-central.json`** — 중앙이 배포를 끄거나 이 엣지를 제외하면 지워지고 엣지 로컬 설정으로 돌아간다
 - **`issues.json`** — 디바운스 비동기 원자 쓰기 + 손상 보존 + 합계 상한(ISSUES_MAX_BYTES, 기본 16MB). 변경 감시 지문에서는 빠지고(이슈마다 change 백업 금지) 백업 번들에는 들어간다. 지우면 모든 이슈가 사라지고 키 번호(ISS-n)가 1부터 다시 매겨진다
+- **`issue-sprints.json`** — 손상이면 보존하고 빈 목록으로 읽는다(관리자 화면이 알린다). 이슈의 sprintId 는 이 파일의 id 를 가리킨다 — 지우면 이슈의 스프린트 표시가 id 로만 남는다. 끝난 스프린트는 회고로 남는다(200개 상한)
+- **`issue-filters.json`** — 손상이면 보존하고 빈 목록으로 읽는다. 지우면 저장 필터만 사라진다(이슈는 그대로)
 - **`wiki.json`** — 디바운스 비동기 원자 쓰기 + 손상 보존 + 합계 상한(WIKI_MAX_BYTES, 기본 8MB). 판은 문서마다 200개(본문은 최근 30판)까지. 변경 감시 지문에서는 빠지고(저장마다 change 백업 금지) 백업 번들에는 들어간다. 지우면 모든 문서가 사라지고 번호(W-n)가 1부터 다시 매겨진다
 - **`issue-autocreate.json`** — 손상이면 보존하고 기본값(꺼짐)으로 읽는다 — 이슈 › 설정 › 자동 등록 화면이 그 사실을 말한다. 지우면 자동 등록이 꺼진다(이미 만든 이슈는 그대로)
 - **`issue-settings.json`** — 손상이면 보존하고 기본값(자동 할당·알림 꺼짐)으로 읽는다 — 이슈 › 설정 화면이 그 사실을 말한다. 지우면 자동 할당·알림이 꺼지고 메일 주소 표가 비어 이슈 메일이 나가지 않는다

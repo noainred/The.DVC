@@ -13,15 +13,17 @@ import { STable } from '../../components/STable.jsx';
 import { Loading, ErrorBox } from '../../components/primitives.jsx';
 import Select from '../../components/Select.jsx';
 import DataList from '../../components/DataList.jsx';
+import { Avatar, TypeTag, PrioTag, StatusChip, Due, ProgressLine } from './issueParts.jsx';
+import { SprintView, EpicsView, FiltersView, EpicSprintBox, ChildrenBox, BulkEditBar, useEpics, epicColor } from './IssuesPlus.jsx';
 import { useHashTab } from '../../hooks/useHashTab.js';
 import {
   STATUS_ORDER, STATUS_TEXT, TYPE_TEXT, PRIORITY_TEXT, statusText, typeText, priorityText, dueInfo, timeText, dateText, initialOf, colorIndexOf,
   groupByStatus, filterRows, myWork, loadPct, LOAD_CAP, toDateInput, fromDateInput, parseLabels, saveFailText, persistNote, historyText,
-  peopleOptions, makeLatest, vcName, vcenterOptions, vcenterRequired, notifyStatusText, AUTO_LEVEL_TEXT, autoKindRows, autoOnCount, autoStatusText, simulateText, originText, progressOf, staleInfo, myRequests, activityText, issueLink, STALE_DAYS,
+  peopleOptions, makeLatest, vcName, vcenterOptions, vcenterRequired, notifyStatusText, childText, sprintName, AUTO_LEVEL_TEXT, autoKindRows, autoOnCount, autoStatusText, simulateText, originText, progressOf, staleInfo, myRequests, activityText, issueLink, STALE_DAYS,
 } from './issueText.js';
 import { wikiHash, statusText as wikiStatusText } from '../wiki/wikiText.js';
 
-const SUBS = [['board', '보드'], ['list', '목록'], ['mine', '내 작업'], ['activity', '활동']];
+const SUBS = [['board', '보드'], ['list', '목록'], ['mine', '내 작업'], ['activity', '활동'], ['sprint', '스프린트'], ['epics', '에픽'], ['filters', '필터']]; // v2.882 스프린트 · 에픽 · 필터
 /** v2.871: 설정 탭은 전체 범위 관리자에게만 보인다(서버가 같은 기준으로 막는다). 해시 키는 늘 유효 — 권한이 없으면 안내만. */
 const SETTINGS_SUB = ['settings', '설정'];
 const EMPTY_FILTERS = Object.freeze({ q: '', assignee: '', priority: '', type: '', status: '', vcenterId: '', mine: false });
@@ -60,7 +62,16 @@ export default function Issues() {
   const [creating, setCreating] = useState(false); // false | 'issue' | 'request'
   const [note, setNote] = useState('');
   const [filters, setFilters] = useState(EMPTY_FILTERS);
+  const [sprints, setSprints] = useState(null);
   const latest = useLatest();
+  const latestS = useLatest();
+  // v2.882 스프린트 목록 — 카드 · 상세 · 일괄 편집이 이름을 쓴다(못 읽으면 빈 목록 · 화면은 id 를 그대로 보인다)
+  const loadSprints = useCallback(() => {
+    const k = latestS.next();
+    fetchJson('/issues/sprints').then((r) => { if (latestS.isLatest(k)) setSprints(r.sprints || []); }).catch(() => { if (latestS.isLatest(k)) setSprints([]); });
+  }, [latestS]);
+  useEffect(() => { loadSprints(); }, [loadSprints]);
+  const metaX = useMemo(() => (meta ? { ...meta, sprintList: sprints || [] } : null), [meta, sprints]);
   // 상세를 열거나 닫으면 새 이슈 입력 창은 닫는다(두 편집 맥락이 한 화면에 겹치지 않게 — Chromium 판독에서 발견).
   useEffect(() => { setCreating(false); }, [openKey]);
 
@@ -73,9 +84,10 @@ export default function Issues() {
   useEffect(() => { load(); }, [load]);
 
   const onWritten = useCallback((r) => { setNote(persistNote(r?.persist)); load(); }, [load]);
+  const [epics, reloadEpics] = useEpics(!!meta?.canWrite);
 
   if (err && !list) return <ErrorBox error={err} />;
-  if (!list || !meta) return <Loading label="이슈" />;
+  if (!list || !meta || !metaX) return <Loading label="이슈" />;
 
   const me = meta.me;
   const canWrite = !!meta.canWrite;
@@ -110,13 +122,16 @@ export default function Issues() {
       {sub === 'settings' && !openKey
         ? (meta.canSettings ? <><IssueSettings /><AutoCreateSettings /></> : <div className="card muted">이슈 설정은 전체 범위(vCenter 제한 없는) 관리자만 볼 수 있습니다.</div>)
         : openKey
-        ? <IssueDetail key={openKey} issueKey={openKey} meta={meta} onBack={() => openIssue('')} onWritten={onWritten} />
+        ? <IssueDetail key={openKey} issueKey={openKey} meta={metaX} onBack={() => openIssue('')} onOpen={openIssue} onWritten={(r) => { onWritten(r); reloadEpics(); }} />
         : (
           <>
-            {sub !== 'mine' && sub !== 'activity' && <FilterBar filters={filters} setF={setF} meta={meta} sub={sub} onReset={() => setFilters(EMPTY_FILTERS)} />}
+            {(sub === 'board' || sub === 'list') && <FilterBar filters={filters} setF={setF} meta={meta} sub={sub} onReset={() => setFilters(EMPTY_FILTERS)} />}
             {meta.scoped && <div className="muted" style={{ fontSize: 12 }}>범위가 지정된 계정이라 내 법인(vCenter)의 이슈만 보입니다 — 법인이 없는 공용 이슈는 보이지 않습니다.</div>}
-            {sub === 'board' && <BoardView rows={shown} meta={meta} onOpen={openIssue} recentDays={Math.round((meta.recentDoneMs || 0) / 86400000)} />}
-            {sub === 'list' && <ListView rows={shown} total={rows.length} meta={meta} onOpen={openIssue} onWritten={onWritten} />}
+            {sub === 'board' && <BoardView rows={shown} meta={metaX} onOpen={openIssue} recentDays={Math.round((meta.recentDoneMs || 0) / 86400000)} />}
+            {sub === 'list' && <ListView rows={shown} total={rows.length} meta={metaX} epics={epics} onOpen={openIssue} onWritten={onWritten} />}
+            {sub === 'sprint' && <SprintView meta={metaX} onOpen={openIssue} onWritten={onWritten} reloadSprints={loadSprints} />}
+            {sub === 'epics' && <EpicsView meta={metaX} onOpen={openIssue} onWritten={(r) => { onWritten(r); reloadEpics(); }} />}
+            {sub === 'filters' && <FiltersView meta={metaX} onOpen={openIssue} onWritten={onWritten} />}
             {sub === 'mine' && <MyWorkView rows={rows} stats={stats} meta={meta} onOpen={openIssue} onWritten={onWritten} />}
             {sub === 'activity' && <ActivityView meta={meta} onOpen={openIssue} />}
           </>
@@ -136,22 +151,6 @@ function PersistWarn({ persist }) {
   );
 }
 
-function Avatar({ name, size = 26 }) {
-  const none = !name;
-  return (
-    <span className={`iss-av${none ? ' none' : ` c${colorIndexOf(name)}`}`} style={{ width: size, height: size, fontSize: Math.round(size * 0.42) }}
-      title={none ? '미할당' : name} aria-label={none ? '미할당' : name}>{initialOf(name)}</span>
-  );
-}
-
-const TypeTag = ({ t }) => <span className={`iss-type t-${t}`}>{typeText(t)}</span>;
-const PrioTag = ({ p }) => <span className={`iss-prio ${p}`}>{priorityText(p)}</span>;
-const StatusChip = ({ s }) => <span className={`iss-chip s-${s}`}>{statusText(s)}</span>;
-function Due({ r }) {
-  const d = dueInfo(r.dueAt, { done: r.status === 'done' });
-  if (!d) return <span className="iss-due muted">기한 없음</span>;
-  return <span className={`iss-due ${d.tone}`}>{d.text}</span>;
-}
 
 function FilterBar({ filters, setF, meta, sub, onReset }) {
   const people = peopleOptions(meta.people);
@@ -217,13 +216,16 @@ function BoardView({ rows, meta, onOpen, recentDays }) {
 
 function IssueCard({ r, meta, onOpen }) {
   return (
-    <button type="button" className={`iss-card${r.status === 'done' ? ' done' : ''}`} onClick={() => onOpen(r.key)}>
+    <button type="button" className={`iss-card${r.status === 'done' ? ' done' : ''}${r.epicKey ? ' has-epic' : ''}`} style={r.epicKey ? { borderLeftColor: epicColor(r.epicKey) } : undefined} onClick={() => onOpen(r.key)}>
       <span className="iss-card-top">
         <TypeTag t={r.type} />
         <span className="iss-key">{r.key}</span>
         {r.blocked && <span className="iss-chip s-blocked" title={r.blocked.reason}>보류</span>}
         {(meta?.vcenters || []).length > 0 && <span className="iss-vc" title="법인(vCenter)">{vcName(meta, r.vcenterId)}</span>}
         {r.origin && <span className="iss-auto" title={originText(r.origin)}>자동</span>}
+        {childText(r) && <span className="iss-subn">{childText(r)}</span>}
+        {r.parentKey && r.parentKey !== r.epicKey && <span className="iss-subn">하위 · {r.parentKey}</span>}
+        {r.sprintId && <span className="iss-subn" title="스프린트">{sprintName(meta?.sprintList, r.sprintId)}</span>}
       </span>
       <span className="iss-card-title">{r.title}</span>
       <ProgressLine r={r} />
@@ -240,7 +242,7 @@ function IssueCard({ r, meta, onOpen }) {
 
 /* ───────────── 목록 + 일괄 할당 ───────────── */
 
-function ListView({ rows, total, meta, onOpen, onWritten }) {
+function ListView({ rows, total, meta, epics, onOpen, onWritten }) {
   const [sel, setSel] = useState(() => new Set());
   const [to, setTo] = useState('');
   const [busy, setBusy] = useState(false);
@@ -278,6 +280,7 @@ function ListView({ rows, total, meta, onOpen, onWritten }) {
           <button className="btn" onClick={() => setSel(new Set())}>선택 해제</button>
         </div>
       )}
+      {canWrite && picked.length > 0 && <BulkEditBar keys={picked} meta={meta} epics={epics} onDone={(r) => { setSel(new Set()); onWritten(r); }} />}
       {msg && <div className="banner">{msg}</div>}
       {rows.length === 0
         ? <div className="muted" style={{ padding: 16 }}>{total ? '조건에 맞는 이슈가 없습니다.' : '아직 이슈가 없습니다.'}</div>
@@ -299,6 +302,16 @@ function ListView({ rows, total, meta, onOpen, onWritten }) {
                     <button type="button" className="iss-link" onClick={() => onOpen(r.key)}>{r.title}</button>
                     {r.blocked && <span className="iss-chip s-blocked" style={{ marginLeft: 6 }} title={r.blocked.reason}>보류</span>}
                     {r.origin && <span className="iss-auto" style={{ marginLeft: 6 }} title={originText(r.origin)}>자동</span>}
+                    {/* v2.882 에픽 · 하위 · 스프린트는 제목 아래 작은 표시 — 열로 두면 1440px 에서 표가 본문 폭을 넘어 기한 · 갱신이 가로 스크롤 뒤로 숨었다(Chromium 판독).
+                        에픽 · 스프린트로 정렬하려면 필터 화면의 결과 표(열이 따로 있다)를 쓴다. */}
+                    {(r.epicKey || r.sprintId || childText(r) || (r.parentKey && r.parentKey !== r.epicKey)) && (
+                      <span className="iss-row-tags">
+                        {r.epicKey && <span className="iss-epic-tag" style={{ borderColor: epicColor(r.epicKey) }}>{r.epicKey}</span>}
+                        {r.parentKey && r.parentKey !== r.epicKey && <span className="iss-subn">하위 · {r.parentKey}</span>}
+                        {childText(r) && <span className="iss-subn">{childText(r)}</span>}
+                        {r.sprintId && <span className="iss-subn" title="스프린트">{sprintName(meta.sprintList, r.sprintId)}</span>}
+                      </span>
+                    )}
                   </td>
                   <td data-sort={r.vcenterId ? vcName(meta, r.vcenterId) : '~'}>{r.vcenterId ? <span className="iss-vc-cell" title={vcName(meta, r.vcenterId)}>{vcName(meta, r.vcenterId)}</span> : <span className="muted">공용</span>}</td>
                   <td data-sort={STATUS_ORDER.indexOf(r.status)}><StatusChip s={r.status} /></td>
@@ -402,22 +415,6 @@ function MiniList({ title, rows, onOpen, empty, showAssignee = false }) {
 /* ───────────── 진행 공유(v2.871) ───────────── */
 
 /** 진행률 막대 + 멈춤 표시. 보고가 없으면 막대를 그리지 않는다(0% 로 그리지 않는다 — 없음과 0 은 다르다). */
-function ProgressLine({ r, compact = false }) {
-  const pct = progressOf(r);
-  const st = r.status === 'done' ? null : staleInfo(r);
-  if (pct == null && !st) return compact ? <span className="muted">—</span> : null;
-  return (
-    <span className={`iss-prog${compact ? ' compact' : ''}`}>
-      {pct != null && (
-        <>
-          <span className="iss-prog-bar" role="img" aria-label={`진행률 ${pct}%`}><span style={{ width: `${pct}%` }} /></span>
-          <span className="iss-prog-n">{pct}%</span>
-        </>
-      )}
-      {st && <span className="iss-stale" title={`진행 중·검토 중인데 ${st.days}일 동안 상태·진행률·댓글 갱신이 없습니다`}>{st.text}</span>}
-    </span>
-  );
-}
 
 /** 내 요청 진행 현황 — 내가 등록한 이슈를 누가 맡아 어디까지 왔는지(최근 완료 포함). */
 function MyRequests({ rows, me, recentDays, onOpen }) {
@@ -522,19 +519,22 @@ function ProgressBox({ it, canWrite, busy, act, noteMax }) {
       {pct != null
         ? <span className="iss-prog big"><span className="iss-prog-bar"><span style={{ width: `${pct}%` }} /></span><b>{pct}%</b></span>
         : <span className="muted">보고 없음</span>}
+      {it.progressAuto && <span className="muted" style={{ fontSize: 11.5 }}>{it.type === 'epic' ? '소속 이슈' : '하위 작업'} {it.childDone}/{it.childCount} 완료에서 계산 — {it.type === 'epic' ? '이슈를 모두 빼면' : '하위 작업을 모두 지우면'} 다시 직접 입력할 수 있습니다.</span>}
       {it.progressNote && <span className="iss-prog-note">{it.progressNote}</span>}
       {it.progressAt && <span className="muted" style={{ fontSize: 11.5 }}>{it.progressBy} · {timeText(it.progressAt)}</span>}
       {st && <span className="iss-stale">{st.text} — {STALE_DAYS}일 넘게 갱신이 없습니다</span>}
       {canWrite && !open && <button className="btn" disabled={busy} onClick={start}>진행 상황 갱신</button>}
       {canWrite && open && (
         <div className="iss-prog-edit">
-          <label className="iss-inline">진행률(%)
-            <input className="input" type="number" min={0} max={100} step={5} value={v} onChange={(e) => setV(e.target.value)} aria-label="진행률" />
-          </label>
+          {!it.progressAuto && (
+            <label className="iss-inline">진행률(%)
+              <input className="input" type="number" min={0} max={100} step={5} value={v} onChange={(e) => setV(e.target.value)} aria-label="진행률" />
+            </label>
+          )}
           <textarea className="input" rows={2} value={note} maxLength={noteMax} onChange={(e) => setNote(e.target.value)} placeholder="진행 메모 — 예: ESXi 3대 중 2대 완료, 내일 마무리" aria-label="진행 메모" />
           {bad && <span className="iss-due over" style={{ fontSize: 12 }}>0~100 의 정수를 넣으세요(비우면 ‘보고 없음’).</span>}
           <div className="flex" style={{ gap: 6 }}>
-            <button className="btn primary" disabled={busy || bad} onClick={() => act(() => postJson(`/issues/${it.key}/progress`, { progress: n, note }), '진행 상황을 갱신했습니다.').then((ok) => { if (ok) setOpen(false); })}>저장</button>
+            <button className="btn primary" disabled={busy || (bad && !it.progressAuto)} onClick={() => act(() => postJson(`/issues/${it.key}/progress`, it.progressAuto ? { note } : { progress: n, note }), '진행 상황을 갱신했습니다.').then((ok) => { if (ok) setOpen(false); })}>저장</button>
             <button className="btn" disabled={busy} onClick={() => setOpen(false)}>취소</button>
           </div>
         </div>
@@ -642,7 +642,7 @@ function IssueEditor({ meta, initial = null, requestOnly = false, onCancel, onSa
 
 /* ───────────── 상세 ───────────── */
 
-function IssueDetail({ issueKey, meta, onBack, onWritten }) {
+function IssueDetail({ issueKey, meta, onBack, onOpen, onWritten }) {
   const [x, setX] = useState(null);
   const [err, setErr] = useState(null);
   const [editing, setEditing] = useState(false);
@@ -681,6 +681,16 @@ function IssueDetail({ issueKey, meta, onBack, onWritten }) {
     } catch (e) { setMsg(saveFailText({ reason: e.message })); return false; } finally { setBusy(false); }
   };
   const people = peopleOptions(meta.people, it.assignee);
+  // v2.882: 남은 하위 작업(에픽이면 소속 이슈)이 있으면 서버가 409(open-children)로 묻는다 — 확인을 받고 한꺼번에 완료로 다시 보낸다
+  const statusAct = (st) => act(async () => {
+    const r = await postJson(`/issues/${it.key}/status`, { status: st });
+    if (r?.ok === false && r.code === 'open-children') {
+      const list = (r.children || []).slice(0, 10).map((c) => `· ${c.key} ${c.title}`).join('\n');
+      if (window.confirm(`${r.reason}\n\n${list}${(r.children || []).length > 10 ? '\n…' : ''}\n\n모두 완료로 바꾸고 이 이슈도 완료할까요? (취소하면 아무것도 바꾸지 않습니다)`)) return postJson(`/issues/${it.key}/status`, { status: st, closeChildren: true });
+      return { ok: false, reason: '완료를 취소했습니다 — 하위 작업은 그대로입니다.' };
+    }
+    return r;
+  });
   const nextStatus = { backlog: 'todo', todo: 'progress', progress: 'review', review: 'done' }[it.status];
   const mineComment = (c) => !!x.isMod || c.author === x.me;
 
@@ -696,17 +706,24 @@ function IssueDetail({ issueKey, meta, onBack, onWritten }) {
                 <div className="iss-detail-meta"><TypeTag t={it.type} /><span className="iss-key">{it.key}</span><span className="muted">· {it.reporter} 등록 · {timeText(it.createdAt)}</span>
                   {it.origin && <><span className="iss-auto">{originText(it.origin)}</span><a href="#/tools/part-faults" style={{ fontSize: 12 }}>파트 장애 화면 →</a></>}
                 </div>
-                <h2 className="iss-title">{it.title}</h2>
+                {(it.epic || (it.parent && it.parent.type !== 'epic')) && (
+                  <div className="iss-crumb">
+                    {it.epic && <button type="button" className="iss-link" onClick={() => onOpen(it.epic.key)}><span className="iss-epic-dot" style={{ background: epicColor(it.epic.key) }} />에픽 {it.epic.key} {it.epic.title}</button>}
+                    {it.parent && it.parent.type !== 'epic' && <>{it.epic && ' › '}<button type="button" className="iss-link" onClick={() => onOpen(it.parent.key)}>{it.parent.key} {it.parent.title}</button></>}
+                    <span> ›</span>
+                  </div>
+                )}
+                <h2 className="iss-title">{it.title}{it.sprint && <span className="iss-subn" title="스프린트">{it.sprint.name}</span>}</h2>
                 <div className="iss-actions">
                   {canWrite
                     ? (
                       <>
                         <label className="iss-inline">상태
-                          <Select className="select" value={it.status} sort={false} disabled={busy} onChange={(e) => act(() => postJson(`/issues/${it.key}/status`, { status: e.target.value }))}>
+                          <Select className="select" value={it.status} sort={false} disabled={busy} onChange={(e) => statusAct(e.target.value)}>
                             {STATUS_ORDER.map((s) => <option key={s} value={s}>{STATUS_TEXT[s]}</option>)}
                           </Select>
                         </label>
-                        {nextStatus && <button className="btn primary" disabled={busy} onClick={() => act(() => postJson(`/issues/${it.key}/status`, { status: nextStatus }))}>{STATUS_TEXT[nextStatus]}(으)로</button>}
+                        {nextStatus && <button className="btn primary" disabled={busy} onClick={() => statusAct(nextStatus)}>{STATUS_TEXT[nextStatus]}(으)로</button>}
                         {it.blocked
                           ? <button className="btn" disabled={busy} onClick={() => act(() => postJson(`/issues/${it.key}/block`, { on: false }))}>보류 해제</button>
                           : <button className="btn" disabled={busy} onClick={() => setBlockOpen((v) => !v)}>보류로 표시</button>}
@@ -726,6 +743,7 @@ function IssueDetail({ issueKey, meta, onBack, onWritten }) {
                 {it.blocked && <div className="banner warn" style={{ whiteSpace: 'normal' }}><b>보류</b> — {it.blocked.reason} <span className="muted">({it.blocked.by} · {timeText(it.blocked.at)})</span></div>}
                 {msg && <div className="banner">{msg}</div>}
                 <div className="iss-body">{it.body || <span className="muted">설명이 없습니다.</span>}</div>
+                <ChildrenBox it={it} meta={meta} canWrite={canWrite} busy={busy} act={act} onOpen={onOpen} />
               </>
             )}
         </div>
@@ -785,6 +803,7 @@ function IssueDetail({ issueKey, meta, onBack, onWritten }) {
           )}
         </div>
         <ProgressBox it={it} canWrite={canWrite} busy={busy} act={act} noteMax={meta.limits?.progressNote || 300} />
+        <EpicSprintBox it={it} meta={meta} canWrite={canWrite} busy={busy} act={act} onOpen={onOpen} />
         <div className="iss-prop-grid">
           <div className="iss-prop"><span className="iss-prop-l">우선순위</span><PrioTag p={it.priority} /></div>
           <div className="iss-prop"><span className="iss-prop-l">기한</span><Due r={it} /></div>

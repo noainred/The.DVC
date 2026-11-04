@@ -8,11 +8,11 @@ import { dayStamp } from '../../dayStamp.js';
 
 export const STATUS_ORDER = Object.freeze(['backlog', 'todo', 'progress', 'review', 'done']);
 export const STATUS_TEXT = Object.freeze({ backlog: '백로그', todo: '할 일', progress: '진행 중', review: '검토', done: '완료' });
-export const TYPE_TEXT = Object.freeze({ incident: '장애', task: '작업', request: '요청', improve: '개선' });
+export const TYPE_TEXT = Object.freeze({ incident: '장애', task: '작업', request: '요청', improve: '개선', epic: '에픽' });
 export const PRIORITY_TEXT = Object.freeze({ p0: 'P0 긴급', p1: 'P1 높음', p2: 'P2 보통', p3: 'P3 낮음' });
 export const FIELD_TEXT = Object.freeze({
   created: '생성', status: '상태', assignee: '담당자', priority: '우선순위', dueAt: '기한', type: '유형', title: '제목', body: '본문',
-  blocked: '보류', labels: '라벨', component: '컴포넌트', watchers: '관찰자',
+  blocked: '보류', labels: '라벨', component: '컴포넌트', watchers: '관찰자', parent: '상위', sprint: '스프린트',
 });
 export const DAY_MS = 24 * 3600_000;
 /** '곧 마감' 으로 보는 기간(서버 통계의 dueSoon 과 같은 2일). */
@@ -179,6 +179,8 @@ export function historyText(h) {
   if (f === 'progress') return `${who}진행률 ${h.from !== '' && h.from != null ? `${h.from}%` : '없음'} → ${h.to !== '' && h.to != null ? `${h.to}%` : '없음'}${h.note ? ` — ${h.note}` : ''}`;
   if (f === 'body') return `${who}본문 수정`;
   if (f === 'title') return `${who}제목 ‘${h.from}’ → ‘${h.to}’`;
+  if (f === 'parent') return h.to ? `${who}상위 ${h.from || '없음'} → ${h.to}` : `${who}상위에서 뺌(${h.from || '—'})`;
+  if (f === 'sprint') return `${who}스프린트 ${h.note || `${h.from || '백로그'} → ${h.to || '백로그'}`}`;
   const label = FIELD_TEXT[f] || f || '';
   return `${who}${label} ${h.from || '—'} → ${h.to || '—'}`;
 }
@@ -320,3 +322,120 @@ export function originText(o) {
   const dev = o.deviceName || o.deviceId || '';
   return `자동 · 파트 장애${dev ? ` · ${dev}` : ''}${o.parts > 1 ? ` · 부품 ${o.parts}` : ''}`;
 }
+
+/* ───────────── v2.882 에픽 · 하위 작업 · 스프린트 · 검색식(시안 ⑥⑦⑧) ───────────── */
+
+/** 빠른 필터 — 검색식 한 줄씩(서버가 해석한다 · 화면은 식만 보낸다). */
+export const QUICK_FILTERS = Object.freeze([
+  { id: 'mine', name: '내 열린 이슈', query: 'assignee = me() AND status != done' },
+  { id: 'myreq', name: '내가 등록한 요청', query: 'reporter = me() AND type = request AND status != done' },
+  { id: 'overdue', name: '기한 초과', query: 'due < now() AND status != done' },
+  { id: 'sprint', name: '이번 스프린트', query: 'sprint = active()' },
+  { id: 'stale', name: '3일 갱신 없음', query: 'status in (progress, review) AND updated < -3d' },
+  { id: 'unassigned', name: '미할당', query: 'assignee is empty AND status != done' },
+]);
+export const QUERY_FIELD_TEXT = Object.freeze({
+  key: '키', title: '제목', text: '제목 · 본문 · 댓글', type: '유형', status: '상태', priority: '우선순위', assignee: '담당자', reporter: '보고자', watcher: '관찰자',
+  vcenter: '법인', label: '라벨', component: '컴포넌트', epic: '에픽', parent: '상위', sprint: '스프린트', progress: '진행률', due: '기한', created: '생성',
+  updated: '갱신', closed: '완료', doc: '관련 문서',
+});
+const OP_TEXT = { '=': '=', '!=': '≠', in: '∈', 'not in': '∉', '>': '>', '>=': '≥', '<': '<', '<=': '≤', '~': '포함', 'is empty': '비어 있음', 'is not empty': '비어 있지 않음' };
+const CODE_TEXT = { status: STATUS_TEXT, type: TYPE_TEXT, priority: PRIORITY_TEXT };
+
+/** 칩 값 한 개 — me() · now() · active() · 상대 날짜 · 코드 값을 사람 말로. */
+export function chipValueText(field, v, { me = '', sprintName = null, vcName = null } = {}) {
+  const s = String(v ?? '');
+  if (s === 'me()') return me ? `나(${me})` : '나';
+  if (s === 'now()') return '오늘';
+  if (s === 'active()') return '진행 중 스프린트';
+  const rel = /^([+-])(\d{1,4})([dw])$/i.exec(s);
+  if (rel) { const n = Number(rel[2]) * (rel[3].toLowerCase() === 'w' ? 7 : 1); return `${n}일 ${rel[1] === '-' ? '전' : '뒤'}`; }
+  if (CODE_TEXT[field]?.[s.toLowerCase()]) return CODE_TEXT[field][s.toLowerCase()];
+  if (field === 'sprint' && sprintName) return sprintName(s) || s;
+  if (field === 'vcenter' && vcName) return vcName(s) || s;
+  return s;
+}
+/** 칩 글 — '담당자 = 나(kim)' · '상태 ∈ 진행 중 · 검토' · 묶음은 '묶음 식'. */
+export function chipText(c, opts = {}) {
+  if (!c || c.op === 'expr' || !c.field) return '묶음 식(괄호 · OR)';
+  const f = QUERY_FIELD_TEXT[c.field] || c.field;
+  const op = OP_TEXT[c.op] || c.op;
+  if (c.op === 'is empty' || c.op === 'is not empty') return `${f} ${op}`;
+  return `${f} ${op} ${(c.values || []).map((v) => chipValueText(c.field, v, opts)).join(' · ')}`;
+}
+/**
+ * 칩 하나 지우기 — 맨 위 AND 의 칸만 칩이므로 남은 칸의 원문을 ' AND ' 로 다시 잇고 정렬 부분(orderStart 뒤)을 그대로 붙인다(한 식 — 두 벌이 아니다).
+ * i 가 범위 밖이면 원래 식.
+ */
+export function removeChip(query, clauses, i, orderStart = -1) {
+  const q = String(query || '');
+  const cs = Array.isArray(clauses) ? clauses : [];
+  if (!(i >= 0 && i < cs.length)) return q;
+  const kept = cs.filter((_, j) => j !== i).map((c) => q.slice(c.start, c.end).trim()).filter(Boolean);
+  const order = orderStart >= 0 ? q.slice(orderStart).trim() : '';
+  return [kept.join(' AND '), order].filter(Boolean).join(' ');
+}
+/** 오류 밑줄 — 식을 [{ text, bad, title }] 조각으로(첫 오류 구간만 밑줄). */
+export function errorSegments(query, errors) {
+  const q = String(query || '');
+  const e = Array.isArray(errors) ? errors[0] : null;
+  if (!e) return [{ text: q, bad: false }];
+  const a = Math.max(0, Math.min(q.length, Number(e.start) || 0));
+  let b = Math.max(a, Math.min(q.length, Number(e.end) || a));
+  if (b === a) b = Math.min(q.length, a + 1);
+  const title = `${e.msg}${e.hint ? ` — ${e.hint}` : ''}`;
+  const out = [];
+  if (a > 0) out.push({ text: q.slice(0, a), bad: false });
+  out.push({ text: a < q.length ? q.slice(a, b) : ' ', bad: true, title });
+  if (b < q.length) out.push({ text: q.slice(b), bad: false });
+  return out;
+}
+
+export const SPRINT_STATE_TEXT = Object.freeze({ planned: '예정', active: '진행 중', closed: '끝남' });
+/** 'MM-DD ~ MM-DD · 남은 n일' — 끝난 스프린트는 '끝남'. */
+export function sprintRangeText(s) {
+  if (!s) return '—';
+  const md = (d) => String(d || '').slice(5) || '—';
+  const tail = s.state === 'closed' ? '끝남' : s.overdue ? '기간 지남' : s.daysLeft != null ? `남은 ${s.daysLeft}일` : '';
+  return `${md(s.startDay)} ~ ${md(s.endDay)}${tail ? ` · ${tail}` : ''}`;
+}
+export function sprintName(sprints, id) {
+  if (!id) return '';
+  const s = (Array.isArray(sprints) ? sprints : []).find((x) => x.id === id);
+  return s ? s.name : id;
+}
+/** 고를 수 있는 스프린트 — 끝나지 않은 것 + 지금 값(끝났어도 보이게). */
+export function sprintOptions(sprints, current = '') {
+  return (Array.isArray(sprints) ? sprints : []).filter((s) => s.state !== 'closed' || s.id === current);
+}
+
+/**
+ * 번다운 선 — days = [{ day, remaining|null }](null = 아직 오지 않은 날 — 그리지 않는다).
+ * 기준선은 '가장 많이 남았던 수 → 마지막 날 0'(첫날 값으로 그으면 스프린트 중간에 이슈를 넣었을 때 바닥에 붙어 쓸모가 없다 — Chromium 판독).
+ * 반환: { actual: 'x,y …', ideal: 'x,y x,y', max, last } — 값이 하나도 없으면 actual 은 ''.
+ */
+export function burnPoints(days, w, h, pad = 6) {
+  const list = Array.isArray(days) ? days : [];
+  const vals = list.map((d) => (Number.isFinite(d?.remaining) ? d.remaining : null));
+  const known = vals.filter((v) => v != null);
+  const max = Math.max(1, ...known, 0);
+  const n = Math.max(1, list.length - 1);
+  const x = (i) => pad + ((w - pad * 2) * i) / n;
+  const y = (v) => pad + (h - pad * 2) * (1 - v / max);
+  const pts = [];
+  vals.forEach((v, i) => { if (v != null) pts.push(`${x(i).toFixed(1)},${y(v).toFixed(1)}`); });
+  const peak = known.length ? Math.max(...known) : null;
+  const ideal = peak ? `${x(0).toFixed(1)},${y(peak).toFixed(1)} ${x(list.length - 1).toFixed(1)},${y(0).toFixed(1)}` : '';
+  const lastIdx = vals.reduce((m, v, i) => (v != null ? i : m), -1);
+  return { actual: pts.join(' '), ideal, max, last: lastIdx >= 0 ? vals[lastIdx] : null, lastIdx };
+}
+/** 하위 작업 표시 — '하위 2/4'. 자식이 없으면 ''. */
+export function childText(r) {
+  return r && r.childCount > 0 ? `${r.type === 'epic' ? '이슈' : '하위'} ${r.childDone}/${r.childCount}` : '';
+}
+/** 에픽 고르기 — 이 이슈의 법인과 맞는 에픽(같은 법인 또는 공용 에픽)만, 자기 자신은 빼고. */
+export function epicOptions(epics, issue) {
+  const vc = issue?.vcenterId || '';
+  return (Array.isArray(epics) ? epics : []).filter((e) => e.type === 'epic' && e.key !== issue?.key && (!e.vcenterId || e.vcenterId === vc));
+}
+

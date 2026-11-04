@@ -4807,6 +4807,34 @@ export const DB_GUIDE_DATA = {
       "web/src/views/issues/Issues.jsx"
     ]
   },
+  "issue-sprints.json": {
+    "title": "이슈 스프린트",
+    "summary": "이슈 › 스프린트 보드의 스프린트(이름 · 기간 · 목표 · 상태)를 담는 작은 파일입니다. 이슈가 어느 스프린트에 들어 있는지는 이슈(issues.json)의 sprintId 가 가리킵니다.",
+    "stores": ["스프린트마다 id · 이름 · 목표 · 시작일 · 종료일(포탈 날짜) · 상태(예정 · 진행 중 · 끝남) · 만든/고친 사람과 시각 · 끝낸 사람 · 끝낼 때 메모"],
+    "writer": "이슈 › 스프린트 화면에서 전체 범위 운영자 · 관리자가 만들고 고치고 끝낼 때만 씁니다.",
+    "usedBy": ["이슈 › 스프린트 보드(번다운 · 사람별)", "이슈 검색식의 sprint 필드(sprint = active() · sprint = \"이름\")"],
+    "retention": "끝낸 스프린트도 회고로 남습니다(자동으로 지우지 않습니다 — 200개 상한).",
+    "growth": "스프린트 수만큼 — 작습니다.",
+    "shrink": "줄일 필요가 없습니다.",
+    "ifDeleted": "스프린트 목록이 비고, 이슈의 스프린트 표시는 id 로만 남습니다. 손상되면 ‘issue-sprints.json.corrupt.<시각>’ 으로 보존하고 빈 목록으로 동작합니다. 포탈 백업에 들어 있습니다.",
+    "cautions": ["번다운은 따로 적재하지 않고 이슈 이력에서 계산합니다 — 이 파일만 되살려도 번다운은 그대로입니다."],
+    "settings": [],
+    "sources": ["server/src/issues/sprints.js", "server/src/routes/api/issues.js"]
+  },
+  "issue-filters.json": {
+    "title": "이슈 저장 필터",
+    "summary": "이슈 검색식 한 줄에 이름을 붙여 저장한 것입니다(사람마다 · 공유 여부).",
+    "stores": ["필터마다 id · 만든 사람 · 이름 · 검색식 · 공유 여부 · 만든/고친 시각"],
+    "writer": "이슈 › 필터 화면에서 운영자 · 관리자가 저장할 때 씁니다. 공유는 전체 범위 계정만 켤 수 있습니다.",
+    "usedBy": ["이슈 › 필터(내 필터 · 공유 필터)"],
+    "retention": "만든 사람이 지울 때까지 남습니다(공유 필터는 전체 범위 관리자도 지울 수 있습니다).",
+    "growth": "사람마다 50개 상한 — 작습니다.",
+    "shrink": "줄일 필요가 없습니다.",
+    "ifDeleted": "저장 필터만 사라집니다(이슈는 그대로). 손상되면 ‘issue-filters.json.corrupt.<시각>’ 으로 보존하고 빈 목록으로 동작합니다.",
+    "cautions": ["범위 계정이 공유 필터를 열면 결과는 자기 범위로 다시 걸러집니다 — 필터가 범위를 넓히지 않습니다."],
+    "settings": [],
+    "sources": ["server/src/issues/filters.js", "server/src/issues/query.js", "server/src/routes/api/issues.js"]
+  },
   "wiki.json": {
     "title": "위키 — 스페이스 · 문서 · 판 · 댓글",
     "summary": "상단 메뉴 ‘위키’ 의 문서(마크다운 본문)와 그 판 · 댓글 · 지켜보는 사람, 스페이스별 대문 설정을 담는 사용자 데이터 파일입니다. 사람이 직접 쓴 내용이라 다시 만들 수 없습니다.",

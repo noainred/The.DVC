@@ -37,7 +37,9 @@ import { atomicWriteFileSync, preserveCorrupt, safeLoadText } from '../util/atom
 import { capStr } from '../util/capStr.js';
 import { numOrNull } from '../util/numOrNull.js';
 import { registerExitFlush } from '../util/exitFlush.js';
-import { dayKey, DAY_MS } from '../util/dayKey.js';
+import { dayKey, dayIndex, dayLabel, dayStartMs, DAY_MS } from '../util/dayKey.js';
+import { getSprint, listSprints, activeSprintIds, findSprintByName } from './sprints.js';
+import { parseQuery, compileQuery, orderComparator } from './query.js';
 
 export const KEY_PREFIX = 'ISS';
 export const KEY_RE = /^ISS-\d{1,9}$/;
@@ -48,7 +50,7 @@ export const VC_ID_RE = /^[^\s\u0000-\u001f\u007f]{1,128}$/;
 export const FULL_ACCESS = Object.freeze({ read: null, write: null });
 
 export const STATUSES = Object.freeze(['backlog', 'todo', 'progress', 'review', 'done']);
-export const TYPES = Object.freeze(['incident', 'task', 'request', 'improve']);
+export const TYPES = Object.freeze(['incident', 'task', 'request', 'improve', 'epic']); // v2.882 에픽(계층의 맨 위)
 export const PRIORITIES = Object.freeze(['p0', 'p1', 'p2', 'p3']);
 export const LIMITS = Object.freeze({
   issueMax: 2000, title: 200, body: 10000, commentMax: 200, commentBody: 2000,
@@ -56,6 +58,8 @@ export const LIMITS = Object.freeze({
   // v2.871 감사 A3-02: 요청 등록(viewer)은 전체 상한에서 운영자 몫(requestReserve)을 남기고, 한 사람이 열어 둔 요청은 requestOpenPerUser 건까지.
   requestReserve: 200, requestOpenPerUser: 20,
   bulkMax: 200,
+  // v2.882 계층 — 한 상위의 자식 수 상한(하위 작업 · 에픽의 이슈)
+  childMax: 200,
 });
 /** 최근 완료로 보여 주는 기간(ms) — 보드의 '완료' 열. */
 export const RECENT_DONE_MS = 14 * 24 * 3600_000;
@@ -82,6 +86,126 @@ export function issuesMaxBytes() {
 }
 
 export const issuesFile = () => path.join(config.configDir, 'issues.json');
+
+/* ───── 일괄 편집 · 스프린트(v2.882 · 시안 ⑦ ⑧) ───── */
+
+/**
+ * 일괄 편집 — set: { sprintId?, parentKey?, addLabels? }(담당자는 bulkAssign). 키마다 updateIssue 를 그대로 탄다(범위 · 계층 규칙 하나).
+ * 결과는 키마다 밝힌다(조용히 건너뛰지 않는다).
+ */
+export function bulkEdit(keys, set, user, { access = FULL_ACCESS, known = null } = {}) {
+  if (!Array.isArray(keys)) throw fieldError('keys', '배열이어야 합니다');
+  if (keys.length > LIMITS.bulkMax) throw fieldError('keys', `한 번에 ${LIMITS.bulkMax}건까지입니다`);
+  const st = set && typeof set === 'object' ? set : {};
+  const body = {};
+  if (Object.hasOwn(st, 'sprintId')) body.sprintId = st.sprintId;
+  if (Object.hasOwn(st, 'parentKey')) body.parentKey = st.parentKey;
+  const add = Object.hasOwn(st, 'addLabels') ? labelsField(st.addLabels) : [];
+  if (!Object.keys(body).length && !add.length) throw fieldError('set', '바꿀 것(스프린트 · 에픽 · 라벨)이 없습니다');
+  const results = [];
+  for (const k of keys) {
+    if (typeof k !== 'string' || !KEY_RE.test(k)) { results.push({ key: String(k).slice(0, 20), ok: false, reason: '키 형식이 아닙니다' }); continue; }
+    try {
+      const b = { ...body };
+      if (add.length) {
+        const cur = findFor(k, access);
+        const labels = [...new Set([...(Array.isArray(cur.labels) ? cur.labels : []), ...add])];
+        if (labels.length > LIMITS.labelMax) throw fieldError('labels', `라벨은 ${LIMITS.labelMax}개까지입니다`);
+        b.labels = labels;
+      }
+      updateIssue(k, b, user, { access, known });
+      results.push({ key: k, ok: true });
+    } catch (e) { results.push({ key: k, ok: false, reason: e.message }); }
+  }
+  return { results, done: results.filter((r) => r.ok).length, failed: results.filter((r) => !r.ok).length };
+}
+
+/**
+ * 스프린트 끝내기의 '미완료 옮기기' — from 스프린트의 열린 이슈를 to('' = 백로그)로. 전 법인 동작이라 라우트가 전체 범위 계정으로 막는다.
+ * 이슈마다 이력('스프린트 끝내기')이 남는다. 반환: { moved, done, keys }.
+ */
+export function moveSprintIssues(fromId, toId, user, { note = '스프린트 끝내기' } = {}) {
+  const to = toId ? sprintField(toId) : '';
+  if (to && to === fromId) throw fieldError('to', '같은 스프린트로는 옮길 수 없습니다');
+  const c = load();
+  const mine = c.issues.filter((x) => (x.sprintId || '') === fromId);
+  const openOnes = mine.filter(isOpen);
+  const now = Date.now();
+  for (const x of openOnes) {
+    const cur = load().issues.find((y) => y.id === x.id);
+    replace(load(), { ...cur, sprintId: to }, [{ at: now, by: user, field: 'sprint', from: fromId, to, note: capStr(`${note}: ${sprintNameOf(fromId)} → ${sprintNameOf(to) || '백로그'}`, 120) }], user);
+  }
+  return { moved: openOnes.length, done: mine.length - openOnes.length, keys: openOnes.map((x) => x.key).slice(0, 200) };
+}
+
+/**
+ * 이 이슈가 시각 t 에 그 스프린트에 들어 있었고 열려 있었는가 — 이력(sprint · status)을 되짚는다. 이력 상한으로 앞부분이 지워졌으면
+ * 가장 이른 남은 기록의 'from' 을 처음 값으로 쓴다(근사 — 화면이 approximate 로 밝힌다).
+ */
+function timelineOf(x, sprintId) {
+  const ev = historyOf(x).filter((h) => (h.field === 'sprint' || h.field === 'status') && Number.isFinite(h.at)).sort((a, b) => a.at - b.at);
+  const firstSprint = ev.find((h) => h.field === 'sprint');
+  const firstStatus = ev.find((h) => h.field === 'status');
+  return {
+    createdAt: x.createdAt || 0,
+    member0: (firstSprint ? (firstSprint.from || '') : (x.sprintId || '')) === sprintId,
+    status0: firstStatus ? firstStatus.from : x.status,
+    ev,
+  };
+}
+
+/**
+ * 스프린트 보드(시안 ⑦) — 그 스프린트의 이슈(보이는 것만) · 상태별 수 · 사람별 열린 수 · 번다운(일별 남은 열린 이슈) · 백로그(스프린트 밖 열린 이슈).
+ * 번다운은 따로 적재하지 않고 이슈 이력에서 계산한다(시안 §4.2). 하위 작업은 상위 이슈 안에서 센다(보드 카드에 n/m) — 번다운 · 수에서 뺀다.
+ */
+export function sprintBoard(sprintId, { access = FULL_ACCESS, now = Date.now(), backlogMax = 200 } = {}) {
+  const sp = getSprint(sprintId);
+  if (!sp) { const e = new Error('없는 스프린트입니다'); e.status = 404; throw e; }
+  const issues = load().issues;
+  const idx = treeIndex(issues);
+  const visible = issues.filter((x) => canSee(x, access));
+  const isSub = (x) => levelOf(x, idx) === 'sub';
+  const inSprint = visible.filter((x) => (x.sprintId || '') === sprintId);
+  const rows = inSprint.map((x) => ({ ...summary(x, idx, access), writable: canEdit(x, access), sub: isSub(x) }));
+  const top = rows.filter((r) => !r.sub && r.type !== 'epic');
+  const counts = Object.fromEntries(STATUSES.map((st) => [st, top.filter((r) => r.status === st).length]));
+  const people = new Map();
+  let unassigned = 0;
+  for (const r of top) { if (r.status === 'done') continue; if (!r.assignee) { unassigned += 1; continue; } people.set(r.assignee, (people.get(r.assignee) || 0) + 1); }
+  // 번다운 — 하위 작업 · 에픽 제외, 한 번이라도 이 스프린트에 들어왔던 이슈
+  const sIdx = Math.floor(Date.UTC(Number(sp.startDay.slice(0, 4)), Number(sp.startDay.slice(5, 7)) - 1, Number(sp.startDay.slice(8, 10))) / DAY_MS);
+  const eIdx = Math.floor(Date.UTC(Number(sp.endDay.slice(0, 4)), Number(sp.endDay.slice(5, 7)) - 1, Number(sp.endDay.slice(8, 10))) / DAY_MS);
+  const today = dayIndex(now);
+  const lastIdx = sp.state === 'closed' ? eIdx : Math.min(eIdx, today);
+  const cands = visible.filter((x) => x.type !== 'epic' && !isSub(x) && ((x.sprintId || '') === sprintId || historyOf(x).some((h) => h.field === 'sprint' && (h.from === sprintId || h.to === sprintId))));
+  let approximate = false;
+  const days = [];
+  const tls = cands.map((x) => { if (Number(x.historyDropped) > 0) approximate = true; return timelineOf(x, sprintId); });
+  for (let d = sIdx; d <= eIdx; d += 1) {
+    if (d > lastIdx) { days.push({ day: dayLabel(d), remaining: null }); continue; }
+    const t = d === today ? now : dayStartMs(d + 1) - 1;
+    let remaining = 0;
+    for (const tl of tls) {
+      if (tl.createdAt > t) continue;
+      let member = tl.member0; let status = tl.status0;
+      for (const h of tl.ev) {
+        if (h.at > t) break;
+        if (h.field === 'sprint') member = (h.to || '') === sprintId; else status = h.to;
+      }
+      if (member && status !== 'done') remaining += 1;
+    }
+    days.push({ day: dayLabel(d), remaining });
+  }
+  const backlog = visible.filter((x) => !x.sprintId && isOpen(x) && x.type !== 'epic' && !isSub(x))
+    .sort((a, b) => (PRIO_RANK[a.priority] ?? 9) - (PRIO_RANK[b.priority] ?? 9) || (b.updatedAt || 0) - (a.updatedAt || 0));
+  return {
+    sprint: sp, rows, counts, total: top.length,
+    people: [...people.entries()].map(([assignee, open]) => ({ assignee, open })).sort((a, b) => b.open - a.open || a.assignee.localeCompare(b.assignee)), unassigned,
+    burndown: { days, approximate, today: dayLabel(today) },
+    backlog: backlog.slice(0, backlogMax).map((x) => ({ ...summary(x, idx, access), writable: canEdit(x, access) })), backlogTotal: backlog.length,
+  };
+}
+export { listSprints };
 
 /* ───── 파일 입출력(테스트가 바꿔 끼운다 — 실패 주입) ───── */
 const realIo = Object.freeze({
@@ -497,22 +621,102 @@ const commentsOf = (x) => (Array.isArray(x?.comments) ? x.comments.filter((c) =>
 const historyOf = (x) => (Array.isArray(x?.history) ? x.history.filter((h) => h && typeof h === 'object') : []);
 const isOpen = (x) => x.status !== 'done';
 
+/* ───── 계층(v2.882 — 에픽 › 이슈 › 하위 작업. 시안 ⑥) ─────
+ * 두 단계만: 에픽(유형 epic)은 상위가 없고, 이슈는 에픽 아래(또는 맨 위), 하위 작업은 '에픽이 아닌 이슈' 아래 — 하위 작업 아래는 없다.
+ * 같은 법인끼리만 묶는다(에픽이 공용이면 어느 법인 이슈든 담는다 — 범위 계정은 공용 에픽을 못 보므로 키를 지운다). 진행률은 자식이 있으면
+ * 자식 완료 비율로 자동(직접 입력 잠김). */
+function treeIndex(issues) {
+  const byKey = new Map(); const kids = new Map();
+  for (const y of issues) byKey.set(y.key, y);
+  for (const y of issues) {
+    if (!y.parentKey || !byKey.has(y.parentKey) || y.parentKey === y.key) continue;
+    const a = kids.get(y.parentKey); if (a) a.push(y); else kids.set(y.parentKey, [y]);
+  }
+  return { byKey, kids };
+}
+function epicKeyOf(x, idx) {
+  if (x.type === 'epic' || !x.parentKey) return '';
+  const p = idx.byKey.get(x.parentKey);
+  if (!p) return '';
+  if (p.type === 'epic') return p.key;
+  const g = p.parentKey ? idx.byKey.get(p.parentKey) : null;
+  return g && g.type === 'epic' ? g.key : '';
+}
+function rollupOf(x, idx) {
+  const kids = idx.kids.get(x.key) || [];
+  const done = kids.filter((k) => k.status === 'done').length;
+  return { childCount: kids.length, childDone: done, auto: kids.length > 0, pct: kids.length ? Math.round((done / kids.length) * 100) : null };
+}
+const levelOf = (x, idx) => (x.type === 'epic' ? 'epic' : (() => { const p = x.parentKey ? idx.byKey.get(x.parentKey) : null; return p && p.type !== 'epic' ? 'sub' : 'issue'; })());
+
+/**
+ * 상위 지정 검사 — '' 는 맨 위. 반환: 저장할 parentKey. self 는 고치는 이슈(새 이슈면 { type, vcenterId, key:'' }).
+ * 조회 범위 밖 상위는 '없는 이슈'(존재 은닉). 같은 법인(또는 공용 에픽)만 · 고리 · 층 규칙 · 자식 수 상한.
+ */
+function parentField(v, self, issues, access) {
+  if (v == null || v === '') return '';
+  if (typeof v !== 'string' || !KEY_RE.test(v.trim())) throw fieldError('parentKey', '이슈 키(ISS-번호)여야 합니다');
+  const key = v.trim();
+  if (key === self.key) throw fieldError('parentKey', '자기 자신을 상위로 둘 수 없습니다');
+  const idx = treeIndex(issues);
+  const p = idx.byKey.get(key);
+  if (!p || !canSee(p, access)) throw fieldError('parentKey', '없는 이슈입니다');
+  if (self.type === 'epic') throw fieldError('parentKey', '에픽은 상위를 둘 수 없습니다(계층의 맨 위)');
+  const selfKids = self.key ? (idx.kids.get(self.key) || []) : [];
+  if (p.type === 'epic') {
+    if (p.vcenterId && p.vcenterId !== (self.vcenterId || '')) throw fieldError('parentKey', '에픽은 같은 법인(또는 공용 에픽)의 이슈만 담습니다');
+  } else {
+    // 하위 작업이 된다 — 상위는 하위 작업이 아니어야 하고, 나는 자식이 없어야 한다(두 단계만)
+    if (levelOf(p, idx) === 'sub') throw fieldError('parentKey', '하위 작업 아래에는 하위 작업을 만들 수 없습니다(두 단계만)');
+    if (selfKids.length) throw fieldError('parentKey', '하위 작업이 있는 이슈는 다른 이슈의 하위 작업이 될 수 없습니다(두 단계만)');
+    if ((p.vcenterId || '') !== (self.vcenterId || '')) throw fieldError('parentKey', '하위 작업은 상위 이슈와 같은 법인이어야 합니다');
+  }
+  if ((idx.kids.get(key) || []).filter((k) => k.key !== self.key).length >= LIMITS.childMax) throw limitError(`한 상위에 ${LIMITS.childMax}건까지 담습니다`);
+  return key;
+}
+/** 스프린트 지정 검사 — '' 는 백로그. 끝난 스프린트에는 넣지 않는다(회고 기록). */
+function sprintField(v) {
+  if (v == null || v === '') return '';
+  if (typeof v !== 'string' || !/^S[a-f0-9]{10}$/.test(v)) throw fieldError('sprintId', '스프린트 id 형식이 아닙니다');
+  const sp = getSprint(v);
+  if (!sp) throw fieldError('sprintId', '없는 스프린트입니다');
+  if (sp.state === 'closed') throw fieldError('sprintId', '끝난 스프린트에는 넣을 수 없습니다');
+  return v;
+}
+const sprintNameOf = (id) => (id ? (getSprint(id)?.name || id) : '');
+
 /** 목록용 요약(본문·댓글·이력 제외). */
-export function summary(x) {
+export function summary(x, idx = null, access = FULL_ACCESS) {
+  const ix = idx || treeIndex(load().issues);
+  const r = rollupOf(x, ix);
+  const vis = (k) => { if (!k) return ''; const y = ix.byKey.get(k); return y && canSee(y, access) ? k : ''; };
   return {
     id: x.id, key: x.key, num: x.num, type: x.type, title: x.title, status: x.status, priority: x.priority, vcenterId: x.vcenterId || '',
     blocked: x.blocked ? { reason: x.blocked.reason, at: x.blocked.at, by: x.blocked.by } : null,
     assignee: x.assignee || '', reporter: x.reporter || '', labels: Array.isArray(x.labels) ? x.labels : [], component: x.component || '',
     dueAt: x.dueAt ?? null, createdAt: x.createdAt, updatedAt: x.updatedAt || x.createdAt, closedAt: x.closedAt ?? null,
     comments: commentsOf(x).length, watchers: Array.isArray(x.watchers) ? x.watchers.length : 0,
-    progress: Number.isInteger(x.progress) ? x.progress : null, progressNote: x.progressNote || '', progressAt: x.progressAt ?? null, progressBy: x.progressBy || '',
+    progress: r.auto ? r.pct : (Number.isInteger(x.progress) ? x.progress : null), progressNote: x.progressNote || '', progressAt: x.progressAt ?? null, progressBy: x.progressBy || '',
     ...(x.origin ? { origin: originView(x.origin) } : {}),
+    // v2.882 계층 · 스프린트 — 볼 수 없는 상위(범위 밖 공용 에픽)의 키는 비운다
+    parentKey: vis(x.parentKey || ''), epicKey: vis(epicKeyOf(x, ix)), sprintId: x.sprintId || '',
+    progressAuto: r.auto, childCount: r.childCount, childDone: r.childDone,
   };
 }
 /** 상세 — 댓글·이력 포함. `me` 는 보는 사람(관찰 여부). */
-export function viewIssue(x, me = '') {
+export function viewIssue(x, me = '', access = FULL_ACCESS) {
+  const idx = treeIndex(load().issues);
+  const s = summary(x, idx, access);
+  const brief = (y) => (y ? { key: y.key, title: y.title, type: y.type, status: y.status } : null);
+  const parent = s.parentKey ? idx.byKey.get(s.parentKey) : null;
+  const epic = s.epicKey ? idx.byKey.get(s.epicKey) : null;
+  const children = (idx.kids.get(x.key) || []).filter((y) => canSee(y, access)).map((y) => ({ ...summary(y, idx, access), writable: canEdit(y, access) }))
+    .sort((a, b) => a.num - b.num);
+  const sp = x.sprintId ? getSprint(x.sprintId) : null;
   return {
-    ...summary(x), body: x.body || '', watcherNames: Array.isArray(x.watchers) ? x.watchers : [], watching: !!me && Array.isArray(x.watchers) && x.watchers.includes(me),
+    ...s, level: levelOf(x, idx), parent: brief(parent), epic: epic ? { ...brief(epic), progress: rollupOf(epic, idx).pct, childCount: rollupOf(epic, idx).childCount, childDone: rollupOf(epic, idx).childDone } : null,
+    children, sprint: sp ? { id: sp.id, name: sp.name, state: sp.state, startDay: sp.startDay, endDay: sp.endDay, daysLeft: sp.daysLeft } : null,
+    body: x.body || '', watcherNames: Array.isArray(x.watchers) ? x.watchers : [], watching: !!me && Array.isArray(x.watchers) && x.watchers.includes(me),
     createdBy: x.createdBy || x.reporter || '', updatedBy: x.updatedBy || '',
     comments: commentsOf(x).map((c) => ({ id: c.id, author: c.author, body: c.body, createdAt: c.createdAt })),
     history: historyOf(x), historyDropped: Number(x.historyDropped) || 0,
@@ -526,8 +730,11 @@ const needleOf = (q) => (typeof q === 'string' ? q.trim().toLowerCase().slice(0,
  * 목록 — 필터는 서버가 건다. `done`: 'open'(기본 — 완료 제외) · 'recent'(최근 RECENT_DONE_MS 안의 완료 포함) · 'all'.
  * 정렬: 우선순위 → 기한(없는 것은 뒤) → 갱신 최신. 페이지 인자는 호출부가 pageArgs 로 좁혀 넘긴다.
  */
-export function listIssues({ q = '', status = '', assignee = null, priority = '', type = '', label = '', vcenterId = null, done = 'open', offset = 0, limit = 200, now = Date.now(), access = FULL_ACCESS } = {}) {
-  const all = load().issues.filter((x) => canSee(x, access)); // 범위가 요청 필터보다 먼저
+export function listIssues({ q = '', status = '', assignee = null, priority = '', type = '', label = '', vcenterId = null, sprintId = null, done = 'open', offset = 0, limit = 200, now = Date.now(), access = FULL_ACCESS, query = '', me = '', ctx = null } = {}) {
+  const issues = load().issues;
+  const idx = treeIndex(issues);
+  const all = issues.filter((x) => canSee(x, access)); // 범위가 요청 필터보다 먼저(검색식도 이 뒤에 건다)
+  if (typeof query === 'string' && query.trim()) return runQuery(all, idx, query, { offset, limit, now, access, me, ctx });
   const needle = needleOf(q);
   const hit = all.filter((x) => {
     if (status) { if (x.status !== status) return false; } else if (done === 'open') { if (!isOpen(x)) return false; } else if (done === 'recent') { if (!isOpen(x) && !(x.closedAt && now - x.closedAt <= RECENT_DONE_MS)) return false; }
@@ -536,18 +743,65 @@ export function listIssues({ q = '', status = '', assignee = null, priority = ''
     if (type && x.type !== type) return false;
     if (label && !(Array.isArray(x.labels) && x.labels.includes(label))) return false;
     if (vcenterId != null && (x.vcenterId || '') !== vcenterId) return false;
+    if (sprintId != null && (x.sprintId || '') !== sprintId) return false;
     if (needle && !`${x.key}\n${x.title}\n${x.body || ''}\n${x.assignee || ''}\n${x.reporter || ''}\n${(x.labels || []).join(' ')}\n${x.component || ''}`.toLowerCase().includes(needle)) return false;
     return true;
   });
   // 감사 A1-02: 행마다 쓰기 가능 여부 — 화면이 '나에게 할당'·일괄 선택을 쓰기 범위 밖 행에서 잠근다(공용 이슈도 범위 계정에는 false).
-  const rows = hit.map((x) => ({ ...summary(x), writable: canEdit(x, access) })).sort((a, b) => (PRIO_RANK[a.priority] ?? 9) - (PRIO_RANK[b.priority] ?? 9)
+  const rows = hit.map((x) => ({ ...summary(x, idx, access), writable: canEdit(x, access) })).sort((a, b) => (PRIO_RANK[a.priority] ?? 9) - (PRIO_RANK[b.priority] ?? 9)
     || ((a.dueAt ?? Infinity) - (b.dueAt ?? Infinity)) || (b.updatedAt - a.updatedAt));
   return { total: rows.length, all: all.length, offset, limit, rows: rows.slice(offset, offset + limit) };
 }
 
 export function getIssue(key, me = '', access = FULL_ACCESS) {
   const x = findFor(key, access);
-  return { ...viewIssue(x, me), writable: canEdit(x, access) };
+  return { ...viewIssue(x, me, access), writable: canEdit(x, access) };
+}
+
+/* ───── 검색식(v2.882 · 시안 ⑧) — 파서는 issues/query.js 하나. 범위는 호출부(listIssues)가 먼저 걸었다 ───── */
+export const QUERY_ROW_TEXT_MAX = 20_000;
+/** 검색식 해석 맥락 — 스프린트 이름 · 활성 · 법인 이름 → id. ctx.vcenters = [{id,name}](라우트가 스냅샷에서). ctx.docs = 키 → 위키 제목 배열. */
+export function queryContext({ me = '', now = Date.now(), vcenters = [], docs = null } = {}) {
+  const vcByName = new Map();
+  for (const v of vcenters || []) { if (v?.id) { vcByName.set(String(v.id).toLowerCase(), v.id); if (v.name) vcByName.set(String(v.name).toLowerCase(), v.id); } }
+  return {
+    me, today: dayIndex(now), dayOf: (ms) => dayIndex(ms), activeSprints: activeSprintIds(),
+    sprintId: (raw) => { const r = String(raw || '').trim(); if (/^S[a-f0-9]{10}$/.test(r)) return r; return findSprintByName(r)?.id || null; },
+    sprintName: (id) => sprintNameOf(id),
+    vcenterId: (raw) => vcByName.get(String(raw || '').trim().toLowerCase()) || String(raw || '').trim(),
+    docs,
+  };
+}
+function queryRow(x, idx, ctx, access = FULL_ACCESS) {
+  // 볼 수 없는 상위(범위 밖 공용 에픽)의 키는 비운다 — summary 와 같은 판정(검색식으로 키를 바꿔 가며 물어 묶음을 알아내지 못하게)
+  const vis = (k) => { if (!k) return ''; const y = idx.byKey.get(k); return y && canSee(y, access) ? k : ''; };
+  const comments = commentsOf(x).map((c) => c.body || '').join('\n');
+  return {
+    key: x.key, num: x.num, title: x.title || '', text: `${x.title || ''}\n${x.body || ''}\n${comments}`.slice(0, QUERY_ROW_TEXT_MAX), type: x.type, status: x.status, priority: x.priority,
+    assignee: x.assignee || '', reporter: x.reporter || '', watchers: Array.isArray(x.watchers) ? x.watchers : [], vcenterId: x.vcenterId || '',
+    labels: Array.isArray(x.labels) ? x.labels : [], component: x.component || '', epicKey: vis(epicKeyOf(x, idx)), parentKey: vis(x.parentKey || ''), sprintId: x.sprintId || '',
+    progress: (() => { const r = rollupOf(x, idx); return r.auto ? r.pct : (Number.isInteger(x.progress) ? x.progress : null); })(),
+    dueAt: x.dueAt ?? null, createdAt: x.createdAt, updatedAt: x.updatedAt || x.createdAt, closedAt: x.closedAt ?? null,
+    docs: ctx.docs ? (ctx.docs(x.key) || []) : [],
+  };
+}
+function queryError(parsed) {
+  const e = new Error(`검색식을 읽지 못했습니다 — ${parsed.errors[0]?.msg || '알 수 없는 오류'}`);
+  e.status = 400; e.field = 'query'; e.extra = { code: 'query', errors: parsed.errors, clauses: parsed.clauses, orderStart: parsed.orderStart };
+  return e;
+}
+function runQuery(all, idx, query, { offset, limit, now, access, me, ctx }) {
+  const parsed = parseQuery(query);
+  if (parsed.errors.length) throw queryError(parsed);
+  const c = ctx || queryContext({ me, now });
+  const pred = compileQuery(parsed.ast, c);
+  const cmp = orderComparator(parsed.order, c);
+  const hit = [];
+  for (const x of all) { const r = queryRow(x, idx, c, access); if (pred(r)) hit.push({ x, r }); }
+  if (cmp) hit.sort((a, b) => cmp(a.r, b.r) || (b.r.updatedAt - a.r.updatedAt));
+  else hit.sort((a, b) => (PRIO_RANK[a.x.priority] ?? 9) - (PRIO_RANK[b.x.priority] ?? 9) || ((a.x.dueAt ?? Infinity) - (b.x.dueAt ?? Infinity)) || (b.r.updatedAt - a.r.updatedAt));
+  const rows = hit.map(({ x }) => ({ ...summary(x, idx, access), writable: canEdit(x, access) }));
+  return { total: rows.length, all: all.length, offset, limit, rows: rows.slice(offset, offset + limit), query: { clauses: parsed.clauses, order: parsed.order, orderStart: parsed.orderStart } };
 }
 
 /**
@@ -653,6 +907,10 @@ export function createIssue(body, user, { access = FULL_ACCESS, known = null, au
     ? { title: body?.title, body: body?.body, priority: body?.priority, dueAt: body?.dueAt, labels: body?.labels, component: body?.component, vcenterId: body?.vcenterId, type: 'request', status: 'backlog' }
     : (body || {});
   const vcenterId = vcenterField(b.vcenterId, access, known);
+  const type0 = enumField(b.type, TYPES, 'type', 'task');
+  // v2.882 계층 · 스프린트(요청 등록은 받지 않는다 — 위 b 에 없다)
+  const parentKey = parentField(b.parentKey, { key: '', type: type0, vcenterId }, c.issues, access);
+  const sprintId = sprintField(b.sprintId);
   let assignee = nameField(b.assignee, 'assignee');
   const autoAssignee = !assignee && auto?.assignee ? nameField(auto.assignee, 'assignee') : '';
   if (autoAssignee) assignee = autoAssignee;
@@ -661,8 +919,9 @@ export function createIssue(body, user, { access = FULL_ACCESS, known = null, au
   const num = c.nextSeq;
   const x = {
     id: newId(), key: `${KEY_PREFIX}-${num}`, num,
-    type: enumField(b.type, TYPES, 'type', 'task'),
+    type: type0,
     title: text(b.title, LIMITS.title, 'title', { required: true }),
+    parentKey, sprintId,
     body: text(b.body, LIMITS.body, 'body'),
     status, blocked: null, vcenterId,
     priority: enumField(b.priority, PRIORITIES, 'priority', 'p2'),
@@ -675,12 +934,14 @@ export function createIssue(body, user, { access = FULL_ACCESS, known = null, au
     history: [
       { at: now, by: user, field: 'created', from: '', to: `${KEY_PREFIX}-${num}`, ...(requestOnly ? { note: '요청 등록' } : origin ? { note: originNote(origin) } : {}) },
       ...(assignee ? [{ at: now, by: user, field: 'assignee', from: '', to: assignee, ...(autoAssignee ? { note: `자동 할당: ${capStr(String(auto.reason || ''), 80)}` } : {}) }] : []),
+      ...(parentKey ? [{ at: now, by: user, field: 'parent', from: '', to: parentKey }] : []),
+      ...(sprintId ? [{ at: now, by: user, field: 'sprint', from: '', to: sprintId, note: capStr(sprintNameOf(sprintId), 60) }] : []),
     ],
   };
   assertRoom(c, x);
   commit([...c.issues, x], { changed: x, nextSeq: num + 1 });
   emit({ type: 'created', actor: user, issue: evIssue(x), auto: !!autoAssignee });
-  return { ...viewIssue(x, user), writable: canEdit(x, access) };
+  return { ...viewIssue(x, user, access), writable: canEdit(x, access) };
 }
 
 /** 제목·본문·유형·우선순위·기한·라벨·컴포넌트·관찰자 — 보낸 칸만 바꾼다. 상태·담당자·보류는 전용 함수로. */
@@ -698,34 +959,78 @@ export function updateIssue(key, body, user, { access = FULL_ACCESS, known = nul
     next[field] = val;
     if (hist) entries.push({ at: now, by: user, field, from: hv(before), to: hv(val) });
   };
+  const idx = treeIndex(c.issues);
+  const myKids = idx.kids.get(x.key) || [];
   if (has('title')) set('title', text(b.title, LIMITS.title, 'title', { required: true }));
   if (has('body')) set('body', text(b.body, LIMITS.body, 'body'), { hist: false });
-  if (has('type')) set('type', enumField(b.type, TYPES, 'type'));
+  if (has('type')) {
+    const t = enumField(b.type, TYPES, 'type');
+    // v2.882: 에픽 ↔ 다른 유형 — 층이 바뀌므로 상위 · 자식이 있으면 막는다(묶음을 먼저 풀게)
+    if (t !== x.type && (t === 'epic' || x.type === 'epic')) {
+      if (t === 'epic' && (x.parentKey || myKids.length)) throw fieldError('type', '상위나 하위 작업이 있는 이슈는 에픽으로 바꿀 수 없습니다 — 먼저 묶음을 푸세요');
+      if (x.type === 'epic' && myKids.length) throw fieldError('type', '이슈가 담긴 에픽은 다른 유형으로 바꿀 수 없습니다 — 먼저 이슈를 빼세요');
+    }
+    set('type', t);
+  }
   if (has('priority')) set('priority', enumField(b.priority, PRIORITIES, 'priority'));
   if (has('dueAt')) set('dueAt', timeField(b.dueAt, 'dueAt'));
   if (has('labels')) set('labels', labelsField(b.labels));
   if (has('component')) set('component', text(b.component, LIMITS.component, 'component'));
   if (has('watchers')) set('watchers', watchersField(b.watchers));
   // 감사 A1-05·A2-01: 값이 그대로면 다시 검사하지 않는다 — 등록에서 빠진 vCenter 의 이슈도 제목·본문 수정은 저장된다(법인을 바꿀 때만 검사).
-  if (has('vcenterId') && !(typeof b.vcenterId === 'string' && b.vcenterId.trim() === (x.vcenterId || ''))) set('vcenterId', vcenterField(b.vcenterId, access, known));
+  if (has('vcenterId') && !(typeof b.vcenterId === 'string' && b.vcenterId.trim() === (x.vcenterId || ''))) {
+    const v = vcenterField(b.vcenterId, access, known);
+    // v2.882: 법인이 바뀌면 묶음 규칙(같은 법인 · 공용 에픽)이 깨지지 않는지 본다
+    const par = x.parentKey ? idx.byKey.get(x.parentKey) : null;
+    if (par && (par.type !== 'epic' || par.vcenterId) && (par.vcenterId || '') !== v) throw fieldError('vcenterId', '상위와 법인이 달라집니다 — 먼저 상위에서 빼세요');
+    if (myKids.some((k) => x.type === 'epic' ? (v && (k.vcenterId || '') !== v) : (k.vcenterId || '') !== v)) throw fieldError('vcenterId', '담긴 이슈 · 하위 작업과 법인이 달라집니다');
+    set('vcenterId', v);
+  }
+  if (has('parentKey')) {
+    const pk = parentField(b.parentKey, { key: x.key, type: next.type, vcenterId: next.vcenterId || '' }, c.issues, access);
+    if (pk !== (x.parentKey || '')) { next.parentKey = pk; entries.push({ at: now, by: user, field: 'parent', from: x.parentKey || '', to: pk }); }
+  }
+  if (has('sprintId')) {
+    const sp = sprintField(b.sprintId);
+    if (sp !== (x.sprintId || '')) { next.sprintId = sp; entries.push({ at: now, by: user, field: 'sprint', from: x.sprintId || '', to: sp, note: capStr(`${sprintNameOf(x.sprintId) || '백로그'} → ${sprintNameOf(sp) || '백로그'}`, 120) }); }
+  }
   if (has('body') && x.body !== next.body) entries.push({ at: now, by: user, field: 'body', from: '', to: '(본문 수정)' });
   const changed = entries.length > 0 || (has('body') && x.body !== next.body);
-  if (!changed) return viewIssue(x, user);
+  if (!changed) return viewIssue(x, user, access);
   return viewIssue(replace(c, next, entries, user), user);
 }
 
 /** 상태 전이. progress 는 담당자 필수 · done 은 closedAt · done 에서 나오면 closedAt 해제. 같은 상태면 그대로. */
-export function setStatus(key, status, user, { access = FULL_ACCESS } = {}) {
+export function setStatus(key, status, user, { access = FULL_ACCESS, closeChildren = false } = {}) {
   const c = load();
   const x = findFor(key, access, { write: true });
   const s = enumField(status, STATUSES, 'status');
-  if (s === x.status) return viewIssue(x, user);
+  if (s === x.status) return viewIssue(x, user, access);
   if (s === 'progress' && !x.assignee) throw fieldError('status', '진행 중으로 옮기려면 담당자가 있어야 합니다 — 먼저 할당하세요');
+  // v2.882: 완료되지 않은 자식(하위 작업 · 에픽의 이슈)이 남아 있으면 묻는다 — closeChildren 이면 한꺼번에 완료(자식마다 쓰기 범위 검사)
+  if (s === 'done') {
+    const open = (treeIndex(c.issues).kids.get(x.key) || []).filter(isOpen);
+    if (open.length && !closeChildren) {
+      throw limitError(`완료되지 않은 ${x.type === 'epic' ? '이슈가' : '하위 작업이'} ${open.length}건 남아 있습니다 — 한꺼번에 완료하거나 취소하세요`,
+        { code: 'open-children', children: open.filter((k) => canSee(k, access)).slice(0, 50).map((k) => ({ key: k.key, title: k.title, status: k.status })) });
+    }
+    if (open.length) {
+      const denied = open.filter((k) => !canSee(k, access) || !canEdit(k, access));
+      if (denied.length) throw forbidden(`쓰기 범위 밖 ${denied.length}건이 있어 한꺼번에 완료할 수 없습니다`);
+      for (const k of open) {
+        const at = Date.now();
+        const cur = load().issues.find((y) => y.id === k.id);
+        const yk = replace(load(), { ...cur, status: 'done', closedAt: at }, [{ at, by: user, field: 'status', from: cur.status, to: 'done', note: `상위 ${x.key} 완료와 함께` }], user);
+        emit({ type: 'status', actor: user, issue: evIssue(yk), from: cur.status, to: 'done' });
+      }
+    }
+  }
   const now = Date.now();
-  const next = { ...x, status: s, closedAt: s === 'done' ? now : null };
-  const y = replace(c, next, [{ at: now, by: user, field: 'status', from: x.status, to: s }], user);
+  const fresh = load().issues.find((y0) => y0.id === x.id) || x;
+  const next = { ...fresh, status: s, closedAt: s === 'done' ? now : null };
+  const y = replace(load(), next, [{ at: now, by: user, field: 'status', from: x.status, to: s }], user);
   emit({ type: 'status', actor: user, issue: evIssue(y), from: x.status, to: s });
-  return viewIssue(y, user);
+  return viewIssue(y, user, access);
 }
 
 /** 담당자 변경('' = 할당 해제). 재할당 이력 + 선택 사유. 같은 담당자면 그대로. */
@@ -733,7 +1038,7 @@ export function assignIssue(key, assignee, user, { reason = '', access = FULL_AC
   const c = load();
   const x = findFor(key, access, { write: true });
   const a = nameField(assignee, 'assignee');
-  if (a === (x.assignee || '')) return viewIssue(x, user);
+  if (a === (x.assignee || '')) return viewIssue(x, user, access);
   // v2.870 감사 A2-05: '진행 중 ⇒ 담당자' 불변조건(setStatus · createIssue 와 같은 규칙) — 할당 해제(일괄 포함)가 담당자 없는 진행 중 이슈를 만들지 않게
   if (!a && x.status === 'progress') throw fieldError('assignee', '진행 중 이슈의 담당자는 비울 수 없습니다 — 상태를 먼저 바꾸세요');
   const why = text(reason, LIMITS.blockReason, 'reason');
@@ -741,7 +1046,7 @@ export function assignIssue(key, assignee, user, { reason = '', access = FULL_AC
   const next = { ...x, assignee: a };
   const y = replace(c, next, [{ at: now, by: user, field: 'assignee', from: x.assignee || '', to: a, ...(why ? { note: why } : {}) }], user);
   emit({ type: 'assigned', actor: user, issue: evIssue(y), from: x.assignee || '', to: a });
-  return viewIssue(y, user);
+  return viewIssue(y, user, access);
 }
 
 /** 여러 이슈에 같은 담당자 — 결과는 키마다 밝힌다(없는 키·오류는 건너뛰고 사유를 적는다 — 조용히 넘기지 않는다). */
@@ -768,7 +1073,7 @@ export function setBlocked(key, on, user, { reason = '', access = FULL_ACCESS } 
     const next = { ...x, blocked: { reason: why, at: now, by: user } };
     return viewIssue(replace(c, next, [{ at: now, by: user, field: 'blocked', from: x.blocked ? x.blocked.reason : '', to: why }], user), user);
   }
-  if (!x.blocked) return viewIssue(x, user);
+  if (!x.blocked) return viewIssue(x, user, access);
   const next = { ...x, blocked: null };
   return viewIssue(replace(c, next, [{ at: now, by: user, field: 'blocked', from: x.blocked.reason, to: '' }], user), user);
 }
@@ -780,7 +1085,7 @@ export function setWatch(key, user, on, { access = FULL_ACCESS } = {}) {
   const c = load();
   const x = findFor(key, access); // 관찰은 본인 표지라 조회 범위면 된다
   const cur = Array.isArray(x.watchers) ? x.watchers : [];
-  if (cur.includes(user) === on) return viewIssue(x, user);
+  if (cur.includes(user) === on) return viewIssue(x, user, access);
   if (on && cur.length >= LIMITS.watcherMax) throw limitError(`관찰자는 ${LIMITS.watcherMax}명까지입니다`);
   const next = { ...x, watchers: on ? [...cur, user] : cur.filter((n) => n !== user) };
   return viewIssue(replace(c, next, [], user, { touch: false }), user);
@@ -794,6 +1099,10 @@ export function setProgress(key, body, user, { access = FULL_ACCESS } = {}) {
   const c = load();
   const x = findFor(key, access, { write: true });
   const b = body || {};
+  // v2.882: 자식이 있으면 진행률은 자식 완료 비율로 자동 — 직접 입력은 잠근다(메모는 그대로 쓸 수 있다)
+  if (Object.hasOwn(b, 'progress') && (treeIndex(c.issues).kids.get(x.key) || []).length) {
+    throw limitError('하위 작업이 있는 이슈의 진행률은 하위 작업 완료 비율로 자동 계산됩니다 — 직접 입력할 수 없습니다', { code: 'progress-auto' });
+  }
   let pct = Number.isInteger(x.progress) ? x.progress : null;
   if (Object.hasOwn(b, 'progress')) {
     if (b.progress === null || b.progress === '') pct = null;
@@ -805,12 +1114,12 @@ export function setProgress(key, body, user, { access = FULL_ACCESS } = {}) {
   }
   const note = Object.hasOwn(b, 'note') ? text(b.note, LIMITS.progressNote, 'note') : (x.progressNote || '');
   const prevPct = Number.isInteger(x.progress) ? x.progress : null;
-  if (pct === prevPct && note === (x.progressNote || '')) return viewIssue(x, user);
+  if (pct === prevPct && note === (x.progressNote || '')) return viewIssue(x, user, access);
   const now = Date.now();
   const next = { ...x, progress: pct, progressNote: note, progressAt: now, progressBy: user };
   const y = replace(c, next, [{ at: now, by: user, field: 'progress', from: prevPct == null ? '' : String(prevPct), to: pct == null ? '' : String(pct), ...(note ? { note: capStr(note, 120) } : {}) }], user);
   emit({ type: 'progress', actor: user, issue: evIssue(y), from: prevPct, to: pct, note: capStr(note, 160) });
-  return { ...viewIssue(y, user), writable: canEdit(y, access) };
+  return { ...viewIssue(y, user, access), writable: canEdit(y, access) };
 }
 
 /**
@@ -821,7 +1130,7 @@ export function setProgress(key, body, user, { access = FULL_ACCESS } = {}) {
 export function activityFeed({ access = FULL_ACCESS, limit = 100, since = 0 } = {}) {
   const lim = Math.max(1, Math.min(LIMITS.activityMax, Math.trunc(Number(limit)) || 100));
   const out = [];
-  const FIELDS = new Set(['created', 'assignee', 'status', 'progress', 'blocked', 'priority', 'dueAt']);
+  const FIELDS = new Set(['created', 'assignee', 'status', 'progress', 'blocked', 'priority', 'dueAt', 'parent', 'sprint']);
   for (const x of load().issues) {
     if (!canSee(x, access)) continue;
     const base = { key: x.key, title: capStr(x.title || '', 120), vcenterId: x.vcenterId || '' };
@@ -867,6 +1176,7 @@ export function deleteIssue(key, user, { isMod = false, access = FULL_ACCESS } =
   const c = load();
   const x = findFor(key, access, { write: true });
   if (!isMod && x.reporter !== user) throw forbidden('보고자 본인이나 관리자만 지울 수 있습니다');
+  if ((treeIndex(c.issues).kids.get(x.key) || []).length) throw fieldError('key', `${x.type === 'epic' ? '담긴 이슈가' : '하위 작업이'} 있어 지울 수 없습니다 — 먼저 빼거나 지우세요`);
   commit(c.issues.filter((y) => y.id !== x.id), { removedId: x.id });
   return summary(x);
 }
