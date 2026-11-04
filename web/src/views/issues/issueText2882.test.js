@@ -5,6 +5,7 @@ import { describe, it, expect } from 'vitest';
 import {
   QUICK_FILTERS, chipText, chipValueText, removeChip, errorSegments, burnPoints, sprintRangeText, sprintName, sprintOptions, epicOptions, childText, historyText, TYPE_TEXT,
 } from './issueText.js';
+import * as T from './issueText.js';
 
 describe('칩 — 사람 말 · 지우면 한 식이 그대로 고쳐진다', () => {
   const q = 'assignee = me() AND status in (progress, review) AND updated >= -7d ORDER BY priority ASC';
@@ -86,5 +87,21 @@ describe('에픽 · 하위 · 이력', () => {
   it('빠른 필터는 검색식 한 줄씩', () => {
     expect(QUICK_FILTERS.length).toBeGreaterThan(3);
     expect(QUICK_FILTERS.every((f) => typeof f.query === 'string' && f.query.length > 5)).toBe(true);
+  });
+});
+
+describe('v2.883 연결 · 완료 확인 문구', () => {
+  it('연결 묶기 · 이력 문장', () => {
+    const g = T.groupLinks([{ type: 'relates', key: 'ISS-2' }, { type: 'blockedBy', key: 'ISS-1' }, { type: 'relates', key: 'ISS-3' }]);
+    expect(g.map((x) => [x.type, x.items.length])).toEqual([['blockedBy', 1], ['relates', 2]]);
+    expect(T.historyText({ field: 'link', by: 'kim', from: '', to: 'blocks ISS-3' })).toBe('kim · 연결 더함 — 이 이슈가 막는 이슈 ISS-3');
+    expect(T.historyText({ field: 'link', by: 'kim', from: 'relates ISS-3', to: '' })).toBe('kim · 연결 뺌 — 관련 이슈 ISS-3');
+  });
+  it('완료 확인 — 남은 하위 · 막는 이슈 · 모르는 코드는 묻지 않는다', () => {
+    expect(T.statusConfirmText({ ok: false, code: 'open-children', reason: 'r', children: [{ key: 'ISS-1', title: 'a' }] })).toMatch(/ISS-1 a[\s\S]*모두 완료/);
+    expect(T.statusConfirmText({ ok: false, code: 'open-blockers', reason: 'r', blockers: [], hidden: 2 })).toMatch(/볼 수 없는 이슈 2건/);
+    expect(T.statusConfirmText({ ok: false, code: 'x' })).toBe(null);
+    expect(T.statusConfirmText({ ok: true })).toBe(null);
+    expect(T.STATUS_CONFIRM_FLAG['open-blockers']).toBe('ignoreBlockers');
   });
 });

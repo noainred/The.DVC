@@ -181,6 +181,7 @@ export function historyText(h) {
   if (f === 'title') return `${who}제목 ‘${h.from}’ → ‘${h.to}’`;
   if (f === 'parent') return h.to ? `${who}상위 ${h.from || '없음'} → ${h.to}` : `${who}상위에서 뺌(${h.from || '—'})`;
   if (f === 'sprint') return `${who}스프린트 ${h.note || `${h.from || '백로그'} → ${h.to || '백로그'}`}`;
+  if (f === 'link') return h.to ? `${who}연결 더함 — ${linkLine(h.to)}` : `${who}연결 뺌 — ${linkLine(h.from)}`;
   const label = FIELD_TEXT[f] || f || '';
   return `${who}${label} ${h.from || '—'} → ${h.to || '—'}`;
 }
@@ -438,4 +439,36 @@ export function epicOptions(epics, issue) {
   const vc = issue?.vcenterId || '';
   return (Array.isArray(epics) ? epics : []).filter((e) => e.type === 'epic' && e.key !== issue?.key && (!e.vcenterId || e.vcenterId === vc));
 }
+
+/* ───────────── v2.883 연결(차단함 · 관련 · 중복) ───────────── */
+/** 연결 종류 → 이 이슈에서 본 말. 저장은 만든 쪽에만 하고 반대 방향은 서버가 읽을 때 계산한다. */
+export const LINK_TEXT = Object.freeze({ blocks: '이 이슈가 막는 이슈', blockedBy: '이 이슈를 막는 이슈', relates: '관련 이슈', duplicates: '원본(이 이슈는 중복)', duplicatedBy: '이 이슈의 중복' });
+export const LINK_ORDER = Object.freeze(['blockedBy', 'blocks', 'relates', 'duplicates', 'duplicatedBy']);
+/** 더하기 선택지 — 사람 말 순서. */
+export const LINK_ADD_TEXT = Object.freeze({ blockedBy: '이 이슈를 막는 이슈', blocks: '이 이슈가 막는 이슈', relates: '관련 이슈', duplicates: '이 이슈의 원본(이 이슈가 중복)', duplicatedBy: '이 이슈의 중복' });
+/** 이력의 'blocks ISS-3' → '이 이슈가 막는 이슈 ISS-3'. */
+export function linkLine(v) {
+  const [type, key] = String(v || '').split(' ');
+  return `${LINK_TEXT[type] || type || '—'} ${key || ''}`.trim();
+}
+/** 연결 묶기 — [{ type, label, items }] (LINK_ORDER 순서 · 빈 종류는 뺀다). */
+export function groupLinks(links) {
+  const list = Array.isArray(links) ? links : [];
+  return LINK_ORDER.map((t) => ({ type: t, label: LINK_TEXT[t], items: list.filter((l) => l.type === t) })).filter((g) => g.items.length);
+}
+/** 완료 전에 서버가 묻는 것(409) — 무엇을 확인받을지 문구. 모르는 코드는 null. */
+export function statusConfirmText(r) {
+  if (!r || r.ok !== false) return null;
+  if (r.code === 'open-children') {
+    const list = (r.children || []).slice(0, 10).map((c) => `· ${c.key} ${c.title}`).join('\n');
+    return `${r.reason}\n\n${list}${(r.children || []).length > 10 ? '\n…' : ''}\n\n모두 완료로 바꾸고 이 이슈도 완료할까요? (취소하면 아무것도 바꾸지 않습니다)`;
+  }
+  if (r.code === 'open-blockers') {
+    const list = (r.blockers || []).slice(0, 10).map((c) => `· ${c.key} ${c.title}`).join('\n');
+    return `${r.reason}\n\n${list}${r.hidden ? `\n· 볼 수 없는 이슈 ${r.hidden}건` : ''}\n\n막고 있는 이슈가 열린 채로 이 이슈를 완료할까요? (막는 이슈는 그대로 둡니다)`;
+  }
+  return null;
+}
+/** 확인을 받으면 다시 보낼 때 더할 값. */
+export const STATUS_CONFIRM_FLAG = Object.freeze({ 'open-children': 'closeChildren', 'open-blockers': 'ignoreBlockers' });
 

@@ -36,8 +36,11 @@ export function withoutTitle(doc, title) {
   return { ...doc, blocks: doc.blocks.slice(1), headings: doc.headings.filter((h) => h.id !== first.id) };
 }
 
-export function MdView({ md = '', ast = null, pages = [], spaceId = '', idPrefix = 'md', className = '', compact = false, dropTitle = '' }) {
-  const doc = useMemo(() => withoutTitle(ast || parseMarkdown(md), dropTitle), [ast, md, dropTitle]);
+/**
+ * breaks: 줄 하나 바꿈을 줄바꿈으로(이슈 본문 · 댓글 — v2.883). onToggleTask(line, checked): 주면 체크리스트를 누를 수 있다(위키 보기 — 판을 만들지 않는다).
+ */
+export function MdView({ md = '', ast = null, pages = [], spaceId = '', idPrefix = 'md', className = '', compact = false, dropTitle = '', breaks = false, onToggleTask = null, busy = false, unresolvedAsSearch = false }) {
+  const doc = useMemo(() => withoutTitle(ast || parseMarkdown(md, { breaks }), dropTitle), [ast, md, dropTitle, breaks]);
   const fnNum = useMemo(() => new Map(doc.footnotes.map((f) => [f.id, f.n])), [doc]);
   const hid = (id) => `${idPrefix}-${id}`;
 
@@ -64,6 +67,8 @@ export function MdView({ md = '', ast = null, pages = [], spaceId = '', idPrefix
         const p = resolvePageRef(n.ref, pages, spaceId);
         if (p) return <a key={key} href={wikiHash({ space: p.spaceId || spaceId, id: p.id })} className="md-page">{n.label || p.title}</a>;
         if (/^W\d{1,9}$/.test(n.ref)) return <a key={key} href={wikiHash({ space: spaceId, id: n.ref })} className="md-page">{n.label || n.ref}</a>;
+        // 문서 목록을 모르는 화면(이슈 본문 · 댓글)은 '없는 문서' 로 단정하지 않고 위키 찾기로 잇는다(v2.883 — Chromium 판독)
+        if (unresolvedAsSearch) return <a key={key} href={wikiHash({ space: spaceId || 'pub', view: 'search', params: { q: n.ref } })} className="md-page" title="위키에서 이 제목을 찾습니다">{n.label || n.ref}</a>;
         return <span key={key} className="md-page missing" title="이 스페이스에서 이 제목의 문서를 찾지 못했습니다">{n.label || n.ref}</span>;
       }
       default: return null;
@@ -115,7 +120,9 @@ export function MdView({ md = '', ast = null, pages = [], spaceId = '', idPrefix
           <L key={key} className={task ? 'md-tasks' : undefined} start={b.t === 'ol' && b.start && b.start !== 1 ? b.start : undefined}>
             {b.items.map((it, j) => (
               <li key={`${key}-${j}`} className={it.task != null ? `md-task${it.task ? ' done' : ''}` : undefined}>
-                {it.task != null && <input type="checkbox" checked={it.task} readOnly disabled aria-label={it.task ? '끝남' : '남음'} />}
+                {it.task != null && (onToggleTask && it.line != null
+                  ? <input type="checkbox" checked={it.task} disabled={busy} onChange={() => onToggleTask(it.line, !it.task)} aria-label={it.task ? '끝남 — 누르면 남음으로' : '남음 — 누르면 끝남으로'} />
+                  : <input type="checkbox" checked={it.task} readOnly disabled aria-label={it.task ? '끝남' : '남음'} />)}
                 <span>{inl(it.inl, `${key}-${j}`)}</span>
                 {it.children.length > 0 && blocks(it.children, `${key}-${j}c`)}
               </li>

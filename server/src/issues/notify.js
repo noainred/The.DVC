@@ -23,9 +23,13 @@ import path from 'node:path';
 import { config } from '../config.js';
 import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
 import { registerStateFile } from '../util/stateFiles.js';
-import { dayKey } from '../util/dayKey.js';
+import { dayKey, portalParts } from '../util/dayKey.js';
 import { capStr } from '../util/capStr.js';
-import { onIssueEvent, listIssues, dueDays } from './store.js';
+import { onIssueEvent, listIssues, dueDays, queryContext } from './store.js';
+import { subscribedFilters } from './filters.js';
+import { listUsers } from '../auth/auth.js';
+import { scopedVcenterIds } from '../auth/scope.js';
+import { store } from '../store.js';
 import { loadIssueSettings, emailOf } from './settings.js';
 import { issueViewers } from './visibility.js';
 import { load as loadMailSettings } from '../mail/settings.js';
@@ -340,6 +344,98 @@ export function issueNotifyStatus() {
   return { ...status, pendingRecipients: pending.size, pendingChat: chatLines.length, batchMs: BATCH_MS };
 }
 
+/* ───── 저장 필터 주간 메일(v2.883 · 시안 ⑧) ─────
+ * 월요일 09:00(포탈 날짜) 뒤 첫 검사에서 구독자마다 한 통 — 결과는 **받는 사람의 조회 범위**로 다시 거른다(구독 · 공유가 범위를 넓히지 않는다).
+ * 로컬 계정은 그 계정의 범위, 로컬이 아닌 이름(AD)은 범위 축이 없어 전체(visibility.js 와 같은 판단), 데모 계정은 보내지 않는다.
+ * 알림이 꺼져 있거나 메일이 꺼져 있으면 보내지 않는다. 이슈 메일 몫(mailRoom)을 같이 쓰고, 몫이 없으면 다음 검사로 미룬다(기록을 쓰지 않는다).
+ * 기록 `issue-filter-mail-state.json`(상태 파일) — '필터|사람' → 보낸 포탈 날짜. 보낸 뒤에만 쓴다.
+ */
+export const WEEKLY_ROWS = 50;
+const WEEKLY_NAME = registerStateFile('issue-filter-mail-state.json');
+const weeklyFile = () => path.join(config.configDir, WEEKLY_NAME);
+let weeklyState = null;
+function loadWeekly() {
+  if (weeklyState) return weeklyState;
+  weeklyState = {};
+  try {
+    if (fs.existsSync(weeklyFile())) {
+      const j = JSON.parse(fs.readFileSync(weeklyFile(), 'utf8'));
+      if (j && typeof j.sent === 'object' && !Array.isArray(j.sent)) for (const [k, v] of Object.entries(j.sent)) if (typeof v === 'string') weeklyState[k] = v;
+    }
+  } catch (e) { preserveCorrupt(weeklyFile(), e.message); weeklyState = {}; }
+  return weeklyState;
+}
+function saveWeekly(s) {
+  try { atomicWriteFileSync(weeklyFile(), JSON.stringify({ sent: s }), { mode: 0o600 }); } catch (e) { console.warn(`[issues] 필터 주간 메일 기록을 쓰지 못했습니다: ${e?.code || e?.message}`); }
+}
+const DUE_TXT = (ms) => (ms ? dayKey(ms) : '기한 없음');
+function weeklyBody(username, f, list) {
+  const rows = list.rows || [];
+  const more = Math.max(0, (list.total || 0) - rows.length);
+  const text = `${username} 님, 저장 필터 ‘${f.name}’ — ${list.total}건\n검색식: ${f.query}\n\n${rows.map((r) => `· ${r.key} [${st(r.status)}] ${r.title}${r.assignee ? ` — ${r.assignee}` : ''}`).join('\n')}${more ? `\n· 외 ${more}건` : ''}\n\n포탈 › 이슈 › 필터에서 확인하세요.`;
+  const tr = rows.map((r) => `<tr><td style="padding:3px 8px;font-family:monospace;">${esc(r.key)}</td><td style="padding:3px 8px;">${esc(st(r.status))}</td><td style="padding:3px 8px;">${esc(r.title)}</td><td style="padding:3px 8px;">${esc(r.assignee || '미할당')}</td><td style="padding:3px 8px;">${esc(DUE_TXT(r.dueAt))}</td></tr>`).join('');
+  const html = `<div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Malgun Gothic',sans-serif;max-width:760px;padding:16px;color:#101828;">
+  <h2 style="margin:0 0 6px;font-size:16px;">저장 필터 ‘${esc(f.name)}’ — ${list.total}건</h2>
+  <div style="color:#667085;font-size:12px;margin-bottom:10px;font-family:monospace;">${esc(f.query)}</div>
+  <table style="border-collapse:collapse;font-size:12.5px;color:#344054;"><tr style="background:#f2f4f7;"><th style="padding:3px 8px;text-align:left;">키</th><th style="padding:3px 8px;text-align:left;">상태</th><th style="padding:3px 8px;text-align:left;">제목</th><th style="padding:3px 8px;text-align:left;">담당자</th><th style="padding:3px 8px;text-align:left;">기한</th></tr>${tr}</table>
+  ${more ? `<div style="font-size:12px;margin-top:6px;">외 ${more}건 — 포탈에서 확인하세요.</div>` : ''}
+  <div style="color:#667085;font-size:11.5px;margin-top:16px;border-top:1px solid #eaecf0;padding-top:10px;">VMware Global Monitoring Portal — 이슈 › 필터에서 구독을 끌 수 있습니다. 결과는 받는 분이 볼 수 있는 법인의 이슈만입니다.</div>
+</div>`;
+  return { text, html };
+}
+/** 받는 사람의 조회 범위(로컬 계정) — AD 등 로컬이 아닌 이름은 null(전체), 데모 계정은 false(보내지 않음). */
+function accessFor(name, byName, snap) {
+  const u = byName.get(name);
+  if (!u) return { read: null, write: null };
+  if (u.demo) return false;
+  return { read: scopedVcenterIds(u, snap), write: null };
+}
+/** @returns {Promise<{ sent: number, skipped: number, deferred: number }>} */
+export async function scanWeeklyFilters(now = Date.now()) {
+  const out = { sent: 0, skipped: 0, deferred: 0 };
+  const parts = portalParts(now);
+  if (parts.dow !== 1 || parts.h < 9) return out;
+  const settings = loadIssueSettings();
+  if (!settings.notify?.enabled || settings.notify?.mail === false) return out;
+  const today = dayKey(now);
+  const sent = loadWeekly();
+  const snap = store.get();
+  let users = [];
+  try { users = listUsers(); } catch { users = []; }
+  const byName = new Map(users.filter((u) => u?.username).map((u) => [u.username, u]));
+  let changed = false;
+  for (const f of subscribedFilters()) {
+    for (const u of f.subscribers) {
+      const mark = `${f.id}|${u}`;
+      if (sent[mark] === today) continue;
+      const email = emailOf(settings, u);
+      const access = accessFor(u, byName, snap);
+      if (!email || access === false) { out.skipped += 1; if (!email) status.noEmail += 1; continue; }
+      if (mailRoom(now) <= 0) { out.deferred += 1; continue; }
+      let list;
+      try {
+        const vcs = (snap?.vcenters || []).filter((v) => v?.id && (!access.read || access.read.has(v.id))).map((v) => ({ id: v.id, name: v.name || v.id }));
+        list = listIssues({ query: f.query, access, me: u, limit: WEEKLY_ROWS, now, ctx: queryContext({ me: u, now, vcenters: vcs }) });
+      } catch (e) { out.skipped += 1; status.lastError = `필터 ‘${capStr(f.name, 40)}’ 주간 메일: ${String(e?.message || e).slice(0, 160)}`; continue; }
+      const { text, html } = weeklyBody(u, f, list);
+      try {
+        mailSentAt.push(Date.now());
+        const r = await senders.mail({ kind: 'issues', to: [email], subject: `[이슈] 주간 필터 — ${capStr(f.name, 60)} ${list.total}건`, html, text });
+        if (r?.ok) { status.mails += 1; out.sent += 1; sent[mark] = today; changed = true; }
+        else if (r?.skipped) { status.mailSkip += 1; status.lastError = r.reason || '메일 발송을 건너뛰었습니다'; out.skipped += 1; }
+        else { status.mailFail += 1; status.lastError = r?.reason || '메일 발송 실패'; out.skipped += 1; }
+      } catch (e) { status.mailFail += 1; status.lastError = String(e?.message || e).slice(0, 200); out.skipped += 1; }
+    }
+  }
+  // 오래된 기록 정리(3주 넘게 지난 것)
+  const cut = dayKey(now - 21 * 86_400_000);
+  for (const [k, v] of Object.entries(sent)) if (v < cut) { delete sent[k]; changed = true; }
+  if (changed) saveWeekly(sent);
+  status.weeklySent = (status.weeklySent || 0) + out.sent;
+  if (out.deferred) status.mailDeferred += out.deferred;
+  return out;
+}
+
 /* ───── 시작 ───── */
 let started = false;
 let dueTimer = null;
@@ -350,7 +446,10 @@ export function startIssueNotify() {
   onIssueEvent((ev) => queueIssueEvent(ev));
   // v2.881 위키 문서 저장 · 댓글 알림 — 같은 묶음 · 같은 범위 판정
   import('../wiki/store.js').then(({ onWikiEvent }) => onWikiEvent((ev) => queueWikiEvent(ev))).catch((e) => console.warn(`[issues] 위키 알림 연결 실패: ${String(e?.message || e).slice(0, 160)}`));
-  const scan = () => { try { scanDue(); } catch (e) { console.warn(`[issues] 기한 알림 검사 실패: ${e?.message || e}`); } };
+  const scan = () => {
+    try { scanDue(); } catch (e) { console.warn(`[issues] 기한 알림 검사 실패: ${e?.message || e}`); }
+    scanWeeklyFilters().catch((e) => console.warn(`[issues] 필터 주간 메일 실패: ${String(e?.message || e).slice(0, 160)}`)); // v2.883
+  };
   dueTimer = setInterval(scan, DUE_SCAN_MS);
   dueTimer.unref?.();
   // 기동 뒤 한 번(감사 A2-02·A5-04) — 30분을 기다리지 않는다. 재기동 직전 묶음에 있던 일반 이벤트(할당·상태·댓글)는 메모리에만 있어
@@ -360,7 +459,7 @@ export function startIssueNotify() {
 }
 /** 테스트 전용. */
 export function _resetIssueNotifyForTest() {
-  pending.clear(); chatLines = []; chatExtra = 0; dueState = null; pendingDue.clear(); droppedNow.clear(); mailSentAt.length = 0;
+  pending.clear(); chatLines = []; chatExtra = 0; dueState = null; weeklyState = null; pendingDue.clear(); droppedNow.clear(); mailSentAt.length = 0;
   if (timer) { clearTimeout(timer); timer = null; }
   for (const k of Object.keys(status)) status[k] = typeof status[k] === 'number' ? 0 : null;
 }

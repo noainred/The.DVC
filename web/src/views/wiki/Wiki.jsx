@@ -11,7 +11,7 @@ import { fetchJson, postJson, putJson, delJson } from '../../api.js';
 import { STable } from '../../components/STable.jsx';
 import { Loading, ErrorBox } from '../../components/primitives.jsx';
 import Select from '../../components/Select.jsx';
-import { makeLatest, persistNote, parseLabels } from '../issues/issueText.js';
+import { makeLatest, persistNote, parseLabels, statusText as issueStatusText } from '../issues/issueText.js';
 import { MdView, MdToc } from './MdView.jsx';
 import {
   STATUS_ORDER, statusText, parseWikiHash, wikiHash, buildTree, flattenTree, parentOptions, breadcrumb, fillTemplate, wikiSaveFailText, isConflict,
@@ -304,6 +304,16 @@ function PageView({ id, space, meta, pages, onWritten }) {
       window.dispatchEvent(new HashChangeEvent('hashchange'));
     }
   }, [page, space]);
+  // v2.883 체크리스트 체크 — 판을 만들지 않는다(서버가 지금 판 본문을 같이 고친다). 문서가 바뀌었으면 다시 읽고 사유를 보인다.
+  const toggleTask = async (line, checked) => {
+    setBusy(true); setMsg('');
+    try {
+      const r = await postJson(`/wiki/pages/${page.id}/check`, { baseVersion: page.version, line, checked });
+      if (r?.ok === false) setMsg(r.reason || '체크하지 못했습니다');
+      else setMsg(persistNote(r?.persist));
+      load();
+    } catch (e) { setMsg(String(e?.message || e)); } finally { setBusy(false); }
+  };
   const act = async (fn, after) => {
     setBusy(true); setMsg('');
     try {
@@ -348,7 +358,10 @@ function PageView({ id, space, meta, pages, onWritten }) {
       {!page.writable && meta.canWrite && <div className="muted wiki-hint">이 문서의 스페이스는 쓰기 범위 밖이거나 읽기 전용이라 조회만 할 수 있습니다.</div>}
       <div className="wiki-doc-body">
         <div className="wiki-doc-main">
-          {page.body.trim() ? <MdView md={page.body} idPrefix={`p${page.id}`} pages={pages} spaceId={space} dropTitle={page.title} /> : <div className="muted">본문이 비어 있습니다.</div>}
+          {page.body.trim()
+            ? <MdView md={page.body} idPrefix={`p${page.id}`} pages={pages} spaceId={space} dropTitle={page.title} busy={busy}
+                onToggleTask={writable ? (line, checked) => toggleTask(line, checked) : null} />
+            : <div className="muted">본문이 비어 있습니다.</div>}
         </div>
         <aside className="wiki-doc-aside">
           <MdToc md={page.body} idPrefix={`p${page.id}`} dropTitle={page.title} />
@@ -358,6 +371,12 @@ function PageView({ id, space, meta, pages, onWritten }) {
               ? <div className="wiki-keys">{page.issueKeys.map((k) => <a key={k} className="md-iss" href={`#/issues/list/${k}`}>{k}</a>)}</div>
               : <div className="muted wiki-small">본문 · 댓글에 ISS-번호를 적으면 여기와 그 이슈의 ‘관련 문서’ 에 서로 이어집니다.</div>}
           </div>
+          {(page.checkLog || []).length > 0 && (
+            <div className="wiki-aside-box">
+              <div className="wiki-aside-title">최근 체크</div>
+              <ul className="wiki-list">{page.checkLog.slice(0, 5).map((c, k) => <li key={k} className="wiki-small"><span className="muted">{c.by} · {dateText(c.at)}</span> {c.checked ? '☑' : '☐'} {c.text}</li>)}</ul>
+            </div>
+          )}
           {children.length > 0 && (
             <div className="wiki-aside-box">
               <div className="wiki-aside-title">하위 문서</div>
@@ -536,6 +555,7 @@ function Editor({ space, meta, pages, page = null, initial = null, onWritten }) 
       </div>
       <div className="wiki-toolbar">
         {SNIPPETS.map(([label, snip]) => <button key={label} type="button" className="btn" onClick={() => insert(snip)}>{label}</button>)}
+        <IssuePicker onPick={(key) => insert(key)} />
         <span className="wiki-grow" />
         {[['split', '나란히'], ['edit', '편집만'], ['preview', '미리보기']].map(([k, l]) => <button key={k} type="button" className={`btn${mode === k ? ' primary' : ''}`} onClick={() => setMode(k)}>{l}</button>)}
       </div>
@@ -564,6 +584,44 @@ function Editor({ space, meta, pages, page = null, initial = null, onWritten }) 
       <div className="wiki-actions wiki-editor-foot">
         <button className="btn primary" disabled={busy || !title.trim()} onClick={() => save()}>{page ? '저장(새 판)' : '만들기'}</button>
         <button className="btn" disabled={busy} onClick={cancel}>취소</button>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * 이슈 찾기(v2.883 · 시안 ③ '이슈 링크 찾기') — 키 · 제목으로 찾아 본문에 'ISS-번호' 를 넣는다(저장하면 자동 링크 + 역참조).
+ * 내가 볼 수 있는 이슈만(서버 /issues 의 범위). 입력이 멈추면 한 번 찾는다(300ms).
+ */
+function IssuePicker({ onPick }) {
+  const [open, setOpen] = useState(false);
+  const [q, setQ] = useState('');
+  const [rows, setRows] = useState(null);
+  const [err, setErr] = useState('');
+  const latest = useLatest();
+  useEffect(() => {
+    if (!open) return undefined;
+    const t = setTimeout(() => {
+      const k = latest.next();
+      fetchJson('/issues', { q: q.trim(), done: 'all', limit: 12 }).then((r) => { if (latest.isLatest(k)) { setRows(r.rows || []); setErr(''); } })
+        .catch((e) => { if (latest.isLatest(k)) { setRows([]); setErr(String(e?.message || e)); } });
+    }, 300);
+    return () => clearTimeout(t);
+  }, [open, q, latest]);
+  if (!open) return <button type="button" className="btn" onClick={() => setOpen(true)}>이슈 찾기</button>;
+  return (
+    <div className="wiki-issue-pick" role="dialog" aria-label="이슈 찾기">
+      <input className="input" autoFocus value={q} onChange={(e) => setQ(e.target.value)} placeholder="키 · 제목 · 담당자" maxLength={100} aria-label="이슈 찾기" />
+      <button type="button" className="btn" onClick={() => { setOpen(false); setQ(''); setRows(null); }}>닫기</button>
+      <div className="wiki-issue-pick-list">
+        {err && <div className="muted wiki-small">{err}</div>}
+        {rows == null && <div className="muted wiki-small">찾는 중…</div>}
+        {rows && rows.length === 0 && !err && <div className="muted wiki-small">찾은 이슈가 없습니다(내가 볼 수 있는 이슈만).</div>}
+        {(rows || []).map((r) => (
+          <button key={r.key} type="button" className="wiki-issue-pick-item" onClick={() => { onPick(r.key); setOpen(false); setQ(''); setRows(null); }}>
+            <span className="md-iss">{r.key}</span> <span className="wiki-issue-pick-title">{r.title}</span> <span className="muted wiki-small">{issueStatusText(r.status)}</span>
+          </button>
+        ))}
       </div>
     </div>
   );

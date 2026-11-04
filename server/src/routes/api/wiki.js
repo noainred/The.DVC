@@ -19,7 +19,7 @@ import { scopedVcenterIds, writeScopedVcenterIds } from '../../auth/scope.js';
 import { store } from '../../store.js';
 import {
   listSpaces, spaceView, updateSpace, tree, getPage, createPage, updatePage, revertPage, versionBody, diffVersions, deletePage,
-  addComment, deleteComment, setWatch, searchPages, backrefs, homeOf, wikiSeq, waitWikiPersist, wikiPersist, PERSIST_WAIT_MS,
+  addComment, deleteComment, setWatch, searchPages, backrefs, homeOf, toggleTask, wikiSeq, waitWikiPersist, wikiPersist, PERSIST_WAIT_MS,
   TEMPLATES, STATUSES, LIMITS, PUB,
 } from '../../wiki/store.js';
 
@@ -144,6 +144,15 @@ export function registerWiki(api) {
     try {
       const p = revertPage(req.params.id, req.body?.v, userOf(req), { access: accessOf(req), note: str(req.body?.note) });
       audit(req, 'wiki.revert', p.id, `v${req.body?.v} → v${p.version}`);
+      res.json({ ok: true, page: p, persist: await persistView(req) });
+    } catch (e) { fail(res, e, next); }
+  });
+  // v2.883 체크리스트 체크 — 쓰기 역할 · 쓰기 범위 · 읽기 전용 아님(저장과 같은 판정). 판을 만들지 않는다(저장소가 지금 판 본문을 같이 고친다).
+  api.post('/wiki/pages/:id/check', writers, async (req, res, next) => {
+    if (!ID_RE.test(req.params.id)) return badId(res);
+    if (!canWrite(req)) return res.status(403).json({ ok: false, reason: '데모 계정은 문서를 고칠 수 없습니다' });
+    try {
+      const p = toggleTask(req.params.id, req.body || {}, userOf(req), { access: accessOf(req) });
       res.json({ ok: true, page: p, persist: await persistView(req) });
     } catch (e) { fail(res, e, next); }
   });
