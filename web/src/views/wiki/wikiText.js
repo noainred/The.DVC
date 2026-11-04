@@ -210,6 +210,8 @@ export function spaceName(spaces, id) {
 
 /* ───── v2.885 C-2 슬래시 명령(편집기) ───── */
 const CARET = '\u0001'; // 스니펫 안의 커서 자리(없으면 끝)
+// 마크다운 코드 울타리(백틱 셋) — 화면 문구가 아니라 본문에 넣는 문법이다. 템플릿 안에 이스케이프 백틱을 쓰면 문구 스윕(uiText.test.js)에 걸린다.
+const FENCE = '\u0060\u0060\u0060';
 /** 명령 — keys 는 찾는 말(한글 · 영어). snip 은 '/명령' 자리를 바꾼다. today 는 그날 날짜(포탈이 아니라 브라우저 날짜 — 문서에 적는 글이다). */
 export const SLASH_COMMANDS = Object.freeze([
   { k: 'h2', label: '제목(큰)', keys: ['제목', 'heading', 'h2'], snip: `## ${CARET}` },
@@ -218,7 +220,7 @@ export const SLASH_COMMANDS = Object.freeze([
   { k: 'ol', label: '번호 목록', keys: ['번호', 'number', 'ol'], snip: `1. ${CARET}` },
   { k: 'task', label: '체크리스트', keys: ['체크', '할일', 'todo', 'task', 'check'], snip: `- [ ] ${CARET}` },
   { k: 'table', label: '표', keys: ['표', 'table'], snip: `| 열 | 열 |\n|---|---|\n| ${CARET} |  |` },
-  { k: 'code', label: '코드 블록', keys: ['코드', 'code'], snip: `\`\`\`bash\n${CARET}\n\`\`\`` },
+  { k: 'code', label: '코드 블록', keys: ['코드', 'code'], snip: `${FENCE}bash\n${CARET}\n${FENCE}` },
   { k: 'quote', label: '인용', keys: ['인용', 'quote'], snip: `> ${CARET}` },
   { k: 'info', label: '콜아웃 — 정보', keys: ['콜아웃', '정보', 'info', 'callout'], snip: `:::info\n${CARET}\n:::` },
   { k: 'warn', label: '콜아웃 — 주의', keys: ['콜아웃', '주의', 'warn', 'warning'], snip: `:::warn\n${CARET}\n:::` },
