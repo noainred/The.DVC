@@ -157,10 +157,13 @@ export default function BareosDisaster({ d, reload, onBatch = null }) {
         {check && check.checks.map((c) => {
           const [mk, tone] = DR_MARK[c.state] || DR_MARK.unknown;
           return (
-            <div key={c.key} style={{ display: 'grid', gridTemplateColumns: '26px minmax(0, 200px) minmax(0, 1fr)', gap: 10, alignItems: 'start', padding: '9px 14px', borderBottom: '1px solid var(--border-soft)' }}>
+            // 설명은 항목명 아래로 — 3열(표지 · 항목 · 설명)이면 400px 에서 설명 칸이 80px 남짓으로 좁아져 한두 단어씩 길게 늘어졌다(Chromium 판독)
+            <div key={c.key} style={{ display: 'grid', gridTemplateColumns: '26px minmax(0, 1fr)', gap: 10, alignItems: 'start', padding: '9px 14px', borderBottom: '1px solid var(--border-soft)' }}>
               <span aria-label={c.state} style={{ color: TONE[tone], fontWeight: 800, textAlign: 'center' }}>{mk}</span>
-              <b style={{ fontSize: 12.5, minWidth: 0, overflowWrap: 'anywhere' }}>{c.label}</b>
-              <span className="muted" style={{ fontSize: 12, minWidth: 0, overflowWrap: 'anywhere' }}>{c.detail}{c.lastOk ? ` · 마지막 성공 ${whenText(c.lastOk)}` : ''}</span>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 }}>
+                <b style={{ fontSize: 12.5, overflowWrap: 'anywhere' }}>{c.label}</b>
+                <span className="muted" style={{ fontSize: 12, overflowWrap: 'anywhere' }}>{c.detail}{c.lastOk ? ` · 마지막 성공 ${whenText(c.lastOk)}` : ''}</span>
+              </div>
             </div>
           );
         })}
