@@ -17,16 +17,18 @@ import { config } from '../config.js';
 import { atomicWriteFileSync, preserveCorrupt, safeLoadText } from '../util/atomicWrite.js';
 import { capStr } from '../util/capStr.js';
 import { makeLoadError } from '../util/registryCore.js';
+import { defaultSla, normalizeSla } from './sla.js';
 
 export const SETTINGS_LIMITS = Object.freeze({ components: 100, pool: 100, people: 500, name: 64, component: 60, email: 254 });
-export const NOTIFY_EVENTS = Object.freeze(['assigned', 'status', 'progress', 'comment', 'due', 'wiki']);
+export const NOTIFY_EVENTS = Object.freeze(['assigned', 'status', 'progress', 'comment', 'due', 'wiki', 'sla']); // v2.888 sla — SLA 초과(이슈 · 단계마다 한 번)
 
 const fileOf = () => path.join(config.configDir, 'issue-settings.json');
 
 export function defaultIssueSettings() {
   return {
     autoAssign: { enabled: false, components: [], pool: [] },
-    notify: { enabled: false, mail: true, chat: false, events: { assigned: true, status: true, progress: true, comment: true, due: true, wiki: true }, people: [] },
+    notify: { enabled: false, mail: true, chat: false, events: { assigned: true, status: true, progress: true, comment: true, due: true, wiki: true, sla: true }, people: [] },
+    sla: defaultSla(), // v2.888 C-3 — 기본 꺼짐(issues/sla.js)
   };
 }
 
@@ -96,6 +98,7 @@ export function normalizeIssueSettings(raw, { strict = true } = {}) {
     value: {
       autoAssign: { enabled: a.enabled === true, components, pool },
       notify: { enabled: n.enabled === true, mail: n.mail !== false, chat: n.chat === true, events, people },
+      sla: tryOr(() => normalizeSla(r.sla, { strict })) || normalizeSla(r.sla, { strict: false }),
     },
     dropped,
   };
@@ -126,7 +129,9 @@ export function loadIssueSettings() {
 export function issueSettingsLoadError() { loadIssueSettings(); return loadErr.get()?.reason || null; }
 
 export function saveIssueSettings(body) {
-  const { value } = normalizeIssueSettings(body, { strict: true });
+  // v2.888: sla 칸이 없는 저장(옛 화면)은 지금 SLA 설정을 그대로 둔다 — 알림만 고쳤는데 SLA 가 기본값(꺼짐)으로 돌아가지 않게
+  const b = body && typeof body === 'object' && !Array.isArray(body) && !Object.hasOwn(body, 'sla') ? { ...body, sla: loadIssueSettings().sla } : body;
+  const { value } = normalizeIssueSettings(b, { strict: true });
   atomicWriteFileSync(fileOf(), JSON.stringify(value, null, 1), { mode: 0o600 });
   cache = value; loadErr.clear();
   return value;

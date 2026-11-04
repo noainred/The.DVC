@@ -13,6 +13,7 @@ import {
   STATUS_ORDER, STATUS_TEXT, makeLatest, saveFailText, persistNote, peopleOptions, vcName, vcenterOptions, dateText, timeText, parseLabels, LOAD_CAP, loadPct,
   QUICK_FILTERS, QUERY_FIELD_TEXT, chipText, removeChip, errorSegments, SPRINT_STATE_TEXT, sprintRangeText, sprintName, sprintOptions, burnPoints, childText,
   epicOptions, colorIndexOf, progressOf, groupLinks, LINK_ADD_TEXT,
+  ISSUE_QUERY_KEY,
 } from './issueText.js';
 
 function useLatest() {
@@ -535,11 +536,11 @@ export function EpicsView({ meta, onOpen, onWritten }) {
 }
 
 /* ───────────── 검색식 · 저장 필터(⑧) ───────────── */
-const QUERY_KEY = 'issues.query';
+const QUERY_KEY = ISSUE_QUERY_KEY; // v2.888 issueText.js 로 옮김(릴리스 노트가 이 큰 파일을 불러오지 않게)
 function readSaved() { try { return window.sessionStorage.getItem(QUERY_KEY) || ''; } catch { return ''; } }
 function writeSaved(q) { try { window.sessionStorage.setItem(QUERY_KEY, q); } catch { /* 저장소를 못 쓰는 브라우저 — 무시 */ } }
 
-export function FiltersView({ meta, onOpen, onWritten }) {
+export function FiltersView({ meta, onOpen, onWritten, onBoard = null }) {
   const [q, setQ] = useState(() => readSaved() || QUICK_FILTERS[0].query);
   const [ran, setRan] = useState('');
   const [res, setRes] = useState(null); // { rows, total, all, query:{clauses, order, orderStart} }
@@ -635,6 +636,7 @@ export function FiltersView({ meta, onOpen, onWritten }) {
             {meta.canShareFilters && cur?.editable && <button className="btn" onClick={() => fsave('share')}>{cur.shared ? '공유 끄기' : '공유'}</button>}
             {meta.canFilters && cur?.id && <button className="btn" onClick={() => fsave('subscribe')} title="월요일 09:00(포탈 날짜)에 이 필터 결과를 메일로 — 이슈 › 설정 › 알림의 내 메일 주소로 · 내가 볼 수 있는 이슈만">{cur.subscribed ? '주간 메일 끄기' : '주간 메일 구독'}</button>}
             {cur?.deletable && <button className="btn" onClick={() => fsave('delete')}>지우기</button>}
+            {onBoard && <button className="btn" disabled={!!qerr || !ran.trim()} title="이 검색식으로 거른 이슈를 보드(칸반)로 봅니다 — 보드 위 띠에서 해제" onClick={() => onBoard({ name: cur ? cur.name : '검색식', query: ran })}>보드로 보기</button>}
           </div>
           <form className="iss-query" onSubmit={submit}>
             <textarea className="input iss-query-input" rows={2} value={q} onChange={(e) => setQ(e.target.value)} maxLength={meta.queryLimits?.length || 500} spellCheck={false} aria-label="검색식"

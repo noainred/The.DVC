@@ -40,6 +40,8 @@ import { registerExitFlush } from '../util/exitFlush.js';
 import { dayKey, dayIndex, dayLabel, dayStartMs, DAY_MS } from '../util/dayKey.js';
 import { getSprint, listSprints, activeSprintIds, findSprintByName } from './sprints.js';
 import { parseQuery, compileQuery, orderComparator } from './query.js';
+import { slaOf, slaQueryState } from './sla.js';
+import { loadIssueSettings } from './settings.js';
 
 export const KEY_PREFIX = 'ISS';
 export const KEY_RE = /^ISS-\d{1,9}$/;
@@ -62,7 +64,11 @@ export const LIMITS = Object.freeze({
   childMax: 200,
   // v2.883 연결 — 이슈마다 저장하는 연결 수(반대 방향은 읽을 때 계산하므로 세지 않는다)
   linkMax: 30,
+  // v2.888 C-3 시간 추적 · 버전 — 예상은 90일(분) · 작업 기록은 이슈마다 200개 · 한 줄 1~1440분(하루) · 메모 200자 · 버전 40자
+  estimateMaxMin: 60 * 24 * 90, worklogMax: 200, worklogMaxMin: 1440, worklogNote: 200, version: 40,
 });
+/** v2.888 버전 표기 — 포탈 버전(2.885.0) · 사내 표기(R24.11 · hotfix-3). 영숫자로 시작하고 영숫자 . _ - 만. */
+export const VERSION_RE = /^[0-9A-Za-z][0-9A-Za-z._-]{0,39}$/;
 /** v2.883 연결 종류 — 만든 쪽에만 저장하고 반대 방향(INVERSE)은 읽을 때 계산한다(상대 이슈의 쓰기 범위가 없어도 된다). */
 export const LINK_TYPES = Object.freeze(['blocks', 'blockedBy', 'relates', 'duplicates', 'duplicatedBy']);
 export const LINK_INVERSE = Object.freeze({ blocks: 'blockedBy', blockedBy: 'blocks', relates: 'relates', duplicates: 'duplicatedBy', duplicatedBy: 'duplicates' });
@@ -631,6 +637,27 @@ function timeField(v, field) {
   if (!Number.isFinite(n) || n <= 0) throw fieldError(field, '시각을 읽지 못했습니다');
   return Math.trunc(n);
 }
+/** v2.888 예상(분): 빈 값 = 없음(null) · 0~estimateMaxMin 정수. */
+function estimateField(v) {
+  if (v == null || v === '') return null;
+  const n = Number(v);
+  if (!Number.isInteger(n) || n < 0 || n > LIMITS.estimateMaxMin) throw fieldError('estimateMin', `0~${LIMITS.estimateMaxMin} 분 정수여야 합니다`);
+  return n;
+}
+/** v2.888 수정/영향 버전: 빈 값 = 없음('') · VERSION_RE. */
+function versionField(v, field) {
+  if (v == null || v === '') return '';
+  if (typeof v !== 'string' || !VERSION_RE.test(v.trim())) throw fieldError(field, '버전은 영숫자로 시작하는 40자 이하(영숫자 . _ - — 예: 2.885.0)여야 합니다');
+  return capStr(v.trim(), LIMITS.version);
+}
+const worklogOf = (x) => (Array.isArray(x?.worklog) ? x.worklog.filter((w) => w && typeof w === 'object' && typeof w.id === 'string' && Number.isInteger(w.minutes)) : []);
+export const spentOf = (x) => worklogOf(x).reduce((a, w) => a + w.minutes, 0);
+/** 분 → '1h 30m'(이력 · 메일용 — 화면은 issueText.js minutesText 와 같은 모양). */
+export function minutesText(m) {
+  if (!Number.isFinite(m)) return '';
+  const h = Math.floor(m / 60); const r = m % 60;
+  return h && r ? `${h}h ${r}m` : h ? `${h}h` : `${r}m`;
+}
 function labelsField(v) {
   if (v == null) return [];
   if (typeof v === 'string') v = v.split(',');
@@ -759,7 +786,7 @@ function sprintField(v) {
 const sprintNameOf = (id) => (id ? (getSprint(id)?.name || id) : '');
 
 /** 목록용 요약(본문·댓글·이력 제외). */
-export function summary(x, idx = null, access = FULL_ACCESS) {
+export function summary(x, idx = null, access = FULL_ACCESS, now = Date.now()) {
   const ix = idx || treeIndex(load().issues);
   const r = rollupOf(x, ix);
   const vis = (k) => { if (!k) return ''; const y = ix.byKey.get(k); return y && canSee(y, access) ? k : ''; };
@@ -776,6 +803,10 @@ export function summary(x, idx = null, access = FULL_ACCESS) {
     progressAuto: r.auto, childCount: r.childCount, childDone: r.childDone,
     // v2.883 — 이 이슈를 막고 있는 열린 이슈 수(볼 수 있는 것만 — 카드의 '차단됨')
     blockedOpen: relationsOf(x, ix, access).filter((l) => l.type === 'blockedBy' && l.open).length,
+    // v2.888 C-3 — 시간 추적 · 버전 · SLA(설정이 꺼져 있거나 대상이 아니면 null)
+    estimateMin: Number.isInteger(x.estimateMin) ? x.estimateMin : null, spentMin: spentOf(x), worklogCount: worklogOf(x).length,
+    fixVersion: x.fixVersion || '', affectsVersion: x.affectsVersion || '',
+    sla: slaOf(x, loadIssueSettings().sla, now),
   };
 }
 /** 상세 — 댓글·이력 포함. `me` 는 보는 사람(관찰 여부). */
@@ -796,6 +827,7 @@ export function viewIssue(x, me = '', access = FULL_ACCESS) {
     createdBy: x.createdBy || x.reporter || '', updatedBy: x.updatedBy || '',
     comments: commentsOf(x).map((c) => ({ id: c.id, author: c.author, body: c.body, createdAt: c.createdAt })),
     history: historyOf(x), historyDropped: Number(x.historyDropped) || 0,
+    worklog: worklogOf(x).map((w) => ({ id: w.id, by: w.by, at: w.at, on: w.on || '', minutes: w.minutes, note: w.note || '' })).reverse(), // v2.888 최신 먼저
   };
 }
 
@@ -824,7 +856,7 @@ export function listIssues({ q = '', status = '', assignee = null, priority = ''
     return true;
   });
   // 감사 A1-02: 행마다 쓰기 가능 여부 — 화면이 '나에게 할당'·일괄 선택을 쓰기 범위 밖 행에서 잠근다(공용 이슈도 범위 계정에는 false).
-  const rows = hit.map((x) => ({ ...summary(x, idx, access), writable: canEdit(x, access) })).sort((a, b) => (PRIO_RANK[a.priority] ?? 9) - (PRIO_RANK[b.priority] ?? 9)
+  const rows = hit.map((x) => ({ ...summary(x, idx, access, now), writable: canEdit(x, access) })).sort((a, b) => (PRIO_RANK[a.priority] ?? 9) - (PRIO_RANK[b.priority] ?? 9)
     || ((a.dueAt ?? Infinity) - (b.dueAt ?? Infinity)) || (b.updatedAt - a.updatedAt));
   return { total: rows.length, all: all.length, offset, limit, rows: rows.slice(offset, offset + limit) };
 }
@@ -841,7 +873,7 @@ export function queryContext({ me = '', now = Date.now(), vcenters = [], docs = 
   const vcByName = new Map();
   for (const v of vcenters || []) { if (v?.id) { vcByName.set(String(v.id).toLowerCase(), v.id); if (v.name) vcByName.set(String(v.name).toLowerCase(), v.id); } }
   return {
-    me, today: dayIndex(now), dayOf: (ms) => dayIndex(ms), activeSprints: activeSprintIds(),
+    me, today: dayIndex(now), now, sla: loadIssueSettings().sla, dayOf: (ms) => dayIndex(ms), activeSprints: activeSprintIds(),
     sprintId: (raw) => { const r = String(raw || '').trim(); if (/^S[a-f0-9]{10}$/.test(r)) return r; return findSprintByName(r)?.id || null; },
     sprintName: (id) => sprintNameOf(id),
     vcenterId: (raw) => vcByName.get(String(raw || '').trim().toLowerCase()) || String(raw || '').trim(),
@@ -859,6 +891,7 @@ function queryRow(x, idx, ctx, access = FULL_ACCESS) {
     progress: (() => { const r = rollupOf(x, idx); return r.auto ? r.pct : (Number.isInteger(x.progress) ? x.progress : null); })(),
     dueAt: x.dueAt ?? null, createdAt: x.createdAt, updatedAt: x.updatedAt || x.createdAt, closedAt: x.closedAt ?? null,
     docs: ctx.docs ? (ctx.docs(x.key) || []) : [],
+    fixVersion: x.fixVersion || '', affectsVersion: x.affectsVersion || '', sla: slaQueryState(slaOf(x, ctx.sla || loadIssueSettings().sla, ctx.now)), // v2.888
   };
 }
 function queryError(parsed) {
@@ -876,7 +909,7 @@ function runQuery(all, idx, query, { offset, limit, now, access, me, ctx }) {
   for (const x of all) { const r = queryRow(x, idx, c, access); if (pred(r)) hit.push({ x, r }); }
   if (cmp) hit.sort((a, b) => cmp(a.r, b.r) || (b.r.updatedAt - a.r.updatedAt));
   else hit.sort((a, b) => (PRIO_RANK[a.x.priority] ?? 9) - (PRIO_RANK[b.x.priority] ?? 9) || ((a.x.dueAt ?? Infinity) - (b.x.dueAt ?? Infinity)) || (b.r.updatedAt - a.r.updatedAt));
-  const rows = hit.map(({ x }) => ({ ...summary(x, idx, access), writable: canEdit(x, access) }));
+  const rows = hit.map(({ x }) => ({ ...summary(x, idx, access, now), writable: canEdit(x, access) }));
   return { total: rows.length, all: all.length, offset, limit, rows: rows.slice(offset, offset + limit), query: { clauses: parsed.clauses, order: parsed.order, orderStart: parsed.orderStart } };
 }
 
@@ -1004,6 +1037,9 @@ export function createIssue(body, user, { access = FULL_ACCESS, known = null, au
     assignee, reporter: user,
     watchers: watchersField(b.watchers), labels: labelsField(b.labels), component: text(b.component, LIMITS.component, 'component'),
     dueAt: timeField(b.dueAt, 'dueAt'),
+    // v2.888 C-3(요청 등록은 받지 않는다 — b 에 없다)
+    ...(requestOnly ? {} : { estimateMin: estimateField(b.estimateMin), fixVersion: versionField(b.fixVersion, 'fixVersion'), affectsVersion: versionField(b.affectsVersion, 'affectsVersion') }),
+    worklog: [],
     createdAt: now, createdBy: user, updatedAt: now, updatedBy: user, closedAt: status === 'done' ? now : null,
     comments: [],
     ...(origin ? { origin: originField(origin) } : {}),
@@ -1053,6 +1089,10 @@ export function updateIssue(key, body, user, { access = FULL_ACCESS, known = nul
   if (has('labels')) set('labels', labelsField(b.labels));
   if (has('component')) set('component', text(b.component, LIMITS.component, 'component'));
   if (has('watchers')) set('watchers', watchersField(b.watchers));
+  // v2.888 C-3 — 예상 · 수정/영향 버전
+  if (has('estimateMin')) { const v = estimateField(b.estimateMin); if (v !== (Number.isInteger(x.estimateMin) ? x.estimateMin : null)) { next.estimateMin = v; entries.push({ at: now, by: user, field: 'estimate', from: x.estimateMin != null ? minutesText(x.estimateMin) : '', to: v != null ? minutesText(v) : '' }); } }
+  if (has('fixVersion')) set('fixVersion', versionField(b.fixVersion, 'fixVersion'));
+  if (has('affectsVersion')) set('affectsVersion', versionField(b.affectsVersion, 'affectsVersion'));
   // 감사 A1-05·A2-01: 값이 그대로면 다시 검사하지 않는다 — 등록에서 빠진 vCenter 의 이슈도 제목·본문 수정은 저장된다(법인을 바꿀 때만 검사).
   if (has('vcenterId') && !(typeof b.vcenterId === 'string' && b.vcenterId.trim() === (x.vcenterId || ''))) {
     const v = vcenterField(b.vcenterId, access, known);
@@ -1073,7 +1113,41 @@ export function updateIssue(key, body, user, { access = FULL_ACCESS, known = nul
   if (has('body') && x.body !== next.body) entries.push({ at: now, by: user, field: 'body', from: '', to: '(본문 수정)' });
   const changed = entries.length > 0 || (has('body') && x.body !== next.body);
   if (!changed) return viewIssue(x, user, access);
-  return viewIssue(replace(c, next, entries, user), user);
+  return viewIssue(replace(c, next, entries, user), user, access); // v2.888: 범위를 넘긴다(빠지면 연결 · 에픽이 범위 밖까지 보였다)
+}
+
+/* ───── v2.888 C-3 작업 기록(시간 추적) ───── */
+const ON_RE = /^\d{4}-\d{2}-\d{2}$/;
+/** 작업 기록 더하기 — 쓰기 범위 · 분(1~1440 정수) · 한 날(YYYY-MM-DD, 빈 값 = 오늘 · 미래 불가) · 메모. 이슈마다 200개(넘으면 409). */
+export function addWorklog(key, body, user, { access = FULL_ACCESS, now = Date.now() } = {}) {
+  const c = load();
+  const x = findFor(key, access, { write: true });
+  const b = body || {};
+  const minutes = Number(b.minutes);
+  if (!Number.isInteger(minutes) || minutes < 1 || minutes > LIMITS.worklogMaxMin) throw fieldError('minutes', `1~${LIMITS.worklogMaxMin} 분 정수여야 합니다(한 줄은 하루까지)`);
+  const today = dayKey(now);
+  let on = typeof b.on === 'string' ? b.on.trim() : '';
+  if (!on) on = today;
+  if (!ON_RE.test(on) || !Number.isFinite(Date.parse(`${on}T00:00:00Z`)) || new Date(`${on}T00:00:00Z`).toISOString().slice(0, 10) !== on) throw fieldError('on', '날짜(YYYY-MM-DD)를 읽지 못했습니다');
+  if (on > today) throw fieldError('on', '앞날의 작업은 기록할 수 없습니다');
+  const list = worklogOf(x);
+  if (list.length >= LIMITS.worklogMax) throw limitError(`작업 기록은 이슈마다 ${LIMITS.worklogMax}개까지입니다 — 하루 단위로 묶어 적어 주세요`);
+  const w = { id: newId(), by: user, at: now, on, minutes, note: text(b.note, LIMITS.worklogNote, 'note') };
+  const next = { ...x, worklog: [...list, w] };
+  const y = replace(c, next, [{ at: now, by: user, field: 'worklog', from: '', to: `+${minutesText(minutes)}`, ...(w.note ? { note: capStr(w.note, 80) } : {}) }], user);
+  return viewIssue(y, user, access);
+}
+/** 작업 기록 지우기 — 적은 사람 본인 또는 전체 범위 관리자(isMod). 쓰기 범위가 있어야 한다. */
+export function removeWorklog(key, id, user, { access = FULL_ACCESS, isMod = false } = {}) {
+  const c = load();
+  const x = findFor(key, access, { write: true });
+  const list = worklogOf(x);
+  const w = list.find((v) => v.id === id);
+  if (!w) { const e = new Error('없는 작업 기록입니다'); e.status = 404; throw e; }
+  if (!isMod && w.by !== user) throw forbidden('작업 기록은 적은 사람이나 관리자만 지울 수 있습니다');
+  const now = Date.now();
+  const y = replace(c, { ...x, worklog: list.filter((v) => v.id !== id) }, [{ at: now, by: user, field: 'worklog', from: `${minutesText(w.minutes)}(${w.by})`, to: '' }], user);
+  return viewIssue(y, user, access);
 }
 
 /** 상태 전이. progress 는 담당자 필수 · done 은 closedAt · done 에서 나오면 closedAt 해제. 같은 상태면 그대로. */
@@ -1156,11 +1230,11 @@ export function setBlocked(key, on, user, { reason = '', access = FULL_ACCESS } 
   if (on) {
     const why = text(reason, LIMITS.blockReason, 'reason', { required: true });
     const next = { ...x, blocked: { reason: why, at: now, by: user } };
-    return viewIssue(replace(c, next, [{ at: now, by: user, field: 'blocked', from: x.blocked ? x.blocked.reason : '', to: why }], user), user);
+    return viewIssue(replace(c, next, [{ at: now, by: user, field: 'blocked', from: x.blocked ? x.blocked.reason : '', to: why }], user), user, access);
   }
   if (!x.blocked) return viewIssue(x, user, access);
   const next = { ...x, blocked: null };
-  return viewIssue(replace(c, next, [{ at: now, by: user, field: 'blocked', from: x.blocked.reason, to: '' }], user), user);
+  return viewIssue(replace(c, next, [{ at: now, by: user, field: 'blocked', from: x.blocked.reason, to: '' }], user), user, access);
 }
 
 /** 관찰 켜기/끄기(본인). 상태를 명시한다(재전송이 두 번 바꾸지 않게). 이력·갱신 시각은 건드리지 않는다. */
@@ -1173,7 +1247,7 @@ export function setWatch(key, user, on, { access = FULL_ACCESS } = {}) {
   if (cur.includes(user) === on) return viewIssue(x, user, access);
   if (on && cur.length >= LIMITS.watcherMax) throw limitError(`관찰자는 ${LIMITS.watcherMax}명까지입니다`);
   const next = { ...x, watchers: on ? [...cur, user] : cur.filter((n) => n !== user) };
-  return viewIssue(replace(c, next, [], user, { touch: false }), user);
+  return viewIssue(replace(c, next, [], user, { touch: false }), user, access);
 }
 
 /**
@@ -1263,5 +1337,5 @@ export function deleteIssue(key, user, { isMod = false, access = FULL_ACCESS } =
   if (!isMod && x.reporter !== user) throw forbidden('보고자 본인이나 관리자만 지울 수 있습니다');
   if ((treeIndex(c.issues).kids.get(x.key) || []).length) throw fieldError('key', `${x.type === 'epic' ? '담긴 이슈가' : '하위 작업이'} 있어 지울 수 없습니다 — 먼저 빼거나 지우세요`);
   commit(c.issues.filter((y) => y.id !== x.id), { removedId: x.id });
-  return summary(x);
+  return summary(x, null, access);
 }

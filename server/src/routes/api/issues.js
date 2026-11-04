@@ -15,7 +15,7 @@
  *  · 설정(`/issues/settings` — 자동 할당 · 알림 · 사람별 메일 주소): 조회·저장 모두 관리자 + 전체 범위(전 법인 공용 설정 — 메일 주소를 담는다).
  *  · 쓰기 응답의 `persist` 는 게시판 리뷰 I-05 계약 그대로.
  */
-import { requireRole, listUsers } from '../../auth/auth.js';
+import { requireRole, requirePerm, listUsers } from '../../auth/auth.js';
 import { isDemoGuest, isAdminDetailUser } from '../../auth/demoGuest.js';
 import { userHasPermission } from '../../auth/permissions.js';
 import { logAudit } from '../../audit.js';
@@ -26,7 +26,7 @@ import { store } from '../../store.js';
 import { fullScopeOnlyWith } from '../admin/shared.js';
 import {
   listIssues, getIssue, createIssue, updateIssue, setStatus, assignIssue, bulkAssign, setBlocked, setWatch, addComment, deleteComment, deleteIssue, setProgress, activityFeed,
-  bulkEdit, moveSprintIssues, sprintBoard, queryContext, addLink, removeLink, LINK_TYPES,
+  bulkEdit, moveSprintIssues, sprintBoard, queryContext, addLink, removeLink, LINK_TYPES, addWorklog, removeWorklog,
   issueStats, knownNames, issuesSeq, waitIssuesPersist, issuesPersist, PERSIST_WAIT_MS,
   LIMITS, STATUSES, TYPES, PRIORITIES, KEY_RE, ID_RE, RECENT_DONE_MS, KEY_PREFIX,
 } from '../../issues/store.js';
@@ -43,6 +43,10 @@ import { listSprints, createSprint, updateSprint, closeSprint, getSprint, sprint
 import { listFilters, createFilter, updateFilter, deleteFilter, filtersLoadError, setSubscription, FILTER_LIMITS } from '../../issues/filters.js';
 import { QUERY_LIMITS, FIELDS as QUERY_FIELDS, ORDERABLE as QUERY_ORDERABLE } from '../../issues/query.js';
 import { issueDocIndex } from '../../wiki/store.js';
+import { issuesCsv } from '../../issues/exportCsv.js';
+import { currentVersion } from '../../config.js';
+import { listNotes } from '../../release-notes.js';
+import { fileStamp } from '../../util/dayKey.js';
 
 const writers = requireRole('admin', 'operator');
 const adminOnly = requireRole('admin');
@@ -160,6 +164,8 @@ export function registerIssues(api) {
       // v2.882 스프린트 · 검색식 · 저장 필터
       canSprints: write && !access.read && !access.write, linkTypes: LINK_TYPES, canShareFilters: write && !access.read && !access.write, canFilters: write,
       queryLimits: QUERY_LIMITS, queryFields: Object.keys(QUERY_FIELDS), queryOrderable: QUERY_ORDERABLE, sprintLimits: SPRINT_LIMITS, filterLimits: FILTER_LIMITS,
+      // v2.888 C-3 — SLA 목표(비밀 아님 — 배지 설명) · 포탈 버전(수정 버전 '반영됨' 판정) · 최근 릴리스 버전(고르기 후보)
+      sla: loadIssueSettings().sla, portalVersion: currentVersion(), knownVersions: (() => { try { return listNotes().slice(0, 15).map((n) => n.version); } catch { return []; } })(),
     });
   });
   api.get('/issues/stats', (req, res) => {
@@ -229,11 +235,10 @@ export function registerIssues(api) {
     const since = Number(req.query.since);
     res.json({ ok: true, ...activityFeed({ access: accessOf(req), limit, since: Number.isFinite(since) && since > 0 ? since : 0 }) });
   });
-  api.get('/issues', (req, res, next) => {
-    const { offset, limit } = pageArgs(req.query, { def: 500, max: LIMITS.issueMax });
+  /** 목록 · CSV 공용 — 범위가 요청 필터 · 검색식보다 먼저(listIssues). 던지면 호출부가 fail. */
+  const listFor = (req, { offset, limit }) => {
     const done = ['open', 'recent', 'all'].includes(req.query.done) ? req.query.done : 'open';
     const q = req.query;
-    res.set('Cache-Control', 'no-store');
     const access = accessOf(req);
     const query = str(q.query).slice(0, QUERY_LIMITS.length + 1);
     // 검색식(v2.882) — 법인 이름은 이 사용자가 볼 수 있는 vCenter 로만 푼다 · doc 필드는 보이는 위키 문서로만
@@ -242,17 +247,45 @@ export function registerIssues(api) {
       const docs = /\bdoc\b/i.test(query) ? issueDocIndex(access) : null;
       ctx = queryContext({ me: userOf(req), vcenters: vcenterChoices(access), docs: docs ? (k) => docs.get(k) || [] : null });
     }
+    return listIssues({
+      q: str(q.q), status: STATUSES.includes(q.status) ? q.status : '', assignee: Object.hasOwn(q, 'assignee') ? str(q.assignee) : null,
+      priority: PRIORITIES.includes(q.priority) ? q.priority : '', type: TYPES.includes(q.type) ? q.type : '', label: str(q.label).slice(0, LIMITS.label),
+      vcenterId: Object.hasOwn(q, 'vcenterId') ? str(q.vcenterId).slice(0, 128) : null,
+      sprintId: Object.hasOwn(q, 'sprintId') ? str(q.sprintId).slice(0, 20) : null,
+      done, offset, limit, access, query, me: userOf(req), ctx,
+    });
+  };
+  api.get('/issues', (req, res, next) => {
+    const { offset, limit } = pageArgs(req.query, { def: 500, max: LIMITS.issueMax });
+    res.set('Cache-Control', 'no-store');
     let list;
-    try {
-      list = listIssues({
-        q: str(q.q), status: STATUSES.includes(q.status) ? q.status : '', assignee: Object.hasOwn(q, 'assignee') ? str(q.assignee) : null,
-        priority: PRIORITIES.includes(q.priority) ? q.priority : '', type: TYPES.includes(q.type) ? q.type : '', label: str(q.label).slice(0, LIMITS.label),
-        vcenterId: Object.hasOwn(q, 'vcenterId') ? str(q.vcenterId).slice(0, 128) : null,
-        sprintId: Object.hasOwn(q, 'sprintId') ? str(q.sprintId).slice(0, 20) : null,
-        done, offset, limit, access, query, me: userOf(req), ctx,
-      });
-    } catch (e) { return fail(res, e, next); }
+    try { list = listFor(req, { offset, limit }); } catch (e) { return fail(res, e, next); }
     res.json({ ok: true, ...list, me: userOf(req), canWrite: canWrite(req), persist: issuesPersist({ admin: isAdmin(req) }) });
+  });
+  // v2.888 C-3 수정 버전별 이슈 수(릴리스 노트의 '이 버전에서 고친 이슈' 한 줄) — 로그인 사용자 전부 · 범위가 먼저(볼 수 있는 이슈만 센다).
+  api.get('/issues/versions', (req, res) => {
+    res.set('Cache-Control', 'no-store');
+    const fix = {};
+    for (const r of listIssues({ done: 'all', limit: LIMITS.issueMax, access: accessOf(req) }).rows) {
+      if (!r.fixVersion) continue;
+      const c = fix[r.fixVersion] || (fix[r.fixVersion] = { total: 0, open: 0 });
+      c.total += 1; if (r.status !== 'done') c.open += 1;
+    }
+    res.json({ ok: true, fix });
+  });
+  // v2.888 C-2 CSV 내보내기 — 목록과 같은 조건(범위 → 필터 · 검색식). 포탈 규약대로 권한 키 'data.csv'(관리자 · 권한에서 끌 수 있다 —
+  //   v2.643 CSV 가져오기/내보내기). ⚠ '/issues/:key' 보다 먼저.
+  api.get('/issues/export.csv', requirePerm('data.csv'), (req, res, next) => {
+    res.set('Cache-Control', 'no-store');
+    let list;
+    try { list = listFor(req, { offset: 0, limit: LIMITS.issueMax }); } catch (e) { return fail(res, e, next); }
+    const access = accessOf(req);
+    const names = new Map(vcenterChoices(access).map((v) => [v.id, v.name || v.id]));
+    const body = issuesCsv(list.rows, { vcName: (id) => names.get(id) || id, sprintName: (id) => getSprint(id)?.name || id });
+    audit(req, 'issue.export', 'issues.csv', `${list.rows.length}건${str(req.query.query).trim() ? ' · 검색식' : ''}`);
+    res.set('Content-Type', 'text/csv; charset=utf-8');
+    res.set('Content-Disposition', `attachment; filename="issues-${fileStamp()}.csv"`);
+    res.send(body);
   });
 
   /* ───── 스프린트(v2.882 · 시안 ⑦) — '/issues/:key' 보다 먼저(키 형식이 아니라 404 가 된다) ───── */
@@ -386,6 +419,21 @@ export function registerIssues(api) {
     } catch (e) { fail(res, e, next, req); }
   });
   // 진행률·진행 메모(v2.871) — 쓰기 계정 · 쓰기 범위.
+  // v2.888 C-3 작업 기록 — 쓰기 역할 · 그 이슈의 쓰기 범위(저장소 findFor). 지우기는 적은 사람 또는 전체 범위 관리자.
+  api.post('/issues/:key/worklog', writers, async (req, res, next) => {
+    if (!KEY_RE.test(req.params.key)) return badKey(res);
+    try {
+      const x = addWorklog(req.params.key, req.body || {}, userOf(req), { access: accessOf(req) });
+      res.json({ ok: true, issue: x, persist: await persistView(req) });
+    } catch (e) { fail(res, e, next, req); }
+  });
+  api.post('/issues/:key/worklog/remove', writers, async (req, res, next) => {
+    if (!KEY_RE.test(req.params.key)) return badKey(res);
+    try {
+      const x = removeWorklog(req.params.key, str(req.body?.id).slice(0, 40), userOf(req), { access: accessOf(req), isMod: isMod(req) });
+      res.json({ ok: true, issue: x, persist: await persistView(req) });
+    } catch (e) { fail(res, e, next, req); }
+  });
   api.post('/issues/:key/progress', writers, async (req, res, next) => {
     if (!KEY_RE.test(req.params.key)) return badKey(res);
     try {

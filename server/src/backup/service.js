@@ -183,7 +183,7 @@ function fingerprintContent(name, content) {
  */
 // v2.785(검토 R-B1): v2.784 의 백업 표시(`backup-marks.json` — VM 별 업무 중요도·백업 필요·메모, 사용자가 누를 때마다 쓴다)도 같은 성격이다 —
 //   빠져 있어 표시를 바꿀 때마다 change 백업이 생겨 자동 보관 슬롯(10)의 실제 설정 변경 백업을 밀어냈다(재현: 표시만 바꿔도 지문이 달라짐).
-export const CHANGE_WATCH_EXCLUDE = new Set(['board.json', 'notices.json', 'backup-marks.json', 'issues.json', 'wiki.json', 'issue-sprints.json', 'issue-filters.json']); // v2.864: 이슈 트래커 · v2.881 위키 · v2.882 스프린트 · 저장 필터도 같은 성질(사용자 데이터)
+export const CHANGE_WATCH_EXCLUDE = new Set(['board.json', 'notices.json', 'backup-marks.json', 'issues.json', 'wiki.json', 'issue-sprints.json', 'issue-filters.json', 'wiki-user.json']); // v2.888 위키 즐겨찾기 · 조회 수(문서를 열 때마다 바뀐다) · v2.864: 이슈 트래커 · v2.881 위키 · v2.882 스프린트 · 저장 필터도 같은 성질(사용자 데이터)
 export function isChangeWatchExcluded(name) { return CHANGE_WATCH_EXCLUDE.has(path.basename(String(name || ''))); }
 export function settingsFingerprint(files) {
   const h = crypto.createHash('sha1');

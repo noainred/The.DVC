@@ -5,6 +5,7 @@ import { describe, it, expect } from 'vitest';
 import {
   parseWikiHash, wikiHash, buildTree, flattenTree, parentOptions, breadcrumb, resolvePageRef, fillTemplate, countTiles, numText,
   quickHref, quickLinksToText, textToQuickLinks, wikiSaveFailText, isConflict, draftKey, loadDraft, saveDraft, clearDraft, diffSummary, searchSummary,
+  slashQuery, filterSlash, applySlash, SLASH_COMMANDS,
 } from './wikiText.js';
 
 const P = (id, parentId = '', extra = {}) => ({ id, parentId, title: `문서 ${id}`, order: Number(id.slice(1)), status: 'approved', spaceId: 'pub', ...extra });
@@ -108,5 +109,34 @@ describe('초안 저장소 — 이 브라우저에만, 못 쓰면 조용히 넘�
     expect(() => clearDraft('k', boom)).not.toThrow();
     const st = mem(); st.setItem('k', '{깨짐'); expect(loadDraft('k', st)).toBe(null);
     st.setItem('k', JSON.stringify({ body: 3 })); expect(loadDraft('k', st)).toBe(null);
+  });
+});
+
+describe('v2.888 슬래시 명령', () => {
+  it('줄 머리의 /낱말만 명령이다(주소 · 경로의 / 는 아니다)', () => {
+    expect(slashQuery('/', 1)).toEqual({ start: 0, q: '' });
+    expect(slashQuery('글\n  /표', 6)).toEqual({ start: 4, q: '표' });
+    expect(slashQuery('https://a/b', 11)).toBe(null);
+    expect(slashQuery('a /b', 4)).toBe(null);
+    expect(slashQuery('/a b', 4)).toBe(null, '공백이 들어가면 끝');
+    expect(slashQuery(`${' '.repeat(50)}/x`, 52)).toBe(null, '40자 넘게 훑지 않는다');
+  });
+  it('거르기 — 앞부분이 맞는 것 먼저 · 영어 별칭', () => {
+    expect(filterSlash('').length).toBe(SLASH_COMMANDS.length);
+    expect(filterSlash('표')[0].k).toBe('table');
+    expect(filterSlash('warn')[0].k).toBe('warn');
+    expect(filterSlash('콜아웃').map((c) => c.k)).toEqual(['info', 'warn', 'danger', 'tip']);
+    expect(filterSlash('없는말')).toEqual([]);
+  });
+  it('적용 — /낱말 자리를 바꾸고 커서를 스니펫 안에 둔다', () => {
+    const t = SLASH_COMMANDS.find((c) => c.k === 'task');
+    expect(applySlash('앞\n/체크뒤', 5, t)).toEqual({ body: '앞\n- [ ] 뒤', caret: 8 });
+    const code = SLASH_COMMANDS.find((c) => c.k === 'code');
+    const r = applySlash('/code', 5, code);
+    expect(r.body).toBe('```bash\n\n```');
+    expect(r.caret).toBe(8);
+    const today = SLASH_COMMANDS.find((c) => c.k === 'today');
+    expect(applySlash('/오늘', 3, today, new Date(2026, 10, 4))).toEqual({ body: '2026-11-04', caret: 10 });
+    expect(applySlash('글', 1, t)).toBe(null);
   });
 });

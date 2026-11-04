@@ -21,8 +21,10 @@ export const FIELDS = Object.freeze({
   key: 'key', title: 'text', text: 'fulltext', type: 'enum', status: 'enum', priority: 'enum', assignee: 'name', reporter: 'name',
   watcher: 'names', vcenter: 'vcenter', label: 'names', component: 'text', epic: 'key', parent: 'key', sprint: 'sprint',
   progress: 'num', due: 'date', created: 'date', updated: 'date', closed: 'date', doc: 'doc',
+  // v2.888 C-3 — 수정/영향 버전(글) · SLA 상태(breached · warning · paused · late · ok · none)
+  fixversion: 'text', affectsversion: 'text', sla: 'state',
 });
-const ENUMS = { type: TYPES, status: STATUS_ORDER, priority: PRIO };
+const ENUMS = { type: TYPES, status: STATUS_ORDER, priority: PRIO, sla: ['breached', 'warning', 'paused', 'late', 'ok', 'none'] };
 /** 한글 값도 받는다(화면의 표시 이름) — 저장 · 비교는 코드 값. */
 const ALIASES = {
   status: {
@@ -31,13 +33,15 @@ const ALIASES = {
   },
   type: { 장애: 'incident', 작업: 'task', 요청: 'request', 개선: 'improve', 에픽: 'epic', bug: 'incident' },
   priority: { 긴급: 'p0', 높음: 'p1', 보통: 'p2', 낮음: 'p3' },
+  sla: { 초과: 'breached', 임박: 'warning', 멈춤: 'paused', 늦음: 'late', 정상: 'ok', 없음: 'none', overdue: 'breached', violated: 'breached' },
 };
 const OPS_BY_KIND = {
   key: ['=', '!=', 'in', 'not in', 'is'], text: ['=', '!=', '~', 'is'], fulltext: ['~'], enum: ['=', '!=', 'in', 'not in', '>', '>=', '<', '<='],
   name: ['=', '!=', 'in', 'not in', 'is'], names: ['=', '!=', 'in', 'not in', 'is'], vcenter: ['=', '!=', 'in', 'not in', 'is'],
   sprint: ['=', '!=', 'in', 'not in', 'is'], num: ['=', '!=', '>', '>=', '<', '<=', 'is'], date: ['=', '!=', '>', '>=', '<', '<=', 'is'], doc: ['~', 'is'],
+  state: ['=', '!=', 'in', 'not in'],
 };
-export const ORDERABLE = Object.freeze(['key', 'title', 'type', 'status', 'priority', 'assignee', 'reporter', 'vcenter', 'progress', 'due', 'created', 'updated', 'closed', 'sprint', 'epic', 'component']);
+export const ORDERABLE = Object.freeze(['key', 'title', 'type', 'status', 'priority', 'assignee', 'reporter', 'vcenter', 'progress', 'due', 'created', 'updated', 'closed', 'sprint', 'epic', 'component', 'fixversion']);
 const KEYWORDS = new Set(['and', 'or', 'not', 'in', 'is', 'empty', 'order', 'by', 'asc', 'desc', 'null']);
 
 /* ───── 비슷한 말(제안) — 짧은 낱말만, 표 크기 상한 ───── */
@@ -177,7 +181,7 @@ export function parseQuery(input) {
       if (!okFn.includes(v.v)) fail(`‘${field}’ 에는 ${v.v}() 를 쓸 수 없습니다${okFn.length ? `(${okFn.map((f) => `${f}()`).join(' · ')})` : ''}`, v);
       return;
     }
-    if (kind === 'enum') {
+    if (kind === 'enum' || kind === 'state') {
       const low = raw.toLowerCase();
       const al = ALIASES[field] || {};
       if (!ENUMS[field].includes(low) && !Object.hasOwn(al, raw) && !Object.hasOwn(al, low)) {
@@ -286,6 +290,7 @@ export function compileQuery(ast, ctx) {
     label: (r) => r.labels || [], component: (r) => r.component || '', epic: (r) => r.epicKey || '', parent: (r) => r.parentKey || '', sprint: (r) => r.sprintId || '',
     progress: (r) => (Number.isInteger(r.progress) ? r.progress : null), due: (r) => r.dueAt, created: (r) => r.createdAt, updated: (r) => r.updatedAt, closed: (r) => r.closedAt,
     doc: (r) => r.docs || [],
+    fixversion: (r) => r.fixVersion || '', affectsversion: (r) => r.affectsVersion || '', sla: (r) => r.sla || 'none',
   }[field];
   if (op === 'is empty' || op === 'is not empty') {
     const want = op === 'is empty';
@@ -300,7 +305,7 @@ export function compileQuery(ast, ctx) {
     }
     const raw = String(v.v);
     switch (kind) {
-      case 'enum': return enumOf(field, raw);
+      case 'enum': case 'state': return enumOf(field, raw);
       case 'key': return raw.toUpperCase();
       case 'num': return Number(raw);
       case 'date': return dateValue(raw, ctx.today);
@@ -352,6 +357,7 @@ export function orderComparator(order, ctx = {}) {
     assignee: (r) => r.assignee || null, reporter: (r) => r.reporter || null, vcenter: (r) => r.vcenterId || null, progress: (r) => (Number.isInteger(r.progress) ? r.progress : null),
     due: (r) => r.dueAt ?? null, created: (r) => r.createdAt ?? null, updated: (r) => r.updatedAt ?? null, closed: (r) => r.closedAt ?? null,
     sprint: (r) => (r.sprintId ? (ctx.sprintName ? ctx.sprintName(r.sprintId) : r.sprintId) : null), epic: (r) => (r.epicKey ? Number(r.epicKey.slice(4)) : null), component: (r) => r.component || null,
+    fixversion: (r) => r.fixVersion || null,
   };
   return (a, b) => {
     for (const { field, dir } of order) {
