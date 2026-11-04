@@ -9,7 +9,8 @@ import { store } from '../../store.js';
 import { STEPS, planSummary, normPlan, LAST_STEP } from './plan.js';
 import { judgePrecheck } from './precheck.js';
 import { classifyFailure } from './causes.js';
-import { resetTarget } from './targets.js';
+import { resetTarget, noTargetWhy } from './targets.js';
+import { linkCandidates, linkDecision, identityIssue } from './linkTarget.js';
 
 const STEP_MS = 4_000;
 const DEMO_BUNDLE = Object.freeze({
@@ -22,23 +23,28 @@ const DEMO_BUNDLE = Object.freeze({
 const _jobs = new Map();
 let _seq = 0;
 let _fetched = true;
-export function _resetForTest() { _jobs.clear(); _seq = 0; _fetched = true; }
+// v2.879: 데모 '등록부 대상 연결' 로 바꾼 이름(배포 대상 id → 새 이름) — 메모리에만
+const _linked = new Map();
+export function _resetForTest() { _jobs.clear(); _seq = 0; _fetched = true; _linked.clear(); }
 
 function targets(now = Date.now()) {
-  const vcs = (store.get()?.vcenters || []).slice(0, 6);
-  // v2.876: 여섯째는 '포탈 미등록 Bareos'(사람이 직접 설치 — 대상 표는 새 설치 · 사전 점검이 기존 설치를 찾아 막는다 → '초기화 후 재설치로 진행')
-  const kinds = ['install', 'reinstall', 'no-edge', 'offline', 'no-pass', 'leftover'];
+  const vcs = (store.get()?.vcenters || []).slice(0, KINDS.length);
+  const deploy = demoDeployTargets(vcs.length);
   return vcs.map((v, i) => {
-    const k = kinds[i % kinds.length];
+    const k = KINDS[i % KINDS.length];
     const agent = k === 'no-edge' ? '' : `edge-demo-${i + 1}`;
     const row = {
       vcenterId: v.id, vcenterName: v.name || v.id, vcHost: String(v.host || `vc-${i + 1}.demo`).replace(/^https?:\/\//, ''), agent,
       edgeAt: agent ? now - (k === 'offline' ? 2 * 86_400_000 : 40_000 + i * 9_000) : null, edgeAgeMs: agent ? (k === 'offline' ? 2 * 86_400_000 : 40_000 + i * 9_000) : null,
       targetId: agent ? `demo-target-${i + 1}` : '', sshHost: agent ? `10.${20 + i}.0.14` : '', sshPort: 22, sshUser: agent ? 'root' : '',
       hasPassword: k !== 'no-pass', director: k === 'reinstall' ? { id: 'dir_demo_existing', name: `${v.name || v.id} Bareos`, host: `10.${20 + i}.0.14`, agent } : null,
-      mode: k === 'reinstall' ? 'reinstall' : 'install', can: ['install', 'reinstall', 'leftover'].includes(k), why: '', demo: true,
+      mode: k === 'reinstall' ? 'reinstall' : 'install', can: ['install', 'reinstall', 'leftover', 'unlinked'].includes(k), why: '', demo: true,
     };
     if (k === 'leftover') row.demoLeftover = true;   // 화면에 내지 않는 데모 표지(facts 가 설치된 Bareos 를 보인다)
+    // v2.879: 일곱째는 '배포 등록부 이름이 다르게 들어간 엣지' — 연결하기 전에는 대상 없음(실제 buildTargets 와 같은 사유 · linkable)
+    if (k === 'unlinked' && !deploy.some((d) => d.agentName.toLowerCase() === agent)) {
+      Object.assign(row, { targetId: '', sshHost: '', sshUser: '', hasPassword: false, can: false, why: noTargetWhy(agent), linkable: true });
+    }
     if (k === 'no-edge') row.why = '엣지 노드 없음 — 이 vCenter 의 인벤토리를 올리는 엣지가 없습니다.';
     if (k === 'offline') row.why = '엣지 응답 없음(마지막 수신 2880분 전).';
     if (k === 'no-pass') row.why = '배포 등록부에 SSH 비밀번호가 저장돼 있지 않습니다(키만 저장된 대상은 아직 지원하지 않습니다).';
@@ -48,8 +54,51 @@ function targets(now = Date.now()) {
   });
 }
 
+/*
+ * v2.879 데모 '등록부 대상 연결': 일곱째 엣지(edge-demo-7)의 대상은 이름이 'edge-demo7'(하이픈 빠짐)로 저장돼 있다. 다른 서버(old-edge) · 비밀번호 없는 대상도 둔다.
+ * 판정은 실제 코드(linkCandidates · linkDecision · identityIssue) — 접속 확인만 아래 표(서버 주소 → 그 서버 포탈 이름)로 대신한다(SSH 없음).
+ */
+const KINDS = ['install', 'reinstall', 'no-edge', 'offline', 'no-pass', 'leftover', 'unlinked'];
+const DEMO_PORTAL = (n) => {
+  const m = new Map(); for (let i = 0; i < n; i++) if (KINDS[i % KINDS.length] !== 'no-edge') m.set(`10.${20 + i}.0.14`, `edge-demo-${i + 1}`);
+  m.set('10.99.0.5', 'old-edge'); return m;
+};
+function demoDeployTargets(n) {
+  const out = [];
+  for (let i = 0; i < n; i++) {
+    const k = KINDS[i % KINDS.length];
+    if (k === 'no-edge') continue;
+    const id = `demo-target-${i + 1}`;
+    out.push({ id, host: `10.${20 + i}.0.14`, port: 22, username: 'root', agentName: _linked.get(id) || (k === 'unlinked' ? `edge-demo${i + 1}` : `edge-demo-${i + 1}`), password: k === 'no-pass' ? '' : 'demo' });
+  }
+  out.push({ id: 'demo-target-old', host: '10.99.0.5', port: 22, username: 'root', agentName: _linked.get('demo-target-old') || 'old-edge', password: 'demo' });
+  out.push({ id: 'demo-target-nokey', host: '10.98.0.9', port: 2222, username: 'admin', agentName: _linked.get('demo-target-nokey') || '', password: '' });
+  return out;
+}
+function demoLinkState() {
+  const rows = targets();
+  const n = rows.length;
+  return { rows, inventory: rows.filter((r) => r.agent).map((r) => ({ vcenterId: r.vcenterId, agent: r.agent })), deployTargets: demoDeployTargets(n), jobs: [], portal: DEMO_PORTAL(n) };
+}
+export function linkTargets() { return linkCandidates(demoLinkState()); }
+/** 실제 linkInstallTarget 과 같은 판정 · 같은 문구(던지면 라우트 sendErr). */
+export function linkTarget(body = {}) {
+  if (typeof body.vcenterId !== 'string' || typeof body.targetId !== 'string' || !body.vcenterId || !body.targetId) throw Object.assign(new Error('vCenter 와 배포 대상을 고르세요.'), { code: 'invalid' });
+  if (typeof body.expectName !== 'string') throw Object.assign(new Error('화면이 본 대상 이름이 없습니다 — 화면을 다시 읽으세요.'), { code: 'invalid' });
+  const s = demoLinkState();
+  const row = s.rows.find((r) => r.vcenterId === body.vcenterId) || null;
+  const cand = linkCandidates(s).find((c) => c.id === body.targetId) || null;
+  linkDecision(row, cand, { expectName: body.expectName });
+  const name = s.portal.get(cand.host) || '';
+  const where = `${cand.host}${cand.sshPort !== 22 ? `:${cand.sshPort}` : ''}`;
+  const bad = identityIssue(where, { ok: true, name, hostname: name ? `${name}.demo` : '', fromEnv: true, root: true }, row.agent);
+  if (bad) throw Object.assign(new Error(bad), { code: 'conflict' });
+  _linked.set(cand.id, row.agent);
+  return { demo: true, vcenterId: row.vcenterId, vcenterName: row.vcenterName, agent: row.agent, targetId: cand.id, host: cand.host, sshPort: cand.sshPort, before: cand.agentName, portalName: name, hostname: `${name}.demo` };
+}
+
 export function overview() {
-  return { ok: true, demo: true, targets: targets(), bundles: _fetched ? [DEMO_BUNDLE] : [], fetch: null, bundleBaseUrl: 'https://github.com/noainred/The.DVC/releases/download/bareos-bundle',
+  return { ok: true, demo: true, targets: targets(), linkTargets: linkTargets(), bundles: _fetched ? [DEMO_BUNDLE] : [], fetch: null, bundleBaseUrl: 'https://github.com/noainred/The.DVC/releases/download/bareos-bundle',
     jobs: [..._jobs.values()].reverse().map((j) => ({ id: j.id, vcenterId: j.vcenterId, vcenterName: j.vcenterName, mode: j.mode, status: view(j).status, by: j.by, createdAt: j.createdAt, updatedAt: Date.now() })),
     steps: STEPS, otpOff: true };
 }

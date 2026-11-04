@@ -49,6 +49,35 @@ export function targetModeText(t) {
   return t.mode === 'reinstall' ? '초기화 후 재설치' : '설치 가능';
 }
 
+/*
+ * v2.879 '등록부 대상 연결'(사용자 요청 — 배포 등록부에 에이전트 이름이 다르게 들어간 대상을 목록에서 골라 고친다 · 오타 방지):
+ *   이름은 입력받지 않는다(그 행의 엣지 이름을 서버가 쓴다). 고를 수 없는 대상은 서버 linkDecision 과 같은 규칙으로 잠그고 까닭을 보인다
+ *   — 서버가 다시 판정하고, 바꾸기 전에 SSH 로 그 서버 포탈 이름을 확인한다(server/src/bareos/install/linkTarget.js).
+ */
+/** 이 행에 연결 단추를 보이는가 — 엣지는 있는데 그 이름의 배포 대상이 없는 행만. */
+export const canLink = (r) => !!(r && r.linkable && r.agent && !r.targetId);
+/** 배포 대상 한 줄(비밀 없음). */
+export function linkCandText(c) {
+  if (!c) return '—';
+  const port = numOrNull(c.sshPort);
+  return `${c.host}${port !== null && port !== 22 ? `:${port}` : ''} · ${c.username || '계정 —'} · 지금 이름 ‘${c.agentName || '(없음)'}’`;
+}
+/** 이 행에서 고를 대상(고를 수 있는 것 먼저 · 각 항목 disabled 와 까닭). */
+export function linkChoices(linkTargets, row) {
+  if (!row) return [];
+  return (Array.isArray(linkTargets) ? linkTargets : []).filter((c) => c && c.id).map((c) => {
+    let why = c.blocked || '';
+    if (!why && c.jobVcenterId && c.jobVcenterId !== row.vcenterId) why = `법인 ‘${c.jobVcenterName || c.jobVcenterId}’ 의 완전 설치 작업이 쓰는 대상입니다`;
+    return { id: c.id, label: linkCandText(c), disabled: !!why, why, cand: c };
+  }).sort((a, b) => Number(a.disabled) - Number(b.disabled));
+}
+/** 연결 성공 문구. */
+export function linkDoneText(r) {
+  if (!r) return '연결했습니다.';
+  const port = numOrNull(r.sshPort);
+  return `연결했습니다 — 배포 대상 ${r.host}${port !== null && port !== 22 ? `:${port}` : ''} 의 에이전트 이름 ‘${r.before || '(없음)'}’ → ‘${r.agent}’ (접속 확인: 그 서버 포탈 이름 ‘${r.portalName || '—'}’). SSH 주소 · 계정 · 비밀번호는 그대로입니다.`;
+}
+
 /** 업로드 진행 → 글자(모르면 '—'). */
 export function uploadText(u) {
   if (!u) return '—';

@@ -20,6 +20,7 @@ import { STEPS } from '../../bareos/install/plan.js';
 import { bundleSourceInfo, listAllBundles, fetchLatestBundle, bundleFetchStatus, deleteBundle, bundleDir, importDirState } from '../../bareos/install/bundle.js';
 import { getBundleSource, saveBundleSource } from '../../bareos/install/bundleSource.js';
 import { listInstallTargets } from '../../bareos/install/targets.js';
+import { listLinkCandidates, linkInstallTarget } from '../../bareos/install/linkTarget.js';
 import {
   runPrecheck, startInstall, retryInstall, stopInstall, rollbackAllInstall, installJob, listInstallJobs, knownHostAddrs, lastJobFor, finishContext,
 } from '../../bareos/install/job.js';
@@ -92,7 +93,8 @@ api.get(P, adminOnly, fullScopeOnly, async (req, res) => {
     });
     res.json({
       // v2.850: 두 폴더(받은 번들 폴더 · 서버 디렉터리)를 화면을 열 때 검증한다(같은 파일은 기억 — 해시는 새 · 바뀐 파일만) — '받아 두면 적용'
-      ok: true, demo: false, targets, bundles: await listAllBundles({ verify: true }), fetch: bundleFetchStatus(), bundleBaseUrl: bundleSourceInfo().url, bundleSource: bundleSourceView(),
+      // v2.879: '등록부 대상 연결' 이 고를 배포 대상(비밀 없음 — host · 포트 · 계정 · 이름 · 고를 수 없는 까닭)
+      ok: true, demo: false, targets, linkTargets: listLinkCandidates(), bundles: await listAllBundles({ verify: true }), fetch: bundleFetchStatus(), bundleBaseUrl: bundleSourceInfo().url, bundleSource: bundleSourceView(),
       jobs: listInstallJobs().slice(0, 20).map((j) => ({ id: j.id, vcenterId: j.vcenterId, vcenterName: j.vcenterName, mode: j.mode, status: j.status, by: j.by, createdAt: j.createdAt, updatedAt: j.updatedAt })),
       steps: STEPS, otpOff: true,
     });
@@ -143,6 +145,24 @@ api.delete(`${P}/bundle/:version`, adminOnly, fullScopeOnly, fullWriteOnly, (req
   const ok = deleteBundle(v);
   audit(req, 'Bareos 완전 설치 번들 삭제', v, ok ? '삭제' : '없음');
   res.json({ ok });
+});
+
+/**
+ * v2.879 배포 등록부 대상 연결(사용자 요청 '다르게 들어간 Agent 명을 수정' · '기존 목록에서 선택' · '오타 방지'): 저장된 배포 대상 하나의 agentName 을
+ *   그 행의 엣지 이름으로 바꾼다. 이름은 받지 않는다(서버가 vcenterId 로 구한다) · 바꾸기 전에 SSH 로 그 서버 포탈 이름을 확인한다(다르면 바꾸지 않음).
+ *   규칙 전문 bareos/install/linkTarget.js. 쓰기 규칙은 이 모듈과 같다(installGate — 데모 계정 403 · OTP 등록 계정만) · 감사(성공 · 거부 모두).
+ */
+api.post(`${P}/link-target`, adminOnly, fullScopeOnly, fullWriteOnly, async (req, res) => {
+  const b = req.body && typeof req.body === 'object' ? req.body : {};
+  const body = { vcenterId: b.vcenterId, targetId: b.targetId, expectName: b.expectName };
+  if (isDemoActive()) { try { return res.json({ ok: true, ...demo.linkTarget(body) }); } catch (e) { return sendErr(res, e); } }
+  if (!installGate(req, res)) return;
+  const vc = typeof body.vcenterId === 'string' ? body.vcenterId : '';
+  try {
+    const r = await linkInstallTarget(body);
+    audit(req, 'Bareos 완전 설치 — 배포 등록부 대상 연결', `${r.vcenterName} · ${r.agent}`, `대상 ${r.host}${r.sshPort !== 22 ? `:${r.sshPort}` : ''} · 에이전트 이름 '${r.before || '(없음)'}' → '${r.agent}' · 접속 확인 포탈 이름 ${r.portalName}(호스트 ${r.hostname || '모름'})`);
+    res.json({ ok: true, ...r });
+  } catch (e) { audit(req, 'Bareos 완전 설치 — 배포 등록부 대상 연결', vcName(vc), `거부 — ${auditReason(e)}`); sendErr(res, e); }
 });
 
 /** 사전 점검(쓰기 없음). */

@@ -69,6 +69,10 @@
   **셋 다 없으면 저장하지 않고 멈춘다**(빈 값 저장 금지) · 설정 화면 매핑 미리 채우기도 같은 출처 · 마무리의 빈 vcserver 는 고칠 곳을 말한다.
 - **v2.876 포탈 미등록 Bareos**(`bareosInstallResetUnreg2876` · `bareosResetScript2876` · 변이 26/26 · 반증 1인): 새 설치 + `resetExisting === true` 만 재설치(`resetTarget`) — 판정 하나(`job.js resetChecked`)를
   사전 점검 SSH 전 · 뒤 · 0단계 다시 하기 · 러너 띄우기 직전에: 등록부 못 읽음 503 · 이 서버(SSH · 이름 · 모든 주소 · 짧은 이름)가 Director 로 등록됨 · 다른 vCenter 작업 기록이면 거부. 스크립트 `bareos-reset.sh` 의 `safe_voldir` 는 러너와 같은 글자.
+- **v2.879 등록부 대상 연결**(`linkTarget.js` · `bareosLinkTarget2879` 변이 6/6 · 웹 `bareosLinkTarget2879` — 사용자 요청 '다르게 들어간 Agent 명 수정' · '기존 목록에서 선택' · '오타 방지'):
+  이름은 **입력받지 않는다**(행의 엣지 이름을 서버가 vcenterId 로 다시 구한다 — 본문의 이름 칸은 무시) · 대상은 저장된 배포 대상에서만(다른 엣지가 쓰는 이름 · 다른 법인 작업(전부 되돌림 아님) · 비밀 없는 대상은 잠금) ·
+  바꾸기 **전에** SSH 로 그 서버 포탈 이름(`effectiveAgentName` — AGENT_NAME → COLLECTOR_DATACENTER → hostname)을 확인해 다르거나 확인 불가면 바꾸지 않는다(엉뚱한 서버에 설치 · 초기화 방지) ·
+  SSH 뒤 판정 다시(주소 · 계정 · 이름이 그사이 바뀌면 거부) · 바꾸는 것은 `setTargetAgentName`(agentName 하나 · expect 대조) — 수집 서버 등록부는 건드리지 않는다(저장 화면 자동 등록은 이름이 바뀌면 새 id 를 하나 더 만든다 — 남긴 것).
 - **데모**: mock + 실제 Director 미등록이면 `demo.js`(시간으로 진행하는 합성 작업 · 판정은 실제 코드 · 장비에 닿지 않음).
 - 실환경 미확인(추정 — 첫 현장 설치에서 확인할 것): Bareos `current` 사전 공개판 RPM 이 Rocky 9.x 의 각 마이너에서 `--alldeps` 로 풀리는지(CI 는 rockylinux:9 최신에서만 확인) ·
   `bconsole -c`(이름 있는 Console) TLS-PSK 접속 출력 모양 · `update_bareos_tables` 가 카탈로그 유지 재설치에서 판 차이를 맞추는지 · WebUI 첫 화면 응답 코드.

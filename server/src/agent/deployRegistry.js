@@ -116,6 +116,31 @@ export function saveTarget(body = {}) {
   return { ok: true, target: redact(target), droppedSecrets };
 }
 
+/**
+ * v2.879(2026-11-04 사용자 요청 '다르게 들어간 Agent 명을 수정할 수 있는 기능' — Bareos 완전 설치 '등록부 대상 연결'): 저장된 대상의
+ *   **agentName 하나만** 바꾼다. SSH 주소 · 계정 · 비밀 · 토큰은 그대로이고(접속처가 바뀌지 않으므로 비밀 폐기 규칙 accessMoved 대상이 아니다),
+ *   수집 서버 등록부는 건드리지 않는다 — 저장 라우트의 자동 등록은 이름에서 수집 서버 id 를 만들어 이름이 바뀌면 하나를 더 만든다.
+ *   expect 를 주면 지금 이름이 그 값일 때만 바꾼다(화면이 본 뒤 그사이 바뀌었으면 conflict). 이름 검증은 호출자 몫(인증된 엣지 이름)이지만
+ *   배포 때 portal.env 에 들어가는 값이라 개행 · NUL · 길이만큼은 여기서도 막는다(LO2601-01 과 같은 판정).
+ * @returns {{ ok:true, before:string, target:object } | { ok:false, code:'not-found'|'conflict'|'invalid', reason:string }}
+ */
+export function setTargetAgentName(id, name, { expect } = {}) {
+  const list = load();
+  const t = list.find((x) => x.id === id);
+  if (!t) return { ok: false, code: 'not-found', reason: '배포 대상을 찾을 수 없습니다(그사이 지워졌을 수 있습니다).' };
+  const before = String(t.agentName || '');
+  if (expect !== undefined && before !== String(expect ?? '')) {
+    return { ok: false, code: 'conflict', reason: `이 배포 대상의 에이전트 이름이 그사이 '${before || '(없음)'}' 로 바뀌었습니다 — 화면을 다시 읽고 고르세요.` };
+  }
+  const v = String(name ?? '').trim();
+  if (!v || v.length > 128) return { ok: false, code: 'invalid', reason: '에이전트 이름이 비었거나 너무 깁니다.' };
+  const envIssue = envPairsIssue(envPairs({ ...t, agentName: v }, 0));
+  if (envIssue) return { ok: false, code: 'invalid', reason: envIssue };
+  t.agentName = v;
+  cache = list; persist();
+  return { ok: true, before, target: redact(t) };
+}
+
 export function removeTarget(id) {
   const list = load();
   const next = list.filter((t) => t.id !== id);
