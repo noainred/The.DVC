@@ -18,11 +18,13 @@ import { localClock, localStamp } from '../util/dayKey.js';
 import { sendPortalMail } from '../mail/service.js';
 import { load as loadMailCfg } from '../mail/settings.js';
 import { isMockMode } from '../mock/demo/flags.js';
+import { store } from '../store.js';
 import { listJobs, registryLoadError } from './registry.js';
 import { loadSettings, jobDirectorId } from './settings.js';
 import { isEdgeNode } from './service.js';
 import { cachedCause } from './notify.js';
 import { issueHint } from './issueHints.js';
+import { healthDigestSection } from './health.js';
 
 export const MAIL_KIND = 'bareos-digest';
 export const TICK_MS = 60_000;
@@ -219,6 +221,10 @@ async function computeAndSend({ by = 'system', now = Date.now() } = {}) {
   const d = digestData(listJobs(), loadSettings(), dirStatusNow(), now, { causeOf: cachedCause });
   if (!d.rows.length) return { ok: true, reason: '백업 대상이 없어 보내지 않았습니다.', skipped: true };
   const m = renderDigest(d, now);
+  // v2.886 사전 점검 절(설정에서 끄면 없음 · 상태 파일만 읽는다 — Director 에 묻지 않는다)
+  let hs = null;
+  try { const names = new Map((store.get()?.vcenters || []).map((v) => [String(v.id), v.name || v.id])); hs = healthDigestSection((id) => names.get(String(id)) || id); } catch { hs = null; }
+  if (hs && m.html.endsWith('</div>')) { m.html = `${m.html.slice(0, -6)}${hs.html}</div>`; m.text += hs.text; }
   const r = await sendPortalMail({ kind: MAIL_KIND, subject: m.subject, html: m.html, text: m.text, by });
   return { ok: !!r?.ok, reason: r?.ok ? '' : String(r?.reason || '발송 실패').slice(0, 200) };
 }

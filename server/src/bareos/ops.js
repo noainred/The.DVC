@@ -17,6 +17,8 @@ import { parseStatusRaw, parseDirStatusRaw, rawHead } from './liveParse.js';
 import { jobNameFor, isFinalStatus, isResourceName } from './names.js';
 import { chainFromHistory, chainIssue } from './restore.js';
 import { firstErrorLine } from './logFirstError.js';
+import { checkVc, checkDisks, isThisHost, VCS_MAX } from './healthProbe.js';
+import { config } from '../config.js';
 import { POLICY_CMDS, POLICY_KEYS, NORMALIZE as POLICY_NORMALIZE, deniedText, normVolumeRows } from './policyParse.js';
 
 const fail = (code, msg) => new BareosConsoleError(code, msg);
@@ -379,6 +381,22 @@ export const OPS = Object.freeze({
    * @param {{ items: { key:number, jobid:number, name:string }[] }} a
    * @returns {Promise<{ key, ok, firstError?: string|null, lines?: number, state?, status?, code?, message? }[]>}
    */
+  /**
+   * v2.886 사전 점검(docs/design/bareos-precheck · 읽기 전용 · MUTATING 아님) — 세션이 열렸으면 Director 콘솔은 응답한 것이다(판·배너만 읽는다).
+   *   vCenter 접속(vcserver:443 TLS · 지문)은 이 작업이 도는 곳에서 잰다(엣지 대행 = 엣지 노드 · 중앙 직접 = 중앙 — from 으로 밝힌다).
+   *   디스크(statfs)는 **엣지에서 · Director 주소가 이 서버일 때만** 잰다(중앙이나 다른 서버에서 재면 엉뚱한 디스크다 — diskSkipped 로 사유).
+   * @param {{ vcservers?: string[], volumeDirs?: string[], dirHost?: string }} a 중앙이 설정에서 만든 값(비밀 없음)
+   */
+  async health(s, { vcservers = [], volumeDirs = [], dirHost = '' } = {}, { signal = null } = {}) {
+    const { version } = parseBanner(s?.info?.banner);
+    const onEdge = !!config.agent?.centralUrl;
+    const vcs = [];
+    for (const h of [...new Set((Array.isArray(vcservers) ? vcservers : []).map(String))].slice(0, VCS_MAX)) vcs.push(await checkVc(h, { signal }));
+    const local = onEdge && isThisHost(dirHost);
+    const disks = local ? await checkDisks(volumeDirs) : [];
+    return { from: onEdge ? 'edge' : 'central', version: version || null, vcs, disks, diskSkipped: local ? null : (onEdge ? 'remote' : 'central'), at: Date.now() };
+  },
+
   async logs(s, { items = [] } = {}, { signal = null } = {}) {
     const out = [];
     let dead = '';

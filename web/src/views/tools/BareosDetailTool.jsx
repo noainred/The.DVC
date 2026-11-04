@@ -15,7 +15,8 @@ import VeeamHeader from './VeeamHeader.jsx';
 import BareosTabs from './BareosTabs.jsx';
 import { CritIcon, MethodBadge } from './BackupMarkIcons.jsx';
 import { Note, ReadGuide, Stat, STAT_GRID, Dot, ResultBar, FilterChip } from './BareosBits.jsx';
-import { snapshotChip, SNAPSHOT_TITLE } from './bareosRestoreText.js';   // v2.861 남은 스냅샷 칩
+import { snapshotChip, SNAPSHOT_TITLE } from './bareosRestoreText.js';
+import { BareosHealthCard } from './BareosHealth.jsx';   // v2.886 사전 점검(관리자 — 403 이면 카드를 그리지 않는다)   // v2.861 남은 스냅샷 칩
 import {
   bareosClass, directorStateOf, directorLineText, resultsUnknownText, numText, shortTs, fmtGb, stText, ST_TONE, runLine, bytesText,
   DETAIL_FILTERS, DETAIL_FILTERS_MAIN, DETAIL_FILTERS_MORE, detailFilterCounts, lvText, buildBareosTree, flattenBareosTree, initialBareosOpen, BAREOS_RPO_DAYS, BAREOS_DETAIL_VC_KEY,
@@ -150,6 +151,8 @@ export default function BareosDetailTool() {
         </div>
         <span className="muted" style={{ fontSize: 12, marginLeft: 'auto' }}>이 법인 VM {numText(data.vm)} (템플릿·vCLS 제외)</span>
       </div>
+
+      {vcId && <BareosHealthCard key={vcId} vcId={vcId} />}
 
       <div data-bareos-stats="" style={STAT_GRID}>
         <Stat label="Bareos 방식 VM" value={numText(c.bareosMethod)}

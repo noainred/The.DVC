@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { fetchJson, postJson, putJson, delJson } from '../../api.js';
 import { useHashTab } from '../../hooks/useHashTab.js';
 import { BareosDigestSettings } from './BareosRehearsal.jsx';   // v2.862 일일 요약 메일
+import { BareosHealthSettings } from './BareosHealth.jsx';   // v2.886 사전 점검
 import { Loading, ErrorBox } from '../../components/ui.jsx';
 import { STable } from '../../components/STable.jsx';
 import Select from '../../components/Select.jsx';
@@ -278,6 +279,14 @@ export default function SettingsTab({ onSaved, writable = true, hashBase = SETTI
             <span className="muted" style={{ fontSize: 12 }}>법인별 최근 24시간 결과 · 실패한 VM · 복원 · 복원 검증</span>
           </summary>
           <div style={{ marginTop: 10 }}><BareosDigestSettings /></div>
+        </details>
+        {/* v2.886 사전 점검(따로 저장 — 공통 기본값 저장과 섞지 않는다) */}
+        <details className="card" style={{ padding: '10px 14px', minWidth: 0 }}>
+          <summary style={{ cursor: 'pointer', display: 'flex', flexWrap: 'wrap', gap: '4px 12px', alignItems: 'center' }}>
+            <b>사전 점검</b>
+            <span className="muted" style={{ fontSize: 12 }}>FD → vCenter:443 · 인증서 지문 · Director 콘솔 · SD 디스크 여유 — 매일 정한 시각(기본 20:00)</span>
+          </summary>
+          <div style={{ marginTop: 10 }}><BareosHealthSettings writable={writable} /></div>
         </details>
         <details className="card" style={{ padding: '10px 14px', minWidth: 0 }}>
           <summary style={{ cursor: 'pointer', display: 'flex', flexWrap: 'wrap', gap: '4px 12px', alignItems: 'center' }}>
