@@ -1,0 +1,396 @@
+<title>서비스 인벤토리 5차 시안</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;600;800&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+/* 레이아웃: 상단 요약 띠 → 결함 카드(지금 ↔ 제안 두 칸) → 결정 필요. 포탈 web/src/styles.css 의 어두운 토큰을 그대로 쓰고 밝은 테마는 같은 역할로 대응. */
+:root{--bg:#0a0e17;--panel:#141b2d;--panel-2:#1a2236;--border:#243049;--text:#e6edf6;--dim:#8b9bb4;--faint:#5d6b85;
+  --accent:#3b82f6;--teal:#22d3ee;--green:#22c55e;--amber:#f59e0b;--red:#ef4444;--purple:#a855f7;
+  --font:"Noto Sans KR","Apple SD Gothic Neo",system-ui,sans-serif;--mono:"JetBrains Mono",ui-monospace,Menlo,Consolas,monospace;color-scheme:dark}
+@media (prefers-color-scheme: light){:root:not([data-theme="dark"]){--bg:#f4f6fa;--panel:#ffffff;--panel-2:#eef2f8;--border:#d5dce8;--text:#111827;--dim:#4b5a73;--faint:#8593a8;color-scheme:light}}
+:root[data-theme="light"]{--bg:#f4f6fa;--panel:#ffffff;--panel-2:#eef2f8;--border:#d5dce8;--text:#111827;--dim:#4b5a73;--faint:#8593a8;color-scheme:light}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font-family:var(--font);font-size:13.5px;line-height:1.55;
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:18px 56px}
+.wrap{max-width:1280px;margin:0 auto;display:flex;flex-direction:column;gap:14px;min-width:0}
+h1{margin:0;font-size:20px;font-weight:800;letter-spacing:-.01em;text-wrap:balance}
+h2{margin:0;font-size:15px;font-weight:800}
+h3{margin:0;font-size:13.5px;font-weight:800}
+p{margin:0}
+.dim{color:var(--dim)}.faint{color:var(--faint)}.mono{font-family:var(--mono);font-size:12px}
+.card{background:var(--panel);border:1px solid var(--border);border-radius:12px;min-width:0}
+.head{padding:14px 16px;display:flex;flex-direction:column;gap:8px}
+.head .meta{display:flex;flex-wrap:wrap;gap:6px 14px;font-size:12.5px;color:var(--dim)}
+.strip{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}
+.kpi{padding:12px 14px;border-left:3px solid var(--border);display:flex;flex-direction:column;gap:3px}
+.kpi .l{font-size:12px;color:var(--dim)}.kpi .v{font-size:24px;font-weight:800;font-variant-numeric:tabular-nums;line-height:1.1}.kpi .s{font-size:12px;color:var(--dim)}
+.chips{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.chip{border:1px solid var(--border);background:var(--panel-2);color:var(--text);border-radius:999px;padding:4px 11px;font:inherit;font-size:12.5px;cursor:pointer}
+.chip[aria-pressed="true"]{background:var(--accent);border-color:var(--accent);color:#fff}
+.chip:focus-visible,button:focus-visible{outline:2px solid var(--teal);outline-offset:2px}
+.find{display:flex;flex-direction:column}
+.find[hidden]{display:none}
+.fh{display:flex;flex-wrap:wrap;gap:8px 10px;align-items:center;padding:12px 16px;border-bottom:1px solid var(--border)}
+.fh .no{font-family:var(--mono);font-weight:600;color:var(--dim)}
+.fh h2{flex:1 1 260px;min-width:0;font-size:14.5px}
+.pill{display:inline-flex;align-items:center;height:20px;padding:0 8px;border-radius:999px;font-size:11px;font-weight:700;white-space:nowrap;border:1px solid var(--border);color:var(--text)}
+.pill.sev-h{background:rgba(239,68,68,.16);color:#fca5a5;border-color:transparent}
+.pill.sev-m{background:rgba(245,158,11,.16);color:#fcd34d;border-color:transparent}
+.pill.sev-l{background:rgba(139,155,180,.16);color:var(--dim);border-color:transparent}
+.pill.ok{background:rgba(34,197,94,.16);color:#86efac;border-color:transparent}
+.pill.est{background:rgba(168,85,247,.16);color:#d8b4fe;border-color:transparent}
+.pill.src{background:rgba(34,211,238,.14);color:#67e8f9;border-color:transparent}
+:root[data-theme="light"] .pill.sev-h,:root[data-theme="light"] .pill.ok,:root[data-theme="light"] .pill.est,:root[data-theme="light"] .pill.src,:root[data-theme="light"] .pill.sev-m{color:var(--text)}
+@media (prefers-color-scheme: light){:root:not([data-theme="dark"]) .pill.sev-h,:root:not([data-theme="dark"]) .pill.ok,:root:not([data-theme="dark"]) .pill.est,:root:not([data-theme="dark"]) .pill.src,:root:not([data-theme="dark"]) .pill.sev-m{color:var(--text)}}
+.fb{display:grid;grid-template-columns:1fr;gap:12px;padding:12px 16px}
+@media (min-width:860px){.fb{grid-template-columns:1fr 1fr}}
+.pane{min-width:0;display:flex;flex-direction:column;gap:8px}
+.pane .lab{font-size:11.5px;font-weight:700;letter-spacing:.06em;color:var(--dim)}
+.pane.now .lab{color:#fca5a5}.pane.next .lab{color:#86efac}
+.mock{background:var(--panel-2);border:1px solid var(--border);border-radius:10px;padding:10px;overflow-x:auto;min-width:0}
+.mock table{border-collapse:collapse;width:100%;font-size:12.5px;white-space:nowrap}
+.mock th{color:var(--dim);font-weight:600;text-align:left;padding:5px 8px;border-bottom:1px solid var(--border);font-size:11.5px}
+.mock td{padding:6px 8px;border-bottom:1px solid var(--border);vertical-align:top}
+.mock tr:last-child td{border-bottom:0}
+.mock td.r,.mock th.r{text-align:right;font-variant-numeric:tabular-nums}
+.sub{font-size:11px;color:var(--dim);white-space:nowrap}
+.b{display:inline-flex;align-items:center;height:18px;padding:0 7px;border-radius:999px;font-size:11px;font-weight:700;white-space:nowrap}
+.b.gray{background:rgba(139,155,180,.18);color:var(--dim)}.b.green{background:rgba(34,197,94,.18);color:#86efac}.b.red{background:rgba(239,68,68,.18);color:#fca5a5}
+.b.amber{background:rgba(245,158,11,.18);color:#fcd34d}.b.blue{background:rgba(59,130,246,.18);color:#93c5fd}.b.purple{background:rgba(168,85,247,.18);color:#d8b4fe}.b.teal{background:rgba(34,211,238,.16);color:#67e8f9}
+@media (prefers-color-scheme: light){:root:not([data-theme="dark"]) .b{color:var(--text)}}
+:root[data-theme="light"] .b{color:var(--text)}
+.bar{display:inline-block;width:40px;height:6px;border-radius:4px;background:var(--border);vertical-align:middle;overflow:hidden}
+.bar i{display:block;height:100%;background:var(--accent)}
+.tb{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.btn{display:inline-flex;align-items:center;gap:6px;min-height:28px;padding:0 10px;border-radius:8px;border:1px solid var(--border);background:var(--panel);color:var(--text);font:inherit;font-size:12.5px}
+.btn.pri{background:var(--accent);border-color:var(--accent);color:#fff}
+.inp{display:inline-flex;align-items:center;min-height:28px;padding:0 10px;border-radius:8px;border:1px solid var(--border);background:var(--panel);color:var(--faint);font-size:12.5px;min-width:0;max-width:100%}
+.seg{display:inline-flex;border:1px solid var(--border);border-radius:8px;overflow:hidden}
+.seg button{border:0;background:var(--panel);color:var(--dim);padding:5px 10px;font:inherit;font-size:12px;cursor:pointer}
+.seg button[aria-pressed="true"]{background:var(--accent);color:#fff}
+.note{font-size:12.5px;color:var(--dim);padding:0 16px 12px}
+.note b{color:var(--text)}
+.why{padding:0 16px 14px;display:flex;flex-direction:column;gap:4px;font-size:12.5px}
+.why .k{color:var(--dim)}
+.mx{border-collapse:collapse;font-size:12px;white-space:nowrap}
+.mx th,.mx td{padding:4px 7px;border-bottom:1px solid var(--border);text-align:center}
+.mx th{color:var(--dim);font-weight:600;font-size:11px}
+.mx td:first-child,.mx th:first-child{text-align:left;font-weight:700}
+.mx .z{color:var(--faint)}
+.mx .heat{border-radius:5px}
+.dec{padding:12px 16px;display:flex;flex-direction:column;gap:10px}
+.dec ol{margin:0;padding-left:20px;display:flex;flex-direction:column;gap:8px}
+.dec li b{display:block}
+.tree{font-size:12.5px;display:flex;flex-direction:column;gap:3px}
+.tree div{display:flex;gap:6px;align-items:center}
+.tree .cnt{margin-left:auto;font-size:11px;color:var(--dim);background:rgba(139,155,180,.14);padding:0 6px;border-radius:999px}
+.dot{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--green)}
+.kcard{border:1px solid var(--border);border-radius:10px;padding:10px 12px;display:flex;flex-direction:column;gap:4px;min-width:0}
+.kcard .v{font-size:20px;font-weight:800;font-variant-numeric:tabular-nums}
+.kgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px}
+.flow{display:flex;flex-wrap:wrap;gap:6px;align-items:center;font-size:12.5px}
+.flow .st{border:1px solid var(--border);border-radius:8px;padding:5px 9px;background:var(--panel)}
+.flow .st.hot{border-color:var(--amber)}
+.flow .ar{color:var(--faint)}
+code{font-family:var(--mono);font-size:12px;background:var(--panel-2);padding:1px 5px;border-radius:5px}
+@media (prefers-reduced-motion: no-preference){.chip,.seg button{transition:background .15s}}
+</style>
+
+<div class="wrap">
+  <div class="card head">
+    <h1>서비스 인벤토리 5차 시안 — 구현본 재검토 반영</h1>
+    <p class="dim">대상은 v2.887.0 으로 릴리스된 <b>특수 기능 › 서비스 인벤토리</b>(도구 키 svc-inventory). 카드마다 왼쪽이 지금 화면, 오른쪽이 제안이다. 목 데이터는 2026-11-05 재촬영 스크린샷의 값(vcenter-ap-northeast-01)을 그대로 옮겼다.</p>
+    <div class="meta"><span>검토 규모: 표준(반증 1인 + 직접 대조 + Chromium 1440/400 재판독)</span><span>근거 표: docs/design/service-map/README.md §5차 검토</span><span>번호 M = 메인 직접 대조 · R = 반증 에이전트</span></div>
+  </div>
+
+  <div class="strip" id="strip"></div>
+
+  <div class="card" style="padding:10px 16px">
+    <div class="chips" id="chips">
+      <span class="dim" style="font-size:12px">보기</span>
+      <button class="chip" data-f="all" aria-pressed="true">전부</button>
+      <button class="chip" data-f="sev-h">높음</button>
+      <button class="chip" data-f="sev-m">중간</button>
+      <button class="chip" data-f="sev-l">낮음</button>
+      <button class="chip" data-f="ax-screen">화면</button>
+      <button class="chip" data-f="ax-judge">판정</button>
+      <button class="chip" data-f="ax-ops">운영 큐</button>
+      <button class="chip" data-f="ax-scope">범위·권한</button>
+      <button class="chip" data-f="ax-perf">성능</button>
+    </div>
+  </div>
+
+  <!-- M1 -->
+  <section class="card find" id="m1" data-sev="sev-m" data-ax="ax-screen">
+    <div class="fh"><span class="no">M1</span><h2>백업 24h — Bareos 를 쓰지 않는 법인에도 '잡 없음 N'</h2><span class="pill sev-m">중간</span><span class="pill ok">확정</span><span class="pill src">화면·집계</span></div>
+    <div class="fb">
+      <div class="pane now"><div class="lab">지금</div>
+        <div class="mock"><table><thead><tr><th>서비스</th><th>구성원</th><th>백업 24h</th></tr></thead><tbody>
+          <tr><td><b>DB-Oracle</b><div class="sub">업무시스템 · dba-1@corp.local</div></td><td>VM 21 · BM 1</td><td><span class="b gray">잡 없음 21</span></td></tr>
+          <tr><td><b>Web</b></td><td>VM 25 · BM 0</td><td><span class="b gray">잡 없음 25</span></td></tr>
+          <tr><td><b>App</b></td><td>VM 24 · BM 0</td><td><span class="b gray">잡 없음 24</span></td></tr>
+          <tr><td><b>(미지정)</b></td><td>VM 115 · BM 0</td><td><span class="b gray">잡 없음 115</span></td></tr>
+        </tbody></table></div>
+        <p class="dim">이 법인에는 Bareos Director 가 없는데도 전 서비스가 '잡 없음' 이라 백업 누락처럼 읽힌다.</p>
+      </div>
+      <div class="pane next"><div class="lab">제안</div>
+        <div class="mock"><table><thead><tr><th>서비스</th><th>구성원</th><th>백업 24h</th></tr></thead><tbody>
+          <tr><td><b>DB-Oracle</b><div class="sub">업무시스템 · dba-1@corp.local</div></td><td>VM 21 · BM 1</td><td><span class="dim" title="이 법인은 Bareos 를 쓰지 않습니다">해당 없음</span></td></tr>
+          <tr><td><b>Web</b></td><td>VM 25 · BM 0</td><td><span class="dim">해당 없음</span></td></tr>
+          <tr><td colspan="3" class="sub">vcenter-eu-central-01(Director 있음)</td></tr>
+          <tr><td><b>DB</b></td><td>VM 50 · BM 1</td><td><span class="b green">47</span> <span class="b red">2</span> <span class="b gray">잡 없음 1</span></td></tr>
+        </tbody></table></div>
+        <p class="dim">법인별 Director 매핑(<code>bareos/settings.js sites[].vcenterId</code>)이 없는 법인은 '해당 없음'. 매트릭스 칸·법인별 투입 자원 행도 같은 기준.</p>
+      </div>
+    </div>
+    <div class="why"><span><span class="k">근거</span> <code>routes/api/svcInventory.js:124-141</code> — <code>backupMeta.used</code> 가 함대 전체 잡 수 기준 · 스크린샷 d-corp</span></div>
+  </section>
+
+  <!-- M2 -->
+  <section class="card find" id="m2" data-sev="sev-m" data-ax="ax-ops">
+    <div class="fh"><span class="no">M2</span><h2>'새로고침' 이 등록부·스캔 라벨·장애·백업 입력을 다시 읽지 않는다</h2><span class="pill sev-m">중간</span><span class="pill ok">확정</span><span class="pill src">운영</span></div>
+    <div class="fb">
+      <div class="pane now"><div class="lab">지금</div>
+        <div class="mock"><div class="tb"><span class="seg"><button aria-pressed="true">서비스별(전 법인)</button><button>법인별 인프라</button></span><span style="flex:1"></span><span class="btn">새로고침</span><span class="btn">CSV</span></div></div>
+        <div class="flow"><span class="st">iDRAC 화면에서 스캔 라벨 수정</span><span class="ar">→</span><span class="st">서비스 인벤토리 '새로고침'</span><span class="ar">→</span><span class="st hot">옛 라벨 그대로</span><span class="ar">→</span><span class="st">다음 스냅샷 세대(수 분)에야 반영</span></div>
+        <p class="dim">입력 수집 캐시 키가 스냅샷 세대 + 태그 카테고리뿐이라, 이 화면 밖에서 바뀐 입력은 다음 수집 주기까지 보이지 않는다.</p>
+      </div>
+      <div class="pane next"><div class="lab">제안</div>
+        <div class="mock"><div class="tb"><span class="seg"><button aria-pressed="true">서비스별(전 법인)</button><button>법인별 인프라</button></span><span style="flex:1"></span><span class="btn pri" title="등록부·스캔 라벨·부품 장애·Bareos 원장을 지금 다시 읽습니다">입력 다시 읽기</span><span class="btn">CSV</span></div>
+          <p class="sub" style="margin-top:8px;white-space:normal">입력 읽은 시각 05:37:02 · 스냅샷 05:36:40 · 등록부 rev 418 · 다음 자동 갱신은 수집 주기(API 값)</p></div>
+        <p class="dim">쓰기 계정에 '입력 다시 읽기'(<code>fresh=1</code>, 프로세스당 30초에 1회 — 28법인 조인 비용 보호). 화면 하단에 '입력 읽은 시각' 을 적어 무엇이 언제 기준인지 밝힌다.</p>
+      </div>
+    </div>
+    <div class="why"><span><span class="k">근거</span> <code>svcInventory.js:77-83</code> gather 키 · <code>:516</code> 은 이 화면의 라벨 변경만 넘긴다 · memoJson 12초</span></div>
+  </section>
+
+  <!-- M3 -->
+  <section class="card find" id="m3" data-sev="sev-m" data-ax="ax-ops">
+    <div class="fh"><span class="no">M3</span><h2>'불필요한 고정' 을 서버만 센다 — 검토 탭에 없다</h2><span class="pill sev-m">중간</span><span class="pill ok">확정</span><span class="pill src">운영 큐</span></div>
+    <div class="fb">
+      <div class="pane now"><div class="lab">지금</div>
+        <div class="mock"><div class="kgrid">
+          <div class="kcard"><span class="sub">드리프트(고정 ≠ 자동)</span><span class="v" style="color:#fca5a5">1</span></div>
+          <div class="kcard"><span class="sub">유령 키</span><span class="v">0</span></div>
+        </div></div>
+        <p class="dim">자동 판정과 같은 고정(redundant)은 응답에 실리지만 화면에 없다. 폴더 규칙을 나중에 만들면 그 전의 '한 대씩 고정' 이 전부 불필요한 고정으로 남는다.</p>
+      </div>
+      <div class="pane next"><div class="lab">제안</div>
+        <div class="mock"><div class="kgrid">
+          <div class="kcard"><span class="sub">드리프트(고정 ≠ 자동)</span><span class="v" style="color:#fca5a5">1</span></div>
+          <div class="kcard"><span class="sub">유령 키</span><span class="v">0</span></div>
+          <div class="kcard" style="border-color:var(--amber)"><span class="sub">불필요한 고정(고정 = 자동)</span><span class="v" style="color:#fcd34d">14</span><span class="sub">폴더 규칙 /Production/DB 가 같은 답</span></div>
+        </div>
+        <div class="tb" style="margin-top:8px"><span class="btn">14건 미리보기</span><span class="btn pri">한 번에 지우기(자동 판정으로)</span><span class="sub">감사 로그 1건</span></div></div>
+        <p class="dim">큐 응답 <code>redundant</code> 에 법인 필터를 넣고, 검토 탭에 카드 + '한 번에 지우기'(<code>pins.clear keys</code>). 지워도 소속은 같으니 안전하다.</p>
+      </div>
+    </div>
+    <div class="why"><span><span class="k">근거</span> <code>servicemap/build.js:159·199</code> · <code>svcInventory/Queues.jsx ReviewView</code></span></div>
+  </section>
+
+  <!-- M7 -->
+  <section class="card find" id="m7" data-sev="sev-m" data-ax="ax-screen">
+    <div class="fh"><span class="no">M7</span><h2>미지정 구성원의 '왜' 가 배지 툴팁에만 있다</h2><span class="pill sev-m">중간</span><span class="pill ok">확정</span><span class="pill src">화면</span></div>
+    <div class="fb">
+      <div class="pane now"><div class="lab">지금</div>
+        <div class="mock"><table><thead><tr><th>이름</th><th>소속 근거</th><th>사용률</th></tr></thead><tbody>
+          <tr><td><span class="dot"></span> <span class="b blue">VM</span> <b>app-ap-0002</b><div class="sub">/Infrastructure/Storage</div></td><td><span class="b gray" title="미지정 — vCenter 폴더 규칙 없음">미지정</span></td><td>CPU <span class="bar"><i style="width:41%"></i></span> 41%</td></tr>
+          <tr><td><span class="b amber">BM</span> <b>bm-ap-northeast-07</b><div class="sub">서비스태그 MA7K2P</div></td><td><span class="b gray" title="미지정 — 스캔 엔트리 라벨이 비어 있음">미지정</span></td><td>CPU <span class="bar"><i style="width:22%"></i></span> 22%</td></tr>
+        </tbody></table></div>
+        <p class="dim">마우스를 올려야 이유가 보인다. 묶음 탭과 구성원 표의 문구도 다르다.</p>
+      </div>
+      <div class="pane next"><div class="lab">제안</div>
+        <div class="mock"><table><thead><tr><th>이름</th><th>미지정 이유</th><th>사용률</th></tr></thead><tbody>
+          <tr><td><span class="dot"></span> <span class="b blue">VM</span> <b>app-ap-0002</b><div class="sub">/Infrastructure/Storage</div></td><td>vCenter 폴더 규칙 없음<div class="sub">폴더 /Infrastructure/Storage 를 연결하면 24대가 함께</div></td><td>CPU <span class="bar"><i style="width:41%"></i></span> 41%</td></tr>
+          <tr><td><span class="b amber">BM</span> <b>bm-ap-northeast-07</b><div class="sub">서비스태그 MA7K2P</div></td><td>스캔 엔트리 라벨이 비어 있음<div class="sub">엔트리 10.20.10.0/24 · 라벨을 정하면 다음 스캔부터 자동</div></td><td>CPU <span class="bar"><i style="width:22%"></i></span> 22%</td></tr>
+        </tbody></table></div>
+        <p class="dim">(미지정) 구성원 표에서 '소속 근거' 열을 '미지정 이유' 로 바꾸고, 묶음 탭과 같은 문구(<code>REASON_TEXT</code>·<code>GROUP_TITLE</code>)를 쓴다. 둘째 줄은 '어떻게 하면 되는가'.</p>
+      </div>
+    </div>
+    <div class="why"><span><span class="k">근거</span> <code>svcInventory/parts.jsx:88</code> — 이유가 <code>title</code> 속성에만</span></div>
+  </section>
+
+  <!-- M8 -->
+  <section class="card find" id="m8" data-sev="sev-m" data-ax="ax-screen">
+    <div class="fh"><span class="no">M8</span><h2>서비스별 현황 표와 트리에 검색·필터가 없다</h2><span class="pill sev-m">중간</span><span class="pill ok">확정</span><span class="pill src">화면</span></div>
+    <div class="fb">
+      <div class="pane now"><div class="lab">지금</div>
+        <div class="mock"><div class="tb"><b>서비스별 현황</b><span class="sub">4개 · 행을 누르면 아래 구성원·영향 호스트</span></div>
+          <div class="tree" style="margin-top:8px"><div>🌐 전체 법인<span class="cnt">2121</span></div><div>🏢 ap-northeast-01<span class="cnt">208</span></div><div>🏢 ap-south-01<span class="cnt">125</span></div><div>🏢 ap-southeast-01<span class="cnt">119</span></div><div class="faint">… 법인 28곳 · 폴더 · 서비스</div></div></div>
+        <p class="dim">28법인이면 '전체 법인' 표가 수백 행이고 트리는 긴 스크롤이다. 3차 시안에 있던 검색칸이 구현에서 빠졌다.</p>
+      </div>
+      <div class="pane next"><div class="lab">제안</div>
+        <div class="mock"><div class="tb"><b>서비스별 현황</b><span class="inp" style="flex:1 1 180px">서비스 · 폴더 · 담당자 · 법인 검색</span><span class="chip" aria-pressed="true">등급 1만</span><span class="chip">담당자 미지정만</span><span class="chip">드리프트 있음</span></div>
+          <div class="tb" style="margin-top:8px"><span class="inp" style="flex:1 1 160px">트리 필터: db</span></div>
+          <div class="tree" style="margin-top:6px"><div>🏢 ap-northeast-01 › 업무시스템 › 🧩 <b>DB</b>-Oracle<span class="cnt">22</span></div><div>🏢 eu-central-01 › 🧩 <b>DB</b><span class="cnt">51</span></div><div>🏢 eu-west-01 › 🧩 <b>DB</b><span class="cnt">28</span></div></div></div>
+        <p class="dim">표 위 검색칸 + 토글 3개(등급 1 · 담당자 미지정 · 드리프트 있음). 트리는 필터 입력 시 걸린 노드만 경로째 펼친다. 서버 변경 없음(응답에 이미 다 있다).</p>
+      </div>
+    </div>
+    <div class="why"><span><span class="k">근거</span> <code>views/tools/SvcInventory.jsx</code> — 검색 입력 없음 · 28법인 × 서비스 수</span></div>
+  </section>
+
+  <!-- M4 -->
+  <section class="card find" id="m4" data-sev="sev-l" data-ax="ax-judge">
+    <div class="fh"><span class="no">M4</span><h2>이름 규칙은 등록 순 첫 일치 — 더 구체적인 규칙이 져서 결과가 등록 순서에 달린다</h2><span class="pill sev-l">낮음</span><span class="pill ok">확정</span><span class="pill src">판정</span></div>
+    <div class="fb">
+      <div class="pane now"><div class="lab">지금</div>
+        <div class="mock"><table><thead><tr><th>종류</th><th>값</th><th>→ 서비스</th></tr></thead><tbody>
+          <tr><td>이름 규칙 · 접두</td><td class="mono">erp-</td><td><b>ERP</b></td></tr>
+          <tr><td>이름 규칙 · 접두</td><td class="mono">erp-db-</td><td><b>ERP-DB</b> <span class="sub">(절대 안 걸린다)</span></td></tr>
+        </tbody></table></div>
+        <p class="dim"><code>erp-db-01</code> 은 먼저 등록한 'erp-' 에 걸려 ERP 로 간다. 폴더 규칙은 가장 긴 접두가 이기는데 이름 규칙만 다르다.</p>
+      </div>
+      <div class="pane next"><div class="lab">제안</div>
+        <div class="mock"><table><thead><tr><th class="r">적용 순서</th><th>종류</th><th>값</th><th>→ 서비스</th></tr></thead><tbody>
+          <tr><td class="r">1</td><td>이름 규칙 · 접두</td><td class="mono">erp-db-</td><td><b>ERP-DB</b></td></tr>
+          <tr><td class="r">2</td><td>이름 규칙 · 접두</td><td class="mono">erp-</td><td><b>ERP</b></td></tr>
+        </tbody></table><p class="sub" style="margin-top:6px;white-space:normal">긴 값이 먼저 적용된다(폴더 규칙과 같은 규칙). 같은 길이면 등록 순.</p></div>
+        <p class="dim">색인에서 값 길이 내림차순으로 정렬하고, 소속 규칙 표에 '적용 순서' 열을 보여 준다. 기존 규칙의 결과가 바뀔 수 있어 릴리스 노트에 적는다(결정 필요 ③).</p>
+      </div>
+    </div>
+    <div class="why"><span><span class="k">근거</span> <code>servicemap/resolve.js:46-48</code> · <code>ops.js namerule.add</code> 끝에 추가</span></div>
+  </section>
+
+  <!-- M5 -->
+  <section class="card find" id="m5" data-sev="sev-l" data-ax="ax-judge">
+    <div class="fh"><span class="no">M5</span><h2>태그가 2개 이상이면 첫 값만 쓰고 표시가 없다</h2><span class="pill sev-l">낮음</span><span class="pill ok">확정</span><span class="pill src">판정</span></div>
+    <div class="fb">
+      <div class="pane now"><div class="lab">지금</div>
+        <div class="mock"><table><thead><tr><th>이름</th><th>소속 근거</th></tr></thead><tbody>
+          <tr><td><span class="dot"></span> <span class="b blue">VM</span> <b>bi-ap-0031</b></td><td><span class="b blue">태그</span> <span class="sub">Service=DB</span></td></tr>
+        </tbody></table></div>
+        <p class="dim">이 VM 의 Service 태그는 DB 와 Web 두 개다. 판정은 첫 값(DB)을 썼고 둘째 값은 어디에도 안 보인다.</p>
+      </div>
+      <div class="pane next"><div class="lab">제안</div>
+        <div class="mock"><table><thead><tr><th>이름</th><th>소속 근거</th></tr></thead><tbody>
+          <tr><td><span class="dot"></span> <span class="b blue">VM</span> <b>bi-ap-0031</b></td><td><span class="b blue">태그</span> <span class="b amber" title="Service 태그 2개: DB · Web — 첫 값(DB)을 썼습니다">태그 2+</span></td></tr>
+        </tbody></table></div>
+        <p class="dim">구성원 행에 '태그 2+' 표지(툴팁에 값 전부). 검토 탭 소계 '태그 충돌 N' 은 선택.</p>
+      </div>
+    </div>
+    <div class="why"><span><span class="k">근거</span> <code>resolve.js:63-69</code> 의 <code>multi</code> 가 <code>memberRow</code> 에 실리지 않는다</span></div>
+  </section>
+
+  <!-- M6 -->
+  <section class="card find" id="m6" data-sev="sev-l" data-ax="ax-scope">
+    <div class="fh"><span class="no">M6</span><h2>후보 조회와 CSV 에 손상 저장소 503 가드가 없다</h2><span class="pill sev-l">낮음</span><span class="pill ok">확정</span><span class="pill src">범위·운영</span></div>
+    <div class="fb">
+      <div class="pane now"><div class="lab">지금</div>
+        <div class="mock"><table><thead><tr><th>경로</th><th>저장소 손상 시</th></tr></thead><tbody>
+          <tr><td class="mono">GET /tools/svc-inventory</td><td><span class="b red">503</span> registryUnreadable</td></tr>
+          <tr><td class="mono">…/members · …/queues</td><td><span class="b red">503</span></td></tr>
+          <tr><td class="mono">…/candidates</td><td><span class="b green">200</span> <span class="sub">전부 '미소속' 후보</span></td></tr>
+          <tr><td class="mono">…/svc-inventory.csv</td><td><span class="b green">200</span> <span class="sub">전부 '(미지정)' 인 CSV</span></td></tr>
+        </tbody></table></div>
+      </div>
+      <div class="pane next"><div class="lab">제안</div>
+        <div class="mock"><table><thead><tr><th>경로</th><th>저장소 손상 시</th></tr></thead><tbody>
+          <tr><td class="mono">…/candidates</td><td><span class="b red">503</span> registryUnreadable</td></tr>
+          <tr><td class="mono">…/svc-inventory.csv</td><td><span class="b red">503</span> <span class="sub">빈 트리 기준 파일을 내보내지 않는다</span></td></tr>
+        </tbody></table></div>
+        <p class="dim">두 경로에 <code>storeLoadError()</code> 검사를 넣는다. 한 줄씩이다.</p>
+      </div>
+    </div>
+    <div class="why"><span><span class="k">근거</span> <code>svcInventory.js:370-383 · 386-408</code>(없음) vs <code>:315 · :352</code>(있음)</span></div>
+  </section>
+
+  <!-- M9 -->
+  <section class="card find" id="m9" data-sev="sev-l" data-ax="ax-screen">
+    <div class="fh"><span class="no">M9</span><h2>매트릭스 칸이 구성원 수뿐 — 법인 간 사용률·할당 비교가 안 된다</h2><span class="pill sev-l">낮음</span><span class="pill est">추정(설계 선택)</span><span class="pill src">화면</span></div>
+    <div class="fb">
+      <div class="pane now"><div class="lab">지금</div>
+        <div class="mock"><table class="mx"><thead><tr><th>서비스</th><th>등급</th><th>법인</th><th>합계</th><th>us-east</th><th>ap-northeast</th><th>eu-central</th><th>eu-west</th></tr></thead><tbody>
+          <tr><td>DB</td><td><span class="b red">1</span></td><td>6</td><td><b>158</b></td><td>26 <span class="b red">1</span></td><td>22 <span class="b red">2</span></td><td>51</td><td>28 <span class="b red">2</span></td></tr>
+          <tr><td>Web</td><td><span class="b amber">2</span></td><td>6</td><td><b>157</b></td><td>25</td><td>25 <span class="b red">1</span></td><td>51</td><td>26 <span class="b red">2</span></td></tr>
+        </tbody></table></div>
+      </div>
+      <div class="pane next"><div class="lab">제안</div>
+        <div class="mock"><div class="tb" style="margin-bottom:8px"><span class="sub">칸</span><span class="seg" id="mxseg"><button data-m="n" aria-pressed="true">구성원 수</button><button data-m="f">부품 장애</button><button data-m="c">CPU 가중</button><button data-m="v">vCPU 할당</button></span><span class="sub">지역 머리글 클릭 → 지역 합계로 접기</span></div>
+          <div id="mxbox"></div></div>
+        <p class="dim">값 종류만 바꾸는 토글이라 서버 변경 없음(칸 응답에 usage·alloc 이 이미 있다). 색은 명도로도 갈리게.</p>
+      </div>
+    </div>
+    <div class="why"><span><span class="k">근거</span> <code>svcInventory/GlobalAxis.jsx MatrixCell</code> · 칸 응답 <code>cells[g][vc].usage/alloc</code></span></div>
+  </section>
+
+  <!-- M10 -->
+  <section class="card find" id="m10" data-sev="sev-l" data-ax="ax-perf">
+    <div class="fh"><span class="no">M10</span><h2>구성원·큐·후보 조회가 호출마다 전체 판정·집계를 다시 한다</h2><span class="pill sev-l">낮음</span><span class="pill est">추정</span><span class="pill src">성능</span></div>
+    <div class="fb">
+      <div class="pane now"><div class="lab">지금</div>
+        <div class="flow"><span class="st">고정 모달 키 입력(250ms)</span><span class="ar">→</span><span class="st">/candidates</span><span class="ar">→</span><span class="st hot">buildInventory 전체(5,850대 판정 + 집계 + 전역)</span></div>
+        <p class="dim">입력 수집(gather)은 세대당 1회지만 판정·집계는 요청마다 다시 한다. 실측은 없다 — 5,850대 판정은 ms 단위라 체감은 작을 것(추정).</p>
+      </div>
+      <div class="pane next"><div class="lab">제안</div>
+        <div class="flow"><span class="st">/candidates · /members · /queues</span><span class="ar">→</span><span class="st">inventoryFor memo(스냅샷 세대 · rev · 범위 · 관리자, 10초)</span><span class="ar">→</span><span class="st">재사용</span></div>
+        <p class="dim">본 응답의 memoJson 키와 같은 축으로 몇 초 memo. 쓰기 뒤에는 rev 가 바뀌어 자동으로 넘어간다.</p>
+      </div>
+    </div>
+    <div class="why"><span><span class="k">근거</span> <code>svcInventory.js:254-261</code> — memo 없음</span></div>
+  </section>
+
+  <!-- M11 -->
+  <section class="card find" id="m11" data-sev="sev-l" data-ax="ax-screen">
+    <div class="fh"><span class="no">M11</span><h2>CSV 에 전역 서비스·등급·담당자 열이 없다</h2><span class="pill sev-l">낮음</span><span class="pill ok">확정</span><span class="pill src">화면</span></div>
+    <div class="fb">
+      <div class="pane now"><div class="lab">지금</div>
+        <div class="mock mono" style="white-space:nowrap">법인, 폴더, 서비스, 종류, 이름, 키, 소속 근거, 근거 값, 전원, CPU%, 메모리%, …</div>
+      </div>
+      <div class="pane next"><div class="lab">제안</div>
+        <div class="mock mono" style="white-space:nowrap">법인, 폴더, 서비스, <b>전역 서비스, 등급, 담당자,</b> 종류, 이름, 키, 소속 근거, 근거 값, 전원, CPU%, 메모리%, …</div>
+        <p class="dim">서비스별 축에서 쓰는 열을 같이 싣는다. 리포트 필터에 그대로 쓸 수 있다.</p>
+      </div>
+    </div>
+    <div class="why"><span><span class="k">근거</span> <code>svcInventory.js:394</code></span></div>
+  </section>
+
+  <div id="agentFindings"></div>
+
+  <section class="card dec" id="decisions">
+    <h2>결정 필요(사용자)</h2>
+    <ol>
+      <li><b>① M9 매트릭스 칸 모드 토글을 넣을지</b> — 넣으면 화면 변경만(서버 그대로). 안 넣으면 지금처럼 구성원 수·장애만.</li>
+      <li><b>② M2 '입력 다시 읽기' 를 누구에게 줄지</b> — 쓰기 계정 전부(권장: 라벨을 바꾸는 사람이 곧 확인하는 사람) vs 전체 범위 관리자만.</li>
+      <li><b>③ M4 이름 규칙 정렬을 바꿀지</b> — '긴 값 우선' 으로 바꾸면 이미 둔 규칙의 결과가 바뀔 수 있다(릴리스 노트 고지). 바꾸지 않으면 '적용 순서' 열만 보여 준다.</li>
+      <li><b>④ M3 불필요한 고정을 자동으로 정리할지</b> — 권장은 '한 번에 지우기' 버튼(사람이 누른다). 자동 정리는 고정의 뜻(사람이 정했다)을 조용히 없애므로 권하지 않는다.</li>
+    </ol>
+    <p class="dim">구현 규모(추정): M1·M2·M3·M6·M11 서버 + 화면 소폭, M7·M8·M9 화면만, M4·M5 판정 코어 한 줄 + 표시. 전부 한 릴리스(v2.89x)에 들어갈 크기이고, 변이 검증은 M4(판정 변경)에만 건다.</p>
+  </section>
+</div>
+
+<script>
+(function(){
+  // 요약 띠 — 카드의 data-sev 를 세어 채운다(수정 뒤 숫자가 어긋나지 않게).
+  var finds=[].slice.call(document.querySelectorAll('.find'));
+  var cnt=function(sel){return finds.filter(function(f){return f.dataset.sev===sel;}).length;};
+  var est=finds.filter(function(f){return f.querySelector('.pill.est');}).length;
+  var strip=document.getElementById('strip');
+  var tiles=[['발견',finds.length,'메인 '+finds.filter(function(f){return f.id[0]==='m';}).length+' · 반증 '+finds.filter(function(f){return f.id[0]==='r';}).length,'var(--accent)'],
+    ['높음',cnt('sev-h'),'설계·판정을 바꾼다','var(--red)'],['중간',cnt('sev-m'),'한 릴리스에 고친다','var(--amber)'],['낮음',cnt('sev-l'),'표시·가드','var(--dim)'],
+    ['추정',est,'재현 못 함 — 표시해 둠','var(--purple)'],['결정 필요',document.querySelectorAll('#decisions li').length,'아래 ①~④','var(--teal)']];
+  strip.innerHTML=tiles.map(function(t){return '<div class="card kpi" style="border-left-color:'+t[3]+'"><span class="l">'+t[0]+'</span><span class="v" style="color:'+t[3]+'">'+t[1]+'</span><span class="s">'+t[2]+'</span></div>';}).join('');
+
+  // 보기 칩 — 심각도·축으로 거른다.
+  var chips=[].slice.call(document.querySelectorAll('#chips .chip'));
+  chips.forEach(function(c){c.addEventListener('click',function(){
+    chips.forEach(function(x){x.setAttribute('aria-pressed',String(x===c));});
+    var f=c.dataset.f;
+    finds.forEach(function(s){s.hidden=!(f==='all'||s.dataset.sev===f||s.dataset.ax===f);});
+  });});
+
+  // M9 — 칸 모드 토글 목업(값은 스크린샷의 구성원 수에 맞춘 가상 사용률·할당).
+  var corps=['us-east','ap-northeast','eu-central','eu-west'];
+  var rows=[{n:'DB',t:1,v:{n:[26,22,51,28],f:[1,2,0,2],c:[48,46,54,42],v:[123,119,287,190]}},{n:'Web',t:2,v:{n:[25,25,51,26],f:[0,1,0,2],c:[55,61,57,52],v:[101,97,210,112]}}];
+  var seg=document.getElementById('mxseg'),box=document.getElementById('mxbox');
+  function heat(v,max,m){if(m==='n'||m==='f')return '';var p=Math.min(1,v/max);return 'background:rgba(59,130,246,'+(0.08+p*0.5).toFixed(2)+')';}
+  function draw(m){var max=m==='c'?100:m==='v'?300:1;
+    var html='<table class="mx"><thead><tr><th>서비스</th><th>등급</th>'+corps.map(function(c){return '<th>'+c+'</th>';}).join('')+'</tr></thead><tbody>';
+    rows.forEach(function(r){html+='<tr><td>'+r.n+'</td><td><span class="b '+(r.t===1?'red':'amber')+'">'+r.t+'</span></td>';
+      r.v[m].forEach(function(x,i){var txt=m==='c'?x+'%':m==='f'?(x?'<span class="b red">'+x+'</span>':'<span class="z">0</span>'):m==='v'?x:x;
+        html+='<td><span class="heat" style="padding:2px 6px;'+heat(x,max,m)+'">'+txt+'</span></td>';});
+      html+='</tr>';});
+    html+='</tbody></table><p class="sub" style="margin-top:6px;white-space:normal">'+({n:'칸 = 구성원 수 + 열린 부품 장애(붉은 배지)',f:'칸 = 열린 부품 장애 수(구성원 + 영향 호스트)',c:'칸 = CPU 가중 사용률(Σ사용률×용량 ÷ Σ용량 · 못 읽음 제외) — 진할수록 높다',v:'칸 = vCPU 할당 합(투입된 자원) — 진할수록 많다'}[m])+'</p>';
+    box.innerHTML=html;}
+  draw('n');
+  seg.addEventListener('click',function(e){var b=e.target.closest('button');if(!b)return;[].forEach.call(seg.children,function(x){x.setAttribute('aria-pressed',String(x===b));});draw(b.dataset.m);});
+})();
+</script>
