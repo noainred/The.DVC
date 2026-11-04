@@ -5,6 +5,7 @@
  *   값이 없으면 '—'(0 이 아니다) · 문구에 백틱 금지.
  */
 import { numOrNull } from '../../numOrNull.js';
+import { unitText } from '../unitText.js';
 
 /** 한 번에 보낼 수 있는 VM(서버 BULK_RESTORE_MAX 와 같다). */
 export const DR_CHUNK = 50;
@@ -205,11 +206,11 @@ export const DR_RUN_STATE = Object.freeze({ running: ['진행 중', 'info'], pau
 /** 항목 상태 → [문구, 색]. 'sent' 는 Director 에서 복원 중이거나 끝맺음(네트워크 끊기 · 켜 보기) 중. */
 export const DR_ITEM_STATE = Object.freeze({ queued: ['대기', 'muted'], sending: ['보내는 중', 'info'], sent: ['복원 중', 'info'], ok: ['성공', 'ok'], failed: ['실패', 'bad'], unknown: ['결과 모름', 'warn'], skipped: ['건너뜀', 'muted'] });
 const COUNT_ORDER = ['ok', 'sent', 'sending', 'queued', 'failed', 'unknown', 'skipped'];
-/** 단계 한 줄 — '성공 3 · 복원 중 2 · 대기 10 / 15대'(0 인 상태는 뺀다). */
+/** 단계 한 줄 — '성공 3 · 복원 중 2 · 대기 10 / 15대'(0 인 상태는 뺀다 · 대수를 모르면 '— / —'). */
 export function drWaveCountsText(w) {
   const c = w?.counts || {};
   const parts = COUNT_ORDER.filter((k) => Number(c[k]) > 0).map((k) => `${DR_ITEM_STATE[k][0]} ${c[k]}`);
-  return `${parts.join(' · ') || '—'} / ${numOrNull(w?.total) ?? '—'}대`;
+  return `${parts.join(' · ') || '—'} / ${unitText(numOrNull(w?.total), '대')}`;   // 못 읽은 대수는 '—'(단위를 붙이지 않는다)
 }
 /** 진행 중(running · paused)인가 — 이 법인에 새 회차를 시작할 수 없다. */
 export const drRunActive = (run) => run?.state === 'running' || run?.state === 'paused';

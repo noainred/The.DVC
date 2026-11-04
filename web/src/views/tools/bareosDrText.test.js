@@ -119,7 +119,7 @@ describe('재해 복구 2차 — 복구 순서(단계)', () => {
   });
   it('진행 카드 — 상태 줄 · 보일 회차 · 회차에 든 VM 은 고르기에서 막는다', () => {
     expect(T.drWaveCountsText({ total: 15, counts: { queued: 10, ok: 3, sent: 2 } })).toBe('성공 3 · 복원 중 2 · 대기 10 / 15대');
-    expect(T.drWaveCountsText({})).toBe('— / —대');
+    expect(T.drWaveCountsText({})).toBe('— / —', '못 읽은 대수에 단위를 붙이지 않는다');
     const runs = [{ id: 'o', vcenterId: 'vc-a', state: 'done', at: 5 }, { id: 'p', vcenterId: 'vc-a', state: 'paused', at: 1 }, { id: 'q', vcenterId: 'vc-b', state: 'running', at: 9 }];
     expect(T.drCurrentRun(runs, 'vc-a').id).toBe('p');
     expect(T.drCurrentRun(runs.filter((r) => r.id !== 'p'), 'vc-a').id).toBe('o');
