@@ -1,0 +1,189 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>이슈 — 스프린트 보드</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=Noto+Sans+KR:wght@400;500;700;800&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+body{margin:0;background:#0a0e17;color:#e6edf6;font-family:"Inter","Noto Sans KR","Apple SD Gothic Neo",sans-serif;font-size:13px}
+a{color:#93c5fd}a:hover{color:#bfdbfe}
+.tb{display:flex;align-items:center;gap:14px;height:44px;padding:0 16px;background:#0f1626;border-bottom:1px solid #243049}
+.tb .logo{display:inline-flex;align-items:center;gap:8px;font-weight:800;font-size:14px}
+.tb .logo .v{width:26px;height:26px;border-radius:7px;background:#3b82f6;display:inline-flex;align-items:center;justify-content:center;font-size:13px;color:#fff}
+.ver{font-size:11px;font-weight:700;color:#5eead4;border:1px solid #2dd4bf;border-radius:6px;padding:1px 6px}
+.mock{font-size:11px;font-weight:800;color:#fcd34d;background:rgba(245,158,11,.16);border-radius:6px;padding:2px 7px}
+.side{flex:0 0 236px;background:#0f1626;border-right:1px solid #243049;padding:14px 10px;display:flex;flex-direction:column;gap:2px}
+.side a{display:flex;align-items:center;gap:10px;min-height:36px;padding:0 12px;border-radius:9px;color:#aebbd0;text-decoration:none;font-size:13.5px;font-weight:600}
+.side a.on{background:#1a2236;color:#e6edf6;box-shadow:inset 3px 0 0 #3b82f6}
+.side .n{margin-left:auto;font-size:11px;color:#5d6b85}
+.card{background:#141b2d;border:1px solid #243049;border-radius:12px}
+.muted{color:#8b9bb4}.faint{color:#5d6b85}
+.mono{font-family:"JetBrains Mono",ui-monospace,monospace}
+.btn{display:inline-flex;align-items:center;gap:6px;min-height:30px;padding:0 11px;border-radius:8px;border:1px solid #243049;background:#1a2236;color:#e6edf6;font:inherit;font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap;text-decoration:none}
+.btn.primary{background:#3b82f6;border-color:#3b82f6;color:#fff}
+.btn.sm{min-height:26px;padding:0 9px;font-size:11.5px}
+.tag{display:inline-flex;align-items:center;gap:5px;height:20px;padding:0 8px;border-radius:999px;font-size:11px;font-weight:700;white-space:nowrap}
+.tag.blue{background:rgba(59,130,246,.18);color:#93c5fd}.tag.gray{background:rgba(139,155,180,.14);color:#aebbd0}.tag.ok{background:rgba(34,197,94,.14);color:#86efac}.tag.warn{background:rgba(245,158,11,.16);color:#fcd34d}.tag.bad{background:rgba(239,68,68,.16);color:#fca5a5}.tag.purple{background:rgba(168,85,247,.18);color:#d8b4fe}.tag.teal{background:rgba(45,212,191,.16);color:#5eead4}
+.chip{display:inline-flex;align-items:center;height:22px;padding:0 9px;border-radius:6px;font-size:11.5px;font-weight:700;border:1px solid #243049;background:#0f1626}
+.chip.progress{color:#93c5fd;border-color:rgba(59,130,246,.5)}.chip.todo{color:#e6edf6}.chip.done{color:#86efac;border-color:rgba(34,197,94,.4)}.chip.review{color:#fcd34d;border-color:rgba(245,158,11,.4)}
+.key{font-family:"JetBrains Mono",monospace;color:#8b9bb4;font-size:11.5px}
+.type{font-size:11.5px;font-weight:800}.type.incident{color:#fca5a5}.type.task{color:#93c5fd}.type.improve{color:#5eead4}.type.request{color:#aebbd0}.type.sub{color:#5eead4}
+.prio{font-size:11.5px;font-weight:800}.prio.p0{color:#fca5a5}.prio.p1{color:#fcd34d}.prio.p2{color:#93c5fd}.prio.p3{color:#aebbd0}
+.av{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:50%;font-size:10px;font-weight:800;color:#fff;flex:0 0 auto}
+.input{min-height:30px;border:1px solid #243049;border-radius:8px;background:#0a0e17;color:#e6edf6;font:inherit;font-size:12.5px;padding:0 10px}
+.col{flex:1 1 0;min-width:0;background:#0f1626;border:1px solid #243049;border-radius:12px;padding:10px;display:flex;flex-direction:column;gap:8px}
+.col .h{display:flex;align-items:center;gap:8px;padding:0 2px 4px;font-size:12px}
+.ic{display:flex;flex-direction:column;gap:6px;padding:10px 11px;border-radius:10px;background:#141b2d;border:1px solid #243049;text-decoration:none;color:#e6edf6;min-width:0;border-left-width:3px}
+.ic.e20{border-left-color:#a855f7}.ic.e22{border-left-color:#2dd4bf}.ic.e0{border-left-color:#243049}
+.ic .t{font-size:12.5px;font-weight:600;line-height:1.4}
+.ic .r{display:flex;align-items:center;gap:6px;flex-wrap:wrap;font-size:11.5px}
+.bar{display:inline-block;height:6px;border-radius:3px;background:rgba(36,48,73,.9);overflow:hidden;vertical-align:middle}
+.bar > span{display:block;height:100%;border-radius:3px;background:#3b82f6}
+.bd{display:flex;align-items:flex-end;gap:3px;height:56px}
+.bd i{display:block;flex:1;background:#3b82f6;border-radius:2px 2px 0 0;min-width:0}
+.bd i.g{background:#243049}.bd i.now{background:#22d3ee}
+.sb{display:flex;align-items:center;height:30px;background:#0f1626;border-top:1px solid #243049;font-family:"JetBrains Mono",monospace;font-size:11.5px;color:#8b9bb4}
+.sb span{flex:1;text-align:center;border-right:1px solid #243049}.sb span:last-child{border-right:0}.sb b{color:#e6edf6}
+</style>
+</helmet>
+
+<div style="min-height: 100vh; display: flex; flex-direction: column; background: #0a0e17">
+  <header class="tb">
+    <span class="muted" aria-hidden="true">☰</span>
+    <span class="logo"><span class="v">V</span>The Davinci</span>
+    <span class="ver">v2.876.0</span><span class="mock">MOCK</span>
+    <span style="flex: 1"></span>
+    <span class="mono muted" style="font-size: 11.5px">11/11 vCenter <b style="color: #22c55e">OK</b> · 오전 10:22</span>
+    <span class="av" style="background: #3b82f6; width: 24px; height: 24px">A</span>
+    <span style="font-size: 12.5px; font-weight: 700">Anonymous <span class="muted" style="font-weight: 400; font-size: 11px">관리자</span></span>
+    <button class="btn sm" type="button">Out</button>
+  </header>
+
+  <div style="display: flex; flex-wrap: wrap; flex: 1">
+    <nav class="side" aria-label="메뉴">
+      <a href="#"><span aria-hidden="true">◫</span>Overview</a>
+      <a href="#"><span aria-hidden="true">▤</span>Summary</a>
+      <a href="#"><span aria-hidden="true">▣</span>서버<span class="n">6 ▾</span></a>
+      <a href="#"><span aria-hidden="true">▥</span>스토리지<span class="n">7 ▾</span></a>
+      <a href="#"><span aria-hidden="true">⌘</span>네트워크<span class="n">6 ▾</span></a>
+      <a href="#"><span aria-hidden="true">⚙</span>자원관리<span class="n">3 ▾</span></a>
+      <a href="#"><span aria-hidden="true">◔</span>자원 최적화<span class="n">2 ▾</span></a>
+      <a href="#"><span aria-hidden="true">✦</span>특수 기능</a>
+      <a href="IssueEpic.dc.html" class="on"><span aria-hidden="true">⚑</span>이슈</a>
+      <a href="Main.dc.html"><span aria-hidden="true">▧</span>위키</a>
+      <a href="#"><span aria-hidden="true">▭</span>게시판</a>
+      <a href="#"><span aria-hidden="true">✲</span>설정<span class="n">2 ▾</span></a>
+    </nav>
+
+    <main style="flex: 999 1 560px; min-width: 0; padding: 16px 22px 24px; display: flex; flex-direction: column; gap: 12px">
+      <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap">
+        <div style="display: inline-flex; gap: 6px; flex-wrap: wrap">
+          <a class="btn" href="IssueEpic.dc.html">보드</a><a class="btn" href="SavedFilter.dc.html">목록</a><a class="btn" href="#">내 작업</a><a class="btn" href="#">활동</a>
+          <a class="btn primary" href="Sprint.dc.html">스프린트</a><a class="btn" href="#">에픽</a><a class="btn" href="SavedFilter.dc.html">필터</a><a class="btn" href="#">설정</a>
+        </div>
+        <span style="flex: 1"></span>
+        <label style="display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: #8b9bb4">스프린트
+          <select class="input" aria-label="스프린트"><option>2026-10 ④ (끝남)</option><option selected>2026-11 ② 11-03 ~ 11-14 (진행 중)</option><option>2026-11 ③ 11-17 ~ 11-28 (예정)</option></select>
+        </label>
+        <button class="btn" type="button">+ 새 스프린트</button>
+      </div>
+
+      <!-- 스프린트 머리 -->
+      <section class="card" style="padding: 14px 16px; display: flex; gap: 16px; flex-wrap: wrap; align-items: stretch">
+        <div style="flex: 1 1 320px; min-width: 0; display: flex; flex-direction: column; gap: 6px">
+          <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap"><b style="font-size: 16px">2026-11 ②</b><span class="tag ok">진행 중</span><span class="muted" style="font-size: 12px">11-03(월) ~ 11-14(금) · 남은 10일 · 공용 + 전 법인</span></div>
+          <div style="font-size: 13px"><b class="muted">목표</b> 고RTT 법인 수집 안정화 1차 마무리 · Bareos 복원 리허설 정례화 착수</div>
+          <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: 12px"><span>이슈 9 · 완료 3 · 진행 4 · 할 일 2</span><span class="bar" style="width: 160px; height: 8px"><span style="width: 33%"></span></span><b>33%</b><span class="muted">· 하위 작업은 상위 이슈 안에서 셉니다(보드 카드에 n/m)</span></div>
+          <div style="display: flex; gap: 6px; flex-wrap: wrap; margin-top: 2px"><button class="btn sm" type="button">목표 · 기간 수정</button><button class="btn sm" type="button">스프린트 끝내기</button><button class="btn sm" type="button">이전 스프린트 회고 보기</button></div>
+        </div>
+        <div style="flex: 0 1 300px; min-width: 0; display: flex; flex-direction: column; gap: 4px">
+          <div style="display: flex; align-items: center; gap: 8px; font-size: 12px"><b>번다운</b><span class="muted">남은 이슈 수 · 일별 · 오늘 6</span><span style="flex: 1"></span><span class="faint">기준선 ━ 회색</span></div>
+          <div class="bd" role="img" aria-label="번다운 — 9에서 시작해 오늘 6건 남음, 기준선은 하루 0.9건씩 감소">
+            <i style="height: 100%"></i><i style="height: 100%"></i><i style="height: 89%"></i><i style="height: 89%"></i><i style="height: 78%"></i><i style="height: 67%"></i><i style="height: 67%"></i><i class="now" style="height: 67%"></i><i class="g" style="height: 50%"></i><i class="g" style="height: 40%"></i><i class="g" style="height: 30%"></i><i class="g" style="height: 20%"></i><i class="g" style="height: 10%"></i><i class="g" style="height: 2%"></i>
+          </div>
+          <div class="faint" style="font-size: 11px; display: flex; justify-content: space-between"><span>11-03</span><span>오늘</span><span>11-14</span></div>
+        </div>
+        <div style="flex: 0 1 240px; min-width: 0; display: flex; flex-direction: column; gap: 5px; font-size: 12px">
+          <b>사람별 · 열린 이슈</b>
+          <span style="display: flex; align-items: center; gap: 6px"><span class="av" style="background: #a855f7">K</span>kim<span class="bar" style="flex: 1"><span style="width: 60%"></span></span><b>3</b></span>
+          <span style="display: flex; align-items: center; gap: 6px"><span class="av" style="background: #22c55e">C</span>choi<span class="bar" style="flex: 1"><span style="width: 40%"></span></span><b>2</b></span>
+          <span style="display: flex; align-items: center; gap: 6px"><span class="av" style="background: #3b82f6">L</span>lee<span class="bar" style="flex: 1"><span style="width: 20%"></span></span><b>1</b></span>
+          <span class="faint" style="font-size: 11px">막대는 5건을 가득으로(표시 기준). 미할당 0.</span>
+        </div>
+      </section>
+
+      <div style="display: flex; gap: 12px; align-items: flex-start; flex-wrap: wrap">
+        <!-- 보드 -->
+        <section style="flex: 999 1 640px; min-width: 0; display: flex; flex-direction: column; gap: 8px">
+          <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 12px">
+            <span class="muted">묶기</span>
+            <span style="display: inline-flex; border: 1px solid #243049; border-radius: 8px; overflow: hidden"><button class="btn sm" type="button" style="border: 0; border-radius: 0; background: #3b82f6; color: #fff">없음</button><button class="btn sm" type="button" style="border: 0; border-radius: 0">에픽별</button><button class="btn sm" type="button" style="border: 0; border-radius: 0">담당자별</button></span>
+            <span class="muted">· 카드 왼쪽 띠 = 에픽(보라 ISS-20 · 청록 ISS-22 · 회색 없음) · 끌어서 상태 바꾸기</span>
+            <span style="flex: 1"></span>
+            <label style="display: inline-flex; align-items: center; gap: 6px"><input type="checkbox"> 내 이슈만</label>
+          </div>
+          <div style="display: flex; gap: 10px; overflow-x: auto; padding-bottom: 4px">
+            <div class="col">
+              <div class="h"><span class="chip todo">할 일</span><span class="muted">2</span></div>
+              <a class="ic e20" href="IssueEpic.dc.html"><span class="r"><span class="type task">작업</span><span class="key">ISS-19</span><span class="tag gray" style="height: 16px; font-size: 10px">하위 · ISS-1</span></span><span class="t">위키 런북 갱신 · 재발 방지 절 보강</span><span class="r"><span class="prio p2">P2</span><span class="muted">기한 없음</span><span style="flex: 1"></span><span class="muted">미할당</span></span></a>
+              <a class="ic e22" href="#"><span class="r"><span class="type task">작업</span><span class="key">ISS-25</span></span><span class="t">복원 리허설 대상 VM 목록 확정(법인 3곳)</span><span class="r"><span class="prio p1">P1</span><span style="color: #fcd34d; font-weight: 700">D-2</span><span style="flex: 1"></span><span class="av" style="background: #3b82f6">L</span></span></a>
+            </div>
+            <div class="col">
+              <div class="h"><span class="chip progress">진행 중</span><span class="muted">4</span></div>
+              <a class="ic e20" href="IssueEpic.dc.html"><span class="r"><span class="type incident">장애</span><span class="key">ISS-1</span><span class="tag gray" style="height: 16px; font-size: 10px">하위 2/4</span></span><span class="t">vCenter PL-WAW 수집 타임아웃 간헐 발생</span><span class="r"><span class="prio p0">P0</span><span style="color: #fcd34d; font-weight: 700">오늘</span><span class="bar" style="width: 50px"><span style="width: 50%"></span></span><span class="muted">50%</span><span style="flex: 1"></span><span class="av" style="background: #a855f7">K</span></span></a>
+              <a class="ic e20" href="#"><span class="r"><span class="type task">작업</span><span class="key">ISS-18</span><span class="tag gray" style="height: 16px; font-size: 10px">하위 · ISS-1</span></span><span class="t">시한 90초 적용 결과 확인(3일 관찰)</span><span class="r"><span class="prio p1">P1</span><span style="color: #fcd34d; font-weight: 700">내일</span><span class="bar" style="width: 50px"><span style="width: 66%"></span></span><span class="muted">66%</span><span style="flex: 1"></span><span class="av" style="background: #22c55e">C</span></span></a>
+              <a class="ic e22" href="#"><span class="r"><span class="type improve">개선</span><span class="key">ISS-24</span></span><span class="t">복원 리허설 결과를 일일 요약 메일에 싣기</span><span class="r"><span class="prio p2">P2</span><span class="muted">11-12</span><span style="flex: 1"></span><span class="av" style="background: #a855f7">K</span></span></a>
+              <a class="ic e0" href="#"><span class="r"><span class="type request">요청</span><span class="key">ISS-26</span></span><span class="t">US-East 호스트 2대 iDRAC 펌웨어 확인</span><span class="r"><span class="prio p3">P3</span><span class="muted">11-13</span><span class="tag warn" style="height: 16px; font-size: 10px">3일 갱신 없음</span><span style="flex: 1"></span><span class="av" style="background: #3b82f6">L</span></span></a>
+            </div>
+            <div class="col">
+              <div class="h"><span class="chip review">검토</span><span class="muted">0</span></div>
+              <div class="faint" style="font-size: 12px; padding: 8px 2px">없음</div>
+            </div>
+            <div class="col">
+              <div class="h"><span class="chip done">완료</span><span class="muted">3 · 이 스프린트</span></div>
+              <a class="ic e20" href="#" style="opacity: .75"><span class="r"><span class="type task">작업</span><span class="key">ISS-16</span></span><span class="t">엣지 수집 시한 env 로 분리</span><span class="r"><span class="muted">11-01 완료</span><span style="flex: 1"></span><span class="av" style="background: #a855f7">K</span></span></a>
+              <a class="ic e20" href="#" style="opacity: .75"><span class="r"><span class="type task">작업</span><span class="key">ISS-17</span></span><span class="t">PL-WAW 시한 90초 적용</span><span class="r"><span class="muted">11-03 완료</span><span style="flex: 1"></span><span class="av" style="background: #a855f7">K</span></span></a>
+              <a class="ic e22" href="#" style="opacity: .75"><span class="r"><span class="type task">작업</span><span class="key">ISS-23</span></span><span class="t">리허설 일정 템플릿(위키) 작성</span><span class="r"><span class="muted">11-04 완료</span><span style="flex: 1"></span><span class="av" style="background: #22c55e">C</span></span></a>
+            </div>
+          </div>
+        </section>
+
+        <!-- 백로그 서랍 -->
+        <aside class="card" aria-label="백로그" style="flex: 1 1 280px; max-width: 340px; min-width: 0; padding: 12px 14px; display: flex; flex-direction: column; gap: 8px">
+          <div style="display: flex; align-items: center; gap: 8px"><b>백로그 · 11</b><span class="muted" style="font-size: 12px">· 스프린트 밖 열린 이슈</span><span style="flex: 1"></span><button class="btn sm" type="button">접기</button></div>
+          <input class="input" type="search" placeholder="백로그에서 찾기" aria-label="백로그에서 찾기">
+          <div style="display: flex; flex-direction: column; gap: 6px">
+            <div class="ic e20" style="flex-direction: row; align-items: center; gap: 8px"><span style="min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 3px"><span class="r"><span class="type task">작업</span><span class="key">ISS-27</span><span class="prio p1">P1</span></span><span class="t">수집 분할(300대 단위) 설계</span></span><button class="btn sm primary" type="button" aria-label="ISS-27 을 스프린트에 넣기">넣기</button></div>
+            <div class="ic e0" style="flex-direction: row; align-items: center; gap: 8px"><span style="min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 3px"><span class="r"><span class="type request">요청</span><span class="key">ISS-5</span><span class="prio p3">P3</span></span><span class="t">IPAM 대역 스캔 실패 알림 중복 발송</span></span><button class="btn sm primary" type="button" aria-label="ISS-5 를 스프린트에 넣기">넣기</button></div>
+            <div class="ic e0" style="flex-direction: row; align-items: center; gap: 8px"><span style="min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 3px"><span class="r"><span class="type task">작업</span><span class="key">ISS-4</span><span class="prio p2">P2</span></span><span class="t">Unity 용량 경고 임계값 조정</span></span><button class="btn sm primary" type="button" aria-label="ISS-4 를 스프린트에 넣기">넣기</button></div>
+            <div class="ic e22" style="flex-direction: row; align-items: center; gap: 8px"><span style="min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 3px"><span class="r"><span class="type improve">개선</span><span class="key">ISS-28</span><span class="prio p2">P2</span></span><span class="t">리허설 실패 시 자동 이슈 등록</span></span><button class="btn sm primary" type="button" aria-label="ISS-28 을 스프린트에 넣기">넣기</button></div>
+            <a class="muted" href="SavedFilter.dc.html" style="font-size: 12px">더 보기(7) · 목록에서 ‘스프린트: 없음’ 필터 →</a>
+          </div>
+          <div class="faint" style="font-size: 11.5px; border-top: 1px solid #1f2a40; padding-top: 8px">넣기 · 빼기는 이력에 남습니다(‘스프린트 2026-11 ② 에 넣음 · kim’). 범위 계정은 자기 법인 이슈만 넣을 수 있고, 스프린트 자체(이름 · 기간 · 목표)는 전체 범위 운영자 · 관리자가 만듭니다.</div>
+        </aside>
+      </div>
+
+      <!-- 끝내기 대화상자 예시 -->
+      <section class="card" style="padding: 12px 16px; border-color: #a855f7; display: flex; gap: 12px; align-items: flex-start; flex-wrap: wrap; font-size: 12.5px">
+        <span class="tag purple">스프린트 끝내기(예시 대화상자)</span>
+        <div style="flex: 1 1 420px; min-width: 0"><b>2026-11 ② 를 끝냅니다 — 완료 3 · 미완료 6</b><div class="muted" style="margin-top: 3px">미완료 6건을 어디로 옮길까요? 옮긴 기록은 이슈 이력에 남고, 끝난 스프린트는 회고(완료 목록 · 번다운 · 옮긴 이슈)로 남습니다.</div>
+          <div style="display: flex; gap: 14px; margin-top: 6px; flex-wrap: wrap"><label style="display: inline-flex; gap: 6px; align-items: center"><input type="radio" name="mv" checked> 다음 스프린트(2026-11 ③)로</label><label style="display: inline-flex; gap: 6px; align-items: center"><input type="radio" name="mv"> 백로그로</label></div></div>
+        <div style="display: flex; gap: 6px"><button class="btn" type="button">취소</button><button class="btn primary" type="button">끝내기</button></div>
+      </section>
+    </main>
+  </div>
+  <footer class="sb" aria-label="상태"><span>서버 Uptime <b>6일</b></span><span>전체 호스트 <b>658</b></span><span>전체 VM <b>5,850</b> (5,412 On)</span><span>활성 알람 <b style="color: #ef4444">3</b></span></footer>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1100}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

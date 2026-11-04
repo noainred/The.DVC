@@ -1,0 +1,173 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>위키 — 새 페이지(템플릿) · 검색</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=Noto+Sans+KR:wght@400;500;700;800&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+body{margin:0;background:#0a0e17;color:#e6edf6;font-family:"Inter","Noto Sans KR","Apple SD Gothic Neo",sans-serif;font-size:13px}
+a{color:#93c5fd}a:hover{color:#bfdbfe}
+.tb{display:flex;align-items:center;gap:14px;height:44px;padding:0 16px;background:#0f1626;border-bottom:1px solid #243049}
+.tb .logo{display:inline-flex;align-items:center;gap:8px;font-weight:800;font-size:14px}
+.tb .logo .v{width:26px;height:26px;border-radius:7px;background:#3b82f6;display:inline-flex;align-items:center;justify-content:center;font-size:13px;color:#fff}
+.ver{font-size:11px;font-weight:700;color:#5eead4;border:1px solid #2dd4bf;border-radius:6px;padding:1px 6px}
+.mock{font-size:11px;font-weight:800;color:#fcd34d;background:rgba(245,158,11,.16);border-radius:6px;padding:2px 7px}
+.side{flex:0 0 236px;background:#0f1626;border-right:1px solid #243049;padding:14px 10px;display:flex;flex-direction:column;gap:2px}
+.side a{display:flex;align-items:center;gap:10px;min-height:36px;padding:0 12px;border-radius:9px;color:#aebbd0;text-decoration:none;font-size:13.5px;font-weight:600}
+.side a.on{background:#1a2236;color:#e6edf6;box-shadow:inset 3px 0 0 #3b82f6}
+.side .n{margin-left:auto;font-size:11px;color:#5d6b85}
+.card{background:#141b2d;border:1px solid #243049;border-radius:12px}
+.muted{color:#8b9bb4}.faint{color:#5d6b85}
+.mono{font-family:"JetBrains Mono",ui-monospace,monospace}
+.btn{display:inline-flex;align-items:center;gap:6px;min-height:30px;padding:0 11px;border-radius:8px;border:1px solid #243049;background:#1a2236;color:#e6edf6;font:inherit;font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap;text-decoration:none}
+.btn.primary{background:#3b82f6;border-color:#3b82f6;color:#fff}
+.btn.sm{min-height:26px;padding:0 9px;font-size:11.5px}
+.tag{display:inline-flex;align-items:center;gap:5px;height:20px;padding:0 8px;border-radius:999px;font-size:11px;font-weight:700;white-space:nowrap}
+.tag.blue{background:rgba(59,130,246,.18);color:#93c5fd}.tag.gray{background:rgba(139,155,180,.14);color:#aebbd0}.tag.ok{background:rgba(34,197,94,.14);color:#86efac}.tag.warn{background:rgba(245,158,11,.16);color:#fcd34d}.tag.bad{background:rgba(239,68,68,.16);color:#fca5a5}.tag.purple{background:rgba(168,85,247,.18);color:#d8b4fe}
+.iss{display:inline-flex;align-items:center;gap:6px;height:22px;padding:0 8px 0 6px;border-radius:6px;border:1px solid #243049;background:#0f1626;color:#e6edf6;font-size:12px;font-weight:600;text-decoration:none;vertical-align:middle}
+.iss .k{font-family:"JetBrains Mono",monospace;color:#93c5fd;font-size:11.5px}
+.iss .st{width:8px;height:8px;border-radius:50%}
+.av{display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:50%;font-size:11px;font-weight:800;color:#fff;flex:0 0 auto}
+.input{min-height:30px;border:1px solid #243049;border-radius:8px;background:#0a0e17;color:#e6edf6;font:inherit;font-size:12.5px;padding:0 10px}
+.tpl{display:flex;flex-direction:column;gap:8px;padding:14px;border:1px solid #243049;border-radius:12px;background:#0f1626;text-decoration:none;color:#e6edf6;min-width:0}
+.tpl.on{border-color:#3b82f6;box-shadow:0 0 0 1px #3b82f6 inset}
+.tpl b{font-size:14px}
+.tpl .sk{font-family:"JetBrains Mono",monospace;font-size:11px;color:#8b9bb4;line-height:1.6;white-space:pre-wrap}
+.hit{padding:10px 12px;border-bottom:1px solid #1f2a40;display:flex;flex-direction:column;gap:4px}
+.hit mark{background:rgba(245,158,11,.28);color:#fde68a;border-radius:3px;padding:0 2px}
+.sb{display:flex;align-items:center;height:30px;background:#0f1626;border-top:1px solid #243049;font-family:"JetBrains Mono",monospace;font-size:11.5px;color:#8b9bb4}
+.sb span{flex:1;text-align:center;border-right:1px solid #243049}.sb span:last-child{border-right:0}.sb b{color:#e6edf6}
+</style>
+</helmet>
+
+<div style="min-height: 100vh; display: flex; flex-direction: column; background: #0a0e17">
+  <header class="tb">
+    <span class="muted" aria-hidden="true">☰</span>
+    <span class="logo"><span class="v">V</span>The Davinci</span>
+    <span class="ver">v2.876.0</span><span class="mock">MOCK</span>
+    <span style="flex: 1"></span>
+    <span class="mono muted" style="font-size: 11.5px">11/11 vCenter <b style="color: #22c55e">OK</b> · 오전 10:18</span>
+    <span class="av" style="background: #3b82f6">A</span>
+    <span style="font-size: 12.5px; font-weight: 700">Anonymous <span class="muted" style="font-weight: 400; font-size: 11px">관리자</span></span>
+    <button class="btn sm" type="button">Out</button>
+  </header>
+
+  <div style="display: flex; flex-wrap: wrap; flex: 1">
+    <nav class="side" aria-label="메뉴">
+      <a href="#"><span aria-hidden="true">◫</span>Overview</a>
+      <a href="#"><span aria-hidden="true">▤</span>Summary</a>
+      <a href="#"><span aria-hidden="true">▣</span>서버<span class="n">6 ▾</span></a>
+      <a href="#"><span aria-hidden="true">▥</span>스토리지<span class="n">7 ▾</span></a>
+      <a href="#"><span aria-hidden="true">⌘</span>네트워크<span class="n">6 ▾</span></a>
+      <a href="#"><span aria-hidden="true">⚙</span>자원관리<span class="n">3 ▾</span></a>
+      <a href="#"><span aria-hidden="true">◔</span>자원 최적화<span class="n">2 ▾</span></a>
+      <a href="#"><span aria-hidden="true">✦</span>특수 기능</a>
+      <a href="#"><span aria-hidden="true">⚑</span>이슈</a>
+      <a href="Main.dc.html" class="on"><span aria-hidden="true">▧</span>위키</a>
+      <a href="#"><span aria-hidden="true">▭</span>게시판</a>
+      <a href="#"><span aria-hidden="true">✲</span>설정<span class="n">2 ▾</span></a>
+    </nav>
+
+    <main style="flex: 999 1 560px; min-width: 0; padding: 16px 22px 24px; display: flex; flex-direction: column; gap: 14px">
+      <!-- 새 페이지 — 템플릿 고르기 -->
+      <section class="card" style="padding: 16px 18px; display: flex; flex-direction: column; gap: 12px">
+        <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap">
+          <b style="font-size: 15px">새 페이지</b>
+          <span class="muted" style="font-size: 12px">스페이스 <b style="color: #e6edf6">vcenter-ap-northeast-01 · 서울</b> · 위치 <b style="color: #e6edf6">운영 절차 › vCenter 수집기 점검</b> 아래</span>
+          <span style="flex: 1"></span>
+          <a class="btn" href="Main.dc.html">취소</a>
+        </div>
+        <div style="display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px">
+          <a class="tpl" href="WikiEdit.dc.html"><span style="display: flex; align-items: center; gap: 8px"><span class="tag gray">빈 페이지</span></span><b>처음부터</b><span class="sk"># 제목
+
+본문</span></a>
+          <a class="tpl on" href="WikiEdit.dc.html"><span style="display: flex; align-items: center; gap: 8px"><span class="tag bad">장애</span><span class="faint" style="font-size: 11px">내장</span></span><b>장애 보고서(포스트모템)</b><span class="sk"># [장애 제목]
+영향 · 기간 · 법인
+## 타임라인
+## 원인
+## 조치 · 재발 방지
+관련 이슈: ISS-</span></a>
+          <a class="tpl" href="WikiEdit.dc.html"><span style="display: flex; align-items: center; gap: 8px"><span class="tag blue">절차</span><span class="faint" style="font-size: 11px">내장</span></span><b>런북</b><span class="sk"># [작업 이름]
+## 언제 쓰나
+## 사전 확인
+## 절차(명령)
+## 되돌리기
+## 확인</span></a>
+          <a class="tpl" href="WikiEdit.dc.html"><span style="display: flex; align-items: center; gap: 8px"><span class="tag ok">회의</span><span class="faint" style="font-size: 11px">내장</span></span><b>회의록</b><span class="sk"># [YYYY-MM-DD] [제목]
+참석 · 진행
+## 안건
+## 결정
+## 할 일 → ISS- 로</span></a>
+          <a class="tpl" href="WikiEdit.dc.html"><span style="display: flex; align-items: center; gap: 8px"><span class="tag warn">변경</span><span class="faint" style="font-size: 11px">관리자 추가</span></span><b>변경 계획(CAB)</b><span class="sk"># [변경 제목]
+대상 법인 · 창(시간)
+## 영향 · 위험
+## 절차 · 되돌리기
+## 승인 · 결과</span></a>
+        </div>
+        <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: 12.5px">
+          <label style="display: flex; align-items: center; gap: 8px; flex: 1 1 300px; min-width: 0; color: #8b9bb4">제목 <input class="input" type="text" value="2026-11 PL-WAW 수집 타임아웃 장애 보고서" aria-label="제목" style="flex: 1; min-width: 0"></label>
+          <label style="display: inline-flex; align-items: center; gap: 6px; color: #8b9bb4">관련 이슈 <input class="input" type="text" value="ISS-1" aria-label="관련 이슈" style="width: 110px"></label>
+          <label style="display: inline-flex; align-items: center; gap: 6px; color: #8b9bb4">라벨 <input class="input" type="text" value="vcenter, pl-waw, 장애" aria-label="라벨" style="width: 190px"></label>
+          <a class="btn primary" href="WikiEdit.dc.html">이 템플릿으로 만들기</a>
+        </div>
+        <div class="faint" style="font-size: 11.5px">템플릿은 ‘위키 › 템플릿’ 에서 전체 범위 관리자가 더하고 고칩니다(마크다운 그대로). 내장 4종은 지울 수 없고 복제해서 바꿉니다. 템플릿의 ‘ISS-’ 칸은 관련 이슈 값으로 채워집니다.</div>
+      </section>
+
+      <!-- 검색 -->
+      <section class="card" style="padding: 0; overflow: hidden">
+        <div style="padding: 12px 14px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; border-bottom: 1px solid #243049">
+          <b style="font-size: 15px">검색</b>
+          <label style="flex: 1 1 320px; min-width: 0; display: flex"><input class="input" type="search" value="수집 타임아웃" aria-label="위키 검색" style="flex: 1; min-width: 0; min-height: 34px; font-size: 13.5px"></label>
+          <select class="input" aria-label="스페이스"><option>모든 스페이스(내 범위)</option><option selected>vcenter-ap-northeast-01</option></select>
+          <select class="input" aria-label="라벨"><option>라벨: 전체</option><option selected>vcenter</option></select>
+          <select class="input" aria-label="관련 이슈"><option>관련 이슈: 전체</option><option>ISS-1</option><option>ISS-20</option></select>
+          <select class="input" aria-label="상태"><option>상태: 전체</option><option>검토 완료</option></select>
+          <button class="btn primary" type="button">찾기</button>
+        </div>
+        <div style="display: flex; flex-wrap: wrap">
+          <div style="flex: 999 1 520px; min-width: 0">
+            <div class="muted" style="padding: 8px 12px; font-size: 12px; border-bottom: 1px solid #1f2a40">7건 · 제목 · 본문 · 댓글에서 · 최근 수정 순</div>
+            <a class="hit" href="Main.dc.html" style="text-decoration: none; color: inherit">
+              <span style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap"><b>PL-WAW <mark>수집 타임아웃</mark> 대응</b><span class="tag ok">검토 완료</span><span class="muted" style="font-size: 11.5px">운영 절차 › vCenter 수집기 점검 · kim · 11-04</span></span>
+              <span class="muted" style="font-size: 12.5px">…기본 <mark>수집</mark> 시한(60초) 안에 호스트 658대 인벤토리를 다 받지 못하는 날이 있다. 이 문서는 증상 → 확인 → 시한 조정…</span>
+              <span style="display: flex; gap: 6px; flex-wrap: wrap"><span class="tag blue">vcenter</span><span class="tag blue">pl-waw</span><span class="iss" style="height: 20px"><span class="st" style="background: #3b82f6"></span><span class="k">ISS-1</span></span><span class="iss" style="height: 20px"><span class="st" style="background: #a855f7"></span><span class="k">ISS-20</span></span></span>
+            </a>
+            <a class="hit" href="#" style="text-decoration: none; color: inherit">
+              <span style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap"><b>2026-11-03 주간 회의록</b><span class="tag ok">검토 완료</span><span class="muted" style="font-size: 11.5px">회의록 · choi · 11-03</span></span>
+              <span class="muted" style="font-size: 12.5px">…결정: PL-WAW <mark>수집 타임아웃</mark>은 시한 90초로 먼저 대응하고 분할은 11월 말 변경 창으로(<mark>ISS-23</mark>)…</span>
+            </a>
+            <a class="hit" href="#" style="text-decoration: none; color: inherit">
+              <span style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap"><b>[변경 계획] 수집 분할</b><span class="tag gray">초안</span><span class="muted" style="font-size: 11.5px">변경 계획 · kim · 11-01</span></span>
+              <span class="muted" style="font-size: 12.5px">…호스트 300대 단위로 나눠 받으면 <mark>타임아웃</mark> 없이 평균 41초…</span>
+            </a>
+            <a class="hit" href="#" style="text-decoration: none; color: inherit">
+              <span style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap"><b>댓글 — PL-WAW 수집 타임아웃 대응</b><span class="tag gray">댓글</span><span class="muted" style="font-size: 11.5px">choi · 11-04 09:50</span></span>
+              <span class="muted" style="font-size: 12.5px">3절 시한을 90초로 올린 뒤 US-East 도 같은 증상이라…</span>
+            </a>
+            <div class="muted" style="padding: 10px 12px; font-size: 12px">더 보기(3) · 보관된 페이지는 ‘보관 포함’ 을 켜야 나옵니다</div>
+          </div>
+          <aside style="flex: 0 1 300px; min-width: 0; border-left: 1px solid #243049; padding: 12px 14px; display: flex; flex-direction: column; gap: 12px; font-size: 12.5px">
+            <div><b>검색 범위</b><div class="muted" style="margin-top: 4px">범위 계정은 자기 법인 스페이스 + 공용만 찾습니다(이슈와 같은 규칙). 보이지 않는 스페이스는 건수에도 들어가지 않습니다.</div></div>
+            <div><b>이슈로도 찾기</b><div class="muted" style="margin-top: 4px">검색어가 <span class="mono">ISS-12</span> 꼴이면 그 이슈를 참조하는 문서를 먼저 보여 줍니다(색인 기반 — 본문 전수 검색이 아닙니다).</div></div>
+            <div><b>검색 방식</b><div class="muted" style="margin-top: 4px">제목 · 본문 · 댓글의 부분 문자열(대소문자 무시). 페이지 2,000 · 본문 64KB 상한이라 SQLite 없이 메모리 색인으로 충분합니다(추정 — 구현 때 실측).</div></div>
+            <div><b>최근 본 페이지</b><div style="display: flex; flex-direction: column; gap: 4px; margin-top: 4px"><a href="#">PL-WAW 수집 타임아웃 대응</a><a href="#">Bareos 복원 리허설 절차</a><a href="#">2026-11-03 주간 회의록</a></div></div>
+          </aside>
+        </div>
+      </section>
+    </main>
+  </div>
+  <footer class="sb" aria-label="상태"><span>서버 Uptime <b>6일</b></span><span>전체 호스트 <b>658</b></span><span>전체 VM <b>5,850</b> (5,412 On)</span><span>활성 알람 <b style="color: #ef4444">3</b></span></footer>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":980}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>
