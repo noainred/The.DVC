@@ -13,10 +13,13 @@ import { Loading, ErrorBox } from '../../components/primitives.jsx';
 import Select from '../../components/Select.jsx';
 import { makeLatest, persistNote, parseLabels, statusText as issueStatusText } from '../issues/issueText.js';
 import { MdView, MdToc } from './MdView.jsx';
+import { makeRenderMacro } from './WikiMacros.jsx';
+import AttachBox from '../attach/AttachBox.jsx';
+import { selectionQuote, findQuote, exportMarkdownName, printDocument } from './wikiExport.js';
 import {
   STATUS_ORDER, statusText, parseWikiHash, wikiHash, buildTree, flattenTree, parentOptions, breadcrumb, fillTemplate, wikiSaveFailText, isConflict,
   draftKey, loadDraft, saveDraft, clearDraft, countTiles, numText, noticeUntilText, quickHref, quickLinksToText, textToQuickLinks, versionLine,
-  diffSummary, DIFF_MARK, WHERE_TEXT, searchSummary, spaceName, dateText, timeText, STALE_DAYS, slashQuery, filterSlash, applySlash,
+  diffSummary, DIFF_MARK, WHERE_TEXT, searchSummary, spaceName, dateText, timeText, STALE_DAYS, slashQuery, filterSlash, applySlash, oncallToText, textToOncall, oncallRange,
 } from './wikiText.js';
 
 function useLatest() {
@@ -116,6 +119,7 @@ export default function Wiki() {
             ? <NewPage key={`${space}|${route.params?.parent || ''}`} space={space} meta={meta} pages={list || []} parent={route.params?.parent || ''} onWritten={onWritten} />
             : <div className="card muted">이 스페이스에는 문서를 만들 수 없습니다(쓰기 권한 · 쓰기 범위 · 읽기 전용).</div>)}
           {route.view === 'settings' && <SpaceSettings key={space} space={space} meta={meta} spaceInfo={spaceInfo} onWritten={onWritten} />}
+          {route.view === 'templates' && <TemplatesAdmin space={space} meta={meta} onWritten={() => loadMeta()} />}
           {route.view === 'page' && <PageView key={route.id} id={route.id} space={space} meta={meta} pages={list || []} onWritten={onWritten} />}
           {route.view === 'edit' && <EditPage key={route.id} id={route.id} space={space} meta={meta} pages={list || []} onWritten={onWritten} />}
           {route.view === 'history' && <HistoryView key={route.id} id={route.id} space={space} meta={meta} onWritten={onWritten} />}
@@ -210,6 +214,13 @@ function HomeView({ space, meta, spaceInfo, pages, canWriteHere }) {
                 : <span key={i} className="wiki-quick-item muted">{l.title}</span>;
             })}</div>
             : <div className="muted wiki-empty">바로 가기가 없습니다{canDecorate ? ' — 대문 꾸미기에서 자주 찾는 문서 · 화면을 고르세요' : ''}.</div>}
+          {((s.owners || []).length > 0 || (data.oncallNow || []).length > 0 || (data.oncallNext || []).length > 0) && (
+            <div className="wiki-oncall">
+              {(s.owners || []).length > 0 && <div><span className="muted">담당</span> <b>{s.owners.join(' · ')}</b></div>}
+              <div><span className="muted">오늘 당번</span> {(data.oncallNow || []).length ? data.oncallNow.map((o, k) => <span key={k}><b>{o.who}</b>{o.note ? ` (${o.note})` : ''} <span className="muted">{oncallRange(o)}</span>{k < data.oncallNow.length - 1 ? ' · ' : ''}</span>) : <span className="muted">당번 표에 오늘이 없습니다</span>}</div>
+              {(data.oncallNext || []).length > 0 && <div><span className="muted">다음</span> {data.oncallNext[0].who} <span className="muted">{oncallRange(data.oncallNext[0])}</span></div>}
+            </div>
+          )}
           {canWriteHere && <button className="btn primary wiki-quick-new" onClick={() => go({ space, view: 'new' })}>+ 템플릿에서 새 문서</button>}
         </section>
       </div>
@@ -314,6 +325,12 @@ function PageView({ id, space, meta, pages, onWritten }) {
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState('');
   const [comment, setComment] = useState('');
+  const [quote, setQuote] = useState(''); // v2.889 인라인 댓글 — 본문에서 고른 글
+  const [pick, setPick] = useState(null); // { text, x, y } — 본문에서 글을 고르면 뜨는 '댓글' 단추
+  const [showResolved, setShowResolved] = useState(false);
+  const mainRef = useRef(null);
+  const formRef = useRef(null);
+  const renderMacro = useMemo(() => makeRenderMacro({ pages, spaceId: space }), [pages, space]);
   // 다른 스페이스 문서로 들어온 링크([[W12]] 등) — 주소를 문서의 스페이스로 맞춘다(기록을 남기지 않게)
   useEffect(() => {
     if (page && page.spaceId !== space) {
@@ -370,6 +387,8 @@ function PageView({ id, space, meta, pages, onWritten }) {
         <div className="wiki-actions">
           {writable && <button className="btn primary" onClick={() => go({ space, id: page.id, view: 'edit' })}>편집</button>}
           <button className="btn" onClick={() => go({ space, id: page.id, view: 'history' })}>이력 ({page.versions.length})</button>
+          <button className="btn" title="본문(마크다운)을 파일로 받습니다 — 매크로는 글자 그대로" onClick={() => { const b = new Blob([`# ${page.title}\n\n${page.body}`], { type: 'text/markdown;charset=utf-8' }); const u = URL.createObjectURL(b); const a = document.createElement('a'); a.href = u; a.download = exportMarkdownName(page); document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(u), 1000); }}>.md 받기</button>
+          <button className="btn" title="지금 보이는 문서(매크로 값 포함 — 이 시각 기준)를 인쇄 · PDF 로 저장합니다" onClick={() => printDocument(mainRef.current, page.title, `${spaceName(meta.spaces, space)} · v${page.version} · ${timeText(Date.now())} 기준`)}>인쇄 · PDF</button>
           {canComment && <button className="btn" disabled={busy} onClick={() => act(() => postJson(`/wiki/pages/${page.id}/watch`, { on: !page.watching }))}>{page.watching ? '지켜보기 끄기' : '지켜보기'} · {page.watchers.length}</button>}
           {writable && <button className="btn" onClick={() => go({ space, view: 'new', params: { parent: page.id } })}>+ 하위 문서</button>}
           {canDelete && <button className="btn" disabled={busy} onClick={() => {
@@ -381,11 +400,18 @@ function PageView({ id, space, meta, pages, onWritten }) {
       {msg && <div className="banner warn">{msg}</div>}
       {!page.writable && meta.canWrite && <div className="muted wiki-hint">이 문서의 스페이스는 쓰기 범위 밖이거나 읽기 전용이라 조회만 할 수 있습니다.</div>}
       <div className="wiki-doc-body">
-        <div className="wiki-doc-main">
+        <div className="wiki-doc-main" ref={mainRef}
+          onMouseUp={canComment ? () => { const q = selectionQuote(window.getSelection(), mainRef.current, meta.limits?.quote || 200); if (!q) { setPick(null); return; } const r = q.rect; const box = mainRef.current.getBoundingClientRect(); setPick({ text: q.text, x: Math.max(0, Math.min(r.left - box.left, box.width - 150)), y: r.bottom - box.top + 6 }); } : undefined}>
           {page.body.trim()
-            ? <MdView md={page.body} idPrefix={`p${page.id}`} pages={pages} spaceId={space} dropTitle={page.title} busy={busy}
+            ? <MdView md={page.body} idPrefix={`p${page.id}`} pages={pages} spaceId={space} dropTitle={page.title} busy={busy} renderMacro={renderMacro}
                 onToggleTask={writable ? (line, checked) => toggleTask(line, checked) : null} />
             : <div className="muted">본문이 비어 있습니다.</div>}
+          {pick && (
+            <button type="button" className="btn btn-sm wiki-pick" style={{ left: pick.x, top: pick.y }}
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => { setQuote(pick.text); setPick(null); window.getSelection()?.removeAllRanges(); requestAnimationFrame(() => formRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' })); }}>💬 이 부분에 댓글</button>
+          )}
+          <AttachBox kind="wiki" owner={page.id} />
         </div>
         <aside className="wiki-doc-aside">
           <MdToc md={page.body} idPrefix={`p${page.id}`} dropTitle={page.title} />
@@ -410,18 +436,28 @@ function PageView({ id, space, meta, pages, onWritten }) {
         </aside>
       </div>
       <section className="wiki-comments">
-        <h3>댓글 {page.comments.length}</h3>
-        {page.comments.map((c) => (
-          <div key={c.id} className="wiki-comment">
+        <div className="wiki-comments-head">
+          <h3>댓글 {page.comments.length}</h3>
+          {page.comments.some((c) => c.resolved) && <label className="wiki-check"><input type="checkbox" checked={showResolved} onChange={(e) => setShowResolved(e.target.checked)} /> 해결한 인라인 댓글 {page.comments.filter((c) => c.resolved).length}개도 보기</label>}
+        </div>
+        {page.comments.filter((c) => showResolved || !c.resolved).map((c) => (
+          <div key={c.id} className={`wiki-comment${c.resolved ? ' resolved' : ''}`}>
             <div className="wiki-comment-head"><b>{c.author}</b><span className="muted"> · {timeText(c.at)} · v{c.v}</span>
+              {c.quote && canComment && <button type="button" className="wiki-mini-act" disabled={busy} title={c.resolved ? `${c.resolvedBy || ''} 가 해결로 표시함` : '해결로 표시하면 목록에서 접힙니다'} onClick={() => act(() => postJson(`/wiki/pages/${page.id}/comments/${c.id}/resolve`, { on: !c.resolved }))}>{c.resolved ? '다시 열기' : '해결'}</button>}
               {(info?.isMod || c.author === info?.me) && canComment && <button type="button" className="wiki-mini-act" disabled={busy} onClick={() => { if (window.confirm('이 댓글을 지울까요?')) act(() => delJson(`/wiki/pages/${page.id}/comments/${c.id}`)); }}>지우기</button>}
             </div>
+            {c.quote && (
+              <button type="button" className="wiki-quote" title="본문에서 이 글을 찾아 표시합니다" onClick={() => { if (!findQuote(mainRef.current, c.quote)) setMsg('본문에서 이 글을 찾지 못했습니다 — 그 뒤에 문서가 바뀌었을 수 있습니다.'); }}>
+                “{c.quote}”
+              </button>
+            )}
             <MdView md={c.body} compact idPrefix={`c${c.id}`} pages={pages} spaceId={space} />
           </div>
         ))}
         {canComment
           ? (
-            <form className="wiki-comment-form" onSubmit={(e) => { e.preventDefault(); if (comment.trim()) act(() => postJson(`/wiki/pages/${page.id}/comments`, { body: comment }), () => { setComment(''); load(); }); }}>
+            <form ref={formRef} className="wiki-comment-form" onSubmit={(e) => { e.preventDefault(); if (comment.trim()) act(() => postJson(`/wiki/pages/${page.id}/comments`, { body: comment, quote }), () => { setComment(''); setQuote(''); load(); }); }}>
+              {quote && <div className="wiki-quote-pick">“{quote}” 에 댓글 <button type="button" className="wiki-mini-act" onClick={() => setQuote('')}>인용 빼기</button></div>}
               <textarea className="input" rows={3} value={comment} onChange={(e) => setComment(e.target.value)} placeholder="댓글 — @사람 으로 알리고, ISS-번호로 이슈를 잇습니다" maxLength={meta.limits?.comment || 2000} />
               <button className="btn primary" type="submit" disabled={busy || !comment.trim()}>댓글 달기</button>
             </form>
@@ -476,11 +512,11 @@ function NewPage({ space, meta, pages, parent, onWritten }) {
       <div className="wiki-tpl-grid">
         {(meta.templates || []).map((t) => (
           <button key={t.id} type="button" className="wiki-tpl" disabled={busy} onClick={() => begin(t.id)}>
-            <b>{t.name}</b><span className="muted">{t.tag}</span>
+            <b>{t.name}</b><span className="muted">{t.tag}{t.custom ? ' · 관리자 템플릿' : ''}</span>
           </button>
         ))}
       </div>
-      <div className="muted wiki-small">템플릿을 고르면 편집 화면이 열립니다 — 저장하기 전에는 문서가 만들어지지 않습니다.</div>
+      <div className="muted wiki-small">템플릿을 고르면 편집 화면이 열립니다 — 저장하기 전에는 문서가 만들어지지 않습니다.{meta.canTemplates && <> <button type="button" className="md-linkbtn" onClick={() => go({ space, view: 'templates' })}>관리자 템플릿 관리 →</button></>}</div>
     </div>
   );
 }
@@ -630,6 +666,7 @@ function Editor({ space, meta, pages, page = null, initial = null, onWritten }) 
         )}
       </div>
       <div className="muted wiki-small">{body.length.toLocaleString()} / {(meta.limits?.body || 65536).toLocaleString()}자 · 마크다운 — HTML 은 글자 그대로 보입니다 · 줄 머리에서 / 를 치면 블록을 고릅니다 · 초안은 이 브라우저에 자동 저장합니다.</div>
+      {page ? <AttachBox kind="wiki" owner={page.id} onInsert={(md) => insert(md)} compact /> : <div className="muted wiki-small">첨부는 문서를 만든 뒤 편집 화면에서 올릴 수 있습니다.</div>}
       {msg && <div className="banner warn" style={{ whiteSpace: 'normal' }}>{msg}</div>}
       {conflict && (
         <div className="card wiki-conflict">
@@ -840,6 +877,65 @@ function toLocalInput(ms) {
   const d = new Date(ms); const p = (n) => String(n).padStart(2, '0');
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
 }
+/** v2.889 관리자 템플릿 — 전 법인 공용(모든 스페이스의 '새 문서'). 관리자 + 전체 범위(서버가 같은 기준으로 막는다). */
+function TemplatesAdmin({ space, meta, onWritten }) {
+  const [data, setData] = useState(null);
+  const [err, setErr] = useState(null);
+  const [form, setForm] = useState(null); // { id, name, tag, body }
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState('');
+  const load = useCallback(() => { fetchJson('/wiki/templates').then((r) => { setData(r); setErr(null); }).catch(setErr); }, []);
+  useEffect(() => { if (meta.canTemplates) load(); }, [load, meta.canTemplates]);
+  if (!meta.canTemplates) return <div className="card muted">관리자 템플릿은 전체 범위(vCenter 제한 없는) 관리자만 바꿉니다.</div>;
+  if (err && !data) return <ErrorBox error={err} />;
+  if (!data) return <Loading label="관리자 템플릿" />;
+  const lim = data.limits || {};
+  const saveTpl = async () => {
+    setBusy(true); setMsg('');
+    try {
+      const body = { name: form.name, tag: form.tag, body: form.body };
+      const r = form.id ? await putJson(`/wiki/templates/${form.id}`, body) : await postJson('/wiki/templates', body);
+      if (r?.ok === false) { setMsg(wikiSaveFailText(r)); return; }
+      setForm(null); setMsg('저장했습니다 — 모든 스페이스의 ‘새 문서’ 에 보입니다.'); load(); onWritten?.();
+    } catch (e) { setMsg(String(e?.message || e)); } finally { setBusy(false); }
+  };
+  const del = async (t) => {
+    if (!window.confirm(`템플릿 ‘${t.name}’ 를 지울까요? 이미 만든 문서는 그대로입니다.`)) return;
+    setBusy(true); setMsg('');
+    try { const r = await delJson(`/wiki/templates/${t.id}`); setMsg(r?.ok === false ? wikiSaveFailText(r) : '지웠습니다.'); load(); onWritten?.(); } catch (e) { setMsg(String(e?.message || e)); } finally { setBusy(false); }
+  };
+  return (
+    <div className="wiki-settings">
+      <div className="wiki-editor-head"><h2 className="wiki-title">관리자 템플릿</h2><span className="muted">내장 템플릿 뒤에 붙습니다 · {lim.max ?? 30}개까지 · 전 법인 공용</span></div>
+      {data.loadError && <div className="banner bad" style={{ whiteSpace: 'normal' }}>템플릿 파일(wiki-templates.json)을 읽지 못해 빈 목록으로 보입니다 — 손상본은 옆에 보존했습니다. 원인: {data.loadError}</div>}
+      {msg && <div className="banner">{msg}</div>}
+      {(data.items || []).length === 0 && !form && <div className="muted">아직 관리자 템플릿이 없습니다.</div>}
+      <ul className="wiki-list">
+        {(data.items || []).map((t) => (
+          <li key={t.id}><b>{t.name}</b> <span className="muted">{t.tag || '—'} · {t.updatedBy || '—'} · {dateText(t.updatedAt)}</span>
+            <button type="button" className="wiki-mini-act" disabled={busy} onClick={() => setForm({ id: t.id, name: t.name, tag: t.tag || '', body: t.body })}>고치기</button>
+            <button type="button" className="wiki-mini-act" disabled={busy} onClick={() => del(t)}>지우기</button></li>
+        ))}
+      </ul>
+      {form ? (
+        <div className="card wiki-tpl-form">
+          <div className="wiki-form-grid">
+            <label>이름<input className="input" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} maxLength={lim.name || 40} /></label>
+            <label>꼬리표<input className="input" value={form.tag} onChange={(e) => setForm({ ...form, tag: e.target.value })} maxLength={lim.tag || 20} placeholder="예: 점검" /></label>
+          </div>
+          <label className="wiki-block">본문(마크다운 — {'{{issue}}'} 는 새 문서 화면의 ‘관련 이슈’ 로 채워집니다)
+            <textarea className="input wiki-textarea short" value={form.body} onChange={(e) => setForm({ ...form, body: e.target.value })} maxLength={lim.body || 20000} spellCheck={false} />
+          </label>
+          <div className="wiki-actions">
+            <button className="btn primary" disabled={busy || !form.name.trim() || !form.body.trim()} onClick={() => saveTpl()}>{form.id ? '저장' : '만들기'}</button>
+            <button className="btn" disabled={busy} onClick={() => setForm(null)}>취소</button>
+          </div>
+        </div>
+      ) : <div className="wiki-actions"><button className="btn primary" disabled={busy || (data.items || []).length >= (lim.max || 30)} onClick={() => setForm({ id: '', name: '', tag: '', body: '# 제목\n\n' })}>+ 템플릿</button><button className="btn" onClick={() => go({ space, view: 'new' })}>새 문서 화면으로</button></div>}
+    </div>
+  );
+}
+
 function SpaceSettings({ space, meta, spaceInfo, onWritten }) {
   const [s, setS] = useState(null);
   const [err, setErr] = useState(null);
@@ -848,14 +944,18 @@ function SpaceSettings({ space, meta, spaceInfo, onWritten }) {
   const [until, setUntil] = useState('');
   const [links, setLinks] = useState('');
   const [readOnly, setReadOnly] = useState(false);
+  const [owners, setOwners] = useState(''); // v2.889 대문 담당(쉼표)
+  const [oncall, setOncall] = useState(''); // v2.889 당번 표(한 줄에 '사람 | 시작 | 끝 | 메모')
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState('');
   useEffect(() => {
     fetchJson(`/wiki/spaces/${encodeURIComponent(space)}`).then((r) => {
       const v = r.space; setS(v); setHomeMd(v.homeMd || ''); setNotice(v.notice?.md || ''); setUntil(toLocalInput(v.notice?.until)); setLinks(quickLinksToText(v.quickLinks)); setReadOnly(!!v.readOnly);
+      setOwners((v.owners || []).join(', ')); setOncall(oncallToText(v.oncall));
     }).catch(setErr);
   }, [space]);
   const parsedLinks = useMemo(() => textToQuickLinks(links), [links]);
+  const parsedOncall = useMemo(() => textToOncall(oncall), [oncall]);
   if (!meta.isAdmin || !spaceInfo?.writable) return <div className="card muted">대문 꾸미기(스페이스 설정)는 그 스페이스의 쓰기 범위가 있는 관리자만 할 수 있습니다.</div>;
   if (err && !s) return <ErrorBox error={err} />;
   if (!s) return <Loading label="스페이스 설정" />;
@@ -864,7 +964,8 @@ function SpaceSettings({ space, meta, spaceInfo, onWritten }) {
     setBusy(true); setMsg('');
     try {
       const u = until ? new Date(until).getTime() : null;
-      const r = await putJson(`/wiki/spaces/${encodeURIComponent(space)}`, { homeMd, notice: notice.trim() ? { md: notice, until: Number.isFinite(u) ? u : null } : null, quickLinks: parsedLinks, readOnly });
+      if (parsedOncall.bad.length) { setMsg(`당번 표 ${parsedOncall.bad.join(', ')}번째 줄을 읽지 못했습니다 — ‘사람 | YYYY-MM-DD | YYYY-MM-DD | 메모’(끝은 시작과 같거나 뒤)`); return; }
+      const r = await putJson(`/wiki/spaces/${encodeURIComponent(space)}`, { homeMd, notice: notice.trim() ? { md: notice, until: Number.isFinite(u) ? u : null } : null, quickLinks: parsedLinks, readOnly, owners: owners.split(',').map((x) => x.trim()).filter(Boolean), oncall: parsedOncall.rows });
       if (r?.ok === false) { setMsg(wikiSaveFailText(r)); return; }
       onWritten?.(r); go({ space });
     } catch (e) { setMsg(String(e?.message || e)); } finally { setBusy(false); }
@@ -885,6 +986,13 @@ function SpaceSettings({ space, meta, spaceInfo, onWritten }) {
         <textarea className="input" rows={6} value={links} onChange={(e) => setLinks(e.target.value)} placeholder={'장애 대응 절차 | #/wiki/pub/W1 | 처음 볼 것\n이슈 보드 | #/issues/board'} />
       </label>
       {bad.length > 0 && <div className="banner warn">바로 가기 {bad.length}줄의 제목이나 주소를 읽지 못했습니다 — 저장하면 서버가 거절합니다: {bad.map((l) => l.title || '(제목 없음)').join(', ')}</div>}
+      <div className="wiki-form-grid">
+        <label>담당(계정 · 쉼표 — 대문에 보입니다 · {meta.limits?.owners ?? 10}명까지)<input className="input" value={owners} onChange={(e) => setOwners(e.target.value)} placeholder="kim, lee" /></label>
+        <label className="span2">당번 표(한 줄에 ‘사람 | 시작 | 끝 | 메모’ — 날짜는 포탈 날짜 YYYY-MM-DD · 끝을 비우면 하루 · {meta.limits?.oncall ?? 30}줄까지)
+          <textarea className="input" rows={4} value={oncall} onChange={(e) => setOncall(e.target.value)} placeholder={'kim | 2026-11-03 | 2026-11-09 | 야간 대응\nlee | 2026-11-10 | 2026-11-16'} />
+        </label>
+      </div>
+      {parsedOncall.bad.length > 0 && <div className="banner warn">당번 표 {parsedOncall.bad.join(', ')}번째 줄을 읽지 못했습니다 — 저장하면 거절합니다.</div>}
       <label className="wiki-check"><input type="checkbox" checked={readOnly} onChange={(e) => setReadOnly(e.target.checked)} /> 읽기 전용(새 문서 · 편집을 막습니다 — 댓글은 그대로)</label>
       {msg && <div className="banner warn">{msg}</div>}
       <div className="wiki-actions">

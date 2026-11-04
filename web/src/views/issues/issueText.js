@@ -578,3 +578,50 @@ export function openIssueQuery(query) {
   try { window.sessionStorage.setItem(ISSUE_QUERY_KEY, String(query || '')); } catch { /* 저장소를 못 쓰는 브라우저 — 빠른 필터로 시작한다 */ }
   window.location.hash = '#/issues/filters';
 }
+
+/* ───── v2.889 C-5 캘린더 ───── */
+const pad2c = (n) => String(n).padStart(2, '0');
+/** 달력 한 달 — 월요일 시작 주(7칸) 배열. 칸 = { day:'YYYY-MM-DD', inMonth }. month 는 1~12. */
+export function monthGrid(year, month) {
+  const first = new Date(Date.UTC(year, month - 1, 1));
+  const lead = (first.getUTCDay() + 6) % 7; // 월=0
+  const start = Date.UTC(year, month - 1, 1 - lead);
+  const daysIn = new Date(Date.UTC(year, month, 0)).getUTCDate();
+  const weeks = Math.ceil((lead + daysIn) / 7);
+  const out = [];
+  for (let w = 0; w < weeks; w += 1) {
+    const row = [];
+    for (let k = 0; k < 7; k += 1) {
+      const d = new Date(start + (w * 7 + k) * 86_400_000);
+      row.push({ day: `${d.getUTCFullYear()}-${pad2c(d.getUTCMonth() + 1)}-${pad2c(d.getUTCDate())}`, inMonth: d.getUTCMonth() === month - 1 });
+    }
+    out.push(row);
+  }
+  return out;
+}
+/** 이슈를 기한 날짜(브라우저 날짜 — 기한 입력과 같은 기준)별로. 기한 없는 것은 따로 센다. */
+export function issuesByDay(rows) {
+  const m = new Map(); let none = 0;
+  for (const r of Array.isArray(rows) ? rows : []) {
+    const d = toDateInput(r?.dueAt);
+    if (!d) { none += 1; continue; }
+    if (!m.has(d)) m.set(d, []);
+    m.get(d).push(r);
+  }
+  for (const list of m.values()) list.sort((a, b) => (a.priority || '').localeCompare(b.priority || '') || a.num - b.num);
+  return { byDay: m, none };
+}
+/** 스프린트 표지 — 그날 시작 · 끝인 스프린트 이름. sprints = [{name,startDay,endDay,state}] */
+export function sprintMarks(sprints, day) {
+  const out = [];
+  for (const s of Array.isArray(sprints) ? sprints : []) {
+    if (s.startDay === day) out.push({ name: s.name, kind: 'start' });
+    if (s.endDay === day) out.push({ name: s.name, kind: 'end' });
+  }
+  return out;
+}
+/** 달 이동 — { y, m } ± n 달. */
+export function shiftMonth({ y, m }, n) {
+  const t = (y * 12 + (m - 1)) + n;
+  return { y: Math.floor(t / 12), m: (t % 12 + 12) % 12 + 1 };
+}

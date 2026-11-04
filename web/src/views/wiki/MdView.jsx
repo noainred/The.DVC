@@ -7,6 +7,7 @@ import React, { useMemo, useState } from 'react';
 import { STable } from '../../components/STable.jsx';
 import { parseMarkdown, inlineText } from './markdown.js';
 import { resolvePageRef, wikiHash } from './wikiText.js';
+import { AttachImg, AttachLink } from '../attach/AttachBox.jsx';
 
 const CALLOUT_TEXT = Object.freeze({ info: '정보', warn: '주의', danger: '위험', tip: '팁' });
 
@@ -39,7 +40,11 @@ export function withoutTitle(doc, title) {
 /**
  * breaks: 줄 하나 바꿈을 줄바꿈으로(이슈 본문 · 댓글 — v2.883). onToggleTask(line, checked): 주면 체크리스트를 누를 수 있다(위키 보기 — 판을 만들지 않는다).
  */
-export function MdView({ md = '', ast = null, pages = [], spaceId = '', idPrefix = 'md', className = '', compact = false, dropTitle = '', breaks = false, onToggleTask = null, busy = false, unresolvedAsSearch = false }) {
+/**
+ * v2.889: renderMacro(block, key) — 포탈 매크로({{issues}} · {{include}} · {{vcenters}} · {{partfaults}})를 그린다(위키 문서 보기만 넘긴다).
+ *   없으면 매크로 자리를 안내 상자로만 둔다(이슈 본문 · 미리보기 · 포함된 문서 안 — 포함 안의 매크로를 그리지 않아 재귀를 막는다).
+ */
+export function MdView({ md = '', ast = null, pages = [], spaceId = '', idPrefix = 'md', className = '', compact = false, dropTitle = '', breaks = false, onToggleTask = null, busy = false, unresolvedAsSearch = false, renderMacro = null }) {
   const doc = useMemo(() => withoutTitle(ast || parseMarkdown(md, { breaks }), dropTitle), [ast, md, dropTitle, breaks]);
   const fnNum = useMemo(() => new Map(doc.footnotes.map((f) => [f.id, f.n])), [doc]);
   const hid = (id) => `${idPrefix}-${id}`;
@@ -53,10 +58,11 @@ export function MdView({ md = '', ast = null, pages = [], spaceId = '', idPrefix
       case 'i': return <em key={key}>{inl(n.c, key)}</em>;
       case 's': return <del key={key}>{inl(n.c, key)}</del>;
       case 'code': return <code key={key} className="md-code-inline">{n.v}</code>;
-      case 'a': return n.ext
+      case 'a': if (n.attach) return <AttachLink key={key} id={n.attach}>{inl(n.c, key)}</AttachLink>;
+        return n.ext
         ? <a key={key} href={n.href} target="_blank" rel="noopener noreferrer" className="md-link ext">{inl(n.c, key)}</a>
         : <a key={key} href={n.href} className="md-link">{inl(n.c, key)}</a>;
-      case 'img': return <img key={key} src={n.src} alt={n.alt} loading="lazy" className="md-img" />;
+      case 'img': return n.attach ? <AttachImg key={key} id={n.attach} alt={n.alt} /> : <img key={key} src={n.src} alt={n.alt} loading="lazy" className="md-img" />;
       case 'iss': return <a key={key} href={`#/issues/list/${n.key}`} className="md-iss" title="이슈 열기">{n.key}</a>;
       case 'mention': return <span key={key} className="md-mention">@{n.user}</span>;
       case 'fn': {
@@ -96,6 +102,9 @@ export function MdView({ md = '', ast = null, pages = [], spaceId = '', idPrefix
       case 'p': return <p key={key}>{inl(b.inl, key)}</p>;
       case 'hr': return <hr key={key} />;
       case 'toc': return <React.Fragment key={key}>{toc()}</React.Fragment>;
+      case 'macro': return renderMacro
+        ? <React.Fragment key={key}>{renderMacro(b, key)}</React.Fragment>
+        : <div key={key} className="md-macro off muted">{`{{${b.name}}}`} — 포탈 매크로는 위키 문서 보기에서 그 시각의 값을 읽어 보입니다.</div>;
       case 'code': return (
         <div key={key} className="md-code">
           <div className="md-code-head"><span className="muted">{b.lang || '코드'}</span><CopyButton text={b.text} /></div>

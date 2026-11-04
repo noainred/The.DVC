@@ -140,3 +140,15 @@ describe('v2.888 슬래시 명령', () => {
     expect(applySlash('글', 1, t)).toBe(null);
   });
 });
+
+describe('v2.889 당번 표', () => {
+  it('글 ↔ 표 · 끝을 비우면 하루 · 못 읽은 줄 번호', async () => {
+    const { oncallToText, textToOncall, oncallRange } = await import('./wikiText.js');
+    const { rows, bad } = textToOncall('kim | 2026-11-03 | 2026-11-09 | 야간\nlee | 2026-11-10\n이상한 줄\npark | 2026-11-09 | 2026-11-01');
+    expect(rows).toEqual([{ who: 'kim', from: '2026-11-03', to: '2026-11-09', note: '야간' }, { who: 'lee', from: '2026-11-10', to: '2026-11-10', note: '' }]);
+    expect(bad).toEqual([3, 4]);
+    expect(oncallToText(rows)).toBe('kim | 2026-11-03 | 2026-11-09 | 야간\nlee | 2026-11-10');
+    expect(oncallRange(rows[0])).toBe('11월 3일 ~ 11월 9일');
+    expect(oncallRange(rows[1])).toBe('11월 10일');
+  });
+});

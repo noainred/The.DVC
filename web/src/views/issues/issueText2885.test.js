@@ -74,3 +74,22 @@ describe('검색식 필드 이름 — 서버 FIELDS 와 화면 이름표가 같�
     expect(Object.keys(FIELDS).filter((k) => !QUERY_FIELD_TEXT[k])).toEqual([]);
   });
 });
+
+describe('v2.889 캘린더', () => {
+  it('달 칸 — 월요일 시작 · 앞뒤 달 칸 · 주 수', async () => {
+    const { monthGrid, issuesByDay, sprintMarks, shiftMonth } = await import('./issueText.js');
+    const g = monthGrid(2026, 11); // 2026-11-01 은 일요일
+    expect(g[0][0]).toEqual({ day: '2026-10-26', inMonth: false });
+    expect(g[0][6]).toEqual({ day: '2026-11-01', inMonth: true });
+    expect(g.length).toBe(6);
+    expect(g[g.length - 1][6].day).toBe('2026-12-06');
+    expect(monthGrid(2027, 2).length).toBe(4, '2027-02-01 은 월요일 · 28일 = 정확히 4주');
+    const t = new Date(2026, 10, 4, 9).getTime();
+    const { byDay, none } = issuesByDay([{ key: 'ISS-2', num: 2, priority: 'p2', dueAt: t }, { key: 'ISS-1', num: 1, priority: 'p0', dueAt: t }, { key: 'ISS-3', num: 3, dueAt: null }]);
+    expect(byDay.get('2026-11-04').map((r) => r.key)).toEqual(['ISS-1', 'ISS-2']);
+    expect(none).toBe(1);
+    expect(sprintMarks([{ name: 'S1', startDay: '2026-11-04', endDay: '2026-11-17' }], '2026-11-04')).toEqual([{ name: 'S1', kind: 'start' }]);
+    expect(shiftMonth({ y: 2026, m: 12 }, 1)).toEqual({ y: 2027, m: 1 });
+    expect(shiftMonth({ y: 2026, m: 1 }, -1)).toEqual({ y: 2025, m: 12 });
+  });
+});

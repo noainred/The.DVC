@@ -337,6 +337,23 @@ export const delJson = (path, opts) => sendJson(path, 'DELETE', {}, opts);
  * @param {string} path  `/api` 이후 경로 (예: `/svcmon/log/files/results-20260807.csv`)
  * @param {string} [filename] 저장 이름. 생략하면 Content-Disposition → 경로 마지막 조각.
  */
+/**
+ * v2.889 파일 본문 올리기(첨부) — application/octet-stream. 실패도 서버 사유를 담은 객체로 돌려준다(400 · 403 · 404 · 409 · 413 — 화면이 사유를 보인다).
+ */
+export async function postBinary(path, blob) {
+  const res = await fetch(`${BASE}${path}`, { method: 'POST', headers: authHeaders({ 'Content-Type': 'application/octet-stream' }), body: blob });
+  if (res.status === 401) { setToken(null); onUnauthorized(); throw new Error('세션이 만료되었습니다.'); }
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) return { ok: false, status: res.status, reason: data?.reason || data?.error || `HTTP ${res.status}`, ...data };
+  return data;
+}
+/** v2.889 인증을 붙여 파일을 받아 Blob 으로(첨부 그림 · 링크 — <img src> 는 인증 머리말을 싣지 못한다). */
+export async function fetchBlob(path) {
+  const res = await fetch(`${BASE}${path}`, { headers: authHeaders() });
+  if (res.status === 401) { setToken(null); onUnauthorized(); throw new Error('세션이 만료되었습니다.'); }
+  if (!res.ok) { const data = await res.json().catch(() => ({})); throw httpFail(path, res, data || {}); }
+  return res.blob();
+}
 export async function downloadFile(path, filename = '') {
   const res = await fetch(`${BASE}${path}`, { headers: authHeaders() });
   if (res.status === 401) { setToken(null); onUnauthorized(); throw new Error('세션이 만료되었습니다.'); }
