@@ -332,7 +332,7 @@ export async function disconnectRestoredVm(vcenterId, name, { setPhase } = {}) {
   try { vc = vcOf(vcenterId); } catch (e) { return fin(false, e.message); }
   const c = new VimSoapClient(vc);
   ph.step('로그인');
-  // v2.873(점검 B3-07): 로그인 실패(인증 정지 · 위임 · 연결)가 던지면 감사 · 사유 없이 끝났다 — 사유를 남긴다(켜기 전 직접 끊으라는 말까지)
+  // v2.874(점검 B3-07): 로그인 실패(인증 정지 · 위임 · 연결)가 던지면 감사 · 사유 없이 끝났다 — 사유를 남긴다(켜기 전 직접 끊으라는 말까지)
   try { await onDemandLogin(c, vc); } catch (e) { return fin(false, `vCenter 로그인 실패(${String(e?.message || e).slice(0, 200)}) — 네트워크를 끊지 못했습니다. 켜기 전에 직접 끊으세요`); }
   try {
     ph.step('VM 찾기');
@@ -377,7 +377,7 @@ export async function verifyRestoredVm(vcenterId, name, { deleteOnOk = true, ret
   try { vc = vcOf(vcenterId); } catch (e) { return fin(false, e.message); }
   const c = new VimSoapClient(vc);
   ph.step('로그인');
-  try { await onDemandLogin(c, vc); } catch (e) { return fin(false, `vCenter 로그인 실패(${String(e?.message || e).slice(0, 200)}) — 검증하지 않았습니다. 검증용 VM '${vmName}' 은 꺼진 채 남아 있습니다(네트워크 연결을 확인하세요)`, { toolsMs: null, deleted: false }); }   // v2.873 B3-07
+  try { await onDemandLogin(c, vc); } catch (e) { return fin(false, `vCenter 로그인 실패(${String(e?.message || e).slice(0, 200)}) — 검증하지 않았습니다. 검증용 VM '${vmName}' 은 꺼진 채 남아 있습니다(네트워크 연결을 확인하세요)`, { toolsMs: null, deleted: false }); }   // v2.874 B3-07
   let ref = null; let powered = false;
   try {
     ph.step('VM 찾기');
@@ -396,7 +396,7 @@ export async function verifyRestoredVm(vcenterId, name, { deleteOnOk = true, ret
     ph.step('Tools 대기');
     const toolsMs = await waitToolsRunning(c, ref, { timeoutMs: VERIFY_TIMEOUT_MIN * 60_000 });
     ph.step('끄기');
-    // v2.873(점검 B3-05): 이미 꺼졌으면(게스트가 스스로 종료 · 사람이 끔) PowerOff 가 InvalidPowerState 로 실패해 성공한 검증을 거짓 실패로 적었다 — 실측 뒤 끈다
+    // v2.874(점검 B3-05): 이미 꺼졌으면(게스트가 스스로 종료 · 사람이 끔) PowerOff 가 InvalidPowerState 로 실패해 성공한 검증을 거짓 실패로 적었다 — 실측 뒤 끈다
     const cur = await vmStateOf(c, ref);
     if (cur.powerState !== 'poweredOff') await powerOffVm(c, ref);
     powered = false;

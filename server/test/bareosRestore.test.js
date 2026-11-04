@@ -186,6 +186,6 @@ test('v2.866 실환경 \'Option vcuser not defined\' — 복원 명령에 백업
   const route = fs.readFileSync(new URL('../src/routes/api/bareosBackup.js', import.meta.url), 'utf8');
   assert.match(route, /restorePlan\(\{[^}]*base: restoreBaseOf\(settings\)\(job\)/);
   assert.match(route, /bulkRestorePlan\(\{[^}]*baseOf: restoreBaseOf\(settings\)/);
-  // v2.873(B4-01): 검증 회차가 판정을 여러 번(planOf) 하게 되어 baseOf 를 한 번 만들어 넘긴다
+  // v2.874(B4-01): 검증 회차가 판정을 여러 번(planOf) 하게 되어 baseOf 를 한 번 만들어 넘긴다
   assert.match(fs.readFileSync(new URL('../src/bareos/rehearsal.js', import.meta.url), 'utf8'), /const baseOf = \(job\) => \{ const site[\s\S]{0,1200}bulkRestorePlan\(\{[\s\S]{0,600}reservedNames: reserved, baseOf,/);
 });

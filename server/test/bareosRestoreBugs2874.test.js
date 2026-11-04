@@ -1,5 +1,5 @@
 /**
- * test/bareosRestoreBugs2873.test.js — Bareos 복원 · 검증 버그 점검(5축 + 반증 1인 · 2026-11-04) 확정분 회귀.
+ * test/bareosRestoreBugs2874.test.js — Bareos 복원 · 검증 버그 점검(5축 + 반증 1인 · 2026-11-04) 확정분 회귀.
  *  ① B1-01 복원 pluginoptions 의 공백: Bareos restore 는 받은 pluginoptions 를 run 으로 **따옴표 없이** 다시 조립해 한 번 더 쪼갠다
  *     (ua_restore.cc 22~master `" pluginoptions=%s"` → ParseUaArgs → ua_run.cc 'Invalid keyword'). 그 두 번 파싱을 lib/scan.cc next_arg 이식으로 재현한다.
  *  ② B1-02 로컬 VMDK 는 where 를 준다(복원 잡 Where = / → FD 가 '' 로 바꿔 FD 루트에 풀렸다).

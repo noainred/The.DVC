@@ -26,7 +26,7 @@ export function restorePreview({ row, runs, jobid, restoreJob, pluginName = 'pyt
   const name = String(newName || '').trim() || `${row.name}-probe`;
   const ni = pluginValueIssue(name, '새 VM 이름');
   if (ni) return { ok: false, issue: ni };
-  // v2.873(점검 B1-04): v2.866 부터 포탈은 복원 명령에 백업과 같은 기본 키(vcserver · dc · folder · config_file)를 싣는다 — 미리 보기도 같아야
+  // v2.874(점검 B1-04): v2.866 부터 포탈은 복원 명령에 백업과 같은 기본 키(vcserver · dc · folder · config_file)를 싣는다 — 미리 보기도 같아야
   //   '포탈이 보내는 그 글자' 다(빠지면 이 명령을 그대로 시험할 때 'vcuser not defined' 가 다시 난다). 기본 키를 모르면 만들지 않는다.
   if (!base?.dc || !base?.folder) return { ok: false, issue: '포탈이 싣는 기본 키를 알아야 같은 명령을 만듭니다 — --dc · --folder(대상의 데이터센터 · 폴더)와 --vcserver · --config-file(사이트 매핑)을 주세요.' };
   const bk = restoreBaseKv({ vcserver: base.vcserver || '', configFile: base.configFile || '' }, { dc: base.dc, folder: base.folder, vmName: name });

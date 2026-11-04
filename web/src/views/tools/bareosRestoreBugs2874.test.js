@@ -1,5 +1,5 @@
 /**
- * v2.873 Bareos 복원 · 검증 점검(5축 + 반증 1인) 확정분 — 화면 쪽(bareosRestoreText.js · bareosRestoreTree.js).
+ * v2.874 Bareos 복원 · 검증 점검(5축 + 반증 1인) 확정분 — 화면 쪽(bareosRestoreText.js · bareosRestoreTree.js).
  *  ① B5-01 결과 모름 복원(jobid 없음)은 서버와 같은 시한 동안 다시 고르지 못한다 · 폴더 표 상태 칸 · 묶음 진행의 결과 모름 수
  *  ② B5-01 · B5-02 묶음 복원 응답 → 화면 결과: 부분 시작은 경고 + 시작하지 못한 항목 사유 · 결과 모름은 마법사 비움 · 확정 실패는 마법사에 남김
  *  ③ B4-02 법인별 마지막 회차 · B3-01 정리 칸(지웠는지 모르면 '남김' 으로 단정하지 않는다)
@@ -12,7 +12,7 @@ const NOW = Date.UTC(2026, 10, 4, 0, 0);
 const J = (id, extra = {}) => ({ id, vmName: `vm-${id}`, folder: '/', vcenterId: 'vc-a', directorId: 'D1', writable: true, restores: [], ...extra });
 const U = (at) => ({ unknown: true, jobid: null, state: 'unknown', at, mode: 'newVm', target: { name: 'x-r' }, batchId: 'rb-1' });
 
-describe('v2.873 ① 결과 모름 붙잡기', () => {
+describe('v2.874 ① 결과 모름 붙잡기', () => {
   it('서버와 같은 시한(6시간) — 그동안 고를 수 없다 · 지나면 놓는다 · jobid 가 있으면 진행 중 판정을 탄다', () => {
     expect(T.RESTORE_UNKNOWN_HOLD_MS).toBe(6 * 3600_000);
     expect(T.pickBlock(J('1', { restores: [U(NOW - 1000)] }), { now: NOW })).toMatch(/결과 모름/);
@@ -27,7 +27,7 @@ describe('v2.873 ① 결과 모름 붙잡기', () => {
   });
 });
 
-describe('v2.873 ② 묶음 복원 응답 → 화면 결과', () => {
+describe('v2.874 ② 묶음 복원 응답 → 화면 결과', () => {
   it('부분 시작(202) — 경고 톤 · 시작하지 못한 항목 사유 · 마법사 비움', () => {
     const o = T.bulkRestoreOutcome({ ok: true, started: 1, total: 3, items: [
       { id: 'a', vmName: 'web-01', ok: true },
@@ -58,7 +58,7 @@ describe('v2.873 ② 묶음 복원 응답 → 화면 결과', () => {
   });
 });
 
-describe('v2.873 ③ 검증 회차 · 정리 칸', () => {
+describe('v2.874 ③ 검증 회차 · 정리 칸', () => {
   it('법인별 마지막 회차 — Director 순서 · 이전 기록 수 · 0대 회차는 bad', () => {
     const runs = [
       { id: 'r3', directorId: 'D2', at: NOW, trigger: 'timer', items: [{ ok: false, vmName: 'big', reason: '여유 부족' }], reason: '보낼 수 있는 대상이 없습니다' },

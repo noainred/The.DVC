@@ -31,7 +31,7 @@ import { runningScans, resumeOutlookText, queuedScans } from '../util/scanJourna
 import { runningBulkDeploys as bulkDeployRuns } from '../agent/bulkDeploy.js';             // v2.742(TIMING-04): 진행 중인 에이전트 대량 배포도 기다린다(읽기만)
 import { runnerStatus as vmcloneRunnerStatus } from '../vmclone/runner.js';  // v2.741(TIMING-01 ③): 실행 중 VM 복제 잡도 기다린다(읽기만)
 import { getJob as vmcloneJob } from '../vmclone/store.js';
-import { runningBareosFinishes } from '../vmclone/execOp.js';   // v2.873(점검 B2-02): Bareos 복원 마무리(NIC 끊기 · 검증 — vCenter 줄)도 기다린다(읽기만)
+import { runningBareosFinishes } from '../vmclone/execOp.js';   // v2.874(점검 B2-02): Bareos 복원 마무리(NIC 끊기 · 검증 — vCenter 줄)도 기다린다(읽기만)
 import { runningBareosWork } from '../bareos/inflight.js';   // v2.825.1(G15): 엣지 대행 작업·늦은 회신·자동 설정도 기다린다(재시작하면 결과를 잃는다 · 읽기만)
 import { poolSettled } from '../util/pool.js';
 import { numOrNull } from '../util/numOrNull.js';
@@ -80,7 +80,7 @@ export function runningBulkDeploys() {
 function bareosWork() {
   let a = []; let b = [];
   try { a = runningBareosWork(); } catch { a = []; }
-  try { b = runningBareosFinishes(); } catch { b = []; }   // v2.873(점검 B2-02): 복원 마무리(NIC 끊기 · 검증 — vCenter 줄)
+  try { b = runningBareosFinishes(); } catch { b = []; }   // v2.874(점검 B2-02): 복원 마무리(NIC 끊기 · 검증 — vCenter 줄)
   return [...a, ...b];
 }
 /**

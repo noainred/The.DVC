@@ -14,7 +14,7 @@ const { restorePreview, fdVersionLine } = await import('../src/bareos/probePlan.
 const { restoreCommand, runRestore } = await import('../src/bareos/director.js');
 const vs = await import('../src/vmclone/vsphere.js');
 
-const BASE = { vcserver: 'vc.corp', configFile: '/etc/bareos/vmware/vc.ini', dc: 'DC-A', folder: '/web' };   // v2.873 B1-04 포탈이 싣는 기본 키
+const BASE = { vcserver: 'vc.corp', configFile: '/etc/bareos/vmware/vc.ini', dc: 'DC-A', folder: '/web' };   // v2.874 B1-04 포탈이 싣는 기본 키
 const R = (jobid, level, startedAt, o = {}) => ({ jobid, name: 'pv-web', type: 'B', level, state: 'ok', status: 'T', startedAt, client: 'fd-seoul', ...o });
 
 test('① 복원 명령 미리 보기 — 포탈과 같은 글자 · 성공한 백업만 · 체인 · 값 검사', async () => {
@@ -27,7 +27,7 @@ test('① 복원 명령 미리 보기 — 포탈과 같은 글자 · 성공한 �
   assert.match(pv.pluginOptions, /restore_datastore=DS-01/);
   assert.equal(pv.command, restoreCommand({ client: 'fd-seoul', jobids: [10, 20, 30], restoreJob: 'PortalVmwareRestore', pluginOptions: pv.pluginOptions }));
   assert.match(pv.command, /^restore client=fd-seoul restoreclient=fd-seoul jobid=10,20,30 restorejob=PortalVmwareRestore pluginoptions=".*" all done yes$/);
-  assert.match(pv.pluginOptions, /^python3:vcserver=vc\.corp:dc=DC-A:folder=\/web:vmname=web-01-test:config_file=\/etc\/bareos\/vmware\/vc\.ini:restore_powerstate=off:restore_datastore=DS-01$/, 'v2.873 B1-04 포탈과 같은 기본 키');
+  assert.match(pv.pluginOptions, /^python3:vcserver=vc\.corp:dc=DC-A:folder=\/web:vmname=web-01-test:config_file=\/etc\/bareos\/vmware\/vc\.ini:restore_powerstate=off:restore_datastore=DS-01$/, 'v2.874 B1-04 포탈과 같은 기본 키');
   assert.match(restorePreview({ row: R(30, 'I', 3000), runs, jobid: 30, restoreJob: 'PortalVmwareRestore' }).issue, /기본 키/, '기본 키를 모르면 만들지 않는다');
   assert.match(restorePreview({ row: R(30, 'I', 3000), runs, jobid: 30, restoreJob: 'PortalVmwareRestore', base: { ...BASE, configFile: '' } }).issue, /INI/);
   assert.doesNotMatch(pv.command, /\bselect\b/, 'select 를 넣지 않는다(v2.827.1)');

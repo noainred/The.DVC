@@ -363,7 +363,7 @@ export const OPS = Object.freeze({
     const chain = chainFromHistory(runs, jobid);
     const ci = chainIssue(chain, jobid);
     if (ci) throw invalid(ci);
-    // v2.873(점검 B5-01): restore 명령을 보낸 뒤 끊김은 결과 모름(묶음 restores 와 같은 표) — 확정 실패(502)로 보이면 다시 눌러 두 번 돈다
+    // v2.874(점검 B5-01): restore 명령을 보낸 뒤 끊김은 결과 모름(묶음 restores 와 같은 표) — 확정 실패(502)로 보이면 다시 눌러 두 번 돈다
     let rid;
     try { rid = await runRestore(s, { client, jobids: chain, restoreJob, pluginOptions }); } catch (e) {
       if (MID_COMMAND_CODES.has(e?.code)) throw Object.assign(new Error(`복원 명령을 보낸 뒤 응답이 끊겼습니다(${e.code}) — 시작됐는지 알 수 없습니다. Director 에서 확인하세요.`), { code: 'unknown', unknown: true });

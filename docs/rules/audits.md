@@ -2627,7 +2627,7 @@ server/src/bareos/CLAUDE.md 크기 상한(15,000B)으로 원문 그대로 옮겼
   ③ 끝난 검증 복원은 vmclone `bareos-verify`(`vsOps.verifyRestoredVm`) — 이름 정확히 1대 · 꺼짐일 때만 · **NIC 끊기를 다시 읽어 확인한 뒤에만 켠다** · Tools 대기 · 늘 끈다 ·
      성공이고 설정이면 `destroyClone(expectedName)`(이름 대조 · 켜져 있으면 안 지움) · 실패는 남긴다(조사용). 결과는 원장 `restores[].finish{ verify, toolsMs(모르면 없음), deleted }`.
      엣지 회신에 `toolsMs`·`deleted` 를 받는다(dispatch `sanitizeReport` · `finishOp` 화이트리스트). 핑 · 앱 시험은 하지 않는다(네트워크를 끊었으니 — 정직 기록).
-     ⚠ **정정(v2.873 점검 B3-01)**: 위 '받는다' 는 **받는 쪽만** 맞았다 — 엣지 워커(`agent/vmCloneWorker.js`) 회신에 두 칸이 없어 엣지 법인 검증은 늘 Tools '—' · '남김' 이었다. v2.873 에 워커가 싣고 남김(false)도 지킨다.
+     ⚠ **정정(v2.874 점검 B3-01)**: 위 '받는다' 는 **받는 쪽만** 맞았다 — 엣지 워커(`agent/vmCloneWorker.js`) 회신에 두 칸이 없어 엣지 법인 검증은 늘 Tools '—' · '남김' 이었다. v2.874 에 워커가 싣고 남김(false)도 지킨다.
   ④ 일일 요약(`bareos/digest.js` — 메일 종류 `bareos-digest` · 기본 켬 08:30)은 `veeam/staleAlert.js` 와 같은 틱(그날 한 번 · 실패 30분 뒤 · 3번 · 데모 · 엣지 제외 · 메일 꺼짐이면 계산 안 함).
      **Director 조회가 실패 중인 법인은 '모름'**(성공 · 실패 수를 만들지 않고 합에도 넣지 않는다) · 원장과 폴러 상태만 읽는다(Director 에 닿지 않는다 · 폴러 상태는 기동 때 `setDigestPoller` — 순환 방지).
   ⑤ 반증 1인 반영(재현 4 · 판독 5 — 모두 이번 판에서 고침):
@@ -2647,7 +2647,7 @@ server/src/bareos/CLAUDE.md 크기 상한(15,000B)으로 원문 그대로 옮겼
        화면이 생기며 열린 경로라 이번에 막았다(홈 데이터스토어 경로와 같은 규칙 — 반증 F5). 변이(이 거르기 제거)를 ⑥ 이 잡는다.
      · `bareos-probe --restore-plan <jobid>`: 포탈이 보낼 복원 명령을 **같은 함수**로 만든다(`director.restoreCommand` — `runRestore` 가 보내는 글자 그대로 ·
        `bareos/probePlan.js restorePreview`) · 보내지 않는다 · `.jobs type=R` 로 복원 잡 리소스 · `status client=` 로 FD 판. 플러그인이 옵션을 받아들이는지는 실제 복원으로만 확정(추정 금지).
-       ⚠ **정정(v2.873 점검 B1-04)**: v2.866 부터 포탈은 기본 키(vcserver · dc · folder · config_file)를 더 싣는데 미리 보기는 싣지 않아 '같은 글자' 가 아니었다 — v2.873 에 `--vcserver · --config-file · --dc · --folder` 를 받는다(모르면 만들지 않는다).
+       ⚠ **정정(v2.874 점검 B1-04)**: v2.866 부터 포탈은 기본 키(vcserver · dc · folder · config_file)를 더 싣는데 미리 보기는 싣지 않아 '같은 글자' 가 아니었다 — v2.874 에 `--vcserver · --config-file · --dc · --folder` 를 받는다(모르면 만들지 않는다).
      · `bareos-probe --vcenter … --vc-user … --vm …`(VCENTER_PASSWORD): 포탈 vCenter 계정으로 **읽기만** — 같은 이름 VM 수 · 전원 · `nicSummary`(못 읽은 칸 null) ·
        `passthroughCount` · `sessionPrivileges`(HasPrivilegeOnEntities — 현재 세션 키 · VM 과 상위 폴더 · `VERIFY_PRIV_IDS`). 로그인 재시도 없음 · SSRF 규칙.
        probe 는 복원 · 재구성 · 켜기 · 지우기 함수를 부르지 않는다(테스트가 소스로 고정). ReconfigVM 의 NIC 연결 변경에 장치 권한 둘 중 무엇이 요구되는지는 판마다 다를 수 있어 둘 다 본다(추정).
@@ -2746,31 +2746,31 @@ high 0 · 반증 1(A3-01 — 경로 오독, 데모 계정은 READ_DENY 하위라
 - 시험 `bareosErrLog2872`(7 — 실제 라우터 + 가짜 Director 포함) · 웹 `backupErrLog2872`(9) · 변이 6/6(범위 · 라우트 상한 · 엣지 정제 · 잡 대조 · 1시간 창 · 근거 없는 same).
 - 시안과 다른 점 5가지는 docs/design/bareos-errlog/README.md §7(서랍의 Full 실행 단추 없음 · 묶음 진행 막대 없음 · 400px 목록은 표 · ↑↓ 키 없음 · 복사는 본문 단추).
 
-## v2.873 Bareos 복원 · 검증 버그 점검(5축 + 반증 1인 — 2026-11-04 · 기준 7afeb3da)
+## v2.874 Bareos 복원 · 검증 버그 점검(5축 + 반증 1인 — 2026-11-04 · 기준 7afeb3da)
 
 사용자 요청 '버그 찾아서 개선' · 선택 '최근 Bareos 복원 · 검증' · '② 표준'. 분석 5축(B1 명령 · B2 원장 · 동시성 · B3 마무리(vmclone) · B4 검증 · 요약 · B5 화면) + 반증 1인.
 반증은 Bareos 원문(ua_restore.cc · ua_run.cc · lib/scan.cc · filed/dir_cmd.cc · bareos-fd-vmware.py 23~25)을 GitHub 에서 다시 받아 바이트 대조했다. 확정 39(high 2 · medium 9 · low 28) · 반증 1(B3-08).
 
 - **B1-01(high · 재현) 복원 pluginoptions 의 공백**: restore 는 받은 pluginoptions 를 run 명령으로 **따옴표 없이** 다시 조립해(`" pluginoptions=%s"`) 한 번 더 쪼갠다 —
   'Seoul DC' · 'datastore1 (1)' 같은 값이 잘려 run 이 'Invalid keyword' 로 거부했다. `restoreCommand` 가 `consoleQuote(…, { literalQuotes: true })`(configure add 와 같은 방식).
-  시험 `bareosRestoreBugs2873` 가 lib/scan.cc next_arg 이식으로 두 번 파싱을 재현한다. 실 Director 실측은 없다(원문 이식 에뮬레이션 — 5개 판 원문 동일).
+  시험 `bareosRestoreBugs2874` 가 lib/scan.cc next_arg 이식으로 두 번 파싱을 재현한다. 실 Director 실측은 없다(원문 이식 에뮬레이션 — 5개 판 원문 동일).
 - **B1-02** 로컬 VMDK 는 `where=/tmp/bareos-restores`(복원 잡 Where = / 를 FD 가 '' 로 바꿔 FD 루트에 풀렸다) · **B1-04** probe 미리 보기에 v2.866 기본 키(`--vcserver · --config-file · --dc · --folder`).
 - **B5-01(high · 재현) 결과 모름이 두 번째 복원을 불렀다**: 묶음 전 항목이 '보낸 뒤 끊김' 이면 502 '한 대도 시작하지 못했습니다' → 웹이 확정 실패로 보여 다시 누르면 202(실측).
   이제 ① 원장에 결과 모름 기록(`addRestore({ unknown:true })` — jobid 없음 · 폴러가 추적하지 않음) ② `restoreHeld`(진행 중 ∨ 결과 모름 6시간 — `RESTORE_UNKNOWN_HOLD_MS`, 웹 같은 값 대조)를
   묶음 · 단건 · 삭제 · 검증 고르기가 본다 ③ 새 VM 이름 예약(at 기준 24시간) ④ 응답 504 + `code:'unknown'` + `unknown` 수 ⑤ 단건 `ops.restore` 도 MID_COMMAND_CODES 를 unknown 으로.
-  웹은 항목별 사유를 그리고(B5-02) 결과 모름이면 마법사를 비운다. 시험 `bareosRestoreUnknown2873`(가짜 Director 가 restore 를 받고 끊음) · 변이 4/4.
+  웹은 항목별 사유를 그리고(B5-02) 결과 모름이면 마법사를 비운다. 시험 `bareosRestoreUnknown2874`(가짜 Director 가 restore 를 받고 끊음) · 변이 4/4.
 - **검증 회차(G3)**: B2-01 대상 잠금(jobLocks — 못 잡으면 건너뜀) · addRestore null 은 '시작' 으로 세지 않음 · B3-03 끝맺음 불가 vCenter(실행 위치 conflict · none, 직접이면 onDemandVcBlock)는 보내지 않음 ·
   B4-01 판정 전에 자르지 않고 통과한 것으로 perCorp 대를 채움(후보 상한 perCorp+30 · 건너뛴 VM 은 triedAt 으로 다음 회차에 뒤로) · B4-03 기록은 Director 마다 4건 ·
-  B4-08 원장 못 읽음 = 미룸(회차 차지 안 함) · GET 503 · B4-09 회차 차지 저장 실패면 보내지 않고 메모리 차지도 되돌림 · B4-02 0대 회차도 감사 + 화면 '법인별 마지막 회차'. 시험 `bareosRehearsalBugs2873` · 변이 4/4.
+  B4-08 원장 못 읽음 = 미룸(회차 차지 안 함) · GET 503 · B4-09 회차 차지 저장 실패면 보내지 않고 메모리 차지도 되돌림 · B4-02 0대 회차도 감사 + 화면 '법인별 마지막 회차'. 시험 `bareosRehearsalBugs2874` · 변이 4/4.
 - **마무리(G4)**: B2-02 vCenter 줄(perVcenter)의 bareos-nic · bareos-verify 를 업그레이드 대기 목록에(`execOp.runningBareosFinishes` → manager) · B3-01 엣지 워커 회신에 toolsMs · deleted(남김 false 도 —
   중앙 정제 · finishOp · 원장이 불리언 그대로, 없으면 화면 '모름') · B3-04 장치 목록이 비거나 모르는 NIC 종류(macAddress 가 있는데 NIC_TYPE_RE 밖)면 켜지 않음(앞 · 뒤 두 검사) ·
   B3-05 끄기 전 전원 실측 · B3-07 로그인 실패를 사유로 · B2-03 끝난 복원을 옛 행이 되돌리지 않음 · B2-04 마무리 중 복원은 다시 묶기에 남고 삭제 409(24시간 상한) · B2-06 같은 jobid 두 항목.
-  시험 `bareosFinishDigest2873` · `vmCloneCenter2793`(워커 왕복) · 변이 5/5(B3-04 는 첫 변이에서 시험이 못 잡아 — 뒤 검사가 같은 문구로 막았다 — 사유 문구 · 다시 읽기 실패 경우로 고쳤다).
+  시험 `bareosFinishDigest2874` · `vmCloneCenter2793`(워커 왕복) · 변이 5/5(B3-04 는 첫 변이에서 시험이 못 잡아 — 뒤 검사가 같은 문구로 막았다 — 사유 문구 · 다시 읽기 실패 경우로 고쳤다).
 - **요약 메일(G5)**: B4-04 창은 끝난 시각(finish.at → endedAt → at) · 진행 중 검증은 따로 · B4-06 모름 법인 실패 행 표지 · B4-10 기동 뒤 첫 폴러 조회 전 미룸(15분 상한) · B4-11 엣지 판정은 `service.isEdgeNode` 하나.
 - **화면(웹)**: B5-05 여러 대면 덮어쓰기를 새 VM 으로 · B5-06 데이터스토어 못 읽음 = null + 다시 읽기 · B5-07 실행 중 고르기 · 단계 잠금 · B5-08 50대 상한 안내 · 일부 선택 폴더 클릭은 빼기 ·
-  B5-03 첫 VM 법인으로 잠가 다시 거름 · B5-04 한 vCenter 일 때만 일괄 데이터스토어. 시험 웹 `bareosRestoreBugs2873`.
+  B5-03 첫 VM 법인으로 잠가 다시 거름 · B5-04 한 vCenter 일 때만 일괄 데이터스토어. 시험 웹 `bareosRestoreBugs2874`.
 - **고치지 않음(사유)**: B1-03(폴더 안 데이터센터 — 플러그인 23/24 한계, 경고 칸 설계 필요) · B1-05(호스트 폴더 안 클러스터 — 화면 안내만 가능) · B1-06(INI 이중 지정 경고 — 실환경 잡 로그 먼저) ·
   B2-05(단건 라우트 nic 기본 · 예약 — 웹 미사용 · 시험 다수 의존) · B3-02(런타임 mock 전환 중 실 복원 — 안전 판정 설계 필요) · B3-06 · B4-12(동시성 설계 — v2.862 F6 재검토 사안) ·
   B4-05(요약의 백업 진행 중 칸 — 실패 메일이 따로 알림) · B4-07(다음 회차 시각 표시 — 동작 변경 아님).
 - 작업 방식 교훈: ① 변이 검증에서 '두 겹 방어' 는 한 겹을 지워도 시험이 통과할 수 있다 — 겹마다 다른 사유 문구로 단언한다(B3-04). ② 소스 모양 시험(`saveState();` 바로 뒤)이 새 규칙과 부딪히면
-  규칙을 지키는 새 모양으로 고친다(시험을 지우지 않는다). ③ 다른 세션이 같은 번호를 먼저 쓰면 주석 · 시험 이름까지 새 번호로 바꾼다(2871 → 2873).
+  규칙을 지키는 새 모양으로 고친다(시험을 지우지 않는다). ③ 다른 세션이 같은 번호를 먼저 쓰면 주석 · 시험 이름까지 새 번호로 바꾼다(2871 → 2874).

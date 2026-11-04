@@ -141,7 +141,7 @@ export default function BareosRehearsal({ directors = [] }) {
           <button type="button" className="tab" style={{ padding: '5px 12px', fontSize: 12 }} disabled={busy || !runDir || !/^\d{6}$/.test(otp)} onClick={runNow}>{busy ? '보내는 중…' : `지금 검증 · 법인마다 ${unitText(p.perCorp, '대')}`}</button>
         </div>
       )}
-      {/* v2.873(점검 B4-02): 법인별 마지막 회차 — 0대로 끝난 정기 검증도 사유와 함께 보인다(예전에는 회차 기록을 그리지 않았다) */}
+      {/* v2.874(점검 B4-02): 법인별 마지막 회차 — 0대로 끝난 정기 검증도 사유와 함께 보인다(예전에는 회차 기록을 그리지 않았다) */}
       {lastRuns.length > 0 && (
         <details data-rehearsal-runs="" style={{ minWidth: 0 }} open={lastRuns.some((x) => rehearsalRunTone(x.run) !== 'ok')}>
           <summary className="muted" style={{ fontSize: 12, cursor: 'pointer' }}>법인별 마지막 회차 · {lastRuns.length}곳{lastRuns.some((x) => rehearsalRunTone(x.run) === 'bad') ? ' · 시작 0대 있음' : ''}</summary>

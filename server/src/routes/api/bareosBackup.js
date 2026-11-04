@@ -145,7 +145,7 @@ const viewJob = (j, vmById, settings) => {
  * 포탈이 본 실행만 안다(등록 전 · 기록 밖 백업은 모른다) — 없으면 null('성공 없음' 이 아니라 '포탈 기록에 없음').
  */
 /** v2.866 복원 명령의 기본 키 값(사이트 매핑 — vCenter 주소 · FD INI 경로). 매핑이 없으면 빈 값(restoreBaseKv 가 거부한다). */
-/** v2.873(점검 B5-01) 결과 모름 복원이 있는 대상의 재요청 거부 사유(묶음 · 단건 같은 말). */
+/** v2.874(점검 B5-01) 결과 모름 복원이 있는 대상의 재요청 거부 사유(묶음 · 단건 같은 말). */
 const UNKNOWN_HELD_REASON = '이 VM 의 직전 복원은 결과를 모릅니다(명령을 보낸 뒤 회신이 끊김) — Director 에서 그 복원이 돌았는지 확인하세요. 같은 복원이 두 번 돌지 않게 6시간 동안 다시 보내지 않습니다.';
 
 export const restoreBaseOf = (settings) => (job) => {
@@ -1004,7 +1004,7 @@ async function deleteRoute(req, res, job) {
     return res.json({ ok: true, note: `이 대상의 Director(${dir0})가 포탈 설정에 없어 원장에서만 지웠습니다. 그 Bareos 서버의 잡(bareos-dir.d/job/${job.bareosJob}.conf)은 그대로이고 스케줄이 있으면 계속 돕니다 — 그 서버에서 직접 정리하세요.` });
   }
   // 복원이 진행 중이면 지우지 않는다(P4) — 지우면 폴러가 그 복원을 더 추적하지 않아 결과를 영영 모른다.
-  if ((job.restores || []).some((r) => restoreHeld(r) || restoreFinishing(r))) return res.status(409).json({ ok: false, reason: '복원이 진행 중이거나 마무리(네트워크 끊기 · 검증) 중이거나 결과를 모르는 대상은 지울 수 없습니다 — 끝난 뒤 다시 시도하세요.' });   // v2.873 B2-04 · B5-01
+  if ((job.restores || []).some((r) => restoreHeld(r) || restoreFinishing(r))) return res.status(409).json({ ok: false, reason: '복원이 진행 중이거나 마무리(네트워크 끊기 · 검증) 중이거나 결과를 모르는 대상은 지울 수 없습니다 — 끝난 뒤 다시 시도하세요.' });   // v2.874 B2-04 · B5-01
   const dir = jobDir(job);
   if (job.demo && !isDemoActive()) {   // I8 — 데모 대상은 실제 Director 에 없다: 원장에서만
     deleteJob(job.id, { directorId: dir });
@@ -1088,7 +1088,7 @@ async function restoreRoute(req, res, job) {
   const name = req.user?.username || '';
   if (config.auth.enabled && !getUser(name)?.totpEnabled) return res.status(403).json({ ok: false, reason: '복원은 OTP 가 등록된 계정만 실행할 수 있습니다. 사용자 관리에서 OTP 를 등록하세요.', needEnroll: true });
   if ((job.restores || []).some(restoreOpen)) return res.status(409).json({ ok: false, reason: '이 대상의 다른 복원이 진행 중입니다.' });
-  if ((job.restores || []).some((r) => restoreUnknownHeld(r))) return res.status(409).json({ ok: false, code: 'unknown-held', reason: UNKNOWN_HELD_REASON });   // v2.873 B5-01
+  if ((job.restores || []).some((r) => restoreUnknownHeld(r))) return res.status(409).json({ ok: false, code: 'unknown-held', reason: UNKNOWN_HELD_REASON });   // v2.874 B5-01
   const jobid = Number(b.jobid);
   if (!Number.isInteger(jobid) || jobid <= 0) return res.status(400).json({ ok: false, reason: '복원할 백업(jobid)을 고르세요.' });
   const settings = effectiveSettings();
@@ -1117,7 +1117,7 @@ async function restoreRoute(req, res, job) {
   } catch (e) {
     const unknown = !!e?.unknown || e?.code === 'unknown';
     audit(req, 'Bareos 복원 실행', `${job.vcenterId}/${job.vmName}`, `${unknown ? '결과 모름' : '실패'} — ${String(e?.message || e).slice(0, 160)}`);
-    // v2.873(점검 B5-01): 보낸 뒤 끊김은 원장에 남긴다 — 다시 누른 같은 복원이 두 번 돌지 않게(restoreHeld · 새 VM 이름 예약)
+    // v2.874(점검 B5-01): 보낸 뒤 끊김은 원장에 남긴다 — 다시 누른 같은 복원이 두 번 돌지 않게(restoreHeld · 새 VM 이름 예약)
     if (unknown) { try { addRestore(job.id, { unknown: true, fromJobids: [jobid], mode: b.mode, target: plan.target, by: req.user?.username || '', client }); } catch (e2) { console.warn(`[bareos] 복원 결과 모름 기록 실패: ${String(e2?.message || e2).slice(0, 160)}`); } }
     sendErr(res, Object.assign(new Error(String(e?.message || e)), { code: unknown ? 'unknown' : (e?.code || '') }));
   }
@@ -1241,7 +1241,7 @@ function bulkRestoreGate(req, items) {
     if (a === 403) { readOnly += 1; denied.set(id, READ_ONLY); jobs.set(id, job); continue; }
     const mm = modeMismatch(job);
     if (mm) { denied.set(id, mm); jobs.set(id, job); continue; }
-    if ((job.restores || []).some((r) => restoreUnknownHeld(r))) { denied.set(id, UNKNOWN_HELD_REASON); jobs.set(id, job); continue; }   // v2.873 B5-01 — 두 번 돌지 않게
+    if ((job.restores || []).some((r) => restoreUnknownHeld(r))) { denied.set(id, UNKNOWN_HELD_REASON); jobs.set(id, job); continue; }   // v2.874 B5-01 — 두 번 돌지 않게
     if ((job.restores || []).some(restoreOpen)) { denied.set(id, '이 VM 의 다른 복원이 진행 중입니다 — 끝난 뒤 다시 시도하세요.'); jobs.set(id, job); continue; }
     jobs.set(id, job);
   }
@@ -1321,7 +1321,7 @@ api.post('/tools/bareos-backup/restore/bulk', adminOnly, async (req, res) => {
       // 엣지가 가져간 뒤 회신이 없으면 결과 모름 — 시작됐을 수 있다(다시 보내면 두 번 돈다)
       const unknown = !!e?.unknown || e?.code === 'unknown';
       for (const r of plan.items) audit(req, 'Bareos 복원 실행', `${r.vcenterId}/${r.vmName}`, `${unknown ? '결과 모름' : '실패'} — 묶음 ${batchId} · ${String(e?.message || e).slice(0, 160)}`);
-      // v2.873(점검 B5-01): 결과 모름이면 원장에 남긴다 — 다시 누른 같은 복원이 두 번 돌지 않게(대상 붙잡기 · 새 VM 이름 예약)
+      // v2.874(점검 B5-01): 결과 모름이면 원장에 남긴다 — 다시 누른 같은 복원이 두 번 돌지 않게(대상 붙잡기 · 새 VM 이름 예약)
       if (unknown) { try { inBatch(() => plan.items.forEach((r, i) => addRestore(r.id, { unknown: true, mode: r.mode, target: r.plan.target, by: name, client: sendItems[i].client, batchId, ...(r.nic ? { nic: r.nic } : {}) }))); } catch (e2) { console.warn(`[bareos] 묶음 복원 ${batchId} 결과 모름 기록 실패: ${String(e2?.message || e2).slice(0, 160)}`); } }
       return sendErr(res, Object.assign(new Error(oldEdgeHint(String(e?.message || e))), { code: e?.code || '' }));
     }
@@ -1341,7 +1341,7 @@ api.post('/tools/bareos-backup/restore/bulk', adminOnly, async (req, res) => {
           const code = x?.code || 'unknown';
           const reason = x?.message || 'Director 회신에 이 VM 이 없습니다 — 시작됐는지 알 수 없습니다. Director 에서 확인하세요.';
           results.push({ id: r.id, vmName: r.vmName, ok: false, code, reason });
-          // v2.873(점검 B5-01): 결과 모름은 원장에 남긴다(같은 복원을 다시 보내 두 번 돌지 않게 — restoreHeld · 새 VM 이름 예약)
+          // v2.874(점검 B5-01): 결과 모름은 원장에 남긴다(같은 복원을 다시 보내 두 번 돌지 않게 — restoreHeld · 새 VM 이름 예약)
           if (code === 'unknown') addRestore(job.id, { unknown: true, mode: r.mode, target: r.plan.target, by: name, client: sendItems[i].client, batchId, ...(r.nic ? { nic: r.nic } : {}) });
           audit(req, 'Bareos 복원 실행', `${job.vcenterId}/${job.vmName}`, `${code === 'unknown' ? '결과 모름' : code === 'skipped' ? '건너뜀' : '실패'} — 묶음 ${batchId} · ${String(reason).slice(0, 160)}`);
         }
@@ -1355,7 +1355,7 @@ api.post('/tools/bareos-backup/restore/bulk', adminOnly, async (req, res) => {
     }
     const started = results.filter((x) => x.ok).length;
     audit(req, 'Bareos 묶음 복원', `${plan.items[0].vcenterId}/${plan.items[0].vmName}${plan.items.length > 1 ? ` 외 ${plan.items.length - 1}대` : ''}`, `묶음 ${batchId} · 시작 ${started} / ${results.length}대`);
-    // v2.873(점검 B5-01): 한 대도 시작하지 못했어도 결과 모름이 있으면 504(결과 모름) — 502 '시작하지 못했습니다' 는 웹이 확정 실패로 보여 다시 누르게 했다
+    // v2.874(점검 B5-01): 한 대도 시작하지 못했어도 결과 모름이 있으면 504(결과 모름) — 502 '시작하지 못했습니다' 는 웹이 확정 실패로 보여 다시 누르게 했다
     const unknownN = results.filter((x) => !x.ok && x.code === 'unknown').length;
     const failStatus = unknownN ? 504 : 502;
     const failReason = unknownN
@@ -1376,7 +1376,7 @@ api.post('/tools/bareos-backup/restore/bulk', adminOnly, async (req, res) => {
  * 결과 목록은 조회 범위 안 대상만(범위 계정은 자기 법인 검증만 본다).
  */
 api.get('/tools/bareos-backup/rehearsal', adminOnly, (req, res) => {
-  // v2.873(점검 B4-08): 원장을 못 읽으면 결과 목록이 비어 '검증 결과 없음' 으로 보인다 — 503(registryUnreadable 규칙)
+  // v2.874(점검 B4-08): 원장을 못 읽으면 결과 목록이 비어 '검증 결과 없음' 으로 보인다 — 503(registryUnreadable 규칙)
   if (registryLoadError()) return res.status(503).json({ ok: false, code: 'registry-unreadable', reason: '백업 대상 원장을 읽지 못해 검증 결과를 보여 줄 수 없습니다(손상본 보존 · 서비스 점검에서 확인).' });
   const allowed = scopedVcenterIds(req.user, store.get());
   const st = rehearsalStatus();
@@ -1394,7 +1394,7 @@ api.get('/tools/bareos-backup/rehearsal', adminOnly, (req, res) => {
   const policy = allowed
     ? { ...st.policy, savedBy: '', datastores: Object.fromEntries(Object.entries(st.policy.datastores || {}).filter(([vc]) => allowed.has(vc))) }
     : st.policy;
-  const runs = st.runs.filter((x) => !visDirs || visDirs.has(x.directorId))   // v2.873 B4-03: 상태가 이미 Director 마다 RUNS_PER_DIR 건 — 여기서 전 법인 공용으로 다시 자르지 않는다
+  const runs = st.runs.filter((x) => !visDirs || visDirs.has(x.directorId))   // v2.874 B4-03: 상태가 이미 Director 마다 RUNS_PER_DIR 건 — 여기서 전 법인 공용으로 다시 자르지 않는다
     .map((x) => (allowed ? { ...x, items: (x.items || []).filter((it) => allowed.has(vcOfJob.get(it.jobId))) } : x));
   // v2.863 정책 화면의 vCenter 별 데이터스토어 칸 — 활성 대상이 있는 vCenter(정책 편집은 전체 범위 전용이라 범위 계정에는 싣지 않는다)
   let vcenters;

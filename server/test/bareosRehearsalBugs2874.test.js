@@ -1,5 +1,5 @@
 /**
- * test/bareosRehearsalBugs2873.test.js — v2.873 Bareos 복원 · 검증 점검(5축 + 반증 1인) 확정분 중 복원 검증(리허설) 회차.
+ * test/bareosRehearsalBugs2874.test.js — v2.874 Bareos 복원 · 검증 점검(5축 + 반증 1인) 확정분 중 복원 검증(리허설) 회차.
  *  ① B4-01(재현): 늘 막히는 VM(빠듯한 홈 데이터스토어)이 앞에 서도 다음 후보로 perCorp 대를 채운다 · 건너뛴 VM 은 다음 회차에 뒤로(triedAt)
  *  ② B3-03: 끝맺음(NIC 끊기 · 켜 보기)을 돌릴 곳을 정할 수 없는 vCenter 의 VM 은 보내지 않는다
  *  ③ B2-01: 다른 요청이 잡은 대상은 건너뛴다(공용 대상 잠금) · 회차가 끝나면 잡은 잠금을 푼다
@@ -12,7 +12,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'bareos2873rh-'));
+const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'bareos2874rh-'));
 process.env.CONFIG_DIR = tmp;
 process.env.DATA_SOURCE = 'mock';
 

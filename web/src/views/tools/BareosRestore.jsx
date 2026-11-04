@@ -28,7 +28,7 @@ const ROW = { display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' };
 const STEPS = [[1, '복원 지점'], [2, '위치 · 이름 · 네트워크'], [3, '확인 · OTP']];
 const FINISH_COLOR = { ok: '#86efac', bad: '#fca5a5', info: 'var(--text-dim)' };
 
-/** v2.873(점검 B5-01 · B5-02) 묶음 복원의 시작하지 못한 · 결과 모름 항목 — 사유와 함께(예전에는 어디에도 그리지 않았다). */
+/** v2.874(점검 B5-01 · B5-02) 묶음 복원의 시작하지 못한 · 결과 모름 항목 — 사유와 함께(예전에는 어디에도 그리지 않았다). */
 function OutcomeItems({ items }) {
   if (!items?.length) return null;
   return (
@@ -56,9 +56,9 @@ export default function BareosRestore({ d, reload, preselect = '', onPreselectUs
   const [otp, setOtp] = useState('');
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState(null);
-  const [errItems, setErrItems] = useState([]);   // v2.873 B5-02 실행이 거부된 항목별 사유(마법사에 남는 실패)
+  const [errItems, setErrItems] = useState([]);   // v2.874 B5-02 실행이 거부된 항목별 사유(마법사에 남는 실패)
   const [done, setDone] = useState(null);
-  const [capNote, setCapNote] = useState('');   // v2.873 B5-08 상한(RESTORE_MAX)에서 담지 못한 수
+  const [capNote, setCapNote] = useState('');   // v2.874 B5-08 상한(RESTORE_MAX)에서 담지 못한 수
   const [dsTick, setDsTick] = useState(0);
   const [batchId, setBatchId] = useState(() => latestBatchId(jobs));
   const [view, setViewState] = useState(() => (typeof window === 'undefined' ? 'list' : loadRestoreView(window.localStorage)));
@@ -79,12 +79,12 @@ export default function BareosRestore({ d, reload, preselect = '', onPreselectUs
 
   const resetWizard = () => { gen.current++; setStep(0); setPts(null); setPtsErr(null); setCheck(null); setCheckErr(null); setOtp(''); setErr(null); setErrItems([]); };
   const toggle = (ids, on) => {
-    if (busy) return;   // v2.873(점검 B5-07): 실행 요청 중에는 고르기를 바꾸지 않는다(늦게 온 성공이 새 고르기를 지웠다)
+    if (busy) return;   // v2.874(점검 B5-07): 실행 요청 중에는 고르기를 바꾸지 않는다(늦게 온 성공이 새 고르기를 지웠다)
     resetWizard(); setDone(null);
-    // v2.873(B5-08): 상한에서 조용히 자르지 않는다 — 담지 못한 수를 알린다
+    // v2.874(B5-08): 상한에서 조용히 자르지 않는다 — 담지 못한 수를 알린다
     const set = new Set(picked);
     let over = 0;
-    // v2.873(점검 B5-03): 아무것도 고르지 않은 채 vCenter · 폴더 '모두' 를 누르면 Director 가 섞인 대상을 담았다(매핑 변경 이력) — 첫 VM 의 법인으로 잠그고 다시 거른다
+    // v2.874(점검 B5-03): 아무것도 고르지 않은 채 vCenter · 폴더 '모두' 를 누르면 Director 가 섞인 대상을 담았다(매핑 변경 이력) — 첫 VM 의 법인으로 잠그고 다시 거른다
     let lock = lockedDir;
     for (const id of ids) {
       if (!on) { set.delete(id); continue; }
@@ -114,7 +114,7 @@ export default function BareosRestore({ d, reload, preselect = '', onPreselectUs
         for (const id of picked) {
           const job = jobsById.get(id);
           let base = out[id] && out[id].id === id ? out[id] : defaultItem(job);
-          // v2.873(점검 B5-05): 1대에서 덮어쓰기를 고른 뒤 VM 을 더하면 화면은 '새 VM'(덮어쓰기 칸이 사라짐)인데 값은 original 로 남았다 — 여러 대면 새 VM 으로
+          // v2.874(점검 B5-05): 1대에서 덮어쓰기를 고른 뒤 VM 을 더하면 화면은 '새 VM'(덮어쓰기 칸이 사라짐)인데 값은 original 로 남았다 — 여러 대면 새 VM 으로
           if (picked.length > 1 && base.mode === 'original') base = withMode(base, 'newVm');
           const lp = latestPoint(byId.get(id)?.points);
           out[id] = { ...base, jobid: base.jobid && (byId.get(id)?.points || []).some((p) => p.jobid === base.jobid && p.chain) ? base.jobid : lp?.jobid ?? null };
@@ -133,7 +133,7 @@ export default function BareosRestore({ d, reload, preselect = '', onPreselectUs
       dsAsked.current.add(vc);
       fetchJson('/datastores', { vcenterId: vc, limit: 2000 })
         .then((r) => setDss((m) => ({ ...m, [vc]: (r.items || []).filter((x) => x.accessible !== false).map((x) => ({ name: x.name, freeGB: x.freeGB ?? null, capacityGB: x.capacityGB ?? null })) })))
-        // v2.873(점검 B5-06): 못 읽음은 빈 목록이 아니다(null) — 다시 읽기를 열어 둔다(dsAsked 에서 뺀다)
+        // v2.874(점검 B5-06): 못 읽음은 빈 목록이 아니다(null) — 다시 읽기를 열어 둔다(dsAsked 에서 뺀다)
         .catch(() => { dsAsked.current.delete(vc); setDss((m) => ({ ...m, [vc]: null })); });
     }
   }, [step, pickedVcKey, dsTick]);
@@ -156,7 +156,7 @@ export default function BareosRestore({ d, reload, preselect = '', onPreselectUs
       setPicked([]); setItems({}); resetWizard();
       reload();
     } catch (e) {
-      // v2.873(점검 B5-01 · B5-02): 실패 본문의 항목별 사유를 그린다 · 결과 모름(504 · 시한)이면 마법사를 비우고 다시 읽는다 —
+      // v2.874(점검 B5-01 · B5-02): 실패 본문의 항목별 사유를 그린다 · 결과 모름(504 · 시한)이면 마법사를 비우고 다시 읽는다 —
       //   같은 고르기로 다시 누르면 두 번 돌 수 있다(서버도 그 VM 을 잠시 거부한다)
       const unknown = outcomeUnknown(e);
       const o = bulkRestoreOutcome(e?.body || null, { unknown, message: unknown ? unknownOutcomeText('복원', e) : e.message });
@@ -209,7 +209,7 @@ export default function BareosRestore({ d, reload, preselect = '', onPreselectUs
                   return (
                     <div key={f.folder} style={{ marginLeft: 6, minWidth: 0 }}>
                       <label style={{ ...ROW, gap: 6, fontSize: 12.5, fontWeight: 600, padding: '3px 0', cursor: free.length ? 'pointer' : 'default' }}>
-                        {/* v2.873(B5-08): 폴더 표와 같은 칸 — 일부만 고른 상태(─)를 보이고, 누르면 뺀다(상한에서 '더하기' 가 아무것도 못 해 풀 수 없었다) */}
+                        {/* v2.874(B5-08): 폴더 표와 같은 칸 — 일부만 고른 상태(─)를 보이고, 누르면 뺀다(상한에서 '더하기' 가 아무것도 못 해 풀 수 없었다) */}
                         <FolderBox ids={free.map((j) => j.id)} picked={picked} toggle={toggle} label={f.folder} />
                         <span style={{ overflowWrap: 'anywhere', minWidth: 0 }}>{f.folder}</span><span className="muted" style={{ fontWeight: 400 }}>{f.vms.length}</span>
                       </label>
@@ -237,7 +237,7 @@ export default function BareosRestore({ d, reload, preselect = '', onPreselectUs
         {/* ── 오른쪽: 3단계 ── */}
         <div className="card" data-bareos-restore-wizard="" style={{ padding: 14, minWidth: 0, flex: '999 1 520px', display: 'flex', flexDirection: 'column', gap: 10, boxSizing: 'border-box' }}>
           <div className="flex gap wrap" role="list" aria-label="복원 단계" style={{ rowGap: 6 }}>
-            {STEPS.map(([n, l]) => <FilterChip key={n} on={step === n} onClick={() => { if (busy) return; /* v2.873 B5-07 실행 중 단계 이동 잠금 */ if (n === 1 && picked.length) loadPoints(); else if (n === 2 && pts) setStep(2); else if (n === 3 && step >= 2 && !issue2) preview(); }}>{n}. {l}</FilterChip>)}
+            {STEPS.map(([n, l]) => <FilterChip key={n} on={step === n} onClick={() => { if (busy) return; /* v2.874 B5-07 실행 중 단계 이동 잠금 */ if (n === 1 && picked.length) loadPoints(); else if (n === 2 && pts) setStep(2); else if (n === 3 && step >= 2 && !issue2) preview(); }}>{n}. {l}</FilterChip>)}
           </div>
           {!picked.length && <div className="muted" style={{ fontSize: 13 }}>왼쪽에서 VM 을 고르세요 — 폴더를 고르면 그 안의 VM 을 모두 고릅니다(백업처럼).</div>}
           {picked.length > 0 && (
@@ -297,7 +297,7 @@ export default function BareosRestore({ d, reload, preselect = '', onPreselectUs
                   <button type="button" className="tab" style={{ padding: '3px 10px', fontSize: 12 }} onClick={retryDs}>다시 읽기</button>
                 </div>
               )}
-              {/* v2.873(점검 B5-04): 고른 VM 이 한 vCenter 일 때만 — 선택지는 그 vCenter 의 데이터스토어다(다른 vCenter VM 에 같은 이름을 넣으면 서버가 거부) */}
+              {/* v2.874(점검 B5-04): 고른 VM 이 한 vCenter 일 때만 — 선택지는 그 vCenter 의 데이터스토어다(다른 vCenter VM 에 같은 이름을 넣으면 서버가 거부) */}
               {many && new Set(pickedJobs.map((j) => j.vcenterId)).size === 1 && (
                 <div style={ROW}>
                   <span className="muted" style={{ fontSize: 12 }}>모든 새 VM 에 같은 데이터스토어</span>

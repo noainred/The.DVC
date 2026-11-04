@@ -15,8 +15,8 @@ const FINAL_STATES = new Set(['ok', 'warning', 'error', 'canceled']);
 /** 아직 끝나지 않은 복원(서버 registry.restoreOpen 과 같은 뜻 — jobid 가 있고 끝난 상태가 아니면 진행 중 · 상태 'unknown' 도 진행 중). */
 export const restoreIsOpen = (r) => !!r?.jobid && !r.abandoned && !FINAL_STATES.has(String(r.state || ''));
 /**
- * v2.873(점검 B5-01) 결과 모름 복원(명령을 보낸 뒤 회신이 끊김 — jobid 없음)을 붙잡는 시간. 서버 bareos/registry.js RESTORE_UNKNOWN_HOLD_MS 와 같다
- *   (server/test/bareosRestoreUnknown2873.test.js 가 대조). 그동안 같은 VM 을 다시 고르지 못한다 — 두 번 돌지 않게(서버도 거부한다).
+ * v2.874(점검 B5-01) 결과 모름 복원(명령을 보낸 뒤 회신이 끊김 — jobid 없음)을 붙잡는 시간. 서버 bareos/registry.js RESTORE_UNKNOWN_HOLD_MS 와 같다
+ *   (server/test/bareosRestoreUnknown2874.test.js 가 대조). 그동안 같은 VM 을 다시 고르지 못한다 — 두 번 돌지 않게(서버도 거부한다).
  */
 export const RESTORE_UNKNOWN_HOLD_MS = 6 * 3600_000;
 export const restoreUnknownHeld = (r, now = Date.now()) => r?.unknown === true && !r.jobid && now - (Number(r.at) || 0) < RESTORE_UNKNOWN_HOLD_MS;
@@ -51,7 +51,7 @@ export function pickBlock(job, { lockedDir = '', now = Date.now() } = {}) {
   if (!job) return '대상 없음';
   if (job.writable === false) return '조회 전용 범위';
   if ((job.restores || []).some(restoreIsOpen)) return '복원 진행 중';
-  if ((job.restores || []).some((r) => restoreUnknownHeld(r, now))) return '직전 복원 결과 모름 — Director 에서 확인';   // v2.873 B5-01
+  if ((job.restores || []).some((r) => restoreUnknownHeld(r, now))) return '직전 복원 결과 모름 — Director 에서 확인';   // v2.874 B5-01
   if (lockedDir && (job.directorId || '') !== lockedDir) return '다른 법인 — 복원은 한 법인씩';
   return '';
 }
@@ -152,13 +152,13 @@ export function batchView(jobs, batchId) {
     open: rows.filter((x) => restoreIsOpen(x.r)).length,
     ok: rows.filter((x) => st(x) === 'ok' || st(x) === 'warning').length,
     bad: rows.filter((x) => st(x) === 'error' || st(x) === 'canceled').length,
-    unknown: rows.filter((x) => x.r.unknown === true && !x.r.jobid).length,   // v2.873 B5-01 보낸 뒤 끊김(결과 모름)
+    unknown: rows.filter((x) => x.r.unknown === true && !x.r.jobid).length,   // v2.874 B5-01 보낸 뒤 끊김(결과 모름)
     nicFailed: rows.filter((x) => x.r.finish?.nic === 'failed').length,
   };
 }
 
 /**
- * v2.873(점검 B5-01 · B5-02): 묶음 복원 응답 → 화면 결과(순수). 시작하지 못한 · 결과 모름 항목을 사유와 함께 보인다 —
+ * v2.874(점검 B5-01 · B5-02): 묶음 복원 응답 → 화면 결과(순수). 시작하지 못한 · 결과 모름 항목을 사유와 함께 보인다 —
  *   예전에는 202 문구가 '아래 진행 표의 사유' 를 가리켰지만 표는 원장(시작한 것)만 그려 사유가 어디에도 없었고, 전부 결과 모름이면 502
  *   '시작하지 못했습니다' 로 보여 다시 누르게 했다(두 번째 복원이 나갔다 — 재현).
  * @param {object|null} body  응답 본문(202) 또는 실패 본문(e.body)
@@ -243,7 +243,7 @@ export function rehearsalDsOptions(list, current = '', { loading = false } = {})
   return out;
 }
 /**
- * v2.873(점검 B4-02): 법인(Director)별 마지막 회차(순수) — 서버 상태가 Director 마다 최근 몇 건을 남긴다(앞이 최신).
+ * v2.874(점검 B4-02): 법인(Director)별 마지막 회차(순수) — 서버 상태가 Director 마다 최근 몇 건을 남긴다(앞이 최신).
  *   예전에는 회차 기록(runs · weeks)을 화면이 그리지 않아, 매주 0대로 끝나는 정기 검증이 화면에서 보이지 않았다(무음 실패).
  * @returns {{ directorId:string, run:object, older:number }[]}  directors 순서 · 기록 없는 Director 는 뺀다
  */
@@ -273,7 +273,7 @@ export const rehearsalRunTone = (run) => {
   return 'bad';
 };
 /**
- * 검증용 VM 정리 칸 — 지움 · 남김 · 모름. v2.873(점검 B3-01): 옛 엣지 회신에는 deleted 가 없다 — 성공했는데 지웠는지 모르면 '남김' 으로 단정하지 않는다.
+ * 검증용 VM 정리 칸 — 지움 · 남김 · 모름. v2.874(점검 B3-01): 옛 엣지 회신에는 deleted 가 없다 — 성공했는데 지웠는지 모르면 '남김' 으로 단정하지 않는다.
  */
 export function cleanupText(finish) {
   if (!finish) return '—';

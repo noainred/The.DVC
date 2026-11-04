@@ -162,7 +162,7 @@ export function sanitizeReport(b) {
     const hosts = (Array.isArray(a.hosts) ? a.hosts.slice(0, 500) : []).map((h) => ({ hostId: t(h?.hostId, 300), ok: bool(h?.ok), detail: t(h?.detail, 300) })).filter((h) => h.hostId);
     const toolsMs = numOr(a.toolsMs);
     return { id, ok: bool(a.ok), detail: t(a.detail, 400), ms: Math.max(0, numOr(a.ms) || 0), ...(hosts.length ? { hosts } : {}), ...(t(a.newName, 80) ? { newName: t(a.newName, 80) } : {}),
-      ...(toolsMs != null && toolsMs >= 0 ? { toolsMs } : {}), ...(typeof a.deleted === 'boolean' ? { deleted: a.deleted } : {}) };   // v2.862 Bareos 복원 검증 · v2.873 B3-01 남김(false)도 싣는다(없음 = 모름)
+      ...(toolsMs != null && toolsMs >= 0 ? { toolsMs } : {}), ...(typeof a.deleted === 'boolean' ? { deleted: a.deleted } : {}) };   // v2.862 Bareos 복원 검증 · v2.874 B3-01 남김(false)도 싣는다(없음 = 모름)
   }).filter(Boolean);
   const s = body.sync && typeof body.sync === 'object' ? body.sync : {};
   const list = (v) => (Array.isArray(v) ? v.slice(0, 20).map((x) => t(x, 200)).filter(Boolean) : []);
