@@ -118,15 +118,116 @@ export function errorTarget(r) {
  */
 export function errorOpen(r, { canBareos = false, canBareosView = false, admin = false } = {}) {
   if (r.open === 'detail') return { key: 'detail', text: 'Detail' };
-  if (r.open === 'bareos') return canBareos ? { key: 'hash', text: '실행 이력', hash: '#/tools/bareos-backup/history' } : canBareosView ? { key: 'hash', text: 'Bareos', hash: '#/tools/bareos-summary' } : null;
+  // v2.872(시안 docs/design/bareos-errlog ①): 그 실행의 로그를 이 화면 서랍에서 — 예전 고정 주소 '실행 이력' 은 대상 목록의 첫 VM 을 보였다(사용자 스크린샷)
+  if (r.open === 'bareos') return canBareos ? (r.jobKey && r.jobid ? { key: 'log', text: '로그' } : { key: 'hash', text: '진행 · 이력', hash: '#/tools/bareos-backup/runs' }) : canBareosView ? { key: 'hash', text: 'Bareos', hash: '#/tools/bareos-summary' } : null;
   if (r.open === 'live') return canBareos ? { key: 'hash', text: '진행 현황', hash: '#/tools/bareos-backup/live' } : null;
   if (r.open === 'em') return { key: 'hash', text: 'Veeam', hash: '#/tools/backup-em' };
   if (r.open === 'bareos-settings') return canBareos && admin ? { key: 'hash', text: '설정', hash: '#/tools/bareos-backup/settings' } : null;
   if (r.open === 'pools') return canBareosView ? { key: 'hash', text: '보존 · 풀', hash: '#/tools/bareos-summary/pools' } : null;   // v2.840 오류 볼륨
   return null;
 }
-/** 같은 원인 칸 — 2건 이상이면 'N건' · 아니면 '—'. */
+/** 같은 모양 칸(v2.872 — 예전 '같은 원인') — 2건 이상이면 'N건' · 아니면 '—'. 같은 원인인지는 묶음 로그가 로그를 읽은 뒤에만 말한다. */
 export const sameText = (n) => (fin(n) && n > 1 ? `${n}건` : '—');
+
+/* ── v2.872 로그 서랍 · 묶어 보기(시안 docs/design/bareos-errlog · 사용자 컨펌 2026-11-04 — 따로 보기와 묶어 보기 둘 다) ── */
+
+/** '이력 →' — 진행 · 이력에서 그 VM · 그 jobid 의 로그를 연 채로(bareosViewText.saveRunFocus). 운영 권한 · 원장 잡이 있을 때만. */
+export function errorHistory(r, { canBareos = false } = {}) {
+  return canBareos && r?.open === 'bareos' && r.jobKey && r.vmId ? { key: 'history', text: '이력 →', hash: '#/tools/bareos-backup/runs' } : null;
+}
+/** 서랍이 열 실행 — 로그를 읽을 수 있는 Bareos 실행 행만(원장 잡 id · jobid). */
+export const canOpenLog = (r) => r?.src === 'bareos' && r.open === 'bareos' && !!r.jobKey && Number.isInteger(r.jobid) && r.jobid > 0;
+/** 서랍의 작업 대상(JobLogPanel 의 job) — 원장 잡 id · VM 이름. 쓰기 범위를 모르므로 Full 실행 단추는 서랍에 두지 않는다(이력 → 에서). */
+export const logJobOf = (r) => ({ id: r.jobKey, vmName: r.vm || r.job || '', writable: false });
+/** 서랍이 기다릴 시한의 Director 표지 — 엣지 대행 법인이면 엣지 회신 시한(서버 relayLimits)만큼(bareosText.withRelayWait). */
+export const logDirOf = (r) => (r?.relay ? { agent: 'edge' } : null);
+
+/** 보기(따로 · 묶어) — 브라우저에 기억(사람별 편의 · 못 읽으면 따로). */
+export const ERROR_VIEWS = Object.freeze([['rows', '따로 보기'], ['groups', '묶어 보기']]);
+const VIEW_KEY = 'backup-summary.errors.view';
+export function loadErrorView(storage = globalThis.localStorage) {
+  try { const v = storage?.getItem(VIEW_KEY); return ERROR_VIEWS.some(([k]) => k === v) ? v : 'rows'; } catch { return 'rows'; }
+}
+export function saveErrorView(v, storage = globalThis.localStorage) {
+  try { storage?.setItem(VIEW_KEY, v); } catch { /* 기억만 못 함 */ }
+}
+
+/** 잡 이름들의 공통 앞부분 + '*'(모두 같으면 그 이름 · 공통이 3자 미만이면 '여러 잡'). */
+export function jobPattern(names) {
+  const xs = [...new Set((Array.isArray(names) ? names : []).map((x) => String(x || '')).filter(Boolean))];
+  if (!xs.length) return '';
+  if (xs.length === 1) return xs[0];
+  let p = xs[0];
+  for (const x of xs.slice(1)) { let i = 0; while (i < p.length && i < x.length && p[i] === x[i]) i++; p = p.slice(0, i); }
+  return p.length >= 3 ? `${p}*` : '여러 잡';
+}
+
+/**
+ * 묶어 보기 — 거른 낱건(rows · 새것 먼저)을 서버의 묶음 id(group)로 모은다. 묶음 순서는 그 묶음의 가장 새 행 순서. 순수.
+ *   group 이 없는 행(구버전 서버)은 저마다 한 묶음. 거르기 칩은 낱건에 걸리고 묶음 크기는 남은 낱건으로 다시 센다.
+ * @returns {{ id, rows, n, head, newest, oldest, target, vms, runs }[]}  runs = 로그를 읽을 수 있는 실행 수
+ */
+export function groupErrors(rows) {
+  const by = new Map();
+  (Array.isArray(rows) ? rows : []).forEach((r, i) => {
+    const id = r?.group || `row${i}`;
+    const g = by.get(id);
+    if (g) g.rows.push(r); else by.set(id, { id, rows: [r] });
+  });
+  return [...by.values()].map((g) => {
+    const head = g.rows[0];
+    const ats = g.rows.map((r) => r.at).filter(fin);
+    const vms = new Set(g.rows.map((r) => r.vmId || r.vm).filter(Boolean)).size;
+    return { id: g.id, rows: g.rows, n: g.rows.length, head, newest: ats.length ? Math.max(...ats) : null, oldest: ats.length ? Math.min(...ats) : null,
+      target: g.rows.length > 1 ? jobPattern(g.rows.map((r) => r.job)) : (head.job || head.vm || head.server || '—'), vms, runs: g.rows.filter(canOpenLog).length };
+  });
+}
+/**
+ * 묶어 보기 정렬 — 묶음 단위(펼친 낱건은 묶음을 따라간다 · 공용 STable 은 행을 낱개로 섞어 묶음이 깨진다 — GPU 계층 표와 같은 방식). 순수.
+ *   key: time(가장 새 시각) · corp · src · target · kind · msg · n · 모르는 값은 방향과 무관하게 뒤.
+ */
+export const GROUP_SORT_KEYS = Object.freeze(['time', 'corp', 'src', 'target', 'kind', 'msg', 'n']);
+export function sortGroups(groups, { key = 'time', dir = 'desc' } = {}) {
+  const val = (g) => ({ time: g.newest, corp: g.head?.vcName || null, src: g.head?.src || null, target: g.target || null, kind: g.head?.kind || null, msg: g.head?.msg || null, n: g.n }[key] ?? null);
+  const sgn = dir === 'asc' ? 1 : -1;
+  return [...(Array.isArray(groups) ? groups : [])].map((g, i) => ({ g, i, v: val(g) })).sort((a, b) => {
+    if (a.v === null || a.v === '') return b.v === null || b.v === '' ? a.i - b.i : 1;
+    if (b.v === null || b.v === '') return -1;
+    const c = typeof a.v === 'number' && typeof b.v === 'number' ? a.v - b.v : String(a.v).localeCompare(String(b.v), 'ko');
+    return c ? c * sgn : a.i - b.i;
+  }).map((x) => x.g);
+}
+
+/** 묶음 시각 칸 — 'MM-DD HH:MM' 또는 'MM-DD HH:MM ~ HH:MM'(같은 날) · 'MM-DD HH:MM ~ MM-DD HH:MM'. */
+export function groupTimeText(g) {
+  if (!fin(g?.newest)) return '—';
+  if (!fin(g.oldest) || g.oldest === g.newest) return mdhm(g.newest);
+  const a = mdhm(g.oldest); const b = mdhm(g.newest);
+  return a.slice(0, 5) === b.slice(0, 5) ? `${a} ~ ${b.slice(6)}` : `${a} ~ ${b}`;
+}
+
+/** 묶음 로그 상한(서버 ops.LOGS_MAX 와 같은 값 — 서버가 400 으로 거른다). */
+export const BULK_LOG_MAX = 15;
+/** 묶음 로그 요청 항목 — 로그를 읽을 수 있는 실행만 · 새것부터 상한까지. more = 상한 밖 실행 수. */
+export function bulkLogItems(g) {
+  const runs = (g?.rows || []).filter(canOpenLog);
+  return { items: runs.slice(0, BULK_LOG_MAX).map((r) => ({ id: r.jobKey, jobid: r.jobid })), rows: runs.slice(0, BULK_LOG_MAX), more: Math.max(0, runs.length - BULK_LOG_MAX) };
+}
+/** 묶음 대조 칸(서버 compareFirstErrors.match) → 글자 · 색. */
+export const MATCH_TEXT = Object.freeze({
+  same: { text: '같은 오류', tone: 'bad' }, other: { text: '다른 오류', tone: 'warn' }, none: { text: '오류 줄 없음', tone: 'muted' }, unread: { text: '못 읽음', tone: 'muted' },
+});
+/** 묶음 대조 한 줄 — 0 인 칸은 뺀다. 같은 오류라고 말할 근거가 없으면(전부 제각각) 그렇게 말한다. */
+export function bulkSummaryText(s) {
+  if (!s || !fin(s.total)) return '';
+  const parts = [];
+  if (s.same) parts.push(`${s.same}건이 같은 오류`);
+  if (s.other) parts.push(`${s.other}건 다른 오류`);
+  if (s.none) parts.push(`${s.none}건 오류 줄 없음`);
+  if (s.unread) parts.push(`${s.unread}건 못 읽음`);
+  if (!s.same && s.other > 1) parts.unshift('같은 오류로 묶이는 실행이 없습니다(첫 오류 줄이 모두 다름)');
+  return parts.join(' · ') || '읽은 실행이 없습니다';
+}
 /** 시각 'MM-DD HH:MM'(브라우저 시각). */
 export const mdhm = (ms) => (fin(ms) ? (() => { const d = new Date(ms); return `${p2(d.getMonth() + 1)}-${p2(d.getDate())} ${p2(d.getHours())}:${p2(d.getMinutes())}`; })() : '—');
 

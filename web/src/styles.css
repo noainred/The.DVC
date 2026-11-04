@@ -2397,3 +2397,8 @@ tr.row-sel > td { background: rgba(59, 130, 246, .10); }
 .iss-label { display: inline-flex; align-items: center; height: 22px; padding: 0 8px; border-radius: 11px; border: 1px solid var(--border); font-size: 12px; }
 .iss-stamp { font-size: 12px; display: flex; flex-direction: column; gap: 2px; padding-top: 10px; border-top: 1px solid var(--border); }
 @media (max-width: 720px) { .iss-side { max-width: none; } }
+/* v2.872 통합 에러 로그의 로그 서랍(시안 docs/design/bareos-errlog ①②④) — 오른쪽 640px(목록은 그대로 보인다) · 좁은 폭은 전체 화면 시트.
+   아래는 상태바(fixed) 위까지 — --statusbar-h 는 App.jsx 가 실측해 .app-body 에 넘긴다(픽바와 같은 값). 공용 Modal(200)보다 아래 · 사이드바(40)보다 위. */
+.err-drawer { position: fixed; top: 0; right: 0; bottom: var(--statusbar-h, 34px); width: min(640px, 100vw); z-index: 60; box-sizing: border-box;
+  background: var(--panel-deep); border-left: 1px solid var(--border); box-shadow: -24px 0 48px rgba(0, 0, 0, .45); display: flex; flex-direction: column; min-width: 0; }
+@media (max-width: 720px) { .err-drawer { top: 56px; width: 100vw; border-left: 0; border-top: 1px solid var(--border); border-radius: 14px 14px 0 0; } }
