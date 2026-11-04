@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>사전 점검 메일 — 상태 변화 알림 · 일일 요약 절</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=Noto+Sans+KR:wght@400;500;700;800&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+body{margin:0;background:#0a0e17;color:#e6edf6;font-family:"Inter","Noto Sans KR","Apple SD Gothic Neo",sans-serif;font-size:13px}
+a{color:#2563eb}a:hover{color:#1d4ed8}
+.muted{color:#8b9bb4}
+.mono{font-family:"JetBrains Mono",ui-monospace,monospace}
+.mail{background:#ffffff;color:#111827;border-radius:12px;border:1px solid #243049;overflow:hidden;min-width:0}
+.mail .hd{padding:12px 16px;background:#f1f5f9;border-bottom:1px solid #e2e8f0;font-size:12.5px;color:#334155;display:flex;flex-direction:column;gap:3px}
+.mail .hd b{color:#0f172a}
+.mail .bd{padding:14px 16px;font-size:13px;line-height:1.55}
+.mail table{border-collapse:collapse;font-size:12.5px;width:100%}
+.mail th{padding:5px 8px;background:#f1f5f9;border:1px solid #cbd5e1;text-align:left;white-space:nowrap;color:#334155}
+.mail td{padding:5px 8px;border:1px solid #cbd5e1;vertical-align:top;line-height:1.45}
+.mail .bad{color:#b91c1c;font-weight:700}.mail .warn{color:#b45309;font-weight:700}.mail .ok{color:#15803d;font-weight:700}.mail .unk{color:#64748b}
+.mail .note{color:#64748b;font-size:11.5px}
+.lbl{font-size:12px;font-weight:700;color:#8b9bb4;display:flex;align-items:center;gap:8px}
+</style>
+</helmet>
+<div style="box-sizing:border-box;min-height:100vh;background:#0a0e17">
+<div style="max-width:1240px;margin:0 auto;box-sizing:border-box;padding:18px 24px 28px;display:flex;flex-direction:column;gap:18px;min-width:0">
+
+  <div class="lbl">① 상태가 나빠질 때 — 종류 ‘Bareos 사전 점검’ (한 틱에 나빠진 법인을 한 통으로)</div>
+  <div class="mail">
+    <div class="hd">
+      <div><b>[Bareos 사전 점검] 불가 2 · 경고 1 — vcenter-pl-krakow-01, vcenter-eu-central-01, vcenter-me-uae-01</b></div>
+      <div>보낸 사람: 포탈 · 받는 사람: 기본 수신자 · 2026-11-04 20:03</div>
+    </div>
+    <div class="bd">
+      <p style="margin:0 0 10px">사전 점검(11-04 20:00)에서 <b>오늘 밤 백업이 실패할 수 있는 법인 2곳</b>과 경고 1곳이 새로 생겼습니다. 포탈 › Backup 현황 › Bareos › 법인 화면의 ‘사전 점검’ 카드에서 자세히 볼 수 있습니다.</p>
+      <table>
+        <thead><tr><th>법인 Director</th><th>항목</th><th>결과</th><th>상세</th><th>조치</th><th>다음 백업</th></tr></thead>
+        <tbody>
+          <tr>
+            <td><b>폴란드 Bareos</b><br><span class="note">vcenter-pl-krakow-01 · 엣지 edge-pl-01</span></td>
+            <td>vCenter 접속<br><span class="note">FD → 192.0.2.21:443</span></td>
+            <td class="bad">불가</td>
+            <td><span class="mono">ECONNREFUSED</span> · 0.8초<br><span class="note">어제까지 정상 → 오늘 불가</span></td>
+            <td>INI 의 vcserver 가 vCenter 가 맞는지 · vCenter 웹 서비스 · 방화벽을 확인하세요. FD 서버에서 <span class="mono">nc -vz 192.0.2.21 443</span></td>
+            <td>11-05 02:00<br><span class="note">잡 38개</span></td>
+          </tr>
+          <tr>
+            <td><b>독일 Bareos</b><br><span class="note">vcenter-eu-central-01 · 엣지 edge-de-01</span></td>
+            <td>SD 디스크 여유<br><span class="note">/var/lib/bareos/storage</span></td>
+            <td class="bad">위험</td>
+            <td>여유 120 GB / 4.0 TB (3%) · 최근 7일 +52 GB/일 · 약 2일 뒤 가득 참<br><span class="note">경고(11-01 12%) → 위험</span></td>
+            <td>오래된 볼륨 정리(정책 · 보존) · 디스크 증설 · 다음 Full(11-09) 전에 여유 확보</td>
+            <td>11-05 02:00<br><span class="note">잡 212개 · Full 11-09</span></td>
+          </tr>
+          <tr>
+            <td><b>UAE Bareos</b><br><span class="note">vcenter-me-uae-01 · 엣지 edge-ae-01</span></td>
+            <td>vCenter 인증서 지문</td>
+            <td class="warn">경고</td>
+            <td>SHA1 이 바뀜 — 10-28 <span class="mono">AB:CD:…:EF:01</span> → 11-04 <span class="mono">12:34:…:9A:BC</span><br><span class="note">vCenter 인증서가 갱신됐거나 다른 서버입니다</span></td>
+            <td>FD INI 의 vcthumbprint 를 새 지문으로 갱신하세요(설정 › 법인별 설정 › FD INI — 지문 읽기). 그대로면 플러그인이 접속을 거부할 수 있습니다(추정 — 실환경 문구 미확인).</td>
+            <td>11-05 02:00</td>
+          </tr>
+        </tbody>
+      </table>
+      <p class="note" style="margin:10px 0 0">이 메일은 상태가 나빠진 법인만 싣습니다(회복되면 1통 따로). 같은 경고를 매일 반복해 보내지 않으며, 매일의 상태는 일일 요약 메일의 ‘사전 점검’ 절에 있습니다. ‘정상’ 은 백업 성공을 보장하지 않습니다. 설정 › 메일 발송의 ‘Bareos 사전 점검’ 종류로 보냈습니다.</p>
+    </div>
+  </div>
+
+  <div class="lbl">② 일일 요약 메일(08:30)에 더해지는 절</div>
+  <div class="mail">
+    <div class="hd">
+      <div><b>Bareos 일일 요약 — 실패 9 · 경고 14 · 성공 1,180 · 결과 모름 법인 3</b></div>
+      <div>2026-11-05 08:30 · (앞부분: 법인별 24시간 표 · 실패한 VM 표 — 그대로)</div>
+    </div>
+    <div class="bd">
+      <h4 style="margin:0 0 6px;font-size:13.5px">사전 점검(11-04 20:00 · 28곳)</h4>
+      <p style="margin:0 0 8px">정상 20 · <span class="bad">불가 2</span> · <span class="warn">경고 3</span> · <span class="unk">모름 3</span>(엣지 미회신 1 · 중앙 직접 2)</p>
+      <table>
+        <thead><tr><th>법인</th><th>vCenter 접속</th><th>인증서 지문</th><th>Director 콘솔</th><th>SD 디스크 여유</th><th>판정</th></tr></thead>
+        <tbody>
+          <tr><td>폴란드 Bareos</td><td class="bad">거부(ECONNREFUSED)</td><td class="unk">—</td><td class="ok">정상</td><td>1.2 TB / 4.0 TB · 약 60일</td><td class="bad">불가</td></tr>
+          <tr><td>독일 Bareos</td><td class="ok">정상</td><td class="ok">같음</td><td class="ok">정상</td><td class="bad">120 GB / 4.0 TB (3%) · 약 2일</td><td class="bad">위험</td></tr>
+          <tr><td>뮌헨 Bareos</td><td class="ok">정상</td><td class="ok">같음</td><td class="ok">정상</td><td class="warn">240 GB / 2.0 TB (12%) · 약 9일</td><td class="warn">경고</td></tr>
+          <tr><td>UAE Bareos</td><td class="ok">정상</td><td class="warn">바뀜(10-28 → 11-04)</td><td class="ok">정상</td><td>1.5 TB / 2.0 TB · 약 190일</td><td class="warn">경고</td></tr>
+          <tr><td>일본 Bareos <span class="note">(중앙 직접)</span></td><td class="unk">정상 — 중앙에서 본 것(FD 시점 아님)</td><td class="ok">같음</td><td class="ok">정상</td><td class="unk">모름</td><td class="unk">모름</td></tr>
+          <tr><td>브라질 Bareos</td><td class="unk">—</td><td class="unk">—</td><td class="unk">—</td><td class="unk">—</td><td class="unk">모름(엣지 미회신)</td></tr>
+          <tr><td colspan="6" class="note">정상 20곳은 싣지 않았습니다 — 포탈 현황 표의 ‘사전 점검’ 열에서 볼 수 있습니다.</td></tr>
+        </tbody>
+      </table>
+      <p class="note" style="margin:10px 0 0">판정은 포탈이 20:00 에 엣지 노드에서 읽은 값 기준입니다 · 모름은 수를 만들지 않습니다 · 설정 › vCenter 관리 › Bareos 백업 서버 › 공통 기본값 · 수집 › 사전 점검에서 시각 · 기준을 바꿉니다.</p>
+    </div>
+  </div>
+
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1240,"height":980}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>
