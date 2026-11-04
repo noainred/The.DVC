@@ -123,7 +123,7 @@ export function verifyOutcome(r) {
 /**
  * 요약 계산(순수) — 법인(Director)마다 최근 24시간. 그 Director 조회가 실패 중이면 known:false(수를 만들지 않는다).
  * @param {object[]} jobs 원장 · @param {object} settings · @param {Record<string,{ok?:boolean, code?:string}>} dirStatus
- * @param {{ causeOf?: (dirId:string, jobid:number) => ({ line: string|null }|null) }} [o] v2.885 실패 메일이 읽어 둔 첫 오류 줄(Director 에 묻지 않는다 — 없으면 예전 오류 문구)
+ * @param {{ causeOf?: (dirId:string, jobid:number, o:{epoch:number, jobName:string, now:number}) => ({ line: string|null }|null) }} [o] v2.885 실패 메일이 읽어 둔 첫 오류 줄(Director 에 묻지 않는다 — 없으면 예전 오류 문구)
  */
 export function digestData(jobs, settings, dirStatus = {}, now = Date.now(), { causeOf = () => null } = {}) {
   const since = now - WINDOW_MS;
@@ -149,7 +149,7 @@ export function digestData(jobs, settings, dirStatus = {}, now = Date.now(), { c
         c.fail += 1;
         if (fails.length < ROWS_MAX) {
           // v2.885: 실패 메일이 읽어 둔 첫 오류 줄 + 해석이 있으면 그것을(오류 줄이 없었으면 그렇다고) · 없으면 예전처럼 포탈이 기록한 오류 문구
-          let cc = null; try { cc = lr.jobid ? causeOf(dir, lr.jobid) : null; } catch { cc = null; }
+          let cc = null; try { cc = lr.jobid ? causeOf(dir, lr.jobid, { epoch: Number(j.runsEpoch) || 0, jobName: j.bareosJob, now }) : null; } catch { cc = null; }
           const hint = cc?.line ? issueHint(cc.line) : '';
           const message = cc ? (cc.line ? `${cc.line.slice(0, 300)}${hint ? ` → ${hint}` : ''}` : '오류 줄 없음(작업 로그)') : String(j.lastError?.message || '').slice(0, 160);
           fails.push({ corp: c.name, known: c.known, vcenterId: j.vcenterId, vmName: j.vmName, jobid: lr.jobid ?? null, at, message });
