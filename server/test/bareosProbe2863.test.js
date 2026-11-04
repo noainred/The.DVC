@@ -14,11 +14,12 @@ const { restorePreview, fdVersionLine } = await import('../src/bareos/probePlan.
 const { restoreCommand, runRestore } = await import('../src/bareos/director.js');
 const vs = await import('../src/vmclone/vsphere.js');
 
+const BASE = { vcserver: 'vc.corp', configFile: '/etc/bareos/vmware/vc.ini', dc: 'DC-A', folder: '/web' };   // v2.874 B1-04 포탈이 싣는 기본 키
 const R = (jobid, level, startedAt, o = {}) => ({ jobid, name: 'pv-web', type: 'B', level, state: 'ok', status: 'T', startedAt, client: 'fd-seoul', ...o });
 
 test('① 복원 명령 미리 보기 — 포탈과 같은 글자 · 성공한 백업만 · 체인 · 값 검사', async () => {
   const runs = [R(30, 'I', 3000), R(20, 'I', 2000), R(10, 'F', 1000), R(25, 'I', 2500, { state: 'error', status: 'f' })];
-  const pv = restorePreview({ row: R(30, 'I', 3000), runs, jobid: 30, restoreJob: 'PortalVmwareRestore', newName: 'web-01-test', datastore: 'DS-01' });
+  const pv = restorePreview({ row: R(30, 'I', 3000), runs, jobid: 30, restoreJob: 'PortalVmwareRestore', newName: 'web-01-test', datastore: 'DS-01', base: BASE });
   assert.equal(pv.ok, true, JSON.stringify(pv));
   assert.deepEqual(pv.chain, [10, 20, 30], '실패한 실행은 체인에 넣지 않는다');
   assert.match(pv.pluginOptions, /vmname=web-01-test/);
@@ -26,21 +27,24 @@ test('① 복원 명령 미리 보기 — 포탈과 같은 글자 · 성공한 �
   assert.match(pv.pluginOptions, /restore_datastore=DS-01/);
   assert.equal(pv.command, restoreCommand({ client: 'fd-seoul', jobids: [10, 20, 30], restoreJob: 'PortalVmwareRestore', pluginOptions: pv.pluginOptions }));
   assert.match(pv.command, /^restore client=fd-seoul restoreclient=fd-seoul jobid=10,20,30 restorejob=PortalVmwareRestore pluginoptions=".*" all done yes$/);
+  assert.match(pv.pluginOptions, /^python3:vcserver=vc\.corp:dc=DC-A:folder=\/web:vmname=web-01-test:config_file=\/etc\/bareos\/vmware\/vc\.ini:restore_powerstate=off:restore_datastore=DS-01$/, 'v2.874 B1-04 포탈과 같은 기본 키');
+  assert.match(restorePreview({ row: R(30, 'I', 3000), runs, jobid: 30, restoreJob: 'PortalVmwareRestore' }).issue, /기본 키/, '기본 키를 모르면 만들지 않는다');
+  assert.match(restorePreview({ row: R(30, 'I', 3000), runs, jobid: 30, restoreJob: 'PortalVmwareRestore', base: { ...BASE, configFile: '' } }).issue, /INI/);
   assert.doesNotMatch(pv.command, /\bselect\b/, 'select 를 넣지 않는다(v2.827.1)');
   // runRestore 가 실제로 보내는 글자와 같다(미리 보기가 다른 명령을 보여 주지 않게)
   let sent = '';
   await runRestore({ call: async (cmd) => { sent = cmd; return { jobid: 99 }; } }, { client: 'fd-seoul', jobids: [10, 20, 30], restoreJob: 'PortalVmwareRestore', pluginOptions: pv.pluginOptions });
   assert.equal(sent, pv.command);
   // 이름을 안 주면 '<잡 이름>-probe'
-  assert.match(restorePreview({ row: R(10, 'F', 1000), runs, jobid: 10, restoreJob: 'PortalVmwareRestore' }).pluginOptions, /vmname=pv-web-probe/);
+  assert.match(restorePreview({ row: R(10, 'F', 1000), runs, jobid: 10, restoreJob: 'PortalVmwareRestore', base: BASE }).pluginOptions, /vmname=pv-web-probe/);
   // 거부
   assert.match(restorePreview({ row: null, runs: [], jobid: 1, restoreJob: 'x' }).issue, /찾지 못했습니다/);
   assert.match(restorePreview({ row: R(25, 'I', 2500, { state: 'error', status: 'f' }), runs, jobid: 25, restoreJob: 'x' }).issue, /성공한 백업이 아닙니다/);
   assert.match(restorePreview({ row: R(40, 'I', 4000), runs: [R(40, 'I', 4000)], jobid: 40, restoreJob: 'x' }).issue, /체인/);
-  assert.match(restorePreview({ row: R(10, 'F', 1000), runs, jobid: 10, restoreJob: 'x', newName: 'a"b' }).issue, /새 VM 이름/);
-  assert.match(restorePreview({ row: R(10, 'F', 1000), runs, jobid: 10, restoreJob: 'x', datastore: 'ds;rm' }).issue, /데이터스토어/);
-  assert.match(restorePreview({ row: R(10, 'F', 1000), runs, jobid: 10, restoreJob: 'bad name' }).issue, /복원 잡 이름/);
-  assert.match(restorePreview({ row: R(10, 'F', 1000, { client: '-x' }), runs, jobid: 10, restoreJob: 'x' }).issue, /FD 이름/);
+  assert.match(restorePreview({ row: R(10, 'F', 1000), runs, jobid: 10, restoreJob: 'x', newName: 'a"b', base: BASE }).issue, /새 VM 이름/);
+  assert.match(restorePreview({ row: R(10, 'F', 1000), runs, jobid: 10, restoreJob: 'x', datastore: 'ds;rm', base: BASE }).issue, /데이터스토어/);
+  assert.match(restorePreview({ row: R(10, 'F', 1000), runs, jobid: 10, restoreJob: 'bad name', base: BASE }).issue, /복원 잡 이름/);
+  assert.match(restorePreview({ row: R(10, 'F', 1000, { client: '-x' }), runs, jobid: 10, restoreJob: 'x', base: BASE }).issue, /FD 이름/);
 });
 
 test('② FD 판 줄 — 평문 · JSON 모드 · 없음', () => {

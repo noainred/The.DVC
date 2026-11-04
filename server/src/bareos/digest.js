@@ -20,6 +20,7 @@ import { load as loadMailCfg } from '../mail/settings.js';
 import { isMockMode } from '../mock/demo/flags.js';
 import { listJobs, registryLoadError } from './registry.js';
 import { loadSettings, jobDirectorId } from './settings.js';
+import { isEdgeNode } from './service.js';
 
 export const MAIL_KIND = 'bareos-digest';
 export const TICK_MS = 60_000;
@@ -33,7 +34,10 @@ const STATE_FILE = () => path.join(config.configDir, 'bareos-digest-state.json')
 const TIME_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
 export const DEFAULTS = Object.freeze({ enabled: true, time: '08:30' });
 const fail = (code, msg) => Object.assign(new Error(msg), { code });
-const isEdge = () => !!(config.agent?.centralUrl && config.agent?.centralToken);
+const isEdge = () => isEdgeNode();   // v2.874 B4-11 판정은 service.js 하나
+/** v2.874(점검 B4-10): 기동 뒤 폴러가 한 번도 돌지 않았으면 모든 법인이 '모름' 이라 그 메일을 '보냄' 으로 적었다 — 이만큼까지 미룬다(상한 — 폴러가 멈춰도 메일은 간다). */
+export const FIRST_POLL_WAIT_MS = 15 * 60_000;
+const _bootAt = Date.now();
 
 let _cfg = null; const _loadErr = makeLoadError();
 let _state = null; let _busy = false; let _timer = null; let _poller = null;
@@ -124,7 +128,7 @@ export function digestData(jobs, settings, dirStatus = {}, now = Date.now()) {
   const fails = [];
   // 반증 F4(재현): 'ok !== false' 는 조회 기록이 없거나(기동 직후 · 접속값 덜 됨 · 엣지 첫 회신 전) ok:null 인 법인을 '안다' 로 셌다 — 조회 성공이 확인된 법인만 안다
   const knownOf = (id) => dirStatus[id]?.ok === true;
-  const blank = (id, name) => ({ id, name, known: knownOf(id), code: dirStatus[id]?.code || '', targets: 0, ran: 0, ok: 0, warn: 0, fail: 0, cancel: 0, stale: 0, restores: 0, restoreFail: 0, nicFail: 0, verifyOk: 0, verifyFail: 0 });
+  const blank = (id, name) => ({ id, name, known: knownOf(id), code: dirStatus[id]?.code || '', targets: 0, ran: 0, ok: 0, warn: 0, fail: 0, cancel: 0, stale: 0, restores: 0, restoreFail: 0, nicFail: 0, verifyOk: 0, verifyFail: 0, verifyPending: 0 });
   for (const d of settings?.directors || []) corps.set(d.id, blank(d.id, d.name || d.id));
   for (const j of Array.isArray(jobs) ? jobs : []) {
     if (j.demo || j.enabled === false) continue;
@@ -138,11 +142,20 @@ export function digestData(jobs, settings, dirStatus = {}, now = Date.now()) {
       if (lr.state === 'ok') c.ok += 1;
       else if (lr.state === 'warning') c.warn += 1;
       else if (lr.state === 'canceled') c.cancel += 1;   // 반증 F4: 취소는 어느 칸에도 세지 않아 사라졌다
-      else if (lr.state === 'error') { c.fail += 1; if (fails.length < ROWS_MAX) fails.push({ corp: c.name, vcenterId: j.vcenterId, vmName: j.vmName, jobid: lr.jobid ?? null, at, message: String(j.lastError?.message || '').slice(0, 160) }); }
+      else if (lr.state === 'error') { c.fail += 1; if (fails.length < ROWS_MAX) fails.push({ corp: c.name, known: c.known, vcenterId: j.vcenterId, vmName: j.vmName, jobid: lr.jobid ?? null, at, message: String(j.lastError?.message || '').slice(0, 160) }); }   // v2.874 B4-06 known
     } else c.stale += 1;
     for (const r of j.restores || []) {
-      if ((Number(r.at) || 0) < since) continue;
-      if (r.verify) { const v = verifyOutcome(r); if (v === 'ok') c.verifyOk += 1; else if (v === 'failed') c.verifyFail += 1; continue; }
+      // v2.874(점검 B4-04 — 재현): 창을 시작 시각(r.at)으로 재면 요약 시각에 진행 중이던 검증 · 복원은 다음 날 창 밖이 돼 어느 메일에도 없었다 —
+      //   끝난 시각(마무리 finish.at → 복원 endedAt → 시작 at)으로 재고, 아직 끝나지 않은 검증은 '진행 중' 으로 따로 센다
+      const endAt = Number(r.finish?.at || r.endedAt || r.at || 0);
+      if (r.verify) {
+        const v = verifyOutcome(r);
+        if (v === 'pending') { c.verifyPending += 1; continue; }
+        if (endAt < since) continue;
+        if (v === 'ok') c.verifyOk += 1; else c.verifyFail += 1;
+        continue;
+      }
+      if (endAt < since) continue;
       c.restores += 1;
       if (r.state === 'error') c.restoreFail += 1;
       if (r.finish?.nic === 'failed') c.nicFail += 1;
@@ -168,8 +181,9 @@ export function renderDigest(d, now = Date.now()) {
   const td = 'style="padding:4px 8px;border-bottom:1px solid #e5e7eb;font-size:12px"';
   const th = 'style="padding:4px 8px;border-bottom:2px solid #9ca3af;font-size:12px;text-align:left"';
   const n = (c, v) => (c.known ? String(v) : '모름');
-  const corpRows = d.rows.map((c) => `<tr><td ${td}>${esc(c.name)}${c.known ? '' : ` (Director 조회 실패 또는 조회 전${c.code ? ` · ${esc(c.code)}` : ''})`}</td><td ${td}>${c.targets}</td><td ${td}>${n(c, c.ok)}</td><td ${td}>${n(c, c.warn)}</td><td ${td}>${n(c, c.fail)}</td><td ${td}>${n(c, c.cancel)}</td><td ${td}>${n(c, c.stale)}</td><td ${td}>${c.restores}${c.restoreFail ? ` (실패 ${c.restoreFail})` : ''}${c.nicFail ? ` · 네트워크 끊기 실패 ${c.nicFail}` : ''}</td><td ${td}>${c.verifyOk + c.verifyFail ? `성공 ${c.verifyOk} · 실패 ${c.verifyFail}` : '—'}</td></tr>`).join('');
-  const failRows = d.fails.map((f) => `<tr><td ${td}>${esc(f.corp)}</td><td ${td}>${esc(f.vmName)}</td><td ${td}>${esc(f.jobid ?? '—')}</td><td ${td}>${esc(localStamp(f.at) || '—')}</td><td ${td}>${esc(f.message || '—')}</td></tr>`).join('');
+  const corpRows = d.rows.map((c) => `<tr><td ${td}>${esc(c.name)}${c.known ? '' : ` (Director 조회 실패 또는 조회 전${c.code ? ` · ${esc(c.code)}` : ''})`}</td><td ${td}>${c.targets}</td><td ${td}>${n(c, c.ok)}</td><td ${td}>${n(c, c.warn)}</td><td ${td}>${n(c, c.fail)}</td><td ${td}>${n(c, c.cancel)}</td><td ${td}>${n(c, c.stale)}</td><td ${td}>${c.restores}${c.restoreFail ? ` (실패 ${c.restoreFail})` : ''}${c.nicFail ? ` · 네트워크 끊기 실패 ${c.nicFail}` : ''}</td><td ${td}>${c.verifyOk + c.verifyFail ? `성공 ${c.verifyOk} · 실패 ${c.verifyFail}` : '—'}${c.verifyPending ? ` · 진행 중 ${c.verifyPending}` : ''}</td></tr>`).join('');
+  // v2.874(점검 B4-06): '모름' 법인의 실패는 제목 합에 없다 — 행에 표지를 단다(마지막으로 읽은 값)
+  const failRows = d.fails.map((f) => `<tr><td ${td}>${esc(f.corp)}${f.known === false ? ' (결과 모름 법인 — 마지막으로 읽은 값 · 제목 합에 없음)' : ''}</td><td ${td}>${esc(f.vmName)}</td><td ${td}>${esc(f.jobid ?? '—')}</td><td ${td}>${esc(localStamp(f.at) || '—')}</td><td ${td}>${esc(f.message || '—')}</td></tr>`).join('');
   const html = `<div style="font-family:sans-serif;color:#111827"><h3 style="margin:0 0 6px">${esc(head)}</h3>`
     + `<p style="margin:0 0 10px;color:#4b5563;font-size:13px">최근 24시간(${esc(localStamp(now - WINDOW_MS))} ~ ${esc(localStamp(now))}) · 법인 ${t.corps}곳 · 백업 대상 ${t.targets}대 · 24시간 안에 실행 없음 ${t.stale}대${t.unknown ? '(결과 모름 법인 제외)' : ''}${t.verifyFail ? ` · 복원 검증 실패 ${t.verifyFail}` : ''}</p>`
     + `<table style="border-collapse:collapse"><thead><tr><th ${th}>법인</th><th ${th}>대상</th><th ${th}>성공</th><th ${th}>경고</th><th ${th}>실패</th><th ${th}>취소</th><th ${th}>실행 없음</th><th ${th}>복원</th><th ${th}>복원 검증</th></tr></thead><tbody>${corpRows}</tbody></table>`
@@ -179,6 +193,12 @@ export function renderDigest(d, now = Date.now()) {
   return { subject, html, text };
 }
 
+/** 폴러가 기동 뒤 한 번이라도 끝났는가(시각 at — 조회 성공 여부와 무관). 모르면 true(막지 않는다). */
+function pollerRanOnce() {
+  try { const p = _poller ? _poller() : null; return !p || Number(p.at) > 0; } catch { return true; }
+}
+/** 기동 뒤 첫 폴러 조회를 기다리는 중인가(상한 FIRST_POLL_WAIT_MS). */
+export function firstPollPending(now = Date.now()) { return !pollerRanOnce() && now - _bootAt < FIRST_POLL_WAIT_MS; }
 function dirStatusNow() {
   try { const p = _poller ? _poller() : null; return Object.fromEntries(Object.entries(p?.directors || {}).map(([k, v]) => [k, { ok: v?.ok, code: v?.code || '' }])); } catch { return {}; }
 }
@@ -203,6 +223,7 @@ export async function tick(now = Date.now()) {
     const st = state();
     const { due, day } = dueOf(cfg, st, now);
     if (!due) return null;
+    if (firstPollPending(now)) return null;   // v2.874 B4-10 — 시도로 세지 않고 다음 틱에
     const tries = st.day === day ? (Number(st.tries) || 0) + 1 : 1;
     let r;
     try { r = await computeAndSend({ now }); } catch (e) { r = { ok: false, reason: String(e?.message || e).slice(0, 200) }; }

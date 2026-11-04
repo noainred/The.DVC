@@ -12,13 +12,13 @@ import { STable } from '../../components/STable.jsx';
 import Select from '../../components/Select.jsx';
 import { requireChanged } from '../changeResult.js';
 import BareosRehearsal from './BareosRehearsal.jsx';
-import BareosRestoreTable from './BareosRestoreTable.jsx';   // v2.866 폴더 표(시안 ① 일반 복원)
+import BareosRestoreTable, { FolderBox } from './BareosRestoreTable.jsx';   // v2.866 폴더 표(시안 ① 일반 복원)
 import { RESTORE_VIEWS, loadRestoreView, saveRestoreView } from './bareosRestoreTree.js';
 import { Note, ReadGuide, FilterChip } from './BareosBits.jsx';
 import { stateBadge, withRelayWait, outcomeUnknown, unknownOutcomeText, driftText, levelLabel } from './bareosText.js';
 import {
   RESTORE_MAX, MODE_SHORT, NIC_LABEL, restoreTree, pickBlock, defaultItem, withMode, itemBody, pointText, latestPoint, wizardIssue,
-  dsText, capacityText, finishText, finishTone, batchView, latestBatchId, snapshotChip, SNAPSHOT_TITLE,
+  dsText, capacityText, finishText, finishTone, batchView, latestBatchId, snapshotChip, SNAPSHOT_TITLE, bulkRestoreOutcome,
 } from './bareosRestoreText.js';
 
 const BASE = '/tools/bareos-backup';
@@ -27,6 +27,19 @@ const INP = { minWidth: 0, width: '100%', boxSizing: 'border-box' };
 const ROW = { display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' };
 const STEPS = [[1, '복원 지점'], [2, '위치 · 이름 · 네트워크'], [3, '확인 · OTP']];
 const FINISH_COLOR = { ok: '#86efac', bad: '#fca5a5', info: 'var(--text-dim)' };
+
+/** v2.874(점검 B5-01 · B5-02) 묶음 복원의 시작하지 못한 · 결과 모름 항목 — 사유와 함께(예전에는 어디에도 그리지 않았다). */
+function OutcomeItems({ items }) {
+  if (!items?.length) return null;
+  return (
+    <ul data-restore-outcome="" style={{ margin: '2px 0 0', paddingLeft: 22, fontSize: 12, lineHeight: 1.6, minWidth: 0 }}>
+      {items.slice(0, 50).map((x, i) => (
+        <li key={`${x.vmName}-${i}`} style={{ overflowWrap: 'anywhere', color: x.unknown ? '#fcd34d' : '#fca5a5' }}><b>{x.vmName}</b> — {x.unknown ? '결과 모름 · ' : ''}{x.reason || '사유 미상'}</li>
+      ))}
+      {items.length > 50 && <li className="muted">외 {items.length - 50}대</li>}
+    </ul>
+  );
+}
 
 export default function BareosRestore({ d, reload, preselect = '', onPreselectUsed = null }) {
   const jobs = useMemo(() => d.jobs || [], [d.jobs]);
@@ -43,7 +56,10 @@ export default function BareosRestore({ d, reload, preselect = '', onPreselectUs
   const [otp, setOtp] = useState('');
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState(null);
+  const [errItems, setErrItems] = useState([]);   // v2.874 B5-02 실행이 거부된 항목별 사유(마법사에 남는 실패)
   const [done, setDone] = useState(null);
+  const [capNote, setCapNote] = useState('');   // v2.874 B5-08 상한(RESTORE_MAX)에서 담지 못한 수
+  const [dsTick, setDsTick] = useState(0);
   const [batchId, setBatchId] = useState(() => latestBatchId(jobs));
   const [view, setViewState] = useState(() => (typeof window === 'undefined' ? 'list' : loadRestoreView(window.localStorage)));
   const setView = (v) => { setViewState(v); saveRestoreView(v, typeof window === 'undefined' ? null : window.localStorage); };
@@ -61,14 +77,26 @@ export default function BareosRestore({ d, reload, preselect = '', onPreselectUs
   // 고른 대상이 원장에서 빠지면(삭제) 목록에서도 뺀다
   useEffect(() => { if (picked.some((id) => !jobsById.has(id))) setPicked((p) => p.filter((id) => jobsById.has(id))); }, [picked, jobsById]);
 
-  const resetWizard = () => { gen.current++; setStep(0); setPts(null); setPtsErr(null); setCheck(null); setCheckErr(null); setOtp(''); setErr(null); };
+  const resetWizard = () => { gen.current++; setStep(0); setPts(null); setPtsErr(null); setCheck(null); setCheckErr(null); setOtp(''); setErr(null); setErrItems([]); };
   const toggle = (ids, on) => {
+    if (busy) return;   // v2.874(점검 B5-07): 실행 요청 중에는 고르기를 바꾸지 않는다(늦게 온 성공이 새 고르기를 지웠다)
     resetWizard(); setDone(null);
-    setPicked((p) => {
-      const set = new Set(p);
-      for (const id of ids) { if (on) { if (set.size < RESTORE_MAX) set.add(id); } else set.delete(id); }
-      return [...set];
-    });
+    // v2.874(B5-08): 상한에서 조용히 자르지 않는다 — 담지 못한 수를 알린다
+    const set = new Set(picked);
+    let over = 0;
+    // v2.874(점검 B5-03): 아무것도 고르지 않은 채 vCenter · 폴더 '모두' 를 누르면 Director 가 섞인 대상을 담았다(매핑 변경 이력) — 첫 VM 의 법인으로 잠그고 다시 거른다
+    let lock = lockedDir;
+    for (const id of ids) {
+      if (!on) { set.delete(id); continue; }
+      if (set.has(id)) continue;
+      const j = jobsById.get(id);
+      if (!j) continue;
+      if (!lock && !set.size) lock = j.directorId || '';
+      if (pickBlock(j, { lockedDir: lock })) continue;
+      if (set.size < RESTORE_MAX) set.add(id); else over += 1;
+    }
+    setCapNote(over ? `한 번에 ${RESTORE_MAX}대까지입니다 — ${over}대는 담지 않았습니다(나눠서 복원하세요).` : '');
+    setPicked([...set]);
   };
   const setItem = (id, patch) => setItems((m) => ({ ...m, [id]: { ...m[id], ...patch } }));
 
@@ -85,7 +113,9 @@ export default function BareosRestore({ d, reload, preselect = '', onPreselectUs
         const out = { ...m };
         for (const id of picked) {
           const job = jobsById.get(id);
-          const base = out[id] && out[id].id === id ? out[id] : defaultItem(job);
+          let base = out[id] && out[id].id === id ? out[id] : defaultItem(job);
+          // v2.874(점검 B5-05): 1대에서 덮어쓰기를 고른 뒤 VM 을 더하면 화면은 '새 VM'(덮어쓰기 칸이 사라짐)인데 값은 original 로 남았다 — 여러 대면 새 VM 으로
+          if (picked.length > 1 && base.mode === 'original') base = withMode(base, 'newVm');
           const lp = latestPoint(byId.get(id)?.points);
           out[id] = { ...base, jobid: base.jobid && (byId.get(id)?.points || []).some((p) => p.jobid === base.jobid && p.chain) ? base.jobid : lp?.jobid ?? null };
         }
@@ -103,9 +133,12 @@ export default function BareosRestore({ d, reload, preselect = '', onPreselectUs
       dsAsked.current.add(vc);
       fetchJson('/datastores', { vcenterId: vc, limit: 2000 })
         .then((r) => setDss((m) => ({ ...m, [vc]: (r.items || []).filter((x) => x.accessible !== false).map((x) => ({ name: x.name, freeGB: x.freeGB ?? null, capacityGB: x.capacityGB ?? null })) })))
-        .catch(() => setDss((m) => ({ ...m, [vc]: [] })));
+        // v2.874(점검 B5-06): 못 읽음은 빈 목록이 아니다(null) — 다시 읽기를 열어 둔다(dsAsked 에서 뺀다)
+        .catch(() => { dsAsked.current.delete(vc); setDss((m) => ({ ...m, [vc]: null })); });
     }
-  }, [step, pickedVcKey]);
+  }, [step, pickedVcKey, dsTick]);
+  const dsFailed = pickedVcKey.split('|').filter((vc) => vc && dss[vc] === null);
+  const retryDs = () => { setDss((m) => { const n = { ...m }; for (const vc of dsFailed) delete n[vc]; return n; }); setDsTick((t) => t + 1); };
   // ③ 미리 보기(Director 에 닿지 않는다 · OTP 를 쓰지 않는다)
   const preview = () => {
     const g = ++gen.current;
@@ -113,16 +146,26 @@ export default function BareosRestore({ d, reload, preselect = '', onPreselectUs
     postJson(`${BASE}/restore-check/bulk`, { items: list.map(itemBody) }).then((r) => { if (g === gen.current) setCheck(r); }).catch((e) => { if (g === gen.current) setCheckErr(e); });
   };
   const run = async () => {
-    setBusy(true); setErr(null);
+    setBusy(true); setErr(null); setErrItems([]);
     try {
       const r = await postJson(`${BASE}/restore/bulk`, { items: list.map(itemBody), otp }, withRelayWait({}, dir, d.relayLimits, 'restores'));
       requireChanged(r);
-      setDone({ ok: !r.saveError, text: `복원을 시작했습니다 — ${r.started} / ${r.total}대${r.started < r.total ? '(시작하지 못한 VM 은 아래 진행 표의 사유를 보세요)' : ''}. 끝나면 네트워크 끊기를 고른 VM 은 포탈이 연결을 끊습니다 — 끊음 표시가 나오기 전에는 켜지 마세요.${r.saveError ? ` ${r.saveError}` : ''}`, items: r.items });
+      const o = bulkRestoreOutcome(r);
+      setDone(o);
       setBatchId(r.batchId || '');
       setPicked([]); setItems({}); resetWizard();
       reload();
     } catch (e) {
-      setErr(outcomeUnknown(e) ? unknownOutcomeText('복원', e) : e.message);
+      // v2.874(점검 B5-01 · B5-02): 실패 본문의 항목별 사유를 그린다 · 결과 모름(504 · 시한)이면 마법사를 비우고 다시 읽는다 —
+      //   같은 고르기로 다시 누르면 두 번 돌 수 있다(서버도 그 VM 을 잠시 거부한다)
+      const unknown = outcomeUnknown(e);
+      const o = bulkRestoreOutcome(e?.body || null, { unknown, message: unknown ? unknownOutcomeText('복원', e) : e.message });
+      if (o.reset) {
+        setDone(o);
+        if (e?.body?.batchId) setBatchId(e.body.batchId);
+        setPicked([]); setItems({}); resetWizard();
+        reload();
+      } else { setErr(o.text); setErrItems(o.items); }
       setOtp('');   // 쓴(또는 틀린) OTP 를 남기면 다시 누를 때 실패 횟수만 오른다
     } finally { setBusy(false); }
   };
@@ -134,17 +177,18 @@ export default function BareosRestore({ d, reload, preselect = '', onPreselectUs
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12, minWidth: 0 }}>
-      {done && <Note tone={done.ok ? 'ok' : 'bad'}>{done.text}</Note>}
+      {done && <div style={{ minWidth: 0 }}><Note tone={done.tone}>{done.text}</Note><OutcomeItems items={done.items} /></div>}
+      {capNote && <Note tone="warn">{capNote}</Note>}
       {/* v2.866 고르는 방식 — 간단 목록(지금 방식 그대로) · 폴더 표(vCenter › 폴더 › VM 트리 표). 다음 단계는 둘 다 같은 마법사다 */}
       <div style={ROW}>
         <span className="muted" style={{ fontSize: 12 }}>고르는 방식</span>
         <div role="group" aria-label="고르는 방식" className="flex gap wrap" style={{ rowGap: 6 }}>
           {RESTORE_VIEWS.map(([k, l]) => <FilterChip key={k} on={view === k} onClick={() => setView(k)}>{l}</FilterChip>)}
         </div>
-        {tableMode && step > 0 && <button type="button" className="tab" style={{ padding: '3px 10px', fontSize: 12 }} onClick={resetWizard}>← 폴더 표로(고른 VM 은 그대로)</button>}
+        {tableMode && step > 0 && <button type="button" className="tab" style={{ padding: '3px 10px', fontSize: 12 }} disabled={busy} onClick={resetWizard}>← 폴더 표로(고른 VM 은 그대로)</button>}
       </div>
       {tableMode && step === 0 && (
-        <BareosRestoreTable jobs={jobs} directors={d.directors || []} picked={picked} toggle={toggle} lockedDir={lockedDir} onNext={loadPoints} onClear={() => { setPicked([]); resetWizard(); }} />
+        <BareosRestoreTable jobs={jobs} directors={d.directors || []} picked={picked} toggle={toggle} lockedDir={lockedDir} onNext={loadPoints} onClear={() => { setPicked([]); setCapNote(''); resetWizard(); }} />
       )}
       {/* 트리는 좁게(최대 420px) · 마법사가 나머지 — 1440 에서 2단계 칸(데이터스토어 · 네트워크)이 가로 스크롤 뒤로 숨지 않게(Chromium 확인) · 좁으면 위아래로 */}
       {(!tableMode || step > 0) && <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, alignItems: 'flex-start', minWidth: 0 }}>
@@ -162,11 +206,11 @@ export default function BareosRestore({ d, reload, preselect = '', onPreselectUs
                 <div className="muted" style={{ fontSize: 12, fontWeight: 700, padding: '4px 2px' }}>{vc.vcenterId} · {(d.directors || []).find((x) => x.id === vc.directorId)?.name || vc.directorId || '—'} · {vc.n}대</div>
                 {vc.folders.map((f) => {
                   const free = f.vms.filter((j) => !pickBlock(j, { lockedDir }));
-                  const allOn = free.length > 0 && free.every((j) => picked.includes(j.id));
                   return (
                     <div key={f.folder} style={{ marginLeft: 6, minWidth: 0 }}>
                       <label style={{ ...ROW, gap: 6, fontSize: 12.5, fontWeight: 600, padding: '3px 0', cursor: free.length ? 'pointer' : 'default' }}>
-                        <input type="checkbox" checked={allOn} disabled={!free.length} onChange={(e) => toggle(free.map((j) => j.id), e.target.checked)} />
+                        {/* v2.874(B5-08): 폴더 표와 같은 칸 — 일부만 고른 상태(─)를 보이고, 누르면 뺀다(상한에서 '더하기' 가 아무것도 못 해 풀 수 없었다) */}
+                        <FolderBox ids={free.map((j) => j.id)} picked={picked} toggle={toggle} label={f.folder} />
                         <span style={{ overflowWrap: 'anywhere', minWidth: 0 }}>{f.folder}</span><span className="muted" style={{ fontWeight: 400 }}>{f.vms.length}</span>
                       </label>
                       {f.vms.map((j) => {
@@ -193,14 +237,14 @@ export default function BareosRestore({ d, reload, preselect = '', onPreselectUs
         {/* ── 오른쪽: 3단계 ── */}
         <div className="card" data-bareos-restore-wizard="" style={{ padding: 14, minWidth: 0, flex: '999 1 520px', display: 'flex', flexDirection: 'column', gap: 10, boxSizing: 'border-box' }}>
           <div className="flex gap wrap" role="list" aria-label="복원 단계" style={{ rowGap: 6 }}>
-            {STEPS.map(([n, l]) => <FilterChip key={n} on={step === n} onClick={() => { if (n === 1 && picked.length) loadPoints(); else if (n === 2 && pts) setStep(2); else if (n === 3 && step >= 2 && !issue2) preview(); }}>{n}. {l}</FilterChip>)}
+            {STEPS.map(([n, l]) => <FilterChip key={n} on={step === n} onClick={() => { if (busy) return; /* v2.874 B5-07 실행 중 단계 이동 잠금 */ if (n === 1 && picked.length) loadPoints(); else if (n === 2 && pts) setStep(2); else if (n === 3 && step >= 2 && !issue2) preview(); }}>{n}. {l}</FilterChip>)}
           </div>
           {!picked.length && <div className="muted" style={{ fontSize: 13 }}>왼쪽에서 VM 을 고르세요 — 폴더를 고르면 그 안의 VM 을 모두 고릅니다(백업처럼).</div>}
           {picked.length > 0 && (
             <div style={ROW}>
               <b style={{ fontSize: 13 }}>고른 VM {picked.length}대</b>
               <span className="muted" style={{ fontSize: 12, overflowWrap: 'anywhere', minWidth: 0 }}>{pickedJobs.slice(0, 6).map((j) => j.vmName).join(' · ')}{picked.length > 6 ? ` 외 ${picked.length - 6}대` : ''}</span>
-              <button type="button" className="tab" style={{ padding: '3px 10px', fontSize: 12, marginLeft: 'auto' }} onClick={() => { setPicked([]); resetWizard(); }}>모두 빼기</button>
+              <button type="button" className="tab" style={{ padding: '3px 10px', fontSize: 12, marginLeft: 'auto' }} disabled={busy} onClick={() => { setPicked([]); setCapNote(''); resetWizard(); }}>모두 빼기</button>
               {step === 0 && <button type="button" className="login-btn" style={{ flex: 'none', padding: '6px 14px' }} onClick={loadPoints}>다음: 복원 지점 읽기</button>}
             </div>
           )}
@@ -247,7 +291,14 @@ export default function BareosRestore({ d, reload, preselect = '', onPreselectUs
 
           {step === 2 && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8, minWidth: 0 }}>
-              {many && (
+              {dsFailed.length > 0 && (
+                <div style={ROW}>
+                  <Note tone="warn">데이터스토어 목록을 읽지 못했습니다({dsFailed.join(' · ')}) — 지금은 백업 당시 그대로만 고를 수 있습니다.</Note>
+                  <button type="button" className="tab" style={{ padding: '3px 10px', fontSize: 12 }} onClick={retryDs}>다시 읽기</button>
+                </div>
+              )}
+              {/* v2.874(점검 B5-04): 고른 VM 이 한 vCenter 일 때만 — 선택지는 그 vCenter 의 데이터스토어다(다른 vCenter VM 에 같은 이름을 넣으면 서버가 거부) */}
+              {many && new Set(pickedJobs.map((j) => j.vcenterId)).size === 1 && (
                 <div style={ROW}>
                   <span className="muted" style={{ fontSize: 12 }}>모든 새 VM 에 같은 데이터스토어</span>
                   <Select className="input" style={{ minWidth: 0, maxWidth: 320 }} value="" onChange={(e) => { const v = e.target.value; setItems((m) => Object.fromEntries(Object.entries(m).map(([k, x]) => [k, picked.includes(k) && x.mode === 'newVm' ? { ...x, datastore: v === '-' ? '' : v } : x]))); }} aria-label="모든 VM 데이터스토어">
@@ -347,7 +398,7 @@ export default function BareosRestore({ d, reload, preselect = '', onPreselectUs
                   {(check.plan.capacity || []).map((c) => <Note key={c.datastore} tone={c.verdict === 'short' ? 'bad' : c.verdict === 'unknown' ? 'warn' : 'info'}>{capacityText(c)}</Note>)}
                   {check.plan.issue && <Note tone="bad">{check.plan.issue}</Note>}
                   {check.needEnroll && <Note tone="bad">복원은 OTP 가 등록된 계정만 실행할 수 있습니다 — 사용자 관리에서 OTP 를 등록하세요.</Note>}
-                  {err && <Note tone="bad">{err}</Note>}
+                  {err && <div style={{ minWidth: 0 }}><Note tone="bad">{err}</Note><OutcomeItems items={errItems} /></div>}
                   <div style={ROW}>
                     <label className="muted" style={{ fontSize: 12, display: 'flex', flexDirection: 'column', gap: 4, width: 200 }}>본인 OTP(6자리)
                       <input className="input" style={INP} inputMode="numeric" autoComplete="one-time-code" value={otp} onChange={(e) => setOtp(e.target.value.replace(/\D/g, '').slice(0, 6))} disabled={!planOk} />
@@ -367,7 +418,7 @@ export default function BareosRestore({ d, reload, preselect = '', onPreselectUs
         <div className="card" data-bareos-restore-batch="" style={{ padding: 12, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 8 }}>
           <div style={ROW}>
             <b style={{ fontSize: 13.5 }}>최근 묶음 복원</b>
-            <span className="muted" style={{ fontSize: 12 }}>{batch.total}대 · 진행 {batch.open} · 성공 {batch.ok} · 실패 {batch.bad}{batch.nicFailed ? ` · 네트워크 끊기 실패 ${batch.nicFailed}` : ''}</span>
+            <span className="muted" style={{ fontSize: 12 }}>{batch.total}대 · 진행 {batch.open} · 성공 {batch.ok} · 실패 {batch.bad}{batch.unknown ? ` · 결과 모름 ${batch.unknown}` : ''}{batch.nicFailed ? ` · 네트워크 끊기 실패 ${batch.nicFailed}` : ''}</span>
             <span className="muted" style={{ fontSize: 11.5, marginLeft: 'auto' }}>상태는 목록을 다시 읽을 때 바뀝니다(폴러)</span>
           </div>
           {batch.rows.some(({ r }) => r.nic === 'disconnect' && (!r.finish || r.finish.nic === 'pending')) && (
@@ -380,9 +431,9 @@ export default function BareosRestore({ d, reload, preselect = '', onPreselectUs
                 {batch.rows.map(({ id, vmName, r }) => {
                   const b = stateBadge(r.state, r.status);
                   return (
-                    <tr key={`${id}-${r.jobid}`}>
+                    <tr key={`${id}-${r.jobid ?? `u${r.at}`}`}>
                       <td data-sort={vmName}><b>{vmName}</b></td>
-                      <td data-sort={r.jobid}>{r.jobid}</td>
+                      <td data-sort={r.jobid ?? ''}>{r.jobid ?? (r.unknown ? '결과 모름' : '—')}</td>
                       <td style={{ fontSize: 12.5 }}>{MODE_SHORT[r.mode] || '—'}{r.target?.name && r.mode === 'newVm' ? ` ‘${r.target.name}’` : ''}</td>
                       <td><span className={`badge ${b.cls}`}>{b.label}</span></td>
                       <td style={{ fontSize: 12, whiteSpace: 'normal', maxWidth: 360, color: FINISH_COLOR[finishTone(r)] }}>{finishText(r)}</td>
