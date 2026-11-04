@@ -32,6 +32,25 @@ export function vmGpuDevices(gpu) {
   };
 }
 
+/**
+ * v2.873 Bareos 백업 대상 표지 — 인벤토리 VM → { vgpu, passthrough, profile } 또는 null.
+ *   VMware 는 vGPU·PCI 패스스루(DirectPath I/O) 장치가 있는 **켜진** VM 의 스냅샷을 지원하지 않아 스냅샷 기반 백업이 실패한다
+ *   (Broadcom KB 394566 — 검색 요약 기준). 판정은 `vmGpuDevices` 하나를 쓴다(복제 금지).
+ *   null = 인벤토리에 없음 · vm.gpu 없음(수집기는 **GPU 호스트 위 VM 만** 장치를 읽는다 — GPU 없는 호스트의 NIC 패스스루는 모른다) · 장치 0.
+ *   패스스루 수는 GPU 가 아닌 DirectPath(NIC · HBA)도 센다(v2.871 gpu.md ①) — 스냅샷 제약은 그것도 같으므로 백업 표지에는 맞는 값이다.
+ *   엣지 push 값은 수 형식을 좁히지 않으므로(central sanitizeVmGpuField 는 pciIds 만) 여기서 정수 0~64 로 자른다. 프로파일은 이름 글자만(64자).
+ */
+export function vmGpuMark(vm) {
+  if (!vm || typeof vm !== 'object' || !vm.gpu || typeof vm.gpu !== 'object') return null;
+  const d = vmGpuDevices(vm.gpu);
+  const cap = (n) => Math.min(64, Math.floor(n));
+  const vgpu = cap(d.vgpu);
+  const passthrough = cap(d.passthrough);
+  if (vgpu < 1 && passthrough < 1) return null;
+  const p = typeof vm.gpu.profile === 'string' ? vm.gpu.profile.trim() : '';
+  return { vgpu: Math.max(0, vgpu), passthrough: Math.max(0, passthrough), profile: vgpu > 0 && /^[A-Za-z0-9._-]{1,64}$/.test(p) ? p : '' };
+}
+
 /** VM 의 vGPU 할당 GB = 프로파일 GB × vGPU 장치 수. vGPU 가 없거나 해석 못 하면 null. */
 export function vmVgpuAllocGB(gpu) {
   const { vgpu } = vmGpuDevices(gpu);

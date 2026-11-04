@@ -13,6 +13,7 @@
 - (원래 4648행) GPU 메모리·온도·동작(v2.650) — 사용률·메모리 점유·온도는 서로 다른 것을 잰다. 온도는 판정에 쓰지 않는다
 - (원래 4665행) GPU 표 시안 A(v2.653) — 빈 칸은 이유를 말하고, 게스트 값이 없으면 ESXi 카운터로 채우되 출처를 밝힌다
 - v2.852 GPU 할당 계층 — 법인 › 데이터센터 › 클러스터 › 호스트 › GPU › VM 의 할당·예비(화면·CSV·엑셀)
+- v2.873 Bareos 백업 대상 GPU 표지 — 켜진 vGPU·PCI 패스스루 VM 은 스냅샷 불가(판정 `vmGpuMark` 하나)
 
 ## 본문
 
@@ -132,3 +133,13 @@
     회귀: server `gpuAllocTree2852` v2.871 2건(변이: 주소 판정 끄기 · 대소문자 무시 끄기 둘 다 실패) · web `gpuAllocText` 1건(수정 전 판으로 실패 확인).
   - ⚠ 정직 기록: `HostGraphicsInfo.vm` 이 꺼진 VM 을 싣는지, 이 현장 vCenter 가 동적 DirectPath `assignedId` 를 주는지는 실장비로 확인하지 못했다
     (꺼진 VM 은 목록에 있어도 할당에 넣지 않으므로 결과는 같다). 한 VM 의 vGPU 장치 둘이 한 GPU 목록에 한 번만 오면 GPU 단위 할당이 한 장치분으로 적게 잡힌다(호스트 합은 정확).
+
+- ⚠ **v2.873 Bareos 백업 대상 GPU 표지 — 판정은 `gpu/vgpuProfile.js vmGpuMark` 하나**(사용자 요청 'GPU VM 백업 대상 화면에 표지 추가' ·
+  `routes/api/bareosBackup.js` viewJob · vm-candidates 의 `gpuDev` · 웹 `bareosText.gpuChip`. 회귀 `server/test/bareosGpuMark2873.test.js` + 웹 `bareosGpuChip2873.test.js`):
+  VMware 는 vGPU·PCI 패스스루 장치가 있는 **켜진** VM 의 스냅샷을 지원하지 않는다(Broadcom KB 394566 — 검색 요약 기준, 원문은 세션 네트워크 정책으로 열지 못했다).
+  대상 표 VM 칸 칩 · 등록 후보 칩 · 상세 패널 안내 한 줄(패널 머리 줄에는 칩을 두지 않는다). 웹은 서버 수를 글자로만 바꾼다(장치 판정 복제 금지).
+  - **null = 모름 또는 없음** — 수집기는 GPU 호스트 위 VM 만 장치를 읽으므로(soapClient `gpuHostRefs`) GPU 없는 호스트의 NIC 패스스루 VM 은 표지가 없다. '장치 없음' 이라고 단정하는 문구를 쓰지 말 것.
+  - 패스스루 수는 NIC·HBA DirectPath 도 센다(v2.871 ①) — 스냅샷 제약은 같으므로 백업 표지에는 맞는 값이다. 이름표는 'PCI 패스스루'(GPU 라고 단정하지 않는다).
+  - 엣지 push 의 수는 중앙에서 좁혀지지 않으므로(sanitizeVmGpuField 는 pciIds 만) 정수 0~64 로 자르고, 프로파일은 이름 글자 64자만. 목록 응답 캐시(memoJson)는 스냅샷 세대로 무효화된다.
+  - ⚠ 정직 기록: 메모리 없는 스냅샷(Bareos 플러그인 방식)이면 최신 vSphere 에서 vGPU VM 도 되는지는 확인하지 못했다 — 문구는 '실패할 수 있습니다' 이고 확인 방법(수동 스냅샷)을 적었다.
+  - 남긴 것(별건): Chromium 1440 에서 상세 패널 머리 줄(이름 · 상태 · OS · 닫기)은 GPU 칩 없이도 닫기를 둘째 줄로 내린다(변경 전부터 — 칩 없는 대상으로 A/B 측정).
