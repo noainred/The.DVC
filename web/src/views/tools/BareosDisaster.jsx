@@ -50,18 +50,21 @@ export default function BareosDisaster({ d, reload, onBatch = null }) {
   const [otp, setOtp] = useState('');
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState(null);
-  const gen = useRef(0);
+  // 늦게 온 이전 응답은 버린다 — 점검 · 지점 읽기 · 미리 보기는 서로를 끊지 않게 따로 센다(같은 카운터면 '다시 점검' 이 지점 읽기를 조용히 멈췄다)
+  const genCheck = useRef(0);
+  const genPts = useRef(0);
+  const genPrev = useRef(0);
   const dirId = check?.directorId || '';
   const dir = (d.directors || []).find((x) => x.id === dirId) || null;
 
   const loadCheck = () => {
-    const g = ++gen.current;
+    const g = ++genCheck.current;
     setCheck(null); setCheckErr(null);
     if (!vc) return;
-    fetchJson(`${BASE}/dr/check`, { vcenterId: vc }).then((r) => { if (g === gen.current) setCheck(r); }).catch((e) => { if (g === gen.current) setCheckErr(e); });
+    fetchJson(`${BASE}/dr/check`, { vcenterId: vc }).then((r) => { if (g === genCheck.current) setCheck(r); }).catch((e) => { if (g === genCheck.current) setCheckErr(e); });
   };
   // 법인을 바꾸면 그 법인 것만 — 앞 법인의 지점 · 고르기 · 짝짓기를 남기지 않는다
-  useEffect(() => { setPts(null); setPtsErr(null); setPicked(new Set()); setMap({}); setPreview(null); setDone(null); setConfirm(''); loadCheck(); }, [vc]);   // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { genPts.current++; genPrev.current++; setPts(null); setPtsErr(null); setPtsProg(null); setPicked(new Set()); setMap({}); setPreview(null); setDone(null); setConfirm(''); loadCheck(); }, [vc]);   // eslint-disable-line react-hooks/exhaustive-deps
 
   const beforeMs = drBeforeMs(beforeText);
   const rows = useMemo(() => drRows(jobs, vc, pts, beforeMs, (j) => pickBlock(j)), [jobs, vc, pts, beforeMs]);
@@ -76,31 +79,32 @@ export default function BareosDisaster({ d, reload, onBatch = null }) {
 
   // ② 복원 지점 — 50대씩 차례로(Director 세션 하나로 VM 마다 이력을 읽는다 · 상한 50)
   const loadPoints = async () => {
-    const g = ++gen.current;
+    const g = ++genPts.current;
+    genPrev.current++;
     const ids = rows.map((r) => r.id);
     setPts(null); setPtsErr(null); setPreview(null); setPtsProg({ done: 0, total: ids.length });
     const acc = new Map();
     try {
       for (let i = 0; i < ids.length; i += DR_CHUNK) {
         const r = await postJson(`${BASE}/restore-points/bulk`, { ids: ids.slice(i, i + DR_CHUNK) }, withRelayWait(DIRECTOR_GET, dir, d.relayLimits, 'restorePoints'));
-        if (g !== gen.current) return;
+        if (g !== genPts.current) return;
         for (const x of r.items || []) acc.set(x.id, x);
         setPtsProg({ done: Math.min(ids.length, i + DR_CHUNK), total: ids.length });
       }
-      if (g !== gen.current) return;
+      if (g !== genPts.current) return;
       setPts(acc);
       // 처음 읽으면 고를 수 있는 것을 모두 고른다(시안 — 법인째). 사람이 뺀 것은 다시 읽어도 빼 둔다.
       setPicked((p) => (p.size ? p : new Set(ids)));
-    } catch (e) { if (g === gen.current) { setPtsErr(e); setPts(acc.size ? acc : null); } }
+    } catch (e) { if (g === genPts.current) { setPtsErr(e); setPts(acc.size ? acc : null); } }
   };
 
-  const toggle = (ids, on) => { if (busy) return; setPreview(null); setPicked((p) => { const s = new Set(p); for (const id of ids) { if (on) s.add(id); else s.delete(id); } return s; }); };
-  const setM = (dc, patch) => { setPreview(null); setMap((m) => ({ ...m, [dc]: { ...(m[dc] || {}), ...patch } })); };
+  const toggle = (ids, on) => { if (busy) return; genPrev.current++; setPreview(null); setPicked((p) => { const s = new Set(p); for (const id of ids) { if (on) s.add(id); else s.delete(id); } return s; }); };
+  const setM = (dc, patch) => { genPrev.current++; setPreview(null); setMap((m) => ({ ...m, [dc]: { ...(m[dc] || {}), ...patch } })); };
 
   const doPreview = () => {
-    const g = ++gen.current;
+    const g = ++genPrev.current;
     setPreview(null); setPreviewErr(null); setDone(null);
-    postJson(`${BASE}/restore-check/bulk`, { items: chunk.map((r) => drItem(r, map)), dr: true }).then((r) => { if (g === gen.current) setPreview(r); }).catch((e) => { if (g === gen.current) setPreviewErr(e); });
+    postJson(`${BASE}/restore-check/bulk`, { items: chunk.map((r) => drItem(r, map)), dr: true }).then((r) => { if (g === genPrev.current) setPreview(r); }).catch((e) => { if (g === genPrev.current) setPreviewErr(e); });
   };
   const start = async () => {
     setBusy(true); setDone(null);
@@ -167,7 +171,7 @@ export default function BareosDisaster({ d, reload, onBatch = null }) {
         <div style={ROW}>
           <b style={{ fontSize: 13.5 }}>2. 백업 당시 폴더에서 고르기</b>
           <label className="muted" style={{ ...ROW, gap: 6, fontSize: 12 }}>이 시각 이전 마지막 성공 백업
-            <input className="input" type="datetime-local" value={beforeText} onChange={(e) => { setBeforeText(e.target.value); setPreview(null); }} aria-label="복원 기준 시각" style={{ minWidth: 0 }} />
+            <input className="input" type="datetime-local" value={beforeText} onChange={(e) => { genPrev.current++; setBeforeText(e.target.value); setPreview(null); }} aria-label="복원 기준 시각" style={{ minWidth: 0 }} />
           </label>
           <button type="button" className="login-btn" style={{ flex: 'none', padding: '6px 14px' }} disabled={busy || !rows.length || (ptsProg && !pts && !ptsErr)} onClick={loadPoints}>{pts ? '복원 지점 다시 읽기' : `복원 지점 읽기 · ${rows.length}대`}</button>
         </div>
