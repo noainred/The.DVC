@@ -344,11 +344,15 @@ function TargetsTab({ d, reload, handoff, focus, goRuns, goRestore }) {
             const lk = targetLocks(j, { busy, running: isRun, hasRun: !!c.jobid });   // G12·G13: 잠긴 버튼은 사유를 말한다(쓰기 범위 밖 포함)
             return (
               <>
-                <div className="flex" style={{ gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-                  <b style={{ fontSize: 16, overflowWrap: 'anywhere' }}>{j.vmName}</b>
-                  {c.badge ? <span className={`badge ${c.badge.cls}`}>{c.badge.label}</span> : null}
-                  <span className={`badge ${osBadgeCls(osKey(j))}`} style={{ fontSize: 10 }}>{osLabel(osKey(j))}</span>
-                  <button type="button" className="tab" aria-label="닫기" onClick={() => setSel('')} style={{ padding: '2px 8px', fontSize: 12, marginLeft: 'auto' }}>닫기</button>
+                {/* v2.882.1 머리 줄 — 이름 · 배지는 왼쪽 묶음 안에서만 줄바꿈하고 닫기는 오른쪽 위에 고정한다.
+                    예전에는 한 줄 flexWrap 이라 1440(패널 폭 약 320px)에서 이름 + 실행 배지 + OS 배지가 넘치면 닫기가 둘째 줄로 내려갔다(Chromium A/B) */}
+                <div data-panel-head="" style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
+                  <div style={{ flex: '1 1 auto', minWidth: 0, display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '4px 8px' }}>
+                    <b style={{ fontSize: 16, overflowWrap: 'anywhere' }}>{j.vmName}</b>
+                    {c.badge ? <span className={`badge ${c.badge.cls}`}>{c.badge.label}</span> : null}
+                    <span className={`badge ${osBadgeCls(osKey(j))}`} style={{ fontSize: 10 }}>{osLabel(osKey(j))}</span>
+                  </div>
+                  <button type="button" className="tab" aria-label="닫기" onClick={() => setSel('')} style={{ padding: '2px 8px', fontSize: 12, flex: 'none' }}>닫기</button>
                 </div>
                 {/* v2.867 멈추는 중 — 머리 줄에 두면 줄이 넘쳐 닫기가 내려갔다(Chromium 1440 확인) — 따로 한 줄 */}
                 {(() => { const ch = cancelChip(j.cancel, { waitMs: d.cancelWaitMs }); return ch ? <div style={{ ...ROW, gap: 6, marginTop: -4 }} title={ch.title}><span className="badge amber">{ch.short}</span><span className="muted" style={{ fontSize: 12 }}>{ch.sub}</span></div> : null; })()}
@@ -374,7 +378,7 @@ function TargetsTab({ d, reload, handoff, focus, goRuns, goRestore }) {
                 {Object.values(lk).some(Boolean) && <div className="muted" style={{ fontSize: 11.5 }}>잠긴 버튼은 마우스를 올리면 이유가 보입니다.</div>}
                 {fullAfterRestoreHint(j) && <Note tone="warn">{fullAfterRestoreHint(j)}</Note>}
                 {snapshotChip(j.snapshotCount) && <Note tone="warn">{SNAPSHOT_TITLE}</Note>}
-                {/* v2.873 GPU 표지 — 패널은 안내 한 줄로만(머리 줄 칩 없음). 1440 에서는 머리 줄이 GPU 칩 없이도 닫기를 둘째 줄로 내린다(변경 전부터 — A/B 측정) · 칩을 더해 늘리지 않는다 */}
+                {/* v2.873 GPU 표지 — 패널은 안내 한 줄로만(머리 줄 칩 없음 — 이유와 대안은 이 줄이 말한다). 머리 줄의 닫기 줄바꿈은 v2.882.1 에 따로 고쳤다 */}
                 {gpuChip(j) && <Note tone="warn"><span data-bareos-gpu-note=""><BoldText text={gpuChip(j).note} /></span></Note>}
                 <dl style={{ margin: 0, display: 'grid', gridTemplateColumns: 'auto minmax(0, 1fr)', gap: '5px 12px', fontSize: 12.5 }}>
                   <dt className="muted">최근 실행</dt><dd style={{ margin: 0 }}>{c.when} <span className="muted">· {c.note}{c.bytes !== '—' ? ` · ${c.bytes}` : ''}</span></dd>
