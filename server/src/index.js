@@ -113,7 +113,8 @@ import { startVmCloneWorker } from './agent/vmCloneWorker.js'; // VM 백업 법�
 import { startBareosMail } from './bareos/notify.js'; // Bareos 백업 실패 메일(v2.822) — 중앙 전용 · 메일 설정이 꺼져 있으면 커서만 옮긴다
 import { startStaleAlert } from './veeam/staleAlert.js';
 import { startBareosDigest, setDigestPoller } from './bareos/digest.js';   // v2.862 Bareos 일일 요약 메일 — 중앙 전용 · 정한 시각에 하루 한 번
-import { startRehearsal } from './bareos/rehearsal.js';   // v2.862 Bareos 복원 검증(리허설) — 기본 꺼짐 · 정한 요일 · 시각에 법인마다 몇 대
+import { startRehearsal } from './bareos/rehearsal.js';
+import { startDrRunner, setDrPollDirs } from './bareos/drRunner.js';   // 재해 복구 2차 — 복구 순서(단계 자동 실행) · 중앙 전용 · 30초 틱   // v2.862 Bareos 복원 검증(리허설) — 기본 꺼짐 · 정한 요일 · 시각에 법인마다 몇 대
 import { startBareosPolicy } from './bareos/policy.js'; // Bareos Director 정책 수집(v2.839) — 중앙 전용 · 하루 1회(설정 시각) · 읽기 전용 명령 // 백업 안 된 VM 일일 메일(v2.838) — 중앙 전용 · 꺼져 있으면 보내지 않는다
 import { startBareosGroupScheduler } from './bareos/groupRunner.js'; // v2.830 Bareos 백업 그룹 예약 실행(30초 틱 · 중앙만)
 import { startBareosPoller, pollerStatus as bareosPollerStatus } from './bareos/poller.js'; // Bareos VM 백업 실행 상태(v2.820) — Director 미설정이면 접속하지 않는다
@@ -600,6 +601,7 @@ const stagger = [
   startBareosMail,   // 〃 실패 메일(v2.822) — 1분 틱, 원장만 읽는다(Director 에 닿지 않는다) · 엣지는 기동하지 않는다
   startStaleAlert,   // 백업 안 된 VM 일일 메일(v2.838) — 1분 틱 · 정한 시각에 하루 한 번 · 데모 · 엣지는 보내지 않는다
   startBareosDigest, // Bareos 일일 요약 메일(v2.862) — 1분 틱 · 정한 시각에 하루 한 번(실패 30분 뒤 · 3번) · 원장만 읽는다 · 데모 · 엣지는 보내지 않는다
+  startDrRunner,     // Bareos 재해 복구 복구 순서 — 30초 틱 · 상태 파일로 이어 가기 · 엣지는 기동하지 않는다
   startRehearsal,    // Bareos 복원 검증(v2.862) — 1분 틱 · 기본 꺼짐 · 회차는 보내기 전에 기록 · 엣지는 기동하지 않는다
   startBareosPolicy, // Bareos 정책 수집(v2.839) — 1분 틱 · 정한 시각에 하루 한 번(실패 30분 뒤 · 3번) · 엣지는 기동하지 않는다
   startStoragePoller, startStoragePush, startStorageConfigPull, // 스토리지 모니터링(v2.302) — 전부 재진입 가드, push/pull 은 CENTRAL_URL 미설정 시 자기기동 안 함
@@ -748,7 +750,8 @@ const svcmonShutdown = () => {
  * 잡을 잃지 않는다 — 깨어난 폴은 claim 하지 않고, 큐에 남은 잡은 다음 폴이 가져간다.
  */
 import { releaseAllWaiters as releaseRmaWaiters } from './rma/jobs.js'; // 종료 시 롱폴 해제(v2.456)
-setDigestPoller(bareosPollerStatus);   // 요약 메일이 법인별 Director 조회 성공 여부를 본다(digest 가 poller 를 import 하면 순환)
+setDigestPoller(bareosPollerStatus);
+setDrPollDirs(() => bareosPollerStatus().directors || {});   // 재해 복구 실행기의 점검(Director 조회 상태)   // 요약 메일이 법인별 Director 조회 성공 여부를 본다(digest 가 poller 를 import 하면 순환)
 
 const SHUTDOWN_GRACE_MS = Math.max(1000, Math.min(60_000, Number(process.env.SHUTDOWN_GRACE_MS) || 8000));
 let shuttingDown = false;

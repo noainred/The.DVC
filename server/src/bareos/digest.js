@@ -148,7 +148,7 @@ export function digestData(jobs, settings, dirStatus = {}, now = Date.now()) {
       // v2.874(점검 B4-04 — 재현): 창을 시작 시각(r.at)으로 재면 요약 시각에 진행 중이던 검증 · 복원은 다음 날 창 밖이 돼 어느 메일에도 없었다 —
       //   끝난 시각(마무리 finish.at → 복원 endedAt → 시작 at)으로 재고, 아직 끝나지 않은 검증은 '진행 중' 으로 따로 센다
       const endAt = Number(r.finish?.at || r.endedAt || r.at || 0);
-      if (r.verify) {
+      if (r.verify && !r.dr) {   // 재해 복구 켜 보기(dr)는 복원 검증이 아니라 복원으로 센다
         const v = verifyOutcome(r);
         if (v === 'pending') { c.verifyPending += 1; continue; }
         if (endAt < since) continue;

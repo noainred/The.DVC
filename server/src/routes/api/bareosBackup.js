@@ -36,8 +36,9 @@ import { listInventory } from '../../central/inventory.js';
 import { pickAgent } from '../../cvp/formChoices.js';
 import { knownAgentNames } from '../../central/knownAgents.js';
 import { pollerStatus, pollOnce, requestReconcile } from '../../bareos/poller.js';
-import { restorePlan, placementDrift, placementAt, bulkRestorePlan, BULK_RESTORE_MAX } from '../../bareos/restore.js';
-import { drItemIssue, drCheckView, drGateBlock } from '../../bareos/drPlan.js';   // 재해 복구 1차(순수)
+import { restorePlan, placementDrift, placementAt, bulkRestorePlan, BULK_RESTORE_MAX, reservedRestoreNames } from '../../bareos/restore.js';
+import { drItemIssue, drCheckView, drGateBlock, drTrialIssue } from '../../bareos/drPlan.js';
+import { normWaves, itemBody as drRunItemBody, createRun, getRun as getDrRun, stopRun, resumeRun, drRunsView, drRunsLoadError, drTick } from '../../bareos/drRunner.js';   // 재해 복구 2차   // 재해 복구 1차(순수)
 import { finishRestores } from '../../bareos/restoreFinish.js';
 import { savePolicy, policyLoadError, rehearsalStatus, runNow as runRehearsalNow, normPolicy, rehearsalBusy } from '../../bareos/rehearsal.js';
 import { loadDigest, saveDigest, digestLoadError, digestStatus, sendDigestNow, normDigest } from '../../bareos/digest.js';
@@ -1228,7 +1229,6 @@ api.post('/tools/bareos-backup/logs/bulk', adminOnly, async (req, res) => {
  * 묶음 복원 판정 · 접근 · 진행 중 — 미리 보기(check)와 실행이 같은 함수를 쓴다(판정을 두 벌 두지 않는다).
  * @returns {{ status?:number, reason?:string, plan?:object, jobs?:Map }}
  */
-const RESERVE_MS = 24 * 3600_000;   // 새 VM 복원 이름을 예약해 두는 시간(진행 중 + 끝난 뒤 하루 — 다음 인벤토리 수집 전 같은 이름을 막는다)
 function bulkRestoreGate(req, items, { dr = false } = {}) {
   const raw = Array.isArray(items) ? items : [];
   // 상한을 먼저 — 항목마다 원장 조회(깊은 복사)를 돌기 전에(반증 검토 L2: 큰 본문 하나가 요청 경로를 1초 넘게 막았다). 판정은 bulkRestorePlan 이 같은 상한으로 한다.
@@ -1251,17 +1251,8 @@ function bulkRestoreGate(req, items, { dr = false } = {}) {
   }
   const settings = effectiveSettings();
   // 최근 · 진행 중 새 VM 복원이 쓰는 이름(아직 인벤토리에 없다 — 반증 검토: 같은 이름 VM 이 둘이 되면 NIC 끊기도 손대지 못한다)
-  const reservedNames = new Set();
-  const since = Date.now() - RESERVE_MS;
-  const snapAt = Number(store.get()?.generatedAt) || 0;
-  for (const j of listJobs()) {
-    for (const r of j.restores || []) {
-      // 반증 R4: 실패 · 취소로 끝난 복원은 그 뒤 인벤토리 수집이 있으면 예약을 푼다 — VM 껍데기가 생겼으면 인벤토리 이름 대조가 막고, 없으면 다시 보낼 수 있다
-      //   (예전: 실패해도 24시간 막혀 재해 복구 화면에서 그 VM 을 다시 보낼 수 없었다 — 이름 바꾸기가 없다)
-      const failedSeen = (r.state === 'error' || r.state === 'canceled') && snapAt > (Number(r.endedAt || r.at) || 0);
-      if (r.mode === 'newVm' && r.target?.name && !failedSeen && (restoreOpen(r) || (Number(r.at) || 0) >= since)) reservedNames.add(`${j.vcenterId}\u0000${String(r.target.name).toLowerCase()}`);
-    }
-  }
+  //   판정은 restore.js reservedRestoreNames 하나(재해 복구 단계 실행기와 같다 — 반증 R4: 실패 · 취소는 그 뒤 인벤토리 수집이 있으면 푼다)
+  const reservedNames = reservedRestoreNames(listJobs(), { snapAt: Number(store.get()?.generatedAt) || 0, isOpen: restoreOpen });
   const plan = bulkRestorePlan({ items: list, jobOf: (id) => jobs.get(id) || null, dirOf: jobDir, snapshot: store.get(), pluginName: settings.defaults.pluginName, reservedNames, baseOf: restoreBaseOf(settings) });
   for (const r of plan.items) if (denied.has(r.id)) { r.ok = false; r.issue = denied.get(r.id); }   // 접근 · 진행 중 사유가 판정 사유보다 앞선다(더 근본적)
   if (dr) {
@@ -1403,6 +1394,104 @@ api.get('/tools/bareos-backup/dr/check', adminOnly, (req, res) => {
   res.json({ ok: true, vcenterId, directorId: director?.id || null, ...view });
 });
 
+/* ───────────────────────── 재해 복구 2차 — 복구 순서(단계 자동 실행 · bareos/drRunner.js) ───────────────────────── */
+
+/**
+ * 회차 계획 판정 — 단계 정규화(normWaves) · 항목마다 범위(조회 밖 404 · 쓰기 밖 403) · 50대씩 묶음 복원과 **같은 판정**(bulkRestoreGate dr — 새 VM · 끊은 채 ·
+ *   클러스터 · 점검 ✕ · 시험 1대 · 진행 중 · 결과 모름 · 이름 예약). 계획 확인과 시작이 같은 함수를 쓴다(OTP 를 쓰기 전에 끝난다).
+ * @returns {{ status:number, reason?:string, waves?:object[], issues?:object[], vcenterId?:string, directorId?:string }}
+ */
+function drRunGate(req) {
+  let waves;
+  try { waves = normWaves(req.body?.waves); } catch (e) { return { status: 400, reason: String(e?.message || e) }; }
+  const vcenterId = String(req.body?.vcenterId || '');
+  if (!vcenterId) return { status: 400, reason: '법인(vCenter)을 고르세요.' };
+  const acc = bareosAccess(req.user, vcenterId, { write: true });
+  if (acc === 404) return { status: 404, reason: '그 vCenter 를 찾을 수 없습니다.' };
+  if (acc === 403) return { status: 403, reason: READ_ONLY };
+  // 시험 1대 규칙은 회차 **전체** 대수로 — 50대씩 나눈 묶음마다 보면 단계마다 1대인 회차가 규칙을 비켜 간다
+  const total = waves.reduce((n, w) => n + w.items.length, 0);
+  const trial = drTrialIssue(listJobs(), vcenterId, total);
+  if (trial) return { status: 400, reason: trial };
+  const issues = [];
+  let dirId = '';
+  for (let wi = 0; wi < waves.length; wi++) {
+    const w = waves[wi];
+    for (let i = 0; i < w.items.length; i += BULK_RESTORE_MAX) {
+      const chunk = w.items.slice(i, i + BULK_RESTORE_MAX).map(drRunItemBody);
+      for (const it of chunk) { const j = getJob(it.id); if (!j || String(j.vcenterId) !== vcenterId) return { status: 404, reason: '백업 대상을 찾을 수 없습니다.' }; }
+      const g = bulkRestoreGate(req, chunk, { dr: true });
+      if (g.status === 404) return { status: 404, reason: '백업 대상을 찾을 수 없습니다.' };
+      if (g.status === 403) return { status: 403, reason: READ_ONLY };
+      if (g.plan.drBlock) return { status: 400, reason: g.plan.issue };
+      dirId = dirId || g.plan.directorId || '';
+      for (const r of g.plan.items) if (!r.ok) issues.push({ id: r.id, vmName: r.vmName || '', wave: wi, issue: r.issue || '복원할 수 없습니다' });
+    }
+  }
+  return { status: issues.length ? 400 : 200, waves, issues, vcenterId, directorId: dirId, ...(issues.length ? { reason: `${issues.length}대를 복원할 수 없습니다 — 항목별 사유를 확인하세요(회차를 시작하지 않았습니다).` } : {}) };
+}
+
+api.post('/tools/bareos-backup/dr/runs/check', adminOnly, (req, res) => {
+  const g = drRunGate(req);
+  if (g.status === 404 || g.status === 403) return res.status(g.status).json({ ok: false, reason: g.reason });
+  res.json({ ok: g.status === 200, ...(g.reason ? { reason: g.reason } : {}), issues: g.issues || [], total: (g.waves || []).reduce((n, w) => n + w.items.length, 0),
+    needEnroll: !!(config.auth.enabled && !getUser(req.user?.username || '')?.totpEnabled) });
+});
+
+api.post('/tools/bareos-backup/dr/runs', adminOnly, (req, res) => {
+  const name = req.user?.username || '';
+  if (config.auth.enabled && !getUser(name)?.totpEnabled) return res.status(403).json({ ok: false, needEnroll: true, reason: '재해 복구는 OTP 가 등록된 계정만 실행할 수 있습니다.' });
+  if (drRunsLoadError()) return res.status(503).json({ ok: false, code: 'state-unreadable', reason: drRunsLoadError() });
+  const g = drRunGate(req);
+  if (g.status !== 200) return res.status(g.status).json({ ok: false, reason: g.reason, issues: g.issues || [] });
+  // 진행 중 회차는 OTP 앞에서(1회용 코드를 태우지 않게) — createRun 이 다시 본다
+  if (drRunsView().runs.some((r) => r.vcenterId === g.vcenterId && (r.state === 'running' || r.state === 'paused'))) return res.status(409).json({ ok: false, reason: '이 법인에 진행 중인 복구 순서가 있습니다 — 멈춘 뒤 새로 시작하세요.' });
+  if (config.auth.enabled) { const v = verifyUserOtp(name, req.body?.otp); if (!v.ok) return res.status(403).json({ ok: false, reason: `OTP 인증 실패 — ${v.reason}` }); }
+  let run;
+  try { run = createRun({ vcenterId: g.vcenterId, directorId: g.directorId, by: name, before: String(req.body?.drBefore || ''), waves: g.waves }); } catch (e) { return res.status(e?.code === 'conflict' ? 409 : e?.code === 'unavailable' ? 503 : 400).json({ ok: false, reason: String(e?.message || e) }); }
+  audit(req, 'Bareos 재해 복구', g.vcenterId, `복구 순서 ${run.id} 시작 · ${run.waves.map((w) => `${w.name} ${w.items.length}대(동시 ${w.concurrency}${w.verify ? ' · 켜 보기' : ''})`).join(' → ')}${run.before ? ` · 기준 시각 ${run.before.replace('T', ' ')}(브라우저 시각)` : ''}`);
+  drTick().catch(() => {});   // 다음 틱을 기다리지 않고 첫 걸음
+  res.status(201).json({ ok: true, run: drRunsView(new Set([g.vcenterId])).runs.find((r) => r.id === run.id) || null });
+});
+
+api.get('/tools/bareos-backup/dr/runs', adminOnly, (req, res) => {
+  if (drRunsLoadError()) return res.status(503).json({ ok: false, code: 'state-unreadable', reason: drRunsLoadError() });
+  const allowed = scopedVcenterIds(req.user, store.get());
+  const vc = String(req.query?.vcenterId || '');
+  if (vc && allowed && !allowed.has(vc)) return res.status(404).json({ ok: false, reason: '그 vCenter 를 찾을 수 없습니다.' });
+  const v = drRunsView(allowed);
+  res.json({ ok: true, runs: vc ? v.runs.filter((r) => r.vcenterId === vc) : v.runs });
+});
+
+/** 멈춤 · 계속 — 그 회차의 vCenter 쓰기 범위(조회 밖 404 · 쓰기 밖 403). 계속은 본인 OTP(다음 단계 복원을 보낸다). */
+function drRunAccess(req, res) {
+  const run = getDrRun(String(req.params.id || ''));
+  if (!run) { res.status(404).json({ ok: false, reason: '그 회차를 찾을 수 없습니다.' }); return null; }
+  const a = bareosAccess(req.user, run.vcenterId, { write: true });
+  if (a === 404) { res.status(404).json({ ok: false, reason: '그 회차를 찾을 수 없습니다.' }); return null; }
+  if (a === 403) { res.status(403).json({ ok: false, reason: READ_ONLY }); return null; }
+  return run;
+}
+api.post('/tools/bareos-backup/dr/runs/:id/stop', adminOnly, (req, res) => {
+  const run = drRunAccess(req, res);
+  if (!run) return;
+  try { stopRun(run.id, req.user?.username || ''); } catch (e) { return res.status(e?.code === 'conflict' ? 409 : 400).json({ ok: false, reason: String(e?.message || e) }); }
+  audit(req, 'Bareos 재해 복구', run.vcenterId, `복구 순서 ${run.id} 멈춤`);
+  res.json({ ok: true });
+});
+api.post('/tools/bareos-backup/dr/runs/:id/resume', adminOnly, (req, res) => {
+  const name = req.user?.username || '';
+  if (config.auth.enabled && !getUser(name)?.totpEnabled) return res.status(403).json({ ok: false, needEnroll: true, reason: '재해 복구는 OTP 가 등록된 계정만 실행할 수 있습니다.' });
+  const run = drRunAccess(req, res);
+  if (!run) return;
+  if (run.state !== 'paused') return res.status(409).json({ ok: false, reason: '멈춤 상태인 회차만 계속할 수 있습니다.' });   // OTP 앞에서
+  if (config.auth.enabled) { const v = verifyUserOtp(name, req.body?.otp); if (!v.ok) return res.status(403).json({ ok: false, reason: `OTP 인증 실패 — ${v.reason}` }); }
+  try { resumeRun(run.id, name); } catch (e) { return res.status(e?.code === 'conflict' ? 409 : 400).json({ ok: false, reason: String(e?.message || e) }); }
+  audit(req, 'Bareos 재해 복구', run.vcenterId, `복구 순서 ${run.id} 계속(멈춤 사유: ${String(run.reason || '').slice(0, 200)})`);
+  drTick().catch(() => {});
+  res.json({ ok: true });
+});
+
 /* ───────────────────────── v2.862 복원 검증(리허설) · 일일 요약 메일 ───────────────────────── */
 
 /**
@@ -1417,7 +1506,7 @@ api.get('/tools/bareos-backup/rehearsal', adminOnly, (req, res) => {
   const results = [];
   for (const j of listJobs()) {
     if (allowed && !allowed.has(j.vcenterId)) continue;
-    for (const r of j.restores || []) if (r.verify) results.push({ jobId: j.id, vmName: j.vmName, vcenterId: j.vcenterId, directorId: jobDir(j), rid: r.jobid, at: r.at ?? null, state: r.state, name: r.target?.name || '', finish: r.finish || null, run: r.rehearsal || '' });
+    for (const r of j.restores || []) if (r.verify && !r.dr) results.push({ jobId: j.id, vmName: j.vmName, vcenterId: j.vcenterId, directorId: jobDir(j), rid: r.jobid, at: r.at ?? null, state: r.state, name: r.target?.name || '', finish: r.finish || null, run: r.rehearsal || '' });
   }
   results.sort((a, b) => (b.at || 0) - (a.at || 0));
   // 반증 F1(재현): Director 하나에 vCenter 가 여럿이면 회차 항목 · 정책 데이터스토어에 범위 밖 vCenter 의 VM 이름 · 사유 · DS 이름이 실렸다 —
