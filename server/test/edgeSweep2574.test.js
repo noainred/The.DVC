@@ -67,7 +67,7 @@ describe('IMP-07 — edgelog/spec.js 표가 실재하고 빠짐이 없다', () =
       ['central/svcmonSilence.js', '중앙 전용(엣지 무보고 감시) — 엣지에서 읽으면 늘 비어 있다'],
       ['vmclone/notify.js', '중앙 전용(v2.794 VM 백업 실패 메일 — 엣지는 startVmBackupMail 이 돌지 않는다. 발송 이력은 설정 › 메일 발송이 말한다)'],
       ['bareos/notify.js', '중앙 전용(v2.822 Bareos 백업 실패 메일 — 엣지는 startBareosMail 이 돌지 않는다. 발송 이력은 설정 › 메일 발송이 말한다)'],
-      ['bareos/digest.js', '중앙 전용(v2.862 Bareos 일일 요약 메일 — 엣지는 startBareosDigest 가 돌지 않는다. 마지막 발송은 설정 › 공통 기본값 · 수집 › 일일 요약 메일이 말한다)'],
+      ['bareos/digest.js', '중앙 전용(v2.862 Bareos 일일 요약 메일 — 엣지는 startBareosDigest 가 돌지 않는다. 마지막 발송은 설정 › vCenter 관리 › Bareos 백업 서버 › 공통 기본값 · 수집 › 일일 요약 메일이 말한다)'],
       ['bareos/rehearsal.js', '중앙 전용(v2.862 Bareos 복원 검증 — 엣지는 startRehearsal 이 돌지 않는다. 회차 · 결과는 운영 › 복원 › 복원 검증 카드가 말한다)'],
       ['veeam/staleAlert.js', '중앙 전용(v2.838 백업 안 된 VM 일일 메일 — 엣지는 startStaleAlert 가 돌지 않는다. 마지막 발송은 Backup › Summary 의 알림 칸 · 발송 이력은 설정 › 메일 발송이 말한다)'],
       ['veeam/em/poller.js', '중앙 전용(v2.788 Veeam Enterprise Manager — 엣지는 startEmPoller 가 돌지 않는다. 상태는 설정 › Veeam 백업 서버 › Enterprise Manager 가 말한다)'],

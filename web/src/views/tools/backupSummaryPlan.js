@@ -122,6 +122,7 @@ export function errorOpen(r, { canBareos = false, canBareosView = false, admin =
   if (r.open === 'bareos') return canBareos ? (r.jobKey && r.jobid ? { key: 'log', text: '로그' } : { key: 'hash', text: '진행 · 이력', hash: '#/tools/bareos-backup/runs' }) : canBareosView ? { key: 'hash', text: 'Bareos', hash: '#/tools/bareos-summary' } : null;
   if (r.open === 'live') return canBareos ? { key: 'hash', text: '진행 현황', hash: '#/tools/bareos-backup/live' } : null;
   if (r.open === 'em') return { key: 'hash', text: 'Veeam', hash: '#/tools/backup-em' };
+  // v2.878: 옛 주소로 둔다 — Bareos 도구가 설정 화면을 열 수 있는 계정은 새 자리(#/settings/bareos)로 넘기고, 못 여는 관리자는 그 자리에서 보인다(legacySettingsHash)
   if (r.open === 'bareos-settings') return canBareos && admin ? { key: 'hash', text: '설정', hash: '#/tools/bareos-backup/settings' } : null;
   if (r.open === 'pools') return canBareosView ? { key: 'hash', text: '보존 · 풀', hash: '#/tools/bareos-summary/pools' } : null;   // v2.840 오류 볼륨
   return null;

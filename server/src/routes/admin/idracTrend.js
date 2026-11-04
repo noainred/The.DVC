@@ -761,7 +761,7 @@ export function registerIdracTrend(adminRouter) {
       const wb = new ExcelJS.Workbook();
       wb.creator = 'VMware Global Monitoring Portal';
       const sum = wb.addWorksheet('요약');
-      sum.addRow(['iDRAC 통합 추이']);
+      sum.addRow(['Infra Observability']);   // v2.878 화면 이름 변경(사용자 요청)
       sum.addRow(['조회 기간', `${localStamp(win.start)} ~ ${localStamp(win.end)}`]);
       sum.addRow(['집계 단위', `${Math.round(win.bucketMs / 60_000)}분 평균`]);
       sum.addRow(['만든 시각', localStamp(Date.now())]);

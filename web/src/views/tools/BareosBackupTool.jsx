@@ -28,7 +28,7 @@ import {
   osCounts, gpuChip, parseJobReport, parseJobDetail, jobTimeline, HIST_LEVEL_OPTS, HIST_RESULT_OPTS, filterHistory, histResultKey,
 } from './bareosText.js';
 import { LogModal } from './BareosJobLog.jsx';   // v2.872 작업 로그 창 — 통합 에러 로그 서랍과 같은 본문
-import { takeBareosHandoff, OPS_SEGMENTS, opsTopOf, opsTabOf, LEGACY_OPS_TAB, takeTargetFocus, legacyOpsHash, runsBoardOpen } from './bareosViewText.js';
+import { takeBareosHandoff, OPS_SEGMENTS, opsTopOf, opsTabOf, LEGACY_OPS_TAB, takeTargetFocus, legacyOpsHash, runsBoardOpen, settingsHomeOk, legacySettingsHash, BAREOS_SETTINGS_HASH } from './bareosViewText.js';
 import { targetPolicyText, targetPolicyShort, VERDICT } from './bareosPolicyText.js';   // v2.840 '적용 정책' 한 줄
 
 /**
@@ -44,6 +44,7 @@ const BASE = '/tools/bareos-backup';
 // v2.830: '백업 그룹' — 전체 VM 트리에서 고른 VM 을 그룹(이름·스케줄·스토리지)으로 — 포탈이 스케줄 실행(BareosGroupsTab.jsx)
 // v2.833: '진행 현황' — 진행 중인 백업 현황판(BareosLiveTab.jsx · 이 탭이 열린 동안만 Director 상태 조회) — v2.860 부터 진행 · 이력 묶음 위쪽의 펼침 구획
 const TABS = [...OPS_SEGMENTS, ['settings', '설정']];
+const LEGACY_SETTINGS_BASE = ['tools', 'bareos-backup', 'settings'];   // v2.878 설정 화면을 못 여는 관리자의 자리(구획 주소)
 const ROW = { display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' };
 const NOTE = { padding: '8px 12px', marginBottom: 10, fontSize: 12.5, lineHeight: 1.6 };
 const BTN = { padding: '4px 9px', fontSize: 12 };
@@ -84,6 +85,14 @@ export default function BareosBackupTool() {
   const reload = () => setTick((t) => t + 1);
   const me = getCurrentUser();
   const fullScope = !me?.scope || (!(me.scope.vcenters || []).length && !(me.scope.regions || []).length);
+  // v2.878(사용자 요청 'Bareos 설정을 전체 설정 메뉴로 — B안'): 설정은 설정 › 🖥️ vCenter 관리 › Bareos 백업 서버 로 옮겼다.
+  //   옛 주소(북마크 · 다른 화면 링크)로 들어오면 그 구획 그대로 새 자리로 넘긴다(replace — 뒤로가기 이력을 쌓지 않는다).
+  //   설정 화면을 못 여는 관리자(설정 소유 계정이 아님)는 넘기지 않고 이 자리에서 같은 화면을 쓴다(Bareos 설정 API 는 설정 소유 여부를 보지 않는다).
+  const moveTo = tab === 'settings' && settingsHomeOk(me) ? (legacySettingsHash(window.location.hash) || BAREOS_SETTINGS_HASH) : null;
+  useEffect(() => {
+    if (!moveTo) return;
+    try { window.location.replace(moveTo); } catch { window.location.hash = moveTo; }
+  }, [moveTo]);
 
   const openRestores = (data?.jobs || []).reduce((n, j) => n + (j.restores || []).filter(restoreIsOpen).length, 0);   // v2.861 운영 › 복원 묶음 버튼의 진행 수
   // v2.822: Backup 상단 메뉴의 한 탭 — 머리는 불러오는 중·오류에도 보인다(탭으로 되돌아갈 수 있게).
@@ -117,7 +126,8 @@ export default function BareosBackupTool() {
       {tab === 'restore' && <BareosRestore d={data} reload={reload} preselect={restorePre} onPreselectUsed={() => setRestorePre('')} />}
       {tab === 'groups' && <BareosGroupsTab d={data} />}
       {tab === 'runs' && <RunsTab d={data} boardHint={boardHint} focus={focus} />}
-      {tab === 'settings' && fullScope && <SettingsTab onSaved={reload} writable={data.settingsWritable !== false} />}
+      {tab === 'settings' && moveTo && <div className="muted" style={{ padding: 16 }}>Bareos 설정은 설정 › 🖥️ vCenter 관리 › Bareos 백업 서버 로 옮겼습니다 — <a href={moveTo}>그 화면으로 이동</a></div>}
+      {tab === 'settings' && !moveTo && fullScope && <SettingsTab onSaved={reload} writable={data.settingsWritable !== false} hashBase={LEGACY_SETTINGS_BASE} />}
       {tab === 'settings' && !fullScope && <div className="muted" style={{ padding: 16 }}>Director 설정은 전체 범위 관리자만 볼 수 있습니다 — 운영 › 백업 대상을 쓰세요.</div>}
       </div>
     </div>
@@ -507,8 +517,8 @@ function AddForm({ d, initial = null, onInitialUsed, onClose, onChanged }) {
       {vc && !cand && !candErr && <Loading />}
       {cand && (
         <>
-          <div className="muted" style={{ fontSize: 12, marginBottom: 6 }}>{candidateSummary(cand)}{cand.director ? ` · 잡을 만들 법인 Director ‘${cand.director.name}’` : ' · 이 vCenter 는 어느 법인 Director 에도 묶여 있지 않습니다(설정 › 법인별 Director)'}{cand.director && cand.mappingMissing?.length ? ` · 매핑이 덜 됐습니다(${cand.mappingMissing.join('·')})` : ''}{!cand.writable ? ' · 조회 전용 범위라 등록할 수 없습니다' : ''}</div>
-          {dirNotReady && <div className="banner warn" style={{ marginBottom: 8, fontSize: 12 }}>법인 Director ‘{cand.director.name}’ 의 콘솔 접속값이 덜 됐습니다({(cand.director.missing || []).join('·') || '접속값'}) — 등록할 수 없습니다. 설정 › 법인별 Director 에서 채우세요(주소·포트·콘솔 이름을 바꾸면 저장 비밀번호가 지워집니다).</div>}
+          <div className="muted" style={{ fontSize: 12, marginBottom: 6 }}>{candidateSummary(cand)}{cand.director ? ` · 잡을 만들 법인 Director ‘${cand.director.name}’` : ' · 이 vCenter 는 어느 법인 Director 에도 묶여 있지 않습니다(설정 › vCenter 관리 › Bareos 백업 서버 › Director)'}{cand.director && cand.mappingMissing?.length ? ` · 매핑이 덜 됐습니다(${cand.mappingMissing.join('·')})` : ''}{!cand.writable ? ' · 조회 전용 범위라 등록할 수 없습니다' : ''}</div>
+          {dirNotReady && <div className="banner warn" style={{ marginBottom: 8, fontSize: 12 }}>법인 Director ‘{cand.director.name}’ 의 콘솔 접속값이 덜 됐습니다({(cand.director.missing || []).join('·') || '접속값'}) — 등록할 수 없습니다. 설정 › vCenter 관리 › Bareos 백업 서버 › Director 에서 채우세요(주소·포트·콘솔 이름을 바꾸면 저장 비밀번호가 지워집니다).</div>}
           <div style={{ ...ROW, marginBottom: 6 }}>
             <button type="button" className="logout-btn" style={BTN} disabled={!visiblePickable.length || sel.size >= cap} onClick={pickVisible}>보이는 등록 가능 VM 전체 선택({visiblePickable.length}대)</button>
             <button type="button" className="logout-btn" style={BTN} disabled={!sel.size} onClick={() => setSel(new Set())}>선택 해제</button>

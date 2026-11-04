@@ -33,6 +33,8 @@ export function precheckScript(volumeDir = DEFAULT_VOLUME_DIR) {
     "echo @@varlib; df -Pk /var/lib 2>/dev/null | awk 'NR==2{print $4}'",
     "echo @@clock; chronyc tracking 2>/dev/null | awk -F': *' '/^System time/{print $2}' | head -1",
     "echo @@addr; ip -4 -o route get 1.1.1.1 2>/dev/null | sed -n 's/.* src \\([0-9.]*\\).*/\\1/p' | head -1; hostname -f 2>/dev/null || hostname",
+    // v2.876(반증 A): 이 서버의 모든 주소 — '포탈 미등록 Bareos 초기화' 가 다른 이름 · 다른 NIC 로 등록된 Director 를 알아보게(지우지 않는 쪽 판정에만 쓴다)
+    "echo @@addrs; hostname -I 2>/dev/null | tr ' ' '\\n' | sed '/^$/d' | head -32",
     `echo @@runner; systemctl is-active ${UNIT} 2>/dev/null || true; tail -n 3 ${REMOTE_ROOT}/run/state 2>/dev/null || true`,
     // 초기화용(설치돼 있을 때만 의미): 실행 중 작업 · 카탈로그 DB 크기 · SD 볼륨 경로별 파일 수·크기·마지막 수정
     // 반증 L2: bconsole 이 실패해도 grep -c 가 0 을 내 '실행 중 0개 ✓' 가 됐다 — 접속이 확인될 때만 센다(못 읽으면 none = 확인 불가)
@@ -102,6 +104,7 @@ export function parsePrecheck(text) {
     clockOffsetSec: clockSec ? Number(clockSec[1]) : null,
     hostAddr: /^\d{1,3}(\.\d{1,3}){3}$/.test(addrLines[0] || '') ? addrLines[0] : null,
     hostname: addrLines.find((x) => !/^\d{1,3}(\.\d{1,3}){3}$/.test(x)) || null,
+    addrs: (s.addrs || []).map((l) => l.trim()).filter((x) => /^[0-9A-Fa-f.:]{2,45}$/.test(x)).slice(0, 32),
     runnerActive: runnerLines[0] === 'active' || runnerLines[0] === 'activating',
     runnerState: runnerLines.slice(1),
     // 'inactive' = Director 꺼짐(실행 중 작업 없음 — 읽은 사실) · none/빈 값 = 못 읽음(null — 0 이 아니다)
@@ -196,7 +199,8 @@ export function judgePrecheck(f, { mode = 'install', bundle = null, plan = null 
   add('tools', '필수 명령', toolMiss.length ? 'bad' : (Object.keys(f.tools).length ? 'ok' : 'unknown'), toolMiss.length ? `없음: ${toolMiss.join(', ')}` : 'systemd-run · dnf · rpm · ss 있음', toolMiss.length ? 'OS 기본 패키지를 먼저 설치하세요.' : '');
   if (mode === 'install') {
     add('bareos', '이미 설치된 Bareos', installed ? 'bad' : 'ok', installed ? `${bareosPkgs.map((p) => `${p.name} ${p.version}`).slice(0, 6).join(' · ') || '패키지 없음'}${f.etcFiles != null ? ` · /etc/bareos 파일 ${f.etcFiles}개` : ''}` : 'bareos 패키지 · /etc/bareos 없음',
-      installed ? '기존 설치를 덮어쓰지 않습니다 — 대상 표에서 ‘초기화 후 재설치’ 를 고르세요.' : '');
+      // v2.876: 예전 문구는 '대상 표에서 초기화 후 재설치' 였지만 포탈에 Director 가 없는 법인은 그 선택지가 없었다(막다른 길) — 이 화면의 단추 · 서버 스크립트를 가리킨다
+      installed ? '기존 설치를 덮어쓰지 않습니다 — 아래 ‘초기화 후 재설치로 진행’ 으로 지우고 설치하거나, 서버에서 bareos-reset.sh 로 지운 뒤 다시 점검하세요.' : '');
   } else {
     add('bareos', '지울 기존 Bareos', installed ? 'warn' : 'ok', installed ? `${bareosPkgs.length}개 패키지 · /etc/bareos 파일 ${f.etcFiles ?? 0}개 — 지우기 전에 /etc/bareos 를 엣지 안에 tar 로 보관합니다` : '설치된 Bareos 가 없습니다(초기화할 것 없음)', '');
     // v2.846 D-2: 못 읽음(unknown)은 막지 않지만 러너 0단계도 멈춘다 — 계획의 '확인했음 — 실행 중 작업 확인 없이 진행' 동의가 있어야 진행한다(조치 문구가 그 동의를 가리킨다)

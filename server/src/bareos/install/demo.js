@@ -9,6 +9,7 @@ import { store } from '../../store.js';
 import { STEPS, planSummary, normPlan, LAST_STEP } from './plan.js';
 import { judgePrecheck } from './precheck.js';
 import { classifyFailure } from './causes.js';
+import { resetTarget } from './targets.js';
 
 const STEP_MS = 4_000;
 const DEMO_BUNDLE = Object.freeze({
@@ -25,7 +26,8 @@ export function _resetForTest() { _jobs.clear(); _seq = 0; _fetched = true; }
 
 function targets(now = Date.now()) {
   const vcs = (store.get()?.vcenters || []).slice(0, 6);
-  const kinds = ['install', 'reinstall', 'no-edge', 'offline', 'no-pass', 'install'];
+  // v2.876: 여섯째는 '포탈 미등록 Bareos'(사람이 직접 설치 — 대상 표는 새 설치 · 사전 점검이 기존 설치를 찾아 막는다 → '초기화 후 재설치로 진행')
+  const kinds = ['install', 'reinstall', 'no-edge', 'offline', 'no-pass', 'leftover'];
   return vcs.map((v, i) => {
     const k = kinds[i % kinds.length];
     const agent = k === 'no-edge' ? '' : `edge-demo-${i + 1}`;
@@ -34,8 +36,9 @@ function targets(now = Date.now()) {
       edgeAt: agent ? now - (k === 'offline' ? 2 * 86_400_000 : 40_000 + i * 9_000) : null, edgeAgeMs: agent ? (k === 'offline' ? 2 * 86_400_000 : 40_000 + i * 9_000) : null,
       targetId: agent ? `demo-target-${i + 1}` : '', sshHost: agent ? `10.${20 + i}.0.14` : '', sshPort: 22, sshUser: agent ? 'root' : '',
       hasPassword: k !== 'no-pass', director: k === 'reinstall' ? { id: 'dir_demo_existing', name: `${v.name || v.id} Bareos`, host: `10.${20 + i}.0.14`, agent } : null,
-      mode: k === 'reinstall' ? 'reinstall' : 'install', can: ['install', 'reinstall'].includes(k), why: '', demo: true,
+      mode: k === 'reinstall' ? 'reinstall' : 'install', can: ['install', 'reinstall', 'leftover'].includes(k), why: '', demo: true,
     };
+    if (k === 'leftover') row.demoLeftover = true;   // 화면에 내지 않는 데모 표지(facts 가 설치된 Bareos 를 보인다)
     if (k === 'no-edge') row.why = '엣지 노드 없음 — 이 vCenter 의 인벤토리를 올리는 엣지가 없습니다.';
     if (k === 'offline') row.why = '엣지 응답 없음(마지막 수신 2880분 전).';
     if (k === 'no-pass') row.why = '배포 등록부에 SSH 비밀번호가 저장돼 있지 않습니다(키만 저장된 대상은 아직 지원하지 않습니다).';
@@ -53,12 +56,13 @@ export function overview() {
 export function fetchBundle() { _fetched = true; return { ok: true, started: true, demo: true }; }
 
 function facts(t, mode) {
+  const has = mode === 'reinstall' || t.demoLeftover === true;   // 서버에 Bareos 가 있다(재설치 · 포탈 미등록 설치)
   return {
     complete: true, uid: 0, os: { id: 'rocky', versionId: '9.4', pretty: 'Rocky Linux 9.4 (Blue Onyx)', arch: 'x86_64' },
     tools: { 'systemd-run': true, dnf: true, rpm: true, ss: true, python3: true, chronyc: false }, selinux: 'Enforcing',
-    pkgs: mode === 'reinstall' ? [{ name: 'bareos-director', version: '22.1.2' }, { name: 'bareos-storage', version: '22.1.2' }, { name: 'bareos-filedaemon', version: '22.1.2' }] : [],
-    etcFiles: mode === 'reinstall' ? 41 : null, services: {}, portsInUse: mode === 'reinstall' ? [9101, 9102, 9103] : [],
-    python: '3.9.18', pyvmomi: null, pluginPathCopies: mode === 'reinstall' ? [] : ['/usr/lib64/bareos/plugins/pyVmomi'],
+    pkgs: has ? [{ name: 'bareos-director', version: t.demoLeftover ? '25.1.2~pre73' : '22.1.2' }, { name: 'bareos-storage', version: t.demoLeftover ? '25.1.2~pre73' : '22.1.2' }, { name: 'bareos-filedaemon', version: t.demoLeftover ? '25.1.2~pre73' : '22.1.2' }] : [],
+    etcFiles: has ? 41 : null, services: {}, portsInUse: has ? [9101, 9102, 9103] : [],
+    python: '3.9.18', pyvmomi: null, pluginPathCopies: has ? [] : ['/usr/lib64/bareos/plugins/pyVmomi'],
     disk: { path: '/var/lib', availKb: 412 * 1024 * 1024, sizeKb: 1800 * 1024 * 1024, mount: '/', exists: false }, varLibAvailKb: 412 * 1024 * 1024,
     clockOffsetSec: null, hostAddr: t.sshHost, hostname: `${t.agent}.demo`, runnerActive: false, runnerState: [],
     runningJobs: mode === 'reinstall' ? 0 : null, catalogBytes: mode === 'reinstall' ? 1_932_735_283 : null,
@@ -66,24 +70,36 @@ function facts(t, mode) {
   };
 }
 
+/** v2.876 실제 코드와 같은 규칙(resetTarget — 데모 Director 등록부는 대상 표의 데모 Director 뿐). 던지면 { ok:false } 로. */
+function demoTarget(t0, body) {
+  const dirs = targets().map((x) => x.director).filter(Boolean);
+  return resetTarget(t0, body, { directors: dirs }, { ids: [t0.sshHost], jobs: [] });
+}
+
 export function precheck(vcenterId, body = {}) {
-  const t = targets().find((x) => x.vcenterId === vcenterId);
-  if (!t) return { ok: false, reason: 'vCenter 를 찾을 수 없습니다.' };
-  if (!t.can) return { ok: false, reason: t.why };
+  const t0 = targets().find((x) => x.vcenterId === vcenterId);
+  if (!t0) return { ok: false, reason: 'vCenter 를 찾을 수 없습니다.' };
+  if (!t0.can) return { ok: false, reason: t0.why };
+  let t;
+  try { t = demoTarget(t0, body); } catch (e) { return { ok: false, code: 'invalid', reason: e.message }; }
   let plan = null;
   try { plan = normPlan({ ...body, reset: body.reset || { ack: true } }, { contents: DEMO_BUNDLE.contents, mode: t.mode, corpName: t.vcenterName }); } catch { plan = null; }
   const j = judgePrecheck(facts(t, t.mode), { mode: t.mode, bundle: DEMO_BUNDLE.contents, plan });
-  return { ok: true, demo: true, at: Date.now(), ms: 6100, target: t, mode: t.mode, ...j, ledgerTargets: t.mode === 'reinstall' ? 12 : 0, bundle: { version: DEMO_BUNDLE.version, contents: DEMO_BUNDLE.contents, size: DEMO_BUNDLE.size } };
+  return { ok: true, demo: true, at: Date.now(), ms: 6100, target: t, mode: t.mode, ...(t.resetUnregistered ? { resetUnregistered: true } : {}), ...j, ledgerTargets: t.mode === 'reinstall' ? 12 : 0, bundle: { version: DEMO_BUNDLE.version, contents: DEMO_BUNDLE.contents, size: DEMO_BUNDLE.size } };
 }
 
 export function start(vcenterId, body = {}, by = '') {
-  const t = targets().find((x) => x.vcenterId === vcenterId);
-  if (!t || !t.can) return { ok: false, reason: t?.why || 'vCenter 를 찾을 수 없습니다.' };
+  const t0 = targets().find((x) => x.vcenterId === vcenterId);
+  if (!t0 || !t0.can) return { ok: false, reason: t0?.why || 'vCenter 를 찾을 수 없습니다.' };
+  let t;
+  try { t = demoTarget(t0, body); } catch (e) { return { ok: false, code: 'invalid', reason: e.message }; }
+  // 실제 흐름과 같이: 기존 설치가 남은 서버는 초기화 없이 시작하지 않는다(사전 점검 ✗)
+  if (t.mode === 'install' && t.demoLeftover) return { ok: false, code: 'precheck', reason: '사전 점검에 ✗ 항목이 있어 시작하지 않았습니다: 이미 설치된 Bareos' };
   let plan;
   try { plan = normPlan(body, { contents: DEMO_BUNDLE.contents, mode: t.mode, corpName: t.vcenterName }); } catch (e) { return { ok: false, code: 'invalid', reason: e.message }; }
   const id = `bi_demo${String(++_seq).padStart(6, '0')}`;
   const first = t.mode === 'reinstall' ? 0 : 1;
-  const j = { id, vcenterId, vcenterName: t.vcenterName, vcHost: t.vcHost, agent: t.agent, sshHost: t.sshHost, hostAddr: t.sshHost, mode: t.mode, plan, by, createdAt: Date.now(), startStep: first,
+  const j = { id, vcenterId, vcenterName: t.vcenterName, vcHost: t.vcHost, agent: t.agent, sshHost: t.sshHost, hostAddr: t.sshHost, mode: t.mode, ...(t.resetUnregistered ? { resetUnregistered: true } : {}), plan, by, createdAt: Date.now(), startStep: first,
     bundle: { version: DEMO_BUNDLE.version, size: DEMO_BUNDLE.size, bareosVersion: DEMO_BUNDLE.contents.bareosVersion }, attempts: [{ n: 1, at: Date.now(), by, fromStep: first, plan: planSummary(plan) }], stopAt: null, rollbackAt: null };
   _jobs.set(id, j);
   return { ok: true, demo: true, job: view(j) };
@@ -133,7 +149,7 @@ function view(j, now = Date.now()) {
     plan: j.plan, planText: planSummary(j.plan), bundle: j.bundle, by: j.by, createdAt: j.createdAt, updatedAt: now, status, currentStep,
     phase: status === 'running' ? (currentStep != null && currentStep <= 3 ? 'remote' : 'central') : 'idle', steps, failure, attempts: j.attempts, startStep: j.startStep,
     upload: a.fromStep <= 1 ? { sent: upSent, total: j.bundle.size, at: a.at, ...(upSent >= j.bundle.size ? { doneAt: a.at + STEP_MS } : {}) } : { sent: j.bundle.size, total: j.bundle.size, reused: true },
-    log: demoLog(steps), directorId: status === 'done' ? 'dir_demo_new' : '', existingDirector: j.mode === 'reinstall',
+    log: demoLog(steps), directorId: status === 'done' ? 'dir_demo_new' : '', existingDirector: j.mode === 'reinstall' && !j.resetUnregistered, ...(j.resetUnregistered ? { resetUnregistered: true } : {}),
     stepsMeta: STEPS.filter((s) => s.n >= j.startStep).map((s) => ({ n: s.n, label: s.label, remote: s.remote })),
     ...(j.rollbackAt ? { rollback: { at: j.rollbackAt, ...(status === 'rolledback' ? { doneAt: j.rollbackAt + 8_000, notes: ['매핑 삭제', 'Director 등록 삭제'] } : {}) } } : {}),
   };

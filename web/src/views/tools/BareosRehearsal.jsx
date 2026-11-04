@@ -185,13 +185,13 @@ export default function BareosRehearsal({ directors = [] }) {
       <ReadGuide note="검증은 켜 보기까지만 합니다 — 네트워크를 끊은 채라 핑 · 앱 시험은 하지 않습니다.">
         <div>① 고르기: 법인마다 마지막 백업이 성공한 활성 대상 중 가장 오래 검증하지 않은 VM 부터(돌아가며). 진행 중 복원이 있거나 등록 뒤 위치가 바뀐 VM 은 뺍니다.</div>
         <div>② 회차는 보내기 전에 기록합니다 — 같은 날 다시 돌지 않습니다. 인증이 멈춘 Director 는 정기 검증에서 건너뜁니다.</div>
-        <div>③ 결과는 일일 요약 메일에도 실립니다(설정 › 공통 기본값 · 수집).</div>
+        <div>③ 결과는 일일 요약 메일에도 실립니다(설정 › vCenter 관리 › Bareos 백업 서버 › 공통 기본값 · 수집).</div>
       </ReadGuide>
     </div>
   );
 }
 
-/** 일일 요약 메일 설정(설정 › 공통 기본값 · 수집 안 — 전체 범위 관리자). */
+/** 일일 요약 메일 설정(설정 › vCenter 관리 › Bareos 백업 서버 › 공통 기본값 · 수집 안 — 전체 범위 관리자). */
 export function BareosDigestSettings() {
   const [d, setD] = useState(null);
   const [err, setErr] = useState(null);
