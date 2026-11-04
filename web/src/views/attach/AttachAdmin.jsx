@@ -5,6 +5,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { fetchJson, putJson, downloadFile } from '../../api.js';
 import { attachSizeText } from './attachText.js';
+import { unitText } from '../unitText.js';
 
 export default function AttachAdmin() {
   const [data, setData] = useState(null);
@@ -34,7 +35,7 @@ export default function AttachAdmin() {
       <h3 className="iss-h3">첨부 파일(위키 · 이슈)</h3>
       {data.loadError && <div className="banner bad" style={{ whiteSpace: 'normal' }}>첨부 설정 파일(attach-settings.json)을 읽지 못해 기본 상한으로 동작 중입니다 — 손상본은 옆에 보존했습니다. 원인: {data.loadError}</div>}
       <div>
-        사용 <b>{attachSizeText(u.bytes)}</b> / 상한 {attachSizeText(max)}{pct != null ? ` (${pct}%)` : ''} · 파일 {u.count ?? '—'}개(위키 {u.wiki?.count ?? '—'} · 이슈 {u.issue?.count ?? '—'})
+        사용 <b>{attachSizeText(u.bytes)}</b> / 상한 {attachSizeText(max)}{pct != null ? ` (${pct}%)` : ''} · 파일 {unitText(u.count, '개')}(위키 {unitText(u.wiki?.count, '개')} · 이슈 {unitText(u.issue?.count, '개')})
         {u.missing > 0 && <span className="iss-chip iss-sla warn" style={{ marginLeft: 6 }} title="목록에는 있지만 파일 본체가 없는 첨부 — 백업에서 되살린 포탈이면 첨부를 따로 옮겨야 합니다">본체 없음 {u.missing}</span>}
         {u.orphan > 0 && <span className="iss-chip iss-sla mute" style={{ marginLeft: 6 }} title="첨부 폴더에 있지만 목록에 없는 파일(목록 손상 · 손으로 넣은 파일)">목록 밖 파일 {u.orphan}</span>}
       </div>
