@@ -61,7 +61,7 @@ test('① 첫 오류 줄 · 서명 · 대조', () => {
   assert.deepEqual(LF.compareFirstErrors([{ ok: true, firstError: 'Fatal error: a' }]).items[0].match, 'same', '한 건뿐이면 그 줄이 대표');
 });
 
-// v2.886: 예전 판(2배 크기 · 한 번씩 재기 · 기준 4배)은 CI 병렬 실행에서 비율 16.35 로 흔들렸다(PR #906 CI — 대상 코드는 그대로, 로컬 3/3 통과).
+// v2.887: 예전 판(2배 크기 · 한 번씩 재기 · 기준 4배)은 CI 병렬 실행에서 비율 16.35 로 흔들렸다(PR #906 CI — 대상 코드는 그대로, 로컬 3/3 통과).
 //   ReDoS 회귀는 비율로 재되(docs/rules/common.md) 8배 크기 · 작은 쪽 · 큰 쪽 번갈아 5회 각각 최솟값 · 기준 24배(선형 약 8 · 제곱 약 64) — wiki 마크다운(#905)과 같은 틀.
 test('① ReDoS — 따옴표 · 공백 긴 줄도 선형(길이 8배에 시간 24배 미만 · 번갈아 5회 최솟값)', () => {
   const mk = (n) => `Fatal error: ${'"'.repeat(n)} ${' '.repeat(n)}x`;

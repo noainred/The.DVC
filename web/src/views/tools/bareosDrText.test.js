@@ -90,3 +90,42 @@ describe('재해 복구 1차 — 반증 반영', () => {
     expect(T.drRows([job], 'vc-a', pts, now, () => '', now)[0].why).toMatch(/최근 보냄/);
   });
 });
+
+describe('재해 복구 2차 — 복구 순서(단계)', () => {
+  const rows = ['a', 'b', 'c'].map((id) => ({ id, point: { jobid: 7 }, at: { dc: 'DC-OLD', folder: '/x', vmName: `VM-${id}` }, why: '' }));
+  const map = { 'DC-OLD': { dc: 'DC-NEW', cluster: 'CL-1', datastore: '' } };
+  it('단계 배정 · 보낼 모양 · 빈 단계는 화면이 먼저 막는다', () => {
+    const waves = [T.drNewWave(0, 4), { ...T.drNewWave(1, 99), verify: true }];
+    expect(waves.map((w) => [w.name, w.concurrency])).toEqual([['1단계', 4], ['2단계', T.DR_CHUNK]]);
+    const assign = { b: 1, c: 7 };
+    expect([T.drWaveOf(assign, 'a', 2), T.drWaveOf(assign, 'b', 2), T.drWaveOf(assign, 'c', 2)]).toEqual([0, 1, 0]);
+    const rw = T.drRunWaves(waves, assign, rows, map);
+    expect(rw[0].items.map((x) => x.id)).toEqual(['a', 'c']);
+    expect(rw[1]).toEqual({ name: '2단계', concurrency: T.DR_CHUNK, verify: true, items: [{ id: 'b', jobid: 7, newVm: { name: 'VM-b', dc: 'DC-NEW', cluster: 'CL-1' } }] });
+    expect(T.drWavesIssue(rw)).toBe('');
+    expect(T.drWavesIssue(T.drRunWaves(waves, {}, rows, map))).toMatch(/2단계.*VM 이 없습니다/);
+    expect(T.drWavesIssue([{ name: 'x', concurrency: 0, items: [{}] }])).toMatch(/1~50/);
+    expect(T.drWavesIssue([])).toMatch(/1~10/);
+    expect(T.drWavesIssue([{ name: 'x', concurrency: 1, items: Array.from({ length: T.DR_ITEMS_MAX + 1 }, () => ({})) }])).toMatch(/1000대/);
+  });
+  it('단계 지우기 — 그 VM 은 앞 단계로 · 뒤 단계 번호를 당긴다', () => {
+    const waves = [T.drNewWave(0), T.drNewWave(1), T.drNewWave(2)];
+    const r = T.drRemoveWave(waves, { a: 1, b: 2, c: 0 }, 1);
+    expect([r.waves.length, r.assign]).toEqual([2, { a: 0, b: 1, c: 0 }]);
+    expect(T.drRemoveWave(waves, { a: 0, b: 1 }, 0).assign).toEqual({ a: 0, b: 0 });
+    expect(T.drRemoveWave([T.drNewWave(0)], { a: 0 }, 0).waves.length).toBe(1);
+    expect(T.drRemoveWave([T.drNewWave(0), { ...T.drNewWave(1), name: 'DB' }, T.drNewWave(2)], {}, 0).waves.map((w) => w.name)).toEqual(['DB', '2단계'], '기본 이름만 새 자리에 맞춘다');
+    expect([T.drWaveLabel({ name: '2단계' }, 1), T.drWaveLabel({ name: 'DB' }, 1), T.drWaveLabel({ name: ' ' }, 0)]).toEqual(['2단계', '2단계 · DB', '1단계']);
+  });
+  it('진행 카드 — 상태 줄 · 보일 회차 · 회차에 든 VM 은 고르기에서 막는다', () => {
+    expect(T.drWaveCountsText({ total: 15, counts: { queued: 10, ok: 3, sent: 2 } })).toBe('성공 3 · 복원 중 2 · 대기 10 / 15대');
+    expect(T.drWaveCountsText({})).toBe('— / —', '못 읽은 대수에 단위를 붙이지 않는다');
+    const runs = [{ id: 'o', vcenterId: 'vc-a', state: 'done', at: 5 }, { id: 'p', vcenterId: 'vc-a', state: 'paused', at: 1 }, { id: 'q', vcenterId: 'vc-b', state: 'running', at: 9 }];
+    expect(T.drCurrentRun(runs, 'vc-a').id).toBe('p');
+    expect(T.drCurrentRun(runs.filter((r) => r.id !== 'p'), 'vc-a').id).toBe('o');
+    expect(T.drCurrentRun(runs, 'vc-z')).toBe(null);
+    const run = { state: 'running', waves: [{ items: [{ id: 'a', state: 'ok' }, { id: 'b', state: 'sent' }] }, { items: [{ id: 'c', state: 'queued' }] }] };
+    expect([...T.drRunIds(run)].sort()).toEqual(['b', 'c']);
+    expect(T.drRunIds({ ...run, state: 'stopped' }).size).toBe(0);
+  });
+});

@@ -1,5 +1,5 @@
 /**
- * issueText2885.test.js — v2.886 C-3 화면 판정: 시간 입력 · 기록/예상 · SLA 배지 · 단계 문구 · 버전 비교 · 이력 문구.
+ * issueText2885.test.js — v2.887 C-3 화면 판정: 시간 입력 · 기록/예상 · SLA 배지 · 단계 문구 · 버전 비교 · 이력 문구.
  * 서버 모양과의 대조: 분 문구는 server/src/issues/store.js minutesText 와 같은 입력에 같은 답.
  */
 import { describe, it, expect } from 'vitest';

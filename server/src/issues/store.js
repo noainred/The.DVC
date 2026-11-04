@@ -64,10 +64,10 @@ export const LIMITS = Object.freeze({
   childMax: 200,
   // v2.883 연결 — 이슈마다 저장하는 연결 수(반대 방향은 읽을 때 계산하므로 세지 않는다)
   linkMax: 30,
-  // v2.886 C-3 시간 추적 · 버전 — 예상은 90일(분) · 작업 기록은 이슈마다 200개 · 한 줄 1~1440분(하루) · 메모 200자 · 버전 40자
+  // v2.887 C-3 시간 추적 · 버전 — 예상은 90일(분) · 작업 기록은 이슈마다 200개 · 한 줄 1~1440분(하루) · 메모 200자 · 버전 40자
   estimateMaxMin: 60 * 24 * 90, worklogMax: 200, worklogMaxMin: 1440, worklogNote: 200, version: 40,
 });
-/** v2.886 버전 표기 — 포탈 버전(2.885.0) · 사내 표기(R24.11 · hotfix-3). 영숫자로 시작하고 영숫자 . _ - 만. */
+/** v2.887 버전 표기 — 포탈 버전(2.885.0) · 사내 표기(R24.11 · hotfix-3). 영숫자로 시작하고 영숫자 . _ - 만. */
 export const VERSION_RE = /^[0-9A-Za-z][0-9A-Za-z._-]{0,39}$/;
 /** v2.883 연결 종류 — 만든 쪽에만 저장하고 반대 방향(INVERSE)은 읽을 때 계산한다(상대 이슈의 쓰기 범위가 없어도 된다). */
 export const LINK_TYPES = Object.freeze(['blocks', 'blockedBy', 'relates', 'duplicates', 'duplicatedBy']);
@@ -637,14 +637,14 @@ function timeField(v, field) {
   if (!Number.isFinite(n) || n <= 0) throw fieldError(field, '시각을 읽지 못했습니다');
   return Math.trunc(n);
 }
-/** v2.886 예상(분): 빈 값 = 없음(null) · 0~estimateMaxMin 정수. */
+/** v2.887 예상(분): 빈 값 = 없음(null) · 0~estimateMaxMin 정수. */
 function estimateField(v) {
   if (v == null || v === '') return null;
   const n = Number(v);
   if (!Number.isInteger(n) || n < 0 || n > LIMITS.estimateMaxMin) throw fieldError('estimateMin', `0~${LIMITS.estimateMaxMin} 분 정수여야 합니다`);
   return n;
 }
-/** v2.886 수정/영향 버전: 빈 값 = 없음('') · VERSION_RE. */
+/** v2.887 수정/영향 버전: 빈 값 = 없음('') · VERSION_RE. */
 function versionField(v, field) {
   if (v == null || v === '') return '';
   if (typeof v !== 'string' || !VERSION_RE.test(v.trim())) throw fieldError(field, '버전은 영숫자로 시작하는 40자 이하(영숫자 . _ - — 예: 2.885.0)여야 합니다');
@@ -803,7 +803,7 @@ export function summary(x, idx = null, access = FULL_ACCESS, now = Date.now()) {
     progressAuto: r.auto, childCount: r.childCount, childDone: r.childDone,
     // v2.883 — 이 이슈를 막고 있는 열린 이슈 수(볼 수 있는 것만 — 카드의 '차단됨')
     blockedOpen: relationsOf(x, ix, access).filter((l) => l.type === 'blockedBy' && l.open).length,
-    // v2.886 C-3 — 시간 추적 · 버전 · SLA(설정이 꺼져 있거나 대상이 아니면 null)
+    // v2.887 C-3 — 시간 추적 · 버전 · SLA(설정이 꺼져 있거나 대상이 아니면 null)
     estimateMin: Number.isInteger(x.estimateMin) ? x.estimateMin : null, spentMin: spentOf(x), worklogCount: worklogOf(x).length,
     fixVersion: x.fixVersion || '', affectsVersion: x.affectsVersion || '',
     sla: slaOf(x, loadIssueSettings().sla, now),
@@ -827,7 +827,7 @@ export function viewIssue(x, me = '', access = FULL_ACCESS) {
     createdBy: x.createdBy || x.reporter || '', updatedBy: x.updatedBy || '',
     comments: commentsOf(x).map((c) => ({ id: c.id, author: c.author, body: c.body, createdAt: c.createdAt })),
     history: historyOf(x), historyDropped: Number(x.historyDropped) || 0,
-    worklog: worklogOf(x).map((w) => ({ id: w.id, by: w.by, at: w.at, on: w.on || '', minutes: w.minutes, note: w.note || '' })).reverse(), // v2.886 최신 먼저
+    worklog: worklogOf(x).map((w) => ({ id: w.id, by: w.by, at: w.at, on: w.on || '', minutes: w.minutes, note: w.note || '' })).reverse(), // v2.887 최신 먼저
   };
 }
 
@@ -891,7 +891,7 @@ function queryRow(x, idx, ctx, access = FULL_ACCESS) {
     progress: (() => { const r = rollupOf(x, idx); return r.auto ? r.pct : (Number.isInteger(x.progress) ? x.progress : null); })(),
     dueAt: x.dueAt ?? null, createdAt: x.createdAt, updatedAt: x.updatedAt || x.createdAt, closedAt: x.closedAt ?? null,
     docs: ctx.docs ? (ctx.docs(x.key) || []) : [],
-    fixVersion: x.fixVersion || '', affectsVersion: x.affectsVersion || '', sla: slaQueryState(slaOf(x, ctx.sla || loadIssueSettings().sla, ctx.now)), // v2.886
+    fixVersion: x.fixVersion || '', affectsVersion: x.affectsVersion || '', sla: slaQueryState(slaOf(x, ctx.sla || loadIssueSettings().sla, ctx.now)), // v2.887
   };
 }
 function queryError(parsed) {
@@ -1037,7 +1037,7 @@ export function createIssue(body, user, { access = FULL_ACCESS, known = null, au
     assignee, reporter: user,
     watchers: watchersField(b.watchers), labels: labelsField(b.labels), component: text(b.component, LIMITS.component, 'component'),
     dueAt: timeField(b.dueAt, 'dueAt'),
-    // v2.886 C-3(요청 등록은 받지 않는다 — b 에 없다)
+    // v2.887 C-3(요청 등록은 받지 않는다 — b 에 없다)
     ...(requestOnly ? {} : { estimateMin: estimateField(b.estimateMin), fixVersion: versionField(b.fixVersion, 'fixVersion'), affectsVersion: versionField(b.affectsVersion, 'affectsVersion') }),
     worklog: [],
     createdAt: now, createdBy: user, updatedAt: now, updatedBy: user, closedAt: status === 'done' ? now : null,
@@ -1089,7 +1089,7 @@ export function updateIssue(key, body, user, { access = FULL_ACCESS, known = nul
   if (has('labels')) set('labels', labelsField(b.labels));
   if (has('component')) set('component', text(b.component, LIMITS.component, 'component'));
   if (has('watchers')) set('watchers', watchersField(b.watchers));
-  // v2.886 C-3 — 예상 · 수정/영향 버전
+  // v2.887 C-3 — 예상 · 수정/영향 버전
   if (has('estimateMin')) { const v = estimateField(b.estimateMin); if (v !== (Number.isInteger(x.estimateMin) ? x.estimateMin : null)) { next.estimateMin = v; entries.push({ at: now, by: user, field: 'estimate', from: x.estimateMin != null ? minutesText(x.estimateMin) : '', to: v != null ? minutesText(v) : '' }); } }
   if (has('fixVersion')) set('fixVersion', versionField(b.fixVersion, 'fixVersion'));
   if (has('affectsVersion')) set('affectsVersion', versionField(b.affectsVersion, 'affectsVersion'));
@@ -1113,10 +1113,10 @@ export function updateIssue(key, body, user, { access = FULL_ACCESS, known = nul
   if (has('body') && x.body !== next.body) entries.push({ at: now, by: user, field: 'body', from: '', to: '(본문 수정)' });
   const changed = entries.length > 0 || (has('body') && x.body !== next.body);
   if (!changed) return viewIssue(x, user, access);
-  return viewIssue(replace(c, next, entries, user), user, access); // v2.886: 범위를 넘긴다(빠지면 연결 · 에픽이 범위 밖까지 보였다)
+  return viewIssue(replace(c, next, entries, user), user, access); // v2.887: 범위를 넘긴다(빠지면 연결 · 에픽이 범위 밖까지 보였다)
 }
 
-/* ───── v2.886 C-3 작업 기록(시간 추적) ───── */
+/* ───── v2.887 C-3 작업 기록(시간 추적) ───── */
 const ON_RE = /^\d{4}-\d{2}-\d{2}$/;
 /** 작업 기록 더하기 — 쓰기 범위 · 분(1~1440 정수) · 한 날(YYYY-MM-DD, 빈 값 = 오늘 · 미래 불가) · 메모. 이슈마다 200개(넘으면 409). */
 export function addWorklog(key, body, user, { access = FULL_ACCESS, now = Date.now() } = {}) {

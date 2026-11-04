@@ -182,7 +182,7 @@ export function historyText(h) {
   if (f === 'parent') return h.to ? `${who}상위 ${h.from || '없음'} → ${h.to}` : `${who}상위에서 뺌(${h.from || '—'})`;
   if (f === 'sprint') return `${who}스프린트 ${h.note || `${h.from || '백로그'} → ${h.to || '백로그'}`}`;
   if (f === 'link') return h.to ? `${who}연결 더함 — ${linkLine(h.to)}` : `${who}연결 뺌 — ${linkLine(h.from)}`;
-  // v2.886 C-3 — 작업 기록 · 예상 · 버전
+  // v2.887 C-3 — 작업 기록 · 예상 · 버전
   if (f === 'worklog') return h.to ? `${who}작업 기록 ${h.to}${h.note ? ` — ${h.note}` : ''}` : `${who}작업 기록 지움 — ${h.from || '—'}`;
   if (f === 'estimate') return `${who}예상 ${h.from || '없음'} → ${h.to || '없음'}`;
   if (f === 'fixVersion') return `${who}수정 버전 ${h.from || '없음'} → ${h.to || '없음'}`;
@@ -344,7 +344,7 @@ export const QUERY_FIELD_TEXT = Object.freeze({
   key: '키', title: '제목', text: '제목 · 본문 · 댓글', type: '유형', status: '상태', priority: '우선순위', assignee: '담당자', reporter: '보고자', watcher: '관찰자',
   vcenter: '법인', label: '라벨', component: '컴포넌트', epic: '에픽', parent: '상위', sprint: '스프린트', progress: '진행률', due: '기한', created: '생성',
   updated: '갱신', closed: '완료', doc: '관련 문서',
-  fixversion: '수정 버전', affectsversion: '영향 버전', sla: 'SLA', // v2.886
+  fixversion: '수정 버전', affectsversion: '영향 버전', sla: 'SLA', // v2.887
 });
 const OP_TEXT = { '=': '=', '!=': '≠', in: '∈', 'not in': '∉', '>': '>', '>=': '≥', '<': '<', '<=': '≤', '~': '포함', 'is empty': '비어 있음', 'is not empty': '비어 있지 않음' };
 const CODE_TEXT = { status: STATUS_TEXT, type: TYPE_TEXT, priority: PRIORITY_TEXT, sla: { breached: '초과', warning: '임박', paused: '멈춤', late: '늦게 지킴', ok: '정상', none: '대상 아님' } };
@@ -480,7 +480,7 @@ export const STATUS_CONFIRM_FLAG = Object.freeze({ 'open-children': 'closeChildr
 
 
 
-/* ───── v2.886 C-3 시간 추적 · SLA · 버전 ───── */
+/* ───── v2.887 C-3 시간 추적 · SLA · 버전 ───── */
 /** 분 → '1h 30m'(서버 issues/store.js minutesText 와 같은 모양). 못 읽으면 '—'. */
 export function minutesText(m) {
   if (!Number.isFinite(m) || m < 0) return '—';
@@ -557,7 +557,7 @@ export function fixVersionState(fixVersion, portalVersion) {
 }
 
 /**
- * v2.886 C-2 CSV 내보내기 매개변수 — 화면의 걸러보기(filterRows)를 서버 목록 매개변수로 옮긴다(서버가 범위 → 같은 조건으로 다시 거른다).
+ * v2.887 C-2 CSV 내보내기 매개변수 — 화면의 걸러보기(filterRows)를 서버 목록 매개변수로 옮긴다(서버가 범위 → 같은 조건으로 다시 거른다).
  * 미할당('__none')은 assignee='' · 공용('__none')은 vcenterId='' · '내 이슈만' 은 assignee=me. 검색 글자는 서버 q(본문까지 본다 — 화면보다 넓을 수 있다).
  */
 export function csvParams(filters = {}, me = '', { done = 'recent', query = '' } = {}) {
@@ -571,7 +571,7 @@ export function csvParams(filters = {}, me = '', { done = 'recent', query = '' }
   return p;
 }
 
-/** v2.886 필터 화면이 마지막 검색식을 기억하는 세션 저장 키(IssuesPlus FiltersView) — 다른 화면이 검색식으로 필터 화면을 열 때도 쓴다. */
+/** v2.887 필터 화면이 마지막 검색식을 기억하는 세션 저장 키(IssuesPlus FiltersView) — 다른 화면이 검색식으로 필터 화면을 열 때도 쓴다. */
 export const ISSUE_QUERY_KEY = 'issues.query';
 /** 다른 화면(릴리스 노트)에서 검색식으로 이슈 필터 화면을 연다. */
 export function openIssueQuery(query) {

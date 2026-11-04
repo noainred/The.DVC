@@ -21,7 +21,7 @@ export const FIELDS = Object.freeze({
   key: 'key', title: 'text', text: 'fulltext', type: 'enum', status: 'enum', priority: 'enum', assignee: 'name', reporter: 'name',
   watcher: 'names', vcenter: 'vcenter', label: 'names', component: 'text', epic: 'key', parent: 'key', sprint: 'sprint',
   progress: 'num', due: 'date', created: 'date', updated: 'date', closed: 'date', doc: 'doc',
-  // v2.886 C-3 — 수정/영향 버전(글) · SLA 상태(breached · warning · paused · late · ok · none)
+  // v2.887 C-3 — 수정/영향 버전(글) · SLA 상태(breached · warning · paused · late · ok · none)
   fixversion: 'text', affectsversion: 'text', sla: 'state',
 });
 const ENUMS = { type: TYPES, status: STATUS_ORDER, priority: PRIO, sla: ['breached', 'warning', 'paused', 'late', 'ok', 'none'] };
