@@ -594,6 +594,12 @@ export function reportCards(f = {}) {
  * 자주 보는 경고·오류 줄의 뜻과 조치(현장 로그 실측 — 2026-10-30). 처음 맞는 규칙 하나만 쓴다. 모르는 줄은 해석하지 않는다(지어내지 않는다).
  */
 const ISSUE_HINTS = Object.freeze([
+  // v2.877(2026-11-04 사용자 로그 JobId 32 — 진짜 원인은 이 한 줄이고 뒤 오류는 그 연쇄였다): FD 플러그인이 vCenter 인증서를 받으려고 vcserver:443 에 붙다 실패.
+  //   이름 풀이 실패는 따로(주소 철자 · DNS) — 나머지(Connection refused · timed out · No route to host …)는 접속 실패로 묶는다. 원인을 하나로 단정하지 않는다.
+  [/Could not fetch SSL Cert.{0,200}(?:Name or service not known|name resolution|nodename nor servname)/i, 'FD 서버가 vCenter(vcserver) 이름을 풀지 못했습니다 — INI 의 vcserver 철자와 FD 서버의 DNS · /etc/hosts 를 확인하세요(FD 서버에서 getent hosts <주소>).'],
+  [/Could not fetch SSL Cert/i, 'FD 서버가 vCenter(vcserver):443 에 접속하지 못했습니다 — INI 의 vcserver 주소가 vCenter 가 맞는지 · vCenter 웹 서비스 · 방화벽을 확인하세요(FD 서버에서 nc -vz <주소> 443). 이 줄 뒤의 오류는 대개 이 실패의 연쇄입니다.'],
+  [/job is already cancelled/i, '잡이 이미 취소된 뒤에 나온 줄입니다(앞선 치명 오류 또는 사람의 취소) — 원인은 위의 첫 오류 줄에 있습니다.'],
+  [/comm line to SD dropped/i, 'Director 와 SD 사이 연결이 끊겼습니다 — 앞에 치명 오류가 있으면 그 연쇄(잡 취소)이고, 없으면 Director↔SD 네트워크와 bareos-sd 상태를 확인하세요.'],
   [/Python 3\.10 or newer is required/i, 'FD 의 pyVmomi 가 9.x 입니다 — Python 3.9 FD 는 pyVmomi 8.x 로 바꾸고 bareos-fd 를 재시작하세요.'],
   [/Permission denied/i, '저장 경로에 bareos 계정이 쓸 수 없습니다 — 폴더 소유자·NFS 권한·SELinux 를 확인하세요.'],
   [/Please mount|label a new one/i, 'SD 가 쓸 볼륨을 열지 못해 기다렸습니다 — 바로 위 줄(열기 실패 원인)을 먼저 보세요.'],
