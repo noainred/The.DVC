@@ -196,7 +196,7 @@ export async function recentJobs(session, days = 2) {
  * 작업 로그(`list joblog jobid=`) → 줄 배열. 상한을 넘으면 **뒤쪽**을 남긴다(끝의 요약·오류가 중요하다).
  * @returns {{ lines: string[], truncated: boolean, total: number }}
  */
-export async function jobLog(session, jobid, { maxBytes = 256 * 1024, maxLines = 4000 } = {}) {
+export async function jobLog(session, jobid, { maxBytes = 256 * 1024, maxLines = 4000, firstErrorOf = null } = {}) {
   // 원문 상한은 넉넉히(16MB) — 예전 1MB 는 로그가 길면 too-large 502 가 나서 '뒤쪽 보존' 이 동작하지 않았다(C9-3 — 재현). 자르기는 아래에서.
   const rows = firstArray(await session.call(`list joblog jobid=${asId(jobid)}`, { maxBytes: Math.max(maxBytes * 4, 16 * 1024 * 1024) }));
   const lines = [];
@@ -206,10 +206,12 @@ export async function jobLog(session, jobid, { maxBytes = 256 * 1024, maxLines =
     for (const ln of t.split('\n')) if (ln.trim()) lines.push(`${at}${ln}`.replace(/[\u0000-\u0008\u000b-\u001f\u007f]/g, ' '));
   }
   const total = lines.length;
+  // v2.885(반증 L3): 첫 오류 줄은 **자르기 전** 전체 줄에서 고른다 — 뒤쪽만 남긴 줄에서 고르면 긴 로그의 '첫 오류' 가 연쇄 줄이 됐다(묶음 로그 · 실패 메일 원인)
+  const firstError = typeof firstErrorOf === 'function' ? firstErrorOf(lines) : undefined;
   let keep = lines.slice(-maxLines);
   let size = keep.reduce((s, l) => s + Buffer.byteLength(l) + 1, 0);
   while (keep.length && size > maxBytes) { size -= Buffer.byteLength(keep[0]) + 1; keep = keep.slice(1); }
-  return { lines: keep, truncated: keep.length < total, total };
+  return { lines: keep, truncated: keep.length < total, total, ...(firstError !== undefined ? { firstError } : {}) };
 }
 
 /** 실행 중 잡 취소. */

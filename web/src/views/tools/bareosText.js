@@ -593,7 +593,8 @@ export function reportCards(f = {}) {
 /**
  * 자주 보는 경고·오류 줄의 뜻과 조치(현장 로그 실측 — 2026-10-30). 처음 맞는 규칙 하나만 쓴다. 모르는 줄은 해석하지 않는다(지어내지 않는다).
  */
-const ISSUE_HINTS = Object.freeze([
+// v2.885: 서버 실패 메일(bareos/issueHints.js)이 같은 표를 쓴다 — 시험(bareosMailCause)이 두 표를 글자까지 대조한다(한쪽만 고치지 말 것)
+export const ISSUE_HINTS = Object.freeze([
   // v2.877(2026-11-04 사용자 로그 JobId 32 — 진짜 원인은 이 한 줄이고 뒤 오류는 그 연쇄였다): FD 플러그인이 vCenter 인증서를 받으려고 vcserver:443 에 붙다 실패.
   //   이름 풀이 실패는 따로(주소 철자 · DNS) — 나머지(Connection refused · timed out · No route to host …)는 접속 실패로 묶는다. 원인을 하나로 단정하지 않는다.
   [/Could not fetch SSL Cert.{0,200}(?:Name or service not known|name resolution|nodename nor servname)/i, 'FD 서버가 vCenter(vcserver) 이름을 풀지 못했습니다 — INI 의 vcserver 철자와 FD 서버의 DNS · /etc/hosts 를 확인하세요(FD 서버에서 getent hosts <주소>).'],
