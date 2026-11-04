@@ -153,8 +153,11 @@ test('DB part_latest: vCenter 단위 교체 · 값 모름 파티션은 unknown �
   assert.equal(rows.length, 3, '빈 수집은 직전 값을 지우지 않는다');
   const base = await db.partUsedAt(['vc-a:vm1'], NOW - 7 * 86_400_000);
   assert.equal(base.get('vc-a:vm1\u0000C:\\'), 90, '7일 전 기준 = 그때 유효하던 기록');
-  await new Promise((r) => setTimeout(r, 20));
-  assert.ok(got.includes('vc-a') && got.includes('vc-b'));
+  // 커밋 알림은 setImmediate 로 미뤄 부른다 — 고정 20ms 한 번만 기다리면 CI 가 바빠 이벤트 루프가 20ms 넘게 멈출 때
+  // 타이머가 알림보다 먼저 끝나 실패했다(2026-11-04 CI 1회 · 로컬 재현 안 됨). 조건이 맞을 때까지 짧게 반복해 기다린다(상한 5초).
+  const until = Date.now() + 5_000;
+  while (!(got.includes('vc-a') && got.includes('vc-b')) && Date.now() < until) await new Promise((r) => setTimeout(r, 10));
+  assert.ok(got.includes('vc-a') && got.includes('vc-b'), `커밋 알림: ${JSON.stringify(got)}`);
   const pr = await db.pruneOrphanVcenters(new Set(['vc-a']));
   assert.ok(pr.ok);
   assert.equal((await db.listPartLatest(['vc-b'])).length, 0, '지운 vCenter 의 최신 값도 지운다');
