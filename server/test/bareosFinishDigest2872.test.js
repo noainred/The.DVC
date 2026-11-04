@@ -53,7 +53,7 @@ test('② B2-02 vCenter 줄의 Bareos 마무리는 업그레이드가 기다린�
   const [r1, r2] = await Promise.all([p1, p2]);
   assert.deepEqual([r1.ok, r2.ok], [true, true]);
   assert.deepEqual(ex.runningBareosFinishes(), [], '끝나면 빠진다');
-  assert.match(src('../src/upgrade/manager.js'), /\.\.\.bareosWork\(\), \.\.\.bareosFinishes\(\)\]/, '대기 목록에 들어간다');
+  assert.match(src('../src/upgrade/manager.js'), /function bareosWork\(\) \{[\s\S]{0,200}runningBareosFinishes\(\)[\s\S]{0,200}return \[\.\.\.a, \.\.\.b\];/, '대기 목록(bareosWork)에 들어간다');
 });
 
 test('③ B3-05 · B3-07 끄기 전 전원 실측 · 로그인 실패는 사유를 남긴다', () => {
