@@ -196,10 +196,11 @@ export function pickedSize(jobs) {
 }
 
 /** 보기(간단 목록 · 폴더 표) — 브라우저에 기억(사람별 편의 · 못 읽으면 기본). */
-export const RESTORE_VIEWS = Object.freeze([['list', '간단 목록'], ['table', '폴더 표']]);
+export const RESTORE_VIEWS = Object.freeze([['list', '간단 목록'], ['table', '폴더 표'], ['dr', '재해 복구']]);
 const VIEW_KEY = 'bareos.restore.view';
 export function loadRestoreView(storage) {
-  try { const v = storage?.getItem(VIEW_KEY); return RESTORE_VIEWS.some(([k]) => k === v) ? v : 'list'; } catch { return 'list'; }
+  // 재해 복구는 기억하지 않는다 — 평소 복원 화면을 열 때 재해 복구 화면이 먼저 뜨지 않게(드문 작업 · 법인째 복원)
+  try { const v = storage?.getItem(VIEW_KEY); return v !== 'dr' && RESTORE_VIEWS.some(([k]) => k === v) ? v : 'list'; } catch { return 'list'; }
 }
 export function saveRestoreView(v, storage) {
   try { storage?.setItem(VIEW_KEY, v); } catch { /* 사생활 보호 창 등 — 기억하지 못해도 된다 */ }

@@ -12,7 +12,8 @@ import { STable } from '../../components/STable.jsx';
 import Select from '../../components/Select.jsx';
 import { requireChanged } from '../changeResult.js';
 import BareosRehearsal from './BareosRehearsal.jsx';
-import BareosRestoreTable, { FolderBox } from './BareosRestoreTable.jsx';   // v2.866 폴더 표(시안 ① 일반 복원)
+import BareosRestoreTable, { FolderBox } from './BareosRestoreTable.jsx';
+import BareosDisaster from './BareosDisaster.jsx';   // 재해 복구 1차(시안 ②)   // v2.866 폴더 표(시안 ① 일반 복원)
 import { RESTORE_VIEWS, loadRestoreView, saveRestoreView } from './bareosRestoreTree.js';
 import { Note, ReadGuide, FilterChip } from './BareosBits.jsx';
 import { stateBadge, withRelayWait, outcomeUnknown, unknownOutcomeText, driftText, levelLabel } from './bareosText.js';
@@ -174,6 +175,7 @@ export default function BareosRestore({ d, reload, preselect = '', onPreselectUs
   const planOk = !!check?.plan?.ok;
   const many = picked.length > 1;
   const tableMode = view === 'table';
+  const drMode = view === 'dr';
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12, minWidth: 0 }}>
@@ -185,13 +187,15 @@ export default function BareosRestore({ d, reload, preselect = '', onPreselectUs
         <div role="group" aria-label="고르는 방식" className="flex gap wrap" style={{ rowGap: 6 }}>
           {RESTORE_VIEWS.map(([k, l]) => <FilterChip key={k} on={view === k} onClick={() => setView(k)}>{l}</FilterChip>)}
         </div>
+        {drMode && <span className="muted" style={{ fontSize: 12 }}>vCenter 를 다시 설치한 뒤 법인째 되살리기 — 백업 당시 폴더에서 고르고 새 vCenter 위치에 짝짓습니다</span>}
         {tableMode && step > 0 && <button type="button" className="tab" style={{ padding: '3px 10px', fontSize: 12 }} disabled={busy} onClick={resetWizard}>← 폴더 표로(고른 VM 은 그대로)</button>}
       </div>
+      {drMode && <BareosDisaster d={d} reload={reload} onBatch={setBatchId} />}
       {tableMode && step === 0 && (
         <BareosRestoreTable jobs={jobs} directors={d.directors || []} picked={picked} toggle={toggle} lockedDir={lockedDir} onNext={loadPoints} onClear={() => { setPicked([]); setCapNote(''); resetWizard(); }} />
       )}
       {/* 트리는 좁게(최대 420px) · 마법사가 나머지 — 1440 에서 2단계 칸(데이터스토어 · 네트워크)이 가로 스크롤 뒤로 숨지 않게(Chromium 확인) · 좁으면 위아래로 */}
-      {(!tableMode || step > 0) && <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, alignItems: 'flex-start', minWidth: 0 }}>
+      {!drMode && (!tableMode || step > 0) && <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, alignItems: 'flex-start', minWidth: 0 }}>
         {/* ── 왼쪽: 법인 › 폴더 › VM ── (폴더 표 보기에서는 표가 대신한다) */}
         {!tableMode && <div className="card" data-bareos-restore-tree="" style={{ padding: 12, minWidth: 0, flex: '1 1 300px', maxWidth: '100%', display: 'flex', flexDirection: 'column', gap: 8, boxSizing: 'border-box' }}>
           <div style={ROW}>
