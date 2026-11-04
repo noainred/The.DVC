@@ -1,0 +1,665 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>서비스 인벤토리 — VM + 베어메탈 통합 (시안 A · 3차)</title>
+<style>
+/* 포탈 web/src/styles.css :root 토큰과 같은 값만 쓴다(새 hex 를 흩뿌리지 않는다). */
+:root{--bg:#0a0e17;--bg-soft:#111726;--panel:#141b2d;--panel-2:#1a2236;--border:#243049;--border-soft:#1f2a40;--panel-deep:#0f1626;
+  --text:#e6edf6;--text-dim:#8b9bb4;--text-faint:#5d6b85;--accent:#3b82f6;--accent-2:#22d3ee;--green:#22c55e;--amber:#f59e0b;--red:#ef4444;--purple:#a855f7;--mint:#34e0b4;
+  --hover:rgba(59,130,246,.10);--mono:'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;--radius:12px}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--text);font-family:Inter,"Noto Sans KR","Apple SD Gothic Neo",system-ui,sans-serif;font-size:13px;overflow-x:hidden}
+.wrap{width:100%;max-width:1440px;margin:0 auto;padding:16px 16px 40px;display:flex;flex-direction:column;gap:12px;min-width:0}
+@media(min-width:900px){.wrap{padding:18px 24px 48px}}
+.card{background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);min-width:0}
+.muted{color:var(--text-dim)}.faint{color:var(--text-faint)}.mono{font-family:var(--mono)}
+.hdr{display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:10px 14px;border-bottom:1px solid var(--border-soft)}
+.hdr .back{color:var(--text-dim);text-decoration:none;font-weight:600}
+.hdr h1{margin:0;font-size:16px;font-weight:800;display:flex;align-items:center;gap:8px;min-width:0;flex-wrap:wrap}
+.sp{flex:1}
+.badge{display:inline-flex;align-items:center;height:20px;padding:0 8px;border-radius:999px;font-size:11px;font-weight:700;white-space:nowrap;border:1px solid var(--border)}
+.badge.blue{background:rgba(59,130,246,.16);color:#93c5fd;border-color:transparent}
+.badge.amber{background:rgba(245,158,11,.16);color:#fcd34d;border-color:transparent}
+.badge.red{background:rgba(239,68,68,.16);color:#fca5a5;border-color:transparent}
+.badge.green{background:rgba(34,197,94,.16);color:#86efac;border-color:transparent}
+.badge.gray{background:rgba(139,155,180,.14);color:#aebbd0;border-color:transparent}
+.badge.teal{background:rgba(45,212,191,.16);color:#5eead4;border-color:transparent}
+.badge.purple{background:rgba(168,85,247,.16);color:#d8b4fe;border-color:transparent}
+.tier{display:inline-flex;align-items:center;justify-content:center;width:22px;height:20px;border-radius:6px;font-size:11px;font-weight:800}
+.tier.t1{background:rgba(239,68,68,.2);color:#fca5a5}.tier.t2{background:rgba(245,158,11,.18);color:#fcd34d}.tier.t3{background:rgba(139,155,180,.14);color:#aebbd0}
+select,input{background:var(--panel-2);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:7px 10px;font:inherit;min-width:0;max-width:100%}
+input[type=checkbox]{width:15px;height:15px;padding:0;accent-color:var(--accent)}
+.btn{display:inline-flex;align-items:center;gap:6px;min-height:32px;padding:0 12px;border-radius:8px;border:1px solid var(--border);background:var(--panel-2);color:var(--text);font:inherit;font-size:12.5px;font-weight:600;cursor:pointer;white-space:nowrap}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+.btn.sm{min-height:26px;padding:0 9px;font-size:12px}
+.btn[disabled]{opacity:.5;cursor:not-allowed}
+.info{padding:10px 14px;border-left:3px solid var(--accent-2);font-size:13px;line-height:1.5}
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(165px,1fr));gap:10px}
+.kpi{padding:12px 14px;display:flex;flex-direction:column;gap:5px;cursor:pointer;border-left:3px solid var(--border)}
+.kpi.on{outline:1px solid var(--accent)}
+.kpi .lbl{font-size:12px;font-weight:600;color:var(--text-dim)}
+.kpi .big{font-size:26px;font-weight:800;letter-spacing:-.01em;line-height:1.1}
+.kpi .sub{font-size:11.5px;color:var(--text-dim)}
+.layout{display:grid;grid-template-columns:1fr;gap:12px;min-width:0}
+@media(min-width:1100px){.layout{grid-template-columns:240px minmax(0,1fr)}}
+.tree{padding:6px 4px}
+.tn{display:flex;align-items:center;gap:6px;padding:5px 8px;cursor:pointer;border-radius:6px;margin:1px 4px;min-width:0;font-size:12.5px}
+.tn:hover{background:var(--hover)} .tn.on{background:rgba(59,130,246,.18);outline:1px solid var(--accent)}
+.tn .tw{width:12px;color:var(--text-faint);flex:none;font-size:10px;text-align:center}
+.tn .nm{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tn .cnt{font-size:11px;color:var(--text-dim);background:rgba(139,155,180,.14);padding:0 6px;border-radius:999px;flex:none}
+.tn.d1{padding-left:22px}.tn.d2{padding-left:36px}.tn.d3{padding-left:50px}.tn.d4{padding-left:64px}
+.tn.un .nm{color:#fcd34d}
+.crumb{display:flex;gap:6px;align-items:center;flex-wrap:wrap;font-size:13px;min-width:0}
+.crumb b{font-weight:800}.crumb .sep{color:var(--text-faint)}
+.tool{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:10px 14px;border-bottom:1px solid var(--border-soft)}
+.seg{display:inline-flex;background:var(--panel-deep);border:1px solid var(--border);border-radius:8px;padding:2px;flex-wrap:wrap}
+.seg button{border:0;background:transparent;color:var(--text-dim);font:inherit;font-weight:600;padding:6px 11px;border-radius:6px;cursor:pointer;display:inline-flex;gap:5px;align-items:center}
+.seg button.on{background:var(--accent);color:#fff;font-weight:800}
+.seg button .n{font-size:10.5px;background:rgba(139,155,180,.18);padding:0 5px;border-radius:999px}
+.seg button.on .n{background:rgba(255,255,255,.25)}
+.chips{display:flex;gap:6px;flex-wrap:wrap}
+.chip{display:inline-flex;align-items:center;gap:6px;min-height:28px;padding:0 11px;border-radius:999px;border:1px solid var(--border);background:var(--panel-2);color:var(--text-dim);font:inherit;font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap}
+.chip.on{background:var(--accent);border-color:var(--accent);color:#fff}
+.sect{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:10px 14px;border-bottom:1px solid var(--border-soft)}
+.sect h2{margin:0;font-size:14px;font-weight:800}
+.tscroll{overflow-x:auto;max-width:100%}
+table{border-collapse:collapse;width:100%}
+th{font-size:12px;font-weight:600;color:var(--text-dim);text-align:left;padding:8px 6px;background:var(--panel-deep);border-bottom:1px solid var(--border);white-space:nowrap;cursor:pointer;user-select:none}
+th[data-nosort]{cursor:default}
+th .arr{color:var(--accent);margin-left:4px;font-size:10px}
+td{padding:9px 6px;border-bottom:1px solid var(--border-soft);vertical-align:middle;white-space:nowrap;font-size:13px}
+td.r,th.r{text-align:right}
+td.src .k{font-weight:700}td.src .src-folder{color:#93c5fd}td.src .src-scan{color:#5eead4}td.src .src-pin{color:#d8b4fe}td.src .src-tag{color:#7dd3fc}td.src .src-rule{color:#aebbd0}
+tr.sel td{background:rgba(59,130,246,.10)}
+tbody tr.row{cursor:pointer}
+tbody tr.row:hover td{background:rgba(59,130,246,.06)}
+tr.unassigned td{background:rgba(245,158,11,.05)}
+.bar{display:inline-flex;height:7px;width:64px;border-radius:4px;overflow:hidden;background:var(--panel-2);vertical-align:middle;margin-right:6px}
+.bar i{display:block;height:100%;background:var(--accent)}
+.bar i.hot{background:var(--amber)}.bar i.crit{background:var(--red)}
+.dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px;vertical-align:middle}
+.dot.on{background:#4ade80}.dot.off{background:var(--text-faint)}
+.foot{padding:8px 14px;font-size:11.5px;color:var(--text-dim);border-top:1px solid var(--border-soft);display:flex;gap:6px 14px;flex-wrap:wrap}
+.note{padding:8px 12px;border-left:3px solid var(--amber);font-size:12.5px}
+.ok-note{padding:8px 12px;border-left:3px solid var(--green);font-size:12.5px}
+.inline{display:flex;gap:6px;align-items:center;padding:8px 14px;flex-wrap:wrap;border-bottom:1px solid var(--border-soft);background:var(--panel-deep)}
+.rule{display:grid;grid-template-columns:28px minmax(0,1fr);gap:10px;padding:10px 14px;border-bottom:1px solid var(--border-soft);align-items:start}
+.rule .no{width:24px;height:24px;border-radius:50%;background:var(--accent);color:#fff;font-weight:800;display:flex;align-items:center;justify-content:center;font-size:12px}
+.rule h3{margin:0 0 3px;font-size:13px;font-weight:700}
+.rule p{margin:0;font-size:12px;color:var(--text-dim);line-height:1.5}
+.grid2{display:grid;grid-template-columns:1fr;gap:12px}
+@media(min-width:1100px){.grid2.rules{grid-template-columns:minmax(0,2fr) minmax(0,3fr)}.grid2.half{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}}
+.hide{display:none!important}
+.sm{font-size:11.5px;color:var(--text-dim)}
+.empty{padding:24px;text-align:center;color:var(--text-dim)}
+.group{border-bottom:1px solid var(--border-soft)}
+.group .gh{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:9px 14px;background:var(--panel-deep)}
+.group .gh b{font-size:13px}
+.group .gb{padding:4px 14px 8px;display:flex;gap:6px 14px;flex-wrap:wrap;font-size:12px;color:var(--text-dim)}
+.attr{display:grid;grid-template-columns:auto minmax(0,1fr);gap:6px 10px;align-items:center;padding:10px 14px;font-size:12.5px}
+.modal-bg{position:fixed;inset:0;background:rgba(0,0,0,.62);display:flex;align-items:center;justify-content:center;z-index:50;padding:10px}
+.modal{background:var(--panel);border:1px solid var(--border);border-radius:12px;width:100%;max-width:1120px;max-height:94vh;display:flex;flex-direction:column;min-width:0}
+.modal .body{overflow:auto;min-height:0;flex:1}
+.modal .mfoot{display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:10px 14px;border-top:1px solid var(--border-soft)}
+.mx td,.mx th{text-align:center;padding:6px 6px}
+.mx td.c{cursor:pointer;font-weight:700}.mx td.c:hover{background:rgba(59,130,246,.12)}
+.mx td.z{color:var(--text-faint);font-weight:400}.mx td.f{color:#fca5a5}
+.mx th.rg{background:var(--panel-2);color:var(--text);font-weight:800}.mx td.n{text-align:left;white-space:nowrap}
+.gl{display:flex;align-items:center;gap:8px;padding:7px 10px;margin:1px 4px;border-radius:6px;cursor:pointer;font-size:12.5px;min-width:0}
+.gl:hover{background:var(--hover)}.gl.on{background:rgba(59,130,246,.18);outline:1px solid var(--accent)}
+.gl .nm{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600}.gl .sub{font-size:11px;color:var(--text-dim);white-space:nowrap}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="card">
+    <div class="hdr">
+      <a class="back" href="#">← 특수 기능</a>
+      <h1>🧩 서비스 인벤토리 <span class="badge gray">시안 A · 3차 · 목 데이터</span> <span class="badge purple">전체 범위 관리자 판본</span></h1>
+      <span class="sp"></span>
+      <label class="sm">범위 <select id="scopeSel"><option value="">전체 법인(vCenter)</option></select></label>
+    </div>
+    <div class="info">
+      VM(vCenter)과 베어메탈(iDRAC/OS)을 <b>법인 › 폴더 › 서비스</b> 로 묶어 봅니다. ESXi 호스트는 구성원이 아니라 <b>그 서비스 VM 이 올라간 호스트로 파생</b>됩니다(호스트·베어메탈 장애 → 영향 서비스가 거꾸로 나옵니다).
+      소속은 <b>고정(수동) → vCenter 폴더 규칙 → iDRAC 스캔 엔트리 라벨 → 태그(선택) → 이름 규칙(선택)</b> 순이고, 어디에도 안 걸리면 <b>(미지정)</b> 으로 따로 셉니다. 서비스는 사람이 만들고 자동 규칙은 기존 서비스에만 붙습니다.
+      <div class="muted" style="font-size:12px;margin-top:3px">미지정은 출처별(vCenter 폴더 · 스캔 엔트리)로 묶어 한 번에 연결합니다. 고정이 자동 판정과 다르면 <b>드리프트</b> 로 검토 목록에 오릅니다. 범위 계정은 자기 법인만 보고, 쓰기 범위가 있는 법인 관리자가 자기 법인을 바꿉니다. 못 읽은 값은 '—'(0 아님).</div>
+    </div>
+  </div>
+
+  <div class="kpis" id="kpis"></div>
+
+  <div class="layout">
+    <div class="card" style="align-self:start" id="treeCard">
+      <div class="sect"><h2>법인 › 폴더 › 서비스</h2><span class="sp"></span><button class="btn sm" id="btnExpand">펼침</button></div>
+      <div class="tree" id="tree"></div>
+      <div class="foot"><span>폴더 경로 '\' 구분 · 최대 10단계. 'vCenter 폴더 가져오기' 는 복사(동기화 아님).</span></div>
+    </div>
+    <div class="card hide" style="align-self:start" id="gpanel">
+      <div class="sect"><h2>전역 서비스</h2><span class="sm" id="gcount"></span></div>
+      <div id="glist" style="padding:6px 4px"></div>
+      <div class="foot"><span>전역 서비스는 전체 범위 관리자가 만든다. 법인 서비스는 이름이 같으면 자동 제안, 다르면 사람이 연결한다.</span></div>
+    </div>
+
+    <div style="display:flex;flex-direction:column;gap:12px;min-width:0">
+      <div class="card">
+        <div class="tool">
+          <div class="seg" id="axisSeg"><button data-a="corp" class="on">법인별 인프라</button><button data-a="svc">서비스별(전 법인)</button></div>
+          <div class="crumb" id="crumb"></div><span class="sp"></span>
+          <div class="seg" id="viewSeg">
+            <button data-v="svc" class="on">서비스별</button><button data-v="un">미지정 <span class="n" id="nUn">0</span></button>
+            <button data-v="unmapped">매핑 안 된 값 <span class="n" id="nUm">0</span></button><button data-v="review">검토 <span class="n" id="nRv">0</span></button><button data-v="rules">소속 규칙</button>
+          </div>
+        </div>
+        <div class="tool" style="border-bottom:0" id="tools2">
+          <input id="q" placeholder="서비스/구성원/폴더/서비스태그 검색" style="width:230px">
+          <span class="sp"></span>
+          <button class="btn" id="btnFolder">＋ 폴더</button><button class="btn" id="btnSvc">＋ 서비스</button><button class="btn" id="btnImport">vCenter 폴더 가져오기</button>
+          <button class="btn" id="btnMove">이동</button><button class="btn" id="btnAdd">⊕ 한 대씩 추가</button>
+          <button class="btn" disabled title="시안 — 구현 시 /tools/svc-inventory.csv">CSV</button>
+        </div>
+        <div class="inline hide" id="formFolder"><span class="sm">새 폴더</span><select id="ffCorp"></select><input id="ffPath" placeholder="경로 예: 업무시스템\개발" style="width:240px"><button class="btn sm primary" id="ffOk">만들기</button><button class="btn sm" data-close="formFolder">취소</button></div>
+        <div class="inline hide" id="formSvc"><span class="sm">새 서비스</span><select id="fsCorp"></select><select id="fsPath"></select><input id="fsName" placeholder="서비스명(1~64자)" style="width:180px"><select id="fsTier"><option value="2">등급 2</option><option value="1">등급 1</option><option value="3">등급 3</option></select><input id="fsOwner" placeholder="담당자(메일·채널)" style="width:170px"><button class="btn sm primary" id="fsOk">만들기</button><button class="btn sm" data-close="formSvc">취소</button></div>
+        <div class="inline hide" id="formMove"><span class="sm">서비스 이동</span><b id="fmName"></b><span class="sm">→ 폴더</span><select id="fmPath"></select><button class="btn sm primary" id="fmOk">이동</button><button class="btn sm" data-close="formMove">취소</button></div>
+        <div class="inline hide" id="formImport"><span class="sm">vCenter VM 폴더(최상위) 를</span><select id="fiCorp"></select><span class="sm">의 포탈 폴더로 복사</span><button class="btn sm primary" id="fiOk">가져오기</button><button class="btn sm" data-close="formImport">취소</button><span class="sm">· 동기화가 아니라 한 번 복사. 이미 있는 이름은 건너뜀.</span></div>
+        <div id="flash" class="ok-note hide" style="margin:8px 14px"></div>
+      </div>
+
+      <div id="noteUnread" class="card note hide"></div>
+
+      <!-- 서비스별(전 법인) 축 -->
+      <div id="vGlobal" class="hide" style="display:flex;flex-direction:column;gap:12px;min-width:0">
+        <div class="card"><div class="tool" style="border-bottom:0">
+          <div class="crumb" id="gcrumb"></div><span class="sp"></span>
+          <span class="sm">정체성</span><div class="seg" id="gmodeSeg"><button data-m="catalog" class="on">A · 카탈로그(globalId)</button><button data-m="name">B · 이름 일치</button></div>
+          <span class="sm">첫 화면</span><div class="seg" id="gfirstSeg"><button data-f="matrix" class="on">A · 매트릭스</button><button data-f="list">B · 목록</button></div>
+          <button class="btn" id="gBack">← 전체</button><button class="btn" disabled title="시안 — 구현 시 /tools/svc-inventory/global.csv">CSV</button>
+        </div></div>
+        <div class="card" id="gFirst"></div>
+        <div id="gSel" class="hide" style="display:flex;flex-direction:column;gap:12px;min-width:0">
+          <div class="kpis" id="gkpis"></div>
+          <div class="card"><div class="sect"><h2 id="gCorpTitle">법인별 투입 자원</h2><span class="sm" id="gCorpSub"></span><span class="sp"></span><span class="sm">행 클릭 → 아래 그 법인의 구성원·영향 호스트</span></div>
+            <div class="tscroll"><table id="gCorpTable" style="min-width:1040px"><thead><tr><th>법인</th><th>법인 서비스명</th><th>담당자</th><th class="r">VM</th><th class="r">베어메탈</th><th class="r">호스트</th><th class="r">vCPU</th><th class="r">메모리 GB</th><th class="r">스토리지 GB</th><th>CPU(가중)</th><th>메모리(가중)</th><th class="r">부품 장애</th><th>백업 24h</th><th class="r">못 읽음</th></tr></thead><tbody></tbody></table></div>
+            <div class="foot"><span>vCPU·메모리·스토리지 = 할당 합계(VM cpuCount·memMB·storageGB + 베어메탈 코어·메모리) — '투입된 자원'. 사용률은 가중 평균(못 읽은 서버 제외).</span><span>엣지 보고가 오래된 법인은 사용률·장애가 '—'.</span></div></div>
+          <div class="card" id="gMemPanel"><div class="sect"><h2 id="gMemTitle">구성원</h2><span class="sm" id="gMemSub"></span></div><div id="gMemBody" class="empty">법인 행을 고르면 그 법인의 이 서비스 구성원이 나옵니다.</div></div>
+          <div class="card" id="gHostPanel"><div class="sect"><h2>영향 호스트(파생)</h2><span class="sm" id="gHostSub"></span></div><div id="gHostBody" class="empty">법인 행을 고르면 그 법인에서 이 서비스 VM 이 올라간 호스트가 나옵니다.</div></div>
+        </div>
+      </div>
+
+      <!-- 서비스별 -->
+      <div id="vSvc" style="display:flex;flex-direction:column;gap:12px;min-width:0">
+        <div class="card hide" id="svcAttr"></div>
+        <div class="card">
+          <div class="sect"><h2>서비스별 현황</h2><span class="sm" id="svcCount"></span><span class="sp"></span>
+            <label class="sm hide" id="mergeWrap" style="display:inline-flex;gap:6px;align-items:center"><input type="checkbox" id="mergeByName"> 서비스명으로 묶기(전 법인)</label>
+            <span class="sm">행 클릭 → 아래 구성원·영향 호스트</span></div>
+          <div class="tscroll"><table id="svcTable" style="min-width:1040px">
+            <thead><tr><th>서비스</th><th>등급</th><th>폴더</th><th>법인</th><th class="r">VM</th><th class="r">베어메탈</th><th class="r" title="구성원 VM 이 올라간 ESXi 호스트 수(파생)">호스트</th><th class="r" title="켜짐/전체">켜짐</th>
+              <th>CPU(가중)</th><th>메모리(가중)</th><th class="r">부품 장애</th><th>백업 24h</th><th class="r">못 읽음</th><th>소속 근거</th></tr></thead><tbody></tbody></table></div>
+          <div class="foot"><span>CPU·메모리 = Σ(사용률×용량)÷Σ용량 · 못 읽은 서버는 분자·분모 모두 제외</span><span>영향 호스트 = 구성원 VM 이 올라간 ESXi 호스트 수(파생)</span><span>백업 = 그 법인 Bareos 최근 24시간 잡 결과</span></div>
+        </div>
+        <div class="grid2" id="memWrap">
+          <div class="card" id="memPanel"><div class="sect"><h2 id="memTitle">구성원</h2><span class="sm" id="memSub"></span></div><div id="memBody" class="empty">트리나 위 표에서 서비스를 고르면 VM · 베어메탈 구성원이 여기 나옵니다.</div></div>
+          <div class="card" id="hostPanel"><div class="sect"><h2>영향 호스트(파생)</h2><span class="sm" id="hostSub"></span></div><div id="hostBody" class="empty">서비스를 고르면 그 VM 이 올라간 호스트와, 그 호스트가 함께 떠받치는 다른 서비스가 나옵니다.</div></div>
+        </div>
+      </div>
+
+      <!-- 미지정(출처별) -->
+      <div id="vUn" class="card hide">
+        <div class="sect"><h2>(미지정) — 출처별 묶음</h2><span class="sm" id="unCount"></span><span class="sp"></span><span class="sm">묶음 단위로 연결하면 같은 출처의 서버가 앞으로도 자동으로 들어온다</span></div>
+        <div id="unGroups"></div>
+        <div class="foot"><span>법인 귀속이 없는 베어메탈은 통합 서버 인벤토리에서 법인을 먼저 정한다(범위 계정에는 보이지 않는다).</span><span>한 대씩 예외 지정은 '⊕ 한 대씩 추가'.</span></div>
+      </div>
+
+      <!-- 매핑 안 된 값 -->
+      <div id="vUm" class="card hide">
+        <div class="sect"><h2>매핑 안 된 값</h2><span class="sm" id="umCount"></span><span class="sp"></span><span class="sm">자동 규칙이 가리키는 값인데 서비스가 없다 — 서비스는 자동으로 만들지 않는다</span></div>
+        <div class="tscroll"><table id="umTable" style="min-width:860px"><thead><tr><th>출처</th><th>값</th><th>법인</th><th class="r">대수</th><th>어떻게 생겼나</th><th data-nosort>조치</th></tr></thead><tbody></tbody></table></div>
+        <div class="foot"><span>'서비스로 만들기' = 그 값 이름의 서비스를 루트에 만들고 규칙을 붙인다(감사). '기존 서비스에 연결' = 별칭 규칙(값 → 서비스).</span></div>
+      </div>
+
+      <!-- 검토: 드리프트 · 유령 키 -->
+      <div id="vRv" class="grid2 hide">
+        <div class="card"><div class="sect"><h2>드리프트(고정 ≠ 자동 판정)</h2><span class="sm" id="drCount"></span></div>
+          <div class="tscroll"><table id="drTable" style="min-width:620px"><thead><tr><th>구성원</th><th>고정된 서비스</th><th>자동 판정</th><th>근거</th><th data-nosort>조치</th></tr></thead><tbody></tbody></table></div>
+          <div class="foot"><span>어느 쪽이 조용히 이기지 않는다 — 관리자가 고른다. '고정 유지' 는 검토 표지를 남긴다.</span></div></div>
+        <div class="card"><div class="sect"><h2>유령 키(고정이 가리키는 서버가 없음)</h2><span class="sm" id="ghCount"></span><span class="sp"></span><button class="btn sm" id="btnGhost">정리(미리보기 → 삭제)</button></div>
+          <div class="tscroll"><table id="ghTable" style="min-width:520px"><thead><tr><th>키</th><th>고정된 서비스</th><th>고정한 사람 · 시각</th><th>왜</th></tr></thead><tbody></tbody></table></div>
+          <div class="foot"><span>VM 키는 iu:&lt;vCenter&gt;:&lt;instanceUuid&gt;(수집 속성 추가 — instanceUuid 는 vCenter 안에서만 유일), 물리는 서비스태그. 읽지 못한 vCenter·엣지 만료 법인의 고정은 유령으로 보지 않고 '판정 보류' — 통합 서버 인벤토리 유령 키 정리(blocked)와 같은 규칙.</span></div></div>
+      </div>
+
+      <!-- 소속 규칙 -->
+      <div id="vRules" class="grid2 rules hide">
+        <div class="card"><div class="sect"><h2>소속 판정 순서</h2><span class="sm">판정 코어 하나 · 위가 이긴다</span></div><div id="rules"></div></div>
+        <div class="card"><div class="sect"><h2 id="frTitle">vCenter 폴더 규칙</h2><span class="sm" id="frSub"></span></div>
+          <div class="tscroll"><table id="frTable" style="min-width:620px"><thead><tr><th>법인</th><th>폴더 접두</th><th>→ 서비스</th><th class="r">걸린 VM</th><th>종류</th></tr></thead><tbody></tbody></table></div>
+          <div class="foot"><span>접두 일치(길이 상한 뒤 선형). 스캔 엔트리 라벨 별칭·태그 별칭도 같은 표에 '종류' 로 섞여 보인다.</span></div></div>
+      </div>
+    </div>
+  </div>
+  <div class="sm faint" id="apiNote"></div>
+</div>
+
+<!-- 한 대씩 추가(예외) 모달 -->
+<div class="modal-bg hide" id="modal">
+  <div class="modal">
+    <div class="sect"><h2>⊕ 한 대씩 추가 — 고정(수동)</h2><span class="sm">예외용. 묶음 연결이 먼저다(미지정 탭).</span><span class="sp"></span><button class="btn sm" id="mClose">닫기</button></div>
+    <div class="tool"><div class="seg" id="mKind"><button data-k="BM" class="on">iDRAC 식별 서버</button><button data-k="VM">VM</button></div><select id="mCorp"></select>
+      <label class="sm" style="display:inline-flex;gap:6px;align-items:center"><input type="checkbox" id="mUnOnly" checked> 미소속만</label><input id="mQ" placeholder="이름/서비스태그/주소/폴더" style="width:200px"><span class="sp"></span><span class="sm" id="mCount"></span></div>
+    <div class="body tscroll"><table id="mTable" style="min-width:900px"><thead><tr><th data-nosort><input type="checkbox" id="mAll"></th><th>이름</th><th>키</th><th>출처</th><th>법인</th><th>현재 소속</th></tr></thead><tbody></tbody></table></div>
+    <div class="mfoot"><span class="sm">선택 <b id="mSel">0</b>대</span><span class="sm">→ 대상 서비스</span><select id="mTarget"></select><button class="btn primary" id="mAdd" disabled>고정</button><span class="sp"></span><span class="sm">고정 = 자동 규칙보다 우선 · 자동 판정과 다르면 드리프트 큐에 오른다 · 감사 로그</span></div>
+  </div>
+</div>
+
+<script>
+// ───────── 결정적 목 데이터(실제 API 응답 모양을 흉내 낸 것 · 값은 가상) ─────────
+function rng(seed){let a=seed>>>0;return()=>{a+=0x6D2B79F5;let t=a;t=Math.imul(t^t>>>15,t|1);t^=t+Math.imul(t^t>>>7,t|61);return((t^t>>>14)>>>0)/4294967296;};}
+const R=rng(20261104);
+const CORPS=[{id:'vc-ap-northeast',name:'vcenter-ap-northeast-01',region:'아시아'},{id:'vc-us-east',name:'vcenter-us-east-01',region:'북미'},{id:'vc-eu-central',name:'vcenter-eu-central-01',region:'유럽'},{id:'vc-eu-west',name:'vcenter-eu-west-01',region:'유럽'}];
+const corpName=(id)=>id?(CORPS.find(c=>c.id===id)||{}).name||id:'(법인 미지정)';
+const corpShort=(id)=>id?id.replace('vc-',''):'(법인 미지정)';
+const SRC_LABEL={pin:'고정(수동)',folder:'vCenter 폴더 규칙',scan:'iDRAC 스캔 엔트리',tag:'vSphere 태그',rule:'이름 규칙',none:'없음'};
+const SRC_CLS={pin:'purple',folder:'blue',scan:'teal',tag:'blue',rule:'gray',none:'amber'};
+const SRC_SHORT={pin:'고정',folder:'폴더',scan:'스캔',tag:'태그',rule:'규칙'};
+const hex=(n)=>Array.from({length:n},()=>'0123456789abcdef'[Math.floor(R()*16)]).join('');
+// 서비스: [폴더, 이름, 등급, 담당자, [VM, BM], vCenter 폴더 접두, 스캔 라벨]
+const SVC_SPEC={
+  'vc-ap-northeast':[['업무시스템','ERP',1,'erp-ops@corp.local',[6,2],'/ERP','ERP'],['업무시스템','MES',1,'#mes-oncall',[4,3],'/MES','MES'],['업무시스템','그룹웨어',2,'gw@corp.local',[5,0],'/Groupware',''],
+    ['DB','DB-Oracle',1,'dba@corp.local',[1,2],'/DB','DB'],['공통','AD/DNS',2,'infra@corp.local',[2,0],'/Infra/AD',''],['공통','CI/CD',3,'',[3,0],'/Infra/CICD',''],['인프라','백업 인프라',2,'backup@corp.local',[0,1],'','Backup']],
+  'vc-us-east':[['업무시스템','ERP',1,'erp-us@corp.local',[3,1],'/ERP','ERP'],['업무시스템','그룹웨어',2,'',[2,0],'/Groupware',''],['DB','Database',1,'dba-us@corp.local',[0,2],'','Database'],['공통','AD/DNS',2,'',[2,0],'/Infra/AD',''],['인프라','백업 인프라',2,'',[0,1],'','Backup']],
+  'vc-eu-central':[['업무시스템','ERP',1,'erp-eu@corp.local',[4,1],'/ERP','ERP'],['업무시스템','MES',1,'',[2,2],'/MES','MES'],['공통','AD/DNS',2,'',[2,0],'/Infra/AD',''],['공통\\파일','파일서버',3,'',[1,1],'/Files','Files'],['DB','DB',1,'dba-eu@corp.local',[1,1],'/DB','DB'],['인프라','백업 인프라',2,'',[0,1],'','Backup']],
+  'vc-eu-west':[['업무시스템','그룹웨어',2,'',[2,0],'/Groupware',''],['공통','AD/DNS',2,'',[2,0],'/Infra/AD',''],['공통\\파일','파일서버',3,'',[1,1],'/Files','Files'],['인프라','백업 인프라',2,'',[0,1],'','Backup'],['업무시스템','Kiosk',3,'',[1,0],'/Kiosk','']],
+};
+const SERVICES=[],FOLDERS=[{corp:'vc-ap-northeast',path:'업무시스템\\개발'}],FOLDER_RULES=[],SCAN_ENTRIES=[],ALIASES=[],MEMBERS=[],HOSTS=[],PINS=new Map(),REVIEWED=new Set();
+const TAG_CATEGORY={'vc-ap-northeast':'Service'};   // 태그 규칙은 선택 — 이 법인만 켜 둔 상태
+let sid=1,seq=1;
+function mkVm(svc,corp,folder,i,extra={}){const on=R()>0.12,unread=R()<0.06;const ci=Math.max(0,CORPS.findIndex(c=>c.id===corp));
+  return Object.assign({key:`iu:${hex(8)}`,name:`${(extra.slug||'vm')}-${corpShort(corp)}-${String(i+1).padStart(2,'0')}`,kind:'VM',corp,vcFolder:folder,host:`esxi-${corpShort(corp)}-0${1+(seq++%4)}`,
+    on,cores:[2,4,8,16][Math.floor(R()*4)],memGB:[8,16,32,64][Math.floor(R()*4)],cpu:on&&!unread?Math.round(5+R()*70):null,mem:on&&!unread?Math.round(20+R()*70):null,msrc:on&&!unread?'vcenter':null,
+    faults:0,backup:R()<0.9?'ok':(R()<0.5?'fail':'none'),ip:`10.${20+ci}.${Math.floor(R()*200)}.${Math.floor(R()*250)+2}`,tag:'',storageGB:[40,80,120,250,500][Math.floor(R()*5)]},extra);}
+function mkBm(corp,entry,i,extra={}){const hasOs=R()<0.55,unread=R()<0.1;const ci=Math.max(0,CORPS.findIndex(c=>c.id===corp));const st=`${corpShort(corp).slice(0,2).toUpperCase()}${1000+Math.floor(R()*9000)}`;
+  return Object.assign({key:`st:${st.toLowerCase()}`,st,name:`${(extra.slug||'bm')}-${corpShort(corp)}-bm${String(i+1).padStart(2,'0')}`,kind:'BM',corp,scanEntry:entry?entry.id:null,found:entry?'스캔 엔트리':(corp?'수동 등록':'엣지 보고'),
+    on:corp?true:null,/* 엣지 보고 베어메탈은 중앙에 전원 상태가 없다(classifyFleet 출력에 없음) → 모름 */cores:[16,32,48,64][Math.floor(R()*4)],memGB:[128,256,512][Math.floor(R()*3)],cpu:unread?null:Math.round(3+R()*60),mem:unread?null:Math.round(15+R()*70),msrc:unread?null:(hasOs?'os':'idrac'),
+    faults:R()<0.12?1:0,backup:R()<0.3?'ok':'none',ip:corp?`10.${20+ci}.9.${Math.floor(R()*200)+10}`:'—',addr:`https://10.${20+ci}.9.${Math.floor(R()*200)+10}`},extra);}
+for(const [corp,list] of Object.entries(SVC_SPEC)){
+  for(let i=0;i<4;i++)HOSTS.push({name:`esxi-${corpShort(corp)}-0${i+1}`,st:`st:${corpShort(corp).slice(0,2)}h${100+i}`,corp,cores:[48,64][i%2],memGB:[512,768][i%2],cpu:Math.round(10+R()*55),mem:Math.round(30+R()*55),faults:(corp==='vc-ap-northeast'&&i===1)?1:0});
+  for(const [path,name,tier,owner,[nv,nb],prefix,label] of list){
+    const svc={id:`s${sid++}`,corp,path,name,tier,owner,note:''};SERVICES.push(svc);
+    if(prefix)FOLDER_RULES.push({corp,prefix,svcId:svc.id});
+    let entry=null;if(label){entry={id:`se-${corpShort(corp)}-${label.toLowerCase()}`,corp,label,range:`10.${20+CORPS.findIndex(c=>c.id===corp)}.9.${SCAN_ENTRIES.length*32}/27`};SCAN_ENTRIES.push(entry);}
+    const slug=name.toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'')||'svc';
+    for(let i=0;i<nv;i++)MEMBERS.push(mkVm(svc,corp,`${prefix}/${R()<0.75?'prod':'dev'}`,i,{slug}));
+    for(let i=0;i<nb;i++)MEMBERS.push(mkBm(corp,entry,i,{slug}));
+  }
+}
+// 라벨이 서비스명과 다른 스캔 엔트리('DB'·'Files'·'Backup') 는 매핑 안 된 값 — 별칭으로 연결해야 한다. 'Backup'·'Files' 는 처음부터 별칭이 있는 것으로 둔다.
+for(const e of SCAN_ENTRIES){if(e.label==='Backup')ALIASES.push({corp:e.corp,kind:'scan',value:'Backup',svcId:SERVICES.find(s=>s.corp===e.corp&&s.name==='백업 인프라').id});
+  if(e.label==='Files')ALIASES.push({corp:e.corp,kind:'scan',value:'Files',svcId:SERVICES.find(s=>s.corp===e.corp&&s.name==='파일서버').id});}
+// 미지정 후보: vCenter 폴더가 규칙에 없는 VM · 라벨 없는 스캔 엔트리의 베어메탈 · 수동 등록/엣지 보고 베어메탈
+const seEmptyAp={id:'se-ap-northeast-none',corp:'vc-ap-northeast',label:'',range:'10.20.10.0/24'};SCAN_ENTRIES.push(seEmptyAp);
+const seEmptyEu={id:'se-eu-central-none',corp:'vc-eu-central',label:'',range:'10.22.10.0/24'};SCAN_ENTRIES.push(seEmptyEu);
+for(let i=0;i<2;i++)MEMBERS.push(mkVm(null,'vc-ap-northeast','/Legacy',i,{slug:'legacy'}));
+MEMBERS.push(mkVm(null,'vc-ap-northeast','/Legacy',2,{slug:'legacy',tag:'ERP'}));          // 태그 규칙(선택)으로 걸리는 예
+MEMBERS.push(mkVm(null,'vc-ap-northeast','/Payroll',0,{slug:'payroll',tag:'Payroll'}));
+MEMBERS.push(mkVm(null,'vc-ap-northeast','/',0,{slug:'root'}));              // 루트에 바로 있는 VM(폴더 없음)
+MEMBERS.push(mkVm(null,'vc-ap-northeast',null,0,{slug:'vapp'}));            // vApp 안 VM — vmPlacement 가 null(위치를 못 따라감)     // 태그 값 'Payroll' — 서비스 없음(매핑 안 된 값)
+MEMBERS.push(mkVm(null,'vc-us-east','/Test',0,{slug:'test'}));
+for(let i=0;i<2;i++)MEMBERS.push(mkVm(null,'vc-eu-west','/HR',i,{slug:'hr'}));
+for(let i=0;i<3;i++)MEMBERS.push(mkBm('vc-ap-northeast',seEmptyAp,i,{slug:'new'}));
+MEMBERS.push(mkBm('vc-eu-central',seEmptyEu,0,{slug:'new'}));
+MEMBERS.push(mkBm('vc-us-east',null,0,{slug:'manual'}));
+for(let i=0;i<2;i++)MEMBERS.push(mkBm('',null,i,{slug:'edge'}));
+// 고정(수동): 드리프트 2건(폴더 규칙과 다름) + 정상 고정 1건 + 유령 키 2건
+const erpAp=SERVICES.find(s=>s.corp==='vc-ap-northeast'&&s.name==='ERP'),mesAp=SERVICES.find(s=>s.corp==='vc-ap-northeast'&&s.name==='MES'),dbAp=SERVICES.find(s=>s.corp==='vc-ap-northeast'&&s.name==='DB-Oracle');
+const erpVm=MEMBERS.filter(m=>m.kind==='VM'&&m.corp==='vc-ap-northeast'&&String(m.vcFolder||'').startsWith('/ERP'));
+PINS.set(erpVm[0].key,{svcId:mesAp.id,by:'admin',at:'2026-10-21',corp:'vc-ap-northeast'});PINS.set(erpVm[1].key,{svcId:dbAp.id,by:'kim',at:'2026-10-28',corp:'vc-ap-northeast'});
+const newBm=MEMBERS.filter(m=>m.kind==='BM'&&m.scanEntry===seEmptyAp.id);PINS.set(newBm[0].key,{svcId:erpAp.id,by:'admin',at:'2026-11-01',corp:'vc-ap-northeast'});
+PINS.set('iu:0f3e9a1c',{svcId:erpAp.id,by:'admin',at:'2026-09-02',corp:'vc-ap-northeast',ghost:'VM 이 삭제됨(스냅샷에 없음 42일)'});PINS.set('st:ap0001',{svcId:mesAp.id,by:'lee',at:'2026-08-15',corp:'vc-ap-northeast',ghost:'서비스태그가 등록부·호스트 어디에도 없음'});
+PINS.set('st:eu7777',{svcId:SERVICES.find(s=>s.corp==='vc-eu-west'&&s.name==='그룹웨어').id,by:'kim',at:'2026-10-05',corp:'vc-eu-west'});   // 엣지 보고가 오래된 법인 — 유령처럼 보이지만 판정을 보류(차단)한다
+// 전역 서비스 카탈로그(시안 A: 카탈로그 + 법인 서비스의 globalId). 이름이 같으면 자동 제안, 다르면 사람이 연결(DB-Oracle·Database → DB).
+const GLOBAL=[{id:'g-erp',name:'ERP',tier:1,owner:'hq-erp@corp.local'},{id:'g-mes',name:'MES',tier:1,owner:''},{id:'g-gw',name:'그룹웨어',tier:2,owner:''},{id:'g-db',name:'DB',tier:1,owner:'hq-dba@corp.local'},
+  {id:'g-ad',name:'AD/DNS',tier:2,owner:''},{id:'g-cicd',name:'CI/CD',tier:3,owner:''},{id:'g-bk',name:'백업 인프라',tier:2,owner:''},{id:'g-files',name:'파일서버',tier:3,owner:''},{id:'g-hr',name:'HR',tier:3,owner:''}];
+for(const sv of SERVICES){const g=GLOBAL.find(g=>g.name.toLowerCase()===sv.name.toLowerCase());if(g)sv.globalId=g.id;}
+SERVICES.find(s=>s.corp==='vc-ap-northeast'&&s.name==='DB-Oracle').globalId='g-db';   // 사람이 연결
+SERVICES.find(s=>s.corp==='vc-us-east'&&s.name==='Database').globalId='g-db';         // 사람이 연결 · 'Kiosk'(eu-west) 는 연결 없음 = 법인 전용
+const META={snapAt:'06:14',snapPeriod:'60초',tagsAt:'06:00',tagRefresh:'6시간',bmAt:'06:12',bmPeriod:'5분',faultsAt:'06:10',staleCorp:'vc-eu-west'};
+
+// ───────── 판정 코어(순수) — 고정 → 폴더 규칙 → 스캔 엔트리 → 태그(선택) → 이름 규칙(선택) → 없음 ─────────
+const svcById=(id)=>SERVICES.find(s=>s.id===id);
+const entryOf=(m)=>SCAN_ENTRIES.find(e=>e.id===m.scanEntry);
+function autoResolve(m){
+  if(m.kind==='VM'){
+    if(m.vcFolder==null)return {svcId:null,src:'none',reason:'vSphere 위치를 못 따라감(vApp 안 VM 등 — vmPlacement null)'};
+    const f=String(m.vcFolder).slice(0,256);
+    const rule=FOLDER_RULES.filter(r=>r.corp===m.corp&&(f===r.prefix||f.startsWith(r.prefix==='/'?'/':r.prefix+'/'))).sort((a,b)=>b.prefix.length-a.prefix.length)[0];
+    if(rule)return {svcId:rule.svcId,src:'folder',via:rule.prefix};
+    if(TAG_CATEGORY[m.corp]&&m.tag){const s=SERVICES.find(s=>s.corp===m.corp&&s.name.toLowerCase()===m.tag.toLowerCase())||svcById((ALIASES.find(a=>a.corp===m.corp&&a.kind==='tag'&&a.value.toLowerCase()===m.tag.toLowerCase())||{}).svcId);
+      if(s)return {svcId:s.id,src:'tag',via:m.tag};return {svcId:null,src:'none',reason:`태그 '${m.tag}' 에 맞는 서비스 없음`,unmapped:{kind:'tag',value:m.tag}};}
+    return {svcId:null,src:'none',reason:'폴더 규칙 없음',unmapped:{kind:'folder',value:m.vcFolder}};
+  }
+  const e=entryOf(m);
+  if(!m.corp)return {svcId:null,src:'none',reason:'법인 귀속 없음(fleet-assign 없음)'};
+  if(!e)return {svcId:null,src:'none',reason:'스캔 엔트리 없음(수동 등록)'};
+  if(!e.label)return {svcId:null,src:'none',reason:'스캔 엔트리 라벨 비어 있음',unmapped:{kind:'entry',value:e.id}};
+  const s=SERVICES.find(s=>s.corp===m.corp&&s.name.toLowerCase()===e.label.toLowerCase())||svcById((ALIASES.find(a=>a.corp===m.corp&&a.kind==='scan'&&a.value.toLowerCase()===e.label.toLowerCase())||{}).svcId);
+  if(s)return {svcId:s.id,src:'scan',via:e.label};
+  return {svcId:null,src:'none',reason:`스캔 라벨 '${e.label}' 에 맞는 서비스 없음`,unmapped:{kind:'scan',value:e.label}};
+}
+function resolve(m){const auto=autoResolve(m);const pin=PINS.get(m.key);if(pin&&svcById(pin.svcId)){return {svcId:pin.svcId,src:'pin',auto,drift:!!(auto.svcId&&auto.svcId!==pin.svcId),reviewed:REVIEWED.has(m.key)};}return {...auto,auto};}
+const svcOf=(m)=>svcById(resolve(m).svcId);
+const svcName=(m)=>{const s=svcOf(m);return s?s.name:'';};
+
+// ───────── 상태 ─────────
+// 변형 페이지(시안 조합별 별도 파일)는 window.__PRESET 으로 시작 상태를 준다 — 한 소스에서 파생.
+const PRESET=window.__PRESET||{};
+const S={axis:PRESET.axis||'corp',gmode:PRESET.gmode||'catalog',gfirst:PRESET.gfirst||'matrix',gsel:PRESET.gsel||null,gcorp:'',view:'svc',sel:{type:'all'},q:'',selSvc:null,sort:{},merge:false,open:new Set([CORPS[0].id]),m:{kind:'BM',corp:'',unOnly:true,q:'',checked:new Set(),target:''}};
+const $=(s)=>document.querySelector(s);
+const esc=(s)=>String(s).replace(/[&<>"]/g,(c)=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const barCell=(v)=>v==null?'<span class="muted">—</span>':`<span class="bar"><i class="${v>=90?'crit':v>=75?'hot':''}" style="width:${v}%"></i></span>${v}%`;
+const srcBadge=(r)=>`<span class="badge ${SRC_CLS[r.src]}" title="${esc(r.via||r.reason||'')}">${SRC_LABEL[r.src]}${r.drift?' · 드리프트':''}</span>`;
+const kindBadge=(k)=>`<span class="badge ${k==='VM'?'blue':'amber'}">${k==='VM'?'VM':'베어메탈'}</span>`;
+const tierBadge=(t)=>`<span class="tier t${t}" title="등급 ${t}">${t}</span>`;
+const bkBadge=(b)=>b==='ok'?'<span class="badge green">성공</span>':b==='fail'?'<span class="badge red">실패</span>':b==='none'?'<span class="badge gray">잡 없음</span>':'<span class="muted">—</span>';
+const msrcLabel=(m)=>m==='vcenter'?'vCenter':m==='idrac'?'iDRAC':m==='os'?'OS(SSH)':'—';
+const under=(p,base)=>p===base||p.startsWith(base+'\\');
+const corpFolders=(corp)=>{const set=new Set(FOLDERS.filter(f=>f.corp===corp).map(f=>f.path));for(const s of SERVICES.filter(s=>s.corp===corp)){const parts=s.path?s.path.split('\\'):[];for(let i=1;i<=parts.length;i++)set.add(parts.slice(0,i).join('\\'));}return [...set].sort((a,b)=>a.localeCompare(b,'ko'));};
+function inSel(m){const s=S.sel,sv=svcOf(m);
+  if(s.type==='all')return true;if(s.type==='corp')return m.corp===s.corp;if(s.type==='un')return m.corp===s.corp&&!sv;
+  if(s.type==='folder')return m.corp===s.corp&&!!sv&&under(sv.path,s.path);if(s.type==='svc')return !!sv&&sv.id===s.id;return true;}
+function filtered(){const q=S.q.trim().toLowerCase();return MEMBERS.filter(m=>inSel(m)&&(!q||m.name.toLowerCase().includes(q)||(svcName(m)||'(미지정)').toLowerCase().includes(q)||m.key.toLowerCase().includes(q)||String(m.vcFolder||'').toLowerCase().includes(q)));}
+// corpusage/build.js 규약: 사용률×용량 합 ÷ 용량 합. 못 읽은 서버는 분자·분모 둘 다 제외.
+function agg(ms){const a={vm:0,bm:0,on:0,cpuU:0,cpuC:0,memU:0,memC:0,unread:0,faults:0,bkOk:0,bkFail:0,bkNone:0,src:{pin:0,folder:0,scan:0,tag:0,rule:0,none:0},hosts:new Set()};
+  for(const m of ms){a[m.kind==='VM'?'vm':'bm']++;if(m.on)a.on++;a.faults+=m.faults;a.src[resolve(m).src]++;if(m.kind==='VM'&&m.host)a.hosts.add(m.host);
+    if(m.backup==='ok')a.bkOk++;else if(m.backup==='fail')a.bkFail++;else if(m.backup==='none')a.bkNone++;
+    if(!m.on)continue;if(m.cpu==null&&m.mem==null){a.unread++;continue;}if(m.cpu!=null){a.cpuU+=m.cpu/100*m.cores;a.cpuC+=m.cores;}if(m.mem!=null){a.memU+=m.mem/100*m.memGB;a.memC+=m.memGB;}}
+  a.cpu=a.cpuC?Math.round(a.cpuU/a.cpuC*100):null;a.mem=a.memC?Math.round(a.memU/a.memC*100):null;a.total=ms.length;a.hostN=a.hosts.size;
+  a.faultsM=a.faults;a.faultsH=0;for(const h of a.hosts){const ho=HOSTS.find(x=>x.name===h);if(ho)a.faultsH+=ho.faults;}a.faults=a.faultsM+a.faultsH;
+  a.onUnk=ms.filter(m=>m.on===null).length;return a;}
+function groupSvc(ms){const g=new Map();
+  for(const m of ms){const sv=svcOf(m);const k=S.merge&&S.sel.type==='all'?(sv?`n:${sv.name}`:`un:${m.corp}`):(sv?sv.id:`un:${m.corp}`);
+    if(!g.has(k))g.set(k,{key:k,svc:sv,corp:m.corp,corps:new Set(),ms:[]});const x=g.get(k);x.ms.push(m);x.corps.add(m.corp);}
+  return [...g.values()].map(x=>({...x,a:agg(x.ms)})).sort((x,y)=>(x.svc?0:1)-(y.svc?0:1)||(x.svc?x.svc.path+'\\'+x.svc.name:'').localeCompare(y.svc?y.svc.path+'\\'+y.svc.name:'','ko')||x.corp.localeCompare(y.corp));}
+function unmappedValues(){const map=new Map();
+  for(const m of MEMBERS){const r=resolve(m);if(r.src!=='none'||!r.unmapped||r.unmapped.kind==='entry')continue;const k=`${m.corp}|${r.unmapped.kind}|${r.unmapped.value}`;
+    if(!map.has(k))map.set(k,{corp:m.corp,kind:r.unmapped.kind,value:r.unmapped.value,n:0});map.get(k).n++;}
+  for(const e of SCAN_ENTRIES){if(!e.label)continue;const s=SERVICES.find(s=>s.corp===e.corp&&s.name.toLowerCase()===e.label.toLowerCase())||ALIASES.find(a=>a.corp===e.corp&&a.kind==='scan'&&a.value.toLowerCase()===e.label.toLowerCase());if(s)continue;
+    const k=`${e.corp}|scan|${e.label}`;if(!map.has(k))map.set(k,{corp:e.corp,kind:'scan',value:e.label,n:MEMBERS.filter(m=>m.scanEntry===e.id).length});}
+  return [...map.values()].filter(x=>S.sel.type==='all'||x.corp===(S.sel.corp||''));}
+function driftList(){return MEMBERS.map(m=>({m,r:resolve(m)})).filter(x=>x.r.src==='pin'&&x.r.drift&&!x.r.reviewed&&(S.sel.type==='all'||x.m.corp===S.sel.corp));}
+function ghostList(){const live=new Set(MEMBERS.map(m=>m.key));return [...PINS.entries()].filter(([k,p])=>!live.has(k)&&p.corp!==META.staleCorp).map(([k,p])=>({key:k,...p}));}
+function ghostBlocked(){const live=new Set(MEMBERS.map(m=>m.key));return [...PINS.entries()].filter(([k,p])=>!live.has(k)&&p.corp===META.staleCorp).map(([k,p])=>({key:k,...p}));}
+
+// ───────── 트리 ─────────
+function buildTree(){const rows=[];const cnt=(f)=>MEMBERS.filter(f).length;const sel=S.sel;
+  rows.push({d:0,t:'all',ic:'🌐',nm:'전체 법인',n:MEMBERS.length,on:sel.type==='all'});
+  for(const c of [...CORPS,{id:'',name:'(법인 미지정)'}]){const open=S.open.has(c.id||'__none');
+    rows.push({d:0,t:'corp',corp:c.id,ic:c.id?'🏢':'❔',tw:open?'▾':'▸',nm:c.id?corpShort(c.id):c.name,n:cnt(m=>m.corp===c.id),on:sel.type==='corp'&&sel.corp===c.id,un:!c.id});
+    if(!open)continue;
+    if(c.id){const folders=corpFolders(c.id);const done=new Set();
+      const walk=(base,d)=>{for(const p of folders){const parent=p.includes('\\')?p.slice(0,p.lastIndexOf('\\')):'';if(parent!==base||done.has(p))continue;done.add(p);
+        const fo=S.open.has(`f:${c.id}:${p}`);const n=cnt(m=>m.corp===c.id&&svcOf(m)&&under(svcOf(m).path,p));
+        rows.push({d,t:'folder',corp:c.id,path:p,ic:'📁',tw:fo?'▾':'▸',nm:p.slice(p.lastIndexOf('\\')+1),n,on:sel.type==='folder'&&sel.corp===c.id&&sel.path===p,empty:n===0});
+        if(fo){walk(p,d+1);for(const s of SERVICES.filter(s=>s.corp===c.id&&s.path===p))rows.push({d:d+1,t:'svc',corp:c.id,id:s.id,ic:'🧩',nm:s.name,tier:s.tier,n:cnt(m=>svcOf(m)?.id===s.id),on:sel.type==='svc'&&sel.id===s.id});}}};
+      walk('',1);for(const s of SERVICES.filter(s=>s.corp===c.id&&!s.path))rows.push({d:1,t:'svc',corp:c.id,id:s.id,ic:'🧩',nm:s.name,tier:s.tier,n:cnt(m=>svcOf(m)?.id===s.id),on:sel.type==='svc'&&sel.id===s.id});}
+    const un=cnt(m=>m.corp===c.id&&!svcOf(m));if(un||!c.id)rows.push({d:1,t:'un',corp:c.id,ic:'⚠',nm:'(미지정)',n:un,on:sel.type==='un'&&sel.corp===c.id,un:true});}
+  $('#tree').innerHTML=rows.map((r,i)=>`<div class="tn d${Math.min(r.d,4)}${r.on?' on':''}${r.un?' un':''}" data-i="${i}"><span class="tw">${r.tw||''}</span><span>${r.ic}</span><span class="nm">${esc(r.nm)}${r.empty?' <span class="faint">(빈 폴더)</span>':''}</span>${r.tier?tierBadge(r.tier):''}<span class="cnt">${r.n}</span></div>`).join('');
+  $('#tree').dataset.rows=JSON.stringify(rows.map(r=>({t:r.t,corp:r.corp,path:r.path,id:r.id})));}
+function crumb(){const s=S.sel;const parts=['<b>전체 법인</b>'];if(s.type!=='all')parts.push(esc(corpName(s.corp)));if(s.type==='folder')parts.push(...s.path.split('\\').map(esc));
+  if(s.type==='svc'){const sv=svcById(s.id);if(sv){if(sv.path)parts.push(...sv.path.split('\\').map(esc));parts.push(`<b>${esc(sv.name)}</b>`);}}if(s.type==='un')parts.push('<b style="color:#fcd34d">(미지정)</b>');
+  $('#crumb').innerHTML=parts.join('<span class="sep">›</span>');}
+
+// ───────── 렌더 ─────────
+function renderKpis(){const ms=filtered();const a=agg(ms);const svcs=new Set(ms.map(m=>svcOf(m)?.id).filter(Boolean));const un=ms.filter(m=>!svcOf(m)).length;
+  const um=unmappedValues().length,dr=driftList().length,gh=ghostList().length;const stale=(S.sel.type==='all'||S.sel.corp===META.staleCorp)?1:0;
+  $('#nUn').textContent=MEMBERS.filter(m=>!svcOf(m)&&(S.sel.type==='all'||m.corp===(S.sel.corp||''))).length;$('#nUm').textContent=um;$('#nRv').textContent=dr+gh;
+  $('#kpis').innerHTML=[['서비스',svcs.size,`등급1 ${[...svcs].filter(id=>svcById(id).tier===1).length} · 법인 ${new Set(ms.map(m=>m.corp).filter(Boolean)).size}`,'var(--accent)','svc'],
+    ['구성원',a.total,`VM ${a.vm} · 베어메탈 ${a.bm} · 영향 호스트 ${a.hostN}${a.faults?` · 부품 장애 ${a.faults}`:''}${stale?` · 엣지 오래됨 ${stale}`:''}`,(a.faults||stale)?'var(--amber)':'var(--accent-2)','svc'],
+    ['(미지정)',un,un?'출처별로 묶어 연결한다':'모두 소속됨',un?'var(--amber)':'var(--green)','un'],
+    ['매핑 안 된 값',um,um?'규칙 값에 맞는 서비스 없음':'없음',um?'var(--amber)':'var(--green)','unmapped'],
+    ['검토 필요',dr+gh,`드리프트 ${dr} · 유령 키 ${gh}`,(dr+gh)?'var(--red)':'var(--green)','review']]
+    .map(([l,v,s,c,view])=>`<div class="card kpi${S.view===view?' on':''}" style="border-left-color:${c}" data-v="${view}"><div class="lbl">${l}</div><div class="big" style="color:${c}">${v}</div><div class="sub">${s}</div></div>`).join('');
+  $('#noteUnread').classList.toggle('hide',!stale);if(stale)$('#noteUnread').innerHTML=`⚠ 엣지 보고가 오래된 법인 <b>${corpName(META.staleCorp)}</b> — 베어메탈 사용률·부품 장애는 '—' 로 표시합니다(TTL 초과). 보고가 다시 오면 자동으로 채워집니다.`;}
+function renderSvc(){const groups=groupSvc(filtered());$('#svcCount').textContent=`${groups.length}묶음`;$('#mergeWrap').classList.add('hide');$('#mergeByName').checked=S.merge;
+  $('#svcTable tbody').innerHTML=groups.map(g=>{const a=g.a,un=!g.svc,merged=S.merge&&S.sel.type==='all';
+    const srcTxt=['pin','folder','scan','tag','rule'].filter(k=>a.src[k]).map(k=>`<span class="src-${k}" title="${SRC_LABEL[k]}">${SRC_SHORT[k]}<span class="k">${a.src[k]}</span></span>`).join('<span class="faint">·</span>')||'<span class="muted">—</span>';
+    const bk=(a.bkOk+a.bkFail+a.bkNone)?`<span class="badge green">${a.bkOk}</span> ${a.bkFail?`<span class="badge red">${a.bkFail}</span> `:''}${a.bkNone?`<span class="badge gray">잡 없음 ${a.bkNone}</span>`:''}`:'<span class="muted">—</span>';
+    return `<tr class="row${S.selSvc===g.key?' sel':''}${un?' unassigned':''}" data-key="${esc(g.key)}">
+      <td data-sort="${esc(un?'\uffff':g.svc.name)}" title="${esc(un?'':('담당자: '+(g.svc.owner||'미지정')))}"><b>${un?'(미지정)':esc(g.svc.name)}</b>${un?' <span class="badge amber">규칙 없음</span>':(g.svc.owner?'':' <span class="faint" title="담당자 미지정">·</span>')}</td>
+      <td data-sort="${un?9:g.svc.tier}">${un?'<span class="faint">—</span>':tierBadge(g.svc.tier)}</td>
+      <td data-sort="${esc(un?'\uffff':g.svc.path)}" class="muted">${un?'—':esc(g.svc.path||'(루트)')}</td>
+      <td data-sort="${esc(merged?String(g.corps.size):corpName(g.corp))}" title="${esc([...g.corps].map(corpName).join(', '))}">${merged?`${g.corps.size}개 법인`:esc(corpShort(g.corp))}</td>
+      <td class="r" data-sort="${a.vm}">${a.vm||'<span class="faint">0</span>'}</td><td class="r" data-sort="${a.bm}">${a.bm||'<span class="faint">0</span>'}</td><td class="r" data-sort="${a.hostN}">${a.hostN||'<span class="faint">0</span>'}</td>
+      <td class="r" data-sort="${a.on}" title="켜짐/전원을 아는 구성원${a.onUnk?` · 전원 모름 ${a.onUnk}`:''}">${a.on}/${a.total-a.onUnk}${a.onUnk?'<span class="faint">?</span>':''}</td><td data-sort="${a.cpu==null?-1:a.cpu}">${barCell(a.cpu)}</td><td data-sort="${a.mem==null?-1:a.mem}">${barCell(a.mem)}</td>
+      <td class="r" data-sort="${g.corp===META.staleCorp?-1:a.faults}">${g.corp===META.staleCorp?'<span class="muted" title="엣지 보고 오래됨 — 장애 수 모름">—</span>':a.faultsM?`<span class="badge red">${a.faultsM}</span>`:'<span class="faint">0</span>'}${g.corp!==META.staleCorp&&a.faultsH?` <span class="faint" title="영향 호스트의 열린 장애 ${a.faultsH}(다른 서비스와 공유 — 열 합계가 KPI 와 다를 수 있다)">+${a.faultsH}h</span>`:''}</td><td data-sort="${a.bkFail}">${bk}</td>
+      <td class="r" data-sort="${a.unread}">${a.unread?`<span class="badge amber">${a.unread}</span>`:'<span class="faint">0</span>'}</td><td class="src" data-sort="${a.src.folder}">${srcTxt}</td></tr>`;}).join('');
+  applySort('svcTable');renderMembersPanel();renderAttr();}
+function memberRows(ms,compact=false){return ms.map(m=>{const r=resolve(m);return `<tr class="${!r.svcId?'unassigned':''}">
+    <td data-sort="${esc(m.name)}"><b>${esc(m.name)}</b><div class="sm mono">${esc(m.key)}${m.kind==='VM'?` · ${m.vcFolder==null?'위치 모름':esc(m.vcFolder)}`:''}</div></td><td data-sort="${m.kind}">${kindBadge(m.kind)}</td>
+    ${compact?'':`<td data-sort="${esc(svcName(m)||'\uffff')}">${r.svcId?esc(svcName(m)):'<span class="badge amber">(미지정)</span>'}</td><td data-sort="${esc(corpName(m.corp))}">${esc(corpShort(m.corp))}</td>`}
+    <td data-sort="${r.src}">${srcBadge(r)}</td><td data-sort="${m.on===null?-1:m.on?1:0}">${m.on===null?'<span class="muted">—</span>':`<span class="dot ${m.on?'on':'off'}"></span>${m.on?'켜짐':'꺼짐'}`}</td>
+    <td data-sort="${m.cpu==null?-1:m.cpu}">${barCell(m.cpu)}</td><td data-sort="${m.mem==null?-1:m.mem}">${barCell(m.mem)}</td><td data-sort="${m.msrc||''}">${m.msrc?msrcLabel(m.msrc):'<span class="badge amber">못 읽음</span>'}</td>
+    <td class="r" data-sort="${m.faults}">${m.faults?`<span class="badge red">${m.faults}</span>`:'<span class="faint">0</span>'}</td><td data-sort="${m.backup}">${bkBadge(m.backup)}</td><td class="mono" data-sort="${esc(m.kind==='VM'?m.host:m.ip)}">${esc(m.kind==='VM'?m.host:m.ip)}</td></tr>`;}).join('');}
+function renderMembersPanel(){const body=$('#memBody'),hb=$('#hostBody');
+  if(!S.selSvc){body.className='empty';body.textContent='트리나 위 표에서 서비스를 고르면 VM · 베어메탈 구성원이 여기 나옵니다.';$('#memTitle').textContent='구성원';$('#memSub').textContent='';hb.className='empty';hb.textContent='서비스를 고르면 그 VM 이 올라간 호스트와, 그 호스트가 함께 떠받치는 다른 서비스가 나옵니다.';$('#hostSub').textContent='';return;}
+  const ms=filtered().filter(m=>{const sv=svcOf(m);return S.selSvc.startsWith('n:')?(sv&&`n:${sv.name}`===S.selSvc):S.selSvc.startsWith('un:')?(!sv&&`un:${m.corp}`===S.selSvc):(sv&&sv.id===S.selSvc);});
+  if(!ms.length){S.selSvc=null;return renderMembersPanel();}
+  const sv=svcOf(ms[0]);$('#memTitle').textContent=sv?sv.name:'(미지정)';$('#memSub').textContent=`${ms.length}대${sv&&sv.path?` · 폴더 ${sv.path}`:''}`;
+  body.className='tscroll';body.innerHTML=`<table id="memSel" style="min-width:860px"><thead><tr><th>이름 · 키 · vCenter 폴더</th><th>종류</th><th>소속 근거</th><th>전원</th><th>CPU</th><th>메모리</th><th>지표 출처</th><th class="r">부품 장애</th><th>백업</th><th>호스트/IP</th></tr></thead><tbody>${memberRows(ms,true)}</tbody></table>`;applySort('memSel');
+  const hosts=[...new Set(ms.filter(m=>m.kind==='VM').map(m=>m.host))].map(h=>{const ho=HOSTS.find(x=>x.name===h)||{name:h,corp:ms[0].corp,cpu:null,mem:null,faults:0};
+    const others=[...new Set(MEMBERS.filter(m=>m.kind==='VM'&&m.host===h).map(m=>svcName(m)||'(미지정)'))].filter(n=>!sv||n!==sv.name);return {...ho,vmN:ms.filter(m=>m.host===h).length,others};});
+  $('#hostSub').textContent=`${hosts.length}대`;hb.className=hosts.length?'tscroll':'empty';
+  hb.innerHTML=hosts.length?`<table id="hostSel" style="min-width:620px"><thead><tr><th>호스트</th><th class="r">이 서비스 VM</th><th>CPU</th><th>메모리</th><th class="r">부품 장애</th><th>함께 떠받치는 서비스</th></tr></thead><tbody>${hosts.map(h=>`<tr><td><b>${esc(h.name)}</b><div class="sm mono">${esc(h.st||'')}</div></td><td class="r" data-sort="${h.vmN}">${h.vmN}</td><td data-sort="${h.cpu==null?-1:h.cpu}">${barCell(h.cpu)}</td><td data-sort="${h.mem==null?-1:h.mem}">${barCell(h.mem)}</td><td class="r" data-sort="${h.faults}">${h.faults?`<span class="badge red">${h.faults}</span> <span class="sm">→ 영향 서비스 ${1+h.others.length}</span>`:'<span class="faint">0</span>'}</td><td class="muted">${h.others.map(esc).join(' · ')||'<span class="faint">없음(전용)</span>'}</td></tr>`).join('')}</tbody></table>`:'베어메탈만 있는 서비스입니다(파생 호스트 없음).';
+  if(hosts.length)applySort('hostSel');}
+function renderAttr(){const box=$('#svcAttr');if(S.sel.type!=='svc'){box.classList.add('hide');return;}const sv=svcById(S.sel.id);if(!sv){box.classList.add('hide');return;}box.classList.remove('hide');
+  box.innerHTML=`<div class="sect"><h2>서비스 속성 — ${esc(sv.name)}</h2><span class="sm">${esc(corpName(sv.corp))} · ${esc(sv.path||'(루트)')}</span><span class="sp"></span><span class="sm">법인 관리자가 바꾼다 · 감사 로그</span></div>
+    <div class="attr"><span class="sm">등급</span><div><select id="atTier"><option value="1"${sv.tier===1?' selected':''}>1 — 부품 장애·백업 실패를 가장 먼저 본다</option><option value="2"${sv.tier===2?' selected':''}>2</option><option value="3"${sv.tier===3?' selected':''}>3</option></select></div>
+    <span class="sm">담당자</span><div><input id="atOwner" value="${esc(sv.owner)}" placeholder="메일 또는 Slack 채널 — 후속: 서비스별 알림 라우팅" style="width:min(420px,100%)"></div>
+    <span class="sm">메모</span><div style="display:flex;gap:6px;flex-wrap:wrap"><input id="atNote" value="${esc(sv.note)}" placeholder="예: 2026-12 DB 서버 교체 예정" style="width:min(420px,100%)"><button class="btn sm primary" id="atSave">저장</button></div></div>`;}
+function renderUn(){const ms=MEMBERS.filter(m=>!svcOf(m)&&(S.sel.type==='all'||m.corp===(S.sel.corp||'')));$('#unCount').textContent=`${ms.length}대`;
+  const groups=new Map();for(const m of ms){const r=resolve(m);let k,title,kind;
+    if(m.kind==='VM'&&r.unmapped?.kind==='folder'){k=`folder|${m.corp}|${m.vcFolder}`;title=m.vcFolder==='/'?'vCenter 루트(폴더 없음)':`vCenter 폴더 ${m.vcFolder}`;kind='folder';}
+    else if(m.kind==='VM'&&m.vcFolder==null){k=`vapp|${m.corp}`;title='vSphere 위치 모름(vApp 안 VM 등) — 폴더 규칙을 못 쓴다';kind='manual';}
+    else if(m.kind==='VM'&&r.unmapped?.kind==='tag'){k=`tag|${m.corp}|${m.tag}`;title=`태그 값 '${m.tag}' (서비스 없음)`;kind='tag';}
+    else if(m.kind==='BM'&&r.unmapped?.kind==='entry'){const e=entryOf(m);k=`entry|${e.id}`;title=`스캔 엔트리 ${e.range} (라벨 없음)`;kind='entry';}
+    else if(m.kind==='BM'&&r.unmapped?.kind==='scan'){const e=entryOf(m);k=`scan|${m.corp}|${e.label}`;title=`스캔 엔트리 ${e.range} · 라벨 '${e.label}' (서비스 없음)`;kind='scan';}
+    else if(!m.corp){k='nocorp';title='법인 귀속 없음(엣지 보고 · fleet-assign 없음)';kind='nocorp';}
+    else{k=`manual|${m.corp}`;title='스캔 엔트리 없음(수동 등록 iDRAC)';kind='manual';}
+    if(!groups.has(k))groups.set(k,{k,title,kind,corp:m.corp,ms:[],value:kind==='folder'?m.vcFolder:kind==='tag'?m.tag:kind==='entry'?entryOf(m).id:kind==='scan'?entryOf(m).label:''});groups.get(k).ms.push(m);}
+  const opts=(corp)=>SERVICES.filter(s=>s.corp===corp).map(s=>`<option value="${s.id}">${esc(s.path?s.path+'\\':'')}${esc(s.name)}</option>`).join('');
+  $('#unGroups').innerHTML=[...groups.values()].map(g=>`<div class="group"><div class="gh"><b>${esc(g.title)}</b><span class="badge gray">${esc(corpShort(g.corp))}</span><span class="badge amber">${g.ms.length}대</span><span class="sp"></span>
+    ${g.kind==='nocorp'?'<span class="sm">통합 서버 인벤토리에서 법인을 먼저 정한다 →</span><button class="btn sm" disabled>법인 귀속(fleet)</button>':g.kind==='manual'?`<span class="sm">묶을 출처가 없다 →</span><button class="btn sm" data-onebyone="${esc(g.corp)}">한 대씩 고정</button>`:
+      `<select data-ug="${esc(g.k)}"><option value="">서비스 선택…</option>${opts(g.corp)}</select><button class="btn sm primary" data-ugok="${esc(g.k)}">${g.kind==='folder'?'이 폴더를 연결':g.kind==='entry'?'이 엔트리를 연결':g.kind==='scan'?`라벨 '${esc(g.value)}' 를 연결`:'이 태그 값을 연결'}</button>${g.kind!=='entry'?`<button class="btn sm" data-ugnew="${esc(g.k)}">'${esc(g.kind==='folder'?(g.value==='/'?'루트':g.value.slice(g.value.lastIndexOf('/')+1)):g.value)}' 서비스로 만들기</button>`:''}`}</div>
+    <div class="gb">${g.ms.map(m=>`<span>${m.kind==='VM'?'🟦':'🟧'} ${esc(m.name)}</span>`).join('')}</div></div>`).join('')||'<div class="empty">미지정이 없습니다.</div>';
+  $('#unGroups').dataset.groups=JSON.stringify([...groups.values()].map(g=>({k:g.k,kind:g.kind,corp:g.corp,value:g.value,keys:g.ms.map(m=>m.key)})));}
+function renderUm(){const list=unmappedValues();$('#umCount').textContent=`${list.length}건`;
+  const kindLabel={folder:'vCenter 폴더',scan:'스캔 엔트리 라벨',tag:'태그 값'};const how={folder:'규칙에 없는 폴더에 VM 이 있다',scan:'엔트리 라벨이 어느 서비스명·별칭과도 다르다',tag:'태그 카테고리 값이 어느 서비스명·별칭과도 다르다'};
+  $('#umTable tbody').innerHTML=list.map(x=>`<tr><td>${esc(kindLabel[x.kind])}</td><td class="mono"><b>${esc(x.value)}</b></td><td>${esc(corpShort(x.corp))}</td><td class="r" data-sort="${x.n}">${x.n}</td><td class="muted">${esc(how[x.kind])}</td>
+    <td><button class="btn sm" data-umnew="${esc(`${x.corp}|${x.kind}|${x.value}`)}">서비스로 만들기</button> <select data-umsel="${esc(`${x.corp}|${x.kind}|${x.value}`)}"><option value="">기존 서비스에 연결…</option>${SERVICES.filter(s=>s.corp===x.corp).map(s=>`<option value="${s.id}">${esc(s.path?s.path+'\\':'')}${esc(s.name)}</option>`).join('')}</select></td></tr>`).join('')||'<tr><td colspan="6" class="empty">매핑 안 된 값이 없습니다.</td></tr>';applySort('umTable');}
+function renderReview(){const dr=driftList();$('#drCount').textContent=`${dr.length}건`;
+  $('#drTable tbody').innerHTML=dr.map(({m,r})=>`<tr><td><b>${esc(m.name)}</b><div class="sm mono">${esc(m.key)}</div></td><td>${esc(svcById(r.svcId).name)} <span class="sm">(${esc(PINS.get(m.key).by)} · ${esc(PINS.get(m.key).at)})</span></td><td>${esc(svcById(r.auto.svcId).name)} <span class="badge ${SRC_CLS[r.auto.src]}">${SRC_LABEL[r.auto.src]}</span></td><td class="muted">${esc(r.auto.via||'')}</td>
+    <td><button class="btn sm" data-drauto="${esc(m.key)}">자동으로 되돌리기</button> <button class="btn sm" data-drkeep="${esc(m.key)}">고정 유지</button></td></tr>`).join('')||'<tr><td colspan="5" class="empty">드리프트가 없습니다.</td></tr>';
+  const gh=ghostList(),gb=ghostBlocked();$('#ghCount').innerHTML=`${gh.length}건${gb.length?` · <span style="color:#fcd34d">판정 보류 ${gb.length}건(${esc(corpShort(META.staleCorp))} — 엣지 보고 오래됨·읽지 못한 법인은 유령으로 보지 않는다)</span>`:''}`;$('#btnGhost').disabled=!gh.length;
+  $('#ghTable tbody').innerHTML=gh.map(g=>`<tr><td class="mono">${esc(g.key)}</td><td>${esc(svcById(g.svcId)?.name||'?')}</td><td>${esc(g.by)} · ${esc(g.at)}</td><td class="muted">${esc(g.ghost||'관측 없음')}</td></tr>`).join('')+gb.map(g=>`<tr style="opacity:.6"><td class="mono">${esc(g.key)}</td><td>${esc(svcById(g.svcId)?.name||'?')}</td><td>${esc(g.by)} · ${esc(g.at)}</td><td class="muted">판정 보류 — ${esc(corpName(g.corp))} 를 지금 읽지 못한다(정리 대상 아님)</td></tr>`).join('')||'<tr><td colspan="4" class="empty">유령 키가 없습니다.</td></tr>';applySort('drTable');applySort('ghTable');}
+function renderRules(){const ms=filtered();const a=agg(ms);const corp=S.sel.type==='all'?'':S.sel.corp;
+  const rules=[['고정(수동) — 한 대씩 추가 · 묶음 연결이 아닌 개별 예외','키 = VM instanceUuid(iu:) · 물리 서비스태그(st:). 자동 판정과 다르면 드리프트 큐에 오르고 관리자가 고른다(조용히 이기지 않는다). 가리키는 서버가 사라지면 유령 키.',a.src.pin,'purple'],
+    ['vCenter 폴더 규칙 — VM 의 1순위 자동 규칙','법인별 폴더 접두 → 서비스. 매 수집(60초)마다 전 VM 에 있는 정확한 위치(vmPlacement.folderPath — \'/ERP/prod\' 꼴, 화면용 folder 가 아니다)를 쓴다. 별도 권한·세션이 없다. 길이 상한 뒤 \'/\' 경계 접두 비교(가장 긴 접두가 이긴다). 규칙에 없는 폴더는 미지정 탭에 폴더 단위로 묶이고, vApp 안 VM 처럼 위치가 null 이면 고정으로만 넣는다.',a.src.folder,'blue'],
+    ['iDRAC 스캔 엔트리 라벨 — 베어메탈의 자동 규칙','idrac.json 항목의 scanRangeId 로 엔트리를 조인해 라벨을 읽는다. 라벨 = 서비스명이면 바로, 다르면 별칭(매핑 안 된 값 탭에서 연결). 라벨이 비어 있으면 미지정 탭에 엔트리 단위로 묶인다.',a.src.scan,'teal'],
+    ['vSphere 태그(선택) — 카테고리를 정한 법인만','별도 REST 세션·6시간 주기·부분 수집 가능 — 그래서 선택이다. 폴더 규칙에 안 걸린 VM 에만 적용. 태그 값에 맞는 서비스가 없으면 매핑 안 된 값.',a.src.tag,'blue'],
+    ['이름 규칙(선택)','정규식 → 서비스. 길이 상한 뒤 선형. 켜지 않으면 없음.',a.src.rule,'gray'],
+    ['(미지정)','위 다섯 다 아니면. 다른 서비스에 넣거나 숨기지 않는다. 출처별 묶음으로 보여 한 번에 연결한다.',a.src.none,'amber']];
+  $('#rules').innerHTML=rules.map(([t,d,n,c],i)=>`<div class="rule"><div class="no" style="background:${i===5?'var(--amber)':'var(--accent)'}">${i===5?'·':i+1}</div><div><h3>${t} <span class="badge ${c}">${n}대</span></h3><p>${d}</p></div></div>`).join('');
+  const fr=FOLDER_RULES.filter(r=>!corp||r.corp===corp).map(r=>({corp:r.corp,prefix:r.prefix,svc:svcById(r.svcId).name,n:MEMBERS.filter(m=>m.kind==='VM'&&resolve(m).src==='folder'&&resolve(m).via===r.prefix&&m.corp===r.corp).length,kind:'폴더 접두'}))
+    .concat(ALIASES.filter(x=>!corp||x.corp===corp).map(x=>({corp:x.corp,prefix:`${x.kind==='scan'?'라벨':'태그'} '${x.value}'`,svc:svcById(x.svcId).name,n:MEMBERS.filter(m=>resolve(m).via===x.value&&m.corp===x.corp).length,kind:x.kind==='scan'?'스캔 라벨 별칭':'태그 별칭'})));
+  $('#frSub').textContent=`${fr.length}건${corp?'':' · 전 법인'}`;
+  $('#frTable tbody').innerHTML=fr.map(r=>`<tr><td>${esc(corpShort(r.corp))}</td><td class="mono">${esc(r.prefix)}</td><td><b>${esc(r.svc)}</b></td><td class="r" data-sort="${r.n}">${r.n}</td><td class="muted">${esc(r.kind)}</td></tr>`).join('');applySort('frTable');}
+function renderApiNote(){$('#apiNote').innerHTML=`갱신(API 값 · 목): 인벤토리 스냅샷 ${META.snapAt}(주기 ${META.snapPeriod} — 폴더 규칙은 이 주기로 반영) · 베어메탈 사용률 ${META.bmAt}(주기 ${META.bmPeriod}) · vSphere 태그 ${META.tagsAt}(주기 ${META.tagRefresh}, 선택) · 부품 장애 ${META.faultsAt}. 화면은 주기·상한 숫자를 박지 않는다.`;}
+function applySort(id){const t=document.getElementById(id);if(!t)return;const st=S.sort[id];const ths=[...t.tHead.rows[0].cells];
+  ths.forEach((th,i)=>{th.querySelector('.arr')?.remove();if(st&&st.col===i){const s=document.createElement('span');s.className='arr';s.textContent=st.dir==='asc'?'▲':'▼';th.appendChild(s);}
+    if(!th.dataset.bound){th.dataset.bound='1';if(th.hasAttribute('data-nosort'))return;th.addEventListener('click',()=>{const cur=S.sort[id];S.sort[id]=!cur||cur.col!==i?{col:i,dir:'asc'}:cur.dir==='asc'?{col:i,dir:'desc'}:null;applySort(id);});}});
+  const tb=t.tBodies[0];const rows=[...tb.rows];rows.forEach((r,i)=>r.dataset.i=r.dataset.i??i);
+  if(!st){rows.sort((a,b)=>a.dataset.i-b.dataset.i);}else{const val=(r)=>{const c=r.cells[st.col];const v=c.dataset.sort??c.textContent.trim();const n=Number(v);return {n:v!==''&&!isNaN(n)?n:null,s:v};};
+    rows.sort((a,b)=>{const x=val(a),y=val(b);const nullA=x.s===''||x.s==='—'||x.n===-1,nullB=y.s===''||y.s==='—'||y.n===-1;if(nullA!==nullB)return nullA?1:-1;const c=(x.n!=null&&y.n!=null)?x.n-y.n:x.s.localeCompare(y.s,'ko');return st.dir==='asc'?c:-c;});}
+  rows.forEach(r=>tb.appendChild(r));}
+function selCorp(){return S.sel.type==='all'?'':S.sel.corp;}
+function renderCorpAxis(){renderKpis();buildTree();crumb();
+  for(const [id,v] of [['vSvc','svc'],['vUn','un'],['vUm','unmapped'],['vRv','review'],['vRules','rules']])$('#'+id).classList.toggle('hide',S.view!==v);
+  document.querySelectorAll('#viewSeg button').forEach(b=>b.classList.toggle('on',b.dataset.v===S.view));$('#btnMove').disabled=S.sel.type!=='svc';
+  ({svc:renderSvc,un:renderUn,unmapped:renderUm,review:renderReview,rules:renderRules})[S.view]();renderApiNote();}
+function render(){
+  const svc=S.axis==='svc';
+  document.querySelectorAll('#axisSeg button').forEach(b=>b.classList.toggle('on',b.dataset.a===S.axis));
+  $('#treeCard').classList.toggle('hide',svc);$('#gpanel').classList.toggle('hide',!svc);$('#kpis').classList.toggle('hide',svc);
+  $('#crumb').classList.toggle('hide',svc);$('#viewSeg').classList.toggle('hide',svc);$('#tools2').classList.toggle('hide',svc);
+  ['formFolder','formSvc','formMove','formImport'].forEach(id=>{if(svc)$('#'+id).classList.add('hide');});
+  $('#vGlobal').classList.toggle('hide',!svc);
+  if(svc){for(const id of ['vSvc','vUn','vUm','vRv','vRules'])$('#'+id).classList.add('hide');$('#noteUnread').classList.add('hide');renderGlobal();renderApiNote();return;}
+  renderCorpAxis();
+}
+// ───────── 서비스별(전 법인) 축 ─────────
+const gKeyOf=(sv)=>!sv?null:(S.gmode==='catalog'?(sv.globalId||null):('n:'+sv.name.toLowerCase()));
+function resAgg(ms){const a=agg(ms);a.vcpu=0;a.memGB=0;a.storageGB=0;a.bmCores=0;for(const m of ms){if(m.kind==='VM'){a.vcpu+=m.cores;a.memGB+=m.memGB;a.storageGB+=m.storageGB||0;}else{a.bmCores+=m.cores;a.memGB+=m.memGB;}}return a;}
+function gGroups(){const map=new Map();const local=[];
+  for(const sv of SERVICES){const k=gKeyOf(sv);if(!k){local.push(sv);continue;}
+    if(!map.has(k)){const g=S.gmode==='catalog'?GLOBAL.find(x=>x.id===k):null;map.set(k,{key:k,name:g?g.name:sv.name,tier:g?g.tier:sv.tier,owner:g?g.owner:'',corps:new Set(),services:[],ms:[]});}
+    const x=map.get(k);x.corps.add(sv.corp);x.services.push(sv);}
+  for(const m of MEMBERS){const k=gKeyOf(svcOf(m));if(k&&map.has(k))map.get(k).ms.push(m);}
+  if(S.gmode==='catalog')for(const g of GLOBAL)if(!map.has(g.id))map.set(g.id,{key:g.id,name:g.name,tier:g.tier,owner:g.owner,corps:new Set(),services:[],ms:[]});
+  const groups=[...map.values()].map(x=>({...x,a:resAgg(x.ms)})).sort((a,b)=>a.tier-b.tier||b.a.total-a.a.total||a.name.localeCompare(b.name,'ko'));
+  return {groups,local};}
+function renderGlobal(){const {groups,local}=gGroups();const sel=groups.find(g=>g.key===S.gsel)||null;if(S.gsel&&!sel)S.gsel=null;
+  $('#gcount').textContent=`${groups.length}개${S.gmode==='catalog'&&local.length?` · 법인 전용 ${local.length}`:''}`;
+  $('#glist').innerHTML=groups.map(g=>`<div class="gl${S.gsel===g.key?' on':''}" data-g="${esc(g.key)}">${tierBadge(g.tier)}<span class="nm">${esc(g.name)}</span><span class="sub">${g.corps.size}법인 · ${g.a.total}대${g.a.faults?` · <span style="color:#fca5a5">장애 ${g.a.faults}</span>`:''}</span></div>`).join('')
+    +(S.gmode==='catalog'&&local.length?`<div class="sm" style="padding:10px 12px 4px;border-top:1px solid var(--border-soft);margin-top:6px">그 법인에만 있는 서비스(전역 연결 없음)</div>${local.map(sv=>`<div class="gl" style="cursor:default"><span class="nm">${esc(sv.name)} <span class="sm">· ${esc(corpShort(sv.corp))}</span></span><select data-glink="${sv.id}" style="padding:3px 6px;font-size:11.5px"><option value="">전역에 연결…</option>${GLOBAL.map(g=>`<option value="${g.id}">${esc(g.name)}</option>`).join('')}</select></div>`).join('')}`:'');
+  document.querySelectorAll('#gmodeSeg button').forEach(b=>b.classList.toggle('on',b.dataset.m===S.gmode));document.querySelectorAll('#gfirstSeg button').forEach(b=>b.classList.toggle('on',b.dataset.f===S.gfirst));
+  $('#gFirst').classList.toggle('hide',!!sel);$('#gSel').classList.toggle('hide',!sel);$('#gBack').classList.toggle('hide',!sel);
+  $('#gcrumb').innerHTML=`<b>서비스별(전 법인)</b>${sel?`<span class="sep">›</span><b>${esc(sel.name)}</b>${S.gcorp?`<span class="sep">›</span>${esc(corpShort(S.gcorp))}`:''}`:''}`;
+  if(!sel){if(S.gfirst==='matrix')renderMatrix(groups);else renderGList(groups);}else renderGSel(sel);}
+function renderMatrix(groups){const regions=[...new Set(CORPS.map(c=>c.region))];const cols=regions.map(r=>({r,cs:CORPS.filter(c=>c.region===r)}));
+  const cell=(g,c)=>{const ms=g.ms.filter(m=>m.corp===c.id);if(!ms.length)return '<td class="z">–</td>';const stale=c.id===META.staleCorp;const f=ms.reduce((s,m)=>s+m.faults,0);
+    return `<td class="c${f?' f':''}" data-mg="${esc(g.key)}" data-mc="${c.id}" title="${esc(g.name)} · ${esc(c.name)} · VM ${ms.filter(m=>m.kind==='VM').length} · 베어메탈 ${ms.filter(m=>m.kind==='BM').length}${stale?' · 엣지 보고 오래됨(장애 수 모름)':f?` · 장애 ${f}`:''}">${ms.length}${stale?'<span class="faint" title="엣지 보고 오래됨 — 장애 수 모름">?</span>':f?`<span class="badge red" style="margin-left:4px">${f}</span>`:''}</td>`;};
+  $('#gFirst').innerHTML=`<div class="sect"><h2>커버리지 매트릭스</h2><span class="sm">행 = 전역 서비스 · 열 = 법인(지역별) · 칸 = 구성원 수(붉은 배지 = 열린 부품 장애 · '?' = 엣지 보고 오래됨) · 칸 클릭 → 그 법인의 구성원</span></div>
+    <div class="tscroll"><table class="mx" style="min-width:${Math.max(640,260+CORPS.length*84)}px"><thead><tr><th rowspan="2" style="text-align:left">서비스</th><th rowspan="2">등급</th>${cols.map(x=>`<th class="rg" colspan="${x.cs.length}">${esc(x.r)}</th>`).join('')}<th rowspan="2">법인</th><th rowspan="2">합계</th></tr><tr>${cols.flatMap(x=>x.cs.map(c=>`<th title="${esc(c.name)}">${esc(corpShort(c.id))}</th>`)).join('')}</tr></thead>
+    <tbody>${groups.map(g=>`<tr><td class="n"><b data-gsel="${esc(g.key)}" style="cursor:pointer">${esc(g.name)}</b></td><td>${tierBadge(g.tier)}</td>${cols.flatMap(x=>x.cs.map(c=>cell(g,c))).join('')}<td>${g.corps.size}</td><td><b>${g.a.total}</b></td></tr>`).join('')}</tbody></table></div>
+    <div class="foot"><span>'–' = 그 법인에 그 서비스가 없다. 미지정 구성원은 여기 없다(법인별 뷰의 미지정 탭).</span><span>28개 법인이면 지역 머리글을 접어 열을 줄인다(구현: 지역 클릭 접기).</span></div>`;}
+function renderGList(groups){
+  $('#gFirst').innerHTML=`<div class="sect"><h2>전역 서비스 목록</h2><span class="sm">${groups.length}개 · 행 클릭 → 법인별 투입 자원</span></div>
+    <div class="tscroll"><table id="gListTable" style="min-width:1040px"><thead><tr><th>서비스</th><th>등급</th><th>전역 담당자</th><th class="r">법인</th><th class="r">VM</th><th class="r">베어메탈</th><th class="r">호스트</th><th class="r">vCPU</th><th class="r">메모리 GB</th><th class="r">스토리지 GB</th><th class="r">BM 코어</th><th class="r">부품 장애</th><th class="r">백업 실패</th><th class="r">못 읽음</th></tr></thead>
+    <tbody>${groups.map(g=>{const a=g.a;return `<tr class="row" data-gsel="${esc(g.key)}"><td data-sort="${esc(g.name)}"><b>${esc(g.name)}</b></td><td data-sort="${g.tier}">${tierBadge(g.tier)}</td><td class="${g.owner?'':'faint'}">${esc(g.owner||'미지정')}</td><td class="r" data-sort="${g.corps.size}">${g.corps.size}</td><td class="r" data-sort="${a.vm}">${a.vm}</td><td class="r" data-sort="${a.bm}">${a.bm}</td><td class="r" data-sort="${a.hostN}">${a.hostN}</td><td class="r" data-sort="${a.vcpu}">${a.vcpu}</td><td class="r" data-sort="${a.memGB}">${a.memGB.toLocaleString()}</td><td class="r" data-sort="${a.storageGB}">${a.storageGB.toLocaleString()}</td><td class="r" data-sort="${a.bmCores}">${a.bmCores}</td><td class="r" data-sort="${a.faults}">${a.faults?`<span class="badge red">${a.faults}</span>`:'<span class="faint">0</span>'}</td><td class="r" data-sort="${a.bkFail}">${a.bkFail?`<span class="badge red">${a.bkFail}</span>`:'<span class="faint">0</span>'}</td><td class="r" data-sort="${a.unread}">${a.unread?`<span class="badge amber">${a.unread}</span>`:'<span class="faint">0</span>'}</td></tr>`;}).join('')}</tbody></table></div>
+    <div class="foot"><span>vCPU·메모리·스토리지 = 할당 합계('투입된 자원'). 못 읽은 서버는 사용률 합산에서만 빠진다(할당 합계에는 들어간다 — 할당은 스냅샷 값).</span></div>`;applySort('gListTable');}
+function hostsOf(ms,svName){return [...new Set(ms.filter(m=>m.kind==='VM').map(m=>m.host))].map(h=>{const ho=HOSTS.find(x=>x.name===h)||{name:h,cpu:null,mem:null,faults:0};
+  const others=[...new Set(MEMBERS.filter(m=>m.kind==='VM'&&m.host===h).map(m=>svcName(m)||'(미지정)'))].filter(n=>n!==svName);return {...ho,vmN:ms.filter(m=>m.host===h).length,others};});}
+function renderGSel(sel){const a=sel.a;const staleIn=[...sel.corps].filter(c=>c===META.staleCorp).length;
+  $('#gkpis').innerHTML=[['법인',sel.corps.size,`${[...sel.corps].map(corpShort).join(' · ')||'없음'}`,'var(--accent)'],['구성원',a.total,`VM ${a.vm} · 베어메탈 ${a.bm} · 영향 호스트 ${a.hostN}`,'var(--accent-2)'],
+    ['vCPU 합',a.vcpu,`BM 코어 ${a.bmCores} 별도`,'var(--accent)'],['메모리 GB',a.memGB.toLocaleString(),'VM 할당 + 베어메탈 설치','var(--accent)'],['스토리지 GB',a.storageGB.toLocaleString(),'VM 할당(스냅샷 storageGB)','var(--accent)'],
+    ['장애·백업 실패',a.faults+a.bkFail,`부품 장애 ${a.faults} · 백업 실패 ${a.bkFail}`,(a.faults+a.bkFail)?'var(--red)':'var(--green)'],['제외',a.unread+staleIn,`못 읽음 ${a.unread}대${staleIn?` · 엣지 오래됨 ${staleIn}법인`:''}`,(a.unread+staleIn)?'var(--amber)':'var(--green)']]
+    .map(([l,v,s,c])=>`<div class="card kpi" style="border-left-color:${c};cursor:default"><div class="lbl">${l}</div><div class="big" style="color:${c}">${v}</div><div class="sub">${s}</div></div>`).join('');
+  $('#gCorpTitle').textContent=`${sel.name} — 법인별 투입 자원`;$('#gCorpSub').textContent=`${S.gmode==='catalog'?'전역 담당자 '+(sel.owner||'미지정')+' · ':''}등급 ${sel.tier}`;
+  const rows=[...sel.corps].map(c=>{const ms=sel.ms.filter(m=>m.corp===c);const x=resAgg(ms);const lsv=sel.services.find(s=>s.corp===c);const corp=CORPS.find(k=>k.id===c);const stale=c===META.staleCorp;
+    const bk=(x.bkOk+x.bkFail+x.bkNone)?`<span class="badge green">${x.bkOk}</span> ${x.bkFail?`<span class="badge red">${x.bkFail}</span> `:''}${x.bkNone?`<span class="badge gray">잡 없음 ${x.bkNone}</span>`:''}`:'<span class="muted">—</span>';
+    return `<tr class="row${S.gcorp===c?' sel':''}" data-gcorp="${c}"><td data-sort="${esc(corpName(c))}" title="${esc(corpName(c))}${corp?` · ${esc(corp.region)}`:''}"><b>${esc(corpShort(c))}</b></td><td class="${lsv&&lsv.name!==sel.name?'':'muted'}">${esc(lsv?lsv.name:'')}${lsv&&lsv.name!==sel.name?' <span class="badge purple" title="전역 이름과 다름 — 사람이 연결">연결</span>':''}</td><td class="${lsv&&lsv.owner?'':'faint'}">${esc(lsv&&lsv.owner||'미지정')}</td>
+      <td class="r" data-sort="${x.vm}">${x.vm}</td><td class="r" data-sort="${x.bm}">${x.bm}</td><td class="r" data-sort="${x.hostN}">${x.hostN}</td><td class="r" data-sort="${x.vcpu}">${x.vcpu}</td><td class="r" data-sort="${x.memGB}">${x.memGB.toLocaleString()}</td><td class="r" data-sort="${x.storageGB}">${x.storageGB.toLocaleString()}</td>
+      <td data-sort="${stale||x.cpu==null?-1:x.cpu}">${stale?'<span class="muted">—</span>':barCell(x.cpu)}</td><td data-sort="${stale||x.mem==null?-1:x.mem}">${stale?'<span class="muted">—</span>':barCell(x.mem)}</td>
+      <td class="r" data-sort="${stale?-1:x.faults}">${stale?'<span class="muted">—</span>':x.faults?`<span class="badge red">${x.faults}</span>`:'<span class="faint">0</span>'}</td><td data-sort="${x.bkFail}">${bk}</td><td class="r" data-sort="${x.unread}">${x.unread?`<span class="badge amber">${x.unread}</span>`:'<span class="faint">0</span>'}</td></tr>`;});
+  $('#gCorpTable tbody').innerHTML=rows.join('')||'<tr><td colspan="14" class="empty">이 전역 서비스에 연결된 법인 서비스가 없습니다.</td></tr>';applySort('gCorpTable');
+  const mb=$('#gMemBody'),hb=$('#gHostBody');
+  if(!S.gcorp||!sel.corps.has(S.gcorp)){S.gcorp='';mb.className='empty';mb.textContent='법인 행을 고르면 그 법인의 이 서비스 구성원이 나옵니다.';$('#gMemTitle').textContent='구성원';$('#gMemSub').textContent='';hb.className='empty';hb.textContent='법인 행을 고르면 그 법인에서 이 서비스 VM 이 올라간 호스트가 나옵니다.';$('#gHostSub').textContent='';return;}
+  const ms=sel.ms.filter(m=>m.corp===S.gcorp);const lsv=sel.services.find(s=>s.corp===S.gcorp);
+  $('#gMemTitle').textContent=`${sel.name} · ${corpName(S.gcorp)}`;$('#gMemSub').textContent=`${ms.length}대${lsv?` · 법인 서비스 '${lsv.name}'`:''}`;
+  mb.className='tscroll';mb.innerHTML=`<table id="gMemSel" style="min-width:860px"><thead><tr><th>이름 · 키 · vCenter 폴더</th><th>종류</th><th>소속 근거</th><th>전원</th><th>CPU</th><th>메모리</th><th>지표 출처</th><th class="r">부품 장애</th><th>백업</th><th>호스트/IP</th></tr></thead><tbody>${memberRows(ms,true)}</tbody></table>`;applySort('gMemSel');
+  const hosts=hostsOf(ms,lsv?lsv.name:sel.name);$('#gHostSub').textContent=`${hosts.length}대`;hb.className=hosts.length?'tscroll':'empty';
+  hb.innerHTML=hosts.length?`<table id="gHostSel" style="min-width:620px"><thead><tr><th>호스트</th><th class="r">이 서비스 VM</th><th>CPU</th><th>메모리</th><th class="r">부품 장애</th><th>함께 떠받치는 서비스</th></tr></thead><tbody>${hosts.map(h=>`<tr><td><b>${esc(h.name)}</b><div class="sm mono">${esc(h.st||'')}</div></td><td class="r" data-sort="${h.vmN}">${h.vmN}</td><td data-sort="${h.cpu==null?-1:h.cpu}">${barCell(h.cpu)}</td><td data-sort="${h.mem==null?-1:h.mem}">${barCell(h.mem)}</td><td class="r" data-sort="${h.faults}">${h.faults?`<span class="badge red">${h.faults}</span> <span class="sm">→ 영향 서비스 ${1+h.others.length}</span>`:'<span class="faint">0</span>'}</td><td class="muted">${h.others.map(esc).join(' · ')||'<span class="faint">없음(전용)</span>'}</td></tr>`).join('')}</tbody></table>`:'베어메탈만 있는 서비스입니다(파생 호스트 없음).';if(hosts.length)applySort('gHostSel');}
+function flash(msg){const f=$('#flash');f.textContent=`✓ ${msg}`;f.classList.remove('hide');clearTimeout(f._t);f._t=setTimeout(()=>f.classList.add('hide'),8000);}
+function mkService(corp,name,path='',tier=2,owner=''){if(SERVICES.some(s=>s.corp===corp&&s.name.toLowerCase()===name.toLowerCase()))return null;const svc={id:`s${sid++}`,corp,path,name,tier,owner,note:''};SERVICES.push(svc);return svc;}
+function connectGroup(k,svcId,newName){const groups=JSON.parse($('#unGroups').dataset.groups||'[]');const g=groups.find(x=>x.k===k);if(!g)return;let sv=svcById(svcId);
+  if(newName){sv=mkService(g.corp,newName);if(!sv)return flash(`'${newName}' 은 이 법인에 이미 있습니다 — '기존 서비스에 연결' 을 쓰십시오.`);}
+  if(!sv)return;
+  if(g.kind==='folder'){FOLDER_RULES.push({corp:g.corp,prefix:g.value,svcId:sv.id});flash(`폴더 규칙 '${g.value}' → '${sv.name}' 을 만들었습니다(VM ${g.keys.length}대 · 앞으로 이 폴더의 VM 은 자동 소속 · 감사 로그).`);}
+  else if(g.kind==='entry'){const e=SCAN_ENTRIES.find(x=>x.id===g.value);e.label=sv.name;flash(`스캔 엔트리 ${e.range} 의 라벨을 '${sv.name}' 으로 두었습니다(베어메탈 ${g.keys.length}대 · 다음 스캔부터 자동 · 감사 로그).`);}
+  else if(g.kind==='scan'){ALIASES.push({corp:g.corp,kind:'scan',value:g.value,svcId:sv.id});flash(`스캔 라벨 '${g.value}' → '${sv.name}' 별칭을 만들었습니다(${g.keys.length}대).`);}
+  else if(g.kind==='tag'){ALIASES.push({corp:g.corp,kind:'tag',value:g.value,svcId:sv.id});flash(`태그 값 '${g.value}' → '${sv.name}' 별칭을 만들었습니다(${g.keys.length}대).`);}
+  render();}
+function umAction(id,svcId,make){const [corp,kind,value]=id.split('|');let sv=svcById(svcId);
+  if(make){sv=mkService(corp,kind==='folder'?value.slice(value.lastIndexOf('/')+1):value);if(!sv)return flash('같은 이름의 서비스가 이미 있습니다 — 기존 서비스에 연결하십시오.');}
+  if(!sv)return;if(kind==='folder')FOLDER_RULES.push({corp,prefix:value,svcId:sv.id});else ALIASES.push({corp,kind,value,svcId:sv.id});
+  flash(`${kind==='folder'?'폴더 규칙':kind==='scan'?'스캔 라벨 별칭':'태그 별칭'} '${value}' → '${sv.name}'${make?' (서비스 새로 만듦 · 루트)':''} — 감사 로그 1건.`);render();}
+
+// ───────── 모달(한 대씩 · 예외) ─────────
+function mCandidates(){const m=S.m,q=m.q.trim().toLowerCase();return MEMBERS.filter(x=>x.kind===m.kind&&(!m.corp||x.corp===m.corp||!x.corp)&&(!m.unOnly||!svcOf(x))&&(!q||x.name.toLowerCase().includes(q)||x.key.includes(q)||String(x.vcFolder||'').toLowerCase().includes(q)||(x.addr||'').includes(q)));}
+function openModal(corp){const m=S.m;m.corp=corp||selCorp();m.checked.clear();m.target=S.sel.type==='svc'?S.sel.id:'';m.q='';m.unOnly=true;m.kind='BM';
+  $('#mCorp').innerHTML=`<option value="">전체 법인</option>${CORPS.map(c=>`<option value="${c.id}">${c.name}</option>`).join('')}`;$('#mCorp').value=m.corp;$('#mQ').value='';$('#mUnOnly').checked=true;$('#modal').classList.remove('hide');renderModal();}
+function renderModal(){const m=S.m;const list=mCandidates();$('#mCount').textContent=`${list.length}대 후보`;document.querySelectorAll('#mKind button').forEach(b=>b.classList.toggle('on',b.dataset.k===m.kind));
+  $('#mTable tbody').innerHTML=list.map(x=>{const r=resolve(x);return `<tr><td><input type="checkbox" data-ck="${esc(x.key)}"${m.checked.has(x.key)?' checked':''}></td><td><b>${esc(x.name)}</b></td><td class="mono">${esc(x.key)}</td><td class="muted">${esc(x.kind==='VM'?(x.vcFolder==null?'위치 모름':x.vcFolder):(x.found+(entryOf(x)?` ${entryOf(x).range}`:'')))}</td><td>${esc(corpShort(x.corp))}</td><td>${r.svcId?`${esc(svcName(x))} ${srcBadge(r)}`:'<span class="badge amber">(미지정)</span>'}</td></tr>`;}).join('')||'<tr><td colspan="6" class="empty">후보가 없습니다.</td></tr>';
+  const tcorp=m.corp||(m.checked.size?MEMBERS.find(x=>m.checked.has(x.key))?.corp:'');const targets=SERVICES.filter(s=>!tcorp||s.corp===tcorp);
+  $('#mTarget').innerHTML=`<option value="">대상 서비스 선택…</option>${targets.map(s=>`<option value="${s.id}">${esc(corpShort(s.corp))} · ${esc(s.path?s.path+'\\':'')}${esc(s.name)}</option>`).join('')}`;$('#mTarget').value=targets.some(s=>s.id===m.target)?m.target:'';m.target=$('#mTarget').value;
+  $('#mSel').textContent=m.checked.size;$('#mAdd').disabled=!(m.checked.size&&m.target);$('#mAll').checked=list.length>0&&list.every(x=>m.checked.has(x.key));applySort('mTable');}
+function doPin(){const m=S.m;const target=svcById(m.target);if(!target)return;let n=0,cross=0,drift=0;
+  for(const x of MEMBERS){if(!m.checked.has(x.key))continue;if(x.corp&&x.corp!==target.corp){cross++;continue;}if(!x.corp)x.corp=target.corp;PINS.set(x.key,{svcId:target.id,by:'admin',at:'2026-11-04',corp:x.corp});if(resolve(x).drift)drift++;n++;}
+  $('#modal').classList.add('hide');m.checked.clear();flash(`${n}대를 '${target.name}' 에 고정했습니다 — 감사 로그 1건.${drift?` 자동 판정과 다른 ${drift}대는 드리프트 큐에 올랐습니다.`:''}${cross?` 다른 법인 ${cross}대는 넣지 않았습니다(법인을 넘는 지정은 409).`:''}`);render();}
+
+// ───────── 이벤트 ─────────
+document.addEventListener('click',(e)=>{
+  const ax=e.target.closest('#axisSeg button');if(ax){S.axis=ax.dataset.a;return render();}
+  const gm=e.target.closest('#gmodeSeg button');if(gm){S.gmode=gm.dataset.m;S.gsel=null;S.gcorp='';return render();}
+  const gf=e.target.closest('#gfirstSeg button');if(gf){S.gfirst=gf.dataset.f;return render();}
+  if(e.target.closest('#gBack')){S.gsel=null;S.gcorp='';return render();}
+  const gl=e.target.closest('#glist .gl[data-g]');if(gl){S.gsel=S.gsel===gl.dataset.g?null:gl.dataset.g;S.gcorp='';return render();}
+  const gs=e.target.closest('[data-gsel]');if(gs){S.gsel=gs.dataset.gsel;S.gcorp='';return render();}
+  const mc=e.target.closest('td.c[data-mg]');if(mc){S.gsel=mc.dataset.mg;S.gcorp=mc.dataset.mc;return render();}
+  const gc=e.target.closest('#gCorpTable tbody tr.row');if(gc){S.gcorp=S.gcorp===gc.dataset.gcorp?'':gc.dataset.gcorp;return render();}
+  const tn=e.target.closest('#tree .tn');if(tn){const r=JSON.parse($('#tree').dataset.rows)[tn.dataset.i];
+    if(r.t==='all')S.sel={type:'all'};else if(r.t==='corp'){const k=r.corp||'__none';if(S.sel.type==='corp'&&S.sel.corp===r.corp){S.open.has(k)?S.open.delete(k):S.open.add(k);}else S.open.add(k);S.sel={type:'corp',corp:r.corp};}
+    else if(r.t==='folder'){const k=`f:${r.corp}:${r.path}`;if(S.sel.type==='folder'&&S.sel.path===r.path&&S.sel.corp===r.corp){S.open.has(k)?S.open.delete(k):S.open.add(k);}else S.open.add(k);S.sel={type:'folder',corp:r.corp,path:r.path};}
+    else if(r.t==='svc'){S.sel={type:'svc',corp:r.corp,id:r.id};S.selSvc=r.id;S.view='svc';}else if(r.t==='un'){S.sel={type:'un',corp:r.corp};S.view='un';}
+    if(r.t!=='svc')S.selSvc=null;$('#scopeSel').value=S.sel.type==='all'?'':(S.sel.corp||'');return render();}
+  if(e.target.closest('#btnExpand')){const all=['__none',...CORPS.map(c=>c.id)];for(const c of CORPS)for(const p of corpFolders(c.id))all.push(`f:${c.id}:${p}`);if(S.open.size>=all.length)S.open.clear();else S.open=new Set(all);return render();}
+  const seg=e.target.closest('#viewSeg button');if(seg){S.view=seg.dataset.v;return render();}
+  const k=e.target.closest('.kpi');if(k){S.view=k.dataset.v;return render();}
+  const row=e.target.closest('#svcTable tbody tr.row');if(row){S.selSvc=S.selSvc===row.dataset.key?null:row.dataset.key;return renderSvc();}
+  const cl=e.target.closest('[data-close]');if(cl){$('#'+cl.dataset.close).classList.add('hide');return;}
+  const hideForms=()=>['formFolder','formSvc','formMove','formImport'].forEach(id=>$('#'+id).classList.add('hide'));
+  if(e.target.closest('#btnFolder')){const c=selCorp();$('#ffCorp').innerHTML=CORPS.map(x=>`<option value="${x.id}">${x.name}</option>`).join('');if(c)$('#ffCorp').value=c;$('#ffCorp').disabled=!!c;$('#ffPath').value=S.sel.type==='folder'?S.sel.path+'\\':'';hideForms();$('#formFolder').classList.remove('hide');return;}
+  if(e.target.closest('#ffOk')){const corp=$('#ffCorp').value,p=$('#ffPath').value.trim().replace(/^\\+|\\+$/g,'');if(!corp||!p||p.split('\\').length>10)return flash('경로가 비어 있거나 형식이 맞지 않습니다(구분자 \\, 최대 10단계).');
+    if(!corpFolders(corp).includes(p))FOLDERS.push({corp,path:p});S.open.add(corp);p.split('\\').forEach((_,i,a)=>S.open.add(`f:${corp}:${a.slice(0,i+1).join('\\')}`));S.sel={type:'folder',corp,path:p};hideForms();flash(`폴더 '${p}' 를 ${corpName(corp)} 에 만들었습니다.`);return render();}
+  if(e.target.closest('#btnSvc')){const c=selCorp();$('#fsCorp').innerHTML=CORPS.map(x=>`<option value="${x.id}">${x.name}</option>`).join('');if(c)$('#fsCorp').value=c;$('#fsCorp').disabled=!!c;
+    const fill=()=>{const cc=$('#fsCorp').value;$('#fsPath').innerHTML=`<option value="">(루트)</option>${corpFolders(cc).map(p=>`<option value="${esc(p)}">${esc(p)}</option>`).join('')}`;if(S.sel.type==='folder'&&S.sel.corp===cc)$('#fsPath').value=S.sel.path;};fill();$('#fsCorp').onchange=fill;$('#fsName').value='';$('#fsOwner').value='';hideForms();$('#formSvc').classList.remove('hide');return;}
+  if(e.target.closest('#fsOk')){const corp=$('#fsCorp').value,path=$('#fsPath').value,name=$('#fsName').value.trim();if(!name||name.length>64)return flash('서비스명은 1~64자입니다.');
+    const sv=mkService(corp,name,path,Number($('#fsTier').value),$('#fsOwner').value.trim());if(!sv)return flash(`'${name}' 은 이 법인에 이미 있습니다(법인 안에서 서비스명은 유일).`);
+    S.open.add(corp);if(path)path.split('\\').forEach((_,i,a)=>S.open.add(`f:${corp}:${a.slice(0,i+1).join('\\')}`));S.sel={type:'svc',corp,id:sv.id};S.selSvc=sv.id;hideForms();flash(`서비스 '${name}' 을 만들었습니다. 이제 미지정 탭에서 폴더·엔트리를 연결하거나 규칙 탭에서 접두를 등록합니다.`);return render();}
+  if(e.target.closest('#btnMove')){const sv=svcById(S.sel.id);if(!sv)return;$('#fmName').textContent=`${sv.name} (${corpName(sv.corp)})`;$('#fmPath').innerHTML=`<option value="">(루트)</option>${corpFolders(sv.corp).map(p=>`<option value="${esc(p)}"${p===sv.path?' selected':''}>${esc(p)}</option>`).join('')}`;hideForms();$('#formMove').classList.remove('hide');return;}
+  if(e.target.closest('#fmOk')){const sv=svcById(S.sel.id);if(!sv)return;const to=$('#fmPath').value,from=sv.path;sv.path=to;if(to)to.split('\\').forEach((_,i,a)=>S.open.add(`f:${sv.corp}:${a.slice(0,i+1).join('\\')}`));hideForms();flash(`'${sv.name}' 을 '${from||'(루트)'}' → '${to||'(루트)'}' 로 옮겼습니다(구성원·규칙 그대로).`);return render();}
+  if(e.target.closest('#btnImport')){const c=selCorp();$('#fiCorp').innerHTML=CORPS.map(x=>`<option value="${x.id}">${x.name}</option>`).join('');if(c)$('#fiCorp').value=c;hideForms();$('#formImport').classList.remove('hide');return;}
+  if(e.target.closest('#fiOk')){const corp=$('#fiCorp').value;const tops=[...new Set(MEMBERS.filter(m=>m.kind==='VM'&&m.corp===corp&&m.vcFolder).map(m=>m.vcFolder.split('/')[1]).filter(Boolean))];let n=0;
+    for(const t of tops){if(!corpFolders(corp).includes(t)){FOLDERS.push({corp,path:t});n++;}}S.open.add(corp);hideForms();flash(`vCenter VM 폴더 ${tops.length}개 중 ${n}개를 포탈 폴더로 복사했습니다(이미 있는 이름 ${tops.length-n}개 건너뜀 · 동기화 아님).`);return render();}
+  if(e.target.closest('#btnAdd'))return openModal();
+  const ob=e.target.closest('[data-onebyone]');if(ob)return openModal(ob.dataset.onebyone);
+  const ugok=e.target.closest('[data-ugok]');if(ugok){const k=ugok.dataset.ugok;const sel=document.querySelector(`[data-ug="${CSS.escape(k)}"]`);if(!sel.value)return flash('대상 서비스를 먼저 고르십시오.');return connectGroup(k,sel.value);}
+  const ugnew=e.target.closest('[data-ugnew]');if(ugnew){const g=JSON.parse($('#unGroups').dataset.groups).find(x=>x.k===ugnew.dataset.ugnew);return connectGroup(g.k,null,g.kind==='folder'?(g.value==='/'?'루트':g.value.slice(g.value.lastIndexOf('/')+1)):g.value);}
+  const umnew=e.target.closest('[data-umnew]');if(umnew)return umAction(umnew.dataset.umnew,null,true);
+  const da=e.target.closest('[data-drauto]');if(da){PINS.delete(da.dataset.drauto);flash('고정을 지웠습니다 — 자동 판정으로 돌아갑니다(감사 로그).');return render();}
+  const dk=e.target.closest('[data-drkeep]');if(dk){REVIEWED.add(dk.dataset.drkeep);flash('고정을 유지합니다 — 검토 표지를 남겼습니다(같은 드리프트는 다시 묻지 않는다).');return render();}
+  if(e.target.closest('#btnGhost')){const gh=ghostList();for(const g of gh)PINS.delete(g.key);flash(`유령 키 ${gh.length}건을 지웠습니다(미리보기 → 삭제 · 감사 로그).`);return render();}
+  if(e.target.closest('#atSave')){const sv=svcById(S.sel.id);if(!sv)return;sv.tier=Number($('#atTier').value);sv.owner=$('#atOwner').value.trim();sv.note=$('#atNote').value.trim();flash(`'${sv.name}' 속성을 저장했습니다(등급 ${sv.tier} · 담당자 ${sv.owner||'없음'} · 감사 로그).`);return render();}
+  if(e.target.closest('#mClose'))return $('#modal').classList.add('hide');
+  const mk=e.target.closest('#mKind button');if(mk){S.m.kind=mk.dataset.k;S.m.checked.clear();return renderModal();}
+  if(e.target.closest('#mAdd'))return doPin();
+});
+document.addEventListener('change',(e)=>{
+  if(e.target.dataset.glink&&e.target.value){const sv=svcById(e.target.dataset.glink);const g=GLOBAL.find(x=>x.id===e.target.value);if(!sv||!g)return;sv.globalId=g.id;flash(`'${sv.name}'(${corpName(sv.corp)}) 을 전역 '${g.name}' 에 연결했습니다(감사 로그).`);return render();}
+  if(e.target.id==='mergeByName'){S.merge=e.target.checked;S.selSvc=null;return renderSvc();}
+  if(e.target.id==='mCorp'){S.m.corp=e.target.value;S.m.checked.clear();return renderModal();}
+  if(e.target.id==='mUnOnly'){S.m.unOnly=e.target.checked;return renderModal();}
+  if(e.target.id==='mTarget'){S.m.target=e.target.value;$('#mAdd').disabled=!(S.m.checked.size&&S.m.target);return;}
+  if(e.target.id==='mAll'){const list=mCandidates();if(e.target.checked)list.forEach(x=>S.m.checked.add(x.key));else S.m.checked.clear();return renderModal();}
+  if(e.target.dataset.ck){e.target.checked?S.m.checked.add(e.target.dataset.ck):S.m.checked.delete(e.target.dataset.ck);return renderModal();}
+  if(e.target.dataset.umsel&&e.target.value)return umAction(e.target.dataset.umsel,e.target.value,false);
+  if(e.target.id==='scopeSel'){S.sel=e.target.value?{type:'corp',corp:e.target.value}:{type:'all'};S.selSvc=null;if(e.target.value)S.open.add(e.target.value);return render();}
+});
+$('#q').addEventListener('input',(e)=>{S.q=e.target.value;render();});
+$('#mQ').addEventListener('input',(e)=>{S.m.q=e.target.value;renderModal();});
+const sc=$('#scopeSel');CORPS.forEach(c=>{const o=document.createElement('option');o.value=c.id;o.textContent=`${c.name} · ${c.region}`;sc.appendChild(o);});
+render();
+</script>
+</body>
+</html>

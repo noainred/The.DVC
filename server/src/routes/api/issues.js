@@ -164,7 +164,7 @@ export function registerIssues(api) {
       // v2.882 스프린트 · 검색식 · 저장 필터
       canSprints: write && !access.read && !access.write, linkTypes: LINK_TYPES, canShareFilters: write && !access.read && !access.write, canFilters: write,
       queryLimits: QUERY_LIMITS, queryFields: Object.keys(QUERY_FIELDS), queryOrderable: QUERY_ORDERABLE, sprintLimits: SPRINT_LIMITS, filterLimits: FILTER_LIMITS,
-      // v2.887 C-3 — SLA 목표(비밀 아님 — 배지 설명) · 포탈 버전(수정 버전 '반영됨' 판정) · 최근 릴리스 버전(고르기 후보)
+      // v2.888 C-3 — SLA 목표(비밀 아님 — 배지 설명) · 포탈 버전(수정 버전 '반영됨' 판정) · 최근 릴리스 버전(고르기 후보)
       sla: loadIssueSettings().sla, portalVersion: currentVersion(), knownVersions: (() => { try { return listNotes().slice(0, 15).map((n) => n.version); } catch { return []; } })(),
     });
   });
@@ -262,7 +262,7 @@ export function registerIssues(api) {
     try { list = listFor(req, { offset, limit }); } catch (e) { return fail(res, e, next); }
     res.json({ ok: true, ...list, me: userOf(req), canWrite: canWrite(req), persist: issuesPersist({ admin: isAdmin(req) }) });
   });
-  // v2.887 C-3 수정 버전별 이슈 수(릴리스 노트의 '이 버전에서 고친 이슈' 한 줄) — 로그인 사용자 전부 · 범위가 먼저(볼 수 있는 이슈만 센다).
+  // v2.888 C-3 수정 버전별 이슈 수(릴리스 노트의 '이 버전에서 고친 이슈' 한 줄) — 로그인 사용자 전부 · 범위가 먼저(볼 수 있는 이슈만 센다).
   api.get('/issues/versions', (req, res) => {
     res.set('Cache-Control', 'no-store');
     const fix = {};
@@ -273,7 +273,7 @@ export function registerIssues(api) {
     }
     res.json({ ok: true, fix });
   });
-  // v2.887 C-2 CSV 내보내기 — 목록과 같은 조건(범위 → 필터 · 검색식). 포탈 규약대로 권한 키 'data.csv'(관리자 · 권한에서 끌 수 있다 —
+  // v2.888 C-2 CSV 내보내기 — 목록과 같은 조건(범위 → 필터 · 검색식). 포탈 규약대로 권한 키 'data.csv'(관리자 · 권한에서 끌 수 있다 —
   //   v2.643 CSV 가져오기/내보내기). ⚠ '/issues/:key' 보다 먼저.
   api.get('/issues/export.csv', requirePerm('data.csv'), (req, res, next) => {
     res.set('Cache-Control', 'no-store');
@@ -419,7 +419,7 @@ export function registerIssues(api) {
     } catch (e) { fail(res, e, next, req); }
   });
   // 진행률·진행 메모(v2.871) — 쓰기 계정 · 쓰기 범위.
-  // v2.887 C-3 작업 기록 — 쓰기 역할 · 그 이슈의 쓰기 범위(저장소 findFor). 지우기는 적은 사람 또는 전체 범위 관리자.
+  // v2.888 C-3 작업 기록 — 쓰기 역할 · 그 이슈의 쓰기 범위(저장소 findFor). 지우기는 적은 사람 또는 전체 범위 관리자.
   api.post('/issues/:key/worklog', writers, async (req, res, next) => {
     if (!KEY_RE.test(req.params.key)) return badKey(res);
     try {

@@ -1,6 +1,6 @@
 # 설정·데이터 파일 레퍼런스 (자동 생성)
 
-포탈이 `CONFIG_DIR`(설치본 기본 `/etc/vmware-portal`) 아래에 만드는 파일 **262개**의 목록이다.
+포탈이 `CONFIG_DIR`(설치본 기본 `/etc/vmware-portal`) 아래에 만드는 파일 **264개**의 목록이다.
 시계열 DB 는 `db-location.json` 이 가리키는 `dbDir` 로 옮길 수 있다.
 
 - 생성: `node scripts/config-doc.mjs` (마지막 갱신 2026-11-04)
@@ -215,6 +215,8 @@
 | `secrets-policy.json` | 설정 | 설정 파일 자격증명(비밀번호·SSH 키·토큰)의 저장 방식(평문/암호화) 중앙 모듈(v2.296). | ✅ | ✅ | ✅ | security/secretVault.js |
 | `secrets-policy.trusted.json` | 설정 | 자격증명 저장 방식 정책의 신뢰 사본(S-07) | ✅ | ✅ | ✅ | security/secretVault.js |
 | `security-session.json` | 설정 | 세션 보안 설정 — 유휴 자동 로그아웃(분) 등. CONFIG_DIR/security-session.json. | ✅ | ✅ | ✅ | security/securitySettings.js |
+| `service-map-pins.json` | 설정 | 서비스 인벤토리 저장소(v2.887, docs/design/service-map/README.md 시안 A 3차 + 4차 검토). | ✅ | ✅ |  | servicemap/store.js |
+| `service-map.json` | 설정 | 서비스 인벤토리 저장소(v2.887, docs/design/service-map/README.md 시안 A 3차 + 4차 검토). | ✅ | ✅ |  | servicemap/store.js |
 | `session-state.json` | 설정 | 세션 폐기·유휴 상태(로그아웃·폐기 기록, 검토 S-05·S-06) | ✅ | ✅ | ✅ | auth/sessionState.js |
 | `settings-owners.txt` | 텍스트 | 설정 소유자 목록(백업·비밀 CSV 등 최상위 권한) | ✅ | ✅ | ✅ | security/securitySettings.js |
 | `ssh` | 디렉터리 | 아이실론 디렉터리 사용량 SSH 키 디렉터리(ssh/isidu_key — 0700/0600, v2.736) |  |  | ✅ | isidu/sshKey.js |
@@ -275,7 +277,7 @@
 | `vmseries` | 디렉터리 | 실시간 스파이크 저장소. **vCenter 마다 독립 파일**(v2.510, 사용자 요구 | ✅ | ✅ | ✅ | vmseries/db.js |
 | `vmseries.json` | 설정 | 실시간 스파이크 수집 설정(v2.510). env 기본값 + CONFIG_DIR/vmseries.json 오버레이. | ✅ | ✅ | ✅ | vmseries/settings.js |
 | `vmware-portal-release` | 디렉터리 | RedHat 계열의 /etc/redhat-release 처럼, CONFIG_DIR에 현재 포탈 버전을 한 줄로 명시하는 |  |  |  | util/releaseFile.js |
-| `wiki-user.json` | 설정 | 위키 사용자별 즐겨찾기(50) · 최근 본 문서(20) · 문서 조회 수(최근 31일 — 사람 · 날 · 문서마다 1회)(v2.887 — 사용자 데이터. 비밀 없음) |  | ✅ |  | wiki/userState.js |
+| `wiki-user.json` | 설정 | 위키 사용자별 즐겨찾기(50) · 최근 본 문서(20) · 문서 조회 수(최근 31일 — 사람 · 날 · 문서마다 1회)(v2.888 — 사용자 데이터. 비밀 없음) |  | ✅ |  | wiki/userState.js |
 | `wiki.json` | 설정 | 위키 스페이스 설정(대문 글 · 공지 · 바로 가기 · 읽기 전용) · 문서 · 판 · 댓글 · 지켜보는 사람(v2.881 — 로그인 사용자가 쓰는 사용자 데이터. 비밀 없음) |  | ✅ |  | wiki/store.js |
 | `xfer-speed-schedule-state.json` | 설정 | 법인 간 전송 속도 예약 실행 처리 기록(상태, v2.735) | ✅ | ✅ | ✅ | xferspeed/poller.js |
 | `xfer-speed-settings.json` | 설정 | 법인 간 전송 속도 측정 설정(v2.735 — 자동 측정 켬·간격 실행·예약 실행·제외 엣지) | ✅ | ✅ | ✅ | xferspeed/settings.js |

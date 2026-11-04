@@ -36,7 +36,7 @@ const PURPOSES = {
   'issue-sprints.json': '이슈 스프린트(이름 · 기간 · 목표 · 상태 — 사용자 데이터, v2.882)',
   'issue-filters.json': '이슈 저장 필터(검색식 · 공유 — 사용자 데이터, v2.882)',
   'wiki.json': '위키 스페이스 · 문서 · 판 · 댓글(사용자 데이터, v2.881)',
-  'wiki-user.json': '위키 즐겨찾기 · 최근 본 문서 · 조회 수(사용자 데이터, v2.887)',
+  'wiki-user.json': '위키 즐겨찾기 · 최근 본 문서 · 조회 수(사용자 데이터, v2.888)',
   'vcenters.json': 'vCenter 등록 정보(호스트·계정·위치)',
   'vcenter-order.json': 'vCenter 화면 표시 순서',
   'users.json': '포탈 사용자/권한/TOTP(2FA) 자격',
