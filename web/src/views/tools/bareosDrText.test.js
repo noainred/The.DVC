@@ -35,6 +35,7 @@ describe('재해 복구 1차 — 기준 시각 · 고르기', () => {
     expect(by.b.why).toMatch(/기준 시각 이전/);
     expect(by.d.why).toMatch(/진행 중/);
     expect(T.drRows(jobs, 'vc-a', null, before).every((r) => /읽기 전/.test(r.why))).toBe(true);
+    expect(T.drRows(jobs, 'vc-a', pts, null).find((r) => r.id === 'a').why).toMatch(/기준 시각을 고르세요/, '기준 시각이 비면 고르지 않는다(반증 R5 — 기본값 없음)');
   });
 });
 
@@ -65,5 +66,27 @@ describe('재해 복구 1차 — 짝짓기 · 묶음', () => {
     expect(RESTORE_VIEWS.map(([k]) => k)).toContain('dr');
     expect(loadRestoreView({ getItem: () => 'dr' })).toBe('list');
     expect(loadRestoreView({ getItem: () => 'table' })).toBe('table');
+  });
+});
+
+describe('재해 복구 1차 — 반증 반영', () => {
+  const now = Date.UTC(2026, 10, 4, 12, 0);
+  it('R1 첫 재해 복구는 1대 — 그 법인 재해 복구 성공(7일 안)이 있으면 50대', () => {
+    const jobs = [J('a', { restores: [{ dr: true, state: 'error', at: now - 1000 }] })];
+    expect(T.drTrialOk(jobs, 'vc-a', now)).toBe(false);
+    jobs[0].restores.push({ dr: true, state: 'ok', at: now - 5000, endedAt: now - 4000 });
+    expect(T.drTrialOk(jobs, 'vc-a', now)).toBe(true);
+    expect(T.drTrialOk(jobs, 'vc-b', now)).toBe(false);
+    expect(T.drTrialOk(jobs, 'vc-a', now + T.DR_TRIAL_MS)).toBe(false);
+    const rows = Array.from({ length: 5 }, (_, i) => ({ id: `v${i}`, why: '' }));
+    expect(T.drNextChunk(rows, new Set(rows.map((r) => r.id)), 1).length).toBe(1);
+  });
+  it('R3 최근 보낸 VM 은 끝났어도 다음 묶음에서 뺀다 · 실패 · 취소는 빼지 않는다(서버가 다시 판정)', () => {
+    const job = J('a', { restores: [{ mode: 'newVm', target: { name: 'ADDC01' }, state: 'ok', at: now - 3600_000 }] });
+    expect(T.drRecentlySent(job, 'addc01', now)).toBe(true);
+    expect(T.drRecentlySent(J('b', { restores: [{ mode: 'newVm', target: { name: 'ADDC01' }, state: 'error', at: now - 1000 }] }), 'ADDC01', now)).toBe(false);
+    expect(T.drRecentlySent(job, 'ADDC01', now + 25 * 3600_000)).toBe(false);
+    const pts = new Map([['a', { ok: true, points: [P(20, now - 86_400_000, { at: { dc: 'D', folder: '/', vmName: 'ADDC01' } })] }]]);
+    expect(T.drRows([job], 'vc-a', pts, now, () => '', now)[0].why).toMatch(/최근 보냄/);
   });
 });

@@ -22,7 +22,25 @@ export function drItemIssue(r) {
  *  · FD 의 INI(인증서 지문 · 계정)와 포탈 계정 권한은 포탈이 읽지 못한다 — 'unknown' + 확인 방법
  * @returns {{ checks: object[], targets: { dcs:string[], clusters:{name,dc}[], datastores:object[] }, counts: object }}
  */
-export function drCheckView({ vcenterId, snapshot, jobs, site, director, dirPoll, lastOkOf }) {
+/** 재해 복구 시험 1대가 성공한 지 이만큼 안이면 묶음(2대 이상)을 연다. */
+export const DR_TRIAL_MS = 7 * 86_400_000;
+const OK_STATES = new Set(['ok', 'warning']);
+/**
+ * 반증 R1(플러그인 원문 — 23~25 vmw2 restore): 디스크를 쓰는 덤퍼는 **백업 때 저장한 접속값**(vCenter 주소 · 계정 · 인증서 지문)을 쓰고 VM MoRef 만 새 것으로 바꾼다.
+ *   다시 설치로 지문 · 계정이 바뀌면 VM 껍데기만 만들어지고 디스크 쓰기가 실패할 수 있다(실환경 미확인 — 추정). 그래서 그 법인에서 재해 복구 1대가
+ *   **성공으로 끝난 뒤에만** 2대 이상 묶음을 보낸다(같은 법인 VM 은 같은 INI 로 백업됐다 — 1대가 되면 나머지도 같은 접속값).
+ * @returns {string} 막는 사유('' = 보낼 수 있다)
+ */
+export function drTrialIssue(jobs, vcenterId, count, now = Date.now()) {
+  if (!(count > 1)) return '';
+  for (const j of Array.isArray(jobs) ? jobs : []) {
+    if (String(j.vcenterId) !== String(vcenterId)) continue;
+    for (const r of j.restores || []) if (r?.dr === true && OK_STATES.has(String(r.state || '')) && now - (Number(r.endedAt || r.at) || 0) < DR_TRIAL_MS) return '';
+  }
+  return '이 법인에서 재해 복구 1대가 성공으로 끝난 뒤에 여러 대를 보냅니다 — Bareos 플러그인은 백업 때 저장한 vCenter 접속값(인증서 지문 · 계정)으로 디스크를 씁니다. vCenter 를 다시 설치해 지문이 바뀌었으면 VM 껍데기만 생기고 실패할 수 있어, 먼저 1대로 확인합니다.';
+}
+
+export function drCheckView({ vcenterId, snapshot, jobs, site, director, dirPoll, lastOkOf, registryHost = '' }) {
   const vc = (snapshot?.vcenters || []).find((v) => String(v.id) === String(vcenterId)) || null;
   const vms = (snapshot?.vms || []).filter((v) => String(v.vcenterId) === String(vcenterId));
   const hosts = (snapshot?.hosts || []).filter((h) => String(h.vcenterId) === String(vcenterId));
@@ -57,11 +75,34 @@ export function drCheckView({ vcenterId, snapshot, jobs, site, director, dirPoll
   if (!site?.vcserver) miss.push('vCenter 주소');
   if (!site?.configFile) miss.push('FD INI 경로');
   if (!site?.client) miss.push('FD 이름');
+  // 반증 R2(플러그인 원문 — INI 값이 플러그인 옵션을 덮어쓴다): 실제로 붙는 곳은 FD INI 의 vcserver 다. 포탈 등록 주소와 매핑이 다르면 알린다(INI 는 포탈이 읽지 못한다).
+  const regDiff = !miss.length && registryHost && String(site.vcserver).toLowerCase() !== String(registryHost).toLowerCase();
   checks.push(miss.length ? { key: 'site', state: 'bad', label: '사이트 매핑', detail: `${miss.join(' · ')} 이(가) 없습니다 — 설정 › 법인별 설정에서 채우세요(복원 명령에 싣는 값).` }
-    : { key: 'site', state: 'ok', label: '사이트 매핑', detail: `vCenter ${site.vcserver} · FD ${site.client} · INI ${site.configFile}` });
+    : { key: 'site', state: regDiff ? 'warn' : 'ok', label: '사이트 매핑',
+      detail: `vCenter ${site.vcserver} · FD ${site.client} · INI ${site.configFile}${regDiff ? ` — 포탈 등록 주소 ${registryHost} 와 다릅니다. 새 vCenter 주소로 맞추세요` : ''} · 실제 접속은 FD INI 의 vcserver 가 우선합니다(플러그인)` });
   // 포탈이 읽지 못하는 것 — 단정하지 않는다
-  checks.push({ key: 'fdIni', state: 'unknown', label: 'Bareos FD 의 vCenter 설정(INI)', detail: '포탈은 FD 의 INI(계정 · 인증서 지문)를 읽지 못합니다 — vCenter 를 다시 설치하면 인증서 지문이 바뀝니다. 설정 › 법인별 Director 의 FD INI 자동 설정으로 다시 쓰거나, 아래에서 1대를 먼저 복원해 확인하세요.' });
+  checks.push({ key: 'fdIni', state: 'unknown', label: 'Bareos FD 의 vCenter 설정(INI) · 백업 때 접속값', detail: '포탈은 FD 의 INI(계정 · 인증서 지문)를 읽지 못합니다 — vCenter 를 다시 설치하면 인증서 지문이 바뀝니다. INI 는 설정 › 법인별 Director 의 FD INI 자동 설정으로 다시 쓰세요. 그리고 플러그인은 디스크를 쓸 때 백업 때 저장한 접속값을 씁니다 — 그래서 먼저 1대를 복원해 성공을 확인한 뒤에 여러 대를 보냅니다(포탈이 막습니다).' });
   checks.push({ key: 'perm', state: 'unknown', label: '포탈 vCenter 계정 권한', detail: '네트워크 끊기에 필요한 권한(장치 설정 · 연결)은 bareos-probe --vcenter 로 확인합니다(읽기 전용).' });
   return { checks, targets: { dcs, clusters, datastores }, counts: { jobs: mine.length, missing, vms: vms.length, hosts: hosts.length } };
 }
 
+
+/**
+ * 재해 복구 묶음을 보내기 전 법인 단위 막기(순수 — 라우트 bulkRestoreGate 가 dr 일 때 부른다).
+ *   반증 R6: 점검의 ✕(Director · 새 vCenter · 매핑)는 화면만이 아니라 서버도 막는다 · R1: 시험 1대가 성공한 뒤에만 여러 대.
+ * @returns {string} 사유('' = 보낼 수 있다)
+ */
+export function drGateBlock({ items, jobs, settings, snapshot, pollDirs = {}, regHosts = new Map(), lastOkOf, directorOf, now = Date.now() }) {
+  const list = Array.isArray(items) ? items : [];
+  const vcs = [...new Set(list.map((r) => r.vcenterId).filter(Boolean))];
+  for (const vcId of vcs) {
+    const site = (settings?.sites || []).find((x) => String(x.vcenterId) === String(vcId)) || null;
+    const director = site?.directorId ? directorOf(site.directorId) : null;
+    const view = drCheckView({ vcenterId: vcId, snapshot, jobs, site, director, dirPoll: director ? pollDirs[director.id] || null : null, lastOkOf, registryHost: regHosts.get(String(vcId)) || '' });
+    const bad = view.checks.find((c) => c.state === 'bad');
+    if (bad) return `재해 복구 점검 ✕ — ${bad.label}: ${bad.detail}`;
+    const trial = drTrialIssue(jobs, vcId, list.filter((r) => String(r.vcenterId) === String(vcId)).length, now);
+    if (trial) return trial;
+  }
+  return '';
+}

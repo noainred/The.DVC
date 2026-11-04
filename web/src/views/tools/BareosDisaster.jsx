@@ -14,7 +14,7 @@ import { requireChanged } from '../changeResult.js';
 import { Note, ReadGuide } from './BareosBits.jsx';
 import { withRelayWait, outcomeUnknown, unknownOutcomeText, whenText, levelLabel } from './bareosText.js';
 import { pickBlock, dsText, capacityText, bulkRestoreOutcome } from './bareosRestoreText.js';
-import { DR_CHUNK, DR_MARK, drBeforeMs, drBeforeText, drRows, drSourceDcs, drDefaultMap, drMapIssue, drItem, drNextChunk, drBlocking } from './bareosDrText.js';
+import { DR_CHUNK, DR_MARK, drBeforeMs, drRows, drSourceDcs, drDefaultMap, drMapIssue, drItem, drNextChunk, drBlocking, drTrialOk } from './bareosDrText.js';
 
 const BASE = '/tools/bareos-backup';
 const DIRECTOR_GET = { retries: 0, timeoutMs: 60_000 };
@@ -37,7 +37,8 @@ export default function BareosDisaster({ d, reload, onBatch = null }) {
   const [vc, setVc] = useState(() => vcs[0] || '');
   const [check, setCheck] = useState(null);
   const [checkErr, setCheckErr] = useState(null);
-  const [beforeText, setBeforeText] = useState(() => drBeforeText(Date.now()));
+  // 반증 R5: 기본값을 비운다 — '지금' 이면 감염 뒤 마지막 백업을 고르기 쉽다(사람이 시각을 정하게)
+  const [beforeText, setBeforeText] = useState('');
   const [pts, setPts] = useState(null);
   const [ptsProg, setPtsProg] = useState(null);
   const [ptsErr, setPtsErr] = useState(null);
@@ -54,6 +55,8 @@ export default function BareosDisaster({ d, reload, onBatch = null }) {
   const genCheck = useRef(0);
   const genPts = useRef(0);
   const genPrev = useRef(0);
+  const vcRef = useRef(vc);
+  vcRef.current = vc;
   const dirId = check?.directorId || '';
   const dir = (d.directors || []).find((x) => x.id === dirId) || null;
 
@@ -73,7 +76,11 @@ export default function BareosDisaster({ d, reload, onBatch = null }) {
   const sources = useMemo(() => drSourceDcs(pickedRows), [pickedRows.map((r) => r.id).join('|')]);   // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { if (check?.targets) setMap((m) => drDefaultMap(sources, check.targets, m)); }, [sources, check]);
   const mapIssue = drMapIssue(sources, map);
-  const chunk = drNextChunk(rows, picked);
+  const trialOk = drTrialOk(jobs, vc);
+  const chunk = drNextChunk(rows, picked, trialOk ? DR_CHUNK : 1);   // 반증 R1: 이 법인 첫 재해 복구는 1대 — 성공을 본 뒤 50대씩
+  const chunkKey = chunk.map((r) => `${r.id}:${r.point?.jobid}`).join('|');
+  // 반증 R3: 묶음이 바뀌면(목록 갱신 · 고르기 · 짝짓기) 미리 본 판정을 버린다 — 보내는 것은 미리 본 항목 그대로(preview.items)
+  useEffect(() => { genPrev.current++; setPreview(null); }, [chunkKey, JSON.stringify(map)]);   // eslint-disable-line react-hooks/exhaustive-deps
   const blocking = drBlocking(check?.checks);
   const vcName = vc;   // 확인 입력 — 법인(vCenter) id 를 그대로(다른 법인으로 잘못 보내지 않게)
 
@@ -103,14 +110,18 @@ export default function BareosDisaster({ d, reload, onBatch = null }) {
 
   const doPreview = () => {
     const g = ++genPrev.current;
+    const items = chunk.map((r) => drItem(r, map));
     setPreview(null); setPreviewErr(null); setDone(null);
-    postJson(`${BASE}/restore-check/bulk`, { items: chunk.map((r) => drItem(r, map)), dr: true }).then((r) => { if (g === genPrev.current) setPreview(r); }).catch((e) => { if (g === genPrev.current) setPreviewErr(e); });
+    postJson(`${BASE}/restore-check/bulk`, { items, dr: true }).then((r) => { if (g === genPrev.current) setPreview({ ...r, items, before: beforeText }); }).catch((e) => { if (g === genPrev.current) setPreviewErr(e); });
   };
   const start = async () => {
+    if (!preview?.items?.length) return;
+    const vc0 = vc;
     setBusy(true); setDone(null);
     try {
-      const r = await postJson(`${BASE}/restore/bulk`, { items: chunk.map((x) => drItem(x, map)), dr: true, otp }, withRelayWait({}, dir, d.relayLimits, 'restores'));
+      const r = await postJson(`${BASE}/restore/bulk`, { items: preview.items, dr: true, drBefore: preview.before, otp }, withRelayWait({}, dir, d.relayLimits, 'restores'));
       requireChanged(r);
+      if (vcRef.current !== vc0) { reload(); return; }   // 반증 R9: 그사이 법인을 바꿨으면 이전 법인 결과를 새 화면에 띄우지 않는다
       setDone(bulkRestoreOutcome(r));
       if (r.batchId) onBatch?.(r.batchId);
       setPreview(null); setConfirm('');
@@ -118,6 +129,7 @@ export default function BareosDisaster({ d, reload, onBatch = null }) {
     } catch (e) {
       const unknown = outcomeUnknown(e);
       const o = bulkRestoreOutcome(e?.body || null, { unknown, message: unknown ? unknownOutcomeText('재해 복구', e) : e.message });
+      if (vcRef.current !== vc0) { reload(); return; }
       setDone(o);
       if (o.reset) { setPreview(null); if (e?.body?.batchId) onBatch?.(e.body.batchId); reload(); }
     } finally { setBusy(false); setOtp(''); }
@@ -179,6 +191,7 @@ export default function BareosDisaster({ d, reload, onBatch = null }) {
           <button type="button" className="login-btn" style={{ flex: 'none', padding: '6px 14px' }} disabled={busy || !rows.length || (ptsProg && !pts && !ptsErr)} onClick={loadPoints}>{pts ? '복원 지점 다시 읽기' : `복원 지점 읽기 · ${rows.length}대`}</button>
         </div>
         <span style={{ fontSize: 12, color: TONE.warn }}>감염 추정 시각보다 앞으로 잡으세요 — 그 뒤 백업은 감염된 상태일 수 있습니다. 시작 시각을 못 읽은 백업은 고르지 않습니다.</span>
+        <span className="muted" style={{ fontSize: 12 }}>시각 기준: 입력은 이 브라우저 시간대, 백업 시각은 Director 현지 시각을 포탈 서버 시간대로 읽은 값입니다 — Director 가 다른 시간대(예: 폴란드)면 그 차이만큼 어긋나니 여유를 두고 잡으세요.</span>
         {beforeMs === null && <Note tone="bad">기준 시각을 읽지 못했습니다 — 날짜와 시각을 다시 고르세요.</Note>}
         {ptsProg && !pts && !ptsErr && <span className="muted" style={{ fontSize: 12 }}>복원 지점 읽는 중… {ptsProg.done} / {ptsProg.total}대</span>}
         {ptsErr && <ErrorBox error={ptsErr} />}
@@ -255,7 +268,7 @@ export default function BareosDisaster({ d, reload, onBatch = null }) {
         <section className="card" style={{ padding: 12, display: 'flex', flexDirection: 'column', gap: 8, minWidth: 0, borderColor: '#7f1d1d' }} data-dr-send="">
           <div style={ROW}>
             <b style={{ fontSize: 13.5 }}>4. 확인 · OTP</b>
-            <span className="muted" style={{ fontSize: 12, minWidth: 0 }}>한 번에 {DR_CHUNK}대까지 보냅니다 — 보낸 VM 은 복원 진행 중이 되어 다음 묶음에서 빠집니다(복구 순서 자동 실행은 다음 판).</span>
+            <span className="muted" style={{ fontSize: 12, minWidth: 0 }}>{trialOk ? `한 번에 ${DR_CHUNK}대까지 보냅니다 — 보낸 VM 은 다음 묶음에서 빠집니다(복구 순서 자동 실행은 다음 판).` : '이 법인의 첫 재해 복구는 1대입니다 — 성공으로 끝난 것을 확인한 뒤 50대씩 보낼 수 있습니다(Bareos 플러그인은 백업 때 저장한 vCenter 접속값으로 디스크를 씁니다 — vCenter 를 다시 설치해 인증서 지문이 바뀌었으면 VM 껍데기만 생기고 실패할 수 있습니다).'}</span>
           </div>
           <div style={ROW}>
             <span>고름 <b>{pickedRows.length}</b>대 · 이번 묶음 <b>{chunk.length}</b>대{pickedRows.length > chunk.length ? ` · 남음 ${pickedRows.length - chunk.length}대` : ''}</span>
@@ -269,7 +282,7 @@ export default function BareosDisaster({ d, reload, onBatch = null }) {
               {preview.plan.items.filter((x) => !x.ok).slice(0, 20).map((x) => <span key={x.id} style={{ fontSize: 12, color: TONE.bad, overflowWrap: 'anywhere' }}>{x.vmName || x.id} — {x.issue}</span>)}
               {(preview.plan.capacity || []).map((c) => <Note key={c.datastore} tone={c.verdict === 'short' ? 'bad' : c.verdict === 'unknown' ? 'warn' : 'info'}>{capacityText(c)}</Note>)}
               {preview.needEnroll && <Note tone="bad">복원은 OTP 가 등록된 계정만 실행할 수 있습니다 — 사용자 관리에서 OTP 를 등록하세요.</Note>}
-              {planOk && <Note tone="info">이번 묶음 {chunk.length}대는 새 VM · 꺼진 채 · 네트워크 끊은 채로 만들어집니다. 진행은 아래 최근 묶음 복원에서 보입니다.</Note>}
+              {planOk && <Note tone="info">이번 묶음 {preview.items.length}대 · 기준 시각 {String(preview.before || '').replace('T', ' ')} 이전 백업 — 새 VM · 꺼진 채 · 네트워크 끊은 채로 만들어집니다. 진행은 아래 최근 묶음 복원에서 보입니다.</Note>}
               <div style={ROW}>
                 <label className="muted" style={{ ...FIELD, width: 220 }}>법인(vCenter) 확인 — ‘{vcName}’ 입력
                   <input className="input" value={confirm} onChange={(e) => setConfirm(e.target.value)} autoComplete="off" aria-label="법인 이름 확인" disabled={!planOk} />
@@ -277,7 +290,7 @@ export default function BareosDisaster({ d, reload, onBatch = null }) {
                 <label className="muted" style={{ ...FIELD, width: 160 }}>본인 OTP(6자리)
                   <input className="input" inputMode="numeric" autoComplete="one-time-code" value={otp} onChange={(e) => setOtp(e.target.value.replace(/\D/g, '').slice(0, 6))} aria-label="재해 복구 OTP" disabled={!planOk} />
                 </label>
-                <button type="button" className="logout-btn" style={{ marginLeft: 'auto', padding: '8px 16px', fontWeight: 800 }} disabled={!canStart} onClick={start}>{busy ? '요청 중…' : `재해 복구 시작 · ${chunk.length}대`}</button>
+                <button type="button" className="logout-btn" style={{ marginLeft: 'auto', padding: '8px 16px', fontWeight: 800 }} disabled={!canStart} onClick={start}>{busy ? '요청 중…' : `재해 복구 시작 · ${preview.items.length}대`}</button>
               </div>
             </>
           )}

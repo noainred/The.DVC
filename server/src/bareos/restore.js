@@ -135,7 +135,7 @@ export function restorePlan({ mode, job, snapshot, newVm = {}, confirmName = '',
     kv.restore_cluster = cluster;
   }
   if (esx) {
-    if (!hosts.some((h) => h.name === esx)) return { ok: false, issue: `호스트 ‘${esx}’ 이(가) 이 vCenter 인벤토리에 없습니다.` };
+    if (!hosts.some((h) => h.name === esx && (!dcTo || h.vcDatacenter === dcTo))) return { ok: false, issue: `호스트 ‘${esx}’ 이(가) 이 vCenter 인벤토리${dcTo ? `의 데이터센터 ‘${dcTo}’` : ''}에 없습니다.` };
     kv.restore_esxhost = esx;
   }
   const r = restorePluginOptions(kv, pluginName);

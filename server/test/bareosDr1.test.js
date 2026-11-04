@@ -126,7 +126,7 @@ const H = (k, j) => (OFF.get(job(k).bareosJob) ?? 0) + j;
 
 
 const { restorePlan } = await import('../src/bareos/restore.js');
-const { drItemIssue, drCheckView } = await import('../src/bareos/drPlan.js');
+const { drItemIssue, drCheckView, drTrialIssue, drGateBlock, DR_TRIAL_MS } = await import('../src/bareos/drPlan.js');
 
 test('① 새 VM 데이터센터 바꾸기 — 인벤토리 이름만 · 클러스터는 그 데이터센터 안 · 폴더는 백업 때 경로', () => {
   const job = { vcenterId: 'vc-a', vmId: 'vc-a:vm-old', vmName: 'web-01', dc: 'DC-OLD', folder: '/web' };
@@ -191,12 +191,12 @@ test('④ 라우트 — dr 규칙 위반은 Director 에 닿기 전 400 · 지�
   // 같은 항목을 dr 없이 보내면 일반 묶음 규칙만(예전 동작 — nic keep 허용)
   r = await call('admin', 'POST', '/restore-check/bulk', { items: [item] });
   assert.equal(r.j.plan.items[0].ok, true, JSON.stringify(r.j.plan.items[0]));
-  r = await call('admin', 'POST', '/restore/bulk', { items: [{ ...item, nic: 'disconnect' }], dr: true, otp: otpNow() });
+  r = await call('admin', 'POST', '/restore/bulk', { items: [{ ...item, nic: 'disconnect' }], dr: true, drBefore: '2026-11-01T00:00', otp: otpNow() });
   assert.equal(r.s, 202, r.t);
   const cmd = D.cmds.slice(before).find((c) => c.startsWith('restore '));
   assert.match(cmd, /dc=DC-NEW:folder=\/web:vmname=web-01-dr:.*restore_cluster=CL-A/);
   const { listAudit } = await import('../src/audit.js');
-  assert.ok(listAudit({ limit: 20, q: r.j.batchId }).items.some((x) => x.action === 'Bareos 재해 복구'));
+  assert.ok(listAudit({ limit: 20, q: r.j.batchId }).items.some((x) => x.action === 'Bareos 재해 복구' && /기준 시각 2026-11-01 00:00/.test(x.detail)), '기준 시각이 감사에(반증 R5)');
   // dr/check
   r = await call('admin', 'GET', '/dr/check?vcenterId=vc-a');
   assert.equal(r.s, 200, r.t);
@@ -207,4 +207,65 @@ test('④ 라우트 — dr 규칙 위반은 Director 에 닿기 전 400 · 지�
   assert.equal(sv.s, 200);
   assert.equal(sv.j.checks.find((c) => c.key === 'site').detail, '채워져 있음', '범위 계정에는 매핑 값을 가린다');
   assert.equal((await call('admin', 'GET', '/dr/check')).s, 400);
+});
+
+test('⑤ 반증 R1 · R6 — 시험 1대 성공 전에는 여러 대 금지 · 점검 ✕ 는 서버가 막는다 · R2 매핑 주소 대조 · R7 호스트도 그 데이터센터', async () => {
+  const now = Date.now();
+  const jobs = [{ vcenterId: 'vc-a', vmId: 'x', restores: [] }, { vcenterId: 'vc-a', vmId: 'y', restores: [{ dr: true, state: 'error', at: now - 1000 }] }];
+  assert.equal(drTrialIssue(jobs, 'vc-a', 1, now), '', '1대는 시험');
+  const web = (await import('node:fs')).readFileSync(new URL('../../web/src/views/tools/bareosDrText.js', import.meta.url), 'utf8');
+  assert.match(web, /export const DR_TRIAL_MS = 7 \* 86_400_000;/, '웹이 같은 기간을 쓴다');
+  assert.equal(DR_TRIAL_MS, 7 * 86_400_000);
+  assert.match(drTrialIssue(jobs, 'vc-a', 2, now), /1대가 성공으로 끝난 뒤/);
+  jobs[0].restores.push({ dr: true, state: 'ok', at: now - 5000, endedAt: now - 4000 });
+  assert.equal(drTrialIssue(jobs, 'vc-a', 50, now), '');
+  assert.match(drTrialIssue(jobs, 'vc-a', 2, now + DR_TRIAL_MS), /1대가 성공/, '오래된 성공은 세지 않는다');
+  assert.match(drTrialIssue([{ vcenterId: 'vc-a', restores: [{ state: 'ok', at: now }] }], 'vc-a', 2, now), /1대가 성공/, '재해 복구가 아닌 복원 성공은 세지 않는다');
+  // 점검 ✕ — 매핑이 빠진 법인은 1대도 막는다
+  const snap = { vcenters: [{ id: 'vc-a' }], vms: [], hosts: [{ vcenterId: 'vc-a', cluster: 'CL', vcDatacenter: 'DC' }], datastores: [] };
+  const settings = { sites: [{ vcenterId: 'vc-a', directorId: 'D1', vcserver: 'vc-a.corp', client: 'fd' }] };
+  const directorOf = (id) => ({ id, name: '한국' });
+  assert.match(drGateBlock({ items: [{ vcenterId: 'vc-a' }], jobs, settings, snapshot: snap, lastOkOf: () => null, directorOf, now }), /점검 ✕ — 사이트 매핑/);
+  settings.sites[0].configFile = '/x.ini';
+  assert.equal(drGateBlock({ items: [{ vcenterId: 'vc-a' }, { vcenterId: 'vc-a' }], jobs, settings, snapshot: snap, lastOkOf: () => null, directorOf, now }), '');
+  assert.match(drGateBlock({ items: [{ vcenterId: 'vc-a' }], jobs, settings, snapshot: snap, pollDirs: { D1: { ok: false, code: 'auth' } }, lastOkOf: () => null, directorOf, now }), /Director/);
+  // R2 — 등록 주소와 다르면 경고(막지는 않는다 — 실제 접속은 FD INI)
+  const v = drCheckView({ vcenterId: 'vc-a', snapshot: snap, jobs, site: settings.sites[0], director: directorOf('D1'), dirPoll: null, lastOkOf: () => null, registryHost: 'vc-a-new.corp' });
+  const site = v.checks.find((c) => c.key === 'site');
+  assert.equal(site.state, 'warn');
+  assert.match(site.detail, /vc-a-new\.corp 와 다릅니다.*FD INI 의 vcserver 가 우선/);
+  // R7 — 호스트도 바꾼 데이터센터 안
+  const job = { vcenterId: 'vc-a', vmId: 'v', vmName: 'w', dc: 'OLD', folder: '/' };
+  const s2 = { vms: [], datastores: [], hosts: [{ vcenterId: 'vc-a', name: 'esx-1', cluster: 'C1', vcDatacenter: 'DC-1' }, { vcenterId: 'vc-a', name: 'esx-2', cluster: 'C2', vcDatacenter: 'DC-2' }] };
+  assert.match(restorePlan({ mode: 'newVm', job, snapshot: s2, newVm: { name: 'w', dc: 'DC-1', esxHost: 'esx-2' }, base: { vcserver: 'a', configFile: '/a.ini' } }).issue, /데이터센터 ‘DC-1’/);
+  assert.equal(restorePlan({ mode: 'newVm', job, snapshot: s2, newVm: { name: 'w', dc: 'DC-1', esxHost: 'esx-1' }, base: { vcserver: 'a', configFile: '/a.ini' } }).ok, true);
+});
+
+test('⑥ 라우트 — 2대 묶음은 시험 1대 성공 뒤 · 재해 복구 표지 · 실패한 복원 이름은 그 뒤 인벤토리가 있으면 풀린다(R4)', async () => {
+  const two = [
+    { id: ID.web, jobid: H('web', 130), mode: 'newVm', nic: 'disconnect', newVm: { name: 'web-01-dr2', dc: 'DC-NEW', cluster: 'CL-A' } },
+    { id: ID.app, jobid: H('app', 130), mode: 'newVm', nic: 'disconnect', newVm: { name: 'app-05-dr', dc: 'DC-NEW', cluster: 'CL-B' } },
+  ];
+  // ④ 의 1대(web-01-dr)는 아직 끝나지 않았다 — 2대는 막힌다
+  let r = await call('admin', 'POST', '/restore-check/bulk', { items: two, dr: true });
+  assert.equal(r.j.plan.ok, false);
+  assert.match(r.j.plan.issue, /1대가 성공으로 끝난 뒤/);
+  const rec = job('web').restores.find((x) => x.dr === true);
+  assert.ok(rec, '재해 복구 복원에 표지(dr)');
+  registry.applyRestoreRow(ID.web, { jobid: rec.jobid, status: 'T', type: 'R', endedAt: Date.now() });
+  r = await call('admin', 'POST', '/restore-check/bulk', { items: two, dr: true });
+  assert.equal(r.j.plan.ok, true, JSON.stringify(r.j.plan));
+  // R4 — 실패로 끝난 복원의 이름: 그 뒤 인벤토리 수집(generatedAt)이 있으면 예약을 푼다
+  const app = job('app');
+  registry.addRestore(app.id, { jobid: 9001, mode: 'newVm', target: { name: 'app-05-fail' }, by: 't', client: 'kr-fd' });
+  registry.applyRestoreRow(app.id, { jobid: 9001, status: 'f', type: 'R', endedAt: Date.now() - 60_000 });
+  const one = [{ id: ID.app, jobid: H('app', 130), mode: 'newVm', newVm: { name: 'app-05-fail' } }];
+  const gen0 = store.snapshot.generatedAt;
+  store.snapshot.generatedAt = Date.now() - 120_000;   // 실패보다 앞선 인벤토리 — 아직 예약
+  r = await call('admin', 'POST', '/restore-check/bulk', { items: one });
+  assert.match(r.j.plan.items[0].issue || '', /최근 복원/);
+  store.snapshot.generatedAt = Date.now();             // 실패 뒤 인벤토리 — 껍데기가 없으면 다시 보낼 수 있다
+  r = await call('admin', 'POST', '/restore-check/bulk', { items: one });
+  assert.equal(r.j.plan.items[0].ok, true, JSON.stringify(r.j.plan.items[0]));
+  store.snapshot.generatedAt = gen0;
 });

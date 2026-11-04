@@ -8,6 +8,27 @@ import { numOrNull } from '../../numOrNull.js';
 
 /** 한 번에 보낼 수 있는 VM(서버 BULK_RESTORE_MAX 와 같다). */
 export const DR_CHUNK = 50;
+/** 시험 1대 성공을 인정하는 기간 — 서버 bareos/drPlan.js DR_TRIAL_MS 와 같다(server/test/bareosDr1 이 대조). */
+export const DR_TRIAL_MS = 7 * 86_400_000;
+/** 이름 예약 기간 — 서버 RESERVE_MS(24시간)와 같은 뜻. 화면은 '최근 보냄' 표시에만 쓴다(판정은 서버). */
+const RECENT_MS = 24 * 3600_000;
+const FAILED = new Set(['error', 'canceled']);
+/**
+ * 반증 R1: 그 법인에서 재해 복구 1대가 성공으로 끝났는가(서버 drTrialIssue 와 같은 조건 — 아니면 서버가 2대 이상을 막는다).
+ *   플러그인은 백업 때 저장한 vCenter 접속값으로 디스크를 쓴다 — 다시 설치로 지문이 바뀌면 껍데기만 생길 수 있어 먼저 1대로 확인한다.
+ */
+export function drTrialOk(jobs, vcenterId, now = Date.now()) {
+  for (const j of Array.isArray(jobs) ? jobs : []) {
+    if (String(j.vcenterId) !== String(vcenterId)) continue;
+    for (const r of j.restores || []) if (r?.dr === true && (r.state === 'ok' || r.state === 'warning') && now - (Number(r.endedAt || r.at) || 0) < DR_TRIAL_MS) return true;
+  }
+  return false;
+}
+/** 반증 R3: 이 이름으로 최근(24시간) 보낸 새 VM 복원 — 끝났어도 다음 묶음에 다시 넣지 않는다(실패 · 취소는 서버가 다시 판정 — 그 뒤 인벤토리에 없으면 다시 보낼 수 있다). */
+export function drRecentlySent(job, name, now = Date.now()) {
+  const k = String(name || '').toLowerCase();
+  return (job?.restores || []).some((r) => r?.mode === 'newVm' && String(r.target?.name || '').toLowerCase() === k && !FAILED.has(String(r.state || '')) && now - (Number(r.at) || 0) < RECENT_MS);
+}
 const pad = (x) => String(x).padStart(2, '0');
 
 /** 기준 시각 입력(datetime-local 'YYYY-MM-DDTHH:MM' — 브라우저 현지 시각) → ms. 틀리면 null. */
@@ -50,7 +71,7 @@ export const drAt = (job, point) => ({
  * 행 — 원장 대상(그 vCenter) × 읽은 복원 지점. 고를 수 없는 사유가 있으면 why.
  * @param {object[]} jobs 원장(화면 목록) · @param {Map<string, object>|null} pts id → restore-points 항목 · @param {(job)=>string} blockOf pickBlock
  */
-export function drRows(jobs, vcenterId, pts, beforeMs, blockOf = () => '') {
+export function drRows(jobs, vcenterId, pts, beforeMs, blockOf = () => '', now = Date.now()) {
   const out = [];
   for (const j of Array.isArray(jobs) ? jobs : []) {
     if (String(j.vcenterId) !== String(vcenterId)) continue;
@@ -61,7 +82,8 @@ export function drRows(jobs, vcenterId, pts, beforeMs, blockOf = () => '') {
     if (!why && !pts) why = '복원 지점 읽기 전';
     else if (!why && !p) why = '복원 지점 읽기 전';
     else if (!why && !p.ok) why = p.reason || '복원 지점을 읽지 못했습니다';
-    else if (!why && !point) why = '기준 시각 이전 성공한 백업 없음';
+    else if (!why && !point) why = beforeMs === null ? '기준 시각을 고르세요' : '기준 시각 이전 성공한 백업 없음';
+    if (!why && drRecentlySent(j, at.vmName, now)) why = '최근 보냄 — 아래 최근 묶음에서 결과를 확인하세요';
     out.push({ id: j.id, job: j, point, at, path: `${at.dc} › ${at.folder}`, why });
   }
   return out.sort((a, b) => a.path.localeCompare(b.path, 'ko') || String(a.at.vmName).localeCompare(String(b.at.vmName), 'ko'));
@@ -112,9 +134,9 @@ export function drItem(row, map) {
 }
 
 /** 이번에 보낼 묶음 — 고른 행 중 아직 고를 수 있는(why 없음) 앞 DR_CHUNK 대. */
-export function drNextChunk(rows, picked) {
+export function drNextChunk(rows, picked, size = DR_CHUNK) {
   const set = picked instanceof Set ? picked : new Set(picked || []);
-  return (Array.isArray(rows) ? rows : []).filter((r) => set.has(r.id) && !r.why).slice(0, DR_CHUNK);
+  return (Array.isArray(rows) ? rows : []).filter((r) => set.has(r.id) && !r.why).slice(0, Math.max(1, Math.min(DR_CHUNK, size)));
 }
 
 /** 점검 한 줄의 표지 · 색. state ok · warn · bad · unknown(포탈이 모른다 — 막지 않지만 사람이 확인). */
