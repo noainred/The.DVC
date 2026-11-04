@@ -30,6 +30,7 @@ import { numOrNull } from '../util/numOrNull.js';
 import { createUserDocWriter } from '../util/userDocWriter.js';
 import { mentionsOf } from '../issues/store.js';
 import { lineDiff, hunks } from './diff.js';
+import { dayKey } from '../util/dayKey.js';
 
 export const PUB = 'pub';
 export const STATUSES = Object.freeze(['draft', 'review', 'approved', 'archived']);
@@ -37,6 +38,8 @@ export const LIMITS = Object.freeze({
   pages: 2000, title: 200, body: 65_536, labels: 10, label: 30, depth: 3, versionsMeta: 200, versionsBody: 30,
   comments: 300, comment: 2000, note: 200, homeMd: 10_000, notice: 1000, quickLinks: 12, quickTitle: 40, quickHref: 300,
   watchers: 100, issueKeys: 50, search: 50,
+  // v2.886 C-5 — 대문 담당(10명) · 당번 표(30줄 · 메모 60자) · 인라인 댓글 인용(200자)
+  owners: 10, oncall: 30, oncallNote: 60, quote: 200,
 });
 export const WIKI_MAX_BYTES_DEFAULT = 8 * 1024 * 1024;
 export const PERSIST_WAIT_MS = 3000;
@@ -236,7 +239,8 @@ const QUICK_HREF_RE = /^(#\/[^\s<>"']{0,280}|https?:\/\/[^\s<>"']{1,280})$/;
 export function spaceView(spaceId, access = FULL_ACCESS) {
   if (!canSeeSpace(spaceId, access)) throw notFound();
   const s = load().spaces[spaceId] || {};
-  return { id: spaceId, homeMd: s.homeMd || '', notice: s.notice || null, quickLinks: s.quickLinks || [], readOnly: !!s.readOnly, updatedAt: s.updatedAt || null, updatedBy: s.updatedBy || '' };
+  return { id: spaceId, homeMd: s.homeMd || '', notice: s.notice || null, quickLinks: s.quickLinks || [], readOnly: !!s.readOnly, updatedAt: s.updatedAt || null, updatedBy: s.updatedBy || '',
+    owners: Array.isArray(s.owners) ? s.owners : [], oncall: Array.isArray(s.oncall) ? s.oncall : [] };
 }
 /** 스페이스 설정(대문 글 · 공지 · 바로 가기 · 읽기 전용) — 라우트가 관리자로 막고, 여기서 그 스페이스의 쓰기 범위를 본다. */
 export function updateSpace(spaceId, body, user, { access = FULL_ACCESS } = {}) {
@@ -266,6 +270,28 @@ export function updateSpace(spaceId, body, user, { access = FULL_ACCESS } = {}) 
     });
   }
   if (Object.hasOwn(b, 'readOnly')) next.readOnly = b.readOnly === true;
+  // v2.886 C-5 대문 담당 · 당번 — 계정명(공백 없는 64자) · 당번은 포탈 날짜 YYYY-MM-DD 범위(끝 ≥ 시작)
+  if (Object.hasOwn(b, 'owners')) {
+    const list = Array.isArray(b.owners) ? b.owners : String(b.owners || '').split(',');
+    const owners = [...new Set(list.map((n) => String(n ?? '').trim()).filter(Boolean))];
+    if (owners.length > LIMITS.owners) throw fieldError('owners', `담당은 ${LIMITS.owners}명까지입니다`);
+    // eslint-disable-next-line no-control-regex
+    for (const n of owners) if (n.length > 64 || /[\s\u0000-\u001f\u007f]/.test(n)) throw fieldError('owners', `‘${capStr(n, 20)}’ — 공백 없는 64자 이하 계정명이어야 합니다`);
+    next.owners = owners;
+  }
+  if (Object.hasOwn(b, 'oncall')) {
+    if (!Array.isArray(b.oncall)) throw fieldError('oncall', '배열이어야 합니다');
+    if (b.oncall.length > LIMITS.oncall) throw fieldError('oncall', `당번 표는 ${LIMITS.oncall}줄까지입니다`);
+    const day = (v, f) => { const t = String(v ?? '').trim(); if (!/^\d{4}-\d{2}-\d{2}$/.test(t) || new Date(`${t}T00:00:00Z`).toISOString().slice(0, 10) !== t) throw fieldError(f, '날짜(YYYY-MM-DD)를 읽지 못했습니다'); return t; };
+    next.oncall = b.oncall.map((o, i) => {
+      const who = String(o?.who ?? '').trim();
+      // eslint-disable-next-line no-control-regex
+      if (!who || who.length > 64 || /[\s\u0000-\u001f\u007f]/.test(who)) throw fieldError(`oncall.${i}.who`, '공백 없는 64자 이하 계정명이어야 합니다');
+      const from = day(o?.from, `oncall.${i}.from`); const to = day(o?.to || o?.from, `oncall.${i}.to`);
+      if (to < from) throw fieldError(`oncall.${i}.to`, '끝 날짜가 시작보다 앞입니다');
+      return { who, from, to, note: text(o?.note ?? '', LIMITS.oncallNote, `oncall.${i}.note`) };
+    }).sort((x, y) => x.from.localeCompare(y.from));
+  }
   next.updatedAt = Date.now(); next.updatedBy = user;
   const spaces = { ...c.spaces, [spaceId]: next };
   const max = wikiMaxBytes();
@@ -456,7 +482,8 @@ export function addComment(id, body, user, { access = FULL_ACCESS } = {}) {
   if (!canEditSpace(p.spaceId, access)) throw forbidden('이 문서의 스페이스는 쓰기 범위 밖입니다 — 조회만 할 수 있습니다');
   const comments = p.comments || [];
   if (comments.length >= LIMITS.comments) throw limitError(`댓글은 문서마다 ${LIMITS.comments}개까지입니다`);
-  const cm = { id: crypto.randomBytes(6).toString('hex'), author: user, body: text(body?.body, LIMITS.comment, 'body', { required: true, multiline: true }), at: Date.now(), v: p.version };
+  const quote = text(body?.quote ?? '', LIMITS.quote, 'quote').replace(/\s+/g, ' ').trim(); // v2.886 인라인 댓글 — 선택한 글(본문에 있는지는 보지 않는다 — 판이 바뀌면 사라질 수 있다)
+  const cm = { id: crypto.randomBytes(6).toString('hex'), author: user, body: text(body?.body, LIMITS.comment, 'body', { required: true, multiline: true }), at: Date.now(), v: p.version, ...(quote ? { quote } : {}) };
   const x = { ...p, comments: [...comments, cm], issueKeys: issueKeysOf(p.title, p.body, ...comments.map((q) => q.body), cm.body) };
   assertRoom(c, x, p.id);
   c.pages = c.pages.map((q) => (q.id === p.id ? x : q));
@@ -475,6 +502,23 @@ export function deleteComment(id, commentId, user, { access = FULL_ACCESS, isMod
   c.pages = c.pages.map((q) => (q.id === p.id ? x : q));
   commit({ changed: x });
   return { id: commentId };
+}
+/**
+ * v2.886 인라인 댓글 해결 표시 — 쓴 사람 · 그 스페이스의 쓰기 역할(라우트가 canWrite 로 넘긴다) · 전체 범위 관리자. 판을 만들지 않는다.
+ */
+export function resolveComment(id, commentId, user, on, { access = FULL_ACCESS, canWrite = false, isMod = false } = {}) {
+  const c = load();
+  const p = findFor(id, access);
+  const cm = (p.comments || []).find((x) => x.id === commentId);
+  if (!cm) throw notFound();
+  if (!isMod && cm.author !== user && !(canWrite && writableBy(p, access))) throw forbidden('해결 표시는 댓글을 쓴 사람이나 이 문서를 고칠 수 있는 사람이 합니다');
+  if (typeof on !== 'boolean') throw fieldError('on', 'true 또는 false 여야 합니다');
+  const next = { ...cm };
+  if (on) Object.assign(next, { resolved: true, resolvedBy: user, resolvedAt: Date.now() }); else { delete next.resolved; delete next.resolvedBy; delete next.resolvedAt; }
+  const x = { ...p, comments: p.comments.map((q) => (q.id === commentId ? next : q)) };
+  c.pages = c.pages.map((q) => (q.id === p.id ? x : q));
+  commit({ changed: x });
+  return { ...next };
 }
 export function setWatch(id, user, on, { access = FULL_ACCESS } = {}) {
   const c = load();
@@ -546,8 +590,13 @@ export function homeOf(spaceId, { access = FULL_ACCESS, me = '', now = Date.now(
   const space = spaceView(spaceId, access);
   const notice = space.notice && (!space.notice.until || space.notice.until > now) ? space.notice : null;
   const lastNote = (p) => { const v = (p.versions || [])[(p.versions || []).length - 1]; return v?.note || ''; };
+  const today = dayKey(now);
+  const oncall = space.oncall || [];
   return {
     space: { ...space, notice },
+    // v2.886 당번 — 오늘(포탈 날짜)이 범위 안인 줄 · 다음 줄(오늘 뒤 시작 · 가장 이른 것 하나)
+    oncallNow: oncall.filter((o) => o.from <= today && today <= o.to),
+    oncallNext: oncall.filter((o) => o.from > today).slice(0, 1),
     counts: {
       pages: live.length, changed7d: live.filter((p) => now - p.updatedAt <= 7 * DAY).length, review: live.filter((p) => p.status === 'review').length,
       myDrafts: me ? live.filter((p) => p.status === 'draft' && p.createdBy === me).length : 0, watching: me ? live.filter((p) => (p.watchers || []).includes(me)).length : 0,

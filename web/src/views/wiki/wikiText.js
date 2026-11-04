@@ -11,7 +11,7 @@ export const statusText = (s) => STATUS_TEXT[s] || s || '—';
 export const STALE_DAYS = 90;
 export const MAX_DEPTH = 3;
 const ID_RE = /^W\d{1,9}$/;
-const VIEWS = Object.freeze(['home', 'search', 'new', 'settings']);
+const VIEWS = Object.freeze(['home', 'search', 'new', 'settings', 'templates']); // v2.886 templates — 관리자 템플릿
 
 /* ───── 주소 ───── */
 function dec(s) { try { return decodeURIComponent(s); } catch { return ''; } }
@@ -267,4 +267,28 @@ export function applySlash(text, caret, cmd, now = new Date()) {
   const clean = snip.replace(CARET, '');
   const body = text.slice(0, q.start) + clean + text.slice(caret);
   return { body, caret: q.start + (at < 0 ? clean.length : at) };
+}
+
+/* ───── v2.886 대문 담당 · 당번 ───── */
+/** 당번 표 → 글('사람 | 시작 | 끝 | 메모' 한 줄씩). */
+export function oncallToText(rows) {
+  return (Array.isArray(rows) ? rows : []).map((o) => [o.who, o.from, o.to === o.from ? '' : o.to, o.note || ''].join(' | ').replace(/( \| )+$/, '')).join('\n');
+}
+/** 글 → 당번 표. 끝을 비우면 시작과 같은 날. 못 읽은 줄은 bad 로 따로(서버도 다시 검사한다). */
+export function textToOncall(text) {
+  const rows = []; const bad = [];
+  const DAY = /^\d{4}-\d{2}-\d{2}$/;
+  String(text ?? '').split('\n').forEach((line, i) => {
+    if (!line.trim()) return;
+    const [who = '', from = '', to = '', ...rest] = line.split('|').map((x) => x.trim());
+    const t = to || from;
+    if (!who || /\s/.test(who) || !DAY.test(from) || !DAY.test(t) || t < from) { bad.push(i + 1); return; }
+    rows.push({ who, from, to: t, note: rest.join(' | ').slice(0, 60) });
+  });
+  return { rows, bad };
+}
+/** '11월 3일 ~ 11월 9일' — 같은 날이면 하루. */
+export function oncallRange(o) {
+  const f = (d) => { const [, m, dd] = String(d || '').split('-'); return m ? `${Number(m)}월 ${Number(dd)}일` : '—'; };
+  return o.from === o.to ? f(o.from) : `${f(o.from)} ~ ${f(o.to)}`;
 }

@@ -24,8 +24,11 @@ import {
 } from './issueText.js';
 import { wikiHash, statusText as wikiStatusText } from '../wiki/wikiText.js';
 import { MdView } from '../wiki/MdView.jsx';
+import AttachBox from '../attach/AttachBox.jsx';
+import AttachAdmin from '../attach/AttachAdmin.jsx';
+import IssueCalendar from './IssueCalendar.jsx';
 
-const SUBS = [['board', '보드'], ['list', '목록'], ['mine', '내 작업'], ['activity', '활동'], ['sprint', '스프린트'], ['epics', '에픽'], ['filters', '필터']]; // v2.882 스프린트 · 에픽 · 필터
+const SUBS = [['board', '보드'], ['list', '목록'], ['calendar', '캘린더'], ['mine', '내 작업'], ['activity', '활동'], ['sprint', '스프린트'], ['epics', '에픽'], ['filters', '필터']]; // v2.882 스프린트 · 에픽 · 필터 · v2.886 캘린더
 /** v2.871: 설정 탭은 전체 범위 관리자에게만 보인다(서버가 같은 기준으로 막는다). 해시 키는 늘 유효 — 권한이 없으면 안내만. */
 const SETTINGS_SUB = ['settings', '설정'];
 const EMPTY_FILTERS = Object.freeze({ q: '', assignee: '', priority: '', type: '', status: '', vcenterId: '', mine: false });
@@ -173,12 +176,12 @@ export default function Issues() {
       {creating && <IssueEditor meta={meta} requestOnly={creating === 'request'} onCancel={() => setCreating(false)} onSaved={(r) => { setCreating(false); onWritten(r); openIssue(r.issue.key); }} />}
 
       {sub === 'settings' && !openKey
-        ? (meta.canSettings ? <><IssueSettings /><AutoCreateSettings /></> : <div className="card muted">이슈 설정은 전체 범위(vCenter 제한 없는) 관리자만 볼 수 있습니다.</div>)
+        ? (meta.canSettings ? <><IssueSettings /><AutoCreateSettings /><AttachAdmin /></> : <div className="card muted">이슈 설정은 전체 범위(vCenter 제한 없는) 관리자만 볼 수 있습니다.</div>)
         : openKey
         ? <IssueDetail key={openKey} issueKey={openKey} meta={metaX} onBack={() => openIssue('')} onOpen={openIssue} onWritten={(r) => { onWritten(r); reloadEpics(); }} />
         : (
           <>
-            {(sub === 'board' || sub === 'list') && <FilterBar filters={filters} setF={setF} meta={meta} sub={sub} onReset={() => setFilters(EMPTY_FILTERS)} />}
+            {(sub === 'board' || sub === 'list' || sub === 'calendar') && <FilterBar filters={filters} setF={setF} meta={meta} sub={sub} onReset={() => setFilters(EMPTY_FILTERS)} />}
             {meta.scoped && <div className="muted" style={{ fontSize: 12 }}>범위가 지정된 계정이라 내 법인(vCenter)의 이슈만 보입니다 — 법인이 없는 공용 이슈는 보이지 않습니다.</div>}
             {sub === 'board' && boardQ && (
               <div className="banner iss-boardq" style={{ whiteSpace: 'normal' }}>
@@ -188,6 +191,7 @@ export default function Issues() {
               </div>
             )}
             {sub === 'board' && <BoardView rows={boardRows} meta={metaX} onOpen={openIssue} recentDays={Math.round((meta.recentDoneMs || 0) / 86400000)} onMove={canWrite ? moveIssue : null} />}
+            {sub === 'calendar' && <IssueCalendar rows={shown} meta={metaX} onOpen={openIssue} onWritten={onWritten} canWrite={canWrite} />}
             {sub === 'list' && <ListView rows={shown} total={rows.length} meta={metaX} epics={epics} onOpen={openIssue} onWritten={onWritten} />}
             {sub === 'sprint' && <SprintView meta={metaX} onOpen={openIssue} onWritten={onWritten} reloadSprints={loadSprints} />}
             {sub === 'epics' && <EpicsView meta={metaX} onOpen={openIssue} onWritten={(r) => { onWritten(r); reloadEpics(); }} />}
@@ -915,6 +919,7 @@ function IssueDetail({ issueKey, meta, onBack, onOpen, onWritten }) {
                 <ChildrenBox it={it} meta={meta} canWrite={canWrite} busy={busy} act={act} onOpen={onOpen} />
                 <LinksBox it={it} meta={meta} canWrite={canWrite} busy={busy} act={act} onOpen={onOpen} />
                 <TimeBox it={it} meta={meta} canWrite={canWrite} busy={busy} act={act} me={x.me} isMod={!!x.isMod} />
+                <AttachBox kind="issue" owner={it.key} />
               </>
             )}
         </div>

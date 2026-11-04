@@ -2789,3 +2789,65 @@ tr.row-sel > td { background: rgba(59, 130, 246, .10); }
 .iss-link-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 320px; }
 .iss-links .iss-mini-act { margin-left: 0; }
 .iss-children-add .input.iss-link-key { flex: 0 1 140px; }
+
+/* ───── v2.886 C-4 첨부 · C-5 매크로 · 인라인 댓글 · 담당/당번 · 캘린더 · 인쇄 ───── */
+.attach-box { margin-top: 14px; padding-top: 10px; border-top: 1px solid var(--border); display: flex; flex-direction: column; gap: 6px; font-size: 13px; min-width: 0; }
+.attach-box.compact { margin-top: 8px; }
+.attach-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
+.attach-note { font-size: 11.5px; }
+.attach-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.attach-list li { display: flex; align-items: center; gap: 8px; min-width: 0; flex-wrap: wrap; }
+.attach-list li.missing { opacity: .7; }
+.attach-thumb { width: 40px; height: 40px; flex: 0 0 auto; border-radius: 6px; overflow: hidden; border: 1px solid var(--border); display: inline-flex; align-items: center; justify-content: center; background: var(--panel-deep, transparent); }
+.attach-thumb-img { max-width: 100%; max-height: 100%; object-fit: cover; }
+.attach-ext { width: 40px; height: 40px; flex: 0 0 auto; border-radius: 6px; border: 1px solid var(--border); display: inline-flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 700; color: var(--text-dim); text-transform: none; }
+.attach-main { display: flex; flex-direction: column; min-width: 0; flex: 1 1 180px; }
+.attach-name { text-align: left; overflow-wrap: anywhere; }
+.attach-meta { font-size: 11.5px; }
+.attach-acts { display: flex; gap: 4px; flex-wrap: wrap; }
+.md-attach-miss { font-size: 12px; color: var(--text-dim); }
+.md-attach-link { font: inherit; }
+.md-macro { border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; margin: 10px 0; display: flex; flex-direction: column; gap: 6px; min-width: 0; overflow-x: auto; }
+.md-macro.off { font-size: 12.5px; }
+.md-macro-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; font-size: 12.5px; }
+.md-macro-foot { font-size: 12px; }
+.md-macro-kpi { display: flex; flex-wrap: wrap; gap: 6px 16px; align-items: baseline; }
+.wiki-doc-main { position: relative; }
+.wiki-pick { position: absolute; z-index: 4; box-shadow: 0 4px 14px #0005; }
+.wiki-comments-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 14px; }
+.wiki-comment.resolved { opacity: .65; }
+.wiki-quote { display: block; text-align: left; width: 100%; background: none; border: 0; border-left: 3px solid var(--amber); padding: 2px 8px; margin: 4px 0; color: var(--text-dim); font: inherit; font-size: 12.5px; cursor: pointer; overflow-wrap: anywhere; }
+.wiki-quote-pick { font-size: 12.5px; color: var(--text-dim); border-left: 3px solid var(--amber); padding: 2px 8px; overflow-wrap: anywhere; }
+.wiki-oncall { display: flex; flex-direction: column; gap: 3px; font-size: 12.5px; margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border); overflow-wrap: anywhere; }
+.wiki-tpl-form { display: flex; flex-direction: column; gap: 8px; }
+.iss-cal { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.iss-cal-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; }
+.iss-cal-title { font-size: 16px; min-width: 110px; text-align: center; }
+.iss-cal-grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 4px; }
+.iss-cal-dow { font-size: 12px; color: var(--text-dim); text-align: center; padding: 2px 0; }
+.iss-cal-cell { min-height: 96px; border: 1px solid var(--border); border-radius: 8px; padding: 4px; display: flex; flex-direction: column; gap: 3px; min-width: 0; background: var(--panel); }
+.iss-cal-cell.out { opacity: .5; }
+.iss-cal-cell.today { border-color: var(--accent); }
+.iss-cal-cell.drop { outline: 2px dashed color-mix(in srgb, var(--accent) 60%, transparent); outline-offset: -2px; }
+.iss-cal-day { font-size: 12px; font-weight: 700; }
+.iss-cal-sprint { font-size: 11px; color: var(--accent); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.iss-cal-sprint.end { color: var(--text-dim); }
+.iss-cal-item { display: flex; align-items: center; gap: 3px; min-width: 0; background: color-mix(in srgb, var(--accent) 8%, transparent); border: 1px solid var(--border); border-radius: 6px; padding: 2px 4px; font: inherit; font-size: 11.5px; color: inherit; cursor: pointer; text-align: left; }
+.iss-cal-item.done { opacity: .55; text-decoration: line-through; }
+.iss-cal-t { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; flex: 1 1 auto; }
+.iss-cal-dow-inline, .iss-cal-narrow-note { display: none; }
+@media (max-width: 700px) {
+  .iss-cal-grid { grid-template-columns: minmax(0, 1fr); }
+  .iss-cal-dow { display: none; }
+  .iss-cal-cell { min-height: 0; }
+  .iss-cal-cell.out, .iss-cal-cell.empty:not(.today) { display: none; } /* v2.886 Chromium 400px — 빈 날 30칸이 목록을 채웠다 */
+  .iss-cal-dow-inline { display: inline; }
+  .iss-cal-narrow-note { display: block; }
+}
+body.wiki-print { background: #fff; color: #111; padding: 24px; }
+.wiki-print-title { margin: 0 0 4px; font-size: 22px; }
+.wiki-print-sub { color: #666; font-size: 12px; margin-bottom: 16px; }
+@media print { body.wiki-print { padding: 0; } .wiki-print .md-macro { break-inside: avoid; } }
+.md-macro-prio { font-size: 11px; font-weight: 700; color: var(--text-dim); }
+.md-macro-prio.p-p0 { color: var(--red); }
+.md-macro-prio.p-p1 { color: var(--amber); }

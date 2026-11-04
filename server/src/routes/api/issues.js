@@ -44,6 +44,7 @@ import { listFilters, createFilter, updateFilter, deleteFilter, filtersLoadError
 import { QUERY_LIMITS, FIELDS as QUERY_FIELDS, ORDERABLE as QUERY_ORDERABLE } from '../../issues/query.js';
 import { issueDocIndex } from '../../wiki/store.js';
 import { issuesCsv } from '../../issues/exportCsv.js';
+import { removeOwner as removeAttachments } from '../../attach/store.js';
 import { currentVersion } from '../../config.js';
 import { listNotes } from '../../release-notes.js';
 import { fileStamp } from '../../util/dayKey.js';
@@ -484,6 +485,7 @@ export function registerIssues(api) {
     try {
       const x = deleteIssue(req.params.key, userOf(req), { isMod: isMod(req), access: accessOf(req) });
       audit(req, 'issue.delete', x.key, `${x.title} (보고자 ${x.reporter})`);
+      try { removeAttachments('issue', x.key); } catch (e) { console.warn(`[issues] ${x.key} 첨부 정리 실패: ${String(e?.message || e).slice(0, 160)}`); } // v2.886
       res.json({ ok: true, persist: await persistView(req) });
     } catch (e) { fail(res, e, next, req); }
   });

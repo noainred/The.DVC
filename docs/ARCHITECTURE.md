@@ -77,9 +77,10 @@
 | 디렉터리 | 파일 | 줄 | 대표 파일(밖에서 import 수) | 머리말 첫 줄 |
 |---|---:|---:|---|---|
 | `agent/` | 49 | 7,369 | `agent/envTimeout.js` (18) | 호환 재수출(v2.613 DEPS2613-01) — 본체는 `util/envTimeout.js` 로 옮겼다. |
-| `auth/` | 15 | 4,201 | `auth/scope.js` (77) | 사용자 데이터 범위(scope) 해석 — "이 사용자가 볼 수 있는 vCenter"를 계산한다. |
+| `attach/` | 1 | 248 | `attach/store.js` (3) | attach/store.js — 위키 문서 · 이슈 첨부 파일(v2.886 · 시안 ⑨⑩ '첨부' · C-4). |
+| `auth/` | 15 | 4,201 | `auth/scope.js` (78) | 사용자 데이터 범위(scope) 해석 — "이 사용자가 볼 수 있는 vCenter"를 계산한다. |
 | `availability/` | 1 | 205 | `availability/analyze.js` (2) | availability/analyze.js — 특수 기능 'VM 가용성(SLA)'(도구 키 `vm-availability`, v2.707 — C6) 판정(순수). |
-| `backup/` | 5 | 1,048 | `backup/service.js` (3) | 포탈 백업 코어 — 중앙 포탈의 모든 설정(CONFIG_DIR의 *.json / *.env)과, 엣지 포탈(에이전트)이 |
+| `backup/` | 5 | 1,049 | `backup/service.js` (3) | 포탈 백업 코어 — 중앙 포탈의 모든 설정(CONFIG_DIR의 *.json / *.env)과, 엣지 포탈(에이전트)이 |
 | `bareos/` | 51 | 13,175 | `bareos/settings.js` (11) | bareos/settings.js — Bareos 연동 설정(v2.820 · v2.823 법인별 Director). 파일: CONFIG_DIR/bareos.json (0600 · 원자적 쓰기 · 비밀 봉인). |
 | `bmstor/` | 9 | 1,335 | `bmstor/poller.js` (4) | bmstor/poller.js — 베어메탈 스토리지 주기 수집(v2.340). |
 | `bmusage/` | 21 | 4,644 | `bmusage/db.js` (4) | bmusage/db.js — 베어메탈 사용률 DB(v2.550). 파일: `<dbDir>/bm-usage.db` |
@@ -110,12 +111,12 @@
 | `hostaccess/` | 4 | 553 | `hostaccess/service.js` (2) | hostaccess/service.js — 호스트 접근 제어 실행 계층(v2.485): 상태 조회 · 계획 · 적용(런타임) · 확정 · 되돌림. |
 | `hostcfg/` | 6 | 1,037 | `hostcfg/cache.js` (3) | 호스트 구성 캐시(v2.699) — vCenter 별 · 호스트 moref 별. 인메모리(재시작하면 비고 몇 주기에 걸쳐 다시 찬다 — |
 | `idrac/` | 39 | 8,551 | `idrac/registry.js` (22) | iDRAC registry — the managed list of Dell servers whose power draw we collect |
-| `insights/` | 21 | 8,714 | `insights/analysisServers.js` (10) | 서버 분석 공용 — iDRAC 등록부(중앙) + 위임 법인의 원격 인벤토리 병합·법인 귀속·필터(v2.579 에 |
+| `insights/` | 21 | 8,767 | `insights/analysisServers.js` (10) | 서버 분석 공용 — iDRAC 등록부(중앙) + 위임 법인의 원격 인벤토리 병합·법인 귀속·필터(v2.579 에 |
 | `intro/` | 5 | 1,967 | `intro/support.js` (0) | GENERATED from dc-runtime/src/*.ts — do not edit. Rebuild with `cd dc-runtime && bun run build`. |
 | `inventory/` | 7 | 1,209 | `inventory/osKind.js` (3) | VM 게스트 OS 문자열 → 'windows' \| 'linux' \| 'other' \| null (v2.834 — Bareos 백업 대상 OS 구분). |
 | `ipam/` | 30 | 5,721 | `ipam/scanStore.js` (7) | IP 스캔 설정(에이전트별) + 결과 저장소. |
 | `isidu/` | 21 | 4,828 | `isidu/digestRules.js` (6) | isidu/digestRules.js — 아이실론 디렉터리 사용량 **종합 메일**의 순수 규칙(v2.742). 파일·타이머·메일 발송 없음. |
-| `issues/` | 10 | 3,390 | `issues/autoCreate.js` (2) | issues/autoCreate.js — 하드웨어 파트 장애 → 이슈 자동 등록(v2.880, 사용자 요청 2026-11-04 |
+| `issues/` | 10 | 3,390 | `issues/store.js` (3) | issues/store.js — 이슈 트래커 저장소(v2.864). 포탈 공용 이슈(장애·작업·요청·개선)를 등록하고 담당자에게 할당해 끝날 때까지 추적한다. |
 | `linkcheck/` | 12 | 2,724 | `linkcheck/links.js` (4) | linkcheck/links.js — **설정에서 통신 링크를 자동으로 뽑는다**(순수, v2.552). |
 | `llm/` | 5 | 594 | `llm/config.js` (2) | Local LLM (Ollama) settings for natural-language search. Stored in |
 | `loganalysis/` | 8 | 2,076 | `loganalysis/index.js` (2) | loganalysis/index.js — 설정 › Log › 로그 분석 파사드(v2.583). |
@@ -131,7 +132,7 @@
 | `pdu/` | 11 | 2,099 | `pdu/registry.js` (5) | pdu/registry.js — PDU(APC Rack PDU 2G) 장비 등록 — `CONFIG_DIR/pdu-devices.json`(0600). |
 | `perf/` | 6 | 1,221 | `perf/monitor.js` (13) | perf/monitor.js — 서버 성능 측정기(v2.498). 요청 지연·이벤트 루프 정체·진행 중 요청을 **상시 O(1)** |
 | `ping/` | 4 | 765 | `ping/db.js` (4) | Ping 모니터링 시계열 저장소 — 등록 대상별 RTT/도달성 샘플을 별도 SQLite에 보관한다. |
-| `portalcheck/` | 7 | 2,481 | `portalcheck/archScan.js` (2) | portalcheck/archScan.js — 특수 기능 › 포탈 점검 › **아키텍처 점검**(v2.614) 판정 코어. |
+| `portalcheck/` | 7 | 2,484 | `portalcheck/archScan.js` (2) | portalcheck/archScan.js — 특수 기능 › 포탈 점검 › **아키텍처 점검**(v2.614) 판정 코어. |
 | `power/` | 1 | 181 | `power/total.js` (1) | power/total.js — 전체 소비 전력 합산(v2.664, **순수 모듈** — 테스트로 고정). |
 | `provision/` | 6 | 956 | `provision/jobs.js` (2) | VM provisioning job engine. Holds deployment jobs in memory and runs them |
 | `proxy/` | 10 | 2,610 | `proxy/sshExec.js` (32) | Small SSH helper built on ssh2: connect, run commands, and upload files via |
@@ -140,7 +141,7 @@
 | `relaytopo/` | 4 | 680 | `relaytopo/store.js` (4) | relaytopo/store.js — 중계 토폴로지(Main – Edge DVC – IRS) 저장(v2.431, 사용자 요구 '첨부한 표처럼 Main-Edge1-Edge2 구조의 |
 | `reports/` | 8 | 993 | `reports/dailyReport.js` (3) | 일일 헬스체크 리포트 발송 스케줄러 — 매일 지정 시각(HH:MM)에 computeHealthReport 결과를 |
 | `rma/` | 14 | 2,693 | `rma/jobs.js` (7) | RMA 원격 명령 잡 큐(중앙, 인메모리) — claim→ack 2단계 확인응답(captureJobs.js 패턴 이식) |
-| `routes/` | 131 | 39,368 | `routes/capacity.js` (1) | Capacity Advisor API — 포탈/엣지 호스트 리소스 실측·평가·권고 조회. |
+| `routes/` | 132 | 39,560 | `routes/capacity.js` (1) | Capacity Advisor API — 포탈/엣지 호스트 리소스 실측·평가·권고 조회. |
 | `sanswitch/` | 30 | 8,062 | `sanswitch/registry.js` (7) | sanswitch/registry.js — SAN 스위치 등록부(v2.410). |
 | `search/` | 1 | 214 | `search/deepSearch.js` (3) | 심층 검색 — 다조건으로 VM을 검색한다. 1차는 스냅샷 기반(즉시): 게이트웨이·IP/서브넷·OS·전원· |
 | `security/` | 19 | 4,576 | `security/secretVault.js` (32) | secretVault.js — 설정 파일 자격증명(비밀번호·SSH 키·토큰)의 저장 방식(평문/암호화) 중앙 모듈(v2.296). |
@@ -163,10 +164,10 @@
 | `vmlife/` | 1 | 92 | `vmlife/analyze.js` (1) | vmlife/analyze.js — 특수 기능 'VM 생성·삭제 이력'(도구 키 `vm-lifecycle`, v2.706 — C5) 판정(순수). |
 | `vmseries/` | 9 | 1,367 | `vmseries/poller.js` (3) | vmseries/poller.js — 실시간 스파이크 주기 수집(v2.510). 기본 50분(사용자 결정), 설정에서 변경. |
 | `vmtrack/` | 4 | 1,798 | `vmtrack/db.js` (4) | vmtrack/db.js — VM 수량 추이 전용 시계열 DB(v2.345, 사용자 요구: "별도의 DB 를 만들어서 트래킹"). |
-| `wiki/` | 3 | 787 | `wiki/store.js` (3) | wiki/store.js — 위키(컨플루언스 같은 문서 공간) 저장소(v2.881 · 시안 docs/design/wiki-issues ①~⑤ · ⑫). |
+| `wiki/` | 4 | 921 | `wiki/store.js` (4) | wiki/store.js — 위키(컨플루언스 같은 문서 공간) 저장소(v2.881 · 시안 docs/design/wiki-issues ①~⑤ · ⑫). |
 | `xferspeed/` | 7 | 1,946 | `xferspeed/schedule.js` (4) | xferspeed/schedule.js — 전송 속도 측정의 **실행 일정**(순수 — 파일·타이머 없음, v2.735). |
 
-디렉터리 89개 · 파일 1128개 · 253,880줄. 대표 파일은 `index.js` 가 있으면 그것, 없으면 그 디렉터리 밖에서 가장 많이 import 되는 파일이고, 설명은 그 파일 머리말의 첫 줄을 그대로 옮긴 것이다(따라서 머리말이 곧 문서다 — 첫 줄을 잘 쓸 것).
+디렉터리 90개 · 파일 1131개 · 254,511줄. 대표 파일은 `index.js` 가 있으면 그것, 없으면 그 디렉터리 밖에서 가장 많이 import 되는 파일이고, 설명은 그 파일 머리말의 첫 줄을 그대로 옮긴 것이다(따라서 머리말이 곧 문서다 — 첫 줄을 잘 쓸 것).
 <!-- arch-doc:modules:end -->
 
 ### 3-3. 라우트 그룹 → 게이트

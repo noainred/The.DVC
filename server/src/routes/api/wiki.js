@@ -20,11 +20,23 @@ import { store } from '../../store.js';
 import {
   listSpaces, spaceView, updateSpace, tree, getPage, createPage, updatePage, revertPage, versionBody, diffVersions, deletePage,
   addComment, deleteComment, setWatch, searchPages, backrefs, homeOf, toggleTask, wikiSeq, waitWikiPersist, wikiPersist, PERSIST_WAIT_MS,
-  TEMPLATES, STATUSES, LIMITS, PUB, metasFor,
+  TEMPLATES, STATUSES, LIMITS, PUB, metasFor, resolveComment,
 } from '../../wiki/store.js';
+import { listCustomTemplates, getCustomTemplate, saveCustomTemplate, deleteCustomTemplate, customTemplatesLoadError, TEMPLATE_LIMITS } from '../../wiki/templates.js';
+import { removeOwner as removeAttachments } from '../../attach/store.js';
+import { writeScopedVcenterIds as writeScopeOf } from '../../auth/scope.js';
+import { fullScopeOnlyWith } from '../admin/shared.js';
 import { recordView, setFavorite, userLists, isFavorite, viewCounts, forgetPage, USER_LIMITS } from '../../wiki/userState.js';
 
 const writers = requireRole('admin', 'operator');
+// v2.886 관리자 템플릿 — 전 법인 공용(모든 스페이스의 '새 문서') · 관리자 + 전체 범위 + 쓰기 범위 무제한
+const templateFleetOnly = fullScopeOnlyWith('관리자 템플릿은 모든 스페이스에 보이는 전 법인 공용 설정이라 전체 범위(vCenter 제한 없는) 관리자만 바꿉니다.');
+function templateFullWrite(req, res, next) {
+  let w = null;
+  try { w = writeScopeOf(req.user, store.get()); } catch { w = new Set(); }
+  if (w) return res.status(403).json({ ok: false, error: 'forbidden', reason: '관리자 템플릿은 쓰기 범위(수정 가능 vCenter)가 지정되지 않은 관리자만 바꿉니다' });
+  next();
+}
 const adminOnly = requireRole('admin');
 const userOf = (req) => req.user?.username || 'anonymous';
 const isAdmin = (req) => isAdminDetailUser(req.user);
@@ -78,11 +90,29 @@ export function registerWiki(api) {
     res.json({
       ok: true, me: userOf(req), canWrite: canWrite(req), canComment: canComment(req), isMod: isMod(req), isAdmin: isAdmin(req), scoped: !!access.read,
       spaces: listSpaces({ access, vcenters: vcentersOf() }), statuses: STATUSES, limits: LIMITS,
-      templates: TEMPLATES.map((t) => ({ id: t.id, name: t.name, tag: t.tag })), persist: wikiPersist({ admin: isAdmin(req) }),
+      templates: [...TEMPLATES.map((t) => ({ id: t.id, name: t.name, tag: t.tag })), ...listCustomTemplates().map((t) => ({ id: t.id, name: t.name, tag: t.tag, custom: true }))], persist: wikiPersist({ admin: isAdmin(req) }),
+      canTemplates: isAdmin(req) && !access.read && !access.write, templateLimits: TEMPLATE_LIMITS, templatesLoadError: isAdmin(req) ? customTemplatesLoadError() : null,
     });
   });
+  // v2.886 관리자 템플릿 목록(본문 포함 — 관리 화면) · 만들기 · 고치기 · 지우기
+  api.get('/wiki/templates', adminOnly, templateFleetOnly, (req, res) => {
+    res.set('Cache-Control', 'no-store');
+    res.json({ ok: true, items: listCustomTemplates(), loadError: customTemplatesLoadError(), limits: TEMPLATE_LIMITS });
+  });
+  api.post('/wiki/templates', adminOnly, templateFleetOnly, templateFullWrite, (req, res, next) => {
+    if (!isAdmin(req)) return res.status(403).json({ ok: false, reason: '데모 계정은 템플릿을 바꿀 수 없습니다' });
+    try { const t = saveCustomTemplate({ ...(req.body || {}), id: '' }, userOf(req)); audit(req, 'wiki.template', t.id, `만듦: ${t.name}`); res.json({ ok: true, template: t }); } catch (e) { fail(res, e, next); }
+  });
+  api.put('/wiki/templates/:id', adminOnly, templateFleetOnly, templateFullWrite, (req, res, next) => {
+    if (!isAdmin(req)) return res.status(403).json({ ok: false, reason: '데모 계정은 템플릿을 바꿀 수 없습니다' });
+    try { const t = saveCustomTemplate({ ...(req.body || {}), id: String(req.params.id).slice(0, 20) }, userOf(req)); audit(req, 'wiki.template', t.id, `고침: ${t.name}`); res.json({ ok: true, template: t }); } catch (e) { fail(res, e, next); }
+  });
+  api.delete('/wiki/templates/:id', adminOnly, templateFleetOnly, templateFullWrite, (req, res, next) => {
+    if (!isAdmin(req)) return res.status(403).json({ ok: false, reason: '데모 계정은 템플릿을 바꿀 수 없습니다' });
+    try { const r = deleteCustomTemplate(String(req.params.id).slice(0, 20)); audit(req, 'wiki.template', r.id, '지움'); res.json({ ok: true, ...r }); } catch (e) { fail(res, e, next); }
+  });
   api.get('/wiki/templates/:id', (req, res) => {
-    const t = TEMPLATES.find((x) => x.id === req.params.id);
+    const t = TEMPLATES.find((x) => x.id === req.params.id) || getCustomTemplate(req.params.id);
     if (!t) return res.status(404).json({ ok: false, reason: '없는 템플릿입니다' });
     res.json({ ok: true, template: t });
   });
@@ -184,6 +214,7 @@ export function registerWiki(api) {
       const r = deletePage(req.params.id, userOf(req), { access: accessOf(req), isMod: isMod(req) });
       audit(req, 'wiki.delete', r.id);
       forgetPage(r.id); // v2.885 그 문서의 조회 수 · 즐겨찾기 · 최근 기록
+      try { removeAttachments('wiki', r.id); } catch (e) { console.warn(`[wiki] ${r.id} 첨부 정리 실패: ${String(e?.message || e).slice(0, 160)}`); } // v2.886
       res.json({ ok: true, ...r, persist: await persistView(req) });
     } catch (e) { fail(res, e, next); }
   });
@@ -191,6 +222,14 @@ export function registerWiki(api) {
     if (!ID_RE.test(req.params.id)) return badId(res);
     try {
       const cm = addComment(req.params.id, req.body || {}, userOf(req), { access: accessOf(req) });
+      res.json({ ok: true, comment: cm, persist: await persistView(req) });
+    } catch (e) { fail(res, e, next); }
+  });
+  // v2.886 인라인 댓글 해결 표시 — 문지기는 댓글과 같고, 쓴 사람 · 고칠 수 있는 사람 · 전체 범위 관리자만(저장소가 판정)
+  api.post('/wiki/pages/:id/comments/:cid/resolve', commenters, async (req, res, next) => {
+    if (!ID_RE.test(req.params.id)) return badId(res);
+    try {
+      const cm = resolveComment(req.params.id, String(req.params.cid).slice(0, 40), userOf(req), req.body?.on, { access: accessOf(req), canWrite: canWrite(req), isMod: isMod(req) });
       res.json({ ok: true, comment: cm, persist: await persistView(req) });
     } catch (e) { fail(res, e, next); }
   });
