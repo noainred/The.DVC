@@ -99,7 +99,7 @@ code{font-family:var(--mono);font-size:12px;background:var(--panel-2);padding:1p
   <div class="card head">
     <h1>서비스 인벤토리 5차 시안 — 구현본 재검토 반영</h1>
     <p class="dim">대상은 v2.887.0 으로 릴리스된 <b>특수 기능 › 서비스 인벤토리</b>(도구 키 svc-inventory). 카드마다 왼쪽이 지금 화면, 오른쪽이 제안이다. 목 데이터는 2026-11-05 재촬영 스크린샷의 값(vcenter-ap-northeast-01)을 그대로 옮겼다.</p>
-    <div class="meta"><span>검토 규모: 표준(반증 1인 + 직접 대조 + Chromium 1440/400 재판독)</span><span>근거 표: docs/design/service-map/README.md §5차 검토</span><span>번호 M = 메인 직접 대조 · R = 반증 에이전트</span></div>
+    <div class="meta"><span>검토 규모: 표준(반증 1인 + 직접 대조 + Chromium 1440/400 재판독)</span><span>근거 표: docs/design/service-map/README.md §5차 검토</span><span>번호 M = 메인 직접 대조 · R = 반증 에이전트(5축 · 19건 · 문제 없음 18건)</span></div>
   </div>
 
   <div class="strip" id="strip"></div>
@@ -313,19 +313,19 @@ code{font-family:var(--mono);font-size:12px;background:var(--panel-2);padding:1p
   </section>
 
   <!-- M10 -->
-  <section class="card find" id="m10" data-sev="sev-l" data-ax="ax-perf">
-    <div class="fh"><span class="no">M10</span><h2>구성원·큐·후보 조회가 호출마다 전체 판정·집계를 다시 한다</h2><span class="pill sev-l">낮음</span><span class="pill est">추정</span><span class="pill src">성능</span></div>
+  <section class="card find" id="m10" data-sev="sev-m" data-ax="ax-perf">
+    <div class="fh"><span class="no">M10 · R5</span><h2>구성원·큐·후보 조회가 호출마다 전체 판정·집계를 다시 한다 — 실측 요청당 80~230ms</h2><span class="pill sev-m">중간</span><span class="pill ok">확정(반증 실측)</span><span class="pill src">성능</span></div>
     <div class="fb">
       <div class="pane now"><div class="lab">지금</div>
         <div class="flow"><span class="st">고정 모달 키 입력(250ms)</span><span class="ar">→</span><span class="st">/candidates</span><span class="ar">→</span><span class="st hot">buildInventory 전체(5,850대 판정 + 집계 + 전역)</span></div>
-        <p class="dim">입력 수집(gather)은 세대당 1회지만 판정·집계는 요청마다 다시 한다. 실측은 없다 — 5,850대 판정은 ms 단위라 체감은 작을 것(추정).</p>
+        <p class="dim">입력 수집(gather)은 세대당 1회지만 판정·집계는 요청마다 다시 한다. 반증 벤치(6,500 구성원 · 658 호스트 · 28 법인): buildInventory 중앙값 77ms, pins 깊은 복사 114ms, 쓰기 한 번에 화면이 3요청 — 폴러·엣지 수신과 같은 이벤트 루프를 요청당 80~230ms 막는다.</p>
       </div>
       <div class="pane next"><div class="lab">제안</div>
         <div class="flow"><span class="st">/candidates · /members · /queues</span><span class="ar">→</span><span class="st">inventoryFor memo(스냅샷 세대 · rev · 범위 · 관리자, 10초)</span><span class="ar">→</span><span class="st">재사용</span></div>
         <p class="dim">본 응답의 memoJson 키와 같은 축으로 몇 초 memo. 쓰기 뒤에는 rev 가 바뀌어 자동으로 넘어간다.</p>
       </div>
     </div>
-    <div class="why"><span><span class="k">근거</span> <code>svcInventory.js:254-261</code> — memo 없음</span></div>
+    <div class="why"><span><span class="k">근거</span> <code>svcInventory.js:254-261</code> — memo 없음 · 반증 R5 벤치(review5-bench.mjs)</span></div>
   </section>
 
   <!-- M11 -->
@@ -343,7 +343,158 @@ code{font-family:var(--mono);font-size:12px;background:var(--panel-2);padding:1p
     <div class="why"><span><span class="k">근거</span> <code>svcInventory.js:394</code></span></div>
   </section>
 
-  <div id="agentFindings"></div>
+  <!-- R1 -->
+  <section class="card find" id="r1" data-sev="sev-h" data-ax="ax-ops">
+    <div class="fh"><span class="no">R1</span><h2>한 대씩 고정할 때마다 '설정 변경' 자동 백업 아카이브가 생긴다</h2><span class="pill sev-h">높음</span><span class="pill ok">확정(재현)</span><span class="pill src">운영</span></div>
+    <div class="fb">
+      <div class="pane now"><div class="lab">지금</div>
+        <div class="flow"><span class="st">한 대씩 고정 1건</span><span class="ar">→</span><span class="st">service-map-pins.json 쓰기</span><span class="ar">→</span><span class="st hot">15초 뒤 '설정 변경' 백업 939KB</span><span class="ar">→</span><span class="st">10번이면 자동 사유 보관 슬롯(10)이 전부 고정 백업</span></div>
+        <div class="mock" style="margin-top:8px"><table><thead><tr><th>백업</th><th>사유</th><th class="r">크기</th></tr></thead><tbody>
+          <tr><td class="mono">portal-backup-2026-11-05T20-48-53-change.json.gz</td><td><span class="b amber">설정 변경</span> <span class="sub">pins.clear</span></td><td class="r">939 KB</td></tr>
+          <tr><td class="mono">portal-backup-2026-11-05T20-48-38-change.json.gz</td><td><span class="b amber">설정 변경</span> <span class="sub">pins.set</span></td><td class="r">939 KB</td></tr>
+          <tr><td class="mono faint">…(실제 설정 변경 백업은 밀려난다)</td><td></td><td></td></tr>
+        </tbody></table></div>
+        <p class="dim">고정 파일을 따로 둔 이유가 '변경 감시 백업에서 빼려고' 였는데 제외 목록(<code>CHANGE_WATCH_EXCLUDE</code>)에 빠져 있다. v2.590 P1 과 같은 유형의 사고.</p>
+      </div>
+      <div class="pane next"><div class="lab">제안</div>
+        <div class="flow"><span class="st">한 대씩 고정 1건</span><span class="ar">→</span><span class="st">pins 쓰기</span><span class="ar">→</span><span class="st">변경 감시 제외(지문 불변)</span><span class="ar">→</span><span class="st">자동 백업 없음</span></div>
+        <p class="dim"><code>backup/service.js CHANGE_WATCH_EXCLUDE</code> 에 <code>service-map-pins.json</code> 추가. 백업 번들에는 그대로 들어간다(복원 가능). 지문 불변 테스트 1건.</p>
+      </div>
+    </div>
+    <div class="why"><span><span class="k">근거</span> <code>backup/service.js:186</code> 목록에 없음 · 재현: pins.set/clear 1건마다 아카이브 1개</span></div>
+  </section>
+
+  <!-- R2 -->
+  <section class="card find" id="r2" data-sev="sev-h" data-ax="ax-scope">
+    <div class="fh"><span class="no">R2</span><h2>등록을 지운 vCenter 의 법인 항목·고정이 영원히 남고 어떤 연산으로도 못 지운다</h2><span class="pill sev-h">높음</span><span class="pill ok">확정(재현)</span><span class="pill src">범위·운영</span></div>
+    <div class="fb">
+      <div class="pane now"><div class="lab">지금</div>
+        <div class="mock"><div class="tree"><div>🏢 ap-northeast-01<span class="cnt">208</span></div><div>🏢 <b>vc-gone</b> <span class="sub">(스냅샷에 없음 · writable)</span><span class="cnt">0</span></div><div style="padding-left:14px">🧩 ERP <span class="b red">유령 1</span><span class="cnt">0</span></div></div>
+          <div class="tb" style="margin-top:8px"><span class="btn">서비스 삭제</span><span class="ar">→</span><span class="b red">404 법인(vCenter)을 찾지 못했습니다</span></div>
+          <div class="tb" style="margin-top:4px"><span class="btn">유령 정리</span><span class="ar">→</span><span class="b red">404</span></div></div>
+        <p class="dim">법인 행은 저장소에 있으면 만들고(<code>build.js:97</code>), 쓰기는 스냅샷에 있어야 통과(<code>corpWriteAccess</code>). 통폐합·id 변경 뒤 KPI '검토 필요' 가 영원히 붉다.</p>
+      </div>
+      <div class="pane next"><div class="lab">제안</div>
+        <div class="mock"><div class="tree"><div>🏢 ap-northeast-01<span class="cnt">208</span></div><div>🏢 <b>vc-gone</b> <span class="b gray">등록 해제된 vCenter</span><span class="cnt">0</span></div></div>
+          <div class="tb" style="margin-top:8px"><span class="btn" style="opacity:.5">＋ 폴더</span><span class="btn" style="opacity:.5">＋ 서비스</span><span class="btn pri">법인 항목 정리(서비스 3 · 규칙 4 · 고정 1)</span><span class="sub">전체 범위 관리자 · 확인창 · 감사 로그</span></div></div>
+        <p class="dim">법인 행에 표지 + 쓰기 버튼 잠금. 전체 범위 관리자 전용 <code>corp.purge</code>(손상 초기화와 같은 등급). 유령 큐·KPI 에서는 '등록 해제' 로 따로 센다.</p>
+      </div>
+    </div>
+    <div class="why"><span><span class="k">근거</span> <code>servicemap/build.js:97</code> · <code>svcInventory.js:236</code> · 재현: vc-gone 법인 + 고정 → writable:true · ghosts:1 · remove/prune 404</span></div>
+  </section>
+
+  <!-- R8 -->
+  <section class="card find" id="r8" data-sev="sev-m" data-ax="ax-judge">
+    <div class="fh"><span class="no">R8</span><h2>'고정 유지' 가 제3의 서비스로 바뀐 새 드리프트까지 영원히 숨긴다</h2><span class="pill sev-m">중간</span><span class="pill ok">확정(실행)</span><span class="pill src">판정</span></div>
+    <div class="fb">
+      <div class="pane now"><div class="lab">지금</div>
+        <div class="flow"><span class="st">고정 MES · 자동 ERP</span><span class="ar">→</span><span class="st">'고정 유지'(reviewed)</span><span class="ar">→</span><span class="st">자동 판정이 ERP → <b>DB</b> 로 바뀜</span><span class="ar">→</span><span class="st hot">드리프트 없음(조용히 고정이 이김)</span></div>
+        <p class="dim">검토 시점의 자동 판정을 저장하지 않아 <code>drift = differs && !reviewed</code> 로 영원히 가린다. 문구 '같은 드리프트는 다시 묻지 않습니다' 와 다르다.</p>
+      </div>
+      <div class="pane next"><div class="lab">제안</div>
+        <div class="mock"><table><thead><tr><th>구성원</th><th>고정된 서비스</th><th>자동 판정</th><th>조치</th></tr></thead><tbody>
+          <tr><td><b>app-ap-0008</b><div class="sub">검토 당시 자동 판정: ERP</div></td><td>MES</td><td>DB <span class="b blue">vCenter 폴더 규칙</span> <span class="b amber">바뀜 ERP → DB</span></td><td><span class="btn">자동으로 되돌리기</span> <span class="btn">고정 유지</span></td></tr>
+        </tbody></table></div>
+        <p class="dim">고정에 <code>reviewedAuto</code>(검토 당시 자동 판정)를 저장하고 <code>drift = differs && reviewedAuto !== auto.serviceId</code>. 같은 드리프트만 다시 묻지 않는다.</p>
+      </div>
+    </div>
+    <div class="why"><span><span class="k">근거</span> <code>servicemap/resolve.js:105</code> · 실행: reviewed 뒤 s1→s3 에도 drift:false</span></div>
+  </section>
+
+  <!-- R3 -->
+  <section class="card find" id="r3" data-sev="sev-m" data-ax="ax-judge">
+    <div class="fh"><span class="no">R3</span><h2>서비스 이름을 바꾸면 스캔 라벨·태그 값 소속이 조용히 끊긴다</h2><span class="pill sev-m">중간</span><span class="pill ok">확정(실행)</span><span class="pill src">판정</span></div>
+    <div class="fb">
+      <div class="pane now"><div class="lab">지금</div>
+        <div class="flow"><span class="st">서비스 'DB' → 'Database' 로 개명</span><span class="ar">→</span><span class="st hot">스캔 라벨 'DB' 인 BM 11대가 (미지정)</span><span class="ar">→</span><span class="st">라벨은 이미 있어 409 — 화면에서 못 고침</span></div>
+        <p class="dim">판정은 서비스명 또는 별칭으로 찾는데 개명은 이름만 바꾼다. 매핑 안 된 값 탭에 'DB' 가 다시 나타나고 사람이 별칭을 또 만들어야 한다.</p>
+      </div>
+      <div class="pane next"><div class="lab">제안</div>
+        <div class="mock"><b>이름을 'Database' 로 바꿉니다</b><p class="sub" style="white-space:normal;margin-top:4px">스캔 라벨 'DB' 로 11대 · 태그 값 'DB' 로 3대가 이 서비스에 소속돼 있습니다. 옛 이름 'DB' 를 별칭으로 남기면 그대로 유지됩니다.</p>
+          <div class="tb" style="margin-top:8px"><span class="btn pri">별칭 남기고 바꾸기</span><span class="btn">별칭 없이 바꾸기(14대가 미지정으로)</span><span class="btn">취소</span></div></div>
+        <p class="dim">개명 확인창에 영향 대수를 보이고 기본값은 '별칭 남김'. 서버는 <code>service.update</code> 에 <code>keepAlias</code> 옵션(결정 필요 ⑥).</p>
+      </div>
+    </div>
+    <div class="why"><span><span class="k">근거</span> <code>resolve.js:81·65</code> · <code>ops.js:49-52</code> 이름만 교체 · 실행: 개명 뒤 scan-label-unmapped</span></div>
+  </section>
+
+  <!-- R4 -->
+  <section class="card find" id="r4" data-sev="sev-m" data-ax="ax-judge">
+    <div class="fh"><span class="no">R4</span><h2>별칭 값이 다른 서비스의 이름과 같으면 별칭이 조용히 무시된다</h2><span class="pill sev-m">중간</span><span class="pill ok">확정(실행)</span><span class="pill src">판정</span></div>
+    <div class="fb">
+      <div class="pane now"><div class="lab">지금</div>
+        <div class="mock"><table><thead><tr><th>종류</th><th>값</th><th>→ 서비스</th><th>실제 판정</th></tr></thead><tbody>
+          <tr><td>스캔 라벨 별칭</td><td class="mono">db</td><td><b>DB-Oracle</b></td><td><span class="b amber">무시됨</span> <span class="sub">서비스 'DB' 이름이 먼저</span></td></tr>
+          <tr><td>서비스</td><td class="mono">DB</td><td><b>DB</b></td><td>라벨 'DB' 전부 여기로</td></tr>
+        </tbody></table></div>
+        <p class="dim">서비스명 조회가 별칭보다 먼저인데, 별칭을 만들 때도 서비스를 만들 때도 충돌을 보지 않는다. 나중에 생긴 동명 서비스가 소속을 바꾼다.</p>
+      </div>
+      <div class="pane next"><div class="lab">제안</div>
+        <div class="mock"><div class="tb"><span class="btn">별칭 'db' → DB-Oracle 연결</span><span class="ar">→</span><span class="b red">409</span><span class="sub">'db' 는 서비스 'DB' 의 이름입니다 — 그 서비스로 바로 걸립니다</span></div>
+          <div class="tb" style="margin-top:6px"><span class="btn">＋ 서비스 'Files'</span><span class="ar">→</span><span class="b red">409</span><span class="sub">'Files' 는 파일서버의 별칭입니다 — 별칭을 먼저 지우십시오</span></div></div>
+        <p class="dim"><code>alias.add</code>·<code>service.add/update</code> 양쪽에서 '별칭 값 ↔ 서비스명' 충돌을 409 로 막는다.</p>
+      </div>
+    </div>
+    <div class="why"><span><span class="k">근거</span> <code>resolve.js:81-84</code> · <code>ops.js alias.add</code>·<code>service.add/update</code> 충돌 검사 없음</span></div>
+  </section>
+
+  <!-- R6 -->
+  <section class="card find" id="r6" data-sev="sev-m" data-ax="ax-ops">
+    <div class="fh"><span class="no">R6</span><h2>수집 서버(pull) 경로의 베어메탈은 스캔 엔트리를 영원히 못 찾는다</h2><span class="pill sev-m">중간</span><span class="pill ok">확정(코드)</span><span class="pill src">운영·판정</span></div>
+    <div class="fb">
+      <div class="pane now"><div class="lab">지금</div>
+        <div class="mock"><div class="tb"><b>묶을 출처 없음(수동 등록 iDRAC · 엣지 구버전)</b><span class="b gray">us-east-01</span><span class="b amber">31대</span></div><p class="sub" style="white-space:normal;margin-top:4px">실제로는 전부 수집 서버가 스캔으로 찾은 서버 — 수집기 push 가 <code>scanRangeId</code> 를 보내지 않아 중앙이 모른다.</p></div>
+        <p class="dim">엣지 push 에는 <code>scanRangeId</code> 를 넣었지만 수집 서버 push(<code>collector/remoteInventory.js SERVER_STR_KEYS</code>)에는 빠졌다. 설계 문서가 예고한 변경이 구현에서 누락됐다.</p>
+      </div>
+      <div class="pane next"><div class="lab">제안</div>
+        <div class="mock"><div class="tb"><b>스캔 엔트리 10.30.9.0/27 — 라벨 없음</b><span class="b gray">us-east-01</span><span class="b amber">31대</span><span class="inp">서비스 선택…</span><span class="btn pri">이 엔트리를 연결</span></div>
+          <div class="tb" style="margin-top:8px"><b>수집 서버가 엔트리 id 를 보내지 않음</b><span class="b gray">br-sao-01</span><span class="b amber">7대</span><span class="sub">수집기를 v2.89x 이상으로</span></div></div>
+        <p class="dim">수집기 push 와 중앙 화이트리스트에 <code>scanRangeId</code> 추가 · 원격 서버도 그 값으로 조인. 구버전 수집기는 '엔트리 id 없음(버전)' 사유로 따로 묶는다.</p>
+      </div>
+    </div>
+    <div class="why"><span><span class="k">근거</span> <code>svcInventory.js:208-209</code> · <code>collector/remoteInventory.js:198</code> 키 목록 · README §판정 2 예고분</span></div>
+  </section>
+
+  <!-- R7 -->
+  <section class="card find" id="r7" data-sev="sev-m" data-ax="ax-scope">
+    <div class="fh"><span class="no">R7</span><h2>범위 계정에 베어메탈 서비스태그가 그대로 간다 — 설계 문서 두 벌이 서로 다르다</h2><span class="pill sev-m">중간</span><span class="pill ok">확정(재현)</span><span class="pill src">범위·권한</span></div>
+    <div class="fb">
+      <div class="pane now"><div class="lab">지금</div>
+        <div class="mock"><table><thead><tr><th>계정</th><th>경로</th><th>응답</th></tr></thead><tbody>
+          <tr><td>scoped1(operator · 2법인)</td><td class="mono">/tools/svc-inventory/members</td><td class="mono">key "st:ma6an6h" · serviceTag "MA6AN6H"</td></tr>
+          <tr><td>scoped1</td><td class="mono">/insights/fleet(통합 서버 인벤토리)</td><td><span class="b red">403</span></td></tr>
+        </tbody></table></div>
+        <p class="dim">README §권한은 '서비스태그를 싣지 않는다', 모듈 CLAUDE.md 는 'CIDR·주소 이름만 가린다'. 구현은 뒤쪽이다.</p>
+      </div>
+      <div class="pane next"><div class="lab">제안(결정 필요 ⑤)</div>
+        <div class="mock"><table><thead><tr><th>안</th><th>범위 계정이 보는 것</th><th>바뀌는 것</th></tr></thead><tbody>
+          <tr><td><b>A 가린다</b> <span class="sub">(권장)</span></td><td class="mono">key "fl:9c1e…" · serviceTag "—"</td><td>비관리자 판본에서 BM 키를 해시로 · CSV·후보·파생 호스트 같은 기준</td></tr>
+          <tr><td><b>B 보인다</b></td><td class="mono">지금 그대로</td><td>README §권한 문장을 고친다</td></tr>
+        </tbody></table></div>
+        <p class="dim">통합 서버 인벤토리가 전체 범위에만 여는 식별자라 A 를 권한다. 고정 키가 바뀌므로 비관리자 고정은 서버가 해시 ↔ 실제 키를 대응시킨다.</p>
+      </div>
+    </div>
+    <div class="why"><span><span class="k">근거</span> <code>memberRow(:264)</code>·<code>candidates(:381)</code> · 재현(인증 켠 목 서버)</span></div>
+  </section>
+
+  <!-- 낮음 11건 -->
+  <section class="card find" id="rlow" data-sev="sev-l" data-ax="ax-ops" data-count="11">
+    <div class="fh"><span class="no">R9–R19</span><h2>낮음 11건 — 표시·가드·문구</h2><span class="pill sev-l">낮음</span><span class="pill ok">확정 10 · 추정 1</span><span class="pill src">여러 축</span></div>
+    <div class="mock" style="margin:12px 16px"><table><thead><tr><th>#</th><th>발견</th><th>제안</th></tr></thead><tbody>
+      <tr><td class="mono">R9</td><td>큐 응답 <code>redundant</code> 에 법인 필터 없음</td><td>법인별 필터(M3 와 함께)</td></tr>
+      <tr><td class="mono">R10</td><td>유령 '판정 보류' 에 시한이 없다 · 출처 하나만 막혀도 전 법인 BM 고정 보류</td><td>보류 시작 시각·출처 표시 · 관리자 '보류 포함 보기' · 법인별 bmBlocked</td></tr>
+      <tr><td class="mono">R11</td><td>유령 정리 버튼이 확인창 없이 즉시 삭제(<code>dry</code> API 미사용)</td><td>미리보기 → 확인창</td></tr>
+      <tr><td class="mono">R12</td><td>폴더 규칙 접두가 대소문자를 구분(머리말 '전부 소문자' 와 다름)</td><td>vSphere 폴더명은 구분하므로 머리말·규칙 표 안내를 고친다</td></tr>
+      <tr><td class="mono">R13</td><td>먼저 넣은 '포함' 규칙이 뒤의 '접두' 를 가린다</td><td>M4 정렬에 종류 우선순위(접두·접미 > 포함)</td></tr>
+      <tr><td class="mono">R14</td><td>태그 여럿이면 첫 태그만</td><td>M5 + '서비스에 걸리는 태그 우선'</td></tr>
+      <tr><td class="mono">R15 <span class="pill est" style="height:16px">추정</span></td><td>키 등급 전환(vm:→iu: · fl:→st:)이 옛 고정을 '정리 대상 유령' 으로 만든다(엣지 업그레이드 직후)</td><td>등급 간 키 승계 또는 보류 사유 'key-upgraded'</td></tr>
+      <tr><td class="mono">R16</td><td>서비스 노드 선택 시 KPI 가 서비스 기준과 법인 기준을 섞는다</td><td>KPI 부제에 '법인 기준' 표기</td></tr>
+      <tr><td class="mono">R17</td><td>'검토 필요' 에 mismatch 포함인데 부제엔 없음 · 503 화면 초기화 버튼이 <code>canReset</code> 무관</td><td>부제 보강 · 버튼 조건</td></tr>
+      <tr><td class="mono">R18</td><td>엣지 scanRangeId 가 중앙 등록부에 없을 때 '엣지 구버전' 으로 뭉뚱그림 · nocorp 사유 미표시</td><td>사유 분리</td></tr>
+      <tr><td class="mono">R19</td><td>CSV 백업 열이 영문 코드 · 드리프트·키 등급 열 없음</td><td>M11 과 함께 화면 문구표 재사용</td></tr>
+    </tbody></table></div>
+    <div class="why"><span><span class="k">근거</span> 반증 보고서 표(docs/design/service-map/README.md §5차 검토 · 반증 R9–R19)</span></div>
+  </section>
 
   <section class="card dec" id="decisions">
     <h2>결정 필요(사용자)</h2>
@@ -352,8 +503,11 @@ code{font-family:var(--mono);font-size:12px;background:var(--panel-2);padding:1p
       <li><b>② M2 '입력 다시 읽기' 를 누구에게 줄지</b> — 쓰기 계정 전부(권장: 라벨을 바꾸는 사람이 곧 확인하는 사람) vs 전체 범위 관리자만.</li>
       <li><b>③ M4 이름 규칙 정렬을 바꿀지</b> — '긴 값 우선' 으로 바꾸면 이미 둔 규칙의 결과가 바뀔 수 있다(릴리스 노트 고지). 바꾸지 않으면 '적용 순서' 열만 보여 준다.</li>
       <li><b>④ M3 불필요한 고정을 자동으로 정리할지</b> — 권장은 '한 번에 지우기' 버튼(사람이 누른다). 자동 정리는 고정의 뜻(사람이 정했다)을 조용히 없애므로 권하지 않는다.</li>
+      <li><b>⑤ R7 범위 계정에 베어메탈 서비스태그를 가릴지</b> — 권장 A(가린다 · 키는 해시): 통합 서버 인벤토리와 같은 기준. B 면 README §권한 문장만 고친다.</li>
+      <li><b>⑥ R3 서비스 개명 때 옛 이름을 별칭으로 남길지</b> — 권장: 확인창에 영향 대수를 보이고 기본값 '별칭 남김'. 자동으로만 남기면 별칭이 조용히 쌓인다.</li>
+      <li><b>⑦ R2 등록 해제된 법인 항목을 누가 지울지</b> — 권장: 전체 범위 관리자 전용 '법인 항목 정리'(손상 초기화와 같은 등급 · 확인창 · 감사 로그).</li>
     </ol>
-    <p class="dim">구현 규모(추정): M1·M2·M3·M6·M11 서버 + 화면 소폭, M7·M8·M9 화면만, M4·M5 판정 코어 한 줄 + 표시. 전부 한 릴리스(v2.89x)에 들어갈 크기이고, 변이 검증은 M4(판정 변경)에만 건다.</p>
+    <p class="dim">구현 순서(제안): <b>1차</b> R1 · R2 · R8 · R3 · R4 · M1 · M6 + M3·R9 — 서버 변경이 작고 사고를 막는다(한 릴리스). <b>2차</b> M2 · R6 · M10/R5 — 입력 재수집 · 수집기 push · memo. <b>3차</b> 화면(M7 · M8 · M9 · R16 · R17 · R11) · 판정 정렬(M4 · R13 · R14 — 변이 검증). 전체 변이 검증은 판정·권한을 바꾸는 R8 · R7 · M4 에만 건다.</p>
   </section>
 </div>
 
@@ -361,12 +515,16 @@ code{font-family:var(--mono);font-size:12px;background:var(--panel-2);padding:1p
 (function(){
   // 요약 띠 — 카드의 data-sev 를 세어 채운다(수정 뒤 숫자가 어긋나지 않게).
   var finds=[].slice.call(document.querySelectorAll('.find'));
-  var cnt=function(sel){return finds.filter(function(f){return f.dataset.sev===sel;}).length;};
-  var est=finds.filter(function(f){return f.querySelector('.pill.est');}).length;
+  var n=function(f){return Number(f.dataset.count||1);};
+  var sum=function(list){return list.reduce(function(a,f){return a+n(f);},0);};
+  var cnt=function(sel){return sum(finds.filter(function(f){return f.dataset.sev===sel;}));};
+  var est=sum(finds.filter(function(f){return f.querySelector('.pill.est')&&!f.dataset.count;}))+1;   // +1 = R15(낮음 표 안의 추정)
   var strip=document.getElementById('strip');
-  var tiles=[['발견',finds.length,'메인 '+finds.filter(function(f){return f.id[0]==='m';}).length+' · 반증 '+finds.filter(function(f){return f.id[0]==='r';}).length,'var(--accent)'],
-    ['높음',cnt('sev-h'),'설계·판정을 바꾼다','var(--red)'],['중간',cnt('sev-m'),'한 릴리스에 고친다','var(--amber)'],['낮음',cnt('sev-l'),'표시·가드','var(--dim)'],
-    ['추정',est,'재현 못 함 — 표시해 둠','var(--purple)'],['결정 필요',document.querySelectorAll('#decisions li').length,'아래 ①~④','var(--teal)']];
+  // 겹침: R9·R13·R14·R19 는 M3·M4·M5·M11 카드와 같은 발견이라 낮음 표에만 두 번 세어진다(R5 는 M10 카드에 합쳤다).
+  var dup=4;
+  var tiles=[['발견(고유)',sum(finds)-dup,'메인 11 · 반증 19 · 겹침 5','var(--accent)'],
+    ['높음',cnt('sev-h'),'설계·판정을 바꾼다','var(--red)'],['중간',cnt('sev-m'),'한 릴리스에 고친다','var(--amber)'],['낮음',cnt('sev-l')-dup,'표시·가드','var(--dim)'],
+    ['추정',est,'재현 못 함 — 표시해 둠','var(--purple)'],['결정 필요',document.querySelectorAll('#decisions li').length,'아래 ①~⑦','var(--teal)']];
   strip.innerHTML=tiles.map(function(t){return '<div class="card kpi" style="border-left-color:'+t[3]+'"><span class="l">'+t[0]+'</span><span class="v" style="color:'+t[3]+'">'+t[1]+'</span><span class="s">'+t[2]+'</span></div>';}).join('');
 
   // 보기 칩 — 심각도·축으로 거른다.
