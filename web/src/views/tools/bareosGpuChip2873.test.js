@@ -37,7 +37,7 @@ describe('gpuChip', () => {
     expect(src).toMatch(/const g = gpuChip\(j\); return g \? <span className="badge amber" data-bareos-gpu=""/);   // 대상 표 VM 칸 칩
     expect(src).toMatch(/const g = gpuChip\(x\); return g \? <span className="badge amber" data-bareos-gpu=""/);   // 등록 후보 칩
     expect(src).toMatch(/data-bareos-gpu-note=""><BoldText text=\{gpuChip\(j\)\.note\}/);                          // 상세 패널 안내 한 줄
-    // 패널 머리 줄에는 칩을 두지 않는다 — 1440 에서 머리 줄은 이미 닫기를 둘째 줄로 내린다(변경 전부터 · A/B) — 더 늘리지 않는다
+    // 패널 머리 줄에는 칩을 두지 않는다 — 이유와 대안은 안내 한 줄이 말한다(머리 줄의 닫기 줄바꿈은 v2.882.1 bareosPanelHead2882 가 고정)
     const head = src.slice(src.indexOf('<b style={{ fontSize: 16, overflowWrap'), src.indexOf('aria-label="닫기" onClick={() => setSel'));
     expect(head).not.toContain('gpuChip');
   });
