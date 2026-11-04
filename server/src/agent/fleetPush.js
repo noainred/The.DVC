@@ -21,7 +21,7 @@ import { readCentralReply, dropSummaryOf, warnDrop } from './centralReply.js'; /
 import { getFleetInventory } from '../insights/fleetInventory.js';
 import { UNREAD_STATUSES } from './inventoryPush.js'; // v2.604 EDGE2604-01: '읽지 못한 vCenter' 판정은 인벤토리 push 와 한 기준
 import { agentNameHeader } from '../util/agentNameHeader.js'; // v2.620(RECENT2620-02)
-import { registryLoadError, loadRegistry } from '../idrac/registry.js'; // v2.744(감사 EDGE-01) · v2.864 scanRangeId
+import { registryLoadError, loadRegistry } from '../idrac/registry.js'; // v2.744(감사 EDGE-01) · v2.885 scanRangeId
 import { centralStatusOnlySupport, sendStatusOnly, FLEET_STATUS_ONLY_MIN_CENTRAL } from './centralStatusOnly.js'; // v2.744(감사 EDGE-01)
 import { createChangeLogger } from '../util/logThrottle.js';
 import { summarizeRegistryError } from '../util/registryCore.js'; // v2.744(회귀 검토 GD-R1)
@@ -209,7 +209,7 @@ export async function pushFleetNow() {
     const inv = await getFleetInventory(snap);
     // 메타만 — 자격증명/전력 제외. 엣지 베어메탈의 전력은 원격 수집(collector pull) 경로로만
     // 중앙에 반영하므로 watts는 보내지 않는다(이중계상 방지). 중앙은 서비스태그로 dedup해 병합한다.
-    // v2.864(서비스 인벤토리 — 4차 검토 반증 3): 그 서버를 등록한 **중앙 스캔 엔트리 id**(등록부 scanRangeId) 를 함께 싣는다.
+    // v2.885(서비스 인벤토리 — 4차 검토 반증 3): 그 서버를 등록한 **중앙 스캔 엔트리 id**(등록부 scanRangeId) 를 함께 싣는다.
     //   라벨(서비스명)은 중앙에만 있으므로 조인은 중앙이 한다(엣지가 라벨을 지어내지 않는다). 등록부를 못 읽으면 빈 값.
     const scanIdOf = (() => {
       try { const m = new Map(loadRegistry().map((r) => [String(r.id), String(r.scanRangeId || '')])); return (b) => m.get(String(b.serverId || '')) || ''; }

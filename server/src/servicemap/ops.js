@@ -1,5 +1,5 @@
 /**
- * servicemap/ops.js — 저장소 변경 연산(순수: draft 를 고치고 { error } 또는 { result } 를 돌려준다, v2.864).
+ * servicemap/ops.js — 저장소 변경 연산(순수: draft 를 고치고 { error } 또는 { result } 를 돌려준다, v2.885).
  * 라우트가 권한(법인 쓰기 범위·전체 범위)을 먼저 확인하고 store.mutateMap(draft => op(draft, body)) 로 부른다.
  * 서비스를 자동으로 만드는 경로는 없다 — 'service.add' 와 'service.createLinked'(사람이 누른 '서비스로 만들기')뿐이다.
  */

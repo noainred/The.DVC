@@ -1,5 +1,5 @@
 /**
- * servicemap/store.js — 서비스 인벤토리 저장소(v2.864, docs/design/service-map/README.md 시안 A 3차 + 4차 검토).
+ * servicemap/store.js — 서비스 인벤토리 저장소(v2.885, docs/design/service-map/README.md 시안 A 3차 + 4차 검토).
  *
  * 파일 둘(비밀 없음):
  *   CONFIG_DIR/service-map.json       — 트리·규칙·전역 카탈로그·설정. 사람이 가끔 바꾼다.

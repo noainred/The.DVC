@@ -1,5 +1,5 @@
 /**
- * svcInventoryText.js — '서비스 인벤토리'(v2.864) 화면 문구·표시 판정(순수). **소속 판정은 서버(servicemap/resolve.js) 하나** —
+ * svcInventoryText.js — '서비스 인벤토리'(v2.885) 화면 문구·표시 판정(순수). **소속 판정은 서버(servicemap/resolve.js) 하나** —
  *   여기에는 판정을 복제하지 않고, 서버가 준 코드(src·reason)를 문장으로 바꾸고 트리·행렬 모양만 만든다.
  * ⚠ 문구에 백틱 금지(BoldText 는 **강조** 만 해석한다). 값 인용은 ‘ ’.
  */

@@ -59,7 +59,7 @@ function addMetric(m, pct, cap) {
   m.used += (pct / 100) * cap; m.total += cap; m.n += 1;
   return true;
 }
-// v2.864: 서비스 인벤토리(servicemap/build.js)가 같은 합산 규칙을 쓴다 — 복제하지 않고 이 함수를 부른다(4차 검토 반증 15).
+// v2.885: 서비스 인벤토리(servicemap/build.js)가 같은 합산 규칙을 쓴다 — 복제하지 않고 이 함수를 부른다(4차 검토 반증 15).
 export function addAgg(a, x) {
   a.servers += 1;
   if (x.cores != null) a.capCores += x.cores;

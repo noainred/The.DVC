@@ -1,5 +1,5 @@
 /**
- * servicemap/build.js — 서비스 인벤토리 집계(순수, v2.864). 입력은 라우트(inputs.js)가 모은 구성원·파생 호스트와 저장소.
+ * servicemap/build.js — 서비스 인벤토리 집계(순수, v2.885). 입력은 라우트(inputs.js)가 모은 구성원·파생 호스트와 저장소.
  *
  * ⚠ CPU·메모리 합산은 `corpusage/build.js` 의 emptyAgg/addAgg/finishAgg 를 **그대로 부른다**(4차 반증 15 — 복제 금지).
  *   못 읽음(unread)·오래됨(stale)·용량 모름(noCap)은 합계에 넣지 않고 따로 센다. 분모 0 이면 null('—').
