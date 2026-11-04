@@ -111,9 +111,22 @@ describe('기능', () => {
   });
 });
 
-describe('선형 시간 — 병적인 입력이 2배가 되면 시간도 대략 2배(제곱이면 4배)', () => {
-  // 3회 중 최솟값 — GC · JIT 한 번의 튐이 비율을 흔들지 않게
-  const time = (fn) => { let best = Infinity; for (let k = 0; k < 3; k += 1) { const t0 = performance.now(); fn(); best = Math.min(best, performance.now() - t0); } return best; };
+// 측정 안정화(사용자 요청 '위키 테스트도 고쳐줘' — main push CI 가 '[[ 반복' 한 건으로 두 번 실패: 20.3 → 87.4ms · 20.1 → 75.4ms, 기준 3.2배).
+//   파서는 선형이다(짝 찾기는 findPair 200자 · findWithin LINK_WINDOW 로 묶임 — 로컬 실측 16k → 128k 에 8.2배). 예전 판은 2배 크기 · 기준 3.2배라
+//   선형(2배)과 기준 사이 여유가 1.6배뿐이었고, 바쁜 CI 실행기에서 큰 쪽 한 번이 튀면 넘었다. 지금: 8배 크기(선형 약 8배 · 제곱 약 64배) · 기준 24배
+//   (선형 대비 3배 여유 · 제곱 대비 2.7배 아래) · 작은 쪽과 큰 쪽을 번갈아 5회씩 재 각각 최솟값(같은 시점의 부하를 함께 받게). 비율 판정은 그대로(ReDoS 회귀는 비율로).
+const PAIR_REPS = 5;
+/** 작은 입력과 큰 입력을 번갈아 재 각각의 최솟값 — 한쪽만 GC · 다른 프로세스 부하를 맞는 치우침을 줄인다. */
+function pairMinTimes(fa, fb, reps = PAIR_REPS) {
+  let a = Infinity; let b = Infinity;
+  for (let k = 0; k < reps; k += 1) {
+    let t0 = performance.now(); fa(); a = Math.min(a, performance.now() - t0);
+    t0 = performance.now(); fb(); b = Math.min(b, performance.now() - t0);
+  }
+  return [a, b];
+}
+
+describe('선형 시간 — 병적인 입력이 8배가 되면 시간도 대략 8배(제곱이면 64배)', () => {
   const cases = {
     '닫히지 않은 [': (n) => '['.repeat(n),
     '[[ 반복': (n) => '[['.repeat(n / 2),
@@ -129,11 +142,11 @@ describe('선형 시간 — 병적인 입력이 2배가 되면 시간도 대략 
   };
   for (const [name, gen] of Object.entries(cases)) {
     it(name, () => {
-      const small = gen(16_000); const big = gen(32_000);
-      parseMarkdown(small); // 데우기
-      const a = Math.max(1, time(() => parseMarkdown(small)));
-      const b = time(() => parseMarkdown(big));
-      expect(b, `${name}: ${a.toFixed(1)}ms → ${b.toFixed(1)}ms`).toBeLessThan(Math.max(a * 3.2, 60));
+      const small = gen(8_000); const big = gen(64_000);
+      parseMarkdown(small); parseMarkdown(big); // 데우기(JIT · 큰 문자열 힙)
+      const [ta, b] = pairMinTimes(() => parseMarkdown(small), () => parseMarkdown(big));
+      const a = Math.max(1, ta);
+      expect(b, `${name}: ${ta.toFixed(1)}ms → ${b.toFixed(1)}ms(8배 입력)`).toBeLessThan(Math.max(a * 24, 60));
     });
   }
 });
