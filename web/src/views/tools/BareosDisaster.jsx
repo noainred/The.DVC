@@ -8,7 +8,7 @@
  *   Director 를 거치는 조회는 자동 재시도 없음 · 엣지 대행 법인은 서버 대기 시간만큼(withRelayWait). 무거운 조회는 버튼으로만(폴링 없음).
  */
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { fetchJson, postJson } from '../../api.js';
+import { fetchJson, postJson, usePolling } from '../../api.js';
 import { Loading, ErrorBox } from '../../components/ui.jsx';
 import { STable } from '../../components/STable.jsx';
 import Select from '../../components/Select.jsx';
@@ -104,10 +104,13 @@ export default function BareosDisaster({ d, reload, onBatch = null }) {
     const was = prevRunState.current;
     prevRunState.current = runState;
     if (was && was !== runState && was.endsWith(':running')) reload();
-    if (!run || run.state !== 'running') return undefined;
-    const t = setInterval(loadRuns, RUN_POLL_MS);
-    return () => clearInterval(t);
   }, [runState]);   // eslint-disable-line react-hooks/exhaustive-deps
+  // 폴링은 공용 usePolling(백그라운드 탭 멈춤 · in-flight 가드) — 진행 중일 때만 경로를 준다(멈춤 · 끝이면 null = 폴링 없음)
+  const { data: polledRuns } = usePolling(run?.state === 'running' ? `${BASE}/dr/runs` : null, { vcenterId: vc }, RUN_POLL_MS);
+  useEffect(() => {
+    const list = polledRuns?.runs;
+    if (Array.isArray(list) && list.every((r) => String(r.vcenterId) === String(vcRef.current))) { genRuns.current++; setRuns(list); setRunsErr(null); }
+  }, [polledRuns]);
 
   const beforeMs = drBeforeMs(beforeText);
   const rows = useMemo(() => drRows(jobs, vc, pts, beforeMs, (j) => pickBlock(j) || (inRun.has(j.id) ? '진행 중인 복구 순서에 있음' : '')), [jobs, vc, pts, beforeMs, inRunKey]);   // eslint-disable-line react-hooks/exhaustive-deps

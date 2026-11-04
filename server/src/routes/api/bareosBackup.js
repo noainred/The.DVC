@@ -24,7 +24,7 @@ import { parseBanner } from '../../bareos/director.js';
 import { diagnoseConsole, DIAG_STAGES } from '../../bareos/console.js';
 import { secretProvided } from '../../util/secretCarry.js';
 import {
-  onDirector, relayToEdge, isDemoActive, effectiveSettings, eligibility, createBackupTarget, createBackupTargets, bareosAuthGuard, clearAuthStopIfSame,
+  onDirector, relayToEdge, isDemoActive, effectiveSettings, eligibility, createBackupTarget, createBackupTargets, bareosAuthGuard, clearAuthStopIfSame, isEdgeNode,
 } from '../../bareos/service.js';
 import { pendingView, relayLimits, RESTORES_DEADLINE_MS, LOGS_DEADLINE_MS } from '../../bareos/edgeOps.js';
 import { LOGS_MAX } from '../../bareos/ops.js';
@@ -38,7 +38,7 @@ import { knownAgentNames } from '../../central/knownAgents.js';
 import { pollerStatus, pollOnce, requestReconcile } from '../../bareos/poller.js';
 import { restorePlan, placementDrift, placementAt, bulkRestorePlan, BULK_RESTORE_MAX, reservedRestoreNames } from '../../bareos/restore.js';
 import { drItemIssue, drCheckView, drGateBlock, drTrialIssue } from '../../bareos/drPlan.js';
-import { normWaves, itemBody as drRunItemBody, createRun, getRun as getDrRun, stopRun, resumeRun, drRunsView, drRunsLoadError, drTick } from '../../bareos/drRunner.js';   // 재해 복구 2차   // 재해 복구 1차(순수)
+import { normWaves, itemBody as drRunItemBody, createRun, getRun as getDrRun, stopRun, resumeRun, drRunsView, drRunsLoadError, drTick, drRunHeldIds } from '../../bareos/drRunner.js';   // 재해 복구 2차   // 재해 복구 1차(순수)
 import { finishRestores } from '../../bareos/restoreFinish.js';
 import { savePolicy, policyLoadError, rehearsalStatus, runNow as runRehearsalNow, normPolicy, rehearsalBusy } from '../../bareos/rehearsal.js';
 import { loadDigest, saveDigest, digestLoadError, digestStatus, sendDigestNow, normDigest } from '../../bareos/digest.js';
@@ -150,6 +150,7 @@ const viewJob = (j, vmById, settings) => {
  */
 /** v2.866 복원 명령의 기본 키 값(사이트 매핑 — vCenter 주소 · FD INI 경로). 매핑이 없으면 빈 값(restoreBaseKv 가 거부한다). */
 /** v2.874(점검 B5-01) 결과 모름 복원이 있는 대상의 재요청 거부 사유(묶음 · 단건 같은 말). */
+const DR_RUN_HELD_REASON = '진행 중인 복구 순서(재해 복구)에 든 VM 입니다 — 그 회차가 보내거나 멈춘 뒤 다시 시도하세요(같은 VM 을 두 번 복원하지 않게).';
 const UNKNOWN_HELD_REASON = '이 VM 의 직전 복원은 결과를 모릅니다(명령을 보낸 뒤 회신이 끊김) — Director 에서 그 복원이 돌았는지 확인하세요. 같은 복원이 두 번 돌지 않게 6시간 동안 다시 보내지 않습니다.';
 
 export const restoreBaseOf = (settings) => (job) => {
@@ -1093,6 +1094,7 @@ async function restoreRoute(req, res, job) {
   if (config.auth.enabled && !getUser(name)?.totpEnabled) return res.status(403).json({ ok: false, reason: '복원은 OTP 가 등록된 계정만 실행할 수 있습니다. 사용자 관리에서 OTP 를 등록하세요.', needEnroll: true });
   if ((job.restores || []).some(restoreOpen)) return res.status(409).json({ ok: false, reason: '이 대상의 다른 복원이 진행 중입니다.' });
   if ((job.restores || []).some((r) => restoreUnknownHeld(r))) return res.status(409).json({ ok: false, code: 'unknown-held', reason: UNKNOWN_HELD_REASON });   // v2.874 B5-01
+  if (drRunHeldIds().has(job.id)) return res.status(409).json({ ok: false, code: 'dr-run-held', reason: DR_RUN_HELD_REASON });   // 재해 복구 2차 반증 F11
   const jobid = Number(b.jobid);
   if (!Number.isInteger(jobid) || jobid <= 0) return res.status(400).json({ ok: false, reason: '복원할 백업(jobid)을 고르세요.' });
   const settings = effectiveSettings();
@@ -1229,7 +1231,10 @@ api.post('/tools/bareos-backup/logs/bulk', adminOnly, async (req, res) => {
  * 묶음 복원 판정 · 접근 · 진행 중 — 미리 보기(check)와 실행이 같은 함수를 쓴다(판정을 두 벌 두지 않는다).
  * @returns {{ status?:number, reason?:string, plan?:object, jobs?:Map }}
  */
-function bulkRestoreGate(req, items, { dr = false } = {}) {
+function bulkRestoreGate(req, items, { dr = false, ctx = null } = {}) {
+  // ctx: 여러 묶음을 한 번에 판정하는 호출(복구 순서 drRunGate)이 원장 사본 · 이름 예약 · 회차 붙잡기를 **한 번만** 만들어 넘긴다
+  //   (반증 F6 — 1,000대 계획 확인이 50대마다 원장 깊은 복사를 두 번씩 해 요청 경로를 약 4초 막았다)
+  const drHeld = ctx?.drHeld || drRunHeldIds();
   const raw = Array.isArray(items) ? items : [];
   // 상한을 먼저 — 항목마다 원장 조회(깊은 복사)를 돌기 전에(반증 검토 L2: 큰 본문 하나가 요청 경로를 1초 넘게 막았다). 판정은 bulkRestorePlan 이 같은 상한으로 한다.
   const list = raw.length > BULK_RESTORE_MAX ? raw.slice(0, BULK_RESTORE_MAX + 1) : raw;
@@ -1246,19 +1251,21 @@ function bulkRestoreGate(req, items, { dr = false } = {}) {
     const mm = modeMismatch(job);
     if (mm) { denied.set(id, mm); jobs.set(id, job); continue; }
     if ((job.restores || []).some((r) => restoreUnknownHeld(r))) { denied.set(id, UNKNOWN_HELD_REASON); jobs.set(id, job); continue; }   // v2.874 B5-01 — 두 번 돌지 않게
+    if (drHeld.has(id)) { denied.set(id, DR_RUN_HELD_REASON); jobs.set(id, job); continue; }   // 재해 복구 2차 반증 F11 — 회차가 보낼 VM 을 다른 길로 따로 보내지 않게
     if ((job.restores || []).some(restoreOpen)) { denied.set(id, '이 VM 의 다른 복원이 진행 중입니다 — 끝난 뒤 다시 시도하세요.'); jobs.set(id, job); continue; }
     jobs.set(id, job);
   }
   const settings = effectiveSettings();
   // 최근 · 진행 중 새 VM 복원이 쓰는 이름(아직 인벤토리에 없다 — 반증 검토: 같은 이름 VM 이 둘이 되면 NIC 끊기도 손대지 못한다)
   //   판정은 restore.js reservedRestoreNames 하나(재해 복구 단계 실행기와 같다 — 반증 R4: 실패 · 취소는 그 뒤 인벤토리 수집이 있으면 푼다)
-  const reservedNames = reservedRestoreNames(listJobs(), { snapAt: Number(store.get()?.generatedAt) || 0, isOpen: restoreOpen });
+  const allJobs = ctx?.allJobs || listJobs();
+  const reservedNames = ctx?.reservedNames || reservedRestoreNames(allJobs, { snapAt: Number(store.get()?.generatedAt) || 0, isOpen: restoreOpen });
   const plan = bulkRestorePlan({ items: list, jobOf: (id) => jobs.get(id) || null, dirOf: jobDir, snapshot: store.get(), pluginName: settings.defaults.pluginName, reservedNames, baseOf: restoreBaseOf(settings) });
   for (const r of plan.items) if (denied.has(r.id)) { r.ok = false; r.issue = denied.get(r.id); }   // 접근 · 진행 중 사유가 판정 사유보다 앞선다(더 근본적)
   if (dr) {
     for (const r of plan.items) { const why = r.ok ? drItemIssue(r) : ''; if (why) { r.ok = false; r.issue = why; } }   // DR 1차 — 화면이 아니라 서버가 지킨다
     // 반증 R6: 점검의 ✕(Director · 새 vCenter · 매핑)는 화면만이 아니라 서버도 막는다 · R1: 시험 1대가 성공한 뒤에만 여러 대
-    const block = drGateBlock({ items: plan.items, jobs: listJobs(), settings, snapshot: store.get(), pollDirs: pollerStatus().directors || {}, regHosts: registryHosts(), lastOkOf, directorOf: (id) => directorById(id, settings) });
+    const block = drGateBlock({ items: plan.items, jobs: allJobs, settings, snapshot: store.get(), pollDirs: pollerStatus().directors || {}, regHosts: registryHosts(), lastOkOf, directorOf: (id) => directorById(id, settings) });
     if (block) { plan.ok = false; plan.issue = block; plan.drBlock = true; }
   }
   const bad = plan.items.filter((r) => !r.ok).length;
@@ -1401,6 +1408,7 @@ api.get('/tools/bareos-backup/dr/check', adminOnly, (req, res) => {
  *   클러스터 · 점검 ✕ · 시험 1대 · 진행 중 · 결과 모름 · 이름 예약). 계획 확인과 시작이 같은 함수를 쓴다(OTP 를 쓰기 전에 끝난다).
  * @returns {{ status:number, reason?:string, waves?:object[], issues?:object[], vcenterId?:string, directorId?:string }}
  */
+const DR_ACTIVE_REASON = '이 법인에 진행 중인 복구 순서가 있습니다 — 끝나거나 멈춘 뒤 새로 시작하세요.';
 function drRunGate(req) {
   let waves;
   try { waves = normWaves(req.body?.waves); } catch (e) { return { status: 400, reason: String(e?.message || e) }; }
@@ -1409,18 +1417,22 @@ function drRunGate(req) {
   const acc = bareosAccess(req.user, vcenterId, { write: true });
   if (acc === 404) return { status: 404, reason: '그 vCenter 를 찾을 수 없습니다.' };
   if (acc === 403) return { status: 403, reason: READ_ONLY };
+  // 진행 중 회차가 있으면 판정 전에(그 회차의 VM 은 아래 붙잡기 판정에서 모두 막혀 사유 목록이 그것으로 찬다) — 시작은 OTP 앞에서 409
+  if (drRunsView().runs.some((r) => r.vcenterId === vcenterId && (r.state === 'running' || r.state === 'paused'))) return { status: 409, reason: DR_ACTIVE_REASON };
   // 시험 1대 규칙은 회차 **전체** 대수로 — 50대씩 나눈 묶음마다 보면 단계마다 1대인 회차가 규칙을 비켜 간다
   const total = waves.reduce((n, w) => n + w.items.length, 0);
-  const trial = drTrialIssue(listJobs(), vcenterId, total);
+  const trial = drTrialIssue(listJobs(), vcenterId, total);   // (시험 규칙이 먼저 막으면 아래 사본을 만들지 않는다)
   if (trial) return { status: 400, reason: trial };
   const issues = [];
   let dirId = '';
+  const allJobs = listJobs();
+  const ctx = { allJobs, reservedNames: reservedRestoreNames(allJobs, { snapAt: Number(store.get()?.generatedAt) || 0, isOpen: restoreOpen }), drHeld: drRunHeldIds() };
   for (let wi = 0; wi < waves.length; wi++) {
     const w = waves[wi];
     for (let i = 0; i < w.items.length; i += BULK_RESTORE_MAX) {
       const chunk = w.items.slice(i, i + BULK_RESTORE_MAX).map(drRunItemBody);
       for (const it of chunk) { const j = getJob(it.id); if (!j || String(j.vcenterId) !== vcenterId) return { status: 404, reason: '백업 대상을 찾을 수 없습니다.' }; }
-      const g = bulkRestoreGate(req, chunk, { dr: true });
+      const g = bulkRestoreGate(req, chunk, { dr: true, ctx });
       if (g.status === 404) return { status: 404, reason: '백업 대상을 찾을 수 없습니다.' };
       if (g.status === 403) return { status: 403, reason: READ_ONLY };
       if (g.plan.drBlock) return { status: 400, reason: g.plan.issue };
@@ -1438,14 +1450,15 @@ api.post('/tools/bareos-backup/dr/runs/check', adminOnly, (req, res) => {
     needEnroll: !!(config.auth.enabled && !getUser(req.user?.username || '')?.totpEnabled) });
 });
 
+const DR_EDGE_REASON = '이 포탈은 법인 엣지 노드입니다 — 복구 순서 실행기는 중앙 포탈에서만 돕니다. 중앙 포탈에서 시작 · 계속하세요.';
 api.post('/tools/bareos-backup/dr/runs', adminOnly, (req, res) => {
+  if (isEdgeNode()) return res.status(409).json({ ok: false, code: 'edge-node', reason: DR_EDGE_REASON });   // 반증 F10 — 엣지는 실행기 타이머가 없어 첫 묶음만 보내고 멈춰 있었다
   const name = req.user?.username || '';
   if (config.auth.enabled && !getUser(name)?.totpEnabled) return res.status(403).json({ ok: false, needEnroll: true, reason: '재해 복구는 OTP 가 등록된 계정만 실행할 수 있습니다.' });
   if (drRunsLoadError()) return res.status(503).json({ ok: false, code: 'state-unreadable', reason: drRunsLoadError() });
   const g = drRunGate(req);
   if (g.status !== 200) return res.status(g.status).json({ ok: false, reason: g.reason, issues: g.issues || [] });
-  // 진행 중 회차는 OTP 앞에서(1회용 코드를 태우지 않게) — createRun 이 다시 본다
-  if (drRunsView().runs.some((r) => r.vcenterId === g.vcenterId && (r.state === 'running' || r.state === 'paused'))) return res.status(409).json({ ok: false, reason: '이 법인에 진행 중인 복구 순서가 있습니다 — 멈춘 뒤 새로 시작하세요.' });
+  // 진행 중 회차는 drRunGate 가 OTP 앞에서 409(1회용 코드를 태우지 않게) — createRun 이 다시 본다
   if (config.auth.enabled) { const v = verifyUserOtp(name, req.body?.otp); if (!v.ok) return res.status(403).json({ ok: false, reason: `OTP 인증 실패 — ${v.reason}` }); }
   let run;
   try { run = createRun({ vcenterId: g.vcenterId, directorId: g.directorId, by: name, before: String(req.body?.drBefore || ''), waves: g.waves }); } catch (e) { return res.status(e?.code === 'conflict' ? 409 : e?.code === 'unavailable' ? 503 : 400).json({ ok: false, reason: String(e?.message || e) }); }
@@ -1480,6 +1493,7 @@ api.post('/tools/bareos-backup/dr/runs/:id/stop', adminOnly, (req, res) => {
   res.json({ ok: true });
 });
 api.post('/tools/bareos-backup/dr/runs/:id/resume', adminOnly, (req, res) => {
+  if (isEdgeNode()) return res.status(409).json({ ok: false, code: 'edge-node', reason: DR_EDGE_REASON });
   const name = req.user?.username || '';
   if (config.auth.enabled && !getUser(name)?.totpEnabled) return res.status(403).json({ ok: false, needEnroll: true, reason: '재해 복구는 OTP 가 등록된 계정만 실행할 수 있습니다.' });
   const run = drRunAccess(req, res);

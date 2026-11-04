@@ -88,6 +88,8 @@ before(async () => {
       { id: 'vc-a:vm-1', vcenterId: 'vc-a', name: 'web-01', powerState: 'POWERED_ON', snapshotCount: 0, vcDcPath: 'DC-A', folderPath: '/web', storageGB: 200, dev: { disks: [{ datastore: 'ds-a1' }] } },   // 홈 DS(검증 여유 판정 — v2.862)
       { id: 'vc-a:vm-5', vcenterId: 'vc-a', name: 'app-05', powerState: 'POWERED_OFF', snapshotCount: 0, vcDcPath: 'DC-A', folderPath: '/app', storageGB: 150 },
       { id: 'vc-a:vm-6', vcenterId: 'vc-a', name: 'db-06', powerState: 'POWERED_OFF', snapshotCount: 0, vcDcPath: 'DC-A', folderPath: '/db', storageGB: 50 },
+      { id: 'vc-a:vm-7', vcenterId: 'vc-a', name: 'fs-07', powerState: 'POWERED_OFF', snapshotCount: 0, vcDcPath: 'DC-A', folderPath: '/fs', storageGB: 40 },
+      { id: 'vc-a:vm-8', vcenterId: 'vc-a', name: 'mq-08', powerState: 'POWERED_OFF', snapshotCount: 0, vcDcPath: 'DC-A', folderPath: '/mq', storageGB: 40 },
       { id: 'vc-b:vm-9', vcenterId: 'vc-b', name: 'db-09', powerState: 'POWERED_ON', snapshotCount: 0, vcDcPath: 'DC-B', folderPath: '/', storageGB: 50 },
     ],
     alarms: [], networks: [],
@@ -119,7 +121,7 @@ test('준비: Director · 매핑 · 대상 3대(vc-a 2 · vc-b 1)', async () => 
     { vcenterId: 'vc-b', directorId: DIR, vcserver: 'vc-b.corp', client: 'kr-fd', storage: 'kr-sd', pool: 'VMwareKR', configFile: '/etc/bareos/vmware/vc-b.ini' },
   ] });
   assert.equal(r.s, 200, r.t);
-  for (const [k, vc, vm] of [['web', 'vc-a', 'vc-a:vm-1'], ['app', 'vc-a', 'vc-a:vm-5'], ['db', 'vc-b', 'vc-b:vm-9'], ['db6', 'vc-a', 'vc-a:vm-6']]) {
+  for (const [k, vc, vm] of [['web', 'vc-a', 'vc-a:vm-1'], ['app', 'vc-a', 'vc-a:vm-5'], ['db', 'vc-b', 'vc-b:vm-9'], ['db6', 'vc-a', 'vc-a:vm-6'], ['fs7', 'vc-a', 'vc-a:vm-7'], ['mq8', 'vc-a', 'vc-a:vm-8']]) {
     r = await call('admin', 'POST', '/jobs', { vcenterId: vc, vmId: vm });
     assert.equal(r.s, 201, r.t);
     ID[k] = r.j.job.id;
@@ -170,7 +172,7 @@ test('① 설정 백업 복원은 실행 상태를 되살리지 않는다(진행
 const W = (k, name, extra = {}) => ({ id: ID[k], jobid: H(k, 130), newVm: { name, dc: 'DC-NEW', cluster: 'CL-A' }, ...extra });
 const restoreCmds = () => D.cmds.filter((c) => c.startsWith('restore '));
 const finishAll = async (state = 'T') => {
-  for (const k of ['web', 'app', 'db6']) {
+  for (const k of ['web', 'app', 'db6', 'fs7', 'mq8']) {
     for (const r of job(k).restores || []) {
       if (!r.drRun || !r.jobid || !registry.restoreOpen(r)) continue;   // 아직 도는 것만(끝난 복원은 그대로)
       registry.applyRestoreRow(ID[k], { jobid: r.jobid, status: state, type: 'R', endedAt: Date.now() });
@@ -293,4 +295,105 @@ test('⑥ 직전 복원 결과를 모르는 VM 은 보내지 않고 실패로 �
   await tick();
   v = RN.drRunsView().runs.find((x) => x.id === run.id);
   assert.equal(v.state, 'paused');
+  RN.stopRun(run.id, 'adm');
 });
+
+const view = (id) => RN.drRunsView().runs.find((x) => x.id === id);
+test('⑦ 반증 F1 — 다른 사유(점검 ✕)로 멈춘 뒤 계속해도, 그 뒤에 생긴 실패는 다시 멈춘다(다음 단계를 사람 확인 없이 보내지 않는다)', async () => {
+  const run = RN.createRun({ vcenterId: 'vc-a', directorId: ID.dir, by: 'adm', waves: [
+    { name: '기반', concurrency: 1, items: [W('fs7', 'fs-07-r'), W('mq8', 'mq-08-r')] },
+    { name: 'DB', concurrency: 1, items: [W('web', 'web-01-r')] },
+  ] });
+  await tick();
+  assert.deepEqual(view(run.id).waves[0].items.map((i) => i.state), ['sent', 'queued']);
+  await finishAll('T');
+  RN.setDrPollDirs(() => ({ [ID.dir]: { ok: false, code: 'timeout', at: Date.now() } }));   // 고RTT 법인의 일시적 Director 조회 실패 → 점검 ✕
+  await tick();
+  assert.equal(view(run.id).state, 'paused', '점검 ✕ 면 보내지 않고 멈춘다');
+  RN.setDrPollDirs(() => ({}));
+  RN.resumeRun(run.id, 'adm');
+  await tick();
+  assert.deepEqual(view(run.id).waves[0].items.map((i) => i.state), ['ok', 'sent']);
+  await finishAll('f');   // 기반 2번째 VM 실패
+  await tick();
+  let v = view(run.id);
+  assert.deepEqual([v.state, v.cur], ['paused', 0], '계속 이후의 실패는 확인되지 않았다 — 다음 단계로 넘기지 않는다');
+  assert.ok(!restoreCmds().some((c) => c.includes('web-01-r')));
+  RN.resumeRun(run.id, 'adm');   // 이번에는 그 실패를 보고 계속
+  await tick(); await tick();
+  v = view(run.id);
+  assert.equal(v.cur, 1);
+  assert.ok(restoreCmds().some((c) => c.includes('web-01-r')));
+  await finishAll('T');
+  await tick(); await tick();
+  assert.equal(view(run.id).state, 'done');
+});
+
+test('⑧ 반증 F3 — 보내는 동안 멈추면 보내기 오류가 와도 멈춤(stopped) 그대로 · 다시 계속할 수 없다', async () => {
+  const run = RN.createRun({ vcenterId: 'vc-a', directorId: ID.dir, by: 'adm', waves: [{ name: 'S', concurrency: 1, items: [W('fs7', 'fs-07-s')] }] });
+  const svc = await import('../src/bareos/service.js');
+  let release; const gate = new Promise((r) => { release = r; }); let called = false;
+  svc._setSessionFactoryForTest(async () => { called = true; await gate; throw Object.assign(new Error('연결 거부'), { code: 'connect' }); });
+  try {
+    const tk = RN.drTick();
+    for (let i = 0; i < 200 && !called; i++) await new Promise((r) => setTimeout(r, 10));
+    assert.ok(called, '보내기에 들어갔다');
+    RN.stopRun(run.id, 'adm');
+    release();
+    await tk;
+  } finally { svc._setSessionFactoryForTest(null); }
+  const v = view(run.id);
+  assert.equal(v.state, 'stopped', '보내기 오류가 stopped 를 paused 로 덮지 않는다');
+  assert.throws(() => RN.resumeRun(run.id, 'adm'), /멈춤 상태인 회차만/);
+});
+
+test('⑨ 반증 F4 — 재시작 뒤 보내던 VM 은 원장에 결과 모름을 남겨 다른 경로의 복원을 막는다 · 그 묶음 기록이 원장에 있으면 그것으로 잇는다', async () => {
+  const run = RN.createRun({ vcenterId: 'vc-a', directorId: ID.dir, by: 'adm', waves: [{ name: 'R', concurrency: 2, items: [W('mq8', 'mq-08-x'), W('web', 'web-01-x')] }] });
+  const f = path.join(tmp, 'bareos-dr-runs.json');
+  const db = JSON.parse(fs.readFileSync(f, 'utf8'));
+  const r = db.runs.find((x) => x.id === run.id);
+  // web 은 보냈고 원장에도 들어갔지만(jobid 777) 'sent' 저장 전에 재시작 · mq8 은 보냈는지 모른다
+  r.waves[0].items[0].state = 'sending'; r.waves[0].items[0].batchId = `${run.id}-b1`;
+  r.waves[0].items[1].state = 'sending'; r.waves[0].items[1].batchId = `${run.id}-b1`;
+  fs.writeFileSync(f, JSON.stringify(db));
+  registry.addRestore(ID.web, { jobid: 777, mode: 'newVm', target: { name: 'web-01-x' }, by: 'adm', client: 'kr-fd', batchId: `${run.id}-b1`, nic: 'disconnect', dr: true, drRun: run.id });
+  RN._resetDrRunsForTest();
+  const before = restoreCmds().length;
+  await tick();
+  const v = view(run.id);
+  assert.deepEqual(v.waves[0].items.map((i) => [i.state, i.rid]), [['unknown', null], ['sent', 777]]);
+  assert.equal(v.state, 'paused');
+  assert.equal(restoreCmds().length, before, '다시 보내지 않는다');
+  assert.ok(job('mq8').restores.some((x) => registry.restoreUnknownHeld(x) && x.drRun === run.id), '원장에 결과 모름 기록');
+  const c = await call('admin', 'POST', '/restore-check/bulk', { items: [{ id: ID.mq8, jobid: H('mq8', 130), mode: 'newVm', nic: 'disconnect', newVm: { name: 'mq-08-y', cluster: 'CL-A' } }] });
+  assert.equal(c.j.plan.ok, false);
+  assert.match(c.j.plan.items[0].issue, /결과를 모릅니다|복구 순서/);
+  RN.stopRun(run.id, 'adm');
+  registry.applyRestoreRow(ID.web, { jobid: 777, status: 'T', type: 'R', endedAt: Date.now() });
+  registry.patchRestoreFinish(ID.web, 777, { nic: 'ok', at: Date.now() });
+});
+
+test('⑩ 반증 F5 · F9 · F11 — 진행 중 회차는 보관 상한에서 남는다 · 원장 기록이 사라진 보냄은 결과 모름 · 회차의 대기 VM 은 묶음 복원이 막는다', async () => {
+  const mk = (i, state) => ({ id: `r${i}`, state });
+  const kept = RN.trimRuns([mk(0, 'done'), mk(1, 'paused'), ...Array.from({ length: 25 }, (_, i) => mk(i + 2, 'done')), mk(99, 'running')]);
+  assert.ok(kept.some((r) => r.id === 'r1') && kept.some((r) => r.id === 'r99'), '멈춤 · 진행 중은 밀려나지 않는다');
+  assert.equal(kept.filter((r) => r.state === 'done').length, 20);
+  const now = Date.now();
+  assert.equal(RN.sentItemState({ rid: 5, sentAt: now - 1000 }, { runsEpoch: now, restores: [] }, {}, now).state, 'unknown', '다시 묶기로 이력이 비었다');
+  assert.equal(RN.sentItemState({ rid: 5, sentAt: now - 49 * 3600_000 }, { restores: [] }, {}, now).state, 'unknown', '48시간 넘게 기록이 없다');
+  assert.equal(RN.sentItemState({ rid: 5, sentAt: now - 1000 }, { restores: [] }, {}, now).state, 'sent', '방금 보낸 것은 기다린다');
+  // F11 — 진행 중 회차(멈춤)의 대기 VM
+  const run = RN.createRun({ vcenterId: 'vc-a', directorId: ID.dir, by: 'adm', waves: [{ name: 'H', concurrency: 1, items: [W('fs7', 'fs-07-h')] }] });
+  const c = await call('admin', 'POST', '/restore-check/bulk', { items: [{ id: ID.fs7, jobid: H('fs7', 130), mode: 'newVm', nic: 'disconnect', newVm: { name: 'fs-07-other', cluster: 'CL-A' } }] });
+  assert.match(c.j.plan.items[0].issue, /복구 순서/);
+  const g = await call('admin', 'POST', '/dr/runs/check', { vcenterId: 'vc-a', waves: [{ concurrency: 1, items: [W('web', 'web-01-z')] }] });
+  assert.match(g.j.reason, /진행 중인 복구 순서/, '같은 법인 진행 중 회차');
+  RN.stopRun(run.id, 'adm');
+  // F10 — 엣지 노드에서는 시작 · 계속을 받지 않는다(실행기 타이머가 없다)
+  const src = fs.readFileSync(new URL('../src/routes/api/bareosBackup.js', import.meta.url), 'utf8');
+  for (const p of ["'/tools/bareos-backup/dr/runs', adminOnly", "'/tools/bareos-backup/dr/runs/:id/resume', adminOnly"]) {
+    const i = src.indexOf(p);
+    assert.ok(i > 0 && /if \(isEdgeNode\(\)\) return res\.status\(409\)/.test(src.slice(i, i + 300)), `${p} — 엣지 409`);
+  }
+});
+
