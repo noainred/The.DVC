@@ -227,14 +227,14 @@ export function judgeCorp({ result = null, error = null, vcserver = '', prevThum
 }
 
 /**
- * 법인 판정 — 가장 나쁜 항목(불가 > 경고). 모름 · 참고는 넣지 않는다. 나쁜 것이 없어도 **점검 항목(vCenter · 지문 · 디스크) 중 하나라도 정상으로
+ * 법인 판정 — 가장 나쁜 항목(불가 > 경고). 모름 · 참고는 넣지 않는다. 나쁜 것이 없어도 **vCenter 접속(엣지에서) · 디스크 중 하나라도 정상으로
  * 확인된 것이 없으면** 모름이다 — Director 콘솔만 응답한 중앙 직접 법인을 '정상' 으로 보이지 않게(FD 시점 · 디스크를 못 봤다).
  */
 export function verdictOf(items) {
   const counted = (items || []).filter((x) => x.status in RANK);
   const worst = counted.reduce((a, x) => (RANK[x.status] > RANK[a] ? x.status : a), 'ok');
   if (worst !== 'ok') return worst;
-  return counted.some((x) => x.key !== 'dir') ? 'ok' : 'unknown';
+  return counted.some((x) => (x.key === 'vc' || x.key === 'disk') && x.status === 'ok') ? 'ok' : 'unknown';   // 지문만 정상(중앙에서 본 것)도 모름
 }
 
 /** 나빠짐 · 회복(순수). notified 가 없으면 '정상' 에서 온 것으로 본다(처음부터 불가면 알린다). 모름은 바꾸지 않는다. */
