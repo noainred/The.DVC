@@ -399,6 +399,27 @@ export function osCounts(rows) {
   return out;
 }
 
+/* ───────────── v2.873 vGPU · PCI 패스스루 표지(켜진 상태 스냅샷 불가) ───────────── */
+/**
+ * 서버 gpuDev(gpu/vgpuProfile.js vmGpuMark — 인벤토리 vm.gpu) → { label, title, note } 또는 null.
+ * null 은 '장치 없음' 이 아니다 — 포탈은 GPU 호스트 위 VM 의 장치만 읽으므로 GPU 없는 호스트의 NIC 패스스루는 모른다(표지를 안 붙일 뿐 단정하지 않는다).
+ * 근거: VMware 는 vGPU·PCI 패스스루(DirectPath I/O) 장치가 있는 켜진 VM 의 스냅샷을 지원하지 않는다(Broadcom KB 394566 — 검색 요약 기준).
+ */
+export function gpuChip(x) {
+  const g = x?.gpuDev;
+  const n = (v) => (Number.isInteger(v) && v > 0 ? v : 0);
+  const vg = n(g?.vgpu);
+  const pt = n(g?.passthrough);
+  if (!vg && !pt) return null;
+  const prof = vg && typeof g.profile === 'string' && g.profile ? `(프로파일 ‘${g.profile}’)` : '';
+  const what = [vg ? `vGPU ${vg}개${prof}` : '', pt ? `PCI 패스스루(DirectPath I/O) ${pt}개 — GPU 일 수도, NIC·HBA 일 수도 있습니다` : ''].filter(Boolean).join(' · ');
+  return {
+    label: vg && pt ? 'vGPU · 패스스루' : vg ? 'vGPU' : 'PCI 패스스루',
+    title: `${what}. VMware 는 vGPU·PCI 패스스루 장치가 있는 켜진 VM 의 스냅샷을 지원하지 않아 백업이 스냅샷 단계에서 실패할 수 있습니다(Broadcom KB 394566). 전원을 끈 상태로 백업하거나 게스트 안 에이전트(파일 단위)를 쓰세요. 이 환경에서 되는지는 vCenter 에서 메모리 없는 스냅샷을 수동으로 만들어 확인할 수 있습니다.`,
+    note: `**켜진 상태에서는 스냅샷을 만들 수 없는 VM** 입니다(${what}) — VMware 제약으로 백업이 스냅샷 단계에서 실패할 수 있습니다. 전원을 끈 상태로 백업하거나 게스트 안 에이전트(파일 단위)를 쓰세요.`,
+  };
+}
+
 /** 한 번에 고를 수 있는 수 — API 의 일괄 상한과 원장 남은 자리 중 작은 값(모르면 상한). */
 export function pickCap(cand) {
   const max = Number.isInteger(cand?.maxBulk) && cand.maxBulk > 0 ? cand.maxBulk : 0;

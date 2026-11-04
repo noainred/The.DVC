@@ -25,7 +25,7 @@ import {
 import {
   stateBadge, levelLabel, bytesText, whenText, runCell, directorLine, directorStatus, directorChipTitle, outcomeUnknown, unknownOutcomeText, withRelayWait,
   targetLocks, restoreLine, candidateSummary, driftText, folderOptions, inFolder, pickCap, bulkSummary, OS_FILTERS, osKey, osLabel, osBadgeCls, osMatches,
-  osCounts, parseJobReport, parseJobDetail, jobTimeline, HIST_LEVEL_OPTS, HIST_RESULT_OPTS, filterHistory, histResultKey,
+  osCounts, gpuChip, parseJobReport, parseJobDetail, jobTimeline, HIST_LEVEL_OPTS, HIST_RESULT_OPTS, filterHistory, histResultKey,
 } from './bareosText.js';
 import { LogModal } from './BareosJobLog.jsx';   // v2.872 작업 로그 창 — 통합 에러 로그 서랍과 같은 본문
 import { takeBareosHandoff, OPS_SEGMENTS, opsTopOf, opsTabOf, LEGACY_OPS_TAB, takeTargetFocus, legacyOpsHash, runsBoardOpen } from './bareosViewText.js';
@@ -292,6 +292,7 @@ function TargetsTab({ d, reload, handoff, focus, goRuns, goRestore }) {
                         <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '3px 6px', maxWidth: 230, whiteSpace: 'normal' }}>
                           <button type="button" onClick={(e) => { e.stopPropagation(); setSel(on ? '' : j.id); }} style={{ all: 'unset', cursor: 'pointer', fontWeight: 700, overflowWrap: 'anywhere' }}>{j.vmName}</button>
                           <span className={`badge ${osBadgeCls(osKey(j))}`} style={{ fontSize: 10 }} title={j.guestOS || '게스트 OS 모름(인벤토리에 없거나 vCenter 에 OS 가 비어 있음)'}>{osLabel(osKey(j))}</span>
+                          {(() => { const g = gpuChip(j); return g ? <span className="badge amber" data-bareos-gpu="" style={{ fontSize: 10 }} title={g.title}>{g.label}</span> : null; })()}
                           {!j.enabled && <span className="badge gray">비활성</span>}
                           {j.missingInDirector && <span className="badge red" title="Director 의 잡 목록에 없습니다(누가 정의 파일을 지웠을 수 있습니다)">Director 에 없음</span>}
                           {j.demo && <span className="badge amber">데모</span>}
@@ -363,6 +364,8 @@ function TargetsTab({ d, reload, handoff, focus, goRuns, goRestore }) {
                 {Object.values(lk).some(Boolean) && <div className="muted" style={{ fontSize: 11.5 }}>잠긴 버튼은 마우스를 올리면 이유가 보입니다.</div>}
                 {fullAfterRestoreHint(j) && <Note tone="warn">{fullAfterRestoreHint(j)}</Note>}
                 {snapshotChip(j.snapshotCount) && <Note tone="warn">{SNAPSHOT_TITLE}</Note>}
+                {/* v2.873 GPU 표지 — 패널은 안내 한 줄로만(머리 줄 칩 없음). 1440 에서는 머리 줄이 GPU 칩 없이도 닫기를 둘째 줄로 내린다(변경 전부터 — A/B 측정) · 칩을 더해 늘리지 않는다 */}
+                {gpuChip(j) && <Note tone="warn"><span data-bareos-gpu-note=""><BoldText text={gpuChip(j).note} /></span></Note>}
                 <dl style={{ margin: 0, display: 'grid', gridTemplateColumns: 'auto minmax(0, 1fr)', gap: '5px 12px', fontSize: 12.5 }}>
                   <dt className="muted">최근 실행</dt><dd style={{ margin: 0 }}>{c.when} <span className="muted">· {c.note}{c.bytes !== '—' ? ` · ${c.bytes}` : ''}</span></dd>
                   {j.lastError && <><dt className="muted">마지막 오류</dt><dd style={{ margin: 0, color: 'var(--red)', overflowWrap: 'anywhere' }}>{j.lastError.message}</dd></>}
@@ -519,7 +522,7 @@ function AddForm({ d, initial = null, onInitialUsed, onClose, onChanged }) {
                 {items.map((x) => (
                   <tr key={x.id} style={{ opacity: pickable(x) ? 1 : 0.6 }}>
                     <td><input type="checkbox" id={`bareos-pick-${x.id}`} aria-label={`${x.name} 선택`} disabled={!pickable(x) || (!sel.has(x.id) && sel.size >= cap)} checked={sel.has(x.id)} onChange={() => toggle(x)} /></td>
-                    <td><label htmlFor={`bareos-pick-${x.id}`}>{x.name}</label></td>
+                    <td><label htmlFor={`bareos-pick-${x.id}`}>{x.name}</label>{(() => { const g = gpuChip(x); return g ? <span className="badge amber" data-bareos-gpu="" style={{ fontSize: 10, marginLeft: 6 }} title={g.title}>{g.label}</span> : null; })()}</td>
                     <td data-sort={`${osKey(x)} ${x.guestOS || ''}`} style={{ fontSize: 12 }}><span className={`badge ${osBadgeCls(osKey(x))}`} style={{ fontSize: 10 }}>{osLabel(osKey(x))}</span> <span className="muted">{x.guestOS || ''}</span></td>
                     <td className="muted" style={{ fontSize: 12 }}>{x.dc ?? '—'} · {x.folder ?? '—'}</td>
                     <td className="muted" style={{ fontSize: 12 }}>{x.template ? '템플릿' : x.powerState === 'POWERED_ON' ? '켜짐' : x.powerState === 'POWERED_OFF' ? '꺼짐' : '—'}</td>
