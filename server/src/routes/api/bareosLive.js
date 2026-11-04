@@ -8,7 +8,7 @@ import { scopedVcenterIds, writeScopedVcenterIds } from '../../auth/scope.js';
 import { store } from '../../store.js';
 import { bareosAccess } from './bareosBackup.js';
 import { effectiveSettings, isDemoActive } from '../../bareos/service.js';
-import { directorById, directorConn } from '../../bareos/settings.js';
+import { directorById, directorConn, settingsRev } from '../../bareos/settings.js';
 import { jobDigests, registryLoadError, registryRev } from '../../bareos/registry.js';
 import { listGroups, groupsRev } from '../../bareos/groups.js';
 import { touchLive, liveSnapshot, runningRunOf, liveRev, LIVE_MS, LIVE_IDLE_MS } from '../../bareos/liveStatus.js';
@@ -202,12 +202,14 @@ function writeKey(user, snap) {
 }
 
 /**
- * v2.870 감사 A5-02: 응답 세대 — 원장(취소 표지 · 실행 결과) · 그룹 · 폴러 · 진행 조회 · 멈추는 중인 그룹. memoJson 의 ETag 는 키(스냅샷 세대 + 이 값)라
+ * v2.870 감사 A5-02: 응답 세대 — 원장(취소 표지 · 실행 결과) · 그룹 · 폴러 · 진행 조회 · 멈추는 중인 그룹 · (v2.871 A5-06) Bareos 설정. memoJson 의 ETag 는 키(스냅샷 세대 + 이 값)라
  *   여기 없는 변화는 304 로 옛 화면이 남는다(재현 — 스냅샷 세대(30초)마다 한 번만 새로 보였다 · 다른 사람 화면의 '멈추는 중' 이 늦었다).
  */
 export function liveGen() {
   const v = (f) => { try { return f(); } catch { return 'e'; } };
-  return `g=${v(registryRev)}|gr=${v(groupsRev)}|p=${v(() => pollerStatus().at || 0)}|l=${v(liveRev)}|cx=${v(cancellingKey)}`;
+  // v2.871 감사 A5-06: s = Bareos 설정 세대 — compute 가 effectiveSettings().sites 로 법인 목록 · Director 매핑을 만든다. 없으면 매핑을 바꿔도
+  //   키(=ETag)가 같아 다음 live 틱 · 스냅샷 세대(약 30초)까지 304 로 옛 법인 목록이 남았다.
+  return `g=${v(registryRev)}|gr=${v(groupsRev)}|p=${v(() => pollerStatus().at || 0)}|l=${v(liveRev)}|cx=${v(cancellingKey)}|s=${v(settingsRev)}`;
 }
 
 export function registerBareosLive(api) {

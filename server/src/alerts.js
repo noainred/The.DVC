@@ -559,6 +559,20 @@ export function alertHtml(alert) {
  */
 export async function sendText(text, title = 'VMware Portal 리포트', kind = 'daily') {
   const cfg = loadAlertConfig();
+  const results = await sendChatText(text, title, cfg);
+  if (cfg.channels.email?.enabled) {
+    // 일일 리포트 등 브로드캐스트는 'daily' 종류로 보낸다 — 알림과 수신자를 따로 둘 수 있게.
+    const r = await sendPortalMail({ kind, subject: title, html: alertHtml({ title, detail: text, severity: 'info' }), text });
+    results.push(`email:${r.ok ? 'ok' : (r.skipped ? 'skip' : 'err')}${r.ok ? '' : ` ${r.reason}`}`);
+  }
+  return results;
+}
+
+/**
+ * v2.871: 채팅 채널(Slack·웹훅·Teams)에만 보내는 텍스트 — 메일은 부르는 쪽이 따로 정한다(이슈 알림은 사람별 메일을 따로 보낸다).
+ * sendText 가 이 함수를 쓰므로 두 경로의 채널 판정·본문이 갈라지지 않는다. 던지지 않는다(결과 문자열 배열).
+ */
+export async function sendChatText(text, title = 'VMware Portal', cfg = loadAlertConfig()) {
   const results = [];
   if (cfg.channels.slack?.enabled && cfg.channels.slack.url) {
     try { const r = await post(cfg.channels.slack.url, { text }); results.push(`slack:${r.status}`); } catch (e) { results.push(`slack:err ${e.message}`); }
@@ -568,11 +582,6 @@ export async function sendText(text, title = 'VMware Portal 리포트', kind = '
   }
   if (cfg.channels.teams?.enabled && cfg.channels.teams.url) {
     try { const r = await post(cfg.channels.teams.url, buildTeamsPayload({ title, detail: text, severity: 'info' }, text)); results.push(`teams:${r.status}`); } catch (e) { results.push(`teams:err ${e.message}`); }
-  }
-  if (cfg.channels.email?.enabled) {
-    // 일일 리포트 등 브로드캐스트는 'daily' 종류로 보낸다 — 알림과 수신자를 따로 둘 수 있게.
-    const r = await sendPortalMail({ kind, subject: title, html: alertHtml({ title, detail: text, severity: 'info' }), text });
-    results.push(`email:${r.ok ? 'ok' : (r.skipped ? 'skip' : 'err')}${r.ok ? '' : ` ${r.reason}`}`);
   }
   return results;
 }

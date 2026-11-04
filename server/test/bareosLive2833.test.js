@@ -428,3 +428,80 @@ test('v2.870 사용자 보고 — FD 가 답하지 못하면 \'보고 없음\' �
   assert.equal(ok.fd.ok, true);
   assert.equal(ok.bytes, 412345678912);
 });
+
+test('v2.871 감사 A4-01 — Director 조회가 시한으로 실패한 틱은 직전 틱의 FD 성공을 이월하지 않는다(거짓 \'보고 없음\' · 멈춤 의심 없음)', async () => {
+  const { corpView } = await import('../src/routes/api/bareosLive.js');
+  const { effectiveSettings } = await import('../src/bareos/service.js');
+  const { stuckRows } = await import('../src/veeam/backupErrors.js');
+  const SVC = await import('../src/bareos/service.js');
+  // 세션을 열기 전에 시한으로 끊김(고RTT 법인 — 접속·TLS-PSK·CRAM 왕복이 LIVE_DEADLINE_MS 를 넘김) = onDirector 가 던지는 경로(liveStatus catch)
+  const failing = (on) => SVC._setSessionFactoryForTest(on ? async () => { throw Object.assign(new Error('connect timeout'), { code: 'timeout' }); } : null);
+  const idle = async () => { for (let i = 0; i < 200 && LIVE._liveBusyForTest(); i++) await new Promise((res) => setTimeout(res, 20)); };
+  const j1 = REG.jobDigests().find((j) => j.id === 'j1');
+  const savedPending = j1.pending;
+  // 6시간째 도는 실행(멈춤 의심 기준 3시간을 넘김)
+  REG.patchJob('j1', { pending: { ...savedPending, since: Date.now() - 6 * 3_600_000 } });
+  try {
+    await idle();
+    LIVE._resetLiveForTest();
+    // ① 첫 틱부터 시한 — clients 가 비어 'not-asked'(이번 조회에 그 FD 가 없음)로 보이면 안 되고 실제 사유가 남는다
+    failing(true);
+    await LIVE.liveTick();
+    let s = LIVE.liveSnapshot('dir_kr', 'vc-a');
+    assert.equal(s.live.ok, false, '전제: 조회 실패 틱');
+    const code1 = s.live.code;
+    assert.equal(code1, 'timeout');
+    assert.deepEqual(s.live.clients['kr-fd'], { ok: false, code: code1 }, '물으려던 FD 는 이번 실패 코드');
+    const st = effectiveSettings();
+    let r = corpView(st.sites[0], st, REG.jobDigests(), { now: Date.now() }).rows.find((x) => x.jobid === 501);
+    assert.equal(r.fd.ok, false); assert.equal(r.fd.code, code1);
+    // ② 성공 틱 → 실패 틱: 직전 성공(ok:true)이 이월되면 jobFdState 가 '답했다' 로 읽고 jobs 는 비어 '보고 없음' · no-report 가 됐다
+    failing(false);
+    await idle();
+    await LIVE.liveTick();
+    s = LIVE.liveSnapshot('dir_kr', 'vc-a');
+    assert.equal(s.live.clients['kr-fd'].ok, true, '전제: 성공 틱');
+    r = corpView(st.sites[0], st, REG.jobDigests(), { now: Date.now() }).rows.find((x) => x.jobid === 501);
+    assert.equal(r.stuck, undefined, '전제: FD 가 진행을 보고하면 멈춤 의심 아님');
+    failing(true);
+    await idle();
+    await LIVE.liveTick();
+    s = LIVE.liveSnapshot('dir_kr', 'vc-a');
+    assert.equal(s.live.ok, false, '전제: 실패 틱');
+    assert.equal(s.live.clients['kr-fd'].ok, false, '직전 틱의 FD 성공을 이월하지 않는다');
+    assert.equal(s.live.clients['kr-fd'].code, s.live.code);
+    const cv = corpView(st.sites[0], st, REG.jobDigests(), { now: Date.now() });
+    r = cv.rows.find((x) => x.jobid === 501);
+    assert.equal(r.fd.ok, false, 'jobFdState 는 실패');
+    assert.equal(r.bytes, null, '진행량은 모름');
+    assert.equal(r.stuck, undefined, 'FD 를 못 읽은 틱은 멈춤 의심(no-report)으로 단정하지 않는다');
+    assert.equal(cv.stuck, 0);
+    assert.deepEqual(stuckRows(cv.rows, { id: 'vc-a', name: 'Seoul' }, cv.live.at), [], '백업 오류 목록에도 거짓 멈춤 의심 행이 없다');
+  } finally {
+    failing(false);
+    REG.patchJob('j1', { pending: savedPending });
+    await idle();
+    await LIVE.liveTick();
+  }
+});
+
+test('v2.871 감사 A5-06 — Bareos 설정(법인 · Director 매핑)이 바뀌면 같은 스냅샷 · 같은 원장이어도 첫 ETag 재요청이 304 가 아니라 200', async () => {
+  const SET = await import('../src/bareos/settings.js');
+  const idle = async () => { for (let i = 0; i < 200 && LIVE._liveBusyForTest(); i++) await new Promise((res) => setTimeout(res, 20)); };
+  const etagGet = async (etag) => { const r = await fetch(`${base}/live`, { headers: { 'x-u': 'admin', ...(etag ? { 'if-none-match': etag } : {}) } }); const t = await r.text(); let j = null; try { j = JSON.parse(t); } catch { /* */ } return { s: r.status, etag: r.headers.get('etag'), j }; };
+  const before = SET.loadSettings().sites.map((s) => ({ ...s }));
+  await idle();
+  await etagGet();   // 화면이 열려 있지 않았으면 이 요청이 진행 조회를 깨운다(끝나면 liveRev 가 올라 키가 바뀐다) — 끝난 뒤를 기준으로
+  await idle();
+  const a = await etagGet();
+  assert.equal(a.s, 200); assert.ok(a.etag);
+  const a2 = await etagGet(a.etag);
+  assert.equal(a2.s, 304, '바뀐 것이 없으면 304(전제)');
+  assert.ok(!a.j.corps.some((c) => c.vcenterId === 'vc-b'), '전제: vc-b 는 아직 매핑 없음');
+  try {
+    SET.saveSettings({ sites: [...before, { ...before[0], vcenterId: 'vc-b', vcserver: 'vc-b.corp' }] });
+    const b = await etagGet(a.etag);
+    assert.equal(b.s, 200, '매핑이 바뀌었는데 304 면 옛 법인 목록이 남는다');
+    assert.ok(b.j.corps.some((c) => c.vcenterId === 'vc-b'), '새 매핑 법인이 보인다');
+  } finally { SET.saveSettings({ sites: before }); await idle(); }
+});

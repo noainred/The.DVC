@@ -318,21 +318,43 @@ export function buildGpuAllocTree(snap, { allowed = null, vcenterId = null, vcen
 }
 
 /**
+ * v2.871 감사 A4-02: 계층에 노드가 없는 법인이 'GPU 호스트 0대' 인지 '모름' 인지 — 인벤토리가 비어 있는 상태(store.js 가 인벤토리 없이
+ *   status 만 남기는 경우: 재시작 직후 첫 수집 전 'pending' · 보존 창을 넘긴 장기 장애 'unreachable' · 수집 꺼짐 · 점검 중)면 모른다.
+ *   stale(직전 인벤토리를 보존해 보이는 중)이면 인벤토리가 있으므로 노드가 없는 것은 실제 0대다. 계층이 상한으로 잘렸으면(truncated)
+ *   노드가 없는 법인도 잘린 호스트의 법인일 수 있어 모른다. 웹 gpuAllocText.js corpUnknownOf 와 같은 판정(시험이 같은 입력으로 대조).
+ * @returns {''|'pending'|'unreachable'|'disabled'|'maintenance'|'truncated'} '' = 아는 값(노드가 있거나 실제 0대)
+ */
+export const CORP_INV_EMPTY = Object.freeze(['pending', 'unreachable', 'disabled', 'maintenance']);
+export function corpUnknownOf(meta, hasNode, truncated = 0) {
+  if (hasNode) return '';
+  const st = str(meta?.status);
+  if (!meta?.stale && CORP_INV_EMPTY.includes(st)) return st;
+  return truncated > 0 ? 'truncated' : '';
+}
+/** 목차·창 칩 글자(모름 사유) — 웹 gpuAllocText.js CORP_UNKNOWN_TEXT 와 같은 글자. */
+export const CORP_UNKNOWN_TEXT = Object.freeze({
+  pending: '수집 전', unreachable: '접속 불가', disabled: '수집 꺼짐', maintenance: '점검 중', truncated: '상한으로 잘림',
+});
+
+/**
  * v2.869: 범위 안 법인(vCenter) 전부 — GPU 호스트가 없는 법인도(엑셀 '목차' 시트 · 내보내기 창의 법인별 시트 안내).
  * 계층(tree)에 있는 법인은 그 노드(vc)를 붙이고, 없는 법인은 vc = null. id 순(화면 법인 칩과 같은 순서).
- * @returns {{ id: string, name: string, city: string, country: string, vc: object|null }[]}
+ * v2.871 A4-02: unknown = corpUnknownOf(노드가 없는 이유가 '모름' 이면 사유 — 0대로 적지 않는다).
+ * @returns {{ id: string, name: string, city: string, country: string, vc: object|null, unknown: string }[]}
  */
 export function allocCorpRoster(snap, opt = {}, tree = null) {
   const inScope = scopeTest(opt);
   const byId = new Map((tree?.vcenters || []).map((v) => [v.id, v]));
+  const truncated = Number(tree?.truncated) || 0;
   const out = new Map();
   for (const m of snap?.vcenters || []) {
     if (!m) continue;
     const id = str(m.id);
     if (!id || out.has(id) || !inScope(id)) continue;
-    out.set(id, { id, name: str(m.name) || id, city: str(m.location?.city), country: str(m.location?.country), vc: byId.get(id) || null });
+    const vc = byId.get(id) || null;
+    out.set(id, { id, name: str(m.name) || id, city: str(m.location?.city), country: str(m.location?.country), vc, unknown: corpUnknownOf(m, !!vc, truncated) });
   }
-  for (const v of byId.values()) if (!out.has(v.id) && inScope(v.id)) out.set(v.id, { id: v.id, name: v.name, city: v.city, country: v.country, vc: v });
+  for (const v of byId.values()) if (!out.has(v.id) && inScope(v.id)) out.set(v.id, { id: v.id, name: v.name, city: v.city, country: v.country, vc: v, unknown: '' });
   return [...out.values()].sort((a, b) => a.id.localeCompare(b.id));
 }
 

@@ -92,3 +92,48 @@ test('실패 뒤 첫 성공은 효과 없음으로 세지 않는다(실패 백�
   assert.equal(runner.attempts.get('x').noEffect, undefined);
   assert.equal(runner.status(now).pending[0].state, 'waiting');
 });
+
+test('v2.871 감사 A2-08 — 효과 없는 성공 사이에 push 실패가 끼어도 셈이 이어진다(상한 · 알림에 닿는다)', async () => {
+  // 엣지가 재시작 중이라 홀수 번째 push 는 닿지 않고(실패) 짝수 번째는 '받았다' 고 답하지만 버전은 그대로
+  const alerts = []; let pushes = 0; let now = NOW;
+  const runner = new sync.EdgeSyncRunner({
+    settings: () => ({ enabled: true, edgeAutoUpgrade: true, edges: [] }), now: () => now, currentVersion: () => CUR, intervalMs: 10 * MIN, log: quiet,
+    collectors: () => [{ id: 'pl', name: '폴란드', url: 'https://pl', enabled: true }], statusOf: () => ({ ok: true, version: OLD }),
+    pushFn: async (bytes, o) => { pushes += 1; const ok = pushes % 2 === 0; return o.ids.map((id) => ({ id, name: '폴란드', ok, reason: ok ? undefined : 'ECONNRESET' })); },
+    resolveBundle: async () => ({ bytes: Buffer.from('x'), version: CUR, source: 'package', manifest: null, path: null }),
+    notifyFn: async (a) => { alerts.push(a); return ['slack:200']; },
+  });
+  const end = NOW + 48 * 3_600_000;
+  for (; now < end; now += 10 * MIN) await runner.run();
+  // 예전: 성공 → 30분 → 실패 → 10분 → 성공(noEffect 0) … 이 끝없이 반복 — 48시간에 약 100회 push · 알림 0
+  assert.ok(pushes <= 30, `push ${pushes}회 — 실패가 끼었다고 효과 없음 셈이 0 으로 돌아가면 안 된다`);
+  const a = runner.attempts.get('pl');
+  assert.ok(a.noEffect >= 4, `noEffect ${a.noEffect} — 실패 기록에도 넘긴다`);
+  assert.equal(alerts.filter((x) => x.key === `edgesync:pl|${CUR}:noeffect`).length, 1, '상한에 닿으면 한 번 알린다');
+});
+
+test('v2.871 감사 A2-08 — 효과 없음 알림 뒤 중앙 버전이 바뀌어도 옛 표지는 엣지가 그 버전 이상을 보고할 때 해소된다', async () => {
+  const alerts = []; let now = NOW; let ver = OLD; let cur = CUR;
+  const runner = new sync.EdgeSyncRunner({
+    settings: () => ({ enabled: true, edgeAutoUpgrade: true, edges: [] }), now: () => now, currentVersion: () => cur, intervalMs: 10 * MIN, log: quiet,
+    collectors: () => [{ id: 'pl', name: '폴란드', url: 'https://pl', enabled: true }], statusOf: () => ({ ok: true, version: ver }),
+    pushFn: async (bytes, o) => o.ids.map((id) => ({ id, name: '폴란드', ok: true })),
+    resolveBundle: async () => ({ bytes: Buffer.from('x'), version: cur, source: 'package', manifest: null, path: null }),
+    notifyFn: async (a) => { alerts.push(a); return ['slack:200']; },
+  });
+  for (const end = NOW + 48 * 3_600_000; now < end; now += 10 * MIN) await runner.run();
+  assert.ok(runner.alerted.has(`pl|${CUR}|ne`), '전제: 효과 없음 알림');
+  // 중앙이 새 버전으로 — 엣지는 아직 옛 버전: 옛 표지는 해소라고 지어내지 않는다
+  cur = '99.2.0';
+  now += 10 * MIN; await runner.run();
+  assert.ok(runner.alerted.has(`pl|${CUR}|ne`), '엣지가 그 버전에 못 미치면 남긴다');
+  assert.equal(alerts.filter((x) => /:close$/.test(x.key)).length, 0);
+  // 엣지가 새 버전까지 올라가면 옛 대상 버전의 표지도 해소 한 번
+  ver = '99.2.0';
+  now += 10 * MIN; await runner.run();
+  assert.ok(!runner.alerted.has(`pl|${CUR}|ne`), '옛 표지를 닫는다(예전에는 cur 로만 찾아 영원히 남았다)');
+  const closed = alerts.filter((x) => x.key === `edgesync:pl|${CUR}:noeffect:close`);
+  assert.equal(closed.length, 1);
+  now += 10 * MIN; await runner.run();
+  assert.equal(alerts.filter((x) => /:close$/.test(x.key)).length, 1, '한 번만');
+});

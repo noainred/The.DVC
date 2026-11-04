@@ -28,6 +28,9 @@ const PURPOSES = {
   'ipam.db': 'IPAM IP 관리대장 — 센터별 IP 인벤토리(외부 공유용)',
   'vcenter-logs.db': 'vCenter 로그 수집 캐시',
   // ── JSON 레지스트리/설정 ────────────────────────────────────────────
+  'issue-notify-state.json': '이슈 기한 알림 기록(상태 — 이슈마다 마지막으로 알린 포탈 날짜, v2.871)',
+  'issue-settings.json': '이슈 트래커 설정(자동 할당 규칙 · 알림 · 사람별 메일 주소, v2.871)',
+  'issues.json': '이슈 트래커 이슈 · 댓글 · 이력(사용자 데이터, v2.864)',
   'vcenters.json': 'vCenter 등록 정보(호스트·계정·위치)',
   'vcenter-order.json': 'vCenter 화면 표시 순서',
   'users.json': '포탈 사용자/권한/TOTP(2FA) 자격',

@@ -121,12 +121,40 @@ export function sumTotals(tree, vcSel) {
  * 상태 점은 호출부가 vcCardText.vcQuickDot 으로 칠한다(vCenter 화면과 같은 판정). 순서는 vCenter id 순.
  * @param {object[]} vcs /vcenters 응답(없거나 못 읽으면 계층의 법인만)
  */
+/**
+ * v2.871 감사 A4-02: 계층에 노드가 없는 법인이 'GPU 호스트 0대' 인지 '모름' 인지 — 서버 allocTree.js corpUnknownOf 와 같은 판정
+ *   (server/test/gpuAllocRoster2871 가 같은 입력으로 대조). 인벤토리 없이 status 만 있는 vCenter(첫 수집 전 · 보존 창을 넘긴 장애 ·
+ *   수집 꺼짐 · 점검 중)와 상한으로 잘린 계층은 모른다. stale(직전 인벤토리 보존)이면 노드가 없는 것은 실제 0대.
+ * @returns {''|'pending'|'unreachable'|'disabled'|'maintenance'|'truncated'}
+ */
+export const CORP_INV_EMPTY = Object.freeze(['pending', 'unreachable', 'disabled', 'maintenance']);
+export function corpUnknownOf(meta, hasNode, truncated = 0) {
+  if (hasNode) return '';
+  const st = typeof meta?.status === 'string' ? meta.status : '';
+  if (!meta?.stale && CORP_INV_EMPTY.includes(st)) return st;
+  return truncated > 0 ? 'truncated' : '';
+}
+export const CORP_UNKNOWN_TEXT = Object.freeze({
+  pending: '수집 전', unreachable: '접속 불가', disabled: '수집 꺼짐', maintenance: '점검 중', truncated: '상한으로 잘림',
+});
+
+/** 칩 글자(제목 · 개수) — 모르면 0 이 아니라 '—'(v2.871 A4-02). */
+export function corpChipText(c) {
+  if (c?.unknown) return { count: '—', title: `GPU 호스트 수 모름(${CORP_UNKNOWN_TEXT[c.unknown] || '모름'} — 0 이 아님)` };
+  return { count: String(c?.hosts ?? 0), title: `GPU 호스트 ${c?.hosts ?? 0}대 · GPU ${c?.gpus ?? 0}장` };
+}
+
 export function corpChips(tree, vcs) {
   const byId = new Map((tree?.vcenters || []).map((vc) => [vc.id, vc]));
   const list = Array.isArray(vcs) && vcs.length ? vcs.map((v) => ({ id: String(v.id), name: v.name || String(v.id), site: v })) : [...byId.values()].map((vc) => ({ id: vc.id, name: vc.name, site: null }));
   for (const vc of byId.values()) if (!list.some((x) => x.id === vc.id)) list.push({ id: vc.id, name: vc.name, site: null });
-  return list.map((x) => ({ ...x, hosts: byId.get(x.id)?.totals?.hosts || 0, gpus: byId.get(x.id)?.totals?.gpus || 0 }))
-    .sort((a, b) => a.id.localeCompare(b.id));
+  const truncated = Number(tree?.truncated) || 0;
+  return list.map((x) => {
+    const node = byId.get(x.id);
+    const unknown = corpUnknownOf(x.site, !!node, truncated);
+    // 모르면 hosts·gpus 는 null(0 이 아니다 — 소비처는 corpChipText 로 글자를 만든다)
+    return { ...x, unknown, hosts: unknown ? null : node?.totals?.hosts || 0, gpus: unknown ? null : node?.totals?.gpus || 0 };
+  }).sort((a, b) => a.id.localeCompare(b.id));
 }
 /** 찾기 — 호스트 이름 또는 그 호스트의 VM 이름이 맞으면 그 호스트를 남긴다. */
 function hostMatches(h, q) {

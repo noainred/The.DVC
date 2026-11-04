@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
-  fdLineOf, rateText, sizeText, elapsedText, progressPct, liveCodeText, corpBadge, corpMatches, corpFilterCounts, sortCorps,
+  fdLineOf, fdProgressMeta, rateText, sizeText, elapsedText, progressPct, liveCodeText, corpBadge, corpMatches, corpFilterCounts, sortCorps,
   sparkSegments, totalHist, slowRows, levelWord, triggerText, reasonText, REASON_HINT, STUCK_TEXT, sortWaiting,
 } from './bareosLiveText.js';
 
@@ -119,5 +119,13 @@ describe('v2.870 사용자 보고 — 실행 중 상세의 FD 한 줄은 그 잡
     // 구버전 서버(row.fd 없음) — 법인 단위 live 로
     expect(fdLineOf({ bytes: null }, { at: 1, ok: true }, ts).missing).toBe(true);
     expect(fdLineOf({ bytes: null }, { at: 1, ok: false, code: 'timeout' }, ts).text).toBe('FD 상태 시한 초과(응답 느림)');
+  });
+  it('v2.871 감사 A1-08 — 진행량 카드 아래 줄: 조회 전은 \'읽지 못함\' 이 아니다 · 실패만 \'읽지 못함\'', () => {
+    const meta = (row, live) => fdProgressMeta(row, live, fdLineOf(row, live, ts));
+    expect(meta({ bytes: null, fd: { client: 'bareos-fd', ok: false, code: '' } }, null)).toBe('FD 상태 조회 전');
+    expect(meta({ bytes: null }, null)).not.toMatch(/읽지 못함/);
+    expect(meta({ bytes: null, fd: { client: 'bareos-fd', ok: false, code: 'timeout' } }, { at: 1, ok: false, code: 'timeout' })).toBe('FD 상태를 읽지 못함 — 시한 초과(응답 느림) · bareos-fd');
+    expect(meta({ bytes: null, fd: { client: 'bareos-fd', ok: true, code: '' } }, { at: 1, ok: true })).toBe('FD 가 이 잡의 진행을 보고하지 않음');
+    expect(meta({ bytes: 5, files: 3, fd: { client: 'bareos-fd', ok: true } }, { at: 1, ok: true })).toBe('파일 3개 · FD 가 보고한 바이트');
   });
 });

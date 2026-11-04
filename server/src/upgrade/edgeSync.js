@@ -256,7 +256,7 @@ export class EdgeSyncRunner {
     this.collectors = collectors; this.statusOf = statusOf; this.pushFn = pushFn; this.pushEdgeFn = pushEdgeFn;
     this.probeFn = probeFn; this.notifyFn = notifyFn; this.resolveBundle = resolveBundle; this.onRun = onRun;
     this.fixedIntervalMs = intervalMs; this.firstDelayMs = firstDelayMs; this.log = log;
-    this.attempts = new Map();     // id → { at, ok, target, attempts, reason }
+    this.attempts = new Map();     // id → { at, ok, target, attempts, reason, okSeen?, noEffect? }
     this.legacyStatus = new Map(); // v2.865 B: 옛 방식 엣지 id → { at, ok, version, error }(마지막 health 질의)
     this.legacyDropped = [];       // v2.865 B: 설정에서 뺀 옛 방식 엣지(사유)
     this.alerted = new Set();      // v2.865 D: 알린 `${id}|${target}`
@@ -322,9 +322,14 @@ export class EdgeSyncRunner {
     const prev = this.attempts.get(r.id);
     const attempts = ok ? 0 : (prev && prev.target === cur ? (prev.attempts || 0) + 1 : 1);
     const reason = ok ? null : (txt(r.reason, 300) || 'push 실패');
-    // v2.870 감사 A2-01: 직전도 같은 대상 버전의 성공이었는데 다시 밀었다 = 그 성공이 효과가 없었다(0 으로 되돌리지 않고 센다)
-    const noEffect = ok && prev && prev.target === cur && prev.ok ? (prev.noEffect || 0) + 1 : 0;
-    this.attempts.set(r.id, { at: this.now(), ok, target: cur, attempts, reason, ...(noEffect ? { noEffect } : {}) });
+    // v2.870 감사 A2-01: 같은 대상 버전으로 이미 성공을 받았는데 다시 밀었다 = 그 성공이 효과가 없었다(0 으로 되돌리지 않고 센다)
+    // v2.871 감사 A2-08: 셈(okSeen = 이 대상 버전으로 받은 성공 수 · noEffect = 그중 첫 번을 뺀 수)은 사이에 낀 **실패 기록에도 넘긴다** —
+    //   예전에는 직전 기록이 성공일 때만 이어져, 성공 → (엣지 재시작 중) 실패 → 성공 … 이 반복되면 noEffect 가 매번 0 으로 돌아가
+    //   다시 밀기 간격 상한 · '효과 없음' 알림에 끝내 닿지 않았다(실패 attempts 도 성공마다 0). 대상 버전이 바뀌면 처음부터.
+    const same = !!prev && prev.target === cur;
+    const okSeen = (same ? Math.max(0, Math.floor(numOrNull(prev.okSeen) ?? 0)) : 0) + (ok ? 1 : 0);   // attempts 는 메모리 기록뿐(파일에 쓰지 않는다)
+    const noEffect = Math.max(0, okSeen - 1);
+    this.attempts.set(r.id, { at: this.now(), ok, target: cur, attempts, reason, ...(okSeen ? { okSeen } : {}), ...(noEffect ? { noEffect } : {}) });
     const row = rowsById.get(r.id) || {};
     const mark = `${r.id}|${cur}`;
     const base = this.intervalMs || this.fixedIntervalMs || edgeSyncIntervalMs();
@@ -339,7 +344,7 @@ export class EdgeSyncRunner {
       }
       // v2.870 감사 A2-01: 효과 없는 성공이 간격 상한에 닿으면 한 번 알린다(해소는 엣지가 대상 버전을 보고할 때 — #closeNoEffect)
       const neMark = `${mark}|ne`;
-      if (noEffect > 0 && !this.alerted.has(neMark) && noEffectWaitMs(noEffect) >= SYNC_BACKOFF_MAX_MS) {
+      if (ok && noEffect > 0 && !this.alerted.has(neMark) && noEffectWaitMs(noEffect) >= SYNC_BACKOFF_MAX_MS) {
         this.alerted.add(neMark);
         const v = (() => { try { return this.#statusOfRow(r.id)?.version || ''; } catch { return ''; } })();
         await this.notifyFn(edgeSyncAlert({ id: r.id, name: row.name, kind: row.kind, target: cur, noEffect, reason: v ? `엣지가 보고하는 버전 v${String(v).slice(0, 32)}` : '', intervalMs: base }));
@@ -349,16 +354,27 @@ export class EdgeSyncRunner {
     return ok;
   }
 
-  /** v2.870 감사 A2-01: '효과 없음' 알림을 낸 엣지가 이제 대상 버전(또는 그보다 새 버전)을 보고하면 해소를 한 번 알린다. */
+  /**
+   * v2.870 감사 A2-01: '효과 없음' 알림을 낸 엣지가 이제 대상 버전(또는 그보다 새 버전)을 보고하면 해소를 한 번 알린다.
+   * v2.871 감사 A2-08: 표지는 지금 중앙 버전(cur)으로만 찾지 않는다 — 알림 뒤 중앙 버전이 바뀌면 옛 `${id}|${old}|ne` 표지가 해소 알림 없이
+   *   남았다. 표지마다 그 표지의 대상 버전과 엣지가 보고하는 버전을 비교해, 그 버전 이상이면(= 그 알림의 문제가 풀렸다) 그 대상 버전으로 해소를 알린다.
+   *   엣지가 아직 그 버전에 못 미치면 표지를 남긴다(해소라고 지어내지 않는다 — 나중에 새 버전까지 올라가면 그때 닫힌다).
+   */
   async #closeNoEffect(plan, rows) {
-    const cur = plan.currentVersion;
     const byId = new Map(rows.map((r) => [String(r.id), r]));
-    for (const e of plan.edges) {
-      const neMark = `${e.id}|${cur}|ne`;
-      if (!this.alerted.has(neMark) || !(e.state === 'up-to-date' || e.state === 'ahead')) continue;
+    const edges = new Map(plan.edges.map((e) => [String(e.id), e]));
+    for (const neMark of [...this.alerted]) {
+      if (!neMark.endsWith('|ne')) continue;
+      const body = neMark.slice(0, -3);
+      const cut = body.lastIndexOf('|');   // id 에 '|' 가 있어도 대상 버전은 마지막 칸
+      if (cut <= 0) continue;
+      const id = body.slice(0, cut); const target = body.slice(cut + 1);
+      const e = edges.get(id);
+      const cmp = e?.version && target ? cmpVersion(e.version, target) : null;
+      if (cmp == null || cmp < 0) continue;
       this.alerted.delete(neMark);
-      const row = byId.get(e.id) || {};
-      try { await this.notifyFn(edgeSyncAlert({ id: e.id, name: row.name, kind: row.kind, target: cur, noEffect: 1, closed: true })); }
+      const row = byId.get(id) || {};
+      try { await this.notifyFn(edgeSyncAlert({ id, name: row.name, kind: row.kind, target, noEffect: 1, closed: true })); }
       catch (err) { this.log.warn?.(`[upgrade] 엣지 자동 업그레이드 알림 발송 실패: ${err?.message || err}`); }
     }
   }
