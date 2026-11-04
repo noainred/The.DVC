@@ -17,7 +17,7 @@ import { useHashTab } from '../../hooks/useHashTab.js';
 import {
   STATUS_ORDER, STATUS_TEXT, TYPE_TEXT, PRIORITY_TEXT, statusText, typeText, priorityText, dueInfo, timeText, dateText, initialOf, colorIndexOf,
   groupByStatus, filterRows, myWork, loadPct, LOAD_CAP, toDateInput, fromDateInput, parseLabels, saveFailText, persistNote, historyText,
-  peopleOptions, makeLatest, vcName, vcenterOptions, vcenterRequired, notifyStatusText, progressOf, staleInfo, myRequests, activityText, issueLink, STALE_DAYS,
+  peopleOptions, makeLatest, vcName, vcenterOptions, vcenterRequired, notifyStatusText, AUTO_LEVEL_TEXT, autoKindRows, autoOnCount, autoStatusText, simulateText, originText, progressOf, staleInfo, myRequests, activityText, issueLink, STALE_DAYS,
 } from './issueText.js';
 
 const SUBS = [['board', '보드'], ['list', '목록'], ['mine', '내 작업'], ['activity', '활동']];
@@ -107,7 +107,7 @@ export default function Issues() {
       {creating && <IssueEditor meta={meta} requestOnly={creating === 'request'} onCancel={() => setCreating(false)} onSaved={(r) => { setCreating(false); onWritten(r); openIssue(r.issue.key); }} />}
 
       {sub === 'settings' && !openKey
-        ? (meta.canSettings ? <IssueSettings /> : <div className="card muted">이슈 설정은 전체 범위(vCenter 제한 없는) 관리자만 볼 수 있습니다.</div>)
+        ? (meta.canSettings ? <><IssueSettings /><AutoCreateSettings /></> : <div className="card muted">이슈 설정은 전체 범위(vCenter 제한 없는) 관리자만 볼 수 있습니다.</div>)
         : openKey
         ? <IssueDetail key={openKey} issueKey={openKey} meta={meta} onBack={() => openIssue('')} onWritten={onWritten} />
         : (
@@ -222,6 +222,7 @@ function IssueCard({ r, meta, onOpen }) {
         <span className="iss-key">{r.key}</span>
         {r.blocked && <span className="iss-chip s-blocked" title={r.blocked.reason}>보류</span>}
         {(meta?.vcenters || []).length > 0 && <span className="iss-vc" title="법인(vCenter)">{vcName(meta, r.vcenterId)}</span>}
+        {r.origin && <span className="iss-auto" title={originText(r.origin)}>자동</span>}
       </span>
       <span className="iss-card-title">{r.title}</span>
       <ProgressLine r={r} />
@@ -296,6 +297,7 @@ function ListView({ rows, total, meta, onOpen, onWritten }) {
                   <td style={{ whiteSpace: 'normal' }}>
                     <button type="button" className="iss-link" onClick={() => onOpen(r.key)}>{r.title}</button>
                     {r.blocked && <span className="iss-chip s-blocked" style={{ marginLeft: 6 }} title={r.blocked.reason}>보류</span>}
+                    {r.origin && <span className="iss-auto" style={{ marginLeft: 6 }} title={originText(r.origin)}>자동</span>}
                   </td>
                   <td data-sort={r.vcenterId ? vcName(meta, r.vcenterId) : '~'}>{r.vcenterId ? <span className="iss-vc-cell" title={vcName(meta, r.vcenterId)}>{vcName(meta, r.vcenterId)}</span> : <span className="muted">공용</span>}</td>
                   <td data-sort={STATUS_ORDER.indexOf(r.status)}><StatusChip s={r.status} /></td>
@@ -690,7 +692,9 @@ function IssueDetail({ issueKey, meta, onBack, onWritten }) {
             ? <div style={{ marginTop: 10 }}><IssueEditor meta={meta} initial={it} onCancel={() => setEditing(false)} onSaved={(r) => { setEditing(false); setX((cur) => ({ ...cur, issue: r.issue })); setMsg(persistNote(r.persist)); onWritten(r); }} /></div>
             : (
               <>
-                <div className="iss-detail-meta"><TypeTag t={it.type} /><span className="iss-key">{it.key}</span><span className="muted">· {it.reporter} 등록 · {timeText(it.createdAt)}</span></div>
+                <div className="iss-detail-meta"><TypeTag t={it.type} /><span className="iss-key">{it.key}</span><span className="muted">· {it.reporter} 등록 · {timeText(it.createdAt)}</span>
+                  {it.origin && <><span className="iss-auto">{originText(it.origin)}</span><a href="#/tools/part-faults" style={{ fontSize: 12 }}>파트 장애 화면 →</a></>}
+                </div>
                 <h2 className="iss-title">{it.title}</h2>
                 <div className="iss-actions">
                   {canWrite
@@ -803,6 +807,143 @@ function IssueDetail({ issueKey, meta, onBack, onWritten }) {
           {it.closedAt && <div>완료 {timeText(it.closedAt)}</div>}
         </div>
       </aside>
+    </div>
+  );
+}
+
+/* ───────────── 설정 › 자동 등록(v2.879 — 하드웨어 파트 장애 → 이슈) ───────────── */
+
+/**
+ * 전체 범위 관리자 전용(서버가 같은 기준 — GET · PUT /issues/autocreate). 칸은 서버가 알려 준 '추출기가 실제로 보고하는 것' 만 연다.
+ * 조회 실패면 저장 버튼을 열지 않는다. 시험 실행은 저장 전 화면 값을 지난 24시간 이벤트에 대 본다(만들지 않는다).
+ */
+function AutoCreateSettings() {
+  const [data, setData] = useState(null);
+  const [err, setErr] = useState(null);
+  const [form, setForm] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState('');
+  const [sim, setSim] = useState('');
+  const latest = useLatest();
+  const load = useCallback(() => {
+    const k = latest.next();
+    fetchJson('/issues/autocreate').then((r) => {
+      if (!latest.isLatest(k)) return;
+      setData(r); setErr(null);
+      const p = r.settings.partfault;
+      setForm({ ...p, matrix: JSON.parse(JSON.stringify(p.matrix)), priority: { ...p.priority }, labels: p.labels.join(', '), agentsOff: [...p.agentsOff] });
+    }).catch((e) => { if (latest.isLatest(k)) setErr(e); });
+  }, [latest]);
+  useEffect(() => { load(); }, [load]);
+
+  if (err && !data) return <ErrorBox error={err} />;
+  if (!data || !form) return <Loading label="자동 등록 설정" />;
+  const upd = (patch) => setForm((f) => ({ ...f, ...patch }));
+  const setCell = (sc, k, v) => setForm((f) => ({ ...f, matrix: { ...f.matrix, [sc]: { ...f.matrix[sc], [k]: v } } }));
+  const toggleAgent = (id) => setForm((f) => ({ ...f, agentsOff: f.agentsOff.includes(id.toLowerCase()) ? f.agentsOff.filter((a) => a !== id.toLowerCase()) : [...f.agentsOff, id.toLowerCase()] }));
+  const bodyOf = () => ({ partfault: { ...form, labels: form.labels.split(',').map((x) => x.trim()).filter(Boolean) } });
+  const save = async () => {
+    setBusy(true); setMsg('');
+    try {
+      const r = await putJson('/issues/autocreate', bodyOf());
+      if (r?.ok) { setMsg('저장했습니다.'); load(); } else setMsg(saveFailText(r));
+    } catch (e) { setMsg(saveFailText({ reason: e.message })); } finally { setBusy(false); }
+  };
+  const simulate = async () => {
+    setBusy(true); setSim('');
+    try {
+      const r = await postJson('/issues/autocreate/simulate', { hours: 24, settings: bodyOf() });
+      setSim(r?.ok ? simulateText(r) : saveFailText(r));
+    } catch (e) { setSim(saveFailText({ reason: e.message })); } finally { setBusy(false); }
+  };
+  const rows = autoKindRows(data);
+  const kl = data.kindLabels || {};
+  const sl = data.scopeLabels || {};
+  const lim = data.limits || {};
+  return (
+    <div className="card iss-editor iss-auto-settings">
+      {err && <div className="banner bad" style={{ whiteSpace: 'normal' }}>자동 등록 설정을 다시 읽지 못했습니다 — 아래는 직전에 읽은 값입니다. 다시 읽기를 누르세요. ({err.message || String(err)})</div>}
+      {data.loadError && <div className="banner bad" style={{ whiteSpace: 'normal' }}>설정 파일(issue-autocreate.json)을 읽지 못해 기본값(꺼짐)으로 동작 중입니다 — 손상본은 옆에 보존했습니다. 저장하면 지금 화면의 값으로 새로 씁니다. 원인: {data.loadError}</div>}
+      <h3 className="iss-h3">자동 등록 — 하드웨어 파트 장애</h3>
+      <label className="iss-check"><input type="checkbox" checked={form.enabled} onChange={(e) => upd({ enabled: e.target.checked })} /> 파트 장애가 열리면 이슈를 자동으로 만듭니다(켜진 칸 {autoOnCount(form.matrix)}개)</label>
+      <div className="muted" style={{ fontSize: 12.5 }}>
+        중앙의 파트 장애 점검(특수 기능 › 파트 장애)이 장애를 판정한 직후에 돕니다 — 파트 장애 기능이 켜진 법인만. unknown(못 읽음) · absent(빈 슬롯)는 장애가 아니라 칸을 켜도 만들지 않습니다.
+        같은 파트가 열린 이슈에 이미 있으면 새로 만들지 않고 댓글을 답니다. 법인은 그 수집 서버가 수집하는 vCenter 가 하나일 때만 정하고, 아니면 공용 이슈입니다.
+      </div>
+      <div className="muted" style={{ fontSize: 12 }}>{autoStatusText(data.status)}</div>
+
+      <STable className="v3-table" minWidth={620}>
+        <thead>
+          <tr><th data-nosort>부품 종류</th>{(data.scopes || []).map((sc) => <th key={sc} data-nosort>{sl[sc] || sc}</th>)}<th data-nosort>우선순위</th></tr>
+        </thead>
+        <tbody>
+          {rows.map((k) => (
+            <tr key={k}>
+              <td><b>{kl[k] || k}</b></td>
+              {(data.scopes || []).map((sc) => (
+                <td key={sc}>
+                  {(data.supported?.[sc] || []).includes(k)
+                    ? (
+                      <Select className="select" value={form.matrix[sc]?.[k] || 'off'} sort={false} aria-label={`${sl[sc] || sc} ${kl[k] || k}`} onChange={(e) => setCell(sc, k, e.target.value)}>
+                        {(data.levels || []).map((v) => <option key={v} value={v}>{AUTO_LEVEL_TEXT[v] || v}</option>)}
+                      </Select>
+                    )
+                    : <span className="muted" title="이 장비군 추출기는 이 부품을 보고하지 않습니다">—</span>}
+                </td>
+              ))}
+              <td>
+                <Select className="select" value={form.priority[k] || 'p2'} sort={false} aria-label={`${kl[k] || k} 우선순위`} onChange={(e) => upd({ priority: { ...form.priority, [k]: e.target.value } })}>
+                  {['p0', 'p1', 'p2', 'p3'].map((p) => <option key={p} value={p}>{PRIORITY_TEXT[p] || p}</option>)}
+                </Select>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </STable>
+      <div className="muted" style={{ fontSize: 11.5 }}>‘—’ 는 그 장비군이 그 부품을 보고하지 않는 칸입니다(추출기 없음). PDU 는 부품 상태 필드가 없어 대상이 아닙니다.</div>
+
+      <div className="iss-auto-grid">
+        <div className="iss-auto-box">
+          <b>만드는 이슈</b>
+          <span className="muted" style={{ fontSize: 12 }}>유형 장애 · 상태 백로그 · 컴포넌트 = 부품 종류 이름(자동 할당 규칙이 켜져 있으면 담당자를 정함)</span>
+          <label className="iss-field">라벨(쉼표 구분)<input className="input" value={form.labels} onChange={(e) => upd({ labels: e.target.value })} /></label>
+          <label className="iss-field">제목 틀<input className="input" value={form.titleTpl} maxLength={lim.titleTpl || 160} onChange={(e) => upd({ titleTpl: e.target.value })} /></label>
+          <span className="muted" style={{ fontSize: 11.5 }}>쓸 수 있는 자리: ‘{'{법인}'}’ ‘{'{장비}'}’ ‘{'{장비군}'}’ ‘{'{부품종류}'}’ ‘{'{부품}'}’ ‘{'{상태}'}’ · 기본 ‘{data.defaultTitleTpl}’</span>
+        </div>
+        <div className="iss-auto-box">
+          <b>중복 · 폭주 막기</b>
+          <label className="iss-inline-wrap">한 장비에서 <input className="input iss-num" type="number" min={1} max={1440} value={form.burstWindowMin} onChange={(e) => upd({ burstWindowMin: Number(e.target.value) })} aria-label="묶는 시간(분)" />분 안에
+            <input className="input iss-num" type="number" min={1} max={100} value={form.burstMax} onChange={(e) => upd({ burstMax: Number(e.target.value) })} aria-label="묶는 건수" />건을 넘으면 장비 단위 1건</label>
+          <label className="iss-inline-wrap">하루 상한 <input className="input iss-num" type="number" min={1} max={1000} value={form.dailyMax} onChange={(e) => upd({ dailyMax: Number(e.target.value) })} aria-label="하루 상한" />건 — 넘으면 만들지 않고 셉니다(위 상태 줄)</label>
+          <span className="muted" style={{ fontSize: 11.5 }}>같은 파트 키의 열린 이슈가 있으면 항상 댓글(‘다시 열림 N회째’)입니다.</span>
+        </div>
+        <div className="iss-auto-box">
+          <b>장애가 바뀌면</b>
+          <label className="iss-inline-wrap">해소(정상 복귀 · 부품 제거)되면 댓글 +
+            <Select className="select" value={form.onResolve} sort={false} aria-label="해소 때 상태" onChange={(e) => upd({ onResolve: e.target.value })}>
+              <option value="review">상태를 검토로</option><option value="keep">상태는 그대로</option>
+            </Select></label>
+          <span className="muted" style={{ fontSize: 11.5 }}>완료는 사람이 합니다. 수동 닫음은 댓글만 · 판정 보류(못 읽음 · 수집 실패)는 사유가 바뀔 때 댓글만 달고 닫지 않습니다.</span>
+          <label className="iss-check"><input type="checkbox" checked={form.replaceNotify} onChange={(e) => upd({ replaceNotify: e.target.checked })} /> 이슈가 맡은 파트는 파트 장애 알림을 보내지 않고 이슈 알림만(두 통 방지)</label>
+        </div>
+        <div className="iss-auto-box">
+          <b>법인(수집 서버) 예외 · {form.agentsOff.length}</b>
+          <span className="muted" style={{ fontSize: 11.5 }}>체크한 수집 서버의 파트 장애로는 이슈를 만들지 않습니다.</span>
+          <div className="iss-checks">
+            {(data.agents || []).length === 0 && <span className="muted" style={{ fontSize: 12 }}>등록된 수집 서버가 없습니다(중앙 직접 수집만).</span>}
+            {(data.agents || []).map((a) => (
+              <label key={a.id} className="iss-check"><input type="checkbox" checked={form.agentsOff.includes(a.id.toLowerCase())} onChange={() => toggleAgent(a.id)} /> {a.name}{a.name !== a.id ? ` (${a.id})` : ''}</label>
+            ))}
+          </div>
+        </div>
+      </div>
+      {sim && <div className="banner" style={{ whiteSpace: 'normal' }}>{sim}</div>}
+      {msg && <div className="banner">{msg}</div>}
+      <div className="flex" style={{ gap: 6, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
+        <button className="btn" onClick={load} disabled={busy}>다시 읽기</button>
+        <button className="btn" onClick={simulate} disabled={busy} title="지금 화면 값을 지난 24시간 파트 장애 이벤트에 대 봅니다 — 만들지 않습니다">지난 24시간으로 시험 실행</button>
+        <button className="btn primary" onClick={save} disabled={busy || !!err}>{busy ? '처리 중…' : '저장'}</button>
+      </div>
     </div>
   );
 }

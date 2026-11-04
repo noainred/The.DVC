@@ -87,8 +87,20 @@ async function runOnce({ notify = true, reason = 'timer' } = {}) {
     //   '재배정·등록 삭제(unassigned)' 가 아니라 '등록부 손상' 으로 보류한다(transition.js).
     const scopeUnreadable = { ...(edge.scopeUnreadable || {}) };
     for (const [sc, e] of Object.entries(local.registryUnreadable || {})) scopeUnreadable[`|${sc}`] = e?.reason || '사유 미상';
-    const tr = transition({ open: prev, observed, scan: { deviceOk, kindFailed, agentsReported, deviceReason: edge.deviceReason, scopeUnreadable } });
+    let tr = transition({ open: prev, observed, scan: { deviceOk, kindFailed, agentsReported, deviceReason: edge.deviceReason, scopeUnreadable } });
     const saved = await applyTransition(tr);
+
+    // v2.879: 파트 장애 → 이슈 자동 등록(issues/autoCreate.js — 설정에서 켠 칸만). DB 에 쓴 뒤 · 알림 전에 한 번. 던지지 않는다.
+    //   '파트 장애 알림 대신 이슈 알림만'(replaceNotify)이 켜져 있으면 이슈가 맡은 파트는 아래 파트 장애 알림에서 뺀다(두 통 방지).
+    let auto = null;
+    try {
+      const { applyPartFaultIssues, loadAutoCreate } = await import('../issues/autoCreate.js');
+      auto = await applyPartFaultIssues(tr);
+      if (auto.enabled && loadAutoCreate().partfault.replaceNotify && auto.handled.size) {
+        const keep = (p) => !auto.handled.has(`${String(p.agent || '').trim().toLowerCase()}|${p.partKey}`);
+        tr = { ...tr, opened: tr.opened.filter(keep), updated: tr.updated.filter(keep), closed: tr.closed.filter(keep) };
+      }
+    } catch (e) { console.warn(`[partfault] 이슈 자동 등록 실패: ${String(e?.message || e).slice(0, 200)}`); }
 
     let note = null;
     // v2.708: 데모(mock)로만 켜진 상태(source 'demo')면 알림을 보내지 않는다 — 합성 장애가 설정된 실제 채널(메일·웹훅)로 나가지 않게.
@@ -103,6 +115,7 @@ async function runOnce({ notify = true, reason = 'timer' } = {}) {
       at: Date.now(), ms: Date.now() - t0, reason,
       local: local.scanned, edgeAgents: edge.agents,
       stats: tr.stats, saved,
+      ...(auto?.enabled ? { issues: { created: auto.created, attached: auto.attached, commented: auto.commented, review: auto.review, capped: auto.capped } } : {}),
       notify: note ? { ...note, dropped: countDropped(note.results) } : null,
       ...(demoOnly ? { demo: true, notifySuppressed: 'demo' } : {}),
     };
@@ -110,7 +123,8 @@ async function runOnce({ notify = true, reason = 'timer' } = {}) {
     console.log(`[partfault] 점검(${reason}) ${Date.now() - t0}ms — 신규 ${tr.stats.opened} · 해소 ${tr.stats.closed} · 변화 ${tr.stats.changed}`
       + ` · 보류 unknown ${tr.stats.heldUnknown}/장비실패 ${tr.stats.heldDeviceFailed}/컬렉션실패 ${tr.stats.heldCollectionFailed}/누락 ${tr.stats.heldMissing}`
       + (tr.stats.heldRegistryUnreadable ? `/등록부손상 ${tr.stats.heldRegistryUnreadable}` : '')
-      + (note ? ` · 알림 ${note.sent}건${note.capped ? `(상한 ${note.capped}건 제외)` : ''}` : ''));
+      + (note ? ` · 알림 ${note.sent}건${note.capped ? `(상한 ${note.capped}건 제외)` : ''}` : '')
+      + (auto?.enabled ? ` · 이슈 생성 ${auto.created}/붙임 ${auto.attached}/댓글 ${auto.commented}${auto.capped ? `/상한 ${auto.capped}` : ''}` : ''));
     return { ok: true, ..._last };
   } catch (e) {
     _last = { at: Date.now(), reason, error: String(e.message || e).slice(0, 300) };

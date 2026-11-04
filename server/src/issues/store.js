@@ -368,6 +368,51 @@ function findFor(key, access = FULL_ACCESS, { write = false } = {}) {
   return x;
 }
 
+/* ───── 자동 등록 출처(v2.879 — 파트 장애 → 이슈) ─────
+ * 사람이 만든 이슈에는 없다. 서버 내부 경로(issues/autoCreate.js)만 붙이고 라우트 본문으로는 받지 않는다(위조 금지).
+ * partKeys 는 한 이슈가 덮는 파트 키(`agent|partKey`) — 장비 단위로 묶은 이슈는 여럿이다. resolved 는 해소된 키.
+ */
+export const ORIGIN_KINDS = Object.freeze(['partfault']);
+const ORIGIN_KEYS_MAX = 64;
+function originField(o) {
+  const t = (v, n) => capStr(String(v ?? '').trim(), n);
+  const keys = (a) => [...new Set((Array.isArray(a) ? a : []).map((k) => t(k, 300)).filter(Boolean))].slice(0, ORIGIN_KEYS_MAX);
+  return {
+    kind: ORIGIN_KINDS.includes(o?.kind) ? o.kind : 'partfault',
+    agent: t(o?.agent, 64), scope: t(o?.scope, 32), deviceId: t(o?.deviceId, 200), deviceName: t(o?.deviceName, 200),
+    partKeys: keys(o?.partKeys), resolved: keys(o?.resolved), reopen: Math.max(0, Math.min(9999, Math.trunc(Number(o?.reopen) || 0))),
+    hold: t(o?.hold, 64),
+  };
+}
+const originNote = (o) => `자동 등록: 파트 장애${o?.deviceName || o?.deviceId ? ` · ${capStr(String(o.deviceName || o.deviceId), 80)}` : ''}`;
+/** 화면에 싣는 출처(키 목록 대신 개수 — 목록 응답을 키우지 않는다). */
+function originView(o) {
+  return { kind: o.kind, agent: o.agent || '', scope: o.scope || '', deviceId: o.deviceId || '', deviceName: o.deviceName || '', parts: (o.partKeys || []).length, resolved: (o.resolved || []).length };
+}
+/** 출처로 이슈 찾기(서버 내부 — 범위 없음). pred(origin, issue) 가 참인 이슈의 사본. */
+export function findByOrigin(pred, { openOnly = true } = {}) {
+  const out = [];
+  for (const x of load().issues) {
+    if (!x.origin || (openOnly && !isOpen(x))) continue;
+    try { if (pred(x.origin, x)) out.push({ key: x.key, status: x.status, createdAt: x.createdAt, closedAt: x.closedAt ?? null, origin: { ...x.origin, partKeys: [...(x.origin.partKeys || [])], resolved: [...(x.origin.resolved || [])] } }); } catch { /* 판정 오류는 건너뛴다 */ }
+  }
+  return out;
+}
+/** 출처 고치기(서버 내부) — 이력·갱신 시각을 바꾸지 않는다(사람이 한 변경이 아니다). */
+export function patchOrigin(key, fn) {
+  const c = load();
+  const x = c.issues.find((i) => i.key === key);
+  if (!x || !x.origin) throw notFound();
+  const next = { ...x, origin: originField(fn({ ...x.origin, partKeys: [...(x.origin.partKeys || [])], resolved: [...(x.origin.resolved || [])] }) || x.origin) };
+  return replace(c, next, [], 'system', { touch: false });
+}
+/** 오늘(포탈 날짜) 자동 등록으로 만든 이슈 수 — 하루 상한 판정(상태 파일 없이 이슈에서 센다). */
+export function originCreatedSince(kind, sinceMs) {
+  let n = 0;
+  for (const x of load().issues) if (x.origin?.kind === kind && x.createdAt >= sinceMs) n += 1;
+  return n;
+}
+
 /* ───── 검증 ───── */
 const newId = () => crypto.randomBytes(8).toString('hex');
 function fieldError(field, msg) { const e = new Error(`${field}: ${msg}`); e.status = 400; e.field = field; return e; }
@@ -461,6 +506,7 @@ export function summary(x) {
     dueAt: x.dueAt ?? null, createdAt: x.createdAt, updatedAt: x.updatedAt || x.createdAt, closedAt: x.closedAt ?? null,
     comments: commentsOf(x).length, watchers: Array.isArray(x.watchers) ? x.watchers.length : 0,
     progress: Number.isInteger(x.progress) ? x.progress : null, progressNote: x.progressNote || '', progressAt: x.progressAt ?? null, progressBy: x.progressBy || '',
+    ...(x.origin ? { origin: originView(x.origin) } : {}),
   };
 }
 /** 상세 — 댓글·이력 포함. `me` 는 보는 사람(관찰 여부). */
@@ -593,7 +639,7 @@ function replace(c, x, entries, user, { touch = true } = {}) {
  * @param {string} user
  * @param {{ access?: object, known?: Set<string>|null, auto?: { assignee: string, reason: string }|null, requestOnly?: boolean }} [opts]
  */
-export function createIssue(body, user, { access = FULL_ACCESS, known = null, auto = null, requestOnly = false } = {}) {
+export function createIssue(body, user, { access = FULL_ACCESS, known = null, auto = null, requestOnly = false, origin = null } = {}) {
   const c = load();
   if (c.issues.length >= LIMITS.issueMax) throw limitError(`이슈는 ${LIMITS.issueMax}건까지 보관합니다 — 관리자에게 지난 이슈 정리를 요청하세요`);
   if (requestOnly) {
@@ -625,8 +671,9 @@ export function createIssue(body, user, { access = FULL_ACCESS, known = null, au
     dueAt: timeField(b.dueAt, 'dueAt'),
     createdAt: now, createdBy: user, updatedAt: now, updatedBy: user, closedAt: status === 'done' ? now : null,
     comments: [],
+    ...(origin ? { origin: originField(origin) } : {}),
     history: [
-      { at: now, by: user, field: 'created', from: '', to: `${KEY_PREFIX}-${num}`, ...(requestOnly ? { note: '요청 등록' } : {}) },
+      { at: now, by: user, field: 'created', from: '', to: `${KEY_PREFIX}-${num}`, ...(requestOnly ? { note: '요청 등록' } : origin ? { note: originNote(origin) } : {}) },
       ...(assignee ? [{ at: now, by: user, field: 'assignee', from: '', to: assignee, ...(autoAssignee ? { note: `자동 할당: ${capStr(String(auto.reason || ''), 80)}` } : {}) }] : []),
     ],
   };
