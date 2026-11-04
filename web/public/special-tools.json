@@ -1,6 +1,6 @@
 {
-  "generatedAt": "2026-11-02T12:41:05.303Z",
-  "count": 120,
+  "generatedAt": "2026-11-04T13:26:00.150Z",
+  "count": 121,
   "tools": [
     {
       "k": "service-hub",
@@ -124,6 +124,14 @@
     },
     {
       "k": "corp-usage",
+      "adminOnly": false,
+      "perm": null,
+      "external": null,
+      "topTab": false,
+      "comingSoon": false
+    },
+    {
+      "k": "svc-inventory",
       "adminOnly": false,
       "perm": null,
       "external": null,

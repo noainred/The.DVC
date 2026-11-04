@@ -2741,3 +2741,18 @@ tr.row-sel > td { background: rgba(59, 130, 246, .10); }
 .iss-link-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 320px; }
 .iss-links .iss-mini-act { margin-left: 0; }
 .iss-children-add .input.iss-link-key { flex: 0 1 140px; }
+
+/* v2.887 서비스 인벤토리 — 좌 목록(트리·전역 서비스) + 우 내용. 1100px 미만은 세로로 쌓는다(그리드 자식 min-width:0). */
+.svcinv-layout { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; min-width: 0; align-items: start; }
+.svcinv-layout > * { min-width: 0; }
+@media (min-width: 1100px) { .svcinv-layout { grid-template-columns: 228px minmax(0, 1fr); } }
+/* 이 화면의 표는 열이 많다 — 셀 여백을 좁혀 1440px(좌측 메뉴 펼침)에서 열이 가로 스크롤 뒤로 숨지 않게 한다(실측 기준). */
+table.svcinv-t thead th, table.svcinv-t tbody td { padding: 7px 6px; }
+.svcinv-sub { font-size: 11px; color: var(--text-dim); max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.svcinv-tn { display: flex; align-items: center; gap: 6px; padding: 5px 8px; margin: 1px 4px; border-radius: 6px; cursor: pointer; font-size: 12.5px; min-width: 0; }
+.svcinv-tn:hover { background: var(--hover); }
+.svcinv-tn.on { background: rgba(59, 130, 246, .18); outline: 1px solid var(--accent); }
+.svcinv-tn .nm { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.svcinv-tn .cnt { font-size: 11px; color: var(--text-dim); background: rgba(139, 155, 180, .14); padding: 0 6px; border-radius: 999px; flex: none; }
+/* 서비스 인벤토리 매트릭스 — 법인 열이 많아 가로 스크롤할 때 서비스명 열을 붙잡아 둔다(28법인 ≈ 2,200px). */
+table.svcinv-t .svcinv-stick { position: sticky; left: 0; z-index: 1; background: var(--panel); }
