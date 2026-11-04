@@ -20,6 +20,7 @@ const Networks = lazy(() => import('./views/Networks.jsx'));
 const Alarms = lazy(() => import('./views/Alarms.jsx'));
 const Board = lazy(() => import('./views/board/Board.jsx')); // 게시판(v2.722)
 const Issues = lazy(() => import('./views/issues/Issues.jsx')); // 이슈 트래커(v2.864)
+const Wiki = lazy(() => import('./views/wiki/Wiki.jsx')); // 위키(v2.881)
 const NoticePopup = lazy(() => import('./views/board/NoticePopup.jsx')); // 접속 공지 팝업(v2.722)
 // IP관리(구 '센터별 IP 관리대장', v2.274 특수 기능에서 승격) — 단독 래퍼(IpamStandalone)는 IpamCore.jsx 가 소유한다.
 // v2.613 WEB2613-08: 예전에는 SpecialTools.jsx(허브 모듈 전체, gz 40KB)를 경유해 lazy 했다 — 허브를 열면 IPAM 3화면이,
@@ -71,6 +72,8 @@ const TABS = [
   { id: 'board', label: '게시판' },
   // 이슈 트래커(v2.864) — 로그인 사용자 전부가 읽는다(등록·할당·상태 변경은 서버가 admin·operator 로 집행).
   { id: 'issues', label: '이슈' },
+  // 위키(v2.881) — 로그인 사용자 전부가 읽는다(문서 쓰기는 서버가 admin·operator 로 집행 · 범위 계정은 자기 법인 스페이스만).
+  { id: 'wiki', label: '위키' },
   // 인사이트는 v2.592 에 '특수 기능' 하위로 이동(specialToolsList 'insights-hub' 카드 · #/tools/insights-hub.
   // ⚠ 'insights' 카드는 다른 화면(운영 인사이트)이다).
   // 옛 주소 #/insights[/<패널>] 는 hooks/hashTab.js movedTabHash 가 새 주소로 바꾼다.
@@ -501,7 +504,7 @@ function Portal({ user, onLogout }) {
   // 아닌 경우. 성능점검(svcmon)은 트리 검색·상태 칩·Test name 검색을 자체로 갖고 상단 필터값을
   // 받지도 않아(<SvcMonitor /> 는 filters 미전달) 상단 검색이 눌러도 아무 일이 없는 죽은 UI 였다.
   // IP관리(ipam)는 화면 안에 자체 vCenter 범위 선택자가 있어 상단 필터바를 쓰지 않는다.
-  const noFilterTabs = ['overview', 'vcenters', 'summary', 'upgrade', 'tools', 'settings', 'svcmon', 'ipam', 'board', 'issues'];
+  const noFilterTabs = ['overview', 'vcenters', 'summary', 'upgrade', 'tools', 'settings', 'svcmon', 'ipam', 'board', 'issues', 'wiki'];
   const showFilters = !noFilterTabs.includes(tab);
 
   // Drill into a site → set the HOSTS tab's own vCenter filter, then go there.
@@ -577,6 +580,7 @@ function Portal({ user, onLogout }) {
           {tab === 'tools' && <SpecialTools />}
           {tab === 'board' && <Board />}
           {tab === 'issues' && <Issues />}
+          {tab === 'wiki' && <Wiki />}
           {tab === 'settings' && user.role === 'admin' && isOwner && <Settings />}
           {tab === 'upgrade' && user.role === 'admin' && health?.features?.upgradeTab && <Upgrade />}
           {/* v2.593(감사 UI-2593-02): 기능이 꺼져 있으면 #/upgrade 가 아무 안내 없는 빈 화면이었다. ⚠ isAllowed 에서 거르지 않는 이유 —

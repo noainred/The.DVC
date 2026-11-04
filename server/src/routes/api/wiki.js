@@ -1,0 +1,185 @@
+/**
+ * routes/api/wiki.js — 위키 API(v2.881 · 시안 docs/design/wiki-issues).
+ *
+ * 권한(이슈 트래커와 같은 틀):
+ *  · 조회(대문 · 트리 · 문서 · 판 · 비교 · 찾기 · 역참조): 로그인 사용자 전부 — 범위가 걸린다. 범위 계정은 자기 조회 범위 법인 스페이스만 보고
+ *    공용 스페이스는 보지 않는다(서버 불변조건 '귀속 없는 데이터는 범위 계정에 노출하지 않는다'). 범위는 요청 필터보다 먼저.
+ *  · 쓰기(만들기 · 저장 · 되돌리기 · 지우기): admin · operator(데모 계정 제외). 단건은 조회 밖 404 → 쓰기 밖 403(저장소 findFor 하나).
+ *  · 댓글 · 지켜보기: 쓰기 역할 또는 권한 키 `issues.request`(이슈 요청 등록과 같은 키 — viewer 기본 보유). 그 밖의 viewer 는 읽기만.
+ *  · 지우기 · 남의 댓글 지우기: 만든 사람(쓴 사람) 또는 **전체 범위** 관리자.
+ *  · 스페이스 설정(대문 글 · 공지 · 바로 가기 · 읽기 전용): 관리자 + 그 스페이스의 쓰기 범위(공용은 전체 범위만 — 저장소가 판정).
+ *  · 쓰기 응답의 `persist` 는 이슈 · 게시판과 같은 계약(saved · pending · failed).
+ */
+import { requireRole } from '../../auth/auth.js';
+import { isDemoGuest, isAdminDetailUser } from '../../auth/demoGuest.js';
+import { userHasPermission } from '../../auth/permissions.js';
+import { logAudit } from '../../audit.js';
+import { clientIp } from '../../util/rateLimit.js';
+import { scopedVcenterIds, writeScopedVcenterIds } from '../../auth/scope.js';
+import { store } from '../../store.js';
+import {
+  listSpaces, spaceView, updateSpace, tree, getPage, createPage, updatePage, revertPage, versionBody, diffVersions, deletePage,
+  addComment, deleteComment, setWatch, searchPages, backrefs, homeOf, wikiSeq, waitWikiPersist, wikiPersist, PERSIST_WAIT_MS,
+  TEMPLATES, STATUSES, LIMITS, PUB,
+} from '../../wiki/store.js';
+
+const writers = requireRole('admin', 'operator');
+const adminOnly = requireRole('admin');
+const userOf = (req) => req.user?.username || 'anonymous';
+const isAdmin = (req) => isAdminDetailUser(req.user);
+const canWrite = (req) => ['admin', 'operator'].includes(req.user?.role) && !isDemoGuest(req.user);
+const canComment = (req) => canWrite(req) || (!!req.user && !isDemoGuest(req.user) && userHasPermission(req.user, 'issues.request'));
+const isMod = (req) => isAdmin(req) && !scopedVcenterIds(req.user, store.get());
+/** 댓글 · 지켜보기 문지기 — 쓰기 역할 또는 요청 권한. 판정 종류를 archScan 이 읽게 태그를 단다. */
+const commenters = (req, res, next) => {
+  if (canComment(req)) return next();
+  return res.status(403).json({ error: 'forbidden', requiredRole: ['admin', 'operator'], requiredPerm: ['issues.request'] });
+};
+commenters.gate = Object.freeze({ kind: 'perm', arg: Object.freeze(['issues.request']) });
+
+function accessOf(req) {
+  const snap = store.get();
+  return { read: scopedVcenterIds(req.user, snap), write: writeScopedVcenterIds(req.user, snap) };
+}
+const vcentersOf = () => (store.get()?.vcenters || []).filter((v) => v?.id).map((v) => ({ id: v.id, name: v.name || v.id }));
+function knownSpaces() {
+  const vcs = store.get()?.vcenters;
+  return Array.isArray(vcs) && vcs.length ? new Set(vcs.map((v) => v.id).filter(Boolean)) : null;
+}
+async function persistView(req) {
+  const seq = wikiSeq();
+  const p = await waitWikiPersist(seq, { maxMs: PERSIST_WAIT_MS });
+  const out = { state: p.state, seq };
+  if (p.state !== 'saved' && isAdmin(req)) {
+    const h = wikiPersist({ admin: true });
+    if (h.lastWriteError) out.error = { code: h.lastWriteError.code, phase: h.lastWriteError.phase, message: h.lastWriteError.message };
+  }
+  return out;
+}
+function fail(res, e, next) {
+  if (e && Number.isInteger(e.status)) return res.status(e.status).json({ ok: false, reason: e.message, ...(e.field ? { field: e.field } : {}), ...(e.extra && typeof e.extra === 'object' ? e.extra : {}) });
+  return next(e);
+}
+const ID_RE = /^W\d{1,9}$/;
+const badId = (res) => res.status(404).json({ ok: false, reason: '없는 문서입니다' });
+const audit = (req, action, target, detail = '') => logAudit({ user: userOf(req), action, target, detail, ip: clientIp(req) });
+const str = (v) => (typeof v === 'string' ? v : '');
+const spaceOf = (req, access) => {
+  const s = str(req.query.space).trim().slice(0, 128);
+  if (s) return s;
+  return access.read ? ([...access.read][0] || '') : PUB; // 범위 계정은 공용을 못 보므로 첫 법인
+};
+
+export function registerWiki(api) {
+  api.get('/wiki/meta', (req, res) => {
+    res.set('Cache-Control', 'no-store');
+    const access = accessOf(req);
+    res.json({
+      ok: true, me: userOf(req), canWrite: canWrite(req), canComment: canComment(req), isMod: isMod(req), isAdmin: isAdmin(req), scoped: !!access.read,
+      spaces: listSpaces({ access, vcenters: vcentersOf() }), statuses: STATUSES, limits: LIMITS,
+      templates: TEMPLATES.map((t) => ({ id: t.id, name: t.name, tag: t.tag })), persist: wikiPersist({ admin: isAdmin(req) }),
+    });
+  });
+  api.get('/wiki/templates/:id', (req, res) => {
+    const t = TEMPLATES.find((x) => x.id === req.params.id);
+    if (!t) return res.status(404).json({ ok: false, reason: '없는 템플릿입니다' });
+    res.json({ ok: true, template: t });
+  });
+  api.get('/wiki/home', (req, res, next) => {
+    res.set('Cache-Control', 'no-store');
+    try { const access = accessOf(req); res.json({ ok: true, ...homeOf(spaceOf(req, access), { access, me: userOf(req) }) }); } catch (e) { fail(res, e, next); }
+  });
+  api.get('/wiki/tree', (req, res, next) => {
+    res.set('Cache-Control', 'no-store');
+    try { const access = accessOf(req); const sid = spaceOf(req, access); res.json({ ok: true, spaceId: sid, pages: tree(sid, { access }) }); } catch (e) { fail(res, e, next); }
+  });
+  api.get('/wiki/search', (req, res, next) => {
+    res.set('Cache-Control', 'no-store');
+    try {
+      const q = req.query;
+      res.json({ ok: true, ...searchPages({ q: str(q.q), spaceId: str(q.space).slice(0, 128), label: str(q.label).slice(0, LIMITS.label), status: STATUSES.includes(q.status) ? q.status : '', issueKey: str(q.issue), includeArchived: q.archived === '1', limit: q.limit, access: accessOf(req) }) });
+    } catch (e) { fail(res, e, next); }
+  });
+  api.get('/wiki/backrefs', (req, res) => {
+    res.set('Cache-Control', 'no-store');
+    res.json({ ok: true, pages: backrefs(str(req.query.key), accessOf(req)) });
+  });
+  api.put('/wiki/spaces/:id', adminOnly, (req, res, next) => {
+    if (!isAdmin(req)) return res.status(403).json({ ok: false, reason: '데모 계정은 스페이스 설정을 바꿀 수 없습니다' });
+    try {
+      const s = updateSpace(String(req.params.id).slice(0, 128), req.body || {}, userOf(req), { access: accessOf(req) });
+      audit(req, 'wiki.space', s.id, Object.keys(req.body || {}).slice(0, 6).join(','));
+      res.json({ ok: true, space: s });
+    } catch (e) { fail(res, e, next); }
+  });
+  api.get('/wiki/spaces/:id', (req, res, next) => {
+    try { res.json({ ok: true, space: spaceView(String(req.params.id).slice(0, 128), accessOf(req)) }); } catch (e) { fail(res, e, next); }
+  });
+
+  api.post('/wiki/pages', writers, async (req, res, next) => {
+    if (!canWrite(req)) return res.status(403).json({ ok: false, reason: '데모 계정은 문서를 만들 수 없습니다' });
+    try {
+      const p = createPage(req.body || {}, userOf(req), { access: accessOf(req), known: knownSpaces() });
+      audit(req, 'wiki.create', p.id, `${p.title} [${p.spaceId}]`);
+      res.json({ ok: true, page: p, persist: await persistView(req) });
+    } catch (e) { fail(res, e, next); }
+  });
+  api.get('/wiki/pages/:id', (req, res, next) => {
+    if (!ID_RE.test(req.params.id)) return badId(res);
+    res.set('Cache-Control', 'no-store');
+    try { res.json({ ok: true, page: getPage(req.params.id, userOf(req), accessOf(req)), canWrite: canWrite(req), canComment: canComment(req), isMod: isMod(req), me: userOf(req) }); } catch (e) { fail(res, e, next); }
+  });
+  api.put('/wiki/pages/:id', writers, async (req, res, next) => {
+    if (!ID_RE.test(req.params.id)) return badId(res);
+    if (!canWrite(req)) return res.status(403).json({ ok: false, reason: '데모 계정은 문서를 고칠 수 없습니다' });
+    try {
+      const p = updatePage(req.params.id, req.body || {}, userOf(req), { access: accessOf(req) });
+      audit(req, 'wiki.save', p.id, `v${p.version}`);
+      res.json({ ok: true, page: p, persist: await persistView(req) });
+    } catch (e) { fail(res, e, next); }
+  });
+  api.post('/wiki/pages/:id/revert', writers, async (req, res, next) => {
+    if (!ID_RE.test(req.params.id)) return badId(res);
+    if (!canWrite(req)) return res.status(403).json({ ok: false, reason: '데모 계정은 문서를 고칠 수 없습니다' });
+    try {
+      const p = revertPage(req.params.id, req.body?.v, userOf(req), { access: accessOf(req), note: str(req.body?.note) });
+      audit(req, 'wiki.revert', p.id, `v${req.body?.v} → v${p.version}`);
+      res.json({ ok: true, page: p, persist: await persistView(req) });
+    } catch (e) { fail(res, e, next); }
+  });
+  api.get('/wiki/pages/:id/versions/:v', (req, res, next) => {
+    if (!ID_RE.test(req.params.id)) return badId(res);
+    try { res.json({ ok: true, version: versionBody(req.params.id, req.params.v, accessOf(req)) }); } catch (e) { fail(res, e, next); }
+  });
+  api.get('/wiki/pages/:id/diff', (req, res, next) => {
+    if (!ID_RE.test(req.params.id)) return badId(res);
+    try { res.json({ ok: true, ...diffVersions(req.params.id, req.query.from, req.query.to, accessOf(req)) }); } catch (e) { fail(res, e, next); }
+  });
+  api.delete('/wiki/pages/:id', writers, async (req, res, next) => {
+    if (!ID_RE.test(req.params.id)) return badId(res);
+    if (!canWrite(req)) return res.status(403).json({ ok: false, reason: '데모 계정은 문서를 지울 수 없습니다' });
+    try {
+      const r = deletePage(req.params.id, userOf(req), { access: accessOf(req), isMod: isMod(req) });
+      audit(req, 'wiki.delete', r.id);
+      res.json({ ok: true, ...r, persist: await persistView(req) });
+    } catch (e) { fail(res, e, next); }
+  });
+  api.post('/wiki/pages/:id/comments', commenters, async (req, res, next) => {
+    if (!ID_RE.test(req.params.id)) return badId(res);
+    try {
+      const cm = addComment(req.params.id, req.body || {}, userOf(req), { access: accessOf(req) });
+      res.json({ ok: true, comment: cm, persist: await persistView(req) });
+    } catch (e) { fail(res, e, next); }
+  });
+  api.delete('/wiki/pages/:id/comments/:cid', commenters, async (req, res, next) => {
+    if (!ID_RE.test(req.params.id)) return badId(res);
+    try {
+      const r = deleteComment(req.params.id, String(req.params.cid).slice(0, 40), userOf(req), { access: accessOf(req), isMod: isMod(req) });
+      res.json({ ok: true, ...r, persist: await persistView(req) });
+    } catch (e) { fail(res, e, next); }
+  });
+  api.post('/wiki/pages/:id/watch', commenters, (req, res, next) => {
+    if (!ID_RE.test(req.params.id)) return badId(res);
+    try { res.json({ ok: true, ...setWatch(req.params.id, userOf(req), req.body?.on !== false, { access: accessOf(req) }) }); } catch (e) { fail(res, e, next); }
+  });
+}
