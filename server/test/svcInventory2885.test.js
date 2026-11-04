@@ -69,8 +69,9 @@ test('이름 규칙: 접두/접미/포함만(정규식 아님) · 입력 길이 
   const idx = buildIndex(map);
   assert.equal(autoResolve(vm('v1', 'A', '/x', { name: 'ERP-app01' }), idx).src, 'rule');
   assert.equal(autoResolve(vm('v2', 'A', '/x', { name: 'x-erp-app' }), idx).src, 'none');
-  const long = 'a'.repeat(100_000);
-  const t0 = Date.now(); autoResolve(vm('v3', 'A', '/x', { name: long }), idx); assert.ok(Date.now() - t0 < 200);
+  // 아주 긴 이름도 정규식 없이 선형으로 — 절대 시간 상한 대신 결과만 본다(CPU 에 따라 깨지는 단언 금지 · TESTDOC2613-02).
+  const long = `erp-${'a'.repeat(100_000)}`;
+  assert.equal(autoResolve(vm('v3', 'A', '/x', { name: long }), idx).src, 'rule');
 });
 
 test('고정: 자동보다 우선 · 다르면 drift(검토하면 해제) · 같으면 redundant · 법인이 다르면 무시(pinMismatch) · 지워진 서비스는 무시', () => {

@@ -131,7 +131,7 @@ export default function GlobalAxis({ d, regionOf, corpName, writableOf, op, busy
                     <td data-sort={g.name}><b>{g.name}</b><div className="svcinv-sub">{g.owner ? `담당 ${g.owner}` : '전역 담당자 미지정'}</div></td><td data-sort={g.tier}><TierBadge tier={g.tier} /></td>
                     <td data-sort={g.corps.length}>{g.corps.length}</td><td data-sort={s.n.total} style={{ whiteSpace: 'nowrap' }}><b>{s.n.total}</b><div className="svcinv-sub">VM {s.n.vm} · BM {s.n.bm}</div></td>
                     <td data-sort={s.alloc.vcpu}>{numText(s.alloc.vcpu)}</td><td data-sort={s.alloc.vmMemGB}>{gbText(s.alloc.vmMemGB)}</td><td data-sort={s.alloc.storageGB}>{gbText(s.alloc.storageGB)}</td><td data-sort={s.alloc.bmCores}>{numText(s.alloc.bmCores)}</td>
-                    <td data-sort={fv ? fv.total : -1}>{fv ? (fv.total ? <span className="badge red">{fv.total}</span> : <span className="muted">0</span>) : <span className="muted">—</span>}</td>
+                    <td data-sort={fv ? fv.total : ''}>{fv ? (fv.total ? <span className="badge red">{fv.total}</span> : <span className="muted">0</span>) : <span className="muted">—</span>}</td>
                     <td data-sort={s.usage.unread + s.usage.stale}>{s.usage.unread + s.usage.stale ? <span className="badge amber">{s.usage.unread + s.usage.stale}</span> : <span className="muted">0</span>}</td>
                   </tr>); })}</tbody>
               </STable>
@@ -179,8 +179,8 @@ function GlobalDetail({ g, d, corpName, gcorp, setGcorp, faultsOn, reloadKey }) 
                 </td>
                 <td data-sort={x ? x.vm + x.bm : 0} style={{ whiteSpace: 'nowrap' }}><b>VM {x?.vm ?? 0}</b><span className="muted"> · </span><b>BM {x?.bm ?? 0}</b><div className="svcinv-sub">호스트 {x?.hosts ?? 0}</div></td>
                 <td data-sort={x?.alloc?.vcpu ?? 0}>{numText(x?.alloc?.vcpu)}</td><td data-sort={(x?.alloc?.vmMemGB || 0) + (x?.alloc?.bmMemGB || 0)}>{numText((x?.alloc?.vmMemGB || 0) + (x?.alloc?.bmMemGB || 0))}</td><td data-sort={x?.alloc?.storageGB ?? 0}>{numText(x?.alloc?.storageGB)}</td>
-                <td data-sort={x?.stale ? -1 : (x?.usage?.cpu ?? -1)}>{x?.stale ? <span className="muted" title="지금 읽지 못함">—</span> : <UsagePair cpu={x?.usage?.cpu ?? null} mem={x?.usage?.mem ?? null} />}</td>
-                <td data-sort={fx ?? -1}>{fx == null ? <span className="muted">—</span> : fx ? <span className="badge red">{fx}</span> : <span className="muted">0</span>}</td>
+                <td data-sort={x?.stale ? '' : (x?.usage?.cpu ?? '')}>{x?.stale ? <span className="muted" title="지금 읽지 못함">—</span> : <UsagePair cpu={x?.usage?.cpu ?? null} mem={x?.usage?.mem ?? null} />}</td>
+                <td data-sort={fx ?? ''}>{fx == null ? <span className="muted">—</span> : fx ? <span className="badge red">{fx}</span> : <span className="muted">0</span>}</td>
                 <td><BackupCell b={x?.backup} meta={d.meta?.backup} /></td>
               </tr>
             );

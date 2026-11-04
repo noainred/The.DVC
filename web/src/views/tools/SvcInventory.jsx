@@ -241,7 +241,7 @@ function ServiceRow({ s, d, corpName, showCorp, on, onClick }) {
       <td data-sort={s.tier ?? 9}>{s.tier ? <TierBadge tier={s.tier} /> : <span className="muted">—</span>}</td>
       {showCorp ? <td data-sort={corpName(s.corp)}>{corpName(s.corp).replace(/^vcenter-/, '')}</td> : null}
       <td data-sort={st.n.total}><MemberCount st={st} /></td>
-      <td data-sort={st.usage.cpu ?? -1}><UsagePair cpu={st.usage.cpu} mem={st.usage.mem} missing={st.usage.unread + st.usage.stale} /></td>
+      <td data-sort={st.usage.cpu ?? ''}><UsagePair cpu={st.usage.cpu} mem={st.usage.mem} missing={st.usage.unread + st.usage.stale} /></td>
       <td><FaultCell f={st.faults} meta={d.meta?.faults} stale={stale} /></td>
       <td><BackupCell b={st.backup} meta={d.meta?.backup} /></td>
       <td><SrcCell src={st.src} />{st.drift ? <div><span className="badge red" title="고정과 자동 판정이 다름 — 검토 탭">드리프트 {st.drift}</span></div> : null}</td>

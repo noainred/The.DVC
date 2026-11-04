@@ -23,6 +23,7 @@ import crypto from 'node:crypto';
 import { requirePerm, requireRole } from '../../auth/auth.js';
 import { scopedVcenterIds, inUserScope, inUserWriteScope, writeScopedVcenterIds } from '../../auth/scope.js';
 import { isDemoGuest, isAdminDetailUser } from '../../auth/demoGuest.js';
+import { todayStamp } from '../../util/dayKey.js';   // 파일명 날짜 = 설정 오프셋의 '오늘'(UTC 날짜 금지 — v2.582 BUG-3)
 import { addressMatcher, maskedAddressName } from '../../auth/addressMask.js';
 import { store } from '../../store.js';
 import { memoJson, scopeKey } from './shared.js';
@@ -244,7 +245,7 @@ function writeKeyOf(user, snap) {
   return w ? [...w].sort().join(',') : 'all';
 }
 const writableOf = (user, snap, vc) => writerOk(user) && inUserWriteScope(user, snap, vc);
-const fleetAdmin = (user, snap) => user?.role === 'admin' && !isDemoGuest(user) && !scopedVcenterIds(user, snap);
+const fleetAdmin = (user, snap) => isAdminDetailUser(user) && !scopedVcenterIds(user, snap);   // 관리자 판본 판정은 isAdminDetailUser 하나(role 직접 비교 금지)
 
 // ───────── 응답 조립 ─────────
 function loadState() {
@@ -400,7 +401,7 @@ export function registerSvcInventory(api) {
           m.faults == null ? '' : m.faults, m.backup === undefined ? '' : (m.backup === null ? '모름' : m.backup), m.host || '', m.kind === 'vm' ? m.ip : '']));
       }
       res.setHeader('Content-Type', 'text/csv; charset=utf-8');
-      res.setHeader('Content-Disposition', `attachment; filename="svc-inventory-${new Date().toISOString().slice(0, 10)}.csv"`);
+      res.setHeader('Content-Disposition', `attachment; filename="svc-inventory-${todayStamp()}.csv"`);
       res.send(lines.join('\r\n'));
     } catch (e) { if (!res.headersSent) res.status(500).json({ ok: false, reason: String(e?.message || e).slice(0, 300) }); }
     finally { lock.release(); }

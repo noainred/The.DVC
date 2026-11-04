@@ -4,6 +4,7 @@
  * ⚠ 문구에 백틱 금지(BoldText 는 **강조** 만 해석한다). 값 인용은 ‘ ’.
  */
 import { numOrNull } from '../../numOrNull.js';
+import { dayStamp } from '../../dayStamp.js';
 
 export const SRC_LABEL = Object.freeze({ pin: '고정', folder: 'vCenter 폴더 규칙', scan: '스캔 엔트리', tag: 'vSphere 태그', rule: '이름 규칙', none: '미지정' });
 export const SRC_SHORT = Object.freeze({ pin: '고정', folder: '폴더', scan: '스캔', tag: '태그', rule: '규칙' });
@@ -108,4 +109,4 @@ export function groupActions(g) {
 }
 
 /** CSV 파일 이름. */
-export const csvNameOf = (d = new Date()) => `svc-inventory-${d.toISOString().slice(0, 10)}.csv`;
+export const csvNameOf = (d = new Date()) => `svc-inventory-${dayStamp(d)}.csv`;   // 사용자 로컬 날짜(UTC 날짜 금지 — v2.582 BUG-3)

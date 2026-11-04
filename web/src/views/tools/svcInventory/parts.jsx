@@ -8,7 +8,7 @@ import { Loading, ErrorBox } from '../../../components/ui.jsx';
 import { SRC_LABEL, SRC_SHORT, SRC_BADGE, REASON_TEXT, pctText, numText, faultsView, backupView, srcSummary, FAULT_REASON } from '../svcInventoryText.js';
 
 export function UsageBar({ v, w = 56 }) {
-  if (v == null) return <span className="muted" data-sort="-1">—</span>;
+  if (v == null) return <span className="muted">—</span>;
   const tone = v >= 90 ? 'var(--red)' : v >= 75 ? 'var(--amber)' : 'var(--accent)';
   return (
     <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, whiteSpace: 'nowrap' }} data-sort={v}>
@@ -133,9 +133,9 @@ export function MembersPanel({ title, sub, query, reloadKey = 0, selectable = fa
                   <div className="svcinv-sub">{m.kind === 'vm' ? (m.folderPath == null ? '위치 모름' : m.folderPath) : (m.serviceTag ? `서비스태그 ${m.serviceTag}` : (m.source || ''))}</div>
                 </td>
                 <td data-sort={m.src}>{memberSrc(m)}</td>
-                <td data-sort={m.usage?.cpu ?? -1}><UsagePair cpu={m.usage?.cpu ?? null} mem={m.usage?.mem ?? null} /></td>
-                <td data-sort={m.cores ?? -1} style={{ whiteSpace: 'nowrap' }}>{numText(m.cores)}<span className="muted"> · {m.memGB == null ? '—' : `${Math.round(m.memGB)}GB`}</span></td>
-                <td data-sort={m.faults ?? -1}>{m.faults == null ? <span className="muted">{m.kind === 'vm' ? '' : '—'}</span> : m.faults ? <span className="badge red">{m.faults}</span> : <span className="muted">0</span>}</td>
+                <td data-sort={m.usage?.cpu ?? ''}><UsagePair cpu={m.usage?.cpu ?? null} mem={m.usage?.mem ?? null} /></td>
+                <td data-sort={m.cores ?? ''} style={{ whiteSpace: 'nowrap' }}>{numText(m.cores)}<span className="muted"> · {m.memGB == null ? '—' : `${Math.round(m.memGB)}GB`}</span></td>
+                <td data-sort={m.faults ?? ''}>{m.faults == null ? <span className="muted">{m.kind === 'vm' ? '' : '—'}</span> : m.faults ? <span className="badge red">{m.faults}</span> : <span className="muted">0</span>}</td>
                 <td data-sort={m.backup || ''}>{backupMember(m.backup)}</td>
                 <td style={{ fontFamily: 'var(--mono)', fontSize: 12, whiteSpace: 'nowrap' }}>{m.kind === 'vm' ? <>{m.host || '—'}<div className="svcinv-sub">{m.ip || ''}</div></> : '—'}</td>
               </tr>
@@ -155,7 +155,7 @@ export function MembersPanel({ title, sub, query, reloadKey = 0, selectable = fa
                 <td data-sort={h.name}><b>{h.name}</b><div className="muted" style={{ fontSize: 11, fontFamily: 'var(--mono)' }}>{h.serviceTag || ''}</div></td>
                 <td data-sort={h.vmHere}>{h.vmHere}</td>
                 <td><UsageBar v={h.usage?.cpuPct ?? null} /></td><td><UsageBar v={h.usage?.memPct ?? null} /></td>
-                <td data-sort={h.faults ?? -1}>{h.faults == null ? <span className="muted">—</span> : h.faults ? <span className="badge red">{h.faults} → 영향 서비스 {1 + (h.others?.length || 0)}</span> : <span className="muted">0</span>}</td>
+                <td data-sort={h.faults ?? ''}>{h.faults == null ? <span className="muted">—</span> : h.faults ? <span className="badge red">{h.faults} → 영향 서비스 {1 + (h.others?.length || 0)}</span> : <span className="muted">0</span>}</td>
                 <td className="muted" style={{ whiteSpace: 'normal' }}>{h.others?.length ? h.others.join(' · ') : '없음(전용)'}{h.unassignedOn ? ` · 미지정 VM ${h.unassignedOn}` : ''}</td>
               </tr>
             ))}</tbody>
