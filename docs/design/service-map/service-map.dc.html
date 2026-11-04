@@ -352,7 +352,9 @@ const svcOf=(m)=>svcById(resolve(m).svcId);
 const svcName=(m)=>{const s=svcOf(m);return s?s.name:'';};
 
 // ───────── 상태 ─────────
-const S={axis:'corp',gmode:'catalog',gfirst:'matrix',gsel:null,gcorp:'',view:'svc',sel:{type:'all'},q:'',selSvc:null,sort:{},merge:false,open:new Set([CORPS[0].id]),m:{kind:'BM',corp:'',unOnly:true,q:'',checked:new Set(),target:''}};
+// 변형 페이지(시안 조합별 별도 파일)는 window.__PRESET 으로 시작 상태를 준다 — 한 소스에서 파생.
+const PRESET=window.__PRESET||{};
+const S={axis:PRESET.axis||'corp',gmode:PRESET.gmode||'catalog',gfirst:PRESET.gfirst||'matrix',gsel:PRESET.gsel||null,gcorp:'',view:'svc',sel:{type:'all'},q:'',selSvc:null,sort:{},merge:false,open:new Set([CORPS[0].id]),m:{kind:'BM',corp:'',unOnly:true,q:'',checked:new Set(),target:''}};
 const $=(s)=>document.querySelector(s);
 const esc=(s)=>String(s).replace(/[&<>"]/g,(c)=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const barCell=(v)=>v==null?'<span class="muted">—</span>':`<span class="bar"><i class="${v>=90?'crit':v>=75?'hot':''}" style="width:${v}%"></i></span>${v}%`;
