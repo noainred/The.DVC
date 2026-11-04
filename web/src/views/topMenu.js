@@ -56,7 +56,7 @@ export const MENU_GROUPS = Object.freeze([
   ] },
   { id: 'optimize', label: '자원 최적화', children: [
     { id: 'waste', label: 'Optimization', tool: 'waste' },
-    { id: 'idrac', label: 'Infra Observability', tool: 'idrac-trend' },   // v2.876 이름 'iDRAC 통합 추이' → 'Infra Observability'(사용자 요청 — id·도구 키는 그대로)
+    { id: 'idrac', label: 'Infra Observability', tool: 'idrac-trend' },   // v2.877 이름 'iDRAC 통합 추이' → 'Infra Observability'(사용자 요청 — id·도구 키는 그대로)
   ] },
   { id: 'tools', label: '특수 기능', tab: 'tools' },
   { id: 'issues', label: '이슈', tab: 'issues' },

@@ -165,7 +165,7 @@ api.post(`${P}/start`, adminOnly, fullScopeOnly, fullWriteOnly, async (req, res)
   try {
     const j = await startInstall({ vcenterId, body: req.body || {}, by: req.user?.username || '' });
     const unknownOk = j.attempts?.[0]?.runningUnknownOk ? ' · 실행 중 작업 확인 없이 진행(화면 동의)' : '';
-    audit(req, j.mode === 'reinstall' ? 'Bareos 완전 초기화 후 재설치 시작' : 'Bareos 완전 설치 시작', `${j.vcenterName} · ${j.agent} (${j.sshHost})`, `${j.id} · 번들 ${j.bundle.version} · ${j.planText}${unknownOk}`);
+    audit(req, j.mode === 'reinstall' ? (j.resetUnregistered ? 'Bareos 완전 초기화(포탈 미등록 Bareos) 후 설치 시작' : 'Bareos 완전 초기화 후 재설치 시작') : 'Bareos 완전 설치 시작', `${j.vcenterName} · ${j.agent} (${j.sshHost})`, `${j.id} · 번들 ${j.bundle.version} · ${j.planText}${unknownOk}`);
     res.json({ ok: true, job: j });
   } catch (e) { audit(req, 'Bareos 완전 설치 시작', vcName(vcenterId), `실패 — ${auditReason(e)}`); sendErr(res, e); }
 });
