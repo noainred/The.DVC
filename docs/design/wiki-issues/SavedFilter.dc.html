@@ -1,0 +1,191 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>이슈 — 검색식 · 저장 필터</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=Noto+Sans+KR:wght@400;500;700;800&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+body{margin:0;background:#0a0e17;color:#e6edf6;font-family:"Inter","Noto Sans KR","Apple SD Gothic Neo",sans-serif;font-size:13px}
+a{color:#93c5fd}a:hover{color:#bfdbfe}
+.tb{display:flex;align-items:center;gap:14px;height:44px;padding:0 16px;background:#0f1626;border-bottom:1px solid #243049}
+.tb .logo{display:inline-flex;align-items:center;gap:8px;font-weight:800;font-size:14px}
+.tb .logo .v{width:26px;height:26px;border-radius:7px;background:#3b82f6;display:inline-flex;align-items:center;justify-content:center;font-size:13px;color:#fff}
+.ver{font-size:11px;font-weight:700;color:#5eead4;border:1px solid #2dd4bf;border-radius:6px;padding:1px 6px}
+.mock{font-size:11px;font-weight:800;color:#fcd34d;background:rgba(245,158,11,.16);border-radius:6px;padding:2px 7px}
+.side{flex:0 0 236px;background:#0f1626;border-right:1px solid #243049;padding:14px 10px;display:flex;flex-direction:column;gap:2px}
+.side a{display:flex;align-items:center;gap:10px;min-height:36px;padding:0 12px;border-radius:9px;color:#aebbd0;text-decoration:none;font-size:13.5px;font-weight:600}
+.side a.on{background:#1a2236;color:#e6edf6;box-shadow:inset 3px 0 0 #3b82f6}
+.side .n{margin-left:auto;font-size:11px;color:#5d6b85}
+.card{background:#141b2d;border:1px solid #243049;border-radius:12px}
+.muted{color:#8b9bb4}.faint{color:#5d6b85}
+.mono{font-family:"JetBrains Mono",ui-monospace,monospace}
+.btn{display:inline-flex;align-items:center;gap:6px;min-height:30px;padding:0 11px;border-radius:8px;border:1px solid #243049;background:#1a2236;color:#e6edf6;font:inherit;font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap;text-decoration:none}
+.btn.primary{background:#3b82f6;border-color:#3b82f6;color:#fff}
+.btn.sm{min-height:26px;padding:0 9px;font-size:11.5px}
+.tag{display:inline-flex;align-items:center;gap:5px;height:20px;padding:0 8px;border-radius:999px;font-size:11px;font-weight:700;white-space:nowrap}
+.tag.blue{background:rgba(59,130,246,.18);color:#93c5fd}.tag.gray{background:rgba(139,155,180,.14);color:#aebbd0}.tag.ok{background:rgba(34,197,94,.14);color:#86efac}.tag.warn{background:rgba(245,158,11,.16);color:#fcd34d}.tag.bad{background:rgba(239,68,68,.16);color:#fca5a5}.tag.purple{background:rgba(168,85,247,.18);color:#d8b4fe}
+.chip{display:inline-flex;align-items:center;height:22px;padding:0 9px;border-radius:6px;font-size:11.5px;font-weight:700;border:1px solid #243049;background:#0f1626}
+.chip.progress{color:#93c5fd;border-color:rgba(59,130,246,.5)}.chip.todo{color:#e6edf6}.chip.done{color:#86efac;border-color:rgba(34,197,94,.4)}.chip.review{color:#fcd34d;border-color:rgba(245,158,11,.4)}.chip.backlog{color:#aebbd0}
+.key{font-family:"JetBrains Mono",monospace;color:#8b9bb4;font-size:12px}
+.type{font-size:12px;font-weight:800}.type.incident{color:#fca5a5}.type.task{color:#93c5fd}.type.improve{color:#5eead4}.type.request{color:#aebbd0}.type.epic{color:#d8b4fe}
+.prio{font-size:12px;font-weight:800}.prio.p0{color:#fca5a5}.prio.p1{color:#fcd34d}.prio.p2{color:#93c5fd}.prio.p3{color:#aebbd0}
+.av{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:50%;font-size:10px;font-weight:800;color:#fff;flex:0 0 auto}
+.input{min-height:30px;border:1px solid #243049;border-radius:8px;background:#0a0e17;color:#e6edf6;font:inherit;font-size:12.5px;padding:0 10px}
+.q{font-family:"JetBrains Mono",ui-monospace,monospace;font-size:13px;min-height:40px;display:flex;align-items:center;gap:0;padding:0 12px;border:1px solid #3b82f6;border-radius:10px;background:#0a0e17;flex:1 1 420px;min-width:0;flex-wrap:wrap}
+.q .f{color:#5eead4}.q .o{color:#8b9bb4}.q .v{color:#fcd34d}.q .kw{color:#d8b4fe;font-weight:700}.q .err{color:#fca5a5;text-decoration:underline wavy}
+.tok{display:inline-flex;align-items:center;gap:6px;height:24px;padding:0 4px 0 9px;border-radius:6px;border:1px solid #243049;background:#1a2236;font-size:11.5px;font-weight:600}
+.tok b{color:#5eead4;font-weight:700}.tok .x{display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;border-radius:4px;color:#8b9bb4;background:transparent;border:0;font:inherit;cursor:pointer}
+.sv{display:flex;align-items:center;gap:8px;padding:7px 9px;border-radius:8px;text-decoration:none;color:#e6edf6;font-size:12.5px;min-width:0}
+.sv.on{background:#1a2236}
+.sv .t{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sv .n{font-family:"JetBrains Mono",monospace;font-size:11px;color:#8b9bb4}
+table{border-collapse:collapse;width:100%}
+th{font-size:12px;font-weight:600;color:#8b9bb4;text-align:left;padding:8px 10px;background:#0f1626;border-bottom:1px solid #243049;white-space:nowrap}
+td{padding:8px 10px;border-bottom:1px solid #1f2a40;vertical-align:middle}
+.bar{display:inline-block;height:6px;border-radius:3px;background:rgba(36,48,73,.9);overflow:hidden;vertical-align:middle}
+.bar > span{display:block;height:100%;border-radius:3px;background:#3b82f6}
+.pop{background:#141b2d;border:1px solid #243049;border-radius:10px;box-shadow:0 4px 24px rgba(0,0,0,.4);padding:6px;display:flex;flex-direction:column;gap:2px;font-size:12.5px}
+.pop a{display:flex;align-items:center;gap:8px;padding:5px 8px;border-radius:7px;text-decoration:none;color:#e6edf6}
+.pop a.on{background:#1a2236}
+.pop .k{font-family:"JetBrains Mono",monospace;color:#5eead4;min-width:96px}
+.sb{display:flex;align-items:center;height:30px;background:#0f1626;border-top:1px solid #243049;font-family:"JetBrains Mono",monospace;font-size:11.5px;color:#8b9bb4}
+.sb span{flex:1;text-align:center;border-right:1px solid #243049}.sb span:last-child{border-right:0}.sb b{color:#e6edf6}
+</style>
+</helmet>
+
+<div style="min-height: 100vh; display: flex; flex-direction: column; background: #0a0e17">
+  <header class="tb">
+    <span class="muted" aria-hidden="true">☰</span>
+    <span class="logo"><span class="v">V</span>The Davinci</span>
+    <span class="ver">v2.876.0</span><span class="mock">MOCK</span>
+    <span style="flex: 1"></span>
+    <span class="mono muted" style="font-size: 11.5px">11/11 vCenter <b style="color: #22c55e">OK</b> · 오전 10:24</span>
+    <span class="av" style="background: #3b82f6; width: 24px; height: 24px">A</span>
+    <span style="font-size: 12.5px; font-weight: 700">Anonymous <span class="muted" style="font-weight: 400; font-size: 11px">관리자</span></span>
+    <button class="btn sm" type="button">Out</button>
+  </header>
+
+  <div style="display: flex; flex-wrap: wrap; flex: 1">
+    <nav class="side" aria-label="메뉴">
+      <a href="#"><span aria-hidden="true">◫</span>Overview</a>
+      <a href="#"><span aria-hidden="true">▤</span>Summary</a>
+      <a href="#"><span aria-hidden="true">▣</span>서버<span class="n">6 ▾</span></a>
+      <a href="#"><span aria-hidden="true">▥</span>스토리지<span class="n">7 ▾</span></a>
+      <a href="#"><span aria-hidden="true">⌘</span>네트워크<span class="n">6 ▾</span></a>
+      <a href="#"><span aria-hidden="true">⚙</span>자원관리<span class="n">3 ▾</span></a>
+      <a href="#"><span aria-hidden="true">◔</span>자원 최적화<span class="n">2 ▾</span></a>
+      <a href="#"><span aria-hidden="true">✦</span>특수 기능</a>
+      <a href="IssueEpic.dc.html" class="on"><span aria-hidden="true">⚑</span>이슈</a>
+      <a href="Main.dc.html"><span aria-hidden="true">▧</span>위키</a>
+      <a href="#"><span aria-hidden="true">▭</span>게시판</a>
+      <a href="#"><span aria-hidden="true">✲</span>설정<span class="n">2 ▾</span></a>
+    </nav>
+
+    <main style="flex: 999 1 560px; min-width: 0; padding: 16px 22px 24px; display: flex; flex-direction: column; gap: 12px">
+      <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap">
+        <div style="display: inline-flex; gap: 6px; flex-wrap: wrap">
+          <a class="btn" href="IssueEpic.dc.html">보드</a><a class="btn" href="#">목록</a><a class="btn" href="#">내 작업</a><a class="btn" href="#">활동</a>
+          <a class="btn" href="Sprint.dc.html">스프린트</a><a class="btn" href="#">에픽</a><a class="btn primary" href="SavedFilter.dc.html">필터</a><a class="btn" href="#">설정</a>
+        </div>
+        <span style="flex: 1"></span>
+        <button class="btn" type="button">새로고침</button><button class="btn primary" type="button">+ 새 이슈</button>
+      </div>
+
+      <div style="display: flex; gap: 12px; align-items: flex-start; flex-wrap: wrap">
+        <!-- 저장 필터 목록 -->
+        <aside class="card" aria-label="저장 필터" style="flex: 0 1 250px; min-width: 0; padding: 10px; display: flex; flex-direction: column; gap: 4px">
+          <div class="muted" style="font-size: 11.5px; font-weight: 700; padding: 4px 8px">빠른 필터</div>
+          <a class="sv" href="#"><span class="t">내 열린 이슈</span><span class="n">5</span></a>
+          <a class="sv" href="#"><span class="t">내가 등록한 요청</span><span class="n">2</span></a>
+          <a class="sv" href="#"><span class="t">기한 초과</span><span class="n">1</span></a>
+          <a class="sv" href="#"><span class="t">이번 스프린트</span><span class="n">9</span></a>
+          <a class="sv" href="#"><span class="t">3일 갱신 없음</span><span class="n">1</span></a>
+          <div class="muted" style="font-size: 11.5px; font-weight: 700; padding: 10px 8px 4px; border-top: 1px solid #1f2a40; margin-top: 4px">내 필터 · 3</div>
+          <a class="sv on" href="#"><span aria-hidden="true" style="color: #fcd34d">★</span><span class="t">kim 진행 중 · 서울 법인</span><span class="n">4</span></a>
+          <a class="sv" href="#"><span class="t">P0 · P1 미할당</span><span class="n">0</span></a>
+          <a class="sv" href="#"><span class="t">리허설 에픽(ISS-22)</span><span class="n">6</span></a>
+          <div class="muted" style="font-size: 11.5px; font-weight: 700; padding: 10px 8px 4px; border-top: 1px solid #1f2a40; margin-top: 4px">공유 필터 · 2 <span class="faint" style="font-weight: 400">· 전체 범위 운영자가 공유</span></div>
+          <a class="sv" href="#"><span class="t">주간 보고용 — 완료 7일</span><span class="n">11</span><span class="tag blue" style="height: 16px; font-size: 10px">구독</span></a>
+          <a class="sv" href="#"><span class="t">장애 미해결(전 법인)</span><span class="n">2</span></a>
+          <div class="faint" style="font-size: 11.5px; padding: 8px 8px 2px; border-top: 1px solid #1f2a40; margin-top: 4px">필터는 검색식 한 줄을 저장한 것 — 보드 · 목록 · 스프린트 · 위키 매크로 · 주간 메일에 그대로 쓴다. 범위 계정이 공유 필터를 열면 자기 범위로 다시 걸러 보인다.</div>
+        </aside>
+
+        <!-- 검색식 · 결과 -->
+        <section style="flex: 999 1 560px; min-width: 0; display: flex; flex-direction: column; gap: 10px">
+          <div class="card" style="padding: 12px 14px; display: flex; flex-direction: column; gap: 10px">
+            <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap">
+              <b style="font-size: 14px">kim 진행 중 · 서울 법인</b><span class="tag gray">내 필터</span><span class="muted" style="font-size: 12px">· 바꾼 뒤 저장 안 됨</span>
+              <span style="flex: 1"></span>
+              <button class="btn sm" type="button">저장</button><button class="btn sm" type="button">다른 이름으로</button><button class="btn sm" type="button">공유</button><button class="btn sm" type="button">보드에 적용</button><button class="btn sm" type="button">주간 메일 구독</button><button class="btn sm" type="button">CSV</button>
+            </div>
+            <div style="display: flex; gap: 8px; align-items: flex-start; flex-wrap: wrap">
+              <div style="display: flex; flex-direction: column; gap: 6px; flex: 1 1 420px; min-width: 0; position: relative">
+                <div class="q" role="textbox" aria-label="검색식" tabindex="0"><span class="f">assignee</span><span class="o">&nbsp;=&nbsp;</span><span class="v">me()</span><span class="kw">&nbsp;AND&nbsp;</span><span class="f">status</span><span class="o">&nbsp;in&nbsp;</span><span class="v">(progress, review)</span><span class="kw">&nbsp;AND&nbsp;</span><span class="f">vcenter</span><span class="o">&nbsp;=&nbsp;</span><span class="v">"vc-ap-northeast"</span><span class="kw">&nbsp;AND&nbsp;</span><span class="f">updated</span><span class="o">&nbsp;&gt;=&nbsp;</span><span class="v">-7d</span><span class="kw">&nbsp;ORDER BY&nbsp;</span><span class="f">priority</span><span class="o">&nbsp;ASC,&nbsp;</span><span class="f">due</span><span class="o">&nbsp;ASC</span><span style="border-left: 2px solid #e6edf6; height: 16px; margin-left: 2px"></span></div>
+                <div class="pop" role="listbox" aria-label="자동 완성" style="position: absolute; top: 100%; left: 0; margin-top: 4px; min-width: 420px; z-index: 5">
+                  <span class="faint" style="padding: 2px 8px; font-size: 11px">필드 · 함수 · 값 자동 완성 — 범위 계정에게는 보이는 법인 · 이름만</span>
+                  <a href="#" class="on"><span class="k">sprint</span>스프린트 — = "2026-11 ②" · = active() · is empty</a>
+                  <a href="#"><span class="k">epic</span>에픽 — = ISS-20 · is empty</a>
+                  <a href="#"><span class="k">progress</span>진행률 — &lt; 50 · is empty(보고 없음)</a>
+                  <a href="#"><span class="k">watcher</span>관찰자 — = me()</a>
+                  <a href="#"><span class="k">text</span>제목 · 본문 · 댓글 — ~ "타임아웃"</a>
+                  <a href="#"><span class="k">doc</span>관련 문서 — ~ "런북" · is not empty</a>
+                </div>
+              </div>
+              <button class="btn primary" type="button" style="min-height: 40px">찾기</button>
+            </div>
+            <!-- 해석된 조건 -->
+            <div style="display: flex; gap: 6px; flex-wrap: wrap; align-items: center; margin-top: 30px">
+              <span class="muted" style="font-size: 12px">해석</span>
+              <span class="tok"><b>담당자</b> = 나(anonymous)<button class="x" type="button" aria-label="조건 지우기">✕</button></span>
+              <span class="tok"><b>상태</b> ∈ 진행 중 · 검토<button class="x" type="button" aria-label="조건 지우기">✕</button></span>
+              <span class="tok"><b>법인</b> = vcenter-ap-northeast-01<button class="x" type="button" aria-label="조건 지우기">✕</button></span>
+              <span class="tok"><b>갱신</b> ≥ 7일 전<button class="x" type="button" aria-label="조건 지우기">✕</button></span>
+              <span class="tok"><b>정렬</b> 우선순위 ↑ · 기한 ↑<button class="x" type="button" aria-label="조건 지우기">✕</button></span>
+              <span class="faint" style="font-size: 11.5px">· 칩을 지우면 검색식도 같이 고쳐집니다(두 벌이 아니라 한 식). 틀린 식은 <span class="err mono">status = runnig</span> 처럼 밑줄과 사유(‘알 수 없는 값 — progress 를 뜻했나요?’)로.</span>
+            </div>
+          </div>
+
+          <div class="card" style="padding: 0; overflow: hidden">
+            <div style="padding: 8px 12px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; border-bottom: 1px solid #243049; font-size: 12px">
+              <b>4건</b><span class="muted">· 전체 열린 이슈 14 중 · 제목 머리를 누르면 정렬(검색식의 ORDER BY 가 바뀜)</span>
+              <span style="flex: 1"></span>
+              <label style="display: inline-flex; align-items: center; gap: 6px"><input type="checkbox"> 전체 선택</label><button class="btn sm" type="button">일괄 편집(담당자 · 스프린트 · 에픽 · 라벨)</button>
+            </div>
+            <div style="overflow-x: auto">
+              <table>
+                <thead><tr><th style="width: 30px"></th><th>키</th><th>유형</th><th>제목</th><th>에픽</th><th>스프린트</th><th>상태</th><th>진행</th><th>우선순위</th><th>담당자</th><th>기한</th><th>갱신</th></tr></thead>
+                <tbody>
+                  <tr><td><input type="checkbox" aria-label="ISS-1 선택"></td><td class="key">ISS-1</td><td><span class="type incident">장애</span></td><td><a href="IssueEpic.dc.html">vCenter PL-WAW 수집 타임아웃 간헐 발생</a></td><td><span class="tag purple">ISS-20</span></td><td class="muted">2026-11 ②</td><td><span class="chip progress">진행 중</span></td><td><span class="bar" style="width: 48px"><span style="width: 50%"></span></span> <span class="mono" style="font-size: 11px">50%</span></td><td><span class="prio p0">P0 긴급</span></td><td><span class="av" style="background: #a855f7">K</span> kim</td><td style="color: #fcd34d; font-weight: 700">오늘</td><td class="muted">11-04</td></tr>
+                  <tr><td><input type="checkbox" aria-label="ISS-18 선택"></td><td class="key">ISS-18</td><td><span class="type task">작업</span></td><td><a href="#">시한 90초 적용 결과 확인(3일 관찰)</a> <span class="tag gray" style="height: 16px; font-size: 10px">하위 · ISS-1</span></td><td><span class="tag purple">ISS-20</span></td><td class="muted">2026-11 ②</td><td><span class="chip progress">진행 중</span></td><td><span class="bar" style="width: 48px"><span style="width: 66%"></span></span> <span class="mono" style="font-size: 11px">66%</span></td><td><span class="prio p1">P1 높음</span></td><td><span class="av" style="background: #22c55e">C</span> choi</td><td style="color: #fcd34d; font-weight: 700">내일</td><td class="muted">11-04</td></tr>
+                  <tr><td><input type="checkbox" aria-label="ISS-24 선택"></td><td class="key">ISS-24</td><td><span class="type improve">개선</span></td><td><a href="#">복원 리허설 결과를 일일 요약 메일에 싣기</a></td><td><span class="tag" style="background: rgba(45,212,191,.16); color: #5eead4">ISS-22</span></td><td class="muted">2026-11 ②</td><td><span class="chip progress">진행 중</span></td><td class="muted">—</td><td><span class="prio p2">P2 보통</span></td><td><span class="av" style="background: #a855f7">K</span> kim</td><td class="muted">11-12</td><td class="muted">11-03</td></tr>
+                  <tr><td><input type="checkbox" aria-label="ISS-2 선택"></td><td class="key">ISS-2</td><td><span class="type task">작업</span></td><td><a href="#">월간 점검 보고서 자동 생성 오류 (엑셀 시트 누락)</a></td><td class="muted">—</td><td class="muted">없음</td><td><span class="chip review">검토</span></td><td><span class="bar" style="width: 48px"><span style="width: 75%"></span></span> <span class="mono" style="font-size: 11px">75%</span></td><td><span class="prio p1">P1 높음</span></td><td><span class="av" style="background: #3b82f6">L</span> lee</td><td style="color: #fca5a5; font-weight: 700">2일 초과</td><td class="muted">11-04</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- 문법 도움 -->
+          <div class="card" style="padding: 12px 14px; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; font-size: 12px">
+            <div><b>필드</b><div class="mono muted" style="margin-top: 4px; line-height: 1.8">key · title · text · type · status · priority · assignee · reporter · watcher · vcenter · label · component · epic · parent · sprint · progress · due · created · updated · closed · doc</div></div>
+            <div><b>연산자 · 값</b><div class="mono muted" style="margin-top: 4px; line-height: 1.8">= != in not in &gt; &gt;= &lt; &lt;= ~(포함) is empty · is not empty<br>me() · now() · active() · -7d · 2026-11-01 · "따옴표 값"<br>AND · OR · 괄호 · ORDER BY 필드 ASC|DESC</div></div>
+            <div><b>규칙</b><div class="muted" style="margin-top: 4px; line-height: 1.7">서버가 식을 해석해 거른다(화면 복제 금지). 범위는 식보다 먼저 — 식에 다른 법인을 적어도 보이지 않는다. 식 길이 500자 · 조건 20개 상한. 저장 필터는 사람마다 50개, 공유는 전체 범위 운영자만. 주간 메일 구독은 그 필터의 결과 표를 월요일 09:00(포탈 날짜)에 보낸다.</div></div>
+          </div>
+        </section>
+      </div>
+    </main>
+  </div>
+  <footer class="sb" aria-label="상태"><span>서버 Uptime <b>6일</b></span><span>전체 호스트 <b>658</b></span><span>전체 VM <b>5,850</b> (5,412 On)</span><span>활성 알람 <b style="color: #ef4444">3</b></span></footer>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1040}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

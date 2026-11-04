@@ -1,6 +1,6 @@
 // v2.852 GPU 할당 계층 — 화면 행 펼치기·형제 정렬·찾기·글자(gpuAllocText.js).
 import { describe, it, expect } from 'vitest';
-import { flattenAlloc, openForLevel, sortSiblings, totalsNote, gpuTexts, numText, ALLOC_LEVELS, DEFAULT_LEVEL, pickVcenters, sumTotals, corpChips, allocExportQuery, EXPORT_DEPTHS, EXPORT_SHEETS } from './gpuAllocText.js';
+import { flattenAlloc, openForLevel, sortSiblings, totalsNote, gpuTexts, numText, ALLOC_LEVELS, DEFAULT_LEVEL, pickVcenters, sumTotals, corpChips, corpChipText, allocExportQuery, EXPORT_DEPTHS, EXPORT_SHEETS, exportPick, exportFileName } from './gpuAllocText.js';
 
 const tot = (o = {}) => ({ hosts: 1, gpus: 1, vsga: 0, capGB: 48, capUnknown: 0, allocGB: 24, allocUnknown: 0, offGB: 0, offUnknown: 0, vmsOn: 1, vmsOff: 0, unplaced: 0, freeGpus: 0, noPlacement: 0, spareGB: 24, allocPct: 50, ...o });
 const vmr = (id, name, gb = 24, extra = {}) => ({ id, name, powerState: 'POWERED_ON', mode: 'vgpu', profile: 'grid_a40-24q', vgpuDevices: 1, passthroughDevices: 0, gb, ...extra });
@@ -88,6 +88,11 @@ describe('v2.853 법인 칩', () => {
     const chips = corpChips(t, [{ id: 'vc2', name: 'vcenter-de' }, { id: 'AZ', name: 'vcenter-az' }, { id: 'vc1', name: 'vcenter-kr' }]);
     expect(chips.map((c) => [c.id, c.hosts])).toEqual([['AZ', 0], ['vc1', 2], ['vc2', 1]]);
     expect(corpChips(t, null).map((c) => c.id)).toEqual(['vc1', 'vc2']);
+    // v2.871 A4-02: 인벤토리 없이 status 만 있는 법인(첫 수집 전 · 접속 불가)은 0 이 아니라 모름(null · '—')
+    const u = corpChips(t, [{ id: 'PL', name: 'vc-pl', status: 'unreachable' }, { id: 'US', name: 'vc-us', status: 'pending' }, { id: 'ST', name: 'vc-st', status: 'unreachable', stale: true }]);
+    expect(u.filter((c) => ['PL', 'US', 'ST'].includes(c.id)).map((c) => [c.id, c.unknown, c.hosts])).toEqual([['PL', 'unreachable', null], ['ST', '', 0], ['US', 'pending', null]]);
+    expect(corpChipText(u.find((c) => c.id === 'PL')).count).toBe('—');
+    expect(corpChipText(u.find((c) => c.id === 'ST')).count).toBe('0');
     const rows = flattenAlloc(t, { query: 'vc2' });
     expect(rows[0].name).toBe('vcenter-de');
     expect(rows.some((r) => r.kind === 'host')).toBe(true);
@@ -100,8 +105,56 @@ describe('v2.855 내보내기 창 쿼리', () => {
     expect(allocExportQuery({ scope: 'vc1' })).toBe('?vcenterId=vc1');
     expect(allocExportQuery({ vcSel: new Set(['AZ', 'GM1']), depth: 'host' })).toBe('?vcenterIds=AZ%2CGM1&depth=host');
     expect(allocExportQuery({ depth: 'vm', sheets: ['info', 'tree'] })).toBe('?sheets=tree%2Cinfo');
-    expect(allocExportQuery({ sheets: ['tree', 'flat', 'info'] })).toBe('');
+    expect(allocExportQuery({ sheets: ['tree', 'flat', 'info', 'corp'] })).toBe('');
+    expect(allocExportQuery({ sheets: ['tree', 'flat', 'info'] })).toBe('?sheets=tree%2Cflat%2Cinfo', 'v2.869: 법인별 시트를 끄면 옛 3시트를 명시');
     expect(EXPORT_DEPTHS.map((d) => d.key)).toEqual(['host', 'gpu', 'vm']);
-    expect(EXPORT_SHEETS.map((s) => s.key)).toEqual(['tree', 'flat', 'info']);
+    expect(EXPORT_SHEETS.map((s) => s.key)).toEqual(['tree', 'flat', 'info', 'corp']);
+  });
+});
+
+describe('v2.868 CPU/메모리 칸', () => {
+  it('법인~호스트 행은 호스트 합, VM 행은 그 VM, GPU 행은 빈 칸 · 정렬 키', () => {
+    const t = tree();
+    const hostT = { hostCores: 32, hostCpuPct: 25, hostMemGB: 512, hostMemPct: 50, vmVcpu: 8, vmMemGB: 32 };
+    t.vcenters[0].totals = { ...t.vcenters[0].totals, ...hostT, hostCores: 64 };
+    const h = t.vcenters[0].datacenters[0].clusters[0].hosts[0];
+    h.totals = { ...h.totals, ...hostT };
+    h.gpus[0].vms[0].res = { vcpu: 8, memGB: 32, cpuPct: 40, memPct: null };
+    const rows = flattenAlloc(t, { open: openForLevel(t, 6) });
+    expect(rows[0].cores).toBe(64);
+    const hr = rows.find((r) => r.name === 'esx-b');
+    expect([hr.cores, hr.cpuPct, hr.memGB, hr.memPct, hr.gvmVcpu, hr.gvmMemGB]).toEqual([32, 25, 512, 50, 8, 32]);
+    const vr = rows.find((r) => r.name === 'cad-01');
+    expect([vr.cores, vr.cpuPct, vr.memGB, vr.memPct, vr.gvmVcpu]).toEqual([8, 40, 32, null, null]);
+    const gr = rows.find((r) => r.kind === 'gpu');
+    expect(gr.cores ?? null).toBe(null);
+    expect(sortSiblings([{ name: 'x', res: { vcpu: 2 } }, { name: 'y', res: { vcpu: 16 } }, { name: 'z' }], { key: 'cores', dir: 'desc' }).map((x) => x.name)).toEqual(['y', 'x', 'z']);
+  });
+});
+
+describe('v2.869 내보내기 창 — 법인 모두 선택이 기본 · 법인별 시트 파일 이름', () => {
+  const chips = [{ id: 'AZ' }, { id: 'GM1' }, { id: 'KR' }];
+  it('창은 모든 법인(null)으로 시작 · 칩을 전부 고르면 다시 전체 · 일부면 그 집합 · 빈 집합은 그대로(호출 쪽이 잠금)', () => {
+    expect(exportPick(null, chips)).toBe(null);
+    expect(exportPick(new Set(['AZ', 'GM1', 'KR']), chips)).toBe(null);
+    expect([...exportPick(new Set(['GM1']), chips)]).toEqual(['GM1']);
+    expect(exportPick(new Set(), chips).size).toBe(0);
+    expect(allocExportQuery({ vcSel: exportPick(null, chips) })).toBe('', '모든 법인이면 vcenterIds 를 싣지 않는다(서버 조회 범위 전부)');
+  });
+  it('파일 이름은 서버가 준 것 — 법인별 시트가 들어가면 _percorp 판', () => {
+    const meta = { fileNames: { vm: 'a.xlsx', host: 'a_host.xlsx' }, fileNamesPercorp: { vm: 'a_percorp.xlsx', host: 'a_host_percorp.xlsx' } };
+    expect(exportFileName(meta, 'vm', true)).toBe('a_percorp.xlsx');
+    expect(exportFileName(meta, 'host', false)).toBe('a_host.xlsx');
+    expect(exportFileName(null, 'vm', true)).toBe('');
+  });
+});
+
+describe('v2.871 버그 점검', () => {
+  it('VM 행 정렬 — 꺼진 VM 은 꺼진 VM GB 로, 할당 정렬에서는 값 없음(뒤로)', () => {
+    const offs = [vmr('a', 'a', 8, { powerState: 'POWERED_OFF' }), vmr('b', 'b', 48, { powerState: 'POWERED_OFF' }), vmr('c', 'c', 24, { powerState: 'POWERED_OFF' })];
+    expect(sortSiblings(offs, { key: 'off', dir: 'desc' }).map((x) => x.name)).toEqual(['b', 'c', 'a']);
+    const mix = [vmr('x', 'off', 48, { powerState: 'POWERED_OFF' }), vmr('y', 'on', 8)];
+    expect(sortSiblings(mix, { key: 'alloc', dir: 'desc' }).map((x) => x.name)).toEqual(['on', 'off']);
+    expect(sortSiblings(mix, { key: 'off', dir: 'desc' }).map((x) => x.name)).toEqual(['off', 'on']);
   });
 });

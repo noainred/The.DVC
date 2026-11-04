@@ -67,8 +67,10 @@ export function effectiveSettings() {
 }
 
 const AUTH_CODES = new Set(['auth', 'pam', 'tls']);
-/** 엣지 노드(중앙으로 push) — 엣지에서는 대행하지 않는다(엣지 자기 Bareos 설정의 agent 는 쓰지 않는다). */
-const isEdge = () => !!config.agent?.centralUrl;
+/** 엣지 노드(중앙으로 push) — 엣지에서는 대행하지 않는다(엣지 자기 Bareos 설정의 agent 는 쓰지 않는다).
+ *  v2.874(점검 B4-11): 리허설 · 요약 메일이 url+token 으로 따로 판정해 토큰만 빠진 엣지에서 정기 작업이 돌 수 있었다 — 판정은 이것 하나. */
+export const isEdgeNode = () => !!config.agent?.centralUrl;
+const isEdge = isEdgeNode;
 
 /**
  * 그 Director 의 세션을 열어 fn(session) 을 돌리고 닫는다.
@@ -95,7 +97,7 @@ export async function withDirector(directorId, fn, { trigger = 'manual', signal 
     try { return await fn(s); } finally { s.close(); }
   }
   const dir = directorById(directorId, settings);
-  if (!dir) throw fail('not-configured', '이 백업 대상의 법인 Director 가 설정에 없습니다 — 설정 › 법인별 Director 에서 확인하세요.');
+  if (!dir) throw fail('not-configured', '이 백업 대상의 법인 Director 가 설정에 없습니다 — 설정 › vCenter 관리 › Bareos 백업 서버 › Director 에서 확인하세요.');
   // v2.824: 엣지 대행 Director 는 중앙이 세션을 열지 않는다(onDirector 가 작업 표로 엣지에 보낸다) — 세션 함수(fn)는 엣지로 보낼 수 없다.
   if (dir.agent && !isEdge()) throw fail('edge-relay', `‘${dir.name}’ Director 는 법인 엣지 '${dir.agent}' 가 대행합니다 — 중앙에서 직접 접속하지 않습니다.`);
   return sessionOn(dir, fn, { trigger, signal });
@@ -107,7 +109,7 @@ export async function withDirector(directorId, fn, { trigger = 'manual', signal 
  */
 export async function sessionOn(dir, fn, { trigger = 'manual', signal = null } = {}) {
   const { conn, missing } = directorConn(dir);
-  if (!conn) throw fail('not-configured', `‘${dir.name}’ Director 설정이 덜 됐습니다(${missing.join('·')}) — 설정 › 법인별 Director 에서 먼저 채우세요.`);
+  if (!conn) throw fail('not-configured', `‘${dir.name}’ Director 설정이 덜 됐습니다(${missing.join('·')}) — 설정 › vCenter 관리 › Bareos 백업 서버 › Director 에서 먼저 채우세요.`);
   const cred = directorCred(dir);
   if (trigger === 'timer') {
     const stop = bareosAuthGuard.authStopFor(cred);
@@ -211,9 +213,9 @@ export function eligibility(vm, settings) {
   if (vm.template) return { ok: false, reason: '템플릿은 백업할 수 없습니다(스냅샷을 만들 수 없음 — Bareos 플러그인 제약).' };
   if (!vm.vcDcPath || !vm.folderPath) return { ok: false, reason: '인벤토리에 데이터센터·폴더 경로가 없습니다(vApp 안의 VM 이거나 SOAP 수집 전 — 다음 수집 뒤 다시 보세요).' };
   const site = siteFor(vm.vcenterId, settings);
-  if (!site) return { ok: false, reason: '이 vCenter 가 어느 법인 Director 에도 묶여 있지 않습니다 — 설정 › 법인별 Director 에서 먼저 묶으세요.' };
+  if (!site) return { ok: false, reason: '이 vCenter 가 어느 법인 Director 에도 묶여 있지 않습니다 — 설정 › vCenter 관리 › Bareos 백업 서버 › Director 에서 먼저 묶으세요.' };
   const director = directorById(site.directorId, settings);
-  if (!director) return { ok: false, reason: '이 vCenter 를 묶은 Director 가 설정에 없습니다 — 설정 › 법인별 Director 에서 확인하세요.' };
+  if (!director) return { ok: false, reason: '이 vCenter 를 묶은 Director 가 설정에 없습니다 — 설정 › vCenter 관리 › Bareos 백업 서버 › Director 에서 확인하세요.' };
   const miss = siteMissing(site);
   if (miss.length) return { ok: false, reason: `이 vCenter 의 매핑이 덜 됐습니다(${miss.join('·')}) — ‘${director.name}’ 편집 화면의 매핑 표를 채우세요.` };
   const p = backupPluginOptions({ plugin: settings.defaults.pluginName, vcserver: site.vcserver, dc: vm.vcDcPath, folder: vm.folderPath, vmname: vm.name, configFile: site.configFile });

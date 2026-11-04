@@ -13,12 +13,12 @@ import Select from '../../components/Select.jsx';
 import { Note, ReadGuide } from './BareosBits.jsx';
 import { requireChanged } from '../changeResult.js';   // putJson 은 400 · 409 를 던지지 않고 본문을 돌려준다 — 실패를 '저장됨' 으로 보이지 않게
 import { whenText } from './bareosText.js';
-import { WEEKDAYS, rehearsalPolicyText, toolsText, verifyText, verifyTone, digestStatusText } from './bareosRestoreText.js';
+import { WEEKDAYS, rehearsalPolicyText, rehearsalDsOptions, toolsText, verifyText, verifyTone, digestStatusText, rehearsalLastRuns, rehearsalRunText, rehearsalRunTone, cleanupText } from './bareosRestoreText.js';
 
 const BASE = '/tools/bareos-backup';
 const ROW = { display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' };
 const FIELD = { display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12, minWidth: 0 };
-const TONE_COLOR = { ok: '#86efac', bad: '#fca5a5', info: 'var(--text-dim)' };
+const TONE_COLOR = { ok: '#86efac', bad: '#fca5a5', warn: '#fcd34d', info: 'var(--text-dim)' };
 
 export default function BareosRehearsal({ directors = [] }) {
   const [d, setD] = useState(null);
@@ -28,6 +28,8 @@ export default function BareosRehearsal({ directors = [] }) {
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState(null);
   const [runDir, setRunDir] = useState('');
+  const [dss, setDss] = useState(null);       // v2.863 vCenter → 데이터스토어 목록(정책 편집을 열 때 한 번 — 인벤토리 조회)
+  const [dsErr, setDsErr] = useState(null);
   const gen = useRef(0);
   const load = useCallback(() => {
     const g = ++gen.current;
@@ -35,6 +37,19 @@ export default function BareosRehearsal({ directors = [] }) {
     fetchJson(`${BASE}/rehearsal`).then((r) => { if (g === gen.current) setD(r); }).catch((e) => { if (g === gen.current) setErr(e); });
   }, []);
   useEffect(() => { load(); }, [load]);
+  const editing = !!edit;
+  useEffect(() => {
+    if (!editing || dss || dsErr) return;
+    let live = true;
+    fetchJson('/datastores').then((r) => {
+      if (!live) return;
+      const by = {};
+      for (const x of r.items || []) (by[x.vcenterId] ||= []).push({ name: x.name, freeGB: x.freeGB ?? null, capacityGB: x.capacityGB ?? null, accessible: x.accessible });
+      setDss(by);
+    }).catch((e) => { if (live) setDsErr(e); });
+    return () => { live = false; };
+  }, [editing, dss, dsErr]);
+  const setDs = (vcId, v) => setEdit((cur) => { const m = { ...(cur.datastores || {}) }; if (v) m[vcId] = v; else delete m[vcId]; return { ...cur, datastores: m }; });
 
   const save = async () => {
     setBusy(true); setMsg(null);
@@ -56,6 +71,7 @@ export default function BareosRehearsal({ directors = [] }) {
   if (!d) return <div className="card" style={{ padding: 12 }}><Loading /></div>;
   const p = d.policy || {};
   const dirName = (id) => directors.find((x) => x.id === id)?.name || id || '—';
+  const lastRuns = rehearsalLastRuns(d.runs, directors);
 
   return (
     <div className="card" data-bareos-rehearsal="" style={{ padding: 12, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -63,7 +79,7 @@ export default function BareosRehearsal({ directors = [] }) {
         <b style={{ fontSize: 13.5 }}>복원 검증(리허설)</b>
         <span className="muted" style={{ fontSize: 12, minWidth: 0, overflowWrap: 'anywhere' }}>{rehearsalPolicyText(p)}</span>
         <button type="button" className="tab" style={{ padding: '3px 10px', fontSize: 12, marginLeft: 'auto' }} onClick={load}>다시 읽기</button>
-        {d.fullScope && !edit && <button type="button" className="tab" style={{ padding: '3px 10px', fontSize: 12 }} onClick={() => { setEdit({ enabled: !!p.enabled, weekday: p.weekday ?? 6, time: p.time || '03:17', perCorp: p.perCorp ?? 3, deleteOnOk: p.deleteOnOk !== false, datastores: { ...(p.datastores || {}) } }); /* 법인별 데이터스토어(화면에 칸은 없다)를 저장이 지우지 않게(반증 F5) */ setMsg(null); }}>정책 바꾸기</button>}
+        {d.fullScope && !edit && <button type="button" className="tab" style={{ padding: '3px 10px', fontSize: 12 }} onClick={() => { setEdit({ enabled: !!p.enabled, weekday: p.weekday ?? 6, time: p.time || '03:17', perCorp: p.perCorp ?? 3, deleteOnOk: p.deleteOnOk !== false, datastores: { ...(p.datastores || {}) } }); /* vCenter 별 데이터스토어 — 아래 칸에 없는 vCenter 의 값도 저장이 지우지 않게(반증 F5) */ setMsg(null); }}>정책 바꾸기</button>}
       </div>
       {d.loadError && <Note tone="bad">복원 검증 정책 파일을 읽지 못했습니다(손상본 보존) — 검증을 돌리지 않고 저장을 막았습니다.</Note>}
       {!p.enabled && <Note tone="info">꺼져 있습니다 — 검증은 VM 을 새로 만들고 데이터스토어를 씁니다. 전체 범위 관리자가 정책을 켜야 정한 요일 · 시각에 돕니다.</Note>}
@@ -85,6 +101,26 @@ export default function BareosRehearsal({ directors = [] }) {
             </label>
             <label className="muted" style={{ ...FIELD, flexDirection: 'row', alignItems: 'center', gap: 6 }}><input type="checkbox" checked={edit.deleteOnOk} onChange={(e) => setEdit({ ...edit, deleteOnOk: e.target.checked })} />성공한 검증용 VM 지우기</label>
           </div>
+          {(d.vcenters || []).length > 0 && (
+            <details data-rehearsal-ds="" style={{ minWidth: 0 }}>
+              <summary className="muted" style={{ fontSize: 12, cursor: 'pointer' }}>검증용 VM 을 만들 데이터스토어(vCenter 마다) · 지정 {Object.keys(edit.datastores || {}).length}곳</summary>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 8, minWidth: 0 }}>
+                <span className="muted" style={{ fontSize: 12 }}>고르지 않으면 VM 의 홈 데이터스토어(첫 디스크)에 만듭니다. 어느 쪽이든 검증 때 여유를 합산해 보고, 여유나 VM 용량을 읽지 못하면 그 VM 은 건너뜁니다.</span>
+                {dsErr && <Note tone="bad">데이터스토어 목록을 읽지 못했습니다 — 지금 값은 그대로 둡니다.</Note>}
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 300px), 1fr))', gap: 8 }}>
+                  {d.vcenters.map((vc) => (
+                    <label key={vc.id} className="muted" style={FIELD}>
+                      <span style={{ overflowWrap: 'anywhere' }}>{vc.name} · 대상 {unitText(vc.jobs, '대')}</span>
+                      <Select className="input" sort={false} style={{ minWidth: 0 }} value={edit.datastores?.[vc.id] || ''} onChange={(e) => setDs(vc.id, e.target.value)} aria-label={`${vc.name} 검증 데이터스토어`}>
+                        {rehearsalDsOptions(dss && !dsErr ? (dss[vc.id] || []) : null, edit.datastores?.[vc.id], { loading: !dss && !dsErr }).map((o) => <option key={o.value || '-'} value={o.value}>{o.label}</option>)}
+                      </Select>
+                    </label>
+                  ))}
+                </div>
+                {!dss && !dsErr && <span className="muted" style={{ fontSize: 12 }}>데이터스토어 목록을 읽는 중…</span>}
+              </div>
+            </details>
+          )}
           <div style={ROW}>
             <label className="muted" style={{ ...FIELD, width: 180 }}>본인 OTP(6자리)
               <input className="input" inputMode="numeric" autoComplete="one-time-code" value={otp} onChange={(e) => setOtp(e.target.value.replace(/\D/g, '').slice(0, 6))} />
@@ -105,11 +141,34 @@ export default function BareosRehearsal({ directors = [] }) {
           <button type="button" className="tab" style={{ padding: '5px 12px', fontSize: 12 }} disabled={busy || !runDir || !/^\d{6}$/.test(otp)} onClick={runNow}>{busy ? '보내는 중…' : `지금 검증 · 법인마다 ${unitText(p.perCorp, '대')}`}</button>
         </div>
       )}
-      <div className="table-wrap" style={{ maxHeight: '40vh' }}>
+      {/* v2.874(점검 B4-02): 법인별 마지막 회차 — 0대로 끝난 정기 검증도 사유와 함께 보인다(예전에는 회차 기록을 그리지 않았다) */}
+      {lastRuns.length > 0 && (
+        <details data-rehearsal-runs="" style={{ minWidth: 0 }} open={lastRuns.some((x) => rehearsalRunTone(x.run) !== 'ok')}>
+          <summary className="muted" style={{ fontSize: 12, cursor: 'pointer' }}>법인별 마지막 회차 · {lastRuns.length}곳{lastRuns.some((x) => rehearsalRunTone(x.run) === 'bad') ? ' · 시작 0대 있음' : ''}</summary>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 6, minWidth: 0 }}>
+            {lastRuns.map(({ directorId, run, older }) => {
+              const miss = (run.items || []).filter((x) => x && !x.ok);
+              return (
+                <div key={directorId} style={{ fontSize: 12, minWidth: 0, borderLeft: `3px solid ${TONE_COLOR[rehearsalRunTone(run)]}`, paddingLeft: 8 }}>
+                  <div style={{ overflowWrap: 'anywhere' }}><b>{dirName(directorId)}</b> <span className="muted">{rehearsalRunText(run)}{older ? ` · 이전 기록 ${older}건` : ''}</span></div>
+                  {miss.length > 0 && (
+                    <ul style={{ margin: '2px 0 0', paddingLeft: 18, color: 'var(--text-dim)' }}>
+                      {miss.slice(0, 10).map((x, i) => <li key={`${x.jobId}-${i}`} style={{ overflowWrap: 'anywhere' }}>{x.vmName || x.jobId} — {String(x.reason || '사유 미상').slice(0, 200)}</li>)}
+                      {miss.length > 10 && <li>외 {miss.length - 10}대</li>}
+                    </ul>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </details>
+      )}
+      {/* v2.863: 결과가 없으면 표 대신 문구만 — 760px 표 가운데 칸에 두면 좁은 화면(400px)에서 가로 스크롤 밖으로 잘렸다(Chromium 판독) */}
+      {!d.results.length && <div className="muted" style={{ fontSize: 12.5, padding: '10px 4px' }}>아직 검증 결과가 없습니다.</div>}
+      {d.results.length > 0 && <div className="table-wrap" style={{ maxHeight: '40vh' }}>
         <STable minWidth={760} wrap={false}>
           <thead><tr><th>VM</th><th>검증용 VM</th><th>시작</th><th>결과</th><th>Tools 응답</th><th>정리</th></tr></thead>
           <tbody>
-            {!d.results.length && <tr><td colSpan={6} className="center muted" style={{ padding: 14 }}>아직 검증 결과가 없습니다.</td></tr>}
             {d.results.map((x) => (
               <tr key={`${x.jobId}-${x.rid}`}>
                 <td data-sort={x.vmName}><b>{x.vmName}</b><div className="muted" style={{ fontSize: 11 }}>{dirName(x.directorId)}</div></td>
@@ -117,22 +176,22 @@ export default function BareosRehearsal({ directors = [] }) {
                 <td data-sort={x.at ?? ''}>{whenText(x.at)}</td>
                 <td style={{ fontSize: 12, whiteSpace: 'normal', maxWidth: 320, color: TONE_COLOR[verifyTone(x)] }} title={x.finish?.detail || undefined}>{verifyText(x)}{x.finish?.detail && x.finish?.verify !== 'ok' ? <div className="muted" style={{ fontSize: 11 }}>{String(x.finish.detail).slice(0, 160)}</div> : null}</td>
                 <td data-sort={x.finish?.toolsMs ?? ''}>{toolsText(x.finish?.toolsMs)}</td>
-                <td style={{ fontSize: 12 }}>{x.finish?.deleted ? '지움' : x.finish?.verify ? '남김' : '—'}</td>
+                <td style={{ fontSize: 12, whiteSpace: 'normal', maxWidth: 220 }}>{cleanupText(x.finish)}</td>
               </tr>
             ))}
           </tbody>
         </STable>
-      </div>
+      </div>}
       <ReadGuide note="검증은 켜 보기까지만 합니다 — 네트워크를 끊은 채라 핑 · 앱 시험은 하지 않습니다.">
         <div>① 고르기: 법인마다 마지막 백업이 성공한 활성 대상 중 가장 오래 검증하지 않은 VM 부터(돌아가며). 진행 중 복원이 있거나 등록 뒤 위치가 바뀐 VM 은 뺍니다.</div>
         <div>② 회차는 보내기 전에 기록합니다 — 같은 날 다시 돌지 않습니다. 인증이 멈춘 Director 는 정기 검증에서 건너뜁니다.</div>
-        <div>③ 결과는 일일 요약 메일에도 실립니다(설정 › 공통 기본값 · 수집).</div>
+        <div>③ 결과는 일일 요약 메일에도 실립니다(설정 › vCenter 관리 › Bareos 백업 서버 › 공통 기본값 · 수집).</div>
       </ReadGuide>
     </div>
   );
 }
 
-/** 일일 요약 메일 설정(설정 › 공통 기본값 · 수집 안 — 전체 범위 관리자). */
+/** 일일 요약 메일 설정(설정 › vCenter 관리 › Bareos 백업 서버 › 공통 기본값 · 수집 안 — 전체 범위 관리자). */
 export function BareosDigestSettings() {
   const [d, setD] = useState(null);
   const [err, setErr] = useState(null);

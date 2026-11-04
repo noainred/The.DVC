@@ -14,8 +14,8 @@ import { jobDigests } from './registry.js';
 import { onDirector, isDemoActive, effectiveSettings } from './service.js';
 import { jobDirectorId, directorById } from './settings.js';
 import { hasPending } from './edgeOps.js';
-import { isFinalStatus } from './names.js';
-import { rateNowOf } from './liveParse.js';
+import { runningRunOf } from './cancelState.js';
+import { rateNowOf, fdAnswerIssue } from './liveParse.js';
 import { LIVE_CLIENTS_MAX } from './ops.js';
 import { poolSettled } from '../util/pool.js';
 
@@ -28,20 +28,15 @@ export const HIST_KEEP = 60;
 let _touchedAt = 0;
 let _timer = null;
 let _busy = false;
+let _rev = 0;   // v2.870 감사 A5-02: 조회 한 번마다 오른다 — 진행 현황 응답 캐시 키(ETag)에 넣는다(스냅샷 세대만으로는 304 로 옛 값이 보였다)
+export const liveRev = () => _rev;
 /** Director id → { at, ok, code, clients: { client → { ok, code } }, jobs: Map<jobid, row> } */
 const _live = new Map();
 /** 법인(vCenter id) → [{ at, rate|null, jobs }] — Director 하나가 법인 여럿을 맡아도 법인마다 따로(합계가 겹쳐 세지지 않게 · Chromium 확인) */
 const _hist = new Map();
 
-/** 이 잡이 지금 도는가(포탈이 시작한 실행 pending · Director 스케줄이 돌린 실행은 lastRun 이 끝나지 않은 상태). */
-export function runningRunOf(j) {
-  if (j?.pending?.jobid) return { jobid: j.pending.jobid, state: j.pending.state || 'queued', level: j.pending.level || '', since: j.pending.since || null, trigger: j.pending.trigger || '', by: j.pending.by || '' };
-  const L = j?.lastRun;
-  if (L?.jobid && L.status && !isFinalStatus(L.status) && ['running', 'queued', 'waiting'].includes(L.state)) {
-    return { jobid: L.jobid, state: L.state, level: L.level || '', since: L.startedAt ?? null, trigger: 'schedule', by: '' };
-  }
-  return null;
-}
+/** 이 잡이 지금 도는가 — v2.867 판정은 cancelState.js 하나(취소 · 그룹 중단이 같은 판정을 쓴다). 예전 import 경로를 위해 다시 내보낸다. */
+export { runningRunOf };
 
 /** Director 마다 실행 중 잡과 물을 FD 목록(설정의 법인 FD + 잡의 FD). 데모 잡은 데모 Director 일 때만(③). */
 export function liveTargets(jobs, settings, demo) {
@@ -93,16 +88,24 @@ export async function liveTick({ now = Date.now(), deadlineMs = LIVE_DEADLINE_MS
         // v2.833.1: FD 가 없어도 Director 상태(잡마다 상태 문구)는 묻는다
         res = await onDirector(t.directorId, 'liveStatus', { clients: t.clients, director: true }, { trigger: 'timer', signal: AbortSignal.timeout(deadlineMs) });
       } catch (e) {
+        // v2.871 감사 A4-01: 이번 틱에 FD 를 하나도 읽지 못했다 — 직전 틱의 clients(ok:true)를 그대로 이월하면 jobFdState 가 '답했다' 로 읽고
+        //   jobs 는 비어 있어 모든 실행 중 행이 'FD 진행 보고 없음' · 멈춤 의심(no-report)이 됐다(고RTT 법인 Director 시한에서 재현).
+        //   이번에 물으려던 FD(+ 직전 틱의 FD)를 모두 이번 실패 코드로 덮는다 — 첫 틱부터 실패해도 'not-asked' 가 아니라 실제 사유(timeout 등)가 남는다.
         const prev = _live.get(t.directorId);
-        _live.set(t.directorId, { at: now, ok: false, code: e?.code || 'error', clients: prev?.clients || {}, jobs: new Map(), dir: { ok: false, code: e?.code || 'error', jobs: new Map(), raw: '' } });
+        const code = e?.code || 'error';
+        const clients = {};
+        for (const c of [...Object.keys(prev?.clients || {}), ...t.clients]) clients[c] = { ok: false, code };
+        _live.set(t.directorId, { at: now, ok: false, code, clients, jobs: new Map(), dir: { ok: false, code, jobs: new Map(), raw: '' } });
         for (const [vc, list] of byVc(t.jobs)) pushHist(vc, { at: now, rate: null, jobs: list.length });
         return;
       }
       const jobs = new Map();
       const clients = {};
       for (const c of res?.clients || []) {
-        clients[c.client] = c.ok ? { ok: true, raw: c.raw || '', n: (c.jobs || []).length } : { ok: false, code: c.code || 'error' };
-        for (const x of c.jobs || []) if (x?.jobid) jobs.set(x.jobid, x);
+        // v2.870: Director 가 FD 에 닿지 못한 답('Failed to connect to Client')은 실패로(옛 엣지 회신도 여기서 — 판정은 중앙 한 곳)
+        const issue = c.ok ? fdAnswerIssue(c.raw) : '';
+        clients[c.client] = c.ok && !issue ? { ok: true, raw: c.raw || '', n: (c.jobs || []).length } : { ok: false, code: issue || c.code || 'error', ...(issue ? { raw: c.raw || '' } : {}) };
+        if (c.ok && !issue) for (const x of c.jobs || []) if (x?.jobid) jobs.set(x.jobid, x);
       }
       const anyOk = Object.values(clients).some((c) => c.ok);
       const d0 = res?.director;
@@ -119,7 +122,7 @@ export async function liveTick({ now = Date.now(), deadlineMs = LIVE_DEADLINE_MS
     });
   } catch (e) {
     console.warn(`[bareos] 진행 현황 조회 오류: ${String(e?.message || e).slice(0, 200)}`);
-  } finally { _busy = false; }
+  } finally { _busy = false; _rev += 1; }
   return { asked, skipped };
 }
 
@@ -146,4 +149,4 @@ export function liveSnapshot(dir, vcenterId = '') {
 }
 
 export const _liveBusyForTest = () => _busy;
-export function _resetLiveForTest() { if (_timer) { clearInterval(_timer); _timer = null; } _touchedAt = 0; _busy = false; _live.clear(); _hist.clear(); }
+export function _resetLiveForTest() { if (_timer) { clearInterval(_timer); _timer = null; } _touchedAt = 0; _busy = false; _live.clear(); _hist.clear(); _rev += 1; }

@@ -1,0 +1,193 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>이슈 — 연결 · 체크리스트 · 첨부 · 시간 추적 · 수정 버전 · SLA · 캘린더</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=Noto+Sans+KR:wght@400;500;700;800&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+body{margin:0;background:#0a0e17;color:#e6edf6;font-family:"Inter","Noto Sans KR","Apple SD Gothic Neo",sans-serif;font-size:13px}
+a{color:#93c5fd}a:hover{color:#bfdbfe}
+.tb{display:flex;align-items:center;gap:14px;height:44px;padding:0 16px;background:#0f1626;border-bottom:1px solid #243049}
+.tb .logo{display:inline-flex;align-items:center;gap:8px;font-weight:800;font-size:14px}
+.tb .logo .v{width:26px;height:26px;border-radius:7px;background:#3b82f6;display:inline-flex;align-items:center;justify-content:center;font-size:13px;color:#fff}
+.ver{font-size:11px;font-weight:700;color:#5eead4;border:1px solid #2dd4bf;border-radius:6px;padding:1px 6px}
+.mock{font-size:11px;font-weight:800;color:#fcd34d;background:rgba(245,158,11,.16);border-radius:6px;padding:2px 7px}
+.side{flex:0 0 236px;background:#0f1626;border-right:1px solid #243049;padding:14px 10px;display:flex;flex-direction:column;gap:2px}
+.side a{display:flex;align-items:center;gap:10px;min-height:36px;padding:0 12px;border-radius:9px;color:#aebbd0;text-decoration:none;font-size:13.5px;font-weight:600}
+.side a.on{background:#1a2236;color:#e6edf6;box-shadow:inset 3px 0 0 #3b82f6}
+.side .n{margin-left:auto;font-size:11px;color:#5d6b85}
+.card{background:#141b2d;border:1px solid #243049;border-radius:12px}
+.muted{color:#8b9bb4}.faint{color:#5d6b85}
+.mono{font-family:"JetBrains Mono",ui-monospace,monospace}
+.btn{display:inline-flex;align-items:center;gap:6px;min-height:30px;padding:0 11px;border-radius:8px;border:1px solid #243049;background:#1a2236;color:#e6edf6;font:inherit;font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap;text-decoration:none}
+.btn.primary{background:#3b82f6;border-color:#3b82f6;color:#fff}
+.btn.sm{min-height:26px;padding:0 9px;font-size:11.5px}
+.tag{display:inline-flex;align-items:center;gap:5px;height:20px;padding:0 8px;border-radius:999px;font-size:11px;font-weight:700;white-space:nowrap}
+.tag.blue{background:rgba(59,130,246,.18);color:#93c5fd}.tag.gray{background:rgba(139,155,180,.14);color:#aebbd0}.tag.ok{background:rgba(34,197,94,.14);color:#86efac}.tag.warn{background:rgba(245,158,11,.16);color:#fcd34d}.tag.bad{background:rgba(239,68,68,.16);color:#fca5a5}.tag.purple{background:rgba(168,85,247,.18);color:#d8b4fe}.tag.teal{background:rgba(45,212,191,.16);color:#5eead4}
+.chip{display:inline-flex;align-items:center;height:22px;padding:0 9px;border-radius:6px;font-size:11.5px;font-weight:700;border:1px solid #243049;background:#0f1626}
+.chip.progress{color:#93c5fd;border-color:rgba(59,130,246,.5)}.chip.todo{color:#e6edf6}.chip.done{color:#86efac;border-color:rgba(34,197,94,.4)}.chip.backlog{color:#aebbd0}
+.key{font-family:"JetBrains Mono",monospace;color:#8b9bb4;font-size:12px}
+.type{font-size:12px;font-weight:800}.type.incident{color:#fca5a5}.type.task{color:#93c5fd}.type.improve{color:#5eead4}
+.iss{display:inline-flex;align-items:center;gap:6px;height:22px;padding:0 8px 0 6px;border-radius:6px;border:1px solid #243049;background:#0f1626;color:#e6edf6;font-size:12px;font-weight:600;text-decoration:none;vertical-align:middle;min-width:0}
+.iss .k{font-family:"JetBrains Mono",monospace;color:#93c5fd;font-size:11.5px}
+.iss .st{width:8px;height:8px;border-radius:50%;flex:0 0 auto}
+.av{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:50%;font-size:10px;font-weight:800;color:#fff;flex:0 0 auto}
+.input{min-height:30px;border:1px solid #243049;border-radius:8px;background:#0a0e17;color:#e6edf6;font:inherit;font-size:12.5px;padding:0 10px}
+.bar{display:inline-block;height:6px;border-radius:3px;background:rgba(36,48,73,.9);overflow:hidden;vertical-align:middle}
+.bar > span{display:block;height:100%;border-radius:3px;background:#3b82f6}
+.bar.ok > span{background:#22c55e}.bar.warn > span{background:#f59e0b}
+.sec{display:flex;flex-direction:column;gap:8px;padding:12px 14px;border-top:1px solid #1f2a40}
+.sec .h{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.sec .h b{font-size:13.5px}
+.lnk{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:12.5px}
+.lnk .rel{min-width:64px;color:#8b9bb4;font-size:11.5px;font-weight:700}
+.task{display:flex;align-items:center;gap:8px;font-size:12.5px}
+.task.done{color:#8b9bb4;text-decoration:line-through}
+.att{display:flex;align-items:center;gap:8px;padding:6px 8px;border:1px solid #243049;border-radius:8px;background:#0f1626;font-size:12px;min-width:0}
+.att .th{width:36px;height:28px;border-radius:5px;background:#243049;flex:0 0 auto}
+.prop{display:flex;flex-direction:column;gap:5px}
+.prop .l{font-size:11.5px;font-weight:700;color:#8b9bb4;letter-spacing:.3px}
+.kbd{font-family:"JetBrains Mono",monospace;font-size:11px;border:1px solid #243049;border-bottom-width:2px;border-radius:5px;padding:1px 6px;background:#0f1626;color:#e6edf6}
+.cal{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:4px}
+.cal .d{min-height:74px;border:1px solid #243049;border-radius:8px;background:#0f1626;padding:5px 6px;font-size:11px;display:flex;flex-direction:column;gap:3px;min-width:0}
+.cal .d.today{border-color:#3b82f6}
+.cal .d .n{color:#8b9bb4;font-weight:700}
+.cal .d a{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;border-radius:4px;padding:1px 5px;font-size:10.5px;text-decoration:none;color:#e6edf6;background:#1a2236;border-left:2px solid #3b82f6}
+.cal .d a.over{border-left-color:#ef4444}.cal .d a.sprint{border-left-color:#a855f7;background:rgba(168,85,247,.12)}
+.sb{display:flex;align-items:center;height:30px;background:#0f1626;border-top:1px solid #243049;font-family:"JetBrains Mono",monospace;font-size:11.5px;color:#8b9bb4}
+.sb span{flex:1;text-align:center;border-right:1px solid #243049}.sb span:last-child{border-right:0}.sb b{color:#e6edf6}
+</style>
+</helmet>
+
+<div style="min-height: 100vh; display: flex; flex-direction: column; background: #0a0e17">
+  <header class="tb">
+    <span class="muted" aria-hidden="true">☰</span>
+    <span class="logo"><span class="v">V</span>The Davinci</span>
+    <span class="ver">v2.876.0</span><span class="mock">MOCK</span>
+    <span style="flex: 1"></span>
+    <span class="mono muted" style="font-size: 11.5px">11/11 vCenter <b style="color: #22c55e">OK</b> · 오전 10:34</span>
+    <span class="av" style="background: #3b82f6; width: 24px; height: 24px">A</span>
+    <span style="font-size: 12.5px; font-weight: 700">Anonymous <span class="muted" style="font-weight: 400; font-size: 11px">관리자</span></span>
+    <button class="btn sm" type="button">Out</button>
+  </header>
+
+  <div style="display: flex; flex-wrap: wrap; flex: 1">
+    <nav class="side" aria-label="메뉴">
+      <a href="#"><span aria-hidden="true">◫</span>Overview</a>
+      <a href="#"><span aria-hidden="true">▤</span>Summary</a>
+      <a href="#"><span aria-hidden="true">▣</span>서버<span class="n">6 ▾</span></a>
+      <a href="#"><span aria-hidden="true">▥</span>스토리지<span class="n">7 ▾</span></a>
+      <a href="#"><span aria-hidden="true">⌘</span>네트워크<span class="n">6 ▾</span></a>
+      <a href="#"><span aria-hidden="true">⚙</span>자원관리<span class="n">3 ▾</span></a>
+      <a href="#"><span aria-hidden="true">◔</span>자원 최적화<span class="n">2 ▾</span></a>
+      <a href="#"><span aria-hidden="true">✦</span>특수 기능</a>
+      <a href="IssueEpic.dc.html" class="on"><span aria-hidden="true">⚑</span>이슈</a>
+      <a href="Main.dc.html"><span aria-hidden="true">▧</span>위키</a>
+      <a href="#"><span aria-hidden="true">▭</span>게시판</a>
+      <a href="#"><span aria-hidden="true">✲</span>설정<span class="n">2 ▾</span></a>
+    </nav>
+
+    <main style="flex: 999 1 560px; min-width: 0; padding: 16px 22px 24px; display: flex; flex-direction: column; gap: 12px">
+      <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap">
+        <div style="display: inline-flex; gap: 6px; flex-wrap: wrap"><a class="btn primary" href="IssueEpic.dc.html">보드</a><a class="btn" href="SavedFilter.dc.html">목록</a><a class="btn" href="#">내 작업</a><a class="btn" href="#">활동</a><a class="btn" href="Sprint.dc.html">스프린트</a><a class="btn" href="#">에픽</a><a class="btn" href="SavedFilter.dc.html">필터</a><a class="btn" href="#">캘린더 <span class="tag purple" style="height: 16px; font-size: 10px; padding: 0 6px">NEW</span></a><a class="btn" href="AutoIssue.dc.html">설정</a></div>
+        <span style="flex: 1"></span>
+        <span class="faint" style="font-size: 12px">단축키 <span class="kbd">c</span> 새 이슈 · <span class="kbd">m</span> 나에게 할당 · <span class="kbd">s</span> 상태 · <span class="kbd">/</span> 검색식 · <span class="kbd">?</span> 전체</span>
+      </div>
+
+      <div style="display: flex; gap: 12px; align-items: flex-start; flex-wrap: wrap">
+        <!-- 상세 본문 -->
+        <section class="card" style="flex: 999 1 560px; min-width: 0; padding: 0; overflow: hidden">
+          <div style="padding: 16px 18px 12px; display: flex; flex-direction: column; gap: 8px">
+            <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap"><a class="btn sm" href="#">← 돌아가기</a><span class="type incident">장애</span><span class="key">ISS-1</span><span class="tag bad">차단됨 — ISS-27 대기</span><span class="tag warn">SLA 해결 3:48 남음</span></div>
+            <h2 style="margin: 0; font-size: 20px">vCenter PL-WAW 수집 타임아웃 간헐 발생 (RTT 800ms 초과)</h2>
+            <div style="font-size: 13px; line-height: 1.7; color: #d6deea">본문 · 댓글은 위키와 <b>같은 마크다운</b>입니다 — 코드 <code class="mono" style="font-size: 12px; background: #0f1626; border: 1px solid #243049; border-radius: 5px; padding: 1px 5px">collect.deadlineMs</code>, 표, 체크리스트, <a class="iss" href="#"><span class="st" style="background: #a855f7"></span><span class="k">ISS-20</span></a> 자동 링크, <a href="#">@choi</a> 멘션, 그림 붙여넣기 전부 됩니다.</div>
+            <div style="display: flex; gap: 6px; flex-wrap: wrap"><button class="btn sm" type="button">복제</button><button class="btn sm" type="button">다른 법인으로 옮기기</button><button class="btn sm" type="button">중복으로 닫고 합치기</button><button class="btn sm" type="button">장애 보고서(위키) 만들기</button><button class="btn sm" type="button">링크 복사</button></div>
+          </div>
+          <div style="display: flex; gap: 4px; padding: 0 14px 8px; flex-wrap: wrap"><button class="btn sm" type="button">댓글 2</button><button class="btn sm" type="button">이력 12</button><button class="btn sm primary" type="button">연결 3</button><button class="btn sm primary" type="button">체크리스트 2/5</button><button class="btn sm primary" type="button">첨부 2</button><button class="btn sm primary" type="button">시간 5h 30m</button></div>
+
+          <div class="sec">
+            <div class="h"><b>연결 · 3</b><span class="muted" style="font-size: 12px">차단함 · 차단됨 · 관련 · 중복 — 양쪽 이슈에 같이 보이고, ‘차단됨’ 은 보드 카드와 목록에 배지로</span></div>
+            <div class="lnk"><span class="rel">차단됨</span><a class="iss" href="#"><span class="st" style="background: #8b9bb4"></span><span class="k">ISS-27</span><span>수집 분할(300대 단위) 설계</span></a><span class="chip backlog">백로그</span><span class="muted">lee</span><button class="btn sm" type="button" aria-label="연결 끊기">✕</button></div>
+            <div class="lnk"><span class="rel">관련</span><a class="iss" href="#"><span class="st" style="background: #8b9bb4"></span><span class="k">ISS-21</span><span>US-East 시한 조정</span></a><span class="chip backlog">백로그</span><span class="muted">kim</span><button class="btn sm" type="button" aria-label="연결 끊기">✕</button></div>
+            <div class="lnk"><span class="rel">차단함</span><a class="iss" href="#"><span class="st" style="background: #e6edf6"></span><span class="k">ISS-19</span><span>위키 런북 갱신</span></a><span class="chip todo">할 일</span><span class="muted">미할당</span><button class="btn sm" type="button" aria-label="연결 끊기">✕</button></div>
+            <div style="display: flex; gap: 6px; flex-wrap: wrap; align-items: center"><select class="input" aria-label="연결 종류"><option>차단함</option><option>차단됨</option><option selected>관련</option><option>중복</option></select><input class="input" type="text" placeholder="이슈 키 또는 제목 찾기" aria-label="연결할 이슈" style="flex: 1 1 240px; min-width: 0"><button class="btn sm primary" type="button">연결</button><span class="faint" style="font-size: 11.5px">차단된 이슈를 ‘완료’ 로 바꾸려 하면 차단 이슈가 남아 있다고 묻습니다.</span></div>
+          </div>
+
+          <div class="sec">
+            <div class="h"><b>체크리스트 · 2/5</b><span class="bar" style="width: 120px"><span style="width: 40%"></span></span><label style="display: inline-flex; align-items: center; gap: 6px; font-size: 12px"><input type="checkbox" checked> 완료 비율을 이 이슈의 진행률로 쓰기</label></div>
+            <div class="task done"><input type="checkbox" checked aria-label="원인 확인"> 엣지 로그에서 deadline exceeded 확인 <span class="faint" style="text-decoration: none; font-size: 11px">kim · 11-03</span></div>
+            <div class="task done"><input type="checkbox" checked aria-label="시한 조정"> 시한 90초 적용 <span class="faint" style="text-decoration: none; font-size: 11px">kim · 11-03</span></div>
+            <div class="task"><input type="checkbox" aria-label="관찰"> 3일 관찰(타임아웃 0건 확인) <span class="tag warn" style="height: 16px; font-size: 10px">choi · 내일</span></div>
+            <div class="task"><input type="checkbox" aria-label="런북"> 런북 3절 갱신</div>
+            <div class="task"><input type="checkbox" aria-label="보고서"> 장애 보고서 작성 → 위키</div>
+            <div style="display: flex; gap: 6px; align-items: center"><input class="input" type="text" placeholder="+ 항목 — Enter · 하위 작업으로 승격하려면 항목 메뉴에서" aria-label="새 항목" style="flex: 1 1 260px; min-width: 0"><span class="faint" style="font-size: 11.5px">체크리스트는 가벼운 할 일(담당자 · 기한 없이), 하위 작업은 사람 · 기한 · 보드가 필요한 것.</span></div>
+          </div>
+
+          <div class="sec">
+            <div class="h"><b>첨부 · 2</b><span class="muted" style="font-size: 12px">끌어 놓기 · 붙여넣기 · 파일 8MB · 이슈당 20개 · 그림은 본문 · 댓글에 끼울 수 있음</span></div>
+            <div style="display: flex; gap: 8px; flex-wrap: wrap"><a class="att" href="#"><span class="th"></span><span style="min-width: 0"><span style="display: block">timeout-graph.png</span><span class="faint">214KB · kim · 11-03</span></span></a><a class="att" href="#"><span aria-hidden="true">▣</span><span style="min-width: 0"><span style="display: block">edge-log-1103.txt</span><span class="faint">38KB · kim · 11-03</span></span></a><button class="btn" type="button" style="border-style: dashed">+ 파일 놓기</button></div>
+          </div>
+
+          <div class="sec">
+            <div class="h"><b>시간 추적</b><span class="muted" style="font-size: 12px">예상 8h · 기록 5h 30m · 남은 2h 30m — 리포트의 ‘법인별 투입 시간’ 에 모입니다</span></div>
+            <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap"><span class="bar" style="width: 220px; height: 8px"><span style="width: 69%"></span></span><span class="mono" style="font-size: 12px">5h 30m / 8h</span></div>
+            <div class="muted" style="font-size: 12px; display: flex; flex-direction: column; gap: 3px"><span>kim · 2h · 11-03 · ‘시한 조정 · 재시작’</span><span>choi · 3h 30m · 11-04 · ‘관찰 · 로그 대조’</span></div>
+            <div style="display: flex; gap: 6px; flex-wrap: wrap; align-items: center"><input class="input" type="text" placeholder="1h 30m" aria-label="기록할 시간" style="width: 90px"><input class="input" type="date" value="2026-11-04" aria-label="날짜"><input class="input" type="text" placeholder="무엇을 했나" aria-label="설명" style="flex: 1 1 200px; min-width: 0"><button class="btn sm primary" type="button">기록</button><label style="display: inline-flex; gap: 6px; align-items: center; font-size: 12px; color: #8b9bb4">예상 <input class="input" type="text" value="8h" aria-label="예상 시간" style="width: 60px"></label></div>
+          </div>
+        </section>
+
+        <!-- 오른쪽 -->
+        <aside class="card" aria-label="속성" style="flex: 1 1 280px; max-width: 360px; min-width: 0; padding: 16px; display: flex; flex-direction: column; gap: 14px">
+          <div class="prop"><span class="l">SLA · P0 장애</span>
+            <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; font-size: 12px">
+              <div style="padding: 8px 10px; border-radius: 8px; background: #0f1626; border: 1px solid #243049"><span class="muted">대응(담당자 지정)</span><div style="display: flex; align-items: center; gap: 6px; margin-top: 3px"><b class="mono">00:12</b><span class="tag ok" style="height: 16px">30분 안</span></div></div>
+              <div style="padding: 8px 10px; border-radius: 8px; background: #0f1626; border: 1px solid rgba(245,158,11,.5)"><span class="muted">해결(완료)</span><div style="display: flex; align-items: center; gap: 6px; margin-top: 3px"><b class="mono" style="color: #fcd34d">3:48</b><span class="muted">남음 / 4h</span></div></div>
+            </div>
+            <span class="bar warn" style="height: 6px"><span style="width: 5%"></span></span>
+            <span class="faint" style="font-size: 11.5px">목표는 설정에서 우선순위마다(P0 30분/4h · P1 2h/2일 · P2 1일/1주). 넘기면 담당자 · 관찰자 알림 + 보드 배지 ‘SLA 초과’. 보류 중에는 시계가 멈춥니다.</span>
+          </div>
+          <div class="prop"><span class="l">수정 버전 · 영향 버전</span>
+            <div style="display: flex; gap: 6px; flex-wrap: wrap; align-items: center"><span class="tag teal">수정 v2.876.0(예정)</span><span class="tag gray">영향 v2.874.0</span></div>
+            <span class="faint" style="font-size: 11.5px">포탈 버전(release-notes)과 잇습니다 — 수정 버전이 게시되면 그 릴리스 노트에 이 이슈 제목이 한 줄로 붙고 이슈는 ‘완료’ 로 묻습니다. 장비 작업 이슈는 비워 둡니다.</span>
+          </div>
+          <div class="prop"><span class="l">담당자 · 관찰자</span>
+            <div style="display: flex; align-items: center; gap: 8px"><span class="av" style="background: #a855f7; width: 28px; height: 28px; font-size: 12px">K</span><b>kim</b><span style="flex: 1"></span><span class="av" style="background: #22c55e">C</span><span class="av" style="background: #3b82f6">L</span><button class="btn sm" type="button">+ 관찰자</button></div>
+          </div>
+          <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px">
+            <div class="prop"><span class="l">우선순위</span><span style="color: #fca5a5; font-weight: 800">P0 긴급</span></div>
+            <div class="prop"><span class="l">기한</span><span style="color: #fcd34d; font-weight: 700">오늘 · 11월 4일</span></div>
+            <div class="prop"><span class="l">상태</span><span class="chip progress" style="align-self: flex-start">진행 중</span></div>
+            <div class="prop"><span class="l">스프린트</span><span class="tag purple" style="align-self: flex-start">2026-11 ②</span></div>
+          </div>
+          <div class="prop"><span class="l">캘린더 · 이번 주(기한 · 스프린트)</span>
+            <div class="cal" role="img" aria-label="이번 주 캘린더 — 11월 3일부터 9일까지의 기한과 스프린트">
+              <div class="d"><span class="n">3 월</span><a class="sprint" href="Sprint.dc.html">스프린트 ② 시작</a></div>
+              <div class="d today"><span class="n">4 화</span><a href="#">ISS-1 P0</a><a class="over" href="#">ISS-2 초과</a></div>
+              <div class="d"><span class="n">5 수</span><a href="#">ISS-18</a><a href="#">ISS-25</a></div>
+              <div class="d"><span class="n">6 목</span></div>
+              <div class="d"><span class="n">7 금</span><a href="#">ISS-26</a></div>
+              <div class="d" style="opacity: .6"><span class="n">8 토</span></div>
+              <div class="d" style="opacity: .6"><span class="n">9 일</span></div>
+            </div>
+            <a href="#" style="font-size: 12px">월 보기 → 기한을 끌어서 옮길 수 있습니다(이력에 남음)</a>
+          </div>
+          <div class="prop"><span class="l">법인(vCenter) · 컴포넌트</span><span>vcenter-ap-northeast-01 · vCenter 수집기</span></div>
+        </aside>
+      </div>
+    </main>
+  </div>
+  <footer class="sb" aria-label="상태"><span>서버 Uptime <b>6일</b></span><span>전체 호스트 <b>658</b></span><span>전체 VM <b>5,850</b> (5,412 On)</span><span>활성 알람 <b style="color: #ef4444">3</b></span></footer>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1240}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

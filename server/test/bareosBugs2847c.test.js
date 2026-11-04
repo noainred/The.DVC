@@ -91,7 +91,7 @@ test('D2-1 카탈로그를 유지한 다시 묶기 — 옛 지점의 덮어쓰�
   assert.ok(!(fresh.issue || '').includes('다시 등록하기 전'), fresh.issue);
   // 복원 라우트가 고른 jobid 를 넘긴다(안 넘기면 지금 위치로 판정해 옛 지점의 덮어쓰기가 열린다)
   const route = fs.readFileSync(new URL('../src/routes/api/bareosBackup.js', import.meta.url), 'utf8');
-  assert.match(route, /const plan = restorePlan\(\{[^}]*\bjobid \}\);/);
+  assert.match(route, /const plan = restorePlan\(\{[^}]*\bjobid, base: restoreBaseOf\(settings\)\(job\) \}\);/);
   // 새 카탈로그(restart)면 옛 지점이 없다 — 기록을 비운다
   REG.rebindJobs([{ id: j.id, bareosJob: 'pv-1', client: 'c', storage: 's', pool: 'p', vmName: 'app', dc: 'DC-A', folder: '/new2' }], { restart: true });
   assert.deepEqual(REG.getJob(j.id).placements, []);

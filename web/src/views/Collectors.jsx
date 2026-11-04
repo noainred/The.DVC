@@ -19,6 +19,7 @@ const EmptyInvModal = React.lazy(() => import('./collectors/EmptyInvModal.jsx'))
 import TransportPanel from './collectors/TransportPanel.jsx';
 import { transportBadge, formHttpNote, importHttpNote } from './collectors/transportText.js';
 import { upgradeCell, autoPushLine } from './collectorUpgradeText.js'; // v2.775 업그레이드 결과 이유·시각
+import { edgeSyncLine, syncRunText } from './upgradeEdgeSyncText.js'; // v2.865: 엣지 자동 업그레이드 한 줄 + '구버전 엣지 밀어 넣기'
 
 // S-09: 새 기본값은 https:// — 평문 http:// 는 사유를 적은 예외로만 등록된다.
 const EMPTY = { id: '', name: '', datacenter: '', url: 'https://', token: '', enabled: true, allowInsecureHttp: false, insecureHttpReason: '' };
@@ -92,6 +93,17 @@ export default function Collectors() {
     return () => { clearInterval(t); if (reloadTimer.current) clearTimeout(reloadTimer.current); };
   }, []);
 
+  // v2.865 C: 엣지 자동 업그레이드 '지금 동기화'(뒤처진 엣지에만 민다 — '모두 업그레이드' 와 달리 최신 엣지는 건드리지 않는다).
+  const edgeSyncNow = async () => {
+    setBusy(true); setBanner(null);
+    try {
+      const r = await postJson('/upgrade/edge-sync');
+      const t = syncRunText(r);
+      setBanner({ ok: t.ok, text: `구버전 엣지 밀어 넣기: ${t.text}` });
+      await load();
+    } catch (e) { setBanner({ ok: false, text: `구버전 엣지 밀어 넣기 실패: ${e.message}` }); }
+    finally { setBusy(false); }
+  };
   const upgrade = async (id) => {
     const who = id ? `'${id}' 에이전트` : '모든 수집 에이전트';
     if (!window.confirm(`${who}를 중앙 포탈 버전(v${central || '?'})으로 업그레이드하고 재시작할까요?`)) return;
@@ -319,6 +331,13 @@ export default function Collectors() {
       {/* v2.775: 마지막 자동 업그레이드에서 수집 서버로 보낸 결과(재시작 전에 파일로 남긴 것) — 전부 받았으면 조용히 한 줄 */}
       {autoPushLine(data?.autoPush) && (() => { const a = autoPushLine(data.autoPush); return (
         <div style={{ marginBottom: 10, fontSize: 12, whiteSpace: 'normal', overflowWrap: 'anywhere', color: a.tone === 'ok' ? 'var(--text-dim)' : a.tone === 'warn' ? 'var(--amber)' : '#f87171' }}>{a.text}</div>); })()}
+
+      {/* v2.865 C: 엣지 자동 업그레이드(주기 동기화) 한 줄 + 지금 밀어 넣기 — 서버가 edgeSync 를 보내지 않으면 그리지 않는다. 문구는 upgradeEdgeSyncText.js. */}
+      {edgeSyncLine(data?.edgeSync) && (() => { const l = edgeSyncLine(data.edgeSync); return (
+        <div data-edge-sync-line="" className="flex gap" style={{ marginBottom: 10, fontSize: 12, alignItems: 'center', flexWrap: 'wrap', whiteSpace: 'normal', overflowWrap: 'anywhere', color: l.tone === 'ok' ? 'var(--text-dim)' : l.tone === 'warn' ? 'var(--amber)' : 'var(--text-dim)' }}>
+          <span style={{ minWidth: 0 }}>{l.text}</span>
+          {l.canRun && <button className="tab" disabled={busy} title="중앙보다 뒤처진 엣지에 중앙 현재 버전 번들을 지금 밀어 넣습니다(주기를 기다리지 않음)" onClick={edgeSyncNow}>구버전 엣지 밀어 넣기</button>}
+        </div>); })()}
 
       {banner && (
         <div style={{ marginBottom: 12, padding: '10px 12px', borderRadius: 8, fontSize: 13,

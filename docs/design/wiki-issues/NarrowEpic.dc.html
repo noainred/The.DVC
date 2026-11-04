@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>이슈 — 400px(에픽 · 하위 작업 · 스프린트)</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=Noto+Sans+KR:wght@400;500;700;800&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+body{margin:0;background:#0a0e17;color:#e6edf6;font-family:"Inter","Noto Sans KR","Apple SD Gothic Neo",sans-serif;font-size:13px}
+a{color:#93c5fd}a:hover{color:#bfdbfe}
+.tb{display:flex;align-items:center;gap:10px;height:44px;padding:0 12px;background:#0f1626;border-bottom:1px solid #243049}
+.tb .logo{display:inline-flex;align-items:center;gap:8px;font-weight:800;font-size:14px}
+.tb .logo .v{width:26px;height:26px;border-radius:7px;background:#3b82f6;display:inline-flex;align-items:center;justify-content:center;font-size:13px;color:#fff}
+.ver{font-size:11px;font-weight:700;color:#5eead4;border:1px solid #2dd4bf;border-radius:6px;padding:1px 6px}
+.mock{font-size:11px;font-weight:800;color:#fcd34d;background:rgba(245,158,11,.16);border-radius:6px;padding:2px 7px}
+.card{background:#141b2d;border:1px solid #243049;border-radius:12px}
+.muted{color:#8b9bb4}.faint{color:#5d6b85}
+.mono{font-family:"JetBrains Mono",ui-monospace,monospace}
+.btn{display:inline-flex;align-items:center;gap:6px;min-height:34px;padding:0 12px;border-radius:8px;border:1px solid #243049;background:#1a2236;color:#e6edf6;font:inherit;font-size:12.5px;font-weight:600;cursor:pointer;white-space:nowrap;text-decoration:none}
+.btn.primary{background:#3b82f6;border-color:#3b82f6;color:#fff}
+.btn.sm{min-height:28px;padding:0 9px;font-size:11.5px}
+.tag{display:inline-flex;align-items:center;gap:5px;height:20px;padding:0 8px;border-radius:999px;font-size:11px;font-weight:700;white-space:nowrap}
+.tag.blue{background:rgba(59,130,246,.18);color:#93c5fd}.tag.gray{background:rgba(139,155,180,.14);color:#aebbd0}.tag.ok{background:rgba(34,197,94,.14);color:#86efac}.tag.warn{background:rgba(245,158,11,.16);color:#fcd34d}.tag.bad{background:rgba(239,68,68,.16);color:#fca5a5}.tag.purple{background:rgba(168,85,247,.18);color:#d8b4fe}
+.chip{display:inline-flex;align-items:center;height:22px;padding:0 9px;border-radius:6px;font-size:11.5px;font-weight:700;border:1px solid #243049;background:#0f1626}
+.chip.progress{color:#93c5fd;border-color:rgba(59,130,246,.5)}.chip.todo{color:#e6edf6}.chip.done{color:#86efac;border-color:rgba(34,197,94,.4)}
+.key{font-family:"JetBrains Mono",monospace;color:#8b9bb4;font-size:12px}
+.type{font-size:12px;font-weight:800}.type.incident{color:#fca5a5}.type.task{color:#93c5fd}.type.epic{color:#d8b4fe}
+.av{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:50%;font-size:10px;font-weight:800;color:#fff;flex:0 0 auto}
+.input{min-height:34px;border:1px solid #243049;border-radius:8px;background:#0a0e17;color:#e6edf6;font:inherit;font-size:13px;padding:0 10px}
+.bar{display:inline-block;height:6px;border-radius:3px;background:rgba(36,48,73,.9);overflow:hidden;vertical-align:middle}
+.bar > span{display:block;height:100%;border-radius:3px;background:#3b82f6}
+.bar.purple > span{background:#a855f7}
+.sub{display:flex;flex-direction:column;gap:5px;padding:9px 10px;border:1px solid #243049;border-radius:10px;background:#0f1626;text-decoration:none;color:#e6edf6;min-width:0}
+.sub .r{display:flex;align-items:center;gap:6px;flex-wrap:wrap;font-size:11.5px}
+.col{flex:0 0 240px;background:#0f1626;border:1px solid #243049;border-radius:12px;padding:8px;display:flex;flex-direction:column;gap:6px}
+.ic{display:flex;flex-direction:column;gap:4px;padding:8px 9px;border-radius:9px;background:#141b2d;border:1px solid #243049;border-left:3px solid #a855f7;text-decoration:none;color:#e6edf6;min-width:0;font-size:12px}
+.bottom{position:sticky;bottom:0;display:flex;gap:6px;padding:8px 10px;background:#0f1626;border-top:1px solid #243049}
+.bottom .btn{flex:1;justify-content:center;min-width:0}
+details.sec{border:1px solid #243049;border-radius:10px;background:#141b2d}
+details.sec summary{list-style:none;display:flex;align-items:center;gap:8px;padding:10px 12px;font-weight:700;cursor:pointer}
+details.sec > div{padding:0 12px 12px;display:flex;flex-direction:column;gap:8px;font-size:12.5px}
+</style>
+</helmet>
+
+<div style="min-height: 100vh; display: flex; flex-direction: column; background: #0a0e17; max-width: 100%">
+  <header class="tb">
+    <button class="btn sm" type="button" aria-label="메뉴" style="min-width: 34px; padding: 0">☰</button>
+    <span class="logo"><span class="v">V</span>The Davinci</span>
+    <span class="ver">v2.876.0</span><span class="mock">MOCK</span>
+    <span style="flex: 1"></span>
+    <span class="av" style="background: #3b82f6; width: 24px; height: 24px">A</span>
+  </header>
+  <div class="muted mono" style="padding: 6px 12px; font-size: 11px; border-bottom: 1px solid #243049">11/11 vCenter <b style="color: #22c55e">OK</b> · 오전 10:20</div>
+
+  <main style="flex: 1; padding: 12px 12px 16px; display: flex; flex-direction: column; gap: 10px; min-width: 0">
+    <div style="display: flex; gap: 6px; flex-wrap: wrap"><a class="btn sm primary" href="NarrowEpic.dc.html">보드</a><a class="btn sm" href="#">목록</a><a class="btn sm" href="#">내 작업</a><a class="btn sm" href="#">활동</a><a class="btn sm" href="#">스프린트</a><a class="btn sm" href="#">에픽</a><a class="btn sm" href="#">필터</a></div>
+    <div class="muted" style="font-size: 12px">열린 이슈 14 · 미할당 2 · 기한 초과 1</div>
+
+    <section class="card" style="padding: 14px; display: flex; flex-direction: column; gap: 8px">
+      <a class="btn sm" href="#" style="align-self: flex-start">← 돌아가기</a>
+      <div class="muted" style="font-size: 11.5px; display: flex; gap: 5px; align-items: center; flex-wrap: wrap"><span class="type epic">에픽</span><span class="key" style="color: #d8b4fe">ISS-20</span><span>고RTT 법인 수집 안정화</span><span>›</span></div>
+      <div style="display: flex; gap: 6px; align-items: center; flex-wrap: wrap"><span class="type incident">장애</span><span class="key">ISS-1</span><span class="tag purple">2026-11 ②</span><span class="tag bad">차단됨</span></div>
+      <h2 style="margin: 0; font-size: 17px; line-height: 1.35">vCenter PL-WAW 수집 타임아웃 간헐 발생 (RTT 800ms 초과)</h2>
+      <div style="display: flex; gap: 6px; flex-wrap: wrap"><select class="input" aria-label="상태" style="flex: 1 1 140px; min-width: 0"><option>할 일</option><option selected>진행 중</option><option>검토</option><option>완료</option></select><button class="btn primary" type="button">검토(으)로</button></div>
+      <div style="display: flex; align-items: center; gap: 8px; font-size: 12.5px"><span class="av" style="background: #a855f7">K</span><b>kim</b><span class="muted">· P0 긴급 · 오늘 기한</span><span style="flex: 1"></span><span class="bar" style="width: 60px"><span style="width: 50%"></span></span><b>50%</b></div>
+    </section>
+
+    <section class="card" style="padding: 12px 14px; display: flex; flex-direction: column; gap: 8px">
+      <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap"><b>하위 작업 · 4</b><span class="bar" style="flex: 1; min-width: 60px"><span style="width: 50%"></span></span><span class="muted" style="font-size: 11.5px">완료 2/4</span></div>
+      <a class="sub" href="#"><span class="r"><span class="key">ISS-16</span><span class="chip done">완료</span><span style="flex: 1"></span><span class="av" style="background: #a855f7">K</span></span><span style="color: #8b9bb4; text-decoration: line-through">엣지 수집 시한 env 로 분리</span></a>
+      <a class="sub" href="#"><span class="r"><span class="key">ISS-17</span><span class="chip done">완료</span><span style="flex: 1"></span><span class="av" style="background: #a855f7">K</span></span><span style="color: #8b9bb4; text-decoration: line-through">PL-WAW 시한 90초 적용</span></a>
+      <a class="sub" href="#"><span class="r"><span class="key">ISS-18</span><span class="chip progress">진행 중</span><span style="color: #fcd34d; font-weight: 700">내일</span><span style="flex: 1"></span><span class="av" style="background: #22c55e">C</span></span><span>시한 90초 적용 결과 확인(3일 관찰)</span><span class="r"><span class="bar" style="width: 60px"><span style="width: 66%"></span></span><span class="muted">66%</span></span></a>
+      <a class="sub" href="#"><span class="r"><span class="key">ISS-19</span><span class="chip todo">할 일</span><span style="flex: 1"></span><span class="muted">미할당</span></span><span>위키 런북 갱신 · 재발 방지 절 보강</span></a>
+      <input class="input" type="text" placeholder="+ 하위 작업 제목" aria-label="새 하위 작업">
+    </section>
+
+    <details class="sec" open>
+      <summary><span aria-hidden="true">▾</span>에픽 · 스프린트 · 관련 문서</summary>
+      <div>
+        <a href="#" style="display: flex; flex-direction: column; gap: 5px; padding: 10px; border: 1px solid rgba(168,85,247,.45); border-radius: 10px; background: rgba(168,85,247,.08); text-decoration: none; color: #e6edf6"><span style="display: flex; gap: 6px; align-items: center"><span class="type epic">에픽</span><span class="key" style="color: #d8b4fe">ISS-20</span></span><b>고RTT 법인 수집 안정화</b><span style="display: flex; align-items: center; gap: 8px; font-size: 12px"><span class="bar purple" style="flex: 1"><span style="width: 25%"></span></span><b>25%</b></span><span class="muted" style="font-size: 11.5px">이슈 4 · 완료 1</span></a>
+        <span><span class="tag purple">2026-11 ②</span> <span class="muted">11-03 ~ 11-14 · 남은 10일</span></span>
+        <a href="NarrowWiki.dc.html">▧ PL-WAW 수집 타임아웃 대응 <span class="tag ok" style="height: 16px">검토 완료</span></a>
+        <a href="#">▧ 2026-11-03 주간 회의록</a>
+      </div>
+    </details>
+
+    <section style="display: flex; flex-direction: column; gap: 6px">
+      <div style="display: flex; align-items: center; gap: 8px"><b>스프린트 보드</b><span class="muted" style="font-size: 11.5px">열을 가로로 넘깁니다</span></div>
+      <div style="display: flex; gap: 8px; overflow-x: auto; padding-bottom: 4px">
+        <div class="col"><div style="display: flex; gap: 6px; align-items: center; font-size: 12px"><span class="chip todo">할 일</span><span class="muted">2</span></div>
+          <a class="ic" href="#"><span style="display: flex; gap: 6px"><span class="key">ISS-19</span><span class="tag gray" style="height: 16px; font-size: 10px">하위</span></span>위키 런북 갱신</a>
+          <a class="ic" href="#" style="border-left-color: #2dd4bf"><span class="key">ISS-25</span>복원 리허설 대상 VM 확정</a></div>
+        <div class="col"><div style="display: flex; gap: 6px; align-items: center; font-size: 12px"><span class="chip progress">진행 중</span><span class="muted">4</span></div>
+          <a class="ic" href="#"><span style="display: flex; gap: 6px"><span class="key">ISS-1</span><span class="tag gray" style="height: 16px; font-size: 10px">하위 2/4</span></span>vCenter PL-WAW 수집 타임아웃</a>
+          <a class="ic" href="#"><span class="key">ISS-18</span>시한 90초 결과 확인</a></div>
+        <div class="col"><div style="display: flex; gap: 6px; align-items: center; font-size: 12px"><span class="chip done">완료</span><span class="muted">3</span></div>
+          <a class="ic" href="#" style="opacity: .75"><span class="key">ISS-17</span>PL-WAW 시한 90초 적용</a></div>
+      </div>
+    </section>
+  </main>
+
+  <div class="bottom" aria-label="동작"><button class="btn" type="button">나에게 할당</button><button class="btn" type="button">댓글 2</button><button class="btn" type="button">진행 갱신</button><button class="btn" type="button">링크</button></div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":400,"height":1640}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

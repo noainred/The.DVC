@@ -161,6 +161,7 @@ export const ROUTE_GATE_ALLOW = Object.freeze({
   'POST /api/tools/bareos-backup/jobs/:id/restore': 'bareosAccess + 본인 OTP — 대상의 vCenter 쓰기 범위(v2.820)',
   // v2.861 묶음 복원 — 항목마다 bareosAccess(조회 밖 = 없는 것과 같은 답 · 쓰기 밖 403) · 실행은 본인 OTP 한 번(bareosRestoreBulkRoutes2861 · 변이 M12·M13·M15)
   'POST /api/tools/bareos-backup/restore-points/bulk': 'bareosAccess(조회) — 항목마다 범위 밖은 없는 대상과 같은 답 · 읽기 전용 지점 조회(v2.861)',
+  'POST /api/tools/bareos-backup/logs/bulk': 'bareosAccess(조회) — 항목마다 범위 밖은 없는 대상과 같은 답 · 읽기 전용 첫 오류 줄 조회(v2.872 통합 에러 로그 묶음 로그)',
   'POST /api/tools/bareos-backup/restore-check/bulk': 'bulkRestoreGate → bareosAccess(쓰기) — 항목마다 조회 밖 제외 · 쓰기 밖 사유 · Director · OTP 안 씀(v2.861)',
   'POST /api/tools/bareos-backup/restore/bulk': 'bulkRestoreGate → bareosAccess — 조회 밖 404 → 쓰기 밖 403 → 판정 400 → 본인 OTP(v2.861)',
   // v2.830 백업 그룹(routes/api/bareosGroups.js) — 핸들러 안 bareosAccess(조회 밖 404 → 쓰기 밖 403)
@@ -168,6 +169,7 @@ export const ROUTE_GATE_ALLOW = Object.freeze({
   'PUT /api/tools/bareos-backup/groups/:id': 'bareosAccess — 그룹의 vCenter 쓰기 범위 · updatedAt 대조(v2.830)',
   'DELETE /api/tools/bareos-backup/groups/:id': 'bareosAccess — 그룹의 vCenter 쓰기 범위(v2.830)',
   'POST /api/tools/bareos-backup/groups/:id/run': 'bareosAccess — 그룹의 vCenter 쓰기 범위(v2.830)',
+  'POST /api/tools/bareos-backup/groups/:id/cancel': 'groupFor → bareosAccess — 그룹의 vCenter 쓰기 범위(조회 밖 404 → 쓰기 밖 403) · 이름 재입력 · 회차 중단(v2.867)',
   'POST /api/tools/bareos-backup/groups/:id/prune-preview': 'groupFor(write:false) → bareosAccess — 그룹 vCenter 조회 범위(밖 404) · 읽기 전용 정리 미리 보기(지우지 않음 · v2.843)',
   'POST /api/tools/bareos-backup/poll': '상태 조회만(원장 갱신) — 범위 계정은 자기 법인 Director 만 조회하고 그 상태만 받는다(v2.823 검토 S1 — visibleDirectorIds·scopedPoller)',
 });
@@ -229,7 +231,12 @@ export const KNOWN_CONFIG_FILES = Object.freeze({
   'backup-marks.json': 'VM 별 백업 표시 — 업무 중요도·백업 필요·메모(veeam/backupMarks.js — 사용자 데이터, 원자 쓰기·손상 보존, v2.784). 백업 번들에는 들어가고 변경 감시 지문에서는 뺀다',
   'vm-export-prefs.json': 'VM 전체 정보 내보내기 \'내 저장값\'(계정별 기본값 · 1~5칸 — vcenter/vmExportPrefs.js · util/exportPrefs.js, 원자 쓰기·손상 보존 503, 비밀 없음, v2.799)',
   'board.json': '게시판 글·댓글·공감(bulletin/store.js — 로그인 사용자가 쓰는 사용자 데이터, 디바운스 비동기 쓰기·손상 보존·합계 상한 BOARD_MAX_BYTES, v2.722)',
-  'issues.json': '이슈 트래커 이슈·댓글·이력(issues/store.js — 로그인 사용자가 쓰는 사용자 데이터, 디바운스 비동기 쓰기·손상 보존·합계 상한 ISSUES_MAX_BYTES, v2.863)',
+  'issues.json': '이슈 트래커 이슈·댓글·이력(issues/store.js — 로그인 사용자가 쓰는 사용자 데이터, 디바운스 비동기 쓰기·손상 보존·합계 상한 ISSUES_MAX_BYTES, v2.864)',
+  'issue-autocreate.json': '파트 장애 → 이슈 자동 등록 설정(issues/autoCreate.js — 부품 종류 × 장비군 칸 · 우선순위 · 상한, 비밀 없음 · 원자 쓰기 · 손상 보존, v2.880)',
+  'issue-sprints.json': '이슈 스프린트(issues/sprints.js — 이름 · 기간 · 목표 · 상태, 비밀 없음 · 원자 쓰기 · 손상 보존, v2.882)',
+  'issue-filters.json': '이슈 저장 필터(issues/filters.js — 사람마다 검색식 · 공유 여부, 비밀 없음 · 원자 쓰기 · 손상 보존, v2.882)',
+  'wiki.json': '위키 스페이스 · 문서 · 판 · 댓글(wiki/store.js — 로그인 사용자가 쓰는 사용자 데이터, 디바운스 비동기 쓰기 · 손상 보존 · 합계 상한 WIKI_MAX_BYTES, v2.881)',
+  'issue-settings.json': '이슈 트래커 설정(issues/settings.js — 자동 할당 규칙 · 알림 · 사람별 메일 주소, 비밀 없음 · 원자 쓰기 · 손상 보존, v2.871)',
 });
 
 /* ── 공용 ─────────────────────────────────────────────────────────────────────── */

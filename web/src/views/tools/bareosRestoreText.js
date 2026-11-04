@@ -12,8 +12,14 @@ export const MODE_SHORT = Object.freeze({ newVm: '새 VM', original: '원래 VM 
 export const NIC_LABEL = Object.freeze({ disconnect: '끊은 채로', keep: '백업 때 그대로' });
 
 const FINAL_STATES = new Set(['ok', 'warning', 'error', 'canceled']);
-/** 아직 끝나지 않은 복원(서버 registry.restoreOpen 과 같은 뜻 — 끝난 상태가 아니면 진행 중 · 'unknown' 도 진행 중). */
+/** 아직 끝나지 않은 복원(서버 registry.restoreOpen 과 같은 뜻 — jobid 가 있고 끝난 상태가 아니면 진행 중 · 상태 'unknown' 도 진행 중). */
 export const restoreIsOpen = (r) => !!r?.jobid && !r.abandoned && !FINAL_STATES.has(String(r.state || ''));
+/**
+ * v2.874(점검 B5-01) 결과 모름 복원(명령을 보낸 뒤 회신이 끊김 — jobid 없음)을 붙잡는 시간. 서버 bareos/registry.js RESTORE_UNKNOWN_HOLD_MS 와 같다
+ *   (server/test/bareosRestoreUnknown2874.test.js 가 대조). 그동안 같은 VM 을 다시 고르지 못한다 — 두 번 돌지 않게(서버도 거부한다).
+ */
+export const RESTORE_UNKNOWN_HOLD_MS = 6 * 3600_000;
+export const restoreUnknownHeld = (r, now = Date.now()) => r?.unknown === true && !r.jobid && now - (Number(r.at) || 0) < RESTORE_UNKNOWN_HOLD_MS;
 
 /**
  * 고르기 트리 — 원장 대상(백업 대상으로 등록된 VM 만 복원할 수 있다) → 법인(vCenter) → 폴더 → VM.
@@ -41,10 +47,11 @@ export function restoreTree(jobs, { q = '' } = {}) {
 /**
  * 이 VM 을 고를 수 없는 사유('' = 고를 수 있다). lockedDir = 이미 고른 VM 의 Director(법인 — 한 번에 한 법인).
  */
-export function pickBlock(job, { lockedDir = '' } = {}) {
+export function pickBlock(job, { lockedDir = '', now = Date.now() } = {}) {
   if (!job) return '대상 없음';
   if (job.writable === false) return '조회 전용 범위';
   if ((job.restores || []).some(restoreIsOpen)) return '복원 진행 중';
+  if ((job.restores || []).some((r) => restoreUnknownHeld(r, now))) return '직전 복원 결과 모름 — Director 에서 확인';   // v2.874 B5-01
   if (lockedDir && (job.directorId || '') !== lockedDir) return '다른 법인 — 복원은 한 법인씩';
   return '';
 }
@@ -145,8 +152,38 @@ export function batchView(jobs, batchId) {
     open: rows.filter((x) => restoreIsOpen(x.r)).length,
     ok: rows.filter((x) => st(x) === 'ok' || st(x) === 'warning').length,
     bad: rows.filter((x) => st(x) === 'error' || st(x) === 'canceled').length,
+    unknown: rows.filter((x) => x.r.unknown === true && !x.r.jobid).length,   // v2.874 B5-01 보낸 뒤 끊김(결과 모름)
     nicFailed: rows.filter((x) => x.r.finish?.nic === 'failed').length,
   };
+}
+
+/**
+ * v2.874(점검 B5-01 · B5-02): 묶음 복원 응답 → 화면 결과(순수). 시작하지 못한 · 결과 모름 항목을 사유와 함께 보인다 —
+ *   예전에는 202 문구가 '아래 진행 표의 사유' 를 가리켰지만 표는 원장(시작한 것)만 그려 사유가 어디에도 없었고, 전부 결과 모름이면 502
+ *   '시작하지 못했습니다' 로 보여 다시 누르게 했다(두 번째 복원이 나갔다 — 재현).
+ * @param {object|null} body  응답 본문(202) 또는 실패 본문(e.body)
+ * @param {{ unknown?: boolean, message?: string }} [o]  unknown = 결과 모름(504 · 시한 · 연결 끊김 — outcomeUnknown)
+ * @returns {{ tone:'ok'|'warn'|'bad', text:string, items:{ vmName:string, reason:string, unknown:boolean }[], reset:boolean }}
+ *   reset = 마법사를 비운다(시작했거나 결과를 모른다 — 같은 고르기로 다시 보내지 않게)
+ */
+export function bulkRestoreOutcome(body, { unknown = false, message = '' } = {}) {
+  const items = (Array.isArray(body?.items) ? body.items : []).filter((x) => x && x.ok === false)
+    .map((x) => ({ vmName: String(x.vmName || x.id || '—'), reason: String(x.reason || '').slice(0, 300), unknown: x.code === 'unknown' }));
+  const started = Number(body?.started) || 0;
+  const total = Number(body?.total) || 0;
+  const unk = items.filter((x) => x.unknown).length;
+  if (started > 0) {
+    const miss = Math.max(0, total - started);
+    const missText = miss ? ` 시작하지 못한 ${miss}대${unk ? `(결과 모름 ${unk}대 — Director 에서 확인)` : ''}는 아래 사유를 보세요.` : '';
+    return { tone: miss || body?.saveError ? 'warn' : 'ok', items, reset: true,
+      text: `복원을 시작했습니다 — ${started} / ${total}대.${missText} 끝나면 네트워크 끊기를 고른 VM 은 포탈이 연결을 끊습니다 — 끊음 표시가 나오기 전에는 켜지 마세요.${body?.saveError ? ` ${body.saveError}` : ''}` };
+  }
+  if (unknown || unk) {
+    const m = String(message || body?.reason || '').slice(0, 300);
+    return { tone: 'bad', items, reset: true,
+      text: `복원 결과를 확인하지 못했습니다 — 이미 시작됐을 수 있습니다. 같은 복원이 두 번 돌지 않게 그 VM 은 잠시 다시 고를 수 없습니다 — 아래 최근 묶음 · 이력(또는 Director)에서 확인하세요.${m ? ` (${m})` : ''}` };
+  }
+  return { tone: 'bad', items, reset: false, text: String(body?.reason || message || '복원을 시작하지 못했습니다.') };
 }
 /** 가장 최근 묶음 id(복원 시작 시각 기준) — 없으면 ''. */
 export function latestBatchId(jobs) {
@@ -182,7 +219,67 @@ export const WEEKDAYS = Object.freeze(['일', '월', '화', '수', '목', '금',
 export function rehearsalPolicyText(p) {
   if (!p) return '—';
   const when = `매주 ${WEEKDAYS[p.weekday] ?? '—'}요일 ${p.time || '—'}`;
-  return `${p.enabled ? '켜짐' : '꺼짐'} · ${when} · 법인마다 ${unitText(p.perCorp, '대')} · 성공한 검증용 VM ${p.deleteOnOk === false ? '남김' : '지움'} · 실패는 남김`;
+  const dsN = Object.keys(p.datastores || {}).length;
+  return `${p.enabled ? '켜짐' : '꺼짐'} · ${when} · 법인마다 ${unitText(p.perCorp, '대')} · 성공한 검증용 VM ${p.deleteOnOk === false ? '남김' : '지움'} · 실패는 남김${dsN ? ` · 데이터스토어 지정 ${dsN}곳` : ''}`;
+}
+
+/**
+ * v2.863 복원 검증 정책의 vCenter 데이터스토어 선택지(순수). 첫 칸은 '고르지 않음(홈 데이터스토어)'.
+ *   list 가 null 이면 목록을 못 읽었거나(loading 이면 읽는 중) — 지금 값을 그 사유로 남긴다(못 읽은 것을 '없음' 으로 단정하지 않는다).
+ *   지금 값이 쓸 수 있는 목록에 없으면 지우지 않고 그 사유(접근 불가 · 인벤토리에 없음)를 붙여 남긴다 — 저장이 조용히 바꾸지 않게.
+ * @param {{name:string, freeGB?:number|null, capacityGB?:number|null, accessible?:boolean}[]|null} list  그 vCenter 의 데이터스토어
+ * @returns {{ value:string, label:string, warn?:boolean }[]}
+ */
+export function rehearsalDsOptions(list, current = '', { loading = false } = {}) {
+  const all = Array.isArray(list) ? list.filter((x) => x && x.name) : [];
+  const usable = all.filter((x) => x.accessible !== false).sort((a, b) => String(a.name).localeCompare(String(b.name)));
+  const out = [{ value: '', label: '고르지 않음 — VM 의 홈 데이터스토어' }, ...usable.map((x) => ({ value: x.name, label: dsText(x) }))];
+  const cur = String(current || '');
+  if (cur && !usable.some((x) => x.name === cur)) {
+    const known = all.find((x) => x.name === cur);
+    const why = list === null ? (loading ? '목록을 읽는 중' : '목록을 읽지 못함') : known ? '접근 불가(인벤토리 기준)' : '인벤토리에 없음 — 검증 때 건너뜁니다';
+    out.splice(1, 0, { value: cur, label: `${cur} · ${why}`, warn: true });
+  }
+  return out;
+}
+/**
+ * v2.874(점검 B4-02): 법인(Director)별 마지막 회차(순수) — 서버 상태가 Director 마다 최근 몇 건을 남긴다(앞이 최신).
+ *   예전에는 회차 기록(runs · weeks)을 화면이 그리지 않아, 매주 0대로 끝나는 정기 검증이 화면에서 보이지 않았다(무음 실패).
+ * @returns {{ directorId:string, run:object, older:number }[]}  directors 순서 · 기록 없는 Director 는 뺀다
+ */
+export function rehearsalLastRuns(runs, directors = []) {
+  const by = new Map();
+  for (const r of Array.isArray(runs) ? runs : []) {
+    const k = String(r?.directorId || '');
+    const cur = by.get(k);
+    if (!cur) by.set(k, { directorId: k, run: r, older: 0 }); else cur.older += 1;
+  }
+  const order = (Array.isArray(directors) ? directors : []).map((x) => String(x.id));
+  const known = order.filter((id) => by.has(id)).map((id) => by.get(id));
+  const rest = [...by.values()].filter((x) => !order.includes(x.directorId)).sort((a, b) => (Number(b.run.at) || 0) - (Number(a.run.at) || 0));
+  return [...known, ...rest];
+}
+/** 회차 한 줄 — '11-07 03:17 · 정기 · 시작 2대 · 건너뜀 1대 — 사유'. */
+export function rehearsalRunText(run) {
+  if (!run) return '—';
+  const items = Array.isArray(run.items) ? run.items : [];
+  const ok = items.filter((x) => x?.ok).length;
+  const skip = items.filter((x) => x && !x.ok).length + (Number(run.moreItems) || 0);
+  return `${whenText(run.at)} · ${run.trigger === 'timer' ? '정기' : '지금 검증'} · 시작 ${unitText(ok, '대')}${skip ? ` · 건너뜀 · 실패 ${unitText(skip, '대')}` : ''}${run.reason ? ` — ${String(run.reason).slice(0, 200)}` : ''}`;
+}
+export const rehearsalRunTone = (run) => {
+  const items = Array.isArray(run?.items) ? run.items : [];
+  if (items.some((x) => x?.ok)) return items.some((x) => x && !x.ok) ? 'warn' : 'ok';
+  return 'bad';
+};
+/**
+ * 검증용 VM 정리 칸 — 지움 · 남김 · 모름. v2.874(점검 B3-01): 옛 엣지 회신에는 deleted 가 없다 — 성공했는데 지웠는지 모르면 '남김' 으로 단정하지 않는다.
+ */
+export function cleanupText(finish) {
+  if (!finish) return '—';
+  if (finish.deleted === true) return '지움';
+  if (finish.verify === 'ok' && finish.deleted !== false) return '모름(회신에 없음 — vCenter 에서 확인)';
+  return finish.verify ? '남김' : '—';
 }
 /** Tools 응답 시간 — 모르면 '—'(0 이 아니다). */
 export function toolsText(ms) {
@@ -200,7 +297,18 @@ export function verifyText(row) {
   if (f?.nic === 'pending') return '켜 보는 중';
   return restoreIsOpen({ jobid: row?.rid, state: row?.state }) ? '복원 중' : '켜 보기 대기';
 }
-export const verifyTone = (row) => (row?.finish?.verify === 'ok' ? 'ok' : (row?.finish?.verify === 'failed' || row?.finish?.nic === 'failed' || row?.state === 'error') ? 'bad' : 'info');
+/**
+ * 복원 검증 한 행의 결과 — 'ok' | 'failed' | 'pending'(v2.870 감사 A2-02 — 판정 코어 하나).
+ *   서버 bareos/digest.js verifyOutcome 과 한 쌍(server/test/bareosVerifyOutcome2870.test.js 가 같은 입력으로 대조).
+ *   리허설 표(verifyTone) · 복원 › 폴더 표(restoreStateText) · 일일 요약 메일이 같은 판정을 쓴다(예전에는 켜 보는 중 · 재시도 소진이 폴더 표에서 '검증 성공').
+ */
+export function verifyOutcome(r) {
+  const f = r?.finish;
+  if (f?.verify === 'ok') return 'ok';
+  if (f?.verify === 'failed' || f?.nic === 'failed' || f?.nic === 'skipped' || r?.state === 'error' || r?.state === 'canceled' || r?.abandoned) return 'failed';
+  return 'pending';
+}
+export const verifyTone = (row) => ({ ok: 'ok', failed: 'bad' }[verifyOutcome(row)] || 'info');
 /** 일일 요약 마지막 발송 한 줄. */
 export function digestStatusText(st) {
   if (!st || !st.day) return '아직 보낸 적 없음';

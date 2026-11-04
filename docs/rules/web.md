@@ -30,6 +30,9 @@
 - (v2.860 추가) Bareos 화면 재구성(시안 `docs/design/bareos-ui-v2`) — 탭 5개 · 운영 안 묶음 · 정책 · 보존 한 화면 · 설정 왼쪽 목록 · 옛 주소 이동
 - (v2.861 추가) Bareos 운영 › 복원 — 폴더 트리에서 고르기 · 3단계 · 묶음 진행 · 복원 뒤 네트워크 끊기 · 남은 스냅샷 칩
 - (v2.862 추가) Bareos 복원 검증(리허설) 카드 · 일일 요약 메일 설정
+- (v2.881 추가) 위키(상단 메뉴 '위키') — 마크다운 렌더러 안전 규약 · 충돌 저장 · 초안 · 링크 색 · 아래 고정 줄
+- (v2.882 추가) 이슈 확장 — 에픽 › 이슈 › 하위 작업 · 스프린트 보드 · 검색식/저장 필터 · 일괄 편집(목록 열은 늘리지 않는다)
+- (v2.883 추가) C-1 — 이슈 본문 마크다운(breaks) · 위키 체크리스트 체크(줄 번호 · 판 없이) · 이슈 찾기 · 이슈 연결 · 주간 메일 구독
 - (원래 5663행) v2.708 — 드롭다운은 공용 `Select`·`DataList` 하나다(자동 정렬)
 - (원래 5801행) 특수 기능 화면(v2.679) — 표시 이름·설명·개발 단계는 '덮어쓰기' 이고 키는 그대로다
 - (원래 5848행) 접속 공지 팝업 · 게시판(v2.722)
@@ -337,10 +340,20 @@
   · 팝업은 **로그인 뒤에만**(App 의 `<Portal>` 옆 — 모든 셸 위) · 폴링 없음 · '보지 않기' 는 브라우저 저장이고 키가 `rev`(id + 수정 시각)라 고치면 다시 보인다.
   · 쓰기 권한: 공지 = admin + 전체 범위 · 글·댓글 = admin·operator(서버 불변조건 '/api 상태변경은 requireRole(admin, operator)') · 수정·삭제 = 작성자 또는 관리자 · 고정 = 관리자.
   · 상단 탭 'board' 를 더하면 V5 `tree.js`(TAB_NAMES·platform) · V6 `menus.js`(TAB_INFO·platform) · `noFilterTabs` 도 함께. 1600px 한 줄 메뉴는 14개에서도 잘리지 않았다(실측 nav scrollWidth == clientWidth).
-- **이슈 트래커(v2.863)** — `server/src/issues/store.js`(issues.json · 게시판과 같은 디바운스 비동기 원자 쓰기·손상 보존·합계 상한 `ISSUES_MAX_BYTES`) + `routes/api/issues.js`(`/issues*`, 회귀 `server/test/issues2863.test.js` — 실제 api 라우터로 역할별 상태코드) + 웹 `views/issues/`{Issues.jsx,issueText.js}. 디자인 시안: Claude Design 캔버스 https://claude.ai/artifact/DhvGAynr761G6y3arqqU8R:
+- **이슈 트래커(v2.864)** — `server/src/issues/store.js`(issues.json · 게시판과 같은 디바운스 비동기 원자 쓰기·손상 보존·합계 상한 `ISSUES_MAX_BYTES`) + `routes/api/issues.js`(`/issues*`, 회귀 `server/test/issues2864.test.js` — 실제 api 라우터로 역할별 상태코드) + 웹 `views/issues/`{Issues.jsx,issueText.js}. 디자인 시안: Claude Design 캔버스 https://claude.ai/artifact/DhvGAynr761G6y3arqqU8R:
   · 전이 규칙은 서버가 판정한다 — '진행 중' 은 담당자 필수(400) · 보류는 사유 필수 · 완료는 `closedAt`. 화면은 거부 사유를 그대로 보인다(두 벌 판정 금지).
   · 쓰기 권한: 생성·수정·상태·할당·댓글 = admin·operator(협업 도구라 남의 이슈도 고친다) · 삭제 = 본인 또는 **전체 범위** 관리자(게시판 `isBoardModerator` 와 같은 기준). 담당자 후보(`people`)는 쓰기 계정에게만 — viewer 에게 계정명 목록을 주지 않는다.
   · ⚠ `/issues/bulk/assign` 은 `/issues/:key/…` 보다 **먼저** 등록한다 — 뒤에 두면 'bulk' 가 키로 잡혀 404 다(초판 자체 테스트가 잡았다).
+  · **v2.875(법인 축 · 알림 · 자동 할당 · 요청 등록 · 진행 공유)**: 이슈마다 `vcenterId`(''=공용). 범위 계정은 자기 법인 이슈만 보고 공용은 못 본다 — 조회 밖 404 → 쓰기 밖 403(`findFor` 하나).
+    법인을 반드시 고르는 계정은 `meta.scoped || meta.writeScoped`(조회 무제한 + writeVcenters 도 공용 불가 — 화면 `vcenterRequired`). 목록 행·상세에 `writable` 을 실어 화면이 버튼·일괄 선택을 잠근다.
+    '이 사람이 이 법인 이슈를 볼 수 있나' 는 `issues/visibility.js` 하나(자동 할당·알림 수신자). 로컬 계정은 그 범위로, 로컬이 아닌 이름은 AD(범위 축 없음 — `auth/ad.js`)로 본다.
+    알림(`issues/notify.js`)은 사람별 1분 묶음 · 본인 제외 · 범위 밖 수신자 제외(`outOfScope`) · 멘션은 알려진 이름의 가장 긴 접두(`resolveMentions`) · 팀 채팅은 `chatSafe` 로 꺾쇠·대괄호를 바꿔 싣는다 ·
+    이슈 메일은 메일 설정 시간당 한도의 절반까지(넘으면 미룸) · 기한 기록은 **보낸 뒤** 쓴다. 기한 판정은 날짜 기준(`store.dueDays` ↔ 웹 `dueInfo` — 대조 시험).
+    요청 등록(viewer · `issues.request`)은 요청 유형·백로그만, 1인 열린 요청 20건 · 전체 상한 중 200건은 운영자 몫. 진행률은 0~100 정수 또는 null(‘보고 없음’ — 0 이 아니다).
+    회귀 `server/test/issues2871.test.js`(변이 14/14).
+  · **v2.880 자동 등록 이슈**: 출처(`origin` — 파트 장애)가 있는 이슈는 카드 · 목록 · 상세에 ‘자동’ 배지(`originText`)와 파트 장애 화면 링크.
+    설정 › 자동 등록(`AutoCreateSettings`)은 서버가 준 지원 칸(`supported`)만 고를 수 있게 그린다('—' = 추출기 없음) · 시험 실행은 저장 전 화면 값을 보낸다(만들지 않는다).
+    이슈 본문은 아직 마크다운을 그리지 않는다 — 서버가 만드는 본문에 '###' 같은 기호를 쓰지 않는다(위키 렌더러가 들어오면 같이 바꾼다).
 - **게시판 답글·공감(v2.723)** — 답글은 댓글 배열에 `parentId`(최상위 댓글 id)로 묶는 **한 단계**다(답글에 단 답글은 최상위 아래로 옮기고 `replyTo`).
   답글이 달린 댓글을 지우면 **자리를 남기고**(`deleted` — 내용·작성자 지움, 세지 않음) 마지막 답글이 지워지면 자리도 치운다. 공감은 이름 목록 `likes` 이고
   요청은 상태를 명시한다(`POST …/like {on:true|false}` — 연타·재전송이 두 번 세지 않는다). 응답에는 개수·내 공감·앞 30명만(`likeView`) — `likes` 배열을 내보내지 말 것.
@@ -488,6 +501,8 @@
   ④ 저장한 양 · 압축 · 쓰는 중 볼륨 크기는 잡 끝 보고에만 있다 — '끝나면 표시'(점선 칸). FD 보고가 없으면 진행량 · 속도 · 진척 · 남은 시간은 '모름'/'—'(0 아님)이고 타임라인 · 볼륨은 로그로 채운다.
   ⑤ 진행 현황 표 안의 펼침 칸은 `position: sticky; left: 0` + **실측 폭**(ResizeObserver) — 400px 에서 넓은 표(minWidth 1100)를 가로로 밀어도 상세는 화면 안. 정렬 때 행과 펼침 칸이 떨어지지 않게 `React.Fragment` 로 묶는다(`sortChildren` 이 첫 tr 로 정렬).
   ⑥ 대기 배지는 회색(실행 중 파랑과 구분 — `bareosText.STATE_BADGE`). 상세에 취소 단추는 두지 않았다(백업 대상 탭). 데모 실행 길이는 env `BAREOS_DEMO_RUN_MS`(화면 검증용 — 기본 30초는 진행 현황 조회 주기보다 짧다).
+  ⑨ v2.866(사용자 요청 '진행 중인 백업 VM 이 자동으로 선택되게'): 아래 카탈로그 최근 실행 표의 대상은 처음에 진행 중 VM 이고, 위 실행 중 표에서 골라진(기본: 실행 중) 작업 VM 을 따라간다(`historyFollowTarget`) ·
+     사람이 대상 칸을 직접 바꾸면 따라가지 않고, 위 표의 행을 누르면 다시 따라간다 · Director 거르기 밖 VM 이면 바꾸지 않는다.
 - **v2.860 — Bareos 화면 재구성(사용자 요청 'Bareos UI 전폭 개선 · 직관적이고 복잡하지 않게' · 승인 시안 `docs/design/bareos-ui-v2` ⓪~⑥)**. 도구 키 3개(`bareos-summary`·`bareos-detail`·`bareos-backup`)와 권한은 그대로이고 탭은 주소만 바꾼다:
   ① 탭은 5개(현황 · 법인 · 운영 · 정책 · 보존 · 설정) — 판정은 `bareosViewText.bareosSubTabs` 하나, 그리는 곳은 `BareosTabs.jsx` 하나(모든 Bareos 화면이 같은 자리 · 오른쪽 `right` 칸에 그 화면의 조작). 두 벌 탭 줄을 되살리지 말 것.
   ② 운영 안 묶음(백업 대상 · 백업 그룹 · 진행 · 이력)은 `OPS_SEGMENTS`. 옛 하위 주소 `live`·`history` 는 `legacyOpsHash` 로 `runs` 로 바꾼다 — **렌더 중에** 바꾼다(효과에서 바꾸면 자식인 현황판이 옛 주소를 먼저 읽어 보기를 잃는다) · 아래 조각 유지(`live/corp` → `runs/corp`) · 옛 진행 현황 링크로 오면 현황판을 펼친 채로(`runsBoardOpen` — 처음 그릴 때는 바꾸기 전 주소, 떠 있는 동안 들어온 주소는 **hashchange 의 `newURL`** 로 본다: 앞 리스너의 갱신이 먼저 그려지면 부모가 주소를 이미 runs 로 바꿔 놓아 `location.hash` 로는 놓친다 — Chromium 재현). 다른 화면의 `/live`·`/history` 링크는 고치지 않아도 된다(`backupSummary2838` 이 옛 주소를 고정).
@@ -496,13 +511,52 @@
   ⑤ 정책 · 보존은 `BareosPolicyPage` 한 화면에 두 구획(`BareosPolicyTab`·`BareosPoolsTab` 의 `bare`) — 'Director 수집 상태' 표 · 데모 안내는 한 번만. 옛 `#/tools/bareos-summary/pools` 는 풀 구획으로 내려간다.
   ⑥ 설정은 왼쪽 목록(`#/tools/bareos-backup/settings/<director|install|corp|accounts|defaults>` — `useHashTab` 중첩 base). 데모일 때 운영 머리의 Director 한 줄은 설정에서 빼고 설정 화면의 안내 하나만 둔다.
   ⑦ 공용 조각은 `BareosBits.jsx`(Note · ReadGuide · Stat · Dot · ResultBar · Segs · FilterChip) — 칸 설명 · 범례는 '읽는 법' 토글로 치우되 지우지 않는다. '확인 필요' 는 실패 · 미등록 · 오래됨 · 켜진 잡의 백업 없음을 합친 것이고 결과를 못 읽으면 '—'(`corpAttention`·`detailFilterCounts`).
+  ⑧ (v2.882.1 — 사용자 요청 '1440 패널 닫기 줄바꿈도 고쳐줘') 오른쪽 패널 머리 줄은 **바깥 줄 줄바꿈 없음**(`data-panel-head`) + 이름 · 배지는 안쪽 묶음(`minWidth: 0`)에서만 줄바꿈 + 닫기는 묶음 밖(`flex: 'none'`). 한 줄 `flexWrap` + `marginLeft: 'auto'` 로 되돌리면 1440(패널 폭 약 320px)에서 이름 + 실행 배지 + OS 배지가 넘칠 때 닫기가 둘째 줄로 내려간다(Chromium A/B · 회귀 `bareosPanelHead2882.test.js`). 머리 줄에 칩을 더하지 말 것 — 멈추는 중(v2.867) · GPU 표지(v2.873)는 따로 한 줄이다.
 - **v2.861 — Bareos 운영 › 복원(사용자 요청 '백업처럼 폴더에서 선택해서 복원' · '네트워크 연결 끊고 시작' · '데이터스토어 선택' — 시안 ⑦~⑪)**. 화면 `BareosRestore.jsx` · 글자 · 빠른 확인 `bareosRestoreText.js`(+ test):
   ① 판정은 서버 `bulkRestorePlan` 하나 — 화면은 같은 규칙을 먼저 말할 뿐(`wizardIssue`) · 3단계 미리 보기는 POST `restore-check/bulk`(Director · OTP 안 씀). 고르기는 **한 법인(Director)만 · 50대**(`pickBlock`) · 덮어쓰기는 1대일 때만 목록에 나온다.
   ② 복원 지점 · 실행은 Director 를 거친다 — `withRelayWait(…, 'restorePoints' | 'restores')`(서버 RESULT_MS — 숫자를 화면에 박지 않는다) · 늦게 온 이전 응답은 `gen` 으로 버린다 · 실패한 OTP 는 비운다.
   ③ 네트워크 끊기 기본(새 VM 끊기 · 덮어쓰기 그대로 — `withMode`) · 상태는 원장 `restores[].nic · finish` 를 `finishText` 로(옛 복원은 '—'). 진행 · 이력의 복원 이력 표에 '네트워크' 칸.
   ④ 데이터스토어 목록은 `/datastores`(vCenter 마다 한 번 — `dsAsked` ref · 렌더마다 다시 묻지 않는다) · 남은 스냅샷 칩은 인벤토리 `snapshotCount`(못 읽으면 칩 없음 — 0 으로 보지 않는다).
   ⑤ 백업 대상 패널의 '복원…' 은 이 화면으로 그 VM 을 골라 넘긴다(옛 단건 RestoreModal 은 지웠다). 결과 창의 'Full 로 지금 실행' 은 해석이 Full 을 권하는 줄(`issueNeedsFull`)에만 · 쓰기 범위일 때만.
+  ⑨ v2.866 폴더 표(`BareosRestoreTable.jsx` · 트리 `bareosRestoreTree.js` + test): 고르는 방식 칩 두 개(간단 목록 · 폴더 표 — 브라우저에 기억, 못 읽으면 간단 목록) · 표는 div 격자(role=table · 열 머리 고정)이고 트리라 정렬하지 않는다 ·
+     아래 고정 줄(선택 수 · 용량 · 다음) · 폴더 체크는 고를 수 있는 VM 만(일부만 고르면 중간 표시) · 모르는 값은 '—' · 부분 합은 '+' · 폴더 VM 수는 열 때 한 번(폴링 없음).
+     v2.867.1(Chromium 판독): 아래 고정 줄은 `.pickbar-sticky`(하단 상태바 위 — 상태바는 720px 이하에서 두 줄 · 실측 52px) · bottom: 8 이면 '다음' 버튼이 상태바에 가렸다(400px 에서는 보이지 않음).
 - **v2.862 — Bareos 복원 검증(리허설) · 일일 요약 메일**(`BareosRehearsal.jsx` — 운영 › 복원 아래 카드 · 설정 › 공통 기본값 · 수집의 '일일 요약 메일' 펼침). 글자는 `bareosRestoreText.js`:
   ① 정책은 꺼짐이 기본 — 화면이 그 사실과 이유(VM 을 만들고 데이터스토어를 쓴다)를 먼저 말한다. 정책 바꾸기 · 지금 검증은 서버가 준 `fullScope` 일 때만 그린다(집행은 서버) · OTP 칸은 6자리 숫자만 · 실패해도 비운다.
   ② 폴링하지 않는다(처음 한 번 + 다시 읽기) · 결과 표의 Tools 응답 시간은 `toolsText`(모르면 '—' — 0 아님) · 정리 칸은 지움/남김/—.
   ③ 최근 묶음 진행(`latestBatchId`)에서 검증 회차는 뺀다 — 사람이 시작한 묶음만. 요약 메일 설정은 공통 기본값 저장과 따로 저장한다.
+  ④ v2.863 vCenter 별 검증 데이터스토어 칸은 정책 편집 안의 접힌 `<details>`(vCenter 가 28곳이어도 기본 화면을 늘리지 않게) · 목록은 편집을 열 때 `/datastores` 한 번(폴링 없음) ·
+     지금 값이 목록에 없으면 지우지 않고 사유를 붙인다(`rehearsalDsOptions` — 읽는 중 · 못 읽음 · 접근 불가 · 인벤토리에 없음을 가른다).
+- **v2.881 — 위키(사용자 요청 '지라와 컨플루언스 같은 기능' · 승인 시안 `docs/design/wiki-issues` ①~⑤ · ⑫)**. 화면 `views/wiki/Wiki.jsx` · 렌더러 `MdView.jsx` · 파서 `markdown.js` · 판정 `wikiText.js`.
+  ① **마크다운은 자체 파서 → 구문 나무 → React 요소**(새 의존성 없음). **innerHTML · dangerouslySetInnerHTML 금지** — HTML 은 글자 그대로다. 링크는 `safeHref`(http(s) · `#/` · mailto)만,
+     그림은 `safeImg`(같은 출처 `/…` · `data:image/(png|jpeg|gif|webp)` — CSP `img-src 'self' data: blob:` 와 맞춘 것. 바깥 그림은 링크로 내린다). 이 둘을 넓히면 `markdown.test.js` 안전 묶음이 막는다.
+  ② 파서 정규식은 앵커 + 길이 상한만 — 제목 · 울타리 · 표 구분 줄은 손으로 판정한다(뒤쪽 공백 · # 을 겹쳐 훑는 역추적). 인라인 짝 찾기는 '닫는 짝 없음' 을 기억해 다시 훑지 않는다.
+     선형 시간은 `markdown.test.js` 가 **비율**로 고정(병적 입력 11종 · 2배 입력에 3.2배 미만 · 3회 최솟값). 옛 정규식으로 되돌리는 변이 2건을 잡는 것을 확인했다.
+  ③ 목차 · 각주 이동은 **해시를 바꾸지 않고** `scrollIntoView`(해시는 화면 주소다 — `#wh-3` 으로 바꾸면 위키를 떠난다). 제목 id 는 `idPrefix` 로 미리보기 · 댓글과 겹치지 않게.
+  ④ 저장은 편집 시작 판(`baseVersion`)을 싣는다 — 409 `conflict` 면 내 글을 그대로 두고 그 사이 바뀐 줄(`/diff`)을 보인 뒤 '확인하고 내 글로 저장'(지금 판으로 다시 보냄). 조용히 덮지 않는다.
+     초안은 이 브라우저(localStorage)에만 1.5초 멈추면 저장 — 모든 접근은 try/catch(막힌 브라우저에서도 화면이 돈다). 서버 판과 편집 시작 판이 같을 때만 '불러오기' 를 띄운다.
+  ⑤ 버튼 판정은 서버 값으로: `writable`(편집 · 지우기 — 쓰기 범위 ∧ 읽기 전용 아님) · `commentable`(댓글 — 쓰기 범위만, 읽기 전용 스페이스에서도 된다 · `addComment` 와 같은 판정 · `wiki2881` ③ 이 고정).
+  ⑥ 본문 첫 `# 제목` 이 문서 제목과 같으면 보기에서만 뺀다(`withoutTitle` — 템플릿이 '# 제목' 으로 시작해 두 번 보였다 · 글은 바꾸지 않는다). 콜아웃 제목이 종류 이름과 같으면 한 번만.
+  ⑦ 링크 색은 `.wiki-page :where(a:not(...))` — 앱 전역이 `a` 색을 정하지 않아 기본 파랑 + 밑줄이 어두운 배경에서 안 읽혔다(Chromium 판독). `:where` 로 특이도를 0 으로 둬야
+     문서 나무 · 빵 부스러기 링크가 자기 색을 지킨다(`:not()` 사슬은 특이도를 올려 덮었다). 위키 밖(이슈 상세 '관련 문서')은 `.wiki-xlink`.
+  ⑧ 편집 아래 고정 버튼 줄은 `bottom: var(--statusbar-h)` — `bottom: 0` 이면 하단 상태바(fixed)가 저장 버튼을 가렸다(Chromium 실측 1440: 버튼 855~900 · 상태바 868~ / 400: 상태바 848~). v2.867 `.pickbar-sticky` 와 같은 사고.
+  ⑨ 마크다운 표도 `STable`(헤더 정렬 · `data-sort` 에 순수 글 · `minWidth` 로 400px 가로 스크롤). 400px 에서 문서 나무는 '문서 목록' 버튼으로 연다.
+- **v2.882 — 이슈 확장(사용자 요청 '지라 같은 기능' — 에픽 · 스프린트 · 필터 · 승인 시안 `docs/design/wiki-issues` ⑥⑦⑧⑬)**. 화면 `views/issues/IssuesPlus.jsx`(스프린트 · 에픽 · 필터 · 일괄 편집 ·
+  상세의 에픽/스프린트 칸 · 하위 작업 칸) · 공용 조각 `issueParts.jsx`(Issues.jsx 에서 옮김) · 판정 `issueText.js`(칩 · 칩 지우기 · 오류 밑줄 · 번다운 선).
+  ① **검색식은 서버가 해석한다**(`server/src/issues/query.js` 하나) — 화면은 식 문자열만 보내고, 칩 · 오류 위치 · 제안도 서버 값이다. 칩을 지우면 남은 칸의 **원문 구간**을
+     ' AND ' 로 다시 잇고 정렬 부분(`orderStart` 뒤)을 그대로 붙인다(`removeChip` — 두 벌의 식을 만들지 않는다). 칸 구간은 `in (…)` 의 닫는 괄호까지 덮는다(빠지면 지울 때 ')' 가 남았다 — 테스트가 잡았다).
+  ② **목록 표에 열을 더하지 않는다** — 에픽 · 스프린트 두 열을 더했더니 1440px 에서 표(1,320px)가 본문 폭(약 1,120px)을 넘어 기한 · 갱신이 가로 스크롤 뒤로 숨었다
+     (Chromium 판독 — v2.780 과 같은 종류). 에픽 · 하위 · 스프린트는 제목 아래 작은 표시(`iss-row-tags`)로 두고, 그 값으로 정렬하려면 필터 화면의 결과 표(열이 따로 있다 · 가로 스크롤)를 쓴다.
+  ③ 스프린트 기본 선택은 '기간 안의 진행 중' → 기간 지난 진행 중(최근) → 예정 — 목록 순서(시작일)대로 고르면 기간이 지난 옛 스프린트가 먼저 잡혔다(Chromium 판독).
+  ④ 번다운 기준선은 '가장 많이 남았던 수 → 마지막 날 0' — 첫날 값으로 그으면 스프린트 중간에 이슈를 넣었을 때 바닥에 붙는다. 아직 오지 않은 날(null)은 그리지 않는다(지어내지 않는다).
+  ⑤ 남은 하위 작업(에픽이면 소속 이슈)이 있으면 서버가 409 `open-children` 로 묻고 화면은 확인을 받아 `closeChildren:true` 로 다시 보낸다(취소하면 아무것도 바꾸지 않는다).
+     자식이 있는 이슈의 진행률 입력은 잠기고 메모만 보낸다(서버 409 `progress-auto` 와 같은 판정).
+  ⑥ 스프린트 · 필터 공유 버튼은 서버 값(`canSprints` · `canShareFilters` — 전체 범위 쓰기 계정)일 때만 그린다. 필터 저장은 쓰기 역할만(viewer 상태변경 예외를 늘리지 않았다).
+- **v2.883 — C-1 기능 모음(시안 ③⑨⑩⑧ 중 A · B 에서 미룬 것)**. 마크다운 파서(`views/wiki/markdown.js`) · `MdView` · 이슈 상세 · 위키 보기/편집 · 필터.
+  ① **이슈 본문 · 댓글은 위키 렌더러 + `breaks`**(줄 하나 바꿈 = 줄바꿈). 표준 마크다운대로 그리면 사람이 평문으로 쓴 예전 본문(파트 장애 자동 이슈의 '■' 줄 포함)이 한 줄로 붙는다.
+     `BREAKS` 는 `parseMarkdown` 호출 동안만 켜는 모듈 변수다(동기 — 다음 해석에 남지 않는 것을 테스트가 본다).
+  ② 문서 목록을 모르는 화면(이슈)은 못 찾은 `[[제목]]` 을 '없는 문서'(빨간 점선)로 단정하지 않고 위키 찾기로 잇는다(`unresolvedAsSearch` — 있는 문서가 빨갛게 보였다, Chromium 판독).
+  ③ **체크리스트 체크는 원문 줄 번호로** — 파서가 줄 번호를 들고 다닌다(인용 · 콜아웃 · 중첩 안에서도 · 코드 블록 안은 항목이 아니다). 서버는 `baseVersion` 과 그 줄의 체크 표시를 다시 확인한다.
+     줄 판정 `taskMarkAt` 은 웹 · 서버 두 벌이라 `server/test/wikiIssues2883.test.js` ① 이 같은 입력으로 대조한다(한쪽만 고치면 다른 칸이 체크된다).
+  ④ 펼친 목록은 떠 있는 상자(absolute)로 두지 말고 그 줄을 통째로 쓴다 — 이슈 찾기 목록이 1440px 에서 화면 오른쪽 끝을 넘어 글자가 잘렸다(Chromium 판독). 키 칩(`.md-iss`)은 줄바꿈하지 않는다.
+  ⑤ 완료 전에 서버가 묻는 것(409 `open-children` · `open-blockers`)은 `statusConfirmText` · `STATUS_CONFIRM_FLAG` 하나로 차례로 확인받는다(최대 3번 · 취소하면 아무것도 바꾸지 않는다).

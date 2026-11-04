@@ -26,10 +26,19 @@ export const OP_LABEL = Object.freeze({ run: '지금 실행', verify: '검증', 
  * 수십 분 걸려 그날 VM 백업 · 다른 복원의 NIC 끊기가 몇 시간 밀렸다(반증 F6). 대신 **vCenter 마다 한 줄**로 차례로 돈다(같은 vCenter 에 동시에 손대지 않게).
  */
 const _bareosChains = new Map();
-function perVcenter(vcenterId, fn) {
+// v2.874(점검 B2-02 — 재현): 이 줄의 작업(대기 · 실행)은 runner · inflight 어디에도 없어 자동 업그레이드가 기다리지 않았다 — 재시작하면 켠 검증 VM 이
+//   끄기 · 지우기 없이 남았다(다시 보낸 검증은 '켜져 있습니다' 거짓 실패). upgrade/manager.js 가 이 목록이 빌 때까지 적용을 미룬다(종류 · 대상 이름 · 시각만).
+const _finishOps = new Map();   // op id → { kind, vcenterId, name, since }
+/** 지금 줄에 있거나 도는 Bareos 마무리(재시작하면 끊긴다) — upgrade/manager.js 대기 목록과 같은 모양. */
+export function runningBareosFinishes() {
+  return [..._finishOps].map(([id, o]) => ({ kind: 'bareos', key: `bareos-finish:${id}`, label: `${OP_LABEL[o.kind] || o.kind}(${o.vcenterId}/${o.name})`.slice(0, 120), since: o.since, resumable: false }));
+}
+function perVcenter(vcenterId, fn, meta = null) {
   const key = String(vcenterId || '');
   const prev = _bareosChains.get(key) || Promise.resolve();
-  const run = prev.catch(() => {}).then(() => fn(() => {}));
+  const mid = meta?.id ? String(meta.id) : '';
+  if (mid) _finishOps.set(mid, { kind: meta.kind, vcenterId: key, name: String(meta.name || '').slice(0, 80), since: Date.now() });
+  const run = prev.catch(() => {}).then(() => fn(() => {})).finally(() => { if (mid) _finishOps.delete(mid); });
   const tailP = run.catch(() => {});
   _bareosChains.set(key, tailP);
   tailP.then(() => { if (_bareosChains.get(key) === tailP) _bareosChains.delete(key); });
@@ -64,7 +73,7 @@ export async function executeOp(op) {
       const r = await disconnectRestoredVm(vcenterId, name, { setPhase });
       logAudit({ user: by, action: r.ok ? 'Bareos 복원 VM 네트워크 끊기' : 'Bareos 복원 VM 네트워크 끊기 실패', target: `${vcenterId}/${name.slice(0, 60)}`, detail: String(r.detail).slice(0, 200) });
       return { ok: r.ok, detail: r.detail, ms: r.ms };
-    });
+    }, { id: op.id, kind, name });
   }
 
   // v2.862 Bareos 복원 검증(리허설) — 검증용으로 복원한 새 VM 을 끊고 · 켜고 · Tools 확인 · 끄고 · (성공이면) 지운다
@@ -75,7 +84,7 @@ export async function executeOp(op) {
       const r = await verifyRestoredVm(vcenterId, name, { deleteOnOk: spec.deleteOnOk !== false, retry: spec.retry === true, setPhase });
       logAudit({ user: by, action: r.ok ? 'Bareos 복원 검증 성공' : 'Bareos 복원 검증 실패', target: `${vcenterId}/${name.slice(0, 60)}`, detail: String(r.detail).slice(0, 200) });
       return { ok: r.ok, detail: r.detail, ms: r.ms, toolsMs: r.toolsMs ?? null, deleted: !!r.deleted };
-    });
+    }, { id: op.id, kind, name });
   }
 
   const job = getJob(String(op.jobId || ''));

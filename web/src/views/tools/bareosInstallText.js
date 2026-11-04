@@ -49,6 +49,38 @@ export function targetModeText(t) {
   return t.mode === 'reinstall' ? '초기화 후 재설치' : '설치 가능';
 }
 
+/*
+ * v2.879 '등록부 대상 연결'(사용자 요청 — 배포 등록부에 에이전트 이름이 다르게 들어간 대상을 목록에서 골라 고친다 · 오타 방지):
+ *   이름은 입력받지 않는다(그 행의 엣지 이름을 서버가 쓴다). 고를 수 없는 대상은 서버 linkDecision 과 같은 규칙으로 잠그고 까닭을 보인다
+ *   — 서버가 다시 판정하고, 바꾸기 전에 SSH 로 그 서버 포탈 이름을 확인한다(server/src/bareos/install/linkTarget.js).
+ */
+/** 이 행에 연결 단추를 보이는가 — 엣지는 있는데 그 이름의 배포 대상이 없는 행만. */
+export const canLink = (r) => !!(r && r.linkable && r.agent && !r.targetId);
+/** 배포 대상 한 줄(비밀 없음). */
+export function linkCandText(c) {
+  if (!c) return '—';
+  const port = numOrNull(c.sshPort);
+  return `${c.host}${port !== null && port !== 22 ? `:${port}` : ''} · ${c.username || '계정 —'} · 지금 이름 ‘${c.agentName || '(없음)'}’`;
+}
+/** 이 행에서 고를 대상(고를 수 있는 것 먼저 · 각 항목 disabled 와 까닭). */
+export function linkChoices(linkTargets, row) {
+  if (!row) return [];
+  return (Array.isArray(linkTargets) ? linkTargets : []).filter((c) => c && c.id).map((c) => {
+    let why = c.blocked || '';
+    const other = (Array.isArray(c.jobs) ? c.jobs : []).find((j) => j && j.vcenterId !== row.vcenterId);
+    if (!why && other) why = `법인 ‘${other.vcenterName || other.vcenterId}’ 의 완전 설치 작업이 쓰는 대상입니다`;
+    return { id: c.id, label: linkCandText(c), disabled: !!why, why, cand: c };
+  }).sort((a, b) => Number(a.disabled) - Number(b.disabled));
+}
+/** SSH 로그인 실패 표지 — 같은 대상으로 다시 누르면 같은 계정으로 또 로그인을 시도한다(계정 잠금 · 자동 재시도 금지 규칙). */
+export const isSshAuthFail = (e) => !!(e && e.body && e.body.code === 'ssh-auth');
+/** 연결 성공 문구. */
+export function linkDoneText(r) {
+  if (!r) return '연결했습니다.';
+  const port = numOrNull(r.sshPort);
+  return `연결했습니다 — 배포 대상 ${r.host}${port !== null && port !== 22 ? `:${port}` : ''} 의 에이전트 이름 ‘${r.before || '(없음)'}’ → ‘${r.agent}’ (접속 확인: 그 서버 포탈 이름 ‘${r.portalName || '—'}’). SSH 주소 · 계정 · 비밀번호는 그대로입니다.`;
+}
+
 /** 업로드 진행 → 글자(모르면 '—'). */
 export function uploadText(u) {
   if (!u) return '—';
@@ -96,6 +128,17 @@ export function defaultPlan(bundle, target) {
 }
 
 /**
+ * v2.876(2026-11-04 사용자 화면 — 사전 점검 '이미 설치된 Bareos ✗' 에서 막다른 길): 포탈에 Director 가 없는 법인(새 설치)의 서버에 Bareos 가 이미 있으면
+ *   그 자리에서 '초기화 후 재설치로 진행' 을 고를 수 있다. 서버(targets.js resetTarget)가 같은 바꿈을 한다 — 이 서버가 다른 법인의 Director 로 등록돼 있으면 서버가 거부한다.
+ */
+export const canResetExisting = (pre, target) => target?.mode === 'install' && target?.can === true && pre?.mode === 'install'
+  && (pre?.items || []).some((i) => i.key === 'bareos' && i.status === 'bad');
+/** 화면이 쓰는 대상 — 계획에 resetExisting 이 켜졌으면 재설치로 본다(서버 resetTarget 과 같은 바꿈 · 기존 재설치 대상은 그대로). */
+export const effectiveTarget = (t, plan) => (t && t.mode === 'install' && plan?.resetExisting === true ? { ...t, mode: 'reinstall', resetUnregistered: true } : t);
+/** '초기화 후 재설치로 진행' 을 고른 계획(초기화 확인 칸 기본값은 재설치와 같다 — 카탈로그 기본 삭제 · 볼륨 기본 보존 · 확인 체크 필요). */
+export const resetExistingPlan = (bundle, target) => ({ ...defaultPlan(bundle, { ...target, mode: 'reinstall' }), resetExisting: true });
+
+/**
  * v2.846 D-2: 실행 중 작업을 못 읽었을 때의 동의 — 서버 사전 점검의 조치 문구(precheck.js RUNNING_UNKNOWN_OK_LABEL)와 **같은 글자**(시험이 대조).
  * 동의는 그 회차에만(서버 작업 기록의 시도 행) — 계획 값이 아니라 다시 하기로 이어지지 않는다.
  */
@@ -113,6 +156,7 @@ export function planBody(p, { pre = null, target = null } = {}) {
   const n = (v) => (v === '' || v == null ? v : Number(v));
   return {
     ...(p.runningUnknownOk === true && runningUnknown(pre, target) ? { runningUnknownOk: true } : {}),
+    ...(p.resetExisting === true ? { resetExisting: true } : {}),   // v2.876 포탈 미등록 Bareos 를 지우고 설치(서버가 다시 판정)
     pyvmomi: p.pyvmomi, pyvmomiFix: !!p.pyvmomiFix, volumeDir: String(p.volumeDir || '').trim(), webui: p.webui !== false,
     pools: { fullDays: n(p.pools?.fullDays), incrDays: n(p.pools?.incrDays), maxVolumeGB: n(p.pools?.maxVolumeGB) },
     schedule: { fullDay: p.schedule?.fullDay, time: p.schedule?.time }, consoleName: String(p.consoleName || '').trim(), directorName: String(p.directorName || '').trim(),

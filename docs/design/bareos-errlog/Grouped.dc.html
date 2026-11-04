@@ -1,0 +1,169 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>통합 에러 로그 — 묶어 보기 · 묶음 로그 대조</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=Noto+Sans+KR:wght@400;500;700;800&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+body{margin:0;background:#0a0e17;color:#e6edf6;font-family:"Inter","Noto Sans KR","Apple SD Gothic Neo",sans-serif;font-size:13px}
+a{color:#93c5fd}a:hover{color:#bfdbfe}
+.card{background:#141b2d;border:1px solid #243049;border-radius:12px}
+.muted{color:#8b9bb4}
+.mono{font-family:"JetBrains Mono",ui-monospace,monospace}
+.toptab{min-width:84px;min-height:40px;display:inline-flex;align-items:center;justify-content:center;padding:0 18px;text-decoration:none;color:#8b9bb4;font-weight:600;font-size:15px;border-bottom:3px solid transparent}
+.toptab.on{color:#e6edf6;font-weight:800;border-bottom-color:#3b82f6}
+.chip{display:inline-flex;align-items:center;gap:6px;min-height:30px;padding:0 12px;border-radius:8px;border:1px solid #243049;background:#1a2236;color:#8b9bb4;font:inherit;font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap;text-decoration:none}
+.chip.on{background:#e6edf6;border-color:#e6edf6;color:#0a0e17}
+.seg{display:inline-flex;border:1px solid #243049;border-radius:8px;overflow:hidden;background:#0f1626}
+.seg a{display:inline-flex;align-items:center;gap:6px;min-height:30px;padding:0 12px;font-size:12px;font-weight:700;color:#8b9bb4;text-decoration:none}
+.seg a.on{background:#3b82f6;color:#ffffff}
+.seg .n{font-size:11px;padding:1px 6px;border-radius:999px;background:rgba(255,255,255,.18)}
+.btn{display:inline-flex;align-items:center;gap:6px;min-height:30px;padding:0 11px;border-radius:8px;border:1px solid #243049;background:#1a2236;color:#e6edf6;font:inherit;font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap;text-decoration:none}
+.btn.primary{background:#3b82f6;border-color:#3b82f6;color:#ffffff}
+.btn.ghost{background:transparent;border-color:transparent;color:#93c5fd;text-decoration:underline;padding:0 4px}
+.btn.sm{min-height:26px;padding:0 9px;font-size:11.5px}
+.tag{display:inline-flex;align-items:center;gap:5px;height:20px;padding:0 8px;border-radius:999px;font-size:11px;font-weight:700;white-space:nowrap}
+.tag.bad{background:rgba(239,68,68,.16);color:#fca5a5}.tag.warn{background:rgba(245,158,11,.16);color:#fcd34d}.tag.vol{background:rgba(249,115,22,.16);color:#fdba74}
+.tag.veeam{background:rgba(59,130,246,.18);color:#93c5fd}.tag.bareos{background:rgba(20,184,166,.18);color:#5eead4}.tag.gray{background:rgba(139,155,180,.14);color:#aebbd0}.tag.ok{background:rgba(34,197,94,.14);color:#86efac}
+table{border-collapse:collapse;width:100%}
+th{font-size:12px;font-weight:600;color:#8b9bb4;text-align:left;padding:9px 10px;background:#0f1626;border-bottom:1px solid #243049;white-space:nowrap}
+td{padding:9px 10px;border-bottom:1px solid #1f2a40;vertical-align:middle;white-space:nowrap;font-size:12.5px}
+tr.grp td{background:#121a2b;font-weight:600}
+tr.grp.open td{box-shadow:inset 3px 0 0 #3b82f6}
+tr.mem td{background:#0d1320;padding-top:6px;padding-bottom:6px;font-size:12px}
+tr.mem td:first-child{padding-left:34px}
+.cnt{display:inline-flex;align-items:center;min-width:22px;height:22px;padding:0 8px;border-radius:999px;background:#3b82f6;color:#ffffff;font-size:11.5px;font-weight:800;justify-content:center}
+.chev{display:inline-block;width:8px;height:8px;border-right:2px solid #8b9bb4;border-bottom:2px solid #8b9bb4;transform:rotate(-45deg);margin-right:8px}
+.chev.open{transform:rotate(45deg)}
+.sm{font-size:11.5px;color:#8b9bb4}
+.drawer{position:absolute;top:0;right:0;bottom:0;width:640px;background:#0f1626;border-left:1px solid #243049;box-shadow:-24px 0 48px rgba(0,0,0,.45);display:flex;flex-direction:column;min-width:0}
+.band{display:flex;align-items:center;gap:10px;padding:10px 14px;border-radius:10px;border:1px solid rgba(239,68,68,.45);background:rgba(239,68,68,.10);color:#fca5a5;font-weight:700}
+.prog{display:flex;height:6px;border-radius:3px;overflow:hidden;background:#1a2236;flex:1 1 0}
+.prog i{display:block;height:100%;background:#4ade80}
+.row{display:flex;align-items:center;gap:8px;padding:7px 10px;border-bottom:1px solid #1f2a40;font-size:12px;min-width:0}
+.row .nm{font-family:"JetBrains Mono",ui-monospace,monospace;font-size:11.5px;width:190px;flex:none;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.row .ln{flex:1 1 0;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#aebbd0}
+.hint{border:1px solid #243049;border-radius:8px;background:rgba(59,130,246,.08);padding:9px 12px;font-size:12px;line-height:1.5;color:#cbd5e1}
+</style>
+</helmet>
+<div style="position:relative;width:100%;min-height:1180px;box-sizing:border-box;overflow:hidden;background:#0a0e17">
+<div style="max-width:1440px;margin:0 auto;box-sizing:border-box;padding:18px 24px 28px;display:flex;flex-direction:column;gap:14px;min-width:0">
+
+  <div style="min-width:0">
+    <div style="font-size:22px;font-weight:800">Backup 현황</div>
+    <div class="muted" style="font-size:13px">Veeam · Bareos 를 한 화면에서 — 법인별 보호 상태와 통합 에러 로그.</div>
+  </div>
+  <div role="tablist" aria-label="Backup 현황 보기" style="display:flex;gap:4px;box-shadow:inset 0 -1px 0 #243049">
+    <a class="toptab on" href="Grouped.dc.html" aria-current="page">Summary</a>
+    <a class="toptab" href="Grouped.dc.html">Detail</a>
+    <a class="toptab" href="Grouped.dc.html">Veeam</a>
+    <a class="toptab" href="Grouped.dc.html">Bareos</a>
+  </div>
+
+  <section class="card" aria-label="통합 에러 로그" style="padding:0;overflow:hidden;min-width:0">
+    <div style="display:flex;flex-wrap:wrap;align-items:center;gap:6px 10px;padding:12px 14px;border-bottom:1px solid #1f2a40">
+      <b style="font-size:14px">통합 에러 로그 — 최근 24시간</b>
+      <span class="muted" style="font-size:12px;min-width:0">같은 모양끼리 한 줄로 — 83건이 8묶음 · 펼치면 낱건</span>
+      <div style="margin-left:auto;display:flex;flex-wrap:wrap;gap:6px;align-items:center">
+        <a class="chip on" href="Grouped.dc.html">전체 83</a>
+        <a class="chip" href="Grouped.dc.html">실패 62</a>
+        <a class="chip" href="Grouped.dc.html">경고 20</a>
+        <a class="chip" href="Grouped.dc.html">오류 볼륨 1</a>
+        <a class="chip" href="Grouped.dc.html">수집 오류 0</a>
+        <a class="chip" href="Grouped.dc.html">Veeam</a>
+        <a class="chip" href="Grouped.dc.html">Bareos</a>
+        <nav class="seg" aria-label="보기">
+          <a href="Main.dc.html">따로 보기</a>
+          <a class="on" href="Grouped.dc.html" aria-current="page">묶어 보기 <span class="n">8</span></a>
+        </nav>
+        <span class="chip" style="cursor:default">24시간 ▾</span>
+      </div>
+    </div>
+
+    <div style="overflow-x:auto">
+      <table>
+        <thead><tr>
+          <th>시각(처음~마지막)</th><th>법인</th><th>솔루션</th><th>대상</th><th>결과</th><th style="min-width:300px">메시지(요약)</th><th>건수</th><th>열기</th>
+        </tr></thead>
+        <tbody>
+          <tr class="grp"><td class="mono">11-04 06:10</td><td>NJ</td><td><span class="tag bareos">Bareos</span></td><td>Full-0001</td><td><span class="tag vol">오류 볼륨</span></td><td style="white-space:normal;max-width:420px;font-weight:400">볼륨 상태 Error · 풀 Full · Director NJ Bareos</td><td><span class="cnt" style="background:#243049;color:#aebbd0">1</span></td><td><a class="btn ghost" href="Grouped.dc.html">보존 · 풀</a></td></tr>
+          <tr class="grp"><td class="mono">11-04 02:40 ~ 03:11</td><td class="muted">—</td><td><span class="tag veeam">Veeam</span></td><td>11. H/W Monitoring <span class="sm">HM</span></td><td><span class="tag bad">실패</span></td><td style="font-weight:400">EM 세션 결과 Failed · HM — 같은 잡이 4번</td><td><span class="cnt">4</span></td><td style="display:flex;gap:6px;align-items:center"><a class="btn sm" href="Grouped.dc.html" aria-label="4건 펼치기"><span class="chev" aria-hidden="true"></span>펼치기</a><a class="btn ghost" href="Grouped.dc.html">Veeam</a></td></tr>
+
+          <tr class="grp open"><td class="mono">11-04 02:42 ~ 02:48</td><td>OC2</td><td><span class="tag bareos">Bareos</span></td><td>pv-54220daf-vm-* <span class="sm">15대</span></td><td><span class="tag bad">실패</span></td><td style="font-weight:400">치명 오류 · Full · 오류 1건 — 같은 모양 15건(1시간 안)</td><td><span class="cnt">15</span></td><td style="display:flex;gap:6px;align-items:center"><a class="btn sm" href="Grouped.dc.html" aria-label="15건 접기"><span class="chev open" aria-hidden="true"></span>접기</a><a class="btn primary sm" href="Grouped.dc.html" aria-current="true">묶음 로그 열림</a></td></tr>
+          <tr class="mem"><td class="mono">02:48</td><td></td><td></td><td class="mono">pv-54220daf-vm-159435 <span class="sm">LESASHSP07 · jobid 20617</span></td><td><span class="tag bad">실패</span></td><td class="sm">치명 오류 · Full · 오류 1건</td><td><span class="tag bad">같은 오류</span></td><td style="display:flex;gap:6px"><a class="btn sm" href="Main.dc.html">로그</a><a class="btn ghost" href="States.dc.html">이력 →</a></td></tr>
+          <tr class="mem"><td class="mono">02:47</td><td></td><td></td><td class="mono">pv-54220daf-vm-100104 <span class="sm">LESASHSP06 · jobid 20616</span></td><td><span class="tag bad">실패</span></td><td class="sm">치명 오류 · Full · 오류 1건</td><td><span class="tag bad">같은 오류</span></td><td style="display:flex;gap:6px"><a class="btn sm" href="Main.dc.html">로그</a><a class="btn ghost" href="States.dc.html">이력 →</a></td></tr>
+          <tr class="mem"><td class="mono">02:45</td><td></td><td></td><td class="mono">pv-54220daf-vm-120327 <span class="sm">LESASHSP05 · jobid 20615</span></td><td><span class="tag bad">실패</span></td><td class="sm">치명 오류 · Full · 오류 1건</td><td><span class="tag bad">같은 오류</span></td><td style="display:flex;gap:6px"><a class="btn sm" href="Main.dc.html">로그</a><a class="btn ghost" href="States.dc.html">이력 →</a></td></tr>
+          <tr class="mem"><td class="mono">02:44</td><td></td><td></td><td class="mono">pv-54220daf-vm-35656 <span class="sm">LESASHSPO05 · jobid 20614</span></td><td><span class="tag bad">실패</span></td><td class="sm">치명 오류 · Full · 오류 1건</td><td><span class="tag warn">다른 오류</span></td><td style="display:flex;gap:6px"><a class="btn sm" href="Main.dc.html">로그</a><a class="btn ghost" href="States.dc.html">이력 →</a></td></tr>
+          <tr class="mem"><td class="mono">02:44</td><td></td><td></td><td class="mono">pv-54220daf-vm-16895 <span class="sm">LESASHSPO04 · jobid 20612</span></td><td><span class="tag bad">실패</span></td><td class="sm">치명 오류 · Full · 오류 1건</td><td><span class="tag bad">같은 오류</span></td><td style="display:flex;gap:6px"><a class="btn sm" href="Main.dc.html">로그</a><a class="btn ghost" href="States.dc.html">이력 →</a></td></tr>
+          <tr class="mem"><td class="mono">02:44</td><td></td><td></td><td class="mono">pv-54220daf-vm-16894 <span class="sm">LESASHSPO03 · jobid 20611</span></td><td><span class="tag bad">실패</span></td><td class="sm">치명 오류 · Full · 오류 1건</td><td><span class="tag bad">같은 오류</span></td><td style="display:flex;gap:6px"><a class="btn sm" href="Main.dc.html">로그</a><a class="btn ghost" href="States.dc.html">이력 →</a></td></tr>
+          <tr class="mem"><td class="mono">02:43</td><td></td><td></td><td class="mono">pv-54220daf-vm-14188 <span class="sm">LESASHSPO00 · jobid 20605</span></td><td><span class="tag bad">실패</span></td><td class="sm">치명 오류 · Full · 오류 1건</td><td><span class="tag gray">못 읽음</span></td><td style="display:flex;gap:6px"><a class="btn sm" href="Main.dc.html">로그</a><a class="btn ghost" href="States.dc.html">이력 →</a></td></tr>
+          <tr class="mem"><td colspan="8" class="sm" style="padding-left:34px">… 8건 더(아래 묶음 로그에 전부) · 열 제목 정렬은 묶음 단위</td></tr>
+
+          <tr class="grp"><td class="mono">11-03 18:58 ~ 19:32</td><td class="muted">—</td><td><span class="tag veeam">Veeam</span></td><td>25.MLDL <span class="sm">MIL_IRS</span></td><td><span class="tag bad">실패</span></td><td style="font-weight:400">EM 세션 결과 Failed · MIL_IRS</td><td><span class="cnt">2</span></td><td style="display:flex;gap:6px;align-items:center"><a class="btn sm" href="Grouped.dc.html"><span class="chev" aria-hidden="true"></span>펼치기</a><a class="btn ghost" href="Grouped.dc.html">Veeam</a></td></tr>
+          <tr class="grp"><td class="mono">11-03 18:48</td><td>MI</td><td><span class="tag veeam">Veeam</span></td><td>25. MLDL <span class="sm">MI_VSA</span></td><td><span class="tag warn">경고</span></td><td style="font-weight:400">EM 세션 결과 Warning · MI_VSA</td><td><span class="cnt" style="background:#243049;color:#aebbd0">1</span></td><td><a class="btn ghost" href="Grouped.dc.html">Veeam</a></td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="muted" style="padding:8px 14px;font-size:11.5px;border-top:1px solid #1f2a40;line-height:1.6">
+      묶음 = 같은 모양(Bareos: 법인 · 결과 · 레벨 · 오류 수가 같고 1시간 안 · Veeam: 잡 · 메시지 앞머리) — 원장만으로는 <b style="color:#cbd5e1">같은 원인인지 모릅니다</b>. ‘묶음 로그’ 가 로그를 읽어 첫 오류 줄을 대조한 뒤에야 ‘같은 오류 · 다른 오류 · 못 읽음’ 이 붙습니다 ·
+      결과 · 솔루션 칩 거르기는 낱건에 걸리고, 묶음은 남은 낱건으로 다시 셉니다.
+    </div>
+  </section>
+</div>
+
+<aside class="drawer" aria-label="묶음 로그 서랍">
+  <div style="display:flex;align-items:flex-start;gap:10px;padding:14px 16px 10px;border-bottom:1px solid #243049">
+    <div style="min-width:0;flex:1 1 0">
+      <div style="font-size:14px;font-weight:800;white-space:normal">묶음 로그 — OC2 · 치명 오류 · Full · 15건</div>
+      <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:6px;align-items:center">
+        <span class="tag bareos">Bareos</span><span class="tag gray">OC2 Bareos(엣지 대행)</span><span class="sm">11-04 02:42 ~ 02:48 · 15건의 joblog 를 차례로 읽어 첫 오류 줄을 대조(Director 세션 하나 · 한 번에 15건까지)</span>
+      </div>
+    </div>
+    <button type="button" class="btn" aria-label="닫기">닫기</button>
+  </div>
+  <div style="display:flex;align-items:center;gap:10px;padding:10px 16px;border-bottom:1px solid #1f2a40">
+    <span class="sm" style="white-space:nowrap">읽음 15 / 15</span>
+    <div class="prog" aria-label="읽기 진행"><i style="width:100%"></i></div>
+    <span class="sm" style="white-space:nowrap">38초 · 02:51 읽음</span>
+  </div>
+  <div style="flex:1 1 0;overflow:auto;padding:12px 16px 16px;display:flex;flex-direction:column;gap:12px;min-width:0">
+    <div class="band"><span aria-hidden="true" style="font-size:16px">✕</span><span style="white-space:normal">13건이 같은 오류 · 1건 다른 오류 · 1건 못 읽음</span></div>
+    <div style="border:1px solid rgba(239,68,68,.35);border-left:3px solid #f87171;border-radius:8px;background:#141b2d;padding:9px 12px;min-width:0">
+      <div class="sm" style="margin-bottom:3px">가장 많은 첫 오류 줄(13건)</div>
+      <div class="mono" style="font-size:12px;color:#fca5a5;white-space:normal;overflow-wrap:anywhere">Fatal error: python-fd: Error creating snapshot for VM &lt;VM&gt;: A general system error occurred: Operation timed out</div>
+    </div>
+    <div class="hint"><b style="color:#e6edf6">해석</b> — 같은 vCenter(oc2-vc.corp) 에서 6분 사이 13대가 스냅샷 시간 초과 → VM 이 아니라 vCenter · 데이터스토어 쪽을 먼저 봅니다. 다른 오류 1건(vm-35656)은 따로 여세요.</div>
+    <div style="font-size:12px;font-weight:600;color:#8b9bb4;letter-spacing:.02em">건마다 — 첫 오류 줄(VM 이름은 지워 비교)</div>
+    <div style="border:1px solid #243049;border-radius:8px;background:#0a0e17;min-width:0">
+      <div class="row"><span class="nm">vm-159435 · 20617</span><span class="tag bad">같음</span><span class="ln">Fatal error: python-fd: Error creating snapshot … Operation timed out</span><a class="btn sm" href="Main.dc.html">로그</a></div>
+      <div class="row"><span class="nm">vm-100104 · 20616</span><span class="tag bad">같음</span><span class="ln">Fatal error: python-fd: Error creating snapshot … Operation timed out</span><a class="btn sm" href="Main.dc.html">로그</a></div>
+      <div class="row"><span class="nm">vm-120327 · 20615</span><span class="tag bad">같음</span><span class="ln">Fatal error: python-fd: Error creating snapshot … Operation timed out</span><a class="btn sm" href="Main.dc.html">로그</a></div>
+      <div class="row"><span class="nm">vm-35656 · 20614</span><span class="tag warn">다름</span><span class="ln">Fatal error: python-fd: Disk ‘[DS02] LESASHSPO05/…vmdk’ is not accessible</span><a class="btn sm" href="Main.dc.html">로그</a></div>
+      <div class="row"><span class="nm">vm-16895 · 20612</span><span class="tag bad">같음</span><span class="ln">Fatal error: python-fd: Error creating snapshot … Operation timed out</span><a class="btn sm" href="Main.dc.html">로그</a></div>
+      <div class="row"><span class="nm">vm-16894 · 20611</span><span class="tag bad">같음</span><span class="ln">Fatal error: python-fd: Error creating snapshot … Operation timed out</span><a class="btn sm" href="Main.dc.html">로그</a></div>
+      <div class="row"><span class="nm">vm-14188 · 20605</span><span class="tag gray">못 읽음</span><span class="ln">카탈로그에 joblog 가 없습니다(지워졌거나 보존 기간 지남) — 상태만 원장 기준</span><a class="btn sm" href="Main.dc.html" aria-disabled="true" style="opacity:.5">로그</a></div>
+      <div class="row sm" style="justify-content:center">… 8건 더 — 전부 ‘같음’</div>
+    </div>
+  </div>
+  <div style="display:flex;align-items:center;gap:8px;padding:10px 16px;border-top:1px solid #243049;flex-wrap:wrap">
+    <span class="sm">다시 읽으면 Director 에 15번 더 묻습니다</span>
+    <span style="flex:1 1 0"></span>
+    <button type="button" class="btn">대조 결과 복사</button>
+    <button type="button" class="btn">다시 읽기</button>
+    <a class="btn primary" href="Main.dc.html">낱건으로 보기</a>
+  </div>
+</aside>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1180}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

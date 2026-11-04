@@ -156,8 +156,8 @@ export default function BareosDetailTool() {
           sub={<>{data.vm && Number.isFinite(c.bareosMethod) ? <span>전체 {numText(data.vm)} 중 {Math.round((c.bareosMethod / data.vm) * 100)}%</span> : null}<span>용량 {c.rows ? fmtGb(c.gb) : '—'}{c.gbUnknown ? ` · 모름 ${c.gbUnknown}대 제외` : ''}</span></>} />
         <Stat label="잡 등록" value={numText(c.jobs)} sub={<><span>켜짐 {numText(c.on)} · 꺼짐 {numText(c.off)}</span>{c.mismatch ? <span>방식 불일치 {numText(c.mismatch)}</span> : null}</>} />
         <Stat label={`마지막 결과 (잡 ${numText(c.jobs)})`}
-          sub={c.ok == null ? <span>모름(잡 {numText(c.unknown)})</span> : <><span style={{ color: TONE.ok }}>성공 {c.ok}</span><span style={{ color: TONE.warn }}>경고 {c.warn}</span><span style={{ color: TONE.bad }}>실패 {c.fail}</span><span style={{ color: TONE.run }}>진행 {c.run}</span></>}>
-          {resultBar(c) ? <ResultBar b={resultBar(c)} label={`성공 ${c.ok} · 경고 ${c.warn} · 실패 ${c.fail} · 진행 ${c.run}`} /> : <span className="muted" style={{ fontSize: 12 }}>{c.jobs ? '모름' : '잡 없음'}</span>}
+          sub={c.ok == null ? <span>모름(잡 {numText(c.unknown)})</span> : <><span style={{ color: TONE.ok }}>성공 {c.ok}</span><span style={{ color: TONE.warn }}>경고 {c.warn}</span><span style={{ color: TONE.bad }}>실패 {c.fail}</span>{c.cancel ? <span className="muted">취소 {c.cancel}</span> : null}<span style={{ color: TONE.run }}>진행 {c.run}</span></>}>
+          {resultBar(c) ? <ResultBar b={resultBar(c)} label={`성공 ${c.ok} · 경고 ${c.warn} · 실패 ${c.fail}${c.cancel ? ` · 취소 ${c.cancel}` : ''} · 진행 ${c.run}`} /> : <span className="muted" style={{ fontSize: 12 }}>{c.jobs ? '모름' : '잡 없음'}</span>}
         </Stat>
         <Stat label="확인 필요" value={numText(attn.n)} tone={attn.n ? 'bad' : undefined}
           sub={<><span>실패 {numText(attn.parts.fail)}</span><span>미등록 {numText(attn.parts.missing)}</span><span>오래됨({data.rpoDays}일+) {numText(attn.parts.old)}</span><span>백업 없음 {numText(attn.parts.never)}</span></>} />
@@ -203,7 +203,7 @@ export default function BareosDetailTool() {
                 if (row.kind === 'folder') {
                   const a = row.node.agg;
                   const tot = a.job || 0;
-                  const den = Math.max(tot, a.ok + a.warn + a.fail + a.run);   // 버그 점검 W3 — 성공 + 지금 진행이 겹쳐도 100% 를 넘지 않게
+                  const den = Math.max(tot, a.ok + a.warn + a.fail + (a.cancel || 0) + a.run);   // 버그 점검 W3 — 성공 + 지금 진행이 겹쳐도 100% 를 넘지 않게
                   const p = (n) => (den ? `${(n / den) * 100}%` : '0%');
                   return (
                     <div role="row" key={row.key} aria-expanded={row.open} style={{ display: 'grid', gridTemplateColumns: GRID, alignItems: 'center', borderTop: '1px solid var(--border-soft)', background: row.depth === 0 ? 'rgba(251,146,60,.06)' : undefined }}>
@@ -220,8 +220,8 @@ export default function BareosDetailTool() {
                       <div role="gridcell" style={{ padding: '4px 6px', display: 'flex', alignItems: 'center', gap: 8, minWidth: 0, fontSize: 12 }}>
                         <span style={{ color: TONE.bareos, fontWeight: 700, fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>{a.job}/{a.n}</span>
                         {known && tot > 0 ? (
-                          <div role="img" aria-label={`성공 ${a.ok} · 경고 ${a.warn} · 실패 ${a.fail} · 진행 ${a.run}`} style={{ display: 'flex', flex: 1, minWidth: 50, maxWidth: 160, height: 6, borderRadius: 3, overflow: 'hidden', background: 'var(--panel-deep)' }}>
-                            <div style={{ width: p(a.ok), background: '#22c55e' }} /><div style={{ width: p(a.warn), background: '#f59e0b' }} /><div style={{ width: p(a.fail), background: '#ef4444' }} /><div style={{ width: p(a.run), background: '#3b82f6' }} />
+                          <div role="img" aria-label={`성공 ${a.ok} · 경고 ${a.warn} · 실패 ${a.fail}${a.cancel ? ` · 취소 ${a.cancel}` : ''} · 진행 ${a.run}`} style={{ display: 'flex', flex: 1, minWidth: 50, maxWidth: 160, height: 6, borderRadius: 3, overflow: 'hidden', background: 'var(--panel-deep)' }}>
+                            <div style={{ width: p(a.ok), background: '#22c55e' }} /><div style={{ width: p(a.warn), background: '#f59e0b' }} /><div style={{ width: p(a.fail), background: '#ef4444' }} /><div style={{ width: p(a.cancel || 0), background: '#94a3b8' }} /><div style={{ width: p(a.run), background: '#3b82f6' }} />
                           </div>
                         ) : null}
                         {/* U-13(v2.846): 결과를 모르는 법인(인증 정지·조회 실패)은 막대처럼 '실패 N' 도 그리지 않는다(마지막으로 읽은 값 — KPI·칩은 '—') */}

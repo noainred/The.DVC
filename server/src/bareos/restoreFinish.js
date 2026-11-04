@@ -26,7 +26,11 @@ export function finishRestores(now = Date.now()) {
   let list = [];
   try { list = restoresToFinish(); } catch { return 0; }
   if (!list.length) return 0;
-  return inBatch(() => finishList(list, now));
+  // v2.870 감사 A2-06: '던지지 않는다' 계약 — 묶음 저장(디스크 오류)이 던지면 0 을 돌려준다.
+  // v2.871 감사 A2-09(주석 정정 + 동작): 이때 메모리 원장은 이미 바뀌었고(pending + opId) vmclone 작업도 이미 나갔다 — '원장은 그대로' 가 아니다.
+  //   registry 의 미저장 표지(_dirty)가 쓰기 성공 때만 내려가므로 다음 틱의 inBatch 끝에서 같은 메모리 원장을 다시 쓴다(작업을 다시 보내지는 않는다 —
+  //   메모리의 pending + opId 를 보고 '도는 중' 으로 건너뛴다). 다시 쓰기 전에 재시작하면 디스크본 기준으로 다시 보낸다(끊기는 멱등 — 피해 작음).
+  try { return inBatch(() => finishList(list, now)); } catch (e) { console.warn(`[bareos] 복원 마무리 원장 저장 실패: ${String(e?.message || e).slice(0, 200)}`); return 0; }
 }
 
 function finishList(list, now) {
@@ -67,7 +71,12 @@ function finishList(list, now) {
   return sent;
 }
 
-const sameOp = (op) => (cur) => (!cur || cur.nic === 'pending' ? (!cur?.opId || cur.opId === op.id) : false);
+/**
+ * 이 결과를 원장에 쓸 것인가 — 지금 기록된 시도의 결과일 때만(옛 작업의 늦은 결과가 새 시도를 덮지 않게).
+ * v2.870 감사 A2-03: 시한이 지나 닫힌(reapOps → 'failed') **같은 작업**의 늦은 회신(ackOp → late)은 받는다 — 예전에는 cur.nic 이 'failed' 라
+ *   버려져 훅의 late 칸이 죽은 코드였고, 엣지가 실제로 끝낸 검증이 '실패' 로 남았다. 재시도(다른 opId)가 나간 뒤의 늦은 회신은 여전히 버린다.
+ */
+export const sameOp = (op) => (cur) => !cur || (cur.nic === 'pending' ? (!cur.opId || cur.opId === op.id) : (!!op.result?.late && !!cur.opId && cur.opId === op.id));
 /** v2.862 복원 검증 결과 — 끊기 · 켜 보기 · 지우기를 한 기록에(Tools 응답 시간은 모르면 없음 — 0 이 아니다). */
 onOpFinish('bareos-verify', (op) => {
   const { bareosJobId, rid } = op.spec || {};
@@ -75,7 +84,7 @@ onOpFinish('bareos-verify', (op) => {
   const ok = !!op.result?.ok;
   patchRestoreFinish(String(bareosJobId), Number(rid), {
     nic: ok ? 'ok' : 'failed', verify: ok ? 'ok' : 'failed', detail: String(op.result?.detail || '').slice(0, 400), at: op.doneAt || Date.now(), opId: op.id,
-    ...(Number.isFinite(op.result?.toolsMs) ? { toolsMs: op.result.toolsMs } : {}), ...(op.result?.deleted === true ? { deleted: true } : {}), ...(op.result?.late ? { late: true } : {}),
+    ...(Number.isFinite(op.result?.toolsMs) ? { toolsMs: op.result.toolsMs } : {}), ...(typeof op.result?.deleted === 'boolean' ? { deleted: op.result.deleted } : {}), ...(op.result?.late ? { late: true } : {}),   // v2.874 B3-01 남김(false)도 — 없으면 화면이 '모름'
   }, sameOp(op));
 });
 

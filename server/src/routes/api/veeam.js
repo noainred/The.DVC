@@ -46,6 +46,7 @@ import { directorById as bareosDirectorById, jobDirectorId as bareosJobDirectorI
 import { directorNextByJob, policySummary as bareosPolicySummary, directorScheduleItems, policyRev as bareosPolicyRev, errorVolumeItems as bareosErrorVolumeItems } from '../../bareos/policy.js';   // v2.839 Director 정책 수집본(접속하지 않는다)
 import { pollerStatus as bareosPollerStatus } from '../../bareos/poller.js';
 import { LIVE_IDLE_MS as BAREOS_LIVE_IDLE_MS } from '../../bareos/liveStatus.js';
+import { relayLimits as bareosRelayLimits } from '../../bareos/edgeOps.js';   // v2.872 통합 에러 로그 서랍 — 엣지 대행 법인의 로그 회신 시한
 import { veeamJobItems, jobsFromRows, groupItems, overlapOf, groupOverlaps, sevenDays, MAX_ITEMS_PER_SITE } from '../../veeam/backupSchedule.js';   // v2.838 '백업 스케줄 — 다음 24시간' · v2.840 그룹 카드 겹침
 import { ERROR_DAYS, veeamVmRows, bareosRows, stuckRows, emSessionRows, collectRows, volumeRows, finishErrors } from '../../veeam/backupErrors.js';   // v2.838 통합 에러 로그
 import { loadAlert, saveAlert, alertLoadError, alertStatus, sendNow as sendStaleAlertNow, setStaleProvider, MAIL_KIND as STALE_MAIL_KIND } from '../../veeam/staleAlert.js';   // v2.838 백업 안 된 VM 일일 메일
@@ -1045,7 +1046,10 @@ async function errorsData(req, snap, scope, days) {
     const b = await vcBackup(vc, vmsBy.get(vc.id) || [], req, { initial: snap?.initial === true, scope });
     const vr = backupVmRows(vc, b, { now, marks, unreadable, withClone: false });
     pushAll(rows, veeamVmRows(vr.vms, site, since, taskMsgOf(b.match?.byVm, admin)));
-    if (vr.bareos) pushAll(rows, bareosRows(vr.bareos, new Set(vr.vms.map((x) => x.id)), site, since)); else bareosUnknownSites++;
+    const sd0 = bset?.sites?.find?.((x) => x.vcenterId === vc.id);
+    // v2.872 relay = 그 법인 Director 가 엣지 대행 — 화면의 로그 서랍이 엣지 회신 시한(relayLimits)만큼 기다린다(숫자를 화면에 박지 않는다)
+    const relay = !!(sd0 && (bset?.directors || []).find?.((d) => d.id === sd0.directorId)?.agent);
+    if (vr.bareos) pushAll(rows, bareosRows(vr.bareos, new Set(vr.vms.map((x) => x.id)), relay ? { ...site, relay } : site, since)); else bareosUnknownSites++;
     for (const v of b.views) if (v.ok === false || v.authStopped) collect.push({ at: v.ts, vc: site.id, vcName: site.name, src: 'veeam', name: v.name, error: v.error, auth: !!v.authStopped });
     const sd = bset?.sites?.find?.((x) => x.vcenterId === vc.id);
     if (sd && vr.bareos) {   // 멈춤 의심 — 진행 현황이 신선할 때만(Summary 배지와 같은 규칙 · 조회를 새로 일으키지 않는다)
@@ -1078,7 +1082,8 @@ async function errorsData(req, snap, scope, days) {
     } catch { /* 수집본을 못 읽음 — 행 없음(정책 탭이 손상을 밝힌다) */ }
   }
   const fin = finishErrors(rows);
-  return { ok: true, at: now, days, scope, ...fin, sources: { veeamVm: true, em: emIncluded, bareos: true }, ...(bareosUnknownSites ? { bareosUnknownSites } : {}) };
+  let relayLimitsNow = null; try { relayLimitsNow = bareosRelayLimits(); } catch { relayLimitsNow = null; }
+  return { ok: true, at: now, days, scope, ...fin, sources: { veeamVm: true, em: emIncluded, bareos: true }, ...(bareosUnknownSites ? { bareosUnknownSites } : {}), ...(relayLimitsNow ? { relayLimits: relayLimitsNow } : {}) };
 }
 
 /**

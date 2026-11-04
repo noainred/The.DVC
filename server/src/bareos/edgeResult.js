@@ -129,12 +129,30 @@ export const VALUE = Object.freeze({
   // v2.840 볼륨 목록 즉시 조회 — 아는 칸 · 행 상한(멱등 정규화를 중앙이 다시 돈다)
   volumes: (v) => normVolumeRows(v),
   cancel: (v) => { const r = obj(v); return r.final ? { final: rowOut(r.final) } : r.cleared ? { cleared: true } : { canceled: bool(r.canceled) }; },
+  // v2.867 묶음 취소 — 항목마다 단건과 같은 모양. 성공인데 canceled · final · cleared 가 하나도 없으면 그 항목은 '결과 모름'(취소가 갔는지 모른다)
+  cancelJobs: (v) => arr(v).slice(0, 500).map((x0) => {
+    const x = obj(x0);
+    const key = Number.isInteger(x.key) && x.key >= 0 && x.key < 1_000_000 ? x.key : -1;
+    if (!bool(x.ok)) return { key, ok: false, ...(x.code ? { code: str(x.code, 40) } : {}), ...(x.message ? { message: str(x.message, 300) } : {}) };
+    if (x.final) { const row = rowOut(x.final); if (row?.jobid) return { key, ok: true, final: row }; }
+    if (x.cleared === true) return { key, ok: true, cleared: true };
+    if (x.canceled === true) return { key, ok: true, canceled: true };
+    return { key, ok: false, code: 'unknown', message: '엣지가 결과 없이 성공을 회신했습니다 — 취소가 갔는지 알 수 없습니다. Director 에서 확인하세요.' };
+  }),
   log: (v) => {
     const r = obj(v); const l = obj(r.log);
     return { log: { lines: arr(l.lines).slice(-4000).map((x) => str(x, 2000)), truncated: bool(l.truncated), total: nonNeg(l.total) }, row: rowOut(r.row) };
   },
   restore: (v) => { const r = obj(v); return { rid: posInt(r.rid), chain: arr(r.chain).slice(0, 400).map(posInt).filter(Boolean) }; },
   // v2.861 묶음 복원 지점(읽기 전용) — 아는 칸만 · 지점 60 · 레벨 한 글자 · 체인 길이는 양의 정수만(못 만들면 null — 그 지점은 고를 수 없다)
+  // v2.872 묶음 로그 — 항목마다 첫 오류 줄만(원문 없음) · 아는 칸 · 상한. 성공인데 firstError 칸이 문자열도 null 도 아니면 그 항목은 '못 읽음'.
+  logs: (v) => arr(v).slice(0, 100).map((x0) => {
+    const x = obj(x0);
+    const key = Number.isInteger(x.key) && x.key >= 0 && x.key < 1_000_000 ? x.key : -1;
+    if (!bool(x.ok)) return { key, ok: false, ...(x.code ? { code: str(x.code, 40) } : {}), ...(x.message ? { message: str(x.message, 300) } : {}) };
+    if (!(x.firstError === null || typeof x.firstError === 'string')) return { key, ok: false, code: 'unknown', message: '엣지 회신에 첫 오류 줄 칸이 없습니다.' };
+    return { key, ok: true, firstError: x.firstError === null ? null : str(x.firstError, 400) || null, lines: nonNeg(x.lines), state: x.state == null ? null : str(x.state, 20), status: x.status == null ? null : str(x.status, 4) };
+  }),
   restorePoints: (v) => arr(v).slice(0, 100).map((x0) => {
     const x = obj(x0);
     const key = Number.isInteger(x.key) && x.key >= 0 && x.key < 1_000_000 ? x.key : -1;

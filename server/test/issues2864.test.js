@@ -1,5 +1,5 @@
 /**
- * issues2863.test.js — 이슈 트래커(v2.863) 회귀.
+ * issues2864.test.js — 이슈 트래커(v2.864) 회귀.
  *
  * 실제 `api` 라우터를 express 에 마운트하고 역할을 바꿔 가며 상태코드를 본다(소스 grep 이 아니다 — v2.536 규약).
  * 고정하는 것: ① viewer 는 조회만(쓰기 403) · operator 가 만든 이슈는 ISS-1 부터 ② 전이 규칙 — 담당자 없이 '진행 중' 400, 완료는 closedAt,
@@ -20,7 +20,7 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SRC = path.resolve(HERE, '../src');
 
 function run(body, { pre } = {}) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'issues2863-'));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'issues2864-'));
   if (pre) pre(dir);
   const script = `
     const express = (await import('express')).default;
@@ -57,10 +57,10 @@ function run(body, { pre } = {}) {
 test('① viewer 는 조회만 · operator 가 만든 이슈는 ISS-1 부터 · ② 전이 규칙(담당자 없이 진행 중 400 · 완료 closedAt · 보류 사유 필수)', () => {
   const { out } = run(`
     as({ username: 'op', role: 'operator', scope: { vcenters: ['vc-1'] } });
-    out.create = await call('POST', '/issues', { title: '첫 이슈', body: '내용', type: 'incident', priority: 'p0', labels: ['VCenter', 'vcenter', ' 수집 '] });
+    out.create = await call('POST', '/issues', { title: '첫 이슈', body: '내용', type: 'incident', priority: 'p0', labels: ['VCenter', 'vcenter', ' 수집 '], vcenterId: 'vc-1' }); // v2.871: 범위 계정은 법인을 고른다
     const key = out.create.j.issue.key;
-    out.create2 = await call('POST', '/issues', { title: '둘째', assignee: 'lee', status: 'progress', dueAt: Date.now() + 86400000 });
-    out.noAssigneeProgress = await call('POST', '/issues', { title: '셋째', status: 'progress' });
+    out.create2 = await call('POST', '/issues', { title: '둘째', assignee: 'lee', status: 'progress', dueAt: Date.now() + 86400000, vcenterId: 'vc-1' });
+    out.noAssigneeProgress = await call('POST', '/issues', { title: '셋째', status: 'progress', vcenterId: 'vc-1' });
     out.toProgress = await call('POST', '/issues/' + key + '/status', { status: 'progress' });
     out.assign = await call('POST', '/issues/' + key + '/assign', { assignee: 'kim', reason: 'vCenter 담당' });
     out.toProgress2 = await call('POST', '/issues/' + key + '/status', { status: 'progress' });
@@ -113,7 +113,11 @@ test('① viewer 는 조회만 · operator 가 만든 이슈는 ISS-1 부터 · 
   assert.equal(out.vList.j.rows.length, 2, 'viewer 도 같은 목록을 본다(열린 이슈 2건)');
   assert.equal(out.vGet.s, 200);
   assert.deepEqual(out.vMeta.j.people, [], 'viewer 에게는 담당자 후보를 주지 않는다');
-  assert.equal(out.vCreate.s, 403);
+  // v2.871(사용자 선택 'viewer 의 요청 등록'): viewer 는 issues.request(기본 보유)로 '요청' 유형만 만든다 — 상태·담당자는 지정할 수 없다.
+  assert.equal(out.vCreate.s, 200);
+  assert.equal(out.vCreate.j.requestOnly, true);
+  assert.equal(out.vCreate.j.issue.type, 'request');
+  assert.equal(out.vCreate.j.issue.status, 'backlog');
   assert.equal(out.vAssign.s, 403);
   assert.equal(out.vComment.s, 403);
 });
@@ -121,7 +125,7 @@ test('① viewer 는 조회만 · operator 가 만든 이슈는 ISS-1 부터 · 
 test('③ 일괄 할당은 키마다 결과 · ④ 삭제 경계(본인·전체 범위 관리자 — 범위 관리자 403 + 사유) · ⑤ 상한·형식', () => {
   const { out } = run(`
     as({ username: 'op', role: 'operator', scope: null });
-    const a = (await call('POST', '/issues', { title: 'A' })).j.issue.key;
+    const a = (await call('POST', '/issues', { title: 'A', vcenterId: 'vc-1' })).j.issue.key; // v2.871: 범위 관리자가 볼 수 있는 법인
     const b = (await call('POST', '/issues', { title: 'B' })).j.issue.key;
     out.bulk = await call('POST', '/issues/bulk/assign', { keys: [a, b, 'ISS-999', 'nope'], assignee: 'park' });
     out.bulkBad = await call('POST', '/issues/bulk/assign', { keys: 'x', assignee: 'park' });
@@ -237,4 +241,21 @@ test('⑦ 손상 파일은 보존하고 빈 목록으로 시작한다 — 덮어
   const kept = fs.readdirSync(dir).filter((n) => n.startsWith('issues.json.corrupt'));
   assert.equal(kept.length, 1, '손상본이 옆에 보존된다');
   assert.equal(JSON.parse(fs.readFileSync(path.join(dir, 'issues.json'), 'utf8')).issues.length, 1);
+});
+
+test('v2.870 감사 A2-05 — 진행 중 이슈의 담당자는 비울 수 없다(단건 400 · 일괄은 그 키만 실패) · 다른 상태는 해제 가능', () => {
+  const { out } = run(`
+    as({ username: 'op', role: 'operator', scope: null });
+    const a = (await call('POST', '/issues', { title: 'A', assignee: 'park' })).j.issue.key;
+    const b = (await call('POST', '/issues', { title: 'B', assignee: 'park' })).j.issue.key;
+    out.prog = await call('POST', '/issues/' + a + '/status', { status: 'progress' });
+    out.unassign = await call('POST', '/issues/' + a + '/assign', { assignee: '' });
+    out.bulk = await call('POST', '/issues/bulk/assign', { keys: [a, b], assignee: '' });
+    out.after = await call('GET', '/issues/' + a);
+  `);
+  assert.equal(out.prog.s, 200, JSON.stringify(out.prog.j));
+  assert.equal(out.unassign.s, 400);
+  assert.match(out.unassign.j.reason || out.unassign.j.error || JSON.stringify(out.unassign.j), /진행 중 이슈의 담당자는 비울 수 없습니다/);
+  assert.deepEqual(out.bulk.j.results.map((r) => r.ok), [false, true]);
+  assert.equal(out.after.j.issue.assignee, 'park');
 });

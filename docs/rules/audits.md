@@ -2606,6 +2606,16 @@ server/src/bareos/CLAUDE.md 크기 상한(15,000B)으로 원문 그대로 옮겼
   `restore_allow_disks_mismatch=yes` 는 덮어쓰기에서 `=== true` 일 때만(Bareos 23.1+ — 옛 Director 는 거부, 추정).
   반증 1인 반영(재현 4 · 판단 5): DS 여유 키는 **vCenter + 이름**(한 Director 에 vCenter 여럿) · 마무리 원장 쓰기는 `inBatch` 한 번 · 추적 놓친 복원은 failed(직접 확인) · 엣지 미인출 작업은 `reapOps` 로 시한 ·
   본문 상한을 항목 순회 전에 · 새 VM 이름은 최근 24시간 · 진행 중 복원 이름과도 겹치면 거부 · 원장 저장이 실패해도 응답(saveError) · 접근 · 진행 중 사유가 판정 사유보다 앞선다.
+  **v2.866 폴더 표**(사용자 '기존 복원 방식 그대로 유지하고, 신규로 VM 백업할 때 쓰는 폴더 리스트 형태로 복원' · 시안 캔버스 ① · `bareosRestoreTree.test.js` · `bareosRestoreBulkRoutes2861` ⑥):
+  고르는 방식 두 가지(간단 목록 = 지금 화면 그대로 · 폴더 표)이고 다음 단계는 같은 마법사다. 고를 수 있는지는 `pickBlock` 하나(복제 금지 — 트리 함수 `restoreFolderRows` 가 그것을 부른다).
+  폴더 VM 수는 `GET restore-folders`(`restoreFolderCounts` — 대상이 있는 vCenter · 템플릿 제외 · **조회 범위 안만** · memoJson + scopeKey)를 표를 열 때 한 번 — 못 읽으면 전체는 null('—').
+  목록 응답에 `powerState` · `storageGB`(인벤토리 — 없으면 null) · `lastOk`(`lastOkOf` — lastRun · finishedRuns 의 성공 · 경고 중 가장 늦은 끝 · 없으면 null = '포탈 기록에 없음' — 카탈로그의 더 오래된 성공은 모른다) · finishedRuns 원문은 여전히 싣지 않는다.
+  VM 마다 복원 지점은 표에서 읽지 않는다(Director 를 VM 수만큼 부르지 않게 — 다음 단계에서 고른 VM 만 한 번에). 시안의 '행마다 복원 지점 칸' 과 다른 점이다(정직 기록).
+  재해 복구(vCenter 를 다시 설치한 뒤 · 백업 당시 폴더 기준 · 위치 짝짓기 · 단계 실행)는 시안 ②로 승인됐고 v2.865 에서 만든다.
+  ⚠ **v2.866 실환경 결함 — 복원이 FD 에서 'python3-fd-mod: Option vcuser not defined' 로 실패**(사용자 보고 · jobid 119 로그): 백업 잡의 플러그인 옵션은 잡 수준 FdPluginOptions 라
+  복원 때 FD 로 다시 오지 않는다(CLAUDE.md 실환경 미확인 항목이 실측으로 확정). 복원 명령은 복원용 키만 실어 FD 가 vCenter 주소 · 자격증명 INI 를 몰랐다.
+  이제 `restoreBaseKv` 가 백업과 같은 기본 키(vcserver · dc · folder · vmname · config_file — 위치는 그 복원 지점의 백업 때 값 `placementAt`)를 앞에 싣고 복원 키가 덮어쓴다.
+  단건 · 묶음 · 검증 세 경로 모두(`restoreBaseOf` · `baseOf` — 소스 대조 테스트) · 매핑이 덜 됐으면 보내지 않는다 · 자격증명 값은 여전히 받지 않는다(`bareosRestore.test.js` v2.866).
 
 ## Bareos v2.862 복원 검증(리허설) · 일일 요약 메일 — 모듈 규칙(2026-11-03)
 
@@ -2617,6 +2627,7 @@ server/src/bareos/CLAUDE.md 크기 상한(15,000B)으로 원문 그대로 옮겼
   ③ 끝난 검증 복원은 vmclone `bareos-verify`(`vsOps.verifyRestoredVm`) — 이름 정확히 1대 · 꺼짐일 때만 · **NIC 끊기를 다시 읽어 확인한 뒤에만 켠다** · Tools 대기 · 늘 끈다 ·
      성공이고 설정이면 `destroyClone(expectedName)`(이름 대조 · 켜져 있으면 안 지움) · 실패는 남긴다(조사용). 결과는 원장 `restores[].finish{ verify, toolsMs(모르면 없음), deleted }`.
      엣지 회신에 `toolsMs`·`deleted` 를 받는다(dispatch `sanitizeReport` · `finishOp` 화이트리스트). 핑 · 앱 시험은 하지 않는다(네트워크를 끊었으니 — 정직 기록).
+     ⚠ **정정(v2.874 점검 B3-01)**: 위 '받는다' 는 **받는 쪽만** 맞았다 — 엣지 워커(`agent/vmCloneWorker.js`) 회신에 두 칸이 없어 엣지 법인 검증은 늘 Tools '—' · '남김' 이었다. v2.874 에 워커가 싣고 남김(false)도 지킨다.
   ④ 일일 요약(`bareos/digest.js` — 메일 종류 `bareos-digest` · 기본 켬 08:30)은 `veeam/staleAlert.js` 와 같은 틱(그날 한 번 · 실패 30분 뒤 · 3번 · 데모 · 엣지 제외 · 메일 꺼짐이면 계산 안 함).
      **Director 조회가 실패 중인 법인은 '모름'**(성공 · 실패 수를 만들지 않고 합에도 넣지 않는다) · 원장과 폴러 상태만 읽는다(Director 에 닿지 않는다 · 폴러 상태는 기동 때 `setDigestPoller` — 순환 방지).
   ⑤ 반증 1인 반영(재현 4 · 판독 5 — 모두 이번 판에서 고침):
@@ -2628,3 +2639,219 @@ server/src/bareos/CLAUDE.md 크기 상한(15,000B)으로 원문 그대로 옮겼
      F6 bareos-nic · bareos-verify 는 vmclone 전역 직렬 큐 대신 **vCenter 마다 한 줄**(execOp `perVcenter`) · F7 다시 보낸 검증의 사유(앞 시도가 지웠을 수 있음 · 켠 채 끊겼을 수 있음 · NIC 경고) ·
      F8 위치 바뀜은 원장 칸이 아니라 인벤토리 `placementDrift` · F9 지금 검증의 바쁨 · Director 접속값을 OTP 앞에서 · F10 틱 실패 로그 · '지금 보내 보기' 1분 1회 · finishOp toolsMs 는 수만.
      남긴 것(추정 — 확인 못 함): 게스트가 allowGuestControl 로 NIC 를 다시 연결할 수 있는지 · PCI 패스스루 NIC 는 끊기 대상 밖 · Director 별 회차 시한(명령마다 120초 시한은 있다).
+     → v2.863: 앞의 둘은 여전히 실환경 미확인이지만 `bareos-probe --vcenter … --vm` 이 그 VM 의 '게스트 제어 허용' NIC 와 PCI 패스스루 수를 보여 준다(⑥).
+  ⑥ **v2.863 후속**(사용자 '프로그램 개선' → 'Bareos 후속 마무리' · `bareosRehearsalDigest2862` ⑥ · `bareosRestoreBulkRoutes2861` ⑤ · `bareosProbe2863`):
+     · 정책 화면에서 vCenter 마다 검증용 데이터스토어를 고른다(`BareosRehearsal.jsx` 펼침 · 선택지는 `rehearsalDsOptions` — 지금 값이 목록에 없으면 지우지 않고
+       '인벤토리에 없음' · '접근 불가' · '목록을 읽지 못함' 사유를 붙여 남긴다). GET /rehearsal 의 `vcenters`(활성 대상이 있는 vCenter)는 **전체 범위에만** 싣는다.
+     · **정한 데이터스토어의 여유 판정이 '모름'이면 정기 검증은 그 VM 을 보내지 않는다** — `bulkRestorePlan` 은 '모름' 을 막지 않는다(대화형은 경고만).
+       화면이 생기며 열린 경로라 이번에 막았다(홈 데이터스토어 경로와 같은 규칙 — 반증 F5). 변이(이 거르기 제거)를 ⑥ 이 잡는다.
+     · `bareos-probe --restore-plan <jobid>`: 포탈이 보낼 복원 명령을 **같은 함수**로 만든다(`director.restoreCommand` — `runRestore` 가 보내는 글자 그대로 ·
+       `bareos/probePlan.js restorePreview`) · 보내지 않는다 · `.jobs type=R` 로 복원 잡 리소스 · `status client=` 로 FD 판. 플러그인이 옵션을 받아들이는지는 실제 복원으로만 확정(추정 금지).
+       ⚠ **정정(v2.874 점검 B1-04)**: v2.866 부터 포탈은 기본 키(vcserver · dc · folder · config_file)를 더 싣는데 미리 보기는 싣지 않아 '같은 글자' 가 아니었다 — v2.874 에 `--vcserver · --config-file · --dc · --folder` 를 받는다(모르면 만들지 않는다).
+     · `bareos-probe --vcenter … --vc-user … --vm …`(VCENTER_PASSWORD): 포탈 vCenter 계정으로 **읽기만** — 같은 이름 VM 수 · 전원 · `nicSummary`(못 읽은 칸 null) ·
+       `passthroughCount` · `sessionPrivileges`(HasPrivilegeOnEntities — 현재 세션 키 · VM 과 상위 폴더 · `VERIFY_PRIV_IDS`). 로그인 재시도 없음 · SSRF 규칙.
+       probe 는 복원 · 재구성 · 켜기 · 지우기 함수를 부르지 않는다(테스트가 소스로 고정). ReconfigVM 의 NIC 연결 변경에 장치 권한 둘 중 무엇이 요구되는지는 판마다 다를 수 있어 둘 다 본다(추정).
+
+## Bareos v2.867 백업 중단 · 취소 — 모듈 규칙(2026-11-03 · 시안 docs/design/bareos-cancel/ · 사용자 컨펌 '좋아 구현해' · 기본값 5가지)
+
+- **판정 하나 `bareos/cancelState.js`**: `runningRunOf`(지금 도는 실행 — pending 먼저, 없으면 끝나지 않은 lastRun · v2.833 liveStatus 에서 옮김) ·
+  `cancelInfo`(원장 `cancelReq` 의 jobid 가 **지금 도는 실행일 때만** '멈추는 중' · `CANCEL_WAIT_MS` 10분 뒤 `stuck` '멈추지 않음') · `cancelGate`(보냈으면 멈추지 않음일 때만 다시) ·
+  `cancelTracked`(pending 없는 실행의 취소는 폴러가 `CANCEL_TRACK_MS` 1시간 따로 묻는다 — `pendingWork` 의 `cancelOnly` 줄). 화면 셋(백업 대상 · 진행 현황판 · 그룹)이 이 값을 그대로 쓴다.
+- **원장 `cancelReq{jobid, at, by, via}`**: 그 실행이 끝나면(`applyRunRow` — A 든 T 든) · 추적 해제(`clearPending`) · 추적 포기(`notePendingMiss`)에서 지운다. 목록 응답에는 원장 칸이 아니라 `cancel`(판정값)만 싣는다.
+- **`ops.cancelJobs`** 는 항목마다 단건 `cancelOne` 과 같은 검사(행 확인 · 잡 이름 대조 · 끝난 행 `final` · 모르는 행 `cleared`) · 세션 하나 · `SESSION_DEAD` 면 남은 것 건너뜀 · `MUTATING` ·
+  엣지 TTL 150초 · 회신 정제는 '성공인데 canceled · final · cleared 가 없음 = 결과 모름'. 옛 엣지(모르는 작업)는 '엣지 업그레이드' 안내 — **단건 취소 N번으로 돌려보내지 않는다**(사용자 결정 ⑤ · WAN 왕복).
+- **그룹 회차 중단(`groupRunner.cancelGroupRun`) — 단계마다 다르다**:
+  · 줄 대기: 실행 표(`_runs`)에 `halted` · 줄에서 뺀다 · **차례가 와도 runGroup 을 부르지 않는다**(회차를 두 번 기록하지 않는다) · 회차 기록은 바로(전부 `halted` '시작 전 멈춤').
+  · 보내는 중: `AbortController` 신호만 — 러너가 **덩어리 사이에서만** 본다(보내던 덩어리를 끊으면 결과 모름 — v2.830 L4). 마지막 회신 뒤 검사부터 `_groupBusy` 를 지우기까지 다른 await 은 취소뿐이고
+    그동안 `_cancelling` 이 두 번째 요청을 막는다. 러너가 이번 회차 jobid 를 자기 잠금으로 취소하고 기록한다.
+  · Director 실행 중: lastFire 의 started·canceled 항목 중 **그 jobid 가 지금 도는 실행인 것만** 묶음 취소(`liveTargets` — 이미 보냈고 멈추지 않음이 아니면 뺀다) · 결과는 `recordFireCancel`(그사이 새 회차면 쓰지 않는다).
+  · 범위 확대(`includeScheduled`) = 그룹 VM 의 그 밖 실행(Bareos 스케줄 · 수동)도 · 다음 회차 건너뛰기(`skipKey` — `decideFire` 가 'skipped' 로 넘기고 기록 때 지운다 · 스케줄을 고치면 지운다).
+  · `groupRunning` 에 `_cancelling` 포함(중단 처리 중 지금 백업 · 지우기 409). 실행 표 · 줄 자리는 **객체로 맞춰** 지운다(중단 뒤 같은 그룹 새 실행의 표를 옛 줄 자리가 지우지 않게).
+- **중단된 회차로는 보관 정리를 하지 않는다**(`pruneDue` — 사용자 결정 ④). 다음 정상 회차가 끝난 뒤 돈다.
+- **라우트**: `POST groups/:id/cancel` — admin · 쓰기 범위(`groupFor`) · 이름 재입력(정확히 같아야 — 앞뒤 공백만 무시) · OTP 없음(멈춤은 데이터를 지우지 않는다 — 사용자 결정 ②) · 202 + 뒤에서 취소 ·
+  멈출 것 없음 409(`idle`). 단건 `jobs/:id/cancel` 은 보낸 뒤 409(`sent`) — 멈추지 않음이면 다시. 감사: '그룹 회차 중단 요청'(라우트) + '그룹 회차 중단'(결과 수).
+- **진행 현황판 캐시 열쇠에 쓰기 범위**(`w=`) — 법인별 `writable` 이 사람마다 다르다.
+- 데모 Director `BAREOS_DEMO_CANCEL_MS`(1초~10분 · 기본 0) — 취소가 끝나기까지 'is waiting for client to cancel'(dird 문구 모양 · 추정).
+- 시험 `bareosCancel2867`(12건) · 변이 11건 전부 잡힘(덩어리 사이 검사 · 보관 정리 제외 · 줄 대기 건너뜀 · 이름 재입력 · 단건 재전송 막기 · 러너 끝 취소 · cancelReq 지우기 · 지금 실행 대조 · 엣지 정제 · skipKey · 이미 보낸 실행 제외).
+- 남긴 것(정직 기록): ① 취소 뒤 VMware 스냅샷 잔류 · Director 상태 원문 · A 로 끝나기까지 시간 · 취소 뒤 증분 기준은 **실환경 미확인**(화면은 추정으로 안내 — `tools/bareos-probe.js` 로 확인할 것).
+  ② 복원 작업 취소는 범위 밖(다음 과제 후보). ③ '일시 정지 · 재개' 없음(Bareos 에 명령 없음). ④ 그 밖 실행(Bareos 스케줄)만 도는 그룹에는 '회차 중단…' 을 열지 않는다 — 행마다 '취소…'.
+  ⑤ 포탈이 재시작하면 중단 처리 중 표(메모리)는 사라진다 — 보낸 취소는 원장 `cancelReq` 로 남고, 보내기 전이면 그 회차는 v2.830 '보내는 도중 재시작' 안내로 보인다.
+- **반증 1인 확정분(2026-11-03 — high 0 · medium 2 · low 6 · 전부 반영)**:
+  F1(재현) 실행 중이라 틱이 차지하지 못한 예약 회차가 중단 직후 다시 출발 → 중단할 때 그 회차를 `missed.reason 'stopped'` 로 남긴다(`dueKey` · 건너뛰기는 그다음 회차) ·
+  F2 취소가 한 건도 가지 않아도 '중단됨' · 보관 정리 막힘 → `canceled.effective`(취소 보냄 · 시작 전 멈춤 · 결과 모름이 하나라도) · `reason`(첫 실패 사유 — 옛 엣지면 업그레이드 안내) ·
+  `pruneDue` 는 effective 일 때만 막는다 · 화면 '중단하지 못함 — 사유'(다시 시도 가능) ·
+  F3(재현) 보내는 중 계획이 이번 회차 실행을 '그 밖' 으로 셈 · 회신 대기 덩어리를 '시작 전 멈춤' 으로 셈 → 실행 표에 `sendJobIds` · `startedJobids` · `progress.inflight` ·
+  F4 뒤에서 도는 중단이 업그레이드 대기 목록 밖 → `inflight` 에 `<그룹>#cancel` · F5 보내는 중 범위 확대가 묵은 원장 사본 → 그때 다시 읽음 ·
+  F6 그룹 중단에 데모/실제 대조 없음 → `liveTargets` · `cancelPlan` 이 거른다 · F7 회차 뒤 그룹에서 뺀 VM 의 이번 회차 실행을 놓침 → 회차 기록의 VM 도 본다 ·
+  F8 단건 취소가 엣지의 `{canceled:false}` 에도 '멈추는 중' → 502 결과 모름(묶음과 같게). 그 밖: 그 밖 실행만 멈춘 경우 단계 'extra'. 시험 ⑦ 3건 + ⑤ 보내는 중 단언(F3).
+- **Chromium 확정분(2026-11-03 · 1440/400 · 메인 재판독)**: ① 진행 현황판 실행 중 표에 '동작' 열을 따로 두니 1440 에서 표 1177px > 칸 1124px — 단추가 가로 스크롤 뒤로 숨고 판정 칩이 잘렸다 →
+  '판정 · 동작' 한 칸(배지 short + 아래 줄 sub + 작은 단추). ② 백업 대상 패널 머리 줄에 칩을 넣으니 줄이 넘쳐 '닫기' 가 내려갔다 → 칩은 머리 아래 따로 한 줄.
+  ③ 같은 띠에 '멈추는 중' 배지와 '중단됨 …' 문구가 함께 보였다 → 기록 문구는 '중단 요청 …'. ④ 그룹 카드 · 머리 KPI 가 사람이 멈춘 실행을 '실패' 로 셌다(v2.828 판정 그대로) → `memberResults.cancel` 따로.
+  남긴 것: 백업 대상 표 + 오른쪽 패널을 함께 열면 1440 에서 '정책' 칸이 좁아 글자가 잘게 끊긴다 — 취소 칩이 없는 화면에서도 같아 이번 변경 전부터의 배치로 판단(A/B 미실행 · 별건 후보).
+  통합 · 법인별 현황(vmView.bareosClass)은 지금도 canceled 를 실패로 센다(판정 코어 — 바꾸면 웹 bareosViewText 와 함께 · 별건 후보).
+  ✅ **v2.870 에 둘 다 고쳤다**(아래 v2.870 절). ⚠ 정정: '정책 칸이 좁은 것은 이번 변경 전부터' 는 일부 틀렸다 — v2.867 이 VM 칸에 넣은 '멈추는 중' 칩도 그 칸을 넓혀 정책 칸을 눌렀다(A/B 를 돌리지 않고 판단한 탓).
+
+## v2.870 프로그램 개선 · 전체 점검(최근 2주 — v2.847 f70088c 기준 · 5축 + 반증 1인 — 2026-11-03)
+
+릴리스 번호: 같은 날 다른 세션이 v2.869.0(GPU 할당율 엑셀 법인별 시트)을 먼저 게시해 이 작업은 **v2.870.0** 이다. 코드 주석 · 시험 이름은 2870 으로 맞췄고, 개발 중 커밋 메시지에는 'v2.869' 로 적혀 있다(이력은 고치지 않는다).
+
+사용자 선택(AskUserQuestion): 현황 화면 '취소' 분리 · 복원 작업 취소(시안 먼저 — Fable) · 백업 대상 표 배치 · 전체 점검(다중 에이전트) · 검증 표준 · 범위 최근 2주.
+5축(A1 화면 · 표시 / A2 데이터 · 상태 / A3 보안 · 범위 / A4 '모름' · 수치 / A5 성능 · 캐시 · 시한) 39건 → 반증 1인이 코드를 다시 읽고 node 로 재현.
+high 0 · 반증 1(A3-01 — 경로 오독, 데모 계정은 READ_DENY 하위라 403 · 재현) · 등급 조정 다수(A1-01 · A4-02 · A5-01 내림, A2-02 올림 — 폴더 표 거짓 '검증 성공' 을 새로 찾음).
+
+- **현황 화면 취소 분리**: `vmView.bareosClass`(서버) · `bareosViewText.bareosClass`(웹)가 `fail = error` · `cancel = canceled` 로 나눈다(한 쌍 — 같은 입력 대조) · `corpCounts` · `sumCounts` 에 cancel(모르면 null) ·
+  `priorityKind` 는 멈춘 실행을 '실패 우선 확인' 에 넣지 않는다(백업이 비면 old · never 가 잡는다) · 막대 회색 칸 · 필터 '실패 · 경고 · 취소'. 시험 `bareosCancelSplit2870`.
+- **A2-02(medium) 복원 검증 판정 하나 `verifyOutcome`**(서버 `digest.js` · 웹 `bareosRestoreText.js` — `bareosVerifyOutcome2870` 가 10가지 입력으로 대조): failed = verify 'failed' · nic 'failed'(추적 놓침 · 재시도 소진 ·
+  보내지 못함 · 이름 모름) · nic 'skipped' · state error · canceled · abandoned. 폴더 표는 켜 보는 중을 '검증 중'(info)으로. ⚠ 실패 경로에 `verify:'failed'` 를 써 넣지 말 것 — 리허설 표 '남김' 칸이 그 유무로 판정한다.
+- **A2-01(medium · 업그레이드 경로) 엣지 동기화 '효과 없는 성공'**: 성공이면 attempts 를 0 으로 돌려 settle(30분) 뒤 매번 다시 밀었다(재현 — 번들 전송 + 엣지 재시작 30~40분마다 영구).
+  이제 같은 대상 버전의 성공이 거듭되면 `noEffect` 를 세고 상태 'no-effect'(웹 표와 1:1) · settle × 2^n(상한 6시간 — `noEffectWaitMs`) · 상한에서 알림 1회(key `…:noeffect`, 실패 알림과 나눔) ·
+  엣지가 대상 버전을 보고하면 해소 1회(`#closeNoEffect`). 시험 `edgeSyncNoEffect2870`(48시간 모의 — push ≤ 14회) · 변이 5/5.
+- **A4-01 · A4-05 · A1-01 GPU 모름**: offUnknown 비고(웹 · 엑셀 같은 말) · KPI 모름 수 · 배치 모르는 GPU 의 VM 칸 '—' · 엑셀 프로파일 `gpuProfText`(웹 gpuTexts.prof 와 대조) ·
+  `hostDown` = DISCONNECTED · NOT_RESPONDING(store.usageReadable 과 같은 규칙 — 잠재: SOAP 는 접어 보내고 REST 호스트에는 GPU 가 없다). 시험 `gpuAllocUnknown2870`.
+- **A5-02 · A5-03 응답 캐시 세대**: memoJson 의 ETag = 키(스냅샷 세대 + extraKey)라 키에 없는 변화는 304 로 옛 화면이 남는다(재현). bareos-live 에 `liveGen()`(원장 · 그룹 · 폴러 · `liveRev` · `cancellingKey`) ·
+  restore-folders 에 원장 세대. `w=`(쓰기 범위)는 그대로. 시험 `bareosLive2833` 끝(같은 스냅샷에서 취소 표지 → 첫 ETag 재요청 200) · 변이 2/2.
+- **A3-03 `POST digest/send` 에 fullWriteOnly**(형제 PUT 과 같이) — 시험이 **거부 사유가 fullWriteOnly 의 것인지** 본다 · 변이 확인.
+- **A5-01 묶음 복원 · 복원 검증 전체 시한 `RESTORES_DEADLINE_MS`**(= 엣지 인출 + 회신 + 여유 — 엣지 경로를 먼저 끊지 않는다). ⚠ 행동 시험이 아니라 산수 + 소스 스윕이다
+  (지연하는 가짜 Director 가 없다 — 시한이 끊은 뒤 분류는 ops.restores 기존 코드). 변이 확인.
+- **A2-03 늦은 검증 회신**: `sameOp` 가 시한으로 닫힌(`reapOps`) **같은 작업**의 늦은 회신(`late`)을 받는다 · 재시도(다른 opId) 뒤 옛 회신 · 늦지 않은 두 번째 결과는 버린다. 시험 `bareosVerifyLate2870` · 변이 3/3.
+- **A1-04 · A1-05 회차 중단 표시**: 줄 대기 · 보내는 중에는 lastFire(이전 회차)의 중단 기록을 보지 않는다 · `cancelSummary.startUnknown`(시작 결과 모름 — jobid 가 없어 취소를 못 보낸 수 · 문구 '취소 못 함 — Director 에서 확인').
+  남긴 것: 직전 중단 없이 그룹 VM 하나를 단건 취소한 '실행 중' 회차는 `cancelPlan.sent` 가 회차 · 그 밖을 나누지 않아 구분하지 못한다(서버가 `sentFire` 를 따로 내야 정확 — 별건).
+- **저위험 묶음**: A4-02 엣지 동기화 한 줄(counts 없음 '엣지 판정 모름' · 마지막 오류 warn) · A1-02 픽바 CSS 이중 오프셋 제거(`--statusbar-h` 는 App 이 실측) · A4-03 폴더 표 vCenter 단위 모름 ·
+  A4-04 바로가기 점은 REST 폴백(경보 미조회)이면 흐림 · A2-05 진행 중 이슈 담당자 해제 400(일괄은 그 키만) · A2-06 `finishRestores` 던지지 않음(시험 없음 — try/catch 한 줄) · A4-06 요약 '실행 없음' 한정어.
+- **사용자 보고(2026-11-03 · 스크린샷 jobid 158 — Director 'is running' 인데 'FD 진행 보고 없음')**: 원인은 확정하지 못했다(그 순간의 FD 원문이 없다). 코드에서 이 표시를 거짓으로 만드는 경로 두 개를 고쳤다:
+  ① 판정이 Director 단위였다 — `live.ok` = 그 Director 의 FD 중 **하나라도** 답함 → 그 잡의 FD 조회가 실패했거나 묻지 않았어도 '보고 없음' · 3시간 뒤 '멈춤 의심'. 이제 `liveParse.jobFdState`(그 잡의 client, 없으면 법인 FD).
+  ② Director 가 FD 에 접속하지 못한 답('Failed to connect to Client' — Bacula 계열 dird 문구, 소스 기억 기반 · 실환경 원문 미확인)을 콘솔 오류가 아니라는 이유로 잡 0개 성공으로 받았다 → `fdAnswerIssue` 를 중앙 liveTick 한 곳에서(옛 엣지 회신 포함) 'fd-connect' 실패로.
+  화면은 '보고 없음' 에 조회 시각 · FD 이름을 붙이고, FD 실패에도 '진단 원문' 을 연다. 시험 `bareosLive2833` 끝(가짜 Director 가 접속 실패 문구) · 웹 `fdLineOf` · 변이 2/2.
+  남긴 것: 다른 원인(엣지 대행에서 이전 조회가 남은 경우 · FD 출력 모양 차이)은 확인하지 못했다 — 다시 나오면 '진단 원문' 의 FD 원문으로 판정한다.
+- **고치지 않음(사유)**: A1-06(설계 — 반증 F1 주석) · A1-07(admin 전용 응답 · 비밀 아님) · A1-08 · A1-09(피벗용 비정규화 · 같은 원천 반올림) · A2-04(시나리오 2 '주 1회' 설계 · 1 은 재시도 상한 설계 필요) ·
+  A2-07(문구가 모호함을 밝힘 — `verify:'unknown'` 은 다음 판정 정리 때) · A3-04 · A3-05(신뢰 모델 · 최고 권한) · A4-08~10 · A5-04~06(현재 규모 근거 없음) · A5-07(상한이 동시 push 방지와 충돌 — A2-01 뒤 재검토).
+- **사용자 판단으로 남긴 것**: A3-02 이슈 트래커에 범위 축이 없다 — 범위 계정도 모든 이슈를 읽고 고친다 · `/issues/meta` people 이 전 계정 이름(반증 권고: 최소한 전체 범위 작성자만).
+  ✅ v2.871 에서 해결(사용자 선택 '계정 이름 목록을 전체 범위 계정에게만' · 이슈 법인 축 — 커밋 6399f924 · 4247a5d6): 담당자 후보는 조회 · 쓰기 모두 무제한 계정만 로컬 계정 전부, 범위 계정은 보이는 이슈의 이름 + 자기 자신, viewer 는 빈 목록(`routes/api/issues.js people` · 시험 `issues2871` ②).
+  정정(2026-11-04): v2.876 · v2.877 보고에서 이 질문을 '답을 기다리는 질문' 으로 다시 물었다 — 이미 v2.871 에서 정하고 구현된 것이었다(이 줄을 고치지 않아 생긴 오해).
+- **별건(다음 점검 첫 후보)**: A3-06 중앙 GPU 수신(`routes/central.js` `{ ...g }`)이 아는 키 화이트리스트 없이 나머지를 통과시킨다(엣지 계약 — 변이 검증 대상).
+- 작업 방식 교훈: ① v2.867 에서 웹 시험 2개만 돌려 CI 가 깨졌다 → 커밋 전 웹 vitest **전량**. ② 감사 보고서의 등급 · 주기는 반증이 자주 고친다(A2-01 '10분마다' → 30~40분 · 대신 재시작 동반) —
+  보고를 그대로 옮기지 말고 반증 문서로 정정해 적는다. ③ 시험 고정값이 틀려(GPU cpuUsagePct 누락) 코드 결함처럼 보인 적이 있다 — 실패하면 고정값부터 의심한다.
+
+## v2.872 통합 에러 로그 — 로그 서랍 · 따로 보기 · 묶어 보기 · 묶음 로그(2026-11-04 · 시안 docs/design/bareos-errlog · 사용자 컨펌 '구현해' · 검증 표준)
+
+릴리스 번호: 같은 날 다른 세션이 v2.871.0(GPU 할당율 버그 점검)을 먼저 게시해 이 작업은 **v2.872.0** 이다. 주석 · 시험 이름은 2872 로 맞췄고 개발 중 커밋 메시지에는 'v2.871' 로 적혀 있다(이력은 고치지 않는다).
+
+- 원인(사용자 스크린샷 — '실행 이력' 을 누르면 무관한 VM): 에러 행의 열기가 고정 주소 `#/tools/bareos-backup/history` 였고, 진행 · 이력은 대상 목록의 첫 VM 을 골랐다. 행에는 vmId · jobid 가 이미 있었다.
+- **묶음 로그 규칙**(`bareos/logFirstError.js` · `ops.logs` · `POST /tools/bareos-backup/logs/bulk`): 회신은 첫 오류 줄만(원문은 낱건 `GET jobs/:id/log`) · 상한 `LOGS_MAX` 15(웹 `BULK_LOG_MAX` 와 시험이 대조) ·
+  Director 마다 세션 하나 · 항목마다 '이 잡의 실행인가'(단건 log 와 같은 검사) · 조회 범위 밖은 없는 대상과 같은 답(Director 에 묻지 않는다) · 전체 시한 `LOGS_DEADLINE_MS` ·
+  엣지 작업 'logs'(TTL 240초 · `edgeResult.logs` — 첫 오류 줄 칸이 없는 성공은 못 읽음) · 옛 엣지는 안내만(낱건 15번으로 돌리지 않는다 — v2.867 과 같은 규칙).
+- **같은 모양 ≠ 같은 원인**: `backupErrors.withShapeGroups` — Bareos 실행은 법인 · 결과 · 메시지(레벨 · 오류 수)가 같고 1시간 창(묶음의 가장 옛 행 기준 사슬) · 그 밖은 예전 키.
+  예전 '같은 원인' 키는 잡 이름이 VM 마다 달라 Bareos 를 한 번도 묶지 못했다. '같은 오류' 는 묶음 로그가 첫 오류 줄 서명(VM 이름 · 숫자 · 따옴표 안 지움)을 대조한 뒤에만 · 전부 제각각이면 same 없음.
+- 첫 오류 줄 = 첫 'Fatal error:' · 없으면 보고 머리줄 · 보고 칸이 아닌 첫 'Error:' · 없으면 null('오류 줄 없음' — 0 이 아니다). 외부 입력이라 줄 600자 · 앵커 · 유한 반복(ReDoS 비율 시험).
+- 웹: 작업 로그 본문 `BareosJobLog.jsx`(JobLogPanel — 늦은 응답 gen) 하나를 운영 LogModal 과 서랍이 같이 쓴다 · '이력 →' 은 `saveRunFocus`(tab 'runs' · jobid) → HistoryTab 이 그 VM 을 사람이 고른 것처럼(실행 중 표를 따라가지 않게) ·
+  백업 대상 패널은 runs 넘기기를 먹지 않는다 · 묶어 보기 표는 묶음 단위 정렬(STable 은 행을 낱개로 섞는다).
+- 시험 `bareosErrLog2872`(7 — 실제 라우터 + 가짜 Director 포함) · 웹 `backupErrLog2872`(9) · 변이 6/6(범위 · 라우트 상한 · 엣지 정제 · 잡 대조 · 1시간 창 · 근거 없는 same).
+- 시안과 다른 점 5가지는 docs/design/bareos-errlog/README.md §7(서랍의 Full 실행 단추 없음 · 묶음 진행 막대 없음 · 400px 목록은 표 · ↑↓ 키 없음 · 복사는 본문 단추).
+
+## v2.875 버그 수정 · 프로그램 개선 · 전체 점검(이슈 트래커 v2.864~ · Bareos/GPU v2.870 — 5축 + 반증 1인 — 2026-11-04)
+
+- 사용자 선택: A3-06(중앙 GPU 수신 화이트리스트) · A3-02(담당자 후보 노출) · 전체 점검(다중 에이전트) · 이슈 법인 축 · 알림(메일·Slack) · 자동 할당 · viewer 요청 등록 · 진행 공유 4종 · 검증 표준.
+- 점검 37건(A1~A5) → 반증 1인이 같은 원인 5쌍을 묶어 32항목 판정: **반증 0 · 확정 31 · 보류 1**(A3-02 의 '인증을 끈 설치의 대체 역할 viewer 도 요청 등록' 정책). 등급 하향 4건, A4-01 high 유지.
+- 확정분은 전부 고쳤다(목록은 커밋 메시지). 보안·범위 수정(A3-01·A3-02·A3-04·A3-05·N1·A1-01·A1-02)과 알림 동작(A2-02·A2-03·A2-05·A5-01·A4-03)은 변이 14건으로 확인(전부 잡힘 —
+  A4-03 은 처음에 살아남아 통계 단언을 더했다).
+- **정정(반증 판단과 다른 것)**: A4-01 의 '백업 오류 목록에도 거짓 멈춤 의심이 실린다' 는 사실이 아니다 — `routes/api/veeam.js` 가 `cv.live.ok` 일 때만 `stuckRows` 를 부르고
+  실패 틱은 `live.ok=false` 다. 실제로 틀렸던 곳은 진행 현황 행 배지·법인 stuck 수·totals.stuck. 시험(`bareosLive2833`)에 stuckRows 빈 배열 단언도 넣었다.
+  A4-01 결함 경로는 '명령 단계 시한' 이 아니라 '세션을 열기 전 끊김'(접속·핸드셰이크·엣지 대행 시한)이었다 — hang 방식 시험은 옛 코드에서도 통과했다.
+- 정책 결정(근거로 정함): A3-01 의 '로컬 계정이 아닌 이름' 은 AD 사용자로 보고 전체 범위로 판정한다 — AD 로그인 사용자 객체에는 범위 축이 없다(`auth/ad.js` authenticate 가 username·name·role 만).
+  N1 은 파일 머리 주석·이 문서의 기존 서술대로 '조회·쓰기 모두 무제한' 일 때만 전 계정 목록을 준다(코드를 문서에 맞췄다).
+- **남긴 것**: A5-05(GPU 엑셀 생성의 메인 스레드 블록 +24% — 4배 규모 최대 525ms, low) · A3-02 정책 부분(사용자 결정 대기) · 재기동 직전 1분 묶음의 일반 알림(할당·상태·댓글)은
+  메모리에만 있어 되살릴 수 없다(종료 때 비동기 발송을 기다릴 수 없다 — 기한 알림만 기록이 '보낸 뒤' 라 다시 보낸다) · Slack·Teams 실제 렌더링 미확인(A3-03).
+
+
+## v2.874 Bareos 복원 · 검증 버그 점검(5축 + 반증 1인 — 2026-11-04 · 기준 7afeb3da)
+
+사용자 요청 '버그 찾아서 개선' · 선택 '최근 Bareos 복원 · 검증' · '② 표준'. 분석 5축(B1 명령 · B2 원장 · 동시성 · B3 마무리(vmclone) · B4 검증 · 요약 · B5 화면) + 반증 1인.
+반증은 Bareos 원문(ua_restore.cc · ua_run.cc · lib/scan.cc · filed/dir_cmd.cc · bareos-fd-vmware.py 23~25)을 GitHub 에서 다시 받아 바이트 대조했다. 확정 39(high 2 · medium 9 · low 28) · 반증 1(B3-08).
+
+- **B1-01(high · 재현) 복원 pluginoptions 의 공백**: restore 는 받은 pluginoptions 를 run 명령으로 **따옴표 없이** 다시 조립해(`" pluginoptions=%s"`) 한 번 더 쪼갠다 —
+  'Seoul DC' · 'datastore1 (1)' 같은 값이 잘려 run 이 'Invalid keyword' 로 거부했다. `restoreCommand` 가 `consoleQuote(…, { literalQuotes: true })`(configure add 와 같은 방식).
+  시험 `bareosRestoreBugs2874` 가 lib/scan.cc next_arg 이식으로 두 번 파싱을 재현한다. 실 Director 실측은 없다(원문 이식 에뮬레이션 — 5개 판 원문 동일).
+- **B1-02** 로컬 VMDK 는 `where=/tmp/bareos-restores`(복원 잡 Where = / 를 FD 가 '' 로 바꿔 FD 루트에 풀렸다) · **B1-04** probe 미리 보기에 v2.866 기본 키(`--vcserver · --config-file · --dc · --folder`).
+- **B5-01(high · 재현) 결과 모름이 두 번째 복원을 불렀다**: 묶음 전 항목이 '보낸 뒤 끊김' 이면 502 '한 대도 시작하지 못했습니다' → 웹이 확정 실패로 보여 다시 누르면 202(실측).
+  이제 ① 원장에 결과 모름 기록(`addRestore({ unknown:true })` — jobid 없음 · 폴러가 추적하지 않음) ② `restoreHeld`(진행 중 ∨ 결과 모름 6시간 — `RESTORE_UNKNOWN_HOLD_MS`, 웹 같은 값 대조)를
+  묶음 · 단건 · 삭제 · 검증 고르기가 본다 ③ 새 VM 이름 예약(at 기준 24시간) ④ 응답 504 + `code:'unknown'` + `unknown` 수 ⑤ 단건 `ops.restore` 도 MID_COMMAND_CODES 를 unknown 으로.
+  웹은 항목별 사유를 그리고(B5-02) 결과 모름이면 마법사를 비운다. 시험 `bareosRestoreUnknown2874`(가짜 Director 가 restore 를 받고 끊음) · 변이 4/4.
+- **검증 회차(G3)**: B2-01 대상 잠금(jobLocks — 못 잡으면 건너뜀) · addRestore null 은 '시작' 으로 세지 않음 · B3-03 끝맺음 불가 vCenter(실행 위치 conflict · none, 직접이면 onDemandVcBlock)는 보내지 않음 ·
+  B4-01 판정 전에 자르지 않고 통과한 것으로 perCorp 대를 채움(후보 상한 perCorp+30 · 건너뛴 VM 은 triedAt 으로 다음 회차에 뒤로) · B4-03 기록은 Director 마다 4건 ·
+  B4-08 원장 못 읽음 = 미룸(회차 차지 안 함) · GET 503 · B4-09 회차 차지 저장 실패면 보내지 않고 메모리 차지도 되돌림 · B4-02 0대 회차도 감사 + 화면 '법인별 마지막 회차'. 시험 `bareosRehearsalBugs2874` · 변이 4/4.
+- **마무리(G4)**: B2-02 vCenter 줄(perVcenter)의 bareos-nic · bareos-verify 를 업그레이드 대기 목록에(`execOp.runningBareosFinishes` → manager) · B3-01 엣지 워커 회신에 toolsMs · deleted(남김 false 도 —
+  중앙 정제 · finishOp · 원장이 불리언 그대로, 없으면 화면 '모름') · B3-04 장치 목록이 비거나 모르는 NIC 종류(macAddress 가 있는데 NIC_TYPE_RE 밖)면 켜지 않음(앞 · 뒤 두 검사) ·
+  B3-05 끄기 전 전원 실측 · B3-07 로그인 실패를 사유로 · B2-03 끝난 복원을 옛 행이 되돌리지 않음 · B2-04 마무리 중 복원은 다시 묶기에 남고 삭제 409(24시간 상한) · B2-06 같은 jobid 두 항목.
+  시험 `bareosFinishDigest2874` · `vmCloneCenter2793`(워커 왕복) · 변이 5/5(B3-04 는 첫 변이에서 시험이 못 잡아 — 뒤 검사가 같은 문구로 막았다 — 사유 문구 · 다시 읽기 실패 경우로 고쳤다).
+- **요약 메일(G5)**: B4-04 창은 끝난 시각(finish.at → endedAt → at) · 진행 중 검증은 따로 · B4-06 모름 법인 실패 행 표지 · B4-10 기동 뒤 첫 폴러 조회 전 미룸(15분 상한) · B4-11 엣지 판정은 `service.isEdgeNode` 하나.
+- **화면(웹)**: B5-05 여러 대면 덮어쓰기를 새 VM 으로 · B5-06 데이터스토어 못 읽음 = null + 다시 읽기 · B5-07 실행 중 고르기 · 단계 잠금 · B5-08 50대 상한 안내 · 일부 선택 폴더 클릭은 빼기 ·
+  B5-03 첫 VM 법인으로 잠가 다시 거름 · B5-04 한 vCenter 일 때만 일괄 데이터스토어. 시험 웹 `bareosRestoreBugs2874`.
+- **고치지 않음(사유)**: B1-03(폴더 안 데이터센터 — 플러그인 23/24 한계, 경고 칸 설계 필요) · B1-05(호스트 폴더 안 클러스터 — 화면 안내만 가능) · B1-06(INI 이중 지정 경고 — 실환경 잡 로그 먼저) ·
+  B2-05(단건 라우트 nic 기본 · 예약 — 웹 미사용 · 시험 다수 의존) · B3-02(런타임 mock 전환 중 실 복원 — 안전 판정 설계 필요) · B3-06 · B4-12(동시성 설계 — v2.862 F6 재검토 사안) ·
+  B4-05(요약의 백업 진행 중 칸 — 실패 메일이 따로 알림) · B4-07(다음 회차 시각 표시 — 동작 변경 아님).
+- 작업 방식 교훈: ① 변이 검증에서 '두 겹 방어' 는 한 겹을 지워도 시험이 통과할 수 있다 — 겹마다 다른 사유 문구로 단언한다(B3-04). ② 소스 모양 시험(`saveState();` 바로 뒤)이 새 규칙과 부딪히면
+  규칙을 지키는 새 모양으로 고친다(시험을 지우지 않는다). ③ 다른 세션이 같은 번호를 먼저 쓰면 주석 · 시험 이름까지 새 번호로 바꾼다(2871 → 2874).
+
+## v2.876 포탈 미등록 Bareos 를 지우고 설치 · 서버 초기화 스크립트(2026-11-04 · 사용자 화면 '이미 설치된 Bareos ✗' · '프로그램으로 만들어줘' — 둘 다 · 검증 표준)
+
+- 원인(사용자 화면 — UDSR26061901 10.84.77.114 · 사람이 직접 설치한 Bareos 25.1.2~pre73): 포탈에 Director 가 없는 법인은 대상 표가 '새 설치' 이고 사전 점검이 기존 설치를 ✗ 로 막는데,
+  조치 문구가 가리킨 '대상 표에서 초기화 후 재설치' 는 Director 가 등록된 법인에만 있었다(`targets.js buildTargets` — mode 는 Director 유무로만). 막다른 길.
+- 고친 것: ① 서버 스크립트 `packaging/bareos-bundle/bareos-reset.sh`(지금 바로 쓰는 길 — 기본은 아무것도 보관하지 않음 · 사용자 결정) ② 마법사 사전 점검의 '초기화 후 재설치로 진행…'
+  (본문 `resetExisting === true` → `resetTarget` 이 재설치로 · 확인 규칙(ack · 볼륨 삭제 법인 이름 · 실행 중 작업)은 재설치 그대로 · 4단계가 Director 를 새로 등록 · 감사 문구 따로).
+- **반증 1인 확정분(재현 → 고침 · 판정 하나 `job.js resetChecked` 를 사전 점검 SSH 전 · 뒤 · 0단계 다시 하기 · 러너 띄우기 직전에)**:
+  D(높음) Director 등록부(bareos.json)를 못 읽으면 빈 목록이 돼 다른 법인 판정이 꺼졌다 → `settingsLoadError` 면 503 ·
+  A(중간) SSH 주소 · 경로 src IPv4 만 대조 → 사전 점검 `@@addrs`(hostname -I) · 호스트 이름 · 짧은 이름 · 끝 점까지(틀리면 거부하는 쪽 · 루프백은 담당 엣지로) ·
+  B(중간) 0단계 다시 하기가 판정 없이 초기화를 다시 띄웠다 · C(낮음~중간) 같은 서버의 다른 vCenter 작업 기록(전부 되돌림 아닌 것)을 보지 않았다 ·
+  E(낮음) 업로드가 길어지는 동안 등록된 Director 를 0단계가 지웠다 → 러너 띄우기 직전 다시 판정 · F(낮음 · UX) 자기 법인의 미매핑 Director 도 거부 — 문구가 두 경우를 말한다.
+  스크립트 G `--dry-run` 이 PostgreSQL 을 켰다 · H Archive Device 를 따옴표 없이 펼쳐 '/data/bareos vol' 이 형제 디렉터리를 지웠다(배열 · 따옴표) ·
+  I /var/log · /var/lib/pgsql · 홈 바로 아래가 safe_voldir 를 지났다 → 러너 · 스크립트 같은 글자로 막음(시험이 두 함수 본문을 대조). 러너 쪽 공백 경로는 `planEnv` 의 `volumeDirIssue` 가 이미 뺐다.
+- 시험 `bareosInstallResetUnreg2876`(9) · `bareosResetScript2876`(10 — 실제 bash · 가짜 루트) · 웹 `bareosInstallReset2876`(6) · 변이 10/10 + 16/16(첫 회 '끝 점' 생존 → 짧은 이름이 없는 IP 끝 점 단언 추가 ·
+  '루프백 빼기' 는 `same()` 이 이미 거르는 등가 변이라 중복 코드를 지움). `startInner` 의 '표지 단 사전 점검 필수' 검사는 같은 본문으로 다시 점검하므로 시험으로 어긋남을 만들 수 없다(이중 방어 — 변이 미검증).
+- 정정: 릴리스 노트 첫 판이 스크립트가 /etc/bareos 를 tar 로 보관한다고 적었다 — 틀림(그것은 러너 0단계 동작 · 스크립트는 보관하지 않는다). 커밋 전 고침.
+- 남긴 것: Director 를 다른 DNS 이름(별칭 · CNAME)으로 등록했으면 알아보지 못한다(DNS 를 풀지 않는다 — 짧은 이름이 다르면 통과) · 작업 기록 파일이 손상되면 C 판정이 빈 목록으로 돈다(기존 load 규칙) ·
+  초기화 확인 화면의 볼륨 목록은 safe_voldir 를 거치지 않은 전체 목록이다(거부된 경로는 러너가 건너뛰고 로그에 남김 — 실제로 지우는 것이 화면보다 적은 쪽).
+
+## v2.879 Bareos 완전 설치 '등록부 대상 연결'(2026-11-04 · 사용자 요청 '다르게 들어간 Agent 명을 수정할 수 있는 기능' · '기존 설치된 목록에서 선택' · '오타나 다른 오류 방지' · 방식 'Bareos 화면에서 바로 연결')
+
+- 원인(사용자 화면 — '불가 — 배포 등록부에 엣지 ‘agent-WA’ 의 SSH 대상이 없습니다 — 배포 › 엣지 노드에서 저장하세요'): 대상 표는 배포 등록부에서 agentName 이 그 엣지 이름(대소문자 무시)인 항목을 찾는데,
+  저장된 대상의 이름이 다르게 들어가 있었다. 문구가 가리킨 '배포 › 엣지 노드' 는 **없는 메뉴**였다(실제: 설정 › 원격 법인(DC)에 Edge 노드 포탈 설치) — 문구 · SSH 인증 실패 조치 문구 고침.
+- 고친 것(`bareos/install/linkTarget.js` · 라우트 `POST …/settings/install/link-target` · 화면 `BareosInstall.jsx LinkCard`):
+  이름은 **입력받지 않는다** — 행의 엣지 이름(인벤토리를 올리는 인증된 이름)을 서버가 vcenterId 로 다시 구한다(본문의 이름 칸 무시) · 대상은 저장된 배포 대상에서만 ·
+  다른 엣지가 쓰는 이름 · 다른 법인의 완전 설치 작업(전부 되돌림 아님 — 법인마다) · SSH 비밀번호와 키가 없는 대상은 잠금(화면도 같은 규칙으로 까닭 표시) ·
+  바꾸기 **전에** SSH(시한 30초 · 세션 끊음)로 **지금 도는** 포탈 이름(`effectiveAgentName`)을 확인 — 다르거나 확인 불가면 바꾸지 않음 · SSH 뒤 판정 다시 ·
+  바꾸는 것은 `deployRegistry.setTargetAgentName`(agentName 하나 · expect 대조 · 개행 거부) — SSH 주소 · 비밀 · 토큰 · 수집 서버 등록부 그대로 · 감사(성공 · 거부 모두 · 대상 id).
+- **반증 1인 확정분(재현 → 고침)**: F1(중간) 첫 판은 포탈이 없는 서버(hostname 만 같음) · root 아닌 계정(portal.env 를 못 읽어 hostname 비교) · 멈춘 포탈의 남은 portal.env 를 통과시켰다
+  → root 필수 · 포탈 포트에 리슨하는 프로세스(`ss -ltnp` pid) 필수 · 유닛 env 파일 존재 · 엣지가 중앙에 보고한 hostname(`agentIdentity` — 메모리 기록 · 모름 = 통과)과 `sameHostName` 대조(v2.777 토큰 적용과 같은 겹) ·
+  F2(낮음) 확인한 엣지 이름과 기록하는 이름(SSH 뒤 다시 읽음)이 다를 수 있었다 → 다르면 거부 · F3(낮음) 다른 법인 작업 표지가 그 대상의 가장 새 작업 하나만 봤다 → 법인마다 ·
+  F4(낮음) 저장 실패에도 메모리 값이 바뀐 채 남았다 → 되돌림(`saveTarget` 은 같은 패턴이 남아 있다 — 기존 동작). nit: 개요가 대상 표를 두 번 만들던 것 · 카드에 '목록 다시 읽기' ·
+  SSH 로그인 실패한 대상은 화면이 다시 누르지 못하게 잠금(반복 로그인 = 계정 잠금) · 거부 감사에 대상 id.
+- 시험 `bareosLinkTarget2879`(14 — 실제 배포 등록부 파일 · 가짜 SSH · express 라우트) · 웹 `bareosLinkTarget2879`(7) · 변이 12/12(동시 실행 가드 변이는 '취소' 로 검출).
+  Chromium 1440 · 400(데모 — 일곱째 엣지 'edge-demo-7' 의 대상이 'edge-demo7' 로 저장됨): 가로 넘침 0 · pageerror 0 · 다른 서버 거부 문구 · 연결 뒤 '설치 가능'.
+- 남긴 것: 기존 '편집 → 대상 수정' 으로 이름을 바꾸면 수집 서버 자동 등록이 새 id 를 하나 더 만든다(`autoRegister.js collectorIdFor` — 수집 데이터센터 칸이 빌 때 · 이 기능은 등록부를 건드리지 않아 해당 없음) ·
+  systemd drop-in `Environment=` 로 이름을 정한 엣지는 판정이 어긋날 수 있다(v2.777 과 같은 한계 — 다르면 거부하는 쪽) · 실제 엣지에서 SSH 확인은 미실측(가짜 SSH · 데모로만 확인).
+
+## Bareos 재해 복구 1차 — 모듈 규칙(2026-11-04 · 시안 ② 'vCenter 를 다시 설치한 뒤 법인째 되살리기' · 사용자 결정 '두 번에 나눠' · '② 표준')
+
+- **범위**: 1차 = 새 vCenter 점검 · 백업 당시 데이터센터 › 폴더에서 고르기 · 위치 짝짓기 · 50대씩 사람이 보내기. **2차(복구 순서 — 단계 자동 실행 · 재시작 이어가기 · 업그레이드 대기)는 아직 없다.**
+- **판정 코어**: 서버 `bareos/drPlan.js`(`drItemIssue` · `drCheckView` — 순수) · 웹 `bareosDrText.js`(고르기 · 짝짓기 · 보낼 모양만 — 판정은 서버가 다시 한다).
+- **dr 규칙은 서버가 지킨다**: `restore-check/bulk` · `restore/bulk` 의 `dr: true`(불리언만) → 항목마다 새 VM · `nic: 'disconnect'` · 클러스터(또는 호스트) 필수. 위반은 OTP · Director 앞에서 400.
+  `dr` 를 빼고 보내면 일반 묶음 복원 규칙(이미 있는 기능 — 권한 · 범위 · OTP 같음)이다. 감사 동작 이름은 'Bareos 재해 복구'.
+- **데이터센터 바꾸기**: `restorePlan` 새 VM 의 `newVm.dc` — 그 vCenter 호스트의 `vcDatacenter` 에 있는 이름만 · 클러스터는 그 데이터센터 안. 폴더는 **백업 때 경로 그대로**(placementAt) —
+  플러그인이 없으면 만든다(bareos-fd-vmware `find_or_create_vm_folder` · 23~25 원문). 포탈은 vCenter 에 폴더를 만들지 않는다. 데이터센터는 플러그인이 만들지 않는다(이름으로 찾음 — 23/24 는 루트 바로 아래만 · B1-03).
+- **클러스터 필수의 근거**: 클러스터 · 호스트를 주지 않으면 플러그인은 백업 때 호스트를 찾는다(create_vm) — 다시 설치한 vCenter 에는 없을 수 있다.
+- **복원 지점의 백업 때 위치**: `restore-points/bulk` 가 지점마다 `at{dc, folder, vmName}`(placementAt — 복원 명령과 같은 함수)를 싣는다. 화면 트리는 이 값으로 그린다.
+- **점검(`GET dr/check`)**: 조회 범위(밖은 404) · 원장 못 읽음 503 · 포탈이 아는 것만(Director 마지막 조회 · 인벤토리 수 · 원장 대상 중 인벤토리에 없는 VM · 사이트 매핑) —
+  FD INI(인증서 지문) · 포탈 계정 권한은 **unknown**(확인 방법만). 범위 · 데모 계정에는 매핑 값(주소 · INI 경로)을 '채워져 있음' 으로 가린다. 못 읽은 여유는 null.
+- **화면**: 기준 시각(브라우저 현지 시각) **이전에 시작한** 마지막 성공 지점(체인 있음)만 — 시작 시각을 못 읽은 지점은 고르지 않는다. 재해 복구 보기는 기억하지 않는다(평소 복원 화면이 먼저).
+  늦게 온 응답 버리기는 점검 · 지점 읽기 · 미리 보기가 **따로** 센다(같은 카운터면 '다시 점검' 이 지점 읽기를 조용히 멈췄다 — 구현 중 발견).
+- 시험 `bareosDr1`(라우트 포함 · 변이 5/5) · 웹 `bareosDrText`. 실환경 미확인(추정): 다른 이름 데이터센터로 복원했을 때 플러그인의 폴더 생성 · `restore_cluster` 경로 해석(호스트 폴더 안 클러스터는 경로가 필요 — B1-05).
+- **반증 1인 결과(2026-11-04 · 확정 · 추정 구분)와 반영**:
+  R1(플러그인 원문으로 확인 — 영향은 실환경 미확인 추정) 디스크를 쓰는 덤퍼는 **백업 때 저장한 vCenter 접속값**(주소 · 계정 · 비밀번호 · 인증서 지문 — vmw2 23 :2603-2614)을 쓰고
+  복원 때는 VM MoRef 만 바꾼다(:658-671) → 다시 설치로 지문이 바뀌면 VM 껍데기만 생길 수 있다. 반영: 그 법인 재해 복구 1대가 성공(7일 안 · `drTrialIssue` · 웹 `drTrialOk` 같은 기간 대조)한 뒤에만 2대 이상(서버가 막는다).
+  **이 한계 자체는 포탈이 고칠 수 없다** — 지문이 바뀐 vCenter 에서 1대가 실패하면 인증서를 옛것으로 되살리거나 Bareos 쪽 조치가 필요하다(실측 필요).
+  R2(원문 확정) 실제 접속은 FD INI 의 vcserver 가 플러그인 옵션을 덮는다(:219-228) → 점검에 '실제 접속은 INI 우선' · 매핑 주소가 등록 주소와 다르면 warn.
+  R3(재현) 끝난 묶음의 VM 이 다음 묶음으로 되돌아와 묶음 전체가 400 → 최근(24시간 · 실패 · 취소 제외) 보낸 이름은 '최근 보냄' · 보내는 것은 미리 본 항목 그대로 · 묶음이 바뀌면 미리 보기 무효.
+  R4(코드 확정) 실패한 복원도 이름을 24시간 예약 → 실패 · 취소로 끝난 복원은 그 뒤 인벤토리 수집이 있으면 예약을 푼다(껍데기가 생겼으면 인벤토리 이름 대조가 막는다 — 일반 묶음 복원에도 같은 규칙).
+  R5(기제 재현 · 영향은 배포 시간대에 달림) 카탈로그 시각은 포탈 서버 시간대로 읽고 입력은 브라우저 시간대 → 기본값을 비우고 시각 기준을 화면에 밝히고 기준 시각을 감사에 남긴다(Director 시간대 보정은 하지 않았다 — 남김).
+  R6(확정) 점검 ✕ 는 화면만 막았다 → dr 묶음은 서버가 `drGateBlock`(점검 bad · 시험 1대)으로 막는다. R7(재현) 호스트도 바꾼 데이터센터 안. R9 늦은 결과는 법인이 바뀌었으면 띄우지 않는다.
+  남김: R8(원문 확정) 호스트 폴더 안 클러스터 · 폴더 안 데이터센터는 플러그인이 경로로 찾는데 포탈은 이름만 보낸다 — 실패는 플러그인 오류로 보인다(경고 칸 설계 필요). 변이 10/10(1차 5 + 반영 5).

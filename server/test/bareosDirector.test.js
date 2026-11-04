@@ -87,7 +87,8 @@ test('restore: jobid 목록 + restorejob + pluginoptions + all done yes(select �
   const { r, log } = await withFake(() => ({ run: { jobid: 1300 } }),
     (s) => runRestore(s, { client: 'kr-fd', jobids: [1198, 1234], restoreJob: 'PortalVmwareRestore', pluginOptions: 'python3:restore_powerstate=off:vmname=web r' }));
   assert.equal(r, 1300);
-  assert.equal(log[0], 'restore client=kr-fd restoreclient=kr-fd jobid=1198,1234 restorejob=PortalVmwareRestore pluginoptions="python3:restore_powerstate=off:vmname=web r" all done yes');
+  // v2.874(점검 B1-01): 값을 따옴표째 넘긴다 — restore 가 run 으로 다시 조립할 때 따옴표 없이 넣어 공백에서 잘렸다(bareosBugs2874 ① 이 2차 파싱을 재현)
+  assert.equal(log[0], 'restore client=kr-fd restoreclient=kr-fd jobid=1198,1234 restorejob=PortalVmwareRestore pluginoptions="\\"python3:restore_powerstate=off:vmname=web r\\"" all done yes');
   assert.doesNotMatch(log[0], /current/);
   // v2.827.1 실환경 재현: select 가 있으면 Bareos 22~25 가 jobid 를 무시하고 FileSet 을 물어 'No FileSet found for client' 로 거부한다
   assert.doesNotMatch(log[0].replace(/pluginoptions="[^"]*"/, ''), /\bselect\b/);

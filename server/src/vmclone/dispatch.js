@@ -162,7 +162,7 @@ export function sanitizeReport(b) {
     const hosts = (Array.isArray(a.hosts) ? a.hosts.slice(0, 500) : []).map((h) => ({ hostId: t(h?.hostId, 300), ok: bool(h?.ok), detail: t(h?.detail, 300) })).filter((h) => h.hostId);
     const toolsMs = numOr(a.toolsMs);
     return { id, ok: bool(a.ok), detail: t(a.detail, 400), ms: Math.max(0, numOr(a.ms) || 0), ...(hosts.length ? { hosts } : {}), ...(t(a.newName, 80) ? { newName: t(a.newName, 80) } : {}),
-      ...(toolsMs != null && toolsMs >= 0 ? { toolsMs } : {}), ...(a.deleted === true ? { deleted: true } : {}) };   // v2.862 Bareos 복원 검증
+      ...(toolsMs != null && toolsMs >= 0 ? { toolsMs } : {}), ...(typeof a.deleted === 'boolean' ? { deleted: a.deleted } : {}) };   // v2.862 Bareos 복원 검증 · v2.874 B3-01 남김(false)도 싣는다(없음 = 모름)
   }).filter(Boolean);
   const s = body.sync && typeof body.sync === 'object' ? body.sync : {};
   const list = (v) => (Array.isArray(v) ? v.slice(0, 20).map((x) => t(x, 200)).filter(Boolean) : []);
@@ -242,7 +242,7 @@ export function finishOp(op, result, now = Date.now(), { late = false } = {}) {
   op.state = 'done'; op.doneAt = now;
   op.result = { ok: !!r.ok, detail: t(String(r.detail ?? ''), 400), ...(r.ms != null ? { ms: Math.max(0, Number(r.ms) || 0) } : {}), ...(r.newName ? { newName: t(r.newName, 80) } : {}), ...(late ? { late: true } : {}),
     // v2.862 Bareos 복원 검증 — Tools 응답 시간(모르면 없음 · 0 이 아니다) · 검증용 VM 을 지웠는가
-    ...(typeof r.toolsMs === 'number' && Number.isFinite(r.toolsMs) && r.toolsMs >= 0 ? { toolsMs: r.toolsMs } : {}), ...(r.deleted === true ? { deleted: true } : {}) };   // 수만(Number('')·Number(null) 은 0 — 못 읽은 값은 0 이 아니다)
+    ...(typeof r.toolsMs === 'number' && Number.isFinite(r.toolsMs) && r.toolsMs >= 0 ? { toolsMs: r.toolsMs } : {}), ...(typeof r.deleted === 'boolean' ? { deleted: r.deleted } : {}) };   // 수만(Number('')·Number(null) 은 0 — 못 읽은 값은 0 이 아니다)
   if ((op.kind === 'nfsds-attach' || op.kind === 'nfsds-detach') && Array.isArray(r.hosts) && op.spec?.nfsDsId) {
     // 요청한 호스트의 결과만 받는다 — 엣지가 다른 호스트를 '연결됨' 으로 보내 연결 수를 부풀리지 못하게(반증 검토 F6). 떼어 내기도 같다.
     const asked = new Set((op.spec.hostIds || []).map(String));

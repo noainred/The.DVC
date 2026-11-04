@@ -23,7 +23,8 @@ export function bareosClass(b, { rpoDays = 1, now = Date.now() } = {}) {
     off: job && b.on === false,
     ok: st === 'ok',
     warn: st === 'warning',
-    fail: st === 'error' || st === 'canceled',
+    fail: st === 'error',
+    cancel: st === 'canceled',   // v2.870 사람이 멈춘 실행 — 실패와 따로(서버 vmView.bareosClass 와 같다)
     run: job && !!b.run,
     never: job && !isFin(b.ok),
     old: job && b.on !== false && isFin(b.ok) && now - b.ok > days * DAY,
@@ -43,7 +44,7 @@ export const DIRECTOR_STATE = {
 export const directorStateOf = (s) => DIRECTOR_STATE[s] || { text: s ? String(s) : '—', color: '#64748b' };
 /** Director 한 줄 — '이름 · 상태 · 담당'(이름이 없으면 미설정). */
 export function directorLineText(dir) {
-  if (!dir || !dir.name) return 'Director 미설정 — 설정 탭에서 이 vCenter 를 법인 Director 에 묶어야 Bareos 결과가 보입니다';
+  if (!dir || !dir.name) return 'Director 미설정 — 설정 › vCenter 관리 › Bareos 백업 서버에서 이 vCenter 를 법인 Director 에 묶어야 Bareos 결과가 보입니다';
   const st = directorStateOf(dir.state).text;
   const via = dir.via === 'edge' ? '엣지 대행' : '중앙 직접';
   return `Director ‘${dir.name}’ · ${st} · ${via}${isFin(dir.at) ? ` · 마지막 조회 ${shortTs(dir.at)}` : ''}`;
@@ -64,9 +65,9 @@ export function resultBar(c) {
   if (!c || !isFin(c.jobs) || c.jobs <= 0 || c.ok == null) return null;
   // 버그 점검 W3: 성공·경고·실패는 '마지막으로 끝난 실행', 진행은 '지금 도는 실행' 이라 한 잡이 둘 다 셀 수 있다(지난번 성공 + 지금 실행) —
   //   분모를 잡 수로만 두면 합이 100% 를 넘어 막대가 비율을 잃었다. 분모 = max(잡 수, 조각 합)
-  const den = Math.max(c.jobs, (c.ok || 0) + (c.warn || 0) + (c.fail || 0) + (c.run || 0));
-  const p = (n) => Math.round((n / den) * 1000) / 10;
-  return { ok: p(c.ok), warn: p(c.warn), fail: p(c.fail), run: p(c.run) };
+  const den = Math.max(c.jobs, (c.ok || 0) + (c.warn || 0) + (c.fail || 0) + (c.cancel || 0) + (c.run || 0));
+  const p = (n) => Math.round(((n || 0) / den) * 1000) / 10;
+  return { ok: p(c.ok), warn: p(c.warn), fail: p(c.fail), cancel: p(c.cancel), run: p(c.run) };
 }
 
 /**
@@ -112,7 +113,7 @@ export const lvText = (v) => (v ? (levelLabel(v) !== '—' ? levelLabel(v) : Str
 
 /* ── 보기 필터(법인별 현황) ── */
 export const DETAIL_FILTERS = [
-  ['all', '전체'], ['attn', '확인 필요'], ['job', '잡 등록'], ['missing', '미등록'], ['run', '진행 중'], ['bad', '실패·경고'], ['old', '오래된 백업'], ['never', '백업 없음'], ['off', '잡 꺼짐'], ['mismatch', '방식 불일치'], ['gone', '인벤토리에 없음'],
+  ['all', '전체'], ['attn', '확인 필요'], ['job', '잡 등록'], ['missing', '미등록'], ['run', '진행 중'], ['bad', '실패·경고·취소'], ['old', '오래된 백업'], ['never', '백업 없음'], ['off', '잡 꺼짐'], ['mismatch', '방식 불일치'], ['gone', '인벤토리에 없음'],
 ];
 /**
  * v2.860(사용자 요청 'Bareos UI 전폭 개선 — 직관적이고 복잡하지 않게' · docs/design/bareos-ui-v2 시안 ②): 법인 화면은 칩 6개만 먼저 보이고
@@ -132,7 +133,7 @@ export function rowMatches(r, f, { rpoDays = 1, now = Date.now(), resultsKnown =
   if (f === 'attn') return k.missing || (resultsKnown && (k.fail || k.old || (k.never && k.on)));
   if (!resultsKnown) return f === 'all';
   if (f === 'run') return k.run;
-  if (f === 'bad') return k.fail || k.warn;
+  if (f === 'bad') return k.fail || k.warn || k.cancel;
   if (f === 'old') return k.old;
   if (f === 'never') return k.never && k.on;
   return true;
@@ -156,7 +157,7 @@ const nat = new Intl.Collator('en', { numeric: true, sensitivity: 'base' });
  *   인벤토리에 없는 잡(gone)은 원장의 등록 때 위치로 놓인다.
  */
 export function buildBareosTree(rows, { filter = 'all', q = '', rpoDays = 1, now = Date.now(), resultsKnown = true } = {}) {
-  const mk = (key, name) => ({ key, name, children: new Map(), rows: [], agg: { n: 0, job: 0, ok: 0, warn: 0, fail: 0, run: 0, missing: 0, gb: 0 }, hit: 0 });
+  const mk = (key, name) => ({ key, name, children: new Map(), rows: [], agg: { n: 0, job: 0, ok: 0, warn: 0, fail: 0, cancel: 0, run: 0, missing: 0, gb: 0 }, hit: 0 });
   const root = mk('', '');
   const needle = String(q || '').trim().toLowerCase();
   for (const r of Array.isArray(rows) ? rows : []) {
@@ -172,7 +173,7 @@ export function buildBareosTree(rows, { filter = 'all', q = '', rpoDays = 1, now
     }
     for (const n of path) {
       n.agg.n++; if (k.job) n.agg.job++; if (k.missing) n.agg.missing++;
-      if (k.ok) n.agg.ok++; if (k.warn) n.agg.warn++; if (k.fail) n.agg.fail++; if (k.run) n.agg.run++;
+      if (k.ok) n.agg.ok++; if (k.warn) n.agg.warn++; if (k.fail) n.agg.fail++; if (k.cancel) n.agg.cancel++; if (k.run) n.agg.run++;
       if (isFin(r.gb)) n.agg.gb += r.gb;
       if (show) n.hit++;
     }
@@ -245,14 +246,38 @@ export function takeBareosHandoff(store = globalThis.sessionStorage, now = Date.
  *   현황(bareos-summary) · 법인(bareos-detail) · 운영(bareos-backup — 백업 대상 · 백업 그룹 · 진행·이력) · 정책 · 보존(bareos-summary/policy) · 설정(bareos-backup/settings).
  *   도구 키 · 권한 · 서버 집행은 그대로다(탭은 UX 게이팅 — 서버가 진실의 원천). 어느 도구 키로 들어와도 같은 자리 · 같은 모양(BareosTabs 하나).
  */
-export function bareosSubTabs({ summaryOk = false, detailOk = false, manageOk = false, admin = false, fullScope = false } = {}) {
+export function bareosSubTabs({ summaryOk = false, detailOk = false, manageOk = false, admin = false, fullScope = false, settingsHome = false } = {}) {
   return [
     ...(summaryOk ? [['summary', '현황', '#/tools/bareos-summary']] : []),
     ...(detailOk ? [['detail', '법인', '#/tools/bareos-detail']] : []),
     ...(admin && manageOk ? [['ops', '운영', '#/tools/bareos-backup/targets']] : []),
     ...(summaryOk ? [['policy', '정책 · 보존', '#/tools/bareos-summary/policy']] : []),
-    ...(admin && manageOk && fullScope ? [['settings', '설정', '#/tools/bareos-backup/settings']] : []),
+    // v2.878(사용자 요청 'Bareos 설정을 전체 설정 메뉴로 — B안'): 설정은 설정 › 🖥️ vCenter 관리 › Bareos 백업 서버 로 옮겼다.
+    //   설정 화면을 열 수 있는 계정(settingsHome)에게는 이 탭을 그리지 않는다. 못 여는 관리자(설정 소유 계정이 아님)는 예전 자리를 그대로 쓴다 —
+    //   Bareos 설정 API 의 게이트는 adminOnly·fullScopeOnly 이고 설정 소유 계정 여부를 보지 않으므로, 탭을 지우면 그 관리자는 화면을 잃는다.
+    ...(admin && manageOk && fullScope && !settingsHome ? [['settings', '설정', '#/tools/bareos-backup/settings']] : []),
   ];
+}
+/** v2.878 Bareos 설정의 새 자리(전체 설정 › vCenter 관리 묶음의 하위 키). 그 아래 조각은 Director · 완전 설치 … 구획. */
+export const BAREOS_SETTINGS_KEY = 'bareos';
+export const BAREOS_SETTINGS_HASH = `#/settings/${BAREOS_SETTINGS_KEY}`;
+/**
+ * v2.878 이 계정이 전체 설정 화면을 열 수 있는가(App 의 '설정' 탭 게이트와 같은 조건 — 관리자 · 설정 소유 계정 · settings 권한).
+ *   UX 판정일 뿐이다(서버가 requireSettingsOwner 로 설정 API 를 집행 · Bareos 설정 API 는 adminOnly · fullScopeOnly).
+ */
+export function settingsHomeOk(u) {
+  if (!u || u.role !== 'admin') return false;
+  if (!(u.name === 'Anonymous' || u.isSettingsOwner === true)) return false;
+  return true;   // 관리자는 hasPerm 이 항상 참(App.jsx hasPerm)
+}
+/**
+ * v2.878 옛 설정 주소(#/tools/bareos-backup/settings[/구획]) → 새 주소(#/settings/bareos[/구획]). 옛 주소가 아니면 null.
+ *   구획 조각은 그대로 잇는다(북마크 · 다른 화면 링크가 같은 구획으로).
+ */
+export function legacySettingsHash(hash) {
+  const s = segsOf(hash);
+  if (!(s[0] === 'tools' && s[1] === 'bareos-backup' && s[2] === 'settings')) return null;
+  return [BAREOS_SETTINGS_HASH, ...s.slice(3)].join('/');   // 조각은 주소에 이미 인코딩된 그대로 잇는다
 }
 /** 운영 탭 안의 묶음(관리 도구 bareos-backup 의 하위 주소). 설정은 위 탭 줄의 '설정' 이다. */
 export const OPS_SEGMENTS = Object.freeze([['targets', '백업 대상'], ['groups', '백업 그룹'], ['restore', '복원'], ['runs', '진행 · 이력']]);   // v2.861 복원(폴더에서 고르기 · 3단계)
@@ -288,6 +313,14 @@ export const TARGET_FOCUS_KEY = 'bareos-backup.focus';
 export function saveTargetFocus(vcenterId, vmId, store = globalThis.sessionStorage) {
   try { store?.setItem(TARGET_FOCUS_KEY, JSON.stringify({ vcenterId: String(vcenterId || ''), vmId: String(vmId || ''), at: Date.now() })); return true; } catch { return false; }
 }
+/**
+ * v2.872 통합 에러 로그 '이력 →'(시안 docs/design/bareos-errlog ③) — 진행 · 이력에서 그 VM 을 대상으로 고르고 그 실행(jobid)의 작업 로그를 요약으로 연 채 뜬다.
+ *   예전에는 고정 주소로만 가서 대상 목록의 첫 VM(실패한 VM 과 무관)이 보였다(사용자 스크린샷 2026-11-04). 같은 열쇠 · 한 번 읽고 지운다 · 10분.
+ */
+export function saveRunFocus(vcenterId, vmId, jobid, store = globalThis.sessionStorage) {
+  const n = Number(jobid);
+  try { store?.setItem(TARGET_FOCUS_KEY, JSON.stringify({ vcenterId: String(vcenterId || ''), vmId: String(vmId || ''), jobid: Number.isInteger(n) && n > 0 ? n : null, tab: 'runs', at: Date.now() })); return true; } catch { return false; }
+}
 export function takeTargetFocus(store = globalThis.sessionStorage, now = Date.now()) {
   let raw = null;
   try { raw = store?.getItem(TARGET_FOCUS_KEY); store?.removeItem(TARGET_FOCUS_KEY); } catch { return null; }
@@ -295,7 +328,8 @@ export function takeTargetFocus(store = globalThis.sessionStorage, now = Date.no
   try {
     const j = JSON.parse(raw);
     if (!j || typeof j.vmId !== 'string' || !j.vmId || !(now - Number(j.at) <= HANDOFF_TTL_MS)) return null;
-    return { vcenterId: String(j.vcenterId || ''), vmId: j.vmId };
+    const n = Number(j.jobid);
+    return { vcenterId: String(j.vcenterId || ''), vmId: j.vmId, tab: j.tab === 'runs' ? 'runs' : 'targets', jobid: Number.isInteger(n) && n > 0 ? n : null };
   } catch { return null; }
 }
 /** 법인별 현황이 이어받을 vCenter(통합 표에서 고른 것 — 이 브라우저에만). */

@@ -1,0 +1,197 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>위키 — 편집</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=Noto+Sans+KR:wght@400;500;700;800&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+body{margin:0;background:#0a0e17;color:#e6edf6;font-family:"Inter","Noto Sans KR","Apple SD Gothic Neo",sans-serif;font-size:13px}
+a{color:#93c5fd}a:hover{color:#bfdbfe}
+.tb{display:flex;align-items:center;gap:14px;height:44px;padding:0 16px;background:#0f1626;border-bottom:1px solid #243049}
+.tb .logo{display:inline-flex;align-items:center;gap:8px;font-weight:800;font-size:14px}
+.tb .logo .v{width:26px;height:26px;border-radius:7px;background:#3b82f6;display:inline-flex;align-items:center;justify-content:center;font-size:13px;color:#fff}
+.ver{font-size:11px;font-weight:700;color:#5eead4;border:1px solid #2dd4bf;border-radius:6px;padding:1px 6px}
+.mock{font-size:11px;font-weight:800;color:#fcd34d;background:rgba(245,158,11,.16);border-radius:6px;padding:2px 7px}
+.side{flex:0 0 236px;background:#0f1626;border-right:1px solid #243049;padding:14px 10px;display:flex;flex-direction:column;gap:2px}
+.side a{display:flex;align-items:center;gap:10px;min-height:36px;padding:0 12px;border-radius:9px;color:#aebbd0;text-decoration:none;font-size:13.5px;font-weight:600}
+.side a.on{background:#1a2236;color:#e6edf6;box-shadow:inset 3px 0 0 #3b82f6}
+.side .n{margin-left:auto;font-size:11px;color:#5d6b85}
+.card{background:#141b2d;border:1px solid #243049;border-radius:12px}
+.muted{color:#8b9bb4}.faint{color:#5d6b85}
+.mono{font-family:"JetBrains Mono",ui-monospace,monospace}
+.btn{display:inline-flex;align-items:center;gap:6px;min-height:30px;padding:0 11px;border-radius:8px;border:1px solid #243049;background:#1a2236;color:#e6edf6;font:inherit;font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap;text-decoration:none}
+.btn.primary{background:#3b82f6;border-color:#3b82f6;color:#fff}
+.btn.sm{min-height:26px;padding:0 9px;font-size:11.5px}
+.btn.ic{min-width:30px;padding:0 8px;font-family:"JetBrains Mono",monospace;font-weight:700}
+.tag{display:inline-flex;align-items:center;gap:5px;height:20px;padding:0 8px;border-radius:999px;font-size:11px;font-weight:700;white-space:nowrap}
+.tag.blue{background:rgba(59,130,246,.18);color:#93c5fd}.tag.gray{background:rgba(139,155,180,.14);color:#aebbd0}.tag.ok{background:rgba(34,197,94,.14);color:#86efac}.tag.warn{background:rgba(245,158,11,.16);color:#fcd34d}.tag.bad{background:rgba(239,68,68,.16);color:#fca5a5}.tag.purple{background:rgba(168,85,247,.18);color:#d8b4fe}
+.iss{display:inline-flex;align-items:center;gap:6px;height:22px;padding:0 8px 0 6px;border-radius:6px;border:1px solid #243049;background:#0f1626;color:#e6edf6;font-size:12px;font-weight:600;text-decoration:none;vertical-align:middle}
+.iss .k{font-family:"JetBrains Mono",monospace;color:#93c5fd;font-size:11.5px}
+.iss .st{width:8px;height:8px;border-radius:50%}
+.av{display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:50%;font-size:11px;font-weight:800;color:#fff;flex:0 0 auto}
+.input{min-height:30px;border:1px solid #243049;border-radius:8px;background:#0a0e17;color:#e6edf6;font:inherit;font-size:12.5px;padding:0 10px}
+.ed{font-family:"JetBrains Mono",ui-monospace,monospace;font-size:12.5px;line-height:1.7;color:#d6deea;white-space:pre-wrap;background:#0a0e17;border:1px solid #243049;border-radius:10px;padding:14px 16px;min-height:560px}
+.ed .h{color:#93c5fd;font-weight:700}.ed .k{color:#fcd34d}.ed .m{color:#86efac}.ed .c{color:#8b9bb4}
+.doc h1{font-size:22px;margin:0 0 6px}
+.doc h2{font-size:15.5px;margin:20px 0 6px;padding-bottom:5px;border-bottom:1px solid #1f2a40}
+.doc p,.doc li{font-size:13px;line-height:1.7;color:#d6deea}
+.doc ul{margin:4px 0;padding-left:20px}
+.doc code{font-family:"JetBrains Mono",monospace;font-size:11.5px;background:#0f1626;border:1px solid #243049;border-radius:5px;padding:1px 5px}
+.doc pre{font-family:"JetBrains Mono",monospace;font-size:11.5px;background:#0f1626;border:1px solid #243049;border-radius:8px;padding:9px 11px;margin:6px 0;line-height:1.6}
+.doc table{border-collapse:collapse;width:100%;margin:6px 0;font-size:12px}
+.doc th{font-weight:600;color:#8b9bb4;text-align:left;padding:6px 9px;background:#0f1626;border-bottom:1px solid #243049}
+.doc td{padding:6px 9px;border-bottom:1px solid #1f2a40}
+.pop{position:absolute;left:0;top:100%;margin-top:6px;z-index:5;background:#141b2d;border:1px solid #243049;border-radius:10px;box-shadow:0 4px 24px rgba(0,0,0,.4);padding:6px;min-width:300px;display:flex;flex-direction:column;gap:2px}
+.pop a{display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:7px;text-decoration:none;color:#e6edf6;font-size:12.5px}
+.pop a.on{background:#1a2236}
+.sb{display:flex;align-items:center;height:30px;background:#0f1626;border-top:1px solid #243049;font-family:"JetBrains Mono",monospace;font-size:11.5px;color:#8b9bb4}
+.sb span{flex:1;text-align:center;border-right:1px solid #243049}.sb span:last-child{border-right:0}.sb b{color:#e6edf6}
+</style>
+</helmet>
+
+<div style="min-height: 100vh; display: flex; flex-direction: column; background: #0a0e17">
+  <header class="tb">
+    <span class="muted" aria-hidden="true">☰</span>
+    <span class="logo"><span class="v">V</span>The Davinci</span>
+    <span class="ver">v2.876.0</span><span class="mock">MOCK</span>
+    <span style="flex: 1"></span>
+    <span class="mono muted" style="font-size: 11.5px">11/11 vCenter <b style="color: #22c55e">OK</b> · 오전 10:14</span>
+    <span class="av" style="background: #3b82f6">A</span>
+    <span style="font-size: 12.5px; font-weight: 700">Anonymous <span class="muted" style="font-weight: 400; font-size: 11px">관리자</span></span>
+    <button class="btn sm" type="button">Out</button>
+  </header>
+
+  <div style="display: flex; flex-wrap: wrap; flex: 1">
+    <nav class="side" aria-label="메뉴">
+      <a href="#"><span aria-hidden="true">◫</span>Overview</a>
+      <a href="#"><span aria-hidden="true">▤</span>Summary</a>
+      <a href="#"><span aria-hidden="true">▣</span>서버<span class="n">6 ▾</span></a>
+      <a href="#"><span aria-hidden="true">▥</span>스토리지<span class="n">7 ▾</span></a>
+      <a href="#"><span aria-hidden="true">⌘</span>네트워크<span class="n">6 ▾</span></a>
+      <a href="#"><span aria-hidden="true">⚙</span>자원관리<span class="n">3 ▾</span></a>
+      <a href="#"><span aria-hidden="true">◔</span>자원 최적화<span class="n">2 ▾</span></a>
+      <a href="#"><span aria-hidden="true">✦</span>특수 기능</a>
+      <a href="#"><span aria-hidden="true">⚑</span>이슈</a>
+      <a href="Main.dc.html" class="on"><span aria-hidden="true">▧</span>위키</a>
+      <a href="#"><span aria-hidden="true">▭</span>게시판</a>
+      <a href="#"><span aria-hidden="true">✲</span>설정<span class="n">2 ▾</span></a>
+    </nav>
+
+    <main style="flex: 999 1 560px; min-width: 0; padding: 16px 22px 24px; display: flex; flex-direction: column; gap: 12px">
+      <!-- 편집 머리 -->
+      <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap">
+        <a class="btn" href="Main.dc.html">← 보기로</a>
+        <span class="muted" style="font-size: 12px">운영 절차 › vCenter 수집기 점검 ›</span>
+        <input class="input" type="text" value="PL-WAW 수집 타임아웃 대응" aria-label="제목" style="flex: 1 1 320px; min-width: 0; font-size: 15px; font-weight: 700; min-height: 34px">
+        <span class="tag gray">v12 기준으로 편집 중</span>
+        <span class="tag ok">초안 자동 저장 10:13:40</span>
+      </div>
+
+      <!-- 도구 막대 -->
+      <div class="card" style="padding: 8px 10px; display: flex; align-items: center; gap: 6px; flex-wrap: wrap">
+        <button class="btn sm ic" type="button" aria-label="굵게">B</button>
+        <button class="btn sm ic" type="button" aria-label="기울임" style="font-style: italic">I</button>
+        <button class="btn sm ic" type="button" aria-label="제목">H2</button>
+        <button class="btn sm ic" type="button" aria-label="목록">≡</button>
+        <button class="btn sm ic" type="button" aria-label="표">⊞</button>
+        <button class="btn sm ic" type="button" aria-label="코드 블록">&lt;/&gt;</button>
+        <span style="width: 1px; height: 20px; background: #243049"></span>
+        <div style="position: relative">
+          <button class="btn sm" type="button" style="background: #1f2a40">⚑ 이슈 링크 ▾</button>
+          <div class="pop" role="listbox" aria-label="이슈 고르기">
+            <label style="padding: 4px 6px"><input class="input" type="search" value="수집" aria-label="이슈 찾기" style="width: 100%; box-sizing: border-box; min-height: 28px"></label>
+            <a href="#" class="on"><span class="iss"><span class="st" style="background: #3b82f6"></span><span class="k">ISS-1</span></span>vCenter PL-WAW 수집 타임아웃 간헐 발생<span class="muted" style="margin-left: auto; font-size: 11px">kim · 진행 중</span></a>
+            <a href="#"><span class="iss"><span class="st" style="background: #a855f7"></span><span class="k">ISS-20</span></span>고RTT 법인 수집 안정화<span class="muted" style="margin-left: auto; font-size: 11px">에픽</span></a>
+            <a href="#"><span class="iss"><span class="st" style="background: #8b9bb4"></span><span class="k">ISS-23</span></span>수집 분할(300대 단위) 설계<span class="muted" style="margin-left: auto; font-size: 11px">백로그</span></a>
+            <span class="faint" style="font-size: 11px; padding: 4px 8px">내 범위에서 보이는 이슈만 · 키를 그냥 쳐도(ISS-23) 저장 때 링크가 됩니다</span>
+          </div>
+        </div>
+        <button class="btn sm" type="button">@ 멘션</button>
+        <button class="btn sm" type="button">▧ 페이지 링크</button>
+        <button class="btn sm" type="button">⇪ 그림 올리기</button>
+        <span style="flex: 1"></span>
+        <label style="display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: #8b9bb4">보기
+          <span style="display: inline-flex; border: 1px solid #243049; border-radius: 8px; overflow: hidden">
+            <button class="btn sm" type="button" style="border: 0; border-radius: 0">편집</button>
+            <button class="btn sm" type="button" style="border: 0; border-radius: 0; background: #3b82f6; color: #fff">나란히</button>
+            <button class="btn sm" type="button" style="border: 0; border-radius: 0">미리보기</button>
+          </span>
+        </label>
+      </div>
+
+      <!-- 편집 · 미리보기 -->
+      <div style="display: flex; gap: 12px; flex-wrap: wrap; align-items: flex-start">
+        <section style="flex: 1 1 440px; min-width: 0; display: flex; flex-direction: column; gap: 6px">
+          <span class="muted" style="font-size: 12px">마크다운 · 제목 · 목록 · 표 · 코드 · 링크 · 그림 · <span class="mono">ISS-12</span> 자동 링크 · <span class="mono">@이름</span> 멘션</span>
+          <div class="ed" role="textbox" aria-label="본문" aria-multiline="true" tabindex="0"><span class="h"># PL-WAW 수집 타임아웃 대응</span>
+
+<span class="h">## 요약</span>
+폴란드 법인 vCenter 는 RTT 가 800ms 를 넘어 기본 수집 시한(60초) 안에
+호스트 658대 인벤토리를 다 받지 못하는 날이 있다. 진행 중인 이슈는 <span class="k">ISS-1</span>,
+상위 에픽은 <span class="k">ISS-20</span> 다.
+
+<span class="h">## 3. 시한 조정(런북)</span>
+```
+vmware-portal-config set collect.deadlineMs 90000 --vcenter vc-pl-waw
+systemctl restart vmware-portal-edge
+```
+바꾼 뒤 <span class="k">ISS-18</span> 에 결과를 남긴다. 시한은 법인 단위라 다른 법인에는 영향이 없다.
+
+<span class="h">## 4. 재발 방지</span>
+- 수집 분할(호스트 300대 단위) — [[변경 계획/수집 분할]] 참조(초안)
+- 검토 요청: <span class="m">@lee</span> <span class="m">@choi</span>
+<span class="c">&lt;!-- 미리보기에서 ISS-18 배지의 점이 초록이면 완료 — 저장 전에도 상태를 보여 준다 --&gt;</span>
+</div>
+        </section>
+        <section class="card doc" style="flex: 1 1 440px; min-width: 0; padding: 18px 22px; align-self: stretch">
+          <div class="muted" style="font-size: 11.5px; margin-bottom: 8px">미리보기 — 저장될 모습 그대로</div>
+          <h1>PL-WAW 수집 타임아웃 대응</h1>
+          <h2>요약</h2>
+          <p>폴란드 법인 vCenter 는 RTT 가 800ms 를 넘어 기본 수집 시한(60초) 안에 호스트 658대 인벤토리를 다 받지 못하는 날이 있다. 진행 중인 이슈는 <a class="iss" href="IssueEpic.dc.html"><span class="st" style="background: #3b82f6"></span><span class="k">ISS-1</span>PL-WAW 수집 타임아웃</a>, 상위 에픽은 <a class="iss" href="IssueEpic.dc.html"><span class="st" style="background: #a855f7"></span><span class="k">ISS-20</span>고RTT 법인 수집 안정화</a> 다.</p>
+          <h2>3. 시한 조정(런북)</h2>
+          <pre>vmware-portal-config set collect.deadlineMs 90000 --vcenter vc-pl-waw
+systemctl restart vmware-portal-edge</pre>
+          <p>바꾼 뒤 <a class="iss" href="IssueEpic.dc.html"><span class="st" style="background: #22c55e"></span><span class="k">ISS-18</span>시한 90초 적용 결과 확인</a> 에 결과를 남긴다. 시한은 법인 단위라 다른 법인에는 영향이 없다.</p>
+          <h2>4. 재발 방지</h2>
+          <ul>
+            <li>수집 분할(호스트 300대 단위) — <a href="#">변경 계획 › 수집 분할</a> 참조(초안)</li>
+            <li>검토 요청: <a href="#">@lee</a> <a href="#">@choi</a></li>
+          </ul>
+        </section>
+      </div>
+
+      <!-- 저장 줄 -->
+      <div class="card" style="padding: 12px 14px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap">
+        <label style="display: flex; align-items: center; gap: 8px; flex: 1 1 360px; min-width: 0; font-size: 12.5px; color: #8b9bb4">버전 메모
+          <input class="input" type="text" value="3절 시한 90초 반영 · 검토 요청" aria-label="버전 메모" style="flex: 1; min-width: 0">
+        </label>
+        <label style="display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; color: #8b9bb4">상태
+          <select class="input" aria-label="문서 상태"><option>초안</option><option selected>검토 중</option><option>검토 완료</option></select>
+        </label>
+        <label style="display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px"><input type="checkbox" checked> 지켜보는 사람에게 알림</label>
+        <span style="flex: 1"></span>
+        <button class="btn" type="button">초안으로 두기</button>
+        <a class="btn primary" href="Main.dc.html">v13 으로 저장</a>
+      </div>
+      <div class="card" style="padding: 10px 14px; border-color: #f59e0b; display: flex; gap: 10px; align-items: flex-start; font-size: 12.5px">
+        <span class="tag warn">충돌 안내(예시)</span>
+        <div style="min-width: 0"><b>lee 가 10:09 에 이 페이지를 v13 으로 저장했습니다</b> — 지금 편집은 v12 기준입니다. 저장을 누르면 두 판을 비교해 합칠 부분을 고르는 화면이 열립니다(남의 저장을 조용히 덮어쓰지 않습니다).
+          <div class="faint" style="margin-top: 4px">편집을 시작한 버전(baseVersion)을 저장 요청에 실어 서버가 판정합니다. 비교 화면은 ③ 버전 이력의 비교와 같은 틀입니다.</div></div>
+      </div>
+    </main>
+  </div>
+  <footer class="sb" aria-label="상태"><span>서버 Uptime <b>6일</b></span><span>전체 호스트 <b>658</b></span><span>전체 VM <b>5,850</b> (5,412 On)</span><span>활성 알람 <b style="color: #ef4444">3</b></span></footer>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1060}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

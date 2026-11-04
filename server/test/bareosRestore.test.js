@@ -157,3 +157,35 @@ test('원장: 같은 실행을 덜 자세한 행으로 받아도 값 유지 · �
   assert.throws(() => registry.addJob({ vcenterId: 'vc-a', vmId: 'x', vmName: 'x', dc: 'D', folder: '/', bareosJob: 'pv-2', client: 'c', storage: 's', pool: 'p' }), /읽지 못한 상태/);
   assert.ok(fs.readdirSync(tmp).some((f) => f.startsWith('bareos-jobs.json.corrupt.')));
 });
+
+test('v2.866 실환경 \'Option vcuser not defined\' — 복원 명령에 백업과 같은 기본 키(vcserver · dc · folder · vmname · config_file)', async () => {
+  const { restoreBaseKv } = await import('../src/bareos/restore.js');
+  const { restorePluginOptions } = await import('../src/bareos/names.js');
+  const base = { vcserver: 'vc-a.corp', configFile: '/etc/bareos/vmware/vc-a.ini' };
+  // 새 VM: 기본 키 + 새 이름(vmname 은 덮어쓴다 — 한 번만) + 꺼진 채
+  const nv = restorePlan({ mode: 'newVm', job, snapshot: snap(), newVm: { name: 'web-01-r' }, base });
+  assert.equal(nv.ok, true, nv.issue);
+  assert.equal(nv.pluginOptions, 'python3:vcserver=vc-a.corp:dc=DC-A:folder=/web:vmname=web-01-r:config_file=/etc/bareos/vmware/vc-a.ini:restore_powerstate=off');
+  assert.equal((nv.pluginOptions.match(/vmname=/g) || []).length, 1);
+  // 덮어쓰기 · 로컬 VMDK 도 같은 기본 키
+  const ov = restorePlan({ mode: 'original', job, snapshot: snap(), confirmName: 'web-01', base });
+  assert.equal(ov.pluginOptions, 'python3:vcserver=vc-a.corp:dc=DC-A:folder=/web:vmname=web-01:config_file=/etc/bareos/vmware/vc-a.ini:restore_powerstate=off');
+  assert.match(restorePlan({ mode: 'localVmdk', job, snapshot: snap(), base }).pluginOptions, /config_file=\/etc\/bareos\/vmware\/vc-a\.ini:localvmdk=yes$/);
+  // 위치는 그 복원 지점의 백업 때 값(placementAt) — 다시 등록하기 전 지점이면 예전 폴더
+  const moved = { ...job, folder: '/new', placements: [{ upToJobid: 500, vmName: 'web-01', dc: 'DC-A', folder: '/old', at: 1 }] };
+  assert.match(restorePlan({ mode: 'newVm', job: moved, snapshot: snap(), newVm: { name: 'web-01-r' }, jobid: 400, base }).pluginOptions, /:folder=\/old:/);
+  assert.match(restorePlan({ mode: 'newVm', job: moved, snapshot: snap(), newVm: { name: 'web-01-r' }, jobid: 600, base }).pluginOptions, /:folder=\/new:/);
+  // 매핑이 덜 됐으면 보내지 않는다(그대로 보내면 FD 에서 실패한다) · 자격증명 값은 여전히 받지 않는다 · 경로 검사
+  assert.match(restorePlan({ mode: 'newVm', job, snapshot: snap(), newVm: { name: 'x' }, base: { vcserver: 'vc-a.corp', configFile: '' } }).issue, /INI/);
+  assert.match(restoreBaseKv({ vcserver: '', configFile: '/a.ini' }, job).issue, /사이트 매핑/);
+  assert.match(restorePluginOptions({ vcpass: 'x' }).issue, /받지 않습니다/);
+  assert.match(restorePluginOptions({ vcuser: 'x' }).issue, /받지 않습니다/);
+  assert.match(restorePluginOptions({ config_file: 'relative.ini' }).issue, /config_file/);
+  assert.match(restorePluginOptions({ config_file: '/etc/../shadow' }).issue, /config_file/);
+  // 실제 라우트 · 묶음 · 검증 세 곳 모두 기본 키를 넘긴다(한 곳이라도 빠지면 그 경로의 복원이 실환경에서 실패한다)
+  const route = fs.readFileSync(new URL('../src/routes/api/bareosBackup.js', import.meta.url), 'utf8');
+  assert.match(route, /restorePlan\(\{[^}]*base: restoreBaseOf\(settings\)\(job\)/);
+  assert.match(route, /bulkRestorePlan\(\{[^}]*baseOf: restoreBaseOf\(settings\)/);
+  // v2.874(B4-01): 검증 회차가 판정을 여러 번(planOf) 하게 되어 baseOf 를 한 번 만들어 넘긴다
+  assert.match(fs.readFileSync(new URL('../src/bareos/rehearsal.js', import.meta.url), 'utf8'), /const baseOf = \(job\) => \{ const site[\s\S]{0,1200}bulkRestorePlan\(\{[\s\S]{0,600}reservedNames: reserved, baseOf,/);
+});

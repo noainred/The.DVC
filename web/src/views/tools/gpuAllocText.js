@@ -18,7 +18,7 @@ export const UNPLACED_TEXT = Object.freeze({
   'no-placement': 'GPU 배치 정보 없음(수집기 갱신 전)',
   'not-listed': '켜져 있으나 어느 GPU 목록에도 없음',
 });
-export const SORT_KEYS = Object.freeze(['name', 'cap', 'alloc', 'spare', 'pct', 'off']);
+export const SORT_KEYS = Object.freeze(['name', 'cap', 'alloc', 'spare', 'pct', 'off', 'cores', 'cpuPct', 'memGB', 'memPct']);
 
 export function numText(v) {
   const n = numOrNull(v);
@@ -37,7 +37,9 @@ export function totalsNote(t) {
   if (t.allocUnknown) { notes.push(`할당 모르는 VM ${t.allocUnknown}`); tone = 'warn'; }
   if (t.capUnknown) { notes.push(`용량 모르는 GPU ${t.capUnknown}`); tone = 'warn'; }
   if (t.noPlacement) notes.push(`배치 정보 없는 GPU ${t.noPlacement}`);
+  if (t.offUnknown) notes.push(`꺼진 VM 용량 모름 ${t.offUnknown}대`);   // v2.870 감사 A4-01: 꺼진 VM 합에서 빠진 수(엑셀 totalsCells 와 같은 말)
   if (t.unplaced) notes.push(`미배치 VM ${t.unplaced}`);
+  if (t.hostUseUnknown && t.hosts > 1) notes.push(`CPU·메모리 사용률 ${t.hostUseUnknown}대 제외`);   // v2.868: 끊김·못 읽음 — 읽은 호스트 기준
   if (!notes.length && t.vmsOn === 0 && t.gpus > 0) { notes.push('할당 VM 없음 — 전부 예비'); tone = 'free'; }
   if (!t.gpus && t.vsga) notes.push('vSGA 만 — 할당형 GPU 없음(합계 제외)');
   return { note: notes.join(' · '), tone };
@@ -62,10 +64,17 @@ const keyVal = (x, key) => {
   if (key === 'name') return x.name || '';
   const t = x.totals || x;
   if (key === 'cap') return numOrNull(t.capGB);
-  if (key === 'alloc') return numOrNull(t.allocGB ?? x.gb);
+  // v2.871(버그 점검): VM 행은 켜진 VM 만 할당 칸에, 꺼진 VM 만 '꺼진 VM GB' 칸에 값이 보인다 — 정렬도 보이는 값으로(예전에는 꺼진 VM 을
+  //   보이지 않는 할당 값으로 정렬하고, 꺼진 VM GB 정렬은 값이 늘 비어 움직이지 않았다).
+  if (key === 'alloc') return numOrNull(x.totals ? t.allocGB : x.powerState && x.powerState !== 'POWERED_ON' ? null : (t.allocGB ?? x.gb));
   if (key === 'spare') return numOrNull(t.spareGB);
   if (key === 'pct') return numOrNull(t.allocPct ?? (x.allocGB != null && x.capGB ? Math.round((x.allocGB / x.capGB) * 100) : null));
-  if (key === 'off') return numOrNull(t.offGB);
+  if (key === 'off') return numOrNull(x.totals ? t.offGB : x.powerState && x.powerState !== 'POWERED_ON' ? x.gb : null);
+  // v2.868: CPU/메모리 — 법인~호스트는 합계, VM 은 그 VM(res)
+  if (key === 'cores') return numOrNull(x.totals ? t.hostCores : x.res?.vcpu);
+  if (key === 'cpuPct') return numOrNull(x.totals ? t.hostCpuPct : x.res?.cpuPct);
+  if (key === 'memGB') return numOrNull(x.totals ? t.hostMemGB : x.res?.memGB);
+  if (key === 'memPct') return numOrNull(x.totals ? t.hostMemPct : x.res?.memPct);
   return null;
 };
 /** 형제 정렬 — 값이 없으면 방향과 무관하게 뒤. sort 가 없으면 원래 순서(서버가 이름순). */
@@ -83,6 +92,8 @@ export function sortSiblings(list, sort) {
 }
 
 const lc = (s) => String(s || '').toLowerCase();
+/** v2.868: CPU/메모리 칸 — 법인~호스트 행은 호스트 합(코어·GB, 사용률은 MHz·MB 가중), VM 행은 그 VM. GPU·묶음 행은 빈 칸. */
+const resCells = (cores, cpuPct, memGB, memPct) => ({ cores: cores ?? null, cpuPct: cpuPct ?? null, memGB: memGB ?? null, memPct: memPct ?? null });
 
 /** v2.853: 법인 칩 선택(빈 Set·null = 전체)으로 vCenter 를 고른다. */
 export function pickVcenters(tree, vcSel) {
@@ -110,12 +121,40 @@ export function sumTotals(tree, vcSel) {
  * 상태 점은 호출부가 vcCardText.vcQuickDot 으로 칠한다(vCenter 화면과 같은 판정). 순서는 vCenter id 순.
  * @param {object[]} vcs /vcenters 응답(없거나 못 읽으면 계층의 법인만)
  */
+/**
+ * v2.871 감사 A4-02: 계층에 노드가 없는 법인이 'GPU 호스트 0대' 인지 '모름' 인지 — 서버 allocTree.js corpUnknownOf 와 같은 판정
+ *   (server/test/gpuAllocRoster2871 가 같은 입력으로 대조). 인벤토리 없이 status 만 있는 vCenter(첫 수집 전 · 보존 창을 넘긴 장애 ·
+ *   수집 꺼짐 · 점검 중)와 상한으로 잘린 계층은 모른다. stale(직전 인벤토리 보존)이면 노드가 없는 것은 실제 0대.
+ * @returns {''|'pending'|'unreachable'|'disabled'|'maintenance'|'truncated'}
+ */
+export const CORP_INV_EMPTY = Object.freeze(['pending', 'unreachable', 'disabled', 'maintenance']);
+export function corpUnknownOf(meta, hasNode, truncated = 0) {
+  if (hasNode) return '';
+  const st = typeof meta?.status === 'string' ? meta.status : '';
+  if (!meta?.stale && CORP_INV_EMPTY.includes(st)) return st;
+  return truncated > 0 ? 'truncated' : '';
+}
+export const CORP_UNKNOWN_TEXT = Object.freeze({
+  pending: '수집 전', unreachable: '접속 불가', disabled: '수집 꺼짐', maintenance: '점검 중', truncated: '상한으로 잘림',
+});
+
+/** 칩 글자(제목 · 개수) — 모르면 0 이 아니라 '—'(v2.871 A4-02). */
+export function corpChipText(c) {
+  if (c?.unknown) return { count: '—', title: `GPU 호스트 수 모름(${CORP_UNKNOWN_TEXT[c.unknown] || '모름'} — 0 이 아님)` };
+  return { count: String(c?.hosts ?? 0), title: `GPU 호스트 ${c?.hosts ?? 0}대 · GPU ${c?.gpus ?? 0}장` };
+}
+
 export function corpChips(tree, vcs) {
   const byId = new Map((tree?.vcenters || []).map((vc) => [vc.id, vc]));
   const list = Array.isArray(vcs) && vcs.length ? vcs.map((v) => ({ id: String(v.id), name: v.name || String(v.id), site: v })) : [...byId.values()].map((vc) => ({ id: vc.id, name: vc.name, site: null }));
   for (const vc of byId.values()) if (!list.some((x) => x.id === vc.id)) list.push({ id: vc.id, name: vc.name, site: null });
-  return list.map((x) => ({ ...x, hosts: byId.get(x.id)?.totals?.hosts || 0, gpus: byId.get(x.id)?.totals?.gpus || 0 }))
-    .sort((a, b) => a.id.localeCompare(b.id));
+  const truncated = Number(tree?.truncated) || 0;
+  return list.map((x) => {
+    const node = byId.get(x.id);
+    const unknown = corpUnknownOf(x.site, !!node, truncated);
+    // 모르면 hosts·gpus 는 null(0 이 아니다 — 소비처는 corpChipText 로 글자를 만든다)
+    return { ...x, unknown, hosts: unknown ? null : node?.totals?.hosts || 0, gpus: unknown ? null : node?.totals?.gpus || 0 };
+  }).sort((a, b) => a.id.localeCompare(b.id));
 }
 /** 찾기 — 호스트 이름 또는 그 호스트의 VM 이름이 맞으면 그 호스트를 남긴다. */
 function hostMatches(h, q) {
@@ -135,13 +174,15 @@ export function flattenAlloc(tree, { open = new Set(), sort = null, query = '', 
   const agg = (id, depth, kind, name, sub, prof, t, hasKids) => {
     const n = totalsNote(t);
     rows.push({ id, depth, kind, name, sub, prof, cap: t.capGB, alloc: t.allocGB, spare: t.spareGB, pct: t.allocPct, off: t.offGB || null,
-      vms: `${t.vmsOn} / ${t.vmsOff}`, note: n.note, tone: n.tone, hasKids, isOpen: hasKids && isOpen(id) });
+      vms: `${t.vmsOn} / ${t.vmsOff}`, note: n.note, tone: n.tone, hasKids, isOpen: hasKids && isOpen(id),
+      ...resCells(t.hostCores, t.hostCpuPct, t.hostMemGB, t.hostMemPct), gvmVcpu: t.vmVcpu ?? null, gvmMemGB: t.vmMemGB ?? null });
   };
   const vmRow = (id, depth, v, { on = true, note = '', tone = '' } = {}) => rows.push({
     id, depth, kind: 'vm', name: v.name, sub: '', prof: v.mode === 'passthrough' ? '패스스루 1장' : v.profile || (v.passthroughDevices ? `패스스루 ${v.passthroughDevices}장` : ''),
     cap: null, alloc: on ? v.gb : null, spare: null, pct: null, off: on ? null : v.gb, vms: on ? '켜짐' : '꺼짐',
     note: note || (on && v.gb == null ? '프로파일 해석 불가 — 0 으로 넣지 않음' : on && v.gbEstimated ? 'GB 는 모델명 추정' : ''),
     tone: tone || (on && v.gb == null ? 'warn' : ''), hasKids: false, isOpen: false,
+    ...resCells(v.res?.vcpu, v.res?.cpuPct, v.res?.memGB, v.res?.memPct), gvmVcpu: null, gvmMemGB: null,
   });
   for (const vc of sortSiblings(pickVcenters(tree, vcSel), sort)) {
     // v2.853: 찾기 글자가 법인(vCenter) id·이름에 맞으면 그 법인을 통째로 보인다(바로가기 찾기 상자와 같은 뜻).
@@ -171,7 +212,7 @@ export function flattenAlloc(tree, { open = new Set(), sort = null, query = '', 
             const pct = g.allocGB != null && g.capGB ? Math.round((g.allocGB / g.capGB) * 100) : null;
             rows.push({ id: gid, depth: 4, kind: g.mode === 'passthrough' ? 'pt' : g.mode === 'vsga' ? 'vsga' : 'gpu', name: `GPU #${g.idx} · ${g.model}`, sub: '',
               prof: tx.prof, cap: g.capGB, alloc: g.allocGB, spare: g.spareGB, pct, off: null,
-              vms: g.mode === 'vsga' ? '' : `${g.vms.length} / 0`, note: tx.note + (g.capBasis === 'model' ? ' · GB 는 모델명 추정' : ''), tone: tx.tone,
+              vms: g.mode === 'vsga' ? '' : !g.placement ? '—' : `${g.vms.length} / 0`, note: tx.note + (g.capBasis === 'model' ? ' · GB 는 모델명 추정' : ''), tone: tx.tone,
               hasKids: g.vms.length > 0, isOpen: g.vms.length > 0 && isOpen(gid) });
             if (g.vms.length && isOpen(gid)) for (const v of sortSiblings(g.vms, sort)) vmRow(`m:${gid}|${v.id}`, 5, v);
           }
@@ -222,10 +263,24 @@ export const EXPORT_SHEETS = Object.freeze([
   { key: 'tree', label: '계층 표', sub: '읽기용 — 들여쓰기 · 행 그룹 · 단계 색' },
   { key: 'flat', label: '평면 표', sub: '필터·피벗용 — GPU·VM 한 줄마다 계층 열을 모두 채움' },
   { key: 'info', label: '안내', sub: '용어 · 기준 · 빈 칸의 뜻' },
+  // v2.869(승인 시안 docs/design/gpu-alloc-corp-sheets): 기본 켬 — 끄면 지금까지와 같은 3시트 파일
+  { key: 'corp', label: '법인별 시트', sub: '법인(vCenter)마다 계층 표를 시트 한 장으로 + 목차 시트' },
 ]);
 /**
+ * v2.869: 내보내기 창의 법인 선택 → 쿼리의 vcSel. 창은 '모든 법인' 으로 시작한다(sel = null — 사용자 지시 "기본적으로 모든 vcenter 를 선택").
+ * 모든 칩을 골랐으면 null(= 범위 전부 — 서버가 조회 범위로 자른다), 아니면 고른 집합. 빈 집합은 '고른 법인 없음' 이라 내려받기를 잠근다(호출 쪽).
+ */
+export function exportPick(sel, chips) {
+  if (sel == null) return null;
+  const ids = (chips || []).map((c) => c.id);
+  if (ids.length && ids.every((id) => sel.has(id))) return null;
+  return sel;
+}
+/** v2.869: 창의 파일 이름 — 서버 export-meta 가 준 이름(법인별 시트가 들어가면 _percorp 판)을 고른다. 지어내지 않는다. */
+export const exportFileName = (meta, depth, percorp) => (percorp ? meta?.fileNamesPercorp?.[depth] : meta?.fileNames?.[depth]) || '';
+/**
  * 내보내기·창 미리보기의 쿼리 — 화면 범위(scope · 고른 법인)를 그대로 싣는다. 단계는 VM 까지(기본)면 싣지 않고,
- * 시트는 셋 다(기본)면 싣지 않는다(서버 allocExportOpts 의 기본과 같다).
+ * 시트는 넷 다(기본 — v2.869 법인별 시트 포함)면 싣지 않는다(서버 allocExportOpts 의 기본과 같다).
  * @returns {string} '' 또는 '?…'
  */
 export function allocExportQuery({ scope = '', vcSel = null, depth = 'vm', sheets = null } = {}) {

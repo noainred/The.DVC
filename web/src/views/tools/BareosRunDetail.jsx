@@ -16,7 +16,7 @@ import {
   parseJobReport, parseJobDetail, jobTimeline, decBytesText, durKo, withRelayWait,
 } from './bareosText.js';
 import {
-  rateText, sizeText, elapsedText, levelWord, triggerText, reasonText, REASON_HINT, STUCK_TEXT, liveCodeText,
+  rateText, sizeText, elapsedText, levelWord, triggerText, reasonText, REASON_HINT, STUCK_TEXT, fdLineOf, fdProgressMeta,
   progressBasis, etaSec, runPhase, futurePhases,
 } from './bareosLiveText.js';
 
@@ -113,7 +113,7 @@ export default function BareosRunDetail({ row, live = null, dir = null, limits =
     <div style={{ ...ROW, marginBottom: 10 }}>
       <b style={{ fontSize: 13.5 }}>jobid {row.jobid} · {row.vmName} 상세</b>
       <span className="muted" style={{ fontSize: 12 }}>
-        {running ? (row.bytes !== null && row.bytes !== undefined ? `FD 진행 보고 ${live?.at ? shortTs(live.at) : '—'}` : live?.ok ? 'FD 진행 보고 없음' : `FD 상태 ${live ? liveCodeText(live.code) : '조회 전'}`) : `Director 상태 조회 ${live?.at ? shortTs(live.at) : '—'}`}
+        {running ? fdLineOf(row, live, shortTs).text : `Director 상태 조회 ${live?.at ? shortTs(live.at) : '—'}`}
         {r?.readAt ? ` · 로그 ${shortTs(r.readAt)} 읽음` : ''} · 시각은 Director 현지 시각
       </span>
       <span style={{ flex: '1 1 0' }} />
@@ -148,8 +148,9 @@ export default function BareosRunDetail({ row, live = null, dir = null, limits =
   const eta = etaSec(row, pb);
   const ended = !!rep?.found;
   const phase = runPhase(tl?.steps, ended);
-  const bytesKnown = row.bytes !== null && row.bytes !== undefined;
-  const fdMissing = !bytesKnown && !!live?.ok;
+  const fdl = fdLineOf(row, live, shortTs);   // v2.870: 그 잡의 FD 답으로(법인 단위 live.ok 가 아니라)
+  const bytesKnown = fdl.known;
+  const fdMissing = fdl.missing;
   const vols = detail?.volumes || [];
   const ratio = Number.isFinite(row.rateNow) && Number.isFinite(row.baseline) && row.baseline > 0 ? Math.round((row.rateNow / row.baseline) * 100) : null;
   const judge = row.stuck ? { tone: 'warn', text: `멈춤 의심 — ${STUCK_TEXT[row.stuck] || ''}` }
@@ -181,8 +182,8 @@ export default function BareosRunDetail({ row, live = null, dir = null, limits =
         </>} />
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 150px), 1fr))', gap: 8, marginTop: 12 }}>
-        <Card label="진행량(FD 보고)" value={bytesKnown ? sizeText(row.bytes) : (live?.ok ? '보고 없음' : '모름')}
-          meta={bytesKnown ? `${Number.isFinite(row.files) ? `파일 ${row.files}개 · ` : ''}FD 가 보고한 바이트` : fdMissing ? 'FD 가 이 잡의 진행을 보고하지 않음' : 'FD 상태를 읽지 못함'} />
+        <Card label="진행량(FD 보고)" value={bytesKnown ? sizeText(row.bytes) : (fdMissing ? '보고 없음' : '모름')}
+          meta={fdProgressMeta(row, live, fdl)} />
         <Card label={<>진척<Est /></>} value={pb.pct !== null ? `${pb.pct} %` : '—'} meta={pb.over ? `${pb.label} — 기준을 넘음` : pb.label} />
         <Card label="속도" value={rateText(row.rateNow)}
           meta={[Number.isFinite(row.rateAvg) ? `평균 ${rateText(row.rateAvg)}` : '', Number.isFinite(row.baseline) ? `지난 실행 평균 ${rateText(row.baseline)}` : ''].filter(Boolean).join(' · ') || '지금(최근) 속도'} />
@@ -211,7 +212,7 @@ export default function BareosRunDetail({ row, live = null, dir = null, limits =
         <Chip tone={bytesKnown ? 'ok' : fdMissing ? 'warn' : 'na'}>{bytesKnown ? `FD 진행 보고 ${live?.at ? shortTs(live.at) : ''}` : fdMissing ? 'FD 진행 보고 없음' : 'FD 상태 모름'}</Chip>
         <Chip tone={judge.tone}>{judge.text}</Chip>
         <Chip tone="na">SD 종료 — 끝나면</Chip>
-        {fdMissing && diagAvailable && onDiag && <button type="button" className="logout-btn" style={BTN} onClick={onDiag}>진단 원문</button>}
+        {(fdMissing || (row.fd && !row.fd.ok)) && diagAvailable && onDiag && <button type="button" className="logout-btn" style={BTN} onClick={onDiag}>진단 원문</button>}
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 380px), 1fr))', gap: 12, marginTop: 14 }}>

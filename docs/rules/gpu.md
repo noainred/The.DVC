@@ -13,6 +13,7 @@
 - (원래 4648행) GPU 메모리·온도·동작(v2.650) — 사용률·메모리 점유·온도는 서로 다른 것을 잰다. 온도는 판정에 쓰지 않는다
 - (원래 4665행) GPU 표 시안 A(v2.653) — 빈 칸은 이유를 말하고, 게스트 값이 없으면 ESXi 카운터로 채우되 출처를 밝힌다
 - v2.852 GPU 할당 계층 — 법인 › 데이터센터 › 클러스터 › 호스트 › GPU › VM 의 할당·예비(화면·CSV·엑셀)
+- v2.873 Bareos 백업 대상 GPU 표지 — 켜진 vGPU·PCI 패스스루 VM 은 스냅샷 불가(판정 `vmGpuMark` 하나)
 
 ## 본문
 
@@ -103,5 +104,42 @@
     (경로 첫 세그먼트 = 도구 키 규약 — 옛 `/tools/gpu/alloc*` 는 지웠다: 남기면 'GPU 인벤토리' 권한만으로 열려 gpu-alloc 거부가 집행되지 않는다) ·
     `auth/toolAccess.js` 매핑 · `toolcats/catalog.js` PRESET(서버·가상화) · `SpecialTools.jsx` 는 scope 콤보 없이(법인은 화면 안 칩).
     GPU 인벤토리의 옛 해시 `#/tools/gpu/alloc` 는 새 도구로 넘기고, 바로가기 단추는 `toolAllowed('gpu-alloc')` 일 때만 보인다.
+  - **v2.868 호스트·VM CPU/메모리**(사용자 요청 '호스트의 CPU/Memory 와 VM 의 CPU/Memory 도 포함'): 스냅샷 값만(`allocTree.hostResOf`·`vmResOf` — 새 수집 없음).
+    호스트 = 코어 · 메모리 GB · 사용률(끊긴 호스트는 null) · VM = vCPU · 메모리 GB · 사용률(꺼진 VM 은 null — 수집기가 0 을 싣는다).
+    합계: 코어·메모리 **합** 은 모르는 호스트가 섞이면 null(부분 합 금지) · **사용률** 은 비율이라 읽은 호스트의 MHz·MB 합으로 내고 뺀 대수(`hostUseUnknown`)를
+    비고에 적는다(한 대가 끊겼다고 법인 사용률을 지우지 않는다 — 처음 판은 null 로 지워 목 데이터 법인 행이 비었다) · 켜진 GPU VM 의 vCPU·메모리 합(`vmVcpu`·`vmMemGB`).
+    엑셀 계층 표는 열이 6개 늘어 비고가 17번째 열이다(`treeLines` cells 17개 — 테스트가 고정).
+  - **v2.869 법인별 시트 · 창은 모든 법인으로 시작**(사용자 요청 '전체 vCenter 한 시트는 유지하면서 1개 vCenter 를 1개 시트에' · '기본적으로 모든 vcenter 를 선택' —
+    승인 시안 `docs/design/gpu-alloc-corp-sheets/`): 시트 키 `corp`(기본 켬 — `ALLOC_SHEET_KEYS` 넷) = **'목차'** + GPU 호스트가 있는 법인마다 계층 표 한 장.
+    법인 시트는 전체 계층 표와 **같은 함수**(`addTreeSheet`)에 `{ totals: vc.totals, vcenters: [vc] }` 를 준 것 — 값을 새로 내지 않는다. 목차는 범위 안 법인 **전부**
+    (`allocTree.allocCorpRoster` — 계층과 같은 범위 판정 `scopeTest` · GPU 없는 법인은 '시트 없음' · 용량 빈 칸). 시트 이름 `corpSheetNames`(31자 · 금지 문자 · 끝 `-.` ·
+    고정 시트·대소문자 겹침은 `~2` — `hostExport.hostSheetNames` 와 같은 규칙) · 링크는 `util/xlsxInternalLink.js`(location 만 — 외부 관계 없음, 테스트가 XML 을 본다) ·
+    '← 목차' 는 제목이 끝나는 칸 뒤(`backLinkCol` — 값이 있는 칸은 제목 넘침을 자른다) · 탭 색 목차 회색 · 법인 파랑 · 할당률 90% 이상 주황 · 법인 시트 상한 100(`CORP_SHEETS_MAX`).
+    파일 이름 `_percorp`(`allocFileName` 다섯째 인자) · `export-meta` 가 `corpSheets`·`fileNamesPercorp` 를 같은 함수로 준다.
+    창(`GpuAllocExportModal`)은 화면 칩 선택과 무관하게 **모든 법인(sel = null)** 으로 시작 · 칩으로 줄임 · '화면 선택대로' · 빈 선택은 내려받기 잠금(빈 `vcenterIds` 는 '전체' 로 읽히므로 보내지 않는다) ·
+    전부 고르면 `vcenterIds` 를 싣지 않는다(`gpuAllocText.exportPick`). 옛 화면이 `sheets=tree,flat,info` 를 보내면 지금처럼 3시트다.
+    실측(합성 28법인 × GPU 호스트 10대 · GPU 560장, 같은 프로세스): 3시트 0.64~0.86초 · 215KB → 법인별 포함 1.1~1.2초 · 373KB. 목 서버 첫 요청 두 번이 5.6~5.8초였는데 원인은 가리지 못했다(이후 0.17~0.53초).
+  - **v2.871 버그 점검(사용자 요청 '버그 찾아서 개선' — GPU 할당율 전체, 메인 직접 점검)** 확정 3건:
+    ① **GPU 아닌 패스스루를 GPU 로 셈** — `parseVmGpu` 는 VM 의 `VirtualPCIPassthrough` 장치를 전부 센다(NIC · HBA DirectPath 포함). 호스트 패스스루 GPU 목록은
+    PCI 디스플레이 클래스(0x03)만이라, NIC 를 받은 VM 이 'GPU VM' 이 되고 GB 를 몰라(allocUnknown) 호스트~법인 **예비·할당률이 통째로 비었다**.
+    `buildHostAlloc devOf`: 호스트 패스스루 GPU 가 모두 pciId 를 갖고 VM 장치 주소를 모두 읽었을 때만 주소로 가른다(맞는 것만 GPU · 대소문자 무시) —
+    GPU 장치가 0 이면 계층에서 뺀다. 하나라도 모르면(구버전 수집기 · 꺼진 VM 동적 DirectPath) 예전처럼 전부 GPU(지어내지 않는다).
+    ⚠ 근원(`parseVmGpu` 가 장치 종류를 가리지 않음)은 GPU 인벤토리(`gpu` 도구)에도 같은 영향이 있을 수 있다 — 이번 범위 밖(별건, 확인 안 함).
+    ② **범위 글자** — 고른 법인을 계층(GPU 있는 법인)으로만 세어 GPU 없는 법인만 고르면 '조회 범위 안에 없음' 이라고 거짓으로 적고 파일 이름도 덜 셌다 →
+    `allocScopeOf`(범위 안에서 고른 법인 = `allocCorpRoster` id · 5곳 이상이면 '외 N곳' — 창이 '모든 법인' 에서 한 곳만 빼도 제목이 끝없이 길어지지 않게).
+    ③ **VM 행 정렬** — 꺼진 VM 을 보이지 않는 할당 값으로 정렬하고 '꺼진 VM GB' 정렬은 값이 늘 비어 움직이지 않았다 → 보이는 칸의 값으로(`keyVal`).
+    정정: 처음에 '꺼진 VM GB 부분 합' 도 결함으로 보고 null 로 바꿨으나, main 의 v2.870 감사 A4-01 이 이미 '합 + 빠진 대수 비고' 로 다뤘고 이 모듈의
+    할당 GB 도 같은 규칙(합 + '할당 모르는 VM N')이라 철회했다(넣었으면 할당과 꺼진 VM 의 규칙이 어긋난다).
+    회귀: server `gpuAllocTree2852` v2.871 2건(변이: 주소 판정 끄기 · 대소문자 무시 끄기 둘 다 실패) · web `gpuAllocText` 1건(수정 전 판으로 실패 확인).
   - ⚠ 정직 기록: `HostGraphicsInfo.vm` 이 꺼진 VM 을 싣는지, 이 현장 vCenter 가 동적 DirectPath `assignedId` 를 주는지는 실장비로 확인하지 못했다
     (꺼진 VM 은 목록에 있어도 할당에 넣지 않으므로 결과는 같다). 한 VM 의 vGPU 장치 둘이 한 GPU 목록에 한 번만 오면 GPU 단위 할당이 한 장치분으로 적게 잡힌다(호스트 합은 정확).
+
+- ⚠ **v2.873 Bareos 백업 대상 GPU 표지 — 판정은 `gpu/vgpuProfile.js vmGpuMark` 하나**(사용자 요청 'GPU VM 백업 대상 화면에 표지 추가' ·
+  `routes/api/bareosBackup.js` viewJob · vm-candidates 의 `gpuDev` · 웹 `bareosText.gpuChip`. 회귀 `server/test/bareosGpuMark2873.test.js` + 웹 `bareosGpuChip2873.test.js`):
+  VMware 는 vGPU·PCI 패스스루 장치가 있는 **켜진** VM 의 스냅샷을 지원하지 않는다(Broadcom KB 394566 — 검색 요약 기준, 원문은 세션 네트워크 정책으로 열지 못했다).
+  대상 표 VM 칸 칩 · 등록 후보 칩 · 상세 패널 안내 한 줄(패널 머리 줄에는 칩을 두지 않는다). 웹은 서버 수를 글자로만 바꾼다(장치 판정 복제 금지).
+  - **null = 모름 또는 없음** — 수집기는 GPU 호스트 위 VM 만 장치를 읽으므로(soapClient `gpuHostRefs`) GPU 없는 호스트의 NIC 패스스루 VM 은 표지가 없다. '장치 없음' 이라고 단정하는 문구를 쓰지 말 것.
+  - 패스스루 수는 NIC·HBA DirectPath 도 센다(v2.871 ①) — 스냅샷 제약은 같으므로 백업 표지에는 맞는 값이다. 이름표는 'PCI 패스스루'(GPU 라고 단정하지 않는다).
+  - 엣지 push 의 수는 중앙에서 좁혀지지 않으므로(sanitizeVmGpuField 는 pciIds 만) 정수 0~64 로 자르고, 프로파일은 이름 글자 64자만. 목록 응답 캐시(memoJson)는 스냅샷 세대로 무효화된다.
+  - ⚠ 정직 기록: 메모리 없는 스냅샷(Bareos 플러그인 방식)이면 최신 vSphere 에서 vGPU VM 도 되는지는 확인하지 못했다 — 문구는 '실패할 수 있습니다' 이고 확인 방법(수동 스냅샷)을 적었다.
+  - ✅ 정정(v2.882.1): 여기 '남긴 것' 으로 적었던 '1440 상세 패널 머리 줄이 GPU 칩 없이도 닫기를 둘째 줄로 내린다'(변경 전부터 — A/B)는 v2.882.1 에 고쳤다(머리 줄 구조 — `docs/rules/web.md` v2.860 ⑧ · `bareosPanelHead2882.test.js`). GPU 칩은 여전히 머리 줄에 두지 않는다.

@@ -191,7 +191,7 @@ test('③ 실행 — OTP 미등록 403 · 조회 밖 404 · 쓰기 밖 403 · �
   assert.match(r.j.batchId, /^rb-/);
   const cmds = D.cmds.slice(before).filter((c) => c.startsWith('restore '));
   assert.equal(cmds.length, 2);
-  assert.match(cmds[0], new RegExp(`jobid=${H('web', 100)},${H('web', 110)},${H('web', 130)} restorejob=PortalVmwareRestore pluginoptions="python3:vmname=web-01-r:restore_powerstate=off:restore_datastore=ds-a1" all done yes$`));
+  assert.match(cmds[0], new RegExp(`jobid=${H('web', 100)},${H('web', 110)},${H('web', 130)} restorejob=PortalVmwareRestore pluginoptions="\\\\"python3:vcserver=vc-a.corp:dc=DC-A:folder=/web:vmname=web-01-r:config_file=/etc/bareos/vmware/vc-a.ini:restore_powerstate=off:restore_datastore=ds-a1\\\\"" all done yes$`));   // v2.874 B1-01
   assert.ok(cmds.every((c) => !/\bselect\b/.test(c)));
   const wr = job('web').restores[0];
   assert.deepEqual([wr.batchId, wr.nic, wr.mode, wr.target.name], [r.j.batchId, 'disconnect', 'newVm', 'web-01-r']);
@@ -235,7 +235,7 @@ test('⑤ v2.862 복원 검증 · 일일 요약 — 전체 범위 · OTP · 입�
   assert.equal(r.s, 202, r.t);
   assert.equal(r.j.started, 1);
   const cmd = D.cmds.slice(before).find((c) => c.startsWith('restore '));
-  assert.match(cmd, /pluginoptions="python3:vmname=web-01-verify-\d{8}:restore_powerstate=off"/, '새 VM · 꺼진 채 · 날짜 이름');
+  assert.match(cmd, /pluginoptions="\\"python3:vcserver=vc-a\.corp:dc=DC-A:folder=\/web:vmname=web-01-verify-\d{8}:config_file=\/etc\/bareos\/vmware\/vc-a\.ini:restore_powerstate=off\\""/, '새 VM · 꺼진 채 · 날짜 이름');
   const rr = job('web').restores[0];
   assert.deepEqual([rr.verify, rr.nic, rr.mode, !!rr.rehearsal], [true, 'disconnect', 'newVm', true]);
   // 복원이 끝나면 bareos-verify(데모 경로) — 결과가 원장 finish 에
@@ -255,10 +255,48 @@ test('⑤ v2.862 복원 검증 · 일일 요약 — 전체 범위 · OTP · 입�
   assert.equal(g.j.policy.savedBy, '');
   assert.ok(g.j.runs.every((x) => (x.items || []).every((it) => it.jobId !== ID.db)));
   assert.match((await call('admin', 'GET', '/rehearsal')).t, /ds-secret-warsaw/, '전체 범위 관리자는 본다');
+  // v2.863 정책 화면의 vCenter 별 데이터스토어 칸 — 활성 대상이 있는 vCenter 목록(전체 범위만 · 범위 계정에는 없다)
+  const gv = (await call('admin', 'GET', '/rehearsal')).j.vcenters;
+  assert.ok(Array.isArray(gv) && gv.some((v) => v.id === 'vc-a' && v.jobs >= 1), JSON.stringify(gv));
+  assert.equal(g.j.vcenters, undefined, '범위 계정에는 vCenter 목록을 싣지 않는다(정책 편집은 전체 범위 전용)');
   assert.equal(g.j.results[0].jobId, ID.web);
   // 일일 요약: 범위 계정 403 · 틀린 시각 400 · 저장
   assert.equal((await call('sadm', 'GET', '/digest')).s, 403);
   assert.equal((await call('admin', 'PUT', '/digest', { time: '8:3' })).s, 400);
   r = await call('admin', 'PUT', '/digest', { enabled: true, time: '08:31' });
   assert.deepEqual([r.s, r.j.config.time], [200, '08:31']);
+  // v2.870 감사 A3-03: '지금 보내 보기' 도 쓰기 범위 무제한만 — 거부 사유가 fullWriteOnly 의 것인지(다른 게이트의 403 으로 통과하지 않게 · audits.md 교훈)
+  const ws = await call('wadm', 'POST', '/digest/send', {});
+  assert.equal(ws.s, 403, ws.t);
+  assert.match(ws.j.reason, /쓰기 범위\(수정 가능 vCenter\)가 지정되지 않은 계정만/);
+});
+
+test('⑥ v2.866 복원 › 폴더 표 — 목록에 전원 · 용량 · 마지막 성공 · 폴더 VM 수는 조회 범위 안 vCenter 만', async () => {
+  const { lastOkOf, restoreFolderCounts } = await import('../src/routes/api/bareosBackup.js');
+  // 마지막 성공: 성공 · 경고만 · 가장 늦은 끝(없으면 시작) · 없으면 null(포탈 기록에 없음)
+  assert.deepEqual(lastOkOf({ jobid: 5, state: 'error', level: 'I', endedAt: 900 }, [{ jobid: 3, state: 'ok', level: 'F', endedAt: 500 }, { jobid: 4, state: 'warning', level: 'I', startedAt: 700 }]), { at: 700, level: 'I', jobid: 4 });
+  assert.equal(lastOkOf(null, []), null);
+  assert.equal(lastOkOf({ state: 'ok', endedAt: 0 }, null), null, '시각을 모르는 성공은 시각을 지어내지 않는다');
+  // 폴더 VM 수: 대상이 있는 vCenter 만 · 템플릿 제외
+  const cnt = restoreFolderCounts([{ vcenterId: 'vc-a' }], [
+    { vcenterId: 'vc-a', vcDcPath: 'DC', folderPath: '/x' }, { vcenterId: 'vc-a', vcDcPath: 'DC', folderPath: '/x' },
+    { vcenterId: 'vc-a', vcDcPath: 'DC', folderPath: '/x', template: true }, { vcenterId: 'vc-z', vcDcPath: 'DC', folderPath: '/x' },
+  ]);
+  assert.deepEqual(cnt, [{ vcenterId: 'vc-a', dc: 'DC', folder: '/x', vms: 2 }]);
+  // 목록: finishedRuns 원문은 싣지 않고 lastOk 만 · 전원 · 용량(인벤토리)
+  const list = await call('admin', 'GET', '');
+  assert.equal(list.s, 200, list.t);
+  const web = list.j.jobs.find((j) => j.id === ID.web);
+  assert.deepEqual([web.powerState, web.storageGB], ['POWERED_ON', 200]);
+  assert.ok('lastOk' in web);
+  assert.ok(list.j.jobs.every((j) => !('finishedRuns' in j)));
+  // 폴더 수: 전체 범위는 두 vCenter · 범위 계정은 자기 vCenter 만(다른 vCenter 의 이름 · 폴더를 싣지 않는다)
+  const a = await call('admin', 'GET', '/restore-folders');
+  assert.equal(a.s, 200, a.t);
+  assert.deepEqual(a.j.folders.map((f) => `${f.vcenterId}${f.folder}:${f.vms}`).sort(), ['vc-a/app:1', 'vc-a/web:1', 'vc-b/:1']);
+  assert.equal(a.j.vcNames['vc-b'], 'Warsaw');
+  const s = await call('sadm', 'GET', '/restore-folders');
+  assert.equal(s.s, 200, s.t);
+  assert.ok(s.j.folders.every((f) => f.vcenterId === 'vc-a'));
+  assert.doesNotMatch(s.t, /Warsaw|vc-b/);
 });

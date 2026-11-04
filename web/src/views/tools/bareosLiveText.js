@@ -37,8 +37,36 @@ const LIVE_CODE_TEXT = {
   timeout: '시한 초과(응답 느림)', aborted: '시한 초과(응답 느림)', jsonrpc: 'Director 가 거부(콘솔 권한 · FD 이름 확인)',
   'auth-stopped': '인증 실패로 주기 조회 정지', auth: '인증 실패', connect: '접속 실패', tls: 'TLS 협상 실패', 'not-configured': 'Director 접속값 없음',
   'no-client': '법인 FD 미설정', 'edge-relay': '엣지 대행 실패', unknown: '결과 모름(엣지 회신 없음)', skipped: '건너뜀',
+  'fd-connect': 'Director 가 FD 에 접속하지 못함', 'not-asked': '이번 조회에 이 FD 가 없음',   // v2.870
 };
+
+/**
+ * v2.870 실행 중 상세의 FD 한 줄 — 그 잡의 FD 답으로(row.fd · 서버 jobFdState). 구버전 서버(row.fd 없음)는 법인 단위 live 로.
+ *   '보고 없음' 에는 언제 · 어느 FD 에 물었는지를 붙인다(사용자 보고 — 오래된 조회인지 화면에서 알 수 없었다).
+ * @returns {{ known: boolean, missing: boolean, text: string }}  known = 진행량을 안다 · missing = FD 는 답했는데 이 잡이 없다
+ */
+export function fdLineOf(row, live, ts = (x) => String(x)) {
+  const known = row?.bytes !== null && row?.bytes !== undefined;
+  const fdOk = row?.fd ? !!row.fd.ok : !!live?.ok;
+  const at = live?.at ? ts(live.at) : '';
+  const who = row?.fd?.client ? ` · ${row.fd.client}` : '';
+  if (known) return { known, missing: false, text: `FD 진행 보고 ${at || '—'}${who}` };
+  if (fdOk) return { known, missing: true, text: `FD 진행 보고 없음${at ? ` · ${at} 조회` : ''}${who}` };
+  if (!live) return { known, missing: false, text: 'FD 상태 조회 전' };
+  return { known, missing: false, text: `FD 상태 ${liveCodeText(row?.fd ? row.fd.code : live.code)}${who}` };
+}
 export const liveCodeText = (code) => LIVE_CODE_TEXT[code] || '상태 조회 실패';
+/**
+ * v2.871 감사 A1-08: 실행 중 상세 '진행량' 카드의 아래 줄. 진행 조회가 아직 없으면(live null) 'FD 상태 조회 전' 만 —
+ *   예전에는 'FD 상태를 읽지 못함 — 조회 전' 으로 '실패' 와 '아직 묻지 않음' 을 한 줄에 함께 말했다.
+ * @param {object} fdl fdLineOf(row, live) 결과
+ */
+export function fdProgressMeta(row, live, fdl) {
+  if (fdl.known) return `${Number.isFinite(row?.files) ? `파일 ${row.files}개 · ` : ''}FD 가 보고한 바이트`;
+  if (fdl.missing) return 'FD 가 이 잡의 진행을 보고하지 않음';
+  if (!live) return fdl.text;
+  return `FD 상태를 읽지 못함 — ${fdl.text.replace(/^FD 상태 /, '')}`;
+}
 
 /**
  * 법인 카드의 표지 — 실행 없음 · 조회 전 · 조회 실패 · 느림 · 정상.
@@ -139,7 +167,7 @@ export const STATE_TEXT = Object.freeze({ running: '실행 중', queued: '대기
 /* ── v2.833.1 Director 상태 문구 · 멈춤 의심 ── */
 /** Director 상태 사유 키(서버 liveParse.dirReasonOf) → 우리말. */
 export const DIR_REASON_TEXT = Object.freeze({
-  running: '실행 중', mount: '마운트 대기', volume: '볼륨 대기', maxjobs: '동시 실행 상한', storage: '스토리지 대기', client: 'FD 대기',
+  running: '실행 중', canceling: '취소 처리 중', mount: '마운트 대기', volume: '볼륨 대기', maxjobs: '동시 실행 상한', storage: '스토리지 대기', client: 'FD 대기',
   priority: '우선순위 대기', starttime: '시작 시각 대기', created: '실행 대기', blocked: '막힘', done: '끝남(반영 전)', other: '기타', unknown: '사유 모름',
 });
 export const reasonText = (k) => DIR_REASON_TEXT[k] || DIR_REASON_TEXT.other;
@@ -261,4 +289,14 @@ export function runRowOf(j, idx, now = Date.now()) {
       bytes: null, files: null, rateNow: null, rateAvg: null, baseline: null, dirStatus: null, prev: null, sizeGb: null,
     },
   };
+}
+
+/**
+ * v2.866 진행 · 이력 — 아래 '카탈로그 최근 실행' 표의 대상이 위 실행 중 표에서 골라진(또는 기본으로 잡힌) 진행 중 VM 을 따라간다(사용자 요청).
+ *   사람이 대상을 직접 바꾸면(byHand) 따라가지 않는다 · 따라갈 VM 이 거르기(Director) 밖이면 바꾸지 않는다.
+ * @returns {string|null} 바꿀 대상 id — 그대로면 null
+ */
+export function historyFollowTarget({ byHand = false, pickedJobId = '', sel = '', ids = [] } = {}) {
+  if (byHand || !pickedJobId || pickedJobId === sel) return null;
+  return ids.includes(pickedJobId) ? pickedJobId : null;
 }

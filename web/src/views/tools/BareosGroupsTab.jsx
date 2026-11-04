@@ -22,7 +22,9 @@ import {
   KEEP_PRESETS, KEEP_DEFAULT, NEW_GROUP_KEEP, keepOtpReasons, keepText, stepKeep, keepMeaning, keepParts, fireKeepBadge, KEEP_BADGE_TEXT, untilText,
   memberResults, resultBadge, folderSummary, sizeSum, prunePreviewText, unscheduledAfter, unscheduledText, groupDeleteConfirmText,
 } from './bareosGroupText.js';
-import { groupPoolText, overlapLine, retentionText } from './bareosPolicyText.js';   // v2.840 카드 '적용 풀 · 보존' · 겹침
+import { groupPoolText, overlapLine, retentionText } from './bareosPolicyText.js';
+import { GroupCancelModal } from './BareosCancelModals.jsx';
+import { groupStopState, cancelAcceptedText, canceledText, progressSegments, PHASE_TEXT } from './bareosCancelText.js';   // v2.867 회차 중단   // v2.840 카드 '적용 풀 · 보존' · 겹침
 
 const BASE = '/tools/bareos-backup';
 const fin = (v) => typeof v === 'number' && Number.isFinite(v);
@@ -32,13 +34,13 @@ const enc = encodeURIComponent;
 const VC_KEY = 'bareos-groups-vc';
 const ROW = { display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8 };
 const BTN = { padding: '5px 12px', fontSize: 12.5 };
-const TONE = { ok: '#86efac', warn: '#fcd34d', bad: '#fca5a5', run: '#93c5fd', muted: 'var(--text-dim)' };
-const TONE_BG = { ok: 'rgba(34,197,94,.14)', warn: 'rgba(245,158,11,.14)', bad: 'rgba(239,68,68,.14)', run: 'rgba(59,130,246,.16)', muted: 'rgba(148,163,184,.12)' };
+const TONE = { ok: '#86efac', warn: '#fcd34d', bad: '#fca5a5', run: '#93c5fd', muted: 'var(--text-dim)', stop: '#fdba74' };
+const TONE_BG = { ok: 'rgba(34,197,94,.14)', warn: 'rgba(245,158,11,.14)', bad: 'rgba(239,68,68,.14)', run: 'rgba(59,130,246,.16)', muted: 'rgba(148,163,184,.12)', stop: 'rgba(251,146,60,.18)' };
 const GRID = '34px minmax(200px, 2fr) 52px 78px minmax(160px, 1.3fr)';
 const loadVc = () => { try { return localStorage.getItem(VC_KEY) || ''; } catch { return ''; } };
 const saveVc = (v) => { try { localStorage.setItem(VC_KEY, v); } catch { /* 저장 못 해도 동작 */ } };
 const errText = (e) => e?.body?.reason || e?.message || String(e);
-const MISSED_REASON = { down: '포탈이 꺼져 있었음', edited: '돌 차례에 스케줄을 고쳐 돌리지 않음' };
+const MISSED_REASON = { down: '포탈이 꺼져 있었음', edited: '돌 차례에 스케줄을 고쳐 돌리지 않음', skipped: '회차 중단 때 건너뛰기로 고름', stopped: '회차 중단 때 차례였던 회차라 돌리지 않음' };
 const missedReason = (m) => MISSED_REASON[m?.reason] || MISSED_REASON.down;
 const FolderIcon = () => (
   <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#fbbf24" strokeWidth="2" strokeLinejoin="round" aria-hidden="true" style={{ flex: 'none' }}><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" /></svg>
@@ -157,6 +159,8 @@ export default function BareosGroupsTab({ d }) {
   const [view, setView] = useState({ kind: 'list' });   // list · edit{ groupId, filter } · detail{ groupId }
   const [q, setQ] = useState('');
   const [runOf, setRunOf] = useState(null);
+  const [stopOf, setStopOf] = useState(null);   // v2.867 회차 중단 확인 창
+  const [stopErr, setStopErr] = useState('');
   const [fireOf, setFireOf] = useState(null);
   const [msg, setMsg] = useState(null);
   const [busy, setBusy] = useState(() => new Set());
@@ -190,7 +194,8 @@ export default function BareosGroupsTab({ d }) {
   const vcKnown = options.some((o) => o.id === vc);
   useEffect(() => { saveVc(vc); treeRef.current = null; setTree(null); setRefreshErr(null); setView({ kind: 'list' }); setRunOf(null); setFireOf(null); setMsg(null); if (vcKnown) load(); }, [vc, vcKnown]);   // eslint-disable-line react-hooks/exhaustive-deps
   // 실행·정리 중인 그룹이 있을 때만 다시 읽는다(결과 기록을 보려고) — 만들기 화면에서는 읽지 않는다(고르던 트리가 바뀌지 않게)
-  const running = !!tree?.groups?.some((x) => x.running);
+  //   v2.867: 이번 회차가 Director 에서 돌거나 취소를 보낸 실행이 아직 돌 때도(멈추는 중 → 중단됨 을 따라간다)
+  const running = !!tree?.groups?.some((x) => x.running || x.stop?.phase || x.stop?.sent > 0);
   useEffect(() => {
     if (!running || view.kind === 'edit') return undefined;
     const t = setTimeout(load, 4000);
@@ -236,6 +241,15 @@ export default function BareosGroupsTab({ d }) {
       if (sameVc(v0)) { setMsg({ ok: true, text: `‘${g.name}’ 그룹을 지웠습니다(백업 대상은 남김).${un ? ` **${un}**` : ''}` }); setView({ kind: 'list' }); }
     } catch (e) { if (sameVc(v0)) setMsg({ ok: false, text: `오류: ${errText(e)}` }); } finally { mark(g.id, false); if (sameVc(v0)) load(); }
   };
+  const stop = async (g, body) => {
+    const v0 = vc; mark(g.id, true); setStopErr('');
+    try {
+      const r = await postJson(`${BASE}/groups/${enc(g.id)}/cancel`, body);
+      if (r?.ok === false) throw Object.assign(new Error(r.reason || '멈추지 못했습니다.'), { body: r });
+      setStopOf(null);
+      if (sameVc(v0)) setMsg({ ok: true, text: cancelAcceptedText(r, g.name) });
+    } catch (e) { setStopErr(errText(e)); } finally { mark(g.id, false); if (sameVc(v0)) load(); }
+  };
   const run = async (g, level) => {
     const v0 = vc; setRunOf(null); mark(g.id, true); setMsg(null);
     try {
@@ -250,7 +264,7 @@ export default function BareosGroupsTab({ d }) {
   if (!options.length) {
     return <div className="card" style={{ padding: 14, fontSize: 13 }}>Director 에 묶인 법인(vCenter)이 없습니다 — <b>설정</b> 탭에서 법인별 Director 를 추가하고 vCenter 를 묶은 뒤 그룹을 만들 수 있습니다.</div>;
   }
-  const sitesNote = tree && !tree.mapped ? `이 법인의 Director 매핑이 덜 됐습니다(${(tree.mappingMissing || []).join('·') || 'Director 없음'}) — 새 VM 은 등록되지 않습니다(설정 탭에서 채우세요).` : '';
+  const sitesNote = tree && !tree.mapped ? `이 법인의 Director 매핑이 덜 됐습니다(${(tree.mappingMissing || []).join('·') || 'Director 없음'}) — 새 VM 은 등록되지 않습니다(설정 › vCenter 관리 › Bareos 백업 서버에서 채우세요).` : '';
   const current = view.groupId ? groups.find((x) => x.id === view.groupId) || null : null;
 
   const banners = (
@@ -275,7 +289,7 @@ export default function BareosGroupsTab({ d }) {
 
       {tree && view.kind === 'list' && (
         <GroupList tree={tree} groups={groups} byId={byId} q={q} setQ={setQ} writable={writable} busy={busy} ovl={ovl?.vc === tree.vcenterId ? ovl : null}
-          onRun={setRunOf} onNew={(filter) => { setMsg(null); setView({ kind: 'edit', groupId: '', filter }); }}
+          onRun={setRunOf} onStop={(g) => { setStopErr(''); setStopOf(g); }} onNew={(filter) => { setMsg(null); setView({ kind: 'edit', groupId: '', filter }); }}
           onEdit={(g) => { setMsg(null); setView({ kind: 'edit', groupId: g.id }); }}
           onDetail={(g) => setView({ kind: 'detail', groupId: g.id })} />
       )}
@@ -286,8 +300,8 @@ export default function BareosGroupsTab({ d }) {
           onReload={(v0) => { if (sameVc(v0)) load(); }} vcNow={vc} />
       )}
       {tree && view.kind === 'detail' && current && (
-        <GroupDetail tree={tree} g={current} byId={byId} writable={writable} busy={busy.has(current.id) || current.running}
-          onBack={() => setView({ kind: 'list' })} onRun={() => setRunOf(current)} onEdit={() => { setMsg(null); setView({ kind: 'edit', groupId: current.id }); }}
+        <GroupDetail tree={tree} g={current} byId={byId} writable={writable} busy={busy.has(current.id) || current.running} marking={busy.has(current.id)}
+          onBack={() => setView({ kind: 'list' })} onRun={() => setRunOf(current)} onStop={() => { setStopErr(''); setStopOf(current); }} onEdit={() => { setMsg(null); setView({ kind: 'edit', groupId: current.id }); }}
           onDelete={() => remove(current)} onFire={() => setFireOf(current)} />
       )}
       {tree && view.kind !== 'list' && view.groupId && !current && (
@@ -295,6 +309,7 @@ export default function BareosGroupsTab({ d }) {
       )}
 
       {runOf && <RunModal g={runOf} onClose={() => setRunOf(null)} onRun={(lv) => run(runOf, lv)} />}
+      {stopOf && <GroupCancelModal g={groups.find((x) => x.id === stopOf.id) || stopOf} waitMs={tree?.cancelWaitMs} busy={busy.has(stopOf.id)} error={stopErr} onConfirm={(body) => stop(stopOf, body)} onClose={() => setStopOf(null)} />}
       {fireOf && <FireModal g={groups.find((x) => x.id === fireOf.id) || fireOf} onClose={() => setFireOf(null)} />}
     </div>
   );
@@ -323,14 +338,14 @@ function CorpBar({ vc, setVc, options, tree, vms, loading, onReload }) {
           <span>그룹 없음 <b style={{ color: vms.length - inGroup ? TONE.warn : undefined }}>{vms.length - inGroup}</b></span>
           {m.unknown
             ? <span className="muted" title={resultsUnknownText({ ...tree.directorState, resultsKnown: false }) || ''}>그룹 VM 마지막 결과 <b>모름</b>(Director {tree.directorState?.state === 'auth' ? '인증 정지' : tree.directorState?.state === 'error' ? '조회 실패' : '미설정'} — 마지막으로 읽은 값이라 세지 않습니다)</span>
-            : <span className="muted">그룹 VM 마지막 결과 <b style={{ color: TONE.ok }}>성공 {m.ok + m.warn}</b> · <b style={{ color: m.fail ? TONE.bad : undefined }}>실패 {m.fail}</b> · <b style={{ color: m.run ? TONE.run : undefined }}>진행 {m.run}</b>{m.never ? ` · 기록 없음 ${m.never}` : ''}</span>}
+            : <span className="muted">그룹 VM 마지막 결과 <b style={{ color: TONE.ok }}>성공 {m.ok + m.warn}</b> · <b style={{ color: m.fail ? TONE.bad : undefined }}>실패 {m.fail}</b>{m.cancel ? <> · <b style={{ color: TONE.warn }}>취소 {m.cancel}</b></> : null} · <b style={{ color: m.run ? TONE.run : undefined }}>진행 {m.run}</b>{m.never ? ` · 기록 없음 ${m.never}` : ''}</span>}
         </div>
       )}
     </section>
   );
 }
 
-function GroupList({ tree, groups, byId, q, setQ, writable, busy, ovl, onRun, onNew, onEdit, onDetail }) {
+function GroupList({ tree, groups, byId, q, setQ, writable, busy, ovl, onRun, onStop, onNew, onEdit, onDetail }) {
   const needle = q.trim().toLowerCase();
   const shown = needle
     ? groups.filter((g) => g.name.toLowerCase().includes(needle) || g.vmIds.some((id) => String(byId.get(id)?.name || '').toLowerCase().includes(needle)))
@@ -345,7 +360,7 @@ function GroupList({ tree, groups, byId, q, setQ, writable, busy, ovl, onRun, on
         <button type="button" className="login-btn" style={{ flex: 'none', padding: '8px 16px' }} disabled={!writable} onClick={() => onNew('all')}>＋ 새 그룹</button>
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 360px), 1fr))', gap: 12 }}>
-        {shown.map((g) => <GroupCard key={g.id} g={g} tree={tree} byId={byId} writable={writable} busy={busy.has(g.id) || g.running} ovl={ovl} onRun={() => onRun(g)} onEdit={() => onEdit(g)} onDetail={() => onDetail(g)} />)}
+        {shown.map((g) => <GroupCard key={g.id} g={g} tree={tree} byId={byId} writable={writable} busy={busy.has(g.id) || g.running} marking={busy.has(g.id)} ovl={ovl} onRun={() => onRun(g)} onStop={() => onStop(g)} onEdit={() => onEdit(g)} onDetail={() => onDetail(g)} />)}
         {!needle && noGroup > 0 && (
           <button type="button" onClick={() => onNew('nogroup')} disabled={!writable}
             style={{ textAlign: 'left', border: '1.5px dashed var(--border)', borderRadius: 12, background: 'transparent', color: 'var(--text)', padding: 16, cursor: writable ? 'pointer' : 'default', font: 'inherit', display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', gap: 8, alignContent: 'start', minHeight: 150 }}>
@@ -380,10 +395,12 @@ function overlapOf(ovl, g) {
   return line ? { text: line.replace(/^겹침 — /, ''), color: TONE.warn } : { text: '없음(다음 24시간 · Veeam 잡 · 다른 Bareos 회차)', color: 'var(--text-dim)' };
 }
 
-function GroupCard({ g, tree, byId, writable, busy, ovl, onRun, onEdit, onDetail }) {
+function GroupCard({ g, tree, byId, writable, busy, marking = false, ovl, onRun, onStop, onEdit, onDetail }) {
   const rows = g.vmIds.map((id) => byId.get(id)).filter(Boolean);
   const size = sizeSum(rows);
-  const badge = g.running ? { text: g.pruning ? '보관 정리 중' : '실행 중', tone: 'run' } : resultBadge(memberResults(rows, { resultsKnown: resultsKnownOf(tree) }));
+  const ss = groupStopState(g);   // v2.867 회차 중단 상태(멈추는 중 · 이번 회차 실행 중 · 중단됨)
+  const badge = ss.kind === 'stopping' || ss.kind === 'cancelable' ? { text: g.pruning ? '보관 정리 중' : ss.text, tone: ss.tone }
+    : g.running ? { text: g.pruning ? '보관 정리 중' : '실행 중', tone: 'run' } : resultBadge(memberResults(rows, { resultsKnown: resultsKnownOf(tree) }));
   const sp = scheduleParts(g.schedule);
   const kp = keepParts(g);
   const ov = overlapOf(ovl, g);
@@ -402,8 +419,9 @@ function GroupCard({ g, tree, byId, writable, busy, ovl, onRun, onEdit, onDetail
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 10, padding: '10px 0', borderTop: '1px solid var(--border-soft)', borderBottom: '1px solid var(--border-soft)' }}>
         <Cell label="스케줄" main={sp.main} sub={sp.sub} />
         <Cell label="보관" main={kp.main} sub={kp.sub} tone={kp.bad ? 'bad' : undefined} />
-        <Cell label="다음 실행" main={g.next ? shortTs(g.next.at) : '—'} sub={g.next ? g.next.level : (g.schedule?.enabled ? '—' : '스케줄 꺼짐')} />
+        <Cell label="다음 실행" main={g.next ? shortTs(g.next.at) : '—'} sub={g.next ? (g.next.skip ? '건너뜀(회차 중단 때 고름)' : g.next.level) : (g.schedule?.enabled ? '—' : '스케줄 꺼짐')} tone={g.next?.skip ? 'warn' : undefined} />
       </div>
+      <StopLines g={g} ss={ss} />
       <div data-group-card-info="" style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', gap: 4, marginTop: -4 }}>
         <InfoLine label="마지막 회차" color={g.fires?.[0] ? TONE[fireTone(g.fires[0])] : 'var(--text-dim)'}>{g.fires?.[0] ? fireText(g.fires[0]) : '아직 실행 기록이 없습니다'}</InfoLine>
         <InfoLine label="적용 정책">{groupPoolText(g.poolPolicy, g.pool || tree.siteDefaults?.pool || '')}{fin(g.keep) ? ` · 보관 Full 체인 ${g.keep}개(포탈)` : ''}</InfoLine>
@@ -411,7 +429,7 @@ function GroupCard({ g, tree, byId, writable, busy, ovl, onRun, onEdit, onDetail
         {fin(g.dupVms) && g.dupVms > 0 && <InfoLine label="두 번 실행" color={TONE.warn}>VM {g.dupVms}대의 잡이 Director 스케줄에도 들어 있어 그룹 예약과 따로 한 번 더 돌 수 있습니다 — 백업 대상 탭의 적용 정책 줄에서 어느 스케줄인지 보세요</InfoLine>}
       </div>
       <div style={{ ...ROW, gap: 6 }}>
-        <button type="button" className="login-btn" style={{ flex: 'none', padding: '6px 14px', fontSize: 12.5 }} disabled={!writable || busy} onClick={onRun}>{g.running ? (g.pruning ? '정리 중' : '실행 중') : '지금 백업'}</button>
+        <RunOrStop g={g} ss={ss} writable={writable} busy={busy} marking={marking} onRun={onRun} onStop={onStop} small />
         <button type="button" className="logout-btn" style={BTN} onClick={onDetail}>상세</button>
         <button type="button" className="logout-btn" style={BTN} disabled={!writable || busy} onClick={onEdit}>수정</button>
         <span style={{ fontSize: 11.5, marginLeft: 'auto', minWidth: 0, overflowWrap: 'anywhere', color: warn ? TONE.warn : 'var(--text-dim)' }}>
@@ -771,10 +789,12 @@ function GroupEdit({ tree, group, initialFilter, initialSel, vms, byId, groupNam
 
 /* ───────── ③ 상세 ───────── */
 
-function GroupDetail({ tree, g, byId, writable, busy, onBack, onRun, onEdit, onDelete, onFire }) {
+function GroupDetail({ tree, g, byId, writable, busy, marking = false, onBack, onRun, onStop, onEdit, onDelete, onFire }) {
   const rows = g.vmIds.map((id) => byId.get(id) || { id, name: id, folder: '', missing: true });
   const size = sizeSum(rows.filter((r) => !r.missing));
-  const badge = g.running ? { text: g.pruning ? '보관 정리 중' : '실행 중', tone: 'run' } : resultBadge(memberResults(rows.filter((r) => !r.missing), { resultsKnown: resultsKnownOf(tree) }));
+  const ss = groupStopState(g);
+  const badge = ss.kind === 'stopping' || ss.kind === 'cancelable' ? { text: g.pruning ? '보관 정리 중' : ss.text, tone: ss.tone }
+    : g.running ? { text: g.pruning ? '보관 정리 중' : '실행 중', tone: 'run' } : resultBadge(memberResults(rows.filter((r) => !r.missing), { resultsKnown: resultsKnownOf(tree) }));
   const sp = scheduleParts(g.schedule);
   const kp = keepParts(g);
   const fires = Array.isArray(g.fires) ? g.fires : [];
@@ -788,13 +808,14 @@ function GroupDetail({ tree, g, byId, writable, busy, onBack, onRun, onEdit, onD
         <h2 style={{ margin: 0, fontSize: 22, fontWeight: 800, overflowWrap: 'anywhere' }}>{g.name}</h2>
         <Badge tone={badge.tone}>{badge.text}</Badge>
         <div style={{ ...ROW, gap: 6, marginLeft: 'auto' }}>
-          <button type="button" className="login-btn" style={{ flex: 'none', padding: '8px 16px' }} disabled={!writable || busy} onClick={onRun}>{g.running ? (g.pruning ? '정리 중' : '실행 중') : '지금 백업'}</button>
+          <RunOrStop g={g} ss={ss} writable={writable} busy={busy} marking={marking} onRun={onRun} onStop={onStop} />
           <button type="button" className="logout-btn" style={BTN} disabled={!writable || busy} onClick={onEdit}>정책 수정</button>
           <button type="button" className="logout-btn" style={{ ...BTN, color: TONE.bad }} disabled={!writable || busy} onClick={onDelete}>그룹 삭제</button>
         </div>
       </div>
       <div className="muted" style={{ fontSize: 12.5, marginTop: -6 }}>법인 {tree.vcName}{tree.director ? ` → Bareos ${tree.director.name}` : ''} · 만든 사람 {g.createdBy || '—'} · {shortTs(g.createdAt)}{g.updatedAt !== g.createdAt ? ` · 고친 사람 ${g.updatedBy || '—'} · ${shortTs(g.updatedAt)}` : ''}</div>
       {g.missed && <div className="banner warn" style={{ fontSize: 12.5 }}>돌리지 않은 회차 {g.missed.key} — {missedReason(g.missed)}</div>}
+      <StopLines g={g} ss={ss} />
       {g.clockAhead && <div className="banner warn" style={{ fontSize: 12.5 }}>마지막 처리 회차({g.lastKey})가 지금 서버 시각보다 뒤입니다 — 서버 시계를 확인하세요. 그 회차까지 예약 실행이 돌지 않습니다.</div>}
       {g.sending && !g.running && <div className="banner warn" style={{ fontSize: 12.5 }}>{g.sending.key || '수동'} 실행을 보내는 도중 포탈이 재시작했습니다 — 일부 VM 은 보내지 않았을 수 있습니다(백업 대상 탭에서 확인).</div>}
       {p?.errors?.length > 0 && (
@@ -806,7 +827,7 @@ function GroupDetail({ tree, g, byId, writable, busy, onBack, onRun, onEdit, onD
       {g.keep != null && <PrunePreview tree={tree} groupId={g.id} keep={g.keep} />}
       <section aria-label="정책 요약" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 220px), 1fr))', gap: 12 }}>
         <Box label="스케줄" main={sp.main} sub={`${sp.sub} · 포탈이 실행`} />
-        <Box label="다음 실행" main={g.next ? shortTs(g.next.at) : '—'} sub={g.next ? `${g.next.level}${untilText(g.next.at - (tree.now || Date.now())) ? ` · ${untilText(g.next.at - (tree.now || Date.now()))}` : ''}` : (g.schedule?.enabled ? '—' : '스케줄 꺼짐 — 수동 실행만')} />
+        <Box label="다음 실행" main={g.next ? shortTs(g.next.at) : '—'} sub={g.next ? `${g.next.skip ? '건너뜀(회차 중단 때 고름)' : g.next.level}${untilText(g.next.at - (tree.now || Date.now())) ? ` · ${untilText(g.next.at - (tree.now || Date.now()))}` : ''}` : (g.schedule?.enabled ? '—' : '스케줄 꺼짐 — 수동 실행만')} />
         <Box label="보관" main={kp.main} sub={kp.sub}>
           {slots > 0 && (
             <div role="img" aria-label={`보관 ${g.keep}개 중 ${p?.keptMin ?? '모름'}개 보유`} style={{ display: 'flex', gap: 2, margin: '4px 0' }}>
@@ -894,6 +915,44 @@ function GroupDetail({ tree, g, byId, writable, busy, onBack, onRun, onEdit, onD
   );
 }
 
+/* ───────── v2.867 회차 중단 — 카드 · 상세 공용 ───────── */
+
+/** '지금 백업' 자리 — 이번 회차가 돌면 '회차 중단…', 멈추는 중이면 잠긴 '중단 보냄', 그 밖은 지금처럼. */
+function RunOrStop({ g, ss, writable, busy, marking, onRun, onStop, small = false }) {
+  const pad = small ? { padding: '6px 14px', fontSize: 12.5 } : { padding: '8px 16px' };
+  if (ss.canStop) {
+    return <button type="button" className="logout-btn" style={{ flex: 'none', ...pad, color: writable && !marking ? 'var(--red)' : undefined }} disabled={!writable || marking} title={!writable ? '조회 전용 범위 — 이 법인은 수정 권한이 없습니다.' : '이 그룹의 회차를 멈춥니다(확인 창).'} onClick={onStop}>회차 중단…</button>;
+  }
+  if (ss.kind === 'stopping') return <button type="button" className="logout-btn" style={{ flex: 'none', ...pad }} disabled title="중단을 이미 보냈습니다 — Director 가 멈추기를 기다리는 중입니다.">중단 보냄</button>;
+  return <button type="button" className="login-btn" style={{ flex: 'none', ...pad }} disabled={!writable || busy} onClick={onRun}>{g.running ? (g.pruning ? '정리 중' : '실행 중') : '지금 백업'}</button>;
+}
+
+/** 이번 회차 진행 막대 · 중단 요약 줄(없으면 그리지 않는다). */
+function StopLines({ g, ss }) {
+  const segs = progressSegments(g);
+  const total = segs.reduce((a, x) => a + x.n, 0);
+  const st = g.stop || {};
+  const c = g.lastFire?.canceled;
+  const showC = c && (ss.kind === 'stopping' || ss.kind === 'stopped' || ss.kind === 'stopfail');
+  if (!segs.length && !g.progress?.queued && !st.phase && !st.sent && !showC) return null;
+  return (
+    <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', gap: 4 }}>
+      {g.progress?.queued && <InfoLine label="이번 회차" color={TONE.run}>Director 차례를 기다리는 중({shortTs(g.progress.since)} 부터)</InfoLine>}
+      {segs.length > 0 && (
+        <>
+          <InfoLine label="이번 회차" color={TONE.run}>보내는 중 · 보냄 {g.progress.sent ?? 0} / {g.progress.toSend ?? 0} · 시작 {g.progress.started ?? 0}{g.progress.inflight ? ` · 회신 기다림 ${g.progress.inflight}` : ''}</InfoLine>
+          <div role="img" aria-label={segs.map((x) => x.label).join(' · ')} style={{ display: 'flex', height: 8, borderRadius: 4, overflow: 'hidden', background: 'var(--border)' }}>
+            {segs.map((x) => <span key={x.label} style={{ width: `${(x.n / total) * 100}%`, background: x.tone === 'run' ? '#60a5fa' : x.tone === 'bad' ? '#f87171' : x.tone === 'wait' ? 'rgba(96,165,250,.45)' : 'var(--border)' }} />)}
+          </div>
+        </>
+      )}
+      {!segs.length && st.phase === 'running' && <InfoLine label="이번 회차" color={TONE.run}>Director 에서 도는 실행 {st.fire}대{st.extra ? ` · 그 밖 실행 ${st.extra}대` : ''}</InfoLine>}
+      {st.sent > 0 && <InfoLine label="멈추는 중" color={TONE.stop}>취소를 보낸 실행 {st.sent}대가 아직 돕니다{st.stuck ? ` · 멈추지 않음 ${st.stuck}대 — Director 에서 확인하세요` : ' — FD 가 멈추기까지 수 초~수 분'}</InfoLine>}
+      {showC && <InfoLine label="중단" color={c.effective === false ? TONE.warn : TONE.stop}>{canceledText(c, shortTs)}{c.effective === false ? '' : ' · 이 회차로는 보관 정리를 하지 않습니다'}</InfoLine>}
+    </div>
+  );
+}
+
 /* ───────── 창 ───────── */
 
 function RunModal({ g, onClose, onRun }) {
@@ -925,6 +984,7 @@ function FireModal({ g, onClose }) {
       {!f ? <div className="muted">실행 기록이 없습니다.</div> : (
         <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', gap: 10 }}>
           <div style={{ fontSize: 13 }}>{fireText(f)} · 레벨 {f.level || '—'}{f.storage ? ` · 스토리지 ${f.storage}` : ''}{f.pool ? ` · 풀 ${f.pool}` : ''}{f.key ? ` · 회차 ${f.key}` : ''}{f.by ? ` · ${f.by}` : ''}</div>
+          {f.canceled && <div className="banner warn" style={{ fontSize: 12.5 }}>{canceledText(f.canceled, shortTs)} · 단계 {PHASE_TEXT[f.canceled.phase] || f.canceled.phase} — ‘시작 전 멈춤’ 은 보내지 않은 것이고 실패 · 결과 모름과 따로 셉니다. 이 회차로는 보관 정리를 하지 않습니다.</div>}
           {f.error && <div className="banner bad" style={{ fontSize: 12.5 }}>{f.error}</div>}
           {(f.items || []).length > 0 && (
             <STable minWidth={600} limit={200}>

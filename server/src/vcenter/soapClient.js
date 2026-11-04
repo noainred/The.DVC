@@ -241,6 +241,7 @@ export class VimSoapClient {
       rootFolder: pick('rootFolder'),
       viewManager: pick('viewManager'),
       sessionManager: pick('sessionManager'),
+      authorizationManager: pick('authorizationManager'),   // v2.863 bareos-probe 권한 사전 점검(HasPrivilegeOnEntities)
       perfManager: pick('perfManager'),
       extensionManager: pick('extensionManager'),
       licenseManager: pick('licenseManager'),

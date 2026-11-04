@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>그룹 회차 중단 확인 창</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=Noto+Sans+KR:wght@400;500;700;800&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+body{margin:0;background:#0a0e17;color:#e6edf6;font-family:"Inter","Noto Sans KR","Apple SD Gothic Neo",sans-serif;font-size:13px}
+a{color:#3b82f6}a:hover{color:#60a5fa}
+.card{background:#141b2d;border:1px solid #243049;border-radius:12px}
+.muted{color:#8b9bb4}
+.mono{font-family:"JetBrains Mono",ui-monospace,monospace}
+.btn{display:inline-flex;align-items:center;gap:6px;min-height:34px;padding:0 14px;border-radius:8px;border:1px solid #243049;background:#1a2236;color:#e6edf6;font:inherit;font-size:13px;font-weight:600;cursor:pointer;white-space:nowrap;text-decoration:none}
+.btn.danger{background:#ef4444;border-color:#ef4444;color:#ffffff}
+.tag{display:inline-flex;align-items:center;gap:5px;height:22px;padding:0 9px;border-radius:999px;font-size:11.5px;font-weight:700;white-space:nowrap}
+.tag.ok{background:rgba(34,197,94,.14);color:#86efac}.tag.warn{background:rgba(245,158,11,.16);color:#fcd34d}.tag.run{background:rgba(59,130,246,.18);color:#93c5fd}.tag.unk{background:rgba(139,155,180,.14);color:#aebbd0}.tag.stop{background:rgba(251,146,60,.18);color:#fdba74}
+.sm{font-size:11.5px;color:#8b9bb4}
+.ph{display:flex;flex-direction:column;gap:4px;padding:10px 12px;border:1px solid #243049;border-radius:10px;background:#0f1626;min-width:0}
+.ph b{font-size:20px;font-weight:800}
+.ph .what{font-size:12px;color:#e6edf6;margin-top:4px;padding-top:6px;border-top:1px solid #1f2a40;line-height:1.45}
+.opt{display:flex;align-items:flex-start;gap:10px;padding:10px 12px;border:1px solid #243049;border-radius:10px;background:#0f1626;cursor:pointer;min-width:0}
+.opt.on{border-color:#3b82f6;background:rgba(59,130,246,.08)}
+.rad{width:16px;height:16px;border-radius:50%;border:2px solid #8b9bb4;flex:none;margin-top:1px;box-sizing:border-box}
+.rad.on{border-color:#3b82f6;background:radial-gradient(circle,#3b82f6 0 4px,transparent 5px)}
+.cb{width:16px;height:16px;border-radius:4px;border:2px solid #8b9bb4;flex:none;margin-top:1px;box-sizing:border-box}
+.note{display:grid;grid-template-columns:minmax(0, 1fr);gap:5px;padding:10px 12px;border-radius:10px;border:1px solid rgba(245,158,11,.4);background:rgba(245,158,11,.08);font-size:12.5px;line-height:1.5}
+.input{min-height:34px;padding:0 12px;border-radius:8px;border:1px solid #243049;background:#0a0e17;color:#e6edf6;font:inherit;font-size:13px;box-sizing:border-box;width:100%}
+</style>
+</helmet>
+<div style="width:780px;height:1060px;box-sizing:border-box;padding:24px;display:flex;flex-direction:column;gap:16px;background:rgba(10,14,23,.92)">
+
+  <section class="card" role="dialog" aria-labelledby="t" style="padding:18px 20px;display:flex;flex-direction:column;gap:14px;border-color:#2b3a57">
+    <div style="display:flex;align-items:flex-start;gap:10px">
+      <div style="min-width:0;flex:1">
+        <h2 id="t" style="margin:0;font-size:17px;font-weight:800">회차 중단 — DB-야간</h2>
+        <div class="sm" style="margin-top:3px">2026-11-03 02:00 회차 · Incremental · 예약 · 그룹 VM 50대 · 담당 엣지 kr-edge01 · 단계 <b style="color:#93c5fd">보내는 중</b>(2번째 덩어리)</div>
+      </div>
+      <button class="btn" type="button" aria-label="닫기" style="min-height:28px;padding:0 10px;font-size:12px">닫기</button>
+    </div>
+
+    <div style="display:grid;grid-template-columns:repeat(4, minmax(0, 1fr));gap:8px">
+      <div class="ph"><span class="sm">시작 대기</span><b>38</b><span class="sm">3·4번째 덩어리 — 아직 안 보냄</span><span class="what">보내지 않습니다 → <b>시작 전 멈춤</b></span></div>
+      <div class="ph" style="border-color:rgba(96,165,250,.45)"><span class="sm">Director 실행 중</span><b style="color:#93c5fd">9</b><span class="sm">이번 회차가 시작한 jobid</span><span class="what">취소 명령을 <b>한 번에</b> 보냅니다 → 멈추는 중</span></div>
+      <div class="ph"><span class="sm">끝남</span><b style="color:#86efac">3</b><span class="sm">성공 3 · 경고 0</span><span class="what">그대로 둡니다 — 성공은 유지</span></div>
+      <div class="ph"><span class="sm">보내는 중 덩어리</span><b>50</b><span class="sm">회신 기다리는 중</span><span class="what">회신을 받은 <b>뒤</b> 그 jobid 들도 취소(도중에 끊지 않음 — 결과 모름 방지)</span></div>
+    </div>
+
+    <div style="display:flex;flex-direction:column;gap:6px">
+      <div class="sm">범위</div>
+      <label class="opt on"><span class="rad on" aria-hidden="true"></span><span><b>이번 회차가 시작한 실행만</b> (9대 + 보내는 중 덩어리)<br><span class="sm">기본값 — 이 회차가 만든 jobid 만 취소합니다. 다른 실행에는 손대지 않습니다.</span></span><input type="radio" name="scope" checked style="position:absolute;opacity:0;width:0;height:0"></label>
+      <label class="opt"><span class="rad" aria-hidden="true"></span><span><b>이 그룹 VM 의 실행 중 전부</b> (+1 — app-erp-02 · Bareos 스케줄이 시작한 Full)<br><span class="sm">Director 스케줄 · 수동 실행까지 함께 취소합니다. 사용자 결정 ①.</span></span><input type="radio" name="scope" style="position:absolute;opacity:0;width:0;height:0"></label>
+    </div>
+
+    <div style="display:flex;flex-direction:column;gap:6px">
+      <div class="sm">옵션</div>
+      <label class="opt"><span class="cb" aria-hidden="true"></span><span><b>다음 예약 회차 1회 건너뛰기</b> — 11-04 02:00 을 돌리지 않고 11-05 02:00 부터<br><span class="sm">기본은 그대로 돕니다(중단이 예약을 바꾸지 않습니다). 사용자 결정 ③.</span></span><input type="checkbox" style="position:absolute;opacity:0;width:0;height:0"></label>
+    </div>
+
+    <div class="note">
+      <div><b>알아 둘 것</b></div>
+      <div>· 취소된 실행은 결과 ‘취소’ 로 남고 <b>복원 지점이 되지 않습니다</b>. 성공한 3대의 백업은 그대로 쓸 수 있습니다.</div>
+      <div>· 이 회차로는 <b>보관 정리를 하지 않습니다</b>(기준 Full 이 어긋날 수 있어서) — 다음 정상 회차가 끝난 뒤에 돕니다. 사용자 결정 ④.</div>
+      <div>· 취소한 VM 에 VMware 스냅샷이 남을 수 있습니다 — 끝난 뒤 백업 대상의 ‘스냅샷 n개’ 칩으로 확인(추정).</div>
+      <div>· FD 가 멈추기까지 수 초~수 분 · 10분 넘게 running 이면 ‘멈추지 않음’ 으로 표시하고 Director 에서 확인하라고 안내합니다.</div>
+    </div>
+
+    <div style="display:flex;flex-direction:column;gap:6px">
+      <label class="sm" for="nm">확인 — 그룹 이름을 그대로 입력하세요 (OTP 는 묻지 않습니다 · 사용자 결정 ②)</label>
+      <input id="nm" class="input" value="DB-야간" aria-describedby="nmh">
+      <div id="nmh" class="sm">감사 로그에 ‘Bareos 그룹 회차 중단 — DB-야간 · 범위 · 취소 n · 시작 전 멈춤 n · hong.gd’ 로 남습니다.</div>
+    </div>
+
+    <div style="display:flex;justify-content:flex-end;gap:8px;flex-wrap:wrap;align-items:center">
+      <span class="sm" style="margin-right:auto">같은 그룹의 ‘지금 백업’ · ‘수정’ · ‘삭제’ 는 멈추는 중에도 409</span>
+      <button class="btn" type="button">닫기</button>
+      <a class="btn danger" href="GroupCard.dc.html">회차 중단</a>
+    </div>
+  </section>
+
+  <section class="card" style="padding:12px 16px;display:flex;flex-direction:column;gap:6px;font-size:12.5px;line-height:1.5">
+    <div><b>법인 쪽에서 한 번에</b> — 담당 엣지가 있으면 중앙은 Director 에 붙지 않고 작업 ‘cancelJobs’(jobid 목록 · 잡 이름 대조) 한 줄을 대행 큐에 둡니다. 엣지가 로컬 Director 에서 9건을 돌리고 요약만 올립니다(회신 시한 150초 · WAN 왕복 1회).</div>
+    <div class="muted">엣지가 옛 판이라 이 작업을 모르면 ‘알 수 없는 작업’ 으로 거절 → 화면은 ‘법인 엣지를 업그레이드한 뒤 다시 시도’ 안내(단건 취소 반복으로 돌려보내지 않음 — 사용자 결정 ⑤). 단건 ‘취소…’ 는 그대로 됩니다.</div>
+  </section>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":780,"height":1060}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

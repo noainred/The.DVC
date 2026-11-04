@@ -263,11 +263,24 @@ export async function restoreChain(session, jobid) {
  * @returns jobid(복원 잡)
  */
 export async function runRestore(session, { client, jobids, restoreJob, pluginOptions }) {
+  return jobIdOf(await session.call(restoreCommand({ client, jobids, restoreJob, pluginOptions }), { timeoutMs: 120_000 }));
+}
+
+/** 복원 명령 문자열(순수 — runRestore 와 bareos-probe '--restore-plan' 미리 보기가 같은 글자를 쓴다 · v2.863). 틀린 값은 던진다. */
+export function restoreCommand({ client, jobids, restoreJob, pluginOptions }) {
   if (!isResourceName(client)) throw bad('복원 FD 이름이 올바르지 않습니다.');
   if (!isResourceName(restoreJob)) throw bad('복원 잡 이름이 올바르지 않습니다.');
   const ids = (Array.isArray(jobids) ? jobids : []).map(asId);
   if (!ids.length || ids.length > 400) throw bad('복원할 백업 jobid 목록이 올바르지 않습니다.');
   if (typeof pluginOptions !== 'string' || !pluginOptions || /["\\;@\r\n\0]/.test(pluginOptions)) throw bad('복원 플러그인 옵션이 올바르지 않습니다.');
-  const cmd = `restore client=${client} restoreclient=${client} jobid=${ids.join(',')} restorejob=${restoreJob} pluginoptions=${consoleQuote(pluginOptions)} all done yes`;
-  return jobIdOf(await session.call(cmd, { timeoutMs: 120_000 }));
+  // v2.874(점검 B1-01 · Bareos 원문 ua_restore.cc 22~master): restore 는 받은 pluginoptions 를 run 명령으로 **따옴표 없이** 다시 조립해(" pluginoptions=%s")
+  //   한 번 더 쪼갠다 — 값에 공백(VM · 데이터센터 · 폴더 · 데이터스토어 이름 'datastore1 (1)')이 있으면 잘려 run 이 'Invalid keyword' 로 거부했다.
+  //   configure add 의 FdPluginOptions 와 같이 따옴표를 값에 남겨(literalQuotes) 두 번째 파싱에서 벗겨지게 한다.
+  // v2.874(B1-02 · FD dir_cmd.cc 가 Where '/' 를 빈 값으로): 로컬 VMDK 는 복원 잡의 Where = / 라 FD 루트에 '/[ds] vm/…vmdk' 로 풀렸다 —
+  //   화면이 말하는 경로(/tmp/bareos-restores)를 where 로 준다(ops 인자 계약은 그대로 — pluginOptions 에서 판정).
+  const where = /(^|:)localvmdk=yes(:|$)/.test(pluginOptions) ? ` where=${consoleQuote(LOCAL_VMDK_WHERE)}` : '';
+  return `restore client=${client} restoreclient=${client} jobid=${ids.join(',')} restorejob=${restoreJob}${where} pluginoptions=${consoleQuote(pluginOptions, { literalQuotes: true })} all done yes`;
 }
+
+/** 로컬 VMDK 복원이 풀리는 FD 쪽 경로(화면 · restore.js 머리말과 같은 값). */
+export const LOCAL_VMDK_WHERE = '/tmp/bareos-restores';

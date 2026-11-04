@@ -119,7 +119,7 @@ export function targetLocks(j, { busy = false, running = false, hasRun = false }
 /** 엣지 대행 작업 종류 → 화면 이름(영문 키를 그대로 보이지 않게 · Chromium 확인). 모르는 종류는 '작업'. */
 const RELAY_KIND_LABEL = Object.freeze({
   probe: '연결 시험', catalog: '카탈로그', addJobs: '대상 등록', disableJobs: '잡 끄기', runJob: '백업 실행', setEnabled: '켜기·끄기', history: '이력',
-  cancel: '취소', log: '로그', restore: '복원', poll: '상태 조회', 'setup.preflight': '자동 설정 점검', 'setup.director': '자동 설정 2단계',
+  cancel: '취소', cancelJobs: '묶음 취소', runJobs: '그룹 실행', log: '로그', restore: '복원', poll: '상태 조회', 'setup.preflight': '자동 설정 점검', 'setup.director': '자동 설정 2단계',
   'setup.fdPlugin': '자동 설정 FD 플러그인', 'setup.fdIni': '자동 설정 FD INI', 'setup.thumbprint': '자동 설정 지문 읽기',
 });
 export const relayKindLabel = (k) => RELAY_KIND_LABEL[k] || '작업';
@@ -220,13 +220,13 @@ export function directorChipTitle(x) {
 /** 머리 상태 줄(법인별 Director 요약 · 폴러). */
 export function directorLine(d) {
   if (!d) return '';
-  if (d.demo) return '데모 Director(합성 응답 — 어디에도 접속하지 않습니다). 설정 › 법인별 Director 에서 실제 Director 를 추가하면 그쪽으로 바뀝니다.';
+  if (d.demo) return '데모 Director(합성 응답 — 어디에도 접속하지 않습니다). 설정 › vCenter 관리 › Bareos 백업 서버 › Director 에서 실제 Director 를 추가하면 그쪽으로 바뀝니다.';
   if (!d.configured) {
     const n = Array.isArray(d.directors) ? d.directors.length : 0;
     // Chromium 확인: Director 를 추가한 뒤에도 '추가하고' 라고 말했다 — 있으면 '접속값이 덜 됐다' 로
     return n
-      ? `법인 Director ${n}개 — 아직 콘솔 접속값(콘솔 이름·비밀번호)을 갖춘 Director 가 없습니다. 설정 › 법인별 Director 편집에서 자동 설정 2단계(또는 연결 저장)로 채우세요.`
-      : 'Director 가 설정되지 않았습니다 — 설정 › 법인별 Director 에서 법인 Director 를 추가하고 주소·콘솔 이름·비밀번호를 등록하세요.';
+      ? `법인 Director ${n}개 — 아직 콘솔 접속값(콘솔 이름·비밀번호)을 갖춘 Director 가 없습니다. 설정 › vCenter 관리 › Bareos 백업 서버 › Director 편집에서 자동 설정 2단계(또는 연결 저장)로 채우세요.`
+      : 'Director 가 설정되지 않았습니다 — 설정 › vCenter 관리 › Bareos 백업 서버 › Director 에서 법인 Director 를 추가하고 주소·콘솔 이름·비밀번호를 등록하세요.';
   }
   const list = Array.isArray(d.directors) ? d.directors : [];
   const st = list.map(directorStatus);
@@ -397,6 +397,27 @@ export function osCounts(rows) {
   const out = Object.fromEntries(OS_FILTERS.map(([k]) => [k, 0]));
   for (const x of Array.isArray(rows) ? rows : []) { out[''] += 1; out[osKey(x)] += 1; }
   return out;
+}
+
+/* ───────────── v2.873 vGPU · PCI 패스스루 표지(켜진 상태 스냅샷 불가) ───────────── */
+/**
+ * 서버 gpuDev(gpu/vgpuProfile.js vmGpuMark — 인벤토리 vm.gpu) → { label, title, note } 또는 null.
+ * null 은 '장치 없음' 이 아니다 — 포탈은 GPU 호스트 위 VM 의 장치만 읽으므로 GPU 없는 호스트의 NIC 패스스루는 모른다(표지를 안 붙일 뿐 단정하지 않는다).
+ * 근거: VMware 는 vGPU·PCI 패스스루(DirectPath I/O) 장치가 있는 켜진 VM 의 스냅샷을 지원하지 않는다(Broadcom KB 394566 — 검색 요약 기준).
+ */
+export function gpuChip(x) {
+  const g = x?.gpuDev;
+  const n = (v) => (Number.isInteger(v) && v > 0 ? v : 0);
+  const vg = n(g?.vgpu);
+  const pt = n(g?.passthrough);
+  if (!vg && !pt) return null;
+  const prof = vg && typeof g.profile === 'string' && g.profile ? `(프로파일 ‘${g.profile}’)` : '';
+  const what = [vg ? `vGPU ${vg}개${prof}` : '', pt ? `PCI 패스스루(DirectPath I/O) ${pt}개 — GPU 일 수도, NIC·HBA 일 수도 있습니다` : ''].filter(Boolean).join(' · ');
+  return {
+    label: vg && pt ? 'vGPU · 패스스루' : vg ? 'vGPU' : 'PCI 패스스루',
+    title: `${what}. VMware 는 vGPU·PCI 패스스루 장치가 있는 켜진 VM 의 스냅샷을 지원하지 않아 백업이 스냅샷 단계에서 실패할 수 있습니다(Broadcom KB 394566). 전원을 끈 상태로 백업하거나 게스트 안 에이전트(파일 단위)를 쓰세요. 이 환경에서 되는지는 vCenter 에서 메모리 없는 스냅샷을 수동으로 만들어 확인할 수 있습니다.`,
+    note: `**켜진 상태에서는 스냅샷을 만들 수 없는 VM** 입니다(${what}) — VMware 제약으로 백업이 스냅샷 단계에서 실패할 수 있습니다. 전원을 끈 상태로 백업하거나 게스트 안 에이전트(파일 단위)를 쓰세요.`,
+  };
 }
 
 /** 한 번에 고를 수 있는 수 — API 의 일괄 상한과 원장 남은 자리 중 작은 값(모르면 상한). */
@@ -573,6 +594,12 @@ export function reportCards(f = {}) {
  * 자주 보는 경고·오류 줄의 뜻과 조치(현장 로그 실측 — 2026-10-30). 처음 맞는 규칙 하나만 쓴다. 모르는 줄은 해석하지 않는다(지어내지 않는다).
  */
 const ISSUE_HINTS = Object.freeze([
+  // v2.877(2026-11-04 사용자 로그 JobId 32 — 진짜 원인은 이 한 줄이고 뒤 오류는 그 연쇄였다): FD 플러그인이 vCenter 인증서를 받으려고 vcserver:443 에 붙다 실패.
+  //   이름 풀이 실패는 따로(주소 철자 · DNS) — 나머지(Connection refused · timed out · No route to host …)는 접속 실패로 묶는다. 원인을 하나로 단정하지 않는다.
+  [/Could not fetch SSL Cert.{0,200}(?:Name or service not known|name resolution|nodename nor servname)/i, 'FD 서버가 vCenter(vcserver) 이름을 풀지 못했습니다 — INI 의 vcserver 철자와 FD 서버의 DNS · /etc/hosts 를 확인하세요(FD 서버에서 getent hosts <주소>).'],
+  [/Could not fetch SSL Cert/i, 'FD 서버가 vCenter(vcserver):443 에 접속하지 못했습니다 — INI 의 vcserver 주소가 vCenter 가 맞는지 · vCenter 웹 서비스 · 방화벽을 확인하세요(FD 서버에서 nc -vz <주소> 443). 이 줄 뒤의 오류는 대개 이 실패의 연쇄입니다.'],
+  [/job is already cancelled/i, '잡이 이미 취소된 뒤에 나온 줄입니다(앞선 치명 오류 또는 사람의 취소) — 원인은 위의 첫 오류 줄에 있습니다.'],
+  [/comm line to SD dropped/i, 'Director 와 SD 사이 연결이 끊겼습니다 — 앞에 치명 오류가 있으면 그 연쇄(잡 취소)이고, 없으면 Director↔SD 네트워크와 bareos-sd 상태를 확인하세요.'],
   [/Python 3\.10 or newer is required/i, 'FD 의 pyVmomi 가 9.x 입니다 — Python 3.9 FD 는 pyVmomi 8.x 로 바꾸고 bareos-fd 를 재시작하세요.'],
   [/Permission denied/i, '저장 경로에 bareos 계정이 쓸 수 없습니다 — 폴더 소유자·NFS 권한·SELinux 를 확인하세요.'],
   [/Please mount|label a new one/i, 'SD 가 쓸 볼륨을 열지 못해 기다렸습니다 — 바로 위 줄(열기 실패 원인)을 먼저 보세요.'],
@@ -1045,7 +1072,7 @@ export function conflictText(conflicts = []) {
   const con = conflicts.some((c) => c.type === 'console');
   return `이미 있는 파일과 겹칩니다: ${what} — 포탈은 남이 만든 파일을 덮지 않으므로 이대로는 2단계가 거부됩니다(서버에 접속하기 전에 막았습니다).`
     + (con ? ' ‘만들 콘솔 이름’ 을 포탈 전용 이름으로 바꾸세요(기존 콘솔은 그대로 둡니다).' : '')
-    + (conflicts.some((c) => c.type !== 'console') ? ' 그 밖의 이름은 설정 탭 기본값을 바꾸거나 전용 Pool · Schedule 만들기를 끄세요.' : '')
+    + (conflicts.some((c) => c.type !== 'console') ? ' 그 밖의 이름은 설정 › vCenter 관리 › Bareos 백업 서버 › 공통 기본값을 바꾸거나 전용 Pool · Schedule 만들기를 끄세요.' : '')
     + ' 서버에서 파일을 정리했으면 1단계 사전 점검을 다시 하세요.';
 }
 

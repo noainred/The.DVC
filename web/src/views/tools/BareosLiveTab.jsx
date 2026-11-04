@@ -6,13 +6,16 @@
  * ⚠ 훅은 조기 return 위 · 400px 에서 가로 넘침 없게 그리드 칸은 minmax(0, 1fr) · 표는 STable(자기 가로 스크롤).
  */
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { usePolling } from '../../api.js';
+import { usePolling, postJson } from '../../api.js';
 import { useHashTab } from '../../hooks/useHashTab.js';
 import { Loading, ErrorBox } from '../../components/ui.jsx';
 import { STable } from '../../components/STable.jsx';
 import Select from '../../components/Select.jsx';
 import { shortTs } from './bareosViewText.js';
 import BareosRunDetail from './BareosRunDetail.jsx';
+import { JobCancelModal, GroupCancelModal } from './BareosCancelModals.jsx';
+import { cancelChip, cancelButton, groupStopState, cancelAcceptedText, PHASE_TEXT, canceledText } from './bareosCancelText.js';
+import { withRelayWait, outcomeUnknown, unknownOutcomeText } from './bareosText.js';
 import {
   rateText, sizeText, elapsedText, progressBasis, liveCodeText, corpBadge, CORP_FILTERS, corpMatches, corpFilterCounts, sortCorps,
   sparkSegments, totalHist, slowRows, levelWord, triggerText, reasonText, REASON_HINT, STUCK_TEXT, sortWaiting,
@@ -22,8 +25,8 @@ const CORP_KEY = 'bareos-live-corp';
 const load = (k, d) => { try { return localStorage.getItem(k) || d; } catch { return d; } };
 const save = (k, v) => { try { localStorage.setItem(k, v); } catch { /* 저장 못 해도 동작 */ } };
 const ROW = { display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8 };
-const TONE = { ok: '#86efac', warn: '#fcd34d', bad: '#fca5a5', run: '#93c5fd', muted: 'var(--text-dim)' };
-const TONE_BG = { ok: 'rgba(34,197,94,.14)', warn: 'rgba(245,158,11,.16)', bad: 'rgba(239,68,68,.14)', run: 'rgba(59,130,246,.16)', muted: 'rgba(148,163,184,.12)' };
+const TONE = { ok: '#86efac', warn: '#fcd34d', bad: '#fca5a5', run: '#93c5fd', muted: 'var(--text-dim)', stop: '#fdba74' };
+const TONE_BG = { ok: 'rgba(34,197,94,.14)', warn: 'rgba(245,158,11,.16)', bad: 'rgba(239,68,68,.14)', run: 'rgba(59,130,246,.16)', muted: 'rgba(148,163,184,.12)', stop: 'rgba(251,146,60,.18)' };
 const CYAN = '#22d3ee';
 const GRID1 = { display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', gap: 12 };
 const VIEWS = [['all', '전체 법인'], ['corp', '단일 법인'], ['speed', '속도 상태']];
@@ -77,7 +80,13 @@ function useWidth(ref) {
 // v2.860: 운영 › 진행 · 이력 안에 접어 넣었다 — 보기 주소의 마지막 조각은 부르는 쪽이 준다(#/tools/bareos-backup/runs/<보기>).
 //   옛 live 로 두면 보기를 바꿀 때마다 옛 주소로 갔다가 runs 로 되돌려져 보기가 주소에 남지 않고 뒤로가기가 헛돈다.
 export default function BareosLiveTab({ hashSub = 'live' } = {}) {
-  const { data, error } = usePolling('/tools/bareos-backup/live', {}, 15_000);
+  // v2.867 취소 · 회차 중단 뒤 바로 다시 읽는다(_r) — usePolling 이 새 열쇠에서 data 를 비우므로 직전 응답을 들고 있는다(BareosBackupTool 과 같은 방식)
+  const [tick, setTick] = useState(0);
+  const { data: polled, error } = usePolling('/tools/bareos-backup/live', { _r: tick }, 15_000);
+  const lastRef = useRef(null);
+  if (polled) lastRef.current = polled;
+  const data = polled || lastRef.current;
+  const reload = () => setTick((t) => t + 1);
   // 보기는 주소에(#/tools/bareos-backup/runs/<보기> — 새로고침·북마크·뒤로가기에서 유지 · CATALOG2613-06 스윕)
   const [view, setView] = useHashTab({ base: ['tools', 'bareos-backup', hashSub], valid: VIEWS.map(([k]) => k), fallback: 'all' });
   const [corpId, setCorpS] = useState(() => load(CORP_KEY, ''));
@@ -107,10 +116,10 @@ export default function BareosLiveTab({ hashSub = 'live' } = {}) {
       </div>
       {error && <div className="banner warn">새로 읽지 못했습니다({error?.body?.reason || error.message}) — 아래는 마지막으로 읽은 값입니다.</div>}
       {data.registryLoadError && <div className="banner bad">백업 대상 원장을 읽지 못했습니다(손상본 보존) — 진행 현황이 비어 보일 수 있습니다.</div>}
-      {!corps.length && <div className="card" style={{ padding: 14, fontSize: 13 }}>볼 수 있는 법인이 없습니다 — 설정 탭에서 법인별 Director 를 묶으세요(범위 계정은 자기 법인만 보입니다).</div>}
+      {!corps.length && <div className="card" style={{ padding: 14, fontSize: 13 }}>볼 수 있는 법인이 없습니다 — 설정 › vCenter 관리 › Bareos 백업 서버에서 법인별 Director 를 묶으세요(범위 계정은 자기 법인만 보입니다).</div>}
 
       {corps.length > 0 && view === 'all' && <AllView data={data} corps={corps} counts={counts} filter={filter} setFilter={setFilter} q={q} setQ={setQ} onOpen={open} />}
-      {corps.length > 0 && view === 'corp' && corp && <CorpView corps={corps} c={corp} onPick={setCorp} limits={data.relayLimits} />}
+      {corps.length > 0 && view === 'corp' && corp && <CorpView corps={corps} c={corp} onPick={setCorp} limits={data.relayLimits} waitMs={data.cancelWaitMs} onChanged={reload} />}
       {corps.length > 0 && view === 'speed' && <SpeedView corps={corps} onOpen={open} />}
     </div>
   );
@@ -185,8 +194,14 @@ function CorpCard({ c, onOpen }) {
 }
 
 /* ───────── ② 단일 법인 ───────── */
-function CorpView({ corps, c, onPick, limits = null }) {
+function CorpView({ corps, c, onPick, limits = null, waitMs = null, onChanged = () => {} }) {
   const [diagOpen, setDiagOpen] = useState(false);
+  // v2.867 취소(행) · 회차 중단(그룹 띠) — 확인 창 · 처리 중 · 결과 한 줄
+  const [cancelRow, setCancelRow] = useState(null);
+  const [stopGroup, setStopGroup] = useState(null);
+  const [sending, setSending] = useState(false);
+  const [sendErr, setSendErr] = useState('');
+  const [note, setNote] = useState(null);
   // v2.858 행 펼침 — 한 번에 하나(로그는 펼친 행만 읽는다). 고르지 않았으면 실행 중이 1건일 때 그 행을 펼친다(승인 시안).
   const [picked, setPicked] = useState(undefined);
   const actRef = useRef(null);
@@ -202,6 +217,27 @@ function CorpView({ corps, c, onPick, limits = null }) {
   const openId = picked !== undefined ? picked : (act.length === 1 ? act[0].jobid : null);
   const openDiag = () => { setDiagOpen(true); requestAnimationFrame(() => document.getElementById('bareos-live-diag')?.scrollIntoView({ block: 'start', behavior: 'smooth' })); };
   const relayDir = c.director?.via === 'edge' ? { relay: true } : null;
+  const ro = c.writable === false ? '조회 전용 범위 — 이 법인은 수정 권한이 없습니다.' : '';
+  const openCancel = (r) => { setSendErr(''); setCancelRow(r); };
+  const sendCancel = async () => {
+    const r = cancelRow; setSending(true); setSendErr('');
+    try {
+      const out = await postJson(`/tools/bareos-backup/jobs/${encodeURIComponent(r.id)}/cancel`, { jobid: r.jobid }, withRelayWait({}, relayDir, limits, 'cancel'));
+      setCancelRow(null);
+      setNote({ ok: true, text: out?.note || `‘${r.vmName}’ 실행(jobid ${r.jobid})에 취소를 보냈습니다 — Director 가 멈추면 결과가 ‘취소’ 로 남습니다(수 초~수 분).` });
+      onChanged();
+    } catch (e) {
+      if (outcomeUnknown(e)) { setCancelRow(null); setNote({ ok: false, text: `결과 모름: ${unknownOutcomeText('취소', e)}` }); onChanged(); }
+      else setSendErr(e?.body?.reason || e.message);
+    } finally { setSending(false); }
+  };
+  const sendStop = async (body) => {
+    const g = stopGroup; setSending(true); setSendErr('');
+    try {
+      const out = await postJson(`/tools/bareos-backup/groups/${encodeURIComponent(g.id)}/cancel`, body);
+      setStopGroup(null); setNote({ ok: true, text: cancelAcceptedText(out, g.name) }); onChanged();
+    } catch (e) { setSendErr(e?.body?.reason || e.message); } finally { setSending(false); }
+  };
   return (
     <>
       <div style={ROW}>
@@ -215,13 +251,13 @@ function CorpView({ corps, c, onPick, limits = null }) {
         </span>
       </div>
       <section aria-label="법인 요약" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 180px), 1fr))', gap: 12 }}>
-        <Kpi label="실행 중" main={c.running} color={TONE.run} sub={stuck.length ? <span style={{ color: TONE.warn }}>멈춤 의심 {stuck.length}</span> : c.slow ? `느림 ${c.slow}` : '—'} />
+        <Kpi label="실행 중" main={c.running} color={TONE.run} sub={<>{stuck.length ? <span style={{ color: TONE.warn }}>멈춤 의심 {stuck.length}</span> : c.slow ? `느림 ${c.slow}` : '—'}{c.stopping ? <span style={{ color: TONE.stop }}> · 멈추는 중 {c.stopping}</span> : null}</>} />
         <Kpi label="지금 속도" main={c.running ? rateText(c.rateNow) : '—'} color={c.rateNow === null ? 'var(--text-dim)' : CYAN}
           sub={fdSaysNothing ? 'FD 가 진행을 보고하지 않음 — 아래 진단' : c.rateUnknown ? `모름 ${c.rateUnknown}건 제외` : undefined}>
           <Spark hist={c.hist} w={200} h={34} label={`${c.vcName} 최근 처리 속도 흐름`} />
         </Kpi>
         <Kpi label="대기" main={c.waiting} sub={c.waiting ? `가장 오래 ${oldestWait ? elapsedText(oldestWait.elapsed) : '—'} · 사유 ${groups.length}가지` : '대기 없음'} />
-        <Kpi label="오늘 성공 / 실패" main={<><span style={{ color: TONE.ok }}>{c.today.ok + c.today.warn}</span> <span className="muted" style={{ fontSize: 15 }}>/</span> <span style={{ color: c.today.fail ? TONE.bad : undefined }}>{c.today.fail}</span></>} sub={`경고 ${c.today.warn} · 저장 ${sizeText(c.today.bytes)}`} />
+        <Kpi label="오늘 성공 / 실패" main={<><span style={{ color: TONE.ok }}>{c.today.ok + c.today.warn}</span> <span className="muted" style={{ fontSize: 15 }}>/</span> <span style={{ color: c.today.fail ? TONE.bad : undefined }}>{c.today.fail}</span></>} sub={`경고 ${c.today.warn}${c.today.canceled ? ` · 취소 ${c.today.canceled}` : ''} · 저장 ${sizeText(c.today.bytes)}`} />
         <Kpi label="최근 24시간 평균 속도" main={c.rateSamples ? rateText(c.rateMedian) : '—'} sub={c.rateSamples ? `끝난 성공 ${c.rateSamples}건 · VM 별 마지막 끝난 실행의 중앙값` : '최근 24시간 끝난 성공 기록 없음'} />
       </section>
 
@@ -238,6 +274,9 @@ function CorpView({ corps, c, onPick, limits = null }) {
         </section>
       )}
 
+      {note && <div className={`banner ${note.ok ? 'ok' : 'warn'}`} style={{ ...ROW, fontSize: 12.5 }}><span style={{ flex: '1 1 260px', minWidth: 0 }}>{note.text}</span><button type="button" className="logout-btn" style={{ padding: '4px 10px', fontSize: 12 }} onClick={() => setNote(null)}>닫기</button></div>}
+      {(c.groupRuns || []).map((g) => <GroupRunBand key={g.id} g={g} lock={ro} onStop={() => { setSendErr(''); setStopGroup(g); }} />)}
+
       <section ref={actRef} className="card" aria-label="실행 중" style={{ padding: 0, overflow: 'hidden', minWidth: 0 }}>
         <div style={{ ...ROW, padding: '10px 14px', borderBottom: '1px solid var(--border-soft)' }}>
           <b>실행 중 {act.length}</b>
@@ -245,7 +284,7 @@ function CorpView({ corps, c, onPick, limits = null }) {
         </div>
         {act.length === 0 ? <div className="muted" style={{ padding: 14, fontSize: 13 }}>지금 이 법인에서 도는 백업이 없습니다.</div> : (
           <STable minWidth={1100} limit={300}>
-            <thead><tr><th>VM</th><th>그룹 · 실행</th><th>레벨</th><th>시작 · 경과</th><th>Director 상태</th><th data-nosort style={{ minWidth: 200 }}>진행량 / 기준</th><th className="right">지금 속도</th><th className="right">지난 평균</th><th>판정</th></tr></thead>
+            <thead><tr><th>VM</th><th>그룹 · 실행</th><th>레벨</th><th>시작 · 경과</th><th>Director 상태</th><th data-nosort style={{ minWidth: 200 }}>진행량 / 기준</th><th className="right">지금 속도</th><th className="right">지난 평균</th><th>판정 · 동작</th></tr></thead>
             <tbody>
               {act.map((r) => {
                 const pb = progressBasis(r);
@@ -267,7 +306,7 @@ function CorpView({ corps, c, onPick, limits = null }) {
                     <td>{levelWord(r.level)}</td>
                     <td data-sort={r.since ?? ''} style={{ fontFamily: 'var(--mono)', fontSize: 12 }}>{r.since ? shortTs(r.since) : '—'}<div style={{ color: r.stuck ? TONE.warn : 'var(--text-dim)' }}>{elapsedText(r.elapsed)}</div></td>
                     <td data-sort={r.dirStatus?.reason || ''} style={{ whiteSpace: 'nowrap', fontSize: 12.5 }}>
-                      {r.dirStatus ? <><span style={{ color: dirWarn ? TONE.warn : TONE.ok, fontWeight: 700 }}>{reasonText(r.dirStatus.reason)}</span><div className="muted" style={{ fontSize: 11, fontFamily: 'var(--mono)' }}>{r.dirStatus.text}</div></>
+                      {r.dirStatus ? <><span style={{ color: dirWarn ? TONE.warn : TONE.ok, fontWeight: 700 }}>{reasonText(r.dirStatus.reason)}</span><div className="muted" style={{ fontSize: 11, fontFamily: 'var(--mono)', whiteSpace: 'normal', overflowWrap: 'anywhere', maxWidth: 150 }}>{r.dirStatus.text}</div></>
                         : <span className="muted">{c.live?.dirOk ? 'Director 표에 없음' : '모름'}</span>}
                     </td>
                     <td>
@@ -277,8 +316,13 @@ function CorpView({ corps, c, onPick, limits = null }) {
                     <td className="right" data-sort={r.rateNow ?? ''} style={{ fontWeight: 800, color: r.rateNow === null ? 'var(--text-dim)' : r.slow ? TONE.warn : CYAN, fontVariantNumeric: 'tabular-nums' }}>{rateText(r.rateNow)}</td>
                     <td className="right" data-sort={r.baseline ?? ''} style={{ fontVariantNumeric: 'tabular-nums' }}>{r.baseline ? rateText(r.baseline) : '—'}</td>
                     <td>
-                      {r.stuck ? <><Badge tone="warn">멈춤 의심</Badge><div className="muted" style={{ fontSize: 11, marginTop: 2 }}>{STUCK_TEXT[r.stuck]}</div></>
-                        : r.slow ? <Badge tone="warn">느림</Badge> : r.rateNow === null ? <Badge tone="muted">속도 모름</Badge> : <Badge tone="ok">정상</Badge>}
+                      {/* v2.867: 판정 칸 하나에 상태 + 취소 단추(따로 열을 두면 1440 에서 표가 칸을 넘어 단추가 가로 스크롤 뒤로 숨었다 — Chromium 확인) */}
+                      {(() => { const ch = cancelChip(r.cancel, { waitMs }); return ch ? <><span title={ch.title}><Badge tone={ch.tone === 'stop' ? 'stop' : 'warn'}>{ch.short}</Badge></span><div className="muted" style={{ fontSize: 11, marginTop: 2, whiteSpace: 'normal', overflowWrap: 'anywhere', maxWidth: 100 }}>{ch.sub}</div></> : null; })()}
+                      {!r.cancel && (r.stuck ? <><Badge tone="warn">멈춤 의심</Badge><div className="muted" style={{ fontSize: 11, marginTop: 2 }}>{STUCK_TEXT[r.stuck]}</div></>
+                        : r.slow ? <Badge tone="warn">느림</Badge> : r.rateNow === null ? <Badge tone="muted">속도 모름</Badge> : <Badge tone="ok">정상</Badge>)}
+                      <div style={{ marginTop: 4 }} onClick={(e) => e.stopPropagation()}>
+                        {(() => { const cb = cancelButton({ running: true, cancel: r.cancel, lockReason: ro }); return <button type="button" className="logout-btn" style={{ padding: '2px 9px', fontSize: 11.5, color: cb.disabled ? undefined : 'var(--red)' }} disabled={cb.disabled} title={cb.title} onClick={() => openCancel(r)}>{cb.label}</button>; })()}
+                      </div>
                     </td>
                   </tr>
                   {open && (
@@ -313,7 +357,7 @@ function CorpView({ corps, c, onPick, limits = null }) {
               ))}
             </div>
             <STable minWidth={760} limit={300}>
-              <thead><tr><th>VM</th><th>그룹 · 실행</th><th>레벨</th><th>보낸 시각 · 대기</th><th>대기 사유</th></tr></thead>
+              <thead><tr><th>VM</th><th>그룹 · 실행</th><th>레벨</th><th>보낸 시각 · 대기</th><th>대기 사유</th><th data-nosort className="right">동작</th></tr></thead>
               <tbody>
                 {wait.map((r) => (
                   <tr key={r.jobid}>
@@ -321,7 +365,11 @@ function CorpView({ corps, c, onPick, limits = null }) {
                     <td style={{ whiteSpace: 'nowrap', fontSize: 12.5 }}>{r.group || '—'}<div className="muted" style={{ fontSize: 11.5 }}>{triggerText(r)}</div></td>
                     <td>{levelWord(r.level)}</td>
                     <td data-sort={r.since ?? ''} style={{ fontFamily: 'var(--mono)', fontSize: 12 }}>{r.since ? shortTs(r.since) : '—'}<div className="muted">{elapsedText(r.elapsed)}</div></td>
-                    <td data-sort={r.dirStatus?.reason || 'unknown'} style={{ whiteSpace: 'nowrap', fontSize: 12.5 }}>{r.dirStatus ? reasonText(r.dirStatus.reason) : <span className="muted">{reasonText('unknown')}</span>}</td>
+                    <td data-sort={r.dirStatus?.reason || 'unknown'} style={{ whiteSpace: 'nowrap', fontSize: 12.5 }}>{r.dirStatus ? reasonText(r.dirStatus.reason) : <span className="muted">{reasonText('unknown')}</span>}
+                      {(() => { const ch = cancelChip(r.cancel, { waitMs }); return ch ? <div title={ch.title}><Badge tone={ch.tone === 'stop' ? 'stop' : 'warn'}>{ch.short}</Badge><div className="muted" style={{ fontSize: 11, whiteSpace: 'normal', overflowWrap: 'anywhere', maxWidth: 160 }}>{ch.sub}</div></div> : null; })()}</td>
+                    <td className="right">
+                      {(() => { const cb = cancelButton({ running: true, cancel: r.cancel, lockReason: ro }); return <button type="button" className="logout-btn" style={{ padding: '4px 10px', fontSize: 12, color: cb.disabled ? undefined : 'var(--red)' }} disabled={cb.disabled} title={cb.title} onClick={() => openCancel(r)}>{cb.label}</button>; })()}
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -351,7 +399,36 @@ function CorpView({ corps, c, onPick, limits = null }) {
           )}
         </section>
       )}
+      {cancelRow && (
+        <JobCancelModal vmName={cancelRow.vmName} jobid={cancelRow.jobid} level={levelWord(cancelRow.level)} since={cancelRow.since} bytesText={cancelRow.bytes !== null && cancelRow.bytes !== undefined ? sizeText(cancelRow.bytes) : ''}
+          group={cancelRow.group || ''} triggerText={triggerText(cancelRow)} stuck={!!cancelRow.cancel?.stuck} waitMs={waitMs} busy={sending} error={sendErr} onConfirm={sendCancel} onClose={() => setCancelRow(null)} />
+      )}
+      {stopGroup && <GroupCancelModal g={{ ...stopGroup, vmIds: { length: stopGroup.total }, stop: stopGroup.plan }} waitMs={waitMs} busy={sending} error={sendErr} onConfirm={sendStop} onClose={() => setStopGroup(null)} />}
     </>
+  );
+}
+
+/** v2.867 그룹 회차 띠(시안 ①) — 줄 대기 · 보내는 중 · 이번 회차 실행 중 · 멈추는 중. 서버 corpView.groupRuns 한 줄. */
+function GroupRunBand({ g, lock = '', onStop }) {
+  const st = groupStopState({ canceling: g.canceling, stop: g.plan, lastFire: g.lastFire });
+  const p = g.plan?.progress;
+  const stopping = st.kind === 'stopping';
+  const c = g.lastFire?.canceled;
+  return (
+    <section aria-label={`그룹 회차 — ${g.name}`} style={{ ...ROW, padding: '10px 14px', borderRadius: 10, border: `1px solid ${stopping ? 'rgba(251,146,60,.45)' : 'rgba(96,165,250,.35)'}`, background: stopping ? 'rgba(251,146,60,.08)' : 'rgba(59,130,246,.08)', gap: '6px 14px' }}>
+      <Badge tone={stopping ? 'stop' : st.kind === 'stopfail' ? 'warn' : 'run'}>{stopping || st.kind === 'stopfail' ? st.text : '그룹 회차'}</Badge>
+      <b style={{ overflowWrap: 'anywhere' }}>{g.name}</b>
+      <span className="muted" style={{ fontSize: 12, minWidth: 0 }}>
+        {g.plan?.phase ? `단계 ${PHASE_TEXT[g.plan.phase]}` : stopping ? '취소를 보낸 실행이 아직 돕니다' : ''}
+        {p && !p.queued ? ` · 보냄 ${p.sent ?? 0} / ${p.toSend ?? 0} · 시작 ${p.started ?? 0}${p.inflight ? ` · 회신 기다림 ${p.inflight}` : ''}` : p?.queued ? ` · ${shortTs(p.since)} 부터 차례 대기` : ''}
+        {g.plan?.fire ? ` · 이번 회차 실행 중 ${g.plan.fire}` : ''}{g.plan?.sent ? ` · 멈추는 중 ${g.plan.sent}` : ''}{g.plan?.stuck ? ` · 멈추지 않음 ${g.plan.stuck}` : ''} · VM {g.total}대
+      </span>
+      {c && <span className="muted" style={{ fontSize: 12, minWidth: 0, overflowWrap: 'anywhere' }}>{canceledText(c, shortTs)}</span>}
+      <div style={{ marginLeft: 'auto', display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+        {st.canStop && <button type="button" className="logout-btn" style={{ padding: '5px 12px', fontSize: 12, color: lock ? undefined : 'var(--red)' }} disabled={!!lock} title={lock || '이 그룹의 회차를 멈춥니다(확인 창).'} onClick={onStop}>회차 중단…</button>}
+        {!st.canStop && stopping && <button type="button" className="logout-btn" style={{ padding: '5px 12px', fontSize: 12 }} disabled title="중단을 이미 보냈습니다 — Director 가 멈추기를 기다리는 중입니다.">중단 보냄</button>}
+      </div>
+    </section>
   );
 }
 

@@ -38,7 +38,7 @@ export default function IdracTrendLinkButton({ hostId, hostName, onClose }) {
   return (
     <>
       <button className="login-btn" style={{ flex: 'none', padding: '8px 14px' }} onClick={run} disabled={busy}
-        title="서비스태그·호스트네임·IP·MAC 으로 이 호스트의 iDRAC 서버를 찾아 특수 기능 › iDRAC 통합 추이에서 엽니다">
+        title="서비스태그·호스트네임·IP·MAC 으로 이 호스트의 iDRAC 서버를 찾아 특수 기능 › Infra Observability 에서 엽니다">
         {busy ? '서버 찾는 중…' : '📊 통합 성능 모니터링'}
       </button>
       {fail && (

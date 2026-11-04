@@ -6,9 +6,10 @@ import Select from '../../components/Select.jsx';
 import BoldText from '../../components/boldText.jsx';
 import {
   checkView, checkCountsText, stepView, jobView, edgeAgeText, targetModeText, uploadText, stepDurText, fixesOrdered, retryLabel,
-  defaultPlan, planBody, planIssues, PYVMOMI_REASON, WEEKDAY_KO, bytesText, whenText,
+  defaultPlan, planBody, planIssues, canResetExisting, effectiveTarget, resetExistingPlan, PYVMOMI_REASON, WEEKDAY_KO, bytesText, whenText,
   RUNNING_UNKNOWN_OK_LABEL, runningUnknown, volumesSizeText, okOrThrow, rollbackCauseText,
   bundleFromText, importDirStateText, bundleWhereText, bundleStateView, bundleSourceHelp,
+  canLink, linkChoices, linkDoneText, isSshAuthFail,
 } from './bareosInstallText.js';
 
 /**
@@ -121,9 +122,59 @@ function BundleCard({ ov, onReload, say, writable }) {
   );
 }
 
+/* ───────── 1-a 등록부 대상 연결(v2.879) ───────── */
+// 사용자 요청: 배포 등록부에 에이전트 이름이 다르게 들어간 대상을 '기존 목록에서 선택' 해 고친다 · '오타나 다른 오류 방지' — 이름 입력 칸이 없다.
+function LinkCard({ row, linkTargets, writable, onClose, onLinked, onReload, say }) {
+  const choices = linkChoices(linkTargets, row);
+  const usable = choices.filter((x) => !x.disabled);
+  const [pick, setPick] = useState(usable.length === 1 ? usable[0].id : '');
+  const [busy, setBusy] = useState(false);
+  const [fail, setFail] = useState(null);   // 거부 · 실패는 이 카드 안에(위쪽 알림은 표에서 멀다)
+  const [authFailed, setAuthFailed] = useState(() => new Set());   // SSH 로그인에 실패한 대상 — 다시 누르지 못하게(반복 로그인 시도 = 계정 잠금 위험)
+  const c = usable.find((x) => x.id === pick) || null;
+  const locked = !!c && authFailed.has(c.id);
+  const go = async () => {
+    if (!c) return;
+    setBusy(true); setFail(null); say(null);
+    try {
+      const r = okOrThrow(await postJson(`${P}/link-target`, { vcenterId: row.vcenterId, targetId: c.id, expectName: c.cand.agentName }), '연결하지 못했습니다.');
+      say({ ok: true, text: linkDoneText(r) }); onLinked();
+    } catch (e) {
+      if (isSshAuthFail(e)) setAuthFailed((m) => new Set(m).add(c.id));
+      setFail({ ok: false, text: e.message });
+    } finally { setBusy(false); }
+  };
+  return (
+    <div className="card" style={DEEP} data-bi-link="">
+      <b>등록부 대상 연결 — {row.vcenterName} · 엣지 ‘{row.agent}’</b>
+      <div className="muted" style={{ fontSize: 12, marginTop: 4, lineHeight: 1.6 }}>
+        <BoldText text={`배포 등록부에 저장된 대상 중 이 엣지 서버를 고르세요. 이름은 입력하지 않습니다 — 고른 대상의 에이전트 이름을 **‘${row.agent}’** 로 바꿉니다. 바꾸기 전에 그 서버에 SSH 로 접속해 포탈 이름이 ‘${row.agent}’ 인지 확인하고, **다르면 바꾸지 않습니다**. SSH 주소 · 계정 · 비밀번호는 그대로입니다.`} />
+      </div>
+      {choices.length === 0 ? (
+        <div className="muted" style={{ fontSize: 12, marginTop: 8 }}>저장된 배포 대상이 없습니다 — <a href="#/settings/agent-deploy/add">설정 › 원격 법인(DC)에 Edge 노드 포탈 설치</a>에서 이 엣지 서버를 먼저 저장하세요.</div>
+      ) : (
+        <div style={{ ...ROW, marginTop: 8 }}>
+          <Select className="input" sort={false} style={{ ...INP, flex: '1 1 320px', width: 'auto' }} value={pick} onChange={(e) => setPick(e.target.value)} aria-label="연결할 배포 대상">
+            <option value="">배포 대상 고르기…</option>
+            {choices.map((x) => <option key={x.id} value={x.id} disabled={x.disabled}>{x.label}{x.disabled ? ` — 고를 수 없음: ${x.why}` : ''}</option>)}
+          </Select>
+          <button type="button" className="login-btn" style={BTN} disabled={!c || busy || !writable || locked} onClick={go}>{busy ? '접속 확인 중…' : '접속 확인 후 연결'}</button>
+          <button type="button" className="logout-btn" style={BTN} disabled={busy} onClick={() => { setFail(null); onReload(); }} title="배포 대상 목록을 다시 읽습니다">목록 다시 읽기</button>
+          <button type="button" className="logout-btn" style={BTN} disabled={busy} onClick={onClose}>닫기</button>
+        </div>
+      )}
+      <Msg m={fail} />
+      {locked && <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>이 대상은 저장된 SSH 계정으로 로그인하지 못했습니다 — 같은 계정으로 다시 시도하지 않습니다. 배포 등록부에서 비밀번호를 고친 뒤 화면을 다시 여세요.</div>}
+      {choices.length > 0 && usable.length === 0 && <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>고를 수 있는 대상이 없습니다(모두 다른 엣지가 쓰거나 확인할 수 없는 대상) — <a href="#/settings/agent-deploy/add">설정 › 원격 법인(DC)에 Edge 노드 포탈 설치</a>에서 이 엣지 서버를 저장하세요.</div>}
+    </div>
+  );
+}
+
 /* ───────── 1 대상 ───────── */
-function TargetsStep({ ov, sel, setSel, onNext, onOpenJob }) {
+function TargetsStep({ ov, sel, setSel, onNext, onOpenJob, writable, onReload, say }) {
   const t = ov.targets.find((x) => x.vcenterId === sel) || null;
+  const [linkFor, setLinkFor] = useState('');
+  const linkRow = ov.targets.find((x) => x.vcenterId === linkFor && canLink(x)) || null;
   return (
     <div className="card" style={CARD}>
       <b>1 대상 고르기</b>
@@ -141,13 +192,15 @@ function TargetsStep({ ov, sel, setSel, onNext, onOpenJob }) {
                 <td data-sort={r.edgeAgeMs ?? ''}>{r.agent ? edgeAgeText(r.edgeAgeMs) : '—'}</td>
                 <td>{r.sshUser ? `${r.sshUser} · ${r.hasPassword ? '저장됨' : '없음'}` : '—'}</td>
                 <td>{r.director ? <>{r.director.name}<div className="muted" style={{ fontSize: 11.5 }}>{r.director.host}{r.director.agent ? ` · 담당 ${r.director.agent}` : ' · 중앙 직접'}</div></> : '미등록'}</td>
-                <td style={{ ...WRAP, maxWidth: 300 }}>{r.can ? <Badge cls={r.mode === 'reinstall' ? 'amber' : 'green'}>{targetModeText(r)}</Badge> : <span className="muted" style={{ fontSize: 12 }}>{targetModeText(r)}</span>}</td>
+                <td style={{ ...WRAP, maxWidth: 300 }}>{r.can ? <Badge cls={r.mode === 'reinstall' ? 'amber' : 'green'}>{targetModeText(r)}</Badge> : <span className="muted" style={{ fontSize: 12 }}>{targetModeText(r)}</span>}
+                  {canLink(r) && <div style={{ marginTop: 4 }}><button type="button" className="logout-btn" style={BTN} disabled={!writable} onClick={() => setLinkFor(r.vcenterId)}>등록부 대상 연결</button></div>}</td>
                 <td>{r.lastJob ? <button type="button" className="logout-btn" style={BTN} onClick={() => onOpenJob(r.lastJob.id)}><Badge cls={jobView(r.lastJob.status).cls}>{jobView(r.lastJob.status).text}</Badge></button> : '—'}</td>
               </tr>
             ))}
           </tbody>
         </STable>
       </div>
+      {linkRow && <LinkCard key={linkRow.vcenterId} row={linkRow} linkTargets={ov.linkTargets} writable={writable} say={say} onReload={onReload} onClose={() => setLinkFor('')} onLinked={() => { setLinkFor(''); onReload(); }} />}
       <div style={{ ...ROW, marginTop: 10, justifyContent: 'flex-end' }}>
         <span className="muted" style={{ fontSize: 12 }}>다음 단계는 서버에 쓰지 않습니다(읽기만).</span>
         <button type="button" className="login-btn" disabled={!t} onClick={onNext}>{t?.mode === 'reinstall' ? '초기화 확인으로 →' : '사전 점검으로 →'}</button>
@@ -183,7 +236,7 @@ function ResetStep({ t, pre, plan, setPlan, onBack, onNext, onRecheck, busy }) {
     <div className="card" style={CARD}>
       <div style={ROW}><b style={{ flex: '1 1 auto' }}>초기화 확인 — {t.vcenterName}</b><Badge cls="amber">초기화 후 재설치</Badge>
         <button type="button" className="logout-btn" style={BTN} disabled={busy} onClick={onRecheck}>다시 읽기</button></div>
-      <div className="banner warn" style={{ marginTop: 8, fontSize: 12.5 }}>이 법인에는 Director ‘{t.director?.name}’ 가 이미 등록돼 있습니다. 완전 설치를 하려면 <b>기존 설치 패키지 · 설정값을 지우고 다시 설치</b>합니다. 아래는 지금 상태를 <b>읽기만</b> 한 것이고, 무엇을 지울지는 실행 때마다 여기서 고릅니다.</div>
+      <div className="banner warn" style={{ marginTop: 8, fontSize: 12.5 }}>{t.resetUnregistered ? <>이 서버에는 <b>포탈에 등록되지 않은 Bareos</b> 가 이미 설치돼 있습니다(사람이 직접 설치했거나 이전 설치가 남긴 것). 이 화면이 지우는 것은 이 엣지 노드 안의 Bareos 뿐이고, 설치 4단계가 Director 를 포탈에 새로 등록합니다.</> : <>이 법인에는 Director ‘{t.director?.name}’ 가 이미 등록돼 있습니다.</>} 완전 설치를 하려면 <b>기존 설치 패키지 · 설정값을 지우고 다시 설치</b>합니다. 아래는 지금 상태를 <b>읽기만</b> 한 것이고, 무엇을 지울지는 실행 때마다 여기서 고릅니다.</div>
       {!pre ? <Loading /> : (
         <>
           <dl className="muted" style={{ display: 'grid', gridTemplateColumns: 'auto minmax(0,1fr)', gap: '4px 14px', fontSize: 12.5, margin: '10px 0 0' }}>
@@ -191,7 +244,7 @@ function ResetStep({ t, pre, plan, setPlan, onBack, onNext, onRecheck, busy }) {
             <dt>실행 중 작업</dt><dd style={{ margin: 0 }}>{pre.items.find((i) => i.key === 'running')?.detail || '—'}</dd>
             <dt>카탈로그 DB</dt><dd style={{ margin: 0 }}>{pre.catalogBytes == null ? '읽지 못함(PostgreSQL 꺼짐 또는 DB 없음)' : `bareos · ${bytesText(pre.catalogBytes)}`}</dd>
             <dt>백업 볼륨</dt><dd style={{ margin: 0 }}>{vols.length ? vols.map((v) => `${v.path} · ${v.files == null ? '파일 수 —' : `파일 ${v.files}개`} · ${bytesText(v.bytes)} · 마지막 ${whenText(v.lastAt)}`).join(' / ') : '설정에서 읽은 볼륨 경로 없음'}</dd>
-            <dt>포탈 쪽</dt><dd style={{ margin: 0 }}>Director 등록 ‘{t.director?.name}’ · 이 법인의 백업 대상 {pre.ledgerTargets == null ? '—' : `${pre.ledgerTargets}개`}(초기화하면 Director 의 잡 설정이 지워집니다 — 포탈 목록은 남고, 마무리 화면이 다시 등록하는 방법을 안내합니다)</dd>
+            <dt>포탈 쪽</dt><dd style={{ margin: 0 }}>{t.resetUnregistered ? '등록된 Director 없음 — 포탈에서 지우는 것은 없습니다(이 서버가 포탈의 어떤 Director 로든 등록돼 있거나 같은 서버에 다른 법인의 설치 작업이 있으면 서버가 거부합니다)' : <>Director 등록 ‘{t.director?.name}’ · 이 법인의 백업 대상 {pre.ledgerTargets == null ? '—' : `${pre.ledgerTargets}개`}(초기화하면 Director 의 잡 설정이 지워집니다 — 포탈 목록은 남고, 마무리 화면이 다시 등록하는 방법을 안내합니다)</>}</dd>
           </dl>
           <div className="card" style={DEEP}>
             <label style={{ ...ROW, fontSize: 13 }}><input type="checkbox" checked disabled /> <b>패키지 · 설정 삭제</b> <Badge cls="gray">필수 · 끌 수 없음</Badge></label>
@@ -221,7 +274,7 @@ function ResetStep({ t, pre, plan, setPlan, onBack, onNext, onRecheck, busy }) {
 }
 
 /* ───────── 2 사전 점검 ───────── */
-function PrecheckStep({ pre, onRecheck, onBack, onNext, busy }) {
+function PrecheckStep({ pre, onRecheck, onBack, onNext, onReset, canReset, busy }) {
   return (
     <div className="card" style={CARD}>
       <div style={ROW}>
@@ -231,6 +284,13 @@ function PrecheckStep({ pre, onRecheck, onBack, onNext, busy }) {
       </div>
       <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>저장된 root 계정으로 접속해 읽기만 합니다. 결과는 지금 이 순간의 상태이고, ‘설치 시작’ 을 누를 때 같은 점검을 한 번 더 합니다. ✗ 가 있으면 진행하지 않습니다 · ? 는 읽지 못한 것(0 이 아님)입니다.</div>
       {!pre ? <Loading /> : <CheckTable pre={pre} />}
+      {canReset && (
+        // v2.876: 포탈에 Director 가 없는 법인의 서버에 Bareos 가 이미 있다 — 예전에는 조치 문구가 없는 선택지('대상 표에서 초기화 후 재설치')를 가리켰다
+        <div className="banner warn" style={{ ...ROW, marginTop: 10, fontSize: 12.5 }}>
+          <span style={{ flex: '1 1 320px', minWidth: 0 }}>이 서버에 <b>포탈에 등록되지 않은 Bareos</b> 가 있습니다. 지우고 새로 설치하려면 ‘초기화 후 재설치로 진행’ 을 누르세요 — 다음 화면에서 지울 범위(카탈로그 · 볼륨)를 고르고 확인한 뒤에만 지웁니다.</span>
+          <button type="button" className="login-btn" style={BTN} disabled={busy} onClick={onReset}>초기화 후 재설치로 진행…</button>
+        </div>
+      )}
       <div style={{ ...ROW, marginTop: 10, justifyContent: 'flex-end' }}>
         <button type="button" className="logout-btn" onClick={onBack}>← 앞으로</button>
         <button type="button" className="login-btn" disabled={!pre || pre.blocked} onClick={onNext}>{pre?.blocked ? '필요: ✗ 조치' : '설치 계획으로 →'}</button>
@@ -491,7 +551,7 @@ function FinishStep({ j, say }) {
         <dt className="muted">번들</dt><dd style={{ margin: 0 }}>{j.bundle?.version} · Bareos {j.bundle?.bareosVersion || '—'}</dd>
         <dt className="muted">WebUI</dt><dd style={{ margin: 0 }}>{j.plan?.webui === false ? '설치 안 함' : `http://${j.hostAddr || '<엣지 주소>'}/bareos-webui — 로그인 계정은 다음 기능(WebUI 계정)에서 만듭니다`}</dd>
         <dt className="muted">계획</dt><dd style={{ margin: 0 }}>{j.planText}</dd>
-        {j.mode === 'reinstall' && <><dt className="muted">백업 대상</dt><dd style={{ margin: 0 }}>초기화로 Director 의 잡 설정이 지워졌습니다 — 이 법인의 백업 대상은 포탈 목록에는 남아 있지만 Director 에는 잡이 없습니다. 백업 대상 탭에서 그 대상을 지우고 다시 등록(일괄 등록)하세요.</dd></>}
+        {j.mode === 'reinstall' && !j.resetUnregistered && <><dt className="muted">백업 대상</dt><dd style={{ margin: 0 }}>초기화로 Director 의 잡 설정이 지워졌습니다 — 이 법인의 백업 대상은 포탈 목록에는 남아 있지만 Director 에는 잡이 없습니다. 백업 대상 탭에서 그 대상을 지우고 다시 등록(일괄 등록)하세요.</dd></>}
       </dl>
     </div>
   );
@@ -540,9 +600,12 @@ export default function BareosInstallPanel({ writable = true }) {
 
   if (err && !ov) return <ErrorBox error={err} />;
   if (!ov) return <Loading />;
-  const t = ov.targets.find((x) => x.vcenterId === sel) || null;
+  const t0 = ov.targets.find((x) => x.vcenterId === sel) || null;
+  // v2.876: '초기화 후 재설치로 진행' 을 고르면(계획 resetExisting) 이 대상을 재설치로 본다 — 서버 resetTarget 과 같은 바꿈
+  const t = effectiveTarget(t0, plan);
   const bundle = (ov.bundles || []).find((x) => x.ok) || null;
   const reinstall = t?.mode === 'reinstall' || job?.mode === 'reinstall';
+  const toTargets = () => { setStep('targets'); setPlan(null); setPre(null); };
 
   const runPre = async () => {
     if (!t) return;
@@ -557,6 +620,16 @@ export default function BareosInstallPanel({ writable = true }) {
     setBusy(true); setMsg(null);
     try { const r = okOrThrow(await postJson(`${P}/precheck`, { vcenterId: t.vcenterId, ...planBody(p) })); setPre(r); if (r.pluginPathCopies?.length) setPlan({ ...p, pyvmomiFix: true }); }
     catch (e) { setMsg({ ok: false, text: e.message }); } finally { setBusy(false); }
+  };
+  const goReset = async () => {
+    if (!t0) return;
+    const p = resetExistingPlan(bundle, t0);
+    const prevPlan = plan; const prevPre = pre;
+    setPlan(p); setPre(null); setStep('reset');
+    setBusy(true); setMsg(null);
+    try { const r = okOrThrow(await postJson(`${P}/precheck`, { vcenterId: t0.vcenterId, ...planBody(p) })); setPre(r); }
+    // 서버가 거부하면(예: 이 서버가 다른 법인의 Director 로 등록됨) 새 설치 점검 화면으로 그대로 돌아간다
+    catch (e) { setMsg({ ok: false, text: e.message }); setPlan(prevPlan); setPre(prevPre); setStep('precheck'); } finally { setBusy(false); }
   };
   const start = async () => {
     setBusy(true); setMsg(null);
@@ -588,14 +661,15 @@ export default function BareosInstallPanel({ writable = true }) {
           <b>법인 Bareos 완전 설치</b>{ov.demo && <> <Badge cls="amber">데모</Badge></>}
           <div className="muted" style={{ fontSize: 12, marginTop: 2 }}>법인의 엣지 노드에 Bareos(Director · Storage · FD · VMware 플러그인 · WebUI)를 한 번에 설치하고 그 법인의 Director 를 이 포탈에 등록합니다. 백업은 법인 안에서 돌고, 중앙은 로그와 상태만 모읍니다. 전 법인 범위 관리자에게만 보입니다.</div>
         </div>
-        {step !== 'targets' && <button type="button" className="logout-btn" style={BTN} onClick={() => { setStep('targets'); setJobId(''); setJob(null); load(); }}>대상 표로</button>}
+        {step !== 'targets' && <button type="button" className="logout-btn" style={BTN} onClick={() => { toTargets(); setJobId(''); setJob(null); load(); }}>대상 표로</button>}
       </div>
       {!writable && <div className="banner warn" style={{ marginTop: 8 }}>쓰기 범위가 지정된 계정은 완전 설치를 실행할 수 없습니다(전 법인 공용 설정).</div>}
       <Stepper step={step} reinstall={reinstall} />
       <Msg m={msg} />
-      {step === 'targets' && <><BundleCard ov={ov} onReload={load} say={setMsg} writable={writable} /><TargetsStep ov={ov} sel={sel} setSel={setSel} onNext={goNext} onOpenJob={openJob} /></>}
-      {step === 'reset' && t && plan && <ResetStep t={t} pre={pre} plan={plan} setPlan={setPlan} busy={busy} onRecheck={runPre} onBack={() => setStep('targets')} onNext={() => setStep('precheck')} />}
-      {step === 'precheck' && t && <PrecheckStep pre={pre} busy={busy} onRecheck={runPre} onBack={() => setStep(reinstall ? 'reset' : 'targets')} onNext={() => setStep('plan')} />}
+      {step === 'targets' && <><BundleCard ov={ov} onReload={load} say={setMsg} writable={writable} /><TargetsStep ov={ov} sel={sel} setSel={setSel} onNext={goNext} onOpenJob={openJob} writable={writable} onReload={load} say={setMsg} /></>}
+      {step === 'reset' && t && plan && <ResetStep t={t} pre={pre} plan={plan} setPlan={setPlan} busy={busy} onRecheck={runPre} onBack={toTargets} onNext={() => setStep('precheck')} />}
+      {step === 'precheck' && t && <PrecheckStep pre={pre} busy={busy} onRecheck={runPre} onBack={() => (reinstall ? setStep('reset') : toTargets())} onNext={() => setStep('plan')}
+        canReset={writable && canResetExisting(pre, t)} onReset={goReset} />}
       {step === 'plan' && t && plan && <PlanStep t={t} pre={pre} bundle={pre?.bundle || bundle} plan={plan} setPlan={setPlan} busy={busy || !writable} onBack={() => setStep('precheck')} onStart={start} />}
       {step === 'run' && (job ? <RunStep j={job} bundle={bundle} busy={busy || !writable} say={setMsg}
         onRetry={(b) => act('retry', b, '다시 시작했습니다.')} onStop={() => act('stop', {}, '중단을 요청했습니다 — 지금 단계가 끝나면 멈춥니다.')}

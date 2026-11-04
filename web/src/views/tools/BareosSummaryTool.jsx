@@ -100,11 +100,11 @@ function BareosSummaryView() {
     .slice().sort((a, b) => order[corpBucket(a)] - order[corpBucket(b)]);   // 확인 필요 · 모름이 위(정렬은 제목을 누르면 바뀐다)
   const prio = Array.isArray(data.priority) ? data.priority : [];
   const pShown = prio.filter((x) => pKind === 'all' || x.kind === pKind);
-  const anyPartial = Object.keys(t.partial || {}).some((k) => ['ok', 'warn', 'fail', 'run', 'old', 'never', 'bareosMethod', 'missing', 'mismatch'].includes(k));
+  const anyPartial = Object.keys(t.partial || {}).some((k) => ['ok', 'warn', 'fail', 'cancel', 'run', 'old', 'never', 'bareosMethod', 'missing', 'mismatch'].includes(k));
   const totAttn = corpAttention(t);
   const totAttnText = totAttn.n === null ? (['fail', 'missing', 'old', 'never'].every((k) => Number.isFinite(t[k])) ? numText((t.fail || 0) + (t.missing || 0) + (t.old || 0) + (t.never || 0)) : '—') : numText(totAttn.n);
   const attnPartial = ['fail', 'missing', 'old', 'never'].some((k) => t.partial?.[k]);
-  const totBar = resultBar({ jobs: t.jobs, ok: t.ok, warn: t.warn, fail: t.fail, run: t.run });
+  const totBar = resultBar({ jobs: t.jobs, ok: t.ok, warn: t.warn, fail: t.fail, cancel: t.cancel, run: t.run });
 
   return (
     <div data-bareos-summary="" style={WRAP}>
@@ -122,8 +122,8 @@ function BareosSummaryView() {
         <Stat label="보호 VM (Bareos 방식)" value={partialText(t, 'bareosMethod')}
           sub={<><span>잡 등록 {partialText(t, 'jobs')}</span><span>켜짐 {partialText(t, 'on')} · 꺼짐 {partialText(t, 'off')}</span>{t.mismatch ? <span>방식 불일치 {partialText(t, 'mismatch')}</span> : null}{t.vm ? <span>전체 VM {numText(t.vm)} 중</span> : null}</>} />
         <Stat label={`마지막 결과 (잡 ${partialText(t, 'jobs')})`}
-          sub={<><span style={{ color: TONE.ok }}>성공 {partialText(t, 'ok')}</span><span style={{ color: TONE.warn }}>경고 {partialText(t, 'warn')}</span><span style={{ color: TONE.bad }}>실패 {partialText(t, 'fail')}</span><span style={{ color: TONE.run }}>진행 {partialText(t, 'run')}</span>{t.unknown ? <span>모름 {numText(t.unknown)}</span> : null}</>}>
-          {totBar ? <ResultBar b={totBar} label={`성공 ${t.ok} · 경고 ${t.warn} · 실패 ${t.fail} · 진행 ${t.run}`} /> : <span className="muted" style={{ fontSize: 12 }}>{t.jobs ? '모름' : '잡 없음'}</span>}
+          sub={<><span style={{ color: TONE.ok }}>성공 {partialText(t, 'ok')}</span><span style={{ color: TONE.warn }}>경고 {partialText(t, 'warn')}</span><span style={{ color: TONE.bad }}>실패 {partialText(t, 'fail')}</span>{t.cancel ? <span style={{ color: TONE.muted }}>취소 {partialText(t, 'cancel')}</span> : null}<span style={{ color: TONE.run }}>진행 {partialText(t, 'run')}</span>{t.unknown ? <span>모름 {numText(t.unknown)}</span> : null}</>}>
+          {totBar ? <ResultBar b={totBar} label={`성공 ${t.ok} · 경고 ${t.warn} · 실패 ${t.fail}${t.cancel ? ` · 취소 ${t.cancel}` : ''} · 진행 ${t.run}`} /> : <span className="muted" style={{ fontSize: 12 }}>{t.jobs ? '모름' : '잡 없음'}</span>}
         </Stat>
         <Stat label="확인 필요" value={`${totAttnText}${attnPartial ? '*' : ''}`} tone={totAttnText !== '0' && totAttnText !== '—' ? 'bad' : undefined}
           sub={<><span>실패 {partialText(t, 'fail')}</span><span>미등록 {partialText(t, 'missing')}</span><span>오래됨({data.rpoDays}일+) {partialText(t, 'old')}</span><span>백업 없음 {partialText(t, 'never')}</span>{bucketN.unknown ? <Tag>결과 모름 {bucketN.unknown}곳 제외</Tag> : null}</>} />
@@ -173,8 +173,8 @@ function BareosSummaryView() {
                   <td style={{ padding: '8px 10px' }}>
                     {bar ? (
                       <>
-                        <ResultBar b={bar} label={`성공 ${c.ok} · 경고 ${c.warn} · 실패 ${c.fail} · 진행 ${c.run} / 잡 ${c.jobs}`} />
-                        <div className="muted" style={{ fontSize: 11.5, marginTop: 4, whiteSpace: 'nowrap' }}>성공 {c.ok} · 경고 {c.warn} · 실패 {c.fail}{c.run ? ` · 진행 ${c.run}` : ''}</div>
+                        <ResultBar b={bar} label={`성공 ${c.ok} · 경고 ${c.warn} · 실패 ${c.fail}${c.cancel ? ` · 취소 ${c.cancel}` : ''} · 진행 ${c.run} / 잡 ${c.jobs}`} />
+                        <div className="muted" style={{ fontSize: 11.5, marginTop: 4, whiteSpace: 'nowrap' }}>성공 {c.ok} · 경고 {c.warn} · 실패 {c.fail}{c.cancel ? ` · 취소 ${c.cancel}` : ''}{c.run ? ` · 진행 ${c.run}` : ''}</div>
                       </>
                     ) : <span className="muted" style={{ fontSize: 12 }}>{bucket === 'unknown' ? `결과 모름 — ${UNKNOWN_WHY[r.director.state] || '조회 전입니다'}` : c.jobs > 0 ? '모름' : '잡 없음'}</span>}
                   </td>

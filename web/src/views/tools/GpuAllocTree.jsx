@@ -14,14 +14,18 @@ import { downloadFailText } from '../downloadFailText.js';
 import { Loading, ErrorBox, SearchBox } from '../../components/ui.jsx';
 import { vcQuickDot } from '../vcCardText.js';
 import { STable } from '../../components/STable.jsx';
-import { ALLOC_LEVELS, DEFAULT_LEVEL, KIND_TEXT, flattenAlloc, openForLevel, numText, pctText, sumTotals, corpChips, allocExportQuery } from './gpuAllocText.js';
+import { ALLOC_LEVELS, DEFAULT_LEVEL, KIND_TEXT, flattenAlloc, openForLevel, numText, pctText, sumTotals, corpChips, corpChipText, allocExportQuery } from './gpuAllocText.js';
 import { GpuAllocExportModal } from './GpuAllocExportModal.jsx';   // v2.855 내보내기 창(시안)
 
 const KIND_BADGE = { vc: 'blue', dc: 'gray', cl: 'gray', host: 'blue', gpu: 'teal', pt: 'amber', vsga: 'gray', unplaced: 'gray', off: 'gray', vm: 'gray' };
 const COLS = [
   { key: 'name', label: '이름' }, { key: null, label: '구분' }, { key: null, label: 'GPU 모델 · 프로파일' },
   { key: 'cap', label: '전체 GB', num: true }, { key: 'alloc', label: '할당 GB', num: true }, { key: 'spare', label: '예비 GB', num: true },
-  { key: 'pct', label: '할당률' }, { key: 'off', label: '꺼진 VM GB', num: true }, { key: null, label: 'VM 켜짐/꺼짐', num: true }, { key: null, label: '비고' },
+  { key: 'pct', label: '할당률' }, { key: 'off', label: '꺼진 VM GB', num: true }, { key: null, label: 'VM 켜짐/꺼짐', num: true },
+  // v2.868: 호스트·VM CPU/메모리(법인~호스트 = 호스트 합 · VM = 그 VM) · 켜진 GPU VM 의 vCPU·메모리 합
+  { key: 'cores', label: '코어·vCPU', num: true }, { key: 'cpuPct', label: 'CPU', num: true }, { key: 'memGB', label: '메모리 GB', num: true },
+  { key: 'memPct', label: '메모리', num: true }, { key: null, label: 'GPU VM vCPU·GB', num: true },
+  { key: null, label: '비고' },
 ];
 
 function Bar({ pct }) {
@@ -83,11 +87,11 @@ export function GpuAllocTree({ scope }) {
   if (!data) return <Loading />;
   const T = sumTotals(data, vcSel) || {};
   const kpis = [
-    { label: '전체 용량', value: numText(T.capGB), unit: T.capGB != null ? 'GB' : '', sub: `GPU ${T.gpus}장 · 호스트 ${T.hosts}대${T.vsga ? ` · vSGA ${T.vsga}장 제외` : ''}` },
-    { label: '할당(켜진 VM)', value: numText(T.allocGB), unit: 'GB', sub: `vGPU·GPU VM ${T.vmsOn}대 켜짐`, tone: 'alloc' },
+    { label: '전체 용량', value: numText(T.capGB), unit: T.capGB != null ? 'GB' : '', sub: `GPU ${T.gpus}장 · 호스트 ${T.hosts}대${T.vsga ? ` · vSGA ${T.vsga}장 제외` : ''}${T.capUnknown ? ` · 모름 ${T.capUnknown}장` : ''}` },
+    { label: '할당(켜진 VM)', value: numText(T.allocGB), unit: 'GB', sub: `vGPU·GPU VM ${T.vmsOn}대 켜짐${T.allocUnknown ? ` · 모름 ${T.allocUnknown}대` : ''}`, tone: 'alloc' },
     { label: '예비', value: numText(T.spareGB), unit: T.spareGB != null ? 'GB' : '', sub: `빈 GPU ${T.freeGpus}장${T.spareGB == null ? ' · 모르는 값이 섞여 계산 안 함' : ''}`, tone: 'spare' },
     { label: '할당률', value: pctText(T.allocPct), unit: '', sub: T.allocPct != null && T.allocPct >= 90 ? '포화에 가깝습니다' : '전체 대비 할당' },
-    { label: '꺼진 VM', value: numText(T.offGB), unit: T.offGB != null ? 'GB' : '', sub: `${T.vmsOff}대 — 켜면 필요한 양`, tone: 'off' },
+    { label: '꺼진 VM', value: numText(T.offGB), unit: T.offGB != null ? 'GB' : '', sub: `${T.vmsOff}대 — 켜면 필요한 양${T.offUnknown ? ` · 모름 ${T.offUnknown}대` : ''}`, tone: 'off' },
     { label: '확인할 것', value: String((T.allocUnknown || 0) + (T.capUnknown || 0) + (T.unplaced || 0)), unit: '건', sub: `할당 모름 ${T.allocUnknown || 0} · 용량 모름 ${T.capUnknown || 0} · 미배치 VM ${T.unplaced || 0}` },
   ];
   const arrow = (key) => (sort && sort.key === key ? (sort.dir === 'asc' ? ' ▲' : ' ▼') : '');
@@ -104,11 +108,12 @@ export function GpuAllocTree({ scope }) {
           const on = vcSel.has(c.id);
           const st = c.site ? vcQuickDot(c.site) : { dot: 'var(--text-faint)', down: false };
           const none = c.hosts === 0;
+          const ct = corpChipText(c);   // v2.871 A4-02: 수집 전 · 접속 불가 법인은 0 이 아니라 '—'
           return (
-            <button key={c.id} type="button" className={`qn-btn${on ? ' on' : ''}${st.down || none ? ' down' : ''}`} aria-pressed={on} onClick={() => toggleVc(c.id)}
-              title={`${c.name} — GPU 호스트 ${c.hosts}대 · GPU ${c.gpus}장${none ? '(GPU 가 설치된 호스트 없음)' : ''}\n${on ? '클릭하면 선택 해제' : '클릭하면 이 법인만 표시(여러 개 선택 가능)'}`}>
+            <button key={c.id} type="button" className={`qn-btn${on ? ' on' : ''}${st.down || none || c.unknown ? ' down' : ''}`} aria-pressed={on} onClick={() => toggleVc(c.id)}
+              title={`${c.name} — ${ct.title}${none ? '(GPU 가 설치된 호스트 없음)' : ''}\n${on ? '클릭하면 선택 해제' : '클릭하면 이 법인만 표시(여러 개 선택 가능)'}`}>
               <span className="qn-dot" style={{ background: st.dot }} />{c.id}
-              <span className="muted" style={{ fontWeight: 400, fontSize: 11 }}>{c.hosts}</span>
+              <span className="muted" style={{ fontWeight: 400, fontSize: 11 }}>{ct.count}</span>
             </button>
           );
         })}
@@ -134,17 +139,17 @@ export function GpuAllocTree({ scope }) {
         <span style={{ marginLeft: 'auto' }} />
         <button type="button" className="logout-btn" style={{ flex: 'none', padding: '6px 11px' }} disabled={loading} onClick={load}>{loading ? '불러오는 중…' : '⟳ 새로 고침'}</button>
         {canCsv() && <button type="button" className="logout-btn" style={{ flex: 'none', padding: '6px 11px' }} disabled={!!dlBusy} onClick={() => download('csv')} title="GPU·VM 한 줄씩(계층 열을 모두 채운 평면 표) — UTF-8(BOM)">{dlBusy === 'csv' ? '내려받는 중…' : '⬇ CSV'}</button>}
-        {canCsv() && <button type="button" className="login-btn" style={{ flex: 'none', padding: '6px 13px' }} disabled={!!dlBusy} onClick={() => setExportOpen(true)} title="넣을 단계(호스트 · GPU · VM)와 시트(계층 표 · 평면 표 · 안내)를 고른 뒤 내려받습니다">⬇ 엑셀(.xlsx)…</button>}
+        {canCsv() && <button type="button" className="login-btn" style={{ flex: 'none', padding: '6px 13px' }} disabled={!!dlBusy} onClick={() => setExportOpen(true)} title="법인(기본 모두) · 넣을 단계(호스트 · GPU · VM) · 시트(계층 표 · 평면 표 · 안내 · 법인별 시트)를 고른 뒤 내려받습니다">⬇ 엑셀(.xlsx)…</button>}
       </div>
       {dlMsg && <div className="error-box" style={{ marginBottom: 8 }}>{dlMsg}</div>}
-      {canCsv() && exportOpen && <GpuAllocExportModal scope={scope} vcSel={vcSel} onClose={() => setExportOpen(false)} />}
+      {canCsv() && exportOpen && <GpuAllocExportModal scope={scope} vcSel={vcSel} chips={chips} onClose={() => setExportOpen(false)} />}
       {err && <ErrorBox error={err} />}
       {(data.vcenters || []).length === 0 ? (
         <div className="card" style={{ padding: 16 }}><span className="muted">GPU 가 설치된 호스트가 없습니다.</span></div>
       ) : rows.length === 0 ? (
         <div className="card" style={{ padding: 16 }}><span className="muted">{query ? `‘${query}’ 에 맞는 법인·호스트·VM 이 없습니다` : '고른 법인에 GPU 가 설치된 호스트가 없습니다'}{vcSel.size ? ` (법인 ${[...vcSel].join(', ')} 선택 중)` : ''}.</span></div>
       ) : (
-        <STable className="gpu-alloc-table" minWidth={1180}>
+        <STable className="gpu-alloc-table" minWidth={1620}>
           <thead>
             <tr>
               {COLS.map((c) => (c.key ? (
@@ -173,6 +178,11 @@ export function GpuAllocTree({ scope }) {
                 <td>{r.pct != null || r.depth < 5 ? <Bar pct={r.pct} /> : ''}</td>
                 <td className="num off">{r.off != null ? numText(r.off) : ''}</td>
                 <td className="num">{r.vms}</td>
+                <td className="num">{r.cores != null ? numText(r.cores) : ''}</td>
+                <td className="num">{r.cpuPct != null ? pctText(r.cpuPct) : ''}</td>
+                <td className="num">{r.memGB != null ? numText(r.memGB) : ''}</td>
+                <td className="num">{r.memPct != null ? pctText(r.memPct) : ''}</td>
+                <td className="num">{r.gvmVcpu != null || r.gvmMemGB != null ? `${numText(r.gvmVcpu)} · ${numText(r.gvmMemGB)}` : ''}</td>
                 <td className={`note${r.tone ? ` t-${r.tone}` : ''}`}>{r.note}</td>
               </tr>
             ))}

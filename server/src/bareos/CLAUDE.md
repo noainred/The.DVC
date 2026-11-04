@@ -57,16 +57,16 @@
   2단계는 중앙 판정·저장 가능 여부(`checkDirectorUpdate`)를 **보내기 전에** 보고, 회신 ok → 중앙 저장 · 엣지는 성공 즉시(시한 안일 때만) 사본 갱신.
   ⑥ 폴러는 엣지 Director 를 **기다리지 않는다**(진행 중 poll 1개 · 회신 때 같은 반영 함수 · 회신 전은 실패로 세지 않는다). 화면은 서버 대기 시간(`relayLimits`)만큼 기다리고 시한·504 는 결과 모름.
   확정분·남긴 것 전문은 audits.md 'Bareos v2.824 법인 엣지 대행 검토 확정분'.
-- **v2.825.1 버그 점검**(사용자 요청 '버그 찾아서 수정' · `bareosBugs2825_1`·`_1b`): 성공으로 인증 정지를 풀 때는 **그 접속값이 지금 설정과 같을 때만**(`clearAuthStopIfSame`) ·
-  복원은 설정만 보면 아는 전제를 OTP 앞에서 · 엣지 성공 회신에 유효한 잡 이름이 없으면 결과 모름 · `ops.poll` 은 **대조를 먼저**(work 가 예산을 넘어도 `.jobs`·다시 끄기가 돈다) ·
-  엣지 자동 설정은 Director·서버마다 한 번에 하나(되돌리기까지) · 재시작하면 결과를 잃는 작업은 `inflight.js` → 업그레이드 자동 적용이 기다린다 · 취소의 끝난 행은 type B 만 반영.
-  전문·남긴 것은 audits.md 'Bareos v2.825.1 버그 점검 확정분'.
+- **v2.825.1 버그 점검**(`bareosBugs2825_1`·`_1b`): 인증 정지 해제는 같은 접속값일 때만(`clearAuthStopIfSame`) · 복원 전제는 OTP 앞 · `ops.poll` 은 대조 먼저 ·
+  재시작하면 결과를 잃는 작업은 `inflight.js` · 취소의 끝난 행은 type B 만 — 전문 audits.md 'Bareos v2.825.1 버그 점검 확정분'.
 - **v2.828 결과 창**(`decBytesText` 하나) — audits.md 'v2.833' 끝. **v2.841·842**: 목록 `.schedule` · @@own(job 제외) · 겹침은 화면·서버 둘 다 · 쓰기 OTP 는 세션 보안 `bareosSetupOtp`(기본 켬·불리언 false 만·꺼도 OTP 등록 계정만) — audits.md.
 - **v2.830 백업 그룹**(`groups`·`groupSchedule`·`groupRunner`·`jobLocks` · `bareosGroups2830`): 스케줄은 포탈이 실행(그룹 잡은 Director 스케줄 없이 등록) · 회차는 **보내기 전에** 한 틱 한 번의 쓰기로 기록 · VM 은 그룹 하나 · 같은 Director 는 차례로 · 대상 잠금 공용. v2.831 보관 개수(`groupRetention` — 카탈로그 삭제)는 실행이 끝난 뒤 기준 Full 앞만·순서 어긋나면 안 지움 · 넓히는 저장은 본인 OTP(v2.831.1). 전문은 audits.md 'Bareos v2.830'·'v2.831' 절.
 - **v2.833·834 진행 현황판**(`liveStatus`·`liveParse` · `bareosLive2833`): 화면이 열린 동안만 `status client=`·`status director` · Director 마다 시한 · 흐름은 법인마다 · 모름은 null · 멈춤 의심은 FD 조회 성공일 때만. 전문 audits.md 'v2.833'·'v2.834'(정책 수집 'v2.839'·'v2.840').
-- 실환경 미확인(추정 — `tools/bareos-probe.js` 로 확인할 것): Node↔Director TLS-PSK 협상 · 잡 수준 FdPluginOptions 와 FileSet 플러그인 문자열 병합 ·
+- 실환경 미확인(추정 — `tools/bareos-probe.js` 로 확인할 것): Node↔Director TLS-PSK 협상 · 잡 수준 FdPluginOptions 병합(복원엔 안 옴 — v2.866 실측) ·
   `.bvfs_get_jobids` JSON 모양 · Profile ACL 지시어 이름 · `list jobs days=N` · 25.x `.jobs` 의 enabled 칸(master 소스 기준 — 없으면 다시 끄기를 하지 않는다) · Migration 행의 시작 시각.
-- **v2.828 조회 화면 · v2.843 법인 로컬**: audits.md 'Bareos v2.828 조회 화면 모듈 규칙' · 'v2.843'(정리 미리 보기 = pruneJobs 판정 · `siteAgent`) · **v2.861 묶음 복원 · NIC 끊기 · v2.862 검증 · 요약 메일**.
+- **v2.828 조회 · v2.843 법인 로컬**(pruneJobs · `siteAgent`) · **v2.861 묶음 복원 · v2.862 검증 · 요약**: audits.md. **v2.874**: literalQuotes · 결과 모름 기록 · `restoreHeld`. **재해 복구**(`drPlan`): 규칙은 서버 — audits.md.
 - **v2.846~848**(`bareosBugs2846a`·`c`·`2847a`~`c`·`bareosConfigurePerm2848`): 보관 정리 새 쪽부터 · 옛 TLS 정지 이관 · 등록 도중 끊김 = 결과 모름 · configure 권한 · 포탈 리소스 판정은 `configurePerm.js` 하나 — audits.md.
+- **v2.867 중단 · 취소**(`cancelState`·`bareosCancel2867`): 판정은 `cancelState.js` 하나 · `cancelJobs` = 단건 `cancelOne` · 그룹 중단은 덩어리 사이에서만 · 중단 회차는 보관 정리 안 함 — audits.md 'v2.867'.
+- **v2.872 묶음 로그**(`logFirstError`·`ops.logs` · `bareosErrLog2872`): 첫 오류 줄만 · 15건 · 이 잡의 실행 검사 · 범위 밖 = 없는 대상 — audits.md 'v2.872'.
 - **v2.844 완전 설치**: 규칙 전문은 `install/CLAUDE.md`(엣지 노드 안 러너 · 그 단계만 되돌림 · 볼륨 삭제 세 겹 · 번들 서명 · OTP 코드 없음).
 - **v2.845 법인별 설정 · 계정 통합**: 규칙 전문은 `manage/CLAUDE.md`(표지 파일만 · 재시작 직전 재확인 · 등록부 SSH 는 담당 엣지 것만).

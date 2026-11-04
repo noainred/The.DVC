@@ -31,6 +31,7 @@ import { runningScans, resumeOutlookText, queuedScans } from '../util/scanJourna
 import { runningBulkDeploys as bulkDeployRuns } from '../agent/bulkDeploy.js';             // v2.742(TIMING-04): 진행 중인 에이전트 대량 배포도 기다린다(읽기만)
 import { runnerStatus as vmcloneRunnerStatus } from '../vmclone/runner.js';  // v2.741(TIMING-01 ③): 실행 중 VM 복제 잡도 기다린다(읽기만)
 import { getJob as vmcloneJob } from '../vmclone/store.js';
+import { runningBareosFinishes } from '../vmclone/execOp.js';   // v2.874(점검 B2-02): Bareos 복원 마무리(NIC 끊기 · 검증 — vCenter 줄)도 기다린다(읽기만)
 import { runningBareosWork } from '../bareos/inflight.js';   // v2.825.1(G15): 엣지 대행 작업·늦은 회신·자동 설정도 기다린다(재시작하면 결과를 잃는다 · 읽기만)
 import { poolSettled } from '../util/pool.js';
 import { numOrNull } from '../util/numOrNull.js';
@@ -76,7 +77,12 @@ export function runningBulkDeploys() {
   try { return bulkDeployRuns(); } catch { return []; }
 }
 /** v2.825.1(G15): 재시작하면 결과를 잃는 Bareos 작업(엣지 대행 상태 변경·늦은 회신 대기·자동 설정 — bareos/inflight.js). 상한은 스캔과 같다. */
-function bareosWork() { try { return runningBareosWork(); } catch { return []; } }
+function bareosWork() {
+  let a = []; let b = [];
+  try { a = runningBareosWork(); } catch { a = []; }
+  try { b = runningBareosFinishes(); } catch { b = []; }   // v2.874(점검 B2-02): 복원 마무리(NIC 끊기 · 검증 — vCenter 줄)
+  return [...a, ...b];
+}
 /**
  * v2.742(감사 RECENT-02): 자동 적용이 기다리는 **시작하지 못한 '지금 수집' 대기 요청**(util/scanJournal queuedScans).
  *   기록이 파일에 남은(resumable) 대기 요청은 재시작 뒤 그 기능의 대기열로 돌아오므로 기다리지 않는다(분리 실행 du 와 같은 판단 — TIMING-03).
@@ -188,7 +194,8 @@ export class UpgradeManager {
     this.deferral = null;       // v2.737: { since, until, latest, scans } — 실행 중 스캔이 끝나기를 기다리는 중
     this.deferTimer = null;
     // v2.859: 등록된 엣지(수집 서버)를 중앙 버전으로 맞추는 주기 동기화 — 확인·적용 중에는 건너뛰고, 적용은 진행 중인 동기화 push 를 기다린다.
-    this.edgeSync = new EdgeSyncRunner({ settings: () => this.settings, busy: () => !!this._applying || this.#ticking });
+    // v2.865 A: 동기화 한 번이 끝날 때마다 상태 파일에 남긴다(onRun) — 재시작 뒤에도 '마지막 동기화' 가 보인다.
+    this.edgeSync = new EdgeSyncRunner({ settings: () => this.settings, busy: () => !!this._applying || this.#ticking, onRun: () => this.#save() });
   }
 
   // v2.736.2: 적용 결과는 routes(엣지·수집기 push 수신)도 대입한다 — 대입하면 파일에도 남는다.
@@ -206,6 +213,7 @@ export class UpgradeManager {
     if (!this.lastCheck && prev.lastCheck) this.lastCheck = prev.lastCheck;
     if (!this.#lastResult && prev.lastResult) this.#lastResult = prev.lastResult;
     if (!this.lastTick && prev.lastTick) this.lastTick = prev.lastTick;
+    if (prev.lastEdgeSync) this.edgeSync.restore(prev.lastEdgeSync); // v2.865 A
     this.persist = { enabled: true, file, error: r.error || null, corruptKept: r.corruptKept || null, restored: !!(prev.lastCheck || prev.lastResult || prev.lastTick) };
     if (r.error) console.warn(`[upgrade] ${r.error}${r.corruptKept ? ` — 원본은 ${r.corruptKept}` : ''}`);
     return this.persist;
@@ -213,7 +221,7 @@ export class UpgradeManager {
 
   #save() {
     if (!this.persist?.enabled || !this.persist.file) return;
-    const err = writeUpgradeStatus(this.persist.file, { lastCheck: this.lastCheck, lastResult: this.#lastResult, lastTick: this.lastTick });
+    const err = writeUpgradeStatus(this.persist.file, { lastCheck: this.lastCheck, lastResult: this.#lastResult, lastTick: this.lastTick, lastEdgeSync: this.edgeSync?.lastRun || null }); // v2.865 A
     if (err && err !== this.persist.error) console.warn(`[upgrade] ${err}`);
     this.persist.error = err;
   }

@@ -1,0 +1,244 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>위키 — 페이지 보기</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=Noto+Sans+KR:wght@400;500;700;800&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+body{margin:0;background:#0a0e17;color:#e6edf6;font-family:"Inter","Noto Sans KR","Apple SD Gothic Neo",sans-serif;font-size:13px}
+a{color:#93c5fd}a:hover{color:#bfdbfe}
+.tb{display:flex;align-items:center;gap:14px;height:44px;padding:0 16px;background:#0f1626;border-bottom:1px solid #243049}
+.tb .logo{display:inline-flex;align-items:center;gap:8px;font-weight:800;font-size:14px}
+.tb .logo .v{width:26px;height:26px;border-radius:7px;background:#3b82f6;display:inline-flex;align-items:center;justify-content:center;font-size:13px;color:#fff}
+.ver{font-size:11px;font-weight:700;color:#5eead4;border:1px solid #2dd4bf;border-radius:6px;padding:1px 6px}
+.mock{font-size:11px;font-weight:800;color:#fcd34d;background:rgba(245,158,11,.16);border-radius:6px;padding:2px 7px}
+.cmdk{flex:0 1 420px;height:30px;border-radius:8px;background:#0a0e17;border:1px solid #243049;color:#5d6b85;font-size:12px;display:flex;align-items:center;padding:0 12px;gap:8px}
+.side{flex:0 0 236px;background:#0f1626;border-right:1px solid #243049;padding:14px 10px;display:flex;flex-direction:column;gap:2px}
+.side a{display:flex;align-items:center;gap:10px;min-height:36px;padding:0 12px;border-radius:9px;color:#aebbd0;text-decoration:none;font-size:13.5px;font-weight:600}
+.side a.on{background:#1a2236;color:#e6edf6;box-shadow:inset 3px 0 0 #3b82f6}
+.side .n{margin-left:auto;font-size:11px;color:#5d6b85}
+.card{background:#141b2d;border:1px solid #243049;border-radius:12px}
+.muted{color:#8b9bb4}.faint{color:#5d6b85}
+.mono{font-family:"JetBrains Mono",ui-monospace,monospace}
+.btn{display:inline-flex;align-items:center;gap:6px;min-height:30px;padding:0 11px;border-radius:8px;border:1px solid #243049;background:#1a2236;color:#e6edf6;font:inherit;font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap;text-decoration:none}
+.btn.primary{background:#3b82f6;border-color:#3b82f6;color:#fff}
+.btn.sm{min-height:26px;padding:0 9px;font-size:11.5px}
+.tag{display:inline-flex;align-items:center;gap:5px;height:20px;padding:0 8px;border-radius:999px;font-size:11px;font-weight:700;white-space:nowrap}
+.tag.blue{background:rgba(59,130,246,.18);color:#93c5fd}.tag.gray{background:rgba(139,155,180,.14);color:#aebbd0}.tag.ok{background:rgba(34,197,94,.14);color:#86efac}.tag.warn{background:rgba(245,158,11,.16);color:#fcd34d}.tag.bad{background:rgba(239,68,68,.16);color:#fca5a5}.tag.purple{background:rgba(168,85,247,.18);color:#d8b4fe}
+.iss{display:inline-flex;align-items:center;gap:6px;height:22px;padding:0 8px 0 6px;border-radius:6px;border:1px solid #243049;background:#0f1626;color:#e6edf6;font-size:12px;font-weight:600;text-decoration:none;vertical-align:middle}
+.iss .k{font-family:"JetBrains Mono",monospace;color:#93c5fd;font-size:11.5px}
+.iss .st{width:8px;height:8px;border-radius:50%}
+.tree a{display:flex;align-items:center;gap:6px;min-height:28px;padding:0 8px;border-radius:7px;color:#aebbd0;text-decoration:none;font-size:12.5px}
+.tree a.on{background:#1a2236;color:#e6edf6;font-weight:700}
+.tree .d1{padding-left:22px}.tree .d2{padding-left:38px}
+.av{display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:50%;font-size:11px;font-weight:800;color:#fff;flex:0 0 auto}
+.doc h1{font-size:26px;margin:0 0 6px;letter-spacing:-.01em}
+.doc h2{font-size:17px;margin:26px 0 8px;padding-bottom:6px;border-bottom:1px solid #1f2a40}
+.doc h3{font-size:14px;margin:18px 0 6px}
+.doc p,.doc li{font-size:13.5px;line-height:1.7;color:#d6deea}
+.doc ul{margin:4px 0;padding-left:22px}
+.doc table{border-collapse:collapse;width:100%;margin:8px 0;font-size:12.5px}
+.doc th{font-weight:600;color:#8b9bb4;text-align:left;padding:7px 10px;background:#0f1626;border-bottom:1px solid #243049}
+.doc td{padding:7px 10px;border-bottom:1px solid #1f2a40}
+.doc code{font-family:"JetBrains Mono",monospace;font-size:12px;background:#0f1626;border:1px solid #243049;border-radius:5px;padding:1px 5px}
+.doc pre{font-family:"JetBrains Mono",monospace;font-size:12px;background:#0f1626;border:1px solid #243049;border-radius:8px;padding:10px 12px;margin:8px 0;overflow:auto;line-height:1.6}
+.prop{display:flex;flex-direction:column;gap:5px}
+.prop .l{font-size:11.5px;font-weight:700;color:#8b9bb4;letter-spacing:.3px}
+.sb{display:flex;align-items:center;gap:0;height:30px;background:#0f1626;border-top:1px solid #243049;font-family:"JetBrains Mono",monospace;font-size:11.5px;color:#8b9bb4}
+.sb span{flex:1;text-align:center;border-right:1px solid #243049}.sb span:last-child{border-right:0}
+.sb b{color:#e6edf6}
+.input{min-height:30px;border:1px solid #243049;border-radius:8px;background:#0a0e17;color:#e6edf6;font:inherit;font-size:12.5px;padding:0 10px}
+</style>
+</helmet>
+
+<div style="min-height: 100vh; display: flex; flex-direction: column; background: #0a0e17">
+  <header class="tb">
+    <span class="muted" aria-hidden="true">☰</span>
+    <span class="logo"><span class="v">V</span>The Davinci</span>
+    <span class="ver">v2.876.0</span><span class="mock">MOCK</span>
+    <span style="flex: 1"></span>
+    <label class="cmdk"><span aria-hidden="true">⌕</span><input type="text" placeholder="기능 · 탭 찾기" style="all: unset; flex: 1; color: #e6edf6"></label>
+    <span style="flex: 1"></span>
+    <span class="mono muted" style="font-size: 11.5px">11/11 vCenter <b style="color: #22c55e">OK</b> · 오전 10:12</span>
+    <span class="av" style="background: #3b82f6">A</span>
+    <span style="font-size: 12.5px; font-weight: 700">Anonymous <span class="muted" style="font-weight: 400; font-size: 11px">관리자</span></span>
+    <button class="btn sm" type="button">Out</button>
+  </header>
+
+  <div style="display: flex; flex-wrap: wrap; flex: 1">
+    <nav class="side" aria-label="메뉴">
+      <a href="#"><span aria-hidden="true">◫</span>Overview</a>
+      <a href="#"><span aria-hidden="true">▤</span>Summary</a>
+      <a href="#"><span aria-hidden="true">▣</span>서버<span class="n">6 ▾</span></a>
+      <a href="#"><span aria-hidden="true">▥</span>스토리지<span class="n">7 ▾</span></a>
+      <a href="#"><span aria-hidden="true">⌘</span>네트워크<span class="n">6 ▾</span></a>
+      <a href="#"><span aria-hidden="true">⚙</span>자원관리<span class="n">3 ▾</span></a>
+      <a href="#"><span aria-hidden="true">◔</span>자원 최적화<span class="n">2 ▾</span></a>
+      <a href="#"><span aria-hidden="true">✦</span>특수 기능</a>
+      <a href="#"><span aria-hidden="true">⚑</span>이슈</a>
+      <a href="Main.dc.html" class="on"><span aria-hidden="true">▧</span>위키 <span class="tag purple" style="height: 16px; font-size: 10px; padding: 0 6px">NEW</span></a>
+      <a href="#"><span aria-hidden="true">▭</span>게시판</a>
+      <a href="#"><span aria-hidden="true">✲</span>설정<span class="n">2 ▾</span></a>
+    </nav>
+
+    <main style="flex: 999 1 560px; min-width: 0; padding: 16px 22px 24px; display: flex; flex-direction: column; gap: 12px">
+      <!-- 위키 머리: 스페이스 · 서브탭 · 검색 · 동작 -->
+      <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap">
+        <label style="display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; color: #8b9bb4">스페이스
+          <select class="input" aria-label="스페이스" style="min-width: 190px">
+            <option>공용(전 법인)</option>
+            <option selected>vcenter-ap-northeast-01 · 서울</option>
+            <option>vcenter-eu-central-01 · 프랑크푸르트</option>
+            <option>vcenter-us-east-01 · 버지니아</option>
+          </select>
+        </label>
+        <div style="display: inline-flex; gap: 6px">
+          <a class="btn" href="WikiHome.dc.html">대문</a>
+          <a class="btn primary" href="Main.dc.html">페이지</a>
+          <a class="btn" href="WikiNew.dc.html">검색</a>
+          <a class="btn" href="WikiNew.dc.html">템플릿</a>
+          <a class="btn" href="#">최근 변경</a>
+        </div>
+        <span class="muted" style="font-size: 12px">페이지 48 · 최근 7일 변경 9 · 내가 지켜보는 페이지 4</span>
+        <span style="flex: 1"></span>
+        <a class="btn" href="WikiHistory.dc.html">버전 이력 12</a>
+        <a class="btn" href="WikiEdit.dc.html">수정</a>
+        <a class="btn primary" href="WikiNew.dc.html">+ 새 페이지</a>
+      </div>
+
+      <div style="display: flex; gap: 12px; align-items: flex-start; flex-wrap: wrap">
+        <!-- 페이지 트리 -->
+        <aside class="card tree" aria-label="페이지 트리" style="flex: 0 1 250px; min-width: 0; padding: 10px 8px; display: flex; flex-direction: column; gap: 1px">
+          <label style="padding: 0 6px 8px"><input class="input" type="search" placeholder="이 스페이스에서 찾기" aria-label="이 스페이스에서 찾기" style="width: 100%; box-sizing: border-box; min-height: 28px"></label>
+          <a href="#"><span aria-hidden="true">▾</span>운영 절차</a>
+          <a href="#" class="d1"><span aria-hidden="true">▸</span>vCenter 수집기 점검</a>
+          <a href="#" class="d1 on"><span aria-hidden="true">▾</span>PL-WAW 수집 타임아웃 대응</a>
+          <a href="#" class="d2">· 2026-11 장애 보고서</a>
+          <a href="#" class="d2">· 시한 조정 런북</a>
+          <a href="#" class="d1"><span aria-hidden="true">▸</span>Bareos 복원 리허설</a>
+          <a href="#"><span aria-hidden="true">▾</span>회의록</a>
+          <a href="#" class="d1">· 2026-11-03 주간</a>
+          <a href="#" class="d1">· 2026-10-27 주간</a>
+          <a href="#"><span aria-hidden="true">▸</span>변경 계획</a>
+          <a href="#"><span aria-hidden="true">▸</span>온보딩</a>
+          <div class="faint" style="font-size: 11.5px; padding: 8px 8px 2px; border-top: 1px solid #1f2a40; margin-top: 6px">끌어서 옮기기 · 트리는 스페이스마다 · 하위 3단계까지</div>
+        </aside>
+
+        <!-- 본문 -->
+        <article class="card doc" style="flex: 999 1 520px; min-width: 0; padding: 22px 26px 26px">
+          <div class="muted" style="font-size: 12px; display: flex; gap: 6px; align-items: center; flex-wrap: wrap">
+            <a href="#">운영 절차</a><span>›</span><a href="#">vCenter 수집기 점검</a><span>›</span><span style="color: #e6edf6">PL-WAW 수집 타임아웃 대응</span>
+            <span style="flex: 1"></span>
+            <span class="tag gray">v12</span><span class="tag ok">최신</span>
+          </div>
+          <h1>PL-WAW 수집 타임아웃 대응</h1>
+          <div class="muted" style="font-size: 12px; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 12px">
+            <span class="av" style="background: #a855f7; width: 20px; height: 20px; font-size: 10px">K</span><span>kim 이 2026-11-04 09:41 에 고침 · 만든 사람 lee · 2026-10-29</span>
+            <span>·</span><span>라벨</span><span class="tag blue">vcenter</span><span class="tag blue">수집</span><span class="tag blue">pl-waw</span>
+          </div>
+
+          <h2>요약</h2>
+          <p>폴란드 법인 vCenter 는 RTT 가 800ms 를 넘어 기본 수집 시한(60초) 안에 호스트 658대 인벤토리를 다 받지 못하는 날이 있다. 이 문서는 <strong>증상 → 확인 → 시한 조정 → 재발 방지</strong> 순서의 대응 절차다. 진행 중인 이슈는 <a class="iss" href="IssueEpic.dc.html"><span class="st" style="background: #3b82f6"></span><span class="k">ISS-1</span>vCenter PL-WAW 수집 타임아웃 간헐 발생</a> 이고, 상위 에픽은 <a class="iss" href="IssueEpic.dc.html"><span class="st" style="background: #a855f7"></span><span class="k">ISS-20</span>고RTT 법인 수집 안정화</a> 다.</p>
+
+          <h2>1. 증상</h2>
+          <ul>
+            <li>Overview 의 vCenter 카드가 <code>timeout</code> 으로 바뀌고 10분 뒤 자동 복구된다(간헐).</li>
+            <li>엣지 로그 <code>collect.inventory</code> 에 <code>deadline exceeded after 60.0s</code> 가 하루 2~5회.</li>
+          </ul>
+
+          <h2>2. 확인</h2>
+          <table>
+            <thead><tr><th>볼 곳</th><th>정상</th><th>이상</th></tr></thead>
+            <tbody>
+              <tr><td>설정 › 수집 서버 › pl-waw · 지연</td><td>650~820ms</td><td>1,100ms 이상이 10분 넘게</td></tr>
+              <tr><td>특수 기능 › 통신 점검</td><td>5단계 전부 OK</td><td>TLS 단계만 2초 이상</td></tr>
+              <tr><td>엣지 상태 export</td><td>마지막 보고 5분 안</td><td>보고 없음(무음)</td></tr>
+            </tbody>
+          </table>
+
+          <h2>3. 시한 조정(런북)</h2>
+          <pre>vmware-portal-config set collect.deadlineMs 90000 --vcenter vc-pl-waw
+systemctl restart vmware-portal-edge</pre>
+          <p>바꾼 뒤 <a class="iss" href="IssueEpic.dc.html"><span class="st" style="background: #22c55e"></span><span class="k">ISS-18</span>시한 90초 적용 결과 확인</a> 에 결과를 남긴다. 시한은 법인 단위라 다른 법인에는 영향이 없다.</p>
+
+          <h2>4. 재발 방지</h2>
+          <ul>
+            <li>수집 분할(호스트 300대 단위) — 변경 계획 <a href="#">[변경 계획] 수집 분할</a> 참조(초안).</li>
+            <li>이 문서를 고치면 관련 이슈의 ‘관련 문서’ 에 자동으로 보인다 — 따로 붙일 필요가 없다.</li>
+          </ul>
+
+          <!-- 댓글 -->
+          <div style="margin-top: 28px; padding-top: 14px; border-top: 1px solid #243049">
+            <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 10px"><b style="font-size: 14px">댓글 3</b><span class="muted" style="font-size: 12px">· @멘션하면 이슈 알림과 같은 경로(묶음 메일 · 팀 채팅)로 알립니다</span></div>
+            <div style="display: flex; gap: 10px; padding: 8px 0; border-bottom: 1px solid #1f2a40">
+              <span class="av" style="background: #22c55e">C</span>
+              <div style="min-width: 0; flex: 1"><div><b>choi</b> <span class="muted" style="font-size: 12px">· 2026-11-04 09:50 · v12 기준</span></div>
+                <div style="font-size: 13px; margin-top: 3px">3절 시한을 90초로 올린 뒤 US-East 도 같은 증상이라 이 절차를 그대로 쓰면 될까요? <a href="#">@kim</a></div></div>
+            </div>
+            <div style="display: flex; gap: 10px; padding: 8px 0 8px 34px; border-bottom: 1px solid #1f2a40">
+              <span class="av" style="background: #a855f7">K</span>
+              <div style="min-width: 0; flex: 1"><div><b>kim</b> <span class="muted" style="font-size: 12px">· 09:58 · 답글</span></div>
+                <div style="font-size: 13px; margin-top: 3px">됩니다. 다만 US-East 는 호스트가 225대라 분할 없이도 75초면 충분합니다 — <a class="iss" href="IssueEpic.dc.html"><span class="st" style="background: #8b9bb4"></span><span class="k">ISS-21</span>US-East 시한 조정</a> 로 따로 열었습니다.</div></div>
+            </div>
+            <div style="display: flex; gap: 10px; padding: 8px 0; border-bottom: 1px solid #1f2a40">
+              <span class="av" style="background: #3b82f6">L</span>
+              <div style="min-width: 0; flex: 1"><div><b>lee</b> <span class="muted" style="font-size: 12px">· 10:04 · v11 기준</span> <span class="tag warn" style="height: 18px">이 댓글 뒤에 문서가 바뀜</span></div>
+                <div style="font-size: 13px; margin-top: 3px">2절 표의 ‘정상’ 지연 범위는 어디서 잰 값인가요?</div></div>
+            </div>
+            <div style="display: flex; gap: 10px; margin-top: 10px; align-items: flex-start">
+              <span class="av" style="background: #3b82f6">A</span>
+              <div style="flex: 1; display: flex; flex-direction: column; gap: 6px">
+                <textarea class="input" rows="2" aria-label="댓글" placeholder="댓글 — @이름 으로 멘션 · ISS-번호 는 자동으로 이슈 링크" style="padding: 8px 10px; resize: vertical"></textarea>
+                <div style="display: flex; gap: 6px; align-items: center"><button class="btn primary" type="button">댓글 달기</button><span class="faint" style="font-size: 11.5px">댓글은 운영자 · 관리자 · 요청 권한(issues.request) 계정이 쓸 수 있습니다</span></div>
+              </div>
+            </div>
+          </div>
+        </article>
+
+        <!-- 오른쪽: 페이지 정보 -->
+        <aside class="card" aria-label="페이지 정보" style="flex: 0 1 270px; min-width: 0; padding: 16px; display: flex; flex-direction: column; gap: 14px">
+          <div class="prop"><span class="l">관련 이슈 · 4</span>
+            <a class="iss" href="IssueEpic.dc.html" style="justify-content: flex-start"><span class="st" style="background: #a855f7"></span><span class="k">ISS-20</span><span style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap">고RTT 법인 수집 안정화</span></a>
+            <a class="iss" href="IssueEpic.dc.html" style="justify-content: flex-start"><span class="st" style="background: #3b82f6"></span><span class="k">ISS-1</span><span style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap">PL-WAW 수집 타임아웃</span></a>
+            <a class="iss" href="IssueEpic.dc.html" style="justify-content: flex-start"><span class="st" style="background: #22c55e"></span><span class="k">ISS-18</span><span style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap">시한 90초 적용 결과 확인</span></a>
+            <a class="iss" href="IssueEpic.dc.html" style="justify-content: flex-start"><span class="st" style="background: #8b9bb4"></span><span class="k">ISS-21</span><span style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap">US-East 시한 조정</span></a>
+            <span class="faint" style="font-size: 11.5px">본문 · 댓글에 적힌 키를 저장 때 색인합니다. 점은 이슈 상태색(백로그 회색 · 진행 파랑 · 완료 초록 · 에픽 보라).</span>
+          </div>
+          <div class="prop"><span class="l">지켜보기 · 3</span>
+            <div style="display: flex; gap: 4px; align-items: center"><span class="av" style="background: #a855f7">K</span><span class="av" style="background: #22c55e">C</span><span class="av" style="background: #3b82f6">L</span><button class="btn sm" type="button" style="margin-left: 6px">지켜보기</button></div>
+            <span class="faint" style="font-size: 11.5px">지켜보는 사람은 문서가 바뀌거나 댓글이 달리면 알림을 받습니다.</span>
+          </div>
+          <div class="prop"><span class="l">법인(스페이스)</span><span>vcenter-ap-northeast-01 · 서울</span></div>
+          <div class="prop"><span class="l">템플릿</span><span>런북 <span class="muted">(v1 에서 시작)</span></span></div>
+          <div class="prop"><span class="l">상태</span><span class="tag ok" style="align-self: flex-start">검토 완료</span><span class="faint" style="font-size: 11.5px">초안 · 검토 중 · 검토 완료 · 보관 — 문서 상태는 이슈 상태와 다른 축입니다.</span></div>
+          <div class="prop"><span class="l">최근 버전</span>
+            <div style="font-size: 12px; display: flex; flex-direction: column; gap: 4px">
+              <span><b>v12</b> kim · 09:41 · ‘3절 시한 90초 반영’</span>
+              <span><b>v11</b> lee · 11-03 17:20 · ‘2절 표 추가’</span>
+              <span><b>v10</b> kim · 11-01 · ‘재발 방지 보강’</span>
+            </div>
+            <a href="WikiHistory.dc.html" style="font-size: 12px">전체 이력 · 비교 →</a>
+          </div>
+          <div class="prop"><span class="l">동작</span>
+            <div style="display: flex; gap: 6px; flex-wrap: wrap"><button class="btn sm" type="button">링크 복사</button><button class="btn sm" type="button">옮기기</button><button class="btn sm" type="button">보관</button><button class="btn sm" type="button">PDF</button></div>
+          </div>
+        </aside>
+      </div>
+    </main>
+  </div>
+
+  <footer class="sb" aria-label="상태"><span>서버 Uptime <b>6일</b></span><span>전체 호스트 <b>658</b></span><span>전체 VM <b>5,850</b> (5,412 On)</span><span>활성 알람 <b style="color: #ef4444">3</b></span></footer>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1180}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

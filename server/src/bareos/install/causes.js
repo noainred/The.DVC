@@ -85,7 +85,7 @@ const any = (...ts) => (e) => { for (const t of ts) { const r = t(e); if (r) ret
 export const RULES = Object.freeze([
   R('ssh-auth', 'SSH 로그인 실패(저장된 계정)', (e) => (e.sshAuth ? (e.message || 'authentication failed').slice(0, 300) : null),
     '배포 등록부에 저장된 이 엣지의 SSH 비밀번호(또는 키)를 서버가 거부했습니다. 계정 잠금을 막으려고 자동으로 다시 시도하지 않습니다.',
-    [{ kind: 'server', label: '배포 등록부의 SSH 계정을 고친 뒤 다시 시도', detail: '배포 › 엣지 노드에서 이 엣지의 root 비밀번호를 새로 저장하세요.' }]),
+    [{ kind: 'server', label: '배포 등록부의 SSH 계정을 고친 뒤 다시 시도', detail: '설정 › 원격 법인(DC)에 Edge 노드 포탈 설치 › 에이전트 현황에서 이 엣지 대상을 편집해 root 비밀번호를 새로 저장하세요.' }]),
   R('busy', '같은 서버에서 다른 작업이 진행 중', causeIs('busy'),
     '같은 서버(또는 같은 Director)의 자동 설정 · 설정 변경 · 설치가 진행 중이라 시작하지 않았습니다(아무것도 바꾸지 않았습니다).',
     [{ kind: 'retry', label: '그 작업이 끝난 뒤 그대로 다시', detail: '' }]),

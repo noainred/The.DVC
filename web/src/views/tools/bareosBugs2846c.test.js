@@ -66,7 +66,7 @@ describe('U-9 그룹 — Director 결과를 모르면 모름', () => {
   const rows = [{ b: { st: 'ok' } }, { b: { st: 'ok' } }, { b: { st: 'error' } }];
   it('resultsKnown=false 면 결과 수는 null · 배지는 결과 모름(초록 아님)', () => {
     const m = memberResults(rows, { resultsKnown: false });
-    expect(m).toEqual({ n: 3, ok: null, warn: null, fail: null, run: null, never: null, unknown: 3 });
+    expect(m).toEqual({ n: 3, ok: null, warn: null, fail: null, cancel: null, run: null, never: null, unknown: 3 });   // v2.867 취소 칸(cancel)도 모름
     expect(resultBadge(m)).toEqual({ text: '결과 모름 3대', tone: 'muted' });
     expect(resultBadge(memberResults([{ b: { st: 'ok' } }], { resultsKnown: true }))).toEqual({ text: '성공 1/1', tone: 'ok' });
   });

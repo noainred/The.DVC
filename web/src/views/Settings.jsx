@@ -1,6 +1,6 @@
 import React, { lazy, Suspense } from 'react';
 import { Loading } from '../components/ui.jsx';
-import { isSuperAdminUser } from '../api.js';
+import { isSuperAdminUser, toolAllowed } from '../api.js';
 // v2.580(튜닝): 설정 하위 화면 42개가 **한 청크(605KB)** 로 묶여 있었다 — 어느 탭을 열든 전부 받는다.
 // 큰 화면 12개(Collectors 1,012줄 …)를 lazy 로 떼어 탭을 열 때만 받는다. `SUB` 표·키·URL 은 그대로다.
 import { useHashTab } from '../hooks/useHashTab.js';
@@ -51,6 +51,7 @@ import HorizonAdmin from './HorizonAdmin.jsx'; // v2.685
 const IsiduSettingsPage = lazy(() => import('./tools/IsiduSettingsPage.jsx')); // v2.740 아이실론 수집 대상 설정(슈퍼 관리자 전용)
 const GuestPartSettings = lazy(() => import('./tools/GuestPartSettings.jsx')); // v2.749 게스트 파티션 사용률 — 조회 주기·임계·무시 규칙·메일
 const VeeamSettings = lazy(() => import('./VeeamSettings.jsx')); // v2.751 Veeam 백업 서버(vCenter 별 · 중앙 또는 그 법인 엣지가 읽음)
+const BareosSettingsPage = lazy(() => import('./BareosSettingsPage.jsx')); // v2.878 Bareos 설정(예전 Backup › Bareos › 설정 탭)
 
 // 모든 하위 화면 정의(키→라벨→컴포넌트). 그룹에 속한 항목은 group 키로 묶는다.
 const SUB = [
@@ -59,6 +60,9 @@ const SUB = [
   { k: 'vcenter-admin', label: 'vCenter 등록·관리', C: VCenterAdmin, group: 'vcenter' },
   { k: 'vcenter-test', label: 'vCenter 연결 테스트', C: VCenterConnTest, group: 'vcenter' },
   { k: 'veeam', label: 'Veeam 백업 서버', C: VeeamSettings, group: 'vcenter' }, // v2.751 — VM 및 폴더 'Veeam 백업 VM 표시' 의 출처
+  // v2.878(사용자 요청 'Bareos 의 설정을 전체 메뉴 설정으로 — B안'): Backup › Bareos 탭 줄의 '설정' 을 여기로 옮겼다. 키 'bareos' 는 bareosViewText BAREOS_SETTINGS_KEY 와 같다.
+  //   Bareos 도구 권한(bareos-backup)이 있는 계정에게만 보인다(서버 API 는 adminOnly · fullScopeOnly 로 따로 집행).
+  { k: 'bareos', label: 'Bareos 백업 서버', C: BareosSettingsPage, group: 'vcenter', show: () => toolAllowed('bareos-backup') },
   { k: 'nsx-admin', label: 'NSX 관리', C: NsxAdmin },
   { k: 'horizon-admin', label: 'Horizon 연결 서버', C: HorizonAdmin }, // v2.685: 라이선스 만료 도구 안에만 있던 등록을 설정에도
   // --- 수집 서버 그룹 ---
@@ -118,7 +122,7 @@ const SUB = [
 
 // 수집/원격접속 관련 화면을 2개 그룹으로 묶어 상단을 단순화(서버가 많아 보이지 않게).
 const GROUPS = {
-  vcenter: { label: '🖥️ vCenter 관리', desc: 'vCenter 등록·관리와 연결 테스트, vCenter 별 Veeam 백업 서버를 한 곳에서.' },
+  vcenter: { label: '🖥️ vCenter 관리', desc: 'vCenter 등록·관리와 연결 테스트, vCenter 별 Veeam 백업 서버 · 법인별 Bareos(Director · 설치 · 계정)를 한 곳에서.' },
   collect: { label: '🗄 수집 서버', desc: 'iDRAC 전력·지표 수집 + 게스트 계정 + 원격 수집 서버 등록 + 엣지 토큰 맞추기 + 분산 에이전트 배포를 한 곳에서.' },
   gpu: { label: '🎮 GPU 사용량 수집', desc: 'GPU 수집(ESXi vGPU/사용률) · GPU 게스트 수집(패스쓰루, 게스트 OS 내부) · GPU 수집 진단을 한 곳에서.' },
   'remote-srv': { label: '🔌 원격 접속 서버', desc: '브라우저 SSH/RDP 중계 서버(프록시)와 원격접속 설정을 한 곳에서.' },
@@ -127,7 +131,7 @@ const GROUPS = {
   log: { label: '📋 Log', desc: 'vCenter 로그 보관 · 진단·로그 · 서버 성능 측정 · 로그 분석(개선점) · 감사 로그를 한 곳에서.' },
 };
 /** 이 사용자에게 보이는 하위 항목(v2.740 — superOnly 는 슈퍼 관리자에게만). 주소로 직접 들어오면 그 화면이 권한 안내를 그린다. */
-const visibleSubs = () => SUB.filter((s) => !s.superOnly || isSuperAdminUser());
+const visibleSubs = () => SUB.filter((s) => (!s.superOnly || isSuperAdminUser()) && (!s.show || s.show()));
 const groupChildren = (g) => visibleSubs().filter((s) => s.group === g);
 
 const DEFAULT_SUB = 'vcenter-admin';

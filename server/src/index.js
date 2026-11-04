@@ -155,6 +155,7 @@ import { startLinkCheckPoller } from './linkcheck/poller.js';   // 통신 점검
 import { startIsiduPoller } from './isidu/poller.js';
 import { startIsiduDigest } from './isidu/digest.js';   // v2.742 아이실론 종합 메일(정한 요일·시각) — 중앙 전용 · 기본 꺼짐
 import { startGuestPartMail } from './guestpart/notify.js';   // v2.749 게스트 파티션 사용률 메일(통합·vCenter 별·95% 즉시·실패) — 중앙 전용 · 기본 꺼짐
+import { startIssueNotify } from './issues/notify.js'; // 이슈 알림(v2.871) — 저장소 이벤트 구독은 시차 기동을 기다리지 않는다(첫 1분 변경을 놓치지 않게) · 설정이 꺼져 있으면 아무것도 보내지 않는다
 import { startStorageUsageMail } from './storage/usageMail.js';   // v2.789 스토리지 사용량 예약 메일(정한 요일·시각) — 중앙 전용 · 기본 꺼짐
 import { startIsiduTargetMail } from './isidu/notify.js';   // v2.745 대상별 결과 메일 정기 발송(보내는 때 '정한 요일·시각') — 중앙 전용 · 30초 틱
 import { scheduleScanResumes } from './util/scanJournal.js';    // v2.737: 업그레이드·재시작으로 중단된 스캔을 기동 2분 뒤 자동 재개           // 아이실론 디렉터리 사용량(v2.736) — 중앙·엣지 공용(자기 몫 대상만)
@@ -647,6 +648,7 @@ const stagger = [
  *   간격을 **총량으로** 정한다 — `min(1500, floor(60000 / N))` 이면 마지막 기동이 항상 60초 안이다(74개면 810ms).
  *   CPU 평탄화(스태거의 본래 목적)는 그대로다. firstDelayMs 는 각 모듈의 것이라 손대지 않는다.
  */
+try { startIssueNotify(); } catch (e) { console.warn(`[issues] 알림 기동 실패: ${e?.message || e}`); }
 const STAGGER_STEP_MS = Math.min(1500, Math.floor(60_000 / Math.max(1, stagger.length)));
 stagger.forEach((start, i) => setTimeout(() => { try { start(); } catch (e) { console.error('[start] 폴러 기동 실패:', e?.message); } }, i * STAGGER_STEP_MS).unref?.());
 // v2.737: 이전 프로세스가 끝내지 못한 스캔(아이실론 du·iDRAC 대역·IP 대역)을 재개 — 재개 함수는 각 폴러 모듈이 import 될 때 등록한다.

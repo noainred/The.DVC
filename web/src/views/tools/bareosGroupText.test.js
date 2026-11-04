@@ -148,7 +148,7 @@ describe('v2.831 시안 — 스케줄·보관·실행 이력', () => {
     expect(untilText(50 * 3_600_000)).toBe('2일 2시간 뒤');
     const rows = [{ b: { st: 'ok' } }, { b: { st: 'warning' } }, { b: { st: 'error' } }, { b: { run: 'running', st: 'ok' } }, { b: null }];
     const m = memberResults(rows);
-    expect(m).toEqual({ n: 5, ok: 2, warn: 1, fail: 1, run: 1, never: 1 });
+    expect(m).toEqual({ n: 5, ok: 2, warn: 1, fail: 1, cancel: 0, run: 1, never: 1 });   // v2.867 취소는 따로(cancel)
     expect(resultBadge(m)).toEqual({ text: '진행 1/5', tone: 'run' });
     expect(resultBadge({ ...m, run: 0 }).text).toBe('실패 1 · 성공 3');
     expect(resultBadge({ n: 2, ok: 2, warn: 0, fail: 0, run: 0, never: 0 })).toEqual({ text: '성공 2/2', tone: 'ok' });

@@ -17,15 +17,18 @@ import {
   directorConn, directorCred, directorById, loadSettings, jobDirectorId, siteMissing, anyDirectorConfigured, LIMITS,
 } from '../../bareos/settings.js';
 import {
-  listJobs, getJob, patchJob, deleteJob, markPending, addRestore, registryLoadError, jobVmIds, MAX_JOBS, restoreOpen, clearPending, applyRunRow, applyRestoreRow, registryRev, inBatch,
+  listJobs, getJob, patchJob, deleteJob, markPending, addRestore, registryLoadError, jobVmIds, MAX_JOBS, restoreOpen, restoreHeld, restoreUnknownHeld, restoreFinishing, clearPending, applyRunRow, applyRestoreRow, registryRev, inBatch, markCancelReq,
 } from '../../bareos/registry.js';
+import { cancelInfo, cancelGate, CANCEL_WAIT_MS } from '../../bareos/cancelState.js';
 import { parseBanner } from '../../bareos/director.js';
 import { diagnoseConsole, DIAG_STAGES } from '../../bareos/console.js';
 import { secretProvided } from '../../util/secretCarry.js';
 import {
   onDirector, relayToEdge, isDemoActive, effectiveSettings, eligibility, createBackupTarget, createBackupTargets, bareosAuthGuard, clearAuthStopIfSame,
 } from '../../bareos/service.js';
-import { pendingView, relayLimits } from '../../bareos/edgeOps.js';
+import { pendingView, relayLimits, RESTORES_DEADLINE_MS, LOGS_DEADLINE_MS } from '../../bareos/edgeOps.js';
+import { LOGS_MAX } from '../../bareos/ops.js';
+import { compareFirstErrors } from '../../bareos/logFirstError.js';
 import { noteSetupStart, noteSetupEnd, noteRestoreBatchStart, noteRestoreBatchEnd } from '../../bareos/inflight.js';
 import { claimSetup, releaseSetupLock, isSetupBusy, setupBusyReason } from '../../bareos/setupLocks.js';
 import { listAgentTokens } from '../../central/agentTokens.js';
@@ -33,11 +36,13 @@ import { listInventory } from '../../central/inventory.js';
 import { pickAgent } from '../../cvp/formChoices.js';
 import { knownAgentNames } from '../../central/knownAgents.js';
 import { pollerStatus, pollOnce, requestReconcile } from '../../bareos/poller.js';
-import { restorePlan, placementDrift, bulkRestorePlan, BULK_RESTORE_MAX } from '../../bareos/restore.js';
+import { restorePlan, placementDrift, placementAt, bulkRestorePlan, BULK_RESTORE_MAX } from '../../bareos/restore.js';
+import { drItemIssue, drCheckView, drGateBlock } from '../../bareos/drPlan.js';   // 재해 복구 1차(순수)
 import { finishRestores } from '../../bareos/restoreFinish.js';
 import { savePolicy, policyLoadError, rehearsalStatus, runNow as runRehearsalNow, normPolicy, rehearsalBusy } from '../../bareos/rehearsal.js';
 import { loadDigest, saveDigest, digestLoadError, digestStatus, sendDigestNow, normDigest } from '../../bareos/digest.js';
 import { osFields } from '../../inventory/osKind.js';
+import { vmGpuMark } from '../../gpu/vgpuProfile.js';
 import { numOrNull } from '../../util/numOrNull.js';
 import { summarizeRegistryError } from '../../util/registryCore.js';
 import { normLevel } from '../../bareos/names.js';
@@ -129,8 +134,58 @@ const viewJob = (j, vmById, settings) => {
   const drift = vmById ? placementDrift(j, vm) : null;
   // v2.834: 게스트 OS(인벤토리 기준 — 인벤토리에 없는 VM 은 모름)
   // v2.861 남은 스냅샷(인벤토리 — 못 읽으면 null · 0 이 아니다): 백업 실패 뒤 남은 스냅샷이 다음 백업을 막는다(bareos-users · PR #1484)
-  return { ...j, directorId: jobDirectorId(j, settings), ...osFields(vm), snapshotCount: vm ? numOrNull(vm.snapshotCount) : null, ...(drift ? { drift } : {}) };
+  // v2.866 복원 › 폴더 표: 전원 · 용량(인벤토리 — 인벤토리에 없거나 못 읽으면 null · 0 이 아니다)
+  // v2.873 vGPU · PCI 패스스루 장치(인벤토리 vm.gpu — 켜진 상태 스냅샷 불가 표지). null = 장치를 모르거나 없음(없다고 단정하지 않는다)
+  return {
+    ...j, directorId: jobDirectorId(j, settings), ...osFields(vm), snapshotCount: vm ? numOrNull(vm.snapshotCount) : null, gpuDev: vmGpuMark(vm),
+    powerState: vm && typeof vm.powerState === 'string' ? vm.powerState.slice(0, 32) : null, storageGB: vm ? numOrNull(vm.storageGB) : null,
+    ...(drift ? { drift } : {}),
+  };
 };
+
+/**
+ * v2.866 마지막 성공 백업(복원 › 폴더 표) — 원장의 lastRun · finishedRuns 중 성공(T·W) · 백업(type 없거나 B) 실행의 가장 늦은 끝(없으면 시작) 시각.
+ * 포탈이 본 실행만 안다(등록 전 · 기록 밖 백업은 모른다) — 없으면 null('성공 없음' 이 아니라 '포탈 기록에 없음').
+ */
+/** v2.866 복원 명령의 기본 키 값(사이트 매핑 — vCenter 주소 · FD INI 경로). 매핑이 없으면 빈 값(restoreBaseKv 가 거부한다). */
+/** v2.874(점검 B5-01) 결과 모름 복원이 있는 대상의 재요청 거부 사유(묶음 · 단건 같은 말). */
+const UNKNOWN_HELD_REASON = '이 VM 의 직전 복원은 결과를 모릅니다(명령을 보낸 뒤 회신이 끊김) — Director 에서 그 복원이 돌았는지 확인하세요. 같은 복원이 두 번 돌지 않게 6시간 동안 다시 보내지 않습니다.';
+
+export const restoreBaseOf = (settings) => (job) => {
+  const site = (settings?.sites || []).find((x) => String(x.vcenterId) === String(job?.vcenterId));
+  return { vcserver: site?.vcserver || '', configFile: site?.configFile || '' };
+};
+
+export function lastOkOf(lastRun, finishedRuns) {
+  let best = null;
+  for (const r of [lastRun, ...(Array.isArray(finishedRuns) ? finishedRuns : [])]) {
+    if (!r || !(r.state === 'ok' || r.state === 'warning')) continue;
+    const at = numOrNull(r.endedAt) ?? numOrNull(r.startedAt);
+    if (at === null || at <= 0) continue;
+    if (!best || at > best.at) best = { at, level: typeof r.level === 'string' ? r.level.slice(0, 1) : '', jobid: numOrNull(r.jobid) };
+  }
+  return best;
+}
+
+/**
+ * v2.866 복원 › 폴더 표 — 백업 대상이 있는 vCenter 의 폴더마다 VM 수(인벤토리 · 템플릿 제외). 폴더 칸의 '대상 / 전체' 막대에 쓴다.
+ *   조회 범위 안 vCenter 만(요청 필터보다 먼저) · 대상이 없는 vCenter 는 싣지 않는다 · Director 에 닿지 않는다.
+ *   화면은 폴더 표를 열 때 한 번 읽는다(폴링하지 않는다). 상시 폴링 라우트가 아니어도 같은 열쇠 규칙(scopeKey)으로 기억한다.
+ */
+export function restoreFolderCounts(jobs, vms) {
+  const vcs = new Set(jobs.map((j) => String(j.vcenterId)));
+  const counts = new Map();
+  for (const v of Array.isArray(vms) ? vms : []) {
+    if (!v || v.template || !vcs.has(String(v.vcenterId))) continue;
+    const dc = typeof v.vcDcPath === 'string' ? v.vcDcPath : '';
+    const folder = typeof v.folderPath === 'string' ? v.folderPath : '';
+    const key = `${v.vcenterId}\u0000${dc}\u0000${folder}`;
+    const c = counts.get(key) || { vcenterId: String(v.vcenterId), dc, folder, vms: 0 };
+    c.vms += 1;
+    counts.set(key, c);
+  }
+  return [...counts.values()];
+}
 
 /**
  * v2.822(검토 S2 — 재현): 설정·원장 로드 오류는 JSON.parse 원문이라 손상된 비밀번호 조각이 실렸다(루트 불변조건 '로드 오류 원문을 응답에 싣지 않는다').
@@ -272,7 +327,7 @@ function setupGate(req, res, dirId, plan, { otp = true } = {}) {
   const hostKey = String(req.body?.host || '').trim().toLowerCase();
   if (hostKey && setupBusyReason(dirId, hostKey)) { res.status(409).json({ ok: false, reason: '같은 서버에 다른 Director 의 자동 설정(또는 설정 변경 · 설치)이 진행 중입니다 — 끝난 뒤 다시 시도하세요.' }); return false; }
   // v2.822.3(I2-6 — 재현): 데모 Director 를 쓰는 동안은 화면 매핑이 데모 값이라 실제 서버 설정과 섞인다
-  if (isDemoActive()) { res.status(409).json({ ok: false, reason: '데모 Director 를 쓰는 중입니다 — 자동 설정은 실제 Director 를 등록한 뒤(설정 › 법인별 Director 에서 추가) 쓸 수 있습니다.' }); return false; }
+  if (isDemoActive()) { res.status(409).json({ ok: false, reason: '데모 Director 를 쓰는 중입니다 — 자동 설정은 실제 Director 를 등록한 뒤(설정 › vCenter 관리 › Bareos 백업 서버 › Director 에서 추가) 쓸 수 있습니다.' }); return false; }
   const name = req.user?.username || '';
   // v2.842: 쓰기 단계의 본인 OTP 재확인은 '설정 › Security › 세션 보안' 값(기본 켬 · 소유자 + OTP 로만 끔)을 따른다 — 요청마다 지금 값을 읽는다.
   //   끈 상태로 지난 요청은 감사에 표시한다(req.bareosOtpOff). 인증이 꺼진 설치(AUTH_ENABLED=false)는 예전처럼 OTP 를 보지 않는다.
@@ -369,7 +424,7 @@ api.get('/tools/bareos-backup', adminOnly, (req, res) => memoJson(req, res, 'bar
  *    역할 · 관리자 판본(isAdminDetailUser — Director 주소·콘솔·오류 원문을 보이는가) · 데모 모드.
  *  · 원장 rev(대상 추가·삭제·실행 결과·대기 — 폴러·엣지 회신이 반영할 때마다 오른다) · 설정 rev(Director·매핑·기본값) · 그룹 rev · 정책 수집 rev · 백업 표시 rev ·
  *    손상 표지(원장·설정·그룹·표시) · 폴러 at·busy 와 Director 별 상태(엣지 회신은 at 없이 ok·relay 만 바꾼다) · 인증 정지(수동 연결 시험이 폴러 없이 바꾼다).
- *  · 스냅샷 세대(memoJson 이 앞에 붙인다 — VM 이름·위치 drift · 게스트 OS · 그룹 다음 회차 시각). 이 밖의 값이 바뀌어도 늦어야 스냅샷 한 주기다.
+ *  · 스냅샷 세대(memoJson 이 앞에 붙인다 — VM 이름·위치 drift · 게스트 OS · GPU 장치(v2.873) · 그룹 다음 회차 시각). 이 밖의 값이 바뀌어도 늦어야 스냅샷 한 주기다.
  */
 function bareosListKey(req) {
   const snap = store.get();
@@ -418,7 +473,10 @@ function bareosListView(req) {
     } catch { return null; }
   };
   // C-5: 끝난 실행 원문(finishedRuns — 실패 메일·RPO 용 · 최근 10건)은 화면이 쓰지 않는다(웹 grep 0건) — 싣지 않는다. 복원 이력(restores)은 '실행 현황 · 이력' 탭이 쓴다.
-  const views = jobs.map(({ finishedRuns, ...j }) => ({ ...viewJob(j, vmById, settings), writable: bareosAccess(req.user, j.vcenterId) === 0, policy: policyOf(j) }));   // eslint-disable-line no-unused-vars
+  const now = Date.now();
+  // v2.866: finishedRuns 원문은 싣지 않고 마지막 성공(lastOk — 복원 › 폴더 표)만 계산해 싣는다
+  // v2.867 cancel = 멈추는 중(취소를 보낸 실행 — cancelState.cancelInfo · 지금 도는 실행일 때만). 원장 칸 cancelReq 는 그대로 싣지 않는다(판정 한 곳)
+  const views = jobs.map(({ finishedRuns, cancelReq, ...j }) => ({ ...viewJob(j, vmById, settings), lastOk: lastOkOf(j.lastRun, finishedRuns), writable: bareosAccess(req.user, j.vcenterId) === 0, policy: policyOf(j), cancel: cancelInfo({ ...j, cancelReq }, now) }));
   let settingsWritable = false;
   try { settingsWritable = !scopedVcenterIds(req.user, store.get()) && !writeScopedVcenterIds(req.user, store.get()); } catch { settingsWritable = false; }
   const rawPoller = pollerStatus();
@@ -443,6 +501,7 @@ function bareosListView(req) {
     ...(scoped ? { scoped: true, omittedOutOfScope: omitted } : {}),
     poller,
     relayLimits: relayLimits(),   // v2.824 엣지 대행 Director 의 화면 시한(서버 대기 시간 — 숫자를 화면에 박지 않는다)
+    cancelWaitMs: CANCEL_WAIT_MS,   // v2.867 '멈추지 않음' 기준(화면 문구 — 숫자를 박지 않는다)
     settingsWritable,   // G12: 설정(전 법인 공용 쓰기 — fullWriteOnly)을 바꿀 수 있는 계정인가
     settingsLoadError: loadErrorView(settingsLoadError(), detail),
     registryLoadError: loadErrorView(registryLoadError(), detail),
@@ -776,7 +835,7 @@ api.get('/tools/bareos-backup/vm-candidates', adminOnly, (req, res) => {
   const all = (store.get()?.vms || []).filter((v) => String(v.vcenterId) === vcenterId);
   const rows = all.slice().sort((x, y) => String(x.name).localeCompare(String(y.name))).slice(0, MAX_CANDIDATES).map((v) => {
     const el = eligibility(v, settings);
-    return { id: v.id, name: v.name, powerState: v.powerState, template: !!v.template, dc: v.vcDcPath ?? null, folder: v.folderPath ?? null, ...osFields(v), eligible: el.ok, reason: el.ok ? '' : el.reason, registered: registered.has(v.id) };
+    return { id: v.id, name: v.name, powerState: v.powerState, template: !!v.template, dc: v.vcDcPath ?? null, folder: v.folderPath ?? null, ...osFields(v), gpuDev: vmGpuMark(v), eligible: el.ok, reason: el.ok ? '' : el.reason, registered: registered.has(v.id) };
   });
   const site = settings.sites.find((s) => s.vcenterId === vcenterId);
   const dir = site ? directorById(site.directorId, settings) : null;
@@ -875,6 +934,9 @@ async function cancelRoute(req, res, job) {
   const mm = modeMismatch(job); if (mm) return res.status(409).json({ ok: false, reason: mm });
   const want = Number(req.body?.jobid || job.pending?.jobid || job.lastRun?.jobid || 0);
   if (!Number.isInteger(want) || want <= 0) return res.status(409).json({ ok: false, reason: '취소할 실행이 없습니다.' });
+  // v2.867: 이미 취소를 보낸 실행은 '멈추지 않음'(CANCEL_WAIT_MS 경과)일 때만 다시 보낸다 — 연타로 같은 cancel 을 겹쳐 보내지 않게
+  const ci = cancelInfo(job);
+  if (ci && ci.jobid === want && !ci.stuck) return res.status(409).json({ ok: false, code: 'sent', reason: cancelGate(job).reason || '취소를 이미 보냈습니다.' });
   if (orphanOf(job) && job.pending?.jobid) {   // C3: 물어볼 Director 가 없다 — 포탈의 추적만 내린다
     const note = `이 대상의 Director(${jobDir(job)})가 설정에 없어 포탈의 추적만 내렸습니다 — 실제 실행 결과는 그 Bareos 서버에서 확인하세요.`;
     clearPending(job.id, note);
@@ -896,8 +958,16 @@ async function cancelRoute(req, res, job) {
       audit(req, 'Bareos 백업 취소', `${job.vcenterId}/${job.vmName}`, `jobid ${want} · Director 에 없음 — 포탈 추적 해제`);
       return res.json({ ok: true, jobid: want, cleared: true, note });
     }
-    audit(req, 'Bareos 백업 취소', `${job.vcenterId}/${job.vmName}`, `jobid ${want}`);
-    res.json({ ok: true, jobid: want });
+    // 반증 F8: 엣지 회신이 정제에서 canceled 없이 떨어지면(성공인데 결과 없음) 취소가 갔는지 모른다 — 묶음 취소(cancelJobs)와 같게 '결과 모름'
+    if (out.canceled !== true) {
+      audit(req, 'Bareos 백업 취소', `${job.vcenterId}/${job.vmName}`, `jobid ${want} · 결과 모름(회신에 결과 없음)`);
+      return res.status(502).json({ ok: false, unknown: true, reason: '결과 모름 — 회신에 취소 결과가 없습니다. 취소가 갔는지 알 수 없으니 Director 에서 확인하세요.' });
+    }
+    // v2.867 '멈추는 중' — 그 실행이 끝나면(폴러 · 로그 열기) 지운다. 기록을 못 써도 취소는 Director 에 갔다(화면 표시만 늦다)
+    let marked = true;
+    try { markCancelReq(job.id, { jobid: want, by: req.user?.username || '', via: 'single' }); } catch (e) { marked = false; console.warn(`[bareos] 취소 표시를 원장에 쓰지 못했습니다(${String(e?.message || e).slice(0, 160)}) — 취소는 Director 에 갔습니다.`); }
+    audit(req, 'Bareos 백업 취소', `${job.vcenterId}/${job.vmName}`, `jobid ${want}${ci?.stuck ? ' · 다시 보냄(멈추지 않음)' : ''}`);
+    res.json({ ok: true, jobid: want, canceling: true, ...(marked ? {} : { note: '취소는 보냈지만 포탈의 표시를 쓰지 못했습니다 — 결과는 다음 조회에 반영됩니다.' }) });
   } catch (e) { sendErr(res, e); }
 }
 
@@ -937,7 +1007,7 @@ async function deleteRoute(req, res, job) {
     return res.json({ ok: true, note: `이 대상의 Director(${dir0})가 포탈 설정에 없어 원장에서만 지웠습니다. 그 Bareos 서버의 잡(bareos-dir.d/job/${job.bareosJob}.conf)은 그대로이고 스케줄이 있으면 계속 돕니다 — 그 서버에서 직접 정리하세요.` });
   }
   // 복원이 진행 중이면 지우지 않는다(P4) — 지우면 폴러가 그 복원을 더 추적하지 않아 결과를 영영 모른다.
-  if ((job.restores || []).some(restoreOpen)) return res.status(409).json({ ok: false, reason: '복원이 진행 중인 대상은 지울 수 없습니다 — 복원이 끝난 뒤 다시 시도하세요.' });
+  if ((job.restores || []).some((r) => restoreHeld(r) || restoreFinishing(r))) return res.status(409).json({ ok: false, reason: '복원이 진행 중이거나 마무리(네트워크 끊기 · 검증) 중이거나 결과를 모르는 대상은 지울 수 없습니다 — 끝난 뒤 다시 시도하세요.' });   // v2.874 B2-04 · B5-01
   const dir = jobDir(job);
   if (job.demo && !isDemoActive()) {   // I8 — 데모 대상은 실제 Director 에 없다: 원장에서만
     deleteJob(job.id, { directorId: dir });
@@ -1021,18 +1091,19 @@ async function restoreRoute(req, res, job) {
   const name = req.user?.username || '';
   if (config.auth.enabled && !getUser(name)?.totpEnabled) return res.status(403).json({ ok: false, reason: '복원은 OTP 가 등록된 계정만 실행할 수 있습니다. 사용자 관리에서 OTP 를 등록하세요.', needEnroll: true });
   if ((job.restores || []).some(restoreOpen)) return res.status(409).json({ ok: false, reason: '이 대상의 다른 복원이 진행 중입니다.' });
+  if ((job.restores || []).some((r) => restoreUnknownHeld(r))) return res.status(409).json({ ok: false, code: 'unknown-held', reason: UNKNOWN_HELD_REASON });   // v2.874 B5-01
   const jobid = Number(b.jobid);
   if (!Number.isInteger(jobid) || jobid <= 0) return res.status(400).json({ ok: false, reason: '복원할 백업(jobid)을 고르세요.' });
   const settings = effectiveSettings();
-  const plan = restorePlan({ mode: b.mode, job, snapshot: store.get(), newVm: b.newVm, confirmName: b.confirmName, pluginName: settings.defaults.pluginName, jobid });   // v2.847 D2-1: 그 지점의 백업 때 위치로 판정
+  const plan = restorePlan({ mode: b.mode, job, snapshot: store.get(), newVm: b.newVm, confirmName: b.confirmName, pluginName: settings.defaults.pluginName, jobid, base: restoreBaseOf(settings)(job) });   // v2.847 D2-1: 그 지점의 백업 때 위치로 판정
   if (!plan.ok) return res.status(400).json({ ok: false, reason: plan.issue });
   // v2.825.1 버그 점검(G2 — 재현): 설정만 보면 아는 전제(그 잡의 Director 가 있고 접속값이 갖춰졌는가)도 OTP **앞에서** 본다 —
   //   뒤에서 'not-configured' 로 실패하면 1회용 코드가 이미 쓰여, 설정을 고친 뒤 같은 코드는 '이미 사용됨' 이었다.
   if (!isDemoActive()) {
     const jd = directorById(jobDir(job), settings);
-    if (!jd) return res.status(409).json({ ok: false, code: 'not-configured', reason: '이 백업 대상의 법인 Director 가 설정에 없습니다 — 설정 › 법인별 Director 에서 확인하세요.' });
+    if (!jd) return res.status(409).json({ ok: false, code: 'not-configured', reason: '이 백업 대상의 법인 Director 가 설정에 없습니다 — 설정 › vCenter 관리 › Bareos 백업 서버 › Director 에서 확인하세요.' });
     const miss = directorConn(jd).missing;
-    if (miss?.length) return res.status(409).json({ ok: false, code: 'not-configured', reason: `‘${jd.name}’ Director 설정이 덜 됐습니다(${miss.join('·')}) — 설정 › 법인별 Director 에서 먼저 채우세요.` });
+    if (miss?.length) return res.status(409).json({ ok: false, code: 'not-configured', reason: `‘${jd.name}’ Director 설정이 덜 됐습니다(${miss.join('·')}) — 설정 › vCenter 관리 › Bareos 백업 서버 › Director 에서 먼저 채우세요.` });
   }
   // OTP 는 입력·전제 검사를 통과한 뒤에 쓴다(1회용 코드를 입력 실수로 태우지 않게). Director 에 닿기 전이다.
   if (config.auth.enabled) {
@@ -1047,8 +1118,11 @@ async function restoreRoute(req, res, job) {
     audit(req, 'Bareos 복원 실행', `${job.vcenterId}/${job.vmName}`, `복원 jobid ${out.rid} · 방식 ${b.mode} · 원본 ${out.chain.join(',')}${plan.target?.name && b.mode === 'newVm' ? ` · 새 VM ${plan.target.name}` : ''}`);
     res.status(202).json({ ok: true, jobid: out.rid, fromJobids: out.chain, target: plan.target });
   } catch (e) {
-    audit(req, 'Bareos 복원 실행', `${job.vcenterId}/${job.vmName}`, `실패 — ${String(e?.message || e).slice(0, 160)}`);
-    sendErr(res, e);
+    const unknown = !!e?.unknown || e?.code === 'unknown';
+    audit(req, 'Bareos 복원 실행', `${job.vcenterId}/${job.vmName}`, `${unknown ? '결과 모름' : '실패'} — ${String(e?.message || e).slice(0, 160)}`);
+    // v2.874(점검 B5-01): 보낸 뒤 끊김은 원장에 남긴다 — 다시 누른 같은 복원이 두 번 돌지 않게(restoreHeld · 새 VM 이름 예약)
+    if (unknown) { try { addRestore(job.id, { unknown: true, fromJobids: [jobid], mode: b.mode, target: plan.target, by: req.user?.username || '', client }); } catch (e2) { console.warn(`[bareos] 복원 결과 모름 기록 실패: ${String(e2?.message || e2).slice(0, 160)}`); } }
+    sendErr(res, Object.assign(new Error(String(e?.message || e)), { code: unknown ? 'unknown' : (e?.code || '') }));
   }
 }
 
@@ -1056,13 +1130,21 @@ async function restoreRoute(req, res, job) {
 
 const RESTORE_POINTS_KEEP = 30;   // 화면에 보이는 복원 지점(VM 마다) — 단건 화면과 같은 수
 /** 옛 엣지는 새 작업 종류(restorePoints · restores)를 '알 수 없는 작업' 으로 거절한다 — 사람이 할 일을 덧붙인다(groupRunner.reasonOf 와 같은 뜻). */
-const oldEdgeHint = (msg) => (/알 수 없는 (Director )?작업/.test(msg) ? `${msg} — 법인 엣지가 묶음 복원(v2.861)보다 오래된 판일 수 있습니다. 엣지를 업그레이드한 뒤 다시 하세요(엣지는 보내지 않았습니다).` : msg);
+const oldEdgeHint = (msg, what = '묶음 복원(v2.861)') => (/알 수 없는 (Director )?작업/.test(msg) ? `${msg} — 법인 엣지가 ${what}보다 오래된 판일 수 있습니다. 엣지를 업그레이드한 뒤 다시 하세요(엣지는 보내지 않았습니다).` : msg);
 const idsOf = (v) => [...new Set((Array.isArray(v) ? v : []).map((x) => String(x ?? '')).filter(Boolean))];
 
 /**
  * 묶음 복원 지점 — body { ids:[원장 job id] } (1~50). 조회(범위 밖 항목은 '찾을 수 없음' — 존재를 흘리지 않는다).
  *   Director 마다 세션 하나(ops.restorePoints — 잡마다 list jobs 한 번 · 지점마다 체인 길이). 법인이 여럿이면 Director 끼리는 나란히.
  */
+// v2.866 폴더별 VM 수 — restoreFolderCounts(모듈 위쪽) · 폴더 표를 열 때 한 번 읽는다(폴링 없음 · 조회 범위 안 vCenter 만)
+api.get('/tools/bareos-backup/restore-folders', adminOnly, (req, res) => memoJson(req, res, 'bareos-restore-folders', (snap) => {
+  const { jobs } = scopedJobs(req.user);
+  const allowed = scopedVcenterIds(req.user, snap);
+  const vms = allowed ? (snap?.vms || []).filter((v) => allowed.has(String(v.vcenterId))) : (snap?.vms || []);
+  const vcNames = Object.fromEntries((snap?.vcenters || []).filter((v) => !allowed || allowed.has(String(v.id))).map((v) => [v.id, v.name || v.id]));
+  return { ok: true, folders: restoreFolderCounts(jobs, vms), vcNames, inventoryAt: snap?.generatedAt ?? null };
+}, { extraKey: `${scopeKey(req.user, store.get())}|g=${registryRev()}` }));   // v2.870 감사 A5-03: 원장 세대(대상을 더하고 빼면 304 로 옛 수가 남지 않게)
 api.post('/tools/bareos-backup/restore-points/bulk', adminOnly, async (req, res) => {
   const ids = idsOf(req.body?.ids);
   if (!ids.length) return res.status(400).json({ ok: false, reason: '복원 지점을 볼 VM 을 고르세요.' });
@@ -1077,7 +1159,7 @@ api.post('/tools/bareos-backup/restore-points/bulk', adminOnly, async (req, res)
     items.set(id, { id, vmName: job.vmName, vcenterId: job.vcenterId, restorePending: (job.restores || []).some(restoreOpen), restoreClient: site?.client || job.client });
     const d = jobDir(job);
     if (!byDir.has(d)) byDir.set(d, []);
-    byDir.get(d).push({ id, name: job.bareosJob });
+    byDir.get(d).push({ id, name: job.bareosJob, job });
   }
   await Promise.all([...byDir.entries()].map(async ([dir, list]) => {
     try {
@@ -1088,7 +1170,8 @@ api.post('/tools/bareos-backup/restore-points/bulk', adminOnly, async (req, res)
         const base = items.get(x.id);
         if (!r) items.set(x.id, { ...base, ok: false, code: 'unknown', reason: 'Director 회신에 이 VM 이 없습니다 — 다시 읽으세요.' });
         else if (!r.ok) items.set(x.id, { ...base, ok: false, code: r.code || 'error', reason: r.message || '복원 지점을 읽지 못했습니다.' });
-        else items.set(x.id, { ...base, ok: true, points: r.points || [], scanned: r.scanned ?? null });
+        // 재해 복구(DR 1차): 지점마다 백업 때 위치(데이터센터 · 폴더 · 이름 — placementAt, 복원 명령이 쓰는 값과 같은 함수)를 싣는다
+        else items.set(x.id, { ...base, ok: true, points: (r.points || []).map((p) => { const at = placementAt(x.job, p.jobid); return { ...p, at: { dc: at.dc ?? null, folder: at.folder ?? null, vmName: at.vmName ?? null } }; }), scanned: r.scanned ?? null });
       });
     } catch (e) {
       const why = oldEdgeHint(String(e?.message || e).slice(0, 300));
@@ -1099,11 +1182,54 @@ api.post('/tools/bareos-backup/restore-points/bulk', adminOnly, async (req, res)
 });
 
 /**
+ * v2.872 통합 에러 로그 '묶음 로그'(시안 docs/design/bareos-errlog ② · 사용자 컨펌 2026-11-04) — body { items:[{ id, jobid }] }(1~LOGS_MAX).
+ *   항목마다 범위(조회 — 밖은 없는 대상과 같은 답) · Director 마다 세션 하나(ops.logs — 단건 로그와 같은 '이 잡의 실행인가' 검사) · 법인끼리는 나란히 ·
+ *   응답은 첫 오류 줄 + 대조(compareFirstErrors — 같은 오류 · 다른 오류 · 오류 줄 없음 · 못 읽음)만. 원문은 낱건 GET jobs/:id/log 에서.
+ *   전체 시한 LOGS_DEADLINE_MS(엣지 인출 + 회신 + 여유) — 중앙 직접 Director 도 끝없이 붙잡지 않는다(v2.870 A5-01 과 같은 규칙).
+ */
+api.post('/tools/bareos-backup/logs/bulk', adminOnly, async (req, res) => {
+  const raw = Array.isArray(req.body?.items) ? req.body.items : [];
+  if (!raw.length) return res.status(400).json({ ok: false, reason: '읽을 실행을 고르세요.' });
+  if (raw.length > LOGS_MAX) return res.status(400).json({ ok: false, reason: `한 번에 ${LOGS_MAX}건까지 읽을 수 있습니다.` });
+  const out = [];
+  const byDir = new Map();
+  raw.forEach((x, i) => {
+    const id = typeof x?.id === 'string' ? x.id.slice(0, 64) : '';
+    const jobid = Number(x?.jobid);
+    if (!id || !Number.isInteger(jobid) || jobid <= 0) { out[i] = { id, jobid: Number.isInteger(jobid) ? jobid : null, ok: false, code: 'invalid', reason: '대상 · jobid 가 올바르지 않습니다.' }; return; }
+    const job = getJob(id);
+    if (!job || bareosAccess(req.user, job.vcenterId, { write: false }) === 404) { out[i] = { id, jobid, ok: false, code: 'not-found', reason: '백업 대상을 찾을 수 없습니다.' }; return; }
+    out[i] = { id, jobid, vmName: job.vmName, jobName: job.bareosJob };
+    const d = jobDir(job);
+    if (!byDir.has(d)) byDir.set(d, []);
+    byDir.get(d).push(i);
+  });
+  await Promise.all([...byDir.entries()].map(async ([dir, idx]) => {
+    try {
+      const r0 = await onDirector(dir, 'logs', { items: idx.map((i, k) => ({ key: k, jobid: out[i].jobid, name: out[i].jobName })) }, { demoOnly: isDemoGuest(req.user), signal: AbortSignal.timeout(LOGS_DEADLINE_MS) });
+      const byKey = new Map((Array.isArray(r0) ? r0 : []).map((r) => [r.key, r]));
+      idx.forEach((i, k) => {
+        const r = byKey.get(k);
+        if (!r) out[i] = { ...out[i], ok: false, code: 'unknown', reason: 'Director 회신에 이 실행이 없습니다 — 다시 읽으세요.' };
+        else if (!r.ok) out[i] = { ...out[i], ok: false, code: r.code || 'error', reason: r.message || '로그를 읽지 못했습니다.' };
+        else out[i] = { ...out[i], ok: true, firstError: r.firstError ?? null, lines: r.lines ?? null };
+      });
+    } catch (e) {
+      // 옛 엣지는 '알 수 없는 작업' — 낱건 로그 15번으로 돌려보내지 않는다(WAN 왕복 · v2.867 묶음 취소와 같은 규칙) · 낱건 '로그' 는 지금도 된다
+      const why = oldEdgeHint(String(e?.message || e).slice(0, 300), '묶음 로그(v2.872)');
+      for (const i of idx) out[i] = { ...out[i], ok: false, code: e?.code || 'error', reason: why };
+    }
+  }));
+  const cmp = compareFirstErrors(out);
+  res.json({ ok: true, items: cmp.items.map(({ jobName, ...x }) => x), summary: cmp.summary, limit: LOGS_MAX });
+});
+
+/**
  * 묶음 복원 판정 · 접근 · 진행 중 — 미리 보기(check)와 실행이 같은 함수를 쓴다(판정을 두 벌 두지 않는다).
  * @returns {{ status?:number, reason?:string, plan?:object, jobs?:Map }}
  */
 const RESERVE_MS = 24 * 3600_000;   // 새 VM 복원 이름을 예약해 두는 시간(진행 중 + 끝난 뒤 하루 — 다음 인벤토리 수집 전 같은 이름을 막는다)
-function bulkRestoreGate(req, items) {
+function bulkRestoreGate(req, items, { dr = false } = {}) {
   const raw = Array.isArray(items) ? items : [];
   // 상한을 먼저 — 항목마다 원장 조회(깊은 복사)를 돌기 전에(반증 검토 L2: 큰 본문 하나가 요청 경로를 1초 넘게 막았다). 판정은 bulkRestorePlan 이 같은 상한으로 한다.
   const list = raw.length > BULK_RESTORE_MAX ? raw.slice(0, BULK_RESTORE_MAX + 1) : raw;
@@ -1119,6 +1245,7 @@ function bulkRestoreGate(req, items) {
     if (a === 403) { readOnly += 1; denied.set(id, READ_ONLY); jobs.set(id, job); continue; }
     const mm = modeMismatch(job);
     if (mm) { denied.set(id, mm); jobs.set(id, job); continue; }
+    if ((job.restores || []).some((r) => restoreUnknownHeld(r))) { denied.set(id, UNKNOWN_HELD_REASON); jobs.set(id, job); continue; }   // v2.874 B5-01 — 두 번 돌지 않게
     if ((job.restores || []).some(restoreOpen)) { denied.set(id, '이 VM 의 다른 복원이 진행 중입니다 — 끝난 뒤 다시 시도하세요.'); jobs.set(id, job); continue; }
     jobs.set(id, job);
   }
@@ -1126,13 +1253,23 @@ function bulkRestoreGate(req, items) {
   // 최근 · 진행 중 새 VM 복원이 쓰는 이름(아직 인벤토리에 없다 — 반증 검토: 같은 이름 VM 이 둘이 되면 NIC 끊기도 손대지 못한다)
   const reservedNames = new Set();
   const since = Date.now() - RESERVE_MS;
+  const snapAt = Number(store.get()?.generatedAt) || 0;
   for (const j of listJobs()) {
     for (const r of j.restores || []) {
-      if (r.mode === 'newVm' && r.target?.name && (restoreOpen(r) || (Number(r.at) || 0) >= since)) reservedNames.add(`${j.vcenterId}\u0000${String(r.target.name).toLowerCase()}`);
+      // 반증 R4: 실패 · 취소로 끝난 복원은 그 뒤 인벤토리 수집이 있으면 예약을 푼다 — VM 껍데기가 생겼으면 인벤토리 이름 대조가 막고, 없으면 다시 보낼 수 있다
+      //   (예전: 실패해도 24시간 막혀 재해 복구 화면에서 그 VM 을 다시 보낼 수 없었다 — 이름 바꾸기가 없다)
+      const failedSeen = (r.state === 'error' || r.state === 'canceled') && snapAt > (Number(r.endedAt || r.at) || 0);
+      if (r.mode === 'newVm' && r.target?.name && !failedSeen && (restoreOpen(r) || (Number(r.at) || 0) >= since)) reservedNames.add(`${j.vcenterId}\u0000${String(r.target.name).toLowerCase()}`);
     }
   }
-  const plan = bulkRestorePlan({ items: list, jobOf: (id) => jobs.get(id) || null, dirOf: jobDir, snapshot: store.get(), pluginName: settings.defaults.pluginName, reservedNames });
+  const plan = bulkRestorePlan({ items: list, jobOf: (id) => jobs.get(id) || null, dirOf: jobDir, snapshot: store.get(), pluginName: settings.defaults.pluginName, reservedNames, baseOf: restoreBaseOf(settings) });
   for (const r of plan.items) if (denied.has(r.id)) { r.ok = false; r.issue = denied.get(r.id); }   // 접근 · 진행 중 사유가 판정 사유보다 앞선다(더 근본적)
+  if (dr) {
+    for (const r of plan.items) { const why = r.ok ? drItemIssue(r) : ''; if (why) { r.ok = false; r.issue = why; } }   // DR 1차 — 화면이 아니라 서버가 지킨다
+    // 반증 R6: 점검의 ✕(Director · 새 vCenter · 매핑)는 화면만이 아니라 서버도 막는다 · R1: 시험 1대가 성공한 뒤에만 여러 대
+    const block = drGateBlock({ items: plan.items, jobs: listJobs(), settings, snapshot: store.get(), pollDirs: pollerStatus().directors || {}, regHosts: registryHosts(), lastOkOf, directorOf: (id) => directorById(id, settings) });
+    if (block) { plan.ok = false; plan.issue = block; plan.drBlock = true; }
+  }
   const bad = plan.items.filter((r) => !r.ok).length;
   if (bad && plan.ok) { plan.ok = false; plan.issue = `${bad}대를 복원할 수 없습니다 — 항목별 사유를 확인하세요(묶음 전체를 보내지 않았습니다).`; }
   // 실행 응답 코드: 조회 범위 밖(없음) 404 → 쓰기 범위 밖 403 → 그 밖의 판정 400(규약 — 조회 밖 404 · 쓰기 밖 403)
@@ -1147,7 +1284,7 @@ const planView = (plan) => ({
 
 /** 묶음 복원 미리 보기 — body { items } · Director 에 닿지 않고 OTP 를 쓰지 않는다(판정 · 데이터스토어 여유만). */
 api.post('/tools/bareos-backup/restore-check/bulk', adminOnly, (req, res) => {
-  const { plan } = bulkRestoreGate(req, req.body?.items);
+  const { plan } = bulkRestoreGate(req, req.body?.items, { dr: req.body?.dr === true });
   res.json({ ok: true, plan: planView(plan), needEnroll: !!(config.auth.enabled && !getUser(req.user?.username || '')?.totpEnabled) });
 });
 
@@ -1160,7 +1297,8 @@ api.post('/tools/bareos-backup/restore-check/bulk', adminOnly, (req, res) => {
 api.post('/tools/bareos-backup/restore/bulk', adminOnly, async (req, res) => {
   const name = req.user?.username || '';
   if (config.auth.enabled && !getUser(name)?.totpEnabled) return res.status(403).json({ ok: false, reason: '복원은 OTP 가 등록된 계정만 실행할 수 있습니다. 사용자 관리에서 OTP 를 등록하세요.', needEnroll: true });
-  const { plan, jobs, settings, status } = bulkRestoreGate(req, req.body?.items);
+  const dr = req.body?.dr === true;
+  const { plan, jobs, settings, status } = bulkRestoreGate(req, req.body?.items, { dr });
   if (status === 404) return res.status(404).json({ ok: false, reason: '백업 대상을 찾을 수 없습니다.' });
   if (status === 403) return res.status(403).json({ ok: false, reason: READ_ONLY });
   if (!plan.ok) return res.status(400).json({ ok: false, reason: plan.issue, plan: planView(plan) });
@@ -1175,9 +1313,9 @@ api.post('/tools/bareos-backup/restore/bulk', adminOnly, async (req, res) => {
     const dir = plan.directorId;
     if (!isDemoActive()) {
       const jd = directorById(dir, settings);
-      if (!jd) return res.status(409).json({ ok: false, code: 'not-configured', reason: '이 법인의 Director 가 설정에 없습니다 — 설정 › 법인별 Director 에서 확인하세요.' });
+      if (!jd) return res.status(409).json({ ok: false, code: 'not-configured', reason: '이 법인의 Director 가 설정에 없습니다 — 설정 › vCenter 관리 › Bareos 백업 서버 › Director 에서 확인하세요.' });
       const miss = directorConn(jd).missing;
-      if (miss?.length) return res.status(409).json({ ok: false, code: 'not-configured', reason: `‘${jd.name}’ Director 설정이 덜 됐습니다(${miss.join('·')}) — 설정 › 법인별 Director 에서 먼저 채우세요.` });
+      if (miss?.length) return res.status(409).json({ ok: false, code: 'not-configured', reason: `‘${jd.name}’ Director 설정이 덜 됐습니다(${miss.join('·')}) — 설정 › vCenter 관리 › Bareos 백업 서버 › Director 에서 먼저 채우세요.` });
     }
     // OTP 는 입력 · 전제 검사를 통과한 뒤에 한 번(1회용 코드를 입력 실수로 태우지 않게). Director 에 닿기 전이다.
     if (config.auth.enabled) {
@@ -1193,11 +1331,13 @@ api.post('/tools/bareos-backup/restore/bulk', adminOnly, async (req, res) => {
     });
     let out;
     try {
-      out = await onDirector(dir, 'restores', { items: sendItems });
+      out = await onDirector(dir, 'restores', { items: sendItems }, { signal: AbortSignal.timeout(RESTORES_DEADLINE_MS) });   // v2.870 감사 A5-01
     } catch (e) {
       // 엣지가 가져간 뒤 회신이 없으면 결과 모름 — 시작됐을 수 있다(다시 보내면 두 번 돈다)
       const unknown = !!e?.unknown || e?.code === 'unknown';
       for (const r of plan.items) audit(req, 'Bareos 복원 실행', `${r.vcenterId}/${r.vmName}`, `${unknown ? '결과 모름' : '실패'} — 묶음 ${batchId} · ${String(e?.message || e).slice(0, 160)}`);
+      // v2.874(점검 B5-01): 결과 모름이면 원장에 남긴다 — 다시 누른 같은 복원이 두 번 돌지 않게(대상 붙잡기 · 새 VM 이름 예약)
+      if (unknown) { try { inBatch(() => plan.items.forEach((r, i) => addRestore(r.id, { unknown: true, mode: r.mode, target: r.plan.target, by: name, client: sendItems[i].client, batchId, ...(r.nic ? { nic: r.nic } : {}), ...(dr ? { dr: true } : {}) }))); } catch (e2) { console.warn(`[bareos] 묶음 복원 ${batchId} 결과 모름 기록 실패: ${String(e2?.message || e2).slice(0, 160)}`); } }
       return sendErr(res, Object.assign(new Error(oldEdgeHint(String(e?.message || e))), { code: e?.code || '' }));
     }
     const byKey = new Map((Array.isArray(out) ? out : []).map((x) => [x.key, x]));
@@ -1209,13 +1349,15 @@ api.post('/tools/bareos-backup/restore/bulk', adminOnly, async (req, res) => {
         const x = byKey.get(i);
         const job = jobs.get(r.id);
         if (x?.ok) {
-          addRestore(job.id, { jobid: x.rid, fromJobids: x.chain, mode: r.mode, target: r.plan.target, by: name, client: sendItems[i].client, batchId, ...(r.nic ? { nic: r.nic } : {}) });
+          addRestore(job.id, { jobid: x.rid, fromJobids: x.chain, mode: r.mode, target: r.plan.target, by: name, client: sendItems[i].client, batchId, ...(r.nic ? { nic: r.nic } : {}), ...(dr ? { dr: true } : {}) });
           results.push({ id: r.id, vmName: r.vmName, ok: true, jobid: x.rid });
           audit(req, 'Bareos 복원 실행', `${job.vcenterId}/${job.vmName}`, `복원 jobid ${x.rid} · 묶음 ${batchId} · 방식 ${r.mode} · 원본 ${(x.chain || []).join(',')}${r.mode === 'newVm' ? ` · 새 VM ${r.plan.target.name}` : ''}${r.nic === 'disconnect' ? ' · 네트워크 끊기' : ''}${r.plan.target?.allowDisksMismatch ? ' · 디스크 불일치 허용' : ''}`);
         } else {
           const code = x?.code || 'unknown';
           const reason = x?.message || 'Director 회신에 이 VM 이 없습니다 — 시작됐는지 알 수 없습니다. Director 에서 확인하세요.';
           results.push({ id: r.id, vmName: r.vmName, ok: false, code, reason });
+          // v2.874(점검 B5-01): 결과 모름은 원장에 남긴다(같은 복원을 다시 보내 두 번 돌지 않게 — restoreHeld · 새 VM 이름 예약)
+          if (code === 'unknown') addRestore(job.id, { unknown: true, mode: r.mode, target: r.plan.target, by: name, client: sendItems[i].client, batchId, ...(r.nic ? { nic: r.nic } : {}), ...(dr ? { dr: true } : {}) });
           audit(req, 'Bareos 복원 실행', `${job.vcenterId}/${job.vmName}`, `${code === 'unknown' ? '결과 모름' : code === 'skipped' ? '건너뜀' : '실패'} — 묶음 ${batchId} · ${String(reason).slice(0, 160)}`);
         }
       });
@@ -1227,13 +1369,38 @@ api.post('/tools/bareos-backup/restore/bulk', adminOnly, async (req, res) => {
       audit(req, 'Bareos 묶음 복원', batchId, `원장 저장 실패 — 시작한 복원의 진행이 화면에 없을 수 있습니다(${saveErr})`);
     }
     const started = results.filter((x) => x.ok).length;
-    audit(req, 'Bareos 묶음 복원', `${plan.items[0].vcenterId}/${plan.items[0].vmName}${plan.items.length > 1 ? ` 외 ${plan.items.length - 1}대` : ''}`, `묶음 ${batchId} · 시작 ${started} / ${results.length}대`);
-    res.status(started ? 202 : 502).json({ ok: started > 0, batchId, started, total: results.length, items: results, ...(started ? {} : { reason: '한 대도 시작하지 못했습니다 — 항목별 사유를 확인하세요.' }),
+    // 반증 R5: 재해 복구는 고른 기준 시각을 감사에 남긴다(감염 뒤 백업을 골랐는지 나중에 확인할 수 있게 — 글자 모양만 받는다)
+    const drBefore = dr && /^[0-9T: -]{10,19}$/.test(String(req.body?.drBefore || '')) ? ` · 기준 시각 ${String(req.body.drBefore).replace('T', ' ')}(브라우저 시각)` : '';
+    audit(req, dr ? 'Bareos 재해 복구' : 'Bareos 묶음 복원', `${plan.items[0].vcenterId}/${plan.items[0].vmName}${plan.items.length > 1 ? ` 외 ${plan.items.length - 1}대` : ''}`, `묶음 ${batchId} · 시작 ${started} / ${results.length}대${drBefore}`);
+    // v2.874(점검 B5-01): 한 대도 시작하지 못했어도 결과 모름이 있으면 504(결과 모름) — 502 '시작하지 못했습니다' 는 웹이 확정 실패로 보여 다시 누르게 했다
+    const unknownN = results.filter((x) => !x.ok && x.code === 'unknown').length;
+    const failStatus = unknownN ? 504 : 502;
+    const failReason = unknownN
+      ? `${unknownN}대는 복원 명령을 보냈지만 결과를 모릅니다 — Director 에서 시작됐는지 확인하세요(같은 복원이 두 번 돌지 않게 그 VM 은 잠시 다시 보내지 않습니다).`
+      : '한 대도 시작하지 못했습니다 — 항목별 사유를 확인하세요.';
+    res.status(started ? 202 : failStatus).json({ ok: started > 0, batchId, started, total: results.length, unknown: unknownN, items: results, ...(started ? {} : { code: unknownN ? 'unknown' : 'none-started', reason: failReason }),
       ...(saveErr ? { saveError: '복원은 시작했지만 원장에 남기지 못했습니다 — 진행 · 네트워크 끊기가 화면에 나오지 않을 수 있습니다. Director 와 vCenter 에서 확인하세요.' } : {}) });
   } finally {
     for (const id of locked) unlockJob(id);
     if (noted) noteRestoreBatchEnd(batchId);
   }
+});
+
+/* ───────────────────────── 재해 복구(DR 1차 — 시안 ② · 사용자 결정 '두 번에 나눠') ───────────────────────── */
+
+api.get('/tools/bareos-backup/dr/check', adminOnly, (req, res) => {
+  const vcenterId = String(req.query?.vcenterId || '');
+  if (!vcenterId) return res.status(400).json({ ok: false, reason: '법인(vCenter)을 고르세요.' });
+  if (bareosAccess(req.user, vcenterId, { write: false }) === 404) return res.status(404).json({ ok: false, reason: '그 vCenter 를 찾을 수 없습니다.' });
+  if (registryLoadError()) return res.status(503).json({ ok: false, code: 'registry-unreadable', reason: '백업 대상 원장을 읽지 못했습니다(손상본 보존 · 서비스 점검에서 확인).' });
+  const settings = effectiveSettings();
+  const site = settings.sites.find((x) => String(x.vcenterId) === vcenterId) || null;
+  const director = site?.directorId ? directorById(site.directorId, settings) : null;
+  const dirPoll = director ? (pollerStatus().directors || {})[director.id] || null : null;
+  const view = drCheckView({ vcenterId, snapshot: store.get(), jobs: listJobs(), site, director, dirPoll, lastOkOf, registryHost: registryHosts().get(vcenterId) || '' });
+  // 범위 · 데모 계정에는 Director 접속 정보를 가리는 기존 규칙과 같게 — 사이트 매핑의 INI 경로 · 주소는 전체 범위만
+  if (scopedVcenterIds(req.user, store.get()) || isDemoGuest(req.user)) for (const c of view.checks) if (c.key === 'site' && c.state === 'ok') c.detail = '채워져 있음';
+  res.json({ ok: true, vcenterId, directorId: director?.id || null, ...view });
 });
 
 /* ───────────────────────── v2.862 복원 검증(리허설) · 일일 요약 메일 ───────────────────────── */
@@ -1243,6 +1410,8 @@ api.post('/tools/bareos-backup/restore/bulk', adminOnly, async (req, res) => {
  * 결과 목록은 조회 범위 안 대상만(범위 계정은 자기 법인 검증만 본다).
  */
 api.get('/tools/bareos-backup/rehearsal', adminOnly, (req, res) => {
+  // v2.874(점검 B4-08): 원장을 못 읽으면 결과 목록이 비어 '검증 결과 없음' 으로 보인다 — 503(registryUnreadable 규칙)
+  if (registryLoadError()) return res.status(503).json({ ok: false, code: 'registry-unreadable', reason: '백업 대상 원장을 읽지 못해 검증 결과를 보여 줄 수 없습니다(손상본 보존 · 서비스 점검에서 확인).' });
   const allowed = scopedVcenterIds(req.user, store.get());
   const st = rehearsalStatus();
   const results = [];
@@ -1259,10 +1428,19 @@ api.get('/tools/bareos-backup/rehearsal', adminOnly, (req, res) => {
   const policy = allowed
     ? { ...st.policy, savedBy: '', datastores: Object.fromEntries(Object.entries(st.policy.datastores || {}).filter(([vc]) => allowed.has(vc))) }
     : st.policy;
-  const runs = st.runs.filter((x) => !visDirs || visDirs.has(x.directorId)).slice(0, 20)
+  const runs = st.runs.filter((x) => !visDirs || visDirs.has(x.directorId))   // v2.874 B4-03: 상태가 이미 Director 마다 RUNS_PER_DIR 건 — 여기서 전 법인 공용으로 다시 자르지 않는다
     .map((x) => (allowed ? { ...x, items: (x.items || []).filter((it) => allowed.has(vcOfJob.get(it.jobId))) } : x));
+  // v2.863 정책 화면의 vCenter 별 데이터스토어 칸 — 활성 대상이 있는 vCenter(정책 편집은 전체 범위 전용이라 범위 계정에는 싣지 않는다)
+  let vcenters;
+  if (!allowed) {
+    const cnt = new Map();
+    for (const j of allJobs) if (j.enabled !== false) cnt.set(j.vcenterId, (cnt.get(j.vcenterId) || 0) + 1);
+    const vcName = new Map((store.get()?.vcenters || []).map((v) => [v.id, v.name || v.id]));
+    vcenters = [...cnt].map(([id, jobs]) => ({ id, name: vcName.get(id) || id, jobs })).sort((a, b) => String(a.name).localeCompare(String(b.name)));
+  }
   res.json({
     ok: true, policy, loadError: st.loadError, fullScope: !allowed,
+    ...(vcenters ? { vcenters } : {}),
     runs, results: results.slice(0, 100),
     weeks: Object.fromEntries(Object.entries(st.weeks).filter(([k]) => !visDirs || visDirs.has(k))),   // 법인별 마지막 회차 날짜(포탈 시각)
   });
@@ -1276,7 +1454,7 @@ api.put('/tools/bareos-backup/rehearsal', adminOnly, fullScopeOnly, fullWriteOnl
   if (config.auth.enabled) { const v = verifyUserOtp(name, req.body?.otp); if (!v.ok) return res.status(403).json({ ok: false, reason: `OTP 인증 실패 — ${v.reason}` }); }
   try {
     const saved = savePolicy(next, { by: name });
-    audit(req, 'Bareos 복원 검증 정책', '전 법인', `${saved.enabled ? '켬' : '끔'} · 요일 ${saved.weekday} ${saved.time} · 법인마다 ${saved.perCorp}대 · 성공 ${saved.deleteOnOk ? '지움' : '남김'}`);
+    audit(req, 'Bareos 복원 검증 정책', '전 법인', `${saved.enabled ? '켬' : '끔'} · 요일 ${saved.weekday} ${saved.time} · 법인마다 ${saved.perCorp}대 · 성공 ${saved.deleteOnOk ? '지움' : '남김'} · 데이터스토어 지정 ${Object.keys(saved.datastores || {}).length}곳`);
     res.json({ ok: true, policy: saved });
   } catch (e) { res.status(e?.code === 'unreadable' ? 503 : 400).json({ ok: false, reason: String(e?.message || e) }); }
 });
@@ -1291,7 +1469,7 @@ api.post('/tools/bareos-backup/rehearsal/run', adminOnly, fullScopeOnly, fullWri
   if (rehearsalBusy()) return res.status(409).json({ ok: false, code: 'busy', reason: '다른 복원 검증이 진행 중입니다 — 끝난 뒤 다시 누르세요.' });
   if (!isDemoActive()) {
     const miss = directorConn(directorById(dirId, settings)).missing;
-    if (miss?.length) return res.status(409).json({ ok: false, code: 'not-configured', reason: `그 Director 설정이 덜 됐습니다(${miss.join('·')}) — 설정 › 법인별 Director 에서 먼저 채우세요.` });
+    if (miss?.length) return res.status(409).json({ ok: false, code: 'not-configured', reason: `그 Director 설정이 덜 됐습니다(${miss.join('·')}) — 설정 › vCenter 관리 › Bareos 백업 서버 › Director 에서 먼저 채우세요.` });
   }
   if (config.auth.enabled) { const v = verifyUserOtp(name, req.body?.otp); if (!v.ok) return res.status(403).json({ ok: false, reason: `OTP 인증 실패 — ${v.reason}` }); }
   try {
@@ -1313,7 +1491,8 @@ api.put('/tools/bareos-backup/digest', adminOnly, fullScopeOnly, fullWriteOnly, 
   } catch (e) { res.status(e?.code === 'unreadable' ? 503 : 400).json({ ok: false, reason: String(e?.message || e) }); }
 });
 let _digestSentAt = 0;   // '지금 보내 보기' 는 1분에 한 번(반증 F10 — 메일 폭주 방지)
-api.post('/tools/bareos-backup/digest/send', adminOnly, fullScopeOnly, async (req, res) => {
+// v2.870 감사 A3-03: 형제 PUT digest · 리허설 쓰기와 같이 fullWriteOnly(쓰기 제한 관리자가 전 법인 메일을 보내고 1분 제한을 써 버리지 않게)
+api.post('/tools/bareos-backup/digest/send', adminOnly, fullScopeOnly, fullWriteOnly, async (req, res) => {
   if (Date.now() - _digestSentAt < 60_000) return res.status(429).json({ ok: false, reason: '방금 보냈습니다 — 1분 뒤 다시 누르세요.' });
   _digestSentAt = Date.now();
   const r = await sendDigestNow({ by: req.user?.username || '' });

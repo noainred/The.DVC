@@ -17,6 +17,8 @@ import { agentLastContact } from '../../central/agentContact.js';
 import { registryHosts, vcHostOf } from '../vcHost.js';
 
 export const EDGE_STALE_MS = 30 * 60_000;
+/** 배포 등록부에 그 엣지 이름의 대상이 없을 때의 사유(데모도 같은 글자). v2.879 '등록부 대상 연결'(linkTarget.js)로 고칠 수 있다. */
+export const noTargetWhy = (agent) => `배포 등록부에 엣지 ‘${agent}’ 의 SSH 대상이 없습니다 — 저장된 대상의 이름이 다르면 ‘등록부 대상 연결’ 로 고르고, 없으면 설정 › 원격 법인(DC)에 Edge 노드 포탈 설치에서 저장하세요.`;
 const lc = (s) => String(s ?? '').trim().toLowerCase();
 
 /**
@@ -48,8 +50,11 @@ export function buildTargets({ vcenters = [], inventory = [], deployTargets = []
       mode: dir ? 'reinstall' : 'install', can: false, why: '',
     };
     if (!agent) row.why = '엣지 노드 없음 — 이 vCenter 의 인벤토리를 올리는 엣지가 없습니다.';
-    else if (!t) row.why = `배포 등록부에 엣지 ‘${agent}’ 의 SSH 대상이 없습니다 — 배포 › 엣지 노드에서 저장하세요.`;
-    else if (!row.hasPassword) row.why = '배포 등록부에 SSH 비밀번호가 저장돼 있지 않습니다(키만 저장된 대상은 아직 지원하지 않습니다).';
+    else if (!t) {
+      // v2.879: 예전 문구의 '배포 › 엣지 노드' 는 없는 메뉴였다(사용자 질문 '배포 등록부가 어디야?') — 실제 메뉴 이름 · 이 화면의 연결 단추를 말한다
+      row.why = noTargetWhy(agent);
+      row.linkable = true;
+    } else if (!row.hasPassword) row.why = '배포 등록부에 SSH 비밀번호가 저장돼 있지 않습니다(키만 저장된 대상은 아직 지원하지 않습니다).';
     else if (edgeAgeMs == null || edgeAgeMs > EDGE_STALE_MS) row.why = `엣지 응답 없음(마지막 수신 ${edgeAgeMs == null ? '기록 없음' : `${Math.round(edgeAgeMs / 60_000)}분 전`}).`;
     else if (dir) {
       const known = knownHostAddrs.get(v.id);
@@ -77,4 +82,35 @@ export function sshCredsFor(targetId) {
   const t = listTargetsRaw().find((x) => x.id === targetId);
   if (!t) return null;
   return { host: t.host, port: Number(t.port) || 22, username: t.username, password: t.password || undefined, privateKey: t.privateKey || undefined, passphrase: t.passphrase || undefined };
+}
+
+const lcHost = (s) => String(s ?? '').trim().toLowerCase().replace(/\.$/, '');
+const ipLike = (s) => /^[0-9.]+$/.test(s) || s.includes(':');
+const shortName = (s) => (ipLike(s) ? s : s.split('.')[0]);
+// 루프백 이름 · 주소는 '어느 서버' 인지 말하지 않는다(설치 직후 Rocky 의 호스트 이름 localhost.localdomain) — 대조에서 빼고, 루프백으로 등록된 Director 는 담당 엣지로 대조한다
+const loopback = (s) => s === 'localhost' || s.startsWith('localhost.') || /^127\./.test(s) || s === '::1';
+/**
+ * v2.876(2026-11-04 사용자 화면 — 사전 점검 '이미 설치된 Bareos ✗' 에서 막다른 길): 포탈에 Director 가 등록되지 않은 법인의 엣지 노드에 Bareos 가 이미 있으면
+ *   (사람이 직접 설치 · 이전 설치가 남김) 대상 표는 '새 설치' 이고 사전 점검이 막는데, 조치 문구가 가리키는 '초기화 후 재설치' 는 Director 가 있어야 열렸다.
+ *   이제 화면이 resetExisting 을 보내면 그 대상만 재설치(0단계 초기화 → 설치 → 4단계가 Director 를 새로 등록)로 다룬다. 지우는 규칙 · 확인은 기존 재설치와 같다.
+ *   ⚠ 포탈에 등록된 Bareos 는 이 길로 지우지 않는다: 이 서버(SSH 주소 + ids — 러너가 읽은 서버 주소 · 호스트 이름 · 모든 주소)가 어떤 Director 로든 등록돼 있거나
+ *   (이름은 짧은 이름끼리도 대조 — 틀리면 거부하는 쪽), 다른 vCenter 의 완전 설치 작업 기록(전부 되돌림 아닌 것)이 같은 서버에 있으면 거부한다(반증 A · C).
+ *   설정을 못 읽었는지는 부르는 쪽(job.js resetChecked)이 먼저 본다 — 빈 Director 목록으로 보지 않는다(반증 D).
+ * @param {{ ids?: string[], jobs?: object[] }} [o]
+ * @returns {object} 대상 행(재설치로 바꿨으면 mode 'reinstall' · resetUnregistered true)
+ */
+export function resetTarget(t, body, settings, { ids = [], jobs = [] } = {}) {
+  if (!(body && body.resetExisting === true) || !t || t.mode !== 'install') return t;
+  const names = [t.sshHost, ...(Array.isArray(ids) ? ids : [])].map(lcHost).filter(Boolean);   // 루프백은 same() 이 거른다
+  const full = new Set(names); const short = new Set(names.map(shortName));
+  const same = (h) => { const x = lcHost(h); return !!x && !loopback(x) && (full.has(x) || short.has(shortName(x))); };
+  const mine = (d) => (loopback(lcHost(d.host)) ? !!d.agent && lcHost(d.agent) === lcHost(t.agent) : same(d.host));   // 엣지가 붙는 Director 의 localhost = 그 엣지 서버
+  const other = (settings?.directors || []).find(mine);
+  if (other) {
+    throw Object.assign(new Error(`이 서버의 Bareos 는 Director ‘${other.name}’(${other.host}) 로 포탈에 등록돼 있습니다 — 포탈에 등록된 Bareos 는 이 단추로 지우지 않습니다. `
+      + '그 Director 를 쓰는 법인에서 \'초기화 후 재설치\' 를 고르거나, 이 법인의 이전 설치 작업이 등록한 것이면 그 작업을 이어 하거나 전부 되돌리세요.'), { code: 'invalid' });
+  }
+  const job = (Array.isArray(jobs) ? jobs : []).find((x) => x && !x.demo && x.vcenterId !== t.vcenterId && x.status !== 'rolledback' && (same(x.sshHost) || same(x.hostAddr)));
+  if (job) throw Object.assign(new Error(`같은 서버에 다른 법인 ‘${job.vcenterName || job.vcenterId}’ 의 완전 설치 작업(${job.id} · ${job.status})이 있습니다 — 그 법인에서 전부 되돌린 뒤에 하세요.`), { code: 'invalid' });
+  return { ...t, mode: 'reinstall', resetUnregistered: true };
 }

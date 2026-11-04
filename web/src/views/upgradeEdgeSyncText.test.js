@@ -3,7 +3,7 @@ import { describe, it, expect } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { EDGE_STATE_TEXT, SYNC_OUTCOME_TEXT, EDGE_SYNC_OFF_FIX, edgeSyncSummary, noSyncText, edgeAutoCheckboxHint } from './upgradeEdgeSyncText.js';
+import { EDGE_STATE_TEXT, SYNC_OUTCOME_TEXT, EDGE_KIND_TEXT, EDGE_SYNC_OFF_FIX, edgeSyncSummary, noSyncText, edgeAutoCheckboxHint, syncRunText, edgeSyncLine } from './upgradeEdgeSyncText.js';
 
 const NOW = Date.UTC(2026, 10, 2, 13, 20, 0); // 고정 기준 시각(정시와 떨어뜨림)
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -19,9 +19,10 @@ describe('서버 코드 ↔ 화면 문구 1:1', () => {
   it('EDGE_SYNC_STATES · EDGE_SYNC_OUTCOMES 가 웹 표와 같다', () => {
     expect(Object.keys(EDGE_STATE_TEXT).sort()).toEqual(listOf('EDGE_SYNC_STATES').sort());
     expect(Object.keys(SYNC_OUTCOME_TEXT).sort()).toEqual(listOf('EDGE_SYNC_OUTCOMES').sort());
+    expect(Object.keys(EDGE_KIND_TEXT).sort()).toEqual(listOf('EDGE_SYNC_KINDS').sort());
   });
   it('문구에 백틱·별표 강조가 없다(BoldText 가 글자로 그린다)', () => {
-    const all = JSON.stringify({ EDGE_STATE_TEXT, SYNC_OUTCOME_TEXT, EDGE_SYNC_OFF_FIX }) + edgeAutoCheckboxHint({ edgeSync: { intervalMs: 600_000 } }) + noSyncText({ edgeSync: { enabled: true } });
+    const all = JSON.stringify({ EDGE_STATE_TEXT, SYNC_OUTCOME_TEXT, EDGE_KIND_TEXT, EDGE_SYNC_OFF_FIX }) + JSON.stringify(syncRunText({ ok: true, run: { outcome: 'pushed', pushed: 2, ok: 1, version: '2.865.0', failed: [{ id: 'a', reason: 'x' }] } })) + JSON.stringify(edgeSyncLine({ enabled: true, total: 1, counts: { behind: 1 }, lastRun: { at: 1, outcome: 'pushed', ok: 0, pushed: 1, restored: true } })) + edgeAutoCheckboxHint({ edgeSync: { intervalMs: 600_000 } }) + noSyncText({ edgeSync: { enabled: true } });
     expect(all.includes('`')).toBe(false);
     expect(all.includes('**')).toBe(false);
   });
@@ -72,5 +73,45 @@ describe('엣지 자동 업그레이드 요약', () => {
     expect(edgeAutoCheckboxHint({ edgeSync: { intervalMs: 600_000 } })).toMatch(/10분마다/);
     expect(edgeAutoCheckboxHint({})).toMatch(/주기적으로/);
     expect(edgeAutoCheckboxHint({})).not.toMatch(/10분/);
+  });
+  it('v2.865: 재시작 전 기록 · 옛 방식 엣지 표지 · 설정에서 뺀 엣지', () => {
+    const s = { enabled: true, edgeAutoUpgrade: true, edgeSync: { enabled: true, armed: true, intervalMs: 600_000, nextRunAt: NOW + 60_000, total: 2, counts: { 'up-to-date': 1, behind: 1, ahead: 0, unknown: 0, unreachable: 0, disabled: 0, waiting: 0, backoff: 0 },
+      lastRun: { at: NOW - 5 * 60_000, outcome: 'idle', restored: true }, legacy: 1, legacyDropped: [{ url: 'http://169.254.1.1', reason: '링크로컬 대역' }],
+      pending: [{ id: 'edge:https://e1', name: 'https://e1', kind: 'edge', version: '2.860.0', state: 'behind', reason: null, nextAt: null }] } };
+    const a = edgeSyncSummary(s, NOW);
+    expect(a.last).toMatch(/재시작 전 기록$/);
+    expect(a.rows[0].kind).toBe('옛 방식 엣지');
+    expect(a.dropped).toEqual(['http://169.254.1.1 — 링크로컬 대역']);
+  });
+  it("v2.865: '지금 동기화' 결과 문구", () => {
+    expect(syncRunText({ ok: true, run: { outcome: 'pushed', pushed: 2, ok: 2, version: '2.865.0', failed: [] } })).toEqual({ ok: true, text: '뒤처진 엣지에 중앙 버전 번들을 밀어 넣었습니다 — 2/2대 성공 (v2.865.0)' });
+    const part = syncRunText({ ok: false, run: { outcome: 'pushed', pushed: 2, ok: 1, version: '2.865.0', failed: [{ id: 'a', name: '부산', reason: 'HTTP 403' }] } });
+    expect(part.ok).toBe(false); expect(part.text).toMatch(/1\/2대 성공 \(v2\.865\.0\) · 실패: 부산: HTTP 403/);
+    expect(syncRunText({ ok: true, run: { outcome: 'idle' } })).toEqual({ ok: true, text: SYNC_OUTCOME_TEXT.idle });
+    expect(syncRunText({ ok: false, run: { outcome: 'no-bundle', behind: 3, reason: '원격 소스의 최신은 v2.864.0' } }).text).toMatch(/뒤처진 3대 · 원격 소스의 최신은/);
+    expect(syncRunText({ ok: false, run: { outcome: 'skipped', reason: '업그레이드 확인·적용이 진행 중' } })).toEqual({ ok: false, text: `${SYNC_OUTCOME_TEXT.skipped} — 업그레이드 확인·적용이 진행 중` });
+    expect(syncRunText({ ok: false, reason: 'auto-upgrade disabled' }).text).toMatch(/자동 업그레이드 사용이 꺼져/);
+    expect(syncRunText(null).ok).toBe(false);
+  });
+  it('v2.865: 수집 서버 화면 한 줄', () => {
+    expect(edgeSyncLine(null)).toBe(null);
+    const off = edgeSyncLine({ enabled: false });
+    expect(off.tone).toBe('muted'); expect(off.canRun).toBe(false); expect(off.text).toMatch(/꺼짐/);
+    const on = edgeSyncLine({ enabled: true, total: 5, legacy: 1, running: false, nextRunAt: NOW + 4 * 60_000, counts: { 'up-to-date': 3, behind: 1, unreachable: 1, unknown: 0, waiting: 0, backoff: 0 }, lastRun: { at: NOW - 6 * 60_000, outcome: 'pushed', ok: 1, pushed: 1 } }, NOW);
+    expect(on.text).toBe('엣지 자동 업그레이드: 켬 · 등록 5대 · 최신 3 · 구버전 1 · 닿지 않음 1 · 옛 방식 엣지 1 · 다음 4분 뒤 · 마지막 6분 전 뒤처진 엣지에 중앙 버전 번들을 밀어 넣었습니다 1/1');
+    expect(on.tone).toBe('warn'); expect(on.canRun).toBe(true);
+    const clean = edgeSyncLine({ enabled: true, total: 2, running: true, counts: { 'up-to-date': 2 }, lastRun: { at: NOW - 60_000, outcome: 'idle', restored: true } }, NOW);
+    expect(clean.tone).toBe('ok'); expect(clean.canRun).toBe(false); expect(clean.text).toMatch(/지금 동기화 중 · 마지막 1분 전 뒤처진 엣지가 없었습니다\(재시작 전\)/);
+  });
+  it('v2.870 감사 A4-02 · A2-01: 판정 모름은 0 이 아니다 · 동기화 오류는 warn · 효과 없음은 구버전 + warn', () => {
+    const unk = edgeSyncLine({ enabled: true, total: 0, counts: null, lastRun: { at: NOW - 60_000, outcome: 'error', reason: 'boom' } }, NOW);
+    expect(unk.text).toMatch(/엣지 판정 모름/);
+    expect(unk.text).not.toMatch(/등록 0대|최신 0/);
+    expect(unk.tone).toBe('warn');
+    expect(edgeSyncLine({ enabled: true, total: 2, counts: { 'up-to-date': 2 }, lastRun: { at: NOW - 60_000, outcome: 'error' } }, NOW).tone).toBe('warn');
+    const ne = edgeSyncLine({ enabled: true, total: 2, counts: { 'up-to-date': 1, 'no-effect': 1 } }, NOW);
+    expect(ne.text).toMatch(/구버전 1/); expect(ne.tone).toBe('warn');
+    expect(edgeSyncSummary({ enabled: true, edgeSync: { enabled: true, total: 1, counts: { 'no-effect': 1 }, pending: [{ id: 'pl', state: 'no-effect', reason: 'r' }] } }, NOW).counts).toMatch(/구버전 1/);
+    expect(EDGE_STATE_TEXT['no-effect'].tone).toBe('bad');
   });
 });

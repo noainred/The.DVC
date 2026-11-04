@@ -16,6 +16,7 @@ import { pruneSelection } from './groupRetention.js';
 import { parseStatusRaw, parseDirStatusRaw, rawHead } from './liveParse.js';
 import { jobNameFor, isFinalStatus, isResourceName } from './names.js';
 import { chainFromHistory, chainIssue } from './restore.js';
+import { firstErrorLine } from './logFirstError.js';
 import { POLICY_CMDS, POLICY_KEYS, NORMALIZE as POLICY_NORMALIZE, deniedText, normVolumeRows } from './policyParse.js';
 
 const fail = (code, msg) => new BareosConsoleError(code, msg);
@@ -45,8 +46,25 @@ async function addOne(s, it) {
   throw fail('invalid', '같은 VM 의 Bareos 잡이 Director 에 이미 여러 개 있습니다 — Director 의 bareos-dir.d/job 아래 pv-… 파일을 정리한 뒤 다시 시도하세요.');
 }
 
+/**
+ * 취소 하나 — 이 잡의 실행(jobid)만. 포탈이 추적 중인 실행을 Director 가 모르면(재시작·다른 Director — P5) { cleared } 로 추적만 내리게 한다.
+ * 이미 끝난 실행이면 { final: row } (부르는 쪽이 결과를 원장에 반영하고 '이미 끝남' 을 알린다). 단건(cancel)과 묶음(cancelJobs)이 이 함수 하나를 쓴다.
+ */
+async function cancelOne(s, { jobid, name, pendingJobid = null } = {}) {
+  if (!Number.isInteger(jobid) || jobid <= 0) throw invalid('jobid 가 올바르지 않습니다.');
+  if (!isResourceName(name)) throw invalid('잡 이름이 올바르지 않습니다.');
+  const row = await jobStatus(s, jobid);
+  if (!row && jobid === pendingJobid) return { cleared: true };
+  if (!row || row.name !== name) throw invalid('이 대상의 실행이 아닙니다.');
+  if (isFinalStatus(row.status)) return { final: row };
+  await cancelJob(s, jobid);
+  return { canceled: true };
+}
+
 /** v2.830 runJobs 한 번에 보내는 잡 수 상한 — 그룹 상한(groups.MAX_MEMBERS)을 부르는 쪽이 이 크기로 나눠 보낸다. */
 export const RUN_JOBS_MAX = 50;
+/** v2.872 묶음 로그 상한(시안 기본값 ② — Director 세션 하나에서 차례로 · 명령마다 콘솔 시한). */
+export const LOGS_MAX = 15;
 /** v2.833 진행 현황판 한 번에 묻는 FD 수(법인 하나 = 보통 FD 하나). */
 export const LIVE_CLIENTS_MAX = 20;
 
@@ -293,17 +311,30 @@ export const OPS = Object.freeze({
     return normVolumeRows(await s.call(`list volumes pool=${pool}`, { maxBytes: 8 * 1024 * 1024 }));
   },
 
+  /** 취소 — 이 잡의 실행(jobid)만(cancelOne). */
+  cancel: (s, a) => cancelOne(s, a),
+
   /**
-   * 취소 — 이 잡의 실행(jobid)만. 포탈이 추적 중인 실행을 Director 가 모르면(재시작·다른 Director — P5) { cleared } 로 추적만 내리게 한다.
-   * 이미 끝난 실행이면 { final: row } (부르는 쪽이 결과를 원장에 반영하고 '이미 끝남' 을 알린다).
+   * v2.867 묶음 취소(그룹 회차 중단) — 항목마다 단건 취소(cancelOne)와 **같은 검사**(행 확인 · 잡 이름 대조 · 끝난 행 · 모르는 행)를 세션 하나로 차례로.
+   * 법인 쪽(엣지 대행이면 그 엣지)에서 한 번에 돈다(VM 수만큼 WAN 을 왕복하지 않는다 — 루트 CLAUDE.md '백업은 법인 로컬').
+   * 한 항목의 실패는 나머지를 막지 않고, 세션째 끊기면(SESSION_DEAD) 남은 것은 '건너뜀'(보내지 않았다).
+   * 옛 엣지는 이 작업 종류를 몰라 '알 수 없는 작업' 으로 거절한다(부르는 쪽이 엣지 업그레이드를 안내 — 단건 취소를 N번 돌려보내지 않는다).
+   * @param {{ items: { key:number, jobid:number, name:string, pendingJobid?:number|null }[] }} a
+   * @returns {Promise<{ key, ok, canceled?, final?, cleared?, code?, message? }[]>}
    */
-  async cancel(s, { jobid, name, pendingJobid }) {
-    const row = await jobStatus(s, jobid);
-    if (!row && jobid === pendingJobid) return { cleared: true };
-    if (!row || row.name !== name) throw invalid('이 대상의 실행이 아닙니다.');
-    if (isFinalStatus(row.status)) return { final: row };
-    await cancelJob(s, jobid);
-    return { canceled: true };
+  async cancelJobs(s, { items = [] } = {}) {
+    const out = [];
+    let dead = '';
+    for (const it of items.slice(0, RUN_JOBS_MAX)) {
+      if (dead) { out.push({ key: it.key, ok: false, code: 'skipped', message: `건너뜀 — ${dead}` }); continue; }
+      try {
+        out.push({ key: it.key, ok: true, ...(await cancelOne(s, it)) });
+      } catch (e) {
+        out.push({ key: it.key, ok: false, code: e?.code || 'error', message: String(e?.message || e).slice(0, 300) });
+        if (SESSION_DEAD.has(e?.code)) dead = `Director 연결 문제로 멈췄습니다(${e.code})`;
+      }
+    }
+    return out;
   },
 
   /**
@@ -332,8 +363,40 @@ export const OPS = Object.freeze({
     const chain = chainFromHistory(runs, jobid);
     const ci = chainIssue(chain, jobid);
     if (ci) throw invalid(ci);
-    const rid = await runRestore(s, { client, jobids: chain, restoreJob, pluginOptions });
+    // v2.874(점검 B5-01): restore 명령을 보낸 뒤 끊김은 결과 모름(묶음 restores 와 같은 표) — 확정 실패(502)로 보이면 다시 눌러 두 번 돈다
+    let rid;
+    try { rid = await runRestore(s, { client, jobids: chain, restoreJob, pluginOptions }); } catch (e) {
+      if (MID_COMMAND_CODES.has(e?.code)) throw Object.assign(new Error(`복원 명령을 보낸 뒤 응답이 끊겼습니다(${e.code}) — 시작됐는지 알 수 없습니다. Director 에서 확인하세요.`), { code: 'unknown', unknown: true });
+      throw e;
+    }
     return { rid, chain };
+  },
+
+  /**
+   * v2.872 통합 에러 로그 '묶음 로그'(시안 docs/design/bareos-errlog ②) — 실패한 실행 여러 건의 작업 로그를 **세션 하나로 순차** 읽어
+   *   **첫 오류 줄만** 돌려준다(원문은 낱건 '로그' 에서 — WAN 으로 수 MB 를 옮기지 않는다). 항목마다 단건 log 와 같은 검사(그 jobid 가 이 잡의 실행인가).
+   *   읽기 전용(MUTATING 아님) · 세션째 끊기면 남은 것은 건너뜀 · 시한 신호가 서면 남은 것을 시작하지 않는다. 옛 엣지는 '알 수 없는 작업' 으로 거절한다.
+   * @param {{ items: { key:number, jobid:number, name:string }[] }} a
+   * @returns {Promise<{ key, ok, firstError?: string|null, lines?: number, state?, status?, code?, message? }[]>}
+   */
+  async logs(s, { items = [] } = {}, { signal = null } = {}) {
+    const out = [];
+    let dead = '';
+    for (const it of (Array.isArray(items) ? items : []).slice(0, LOGS_MAX)) {
+      if (!dead && signal?.aborted) dead = '시한이 지나 남은 실행은 읽지 않았습니다';
+      if (dead) { out.push({ key: it.key, ok: false, code: 'skipped', message: `건너뜀 — ${dead}` }); continue; }
+      try {
+        if (!isResourceName(it.name)) throw invalid('잡 이름이 올바르지 않습니다.');
+        const row = await jobStatus(s, it.jobid);
+        if (!row || row.name !== it.name) throw invalid('이 대상의 실행이 아닙니다.');
+        const log = await jobLog(s, it.jobid, { maxBytes: 128 * 1024, maxLines: 2000 });
+        out.push({ key: it.key, ok: true, firstError: firstErrorLine(log.lines), lines: log.total, state: row.state ?? null, status: row.status ?? null });
+      } catch (e) {
+        out.push({ key: it.key, ok: false, code: e?.code || 'error', message: String(e?.message || e).slice(0, 300) });
+        if (SESSION_DEAD.has(e?.code)) dead = `Director 연결 문제로 멈췄습니다(${e.code})`;
+      }
+    }
+    return out;
   },
 
   /**
@@ -466,4 +529,4 @@ export const OPS = Object.freeze({
 });
 
 /** Director 상태를 바꾸는 작업. */
-export const MUTATING = Object.freeze(new Set(['addJobs', 'disableJobs', 'runJob', 'runJobs', 'pruneJobs', 'setEnabled', 'cancel', 'restore', 'restores', 'poll']));
+export const MUTATING = Object.freeze(new Set(['addJobs', 'disableJobs', 'runJob', 'runJobs', 'pruneJobs', 'setEnabled', 'cancel', 'cancelJobs', 'restore', 'restores', 'poll']));

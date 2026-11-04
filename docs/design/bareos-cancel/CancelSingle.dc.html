@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>단일 백업 취소 확인 창</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=Noto+Sans+KR:wght@400;500;700;800&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+body{margin:0;background:#0a0e17;color:#e6edf6;font-family:"Inter","Noto Sans KR","Apple SD Gothic Neo",sans-serif;font-size:13px}
+a{color:#3b82f6}a:hover{color:#60a5fa}
+.card{background:#141b2d;border:1px solid #243049;border-radius:12px}
+.muted{color:#8b9bb4}
+.mono{font-family:"JetBrains Mono",ui-monospace,monospace}
+.btn{display:inline-flex;align-items:center;gap:6px;min-height:34px;padding:0 14px;border-radius:8px;border:1px solid #243049;background:#1a2236;color:#e6edf6;font:inherit;font-size:13px;font-weight:600;cursor:pointer;white-space:nowrap;text-decoration:none}
+.btn.danger{background:#ef4444;border-color:#ef4444;color:#ffffff}
+.tag{display:inline-flex;align-items:center;gap:5px;height:22px;padding:0 9px;border-radius:999px;font-size:11.5px;font-weight:700;white-space:nowrap}
+.tag.ok{background:rgba(34,197,94,.14);color:#86efac}.tag.bad{background:rgba(239,68,68,.16);color:#fca5a5}.tag.warn{background:rgba(245,158,11,.16);color:#fcd34d}.tag.run{background:rgba(59,130,246,.18);color:#93c5fd}.tag.unk{background:rgba(139,155,180,.14);color:#aebbd0}.tag.stop{background:rgba(251,146,60,.18);color:#fdba74}
+.kv{display:grid;grid-template-columns:88px minmax(0, 1fr);gap:6px 10px;font-size:12.5px}
+.kv dt{color:#8b9bb4;margin:0}.kv dd{margin:0;overflow-wrap:anywhere}
+.note{display:grid;grid-template-columns:minmax(0, 1fr);gap:6px;padding:10px 12px;border-radius:10px;border:1px solid rgba(245,158,11,.4);background:rgba(245,158,11,.08);font-size:12.5px;line-height:1.5}
+.sm{font-size:11.5px;color:#8b9bb4}
+.spin{display:inline-block;width:10px;height:10px;border-radius:50%;border:2px solid #fdba74;border-right-color:transparent;flex:none}
+.step{display:flex;flex-direction:column;gap:6px;padding:10px 12px;border:1px solid #243049;border-radius:10px;background:#0f1626;min-width:0}
+.arrow{display:flex;align-items:center;justify-content:center;color:#5d6b85;font-size:18px}
+</style>
+</helmet>
+<div style="width:720px;height:700px;box-sizing:border-box;padding:24px;display:flex;flex-direction:column;gap:18px;background:rgba(10,14,23,.92)">
+
+  <section class="card" role="dialog" aria-labelledby="t" style="padding:18px 20px;display:flex;flex-direction:column;gap:14px;border-color:#2b3a57">
+    <div style="display:flex;align-items:flex-start;gap:10px">
+      <div style="min-width:0;flex:1">
+        <h2 id="t" style="margin:0;font-size:17px;font-weight:800">실행 취소 — db-ora-01</h2>
+        <div class="sm" style="margin-top:3px">jobid 4812 · 그룹 DB-야간 · 예약 02:00 회차 · 담당 엣지 kr-edge01</div>
+      </div>
+      <button class="btn" type="button" aria-label="닫기" style="min-height:28px;padding:0 10px;font-size:12px">닫기</button>
+    </div>
+
+    <dl class="kv">
+      <dt>지금</dt><dd><span class="tag run">실행 중</span> &nbsp;Incremental · 02:00:04 시작 · 41분 경과 · 38.2 GB(추정 61%) · 15.8 MB/s</dd>
+      <dt>하는 일</dt><dd>Director 에 <b>cancel jobid=4812</b> 명령을 보냅니다. FD 가 멈추기까지 <b>수 초~수 분</b> 걸리고, 그동안 이 대상은 ‘멈추는 중’ 으로 보입니다.</dd>
+      <dt>결과</dt><dd>끝나면 결과 <b>취소</b> 로 기록되고(오늘 취소 1) <b>복원 지점이 되지 않습니다</b>. 다음 증분은 마지막 성공 백업 기준으로 돕니다.</dd>
+    </dl>
+
+    <div class="note">
+      <div><b>알아 둘 것</b></div>
+      <div>· 이 실행이 만든 VMware 스냅샷이 남을 수 있습니다 — 끝난 뒤 백업 대상 패널의 ‘스냅샷 n개’ 칩으로 확인하세요(실환경 미확인 · 추정).</div>
+      <div>· 그룹 회차의 다른 VM 은 계속 돕니다. 회차 전체를 멈추려면 그룹 카드의 ‘회차 중단…’ 을 쓰세요.</div>
+      <div>· 취소는 삭제가 아닙니다 — 이미 쓴 볼륨 · 카탈로그는 지우지 않습니다. OTP 는 묻지 않습니다.</div>
+    </div>
+
+    <div style="display:flex;justify-content:flex-end;gap:8px;flex-wrap:wrap">
+      <button class="btn" type="button">닫기</button>
+      <a class="btn danger" href="Main.dc.html">취소 보내기</a>
+    </div>
+  </section>
+
+  <div style="display:flex;flex-direction:column;gap:8px;min-width:0">
+    <div class="sm">보낸 뒤 이 대상의 판정 칸이 바뀌는 순서(4초 재읽기 · 폴러 반영)</div>
+    <div style="display:grid;grid-template-columns:minmax(0, 1fr) 24px minmax(0, 1fr) 24px minmax(0, 1fr);gap:8px;align-items:stretch">
+      <div class="step"><span class="tag run">실행 중</span><span class="sm">취소 전 · ‘취소…’ 버튼 활성</span></div>
+      <div class="arrow" aria-hidden="true">→</div>
+      <div class="step"><span class="tag stop"><i class="spin" aria-hidden="true"></i> 멈추는 중 0분 08초</span><span class="sm">원장 pending.cancel = {at, by} · 버튼은 ‘취소 보냄’ 으로 잠김 · Director 상태 ‘is waiting for client to cancel’</span></div>
+      <div class="arrow" aria-hidden="true">→</div>
+      <div class="step"><span class="tag unk">취소됨</span><span class="sm">Director 행 상태 A → lastRun.state = canceled · 끝난 실행 · 복원 지점 아님</span></div>
+    </div>
+    <div style="display:grid;grid-template-columns:minmax(0, 1fr) minmax(0, 1fr);gap:8px">
+      <div class="step" style="border-color:rgba(245,158,11,.4)"><span class="tag warn">멈추지 않음 — 10분 넘게 running</span><span class="sm">폴러가 pending.cancel.at + 10분을 넘겨도 running 이면 표시 · 버튼은 ‘다시 보내기’ 로 풀림 · Director 에서 확인하라고 안내</span></div>
+      <div class="step"><span class="tag ok">이미 끝남</span><span class="sm">보내기 전에 끝났으면 400 finished — 결과만 반영하고 ‘이미 끝난 실행입니다’ 안내(지금 동작 그대로)</span></div>
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":720,"height":700}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>
