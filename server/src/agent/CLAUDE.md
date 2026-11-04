@@ -17,3 +17,10 @@
   그래서 ① 대상 이름(agentName)이 없으면 멈추고 ② 접속한 장비의 이름(`effectiveAgentName` — config.js 순서·마지막 값)이 다르면 멈추고
   ③ 중앙이 pull 로 기록한 엣지 호스트 이름(`expectHostname`)이 있으면 `util/sameHostName.js` 로 hostname 과 대조해 다르면 멈춘다(모름=null 은 통과).
   이 확인을 cp·sed 뒤로 옮기거나 빼지 말 것 — 회귀 `test/edgeTokenApply2776.test.js` E-2 · 포워딩 종단 `test/edgeTokenTopo2777.test.js`.
+
+# 에이전트 이름만 바꾸기(`deployRegistry.setTargetAgentName`) — v2.879
+
+- Bareos 완전 설치 '등록부 대상 연결'(`bareos/install/linkTarget.js`)만 부른다. 바꾸는 것은 agentName 하나(주소가 그대로라 `accessMoved` 비밀 폐기 대상 아님) ·
+  `expect` 가 지금 값과 다르면 conflict(그사이 사람이 바꾼 값을 덮지 않는다) · 개행 · NUL 은 `envPairsIssue` 로 거부(배포 때 portal.env 에 들어간다).
+  ⚠ 저장 라우트의 수집 서버 자동 등록(`autoRegister.js collectorIdFor`)은 수집 데이터센터 칸이 비면 **이름으로 id 를 만든다** — 이름을 바꾼 뒤 '대상 수정' 으로 저장하면
+  새 이름의 수집 서버가 하나 더 생긴다(옛 항목은 남음 · 미해결). 이 경로를 고칠 때 같은 토큰 · 주소의 기존 항목을 갱신하도록 할 것.

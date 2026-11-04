@@ -17,6 +17,8 @@ import { agentLastContact } from '../../central/agentContact.js';
 import { registryHosts, vcHostOf } from '../vcHost.js';
 
 export const EDGE_STALE_MS = 30 * 60_000;
+/** 배포 등록부에 그 엣지 이름의 대상이 없을 때의 사유(데모도 같은 글자). v2.879 '등록부 대상 연결'(linkTarget.js)로 고칠 수 있다. */
+export const noTargetWhy = (agent) => `배포 등록부에 엣지 ‘${agent}’ 의 SSH 대상이 없습니다 — 저장된 대상의 이름이 다르면 ‘등록부 대상 연결’ 로 고르고, 없으면 설정 › 원격 법인(DC)에 Edge 노드 포탈 설치에서 저장하세요.`;
 const lc = (s) => String(s ?? '').trim().toLowerCase();
 
 /**
@@ -48,8 +50,11 @@ export function buildTargets({ vcenters = [], inventory = [], deployTargets = []
       mode: dir ? 'reinstall' : 'install', can: false, why: '',
     };
     if (!agent) row.why = '엣지 노드 없음 — 이 vCenter 의 인벤토리를 올리는 엣지가 없습니다.';
-    else if (!t) row.why = `배포 등록부에 엣지 ‘${agent}’ 의 SSH 대상이 없습니다 — 배포 › 엣지 노드에서 저장하세요.`;
-    else if (!row.hasPassword) row.why = '배포 등록부에 SSH 비밀번호가 저장돼 있지 않습니다(키만 저장된 대상은 아직 지원하지 않습니다).';
+    else if (!t) {
+      // v2.879: 예전 문구의 '배포 › 엣지 노드' 는 없는 메뉴였다(사용자 질문 '배포 등록부가 어디야?') — 실제 메뉴 이름 · 이 화면의 연결 단추를 말한다
+      row.why = noTargetWhy(agent);
+      row.linkable = true;
+    } else if (!row.hasPassword) row.why = '배포 등록부에 SSH 비밀번호가 저장돼 있지 않습니다(키만 저장된 대상은 아직 지원하지 않습니다).';
     else if (edgeAgeMs == null || edgeAgeMs > EDGE_STALE_MS) row.why = `엣지 응답 없음(마지막 수신 ${edgeAgeMs == null ? '기록 없음' : `${Math.round(edgeAgeMs / 60_000)}분 전`}).`;
     else if (dir) {
       const known = knownHostAddrs.get(v.id);
