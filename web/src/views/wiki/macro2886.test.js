@@ -1,5 +1,5 @@
 /**
- * macro2886.test.js — v2.886 C-4 · C-5: 매크로 줄 해석 · 마크다운 블록 · 첨부 주소(attach:) · 인라인 댓글 인용 정리 · 첨부 문구.
+ * macro2886.test.js — v2.887 C-4 · C-5: 매크로 줄 해석 · 마크다운 블록 · 첨부 주소(attach:) · 인라인 댓글 인용 정리 · 첨부 문구.
  */
 import { describe, it, expect } from 'vitest';
 import { parseMacroLine, issuesMacroArgs, includeTarget, MACROS } from './macro.js';

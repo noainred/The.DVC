@@ -29,7 +29,7 @@ import { fullScopeOnlyWith } from '../admin/shared.js';
 import { recordView, setFavorite, userLists, isFavorite, viewCounts, forgetPage, USER_LIMITS } from '../../wiki/userState.js';
 
 const writers = requireRole('admin', 'operator');
-// v2.886 관리자 템플릿 — 전 법인 공용(모든 스페이스의 '새 문서') · 관리자 + 전체 범위 + 쓰기 범위 무제한
+// v2.887 관리자 템플릿 — 전 법인 공용(모든 스페이스의 '새 문서') · 관리자 + 전체 범위 + 쓰기 범위 무제한
 const templateFleetOnly = fullScopeOnlyWith('관리자 템플릿은 모든 스페이스에 보이는 전 법인 공용 설정이라 전체 범위(vCenter 제한 없는) 관리자만 바꿉니다.');
 function templateFullWrite(req, res, next) {
   let w = null;
@@ -94,7 +94,7 @@ export function registerWiki(api) {
       canTemplates: isAdmin(req) && !access.read && !access.write, templateLimits: TEMPLATE_LIMITS, templatesLoadError: isAdmin(req) ? customTemplatesLoadError() : null,
     });
   });
-  // v2.886 관리자 템플릿 목록(본문 포함 — 관리 화면) · 만들기 · 고치기 · 지우기
+  // v2.887 관리자 템플릿 목록(본문 포함 — 관리 화면) · 만들기 · 고치기 · 지우기
   api.get('/wiki/templates', adminOnly, templateFleetOnly, (req, res) => {
     res.set('Cache-Control', 'no-store');
     res.json({ ok: true, items: listCustomTemplates(), loadError: customTemplatesLoadError(), limits: TEMPLATE_LIMITS });
@@ -214,7 +214,7 @@ export function registerWiki(api) {
       const r = deletePage(req.params.id, userOf(req), { access: accessOf(req), isMod: isMod(req) });
       audit(req, 'wiki.delete', r.id);
       forgetPage(r.id); // v2.885 그 문서의 조회 수 · 즐겨찾기 · 최근 기록
-      try { removeAttachments('wiki', r.id); } catch (e) { console.warn(`[wiki] ${r.id} 첨부 정리 실패: ${String(e?.message || e).slice(0, 160)}`); } // v2.886
+      try { removeAttachments('wiki', r.id); } catch (e) { console.warn(`[wiki] ${r.id} 첨부 정리 실패: ${String(e?.message || e).slice(0, 160)}`); } // v2.887
       res.json({ ok: true, ...r, persist: await persistView(req) });
     } catch (e) { fail(res, e, next); }
   });
@@ -225,7 +225,7 @@ export function registerWiki(api) {
       res.json({ ok: true, comment: cm, persist: await persistView(req) });
     } catch (e) { fail(res, e, next); }
   });
-  // v2.886 인라인 댓글 해결 표시 — 문지기는 댓글과 같고, 쓴 사람 · 고칠 수 있는 사람 · 전체 범위 관리자만(저장소가 판정)
+  // v2.887 인라인 댓글 해결 표시 — 문지기는 댓글과 같고, 쓴 사람 · 고칠 수 있는 사람 · 전체 범위 관리자만(저장소가 판정)
   api.post('/wiki/pages/:id/comments/:cid/resolve', commenters, async (req, res, next) => {
     if (!ID_RE.test(req.params.id)) return badId(res);
     try {

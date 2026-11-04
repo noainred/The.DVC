@@ -1,5 +1,5 @@
 /**
- * AttachAdmin — 첨부 관리(v2.886 · C-4): 사용량 · 전체 상한 설정(사용자 결정: 설정에서 · 기본 2GB) · 전체 내려받기(포탈 백업에 넣지 않는 대신 — 사용자 결정).
+ * AttachAdmin — 첨부 관리(v2.887 · C-4): 사용량 · 전체 상한 설정(사용자 결정: 설정에서 · 기본 2GB) · 전체 내려받기(포탈 백업에 넣지 않는 대신 — 사용자 결정).
  * 관리자 + 전체 범위만(서버 /attach/admin/* 이 같은 기준). 이슈 › 설정 탭에 붙는다.
  */
 import React, { useCallback, useEffect, useState } from 'react';

@@ -38,7 +38,7 @@ export const LIMITS = Object.freeze({
   pages: 2000, title: 200, body: 65_536, labels: 10, label: 30, depth: 3, versionsMeta: 200, versionsBody: 30,
   comments: 300, comment: 2000, note: 200, homeMd: 10_000, notice: 1000, quickLinks: 12, quickTitle: 40, quickHref: 300,
   watchers: 100, issueKeys: 50, search: 50,
-  // v2.886 C-5 — 대문 담당(10명) · 당번 표(30줄 · 메모 60자) · 인라인 댓글 인용(200자)
+  // v2.887 C-5 — 대문 담당(10명) · 당번 표(30줄 · 메모 60자) · 인라인 댓글 인용(200자)
   owners: 10, oncall: 30, oncallNote: 60, quote: 200,
 });
 export const WIKI_MAX_BYTES_DEFAULT = 8 * 1024 * 1024;
@@ -270,7 +270,7 @@ export function updateSpace(spaceId, body, user, { access = FULL_ACCESS } = {}) 
     });
   }
   if (Object.hasOwn(b, 'readOnly')) next.readOnly = b.readOnly === true;
-  // v2.886 C-5 대문 담당 · 당번 — 계정명(공백 없는 64자) · 당번은 포탈 날짜 YYYY-MM-DD 범위(끝 ≥ 시작)
+  // v2.887 C-5 대문 담당 · 당번 — 계정명(공백 없는 64자) · 당번은 포탈 날짜 YYYY-MM-DD 범위(끝 ≥ 시작)
   if (Object.hasOwn(b, 'owners')) {
     const list = Array.isArray(b.owners) ? b.owners : String(b.owners || '').split(',');
     const owners = [...new Set(list.map((n) => String(n ?? '').trim()).filter(Boolean))];
@@ -482,7 +482,7 @@ export function addComment(id, body, user, { access = FULL_ACCESS } = {}) {
   if (!canEditSpace(p.spaceId, access)) throw forbidden('이 문서의 스페이스는 쓰기 범위 밖입니다 — 조회만 할 수 있습니다');
   const comments = p.comments || [];
   if (comments.length >= LIMITS.comments) throw limitError(`댓글은 문서마다 ${LIMITS.comments}개까지입니다`);
-  const quote = text(body?.quote ?? '', LIMITS.quote, 'quote').replace(/\s+/g, ' ').trim(); // v2.886 인라인 댓글 — 선택한 글(본문에 있는지는 보지 않는다 — 판이 바뀌면 사라질 수 있다)
+  const quote = text(body?.quote ?? '', LIMITS.quote, 'quote').replace(/\s+/g, ' ').trim(); // v2.887 인라인 댓글 — 선택한 글(본문에 있는지는 보지 않는다 — 판이 바뀌면 사라질 수 있다)
   const cm = { id: crypto.randomBytes(6).toString('hex'), author: user, body: text(body?.body, LIMITS.comment, 'body', { required: true, multiline: true }), at: Date.now(), v: p.version, ...(quote ? { quote } : {}) };
   const x = { ...p, comments: [...comments, cm], issueKeys: issueKeysOf(p.title, p.body, ...comments.map((q) => q.body), cm.body) };
   assertRoom(c, x, p.id);
@@ -504,7 +504,7 @@ export function deleteComment(id, commentId, user, { access = FULL_ACCESS, isMod
   return { id: commentId };
 }
 /**
- * v2.886 인라인 댓글 해결 표시 — 쓴 사람 · 그 스페이스의 쓰기 역할(라우트가 canWrite 로 넘긴다) · 전체 범위 관리자. 판을 만들지 않는다.
+ * v2.887 인라인 댓글 해결 표시 — 쓴 사람 · 그 스페이스의 쓰기 역할(라우트가 canWrite 로 넘긴다) · 전체 범위 관리자. 판을 만들지 않는다.
  */
 export function resolveComment(id, commentId, user, on, { access = FULL_ACCESS, canWrite = false, isMod = false } = {}) {
   const c = load();
@@ -594,7 +594,7 @@ export function homeOf(spaceId, { access = FULL_ACCESS, me = '', now = Date.now(
   const oncall = space.oncall || [];
   return {
     space: { ...space, notice },
-    // v2.886 당번 — 오늘(포탈 날짜)이 범위 안인 줄 · 다음 줄(오늘 뒤 시작 · 가장 이른 것 하나)
+    // v2.887 당번 — 오늘(포탈 날짜)이 범위 안인 줄 · 다음 줄(오늘 뒤 시작 · 가장 이른 것 하나)
     oncallNow: oncall.filter((o) => o.from <= today && today <= o.to),
     oncallNext: oncall.filter((o) => o.from > today).slice(0, 1),
     counts: {

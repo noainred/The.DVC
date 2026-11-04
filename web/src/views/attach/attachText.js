@@ -1,5 +1,5 @@
 /**
- * attachText.js — 첨부 화면 문구(v2.886 · 순수).
+ * attachText.js — 첨부 화면 문구(v2.887 · 순수).
  */
 /** 바이트 → '8 MB' · '512 KB' · '120 B'. 못 읽으면 '—'. */
 export function attachSizeText(n) {

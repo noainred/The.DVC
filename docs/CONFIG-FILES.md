@@ -28,9 +28,9 @@
 | `alerts-state.json` | 설정 | Alerting — evaluates threshold/condition rules against the current snapshot on | ✅ | ✅ | ✅ | alerts.js |
 | `alerts.json` | 설정 | Alerting — evaluates threshold/condition rules against the current snapshot on | ✅ | ✅ | ✅ | alerts.js |
 | `api-keys.json` | 설정 | 외부 연동 API 키 저장소 (v2.562) — 다른 포탈이 이 포탈의 조회 API 를 읽을 수 있게 하는 인증. | ✅ | ✅ | ✅ | publicapi/keys.js |
-| `attach-settings.json` | 설정 | 첨부 전체 상한(v2.886 — maxTotalMB, 기본 2048 · 1~102400. 비밀 없음) | ✅ | ✅ | ✅ | attach/store.js |
-| `attachments` | 디렉터리 | 위키 문서 · 이슈 첨부 파일(v2.886 · 시안 ⑨⑩ '첨부' · C-4). | ✅ | ✅ | ✅ | attach/store.js |
-| `attachments.json` | 설정 | 위키 문서 · 이슈 첨부 목록(v2.886 — 원래 이름 · 주인(W-번호 · ISS-번호) · 크기 · sha256 · 올린 사람. 비밀 없음) | ✅ | ✅ | ✅ | attach/store.js |
+| `attach-settings.json` | 설정 | 첨부 전체 상한(v2.887 — maxTotalMB, 기본 2048 · 1~102400. 비밀 없음) | ✅ | ✅ | ✅ | attach/store.js |
+| `attachments` | 디렉터리 | 위키 문서 · 이슈 첨부 파일(v2.887 · 시안 ⑨⑩ '첨부' · C-4). | ✅ | ✅ | ✅ | attach/store.js |
+| `attachments.json` | 설정 | 위키 문서 · 이슈 첨부 목록(v2.887 — 원래 이름 · 주인(W-번호 · ISS-번호) · 크기 · sha256 · 올린 사람. 비밀 없음) | ✅ | ✅ | ✅ | attach/store.js |
 | `audit.ndjson` | 로그(NDJSON) | 감사 로그(상태 변경 기록) | ✅ |  | ✅ | audit.js |
 | `auth-secret` | 디렉터리 | 세션 토큰 서명 키(자동 생성) | ✅ | ✅ | ✅ | auth/auth.js |
 | `auth.json` | 설정 | Active Directory (LDAP) authentication — UPN simple bind + group→role mapping. | ✅ | ✅ | ✅ | auth/ad.js |
@@ -277,7 +277,7 @@
 | `vmseries` | 디렉터리 | 실시간 스파이크 저장소. **vCenter 마다 독립 파일**(v2.510, 사용자 요구 | ✅ | ✅ | ✅ | vmseries/db.js |
 | `vmseries.json` | 설정 | 실시간 스파이크 수집 설정(v2.510). env 기본값 + CONFIG_DIR/vmseries.json 오버레이. | ✅ | ✅ | ✅ | vmseries/settings.js |
 | `vmware-portal-release` | 디렉터리 | RedHat 계열의 /etc/redhat-release 처럼, CONFIG_DIR에 현재 포탈 버전을 한 줄로 명시하는 |  |  |  | util/releaseFile.js |
-| `wiki-templates.json` | 설정 | 위키 관리자 템플릿(v2.886 — 이름 · 꼬리표 · 본문, 30개. 비밀 없음) | ✅ | ✅ | ✅ | wiki/templates.js |
+| `wiki-templates.json` | 설정 | 위키 관리자 템플릿(v2.887 — 이름 · 꼬리표 · 본문, 30개. 비밀 없음) | ✅ | ✅ | ✅ | wiki/templates.js |
 | `wiki-user.json` | 설정 | 위키 사용자별 즐겨찾기(50) · 최근 본 문서(20) · 문서 조회 수(최근 31일 — 사람 · 날 · 문서마다 1회)(v2.885 — 사용자 데이터. 비밀 없음) |  | ✅ |  | wiki/userState.js |
 | `wiki.json` | 설정 | 위키 스페이스 설정(대문 글 · 공지 · 바로 가기 · 읽기 전용) · 문서 · 판 · 댓글 · 지켜보는 사람(v2.881 — 로그인 사용자가 쓰는 사용자 데이터. 비밀 없음) |  | ✅ |  | wiki/store.js |
 | `xfer-speed-schedule-state.json` | 설정 | 법인 간 전송 속도 예약 실행 처리 기록(상태, v2.735) | ✅ | ✅ | ✅ | xferspeed/poller.js |

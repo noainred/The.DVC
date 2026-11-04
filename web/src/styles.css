@@ -2790,7 +2790,7 @@ tr.row-sel > td { background: rgba(59, 130, 246, .10); }
 .iss-links .iss-mini-act { margin-left: 0; }
 .iss-children-add .input.iss-link-key { flex: 0 1 140px; }
 
-/* ───── v2.886 C-4 첨부 · C-5 매크로 · 인라인 댓글 · 담당/당번 · 캘린더 · 인쇄 ───── */
+/* ───── v2.887 C-4 첨부 · C-5 매크로 · 인라인 댓글 · 담당/당번 · 캘린더 · 인쇄 ───── */
 .attach-box { margin-top: 14px; padding-top: 10px; border-top: 1px solid var(--border); display: flex; flex-direction: column; gap: 6px; font-size: 13px; min-width: 0; }
 .attach-box.compact { margin-top: 8px; }
 .attach-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
@@ -2840,7 +2840,7 @@ tr.row-sel > td { background: rgba(59, 130, 246, .10); }
   .iss-cal-grid { grid-template-columns: minmax(0, 1fr); }
   .iss-cal-dow { display: none; }
   .iss-cal-cell { min-height: 0; }
-  .iss-cal-cell.out, .iss-cal-cell.empty:not(.today) { display: none; } /* v2.886 Chromium 400px — 빈 날 30칸이 목록을 채웠다 */
+  .iss-cal-cell.out, .iss-cal-cell.empty:not(.today) { display: none; } /* v2.887 Chromium 400px — 빈 날 30칸이 목록을 채웠다 */
   .iss-cal-dow-inline { display: inline; }
   .iss-cal-narrow-note { display: block; }
 }

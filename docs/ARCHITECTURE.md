@@ -77,7 +77,7 @@
 | 디렉터리 | 파일 | 줄 | 대표 파일(밖에서 import 수) | 머리말 첫 줄 |
 |---|---:|---:|---|---|
 | `agent/` | 49 | 7,369 | `agent/envTimeout.js` (18) | 호환 재수출(v2.613 DEPS2613-01) — 본체는 `util/envTimeout.js` 로 옮겼다. |
-| `attach/` | 1 | 248 | `attach/store.js` (3) | attach/store.js — 위키 문서 · 이슈 첨부 파일(v2.886 · 시안 ⑨⑩ '첨부' · C-4). |
+| `attach/` | 1 | 248 | `attach/store.js` (3) | attach/store.js — 위키 문서 · 이슈 첨부 파일(v2.887 · 시안 ⑨⑩ '첨부' · C-4). |
 | `auth/` | 15 | 4,201 | `auth/scope.js` (78) | 사용자 데이터 범위(scope) 해석 — "이 사용자가 볼 수 있는 vCenter"를 계산한다. |
 | `availability/` | 1 | 205 | `availability/analyze.js` (2) | availability/analyze.js — 특수 기능 'VM 가용성(SLA)'(도구 키 `vm-availability`, v2.707 — C6) 판정(순수). |
 | `backup/` | 5 | 1,049 | `backup/service.js` (3) | 포탈 백업 코어 — 중앙 포탈의 모든 설정(CONFIG_DIR의 *.json / *.env)과, 엣지 포탈(에이전트)이 |

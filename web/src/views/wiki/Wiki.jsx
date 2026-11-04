@@ -325,7 +325,7 @@ function PageView({ id, space, meta, pages, onWritten }) {
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState('');
   const [comment, setComment] = useState('');
-  const [quote, setQuote] = useState(''); // v2.886 인라인 댓글 — 본문에서 고른 글
+  const [quote, setQuote] = useState(''); // v2.887 인라인 댓글 — 본문에서 고른 글
   const [pick, setPick] = useState(null); // { text, x, y } — 본문에서 글을 고르면 뜨는 '댓글' 단추
   const [showResolved, setShowResolved] = useState(false);
   const mainRef = useRef(null);
@@ -877,7 +877,7 @@ function toLocalInput(ms) {
   const d = new Date(ms); const p = (n) => String(n).padStart(2, '0');
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
 }
-/** v2.886 관리자 템플릿 — 전 법인 공용(모든 스페이스의 '새 문서'). 관리자 + 전체 범위(서버가 같은 기준으로 막는다). */
+/** v2.887 관리자 템플릿 — 전 법인 공용(모든 스페이스의 '새 문서'). 관리자 + 전체 범위(서버가 같은 기준으로 막는다). */
 function TemplatesAdmin({ space, meta, onWritten }) {
   const [data, setData] = useState(null);
   const [err, setErr] = useState(null);
@@ -944,8 +944,8 @@ function SpaceSettings({ space, meta, spaceInfo, onWritten }) {
   const [until, setUntil] = useState('');
   const [links, setLinks] = useState('');
   const [readOnly, setReadOnly] = useState(false);
-  const [owners, setOwners] = useState(''); // v2.886 대문 담당(쉼표)
-  const [oncall, setOncall] = useState(''); // v2.886 당번 표(한 줄에 '사람 | 시작 | 끝 | 메모')
+  const [owners, setOwners] = useState(''); // v2.887 대문 담당(쉼표)
+  const [oncall, setOncall] = useState(''); // v2.887 당번 표(한 줄에 '사람 | 시작 | 끝 | 메모')
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState('');
   useEffect(() => {
