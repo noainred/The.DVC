@@ -25,7 +25,7 @@ import { atomicWriteFileSync, preserveCorrupt } from '../util/atomicWrite.js';
 import { registerStateFile } from '../util/stateFiles.js';
 import { dayKey, portalParts } from '../util/dayKey.js';
 import { capStr } from '../util/capStr.js';
-import { onIssueEvent, listIssues, dueDays, queryContext } from './store.js';
+import { onIssueEvent, listIssues, dueDays, queryContext, minutesText } from './store.js';
 import { subscribedFilters } from './filters.js';
 import { listUsers } from '../auth/auth.js';
 import { scopedVcenterIds } from '../auth/scope.js';
@@ -62,7 +62,7 @@ let flushing = null; // 진행 중인 flush(감사 A5-03 — 겹쳐 돌지 않�
 const droppedNow = new Set(); // 이번 묶음에서 사람 수 상한으로 뺀 사람(감사 A4-08 — '사람' 단위로 센다)
 const pendingDue = new Map(); // 이슈 키 → 포탈 날짜 — 보낸 뒤에야 기록 파일에 쓴다(감사 A2-02·A5-04)
 const mailSentAt = []; // 이슈 메일 발송 시각(최근 1시간 — 감사 A5-01 이슈 몫 예산)
-const status = { lastFlushAt: null, mails: 0, mailFail: 0, mailSkip: 0, mailDeferred: 0, noEmail: 0, outOfScope: 0, chat: 0, chatFail: 0, dropped: 0, lastError: null, dueSent: 0, lastDueScanAt: null };
+const status = { lastFlushAt: null, mails: 0, mailFail: 0, mailSkip: 0, mailDeferred: 0, noEmail: 0, outOfScope: 0, chat: 0, chatFail: 0, dropped: 0, lastError: null, dueSent: 0, slaSent: 0, lastDueScanAt: null };
 
 /**
  * 이슈 메일의 시간당 몫 — 메일 설정의 시간당 한도(공용 — 장애 알림과 같이 쓴다)의 절반. 0(제한 없음)이면 제한 없음.
@@ -104,6 +104,8 @@ function lineOf(ev, who) {
       const what = d == null ? '기한 확인 필요' : d < 0 ? '기한이 지났습니다' : d === 0 ? '오늘이 기한입니다' : '내일이 기한입니다';
       return `${head} — ${what}(${dayKey(i.dueAt) || '날짜 모름'})`;
     }
+    // v2.885 SLA 초과 — 단계 · 목표 · 흐른 시간(보류 시간 제외)
+    case 'sla': return `${head} — SLA ${ev.kind === 'respond' ? '응답' : '해결'} 목표(${minutesText(ev.targetMin)})를 넘었습니다 · 흐른 시간 ${minutesText(ev.usedMin)}(보류 제외)`;
     default: return head;
   }
 }
@@ -150,6 +152,7 @@ export function recipientsOf(ev, settings = loadIssueSettings(), viewers = issue
     const known = new Set([...viewers.localNames, ...(settings.notify.people || []).map((p) => p.username), ...parts]);
     for (const x of [...parts, ...resolveMentions(ev.mentions, known)]) set.add(x);
   } else if (ev.type === 'due') { if (i.assignee) set.add(i.assignee); }
+  else if (ev.type === 'sla') { for (const x of [i.assignee, i.reporter]) if (x) set.add(x); } // v2.885 담당자 · 보고자(+ 팀 채팅)
   set.delete(ev.actor);
   const out = [];
   for (const u of set) {
@@ -215,7 +218,7 @@ export function queueIssueEvent(ev) {
     chatLines.push(chatSafe(lineOf(ev, '')));
     if (chatLines.length > LINES_MAX) { chatExtra += chatLines.length - LINES_MAX; chatLines = chatLines.slice(-LINES_MAX); }
   }
-  if (ev.type === 'due' && ev.dueDay && ev.issue?.key) pendingDue.set(ev.issue.key, ev.dueDay);
+  if ((ev.type === 'due' || ev.type === 'sla') && ev.dueDay && ev.issue?.key) pendingDue.set(ev.markKey || ev.issue.key, ev.dueDay); // v2.885 SLA 는 'sla:<키>:<단계>'
   if (who.length || settings.notify.chat || pendingDue.size) schedule();
   return who.length;
 }
@@ -325,9 +328,42 @@ export function scanDue(now = Date.now()) {
   }
   // 오래된 기록 정리(며칠 지난 날짜) — 표가 끝없이 자라지 않게.
   const cut = dayKey(now - STATE_KEEP_DAYS * 86_400_000);
-  for (const [k, v] of Object.entries(s)) if (v < cut) { delete s[k]; changed = true; }
+  for (const [k, v] of Object.entries(s)) if (!k.startsWith('sla:') && v < cut) { delete s[k]; changed = true; } // SLA 기록은 scanSla 가 정리한다
   if (changed) saveDueState(s);
   status.dueSent += n;
+  return n;
+}
+
+/**
+ * v2.885 SLA 초과 알림 — 열린 이슈의 응답 · 해결 단계가 목표를 넘으면 **단계마다 한 번** 담당자 · 보고자(+ 팀 채팅)에게.
+ * 기록 'sla:<키>:<단계>' 는 보낸 뒤에 쓰고(기한 알림과 같은 규칙), 더는 넘은 상태가 아니면(완료 · 우선순위 변경 · 목표 변경) 지운다 —
+ * 다시 열려 또 넘으면 다시 알린다. SLA · 알림 · 이 이벤트 중 하나라도 꺼져 있으면 보내지 않는다(기록도 그대로 둔다).
+ */
+export function scanSla(now = Date.now()) {
+  const settings = loadIssueSettings();
+  if (!settings.sla?.enabled || !settings.notify?.enabled || settings.notify.events?.sla === false) return 0;
+  const today = dayKey(now);
+  const s = loadDueState();
+  const live = new Set();
+  let n = 0;
+  for (const r of listIssues({ done: 'open', limit: 100_000, now }).rows) {
+    const sla = r.sla;
+    if (!sla) continue;
+    for (const kind of ['respond', 'resolve']) {
+      const st0 = sla[kind];
+      if (st0?.state !== 'breached') continue;
+      const mk = `sla:${r.key}:${kind}`;
+      live.add(mk);
+      if (s[mk] || pendingDue.has(mk)) continue;
+      queueIssueEvent({ type: 'sla', actor: '', kind, dueDay: today, markKey: mk, targetMin: st0.targetMin, usedMin: st0.usedMin,
+        issue: { key: r.key, title: r.title, assignee: r.assignee, reporter: r.reporter, vcenterId: r.vcenterId || '' } });
+      n += 1;
+    }
+  }
+  let changed = false;
+  for (const k of Object.keys(s)) if (k.startsWith('sla:') && !live.has(k)) { delete s[k]; changed = true; }
+  if (changed) saveDueState(s);
+  status.slaSent += n;
   return n;
 }
 function saveDueState(s) {
@@ -448,6 +484,7 @@ export function startIssueNotify() {
   import('../wiki/store.js').then(({ onWikiEvent }) => onWikiEvent((ev) => queueWikiEvent(ev))).catch((e) => console.warn(`[issues] 위키 알림 연결 실패: ${String(e?.message || e).slice(0, 160)}`));
   const scan = () => {
     try { scanDue(); } catch (e) { console.warn(`[issues] 기한 알림 검사 실패: ${e?.message || e}`); }
+    try { scanSla(); } catch (e) { console.warn(`[issues] SLA 알림 검사 실패: ${String(e?.message || e).slice(0, 160)}`); } // v2.885
     scanWeeklyFilters().catch((e) => console.warn(`[issues] 필터 주간 메일 실패: ${String(e?.message || e).slice(0, 160)}`)); // v2.883
   };
   dueTimer = setInterval(scan, DUE_SCAN_MS);

@@ -182,6 +182,11 @@ export function historyText(h) {
   if (f === 'parent') return h.to ? `${who}상위 ${h.from || '없음'} → ${h.to}` : `${who}상위에서 뺌(${h.from || '—'})`;
   if (f === 'sprint') return `${who}스프린트 ${h.note || `${h.from || '백로그'} → ${h.to || '백로그'}`}`;
   if (f === 'link') return h.to ? `${who}연결 더함 — ${linkLine(h.to)}` : `${who}연결 뺌 — ${linkLine(h.from)}`;
+  // v2.885 C-3 — 작업 기록 · 예상 · 버전
+  if (f === 'worklog') return h.to ? `${who}작업 기록 ${h.to}${h.note ? ` — ${h.note}` : ''}` : `${who}작업 기록 지움 — ${h.from || '—'}`;
+  if (f === 'estimate') return `${who}예상 ${h.from || '없음'} → ${h.to || '없음'}`;
+  if (f === 'fixVersion') return `${who}수정 버전 ${h.from || '없음'} → ${h.to || '없음'}`;
+  if (f === 'affectsVersion') return `${who}영향 버전 ${h.from || '없음'} → ${h.to || '없음'}`;
   const label = FIELD_TEXT[f] || f || '';
   return `${who}${label} ${h.from || '—'} → ${h.to || '—'}`;
 }
@@ -339,9 +344,10 @@ export const QUERY_FIELD_TEXT = Object.freeze({
   key: '키', title: '제목', text: '제목 · 본문 · 댓글', type: '유형', status: '상태', priority: '우선순위', assignee: '담당자', reporter: '보고자', watcher: '관찰자',
   vcenter: '법인', label: '라벨', component: '컴포넌트', epic: '에픽', parent: '상위', sprint: '스프린트', progress: '진행률', due: '기한', created: '생성',
   updated: '갱신', closed: '완료', doc: '관련 문서',
+  fixversion: '수정 버전', affectsversion: '영향 버전', sla: 'SLA', // v2.885
 });
 const OP_TEXT = { '=': '=', '!=': '≠', in: '∈', 'not in': '∉', '>': '>', '>=': '≥', '<': '<', '<=': '≤', '~': '포함', 'is empty': '비어 있음', 'is not empty': '비어 있지 않음' };
-const CODE_TEXT = { status: STATUS_TEXT, type: TYPE_TEXT, priority: PRIORITY_TEXT };
+const CODE_TEXT = { status: STATUS_TEXT, type: TYPE_TEXT, priority: PRIORITY_TEXT, sla: { breached: '초과', warning: '임박', paused: '멈춤', late: '늦게 지킴', ok: '정상', none: '대상 아님' } };
 
 /** 칩 값 한 개 — me() · now() · active() · 상대 날짜 · 코드 값을 사람 말로. */
 export function chipValueText(field, v, { me = '', sprintName = null, vcName = null } = {}) {
@@ -472,3 +478,103 @@ export function statusConfirmText(r) {
 /** 확인을 받으면 다시 보낼 때 더할 값. */
 export const STATUS_CONFIRM_FLAG = Object.freeze({ 'open-children': 'closeChildren', 'open-blockers': 'ignoreBlockers' });
 
+
+
+/* ───── v2.885 C-3 시간 추적 · SLA · 버전 ───── */
+/** 분 → '1h 30m'(서버 issues/store.js minutesText 와 같은 모양). 못 읽으면 '—'. */
+export function minutesText(m) {
+  if (!Number.isFinite(m) || m < 0) return '—';
+  const v = Math.round(m);
+  const h = Math.floor(v / 60); const r = v % 60;
+  return h && r ? `${h}h ${r}m` : h ? `${h}h` : `${r}m`;
+}
+/**
+ * 시간 입력 → 분. '90' · '90m' · '1h' · '1h 30m' · '1.5h' · '1시간 30분' · '45분' · '2d'(하루 8시간이 아니라 24시간 — 오해를 막으려 d 는 받지 않는다).
+ * 못 읽거나 0 이하면 null. 상한은 서버가 본다.
+ */
+export function parseDuration(input) {
+  const s = String(input ?? '').trim().toLowerCase().replace(/\s+/g, '');
+  if (!s || s.length > 20) return null;
+  if (/^\d{1,5}$/.test(s)) { const n = Number(s); return n > 0 ? n : null; }
+  const m = /^(?:(\d{1,4}(?:\.\d{1,2})?)(?:h|시간))?(?:(\d{1,4})(?:m|분))?$/.exec(s);
+  if (!m || (m[1] == null && m[2] == null)) return null;
+  const total = Math.round(Number(m[1] || 0) * 60 + Number(m[2] || 0));
+  return total > 0 ? total : null;
+}
+/** 예상 대비 기록 — '기록 2h 30m / 예상 4h (63%)' · 예상이 없으면 기록만 · 둘 다 없으면 ''. */
+export function timeTrackText(r) {
+  const est = Number.isInteger(r?.estimateMin) ? r.estimateMin : null;
+  const spent = r?.worklogCount ? r.spentMin : null;
+  if (est == null && spent == null) return '';
+  if (est == null) return `기록 ${minutesText(spent)}`;
+  if (spent == null) return `예상 ${minutesText(est)}`;
+  return `기록 ${minutesText(spent)} / 예상 ${minutesText(est)}${est > 0 ? ` (${Math.round((spent / est) * 100)}%)` : ''}`;
+}
+
+export const SLA_STATE_TEXT = Object.freeze({ breached: '초과', late: '늦게 지킴', warning: '임박', paused: '멈춤(보류)', running: '진행', met: '지킴', off: '보지 않음' });
+const STAGE_TEXT = { respond: '응답', resolve: '해결' };
+/** 남은 시간 — dueAt 기준(분 단위로 내림). */
+function leftText(dueAt, now) {
+  const m = Math.max(0, Math.floor((dueAt - now) / 60_000));
+  return minutesText(m);
+}
+/**
+ * 카드 · 목록 배지 — 지금 볼 단계 하나. 열린 이슈의 초과 · 임박 · 멈춤만(진행 · 지킴은 배지 없음 — 화면 소음).
+ * @returns {{ cls: string, text: string, title: string }|null}
+ */
+export function slaBadge(sla, now = Date.now()) {
+  if (!sla) return null;
+  const stage = ['respond', 'resolve'].find((k) => ['breached', 'warning', 'paused'].includes(sla[k]?.state));
+  if (!stage) return null;
+  const st = sla[stage];
+  const name = STAGE_TEXT[stage];
+  if (st.state === 'breached') return { cls: 'bad', text: `SLA ${name} 초과`, title: `${name} 목표 ${minutesText(st.targetMin)} — 흐른 시간 ${minutesText(st.usedMin)}(보류 제외)` };
+  if (st.state === 'paused') return { cls: 'mute', text: `SLA 멈춤`, title: `보류 중이라 ${name} 시계가 멈췄습니다 — 흐른 시간 ${minutesText(st.usedMin)} / 목표 ${minutesText(st.targetMin)}` };
+  return { cls: 'warn', text: `SLA ${name} ${st.dueAt ? `${leftText(st.dueAt, now)} 남음` : '임박'}`, title: `${name} 목표 ${minutesText(st.targetMin)} — 흐른 시간 ${minutesText(st.usedMin)}(보류 제외)` };
+}
+/** 상세의 단계 한 줄 — '응답: 지킴 · 12m / 목표 15m' · '해결: 진행 · 1h 2m / 목표 4h · 2h 58m 남음'. */
+export function slaStageText(kind, st, now = Date.now()) {
+  if (!st) return '';
+  const name = STAGE_TEXT[kind] || kind;
+  if (st.state === 'off') return `${name}: 보지 않음(목표 0)`;
+  const used = st.usedMin == null ? '—' : minutesText(st.usedMin);
+  const left = st.dueAt ? ` · ${leftText(st.dueAt, now)} 남음` : '';
+  return `${name}: ${SLA_STATE_TEXT[st.state] || st.state} · ${used} / 목표 ${minutesText(st.targetMin)}${left}`;
+}
+
+/** 버전 비교(숫자 마디) — x.y.z 가 아니면 null. */
+export function versionCmp(a, b) {
+  const re = /^\d{1,6}(\.\d{1,6}){0,3}$/;
+  if (!re.test(String(a || '')) || !re.test(String(b || ''))) return null;
+  const pa = String(a).split('.').map(Number); const pb = String(b).split('.').map(Number);
+  for (let i = 0; i < Math.max(pa.length, pb.length); i += 1) { const d = (pa[i] || 0) - (pb[i] || 0); if (d) return d < 0 ? -1 : 1; }
+  return 0;
+}
+/** 수정 버전이 이 포탈에 들어왔는가 — 'in'(지금 판 이하) · 'later'(아직) · null(포탈 버전 표기가 아니다 — 판정하지 않는다). */
+export function fixVersionState(fixVersion, portalVersion) {
+  const c = versionCmp(fixVersion, portalVersion);
+  return c == null ? null : c <= 0 ? 'in' : 'later';
+}
+
+/**
+ * v2.885 C-2 CSV 내보내기 매개변수 — 화면의 걸러보기(filterRows)를 서버 목록 매개변수로 옮긴다(서버가 범위 → 같은 조건으로 다시 거른다).
+ * 미할당('__none')은 assignee='' · 공용('__none')은 vcenterId='' · '내 이슈만' 은 assignee=me. 검색 글자는 서버 q(본문까지 본다 — 화면보다 넓을 수 있다).
+ */
+export function csvParams(filters = {}, me = '', { done = 'recent', query = '' } = {}) {
+  const p = { done };
+  if (query) p.query = query;
+  if (filters.q?.trim()) p.q = filters.q.trim();
+  if (filters.mine) p.assignee = me;
+  else if (filters.assignee) p.assignee = filters.assignee === '__none' ? '' : filters.assignee;
+  for (const k of ['priority', 'type', 'status']) if (filters[k]) p[k] = filters[k];
+  if (filters.vcenterId) p.vcenterId = filters.vcenterId === '__none' ? '' : filters.vcenterId;
+  return p;
+}
+
+/** v2.885 필터 화면이 마지막 검색식을 기억하는 세션 저장 키(IssuesPlus FiltersView) — 다른 화면이 검색식으로 필터 화면을 열 때도 쓴다. */
+export const ISSUE_QUERY_KEY = 'issues.query';
+/** 다른 화면(릴리스 노트)에서 검색식으로 이슈 필터 화면을 연다. */
+export function openIssueQuery(query) {
+  try { window.sessionStorage.setItem(ISSUE_QUERY_KEY, String(query || '')); } catch { /* 저장소를 못 쓰는 브라우저 — 빠른 필터로 시작한다 */ }
+  window.location.hash = '#/issues/filters';
+}

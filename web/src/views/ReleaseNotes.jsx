@@ -3,6 +3,7 @@ import { fetchJson, postJson, delJson } from '../api.js';
 import { Modal, Loading } from '../components/ui.jsx';
 import BoldText from '../components/boldText.jsx';
 import { releaseLineText } from './releaseNoteText.js';
+import { openIssueQuery } from './issues/issueText.js';
 
 /** 버전 배지 클릭 시 열리는 릴리즈 노트(변경 이력) 모달. 관리자는 기록 추가 가능. */
 export default function ReleaseNotes({ isAdmin, onClose }) {
@@ -13,6 +14,9 @@ export default function ReleaseNotes({ isAdmin, onClose }) {
 
   const load = () => fetchJson('/release-notes').then(setData).catch(() => setData({ notes: [], current: '' }));
   useEffect(() => { load(); }, []);
+  // v2.885 이 버전에서 고친 이슈(수정 버전 — 내가 볼 수 있는 이슈만 센다). 못 읽으면 줄을 그리지 않는다.
+  const [fixed, setFixed] = useState(null);
+  useEffect(() => { fetchJson('/issues/versions').then((r) => setFixed(r.fix || {})).catch(() => setFixed(null)); }, []);
 
   const save = async () => {
     const r = await postJson('/admin/release-notes', form).catch((e) => ({ ok: false, reason: e.message }));
@@ -70,6 +74,11 @@ export default function ReleaseNotes({ isAdmin, onClose }) {
                 <ul style={{ margin: '6px 0 0', paddingLeft: 20, fontSize: 13, lineHeight: 1.7 }}>
                   {(n.notes || []).map((line, i) => <li key={i}><BoldText text={releaseLineText(line)} /></li>)}{/* v2.607 WEB2607-08 */}
                 </ul>
+                {fixed?.[n.version] && (
+                  <button type="button" className="iss-link" style={{ fontSize: 12.5, marginTop: 4, paddingLeft: 20 }} onClick={() => { onClose?.(); openIssueQuery(`fixversion = "${n.version}"`); }}>
+                    이 버전에서 고친 이슈 {fixed[n.version].total}건{fixed[n.version].open ? ` (아직 열림 ${fixed[n.version].open})` : ''} →
+                  </button>
+                )}
               </div>
             ))}
           </div>

@@ -16,7 +16,7 @@ import { MdView, MdToc } from './MdView.jsx';
 import {
   STATUS_ORDER, statusText, parseWikiHash, wikiHash, buildTree, flattenTree, parentOptions, breadcrumb, fillTemplate, wikiSaveFailText, isConflict,
   draftKey, loadDraft, saveDraft, clearDraft, countTiles, numText, noticeUntilText, quickHref, quickLinksToText, textToQuickLinks, versionLine,
-  diffSummary, DIFF_MARK, WHERE_TEXT, searchSummary, spaceName, dateText, timeText, STALE_DAYS,
+  diffSummary, DIFF_MARK, WHERE_TEXT, searchSummary, spaceName, dateText, timeText, STALE_DAYS, slashQuery, filterSlash, applySlash,
 } from './wikiText.js';
 
 function useLatest() {
@@ -221,6 +221,23 @@ function HomeView({ space, meta, spaceInfo, pages, canWriteHere }) {
           </div>
         ))}
       </div>
+      {/* v2.885 C-2 — 즐겨찾기 · 최근 본 문서(모든 스페이스 · 서버가 지금 범위로 다시 거른다) · 많이 본 문서(이 스페이스 · 30일 · 사람 · 날마다 1회) */}
+      <div className="wiki-home-grid three">
+        <section className="card">
+          <div className="wiki-sec-head"><h3>즐겨찾기</h3><span className="muted wiki-small">모든 스페이스</span></div>
+          <LinkList rows={data.mine?.fav} empty="문서 제목 옆 ☆ 를 누르면 여기에 모입니다." extra={(p) => `${spaceName(meta.spaces, p.spaceId)} · ${dateText(p.updatedAt)}`} />
+        </section>
+        <section className="card">
+          <div className="wiki-sec-head"><h3>최근 본 문서</h3></div>
+          <LinkList rows={(data.mine?.recent || []).slice(0, 8)} empty="아직 연 문서가 없습니다." extra={(p) => `${spaceName(meta.spaces, p.spaceId)} · 본 시각 ${timeText(p.viewedAt)}`} />
+        </section>
+        <section className="card">
+          <div className="wiki-sec-head"><h3>많이 본 문서</h3><span className="muted wiki-small">최근 30일 · 한 사람 하루 1회</span></div>
+          {data.popular == null
+            ? <div className="muted wiki-empty">조회 수를 읽지 못했습니다.</div>
+            : <LinkList rows={data.popular} empty="아직 조회 기록이 없습니다." extra={(p) => `조회 ${numText(p.views)} · ${dateText(p.updatedAt)}`} />}
+        </section>
+      </div>
       <div className="wiki-home-grid">
         <section className="card">
           <div className="wiki-sec-head"><h3>최근 수정</h3><button className="btn" onClick={() => go({ space, view: 'search' })}>전체 보기</button></div>
@@ -337,7 +354,14 @@ function PageView({ id, space, meta, pages, onWritten }) {
         {crumbs.slice(0, -1).map((c) => <React.Fragment key={c.id}> › <a href={wikiHash({ space, id: c.id })}>{c.title}</a></React.Fragment>)}
       </div>
       <div className="wiki-doc-head">
-        <h2 className="wiki-title">{page.title}</h2>
+        <div className="wiki-title-row">
+          <h2 className="wiki-title">{page.title}</h2>
+          {canComment && (
+            <button type="button" className={`wiki-star${page.fav ? ' on' : ''}`} disabled={busy} aria-pressed={!!page.fav}
+              title={page.fav ? '즐겨찾기에서 빼기' : '즐겨찾기(대문 ‘즐겨찾기’ 에 모입니다)'}
+              onClick={() => act(() => postJson(`/wiki/pages/${page.id}/fav`, { on: !page.fav }))}>{page.fav ? '★' : '☆'}<span className="wiki-star-t">{page.fav ? '즐겨찾기 중' : '즐겨찾기'}</span></button>
+          )}
+        </div>
         <div className="wiki-doc-meta">
           <StatusChip s={page.status} />
           {page.labels.map((l) => <a key={l} className="wiki-label" href={wikiHash({ space, view: 'search', params: { label: l } })}>{l}</a>)}
@@ -489,6 +513,28 @@ function Editor({ space, meta, pages, page = null, initial = null, onWritten }) 
     return d && d.baseVersion === page.version && (d.body !== page.body || d.title !== page.title) ? d : null;
   });
   const ta = useRef(null);
+  // v2.885 슬래시 명령 — 줄 머리에서 '/' 를 치면 블록 고르기(↑↓ · Enter/Tab · Esc). 메뉴는 본문 칸 아래에 붙인다(커서 좌표를 재지 않는다).
+  const [slash, setSlash] = useState(null); // { q, items, i }
+  const syncSlash = (text, caret) => {
+    const q = slashQuery(text, caret);
+    const items = q ? filterSlash(q.q).slice(0, 8) : [];
+    setSlash(q && items.length ? { q: q.q, items, i: 0 } : null);
+  };
+  const pickSlash = (cmd) => {
+    const el = ta.current;
+    const caret = el?.selectionStart ?? body.length;
+    const r = applySlash(body, caret, cmd);
+    setSlash(null);
+    if (!r) return;
+    setBody(r.body);
+    requestAnimationFrame(() => { try { el.focus(); el.setSelectionRange(r.caret, r.caret); } catch { /* 선택 범위를 못 옮기는 브라우저 */ } });
+  };
+  const onSlashKey = (e) => {
+    if (!slash) return;
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); const d = e.key === 'ArrowDown' ? 1 : -1; setSlash((s0) => ({ ...s0, i: (s0.i + d + s0.items.length) % s0.items.length })); }
+    else if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); pickSlash(slash.items[slash.i]); }
+    else if (e.key === 'Escape') { e.preventDefault(); setSlash(null); }
+  };
   const dirty = title !== (src.title || '') || body !== (src.body || '') || status !== (src.status || 'draft') || labels !== (src.labels || []).join(', ') || parentId !== (src.parentId || '');
   // 초안 자동 저장(1.5초 멈추면) — 이 브라우저에만
   useEffect(() => {
@@ -561,7 +607,21 @@ function Editor({ space, meta, pages, page = null, initial = null, onWritten }) 
       </div>
       <div className={`wiki-editor-panes m-${mode}`}>
         {mode !== 'preview' && (
-          <textarea ref={ta} className="input wiki-textarea" value={body} onChange={(e) => setBody(e.target.value)} spellCheck={false} aria-label="본문(마크다운)" maxLength={meta.limits?.body || 65536} />
+          <div className="wiki-textarea-wrap">
+            <textarea ref={ta} className="input wiki-textarea" value={body} spellCheck={false} aria-label="본문(마크다운) — 줄 머리에서 / 로 블록 넣기" maxLength={meta.limits?.body || 65536}
+              onChange={(e) => { setBody(e.target.value); syncSlash(e.target.value, e.target.selectionStart); }}
+              onKeyDown={onSlashKey} onBlur={() => setTimeout(() => setSlash(null), 150)}
+              aria-expanded={!!slash} aria-controls={slash ? 'wiki-slash-menu' : undefined} />
+            {slash && (
+              <div id="wiki-slash-menu" className="wiki-slash" role="listbox" aria-label="블록 넣기">
+                <div className="wiki-slash-head muted">/{slash.q} — ↑↓ 고르기 · Enter 넣기 · Esc 닫기</div>
+                {slash.items.map((c, i) => (
+                  <button key={c.k} type="button" role="option" aria-selected={i === slash.i} className={`wiki-slash-item${i === slash.i ? ' on' : ''}`}
+                    onMouseDown={(e) => { e.preventDefault(); pickSlash(c); }}>{c.label}<span className="muted">{c.keys[0]}</span></button>
+                ))}
+              </div>
+            )}
+          </div>
         )}
         {mode !== 'edit' && (
           <div className="wiki-preview" aria-label="미리보기">
@@ -569,7 +629,7 @@ function Editor({ space, meta, pages, page = null, initial = null, onWritten }) 
           </div>
         )}
       </div>
-      <div className="muted wiki-small">{body.length.toLocaleString()} / {(meta.limits?.body || 65536).toLocaleString()}자 · 마크다운 — HTML 은 글자 그대로 보입니다 · 초안은 이 브라우저에 자동 저장합니다.</div>
+      <div className="muted wiki-small">{body.length.toLocaleString()} / {(meta.limits?.body || 65536).toLocaleString()}자 · 마크다운 — HTML 은 글자 그대로 보입니다 · 줄 머리에서 / 를 치면 블록을 고릅니다 · 초안은 이 브라우저에 자동 저장합니다.</div>
       {msg && <div className="banner warn" style={{ whiteSpace: 'normal' }}>{msg}</div>}
       {conflict && (
         <div className="card wiki-conflict">

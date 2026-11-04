@@ -8,7 +8,7 @@
  * 디자인 시안: Claude Design 캔버스 '이슈 트래커 시안'(보드·상세·목록·내 작업·새 이슈).
  */
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { fetchJson, postJson, putJson, delJson } from '../../api.js';
+import { fetchJson, postJson, putJson, delJson, downloadFile, canCsv } from '../../api.js';
 import { STable } from '../../components/STable.jsx';
 import { Loading, ErrorBox } from '../../components/primitives.jsx';
 import Select from '../../components/Select.jsx';
@@ -20,6 +20,7 @@ import {
   STATUS_ORDER, STATUS_TEXT, TYPE_TEXT, PRIORITY_TEXT, statusText, typeText, priorityText, dueInfo, timeText, dateText, initialOf, colorIndexOf,
   groupByStatus, filterRows, myWork, loadPct, LOAD_CAP, toDateInput, fromDateInput, parseLabels, saveFailText, persistNote, historyText,
   peopleOptions, makeLatest, vcName, vcenterOptions, vcenterRequired, notifyStatusText, childText, sprintName, statusConfirmText, STATUS_CONFIRM_FLAG, AUTO_LEVEL_TEXT, autoKindRows, autoOnCount, autoStatusText, simulateText, originText, progressOf, staleInfo, myRequests, activityText, issueLink, STALE_DAYS,
+  minutesText, parseDuration, timeTrackText, slaBadge, slaStageText, fixVersionState, csvParams,
 } from './issueText.js';
 import { wikiHash, statusText as wikiStatusText } from '../wiki/wikiText.js';
 import { MdView } from '../wiki/MdView.jsx';
@@ -29,6 +30,27 @@ const SUBS = [['board', '보드'], ['list', '목록'], ['mine', '내 작업'], [
 const SETTINGS_SUB = ['settings', '설정'];
 const EMPTY_FILTERS = Object.freeze({ q: '', assignee: '', priority: '', type: '', status: '', vcenterId: '', mine: false });
 const KEY_RE = /^ISS-\d{1,9}$/;
+
+/**
+ * 상태 바꾸기(상세 · 보드 끌기 공용) — 서버가 409(open-children · open-blockers)로 물으면 확인을 받고 다시 보낸다(최대 3번).
+ * v2.885: 보드에서 끌어 옮기기가 같은 확인 흐름을 쓴다(두 벌 금지).
+ */
+async function postStatusConfirmed(key, st) {
+  let extra = {};
+  for (let n = 0; n < 3; n += 1) {
+    const r = await postJson(`/issues/${key}/status`, { status: st, ...extra });
+    const ask = statusConfirmText(r);
+    if (!ask) return r;
+    if (!window.confirm(ask)) return { ok: false, reason: '완료를 취소했습니다 — 아무것도 바꾸지 않았습니다.' };
+    extra = { ...extra, [STATUS_CONFIRM_FLAG[r.code]]: true };
+  }
+  return { ok: false, reason: '확인을 여러 번 받았지만 완료하지 못했습니다 — 다시 시도하세요.' };
+}
+/** v2.885 SLA 배지(초과 · 임박 · 멈춤만). */
+function SlaChip({ sla }) {
+  const b = slaBadge(sla);
+  return b ? <span className={`iss-chip iss-sla ${b.cls}`} title={b.title}>{b.text}</span> : null;
+}
 
 function useLatest() {
   const ref = useRef(null);
@@ -84,8 +106,29 @@ export default function Issues() {
   }, [latest]);
   useEffect(() => { load(); }, [load]);
 
-  const onWritten = useCallback((r) => { setNote(persistNote(r?.persist)); load(); }, [load]);
+  // v2.885 C-2 '보드에 적용' — 저장 필터 · 검색식으로 거른 이슈를 보드로 본다(서버가 범위 → 검색식). 해제하면 평소 보드.
+  const [boardQ, setBoardQ] = useState(null); // { name, query }
+  const [boardRes, setBoardRes] = useState(null); // { rows, err }
+  const latestB = useLatest();
+  const loadBoardQ = useCallback((bq) => {
+    const k = latestB.next();
+    if (!bq) { setBoardRes(null); return; }
+    fetchJson('/issues', { query: bq.query, done: 'recent', limit: 2000 }, undefined, { retries: 0 })
+      .then((r) => { if (latestB.isLatest(k)) setBoardRes({ rows: r.rows || [], err: null }); })
+      .catch((e) => { if (latestB.isLatest(k)) setBoardRes({ rows: null, err: e }); });
+  }, [latestB]);
+  useEffect(() => { loadBoardQ(boardQ); }, [boardQ, loadBoardQ]);
+  const onWritten = useCallback((r) => { setNote(persistNote(r?.persist)); load(); loadBoardQ(boardQ); }, [load, loadBoardQ, boardQ]);
   const [epics, reloadEpics] = useEpics(!!meta?.canWrite);
+  // v2.885 보드 끌어 옮기기 — 상세와 같은 확인 흐름
+  const moveIssue = useCallback(async (key, st) => {
+    setNote('');
+    try {
+      const r = await postStatusConfirmed(key, st);
+      if (r?.ok) onWritten(r); else setNote(`${key}: ${saveFailText(r)}`);
+    } catch (e) { setNote(`${key}: ${saveFailText({ reason: e.message })}`); }
+  }, [onWritten]);
+  const [csvBusy, setCsvBusy] = useState(false);
 
   if (err && !list) return <ErrorBox error={err} />;
   if (!list || !meta || !metaX) return <Loading label="이슈" />;
@@ -97,6 +140,14 @@ export default function Issues() {
   const setF = (k) => (e) => setFilters((f) => ({ ...f, [k]: e?.target ? (e.target.type === 'checkbox' ? e.target.checked : e.target.value) : e }));
   const rows = list.rows || [];
   const shown = filterRows(rows, { ...filters, me });
+  const boardRows = boardQ ? filterRows(boardRes?.rows || [], { ...filters, me }) : shown;
+  const exportCsv = async () => {
+    setCsvBusy(true); setNote('');
+    try {
+      const p = csvParams(filters, me, { done: 'recent', query: sub === 'board' && boardQ ? boardQ.query : '' });
+      await downloadFile(`/issues/export.csv?${new URLSearchParams(p).toString()}`);
+    } catch (e) { setNote(`CSV 를 받지 못했습니다 — ${e?.message || e}`); } finally { setCsvBusy(false); }
+  };
 
   return (
     <div className="iss-page">
@@ -111,6 +162,7 @@ export default function Issues() {
         </span>
         <span className="iss-grow" />
         <button className="btn" onClick={load}>새로고침</button>
+        {(sub === 'board' || sub === 'list') && !openKey && canCsv() && <button className="btn" disabled={csvBusy} onClick={exportCsv} title="지금 걸러 본 조건(열린 이슈 + 최근 완료)을 CSV 로 — 서버가 범위로 다시 거릅니다">{csvBusy ? 'CSV…' : 'CSV'}</button>}
         {canWrite && <button className="btn primary" onClick={() => setCreating('issue')}>+ 새 이슈</button>}
         {canRequest && <button className="btn primary" onClick={() => setCreating('request')} title="요청 유형으로 등록합니다 — 담당자·상태는 운영자가 정합니다">+ 요청 등록</button>}
         {!canWrite && !canRequest && <span className="muted" style={{ fontSize: 12 }}>이슈 등록·할당은 운영자·관리자만 할 수 있습니다</span>}
@@ -128,11 +180,18 @@ export default function Issues() {
           <>
             {(sub === 'board' || sub === 'list') && <FilterBar filters={filters} setF={setF} meta={meta} sub={sub} onReset={() => setFilters(EMPTY_FILTERS)} />}
             {meta.scoped && <div className="muted" style={{ fontSize: 12 }}>범위가 지정된 계정이라 내 법인(vCenter)의 이슈만 보입니다 — 법인이 없는 공용 이슈는 보이지 않습니다.</div>}
-            {sub === 'board' && <BoardView rows={shown} meta={metaX} onOpen={openIssue} recentDays={Math.round((meta.recentDoneMs || 0) / 86400000)} />}
+            {sub === 'board' && boardQ && (
+              <div className="banner iss-boardq" style={{ whiteSpace: 'normal' }}>
+                <b>보드에 적용 중: {boardQ.name}</b> <code className="iss-boardq-q">{boardQ.query}</code>
+                {boardRes?.err ? <span> — 읽지 못했습니다({boardRes.err.message || String(boardRes.err)})</span> : !boardRes ? <span className="muted"> — 읽는 중…</span> : <span className="muted"> — {boardRes.rows.length}건</span>}
+                <button className="btn" onClick={() => setBoardQ(null)}>해제</button>
+              </div>
+            )}
+            {sub === 'board' && <BoardView rows={boardRows} meta={metaX} onOpen={openIssue} recentDays={Math.round((meta.recentDoneMs || 0) / 86400000)} onMove={canWrite ? moveIssue : null} />}
             {sub === 'list' && <ListView rows={shown} total={rows.length} meta={metaX} epics={epics} onOpen={openIssue} onWritten={onWritten} />}
             {sub === 'sprint' && <SprintView meta={metaX} onOpen={openIssue} onWritten={onWritten} reloadSprints={loadSprints} />}
             {sub === 'epics' && <EpicsView meta={metaX} onOpen={openIssue} onWritten={(r) => { onWritten(r); reloadEpics(); }} />}
-            {sub === 'filters' && <FiltersView meta={metaX} onOpen={openIssue} onWritten={onWritten} />}
+            {sub === 'filters' && <FiltersView meta={metaX} onOpen={openIssue} onWritten={onWritten} onBoard={(bq) => { setBoardQ(bq); setSub('board'); }} />}
             {sub === 'mine' && <MyWorkView rows={rows} stats={stats} meta={meta} onOpen={openIssue} onWritten={onWritten} />}
             {sub === 'activity' && <ActivityView meta={meta} onOpen={openIssue} />}
           </>
@@ -194,19 +253,37 @@ function FilterBar({ filters, setF, meta, sub, onReset }) {
 
 /* ───────────── 보드 ───────────── */
 
-function BoardView({ rows, meta, onOpen, recentDays }) {
+/**
+ * v2.885 C-2: 카드를 다른 칸으로 끌어 상태를 바꾼다(쓰기 역할 · 그 이슈의 쓰기 범위 — 서버가 집행). 확인이 필요한 완료(남은 하위 · 막는 이슈)는
+ * 상세와 같은 확인 흐름(postStatusConfirmed). 끌 수 없는 환경(키보드 · 터치)은 상세의 상태 고르기를 쓴다.
+ */
+function BoardView({ rows, meta, onOpen, recentDays, onMove = null }) {
   const g = groupByStatus(rows);
+  const [over, setOver] = useState('');
+  const [dragKey, setDragKey] = useState('');
+  const drop = (e, s) => {
+    e.preventDefault(); setOver('');
+    const key = e.dataTransfer.getData('text/plain') || dragKey;
+    setDragKey('');
+    const r = rows.find((x) => x.key === key);
+    if (onMove && r && r.status !== s) onMove(key, s);
+  };
   return (
     <div className="iss-board-wrap">
+      {onMove && <div className="muted iss-board-hint">카드를 다른 칸으로 끌어 상태를 바꿀 수 있습니다(쓰기 범위 안의 이슈만 — 끌 수 없으면 카드를 열어 상태를 고르세요).</div>}
       <div className="iss-board">
         {STATUS_ORDER.map((s) => (
-          <section key={s} className="iss-col" aria-label={STATUS_TEXT[s]}>
+          <section key={s} className={`iss-col${over === s ? ' drop' : ''}`} aria-label={STATUS_TEXT[s]}
+            onDragOver={onMove && dragKey ? (e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; if (over !== s) setOver(s); } : undefined}
+            onDragLeave={onMove ? (e) => { if (!e.currentTarget.contains(e.relatedTarget)) setOver(''); } : undefined}
+            onDrop={onMove ? (e) => drop(e, s) : undefined}>
             <div className="iss-col-head">
               <StatusChip s={s} />
               <span className="muted" style={{ fontSize: 12 }}>{s === 'done' ? `최근 ${recentDays}일 · ${g[s].length}` : g[s].length}</span>
             </div>
             {g[s].length === 0 && <div className="muted iss-col-empty">없음</div>}
-            {g[s].map((r) => <IssueCard key={r.key} r={r} meta={meta} onOpen={onOpen} />)}
+            {g[s].map((r) => <IssueCard key={r.key} r={r} meta={meta} onOpen={onOpen}
+              drag={onMove && r.writable !== false ? { onStart: () => setDragKey(r.key), onEnd: () => { setDragKey(''); setOver(''); }, dragging: dragKey === r.key } : null} />)}
           </section>
         ))}
       </div>
@@ -215,14 +292,16 @@ function BoardView({ rows, meta, onOpen, recentDays }) {
   );
 }
 
-function IssueCard({ r, meta, onOpen }) {
+function IssueCard({ r, meta, onOpen, drag = null }) {
   return (
-    <button type="button" className={`iss-card${r.status === 'done' ? ' done' : ''}${r.epicKey ? ' has-epic' : ''}`} style={r.epicKey ? { borderLeftColor: epicColor(r.epicKey) } : undefined} onClick={() => onOpen(r.key)}>
+    <button type="button" className={`iss-card${r.status === 'done' ? ' done' : ''}${r.epicKey ? ' has-epic' : ''}${drag ? ' draggable' : ''}${drag?.dragging ? ' dragging' : ''}`} style={r.epicKey ? { borderLeftColor: epicColor(r.epicKey) } : undefined} onClick={() => onOpen(r.key)}
+      draggable={!!drag} onDragStart={drag ? (e) => { e.dataTransfer.setData('text/plain', r.key); e.dataTransfer.effectAllowed = 'move'; drag.onStart(); } : undefined} onDragEnd={drag ? drag.onEnd : undefined}>
       <span className="iss-card-top">
         <TypeTag t={r.type} />
         <span className="iss-key">{r.key}</span>
         {r.blocked && <span className="iss-chip s-blocked" title={r.blocked.reason}>보류</span>}
         {r.blockedOpen > 0 && <span className="iss-chip s-linkblock" title="이 이슈를 막고 있는 열린 이슈가 있습니다(연결)">차단됨 {r.blockedOpen}</span>}
+        {r.status !== 'done' && <SlaChip sla={r.sla} />}
         {(meta?.vcenters || []).length > 0 && <span className="iss-vc" title="법인(vCenter)">{vcName(meta, r.vcenterId)}</span>}
         {r.origin && <span className="iss-auto" title={originText(r.origin)}>자동</span>}
         {childText(r) && <span className="iss-subn">{childText(r)}</span>}
@@ -304,6 +383,7 @@ function ListView({ rows, total, meta, epics, onOpen, onWritten }) {
                     <button type="button" className="iss-link" onClick={() => onOpen(r.key)}>{r.title}</button>
                     {r.blocked && <span className="iss-chip s-blocked" style={{ marginLeft: 6 }} title={r.blocked.reason}>보류</span>}
                     {r.blockedOpen > 0 && <span className="iss-chip s-linkblock" style={{ marginLeft: 6 }} title="이 이슈를 막고 있는 열린 이슈가 있습니다(연결)">차단됨 {r.blockedOpen}</span>}
+                    {r.status !== 'done' && slaBadge(r.sla) && <span style={{ marginLeft: 6 }}><SlaChip sla={r.sla} /></span>}
                     {r.origin && <span className="iss-auto" style={{ marginLeft: 6 }} title={originText(r.origin)}>자동</span>}
                     {/* v2.882 에픽 · 하위 · 스프린트는 제목 아래 작은 표시 — 열로 두면 1440px 에서 표가 본문 폭을 넘어 기한 · 갱신이 가로 스크롤 뒤로 숨었다(Chromium 판독).
                         에픽 · 스프린트로 정렬하려면 필터 화면의 결과 표(열이 따로 있다)를 쓴다. */}
@@ -571,6 +651,8 @@ function IssueEditor({ meta, initial = null, requestOnly = false, onCancel, onSa
     title: initial?.title || '', body: initial?.body || '', type: initial?.type || (requestOnly ? 'request' : 'task'), priority: initial?.priority || 'p2',
     assignee: initial ? (initial.assignee || '') : '', dueAt: toDateInput(initial?.dueAt), labels: (initial?.labels || []).join(', '), component: initial?.component || '',
     vcenterId: initial ? (initial.vcenterId || '') : (needVc ? (vcOpts[0]?.id || '') : ''),
+    // v2.885 C-3 — 예상(‘1h 30m’ · ‘90’) · 수정/영향 버전
+    estimate: Number.isInteger(initial?.estimateMin) ? minutesText(initial.estimateMin) : '', fixVersion: initial?.fixVersion || '', affectsVersion: initial?.affectsVersion || '',
   }));
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState('');
@@ -593,7 +675,12 @@ function IssueEditor({ meta, initial = null, requestOnly = false, onCancel, onSa
   const save = async () => {
     setBusy(true); setMsg('');
     const payload = { title: f.title, body: f.body, priority: f.priority, dueAt: fromDateInput(f.dueAt), labels: parseLabels(f.labels), component: f.component, vcenterId: f.vcenterId };
-    if (!requestOnly) payload.type = f.type;
+    if (!requestOnly) {
+      payload.type = f.type;
+      const est = f.estimate.trim() ? parseDuration(f.estimate) : null;
+      if (f.estimate.trim() && est == null) { setBusy(false); setMsg('예상 시간을 읽지 못했습니다 — 예: 90 · 1h 30m · 1.5h · 2시간'); return; }
+      payload.estimateMin = est; payload.fixVersion = f.fixVersion.trim(); payload.affectsVersion = f.affectsVersion.trim();
+    }
     try {
       const r = initial ? await putJson(`/issues/${initial.key}`, payload) : await postJson('/issues', requestOnly ? payload : { ...payload, assignee: f.assignee });
       if (r?.ok) onSaved(r); else setMsg(saveFailText(r));
@@ -625,6 +712,12 @@ function IssueEditor({ meta, initial = null, requestOnly = false, onCancel, onSa
           <DataList id="iss-components">{(meta.components || []).map((c) => <option key={c} value={c} />)}</DataList>
         </label>
         <label className="iss-field">라벨(쉼표 구분)<input className="input" value={f.labels} onChange={set('labels')} placeholder="vcenter, 수집" /></label>
+        {!requestOnly && <>
+          <label className="iss-field">예상 시간<input className="input" value={f.estimate} onChange={set('estimate')} maxLength={20} placeholder="예: 1h 30m · 90 · 2시간" /></label>
+          <label className="iss-field">수정 버전<input className="input" value={f.fixVersion} onChange={set('fixVersion')} maxLength={meta.limits?.version || 40} placeholder={meta.portalVersion ? `예: ${meta.portalVersion}` : '예: 2.885.0'} list="iss-versions" /></label>
+          <label className="iss-field">영향 버전<input className="input" value={f.affectsVersion} onChange={set('affectsVersion')} maxLength={meta.limits?.version || 40} placeholder="문제가 나타난 버전" list="iss-versions" /></label>
+          <DataList id="iss-versions">{(meta.knownVersions || []).map((v) => <option key={v} value={v} />)}</DataList>
+        </>}
       </div>
       {!initial && !requestOnly && s && !f.assignee && (
         <div className="iss-suggest">
@@ -644,6 +737,85 @@ function IssueEditor({ meta, initial = null, requestOnly = false, onCancel, onSa
 }
 
 /* ───────────── 상세 ───────────── */
+
+/**
+ * v2.885 C-3 — SLA 시계 · 시간 추적(예상 · 작업 기록) · 수정/영향 버전. SLA 는 서버가 이력에서 계산한 값을 그대로 보인다(화면이 다시 계산하지 않는다).
+ * 작업 기록 지우기는 적은 사람 또는 전체 범위 관리자(서버가 집행).
+ */
+function TimeBox({ it, meta, canWrite, busy, act, me, isMod }) {
+  const [open, setOpen] = useState(false);
+  const [dur, setDur] = useState('');
+  const [on, setOn] = useState('');
+  const [note, setNote] = useState('');
+  const [err, setErr] = useState('');
+  const [all, setAll] = useState(false);
+  const sla = it.sla;
+  const track = timeTrackText(it);
+  const fx = fixVersionState(it.fixVersion, meta.portalVersion);
+  const logs = it.worklog || [];
+  if (!sla && !track && !logs.length && !it.fixVersion && !it.affectsVersion && !canWrite) return null;
+  const add = async () => {
+    const m = parseDuration(dur);
+    if (m == null) { setErr('시간을 읽지 못했습니다 — 예: 30 · 45m · 1h 30m · 1.5h · 2시간'); return; }
+    setErr('');
+    const ok = await act(() => postJson(`/issues/${it.key}/worklog`, { minutes: m, on: on || undefined, note: note.trim() }));
+    if (ok) { setDur(''); setNote(''); setOn(''); setOpen(false); }
+  };
+  return (
+    <section className="iss-timebox" aria-label="SLA · 시간 · 버전">
+      {sla && (
+        <div className="iss-time-row">
+          <b className="iss-time-k">SLA</b>
+          <div className="iss-time-v">
+            {it.status !== 'done' && <SlaChip sla={sla} />}
+            <div>{slaStageText('respond', sla.respond)}</div>
+            <div>{slaStageText('resolve', sla.resolve)}</div>
+            <div className="muted iss-small">달력 시간(24×7) · 보류 중에는 시계가 멈춥니다 · 응답 = 진행 중/검토/완료로 옮기거나 보고자가 아닌 사람의 첫 댓글{sla.partial ? ' · 이력 일부가 지워져(이슈당 300줄) 근사값입니다' : ''}</div>
+          </div>
+        </div>
+      )}
+      <div className="iss-time-row">
+        <b className="iss-time-k">시간</b>
+        <div className="iss-time-v">
+          <span>{track || '예상 · 기록 없음'}</span>
+          {canWrite && !open && <button type="button" className="btn btn-sm" disabled={busy} onClick={() => setOpen(true)}>+ 작업 기록</button>}
+          {open && (
+            <div className="iss-worklog-form">
+              <input className="input" value={dur} onChange={(e) => setDur(e.target.value)} placeholder="걸린 시간 — 1h 30m" maxLength={20} aria-label="걸린 시간" autoFocus />
+              <input className="input" type="date" value={on} onChange={(e) => setOn(e.target.value)} aria-label="작업한 날(비우면 오늘)" title="작업한 날 — 비우면 오늘" />
+              <input className="input" value={note} onChange={(e) => setNote(e.target.value)} placeholder="메모(선택)" maxLength={meta.limits?.worklogNote || 200} aria-label="메모" />
+              <button type="button" className="btn primary" disabled={busy || !dur.trim()} onClick={add}>기록</button>
+              <button type="button" className="btn" disabled={busy} onClick={() => { setOpen(false); setErr(''); }}>취소</button>
+            </div>
+          )}
+          {err && <div className="banner warn">{err}</div>}
+          {logs.length > 0 && (
+            <ul className="iss-worklog">
+              {(all ? logs : logs.slice(0, 5)).map((w) => (
+                <li key={w.id}>
+                  <span className="iss-worklog-m">{minutesText(w.minutes)}</span>
+                  <span className="muted">{w.on || dateText(w.at)} · {w.by}</span>
+                  {w.note && <span className="iss-worklog-note">{w.note}</span>}
+                  {canWrite && (isMod || w.by === me) && <button type="button" className="btn btn-sm" disabled={busy} onClick={() => { if (window.confirm(`${w.on || ''} ${minutesText(w.minutes)} 작업 기록을 지울까요?`)) act(() => postJson(`/issues/${it.key}/worklog/remove`, { id: w.id })); }}>지우기</button>}
+                </li>
+              ))}
+              {logs.length > 5 && <li><button type="button" className="iss-link" onClick={() => setAll((v) => !v)}>{all ? '접기' : `${logs.length - 5}개 더 보기`}</button></li>}
+            </ul>
+          )}
+        </div>
+      </div>
+      {(it.fixVersion || it.affectsVersion) && (
+        <div className="iss-time-row">
+          <b className="iss-time-k">버전</b>
+          <div className="iss-time-v">
+            {it.fixVersion && <span>수정 {it.fixVersion}{fx === 'in' && <span className="iss-chip iss-ver in" title={`이 포탈은 ${meta.portalVersion} 입니다`}>이 포탈에 반영됨</span>}{fx === 'later' && <span className="iss-chip iss-ver" title={`이 포탈은 ${meta.portalVersion} 입니다`}>예정 · 지금 {meta.portalVersion}</span>}</span>}
+            {it.affectsVersion && <span>영향 {it.affectsVersion}</span>}
+          </div>
+        </div>
+      )}
+    </section>
+  );
+}
 
 function IssueDetail({ issueKey, meta, onBack, onOpen, onWritten }) {
   const [x, setX] = useState(null);
@@ -686,17 +858,7 @@ function IssueDetail({ issueKey, meta, onBack, onOpen, onWritten }) {
   const people = peopleOptions(meta.people, it.assignee);
   // v2.882: 남은 하위 작업(에픽이면 소속 이슈)이 있으면 서버가 409(open-children)로 묻는다 — 확인을 받고 한꺼번에 완료로 다시 보낸다
   // v2.883: 막고 있는 열린 이슈(open-blockers)도 같은 방식으로 묻는다 — 확인할 것이 여럿이면 차례로(최대 3번)
-  const statusAct = (st) => act(async () => {
-    let extra = {};
-    for (let n = 0; n < 3; n += 1) {
-      const r = await postJson(`/issues/${it.key}/status`, { status: st, ...extra });
-      const ask = statusConfirmText(r);
-      if (!ask) return r;
-      if (!window.confirm(ask)) return { ok: false, reason: '완료를 취소했습니다 — 아무것도 바꾸지 않았습니다.' };
-      extra = { ...extra, [STATUS_CONFIRM_FLAG[r.code]]: true };
-    }
-    return { ok: false, reason: '확인을 여러 번 받았지만 완료하지 못했습니다 — 다시 시도하세요.' };
-  });
+  const statusAct = (st) => act(() => postStatusConfirmed(it.key, st));
   const nextStatus = { backlog: 'todo', todo: 'progress', progress: 'review', review: 'done' }[it.status];
   const mineComment = (c) => !!x.isMod || c.author === x.me;
 
@@ -752,6 +914,7 @@ function IssueDetail({ issueKey, meta, onBack, onOpen, onWritten }) {
                 <div className="iss-body md">{it.body ? <MdView md={it.body} compact breaks unresolvedAsSearch idPrefix={`i${it.key}`} /> : <span className="muted">설명이 없습니다.</span>}</div>
                 <ChildrenBox it={it} meta={meta} canWrite={canWrite} busy={busy} act={act} onOpen={onOpen} />
                 <LinksBox it={it} meta={meta} canWrite={canWrite} busy={busy} act={act} onOpen={onOpen} />
+                <TimeBox it={it} meta={meta} canWrite={canWrite} busy={busy} act={act} me={x.me} isMod={!!x.isMod} />
               </>
             )}
         </div>
@@ -1005,7 +1168,7 @@ function AutoCreateSettings() {
 
 /* ───────────── 설정(v2.871 — 자동 할당 · 알림 · 사람별 메일 주소) ───────────── */
 
-const EVENT_TEXT = Object.freeze({ assigned: '할당(새 담당자 · 이전 담당자)', status: '상태 변경(담당자 · 보고자 · 관찰자)', progress: '진행률·진행 메모(담당자 · 보고자 · 관찰자)', comment: '댓글 · @멘션(담당자 · 보고자 · 관찰자 · 언급된 사람)', due: '기한 내일 · 오늘 · 지남(담당자 — 포탈 날짜로 하루 한 번)', wiki: '위키 문서 저장 · 댓글 · @멘션(지켜보는 사람 · 언급된 사람)' });
+const EVENT_TEXT = Object.freeze({ sla: 'SLA 초과(담당자 · 보고자 — 응답 · 해결 단계마다 한 번 · 아래 SLA 가 켜져 있을 때)', assigned: '할당(새 담당자 · 이전 담당자)', status: '상태 변경(담당자 · 보고자 · 관찰자)', progress: '진행률·진행 메모(담당자 · 보고자 · 관찰자)', comment: '댓글 · @멘션(담당자 · 보고자 · 관찰자 · 언급된 사람)', due: '기한 내일 · 오늘 · 지남(담당자 — 포탈 날짜로 하루 한 번)', wiki: '위키 문서 저장 · 댓글 · @멘션(지켜보는 사람 · 언급된 사람)' });
 const splitNames = (s) => String(s || '').split(/[,\s]+/).map((x) => x.trim()).filter(Boolean);
 
 /** 전체 범위 관리자 전용 — 서버가 같은 기준으로 막는다(GET·PUT /issues/settings). 조회 실패면 저장 버튼을 열지 않는다. */
@@ -1025,6 +1188,8 @@ function IssueSettings() {
       setForm({
         autoEnabled: !!st.autoAssign.enabled, components: st.autoAssign.components.map((c) => ({ ...c })), pool: st.autoAssign.pool.join(', '),
         notifyEnabled: !!st.notify.enabled, mail: st.notify.mail !== false, chat: !!st.notify.chat, events: { ...st.notify.events }, people: st.notify.people.map((p) => ({ ...p })),
+        // v2.885 SLA(서버 issues/sla.js normalizeSla 가 다시 검사한다)
+        sla: st.sla ? { enabled: !!st.sla.enabled, types: [...(st.sla.types || [])], warnPct: st.sla.warnPct ?? 80, targets: Object.fromEntries(Object.entries(st.sla.targets || {}).map(([k, v]) => [k, { respondMin: String(v.respondMin), resolveMin: String(v.resolveMin) }])) } : null,
       });
     }).catch((e) => { if (latest.isLatest(k)) setErr(e); });
   }, [latest]);
@@ -1040,6 +1205,7 @@ function IssueSettings() {
     const body = {
       autoAssign: { enabled: form.autoEnabled, components: form.components.filter((c) => c.name.trim() || c.assignee.trim()), pool: splitNames(form.pool) },
       notify: { enabled: form.notifyEnabled, mail: form.mail, chat: form.chat, events: form.events, people: form.people.filter((p) => p.username.trim() || p.email.trim()) },
+      ...(form.sla ? { sla: { enabled: form.sla.enabled, types: form.sla.types, warnPct: Number(form.sla.warnPct), targets: Object.fromEntries(Object.entries(form.sla.targets).map(([k, v]) => [k, { respondMin: Number(v.respondMin), resolveMin: Number(v.resolveMin) }])) } } : {}),
     };
     try {
       const r = await putJson('/issues/settings', body);
@@ -1094,6 +1260,36 @@ function IssueSettings() {
         </div>
         {st && <div className="muted" style={{ fontSize: 12.5 }}>발송 상태: {notifyStatusText(st)}{st.lastError ? ` · 마지막 문제: ${st.lastError}` : ''}</div>}
       </div>
+
+      {form.sla && (
+        <div className="card iss-editor">
+          <h3 className="iss-h3">SLA(응답 · 해결 목표)</h3>
+          <label className="iss-check"><input type="checkbox" checked={form.sla.enabled} onChange={(e) => upd({ sla: { ...form.sla, enabled: e.target.checked } })} /> SLA 시계 켜기 — 카드 · 목록에 초과 · 임박 배지, 위 알림이 켜져 있으면 초과 때 담당자 · 보고자에게 한 번</label>
+          <div className="muted" style={{ fontSize: 12.5 }}>달력 시간(24×7)으로 셉니다(업무 시간 · 휴일 달력은 아직 없습니다). 보류로 표시한 동안은 시계가 멈춥니다. 응답 = 진행 중 · 검토 · 완료로 옮기거나 보고자가 아닌 사람의 첫 댓글. 해결 = 완료. 목표 0 은 그 단계를 보지 않습니다.</div>
+          <div className="iss-checks">
+            <span className="muted" style={{ fontSize: 12.5 }}>대상 유형</span>
+            {['incident', 'request', 'task', 'improve'].map((t) => (
+              <label key={t} className="iss-check"><input type="checkbox" checked={form.sla.types.includes(t)} onChange={(e) => upd({ sla: { ...form.sla, types: e.target.checked ? [...form.sla.types, t] : form.sla.types.filter((x) => x !== t) } })} /> {TYPE_TEXT[t] || t}</label>
+            ))}
+            <label className="iss-inline">임박 기준(%)<input className="input iss-num" type="number" min={50} max={99} value={form.sla.warnPct} onChange={(e) => upd({ sla: { ...form.sla, warnPct: e.target.value } })} /></label>
+          </div>
+          <div className="iss-sla-grid">
+            <span className="muted">우선순위</span><span className="muted">응답(분)</span><span className="muted">해결(분)</span>
+            {['p0', 'p1', 'p2', 'p3'].map((p) => (
+              <React.Fragment key={p}>
+                <span><PrioTag p={p} /></span>
+                {['respondMin', 'resolveMin'].map((k) => (
+                  <label key={k} className="iss-sla-cell">
+                    <input className="input iss-num" type="number" min={0} max={129600} value={form.sla.targets[p]?.[k] ?? ''} aria-label={`${PRIORITY_TEXT[p]} ${k === 'respondMin' ? '응답' : '해결'}(분)`}
+                      onChange={(e) => upd({ sla: { ...form.sla, targets: { ...form.sla.targets, [p]: { ...form.sla.targets[p], [k]: e.target.value } } } })} />
+                    <span className="muted">{Number(form.sla.targets[p]?.[k]) > 0 ? minutesText(Number(form.sla.targets[p][k])) : '보지 않음'}</span>
+                  </label>
+                ))}
+              </React.Fragment>
+            ))}
+          </div>
+        </div>
+      )}
       {msg && <div className="banner">{msg}</div>}
       <div className="flex" style={{ gap: 6, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
         <button className="btn" onClick={load} disabled={busy}>다시 읽기</button>

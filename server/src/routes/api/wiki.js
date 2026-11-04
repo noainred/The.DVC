@@ -20,8 +20,9 @@ import { store } from '../../store.js';
 import {
   listSpaces, spaceView, updateSpace, tree, getPage, createPage, updatePage, revertPage, versionBody, diffVersions, deletePage,
   addComment, deleteComment, setWatch, searchPages, backrefs, homeOf, toggleTask, wikiSeq, waitWikiPersist, wikiPersist, PERSIST_WAIT_MS,
-  TEMPLATES, STATUSES, LIMITS, PUB,
+  TEMPLATES, STATUSES, LIMITS, PUB, metasFor,
 } from '../../wiki/store.js';
+import { recordView, setFavorite, userLists, isFavorite, viewCounts, forgetPage, USER_LIMITS } from '../../wiki/userState.js';
 
 const writers = requireRole('admin', 'operator');
 const adminOnly = requireRole('admin');
@@ -87,7 +88,14 @@ export function registerWiki(api) {
   });
   api.get('/wiki/home', (req, res, next) => {
     res.set('Cache-Control', 'no-store');
-    try { const access = accessOf(req); res.json({ ok: true, ...homeOf(spaceOf(req, access), { access, me: userOf(req) }) }); } catch (e) { fail(res, e, next); }
+    try {
+      const access = accessOf(req);
+      const home = homeOf(spaceOf(req, access), { access, me: userOf(req), views: viewCounts() });
+      // v2.885 개인화 — 즐겨찾기 · 최근 본 문서(모든 스페이스 · 지금 범위로 다시 거른다)
+      const mine = userLists(userOf(req));
+      const at = new Map(mine.recent.map((r) => [r.id, r.at]));
+      res.json({ ok: true, ...home, mine: { fav: metasFor(mine.fav, access), recent: metasFor(mine.recent.map((r) => r.id), access, (id) => ({ viewedAt: at.get(id) })) } });
+    } catch (e) { fail(res, e, next); }
   });
   api.get('/wiki/tree', (req, res, next) => {
     res.set('Cache-Control', 'no-store');
@@ -127,7 +135,12 @@ export function registerWiki(api) {
   api.get('/wiki/pages/:id', (req, res, next) => {
     if (!ID_RE.test(req.params.id)) return badId(res);
     res.set('Cache-Control', 'no-store');
-    try { res.json({ ok: true, page: getPage(req.params.id, userOf(req), accessOf(req)), canWrite: canWrite(req), canComment: canComment(req), isMod: isMod(req), me: userOf(req) }); } catch (e) { fail(res, e, next); }
+    try {
+      const page = getPage(req.params.id, userOf(req), accessOf(req));
+      // v2.885 최근 본 · 조회 수 — 볼 수 있음을 확인한 뒤에만(데모 계정은 함께 쓰는 계정이라 세지 않는다). ?nv=1 은 세지 않는다(저장 뒤 다시 읽기 등).
+      if (!isDemoGuest(req.user) && req.query.nv !== '1') recordView(userOf(req), page.id);
+      res.json({ ok: true, page: { ...page, fav: isFavorite(userOf(req), page.id) }, canWrite: canWrite(req), canComment: canComment(req), isMod: isMod(req), me: userOf(req) });
+    } catch (e) { fail(res, e, next); }
   });
   api.put('/wiki/pages/:id', writers, async (req, res, next) => {
     if (!ID_RE.test(req.params.id)) return badId(res);
@@ -170,6 +183,7 @@ export function registerWiki(api) {
     try {
       const r = deletePage(req.params.id, userOf(req), { access: accessOf(req), isMod: isMod(req) });
       audit(req, 'wiki.delete', r.id);
+      forgetPage(r.id); // v2.885 그 문서의 조회 수 · 즐겨찾기 · 최근 기록
       res.json({ ok: true, ...r, persist: await persistView(req) });
     } catch (e) { fail(res, e, next); }
   });
@@ -185,6 +199,14 @@ export function registerWiki(api) {
     try {
       const r = deleteComment(req.params.id, String(req.params.cid).slice(0, 40), userOf(req), { access: accessOf(req), isMod: isMod(req) });
       res.json({ ok: true, ...r, persist: await persistView(req) });
+    } catch (e) { fail(res, e, next); }
+  });
+  // v2.885 즐겨찾기 — 지켜보기와 같은 문지기(쓰기 역할 또는 요청 권한). 볼 수 있는 문서만(조회 밖 404). 본인 상태만 바꾼다.
+  api.post('/wiki/pages/:id/fav', commenters, (req, res, next) => {
+    if (!ID_RE.test(req.params.id)) return badId(res);
+    try {
+      getPage(req.params.id, userOf(req), accessOf(req));
+      res.json({ ok: true, ...setFavorite(userOf(req), req.params.id, req.body?.on !== false), max: USER_LIMITS.fav });
     } catch (e) { fail(res, e, next); }
   });
   api.post('/wiki/pages/:id/watch', commenters, (req, res, next) => {

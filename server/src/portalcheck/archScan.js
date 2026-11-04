@@ -236,6 +236,7 @@ export const KNOWN_CONFIG_FILES = Object.freeze({
   'issue-sprints.json': '이슈 스프린트(issues/sprints.js — 이름 · 기간 · 목표 · 상태, 비밀 없음 · 원자 쓰기 · 손상 보존, v2.882)',
   'issue-filters.json': '이슈 저장 필터(issues/filters.js — 사람마다 검색식 · 공유 여부, 비밀 없음 · 원자 쓰기 · 손상 보존, v2.882)',
   'wiki.json': '위키 스페이스 · 문서 · 판 · 댓글(wiki/store.js — 로그인 사용자가 쓰는 사용자 데이터, 디바운스 비동기 쓰기 · 손상 보존 · 합계 상한 WIKI_MAX_BYTES, v2.881)',
+  'wiki-user.json': '위키 사용자별 즐겨찾기 · 최근 본 문서 · 조회 수(wiki/userState.js — 사용자 데이터, 디바운스 비동기 쓰기 · 손상 보존 · 상한, 비밀 없음, v2.885)',
   'issue-settings.json': '이슈 트래커 설정(issues/settings.js — 자동 할당 규칙 · 알림 · 사람별 메일 주소, 비밀 없음 · 원자 쓰기 · 손상 보존, v2.871)',
 });
 

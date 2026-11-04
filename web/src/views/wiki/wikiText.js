@@ -207,3 +207,62 @@ export function spaceName(spaces, id) {
   const s = (spaces || []).find((x) => x.id === id);
   return s ? s.name : (id === 'pub' ? '공용(전 법인)' : id || '—');
 }
+
+/* ───── v2.885 C-2 슬래시 명령(편집기) ───── */
+const CARET = '\u0001'; // 스니펫 안의 커서 자리(없으면 끝)
+/** 명령 — keys 는 찾는 말(한글 · 영어). snip 은 '/명령' 자리를 바꾼다. today 는 그날 날짜(포탈이 아니라 브라우저 날짜 — 문서에 적는 글이다). */
+export const SLASH_COMMANDS = Object.freeze([
+  { k: 'h2', label: '제목(큰)', keys: ['제목', 'heading', 'h2'], snip: `## ${CARET}` },
+  { k: 'h3', label: '제목(작은)', keys: ['소제목', 'heading', 'h3'], snip: `### ${CARET}` },
+  { k: 'ul', label: '목록', keys: ['목록', 'list', 'ul', 'bullet'], snip: `- ${CARET}` },
+  { k: 'ol', label: '번호 목록', keys: ['번호', 'number', 'ol'], snip: `1. ${CARET}` },
+  { k: 'task', label: '체크리스트', keys: ['체크', '할일', 'todo', 'task', 'check'], snip: `- [ ] ${CARET}` },
+  { k: 'table', label: '표', keys: ['표', 'table'], snip: `| 열 | 열 |\n|---|---|\n| ${CARET} |  |` },
+  { k: 'code', label: '코드 블록', keys: ['코드', 'code'], snip: `\`\`\`bash\n${CARET}\n\`\`\`` },
+  { k: 'quote', label: '인용', keys: ['인용', 'quote'], snip: `> ${CARET}` },
+  { k: 'info', label: '콜아웃 — 정보', keys: ['콜아웃', '정보', 'info', 'callout'], snip: `:::info\n${CARET}\n:::` },
+  { k: 'warn', label: '콜아웃 — 주의', keys: ['콜아웃', '주의', 'warn', 'warning'], snip: `:::warn\n${CARET}\n:::` },
+  { k: 'danger', label: '콜아웃 — 위험', keys: ['콜아웃', '위험', 'danger'], snip: `:::danger\n${CARET}\n:::` },
+  { k: 'tip', label: '콜아웃 — 팁', keys: ['콜아웃', '팁', 'tip'], snip: `:::tip\n${CARET}\n:::` },
+  { k: 'fold', label: '접기', keys: ['접기', 'fold', 'details', 'toggle'], snip: `:::fold 더 보기\n${CARET}\n:::` },
+  { k: 'toc', label: '목차', keys: ['목차', 'toc'], snip: `[[toc]]\n${CARET}` },
+  { k: 'hr', label: '구분선', keys: ['구분선', 'hr', 'divider', 'line'], snip: `---\n${CARET}` },
+  { k: 'page', label: '문서 링크', keys: ['문서', '링크', 'link', 'page'], snip: `[[${CARET}]]` },
+  { k: 'issue', label: '이슈 키', keys: ['이슈', 'issue', 'iss'], snip: `ISS-${CARET}` },
+  { k: 'fn', label: '각주', keys: ['각주', 'footnote', 'fn'], snip: `[^1]${CARET}\n\n[^1]: ` },
+  { k: 'today', label: '오늘 날짜', keys: ['오늘', '날짜', 'today', 'date'], snip: '' },
+]);
+/**
+ * 커서 앞이 '줄 머리(공백 허용) + /낱말' 이면 { start(‘/’ 위치), q } — 아니면 null. 주소(https://…) · 경로 중간의 '/' 는 명령이 아니다(줄 머리만).
+ * 줄 머리에서 커서까지 40자를 넘게 보지 않는다(긴 줄에서 매 입력마다 줄 전체를 훑지 않게).
+ */
+export function slashQuery(text, caret) {
+  const s = String(text ?? '');
+  const c = Math.max(0, Math.min(Number.isInteger(caret) ? caret : s.length, s.length));
+  const ls = s.lastIndexOf('\n', c - 1) + 1;
+  if (c - ls > 40) return null;
+  const head = s.slice(ls, c);
+  const m = /^([ \t]*)\/([^\s/]{0,20})$/.exec(head);
+  return m ? { start: ls + m[1].length, q: m[2] } : null;
+}
+/** 찾는 말로 거르기 — 빈 말이면 전부. 앞부분이 맞는 것 먼저. */
+export function filterSlash(q, list = SLASH_COMMANDS) {
+  const w = String(q || '').toLowerCase();
+  if (!w) return [...list];
+  const hit = (c) => [c.label, ...c.keys].map((x) => x.toLowerCase());
+  const pre = list.filter((c) => hit(c).some((x) => x.startsWith(w)));
+  const mid = list.filter((c) => !pre.includes(c) && hit(c).some((x) => x.includes(w)));
+  return [...pre, ...mid];
+}
+const pad2 = (n) => String(n).padStart(2, '0');
+/** 명령 적용 — '/낱말' 자리를 스니펫으로 바꾸고 새 본문 · 커서 위치를 돌려준다. */
+export function applySlash(text, caret, cmd, now = new Date()) {
+  const q = slashQuery(text, caret);
+  if (!q || !cmd) return null;
+  let snip = cmd.snip;
+  if (cmd.k === 'today') snip = `${now.getFullYear()}-${pad2(now.getMonth() + 1)}-${pad2(now.getDate())}${CARET}`;
+  const at = snip.indexOf(CARET);
+  const clean = snip.replace(CARET, '');
+  const body = text.slice(0, q.start) + clean + text.slice(caret);
+  return { body, caret: q.start + (at < 0 ? clean.length : at) };
+}
