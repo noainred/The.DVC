@@ -68,7 +68,7 @@ export function effectiveSettings() {
 
 const AUTH_CODES = new Set(['auth', 'pam', 'tls']);
 /** 엣지 노드(중앙으로 push) — 엣지에서는 대행하지 않는다(엣지 자기 Bareos 설정의 agent 는 쓰지 않는다).
- *  v2.872(점검 B4-11): 리허설 · 요약 메일이 url+token 으로 따로 판정해 토큰만 빠진 엣지에서 정기 작업이 돌 수 있었다 — 판정은 이것 하나. */
+ *  v2.873(점검 B4-11): 리허설 · 요약 메일이 url+token 으로 따로 판정해 토큰만 빠진 엣지에서 정기 작업이 돌 수 있었다 — 판정은 이것 하나. */
 export const isEdgeNode = () => !!config.agent?.centralUrl;
 const isEdge = isEdgeNode;
 

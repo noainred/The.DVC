@@ -328,7 +328,7 @@ test('엣지 워커 왕복 — 가짜 중앙에서 정의·작업을 받아 로�
   assert.ok(store.getJob('cj-w'), '담당 미확정(빈 vcenters)으로는 지우지 않는다');
 });
 
-test('v2.872 B3-01 엣지 워커 — Bareos 복원 검증 회신에 Tools 시간 · 지움 여부를 싣고, 중앙 정제 · 마무리가 남김(false)도 지킨다', async () => {
+test('v2.873 B3-01 엣지 워커 — Bareos 복원 검증 회신에 Tools 시간 · 지움 여부를 싣고, 중앙 정제 · 마무리가 남김(false)도 지킨다', async () => {
   const { syncVmCloneNow } = await import('../src/agent/vmCloneWorker.js');
   central.syncBody = { ok: true, vcenters: ['vc-site'], jobs: [], ops: [
     { id: 'vco-bv1', kind: 'bareos-verify', vcenterId: 'vc-site', spec: { name: 'web-01-verify-20261104', deleteOnOk: true } },

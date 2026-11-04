@@ -1,5 +1,5 @@
 /**
- * test/bareosFinishDigest2872.test.js — v2.872 Bareos 복원 · 검증 점검(5축 + 반증 1인) 확정분 중 끝맺음(vmclone) · 일일 요약 메일.
+ * test/bareosFinishDigest2873.test.js — v2.873 Bareos 복원 · 검증 점검(5축 + 반증 1인) 확정분 중 끝맺음(vmclone) · 일일 요약 메일.
  *  ① B3-04(재현): 장치 목록을 못 읽거나(빈 XML) 모르는 NIC 종류가 있으면 '끊었음' 으로 보지 않고 켜지 않는다(fail-closed) — 재구성도 하지 않는다
  *  ② B2-02(재현): vCenter 줄에 선(대기 · 실행) Bareos 마무리는 자동 업그레이드가 기다리는 목록에 있다 · 끝나면 빠진다
  *  ③ B3-05 · B3-07: 끄기 전 전원 상태 실측 · 로그인 실패는 사유를 남긴다(던지지 않는다)
@@ -12,7 +12,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'bareos2872fd-'));
+const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'bareos2873fd-'));
 process.env.CONFIG_DIR = tmp;
 process.env.DATA_SOURCE = 'mock';
 

@@ -115,7 +115,7 @@ function runOps(ops) {
         _inflight.delete(id); _done.add(id);
         if (_done.size > 500) _done.delete(_done.values().next().value);
         _acks.push({ at: Date.now(), id, ok: !!r?.ok, detail: String(r?.detail ?? '').slice(0, 400), ...(r?.ms != null ? { ms: r.ms } : {}), ...(Array.isArray(r?.hosts) ? { hosts: r.hosts.slice(0, 500) } : {}), ...(r?.newName ? { newName: r.newName } : {}),
-          // v2.872(점검 B3-01): Bareos 복원 검증 결과 — 중앙은 받는데 엣지가 보내지 않아 엣지 법인 검증은 늘 Tools '—' · '남김' 이었다
+          // v2.873(점검 B3-01): Bareos 복원 검증 결과 — 중앙은 받는데 엣지가 보내지 않아 엣지 법인 검증은 늘 Tools '—' · '남김' 이었다
           ...(typeof r?.toolsMs === 'number' && Number.isFinite(r.toolsMs) && r.toolsMs >= 0 ? { toolsMs: r.toolsMs } : {}), ...(typeof r?.deleted === 'boolean' ? { deleted: r.deleted } : {}) });
         if (_acks.length > 200) _acks.splice(0, _acks.length - 200);
         reportNow().catch(() => {});

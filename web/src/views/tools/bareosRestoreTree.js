@@ -172,7 +172,7 @@ export function lastOkText(job) {
 export function restoreStateText(job, now = Date.now()) {
   const rs = Array.isArray(job?.restores) ? job.restores : [];
   if (rs.some(restoreIsOpen)) return { text: '복원 진행 중', tone: 'info' };
-  if (rs.some((r) => restoreUnknownHeld(r, now))) return { text: '직전 복원 결과 모름', tone: 'warn' };   // v2.872 B5-01 — 보낸 뒤 끊김(Director 에서 확인)
+  if (rs.some((r) => restoreUnknownHeld(r, now))) return { text: '직전 복원 결과 모름', tone: 'warn' };   // v2.873 B5-01 — 보낸 뒤 끊김(Director 에서 확인)
   const recent = rs.filter((r) => Number(r.at) >= now - 7 * 86_400_000).sort((a, b) => Number(b.at) - Number(a.at))[0];
   if (recent?.verify) {
     // v2.870 감사 A2-02: 검증 판정은 verifyOutcome 하나(켜 보는 중 · 재시도 소진을 '검증 성공' 으로 보이던 것)

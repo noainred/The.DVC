@@ -11,7 +11,7 @@
  *  · 판정 · 보내기는 묶음 복원과 같은 길(bulkRestorePlan — 이름 겹침 · 데이터스토어 여유 · ops.restores 세션 하나). 하나라도 막히면 그 VM 만 뺀다(자동 작업이라 나머지는 보낸다).
  *  · 회차는 **보내기 전에** 기록한다(그 주 그 법인은 한 번 — 재시작 · 실패로 같은 주에 다시 돌지 않는다 · 백업 그룹 러너와 같은 규칙).
  *  · 중앙 전용(엣지는 기동하지 않는다). 인증 정지된 Director 는 주기 실행에서 건너뛴다(trigger 'timer').
- * 상태 파일: CONFIG_DIR/bareos-rehearsal.json(정책 — 비밀 없음) · bareos-rehearsal-state.json(회차 · 마지막 검증 · 시도 시각 · Director 마다 최근 결과 RUNS_PER_DIR 건 — v2.872).
+ * 상태 파일: CONFIG_DIR/bareos-rehearsal.json(정책 — 비밀 없음) · bareos-rehearsal-state.json(회차 · 마지막 검증 · 시도 시각 · Director 마다 최근 결과 RUNS_PER_DIR 건 — v2.873).
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -37,11 +37,11 @@ import { logAudit } from '../audit.js';
 
 export const TICK_MS = 60_000;
 export const PER_CORP_MAX = 10;
-/** v2.872(점검 B4-03 — 재현): 전 법인 공용 20건이면 28 법인 틱 한 번에 앞 8 법인 기록이 사라졌다 — Director 마다 최근 k건. */
+/** v2.873(점검 B4-03 — 재현): 전 법인 공용 20건이면 28 법인 틱 한 번에 앞 8 법인 기록이 사라졌다 — Director 마다 최근 k건. */
 export const RUNS_PER_DIR = 4;
 /** 회차 하나에 남기는 항목 상한(건너뜀 사유가 길게 쌓여 상태 파일이 커지지 않게 — 넘친 수는 moreItems). */
 const RUN_ITEMS_MAX = 30;
-/** v2.872(B4-01): 판정에서 막힌 VM 을 건너뛰고 다음 후보로 채울 때 더 볼 후보 수(고정 상한 — 요청 경로 아닌 정기 작업이지만 계산을 묶어 둔다). */
+/** v2.873(B4-01): 판정에서 막힌 VM 을 건너뛰고 다음 후보로 채울 때 더 볼 후보 수(고정 상한 — 요청 경로 아닌 정기 작업이지만 계산을 묶어 둔다). */
 const EXTRA_TRIES = 30;
 const TIME_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
 export const DEFAULTS = Object.freeze({ enabled: false, weekday: 6, time: '03:17', perCorp: 3, deleteOnOk: true, datastores: {} });
@@ -49,7 +49,7 @@ registerStateFile('bareos-rehearsal-state.json');
 const FILE = () => path.join(config.configDir, 'bareos-rehearsal.json');   // ⚠ 리터럴 형태 유지 — scripts/config-doc.mjs 가 이 모양으로 파일을 찾는다
 const STATE_FILE = () => path.join(config.configDir, 'bareos-rehearsal-state.json');
 const fail = (code, msg) => Object.assign(new Error(msg), { code });
-const isEdge = () => isEdgeNode();   // v2.872 B4-11 판정은 service.js 하나
+const isEdge = () => isEdgeNode();   // v2.873 B4-11 판정은 service.js 하나
 const DS_RE = /^[^"\\:;@\r\n\0]{1,80}$/;
 
 let _cfg = null; const _loadErr = makeLoadError();
@@ -119,7 +119,7 @@ function state() {
   if (!Array.isArray(_state.runs)) _state.runs = [];
   return _state;
 }
-/** v2.872(점검 B4-09): 성공 여부를 돌려준다 — 회차 차지 저장이 실패하면 보내지 않는다(반증 F2 의 '보내기 전 파일 기록' 보장). */
+/** v2.873(점검 B4-09): 성공 여부를 돌려준다 — 회차 차지 저장이 실패하면 보내지 않는다(반증 F2 의 '보내기 전 파일 기록' 보장). */
 function saveState() {
   try { atomicWriteFileSync(STATE_FILE(), JSON.stringify(_state), { mode: 0o600 }); return true; } catch (e) { console.warn(`[bareos] 복원 검증 상태를 저장하지 못했습니다(${e?.message || e})`); return false; }
 }
@@ -165,11 +165,11 @@ export function pickCandidates(jobs, dirId, n, dirOf, lastAt = {}, driftOf = () 
       && (j.lastRun?.state === 'ok' || j.lastRun?.state === 'warning') && Number.isInteger(j.lastRun?.jobid) && j.lastRun.jobid > 0
       && !(j.restores || []).some((r) => restoreHeld(r)))
     .sort((a, b) => ((lastAt[a.id] || 0) - (lastAt[b.id] || 0)) || String(a.vmName).localeCompare(String(b.vmName)))
-    .slice(0, n);   // v2.872(B4-01): runRehearsal 은 n 을 넉넉히 받아 판정을 지난 것으로 perCorp 대를 채운다(판정 전에 자르면 막힌 VM 이 앞을 영구 점유)
+    .slice(0, n);   // v2.873(B4-01): runRehearsal 은 n 을 넉넉히 받아 판정을 지난 것으로 perCorp 대를 채운다(판정 전에 자르면 막힌 VM 이 앞을 영구 점유)
 }
 
 /**
- * v2.872(점검 B3-03): 복원이 끝난 뒤 끝맺음(NIC 끊기 · 켜 보기 · 지우기)을 돌릴 수 있는 vCenter 인가 — 실행 위치가 정해지고(conflict · none 아님),
+ * v2.873(점검 B3-03): 복원이 끝난 뒤 끝맺음(NIC 끊기 · 켜 보기 · 지우기)을 돌릴 수 있는 vCenter 인가 — 실행 위치가 정해지고(conflict · none 아님),
  *   중앙 직접이면 로그인 전에 막는 사유(위임 · 꺼짐 · 점검중 · 인증 정지 — onDemandVcBlock)가 없어야 한다. 사람이 보지 않는 정기 작업은
  *   끝맺음이 실패할 것을 알면 보내지 않는다(끊기 실패 검증 VM 이 매주 쌓였다). 데모는 vsOps 가 흉내 내므로 실행 위치만 본다.
  * @returns {(vcenterId:string) => string}  막는 사유('' = 보낼 수 있음)
@@ -210,11 +210,11 @@ export async function runRehearsal(dirId, { trigger = 'timer', by = 'rehearsal',
   // 반증 F3: 기동 직후 빈 인벤토리(initial)에서는 이름 겹침 검사가 비어 통과한다 — 회차를 차지하지 않고 미룬다(다음 틱에 다시)
   const snap = store.get();
   if (!snap || snap.initial || !(snap.vms || []).length) return { ok: false, started: 0, deferred: true, runId, items: [], reason: '인벤토리 수집 전이라 미뤘습니다(다음 확인에서 다시)' };
-  // v2.872(점검 B4-08): 원장을 못 읽으면 대상 · 진행 중 복원을 모른다 — 회차를 차지하지 않고 미룬다('검증할 대상 없음' 으로 확정 기록하지 않는다)
+  // v2.873(점검 B4-08): 원장을 못 읽으면 대상 · 진행 중 복원을 모른다 — 회차를 차지하지 않고 미룬다('검증할 대상 없음' 으로 확정 기록하지 않는다)
   if (registryLoadError()) return { ok: false, started: 0, deferred: true, runId, items: [], reason: '백업 대상 원장을 읽지 못해 미뤘습니다(손상본 보존 · 서비스 점검에서 확인)' };
   const prevDay = st.weeks[dirId];
   st.weeks[dirId] = day;   // 보내기 전에 회차를 차지하고 **파일에 남긴다**(반증 F2 — 메모리에만 두면 송신 중 재시작에 같은 날 다시 돌았다)
-  if (!saveState()) {   // v2.872(B4-09): 남기지 못하면 보내지 않는다(재시작하면 같은 날 다시 돈다) — 메모리 차지도 되돌려 다음 틱에 다시 시도
+  if (!saveState()) {   // v2.873(B4-09): 남기지 못하면 보내지 않는다(재시작하면 같은 날 다시 돈다) — 메모리 차지도 되돌려 다음 틱에 다시 시도
     if (prevDay === undefined) delete st.weeks[dirId]; else st.weeks[dirId] = prevDay;
     return { ok: false, started: 0, deferred: true, runId, items: [], reason: '복원 검증 상태 파일을 쓰지 못해 보내지 않았습니다(같은 날 두 번 돌지 않게) — 디스크 · 권한을 확인하세요' };
   }
@@ -225,14 +225,14 @@ export async function runRehearsal(dirId, { trigger = 'timer', by = 'rehearsal',
   const finishRun = (r) => {
     run.reason = r.reason || '';
     if (run.items.length > RUN_ITEMS_MAX) { run.moreItems = run.items.length - RUN_ITEMS_MAX; run.items = [...run.items.filter((x) => x.ok), ...run.items.filter((x) => !x.ok)].slice(0, RUN_ITEMS_MAX); }
-    st.runs = keepRunsPerDir([run, ...st.runs]);   // v2.872 B4-03
+    st.runs = keepRunsPerDir([run, ...st.runs]);   // v2.873 B4-03
     saveState();
-    // v2.872(점검 B4-02): 0대 회차도 감사에 한 줄 — 정기 작업이 아무것도 하지 않은 것을 화면 밖에서도 알 수 있게(무음 실패 금지)
+    // v2.873(점검 B4-02): 0대 회차도 감사에 한 줄 — 정기 작업이 아무것도 하지 않은 것을 화면 밖에서도 알 수 있게(무음 실패 금지)
     const { audited, ...rest } = r;
     if (!(r.started > 0) && !audited) logAudit({ user: by, action: 'Bareos 복원 검증', target: directorById(dirId, settings)?.name || dirId, detail: `회차 ${runId} · 시작 0대 — ${String(r.reason || '').slice(0, 200)}${trigger === 'timer' ? ' · 정기' : ' · 지금 검증'}` });
     return { ...rest, runId, items: run.items };
   };
-  // v2.872(점검 B4-01 — 재현): 판정 전에 n 대로 자르면 늘 막히는 VM(빠듯한 홈 데이터스토어 등)이 앞자리를 영구히 차지해 매주 0대였다 —
+  // v2.873(점검 B4-01 — 재현): 판정 전에 n 대로 자르면 늘 막히는 VM(빠듯한 홈 데이터스토어 등)이 앞자리를 영구히 차지해 매주 0대였다 —
   //   순서대로 판정해 통과한 것으로 perCorp 대를 채우고(후보 상한 EXTRA_TRIES), 건너뛴 VM 은 시도 시각(triedAt)을 남겨 다음 회차에 뒤로 보낸다.
   const order = { ...st.lastAt };
   for (const [id, t] of Object.entries(st.triedAt || {})) if ((Number(t) || 0) > (order[id] || 0)) order[id] = Number(t) || 0;
@@ -286,7 +286,7 @@ export async function runRehearsal(dirId, { trigger = 'timer', by = 'rehearsal',
   const byId = new Map(chosen.map((j) => [j.id, j]));
   const ready0 = plan.items.filter((x) => x.ok);
   for (const x of plan.items.filter((y) => !y.ok)) { run.items.push({ jobId: x.id, vmName: x.vmName, ok: false, reason: x.issue }); st.triedAt[x.id] = now; }   // 위 판정과 같은 함수라 생기지 않아야 한다(방어)
-  // v2.872(점검 B2-01): 대상 잠금(jobLocks — 실행 · 복원 · 삭제 · 그룹과 공용). 묶음 · 단건 복원이 같은 VM 을 보내는 중이면(아직 원장에 없다) 두 번 돌았다 —
+  // v2.873(점검 B2-01): 대상 잠금(jobLocks — 실행 · 복원 · 삭제 · 그룹과 공용). 묶음 · 단건 복원이 같은 VM 을 보내는 중이면(아직 원장에 없다) 두 번 돌았다 —
   //   잡지 못한 VM 은 이번 회차에서 건너뛴다(자동 작업 — 기다리지 않는다). 잠금은 원장에 남긴 뒤 푼다.
   const locked = [];
   const ready = [];
@@ -306,7 +306,7 @@ export async function runRehearsal(dirId, { trigger = 'timer', by = 'rehearsal',
       const why = String(e?.message || e).slice(0, 300);
       const unknown = !!e?.unknown || e?.code === 'unknown';
       for (const x of ready) run.items.push({ jobId: x.id, vmName: x.vmName, ok: false, reason: unknown ? `결과 모름 — ${why}` : why });
-      // v2.872(점검 B5-01): 결과 모름은 원장에 남긴다 — 그 VM 을 다음 회차 · 사람의 복원이 다시 보내지 않게(restoreHeld · 이름 예약)
+      // v2.873(점검 B5-01): 결과 모름은 원장에 남긴다 — 그 VM 을 다음 회차 · 사람의 복원이 다시 보내지 않게(restoreHeld · 이름 예약)
       if (unknown) { try { inBatch(() => ready.forEach((x, i) => addRestore(x.id, { unknown: true, mode: 'newVm', target: x.plan.target, by, client: sendItems[i].client, batchId: runId, nic: 'disconnect', verify: true, rehearsal: runId }))); } catch (e2) { console.warn(`[bareos] 복원 검증 ${runId} 결과 모름 기록 실패: ${e2?.message || e2}`); } }
       logAudit({ user: by, action: 'Bareos 복원 검증', target: directorById(dirId, settings)?.name || dirId, detail: `실패 — ${why}` });
       return finishRun({ ok: false, started: 0, reason: why, audited: true });
@@ -319,14 +319,14 @@ export async function runRehearsal(dirId, { trigger = 'timer', by = 'rehearsal',
         const r = byKey.get(i);
         const job = byId.get(x.id);
         if (r?.ok) {
-          // v2.872(점검 B2-01): 원장에 못 넣었으면(그사이 대상이 지워짐) '시작' 으로 세지 않는다 — 끝맺음(끊기 · 켜 보기 · 지우기)이 돌지 않는다
+          // v2.873(점검 B2-01): 원장에 못 넣었으면(그사이 대상이 지워짐) '시작' 으로 세지 않는다 — 끝맺음(끊기 · 켜 보기 · 지우기)이 돌지 않는다
           const rec = addRestore(job.id, { jobid: r.rid, fromJobids: r.chain, mode: 'newVm', target: x.plan.target, by, client: sendItems[i].client, batchId: runId, nic: 'disconnect', verify: true, deleteOnOk: policy.deleteOnOk, rehearsal: runId });
           st.lastAt[job.id] = now;
           if (rec) { started += 1; run.items.push({ jobId: job.id, vmName: job.vmName, ok: true, rid: r.rid, name: x.plan.target.name }); }
           else run.items.push({ jobId: job.id, vmName: job.vmName, ok: false, rid: r.rid, name: x.plan.target.name, reason: `복원(jobid ${r.rid})은 시작했지만 원장에서 대상이 사라져 끝맺음(끊기 · 켜 보기 · 지우기)이 돌지 않습니다 — vCenter 에서 ‘${x.plan.target.name}’ 을 확인하세요` });
         } else {
           const unknown = !r || r.code === 'unknown';
-          // v2.872(점검 B5-01): 결과 모름은 원장에 남긴다(다시 보내지 않게)
+          // v2.873(점검 B5-01): 결과 모름은 원장에 남긴다(다시 보내지 않게)
           if (unknown) addRestore(job.id, { unknown: true, mode: 'newVm', target: x.plan.target, by, client: sendItems[i].client, batchId: runId, nic: 'disconnect', verify: true, rehearsal: runId });
           run.items.push({ jobId: job.id, vmName: job.vmName, ok: false, reason: r?.message || 'Director 회신에 없음 — 결과 모름' });
         }

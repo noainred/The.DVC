@@ -26,7 +26,7 @@ export const OP_LABEL = Object.freeze({ run: '지금 실행', verify: '검증', 
  * 수십 분 걸려 그날 VM 백업 · 다른 복원의 NIC 끊기가 몇 시간 밀렸다(반증 F6). 대신 **vCenter 마다 한 줄**로 차례로 돈다(같은 vCenter 에 동시에 손대지 않게).
  */
 const _bareosChains = new Map();
-// v2.872(점검 B2-02 — 재현): 이 줄의 작업(대기 · 실행)은 runner · inflight 어디에도 없어 자동 업그레이드가 기다리지 않았다 — 재시작하면 켠 검증 VM 이
+// v2.873(점검 B2-02 — 재현): 이 줄의 작업(대기 · 실행)은 runner · inflight 어디에도 없어 자동 업그레이드가 기다리지 않았다 — 재시작하면 켠 검증 VM 이
 //   끄기 · 지우기 없이 남았다(다시 보낸 검증은 '켜져 있습니다' 거짓 실패). upgrade/manager.js 가 이 목록이 빌 때까지 적용을 미룬다(종류 · 대상 이름 · 시각만).
 const _finishOps = new Map();   // op id → { kind, vcenterId, name, since }
 /** 지금 줄에 있거나 도는 Bareos 마무리(재시작하면 끊긴다) — upgrade/manager.js 대기 목록과 같은 모양. */

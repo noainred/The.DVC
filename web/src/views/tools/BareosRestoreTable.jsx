@@ -20,7 +20,7 @@ export function FolderBox({ ids, picked, toggle, label }) {
   const on = ids.filter((id) => picked.includes(id)).length;
   const all = ids.length > 0 && on === ids.length;
   useEffect(() => { if (ref.current) ref.current.indeterminate = on > 0 && !all; }, [on, all]);
-  // v2.872(점검 B5-08): 일부만 고른 상태(─)에서 누르면 뺀다 — '더하기' 였을 때 상한(50대)에 걸린 폴더는 아무것도 못 해 풀 수 없었다
+  // v2.873(점검 B5-08): 일부만 고른 상태(─)에서 누르면 뺀다 — '더하기' 였을 때 상한(50대)에 걸린 폴더는 아무것도 못 해 풀 수 없었다
   return <input ref={ref} type="checkbox" checked={all} disabled={!ids.length} onChange={() => toggle(ids, on === 0)} title={on > 0 && !all ? '일부만 골랐습니다 — 누르면 이 폴더의 VM 을 뺍니다' : undefined} aria-label={`${label} 안의 복원 가능한 VM 모두`} />;
 }
 

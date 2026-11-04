@@ -191,7 +191,7 @@ test('③ 실행 — OTP 미등록 403 · 조회 밖 404 · 쓰기 밖 403 · �
   assert.match(r.j.batchId, /^rb-/);
   const cmds = D.cmds.slice(before).filter((c) => c.startsWith('restore '));
   assert.equal(cmds.length, 2);
-  assert.match(cmds[0], new RegExp(`jobid=${H('web', 100)},${H('web', 110)},${H('web', 130)} restorejob=PortalVmwareRestore pluginoptions="\\\\"python3:vcserver=vc-a.corp:dc=DC-A:folder=/web:vmname=web-01-r:config_file=/etc/bareos/vmware/vc-a.ini:restore_powerstate=off:restore_datastore=ds-a1\\\\"" all done yes$`));   // v2.872 B1-01
+  assert.match(cmds[0], new RegExp(`jobid=${H('web', 100)},${H('web', 110)},${H('web', 130)} restorejob=PortalVmwareRestore pluginoptions="\\\\"python3:vcserver=vc-a.corp:dc=DC-A:folder=/web:vmname=web-01-r:config_file=/etc/bareos/vmware/vc-a.ini:restore_powerstate=off:restore_datastore=ds-a1\\\\"" all done yes$`));   // v2.873 B1-01
   assert.ok(cmds.every((c) => !/\bselect\b/.test(c)));
   const wr = job('web').restores[0];
   assert.deepEqual([wr.batchId, wr.nic, wr.mode, wr.target.name], [r.j.batchId, 'disconnect', 'newVm', 'web-01-r']);

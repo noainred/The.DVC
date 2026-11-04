@@ -1,5 +1,5 @@
 /**
- * test/bareosRestoreUnknown2872.test.js — v2.872 점검 B5-01(high · 재현): 복원 명령을 보낸 뒤 회신이 끊긴 '결과 모름' 이 두 번째 복원을 부르지 않는다.
+ * test/bareosRestoreUnknown2873.test.js — v2.873 점검 B5-01(high · 재현): 복원 명령을 보낸 뒤 회신이 끊긴 '결과 모름' 이 두 번째 복원을 부르지 않는다.
  *  예전: 묶음 전 항목이 결과 모름이면 502 '한 대도 시작하지 못했습니다'(웹은 확정 실패로 보여 다시 누르게 했다) · 원장 · 이름 예약 없음 → 같은 요청 두 번째가 202(실측).
  *  ① 묶음: 504 + code 'unknown' + unknown 수 · 원장에 결과 모름 기록 · 같은 요청은 Director 에 닿기 전에 거부 · 새 VM 이름 예약 · 삭제 409
  *  ② 단건: 보낸 뒤 끊김 = 504 결과 모름(ops.restore 가 MID_COMMAND_CODES 를 unknown 으로) · 원장 기록 · 다시 보내면 409 unknown-held
@@ -11,7 +11,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'bareosunknown2872-'));
+const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'bareosunknown2873-'));
 process.env.CONFIG_DIR = tmp;
 process.env.DATA_SOURCE = 'mock';
 process.env.AUTH_ENABLED = 'true';

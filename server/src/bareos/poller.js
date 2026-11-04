@@ -132,7 +132,7 @@ function applyPoll({ d, base, rot, slice, mine, retired, live, due, seq, reconci
   _rot.set(d.id, rot + (r.attempted ?? r.rows.length));
   if (r.redisabled?.length && relayed(d, demo)) compensateRedisabled(d, r.redisabled, { dirOfJob, modeOk });
   let updated = 0;
-  // v2.872(점검 B2-06): 같은 jobid 를 기다리는 항목이 둘이면(재설치 뒤 옛 복원과 새 실행이 겹침) Map 이 하나를 접어 다른 쪽이 갱신되지 않았다 — 목록으로
+  // v2.873(점검 B2-06): 같은 jobid 를 기다리는 항목이 둘이면(재설치 뒤 옛 복원과 새 실행이 겹침) Map 이 하나를 접어 다른 쪽이 갱신되지 않았다 — 목록으로
   const byJobid = new Map();
   for (const w of slice) { const a = byJobid.get(w.jobid); if (a) a.push(w); else byJobid.set(w.jobid, [w]); }
   inBatch(() => {   // 원장 쓰기는 이 묶음 끝에 한 번(P2·I4)

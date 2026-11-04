@@ -138,7 +138,7 @@ async function restorePlanCheck(s) {
   const runs = row?.name ? await jobRuns(s, row.name) : [];
   const restoreJob = val('--restore-job') || 'PortalVmwareRestore';
   const pv = restorePreview({ row, runs, jobid: id, restoreJob, pluginName: val('--plugin') || 'python3', newName: val('--vm-name') || '', datastore: val('--datastore') || '',
-    base: { vcserver: val('--vcserver') || '', configFile: val('--config-file') || '', dc: val('--dc') || '', folder: val('--folder') || '' } });   // v2.872 B1-04 포탈과 같은 기본 키
+    base: { vcserver: val('--vcserver') || '', configFile: val('--config-file') || '', dc: val('--dc') || '', folder: val('--folder') || '' } });   // v2.873 B1-04 포탈과 같은 기본 키
   if (!pv.ok) { console.log(`  ✖ ${pv.issue}`); return; }
   console.log(`  ✔ 잡 ‘${pv.name}’ · FD ‘${pv.client}’ · 체인 ${pv.chain.length}개: ${pv.chain.join(', ')}`);
   console.log(`  ✔ 플러그인 옵션: ${pv.pluginOptions}`);

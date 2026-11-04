@@ -379,7 +379,7 @@ export async function reconfigVm(c, vmRef, specInnerXml, { label = 'VM 재구성
  * @returns {Promise<number>} 끊은 NIC 수
  */
 /**
- * v2.872(점검 B3-04 — 재현): 장치 목록을 믿을 수 있는가(순수). 빈 장치 XML 이면 allNicsDisconnected 가 true(NIC 0개)라 재구성 없이 켰다(fail-open) ·
+ * v2.873(점검 B3-04 — 재현): 장치 목록을 믿을 수 있는가(순수). 빈 장치 XML 이면 allNicsDisconnected 가 true(NIC 0개)라 재구성 없이 켰다(fail-open) ·
  *   모르는 NIC 종류(NIC_TYPE_RE 밖인데 macAddress 가 있는 장치)는 끊었는지 판정할 수 없다. 사유('' = 믿을 수 있음).
  */
 export function deviceListIssue(deviceXml) {

@@ -146,7 +146,7 @@ test('⑤ 반증 반영 — 빈 인벤토리면 미루고 회차를 차지하지
   const saved = JSON.parse(fs.readFileSync(path.join(tmp, 'bareos-rehearsal-state.json'), 'utf8'));
   assert.equal(saved.weeks.D9, today);
   const src = fs.readFileSync(new URL('../src/bareos/rehearsal.js', import.meta.url), 'utf8');
-  assert.match(src, /st\.weeks\[dirId\] = day;[^\n]*\n\s*if \(!saveState\(\)\) \{/, '회차 기록 바로 뒤에 파일 저장(보내기 전) — v2.872 B4-09 저장 실패면 보내지 않는다');
+  assert.match(src, /st\.weeks\[dirId\] = day;[^\n]*\n\s*if \(!saveState\(\)\) \{/, '회차 기록 바로 뒤에 파일 저장(보내기 전) — v2.873 B4-09 저장 실패면 보내지 않는다');
 });
 
 test('⑥ v2.863 정책에서 고른 데이터스토어 — 여유를 모르면 정기 검증이 보내지 않는다 · 인벤토리에 없으면 건너뜀 · 알면 판정을 지난다', async () => {
