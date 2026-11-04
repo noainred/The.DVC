@@ -154,7 +154,7 @@ export default function BareosPolicyTab({ bare = false, reloadKey = 0 } = {}) {
               </tbody>
             </STable>
           </div>
-        ) : <div className="muted" style={{ padding: '10px 14px', fontSize: 12.5 }}>범위 안에 Director 가 없습니다 — 설정 › 법인별 Director 와 매핑을 확인하세요.</div>}
+        ) : <div className="muted" style={{ padding: '10px 14px', fontSize: 12.5 }}>범위 안에 Director 가 없습니다 — 설정 › vCenter 관리 › Bareos 백업 서버 › Director 와 매핑을 확인하세요.</div>}
         {anyDenied && <div style={{ padding: '8px 14px', fontSize: 12, color: TONE.warn, borderTop: '1px solid var(--border-soft)' }}>‘권한 없음’ — 포탈 콘솔 Profile 의 Command ACL 에 show 가 없습니다. 자동 설정을 다시 돌리거나 Profile 에 show 를 더하면 Run 줄 · JobDefs · FileSet 이 보입니다(나머지 값은 그대로 수집됩니다).</div>}
       </Section>
 

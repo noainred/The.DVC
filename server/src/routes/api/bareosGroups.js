@@ -259,7 +259,7 @@ api.get('/tools/bareos-backup/groups/options', adminOnly, async (req, res) => {
   const vcenterId = String(req.query.vcenterId || '');
   if (bareosAccess(req.user, vcenterId, { write: false })) return res.status(404).json({ ok: false, reason: 'vCenter 를 찾을 수 없습니다.' });
   const si = siteInfo(vcenterId, effectiveSettings());
-  if (!si.site || !si.view) return res.status(409).json({ ok: false, reason: '이 vCenter 가 어느 법인 Director 에도 묶여 있지 않습니다 — 설정 › 법인별 Director 에서 먼저 묶으세요.' });
+  if (!si.site || !si.view) return res.status(409).json({ ok: false, reason: '이 vCenter 가 어느 법인 Director 에도 묶여 있지 않습니다 — 설정 › vCenter 관리 › Bareos 백업 서버 › Director 에서 먼저 묶으세요.' });
   try {
     const c = await readDirector({ demoOnly: isDemoGuest(req.user) }, si.view.id, 'catalog');
     res.json({ ok: true, storages: c.storages ?? null, pools: c.pools ?? null, errors: { ...(c.errors?.storages ? { storages: c.errors.storages } : {}), ...(c.errors?.pools ? { pools: c.errors.pools } : {}) } });
@@ -271,7 +271,7 @@ api.post('/tools/bareos-backup/groups', adminOnly, async (req, res) => {
   const vcenterId = String(req.body?.vcenterId || '');
   const v = precheck(req, res, vcenterId); if (!v) return;
   const si = siteInfo(vcenterId, effectiveSettings());
-  if (!si.site) return res.status(409).json({ ok: false, reason: '이 vCenter 가 어느 법인 Director 에도 묶여 있지 않습니다 — 설정 › 법인별 Director 에서 먼저 묶으세요.' });
+  if (!si.site) return res.status(409).json({ ok: false, reason: '이 vCenter 가 어느 법인 Director 에도 묶여 있지 않습니다 — 설정 › vCenter 관리 › Bareos 백업 서버 › Director 에서 먼저 묶으세요.' });
   const og = keepOtpGate(req, res, null, v, vcenterId); if (!og) return;
   const reg = await registerMissing(req, vcenterId, v.vmIds, v.schedule.level);
   if (!reg.members.length) return res.status(409).json({ ok: false, reason: '백업 대상으로 등록된 VM 이 하나도 없어 그룹을 만들지 않았습니다 — VM 별 사유를 보세요.', registered: reg.registered, excluded: reg.excluded });

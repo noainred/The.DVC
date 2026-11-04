@@ -86,7 +86,7 @@ describe('v2.841 ② 2단계 겹침 · 포탈 전용 콘솔 이름', () => {
     expect(t).toMatch(/서버에 접속하기 전에 막았습니다/);
     expect(t).toMatch(/만들 콘솔 이름/);
     expect(t).toMatch(/사전 점검을 다시 하세요/);
-    expect(t).not.toMatch(/설정 탭 기본값/);
+    expect(t).not.toMatch(/공통 기본값/);   // v2.878 문구가 새 자리(설정 › vCenter 관리 › Bareos 백업 서버 › 공통 기본값)로 바뀌었다
     expect(conflictText([{ type: 'pool', name: 'PortalVmwareFull', state: 'notfile' }])).toMatch(/일반 파일 아님.*전용 Pool/);
     expect(conflictText([])).toBe('');
     expect(t).not.toMatch(/`/);

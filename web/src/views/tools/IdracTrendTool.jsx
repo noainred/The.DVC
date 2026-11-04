@@ -504,7 +504,7 @@ function CsvModal({ hasHost = false, noGpu = false, fmt = 'csv', typeFilter = EM
     try { await downloadFile(`/admin/idrac/trend/export.${xlsx ? 'xlsx' : 'csv'}?${qs}`); onClose(); } catch (x) { setE(x); } finally { setBusy(false); }
   };
   return (
-    <Modal title={xlsx ? '📊 iDRAC 통합 추이 엑셀(차트) 내보내기' : '⬇ iDRAC 통합 추이 CSV 내보내기'} onClose={onClose} width={560}>
+    <Modal title={xlsx ? '📊 Infra Observability 엑셀(차트) 내보내기' : '⬇ Infra Observability CSV 내보내기'} onClose={onClose} width={560}>
       <div className="muted" style={{ fontSize: 12, fontWeight: 600, marginBottom: 6 }}>범위</div>
       <div className="flex" style={{ flexDirection: 'column', gap: 8, marginBottom: 14 }}>
         <button type="button" className={opt(scope, 'server')} style={{ textAlign: 'left', marginTop: 0 }} onClick={() => setScope('server')}>단일 서버 — {serverName}</button>

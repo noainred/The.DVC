@@ -264,7 +264,7 @@ export default function BareosGroupsTab({ d }) {
   if (!options.length) {
     return <div className="card" style={{ padding: 14, fontSize: 13 }}>Director 에 묶인 법인(vCenter)이 없습니다 — <b>설정</b> 탭에서 법인별 Director 를 추가하고 vCenter 를 묶은 뒤 그룹을 만들 수 있습니다.</div>;
   }
-  const sitesNote = tree && !tree.mapped ? `이 법인의 Director 매핑이 덜 됐습니다(${(tree.mappingMissing || []).join('·') || 'Director 없음'}) — 새 VM 은 등록되지 않습니다(설정 탭에서 채우세요).` : '';
+  const sitesNote = tree && !tree.mapped ? `이 법인의 Director 매핑이 덜 됐습니다(${(tree.mappingMissing || []).join('·') || 'Director 없음'}) — 새 VM 은 등록되지 않습니다(설정 › vCenter 관리 › Bareos 백업 서버에서 채우세요).` : '';
   const current = view.groupId ? groups.find((x) => x.id === view.groupId) || null : null;
 
   const banners = (

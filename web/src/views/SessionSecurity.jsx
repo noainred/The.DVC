@@ -186,7 +186,7 @@ export default function SessionSecurity() {
               <b>Bareos 자동 설정 — 쓰기 단계마다 본인 OTP 재확인</b>
             </label>
             <div className="muted" style={{ fontSize: 12, lineHeight: 1.7 }}>
-              Backup 현황 · Bareos › 설정 탭의 자동 설정 2단계(Director 리소스) · 3단계(FD 플러그인) · 5단계(FD INI)는 root SSH 로 법인 서버의 설정 파일을 씁니다.
+              설정 › vCenter 관리 › Bareos 백업 서버 › Director 의 자동 설정 2단계(Director 리소스) · 3단계(FD 플러그인) · 5단계(FD INI)는 root SSH 로 법인 서버의 설정 파일을 씁니다.
               켜 두면(기본) 단계마다 본인 OTP 6자리를 다시 확인합니다. 끄면 코드 입력만 건너뜁니다 — 실행은 여전히 OTP 를 등록한 관리자(전체 범위)만 할 수 있고,
               단계마다 SSH root 비밀번호가 필요합니다. 사전 점검 · 지문 읽기는 쓰기가 없어 원래 OTP 를 묻지 않고, 다른 작업(복원 · 보관 정리 · 업그레이드 등)의
               OTP 확인은 이 설정과 무관합니다. 로그인 인증이 꺼진 설치는 이 값과 무관하게 OTP 를 묻지 않습니다.

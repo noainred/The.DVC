@@ -56,7 +56,8 @@ describe('② Settings.jsx — 슈퍼 관리자 전용 항목', () => {
   });
 
   it('그룹 탭과 상단 탭이 같은 필터(visibleSubs)를 거친다 — 한쪽만 거르면 그룹 버튼이 숨긴 항목을 연다', () => {
-    expect(SETTINGS).toMatch(/const visibleSubs = \(\) => SUB\.filter\(\(s\) => !s\.superOnly \|\| isSuperAdminUser\(\)\)/);
+    // v2.878: Bareos 백업 서버의 show(도구 권한)도 같은 필터가 본다 — superOnly 판정은 그대로 앞에 있어야 한다
+    expect(SETTINGS).toMatch(/const visibleSubs = \(\) => SUB\.filter\(\(s\) => \(!s\.superOnly \|\| isSuperAdminUser\(\)\) && \(!s\.show \|\| s\.show\(\)\)\)/);
     expect(SETTINGS).toMatch(/const groupChildren = \(g\) => visibleSubs\(\)\.filter/);
     expect(SETTINGS).toMatch(/for \(const s of visibleSubs\(\)\)/);
     // SUB 를 직접 훑어 탭을 만드는 곳이 남아 있으면 superOnly 가 새는 길이 된다.
