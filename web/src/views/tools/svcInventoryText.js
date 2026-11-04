@@ -45,7 +45,8 @@ export function faultsView(f, available) {
 export function backupView(b, meta) {
   if (!meta?.used) return null;
   if (meta.unreadable) return { unknown: true };
-  return { ok: n0(b?.ok), fail: n0(b?.fail), none: n0(b?.none), unknown: n0(b?.unknown) };
+  // na = 이 법인에 Bareos Director 매핑이 없는 VM(해당 없음 — 5차 검토 M1). 잡 없음(none)·모름(unknown)과 섞지 않는다.
+  return { ok: n0(b?.ok), fail: n0(b?.fail), none: n0(b?.none), unknown: n0(b?.unknown), na: n0(b?.na) };
 }
 /** 소속 근거 요약 'pin 1 · 폴더 4 · 스캔 2'. */
 export function srcSummary(src) {

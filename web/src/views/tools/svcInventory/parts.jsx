@@ -68,7 +68,8 @@ export function BackupCell({ b, meta }) {
       {v.ok ? <span className="badge green" title="24시간 안에 성공">{v.ok}</span> : null}
       {v.fail ? <span className="badge red" title="실패 또는 24시간 넘게 성공 없음">{v.fail}</span> : null}
       {v.none ? <span className="badge gray" title="잡 없음">잡 없음 {v.none}</span> : null}
-      {!v.ok && !v.fail && !v.none ? <span className="muted">—</span> : null}
+      {v.unknown ? <span className="muted" title="Bareos 원장을 읽지 못한 VM">모름 {v.unknown}</span> : null}
+      {!v.ok && !v.fail && !v.none && !v.unknown ? (v.na ? <span className="muted" title="이 법인은 Bareos 를 쓰지 않습니다(Director 매핑 없음)">해당 없음</span> : <span className="muted">—</span>) : null}
     </span>
   );
 }
@@ -95,7 +96,7 @@ function powerDot(p) {
   if (p === false) return <span className="muted" title="꺼짐">○</span>;
   return <span className="muted" title="전원 상태를 모릅니다(엣지 보고 서버 등)">◌</span>;
 }
-const backupMember = (b) => (b === undefined ? <span className="muted">—</span> : b === null ? <span className="muted">모름</span>
+const backupMember = (b) => (b === undefined ? <span className="muted" title="이 법인은 Bareos 를 쓰지 않습니다(Director 매핑 없음)">해당 없음</span> : b === null ? <span className="muted">모름</span>
   : b === 'ok' ? <span className="badge green">성공</span> : b === 'fail' ? <span className="badge red">실패·지연</span> : <span className="badge gray">잡 없음</span>);
 
 /** 구성원 표 + 영향 호스트 표. query 가 바뀌면 다시 읽는다(늦게 온 이전 응답은 버린다). */
