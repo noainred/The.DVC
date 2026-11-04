@@ -1,4 +1,4 @@
-# 서비스 인벤토리(`servicemap/` · 라우트 `routes/api/svcInventory.js` · 도구 키 `svc-inventory`) 불변조건 — v2.886
+# 서비스 인벤토리(`servicemap/` · 라우트 `routes/api/svcInventory.js` · 도구 키 `svc-inventory`) 불변조건 — v2.887
 
 > 설계·결정 기록은 `docs/design/service-map/README.md`. 사용자 선택: 시안 2(전역 카탈로그 globalId + 커버리지 매트릭스) · 1+2단계 전부.
 
@@ -16,4 +16,4 @@
   유령 키는 그 법인을 못 읽었거나 베어메탈 출처를 못 읽었으면 **판정 보류**로 따로 둔다(지우지 않는다).
 - **키**: VM = `iu:<vcenterId>:<instanceUuid>`(없으면 `vm:<moref id>`) · 베어메탈 = `st:<서비스태그>`(없으면 `fl:<fleetId sha1 16자>` — 주소 원문을 키에 싣지 않는다).
 - **의존 방향**: 도메인 모듈(`servicemap/*`)은 `routes/` 를 import 하지 않는다(arch 테스트) — 스냅샷·fleet·장애·백업 입력 수집은 라우트 층에서 한다.
-- 회귀: `server/test/svcInventory2886.test.js` · 웹 `web/src/views/tools/svcInventoryText.test.js`.
+- 회귀: `server/test/svcInventory2887.test.js` · 웹 `web/src/views/tools/svcInventoryText.test.js`.

@@ -164,6 +164,11 @@ export const ROUTE_GATE_ALLOW = Object.freeze({
   'POST /api/tools/bareos-backup/logs/bulk': 'bareosAccess(조회) — 항목마다 범위 밖은 없는 대상과 같은 답 · 읽기 전용 첫 오류 줄 조회(v2.872 통합 에러 로그 묶음 로그)',
   'POST /api/tools/bareos-backup/restore-check/bulk': 'bulkRestoreGate → bareosAccess(쓰기) — 항목마다 조회 밖 제외 · 쓰기 밖 사유 · Director · OTP 안 씀(v2.861)',
   'POST /api/tools/bareos-backup/restore/bulk': 'bulkRestoreGate → bareosAccess — 조회 밖 404 → 쓰기 밖 403 → 판정 400 → 본인 OTP(v2.861)',
+  // 재해 복구 2차(복구 순서 · bareos/drRunner.js) — drRunGate · drRunAccess 가 핸들러 안에서 그 vCenter 쓰기 범위를 판정한다
+  'POST /api/tools/bareos-backup/dr/runs/check': 'drRunGate → bareosAccess(쓰기) — 조회 밖 404 → 쓰기 밖 403 · 항목마다 그 vCenter 대상만 · OTP 안 씀(재해 복구 2차)',
+  'POST /api/tools/bareos-backup/dr/runs': 'drRunGate → bareosAccess — 조회 밖 404 → 쓰기 밖 403 → 판정 400 → 진행 중 409 → 본인 OTP(재해 복구 2차)',
+  'POST /api/tools/bareos-backup/dr/runs/:id/stop': 'drRunAccess → bareosAccess — 회차의 vCenter 쓰기 범위(조회 밖 404 → 쓰기 밖 403 · 재해 복구 2차)',
+  'POST /api/tools/bareos-backup/dr/runs/:id/resume': 'drRunAccess → bareosAccess — 회차의 vCenter 쓰기 범위 → 멈춤 아님 409 → 본인 OTP(재해 복구 2차)',
   // v2.830 백업 그룹(routes/api/bareosGroups.js) — 핸들러 안 bareosAccess(조회 밖 404 → 쓰기 밖 403)
   'POST /api/tools/bareos-backup/groups': 'bareosAccess — 대상 vCenter 조회 404 → 쓰기 403 · VM 이 그 vCenter 인벤토리(또는 원장)인지 membersPlan(v2.830)',
   'PUT /api/tools/bareos-backup/groups/:id': 'bareosAccess — 그룹의 vCenter 쓰기 범위 · updatedAt 대조(v2.830)',

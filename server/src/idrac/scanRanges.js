@@ -191,7 +191,7 @@ export function scanRangesForDatacenter(datacenterId) {
 }
 
 /**
- * v2.886(서비스 인벤토리 — 4차 검토 반증 7): 엔트리 **라벨(service)만** 바꾼다. saveScanRanges 를 쓰지 않는 이유 —
+ * v2.887(서비스 인벤토리 — 4차 검토 반증 7): 엔트리 **라벨(service)만** 바꾼다. saveScanRanges 를 쓰지 않는 이유 —
  *   그 함수는 모르는 id 에 새 엔트리를 만들고(빈 대역·계정) datacenterId 를 요청값으로 옮긴다. 여기서는
  *   ① 엔트리가 있어야 하고(없으면 404) ② 엔트리의 datacenterId 가 호출부가 준 값과 같아야 하며(법인 축 검사는 호출부)
  *   ③ 이미 라벨이 있으면 덮지 않는다(설계: '라벨 없는 엔트리에') ④ service 외 필드는 손대지 않는다 — 대역·계정·agent 가

@@ -2742,7 +2742,7 @@ tr.row-sel > td { background: rgba(59, 130, 246, .10); }
 .iss-links .iss-mini-act { margin-left: 0; }
 .iss-children-add .input.iss-link-key { flex: 0 1 140px; }
 
-/* v2.886 서비스 인벤토리 — 좌 목록(트리·전역 서비스) + 우 내용. 1100px 미만은 세로로 쌓는다(그리드 자식 min-width:0). */
+/* v2.887 서비스 인벤토리 — 좌 목록(트리·전역 서비스) + 우 내용. 1100px 미만은 세로로 쌓는다(그리드 자식 min-width:0). */
 .svcinv-layout { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; min-width: 0; align-items: start; }
 .svcinv-layout > * { min-width: 0; }
 @media (min-width: 1100px) { .svcinv-layout { grid-template-columns: 228px minmax(0, 1fr); } }

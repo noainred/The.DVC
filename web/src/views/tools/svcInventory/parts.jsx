@@ -1,5 +1,5 @@
 /**
- * 서비스 인벤토리 화면 부품(v2.886) — 칸 표시·구성원/영향 호스트 패널. 판정은 서버가 하고 여기는 그리기만 한다.
+ * 서비스 인벤토리 화면 부품(v2.887) — 칸 표시·구성원/영향 호스트 패널. 판정은 서버가 하고 여기는 그리기만 한다.
  */
 import React, { useEffect, useRef, useState } from 'react';
 import { fetchJson } from '../../../api.js';

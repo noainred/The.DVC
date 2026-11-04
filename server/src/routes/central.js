@@ -660,7 +660,7 @@ const INV_TEXT_KEYS = ['id', 'name', 'host', 'cluster', 'datacenter', 'type', 'v
   'hostName', 'serviceTag', 'mgmtIp'];
 /** v2.727(감사 D-05): 글자가 아니면 뜻이 없는 필드(IP 는 수가 아니다) — 문자열 외에는 null 로 버린다. */
 // v2.820: VM 의 정확한 위치(vcenter/vmPlacement.js — Bareos 플러그인이 이 글자로 VM 을 찾는다) — 글자가 아니면 null(모름).
-// v2.886: instanceUuid(서비스 인벤토리 VM 키)도 글자만 — 엣지가 객체를 보내면 null(읽지 못함). 길이는 아래 문자열 상한이 자른다.
+// v2.887: instanceUuid(서비스 인벤토리 VM 키)도 글자만 — 엣지가 객체를 보내면 null(읽지 못함). 길이는 아래 문자열 상한이 자른다.
 const INV_STR_ONLY_KEYS = ['mgmtIp', 'vcDcPath', 'folderPath', 'instanceUuid'];
 /**
  * 롤업·화면이 수로 계산하는 인벤토리 필드(v2.605 CEN2605-01) — 호스트·VM·DS·네트워크의 수치 필드 합집합.

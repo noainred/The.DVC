@@ -148,7 +148,7 @@ export function setEdgeFleet(agent, baremetal, generatedAt, { verified = true, v
     watts: null,
     vcenterId: vcOf(b),
     source: capStr(b.source || '', 32),
-    // v2.886(서비스 인벤토리): 엣지 등록부의 중앙 스캔 엔트리 id — 글자만(객체·수는 빈 값), 128자 상한. 구버전 엣지는 없다(빈 값).
+    // v2.887(서비스 인벤토리): 엣지 등록부의 중앙 스캔 엔트리 id — 글자만(객체·수는 빈 값), 128자 상한. 구버전 엣지는 없다(빈 값).
     scanRangeId: typeof b.scanRangeId === 'string' ? capStr(b.scanRangeId, 128) : '',
   }));
   if (omitted) console.warn(`[central-fleet] '${a}' 베어메탈 ${valid.length}대 중 ${omitted}대를 상한으로 받지 않았습니다(에이전트당 ${PER_AGENT_MAX} · 전체 ${TOTAL_MAX}${verified ? '' : ` · 미검증 이름 합 ${UNVERIFIED_TOTAL_MAX}`}).`);
