@@ -274,7 +274,7 @@
 | `vmseries` | 디렉터리 | 실시간 스파이크 저장소. **vCenter 마다 독립 파일**(v2.510, 사용자 요구 | ✅ | ✅ | ✅ | vmseries/db.js |
 | `vmseries.json` | 설정 | 실시간 스파이크 수집 설정(v2.510). env 기본값 + CONFIG_DIR/vmseries.json 오버레이. | ✅ | ✅ | ✅ | vmseries/settings.js |
 | `vmware-portal-release` | 디렉터리 | RedHat 계열의 /etc/redhat-release 처럼, CONFIG_DIR에 현재 포탈 버전을 한 줄로 명시하는 |  |  |  | util/releaseFile.js |
-| `wiki-user.json` | 설정 | 위키 사용자별 즐겨찾기(50) · 최근 본 문서(20) · 문서 조회 수(최근 31일 — 사람 · 날 · 문서마다 1회)(v2.885 — 사용자 데이터. 비밀 없음) |  | ✅ |  | wiki/userState.js |
+| `wiki-user.json` | 설정 | 위키 사용자별 즐겨찾기(50) · 최근 본 문서(20) · 문서 조회 수(최근 31일 — 사람 · 날 · 문서마다 1회)(v2.886 — 사용자 데이터. 비밀 없음) |  | ✅ |  | wiki/userState.js |
 | `wiki.json` | 설정 | 위키 스페이스 설정(대문 글 · 공지 · 바로 가기 · 읽기 전용) · 문서 · 판 · 댓글 · 지켜보는 사람(v2.881 — 로그인 사용자가 쓰는 사용자 데이터. 비밀 없음) |  | ✅ |  | wiki/store.js |
 | `xfer-speed-schedule-state.json` | 설정 | 법인 간 전송 속도 예약 실행 처리 기록(상태, v2.735) | ✅ | ✅ | ✅ | xferspeed/poller.js |
 | `xfer-speed-settings.json` | 설정 | 법인 간 전송 속도 측정 설정(v2.735 — 자동 측정 켬·간격 실행·예약 실행·제외 엣지) | ✅ | ✅ | ✅ | xferspeed/settings.js |

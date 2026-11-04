@@ -104,7 +104,7 @@ function lineOf(ev, who) {
       const what = d == null ? '기한 확인 필요' : d < 0 ? '기한이 지났습니다' : d === 0 ? '오늘이 기한입니다' : '내일이 기한입니다';
       return `${head} — ${what}(${dayKey(i.dueAt) || '날짜 모름'})`;
     }
-    // v2.885 SLA 초과 — 단계 · 목표 · 흐른 시간(보류 시간 제외)
+    // v2.886 SLA 초과 — 단계 · 목표 · 흐른 시간(보류 시간 제외)
     case 'sla': return `${head} — SLA ${ev.kind === 'respond' ? '응답' : '해결'} 목표(${minutesText(ev.targetMin)})를 넘었습니다 · 흐른 시간 ${minutesText(ev.usedMin)}(보류 제외)`;
     default: return head;
   }
@@ -152,7 +152,7 @@ export function recipientsOf(ev, settings = loadIssueSettings(), viewers = issue
     const known = new Set([...viewers.localNames, ...(settings.notify.people || []).map((p) => p.username), ...parts]);
     for (const x of [...parts, ...resolveMentions(ev.mentions, known)]) set.add(x);
   } else if (ev.type === 'due') { if (i.assignee) set.add(i.assignee); }
-  else if (ev.type === 'sla') { for (const x of [i.assignee, i.reporter]) if (x) set.add(x); } // v2.885 담당자 · 보고자(+ 팀 채팅)
+  else if (ev.type === 'sla') { for (const x of [i.assignee, i.reporter]) if (x) set.add(x); } // v2.886 담당자 · 보고자(+ 팀 채팅)
   set.delete(ev.actor);
   const out = [];
   for (const u of set) {
@@ -218,7 +218,7 @@ export function queueIssueEvent(ev) {
     chatLines.push(chatSafe(lineOf(ev, '')));
     if (chatLines.length > LINES_MAX) { chatExtra += chatLines.length - LINES_MAX; chatLines = chatLines.slice(-LINES_MAX); }
   }
-  if ((ev.type === 'due' || ev.type === 'sla') && ev.dueDay && ev.issue?.key) pendingDue.set(ev.markKey || ev.issue.key, ev.dueDay); // v2.885 SLA 는 'sla:<키>:<단계>'
+  if ((ev.type === 'due' || ev.type === 'sla') && ev.dueDay && ev.issue?.key) pendingDue.set(ev.markKey || ev.issue.key, ev.dueDay); // v2.886 SLA 는 'sla:<키>:<단계>'
   if (who.length || settings.notify.chat || pendingDue.size) schedule();
   return who.length;
 }
@@ -335,7 +335,7 @@ export function scanDue(now = Date.now()) {
 }
 
 /**
- * v2.885 SLA 초과 알림 — 열린 이슈의 응답 · 해결 단계가 목표를 넘으면 **단계마다 한 번** 담당자 · 보고자(+ 팀 채팅)에게.
+ * v2.886 SLA 초과 알림 — 열린 이슈의 응답 · 해결 단계가 목표를 넘으면 **단계마다 한 번** 담당자 · 보고자(+ 팀 채팅)에게.
  * 기록 'sla:<키>:<단계>' 는 보낸 뒤에 쓰고(기한 알림과 같은 규칙), 더는 넘은 상태가 아니면(완료 · 우선순위 변경 · 목표 변경) 지운다 —
  * 다시 열려 또 넘으면 다시 알린다. SLA · 알림 · 이 이벤트 중 하나라도 꺼져 있으면 보내지 않는다(기록도 그대로 둔다).
  */
@@ -484,7 +484,7 @@ export function startIssueNotify() {
   import('../wiki/store.js').then(({ onWikiEvent }) => onWikiEvent((ev) => queueWikiEvent(ev))).catch((e) => console.warn(`[issues] 위키 알림 연결 실패: ${String(e?.message || e).slice(0, 160)}`));
   const scan = () => {
     try { scanDue(); } catch (e) { console.warn(`[issues] 기한 알림 검사 실패: ${e?.message || e}`); }
-    try { scanSla(); } catch (e) { console.warn(`[issues] SLA 알림 검사 실패: ${String(e?.message || e).slice(0, 160)}`); } // v2.885
+    try { scanSla(); } catch (e) { console.warn(`[issues] SLA 알림 검사 실패: ${String(e?.message || e).slice(0, 160)}`); } // v2.886
     scanWeeklyFilters().catch((e) => console.warn(`[issues] 필터 주간 메일 실패: ${String(e?.message || e).slice(0, 160)}`)); // v2.883
   };
   dueTimer = setInterval(scan, DUE_SCAN_MS);
