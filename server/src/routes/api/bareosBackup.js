@@ -41,6 +41,7 @@ import { finishRestores } from '../../bareos/restoreFinish.js';
 import { savePolicy, policyLoadError, rehearsalStatus, runNow as runRehearsalNow, normPolicy, rehearsalBusy } from '../../bareos/rehearsal.js';
 import { loadDigest, saveDigest, digestLoadError, digestStatus, sendDigestNow, normDigest } from '../../bareos/digest.js';
 import { osFields } from '../../inventory/osKind.js';
+import { vmGpuMark } from '../../gpu/vgpuProfile.js';
 import { numOrNull } from '../../util/numOrNull.js';
 import { summarizeRegistryError } from '../../util/registryCore.js';
 import { normLevel } from '../../bareos/names.js';
@@ -133,8 +134,9 @@ const viewJob = (j, vmById, settings) => {
   // v2.834: 게스트 OS(인벤토리 기준 — 인벤토리에 없는 VM 은 모름)
   // v2.861 남은 스냅샷(인벤토리 — 못 읽으면 null · 0 이 아니다): 백업 실패 뒤 남은 스냅샷이 다음 백업을 막는다(bareos-users · PR #1484)
   // v2.866 복원 › 폴더 표: 전원 · 용량(인벤토리 — 인벤토리에 없거나 못 읽으면 null · 0 이 아니다)
+  // v2.873 vGPU · PCI 패스스루 장치(인벤토리 vm.gpu — 켜진 상태 스냅샷 불가 표지). null = 장치를 모르거나 없음(없다고 단정하지 않는다)
   return {
-    ...j, directorId: jobDirectorId(j, settings), ...osFields(vm), snapshotCount: vm ? numOrNull(vm.snapshotCount) : null,
+    ...j, directorId: jobDirectorId(j, settings), ...osFields(vm), snapshotCount: vm ? numOrNull(vm.snapshotCount) : null, gpuDev: vmGpuMark(vm),
     powerState: vm && typeof vm.powerState === 'string' ? vm.powerState.slice(0, 32) : null, storageGB: vm ? numOrNull(vm.storageGB) : null,
     ...(drift ? { drift } : {}),
   };
@@ -421,7 +423,7 @@ api.get('/tools/bareos-backup', adminOnly, (req, res) => memoJson(req, res, 'bar
  *    역할 · 관리자 판본(isAdminDetailUser — Director 주소·콘솔·오류 원문을 보이는가) · 데모 모드.
  *  · 원장 rev(대상 추가·삭제·실행 결과·대기 — 폴러·엣지 회신이 반영할 때마다 오른다) · 설정 rev(Director·매핑·기본값) · 그룹 rev · 정책 수집 rev · 백업 표시 rev ·
  *    손상 표지(원장·설정·그룹·표시) · 폴러 at·busy 와 Director 별 상태(엣지 회신은 at 없이 ok·relay 만 바꾼다) · 인증 정지(수동 연결 시험이 폴러 없이 바꾼다).
- *  · 스냅샷 세대(memoJson 이 앞에 붙인다 — VM 이름·위치 drift · 게스트 OS · 그룹 다음 회차 시각). 이 밖의 값이 바뀌어도 늦어야 스냅샷 한 주기다.
+ *  · 스냅샷 세대(memoJson 이 앞에 붙인다 — VM 이름·위치 drift · 게스트 OS · GPU 장치(v2.873) · 그룹 다음 회차 시각). 이 밖의 값이 바뀌어도 늦어야 스냅샷 한 주기다.
  */
 function bareosListKey(req) {
   const snap = store.get();
@@ -832,7 +834,7 @@ api.get('/tools/bareos-backup/vm-candidates', adminOnly, (req, res) => {
   const all = (store.get()?.vms || []).filter((v) => String(v.vcenterId) === vcenterId);
   const rows = all.slice().sort((x, y) => String(x.name).localeCompare(String(y.name))).slice(0, MAX_CANDIDATES).map((v) => {
     const el = eligibility(v, settings);
-    return { id: v.id, name: v.name, powerState: v.powerState, template: !!v.template, dc: v.vcDcPath ?? null, folder: v.folderPath ?? null, ...osFields(v), eligible: el.ok, reason: el.ok ? '' : el.reason, registered: registered.has(v.id) };
+    return { id: v.id, name: v.name, powerState: v.powerState, template: !!v.template, dc: v.vcDcPath ?? null, folder: v.folderPath ?? null, ...osFields(v), gpuDev: vmGpuMark(v), eligible: el.ok, reason: el.ok ? '' : el.reason, registered: registered.has(v.id) };
   });
   const site = settings.sites.find((s) => s.vcenterId === vcenterId);
   const dir = site ? directorById(site.directorId, settings) : null;
