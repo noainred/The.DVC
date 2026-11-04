@@ -26,7 +26,7 @@ import { store } from '../../store.js';
 import { fullScopeOnlyWith } from '../admin/shared.js';
 import {
   listIssues, getIssue, createIssue, updateIssue, setStatus, assignIssue, bulkAssign, setBlocked, setWatch, addComment, deleteComment, deleteIssue, setProgress, activityFeed,
-  bulkEdit, moveSprintIssues, sprintBoard, queryContext,
+  bulkEdit, moveSprintIssues, sprintBoard, queryContext, addLink, removeLink, LINK_TYPES,
   issueStats, knownNames, issuesSeq, waitIssuesPersist, issuesPersist, PERSIST_WAIT_MS,
   LIMITS, STATUSES, TYPES, PRIORITIES, KEY_RE, ID_RE, RECENT_DONE_MS, KEY_PREFIX,
 } from '../../issues/store.js';
@@ -40,7 +40,7 @@ import {
 import { PART_KIND_LABEL, SCOPE_LABEL } from '../../partfault/types.js';
 import { listCollectors } from '../../collector/registry.js';
 import { listSprints, createSprint, updateSprint, closeSprint, getSprint, sprintsLoadError, SPRINT_LIMITS } from '../../issues/sprints.js';
-import { listFilters, createFilter, updateFilter, deleteFilter, filtersLoadError, FILTER_LIMITS } from '../../issues/filters.js';
+import { listFilters, createFilter, updateFilter, deleteFilter, filtersLoadError, setSubscription, FILTER_LIMITS } from '../../issues/filters.js';
 import { QUERY_LIMITS, FIELDS as QUERY_FIELDS, ORDERABLE as QUERY_ORDERABLE } from '../../issues/query.js';
 import { issueDocIndex } from '../../wiki/store.js';
 
@@ -158,7 +158,7 @@ export function registerIssues(api) {
       components: write ? loadIssueSettings().autoAssign.components.map((c) => c.name) : [],
       persist: issuesPersist({ admin: isAdmin(req) }),
       // v2.882 스프린트 · 검색식 · 저장 필터
-      canSprints: write && !access.read && !access.write, canShareFilters: write && !access.read && !access.write, canFilters: write,
+      canSprints: write && !access.read && !access.write, linkTypes: LINK_TYPES, canShareFilters: write && !access.read && !access.write, canFilters: write,
       queryLimits: QUERY_LIMITS, queryFields: Object.keys(QUERY_FIELDS), queryOrderable: QUERY_ORDERABLE, sprintLimits: SPRINT_LIMITS, filterLimits: FILTER_LIMITS,
     });
   });
@@ -311,6 +311,11 @@ export function registerIssues(api) {
     if (!canWrite(req)) return res.status(403).json({ ok: false, reason: '데모 계정은 필터를 고칠 수 없습니다' });
     try { res.json({ ok: true, filter: updateFilter(str(req.params.id).slice(0, 20), req.body || {}, userOf(req), { canShare: canShareFilters(req) }) }); } catch (e) { fail(res, e, next); }
   });
+  // v2.883 주간 메일 구독 — 볼 수 있는 필터(내 것 · 공유)만. 메일은 받는 사람의 범위로 다시 거른다(notify.js scanWeeklyFilters).
+  api.post('/issues/filters/:id/subscribe', writers, (req, res, next) => {
+    if (!canWrite(req)) return res.status(403).json({ ok: false, reason: '데모 계정은 구독할 수 없습니다' });
+    try { res.json({ ok: true, filter: setSubscription(str(req.params.id).slice(0, 20), userOf(req), req.body?.on === true ? true : req.body?.on === false ? false : null, { isMod: isMod(req) }) }); } catch (e) { fail(res, e, next); }
+  });
   api.delete('/issues/filters/:id', writers, (req, res, next) => {
     if (!canWrite(req)) return res.status(403).json({ ok: false, reason: '데모 계정은 필터를 지울 수 없습니다' });
     try { res.json({ ok: true, ...deleteFilter(str(req.params.id).slice(0, 20), userOf(req), { isMod: isMod(req) }) }); } catch (e) { fail(res, e, next); }
@@ -358,8 +363,25 @@ export function registerIssues(api) {
   api.post('/issues/:key/status', writers, async (req, res, next) => {
     if (!KEY_RE.test(req.params.key)) return badKey(res);
     try {
-      const x = setStatus(req.params.key, req.body?.status, userOf(req), { access: accessOf(req), closeChildren: req.body?.closeChildren === true });
+      const x = setStatus(req.params.key, req.body?.status, userOf(req), { access: accessOf(req), closeChildren: req.body?.closeChildren === true, ignoreBlockers: req.body?.ignoreBlockers === true });
       audit(req, 'issue.status', x.key, x.status);
+      res.json({ ok: true, issue: x, persist: await persistView(req) });
+    } catch (e) { fail(res, e, next, req); }
+  });
+  // v2.883 연결(차단함 · 관련 · 중복) — 쓰기 계정. 더하기는 이 이슈의 쓰기 범위 + 상대 조회 범위, 빼기는 저장된 쪽 이슈의 쓰기 범위.
+  api.post('/issues/:key/links', writers, async (req, res, next) => {
+    if (!KEY_RE.test(req.params.key)) return badKey(res);
+    try {
+      const x = addLink(req.params.key, req.body || {}, userOf(req), { access: accessOf(req) });
+      audit(req, 'issue.link', x.key, `${str(req.body?.type).slice(0, 20)} ${str(req.body?.key).slice(0, 20)}`);
+      res.json({ ok: true, issue: x, persist: await persistView(req) });
+    } catch (e) { fail(res, e, next, req); }
+  });
+  api.post('/issues/:key/links/remove', writers, async (req, res, next) => {
+    if (!KEY_RE.test(req.params.key)) return badKey(res);
+    try {
+      const x = removeLink(req.params.key, req.body || {}, userOf(req), { access: accessOf(req) });
+      audit(req, 'issue.unlink', x.key, `${str(req.body?.type).slice(0, 20)} ${str(req.body?.key).slice(0, 20)}`);
       res.json({ ok: true, issue: x, persist: await persistView(req) });
     } catch (e) { fail(res, e, next, req); }
   });

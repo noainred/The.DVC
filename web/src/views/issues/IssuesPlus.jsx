@@ -12,7 +12,7 @@ import { Avatar, TypeTag, PrioTag, StatusChip, Due, ProgressLine } from './issue
 import {
   STATUS_ORDER, STATUS_TEXT, makeLatest, saveFailText, persistNote, peopleOptions, vcName, vcenterOptions, dateText, timeText, parseLabels, LOAD_CAP, loadPct,
   QUICK_FILTERS, QUERY_FIELD_TEXT, chipText, removeChip, errorSegments, SPRINT_STATE_TEXT, sprintRangeText, sprintName, sprintOptions, burnPoints, childText,
-  epicOptions, colorIndexOf, progressOf,
+  epicOptions, colorIndexOf, progressOf, groupLinks, LINK_ADD_TEXT,
 } from './issueText.js';
 
 function useLatest() {
@@ -176,6 +176,50 @@ export function ChildrenBox({ it, meta, canWrite, busy, act, onOpen }) {
         </div>
       )}
       {!isEpic && <div className="muted iss-small">계층은 두 단계만 — 에픽 › 이슈 › 하위 작업. 하위 작업 아래에는 만들 수 없고, 남은 하위 작업이 있으면 상위를 ‘완료’ 로 바꿀 때 묻습니다.</div>}
+    </div>
+  );
+}
+
+/* ───────────── 상세 — 연결(v2.883 · 시안 ⑩ 차단함/차단됨/관련/중복) ───────────── */
+export function LinksBox({ it, meta, canWrite, busy, act, onOpen }) {
+  const [type, setType] = useState('relates');
+  const [key, setKey] = useState('');
+  const groups = groupLinks(it.links);
+  const n = (it.links || []).length;
+  const keyOk = /^ISS-\d{1,9}$/i.test(key.trim());
+  return (
+    <div className="iss-children iss-links">
+      <div className="iss-children-head">
+        <b>연결 · {n}</b>
+        {it.blockedOpen > 0 && <span className="iss-chip s-linkblock">차단됨 {it.blockedOpen}</span>}
+        <span className="muted iss-small">막는 이슈가 열린 채로 완료하면 묻습니다 · 볼 수 없는 법인의 이슈와의 연결은 보이지 않습니다.</span>
+      </div>
+      {groups.length === 0 && <div className="muted iss-small">연결된 이슈가 없습니다.</div>}
+      {groups.map((g) => (
+        <div key={g.type} className="iss-link-group">
+          <span className="iss-link-label">{g.label}</span>
+          {g.items.map((l) => (
+            <span key={`${l.type}-${l.key}`} className={`iss-link-item${l.open ? '' : ' done'}`}>
+              <button type="button" className="iss-link" onClick={() => onOpen(l.key)}>{l.key}</button>
+              <span className="iss-link-title">{l.title}</span>
+              <StatusChip s={l.status} />
+              {canWrite && (
+                <button type="button" className="iss-mini-act" disabled={busy} title={l.own ? '연결 빼기' : `${l.key} 쪽에서 만든 연결 — 그 이슈의 쓰기 범위가 있어야 뺄 수 있습니다`}
+                  onClick={() => act(() => postJson(`/issues/${it.key}/links/remove`, { type: l.type, key: l.key }), '연결을 뺐습니다.')}>빼기</button>
+              )}
+            </span>
+          ))}
+        </div>
+      ))}
+      {canWrite && (
+        <div className="iss-children-add">
+          <Select className="select" value={type} onChange={(e) => setType(e.target.value)} aria-label="연결 종류" sort={false}>
+            {Object.entries(LINK_ADD_TEXT).map(([t, label]) => <option key={t} value={t}>{label}</option>)}
+          </Select>
+          <input className="input iss-link-key" value={key} onChange={(e) => setKey(e.target.value.toUpperCase())} maxLength={14} placeholder="ISS-번호" aria-label="연결할 이슈 키" />
+          <button className="btn" disabled={busy || !keyOk} onClick={() => act(() => postJson(`/issues/${it.key}/links`, { type, key: key.trim() }), '연결했습니다.').then((ok) => { if (ok) setKey(''); })}>+ 연결</button>
+        </div>
+      )}
     </div>
   );
 }
@@ -543,6 +587,7 @@ export function FiltersView({ meta, onOpen, onWritten }) {
       let r;
       if (mode === 'update' && cur?.id) r = await putJson(`/issues/filters/${cur.id}`, { query: q.trim() });
       else if (mode === 'share' && cur?.id) r = await putJson(`/issues/filters/${cur.id}`, { shared: !cur.shared });
+      else if (mode === 'subscribe' && cur?.id) r = await postJson(`/issues/filters/${cur.id}/subscribe`, { on: !cur.subscribed });
       else if (mode === 'delete' && cur?.id) { if (!window.confirm(`필터 ‘${cur.name}’ 를 지울까요?`)) return; r = await delJson(`/issues/filters/${cur.id}`); }
       else {
         const name = window.prompt('필터 이름', cur?.name ? `${cur.name} 사본` : '');
@@ -550,7 +595,7 @@ export function FiltersView({ meta, onOpen, onWritten }) {
         r = await postJson('/issues/filters', { name, query: q.trim() });
       }
       if (r?.ok) {
-        setMsg(mode === 'delete' ? '필터를 지웠습니다.' : '필터를 저장했습니다.');
+        setMsg(mode === 'delete' ? '필터를 지웠습니다.' : mode === 'subscribe' ? (r.filter?.subscribed ? '주간 메일을 구독했습니다 — 월요일 09:00(포탈 날짜)에 보냅니다. 이슈 › 설정 › 알림에 내 메일 주소가 있어야 하고 알림이 켜져 있어야 합니다.' : '주간 메일 구독을 껐습니다.') : '필터를 저장했습니다.');
         setCur(mode === 'delete' ? null : r.filter);
         loadFilters();
       } else setMsg(fmtFail(r));
@@ -571,11 +616,11 @@ export function FiltersView({ meta, onOpen, onWritten }) {
         </div>
         <div className="iss-filter-group"><b>내 필터 · {mineF.length}</b>
           {mineF.length === 0 && <span className="muted iss-small">{meta.canFilters ? '검색식을 쓰고 ‘다른 이름으로 저장’ 하세요.' : '필터 저장은 운영자 · 관리자만 합니다.'}</span>}
-          {mineF.map((f) => <button key={f.id} type="button" className={`iss-filter-item${cur?.id === f.id ? ' on' : ''}`} onClick={() => pick(f)}>{f.shared ? '★ ' : ''}{f.name}</button>)}
+          {mineF.map((f) => <button key={f.id} type="button" className={`iss-filter-item${cur?.id === f.id ? ' on' : ''}`} onClick={() => pick(f)}>{f.shared ? '★ ' : ''}{f.name}{f.subscribed ? ' ✉' : ''}</button>)}
         </div>
         <div className="iss-filter-group"><b>공유 필터 · {sharedF.length}</b>
           {sharedF.length === 0 && <span className="muted iss-small">전체 범위 운영자 · 관리자가 공유한 필터가 여기에 보입니다.</span>}
-          {sharedF.map((f) => <button key={f.id} type="button" className={`iss-filter-item${cur?.id === f.id ? ' on' : ''}`} onClick={() => pick(f)}>{f.name} <span className="muted iss-small">{f.owner}</span></button>)}
+          {sharedF.map((f) => <button key={f.id} type="button" className={`iss-filter-item${cur?.id === f.id ? ' on' : ''}`} onClick={() => pick(f)}>{f.name}{f.subscribed ? ' ✉' : ''} <span className="muted iss-small">{f.owner}</span></button>)}
         </div>
         <div className="muted iss-small">필터는 검색식 한 줄을 저장한 것입니다. 범위 계정이 공유 필터를 열면 자기 범위로 다시 걸러 보입니다.</div>
       </aside>
@@ -588,6 +633,7 @@ export function FiltersView({ meta, onOpen, onWritten }) {
             {meta.canFilters && cur?.editable && <button className="btn" onClick={() => fsave('update')} disabled={cur.query === q.trim()}>저장</button>}
             {meta.canFilters && <button className="btn" onClick={() => fsave('new')}>다른 이름으로 저장</button>}
             {meta.canShareFilters && cur?.editable && <button className="btn" onClick={() => fsave('share')}>{cur.shared ? '공유 끄기' : '공유'}</button>}
+            {meta.canFilters && cur?.id && <button className="btn" onClick={() => fsave('subscribe')} title="월요일 09:00(포탈 날짜)에 이 필터 결과를 메일로 — 이슈 › 설정 › 알림의 내 메일 주소로 · 내가 볼 수 있는 이슈만">{cur.subscribed ? '주간 메일 끄기' : '주간 메일 구독'}</button>}
             {cur?.deletable && <button className="btn" onClick={() => fsave('delete')}>지우기</button>}
           </div>
           <form className="iss-query" onSubmit={submit}>

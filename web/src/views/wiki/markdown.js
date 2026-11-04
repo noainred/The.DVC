@@ -16,6 +16,8 @@ export const MAX_DEPTH = 6;               // 블록 중첩(인용 · 목록 · �
 export const LINK_WINDOW = 300;           // [글](주소) 의 글 · 주소를 찾는 거리 상한
 export const CALLOUTS = Object.freeze(['info', 'warn', 'danger', 'tip']);
 const MAX_INPUT = 200_000;
+/** 줄 하나 바꿈을 줄바꿈으로(이슈 본문 · 댓글 — 사람이 평문으로 쓴 글이 한 줄로 붙지 않게). parseMarkdown 이 호출 동안만 켠다(동기). */
+let BREAKS = false;
 
 /* ───── 주소 판정 ───── */
 const SAFE_HREF_RE = /^(https?:\/\/[^\s<>"'`]{1,2000}|#\/[^\s<>"'`]{0,2000}|mailto:[^\s<>"'`:/]{1,200})$/i;
@@ -82,7 +84,7 @@ export function parseInline(src, depth = 0) {
     }
     if (ch === '\n') {
       // 줄 끝 공백 둘 = 줄바꿈, 아니면 공백 하나
-      if (buf.endsWith('  ')) { buf = buf.trimEnd(); push({ t: 'br' }); } else buf += ' ';
+      if (BREAKS || buf.endsWith('  ')) { buf = buf.trimEnd(); push({ t: 'br' }); } else buf += ' ';
       i += 1; continue;
     }
     if (ch === '`') {
@@ -249,7 +251,8 @@ const startsBlock = (l) => !!headingOf(l) || FENCE_RE.test(l) || HR_RE.test(l) |
 /**
  * 블록 줄 배열 → 블록 마디. ctx = { footnotes: Map, headings: [] } — 문서 전체가 공유한다.
  */
-function parseBlocks(lines, ctx, depth) {
+function parseBlocks(lines, ctx, depth, nos = null) {
+  const no = (k) => (nos ? nos[k] : k); // 원문 줄 번호(0부터) — 체크리스트 체크가 그 줄을 고친다
   const out = [];
   let i = 0;
   while (i < lines.length) {
@@ -278,16 +281,16 @@ function parseBlocks(lines, ctx, depth) {
     const ct = CONTAINER_RE.exec(line);
     if (ct) {
       const kind = ct[1].toLowerCase();
-      const inner = [];
+      const inner = []; const innerNo = [];
       let nest = 0;
       i += 1;
       while (i < lines.length) {
         if (CONTAINER_RE.test(lines[i])) nest += 1;
         else if (CONTAINER_END_RE.test(lines[i])) { if (nest === 0) break; nest -= 1; }
-        inner.push(lines[i]); i += 1;
+        inner.push(lines[i]); innerNo.push(no(i)); i += 1;
       }
       i += 1;
-      const blocks = depth >= MAX_DEPTH ? [{ t: 'p', inl: [{ t: 'text', v: inner.join('\n') }] }] : parseBlocks(inner, ctx, depth + 1);
+      const blocks = depth >= MAX_DEPTH ? [{ t: 'p', inl: [{ t: 'text', v: inner.join('\n') }] }] : parseBlocks(inner, ctx, depth + 1, innerNo);
       out.push(kind === 'fold' ? { t: 'fold', title: parseInline(ct[2] || '펼치기'), blocks } : { t: 'callout', kind, title: ct[2] ? parseInline(ct[2]) : null, blocks });
       continue;
     }
@@ -302,12 +305,12 @@ function parseBlocks(lines, ctx, depth) {
     }
     // 인용
     if (QUOTE_RE.test(line)) {
-      const inner = [];
+      const inner = []; const innerNo = [];
       while (i < lines.length && !isBlank(lines[i]) && (QUOTE_RE.test(lines[i]) || !startsBlock(lines[i]))) {
         const m = QUOTE_RE.exec(lines[i]);
-        inner.push(m ? m[1] : lines[i]); i += 1;
+        inner.push(m ? m[1] : lines[i]); innerNo.push(no(i)); i += 1;
       }
-      out.push({ t: 'quote', blocks: depth >= MAX_DEPTH ? [{ t: 'p', inl: [{ t: 'text', v: inner.join('\n') }] }] : parseBlocks(inner, ctx, depth + 1) });
+      out.push({ t: 'quote', blocks: depth >= MAX_DEPTH ? [{ t: 'p', inl: [{ t: 'text', v: inner.join('\n') }] }] : parseBlocks(inner, ctx, depth + 1, innerNo) });
       continue;
     }
     // 목록
@@ -322,22 +325,23 @@ function parseBlocks(lines, ctx, depth) {
         const m = LIST_RE.exec(lines[i]);
         if (!m || m[1].length !== base || /\d/.test(m[2]) !== ordered) break;
         const first = m[3];
+        const headNo = no(i);
         const indent = base + m[2].length + 1;
-        const sub = [];
+        const sub = []; const subNo = [];
         i += 1;
         while (i < lines.length) {
           const l = lines[i];
           if (isBlank(l)) {
             // 빈 줄 뒤에 들여쓴 줄이 이어지면 같은 항목
-            if (i + 1 < lines.length && /^\s+\S/.test(lines[i + 1]) && (lines[i + 1].length - lines[i + 1].trimStart().length) > base) { sub.push(''); i += 1; continue; }
+            if (i + 1 < lines.length && /^\s+\S/.test(lines[i + 1]) && (lines[i + 1].length - lines[i + 1].trimStart().length) > base) { sub.push(''); subNo.push(no(i)); i += 1; continue; }
             break;
           }
           const lead = l.length - l.trimStart().length;
           const lm2 = LIST_RE.exec(l);
           if (lm2 && lm2[1].length <= base) break;
-          if (lead > base) { sub.push(l.slice(Math.min(lead, indent))); i += 1; continue; }
+          if (lead > base) { sub.push(l.slice(Math.min(lead, indent))); subNo.push(no(i)); i += 1; continue; }
           if (startsBlock(l)) break;
-          sub.push(l.trimStart()); i += 1; // 게으른 이어 쓰기
+          sub.push(l.trimStart()); subNo.push(no(i)); i += 1; // 게으른 이어 쓰기
         }
         const task = TASK_RE.exec(first);
         const head = task ? task[2] : first;
@@ -345,11 +349,12 @@ function parseBlocks(lines, ctx, depth) {
         const textLines = [head];
         let k = 0;
         while (k < sub.length && sub[k] !== '' && !startsBlock(sub[k])) { textLines.push(sub[k]); k += 1; }
-        const rest = sub.slice(k);
+        const rest = sub.slice(k); const restNo = subNo.slice(k);
         items.push({
           task: task ? task[1].toLowerCase() === 'x' : null,
+          ...(task ? { line: headNo } : {}),
           inl: parseInline(textLines.join('\n')),
-          children: rest.some((x) => !isBlank(x)) ? (depth >= MAX_DEPTH ? [{ t: 'p', inl: [{ t: 'text', v: rest.join('\n') }] }] : parseBlocks(rest, ctx, depth + 1)) : [],
+          children: rest.some((x) => !isBlank(x)) ? (depth >= MAX_DEPTH ? [{ t: 'p', inl: [{ t: 'text', v: rest.join('\n') }] }] : parseBlocks(rest, ctx, depth + 1, restNo)) : [],
         });
         if (i < lines.length && isBlank(lines[i])) {
           // 빈 줄 하나 뒤에 같은 종류 항목이 오면 목록이 이어진다
@@ -392,10 +397,12 @@ function parseBlocks(lines, ctx, depth) {
  * 마크다운 → { blocks, headings, footnotes:[{id,n,inl}] }.
  * 각주는 본문에서 처음 쓴 순서로 번호를 붙인다(정의만 있고 쓰지 않은 것도 끝에 싣는다).
  */
-export function parseMarkdown(md) {
+export function parseMarkdown(md, { breaks = false } = {}) {
   const src = String(md ?? '').slice(0, MAX_INPUT).replace(/\r\n?/g, '\n').replace(/\t/g, '    ');
   const ctx = { footnotes: new Map(), headings: [] };
-  const blocks = parseBlocks(src.split('\n'), ctx, 0);
+  BREAKS = !!breaks;
+  let blocks;
+  try { blocks = parseBlocks(src.split('\n'), ctx, 0); } finally { BREAKS = false; }
   const order = [];
   const walk = (nodes) => {
     for (const n of nodes || []) {
@@ -427,4 +434,31 @@ export function issueKeysIn(md) {
   let m;
   while ((m = re.exec(s)) && out.length < 50) if (!out.includes(m[0])) out.push(m[0]);
   return out;
+}
+
+/**
+ * 체크리스트 줄의 '[ ]' 안 글자 위치 — 아니면 -1. 앞의 공백 · 인용(>) 을 건너뛰고 목록 표시(- * + · 1. 1)) 뒤 '[ ]' / '[x]' 다음 공백.
+ * 서버(server/src/wiki/store.js taskMarkAt)와 같은 규칙이다 — 대조는 test/wikiIssues2883.test.js(같은 입력).
+ */
+export function taskMarkAt(line) {
+  const s = String(line ?? '');
+  if (s.length > 4000) return -1;
+  let i = 0;
+  for (;;) {
+    while (i < s.length && (s[i] === ' ' || s[i] === '\t')) i += 1;
+    if (s[i] === '>') { i += 1; continue; }
+    break;
+  }
+  if (s[i] === '-' || s[i] === '*' || s[i] === '+') i += 1;
+  else {
+    const st = i;
+    while (i < s.length && i - st < 9 && s[i] >= '0' && s[i] <= '9') i += 1;
+    if (i === st || (s[i] !== '.' && s[i] !== ')')) return -1;
+    i += 1;
+  }
+  if (s[i] !== ' ' && s[i] !== '\t') return -1;
+  while (s[i] === ' ' || s[i] === '\t') i += 1;
+  if (s[i] !== '[' || s[i + 2] !== ']' || !(s[i + 1] === ' ' || s[i + 1] === 'x' || s[i + 1] === 'X')) return -1;
+  if (s[i + 3] !== ' ' && s[i + 3] !== '\t') return -1;
+  return i + 1;
 }

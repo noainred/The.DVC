@@ -2585,7 +2585,7 @@ tr.row-sel > td { background: rgba(59, 130, 246, .10); }
 .md-body .md-link, .md-body .md-page { color: var(--accent-2); }
 .md-body .md-link.ext::after { content: ' ↗'; font-size: 11px; }
 .md-body .md-page.missing { color: var(--red); text-decoration: underline dotted; cursor: help; }
-.md-iss { display: inline-flex; padding: 0 6px; border-radius: 5px; font-family: var(--mono); font-size: 12px; background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--accent-2); text-decoration: none; border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent); }
+.md-iss { display: inline-flex; white-space: nowrap; flex: 0 0 auto; padding: 0 6px; border-radius: 5px; font-family: var(--mono); font-size: 12px; background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--accent-2); text-decoration: none; border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent); }
 .md-mention { color: var(--amber); font-weight: 600; }
 .md-code-inline { font-family: var(--mono); font-size: .92em; padding: 1px 5px; border-radius: 4px; background: var(--panel-deep); border: 1px solid var(--border-soft); }
 .md-code { margin: 8px 0 12px; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; background: var(--panel-deep); }
@@ -2722,3 +2722,22 @@ tr.row-sel > td { background: rgba(59, 130, 246, .10); }
 }
 .iss-row-tags { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 3px; }
 .iss-row-tags .iss-subn { margin-left: 0; }
+
+/* ───── v2.883 C-1 — 이슈 본문 마크다운 · 이슈 찾기 · 이슈 연결 ───── */
+.iss-body.md, .iss-comment-body.md { white-space: normal; }
+.iss-body.md .md-body.compact { font-size: 13.5px; }
+/* 펼친 이슈 찾기는 도구 줄 아래 한 줄을 통째로 쓴다 — 떠 있는 목록(absolute)이면 1440px 에서 오른쪽 화면 끝을 넘어 글자가 잘렸다(Chromium 판독) */
+.wiki-issue-pick { flex: 1 1 100%; order: 99; display: flex; gap: 4px; align-items: center; flex-wrap: wrap; min-width: 0; }
+.wiki-issue-pick .input { width: 260px; max-width: 100%; }
+.wiki-issue-pick-list { flex: 1 1 100%; min-width: 0; max-height: 260px; overflow: auto; background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 4px; display: flex; flex-direction: column; }
+.wiki-issue-pick-item { display: flex; align-items: center; gap: 6px; text-align: left; background: none; border: 0; border-radius: 6px; padding: 5px 6px; color: var(--text); font: inherit; font-size: 13px; cursor: pointer; min-width: 0; }
+.wiki-issue-pick-item:hover { background: var(--hover); }
+.wiki-issue-pick-title { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.iss-chip.s-linkblock { background: color-mix(in srgb, var(--red) 14%, transparent); color: var(--red); border-color: color-mix(in srgb, var(--red) 40%, transparent); }
+.iss-link-group { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; font-size: 13px; min-width: 0; }
+.iss-link-label { font-size: 12px; color: var(--text-dim); flex: 0 0 auto; }
+.iss-link-item { display: inline-flex; align-items: center; gap: 6px; min-width: 0; max-width: 100%; padding: 2px 6px; border: 1px solid var(--border-soft); border-radius: 6px; }
+.iss-link-item.done { opacity: .75; }
+.iss-link-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 320px; }
+.iss-links .iss-mini-act { margin-left: 0; }
+.iss-children-add .input.iss-link-key { flex: 0 1 140px; }

@@ -14,7 +14,7 @@ import { config } from '../config.js';
 import { atomicWriteFileSync, preserveCorrupt, safeLoadText } from '../util/atomicWrite.js';
 import { parseQuery, QUERY_LIMITS } from './query.js';
 
-export const FILTER_LIMITS = Object.freeze({ perOwner: 50, total: 3000, name: 60 });
+export const FILTER_LIMITS = Object.freeze({ perOwner: 50, total: 3000, name: 60, subscribers: 100 });
 export const filtersFile = () => path.join(config.configDir, 'issue-filters.json');
 
 let cache = null;
@@ -69,9 +69,12 @@ function queryOf(v) {
   return q;
 }
 
+const subsOf = (f) => (Array.isArray(f.subscribers) ? f.subscribers.filter((u) => typeof u === 'string' && u) : []);
 const view = (f, me, isMod) => ({
   id: f.id, name: f.name, query: f.query, shared: !!f.shared, owner: f.owner, mine: f.owner === me,
   editable: f.owner === me, deletable: f.owner === me || (!!f.shared && isMod), createdAt: f.createdAt, updatedAt: f.updatedAt || f.createdAt,
+  // v2.883 주간 메일 구독 — 내가 구독했는지와 수만(다른 사람 이름은 싣지 않는다)
+  subscribed: subsOf(f).includes(me), subscriberCount: subsOf(f).length,
 });
 /** 내 필터 + 공유 필터 — 내 것 먼저, 이름 순. */
 export function listFilters(me, { isMod = false } = {}) {
@@ -104,6 +107,8 @@ export function updateFilter(id, body, me, { canShare = false } = {}) {
     const sh = b.shared === true;
     if (sh && !canShare) throw forbidden('필터 공유는 전체 범위(vCenter 제한 없는) 운영자 · 관리자만 할 수 있습니다');
     next.shared = sh;
+    // 공유를 끄면 만든 사람 말고는 볼 수 없게 되므로 남의 구독도 내린다(볼 수 없는 필터로 메일이 가지 않게)
+    if (!sh) next.subscribers = subsOf(cur).filter((u) => u === cur.owner);
   }
   next.updatedAt = Date.now();
   save(filters.map((f) => (f.id === id ? next : f)));
@@ -116,4 +121,28 @@ export function deleteFilter(id, me, { isMod = false } = {}) {
   if (cur.owner !== me && !isMod) throw forbidden('필터는 만든 사람이나 전체 범위 관리자만 지울 수 있습니다');
   save(filters.filter((f) => f.id !== id));
   return { id };
+}
+
+/**
+ * 주간 메일 구독(v2.883 · 시안 ⑧) — 볼 수 있는 필터(내 것 · 공유)만. 메일은 월요일 09:00(포탈 날짜)에 issues/notify.js 가 보내고,
+ * 결과는 **받는 사람의 범위**로 다시 거른다(구독이 범위를 넓히지 않는다).
+ */
+export function setSubscription(id, me, on, { isMod = false } = {}) {
+  if (!me) throw forbidden('로그인한 사용자만 구독할 수 있습니다');
+  if (typeof on !== 'boolean') throw fieldError('on', 'true 또는 false 여야 합니다');
+  const { filters } = load();
+  const cur = filters.find((f) => f.id === id);
+  if (!cur || (cur.owner !== me && !cur.shared)) throw notFound();
+  const subs = subsOf(cur);
+  if (subs.includes(me) === on) return view(cur, me, isMod);
+  if (on && subs.length >= FILTER_LIMITS.subscribers) throw conflict(`한 필터의 구독자는 ${FILTER_LIMITS.subscribers}명까지입니다`);
+  const next = { ...cur, subscribers: on ? [...subs, me] : subs.filter((u) => u !== me) };
+  save(filters.map((f) => (f.id === id ? next : f)));
+  return view(next, me, isMod);
+}
+/** 구독자가 있는 필터(메일 발송용 사본) — 공유가 꺼진 필터는 만든 사람의 구독만 남긴다. */
+export function subscribedFilters() {
+  return load().filters
+    .map((f) => ({ id: f.id, name: f.name, query: f.query, owner: f.owner, shared: !!f.shared, subscribers: subsOf(f).filter((u) => f.shared || u === f.owner) }))
+    .filter((f) => f.subscribers.length);
 }

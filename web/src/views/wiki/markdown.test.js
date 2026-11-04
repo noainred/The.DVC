@@ -137,3 +137,18 @@ describe('선형 시간 — 병적인 입력이 2배가 되면 시간도 대략 
     });
   }
 });
+
+describe('v2.883 — 줄바꿈 그대로(이슈) · 체크리스트 줄 번호', () => {
+  it('breaks 면 줄 하나 바꿈이 줄바꿈, 아니면 공백', () => {
+    expect(parseMarkdown('a\nb', { breaks: true }).blocks[0].inl.map((n) => n.t)).toEqual(['text', 'br', 'text']);
+    expect(parseMarkdown('a\nb').blocks[0].inl).toEqual([{ t: 'text', v: 'a b' }]);
+    expect(parseMarkdown('a\nb').blocks[0].inl).toEqual([{ t: 'text', v: 'a b' }], '한 번 켠 뒤 다음 해석에 남지 않는다');
+  });
+  it('체크리스트 항목은 원문 줄 번호(0부터)를 가진다 — 인용 · 콜아웃 · 중첩 안에서도', () => {
+    const md = '- [ ] a\n  - [x] b\n\n> - [ ] q\n\n:::warn\n- [ ] w\n:::';
+    const lines = [];
+    const walk = (bs) => { for (const b of bs) { for (const it of b.items || []) { if (it.task != null) lines.push(it.line); walk(it.children); } if (b.blocks) walk(b.blocks); } };
+    walk(parseMarkdown(md).blocks);
+    expect(lines).toEqual([0, 1, 3, 6]);
+  });
+});
