@@ -1,5 +1,5 @@
 /**
- * routes/api/svcInventory.js — 특수 기능 '서비스 인벤토리'(도구 키 `svc-inventory`, v2.885).
+ * routes/api/svcInventory.js — 특수 기능 '서비스 인벤토리'(도구 키 `svc-inventory`, v2.886).
  *   설계: docs/design/service-map/README.md(시안 A 3차 + 4차 검토, 사용자 선택 '시안 2 — 카탈로그 + 매트릭스').
  *
  * VM(vCenter)과 베어메탈(iDRAC/OS)을 법인 › 폴더 › 서비스로 묶는다. ESXi 호스트는 구성원이 아니라 파생(영향 호스트).

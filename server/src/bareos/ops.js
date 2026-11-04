@@ -389,8 +389,8 @@ export const OPS = Object.freeze({
         if (!isResourceName(it.name)) throw invalid('잡 이름이 올바르지 않습니다.');
         const row = await jobStatus(s, it.jobid);
         if (!row || row.name !== it.name) throw invalid('이 대상의 실행이 아닙니다.');
-        const log = await jobLog(s, it.jobid, { maxBytes: 128 * 1024, maxLines: 2000 });
-        out.push({ key: it.key, ok: true, firstError: firstErrorLine(log.lines), lines: log.total, state: row.state ?? null, status: row.status ?? null });
+        const log = await jobLog(s, it.jobid, { maxBytes: 128 * 1024, maxLines: 2000, firstErrorOf: firstErrorLine });   // v2.885 반증 L3: 자르기 전 전체에서
+        out.push({ key: it.key, ok: true, firstError: log.firstError ?? null, lines: log.total, state: row.state ?? null, status: row.status ?? null });
       } catch (e) {
         out.push({ key: it.key, ok: false, code: e?.code || 'error', message: String(e?.message || e).slice(0, 300) });
         if (SESSION_DEAD.has(e?.code)) dead = `Director 연결 문제로 멈췄습니다(${e.code})`;

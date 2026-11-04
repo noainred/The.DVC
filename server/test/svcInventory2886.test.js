@@ -1,4 +1,4 @@
-// v2.885 서비스 인벤토리 — 판정 코어·집계·큐·저장소·쓰기 연산·권한(docs/design/service-map/README.md 4차 검토 반영본).
+// v2.886 서비스 인벤토리 — 판정 코어·집계·큐·저장소·쓰기 연산·권한(docs/design/service-map/README.md 4차 검토 반영본).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';

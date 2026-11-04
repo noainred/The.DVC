@@ -44,7 +44,7 @@ import { registerEdgeLog } from './api/edgeLog.js'; // 엣지 로그·진행상�
 import { registerBmUsage } from './api/bmUsage.js'; // 베어메탈 사용률(CPU·MEM·디스크·NET·HBA, v2.550)
 import { registerServerSensors } from './api/serverSensors.js'; // 서버 온도 › 센서 상세(v2.659)
 import { registerCorpUsage } from './api/corpUsage.js'; // 법인별 서버 사용량(전체·물리·가상화, v2.625)
-import { registerSvcInventory } from './api/svcInventory.js'; // 서비스 인벤토리(VM + 베어메탈 · 법인 › 폴더 › 서비스 · 전역 카탈로그, v2.885)
+import { registerSvcInventory } from './api/svcInventory.js'; // 서비스 인벤토리(VM + 베어메탈 · 법인 › 폴더 › 서비스 · 전역 카탈로그, v2.886)
 import { registerLinkCheck } from './api/linkCheck.js'; // 통신 점검(중앙↔엣지·vCenter·엣지↔엣지, v2.552)
 import { registerXferSpeed } from './api/xferSpeed.js'; // 법인 간 전송 속도(중앙↔엣지 10MB 왕복, v2.735)
 import { registerIsilonDirUsage } from './api/isilonDirUsage.js'; // 아이실론 디렉터리 사용량(사용자 폴더 du Top N·추이, v2.736)
