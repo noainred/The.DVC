@@ -32,6 +32,9 @@ const { startFakeDirector } = await import('./_fakeBareosDirector.js');
 const D = { jobs: new Map(), runs: new Map(), nextId: 500, cmds: [] };
 const OFF = new Map();
 const DROP = { on: false };
+// restore 명령이 Director 에 닿는 순간의 실행 상태 파일(보내기 **전에** 'sending' 이 남았는지 — 재시작 뒤 다시 보내지 않는 근거)
+const SNAP = [];
+const runsFile = () => path.join(tmp, 'bareos-dr-runs.json');
 const HIST = (name) => { const o = OFF.get(name) ?? 0; return [
   { jobid: 100 + o, name, type: 'B', level: 'F', jobstatus: 'T', starttime: '2026-10-20 02:00:00', endtime: '2026-10-20 02:40:00', jobbytes: 1000 },
   { jobid: 110 + o, name, type: 'B', level: 'I', jobstatus: 'T', starttime: '2026-10-21 02:00:00', endtime: '2026-10-21 02:05:00', jobbytes: 10 },
@@ -44,6 +47,7 @@ async function handle(cmd) {
   if (cmd === '.clients') return { clients: [{ name: 'kr-fd' }] };
   if (cmd === '.jobs') return { jobs: [...D.jobs].map(([name]) => ({ name, enabled: true })) };
   if (cmd.startsWith('configure add job')) { D.jobs.set(kv.name, {}); OFF.set(kv.name, OFF.size * 1000); return { add: { resource: 'Job', name: kv.name } }; }
+  if (cmd.startsWith('restore ')) SNAP.push(fs.existsSync(runsFile()) ? fs.readFileSync(runsFile(), 'utf8') : '');
   if (cmd.startsWith('restore ') && DROP.on) throw new Error('drop');   // 명령을 받은 뒤 끊는다(결과 모름)
   if (cmd.startsWith('restore ')) { const id = D.nextId++; D.runs.set(id, { name: 'PortalVmwareRestore', status: 'C', type: 'R' }); return { run: { jobid: id } }; }
   if (cmd.startsWith('llist jobid=')) {
@@ -146,8 +150,15 @@ test('① 단계 정규화 · 보낸 항목 상태', () => {
   assert.equal(RN.sentItemState({ rid: 5 }, job({ jobid: 5, status: 'T', state: 'ok', nic: 'disconnect', at: now }), {}, now).state, 'sent', '끊기 끝맺음 전');
   assert.equal(RN.sentItemState({ rid: 5 }, job({ jobid: 5, status: 'T', state: 'ok', nic: 'disconnect', at: now, finish: { nic: 'ok' } }), {}, now).state, 'ok');
   assert.match(RN.sentItemState({ rid: 5 }, job({ jobid: 5, status: 'f', state: 'error', nic: 'disconnect', at: now, finish: { nic: 'skipped' } }), {}, now).reason, /성공으로 끝나지/);
-  assert.match(RN.sentItemState({ rid: 5 }, job({ jobid: 5, status: 'T', state: 'ok', nic: 'disconnect', at: now, finish: { nic: 'failed', verify: 'failed', detail: 'Tools' } }), { verify: true }, now).reason, /네트워크 끊기 실패|켜 보기 실패/);
+  assert.match(RN.sentItemState({ rid: 5 }, job({ jobid: 5, status: 'T', state: 'ok', nic: 'disconnect', at: now, finish: { nic: 'failed', detail: 'Tools' } }), {}, now).reason, /네트워크 끊기 실패/);
+  assert.match(RN.sentItemState({ rid: 5 }, job({ jobid: 5, status: 'T', state: 'ok', nic: 'disconnect', verify: true, at: now, finish: { nic: 'ok', verify: 'failed', detail: 'Tools' } }), { verify: true }, now).reason, /켜 보기 실패/);
+  assert.equal(RN.sentItemState({ rid: 5 }, job({ jobid: 5, status: 'T', state: 'ok', nic: 'disconnect', verify: true, at: now, finish: { nic: 'ok', verify: 'ok' } }), { verify: true }, now).state, 'ok');
   assert.equal(RN.sentItemState({ rid: 5 }, null, {}, now).state, 'failed');
+  // 화면 상한이 서버와 같다(웹 bareosDrText.js — 한쪽만 바꾸면 화면이 통과시킨 계획을 서버가 거부한다)
+  const web = fs.readFileSync(new URL('../../web/src/views/tools/bareosDrText.js', import.meta.url), 'utf8');
+  assert.equal(Number(/export const DR_WAVES_MAX = (\d+);/.exec(web)?.[1]), RN.DR_WAVES_MAX);
+  assert.equal(Number(/export const DR_ITEMS_MAX = (\d+);/.exec(web)?.[1]), RN.DR_ITEMS_MAX);
+  assert.equal(Number(/export const DR_CHUNK = (\d+);/.exec(web)?.[1]), RN.DR_CONC_MAX, '동시 복원 수 상한 = 한 번에 보낼 수 있는 대수');
 });
 
 const W = (k, name, extra = {}) => ({ id: ID[k], jobid: H(k, 130), newVm: { name, dc: 'DC-NEW', cluster: 'CL-A' }, ...extra });
@@ -155,7 +166,7 @@ const restoreCmds = () => D.cmds.filter((c) => c.startsWith('restore '));
 const finishAll = async (state = 'T') => {
   for (const k of ['web', 'app', 'db6']) {
     for (const r of job(k).restores || []) {
-      if (!r.drRun || !r.jobid) continue;
+      if (!r.drRun || !r.jobid || !registry.restoreOpen(r)) continue;   // 아직 도는 것만(끝난 복원은 그대로)
       registry.applyRestoreRow(ID[k], { jobid: r.jobid, status: state, type: 'R', endedAt: Date.now() });
       registry.patchRestoreFinish(ID[k], r.jobid, state === 'T' ? { nic: 'ok', at: Date.now(), ...(r.verify ? { verify: 'ok' } : {}) } : { nic: 'skipped', at: Date.now() });
     }
@@ -163,17 +174,19 @@ const finishAll = async (state = 'T') => {
 };
 
 test('② 시작 — 시험 1대 규칙은 회차 전체로 · 판정 · OTP · 진행 중 409', async () => {
-  const waves = [{ name: '기반', concurrency: 1, items: [W('web', 'web-01-n')] }, { name: '나머지', concurrency: 1, items: [W('app', 'app-05-n')] }];
+  const waves = [{ name: '기반', concurrency: 1, items: [W('web', 'web-01-n')] }, { name: '나머지', concurrency: 1, items: [W('app', 'app-05-n'), W('db6', 'db-06-n')] }];
   let r = await call('admin', 'POST', '/dr/runs/check', { vcenterId: 'vc-a', waves });
   assert.equal(r.j.ok, false);
-  assert.match(r.j.reason, /1대가 성공으로 끝난 뒤/, '단계마다 1대여도 회차 전체 2대 — 시험 규칙');
+  assert.match(r.j.reason, /1대가 성공으로 끝난 뒤/);
+  r = await call('admin', 'POST', '/dr/runs/check', { vcenterId: 'vc-a', waves: [{ concurrency: 1, items: [W('web', 'web-01-n')] }, { concurrency: 1, items: [W('app', 'app-05-n')] }] });
+  assert.match(r.j.reason || '', /1대가 성공으로 끝난 뒤/, '단계마다 1대여도 회차 전체 2대 — 시험 규칙(50대 묶음마다 보면 비켜 간다)');
   // 시험 1대 성공 기록
   registry.addRestore(ID.db6, { jobid: 7001, mode: 'newVm', target: { name: 'db-06-trial' }, by: 't', client: 'kr-fd', dr: true, nic: 'disconnect' });
   registry.applyRestoreRow(ID.db6, { jobid: 7001, status: 'T', type: 'R', endedAt: Date.now() });
   registry.patchRestoreFinish(ID.db6, 7001, { nic: 'ok', at: Date.now() });
   r = await call('admin', 'POST', '/dr/runs/check', { vcenterId: 'vc-a', waves });
   assert.equal(r.j.ok, true, JSON.stringify(r.j));
-  assert.equal(r.j.total, 2);
+  assert.equal(r.j.total, 3);
   r = await call('admin', 'POST', '/dr/runs/check', { vcenterId: 'vc-a', waves: [{ concurrency: 1, items: [{ ...W('web', 'web-01-n'), newVm: { name: 'web-01-n', dc: 'DC-NEW' } }] }] });
   assert.match(r.j.issues[0].issue, /클러스터/, '묶음 복원과 같은 dr 판정');
   assert.equal((await call('sadm', 'POST', '/dr/runs/check', { vcenterId: 'vc-b', waves })).s, 404);
@@ -191,6 +204,8 @@ test('③ 단계 — 동시 수만큼 · 앞 단계가 끝맺음까지 끝나야
   let cmds = restoreCmds();
   assert.equal(cmds.length, 1, '1단계 1대만');
   assert.match(cmds[0], /vmname=web-01-n:/);
+  const at0 = JSON.parse(SNAP[0]).runs.find((x) => x.id === ID.run);
+  assert.equal(at0.waves[0].items[0].state, 'sending', '보내기 전에 파일에 남긴다');
   const rec = job('web').restores.find((x) => x.drRun === ID.run);
   assert.deepEqual([rec.dr, rec.nic, rec.verify ?? null], [true, 'disconnect', null]);
   await tick();
@@ -204,8 +219,10 @@ test('③ 단계 — 동시 수만큼 · 앞 단계가 끝맺음까지 끝나야
   cmds = restoreCmds();
   assert.equal(cmds.length, 2);
   assert.match(cmds[1], /vmname=app-05-n:/);
+  await tick();
+  assert.equal(restoreCmds().length, 2, '동시 복원 수 1 — 앞 VM 이 끝나기 전에는 다음 VM 을 보내지 않는다');
   const v = RN.drRunsView().runs.find((x) => x.id === ID.run);
-  assert.deepEqual([v.cur, v.waves[0].counts.ok, v.waves[1].counts.sent], [1, 1, 1]);
+  assert.deepEqual([v.cur, v.waves[0].counts.ok, v.waves[1].counts.sent, v.waves[1].counts.queued], [1, 1, 1, 1]);
   const { listAudit } = await import('../src/audit.js');
   assert.ok(listAudit({ limit: 50, q: ID.run }).items.some((x) => /기준 시각 2026-11-01 00:00/.test(x.detail)));
 });
@@ -213,7 +230,13 @@ test('③ 단계 — 동시 수만큼 · 앞 단계가 끝맺음까지 끝나야
 test('④ 단계 실패 → 멈춤 · 멈춤이면 보내지 않는다 · 계속(OTP) → 다음', async () => {
   await finishAll('f');
   await tick();
+  assert.equal(restoreCmds().length, 3, '실패해도 단계 안 남은 VM 은 보낸다(빈 자리 1)');
+  assert.match(restoreCmds()[2], /vmname=db-06-n:/);
   let v = RN.drRunsView().runs.find((x) => x.id === ID.run);
+  assert.equal(v.state, 'running');
+  await finishAll('f');
+  await tick();
+  v = RN.drRunsView().runs.find((x) => x.id === ID.run);
   assert.equal(v.state, 'paused');
   assert.match(v.reason, /실패/);
   assert.equal((await call('admin', 'POST', `/dr/runs/${ID.run}/resume`, { otp: '000000' })).s, 403);
@@ -249,4 +272,19 @@ test('⑤ 재시작 — 보내던 항목은 결과 모름(다시 보내지 않�
   assert.equal((await call('wadm', 'POST', `/dr/runs/${id}/stop`, {})).s, 409, '이미 멈춤');
   const g = await call('sadm', 'GET', '/dr/runs?vcenterId=vc-b');
   assert.equal(g.s, 404);
+});
+
+test('⑥ 직전 복원 결과를 모르는 VM 은 보내지 않고 실패로 둔다 · 단계 끝에 멈춤', async () => {
+  registry.addRestore(ID.app, { mode: 'newVm', target: { name: 'app-05-q' }, by: 't', client: 'kr-fd', unknown: true });
+  assert.ok(job('app').restores.some((r) => registry.restoreUnknownHeld(r)), '준비: 결과 모름 기록');
+  const run = RN.createRun({ vcenterId: 'vc-a', directorId: ID.dir, by: 'adm', waves: [{ name: 'U', concurrency: 1, items: [W('app', 'app-05-u')] }] });
+  const before = restoreCmds().length;
+  await tick();
+  let v = RN.drRunsView().runs.find((x) => x.id === run.id);
+  assert.equal(v.waves[0].items[0].state, 'failed');
+  assert.match(v.waves[0].items[0].reason, /결과를 모릅니다/);
+  assert.equal(restoreCmds().length, before, '보내지 않는다');
+  await tick();
+  v = RN.drRunsView().runs.find((x) => x.id === run.id);
+  assert.equal(v.state, 'paused');
 });

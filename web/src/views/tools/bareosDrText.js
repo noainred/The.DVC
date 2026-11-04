@@ -143,3 +143,85 @@ export function drNextChunk(rows, picked, size = DR_CHUNK) {
 export const DR_MARK = Object.freeze({ ok: ['✓', 'ok'], warn: ['!', 'warn'], bad: ['✕', 'bad'], unknown: ['?', 'info'] });
 /** 점검 중 '다음' 을 막는 것(bad) 수. unknown 은 막지 않는다(포탈이 읽을 수 없는 것 — 확인 방법을 보인다). */
 export const drBlocking = (checks) => (Array.isArray(checks) ? checks : []).filter((c) => c?.state === 'bad').length;
+
+/* ───────────── 2차 — 복구 순서(단계 자동 실행 · 서버 bareos/drRunner.js) ───────────── */
+
+/** 단계 수 · 회차 대수 상한 — 서버 drRunner DR_WAVES_MAX · DR_ITEMS_MAX 와 같다(server/test/bareosDr2 가 normWaves 로 같은 값을 본다). */
+export const DR_WAVES_MAX = 10;
+export const DR_ITEMS_MAX = 1000;
+
+/** 새 단계(이름 · 동시 복원 수 · 켜 보기). 동시 수는 1~DR_CHUNK. */
+export const drNewWave = (i, n = 1) => ({ name: `${i + 1}단계`, concurrency: Math.max(1, Math.min(DR_CHUNK, Math.floor(Number(n)) || 1)), verify: false });
+
+/** 이 VM 의 단계 번호 — 배정이 없거나 범위 밖이면 0(1단계). */
+export function drWaveOf(assign, id, count) {
+  const w = Number(assign?.[id]);
+  return Number.isInteger(w) && w >= 0 && w < count ? w : 0;
+}
+
+/** 단계 지우기 — 그 단계 VM 은 바로 앞 단계로(첫 단계면 다음 단계로), 뒤 단계 번호는 하나씩 당긴다. 단계가 하나면 그대로. */
+export function drRemoveWave(waves, assign, idx) {
+  if (!Array.isArray(waves) || waves.length <= 1 || idx < 0 || idx >= waves.length) return { waves, assign };
+  const to = idx === 0 ? 0 : idx - 1;
+  const out = {};
+  for (const id of Object.keys(assign || {})) {
+    const w = drWaveOf(assign, id, waves.length);
+    out[id] = w === idx ? to : w > idx ? w - 1 : w;
+  }
+  // 기본 이름('3단계')은 새 자리에 맞춘다 — 지운 뒤 2번째 자리에 '3단계' 가 남으면 헷갈린다. 사람이 지은 이름은 그대로.
+  const rest = waves.map((w, i) => ({ w, i })).filter(({ i }) => i !== idx).map(({ w, i }, k) => (String(w.name || '').trim() === `${i + 1}단계` ? { ...w, name: `${k + 1}단계` } : w));
+  return { waves: rest, assign: out };
+}
+/** 단계 선택지 문구 — 기본 이름이면 '2단계', 지은 이름이면 '2단계 · DB'. */
+export const drWaveLabel = (w, i) => (String(w?.name || '').trim() && String(w.name).trim() !== `${i + 1}단계` ? `${i + 1}단계 · ${String(w.name).trim()}` : `${i + 1}단계`);
+
+/** 서버로 보낼 단계 — 고른 행(why 없음)을 단계별로. 항목은 drItem 의 새 VM 모양(id · jobid · newVm). */
+export function drRunWaves(waves, assign, rows, map) {
+  const ws = Array.isArray(waves) ? waves : [];
+  const list = Array.isArray(rows) ? rows : [];
+  return ws.map((w, i) => ({
+    name: String(w.name || '').trim() || `${i + 1}단계`, concurrency: Number(w.concurrency), verify: w.verify === true,
+    items: list.filter((r) => drWaveOf(assign, r.id, ws.length) === i).map((r) => { const x = drItem(r, map); return { id: x.id, jobid: x.jobid, newVm: x.newVm }; }),
+  }));
+}
+
+/** 시작 전 화면이 먼저 말하는 것('' = 계획 확인을 보낼 수 있다). 서버 normWaves 와 같은 규칙(서버가 다시 본다). */
+export function drWavesIssue(runWaves) {
+  const ws = Array.isArray(runWaves) ? runWaves : [];
+  if (!ws.length || ws.length > DR_WAVES_MAX) return `단계는 1~${DR_WAVES_MAX}개입니다.`;
+  let total = 0;
+  for (const w of ws) {
+    const c = Number(w.concurrency);
+    if (!Number.isInteger(c) || c < 1 || c > DR_CHUNK) return `‘${w.name}’ 동시 복원 수는 1~${DR_CHUNK} 입니다.`;
+    if (!w.items.length) return `‘${w.name}’ 에 VM 이 없습니다 — 단계를 지우거나 VM 을 옮기세요.`;
+    total += w.items.length;
+  }
+  if (total > DR_ITEMS_MAX) return `한 회차는 ${DR_ITEMS_MAX}대까지입니다 — 고르기를 나눠 두 번 시작하세요.`;
+  return '';
+}
+
+/** 회차 상태 → [문구, 색]. */
+export const DR_RUN_STATE = Object.freeze({ running: ['진행 중', 'info'], paused: ['멈춤 — 확인이 필요합니다', 'warn'], stopped: ['멈춤(사람이 멈춤)', 'muted'], done: ['끝', 'ok'] });
+/** 항목 상태 → [문구, 색]. 'sent' 는 Director 에서 복원 중이거나 끝맺음(네트워크 끊기 · 켜 보기) 중. */
+export const DR_ITEM_STATE = Object.freeze({ queued: ['대기', 'muted'], sending: ['보내는 중', 'info'], sent: ['복원 중', 'info'], ok: ['성공', 'ok'], failed: ['실패', 'bad'], unknown: ['결과 모름', 'warn'], skipped: ['건너뜀', 'muted'] });
+const COUNT_ORDER = ['ok', 'sent', 'sending', 'queued', 'failed', 'unknown', 'skipped'];
+/** 단계 한 줄 — '성공 3 · 복원 중 2 · 대기 10 / 15대'(0 인 상태는 뺀다). */
+export function drWaveCountsText(w) {
+  const c = w?.counts || {};
+  const parts = COUNT_ORDER.filter((k) => Number(c[k]) > 0).map((k) => `${DR_ITEM_STATE[k][0]} ${c[k]}`);
+  return `${parts.join(' · ') || '—'} / ${numOrNull(w?.total) ?? '—'}대`;
+}
+/** 진행 중(running · paused)인가 — 이 법인에 새 회차를 시작할 수 없다. */
+export const drRunActive = (run) => run?.state === 'running' || run?.state === 'paused';
+/** 이 법인에서 보일 회차 — 진행 중 · 멈춤이 있으면 그것, 없으면 가장 최근(at). */
+export function drCurrentRun(runs, vcenterId) {
+  const mine = (Array.isArray(runs) ? runs : []).filter((r) => String(r.vcenterId) === String(vcenterId));
+  return mine.find(drRunActive) || mine.sort((a, b) => (Number(b.at) || 0) - (Number(a.at) || 0))[0] || null;
+}
+/** 진행 중 회차에 든 VM(원장 id) — 고르기에서 막는다(같은 VM 을 두 번 보내지 않게 · 서버도 막는다). */
+export function drRunIds(run) {
+  const s = new Set();
+  if (!drRunActive(run)) return s;
+  for (const w of run.waves || []) for (const it of w.items || []) if (it.state === 'queued' || it.state === 'sending' || it.state === 'sent') s.add(it.id);
+  return s;
+}
