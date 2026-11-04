@@ -252,17 +252,17 @@ export function bareosSubTabs({ summaryOk = false, detailOk = false, manageOk = 
     ...(detailOk ? [['detail', '법인', '#/tools/bareos-detail']] : []),
     ...(admin && manageOk ? [['ops', '운영', '#/tools/bareos-backup/targets']] : []),
     ...(summaryOk ? [['policy', '정책 · 보존', '#/tools/bareos-summary/policy']] : []),
-    // v2.877(사용자 요청 'Bareos 설정을 전체 설정 메뉴로 — B안'): 설정은 설정 › 🖥️ vCenter 관리 › Bareos 백업 서버 로 옮겼다.
+    // v2.878(사용자 요청 'Bareos 설정을 전체 설정 메뉴로 — B안'): 설정은 설정 › 🖥️ vCenter 관리 › Bareos 백업 서버 로 옮겼다.
     //   설정 화면을 열 수 있는 계정(settingsHome)에게는 이 탭을 그리지 않는다. 못 여는 관리자(설정 소유 계정이 아님)는 예전 자리를 그대로 쓴다 —
     //   Bareos 설정 API 의 게이트는 adminOnly·fullScopeOnly 이고 설정 소유 계정 여부를 보지 않으므로, 탭을 지우면 그 관리자는 화면을 잃는다.
     ...(admin && manageOk && fullScope && !settingsHome ? [['settings', '설정', '#/tools/bareos-backup/settings']] : []),
   ];
 }
-/** v2.877 Bareos 설정의 새 자리(전체 설정 › vCenter 관리 묶음의 하위 키). 그 아래 조각은 Director · 완전 설치 … 구획. */
+/** v2.878 Bareos 설정의 새 자리(전체 설정 › vCenter 관리 묶음의 하위 키). 그 아래 조각은 Director · 완전 설치 … 구획. */
 export const BAREOS_SETTINGS_KEY = 'bareos';
 export const BAREOS_SETTINGS_HASH = `#/settings/${BAREOS_SETTINGS_KEY}`;
 /**
- * v2.877 이 계정이 전체 설정 화면을 열 수 있는가(App 의 '설정' 탭 게이트와 같은 조건 — 관리자 · 설정 소유 계정 · settings 권한).
+ * v2.878 이 계정이 전체 설정 화면을 열 수 있는가(App 의 '설정' 탭 게이트와 같은 조건 — 관리자 · 설정 소유 계정 · settings 권한).
  *   UX 판정일 뿐이다(서버가 requireSettingsOwner 로 설정 API 를 집행 · Bareos 설정 API 는 adminOnly · fullScopeOnly).
  */
 export function settingsHomeOk(u) {
@@ -271,7 +271,7 @@ export function settingsHomeOk(u) {
   return true;   // 관리자는 hasPerm 이 항상 참(App.jsx hasPerm)
 }
 /**
- * v2.877 옛 설정 주소(#/tools/bareos-backup/settings[/구획]) → 새 주소(#/settings/bareos[/구획]). 옛 주소가 아니면 null.
+ * v2.878 옛 설정 주소(#/tools/bareos-backup/settings[/구획]) → 새 주소(#/settings/bareos[/구획]). 옛 주소가 아니면 null.
  *   구획 조각은 그대로 잇는다(북마크 · 다른 화면 링크가 같은 구획으로).
  */
 export function legacySettingsHash(hash) {

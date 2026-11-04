@@ -78,7 +78,7 @@ export function DiagStages({ stages }) {
 }
 
 /* ───────────────────────── 설정 탭 ───────────────────────── */
-// v2.877: hashBase — 구획 주소의 앞부분. 기본은 새 자리(전체 설정 › vCenter 관리 › Bareos 백업 서버 = #/settings/bareos/<구획>) ·
+// v2.878: hashBase — 구획 주소의 앞부분. 기본은 새 자리(전체 설정 › vCenter 관리 › Bareos 백업 서버 = #/settings/bareos/<구획>) ·
 //   설정 화면을 못 여는 관리자는 예전 자리(#/tools/bareos-backup/settings/<구획>)에서 같은 화면을 쓴다(BareosBackupTool).
 export const SETTINGS_HASH_BASE = Object.freeze(['settings', 'bareos']);
 export default function SettingsTab({ onSaved, writable = true, hashBase = SETTINGS_HASH_BASE }) {

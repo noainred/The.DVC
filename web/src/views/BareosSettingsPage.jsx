@@ -1,5 +1,5 @@
 /**
- * 설정 › 🖥️ vCenter 관리 › Bareos 백업 서버(v2.877 — 사용자 요청 'Bareos 의 설정을 전체 메뉴 설정으로 위치 변경 · B안').
+ * 설정 › 🖥️ vCenter 관리 › Bareos 백업 서버(v2.878 — 사용자 요청 'Bareos 의 설정을 전체 메뉴 설정으로 위치 변경 · B안').
  *   예전 자리는 Backup › Bareos 탭 줄의 '설정'(#/tools/bareos-backup/settings)이었다. 화면 본문(Director · 완전 설치 · 법인별 설정 ·
  *   계정 통합 · 공통 기본값)은 BareosSettings.jsx 그대로이고, 구획 주소만 #/settings/bareos/<구획> 으로 바뀌었다.
  *   API 와 권한은 그대로다 — /api/tools/bareos-backup/settings… 는 adminOnly · fullScopeOnly(서버가 집행), 도구 키 bareos-backup 권한도 그대로 본다.

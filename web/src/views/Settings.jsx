@@ -51,7 +51,7 @@ import HorizonAdmin from './HorizonAdmin.jsx'; // v2.685
 const IsiduSettingsPage = lazy(() => import('./tools/IsiduSettingsPage.jsx')); // v2.740 아이실론 수집 대상 설정(슈퍼 관리자 전용)
 const GuestPartSettings = lazy(() => import('./tools/GuestPartSettings.jsx')); // v2.749 게스트 파티션 사용률 — 조회 주기·임계·무시 규칙·메일
 const VeeamSettings = lazy(() => import('./VeeamSettings.jsx')); // v2.751 Veeam 백업 서버(vCenter 별 · 중앙 또는 그 법인 엣지가 읽음)
-const BareosSettingsPage = lazy(() => import('./BareosSettingsPage.jsx')); // v2.877 Bareos 설정(예전 Backup › Bareos › 설정 탭)
+const BareosSettingsPage = lazy(() => import('./BareosSettingsPage.jsx')); // v2.878 Bareos 설정(예전 Backup › Bareos › 설정 탭)
 
 // 모든 하위 화면 정의(키→라벨→컴포넌트). 그룹에 속한 항목은 group 키로 묶는다.
 const SUB = [
@@ -60,7 +60,7 @@ const SUB = [
   { k: 'vcenter-admin', label: 'vCenter 등록·관리', C: VCenterAdmin, group: 'vcenter' },
   { k: 'vcenter-test', label: 'vCenter 연결 테스트', C: VCenterConnTest, group: 'vcenter' },
   { k: 'veeam', label: 'Veeam 백업 서버', C: VeeamSettings, group: 'vcenter' }, // v2.751 — VM 및 폴더 'Veeam 백업 VM 표시' 의 출처
-  // v2.877(사용자 요청 'Bareos 의 설정을 전체 메뉴 설정으로 — B안'): Backup › Bareos 탭 줄의 '설정' 을 여기로 옮겼다. 키 'bareos' 는 bareosViewText BAREOS_SETTINGS_KEY 와 같다.
+  // v2.878(사용자 요청 'Bareos 의 설정을 전체 메뉴 설정으로 — B안'): Backup › Bareos 탭 줄의 '설정' 을 여기로 옮겼다. 키 'bareos' 는 bareosViewText BAREOS_SETTINGS_KEY 와 같다.
   //   Bareos 도구 권한(bareos-backup)이 있는 계정에게만 보인다(서버 API 는 adminOnly · fullScopeOnly 로 따로 집행).
   { k: 'bareos', label: 'Bareos 백업 서버', C: BareosSettingsPage, group: 'vcenter', show: () => toolAllowed('bareos-backup') },
   { k: 'nsx-admin', label: 'NSX 관리', C: NsxAdmin },

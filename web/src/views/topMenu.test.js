@@ -50,7 +50,7 @@ describe('메뉴 구성', () => {
     expect(labels('storage')).toEqual(['스토리지 현황', '데이터스토어', '스토리지 증가량 보고서', '스토리지 사용량 보고서', '스토리지 사용량 추이', '베어메탈 스토리지', 'SAN 스토리지 성능 측정']);
     expect(labels('network')).toEqual(['전체 네트워크 장비', '가상화 네트워크', '통신 지도', '글로벌 네트워크 점검', 'IP관리', 'Monitoring']);
     expect(labels('resource')).toEqual(['서버 분석', 'GPU 인벤토리', '전력 분석']);
-    expect(labels('optimize')).toEqual(['Optimization', 'Infra Observability']);   // v2.877 이름 변경(id·도구 키 idrac-trend 그대로)
+    expect(labels('optimize')).toEqual(['Optimization', 'Infra Observability']);   // v2.878 이름 변경(id·도구 키 idrac-trend 그대로)
   });
 });
 

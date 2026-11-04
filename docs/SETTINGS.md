@@ -43,7 +43,7 @@
 - **주의**: 조회 전용(작업을 시작·중지하지 않는다). Veeam 기본 인증서는 자체서명이라 처음에는 그 노드의 설정 › Security › 장비 신뢰에서 승인해야 한다. 401(계정 거부)이면 주기 수집을 멈추고 비밀번호를 바꾸면 자동 재개한다. 폴더·클러스터·태그 단위로 작업에 넣은 VM 은 VM 단위로 펼치지 않는다 — 복원 지점이 생기거나 백업 중일 때 배지가 붙는다. 배지가 없는 VM 을 '백업 안 됨' 으로 읽지 말 것.
 
 ### 3-2. Bareos 백업 서버 — `#/settings/bareos`
-- **무엇**: 법인마다 Bareos Director 를 등록하고 vCenter 를 묶는다. 왼쪽 목록의 구획 — Director(등록·연결 시험·매핑·자동 설정) · 완전 설치 · 법인별 설정 · 계정 통합(중앙) · 공통 기본값 · 수집(구획 주소 `#/settings/bareos/<구획>`). v2.877 에 Backup › Bareos 탭 줄의 '설정'(`#/tools/bareos-backup/settings`)에서 이 자리로 옮겼다(사용자 요청 — 화면 본문은 같다). 백업 실행·복원은 Backup › Bareos › 운영에서 한다.
+- **무엇**: 법인마다 Bareos Director 를 등록하고 vCenter 를 묶는다. 왼쪽 목록의 구획 — Director(등록·연결 시험·매핑·자동 설정) · 완전 설치 · 법인별 설정 · 계정 통합(중앙) · 공통 기본값 · 수집(구획 주소 `#/settings/bareos/<구획>`). v2.878 에 Backup › Bareos 탭 줄의 '설정'(`#/tools/bareos-backup/settings`)에서 이 자리로 옮겼다(사용자 요청 — 화면 본문은 같다). 백업 실행·복원은 Backup › Bareos › 운영에서 한다.
 - **저장**: Bareos 설정 파일(Director·매핑 — 비밀 봉인)과 백업 대상 원장. 세부는 `server/src/bareos/` 와 그 폴더의 CLAUDE.md.
 - **권한**: Bareos 도구 권한(`bareos-backup`)이 있는 계정에게 이 항목이 보인다. API(`/api/tools/bareos-backup/settings…`)는 `adminOnly` · `fullScopeOnly`(쓰기는 `fullWriteOnly`)로 따로 집행한다 — 범위 계정에게는 '전체 범위 관리자만' 안내만 보인다.
 - **주의**: 옛 주소로 들어오면 설정 화면을 열 수 있는 계정(관리자 · 설정 소유 계정)은 같은 구획의 새 주소로 넘어간다. 설정 소유 계정이 아닌 관리자는 설정 메뉴를 못 열므로 예전처럼 Bareos 탭 줄의 '설정' 에서 같은 화면을 쓴다(Bareos 설정 API 는 설정 소유 여부를 보지 않는다 — 탭을 지우면 그 관리자가 화면을 잃는다).

@@ -1,4 +1,4 @@
-// v2.877(사용자 요청 'Bareos 의 설정을 전체 메뉴 설정으로 위치 변경 — B안'): Backup › Bareos › 설정 탭 → 설정 › 🖥️ vCenter 관리 › Bareos 백업 서버.
+// v2.878(사용자 요청 'Bareos 의 설정을 전체 메뉴 설정으로 위치 변경 — B안'): Backup › Bareos › 설정 탭 → 설정 › 🖥️ vCenter 관리 › Bareos 백업 서버.
 //   ① 설정 화면을 열 수 있는 계정에게는 Bareos 탭 줄에 '설정' 을 그리지 않는다 · 못 여는 관리자(설정 소유 계정 아님)는 예전 자리를 그대로 쓴다
 //   ② 옛 주소는 구획 그대로 새 주소로(북마크) ③ 설정 화면의 vCenter 관리 묶음에 'bareos' 하위 키 · 도구 권한으로 보인다
 import { describe, it, expect } from 'vitest';
@@ -9,7 +9,7 @@ import { bareosSubTabs, settingsHomeOk, legacySettingsHash, BAREOS_SETTINGS_HASH
 const read = (p) => stripComments(fs.readFileSync(new URL(p, import.meta.url), 'utf8'));
 const ALL = { summaryOk: true, detailOk: true, manageOk: true, admin: true, fullScope: true };
 
-describe('Bareos 설정 자리 옮김(v2.877)', () => {
+describe('Bareos 설정 자리 옮김(v2.878)', () => {
   it('설정 화면을 열 수 있으면 Bareos 탭 줄에 설정이 없다 · 못 열면 예전 자리 그대로', () => {
     expect(bareosSubTabs({ ...ALL, settingsHome: true }).map((t) => t[0])).toEqual(['summary', 'detail', 'ops', 'policy']);
     expect(bareosSubTabs({ ...ALL, settingsHome: false }).map((t) => t[0])).toEqual(['summary', 'detail', 'ops', 'policy', 'settings']);

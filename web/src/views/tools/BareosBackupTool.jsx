@@ -44,7 +44,7 @@ const BASE = '/tools/bareos-backup';
 // v2.830: '백업 그룹' — 전체 VM 트리에서 고른 VM 을 그룹(이름·스케줄·스토리지)으로 — 포탈이 스케줄 실행(BareosGroupsTab.jsx)
 // v2.833: '진행 현황' — 진행 중인 백업 현황판(BareosLiveTab.jsx · 이 탭이 열린 동안만 Director 상태 조회) — v2.860 부터 진행 · 이력 묶음 위쪽의 펼침 구획
 const TABS = [...OPS_SEGMENTS, ['settings', '설정']];
-const LEGACY_SETTINGS_BASE = ['tools', 'bareos-backup', 'settings'];   // v2.877 설정 화면을 못 여는 관리자의 자리(구획 주소)
+const LEGACY_SETTINGS_BASE = ['tools', 'bareos-backup', 'settings'];   // v2.878 설정 화면을 못 여는 관리자의 자리(구획 주소)
 const ROW = { display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' };
 const NOTE = { padding: '8px 12px', marginBottom: 10, fontSize: 12.5, lineHeight: 1.6 };
 const BTN = { padding: '4px 9px', fontSize: 12 };
@@ -85,7 +85,7 @@ export default function BareosBackupTool() {
   const reload = () => setTick((t) => t + 1);
   const me = getCurrentUser();
   const fullScope = !me?.scope || (!(me.scope.vcenters || []).length && !(me.scope.regions || []).length);
-  // v2.877(사용자 요청 'Bareos 설정을 전체 설정 메뉴로 — B안'): 설정은 설정 › 🖥️ vCenter 관리 › Bareos 백업 서버 로 옮겼다.
+  // v2.878(사용자 요청 'Bareos 설정을 전체 설정 메뉴로 — B안'): 설정은 설정 › 🖥️ vCenter 관리 › Bareos 백업 서버 로 옮겼다.
   //   옛 주소(북마크 · 다른 화면 링크)로 들어오면 그 구획 그대로 새 자리로 넘긴다(replace — 뒤로가기 이력을 쌓지 않는다).
   //   설정 화면을 못 여는 관리자(설정 소유 계정이 아님)는 넘기지 않고 이 자리에서 같은 화면을 쓴다(Bareos 설정 API 는 설정 소유 여부를 보지 않는다).
   const moveTo = tab === 'settings' && settingsHomeOk(me) ? (legacySettingsHash(window.location.hash) || BAREOS_SETTINGS_HASH) : null;
