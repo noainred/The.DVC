@@ -78,7 +78,10 @@ export function DiagStages({ stages }) {
 }
 
 /* ───────────────────────── 설정 탭 ───────────────────────── */
-export default function SettingsTab({ onSaved, writable = true }) {
+// v2.877: hashBase — 구획 주소의 앞부분. 기본은 새 자리(전체 설정 › vCenter 관리 › Bareos 백업 서버 = #/settings/bareos/<구획>) ·
+//   설정 화면을 못 여는 관리자는 예전 자리(#/tools/bareos-backup/settings/<구획>)에서 같은 화면을 쓴다(BareosBackupTool).
+export const SETTINGS_HASH_BASE = Object.freeze(['settings', 'bareos']);
+export default function SettingsTab({ onSaved, writable = true, hashBase = SETTINGS_HASH_BASE }) {
   const [s, setS] = useState(null);
   const [err, setErr] = useState(null);
   const [sel, setSel] = useState('');
@@ -89,7 +92,7 @@ export default function SettingsTab({ onSaved, writable = true }) {
   const defsBase = useRef(null);
   const [busy, setBusy] = useState(false);
   // v2.845 설정 하위 탭 — 기본 설정(Director · 매핑 · 자동 설정) · 완전 설치(v2.844) · 법인별 Bareos · 계정 통합(중앙). 훅은 조기 return 위.
-  const [sub, setSub] = useHashTab({ base: ['tools', 'bareos-backup', 'settings'], valid: SUB_TABS.map(([k]) => k), fallback: 'director' });
+  const [sub, setSub] = useHashTab({ base: hashBase, valid: SUB_TABS.map(([k]) => k), fallback: 'director' });
   const gen = useRef(0);
   // W14: 늦게 온 이전 응답은 버린다 · keepDefs: 저장하지 않은 공통 기본값 편집은 버리지 않는다
   const load = (keepDefs = true) => {

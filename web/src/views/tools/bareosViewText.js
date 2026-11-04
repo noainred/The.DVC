@@ -246,14 +246,38 @@ export function takeBareosHandoff(store = globalThis.sessionStorage, now = Date.
  *   현황(bareos-summary) · 법인(bareos-detail) · 운영(bareos-backup — 백업 대상 · 백업 그룹 · 진행·이력) · 정책 · 보존(bareos-summary/policy) · 설정(bareos-backup/settings).
  *   도구 키 · 권한 · 서버 집행은 그대로다(탭은 UX 게이팅 — 서버가 진실의 원천). 어느 도구 키로 들어와도 같은 자리 · 같은 모양(BareosTabs 하나).
  */
-export function bareosSubTabs({ summaryOk = false, detailOk = false, manageOk = false, admin = false, fullScope = false } = {}) {
+export function bareosSubTabs({ summaryOk = false, detailOk = false, manageOk = false, admin = false, fullScope = false, settingsHome = false } = {}) {
   return [
     ...(summaryOk ? [['summary', '현황', '#/tools/bareos-summary']] : []),
     ...(detailOk ? [['detail', '법인', '#/tools/bareos-detail']] : []),
     ...(admin && manageOk ? [['ops', '운영', '#/tools/bareos-backup/targets']] : []),
     ...(summaryOk ? [['policy', '정책 · 보존', '#/tools/bareos-summary/policy']] : []),
-    ...(admin && manageOk && fullScope ? [['settings', '설정', '#/tools/bareos-backup/settings']] : []),
+    // v2.877(사용자 요청 'Bareos 설정을 전체 설정 메뉴로 — B안'): 설정은 설정 › 🖥️ vCenter 관리 › Bareos 백업 서버 로 옮겼다.
+    //   설정 화면을 열 수 있는 계정(settingsHome)에게는 이 탭을 그리지 않는다. 못 여는 관리자(설정 소유 계정이 아님)는 예전 자리를 그대로 쓴다 —
+    //   Bareos 설정 API 의 게이트는 adminOnly·fullScopeOnly 이고 설정 소유 계정 여부를 보지 않으므로, 탭을 지우면 그 관리자는 화면을 잃는다.
+    ...(admin && manageOk && fullScope && !settingsHome ? [['settings', '설정', '#/tools/bareos-backup/settings']] : []),
   ];
+}
+/** v2.877 Bareos 설정의 새 자리(전체 설정 › vCenter 관리 묶음의 하위 키). 그 아래 조각은 Director · 완전 설치 … 구획. */
+export const BAREOS_SETTINGS_KEY = 'bareos';
+export const BAREOS_SETTINGS_HASH = `#/settings/${BAREOS_SETTINGS_KEY}`;
+/**
+ * v2.877 이 계정이 전체 설정 화면을 열 수 있는가(App 의 '설정' 탭 게이트와 같은 조건 — 관리자 · 설정 소유 계정 · settings 권한).
+ *   UX 판정일 뿐이다(서버가 requireSettingsOwner 로 설정 API 를 집행 · Bareos 설정 API 는 adminOnly · fullScopeOnly).
+ */
+export function settingsHomeOk(u) {
+  if (!u || u.role !== 'admin') return false;
+  if (!(u.name === 'Anonymous' || u.isSettingsOwner === true)) return false;
+  return true;   // 관리자는 hasPerm 이 항상 참(App.jsx hasPerm)
+}
+/**
+ * v2.877 옛 설정 주소(#/tools/bareos-backup/settings[/구획]) → 새 주소(#/settings/bareos[/구획]). 옛 주소가 아니면 null.
+ *   구획 조각은 그대로 잇는다(북마크 · 다른 화면 링크가 같은 구획으로).
+ */
+export function legacySettingsHash(hash) {
+  const s = segsOf(hash);
+  if (!(s[0] === 'tools' && s[1] === 'bareos-backup' && s[2] === 'settings')) return null;
+  return [BAREOS_SETTINGS_HASH, ...s.slice(3)].join('/');   // 조각은 주소에 이미 인코딩된 그대로 잇는다
 }
 /** 운영 탭 안의 묶음(관리 도구 bareos-backup 의 하위 주소). 설정은 위 탭 줄의 '설정' 이다. */
 export const OPS_SEGMENTS = Object.freeze([['targets', '백업 대상'], ['groups', '백업 그룹'], ['restore', '복원'], ['runs', '진행 · 이력']]);   // v2.861 복원(폴더에서 고르기 · 3단계)

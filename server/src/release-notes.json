@@ -1,6 +1,15 @@
 {
   "notes": [
     {
+      "version": "2.877.0",
+      "date": "2026-11-04",
+      "title": "'iDRAC 통합 추이' 이름을 'Infra Observability' 로 · Bareos 설정을 설정 › vCenter 관리로 옮김",
+      "notes": [
+        "'iDRAC 통합 추이' 화면 이름을 성능 지표 'Infra Observability' 로 바꿨습니다 — 메뉴(자원 최적화)·특수 기능 목록·내보내기 창·엑셀 요약 시트·호스트 상세 연결 버튼 안내·포탈 DB 안내. 도구 키(idrac-trend)·권한·주소는 그대로이고 옛 이름으로도 찾을 수 있습니다.",
+        "Bareos 설정(Director · 완전 설치 · 법인별 설정 · 계정 통합 · 공통 기본값)을 Backup › Bareos 탭 줄에서 설정 › 🖥️ vCenter 관리 › Bareos 백업 서버 로 옮겼습니다. 옛 주소로 들어오면 같은 구획의 새 자리로 넘어갑니다. 설정 화면을 열 수 없는 관리자(설정 소유 계정이 아님)는 예전처럼 Bareos 탭 줄의 '설정' 을 씁니다 — API 와 권한은 그대로입니다."
+      ]
+    },
+    {
       "version": "2.876.0",
       "date": "2026-11-04",
       "title": "Bareos 완전 설치 — 포탈에 등록되지 않은 기존 Bareos 를 지우고 설치(사전 점검 '이미 설치된 Bareos ✗' 막다른 길 해소)",
