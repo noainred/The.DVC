@@ -14,14 +14,15 @@ import { Loading, ErrorBox } from '../../components/primitives.jsx';
 import Select from '../../components/Select.jsx';
 import DataList from '../../components/DataList.jsx';
 import { Avatar, TypeTag, PrioTag, StatusChip, Due, ProgressLine } from './issueParts.jsx';
-import { SprintView, EpicsView, FiltersView, EpicSprintBox, ChildrenBox, BulkEditBar, useEpics, epicColor } from './IssuesPlus.jsx';
+import { SprintView, EpicsView, FiltersView, EpicSprintBox, ChildrenBox, BulkEditBar, LinksBox, useEpics, epicColor } from './IssuesPlus.jsx';
 import { useHashTab } from '../../hooks/useHashTab.js';
 import {
   STATUS_ORDER, STATUS_TEXT, TYPE_TEXT, PRIORITY_TEXT, statusText, typeText, priorityText, dueInfo, timeText, dateText, initialOf, colorIndexOf,
   groupByStatus, filterRows, myWork, loadPct, LOAD_CAP, toDateInput, fromDateInput, parseLabels, saveFailText, persistNote, historyText,
-  peopleOptions, makeLatest, vcName, vcenterOptions, vcenterRequired, notifyStatusText, childText, sprintName, AUTO_LEVEL_TEXT, autoKindRows, autoOnCount, autoStatusText, simulateText, originText, progressOf, staleInfo, myRequests, activityText, issueLink, STALE_DAYS,
+  peopleOptions, makeLatest, vcName, vcenterOptions, vcenterRequired, notifyStatusText, childText, sprintName, statusConfirmText, STATUS_CONFIRM_FLAG, AUTO_LEVEL_TEXT, autoKindRows, autoOnCount, autoStatusText, simulateText, originText, progressOf, staleInfo, myRequests, activityText, issueLink, STALE_DAYS,
 } from './issueText.js';
 import { wikiHash, statusText as wikiStatusText } from '../wiki/wikiText.js';
+import { MdView } from '../wiki/MdView.jsx';
 
 const SUBS = [['board', '보드'], ['list', '목록'], ['mine', '내 작업'], ['activity', '활동'], ['sprint', '스프린트'], ['epics', '에픽'], ['filters', '필터']]; // v2.882 스프린트 · 에픽 · 필터
 /** v2.871: 설정 탭은 전체 범위 관리자에게만 보인다(서버가 같은 기준으로 막는다). 해시 키는 늘 유효 — 권한이 없으면 안내만. */
@@ -221,6 +222,7 @@ function IssueCard({ r, meta, onOpen }) {
         <TypeTag t={r.type} />
         <span className="iss-key">{r.key}</span>
         {r.blocked && <span className="iss-chip s-blocked" title={r.blocked.reason}>보류</span>}
+        {r.blockedOpen > 0 && <span className="iss-chip s-linkblock" title="이 이슈를 막고 있는 열린 이슈가 있습니다(연결)">차단됨 {r.blockedOpen}</span>}
         {(meta?.vcenters || []).length > 0 && <span className="iss-vc" title="법인(vCenter)">{vcName(meta, r.vcenterId)}</span>}
         {r.origin && <span className="iss-auto" title={originText(r.origin)}>자동</span>}
         {childText(r) && <span className="iss-subn">{childText(r)}</span>}
@@ -301,6 +303,7 @@ function ListView({ rows, total, meta, epics, onOpen, onWritten }) {
                   <td style={{ whiteSpace: 'normal' }}>
                     <button type="button" className="iss-link" onClick={() => onOpen(r.key)}>{r.title}</button>
                     {r.blocked && <span className="iss-chip s-blocked" style={{ marginLeft: 6 }} title={r.blocked.reason}>보류</span>}
+                    {r.blockedOpen > 0 && <span className="iss-chip s-linkblock" style={{ marginLeft: 6 }} title="이 이슈를 막고 있는 열린 이슈가 있습니다(연결)">차단됨 {r.blockedOpen}</span>}
                     {r.origin && <span className="iss-auto" style={{ marginLeft: 6 }} title={originText(r.origin)}>자동</span>}
                     {/* v2.882 에픽 · 하위 · 스프린트는 제목 아래 작은 표시 — 열로 두면 1440px 에서 표가 본문 폭을 넘어 기한 · 갱신이 가로 스크롤 뒤로 숨었다(Chromium 판독).
                         에픽 · 스프린트로 정렬하려면 필터 화면의 결과 표(열이 따로 있다)를 쓴다. */}
@@ -682,14 +685,17 @@ function IssueDetail({ issueKey, meta, onBack, onOpen, onWritten }) {
   };
   const people = peopleOptions(meta.people, it.assignee);
   // v2.882: 남은 하위 작업(에픽이면 소속 이슈)이 있으면 서버가 409(open-children)로 묻는다 — 확인을 받고 한꺼번에 완료로 다시 보낸다
+  // v2.883: 막고 있는 열린 이슈(open-blockers)도 같은 방식으로 묻는다 — 확인할 것이 여럿이면 차례로(최대 3번)
   const statusAct = (st) => act(async () => {
-    const r = await postJson(`/issues/${it.key}/status`, { status: st });
-    if (r?.ok === false && r.code === 'open-children') {
-      const list = (r.children || []).slice(0, 10).map((c) => `· ${c.key} ${c.title}`).join('\n');
-      if (window.confirm(`${r.reason}\n\n${list}${(r.children || []).length > 10 ? '\n…' : ''}\n\n모두 완료로 바꾸고 이 이슈도 완료할까요? (취소하면 아무것도 바꾸지 않습니다)`)) return postJson(`/issues/${it.key}/status`, { status: st, closeChildren: true });
-      return { ok: false, reason: '완료를 취소했습니다 — 하위 작업은 그대로입니다.' };
+    let extra = {};
+    for (let n = 0; n < 3; n += 1) {
+      const r = await postJson(`/issues/${it.key}/status`, { status: st, ...extra });
+      const ask = statusConfirmText(r);
+      if (!ask) return r;
+      if (!window.confirm(ask)) return { ok: false, reason: '완료를 취소했습니다 — 아무것도 바꾸지 않았습니다.' };
+      extra = { ...extra, [STATUS_CONFIRM_FLAG[r.code]]: true };
     }
-    return r;
+    return { ok: false, reason: '확인을 여러 번 받았지만 완료하지 못했습니다 — 다시 시도하세요.' };
   });
   const nextStatus = { backlog: 'todo', todo: 'progress', progress: 'review', review: 'done' }[it.status];
   const mineComment = (c) => !!x.isMod || c.author === x.me;
@@ -742,8 +748,10 @@ function IssueDetail({ issueKey, meta, onBack, onOpen, onWritten }) {
                 )}
                 {it.blocked && <div className="banner warn" style={{ whiteSpace: 'normal' }}><b>보류</b> — {it.blocked.reason} <span className="muted">({it.blocked.by} · {timeText(it.blocked.at)})</span></div>}
                 {msg && <div className="banner">{msg}</div>}
-                <div className="iss-body">{it.body || <span className="muted">설명이 없습니다.</span>}</div>
+                {/* v2.883 본문은 위키와 같은 렌더러(HTML 미해석 · 안전 주소만) — 줄 하나 바꿈은 그대로 줄바꿈(평문으로 쓴 예전 본문이 한 줄로 붙지 않게) */}
+                <div className="iss-body md">{it.body ? <MdView md={it.body} compact breaks unresolvedAsSearch idPrefix={`i${it.key}`} /> : <span className="muted">설명이 없습니다.</span>}</div>
                 <ChildrenBox it={it} meta={meta} canWrite={canWrite} busy={busy} act={act} onOpen={onOpen} />
+                <LinksBox it={it} meta={meta} canWrite={canWrite} busy={busy} act={act} onOpen={onOpen} />
               </>
             )}
         </div>
@@ -763,7 +771,7 @@ function IssueDetail({ issueKey, meta, onBack, onOpen, onWritten }) {
                       <div className="iss-comment-head"><b>{c.author}</b><span className="muted"> · {timeText(c.createdAt)}</span>
                         {canWrite && mineComment(c) && <button type="button" className="iss-mini-act" disabled={busy} onClick={() => { if (window.confirm('이 댓글을 지울까요?')) act(() => delJson(`/issues/${it.key}/comments/${c.id}`)); }}>삭제</button>}
                       </div>
-                      <div className="iss-comment-body">{c.body}</div>
+                      <div className="iss-comment-body md"><MdView md={c.body} compact breaks unresolvedAsSearch idPrefix={`c${c.id}`} /></div>
                     </div>
                   </div>
                 ))}

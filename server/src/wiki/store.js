@@ -196,6 +196,7 @@ function viewPage(p, me = '', access = FULL_ACCESS) {
     comments: (p.comments || []).map((c) => ({ ...c })),
     writable: writableBy(p, access) && !load().spaces[p.spaceId]?.readOnly,
     commentable: writableBy(p, access), // 댓글은 읽기 전용 스페이스에서도 된다(쓰기 범위만 본다 — addComment 와 같은 판정)
+    checkLog: (Array.isArray(p.checkLog) ? p.checkLog : []).slice(-10).reverse(), // v2.883 체크리스트 기록(최근 10)
   };
 }
 
@@ -348,6 +349,67 @@ export function revertPage(id, v, user, { access = FULL_ACCESS, note = '' } = {}
   if (!target) throw notFound();
   if (typeof target.body !== 'string') throw fieldError('v', `v${target.v} 은 본문을 보관하지 않는 오래된 판입니다(최근 ${LIMITS.versionsBody}판만 본문을 둡니다)`);
   return updatePage(id, { baseVersion: p.version, body: target.body, note: text(note || `v${target.v} 로 되돌림`, LIMITS.note, 'note') }, user, { access });
+}
+
+/**
+ * 체크리스트 줄의 '[ ]' 안 글자 위치 — 아니면 -1(웹 views/wiki/markdown.js taskMarkAt 과 같은 규칙 — test/wikiIssues2883 이 같은 입력으로 대조).
+ * 정규식 대신 손으로(앞쪽 공백 · '>' 를 겹쳐 훑는 역추적이 생기지 않게 · 긴 줄은 거절).
+ */
+export function taskMarkAt(line) {
+  const s = String(line ?? '');
+  if (s.length > 4000) return -1;
+  let i = 0;
+  for (;;) {
+    while (i < s.length && (s[i] === ' ' || s[i] === '\t')) i += 1;
+    if (s[i] === '>') { i += 1; continue; }
+    break;
+  }
+  if (s[i] === '-' || s[i] === '*' || s[i] === '+') i += 1;
+  else {
+    const st = i;
+    while (i < s.length && i - st < 9 && s[i] >= '0' && s[i] <= '9') i += 1;
+    if (i === st || (s[i] !== '.' && s[i] !== ')')) return -1;
+    i += 1;
+  }
+  if (s[i] !== ' ' && s[i] !== '\t') return -1;
+  while (s[i] === ' ' || s[i] === '\t') i += 1;
+  if (s[i] !== '[' || s[i + 2] !== ']' || !(s[i + 1] === ' ' || s[i + 1] === 'x' || s[i + 1] === 'X')) return -1;
+  if (s[i + 3] !== ' ' && s[i + 3] !== '\t') return -1;
+  return i + 1;
+}
+export const CHECK_LOG_MAX = 50;
+
+/**
+ * 체크리스트 한 칸(v2.883 · 시안 ⑨ '체크리스트(보기에서 체크)') — line(0부터)의 '[ ]' ↔ '[x]'. **판을 만들지 않는다** — 지금 판의 본문도 같이 고쳐
+ * 판 본문과 문서 본문이 어긋나지 않게 하고, 기록(checkLog)에 한 줄 남긴다. 쓰기 범위 · 읽기 전용은 저장과 같은 판정(findFor write).
+ * baseVersion 이 지금 판과 다르면 409(본문이 바뀌어 줄 번호가 달라졌을 수 있다). 그 줄이 체크리스트가 아니거나 상태가 이미 다르면 409.
+ */
+export function toggleTask(id, body, user, { access = FULL_ACCESS } = {}) {
+  const c = load();
+  const p = findFor(id, access, { write: true });
+  const b = body || {};
+  const base = numOrNull(b.baseVersion);
+  if (base == null || Math.trunc(base) !== p.version) {
+    throw limitError(`문서가 바뀌었습니다(지금 판 v${p.version}) — 다시 읽은 뒤 체크하세요`, { code: 'conflict', current: { version: p.version, by: p.updatedBy, at: p.updatedAt } });
+  }
+  if (typeof b.checked !== 'boolean') throw fieldError('checked', 'true 또는 false 여야 합니다');
+  const lines = String(p.body || '').split(/\r\n?|\n/);
+  const n = Number.isInteger(b.line) ? b.line : -1;
+  if (n < 0 || n >= lines.length) throw fieldError('line', '줄 번호가 문서 범위 밖입니다');
+  const pos = taskMarkAt(lines[n]);
+  if (pos < 0) throw limitError('그 줄은 체크리스트 항목이 아닙니다 — 다시 읽은 뒤 체크하세요', { code: 'not-task' });
+  const cur = lines[n][pos] !== ' ';
+  if (cur === b.checked) return viewPage(p, user, access);
+  lines[n] = `${lines[n].slice(0, pos)}${b.checked ? 'x' : ' '}${lines[n].slice(pos + 1)}`;
+  const md = lines.join('\n');
+  const now = Date.now();
+  const versions = (p.versions || []).map((v, k, arr) => (k === arr.length - 1 && typeof v.body === 'string' ? { ...v, body: md, len: md.length } : v));
+  const log = [...(Array.isArray(p.checkLog) ? p.checkLog : []), { at: now, by: user, line: n, checked: b.checked, text: capStr(lines[n].trim(), 80) }].slice(-CHECK_LOG_MAX);
+  const x = { ...p, body: md, versions, checkLog: log };
+  assertRoom(c, x, p.id);
+  c.pages = c.pages.map((q) => (q.id === p.id ? x : q));
+  commit({ changed: x });
+  return viewPage(x, user, access);
 }
 
 export function versionBody(id, v, access = FULL_ACCESS) {

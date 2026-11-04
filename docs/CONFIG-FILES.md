@@ -1,6 +1,6 @@
 # 설정·데이터 파일 레퍼런스 (자동 생성)
 
-포탈이 `CONFIG_DIR`(설치본 기본 `/etc/vmware-portal`) 아래에 만드는 파일 **259개**의 목록이다.
+포탈이 `CONFIG_DIR`(설치본 기본 `/etc/vmware-portal`) 아래에 만드는 파일 **260개**의 목록이다.
 시계열 DB 는 `db-location.json` 이 가리키는 `dbDir` 로 옮길 수 있다.
 
 - 생성: `node scripts/config-doc.mjs` (마지막 갱신 2026-11-04)
@@ -144,6 +144,7 @@
 | `isidu-settings.json` | 설정 | 아이실론 디렉터리 사용량 조사 대상(v2.736 — 아이실론·경로·주기·실행 노드·보존일. 비밀 없음) | ✅ | ✅ | ✅ | isidu/settings.js |
 | `isidu.db` | DB | 아이실론 디렉터리 사용량 이력 DB(v2.736). 파일: `<dbDir>/isidu.db` |  |  | ✅ | isidu/db.js |
 | `issue-autocreate.json` | 설정 | 파트 장애 → 이슈 자동 등록 설정(v2.880 — 켜기 · 부품 종류 × 장비군 칸(끔/fault/fault+warn) · 우선순위 · 라벨 · 제목 틀 · 폭주 묶음 · 하루 상한 · 해소 처리 · 법인 예외. 비밀 없음) | ✅ | ✅ | ✅ | issues/autoCreate.js |
+| `issue-filter-mail-state.json` | 설정 | 저장 필터 주간 메일 기록(상태, v2.883) |  |  |  | (외부/설치 스크립트) |
 | `issue-filters.json` | 설정 | 이슈 저장 필터(v2.882 — 사람마다 검색식 50개 · 공유 여부. 비밀 없음) | ✅ | ✅ | ✅ | issues/filters.js |
 | `issue-notify-state.json` | 설정 | 이슈 기한 알림 기록(상태, v2.871) |  |  |  | (외부/설치 스크립트) |
 | `issue-settings.json` | 설정 | 이슈 트래커 설정(v2.871 — 자동 할당 규칙 · 알림 켜기·이벤트 · 사람별 메일 주소. 비밀 없음) | ✅ | ✅ | ✅ | issues/settings.js |
@@ -316,6 +317,7 @@
 - **`wiki.json`** — 디바운스 비동기 원자 쓰기 + 손상 보존 + 합계 상한(WIKI_MAX_BYTES, 기본 8MB). 판은 문서마다 200개(본문은 최근 30판)까지. 변경 감시 지문에서는 빠지고(저장마다 change 백업 금지) 백업 번들에는 들어간다. 지우면 모든 문서가 사라지고 번호(W-n)가 1부터 다시 매겨진다
 - **`issue-autocreate.json`** — 손상이면 보존하고 기본값(꺼짐)으로 읽는다 — 이슈 › 설정 › 자동 등록 화면이 그 사실을 말한다. 지우면 자동 등록이 꺼진다(이미 만든 이슈는 그대로)
 - **`issue-settings.json`** — 손상이면 보존하고 기본값(자동 할당·알림 꺼짐)으로 읽는다 — 이슈 › 설정 화면이 그 사실을 말한다. 지우면 자동 할당·알림이 꺼지고 메일 주소 표가 비어 이슈 메일이 나가지 않는다
+- **`issue-filter-mail-state.json`** — 상태 파일(백업 감시 제외). 필터 · 받는 사람마다 마지막으로 주간 메일을 보낸 포탈 날짜(3주 지난 것은 지운다). 지우면 그 주 메일이 한 번 더 나갈 수 있다
 - **`issue-notify-state.json`** — 상태 파일(백업 감시 제외). 이슈마다 마지막으로 기한 알림을 보낸 포탈 날짜. 지우면 그날 기한 알림이 한 번 더 나갈 수 있다
 - **`settings-owners.txt`** — username 기준. 표시이름 승계 불가
 - **`vcenters.json`** — ⚠ 지우면 수집 대상이 사라진다. v2.444 부터 예제 폴백 없음

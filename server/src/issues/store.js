@@ -60,7 +60,12 @@ export const LIMITS = Object.freeze({
   bulkMax: 200,
   // v2.882 계층 — 한 상위의 자식 수 상한(하위 작업 · 에픽의 이슈)
   childMax: 200,
+  // v2.883 연결 — 이슈마다 저장하는 연결 수(반대 방향은 읽을 때 계산하므로 세지 않는다)
+  linkMax: 30,
 });
+/** v2.883 연결 종류 — 만든 쪽에만 저장하고 반대 방향(INVERSE)은 읽을 때 계산한다(상대 이슈의 쓰기 범위가 없어도 된다). */
+export const LINK_TYPES = Object.freeze(['blocks', 'blockedBy', 'relates', 'duplicates', 'duplicatedBy']);
+export const LINK_INVERSE = Object.freeze({ blocks: 'blockedBy', blockedBy: 'blocks', relates: 'relates', duplicates: 'duplicatedBy', duplicatedBy: 'duplicates' });
 /** 최근 완료로 보여 주는 기간(ms) — 보드의 '완료' 열. */
 export const RECENT_DONE_MS = 14 * 24 * 3600_000;
 export const ISSUES_MAX_BYTES_DEFAULT = 16 * 1024 * 1024;
@@ -86,6 +91,56 @@ export function issuesMaxBytes() {
 }
 
 export const issuesFile = () => path.join(config.configDir, 'issues.json');
+
+/* ───── 연결(v2.883 · 시안 ⑩ — 차단함/차단됨/관련/중복) ───── */
+/**
+ * 연결 더하기 — 이 이슈(쓰기 범위)에 저장한다. 상대는 볼 수 있어야 한다(조회 범위 밖이면 '없는 이슈'). 반대 방향은 상대에 쓰지 않고 읽을 때 계산한다.
+ * 같은 연결(어느 쪽에 저장됐든)이 이미 있으면 그대로 둔다.
+ */
+export function addLink(key, body, user, { access = FULL_ACCESS } = {}) {
+  const c = load();
+  const x = findFor(key, access, { write: true });
+  const b = body || {};
+  if (!LINK_TYPES.includes(b.type)) throw fieldError('type', `${LINK_TYPES.join(' · ')} 중 하나여야 합니다`);
+  const target = typeof b.key === 'string' ? b.key.trim().toUpperCase() : '';
+  if (!KEY_RE.test(target)) throw fieldError('key', '이슈 키(ISS-번호)여야 합니다');
+  if (target === x.key) throw fieldError('key', '자기 자신과는 연결할 수 없습니다');
+  const y = c.issues.find((q) => q.key === target);
+  if (!y || !canSee(y, access)) throw fieldError('key', '없는 이슈입니다');
+  const idx = treeIndex(c.issues);
+  if (relationsOf(x, idx, null).some((l) => l.type === b.type && l.key === target)) return { ...viewIssue(x, user, access), writable: canEdit(x, access) };
+  const mine = linksOf(x);
+  if (mine.length >= LIMITS.linkMax) throw limitError(`연결은 이슈마다 ${LIMITS.linkMax}개까지입니다`);
+  const now = Date.now();
+  const next = { ...x, links: [...mine, { type: b.type, key: target, at: now, by: user }] };
+  const out = replace(c, next, [{ at: now, by: user, field: 'link', from: '', to: `${b.type} ${target}` }], user);
+  return { ...viewIssue(out, user, access), writable: canEdit(out, access) };
+}
+/**
+ * 연결 빼기 — 이 이슈에 저장된 것이면 이 이슈(쓰기 범위)에서, 상대가 만든 것(반대 방향)이면 **상대 이슈의 쓰기 범위**가 있어야 상대에서 지운다.
+ */
+export function removeLink(key, body, user, { access = FULL_ACCESS } = {}) {
+  const c = load();
+  const x = findFor(key, access);
+  const b = body || {};
+  if (!LINK_TYPES.includes(b.type)) throw fieldError('type', `${LINK_TYPES.join(' · ')} 중 하나여야 합니다`);
+  const target = typeof b.key === 'string' ? b.key.trim().toUpperCase() : '';
+  const now = Date.now();
+  const mine = linksOf(x);
+  if (mine.some((l) => l.type === b.type && l.key === target)) {
+    if (!canEdit(x, access)) throw forbidden('이 이슈의 법인은 쓰기 범위 밖입니다 — 조회만 할 수 있습니다');
+    const out = replace(c, { ...x, links: mine.filter((l) => !(l.type === b.type && l.key === target)) }, [{ at: now, by: user, field: 'link', from: `${b.type} ${target}`, to: '' }], user);
+    return { ...viewIssue(out, user, access), writable: canEdit(out, access) };
+  }
+  // 반대 방향 — 상대가 저장한 (inverse, x.key)
+  const inv = LINK_INVERSE[b.type];
+  const y = KEY_RE.test(target) ? c.issues.find((q) => q.key === target) : null;
+  if (!y || !canSee(y, access) || !linksOf(y).some((l) => l.type === inv && l.key === x.key)) throw notFound();
+  if (!canEdit(y, access)) throw forbidden(`이 연결은 ${y.key} 쪽에서 만든 것이라 그 이슈의 쓰기 범위가 있어야 지울 수 있습니다`);
+  replace(c, { ...y, links: linksOf(y).filter((l) => !(l.type === inv && l.key === x.key)) }, [{ at: now, by: user, field: 'link', from: `${inv} ${x.key}`, to: '' }], user);
+  const fresh = load().issues.find((q) => q.id === x.id) || x;
+  return { ...viewIssue(fresh, user, access), writable: canEdit(fresh, access) };
+}
 
 /* ───── 일괄 편집 · 스프린트(v2.882 · 시안 ⑦ ⑧) ───── */
 
@@ -626,13 +681,31 @@ const isOpen = (x) => x.status !== 'done';
  * 같은 법인끼리만 묶는다(에픽이 공용이면 어느 법인 이슈든 담는다 — 범위 계정은 공용 에픽을 못 보므로 키를 지운다). 진행률은 자식이 있으면
  * 자식 완료 비율로 자동(직접 입력 잠김). */
 function treeIndex(issues) {
-  const byKey = new Map(); const kids = new Map();
+  const byKey = new Map(); const kids = new Map(); const incoming = new Map();
   for (const y of issues) byKey.set(y.key, y);
   for (const y of issues) {
+    for (const l of linksOf(y)) { const a = incoming.get(l.key); const e = { type: LINK_INVERSE[l.type], key: y.key }; if (a) a.push(e); else incoming.set(l.key, [e]); }
     if (!y.parentKey || !byKey.has(y.parentKey) || y.parentKey === y.key) continue;
     const a = kids.get(y.parentKey); if (a) a.push(y); else kids.set(y.parentKey, [y]);
   }
-  return { byKey, kids };
+  return { byKey, kids, incoming };
+}
+const linksOf = (x) => (Array.isArray(x?.links) ? x.links.filter((l) => l && LINK_TYPES.includes(l.type) && typeof l.key === 'string') : []);
+/**
+ * 이 이슈의 연결 — 내가 만든 것(own) + 남이 나를 가리킨 것(반대 방향). 없는 이슈 · 볼 수 없는 이슈는 뺀다. 같은 (종류, 키)는 한 번.
+ * access 가 null 이면 범위 없이(서버 내부 판정 — 완료 전 차단 검사).
+ */
+function relationsOf(x, idx, access = FULL_ACCESS) {
+  const out = []; const seen = new Set();
+  const add = (type, key, own) => {
+    const y = idx.byKey.get(key);
+    if (!y || key === x.key || (access && !canSee(y, access))) return;
+    const k = `${type}|${key}`; if (seen.has(k)) return; seen.add(k);
+    out.push({ type, key, own, title: y.title, status: y.status, open: isOpen(y) });
+  };
+  for (const l of linksOf(x)) add(l.type, l.key, true);
+  for (const l of idx.incoming.get(x.key) || []) add(l.type, l.key, false);
+  return out;
 }
 function epicKeyOf(x, idx) {
   if (x.type === 'epic' || !x.parentKey) return '';
@@ -701,6 +774,8 @@ export function summary(x, idx = null, access = FULL_ACCESS) {
     // v2.882 계층 · 스프린트 — 볼 수 없는 상위(범위 밖 공용 에픽)의 키는 비운다
     parentKey: vis(x.parentKey || ''), epicKey: vis(epicKeyOf(x, ix)), sprintId: x.sprintId || '',
     progressAuto: r.auto, childCount: r.childCount, childDone: r.childDone,
+    // v2.883 — 이 이슈를 막고 있는 열린 이슈 수(볼 수 있는 것만 — 카드의 '차단됨')
+    blockedOpen: relationsOf(x, ix, access).filter((l) => l.type === 'blockedBy' && l.open).length,
   };
 }
 /** 상세 — 댓글·이력 포함. `me` 는 보는 사람(관찰 여부). */
@@ -716,6 +791,7 @@ export function viewIssue(x, me = '', access = FULL_ACCESS) {
   return {
     ...s, level: levelOf(x, idx), parent: brief(parent), epic: epic ? { ...brief(epic), progress: rollupOf(epic, idx).pct, childCount: rollupOf(epic, idx).childCount, childDone: rollupOf(epic, idx).childDone } : null,
     children, sprint: sp ? { id: sp.id, name: sp.name, state: sp.state, startDay: sp.startDay, endDay: sp.endDay, daysLeft: sp.daysLeft } : null,
+    links: relationsOf(x, idx, access),
     body: x.body || '', watcherNames: Array.isArray(x.watchers) ? x.watchers : [], watching: !!me && Array.isArray(x.watchers) && x.watchers.includes(me),
     createdBy: x.createdBy || x.reporter || '', updatedBy: x.updatedBy || '',
     comments: commentsOf(x).map((c) => ({ id: c.id, author: c.author, body: c.body, createdAt: c.createdAt })),
@@ -1001,13 +1077,22 @@ export function updateIssue(key, body, user, { access = FULL_ACCESS, known = nul
 }
 
 /** 상태 전이. progress 는 담당자 필수 · done 은 closedAt · done 에서 나오면 closedAt 해제. 같은 상태면 그대로. */
-export function setStatus(key, status, user, { access = FULL_ACCESS, closeChildren = false } = {}) {
+export function setStatus(key, status, user, { access = FULL_ACCESS, closeChildren = false, ignoreBlockers = false } = {}) {
   const c = load();
   const x = findFor(key, access, { write: true });
   const s = enumField(status, STATUSES, 'status');
   if (s === x.status) return viewIssue(x, user, access);
   if (s === 'progress' && !x.assignee) throw fieldError('status', '진행 중으로 옮기려면 담당자가 있어야 합니다 — 먼저 할당하세요');
   // v2.882: 완료되지 않은 자식(하위 작업 · 에픽의 이슈)이 남아 있으면 묻는다 — closeChildren 이면 한꺼번에 완료(자식마다 쓰기 범위 검사)
+  if (s === 'done' && !ignoreBlockers) {
+    // v2.883: 이 이슈를 막고 있는 열린 이슈가 있으면 묻는다(범위 없이 센다 — 볼 수 없는 것은 수만 밝힌다)
+    const blockers = relationsOf(x, treeIndex(c.issues), null).filter((l) => l.type === 'blockedBy' && l.open);
+    if (blockers.length) {
+      const visible = blockers.filter((l) => { const y = load().issues.find((q) => q.key === l.key); return y && canSee(y, access); });
+      throw limitError(`이 이슈를 막고 있는 열린 이슈가 ${blockers.length}건 있습니다${blockers.length > visible.length ? `(볼 수 없는 ${blockers.length - visible.length}건 포함)` : ''} — 그래도 완료할지 확인하세요`,
+        { code: 'open-blockers', blockers: visible.slice(0, 30).map((l) => ({ key: l.key, title: l.title, status: l.status })), hidden: blockers.length - visible.length });
+    }
+  }
   if (s === 'done') {
     const open = (treeIndex(c.issues).kids.get(x.key) || []).filter(isOpen);
     if (open.length && !closeChildren) {
