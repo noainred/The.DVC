@@ -536,7 +536,7 @@ export function EpicsView({ meta, onOpen, onWritten }) {
 }
 
 /* ───────────── 검색식 · 저장 필터(⑧) ───────────── */
-const QUERY_KEY = ISSUE_QUERY_KEY; // v2.885 issueText.js 로 옮김(릴리스 노트가 이 큰 파일을 불러오지 않게)
+const QUERY_KEY = ISSUE_QUERY_KEY; // v2.886 issueText.js 로 옮김(릴리스 노트가 이 큰 파일을 불러오지 않게)
 function readSaved() { try { return window.sessionStorage.getItem(QUERY_KEY) || ''; } catch { return ''; } }
 function writeSaved(q) { try { window.sessionStorage.setItem(QUERY_KEY, q); } catch { /* 저장소를 못 쓰는 브라우저 — 무시 */ } }
 

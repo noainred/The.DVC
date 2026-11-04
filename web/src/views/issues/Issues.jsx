@@ -36,7 +36,7 @@ const KEY_RE = /^ISS-\d{1,9}$/;
 
 /**
  * 상태 바꾸기(상세 · 보드 끌기 공용) — 서버가 409(open-children · open-blockers)로 물으면 확인을 받고 다시 보낸다(최대 3번).
- * v2.885: 보드에서 끌어 옮기기가 같은 확인 흐름을 쓴다(두 벌 금지).
+ * v2.886: 보드에서 끌어 옮기기가 같은 확인 흐름을 쓴다(두 벌 금지).
  */
 async function postStatusConfirmed(key, st) {
   let extra = {};
@@ -49,7 +49,7 @@ async function postStatusConfirmed(key, st) {
   }
   return { ok: false, reason: '확인을 여러 번 받았지만 완료하지 못했습니다 — 다시 시도하세요.' };
 }
-/** v2.885 SLA 배지(초과 · 임박 · 멈춤만). */
+/** v2.886 SLA 배지(초과 · 임박 · 멈춤만). */
 function SlaChip({ sla }) {
   const b = slaBadge(sla);
   return b ? <span className={`iss-chip iss-sla ${b.cls}`} title={b.title}>{b.text}</span> : null;
@@ -109,7 +109,7 @@ export default function Issues() {
   }, [latest]);
   useEffect(() => { load(); }, [load]);
 
-  // v2.885 C-2 '보드에 적용' — 저장 필터 · 검색식으로 거른 이슈를 보드로 본다(서버가 범위 → 검색식). 해제하면 평소 보드.
+  // v2.886 C-2 '보드에 적용' — 저장 필터 · 검색식으로 거른 이슈를 보드로 본다(서버가 범위 → 검색식). 해제하면 평소 보드.
   const [boardQ, setBoardQ] = useState(null); // { name, query }
   const [boardRes, setBoardRes] = useState(null); // { rows, err }
   const latestB = useLatest();
@@ -123,7 +123,7 @@ export default function Issues() {
   useEffect(() => { loadBoardQ(boardQ); }, [boardQ, loadBoardQ]);
   const onWritten = useCallback((r) => { setNote(persistNote(r?.persist)); load(); loadBoardQ(boardQ); }, [load, loadBoardQ, boardQ]);
   const [epics, reloadEpics] = useEpics(!!meta?.canWrite);
-  // v2.885 보드 끌어 옮기기 — 상세와 같은 확인 흐름
+  // v2.886 보드 끌어 옮기기 — 상세와 같은 확인 흐름
   const moveIssue = useCallback(async (key, st) => {
     setNote('');
     try {
@@ -258,7 +258,7 @@ function FilterBar({ filters, setF, meta, sub, onReset }) {
 /* ───────────── 보드 ───────────── */
 
 /**
- * v2.885 C-2: 카드를 다른 칸으로 끌어 상태를 바꾼다(쓰기 역할 · 그 이슈의 쓰기 범위 — 서버가 집행). 확인이 필요한 완료(남은 하위 · 막는 이슈)는
+ * v2.886 C-2: 카드를 다른 칸으로 끌어 상태를 바꾼다(쓰기 역할 · 그 이슈의 쓰기 범위 — 서버가 집행). 확인이 필요한 완료(남은 하위 · 막는 이슈)는
  * 상세와 같은 확인 흐름(postStatusConfirmed). 끌 수 없는 환경(키보드 · 터치)은 상세의 상태 고르기를 쓴다.
  */
 function BoardView({ rows, meta, onOpen, recentDays, onMove = null }) {
@@ -655,7 +655,7 @@ function IssueEditor({ meta, initial = null, requestOnly = false, onCancel, onSa
     title: initial?.title || '', body: initial?.body || '', type: initial?.type || (requestOnly ? 'request' : 'task'), priority: initial?.priority || 'p2',
     assignee: initial ? (initial.assignee || '') : '', dueAt: toDateInput(initial?.dueAt), labels: (initial?.labels || []).join(', '), component: initial?.component || '',
     vcenterId: initial ? (initial.vcenterId || '') : (needVc ? (vcOpts[0]?.id || '') : ''),
-    // v2.885 C-3 — 예상(‘1h 30m’ · ‘90’) · 수정/영향 버전
+    // v2.886 C-3 — 예상(‘1h 30m’ · ‘90’) · 수정/영향 버전
     estimate: Number.isInteger(initial?.estimateMin) ? minutesText(initial.estimateMin) : '', fixVersion: initial?.fixVersion || '', affectsVersion: initial?.affectsVersion || '',
   }));
   const [busy, setBusy] = useState(false);
@@ -743,7 +743,7 @@ function IssueEditor({ meta, initial = null, requestOnly = false, onCancel, onSa
 /* ───────────── 상세 ───────────── */
 
 /**
- * v2.885 C-3 — SLA 시계 · 시간 추적(예상 · 작업 기록) · 수정/영향 버전. SLA 는 서버가 이력에서 계산한 값을 그대로 보인다(화면이 다시 계산하지 않는다).
+ * v2.886 C-3 — SLA 시계 · 시간 추적(예상 · 작업 기록) · 수정/영향 버전. SLA 는 서버가 이력에서 계산한 값을 그대로 보인다(화면이 다시 계산하지 않는다).
  * 작업 기록 지우기는 적은 사람 또는 전체 범위 관리자(서버가 집행).
  */
 function TimeBox({ it, meta, canWrite, busy, act, me, isMod }) {
@@ -1193,7 +1193,7 @@ function IssueSettings() {
       setForm({
         autoEnabled: !!st.autoAssign.enabled, components: st.autoAssign.components.map((c) => ({ ...c })), pool: st.autoAssign.pool.join(', '),
         notifyEnabled: !!st.notify.enabled, mail: st.notify.mail !== false, chat: !!st.notify.chat, events: { ...st.notify.events }, people: st.notify.people.map((p) => ({ ...p })),
-        // v2.885 SLA(서버 issues/sla.js normalizeSla 가 다시 검사한다)
+        // v2.886 SLA(서버 issues/sla.js normalizeSla 가 다시 검사한다)
         sla: st.sla ? { enabled: !!st.sla.enabled, types: [...(st.sla.types || [])], warnPct: st.sla.warnPct ?? 80, targets: Object.fromEntries(Object.entries(st.sla.targets || {}).map(([k, v]) => [k, { respondMin: String(v.respondMin), resolveMin: String(v.resolveMin) }])) } : null,
       });
     }).catch((e) => { if (latest.isLatest(k)) setErr(e); });
