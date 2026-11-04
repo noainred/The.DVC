@@ -1,6 +1,6 @@
 # 설정·데이터 파일 레퍼런스 (자동 생성)
 
-포탈이 `CONFIG_DIR`(설치본 기본 `/etc/vmware-portal`) 아래에 만드는 파일 **260개**의 목록이다.
+포탈이 `CONFIG_DIR`(설치본 기본 `/etc/vmware-portal`) 아래에 만드는 파일 **261개**의 목록이다.
 시계열 DB 는 `db-location.json` 이 가리키는 `dbDir` 로 옮길 수 있다.
 
 - 생성: `node scripts/config-doc.mjs` (마지막 갱신 2026-11-04)
@@ -40,6 +40,7 @@
 | `bareos-bundle-source.json` | 설정 | Bareos 완전 설치 번들의 **받는 주소 · 서버 디렉터리** 설정(v2.850 · 사용자 요청 | ✅ | ✅ | ✅ | bareos/install/bundleSource.js |
 | `bareos-digest-state.json` | 설정 | Bareos 일일 요약 메일 마지막 발송(상태, v2.862) | ✅ | ✅ | ✅ | bareos/digest.js |
 | `bareos-digest.json` | 설정 | Bareos 일일 요약 메일 설정(v2.862 — 켜기 · 시각. 비밀 없음) | ✅ | ✅ | ✅ | bareos/digest.js |
+| `bareos-dr-runs.json` | 설정 | 재해 복구 2차: 복구 순서(단계 자동 실행) — 시안 ② Disaster2 '3. 복구 순서' · 사용자 결정 '두 번에 나눠' · '② 표준'(2026-11-04). | ✅ | ✅ | ✅ | bareos/drRunner.js |
 | `bareos-edge-directors.json` | 설정 | **엣지 쪽** 법인 Director 사본(v2.824 엣지 대행). 파일: CONFIG_DIR/bareos-edge-directors.json (0600 · 원자적 쓰기 · 비밀 봉인). | ✅ | ✅ | ✅ | bareos/edgeStore.js |
 | `bareos-groups.json` | 설정 | Bareos 백업 그룹 원장(v2.830 · 사용자 요청 'VM 을 골라 그룹으로 — 이름·스케줄·스토리지 지정, 나중에 수정'). | ✅ | ✅ | ✅ | bareos/groups.js |
 | `bareos-install-jobs.json` | 설정 | Bareos 완전 설치 작업(v2.844): 시작 · 진행 읽기 · 4~7단계 · 다시 시도 · 중단 · 전부 되돌리기. | ✅ | ✅ | ✅ | bareos/install/job.js |
