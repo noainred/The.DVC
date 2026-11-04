@@ -510,6 +510,7 @@
   ⑤ 정책 · 보존은 `BareosPolicyPage` 한 화면에 두 구획(`BareosPolicyTab`·`BareosPoolsTab` 의 `bare`) — 'Director 수집 상태' 표 · 데모 안내는 한 번만. 옛 `#/tools/bareos-summary/pools` 는 풀 구획으로 내려간다.
   ⑥ 설정은 왼쪽 목록(`#/tools/bareos-backup/settings/<director|install|corp|accounts|defaults>` — `useHashTab` 중첩 base). 데모일 때 운영 머리의 Director 한 줄은 설정에서 빼고 설정 화면의 안내 하나만 둔다.
   ⑦ 공용 조각은 `BareosBits.jsx`(Note · ReadGuide · Stat · Dot · ResultBar · Segs · FilterChip) — 칸 설명 · 범례는 '읽는 법' 토글로 치우되 지우지 않는다. '확인 필요' 는 실패 · 미등록 · 오래됨 · 켜진 잡의 백업 없음을 합친 것이고 결과를 못 읽으면 '—'(`corpAttention`·`detailFilterCounts`).
+  ⑧ (v2.882.1 — 사용자 요청 '1440 패널 닫기 줄바꿈도 고쳐줘') 오른쪽 패널 머리 줄은 **바깥 줄 줄바꿈 없음**(`data-panel-head`) + 이름 · 배지는 안쪽 묶음(`minWidth: 0`)에서만 줄바꿈 + 닫기는 묶음 밖(`flex: 'none'`). 한 줄 `flexWrap` + `marginLeft: 'auto'` 로 되돌리면 1440(패널 폭 약 320px)에서 이름 + 실행 배지 + OS 배지가 넘칠 때 닫기가 둘째 줄로 내려간다(Chromium A/B · 회귀 `bareosPanelHead2882.test.js`). 머리 줄에 칩을 더하지 말 것 — 멈추는 중(v2.867) · GPU 표지(v2.873)는 따로 한 줄이다.
 - **v2.861 — Bareos 운영 › 복원(사용자 요청 '백업처럼 폴더에서 선택해서 복원' · '네트워크 연결 끊고 시작' · '데이터스토어 선택' — 시안 ⑦~⑪)**. 화면 `BareosRestore.jsx` · 글자 · 빠른 확인 `bareosRestoreText.js`(+ test):
   ① 판정은 서버 `bulkRestorePlan` 하나 — 화면은 같은 규칙을 먼저 말할 뿐(`wizardIssue`) · 3단계 미리 보기는 POST `restore-check/bulk`(Director · OTP 안 씀). 고르기는 **한 법인(Director)만 · 50대**(`pickBlock`) · 덮어쓰기는 1대일 때만 목록에 나온다.
   ② 복원 지점 · 실행은 Director 를 거친다 — `withRelayWait(…, 'restorePoints' | 'restores')`(서버 RESULT_MS — 숫자를 화면에 박지 않는다) · 늦게 온 이전 응답은 `gen` 으로 버린다 · 실패한 OTP 는 비운다.
