@@ -19,14 +19,14 @@ import { capStr } from '../util/capStr.js';
 import { makeLoadError } from '../util/registryCore.js';
 
 export const SETTINGS_LIMITS = Object.freeze({ components: 100, pool: 100, people: 500, name: 64, component: 60, email: 254 });
-export const NOTIFY_EVENTS = Object.freeze(['assigned', 'status', 'progress', 'comment', 'due']);
+export const NOTIFY_EVENTS = Object.freeze(['assigned', 'status', 'progress', 'comment', 'due', 'wiki']);
 
 const fileOf = () => path.join(config.configDir, 'issue-settings.json');
 
 export function defaultIssueSettings() {
   return {
     autoAssign: { enabled: false, components: [], pool: [] },
-    notify: { enabled: false, mail: true, chat: false, events: { assigned: true, status: true, progress: true, comment: true, due: true }, people: [] },
+    notify: { enabled: false, mail: true, chat: false, events: { assigned: true, status: true, progress: true, comment: true, due: true, wiki: true }, people: [] },
   };
 }
 

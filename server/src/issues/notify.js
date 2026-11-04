@@ -161,20 +161,51 @@ function schedule() {
   timer.unref?.();
 }
 
+/** 사람 한 명의 묶음에 줄 하나(상한 · 사람 수 상한 — 이슈 · 위키 공용). */
+function pushLine(u, line) {
+  let p = pending.get(u);
+  if (!p) {
+    if (pending.size >= RECIP_MAX) { if (!droppedNow.has(u)) { droppedNow.add(u); status.dropped += 1; } return; }
+    p = { lines: [], extra: 0 }; pending.set(u, p);
+  }
+  p.lines.push(line);
+  if (p.lines.length > LINES_MAX) { p.extra += p.lines.length - LINES_MAX; p.lines = p.lines.slice(-LINES_MAX); }
+}
+
+/**
+ * 위키 이벤트(v2.881 — 문서 저장 · 댓글 · @멘션) → 사람별 묶음. 받는 사람: 지켜보는 사람 + 새로 언급된 사람(+ 댓글이면 만든 사람) · 본인 제외 ·
+ * **그 스페이스(법인)를 볼 수 있는 사람만**(이슈와 같은 판정 — visibility.js). 팀 채팅에는 싣지 않는다(문서 편집은 채널 소음이 크다).
+ */
+export function queueWikiEvent(ev, settings = loadIssueSettings(), viewers = issueViewers()) {
+  const n = settings?.notify;
+  if (!n?.enabled || n.events?.wiki === false) return 0;
+  const pg = ev.page || {};
+  const parts = [...(pg.watchers || []), ...(ev.type === 'comment' && pg.createdBy ? [pg.createdBy] : [])].filter(Boolean);
+  const known = new Set([...viewers.localNames, ...(n.people || []).map((p) => p.username), ...parts]);
+  const set = new Set(ev.type === 'created' ? [] : parts);
+  const mentioned = new Set(resolveMentions(ev.mentions, known));
+  for (const m of mentioned) set.add(m);
+  set.delete(ev.actor);
+  const head = `[위키] ${capStr(pg.title || '', 120)}`;
+  let count = 0;
+  for (const u of set) {
+    if (!viewers.canSee(u, pg.vcenterId || '')) { status.outOfScope += 1; continue; }
+    const tag = mentioned.has(u) ? '에서 언급했습니다' : '';
+    const line = ev.type === 'comment' ? `${head} — 댓글${tag ? ` · ${tag}` : ''} · ${ev.actor}: ${capStr(ev.excerpt || '', 160)}`
+      : ev.type === 'saved' ? `${head} — v${ev.version} 고침${tag ? ` · 본문${tag}` : ''} · ${ev.actor}${ev.note ? `: ${capStr(ev.note, 120)}` : ''}`
+        : `${head} — 새 문서${tag ? ` · 본문${tag}` : ''} · ${ev.actor}`;
+    pushLine(u, line); count += 1;
+  }
+  if (count) schedule();
+  return count;
+}
+
 /** 이벤트 하나를 묶음에 넣는다(라우트·기한 검사가 부른다 — 저장소 훅이 연결한다). */
 export function queueIssueEvent(ev) {
   const settings = loadIssueSettings();
   if (!eventOn(ev, settings)) return 0;
   const who = recipientsOf(ev, settings);
-  for (const u of who) {
-    let p = pending.get(u);
-    if (!p) {
-      if (pending.size >= RECIP_MAX) { if (!droppedNow.has(u)) { droppedNow.add(u); status.dropped += 1; } continue; }
-      p = { lines: [], extra: 0 }; pending.set(u, p);
-    }
-    p.lines.push(lineOf(ev, u));
-    if (p.lines.length > LINES_MAX) { p.extra += p.lines.length - LINES_MAX; p.lines = p.lines.slice(-LINES_MAX); }
-  }
+  for (const u of who) pushLine(u, lineOf(ev, u));
   // 팀 채팅은 개인 수신자와 따로다(감사 A2-03 — 받을 사람이 없는 이벤트(예: 담당자 없는 새 요청)도 팀 채널에는 간다). 문구는 chatSafe(A3-03).
   if (settings.notify.chat) {
     chatLines.push(chatSafe(lineOf(ev, '')));
@@ -317,6 +348,8 @@ export function startIssueNotify() {
   if (started) return;
   started = true;
   onIssueEvent((ev) => queueIssueEvent(ev));
+  // v2.881 위키 문서 저장 · 댓글 알림 — 같은 묶음 · 같은 범위 판정
+  import('../wiki/store.js').then(({ onWikiEvent }) => onWikiEvent((ev) => queueWikiEvent(ev))).catch((e) => console.warn(`[issues] 위키 알림 연결 실패: ${String(e?.message || e).slice(0, 160)}`));
   const scan = () => { try { scanDue(); } catch (e) { console.warn(`[issues] 기한 알림 검사 실패: ${e?.message || e}`); } };
   dueTimer = setInterval(scan, DUE_SCAN_MS);
   dueTimer.unref?.();

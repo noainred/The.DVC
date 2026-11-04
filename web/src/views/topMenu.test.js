@@ -14,8 +14,8 @@ const allItems = () => MENU_GROUPS.flatMap((g) => (g.children ? g.children.map((
 const tabsInMenu = () => new Set(allItems().map(({ g, c }) => (c ? c.tab : g.tab)).filter(Boolean));
 
 describe('메뉴 구성', () => {
-  it('대메뉴는 사용자가 정한 순서다(업그레이드는 설정 아래 · v2.787 백업 대메뉴는 서버 › Veeam 으로 옮김 · v2.864 이슈 추가)', () => {
-    expect(MENU_GROUPS.map((g) => g.label)).toEqual(['Overview', 'Summary', '서버', '스토리지', '네트워크', '자원관리', '자원 최적화', '특수 기능', '이슈', '게시판', '설정']);
+  it('대메뉴는 사용자가 정한 순서다(업그레이드는 설정 아래 · v2.787 백업 대메뉴는 서버 › Veeam 으로 옮김 · v2.864 이슈 · v2.881 위키 추가)', () => {
+    expect(MENU_GROUPS.map((g) => g.label)).toEqual(['Overview', 'Summary', '서버', '스토리지', '네트워크', '자원관리', '자원 최적화', '특수 기능', '이슈', '위키', '게시판', '설정']);
     expect(MENU_GROUPS.find((g) => g.id === 'backup')).toBe(undefined);
     const settings = MENU_GROUPS.find((g) => g.id === 'settings');
     // v2.827: 엣지 토큰 맞추기가 설정 그룹의 독립 항목(도구)으로 들어왔다

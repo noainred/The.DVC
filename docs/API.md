@@ -22,14 +22,14 @@
 
 | 항목 | 값 |
 |---|---|
-| 엔드포인트 | **1195개** |
+| 엔드포인트 | **1213개** |
 | 마운트 그룹 | 14개 |
-| 라우트 파일 | 119개 |
-| GET | 629개 |
-| POST | 383개 |
-| PUT | 118개 |
+| 라우트 파일 | 120개 |
+| GET | 639개 |
+| POST | 387개 |
+| PUT | 120개 |
 | PATCH | 3개 |
-| DELETE | 62개 |
+| DELETE | 64개 |
 
 | 그룹 | 엔드포인트 | 설명 |
 |---|---:|---|
@@ -45,7 +45,7 @@
 | [`/api/ping`](#apiping) | 14 | 네트워크 Ping 모니터링(조회=인증, 대상 관리=관리자). |
 | [`/metrics`](#metrics) | 1 | Prometheus/OTel 익스포터(선택 토큰). |
 | [`/api/v1`](#apiv1) | 10 | **외부 포탈용 공개 조회 API**(v2.562). 전용 API 키(`X-Api-Key`)로 인증하고 조회 전용이다. 상세는 [API-PUBLIC.md](API-PUBLIC.md). |
-| [`/api`](#api) | 615 | 포탈 화면이 쓰는 **주 조회·작업 API**. `authMiddleware + requireEnrolled` 뒤이고, `/tools/*` 는 `toolGate` 가 사용자별 도구 권한을 집행한다. |
+| [`/api`](#api) | 633 | 포탈 화면이 쓰는 **주 조회·작업 API**. `authMiddleware + requireEnrolled` 뒤이고, `/tools/*` 는 `toolGate` 가 사용자별 도구 권한을 집행한다. |
 | [`/dl`](#dl) | 2 | 중앙 업그레이드 소스(`versions.json` + 번들). **공개**다. |
 
 ---
@@ -1349,6 +1349,24 @@ Prometheus/OTel 익스포터(선택 토큰).
 | GET | `/vms/lookup` | 권한 `inv.vms` | [server/src/routes/api/inventory.js:464](../server/src/routes/api/inventory.js#L464) |
 | POST | `/vms/upgrade-tools` | 역할 `admin/operator` · 권한 `tools` · `auditMiddleware` | [server/src/routes/api/toolsInfo.js:299](../server/src/routes/api/toolsInfo.js#L299) |
 | POST | `/vms/usage` | 권한 `inv.vms` | [server/src/routes/api/toolsCapacity.js:338](../server/src/routes/api/toolsCapacity.js#L338) |
+| GET | `/wiki/backrefs` | — | [server/src/routes/api/wiki.js:103](../server/src/routes/api/wiki.js#L103) |
+| GET | `/wiki/home` | — | [server/src/routes/api/wiki.js:88](../server/src/routes/api/wiki.js#L88) |
+| GET | `/wiki/meta` | — | [server/src/routes/api/wiki.js:74](../server/src/routes/api/wiki.js#L74) |
+| POST | `/wiki/pages` | 역할 `admin/operator` | [server/src/routes/api/wiki.js:119](../server/src/routes/api/wiki.js#L119) |
+| DELETE | `/wiki/pages/:id` | 역할 `admin/operator` | [server/src/routes/api/wiki.js:158](../server/src/routes/api/wiki.js#L158) |
+| GET | `/wiki/pages/:id` | — | [server/src/routes/api/wiki.js:127](../server/src/routes/api/wiki.js#L127) |
+| PUT | `/wiki/pages/:id` | 역할 `admin/operator` | [server/src/routes/api/wiki.js:132](../server/src/routes/api/wiki.js#L132) |
+| POST | `/wiki/pages/:id/comments` | `commenters` | [server/src/routes/api/wiki.js:167](../server/src/routes/api/wiki.js#L167) |
+| DELETE | `/wiki/pages/:id/comments/:cid` | `commenters` | [server/src/routes/api/wiki.js:174](../server/src/routes/api/wiki.js#L174) |
+| GET | `/wiki/pages/:id/diff` | — | [server/src/routes/api/wiki.js:154](../server/src/routes/api/wiki.js#L154) |
+| POST | `/wiki/pages/:id/revert` | 역할 `admin/operator` | [server/src/routes/api/wiki.js:141](../server/src/routes/api/wiki.js#L141) |
+| GET | `/wiki/pages/:id/versions/:v` | — | [server/src/routes/api/wiki.js:150](../server/src/routes/api/wiki.js#L150) |
+| POST | `/wiki/pages/:id/watch` | `commenters` | [server/src/routes/api/wiki.js:181](../server/src/routes/api/wiki.js#L181) |
+| GET | `/wiki/search` | — | [server/src/routes/api/wiki.js:96](../server/src/routes/api/wiki.js#L96) |
+| GET | `/wiki/spaces/:id` | — | [server/src/routes/api/wiki.js:115](../server/src/routes/api/wiki.js#L115) |
+| PUT | `/wiki/spaces/:id` | 역할 `admin` | [server/src/routes/api/wiki.js:107](../server/src/routes/api/wiki.js#L107) |
+| GET | `/wiki/templates/:id` | — | [server/src/routes/api/wiki.js:83](../server/src/routes/api/wiki.js#L83) |
+| GET | `/wiki/tree` | — | [server/src/routes/api/wiki.js:92](../server/src/routes/api/wiki.js#L92) |
 
 ## `/dl`
 
@@ -1389,6 +1407,7 @@ Prometheus/OTel 익스포터(선택 토큰).
 | `noticeFleetOnly` | 3 | **전체 범위 계정만**(v2.722 — 접속 공지 작성·수정·삭제. 공지는 전 법인 사용자에게 보인다). 범위 제한 계정은 403. |
 | `auditMiddleware` | 3 | 상태변경 감사 로그 기록. |
 | `menuFleetOnly` | 3 | **전체 범위 계정만**(v2.726 — 좌측 메뉴 배포. 전 사용자 화면을 바꾼다). 범위 제한 계정은 403. |
+| `commenters` | 3 | **admin·operator 또는 권한 키 `issues.request`**(v2.881 위키 — 댓글 · 지켜보기. 데모 계정 제외 · 문서의 스페이스가 쓰기 범위 안이어야 한다 — 저장소 `addComment`). |
 | `adFleetOnly` | 3 | **전체 범위 계정만**(v2.628 SEC2628-04 — AD 설정 조회·저장·연결 테스트. AD 는 전 사용자 공통 인증 소스다). 범위 제한 계정은 403. |
 | `ownerIfAutoCentralToken` | 2 | 요청이 `autoCentralToken` 옵션을 쓸 때만 **설정 소유자**를 요구한다(평문 CENTRAL_TOKEN 을 원격 호스트에 기록하는 경로라 백업과 같은 등급). |
 | `requireOwnOtp` | 2 | **본인 OTP 재인증**(1회용·실패 잠금). 호스트 접근 제어 적용·확정처럼 되돌리기 어려운 동작에 붙는다. |
@@ -1398,7 +1417,7 @@ Prometheus/OTel 익스포터(선택 토큰).
 | `liveFleetOnly` | 1 | **전체 범위 계정만**(v2.629 A6-02 — iDRAC 에 실시간 로그인하는 GPU 조사). 범위 제한 계정은 403. |
 | `settingsFleetOnly` | 1 | **전체 범위 계정만**(v2.633 — 손상 보존본만 남은 중앙 설정 파일을 기본값으로 확정. 그 기본값이 모든 엣지에 배포된다). 범위 제한 계정은 403. |
 | `csvPermIfDownload` | 1 | `csvPerm` 과 같되 **download=1(파일 내보내기)일 때만** 요구한다 — 화면 조회(JSON)는 통과(v2.741 AUTHZ-02 — VMware 구성 백업). |
-| `creators` | 1 | **admin·operator 또는 권한 키 `issues.request`**(v2.871 — 이슈 생성. 쓰기 역할이 아니면 요청 유형만 — 백로그 · 담당자·상태·관찰자 지정 없음, 저장소 `requestOnly`). 이 라우트만 viewer 상태변경 예외다. |
+| `creators` | 1 | **admin·operator 또는 권한 키 `issues.request`**(v2.871 — 이슈 생성. 쓰기 역할이 아니면 요청 유형만 — 백로그 · 담당자·상태·관찰자 지정 없음, 저장소 `requestOnly`). viewer 상태변경 예외는 이것과 v2.881 위키 `commenters`(댓글 · 지켜보기) 둘뿐이다. |
 | `csvPermUnlessJson` | 1 | `csvPerm` 과 같되 **format=json(화면의 표·붙여넣기 등록)은 통과**(v2.643 — 성능점검 대상 등록 마법사). |
 
 ---

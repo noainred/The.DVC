@@ -26,12 +26,13 @@ export const ICON_PATH = Object.freeze({
   grid: 'M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z',
   refresh: 'M20 12a8 8 0 1 1-2.3-5.7M20 4v5h-5', // v2.727(A-01) 사이드바 '메뉴 다시 읽기'
   flag: 'M5 21V4M5 4h11l-2 4 2 4H5', // v2.864 이슈 트래커
+  book: 'M4 5a2 2 0 0 1 2-2h13v16H6a2 2 0 0 0-2 2zM4 5v16M8 7h7', // v2.881 위키
 });
 
 /** 그룹 id → 아이콘 이름. 사용자 그룹(custom-…)·모르는 id 는 folder. */
 export const GROUP_ICON = Object.freeze({
   overview: 'home', summary: 'chart', server: 'server', storage: 'db', network: 'net', resource: 'cpu', optimize: 'gauge',
-  tools: 'wrench', issues: 'flag', board: 'msg', settings: 'cog',
+  tools: 'wrench', issues: 'flag', wiki: 'book', board: 'msg', settings: 'cog',
 });
 
 export function iconNameOf(groupId) { return GROUP_ICON[groupId] || 'folder'; }

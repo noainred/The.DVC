@@ -19,6 +19,7 @@ import {
   groupByStatus, filterRows, myWork, loadPct, LOAD_CAP, toDateInput, fromDateInput, parseLabels, saveFailText, persistNote, historyText,
   peopleOptions, makeLatest, vcName, vcenterOptions, vcenterRequired, notifyStatusText, AUTO_LEVEL_TEXT, autoKindRows, autoOnCount, autoStatusText, simulateText, originText, progressOf, staleInfo, myRequests, activityText, issueLink, STALE_DAYS,
 } from './issueText.js';
+import { wikiHash, statusText as wikiStatusText } from '../wiki/wikiText.js';
 
 const SUBS = [['board', '보드'], ['list', '목록'], ['mine', '내 작업'], ['activity', '활동']];
 /** v2.871: 설정 탭은 전체 범위 관리자에게만 보인다(서버가 같은 기준으로 막는다). 해시 키는 늘 유효 — 권한이 없으면 안내만. */
@@ -801,12 +802,39 @@ function IssueDetail({ issueKey, meta, onBack, onWritten }) {
           <span className="iss-labels">{it.watcherNames.map((n) => <Avatar key={n} name={n} size={22} />)}</span>
           {canWrite && <button className="btn" disabled={busy} onClick={() => act(() => postJson(`/issues/${it.key}/watch`, { on: !it.watching }))}>{it.watching ? '관찰 그만하기' : '관찰하기'}</button>}
         </div>
+        <RelatedDocs issueKey={it.key} />
         <div className="muted iss-stamp">
           <div>생성 {timeText(it.createdAt)} · {it.createdBy}</div>
           <div>최근 수정 {timeText(it.updatedAt)}{it.updatedBy ? ` · ${it.updatedBy}` : ''}</div>
           {it.closedAt && <div>완료 {timeText(it.closedAt)}</div>}
         </div>
       </aside>
+    </div>
+  );
+}
+
+/**
+ * 관련 문서(v2.881) — 본문 · 댓글에 이 이슈 키를 적은 위키 문서(서버 역참조 색인 · 내가 볼 수 있는 스페이스만).
+ * 못 읽으면 '없음' 으로 지어내지 않고 못 읽었다고 적는다.
+ */
+function RelatedDocs({ issueKey }) {
+  const [rows, setRows] = useState(null);
+  const [err, setErr] = useState('');
+  useEffect(() => {
+    let alive = true;
+    fetchJson('/wiki/backrefs', { key: issueKey }).then((r) => { if (alive) { setRows(r.pages || []); setErr(''); } }).catch((e) => { if (alive) setErr(String(e?.message || e)); });
+    return () => { alive = false; };
+  }, [issueKey]);
+  return (
+    <div className="iss-prop"><span className="iss-prop-l">관련 문서{rows ? ` · ${rows.length}` : ''}</span>
+      {err ? <span className="muted" style={{ fontSize: 12 }}>위키 역참조를 읽지 못했습니다 — {err}</span>
+        : !rows ? <span className="muted" style={{ fontSize: 12 }}>읽는 중…</span>
+          : rows.length ? (
+            <span style={{ display: 'flex', flexDirection: 'column', gap: 3, fontSize: 12.5, minWidth: 0 }}>
+              {rows.slice(0, 10).map((p) => <a key={p.id} className="wiki-xlink" href={wikiHash({ space: p.spaceId, id: p.id })} style={{ overflowWrap: 'anywhere' }}>{p.title}{p.status !== 'approved' ? ` · ${wikiStatusText(p.status)}` : ''}</a>)}
+              {rows.length > 10 && <span className="muted">외 {rows.length - 10}건 — 위키 찾기에서 ‘{issueKey}’</span>}
+            </span>
+          ) : <span className="muted" style={{ fontSize: 12 }}>위키 문서의 본문 · 댓글에 ‘{issueKey}’ 를 적으면 여기에 이어집니다.</span>}
     </div>
   );
 }
@@ -950,7 +978,7 @@ function AutoCreateSettings() {
 
 /* ───────────── 설정(v2.871 — 자동 할당 · 알림 · 사람별 메일 주소) ───────────── */
 
-const EVENT_TEXT = Object.freeze({ assigned: '할당(새 담당자 · 이전 담당자)', status: '상태 변경(담당자 · 보고자 · 관찰자)', progress: '진행률·진행 메모(담당자 · 보고자 · 관찰자)', comment: '댓글 · @멘션(담당자 · 보고자 · 관찰자 · 언급된 사람)', due: '기한 내일 · 오늘 · 지남(담당자 — 포탈 날짜로 하루 한 번)' });
+const EVENT_TEXT = Object.freeze({ assigned: '할당(새 담당자 · 이전 담당자)', status: '상태 변경(담당자 · 보고자 · 관찰자)', progress: '진행률·진행 메모(담당자 · 보고자 · 관찰자)', comment: '댓글 · @멘션(담당자 · 보고자 · 관찰자 · 언급된 사람)', due: '기한 내일 · 오늘 · 지남(담당자 — 포탈 날짜로 하루 한 번)', wiki: '위키 문서 저장 · 댓글 · @멘션(지켜보는 사람 · 언급된 사람)' });
 const splitNames = (s) => String(s || '').split(/[,\s]+/).map((x) => x.trim()).filter(Boolean);
 
 /** 전체 범위 관리자 전용 — 서버가 같은 기준으로 막는다(GET·PUT /issues/settings). 조회 실패면 저장 버튼을 열지 않는다. */
