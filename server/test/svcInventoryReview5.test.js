@@ -16,7 +16,7 @@ const sm = await import('../src/servicemap/store.js');
 const { CORP_OPS } = await import('../src/servicemap/ops.js');
 const backup = await import('../src/backup/service.js');
 const { store } = await import('../src/store.js');
-const { registerSvcInventory } = await import('../src/routes/api/svcInventory.js');
+const { registerSvcInventory, backupMetaFor } = await import('../src/routes/api/svcInventory.js');
 
 const S = (id, name, extra = {}) => ({ id, name, path: '', tier: 2, owner: '', note: '', globalId: '', ...extra });
 function mapOf(corps = {}) {
@@ -62,7 +62,10 @@ test('R8: 고정 유지는 그때의 자동 판정과 같은 드리프트만 가
   const moved = resolveMember(vm('k1', 'A', '/DB'), idx, {}, pin({ reviewed: true, reviewedAuto: 's1' }));
   assert.equal(moved.drift, true, '자동 판정이 s1 → s3 로 바뀌면 다시 드리프트(예전에는 영원히 숨었다)');
   assert.deepEqual(moved.driftChanged, { reviewedAuto: 's1' });
-  assert.equal(resolveMember(vm('k1', 'A', '/ERP'), idx, {}, pin({ reviewed: true })).drift, true, 'reviewedAuto 가 없는 옛 표지는 모르는 것 — 같다고 보지 않는다');
+  const legacy = resolveMember(vm('k1', 'A', '/ERP'), idx, {}, pin({ reviewed: true }));
+  assert.equal(legacy.drift, true, 'reviewedAuto 가 없는 옛 표지는 모르는 것 — 같다고 보지 않는다');
+  assert.deepEqual(legacy.driftChanged, { legacy: true }, "'바뀜' 이 아니라 '다시 확인' — 바뀌었는지 모른다");
+  assert.deepEqual(resolveMember(vm('k1', 'A', '/ERP'), idx, {}, pin({ reviewed: true, reviewedAuto: null })).driftChanged, { reviewedAuto: null });
   assert.equal(resolveMember(vm('k1', 'A', '/ERP'), idx, {}, pin({ reviewed: true, reviewedAuto: null })).drift, true, '검토 때 자동 판정이 없었으면 새로 생긴 자동 판정은 새 드리프트');
   assert.equal(resolveMember(vm('k1', 'A', '/none'), idx, {}, pin({ reviewed: true, reviewedAuto: 's1' })).drift, false, '자동 판정이 없으면 드리프트가 아니다(예전과 같다)');
   // 저장소 정규화가 reviewedAuto 를 지킨다 — 검토하지 않은 고정에는 싣지 않는다
@@ -125,6 +128,14 @@ test('M1: 백업 칸 — 매핑 없는 법인 VM(undefined)은 해당 없음(na)
   const map = mapOf({ A: { services: [S('s1', 'ERP')], folderRules: [{ prefix: '/ERP', serviceId: 's1' }] } });
   const inv = buildInventory({ members: [vm('v1', 'A', '/ERP', { backup: undefined }), vm('v2', 'A', '/ERP', { backup: 'none' }), vm('v3', 'A', '/ERP', { backup: null }), vm('v4', 'A', '/ERP', { backup: 'ok' })], map });
   assert.deepEqual(inv.services[0].stat.backup, { ok: 1, fail: 0, none: 1, unknown: 1, na: 1 });
+});
+
+test('M1: 범위 계정의 백업 메타는 자기 법인 기준 — 함대 전체 Bareos 매핑 법인 수를 싣지 않는다', () => {
+  const g = { backupMeta: { used: true, corps: 2 }, bareosCorps: new Set(['vc-us-east', 'vc-us-west']) };
+  assert.deepEqual(backupMetaFor(g, null), { used: true, corps: 2 }, '전체 범위는 그대로');
+  assert.deepEqual(backupMetaFor(g, new Set(['vc-ap', 'vc-eu'])), { used: false }, '자기 법인에 매핑이 없으면 Bareos 미사용으로 보인다');
+  assert.deepEqual(backupMetaFor(g, new Set(['vc-us-east', 'vc-ap'])), { used: true, corps: 1 });
+  assert.deepEqual(backupMetaFor({ backupMeta: { used: true, unreadable: true } }, new Set(['x'])), { used: true, unreadable: true }, '설정을 못 읽었으면 모름 그대로');
 });
 
 test('M3/R9: 불필요한 고정은 법인·이름과 함께 목록으로 — 정리 버튼이 키를 쓴다', () => {

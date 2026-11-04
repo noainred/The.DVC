@@ -161,7 +161,7 @@ export function buildQueues({ members = [], resolved, pins = {}, allowed = null,
     const r = resolved.get(m.key);
     if (r.pinMismatch) mismatch.push({ key: m.key, name: m.name, kind: m.kind, corp: m.corp, pinCorp: r.pinMismatch.corp, serviceId: r.pinMismatch.serviceId });
     if (r.drift) drift.push({ key: m.key, name: m.name, kind: m.kind, corp: m.corp, pin: { serviceId: r.serviceId, by: pins[m.key]?.by || '', at: pins[m.key]?.at || 0 }, auto: { serviceId: r.auto.serviceId, src: r.auto.src, via: r.auto.via || '' },
-      ...(r.driftChanged ? { changed: { reviewedAuto: r.driftChanged.reviewedAuto } } : {}) });
+      ...(r.driftChanged ? { changed: r.driftChanged.legacy ? { legacy: true } : { reviewedAuto: r.driftChanged.reviewedAuto } } : {}) });
     if (r.src === 'pin' && r.redundant) redundant.push({ key: m.key, name: m.name, kind: m.kind, corp: m.corp, serviceId: r.serviceId, via: r.auto.src });
     if (r.serviceId) continue;
     let gk; let kind; let value = '';

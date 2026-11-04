@@ -234,7 +234,7 @@ async function gatherNow(snap, tagCategory) {
   }
   let bmBlocked = false;
   try { bmBlocked = (fleetKeySources(snap).unreadable || []).some((u) => u.source !== 'vcenter'); } catch { bmBlocked = true; }
-  return { members, hostByKey, unreadCorps, bmBlocked, corpNames, scanEntries, faultsMeta, backupMeta, sourceErrors, at: now };
+  return { members, hostByKey, unreadCorps, bmBlocked, corpNames, scanEntries, faultsMeta, backupMeta, bareosCorps, sourceErrors, at: now };
 }
 
 // ───────── 권한 ─────────
@@ -270,6 +270,13 @@ async function inventoryFor(req, snap) {
   const admin = isAdminDetailUser(req.user);
   const inv = buildInventory({ members: g.members, map: st.map, pins: st.pins, hostByKey: g.hostByKey, allowed, unreadCorps: g.unreadCorps, bmBlocked: g.bmBlocked, corpNames: g.corpNames, scanEntries: g.scanEntries, adminView: admin, knownCorps: knownCorpsOf(snap) });
   return { st, g, inv, allowed, admin };
+}
+/** 백업 메타를 범위로 자른다 — 범위 계정에 함대 전체의 Bareos 매핑 법인 수를 싣지 않는다(5차 1차 Chromium 확인). */
+export function backupMetaFor(g, allowed) {
+  const m = g.backupMeta || { used: false };
+  if (!allowed || !m.used || m.corps == null) return m;
+  const n = [...(g.bareosCorps || [])].filter((vc) => allowed.has(vc)).length;
+  return n ? { ...m, corps: n } : { used: false };
 }
 const maskName = (m, admin) => (!admin && m.kind === 'bm' && m.nameIsAddr ? maskedAddressName(m.name) : m.name);
 
@@ -317,7 +324,7 @@ export function registerSvcInventory(api) {
           for (const x of q.orphaned) bump(x.corp, 'orphaned');
           return o;
         })(),
-        meta: { faults: g.faultsMeta, backup: g.backupMeta, unreadCorps: [...g.unreadCorps].filter((v) => !allowed || allowed.has(v)), bmBlocked: g.bmBlocked, sourceErrors: allowed ? [] : g.sourceErrors, limits: LIMITS, snapAt: s?.generatedAt || null },
+        meta: { faults: g.faultsMeta, backup: backupMetaFor(g, allowed), unreadCorps: [...g.unreadCorps].filter((v) => !allowed || allowed.has(v)), bmBlocked: g.bmBlocked, sourceErrors: allowed ? [] : g.sourceErrors, limits: LIMITS, snapAt: s?.generatedAt || null },
       };
     }, { ttlMs: 12_000, extraKey });
   });
@@ -355,7 +362,7 @@ export function registerSvcInventory(api) {
         const unassignedOn = onHost.filter((m) => !inv.resolved.get(m.key)?.serviceId).length;
         return { name: h.name, corp: h.corp, serviceTag: h.serviceTag || '', usage: h.usage, faults: h.faults, vmHere: mine, others, unassignedOn };
       }).sort((a, b) => b.vmHere - a.vmHere || a.name.localeCompare(b.name));
-      res.json({ ok: true, rev: st.rev, members: rows, omitted: Math.max(0, list.length - CAP), hosts, faults: g.faultsMeta, backup: g.backupMeta });
+      res.json({ ok: true, rev: st.rev, members: rows, omitted: Math.max(0, list.length - CAP), hosts, faults: g.faultsMeta, backup: backupMetaFor(g, allowed) });
     } catch (e) { if (!res.headersSent) res.status(500).json({ ok: false, reason: String(e?.message || e).slice(0, 300) }); }
   });
 

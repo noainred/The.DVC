@@ -115,6 +115,7 @@ export default function SvcInventory() {
   if (sel.type === 'un') crumb.push(<b key="u" style={{ color: 'var(--amber)' }}>(미지정)</b>);
   const canWriteHere = selCorp && writableOf(selCorp);
   const selCorpRow = selCorp ? corps.find((c) => c.vcenterId === selCorp) : null;
+  const orphanOf = (vc) => !!corps.find((c) => c.vcenterId === vc)?.orphan;
   const folderOptions = selCorp ? [...new Set([...(corps.find((c) => c.vcenterId === selCorp)?.folders || []), ...servicesOf(selCorp).map((s) => s.path).filter(Boolean)])].sort() : [];
   const membersQuery = selRow ? (selRow.startsWith('un:') ? { corp: selRow.slice(3), unassigned: '1' } : { service: selRow }) : null;
 
@@ -206,9 +207,9 @@ export default function SvcInventory() {
                       <STable className="table svcinv-t" minWidth={sel.type === 'all' ? 760 : 680}>
                         <thead><tr><th>서비스</th><th>등급</th>{sel.type === 'all' ? <th>법인</th> : null}<th title="VM·베어메탈 · 호스트 = 구성원 VM 이 올라간 ESXi 호스트 수(파생)">구성원</th><th title="Σ(사용률×용량)÷Σ용량">사용률</th><th>부품 장애</th><th>백업 24h</th><th>소속 근거</th></tr></thead>
                         <tbody>
-                          {shown.map((s) => <ServiceRow key={s.id} s={s} d={d} corpName={corpName} showCorp={sel.type === 'all'} on={selRow === s.id} onClick={() => setSelRow(selRow === s.id ? '' : s.id)} />)}
+                          {shown.map((s) => <ServiceRow key={s.id} s={s} d={d} corpName={corpName} showCorp={sel.type === 'all'} orphanOf={orphanOf} on={selRow === s.id} onClick={() => setSelRow(selRow === s.id ? '' : s.id)} />)}
                           {(sel.type === 'all' ? corps : corps.filter((c) => c.vcenterId === selCorp)).filter((c) => c.unassigned && sel.type !== 'svc' && sel.type !== 'folder').map((c) => (
-                            <ServiceRow key={`un:${c.vcenterId}`} s={{ id: `un:${c.vcenterId}`, name: '(미지정)', path: '', corp: c.vcenterId, tier: null, stat: c.unassigned, unassigned: true }} d={d} corpName={corpName} showCorp={sel.type === 'all'} on={selRow === `un:${c.vcenterId}`} onClick={() => setSelRow(selRow === `un:${c.vcenterId}` ? '' : `un:${c.vcenterId}`)} />
+                            <ServiceRow key={`un:${c.vcenterId}`} s={{ id: `un:${c.vcenterId}`, name: '(미지정)', path: '', corp: c.vcenterId, tier: null, stat: c.unassigned, unassigned: true }} d={d} corpName={corpName} showCorp={sel.type === 'all'} orphanOf={orphanOf} on={selRow === `un:${c.vcenterId}`} onClick={() => setSelRow(selRow === `un:${c.vcenterId}` ? '' : `un:${c.vcenterId}`)} />
                           ))}
                         </tbody>
                       </STable>
@@ -231,7 +232,7 @@ export default function SvcInventory() {
   );
 }
 
-function ServiceRow({ s, d, corpName, showCorp, on, onClick }) {
+function ServiceRow({ s, d, corpName, showCorp, on, onClick, orphanOf }) {
   const st = s.stat;
   const stale = (d.meta?.unreadCorps || []).includes(s.corp);
   const sub = s.unassigned ? '어느 규칙에도 안 걸린 구성원' : [s.path || '(루트)', s.owner || '담당자 미지정'].join(' · ');
@@ -242,7 +243,7 @@ function ServiceRow({ s, d, corpName, showCorp, on, onClick }) {
         <div className="svcinv-sub" style={!s.unassigned && !s.owner ? { color: 'var(--text-faint)' } : undefined}>{sub}</div>
       </td>
       <td data-sort={s.tier ?? 9}>{s.tier ? <TierBadge tier={s.tier} /> : <span className="muted">—</span>}</td>
-      {showCorp ? <td data-sort={corpName(s.corp)}>{corpName(s.corp).replace(/^vcenter-/, '')}</td> : null}
+      {showCorp ? <td data-sort={corpName(s.corp)}>{corpName(s.corp).replace(/^vcenter-/, '')}{orphanOf?.(s.corp) ? <div><span className="badge gray" title="등록 해제된 vCenter — 서비스·규칙·고정만 남아 있습니다">등록 해제</span></div> : null}</td> : null}
       <td data-sort={st.n.total}><MemberCount st={st} /></td>
       <td data-sort={st.usage.cpu ?? ''}><UsagePair cpu={st.usage.cpu} mem={st.usage.mem} missing={st.usage.unread + st.usage.stale} /></td>
       <td><FaultCell f={st.faults} meta={d.meta?.faults} stale={stale} /></td>
@@ -369,7 +370,7 @@ function CorpTree({ corps, servicesOf, noCorp, sel, open, onSel, onToggle }) {
             <span style={{ width: 10, color: 'var(--text-faint)', fontSize: 10 }}>{r.tw || ''}</span>
             <span>{r.icon}</span>
             <span className="nm" title={r.name} style={r.un ? { color: 'var(--amber)' } : undefined}>{r.name}{r.empty ? <span className="muted"> (빈)</span> : null}</span>
-            {r.orphan ? <span className="badge gray" title="이 vCenter 는 등록이 해제됐습니다 — 서비스·규칙·고정만 남아 있습니다">등록 해제</span> : null}
+            {r.orphan ? <span className="badge gray" style={{ flex: 'none' }} title="등록 해제된 vCenter — 서비스·규칙·고정만 남아 있습니다">해제</span> : null}
             {r.tier ? <TierBadge tier={r.tier} /> : null}
             <span className="cnt">{r.n}</span>
           </div>

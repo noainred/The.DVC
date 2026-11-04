@@ -106,5 +106,6 @@ export function resolveMember(m, idx, ctx = {}, pins = {}) {
   const differs = !!auto.serviceId && auto.serviceId !== pin.serviceId;
   const sameAsReviewed = pin.reviewed === true && pin.reviewedAuto !== undefined && (pin.reviewedAuto ?? null) === (auto.serviceId ?? null);
   return { serviceId: pin.serviceId, src: 'pin', via: pin.by || '', auto, drift: differs && !sameAsReviewed, redundant: auto.serviceId === pin.serviceId,
-    ...(differs && pin.reviewed === true && !sameAsReviewed ? { driftChanged: { reviewedAuto: pin.reviewedAuto ?? null } } : {}) };
+    // legacy = 검토 당시 자동 판정을 기록하지 않은 옛 표지(바뀌었는지 모른다 — '바뀜' 이 아니라 '다시 확인')
+    ...(differs && pin.reviewed === true && !sameAsReviewed ? { driftChanged: pin.reviewedAuto === undefined ? { legacy: true } : { reviewedAuto: pin.reviewedAuto } } : {}) };
 }

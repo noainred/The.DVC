@@ -138,7 +138,9 @@ export function ReviewView({ corp, reloadKey, svcName, writableOf, op, busy, cor
                 <td data-sort={x.name} title={x.key}><b>{x.name}</b><div className="svcinv-sub">{corpName(x.corp)}</div><div className="svcinv-sub" style={{ fontFamily: 'var(--mono)' }}>{x.key}</div></td>
                 <td>{svcName(x.pin.serviceId)}<div className="svcinv-sub">{x.pin.by || '?'}{x.pin.at ? ` · ${new Date(x.pin.at).toLocaleDateString()}` : ''}</div></td>
                 <td>{svcName(x.auto.serviceId)} <span className="badge blue">{SRC_LABEL[x.auto.src] || x.auto.src}</span>
-                  {x.changed ? <span className="badge amber" style={{ marginLeft: 4 }} title="‘고정 유지’ 를 누른 뒤 자동 판정이 바뀌었습니다 — 다시 고릅니다">바뀜 {x.changed.reviewedAuto ? `${svcName(x.changed.reviewedAuto)} → ` : ''}{svcName(x.auto.serviceId)}</span> : null}
+                  {/* 바뀜 표지는 줄을 따로 — 같은 줄에 두면 1440px 에서 조치 열이 가로 스크롤 뒤로 밀린다(실측) */}
+                  {x.changed?.legacy ? <div><span className="badge amber" title="업그레이드 전에 ‘고정 유지’ 한 항목입니다 — 그때의 자동 판정을 기록하지 않아 바뀌었는지 모릅니다. 한 번 다시 고르면 이후에는 같은 드리프트를 묻지 않습니다">다시 확인</span></div>
+                    : x.changed ? <div><span className="badge amber" title={`‘고정 유지’ 를 누른 뒤 자동 판정이 바뀌었습니다(${x.changed.reviewedAuto ? svcName(x.changed.reviewedAuto) : '자동 판정 없음'} → ${svcName(x.auto.serviceId)}) — 다시 고릅니다`}>바뀜</span></div> : null}
                   <div className="svcinv-sub" title={x.auto.via}>{x.auto.via}</div></td>
                 <td>{writableOf(x.corp) ? (
                   <span className="flex wrap gap">
