@@ -1,0 +1,218 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>이슈 설정 — 파트 장애 자동 등록 · 자동화 규칙 · 리포트</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=Noto+Sans+KR:wght@400;500;700;800&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+body{margin:0;background:#0a0e17;color:#e6edf6;font-family:"Inter","Noto Sans KR","Apple SD Gothic Neo",sans-serif;font-size:13px}
+a{color:#93c5fd}a:hover{color:#bfdbfe}
+.tb{display:flex;align-items:center;gap:14px;height:44px;padding:0 16px;background:#0f1626;border-bottom:1px solid #243049}
+.tb .logo{display:inline-flex;align-items:center;gap:8px;font-weight:800;font-size:14px}
+.tb .logo .v{width:26px;height:26px;border-radius:7px;background:#3b82f6;display:inline-flex;align-items:center;justify-content:center;font-size:13px;color:#fff}
+.ver{font-size:11px;font-weight:700;color:#5eead4;border:1px solid #2dd4bf;border-radius:6px;padding:1px 6px}
+.mock{font-size:11px;font-weight:800;color:#fcd34d;background:rgba(245,158,11,.16);border-radius:6px;padding:2px 7px}
+.side{flex:0 0 236px;background:#0f1626;border-right:1px solid #243049;padding:14px 10px;display:flex;flex-direction:column;gap:2px}
+.side a{display:flex;align-items:center;gap:10px;min-height:36px;padding:0 12px;border-radius:9px;color:#aebbd0;text-decoration:none;font-size:13.5px;font-weight:600}
+.side a.on{background:#1a2236;color:#e6edf6;box-shadow:inset 3px 0 0 #3b82f6}
+.side .n{margin-left:auto;font-size:11px;color:#5d6b85}
+.card{background:#141b2d;border:1px solid #243049;border-radius:12px}
+.muted{color:#8b9bb4}.faint{color:#5d6b85}
+.mono{font-family:"JetBrains Mono",ui-monospace,monospace}
+.btn{display:inline-flex;align-items:center;gap:6px;min-height:30px;padding:0 11px;border-radius:8px;border:1px solid #243049;background:#1a2236;color:#e6edf6;font:inherit;font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap;text-decoration:none}
+.btn.primary{background:#3b82f6;border-color:#3b82f6;color:#fff}
+.btn.sm{min-height:26px;padding:0 9px;font-size:11.5px}
+.tag{display:inline-flex;align-items:center;gap:5px;height:20px;padding:0 8px;border-radius:999px;font-size:11px;font-weight:700;white-space:nowrap}
+.tag.blue{background:rgba(59,130,246,.18);color:#93c5fd}.tag.gray{background:rgba(139,155,180,.14);color:#aebbd0}.tag.ok{background:rgba(34,197,94,.14);color:#86efac}.tag.warn{background:rgba(245,158,11,.16);color:#fcd34d}.tag.bad{background:rgba(239,68,68,.16);color:#fca5a5}.tag.purple{background:rgba(168,85,247,.18);color:#d8b4fe}.tag.teal{background:rgba(45,212,191,.16);color:#5eead4}
+.key{font-family:"JetBrains Mono",monospace;color:#8b9bb4;font-size:12px}
+.av{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:50%;font-size:10px;font-weight:800;color:#fff;flex:0 0 auto}
+.input{min-height:30px;border:1px solid #243049;border-radius:8px;background:#0a0e17;color:#e6edf6;font:inherit;font-size:12.5px;padding:0 10px}
+.sw{display:inline-flex;align-items:center;gap:8px;font-weight:700}
+.sw i{display:inline-block;width:34px;height:18px;border-radius:9px;background:#243049;position:relative}
+.sw i::after{content:"";position:absolute;top:2px;left:2px;width:14px;height:14px;border-radius:50%;background:#8b9bb4}
+.sw.on i{background:#3b82f6}.sw.on i::after{left:18px;background:#fff}
+.seg{display:inline-flex;border:1px solid #243049;border-radius:7px;overflow:hidden;background:#0a0e17}
+.seg span{display:inline-flex;align-items:center;min-height:22px;padding:0 8px;font-size:11px;font-weight:700;color:#5d6b85;border-right:1px solid #243049;white-space:nowrap}
+.seg span:last-child{border-right:0}
+.seg span.on{background:#3b82f6;color:#fff}.seg span.on.w{background:#b45309;color:#fff}.seg span.on.off{background:#243049;color:#e6edf6}
+table{border-collapse:collapse;width:100%}
+th{font-size:12px;font-weight:600;color:#8b9bb4;text-align:left;padding:7px 10px;background:#0f1626;border-bottom:1px solid #243049;white-space:nowrap}
+td{padding:5px 10px;border-bottom:1px solid #1f2a40;vertical-align:middle;font-size:12.5px}
+.rule{display:flex;align-items:center;gap:10px;padding:9px 12px;border:1px solid #243049;border-radius:10px;background:#0f1626;font-size:12.5px;flex-wrap:wrap}
+.rule .w{color:#5eead4;font-weight:700}.rule .t{color:#d8b4fe;font-weight:700}
+.bars{display:flex;align-items:flex-end;gap:6px;height:70px}
+.bars div{flex:1;display:flex;flex-direction:column;justify-content:flex-end;gap:2px;min-width:0}
+.bars i{display:block;border-radius:3px 3px 0 0}
+.bars i.c{background:#3b82f6}.bars i.r{background:#22c55e}
+.kpi{display:flex;flex-direction:column;gap:2px;padding:8px 10px;border-radius:8px;background:#0f1626;border:1px solid #243049;min-width:0}
+.kpi b{font-size:18px;font-family:"JetBrains Mono",monospace}
+.kpi span{font-size:11px;color:#8b9bb4}
+.sb{display:flex;align-items:center;height:30px;background:#0f1626;border-top:1px solid #243049;font-family:"JetBrains Mono",monospace;font-size:11.5px;color:#8b9bb4}
+.sb span{flex:1;text-align:center;border-right:1px solid #243049}.sb span:last-child{border-right:0}.sb b{color:#e6edf6}
+</style>
+</helmet>
+
+<div style="min-height: 100vh; display: flex; flex-direction: column; background: #0a0e17">
+  <header class="tb">
+    <span class="muted" aria-hidden="true">☰</span>
+    <span class="logo"><span class="v">V</span>The Davinci</span>
+    <span class="ver">v2.876.0</span><span class="mock">MOCK</span>
+    <span style="flex: 1"></span>
+    <span class="mono muted" style="font-size: 11.5px">11/11 vCenter <b style="color: #22c55e">OK</b> · 오전 10:38</span>
+    <span class="av" style="background: #3b82f6; width: 24px; height: 24px">A</span>
+    <span style="font-size: 12.5px; font-weight: 700">Anonymous <span class="muted" style="font-weight: 400; font-size: 11px">관리자</span></span>
+    <button class="btn sm" type="button">Out</button>
+  </header>
+
+  <div style="display: flex; flex-wrap: wrap; flex: 1">
+    <nav class="side" aria-label="메뉴">
+      <a href="#"><span aria-hidden="true">◫</span>Overview</a>
+      <a href="#"><span aria-hidden="true">▤</span>Summary</a>
+      <a href="#"><span aria-hidden="true">▣</span>서버<span class="n">6 ▾</span></a>
+      <a href="#"><span aria-hidden="true">▥</span>스토리지<span class="n">7 ▾</span></a>
+      <a href="#"><span aria-hidden="true">⌘</span>네트워크<span class="n">6 ▾</span></a>
+      <a href="#"><span aria-hidden="true">⚙</span>자원관리<span class="n">3 ▾</span></a>
+      <a href="#"><span aria-hidden="true">◔</span>자원 최적화<span class="n">2 ▾</span></a>
+      <a href="#"><span aria-hidden="true">✦</span>특수 기능</a>
+      <a href="IssueEpic.dc.html" class="on"><span aria-hidden="true">⚑</span>이슈</a>
+      <a href="Main.dc.html"><span aria-hidden="true">▧</span>위키</a>
+      <a href="#"><span aria-hidden="true">▭</span>게시판</a>
+      <a href="#"><span aria-hidden="true">✲</span>설정<span class="n">2 ▾</span></a>
+    </nav>
+
+    <main style="flex: 999 1 560px; min-width: 0; padding: 16px 22px 24px; display: flex; flex-direction: column; gap: 12px">
+      <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap">
+        <div style="display: inline-flex; gap: 6px; flex-wrap: wrap"><a class="btn" href="IssueEpic.dc.html">보드</a><a class="btn" href="SavedFilter.dc.html">목록</a><a class="btn" href="#">내 작업</a><a class="btn" href="#">활동</a><a class="btn" href="Sprint.dc.html">스프린트</a><a class="btn" href="#">에픽</a><a class="btn" href="SavedFilter.dc.html">필터</a><a class="btn" href="#">리포트 <span class="tag purple" style="height: 16px; font-size: 10px; padding: 0 6px">NEW</span></a><a class="btn primary" href="AutoIssue.dc.html">설정</a></div>
+        <span style="flex: 1"></span>
+        <span class="muted" style="font-size: 12px">전체 범위 관리자만 · 저장은 감사 로그에</span>
+      </div>
+      <div style="display: inline-flex; gap: 6px; flex-wrap: wrap"><button class="btn sm" type="button">자동 할당</button><button class="btn sm" type="button">알림</button><button class="btn sm primary" type="button">자동 등록</button><button class="btn sm" type="button">SLA</button><button class="btn sm" type="button">자동화 규칙</button><button class="btn sm" type="button">템플릿</button></div>
+
+      <!-- A. 파트 장애 → 이슈 -->
+      <section class="card" style="padding: 16px 18px; display: flex; flex-direction: column; gap: 12px">
+        <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap">
+          <label class="sw on"><i aria-hidden="true"></i><input type="checkbox" checked style="position: absolute; opacity: 0" aria-label="파트 장애 자동 등록 켜기"><span style="font-size: 15px">하드웨어 파트 장애가 열리면 이슈를 자동 등록</span></label>
+          <span class="muted" style="font-size: 12px">중앙이 전이(열림 · 변화 · 해소)를 받는 자리에서 — 파트 장애 기능이 켜진 법인만(특수 기능 › 파트 장애)</span>
+          <span style="flex: 1"></span>
+          <span class="tag ok">마지막 처리 10:36 · 오늘 이슈 3 · 댓글 7</span>
+        </div>
+
+        <div style="display: flex; gap: 14px; flex-wrap: wrap; align-items: flex-start">
+          <!-- 매트릭스 -->
+          <div style="flex: 1 1 560px; min-width: 0">
+            <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 6px; flex-wrap: wrap"><b>어떤 장애를 등록할지 — 부품 종류 × 장비군</b><span class="faint" style="font-size: 11.5px">끔 · fault 만 · fault + warn(주의 — 예측 실패 · 성능 저하). unknown · absent 는 장애가 아니라 등록하지 않습니다.</span></div>
+            <div style="overflow-x: auto">
+              <table>
+                <thead><tr><th>부품 종류</th><th>물리 서버(iDRAC)</th><th>스토리지</th><th>SAN 스위치</th><th>ESXi 호스트</th><th>우선순위</th></tr></thead>
+                <tbody>
+                  <tr><td><b>디스크</b></td><td><span class="seg"><span>끔</span><span>fault</span><span class="on w">fault + warn</span></span></td><td><span class="seg"><span>끔</span><span>fault</span><span class="on w">fault + warn</span></span></td><td><span class="faint">—</span></td><td><span class="seg"><span>끔</span><span class="on">fault</span><span>fault + warn</span></span></td><td><select class="input" aria-label="디스크 우선순위" style="min-height: 26px"><option selected>P1 높음</option><option>P0 긴급</option><option>P2 보통</option></select></td></tr>
+                  <tr><td><b>PSU</b></td><td><span class="seg"><span>끔</span><span class="on">fault</span><span>fault + warn</span></span></td><td><span class="seg"><span>끔</span><span class="on">fault</span><span>fault + warn</span></span></td><td><span class="seg"><span>끔</span><span class="on">fault</span><span>fault + warn</span></span></td><td><span class="faint">—</span></td><td><select class="input" aria-label="PSU 우선순위" style="min-height: 26px"><option selected>P1 높음</option><option>P0 긴급</option></select></td></tr>
+                  <tr><td><b>메모리(DIMM)</b></td><td><span class="seg"><span>끔</span><span class="on">fault</span><span>fault + warn</span></span></td><td><span class="seg"><span>끔</span><span class="on">fault</span><span>fault + warn</span></span></td><td><span class="faint">—</span></td><td><span class="seg"><span>끔</span><span class="on">fault</span><span>fault + warn</span></span></td><td><select class="input" aria-label="메모리 우선순위" style="min-height: 26px"><option selected>P1 높음</option></select></td></tr>
+                  <tr><td><b>팬</b></td><td><span class="seg"><span>끔</span><span class="on">fault</span><span>fault + warn</span></span></td><td><span class="seg"><span>끔</span><span class="on">fault</span><span>fault + warn</span></span></td><td><span class="seg"><span>끔</span><span class="on">fault</span><span>fault + warn</span></span></td><td><span class="faint">—</span></td><td><select class="input" aria-label="팬 우선순위" style="min-height: 26px"><option selected>P2 보통</option></select></td></tr>
+                  <tr><td><b>CPU</b></td><td><span class="seg"><span>끔</span><span class="on">fault</span><span>fault + warn</span></span></td><td><span class="faint">—</span></td><td><span class="faint">—</span></td><td><span class="seg"><span>끔</span><span class="on">fault</span><span>fault + warn</span></span></td><td><select class="input" aria-label="CPU 우선순위" style="min-height: 26px"><option selected>P0 긴급</option></select></td></tr>
+                  <tr><td><b>GPU</b></td><td><span class="seg"><span>끔</span><span class="on">fault</span><span>fault + warn</span></span></td><td><span class="faint">—</span></td><td><span class="faint">—</span></td><td><span class="seg"><span>끔</span><span class="on">fault</span><span>fault + warn</span></span></td><td><select class="input" aria-label="GPU 우선순위" style="min-height: 26px"><option selected>P1 높음</option></select></td></tr>
+                  <tr><td><b>스토리지 컨트롤러</b></td><td><span class="faint">—</span></td><td><span class="seg"><span>끔</span><span class="on">fault</span><span>fault + warn</span></span></td><td><span class="faint">—</span></td><td><span class="faint">—</span></td><td><select class="input" aria-label="컨트롤러 우선순위" style="min-height: 26px"><option selected>P0 긴급</option></select></td></tr>
+                  <tr><td><b>NIC</b></td><td><span class="seg"><span>끔</span><span class="on">fault</span><span>fault + warn</span></span></td><td><span class="faint">—</span></td><td><span class="faint">—</span></td><td><span class="seg"><span>끔</span><span class="on">fault</span><span>fault + warn</span></span></td><td><select class="input" aria-label="NIC 우선순위" style="min-height: 26px"><option selected>P2 보통</option></select></td></tr>
+                  <tr><td><b>노드 / SP</b></td><td><span class="faint">—</span></td><td><span class="seg"><span>끔</span><span class="on">fault</span><span>fault + warn</span></span></td><td><span class="faint">—</span></td><td><span class="faint">—</span></td><td><select class="input" aria-label="노드 우선순위" style="min-height: 26px"><option selected>P0 긴급</option></select></td></tr>
+                  <tr><td><b>SFP · 포트</b></td><td><span class="faint">—</span></td><td><span class="seg"><span>끔</span><span class="on">fault</span><span>fault + warn</span></span></td><td><span class="seg"><span>끔</span><span>fault</span><span class="on w">fault + warn</span></span></td><td><span class="faint">—</span></td><td><select class="input" aria-label="포트 우선순위" style="min-height: 26px"><option selected>P2 보통</option></select></td></tr>
+                  <tr><td><b>배터리 · 인클로저 · 센서</b></td><td><span class="seg"><span>끔</span><span class="on">fault</span><span>fault + warn</span></span></td><td><span class="seg"><span>끔</span><span class="on">fault</span><span>fault + warn</span></span></td><td><span class="seg"><span>끔</span><span class="on">fault</span><span>fault + warn</span></span></td><td><span class="faint">—</span></td><td><select class="input" aria-label="배터리 우선순위" style="min-height: 26px"><option selected>P2 보통</option></select></td></tr>
+                  <tr><td><b>PCIe 카드 · 기타</b></td><td><span class="seg"><span class="on off">끔</span><span>fault</span><span>fault + warn</span></span></td><td><span class="seg"><span class="on off">끔</span><span>fault</span><span>fault + warn</span></span></td><td><span class="seg"><span class="on off">끔</span><span>fault</span><span>fault + warn</span></span></td><td><span class="seg"><span class="on off">끔</span><span>fault</span><span>fault + warn</span></span></td><td><select class="input" aria-label="기타 우선순위" style="min-height: 26px"><option selected>P3 낮음</option></select></td></tr>
+                </tbody>
+              </table>
+            </div>
+            <div class="faint" style="font-size: 11.5px; margin-top: 6px">‘—’ 는 그 장비군이 그 부품을 보고하지 않는 칸(추출기 없음 — 지어내지 않음). PDU 는 부품 상태 필드가 없어 대상이 아닙니다. 법인마다 따로 끄려면 아래 ‘법인별 예외’.</div>
+          </div>
+
+          <!-- 규칙 -->
+          <div style="flex: 1 1 320px; min-width: 0; display: flex; flex-direction: column; gap: 10px; font-size: 12.5px">
+            <div class="card" style="padding: 10px 12px; display: flex; flex-direction: column; gap: 6px; background: #0f1626">
+              <b>만드는 이슈</b>
+              <span>유형 <span class="tag bad">장애</span> · 법인 = 그 엣지의 vCenter(법인 · vCenter · Bareos 1:1:1) · 컴포넌트 = 부품 종류 이름(‘디스크’) → <b>자동 할당 규칙</b>이 담당자를 정함</span>
+              <label style="display: flex; align-items: center; gap: 6px">에픽 <select class="input" aria-label="에픽" style="flex: 1; min-width: 0; min-height: 26px"><option>없음</option><option selected>ISS-31 하드웨어 교체(2026-4Q)</option></select></label>
+              <label style="display: flex; align-items: center; gap: 6px">라벨 <input class="input" type="text" value="partfault, auto" aria-label="라벨" style="flex: 1; min-width: 0; min-height: 26px"></label>
+              <label style="display: flex; flex-direction: column; gap: 3px">제목 틀 <input class="input" type="text" value="[파트 장애] {법인} · {장비} · {부품종류} {부품} {상태}" aria-label="제목 틀" style="min-height: 26px; font-family: 'JetBrains Mono', monospace; font-size: 11.5px"></label>
+              <span class="faint" style="font-size: 11.5px">본문: 장비 · 부품 · 키 신뢰도(시리얼 / 슬롯 / 합성 순번) · 처음 감지 시각 · 파트 장애 화면 링크 · 라벨 ‘partfault’ 가 붙은 위키 런북 링크.</span>
+            </div>
+            <div class="card" style="padding: 10px 12px; display: flex; flex-direction: column; gap: 6px; background: #0f1626">
+              <b>중복 · 폭주 막기</b>
+              <label style="display: flex; align-items: center; gap: 6px"><input type="checkbox" checked> 같은 (법인 · 파트 키)에 열린 이슈가 있으면 새로 만들지 않고 댓글(‘다시 열림 2회째’)</label>
+              <label style="display: flex; align-items: center; gap: 6px; flex-wrap: wrap"><input type="checkbox" checked> 한 장비에서 <input class="input" type="text" value="5" aria-label="분" style="width: 44px; min-height: 24px">분 안에 <input class="input" type="text" value="5" aria-label="건" style="width: 44px; min-height: 24px">건 넘으면 장비 단위 1건(부품 목록은 본문)</label>
+              <label style="display: flex; align-items: center; gap: 6px"><input type="checkbox" checked> 하루 상한 <input class="input" type="text" value="50" aria-label="하루 상한" style="width: 54px; min-height: 24px">건 — 넘으면 멈추고 상태에 ‘상한 도달’ 표시(조용히 버리지 않음)</label>
+            </div>
+            <div class="card" style="padding: 10px 12px; display: flex; flex-direction: column; gap: 6px; background: #0f1626">
+              <b>장애가 바뀌면</b>
+              <span>정상 복귀(ok) · 부품 제거(removed) → 댓글 + 상태를 <select class="input" aria-label="해소 시 상태" style="min-height: 24px; display: inline-block"><option selected>검토</option><option>그대로</option></select>(완료는 사람이)</span>
+              <span>수동 닫음(manual) → 댓글만 · 보류(unknown · 컬렉션 실패) → 댓글 ‘판정 보류’, 닫지 않음</span>
+              <label style="display: flex; align-items: center; gap: 6px"><input type="checkbox"> 파트 장애 자체 알림은 끄고 이슈 알림(담당자 메일 · 팀 채팅)만 보냄 — 두 통 방지</label>
+            </div>
+            <div style="display: flex; gap: 6px; flex-wrap: wrap"><button class="btn sm" type="button">법인별 예외(2)</button><button class="btn sm" type="button">지난 24시간으로 시험 실행</button><button class="btn primary" type="button">저장</button></div>
+          </div>
+        </div>
+
+        <!-- 시험 실행 결과 + 예시 이슈 -->
+        <div style="display: flex; gap: 12px; flex-wrap: wrap; align-items: stretch">
+          <div class="card" style="flex: 1 1 360px; min-width: 0; padding: 10px 12px; background: #0f1626; font-size: 12.5px">
+            <b>시험 실행 — 지난 24시간 전이 41건에 이 설정을 대면</b>
+            <div class="muted" style="margin-top: 4px; line-height: 1.7">이슈 <b style="color: #e6edf6">3건</b> 생성 · 댓글 7 · 건너뜀 31(꺼진 종류 4 · unknown/absent 19 · 중복 6 · 파트 장애 꺼진 법인 2)<br>→ vc-pl-waw esxi-plwaw-03 디스크 Bay 5 fault · vc-eu-central unity-fra-01 PSU B fault · vc-us-east r740-ash-11 DIMM A7 warn(예측 실패)</div>
+          </div>
+          <a class="card" href="IssueFeatures.dc.html" style="flex: 1 1 420px; min-width: 0; padding: 10px 12px; text-decoration: none; color: #e6edf6; display: flex; flex-direction: column; gap: 5px">
+            <span style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap"><span class="tag teal">자동 등록 · 파트 장애</span><span class="key">ISS-30</span><span style="color: #fca5a5; font-weight: 800; font-size: 12px">장애</span><span class="tag blue">진행 중</span><span class="tag purple">ISS-31</span></span>
+            <b>[파트 장애] 서울 · esxi-plwaw-03 · 디스크 Bay 5 fault</b>
+            <span class="muted" style="font-size: 12px">처음 감지 11-04 06:12 · 키 신뢰도 시리얼(…7K2Q) · 담당자 park(자동 할당 ‘디스크’) · P1 · 런북 <a href="Main.dc.html">디스크 교체 절차</a></span>
+            <span class="muted" style="font-size: 12px">댓글 1 — 06:42 자동: ‘같은 파트가 다시 열림(2회째) — 재부팅 뒤 재발’</span>
+          </a>
+        </div>
+      </section>
+
+      <!-- B. 다른 알람 -->
+      <section class="card" style="padding: 14px 18px; display: flex; flex-direction: column; gap: 8px">
+        <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap"><b>다른 알람도 같은 틀로</b><span class="muted" style="font-size: 12px">· 이번 범위는 파트 장애만 구현하고, 아래는 같은 훅 자리에 하나씩 붙입니다(다음 단계 — 켜지지 않습니다)</span></div>
+        <div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; font-size: 12.5px">
+          <div class="rule"><label class="sw"><i aria-hidden="true"></i><input type="checkbox" style="position: absolute; opacity: 0" aria-label="vCenter 연결 끊김"></label>vCenter 연결 끊김 10분 이상<span class="tag gray" style="margin-left: auto">다음 단계</span></div>
+          <div class="rule"><label class="sw"><i aria-hidden="true"></i><input type="checkbox" style="position: absolute; opacity: 0" aria-label="백업 실패"></label>백업 잡 실패(Bareos · Veeam)<span class="tag gray" style="margin-left: auto">다음 단계</span></div>
+          <div class="rule"><label class="sw"><i aria-hidden="true"></i><input type="checkbox" style="position: absolute; opacity: 0" aria-label="인증서 만료"></label>TLS 인증서 만료 D-7<span class="tag gray" style="margin-left: auto">다음 단계</span></div>
+          <div class="rule"><label class="sw"><i aria-hidden="true"></i><input type="checkbox" style="position: absolute; opacity: 0" aria-label="데이터스토어"></label>데이터스토어 사용 90% 이상<span class="tag gray" style="margin-left: auto">다음 단계</span></div>
+          <div class="rule"><label class="sw"><i aria-hidden="true"></i><input type="checkbox" style="position: absolute; opacity: 0" aria-label="엣지 보고 없음"></label>엣지 보고 없음 30분<span class="tag gray" style="margin-left: auto">다음 단계</span></div>
+          <div class="rule"><label class="sw"><i aria-hidden="true"></i><input type="checkbox" style="position: absolute; opacity: 0" aria-label="복원 리허설 실패"></label>복원 리허설 실패<span class="tag gray" style="margin-left: auto">다음 단계</span></div>
+        </div>
+      </section>
+
+      <!-- C. 자동화 규칙 + D. 리포트 -->
+      <div style="display: flex; gap: 12px; flex-wrap: wrap; align-items: flex-start">
+        <section class="card" style="flex: 1 1 480px; min-width: 0; padding: 14px 18px; display: flex; flex-direction: column; gap: 8px">
+          <div style="display: flex; align-items: center; gap: 8px"><b>자동화 규칙 · 4</b><span class="muted" style="font-size: 12px">‘언제 → 무엇을’ 한 줄 — 서버가 이슈 이벤트에서 돌립니다</span><span style="flex: 1"></span><button class="btn sm" type="button">+ 규칙</button></div>
+          <div class="rule"><span class="w">상태가 완료로 바뀌면</span>→<span class="t">관련 위키 체크리스트의 그 이슈 항목을 완료로</span><span class="tag ok" style="margin-left: auto">켬</span></div>
+          <div class="rule"><span class="w">진행 중인데 7일 갱신 없으면</span>→<span class="t">담당자에게 알림 · 보드에 ‘멈춤’ 배지</span><span class="tag ok" style="margin-left: auto">켬</span></div>
+          <div class="rule"><span class="w">P0 장애가 등록되면</span>→<span class="t">팀 채팅 즉시(묶지 않고) · SLA 시계 시작</span><span class="tag ok" style="margin-left: auto">켬</span></div>
+          <div class="rule"><span class="w">하위 작업이 모두 완료되면</span>→<span class="t">상위 이슈를 검토로</span><span class="tag gray" style="margin-left: auto">끔</span></div>
+          <span class="faint" style="font-size: 11.5px">규칙은 고정 목록에서 고릅니다(자유 스크립트 없음 — 서버에서 안전하게 돌릴 수 있는 것만). 실행 기록은 이슈 이력에 ‘자동화’ 로 남습니다.</span>
+        </section>
+        <section class="card" style="flex: 1 1 420px; min-width: 0; padding: 14px 18px; display: flex; flex-direction: column; gap: 8px">
+          <div style="display: flex; align-items: center; gap: 8px"><b>리포트 · 최근 4주</b><span class="muted" style="font-size: 12px">생성 · 해결 추세 — 리포트 탭에서 법인 · 유형 · 담당자별로</span></div>
+          <div style="display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px">
+            <div class="kpi"><b>37</b><span>생성 · 4주</span></div><div class="kpi"><b>31</b><span>해결</span></div><div class="kpi"><b>1.8일</b><span>평균 해결(완료만)</span></div><div class="kpi"><b>24%</b><span>자동 등록 비율</span></div>
+          </div>
+          <div class="bars" role="img" aria-label="주별 생성(파랑)과 해결(초록) — 10/13주 9/7 · 10/20주 8/9 · 10/27주 11/8 · 11/3주 9/7">
+            <div><i class="c" style="height: 45px"></i><i class="r" style="height: 35px"></i></div><div><i class="c" style="height: 40px"></i><i class="r" style="height: 45px"></i></div><div><i class="c" style="height: 55px"></i><i class="r" style="height: 40px"></i></div><div><i class="c" style="height: 45px"></i><i class="r" style="height: 35px"></i></div>
+          </div>
+          <div class="faint" style="font-size: 11px; display: flex; justify-content: space-between"><span>10/13</span><span>10/20</span><span>10/27</span><span>11/3</span></div>
+          <span class="faint" style="font-size: 11.5px">평균 해결 시간은 완료된 이슈만으로(보류 시간 제외) · 법인별 열린 이슈 · 담당자별 투입 시간(시간 추적) · SLA 준수율 — 전부 서버 집계(화면 복제 금지) · CSV.</span>
+        </section>
+      </div>
+    </main>
+  </div>
+  <footer class="sb" aria-label="상태"><span>서버 Uptime <b>6일</b></span><span>전체 호스트 <b>658</b></span><span>전체 VM <b>5,850</b> (5,412 On)</span><span>활성 알람 <b style="color: #ef4444">3</b></span></footer>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1560}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

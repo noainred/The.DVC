@@ -1,0 +1,216 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>위키 — 마크다운 블록 · 포탈 매크로 · 인라인 댓글 · 슬래시 명령</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=Noto+Sans+KR:wght@400;500;700;800&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+body{margin:0;background:#0a0e17;color:#e6edf6;font-family:"Inter","Noto Sans KR","Apple SD Gothic Neo",sans-serif;font-size:13px}
+a{color:#93c5fd}a:hover{color:#bfdbfe}
+.tb{display:flex;align-items:center;gap:14px;height:44px;padding:0 16px;background:#0f1626;border-bottom:1px solid #243049}
+.tb .logo{display:inline-flex;align-items:center;gap:8px;font-weight:800;font-size:14px}
+.tb .logo .v{width:26px;height:26px;border-radius:7px;background:#3b82f6;display:inline-flex;align-items:center;justify-content:center;font-size:13px;color:#fff}
+.ver{font-size:11px;font-weight:700;color:#5eead4;border:1px solid #2dd4bf;border-radius:6px;padding:1px 6px}
+.mock{font-size:11px;font-weight:800;color:#fcd34d;background:rgba(245,158,11,.16);border-radius:6px;padding:2px 7px}
+.side{flex:0 0 236px;background:#0f1626;border-right:1px solid #243049;padding:14px 10px;display:flex;flex-direction:column;gap:2px}
+.side a{display:flex;align-items:center;gap:10px;min-height:36px;padding:0 12px;border-radius:9px;color:#aebbd0;text-decoration:none;font-size:13.5px;font-weight:600}
+.side a.on{background:#1a2236;color:#e6edf6;box-shadow:inset 3px 0 0 #3b82f6}
+.side .n{margin-left:auto;font-size:11px;color:#5d6b85}
+.card{background:#141b2d;border:1px solid #243049;border-radius:12px}
+.muted{color:#8b9bb4}.faint{color:#5d6b85}
+.mono{font-family:"JetBrains Mono",ui-monospace,monospace}
+.btn{display:inline-flex;align-items:center;gap:6px;min-height:30px;padding:0 11px;border-radius:8px;border:1px solid #243049;background:#1a2236;color:#e6edf6;font:inherit;font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap;text-decoration:none}
+.btn.primary{background:#3b82f6;border-color:#3b82f6;color:#fff}
+.btn.sm{min-height:26px;padding:0 9px;font-size:11.5px}
+.tag{display:inline-flex;align-items:center;gap:5px;height:20px;padding:0 8px;border-radius:999px;font-size:11px;font-weight:700;white-space:nowrap}
+.tag.blue{background:rgba(59,130,246,.18);color:#93c5fd}.tag.gray{background:rgba(139,155,180,.14);color:#aebbd0}.tag.ok{background:rgba(34,197,94,.14);color:#86efac}.tag.warn{background:rgba(245,158,11,.16);color:#fcd34d}.tag.bad{background:rgba(239,68,68,.16);color:#fca5a5}.tag.purple{background:rgba(168,85,247,.18);color:#d8b4fe}
+.iss{display:inline-flex;align-items:center;gap:6px;height:22px;padding:0 8px 0 6px;border-radius:6px;border:1px solid #243049;background:#0f1626;color:#e6edf6;font-size:12px;font-weight:600;text-decoration:none;vertical-align:middle}
+.iss .k{font-family:"JetBrains Mono",monospace;color:#93c5fd;font-size:11.5px}
+.iss .st{width:8px;height:8px;border-radius:50%}
+.av{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:50%;font-size:10px;font-weight:800;color:#fff;flex:0 0 auto}
+.input{min-height:30px;border:1px solid #243049;border-radius:8px;background:#0a0e17;color:#e6edf6;font:inherit;font-size:12.5px;padding:0 10px}
+.syn{font-family:"JetBrains Mono",monospace;font-size:11px;color:#5eead4;background:#0a0e17;border:1px solid #243049;border-radius:5px;padding:1px 6px;white-space:nowrap}
+.doc h1{font-size:24px;margin:0 0 6px}
+.doc h2{font-size:16px;margin:22px 0 8px;padding-bottom:5px;border-bottom:1px solid #1f2a40;display:flex;align-items:center;gap:8px}
+.doc h2 .syn{font-weight:400}
+.doc p,.doc li{font-size:13.5px;line-height:1.7;color:#d6deea}
+.doc ul,.doc ol{margin:4px 0;padding-left:22px}
+.doc code{font-family:"JetBrains Mono",monospace;font-size:12px;background:#0f1626;border:1px solid #243049;border-radius:5px;padding:1px 5px}
+.doc table{border-collapse:collapse;width:100%;margin:6px 0;font-size:12.5px}
+.doc th{font-weight:600;color:#8b9bb4;text-align:left;padding:7px 10px;background:#0f1626;border-bottom:1px solid #243049;cursor:pointer}
+.doc td{padding:7px 10px;border-bottom:1px solid #1f2a40}
+.call{display:flex;gap:10px;padding:10px 12px;border-radius:10px;border:1px solid;margin:8px 0;font-size:13px;line-height:1.6}
+.call.info{border-color:rgba(59,130,246,.5);background:rgba(59,130,246,.10)}.call.warn{border-color:rgba(245,158,11,.5);background:rgba(245,158,11,.10)}.call.bad{border-color:rgba(239,68,68,.5);background:rgba(239,68,68,.10)}.call.tip{border-color:rgba(34,197,94,.5);background:rgba(34,197,94,.10)}
+.call b.l{white-space:nowrap}
+.task{list-style:none;padding-left:4px}
+.task li{display:flex;align-items:flex-start;gap:8px}
+.task li.done{color:#8b9bb4;text-decoration:line-through}
+.code{font-family:"JetBrains Mono",monospace;font-size:12px;background:#0f1626;border:1px solid #243049;border-radius:8px;margin:6px 0;overflow:hidden}
+.code .hd{display:flex;align-items:center;gap:8px;padding:5px 10px;border-bottom:1px solid #243049;color:#8b9bb4;font-size:11px}
+.code .ln{display:grid;grid-template-columns:32px 1fr}
+.code .ln span:first-child{color:#5d6b85;text-align:right;padding:0 8px 0 0;border-right:1px solid #1f2a40;user-select:none}
+.code .ln span:last-child{padding:0 10px;white-space:pre}
+.fold{border:1px solid #243049;border-radius:8px;margin:6px 0}
+.fold summary{padding:8px 12px;font-weight:700;cursor:pointer;list-style:none;display:flex;align-items:center;gap:8px}
+.fold div{padding:0 12px 10px;color:#d6deea;font-size:13px}
+.macro{border:1px dashed rgba(45,212,191,.6);border-radius:10px;padding:10px 12px;margin:8px 0;background:rgba(45,212,191,.05)}
+.macro .mh{display:flex;align-items:center;gap:8px;font-size:11.5px;color:#5eead4;margin-bottom:6px}
+.kpi{display:flex;flex-direction:column;gap:2px;padding:8px 10px;border-radius:8px;background:#0f1626;border:1px solid #243049;min-width:0}
+.kpi b{font-size:18px;font-family:"JetBrains Mono",monospace}
+.kpi span{font-size:11px;color:#8b9bb4}
+.hl{background:rgba(245,158,11,.22);border-bottom:2px solid #f59e0b;cursor:pointer}
+.bubble{position:absolute;right:-290px;top:-10px;width:270px;background:#141b2d;border:1px solid #f59e0b;border-radius:10px;padding:10px;box-shadow:0 4px 24px rgba(0,0,0,.4);font-size:12.5px}
+.pop{background:#141b2d;border:1px solid #243049;border-radius:10px;box-shadow:0 4px 24px rgba(0,0,0,.4);padding:6px;display:flex;flex-direction:column;gap:1px;font-size:12.5px}
+.pop a{display:flex;align-items:center;gap:8px;padding:5px 8px;border-radius:7px;text-decoration:none;color:#e6edf6}
+.pop a.on{background:#1a2236}
+.pop .k{font-family:"JetBrains Mono",monospace;color:#5eead4;min-width:90px}
+.kbd{font-family:"JetBrains Mono",monospace;font-size:11px;border:1px solid #243049;border-bottom-width:2px;border-radius:5px;padding:1px 6px;background:#0f1626;color:#e6edf6}
+.sb{display:flex;align-items:center;height:30px;background:#0f1626;border-top:1px solid #243049;font-family:"JetBrains Mono",monospace;font-size:11.5px;color:#8b9bb4}
+.sb span{flex:1;text-align:center;border-right:1px solid #243049}.sb span:last-child{border-right:0}.sb b{color:#e6edf6}
+</style>
+</helmet>
+
+<div style="min-height: 100vh; display: flex; flex-direction: column; background: #0a0e17">
+  <header class="tb">
+    <span class="muted" aria-hidden="true">☰</span>
+    <span class="logo"><span class="v">V</span>The Davinci</span>
+    <span class="ver">v2.876.0</span><span class="mock">MOCK</span>
+    <span style="flex: 1"></span>
+    <span class="mono muted" style="font-size: 11.5px">11/11 vCenter <b style="color: #22c55e">OK</b> · 오전 10:30</span>
+    <span class="av" style="background: #3b82f6; width: 24px; height: 24px">A</span>
+    <span style="font-size: 12.5px; font-weight: 700">Anonymous <span class="muted" style="font-weight: 400; font-size: 11px">관리자</span></span>
+    <button class="btn sm" type="button">Out</button>
+  </header>
+
+  <div style="display: flex; flex-wrap: wrap; flex: 1">
+    <nav class="side" aria-label="메뉴">
+      <a href="#"><span aria-hidden="true">◫</span>Overview</a>
+      <a href="#"><span aria-hidden="true">▤</span>Summary</a>
+      <a href="#"><span aria-hidden="true">▣</span>서버<span class="n">6 ▾</span></a>
+      <a href="#"><span aria-hidden="true">▥</span>스토리지<span class="n">7 ▾</span></a>
+      <a href="#"><span aria-hidden="true">⌘</span>네트워크<span class="n">6 ▾</span></a>
+      <a href="#"><span aria-hidden="true">⚙</span>자원관리<span class="n">3 ▾</span></a>
+      <a href="#"><span aria-hidden="true">◔</span>자원 최적화<span class="n">2 ▾</span></a>
+      <a href="#"><span aria-hidden="true">✦</span>특수 기능</a>
+      <a href="IssueEpic.dc.html"><span aria-hidden="true">⚑</span>이슈</a>
+      <a href="Main.dc.html" class="on"><span aria-hidden="true">▧</span>위키</a>
+      <a href="#"><span aria-hidden="true">▭</span>게시판</a>
+      <a href="#"><span aria-hidden="true">✲</span>설정<span class="n">2 ▾</span></a>
+    </nav>
+
+    <main style="flex: 999 1 560px; min-width: 0; padding: 16px 22px 24px; display: flex; flex-direction: column; gap: 12px">
+      <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap">
+        <a class="btn" href="Main.dc.html">← 페이지로</a>
+        <b style="font-size: 15px">위키가 지원하는 블록 · 매크로 · 편집 도구</b>
+        <span class="muted" style="font-size: 12px">— 한 페이지에 전부 넣어 보여 주는 샘플(실제 문서가 아닙니다)</span>
+        <span style="flex: 1"></span>
+        <button class="btn sm" type="button">마크다운 내려받기</button><button class="btn sm" type="button">PDF</button><button class="btn sm" type="button">본문 복사</button>
+      </div>
+
+      <div style="display: flex; gap: 12px; align-items: flex-start; flex-wrap: wrap">
+        <!-- 자동 목차 -->
+        <aside class="card" aria-label="목차" style="flex: 0 1 220px; min-width: 0; padding: 12px; font-size: 12.5px; display: flex; flex-direction: column; gap: 4px">
+          <b class="muted" style="font-size: 11.5px">목차 <span class="syn">[[toc]]</span></b>
+          <a href="#">1. 글 꾸미기</a><a href="#" style="padding-left: 12px">콜아웃</a><a href="#" style="padding-left: 12px">체크리스트</a><a href="#" style="padding-left: 12px">표 · 코드 · 접기 · 각주</a>
+          <a href="#">2. 포탈 매크로</a><a href="#" style="padding-left: 12px">vCenter · 호스트 카드</a><a href="#" style="padding-left: 12px">이슈 목록 · 파트 장애</a>
+          <a href="#">3. 인라인 댓글</a><a href="#">4. 슬래시 명령 · 단축키</a>
+          <div class="faint" style="font-size: 11px; margin-top: 6px; border-top: 1px solid #1f2a40; padding-top: 6px">제목(##)에서 자동으로 만들고, 본문이 길면 옆에 고정됩니다.</div>
+        </aside>
+
+        <!-- 본문 -->
+        <article class="card doc" style="flex: 999 1 560px; min-width: 0; padding: 20px 24px 24px; position: relative">
+          <h1>위키 블록 샘플</h1>
+          <p class="muted" style="font-size: 12px">마크다운 기본(제목 · 굵게 · 목록 · 링크 · 그림)은 그대로, 아래는 그 위에 더 얹는 것들입니다. 문법은 <span class="syn">회색 칩</span>으로 적었습니다.</p>
+
+          <h2>1. 글 꾸미기</h2>
+          <div class="call info"><b class="l">ℹ 정보</b><span><b>콜아웃 4종</b> <span class="syn">:::info</span> <span class="syn">:::warn</span> <span class="syn">:::danger</span> <span class="syn">:::tip</span> — 절차서의 주의 사항을 눈에 띄게. 제목을 붙일 수 있고(<span class="syn">:::warn 전원 작업 전</span>) 접을 수도 있습니다.</span></div>
+          <div class="call warn"><b class="l">⚠ 주의</b><span>PL-WAW 법인은 RTT 800ms 가 넘습니다 — SSH 세션 예산을 장비 시한보다 짧게 두세요.</span></div>
+          <div class="call bad"><b class="l">⛔ 위험</b><span>복원 뒤 NIC 를 끊지 않으면 원본 VM 과 IP 가 충돌합니다.</span></div>
+          <div class="call tip"><b class="l">✓ 팁</b><span>관련 이슈 키를 적어 두면 이슈 상세의 ‘관련 문서’ 에 자동으로 보입니다.</span></div>
+
+          <p style="margin-top: 14px"><b>체크리스트</b> <span class="syn">- [ ]</span> <span class="syn">- [x]</span> — 보기 화면에서 바로 체크할 수 있습니다. 체크 토글은 판을 새로 만들지 않고 이력 한 줄(‘kim 이 2번 항목 완료’)로만 남습니다(작은 변경 — 버전 폭주 방지).</p>
+          <ul class="task">
+            <li class="done"><input type="checkbox" checked aria-label="시한 env 분리"> 엣지 수집 시한 env 로 분리 <span class="muted" style="text-decoration: none; font-size: 11.5px">kim · 11-01</span></li>
+            <li class="done"><input type="checkbox" checked aria-label="90초 적용"> PL-WAW 시한 90초 적용 <span class="muted" style="text-decoration: none; font-size: 11.5px">kim · 11-03</span></li>
+            <li><input type="checkbox" aria-label="3일 관찰"> 3일 관찰 뒤 결과 기록 → <a class="iss" href="IssueEpic.dc.html"><span class="st" style="background: #3b82f6"></span><span class="k">ISS-18</span></a> <span class="faint" style="font-size: 11.5px">(항목 끝의 이슈 키는 그 이슈가 완료되면 자동으로 체크됩니다)</span></li>
+            <li><input type="checkbox" aria-label="런북 갱신"> 런북 갱신 <span class="tag warn" style="height: 18px">@lee 담당</span></li>
+          </ul>
+
+          <p style="margin-top: 14px"><b>표</b> <span class="syn">| a | b |</span> — 머리를 누르면 정렬(포탈 표 규칙 그대로) · 숫자 열은 오른쪽 정렬 · 넓으면 가로 스크롤.</p>
+          <table>
+            <thead><tr><th>법인 ↕</th><th>RTT(ms) ↓</th><th>호스트 ↕</th><th>시한(초) ↕</th></tr></thead>
+            <tbody><tr><td>vcenter-pl-waw-01</td><td style="text-align: right" class="mono">842</td><td style="text-align: right" class="mono">658</td><td style="text-align: right" class="mono">90</td></tr><tr><td>vcenter-us-east-01</td><td style="text-align: right" class="mono">811</td><td style="text-align: right" class="mono">225</td><td style="text-align: right" class="mono">75</td></tr><tr><td>vcenter-ap-northeast-01</td><td style="text-align: right" class="mono">12</td><td style="text-align: right" class="mono">186</td><td style="text-align: right" class="mono">60</td></tr></tbody>
+          </table>
+
+          <p style="margin-top: 14px"><b>코드 블록</b> <span class="syn">```bash</span> — 언어 강조 · 줄 번호 · 복사 버튼 · 긴 줄은 가로 스크롤.</p>
+          <div class="code"><div class="hd"><span>bash</span><span style="flex: 1"></span><button class="btn sm" type="button">복사</button></div>
+            <div class="ln"><span>1</span><span>vmware-portal-config set collect.deadlineMs 90000 --vcenter vc-pl-waw</span></div>
+            <div class="ln"><span>2</span><span>systemctl restart vmware-portal-edge</span></div>
+            <div class="ln"><span>3</span><span>journalctl -u vmware-portal-edge -n 50 --no-pager | grep deadline</span></div>
+          </div>
+
+          <details class="fold" open><summary><span aria-hidden="true">▾</span>접기 블록 <span class="syn" style="font-weight: 400">:::fold 제목</span> — 긴 로그 · 부록을 숨겨 둡니다(검색에는 잡힙니다)</summary><div>2026-11-04 00:07 collect.inventory vc-pl-waw: 658 hosts · 41.2s · ok<br>2026-11-03 23:37 collect.inventory vc-pl-waw: deadline exceeded after 60.0s</div></details>
+
+          <p>각주<sup><a href="#">1</a></sup> <span class="syn">[^1]</span> · 페이지 링크 <span class="syn">[[회의록/2026-11-03 주간]]</span> · 페이지 안 앵커 <span class="syn">[3절](#시한-조정)</span> · 다른 페이지 포함 <span class="syn">{{include 운영 절차/공통 사전 확인}}</span> · 날짜 <span class="syn">{{today}}</span> · 그림은 끌어 놓기 · 붙여넣기(클립보드) → 첨부로 저장되고 <span class="syn">![설명](첨부:스크린샷.png)</span> 로 들어갑니다(파일 8MB · 페이지당 20개).</p>
+          <p class="faint" style="font-size: 11.5px">1. 각주는 페이지 끝에 모이고 번호는 자동입니다. 수식·머메이드 다이어그램은 이번 범위에 넣지 않았습니다(의존성 추가 — 필요하면 다음에).</p>
+
+          <h2>2. 포탈 매크로 <span class="syn">{{…}}</span></h2>
+          <p>문서 안에 포탈의 <b>지금 값</b>을 끼워 넣습니다. 저장된 글이 아니라 열 때마다 API 로 읽어 옵니다(범위 밖이면 ‘볼 수 없는 법인’ 으로 보이고 값은 비웁니다).</p>
+          <div class="macro"><div class="mh"><span class="syn">{{vcenter vc-pl-waw}}</span><span>· vCenter 카드 — 상태 · 호스트 · VM · 마지막 수집 · 엣지</span></div>
+            <div style="display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px">
+              <div class="kpi"><b style="color: #22c55e">OK</b><span>vcenter-pl-waw-01</span></div><div class="kpi"><b>658</b><span>호스트 · 연결 657</span></div><div class="kpi"><b>5,850</b><span>VM · 켜짐 5,412</span></div><div class="kpi"><b>41.2s</b><span>마지막 수집 · 09:58</span></div><div class="kpi"><b>842ms</b><span>RTT · 엣지 pl-waw</span></div>
+            </div></div>
+          <div class="macro"><div class="mh"><span class="syn">{{host esxi-plwaw-03}}</span><span>· 호스트 한 줄 — 상태 · 클러스터 · 열린 파트 장애</span></div>
+            <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: 12.5px"><span class="tag ok">연결</span><b>esxi-plwaw-03</b><span class="muted">WAW-CL1 · 7.0.3 · VM 41</span><span class="tag bad">파트 장애 1 · 디스크</span><a href="#">열기 →</a></div></div>
+          <div class="macro"><div class="mh"><span class="syn">{{issues filter="epic = ISS-20 AND status != done"}}</span><span>· 이슈 표 — 검색식 또는 저장 필터 이름(필터 화면과 같은 식)</span></div>
+            <table style="margin: 0"><thead><tr><th>키</th><th>제목</th><th>담당자</th><th>상태</th><th>기한</th></tr></thead><tbody>
+              <tr><td class="mono" style="color: #93c5fd">ISS-1</td><td>vCenter PL-WAW 수집 타임아웃 간헐 발생</td><td>kim</td><td><span class="tag blue">진행 중</span></td><td style="color: #fcd34d">오늘</td></tr>
+              <tr><td class="mono" style="color: #93c5fd">ISS-18</td><td>시한 90초 적용 결과 확인</td><td>choi</td><td><span class="tag blue">진행 중</span></td><td style="color: #fcd34d">내일</td></tr>
+              <tr><td class="mono" style="color: #93c5fd">ISS-19</td><td>위키 런북 갱신</td><td class="muted">미할당</td><td><span class="tag gray">할 일</span></td><td class="muted">—</td></tr></tbody></table></div>
+          <div class="macro"><div class="mh"><span class="syn">{{partfaults agent=pl-waw open}}</span><span>· 열린 파트 장애 — 파트 장애 화면과 같은 판정(unknown · absent 는 따로)</span></div>
+            <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: 12.5px"><span class="tag bad">fault 1</span><span class="tag warn">warn 2</span><span class="tag gray">unknown 4</span><span class="muted">esxi-plwaw-03 디스크 Bay 5(S/N …7K2Q) fault · 11-04 06:12 · <a class="iss" href="IssueEpic.dc.html"><span class="st" style="background: #3b82f6"></span><span class="k">ISS-30</span></a> 자동 등록</span></div></div>
+          <p class="faint" style="font-size: 11.5px">그 밖에 <span class="syn">{{backup vcenter=…}}</span>(마지막 백업 결과) · <span class="syn">{{cert host=…}}</span>(인증서 만료) · <span class="syn">{{recent-changes space=… days=7}}</span>(최근 변경 문서) · <span class="syn">{{props}}</span>(이 페이지 속성 표). 매크로 결과는 PDF · 마크다운 내보내기에 ‘그 시각 값’ 으로 굳어 들어갑니다.</p>
+
+          <h2>3. 인라인 댓글</h2>
+          <p style="position: relative">글을 끌어 고르면 ‘댓글’ 단추가 뜹니다. <span class="hl">2절 표의 ‘정상’ 지연 범위는 어디서 잰 값인가요</span> 처럼 그 자리에 표시가 남고, 오른쪽 말풍선에서 답하고 ‘해결’ 로 닫습니다. 글이 바뀌어 자리를 못 찾으면 페이지 댓글로 내려갑니다(지우지 않습니다).
+            <span class="bubble"><span style="display: flex; align-items: center; gap: 6px"><span class="av" style="background: #3b82f6">L</span><b>lee</b><span class="muted" style="font-size: 11px">· 10:04 · v11</span></span><span style="display: block; margin: 6px 0">실측 기준인지 문서 기준인지 적어 주세요.</span><span style="display: flex; gap: 6px"><button class="btn sm" type="button">답글</button><button class="btn sm" type="button">해결</button></span></span>
+          </p>
+
+          <h2>4. 슬래시 명령 · 단축키</h2>
+          <div style="display: flex; gap: 14px; flex-wrap: wrap; align-items: flex-start">
+            <div style="flex: 0 1 300px; min-width: 0"><p style="margin: 0 0 6px">편집 중 <span class="kbd">/</span> 를 치면 블록 메뉴가 뜹니다.</p>
+              <div class="pop" role="listbox" aria-label="슬래시 명령"><a href="#" class="on"><span class="k">/콜아웃</span>정보 · 주의 · 위험 · 팁</a><a href="#"><span class="k">/체크</span>체크리스트</a><a href="#"><span class="k">/표</span>표 3×3</a><a href="#"><span class="k">/코드</span>코드 블록(언어)</a><a href="#"><span class="k">/접기</span>접기 블록</a><a href="#"><span class="k">/이슈</span>이슈 링크 찾기</a><a href="#"><span class="k">/vcenter</span>vCenter 카드 매크로</a><a href="#"><span class="k">/템플릿</span>템플릿 조각 끼우기</a><a href="#"><span class="k">/목차</span>목차</a></div></div>
+            <table style="flex: 1 1 320px; margin: 0; font-size: 12.5px">
+              <thead><tr><th>키</th><th>동작</th></tr></thead>
+              <tbody><tr><td><span class="kbd">Ctrl</span> <span class="kbd">S</span></td><td>저장(새 판) · <span class="kbd">Ctrl</span> <span class="kbd">Shift</span> <span class="kbd">S</span> 초안</td></tr><tr><td><span class="kbd">Ctrl</span> <span class="kbd">K</span></td><td>페이지 링크 · <span class="kbd">Ctrl</span> <span class="kbd">Shift</span> <span class="kbd">I</span> 이슈 링크</td></tr><tr><td><span class="kbd">Ctrl</span> <span class="kbd">E</span></td><td>편집 ↔ 미리보기 · <span class="kbd">Ctrl</span> <span class="kbd">\</span> 나란히</td></tr><tr><td><span class="kbd">@</span></td><td>멘션 자동 완성(내 범위에 보이는 이름)</td></tr><tr><td><span class="kbd">Ctrl</span> <span class="kbd">/</span></td><td>단축키 도움말 · <span class="kbd">Esc</span> 메뉴 닫기</td></tr></tbody>
+            </table>
+          </div>
+        </article>
+
+        <!-- 오른쪽: 첨부 · 역링크 -->
+        <aside class="card" aria-label="첨부 · 역링크" style="flex: 0 1 250px; min-width: 0; padding: 14px; display: flex; flex-direction: column; gap: 12px; font-size: 12.5px">
+          <div><b class="muted" style="font-size: 11.5px">첨부 · 3</b>
+            <div style="display: flex; flex-direction: column; gap: 5px; margin-top: 6px"><a href="#">▣ 타임아웃-그래프.png <span class="faint">214KB</span></a><a href="#">▣ edge-log-1103.txt <span class="faint">38KB</span></a><a href="#">▣ cab-승인.pdf <span class="faint">1.1MB</span></a></div>
+            <div class="faint" style="font-size: 11px; margin-top: 6px">첨부는 페이지와 함께 보관 · 판에 묶이지 않습니다(지우면 모든 판에서 사라짐 — 묻고 지웁니다).</div></div>
+          <div><b class="muted" style="font-size: 11.5px">여기로 오는 링크 · 4</b>
+            <div style="display: flex; flex-direction: column; gap: 5px; margin-top: 6px"><a href="#">2026-11-03 주간 회의록</a><a href="#">[변경 계획] 수집 분할</a><a href="#">온보딩 › 엣지 운영 FAQ</a><a href="IssueEpic.dc.html">이슈 ISS-1 (관련 문서)</a></div></div>
+          <div><b class="muted" style="font-size: 11.5px">페이지 권한</b><div class="muted" style="margin-top: 4px">읽기: 이 스페이스를 보는 모든 계정 · 쓰기: 운영자 · 관리자 · 요청 권한 계정은 댓글만. 스페이스 단위로 ‘읽기 전용(공지)’ 을 켤 수 있습니다.</div></div>
+        </aside>
+      </div>
+    </main>
+  </div>
+  <footer class="sb" aria-label="상태"><span>서버 Uptime <b>6일</b></span><span>전체 호스트 <b>658</b></span><span>전체 VM <b>5,850</b> (5,412 On)</span><span>활성 알람 <b style="color: #ef4444">3</b></span></footer>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1460}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

@@ -32,6 +32,12 @@ import {
 import { loadIssueSettings, saveIssueSettings, issueSettingsLoadError, suggestAssignee, SETTINGS_LIMITS, NOTIFY_EVENTS } from '../../issues/settings.js';
 import { issueNotifyStatus } from '../../issues/notify.js';
 import { issueViewers } from '../../issues/visibility.js';
+import {
+  loadAutoCreate, saveAutoCreate, autoCreateLoadError, autoCreateStatus, simulatePartFault,
+  AUTO_SUPPORTED, AUTO_KINDS, AUTO_SCOPES, AUTO_LEVELS, AUTO_LIMITS, DEFAULT_TITLE_TPL,
+} from '../../issues/autoCreate.js';
+import { PART_KIND_LABEL, SCOPE_LABEL } from '../../partfault/types.js';
+import { listCollectors } from '../../collector/registry.js';
 
 const writers = requireRole('admin', 'operator');
 const adminOnly = requireRole('admin');
@@ -173,6 +179,37 @@ export function registerIssues(api) {
       const s = saveIssueSettings(req.body || {});
       audit(req, 'issue.settings', 'issue-settings.json', `자동 할당 ${s.autoAssign.enabled ? '켬' : '끔'}(규칙 ${s.autoAssign.components.length} · 후보 ${s.autoAssign.pool.length}) · 알림 ${s.notify.enabled ? '켬' : '끔'}(사람 ${s.notify.people.length})`);
       res.json({ ok: true, settings: s, loadError: null, notifyStatus: issueNotifyStatus() });
+    } catch (e) { fail(res, e, next); }
+  });
+  // v2.880 파트 장애 → 이슈 자동 등록 설정 — 이슈 설정과 같은 문지기(관리자 + 전체 범위, 저장은 쓰기 범위도 무제한).
+  //   ⚠ '/issues/:key' 보다 먼저(뒤에 두면 'autocreate' 가 키로 잡혀 404).
+  api.get('/issues/autocreate', adminOnly, issueSettingsFleetOnly, (req, res) => {
+    if (!isAdmin(req)) return res.status(403).json({ ok: false, reason: '데모 계정은 이슈 설정을 볼 수 없습니다' });
+    res.set('Cache-Control', 'no-store');
+    let agents = [];
+    try { agents = listCollectors().map((c) => ({ id: String(c.id || ''), name: String(c.name || c.id || '') })).filter((c) => c.id).slice(0, 500); } catch { agents = []; }
+    res.json({
+      ok: true, settings: loadAutoCreate(), loadError: autoCreateLoadError(), status: autoCreateStatus(),
+      supported: AUTO_SUPPORTED, kinds: AUTO_KINDS, scopes: AUTO_SCOPES, levels: AUTO_LEVELS, limits: AUTO_LIMITS, defaultTitleTpl: DEFAULT_TITLE_TPL,
+      kindLabels: PART_KIND_LABEL, scopeLabels: SCOPE_LABEL, agents,
+    });
+  });
+  api.put('/issues/autocreate', adminOnly, issueSettingsFleetOnly, fullWriteOnly, (req, res, next) => {
+    if (!isAdmin(req)) return res.status(403).json({ ok: false, reason: '데모 계정은 이슈 설정을 바꿀 수 없습니다' });
+    try {
+      const s = saveAutoCreate(req.body || {});
+      const pf = s.partfault;
+      const on = Object.values(pf.matrix).reduce((n, m) => n + Object.values(m).filter((v) => v !== 'off').length, 0);
+      audit(req, 'issue.autocreate', 'issue-autocreate.json', `파트 장애 자동 등록 ${pf.enabled ? '켬' : '끔'}(켜진 칸 ${on} · 하루 상한 ${pf.dailyMax} · 법인 예외 ${pf.agentsOff.length})`);
+      res.json({ ok: true, settings: s, loadError: null, status: autoCreateStatus() });
+    } catch (e) { fail(res, e, next); }
+  });
+  // 시험 실행 — 지난 N시간 파트 장애 이벤트에 (저장 전) 화면 값을 대 본다. 만들지 않는다(읽기). 화면 값이 형식 밖이면 400.
+  api.post('/issues/autocreate/simulate', adminOnly, issueSettingsFleetOnly, async (req, res, next) => {
+    if (!isAdmin(req)) return res.status(403).json({ ok: false, reason: '데모 계정은 이슈 설정을 볼 수 없습니다' });
+    try {
+      const r = await simulatePartFault({ hours: req.body?.hours, cfgOverride: req.body?.settings || null });
+      res.json({ ok: true, ...r });
     } catch (e) { fail(res, e, next); }
   });
   // 팀 활동 피드(v2.871) — 로그인 사용자 전부 · 범위 안 이슈만(요청 필터보다 먼저). 폴링하지 않는다(화면이 마운트·버튼으로).
