@@ -208,7 +208,7 @@ export function retentionNote(data) {
 }
 export function emptyNote(data) {
   if (!data) return '';
-  if (data.enabled === false) return 'iDRAC 통합 추이 적재가 꺼져 있습니다(IDRAC_TREND_SERIES=false) — 소비 전력만 보일 수 있습니다.';
+  if (data.enabled === false) return 'Infra Observability 적재가 꺼져 있습니다(IDRAC_TREND_SERIES=false) — 소비 전력만 보일 수 있습니다.';
   const any = (data.points || []).some((p) => SERIES.some((s) => p[s.k] != null));
   if (any) return '';
   if (data.firstTs && data.firstTs > data.end) return '이 기간 이후부터 수집되었습니다 — 더 최근 기간을 고르세요.';
