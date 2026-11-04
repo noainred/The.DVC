@@ -191,7 +191,7 @@ test('③ 실행 — OTP 미등록 403 · 조회 밖 404 · 쓰기 밖 403 · �
   assert.match(r.j.batchId, /^rb-/);
   const cmds = D.cmds.slice(before).filter((c) => c.startsWith('restore '));
   assert.equal(cmds.length, 2);
-  assert.match(cmds[0], new RegExp(`jobid=${H('web', 100)},${H('web', 110)},${H('web', 130)} restorejob=PortalVmwareRestore pluginoptions="python3:vcserver=vc-a.corp:dc=DC-A:folder=/web:vmname=web-01-r:config_file=/etc/bareos/vmware/vc-a.ini:restore_powerstate=off:restore_datastore=ds-a1" all done yes$`));
+  assert.match(cmds[0], new RegExp(`jobid=${H('web', 100)},${H('web', 110)},${H('web', 130)} restorejob=PortalVmwareRestore pluginoptions="\\\\"python3:vcserver=vc-a.corp:dc=DC-A:folder=/web:vmname=web-01-r:config_file=/etc/bareos/vmware/vc-a.ini:restore_powerstate=off:restore_datastore=ds-a1\\\\"" all done yes$`));   // v2.874 B1-01
   assert.ok(cmds.every((c) => !/\bselect\b/.test(c)));
   const wr = job('web').restores[0];
   assert.deepEqual([wr.batchId, wr.nic, wr.mode, wr.target.name], [r.j.batchId, 'disconnect', 'newVm', 'web-01-r']);
@@ -235,7 +235,7 @@ test('⑤ v2.862 복원 검증 · 일일 요약 — 전체 범위 · OTP · 입�
   assert.equal(r.s, 202, r.t);
   assert.equal(r.j.started, 1);
   const cmd = D.cmds.slice(before).find((c) => c.startsWith('restore '));
-  assert.match(cmd, /pluginoptions="python3:vcserver=vc-a\.corp:dc=DC-A:folder=\/web:vmname=web-01-verify-\d{8}:config_file=\/etc\/bareos\/vmware\/vc-a\.ini:restore_powerstate=off"/, '새 VM · 꺼진 채 · 날짜 이름');
+  assert.match(cmd, /pluginoptions="\\"python3:vcserver=vc-a\.corp:dc=DC-A:folder=\/web:vmname=web-01-verify-\d{8}:config_file=\/etc\/bareos\/vmware\/vc-a\.ini:restore_powerstate=off\\""/, '새 VM · 꺼진 채 · 날짜 이름');
   const rr = job('web').restores[0];
   assert.deepEqual([rr.verify, rr.nic, rr.mode, !!rr.rehearsal], [true, 'disconnect', 'newVm', true]);
   // 복원이 끝나면 bareos-verify(데모 경로) — 결과가 원장 finish 에

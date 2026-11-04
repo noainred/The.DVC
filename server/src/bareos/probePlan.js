@@ -6,15 +6,16 @@
  * 데이터스토어가 그 vCenter 인벤토리에 있는지는 포탈만 안다(probe 는 Director 에만 닿는다) — 결과에 그 사실을 적는다.
  */
 import { restorePluginOptions, pluginValueIssue, isResourceName } from './names.js';
-import { chainFromHistory, chainIssue } from './restore.js';
+import { chainFromHistory, chainIssue, restoreBaseKv } from './restore.js';
 import { restoreCommand } from './director.js';
 
 /**
- * @param {{ row: object|null, runs: object[], jobid: number, restoreJob: string, pluginName?: string, newName?: string, datastore?: string }} a
- *   row = jobStatus(jobid) · runs = 그 잡 이름의 실행 이력(jobRuns)
+ * @param {{ row: object|null, runs: object[], jobid: number, restoreJob: string, pluginName?: string, newName?: string, datastore?: string,
+ *   base?: { vcserver?: string, configFile?: string, dc?: string, folder?: string } }} a
+ *   row = jobStatus(jobid) · runs = 그 잡 이름의 실행 이력(jobRuns) · base = 포탈이 복원 명령에 싣는 기본 키(사이트 매핑 · 대상의 데이터센터 · 폴더 — v2.866)
  * @returns {{ ok: boolean, issue?: string, name?: string, client?: string, chain?: number[], pluginOptions?: string, command?: string }}
  */
-export function restorePreview({ row, runs, jobid, restoreJob, pluginName = 'python3', newName = '', datastore = '' }) {
+export function restorePreview({ row, runs, jobid, restoreJob, pluginName = 'python3', newName = '', datastore = '', base = null }) {
   if (!row || !row.name) return { ok: false, issue: '그 jobid 를 카탈로그에서 찾지 못했습니다.' };
   if (row.type !== 'B' || !(row.state === 'ok' || row.state === 'warning')) return { ok: false, issue: `그 jobid 는 성공한 백업이 아닙니다(종류 ${row.type || '—'} · 상태 ${row.status || '—'}) — 포탈도 이 jobid 로는 복원하지 않습니다.` };
   if (!isResourceName(row.client)) return { ok: false, issue: `카탈로그의 FD 이름(‘${String(row.client || '').slice(0, 64)}’)을 쓸 수 없습니다.` };
@@ -25,7 +26,12 @@ export function restorePreview({ row, runs, jobid, restoreJob, pluginName = 'pyt
   const name = String(newName || '').trim() || `${row.name}-probe`;
   const ni = pluginValueIssue(name, '새 VM 이름');
   if (ni) return { ok: false, issue: ni };
-  const kv = { vmname: name, restore_powerstate: 'off' };
+  // v2.874(점검 B1-04): v2.866 부터 포탈은 복원 명령에 백업과 같은 기본 키(vcserver · dc · folder · config_file)를 싣는다 — 미리 보기도 같아야
+  //   '포탈이 보내는 그 글자' 다(빠지면 이 명령을 그대로 시험할 때 'vcuser not defined' 가 다시 난다). 기본 키를 모르면 만들지 않는다.
+  if (!base?.dc || !base?.folder) return { ok: false, issue: '포탈이 싣는 기본 키를 알아야 같은 명령을 만듭니다 — --dc · --folder(대상의 데이터센터 · 폴더)와 --vcserver · --config-file(사이트 매핑)을 주세요.' };
+  const bk = restoreBaseKv({ vcserver: base.vcserver || '', configFile: base.configFile || '' }, { dc: base.dc, folder: base.folder, vmName: name });
+  if (bk.issue) return { ok: false, issue: `${bk.issue} — --vcserver · --config-file 로 주세요.` };
+  const kv = { ...bk.kv, vmname: name, restore_powerstate: 'off' };
   const ds = String(datastore || '').trim();
   if (ds) {
     const di = pluginValueIssue(ds, '데이터스토어');

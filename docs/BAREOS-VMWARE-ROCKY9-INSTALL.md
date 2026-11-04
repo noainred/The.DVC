@@ -614,8 +614,9 @@ ls -lh /mnt/bareos/            # (SD 서버) KR-VM-0001 같은 볼륨 파일이 
 3. **사이트 매핑**: vCenter 마다 클라이언트(8.1)·스토리지/풀(8.2)·스케줄·INI 경로(9.3)를 고른다.
 4. 포탈 콘솔은 잡을 만들려고 `configure` 를 쓰므로 **사실상 Director 관리자 등급**이다(Bareos 에 하위 명령 단위 ACL 이 없다) — 콘솔 비밀번호를 그 등급으로 관리한다.
 5. **복원 · 복원 검증 전 사전 점검(v2.863 — 둘 다 읽기 전용)**:
-   - 복원 명령 미리 보기: `BAREOS_PASSWORD='…' node server/src/tools/bareos-probe.js --host <Director> --name <콘솔 이름> --restore-plan <jobid> [--vm-name 새이름] [--datastore DS]`
+   - 복원 명령 미리 보기: `BAREOS_PASSWORD='…' node server/src/tools/bareos-probe.js --host <Director> --name <콘솔 이름> --restore-plan <jobid> --vcserver <vCenter 주소> --config-file <FD INI 경로> --dc <데이터센터> --folder <폴더> [--vm-name 새이름] [--datastore DS]`
      — 포탈이 보낼 `restore …` 명령을 포탈과 같은 함수로 만들어 보여 주고(**보내지 않는다**), 복원 잡 리소스(`.jobs type=R`)와 FD 판(`status client=`)을 확인한다.
+     `--vcserver · --config-file` 은 사이트 매핑 값, `--dc · --folder` 는 대상 VM 의 데이터센터 · 폴더다(v2.874 — 포탈이 복원 명령에 싣는 기본 키와 같게. 모르면 만들지 않는다).
      옵션이 플러그인 판에서 실제로 받아들여지는지는 시험 VM 복원 한 번으로만 확정된다.
    - NIC 끊기 사전 점검: `VCENTER_PASSWORD='…' node server/src/tools/bareos-probe.js --vcenter <vCenter> --vc-user <포탈 vCenter 계정> --vm <VM 이름>`
      — 같은 이름 VM 수 · 전원 · NIC 연결 상태 · PCI 패스스루 수 · 그 VM 과 상위 폴더에서 계정 권한(장치 설정 · 장치 연결 · 켜기 · 끄기 · 삭제).
