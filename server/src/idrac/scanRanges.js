@@ -191,6 +191,31 @@ export function scanRangesForDatacenter(datacenterId) {
 }
 
 /**
+ * v2.864(서비스 인벤토리 — 4차 검토 반증 7): 엔트리 **라벨(service)만** 바꾼다. saveScanRanges 를 쓰지 않는 이유 —
+ *   그 함수는 모르는 id 에 새 엔트리를 만들고(빈 대역·계정) datacenterId 를 요청값으로 옮긴다. 여기서는
+ *   ① 엔트리가 있어야 하고(없으면 404) ② 엔트리의 datacenterId 가 호출부가 준 값과 같아야 하며(법인 축 검사는 호출부)
+ *   ③ 이미 라벨이 있으면 덮지 않는다(설계: '라벨 없는 엔트리에') ④ service 외 필드는 손대지 않는다 — 대역·계정·agent 가
+ *   그대로라 접속처 변경 판정(secretCarry)이 비밀을 폐기하지 않는다. 라벨 상한은 saveScanRanges 와 같은 128자.
+ * @returns {{ok:true}|{ok:false,status:number,reason:string}}
+ */
+export function setScanRangeLabel(id, label, { datacenterId = '' } = {}) {
+  const key = String(id || '').trim();
+  const svc = String(label ?? '').trim();
+  if (!svc) return { ok: false, status: 400, reason: '라벨이 비어 있습니다.' };
+  if (svc.length > 128 || [...svc].some((c) => c.charCodeAt(0) < 32)) return { ok: false, status: 400, reason: '라벨은 128자 이하이고 제어 문자를 쓸 수 없습니다.' };
+  const cur = read();
+  const e = (cur.entries || {})[key];
+  if (!e) return { ok: false, status: 404, reason: '스캔 엔트리를 찾지 못했습니다.' };
+  if (String(e.datacenterId || '').trim() !== String(datacenterId || '').trim()) return { ok: false, status: 403, reason: '이 엔트리는 다른 DataCenter 소속입니다.' };
+  if (String(e.service || '').trim()) return { ok: false, status: 409, reason: `이미 라벨('${String(e.service).slice(0, 40)}')이 있습니다 — 대역 관리 화면에서 바꾸십시오.` };
+  const data = structuredClone(cur);
+  data.entries[key] = { ...data.entries[key], service: svc, updatedAt: Date.now() };
+  const err = write(data);
+  if (err) { cache = cur; return { ok: false, status: 500, reason: `저장 실패: ${String(err).slice(0, 120)}` }; }
+  return { ok: true };
+}
+
+/**
  * 저장/수정. body: { id?, datacenterId, service?, ranges?, username?, password?, agent?, enabled?, mode? }.
  * id가 있고 기존에 존재하면 수정, 없으면 새 엔트리 생성(UUID 발급). 비밀번호는 빈 문자열이면 기존 유지.
  */

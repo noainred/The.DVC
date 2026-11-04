@@ -677,6 +677,8 @@ export function generateSnapshot() {
         // v2.820: Bareos 연동용 정확한 위치(vcenter/vmPlacement.js 와 같은 모양) — 데이터센터는 사이트별 1개, 폴더는 위 folder 의 '/' 경로.
         vcDcPath: `DC-${site.id}`,
         folderPath: `/${VM_FOLDERS[(vm.idx * 7 + site.id.length) % VM_FOLDERS.length]}`,
+        // v2.864: 목 instanceUuid — 사이트·순번으로 결정적(vCenter 안에서 유일).
+        instanceUuid: `5001${String(site.id.length).padStart(4, '0')}-${String(vm.idx).padStart(4, '0')}-4000-8000-${site.id.replace(/[^a-z0-9]/gi, '').slice(0, 12).padEnd(12, '0').toLowerCase()}`,
         toolsStatus: powered ? (vm.idx % 19 === 3 ? 'OUTDATED' : 'RUNNING') : 'NOT_RUNNING',
         toolsVersion: TOOLS_VERSIONS[vm.idx % TOOLS_VERSIONS.length],
         // 버전/패치 준수 리포트용 — 실환경 SOAP의 guest.toolsVersionStatus2와 동일한 값 집합.

@@ -1846,7 +1846,9 @@ export async function collectFromVCenterSoap(vc, { signal = null, deadlineAt = D
         'guest.toolsVersion', 'guest.toolsVersionStatus2', 'config.annotation', 'snapshot', 'layoutEx.file',
         // 버전/패치 준수·좀비 탐지용(추가 SOAP 왕복 없음): VM 하드웨어 버전(vmx-NN)과
         // 연결 상태(orphaned/inaccessible/invalid = 고아·방치 VM 판별).
-        'config.version', 'runtime.connectionState'] },
+        'config.version', 'runtime.connectionState',
+        // v2.864(서비스 인벤토리): VM 키 — instanceUuid 는 vCenter 안에서 유일(키는 vcenterId 와 함께 쓴다). moref 는 재등록·이동에 바뀐다.
+        'config.instanceUuid'] },
       { type: 'Datastore', paths: ['name', 'summary.type', 'summary.capacity', 'summary.freeSpace', 'summary.accessible', 'info'] },
       { type: 'Network', paths: ['name'] },
       { type: 'DistributedVirtualPortgroup', paths: ['name'] },
@@ -2118,6 +2120,7 @@ export async function collectFromVCenterSoap(vc, { signal = null, deadlineAt = D
         ...vmPlacement(p.parent, folderByRef, dcByRef),
         resourcePool: poolName.get(p.resourcePool) || '',
         name: p.name,
+        instanceUuid: typeof p['config.instanceUuid'] === 'string' ? p['config.instanceUuid'].slice(0, 64) : '',
         powerState: powered ? 'POWERED_ON' : 'POWERED_OFF',
         template: p['summary.config.template'] === 'true',
         guestOS: p['summary.config.guestFullName'] || 'unknown',

@@ -59,7 +59,8 @@ function addMetric(m, pct, cap) {
   m.used += (pct / 100) * cap; m.total += cap; m.n += 1;
   return true;
 }
-function addAgg(a, x) {
+// v2.864: 서비스 인벤토리(servicemap/build.js)가 같은 합산 규칙을 쓴다 — 복제하지 않고 이 함수를 부른다(4차 검토 반증 15).
+export function addAgg(a, x) {
   a.servers += 1;
   if (x.cores != null) a.capCores += x.cores;
   if (x.memGB != null) a.capMemGB += x.memGB;
@@ -76,7 +77,7 @@ function addAgg(a, x) {
   if (c && filled.includes('cpu')) a.filledCpu += 1;
   if (m && filled.includes('mem')) a.filledMem += 1;
 }
-function mergeAgg(into, a) {
+export function mergeAgg(into, a) {
   into.servers += a.servers; into.unread += a.unread; into.stale += a.stale; into.noCap += a.noCap;
   into.cpuMissing += a.cpuMissing; into.memMissing += a.memMissing; into.keyConflict += a.keyConflict;
   into.dupSameBox += a.dupSameBox; into.filledCpu += a.filledCpu; into.filledMem += a.filledMem;
@@ -190,7 +191,7 @@ export function edgeRowOf(b, rowsByAgentKey) {
  * @param {Set|null} p.allowed     범위 계정의 허용 vCenter(null = 전체)
  * @param {Map|null} p.vcOwner     vcenterId → 담당 엣지 이름(site vCenter 만, v2.682 R3S-01)
  */
-export function buildCorpUsage({ vcenters = [], bareMetal = [], virtHosts = [], rowsByKey = new Map(), rowsByAgentKey = new Map(), hostByKey = new Map(), capOf = () => null, allowed = null, now = Date.now(), freshMs = 30 * 60_000, unreadVcenters = null, vcOwner = null } = {}) {
+export function buildCorpUsage({ vcenters = [], bareMetal = [], virtHosts = [], rowsByKey = new Map(), rowsByAgentKey = new Map(), hostByKey = new Map(), capOf = () => null, allowed = null, now = Date.now(), freshMs = 30 * 60_000, unreadVcenters = null, vcOwner = null, withServers = false } = {}) {
   const names = new Map((vcenters || []).filter((v) => v && t(v.id)).map((v) => [t(v.id), t(v.name) || t(v.id)]));
   const corps = new Map();
   const corpOf = (vc) => {
@@ -200,7 +201,7 @@ export function buildCorpUsage({ vcenters = [], bareMetal = [], virtHosts = [], 
     }
     return corps.get(vc);
   };
-  const unassigned = { bm: emptyAgg() };
+  const unassigned = { bm: emptyAgg(), servers: [] };
   const inScope = (vc) => !allowed || allowed.has(vc);
   const seen = new Map();   // key → 처음 센 서버의 vCenter
   const vcUnreadOf = (vc) => (unreadVcenters instanceof Map ? unreadVcenters.get(vc) || null : null);
@@ -231,7 +232,7 @@ export function buildCorpUsage({ vcenters = [], bareMetal = [], virtHosts = [], 
       : (capOf(b) || {});
     const j = judgeServer({ role: 'bm', row: keyConflict ? null : (edgeRowOf(b, rowsByAgentKey) || ownedRowOf(key, b.remoteAgent, rowsByKey, rowsByAgentKey)), now, freshMs });
     const x = { key, name: t(b.name), role: 'bm', cores: posOrNull(cap.cores), memGB: posOrNull(cap.memGB), ...j, ...(keyConflict ? { keyConflict: true } : {}) };
-    if (!vc) { if (!allowed) addAgg(unassigned.bm, x); continue; }
+    if (!vc) { if (!allowed) { addAgg(unassigned.bm, x); if (withServers) unassigned.servers.push(x); } continue; }
     if (!inScope(vc)) continue;
     const c = corpOf(vc);
     addAgg(c.bm, x); c.servers.push(x);
@@ -293,7 +294,7 @@ export function buildCorpUsage({ vcenters = [], bareMetal = [], virtHosts = [], 
   // 켠 법인이 아니어도 서버가 없는 법인은 행을 만들지 않는다(빈 행은 '0대' 라는 정보가 아니라 잡음이다).
   const rows = [...corps.values()].map((c) => {
     const all = emptyAgg(); mergeAgg(all, c.bm); mergeAgg(all, c.virt);
-    return { vcenterId: c.vcenterId, name: c.name, group: c.group, all: finishAgg(all), bm: finishAgg(c.bm), virt: finishAgg(c.virt), serverCount: c.servers.length };
+    return { vcenterId: c.vcenterId, name: c.name, group: c.group, all: finishAgg(all), bm: finishAgg(c.bm), virt: finishAgg(c.virt), serverCount: c.servers.length, ...(withServers ? { servers: c.servers } : {}) };
   }).sort((a, b) => a.name.localeCompare(b.name, 'en', { numeric: true, sensitivity: 'base' }) || a.vcenterId.localeCompare(b.vcenterId));
 
   const totals = {};
@@ -310,7 +311,7 @@ export function buildCorpUsage({ vcenters = [], bareMetal = [], virtHosts = [], 
     corps: rows,
     totals,
     // 법인 귀속이 없는 물리 서버 — 어느 법인 합계에도 넣지 않는다(범위 계정에는 null — 귀속 없는 데이터 미노출).
-    unassigned: allowed ? null : { bm: finishAgg(unassigned.bm) },
+    unassigned: allowed ? null : { bm: finishAgg(unassigned.bm), ...(withServers ? { servers: unassigned.servers } : {}) },
     freshMs,
   };
 }
