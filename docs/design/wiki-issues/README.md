@@ -116,7 +116,7 @@ Stiltsoft '10 Confluence best practices' · Medium 'clutter-free Confluence cont
 
 ## 6.5 구현 기록
 
-- **D(파트 장애 자동 등록) — v2.879.0 구현.** 정정(구현 중 코드 확인): 시안 ⑪ 의 매트릭스에 그린 **ESXi 열 · NIC · SFP 행은 없다** — 파트 장애 추출기는
+- **D(파트 장애 자동 등록) — v2.880.0 구현.** 정정(구현 중 코드 확인): 시안 ⑪ 의 매트릭스에 그린 **ESXi 열 · NIC · SFP 행은 없다** — 파트 장애 추출기는
   `partfault/extract/{idrac,storage,sanswitch}.js` 셋뿐이고 iDRAC 은 PSU · 디스크 · DIMM · 팬 · CPU · GPU · 컨트롤러 · PCIe, 스토리지는 노드 · 디스크 · DIMM · 팬 · PSU ·
   배터리 · 인클로저 · PCIe · 기타, SAN 은 포트 · 팬 · PSU 만 보고한다. 화면은 서버가 준 지원 칸만 연다. 법인 판정에 iDRAC 서비스 태그 → 호스트 vCenter 를 더했다
   (시안은 '수집 서버의 vCenter' 만 적었다 — 중앙 직접 수집이면 전부 공용이 되는 문제를 목 서버 실행에서 발견). 자동화 규칙 · 리포트 · 다른 알람은 이번에 넣지 않았다(다음 단계).

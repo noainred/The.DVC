@@ -90,7 +90,7 @@ async function runOnce({ notify = true, reason = 'timer' } = {}) {
     let tr = transition({ open: prev, observed, scan: { deviceOk, kindFailed, agentsReported, deviceReason: edge.deviceReason, scopeUnreadable } });
     const saved = await applyTransition(tr);
 
-    // v2.879: 파트 장애 → 이슈 자동 등록(issues/autoCreate.js — 설정에서 켠 칸만). DB 에 쓴 뒤 · 알림 전에 한 번. 던지지 않는다.
+    // v2.880: 파트 장애 → 이슈 자동 등록(issues/autoCreate.js — 설정에서 켠 칸만). DB 에 쓴 뒤 · 알림 전에 한 번. 던지지 않는다.
     //   '파트 장애 알림 대신 이슈 알림만'(replaceNotify)이 켜져 있으면 이슈가 맡은 파트는 아래 파트 장애 알림에서 뺀다(두 통 방지).
     let auto = null;
     try {

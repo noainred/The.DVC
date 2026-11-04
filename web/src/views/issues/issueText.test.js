@@ -201,7 +201,7 @@ describe('v2.871 진행 공유 — 진행률 · 멈춤 · 내 요청 · 활동 �
   });
 });
 
-describe('v2.879 자동 등록 문구', () => {
+describe('v2.880 자동 등록 문구', () => {
   const m = AUTO;
   it('autoKindRows — 어느 장비군이라도 지원하는 종류만 · 순서 유지', () => {
     expect(m.autoKindRows({ kinds: ['disk', 'nic', 'port'], supported: { idrac: ['disk'], sanswitch: ['port'] } })).toEqual(['disk', 'port']);
@@ -211,9 +211,9 @@ describe('v2.879 자동 등록 문구', () => {
     expect(m.autoOnCount({ idrac: { disk: 'warn', pcie: 'off' }, storage: { psu: 'fault' } })).toBe(2);
   });
   it('autoStatusText — 상한 · 건너뜀 · 실패를 숨기지 않는다', () => {
-    const t = m.autoStatusText({ lastRunAt: Date.now(), created: 2, attached: 0, commented: 3, review: 1, capped: 4, skipped: { 'not-fault': 5 }, errors: 1, lastError: 'x' });
+    const t = m.autoStatusText({ ranAt: Date.now(), created: 2, attached: 0, commented: 3, review: 1, capped: 4, skipped: { 'not-fault': 5 }, errors: 1, error: 'x' });
     expect(t).toMatch(/이슈 2건/); expect(t).toMatch(/하루 상한으로 안 만든 것 4건/); expect(t).toMatch(/장애 아님\(unknown · absent\) 5/); expect(t).toMatch(/실패 1\(x\)/);
-    expect(m.autoStatusText({ lastRunAt: null })).toMatch(/아직 처리한 전이가 없습니다/);
+    expect(m.autoStatusText({ ranAt: null })).toMatch(/아직 처리한 전이가 없습니다/);
   });
   it('simulateText · originText', () => {
     expect(m.simulateText({ hours: 24, events: 41, create: 3, attach: 0, comment: 7, capped: 0, skipped: { 'kind-off': 4 } })).toMatch(/새 이슈 3건.*끈 칸 4.*만들지는 않았습니다/);

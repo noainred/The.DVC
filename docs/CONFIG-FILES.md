@@ -143,7 +143,7 @@
 | `isidu-push.json` | 설정 | 아이실론 디렉터리 사용량 엣지 push 커서(상태, v2.736) | ✅ |  | ✅ | isidu/push.js |
 | `isidu-settings.json` | 설정 | 아이실론 디렉터리 사용량 조사 대상(v2.736 — 아이실론·경로·주기·실행 노드·보존일. 비밀 없음) | ✅ | ✅ | ✅ | isidu/settings.js |
 | `isidu.db` | DB | 아이실론 디렉터리 사용량 이력 DB(v2.736). 파일: `<dbDir>/isidu.db` |  |  | ✅ | isidu/db.js |
-| `issue-autocreate.json` | 설정 | 파트 장애 → 이슈 자동 등록 설정(v2.879 — 켜기 · 부품 종류 × 장비군 칸(끔/fault/fault+warn) · 우선순위 · 라벨 · 제목 틀 · 폭주 묶음 · 하루 상한 · 해소 처리 · 법인 예외. 비밀 없음) | ✅ | ✅ | ✅ | issues/autoCreate.js |
+| `issue-autocreate.json` | 설정 | 파트 장애 → 이슈 자동 등록 설정(v2.880 — 켜기 · 부품 종류 × 장비군 칸(끔/fault/fault+warn) · 우선순위 · 라벨 · 제목 틀 · 폭주 묶음 · 하루 상한 · 해소 처리 · 법인 예외. 비밀 없음) | ✅ | ✅ | ✅ | issues/autoCreate.js |
 | `issue-notify-state.json` | 설정 | 이슈 기한 알림 기록(상태, v2.871) |  |  |  | (외부/설치 스크립트) |
 | `issue-settings.json` | 설정 | 이슈 트래커 설정(v2.871 — 자동 할당 규칙 · 알림 켜기·이벤트 · 사람별 메일 주소. 비밀 없음) | ✅ | ✅ | ✅ | issues/settings.js |
 | `issues.json` | 설정 | 이슈 트래커 이슈·댓글·이력(v2.864 — 로그인 사용자가 쓰는 사용자 데이터. 비밀 없음) | ✅ | ✅ | ✅ | issues/store.js |

@@ -1,5 +1,5 @@
 /**
- * issuesAutoCreate2879.test.js — 하드웨어 파트 장애 → 이슈 자동 등록(v2.879 · 시안 docs/design/wiki-issues ⑪).
+ * issuesAutoCreate2880.test.js — 하드웨어 파트 장애 → 이슈 자동 등록(v2.880 · 시안 docs/design/wiki-issues ⑪).
  *
  * ① 순수 판정(planPartFault · eligibility · titleOf) — 같은 함수가 시험 실행과 실제 실행에 쓰인다.
  * ② 실제 저장소 경로 — 자식 프로세스에서 CONFIG_DIR 을 갈아 끼우고 applyPartFaultIssues 를 실제로 부른다(진입 함수를 실제로 호출 — common.md).
@@ -89,7 +89,7 @@ test('② 제목 틀 · 설정 정제(저장은 400 · 파일은 버리고 센�
 });
 
 function run(body, { pre, env = {} } = {}) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'issuesAuto2879-'));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'issuesAuto2880-'));
   if (pre) pre(dir);
   const script = `
     const express = (await import('express')).default;

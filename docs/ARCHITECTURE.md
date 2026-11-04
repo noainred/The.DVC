@@ -115,7 +115,7 @@
 | `inventory/` | 7 | 1,209 | `inventory/osKind.js` (3) | VM 게스트 OS 문자열 → 'windows' \| 'linux' \| 'other' \| null (v2.834 — Bareos 백업 대상 OS 구분). |
 | `ipam/` | 30 | 5,721 | `ipam/scanStore.js` (7) | IP 스캔 설정(에이전트별) + 결과 저장소. |
 | `isidu/` | 21 | 4,828 | `isidu/digestRules.js` (6) | isidu/digestRules.js — 아이실론 디렉터리 사용량 **종합 메일**의 순수 규칙(v2.742). 파일·타이머·메일 발송 없음. |
-| `issues/` | 5 | 1,887 | `issues/autoCreate.js` (2) | issues/autoCreate.js — 하드웨어 파트 장애 → 이슈 자동 등록(v2.879, 사용자 요청 2026-11-04 |
+| `issues/` | 5 | 1,887 | `issues/autoCreate.js` (2) | issues/autoCreate.js — 하드웨어 파트 장애 → 이슈 자동 등록(v2.880, 사용자 요청 2026-11-04 |
 | `linkcheck/` | 12 | 2,724 | `linkcheck/links.js` (4) | linkcheck/links.js — **설정에서 통신 링크를 자동으로 뽑는다**(순수, v2.552). |
 | `llm/` | 5 | 594 | `llm/config.js` (2) | Local LLM (Ollama) settings for natural-language search. Stored in |
 | `loganalysis/` | 8 | 2,076 | `loganalysis/index.js` (2) | loganalysis/index.js — 설정 › Log › 로그 분석 파사드(v2.583). |

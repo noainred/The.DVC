@@ -1,5 +1,5 @@
 /**
- * issues/autoCreate.js — 하드웨어 파트 장애 → 이슈 자동 등록(v2.879, 사용자 요청 2026-11-04
+ * issues/autoCreate.js — 하드웨어 파트 장애 → 이슈 자동 등록(v2.880, 사용자 요청 2026-11-04
  * "하드웨어 파트 장애가 발생하면 자동으로 이슈 등록하는 기능 추가, 설정에서 어떤 장애에 대해서 자동으로 추가할 것인지 설정").
  * 시안: docs/design/wiki-issues ⑪(이슈 설정 › 자동 등록).
  *
@@ -320,7 +320,8 @@ function bodyOf(parts, { device = false } = {}) {
 
 /* ───── 실행 ───── */
 const SYSTEM_USER = 'partfault';
-const freshStatus = () => ({ lastRunAt: null, created: 0, attached: 0, commented: 0, review: 0, migrated: 0, capped: 0, errors: 0, lastError: null, skipped: {}, lastCapAt: null });
+// 메모리 상태(파일에 쓰지 않는다 — 화면 · 점검용). 이름에 last* 를 쓰지 않는다: 저장 레코드의 실행 필드로 오인된다(audit2613f TESTDOC2613-13 스윕).
+const freshStatus = () => ({ ranAt: null, created: 0, attached: 0, commented: 0, review: 0, migrated: 0, capped: 0, errors: 0, error: null, skipped: {}, cappedAt: null });
 const status = freshStatus();
 let capWarnedDay = '';
 export function autoCreateStatus() { return { ...status, skipped: { ...status.skipped } }; }
@@ -369,16 +370,16 @@ export async function applyPartFaultIssues(tr, { now = Date.now() } = {}) {
   const cfg = loadAutoCreate().partfault;
   const out = { enabled: !!cfg.enabled, handled: new Set(), created: 0, attached: 0, commented: 0, review: 0, skipped: {}, capped: 0 };
   if (!cfg.enabled) return out;
-  status.lastRunAt = now;
+  status.ranAt = now;
   let plan;
   try {
     const existing = findByOrigin((o) => o.kind === 'partfault');
     plan = planPartFault(tr, cfg, { existing, now, createdToday: originCreatedSince('partfault', todayStartMs(now)) });
-  } catch (e) { status.errors += 1; status.lastError = String(e?.message || e).slice(0, 200); return out; }
+  } catch (e) { status.errors += 1; status.error = String(e?.message || e).slice(0, 200); return out; }
   out.skipped = plan.skipped; out.capped = plan.capped;
   for (const [k, n] of Object.entries(plan.skipped)) status.skipped[k] = (status.skipped[k] || 0) + n;
   if (plan.capped) {
-    status.capped += plan.capped; status.lastCapAt = now;
+    status.capped += plan.capped; status.cappedAt = now;
     const day = dayKey(now);
     if (capWarnedDay !== day) { capWarnedDay = day; console.warn(`[issues] 파트 장애 자동 등록 하루 상한(${cfg.dailyMax}건)에 닿아 ${plan.capped}건을 만들지 않았습니다 — 이슈 › 설정 › 자동 등록`); }
   }
@@ -443,8 +444,8 @@ export async function applyPartFaultIssues(tr, { now = Date.now() } = {}) {
         comment(a.key, `판정 보류(닫지 않음): ${HOLD_TEXT[a.reason] || a.reason} — 다음 점검에서 다시 판정합니다.`);
       }
     } catch (e) {
-      status.errors += 1; status.lastError = `${a.type}: ${String(e?.message || e).slice(0, 180)}`;
-      console.warn(`[issues] 파트 장애 자동 등록 실패(${status.lastError})`);
+      status.errors += 1; status.error = `${a.type}: ${String(e?.message || e).slice(0, 180)}`;
+      console.warn(`[issues] 파트 장애 자동 등록 실패(${status.error})`);
     }
   }
   return out;

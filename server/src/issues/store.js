@@ -368,7 +368,7 @@ function findFor(key, access = FULL_ACCESS, { write = false } = {}) {
   return x;
 }
 
-/* ───── 자동 등록 출처(v2.879 — 파트 장애 → 이슈) ─────
+/* ───── 자동 등록 출처(v2.880 — 파트 장애 → 이슈) ─────
  * 사람이 만든 이슈에는 없다. 서버 내부 경로(issues/autoCreate.js)만 붙이고 라우트 본문으로는 받지 않는다(위조 금지).
  * partKeys 는 한 이슈가 덮는 파트 키(`agent|partKey`) — 장비 단위로 묶은 이슈는 여럿이다. resolved 는 해소된 키.
  */

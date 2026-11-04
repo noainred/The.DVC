@@ -84,13 +84,13 @@
     `device-failed` 로 보류한다. **agent 는 인증된 값으로 덮어쓴다**(엣지가 법인 귀속을 정하지 못하게, F5).
     스토리지·SAN 은 `devicesForAgent(agent)` 에 없는 장비를 **버리고 개수를 밝힌다**(`rejected`). iDRAC 은 중앙
     등록부에 없어 검사 불가 — DB 기본키의 agent 축이 격리한다. 오래된 보고(기본 3시간)는 `deviceOk` 전부 false.
-  - **v2.879 이슈 자동 등록**(`issues/autoCreate.js` · 설정 `issue-autocreate.json` · 화면 이슈 › 설정 › 자동 등록): 중앙 폴러(`poller.js runOnce`)가 `applyTransition` 직후 · 알림 전에
+  - **v2.880 이슈 자동 등록**(`issues/autoCreate.js` · 설정 `issue-autocreate.json` · 화면 이슈 › 설정 › 자동 등록): 중앙 폴러(`poller.js runOnce`)가 `applyTransition` 직후 · 알림 전에
     `applyPartFaultIssues(tr)` 를 한 번 부른다(던지지 않음). 판정은 전이 결과 그대로 — **unknown · absent 는 등록하지 않는다** · 칸은 추출기가 실제로 보고하는
     부품만(`AUTO_SUPPORTED` — idrac/storage/sanswitch, ESXi · NIC · SFP 없음 · 테스트가 추출기 파일과 대조). 같은 `agent|partKey` 를 덮는 열린 이슈가 있으면 댓글 ·
     장비 폭주는 1건 · 하루 상한 · 키 변경(key-migrated)은 출처의 키만 바꾼다 · 해소되면 댓글 + 설정에 따라 '검토'(완료는 사람이) · 보류는 사유가 바뀔 때 댓글.
     법인은 ① iDRAC 서비스 태그 → 호스트의 vCenter(`hostVcByTag`) ② 수집 서버의 vCenter 가 하나 ③ 공용. 'replaceNotify' 를 켜면 이슈가 맡은 파트는 파트 장애
     알림에서 뺀다(기본 끔 — 사용자가 고른 '파트당 1건 즉시' 를 바꾸지 않는다). 이슈의 `origin` 은 서버 내부 경로만 붙인다(라우트 본문으로 받지 않음 — 위조 금지).
-    회귀 `server/test/issuesAutoCreate2879.test.js`(변이 11/11).
+    회귀 `server/test/issuesAutoCreate2880.test.js`(변이 11/11).
   - **스위치는 `partfault/settings.js partFaultEnabled()` 하나다**(F3): env `PARTFAULT_ENABLED` > 중앙 설정
     (`partfault-settings.json`, 엣지별 off 가능) > 기본 꺼짐. 엣지는 `agent/partFaultConfigPull.js` 로 받는다.
     **엣지에서는 poller(전이·DB·알림)가 돌지 않는다** — 엣지가 스위치를 켜면 알림이 두 번 나가던 것(v2.547).

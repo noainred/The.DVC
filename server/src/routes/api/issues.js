@@ -181,7 +181,7 @@ export function registerIssues(api) {
       res.json({ ok: true, settings: s, loadError: null, notifyStatus: issueNotifyStatus() });
     } catch (e) { fail(res, e, next); }
   });
-  // v2.879 파트 장애 → 이슈 자동 등록 설정 — 이슈 설정과 같은 문지기(관리자 + 전체 범위, 저장은 쓰기 범위도 무제한).
+  // v2.880 파트 장애 → 이슈 자동 등록 설정 — 이슈 설정과 같은 문지기(관리자 + 전체 범위, 저장은 쓰기 범위도 무제한).
   //   ⚠ '/issues/:key' 보다 먼저(뒤에 두면 'autocreate' 가 키로 잡혀 404).
   api.get('/issues/autocreate', adminOnly, issueSettingsFleetOnly, (req, res) => {
     if (!isAdmin(req)) return res.status(403).json({ ok: false, reason: '데모 계정은 이슈 설정을 볼 수 없습니다' });

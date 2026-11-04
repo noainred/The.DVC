@@ -280,7 +280,7 @@ export function issueLink(key, loc = (typeof window !== 'undefined' ? window.loc
   return `${loc.origin}${loc.pathname}#/issues/board/${key}`;
 }
 
-/* ───────────── v2.879 파트 장애 → 이슈 자동 등록 ───────────── */
+/* ───────────── v2.880 파트 장애 → 이슈 자동 등록 ───────────── */
 
 /** 칸 값(off/fault/warn) → 화면 글. */
 export const AUTO_LEVEL_TEXT = Object.freeze({ off: '끔', fault: 'fault 만', warn: 'fault + warn' });
@@ -299,12 +299,12 @@ const SKIP_TEXT = Object.freeze({ 'not-fault': '장애 아님(unknown · absent)
 /** 자동 등록 상태 한 줄 — 서버 autoCreateStatus(). 실패·상한·건너뜀을 숨기지 않는다. */
 export function autoStatusText(st) {
   if (!st || typeof st !== 'object') return '';
-  const parts = [st.lastRunAt ? `마지막 처리 ${timeText(st.lastRunAt)}` : '아직 처리한 전이가 없습니다(포탈 시작 뒤)'];
+  const parts = [st.ranAt ? `마지막 처리 ${timeText(st.ranAt)}` : '아직 처리한 전이가 없습니다(포탈 시작 뒤)'];
   parts.push(`이슈 ${st.created ?? 0}건 · 붙임 ${st.attached ?? 0} · 댓글 ${st.commented ?? 0} · 검토로 ${st.review ?? 0}`);
   if (st.capped) parts.push(`하루 상한으로 안 만든 것 ${st.capped}건`);
   const sk = Object.entries(st.skipped || {}).filter(([, n]) => n > 0).map(([k, n]) => `${SKIP_TEXT[k] || k} ${n}`);
   if (sk.length) parts.push(`건너뜀 — ${sk.join(' · ')}`);
-  if (st.errors) parts.push(`실패 ${st.errors}${st.lastError ? `(${st.lastError})` : ''}`);
+  if (st.errors) parts.push(`실패 ${st.errors}${st.error ? `(${st.error})` : ''}`);
   return parts.join(' · ');
 }
 /** 시험 실행 결과 한 줄. */
