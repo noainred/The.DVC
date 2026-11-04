@@ -221,7 +221,7 @@ async function computeAndSend({ by = 'system', now = Date.now() } = {}) {
   const d = digestData(listJobs(), loadSettings(), dirStatusNow(), now, { causeOf: cachedCause });
   if (!d.rows.length) return { ok: true, reason: '백업 대상이 없어 보내지 않았습니다.', skipped: true };
   const m = renderDigest(d, now);
-  // v2.886 사전 점검 절(설정에서 끄면 없음 · 상태 파일만 읽는다 — Director 에 묻지 않는다)
+  // v2.890 사전 점검 절(설정에서 끄면 없음 · 상태 파일만 읽는다 — Director 에 묻지 않는다)
   let hs = null;
   try { const names = new Map((store.get()?.vcenters || []).map((v) => [String(v.id), v.name || v.id])); hs = healthDigestSection((id) => names.get(String(id)) || id); } catch { hs = null; }
   if (hs && m.html.endsWith('</div>')) { m.html = `${m.html.slice(0, -6)}${hs.html}</div>`; m.text += hs.text; }

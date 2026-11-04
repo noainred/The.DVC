@@ -1,4 +1,4 @@
-// v2.886 Bareos 사전 점검 화면 조각(docs/design/bareos-precheck · 컨펌 2026-11-05) — 현황 띠 · 법인 카드 · 설정 행.
+// v2.890 Bareos 사전 점검 화면 조각(docs/design/bareos-precheck · 컨펌 2026-11-05) — 현황 띠 · 법인 카드 · 설정 행.
 // 판정은 서버(GET /tools/bareos-backup/health — 관리자) · 이 파일은 보여 주기만. 403(관리자 아님)이면 조용히 숨긴다(조각이라 화면을 막지 않는다).
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { fetchJson, postJson, putJson } from '../../api.js';

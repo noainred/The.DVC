@@ -1,4 +1,4 @@
-// v2.886 Bareos 사전 점검(docs/design/bareos-precheck) 화면 문구 — 판정은 서버(bareos/health.js judgeCorp) 하나이고 여기는 보이는 글자만 고른다.
+// v2.890 Bareos 사전 점검(docs/design/bareos-precheck) 화면 문구 — 판정은 서버(bareos/health.js judgeCorp) 하나이고 여기는 보이는 글자만 고른다.
 // 모름은 0 이 아니다 — 수에 넣지 않고 '모름' 으로 · '정상' 은 백업 성공을 보장하지 않는다(문구가 그 한계를 말한다).
 import { numOrNull } from '../../numOrNull.js';
 
