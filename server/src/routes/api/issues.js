@@ -26,6 +26,7 @@ import { store } from '../../store.js';
 import { fullScopeOnlyWith } from '../admin/shared.js';
 import {
   listIssues, getIssue, createIssue, updateIssue, setStatus, assignIssue, bulkAssign, setBlocked, setWatch, addComment, deleteComment, deleteIssue, setProgress, activityFeed,
+  bulkEdit, moveSprintIssues, sprintBoard, queryContext,
   issueStats, knownNames, issuesSeq, waitIssuesPersist, issuesPersist, PERSIST_WAIT_MS,
   LIMITS, STATUSES, TYPES, PRIORITIES, KEY_RE, ID_RE, RECENT_DONE_MS, KEY_PREFIX,
 } from '../../issues/store.js';
@@ -38,10 +39,16 @@ import {
 } from '../../issues/autoCreate.js';
 import { PART_KIND_LABEL, SCOPE_LABEL } from '../../partfault/types.js';
 import { listCollectors } from '../../collector/registry.js';
+import { listSprints, createSprint, updateSprint, closeSprint, getSprint, sprintsLoadError, SPRINT_LIMITS } from '../../issues/sprints.js';
+import { listFilters, createFilter, updateFilter, deleteFilter, filtersLoadError, FILTER_LIMITS } from '../../issues/filters.js';
+import { QUERY_LIMITS, FIELDS as QUERY_FIELDS, ORDERABLE as QUERY_ORDERABLE } from '../../issues/query.js';
+import { issueDocIndex } from '../../wiki/store.js';
 
 const writers = requireRole('admin', 'operator');
 const adminOnly = requireRole('admin');
 const issueSettingsFleetOnly = fullScopeOnlyWith('이슈 설정(자동 할당 · 알림 · 메일 주소)은 전 법인 공용이라 전체 범위(vCenter 제한 없는) 관리자만 보고 바꿀 수 있습니다.');
+/** v2.882 스프린트는 전 법인 공용(공용 + 전 법인 이슈를 담는다) — 만들기 · 고치기 · 끝내기는 전체 범위 운영자 · 관리자. 이슈 넣기 · 빼기는 그 이슈의 쓰기 범위. */
+const sprintFleetOnly = fullScopeOnlyWith('스프린트(이름 · 기간 · 목표 · 끝내기)는 전 법인 공용이라 전체 범위(vCenter 제한 없는) 운영자 · 관리자만 만들고 바꿀 수 있습니다 — 이슈를 넣고 빼는 것은 이슈의 쓰기 범위로 됩니다.');
 /** v2.871 감사 A3-05: 전 법인 공용 쓰기 — 조회가 무제한이어도 쓰기 범위(writeVcenters)가 지정된 계정은 403(bareosManage.js fullWriteOnly 와 같은 판정). */
 function fullWriteOnly(req, res, next) {
   let w = null;
@@ -150,6 +157,9 @@ export function registerIssues(api) {
       keyPrefix: KEY_PREFIX, recentDoneMs: RECENT_DONE_MS, people: write ? people(req, access) : [], vcenters: vcenterChoices(access),
       components: write ? loadIssueSettings().autoAssign.components.map((c) => c.name) : [],
       persist: issuesPersist({ admin: isAdmin(req) }),
+      // v2.882 스프린트 · 검색식 · 저장 필터
+      canSprints: write && !access.read && !access.write, canShareFilters: write && !access.read && !access.write, canFilters: write,
+      queryLimits: QUERY_LIMITS, queryFields: Object.keys(QUERY_FIELDS), queryOrderable: QUERY_ORDERABLE, sprintLimits: SPRINT_LIMITS, filterLimits: FILTER_LIMITS,
     });
   });
   api.get('/issues/stats', (req, res) => {
@@ -219,21 +229,91 @@ export function registerIssues(api) {
     const since = Number(req.query.since);
     res.json({ ok: true, ...activityFeed({ access: accessOf(req), limit, since: Number.isFinite(since) && since > 0 ? since : 0 }) });
   });
-  api.get('/issues', (req, res) => {
+  api.get('/issues', (req, res, next) => {
     const { offset, limit } = pageArgs(req.query, { def: 500, max: LIMITS.issueMax });
     const done = ['open', 'recent', 'all'].includes(req.query.done) ? req.query.done : 'open';
     const q = req.query;
     res.set('Cache-Control', 'no-store');
-    res.json({
-      ok: true,
-      ...listIssues({
+    const access = accessOf(req);
+    const query = str(q.query).slice(0, QUERY_LIMITS.length + 1);
+    // 검색식(v2.882) — 법인 이름은 이 사용자가 볼 수 있는 vCenter 로만 푼다 · doc 필드는 보이는 위키 문서로만
+    let ctx = null;
+    if (query.trim()) {
+      const docs = /\bdoc\b/i.test(query) ? issueDocIndex(access) : null;
+      ctx = queryContext({ me: userOf(req), vcenters: vcenterChoices(access), docs: docs ? (k) => docs.get(k) || [] : null });
+    }
+    let list;
+    try {
+      list = listIssues({
         q: str(q.q), status: STATUSES.includes(q.status) ? q.status : '', assignee: Object.hasOwn(q, 'assignee') ? str(q.assignee) : null,
         priority: PRIORITIES.includes(q.priority) ? q.priority : '', type: TYPES.includes(q.type) ? q.type : '', label: str(q.label).slice(0, LIMITS.label),
         vcenterId: Object.hasOwn(q, 'vcenterId') ? str(q.vcenterId).slice(0, 128) : null,
-        done, offset, limit, access: accessOf(req),
-      }),
-      me: userOf(req), canWrite: canWrite(req), persist: issuesPersist({ admin: isAdmin(req) }),
-    });
+        sprintId: Object.hasOwn(q, 'sprintId') ? str(q.sprintId).slice(0, 20) : null,
+        done, offset, limit, access, query, me: userOf(req), ctx,
+      });
+    } catch (e) { return fail(res, e, next); }
+    res.json({ ok: true, ...list, me: userOf(req), canWrite: canWrite(req), persist: issuesPersist({ admin: isAdmin(req) }) });
+  });
+
+  /* ───── 스프린트(v2.882 · 시안 ⑦) — '/issues/:key' 보다 먼저(키 형식이 아니라 404 가 된다) ───── */
+  api.get('/issues/sprints', (req, res) => {
+    res.set('Cache-Control', 'no-store');
+    const access = accessOf(req);
+    res.json({ ok: true, sprints: listSprints(), canManage: canWrite(req) && !access.read && !access.write, loadError: isAdmin(req) ? sprintsLoadError() : null, limits: SPRINT_LIMITS });
+  });
+  api.get('/issues/sprints/:id/board', (req, res, next) => {
+    res.set('Cache-Control', 'no-store');
+    try { res.json({ ok: true, ...sprintBoard(str(req.params.id).slice(0, 20), { access: accessOf(req) }) }); } catch (e) { fail(res, e, next); }
+  });
+  api.post('/issues/sprints', writers, sprintFleetOnly, fullWriteOnly, (req, res, next) => {
+    if (!canWrite(req)) return res.status(403).json({ ok: false, reason: '데모 계정은 스프린트를 만들 수 없습니다' });
+    try {
+      const sp = createSprint(req.body || {}, userOf(req));
+      audit(req, 'issue.sprint.create', sp.id, `${sp.name} ${sp.startDay}~${sp.endDay}`);
+      res.json({ ok: true, sprint: sp });
+    } catch (e) { fail(res, e, next); }
+  });
+  api.put('/issues/sprints/:id', writers, sprintFleetOnly, fullWriteOnly, (req, res, next) => {
+    if (!canWrite(req)) return res.status(403).json({ ok: false, reason: '데모 계정은 스프린트를 고칠 수 없습니다' });
+    try {
+      const sp = updateSprint(str(req.params.id).slice(0, 20), req.body || {}, userOf(req));
+      audit(req, 'issue.sprint.update', sp.id, Object.keys(req.body || {}).slice(0, 6).join(','));
+      res.json({ ok: true, sprint: sp });
+    } catch (e) { fail(res, e, next); }
+  });
+  // 끝내기 — 미완료를 다음 스프린트(to) 또는 백로그('')로 옮긴 뒤 닫는다(순서: 옮기기 → 닫기. 옮기기가 실패하면 닫지 않는다).
+  api.post('/issues/sprints/:id/close', writers, sprintFleetOnly, fullWriteOnly, async (req, res, next) => {
+    if (!canWrite(req)) return res.status(403).json({ ok: false, reason: '데모 계정은 스프린트를 끝낼 수 없습니다' });
+    try {
+      const id = str(req.params.id).slice(0, 20);
+      const sp = getSprint(id);
+      if (!sp) return res.status(404).json({ ok: false, reason: '없는 스프린트입니다' });
+      if (sp.state === 'closed') return res.status(409).json({ ok: false, reason: '이미 끝난 스프린트입니다' });
+      const to = str(req.body?.to).slice(0, 20);
+      const moved = moveSprintIssues(id, to, userOf(req));
+      const closed = closeSprint(id, userOf(req), { note: `완료 ${moved.done} · 옮김 ${moved.moved}${to ? ` → ${getSprint(to)?.name || to}` : ' → 백로그'}` });
+      audit(req, 'issue.sprint.close', id, `${sp.name} — 완료 ${moved.done} · 옮김 ${moved.moved}${to ? ` → ${to}` : ' → 백로그'}`);
+      res.json({ ok: true, sprint: closed, moved, persist: await persistView(req) });
+    } catch (e) { fail(res, e, next); }
+  });
+
+  /* ───── 저장 필터(v2.882 · 시안 ⑧) — 쓰기 계정(운영자 · 관리자)이 저장한다. 공유는 전체 범위 쓰기 계정만(저장소가 canShare 로 판정) ───── */
+  api.get('/issues/filters', (req, res) => {
+    res.set('Cache-Control', 'no-store');
+    res.json({ ok: true, filters: listFilters(userOf(req), { isMod: isMod(req) }), loadError: isAdmin(req) ? filtersLoadError() : null, limits: FILTER_LIMITS });
+  });
+  const canShareFilters = (req) => { const a = accessOf(req); return canWrite(req) && !a.read && !a.write; };
+  api.post('/issues/filters', writers, (req, res, next) => {
+    if (!canWrite(req)) return res.status(403).json({ ok: false, reason: '데모 계정은 필터를 저장할 수 없습니다' });
+    try { res.json({ ok: true, filter: createFilter(req.body || {}, userOf(req), { canShare: canShareFilters(req) }) }); } catch (e) { fail(res, e, next); }
+  });
+  api.put('/issues/filters/:id', writers, (req, res, next) => {
+    if (!canWrite(req)) return res.status(403).json({ ok: false, reason: '데모 계정은 필터를 고칠 수 없습니다' });
+    try { res.json({ ok: true, filter: updateFilter(str(req.params.id).slice(0, 20), req.body || {}, userOf(req), { canShare: canShareFilters(req) }) }); } catch (e) { fail(res, e, next); }
+  });
+  api.delete('/issues/filters/:id', writers, (req, res, next) => {
+    if (!canWrite(req)) return res.status(403).json({ ok: false, reason: '데모 계정은 필터를 지울 수 없습니다' });
+    try { res.json({ ok: true, ...deleteFilter(str(req.params.id).slice(0, 20), userOf(req), { isMod: isMod(req) }) }); } catch (e) { fail(res, e, next); }
   });
   api.get('/issues/:key', (req, res, next) => {
     if (!KEY_RE.test(req.params.key)) return badKey(res);
@@ -252,6 +332,14 @@ export function registerIssues(api) {
     } catch (e) { fail(res, e, next); }
   });
   // ⚠ '/issues/:key/…' 보다 먼저 — 뒤에 두면 'bulk' 가 키로 잡혀 404 가 된다(v2.864 자체 테스트가 잡았다).
+  // v2.882 일괄 편집(스프린트 · 에픽 · 라벨 더하기) — 키마다 updateIssue(범위 · 계층 규칙 하나)
+  api.post('/issues/bulk/edit', writers, async (req, res, next) => {
+    try {
+      const r = bulkEdit(req.body?.keys, req.body?.set, userOf(req), { access: accessOf(req), known: knownVcenters() });
+      audit(req, 'issue.bulk-edit', Object.keys(req.body?.set || {}).slice(0, 4).join(','), `${r.done}건 성공 · ${r.failed}건 실패`);
+      res.json({ ok: true, ...r, persist: await persistView(req) });
+    } catch (e) { fail(res, e, next); }
+  });
   api.post('/issues/bulk/assign', writers, async (req, res, next) => {
     try {
       const r = bulkAssign(req.body?.keys, req.body?.assignee, userOf(req), { access: accessOf(req) });
@@ -270,7 +358,7 @@ export function registerIssues(api) {
   api.post('/issues/:key/status', writers, async (req, res, next) => {
     if (!KEY_RE.test(req.params.key)) return badKey(res);
     try {
-      const x = setStatus(req.params.key, req.body?.status, userOf(req), { access: accessOf(req) });
+      const x = setStatus(req.params.key, req.body?.status, userOf(req), { access: accessOf(req), closeChildren: req.body?.closeChildren === true });
       audit(req, 'issue.status', x.key, x.status);
       res.json({ ok: true, issue: x, persist: await persistView(req) });
     } catch (e) { fail(res, e, next, req); }

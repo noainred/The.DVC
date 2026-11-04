@@ -2635,3 +2635,90 @@ tr.row-sel > td { background: rgba(59, 130, 246, .10); }
   .wiki-search { max-width: none; flex-basis: 100%; }
   .wiki-doc-main { padding: 10px 12px; }
 }
+
+/* ───── 이슈 확장(v2.882 · 시안 docs/design/wiki-issues ⑥⑦⑧⑬) — 에픽 · 하위 작업 · 스프린트 · 검색식 ───── */
+.iss-card-top { flex-wrap: wrap; }
+.iss-card.has-epic, .iss-scard { border-left-width: 4px; }
+.iss-type.t-epic { color: #a855f7; }
+.iss-small { font-size: 11.5px; }
+.iss-subn { display: inline-flex; align-items: center; margin-left: 6px; padding: 0 6px; border-radius: 5px; font-size: 11px; white-space: nowrap; color: var(--text-dim); background: color-mix(in srgb, var(--border) 55%, transparent); }
+.iss-card-top .iss-subn { margin-left: 0; }
+.iss-epic-tag { display: inline-flex; padding: 0 6px; border: 1px solid var(--border); border-left-width: 4px; border-radius: 5px; font-family: var(--mono); font-size: 11.5px; white-space: nowrap; }
+.iss-epic-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; vertical-align: 0; }
+.iss-crumb { font-size: 12.5px; color: var(--text-dim); margin-top: 6px; overflow-wrap: anywhere; }
+.iss-crumb .iss-link { color: var(--accent-2); text-decoration: none; }
+.iss-title .iss-subn { vertical-align: middle; font-size: 11.5px; font-weight: 400; }
+.iss-children { margin-top: 14px; padding-top: 10px; border-top: 1px solid var(--border-soft); display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.iss-children-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.iss-children-head .iss-prog { flex: 0 0 160px; }
+.iss-children-add { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; margin: 6px 0; }
+.iss-children-add .input { flex: 1 1 260px; min-width: 0; }
+.iss-children-add .select { flex: 0 1 180px; min-width: 0; }
+.iss-bulk-edit .input.iss-bulk-labels { min-width: 0; flex: 0 1 180px; }
+.iss-bulk-msg { flex-basis: 100%; font-size: 12.5px; overflow-wrap: anywhere; }
+.iss-bulk-note { flex-basis: 100%; font-size: 11.5px; }
+/* 스프린트 보드 */
+.iss-sprint { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.iss-sprint-pick { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.iss-sprint-tabs { display: flex; gap: 6px; flex-wrap: wrap; flex: 1 1 auto; min-width: 0; }
+.iss-sprint-form { display: flex; flex-direction: column; gap: 8px; }
+.iss-sprint-form-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px 12px; }
+.iss-span2 { grid-column: span 3; }
+.iss-sprint-head { display: flex; flex-direction: column; gap: 8px; }
+.iss-sprint-title { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.iss-sprint-title h3 { margin: 0; font-size: 17px; }
+.iss-sprint-goal { font-size: 13px; overflow-wrap: anywhere; }
+.iss-sprint-sum { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: 13px; }
+.iss-sprint-sum .iss-prog { flex: 0 0 180px; }
+.iss-close-box { display: flex; flex-direction: column; gap: 8px; padding: 10px 12px; border-radius: 8px; border: 1px solid color-mix(in srgb, var(--amber) 50%, transparent); background: color-mix(in srgb, var(--amber) 8%, transparent); font-size: 13px; }
+.iss-sprint-stats { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 10px; }
+.iss-people { display: flex; flex-direction: column; gap: 4px; }
+.iss-burn { display: flex; flex-direction: column; gap: 4px; }
+.iss-burn-head { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.iss-burn-svg { width: 100%; max-width: 520px; height: auto; display: block; }
+.iss-burn-axis { stroke: var(--border); stroke-width: 1; }
+.iss-burn-ideal { fill: none; stroke: var(--text-faint); stroke-width: 1.5; stroke-dasharray: 4 4; }
+.iss-burn-line { fill: none; stroke: var(--accent-2); stroke-width: 2.2; stroke-linejoin: round; }
+.iss-burn-foot { display: flex; justify-content: space-between; max-width: 520px; }
+.iss-sprint-tools { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.iss-board.cols4 { grid-template-columns: repeat(4, minmax(200px, 1fr)); min-width: 860px; }
+.iss-scard { cursor: default; }
+.iss-scard .iss-card-title { text-decoration: none; }
+.iss-scard .iss-key.iss-link { text-decoration: none; }
+.iss-scard .iss-mini-act { margin-left: 0; color: var(--text-dim); }
+.iss-scard .iss-mini-act:hover { color: var(--red); }
+.iss-scard > .iss-vc { align-self: flex-start; }
+.iss-backlog { display: flex; flex-direction: column; gap: 6px; }
+.iss-backlog-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+.iss-backlog-row { display: flex; align-items: center; gap: 8px; min-width: 0; padding: 4px 0; border-bottom: 1px solid var(--border-soft); font-size: 13px; }
+.iss-backlog-title { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-decoration: none; }
+/* 검색식 · 저장 필터 */
+.iss-filters { display: grid; grid-template-columns: 240px minmax(0, 1fr); gap: 10px; align-items: start; }
+.iss-filter-side { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.iss-filter-group { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.iss-filter-group > b { font-size: 12.5px; margin-bottom: 2px; }
+.iss-filter-item { text-align: left; background: none; border: 0; border-radius: 6px; padding: 4px 8px; color: var(--text); font: inherit; font-size: 13px; cursor: pointer; overflow-wrap: anywhere; }
+.iss-filter-item:hover { background: var(--hover); }
+.iss-filter-item.on { background: color-mix(in srgb, var(--accent) 18%, transparent); font-weight: 700; }
+.iss-filter-main { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.iss-filter-title { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
+.iss-query { display: flex; gap: 6px; align-items: stretch; }
+.iss-query-input { flex: 1 1 auto; min-width: 0; font-family: var(--mono); font-size: 12.5px; resize: vertical; }
+.iss-query-err { display: flex; flex-direction: column; gap: 4px; margin-top: 8px; font-size: 12.5px; color: var(--red); }
+.iss-query-err code { font-family: var(--mono); color: var(--text); white-space: pre-wrap; overflow-wrap: anywhere; }
+.iss-query-err mark { background: none; color: var(--red); text-decoration: underline wavy var(--red); text-underline-offset: 3px; }
+.iss-chips { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 8px; }
+.iss-qchip { display: inline-flex; align-items: center; gap: 6px; padding: 2px 4px 2px 9px; border-radius: 12px; font-size: 12px; border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent); background: color-mix(in srgb, var(--accent) 12%, transparent); overflow-wrap: anywhere; }
+.iss-qchip button { background: none; border: 0; color: var(--text-dim); cursor: pointer; font-size: 11px; padding: 0 4px; }
+.iss-qchip button:hover { color: var(--red); }
+.iss-qchip.order { padding-right: 9px; border-style: dashed; }
+.iss-query-help { margin-top: 8px; font-size: 12px; }
+.iss-query-help > div { margin-top: 4px; overflow-wrap: anywhere; }
+@media (max-width: 900px) {
+  .iss-filters { grid-template-columns: minmax(0, 1fr); }
+  .iss-sprint-stats { grid-template-columns: minmax(0, 1fr); }
+  .iss-sprint-form-grid { grid-template-columns: minmax(0, 1fr); }
+  .iss-span2 { grid-column: auto; }
+}
+.iss-row-tags { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 3px; }
+.iss-row-tags .iss-subn { margin-left: 0; }

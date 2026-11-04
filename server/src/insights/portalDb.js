@@ -32,6 +32,8 @@ const PURPOSES = {
   'issue-autocreate.json': '파트 장애 → 이슈 자동 등록 설정(부품 종류 × 장비군 · 우선순위 · 중복·폭주 · 하루 상한, v2.880)',
   'issue-settings.json': '이슈 트래커 설정(자동 할당 규칙 · 알림 · 사람별 메일 주소, v2.871)',
   'issues.json': '이슈 트래커 이슈 · 댓글 · 이력(사용자 데이터, v2.864)',
+  'issue-sprints.json': '이슈 스프린트(이름 · 기간 · 목표 · 상태 — 사용자 데이터, v2.882)',
+  'issue-filters.json': '이슈 저장 필터(검색식 · 공유 — 사용자 데이터, v2.882)',
   'wiki.json': '위키 스페이스 · 문서 · 판 · 댓글(사용자 데이터, v2.881)',
   'vcenters.json': 'vCenter 등록 정보(호스트·계정·위치)',
   'vcenter-order.json': 'vCenter 화면 표시 순서',
