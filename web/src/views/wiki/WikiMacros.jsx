@@ -84,7 +84,7 @@ function VcentersMacro() {
     <Frame title="법인(vCenter) 상태" at={st.at} onReload={reload}>
       {st.err ? <div className="muted">{errText(st.err)}</div> : !st.data ? null : rows.length === 0 ? <div className="muted">볼 수 있는 vCenter 가 없습니다.</div> : (
         <STable className="tbl">
-          <thead><tr><th>vCenter</th><th>상태</th><th>호스트 · VM(켜짐)</th><th title="CPU · 메모리 · 스토리지 사용률">사용률 CPU · 메모리 · 스토리지</th></tr></thead>
+          <thead><tr><th>vCenter</th><th>상태</th><th>호스트 · VM(켜짐)</th><th title="CPU · 메모리 · 스토리지 사용률">CPU · 메모리 · DS</th></tr></thead>
           <tbody>
             {rows.map((v) => {
               const m = v.metrics || {};
