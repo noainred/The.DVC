@@ -94,7 +94,7 @@ export function linkTarget(body = {}) {
   const bad = identityIssue(where, { ok: true, name, hostname: name ? `${name}.demo` : '', fromEnv: true, root: true }, row.agent);
   if (bad) throw Object.assign(new Error(bad), { code: 'conflict' });
   _linked.set(cand.id, row.agent);
-  return { demo: true, vcenterId: row.vcenterId, vcenterName: row.vcenterName, agent: row.agent, targetId: cand.id, host: cand.host, sshPort: cand.sshPort, before: cand.agentName, portalName: name, hostname: `${name}.demo` };
+  return { demo: true, vcenterId: row.vcenterId, vcenterName: row.vcenterName, agent: row.agent, targetId: cand.id, host: cand.host, sshPort: cand.sshPort, before: cand.agentName, portalName: name, hostname: `${name}.demo`, unit: 'vmware-portal' };
 }
 
 export function overview() {

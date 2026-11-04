@@ -10,6 +10,8 @@
  *  ⑥ buildTargets 사유 문구는 실제 메뉴 이름(없는 메뉴 '배포 › 엣지 노드' 소스 스윕) · linkable
  *  ⑦ 라우트(express): 이름을 본문에서 받지 않는다(agentName 을 보내도 행의 엣지 이름) · 감사
  *  ⑧ 데모: 일곱째 엣지 — 실제 판정 코드 · 다른 서버 거부 · 연결 뒤 설치 가능
+ *  ⑨ 반증 1인 확정분(재현 → 고침): F1 포탈이 없는 서버 · root 아님 · 멈춘 포탈의 남은 portal.env · 엣지가 보고한 hostname 과 다름 /
+ *     F2 SSH 동안 그 vCenter 의 엣지가 바뀜 / F3 같은 대상을 쓴 다른 법인의 오래된 작업 / F4 저장 실패면 메모리 값도 되돌림
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -50,10 +52,10 @@ test('① linkCandidates — 다른 엣지가 쓰는 이름 · 비밀 없는 대
   assert.deepEqual(c.map((x) => x.id), ['b', 'c', 'd', 'e', 'a'], '주소 숫자 순(10.0.0.9 < 10.0.0.10)');
   const by = Object.fromEntries(c.map((x) => [x.id, x]));
   assert.match(by.a.blocked, /엣지 ‘edge-1’ 가 쓰는 대상/);
-  assert.equal(by.b.blocked, ''); assert.equal(by.b.sshPort, 2222); assert.equal(by.b.jobVcenterId, undefined, '전부 되돌린 작업은 표지하지 않는다');
+  assert.equal(by.b.blocked, ''); assert.equal(by.b.sshPort, 2222); assert.deepEqual(by.b.jobs, [], '전부 되돌린 작업은 표지하지 않는다');
   assert.equal(by.c.blocked, ''); assert.equal(by.c.hasKey, true);
   assert.match(by.d.blocked, /비밀번호 · 키가 저장돼 있지 않아/);
-  assert.equal(by.e.blocked, ''); assert.equal(by.e.jobVcenterId, 'vc5');
+  assert.equal(by.e.blocked, ''); assert.deepEqual(by.e.jobs, [{ vcenterId: 'vc5', vcenterName: '법인5', id: 'bi_job001' }]);
   const json = JSON.stringify(c);
   assert.ok(!json.includes(PASS) && !json.includes('KEY'), '응답에 비밀이 없다');
   for (const x of c) assert.equal('password' in x || 'privateKey' in x, false);
@@ -61,7 +63,7 @@ test('① linkCandidates — 다른 엣지가 쓰는 이름 · 비밀 없는 대
 
 test('② linkDecision — 거부 사유들', () => {
   const row = { vcenterId: 'vc9', vcenterName: '법인9', agent: 'agent-WA', targetId: '' };
-  const cand = { id: 'b', host: '10.0.0.9', sshPort: 22, agentName: 'agentWA', blocked: '' };
+  const cand = { id: 'b', host: '10.0.0.9', sshPort: 22, agentName: 'agentWA', blocked: '', jobs: [] };
   const code = (fn) => { try { fn(); return 'ok'; } catch (e) { return e.code; } };
   assert.equal(code(() => L.linkDecision(row, cand, { expectName: 'agentWA' })), 'ok');
   assert.equal(code(() => L.linkDecision(null, cand)), 'not-found');
@@ -69,13 +71,13 @@ test('② linkDecision — 거부 사유들', () => {
   assert.equal(code(() => L.linkDecision({ ...row, targetId: 't1' }, cand)), 'conflict', '이미 연결된 행');
   assert.equal(code(() => L.linkDecision(row, null)), 'not-found');
   assert.equal(code(() => L.linkDecision(row, { ...cand, blocked: '엣지 ‘x’ 가 쓰는 대상입니다' })), 'conflict');
-  assert.equal(code(() => L.linkDecision(row, { ...cand, jobVcenterId: 'vc5', jobVcenterName: '법인5', jobId: 'bi_x' })), 'conflict', '다른 법인 작업');
-  assert.equal(code(() => L.linkDecision(row, { ...cand, jobVcenterId: 'vc9' })), 'ok', '이 법인 작업은 막지 않는다');
+  assert.equal(code(() => L.linkDecision(row, { ...cand, jobs: [{ vcenterId: 'vc5', vcenterName: '법인5', id: 'bi_x' }] })), 'conflict', '다른 법인 작업');
+  assert.equal(code(() => L.linkDecision(row, { ...cand, jobs: [{ vcenterId: 'vc9', vcenterName: '법인9', id: 'bi_y' }] })), 'ok', '이 법인 작업은 막지 않는다');
   assert.equal(code(() => L.linkDecision(row, cand, { expectName: 'agentwa' })), 'conflict', '화면이 본 이름과 다르면(대소문자도) 거부');
 });
 
 /* ───────── ③ SSH 안 읽기 ───────── */
-function fakeExec({ uid = '0', env = '', hostname = 'edge-wa01', listenPid = '', unit = '', envPort = '' } = {}) {
+function fakeExec({ uid = '0', env = '', hostname = 'edge-wa01', listenPid = '4242', unit = 'vmware-portal.service', envPort = '', envExists = true } = {}) {
   const cmds = [];
   const exec = async (cmd) => {
     cmds.push(cmd);
@@ -83,6 +85,7 @@ function fakeExec({ uid = '0', env = '', hostname = 'edge-wa01', listenPid = '',
     if (cmd.startsWith('ss -ltnp')) return { stdout: listenPid ? `LISTEN 0 511 *:4000 *:* users:(("node",pid=${listenPid},fd=20))\n` : '' };
     if (cmd.startsWith('ps -o unit=')) return { stdout: `${unit}\n` };
     if (cmd.startsWith("grep -E '^PORT='")) return { stdout: envPort ? `PORT=${envPort}\n` : '' };
+    if (cmd.startsWith('test -f')) return { stdout: envExists ? 'yes\n' : 'no\n' };
     if (cmd.startsWith("grep -E '^(AGENT_NAME|COLLECTOR_DATACENTER)='")) return { stdout: env };
     if (cmd.startsWith('hostname')) return { stdout: `${hostname}\n` };
     return { stdout: '', code: 0 };
@@ -91,22 +94,25 @@ function fakeExec({ uid = '0', env = '', hostname = 'edge-wa01', listenPid = '',
 }
 
 test('③ readPortalIdentity — AGENT_NAME 마지막 값 · COLLECTOR_DATACENTER · hostname · 확인 불가', async () => {
-  let f = fakeExec({ env: 'AGENT_NAME=agentWA\nAGENT_NAME="agent-WA"\n', listenPid: '4242', unit: 'vmware-portal.service' });
+  let f = fakeExec({ env: 'AGENT_NAME=agentWA\nAGENT_NAME="agent-WA"\n' });
   let r = await L.readPortalIdentity(f.exec, 4000);
-  assert.deepEqual([r.ok, r.name, r.fromEnv, r.root], [true, 'agent-WA', true, true], '마지막 값 · 따옴표 벗김');
+  assert.deepEqual([r.ok, r.name, r.fromEnv, r.unit], [true, 'agent-WA', true, 'vmware-portal'], '마지막 값 · 따옴표 벗김');
   assert.ok(f.cmds.some((c) => c.includes("'/etc/vmware-portal/portal.env'")), '기본 인스턴스 파일');
   assert.ok(!f.cmds.some((c) => /TOKEN/.test(c)), '토큰 키를 읽는 명령이 없다');
   r = await L.readPortalIdentity(fakeExec({ env: 'COLLECTOR_DATACENTER=WA\n' }).exec, 4000);
   assert.equal(r.name, 'WA');
-  r = await L.readPortalIdentity(fakeExec({ env: '', uid: '1000', hostname: 'edge-wa01' }).exec, 4000);
-  assert.deepEqual([r.name, r.fromEnv, r.root], ['edge-wa01', false, false]);
-  r = await L.readPortalIdentity(fakeExec({ envPort: '4100' }).exec, 4000);
-  assert.equal(r.ok, false, ':4000 리슨 없음 + 기본 인스턴스 PORT 다름 → 그 엣지인지 모름');
-  assert.match(r.reason, /확인할 수 없습니다\(바꾸지 않았습니다\)/);
+  r = await L.readPortalIdentity(fakeExec({ env: '', hostname: 'edge-wa01' }).exec, 4000);
+  assert.deepEqual([r.ok, r.name, r.fromEnv], [true, 'edge-wa01', false], '포탈이 돌고 이름 키가 없으면 포탈과 같은 규칙(hostname)');
+  r = await L.readPortalIdentity(fakeExec({ listenPid: '' }).exec, 4000);
+  assert.equal(r.ok, false, ':4000 리슨 없음 → 그 엣지인지 모름');
+  assert.match(r.reason, /리슨하는 프로세스가 없습니다.*바꾸지 않았습니다/);
   r = await L.readPortalIdentity(fakeExec({ listenPid: '77', unit: 'haproxy.service' }).exec, 4000);
   assert.equal(r.ok, false, '포워더가 받는 포트');
-  assert.equal(L.identityIssue('h', { ok: true, name: '', hostname: '', fromEnv: false, root: true }, ''), 'h 의 포탈 이름은 ‘모름’ 입니다(호스트 이름 모름) — 엣지 ‘’ 가 아닌 다른 서버입니다. 다른 대상을 고르세요(바꾸지 않았습니다).', '빈 이름끼리 같다고 보지 않는다');
-  assert.match(L.identityIssue('h', { ok: true, name: 'edge-wa01', hostname: 'edge-wa01', fromEnv: false, root: false }, 'agent-WA'), /root 가 아니라 portal\.env 를 읽지 못했을 수/);
+  assert.equal(L.identityIssue('h', { ok: true, name: '', hostname: '', fromEnv: false }, ''), 'h 의 포탈 이름은 ‘모름’ 입니다(호스트 이름 모름) — 엣지 ‘’ 가 아닌 다른 서버입니다. 다른 대상을 고르세요(바꾸지 않았습니다).', '빈 이름끼리 같다고 보지 않는다');
+  const ok = { ok: true, name: 'agent-WA', hostname: 'edge-wa01.corp', fromEnv: true };
+  assert.equal(L.identityIssue('h', ok, 'AGENT-wa'), null, '대소문자 무시');
+  assert.equal(L.identityIssue('h', ok, 'agent-WA', 'edge-wa01'), null, '짧은 이름 · FQDN 같은 장비');
+  assert.match(L.identityIssue('h', ok, 'agent-WA', 'edge-wb01.corp'), /중앙에 보고한 호스트 이름 ‘edge-wb01\.corp’ 과 다릅니다/);
 });
 
 /* ───────── ④ 실행(실제 등록부 파일) ───────── */
@@ -114,7 +120,7 @@ const ROWS = () => [
   { vcenterId: 'vc9', vcenterName: '법인9', agent: 'agent-WA', targetId: '', sshHost: '', linkable: true },
   { vcenterId: 'vc1', vcenterName: '법인1', agent: 'edge-1', targetId: '', sshHost: '' },
 ];
-function setup({ portal = 'agent-WA', sshThrows = null, during = null } = {}) {
+function setup({ portal = 'agent-WA', sshThrows = null, during = null, exec = null, hostOf = () => '' } = {}) {
   for (const t of R.listTargetsRaw()) R.removeTarget(t.id);
   const wa = R.saveTarget({ host: '10.0.0.9', port: 22, username: 'root', password: PASS, agentName: 'agentWA', centralToken: 'CT-secret', collectorToken: 'COL-secret', portalPort: 4000 }).target;
   const other = R.saveTarget({ host: '10.0.0.30', port: 22, username: 'root', password: PASS, agentName: 'old-edge' }).target;
@@ -125,8 +131,9 @@ function setup({ portal = 'agent-WA', sshThrows = null, during = null } = {}) {
       calls.ssh++; calls.creds = creds; calls.signal = signal;
       if (sshThrows) throw sshThrows;
       if (during) during();
-      return fn({ exec: fakeExec({ env: `AGENT_NAME=${creds.host === '10.0.0.9' ? portal : 'old-edge'}\n` }).exec });
+      return fn({ exec: exec || fakeExec({ env: `AGENT_NAME=${creds.host === '10.0.0.9' ? portal : 'old-edge'}\n` }).exec });
     },
+    hostOf,
   });
   return { wa, other, calls };
 }
@@ -190,6 +197,57 @@ test('④-3 SSH 동안 주소가 바뀌거나 · 화면이 본 이름이 다르�
   await assert.rejects(L.linkInstallTarget({ vcenterId: 'vc9', targetId: s.other.id, expectName: 'old-edge' }), (e) => e.code === 'conflict' && /진행 중/.test(e.message));
   release(); await p1;
   assert.equal(R.getTargetRaw(s.wa.id).agentName, 'agent-WA');
+});
+
+/* ───────── ⑨ 반증 1인 확정분 ───────── */
+test('⑨ F1 포탈이 없는 서버 · root 아님 · 멈춘 포탈의 남은 portal.env · 보고한 hostname 과 다름 → 바꾸지 않는다', async () => {
+  const cases = [
+    ['포탈 없음(hostname 만 같음)', { exec: fakeExec({ env: '', hostname: 'agent-WA', listenPid: '', envExists: false }).exec }, /리슨하는 프로세스가 없습니다/],
+    ['root 아님', { exec: fakeExec({ uid: '1000', env: '', hostname: 'agent-WA' }).exec }, /root 가 아니라/],
+    ['멈춘 포탈의 남은 portal.env', { exec: fakeExec({ env: 'AGENT_NAME=agent-WA\n', listenPid: '' }).exec }, /리슨하는 프로세스가 없습니다/],
+    ['설정 파일 없음', { exec: fakeExec({ env: 'AGENT_NAME=agent-WA\n', envExists: false }).exec }, /portal\.env 가 없습니다/],
+    ['복사된 설정(보고한 hostname 과 다름)', { exec: fakeExec({ env: 'AGENT_NAME=agent-WA\n', hostname: 'old-box.corp' }).exec, hostOf: () => 'wa-edge.corp' }, /중앙에 보고한 호스트 이름/],
+  ];
+  for (const [label, o, re] of cases) {
+    const s = setup(o);
+    await assert.rejects(L.linkInstallTarget({ vcenterId: 'vc9', targetId: s.wa.id, expectName: 'agentWA' }), (e) => e.code === 'conflict' && re.test(e.message), label);
+    assert.equal(R.getTargetRaw(s.wa.id).agentName, 'agentWA', `${label} — 바꾸지 않음`);
+  }
+  // 보고한 hostname 이 같으면(짧은 이름) · 모르면 통과
+  let s = setup({ exec: fakeExec({ env: 'AGENT_NAME=agent-WA\n', hostname: 'wa-edge.corp' }).exec, hostOf: () => 'wa-edge' });
+  assert.equal((await L.linkInstallTarget({ vcenterId: 'vc9', targetId: s.wa.id, expectName: 'agentWA' })).agent, 'agent-WA');
+});
+
+test('⑨ F2 SSH 동안 그 vCenter 의 엣지가 바뀌면 바꾸지 않는다', async () => {
+  for (const t of R.listTargetsRaw()) R.removeTarget(t.id);
+  const wa = R.saveTarget({ host: '10.0.0.9', username: 'root', password: PASS, agentName: 'agentWA' }).target;
+  let owner = 'agent-WA';
+  L._setLinkDepsForTest({
+    snapshot: () => ({ rows: [{ vcenterId: 'vc9', vcenterName: '법인9', agent: owner, targetId: '', linkable: true }], inventory: [{ vcenterId: 'vc9', agent: owner }], deployTargets: R.listTargetsRaw(), jobs: [] }),
+    ssh: async (creds, fn) => { const r = await fn({ exec: fakeExec({ env: 'AGENT_NAME=agent-WA\n' }).exec }); owner = 'agent-ZZ'; return r; },
+  });
+  await assert.rejects(L.linkInstallTarget({ vcenterId: 'vc9', targetId: wa.id, expectName: 'agentWA' }), (e) => e.code === 'conflict' && /엣지가 ‘agent-WA’ → ‘agent-ZZ’/.test(e.message));
+  assert.equal(R.getTargetRaw(wa.id).agentName, 'agentWA');
+});
+
+test('⑨ F3 같은 대상을 쓴 다른 법인의 오래된 작업도 본다(가장 새 작업이 이 법인 것이어도)', () => {
+  const s = { deployTargets: [{ id: 'b', host: '10.0.0.9', agentName: 'agentWA', password: PASS }], inventory: [],
+    jobs: [{ id: 'bi_new001', vcenterId: 'vc9', vcenterName: '법인9', targetId: 'b', status: 'failed' }, { id: 'bi_old001', vcenterId: 'vc5', vcenterName: '법인5', targetId: 'b', status: 'done' }] };
+  const c = L.linkCandidates(s)[0];
+  assert.deepEqual(c.jobs.map((j) => j.vcenterId), ['vc9', 'vc5']);
+  assert.throws(() => L.linkDecision({ vcenterId: 'vc9', agent: 'agent-WA', targetId: '' }, c), (e) => e.code === 'conflict' && /법인 ‘법인5’/.test(e.message));
+});
+
+test('⑨ F4 저장이 실패하면 메모리 값도 되돌린다', () => {
+  for (const t of R.listTargetsRaw()) R.removeTarget(t.id);
+  const t = R.saveTarget({ host: '10.2.2.2', username: 'root', password: PASS, agentName: 'typo' }).target;
+  const file = path.join(tmp, 'agent-deploy-targets.json');
+  fs.rmSync(file); fs.mkdirSync(file);   // 같은 이름의 디렉터리 — rename 이 실패한다(root 로 돌아도)
+  try {
+    assert.throws(() => R.setTargetAgentName(t.id, 'agent-WA', { expect: 'typo' }));
+    assert.equal(R.getTargetRaw(t.id).agentName, 'typo', '메모리 값도 그대로');
+  } finally { fs.rmSync(file, { recursive: true, force: true }); }
+  assert.equal(R.setTargetAgentName(t.id, 'agent-WA', { expect: 'typo' }).ok, true, '고친 뒤에는 저장된다');
 });
 
 /* ───────── ⑤ 등록부 ───────── */

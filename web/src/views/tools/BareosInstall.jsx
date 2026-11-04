@@ -9,7 +9,7 @@ import {
   defaultPlan, planBody, planIssues, canResetExisting, effectiveTarget, resetExistingPlan, PYVMOMI_REASON, WEEKDAY_KO, bytesText, whenText,
   RUNNING_UNKNOWN_OK_LABEL, runningUnknown, volumesSizeText, okOrThrow, rollbackCauseText,
   bundleFromText, importDirStateText, bundleWhereText, bundleStateView, bundleSourceHelp,
-  canLink, linkChoices, linkDoneText,
+  canLink, linkChoices, linkDoneText, isSshAuthFail,
 } from './bareosInstallText.js';
 
 /**
@@ -124,20 +124,25 @@ function BundleCard({ ov, onReload, say, writable }) {
 
 /* ───────── 1-a 등록부 대상 연결(v2.879) ───────── */
 // 사용자 요청: 배포 등록부에 에이전트 이름이 다르게 들어간 대상을 '기존 목록에서 선택' 해 고친다 · '오타나 다른 오류 방지' — 이름 입력 칸이 없다.
-function LinkCard({ row, linkTargets, writable, onClose, onLinked, say }) {
+function LinkCard({ row, linkTargets, writable, onClose, onLinked, onReload, say }) {
   const choices = linkChoices(linkTargets, row);
   const usable = choices.filter((x) => !x.disabled);
   const [pick, setPick] = useState(usable.length === 1 ? usable[0].id : '');
   const [busy, setBusy] = useState(false);
   const [fail, setFail] = useState(null);   // 거부 · 실패는 이 카드 안에(위쪽 알림은 표에서 멀다)
+  const [authFailed, setAuthFailed] = useState(() => new Set());   // SSH 로그인에 실패한 대상 — 다시 누르지 못하게(반복 로그인 시도 = 계정 잠금 위험)
   const c = usable.find((x) => x.id === pick) || null;
+  const locked = !!c && authFailed.has(c.id);
   const go = async () => {
     if (!c) return;
     setBusy(true); setFail(null); say(null);
     try {
       const r = okOrThrow(await postJson(`${P}/link-target`, { vcenterId: row.vcenterId, targetId: c.id, expectName: c.cand.agentName }), '연결하지 못했습니다.');
       say({ ok: true, text: linkDoneText(r) }); onLinked();
-    } catch (e) { setFail({ ok: false, text: e.message }); } finally { setBusy(false); }
+    } catch (e) {
+      if (isSshAuthFail(e)) setAuthFailed((m) => new Set(m).add(c.id));
+      setFail({ ok: false, text: e.message });
+    } finally { setBusy(false); }
   };
   return (
     <div className="card" style={DEEP} data-bi-link="">
@@ -153,11 +158,13 @@ function LinkCard({ row, linkTargets, writable, onClose, onLinked, say }) {
             <option value="">배포 대상 고르기…</option>
             {choices.map((x) => <option key={x.id} value={x.id} disabled={x.disabled}>{x.label}{x.disabled ? ` — 고를 수 없음: ${x.why}` : ''}</option>)}
           </Select>
-          <button type="button" className="login-btn" style={BTN} disabled={!c || busy || !writable} onClick={go}>{busy ? '접속 확인 중…' : '접속 확인 후 연결'}</button>
+          <button type="button" className="login-btn" style={BTN} disabled={!c || busy || !writable || locked} onClick={go}>{busy ? '접속 확인 중…' : '접속 확인 후 연결'}</button>
+          <button type="button" className="logout-btn" style={BTN} disabled={busy} onClick={() => { setFail(null); onReload(); }} title="배포 대상 목록을 다시 읽습니다">목록 다시 읽기</button>
           <button type="button" className="logout-btn" style={BTN} disabled={busy} onClick={onClose}>닫기</button>
         </div>
       )}
       <Msg m={fail} />
+      {locked && <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>이 대상은 저장된 SSH 계정으로 로그인하지 못했습니다 — 같은 계정으로 다시 시도하지 않습니다. 배포 등록부에서 비밀번호를 고친 뒤 화면을 다시 여세요.</div>}
       {choices.length > 0 && usable.length === 0 && <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>고를 수 있는 대상이 없습니다(모두 다른 엣지가 쓰거나 확인할 수 없는 대상) — <a href="#/settings/agent-deploy/add">설정 › 원격 법인(DC)에 Edge 노드 포탈 설치</a>에서 이 엣지 서버를 저장하세요.</div>}
     </div>
   );
@@ -193,7 +200,7 @@ function TargetsStep({ ov, sel, setSel, onNext, onOpenJob, writable, onReload, s
           </tbody>
         </STable>
       </div>
-      {linkRow && <LinkCard key={linkRow.vcenterId} row={linkRow} linkTargets={ov.linkTargets} writable={writable} say={say} onClose={() => setLinkFor('')} onLinked={() => { setLinkFor(''); onReload(); }} />}
+      {linkRow && <LinkCard key={linkRow.vcenterId} row={linkRow} linkTargets={ov.linkTargets} writable={writable} say={say} onReload={onReload} onClose={() => setLinkFor('')} onLinked={() => { setLinkFor(''); onReload(); }} />}
       <div style={{ ...ROW, marginTop: 10, justifyContent: 'flex-end' }}>
         <span className="muted" style={{ fontSize: 12 }}>다음 단계는 서버에 쓰지 않습니다(읽기만).</span>
         <button type="button" className="login-btn" disabled={!t} onClick={onNext}>{t?.mode === 'reinstall' ? '초기화 확인으로 →' : '사전 점검으로 →'}</button>

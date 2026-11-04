@@ -3,7 +3,7 @@
 import { describe, it, expect } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
-import { canLink, linkChoices, linkCandText, linkDoneText } from './bareosInstallText.js';
+import { canLink, linkChoices, linkCandText, linkDoneText, isSshAuthFail } from './bareosInstallText.js';
 
 const here = path.dirname(new URL(import.meta.url).pathname);
 const src = fs.readFileSync(path.join(here, 'BareosInstall.jsx'), 'utf8');
@@ -13,8 +13,8 @@ const LIST = [
   { id: 'a', host: '10.0.0.20', sshPort: 22, username: 'root', agentName: 'edge-1', blocked: '엣지 ‘edge-1’ 가 쓰는 대상입니다' },
   { id: 'b', host: '10.0.0.9', sshPort: 2222, username: 'root', agentName: 'agentWA', blocked: '' },
   { id: 'c', host: '10.0.0.10', sshPort: 22, username: 'admin', agentName: '', blocked: '' },
-  { id: 'e', host: '10.0.0.12', sshPort: 22, username: 'root', agentName: 'x', blocked: '', jobVcenterId: 'vc5', jobVcenterName: '법인5' },
-  { id: 'f', host: '10.0.0.13', sshPort: 22, username: 'root', agentName: 'y', blocked: '', jobVcenterId: 'vc9' },
+  { id: 'e', host: '10.0.0.12', sshPort: 22, username: 'root', agentName: 'x', blocked: '', jobs: [{ vcenterId: 'vc9', vcenterName: '법인9', id: 'bi_n' }, { vcenterId: 'vc5', vcenterName: '법인5', id: 'bi_o' }] },
+  { id: 'f', host: '10.0.0.13', sshPort: 22, username: 'root', agentName: 'y', blocked: '', jobs: [{ vcenterId: 'vc9', vcenterName: '법인9', id: 'bi_m' }] },
 ];
 
 describe('등록부 대상 연결 — 판정', () => {
@@ -55,5 +55,12 @@ describe('등록부 대상 연결 — 화면 소스', () => {
   it('실패는 카드 안에 보인다 · 고를 수 없는 항목은 disabled', () => {
     expect(card).toMatch(/<Msg m=\{fail\} \/>/);
     expect(card).toMatch(/disabled=\{x\.disabled\}/);
+  });
+  it('SSH 로그인 실패한 대상은 다시 누르지 못한다(반복 로그인 = 계정 잠금 위험) · 목록 다시 읽기', () => {
+    expect(isSshAuthFail({ body: { code: 'ssh-auth' } })).toBe(true);
+    expect(isSshAuthFail({ body: { code: 'conflict' } })).toBe(false);
+    expect(isSshAuthFail(new Error('x'))).toBe(false);
+    expect(card).toMatch(/disabled=\{!c \|\| busy \|\| !writable \|\| locked\}/);
+    expect(card).toMatch(/목록 다시 읽기/);
   });
 });

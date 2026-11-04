@@ -67,10 +67,13 @@ export function linkChoices(linkTargets, row) {
   if (!row) return [];
   return (Array.isArray(linkTargets) ? linkTargets : []).filter((c) => c && c.id).map((c) => {
     let why = c.blocked || '';
-    if (!why && c.jobVcenterId && c.jobVcenterId !== row.vcenterId) why = `법인 ‘${c.jobVcenterName || c.jobVcenterId}’ 의 완전 설치 작업이 쓰는 대상입니다`;
+    const other = (Array.isArray(c.jobs) ? c.jobs : []).find((j) => j && j.vcenterId !== row.vcenterId);
+    if (!why && other) why = `법인 ‘${other.vcenterName || other.vcenterId}’ 의 완전 설치 작업이 쓰는 대상입니다`;
     return { id: c.id, label: linkCandText(c), disabled: !!why, why, cand: c };
   }).sort((a, b) => Number(a.disabled) - Number(b.disabled));
 }
+/** SSH 로그인 실패 표지 — 같은 대상으로 다시 누르면 같은 계정으로 또 로그인을 시도한다(계정 잠금 · 자동 재시도 금지 규칙). */
+export const isSshAuthFail = (e) => !!(e && e.body && e.body.code === 'ssh-auth');
 /** 연결 성공 문구. */
 export function linkDoneText(r) {
   if (!r) return '연결했습니다.';

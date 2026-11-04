@@ -160,9 +160,13 @@ api.post(`${P}/link-target`, adminOnly, fullScopeOnly, fullWriteOnly, async (req
   const vc = typeof body.vcenterId === 'string' ? body.vcenterId : '';
   try {
     const r = await linkInstallTarget(body);
-    audit(req, 'Bareos 완전 설치 — 배포 등록부 대상 연결', `${r.vcenterName} · ${r.agent}`, `대상 ${r.host}${r.sshPort !== 22 ? `:${r.sshPort}` : ''} · 에이전트 이름 '${r.before || '(없음)'}' → '${r.agent}' · 접속 확인 포탈 이름 ${r.portalName}(호스트 ${r.hostname || '모름'})`);
+    audit(req, 'Bareos 완전 설치 — 배포 등록부 대상 연결', `${r.vcenterName} · ${r.agent}`, `대상 ${r.targetId} ${r.host}${r.sshPort !== 22 ? `:${r.sshPort}` : ''} · 에이전트 이름 '${r.before || '(없음)'}' → '${r.agent}' · 접속 확인 포탈 이름 ${r.portalName}(유닛 ${r.unit || '모름'} · 호스트 ${r.hostname || '모름'})`);
     res.json({ ok: true, ...r });
-  } catch (e) { audit(req, 'Bareos 완전 설치 — 배포 등록부 대상 연결', vcName(vc), `거부 — ${auditReason(e)}`); sendErr(res, e); }
+  } catch (e) {
+    const tid = typeof body.targetId === 'string' ? body.targetId.slice(0, 64) : '';
+    audit(req, 'Bareos 완전 설치 — 배포 등록부 대상 연결', vcName(vc), `거부 — 대상 ${tid || '—'} · ${auditReason(e)}`);
+    sendErr(res, e);
+  }
 });
 
 /** 사전 점검(쓰기 없음). */

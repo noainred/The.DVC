@@ -137,7 +137,10 @@ export function setTargetAgentName(id, name, { expect } = {}) {
   const envIssue = envPairsIssue(envPairs({ ...t, agentName: v }, 0));
   if (envIssue) return { ok: false, code: 'invalid', reason: envIssue };
   t.agentName = v;
-  cache = list; persist();
+  cache = list;
+  // 반증 F4(재현 — ENOSPC): 쓰기가 실패하면 메모리 값도 되돌린다. 예전 판은 캐시만 바뀐 채 남아 '실패' 응답 뒤에도 대상 표 · 설치가 새 이름을 읽었다
+  //   (재시작하면 되돌아가는 보고 불일치). saveTarget 은 같은 패턴이 남아 있다 — 기존 동작.
+  try { persist(); } catch (e) { t.agentName = before; throw e; }
   return { ok: true, before, target: redact(t) };
 }
 
