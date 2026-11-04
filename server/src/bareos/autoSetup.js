@@ -318,7 +318,7 @@ const leftText = (r) => (r.left?.length ? `되돌리지 못한 파일: ${r.left.
 export function planDirector(b = {}, ctx = null) {
   const cur = ctx?.cur || loadSettings();
   const dir = ctx?.dir || directorById(b.directorId, cur);
-  if (!dir) throw fail('invalid', '자동 설정할 법인 Director 를 고르세요(설정 › 법인별 Director 에서 먼저 추가합니다).');
+  if (!dir) throw fail('invalid', '자동 설정할 법인 Director 를 고르세요(설정 › vCenter 관리 › Bareos 백업 서버 › Director 에서 먼저 추가합니다).');
   const { ssh, issue } = normSsh(b);
   if (issue) throw fail('invalid', issue);
   const directorPort = b.directorPort === undefined || b.directorPort === '' ? 9101 : Number(b.directorPort);
@@ -334,7 +334,7 @@ export function planDirector(b = {}, ctx = null) {
   const clash = cur.directors.find((o) => o.id !== dir.id && lc(o.host) === lc(ssh.host) && Number(o.port) === directorPort && o.consoleName === consoleName);
   if (clash) throw fail('invalid', `같은 콘솔(${ssh.host}:${directorPort} · ${consoleName})을 ‘${clash.name}’ Director 가 이미 씁니다 — 다른 콘솔 이름을 쓰세요.`);
   for (const k of ['fileSet', 'jobDefs', 'restoreJob']) {
-    if (!isResourceName(cur.defaults[k] || '')) throw fail('invalid', `설정 탭 기본값의 ${k} 이름이 비어 있거나 올바르지 않습니다 — 먼저 기본값을 저장하세요.`);
+    if (!isResourceName(cur.defaults[k] || '')) throw fail('invalid', `설정 › vCenter 관리 › Bareos 백업 서버 › 공통 기본값의 ${k} 이름이 비어 있거나 올바르지 않습니다 — 먼저 기본값을 저장하세요.`);
   }
   const ex = normVmwareExtras(b);
   if (ex.issue) throw fail('invalid', ex.issue);
@@ -482,7 +482,7 @@ function clearStaleAuthStop(directorId) {
 
 function siteOf(vcenterId, directorId = '', ctx = null) {
   const site = ctx?.site ? (ctx.site.vcenterId === String(vcenterId || '') ? ctx.site : null) : loadSettings().sites.find((s) => s.vcenterId === String(vcenterId || ''));
-  if (!site) throw fail('invalid', '이 vCenter 의 사이트 매핑이 없습니다 — 설정 탭에서 매핑(FD·스토리지·풀·INI 경로)을 먼저 저장하세요.');
+  if (!site) throw fail('invalid', '이 vCenter 의 사이트 매핑이 없습니다 — 설정 › vCenter 관리 › Bareos 백업 서버에서 매핑(FD·스토리지·풀·INI 경로)을 먼저 저장하세요.');
   // v2.823: 이 Director 편집 화면에서 연 단계는 이 Director 에 묶인 vCenter 만 다룬다(다른 법인 FD 에 쓰지 않게)
   if (directorId && site.directorId !== directorId) throw fail('invalid', '이 vCenter 는 이 Director 에 묶여 있지 않습니다.');
   if (!FD_PATH_RE.test(site.configFile) || /(^|\/)\.\.(\/|$)/.test(site.configFile)) throw fail('invalid', '사이트 매핑의 INI 경로가 올바르지 않습니다.');
@@ -490,7 +490,7 @@ function siteOf(vcenterId, directorId = '', ctx = null) {
   //   매핑 저장(normalizeSite)은 그대로 둔다 — 넣으면 예전 매핑이 로드 때 조용히 사라진다. 자동 설정만 거부한다.
   if (!/^\/etc\/bareos\/[A-Za-z0-9._/-]+\.ini$/.test(site.configFile)) throw fail('invalid', `자동 설정은 /etc/bareos/ 아래 .ini 경로에만 씁니다(지금 매핑: ${site.configFile}) — 매핑의 INI 경로를 바꾸거나 직접 넣으세요.`);
   // v2.851.1: 비어 있으면 무엇을 고칠지 말한다(완전 설치 7단계가 빈 값을 저장하던 결함의 흔적 — 2026-11-02 사용자 화면)
-  if (!site.vcserver) throw fail('invalid', '이 vCenter 매핑의 vcserver(FD 가 접속할 vCenter 주소)가 비어 있습니다 — 설정 › Bareos › 기본 설정의 매핑 표에서 vCenter 호스트 이름 또는 IP 를 넣고 저장한 뒤 다시 하세요.');
+  if (!site.vcserver) throw fail('invalid', '이 vCenter 매핑의 vcserver(FD 가 접속할 vCenter 주소)가 비어 있습니다 — 설정 › vCenter 관리 › Bareos 백업 서버 › Director 의 매핑 표에서 vCenter 호스트 이름 또는 IP 를 넣고 저장한 뒤 다시 하세요.');
   if (!HOST_RE.test(site.vcserver)) throw fail('invalid', '사이트 매핑의 vcserver 주소가 올바르지 않습니다.');
   return site;
 }
@@ -712,7 +712,7 @@ export function conflictMessage(foreign = [], consoleName = '') {
   const prof = foreign.find((f) => f.type === 'profile');
   if (prof) parts.push(`Profile ‘${prof.name}’ 파일(${prof.path})이 포탈이 만든 것이 아닙니다 — 포탈 콘솔이 쓰는 이름이라 바꿀 수 없습니다. 그 파일을 확인하세요(다른 콘솔이 쓰는 Profile 이면 그대로 두고 그 이름을 바꿔야 합니다).`);
   const def = foreign.filter((f) => ['fileset', 'jobdefs', 'job'].includes(f.type));
-  if (def.length) parts.push(`${def.map((f) => `${f.type} ‘${f.name}’`).join(' · ')} 파일이 포탈이 만든 것이 아닙니다 — 설정 탭 기본값(FileSet · JobDefs · 복원 잡 이름)을 다른 이름으로 저장한 뒤 다시 실행하세요.`);
+  if (def.length) parts.push(`${def.map((f) => `${f.type} ‘${f.name}’`).join(' · ')} 파일이 포탈이 만든 것이 아닙니다 — 설정 › vCenter 관리 › Bareos 백업 서버 › 공통 기본값(FileSet · JobDefs · 복원 잡 이름)을 다른 이름으로 저장한 뒤 다시 실행하세요.`);
   const ext = foreign.filter((f) => f.type === 'pool' || f.type === 'schedule');
   if (ext.length) parts.push(`${ext.map((f) => `${f.type} ‘${f.name}’`).join(' · ')} 파일이 포탈이 만든 것이 아닙니다 — 전용 Pool · Schedule 만들기를 끄고 다시 실행하거나 그 파일을 확인하세요.`);
   const known = new Set([con, prof, ...def, ...ext].filter(Boolean));

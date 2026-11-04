@@ -469,7 +469,7 @@ function diagHint(key, code) {
   if (key === 'api') return 'Bareos 15.2 이상이어야 JSON 모드를 씁니다(권장 25.x).';
   if (key === 'resources') return code === 'missing' ? `이대로는 백업 대상 등록이 'Could not find config resource' 로 실패합니다. ${PORTAL_RES_FIX_TEXT}` : '목록 명령(.jobdefs · .filesets · .jobs)을 읽지 못해 확인하지 못했습니다 — 콘솔 Profile 의 Command ACL 에 그 명령이 있는지 확인하세요.';
   if (key === 'configure') return code === 'acl' ? `이 콘솔로는 백업 대상을 등록할 수 없습니다(조회 · 실행은 됩니다). ${CONFIGURE_FIX_TEXT}` : '권한을 확인하지 못했습니다 — 등록이 실패하면 콘솔 Profile 의 Command ACL 에 configure 가 있는지 확인하세요.';
-  if (key === 'command') return code === 'jsonrpc' ? '콘솔 Profile 의 Command ACL 에 .clients 와 포탈이 쓰는 명령(설정 탭 사전 준비 블록)이 있는지 확인하세요.' : '응답이 JSON 이 아니면 JSON 모드가 켜지지 않은 것입니다(Bareos 버전 확인).';
+  if (key === 'command') return code === 'jsonrpc' ? '콘솔 Profile 의 Command ACL 에 .clients 와 포탈이 쓰는 명령(설정 › vCenter 관리 › Bareos 백업 서버 › Director 의 사전 준비 블록)이 있는지 확인하세요.' : '응답이 JSON 이 아니면 JSON 모드가 켜지지 않은 것입니다(Bareos 버전 확인).';
   return '';
 }
 

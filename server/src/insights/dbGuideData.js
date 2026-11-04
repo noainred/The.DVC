@@ -2250,7 +2250,7 @@ export const DB_GUIDE_DATA = {
     ],
     "settings": [
       "특수 기능 › Bareos VM 백업 › 백업 대상",
-      "특수 기능 › Bareos VM 백업 › 설정 — 상태 조회 주기"
+      "설정 › vCenter 관리 › Bareos 백업 서버 — 상태 조회 주기"
     ],
     "sources": [
       "server/src/bareos/registry.js",
@@ -2278,7 +2278,7 @@ export const DB_GUIDE_DATA = {
       "비밀번호는 들어 있지 않습니다(지문만)."
     ],
     "settings": [
-      "특수 기능 › Bareos VM 백업 › 설정 — 법인별 Director 의 콘솔 비밀번호를 고치거나 연결 시험에 성공하면 재개"
+      "설정 › vCenter 관리 › Bareos 백업 서버 › Director — 법인별 Director 의 콘솔 비밀번호를 고치거나 연결 시험에 성공하면 재개"
     ],
     "sources": [
       "server/src/bareos/service.js",
@@ -2360,7 +2360,7 @@ export const DB_GUIDE_DATA = {
       "상태 파일이라 백업 '변경 감시'·엣지 설정 push 에서 빠집니다(중앙으로 올라가지 않습니다). 엣지 자기 백업 번들에는 들어갑니다(설정 소유자 전용 · 봉인은 비밀 정책을 따릅니다) — 옛 백업으로 복원해도 작업의 접속값 표지가 다르면 엣지가 배정을 다시 받아 맞춥니다."
     ],
     "settings": [
-      "중앙 › 특수 기능 › Bareos VM 백업 › 설정 › 법인별 Director 편집 › 담당(접속 주체)"
+      "중앙 › 설정 › vCenter 관리 › Bareos 백업 서버 › Director 편집 › 담당(접속 주체)"
     ],
     "sources": [
       "server/src/bareos/edgeStore.js",
@@ -2378,7 +2378,7 @@ export const DB_GUIDE_DATA = {
       "기본값: JobDefs(기본 PortalVmwareDefaults)·FileSet(기본 PortalVmwareGeneric)·복원 잡(기본 PortalVmwareRestore)·레벨(기본 Incremental)·상태 조회 주기(기본 60초, 30초~1시간)·플러그인 이름(python3).",
       "vCenter 매핑(최대 200개): vCenter 마다 묶인 법인 Director id 와 FD 가 접속할 vCenter 주소·FD 클라이언트·스토리지·풀·스케줄·FD 의 자격증명 INI 경로."
     ],
-    "writer": "특수 기능 › Bareos VM 백업 › 설정 탭(법인별 Director 추가·편집·자동 설정·매핑)에서 저장할 때 씁니다(관리자 중 조회·쓰기 범위가 모두 무제한인 계정만, 원자적 쓰기, 권한 0600). Director 주소·포트·콘솔 이름을 바꾸면 그 Director 의 저장 비밀번호를 승계하지 않습니다(새 주소로 옛 비밀번호를 보내지 않게). 데모(mock) 모드에서 Director 가 하나도 없으면 메모리의 데모 설정을 쓰고 이 파일은 만들지 않습니다.",
+    "writer": "설정 › vCenter 관리 › Bareos 백업 서버(법인별 Director 추가·편집·자동 설정·매핑)에서 저장할 때 씁니다(관리자 중 조회·쓰기 범위가 모두 무제한인 계정만, 원자적 쓰기, 권한 0600). Director 주소·포트·콘솔 이름을 바꾸면 그 Director 의 저장 비밀번호를 승계하지 않습니다(새 주소로 옛 비밀번호를 보내지 않게). 데모(mock) 모드에서 Director 가 하나도 없으면 메모리의 데모 설정을 쓰고 이 파일은 만들지 않습니다.",
     "usedBy": [
       "특수 기능 › Bareos VM 백업: 백업 대상 등록(잡 생성)·실행·복원·연결 시험이 이 설정으로 Director 에 접속합니다.",
       "Bareos 상태 폴러: 이 주기로 실행 결과를 확인합니다.",
@@ -2390,11 +2390,11 @@ export const DB_GUIDE_DATA = {
     "ifDeleted": "Director 설정이 비어 포탈이 Bareos 에 접속하지 않습니다(백업 대상 원장과 Director 의 잡·스케줄은 그대로라 Bareos 백업은 계속 돕니다). 화면에서 다시 등록해도 새 Director 는 새 id 라 이미 등록한 대상은 그 Director 를 찾지 못합니다 — 그런 대상은 원장에서만 지우고 다시 등록하세요(포탈 백업에서 파일을 복원하면 id 가 돌아옵니다). 파일이 깨지면 ‘.corrupt.<시각>’ 으로 보존하고 빈 설정으로 시작합니다.",
     "cautions": [
       "Director 콘솔 비밀번호가 들어 있습니다 — 손으로 편집하거나 외부에 공유하지 마세요(암호화 정책이면 봉인된 값입니다).",
-      "포탈은 이 콘솔 계정으로 잡을 만들고 실행·복원합니다. Director 쪽 Profile 의 Command ACL 로 필요한 명령만 허용하세요(설정 탭의 사전 준비 블록 참고).",
+      "포탈은 이 콘솔 계정으로 잡을 만들고 실행·복원합니다. Director 쪽 Profile 의 Command ACL 로 필요한 명령만 허용하세요(설정 › vCenter 관리 › Bareos 백업 서버 › Director 의 사전 준비 블록 참고).",
       "설정 › 포탈 백업에 포함됩니다."
     ],
     "settings": [
-      "특수 기능 › Bareos VM 백업 › 설정",
+      "설정 › vCenter 관리 › Bareos 백업 서버",
       "server/src/tools/bareos-probe.js — 실제 Director 연결 점검 도구(포탈 서버에서 실행)"
     ],
     "sources": [
@@ -4245,7 +4245,7 @@ export const DB_GUIDE_DATA = {
       "로그인 화면: 유휴 자동 로그아웃·만료 경고 시간",
       "설정 화면 전체: 설정 소유자만 들어갈 수 있게 하는 검사",
       "설정 › Security › 보안 자가진단: 현재 정책 점검",
-      "Backup 현황 · Bareos › 설정 탭의 자동 설정 2·3·5단계: 본인 OTP 를 다시 확인할지(요청마다 이 파일의 지금 값)"
+      "설정 › vCenter 관리 › Bareos 백업 서버 › Director 의 자동 설정 2·3·5단계: 본인 OTP 를 다시 확인할지(요청마다 이 파일의 지금 값)"
     ],
     "retention": "설정 파일이라 자동 정리가 없습니다.",
     "growth": "항목이 정해진 작은 파일입니다.",

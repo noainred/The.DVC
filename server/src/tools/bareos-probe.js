@@ -147,7 +147,7 @@ async function restorePlanCheck(s) {
   const rj = await s.call('.jobs type=R').then((r) => ({ names: namesOf(r) })).catch((e) => ({ error: String(e?.message || e) }));
   if (rj.error) console.log(`  ✖ 복원 잡 목록(.jobs type=R)을 읽지 못했습니다: ${rj.error}`);
   else if (rj.names.includes(restoreJob)) console.log(`  ✔ 복원 잡 ‘${restoreJob}’ 이(가) Director 에 있습니다(복원 잡 ${rj.names.length}개).`);
-  else console.log(`  ✖ 복원 잡 ‘${restoreJob}’ 이(가) 없습니다 — 있는 복원 잡: ${rj.names.slice(0, 15).join(', ') || '(없음)'}. 포탈 설정 › 공통 기본값의 복원 잡 이름을 확인하세요.`);
+  else console.log(`  ✖ 복원 잡 ‘${restoreJob}’ 이(가) 없습니다 — 있는 복원 잡: ${rj.names.slice(0, 15).join(', ') || '(없음)'}. 포탈 설정 › vCenter 관리 › Bareos 백업 서버 › 공통 기본값의 복원 잡 이름을 확인하세요.`);
   try {
     const raw = typeof s.callRaw === 'function' ? await s.callRaw(`status client=${pv.client}`, { timeoutMs: 60_000, maxBytes: 2 * 1024 * 1024 }) : JSON.stringify(await s.call(`status client=${pv.client}`));
     const v = fdVersionLine(raw);

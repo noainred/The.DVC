@@ -67,7 +67,7 @@ export function placementAt(job, jobid) {
  */
 export function restoreBaseKv(base, at) {
   if (!base) return { kv: {} };
-  if (!base.vcserver || !base.configFile) return { issue: '이 vCenter 의 사이트 매핑에 vCenter 주소 · FD 자격증명 파일(INI) 경로가 없습니다 — 설정 › 법인별 설정에서 채운 뒤 복원하세요(FD 가 vCenter 계정을 모르면 복원이 실패합니다).' };
+  if (!base.vcserver || !base.configFile) return { issue: '이 vCenter 의 사이트 매핑에 vCenter 주소 · FD 자격증명 파일(INI) 경로가 없습니다 — 설정 › vCenter 관리 › Bareos 백업 서버 › 법인별 설정에서 채운 뒤 복원하세요(FD 가 vCenter 계정을 모르면 복원이 실패합니다).' };
   return { kv: { vcserver: base.vcserver, dc: at?.dc, folder: at?.folder, vmname: at?.vmName, config_file: base.configFile } };
 }
 

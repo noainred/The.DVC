@@ -517,8 +517,8 @@ function AddForm({ d, initial = null, onInitialUsed, onClose, onChanged }) {
       {vc && !cand && !candErr && <Loading />}
       {cand && (
         <>
-          <div className="muted" style={{ fontSize: 12, marginBottom: 6 }}>{candidateSummary(cand)}{cand.director ? ` · 잡을 만들 법인 Director ‘${cand.director.name}’` : ' · 이 vCenter 는 어느 법인 Director 에도 묶여 있지 않습니다(설정 › 법인별 Director)'}{cand.director && cand.mappingMissing?.length ? ` · 매핑이 덜 됐습니다(${cand.mappingMissing.join('·')})` : ''}{!cand.writable ? ' · 조회 전용 범위라 등록할 수 없습니다' : ''}</div>
-          {dirNotReady && <div className="banner warn" style={{ marginBottom: 8, fontSize: 12 }}>법인 Director ‘{cand.director.name}’ 의 콘솔 접속값이 덜 됐습니다({(cand.director.missing || []).join('·') || '접속값'}) — 등록할 수 없습니다. 설정 › 법인별 Director 에서 채우세요(주소·포트·콘솔 이름을 바꾸면 저장 비밀번호가 지워집니다).</div>}
+          <div className="muted" style={{ fontSize: 12, marginBottom: 6 }}>{candidateSummary(cand)}{cand.director ? ` · 잡을 만들 법인 Director ‘${cand.director.name}’` : ' · 이 vCenter 는 어느 법인 Director 에도 묶여 있지 않습니다(설정 › vCenter 관리 › Bareos 백업 서버 › Director)'}{cand.director && cand.mappingMissing?.length ? ` · 매핑이 덜 됐습니다(${cand.mappingMissing.join('·')})` : ''}{!cand.writable ? ' · 조회 전용 범위라 등록할 수 없습니다' : ''}</div>
+          {dirNotReady && <div className="banner warn" style={{ marginBottom: 8, fontSize: 12 }}>법인 Director ‘{cand.director.name}’ 의 콘솔 접속값이 덜 됐습니다({(cand.director.missing || []).join('·') || '접속값'}) — 등록할 수 없습니다. 설정 › vCenter 관리 › Bareos 백업 서버 › Director 에서 채우세요(주소·포트·콘솔 이름을 바꾸면 저장 비밀번호가 지워집니다).</div>}
           <div style={{ ...ROW, marginBottom: 6 }}>
             <button type="button" className="logout-btn" style={BTN} disabled={!visiblePickable.length || sel.size >= cap} onClick={pickVisible}>보이는 등록 가능 VM 전체 선택({visiblePickable.length}대)</button>
             <button type="button" className="logout-btn" style={BTN} disabled={!sel.size} onClick={() => setSel(new Set())}>선택 해제</button>

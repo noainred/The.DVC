@@ -533,7 +533,7 @@ async function centralStep(j, creds, n) {
     //   순서: 지금 매핑에 있는 값(사람이 넣은 값 — 재설치) > 작업 시작 때 값 > vCenter 등록부. 셋 다 없으면 **저장하지 않고 멈춘다**(빈 값을 저장하지 않는다).
     const prev = cur.sites.find((s) => s.vcenterId === j.vcenterId) || null;
     const vcserver = String(prev?.vcserver || '') || String(j.vcHost || '') || registryHosts().get(String(j.vcenterId)) || '';
-    if (!vcserver) throw fail('invalid', `vCenter ‘${j.vcenterName}’ 의 주소를 vCenter 등록부에서 찾지 못해 매핑을 저장하지 않았습니다 — 설정 › Bareos › 기본 설정의 매핑 표에서 vcserver(호스트 이름 또는 IP)를 넣고 저장한 뒤 7단계를 다시 하세요.`);
+    if (!vcserver) throw fail('invalid', `vCenter ‘${j.vcenterName}’ 의 주소를 vCenter 등록부에서 찾지 못해 매핑을 저장하지 않았습니다 — 설정 › vCenter 관리 › Bareos 백업 서버 › Director 의 매핑 표에서 vcserver(호스트 이름 또는 IP)를 넣고 저장한 뒤 7단계를 다시 하세요.`);
     const ini = `/etc/bareos/vmware/${String(vcserver || j.vcenterId).replace(/[^A-Za-z0-9._-]/g, '_').slice(0, 80)}.ini`;
     const site = { vcenterId: j.vcenterId, directorId: j.directorId, vcserver, client: FD_CLIENT, storage: DIR_STORAGE, pool: VMWARE_POOL_FULL, schedule: j.plan.schedule ? VMWARE_SCHEDULE : '', configFile: ini };
     const had = !!prev;
@@ -700,7 +700,7 @@ async function driveRollbackAll(j, creds, { resume = false } = {}) {
       notes.push('매핑 삭제');
     }
     if (j.createdDirector && j.directorId) { const st = loadSettings(); deleteDirector(j.directorId, { inUseByJobs: listJobs().filter((x) => !x.demo && jobDirectorId(x, st) === j.directorId).length }); notes.push('Director 등록 삭제'); }
-    else if (j.existingDirector) notes.push('기존 Director 등록은 남김 — 재설치 전 설치는 초기화로 지워져 접속되지 않습니다(설정 › 법인별 Director 에서 정리)');
+    else if (j.existingDirector) notes.push('기존 Director 등록은 남김 — 재설치 전 설치는 초기화로 지워져 접속되지 않습니다(설정 › vCenter 관리 › Bareos 백업 서버 › Director 에서 정리)');
   } catch (e) { notes.push(`포탈 쪽 일부 남음: ${String(e?.message || e).slice(0, 200)}`); }
   const a = j.attempts[j.attempts.length - 1]; if (a?.rollbackAll) { a.endedAt = Date.now(); a.result = 'rolledback'; }
   touch(j, { status: 'rolledback', phase: 'idle', pollError: null, rollback: { ...j.rollback, doneAt: Date.now(), notes } });
