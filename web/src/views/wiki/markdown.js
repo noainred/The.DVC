@@ -28,7 +28,7 @@ export function safeHref(u) {
   const s = String(u ?? '').trim();
   return SAFE_HREF_RE.test(s) ? s : null;
 }
-/** v2.887 첨부 주소 — 'attach:<32자 hex>'. 화면이 인증 붙여 받아 그린다(주소창 · <img src> 로 직접 열면 인증이 없다). 아니면 null. */
+/** v2.889 첨부 주소 — 'attach:<32자 hex>'. 화면이 인증 붙여 받아 그린다(주소창 · <img src> 로 직접 열면 인증이 없다). 아니면 null. */
 const ATTACH_RE = /^attach:([a-f0-9]{32})$/;
 export function attachId(u) { const m = ATTACH_RE.exec(String(u ?? '').trim()); return m ? m[1] : null; }
 export function safeImg(u) {
@@ -123,7 +123,7 @@ export function parseInline(src, depth = 0) {
           const alt = s.slice(i + 2, close); const url = s.slice(close + 2, end).trim();
           const img = safeImg(url);
           const att = attachId(url);
-          if (att) push({ t: 'img', attach: att, src: '', alt }); // v2.887 첨부 그림
+          if (att) push({ t: 'img', attach: att, src: '', alt }); // v2.889 첨부 그림
           else if (img) push({ t: 'img', src: img, alt });
           else { const href = safeHref(url); push(href ? { t: 'a', href, ext: isExternal(href), c: [{ t: 'text', v: `그림: ${alt || url}` }] } : { t: 'text', v: s.slice(i, end + 1) }); }
           i = end + 1; continue;
@@ -150,7 +150,7 @@ export function parseInline(src, depth = 0) {
           const href = safeHref(s.slice(close + 2, end));
           const label = s.slice(i + 1, close);
           const att = attachId(s.slice(close + 2, end));
-          if (att) { push({ t: 'a', attach: att, href: '', ext: false, c: inner(label) }); i = end + 1; continue; } // v2.887 첨부 링크
+          if (att) { push({ t: 'a', attach: att, href: '', ext: false, c: inner(label) }); i = end + 1; continue; } // v2.889 첨부 링크
           if (href) { push({ t: 'a', href, ext: isExternal(href), c: inner(label) }); i = end + 1; continue; }
           // 안전하지 않은 주소 — 글만 남기고 주소는 버린다(무엇을 버렸는지는 보이게 글자로)
           buf += `${label} (${s.slice(close + 2, end)})`; i = end + 1; continue;
@@ -277,7 +277,7 @@ function parseBlocks(lines, ctx, depth, nos = null) {
       continue;
     }
     if (TOC_RE.test(line)) { out.push({ t: 'toc' }); i += 1; continue; }
-    // v2.887 포탈 매크로 — 줄 하나가 통째로 {{이름 …}} 이고 아는 이름일 때만(macro.js)
+    // v2.889 포탈 매크로 — 줄 하나가 통째로 {{이름 …}} 이고 아는 이름일 때만(macro.js)
     if (line.length <= MACRO_LIMITS.line && line.includes('{{')) { const mc = parseMacroLine(line); if (mc) { out.push({ t: 'macro', name: mc.name, args: mc.args }); i += 1; continue; } }
     const h = headingOf(line);
     if (h) {

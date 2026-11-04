@@ -75,7 +75,7 @@ describe('검색식 필드 이름 — 서버 FIELDS 와 화면 이름표가 같�
   });
 });
 
-describe('v2.887 캘린더', () => {
+describe('v2.889 캘린더', () => {
   it('달 칸 — 월요일 시작 · 앞뒤 달 칸 · 주 수', async () => {
     const { monthGrid, issuesByDay, sprintMarks, shiftMonth } = await import('./issueText.js');
     const g = monthGrid(2026, 11); // 2026-11-01 은 일요일

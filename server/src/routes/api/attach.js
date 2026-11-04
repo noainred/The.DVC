@@ -1,5 +1,5 @@
 /**
- * routes/api/attach.js — 위키 문서 · 이슈 첨부(v2.887 · C-4). 저장소는 attach/store.js.
+ * routes/api/attach.js — 위키 문서 · 이슈 첨부(v2.889 · C-4). 저장소는 attach/store.js.
  *
  * 권한(위키 · 이슈와 같은 틀 — 서버 불변조건 '/api 상태변경은 requireRole(admin, operator)'):
  *  · 보기 · 내려받기: 로그인 사용자 전부 — **그 주인(문서 · 이슈)을 볼 수 있을 때만**(위키 getPage · 이슈 getIssue 가 범위를 판정 — 조회 밖 404).

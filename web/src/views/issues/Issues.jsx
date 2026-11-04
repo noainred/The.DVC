@@ -28,7 +28,7 @@ import AttachBox from '../attach/AttachBox.jsx';
 import AttachAdmin from '../attach/AttachAdmin.jsx';
 import IssueCalendar from './IssueCalendar.jsx';
 
-const SUBS = [['board', '보드'], ['list', '목록'], ['calendar', '캘린더'], ['mine', '내 작업'], ['activity', '활동'], ['sprint', '스프린트'], ['epics', '에픽'], ['filters', '필터']]; // v2.882 스프린트 · 에픽 · 필터 · v2.887 캘린더
+const SUBS = [['board', '보드'], ['list', '목록'], ['calendar', '캘린더'], ['mine', '내 작업'], ['activity', '활동'], ['sprint', '스프린트'], ['epics', '에픽'], ['filters', '필터']]; // v2.882 스프린트 · 에픽 · 필터 · v2.889 캘린더
 /** v2.871: 설정 탭은 전체 범위 관리자에게만 보인다(서버가 같은 기준으로 막는다). 해시 키는 늘 유효 — 권한이 없으면 안내만. */
 const SETTINGS_SUB = ['settings', '설정'];
 const EMPTY_FILTERS = Object.freeze({ q: '', assignee: '', priority: '', type: '', status: '', vcenterId: '', mine: false });

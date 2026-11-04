@@ -485,7 +485,7 @@ export function registerIssues(api) {
     try {
       const x = deleteIssue(req.params.key, userOf(req), { isMod: isMod(req), access: accessOf(req) });
       audit(req, 'issue.delete', x.key, `${x.title} (보고자 ${x.reporter})`);
-      try { removeAttachments('issue', x.key); } catch (e) { console.warn(`[issues] ${x.key} 첨부 정리 실패: ${String(e?.message || e).slice(0, 160)}`); } // v2.887
+      try { removeAttachments('issue', x.key); } catch (e) { console.warn(`[issues] ${x.key} 첨부 정리 실패: ${String(e?.message || e).slice(0, 160)}`); } // v2.889
       res.json({ ok: true, persist: await persistView(req) });
     } catch (e) { fail(res, e, next, req); }
   });

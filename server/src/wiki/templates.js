@@ -1,5 +1,5 @@
 /**
- * wiki/templates.js — 관리자가 더하는 위키 템플릿(v2.887 · 시안 ⑤ '관리자 추가 템플릿' · C-5). 파일 `wiki-templates.json`.
+ * wiki/templates.js — 관리자가 더하는 위키 템플릿(v2.889 · 시안 ⑤ '관리자 추가 템플릿' · C-5). 파일 `wiki-templates.json`.
  *
  *  · 내장 템플릿(wiki/store.js TEMPLATES)은 그대로 두고 그 뒤에 붙는다. id 는 서버가 만든다('c' + 10자 hex — 내장 id 와 겹치지 않는다).
  *  · 상한은 거부다: 30개 · 이름 40자 · 꼬리표 20자 · 본문 20,000자. 손상은 보존하고 빈 목록으로 읽는다(loadError 로 화면이 말한다).

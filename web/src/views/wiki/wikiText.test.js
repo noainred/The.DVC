@@ -141,7 +141,7 @@ describe('v2.886 슬래시 명령', () => {
   });
 });
 
-describe('v2.887 당번 표', () => {
+describe('v2.889 당번 표', () => {
   it('글 ↔ 표 · 끝을 비우면 하루 · 못 읽은 줄 번호', async () => {
     const { oncallToText, textToOncall, oncallRange } = await import('./wikiText.js');
     const { rows, bad } = textToOncall('kim | 2026-11-03 | 2026-11-09 | 야간\nlee | 2026-11-10\n이상한 줄\npark | 2026-11-09 | 2026-11-01');

@@ -579,7 +579,7 @@ export function openIssueQuery(query) {
   window.location.hash = '#/issues/filters';
 }
 
-/* ───── v2.887 C-5 캘린더 ───── */
+/* ───── v2.889 C-5 캘린더 ───── */
 const pad2c = (n) => String(n).padStart(2, '0');
 /** 달력 한 달 — 월요일 시작 주(7칸) 배열. 칸 = { day:'YYYY-MM-DD', inMonth }. month 는 1~12. */
 export function monthGrid(year, month) {

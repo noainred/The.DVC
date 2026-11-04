@@ -11,7 +11,7 @@ export const statusText = (s) => STATUS_TEXT[s] || s || '—';
 export const STALE_DAYS = 90;
 export const MAX_DEPTH = 3;
 const ID_RE = /^W\d{1,9}$/;
-const VIEWS = Object.freeze(['home', 'search', 'new', 'settings', 'templates']); // v2.887 templates — 관리자 템플릿
+const VIEWS = Object.freeze(['home', 'search', 'new', 'settings', 'templates']); // v2.889 templates — 관리자 템플릿
 
 /* ───── 주소 ───── */
 function dec(s) { try { return decodeURIComponent(s); } catch { return ''; } }
@@ -269,7 +269,7 @@ export function applySlash(text, caret, cmd, now = new Date()) {
   return { body, caret: q.start + (at < 0 ? clean.length : at) };
 }
 
-/* ───── v2.887 대문 담당 · 당번 ───── */
+/* ───── v2.889 대문 담당 · 당번 ───── */
 /** 당번 표 → 글('사람 | 시작 | 끝 | 메모' 한 줄씩). */
 export function oncallToText(rows) {
   return (Array.isArray(rows) ? rows : []).map((o) => [o.who, o.from, o.to === o.from ? '' : o.to, o.note || ''].join(' | ').replace(/( \| )+$/, '')).join('\n');

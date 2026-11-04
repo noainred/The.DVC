@@ -41,7 +41,7 @@ export function withoutTitle(doc, title) {
  * breaks: 줄 하나 바꿈을 줄바꿈으로(이슈 본문 · 댓글 — v2.883). onToggleTask(line, checked): 주면 체크리스트를 누를 수 있다(위키 보기 — 판을 만들지 않는다).
  */
 /**
- * v2.887: renderMacro(block, key) — 포탈 매크로({{issues}} · {{include}} · {{vcenters}} · {{partfaults}})를 그린다(위키 문서 보기만 넘긴다).
+ * v2.889: renderMacro(block, key) — 포탈 매크로({{issues}} · {{include}} · {{vcenters}} · {{partfaults}})를 그린다(위키 문서 보기만 넘긴다).
  *   없으면 매크로 자리를 안내 상자로만 둔다(이슈 본문 · 미리보기 · 포함된 문서 안 — 포함 안의 매크로를 그리지 않아 재귀를 막는다).
  */
 export function MdView({ md = '', ast = null, pages = [], spaceId = '', idPrefix = 'md', className = '', compact = false, dropTitle = '', breaks = false, onToggleTask = null, busy = false, unresolvedAsSearch = false, renderMacro = null }) {
