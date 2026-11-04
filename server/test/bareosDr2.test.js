@@ -161,6 +161,12 @@ test('① 단계 정규화 · 보낸 항목 상태', () => {
   assert.equal(Number(/export const DR_CHUNK = (\d+);/.exec(web)?.[1]), RN.DR_CONC_MAX, '동시 복원 수 상한 = 한 번에 보낼 수 있는 대수');
 });
 
+test('① 설정 백업 복원은 실행 상태를 되살리지 않는다(진행 중에 만든 백업 → 끝난 회차가 OTP 없이 다시 돈다)', async () => {
+  const { RESTORE_EXCLUDE, stagedNameIssue } = await import('../src/backup/stagedRestore.js');
+  assert.ok(RESTORE_EXCLUDE.has('bareos-dr-runs.json'));
+  assert.equal(stagedNameIssue('bareos-dr-runs.json'), '복원 제외');
+});
+
 const W = (k, name, extra = {}) => ({ id: ID[k], jobid: H(k, 130), newVm: { name, dc: 'DC-NEW', cluster: 'CL-A' }, ...extra });
 const restoreCmds = () => D.cmds.filter((c) => c.startsWith('restore '));
 const finishAll = async (state = 'T') => {
