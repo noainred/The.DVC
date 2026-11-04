@@ -270,7 +270,9 @@ async function fakeDns(mode) {
     });
     sock.on('error', () => {});
   });
-  await new Promise((res, rej) => { tcp.once('error', rej); tcp.listen(port, '127.0.0.1', res); });
+  // 같은 번호 TCP 포트가 이미 쓰이면(전량 실행 중 다른 테스트) 던지기 전에 UDP 를 닫는다 — 남은 UDP 소켓이
+  // 프로세스를 붙잡아 파일 전체가 120초 시한에 걸렸다(v2.883 릴리스 실행 #970 · 첫 listen 을 실패시키는 재현으로 확인)
+  try { await new Promise((res, rej) => { tcp.once('error', rej); tcp.listen(port, '127.0.0.1', res); }); } catch (e) { try { udp.close(); } catch { /* */ } throw e; }
   return { port, close: () => { try { udp.close(); } catch { /* */ } tcp.close(); } };
 }
 async function fakeDnsAnyPort(mode) {
