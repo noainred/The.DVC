@@ -36,7 +36,7 @@ const PURPOSES = {
   'issue-sprints.json': '이슈 스프린트(이름 · 기간 · 목표 · 상태 — 사용자 데이터, v2.882)',
   'issue-filters.json': '이슈 저장 필터(검색식 · 공유 — 사용자 데이터, v2.882)',
   'wiki.json': '위키 스페이스 · 문서 · 판 · 댓글(사용자 데이터, v2.881)',
-  'wiki-user.json': '위키 즐겨찾기 · 최근 본 문서 · 조회 수(사용자 데이터, v2.886)',
+  'wiki-user.json': '위키 즐겨찾기 · 최근 본 문서 · 조회 수(사용자 데이터, v2.888)',
   'attachments.json': '위키 · 이슈 첨부 목록(사용자 데이터 · 본체는 attachments/ 폴더 — 백업 제외, v2.889)',
   'attach-settings.json': '첨부 전체 상한(MB)(설정, v2.889)',
   'wiki-templates.json': '위키 관리자 템플릿(설정, v2.889)',

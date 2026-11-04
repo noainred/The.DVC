@@ -177,7 +177,7 @@ function findFor(id, access = FULL_ACCESS, { write = false } = {}) {
 }
 export const writableBy = (p, access = FULL_ACCESS) => canSeeSpace(p.spaceId, access) && canEditSpace(p.spaceId, access);
 /**
- * v2.886 — 저장된 id 목록(즐겨찾기 · 최근 본) → 지금 볼 수 있는 문서의 메타(순서 유지). 지워졌거나 범위 밖이면 빠진다(저장된 id 를 믿지 않는다).
+ * v2.888 — 저장된 id 목록(즐겨찾기 · 최근 본) → 지금 볼 수 있는 문서의 메타(순서 유지). 지워졌거나 범위 밖이면 빠진다(저장된 id 를 믿지 않는다).
  * extra(id) 가 주는 값을 덧붙인다(최근 본 시각 등).
  */
 export function metasFor(ids, access = FULL_ACCESS, extra = null) {
@@ -607,7 +607,7 @@ export function homeOf(spaceId, { access = FULL_ACCESS, me = '', now = Date.now(
     myDrafts: me ? live.filter((p) => p.status === 'draft' && p.createdBy === me).sort((a, b) => b.updatedAt - a.updatedAt).slice(0, 8).map(metaOf) : [],
     faq: live.filter((p) => (p.labels || []).includes('faq')).sort((a, b) => a.title.localeCompare(b.title)).slice(0, 10).map(metaOf),
     stale: live.filter((p) => now - p.updatedAt > 90 * DAY).sort((a, b) => a.updatedAt - b.updatedAt).slice(0, 8).map(metaOf),
-    // v2.886 많이 본 문서(최근 30일 · 사람/날/문서마다 1회) — views = Map(id → n)(wiki/userState.js). 이 스페이스의 보관 아닌 문서만.
+    // v2.888 많이 본 문서(최근 30일 · 사람/날/문서마다 1회) — views = Map(id → n)(wiki/userState.js). 이 스페이스의 보관 아닌 문서만.
     popular: views instanceof Map ? live.filter((p) => views.get(p.id) > 0).sort((a, b) => (views.get(b.id) - views.get(a.id)) || (b.updatedAt - a.updatedAt))
       .slice(0, 8).map((p) => ({ ...metaOf(p), views: views.get(p.id) })) : null,
     labels: [...labels.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).slice(0, 30).map(([name, n]) => ({ name, n })),

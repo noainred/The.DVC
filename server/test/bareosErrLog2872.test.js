@@ -61,11 +61,17 @@ test('① 첫 오류 줄 · 서명 · 대조', () => {
   assert.deepEqual(LF.compareFirstErrors([{ ok: true, firstError: 'Fatal error: a' }]).items[0].match, 'same', '한 건뿐이면 그 줄이 대표');
 });
 
-test('① ReDoS — 따옴표 · 공백 긴 줄도 선형(길이 2배에 시간 4배 미만)', () => {
-  const t = (n) => { const s = `Fatal error: ${'"'.repeat(n)} ${' '.repeat(n)}x`; const t0 = process.hrtime.bigint(); for (let i = 0; i < 50; i++) LF.errorSig(LF.firstErrorLine([s])); return Number(process.hrtime.bigint() - t0); };
-  t(2000);
-  const r = t(4000) / Math.max(1, t(2000));
-  assert.ok(r < 4, `비율 ${r.toFixed(2)}`);
+// v2.888: 예전 판(2배 크기 · 한 번씩 재기 · 기준 4배)은 CI 병렬 실행에서 비율 16.35 로 흔들렸다(PR #906 CI — 대상 코드는 그대로, 로컬 3/3 통과).
+//   ReDoS 회귀는 비율로 재되(docs/rules/common.md) 8배 크기 · 작은 쪽 · 큰 쪽 번갈아 5회 각각 최솟값 · 기준 24배(선형 약 8 · 제곱 약 64) — wiki 마크다운(#905)과 같은 틀.
+test('① ReDoS — 따옴표 · 공백 긴 줄도 선형(길이 8배에 시간 24배 미만 · 번갈아 5회 최솟값)', () => {
+  const mk = (n) => `Fatal error: ${'"'.repeat(n)} ${' '.repeat(n)}x`;
+  const run = (s) => { const t0 = process.hrtime.bigint(); for (let i = 0; i < 20; i++) LF.errorSig(LF.firstErrorLine([s])); return Number(process.hrtime.bigint() - t0); };
+  const small = mk(1000); const big = mk(8000);
+  run(small); run(big); // 데우기
+  let a = Infinity; let b = Infinity;
+  for (let k = 0; k < 5; k++) { a = Math.min(a, run(small)); b = Math.min(b, run(big)); }
+  const r = b / Math.max(1, a);
+  assert.ok(r < 24, `비율 ${r.toFixed(2)}(작은 쪽 ${(a / 1e6).toFixed(2)}ms · 큰 쪽 ${(b / 1e6).toFixed(2)}ms)`);
 });
 
 test('② 같은 모양 묶음 — Bareos 실행은 1시간 창 · 잡 이름 무관 · 그 밖은 예전 키', () => {

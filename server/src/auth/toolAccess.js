@@ -76,6 +76,7 @@ export const TOOL_PATH_KEYS = Object.freeze({
   'edge-log-local': 'edge-log',      // 〃 이 포탈 자신의 로그(경로를 `/:agent` 와 섞지 않기 위해 분리)
   'bm-usage': 'bm-usage',            // BmUsage.jsx 전용(v2.550) — 베어메탈 사용률
   'corp-usage': 'corp-usage',
+  'svc-inventory': 'svc-inventory', // SvcInventory.jsx 전용(v2.887) — 서비스 인벤토리(조회·쓰기 연산·CSV)
   'power-total': 'power-total',      // PowerTotal.jsx 전용(v2.664) — 전체 소비 전력(서버·네트워크·스토리지)        // CorpUsage.jsx 전용(v2.625) — 법인별 서버 사용량(전체·물리·가상화)
   'link-check': 'link-check',        // LinkCheck.jsx 전용(v2.552) — 중앙↔엣지·vCenter 통신 점검(adminOnly)
   'portal-check': 'portal-check',    // PortalCheck.jsx 전용(v2.560) — 토큰 점검(adminOnly+fullScope)

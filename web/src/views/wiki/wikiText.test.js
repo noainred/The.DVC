@@ -112,7 +112,7 @@ describe('초안 저장소 — 이 브라우저에만, 못 쓰면 조용히 넘�
   });
 });
 
-describe('v2.886 슬래시 명령', () => {
+describe('v2.888 슬래시 명령', () => {
   it('줄 머리의 /낱말만 명령이다(주소 · 경로의 / 는 아니다)', () => {
     expect(slashQuery('/', 1)).toEqual({ start: 0, q: '' });
     expect(slashQuery('글\n  /표', 6)).toEqual({ start: 4, q: '표' });

@@ -1,6 +1,6 @@
 # 설정·데이터 파일 레퍼런스 (자동 생성)
 
-포탈이 `CONFIG_DIR`(설치본 기본 `/etc/vmware-portal`) 아래에 만드는 파일 **265개**의 목록이다.
+포탈이 `CONFIG_DIR`(설치본 기본 `/etc/vmware-portal`) 아래에 만드는 파일 **268개**의 목록이다.
 시계열 DB 는 `db-location.json` 이 가리키는 `dbDir` 로 옮길 수 있다.
 
 - 생성: `node scripts/config-doc.mjs` (마지막 갱신 2026-11-04)
@@ -28,9 +28,9 @@
 | `alerts-state.json` | 설정 | Alerting — evaluates threshold/condition rules against the current snapshot on | ✅ | ✅ | ✅ | alerts.js |
 | `alerts.json` | 설정 | Alerting — evaluates threshold/condition rules against the current snapshot on | ✅ | ✅ | ✅ | alerts.js |
 | `api-keys.json` | 설정 | 외부 연동 API 키 저장소 (v2.562) — 다른 포탈이 이 포탈의 조회 API 를 읽을 수 있게 하는 인증. | ✅ | ✅ | ✅ | publicapi/keys.js |
-| `attach-settings.json` | 설정 | 첨부 전체 상한(v2.887 — maxTotalMB, 기본 2048 · 1~102400. 비밀 없음) | ✅ | ✅ | ✅ | attach/store.js |
-| `attachments` | 디렉터리 | 위키 문서 · 이슈 첨부 파일(v2.887 · 시안 ⑨⑩ '첨부' · C-4). | ✅ | ✅ | ✅ | attach/store.js |
-| `attachments.json` | 설정 | 위키 문서 · 이슈 첨부 목록(v2.887 — 원래 이름 · 주인(W-번호 · ISS-번호) · 크기 · sha256 · 올린 사람. 비밀 없음) | ✅ | ✅ | ✅ | attach/store.js |
+| `attach-settings.json` | 설정 | 첨부 전체 상한(v2.889 — maxTotalMB, 기본 2048 · 1~102400. 비밀 없음) | ✅ | ✅ | ✅ | attach/store.js |
+| `attachments` | 디렉터리 | 위키 문서 · 이슈 첨부 파일(v2.889 · 시안 ⑨⑩ '첨부' · C-4). | ✅ | ✅ | ✅ | attach/store.js |
+| `attachments.json` | 설정 | 위키 문서 · 이슈 첨부 목록(v2.889 — 원래 이름 · 주인(W-번호 · ISS-번호) · 크기 · sha256 · 올린 사람. 비밀 없음) | ✅ | ✅ | ✅ | attach/store.js |
 | `audit.ndjson` | 로그(NDJSON) | 감사 로그(상태 변경 기록) | ✅ |  | ✅ | audit.js |
 | `auth-secret` | 디렉터리 | 세션 토큰 서명 키(자동 생성) | ✅ | ✅ | ✅ | auth/auth.js |
 | `auth.json` | 설정 | Active Directory (LDAP) authentication — UPN simple bind + group→role mapping. | ✅ | ✅ | ✅ | auth/ad.js |
@@ -43,6 +43,7 @@
 | `bareos-bundle-source.json` | 설정 | Bareos 완전 설치 번들의 **받는 주소 · 서버 디렉터리** 설정(v2.850 · 사용자 요청 | ✅ | ✅ | ✅ | bareos/install/bundleSource.js |
 | `bareos-digest-state.json` | 설정 | Bareos 일일 요약 메일 마지막 발송(상태, v2.862) | ✅ | ✅ | ✅ | bareos/digest.js |
 | `bareos-digest.json` | 설정 | Bareos 일일 요약 메일 설정(v2.862 — 켜기 · 시각. 비밀 없음) | ✅ | ✅ | ✅ | bareos/digest.js |
+| `bareos-dr-runs.json` | 설정 | 재해 복구 2차: 복구 순서(단계 자동 실행) — 시안 ② Disaster2 '3. 복구 순서' · 사용자 결정 '두 번에 나눠' · '② 표준'(2026-11-04). | ✅ | ✅ | ✅ | bareos/drRunner.js |
 | `bareos-edge-directors.json` | 설정 | **엣지 쪽** 법인 Director 사본(v2.824 엣지 대행). 파일: CONFIG_DIR/bareos-edge-directors.json (0600 · 원자적 쓰기 · 비밀 봉인). | ✅ | ✅ | ✅ | bareos/edgeStore.js |
 | `bareos-groups.json` | 설정 | Bareos 백업 그룹 원장(v2.830 · 사용자 요청 'VM 을 골라 그룹으로 — 이름·스케줄·스토리지 지정, 나중에 수정'). | ✅ | ✅ | ✅ | bareos/groups.js |
 | `bareos-install-jobs.json` | 설정 | Bareos 완전 설치 작업(v2.844): 시작 · 진행 읽기 · 4~7단계 · 다시 시도 · 중단 · 전부 되돌리기. | ✅ | ✅ | ✅ | bareos/install/job.js |
@@ -217,6 +218,8 @@
 | `secrets-policy.json` | 설정 | 설정 파일 자격증명(비밀번호·SSH 키·토큰)의 저장 방식(평문/암호화) 중앙 모듈(v2.296). | ✅ | ✅ | ✅ | security/secretVault.js |
 | `secrets-policy.trusted.json` | 설정 | 자격증명 저장 방식 정책의 신뢰 사본(S-07) | ✅ | ✅ | ✅ | security/secretVault.js |
 | `security-session.json` | 설정 | 세션 보안 설정 — 유휴 자동 로그아웃(분) 등. CONFIG_DIR/security-session.json. | ✅ | ✅ | ✅ | security/securitySettings.js |
+| `service-map-pins.json` | 설정 | 서비스 인벤토리 저장소(v2.887, docs/design/service-map/README.md 시안 A 3차 + 4차 검토). | ✅ | ✅ |  | servicemap/store.js |
+| `service-map.json` | 설정 | 서비스 인벤토리 저장소(v2.887, docs/design/service-map/README.md 시안 A 3차 + 4차 검토). | ✅ | ✅ |  | servicemap/store.js |
 | `session-state.json` | 설정 | 세션 폐기·유휴 상태(로그아웃·폐기 기록, 검토 S-05·S-06) | ✅ | ✅ | ✅ | auth/sessionState.js |
 | `settings-owners.txt` | 텍스트 | 설정 소유자 목록(백업·비밀 CSV 등 최상위 권한) | ✅ | ✅ | ✅ | security/securitySettings.js |
 | `ssh` | 디렉터리 | 아이실론 디렉터리 사용량 SSH 키 디렉터리(ssh/isidu_key — 0700/0600, v2.736) |  |  | ✅ | isidu/sshKey.js |
@@ -277,8 +280,8 @@
 | `vmseries` | 디렉터리 | 실시간 스파이크 저장소. **vCenter 마다 독립 파일**(v2.510, 사용자 요구 | ✅ | ✅ | ✅ | vmseries/db.js |
 | `vmseries.json` | 설정 | 실시간 스파이크 수집 설정(v2.510). env 기본값 + CONFIG_DIR/vmseries.json 오버레이. | ✅ | ✅ | ✅ | vmseries/settings.js |
 | `vmware-portal-release` | 디렉터리 | RedHat 계열의 /etc/redhat-release 처럼, CONFIG_DIR에 현재 포탈 버전을 한 줄로 명시하는 |  |  |  | util/releaseFile.js |
-| `wiki-templates.json` | 설정 | 위키 관리자 템플릿(v2.887 — 이름 · 꼬리표 · 본문, 30개. 비밀 없음) | ✅ | ✅ | ✅ | wiki/templates.js |
-| `wiki-user.json` | 설정 | 위키 사용자별 즐겨찾기(50) · 최근 본 문서(20) · 문서 조회 수(최근 31일 — 사람 · 날 · 문서마다 1회)(v2.886 — 사용자 데이터. 비밀 없음) |  | ✅ |  | wiki/userState.js |
+| `wiki-templates.json` | 설정 | 위키 관리자 템플릿(v2.889 — 이름 · 꼬리표 · 본문, 30개. 비밀 없음) | ✅ | ✅ | ✅ | wiki/templates.js |
+| `wiki-user.json` | 설정 | 위키 사용자별 즐겨찾기(50) · 최근 본 문서(20) · 문서 조회 수(최근 31일 — 사람 · 날 · 문서마다 1회)(v2.888 — 사용자 데이터. 비밀 없음) |  | ✅ |  | wiki/userState.js |
 | `wiki.json` | 설정 | 위키 스페이스 설정(대문 글 · 공지 · 바로 가기 · 읽기 전용) · 문서 · 판 · 댓글 · 지켜보는 사람(v2.881 — 로그인 사용자가 쓰는 사용자 데이터. 비밀 없음) |  | ✅ |  | wiki/store.js |
 | `xfer-speed-schedule-state.json` | 설정 | 법인 간 전송 속도 예약 실행 처리 기록(상태, v2.735) | ✅ | ✅ | ✅ | xferspeed/poller.js |
 | `xfer-speed-settings.json` | 설정 | 법인 간 전송 속도 측정 설정(v2.735 — 자동 측정 켬·간격 실행·예약 실행·제외 엣지) | ✅ | ✅ | ✅ | xferspeed/settings.js |

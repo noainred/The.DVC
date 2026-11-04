@@ -232,7 +232,7 @@ function HomeView({ space, meta, spaceInfo, pages, canWriteHere }) {
           </div>
         ))}
       </div>
-      {/* v2.886 C-2 — 즐겨찾기 · 최근 본 문서(모든 스페이스 · 서버가 지금 범위로 다시 거른다) · 많이 본 문서(이 스페이스 · 30일 · 사람 · 날마다 1회) */}
+      {/* v2.888 C-2 — 즐겨찾기 · 최근 본 문서(모든 스페이스 · 서버가 지금 범위로 다시 거른다) · 많이 본 문서(이 스페이스 · 30일 · 사람 · 날마다 1회) */}
       <div className="wiki-home-grid three">
         <section className="card">
           <div className="wiki-sec-head"><h3>즐겨찾기</h3><span className="muted wiki-small">모든 스페이스</span></div>
@@ -549,7 +549,7 @@ function Editor({ space, meta, pages, page = null, initial = null, onWritten }) 
     return d && d.baseVersion === page.version && (d.body !== page.body || d.title !== page.title) ? d : null;
   });
   const ta = useRef(null);
-  // v2.886 슬래시 명령 — 줄 머리에서 '/' 를 치면 블록 고르기(↑↓ · Enter/Tab · Esc). 메뉴는 본문 칸 아래에 붙인다(커서 좌표를 재지 않는다).
+  // v2.888 슬래시 명령 — 줄 머리에서 '/' 를 치면 블록 고르기(↑↓ · Enter/Tab · Esc). 메뉴는 본문 칸 아래에 붙인다(커서 좌표를 재지 않는다).
   const [slash, setSlash] = useState(null); // { q, items, i }
   const syncSlash = (text, caret) => {
     const q = slashQuery(text, caret);

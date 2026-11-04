@@ -46,7 +46,7 @@ export const PRESET = Object.freeze([
     id: 'server', label: '서버', icon: '🖥️',
     tools: ['fleet', 'hardware', 'serveranalysis', 'idrac-trend', 'serial-lookup', 'esxi', 'host-hygiene', 'esxitemp', 'roomtemp',
       'powermap', 'pdu', 'gpu', 'gpu-alloc', 'hba', 'nic-speed', 'nic-models', 'rma', 'bm-storage', 'part-faults',
-      'bm-usage', 'corp-usage', 'power-total'],
+      'bm-usage', 'corp-usage', 'power-total', 'svc-inventory'],
   },
   {
     id: 'network', label: '네트워크', icon: '🌐',
@@ -60,7 +60,7 @@ export const PRESET = Object.freeze([
   },
   {
     id: 'virtualization', label: '가상화', icon: '🧊',
-    tools: ['vmfinder', 'vm-track', 'vmtools', 'guestos', 'real-os', 'curuser', 'snapshots', 'vm-clone', 'bareos-backup',
+    tools: ['svc-inventory', 'vmfinder', 'vm-track', 'vmtools', 'guestos', 'real-os', 'curuser', 'snapshots', 'vm-clone', 'bareos-backup',
       'vmprovision', 'vm-export', 'vm-changes', 'vm-lifecycle', 'contention', 'vm-availability', 'cost-showback', 'migration-readiness', 'esxi', 'host-hygiene', 'cluster-check', 'esxitemp', 'vcversion', 'solutions', 'gpu', 'gpu-alloc', 'topo3d'],
   },
   {
@@ -75,7 +75,7 @@ export const PRESET = Object.freeze([
   },
   {
     id: 'report', label: '리포트·점검', icon: '📋',
-    tools: ['daily-health', 'insights', 'insights-hub', 'compliance-report', 'change-history', 'unprotected-vms',
+    tools: ['daily-health', 'insights', 'insights-hub', 'svc-inventory', 'compliance-report', 'change-history', 'unprotected-vms',
       'alert-channels', 'davinci-svc', 'svcmon-config', 'vmware-backup', 'backup-summary', 'backup-detail', 'backup-em', 'bareos-summary', 'bareos-detail', 'dir-usage', 'capacity',
       'portal-check'],
   },

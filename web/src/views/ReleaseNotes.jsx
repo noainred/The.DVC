@@ -14,7 +14,7 @@ export default function ReleaseNotes({ isAdmin, onClose }) {
 
   const load = () => fetchJson('/release-notes').then(setData).catch(() => setData({ notes: [], current: '' }));
   useEffect(() => { load(); }, []);
-  // v2.886 이 버전에서 고친 이슈(수정 버전 — 내가 볼 수 있는 이슈만 센다). 못 읽으면 줄을 그리지 않는다.
+  // v2.888 이 버전에서 고친 이슈(수정 버전 — 내가 볼 수 있는 이슈만 센다). 못 읽으면 줄을 그리지 않는다.
   const [fixed, setFixed] = useState(null);
   useEffect(() => { fetchJson('/issues/versions').then((r) => setFixed(r.fix || {})).catch(() => setFixed(null)); }, []);
 

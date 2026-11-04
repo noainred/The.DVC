@@ -274,3 +274,21 @@ export function bulkRestorePlan({ items, jobOf, dirOf, snapshot, pluginName = 'p
   const bad = out.filter((r) => !r.ok);
   return { ok: !bad.length, ...(bad.length ? { issue: `${bad.length}대를 복원할 수 없습니다 — 항목별 사유를 확인하세요(묶음 전체를 보내지 않았습니다).` } : {}), directorId: dir || '', items: out, capacity };
 }
+
+/** 새 VM 복원 이름을 예약해 두는 시간(진행 중 + 끝난 뒤 하루 — 다음 인벤토리 수집 전 같은 이름을 막는다). */
+export const RESTORE_NAME_RESERVE_MS = 24 * 3600_000;
+/**
+ * 최근 · 진행 중 새 VM 복원이 쓰는 이름(`${vcenterId}\u0000${소문자 이름}`) — 묶음 복원 라우트와 재해 복구 단계 실행기(drRunner)가 같은 판정을 쓴다(순수).
+ *   반증 R4(재해 복구 1차): 실패 · 취소로 끝난 복원은 그 뒤 인벤토리 수집(snapAt)이 있으면 예약을 푼다 — 껍데기가 생겼으면 인벤토리 이름 대조가 막는다.
+ */
+export function reservedRestoreNames(jobs, { now = Date.now(), snapAt = 0, isOpen = () => false } = {}) {
+  const out = new Set();
+  const since = now - RESTORE_NAME_RESERVE_MS;
+  for (const j of Array.isArray(jobs) ? jobs : []) {
+    for (const r of j.restores || []) {
+      const failedSeen = (r.state === 'error' || r.state === 'canceled') && snapAt > (Number(r.endedAt || r.at) || 0);
+      if (r.mode === 'newVm' && r.target?.name && !failedSeen && (isOpen(r) || (Number(r.at) || 0) >= since)) out.add(`${j.vcenterId}\u0000${String(r.target.name).toLowerCase()}`);
+    }
+  }
+  return out;
+}

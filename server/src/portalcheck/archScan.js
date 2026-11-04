@@ -164,6 +164,11 @@ export const ROUTE_GATE_ALLOW = Object.freeze({
   'POST /api/tools/bareos-backup/logs/bulk': 'bareosAccess(조회) — 항목마다 범위 밖은 없는 대상과 같은 답 · 읽기 전용 첫 오류 줄 조회(v2.872 통합 에러 로그 묶음 로그)',
   'POST /api/tools/bareos-backup/restore-check/bulk': 'bulkRestoreGate → bareosAccess(쓰기) — 항목마다 조회 밖 제외 · 쓰기 밖 사유 · Director · OTP 안 씀(v2.861)',
   'POST /api/tools/bareos-backup/restore/bulk': 'bulkRestoreGate → bareosAccess — 조회 밖 404 → 쓰기 밖 403 → 판정 400 → 본인 OTP(v2.861)',
+  // 재해 복구 2차(복구 순서 · bareos/drRunner.js) — drRunGate · drRunAccess 가 핸들러 안에서 그 vCenter 쓰기 범위를 판정한다
+  'POST /api/tools/bareos-backup/dr/runs/check': 'drRunGate → bareosAccess(쓰기) — 조회 밖 404 → 쓰기 밖 403 · 항목마다 그 vCenter 대상만 · OTP 안 씀(재해 복구 2차)',
+  'POST /api/tools/bareos-backup/dr/runs': 'drRunGate → bareosAccess — 조회 밖 404 → 쓰기 밖 403 → 판정 400 → 진행 중 409 → 본인 OTP(재해 복구 2차)',
+  'POST /api/tools/bareos-backup/dr/runs/:id/stop': 'drRunAccess → bareosAccess — 회차의 vCenter 쓰기 범위(조회 밖 404 → 쓰기 밖 403 · 재해 복구 2차)',
+  'POST /api/tools/bareos-backup/dr/runs/:id/resume': 'drRunAccess → bareosAccess — 회차의 vCenter 쓰기 범위 → 멈춤 아님 409 → 본인 OTP(재해 복구 2차)',
   // v2.830 백업 그룹(routes/api/bareosGroups.js) — 핸들러 안 bareosAccess(조회 밖 404 → 쓰기 밖 403)
   'POST /api/tools/bareos-backup/groups': 'bareosAccess — 대상 vCenter 조회 404 → 쓰기 403 · VM 이 그 vCenter 인벤토리(또는 원장)인지 membersPlan(v2.830)',
   'PUT /api/tools/bareos-backup/groups/:id': 'bareosAccess — 그룹의 vCenter 쓰기 범위 · updatedAt 대조(v2.830)',
@@ -236,7 +241,7 @@ export const KNOWN_CONFIG_FILES = Object.freeze({
   'issue-sprints.json': '이슈 스프린트(issues/sprints.js — 이름 · 기간 · 목표 · 상태, 비밀 없음 · 원자 쓰기 · 손상 보존, v2.882)',
   'issue-filters.json': '이슈 저장 필터(issues/filters.js — 사람마다 검색식 · 공유 여부, 비밀 없음 · 원자 쓰기 · 손상 보존, v2.882)',
   'wiki.json': '위키 스페이스 · 문서 · 판 · 댓글(wiki/store.js — 로그인 사용자가 쓰는 사용자 데이터, 디바운스 비동기 쓰기 · 손상 보존 · 합계 상한 WIKI_MAX_BYTES, v2.881)',
-  'wiki-user.json': '위키 사용자별 즐겨찾기 · 최근 본 문서 · 조회 수(wiki/userState.js — 사용자 데이터, 디바운스 비동기 쓰기 · 손상 보존 · 상한, 비밀 없음, v2.886)',
+  'wiki-user.json': '위키 사용자별 즐겨찾기 · 최근 본 문서 · 조회 수(wiki/userState.js — 사용자 데이터, 디바운스 비동기 쓰기 · 손상 보존 · 상한, 비밀 없음, v2.888)',
   'attachments.json': '위키 · 이슈 첨부 목록(attach/store.js — 사용자 데이터 · 원래 이름 · 주인 · 크기 · sha256. 본체는 attachments/<id> — 포탈 백업에 넣지 않는다(사용자 결정), v2.889)',
   'attach-settings.json': '첨부 전체 상한(MB)(attach/store.js — 관리자 + 전체 범위 · 원자 쓰기 · 손상 보존, v2.889)',
   'wiki-templates.json': '위키 관리자 템플릿(wiki/templates.js — 이름 · 꼬리표 · 본문, 30개 · 원자 쓰기 · 손상 보존, v2.889)',
