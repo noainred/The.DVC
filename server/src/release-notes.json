@@ -1,6 +1,16 @@
 {
   "notes": [
     {
+      "version": "2.877.0",
+      "date": "2026-11-04",
+      "title": "Bareos 작업 로그 해석 — 'Could not fetch SSL Cert'(FD → vCenter:443 접속 실패)와 그 연쇄 오류 안내",
+      "notes": [
+        "작업 로그의 경고·오류 목록에서 'Could not fetch SSL Cert … Connection refused · timed out · No route to host' 줄에 'FD 서버가 vCenter(vcserver):443 에 접속하지 못했습니다 — INI 의 vcserver 주소 · vCenter 웹 서비스 · 방화벽 확인(FD 서버에서 nc -vz <주소> 443)' 안내가 붙습니다",
+        "이름 풀이 실패(Name or service not known · Temporary failure in name resolution)는 따로 안내합니다(INI 의 vcserver 철자 · FD 서버 DNS · /etc/hosts)",
+        "뒤따르는 'job is already cancelled' · \"Director's comm line to SD dropped\" 는 앞선 치명 오류의 연쇄일 수 있다고 안내합니다 — 색은 오류 그대로 둡니다(낮춰 단정하지 않음)"
+      ]
+    },
+    {
       "version": "2.876.0",
       "date": "2026-11-04",
       "title": "Bareos 완전 설치 — 포탈에 등록되지 않은 기존 Bareos 를 지우고 설치(사전 점검 '이미 설치된 Bareos ✗' 막다른 길 해소)",
