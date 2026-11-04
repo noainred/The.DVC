@@ -280,7 +280,7 @@ function ListView({ rows, total, meta, onOpen, onWritten }) {
       {rows.length === 0
         ? <div className="muted" style={{ padding: 16 }}>{total ? '조건에 맞는 이슈가 없습니다.' : '아직 이슈가 없습니다.'}</div>
         : (
-          <STable className="v3-table" minWidth={1160}>
+          <STable className="v3-table" minWidth={1120}>
             <thead>
               <tr>
                 {canWrite && <th data-nosort style={{ width: 34 }}><input type="checkbox" checked={allOn} onChange={toggleAll} aria-label="보이는 이슈 전체 선택" /></th>}
@@ -526,7 +526,7 @@ function ProgressBox({ it, canWrite, busy, act, noteMax }) {
       {canWrite && open && (
         <div className="iss-prog-edit">
           <label className="iss-inline">진행률(%)
-            <input className="input" type="number" min={0} max={100} step={5} value={v} onChange={(e) => setV(e.target.value)} style={{ width: 80 }} aria-label="진행률" />
+            <input className="input" type="number" min={0} max={100} step={5} value={v} onChange={(e) => setV(e.target.value)} aria-label="진행률" />
           </label>
           <textarea className="input" rows={2} value={note} maxLength={noteMax} onChange={(e) => setNote(e.target.value)} placeholder="진행 메모 — 예: ESXi 3대 중 2대 완료, 내일 마무리" aria-label="진행 메모" />
           {bad && <span className="iss-due over" style={{ fontSize: 12 }}>0~100 의 정수를 넣으세요(비우면 ‘보고 없음’).</span>}

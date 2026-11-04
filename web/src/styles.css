@@ -2407,15 +2407,19 @@ tr.row-sel > td { background: rgba(59, 130, 246, .10); }
 .iss-row-edit .input { flex: 1 1 200px; min-width: 0; }
 .iss-checks { display: flex; flex-wrap: wrap; gap: 6px 16px; }
 .iss-checks .iss-check { white-space: normal; }
-.iss-vc-cell { display: inline-block; max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: bottom; }
-.iss-prog { display: flex; align-items: center; gap: 6px; min-width: 0; flex-wrap: wrap; font-size: 11.5px; }
+.iss-vc-cell { display: inline-block; max-width: 104px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: bottom; }
+.iss-prog { display: inline-flex; align-items: center; gap: 6px; min-width: 0; flex-wrap: nowrap; font-size: 11.5px; white-space: nowrap; }
 .iss-prog-bar { flex: 1 1 60px; min-width: 48px; max-width: 160px; height: 6px; border-radius: 3px; background: color-mix(in srgb, var(--border) 70%, transparent); overflow: hidden; }
 .iss-prog-bar > span { display: block; height: 100%; border-radius: 3px; background: var(--accent); }
-.iss-prog.compact .iss-prog-bar { flex: 0 0 56px; }
+.iss-prog.compact .iss-prog-bar { flex: 0 0 40px; min-width: 40px; }
+.iss-prog.big { display: flex; }
 .iss-prog.big .iss-prog-bar { height: 8px; max-width: none; }
 .iss-prog-n { font-variant-numeric: tabular-nums; }
 .iss-prog-note { font-size: 12.5px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .iss-prog-edit { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.iss-prog-edit .iss-inline { display: flex; align-items: center; gap: 8px; white-space: nowrap; }
+.iss-prog-edit .iss-inline .input { flex: 0 0 90px; width: 90px; min-width: 0; }
+.iss-prog-edit textarea.input { min-width: 0; width: 100%; box-sizing: border-box; }
 .iss-stale { font-size: 11.5px; color: var(--amber); font-weight: 600; white-space: nowrap; }
 .iss-req { padding: 7px 0; border-bottom: 1px solid var(--border); display: flex; flex-direction: column; gap: 4px; min-width: 0; }
 .iss-req:last-child { border-bottom: 0; }
