@@ -21,6 +21,8 @@ import { isMockMode } from '../mock/demo/flags.js';
 import { listJobs, registryLoadError } from './registry.js';
 import { loadSettings, jobDirectorId } from './settings.js';
 import { isEdgeNode } from './service.js';
+import { cachedCause } from './notify.js';
+import { issueHint } from './issueHints.js';
 
 export const MAIL_KIND = 'bareos-digest';
 export const TICK_MS = 60_000;
@@ -121,8 +123,9 @@ export function verifyOutcome(r) {
 /**
  * 요약 계산(순수) — 법인(Director)마다 최근 24시간. 그 Director 조회가 실패 중이면 known:false(수를 만들지 않는다).
  * @param {object[]} jobs 원장 · @param {object} settings · @param {Record<string,{ok?:boolean, code?:string}>} dirStatus
+ * @param {{ causeOf?: (dirId:string, jobid:number) => ({ line: string|null }|null) }} [o] v2.885 실패 메일이 읽어 둔 첫 오류 줄(Director 에 묻지 않는다 — 없으면 예전 오류 문구)
  */
-export function digestData(jobs, settings, dirStatus = {}, now = Date.now()) {
+export function digestData(jobs, settings, dirStatus = {}, now = Date.now(), { causeOf = () => null } = {}) {
   const since = now - WINDOW_MS;
   const corps = new Map();
   const fails = [];
@@ -142,7 +145,16 @@ export function digestData(jobs, settings, dirStatus = {}, now = Date.now()) {
       if (lr.state === 'ok') c.ok += 1;
       else if (lr.state === 'warning') c.warn += 1;
       else if (lr.state === 'canceled') c.cancel += 1;   // 반증 F4: 취소는 어느 칸에도 세지 않아 사라졌다
-      else if (lr.state === 'error') { c.fail += 1; if (fails.length < ROWS_MAX) fails.push({ corp: c.name, known: c.known, vcenterId: j.vcenterId, vmName: j.vmName, jobid: lr.jobid ?? null, at, message: String(j.lastError?.message || '').slice(0, 160) }); }   // v2.874 B4-06 known
+      else if (lr.state === 'error') {
+        c.fail += 1;
+        if (fails.length < ROWS_MAX) {
+          // v2.885: 실패 메일이 읽어 둔 첫 오류 줄 + 해석이 있으면 그것을(오류 줄이 없었으면 그렇다고) · 없으면 예전처럼 포탈이 기록한 오류 문구
+          let cc = null; try { cc = lr.jobid ? causeOf(dir, lr.jobid) : null; } catch { cc = null; }
+          const hint = cc?.line ? issueHint(cc.line) : '';
+          const message = cc ? (cc.line ? `${cc.line.slice(0, 300)}${hint ? ` → ${hint}` : ''}` : '오류 줄 없음(작업 로그)') : String(j.lastError?.message || '').slice(0, 160);
+          fails.push({ corp: c.name, known: c.known, vcenterId: j.vcenterId, vmName: j.vmName, jobid: lr.jobid ?? null, at, message });
+        }
+      }   // v2.874 B4-06 known
     } else c.stale += 1;
     for (const r of j.restores || []) {
       // v2.874(점검 B4-04 — 재현): 창을 시작 시각(r.at)으로 재면 요약 시각에 진행 중이던 검증 · 복원은 다음 날 창 밖이 돼 어느 메일에도 없었다 —
@@ -204,7 +216,7 @@ function dirStatusNow() {
 }
 async function computeAndSend({ by = 'system', now = Date.now() } = {}) {
   if (registryLoadError()) return { ok: false, reason: '백업 대상 원장을 읽지 못했습니다 — 요약을 만들지 않았습니다.' };
-  const d = digestData(listJobs(), loadSettings(), dirStatusNow(), now);
+  const d = digestData(listJobs(), loadSettings(), dirStatusNow(), now, { causeOf: cachedCause });
   if (!d.rows.length) return { ok: true, reason: '백업 대상이 없어 보내지 않았습니다.', skipped: true };
   const m = renderDigest(d, now);
   const r = await sendPortalMail({ kind: MAIL_KIND, subject: m.subject, html: m.html, text: m.text, by });

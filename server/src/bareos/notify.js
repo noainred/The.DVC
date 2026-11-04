@@ -17,8 +17,14 @@
  *   그 사이에 같은 대상이 두 번 실패하면 최신 1건만 알린다. 포탈이 시작한 실행은 pending 으로 따로 추적하고 끝난 실행 목록(finishedRuns)에
  *   남아 빠지지 않는다(v2.822.3 C2-2 — 그 전에는 더 큰 jobid 가 lastRun 이면 빠졌다).
  *
+ * v2.885 '원인' 칸(2026-11-04 사용자 선택 — 메일만 보고 원인을 알게): 보내기 전에 실패 · 경고로 끝난 **백업** 실행의 첫 오류 줄을
+ *   v2.872 묶음 로그(ops.logs — Director 마다 한 번 · 엣지 대행 · 이 잡의 실행인지 확인)로 읽어 줄 + 해석(issueHints.js — 웹과 같은 표)을 싣는다.
+ *   · 읽기는 trigger 'timer'(인증 정지된 Director 에 닿지 않는다 — 자동 재시도 금지) · Director 마다 LOGS_MAX · 한 통 CAUSE_MAX 까지 · 시한 LOGS_DEADLINE_MS.
+ *   · 못 읽어도 메일은 보낸다(원인 칸에 '못 읽음 — 사유'). 원인을 지어내지 않는다 — 첫 오류 줄이 없으면 '오류 줄 없음'(0 이 아니라 없음).
+ *   · 복원 행은 읽지 않는다(묶음 로그는 백업 잡 이름으로 그 실행인지 확인한다 — 복원 잡은 이름이 달라 거부된다).
+ *   · 읽은 원인은 상태 파일 causes 에 남겨(CAUSE_KEEP) 다시 보내기 · 일일 요약(digest.js cachedCause)이 Director 에 다시 묻지 않고 쓴다.
  * 상태 파일: CONFIG_DIR/bareos-mail-state.json → { since, runs: { <대상 id>: jobid(커서) }, seen: { <대상 id>: [커서보다 큰 판정한 jobid] },
- *   restores: { <대상 id>: jobid }, history: [...] } (비밀 없음)
+ *   restores: { <대상 id>: jobid }, causes: { '<Director id>:<jobid>': { line, at } }, history: [...] } (비밀 없음)
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -32,6 +38,10 @@ import { localStamp } from '../util/dayKey.js';
 import { listJobs, registryLoadError, MAX_JOBS } from './registry.js';
 import { loadSettings, directorById, jobDirectorId } from './settings.js';
 import { isFinalStatus } from './names.js';
+import { onDirector } from './service.js';
+import { LOGS_DEADLINE_MS } from './edgeOps.js';
+import { LOGS_MAX } from './ops.js';
+import { issueHint } from './issueHints.js';
 
 export const MAIL_KIND = 'bareos-backup';
 export const TICK_MS = 60_000;
@@ -41,6 +51,10 @@ const MAX_ROWS = 50;
 const KEYS_MAX = MAX_JOBS + 500;
 const HISTORY_MAX = 30;
 const LEVEL = { F: 'Full', I: 'Incremental', D: 'Differential' };
+/** v2.885 한 통에 원인을 읽는 실행 수 상한(Director 마다는 LOGS_MAX) · 남겨 두는 원인 수 · 줄 길이. */
+export const CAUSE_MAX = 30;
+const CAUSE_KEEP = 400;
+const CAUSE_LINE_MAX = 400;
 
 registerStateFile('bareos-mail-state.json');
 const FILE = () => path.join(config.configDir, 'bareos-mail-state.json');   // ⚠ 리터럴 형태 유지 — scripts/config-doc.mjs 가 이 모양으로 찾는다
@@ -65,6 +79,17 @@ const seenMap = (o) => {
   return out;
 };
 
+/** v2.885 원인 기록 — 키 'Director id:jobid' · 값 { line: 첫 오류 줄(없으면 null — 읽었는데 오류 줄이 없다), at }. 넘치면 최근 것을 남긴다. */
+const CAUSE_KEY_RE = /^[A-Za-z0-9._-]{1,80}:\d{1,12}$/;
+const causeMap = (o) => {
+  const out = {};
+  for (const [k, v] of Object.entries(o && typeof o === 'object' && !Array.isArray(o) ? o : {}).slice(-CAUSE_KEEP)) {
+    if (!CAUSE_KEY_RE.test(k) || !v || typeof v !== 'object') continue;
+    out[k] = { line: typeof v.line === 'string' ? v.line.slice(0, CAUSE_LINE_MAX) : null, at: Number(v.at) || 0 };
+  }
+  return out;
+};
+
 let _state = null;
 function state() {
   if (_state) return _state;
@@ -72,12 +97,12 @@ function state() {
     if (fs.existsSync(FILE())) {
       const raw = JSON.parse(fs.readFileSync(FILE(), 'utf8'));
       if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error('형식 오류');
-      _state = { since: Number(raw.since) || Date.now(), runs: numMap(raw.runs), seen: seenMap(raw.seen), restores: numMap(raw.restores), epochs: numMap(raw.epochs), history: (Array.isArray(raw.history) ? raw.history : []).slice(0, HISTORY_MAX) };
+      _state = { since: Number(raw.since) || Date.now(), runs: numMap(raw.runs), seen: seenMap(raw.seen), restores: numMap(raw.restores), epochs: numMap(raw.epochs), causes: causeMap(raw.causes), history: (Array.isArray(raw.history) ? raw.history : []).slice(0, HISTORY_MAX) };
       return _state;
     }
   } catch { preserveCorrupt(FILE()); }
   // 처음(또는 손상) — 지금부터 센다. 기준 시각을 바로 남긴다(첫 발송이 실패한 채 재시작해도 since 가 밀리지 않게).
-  _state = { since: Date.now(), runs: {}, seen: {}, restores: {}, epochs: {}, history: [] };
+  _state = { since: Date.now(), runs: {}, seen: {}, restores: {}, epochs: {}, causes: {}, history: [] };
   save();
   return _state;
 }
@@ -158,6 +183,61 @@ export function collectBareosFailures(jobs, st) {
   return { rows, marks };
 }
 
+/**
+ * v2.885 실패 · 경고 백업 행에 첫 오류 줄을 붙인다(행을 고친다). 기록(causes)에 있으면 다시 읽지 않는다.
+ * @param {object[]} rows collectBareosFailures 의 rows
+ * @param {(row:object) => string} dirOf 행 → Director id
+ * @param {{ causes: object, read: (dirId:string, items:object[]) => Promise<object[]>, now?: number }} o
+ *   read 는 Director 하나의 묶음 로그 회신({ key, ok, firstError, code, message }[]) — 던지면 그 Director 의 행은 '못 읽음'.
+ * @returns {Promise<{ asked: number, read: number, failed: number }>}
+ */
+export async function attachCauses(rows, dirOf, { causes, read, now = Date.now() }) {
+  const byDir = new Map();
+  let budget = CAUSE_MAX;
+  for (const r of rows) {
+    if (r.kind !== 'backup') continue;
+    const dir = String(dirOf(r) || '');
+    const key = `${dir}:${r.jobid}`;
+    if (dir && causes[key]) { r.cause = { line: causes[key].line }; continue; }
+    if (!dir) { r.causeMiss = 'Director 를 알 수 없습니다'; continue; }
+    const list = byDir.get(dir) || [];
+    if (budget <= 0 || list.length >= LOGS_MAX) { r.causeMiss = '한 통에 읽는 상한 밖 — 포탈에서 확인하세요'; continue; }
+    budget -= 1; list.push(r); byDir.set(dir, list);
+  }
+  const stat = { asked: 0, read: 0, failed: 0 };
+  await Promise.all([...byDir.entries()].map(async ([dir, list]) => {
+    stat.asked += list.length;
+    let res = null;
+    try { res = await read(dir, list.map((r, k) => ({ key: k, jobid: r.jobid, name: r.jobName }))); }
+    catch (e) { for (const r of list) r.causeMiss = String(e?.message || e || '읽지 못했습니다').slice(0, 160); stat.failed += list.length; return; }
+    const byKey = new Map((Array.isArray(res) ? res : []).map((x) => [x?.key, x]));
+    list.forEach((r, k) => {
+      const x = byKey.get(k);
+      if (!x || !x.ok) { r.causeMiss = String(x?.message || 'Director 회신에 이 실행이 없습니다').slice(0, 160); stat.failed += 1; return; }
+      const line = typeof x.firstError === 'string' && x.firstError ? x.firstError.slice(0, CAUSE_LINE_MAX) : null;
+      r.cause = { line };
+      causes[`${dir}:${r.jobid}`] = { line, at: now };
+      stat.read += 1;
+    });
+  }));
+  const keys = Object.keys(causes);
+  if (keys.length > CAUSE_KEEP) for (const k of keys.slice(0, keys.length - CAUSE_KEEP)) delete causes[k];
+  return stat;
+}
+
+/** v2.885 원인 칸 글(순수) — { text, hint }. 읽지 않은 행(복원)은 '—'. */
+export function causeText(r) {
+  if (r?.cause) return r.cause.line ? { text: r.cause.line, hint: issueHint(r.cause.line) } : { text: '오류 줄 없음(로그에 Fatal error · Error 줄이 없습니다)', hint: '' };
+  if (r?.causeMiss) return { text: `못 읽음 — ${r.causeMiss}`, hint: '' };
+  return { text: '—', hint: '' };
+}
+
+/** v2.885 일일 요약용 — 실패 메일이 읽어 둔 원인(없으면 null · 읽었는데 오류 줄이 없으면 { line: null }). Director 에 묻지 않는다. */
+export function cachedCause(dirId, jobid) {
+  const c = state().causes?.[`${dirId}:${jobid}`];
+  return c ? { line: c.line } : null;
+}
+
 const esc = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 const RESTORE_MODE = { original: '원래 VM 덮어쓰기', newVm: '새 VM', localVmdk: 'FD 로컬 VMDK' };
 const what = (r) => (r.kind === 'restore' ? `복원(${RESTORE_MODE[r.mode] || '—'})` : `백업${r.level ? ` ${r.level}` : ''}`);
@@ -176,14 +256,16 @@ export function renderBareosMail(rows, vcName = (id) => id, dirName = () => '') 
   const head = [nErr ? `실패 ${nErr}건` : '', nWarn ? `경고 ${nWarn}건` : ''].filter(Boolean).join(' · ');
   const subject = `[Bareos 백업] ${head} — ${vms.slice(0, 3).join(', ')}${vms.length > 3 ? ` 외 ${vms.length - 3}` : ''}`;
   const td = (v, extra = '') => `<td style="padding:4px 8px${extra}">${v}</td>`;
-  const tr = shown.map((r) => `<tr>${td(esc(r.at ? localStamp(r.at) : '—'), ';white-space:nowrap')}${td(esc(dirName(r) || '—'))}${td(esc(vcName(r.vcenterId)))}${td(`<b>${esc(r.vmName)}</b>`)}${td(esc(what(r)))}${td(esc(result(r)))}${td(esc(r.jobid))}${td(esc(r.jobName))}${td(esc(r.client || '—'))}</tr>`).join('');
-  const th = ['확인 시각', '법인 Director', 'vCenter', 'VM', '종류', '결과', 'jobid', 'Bareos 잡', '사이트 FD'].map((h) => `<th style="padding:4px 8px">${h}</th>`).join('');
+  // v2.885 원인 칸: 첫 오류 줄(고정폭) + 해석(→) — 줄이 길어도 표가 옆으로 끝없이 늘지 않게 칸 너비 상한
+  const causeCell = (r) => { const c = causeText(r); return td(`<span style="font-family:monospace;font-size:11.5px">${esc(c.text)}</span>${c.hint ? `<br><span style="color:#475569">→ ${esc(c.hint)}</span>` : ''}`, ';max-width:520px;word-break:break-word'); };
+  const tr = shown.map((r) => `<tr>${td(esc(r.at ? localStamp(r.at) : '—'), ';white-space:nowrap')}${td(esc(dirName(r) || '—'))}${td(esc(vcName(r.vcenterId)))}${td(`<b>${esc(r.vmName)}</b>`)}${td(esc(what(r)))}${td(esc(result(r)))}${causeCell(r)}${td(esc(r.jobid))}${td(esc(r.jobName))}${td(esc(r.client || '—'))}</tr>`).join('');
+  const th = ['확인 시각', '법인 Director', 'vCenter', 'VM', '종류', '결과', '원인(첫 오류 줄)', 'jobid', 'Bareos 잡', '사이트 FD'].map((h) => `<th style="padding:4px 8px">${h}</th>`).join('');
   const html = `<div style="font-family:sans-serif;font-size:13px">`
     + `<p>Bareos VM 백업에서 확인이 필요한 실행이 ${rows.length}건 있습니다(${head}). 작업 로그는 포탈 › Backup 현황 › Bareos(특수 기능 › Backup 현황 · Bareos)의 백업 대상 표 '로그' 에서 볼 수 있습니다.</p>`
     + `<table style="border-collapse:collapse;font-size:12.5px" border="1" cellspacing="0"><thead><tr style="background:#f1f5f9">${th}</tr></thead><tbody>${tr}</tbody></table>`
     + (more > 0 ? `<p>그 밖에 ${more}건은 메일에 싣지 않았습니다 — 포탈에서 확인하세요.</p>` : '')
     + `<p style="color:#64748b">확인 시각은 포탈이 결과를 읽은 시각입니다. 이 메일은 설정 › 메일 발송의 'Bareos 백업 실패' 종류로 보냈습니다. 같은 1분 확인 주기의 항목은 한 통으로 묶습니다.</p></div>`;
-  const text = [`Bareos 백업 ${head}`, ...shown.map((r) => [r.at ? localStamp(r.at) : '—', dirName(r) || '—', vcName(r.vcenterId), r.vmName, what(r), result(r), `jobid ${r.jobid}`, r.jobName].join(' · ')), ...(more > 0 ? [`그 밖에 ${more}건`] : [])].join('\n');
+  const text = [`Bareos 백업 ${head}`, ...shown.map((r) => { const c = causeText(r); return [[r.at ? localStamp(r.at) : '—', dirName(r) || '—', vcName(r.vcenterId), r.vmName, what(r), result(r), `jobid ${r.jobid}`, r.jobName].join(' · '), `  원인: ${c.text}`, ...(c.hint ? [`  → ${c.hint}`] : [])].join('\n'); }), ...(more > 0 ? [`그 밖에 ${more}건`] : [])].join('\n');
   return { subject, html, text };
 }
 
@@ -219,6 +301,11 @@ export async function tick(now = Date.now()) {
     let settings = null;
     try { settings = loadSettings(); } catch { /* 이름만 비운다 */ }
     const dirName = (r) => (settings ? directorById(jobDirectorId(r, settings), settings)?.name || '' : '');
+    // v2.885 원인 칸 — 못 읽어도 보낸다(원인 칸에 사유). 설정을 못 읽었으면 Director 를 모른다 → 읽지 않는다
+    st.causes = st.causes || {};
+    try {
+      await attachCauses(rows, (r) => (settings ? jobDirectorId(r, settings) : ''), { causes: st.causes, now, read: _readCauses });
+    } catch { /* 원인 칸만 비운다 */ }
     const m = renderBareosMail(rows, (id) => names.get(String(id)) || id, dirName);
     const r = await sendPortalMail({ kind: MAIL_KIND, subject: m.subject, html: m.html, text: m.text, by: 'system' });
     _last = { at: now, sent: !!r?.ok, rows: rows.length, ...(r?.ok ? {} : { reason: String(r?.reason || '발송 실패').slice(0, 200) }) };
@@ -242,5 +329,9 @@ export function startBareosMail() {
   _timer = setInterval(() => { tick().catch(() => {}); }, TICK_MS);
   _timer.unref?.();
 }
+
+// v2.885 묶음 로그 읽기(Director 하나) — 주기 작업이라 trigger 'timer'(인증 정지된 Director 에 닿지 않는다) · 시한은 화면 묶음 로그와 같다
+let _readCauses = (dirId, items) => onDirector(dirId, 'logs', { items }, { trigger: 'timer', signal: AbortSignal.timeout(LOGS_DEADLINE_MS) });
+export function _setCauseReaderForTest(fn) { _readCauses = fn || ((dirId, items) => onDirector(dirId, 'logs', { items }, { trigger: 'timer', signal: AbortSignal.timeout(LOGS_DEADLINE_MS) })); }
 
 export function _resetForTest() { _state = null; _busy = false; _last = null; }
