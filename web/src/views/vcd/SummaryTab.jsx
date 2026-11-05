@@ -132,9 +132,10 @@ export default function SummaryTab({ site, vcenterId, hosts, vms, datastores, ne
                   : ext.state === 'missing' ? '—' : `${ext.items.length}개`],
             ['ESXi 버전', hostsOk ? (esxi.rows.length ? esxi.rows.slice(0, 3).map((r) => `${r.version} ×${r.count}`).join(' · ') + (esxi.rows.length > 3 ? ` · 외 ${esxi.rows.length - 3}` : '') : '—') : '—'],
             ['버전 모름', hostsOk && esxi.unknown ? `${esxi.unknown}대(버전을 보고하지 않음)` : null],
-            ['적용 가능 패치', <span className="badge gray" key="p">수집하지 않음</span>],
+            // v2.901 정정: v2.898 부터 업데이트 탭이 vCenter 어플라이언스 업데이트 · vLCM 준수를 읽는다 — 여기 '수집하지 않음' 은 낡은 문구였다
+            ['적용 가능 패치', <button type="button" className="vcd-more" key="p" onClick={() => onGo('updates')}>업데이트 탭 →</button>],
           ].filter((r) => r[1] != null)} />
-          <Note>확장 목록은 주기 수집에 이미 실립니다(ExtensionManager). 패치 · vLCM 준수 상태는 수집하지 않습니다 — 업데이트 탭 참고.</Note>
+          <Note>확장 목록은 주기 수집에 이미 실립니다(ExtensionManager). vCenter 어플라이언스 업데이트 · vLCM 준수 상태는 업데이트 탭에서 봅니다(마지막 확인 결과를 읽습니다 — 포탈이 확인 · 스캔을 일으키지 않습니다).</Note>
         </Card>
       </div>
 

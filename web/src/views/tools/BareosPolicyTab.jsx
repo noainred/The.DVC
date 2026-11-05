@@ -5,7 +5,7 @@
  *   판정은 서버 하나 — 글자는 bareosPolicyText.js. 못 읽은 값은 '—'(0 이 아니다) · Director 가 싣지 않은 JobDefs 칸은 '기본'.
  */
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { fetchJson, postJson, toolAllowed } from '../../api.js';
+import { fetchJson, postJson, toolAllowed, adminToolAllowed } from '../../api.js';
 import { Loading, ErrorBox } from '../../components/ui.jsx';
 import { STable } from '../../components/STable.jsx';
 import VeeamHeader from './VeeamHeader.jsx';
@@ -74,7 +74,7 @@ export default function BareosPolicyTab({ bare = false, reloadKey = 0 } = {}) {
     if (!busy) return undefined;
     const t = setTimeout(load, 5000);
     return () => clearTimeout(t);
-  }, [busy, data, load]);
+  }, [busy, data, load, error]);   // v2.901(점검 W6): 이어 읽기가 실패해도(데이터가 그대로) 다음 시도를 건다 — 예전엔 한 번 실패하면 '수집 중' 에서 멈췄다
 
   const canCollect = !!data?.canCollect && toolAllowed('bareos-backup');
   const collect = async (directorIds) => {
@@ -111,7 +111,7 @@ export default function BareosPolicyTab({ bare = false, reloadKey = 0 } = {}) {
   const sch = filterSchedules(data.schedules, sKind);
   const vms = filterVms(data.vms, { verdict, os });
   const now = data.at || Date.now();
-  const canBareos = toolAllowed('bareos-backup');
+  const canBareos = adminToolAllowed('bareos-backup');   // v2.901(점검 W1): 대상 추가 · 그룹에 넣기는 admin 전용 도구로 간다
   const act = (r) => {
     if (r.verdict === 'unregistered' && canBareos) return { text: '대상 추가', go: () => { saveBareosHandoff(r.vc, [r.vmId]); window.location.hash = '#/tools/bareos-backup/targets'; } };
     if (r.verdict === 'manual' && canBareos) return { text: '그룹에 넣기', go: () => { saveBareosGroupHandoff(r.vc, [r.vmId]); window.location.hash = '#/tools/bareos-backup/groups'; } };

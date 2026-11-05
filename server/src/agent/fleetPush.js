@@ -88,6 +88,15 @@ export function fleetWithholdMaxMs(intervalMs, ttlMs = FLEET_CENTRAL_TTL_MS, cap
 let lastFullOkAt = null; // 마지막 '온전한'(send 모드) push 성공 시각 — 부분 전송은 기준을 옮기지 않는다(옮기면 보류↔부분이 번갈아 돈다)
 
 /** 부분 전송에서 뺄 항목 — 못 읽은 vCenter 귀속분 + 귀속 없는 항목(순수). 반환 { keep, dropped } */
+/**
+ * 6차 2(서비스 인벤토리): '태그가 없을 때의 fleetId'(untaggedId · 순수) — 함대 분류(`insights/fleetInventory.js`)와 같은 규칙:
+ *   일반 행 norm(serverId) · ESXi 호스트 행(`host:`) norm(name). 태그가 나중에 읽히면 엣지 fleetId 가 태그로 바뀌어 중앙 serverId
+ *   (`edge:<agent>:<fleetId>`)도 바뀐다 — 중앙이 그 전에 저장한 서비스 인벤토리 `fl:` 고정을 승계하려면 이 값이 필요하다.
+ */
+export function fleetUntaggedId(b) {
+  const sid = String(b?.serverId || '');
+  return (sid.startsWith('host:') ? String(b?.name || '') : sid).trim().toLowerCase();
+}
 export function partialBareMetal(list, unread) {
   const bad = new Set(unread || []);
   const keep = []; let dropped = 0;
@@ -217,7 +226,7 @@ export async function pushFleetNow() {
     })();
     let baremetal = (inv.bareMetal || []).map((b) => ({
       fleetId: b.fleetId, name: b.name, model: b.model, serviceTag: b.serviceTag,
-      vcenterId: b.vcenterId, source: b.source, scanRangeId: scanIdOf(b),
+      vcenterId: b.vcenterId, source: b.source, scanRangeId: scanIdOf(b), untaggedId: fleetUntaggedId(b),
     }));
     let partialInfo = null;
     if (dec.mode === 'partial') {

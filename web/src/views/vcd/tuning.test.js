@@ -96,6 +96,17 @@ describe('호스트 진단 · 계획', () => {
   });
 });
 
+describe('v2.901 구형 네트워크 어댑터 → VMXNET3 권장', () => {
+  it('E1000/E1000E 가 있으면 계획에 주의 행 · VMXNET 3 만이면 없음 · 어댑터를 읽지 않았으면 없음', () => {
+    const base = { powerState: 'POWERED_ON', cfg: {} };
+    const row = vmTuningPlan({ vm: { ...base, dev: { nics: [{ adapter: 'E1000E' }, { adapter: 'E1000E' }, { adapter: 'VMXNET 3' }] } } }).find((r) => r.k === 'cfg:nic-legacy');
+    expect(row.lv).toBe('warn');
+    expect(row.action).toBe('네트워크 어댑터를 VMXNET3 로 — E1000E 2개');
+    expect(vmTuningPlan({ vm: { ...base, dev: { nics: [{ adapter: 'VMXNET 3' }] } } }).some((r) => r.k === 'cfg:nic-legacy')).toBe(false);
+    expect(vmTuningPlan({ vm: { ...base, dev: { disks: [] } } }).some((r) => r.k === 'cfg:nic-legacy')).toBe(false);
+  });
+});
+
 describe('체크리스트 내보내기', () => {
   const rows = [{ k: 'a', lv: 'crit', action: '=SUM(A1)', why: 'x, "y"', risk: '', where: 'w' }];
   it('CSV — BOM · 수식 주입 방지 · 따옴표', () => {

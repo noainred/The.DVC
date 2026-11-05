@@ -178,3 +178,18 @@ describe('CSS 이름 충돌 — 새 클래스가 기존 vCenter 트리 규칙과
     expect(parts).not.toMatch(/className="vcd-sub"/);
   });
 });
+
+describe('v2.901 정정 — 이미 수집하는 값을 화면이 수집하지 않는다고 말하지 않는다', () => {
+  const src = async (f) => { const fs = await import('node:fs'); const path = await import('node:path'); return fs.readFileSync(path.resolve(path.dirname(new URL(import.meta.url).pathname), f), 'utf8'); };
+  it('성능 튜닝 구성 권장 — NIC 유형(VMXNET3 권장)은 VM 구성 점검이 판정한다(v2.901 nic-legacy)', async () => {
+    const t = await src('./TuningTabs.jsx');
+    expect(t).not.toMatch(/네트워크 어댑터 유형\(vmxnet3 여부\)은 수집하지 않습니다/);
+    expect(t).toMatch(/VMXNET3 권장\)은 VM 구성 점검이 판정합니다/);
+  });
+  it('vCenter 요약 — 적용 가능 패치는 업데이트 탭(v2.898 부터 수집)', async () => {
+    const s = await src('./SummaryTab.jsx');
+    expect(s).not.toMatch(/\['적용 가능 패치', <span className="badge gray" key="p">수집하지 않음/);
+    expect(s).not.toMatch(/패치 · vLCM 준수 상태는 수집하지 않습니다/);
+    expect(s).toMatch(/onGo\('updates'\)/);
+  });
+});

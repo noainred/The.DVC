@@ -135,8 +135,8 @@ test('① 지난/다음 회차 — 서버 현지 시각 · 같은 분은 지난 
   assert.equal(S.lastDueSlot(sched, at).key, '2026-10-30 02:10', '그 분 정각이면 지난 회차');
   assert.equal(S.nextSlot(sched, at).key, '2026-11-02 02:10', '월말을 넘겨 다음 월요일');
   assert.equal(S.nextSlot({ ...sched, enabled: false }, wed10), null);
-  assert.equal(S.scheduleText(sched), '월·수·금 02:10 Incremental (Full: 금)');
-  assert.equal(S.scheduleText(EVERY), '매일 02:10 Incremental');
+  assert.equal(S.scheduleText(sched), '월·수·금 02:10 Incremental (Full: 금) · 현지 서버 시각');
+  assert.equal(S.scheduleText(EVERY), '매일 02:10 Incremental · 현지 서버 시각');
   assert.equal(S.scheduleText({ ...sched, enabled: false }), '스케줄 꺼짐(수동 실행만)');
 });
 
@@ -202,7 +202,7 @@ test('③ 만들기 — 잡 없는 VM 은 Director 스케줄 없이 등록 · �
   const adds = D.cmds.filter((c) => c.startsWith('configure add job'));
   assert.equal(adds.length, 2);
   for (const c of adds) assert.doesNotMatch(c, /schedule=/, `그룹이 실행하므로 Director 스케줄을 붙이지 않는다: ${c}`);
-  assert.equal(r.j.group.scheduleText, '매일 02:10 Incremental');
+  assert.equal(r.j.group.scheduleText, '매일 02:10 Incremental · 현지 서버 시각');
   assert.ok(r.j.group.next?.key);
   assert.deepEqual(r.j.doubleScheduled, [], '새로 만든 잡에는 Director 스케줄이 없다');
   const saved = JSON.parse(fs.readFileSync(path.join(tmp, 'bareos-groups.json'), 'utf8'));

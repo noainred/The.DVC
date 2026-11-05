@@ -159,9 +159,9 @@ test('2차 반증 5: 수집 서버 경로가 엔트리 id 를 주지 않으면 �
     { serverId: 'edge:a:4', serviceTag: 'TAG4', scanRangeId: '' },       // 엔트리 없음(새 엣지) — 넣는다
   ]);
   assert.deepEqual([...byTag.entries()], [['tag1', 'e1'], ['tag4', '']]);
-  const scanEntries = new Map([['e1', { service: 'DB' }]]);
+  const scanEntries = new Map([['e1', { service: 'DB', datacenterId: 'dc-kr' }]]);
   const remoteScan = new Map([['remote:c1:1', null], ['remote:c1:2', null], ['remote:c1:4', null], ['remote:c1:5', 'e1']]);
-  const ctx = { remoteScan, scanEntries, edgeScanByTag: byTag };
+  const ctx = { remoteScan, scanEntries, edgeScanByTag: byTag, dcOfServer: () => 'dc-kr' };   // v2.901 E5 — 폴백은 같은 DataCenter 엔트리만
   assert.deepEqual(scanInfoOf({ source: 'remote', serverId: 'remote:c1:1', serviceTag: 'Tag1' }, ctx).scan, { entryId: 'e1', label: 'DB' }, '구버전 수집 서버(null) → 엣지 push 값');
   assert.deepEqual(scanInfoOf({ source: 'remote', serverId: 'remote:c9:9', serviceTag: 'TAG1' }, ctx).scan, { entryId: 'e1', label: 'DB' }, '못 받음(undefined) → 엣지 push 값');
   assert.equal(scanInfoOf({ source: 'remote', serverId: 'remote:c1:2', serviceTag: 'TAG2' }, ctx).scanWhy, 'old-source', '태그가 갈리면 폴백하지 않는다');
@@ -240,4 +240,39 @@ test('전 법인 구성원 보기(사용자 요청 2026-11-05): global 만 주�
     assert.deepEqual(sc.body.members.map((m) => m.corp), ['vc-a', 'vc-a'], '범위 계정은 자기 법인만(전 법인 보기라도)');
     assert.ok(sc.body.hosts.every((x) => x.corp === 'vc-a'));
   } finally { store.snapshot = prev; }
+});
+
+test('v2.901 점검 E4: 엣지의 등록부 밖 장치(OME · 수집 서버 경유)의 빈 scanRangeId 는 수동 등록이 아니라 보고되지 않음', async () => {
+  const { edgeScanOf, edgeScanReportable } = await import('../src/routes/api/svcInventory.js');
+  const servers = [
+    { serverId: 'edge:a:1', edgeSource: 'idrac', serviceTag: 'T1', scanRangeId: '' },   // 등록부 서버 — 빈 값 = 수동 등록
+    { serverId: 'edge:a:2', edgeSource: 'ome', serviceTag: 'T2', scanRangeId: '' },     // OME 장치 — 등록부 밖
+    { serverId: 'edge:a:3', edgeSource: 'remote', serviceTag: 'T3', scanRangeId: '' },  // 엣지의 수집 서버 경유
+    { serverId: 'edge:a:4', edgeSource: '', serviceTag: 'T4', scanRangeId: 'e1' },      // 출처를 모르는 옛 기록 — 받은 값 그대로
+  ];
+  assert.deepEqual(servers.map(edgeScanReportable), [true, false, false, true]);
+  const edgeScan = edgeScanOf(servers);
+  const ctx = { edgeScan, scanEntries: new Map([['e1', { service: 'DB', datacenterId: 'dc-kr' }]]), edgeScanByTag: edgeScanByTagOf(servers) };
+  assert.equal(scanInfoOf({ source: 'edge', serverId: 'edge:a:1' }, ctx).scanWhy, undefined, '등록부 서버의 빈 값 = 수동 등록');
+  assert.equal(scanInfoOf({ source: 'edge', serverId: 'edge:a:2' }, ctx).scanWhy, 'not-reported', 'OME 장치를 수동 등록으로 단정하지 않는다');
+  assert.equal(scanInfoOf({ source: 'edge', serverId: 'edge:a:3' }, ctx).scanWhy, 'not-reported');
+  assert.deepEqual(scanInfoOf({ source: 'edge', serverId: 'edge:a:4' }, ctx).scan, { entryId: 'e1', label: 'DB' });
+  assert.deepEqual([...ctx.edgeScanByTag.keys()].sort(), ['t1', 't4'], '태그 폴백 표에도 등록부 밖 장치를 넣지 않는다');
+  // 중앙 fleet 이 엣지 쪽 출처를 보존한다(소스 대조 — getEdgeFleetServers 는 source 를 'edge' 로 덮는다)
+  const src = fs.readFileSync(new URL('../src/central/fleet.js', import.meta.url), 'utf8');
+  assert.match(src, /edgeSource: typeof b\.source === 'string' \? b\.source : ''/);
+});
+
+test('v2.901 점검 E5: 서비스 태그 폴백은 서버 법인의 DataCenter 와 같은 엔트리일 때만', () => {
+  const byTag = edgeScanByTagOf([{ serverId: 'edge:a:1', serviceTag: 'TAG1', scanRangeId: 'e1' }, { serverId: 'edge:a:2', serviceTag: 'TAG2', scanRangeId: 'e9' }]);
+  const scanEntries = new Map([['e1', { service: 'DB', datacenterId: 'dc-kr' }]]);
+  const remoteScan = new Map([['remote:c1:1', null]]);
+  const base = { remoteScan, scanEntries, edgeScanByTag: byTag };
+  const b = { source: 'remote', serverId: 'remote:c1:1', serviceTag: 'TAG1' };
+  assert.deepEqual(scanInfoOf(b, { ...base, dcOfServer: () => 'dc-kr' }).scan, { entryId: 'e1', label: 'DB' }, '같은 DataCenter');
+  assert.equal(scanInfoOf(b, { ...base, dcOfServer: () => 'dc-us' }).scan, null, '다른 법인 엔트리는 붙이지 않는다');
+  assert.equal(scanInfoOf(b, { ...base, dcOfServer: () => 'dc-us' }).scanWhy, 'old-source');
+  assert.equal(scanInfoOf(b, { ...base, dcOfServer: () => '' }).scan, null, '서버 법인의 DataCenter 를 모르면 쓰지 않는다');
+  assert.equal(scanInfoOf(b, base).scan, null, 'dcOfServer 없음 = 모름');
+  assert.equal(scanInfoOf({ ...b, serviceTag: 'TAG2' }, { ...base, dcOfServer: () => 'dc-kr' }).scanWhy, 'old-source', '중앙에 없는 엔트리는 맞춰 볼 수 없다');
 });

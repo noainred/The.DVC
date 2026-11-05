@@ -56,12 +56,63 @@ export function planBuckets(rangeMs, points) {
   if (raw < HOUR_MS) return { bucketMs: raw, hourly: false };
   return { bucketMs: Math.ceil(raw / HOUR_MS) * HOUR_MS, hourly: true };
 }
-function readHistory(db, id, since, plan, points) {
+function readHistory(db, id, since, plan, points, until = null) {
   if (plan.hourly && db.historyHourly) {
-    const r = db.historyHourly(id, since, plan.bucketMs, points);
+    const r = db.historyHourly(id, since, plan.bucketMs, points, until);
     if (r) return { rows: r, source: 'hourly' };
   }
-  return { rows: db.history(id, since, plan.bucketMs, points), source: 'raw' };
+  return { rows: db.history(id, since, plan.bucketMs, points, until), source: 'raw' };
+}
+
+/**
+ * v2.890 — 끝이 있는 창의 시계열 + 창 통계(전송 속도 상세의 'Ping 함께 보기' · 시안 docs/design/xfer-ping).
+ *
+ * `seriesOf` 는 '지금부터 거꾸로' 만 준다(네트워크 › 체크·vCenter 포트가 쓴다 — 바꾸지 않는다). 이 함수는 [start, end) 창을 준다:
+ *  · 칸 크기는 planBuckets(end − start, points) — 1시간 이상이면 시간 롤업(끝은 시간 경계로 내린다).
+ *  · `past` 가 아니면(지금 창) 끝을 열어 둔다 — 조회 사이에 들어온 표본을 빼지 않는다(전송 속도 /history 와 같은 판단).
+ *  · 통계: 표본 수·실패 수는 칸의 정확한 합(fail), 평균은 성공 표본 가중, 최고는 칸 최고의 최대.
+ *    중앙값은 **원시 칸(창이 짧을 때)에서만** 표본으로 구한다 — 롤업 창은 null(지어내지 않는다).
+ *  · 응답에 주소·포트를 싣지 않는다(호출부가 대상 id·kind·enabled 만 고른다).
+ * @returns {{ bucketMs, source, series: Array<{ts,avg,min,max,loss,n}>, stats }}
+ */
+export async function windowOf(id, { start, end, past = false, points = 240 } = {}) {
+  const db = await getPingDb();
+  const rangeMs = Math.max(1000, end - start);
+  const plan = planBuckets(rangeMs, points);
+  const until = past ? end : null;
+  // 창 시작이 칸 중간이면 첫 칸이 하나 더 생긴다 — 상한을 2 넉넉히(DESC LIMIT 이 가장 오래된 칸을 자르지 않게).
+  const { rows, source } = readHistory(db, id, start, plan, points + 2, until);
+  let n = 0; let fail = 0; let okN = 0; let sum = 0; let max = null;
+  for (const b of rows) {
+    const bn = Number(b.n) || 0;
+    const bf = Number.isFinite(Number(b.fail)) ? Number(b.fail) : Math.round((Number(b.loss) || 0) * bn);
+    n += bn; fail += bf;
+    if (b.avg != null && bn - bf > 0) { okN += bn - bf; sum += b.avg * (bn - bf); }
+    if (b.max != null && (max == null || b.max > max)) max = b.max;
+  }
+  let median = null;
+  if (!plan.hourly && db.okRttIn) median = medianOf(db.okRttIn(id, start, until == null ? Number.MAX_SAFE_INTEGER : until));
+  const r2 = (v) => (v == null ? null : Math.round(v * 100) / 100);
+  const stats = {
+    n, ok: n - fail, fail,
+    lossPct: n ? Math.round((fail / n) * 10_000) / 100 : null,
+    avg: okN ? r2(sum / okN) : null,
+    median: r2(median),
+    max: r2(max),
+  };
+  return {
+    bucketMs: plan.bucketMs, source,
+    series: rows.map((b) => ({ ts: b.ts, avg: b.avg, min: b.min, max: b.max, loss: b.loss, n: b.n })),
+    stats,
+  };
+}
+function medianOf(arr) { return arr && arr.length ? median(arr) : null; }
+
+/** v2.890 — 대상의 마지막 표본 · 가장 오래된 표본 시각(단일 aggregate 두 번 — 인덱스 끝만 본다). */
+export async function targetBoundsOf(id) {
+  const db = await getPingDb();
+  const b = db.bounds ? db.bounds(id) : db.meta(id);
+  return { latest: db.latest(id), oldestTs: b?.firstTs ?? null };
 }
 
 /** 대상의 현재 상태 요약(대시보드 상단 카드/목록용). sources 지정 시 해당 출처만. */

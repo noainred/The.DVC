@@ -114,8 +114,9 @@ test('R15: 키 등급이 오르면 옛 키 고정을 승계한다(유령 아님 
   const inv = buildInventory({ members: [vm], map, pins, uuidUnreadCorps: new Set(['A']) });
   assert.deepEqual(inv.queues.aliasPins.map((x) => [x.key, x.aliasKey]), [['iu:A:u1', 'vm:A:vm-1']]);
   assert.deepEqual(inv.queues.drift.map((x) => [x.key, x.pin.by, x.pin.at]), [['iu:A:u1', 'kim', 7]], '별칭 고정의 드리프트 행도 고정한 사람·시각(4차 반증 6)');
-  assert.deepEqual(inv.queues.ghosts.map((x) => x.key).sort(), ['iu:B:gone', 'st:zz9gone'], "별칭 고정은 유령이 아니다 · st: 고정은 '함대가 안다' 로 붙잡지 않는다(4차 반증 2 — ESXi 가 된 서버)");
-  assert.deepEqual(inv.queues.ghostsHeld.map((x) => [x.key, x.held]), [['iu:A:gone', 'uuid-unread']], 'instanceUuid 를 못 읽는 법인만 보류(4차 반증 5)');
+  assert.deepEqual(inv.queues.ghosts.map((x) => x.key).sort(), ['st:zz9gone'], "별칭 고정은 유령이 아니다 · st: 고정은 '함대가 안다' 로 붙잡지 않는다(4차 반증 2 — ESXi 가 된 서버)");
+  // instanceUuid 를 못 읽는 법인은 보류(4차 반증 5) · VM 이 한 대도 없는 법인 B 의 VM 고정도 보류(6차 1 — 예전에는 유령)
+  assert.deepEqual(inv.queues.ghostsHeld.map((x) => [x.key, x.held]).sort(), [['iu:A:gone', 'uuid-unread'], ['iu:B:gone', 'corp-no-vms']]);
   const otherCorp = resolveMember({ ...vm, corp: 'B', key: 'iu:B:u9' }, buildIndex(map), {}, pins);
   assert.equal(otherCorp.src, 'none', '다른 법인의 별칭 고정은 쓰지 않는다');
 });

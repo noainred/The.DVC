@@ -249,7 +249,8 @@ describe('xferSpeedText — 차트 마우스 오버(v2.735.3)', () => {
     const src = fs.readFileSync(path.join(here, 'XferSpeedTool.jsx'), 'utf8');
     expect(src).toMatch(/if \(alive && end == null && !shouldStopPolling\(e\)\) timer = setTimeout\(loop, 60_000\)/);   // v2.740 D-05: 403·404 면 멈춘다
     expect(src).toMatch(/<WindowScroll /);
-    expect(src).toMatch(/hoverAt\(m, hoverPx/);
+    // v2.890: 오버는 comboHover 가 hoverAt 을 감싼다('전송 속도' 보기는 hoverAt 결과 그대로 — xferPing.test.js 가 고정).
+    expect(src).toMatch(/comboHover\(m, [^)]*hoverPx/);
     expect(src).toMatch(/const key = `\$\{agent\}\|\$\{days\}`/);
   });
 });

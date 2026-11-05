@@ -34,13 +34,54 @@ export const CORP_OPS = {
     if (!c.folders.includes(p.value)) c.folders.push(p.value);
     return { result: { path: p.value } };
   },
+  /**
+   * 폴더 지우기. 아래에 서비스가 있으면 409 — 단 `moveUp:true` 면 이 폴더 한 단계만 걷어 내고 그 아래(하위 폴더·서비스)를 한 단계 위로 올린다
+   * (예약 1-b · 서비스·규칙·고정은 그대로 — 경로만 바뀐다). `expect`(화면이 본 아래 서비스 수)가 다르면 409(그 사이 바뀜).
+   */
   'folder.remove'(d, b) {
     const p = cleanFolderPath(b.path); if (p.error || !p.value) return err(p.error || '폴더 경로가 비어 있습니다');
     const c = corpOf(d, b.corp);
     const busy = c.services.filter((s) => under(s.path, p.value)).length;
-    if (busy) return err(`이 폴더 아래 서비스 ${busy}개가 있습니다 — 먼저 옮기거나 지우십시오`, 409);
+    if (b.expect != null && Number(b.expect) !== busy) return err(`이 폴더 아래 서비스 수가 화면과 다릅니다(지금 ${busy}개) — 새로 고쳐 다시 확인하십시오`, 409);
+    if (busy && b.moveUp !== true) return err(`이 폴더 아래 서비스 ${busy}개가 있습니다 — 먼저 옮기거나 지우십시오`, 409);
+    if (b.moveUp === true) {
+      const parent = p.value.includes('\\') ? p.value.slice(0, p.value.lastIndexOf('\\')) : '';
+      const lift = (x) => (x === p.value ? parent : parent ? `${parent}${x.slice(p.value.length)}` : x.slice(p.value.length + 1));
+      // 올라가는 하위 폴더가 부모 아래 같은 이름의 폴더와 합쳐지면 409(6차 반증 F4 — 개명과 같은 규칙: 두 폴더를 조용히 합치지 않는다).
+      const children = new Set();
+      for (const x of [...c.folders, ...c.services.map((sv) => sv.path)]) if (x !== p.value && under(x, p.value)) { const rest = x.slice(p.value.length + 1); children.add(rest.split('\\')[0]); }
+      const outside = (x) => c.folders.some((f) => !under(f, p.value) && under(f, x)) || c.services.some((sv) => !under(sv.path, p.value) && under(sv.path, x));
+      const clash = [...children].map((n) => (parent ? `${parent}\\${n}` : n)).filter(outside);
+      if (clash.length) return err(`걷어 내면 하위 폴더가 이미 있는 폴더와 합쳐집니다(${clash.slice(0, 3).join(', ')}) — 먼저 이름을 바꾸십시오`, 409);
+      for (const s of c.services) if (under(s.path, p.value)) s.path = lift(s.path);
+      c.folders = [...new Set(c.folders.map((f) => (under(f, p.value) ? lift(f) : f)).filter(Boolean))];
+      return { result: { path: p.value, moved: busy } };
+    }
     c.folders = c.folders.filter((f) => !under(f, p.value));
     return { result: { path: p.value } };
+  },
+  /**
+   * 폴더 이름 바꾸기(예약 1-b) — 마지막 단계 이름만 바꾼다(같은 부모 아래). 그 아래 하위 폴더·서비스 경로를 함께 바꾼다.
+   * 같은 이름의 폴더(명시 폴더 또는 서비스 경로)가 이미 있으면 409(두 폴더가 조용히 합쳐지지 않게). 폴더는 포탈 화면용 묶음이라 판정에는 영향이 없다.
+   */
+  'folder.rename'(d, b) {
+    const p = cleanFolderPath(b.path); if (p.error || !p.value) return err(p.error || '폴더 경로가 비어 있습니다');
+    const n = cleanFolderPath(b.name); if (n.error || !n.value) return err(n.error || '새 이름이 비어 있습니다');
+    if (n.value.includes('\\')) return err('새 이름에는 구분자(\\)를 쓸 수 없습니다 — 이름만 바꿉니다');
+    const c = corpOf(d, b.corp);
+    const parent = p.value.includes('\\') ? p.value.slice(0, p.value.lastIndexOf('\\')) : '';
+    const next = parent ? `${parent}\\${n.value}` : n.value;
+    const exists = (x) => c.folders.some((f) => under(f, x)) || c.services.some((s) => under(s.path, x));
+    if (!exists(p.value)) return err('그 폴더가 없습니다', 404);
+    if (next === p.value) return { result: { path: p.value, to: next, same: true } };
+    // 이미 있는 이름이면 막는다 — 대소문자만 다른 형제('Ops'·'ops')도 다른 폴더다(6차 반증 F3: 예전에는 그 경우만 조용히 합쳤다).
+    //   next 는 p.value 와 다른 같은 부모 아래 형제라 p.value 쪽 항목이 next 에 걸리지 않는다(대소문자만 바꾸는 개명은 exists(next) 가 거짓).
+    if (exists(next)) return err(`'${next}' 폴더가 이미 있습니다 — 다른 이름을 고르십시오(두 폴더를 합치지 않습니다)`, 409);
+    const swap = (x) => (under(x, p.value) ? `${next}${x.slice(p.value.length)}` : x);
+    let services = 0;
+    for (const s of c.services) if (under(s.path, p.value)) { s.path = swap(s.path); services += 1; }
+    c.folders = [...new Set(c.folders.map(swap))];
+    return { result: { path: p.value, to: next, services } };
   },
   'service.add'(d, b) {
     const n = cleanText(b.name, LIMITS.name, { label: '서비스명' }); if (n.error) return err(n.error);
@@ -113,6 +154,16 @@ export const CORP_OPS = {
     c.folderRules.push({ prefix: p.value, serviceId: b.serviceId });
     return { result: { prefix: p.value } };
   },
+  /** 폴더 규칙의 대상 서비스 바꾸기(예약 1-d) — 지우고 다시 넣는 두 단계 사이에 소속이 비지 않게 한 연산으로. */
+  'rule.update'(d, b) {
+    const p = cleanFolderPrefix(b.prefix); if (p.error) return err(p.error);
+    const c = corpOf(d, b.corp);
+    if (!svcIn(c, b.serviceId)) return err('대상 서비스를 찾지 못했습니다', 404);
+    const r = c.folderRules.find((x) => x.prefix === p.value); if (!r) return err('그 규칙이 없습니다', 404);
+    if (r.serviceId === b.serviceId) return { result: { prefix: p.value, same: true } };
+    r.serviceId = b.serviceId;
+    return { result: { prefix: p.value } };
+  },
   'rule.remove'(d, b) {
     const p = cleanFolderPrefix(b.prefix); if (p.error) return err(p.error);
     const c = corpOf(d, b.corp);
@@ -137,6 +188,17 @@ export const CORP_OPS = {
     c.aliases.push({ kind: b.kind, value: v.value, serviceId: b.serviceId });
     return { result: { kind: b.kind, value: v.value } };
   },
+  /** 별칭의 대상 서비스 바꾸기(예약 1-d). 새 대상의 이름과 같은 값이면 별칭이 필요 없다(이름이 먼저 걸린다) — 409 로 알린다. */
+  'alias.update'(d, b) {
+    const c = corpOf(d, b.corp);
+    if (!svcIn(c, b.serviceId)) return err('대상 서비스를 찾지 못했습니다', 404);
+    const a = c.aliases.find((x) => x.kind === b.kind && lc(x.value) === lc(b.value)); if (!a) return err('그 별칭이 없습니다', 404);
+    if (a.serviceId === b.serviceId) return { result: { same: true } };
+    const byName = (c.services || []).find((s) => sameName(s.name, a.value));
+    if (byName) return err(`'${a.value}' 은(는) 서비스 '${byName.name}' 의 이름이라 이 별칭은 쓰이지 않습니다 — 별칭을 지우십시오`, 409);
+    a.serviceId = b.serviceId;
+    return { result: { kind: a.kind, value: a.value } };
+  },
   'alias.remove'(d, b) {
     const c = corpOf(d, b.corp);
     const n = c.aliases.length; c.aliases = c.aliases.filter((a) => !(a.kind === b.kind && lc(a.value) === lc(b.value)));
@@ -151,6 +213,15 @@ export const CORP_OPS = {
     if (c.nameRules.length >= LIMITS.nameRulesPerCorp) return err(`이름 규칙은 법인당 ${LIMITS.nameRulesPerCorp}개까지입니다`);
     if (c.nameRules.some((r) => r.match === b.match && lc(r.value) === lc(v.value))) return err('같은 이름 규칙이 이미 있습니다', 409);
     c.nameRules.push({ match: b.match, value: v.value, serviceId: b.serviceId });
+    return { result: {} };
+  },
+  /** 이름 규칙의 대상 서비스 바꾸기(예약 1-d) — 적용 순서(sortNameRules)는 값·종류로 정해지므로 바뀌지 않는다. */
+  'namerule.update'(d, b) {
+    const c = corpOf(d, b.corp);
+    if (!svcIn(c, b.serviceId)) return err('대상 서비스를 찾지 못했습니다', 404);
+    const r = c.nameRules.find((x) => x.match === b.match && lc(x.value) === lc(b.value)); if (!r) return err('그 이름 규칙이 없습니다', 404);
+    if (r.serviceId === b.serviceId) return { result: { same: true } };
+    r.serviceId = b.serviceId;
     return { result: {} };
   },
   'namerule.remove'(d, b) {

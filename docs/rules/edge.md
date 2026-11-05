@@ -612,6 +612,20 @@
     · 상한에 걸린 조회는 **가장 최근 행을 남긴다**(DESC LIMIT 후 뒤집기) · 요청보다 많은 바이트는 bad-body · 엣지 `COLLECTOR_TOKEN` 없음은 `collector-off`(서버 `XFER_FAIL_KINDS` ↔ 웹 `FAIL_TEXT` 1:1) ·
       잴 엣지가 0곳이면 `/run` 409 `noTargets` + 사유 · 보존 정리는 30초 틱에서 6시간마다(`PRUNE_EVERY_MS` · 첫 틱 제외 · 측정이 꺼져 있어도).
     · 남긴 것: 오래됨 사유 코드(XS-12). 실제 원격 회선으로는 확인하지 못했다(목업·테스트 라우터).
+  · **v2.899 — 상세의 'Ping 함께 보기'(시안 `docs/design/xfer-ping` · 사용자 컨펌 "기본값대로"). 새로 재지 않는다 — Ping 모니터의 엣지 기록을 읽는다**
+    (`ping/{db,service,store}.js` + `routes/api/xferSpeed.js GET /tools/xfer-speed/ping` + 웹 `XferSpeedTool.jsx TrendCharts·PingPanel`·`xferSpeedText.js pingModel·comboHover`.
+    회귀 `server/test/xferPing2890.test.js`(실제 api 라우터 — 게이트 변이 2/2) + 웹 `xferPing.test.js`):
+    · 창은 `detailWindowOf` **하나**(`/history`·`/ping` 이 같은 start·end·past) — 두 차트가 같은 x 축이다. Ping 창은 **[since, until) 반개구간**(롤업은 시간 경계로 내림) —
+      이웃한 '이전 구간' 두 칸이 경계 표본을 두 번 세지 않는다. 지금 창은 끝이 열려 있다(`/history` 와 같다).
+    · 대상 id 는 `ping/store.js edgeTargetId` **하나**(`edge_<id 소문자>` — 자동 등록과 새 라우트가 공유, 테스트가 사본을 막는다).
+    · ⚠ 엣지 대상은 `kind:'tcp'` — **ICMP 가 아니라 엣지 포탈 포트 TCP 연결 시간**이다. 응답 `method:'tcp-connect'` 이고 화면이 그렇게 쓴다. 전송 측정의 '지연'(응답 머리)과 다른 값이다.
+    · 값이 없으면 빈 배열로 두지 않고 `reason`(`PING_REASONS` ↔ 웹 `PING_REASON_TEXT` 1:1): no-target(모니터 시작 뒤 추가·지운 엣지 — 자동 등록은 시작 때만이고 지운 것은 tombstone 이라
+      '엣지 노드 다시 등록'(`POST /api/ping/edge/sync`)이 되살리지 않는다 — 화면이 그렇게 말한다) · monitor-off · disabled · before-retention · no-samples. 저장소 예외는 503.
+    · 통계: n·fail 은 칸의 정확한 합(`history` 가 fail 을 싣는다 — loss×n 반올림 금지), 평균은 성공 표본 가중, **중앙값은 원시 칸 창(≤ 10일)에서만** 표본으로 — 롤업 창은 null.
+    · 응답에 대상 호스트를 싣지 않는다(id·kind·port·enabled). 권한은 형제 라우트와 같다(adminOnly + fullScopeOnly · 데모 계정은 데모 엣지만 404 규약).
+    · 웹: 보기 `전송 속도 | 전송 속도 + Ping | Ping만`(기본 '전송 속도' · localStorage `xs.detail.view` — 편의라 못 읽으면 기본값) · '전송 속도' 보기면 Ping 을 **조회하지 않는다** ·
+      다른 창의 Ping 응답은 그리지 않는다(`samePingWindow`) · 오버 상자는 보이는 첫 차트 위(카드 맨 위면 Ping 알약을 덮었다) · 선을 끊는 간격은 칸 × 1.5 와 표본 간격 × 1.6 중 큰 쪽
+      (칸 크기만 보면 표본이 칸보다 성긴 대상에서 점만 남았다 — 화면 확인으로 잡았다).
 - ⚠⚠ **v2.737 — 업그레이드·재시작으로 끊긴 스캔은 '실행 중 스캔 기록' 으로 자동 재개한다. 기록 판정은 `util/scanJournal.js` 하나**
   (사용자 신고 "업그레이드 되면 scan 하던게 중단되는 버그" · 선택 ①+②+③ · 전체 검증. `util/scanJournal.js` + `isidu/detach.js` + 재개 함수 3곳
   (`isidu/poller.js resumeIsidu`·`idrac/scanPoller.js resumeIdracScan`·`ipam/scanPoller.js resumeIpScan`) + `upgrade/manager.js` 대기 + 웹
