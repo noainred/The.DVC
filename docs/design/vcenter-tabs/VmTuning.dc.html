@@ -1,0 +1,219 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>VM 개체 보기 — 성능 튜닝 탭</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=Noto+Sans+KR:wght@400;500;700;800&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+body{margin:0;background:#0a0e17;color:#e6edf6;font-family:"Inter","Noto Sans KR","Apple SD Gothic Neo",sans-serif;font-size:13px}
+a{color:#93c5fd}a:hover{color:#bfdbfe}
+.muted{color:#8b9bb4}
+.faint{color:#5d6b85}
+.mono{font-family:"JetBrains Mono",ui-monospace,monospace}
+.card{background:#141b2d;border:1px solid #243049;border-radius:12px;min-width:0}
+.vtab{display:inline-flex;align-items:center;gap:6px;min-height:34px;padding:0 12px;border-radius:8px;border:1px solid transparent;color:#8b9bb4;font:inherit;font-size:13px;font-weight:600;text-decoration:none;white-space:nowrap;flex:none}
+.vtab.on{color:#ffffff;background:#3b82f6;border-color:#3b82f6}
+.vtab .n{font-size:10.5px;font-weight:700;padding:1px 6px;border-radius:999px;background:rgba(139,155,180,.16);color:#aebbd0}
+.vtab.on .n{background:rgba(255,255,255,.22);color:#ffffff}
+.btn{display:inline-flex;align-items:center;gap:6px;min-height:30px;padding:0 12px;border-radius:8px;border:1px solid #243049;background:#1a2236;color:#e6edf6;font:inherit;font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap;text-decoration:none}
+.btn.primary{background:linear-gradient(135deg,#3b82f6,#2563eb);border-color:#2563eb;color:#ffffff;font-weight:700}
+.btn.ghost{background:transparent;border-color:transparent;color:#93c5fd;padding:0 4px}
+.btn.off{opacity:.55}
+.chip{display:inline-flex;align-items:center;gap:6px;min-height:28px;padding:0 11px;border-radius:8px;border:1px solid #243049;background:#1a2236;color:#8b9bb4;font-size:12px;font-weight:700;white-space:nowrap;text-decoration:none}
+.chip.on{background:#e6edf6;border-color:#e6edf6;color:#0a0e17}
+.badge{display:inline-flex;align-items:center;padding:2px 9px;border-radius:20px;font-size:11px;font-weight:600;white-space:nowrap}
+.badge.green{background:rgba(34,197,94,.15);color:#4ade80}
+.badge.amber{background:rgba(245,158,11,.15);color:#fbbf24}
+.badge.red{background:rgba(239,68,68,.15);color:#f87171}
+.badge.gray{background:rgba(139,155,180,.15);color:#8b9bb4}
+.badge.blue{background:rgba(59,130,246,.15);color:#60a5fa}
+.badge.purple{background:rgba(168,85,247,.15);color:#c084fc}
+.ct{display:flex;align-items:center;gap:8px;padding:11px 14px;border-bottom:1px solid #1f2a40;min-width:0;flex-wrap:wrap}
+.ct b{font-size:13.5px}
+.ct .more{margin-left:auto;font-size:12px;white-space:nowrap}
+.kv{display:grid;grid-template-columns:auto minmax(0,1fr);gap:7px 14px;padding:12px 14px;font-size:12.5px;align-items:baseline}
+.kv span{color:#8b9bb4;white-space:nowrap}
+.kv div{min-width:0;overflow-wrap:anywhere}
+.row{display:flex;align-items:center;gap:10px;min-width:0}
+table{border-collapse:collapse;width:100%}
+th{font-size:12px;font-weight:600;color:#8b9bb4;text-align:left;padding:9px 10px;background:#0f1626;border-bottom:1px solid #243049;white-space:nowrap;cursor:pointer}
+th.sort{color:#e6edf6}
+td{padding:8px 10px;border-bottom:1px solid #1f2a40;vertical-align:middle;white-space:nowrap;font-size:12.5px}
+.sm{font-size:11.5px;color:#8b9bb4}
+.note{padding:9px 14px;font-size:11.5px;line-height:1.6;color:#8b9bb4;border-top:1px solid #1f2a40}
+.crumb{display:flex;align-items:center;gap:6px;font-size:12px;color:#8b9bb4;flex-wrap:wrap;min-width:0}
+.crumb a{color:#93c5fd;text-decoration:none}
+.diag{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:8px;padding:12px 14px}
+.diag div{border:1px solid #243049;border-radius:10px;background:#0f1626;padding:9px 11px;min-width:0}
+.diag b{display:block;font-size:13px;margin-top:3px}
+.diag span{font-size:11px;color:#8b9bb4}
+.diag i{font-style:normal;display:block;font-size:11px;color:#5d6b85;margin-top:3px;white-space:normal}
+.bar{height:6px;border-radius:999px;background:#243049;overflow:hidden;flex:1 1 0;min-width:60px;position:relative}
+.bar i{display:block;height:100%;border-radius:999px}
+.bar em{position:absolute;top:-3px;width:2px;height:12px;background:#e6edf6}
+.find{display:flex;gap:8px;align-items:flex-start;padding:9px 14px;border-bottom:1px solid #1f2a40;font-size:12.5px}
+.find .badge{flex:none}
+.find small{display:block;color:#8b9bb4;font-size:11.5px;white-space:normal}
+.find .act{margin-left:auto;display:inline-flex;gap:6px;flex:none}
+.plan td{white-space:normal}
+</style>
+</helmet>
+<div style="position:relative;width:100%;min-height:1440px;box-sizing:border-box;overflow:hidden;background:#0a0e17">
+<div style="max-width:1440px;margin:0 auto;box-sizing:border-box;padding:18px 24px 28px;display:flex;flex-direction:column;gap:12px;min-width:0">
+
+  <div class="crumb" aria-label="경로">
+    <a href="Main.dc.html">← VM 및 폴더</a><span>›</span><span>VC-DEMO1</span><span>›</span><span>DC-KR1</span><span>›</span><span>Prod / Web</span><span>›</span><b style="color:#e6edf6">web-kr1-023</b>
+  </div>
+
+  <div class="card" style="padding:14px 16px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px 16px">
+    <div class="row" style="gap:12px;flex-wrap:wrap">
+      <div style="width:40px;height:40px;border-radius:10px;background:#0f1626;border:1px solid #243049;display:flex;align-items:center;justify-content:center" aria-hidden="true">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#93c5fd" stroke-width="1.8"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/></svg>
+      </div>
+      <div style="min-width:0">
+        <div class="row" style="gap:8px;flex-wrap:wrap"><span style="font-size:17px;font-weight:800">web-kr1-023</span><span class="badge green">전원 켜짐</span><span class="badge green">Tools 실행 중</span></div>
+        <div class="muted" style="font-size:12px">Ubuntu Linux (64-bit) · 호스트 esx-kr1-03 · 클러스터 CL-Web01 · 4 vCPU · 16 GB</div>
+      </div>
+    </div>
+    <div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end">
+      <span class="btn">⚙ 사양 변경</span><span class="btn">🖥 콘솔</span><span class="btn">📊 축소 근거 리포트</span>
+    </div>
+  </div>
+
+  <!-- 탭 줄: vSphere 8개 + 포탈 전용 '성능 튜닝'(맨 끝 · 구분선) -->
+  <nav role="tablist" aria-label="VM 보기" style="display:flex;gap:4px;overflow-x:auto;padding-bottom:8px;border-bottom:1px solid #243049;min-width:0;align-items:center">
+    <a class="vtab" href="VmObject.dc.html">요약</a>
+    <a class="vtab" href="ObjectTabs.dc.html">모니터</a>
+    <a class="vtab" href="ObjectTabs.dc.html">구성 <span class="n">2</span></a>
+    <a class="vtab" href="ObjectTabs.dc.html">사용 권한</a>
+    <a class="vtab" href="ObjectTabs.dc.html">데이터스토어 <span class="n">2</span></a>
+    <a class="vtab" href="ObjectTabs.dc.html">네트워크</a>
+    <a class="vtab" href="ObjectTabs.dc.html">스냅샷 <span class="n">1</span></a>
+    <a class="vtab" href="ObjectTabs.dc.html">업데이트</a>
+    <span style="width:1px;height:22px;background:#243049;margin:0 4px" aria-hidden="true"></span>
+    <a class="vtab on" href="VmTuning.dc.html" aria-current="page">성능 튜닝 <span class="n">4</span></a>
+  </nav>
+
+  <!-- 진단 띠: 다섯 축 · 점수 없음 · 각 축의 근거 한 줄 -->
+  <section class="card" aria-label="진단">
+    <div class="ct"><b>진단</b><span class="sm">기간</span><span class="chip">7일</span><span class="chip on">30일</span><span class="chip">90일</span>
+      <span class="sm" style="margin-left:6px">표본 8,640(5분) · 덮음 100% · 산정 11-05 11:40</span>
+      <span class="more sm">열 때 1회 조회(rightsize + contention + vmcfg) · 다시 계산 버튼</span></div>
+    <div class="diag">
+      <div><span>자원 적정화</span><b style="color:#fbbf24">과다 할당 — CPU</b><i>사용 p95 1.3 GHz / 할당 10 GHz · 권장 2 vCPU</i></div>
+      <div><span>CPU 경합</span><b style="color:#4ade80">정상</b><i>Ready p95 1.2% (경고선 5%) · Co-stop 0.1%</i></div>
+      <div><span>메모리 압박</span><b style="color:#8b9bb4">—</b><i>벌룬 · 스왑은 레벨 2 카운터 — 이 vCenter 통계 수준 1(수집 안 됨)</i></div>
+      <div><span>스토리지 지연</span><b style="color:#f87171">느림 — 쓰기</b><i>쓰기 지연 p95 28 ms(경고선 20) · ds-kr1-san03 사용률 92%</i></div>
+      <div><span>구성</span><b style="color:#fbbf24">확인 2</b><i>CPU 핫애드(vNUMA 비활성) · 스냅샷 35일</i></div>
+    </div>
+    <div class="note">판정은 서버 한 곳(rightsize 정책 + contention/parse.js 코드 + vmcfg/parse.js)의 값을 그대로 보인다 — 화면에서 다시 판정하지 않는다. ‘—’ 는 못 읽은 것이고 ‘정상’ 이 아니다. 점수 · 등급은 두지 않는다(근거 없는 합산 금지).</div>
+  </section>
+
+  <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;min-width:0">
+
+    <!-- 자원 적정화 -->
+    <section class="card" aria-label="자원 적정화">
+      <div class="ct"><b>자원 적정화</b><span class="sm">/tools/rightsize · RightsizeReport 과 같은 계산</span><a class="more" href="VmTuning.dc.html">리포트 전체 →</a></div>
+      <div style="padding:12px 14px;display:grid;gap:12px">
+        <div>
+          <div class="row" style="justify-content:space-between;margin-bottom:6px"><b>CPU — 4 vCPU (10.0 GHz 할당)</b><span class="badge amber">권장 2 vCPU</span></div>
+          <div class="row"><span class="sm" style="width:64px">p95</span><div class="bar"><i style="width:13%;background:#60a5fa"></i><em style="left:13%"></em></div><span class="mono sm" style="width:120px;text-align:right">1.3 GHz · 13%</span></div>
+          <div class="row" style="margin-top:4px"><span class="sm" style="width:64px">최대</span><div class="bar"><i style="width:31%;background:#3b82f6"></i></div><span class="mono sm" style="width:120px;text-align:right">3.1 GHz · 31%</span></div>
+          <div class="sm" style="margin-top:6px">산정: p95 ÷ 코어 클럭(2.5 GHz) × 여유 1.5 → 올림. 피크(31%)는 30일 중 2회(배치 시각) — 예약 작업이면 유지.</div>
+        </div>
+        <div>
+          <div class="row" style="justify-content:space-between;margin-bottom:6px"><b>메모리 — 16 GB</b><span class="badge gray">유지</span></div>
+          <div class="row"><span class="sm" style="width:64px">active p95</span><div class="bar"><i style="width:38%;background:#4ade80"></i><em style="left:38%"></em></div><span class="mono sm" style="width:120px;text-align:right">6.1 GB · 38%</span></div>
+          <div class="row" style="margin-top:4px"><span class="sm" style="width:64px">consumed</span><div class="bar"><i style="width:61%;background:#22c55e"></i></div><span class="mono sm" style="width:120px;text-align:right">9.8 GB · 61%</span></div>
+          <div class="sm" style="margin-top:6px">consumed 가 61% 라 감축 권장 없음. 감축 금지 신호(벌룬 · 스왑 &gt; 0 · Ready 높음)는 읽지 못해 ‘—’ — 신호를 못 읽었으면 권장을 내지 않는다.</div>
+        </div>
+      </div>
+      <div class="note">값은 vCenter 성능 롤업(5분 · 30일)을 열 때 빌려온다(저장 안 함). 꺼진 VM · 표본 50% 미만은 권장을 내지 않고 ‘표본 부족’.</div>
+    </section>
+
+    <!-- CPU 경합 · 시끄러운 이웃 -->
+    <section class="card" aria-label="CPU 경합">
+      <div class="ct"><b>CPU 경합 · 같은 호스트의 이웃</b><span class="sm">contention perfc · 최근 창 1시간(20초)</span><a class="more" href="VmTuning.dc.html">도구 ‘CPU 경합·디스크 지연’ →</a></div>
+      <div style="padding:12px 14px;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px">
+        <div style="border:1px solid #243049;border-radius:10px;background:#0f1626;padding:8px 10px"><span class="sm">CPU Ready</span><b style="display:block;font-size:16px">1.2%</b><i class="faint" style="font-style:normal;font-size:11px">avg · p95 1.9 · 경고 5 / 위험 10</i></div>
+        <div style="border:1px solid #243049;border-radius:10px;background:#0f1626;padding:8px 10px"><span class="sm">Co-stop</span><b style="display:block;font-size:16px">0.1%</b><i class="faint" style="font-style:normal;font-size:11px">vCPU 4 — 줄이면 더 내려간다</i></div>
+        <div style="border:1px solid #243049;border-radius:10px;background:#0f1626;padding:8px 10px"><span class="sm">CPU 지연</span><b style="display:block;font-size:16px">2.4%</b><i class="faint" style="font-style:normal;font-size:11px">정보</i></div>
+      </div>
+      <div style="overflow-x:auto">
+        <table>
+          <thead><tr><th>esx-kr1-03 의 상위 VM</th><th class="sort">CPU 사용 ▾</th><th>Ready</th><th>vCPU</th><th>열기</th></tr></thead>
+          <tbody>
+            <tr><td>db-kr1-004</td><td>64% · 25.6 GHz</td><td>3.8%</td><td>16</td><td><a href="VmObject.dc.html">개체 →</a></td></tr>
+            <tr><td>etl-kr1-002</td><td>41% · 13.1 GHz</td><td>2.1%</td><td>8</td><td><a href="VmObject.dc.html">개체 →</a></td></tr>
+            <tr><td><b>web-kr1-023</b> <span class="sm">(이 VM)</span></td><td>23% · 2.3 GHz</td><td>1.2%</td><td>4</td><td class="muted">—</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="note">호스트 CPU 44% · 가상화율 3.4:1 — 이 VM 의 Ready 는 정상 범위라 ‘이웃 때문’ 으로 단정하지 않는다. 이동(vMotion)은 포탈이 하지 않는다 — vSphere 에서.</div>
+    </section>
+
+    <!-- 스토리지 지연 -->
+    <section class="card" aria-label="스토리지 지연">
+      <div class="ct"><b>스토리지 지연</b><span class="badge red">쓰기 느림</span><span class="sm">disk latency(perfc) · /datastores · dscfg</span></div>
+      <div style="overflow-x:auto">
+        <table>
+          <thead><tr><th>디스크</th><th>데이터스토어</th><th>읽기 지연</th><th class="sort">쓰기 지연 ▾</th><th>DS 사용률</th><th>씬 오버할당</th></tr></thead>
+          <tbody>
+            <tr><td>하드 디스크 1</td><td class="mono">ds-kr1-san03</td><td>3 ms</td><td><span class="badge red">28 ms</span></td><td><span class="badge red">92%</span></td><td>1.6× <span class="sm">· 스토리지 경로 점검</span></td></tr>
+            <tr><td>하드 디스크 2</td><td class="mono">ds-kr1-san04</td><td>2 ms</td><td>5 ms</td><td>61%</td><td>1.1×</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="kv" style="border-top:1px solid #1f2a40">
+        <span>같은 DS 의 느린 VM</span><div>ds-kr1-san03 에서 쓰기 20 ms 넘는 VM 7대 — DS 쪽 문제일 가능성(이 VM 만이 아니다)</div>
+        <span>스냅샷</span><div>1개 · 2.4 GB · 35일 <span class="sm">· 델타 디스크가 쓰기 지연을 키운다 — 삭제는 vSphere · 백업 솔루션에서</span></div>
+        <span>디스크 모드</span><div>persistent / 공유 없음 · RDM 없음</div>
+      </div>
+      <div class="note">디스크 지연은 VM 디스크 단위(perfc)이고 DS 쪽 요약은 도구 ‘데이터스토어·경로 점검’ 과 같은 값. 경고선(20 ms · 위험 40 ms)은 contention 정책값 — 화면에 박지 않고 API 가 준다.</div>
+    </section>
+
+    <!-- 구성 권장 -->
+    <section class="card" aria-label="구성 권장">
+      <div class="ct"><b>구성 권장</b><span class="sm">vmcfg findings · Tools · 하드웨어 버전</span></div>
+      <div class="find"><span class="badge amber">주의</span><div><b>CPU 핫애드 켜짐 → vNUMA 비활성</b><small>4 vCPU 는 한 NUMA 노드 안이라 영향 작음. 8 vCPU 넘게 키울 계획이면 먼저 끈다(끄려면 전원 off).</small></div><span class="act"><a class="btn" href="VmTuning.dc.html">사양 변경 →</a></span></div>
+      <div class="find"><span class="badge amber">주의</span><div><b>스냅샷 35일</b><small>백업 임시 스냅샷이 남아 있다 — 백업 솔루션의 실패 이력 확인(Veeam 11-05 02:41 성공인데 남아 있음).</small></div><span class="act"><a class="btn" href="ObjectTabs.dc.html">스냅샷 →</a></span></div>
+      <div class="find"><span class="badge blue">정보</span><div><b>CPU 예약 · 제한 없음 · 메모리 예약 없음</b><small>제한(limit)이 있으면 Ready 없이도 느리다 — 지금은 해당 없음.</small></div></div>
+      <div class="find"><span class="badge green">정상</span><div><b>VMware Tools 12.3.5 최신 · 호환성 vmx-19 · 레거시 장치 없음</b><small>vmx-21 로 올리면 새 장치 유형을 쓸 수 있다 — 성능 이유로 올릴 근거는 없다.</small></div></div>
+      <div class="note">전원 정책 · NUMA 배치 · 지연 민감도(latencySensitivity) · 네트워크 어댑터 유형(vmxnet3 여부)은 수집하지 않는다 — 2차.</div>
+    </section>
+  </div>
+
+  <!-- 조치 계획 -->
+  <section class="card" aria-label="조치 계획">
+    <div class="ct"><b>조치 계획</b><span class="sm">권장을 모아 순서대로 · 적용은 지금 도구(사양 변경 — 권한 vm.reconfig · 쓰기 범위) 또는 vSphere 에서</span>
+      <span class="more" style="display:inline-flex;gap:6px"><a class="btn" href="VmTuning.dc.html">⬇ 체크리스트 내보내기</a><a class="btn" href="VmTuning.dc.html">🔁 변경 뒤 다시 평가</a></span></div>
+    <div style="overflow-x:auto">
+      <table class="plan">
+        <thead><tr><th>#</th><th>조치</th><th>기대 효과</th><th>위험 · 조건</th><th>어디서</th><th>상태</th></tr></thead>
+        <tbody>
+          <tr><td>1</td><td><b>ds-kr1-san03 쓰기 지연 원인 확인</b> — DS 사용률 92% · 같은 DS 7대 느림</td><td>쓰기 28 → 10 ms 이하(DS 쪽)</td><td>이 VM 만 고쳐서 될 일이 아니다 — 스토리지 팀</td><td><a href="VmTuning.dc.html">데이터스토어·경로 점검 →</a></td><td><span class="badge gray">대기</span></td></tr>
+          <tr><td>2</td><td><b>남은 백업 스냅샷 정리</b> (2.4 GB · 35일)</td><td>델타 쓰기 제거 · 공간 2.4 GB</td><td>백업 솔루션이 쓰는 중인지 확인</td><td>vSphere · Veeam</td><td><span class="badge gray">대기</span></td></tr>
+          <tr><td>3</td><td><b>vCPU 4 → 2</b> (p95 13% · 피크 31%)</td><td>Co-stop · 호스트 가상화율 개선 · 코어 라이선스 영향 없음</td><td>배치 피크 2회 — 담당자 확인 · 전원 off 필요(핫리무브 없음)</td><td><a href="VmTuning.dc.html">사양 변경 →</a></td><td><span class="badge blue">담당 확인</span></td></tr>
+          <tr><td>4</td><td><b>CPU 핫애드 끄기</b></td><td>vNUMA 활성(8 vCPU 이상일 때 의미)</td><td>지금 4 vCPU 라 효과 작음 — 3번과 함께</td><td><a href="VmTuning.dc.html">사양 변경 →</a></td><td><span class="badge gray">선택</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="note">상태는 사람이 바꾼다(대기 · 담당 확인 · 적용 · 무시 — 무시에는 사유). 저장은 VM instanceUuid 기준 · 변경 뒤 ‘다시 평가’ 는 같은 기간으로 전후를 나란히(변경 시각은 vm-changes 에서).</div>
+  </section>
+
+  <div class="faint" style="font-size:11.5px">가상 데이터 · 이 탭은 vSphere Client 에 없는 포탈 전용 탭 — 흩어진 도구(축소 근거 리포트 · CPU 경합·디스크 지연 · VM 구성 점검 · 데이터스토어·경로 점검 · Optimization)의 이 VM 몫을 한 자리에 모으고 조치 계획을 붙인다. 새 수집 없이 열 때 1회 조회.</div>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1440}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

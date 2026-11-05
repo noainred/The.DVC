@@ -1,0 +1,229 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>VM · 호스트 개체 — 나머지 탭(모니터 · 구성 · 데이터스토어 · 네트워크 · 스냅샷 · VM · 리소스 풀 · 사용 권한 · 업데이트)</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=Noto+Sans+KR:wght@400;500;700;800&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+body{margin:0;background:#0a0e17;color:#e6edf6;font-family:"Inter","Noto Sans KR","Apple SD Gothic Neo",sans-serif;font-size:13px}
+a{color:#93c5fd}a:hover{color:#bfdbfe}
+.muted{color:#8b9bb4}
+.faint{color:#5d6b85}
+.mono{font-family:"JetBrains Mono",ui-monospace,monospace}
+.card{background:#141b2d;border:1px solid #243049;border-radius:12px;min-width:0}
+.vtab{display:inline-flex;align-items:center;gap:6px;min-height:34px;padding:0 12px;border-radius:8px;border:1px solid transparent;color:#8b9bb4;font:inherit;font-size:13px;font-weight:600;text-decoration:none;white-space:nowrap;flex:none}
+.vtab.on{color:#ffffff;background:#3b82f6;border-color:#3b82f6}
+.vtab .n{font-size:10.5px;font-weight:700;padding:1px 6px;border-radius:999px;background:rgba(139,155,180,.16);color:#aebbd0}
+.vtab.on .n{background:rgba(255,255,255,.22);color:#ffffff}
+.sub{display:flex;flex-direction:column;gap:2px;padding:10px;border-right:1px solid #1f2a40;min-width:0}
+.sub a{display:flex;align-items:center;gap:8px;min-height:32px;padding:0 10px;border-radius:8px;color:#8b9bb4;text-decoration:none;font-weight:600;font-size:12.5px;white-space:nowrap}
+.sub a.on{background:#1a2236;color:#e6edf6;border:1px solid #3b82f6}
+.sub a .n{margin-left:auto;font-size:10.5px;font-weight:700;padding:1px 6px;border-radius:999px;background:rgba(139,155,180,.16);color:#aebbd0}
+.sub h5{margin:8px 10px 2px;font-size:10.5px;color:#5d6b85;font-weight:700}
+.btn{display:inline-flex;align-items:center;gap:6px;min-height:30px;padding:0 12px;border-radius:8px;border:1px solid #243049;background:#1a2236;color:#e6edf6;font:inherit;font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap;text-decoration:none}
+.chip{display:inline-flex;align-items:center;gap:6px;min-height:28px;padding:0 11px;border-radius:8px;border:1px solid #243049;background:#1a2236;color:#8b9bb4;font-size:12px;font-weight:700;white-space:nowrap;text-decoration:none}
+.chip.on{background:#e6edf6;border-color:#e6edf6;color:#0a0e17}
+.badge{display:inline-flex;align-items:center;padding:2px 9px;border-radius:20px;font-size:11px;font-weight:600;white-space:nowrap}
+.badge.green{background:rgba(34,197,94,.15);color:#4ade80}
+.badge.amber{background:rgba(245,158,11,.15);color:#fbbf24}
+.badge.red{background:rgba(239,68,68,.15);color:#f87171}
+.badge.gray{background:rgba(139,155,180,.15);color:#8b9bb4}
+.badge.blue{background:rgba(59,130,246,.15);color:#60a5fa}
+.badge.purple{background:rgba(168,85,247,.15);color:#c084fc}
+.ct{display:flex;align-items:center;gap:8px;padding:11px 14px;border-bottom:1px solid #1f2a40;min-width:0;flex-wrap:wrap}
+.ct b{font-size:13.5px}
+.ct .more{margin-left:auto;font-size:12px;white-space:nowrap}
+.kv{display:grid;grid-template-columns:auto minmax(0,1fr);gap:7px 14px;padding:12px 14px;font-size:12.5px;align-items:baseline}
+.kv span{color:#8b9bb4;white-space:nowrap}
+.kv div{min-width:0;overflow-wrap:anywhere}
+.row{display:flex;align-items:center;gap:10px;min-width:0}
+table{border-collapse:collapse;width:100%}
+th{font-size:12px;font-weight:600;color:#8b9bb4;text-align:left;padding:9px 10px;background:#0f1626;border-bottom:1px solid #243049;white-space:nowrap;cursor:pointer}
+th.sort{color:#e6edf6}
+td{padding:8px 10px;border-bottom:1px solid #1f2a40;vertical-align:middle;white-space:nowrap;font-size:12.5px}
+.sm{font-size:11.5px;color:#8b9bb4}
+.note{padding:9px 14px;font-size:11.5px;line-height:1.6;color:#8b9bb4;border-top:1px solid #1f2a40}
+.lead{font-size:11.5px;color:#8b9bb4;margin:2px 0}
+.pane{display:grid;grid-template-columns:200px minmax(0,1fr);min-width:0}
+.ghost td{padding:9px 10px}
+.ghost i{display:inline-block;height:9px;border-radius:999px;background:#243049}
+.bar{height:6px;border-radius:999px;background:#243049;overflow:hidden;flex:1 1 0;min-width:60px}
+.bar i{display:block;height:100%;border-radius:999px}
+</style>
+</helmet>
+<div style="position:relative;width:100%;min-height:1700px;box-sizing:border-box;overflow:hidden;background:#0a0e17">
+<div style="max-width:1440px;margin:0 auto;box-sizing:border-box;padding:18px 24px 28px;display:flex;flex-direction:column;gap:12px;min-width:0">
+
+  <!-- 1) VM › 모니터: 성능(온디맨드 메트릭) · 이벤트(vmHistory) · 작업(수집하지 않음) -->
+  <div class="lead">VM 개체 › <b style="color:#e6edf6">모니터</b> — 하위 칸: 성능(/vms/:id/metrics · 지금 ‘📈 메트릭’ 창 그대로) · 이벤트(vm-changes vmHistory) · 작업(수집하지 않음)</div>
+  <section class="card pane" aria-label="VM 모니터">
+    <div class="sub">
+      <a class="on" href="ObjectTabs.dc.html">성능</a>
+      <a href="ObjectTabs.dc.html">이벤트 <span class="n">17</span></a>
+      <a href="ObjectTabs.dc.html">작업 <span class="n">—</span></a>
+    </div>
+    <div style="min-width:0">
+      <div class="ct"><b>성능</b>
+        <span class="chip">CPU %</span><span class="chip on">메모리 %</span><span class="chip">디스크 KBps</span><span class="chip">네트워크 KBps</span>
+        <span class="sm" style="margin-left:8px">기간</span><span class="chip">실시간</span><span class="chip on">1일</span><span class="chip">1주</span><span class="chip">1달</span><span class="chip">1년</span>
+        <span class="more sm">열 때 1회 조회 · 15초 폴링 없음 · 늦게 온 응답은 버린다</span>
+      </div>
+      <div style="padding:12px 14px">
+        <svg style="width:100%;height:160px" viewBox="0 0 1000 160" preserveAspectRatio="none" role="img" aria-label="메모리 사용률 1일 추이">
+          <line x1="0" y1="40" x2="1000" y2="40" stroke="#1f2a40"/><line x1="0" y1="80" x2="1000" y2="80" stroke="#1f2a40"/><line x1="0" y1="120" x2="1000" y2="120" stroke="#1f2a40"/>
+          <polyline fill="none" stroke="#4ade80" stroke-width="2" points="0,70 60,68 120,72 180,66 240,64 300,69 360,60 420,58 480,62 540,55 600,52 660,56 720,50 780,48 840,52 900,47 960,45 1000,46"/>
+        </svg>
+        <div class="row sm" style="justify-content:space-between"><span>11-04 11:00</span><span>평균 58% · 최대 66% · 표본 288(5분)</span><span>11-05 11:00</span></div>
+      </div>
+      <div class="note">값은 vCenter 성능 롤업(저장 안 함 — 5,850 VM 규모라 per-VM 시계열을 적재하지 않는다). 표본이 없으면 ‘표본 없음’ 이지 0 이 아니다.</div>
+    </div>
+  </section>
+
+  <!-- 2) VM › 구성 · 데이터스토어 · 네트워크 · 스냅샷 : 한 줄에 둘씩 -->
+  <div class="lead">VM 개체 › <b style="color:#e6edf6">구성</b>(vmcfg 캐시 — 설정 점검 + 하드웨어 장치) · <b style="color:#e6edf6">데이터스토어</b>(cfg.dev 디스크별 DS + 게스트 파티션) · <b style="color:#e6edf6">네트워크</b>(게스트 IP · DNS · 게이트웨이 — 포트그룹은 수집하지 않음) · <b style="color:#e6edf6">스냅샷</b>(개수 · 크기 — 트리는 2차)</div>
+  <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;min-width:0">
+
+    <section class="card" aria-label="VM 구성">
+      <div class="ct"><b>구성 › 하드웨어 장치</b><span class="sm">cfg.dev · 읽은 시각 11-05 10:31</span><a class="more" href="ObjectTabs.dc.html">설정 점검 2 →</a></div>
+      <div style="overflow-x:auto">
+        <table>
+          <thead><tr><th class="sort">장치 ▾</th><th>값</th><th>데이터스토어</th><th>모드 / 공유</th></tr></thead>
+          <tbody>
+            <tr><td>하드 디스크 1</td><td>100 GB · 씬</td><td class="mono">ds-kr1-san03</td><td>persistent / —</td></tr>
+            <tr><td>하드 디스크 2</td><td>200 GB · 씩</td><td class="mono">ds-kr1-san04</td><td>persistent / —</td></tr>
+            <tr><td>CD/DVD 드라이브 1</td><td>클라이언트 장치</td><td class="muted">—</td><td>연결 안 됨</td></tr>
+            <tr><td>네트워크 어댑터</td><td class="muted">수집하지 않음</td><td class="muted">—</td><td class="muted">—</td></tr>
+            <tr><td>USB / 직렬 / 병렬</td><td>0 / 0 / 0</td><td class="muted">—</td><td class="muted">—</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="kv" style="border-top:1px solid #1f2a40">
+        <span>CBT</span><div>켜짐</div>
+        <span>CPU 예약 / 제한</span><div>— / —</div>
+        <span>메모리 예약 / 제한</span><div>— / —</div>
+        <span>디스크 통합 필요</span><div>아니오</div>
+        <span>펌웨어</span><div>EFI</div>
+      </div>
+      <div class="note">vmcfg 가 아직 이 VM 을 읽지 않았으면 표 대신 ‘아직 읽지 않음(순번 N/911)’ 한 줄 — 빈 표를 보이지 않는다.</div>
+    </section>
+
+    <section class="card" aria-label="VM 데이터스토어">
+      <div class="ct"><b>데이터스토어</b><span class="sm">디스크별 DS(cfg.dev) · 게스트 파티션(/vms/:id/partitions)</span></div>
+      <div style="overflow-x:auto">
+        <table>
+          <thead><tr><th class="sort">데이터스토어 ▾</th><th>유형</th><th>이 VM 디스크</th><th>DS 사용률</th><th>열기</th></tr></thead>
+          <tbody>
+            <tr><td class="mono">ds-kr1-san03</td><td>VMFS 6 · SAN</td><td>디스크 1 · 100 GB</td><td><div class="row"><div class="bar"><i style="width:92%;background:#f87171"></i></div><b>92%</b></div></td><td><a href="Main.dc.html">DS →</a></td></tr>
+            <tr><td class="mono">ds-kr1-san04</td><td>VMFS 6 · SAN</td><td>디스크 2 · 200 GB</td><td><div class="row"><div class="bar"><i style="width:61%;background:#4ade80"></i></div><b>61%</b></div></td><td><a href="Main.dc.html">DS →</a></td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="ct" style="border-top:1px solid #1f2a40"><b>게스트 파티션</b><span class="sm">Tools 보고 · 열 때 1회</span></div>
+      <div style="overflow-x:auto">
+        <table>
+          <thead><tr><th>마운트</th><th>전체</th><th>사용</th><th>사용률</th></tr></thead>
+          <tbody>
+            <tr><td class="mono">/</td><td>98 GB</td><td>71 GB</td><td><div class="row"><div class="bar"><i style="width:72%;background:#fbbf24"></i></div><b>72%</b></div></td></tr>
+            <tr><td class="mono">/data</td><td>197 GB</td><td>141 GB</td><td><div class="row"><div class="bar"><i style="width:72%;background:#fbbf24"></i></div><b>72%</b></div></td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="card" aria-label="VM 네트워크">
+      <div class="ct"><b>네트워크</b><span class="sm">guest.net · ipStack</span></div>
+      <div class="kv">
+        <span>IP(게스트 보고)</span><div class="mono">10.20.3.23 · fe80::…:3a1f</div>
+        <span>게이트웨이</span><div class="mono">10.20.3.1</div>
+        <span>DNS</span><div class="mono">10.20.0.53 · 10.20.0.54</div>
+        <span>DNS 역방향</span><div>web-kr1-023.demo.corp <span class="badge green">일치</span> <span class="sm">· 도구 ‘VM DNS’ 와 같은 판정</span></div>
+        <span>포트그룹 / vSwitch</span><div class="muted">수집하지 않음 — 2차(VM 장치 backing 을 vmcfg 에 추가하면 보인다)</div>
+        <span>IP 대장</span><div><a href="ObjectTabs.dc.html">10.20.3.0/24 · 원장 행 →</a></div>
+      </div>
+      <div class="note">핑은 지금 상세 창의 VmIpPing 그대로(버튼을 눌렀을 때만).</div>
+    </section>
+
+    <section class="card" aria-label="VM 스냅샷">
+      <div class="ct"><b>스냅샷</b><span class="badge amber">1개 · 2.4 GB</span><span class="sm">snapshot · layoutEx.file</span></div>
+      <div class="kv">
+        <span>개수 / 크기</span><div>1 / 2.4 GB</div>
+        <span>가장 오래된 것</span><div>2026-10-01 03:00 <span class="badge amber">35일</span></div>
+        <span>마지막 생성자</span><div>DEMO\svc-veeam <span class="sm">· 이벤트로 추정(이름에 VEEAM)</span></div>
+        <span>스냅샷 트리</span><div class="muted">이름 · 설명 · 부모 관계는 수집하지 않음 — 2차(snapshot.rootSnapshotList)</div>
+      </div>
+      <div class="note">스냅샷 삭제 · 되돌리기 같은 동작은 두지 않는다(조회 전용 — 상태를 바꾸는 도구는 ‘운영 작업’ 소속).</div>
+    </section>
+  </div>
+
+  <!-- 3) 호스트 › VM · 리소스 풀 · 사용 권한 · 업데이트 -->
+  <div class="lead">호스트 개체 › <b style="color:#e6edf6">VM</b>(지금 HostVmsModal 표를 탭에) · <b style="color:#e6edf6">리소스 풀</b>(VM.resourcePool 로 묶음) · <b style="color:#e6edf6">사용 권한</b> · <b style="color:#e6edf6">업데이트</b> — VM 개체의 같은 탭도 같은 틀</div>
+  <div style="display:grid;grid-template-columns:minmax(0,1.3fr) minmax(0,1fr);gap:12px;min-width:0">
+
+    <section class="card" aria-label="호스트의 VM">
+      <div class="ct"><b>VM 41</b><span class="chip on">전체 41</span><span class="chip">켜짐 37</span><span class="chip">꺼짐 4</span><span class="more sm">검색 · 열 제목 정렬 · CSV</span></div>
+      <div style="overflow-x:auto">
+        <table>
+          <thead><tr><th class="sort">이름 ▾</th><th>전원</th><th>vCPU</th><th>메모리</th><th>CPU %</th><th>MEM %</th><th>리소스 풀</th><th>열기</th></tr></thead>
+          <tbody>
+            <tr><td>web-kr1-023</td><td><span class="badge green">On</span></td><td>4</td><td>16 GB</td><td>23%</td><td>61%</td><td>Resources</td><td><a href="VmObject.dc.html">개체 →</a></td></tr>
+            <tr><td>web-kr1-031</td><td><span class="badge green">On</span></td><td>4</td><td>16 GB</td><td>18%</td><td>55%</td><td>Resources</td><td><a href="VmObject.dc.html">개체 →</a></td></tr>
+            <tr><td>db-kr1-004</td><td><span class="badge green">On</span></td><td>16</td><td>128 GB</td><td>64%</td><td>88%</td><td>RP-DB</td><td><a href="VmObject.dc.html">개체 →</a></td></tr>
+            <tr><td>batch-kr1-011</td><td><span class="badge gray">Off</span></td><td>8</td><td>32 GB</td><td class="muted">—</td><td class="muted">—</td><td>RP-Batch</td><td><a href="VmObject.dc.html">개체 →</a></td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="note">… 37개 더. 행 이름 = 지금 상세 창(빠른 확인), ‘개체 →’ = VM 개체 화면. 꺼진 VM 의 사용률은 ‘—’.</div>
+    </section>
+
+    <section class="card" aria-label="리소스 풀">
+      <div class="ct"><b>리소스 풀</b><span class="sm">VM.resourcePool 로 묶음 · 예약 · 제한 · 공유 값은 수집하지 않음</span></div>
+      <div style="overflow-x:auto">
+        <table>
+          <thead><tr><th class="sort">풀 ▾</th><th>VM</th><th>vCPU 합</th><th>메모리 합</th><th>예약 / 제한</th></tr></thead>
+          <tbody>
+            <tr><td>Resources</td><td>29</td><td>124</td><td>512 GB</td><td class="muted">수집하지 않음</td></tr>
+            <tr><td>RP-DB</td><td>6</td><td>72</td><td>384 GB</td><td class="muted">수집하지 않음</td></tr>
+            <tr><td>RP-Batch</td><td>6</td><td>22</td><td>44 GB</td><td class="muted">수집하지 않음</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="note">풀 자체 속성(ResourcePool.config)은 2차 — 1차는 VM 쪽 이름으로만 묶는다.</div>
+    </section>
+
+    <section class="card" aria-label="사용 권한">
+      <div class="ct"><b>사용 권한</b><span class="badge gray">권한 목록 수집하지 않음</span><span class="badge purple">2차</span></div>
+      <div class="kv">
+        <span>지금 아는 것</span><div>이 개체를 대상으로 한 권한 · 역할 변경 <b>이벤트</b>만(vm-changes) — 최근 90일 0건</div>
+        <span>수집하면</span><div class="muted">사용자/그룹 · 역할 · 정의 위치 · 전파(상속) — AuthorizationManager.RetrieveEntityPermissions · 관리자 판본만</div>
+      </div>
+      <div style="padding:0 14px 12px"><table class="ghost"><thead><tr><th>사용자 / 그룹</th><th>역할</th><th>정의 위치</th><th>전파</th></tr></thead><tbody><tr><td><i style="width:120px"></i></td><td><i style="width:90px"></i></td><td><i style="width:110px"></i></td><td><i style="width:30px"></i></td></tr><tr><td><i style="width:100px"></i></td><td><i style="width:70px"></i></td><td><i style="width:130px"></i></td><td><i style="width:30px"></i></td></tr></tbody></table></div>
+    </section>
+
+    <section class="card" aria-label="업데이트">
+      <div class="ct"><b>업데이트</b><span class="sm">버전 · 빌드만 안다 · 패치 상태는 2차</span></div>
+      <div class="kv">
+        <span>호스트</span><div>ESXi 8.0.3 build-24280767 <span class="sm">· fleet 안 같은 빌드 84 / 89 · vCenter 8.0.3 과 호환</span></div>
+        <span>재부팅 필요</span><div>아니오 <span class="sm">(hcfg)</span></div>
+        <span>VM(개체가 VM 일 때)</span><div>VMware Tools 12.3.5 <span class="badge green">최신</span> · 호환성 vmx-19 <span class="sm">· 업그레이드 가능 vmx-21(호스트 8.0)</span></div>
+        <span>vLCM 이미지 준수</span><div class="muted">수집하지 않음 — 2차</div>
+      </div>
+      <div class="note">‘Tools 업그레이드’ 동작은 지금 도구(/vms/upgrade-tools · 쓰기 범위)에서 — 이 탭은 조회 전용.</div>
+    </section>
+  </div>
+
+  <div class="faint" style="font-size:11.5px">가상 데이터 · 하위 칸 순서는 vSphere 의 개체 탭(모니터: 성능 · 이벤트 · 작업 / 구성: 하드웨어 · 설정) 을 따르되 수집하지 않는 칸은 숨기지 않고 ‘수집하지 않음 · 2차’ 로 보인다.</div>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1700}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>
