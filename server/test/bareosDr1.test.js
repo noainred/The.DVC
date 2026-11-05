@@ -254,6 +254,12 @@ test('⑥ 라우트 — 2대 묶음은 시험 1대 성공 뒤 · 재해 복구 �
   assert.ok(rec, '재해 복구 복원에 표지(dr)');
   registry.applyRestoreRow(ID.web, { jobid: rec.jobid, status: 'T', type: 'R', endedAt: Date.now() });
   r = await call('admin', 'POST', '/restore-check/bulk', { items: two, dr: true });
+  assert.match(r.j.plan.issue || '', /1대가 성공으로 끝난 뒤/, '버그 점검 B4-02: 끝맺음(네트워크 끊기) 전에는 시험이 끝나지 않았다');
+  registry.patchRestoreFinish(ID.web, rec.jobid, { nic: 'failed', detail: '권한 없음', at: Date.now() });
+  r = await call('admin', 'POST', '/restore-check/bulk', { items: two, dr: true });
+  assert.match(r.j.plan.issue || '', /1대가 성공으로 끝난 뒤/, '끊기 실패한 시험은 통과가 아니다');
+  registry.patchRestoreFinish(ID.web, rec.jobid, { nic: 'ok', at: Date.now() });
+  r = await call('admin', 'POST', '/restore-check/bulk', { items: two, dr: true });
   assert.equal(r.j.plan.ok, true, JSON.stringify(r.j.plan));
   // R4 — 실패로 끝난 복원의 이름: 그 뒤 인벤토리 수집(generatedAt)이 있으면 예약을 푼다
   const app = job('app');
@@ -265,7 +271,10 @@ test('⑥ 라우트 — 2대 묶음은 시험 1대 성공 뒤 · 재해 복구 �
   store.snapshot.generatedAt = iso(Date.now() - 120_000);   // 실패보다 앞선 인벤토리 — 아직 예약
   r = await call('admin', 'POST', '/restore-check/bulk', { items: one });
   assert.match(r.j.plan.items[0].issue || '', /최근 복원/);
-  store.snapshot.generatedAt = iso(Date.now() + 1000);      // 실패 뒤 인벤토리 — 껍데기가 없으면 다시 보낼 수 있다
+  store.snapshot.generatedAt = iso(Date.now() + 60_000);    // 실패 뒤 병합이지만 여유(수집 주기 · 시한) 안 — 끝나기 전에 읽은 인벤토리일 수 있다
+  r = await call('admin', 'POST', '/restore-check/bulk', { items: one });
+  assert.match(r.j.plan.items[0].issue || '', /최근 복원/, '여유 안에서는 풀지 않는다(반증 노트 ①)');
+  store.snapshot.generatedAt = iso(Date.now() + 31 * 60_000); // 끝을 본 뒤 여유를 넘긴 새 인벤토리 — 껍데기가 없으면 다시 보낼 수 있다
   const vcA = store.snapshot.vcenters.find((v) => v.id === 'vc-a');
   vcA.maintenance = true; vcA.status = 'maintenance';       // 점검중 vCenter 의 값은 낡은 인벤토리다 — 풀지 않는다
   r = await call('admin', 'POST', '/restore-check/bulk', { items: one });

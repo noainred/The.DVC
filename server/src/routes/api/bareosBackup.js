@@ -38,7 +38,7 @@ import { knownAgentNames } from '../../central/knownAgents.js';
 import { pollerStatus, pollOnce, requestReconcile } from '../../bareos/poller.js';
 import { restorePlan, placementDrift, placementAt, bulkRestorePlan, BULK_RESTORE_MAX, reservedRestoreNames, inventoryAtOf } from '../../bareos/restore.js';
 import { drItemIssue, drCheckView, drGateBlock, drTrialIssue } from '../../bareos/drPlan.js';
-import { normWaves, itemBody as drRunItemBody, createRun, getRun as getDrRun, stopRun, resumeRun, drRunsView, drRunsLoadError, drTick, drRunHeldIds } from '../../bareos/drRunner.js';   // 재해 복구 2차   // 재해 복구 1차(순수)
+import { normWaves, itemBody as drRunItemBody, createRun, getRun as getDrRun, stopRun, resumeRun, drRunsView, drRunsLoadError, drTick, drRunHeldIds, drRunHeldNames } from '../../bareos/drRunner.js';   // 재해 복구 2차   // 재해 복구 1차(순수)
 import { finishRestores } from '../../bareos/restoreFinish.js';
 import { savePolicy, policyLoadError, rehearsalStatus, runNow as runRehearsalNow, normPolicy, rehearsalBusy } from '../../bareos/rehearsal.js';
 import { loadDigest, saveDigest, digestLoadError, digestStatus, sendDigestNow, normDigest } from '../../bareos/digest.js';
@@ -55,7 +55,7 @@ import {
   planDirector, setupDirector, planFdIni, setupFdIni, readFdThumbprint, preflight, planFdPlugin, setupFdPlugin, VMWARE_POOL_FULL, VMWARE_SCHEDULE, newConsolePassword,
 } from '../../bareos/autoSetup.js';
 import { isSshAuthError, isSshHostKeyError } from '../../proxy/sshExec.js';
-import { tryLockJob, unlockJob } from '../../bareos/jobLocks.js';
+import { tryLockJob, unlockJob, tryHoldNames, releaseNames, heldRestoreNames, restoreNameKey } from '../../bareos/jobLocks.js';
 import { jobPolicyResolver, policyRev } from '../../bareos/policy.js';
 import { listGroups, groupsLoadError, groupsRev } from '../../bareos/groups.js';
 import { getMarks, marksUnreadable, marksRev } from '../../veeam/backupMarks.js';
@@ -1260,7 +1260,9 @@ function bulkRestoreGate(req, items, { dr = false, ctx = null } = {}) {
   // 최근 · 진행 중 새 VM 복원이 쓰는 이름(아직 인벤토리에 없다 — 반증 검토: 같은 이름 VM 이 둘이 되면 NIC 끊기도 손대지 못한다)
   //   판정은 restore.js reservedRestoreNames 하나(재해 복구 단계 실행기와 같다 — 반증 R4: 실패 · 취소는 그 뒤 인벤토리 수집이 있으면 푼다)
   const allJobs = ctx?.allJobs || listJobs();
-  const reservedNames = ctx?.reservedNames || reservedRestoreNames(allJobs, { snapAt: inventoryAtOf(store.get()), isOpen: restoreOpen });
+  const reservedNames0 = ctx?.reservedNames || reservedRestoreNames(allJobs, { snapAt: inventoryAtOf(store.get()), isOpen: restoreOpen });
+  // 보내는 중인 이름(다른 요청 · 실행기)과 진행 중 회차가 쓸 이름도 예약으로 본다(버그 점검 B3-04 — 원장 기록은 회신 뒤라 그 사이가 비었다)
+  const reservedNames = new Set([...reservedNames0, ...heldRestoreNames(), ...(ctx?.drHeldNames || drRunHeldNames())]);
   const plan = bulkRestorePlan({ items: list, jobOf: (id) => jobs.get(id) || null, dirOf: jobDir, snapshot: store.get(), pluginName: settings.defaults.pluginName, reservedNames, baseOf: restoreBaseOf(settings) });
   for (const r of plan.items) if (denied.has(r.id)) { r.ok = false; r.issue = denied.get(r.id); }   // 접근 · 진행 중 사유가 판정 사유보다 앞선다(더 근본적)
   if (dr) {
@@ -1306,6 +1308,9 @@ api.post('/tools/bareos-backup/restore/bulk', adminOnly, async (req, res) => {
     if (!tryLockJob(r.id)) { for (const id of locked) unlockJob(id); return res.status(409).json({ ok: false, reason: `‘${r.vmName}’ 의 다른 요청을 처리하는 중입니다 — 잠시 뒤 다시 시도하세요.` }); }
     locked.push(r.id);
   }
+  // 새 VM 이름 잡기(B3-04) — 판정과 보내기 사이에 다른 요청이 같은 이름을 보내지 않게. 원장 기록 뒤 finally 에서 놓는다
+  const heldNames = plan.items.filter((r) => r.mode === 'newVm' && r.plan?.target?.name).map((r) => restoreNameKey(jobs.get(r.id)?.vcenterId, r.plan.target.name));
+  if (!tryHoldNames(heldNames)) { for (const id of locked) unlockJob(id); return res.status(409).json({ ok: false, reason: '같은 새 VM 이름을 다른 요청이 지금 보내는 중입니다 — 잠시 뒤 다시 확인하세요.' }); }
   const batchId = `rb-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
   let noted = false;
   try {
@@ -1381,6 +1386,7 @@ api.post('/tools/bareos-backup/restore/bulk', adminOnly, async (req, res) => {
       ...(saveErr ? { saveError: '복원은 시작했지만 원장에 남기지 못했습니다 — 진행 · 네트워크 끊기가 화면에 나오지 않을 수 있습니다. Director 와 vCenter 에서 확인하세요.' } : {}) });
   } finally {
     for (const id of locked) unlockJob(id);
+    releaseNames(heldNames);
     if (noted) noteRestoreBatchEnd(batchId);
   }
 });
@@ -1445,7 +1451,7 @@ function drRunGate(req) {
   const issues = [];
   let dirId = '';
   const allJobs = listJobs();
-  const ctx = { allJobs, reservedNames: reservedRestoreNames(allJobs, { snapAt: inventoryAtOf(store.get()), isOpen: restoreOpen }), drHeld: drRunHeldIds() };
+  const ctx = { allJobs, reservedNames: reservedRestoreNames(allJobs, { snapAt: inventoryAtOf(store.get()), isOpen: restoreOpen }), drHeld: drRunHeldIds(), drHeldNames: drRunHeldNames() };
   for (let wi = 0; wi < waves.length; wi++) {
     const w = waves[wi];
     for (let i = 0; i < w.items.length; i += BULK_RESTORE_MAX) {
@@ -1492,7 +1498,9 @@ api.get('/tools/bareos-backup/dr/runs', adminOnly, (req, res) => {
   const vc = String(req.query?.vcenterId || '');
   if (vc && allowed && !allowed.has(vc)) return res.status(404).json({ ok: false, reason: '그 vCenter 를 찾을 수 없습니다.' });
   const v = drRunsView(allowed);
-  res.json({ ok: true, runs: vc ? v.runs.filter((r) => r.vcenterId === vc) : v.runs });
+  // writable — 조회는 되지만 쓰기 범위 밖인 회차는 화면이 멈추기 · 계속 버튼을 잠근다(집행은 drRunAccess 403 · v2.733 관례 · 버그 점검 B2 참고)
+  const list = (vc ? v.runs.filter((r) => r.vcenterId === vc) : v.runs).map((r) => ({ ...r, writable: bareosAccess(req.user, r.vcenterId, { write: true }) === 0 }));
+  res.json({ ok: true, runs: list });
 });
 
 /** 멈춤 · 계속 — 그 회차의 vCenter 쓰기 범위(조회 밖 404 · 쓰기 밖 403). 계속은 본인 OTP(다음 단계 복원을 보낸다). */
@@ -1507,9 +1515,10 @@ function drRunAccess(req, res) {
 api.post('/tools/bareos-backup/dr/runs/:id/stop', adminOnly, (req, res) => {
   const run = drRunAccess(req, res);
   if (!run) return;
-  try { stopRun(run.id, req.user?.username || ''); } catch (e) { return res.status(e?.code === 'conflict' ? 409 : e?.code === 'save-failed' ? 503 : 400).json({ ok: false, ...(e?.code ? { code: e.code } : {}), reason: String(e?.message || e) }); }
-  audit(req, 'Bareos 재해 복구', run.vcenterId, `복구 순서 ${run.id} 멈춤`);
-  res.json({ ok: true });
+  let st;
+  try { st = stopRun(run.id, req.user?.username || ''); } catch (e) { return res.status(e?.code === 'conflict' ? 409 : 400).json({ ok: false, ...(e?.code ? { code: e.code } : {}), reason: String(e?.message || e) }); }
+  audit(req, 'Bareos 재해 복구', run.vcenterId, `복구 순서 ${run.id} 멈춤${st.saved === false ? '(상태 저장 실패 — 다음 틱에 다시 저장)' : ''}`);
+  res.json({ ok: true, ...(st.saved === false ? { warning: '이 포탈에서는 멈췄지만 실행 상태를 저장하지 못했습니다(디스크 · 권한 — 서버 로그 확인). 저장되기 전에 포탈이 재시작되면 다시 돌 수 있습니다 — 저장 문제를 먼저 고치세요.' } : {}) });
 });
 api.post('/tools/bareos-backup/dr/runs/:id/resume', adminOnly, (req, res) => {
   if (isEdgeNode()) return res.status(409).json({ ok: false, code: 'edge-node', reason: DR_EDGE_REASON });
@@ -1518,6 +1527,16 @@ api.post('/tools/bareos-backup/dr/runs/:id/resume', adminOnly, (req, res) => {
   const run = drRunAccess(req, res);
   if (!run) return;
   if (run.state !== 'paused') return res.status(409).json({ ok: false, reason: '멈춤 상태인 회차만 계속할 수 있습니다.' });   // OTP 앞에서
+  // Director 전제 · 인증 정지도 OTP 앞에서(반증 의견 B2-03 — 없으면 계속이 OTP 를 쓰고 첫 걸음에서 바로 다시 멈춘다)
+  if (!isDemoActive() && run.directorId) {
+    const settings0 = effectiveSettings();
+    const jd = directorById(run.directorId, settings0);
+    if (!jd) return res.status(409).json({ ok: false, code: 'not-configured', reason: '이 회차의 Director 가 설정에 없습니다 — 설정을 확인하세요.' });
+    const miss = directorConn(jd).missing;
+    if (miss?.length) return res.status(409).json({ ok: false, code: 'not-configured', reason: `‘${jd.name}’ Director 설정이 덜 됐습니다(${miss.join('·')}) — 설정에서 먼저 채우세요.` });
+    const stop = bareosAuthGuard.authStopFor(directorCred(jd));
+    if (stop) return res.status(409).json({ ok: false, code: 'auth-stopped', reason: `‘${jd.name}’ Director 인증 실패로 멈춘 상태입니다 — 접속값을 고치고 연결 시험이 성공한 뒤 계속하세요.` });
+  }
   if (config.auth.enabled) { const v = verifyUserOtp(name, req.body?.otp); if (!v.ok) return res.status(403).json({ ok: false, reason: `OTP 인증 실패 — ${v.reason}` }); }
   try { resumeRun(run.id, name); } catch (e) { return res.status(e?.code === 'conflict' ? 409 : e?.code === 'save-failed' ? 503 : 400).json({ ok: false, ...(e?.code ? { code: e.code } : {}), reason: String(e?.message || e) }); }
   audit(req, 'Bareos 재해 복구', run.vcenterId, `복구 순서 ${run.id} 계속(멈춤 사유: ${String(run.reason || '').slice(0, 200)})`);

@@ -32,7 +32,7 @@ import { drItemIssue, drGateBlock } from './drPlan.js';
 import { pluginValueIssue } from './names.js';
 import { noteRestoreBatchStart, noteRestoreBatchEnd } from './inflight.js';
 import { RESTORES_DEADLINE_MS } from './edgeOps.js';
-import { tryLockJob, unlockJob } from './jobLocks.js';
+import { tryLockJob, unlockJob, tryHoldNames, releaseNames, restoreNameKey } from './jobLocks.js';
 import { registryHosts } from './vcHost.js';
 import { logAudit } from '../audit.js';
 
@@ -43,12 +43,15 @@ export const DR_CONC_MAX = BULK_RESTORE_MAX;
 const RUNS_KEEP = 20;   // 끝난 · 멈춘 회차 보관 수(진행 중 · 멈춤은 세지 않고 모두 남긴다)
 /** 보낸 뒤 원장에서 그 복원 행이 사라졌을 때(다시 묶기 · 보관 상한) 결과 모름으로 보기까지 — 끝맺음 상한(24시간)보다 길게. */
 const SENT_LOST_MS = 48 * 3600_000;
+/** 첫 수집 전 골격 · 수집 대기(pending)에서 멈추지 않고 기다리는 상한(버그 점검 B1-04 · 반증 의견 — 엣지가 push 를 안 하면 말없이 서 있지 않게). */
+const INVENTORY_WAIT_MS = 30 * 60_000;
 const ACTIVE = new Set(['running', 'paused']);
 registerStateFile('bareos-dr-runs.json');
 const FILE = () => path.join(config.configDir, 'bareos-dr-runs.json');   // ⚠ 리터럴 형태 유지 — scripts/config-doc.mjs 가 이 모양으로 파일을 찾는다
 const fail = (code, msg) => Object.assign(new Error(msg), { code });
 
 let _db = null; let _bad = ''; let _timer = null; let _pollDirs = () => ({});
+let _dirty = false;   // 멈춤 저장이 실패했다 — 메모리는 멈춘 채로 두고 다음 틱에 다시 저장한다(반증 노트: 멈춤은 '보내지 않는 쪽' 이라 되돌리지 않는다)
 const _stepping = new Set();   // 지금 걷는 회차 id(회차마다 재진입 가드)
 
 /** 상태 파일 모양(버그 점검 B3-06 — JSON 이지만 모양이 틀리면 빈 상태로 보고 다음 저장이 원본을 덮었다 · 회차에 waves 가 없으면 GET 이 500). */
@@ -89,7 +92,7 @@ function saveOrRollback(rollback) {
   }
 }
 export const drRunsLoadError = () => { load(); return _bad; };
-export function _resetDrRunsForTest() { _db = null; _bad = ''; _stepping.clear(); }
+export function _resetDrRunsForTest() { _db = null; _bad = ''; _dirty = false; _stepping.clear(); }
 /** 폴러의 Director 조회 상태 공급자(drGateBlock 의 Director 판정 — poller 를 import 하면 순환이라 기동 때 넣는다). */
 export function setDrPollDirs(fn) { _pollDirs = typeof fn === 'function' ? fn : () => ({}); }
 
@@ -121,7 +124,9 @@ export function normWaves(input) {
     });
     if (!items.length) throw fail('invalid', `${i + 1}단계에 VM 이 없습니다.`);
     total += items.length;
-    return { name: clip(w?.name, 40).trim() || `${i + 1}단계`, concurrency: conc, verify: w?.verify === true, items };
+    // 단계 이름의 제어 · 양방향 문자는 공백으로(버그 점검 B2-06 — 감사 · 사유 · 업그레이드 대기 표지에 실려 표시가 뒤집혔다)
+    const wname = clip(w?.name, 40).replace(/[\u0000-\u001f\u007f\u200e\u200f\u202a-\u202e\u2066-\u2069]/g, ' ').trim();
+    return { name: wname || `${i + 1}단계`, concurrency: conc, verify: w?.verify === true, items };
   });
   if (total > DR_ITEMS_MAX) throw fail('invalid', `한 회차는 ${DR_ITEMS_MAX}대까지입니다.`);
   return out;
@@ -160,6 +165,19 @@ export function drRunHeldIds() {
   }
   return s;
 }
+/** 진행 중 · 멈춤 회차의 대기 · 보내는 중 · 복원 중 VM 의 새 이름(이름 예약 키) — 사람 경로(묶음 복원)가 같은 새 이름을 다른 VM 에 쓰지 않게(B3-04 반증 의견). */
+export function drRunHeldNames() {
+  const s = new Set();
+  for (const r of load().runs) {
+    const active = ACTIVE.has(r.state);
+    for (const w of r.waves || []) for (const it of w.items || []) if (it.newVm?.name && (it.state === 'sending' || (active && (it.state === 'queued' || it.state === 'sent')))) s.add(restoreNameKey(r.vcenterId, it.newVm.name));
+  }
+  return s;
+}
+/** 진행 중 · 멈춤 회차가 있는 vCenter — 정기 복원 검증은 그 법인을 미룬다(버그 점검 B1-07 · B2-07: 회차가 보낼 VM 을 검증이 따로 복원할 수 있었고, 재해 복구 중 Director 부하도 줄인다). */
+export function drActiveVcenterIds() {
+  return new Set(load().runs.filter((r) => ACTIVE.has(r.state)).map((r) => String(r.vcenterId)));
+}
 function findRun(id) { return load().runs.find((r) => r.id === id) || null; }
 export function getRun(id) { const r = findRun(id); return r ? JSON.parse(JSON.stringify(r)) : null; }
 /** 멈춤 — 보내지 않은 항목은 그대로 둔다(보낸 복원은 Director 에서 계속 돈다). */
@@ -167,10 +185,11 @@ export function stopRun(id, by, now = Date.now()) {
   const r = findRun(id);
   if (!r) throw fail('not-found', '그 회차를 찾을 수 없습니다.');
   if (!ACTIVE.has(r.state)) throw fail('conflict', '이미 끝났거나 멈춘 회차입니다.');
-  const prev = { state: r.state, reason: r.reason, updatedAt: r.updatedAt };
   Object.assign(r, { state: 'stopped', reason: `${clip(by, 64)} 이(가) 멈춤 — 보내지 않은 VM 은 보내지 않습니다(보낸 복원은 계속 돕니다)`, updatedAt: now });
-  saveOrRollback(() => Object.assign(r, prev));
-  return getRun(id);
+  // 멈춤은 되돌리지 않는다 — 저장이 실패해도 이 프로세스는 보내지 않고, 틱마다 다시 저장한다(재시작 전에 저장되지 않으면 다시 돌 수 있다 — 응답이 알린다)
+  let saved = true;
+  try { save(); } catch (e) { saved = false; _dirty = true; console.warn(`[bareos] 재해 복구 멈춤 저장 실패(다음 틱에 다시): ${clip(e?.message || e, 300)}`); }
+  return { ...getRun(id), saved };
 }
 /** 계속 — 멈춤(paused)만. 그 단계의 실패 · 결과 모름을 확인했다고 보고 다음으로 넘긴다(결과 모름 VM 은 다시 보내지 않는다). */
 export function resumeRun(id, by, now = Date.now()) {
@@ -274,14 +293,22 @@ async function step(run, now) {
   const snapshot = store.get();
   // 첫 수집 전 골격 · 그 vCenter 수집 대기 — 점검 ✕ 로 멈추지 않고 이번 틱만 넘긴다(버그 점검 B1-04 — 재시작 · 자동 업그레이드마다 회차가 멈춰 OTP 로 계속해야 했다)
   const vcNow = (snapshot?.vcenters || []).find((v) => String(v.id) === String(run.vcenterId));
-  if (snapshot?.initial || vcNow?.status === 'pending') { if (changed) { run.updatedAt = now; save(); } return; }
+  if (snapshot?.initial || vcNow?.status === 'pending') {
+    run.waitSince = Number(run.waitSince) || now;
+    if (now - run.waitSince > INVENTORY_WAIT_MS) {
+      Object.assign(run, { state: 'paused', reason: `vCenter 인벤토리를 ${Math.round(INVENTORY_WAIT_MS / 60_000)}분 넘게 읽지 못해 멈췄습니다(수집 대기) — 수집을 확인한 뒤 계속을 누르세요`, updatedAt: now });
+      delete run.waitSince;
+    } else run.reason = 'vCenter 인벤토리 수집을 기다리는 중입니다(재시작 직후) — 읽으면 이어 갑니다';
+    run.updatedAt = now; save(); return;
+  }
+  if (run.waitSince) { delete run.waitSince; run.reason = ''; }
   const vcJobs = listJobsOf(run.vcenterId);   // 판정 · 이름 예약은 vCenter 로 나뉜다(B3-01)
   // 점검 ✕ 는 보내지 않고 멈춘다(시험 1대 규칙은 시작 때 — 회차는 여러 대라 count 1 로 본다)
   const block = drGateBlock({ items: [{ vcenterId: run.vcenterId }], jobs: vcJobs, settings, snapshot, pollDirs: _pollDirs() || {}, regHosts: registryHosts(), lastOkOf: () => null, directorOf: (id) => directorById(id, settings), now });
   if (block) { Object.assign(run, { state: 'paused', reason: block, updatedAt: now }); save(); return; }
   // Director 접속값 · 인증 정지 — 보내지 않고 멈춘다(버그 점검 B2-03 · B2-04: 덜 된 설정으로 실패하거나, 틀린 줄 아는 비밀번호로 다시 로그인했다 — 자동 재시도 금지)
   const dirNow = run.directorId ? directorById(run.directorId, settings) : null;
-  if (!isDemoActive(settings) && dirNow) {
+  if (!isDemoActive() && dirNow) {
     const miss = directorConn(dirNow).missing;
     if (miss?.length) { Object.assign(run, { state: 'paused', reason: `‘${dirNow.name}’ Director 설정이 덜 됐습니다(${miss.join('·')}) — 설정에서 채운 뒤 계속을 누르세요`, updatedAt: now }); save(); return; }
     const stop = bareosAuthGuard.authStopFor(directorCred(dirNow));
@@ -289,6 +316,7 @@ async function step(run, now) {
   }
   const pick = queued.slice(0, Math.min(free, BULK_RESTORE_MAX));
   const locked = [];
+  const held = [];   // 잡은 새 이름(원장 기록 뒤 finally 에서 놓는다)
   const jobs = new Map();
   let blocked = 0;   // 이번 걸음에서 보내기 전에 막힌 대수 — 단계 끝까지 기다리지 않고 바로 멈춘다(버그 점검 B1-02 ②)
   for (const it of pick) {
@@ -314,6 +342,13 @@ async function step(run, now) {
       const why = !p?.ok ? (p?.issue || '판정에서 막혔습니다') : drItemIssue(p);
       if (why) { Object.assign(it, { state: 'failed', reason: clip(`${why}(보내지 않았습니다)`, 300) }); changed = true; blocked += 1; } else ready.push({ it, p });
     });
+    // 같은 새 이름을 지금 다른 요청이 보내는 중이면 이번 틱은 그 VM 을 보내지 않는다(대기 그대로 — B3-04)
+    const nameKeys = [];
+    for (let i = ready.length - 1; i >= 0; i--) {
+      const k = restoreNameKey(run.vcenterId, ready[i].p.plan?.target?.name || ready[i].it.newVm?.name);
+      if (tryHoldNames([k])) nameKeys.push(k); else ready.splice(i, 1);
+    }
+    held.push(...nameKeys);
     if (!ready.length) { pauseBlocked(); run.updatedAt = now; save(); return; }
     const dirId = plan.directorId || run.directorId;
     const batchId = `${run.id}-${now.toString(36)}`;
@@ -374,7 +409,7 @@ async function step(run, now) {
     }
     pauseBlocked();
     save();
-  } finally { for (const id of locked) unlockJob(id); }
+  } finally { for (const id of locked) unlockJob(id); releaseNames(held); }
 }
 
 /**
@@ -385,6 +420,7 @@ async function step(run, now) {
 export async function drTick(now = Date.now()) {
   const db = load();
   if (_bad) return null;
+  if (_dirty) { try { save(); _dirty = false; } catch { /* 다음 틱 */ } }
   // 멈춘 · 끝난 회차에 남은 'sending'(보내는 중에 멈춘 뒤 재시작) — 걷지 않는 회차도 결과 모름 기록까지는 한다(B1-03 · B3-02)
   let fixed = false;
   for (const r of db.runs) {
