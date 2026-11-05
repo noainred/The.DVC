@@ -14,7 +14,7 @@ import STable from '../components/STable.jsx';
 import { vmSearchTerm, vmSearchSummary, vcNameOf, powerLabel, memText, VM_SEARCH_LIMIT } from './vcVmSearchText.js';
 import { countableTotals, PARTIAL_TITLE } from './corpSiteStatus.js'; // v2.741(WEB-01) 법인 표와 같은 '셀 수 있는 vCenter' 판정
 import { hostCapShort, hostCapFootnote, hostCapTotal } from './hostCapacityText.js'; // v2.742(LEFT-06): 용량 모름 호스트는 총량에서 빠졌다
-import { parseVcRoute, vcHash, currentHash, goHash, onHashChange } from './vcd/vcdRoute.js'; // v2.896: 상세 · 개체 보기 주소(#/vcenters/<id>[/vm|host/<id>])
+import { parseVcRoute, vcHash, currentHash, goHash, onHashChange } from './vcd/vcdRoute.js'; // v2.895: 상세 · 개체 보기 주소(#/vcenters/<id>[/vm|host/<id>])
 import { backupPairCell, backupTotals } from './veeamBadge.js'; // v2.757 카드의 VM 백업 수량 · v2.778.1 veeam/snapshot 두 수
 
 /**
@@ -187,7 +187,7 @@ function Bar({ label, pct, detail, title }) {
 
 export default function VCenters({ onSelectSite, resetSignal }) {
   const { data, error, loading } = usePolling('/vcenters', {}, 15_000);
-  // v2.896: 연 vCenter 는 주소에서 읽는다(#/vcenters/<id> — 새로고침 · 공유 · 뒤로 가기). 열고 닫기는 주소를 바꾸고, hashchange 가 상태를 맞춘다.
+  // v2.895: 연 vCenter 는 주소에서 읽는다(#/vcenters/<id> — 새로고침 · 공유 · 뒤로 가기). 열고 닫기는 주소를 바꾸고, hashchange 가 상태를 맞춘다.
   const [openId, setOpenIdState] = useState(() => parseVcRoute(currentHash()).vcId);
   const setOpenId = (id) => { goHash(vcHash(id || null)); setOpenIdState(id || null); };
   useEffect(() => onHashChange(() => {
@@ -205,7 +205,7 @@ export default function VCenters({ onSelectSite, resetSignal }) {
   // 빠른 찾기(특수 기능의 '메뉴 빠른 찾기'와 동일 UX) — 훅은 조기 return 위에 선언(React #310).
   const [query, setQuery] = useState('');
   // 상단메뉴 Platform 재클릭(resetSignal 증가) 시 vCenter 상세 드릴다운을 닫고 전체 목록으로 복귀.
-  // v2.896: 첫 렌더(주소로 바로 연 상세)에는 닫지 않는다 — 신호가 실제로 바뀐 뒤에만.
+  // v2.895: 첫 렌더(주소로 바로 연 상세)에는 닫지 않는다 — 신호가 실제로 바뀐 뒤에만.
   const resetSeen = useRef(resetSignal);
   useEffect(() => {
     if (resetSeen.current === resetSignal) return;

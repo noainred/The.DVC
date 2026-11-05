@@ -1,5 +1,5 @@
 /**
- * views/vcd/ObjectShell.jsx — 개체 보기의 공통 틀(v2.896 — 승인 시안 ⑧⑨): 경로 줄(← 돌아가기) · 개체 머리 · 탭 줄.
+ * views/vcd/ObjectShell.jsx — 개체 보기의 공통 틀(v2.895 — 승인 시안 ⑧⑨): 경로 줄(← 돌아가기) · 개체 머리 · 탭 줄.
  * 새 셸이 아니다 — vCenter 상세 화면 안에서 탭 자리를 대신한다(기본값 8). 탭 줄은 vCenter 탭과 같은 모양(한 줄 · 넘치면 그 줄만 가로 스크롤).
  */
 import React from 'react';

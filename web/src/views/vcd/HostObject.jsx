@@ -1,5 +1,5 @@
 /**
- * views/vcd/HostObject.jsx — ESXi 호스트 '개체 보기'(v2.896 — 승인 시안 ⑨⑩ · 기본값 8~10). vSphere Client 의 호스트 개체 탭 9개.
+ * views/vcd/HostObject.jsx — ESXi 호스트 '개체 보기'(v2.895 — 승인 시안 ⑨⑩ · 기본값 8~10). vSphere Client 의 호스트 개체 탭 9개.
  *   값은 /hosts 한 행 + 캐시(hcfg · perfc) + /vms(이 호스트 위) + 온디맨드(이벤트 · 메트릭)만 — 새 수집 없음.
  *   섹션은 호스트 상세 창 · 전체 페이지(#/hosts/<id>)의 것을 그대로 쓴다(복제 금지). 더 자세한 표(NIC · 스토리지 경로 · 재부팅 · iDRAC)는 전체 페이지로 보낸다.
  */

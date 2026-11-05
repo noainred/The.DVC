@@ -40,10 +40,10 @@ import SummaryTab from './vcd/SummaryTab.jsx';
 import MonitorTab from './vcd/MonitorTab.jsx';
 import ConfigureTab from './vcd/ConfigureTab.jsx';
 import { DatacenterTab, ExtensionsTab, PermsTab, LinkedTab, UpdatesTab } from './vcd/InventoryTabs.jsx';
-// v2.896(사용자 요청 '폴더에서 VM 을 vCenter 처럼 — 별도 버튼 · ESXi 호스트도'): 개체 보기 — 주소 #/vcenters/<vc>/vm|host/<id>[/<탭>] (승인 시안 ⑧~⑪ · 기본값 8~10).
+// v2.895(사용자 요청 '폴더에서 VM 을 vCenter 처럼 — 별도 버튼 · ESXi 호스트도'): 개체 보기 — 주소 #/vcenters/<vc>/vm|host/<id>[/<탭>] (승인 시안 ⑧~⑪ · 기본값 8~10).
 import { parseVcRoute, vcHash, currentHash, goHash, replaceHash, onHashChange } from './vcd/vcdRoute.js';
 import { normObjTab, TUNING_TAB } from './vcd/objTabs.js';
-import { VmTuning, HostTuning } from './vcd/TuningTabs.jsx'; // v2.897 성능 튜닝 탭(승인 시안 ⑫⑬ · 기본값 11~13)
+import { VmTuning, HostTuning } from './vcd/TuningTabs.jsx'; // v2.895 성능 튜닝 탭(승인 시안 ⑫⑬ · 기본값 11~13)
 import VmObject from './vcd/VmObject.jsx';
 import HostObject from './vcd/HostObject.jsx';
 
@@ -294,7 +294,7 @@ export default function VCenterDetail({ site, onBack }) {
     if (t === 'monitor' && (sub || k === 'trend')) setMonSub(sub || 'perf');
     if (t === 'configure' && sub) setCfgSub(sub);
   };
-  // v2.896 개체 보기 — 주소가 진실의 원천이다(새로고침 · 공유 · 뒤로 가기). 다른 vCenter 의 주소는 무시한다.
+  // v2.895 개체 보기 — 주소가 진실의 원천이다(새로고침 · 공유 · 뒤로 가기). 다른 vCenter 의 주소는 무시한다.
   const [obj, setObj] = useState(() => { const r = parseVcRoute(currentHash()); return r.vcId === vcenterId ? r.obj : null; });
   useEffect(() => onHashChange(() => { const r = parseVcRoute(currentHash()); if (r.vcId === vcenterId) setObj(r.obj); }), [vcenterId]);
   const openObj = (type, id) => { setSel(null); setObj({ type, id, tab: '' }); goHash(vcHash(vcenterId, { type, id })); };
@@ -908,7 +908,7 @@ function Leaf({ icon, label, sub, badge, onClick, onObj }) {
     </div>
   );
 }
-/** v2.896: 트리 행의 '개체 보기' — 행 이름(지금의 상세 창)과 따로 · 1440 은 마우스를 올리면 · 400 · 터치는 항상 보인다(CSS .vcd-objbtn). */
+/** v2.895: 트리 행의 '개체 보기' — 행 이름(지금의 상세 창)과 따로 · 1440 은 마우스를 올리면 · 400 · 터치는 항상 보인다(CSS .vcd-objbtn). */
 function ObjBtn({ onClick }) {
   return <button type="button" className="vcd-objbtn" title="vSphere 처럼 탭으로 봅니다(개체 보기)" onClick={(e) => { e.stopPropagation(); onClick(); }}>⤢ 개체 보기</button>;
 }
@@ -997,7 +997,7 @@ export function VmUsageCell({ enabled, u, known, days, loading, synthesized, pow
 
 // 가상화율 색상 임계값 — CPU: 2.5 주의/4 위험, MEM: 1.0 주의(오버커밋)/1.5 위험.
 // 트리 배지(VirtBadge)와 '전체 현황' 표가 같은 기준으로 색을 쓰도록 한 곳에 둔다.
-// 기준값은 vcdVirt.js RATIO_LEVELS 한 곳(v2.897 — 성능 튜닝 탭과 같은 값).
+// 기준값은 vcdVirt.js RATIO_LEVELS 한 곳(v2.895 — 성능 튜닝 탭과 같은 값).
 const ratioColor = (r, isMem) => {
   const lv = ratioLevel(r, isMem);
   return lv === 'crit' ? '#ef4444' : lv === 'warn' ? '#f59e0b' : '#22c55e';

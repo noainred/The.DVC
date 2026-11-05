@@ -8,7 +8,7 @@ import { normObjTab, TUNING_TAB } from './objTabs.js';
 
 const st = (axes, k) => axes.find((a) => a.k === k);
 
-describe('성능 튜닝(v2.897) — 기준값은 기존 화면 · 규칙과 같다', () => {
+describe('성능 튜닝(v2.895) — 기준값은 기존 화면 · 규칙과 같다', () => {
   it('사용률 75 · 90 · 데이터스토어 90 · 95(포탈 알람 규칙) · 가상화율 2.5 · 4 / 1.0 · 1.5(트리 색)', () => {
     expect([usageLevel(74), usageLevel(75), usageLevel(90), usageLevel(null)]).toEqual(['ok', 'warn', 'crit', null]);
     expect([dsLevel(90), dsLevel(91), dsLevel(96), dsLevel('')]).toEqual(['ok', 'warn', 'crit', null]);

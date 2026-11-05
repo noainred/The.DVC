@@ -1,5 +1,5 @@
 /**
- * views/vcd/VmObject.jsx — VM '개체 보기'(v2.896 — 승인 시안 ⑧⑩⑪ · 기본값 8~10). vSphere Client 의 VM 개체 탭 8개.
+ * views/vcd/VmObject.jsx — VM '개체 보기'(v2.895 — 승인 시안 ⑧⑩⑪ · 기본값 8~10). vSphere Client 의 VM 개체 탭 8개.
  *   값은 /vms 한 행 + 캐시(vmcfg cfg · dev · perfc) + 온디맨드(파티션 · 이벤트 · 메트릭 — 열 때 1회)만 — 새 수집 없음.
  *   섹션은 지금 VM 상세 창(components/EntityDetail.jsx)의 것을 그대로 쓴다(복제 금지). 상태를 바꾸는 동작은 지금 버튼(권한 · 쓰기 범위) 그대로.
  */

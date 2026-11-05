@@ -1,5 +1,5 @@
 /**
- * views/vcd/vcdRoute.js — vCenter 화면 주소(v2.896 — 개체 보기 · 승인 시안 ⑧~⑪ · 기본값 8: 같은 vCenter 화면의 탭 자리 + 해시 주소).
+ * views/vcd/vcdRoute.js — vCenter 화면 주소(v2.895 — 개체 보기 · 승인 시안 ⑧~⑪ · 기본값 8: 같은 vCenter 화면의 탭 자리 + 해시 주소).
  *
  *   #/vcenters                                 vCenter 목록
  *   #/vcenters/<vcId>                          그 vCenter 상세(탭 12개)

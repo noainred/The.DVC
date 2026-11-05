@@ -5,7 +5,7 @@ import {
   hostDatastoresFromVms, sameBuildCount, vmSnapshotFacts, toolsStatusBadge,
 } from './objTabs.js';
 
-describe('개체 보기 주소(v2.896)', () => {
+describe('개체 보기 주소(v2.895)', () => {
   it('목록 · 상세 · VM · 호스트 · 탭 — 콜론이 든 id 도 왕복한다', () => {
     expect(parseVcRoute('#/vcenters')).toEqual({ vcId: null, obj: null });
     expect(parseVcRoute('#/vcenters/vc-us-east')).toEqual({ vcId: 'vc-us-east', obj: null });

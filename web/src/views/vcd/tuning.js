@@ -1,5 +1,5 @@
 /**
- * views/vcd/tuning.js — '성능 튜닝' 탭(VM · ESXi 호스트 개체 보기 — v2.897 · 승인 시안 ⑫⑬ · 기본값 11~13).
+ * views/vcd/tuning.js — '성능 튜닝' 탭(VM · ESXi 호스트 개체 보기 — v2.895 · 승인 시안 ⑫⑬ · 기본값 11~13).
  *
  * 새 판정을 만들지 않는다 — 이미 있는 판정을 한 자리에 모은다(순수 · vitest 고정):
  *   · 자원 적정화 = 서버 `/tools/rightsize`(analyzeRightsize — 정책 · 감축 금지 신호 포함)의 verdict 그대로

@@ -200,7 +200,7 @@ describe('v2.895 vCenter 탭 12개 — 렌더(얕게)', () => {
 });
 
 
-describe('v2.896 개체 보기 — 렌더(얕게)', () => {
+describe('v2.895 개체 보기 — 렌더(얕게)', () => {
   const site = { id: 'vc1', name: 'VC1', status: 'connected', version: '8.0.2', build: '222', metrics: {}, location: {} };
   const hosts = [{ id: 'vc1:host-1', vcenterId: 'vc1', name: 'esx-1', cluster: 'CL1', connectionState: 'CONNECTED', version: '8.0.2', build: '1', vcDatacenter: 'DC1', vmCount: 2 }];
   const vms = [
@@ -269,7 +269,7 @@ describe('v2.896 개체 보기 — 렌더(얕게)', () => {
   });
 });
 
-describe('v2.897 성능 튜닝 탭 — 렌더(얕게)', () => {
+describe('v2.895 성능 튜닝 탭 — 렌더(얕게)', () => {
   it('VM — 라이트사이징 권한이 없으면 부르지 않고 권한 안내 · 진단 축 5개', async () => {
     const { VmTuning } = await import('./TuningTabs.jsx');
     H.denyTools = ['rightsizing'];

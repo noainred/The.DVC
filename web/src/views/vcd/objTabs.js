@@ -1,5 +1,5 @@
 /**
- * views/vcd/objTabs.js — VM · ESXi 호스트 '개체 보기' 의 탭과 묶음(v2.896 — 승인 시안 ⑧~⑪ · 기본값 8~10).
+ * views/vcd/objTabs.js — VM · ESXi 호스트 '개체 보기' 의 탭과 묶음(v2.895 — 승인 시안 ⑧~⑪ · 기본값 8~10).
  * 순수 모듈(vitest 고정). 화면은 vcd/VmObject.jsx · HostObject.jsx · ObjectShell.jsx.
  *  - 새 수집 없음: /vms · /hosts 한 행 + 캐시(vmcfg cfg·dev · hcfg · perfc) + 온디맨드(메트릭 · 파티션 · 이벤트)만.
  *  - 수집하지 않는 것(네트워크 어댑터 장치 · 포트그룹 · 권한 목록 · 스냅샷 트리 · 리소스 풀 속성 · 호스트별 DS 마운트 · vLCM)은 탭을 숨기지 않고 '수집하지 않음 · 2차'.
@@ -29,7 +29,7 @@ export const HOST_OBJ_TABS = Object.freeze([
   { k: 'updates', label: '업데이트' },
 ]);
 
-/** v2.897: vSphere 에 없는 포탈 전용 탭 — 탭 줄 맨 끝(구분선 뒤 · 기본값 13 '성능 튜닝'). VM · 호스트 공통. */
+/** v2.895: vSphere 에 없는 포탈 전용 탭 — 탭 줄 맨 끝(구분선 뒤 · 기본값 13 '성능 튜닝'). VM · 호스트 공통. */
 export const TUNING_TAB = Object.freeze({ k: 'tuning', label: '성능 튜닝' });
 
 /** 개체 종류별 탭 목록 · 모르는 탭 키는 요약으로(포탈 전용 탭 'tuning' 은 둘 다 받는다). */

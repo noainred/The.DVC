@@ -37,7 +37,7 @@ import { vmCfgFindings, vmCfgRows, VM_CFG_TEXT } from '../views/vmcfg/vmCfgText.
 import { hostCfgFindings, hostCfgRows, HOST_CFG_TEXT, findingDetail as hostFindingDetail } from '../views/hostcfg/hostCfgText.js'; // v2.699
 import { MOVE_KIND_LABEL, fmtTs as vmChgTs, routeText, changeText, vmHistoryNotCollectedText, vmHistoryLagText } from '../views/vmchanges/vmChangesText.js'; // v2.702 · v2.733(C1-01) · v2.772(Z4-2)
 import { vmTagLine } from '../views/tags/vmTagsText.js'; // v2.703
-import { vcHash } from '../views/vcd/vcdRoute.js'; // v2.896 개체 보기(같은 vCenter 화면 · 해시 주소)
+import { vcHash } from '../views/vcd/vcdRoute.js'; // v2.895 개체 보기(같은 vCenter 화면 · 해시 주소)
 import { vmContentionFindings, CONTENTION_TEXT, avgMaxText, msText } from '../views/contention/contentionText.js'; // v2.706(C2·C3)
 import { CLUSTER_TEXT, clusterDetailRows, vmRulesText, findingDetail as clusterFindingDetail, ageText as clusterAgeText, clusterOfParams, clusterMissLine } from '../views/clustercfg/clusterCfgText.js'; // v2.701 · v2.742(VC-05) 조회 인자·빈 사유
 
@@ -733,7 +733,7 @@ export function EntityDetail({ type, item, onClose }) {
 }
 
 /**
- * v2.896(사용자 요청 '폴더에서 VM 을 vCenter 에서 보는 것처럼 — 별도 버튼으로 · ESXi 호스트도'): 이 창(빠른 확인)을 닫고
+ * v2.895(사용자 요청 '폴더에서 VM 을 vCenter 에서 보는 것처럼 — 별도 버튼으로 · ESXi 호스트도'): 이 창(빠른 확인)을 닫고
  * 같은 vCenter 화면의 '개체 보기'(vSphere 식 탭)로 간다. 주소는 #/vcenters/<vc>/vm|host/<id> — 새로고침 · 공유가 된다.
  */
 export function ObjectViewButton({ type, item, onClose }) {

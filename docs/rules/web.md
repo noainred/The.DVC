@@ -36,8 +36,8 @@
 - (v2.888 추가) C-2 · C-3 — 위키 즐겨찾기 · 최근 본 · 많이 본 · 슬래시 명령 · 이슈 CSV · 보드 끌기 · 보드에 필터 · 작업 기록 · SLA · 버전 · 쓰기 응답 범위
 - (v2.889 추가) C-4 · C-5 — 첨부(인증 붙여 받기 · attach: 주소) · 포탈 매크로 · 포함 · 인라인 댓글 · 담당/당번 · 관리자 템플릿 · 캘린더 · 내보내기
 - (v2.895 추가) vCenter 상세 탭 12개(시안 `docs/design/vcenter-tabs` ①~⑦) — 탭 목록 · 옛 키 · 하위 칸 · 묶음은 `views/vcd/vcdTabs.js` 하나 · 도구 데이터는 그 도구 권한일 때만 · 포탈 알람은 '포탈 규칙'
-- (v2.896 추가) VM · ESXi 호스트 개체 보기(시안 ⑧~⑪) — 주소 `#/vcenters/<vc>/vm|host/<id>[/<탭>]` 는 `views/vcd/vcdRoute.js` 하나 · 트리 행 · 상세 창의 '⤢ 개체 보기' · 섹션은 EntityDetail 것을 재사용
-- (v2.897 추가) 개체 보기 › 성능 튜닝(시안 ⑫⑬) — 판정은 기존 모듈(rightsize verdict · contention · vmcfg · hcfg · 가상화율 RATIO_LEVELS · 사용률 75/90 · DS 90/95)을 `vcd/tuning.js` 한 곳에서 모은다 · 새 서버 경로 없음 · 계획은 저장 없이 내보내기만
+- (v2.895 추가) VM · ESXi 호스트 개체 보기(시안 ⑧~⑪) — 주소 `#/vcenters/<vc>/vm|host/<id>[/<탭>]` 는 `views/vcd/vcdRoute.js` 하나 · 트리 행 · 상세 창의 '⤢ 개체 보기' · 섹션은 EntityDetail 것을 재사용
+- (v2.895 추가) 개체 보기 › 성능 튜닝(시안 ⑫⑬) — 판정은 기존 모듈(rightsize verdict · contention · vmcfg · hcfg · 가상화율 RATIO_LEVELS · 사용률 75/90 · DS 90/95)을 `vcd/tuning.js` 한 곳에서 모은다 · 새 서버 경로 없음 · 계획은 저장 없이 내보내기만
 - (원래 5663행) v2.708 — 드롭다운은 공용 `Select`·`DataList` 하나다(자동 정렬)
 - (원래 5801행) 특수 기능 화면(v2.679) — 표시 이름·설명·개발 단계는 '덮어쓰기' 이고 키는 그대로다
 - (원래 5848행) 접속 공지 팝업 · 게시판(v2.722)
@@ -563,12 +563,12 @@
   ⑤ 남은 하위 작업(에픽이면 소속 이슈)이 있으면 서버가 409 `open-children` 로 묻고 화면은 확인을 받아 `closeChildren:true` 로 다시 보낸다(취소하면 아무것도 바꾸지 않는다).
      자식이 있는 이슈의 진행률 입력은 잠기고 메모만 보낸다(서버 409 `progress-auto` 와 같은 판정).
   ⑥ 스프린트 · 필터 공유 버튼은 서버 값(`canSprints` · `canShareFilters` — 전체 범위 쓰기 계정)일 때만 그린다. 필터 저장은 쓰기 역할만(viewer 상태변경 예외를 늘리지 않았다).
-- **v2.897 — 성능 튜닝 탭(VM · ESXi 호스트 개체 보기 — 사용자 요청 '성능 튜닝을 위한 기능' · 승인 시안 ⑫⑬ · 기본값 11~13)**. 화면 `views/vcd/TuningTabs.jsx` · 판정 · 계획 `vcd/tuning.js`(순수). 회귀 `vcd/tuning.test.js` · `vcdTabsRender.test.jsx`.
+- **v2.895 — 성능 튜닝 탭(VM · ESXi 호스트 개체 보기 — 사용자 요청 '성능 튜닝을 위한 기능' · 승인 시안 ⑫⑬ · 기본값 11~13)**. 화면 `views/vcd/TuningTabs.jsx` · 판정 · 계획 `vcd/tuning.js`(순수). 회귀 `vcd/tuning.test.js` · `vcdTabsRender.test.jsx`.
   - **새 판정 · 새 서버 경로 없음** — 자원 적정화는 서버 `/tools/rightsize`(analyzeRightsize) verdict 그대로(reduce · hold = 주의 · keep = 적정 · insufficient = 판정 보류) · CPU 경합 · 디스크 지연은 `contentionText.vmContentionFindings` · 구성은 `vmCfgFindings` · `hostCfgFindings` · 가상화율은 `vcdVirt.js RATIO_LEVELS`(트리 색 `ratioColor` 도 이 값을 쓴다 — 한 곳) · 사용률은 usageColor 의 75/90 · 데이터스토어는 포탈 알람 규칙 90/95. 기준을 바꾸려면 원래 모듈을 바꾼다(여기서 숫자를 새로 정하지 않는다).
   - 축마다 ok · warn · crit · **unknown** — 꺼짐 · 측정 없음 · 권한 없음 · 조회 실패 · 레벨 2 카운터(벌룬 · 스왑) 표본 없음은 unknown('—')이고 정상으로 세지 않는다. 점수 · 등급 없음.
   - VM 탭만 서버를 부른다(`/tools/rightsize` · 열 때 1회 · 기간 7/30/90 · 기본 30일 · 'rightsizing' 권한 없으면 부르지 않고 403 안내). 호스트 탭은 받은 목록만 쓴다 — **VM 수십 대의 성능 롤업을 한꺼번에 묻지 않는다**(고RTT 부하).
   - 조치 계획은 축의 근거에서만 만들고 **저장하지 않는다**(체크리스트 CSV · Markdown 내려받기 — `canCsv` · CSV 수식 주입 방지 · BOM). 적용은 지금 도구(사양 변경 — vm.reconfig · 쓰기 범위) · vSphere 에서.
-- **v2.896 — VM · ESXi 호스트 개체 보기(사용자 요청 '폴더에서 VM 을 vCenter 처럼 — 별도 버튼 · 호스트도' · 승인 시안 `docs/design/vcenter-tabs` ⑧~⑪ · 기본값 8~10)**. 화면 `views/vcd/{VmObject,HostObject,ObjectShell}.jsx` · 주소 `vcd/vcdRoute.js` · 묶음 `vcd/objTabs.js`. 회귀 `vcd/objView.test.js` · `vcdTabsRender.test.jsx`.
+- **v2.895 — VM · ESXi 호스트 개체 보기(사용자 요청 '폴더에서 VM 을 vCenter 처럼 — 별도 버튼 · 호스트도' · 승인 시안 `docs/design/vcenter-tabs` ⑧~⑪ · 기본값 8~10)**. 화면 `views/vcd/{VmObject,HostObject,ObjectShell}.jsx` · 주소 `vcd/vcdRoute.js` · 묶음 `vcd/objTabs.js`. 회귀 `vcd/objView.test.js` · `vcdTabsRender.test.jsx`.
   - **주소가 진실의 원천**: `#/vcenters/<vcId>` = 상세, `/vm|host/<id>[/<탭>]` = 개체 보기(id 에 ':' 이 있어 조각마다 encodeURIComponent). `VCenters` 의 연 vCenter 도 주소에서 읽는다(새로고침 · 뒤로 가기 · 공유). 탭 전환은 `replaceHash`(기록을 쌓지 않는다). 다른 vCenter 주소는 무시한다. 브라우저가 아닌 시험에서도 던지지 않게 `currentHash` · `goHash` · `onHashChange` 를 쓴다(직접 `window.location` 금지).
   - 여는 곳 셋 — 트리 행의 `.vcd-objbtn`(1440 은 마우스를 올릴 때 · 터치/좁은 화면은 항상) · 상세 창 버튼 줄의 `ObjectViewButton`(창을 닫고 간다 — 다른 화면의 상세 창에서도 같은 주소로) · 개체끼리(VM 요약 › 호스트 · 호스트 VM 탭 › 개체 →). 행 이름 클릭(상세 창)은 그대로.
   - **새 수집 없음** — /vms · /hosts 한 행 + 캐시(vmcfg cfg·dev · hcfg · perfc) + 온디맨드(파티션 · 이벤트 · 메트릭 — 열 때 1회). 섹션은 `EntityDetail` 의 것(VmCfgSection · VmPartitionsSection · VmTagsSection · VmChangesSection · PerfcSection · ClusterCfgSection · HostBasicRows · HostCfgSection · HostHbaTable)을 export 해 재사용 — 복제 금지. 조회 전용이고 상태를 바꾸는 동작은 지금 버튼(권한 · 쓰기 범위) 그대로.

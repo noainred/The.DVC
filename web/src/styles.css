@@ -2893,7 +2893,7 @@ table.svcinv-t thead th, table.svcinv-t tbody td { padding: 7px 6px; }
 .svcinv-tn .cnt { font-size: 11px; color: var(--text-dim); background: rgba(139, 155, 180, .14); padding: 0 6px; border-radius: 999px; flex: none; }
 /* 서비스 인벤토리 매트릭스 — 법인 열이 많아 가로 스크롤할 때 서비스명 열을 붙잡아 둔다(28법인 ≈ 2,200px). */
 table.svcinv-t .svcinv-stick { position: sticky; left: 0; z-index: 1; background: var(--panel); }
-/* v2.896 개체 보기(VM · ESXi 호스트 — 시안 docs/design/vcenter-tabs ⑧~⑪) — 경로 줄 · 개체 머리. 탭 줄은 .vcd-views 그대로. */
+/* v2.895 개체 보기(VM · ESXi 호스트 — 시안 docs/design/vcenter-tabs ⑧~⑪) — 경로 줄 · 개체 머리. 탭 줄은 .vcd-views 그대로. */
 .vcd-crumb { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 12px; color: var(--text-dim); min-width: 0; }
 .vcd-crumb b { color: var(--text); overflow-wrap: anywhere; }
 .vcd-obj-head { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px 16px; padding: 14px 16px; min-width: 0; }
@@ -2901,7 +2901,7 @@ table.svcinv-t .svcinv-stick { position: sticky; left: 0; z-index: 1; background
 .vcd-objbtn { flex: none; margin-left: 6px; padding: 1px 9px; border-radius: 999px; font-size: 11.5px; font-weight: 700; cursor: pointer; white-space: nowrap; color: #7dd3fc; background: rgba(56, 189, 248, .12); border: 1px solid rgba(56, 189, 248, .45); line-height: 1.6; opacity: 0; }
 .vcd-node:hover .vcd-objbtn, .vcd-objbtn:focus-visible { opacity: 1; }
 @media (hover: none), (max-width: 720px) { .vcd-objbtn { opacity: 1; } }
-/* v2.897 성능 튜닝 탭 — 진단 띠(5축 · 점수 없음). 좁으면 두 칸. */
+/* v2.895 성능 튜닝 탭 — 진단 띠(5축 · 점수 없음). 좁으면 두 칸. */
 .vcd-axes { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; padding: 12px 14px; }
 .vcd-axes > div { border: 1px solid var(--border); border-radius: 10px; background: var(--panel-deep); padding: 9px 11px; min-width: 0; }
 .vcd-axes span { display: block; font-size: 11px; color: var(--text-dim); }
