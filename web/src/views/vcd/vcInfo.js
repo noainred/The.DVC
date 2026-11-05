@@ -91,7 +91,7 @@ export function allocText(v, unit) {
 }
 export const SHARE_LEVEL_TEXT = Object.freeze({ low: '낮음', normal: '보통', high: '높음', custom: '사용자 지정' });
 
-// ── v2.905: 팀 구성 문구(표준 스위치 hcfg · 분산 포트그룹 vcinfo dvpg 한 벌 — 서버 TEAMING_POLICIES 와 같은 키) ─────────────
+// ── v2.906: 팀 구성 문구(표준 스위치 hcfg · 분산 포트그룹 vcinfo dvpg 한 벌 — 서버 TEAMING_POLICIES 와 같은 키) ─────────────
 export const TEAMING_TEXT = Object.freeze({
   loadbalance_srcid: '원래 가상 포트 기반', loadbalance_srcmac: '원본 MAC 해시 기반', loadbalance_ip: 'IP 해시 기반',
   failover_explicit: '명시적 장애 조치 순서', loadbalance_loadbased: '물리 NIC 부하 기반',

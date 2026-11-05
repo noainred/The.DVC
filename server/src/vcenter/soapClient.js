@@ -2289,7 +2289,7 @@ export async function collectFromVCenterSoap(vc, { signal = null, deadlineAt = D
     //   (/vcenters 가 객체를 통째로 내보낸다 — 권한 목록이 새면 안 된다). 엣지 push 는 inventoryPush 가 캐시에서 따로 붙인다.
     await runAux('vcinfo', 'vCenter 알람·작업·권한', VCINFO_BUDGET_MS, (budgetMs) => refreshVcInfo(c, vc, { signal, budgetMs,
       poolRefs: objs.filter((x) => x.type === 'ResourcePool').map((x) => x.ref),   // v2.901: 리소스 풀 설정(6시간마다)
-      dvpgRefs: objs.filter((x) => x.type === 'DistributedVirtualPortgroup').map((x) => x.ref) }));   // v2.905: 분산 포트그룹 팀 구성(6시간마다)
+      dvpgRefs: objs.filter((x) => x.type === 'DistributedVirtualPortgroup').map((x) => x.ref) }));   // v2.906: 분산 포트그룹 팀 구성(6시간마다)
     // v2.898 ④: Linked Mode 구성원 · 어플라이언스 업데이트 · vLCM 이미지 준수(REST GET — 6시간마다 · 때가 아니면 세션도 열지 않는다).
     await runAux('vcrest', 'Linked Mode·업데이트·vLCM', VCREST_BUDGET_MS, (budgetMs) => refreshVcRest(vc,
       objs.filter((x) => x.type === 'ClusterComputeResource').map((x) => ({ ref: x.ref, name: typeof x.props?.name === 'string' ? x.props.name : null })), { signal, budgetMs }));

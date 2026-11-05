@@ -443,7 +443,7 @@ export async function cancelLive(targets, { by = '', held = false } = {}) {
  *  · phase: queued(줄 대기) · sending(보내는 중) · running(보낸 뒤 Director 에서 도는 이번 회차 실행) · null(멈출 이번 회차 실행이 없음)
  *  · fire: 이번 회차(lastFire)가 시작해 아직 도는 실행 중 취소를 보낼 수 있는 것 · extra: 그룹 VM 의 그 밖 실행(Bareos 스케줄 · 수동)
  *  · sent: 이미 취소를 보내 멈추는 중인 실행 · stuck: 그중 '멈추지 않음'
- *  · sentFire · stuckFire: sent · stuck 중 **이번 회차** 실행(v2.905 — 회차 중단 없이 행마다 '취소…' 로 멈춘 회차를 화면이 구분하게. v2.870 A1-04 남김)
+ *  · sentFire · stuckFire: sent · stuck 중 **이번 회차** 실행(v2.906 — 회차 중단 없이 행마다 '취소…' 로 멈춘 회차를 화면이 구분하게. v2.870 A1-04 남김)
  * @returns {{ phase: 'queued'|'sending'|'running'|null, fire: number, extra: number, sent: number, stuck: number, sentFire: number, stuckFire: number, progress: object|null, pruning: boolean }}
  */
 export function cancelPlan(g, jobsByVm, now = Date.now()) {

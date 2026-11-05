@@ -64,7 +64,7 @@ describe('v2.901 리소스 풀 설정 · 호스트 마운트 · 팀 구성 문�
   });
 });
 
-describe('v2.905 분산 포트그룹 팀 구성 — 화면 판정', () => {
+describe('v2.906 분산 포트그룹 팀 구성 — 화면 판정', () => {
   const host = { hcfg: { net: { switches: [{ name: 'vSwitch0', kind: 'vss' }, { name: 'DS-Prod', kind: 'dvs' }] } } };
   const items = [
     { ref: 'pg-1', name: 'App', dvsName: 'DS-Prod', uplinkPg: false },
