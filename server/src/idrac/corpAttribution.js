@@ -19,6 +19,8 @@ import { remoteServersResolved } from '../insights/analysisServers.js';
 import { serversByCorp } from './serverByCorp.js';
 import { loadFleetAssign } from '../insights/fleetAssign.js';
 import { listDatacenters, getDatacenterAssign } from '../datacenter/store.js';
+import { store } from '../store.js';
+import { getInventory as getIdracInventory } from './invCache.js';
 
 const t = (v) => String(v ?? '').trim();
 const norm = (v) => t(v).toLowerCase();
@@ -121,3 +123,33 @@ export function vcIndexFromSnap(snap = null, servers = null) {
   const { opts } = corpAttribution(snap?.vcenters || []);
   return buildVcIndex(Array.isArray(servers) ? servers : allPhysicalServers(), snap?.hosts || [], opts);
 }
+
+// ── v2.908: 서버 하나의 귀속 vCenter 판정 — routes/admin/idracCore.js 에서 옮겼다(그 파일이 그대로 다시 내보낸다) ──────────
+// 서버 분석 · iDRAC 조회의 범위 절단(idracScopeOf/idracInScope)과 ⌘K 통합 장비 검색(search/inventoryIndex.js)이 **같은 판정 한 벌**을 쓴다.
+//   순서: 명시 vcenterId → 서비스태그로 찾은 ESXi 호스트의 vCenter(mappedVcenterId · tagMap) → 개요 · 법인별 사용량과 같은 귀속 색인(아래 vcIndexFromSnap).
+//   셋 다 없으면 '' = 귀속 없음 → 범위 계정에 노출하지 않는다. 판정 근거와 이력은 idracCore.js 의 v2.629 · v2.630 주석.
+const idTag = (s) => String(s?.serviceTag || s?.inv?.system?.serviceTag || getIdracInventory(s?.id)?.system?.serviceTag || '').trim();
+export function idracServerVcOf(s, tagMap, index = null) {
+  const tag = idTag(s).toLowerCase();
+  const direct = String(s?.vcenterId || s?.mappedVcenterId || (tag && tagMap ? tagMap.get(tag) : '') || '');
+  if (direct || !index) return direct;
+  const id = String(s?.id ?? '').trim();
+  return String((id && index.byId?.get(id)) || (tag && index.byTag?.get(tag)) || '');
+}
+// 귀속 색인은 스냅샷 세대 + 10초 동안 재사용한다(서버마다 hiddenByScope 가 부르므로 요청마다 다시 만들지 않는다).
+let _idxCache = null;
+const IDX_TTL_MS = 10_000;
+export function idracCorpIndex(snap = store.get()) {
+  const gen = String(snap?.generatedAt || '');
+  const now = Date.now();
+  if (_idxCache && _idxCache.gen === gen && now - _idxCache.at < IDX_TTL_MS) return _idxCache.index;
+  let index = null;
+  try {
+    const servers = allPhysicalServers().map((x) => (x && !x.serviceTag && idTag(x) ? { ...x, serviceTag: idTag(x) } : x));
+    index = vcIndexFromSnap(snap, servers);
+  } catch { index = null; } // 색인을 못 만들면 3단 판정만(= 더 좁게 — 범위 밖을 보이게 하지 않는다)
+  _idxCache = { gen, at: now, index };
+  return index;
+}
+export function _resetIdracCorpIndex() { _idxCache = null; }
+

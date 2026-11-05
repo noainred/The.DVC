@@ -18,7 +18,7 @@ import { search, flatten, catsOfFrom } from './palette.js';
 import { handoffSearch } from '../hooks/searchHandoff.js'; // v2.616 검색어 인계 — 검색어 · IP · 시리얼을 URL 에 싣지 않는다
 import {
   KIND_LABEL, KIND_SHORT, MODE_LABEL, splitPrefix, focusPlan, listPlan, canFilter, LIST_SCREEN, TO_LABEL,
-  readRecent, pushRecent, clearRecent, agoText, builtAgoText, highlightParts, metaParts,
+  readRecent, pushRecent, clearRecent, recentKeyFor, agoText, builtAgoText, highlightParts, metaParts,
 } from './invSearchQuery.js';
 
 const KIND_TAG = { tool: '기능', tab: '탭' };
@@ -31,7 +31,7 @@ function Hl({ text, needle }) {
   return <>{a}{b && <mark className="inv-hl">{b}</mark>}{c}</>;
 }
 
-export default function Palette({ onClose, onPick, isAdmin, toolsAllowed = null, tabs = [] }) {
+export default function Palette({ onClose, onPick, isAdmin, username = '', toolsAllowed = null, tabs = [] }) {
   const [q, setQ] = useState('');
   const [cur, setCur] = useState(0);
   const [catCfg, setCatCfg] = useState(null);
@@ -41,7 +41,8 @@ export default function Palette({ onClose, onPick, isAdmin, toolsAllowed = null,
   const [invErr, setInvErr] = useState(null);
   const [loading, setLoading] = useState(false);
   const [nonce, setNonce] = useState(0);            // '다시 시도'
-  const [recent, setRecent] = useState(() => readRecent());
+  const recentKey = useMemo(() => recentKeyFor(username), [username]); // 계정별(반증 L-4) — App 이 넘기는 로그인 계정
+  const [recent, setRecent] = useState(() => readRecent(undefined, recentKey));
   const inputRef = useRef(null);
   const seqRef = useRef(0);
 
@@ -133,7 +134,7 @@ export default function Palette({ onClose, onPick, isAdmin, toolsAllowed = null,
   };
   const pick = (item, newTab = false) => {
     if (!item || !item.plan) return;
-    if (item.type === 'dev') setRecent(pushRecent({ kind: item.row.kind, name: item.row.name, corp: item.row.corp, plan: item.plan }));
+    if (item.type === 'dev') setRecent(pushRecent({ kind: item.row.kind, name: item.row.name, corp: item.row.corp, plan: item.plan }, undefined, Date.now(), recentKey));
     go(item.plan, newTab);
   };
   const goList = (kind) => go(listPlan(kind, text));
@@ -245,7 +246,7 @@ export default function Palette({ onClose, onPick, isAdmin, toolsAllowed = null,
               {recent.length > 0 && (
                 <>
                   <div className="inv-sec">최근 연 항목 <span className="v3-faint">· 이 브라우저에만</span>
-                    <button type="button" className="inv-link" style={{ marginLeft: 'auto' }} onClick={() => setRecent(clearRecent())}>지우기</button>
+                    <button type="button" className="inv-link" style={{ marginLeft: 'auto' }} onClick={() => setRecent(clearRecent(undefined, recentKey))}>지우기</button>
                   </div>
                   {recent.map((r) => {
                     idx += 1; const i = idx;

@@ -18,7 +18,8 @@
 import { store } from '../store.js';
 import { numOrNull } from '../util/numOrNull.js';
 import { hostLedgerIp, buildIpamRowsShared } from '../ipam/ledger.js';
-import { analysisServersWithRemote, invForServer } from '../insights/analysisServers.js';
+import { analysisServersWithRemote, invForServer, hostVcByTag } from '../insights/analysisServers.js';
+import { idracServerVcOf, idracCorpIndex } from '../idrac/corpAttribution.js'; // 서버 분석 범위 절단과 같은 귀속 판정 한 벌(반증 L-1)
 import { allOmeDevices, dbKey as omeDbKey } from '../idrac/omeCache.js';
 import { registryLoadError as idracRegistryError } from '../idrac/registry.js';
 import { getEdgeFleetServers } from '../central/fleet.js';
@@ -38,6 +39,7 @@ import { localSnapshots as pduLocal } from '../pdu/poller.js';
 import { edgePduSnapshots } from '../central/pduEdge.js';
 import { listDatacenters } from '../datacenter/store.js';
 import { KIND_KEYS, normSerial } from './inventoryQuery.js';
+import { createYielder } from '../util/timeSlice.js';
 
 export const INDEX_TTL_MS = 30_000;    // 시리얼 색인과 같은 수명(env 로 열지 않는다 — TIM2605-04)
 export const REFRESH_MIN_MS = 10_000;
@@ -82,6 +84,12 @@ export function mkRow(kind, f) {
   row._addr = row.addr.toLowerCase();
   row._sn = uniq(serials.map(normSerial));
   row._m = `${row.model} ${row.sub}`.trim().toLowerCase();
+  // 반증 M-1: 이름 · 보조 이름 · 모델 칸에 이 행의 주소가 들어 있는가 — 주소를 가리는 판본에서는 그 칸으로 찾지 않는다
+  //   (SAN 등록 이름이 비면 스냅샷 이름이 관리 IP 로 떨어진다 — sanswitch/types.js). 판정은 inventoryQuery.matchTier.
+  const addrs = [row._addr, ...row._ip].filter(Boolean);
+  row._nAddr = addrs.some((a) => row._n.includes(a));
+  row._aAddr = addrs.some((a) => row._a.includes(a));
+  row._mAddr = addrs.some((a) => row._m.includes(a));
   return row;
 }
 
@@ -100,82 +108,83 @@ function hostStatus(h) {
   return ['', ''];
 }
 
+/*
+ * 출처 함수는 모두 async 이고 행 128개마다 `ctx.tick()` 으로 **시간 기준 양보**(util/timeSlice.js — 15ms)를 한다(반증 L-3 —
+ * 목 14k 행 재생성이 32~107ms 동안 이벤트 루프를 잡았다 · perf-db '요청 경로 큰 집계는 조각 + 시간 기준 양보').
+ * 실패하면 그때까지 넣은 행 수와 사유를 함께 적는다(부분 결과를 '0행' 으로 적지 않는다 — 반증 L-5).
+ */
+const errText = (e) => (typeof e === 'string' ? e : String(e?.message || e).slice(0, 200));
+
 /** vCenter 스냅샷 4종(템플릿 VM 제외). */
-function fromSnapshot(snap, vcName, out, mark) {
-  try {
+async function fromSnapshot(snap, vcName, ctx) {
+  const run = async (kind, list, make) => {
     let n = 0;
-    for (const v of snap.vms || []) {
-      if (!v || v.template) continue;
-      const [status, statusText] = vmStatus(v.powerState);
-      const ips = Array.isArray(v.ipAddresses) && v.ipAddresses.length ? v.ipAddresses : (v.ipAddress ? [v.ipAddress] : []);
-      out.push(mkRow('vm', { id: v.id, name: v.name, ips, sub: v.guestOS, model: '', status, statusText,
-        vcenterId: v.vcenterId, corp: vcName(v.vcenterId), host: v.host }));
-      n++;
-    }
-    mark('vm', n);
-  } catch (e) { mark('vm', 0, e); }
-  try {
-    let n = 0;
-    for (const h of snap.hosts || []) {
-      if (!h) continue;
-      const [status, statusText] = hostStatus(h);
-      const hip = (() => { try { return hostLedgerIp(h); } catch { return null; } })();
-      out.push(mkRow('host', { id: h.id, name: h.name, ips: hip ? [hip.ip] : [], serials: [h.serviceTag],
-        model: [h.vendor, h.model].filter(Boolean).join(' '), sub: [h.version ? `ESXi ${h.version}` : '', h.cluster].filter(Boolean).join(' · '),
-        status, statusText, vcenterId: h.vcenterId, corp: vcName(h.vcenterId) }));
-      n++;
-    }
-    mark('host', n);
-  } catch (e) { mark('host', 0, e); }
-  try {
-    let n = 0;
-    for (const d of snap.datastores || []) {
-      if (!d) continue;
-      const pct = numOrNull(d.usagePct);
-      const down = d.accessible === false;
-      out.push(mkRow('datastore', { id: d.id, name: d.name, sub: [d.type, d.storageType].filter(Boolean).join(' · '),
-        status: down ? 'down' : '', statusText: down ? '접근 불가' : (pct != null ? `사용 ${Math.round(pct)}%` : ''),
-        vcenterId: d.vcenterId, corp: vcName(d.vcenterId), alt: d.remoteHost || '' }));
-      n++;
-    }
-    mark('datastore', n);
-  } catch (e) { mark('datastore', 0, e); }
-  try {
-    let n = 0;
-    for (const vc of snap.vcenters || []) {
-      if (!vc) continue;
-      const st = low(vc.status);
-      const loc = vc.location && typeof vc.location === 'object' ? [vc.location.city, vc.location.country].filter(Boolean).join(', ') : '';
-      out.push(mkRow('vcenter', { id: vc.id, name: vc.name || vc.id, alt: loc, sub: vc.version ? `vCenter ${vc.version}` : '',
-        status: st === 'connected' ? 'ok' : st ? 'down' : '', statusText: st === 'connected' ? '연결됨' : st === 'unreachable' ? '연결 불가' : '',
-        vcenterId: vc.id, corp: vc.name || vc.id }));
-      n++;
-    }
-    mark('vcenter', n);
-  } catch (e) { mark('vcenter', 0, e); }
+    try {
+      for (const x of list || []) {
+        if (!x) continue;
+        const row = make(x);
+        if (row) { ctx.out.push(row); n++; }
+        await ctx.tick();
+      }
+      ctx.mark(kind, n);
+    } catch (e) { ctx.mark(kind, n, e); }
+  };
+  await run('vm', snap.vms, (v) => {
+    if (v.template) return null;
+    const [status, statusText] = vmStatus(v.powerState);
+    const ips = Array.isArray(v.ipAddresses) && v.ipAddresses.length ? v.ipAddresses : (v.ipAddress ? [v.ipAddress] : []);
+    return mkRow('vm', { id: v.id, name: v.name, ips, sub: v.guestOS, status, statusText, vcenterId: v.vcenterId, corp: vcName(v.vcenterId), host: v.host });
+  });
+  await run('host', snap.hosts, (h) => {
+    const [status, statusText] = hostStatus(h);
+    const hip = (() => { try { return hostLedgerIp(h); } catch { return null; } })();
+    return mkRow('host', { id: h.id, name: h.name, ips: hip ? [hip.ip] : [], serials: [h.serviceTag],
+      model: [h.vendor, h.model].filter(Boolean).join(' '), sub: [h.version ? `ESXi ${h.version}` : '', h.cluster].filter(Boolean).join(' · '),
+      status, statusText, vcenterId: h.vcenterId, corp: vcName(h.vcenterId) });
+  });
+  await run('datastore', snap.datastores, (d) => {
+    const pct = numOrNull(d.usagePct);
+    const down = d.accessible === false;
+    return mkRow('datastore', { id: d.id, name: d.name, sub: [d.type, d.storageType].filter(Boolean).join(' · '),
+      status: down ? 'down' : '', statusText: down ? '접근 불가' : (pct != null ? `사용 ${Math.round(pct)}%` : ''),
+      vcenterId: d.vcenterId, corp: vcName(d.vcenterId), alt: d.remoteHost || '' });
+  });
+  await run('vcenter', snap.vcenters, (vc) => {
+    const st = low(vc.status);
+    const loc = vc.location && typeof vc.location === 'object' ? [vc.location.city, vc.location.country].filter(Boolean).join(', ') : '';
+    return mkRow('vcenter', { id: vc.id, name: vc.name || vc.id, alt: loc, sub: vc.version ? `vCenter ${vc.version}` : '',
+      status: st === 'connected' ? 'ok' : st ? 'down' : '', statusText: st === 'connected' ? '연결됨' : st === 'unreachable' ? '연결 불가' : '',
+      vcenterId: vc.id, corp: vc.name || vc.id });
+  });
 }
 
-/** 물리 서버 — iDRAC(중앙 + 위임 엣지 원격 인벤토리) · OME · 엣지 베어메탈. 서비스 태그가 같은 것은 한 행(iDRAC 우선). */
-function fromServers(dcName, vcName, out, mark) {
+/**
+ * 물리 서버 — iDRAC(중앙 + 위임 엣지 원격 인벤토리) · OME · 엣지 베어메탈. 서비스 태그가 같은 것은 한 행(iDRAC 우선).
+ * 귀속 vCenter 는 서버 분석 범위 절단과 **같은 판정**(idrac/corpAttribution.js idracServerVcOf — 명시 · 서비스태그 매핑 · 법인 귀속 색인).
+ * 예전(초판)은 앞 두 단계만 본 '줄인 사본' 이라 범위 관리자가 서버 분석에서 보는 서버를 ⌘K 에서 못 찾았다(반증 L-1 · v2.630 R2630-01 과 같은 계열).
+ */
+async function fromServers(snap, dcName, vcName, ctx) {
   let n = 0; let err = null;
   const seenTag = new Set();
   try {
-    const regErr = idracRegistryError();
-    if (regErr) err = 'registryUnreadable';
+    if (idracRegistryError()) err = 'registryUnreadable';
+    const tagMap = hostVcByTag();
+    const index = (() => { try { return idracCorpIndex(snap); } catch { return null; } })(); // 못 만들면 앞 두 단계만(= 더 좁게)
     for (const s of analysisServersWithRemote(undefined)) {
       if (!s) continue;
       const inv = (() => { try { return invForServer(s); } catch { return null; } })();
       const sys = inv?.system || {};
       const tag = s.serviceTag || sys.serviceTag || '';
       if (tag) seenTag.add(normSerial(tag));
-      const vc = str(s.vcenterId || s.mappedVcenterId);
+      const vc = str(idracServerVcOf(s, tagMap, index));
       const vendor = s.type === 'ilo' || /hpe/i.test(String(s.vendor || '')) ? 'iLO' : 'iDRAC';
-      out.push(mkRow('server', { id: s.id, name: s.name || sys.hostName || s.host || s.id, alt: sys.hostName || '',
+      ctx.out.push(mkRow('server', { id: s.id, name: s.name || sys.hostName || s.host || s.id, alt: sys.hostName || '',
         addr: s.host, serials: [tag, sys.serialNumber, sys.assetTag], model: sys.model || s.model || '',
         sub: [sys.manufacturer, vendor, s.remote ? '엣지 수집' : ''].filter(Boolean).join(' · '),
-        statusText: vc ? 'ESXi 호스트' : '베어메탈', vcenterId: vc, corp: dcName(s.datacenterId) || vcName(vc),
+        statusText: s.vcenterId || s.mappedVcenterId ? 'ESXi 호스트' : '베어메탈', vcenterId: vc, corp: dcName(s.datacenterId) || vcName(vc),
         agent: s.remote ? (s.collectorId || '') : '' }));
       n++;
+      await ctx.tick();
     }
   } catch (e) { err = e; }
   try {
@@ -183,9 +192,10 @@ function fromServers(dcName, vcName, out, mark) {
       const tag = device?.serviceTag || '';
       if (tag && seenTag.has(normSerial(tag))) continue;
       if (tag) seenTag.add(normSerial(tag));
-      out.push(mkRow('server', { id: `ome:${omeDbKey(entryId, device)}`, name: device?.name || tag, serials: [tag],
+      ctx.out.push(mkRow('server', { id: `ome:${omeDbKey(entryId, device)}`, name: device?.name || tag, serials: [tag],
         model: device?.model || '', sub: 'OME 발견', statusText: '베어메탈' }));
       n++;
+      await ctx.tick();
     }
   } catch (e) { err = err || e; }
   try {
@@ -193,131 +203,159 @@ function fromServers(dcName, vcName, out, mark) {
       const tag = e?.serviceTag || '';
       if (tag && seenTag.has(normSerial(tag))) continue;
       if (tag) seenTag.add(normSerial(tag));
-      out.push(mkRow('server', { id: `edge:${e.remoteAgent || ''}:${e.serverId || tag}`, name: e.serverName || tag, serials: [tag],
+      // serverId 는 이미 'edge:<agent>:<…>' 이다(central/fleet.js) — 접두를 다시 붙이지 않는다(반증 L-5).
+      ctx.out.push(mkRow('server', { id: e.serverId || `edge:${e.remoteAgent || ''}:${tag}`, name: e.serverName || tag, serials: [tag],
         model: e.model || '', sub: '엣지 베어메탈', statusText: e.vcenterId ? 'ESXi 호스트' : '베어메탈',
         vcenterId: e.vcenterId || '', corp: vcName(e.vcenterId), agent: e.remoteAgent || '' }));
       n++;
+      await ctx.tick();
     }
   } catch (e) { err = err || e; }
-  mark('server', n, err);
+  ctx.mark('server', n, err);
 }
 
-function fromGpu(vcName, out, mark) {
+async function fromList(kind, ctx, load) {
+  let n = 0;
   try {
-    let n = 0;
-    for (const s of listPhysical()) {
-      out.push(mkRow('gpu', { id: s.id, name: s.name || s.host, addr: s.host, model: (s.gpuModels || []).join(', '),
-        sub: [s.os === 'windows' ? 'Windows' : 'Linux', s.enabled === false ? '수집 꺼짐' : ''].filter(Boolean).join(' · '),
-        vcenterId: s.vcenterId, corp: vcName(s.vcenterId) }));
-      n++;
-    }
-    mark('gpu', n);
-  } catch (e) { mark('gpu', 0, e); }
+    const { items, bad } = load();
+    for (const make of items) { const row = make(); if (row) { ctx.out.push(row); n++; } await ctx.tick(); }
+    ctx.mark(kind, n, bad || null);
+  } catch (e) { ctx.mark(kind, n, e); }
 }
 
-function fromStorage(dcName, out, mark) {
-  try {
-    const bad = storageRegistryError();
-    const byId = latestMapByDevice([storageLocal(), edgeStorageSnapshots()]);
-    let n = 0;
-    for (const d of listStorage()) {
+const gpuSource = (vcName) => () => ({
+  bad: null,
+  items: listPhysical().map((s) => () => mkRow('gpu', { id: s.id, name: s.name || s.host, addr: s.host, model: (s.gpuModels || []).join(', '),
+    sub: [s.os === 'windows' ? 'Windows' : 'Linux', s.enabled === false ? '수집 꺼짐' : ''].filter(Boolean).join(' · '),
+    vcenterId: s.vcenterId, corp: vcName(s.vcenterId) })),
+});
+
+const storageSource = (dcName) => () => {
+  const bad = storageRegistryError() ? 'registryUnreadable' : null;
+  const byId = latestMapByDevice([storageLocal(), edgeStorageSnapshots()]);
+  return {
+    bad,
+    items: listStorage().map((d) => () => {
       const s = byId.get(d.id) || null;
       const pct = numOrNull(s?.capacity?.pct);
       const status = !s ? '' : s.ok === false ? 'down' : 'ok';
       const statusText = !s ? '수집 전' : s.ok === false ? '수집 실패' : (pct != null ? `사용 ${Math.round(pct)}%` : '수집됨');
-      out.push(mkRow('storage', { id: d.id, name: d.name || s?.name || d.id, addr: d.host,
+      return mkRow('storage', { id: d.id, name: d.name || s?.name || d.id, addr: d.host,
         serials: [s?.serial, ...((s?.extra?.appliances || []).map((a) => a?.serviceTag))],
         model: s?.extra?.model || '', sub: [d.type, s?.version].filter(Boolean).join(' '), status, statusText,
-        corp: dcName(d.datacenterId), agent: d.agent || s?.agent || '' }));
-      n++;
-    }
-    mark('storage', n, bad ? 'registryUnreadable' : null);
-  } catch (e) { mark('storage', 0, e); }
-}
+        corp: dcName(d.datacenterId), agent: d.agent || s?.agent || '' });
+    }),
+  };
+};
 
-function fromSanSwitch(dcName, out, mark) {
-  try {
-    const bad = switchRegistryError();
-    const byId = latestMapByDevice([switchLocal(), edgeSanSwitchSnapshots()]);
-    let n = 0;
-    for (const d of listSwitches()) {
+const sanSource = (dcName) => () => {
+  const bad = switchRegistryError() ? 'registryUnreadable' : null;
+  const byId = latestMapByDevice([switchLocal(), edgeSanSwitchSnapshots()]);
+  return {
+    bad,
+    items: listSwitches().map((d) => () => {
       const s = byId.get(d.id) || null;
       const state = str(s?.switchState || s?.extra?.switchState);
       const status = !s ? '' : s.ok === false ? 'down' : (state && !/online/i.test(state) ? 'warn' : 'ok');
       const statusText = !s ? '수집 전' : s.ok === false ? '수집 실패' : (state || '수집됨');
-      out.push(mkRow('sanswitch', { id: d.id, name: d.name || s?.name || d.id, alt: s?.name && s.name !== d.name ? s.name : '',
+      return mkRow('sanswitch', { id: d.id, name: d.name || s?.name || d.id, alt: s?.name && s.name !== d.name ? s.name : '',
         addr: d.host || s?.host, serials: [s?.serial, s?.wwn], model: s?.model || '',
         sub: s?.fabricOs ? `FOS ${s.fabricOs}` : '', status, statusText,
-        corp: dcName(d.datacenterId || s?.datacenterId), agent: d.agent || s?.agent || '' }));
-      n++;
-    }
-    mark('sanswitch', n, bad ? 'registryUnreadable' : null);
-  } catch (e) { mark('sanswitch', 0, e); }
-}
+        corp: dcName(d.datacenterId || s?.datacenterId), agent: d.agent || s?.agent || '' });
+    }),
+  };
+};
 
-async function fromCvp(dcList, out, mark) {
+const pduSource = (dcName) => () => {
+  const bad = pduRegistryError() ? 'registryUnreadable' : null;
+  const byId = new Map();
+  for (const s of [...pduLocal(), ...edgePduSnapshots()]) {
+    if (!s || s.id == null) continue;
+    const prev = byId.get(s.id);
+    if (!prev || (Number(s.collectedAt) || 0) > (Number(prev.collectedAt) || 0)) byId.set(s.id, s);
+  }
+  return {
+    bad,
+    items: listPdus().map((d) => () => {
+      const s = byId.get(d.id) || null;
+      return mkRow('pdu', { id: d.id, name: d.name || d.id, addr: d.host, serials: [s?.serial], model: s?.model || '',
+        sub: 'APC Rack PDU', status: !s ? '' : s.ok === false ? 'down' : 'ok', statusText: !s ? '수집 전' : s.ok === false ? '수집 실패' : '수집됨',
+        corp: dcName(d.datacenterId), agent: d.agent || s?.agent || '' });
+    }),
+  };
+};
+
+async function fromCvp(dcList, ctx) {
+  let n = 0;
   try {
     const bad = cvpRegistryError();
     const servers = listCvpServers();
     const { rows, unavailable } = await listCvpDeviceRows();
     const own = rowOwnerOf(servers);
     const corpOf = corpResolver(servers, dcList);
-    let n = 0;
     for (const d of rows) {
       if (!own(d)) continue;
-      out.push(mkRow('netswitch', { id: `${d.cvpId}|${d.key}`, name: d.hostname || d.key, addr: d.mgmtIp, serials: [d.serial],
+      ctx.out.push(mkRow('netswitch', { id: `${d.cvpId}|${d.key}`, name: d.hostname || d.key, addr: d.mgmtIp, serials: [d.serial],
         model: d.model, sub: d.eosVersion ? `EOS ${d.eosVersion}` : '', corp: corpOf(d.cvpId).corpName || '', agent: d.agent || '' }));
       n++;
+      await ctx.tick();
     }
-    mark('netswitch', n, bad ? 'registryUnreadable' : unavailable ? 'dbUnavailable' : null);
-  } catch (e) { mark('netswitch', 0, e); }
-}
-
-function fromPdu(dcName, out, mark) {
-  try {
-    const bad = pduRegistryError();
-    const byId = new Map();
-    for (const s of [...pduLocal(), ...edgePduSnapshots()]) {
-      if (!s || s.id == null) continue;
-      const prev = byId.get(s.id);
-      if (!prev || (Number(s.collectedAt) || 0) > (Number(prev.collectedAt) || 0)) byId.set(s.id, s);
-    }
-    let n = 0;
-    for (const d of listPdus()) {
-      const s = byId.get(d.id) || null;
-      out.push(mkRow('pdu', { id: d.id, name: d.name || d.id, addr: d.host, serials: [s?.serial], model: s?.model || '',
-        sub: 'APC Rack PDU', status: !s ? '' : s.ok === false ? 'down' : 'ok', statusText: !s ? '수집 전' : s.ok === false ? '수집 실패' : '수집됨',
-        corp: dcName(d.datacenterId), agent: d.agent || s?.agent || '' }));
-      n++;
-    }
-    mark('pdu', n, bad ? 'registryUnreadable' : null);
-  } catch (e) { mark('pdu', 0, e); }
+    ctx.mark('netswitch', n, bad ? 'registryUnreadable' : unavailable ? 'dbUnavailable' : null);
+  } catch (e) { ctx.mark('netswitch', n, e); }
 }
 
 const OWNER_LABEL = { vm: 'VM', host: 'VM호스트', scanned: '스캔 발견', manual: '수동 등록' };
-async function fromIpam(snap, out, mark) {
-  try {
-    const data = await buildIpamRowsShared(snap, '', null, { shouldCache: () => store.get() === snap });
-    let n = 0;
-    for (const r of data?.rows || []) {
-      if (!r || !r.ip) continue;
-      out.push(mkRow('ip', { id: r.ip, name: r.ip, ips: [r.ip], alt: [r.ownerName !== r.ip ? r.ownerName : '', r.hostName && r.hostName !== r.ownerName ? r.hostName : ''].filter(Boolean).join(' · '),
-        sub: OWNER_LABEL[r.ownerType] || str(r.ownerType), vcenterId: r.vcenterId || '', corp: r.vcenterName || '', ownerType: r.ownerType }));
-      n++;
-    }
-    mark('ip', n);
-  } catch (e) { mark('ip', 0, e); }
+
+/** IP 대장 원장(ipam/ledger.js) → 검색 행. 관리자 판본 색인과 범위 계정용(라우트 — 반증 L-2) 둘 다 이것 하나로 만든다. */
+export async function ipRowsFromLedger(data, tick = async () => {}) {
+  const out = [];
+  for (const r of data?.rows || []) {
+    if (!r || !r.ip) continue;
+    out.push(mkRow('ip', { id: r.ip, name: r.ip, ips: [r.ip], alt: [r.ownerName !== r.ip ? r.ownerName : '', r.hostName && r.hostName !== r.ownerName ? r.hostName : ''].filter(Boolean).join(' · '),
+      sub: OWNER_LABEL[r.ownerType] || str(r.ownerType), vcenterId: r.vcenterId || '', corp: r.vcenterName || '', ownerType: r.ownerType }));
+    await tick();
+  }
+  return out;
 }
 
-/** 전 출처 → 행. 던지지 않는다(출처별로 실패를 기록한다). */
+/**
+ * 범위 계정의 IP 행 — **IP관리 화면과 같은 범위 원장**(`buildIpamRowsShared(snap, '', allowed)` — 같은 세대 캐시 · 양보판)에서 만든다(반증 L-2:
+ * 관리자 판본 원장은 범위 밖 VM · 스캔이 쓰는 IP 에 대해 자기 vCenter 로 예약한 수동 행을 만들지 않아, 범위 계정에게 IP관리에는 있는 행이 ⌘K 에서 빠졌다).
+ * 같은 원장 객체(세대)는 한 번만 행으로 바꾼다(WeakMap — 키 입력마다 다시 만들지 않는다).
+ */
+const _scopedIpRows = new WeakMap();
+export async function scopedIpRows(snap, allowed) {
+  const data = await buildIpamRowsShared(snap, '', allowed, { shouldCache: () => store.get() === snap });
+  if (!data || typeof data !== 'object') return [];
+  const hit = _scopedIpRows.get(data);
+  if (hit) return hit;
+  const y = createYielder(15);
+  let i = 0;
+  const rows = await ipRowsFromLedger(data, async () => { if ((++i & 127) === 0) await y(); });
+  _scopedIpRows.set(data, rows);
+  return rows;
+}
+
+async function fromIpam(snap, ctx) {
+  try {
+    const data = await buildIpamRowsShared(snap, '', null, { shouldCache: () => store.get() === snap });
+    const rows = await ipRowsFromLedger(data, ctx.tick);
+    for (const r of rows) ctx.out.push(r);
+    ctx.mark('ip', rows.length);
+  } catch (e) { ctx.mark('ip', 0, e); }
+}
+
+/** 전 출처 → 행. 던지지 않는다(출처별로 실패를 기록한다). 행 128개마다 시간 기준 양보. */
 export async function buildInventoryIndex() {
   const t0 = Date.now();
   const snap = store.get() || {};
-  const rows = [];
   const sources = {};
-  const mark = (k, n, err) => {
-    const e = err ? (typeof err === 'string' ? err : String(err?.message || err).slice(0, 200)) : null;
-    sources[k] = { rows: n, ...(e ? { error: e } : {}) };
+  const y = createYielder(15);
+  let i = 0;
+  const ctx = {
+    out: [],
+    mark: (k, n, err) => { sources[k] = { rows: n, ...(err ? { error: errText(err) } : {}) }; },
+    tick: async () => { if ((++i & 127) === 0) await y(); },
   };
   const vcNames = new Map((snap.vcenters || []).map((v) => [String(v?.id), String(v?.name || v?.id || '')]));
   const vcName = (id) => (id ? vcNames.get(String(id)) || '' : '');
@@ -326,16 +364,16 @@ export async function buildInventoryIndex() {
   const dcNames = new Map(dcList.map((d) => [String(d.id), String(d.name || d.id)]));
   const dcName = (id) => (id ? dcNames.get(String(id)) || '' : '');
 
-  fromSnapshot(snap, vcName, rows, mark);
-  fromServers(dcName, vcName, rows, mark);
-  fromGpu(vcName, rows, mark);
-  fromStorage(dcName, rows, mark);
-  fromSanSwitch(dcName, rows, mark);
-  fromPdu(dcName, rows, mark);
-  await fromCvp(dcList, rows, mark);
-  await fromIpam(snap, rows, mark);
+  await fromSnapshot(snap, vcName, ctx);
+  await fromServers(snap, dcName, vcName, ctx);
+  await fromList('gpu', ctx, gpuSource(vcName));
+  await fromList('storage', ctx, storageSource(dcName));
+  await fromList('sanswitch', ctx, sanSource(dcName));
+  await fromList('pdu', ctx, pduSource(dcName));
+  await fromCvp(dcList, ctx);
+  await fromIpam(snap, ctx);
   for (const k of KIND_KEYS) if (!sources[k]) sources[k] = { rows: 0 };
-  return { rows, sources, builtAt: Date.now(), buildMs: Date.now() - t0, snapAt: snap.generatedAt || null };
+  return { rows: ctx.out, sources, builtAt: Date.now(), buildMs: Date.now() - t0, yields: y.count(), snapAt: snap.generatedAt || null };
 }
 
 let _cache = null;     // { at, rows, sources, builtAt, buildMs }

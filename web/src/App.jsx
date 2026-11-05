@@ -148,6 +148,7 @@ export default function App() {
     (async () => {
       const cfg = await fetchAuthConfig();
       setAuthCfg(cfg);
+      // v2.908: 인증을 끈 단일 사용자 모드에는 계정명이 없다 — ⌘K 최근 항목 키는 'anonymous'(로그인 계정은 /auth/me 의 username).
       if (!cfg.authEnabled) return setUser({ name: 'Anonymous', role: 'admin', serviceHubUrl: cfg.serviceHubUrl || '' }); // v2.613 WEB2613-01: 화면이 /auth/me 를 다시 부르지 않으므로 허브 주소도 여기서
       if (!getToken()) return setUser(null);
       const me = await fetchMe();
@@ -635,7 +636,7 @@ function Portal({ user, onLogout }) {
       {paletteOn && (
         <Suspense fallback={null}>
           <div className="hdr-palette">{/* v2.727: 팔레트를 다크 토큰으로 — styles.css .hdr-palette */}
-            <Palette tabs={visibleTabs} isAdmin={user.role === 'admin'} toolsAllowed={getCurrentUser()?.toolsAllowed ?? null}
+            <Palette tabs={visibleTabs} isAdmin={user.role === 'admin'} username={user.username || 'anonymous'} toolsAllowed={getCurrentUser()?.toolsAllowed ?? null}
               onClose={() => setPaletteOn(false)}
               onPick={(h) => { setPaletteOn(false); if (h && window.location.hash !== h) window.location.hash = h; }} />
           </div>

@@ -22,7 +22,7 @@ before(async () => {
   WEBQ = await import('../../web/src/components/invSearchQuery.js');
   perms = await import('../src/auth/permissions.js');
 });
-after(() => { try { IDX._resetForTest(); } catch { /* */ } try { fs.rmSync(tmp, { recursive: true, force: true }); } catch { /* */ } });
+after(() => { try { IDX._resetForTest(); ROUTE._setScopedIpForTest(null); } catch { /* */ } try { fs.rmSync(tmp, { recursive: true, force: true }); } catch { /* */ } });
 
 // ── 질의 해석 ────────────────────────────────────────────────────────────────
 test('parseQuery: 알려진 접두만 해석 · 최소 글자 · 상한 · 문자열 아닌 입력', () => {
@@ -203,7 +203,17 @@ async function seed() {
     row('ip', { id: '10.20.1.13', name: '10.20.1.13', ips: ['10.20.1.13'], alt: 'srv-db-old', vcenterId: '', ownerType: 'scanned' }),
     row('ip', { id: '10.20.1.11', name: '10.20.1.11', ips: ['10.20.1.11'], alt: 'srv-db-01', vcenterId: 'vc1', ownerType: 'vm' }),
   ], { storage: { rows: 1, error: 'registryUnreadable' }, vm: { rows: 2 } });
+  // 범위 계정의 IP 행은 IP관리와 같은 범위 원장에서 온다(반증 L-2) — 여기서는 그 출처를 고정한다.
+  ROUTE._setScopedIpForTest(async (_snap, allowed) => {
+    scopedIpCalls.push([...allowed]);
+    return [
+      row('ip', { id: '10.20.1.11', name: '10.20.1.11', ips: ['10.20.1.11'], alt: 'srv-db-01', vcenterId: 'vc1', ownerType: 'vm' }),
+      row('ip', { id: '10.50.0.7', name: '10.50.0.7', ips: ['10.50.0.7'], alt: 'kr-reserved-db', vcenterId: 'vc1', ownerType: 'manual' }),
+      row('ip', { id: '10.99.0.1', name: '10.99.0.1', ips: ['10.99.0.1'], alt: 'srv-db-x', vcenterId: 'vc2', ownerType: 'manual' }),
+    ];
+  });
 }
+const scopedIpCalls = [];
 
 test('라우트: 범위 계정 응답에는 범위 밖 이름 · 개수가 어디에도 없다', async () => {
   await seed();
@@ -220,6 +230,69 @@ test('라우트: 범위 계정 응답에는 범위 밖 이름 · 개수가 어�
   const empty = await call(RANGE, {});
   assert.equal(empty.body.counts.vm, 1, '빈 입력의 종류별 개수도 범위 안만');
   assert.ok(!JSON.stringify(empty.body).includes('"rows":'), '출처 전체 개수(sources.rows)는 싣지 않는다');
+});
+
+test('라우트(반증 L-2): 범위 계정의 IP 행은 범위 원장에서 — 자기 vCenter 로 예약한 수동 IP 가 보이고, 원장이 잘못 준 범위 밖 행은 다시 거른다', async () => {
+  await seed();
+  scopedIpCalls.length = 0;
+  const r = await call(RANGE, { q: 'kr-reserved' });
+  assert.deepEqual(scopedIpCalls, [['vc1']], '범위 원장은 그 계정의 허용 vCenter 로 만든다');
+  assert.deepEqual(r.body.groups.map((g) => [g.kind, g.rows.map((x) => x.id)]), [['ip', ['10.50.0.7']]]);
+  const leak = await call(RANGE, { q: 'srv-db-x' });
+  assert.equal(leak.body.matched, 0, '원장 행도 visible() 로 한 번 더 거른다');
+  scopedIpCalls.length = 0;
+  await call(ADMIN, { q: 'srv' });
+  assert.equal(scopedIpCalls.length, 0, '전체 범위 계정은 관리자 판본 색인 그대로');
+});
+
+test('반증 M-1: 비관리자는 이름 · 보조 이름 · 모델에 든 가린 주소로도 찾지 못하고, 같은 등급 순서도 주소 순이 아니다', async () => {
+  const { store } = await import('../src/store.js');
+  void store;
+  IDX._setIndexForTest([
+    row('sanswitch', { id: 'sw-1', name: '10.30.0.3', alt: '10.30.0.3', addr: '10.30.0.3', serials: ['S1'] }),
+    row('sanswitch', { id: 'sw-2', name: '10.30.0.5', addr: '10.30.0.5', serials: ['S2'] }),
+    row('sanswitch', { id: 'sw-3', name: 'core-a', alt: '172.16.5.9', addr: '172.16.5.9' }),
+    row('pdu', { id: 'pdu-1', name: 'pdu-10.9.8.7', addr: '10.9.8.7', model: 'AP 10.9.8.7' }),
+    row('sanswitch', { id: 'sw-4', name: 'edge-sw', addr: '10.30.0.9' }),
+  ]);
+  for (const q of ['10.30.0.', '10.30.0.3', '172.16.5.9', '10.9.8.7', 'pdu-10.9', 'ip:10.30']) {
+    const r = await call(OPER, { q });
+    assert.equal(r.body.matched, 0, `${q} 로 가린 주소의 장비가 찾아졌다`);
+  }
+  const ok = await call(OPER, { q: 'edge-sw' });
+  assert.equal(ok.body.matched, 1, '주소가 없는 이름은 그대로 찾는다');
+  const a = await call(ADMIN, { q: '10.30.0.' });
+  assert.equal(a.body.matched, 3, '관리자는 주소로 찾는다');
+  // 같은 등급 정렬: 가린 행은 원래 이름(=주소) 순이 아니라 색인 순 — 시리얼로 모두 걸리게 해 순서를 본다
+  IDX._setIndexForTest([
+    row('sanswitch', { id: 'b', name: '10.0.0.9', addr: '10.0.0.9', serials: ['ZZQ1'] }),
+    row('sanswitch', { id: 'a', name: '10.0.0.1', addr: '10.0.0.1', serials: ['ZZQ2'] }),
+  ]);
+  const o = await call(OPER, { q: 'sn:zzq' });
+  assert.deepEqual(o.body.groups[0].rows.map((x) => x.id), ['b', 'a'], '가린 행은 색인 순(주소 순 아님)');
+  const ad = await call(ADMIN, { q: 'sn:zzq' });
+  assert.deepEqual(ad.body.groups[0].rows.map((x) => x.id), ['a', 'b'], '관리자는 이름 순');
+});
+
+test('반증 M-2: 구분자로 채운 254자 검색어도 보통 검색어와 비슷한 시간(비율) — 시리얼 정규화는 요청당 한 번', () => {
+  const rows = [];
+  for (let i = 0; i < 20000; i++) rows.push(row('vm', { id: `v${i}`, name: `vm-${i}`, serials: [`SN${i}`], model: 'model x' }));
+  const time = (q) => { const pq = Q.parseQuery(q); const t0 = process.hrtime.bigint(); for (let k = 0; k < 3; k++) Q.searchRows(rows, pq); return Number(process.hrtime.bigint() - t0) / 3e6; };
+  time('warm');
+  const normal = Math.max(1, time('zz-none-1'));
+  const crafted = time('-.'.repeat(127));
+  assert.ok(Q.parseQuery('-.'.repeat(127)).snNeedle === '', '구분자만이면 정규화 결과는 빈 값');
+  assert.ok(crafted < normal * 8, `조작 검색어 ${crafted.toFixed(1)}ms ↔ 보통 ${normal.toFixed(1)}ms`);
+});
+
+test('반증 L-1 · L-3 · L-5: 서버 귀속은 서버 분석과 같은 함수 · 색인 생성은 시간 기준 양보 · 엣지 id 접두 한 번', () => {
+  const src = fs.readFileSync(new URL('../src/search/inventoryIndex.js', import.meta.url), 'utf8');
+  assert.match(src, /idracServerVcOf\(s, tagMap, index\)/);
+  assert.match(src, /from '\.\.\/idrac\/corpAttribution\.js'/);
+  assert.match(src, /createYielder\(15\)/);
+  assert.match(src, /id: e\.serverId \|\|/);
+  const core = fs.readFileSync(new URL('../src/routes/admin/idracCore.js', import.meta.url), 'utf8');
+  assert.ok(!/export function idracServerVcOf/.test(core), '판정 본문은 corpAttribution 한 곳(idracCore 는 다시 내보내기만)');
 });
 
 test('라우트: 관리자는 전 종류 · 출처 오류 · ip: 로 스토리지 관리 주소', async () => {

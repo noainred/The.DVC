@@ -1,7 +1,7 @@
 // v2.908 통합 장비 검색 — 화면 쪽 순수 모듈(접두 · 이동 주소 · 최근 항목 · 행 메타) 고정. 서버 판정과의 접두 대조는 server/test/invSearch2908.test.js.
 import { describe, it, expect } from 'vitest';
 import {
-  splitPrefix, withKindPrefix, focusPlan, listPlan, canFilter, HANDOFF_TARGETS, readRecent, pushRecent, clearRecent, RECENT_MAX, agoText,
+  splitPrefix, withKindPrefix, focusPlan, listPlan, canFilter, HANDOFF_TARGETS, readRecent, pushRecent, clearRecent, RECENT_MAX, agoText, recentKeyFor,
   highlightParts, metaParts, shownSerial, shownIp, statusTone, builtAgoText,
 } from './invSearchQuery.js';
 import fs from 'node:fs';
@@ -93,6 +93,17 @@ describe('최근 연 항목(localStorage 10개)', () => {
     expect(() => pushRecent({ kind: 'vm', name: 'a', plan: { hash: '#/a' } }, broken)).not.toThrow();
     const junk = mem(); junk.setItem('ui.invSearch.recent', '{"a":1}');
     expect(readRecent(junk)).toEqual([]);
+  });
+  it('계정별 키 — 다른 계정의 최근 항목을 읽지 않는다 · 계정을 모르면 저장하지 않는다(반증 L-4)', () => {
+    const st = mem();
+    const ka = recentKeyFor('alice'); const kb = recentKeyFor('bob');
+    expect(ka).not.toBe(kb);
+    pushRecent({ kind: 'vm', name: 'secret-vm', plan: { hash: '#/vcenters/vc/vm/1', handoff: null } }, st, 1, ka);
+    expect(readRecent(st, ka)).toHaveLength(1);
+    expect(readRecent(st, kb)).toEqual([]);
+    expect(recentKeyFor('')).toBe(null);
+    expect(pushRecent({ kind: 'vm', name: 'x', plan: { hash: '#/a' } }, st, 1, null)).toEqual([]);
+    expect(readRecent(st, null)).toEqual([]);
   });
   it('agoText · builtAgoText', () => {
     expect(agoText(0)).toBe('');

@@ -52,7 +52,7 @@ const PREFIX_RE = /^([a-z]{2,4}):/i;
  */
 export function parseQuery(raw) {
   const s0 = typeof raw === 'string' ? raw : '';
-  if (s0.length > QUERY_MAX) return { raw: '', mode: 'all', kind: null, text: '', needle: '', tooShort: false, tooLong: true };
+  if (s0.length > QUERY_MAX) return { raw: '', mode: 'all', kind: null, text: '', needle: '', snNeedle: '', tooShort: false, tooLong: true };
   let s = s0.trim();
   let mode = 'all'; let kind = null;
   const m = PREFIX_RE.exec(s);
@@ -63,23 +63,29 @@ export function parseQuery(raw) {
   }
   const needle = s.toLowerCase();
   const min = mode === 'all' ? MIN_TEXT : MIN_FIELD;
-  return { raw: s0, mode, kind, text: s, needle, tooShort: needle.length < min, tooLong: false };
+  // 시리얼 정규화는 **요청당 한 번**(반증 M-2 — 행마다 다시 하면 구분자로 채운 254자 검색어가 14k 행에서 55~82ms, 5만 행에서 215ms 를 잡았다).
+  return { raw: s0, mode, kind, text: s, needle, snNeedle: normSerial(needle), tooShort: needle.length < min, tooLong: false };
 }
 
-/** 행 하나의 일치 등급 — 낮을수록 먼저. 맞지 않으면 null(0 은 쓰지 않는다 — '가장 좋음' 과 헷갈린다). */
+/**
+ * 행 하나의 일치 등급 — 낮을수록 먼저. 맞지 않으면 null(0 은 쓰지 않는다 — '가장 좋음' 과 헷갈린다).
+ * addrSearchable=false(주소를 가리는 판본)면 주소는 물론 **주소가 들어 있는 이름 · 보조 이름 · 모델 칸**으로도 찾지 않는다(반증 M-1 —
+ * SAN 이름이 관리 IP 로 떨어진 행을 이름 등급으로 찾아 id ↔ IP 대응을 복원할 수 있었다). 칸별 표시(_nAddr …)는 색인 때 mkRow 가 만든다.
+ */
 export function matchTier(row, pq, { addrSearchable = true } = {}) {
   const n = pq.needle;
   if (!n || pq.tooShort || pq.tooLong) return null;
+  const sn = pq.snNeedle ?? normSerial(n);
   if (pq.mode === 'ip') return ipTier(row, n, addrSearchable);
-  if (pq.mode === 'sn') return snTier(row, normSerial(n));
-  if (row._n.startsWith(n)) return 1;
-  if (row._n.includes(n)) return 2;
-  if (row._a && row._a.includes(n)) return 3;
+  if (pq.mode === 'sn') return snTier(row, sn);
+  const nameOk = addrSearchable || !row._nAddr;
+  if (nameOk && row._n.startsWith(n)) return 1;
+  if (nameOk && row._n.includes(n)) return 2;
+  if (row._a && (addrSearchable || !row._aAddr) && row._a.includes(n)) return 3;
   const it = ipTier(row, n, addrSearchable);
   if (it != null) return 4;
-  const sn = normSerial(n);
   if (sn.length >= MIN_FIELD && snTier(row, sn) != null) return 5;
-  if (row._m && row._m.includes(n)) return 6;
+  if (row._m && (addrSearchable || !row._mAddr) && row._m.includes(n)) return 6;
   return null;
 }
 
@@ -118,12 +124,16 @@ export function searchRows(rows, pq, opts = {}) {
   const hits = new Map(KIND_KEYS.map((k) => [k, []]));
   const counts = Object.fromEntries(KIND_KEYS.map((k) => [k, 0]));
   if (!pq.tooShort && !pq.tooLong && pq.needle) {
-    for (const r of rows) {
-      const t = matchTier(r, pq, { addrSearchable: addrOk(r) });
+    for (let i = 0; i < rows.length; i++) {
+      const r = rows[i];
+      const ok = addrOk(r);
+      const t = matchTier(r, pq, { addrSearchable: ok });
       if (t == null) continue;
       counts[r.kind] = (counts[r.kind] || 0) + 1; // 칩 개수는 종류 필터와 무관하게 센다(다른 칩의 수도 보이게)
       if (want && !want.has(r.kind)) continue;
-      hits.get(r.kind)?.push({ r, t });
+      // 같은 등급 정렬 키: 이름에 가린 주소가 든 행은 원래 이름(=주소) 순으로 세우지 않는다 — 순서가 숨긴 주소를 알려 준다(반증 M-1).
+      const k = ok || !r._nAddr ? r._n : `\uffff${String(i).padStart(8, '0')}`;
+      hits.get(r.kind)?.push({ r, t, k });
     }
   }
   const groups = []; let shown = 0; let matched = 0;
@@ -131,7 +141,7 @@ export function searchRows(rows, pq, opts = {}) {
     const list = hits.get(k);
     if (!list.length) continue;
     matched += list.length;
-    list.sort((a, b) => a.t - b.t || (a.r._n < b.r._n ? -1 : a.r._n > b.r._n ? 1 : 0));
+    list.sort((a, b) => a.t - b.t || (a.k < b.k ? -1 : a.k > b.k ? 1 : 0));
     const room = Math.max(0, Math.min(perKind, totalMax - shown));
     const take = list.slice(0, room).map((x) => x.r);
     shown += take.length;

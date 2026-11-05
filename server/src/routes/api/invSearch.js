@@ -12,7 +12,7 @@
  */
 import { store } from '../../store.js';
 import { userHasPermission, userToolAllowed } from '../../auth/permissions.js';
-import { inventoryIndex } from '../../search/inventoryIndex.js';
+import { inventoryIndex, scopedIpRows } from '../../search/inventoryIndex.js';
 import { accessPlan, publicRow, LOCK_REASON_FULL_SCOPE } from '../../search/inventoryAccess.js';
 import { parseQuery, searchRows, KINDS, KIND_KEYS, normSerial, QUERY_MAX, MIN_TEXT, MIN_FIELD, PER_KIND, TOTAL_MAX } from '../../search/inventoryQuery.js';
 import { serialIndex } from '../../insights/serialLookup.js';
@@ -26,19 +26,31 @@ export function parseKinds(v) {
   return set.size ? set : null;
 }
 
+let _scopedIp = scopedIpRows;
+/** 테스트 전용 — 범위 계정 IP 행 출처를 바꾼다(null 이면 원래 것). */
+export function _setScopedIpForTest(fn) { _scopedIp = typeof fn === 'function' ? fn : scopedIpRows; }
+
 export function registerInvSearch(api) {
   api.get('/search/inventory', async (req, res) => {
     const pq = parseQuery(req.query.q);
     const snap = store.get();
     const plan = accessPlan(req.user, snap);
+    const ok = KIND_KEYS.filter((k) => plan.kinds[k] === 'ok');
     let idx;
     try {
-      idx = await inventoryIndex({ force: req.query.refresh === '1' });
+      // 강제 재생성(10초 스로틀)은 볼 수 있는 종류가 있는 계정만(반증 L-3 — 권한 0 계정이 재생성만 일으키지 않게).
+      idx = await inventoryIndex({ force: req.query.refresh === '1' && ok.length > 0 });
     } catch (e) {
       return res.status(503).json({ error: 'index-unavailable', reason: '장비 색인을 만들지 못했습니다 — 잠시 뒤 다시 시도하세요.' });
     }
-    const visible = idx.rows.filter(plan.visible);
-    const ok = KIND_KEYS.filter((k) => plan.kinds[k] === 'ok');
+    let visible = idx.rows.filter(plan.visible);
+    // 범위 계정의 IP 대장 행은 IP관리 화면과 같은 **범위 원장**에서(반증 L-2). 못 만들면 관리자 판본 행을 범위로 거른 것을 그대로 쓴다(그것도 범위 안이다).
+    if (plan.allowed && plan.kinds.ip === 'ok') {
+      try {
+        const ipRows = await _scopedIp(snap, plan.allowed);
+        visible = visible.filter((r) => r.kind !== 'ip').concat((ipRows || []).filter(plan.visible));
+      } catch { /* 위 주석 */ }
+    }
     const meta = {
       kinds: KINDS.filter((k) => plan.kinds[k.key]).map((k) => ({ key: k.key, label: k.label, prefix: k.prefix, ...(plan.kinds[k.key] === 'locked' ? { locked: true, reason: LOCK_REASON_FULL_SCOPE } : {}) })),
       // 못 읽은 출처 — 이 사용자가 볼 수 있는 종류의 것만(사유만, 개수 없이).

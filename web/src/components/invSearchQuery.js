@@ -114,28 +114,38 @@ export const LIST_SCREEN = Object.freeze({
 // ── 최근 연 항목(컨펌 ④ — 브라우저 localStorage 10개). 저장소가 막혀 있으면 조용히 빈 목록(편의 기능). ──
 export const RECENT_KEY = 'ui.invSearch.recent';
 export const RECENT_MAX = 10;
+/**
+ * 계정별 키(반증 L-4 — 같은 브라우저를 쓰는 다음 계정에게 앞 계정이 연 장비 이름 · 법인 · vCenter/VM id 가 보이지 않게).
+ * 계정을 모르면 저장하지 않는 키(null)를 돌려준다.
+ */
+export function recentKeyFor(username) {
+  const u = String(username ?? '').trim();
+  return u ? `${RECENT_KEY}:${encodeURIComponent(u).slice(0, 120)}` : null;
+}
 
-export function readRecent(storage = globalThis.localStorage) {
+export function readRecent(storage = globalThis.localStorage, key = RECENT_KEY) {
+  if (!key) return [];
   try {
-    const v = JSON.parse(storage?.getItem(RECENT_KEY) || '[]');
+    const v = JSON.parse(storage?.getItem(key) || '[]');
     return Array.isArray(v) ? v.filter((x) => x && x.plan && typeof x.plan.hash === 'string' && x.plan.hash.startsWith('#/') && typeof x.name === 'string').slice(0, RECENT_MAX) : [];
   } catch { return []; }
 }
 
 /** 맨 앞에 넣고 같은 이동은 하나만. 저장하는 것은 이름 · 종류 · 법인 · 이동(plan) · 시각뿐(상태 값은 낡으므로 넣지 않는다). */
-export function pushRecent(item, storage = globalThis.localStorage, now = Date.now()) {
+export function pushRecent(item, storage = globalThis.localStorage, now = Date.now(), key = RECENT_KEY) {
+  if (!key) return [];
   const plan = item?.plan;
-  if (!plan || typeof plan.hash !== 'string' || !plan.hash) return readRecent(storage);
+  if (!plan || typeof plan.hash !== 'string' || !plan.hash) return readRecent(storage, key);
   const handoff = Array.isArray(plan.handoff) && plan.handoff.length === 2 ? [String(plan.handoff[0]).slice(0, 40), String(plan.handoff[1]).slice(0, 200)] : null;
   const entry = { kind: String(item.kind || ''), name: String(item.name || '').slice(0, 120), corp: String(item.corp || '').slice(0, 80), plan: { hash: plan.hash.slice(0, 400), handoff }, at: now };
   const sig = (x) => `${x.plan.hash}|${x.plan.handoff ? x.plan.handoff.join('|') : ''}`;
-  const next = [entry, ...readRecent(storage).filter((x) => sig(x) !== sig(entry))].slice(0, RECENT_MAX);
-  try { storage?.setItem(RECENT_KEY, JSON.stringify(next)); } catch { /* 저장 차단 — 무시 */ }
+  const next = [entry, ...readRecent(storage, key).filter((x) => sig(x) !== sig(entry))].slice(0, RECENT_MAX);
+  try { storage?.setItem(key, JSON.stringify(next)); } catch { /* 저장 차단 — 무시 */ }
   return next;
 }
 
-export function clearRecent(storage = globalThis.localStorage) {
-  try { storage?.removeItem(RECENT_KEY); } catch { /* 무시 */ }
+export function clearRecent(storage = globalThis.localStorage, key = RECENT_KEY) {
+  try { if (key) storage?.removeItem(key); } catch { /* 무시 */ }
   return [];
 }
 
