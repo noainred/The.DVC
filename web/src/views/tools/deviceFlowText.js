@@ -140,7 +140,7 @@ export function headerNote(data = {}, now = Date.now()) {
  */
 export function noEdgesNote(data = {}) {
   const un = Number(data.totals?.unassignedDevices) || 0;
-  const parts = ['**등록된 수집 서버(엣지)가 없습니다.** 엣지는 설정 › 수집 서버에서 등록합니다.'];
+  const parts = ['**등록된 수집 서버(엣지)가 없습니다.** 엣지는 설정 › 엣지·원격 › 수집 서버(원격)에서 등록합니다.'];
   parts.push(un
     ? `엣지 담당으로 적힌 장비 **${un}대**는 붙일 엣지가 없어 아래 '붙일 곳 없음' 에 모았습니다.`
     : '모든 장비를 메인이 직접 수집하는 구성이면 이 상태가 정상입니다.');

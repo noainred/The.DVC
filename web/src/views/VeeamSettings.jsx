@@ -200,7 +200,7 @@ function VeeamBrServers() {
       <div className="muted" style={{ fontSize: 12, lineHeight: 1.6 }}>
         vCenter 별 Veeam Backup &amp; Replication 서버를 등록하면 vCenter › VM 및 폴더의 <b>Veeam 백업 VM 표시</b> 체크박스가 백업 대상·지금 백업 중인 VM 에 배지를 붙입니다.
         스토리지 원격 점검처럼 <b>읽는 곳</b>을 그 vCenter 와 같은 데이터센터의 엣지로 정하면 엣지가 Veeam REST API(기본 포트 9419, v12 이상)를 읽어 중앙으로 올립니다.
-        읽기 전용 계정(Veeam Backup Viewer 역할)을 권장합니다. 처음 접속하면 Veeam 의 자체서명 인증서가 승인 대기로 끊길 수 있습니다 — 그 노드의 설정 › Security › 장비 신뢰에서 승인하세요.
+        읽기 전용 계정(Veeam Backup Viewer 역할)을 권장합니다. 처음 접속하면 Veeam 의 자체서명 인증서가 승인 대기로 끊길 수 있습니다 — 그 노드의 설정 › 보안 › 장비 신뢰에서 승인하세요.
       </div>
       {d?.registryError && <div className="banner warn" style={{ marginTop: 8 }}>Veeam 서버 등록부를 읽지 못했습니다({d.registryError}) — 등록이 0대라는 뜻이 아닙니다.</div>}
       {err && <div className="banner warn" style={{ marginTop: 8 }}>목록을 읽지 못했습니다(0대라는 뜻이 아닙니다): {err} <button className="tab" style={{ marginLeft: 8, padding: '2px 10px' }} onClick={load}>다시 읽기</button></div>}
@@ -217,7 +217,7 @@ function VeeamBrServers() {
                     <td className="muted">{s.host}:{s.port}</td>
                     <td>{(s.vcenterIds || []).map((id) => vcName.get(id) || id).join(', ')}</td>
                     <td>{s.agent ? `엣지 ${s.agent}` : '중앙'}{s.agent && Array.isArray(d?.tokenAgents) && !d.tokenAgents.some((a) => String(a).toLowerCase() === String(s.agent).toLowerCase()) && (
-                      <div style={{ color: 'var(--amber)', fontSize: 11, marginTop: 2 }} title="Veeam 위임은 엣지별(개별) 토큰으로만 받습니다 — 공유 토큰으로는 어느 엣지인지 가릴 수 없어 자격증명을 내려보내지 않습니다">개별 토큰 없음 — 설정 › 수집 서버에서 발급</div>
+                      <div style={{ color: 'var(--amber)', fontSize: 11, marginTop: 2 }} title="Veeam 위임은 엣지별(개별) 토큰으로만 받습니다 — 공유 토큰으로는 어느 엣지인지 가릴 수 없어 자격증명을 내려보내지 않습니다">개별 토큰 없음 — 설정 › 엣지·원격 › 수집 서버(원격)에서 발급</div>
                     )}</td>
                     <td style={{ color: TONE[c.tone], maxWidth: 360, overflowWrap: 'anywhere' }}>{c.text}
                       {ph && <div style={{ color: TONE[ph.tone], fontSize: 11, marginTop: 2 }}>{ph.text}</div>}</td>

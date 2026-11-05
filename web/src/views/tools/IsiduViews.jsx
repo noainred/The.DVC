@@ -153,8 +153,8 @@ export function StatusView({ targets, data, ov, now, runNow, busy, openTarget, o
             <button key={k} type="button" className={`isd-fchip${filter === k ? ' on' : ''}`} aria-pressed={filter === k} onClick={() => setFilter(k)} disabled={!counts[k]}><span className={`isd-dot ${k}`} aria-hidden="true" /> {label} {countText(counts[k])}</button>
           ))}
         </div>
-        {/* v2.740: 일괄 변경·일괄 수집은 설정 › 수집 서버 › 아이실론 디렉터리 사용량(슈퍼 관리자 전용)으로 옮겼다 — 슈퍼 관리자에게만 그 화면으로 가는 길을 보인다. */}
-        {openBulk ? <div className="isd-actions"><button type="button" className="isd-btn" onClick={openBulk} title="설정 › 수집 서버 › 아이실론 디렉터리 사용량 › 일괄 변경으로 이동합니다(슈퍼 관리자 전용)">일괄 변경 · 일괄 수집(설정)</button></div> : null}
+        {/* v2.740: 일괄 변경·일괄 수집은 설정 › 수집 › 아이실론 디렉터리 사용량(슈퍼 관리자 전용)으로 옮겼다 — 슈퍼 관리자에게만 그 화면으로 가는 길을 보인다. */}
+        {openBulk ? <div className="isd-actions"><button type="button" className="isd-btn" onClick={openBulk} title="설정 › 수집 › 아이실론 디렉터리 사용량 › 일괄 변경으로 이동합니다(슈퍼 관리자 전용)">일괄 변경 · 일괄 수집(설정)</button></div> : null}
       </div>
 
       <section className="isd-card" aria-label="대상별 수집 상태">

@@ -43,7 +43,7 @@
 ## 본문
 
 - **스토리지 폴러 주기는 중앙 배포값**(`storage/intervals.js`, v2.409): 수집/push/설정 pull 주기를
-  모듈 로드 시 `const INTERVAL_MS = ...env...` 로 굳히지 말 것 — 그러면 중앙(설정 › 수집 서버 ›
+  모듈 로드 시 `const INTERVAL_MS = ...env...` 로 굳히지 말 것 — 그러면 중앙(설정 › 엣지·원격 › 수집 서버(원격) ›
   스토리지 수집 주기)에서 아무리 바꿔도 **엣지를 재시작해야** 먹어 기능이 통째로 죽는다.
   `runtimeIntervals()` 를 매 틱 조회하고 `startAdaptiveTimer` 로 재무장한다(setInterval 은 생성
   시 간격에 묶인다). 값 변경 시 `onIntervalsChange` 리스너가 **무장된 타이머를 즉시 재무장**하는
@@ -759,7 +759,7 @@
   · ⚠ 정직 기록: 실제 메일 서버·Outlook 에서 첨부를 연 적은 없다(가짜 SMTP 왕복으로 MIME 을 풀어 exceljs 로 다시 읽은 것까지). 실장비의 HDD/SSD 매체 값은 v2.303 수집기 가정 그대로다.
 
 - **게스트 파티션 사용률 경보(v2.749 — 시안 ①~④ 승인)** — 판정 코어 `server/src/guestpart/rules.js`(순수) · 조회 `report.js` · 설정 `settings.js`(`guest-partition.json`) ·
-  메일 `notify.js`(+ `mailHtml.js`) · 라우트 `routes/api/toolsGuestPart.js` · 화면 `GuestPartTool.jsx`(특수기능)·`GuestPartSettings.jsx`(설정 › 수집 서버). 회귀 `server/test/guestPart2749.test.js` · `web/src/views/tools/guestPartText.test.js`.
+  메일 `notify.js`(+ `mailHtml.js`) · 라우트 `routes/api/toolsGuestPart.js` · 화면 `GuestPartTool.jsx`(특수기능)·`GuestPartSettings.jsx`(설정 › 엣지·원격 › 수집 서버(원격)). 회귀 `server/test/guestPart2749.test.js` · `web/src/views/tools/guestPartText.test.js`.
   - **원천은 게스트 디스크 회수와 같은 수집**이다(수집 켜기·주기는 `guest-disk.json` 한 곳 — 두 곳에 두지 말 것). 현재 사용률은 새 표 `part_latest`(수집마다 vCenter 단위 교체,
     `commitCollection` 같은 트랜잭션)에서 읽는다. `part_last` 는 diff 기준(변화가 기준 GB 이상일 때만 갱신)이라 사용률 원천이 될 수 없다(50 GB 에서 1 GB = 2%p). 엣지 수신도 같은 함수를 지난다.
   - 사용률을 모르는 파티션(여유 공간 미보고)은 `unknown=1`·값 null — 0% 가 아니다. Tools 미보고 게스트는 '확인 불가' 로 따로 센다(인벤토리 게스트 − 보고 게스트, 템플릿 제외).

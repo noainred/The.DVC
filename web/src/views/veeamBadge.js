@@ -107,7 +107,7 @@ export function veeamSummary(d, { loading = false, error = '', vmTotal = null, r
   const base = { stats: null, source: '', basis: '', warnings: [], details: [], demo: false, runningJobs: [] };
   if (error) return { ...base, tone: 'warn', kind: 'error', text: `Veeam 백업 상태를 읽지 못했습니다(백업이 없다는 뜻이 아닙니다): ${error}` };
   if (!d) return { ...base, tone: 'muted', kind: 'loading', text: loading ? 'Veeam 백업 상태를 읽는 중…' : '' };
-  if (!d.configured) return { ...base, tone: 'muted', kind: 'unconfigured', text: '이 vCenter 에 연결된 Veeam 서버가 없습니다 — 설정 › vCenter 관리 › Veeam 백업 서버에서 등록하세요. 지금은 vCenter 스냅샷 기준 배지(📸 점선)만 보입니다.' };
+  if (!d.configured) return { ...base, tone: 'muted', kind: 'unconfigured', text: '이 vCenter 에 연결된 Veeam 서버가 없습니다 — 설정 › 백업 › Veeam 백업 서버에서 등록하세요. 지금은 vCenter 스냅샷 기준 배지(📸 점선)만 보입니다.' };
   const c = veeamCounts(d.byVm);
   const servers = Array.isArray(d.servers) ? d.servers : [];
   const warnings = []; const details = [];
@@ -290,7 +290,7 @@ export function collectLagText(collectedAt, now = Date.now()) {
   const ms = Math.max(0, now - collectedAt);
   const d = Math.floor(ms / 86_400_000);
   const lag = d >= 1 ? `${d}일` : `${Math.max(1, Math.floor(ms / 3_600_000))}시간`;
-  return `수집이 ${lag} 뒤처짐 — 설정 › Log(vCenter 로그 보관)에서 원인을 확인하세요.`;
+  return `수집이 ${lag} 뒤처짐 — 설정 › 로그 › vCenter 로그 보관에서 원인을 확인하세요.`;
 }
 
 /** 이벤트 조회 상태 → 요약 줄 문구(ok 가 아니면 이유 — 이벤트가 없다고 '백업 없음' 으로 말하지 않는다). */
@@ -431,7 +431,7 @@ export function backupPairCell(e, vmFallback = null, now = Date.now(), { refresh
   const num = (x) => (x && Number.isFinite(x.n) ? `${x.n}${x.partial ? '*' : ''}` : '—');
   const total = Number.isFinite(vE?.vmTotal) ? vE.vmTotal : Number.isFinite(sE?.vmTotal) ? sE.vmTotal : (Number.isFinite(vmFallback) ? vmFallback : null);
   const lines = [`veeam/snapshot — Veeam 백업 대상 ${num(vE)} / 스냅샷 기준 ${num(sE)}${total != null ? ` (VM ${total}대 중)` : ''}`];
-  lines.push('', '[Veeam]', vc ? vc.title : 'Veeam 서버와 연동되지 않았습니다 — 설정 › vCenter 관리 › Veeam 백업 서버에서 등록하면 Veeam 기준 수가 나옵니다.');
+  lines.push('', '[Veeam]', vc ? vc.title : 'Veeam 서버와 연동되지 않았습니다 — 설정 › 백업 › Veeam 백업 서버에서 등록하면 Veeam 기준 수가 나옵니다.');
   lines.push('', '[스냅샷]', sc ? sc.title.replace('Veeam 서버와 연동되지 않아 vCenter 로 본 값입니다', 'vCenter 스냅샷·이벤트로 본 값입니다(Veeam 서버 값과 별개)') : (unknownSrc ? '확인 불가(위 사유)' : '이 응답에 스냅샷 기준 값이 없습니다(포탈이 옛 판이거나 VM 목록 수집 전).'));
   const tones = [vc?.tone, sc?.tone];
   const tone = tones.includes('warn') ? 'warn' : vc && vc.tone !== 'none' ? vc.tone : sc && sc.tone !== 'none' ? sc.tone : 'none';

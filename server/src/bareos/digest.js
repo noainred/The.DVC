@@ -202,7 +202,7 @@ export function renderDigest(d, now = Date.now()) {
     + `<p style="margin:0 0 10px;color:#4b5563;font-size:13px">최근 24시간(${esc(localStamp(now - WINDOW_MS))} ~ ${esc(localStamp(now))}) · 법인 ${t.corps}곳 · 백업 대상 ${t.targets}대 · 24시간 안에 실행 없음 ${t.stale}대${t.unknown ? '(결과 모름 법인 제외)' : ''}${t.verifyFail ? ` · 복원 검증 실패 ${t.verifyFail}` : ''}</p>`
     + `<table style="border-collapse:collapse"><thead><tr><th ${th}>법인</th><th ${th}>대상</th><th ${th}>성공</th><th ${th}>경고</th><th ${th}>실패</th><th ${th}>취소</th><th ${th}>실행 없음</th><th ${th}>복원</th><th ${th}>복원 검증</th></tr></thead><tbody>${corpRows}</tbody></table>`
     + (failRows ? `<h4 style="margin:14px 0 6px">실패한 VM</h4><table style="border-collapse:collapse"><thead><tr><th ${th}>법인</th><th ${th}>VM</th><th ${th}>jobid</th><th ${th}>끝난 시각</th><th ${th}>오류</th></tr></thead><tbody>${failRows}</tbody></table>` : '')
-    + `<p style="font-size:11px;color:#6b7280">결과는 포탈 원장(폴러가 Director 카탈로그로 갱신한 마지막 실행) 기준입니다 · Director 조회가 실패 중인 법인은 수를 만들지 않고 '모름' 으로 적습니다 · 포탈 › 서버 › Backup › Bareos 에서 자세히 볼 수 있습니다 · 설정 › vCenter 관리 › Bareos 백업 서버 › 공통 기본값 · 수집에서 끄거나 시각을 바꿉니다.</p></div>`;
+    + `<p style="font-size:11px;color:#6b7280">결과는 포탈 원장(폴러가 Director 카탈로그로 갱신한 마지막 실행) 기준입니다 · Director 조회가 실패 중인 법인은 수를 만들지 않고 '모름' 으로 적습니다 · 포탈 › 서버 › Backup › Bareos 에서 자세히 볼 수 있습니다 · 설정 › 백업 › Bareos 백업 서버 › 공통 기본값 · 수집에서 끄거나 시각을 바꿉니다.</p></div>`;
   const text = `${head}\n${d.rows.map((c) => `${c.name}\t대상 ${c.targets}\t성공 ${n(c, c.ok)}\t경고 ${n(c, c.warn)}\t실패 ${n(c, c.fail)}`).join('\n')}${d.fails.length ? `\n\n실패한 VM\n${d.fails.map((f) => `${f.corp}\t${f.vmName}\t${f.jobid ?? '—'}`).join('\n')}` : ''}`;
   return { subject, html, text };
 }

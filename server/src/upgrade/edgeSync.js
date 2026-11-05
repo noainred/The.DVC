@@ -232,7 +232,7 @@ export function edgeSyncAlert({ id, name, kind, target, attempts, reason, interv
   const lines = closed
     ? [`엣지: ${who}`, `대상 버전: v${target}`, '상태: 해소됨 — 중앙 버전 번들을 받았습니다(또는 이미 최신이라고 답했습니다).']
     : [`엣지: ${who}`, `대상 버전: v${target}`, `연속 실패: ${attempts}회 — 다음 시도까지 백오프 상한(${Math.round(SYNC_BACKOFF_MAX_MS / 3_600_000)}시간)에 닿았습니다(주기 ${Math.round((numOrNull(intervalMs) ?? 600_000) / 60_000)}분).`,
-      `마지막 사유: ${reason || '사유 없음'}`, '조치: 설정 › 수집 서버에서 그 엣지의 토큰·URL·인바운드 경로(NAT/방화벽)를 확인하고 ‘모두 업그레이드’ 또는 ‘구버전 엣지 밀어 넣기’ 로 다시 시도하세요.'];
+      `마지막 사유: ${reason || '사유 없음'}`, '조치: 설정 › 엣지·원격 › 수집 서버(원격)에서 그 엣지의 토큰·URL·인바운드 경로(NAT/방화벽)를 확인하고 ‘모두 업그레이드’ 또는 ‘구버전 엣지 밀어 넣기’ 로 다시 시도하세요.'];
   return {
     key: `edgesync:${id}|${target}${closed ? ':close' : ''}`,
     severity: closed ? 'info' : 'warning',

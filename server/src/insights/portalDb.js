@@ -246,7 +246,7 @@ const DETAILS = {
   },
   'vcenters.json': {
     keeps: 'vCenter 등록 정보(id·이름·호스트 URL·계정/암호·위치·수집 모드).',
-    writer: '설정 › vCenter 관리(원자적 쓰기 + 손상 보존)',
+    writer: '설정 › 인프라 등록 › vCenter 등록·관리(원자적 쓰기 + 손상 보존)',
     retention: '영구(구성 데이터)',
     note: '⚠ 자격증명 포함. 손상 시 .corrupt.<ts> 로 보존 후 빈 값 반환(다음 저장이 원본을 소거하지 않게).',
   },
