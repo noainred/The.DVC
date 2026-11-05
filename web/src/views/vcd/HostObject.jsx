@@ -236,7 +236,7 @@ function HostMountsCard({ host, datastores }) {
   );
 }
 
-// v2.901 팀 구성 문구 — v2.902 부터 vcInfo.js 한 벌(분산 포트그룹 표와 같이 쓴다). 예전 이름으로도 내보낸다.
+// v2.901 팀 구성 문구 — v2.904 부터 vcInfo.js 한 벌(분산 포트그룹 표와 같이 쓴다). 예전 이름으로도 내보낸다.
 export { teamingText };
 
 function HostNetCards({ host }) {

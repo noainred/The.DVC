@@ -391,7 +391,7 @@ export function PoolSettingsCard({ vcenterId, host, poolNames }) {
 }
 
 /**
- * v2.902: 이 호스트가 붙은 분산 스위치의 포트그룹 팀 구성 · LACP · VLAN(vcinfo dvpg — vCenter 포트그룹 설정, 주기 수집).
+ * v2.904: 이 호스트가 붙은 분산 스위치의 포트그룹 팀 구성 · LACP · VLAN(vcinfo dvpg — vCenter 포트그룹 설정, 주기 수집).
  * 분산 스위치가 없는 호스트 · 호스트 구성을 아직 읽지 않은 호스트에는 그리지 않는다(위 '가상 스위치' 카드가 그 사실을 말한다).
  */
 export function DvpgTeamingCard({ vcenterId, host }) {

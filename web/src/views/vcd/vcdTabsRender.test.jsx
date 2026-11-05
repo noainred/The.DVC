@@ -382,7 +382,7 @@ describe('v2.898 ④ 연결된 vCenter · 업데이트 · vLCM 카드 — 렌더
   });
 });
 
-describe('v2.902 분산 포트그룹 팀 구성 카드 — 렌더(얕게)', () => {
+describe('v2.904 분산 포트그룹 팀 구성 카드 — 렌더(얕게)', () => {
   it('분산 스위치가 없는 호스트에는 부르지 않고 그리지 않는다 · 있으면 /vcenter-info/dvpg 한 번 · 이 vDS 행만(업링크 포트그룹 제외)', async () => {
     const { DvpgTeamingCard } = await import('./VcInfoParts.jsx');
     const called = [];

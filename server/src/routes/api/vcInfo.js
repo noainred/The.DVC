@@ -74,7 +74,7 @@ const KIND_LIMITS = Object.freeze({
   alarms: { max: VCINFO_LIMITS.alarms }, tasks: { max: VCINFO_LIMITS.tasks, keepMs: TASK_KEEP_MS }, perms: { max: VCINFO_LIMITS.perms },
   vlcm: { clusters: VCREST_LIMITS.clusters, ncMax: VCREST_LIMITS.nc },
   pools: { max: POOLS_MAX },   // v2.901
-  dvpg: { max: DVPG_MAX },     // v2.902
+  dvpg: { max: DVPG_MAX },     // v2.904
 });
 
 /** 응답 본문(순수 — 테스트 고정). entry 는 캐시의 그 종류 값(없으면 null), admin 은 관리자 판본 여부. */
@@ -98,7 +98,7 @@ export function vcInfoBody(kind, vcenterId, entry, { admin = false, source = nul
     ...base, at: entry.at ?? null, items, error: entry.error ?? null,
     ...(entry.omitted ? { omitted: entry.omitted } : {}),
     ...(entry.unreadable ? { unreadable: entry.unreadable } : {}),   // v2.901(점검 E1): 못 읽은 알람 원소 수
-    ...(kind === 'dvpg' ? { lagError: entry.lagError ?? null, dvsError: entry.dvsError ?? null } : {}),   // v2.902: LAG · vDS 이름을 못 읽은 사유
+    ...(kind === 'dvpg' ? { lagError: entry.lagError ?? null, dvsError: entry.dvsError ?? null } : {}),   // v2.904: LAG · vDS 이름을 못 읽은 사유
     ...(kind === 'perms' ? { roles: Array.isArray(entry.roles) ? entry.roles : [] } : {}),
     ...(userMasked ? { userMasked: true } : {}),
   };

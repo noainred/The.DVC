@@ -152,7 +152,7 @@ async function readPools(c, refs, now) {
 }
 
 /**
- * v2.902: 분산 포트그룹 팀 구성 · LACP · VLAN — 수집이 이미 가진 포트그룹 moref 만 묻는다(읽기 전용 RetrieveProperties).
+ * v2.904: 분산 포트그룹 팀 구성 · LACP · VLAN — 수집이 이미 가진 포트그룹 moref 만 묻는다(읽기 전용 RetrieveProperties).
  *   vDS 는 이름(호스트 hcfg 의 분산 스위치 이름과 짝짓는다)과 Enhanced LACP 의 LAG(config.lacpGroupConfig)를 한 번에 — LAG 를 못 읽으면 이름만 다시 읽고
  *   LACP 는 옛 포트그룹 설정으로만 판정한다(lagError). vDS 이름까지 못 읽으면 이름 없이(화면이 호스트와 짝짓지 못한다고 말한다).
  */
@@ -209,7 +209,7 @@ export async function refreshVcInfo(c, vc, { now = Date.now(), signal = null, bu
     ['perms', () => readPerms(c, now)],
     // v2.901: 리소스 풀 예약 · 제한 · 공유 — 수집이 이미 가진 풀 moref 를 받을 때만(없으면 이 종류를 건드리지 않는다).
     ...(Array.isArray(poolRefs) ? [['pools', () => readPools(c, poolRefs, now)]] : []),
-    // v2.902: 분산 포트그룹 팀 구성 — 수집이 이미 가진 포트그룹 moref 를 받을 때만
+    // v2.904: 분산 포트그룹 팀 구성 — 수집이 이미 가진 포트그룹 moref 를 받을 때만
     ...(Array.isArray(dvpgRefs) ? [['dvpg', () => readDvpg(c, dvpgRefs, now)]] : []),
   ];
   await runJobs(cur, jobs, now, deadline, signal);
