@@ -14,7 +14,9 @@
   초기화(`store.reset`)는 전체 범위 관리자만이고 손상본을 보존한다(`preserveCorrupt`). 비밀은 싣지 않는다.
 - **범위**: 조회는 `scopedVcenterIds` 교집합이 요청 필터보다 먼저 · 법인 대상 쓰기는 `corpWriteAccess`(모르는 법인·조회 밖 404 → 쓰기 밖 403, writeVcenters 미설정 = 조회 범위) ·
   전역 카탈로그·태그 카테고리·초기화는 전체 범위 관리자(`FLEET_OPS`). 법인 미지정 구성원은 범위 계정에 싣지 않는다. 응답 캐시는 범위·쓰기 범위·관리자·저장소 rev 를 키에 넣는다.
-  비관리자 판본에는 스캔 엔트리 대역(CIDR)·주소 모양 BM 이름을 싣지 않는다.
+  비관리자 판본에는 스캔 엔트리 대역(CIDR)·주소 모양 BM 이름을 싣지 않는다. **범위 계정 판본에는 베어메탈 서비스태그를 싣지 않는다**(5차 R7·결정 ⑤ — `/insights/fleet` 403 과 같은 기준):
+  키는 `pubKey`(st:·fl: → `maskedIdToken`) · 쓰기는 `keyResolverFor`(그 법인 후보 안에서만 · 원문 베어메탈 키 거부) · 이름 안의 태그는 `stripTag`(찾기·CSV 도 가린 이름 기준).
+  새 응답 필드·새 키 입력을 만들면 **이 셋을 지나는지** 먼저 볼 것. 잔여 위험: 쓰기 계정이 이름 규칙을 추측해 넣으면 소속 변화로 태그를 되찾을 수 있다(4차 반증 4 — 판정은 판본마다 바꾸지 않는다).
 - **고정**: 법인이 있는 구성원만(법인 없는 서버는 통합 서버 인벤토리에서 법인을 먼저 정한다). 자동 판정과 다르면 드리프트 큐. 법인이 바뀌면 무시(pinMismatch).
   '고정 유지'(`pins.review`)는 그 순간의 자동 판정을 `reviewedAuto` 로 저장하고 **그와 같은 드리프트만** 가린다 — 자동 판정이 다른 서비스로 바뀌면 다시 묻는다.
   `reviewedAuto` 가 없는 옛 표지는 같다고 보지 않는다(5차 반증 R8 — 예전에는 검토 한 번이 이후 모든 드리프트를 숨겼다).
@@ -33,6 +35,9 @@
 - **백업 칸은 법인 Director 매핑(`bareos.json sites[].vcenterId`) ∪ 원장에 잡이 있는 법인 기준** — 그 밖의 법인 VM 은 `undefined`(해당 없음, `stat.backup.na`). 함대 잡 수로 판단하지 않는다(M1).
   설정 손상은 `settingsLoadError()` 로만 안다(`loadSettings` 는 던지지 않는다) — 손상이면 모름(null)이지 해당 없음이 아니다(1차 반증 2). 범위 계정 `meta.backup` 은 자기 법인 기준(`backupMetaFor`).
 - **키**: VM = `iu:<vcenterId>:<instanceUuid>`(없으면 `vm:<moref id>`) · 베어메탈 = `st:<서비스태그>`(없으면 `fl:<fleetId sha1 16자>` — 주소 원문을 키에 싣지 않는다).
+  키 등급이 오르면 낮은 등급 키를 `aliasKeys` 로 싣고 그 고정을 승계한다(같은 법인 · 유령 아님 · `pins.rekey`·고정 쓰기 때 새 키로 옮김 — 읽기 경로는 쓰지 않는다 · 5차 R15).
+  베어메탈 별칭은 **태그가 없을 때의 fleetId**(일반 행 serverId · ESXi 호스트 행 name — 함대 분류와 같은 규칙)다 — lc(fleetId) 로 만들면 태그가 읽힌 뒤 절대 맞지 않는다(4차 반증 1, 시험은 실제 라우트로).
+  `st:` 고정을 '함대 키 집합에 태그가 있다' 로 보류하지 말 것 — 그 집합에 ESXi 호스트 태그가 있어 가상화 호스트가 된 서버의 고정을 영원히 붙잡았다(4차 반증 2 — 되돌림). VM instanceUuid 를 하나도 못 읽는 법인의 `iu:` 고정은 보류 `uuid-unread`.
 - **의존 방향**: 도메인 모듈(`servicemap/*`)은 `routes/` 를 import 하지 않는다(arch 테스트) — 스냅샷·fleet·장애·백업 입력 수집은 라우트 층에서 한다.
 - **판정 결과 memo(`inventoryFor`)**: 키 = 스냅샷 세대 · 저장소 rev · 입력 세대(gather 시각 · inputRev) · 알려진 법인 · 범위 · 관리자 판본(12초 · 4개). 판정에 새 입력을 더하면
   **그 입력이 바뀔 때 키도 바뀌는지** 먼저 답할 것(5차 2차 M10/R5). 읽기 경로는 깊게 동결한 참조(`peekMap`·`peekPins`)만 쓰고 고치지 않는다 — 고치면 던진다.
@@ -45,4 +50,4 @@
 - **법인 귀속 없음은 이유별**(R18 둘째 절): 귀속 판정 오류 · 서비스 태그가 두 법인에 걸려 보류(`buildVcIndex.conflictTags`) · 어느 규칙에도 맞지 않음. 묶음 키 `nocorp|<이유>`.
 - **구성원 조회 `members?global=<id>`** 는 corp 없이도 범위 안 전 법인을 준다(화면 '전 법인 구성원 모두 보기'). 영향 호스트의 '함께 떠받치는 서비스' 에서는 **그 전역 서비스의 법인 서비스 id 를 모두** 뺀다(`svc` 만 빼면 자기 자신이 뜬다 — v2.887~v2.890 결함).
 - **라우트(`routes/api/svcInventory.js`)·이 폴더를 고치면 커밋 전에 `node scripts/api-doc.mjs` · `node scripts/arch-doc.mjs`** — 줄 번호가 바뀌어 `apiDoc2563`·`audit2613h` 가 깨진다(v2.887·v2.890 두 번 전량 verify 에서 처음 잡혔다).
-- 회귀: `server/test/svcInventory2887.test.js` · `server/test/svcInventoryReview5.test.js`(5차 검토 1차 — 수정 전 코드에서 10/10 실패 확인) · `svcInventoryReview5b.test.js`(2차) · `svcInventoryReview5c.test.js`(3차 — 판정 순서 변이 9종) · 웹 `web/src/views/tools/svcInventoryText.test.js`.
+- 회귀: `server/test/svcInventory2887.test.js` · `server/test/svcInventoryReview5.test.js`(5차 검토 1차 — 수정 전 코드에서 10/10 실패 확인) · `svcInventoryReview5b.test.js`(2차) · `svcInventoryReview5c.test.js`(3차 — 판정 순서 변이 13종) · `svcInventoryReview5d.test.js`(4차 — 범위 가림·키 승계 · 반증 대상에서 3건 실패 확인) · 웹 `web/src/views/tools/svcInventoryText.test.js`.

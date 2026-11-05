@@ -77,7 +77,7 @@ function finishStat(st, hostByKey) {
  * @param {{members:object[], map:object, pins:object, hostByKey:Map, allowed:Set|null, unreadCorps:Set, bmBlocked:boolean,
  *          corpNames:Map, scanEntries?:Map, adminView?:boolean}} input
  */
-export function buildInventory({ members = [], map, pins = {}, hostByKey = new Map(), allowed = null, unreadCorps = new Set(), bmBlocked = false, corpNames = new Map(), scanEntries = new Map(), adminView = true, knownCorps = null } = {}) {
+export function buildInventory({ members = [], map, pins = {}, hostByKey = new Map(), allowed = null, unreadCorps = new Set(), bmBlocked = false, uuidUnreadCorps = new Set(), corpNames = new Map(), scanEntries = new Map(), adminView = true, knownCorps = null } = {}) {
   const idx = buildIndex(map);
   const ctx = { tagCategory: map?.settings?.tagCategory || '' };
   const inScope = (vc) => (allowed ? !!vc && allowed.has(vc) : true);
@@ -146,7 +146,7 @@ export function buildInventory({ members = [], map, pins = {}, hostByKey = new M
   const unlinked = services.filter((s) => !s.globalId || !globalById.has(s.globalId))
     .map((s) => ({ id: s.id, corp: s.corp, name: s.name, suggest: globalNames.get(lc(s.name)) || null, n: s.stat.n.total }));
 
-  return { resolved, corps, services, noCorp, global: { globals, cells, unlinked }, queues: buildQueues({ members, resolved, pins, allowed, unreadCorps, bmBlocked, idx, scanEntries, adminView, knownCorps }) };
+  return { resolved, corps, services, noCorp, global: { globals, cells, unlinked }, queues: buildQueues({ members, resolved, pins, allowed, unreadCorps, bmBlocked, uuidUnreadCorps, idx, scanEntries, adminView, knownCorps }) };
 }
 
 /**
@@ -154,22 +154,24 @@ export function buildInventory({ members = [], map, pins = {}, hostByKey = new M
  * ⚠ 유령 판정은 **읽지 못한 출처를 막는다**(4차 반증 5): 그 법인 vCenter 를 지금 못 읽거나(unreadCorps) 베어메탈 출처를 못 읽으면
  *   (bmBlocked — 등록부 손상·엣지 만료 등) 그 고정은 유령이 아니라 '판정 보류' 다. v2.783 P-B3 와 같은 사고 유형.
  */
-export function buildQueues({ members = [], resolved, pins = {}, allowed = null, unreadCorps = new Set(), bmBlocked = false, idx, scanEntries = new Map(), adminView = true, knownCorps = null }) {
+export function buildQueues({ members = [], resolved, pins = {}, allowed = null, unreadCorps = new Set(), bmBlocked = false, uuidUnreadCorps = new Set(), idx, scanEntries = new Map(), adminView = true, knownCorps = null }) {
   const inScope = (vc) => (allowed ? !!vc && allowed.has(vc) : true);
   const groups = new Map();
   const unmapped = new Map();
-  const drift = []; const mismatch = []; const redundant = []; const tagAmbiguous = []; const ruleOverlap = [];
+  const drift = []; const mismatch = []; const redundant = []; const tagAmbiguous = []; const ruleOverlap = []; const aliasPins = [];
   const NAME_CAP = 40;
   for (const m of members) {
     if (!inScope(m.corp)) continue;
     const r = resolved.get(m.key);
     if (r.pinMismatch) mismatch.push({ key: m.key, name: m.name, kind: m.kind, corp: m.corp, pinCorp: r.pinMismatch.corp, serviceId: r.pinMismatch.serviceId });
-    if (r.drift) drift.push({ key: m.key, name: m.name, kind: m.kind, corp: m.corp, pin: { serviceId: r.serviceId, by: pins[m.key]?.by || '', at: pins[m.key]?.at || 0 }, auto: { serviceId: r.auto.serviceId, src: r.auto.src, via: r.auto.via || '' },
+    if (r.drift) drift.push({ key: m.key, name: m.name, kind: m.kind, corp: m.corp, pin: { serviceId: r.serviceId, by: pins[r.pinKey || m.key]?.by || '', at: pins[r.pinKey || m.key]?.at || 0 }, auto: { serviceId: r.auto.serviceId, src: r.auto.src, via: r.auto.via || '' },
       ...(r.driftChanged ? { changed: r.driftChanged.legacy ? { legacy: true } : { reviewedAuto: r.driftChanged.reviewedAuto } } : {}) });
     // 불필요한 고정 — 단 '모호한 자동 판정을 사람이 확인한 고정'(태그 모호·규칙 겹침)은 불필요하지 않다: 지우면 다시 모호로 돌아간다(3차 반증 4 — 순환)
     if (r.src === 'pin' && r.redundant && !r.auto?.tagAmbiguous && !r.auto?.ruleOverlap) redundant.push({ key: m.key, name: m.name, kind: m.kind, corp: m.corp, serviceId: r.serviceId, via: r.auto.src });
     // 태그가 둘 이상의 서비스에 걸림(5차 M5·R14) — 첫 값으로 정했지만 사람이 봐야 한다. 고정한 구성원은 사람이 이미 정했다.
     if (r.src === 'tag' && r.tagAmbiguous) tagAmbiguous.push({ key: m.key, name: m.name, kind: m.kind, corp: m.corp, serviceId: r.serviceId, tags: r.tagValues || [] });
+    // 낮은 등급 키(별칭)로 저장된 고정 — 판정은 이미 쓰고 있다. '새 키로 옮기기' 대상(5차 R15)
+    if (r.src === 'pin' && r.pinKey) aliasPins.push({ key: m.key, name: m.name, kind: m.kind, corp: m.corp, aliasKey: r.pinKey, serviceId: r.serviceId });
     // 이름 규칙 둘 이상(다른 서비스)이 걸림 — 결과가 적용 순서에 달렸다(3차 반증 1: 순서를 바꾼 업그레이드에서 조용히 옮겨 간 구성원).
     if (r.src === 'rule' && r.ruleOverlap) ruleOverlap.push({ key: m.key, name: m.name, kind: m.kind, corp: m.corp, serviceId: r.serviceId, via: r.via, others: r.ruleOverlap });
     if (r.serviceId) continue;
@@ -207,6 +209,7 @@ export function buildQueues({ members = [], resolved, pins = {}, allowed = null,
 
   // 유령 키 — 범위 안 법인의 고정 중 지금 구성원 전체 집합에 없는 키.
   const live = new Set(members.map((m) => m.key));
+  for (const m of members) for (const a of m.aliasKeys || []) live.add(a);   // 별칭 고정은 유령이 아니다(5차 R15)
   const ghosts = []; const held = []; const orphaned = [];
   for (const [k, p] of Object.entries(pins || {})) {
     if (live.has(k) || !inScope(p.corp)) continue;
@@ -214,12 +217,15 @@ export function buildQueues({ members = [], resolved, pins = {}, allowed = null,
     if (knownCorps && !knownCorps.has(p.corp)) { orphaned.push({ key: k, serviceId: p.serviceId, corp: p.corp }); continue; }
     const svcName = idx?.get(p.corp)?.svcById.get(p.serviceId)?.name || '';
     const isBm = k.startsWith('st:') || k.startsWith('fl:');
-    const why = unreadCorps.has(p.corp) ? 'corp-unread' : (isBm && bmBlocked ? 'bm-source-unread' : '');
+    // VM 식별 키(instanceUuid)를 못 읽는 법인(REST 폴백 수집 등)의 iu: 고정 — 그 VM 이 정말 없는지 모른다(4차 반증 5).
+    // ⚠ 4차 반증 2: 'st: 태그를 함대가 아직 안다' 로 보류하던 것은 되돌렸다 — 함대 키 집합에 ESXi 호스트 태그가 들어 있어 가상화 호스트가 된 서버의 고정을 영원히 붙잡았다.
+    const uuidUnread = k.startsWith('iu:') && uuidUnreadCorps instanceof Set && uuidUnreadCorps.has(p.corp);
+    const why = unreadCorps.has(p.corp) ? 'corp-unread' : (isBm && bmBlocked ? 'bm-source-unread' : uuidUnread ? 'uuid-unread' : '');
     (why ? held : ghosts).push({ key: k, serviceId: p.serviceId, serviceName: svcName, corp: p.corp, by: p.by, at: p.at, ...(why ? { held: why } : {}) });
   }
   return {
     unassigned: [...groups.values()].sort((a, b) => b.n - a.n || a.key.localeCompare(b.key)),
     unmapped: [...unmapped.values()].sort((a, b) => b.n - a.n),
-    drift, mismatch, redundant, ghosts, ghostsHeld: held, orphaned, tagAmbiguous, ruleOverlap,
+    drift, mismatch, redundant, ghosts, ghostsHeld: held, orphaned, tagAmbiguous, ruleOverlap, aliasPins,
   };
 }
