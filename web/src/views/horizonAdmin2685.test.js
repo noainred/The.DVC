@@ -12,7 +12,8 @@ const read = (p) => fs.readFileSync(path.join(HERE, p), 'utf8');
 describe('Horizon 연결 서버 등록 — 설정 메뉴', () => {
   const settings = read('Settings.jsx');
   it('설정 하위 메뉴에 horizon-admin 이 있고 HorizonAdmin 을 그린다', () => {
-    expect(settings).toMatch(/\{ k: 'horizon-admin', label: 'Horizon 연결 서버', C: HorizonAdmin \}/);
+    // v2.902: 설정 1단 재배치 — 인프라 등록 묶음(group 'infra')에 속한다. 키 · 라벨 · 컴포넌트는 그대로.
+    expect(settings).toMatch(/\{ k: 'horizon-admin', label: 'Horizon 연결 서버', C: HorizonAdmin, group: 'infra' \}/);
     expect(settings).toMatch(/import HorizonAdmin from '\.\/HorizonAdmin\.jsx'/);
   });
   it('라이선스 만료 도구는 등록 폼을 복제하지 않고 공용 컴포넌트를 쓴다', () => {

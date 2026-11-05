@@ -236,7 +236,7 @@
 | [RELEASES.md](RELEASES.md) | 릴리스/다운로드 — GitHub Releases 가이드 |
 | [REVIEW-2026-09-07.md](REVIEW-2026-09-07.md) | 전체 소스 리뷰 (2026-09-07, v2.409 ~ v2.415 신규 모듈 중심) — 결과와 남은 개선 포인트 |
 | [SERVICE-HUB.md](SERVICE-HUB.md) | 글로벌 데이터센터 서비스 허브 (pyportal) — 운영 가이드 |
-| [SETTINGS.md](SETTINGS.md) | 설정 화면 안내 — 모든 탭·모든 설정 (v2.583) |
+| [SETTINGS.md](SETTINGS.md) | 설정 화면 안내 — 모든 탭·모든 설정 (v2.583 · 메뉴 묶음 v2.902) |
 | [SVCMON-ARCHITECTURE.md](SVCMON-ARCHITECTURE.md) | 성능점검 — 아키텍처 / 용량 산정 / 튜닝 |
 | [SVCMON-BULK.md](SVCMON-BULK.md) | 성능점검 — 가져오기 / 내보내기 · 대량 자동등록 |
 | [SVCMON-TESTS.md](SVCMON-TESTS.md) | 성능점검 — 테스트 유형 상세 |
