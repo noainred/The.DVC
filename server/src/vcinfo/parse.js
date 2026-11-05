@@ -9,7 +9,7 @@
 // 정규식은 전부 '[^<]*'(다음 '<' 에서 멈춘다) 또는 길이 상한이 있는 반복이고, 입력 길이를 먼저 자른다(정규식 규칙).
 import { xmlUnescape } from '../vcenter/soapParse.js';
 import { flatStr } from '../util/capStr.js';
-import { TEAMING_POLICIES } from '../hostcfg/parse.js';   // v2.904: 팀 구성 정책 이름은 표준 스위치(hcfg)와 한 벌   // v2.901(점검 E2): 캐시에 남는 글자는 응답 원문을 붙잡지 않게 평탄화
+import { TEAMING_POLICIES } from '../hostcfg/parse.js';   // v2.905: 팀 구성 정책 이름은 표준 스위치(hcfg)와 한 벌   // v2.901(점검 E2): 캐시에 남는 글자는 응답 원문을 붙잡지 않게 평탄화
 
 export const VCINFO_LIMITS = Object.freeze({ alarms: 500, tasks: 200, perms: 1000, roles: 200, xml: 4_000_000 });
 const MOREF_RE = /^[\w.:-]{1,64}$/;
@@ -220,7 +220,7 @@ export function sanitizeVcInfo(v) {
   if (Object.hasOwn(v, 'tasks')) out.tasks = sanTasks(v.tasks);
   if (Object.hasOwn(v, 'perms')) out.perms = sanPerms(v.perms);
   if (Object.hasOwn(v, 'pools')) out.pools = sanitizePools(v.pools);   // v2.901 리소스 풀
-  if (Object.hasOwn(v, 'dvpg')) out.dvpg = sanitizeDvpg(v.dvpg);   // v2.904 분산 포트그룹 팀 구성
+  if (Object.hasOwn(v, 'dvpg')) out.dvpg = sanitizeDvpg(v.dvpg);   // v2.905 분산 포트그룹 팀 구성
   return sanitizeVcRestInfo(v, out);   // v2.898 ④ linked · updates · vlcm
 }
 
@@ -377,7 +377,7 @@ export function sanitizePools(k) {
     })).filter((x) => x.ref) };
 }
 
-// ── v2.904: 분산 포트그룹 팀 구성 · LACP · VLAN(DistributedVirtualPortgroup.config.defaultPortConfig — 6시간마다) ──────────────
+// ── v2.905: 분산 포트그룹 팀 구성 · LACP · VLAN(DistributedVirtualPortgroup.config.defaultPortConfig — 6시간마다) ──────────────
 //   dvpg: { at, items:[{ ref, name, dvs, dvsName, uplinkPg, vlan:{id,trunk,pvlan}|null, teaming:{policy,active,standby,failback}|null, lacp:{enabled,mode,lag}|null }], omitted, error, lagError, dvsError }
 //   VMwareDVSPortSetting 은 값마다 <inherited>…</inherited><value>…</value> 로 감싼다 — 그 칸의 <value> 를 읽는다(상속받은 유효 값). 못 읽은 값은 null.
 //   failback 은 rollingOrder 의 반대(표준 스위치 teamingOf 와 같은 규칙). LACP: Enhanced LACP 의 LAG(vDS config.lacpGroupConfig)가 활성 업링크에 있으면 그 LAG,

@@ -119,7 +119,7 @@ export function mockVcInfo(kind, vcId, snap, now = Date.now(), allowed = null) {
     return { at: now - ((seed % 300) + 50) * MIN, items, omitted: 0, error: null };
   }
   if (kind === 'dvpg') {
-    // v2.904: 데모 분산 포트그룹 팀 구성 — 이 vCenter 의 분산 포트그룹(스냅샷 networks) + 업링크 포트그룹 하나. vDS 이름은 데모 호스트 hcfg 의 분산 스위치와 같다.
+    // v2.905: 데모 분산 포트그룹 팀 구성 — 이 vCenter 의 분산 포트그룹(스냅샷 networks) + 업링크 포트그룹 하나. vDS 이름은 데모 호스트 hcfg 의 분산 스위치와 같다.
     //   갈래가 보이게: 포트 ID 기반 · 물리 NIC 부하 기반 · LAG(Enhanced LACP) · 명시적 장애 조치(대기 업링크) · 트렁크 VLAN.
     const dvsName = hosts.flatMap((h) => h.hcfg?.net?.switches || []).find((w) => w.kind === 'dvs')?.name || 'DSwitch-Prod';
     const nets = (snap?.networks || []).filter((n) => n.vcenterId === vcId && n.type === 'DISTRIBUTED_PORTGROUP').slice(0, 200);

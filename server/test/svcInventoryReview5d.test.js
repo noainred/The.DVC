@@ -40,7 +40,7 @@ function setup(pins = {}) {
   fs.writeFileSync(path.join(tmp, 'service-map.json'), JSON.stringify({ rev: 0, globals: [], settings: { tagCategory: '' }, corps: { 'vc-a': corpOf({ services: [S('s1', 'ERP'), S('s2', 'MES')], folderRules: [{ prefix: '/ERP', serviceId: 's1' }] }) } }));
   fs.writeFileSync(path.join(tmp, 'service-map-pins.json'), JSON.stringify({ rev: 0, pins }));
 }
-// v2.904: 세대(generatedAt)는 늘 커지게 — 예전 'Date.now() + n' 은 앞 테스트(n 이 더 큰)와 시각 차가 정확히 n 차이면 같은 세대가 되어
+// v2.905: 세대(generatedAt)는 늘 커지게 — 예전 'Date.now() + n' 은 앞 테스트(n 이 더 큰)와 시각 차가 정확히 n 차이면 같은 세대가 되어
 //   수집 기억(열쇠 = generatedAt)이 앞 테스트의 구성원을 돌려줬다(전량 실행에서만 간헐 실패 — R15 '0 !== 3'). 운영 세대는 수집마다 새 시각이다.
 let _gen = Date.now();
 const snapOf = (n, vms = []) => ({ ...store.snapshot, generatedAt: (_gen += 10_000) + n, vcenters: [{ id: 'vc-a', name: 'vcenter-a' }], hosts: [], vms });

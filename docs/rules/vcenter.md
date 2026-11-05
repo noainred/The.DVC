@@ -26,7 +26,7 @@
 - (원래 5738행) v2.702 — VM 이동·구성 변경 이력(A7·A8). 원천은 logs DB 의 vCenter 이벤트이고 상세는 수집 시점에 `detail` 열로 싣는다
 - v2.898 — vCenter 알람 · 최근 작업 · 권한 목록 · Linked Mode · 업데이트 · vLCM(`vcinfo/`) + 스냅샷 트리 · VM NIC. 캐시는 스냅샷 vCenter 객체 밖이고 호출은 읽기 전용뿐이다
 - v2.901 — 리소스 풀 설정(`vcinfo` pools) · NIC 팀 구성(hcfg.net teaming) · 호스트별 DS 마운트(dscfg mounts) · VMXNET3 권장(nic-legacy) · Linked 범위 가림 · 엣지 vcInfo 계약(키 없음 = 유지 · 낡음 · 만료)
-- v2.904 — 분산 포트그룹 팀 구성 · LACP · VLAN(`vcinfo` dvpg — 6시간 · 이미 받은 포트그룹 moref 만 · Enhanced LACP 의 LAG)
+- v2.905 — 분산 포트그룹 팀 구성 · LACP · VLAN(`vcinfo` dvpg — 6시간 · 이미 받은 포트그룹 moref 만 · Enhanced LACP 의 LAG)
 - (원래 5751행) v2.701 — 클러스터 HA·DRS 점검(A6) + 호스트 네트워크(A10). 클러스터 구성은 클러스터 전용 캐시(`clustercfg/`)이고 vcenter.clusterCfg
 
 ## 본문
@@ -419,7 +419,7 @@
   - **엣지 vcInfo 계약(E3 · E7)**: 중앙 지원이 확인되면 키를 늘 싣고(`{}` = 비움) 모르면 키를 뺀다 — 중앙은 키가 없으면 직전 값을 유지 · `putFromEdge` 는 종류째 교체 · 엣지 `at` 은 받은 시각으로 자른다 ·
     받은 지 30분이면 낡음(`stale`) · 24시간이면 보이지 않는다(`EDGE_EXPIRE_MS` — 엣지가 멈춘 뒤 옛 권한 목록을 계속 보이지 않게). 못 읽은 알람 원소는 `unreadable` 로 센다(0건이 아니다 — E1).
   - **E6**: 장비 출력 정규식 규칙 — VM PCI 패스스루 주소는 `firstBacking`(indexOf · 조각 64KB). 게으른 `[\s\S]*?` 를 닫힘 없는 반복 태그 위에 두지 말 것(실측 132KB 1.3초).
-- **v2.904 — 분산 포트그룹 팀 구성 · LACP · VLAN(`vcinfo` 종류 'dvpg')**(사용자 선택 'vDS 팀 구성 수집' · '표준'). 회귀 `server/test/dvpg2904.test.js`(변이 3/3) · 웹 `vcd/vcInfo.test.js` · `vcdTabsRender.test.jsx`.
+- **v2.905 — 분산 포트그룹 팀 구성 · LACP · VLAN(`vcinfo` 종류 'dvpg')**(사용자 선택 'vDS 팀 구성 수집' · '표준'). 회귀 `server/test/dvpg2905.test.js`(변이 3/3) · 웹 `vcd/vcInfo.test.js` · `vcdTabsRender.test.jsx`.
   - **인벤토리 호출에 싣지 않는다**: `config.defaultPortConfig` 는 포트그룹마다 수 KB 라 매 수집 주기에 실으면 고RTT 법인 응답이 커진다 — vcinfo 6시간 주기로 따로, 수집이 이미 가진 포트그룹 moref 만(`dvpgRefs`).
   - 경로는 `config.defaultPortConfig` 통째로(선언 타입 DVPortSetting 의 하위 속성 경로를 쓰면 InvalidProperty 위험) · 업링크 포트그룹은 `tag` 의 `SYSTEM/DVS.UPLINKPG`(uplinkPg — 화면이 뺀다).
   - 값은 `<inherited>…</inherited><value>…</value>` 의 value(상속받은 유효 값) · failback = !rollingOrder(표준 스위치 `teamingOf` 와 같은 규칙) · 정책 이름은 `hostcfg/parse.js TEAMING_POLICIES` 한 벌.

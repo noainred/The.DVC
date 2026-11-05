@@ -1101,7 +1101,7 @@ async function restoreRoute(req, res, job) {
   const settings = effectiveSettings();
   const plan = restorePlan({ mode: b.mode, job, snapshot: store.get(), newVm: b.newVm, confirmName: b.confirmName, pluginName: settings.defaults.pluginName, jobid, base: restoreBaseOf(settings)(job) });   // v2.847 D2-1: 그 지점의 백업 때 위치로 판정
   if (!plan.ok) return res.status(400).json({ ok: false, reason: plan.issue });
-  // v2.904(별건 정리 — 재해 복구 버그 점검 '남김: 단건 복원 라우트는 이름 예약을 보지 않는다'): 새 VM 이름은 묶음 복원 · 복구 순서와 같은 예약을 본다.
+  // v2.905(별건 정리 — 재해 복구 버그 점검 '남김: 단건 복원 라우트는 이름 예약을 보지 않는다'): 새 VM 이름은 묶음 복원 · 복구 순서와 같은 예약을 본다.
   //   예전에는 인벤토리의 동명 VM 만 봐서, 아직 인벤토리에 없는 진행 중 · 방금 보낸 같은 이름 복원과 겹칠 수 있었다(같은 이름 VM 둘 — NIC 끊기 · 켜 보기가 손대지 못한다).
   //   판정 · 문구는 bulkRestorePlan 과 같다. 보내는 중인 이름은 원장 기록 뒤까지 잡는다(B3-04 와 같은 창).
   const nameKey = b.mode === 'newVm' && plan.target?.name ? restoreNameKey(job.vcenterId, plan.target.name) : '';

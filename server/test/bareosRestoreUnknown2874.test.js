@@ -185,7 +185,7 @@ test('③ 붙잡기는 시한이 있다(웹과 같은 값) · jobid 가 있으�
   assert.match(web, /export const RESTORE_UNKNOWN_HOLD_MS = 6 \* 3600_000;/);
 });
 
-test('④ v2.904 단건 새 VM 복원도 이름 예약을 본다 — 진행 중 · 방금 보낸 같은 이름은 409(OTP · Director 전) · 보내는 중 이름도', async () => {
+test('④ v2.905 단건 새 VM 복원도 이름 예약을 본다 — 진행 중 · 방금 보낸 같은 이름은 409(OTP · Director 전) · 보내는 중 이름도', async () => {
   // 별건 정리(재해 복구 버그 점검 '남김: 단건 복원 라우트는 이름 예약을 보지 않는다') — 예전에는 인벤토리 동명 VM 만 봐서 202 로 보냈다
   store.snapshot = { ...store.snapshot, vms: [...store.snapshot.vms, { id: 'vc-a:vm-7', vcenterId: 'vc-a', name: 'api-07', powerState: 'POWERED_OFF', snapshotCount: 0, vcDcPath: 'DC-A', folderPath: '/api', storageGB: 40 }] };
   let r = await call('admin', 'POST', '/jobs', { vcenterId: 'vc-a', vmId: 'vc-a:vm-7' });

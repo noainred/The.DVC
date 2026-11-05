@@ -66,7 +66,7 @@ describe('v2.867 취소 문구 — 판정은 서버 cancelInfo 값 그대로', (
     expect(groupStopState({ stop: { phase: 'running', pruning: true } }).canStop).toBe(false);
   });
 
-  it('groupStopState — v2.904 회차 중단 없이 행마다 취소한 이번 회차 실행(sentFire)을 구분한다', () => {
+  it('groupStopState — v2.905 회차 중단 없이 행마다 취소한 이번 회차 실행(sentFire)을 구분한다', () => {
     // 남은 이번 회차 실행이 전부 행마다 취소로 멈추는 중 — 예전에는 표지 없음(kind null)
     expect(groupStopState({ stop: { phase: null, sent: 1, stuck: 0, sentFire: 1, stuckFire: 0 } })).toMatchObject({ kind: 'stopping', text: '멈추는 중(실행별 취소)' });
     // 다른 실행이 아직 돈다 — 실행 중 + 행마다 취소 수

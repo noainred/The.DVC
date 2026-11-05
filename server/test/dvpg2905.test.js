@@ -1,5 +1,5 @@
 /**
- * test/dvpg2904.test.js — v2.904 분산 포트그룹 팀 구성 · LACP · VLAN(vcinfo 종류 'dvpg' — 사용자 선택 'vDS 팀 구성 수집').
+ * test/dvpg2905.test.js — v2.905 분산 포트그룹 팀 구성 · LACP · VLAN(vcinfo 종류 'dvpg' — 사용자 선택 'vDS 팀 구성 수집').
  *  ① 파서: VMwareDVSPortSetting 의 <inherited>/<value> 감싸기 · 업링크 순서 · rollingOrder → failback · VLAN ID · 트렁크 · PVLAN · 옛 lacpPolicy
  *  ② 포트그룹 행: 업링크 포트그룹(tag SYSTEM/DVS.UPLINKPG) · vDS moref · LAG(Enhanced LACP)가 활성 업링크에 있으면 LACP = 그 LAG
  *  ③ 엣지 정제: 아는 정책 · 업링크 이름 형식 · VLAN 범위 · 상한 · sanitizeVcInfo 가 dvpg 를 받는다(모르는 키는 버린다)
