@@ -13,6 +13,7 @@ import { Card, KV, Note } from './VcdParts.jsx';
 import { dayStamp } from '../../dayStamp.js';
 import { vmDiskRows, vmDatastoreRows, vmsOnHost, hostDatastoresFromVms } from './objTabs.js';
 import { gbText } from './vcdTabs.js';
+import { unitText } from '../unitText.js';
 import {
   VM_TUNING_DAYS, DEFAULT_VM_TUNING_DAYS, vmTuningAxes, vmTuningPlan, hostTuningAxes, hostTuningPlan, heavyNeighbors, planCsv, planMarkdown,
 } from './tuning.js';
@@ -103,7 +104,7 @@ export function VmTuning({ vm, vms, datastores }) {
   const p = vm?.perfc;
   return (
     <>
-      <Card title="진단" sub={rs?.window ? `표본 ${rs.window.samples ?? '—'} · 덮음 ${rs.window.coveragePct ?? '—'}% · 롤업 ${rs.window.intervalSec ? `${rs.window.intervalSec / 60}분` : '—'}` : ''}
+      <Card title="진단" sub={rs?.window ? `표본 ${rs.window.samples ?? '—'} · 덮음 ${unitText(rs.window.coveragePct, '%')} · 롤업 ${rs.window.intervalSec ? `${rs.window.intervalSec / 60}분` : '—'}` : ''}
         more={<span style={{ display: 'inline-flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
           <span className="muted" style={{ fontSize: 11.5 }}>기간</span>
           {VM_TUNING_DAYS.map((d) => <button key={d} type="button" className={days === d ? 'login-btn' : 'tab'} style={{ flex: 'none', padding: '4px 10px' }} onClick={() => setDays(d)}>{d}일</button>)}
@@ -122,9 +123,9 @@ export function VmTuning({ vm, vms, datastores }) {
                 : !rs ? <Loading label="적정화 근거(vCenter 성능 롤업)" /> : (
                   <KV rows={[
                     ['판정', <span key="v"><b>{rs.verdict?.title || '—'}</b>{rs.verdict?.summary ? <span className="muted"> · {rs.verdict.summary}</span> : null}</span>],
-                    ['CPU', c ? `${c.vcpu} vCPU · 사용 p95 ${c.usagePct?.p95 ?? '—'}% · 최대 ${c.usagePct?.max ?? '—'}%${c.recommendedVcpu != null ? ` · 권장 ${c.recommendedVcpu} vCPU` : ''}` : '—'],
+                    ['CPU', c ? `${c.vcpu} vCPU · 사용 p95 ${unitText(c.usagePct?.p95, '%')} · 최대 ${unitText(c.usagePct?.max, '%')}${c.recommendedVcpu != null ? ` · 권장 ${c.recommendedVcpu} vCPU` : ''}` : '—'],
                     ['메모리', m ? `${gbText(m.allocMB / 1024)} · 워킹셋 ${gbText((m.workingSetMB ?? 0) / 1024)}${m.recommendedMB != null ? ` · 권장 ${gbText(m.recommendedMB / 1024)}` : ''}` : '—'],
-                    ['감축 금지 신호', m ? `벌룬 ${m.balloon?.n ? `${m.balloon.samplesAbove0 || 0}회` : '못 읽음'} · 스왑 ${m.swapped?.n ? `${m.swapped.samplesAbove0 || 0}회` : '못 읽음'} · Ready p95 ${c?.readyPct?.p95 ?? '—'}%` : '—'],
+                    ['감축 금지 신호', m ? `벌룬 ${m.balloon?.n ? `${m.balloon.samplesAbove0 || 0}회` : '못 읽음'} · 스왑 ${m.swapped?.n ? `${m.swapped.samplesAbove0 || 0}회` : '못 읽음'} · Ready p95 ${unitText(c?.readyPct?.p95, '%')}` : '—'],
                     ['근거', rs.evidence?.sufficient === false ? <span className="badge amber" key="e">불충분 — {(rs.evidence.reasons || [])[0] || ''}</span> : '충분'],
                   ]} />
                 )}
@@ -133,8 +134,8 @@ export function VmTuning({ vm, vms, datastores }) {
 
         <Card title="CPU 경합 · 같은 호스트의 무거운 VM" sub="perfc 최근 창">
           <KV rows={[
-            ['CPU 대기(Ready)', p?.readyPct ? `${p.readyPct.avg ?? '—'}% (최대 ${p.readyPct.max ?? '—'}%)` : '—'],
-            ['Co-stop', p?.costopPct ? `${p.costopPct.avg ?? '—'}% (최대 ${p.costopPct.max ?? '—'}%)` : '—'],
+            ['CPU 대기(Ready)', p?.readyPct ? `${unitText(p.readyPct.avg, '%')} (최대 ${unitText(p.readyPct.max, '%')})` : '—'],
+            ['Co-stop', p?.costopPct ? `${unitText(p.costopPct.avg, '%')} (최대 ${unitText(p.costopPct.max, '%')})` : '—'],
             ['판정', cont.filter((f) => f.code.startsWith('cpu-')).length ? cont.filter((f) => f.code.startsWith('cpu-')).map((f) => CONTENTION_TEXT[f.code]?.title || f.code).join(' · ') : (p ? '경고선 아래' : '측정하지 않음')],
           ]} />
           {neighbors.length > 0 && (
@@ -152,7 +153,7 @@ export function VmTuning({ vm, vms, datastores }) {
 
         <Card title="스토리지 지연" sub="perfc 디스크 · 데이터스토어 사용률">
           <KV rows={[
-            ['읽기 · 쓰기 지연', p?.readMs || p?.writeMs ? `${p.readMs?.avg ?? '—'} ms · ${p.writeMs?.avg ?? '—'} ms${p.disk ? ` (가장 느린 ${p.disk})` : ''}` : '—'],
+            ['읽기 · 쓰기 지연', p?.readMs || p?.writeMs ? `${unitText(p.readMs?.avg, ' ms')} · ${unitText(p.writeMs?.avg, ' ms')}${p.disk ? ` (가장 느린 ${p.disk})` : ''}` : '—'],
             ['스냅샷', vm.snapshotCount ? `${vm.snapshotCount}개 · ${gbText(vm.snapshotSizeGB)}` : '없음'],
           ]} />
           {dsRows?.length ? (
@@ -218,8 +219,8 @@ export function HostTuning({ host, vms, datastores, includeOff = true }) {
         <Card title="하드웨어 · 상태">
           <KV rows={[
             ['상태', <StateBadge key="s" state={host.connectionState} />],
-            ['CPU', `${host.cpuSockets ?? '—'} 소켓 · ${host.cpuCores ?? '—'} 코어 · 사용 ${host.cpuUsagePct ?? '—'}%`],
-            ['메모리', `${gbText((host.memTotalMB ?? null) == null ? null : host.memTotalMB / 1024)} · 사용 ${host.memUsagePct ?? '—'}%`],
+            ['CPU', `${host.cpuSockets ?? '—'} 소켓 · ${host.cpuCores ?? '—'} 코어 · 사용 ${unitText(host.cpuUsagePct, '%')}`],
+            ['메모리', `${gbText((host.memTotalMB ?? null) == null ? null : host.memTotalMB / 1024)} · 사용 ${unitText(host.memUsagePct, '%')}`],
             ['소비 전력', host.powerWatts > 0 ? `${host.powerWatts} W` : '—'],
             ['온도', host.tempMaxC != null ? `최고 ${host.tempMaxC} °C` : '—'],
             ['재부팅 필요', host.hcfg ? (host.hcfg.rebootRequired === true ? '예' : host.hcfg.rebootRequired === false ? '아니오' : '—') : '—'],

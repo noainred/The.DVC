@@ -2,7 +2,7 @@
  * views/vcd/tuning.js — '성능 튜닝' 탭(VM · ESXi 호스트 개체 보기 — v2.895 · 승인 시안 ⑫⑬ · 기본값 11~13).
  *
  * 새 판정을 만들지 않는다 — 이미 있는 판정을 한 자리에 모은다(순수 · vitest 고정):
- *   · 자원 적정화 = 서버 `/tools/rightsize`(analyzeRightsize — 정책 · 감축 금지 신호 포함)의 verdict 그대로
+ *   · 자원 적정화 = 서버 라이트사이징(tools/rightsize.js analyzeRightsize — 정책 · 감축 금지 신호 포함)의 verdict 그대로
  *   · CPU 경합 · 디스크 지연 = `contention/contentionText.js vmContentionFindings`(서버 contention/parse.js 와 같은 규칙)
  *   · 구성 = `vmcfg/vmCfgText.js vmCfgFindings` · `hostcfg/hostCfgText.js hostCfgFindings`
  *   · 가상화율 = `vcdVirt.js ratioLevel`(트리 색과 같은 기준) · 사용률 색 = usageColor(75 · 90) · 데이터스토어 = 포탈 알람 규칙(90 · 95)
@@ -10,12 +10,13 @@
  * 조치 계획은 축의 근거에서만 만든다(지어낸 효과 · 수치 없음). 적용은 지금 도구 · vSphere 에서 — 이 탭은 조회 + 계획.
  */
 import { numOrNull } from '../../numOrNull.js';
+import { unitText } from '../unitText.js';
 import { vmContentionFindings, CONTENTION_TEXT, THRESHOLDS } from '../contention/contentionText.js';
 import { vmCfgFindings, VM_CFG_TEXT } from '../vmcfg/vmCfgText.js';
 import { hostCfgFindings, HOST_CFG_TEXT } from '../hostcfg/hostCfgText.js';
 import { ratioLevel } from '../vcdVirt.js';
 
-/** 기간 칩 — 서버 /tools/rightsize 가 받는 값 중(7 · 30 · 90 · 180 · 365). VM 기본 30일(기본값 12). */
+/** 기간 칩 — 서버 라이트사이징 라우트가 받는 값 중(7 · 30 · 90 · 180 · 365). VM 기본 30일(기본값 12). */
 export const VM_TUNING_DAYS = Object.freeze([7, 30, 90]);
 export const DEFAULT_VM_TUNING_DAYS = 30;
 
@@ -38,7 +39,7 @@ const SEV_TO_LEVEL = { crit: 'crit', warn: 'warn', info: 'ok' };
 const axis = (k, label, state, title, detail) => ({ k, label, state, title, detail });
 
 /**
- * VM 진단 — 5축. rs = /tools/rightsize 응답(없으면 null), rsError = 그 조회 실패 문구, dsRows = vmDatastoreRows 결과(없으면 null).
+ * VM 진단 — 5축. rs = 라이트사이징 응답(없으면 null), rsError = 그 조회 실패 문구, dsRows = vmDatastoreRows 결과(없으면 null).
  */
 export function vmTuningAxes({ vm, rs = null, rsError = '', rsDenied = false, dsRows = null }) {
   const on = vm?.powerState === 'POWERED_ON';
@@ -68,7 +69,7 @@ export function vmTuningAxes({ vm, rs = null, rsError = '', rsDenied = false, ds
     const lv = worst(cpuF.map((f) => SEV_TO_LEVEL[f.sev] || 'ok'));
     const p = vm.perfc;
     out.push(axis('cpu', 'CPU 경합', cpuF.length ? lv : 'ok', cpuF.length ? (CONTENTION_TEXT[cpuF[0].code]?.title || cpuF[0].code) : '정상',
-      `Ready ${p.readyPct?.avg ?? '—'}% · Co-stop ${p.costopPct?.avg ?? '—'}% (경고선 Ready ${THRESHOLDS.readyWarn}% · Co-stop ${THRESHOLDS.costopWarn}%)`));
+      `Ready ${unitText(p.readyPct?.avg, '%')} · Co-stop ${unitText(p.costopPct?.avg, '%')} (경고선 Ready ${THRESHOLDS.readyWarn}% · Co-stop ${THRESHOLDS.costopWarn}%)`));
   }
 
   // 3) 메모리 압박 — rightsize 의 벌룬 · 스왑(레벨 2 카운터 — 못 읽으면 unknown)
@@ -79,7 +80,7 @@ export function vmTuningAxes({ vm, rs = null, rsError = '', rsDenied = false, ds
   } else {
     const swapped = (swp?.samplesAbove0 || 0) > 0; const ballooned = (bal?.samplesAbove0 || 0) > 0;
     out.push(axis('mem', '메모리 압박', swapped ? 'crit' : ballooned ? 'warn' : 'ok', swapped ? '스왑 있음' : ballooned ? '벌룬 있음' : '없음',
-      `벌룬 최대 ${bal?.max ?? '—'} MB · 스왑 최대 ${swp?.max ?? '—'} MB`));
+      `벌룬 최대 ${unitText(bal?.max, ' MB')} · 스왑 최대 ${unitText(swp?.max, ' MB')}`));
   }
 
   // 4) 스토리지 지연 — contention 디스크 + 데이터스토어 사용률
@@ -91,7 +92,7 @@ export function vmTuningAxes({ vm, rs = null, rsError = '', rsDenied = false, ds
     const lv = worst(sLevels.length ? sLevels : ['ok']);
     const p = vm?.perfc;
     out.push(axis('storage', '스토리지 지연', lv, diskF.length ? (CONTENTION_TEXT[diskF[0].code]?.title || '디스크 지연') : lv !== 'ok' ? '데이터스토어 여유 부족' : '정상',
-      `${measured ? `읽기 ${p.readMs?.avg ?? '—'} ms · 쓰기 ${p.writeMs?.avg ?? '—'} ms` : '지연 측정 없음'}${dsRows?.length ? ` · DS ${dsRows.map((d) => `${d.datastore} ${d.dsUsagePct ?? '—'}%`).join(', ')}` : ''}`));
+      `${measured ? `읽기 ${unitText(p.readMs?.avg, ' ms')} · 쓰기 ${unitText(p.writeMs?.avg, ' ms')}` : '지연 측정 없음'}${dsRows?.length ? ` · DS ${dsRows.map((d) => `${d.datastore} ${unitText(d.dsUsagePct, '%')}`).join(', ')}` : ''}`));
   }
 
   // 5) 구성 — vmcfg findings
@@ -117,7 +118,7 @@ export function vmTuningPlan({ vm, rs = null, dsRows = null, now = Date.now() })
     if (lv === 'warn' || lv === 'crit') add(lv, { k: `ds:${d.datastore}`, action: `데이터스토어 ${d.datastore} 여유 확보(사용률 ${d.dsUsagePct}%)`, why: '여유가 적으면 씬 디스크 증가 · 스냅샷이 실패할 수 있습니다', risk: '이 VM 만의 문제가 아닙니다 — 같은 DS 의 다른 VM 도 함께', where: '데이터스토어 · 경로 점검', tool: 'storage-paths' });
   }
   for (const f of cont.filter((x) => x.code.startsWith('disk-'))) {
-    add(SEV_TO_LEVEL[f.sev] || 'warn', { k: f.code, action: `디스크 지연 원인 확인(${f.facts?.disk || '디스크'} 평균 ${f.facts?.avg ?? '—'} ms)`, why: CONTENTION_TEXT[f.code]?.fix || '', risk: '데이터스토어 쪽 원인이면 이 VM 을 고쳐도 낫지 않습니다', where: 'CPU 경합 · 디스크 지연', tool: 'contention' });
+    add(SEV_TO_LEVEL[f.sev] || 'warn', { k: f.code, action: `디스크 지연 원인 확인(${f.facts?.disk || '디스크'} 평균 ${unitText(f.facts?.avg, ' ms')})`, why: CONTENTION_TEXT[f.code]?.fix || '', risk: '데이터스토어 쪽 원인이면 이 VM 을 고쳐도 낫지 않습니다', where: 'CPU 경합 · 디스크 지연', tool: 'contention' });
   }
   const oldTs = numOrNull(vm?.snapshotOldestTs);
   const oldDays = oldTs ? Math.floor((now - oldTs) / 86_400_000) : null;
@@ -152,7 +153,7 @@ export function hostTuningAxes({ host, vcpuAlloc = null, memAllocMB = null, onHo
   const rLv = ratioLevel(ratio, false);
   if (down) out.push(axis('cpu', 'CPU 여력 · 가상화율', 'unknown', '— (끊김)', '연결이 끊긴 호스트는 판정하지 않습니다.'));
   else out.push(axis('cpu', 'CPU 여력 · 가상화율', worst([cpuLv, rLv].filter(Boolean)), ratio != null ? `${(Math.round(ratio * 10) / 10).toFixed(1)}:1` : '—',
-    `vCPU ${vcpuAlloc ?? '—'} / 코어 ${cores ?? '—'} · 사용 ${numOrNull(host?.cpuUsagePct) ?? '—'}% (가상화율 2.5 주의 · 4 위험 — 트리와 같은 기준)`));
+    `vCPU ${vcpuAlloc ?? '—'} / 코어 ${cores ?? '—'} · 사용 ${unitText(numOrNull(host?.cpuUsagePct), '%')} (가상화율 2.5 주의 · 4 위험 — 트리와 같은 기준)`));
 
   const ready = onHost.filter((v) => vmContentionFindings(v).some((f) => f.code === 'cpu-ready' || f.code === 'cpu-ready-crit'));
   const measuredN = onHost.filter((v) => v?.powerState === 'POWERED_ON' && v?.perfc).length;
@@ -164,8 +165,8 @@ export function hostTuningAxes({ host, vcpuAlloc = null, memAllocMB = null, onHo
   const memTotal = numOrNull(host?.memTotalMB);
   const mRatio = memTotal && memAllocMB != null ? memAllocMB / memTotal : null;
   if (down) out.push(axis('mem', '메모리', 'unknown', '— (끊김)', ''));
-  else out.push(axis('mem', '메모리', worst([memLv, ratioLevel(mRatio, true)].filter(Boolean)), `${numOrNull(host?.memUsagePct) ?? '—'}%`,
-    `할당 ${memAllocMB != null ? Math.round(memAllocMB / 1024) : '—'} GB / 물리 ${memTotal ? Math.round(memTotal / 1024) : '—'} GB${mRatio != null ? ` · ${(Math.round(mRatio * 10) / 10).toFixed(1)}:1` : ''} · 호스트 벌룬 · 스왑 합은 수집하지 않습니다`));
+  else out.push(axis('mem', '메모리', worst([memLv, ratioLevel(mRatio, true)].filter(Boolean)), `${unitText(numOrNull(host?.memUsagePct), '%')}`,
+    `할당 ${unitText(memAllocMB != null ? Math.round(memAllocMB / 1024) : null, ' GB')} / 물리 ${unitText(memTotal ? Math.round(memTotal / 1024) : null, ' GB')}${mRatio != null ? ` · ${(Math.round(mRatio * 10) / 10).toFixed(1)}:1` : ''} · 호스트 벌룬 · 스왑 합은 수집하지 않습니다`));
 
   const hf = down ? [] : hostCfgFindings(host);
   const pathF = hf.filter((f) => /^mp-|^vsan-/.test(f.code));
