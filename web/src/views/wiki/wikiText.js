@@ -11,7 +11,7 @@ export const statusText = (s) => STATUS_TEXT[s] || s || '—';
 export const STALE_DAYS = 90;
 export const MAX_DEPTH = 3;
 const ID_RE = /^W\d{1,9}$/;
-const VIEWS = Object.freeze(['home', 'search', 'new', 'settings', 'templates']); // v2.889 templates — 관리자 템플릿
+const VIEWS = Object.freeze(['home', 'search', 'new', 'settings', 'templates', 'tidy']); // v2.889 templates — 관리자 템플릿 · v2.907 tidy — 휴지통 · 깨진 링크
 
 /* ───── 주소 ───── */
 function dec(s) { try { return decodeURIComponent(s); } catch { return ''; } }

@@ -4872,6 +4872,19 @@ export const DB_GUIDE_DATA = {
     "cautions": ["상한을 지금 사용량보다 낮추면 새 첨부만 막히고 있는 첨부는 지우지 않습니다."],
     "sources": ["server/src/attach/store.js", "server/src/routes/api/attach.js"]
   },
+  "issue-templates.json": {
+    "title": "이슈 — 관리자 템플릿",
+    "summary": "관리자가 더한 이슈 템플릿입니다. 내장 3개(장애 보고 · 작업 · 요청) 뒤에 붙어 ‘새 이슈’ 화면의 템플릿 고르기에 보입니다.",
+    "stores": ["템플릿마다 id · 이름 · 유형 · 우선순위 · 라벨 · 컴포넌트 · 설명(마크다운) · 만든/고친 사람과 시각 — 30개까지"],
+    "writer": "이슈 › 설정 › 이슈 템플릿에서 전체 범위 관리자가 저장할 때 원자적으로 씁니다.",
+    "usedBy": ["이슈 › 새 이슈(템플릿 고르기)"],
+    "retention": "자동으로 지우지 않습니다.",
+    "growth": "템플릿 수에 비례합니다(30개 · 설명 10,000자).",
+    "shrink": "필요 없는 템플릿을 화면에서 지우십시오.",
+    "ifDeleted": "관리자 템플릿만 사라지고 내장 템플릿과 이미 만든 이슈는 그대로입니다. 손상되면 보존하고 빈 목록으로 읽습니다.",
+    "cautions": ["전 법인 공용 설정입니다 — 범위가 지정된 계정은 바꿀 수 없습니다."],
+    "sources": ["server/src/issues/templates.js", "server/src/routes/api/issues.js"]
+  },
   "wiki-templates.json": {
     "title": "위키 — 관리자 템플릿",
     "summary": "관리자가 더한 위키 문서 템플릿입니다. 내장 템플릿 뒤에 붙어 모든 스페이스의 ‘새 문서’ 화면에 보입니다.",

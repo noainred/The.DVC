@@ -1,6 +1,6 @@
 # 설정·데이터 파일 레퍼런스 (자동 생성)
 
-포탈이 `CONFIG_DIR`(설치본 기본 `/etc/vmware-portal`) 아래에 만드는 파일 **270개**의 목록이다.
+포탈이 `CONFIG_DIR`(설치본 기본 `/etc/vmware-portal`) 아래에 만드는 파일 **271개**의 목록이다.
 시계열 DB 는 `db-location.json` 이 가리키는 `dbDir` 로 옮길 수 있다.
 
 - 생성: `node scripts/config-doc.mjs` (마지막 갱신 2026-11-05)
@@ -155,6 +155,7 @@
 | `issue-notify-state.json` | 설정 | 이슈 기한 알림 기록(상태, v2.871) |  |  |  | (외부/설치 스크립트) |
 | `issue-settings.json` | 설정 | 이슈 트래커 설정(v2.871 — 자동 할당 규칙 · 알림 켜기·이벤트 · 사람별 메일 주소. 비밀 없음) | ✅ | ✅ | ✅ | issues/settings.js |
 | `issue-sprints.json` | 설정 | 이슈 스프린트(v2.882 — 이름 · 기간(포탈 날짜) · 목표 · 상태 예정/진행 중/끝남. 비밀 없음) | ✅ | ✅ | ✅ | issues/sprints.js |
+| `issue-templates.json` | 설정 | 이슈 관리자 템플릿(v2.907 — 이름 · 유형 · 우선순위 · 라벨 · 컴포넌트 · 설명, 30개. 비밀 없음) | ✅ | ✅ | ✅ | issues/templates.js |
 | `issues.json` | 설정 | 이슈 트래커 이슈·댓글·이력(v2.864 — 로그인 사용자가 쓰는 사용자 데이터. 비밀 없음) | ✅ | ✅ | ✅ | issues/store.js |
 | `link-check.db` | DB | 통신 점검 로그 **3단 DB**(v2.552). 파일: `<dbDir>/link-check.db` |  |  | ✅ | linkcheck/db.js |
 | `linkcheck-settings.json` | 설정 | 통신 점검 설정(v2.552). 파일: `CONFIG_DIR/linkcheck-settings.json` | ✅ | ✅ | ✅ | linkcheck/settings.js |
@@ -329,6 +330,7 @@
 - **`attachments.json`** — 파일 본체는 CONFIG_DIR/attachments/<id>(서버가 만든 이름 · 0600). **포탈 백업에는 목록만 들어가고 본체는 들어가지 않는다**(사용자 결정) — 관리자가 이슈 › 설정 › 첨부 파일 › 전체 내려받기(tar.gz)로 따로 보관. 목록을 되살렸는데 본체가 없으면 화면이 ‘파일 없음’ 으로 밝힌다. 변경 감시 지문에서는 빠진다
 - **`attach-settings.json`** — 손상이면 보존하고 기본 상한으로 읽는다(관리 화면이 알린다). 넘기게 되는 올리기는 409 attach-full
 - **`wiki-templates.json`** — 내장 템플릿 뒤에 붙어 모든 스페이스의 새 문서 화면에 보인다. 손상이면 보존하고 빈 목록으로 읽는다
+- **`issue-templates.json`** — 내장 3개(장애 보고 · 작업 · 요청) 뒤에 붙어 새 이슈 화면의 템플릿 고르기에 보인다. 손상이면 보존하고 빈 목록으로 읽는다
 - **`issue-autocreate.json`** — 손상이면 보존하고 기본값(꺼짐)으로 읽는다 — 이슈 › 설정 › 자동 등록 화면이 그 사실을 말한다. 지우면 자동 등록이 꺼진다(이미 만든 이슈는 그대로)
 - **`issue-settings.json`** — 손상이면 보존하고 기본값(자동 할당·알림 꺼짐)으로 읽는다 — 이슈 › 설정 화면이 그 사실을 말한다. 지우면 자동 할당·알림이 꺼지고 메일 주소 표가 비어 이슈 메일이 나가지 않는다
 - **`issue-filter-mail-state.json`** — 상태 파일(백업 감시 제외). 필터 · 받는 사람마다 마지막으로 주간 메일을 보낸 포탈 날짜(3주 지난 것은 지운다). 지우면 그 주 메일이 한 번 더 나갈 수 있다

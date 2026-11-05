@@ -27,11 +27,13 @@ import { fullScopeOnlyWith } from '../admin/shared.js';
 import {
   listIssues, getIssue, createIssue, updateIssue, setStatus, assignIssue, bulkAssign, setBlocked, setWatch, addComment, deleteComment, deleteIssue, setProgress, activityFeed,
   bulkEdit, moveSprintIssues, sprintBoard, queryContext, addLink, removeLink, LINK_TYPES, addWorklog, removeWorklog,
-  issueStats, knownNames, issuesSeq, waitIssuesPersist, issuesPersist, PERSIST_WAIT_MS,
+  issueStats, knownNames, issuesSeq, waitIssuesPersist, issuesPersist, PERSIST_WAIT_MS, addWatchers, mentionsOf, editComment,
   LIMITS, STATUSES, TYPES, PRIORITIES, KEY_RE, ID_RE, RECENT_DONE_MS, KEY_PREFIX,
 } from '../../issues/store.js';
 import { loadIssueSettings, saveIssueSettings, issueSettingsLoadError, suggestAssignee, SETTINGS_LIMITS, NOTIFY_EVENTS } from '../../issues/settings.js';
-import { issueNotifyStatus } from '../../issues/notify.js';
+import { issueNotifyStatus, resolveMentions } from '../../issues/notify.js';
+import { mentionCandidates } from '../../issues/mentionables.js';
+import { allIssueTemplates, saveIssueTemplate, deleteIssueTemplate, issueTemplatesLoadError, ISSUE_TEMPLATE_LIMITS } from '../../issues/templates.js';
 import { issueViewers } from '../../issues/visibility.js';
 import {
   loadAutoCreate, saveAutoCreate, autoCreateLoadError, autoCreateStatus, simulatePartFault,
@@ -185,6 +187,23 @@ export function registerIssues(api) {
     // v2.871 감사 A3-04: 제안 이름은 이 사용자의 담당자 후보(people)에 있을 때만 싣는다 — 요청 계정·범위 계정에게 계정명을 새로 알려 주지 않는다.
     const visible = !!s && canWrite(req) && ((!access.read && !access.write) || people(req, access).some((p) => p.username === s.assignee));
     res.json({ ok: true, suggestion: visible ? s : null, ...(s && !visible ? { hidden: true } : {}), autoAssign: loadIssueSettings().autoAssign.enabled });
+  });
+  /* ── v2.907 이슈 템플릿(기능 추천 5) — '/issues/:key' 보다 먼저(뒤에 두면 'templates' 가 키로 잡혀 404) ── */
+  api.get('/issues/templates', creators, (req, res) => {
+    res.set('Cache-Control', 'no-store');
+    res.json({ ok: true, items: allIssueTemplates(), loadError: isAdmin(req) ? issueTemplatesLoadError() : null, limits: ISSUE_TEMPLATE_LIMITS, canManage: isAdmin(req) && isFullReadWriteScope(req.user, store.get()) });
+  });
+  api.post('/issues/templates', adminOnly, issueSettingsFleetOnly, fullWriteOnly, (req, res, next) => {
+    if (!isAdmin(req)) return res.status(403).json({ ok: false, reason: '데모 계정은 템플릿을 바꿀 수 없습니다' });
+    try { const t = saveIssueTemplate({ ...(req.body || {}), id: '' }, userOf(req)); audit(req, 'issue.template', t.id, `만듦: ${t.name}`); res.json({ ok: true, template: t }); } catch (e) { fail(res, e, next); }
+  });
+  api.put('/issues/templates/:id', adminOnly, issueSettingsFleetOnly, fullWriteOnly, (req, res, next) => {
+    if (!isAdmin(req)) return res.status(403).json({ ok: false, reason: '데모 계정은 템플릿을 바꿀 수 없습니다' });
+    try { const t = saveIssueTemplate({ ...(req.body || {}), id: str(req.params.id).slice(0, 20) }, userOf(req)); audit(req, 'issue.template', t.id, `고침: ${t.name}`); res.json({ ok: true, template: t }); } catch (e) { fail(res, e, next); }
+  });
+  api.delete('/issues/templates/:id', adminOnly, issueSettingsFleetOnly, fullWriteOnly, (req, res, next) => {
+    if (!isAdmin(req)) return res.status(403).json({ ok: false, reason: '데모 계정은 템플릿을 바꿀 수 없습니다' });
+    try { const r = deleteIssueTemplate(str(req.params.id).slice(0, 20)); audit(req, 'issue.template', r.id, '지움'); res.json({ ok: true, ...r }); } catch (e) { fail(res, e, next); }
   });
   api.get('/issues/settings', adminOnly, issueSettingsFleetOnly, (req, res) => {
     if (!isAdmin(req)) return res.status(403).json({ ok: false, reason: '데모 계정은 이슈 설정을 볼 수 없습니다' });
@@ -465,11 +484,47 @@ export function registerIssues(api) {
     if (!KEY_RE.test(req.params.key)) return badKey(res);
     try { const x = setWatch(req.params.key, userOf(req), req.body?.on, { access: accessOf(req) }); res.json({ ok: true, issue: x, persist: await persistView(req, { wait: false }) }); } catch (e) { fail(res, e, next); }
   });
+  // v2.907 멘션 후보(시안 docs/design/wiki-mention ⑥-7) — 위키와 같은 판정(issues/mentionables.js) · 참여자 = 담당 · 보고 · 관찰 · 댓글 쓴 사람
+  api.get('/issues/:key/mentionables', writers, (req, res, next) => {
+    if (!KEY_RE.test(req.params.key)) return badKey(res);
+    res.set('Cache-Control', 'no-store');
+    try {
+      const access = accessOf(req);
+      const it = getIssue(req.params.key, userOf(req), access);
+      const parts = [it.assignee, it.reporter, ...(it.watcherNames || []), ...(it.comments || []).map((c) => c.author)].filter(Boolean);
+      const full = canWrite(req) && isFullReadWriteScope(req.user, store.get());
+      const settings = loadIssueSettings();
+      const viewers = issueViewers();
+      let users = [];
+      try { users = listUsers(); } catch { users = []; }
+      const r = mentionCandidates({ q: str(req.query.q), me: userOf(req), meName: req.user?.name || '', full, participants: parts, knownNames: knownNames(access), users, people: full ? settings.notify?.people || [] : [], canSee: (n) => viewers.canSee(n, it.vcenterId || '') });
+      res.json({ ok: true, ...r, full, notifyOn: !!(settings.notify?.enabled && settings.notify?.mail !== false) });
+    } catch (e) { fail(res, e, next, req); }
+  });
   api.post('/issues/:key/comments', writers, async (req, res, next) => {
     if (!KEY_RE.test(req.params.key)) return badKey(res);
     try {
-      const c = addComment(req.params.key, req.body, userOf(req), { access: accessOf(req) });
+      const access = accessOf(req);
+      const c = addComment(req.params.key, req.body, userOf(req), { access });
       audit(req, 'issue.comment.create', `${req.params.key}/${c.id}`);
+      // v2.907 선택(결정 5): 언급한 사람을 관찰자로 — 알림과 같은 이름 해석 · 그 법인을 볼 수 없는 사람은 빼고 센다
+      let watch = null;
+      if (req.body?.watchMentions === true) {
+        const it = getIssue(req.params.key, userOf(req), access);
+        const viewers = issueViewers();
+        const settings = loadIssueSettings();
+        const known = new Set([...viewers.localNames, ...(settings.notify?.people || []).map((p) => p.username), it.assignee, it.reporter, ...(it.watcherNames || [])].filter(Boolean));
+        watch = addWatchers(req.params.key, resolveMentions(mentionsOf(c.body), known), userOf(req), { access, canSee: viewers.canSee });
+      }
+      res.json({ ok: true, comment: c, ...(watch ? { watch } : {}), persist: await persistView(req) });
+    } catch (e) { fail(res, e, next, req); }
+  });
+  // v2.907 댓글 고치기(기능 추천 1) — 쓴 사람만(저장소가 판정) · 새로 언급한 사람에게만 알림
+  api.put('/issues/:key/comments/:cid', writers, async (req, res, next) => {
+    if (!KEY_RE.test(req.params.key)) return badKey(res);
+    try {
+      const c = editComment(req.params.key, str(req.params.cid).slice(0, 40), req.body || {}, userOf(req), { access: accessOf(req) });
+      audit(req, 'issue.comment.edit', `${req.params.key}/${c.id}`);
       res.json({ ok: true, comment: c, persist: await persistView(req) });
     } catch (e) { fail(res, e, next, req); }
   });

@@ -64,7 +64,11 @@ export function MdView({ md = '', ast = null, pages = [], spaceId = '', idPrefix
         : <a key={key} href={n.href} className="md-link">{inl(n.c, key)}</a>;
       case 'img': return n.attach ? <AttachImg key={key} id={n.attach} alt={n.alt} /> : <img key={key} src={n.src} alt={n.alt} loading="lazy" className="md-img" />;
       case 'iss': return <a key={key} href={`#/issues/list/${n.key}`} className="md-iss" title="이슈 열기">{n.key}</a>;
-      case 'mention': return <span key={key} className="md-mention">@{n.user}</span>;
+      case 'mention': { // v2.907 '@계정/이름' 은 계정(모노) + 이름으로 나눠 그린다(글자는 그대로 — 알림 · .md · 메일이 같은 글자를 쓴다)
+        const sl = n.user.indexOf('/');
+        if (sl <= 0) return <span key={key} className="md-mention">@{n.user}</span>;
+        return <span key={key} className="md-mention" title={`${n.user.slice(0, sl)} · ${n.user.slice(sl + 1)}`}><span className="md-mention-u">@{n.user.slice(0, sl)}</span><span className="md-mention-s">/</span><span className="md-mention-n">{n.user.slice(sl + 1)}</span></span>;
+      }
       case 'fn': {
         const num = fnNum.get(n.id);
         return <sup key={key} className="md-fnref"><button type="button" className="md-linkbtn" onClick={() => scrollToId(hid(`fn-${n.id}`))}>[{num ?? n.id}]</button></sup>;

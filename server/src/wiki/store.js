@@ -68,30 +68,33 @@ let cache = null; // { spaces, pages, nextNum, sizes:Map, bytes }
 const jsonBytes = (v) => Buffer.byteLength(JSON.stringify(v), 'utf8');
 const writer = createUserDocWriter({
   tag: 'wiki', file: wikiFile,
-  serialize: () => (cache ? JSON.stringify({ v: 1, nextNum: cache.nextNum, spaces: cache.spaces, pages: cache.pages }) : null),
+  serialize: () => (cache ? JSON.stringify({ v: 1, nextNum: cache.nextNum, spaces: cache.spaces, pages: cache.pages, trash: cache.trash }) : null),
 });
 
 function load() {
   if (cache) return cache;
   const file = wikiFile();
-  let spaces = {}; let pages = []; let nextNum = 1;
+  let spaces = {}; let pages = []; let nextNum = 1; let trash = [];
   try {
     if (fs.existsSync(file)) {
       const j = JSON.parse(fs.readFileSync(file, 'utf8'));
       if (!j || typeof j !== 'object' || !Array.isArray(j.pages)) throw new Error('pages 배열이 없습니다');
       pages = j.pages.filter((p) => p && typeof p === 'object' && typeof p.id === 'string' && typeof p.spaceId === 'string');
+      // v2.907 휴지통 — 지운 문서는 TRASH_DAYS 동안 따로 둔다(판 · 댓글 · 첨부 그대로). 같은 id 가 살아 있는 문서와 겹치면 휴지통 쪽을 버린다.
+      const live = new Set(pages.map((p) => p.id));
+      trash = (Array.isArray(j.trash) ? j.trash : []).filter((p) => p && typeof p === 'object' && typeof p.id === 'string' && typeof p.spaceId === 'string' && !live.has(p.id));
       spaces = j.spaces && typeof j.spaces === 'object' && !Array.isArray(j.spaces) ? j.spaces : {};
       const n = numOrNull(j.nextNum);
-      nextNum = Math.max(n != null && n >= 1 ? Math.trunc(n) : 1, pages.reduce((m, p) => Math.max(m, Number(p.num) || 0), 0) + 1);
+      nextNum = Math.max(n != null && n >= 1 ? Math.trunc(n) : 1, [...pages, ...trash].reduce((m, p) => Math.max(m, Number(p.num) || 0), 0) + 1);
     }
   } catch (e) {
     preserveCorrupt(file, e.message);
     console.warn(`[wiki] wiki.json 을 읽지 못해 빈 위키로 시작합니다: ${safeLoadText(e) || '사유 미상'}`);
-    spaces = {}; pages = []; nextNum = 1;
+    spaces = {}; pages = []; nextNum = 1; trash = [];
   }
-  const sizes = new Map(pages.map((p) => [p.id, jsonBytes(p)]));
+  const sizes = new Map([...pages, ...trash].map((p) => [p.id, jsonBytes(p)]));
   let bytes = jsonBytes(spaces); for (const b of sizes.values()) bytes += b;
-  cache = { spaces, pages, nextNum, sizes, bytes };
+  cache = { spaces, pages, nextNum, sizes, bytes, trash };
   return cache;
 }
 function commit({ changed = null, removedId = null, spacesChanged = false } = {}) {
@@ -160,6 +163,8 @@ export function issueKeysScan(...texts) {
 }
 export function issueKeysOf(...texts) { return issueKeysScan(...texts).keys; }
 const keyFields = (...texts) => { const r = issueKeysScan(...texts); return { issueKeys: r.keys, issueKeysDropped: r.dropped }; };
+/** 댓글이 색인에 싣는 글 — 본문 + 그 댓글에서 만든 이슈 키(v2.907 — '관련 이슈' 에 함께 보인다). */
+const commentTexts = (comments) => (comments || []).flatMap((q) => [q.body, q.issueKey || '']);
 
 /* ───── 범위 ───── */
 export const FULL_ACCESS = Object.freeze({ read: null, write: null });
@@ -390,14 +395,17 @@ export function updatePage(id, body, user, { access = FULL_ACCESS } = {}) {
   const same = title === p.title && md === p.body && status === p.status && JSON.stringify(labels) === JSON.stringify(p.labels) && parentId === (p.parentId || '');
   if (same) return viewPage(p, user, access);
   const now = Date.now();
-  const nx = { ...p, title, body: md, status, labels, parentId, version: p.version + 1, updatedAt: Math.max(now, (p.updatedAt || 0) + 1), updatedBy: user, ...keyFields(title, md, ...(p.comments || []).map((cm) => cm.body)) };
+  const nx = { ...p, title, body: md, status, labels, parentId, version: p.version + 1, updatedAt: Math.max(now, (p.updatedAt || 0) + 1), updatedBy: user, ...keyFields(title, md, ...commentTexts(p.comments)) };
   const x = { ...nx, ...pushVersion(nx, { by: user, note: has('note') ? text(b.note, LIMITS.note, 'note') : '', at: nx.updatedAt }) };
   assertRoom(c, x, p.id);
+  const oldPages = c.pages;
   c.pages = c.pages.map((q) => (q.id === p.id ? x : q));
   commit({ changed: x });
+  // v2.907 제목이 바뀌면 '[[옛 제목]]' 링크를 새 제목으로(기능 추천 3 — 제목으로 찾는 링크가 조용히 깨졌다)
+  const linkFix = title !== p.title ? rewriteLinksAfterRename(c, oldPages, x, p.title, user, access) : null;
   const prevMentions = new Set(mentionsOf(p.body));
   emit({ type: 'saved', actor: user, page: evPage(x), version: x.version, note: has('note') ? capStr(String(b.note || ''), 120) : '', mentions: mentionsOf(md).filter((m) => !prevMentions.has(m)) });
-  return viewPage(x, user, access);
+  return { ...viewPage(x, user, access), ...(linkFix ? { linkFix } : {}) };
 }
 
 /** 되돌리기 — 그 판의 본문으로 새 판을 만든다(본문을 들고 있는 판만). */
@@ -489,9 +497,191 @@ export function deletePage(id, user, { access = FULL_ACCESS, isMod = false } = {
   const p = findFor(id, access, { write: true });
   if (!isMod && p.createdBy !== user) throw forbidden('문서는 만든 사람이나 전체 범위 관리자만 지울 수 있습니다 — 보관(상태)으로 숨길 수 있습니다');
   if (childrenOf(c.pages, p.id).length) throw fieldError('id', '하위 문서가 있어 지울 수 없습니다 — 먼저 옮기거나 지우세요');
+  // v2.907 휴지통(기능 추천 2): 바로 없애지 않고 TRASH_DAYS 동안 둔다 — 판 · 댓글 · 첨부를 그대로 되살릴 수 있다. 첨부 본체는 영구 삭제 때 지운다.
+  const t = { ...p, deletedAt: Date.now(), deletedBy: user };
   c.pages = c.pages.filter((q) => q.id !== p.id);
-  commit({ removedId: p.id });
-  return { id: p.id };
+  c.trash = [...(c.trash || []), t];
+  commit({ changed: t });
+  return { id: p.id, trashed: true, purgeAt: t.deletedAt + TRASH_DAYS * DAY_MS };
+}
+
+/* ───── v2.907 댓글 고치기(기능 추천 1) ─────
+ * 쓴 사람만 · 댓글을 쓸 수 있는 범위(addComment 와 같은 판정). 옛 본문은 최근 5개까지 남기고(editedAt · edits) 판은 만들지 않는다.
+ * 알림은 **새로 언급한 사람에게만**(같은 사람에게 두 번 가지 않게 — 오타 고치기로 메일이 다시 나가던 '지우고 다시 쓰기' 의 대안).
+ */
+export const COMMENT_EDIT_KEEP = 5;
+export function editComment(id, commentId, body, user, { access = FULL_ACCESS } = {}) {
+  const c = load();
+  const p = findFor(id, access);
+  if (!canEditSpace(p.spaceId, access)) throw forbidden('이 문서의 스페이스는 쓰기 범위 밖입니다 — 조회만 할 수 있습니다');
+  const cm = (p.comments || []).find((x) => x.id === commentId);
+  if (!cm) throw notFound();
+  if (cm.author !== user) throw forbidden('댓글은 쓴 사람만 고칠 수 있습니다');
+  const next = text(body?.body, LIMITS.comment, 'body', { required: true, multiline: true });
+  if (next === cm.body) return cm;
+  const now = Date.now();
+  const edited = { ...cm, body: next, editedAt: now, edits: (Number(cm.edits) || 0) + 1, prev: [...(Array.isArray(cm.prev) ? cm.prev : []), { at: cm.editedAt || cm.at, body: cm.body }].slice(-COMMENT_EDIT_KEEP) };
+  const comments = p.comments.map((x) => (x.id === commentId ? edited : x));
+  const x = { ...p, comments, ...keyFields(p.title, p.body, ...commentTexts(comments)) };
+  assertRoom(c, x, p.id);
+  c.pages = c.pages.map((q) => (q.id === p.id ? x : q));
+  commit({ changed: x });
+  const before = new Set(mentionsOf(cm.body));
+  const fresh = mentionsOf(next).filter((m) => !before.has(m));
+  if (fresh.length) emit({ type: 'comment', edit: true, actor: user, page: evPage(x), excerpt: capStr(next, 200), mentions: fresh });
+  return edited;
+}
+
+/* ───── v2.907 문서 링크 — 역링크 · 제목 바꿀 때 링크 갱신 · 깨진 링크(기능 추천 3) ─────
+ * '[[제목]]' · '[[제목|글]]' · '[[W12]]' 를 화면 파서(web markdown.js)와 같은 규칙으로 읽는다: 대괄호 둘 안 200자 · '|' 앞이 가리키는 곳 · 'toc' 는 목차.
+ * 가리키는 문서 찾기도 화면 resolvePageRef 와 같다 — W번호면 그 문서, 아니면 제목(대소문자 무시)이 같은 문서 중 같은 스페이스 우선.
+ */
+const PAGE_ID_RE = /^W\d{1,9}$/;
+export function pageRefsOf(md) {
+  const s = String(md || '');
+  const out = [];
+  let i = 0;
+  while (i < s.length && out.length < 500) {
+    const a = s.indexOf('[[', i);
+    if (a < 0) break;
+    const b = s.indexOf(']]', a + 2);
+    if (b < 0) break;
+    const raw = s.slice(a + 2, b);
+    if (raw.length <= 200 && !raw.includes('\n') && !raw.includes('[')) {
+      const bar = raw.indexOf('|');
+      const ref = (bar >= 0 ? raw.slice(0, bar) : raw).trim();
+      if (ref && ref.toLowerCase() !== 'toc') out.push({ ref, label: bar >= 0 ? raw.slice(bar + 1).trim() : '', start: a, end: b + 2 });
+      i = b + 2;
+    } else i = a + 2;
+  }
+  return out;
+}
+export function resolveRef(ref, pages, spaceId = '') {
+  const r = String(ref || '').trim();
+  if (!r) return null;
+  if (PAGE_ID_RE.test(r)) return pages.find((p) => p.id === r) || null;
+  const low = r.toLowerCase();
+  const hits = pages.filter((p) => String(p.title).toLowerCase() === low);
+  return hits.find((p) => p.spaceId === spaceId) || hits[0] || null;
+}
+/** 이 문서를 가리키는 문서(볼 수 있는 것만 · 보관 포함). */
+export function backlinks(id, access = FULL_ACCESS) {
+  const all = load().pages;
+  const me = findFor(id, access);
+  const out = [];
+  for (const p of all) {
+    if (p.id === me.id || !canSeeSpace(p.spaceId, access)) continue;
+    if (pageRefsOf(p.body).some((r) => resolveRef(r.ref, all, p.spaceId)?.id === me.id)) out.push(metaOf(p));
+  }
+  return out.sort((a, b) => a.title.localeCompare(b.title));
+}
+/** 가리키는 곳이 없는 링크(볼 수 있는 문서 · 스페이스 선택). */
+export function brokenLinks({ access = FULL_ACCESS, spaceId = '', limit = 200 } = {}) {
+  const all = load().pages;
+  const out = [];
+  for (const p of all) {
+    if (!canSeeSpace(p.spaceId, access) || (spaceId && p.spaceId !== spaceId)) continue;
+    for (const r of pageRefsOf(p.body)) if (!resolveRef(r.ref, all, p.spaceId)) out.push({ id: p.id, title: p.title, spaceId: p.spaceId, ref: capStr(r.ref, 120) });
+  }
+  return { total: out.length, rows: out.slice(0, Math.max(1, Math.min(500, Math.trunc(Number(limit)) || 200))) };
+}
+/**
+ * 제목이 바뀐 문서를 '[[옛 제목]]' 으로 가리키던 링크를 새 제목으로 고친다 — 옛 제목이 **이 문서로 풀리던** 링크만(같은 제목의 다른 문서를 빼앗지 않는다).
+ * 고칠 수 있는 문서(쓰기 범위 · 읽기 전용 아님)만 새 판으로(메모 '링크 갱신') · 나머지는 센다. renamedPage 는 바뀐 뒤의 문서.
+ */
+function rewriteLinksAfterRename(c, oldPages, renamed, oldTitle, user, access) {
+  let fixed = 0; let skipped = 0;
+  const now = Date.now();
+  for (const p of [...c.pages]) {
+    if (p.id === renamed.id) continue;
+    const refs = pageRefsOf(p.body).filter((r) => !PAGE_ID_RE.test(r.ref) && r.ref.toLowerCase() === oldTitle.toLowerCase() && resolveRef(r.ref, oldPages, p.spaceId)?.id === renamed.id);
+    if (!refs.length) continue;
+    if (!canSeeSpace(p.spaceId, access) || !canEditSpace(p.spaceId, access) || c.spaces[p.spaceId]?.readOnly) { skipped += 1; continue; }
+    let md = p.body; // 뒤에서부터 바꿔 자리(start/end)가 흔들리지 않게
+    for (const r of [...refs].sort((a, b) => b.start - a.start)) md = `${md.slice(0, r.start)}[[${renamed.title}${r.label ? `|${r.label}` : ''}]]${md.slice(r.end)}`;
+    if (md.length > LIMITS.body) { skipped += 1; continue; }
+    const nx = { ...p, body: md, version: p.version + 1, updatedAt: Math.max(now, (p.updatedAt || 0) + 1), updatedBy: user, ...keyFields(p.title, md, ...commentTexts(p.comments)) };
+    const x = { ...nx, ...pushVersion(nx, { by: user, note: capStr(`링크 갱신: ‘${oldTitle}’ → ‘${renamed.title}’`, LIMITS.note), at: nx.updatedAt }) };
+    try { assertRoom(c, x, p.id); } catch { skipped += 1; continue; }
+    c.pages = c.pages.map((q) => (q.id === p.id ? x : q));
+    commit({ changed: x });
+    fixed += 1;
+  }
+  return { fixed, skipped };
+}
+
+/* ───── v2.907 다른 스페이스로 옮기기(기능 추천 4) ─────
+ * 문서와 그 아래 문서 전부를 함께(계층 그대로 · 옮긴 맨 위 문서는 새 스페이스의 맨 위로). 두 스페이스 모두 쓰기 범위 · 읽기 전용 아님.
+ * 문서 번호(W…)는 그대로라 첨부 · 즐겨찾기 · 이슈 '관련 문서' 가 따라간다(첨부는 문서의 스페이스로 보기 범위를 판정한다).
+ */
+export function movePage(id, toSpace, user, { access = FULL_ACCESS, known = null } = {}) {
+  const c = load();
+  const p = findFor(id, access, { write: true });
+  const to = String(toSpace || '').trim();
+  if (!to || to === p.spaceId) throw fieldError('spaceId', '옮길 스페이스를 고르세요(지금 스페이스와 다른 곳)');
+  if (to !== PUB && !VC_ID_RE.test(to)) throw fieldError('spaceId', '스페이스 형식이 아닙니다');
+  if (to !== PUB && known && !known.has(to)) throw fieldError('spaceId', '등록되지 않은 법인(vCenter)입니다');
+  if (!canSeeSpace(to, access)) throw fieldError('spaceId', '등록되지 않은 법인(vCenter)입니다'); // 조회 밖 — 존재를 흘리지 않는다
+  if (!canEditSpace(to, access)) throw forbidden('옮길 스페이스는 쓰기 범위 밖입니다');
+  if (c.spaces[to]?.readOnly) throw forbidden('옮길 스페이스는 읽기 전용입니다(스페이스 설정)');
+  const ids = new Set([p.id]);
+  for (let grew = true; grew;) { grew = false; for (const q of c.pages) if (!ids.has(q.id) && ids.has(q.parentId)) { ids.add(q.id); grew = true; } }
+  const now = Date.now();
+  const moved = [];
+  c.pages = c.pages.map((q) => {
+    if (!ids.has(q.id)) return q;
+    const x = { ...q, spaceId: to, parentId: q.id === p.id ? '' : q.parentId, updatedAt: Math.max(now, (q.updatedAt || 0) + 1), updatedBy: user };
+    moved.push(x);
+    return x;
+  });
+  for (const x of moved) commit({ changed: x });
+  return { id: p.id, spaceId: to, moved: moved.length, from: p.spaceId };
+}
+
+/* ───── v2.907 휴지통(기능 추천 2) ───── */
+export const TRASH_DAYS = 30;
+const DAY_MS = 86_400_000;
+const trashView = (t) => ({ id: t.id, title: t.title, spaceId: t.spaceId, parentId: t.parentId || '', deletedAt: t.deletedAt, deletedBy: t.deletedBy || '', createdBy: t.createdBy || '', version: t.version, purgeAt: (t.deletedAt || 0) + TRASH_DAYS * DAY_MS });
+/** 볼 수 있는 휴지통 항목(최근에 지운 것 먼저). */
+export function listTrash({ access = FULL_ACCESS, spaceId = '' } = {}) {
+  return (load().trash || []).filter((t) => canSeeSpace(t.spaceId, access) && (!spaceId || t.spaceId === spaceId)).sort((a, b) => b.deletedAt - a.deletedAt).map(trashView);
+}
+/** 기한(TRASH_DAYS)이 지난 휴지통 항목을 영구히 지운다 — 지운 id 목록(라우트가 첨부 · 즐겨찾기를 정리한다). */
+export function purgeExpiredTrash(now = Date.now()) {
+  const c = load();
+  const keep = []; const gone = [];
+  for (const t of c.trash || []) (now - (t.deletedAt || 0) > TRASH_DAYS * DAY_MS ? gone : keep).push(t);
+  if (!gone.length) return [];
+  c.trash = keep;
+  for (const t of gone) commit({ removedId: t.id });
+  return gone.map((t) => t.id);
+}
+/** 되살리기 — 원래 스페이스에(쓰기 범위 · 읽기 전용 아님). 상위 문서가 없어졌으면 맨 위로. */
+export function restorePage(id, user, { access = FULL_ACCESS } = {}) {
+  const c = load();
+  const t = (c.trash || []).find((x) => x.id === id);
+  if (!t || !canSeeSpace(t.spaceId, access)) throw notFound();
+  if (!canEditSpace(t.spaceId, access)) throw forbidden('이 문서의 스페이스는 쓰기 범위 밖입니다 — 되살릴 수 없습니다');
+  if (c.spaces[t.spaceId]?.readOnly) throw forbidden('이 스페이스는 읽기 전용입니다(스페이스 설정)');
+  if (c.pages.some((q) => q.id === id)) throw limitError('같은 번호의 문서가 이미 있습니다');
+  const { deletedAt, deletedBy, ...rest } = t; void deletedAt; void deletedBy;
+  const parentOk = rest.parentId && c.pages.some((q) => q.id === rest.parentId && q.spaceId === rest.spaceId);
+  const x = { ...rest, parentId: parentOk ? rest.parentId : '', updatedAt: Date.now(), updatedBy: user };
+  c.trash = c.trash.filter((q) => q.id !== id);
+  c.pages = [...c.pages, x];
+  commit({ changed: x });
+  return viewPage(x, user, access);
+}
+/** 영구 삭제 — 지운 사람 · 만든 사람 · 전체 범위 관리자(isMod). */
+export function purgeTrashItem(id, user, { access = FULL_ACCESS, isMod = false } = {}) {
+  const c = load();
+  const t = (c.trash || []).find((x) => x.id === id);
+  if (!t || !canSeeSpace(t.spaceId, access)) throw notFound();
+  if (!canEditSpace(t.spaceId, access)) throw forbidden('이 문서의 스페이스는 쓰기 범위 밖입니다');
+  if (!isMod && t.deletedBy !== user && t.createdBy !== user) throw forbidden('영구 삭제는 지운 사람 · 만든 사람이나 전체 범위 관리자만 합니다');
+  c.trash = c.trash.filter((q) => q.id !== id);
+  commit({ removedId: id });
+  return { id };
 }
 
 export function addComment(id, body, user, { access = FULL_ACCESS } = {}) {
@@ -502,12 +692,40 @@ export function addComment(id, body, user, { access = FULL_ACCESS } = {}) {
   if (comments.length >= LIMITS.comments) throw limitError(`댓글은 문서마다 ${LIMITS.comments}개까지입니다`);
   const quote = text(body?.quote ?? '', LIMITS.quote, 'quote').replace(/\s+/g, ' ').trim(); // v2.889 인라인 댓글 — 선택한 글(본문에 있는지는 보지 않는다 — 판이 바뀌면 사라질 수 있다)
   const cm = { id: crypto.randomBytes(6).toString('hex'), author: user, body: text(body?.body, LIMITS.comment, 'body', { required: true, multiline: true }), at: Date.now(), v: p.version, ...(quote ? { quote } : {}) };
-  const x = { ...p, comments: [...comments, cm], ...keyFields(p.title, p.body, ...comments.map((q) => q.body), cm.body) };
+  const x = { ...p, comments: [...comments, cm], ...keyFields(p.title, p.body, ...commentTexts(comments), cm.body) };
   assertRoom(c, x, p.id);
   c.pages = c.pages.map((q) => (q.id === p.id ? x : q));
   commit({ changed: x });
   emit({ type: 'comment', actor: user, page: evPage(x), excerpt: capStr(cm.body, 200), mentions: mentionsOf(cm.body) });
   return cm;
+}
+/** v2.907 한 댓글(볼 수 있는 문서 · 없으면 404) — 댓글에서 이슈를 만들 때 라우트가 읽는다. */
+export function getComment(id, commentId, access = FULL_ACCESS) {
+  const p = findFor(id, access);
+  const cm = (p.comments || []).find((x) => x.id === commentId);
+  if (!cm) throw notFound();
+  return { page: { id: p.id, title: p.title, spaceId: p.spaceId, createdBy: p.createdBy || '', watchers: [...(p.watchers || [])] }, comment: { ...cm } };
+}
+/** 이 문서의 참여자(만든 사람 · 고친 사람 · 지켜보는 사람 · 댓글 쓴 사람) — 멘션 후보(볼 수 있는 문서만). */
+export function pageParticipants(id, access = FULL_ACCESS) {
+  const p = findFor(id, access);
+  const s = new Set([p.createdBy, p.updatedBy, ...(p.watchers || []), ...(p.comments || []).map((q) => q.author)].filter(Boolean));
+  return { spaceId: p.spaceId, names: [...s] };
+}
+/**
+ * v2.907 댓글에서 만든 이슈의 키를 그 댓글에 적는다(같은 댓글로 두 번 만들지 않게 · '관련 이슈' 색인). 판을 만들지 않는다.
+ * 쓰기 범위는 보지 않는다 — 이슈를 만든 라우트가 이미 댓글 · 이슈 권한을 봤다(조회 범위만).
+ */
+export function setCommentIssue(id, commentId, key, { access = FULL_ACCESS } = {}) {
+  const c = load();
+  const p = findFor(id, access);
+  if (!(p.comments || []).some((x) => x.id === commentId)) throw notFound();
+  const comments = p.comments.map((x) => (x.id === commentId ? { ...x, issueKey: String(key || '').slice(0, 20) } : x));
+  const x = { ...p, comments, ...keyFields(p.title, p.body, ...commentTexts(comments)) };
+  assertRoom(c, x, p.id);
+  c.pages = c.pages.map((q) => (q.id === p.id ? x : q));
+  commit({ changed: x });
+  return comments.find((q) => q.id === commentId);
 }
 export function deleteComment(id, commentId, user, { access = FULL_ACCESS, isMod = false } = {}) {
   const c = load();
@@ -516,7 +734,7 @@ export function deleteComment(id, commentId, user, { access = FULL_ACCESS, isMod
   if (!cm) throw notFound();
   if (!isMod && cm.author !== user) throw forbidden('댓글은 쓴 사람이나 전체 범위 관리자만 지울 수 있습니다');
   const comments = p.comments.filter((x) => x.id !== commentId);
-  const x = { ...p, comments, ...keyFields(p.title, p.body, ...comments.map((q) => q.body)) };
+  const x = { ...p, comments, ...keyFields(p.title, p.body, ...commentTexts(comments)) };
   c.pages = c.pages.map((q) => (q.id === p.id ? x : q));
   commit({ changed: x });
   return { id: commentId };
