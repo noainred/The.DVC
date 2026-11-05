@@ -48,6 +48,7 @@ export default function GlobalAxis({ d, regionOf, corpName, writableOf, op, busy
   const [folded, setFolded] = useState(() => new Set());     // 접은 지역 — 28열이면 1440px 에 다 안 보인다
   const fold = (r) => setFolded((s0) => { const n = new Set(s0); if (n.has(r)) n.delete(r); else n.add(r); return n; });
   const [ng, setNg] = useState({ name: '', tier: '2', owner: '' });
+  const [adding, setAdding] = useState(false);   // '＋ 전역 서비스' 를 눌렀을 때만 입력칸을 연다(예약 2 — 법인 축의 '＋ 폴더'·'＋ 서비스' 와 같은 방식)
   const [linkPick, setLinkPick] = useState({});
   const globals = d.global?.globals || [];
   const cells = d.global?.cells || {};
@@ -76,10 +77,15 @@ export default function GlobalAxis({ d, regionOf, corpName, writableOf, op, busy
           ))}
           {d.canFleet ? (
             <div className="flex wrap gap" style={{ padding: '10px 12px', borderTop: '1px solid var(--border)', alignItems: 'center' }}>
-              <input className="input" value={ng.name} onChange={(e) => setNg({ ...ng, name: e.target.value })} placeholder="새 전역 서비스(예: DB)" style={{ minWidth: 0, flex: '1 1 140px' }} />
-              <Select className="select" sort={false} value={ng.tier} onChange={(e) => setNg({ ...ng, tier: e.target.value })} style={{ maxWidth: 90 }} aria-label="등급"><option value="1">등급 1</option><option value="2">등급 2</option><option value="3">등급 3</option></Select>
-              <input className="input" value={ng.owner} onChange={(e) => setNg({ ...ng, owner: e.target.value })} placeholder="전역 담당자" style={{ minWidth: 0, flex: '1 1 140px' }} />
-              <button type="button" className="login-btn" style={btn} disabled={busy || !ng.name.trim()} onClick={async () => { const r = await op({ op: 'global.add', name: ng.name, tier: Number(ng.tier), owner: ng.owner }, `전역 서비스 ‘${ng.name}’ 을 만들었습니다.`); if (r) setNg({ name: '', tier: '2', owner: '' }); }}>추가</button>
+              {!adding ? <button type="button" className="logout-btn" style={btn} onClick={() => setAdding(true)}>＋ 전역 서비스</button> : (
+                <>
+                  <input className="input" autoFocus value={ng.name} onChange={(e) => setNg({ ...ng, name: e.target.value })} placeholder="새 전역 서비스(예: DB)" style={{ minWidth: 0, flex: '1 1 140px' }} />
+                  <Select className="select" sort={false} value={ng.tier} onChange={(e) => setNg({ ...ng, tier: e.target.value })} style={{ maxWidth: 90 }} aria-label="등급"><option value="1">등급 1</option><option value="2">등급 2</option><option value="3">등급 3</option></Select>
+                  <input className="input" value={ng.owner} onChange={(e) => setNg({ ...ng, owner: e.target.value })} placeholder="전역 담당자" style={{ minWidth: 0, flex: '1 1 140px' }} />
+                  <button type="button" className="login-btn" style={btn} disabled={busy || !ng.name.trim()} onClick={async () => { const r = await op({ op: 'global.add', name: ng.name, tier: Number(ng.tier), owner: ng.owner }, `전역 서비스 ‘${ng.name}’ 을 만들었습니다.`); if (r) { setNg({ name: '', tier: '2', owner: '' }); setAdding(false); } }}>추가</button>
+                  <button type="button" className="logout-btn" style={btn} onClick={() => { setAdding(false); setNg({ name: '', tier: '2', owner: '' }); }}>취소</button>
+                </>
+              )}
             </div>
           ) : null}
           {unlinked.length ? (
@@ -172,13 +178,50 @@ export default function GlobalAxis({ d, regionOf, corpName, writableOf, op, busy
             </div>
           ) : null}
 
-          {sel ? <GlobalDetail g={sel} d={d} corpName={corpName} gcorp={gcorp} setGcorp={setGcorp} faultsOn={faultsOn} reloadKey={reloadKey} /> : null}
+          {sel ? <GlobalDetail key={sel.id} g={sel} d={d} corpName={corpName} gcorp={gcorp} setGcorp={setGcorp} faultsOn={faultsOn} reloadKey={reloadKey} op={op} busy={busy} onRemoved={() => pick('')} /> : null}
         </div>
     </div>
   );
 }
 
-function GlobalDetail({ g, d, corpName, gcorp, setGcorp, faultsOn, reloadKey }) {
+/**
+ * 전역 서비스 수정·삭제(예약 1-a) — 전체 범위 관리자만(서버 FLEET_OPS 와 같은 게이트 · 화면은 d.canFleet).
+ * 삭제는 연결된 법인 서비스 수를 먼저 보이고 확인한다 — 법인 서비스·구성원·규칙은 그대로 남고 전역 연결만 풀린다(global.remove).
+ */
+function GlobalEdit({ g, op, busy, onRemoved }) {
+  const [mode, setMode] = useState('');   // '' | 'edit' | 'remove'
+  const [v, setV] = useState({ name: g.name, tier: String(g.tier), owner: g.owner || '', note: g.note || '' });
+  if (mode === 'edit') {
+    return (
+      <div className="flex wrap gap" style={{ flex: '1 1 100%', alignItems: 'center', minWidth: 0 }}>
+        <input className="input" autoFocus value={v.name} onChange={(e) => setV({ ...v, name: e.target.value })} placeholder="전역 서비스명" aria-label="전역 서비스명" style={{ minWidth: 0, flex: '1 1 160px' }} />
+        <Select className="select" sort={false} value={v.tier} onChange={(e) => setV({ ...v, tier: e.target.value })} style={{ maxWidth: 90 }} aria-label="등급"><option value="1">등급 1</option><option value="2">등급 2</option><option value="3">등급 3</option></Select>
+        <input className="input" value={v.owner} onChange={(e) => setV({ ...v, owner: e.target.value })} placeholder="전역 담당자" aria-label="전역 담당자" style={{ minWidth: 0, flex: '1 1 140px' }} />
+        <input className="input" value={v.note} onChange={(e) => setV({ ...v, note: e.target.value })} placeholder="메모" aria-label="메모" style={{ minWidth: 0, flex: '2 1 200px' }} />
+        <button type="button" className="login-btn" style={btn} disabled={busy || !v.name.trim()} onClick={async () => { const r = await op({ op: 'global.update', id: g.id, name: v.name, tier: Number(v.tier), owner: v.owner, note: v.note }, `전역 서비스 ‘${v.name}’ 을(를) 저장했습니다.`); if (r) setMode(''); }}>저장</button>
+        <button type="button" className="logout-btn" style={btn} onClick={() => { setMode(''); setV({ name: g.name, tier: String(g.tier), owner: g.owner || '', note: g.note || '' }); }}>취소</button>
+      </div>
+    );
+  }
+  if (mode === 'remove') {
+    const n = g.services?.length || 0;
+    return (
+      <div className="flex wrap gap" style={{ flex: '1 1 100%', alignItems: 'center', minWidth: 0, padding: '6px 8px', border: '1px solid var(--amber)', borderRadius: 6 }}>
+        <span style={{ fontSize: 13, flex: '1 1 260px', minWidth: 0 }}>전역 서비스 <b>{g.name}</b> 을(를) 지웁니다 — 연결된 법인 서비스 <b>{n}</b>개는 그대로 남고 전역 연결만 풀립니다(구성원·규칙·고정은 바뀌지 않습니다).</span>
+        <button type="button" className="login-btn" style={btn} disabled={busy} onClick={async () => { const r = await op({ op: 'global.remove', id: g.id }, `전역 서비스 ‘${g.name}’ 을(를) 지웠습니다(법인 서비스 ${n}개는 연결만 풀림).`); if (r) onRemoved(); }}>지우기</button>
+        <button type="button" className="logout-btn" style={btn} onClick={() => setMode('')}>취소</button>
+      </div>
+    );
+  }
+  return (
+    <span className="flex wrap gap">
+      <button type="button" className="logout-btn" style={btn} disabled={busy} onClick={() => setMode('edit')}>수정</button>
+      <button type="button" className="logout-btn" style={btn} disabled={busy} onClick={() => setMode('remove')}>삭제…</button>
+    </span>
+  );
+}
+
+function GlobalDetail({ g, d, corpName, gcorp, setGcorp, faultsOn, reloadKey, op, busy, onRemoved }) {
   const s = g.stat;
   const cells = d.global.cells[g.id] || {};
   const unread = s.usage.unread + s.usage.stale;
@@ -186,6 +229,12 @@ function GlobalDetail({ g, d, corpName, gcorp, setGcorp, faultsOn, reloadKey }) 
   const fv = faultsView(s.faults, faultsOn);
   return (
     <>
+      {d.canFleet ? (
+        <div className="card flex wrap gap" style={{ padding: '8px 14px', alignItems: 'center', minWidth: 0 }}>
+          <span className="muted" style={{ fontSize: 12, flex: '1 1 240px', minWidth: 0 }}>전역 서비스 <b>{g.name}</b> · 등급 {g.tier} · 담당 {g.owner || '미지정'}{g.note ? ` · ${g.note}` : ''}</span>
+          <GlobalEdit g={g} op={op} busy={busy} onRemoved={onRemoved} />
+        </div>
+      ) : null}
       <div className="kpis" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))' }}>
         <Card label="법인" value={g.corps.length} meta={g.corps.length ? `${g.corps.slice(0, 4).map((c) => shortCorp(corpName(c))).join(' · ')}${g.corps.length > 4 ? ` 외 ${g.corps.length - 4}` : ''}` : '연결된 법인 없음'} />
         <Card label="구성원" value={s.n.total} meta={`VM ${s.n.vm} · 베어메탈 ${s.n.bm} · 영향 호스트 ${s.hosts}`} />

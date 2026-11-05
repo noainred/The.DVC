@@ -40,6 +40,9 @@ const PURPOSES = {
   'attachments.json': '위키 · 이슈 첨부 목록(사용자 데이터 · 본체는 attachments/ 폴더 — 백업 제외, v2.889)',
   'attach-settings.json': '첨부 전체 상한(MB)(설정, v2.889)',
   'wiki-templates.json': '위키 관리자 템플릿(설정, v2.889)',
+  'issue-templates.json': '이슈 관리자 템플릿(설정, v2.907)',
+  'issue-alert-auto.json': '다른 알람 · 백업 실패 → 이슈 자동 등록 설정(설정, v2.908)',
+  'issue-inbox.json': '포탈 알림함(상태 — 사람마다 최근 100줄 · 30일, v2.908)',
   'vcenters.json': 'vCenter 등록 정보(호스트·계정·위치)',
   'vcenter-order.json': 'vCenter 화면 표시 순서',
   'users.json': '포탈 사용자/권한/TOTP(2FA) 자격',
@@ -246,7 +249,7 @@ const DETAILS = {
   },
   'vcenters.json': {
     keeps: 'vCenter 등록 정보(id·이름·호스트 URL·계정/암호·위치·수집 모드).',
-    writer: '설정 › vCenter 관리(원자적 쓰기 + 손상 보존)',
+    writer: '설정 › 인프라 등록 › vCenter 등록·관리(원자적 쓰기 + 손상 보존)',
     retention: '영구(구성 데이터)',
     note: '⚠ 자격증명 포함. 손상 시 .corrupt.<ts> 로 보존 후 빈 값 반환(다음 저장이 원본을 소거하지 않게).',
   },

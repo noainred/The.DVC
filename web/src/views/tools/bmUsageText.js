@@ -770,7 +770,7 @@ export function edgePullState(row = {}, { minEdgeVersion = '', staleMs = 30 * 60
   const at = n(row.snapAt);
   const att = row.lastAttempt || null;
   if (row.enabled === false) return { state: 'off-central', label: '중앙에서 비활성', why: '중앙에서 이 수집 서버를 비활성으로 두었습니다 — 켜야 가져올 수 있습니다.', tone: 'idle' };
-  if (!row.hasUrl) return { state: 'no-url', label: 'URL 없음', why: '설정 › 수집 서버에 이 엣지의 URL 이 없습니다.', tone: 'bad' };
+  if (!row.hasUrl) return { state: 'no-url', label: 'URL 없음', why: '설정 › 엣지·원격 › 수집 서버(원격)에 이 엣지의 URL 이 없습니다.', tone: 'bad' };
   if (!at) {
     if (!att) return { state: 'never', label: '가져온 적 없음', why: '아직 한 번도 가져오지 않았습니다 — 이 기능은 **누를 때만** 나가므로 이상이 아닙니다.', tone: 'idle' };
     return {

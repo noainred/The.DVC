@@ -87,6 +87,12 @@ export const toolAllowed = (k) => {
   const denied = Array.isArray(u.toolsDenied) ? u.toolsDenied : [];
   return !denied.includes(k);
 };
+/**
+ * v2.901(점검 W1): 관리자(admin) 전용 도구로 가는 버튼 · 링크 판정 — toolAllowed 는 비관리자에게 toolsDenied 만 보므로 카탈로그 adminOnly 도구에도 참이다
+ *   (operator · viewer 에게 누르면 늘 잠금 화면 · 403 인 버튼이 보였다). 서버가 admin 으로 집행하는 도구(Veeam 백업 실행 · Bareos 백업 관리)는 이것으로 가린다.
+ */
+export const adminToolAllowed = (k) => hasRole('admin') && toolAllowed(k);
+
 
 /**
  * 관리자가 **이 계정에 명시적으로 허용한** 도구인가(v2.555).
@@ -354,6 +360,18 @@ export async function fetchBlob(path) {
   if (!res.ok) { const data = await res.json().catch(() => ({})); throw httpFail(path, res, data || {}); }
   return res.blob();
 }
+/**
+ * Content-Disposition → 파일 이름. RFC 5987 의 filename*=UTF-8''… 을 먼저 본다(v2.904 점검 W-3 — 한글 이름이 ASCII 대체본 '___.txt' 로 저장되던 것).
+ * 못 읽으면 ''.
+ */
+export function dispositionName(cd) {
+  const s = String(cd || '');
+  const star = /filename\*\s*=\s*UTF-8''([^;\s]+)/i.exec(s);
+  if (star) { try { return decodeURIComponent(star[1]); } catch { /* 깨진 인코딩 — 아래 ASCII 이름으로 */ } }
+  const m = /filename="?([^";]+)"?/i.exec(s);
+  if (m) { try { return decodeURIComponent(m[1]); } catch { return m[1]; } }
+  return '';
+}
 export async function downloadFile(path, filename = '') {
   const res = await fetch(`${BASE}${path}`, { headers: authHeaders() });
   if (res.status === 401) { setToken(null); onUnauthorized(); throw new Error('세션이 만료되었습니다.'); }
@@ -362,9 +380,7 @@ export async function downloadFile(path, filename = '') {
     // 403 이면 권한 정보를 보존한다 — 다운로드 버튼도 '권한 없음' 안내로 이어져야 한다.
     throw httpFail(path, res, data || {});
   }
-  const cd = res.headers.get('content-disposition') || '';
-  const m = /filename="?([^";]+)"?/i.exec(cd);
-  const name = filename || (m && decodeURIComponent(m[1])) || path.split('/').pop() || 'download';
+  const name = filename || dispositionName(res.headers.get('content-disposition')) || path.split('/').pop() || 'download';
   const blob = await res.blob();
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');

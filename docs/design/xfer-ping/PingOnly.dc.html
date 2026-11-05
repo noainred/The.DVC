@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>법인 상세 — Ping만 보기 (1440)</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=Noto+Sans+KR:wght@400;500;700&family=JetBrains+Mono:wght@400;500;600&display=swap">
+<style>
+body{margin:0;background:#0a0e17;color:#e6edf6;font-family:"Inter","Noto Sans KR","Apple SD Gothic Neo",sans-serif;font-size:13px;line-height:1.45}
+a{color:#7dd3fc}a:hover{color:#bae6fd}
+.mono{font-family:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,monospace}
+.card{background:#141b2d;border:1px solid #1f2a40;border-radius:14px}
+.btn{height:34px;padding:0 15px;border-radius:8px;border:1px solid #243049;background:#141b2d;color:#e6edf6;font:inherit;font-size:13px;cursor:pointer;white-space:nowrap}
+.btn.primary{border-color:#1d4ed8;background:#2563eb;color:#fff;font-weight:600}
+.btn.sm{height:28px;padding:0 10px;font-size:12px}
+.btn:disabled{opacity:.55;cursor:not-allowed}
+.seg{display:inline-flex;border:1px solid #243049;border-radius:8px;overflow:hidden;flex-wrap:wrap}
+.seg button{height:30px;padding:0 11px;border:0;border-left:1px solid #243049;background:transparent;color:#8b9bb4;font:inherit;font-size:12px;cursor:pointer;white-space:nowrap}
+.seg button:first-child{border-left:0}
+.seg button.on{background:#1a2236;color:#e6edf6}
+.stat{background:#141b2d;border:1px solid #1f2a40;border-radius:12px;padding:12px 14px;display:flex;flex-direction:column;gap:6px;min-width:0}
+.stat span:first-child{font-size:12px;color:#8b9bb4}
+.stat b{font-family:"JetBrains Mono",ui-monospace,monospace;font-weight:500;font-size:15px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.legend{display:flex;flex-wrap:wrap;align-items:center;gap:12px;font-size:12.5px;color:#8b9bb4}
+.legend i{display:inline-block;width:14px;height:6px;border-radius:3px;margin-right:6px;vertical-align:middle}
+.note{font-size:12px;color:#5d6b85;overflow-wrap:anywhere}
+.pill{display:inline-flex;align-items:center;gap:6px;height:26px;padding:0 10px;border-radius:999px;border:1px solid #243049;background:#0f1626;font-size:12px;color:#8b9bb4;white-space:nowrap}
+.pill b{font-family:"JetBrains Mono",ui-monospace,monospace;font-weight:600;color:#e6edf6}
+.tip{position:absolute;top:8px;min-width:190px;max-width:340px;padding:8px 10px;border-radius:8px;border:1px solid #243049;background:rgba(11,18,32,.94);box-shadow:0 6px 18px rgba(0,0,0,.35);font-size:12px;line-height:1.55;z-index:2}
+.tip .h{font-family:"JetBrains Mono",ui-monospace,monospace;color:#e6edf6;font-weight:600;margin-bottom:2px;white-space:nowrap}
+.tip .l{display:flex;gap:6px;align-items:baseline;font-variant-numeric:tabular-nums}
+svg text{font-family:"JetBrains Mono",ui-monospace,monospace}
+input[type=range]{accent-color:#3b82f6}
+</style>
+</helmet>
+<div style="box-sizing:border-box;padding:18px 24px 40px;max-width:1680px;display:flex;flex-direction:column;gap:16px;min-width:0">
+
+  <div style="display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;gap:14px">
+    <div style="display:flex;flex-direction:column;gap:6px;min-width:0">
+      <a href="#" style="font-size:12.5px;text-decoration:none">← 법인별 전송 속도</a>
+      <div style="display:flex;flex-wrap:wrap;align-items:center;gap:10px"><h2 style="margin:0;font-size:24px;font-weight:700">PL-WRO 법인</h2></div>
+      <div style="color:#8b9bb4;font-size:13px">EU-Central · 엣지 · 등록부</div>
+    </div>
+    <div style="display:flex;flex-wrap:wrap;align-items:center;gap:10px">
+      <div class="seg" role="tablist" aria-label="기간"><button type="button" class="on">24시간</button><button type="button">7일</button><button type="button">30일</button><button type="button">90일</button><button type="button">1년</button></div>
+      <button type="button" class="btn">CSV</button>
+      <button type="button" class="btn primary">이 법인만 지금 측정</button>
+    </div>
+  </div>
+
+  <div style="display:grid;grid-template-columns:repeat(6, minmax(0, 1fr));gap:12px">
+    <div class="stat"><span>평균</span><b style="color:#67e8f9">↓ 2.54 Mbps</b><b style="color:#fbbf24">↑ 19.6 Mbps</b></div>
+    <div class="stat"><span>중앙값</span><b style="color:#67e8f9">↓ 2.21 Mbps</b><b style="color:#fbbf24">↑ 21.8 Mbps</b></div>
+    <div class="stat"><span>하위 10%</span><b style="color:#67e8f9">↓ 1.31 Mbps</b><b style="color:#fbbf24">↑ 8.4 Mbps</b></div>
+    <div class="stat"><span>최저 · 최고</span><b style="color:#67e8f9">↓ 1.23 · 16.9</b><b style="color:#fbbf24">↑ 7.8 · 35.0</b></div>
+    <div class="stat"><span>성공률</span><b style="color:#67e8f9">↓ 100% (48/48)</b><b style="color:#fbbf24">↑ 97.9% (47/48)</b></div>
+    <div class="stat"><span>지연(중앙값)</span><b style="color:#67e8f9">↓ 498ms</b><b style="color:#fbbf24">↑ 257ms</b></div>
+  </div>
+
+  <section class="card" style="padding:14px 16px;display:flex;flex-direction:column;gap:10px;min-width:0">
+    <div style="display:flex;flex-wrap:wrap;justify-content:space-between;gap:10px;align-items:center">
+      <div style="display:flex;flex-wrap:wrap;align-items:center;gap:12px">
+        <h3 style="margin:0;font-size:15px;font-weight:600">24시간 추이</h3>
+        <div class="seg" role="tablist" aria-label="보기"><button type="button">전송 속도</button><button type="button">전송 속도 + Ping</button><button type="button" class="on">Ping만</button></div>
+      </div>
+      <div class="legend">
+        <span><i style="background:#a78bfa"></i>Ping 평균(6분)</span>
+        <span><i style="background:rgba(167,139,250,.28);height:8px"></i>최저~최고</span>
+        <span><i style="border-top:1px dashed #a78bfa;background:none;height:0"></i>기간 중앙값</span>
+        <span><i style="background:#ef4444;width:3px;height:9px;border-radius:1px"></i>손실</span>
+      </div>
+    </div>
+
+    <div style="display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:8px 12px">
+      <div style="display:flex;flex-wrap:wrap;align-items:center;gap:8px">
+        <h4 style="margin:0;font-size:13px;font-weight:600;color:#c4b5fd">Ping</h4>
+        <span class="note">엣지 포탈 TCP 연결(443) · 1분 간격 1,440회 · 6분 평균 · 네트워크 › 체크와 같은 기록</span>
+      </div>
+      <div style="display:flex;flex-wrap:wrap;gap:6px">
+        <span class="pill">평균 <b>251ms</b></span>
+        <span class="pill">중앙값 <b>246ms</b></span>
+        <span class="pill">최고 <b>592ms</b></span>
+        <span class="pill">손실 <b>0.28%</b> (4/1,440)</span>
+        <span class="pill">마지막 <b>244ms</b> · 10:35</span>
+      </div>
+    </div>
+
+    <div style="position:relative;width:100%;min-width:0">
+      <svg viewBox="0 0 1360 280" role="img" aria-label="Ping 추이" style="display:block;width:100%;height:auto">
+        <line x1="46" x2="1344" y1="254" y2="254" stroke="#1f2a40"></line><text x="40" y="258" fill="#5d6b85" font-size="11" text-anchor="end">0</text>
+        <line x1="46" x2="1344" y1="194" y2="194" stroke="#1f2a40"></line><text x="40" y="198" fill="#5d6b85" font-size="11" text-anchor="end">150</text>
+        <line x1="46" x2="1344" y1="134" y2="134" stroke="#1f2a40"></line><text x="40" y="138" fill="#5d6b85" font-size="11" text-anchor="end">300</text>
+        <line x1="46" x2="1344" y1="74" y2="74" stroke="#1f2a40"></line><text x="40" y="78" fill="#5d6b85" font-size="11" text-anchor="end">450</text>
+        <line x1="46" x2="1344" y1="14" y2="14" stroke="#1f2a40"></line><text x="40" y="18" fill="#5d6b85" font-size="11" text-anchor="end">600</text>
+        <text x="40" y="8" fill="#5d6b85" font-size="10" text-anchor="end">ms</text>
+        <line x1="121.72" x2="121.72" y1="14" y2="254" stroke="#1a2236"></line><text x="121.72" y="272" fill="#5d6b85" font-size="11" text-anchor="middle">12:00</text>
+        <line x1="446.22" x2="446.22" y1="14" y2="254" stroke="#1a2236"></line><text x="446.22" y="272" fill="#5d6b85" font-size="11" text-anchor="middle">18:00</text>
+        <line x1="770.72" x2="770.72" y1="14" y2="254" stroke="#1a2236"></line><text x="770.72" y="272" fill="#5d6b85" font-size="11" text-anchor="middle">00:00</text>
+        <line x1="1095.22" x2="1095.22" y1="14" y2="254" stroke="#1a2236"></line><text x="1095.22" y="272" fill="#5d6b85" font-size="11" text-anchor="middle">06:00</text>
+        <path d="M48.7 153.91 L54.11 155.58 L59.52 153.91 L64.93 153.92 L70.34 154.97 L75.75 153.64 L81.15 153.6 L86.56 153.68 L91.97 154.11 L97.38 156.51 L102.79 154.46 L108.2 154.51 L113.6 153.62 L119.01 153.91 L124.42 154.03 L129.83 153.7 L135.24 153.66 L140.65 153.76 L146.05 154.52 L151.46 154.06 L156.87 154.34 L162.28 154.17 L167.69 154.62 L173.1 153.72 L178.5 133.86 L183.91 131.53 L189.32 131.52 L194.73 133.93 L200.14 133.62 L205.55 134.08 L210.95 81.85 L216.36 133.56 L221.77 133.1 L227.18 132.52 L232.59 134.41 L238 135.71 L243.4 132.46 L248.81 131.53 L254.22 71.26 L259.63 138.28 L265.04 132.88 L270.45 130.93 L275.85 131.8 L281.26 132.45 L286.67 153.74 L292.08 154.23 L297.49 153.77 L302.9 154.45 L308.3 154.18 L313.71 155.33 L319.12 153.67 L324.53 154.8 L329.94 153.83 L335.35 153.76 L340.75 154.44 L346.16 153.99 L351.57 154 L356.98 154.16 L362.39 154.8 L367.8 153.87 L373.2 153.64 L378.61 154.51 L384.02 154.02 L389.43 155.59 L394.84 154.28 L400.25 153.88 L405.65 154.45 L411.06 154.52 L416.47 154 L421.88 154.62 L427.29 154.02 L432.7 153.76 L438.1 153.85 L443.51 154.17 L448.92 154.26 L454.33 153.68 L459.74 153.84 L465.15 154.41 L470.55 153.92 L475.96 153.66 L481.37 103.66 L486.78 153.6 L492.19 153.73 L497.6 155.04 L503 154.94 L508.41 153.68 L513.82 154.58 L519.23 154 L524.64 154.78 L530.05 154.35 L535.45 153.7 L540.86 153.8 L546.27 153.98 L551.68 153.76 L557.09 153.61 L562.5 153.75 L567.9 154.16 L573.31 153.73 L578.72 116.79 L584.13 154.98 L589.54 153.79 L594.95 155.1 L600.35 154.02 L605.76 153.64 L611.17 153.8 L616.58 153.97 L621.99 154.12 L627.4 153.82 L632.8 154.06 L638.21 154.35 L643.62 154.28 L649.03 154.06 L654.44 153.93 L659.85 154.02 L665.25 153.87 L670.66 153.9 L676.07 154.04 L681.48 153.7 L686.89 153.94 L692.3 153.83 L697.7 153.9 L703.11 153.82 L708.52 153.7 L713.93 154.04 L719.34 154.46 L724.75 153.92 L730.15 153.74 L735.56 153.64 L740.97 153.88 L746.38 154.2 L751.79 154.57 L757.2 153.87 L762.6 154.31 L768.01 154.5 L773.42 154.27 L778.83 154.22 L784.24 154.02 L789.65 153.79 L795.05 153.64 L800.46 154.14 L805.87 154.72 L811.28 153.95 L816.69 154.57 L822.1 153.86 L827.5 153.83 L832.91 155.9 L838.32 155.03 L843.73 154.24 L849.14 154.11 L854.55 153.87 L859.95 154.38 L865.36 154.22 L870.77 154.48 L876.18 155.22 L881.59 153.96 L887 154.61 L892.4 153.65 L897.81 154.46 L903.22 153.77 L908.63 154.06 L914.04 154.04 L919.45 154.72 L924.85 154.29 L930.26 154.04 L935.67 153.68 L941.08 154.03 L946.49 154.11 L951.9 154.84 L957.3 153.94 L962.71 154.04 L968.12 154.49 L973.53 154.4 L978.94 36.02 L984.35 26.07 L989.75 17.14 L995.16 35.36 L1000.57 155.37 L1005.98 153.92 L1011.39 154.66 L1016.8 101.98 L1022.2 154.77 L1027.61 155.64 L1033.02 153.92 L1038.43 156.32 L1043.84 153.81 L1049.25 154.93 L1054.65 154.2 L1060.06 153.85 L1065.47 153.98 L1070.88 153.99 L1076.29 153.84 L1081.7 153.77 L1087.1 154.22 L1092.51 154.2 L1097.92 154 L1103.33 154.41 L1108.74 154.24 L1114.15 154.85 L1119.55 153.71 L1124.96 154.17 L1130.37 154.76 L1135.78 155.22 L1141.19 154.69 L1146.6 154.14 L1152 153.62 L1157.41 154.32 L1162.82 154.76 L1168.23 154.23 L1173.64 154.45 L1179.05 153.98 L1184.45 154.07 L1189.86 154.2 L1195.27 153.66 L1200.68 153.85 L1206.09 153.77 L1211.5 154.43 L1216.9 155.81 L1222.31 153.96 L1227.72 153.86 L1233.13 154.45 L1238.54 153.96 L1243.95 153.72 L1249.35 153.9 L1254.76 153.68 L1260.17 154.16 L1265.58 153.69 L1270.99 153.84 L1276.4 153.86 L1281.8 153.96 L1287.21 153.64 L1292.62 153.7 L1298.03 155.03 L1303.44 154.55 L1308.85 153.96 L1314.25 154.36 L1319.66 155 L1325.07 153.9 L1330.48 154.32 L1335.89 154.04 L1341.3 153.69 L1341.3 156.53 L1335.89 156.81 L1330.48 156.78 L1325.07 156.94 L1319.66 157.59 L1314.25 157.35 L1308.85 157.07 L1303.44 157.01 L1298.03 156.93 L1292.62 156.44 L1287.21 157.53 L1281.8 157.12 L1276.4 157.07 L1270.99 157.33 L1265.58 157.19 L1260.17 156.62 L1254.76 156.5 L1249.35 156.53 L1243.95 157.07 L1238.54 157.29 L1233.13 157.5 L1227.72 157.4 L1222.31 157.53 L1216.9 157.36 L1211.5 156.51 L1206.09 157.12 L1200.68 157.14 L1195.27 155.83 L1189.86 155.49 L1184.45 156.66 L1179.05 156.67 L1173.64 157.45 L1168.23 156.78 L1162.82 157.06 L1157.41 157.33 L1152 157.31 L1146.6 157.51 L1141.19 157.52 L1135.78 157.41 L1130.37 157.06 L1124.96 157.02 L1119.55 155.92 L1114.15 157.36 L1108.74 157.47 L1103.33 156.64 L1097.92 157.59 L1092.51 157.41 L1087.1 157.19 L1081.7 157.37 L1076.29 157.51 L1070.88 157.47 L1065.47 157.5 L1060.06 157.44 L1054.65 157.38 L1049.25 157.56 L1043.84 156.76 L1038.43 157.28 L1033.02 156.63 L1027.61 157.11 L1022.2 157.39 L1016.8 157.12 L1011.39 157.48 L1005.98 155.8 L1000.57 157.31 L995.16 156.35 L989.75 92.02 L984.35 83.68 L978.94 156.62 L973.53 157.24 L968.12 157.18 L962.71 156.6 L957.3 156.08 L951.9 157.23 L946.49 156.75 L941.08 157.49 L935.67 156.6 L930.26 156.26 L924.85 156.82 L919.45 156.55 L914.04 157.54 L908.63 157.12 L903.22 156.77 L897.81 157.19 L892.4 157.38 L887 157.14 L881.59 157.41 L876.18 157.02 L870.77 157.28 L865.36 157.49 L859.95 155.8 L854.55 156 L849.14 157.13 L843.73 157.02 L838.32 156.62 L832.91 157.18 L827.5 157.54 L822.1 156.94 L816.69 157.56 L811.28 157.13 L805.87 157.28 L800.46 156.82 L795.05 156.19 L789.65 157.57 L784.24 157.53 L778.83 157.46 L773.42 157.16 L768.01 157.56 L762.6 157.42 L757.2 156.37 L751.79 157.48 L746.38 157.5 L740.97 157.52 L735.56 157.33 L730.15 157.45 L724.75 157.05 L719.34 157.24 L713.93 156.77 L708.52 156.33 L703.11 156.8 L697.7 156.4 L692.3 157 L686.89 157.16 L681.48 156.73 L676.07 156.55 L670.66 157.27 L665.25 156.42 L659.85 156.81 L654.44 156.96 L649.03 157.02 L643.62 156.74 L638.21 157.58 L632.8 157.55 L627.4 157.56 L621.99 157.18 L616.58 157.58 L611.17 156.38 L605.76 156.93 L600.35 157.25 L594.95 157.39 L589.54 156.82 L584.13 157.52 L578.72 157.4 L573.31 156.84 L567.9 157.2 L562.5 156.75 L557.09 157.4 L551.68 155.77 L546.27 157.58 L540.86 157.4 L535.45 157.12 L530.05 157.3 L524.64 156.26 L519.23 156.77 L513.82 157.19 L508.41 157.6 L503 157.41 L497.6 157.12 L492.19 157.09 L486.78 157.08 L481.37 156.81 L475.96 156.93 L470.55 157.4 L465.15 157.26 L459.74 157.58 L454.33 157.56 L448.92 156.94 L443.51 156.31 L438.1 157.12 L432.7 157.46 L427.29 156.82 L421.88 156.3 L416.47 156.85 L411.06 157.56 L405.65 156.77 L400.25 157.52 L394.84 157.54 L389.43 157.48 L384.02 157.02 L378.61 157.48 L373.2 157.42 L367.8 156.53 L362.39 157.56 L356.98 157 L351.57 157.5 L346.16 157.46 L340.75 156.94 L335.35 156.18 L329.94 157.45 L324.53 156.01 L319.12 157.14 L313.71 157.54 L308.3 156.09 L302.9 156.1 L297.49 156.89 L292.08 157.37 L286.67 157.46 L281.26 148.92 L275.85 145.06 L270.45 143.22 L265.04 142.96 L259.63 143.42 L254.22 145.62 L248.81 145.48 L243.4 144.5 L238 146.98 L232.59 142.23 L227.18 139.46 L221.77 145.18 L216.36 145.87 L210.95 144.93 L205.55 146.22 L200.14 145.65 L194.73 147.38 L189.32 147.83 L183.91 143.1 L178.5 146.21 L173.1 156.7 L167.69 156.88 L162.28 157.36 L156.87 157.12 L151.46 157.57 L146.05 157.36 L140.65 156.7 L135.24 157.19 L129.83 156.83 L124.42 157.02 L119.01 157.36 L113.6 156.86 L108.2 157.39 L102.79 157.52 L97.38 157.51 L91.97 157.1 L86.56 156.62 L81.15 155.17 L75.75 156.32 L70.34 157.17 L64.93 157.21 L59.52 156.93 L54.11 156.43 L48.7 156.9 Z" fill="#a78bfa" opacity=".22"></path>
+        <line x1="46" x2="1344" y1="155.53" y2="155.53" stroke="#a78bfa" stroke-dasharray="4 4" opacity=".5"></line>
+        <path d="M48.7 155.28 L54.11 155.98 L59.52 155.19 L64.93 155.37 L70.34 156.17 L75.75 154.67 L81.15 154.3 L86.56 155.44 L91.97 155.69 L97.38 157.05 L102.79 155.95 L108.2 156.31 L113.6 154.73 L119.01 155.54 L124.42 155.6 L129.83 155.67 L135.24 156 L140.65 155.39 L146.05 156.1 L151.46 155.7 L156.87 156.07 L162.28 156.29 L167.69 155.96 L173.1 154.62 L178.5 138.03 L183.91 139.75 L189.32 138.92 L194.73 142.84 L200.14 140.02 L205.55 138.5 L210.95 127.43 L216.36 141.62 L221.77 139.04 L227.18 136.94 L232.59 138.35 L238 141.73 L243.4 138.33 L248.81 138.02 L254.22 128.27 L259.63 140.69 L265.04 138.54 L270.45 137.41 L275.85 138.41 L281.26 139.16 L286.67 155.84 L292.08 155.49 L297.49 155.87 L302.9 155.22 L308.3 155 L313.71 156.34 L319.12 155.46 L324.53 155.54 L329.94 155.53 L335.35 155.03 L340.75 155.85 L346.16 155.34 L351.57 156.56 L356.98 155.56 L362.39 156.06 L367.8 154.99 L373.2 155.93 L378.61 155.68 L384.02 155.09 L389.43 157.05 L394.84 155.81 L400.25 155.06 L405.65 155.9 L411.06 156.13 L416.47 155.47 L421.88 155.24 L427.29 155.26 L432.7 155.62 L438.1 155.47 L443.51 155.42 L448.92 155.17 L454.33 155.53 L459.74 156.21 L465.15 156.28 L470.55 155.74 L475.96 155.48 L481.37 146.7 L486.78 155.74 L492.19 155.52 L497.6 156 L503 156.42 L508.41 155.46 L513.82 155.71 L519.23 155.72 L524.64 155.52 L530.05 156.22 L535.45 155.47 L540.86 155.32 L546.27 155.78 L551.68 155.02 L557.09 155.56 L562.5 155.69 L567.9 156.1 L573.31 154.92 L578.72 148.96 L584.13 156.85 L589.54 155.54 L594.95 156.27 L600.35 155.44 L605.76 155.2 L611.17 155.03 L616.58 156.05 L621.99 155.72 L627.4 155.52 L632.8 156 L638.21 156 L643.62 155.42 L649.03 155.46 L654.44 155.18 L659.85 155.58 L665.25 155.19 L670.66 156.24 L676.07 155.13 L681.48 155.53 L686.89 155.64 L692.3 155.44 L697.7 155.02 L703.11 155.4 L708.52 154.6 L713.93 155.46 L719.34 155.74 L724.75 155.66 L730.15 155.42 L735.56 154.69 L740.97 155.57 L746.38 156.33 L751.79 155.98 L757.2 155.22 L762.6 155.98 L768.01 156.05 L773.42 155.74 L778.83 156.32 L784.24 155.81 L789.65 155.8 L795.05 154.49 L800.46 155.43 L805.87 155.92 L811.28 155.49 L816.69 156.04 L822.1 155.64 L827.5 156.05 L832.91 156.63 L838.32 155.97 L843.73 155.63 L849.14 155.26 L854.55 154.54 L859.95 155.08 L865.36 155.81 L870.77 155.78 L876.18 155.91 L881.59 155.61 L887 156.36 L892.4 155.34 L897.81 156.08 L903.22 155.38 L908.63 156.19 L914.04 155.45 L919.45 155.82 L924.85 155.71 L930.26 155.16 L935.67 155.08 L941.08 155.15 L946.49 155.65 L951.9 156.14 L957.3 155.34 L962.71 155.45 L968.12 155.99 L973.53 155.48 L978.94 104.82 L984.35 44.68 L989.75 50.58 L995.16 111.92 L1000.57 156.42 L1005.98 154.8 L1011.39 156.14 L1016.8 146.95 L1022.2 156.67 L1027.61 156.11 L1033.02 155.4 L1038.43 156.66 L1043.84 155.3 L1049.25 156.11 L1054.65 155.58 L1060.06 155.33 L1065.47 155.76 L1070.88 155.36 L1076.29 154.91 L1081.7 155.66 L1087.1 155.3 L1092.51 155.84 L1097.92 155.6 L1103.33 155.41 L1108.74 156.19 L1114.15 156.32 L1119.55 154.6 L1124.96 155.82 L1130.37 156.05 L1135.78 156.27 L1141.19 156.12 L1146.6 155.43 L1152 155.63 L1157.41 155.66 L1162.82 155.64 L1168.23 155.9 L1173.64 156.01 L1179.05 155.71 L1184.45 155.46 L1189.86 154.8 L1195.27 154.56 L1200.68 155.52 L1206.09 155.14 L1211.5 155.36 L1216.9 156.4 L1222.31 155.93 L1227.72 155.3 L1233.13 155.44 L1238.54 155.72 L1243.95 155.36 L1249.35 155.21 L1254.76 154.49 L1260.17 154.87 L1265.58 155.79 L1270.99 156.14 L1276.4 155.35 L1281.8 155.66 L1287.21 155.89 L1292.62 155.16 L1298.03 156.13 L1303.44 155.64 L1308.85 155.99 L1314.25 155.23 L1319.66 156.34 L1325.07 155.6 L1330.48 155.27 L1335.89 155.47 L1341.3 154.74" fill="none" stroke="#a78bfa" stroke-width="1.6" stroke-linejoin="round"></path>
+        <g aria-label="손실 구간">
+          <rect x="323" y="14" width="3" height="9" rx="1" fill="#ef4444"></rect>
+          <rect x="328.5" y="14" width="3" height="9" rx="1" fill="#ef4444"></rect>
+          <rect x="983" y="14" width="3" height="9" rx="1" fill="#ef4444"></rect>
+          <rect x="988.5" y="14" width="3" height="9" rx="1" fill="#ef4444"></rect>
+        </g>
+        <g aria-hidden="true">
+          <line x1="984.35" x2="984.35" y1="14" y2="254" stroke="#8b9bb4" stroke-dasharray="3 3"></line>
+          <circle cx="984.35" cy="44.68" r="4" fill="#a78bfa" stroke="#0b1220" stroke-width="1.5"></circle>
+        </g>
+      </svg>
+      <div class="tip" style="left:72.4%;transform:translateX(calc(-100% - 12px))" role="status">
+        <div class="h">11-05 02:50 ~ 02:56</div>
+        <div class="l"><span style="color:#a78bfa">●</span><span>Ping 523ms 평균 · 426~570 · 손실 17% (1/6)</span></div>
+        <div class="l"><span style="color:#fca5a5">✕</span><span>6회 중 1회 연결 실패(2.5초 안에 응답 없음)</span></div>
+      </div>
+    </div>
+    <div class="note">Ping 은 ICMP 가 아니라 엣지 포탈 443 포트에 TCP 연결이 맺어지기까지의 시간입니다 — 전송 측정의 '지연' 과 다른 값 · 7일 이상은 시간 단위 요약(1시간 평균·최저·최고·손실)으로 그립니다</div>
+
+    <div style="margin-top:4px;min-width:0">
+      <div style="display:flex;align-items:center;gap:8px;min-width:0;flex-wrap:wrap">
+        <button type="button" class="btn sm">◀ 이전 24시간</button>
+        <input type="range" min="0" max="12" step="1" value="12" aria-label="조회 구간 스크롤(오른쪽 끝 = 최근)" style="flex:1 1 160px;min-width:0">
+        <button type="button" class="btn sm" disabled>다음 24시간 ▶</button>
+        <button type="button" class="btn sm primary" disabled>최신</button>
+      </div>
+      <div class="note" style="margin-top:4px;text-align:center;font-variant-numeric:tabular-nums">최근 구간 · 11-04 10:36 ~ 11-05 10:36</div>
+    </div>
+  </section>
+
+  <section class="card" style="padding:0;overflow:hidden;min-width:0">
+    <div style="display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:12px;padding:14px 16px;border-bottom:1px solid #1f2a40">
+      <h3 style="margin:0;font-size:15px;font-weight:600">측정 기록</h3><span class="note">최근 40건(14일 안) · 시각은 포탈 시각</span>
+    </div>
+    <div class="note" style="padding:14px 16px">… (기존 표 그대로 — 보기 선택과 무관하게 전송 측정 기록만)</div>
+  </section>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":960}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

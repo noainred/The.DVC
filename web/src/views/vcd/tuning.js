@@ -138,6 +138,12 @@ export function vmTuningPlan({ vm, rs = null, dsRows = null, now = Date.now() })
   for (const f of vmCfgFindings(vm).filter((x) => x.sev === 'warn' || x.sev === 'crit')) {
     add(SEV_TO_LEVEL[f.sev], { k: `cfg:${f.code}`, action: VM_CFG_TEXT[f.code]?.title || f.code, why: VM_CFG_TEXT[f.code]?.fix || '', risk: '', where: 'VM 구성 점검', tool: 'vm-hygiene' });
   }
+  // v2.901: 구형 네트워크 어댑터 → VMXNET3(구성 점검에서는 '정보' 등급이지만 튜닝 계획에서는 성능 권장이라 주의로 올린다).
+  const nicF = vmCfgFindings(vm).find((x) => x.code === 'nic-legacy');
+  if (nicF) {
+    add('warn', { k: 'cfg:nic-legacy', action: `네트워크 어댑터를 VMXNET3 로 — ${(nicF.facts.adapters || []).join(' · ')} ${nicF.facts.count}개`,
+      why: VM_CFG_TEXT['nic-legacy'].fix, risk: '어댑터 교체는 게스트 안 NIC 이름 · IP 설정을 바꿀 수 있습니다 — 점검 창에서 · 콘솔 접근을 확보한 뒤', where: 'VM 사양 변경(vSphere) · VM 개체 › 네트워크 탭', tool: null });
+  }
   return rows.sort((a, b) => (a.lv === b.lv ? 0 : a.lv === 'crit' ? -1 : b.lv === 'crit' ? 1 : 0));
 }
 

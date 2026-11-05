@@ -329,7 +329,7 @@ export default function AgentDeploy() {
             </div>
             <span className="muted" style={{ fontSize: 11 }}>{tokenInfo.hasToken ? '✅ 중앙 토큰이 이 포탈에 설정됨(자동 입력됨)' : '⚠ 중앙 미설정 — 생성 시 portal.env에 저장(리붓 유지)'}</span>
           </label>
-          <label title="(선택) 이 에이전트를 '전력/데이터 pull 대상'으로도 쓸 때만. 중앙이 이 에이전트의 /api/collector/export 를 당겨갈 때 쓰는 임의 비밀입니다. iDRAC/IP 스캔만 할 거면 비워두세요. 자동 채우기는 랜덤값을 넣습니다. 중앙 '설정 › 수집 서버' 등록 시 같은 값을 사용하세요.">
+          <label title="(선택) 이 에이전트를 '전력/데이터 pull 대상'으로도 쓸 때만. 중앙이 이 에이전트의 /api/collector/export 를 당겨갈 때 쓰는 임의 비밀입니다. iDRAC/IP 스캔만 할 거면 비워두세요. 자동 채우기는 랜덤값을 넣습니다. 중앙 '설정 › 엣지·원격 › 수집 서버(원격)' 등록 시 같은 값을 사용하세요.">
             <span className="cap">전력수집 토큰(COLLECTOR_TOKEN, 선택){f.hasCollectorToken ? <span className="badge green" style={{ marginLeft: 6 }}>저장됨</span> : null}</span><input className="input" value={f.collectorToken} onChange={set('collectorToken')} placeholder={f.hasCollectorToken ? '저장됨 — 비우면 기존 값 유지' : '(전력수집 시에만)'} /></label>
           <label title="(선택) 전력수집 에이전트가 보고할 데이터센터 라벨. 수집 토큰을 쓸 때만 의미 있습니다. 예: OC2. 안 쓰면 비움. ※ 아래 '수집 서버 자동 등록'을 켜면 배포 후 중앙에 자동 등록됩니다.">
             <span className="cap">수집 DC명(COLLECTOR_DATACENTER, 선택)</span>
@@ -347,7 +347,7 @@ export default function AgentDeploy() {
           <label className="agent-check" style={{ gridColumn: '1 / -1' }} title="켜면 이 현장 서버가 자기 로컬 vCenter 인벤토리(VM/호스트/데이터스토어/NSX/알람)를 수집해 중앙(OC2)으로 push 합니다(AGENT_PUSH_INVENTORY=true). 중앙은 그 vCenter를 직접 폴링하지 않아 고RTT 원격 사이트의 수집 지연이 사라집니다. ※ 중앙의 'vCenter 관리'에서 해당 vCenter의 수집 방식을 '사이트 위임'으로 설정해야 적용됩니다. 그리고 이 현장 서버의 vcenters.json에 로컬 vCenter를 등록해야 합니다.">
             <input type="checkbox" checked={!!f.pushInventory} onChange={(e) => setF((s) => ({ ...s, pushInventory: e.target.checked }))} />
             <span>사이트 위임 수집 — 이 현장 서버가 로컬 vCenter 수집 후 중앙으로 push(고RTT 사이트 권장)</span></label>
-          <label className="agent-check" style={{ gridColumn: '1 / -1' }} title="켜면 배포·설치 성공 직후, 이 호스트(http://host:포탈포트)를 중앙 '설정 › 수집 서버'에 자동 등록합니다(전력수집 토큰 사용). 따로 수집 서버 화면에서 URL/토큰을 입력할 필요가 없습니다. 전력수집 토큰이 비어 있으면 무시됩니다.">
+          <label className="agent-check" style={{ gridColumn: '1 / -1' }} title="켜면 배포·설치 성공 직후, 이 호스트(http://host:포탈포트)를 중앙 '설정 › 엣지·원격 › 수집 서버(원격)'에 자동 등록합니다(전력수집 토큰 사용). 따로 수집 서버 화면에서 URL/토큰을 입력할 필요가 없습니다. 전력수집 토큰이 비어 있으면 무시됩니다.">
             <input type="checkbox" checked={!!f.registerCollector} onChange={(e) => setF((s) => ({ ...s, registerCollector: e.target.checked }))} />
             <span>수집 서버 자동 등록 — 설치 성공 시 중앙 '수집 서버'에 자동 등록(전력수집 토큰 필요)</span></label>
           <label className="agent-check" style={{ gridColumn: '1 / -1' }} title="켜면 배포 시 이 agent에 GPU 게스트(패스쓰루) 수집을 자동 구성합니다 — agent의 vcenters.json(수집 vCenter)과 gpu-guest.json(게스트 계정)을 써넣어 agent 포탈에 따로 로그인할 필요가 없습니다. agent가 ESXi 망에 닿아 수집 후 중앙으로 push 합니다.">

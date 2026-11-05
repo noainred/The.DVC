@@ -101,13 +101,13 @@ export function evidenceText(row) {
     return '비교할 대상이 없습니다 — 그 엣지에 COLLECTOR_TOKEN 이 설정되지 않았습니다(수집 기능 자체가 꺼진 상태입니다).';
   }
   if (st === 'skip-no-token') {
-    return '비교할 대상이 없습니다 — **중앙 등록부에 이 엣지의 수집 토큰이 없습니다**. 설정 › 수집 서버에서 토큰을 넣으세요.';
+    return '비교할 대상이 없습니다 — **중앙 등록부에 이 엣지의 수집 토큰이 없습니다**. 설정 › 엣지·원격 › 수집 서버(원격)에서 토큰을 넣으세요.';
   }
   if (st === 'wrong-edge') {
     return '**이 주소가 다른 엣지에 닿고 있습니다** — 토큰이 같은지 다른지와 무관하게, 먼저 주소를 고쳐야 합니다.';
   }
   // v2.767(점검 R2-B4-5): 비활성 수집 서버는 점검 대상이 아니다('지금 점검' 을 눌러도 같다 — 거짓 안내 금지).
-  if (row?.disabled === true || row?.probe?.disabled === true) return '비활성 수집 서버라 점검하지 않습니다 — 설정 › 수집 서버에서 켜면 점검합니다.';
+  if (row?.disabled === true || row?.probe?.disabled === true) return '비활성 수집 서버라 점검하지 않습니다 — 설정 › 엣지·원격 › 수집 서버(원격)에서 켜면 점검합니다.';
   if (st === 'not-run') return '아직 확인하지 않았습니다 — ‘지금 점검’ 을 누르세요.';
   return '확인하지 못했습니다 — 통신 자체가 되지 않아 값 비교를 할 수 없습니다.';
 }
@@ -213,7 +213,7 @@ export function scopeLabel(scope) {
 /** 발견 코드 → { title, fix }. **여기에 없는 코드는 서버도 만들지 않는다**(테스트가 대조한다). */
 export const FINDING_TEXT = Object.freeze({
   'dup-collector-equals-central': { title: '수집 토큰이 공유 중앙 토큰과 같습니다', fix: '그 엣지의 COLLECTOR_TOKEN 과 중앙의 CENTRAL_TOKEN 을 서로 다른 값으로 바꾸세요.' },
-  'dup-cross-edge': { title: '서로 다른 엣지가 같은 수집 토큰을 씁니다', fix: '엣지마다 다른 값으로 바꾸고 설정 › 수집 서버의 등록값도 함께 고치세요.' },
+  'dup-cross-edge': { title: '서로 다른 엣지가 같은 수집 토큰을 씁니다', fix: '엣지마다 다른 값으로 바꾸고 설정 › 엣지·원격 › 수집 서버(원격)의 등록값도 함께 고치세요.' },
   'dup-deploy-target': { title: '배포 대상에 저장된 토큰이 다른 항목과 겹칩니다', fix: '설정 › 엣지 배포에서 그 항목의 토큰을 엣지마다 다르게 넣으세요(다음 재배포 때 터집니다).' },
   'dup-same-edge-multi-role': { title: '한 엣지에서 같은 값이 두 용도로 쓰입니다', fix: '기본 구성이라 조치는 선택입니다. 나누려면 그 엣지에 COLLECTOR_TOKEN 을 따로 지정하세요.' },
 
@@ -221,7 +221,7 @@ export const FINDING_TEXT = Object.freeze({
   'probe-wrong-edge': { title: '등록된 주소가 다른 엣지에 닿습니다', fix: 'NAT·포트포워딩을 확인하고 그 엣지의 portal.env 에 EDGE_ADVERTISE_URL 을 지정하세요.' },
   'probe-edge-no-token': { title: '그 엣지에 수집 토큰이 설정되지 않았습니다', fix: '그 엣지의 portal.env 에 COLLECTOR_TOKEN(또는 EDGE_MODE=all + EDGE_TOKEN)을 설정하고 재시작하세요.' },
   'probe-unreachable': { title: '엣지에 닿지 못했습니다', fix: '주소·포트·방화벽을 확인하세요(토큰 문제가 아닙니다).' },
-  'probe-no-token-stored': { title: '중앙 등록부에 그 엣지의 수집 토큰이 없습니다', fix: '설정 › 수집 서버에서 토큰을 넣으세요(지금은 보내 볼 값이 없어 점검이 불가능합니다).' },
+  'probe-no-token-stored': { title: '중앙 등록부에 그 엣지의 수집 토큰이 없습니다', fix: '설정 › 엣지·원격 › 수집 서버(원격)에서 토큰을 넣으세요(지금은 보내 볼 값이 없어 점검이 불가능합니다).' },
   'probe-http': { title: '예상 밖 응답을 받았습니다', fix: '그 주소가 정말 엣지 포탈인지 확인하세요(리버스 프록시·로드밸런서가 앞에 있을 수 있습니다).' },
   'probe-not-run': { title: '이번에는 점검하지 않았습니다', fix: '‘지금 점검’ 을 다시 누르면 이어서 점검합니다.' },
 
@@ -230,13 +230,13 @@ export const FINDING_TEXT = Object.freeze({
   'edge-shared-token': { title: '공유 중앙 토큰을 쓰고 있습니다', fix: '개별 토큰을 발급해 그 엣지의 CENTRAL_TOKEN 을 바꾸세요(그러지 않으면 개별 토큰 전용 기능인 통신 점검·파트 장애 등이 이 법인에서 동작하지 않습니다).' },
   'edge-no-report': { title: '엣지 자기보고가 없습니다', fix: '‘엣지 값 가져오기’ 를 누르세요(중앙 토큰 축은 엣지가 말해 주지 않으면 확인할 수 없습니다).' },
   'edge-old-version': { title: '구버전 엣지라 자기보고 경로가 없습니다', fix: '그 엣지를 업그레이드하세요.' },
-  'edge-name-mismatch': { title: '중앙이 아는 이름과 엣지가 말한 이름이 다릅니다', fix: 'AGENT_NAME 과 설정 › 수집 서버의 이름을 맞추세요(다르면 엣지 보고가 엉뚱한 행에 붙습니다).' },
+  'edge-name-mismatch': { title: '중앙이 아는 이름과 엣지가 말한 이름이 다릅니다', fix: 'AGENT_NAME 과 설정 › 엣지·원격 › 수집 서버(원격)의 이름을 맞추세요(다르면 엣지 보고가 엉뚱한 행에 붙습니다).' },
   'edge-collector-fp-diff': { title: '수집 토큰 지문이 중앙 등록값과 다릅니다', fix: '등록부에 같은 엣지가 여러 항목으로 있는지 확인하세요(중앙이 어느 값을 쓰는지가 갈립니다).' },
   'edge-report-stale': { title: '오래된 엣지 보고가 토큰 문제를 말하고 있습니다', fix: '‘엣지 값 가져오기’ 를 다시 누르세요(그 뒤에 고쳤을 수 있어 지금은 결함으로 세지 않습니다).' },
 
   'edge-is-also-central': { title: '이 엣지가 또 다른 중앙으로 동작합니다', fix: '그 엣지의 CENTRAL_TOKEN 을 지우고 EDGE_TOKEN 을 쓰세요(CENTRAL_TOKEN 은 그 인스턴스의 중앙 엔드포인트를 엽니다).' },
   'deploy-collector-diff': { title: '배포 대상의 수집 토큰이 현재 등록값과 다릅니다', fix: '설정 › 엣지 배포의 값을 지금 등록값과 맞추세요(그러지 않으면 다음 재배포에서 등록값이 무효가 됩니다).' },
-  'not-in-registry': { title: '수집 서버 등록부에 없는 엣지입니다', fix: '설정 › 수집 서버에 등록하세요(등록되지 않으면 중앙이 이 엣지를 점검하거나 당길 수 없습니다).' },
+  'not-in-registry': { title: '수집 서버 등록부에 없는 엣지입니다', fix: '설정 › 엣지·원격 › 수집 서버(원격)에 등록하세요(등록되지 않으면 중앙이 이 엣지를 점검하거나 당길 수 없습니다).' },
 
   'hygiene-space': { title: '토큰 값 앞뒤에 공백이 있습니다', fix: '공백을 지우세요. 비교는 전체 문자열이라 공백 하나로 거부되는데 화면에서는 보이지 않습니다.' },
   'hygiene-short': { title: '토큰이 짧습니다', fix: '충분히 긴 무작위 값으로 바꾸세요(개별 토큰 발급 기능이 256비트 값을 만들어 줍니다).' },
@@ -311,7 +311,7 @@ export function bannerText(scan) {
   const fc = scan?.findingCounts || {};
   const measured = n(k.measured) || 0;
   if (!n(k.total)) {
-    return { tone: 'gray', text: '점검할 엣지가 없습니다 — 설정 › 수집 서버에 엣지를 등록하면 여기에 나타납니다.' };
+    return { tone: 'gray', text: '점검할 엣지가 없습니다 — 설정 › 엣지·원격 › 수집 서버(원격)에 엣지를 등록하면 여기에 나타납니다.' };
   }
   /*
    * ⚠⚠ **두 축을 한 숫자로 말하지 말 것**(v2.560 스크린샷 판독에서 잡은 결함): 초판 배너는
@@ -344,7 +344,7 @@ export function bannerText(scan) {
     if (noAnswer || noToken) {
       const parts = [];
       if (noAnswer) parts.push(`**엣지 ${noAnswer}곳이 응답하지 않았습니다**(연결 실패·시한 초과) — 등록된 주소·포트·방화벽·엣지 기동 여부를 확인하세요`);
-      if (noToken) parts.push(`**${noToken}곳은 중앙에 저장된 수집 토큰이 없어 시도하지 않았습니다** — 설정 › 수집 서버에서 토큰을 저장하세요`);
+      if (noToken) parts.push(`**${noToken}곳은 중앙에 저장된 수집 토큰이 없어 시도하지 않았습니다** — 설정 › 엣지·원격 › 수집 서버(원격)에서 토큰을 저장하세요`);
       return { tone: 'amber', text: `통신 점검을 돌렸지만 응답을 받은 엣지가 없습니다 — ${parts.join(' · ')}. 응답이 없으면 토큰이 맞는지는 알 수 없습니다(‘정상’ 도 ‘불일치’ 도 아닙니다).` };
     }
     return { tone: 'gray', text: '아직 통신 점검을 돌리지 않았습니다 — **‘지금 점검’** 을 누르면 중앙에 저장된 토큰으로 각 엣지를 실제로 두드려 봅니다. 그 전까지의 판정은 저장값 대조(중복·값 위생)뿐입니다.' };
@@ -374,7 +374,7 @@ export function tableFootnotes(scan, limits) {
   const rows = scan?.rows || [];
   const has = (fn) => rows.some(fn);
   if (has((r) => r.registered === false)) {
-    out.push('‘등록부 없음’ 행은 중앙의 다른 기록(개별 토큰·배포 대상·설정 push·인출 상태)에는 있는데 설정 › 수집 서버에 없는 엣지입니다 — 이 행을 빼면 화면이 ‘전부 정상’ 이라는 거짓을 말하게 되므로 일부러 보여 줍니다.');
+    out.push('‘등록부 없음’ 행은 중앙의 다른 기록(개별 토큰·배포 대상·설정 push·인출 상태)에는 있는데 설정 › 엣지·원격 › 수집 서버(원격)에 없는 엣지입니다 — 이 행을 빼면 화면이 ‘전부 정상’ 이라는 거짓을 말하게 되므로 일부러 보여 줍니다.');
   }
   if (has((r) => !r.edge)) {
     const v = t(limits?.minEdgeVersion);

@@ -257,7 +257,7 @@ const cloneSettings = (cur) => ({ version: 2, directors: cur.directors.map((d) =
  * @throws Error(message = 사람이 읽는 사유, code invalid|conflict)
  */
 export function saveSettings(body = {}, { jobDirs = new Map() } = {}) {
-  if (body.director !== undefined) throw fail('invalid', 'Director 접속값은 법인별 Director 화면(설정 › vCenter 관리 › Bareos 백업 서버 › Director)에서 저장합니다.');
+  if (body.director !== undefined) throw fail('invalid', 'Director 접속값은 법인별 Director 화면(설정 › 백업 › Bareos 백업 서버 › Director)에서 저장합니다.');
   const cur = loadSettings();
   const next = cloneSettings(cur);
   if (body.defaults && typeof body.defaults === 'object') {

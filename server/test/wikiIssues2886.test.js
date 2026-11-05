@@ -128,6 +128,8 @@ test('② 첨부 — 범위 · 형식 · 크기 · 개수 · 전체 상한 · �
     out.gone = await raw('/attach/file/' + out.txt.j.item.id);
     // 주인 삭제 → 첨부도
     out.delPage = await call('DELETE', '/wiki/pages/' + pa.id);
+    await call('DELETE', '/wiki/trash/' + pa.id); // v2.907 휴지통 — 첨부는 영구 삭제 때(삭제가 저장된 뒤)
+    await new Promise((r) => setTimeout(r, 50));
     out.afterDel = await raw('/attach/file/' + out.png.j.item.id);
     out.ids = { png: out.png.j?.item?.id };
   `);

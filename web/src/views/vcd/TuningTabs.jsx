@@ -124,7 +124,8 @@ export function VmTuning({ vm, vms, datastores }) {
                   <KV rows={[
                     ['판정', <span key="v"><b>{rs.verdict?.title || '—'}</b>{rs.verdict?.summary ? <span className="muted"> · {rs.verdict.summary}</span> : null}</span>],
                     ['CPU', c ? `${c.vcpu} vCPU · 사용 p95 ${unitText(c.usagePct?.p95, '%')} · 최대 ${unitText(c.usagePct?.max, '%')}${c.recommendedVcpu != null ? ` · 권장 ${c.recommendedVcpu} vCPU` : ''}` : '—'],
-                    ['메모리', m ? `${gbText(m.allocMB / 1024)} · 워킹셋 ${gbText((m.workingSetMB ?? 0) / 1024)}${m.recommendedMB != null ? ` · 권장 ${gbText(m.recommendedMB / 1024)}` : ''}` : '—'],
+                    // v2.901(점검 W3 — 정정): 워킹셋을 못 읽으면(표본 없음 — 서버 null) '0 GB' 가 아니라 '—'(v2.895 의 ?? 0 은 못 읽은 값을 0 으로 그렸다).
+                    ['메모리', m ? `${gbText(m.allocMB / 1024)} · 워킹셋 ${m.workingSetMB == null ? '—' : gbText(m.workingSetMB / 1024)}${m.recommendedMB != null ? ` · 권장 ${gbText(m.recommendedMB / 1024)}` : ''}` : '—'],
                     ['감축 금지 신호', m ? `벌룬 ${m.balloon?.n ? `${m.balloon.samplesAbove0 || 0}회` : '못 읽음'} · 스왑 ${m.swapped?.n ? `${m.swapped.samplesAbove0 || 0}회` : '못 읽음'} · Ready p95 ${unitText(c?.readyPct?.p95, '%')}` : '—'],
                     ['근거', rs.evidence?.sufficient === false ? <span className="badge amber" key="e">불충분 — {(rs.evidence.reasons || [])[0] || ''}</span> : '충분'],
                   ]} />
@@ -176,7 +177,7 @@ export function VmTuning({ vm, vms, datastores }) {
                 ))}
               </div>
             ) : <div className="muted" style={{ padding: '10px 14px', fontSize: 12.5 }}>읽은 값에서 확인할 항목이 없습니다.</div>}
-          <Note>전원 정책 · NUMA 배치 · 지연 민감도 · 네트워크 어댑터 유형(vmxnet3 여부)은 수집하지 않습니다(2차).</Note>
+          <Note>네트워크 어댑터 유형(E1000 · E1000E 등 옛 NIC → VMXNET3 권장)은 VM 구성 점검이 판정합니다. 전원 정책 · NUMA 배치 · 지연 민감도는 수집하지 않습니다.</Note>
         </Card>
       </div>
 

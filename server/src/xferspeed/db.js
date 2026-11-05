@@ -196,6 +196,53 @@ export async function samplesSince(sinceTs, { agent = '', limit = 200_000, until
   } catch (e) { return { rows: [], truncated: false, available: true, error: String(e?.message || e).slice(0, 200) }; }
 }
 
+/**
+ * v2.902 — 한 엣지의 측정 기록 한 쪽(상세 '측정 기록' 표 · 사용자 요청 "히스토리 보는 기능 강화").
+ * 창 [sinceTs, until](until 이 null 이면 끝이 열린 지금 창 — `samplesSince` 와 같은 닫힌 끝)을 **최근 → 과거** 순서(ts 내림 · 같은 ts 는 down 먼저)로
+ * `limit` 행씩 준다. 쪽 넘김은 OFFSET 이 아니라 **커서**(`before` = 앞 쪽 마지막 행의 {ts, dir}) — 방향마다 PK(agent, dir, ts) 범위를
+ * 거꾸로 읽어 합치므로 정렬·건너뛰기 비용이 쪽 크기만큼이다(180일 × 48회 × 2방향 ≈ 1.7만 행을 쪽마다 정렬하지 않는다).
+ * 새 측정이 들어와도 커서 뒤 쪽은 밀리지 않는다. 건수(total·failTotal)는 방향마다 단일 COUNT(PK 범위)다.
+ * @returns {Promise<{rows:Array, total:number, failTotal:number, next:{ts:number,dir:string}|null, available:boolean, error?:string}>}
+ */
+export async function logPage(agent, { sinceTs, until = null, before = null, limit = 50, onlyFail = false } = {}) {
+  const db = await getDb();
+  if (!db) return { rows: [], total: 0, failTotal: 0, next: null, available: false };
+  const lim = Math.max(1, Math.min(500, Math.floor(n(limit) ?? 50)));
+  const hi = n(until) ?? Number.MAX_SAFE_INTEGER;
+  const lo = n(sinceTs) ?? 0;
+  try {
+    const page = (dir) => {
+      let cond = 'agent = ? AND dir = ? AND ts >= ?';
+      const args = [agent, dir, lo];
+      if (before && n(before.ts) != null) {
+        // 순서가 (ts 내림, dir 오름)이라 커서 행 뒤 = ts 가 더 작거나, ts 가 같고 dir 이 뒤인 행.
+        const incl = dir > String(before.dir);
+        cond += incl ? ' AND ts <= ?' : ' AND ts < ?';
+        args.push(incl ? Math.min(hi, n(before.ts)) : Math.min(hi + 1, n(before.ts)));
+      } else { cond += ' AND ts <= ?'; args.push(hi); }
+      if (onlyFail) cond += ' AND ok = 0';
+      return db.prepare(`SELECT ${SAMPLE_COLS_AGENT} FROM xfer_sample WHERE ${cond} ORDER BY ts DESC LIMIT ?`).all(...args, lim + 1);
+    };
+    const a = page('down'); const b = page('up');
+    const merged = [];
+    let i = 0; let j = 0;
+    while (merged.length < lim + 1 && (i < a.length || j < b.length)) {
+      if (j >= b.length || (i < a.length && Number(a[i].ts) >= Number(b[j].ts))) merged.push(a[i++]);
+      else merged.push(b[j++]);
+    }
+    const more = merged.length > lim;
+    const rows = more ? merged.slice(0, lim) : merged;
+    const last = rows[rows.length - 1];
+    const cnt = (dir, fail) => Number(db.prepare(`SELECT COUNT(*) c FROM xfer_sample WHERE agent = ? AND dir = ? AND ts >= ? AND ts <= ?${fail ? ' AND ok = 0' : ''}`).get(agent, dir, lo, hi)?.c || 0);
+    return {
+      rows, available: true,
+      total: cnt('down', false) + cnt('up', false),
+      failTotal: cnt('down', true) + cnt('up', true),
+      next: more && last ? { ts: Number(last.ts), dir: String(last.dir) } : null,
+    };
+  } catch (e) { return { rows: [], total: 0, failTotal: 0, next: null, available: true, error: String(e?.message || e).slice(0, 200) }; }
+}
+
 /** 기간 안의 최근 실패(모든 엣지) — 화면 '최근 실패' 목록. */
 export async function recentFailures(sinceTs, limit = 12) {
   const db = await getDb();

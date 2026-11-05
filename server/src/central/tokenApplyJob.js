@@ -172,7 +172,7 @@ async function runJob(job, deps, { upgradeFirst = false } = {}) {
   if (existing) {
     const unused = !(Number(existing.lastUsedAt) > 0);
     stepEnd(s, 'bad', unused
-      ? '이미 발급됐지만 한 번도 쓰이지 않은 개별 토큰이 있습니다(이전 작업이 중단됐을 수 있습니다) — 설정 › 수집 서버의 엣지별 개별 central 토큰에서 회수한 뒤 다시 실행하세요.'
+      ? '이미 발급됐지만 한 번도 쓰이지 않은 개별 토큰이 있습니다(이전 작업이 중단됐을 수 있습니다) — 설정 › 엣지·원격 › 수집 서버(원격)의 엣지별 개별 central 토큰에서 회수한 뒤 다시 실행하세요.'
       : '이미 개별 토큰이 발급돼 있습니다 — 다시 발급하면 엣지가 쓰는 기존 토큰이 즉시 폐기되므로 자동 적용은 공유 토큰 엣지만 합니다.', deps);
     return finish(job, 'failed', '이미 개별 토큰이 있습니다.', deps);
   }
@@ -207,8 +207,8 @@ async function runJob(job, deps, { upgradeFirst = false } = {}) {
     job.hint = canUpgrade ? 'upgrade' : '';
     stepEnd(s, 'bad', `수집 서버 ${col.url} · ${verText()}${reported ? ` · 보고 이름 ${reported}` : ''} · 보고 호스트 ${reportedHost || '모름'} · 배포 기록 ${targetText} — 토큰을 전달할 통로가 없어 발급하지 않았습니다.`, deps);
     return finish(job, 'failed', `엣지 판 ${ver} 에는 수집 토큰 통로(${MIN_EDGE_API_VERSION} 이상)가 없고 배포 기록(SSH 계정)도 없어 토큰을 전달할 수 없습니다(발급하지 않음). `
-      + (canUpgrade ? `'엣지 업그레이드 뒤 자동 적용' 으로 엣지를 중앙 판으로 올린 뒤 적용하거나(엣지 포탈이 재시작됩니다), ` : '엣지를 먼저 업그레이드하거나(설정 › 수집 서버 › 업그레이드), ')
-      + '설정 › 수집 서버 › 원격 법인(DC)에 Edge 노드 포탈 설치에 이 엣지를 등록해 SSH 통로를 여세요.', deps);
+      + (canUpgrade ? `'엣지 업그레이드 뒤 자동 적용' 으로 엣지를 중앙 판으로 올린 뒤 적용하거나(엣지 포탈이 재시작됩니다), ` : '엣지를 먼저 업그레이드하거나(설정 › 엣지·원격 › 수집 서버(원격) › 업그레이드), ')
+      + '설정 › 엣지·원격 › 원격 법인(DC)에 Edge 노드 포탈 설치에 이 엣지를 등록해 SSH 통로를 여세요.', deps);
   }
   stepEnd(s, 'ok', `수집 서버 ${col.url} · ${verText()}${reported ? ` · 보고 이름 ${reported}` : ''} · 보고 호스트 ${reportedHost || '모름(이름으로만 확인)'} · 배포 기록 ${targetText}`, deps);
 
@@ -225,7 +225,7 @@ async function runJob(job, deps, { upgradeFirst = false } = {}) {
       if (!up || !up.ok) {
         stepEnd(s, 'bad', `번들 push 실패: ${up?.reason || '사유 미상'}`, deps);
         audit(deps, '엣지 개별 central 토큰 자동 적용 실패', job, '엣지 업그레이드 push 실패');
-        return finish(job, 'failed', `엣지 업그레이드 번들을 보내지 못했습니다(${up?.reason || '사유 미상'}) — 토큰은 발급하지 않았습니다. 설정 › 수집 서버 › 업그레이드에서 번들·수집 토큰을 확인하세요.`, deps);
+        return finish(job, 'failed', `엣지 업그레이드 번들을 보내지 못했습니다(${up?.reason || '사유 미상'}) — 토큰은 발급하지 않았습니다. 설정 › 엣지·원격 › 수집 서버(원격) › 업그레이드에서 번들·수집 토큰을 확인하세요.`, deps);
       }
       sub.push(`✓ 번들 v${up.version || '?'} 전달 — 엣지가 설치·재시작합니다`);
       audit(deps, '엣지 업그레이드 push(개별 토큰 자동 적용)', job, `v${up.version || '?'}`);
@@ -280,7 +280,7 @@ async function runJob(job, deps, { upgradeFirst = false } = {}) {
     if (!cur) { stepEnd(c, 'ok', '취소할 토큰이 이미 없습니다.', deps); return true; }
     if (issuedCreatedAt != null && cur.createdAt !== issuedCreatedAt) { stepEnd(c, 'warn', '그 사이 이 엣지의 개별 토큰이 다시 발급돼 이 작업은 취소하지 않았습니다.', deps); return false; }
     try { deps.revoke(name); stepEnd(c, 'ok', `발급을 취소했습니다(${why}) — 엣지는 예전처럼 공유 토큰으로 동작합니다.`, deps); audit(deps, '엣지 개별 central 토큰 회수(자동 적용 정리)', job, why); return true; }
-    catch (e) { stepEnd(c, 'bad', `발급 취소 실패: ${cut(e)} — 설정 › 수집 서버의 개별 토큰 목록에서 '${name}' 을 회수하세요.`, deps); return false; }
+    catch (e) { stepEnd(c, 'bad', `발급 취소 실패: ${cut(e)} — 설정 › 엣지·원격 › 수집 서버(원격)의 개별 토큰 목록에서 '${name}' 을 회수하세요.`, deps); return false; }
   };
   const fail = (summary) => { audit(deps, '엣지 개별 central 토큰 자동 적용 실패', job, summary); return finish(job, 'failed', summary, deps); };
 
@@ -339,7 +339,7 @@ async function runJob(job, deps, { upgradeFirst = false } = {}) {
   if (!applied) {
     s = stepStart(job, 'ssh', deps);
     if (!target) {
-      stepEnd(s, 'skip', targets.length ? '배포 기록이 여러 개라 어느 호스트인지 정할 수 없습니다.' : '배포 기록(SSH 계정)이 없어 SSH 로 적용할 수 없습니다 — 설정 › 수집 서버 › 원격 법인(DC)에 Edge 노드 포탈 설치에 이 엣지를 등록하세요.', deps);
+      stepEnd(s, 'skip', targets.length ? '배포 기록이 여러 개라 어느 호스트인지 정할 수 없습니다.' : '배포 기록(SSH 계정)이 없어 SSH 로 적용할 수 없습니다 — 설정 › 엣지·원격 › 원격 법인(DC)에 Edge 노드 포탈 설치에 이 엣지를 등록하세요.', deps);
       // 옛 판 엣지(401·404)는 아무것도 받지 않았다 — 확정 취소. 다른 실패는 예전 판정 그대로.
       revokeIssued('엣지에 전달하지 못함', { definite: edgeUnchanged || !!r.skipped || r.status === 404 || r.status === 401 });
       return fail(`엣지에 전달하지 못했습니다: ${sshReason}${job.hint === 'upgrade' ? " — '엣지 업그레이드 뒤 자동 적용' 으로 엣지를 중앙 판으로 올린 뒤 적용할 수 있습니다(엣지 포탈이 재시작됩니다)." : ''}`);

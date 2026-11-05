@@ -110,7 +110,7 @@ export function perfDiagText(diag, now = Date.now()) {
         title: `엣지 '${agent}' 가 수집 상태를 보고하지 않았습니다.`,
         body: '이 스위치는 엣지가 현지에서 수집해 중앙으로 올립니다. 그런데 그 엣지에서 상태 보고가 한 번도 오지 않았습니다 — 엣지 포탈 버전이 낮거나, 엣지가 중앙 설정을 받아가지 못하는 상태입니다.',
         waiting: false, tone: 'fix',
-        action: `엣지 '${agent}' 의 포탈 버전을 확인하고(상태 보고는 v2.517 부터), 설정 › 수집 서버에서 그 엣지의 마지막 연결 시각을 확인하세요.`,
+        action: `엣지 '${agent}' 의 포탈 버전을 확인하고(상태 보고는 v2.517 부터), 설정 › 엣지·원격 › 수집 서버(원격)에서 그 엣지의 마지막 연결 시각을 확인하세요.`,
         error: null,
       };
     case 'edge-disabled':
@@ -118,7 +118,7 @@ export function perfDiagText(diag, now = Date.now()) {
         title: `엣지 '${agent}' 에서 포트 사용량 수집이 꺼져 있습니다.`,
         body: '중앙 설정은 설정 pull 로 엣지에 내려갑니다. 엣지가 아직 그 값을 받지 못했거나, 그 엣지가 현장 설정(SANSW_PERF_LOCAL=1)으로 중앙 값을 무시하고 있습니다.',
         waiting: false, tone: 'fix',
-        action: '설정 › 수집 서버 › SAN 스위치 포트 사용량 에서 수집을 켜고, 엣지의 다음 설정 pull(몇 분)을 기다리세요. 그래도 꺼짐이면 그 엣지의 portal.env 에서 SANSW_PERF_LOCAL 을 확인하세요.',
+        action: '설정 › 수집 › SAN 스위치 포트 사용량 에서 수집을 켜고, 엣지의 다음 설정 pull(몇 분)을 기다리세요. 그래도 꺼짐이면 그 엣지의 portal.env 에서 SANSW_PERF_LOCAL 을 확인하세요.',
         error: null,
       };
     case 'edge-device-failed':
@@ -163,7 +163,7 @@ export function perfDiagText(diag, now = Date.now()) {
         title: '포트 사용량 수집이 꺼져 있습니다.',
         body: '기본은 꺼짐입니다 — 운영 스위치에 주기 접속을 임의로 만들지 않기 위해서입니다. 켜면 portperfshow 를 주기적으로 실행해 쌓기 시작합니다.',
         waiting: false, tone: 'fix',
-        action: '설정 › 수집 서버 › SAN 스위치 포트 사용량 에서 수집을 켜세요.', error: null,
+        action: '설정 › 수집 › SAN 스위치 포트 사용량 에서 수집을 켜세요.', error: null,
       };
     case 'device-failed':
       return {

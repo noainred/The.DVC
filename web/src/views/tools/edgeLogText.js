@@ -76,8 +76,8 @@ export function edgeHint(row = {}, { minVersion = '' } = {}) {
   const label = EDGE_KIND_LABEL[kind] || kind;
   const tone = EDGE_KIND_TONE[kind] || 'idle';
   const base = { kind, label, tone };
-  if (kind === 'disabled') return { ...base, can: false, text: '설정 › 수집 서버에서 이 엣지를 **비활성**으로 두었습니다. 활성화해야 가져올 수 있습니다.' };
-  if (kind === 'no-url') return { ...base, can: false, text: '이 수집 서버에 **URL 이 없습니다** — 설정 › 수집 서버에서 주소를 넣으세요.' };
+  if (kind === 'disabled') return { ...base, can: false, text: '설정 › 엣지·원격 › 수집 서버(원격)에서 이 엣지를 **비활성**으로 두었습니다. 활성화해야 가져올 수 있습니다.' };
+  if (kind === 'no-url') return { ...base, can: false, text: '이 수집 서버에 **URL 이 없습니다** — 설정 › 엣지·원격 › 수집 서버(원격)에서 주소를 넣으세요.' };
   if (kind === 'old-version') return { ...base, can: false, text: `이 엣지는 **v${minVersion} 미만**이라 로그를 내주는 경로가 없습니다. 눌러도 실패합니다 — 엣지를 업그레이드하세요.` };
   if (kind === 'unknown-version') return { ...base, can: true, text: '이 엣지의 **버전을 모릅니다**(아직 중앙에 수집 결과를 준 적이 없습니다). 눌러 보면 되는지 알 수 있습니다 — 구버전이면 그렇다고 답합니다.' };
   if (kind === 'failed') {
@@ -90,7 +90,7 @@ export function edgeHint(row = {}, { minVersion = '' } = {}) {
 
 /** pull 실패 `kind` → 사람이 할 일. ⚠ 한 문구로 덮지 말 것(조치가 정반대다). */
 export const FETCH_KIND_TEXT = Object.freeze({
-  'not-registered': '수집 서버 등록부에 없는 이름입니다 — 설정 › 수집 서버에서 등록하세요.',
+  'not-registered': '수집 서버 등록부에 없는 이름입니다 — 설정 › 엣지·원격 › 수집 서버(원격)에서 등록하세요.',
   'disabled-central': '중앙에서 이 수집 서버를 **비활성**으로 두었습니다.',
   'no-url': '이 수집 서버에 **URL 이 없습니다**.',
   auth: '수집 서버 **토큰 불일치** 입니다 — 중앙 등록값과 그 엣지의 **COLLECTOR_TOKEN** 을 대조하세요. 다시 눌러도 결과는 같습니다.',
@@ -205,8 +205,8 @@ export function tableFootnotes(counts = {}, { minVersion = '' } = {}) {
   const out = [];
   if (counts['old-version']) out.push(`**구버전 엣지 ${counts['old-version']}곳** — v${minVersion} 미만에는 로그를 내주는 경로가 없습니다. 눌러도 실패하니 먼저 업그레이드하세요.`);
   if (counts['unknown-version']) out.push(`**버전 미상 ${counts['unknown-version']}곳** — 아직 중앙에 수집 결과를 준 적이 없어 버전을 모릅니다. 눌러 보면 되는지 알 수 있습니다.`);
-  if (counts.disabled) out.push(`**비활성 ${counts.disabled}곳** — 설정 › 수집 서버에서 활성화해야 합니다.`);
-  if (counts['no-url']) out.push(`**URL 없음 ${counts['no-url']}곳** — 설정 › 수집 서버에 주소를 넣어야 합니다.`);
+  if (counts.disabled) out.push(`**비활성 ${counts.disabled}곳** — 설정 › 엣지·원격 › 수집 서버(원격)에서 활성화해야 합니다.`);
+  if (counts['no-url']) out.push(`**URL 없음 ${counts['no-url']}곳** — 설정 › 엣지·원격 › 수집 서버(원격)에 주소를 넣어야 합니다.`);
   if (counts.failed) out.push(`**마지막 시도 실패 ${counts.failed}곳** — 행의 사유를 보세요. 닿지 못한 경우에는 폴백 요청이 등록돼 있습니다.`);
   return out;
 }
@@ -256,7 +256,7 @@ export function identityNote(row = {}) {
 /** 등록부에 없는데 보관분만 있는 행. */
 export function unregisteredNote(row = {}) {
   if (!row.unregistered) return '';
-  return '설정 › 수집 서버 **등록부에 없는 이름**입니다(등록을 지웠거나 이름이 바뀌었습니다). 보관분만 남아 있어 새로 가져올 수는 없습니다.';
+  return '설정 › 엣지·원격 › 수집 서버(원격) **등록부에 없는 이름**입니다(등록을 지웠거나 이름이 바뀌었습니다). 보관분만 남아 있어 새로 가져올 수는 없습니다.';
 }
 
 /*

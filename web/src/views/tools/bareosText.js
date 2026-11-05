@@ -220,13 +220,13 @@ export function directorChipTitle(x) {
 /** 머리 상태 줄(법인별 Director 요약 · 폴러). */
 export function directorLine(d) {
   if (!d) return '';
-  if (d.demo) return '데모 Director(합성 응답 — 어디에도 접속하지 않습니다). 설정 › vCenter 관리 › Bareos 백업 서버 › Director 에서 실제 Director 를 추가하면 그쪽으로 바뀝니다.';
+  if (d.demo) return '데모 Director(합성 응답 — 어디에도 접속하지 않습니다). 설정 › 백업 › Bareos 백업 서버 › Director 에서 실제 Director 를 추가하면 그쪽으로 바뀝니다.';
   if (!d.configured) {
     const n = Array.isArray(d.directors) ? d.directors.length : 0;
     // Chromium 확인: Director 를 추가한 뒤에도 '추가하고' 라고 말했다 — 있으면 '접속값이 덜 됐다' 로
     return n
-      ? `법인 Director ${n}개 — 아직 콘솔 접속값(콘솔 이름·비밀번호)을 갖춘 Director 가 없습니다. 설정 › vCenter 관리 › Bareos 백업 서버 › Director 편집에서 자동 설정 2단계(또는 연결 저장)로 채우세요.`
-      : 'Director 가 설정되지 않았습니다 — 설정 › vCenter 관리 › Bareos 백업 서버 › Director 에서 법인 Director 를 추가하고 주소·콘솔 이름·비밀번호를 등록하세요.';
+      ? `법인 Director ${n}개 — 아직 콘솔 접속값(콘솔 이름·비밀번호)을 갖춘 Director 가 없습니다. 설정 › 백업 › Bareos 백업 서버 › Director 편집에서 자동 설정 2단계(또는 연결 저장)로 채우세요.`
+      : 'Director 가 설정되지 않았습니다 — 설정 › 백업 › Bareos 백업 서버 › Director 에서 법인 Director 를 추가하고 주소·콘솔 이름·비밀번호를 등록하세요.';
   }
   const list = Array.isArray(d.directors) ? d.directors : [];
   const st = list.map(directorStatus);
@@ -1073,7 +1073,7 @@ export function conflictText(conflicts = []) {
   const con = conflicts.some((c) => c.type === 'console');
   return `이미 있는 파일과 겹칩니다: ${what} — 포탈은 남이 만든 파일을 덮지 않으므로 이대로는 2단계가 거부됩니다(서버에 접속하기 전에 막았습니다).`
     + (con ? ' ‘만들 콘솔 이름’ 을 포탈 전용 이름으로 바꾸세요(기존 콘솔은 그대로 둡니다).' : '')
-    + (conflicts.some((c) => c.type !== 'console') ? ' 그 밖의 이름은 설정 › vCenter 관리 › Bareos 백업 서버 › 공통 기본값을 바꾸거나 전용 Pool · Schedule 만들기를 끄세요.' : '')
+    + (conflicts.some((c) => c.type !== 'console') ? ' 그 밖의 이름은 설정 › 백업 › Bareos 백업 서버 › 공통 기본값을 바꾸거나 전용 Pool · Schedule 만들기를 끄세요.' : '')
     + ' 서버에서 파일을 정리했으면 1단계 사전 점검을 다시 하세요.';
 }
 

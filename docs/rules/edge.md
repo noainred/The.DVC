@@ -612,6 +612,30 @@
     · 상한에 걸린 조회는 **가장 최근 행을 남긴다**(DESC LIMIT 후 뒤집기) · 요청보다 많은 바이트는 bad-body · 엣지 `COLLECTOR_TOKEN` 없음은 `collector-off`(서버 `XFER_FAIL_KINDS` ↔ 웹 `FAIL_TEXT` 1:1) ·
       잴 엣지가 0곳이면 `/run` 409 `noTargets` + 사유 · 보존 정리는 30초 틱에서 6시간마다(`PRUNE_EVERY_MS` · 첫 틱 제외 · 측정이 꺼져 있어도).
     · 남긴 것: 오래됨 사유 코드(XS-12). 실제 원격 회선으로는 확인하지 못했다(목업·테스트 라우터).
+  · **v2.899 — 상세의 'Ping 함께 보기'(시안 `docs/design/xfer-ping` · 사용자 컨펌 "기본값대로"). 새로 재지 않는다 — Ping 모니터의 엣지 기록을 읽는다**
+    (`ping/{db,service,store}.js` + `routes/api/xferSpeed.js GET /tools/xfer-speed/ping` + 웹 `XferSpeedTool.jsx TrendCharts·PingPanel`·`xferSpeedText.js pingModel·comboHover`.
+    회귀 `server/test/xferPing2890.test.js`(실제 api 라우터 — 게이트 변이 2/2) + 웹 `xferPing.test.js`):
+    · 창은 `detailWindowOf` **하나**(`/history`·`/ping` 이 같은 start·end·past) — 두 차트가 같은 x 축이다. Ping 창은 **[since, until) 반개구간**(롤업은 시간 경계로 내림) —
+      이웃한 '이전 구간' 두 칸이 경계 표본을 두 번 세지 않는다. 지금 창은 끝이 열려 있다(`/history` 와 같다).
+    · 대상 id 는 `ping/store.js edgeTargetId` **하나**(`edge_<id 소문자>` — 자동 등록과 새 라우트가 공유, 테스트가 사본을 막는다).
+    · ⚠ 엣지 대상은 `kind:'tcp'` — **ICMP 가 아니라 엣지 포탈 포트 TCP 연결 시간**이다. 응답 `method:'tcp-connect'` 이고 화면이 그렇게 쓴다. 전송 측정의 '지연'(응답 머리)과 다른 값이다.
+    · 값이 없으면 빈 배열로 두지 않고 `reason`(`PING_REASONS` ↔ 웹 `PING_REASON_TEXT` 1:1): no-target(모니터 시작 뒤 추가·지운 엣지 — 자동 등록은 시작 때만이고 지운 것은 tombstone 이라
+      '엣지 노드 다시 등록'(`POST /api/ping/edge/sync`)이 되살리지 않는다 — 화면이 그렇게 말한다) · monitor-off · disabled · before-retention · no-samples. 저장소 예외는 503.
+    · 통계: n·fail 은 칸의 정확한 합(`history` 가 fail 을 싣는다 — loss×n 반올림 금지), 평균은 성공 표본 가중, **중앙값은 원시 칸 창(≤ 10일)에서만** 표본으로 — 롤업 창은 null.
+    · 응답에 대상 호스트를 싣지 않는다(id·kind·port·enabled). 권한은 형제 라우트와 같다(adminOnly + fullScopeOnly · 데모 계정은 데모 엣지만 404 규약).
+    · 웹: 보기 `전송 속도 | 전송 속도 + Ping | Ping만`(기본 '전송 속도' · localStorage `xs.detail.view` — 편의라 못 읽으면 기본값) · '전송 속도' 보기면 Ping 을 **조회하지 않는다** ·
+      다른 창의 Ping 응답은 그리지 않는다(`samePingWindow`) · 오버 상자는 보이는 첫 차트 위(카드 맨 위면 Ping 알약을 덮었다) · 선을 끊는 간격은 칸 × 1.5 와 표본 간격 × 1.6 중 큰 쪽
+      (칸 크기만 보면 표본이 칸보다 성긴 대상에서 점만 남았다 — 화면 확인으로 잡았다).
+  · **v2.902 — 상세 히스토리 보기(사용자 요청 "히스토리 보는 기능 강화 및 버그 수정")**. 회귀 `server/test/xferLog2902.test.js`(실제 api 라우터 — 게이트 변이 2/2) +
+    웹 `xferHistory.test.js`:
+    · ⚠ **스크롤 범위는 `historyOldestOf` 하나**(전송 기록 — 원시 또는 일 요약 — 과, Ping 을 함께 보는 보기면 Ping 기록 중 **더 오래된 쪽**). 전송 기록만 보면
+      전송 측정이 꺼져 있거나(기본 꺼짐) 원시 보관(180일)이 Ping(365일)보다 짧을 때 'Ping만' 에서 남은 Ping 과거로 못 갔다(B1).
+    · 측정 기록 표는 **보고 있는 창 전체**다(예전 '끝 이전 14일 중 최근 40건' — 기간·구간과 무관했다). `GET /tools/xfer-speed/log` — 창은 `detailWindowOf`(닫힌 끝 ts ≤ end, `/history` 와 같다) ·
+      **커서 쪽 넘김**(`before=<ts>:<down|up>` = 앞 쪽의 `next`, 순서 ts 내림 · 같은 ts 는 down 먼저). `xferspeed/db.js logPage` 는 방향마다 PK(agent, dir, ts) 범위를
+      거꾸로 읽어 합친다 — **OFFSET·정렬로 바꾸지 말 것**(쪽마다 1.7만 행 정렬 · 새 측정이 들어오면 뒤 쪽이 밀린다). 건수는 방향마다 단일 COUNT. 형식이 틀린 커서는 400(field:'before').
+      원시 보관보다 앞까지 걸친 창은 화면이 '그보다 앞은 표에 없다' 고 말한다(`oldest`·`retention`). 화면은 `/history?log=0` 으로 예전 14일 읽기를 끈다(1분 폴링).
+    · 날짜로 이동(`jumpToDate`): 고른 포탈 날짜의 끝(다음 날 0시)이 창 끝 — anchor 를 '지금 이후 첫 칸 경계' 로 잡아 ◀▶ 가 날짜 경계로 움직이고 back 0 이면 예전처럼 최근 구간.
+      기록보다 앞이면 가장 오래된 칸으로 자르고 알린다. 과거 구간의 '지금 측정' 안내는 `runOneText`(과거 구간은 갱신하지 않는다 — B2).
 - ⚠⚠ **v2.737 — 업그레이드·재시작으로 끊긴 스캔은 '실행 중 스캔 기록' 으로 자동 재개한다. 기록 판정은 `util/scanJournal.js` 하나**
   (사용자 신고 "업그레이드 되면 scan 하던게 중단되는 버그" · 선택 ①+②+③ · 전체 검증. `util/scanJournal.js` + `isidu/detach.js` + 재개 함수 3곳
   (`isidu/poller.js resumeIsidu`·`idrac/scanPoller.js resumeIdracScan`·`ipam/scanPoller.js resumeIpScan`) + `upgrade/manager.js` 대기 + 웹
@@ -762,7 +786,7 @@
   - 사전 점검은 pull 상태의 엣지 판이 낮게 보이면 **그 엣지만 다시 당겨**(`pullCollectorByAgent`) 확인한다(오래된 상태로 업그레이드를 권하지 않게).
     낮은 것이 확인되면 수집 토큰 통로는 보내지 않고(SSH 로 바로), SSH 배포 기록도 없고 업그레이드 옵션도 아니면 **발급 전에** 멈춘다
     (발급→취소 공회전·기록 오염 없음) · 기록 `hint:'upgrade'` 로 화면이 '엣지 업그레이드 뒤 자동 적용' 버튼을 단다.
-  - `upgradeFirst` 는 엣지 포탈을 재시작하므로 **사용자가 고른 때만**(기본 아님). 번들 push 는 설정 › 수집 서버 › 업그레이드의 단일 push 와
+  - `upgradeFirst` 는 엣지 포탈을 재시작하므로 **사용자가 고른 때만**(기본 아님). 번들 push 는 설정 › 엣지·원격 › 수집 서버(원격) › 업그레이드의 단일 push 와
     같은 경로(`pushUpgradeToCollectors` — 서명 manifest 포함) · 새 판(최소 2.776.0 이고 번들 판을 알면 그 이상)을 **확인한 뒤에만** 발급한다.
     시한(`UPGRADE_WAIT_MS`) 안에 못 보면 발급하지 않고 멈춘다. 판을 모르면(pull 상태 없음) 업그레이드하지 않고 통로를 직접 시도한다.
   - 웹 `edgeTokenSyncText.js MIN_EDGE_API_VERSION` 과 `web/src/cmpVersion.js` 는 서버 값·규칙의 사본 — 서버 테스트가 대조한다. 판을 모르면 null(낮다고 보지 않는다).

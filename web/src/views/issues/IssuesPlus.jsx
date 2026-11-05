@@ -157,7 +157,7 @@ export function ChildrenBox({ it, meta, canWrite, busy, act, onOpen }) {
               <tr key={k.key}>
                 <td data-sort={k.num} className="iss-key">{k.key}</td>
                 <td style={{ whiteSpace: 'normal' }}><button type="button" className="iss-link" onClick={() => onOpen(k.key)}>{k.title}</button>{childText(k) && <span className="iss-subn">{childText(k)}</span>}</td>
-                <td data-sort={k.assignee || '~'}>{k.assignee ? <span className="iss-who"><Avatar name={k.assignee} size={20} />{k.assignee}</span> : <span className="iss-unassigned">미할당</span>}</td>
+                <td data-sort={k.assignee || ''}>{k.assignee ? <span className="iss-who"><Avatar name={k.assignee} size={20} />{k.assignee}</span> : <span className="iss-unassigned">미할당</span>}</td>
                 <td data-sort={STATUS_ORDER.indexOf(k.status)}><StatusChip s={k.status} /></td>
                 <td data-sort={progressOf(k) ?? ''}><ProgressLine r={k} compact /></td>
                 <td data-sort={k.dueAt ?? ''}><Due r={k} /></td>
@@ -340,7 +340,9 @@ export function SprintView({ meta, onOpen, onWritten, reloadSprints }) {
   const load = useCallback(() => {
     if (!sel) { setBoard(null); return; }
     const k = latest.next();
-    fetchJson(`/issues/sprints/${sel}/board`).then((r) => { if (latest.isLatest(k)) { setBoard(r); setErr(null); } }).catch((e) => { if (latest.isLatest(k)) setErr(e); });
+    // v2.901(점검 W2): 다른 스프린트로 바꾸면 이전 보드 · 오류를 바로 비운다 — 응답이 오기 전 A 의 '끝내기' 가 sprints/A 로 나가고, B 가 실패하면 A 보드가 오류 없이 남았다
+    setBoard((b) => (b?.sprint?.id === sel ? b : null)); setErr((e0) => (e0 && e0.__sprint === sel ? e0 : null));
+    fetchJson(`/issues/sprints/${sel}/board`).then((r) => { if (latest.isLatest(k)) { setBoard(r); setErr(null); } }).catch((e) => { if (latest.isLatest(k)) { try { e.__sprint = sel; } catch { /* 얼린 오류 */ } setErr(e); } });
   }, [sel, latest]);
   useEffect(() => { load(); }, [load]);
   const act = async (fn, okMsg = '') => {
@@ -351,13 +353,15 @@ export function SprintView({ meta, onOpen, onWritten, reloadSprints }) {
       setMsg(saveFailText(r)); return false;
     } catch (e) { setMsg(saveFailText({ reason: e.message })); return false; } finally { setBusy(false); }
   };
-  const sp = board?.sprint || sprints.find((s) => s.id === sel) || null;
-  const rows = useMemo(() => (board?.rows || []).filter((r) => r.type !== 'epic' && (!mine || r.assignee === meta.me)), [board, mine, meta.me]);
+  // 보드는 고른 스프린트의 것일 때만 쓴다(늦게 온 이전 응답 · 바꾼 직후 — 동작이 다른 스프린트에 가지 않게)
+  const cur = board?.sprint?.id === sel ? board : null;
+  const sp = cur?.sprint || sprints.find((s) => s.id === sel) || null;
+  const rows = useMemo(() => (cur?.rows || []).filter((r) => r.type !== 'epic' && (!mine || r.assignee === meta.me)), [cur, mine, meta.me]);
   const nextSprints = sprints.filter((s) => s.state !== 'closed' && s.id !== sel);
   const canManage = !!meta.canSprints;
   const open = sp && sp.state !== 'closed';
-  const counts = board?.counts || {};
-  const total = board?.total ?? 0;
+  const counts = cur?.counts || {};
+  const total = cur?.total ?? 0;
   const donePct = total ? Math.round(((counts.done || 0) / total) * 100) : null;
   return (
     <div className="iss-sprint">
@@ -375,9 +379,9 @@ export function SprintView({ meta, onOpen, onWritten, reloadSprints }) {
       </div>
       {form && <SprintForm initial={form === 'edit' ? sp : null} limits={meta.sprintLimits} onCancel={() => setForm(null)} onSaved={(s) => { setForm(null); setSel(s.id); reloadSprints?.(); }} />}
       {msg && <div className="banner">{msg}</div>}
-      {err && !board && <ErrorBox error={err} />}
-      {sel && !board && !err && <Loading label="스프린트" />}
-      {sp && board && (
+      {err && !cur && <ErrorBox error={err} />}
+      {sel && !cur && !err && <Loading label="스프린트" />}
+      {sp && cur && (
         <>
           <div className="card iss-sprint-head">
             <div className="iss-sprint-title">
@@ -415,18 +419,18 @@ export function SprintView({ meta, onOpen, onWritten, reloadSprints }) {
             )}
           </div>
           <div className="iss-sprint-stats">
-            <div className="card"><Burndown bd={board.burndown} /></div>
+            <div className="card"><Burndown bd={cur.burndown} /></div>
             <div className="card iss-people">
               <b>사람별 · 열린 이슈</b>
-              {(board.people || []).length === 0 && <div className="muted iss-small">담당자가 정해진 열린 이슈가 없습니다.</div>}
-              {(board.people || []).map((p) => (
+              {(cur.people || []).length === 0 && <div className="muted iss-small">담당자가 정해진 열린 이슈가 없습니다.</div>}
+              {(cur.people || []).map((p) => (
                 <div key={p.assignee} className="iss-load">
                   <span className="iss-load-name iss-who"><Avatar name={p.assignee} size={20} />{p.assignee}</span>
                   <span className="iss-bar" role="img" aria-label={`열린 이슈 ${p.open}건`}><span style={{ width: `${loadPct(p.open)}%` }} /></span>
                   <span className="iss-load-n">{p.open}</span>
                 </div>
               ))}
-              <div className="muted iss-small">막대는 {LOAD_CAP}건을 가득으로(표시 기준). 미할당 {board.unassigned ?? 0}.</div>
+              <div className="muted iss-small">막대는 {LOAD_CAP}건을 가득으로(표시 기준). 미할당 {cur.unassigned ?? 0}.</div>
             </div>
           </div>
           <div className="iss-sprint-tools">
@@ -434,7 +438,7 @@ export function SprintView({ meta, onOpen, onWritten, reloadSprints }) {
             <span className="muted iss-small">카드 왼쪽 띠 = 에픽(색은 에픽 키마다 같다 · 없음은 띠 없음)</span>
           </div>
           <div className="iss-board-wrap">
-            <div className="iss-board cols4">
+            <div className="iss-cur cols4">
               {BOARD_COLS.map((s) => {
                 const list = rows.filter((r) => (s === 'todo' ? r.status === 'todo' || r.status === 'backlog' : r.status === s));
                 return (
@@ -450,13 +454,13 @@ export function SprintView({ meta, onOpen, onWritten, reloadSprints }) {
           {open && (
             <div className="card iss-backlog">
               <div className="iss-backlog-head">
-                <b>백로그 · {board.backlogTotal ?? 0} · 스프린트 밖 열린 이슈</b>
+                <b>백로그 · {cur.backlogTotal ?? 0} · 스프린트 밖 열린 이슈</b>
                 <button className="btn" onClick={() => setBacklogOpen((v) => !v)}>{backlogOpen ? '접기' : '펼치기'}</button>
               </div>
               {backlogOpen && (
                 <>
-                  {(board.backlog || []).length === 0 && <div className="muted iss-small">스프린트 밖 열린 이슈가 없습니다.</div>}
-                  {(board.backlog || []).map((r) => (
+                  {(cur.backlog || []).length === 0 && <div className="muted iss-small">스프린트 밖 열린 이슈가 없습니다.</div>}
+                  {(cur.backlog || []).map((r) => (
                     <div key={r.key} className="iss-backlog-row">
                       <TypeTag t={r.type} /><button type="button" className="iss-key iss-link" onClick={() => onOpen(r.key)}>{r.key}</button><PrioTag p={r.priority} />
                       <button type="button" className="iss-link iss-backlog-title" onClick={() => onOpen(r.key)}>{r.title}</button>
@@ -465,7 +469,7 @@ export function SprintView({ meta, onOpen, onWritten, reloadSprints }) {
                         : <span className="muted iss-small">조회만</span>}
                     </div>
                   ))}
-                  {board.backlogTotal > (board.backlog || []).length && <div className="muted iss-small">위 {(board.backlog || []).length}건만 보입니다(우선순위 · 최근 순). 나머지는 필터에서 ‘sprint is empty’.</div>}
+                  {cur.backlogTotal > (cur.backlog || []).length && <div className="muted iss-small">위 {(cur.backlog || []).length}건만 보입니다(우선순위 · 최근 순). 나머지는 필터에서 ‘sprint is empty’.</div>}
                   <div className="muted iss-small">넣기 · 빼기는 이력에 남습니다. 범위 계정은 자기 법인 이슈만 넣고, 스프린트 자체(이름 · 기간 · 목표)는 전체 범위 운영자 · 관리자가 만듭니다.</div>
                 </>
               )}
@@ -520,11 +524,11 @@ export function EpicsView({ meta, onOpen, onWritten }) {
                 <tr key={e.key}>
                   <td data-sort={e.num} className="iss-key"><span className="iss-epic-dot" style={{ background: epicColor(e.key) }} />{e.key}</td>
                   <td style={{ whiteSpace: 'normal' }}><button type="button" className="iss-link" onClick={() => onOpen(e.key)}>{e.title}</button></td>
-                  <td data-sort={e.vcenterId ? vcName(meta, e.vcenterId) : '~'}>{e.vcenterId ? vcName(meta, e.vcenterId) : <span className="muted">공용</span>}</td>
+                  <td data-sort={e.vcenterId ? vcName(meta, e.vcenterId) : ''}>{e.vcenterId ? vcName(meta, e.vcenterId) : <span className="muted">공용</span>}</td>
                   <td data-sort={STATUS_ORDER.indexOf(e.status)}><StatusChip s={e.status} /></td>
                   <td data-sort={progressOf(e) ?? ''}><ProgressLine r={e} compact /></td>
                   <td data-sort={e.childCount}>{e.childCount ? `${e.childDone}/${e.childCount}` : <span className="muted">0</span>}</td>
-                  <td data-sort={e.assignee || '~'}>{e.assignee || <span className="muted">—</span>}</td>
+                  <td data-sort={e.assignee || ''}>{e.assignee || <span className="muted">—</span>}</td>
                   <td data-sort={e.updatedAt} className="muted" title={timeText(e.updatedAt)}>{dateText(e.updatedAt)}</td>
                 </tr>
               ))}
@@ -610,7 +614,7 @@ export function FiltersView({ meta, onOpen, onWritten, onBoard = null }) {
   const sharedF = (filters?.filters || []).filter((f) => !f.mine && f.shared);
   const segs = qerr ? errorSegments(q, qerr.errors) : null;
   return (
-    <div className="iss-filters">
+    <div className="iss-filterview">
       <aside className="card iss-filter-side" aria-label="필터">
         <div className="iss-filter-group"><b>빠른 필터</b>
           {QUICK_FILTERS.map((f) => <button key={f.id} type="button" className={`iss-filter-item${ran === f.query ? ' on' : ''}`} onClick={() => pick(f)}>{f.name}</button>)}
@@ -640,7 +644,7 @@ export function FiltersView({ meta, onOpen, onWritten, onBoard = null }) {
           </div>
           <form className="iss-query" onSubmit={submit}>
             <textarea className="input iss-query-input" rows={2} value={q} onChange={(e) => setQ(e.target.value)} maxLength={meta.queryLimits?.length || 500} spellCheck={false} aria-label="검색식"
-              onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); submit(e); } }} />
+              onKeyDown={(e) => { if (e.nativeEvent?.isComposing || e.keyCode === 229) return; /* v2.904 점검 W-6 — 한글 조합 확정 Enter */ if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); submit(e); } }} />
             <button className="btn primary" type="submit">찾기</button>
           </form>
           {segs && (
@@ -692,12 +696,12 @@ export function FiltersView({ meta, onOpen, onWritten, onBoard = null }) {
                         <td data-sort={r.num} className="iss-key">{r.key}</td>
                         <td><TypeTag t={r.type} /></td>
                         <td style={{ whiteSpace: 'normal' }}><button type="button" className="iss-link" onClick={() => onOpen(r.key)}>{r.title}</button>{r.parentKey && r.parentKey !== r.epicKey && <span className="iss-subn">하위 · {r.parentKey}</span>}{childText(r) && <span className="iss-subn">{childText(r)}</span>}</td>
-                        <td data-sort={r.epicKey || '~'}>{r.epicKey ? <span className="iss-epic-tag" style={{ borderColor: epicColor(r.epicKey) }}>{r.epicKey}</span> : <span className="muted">—</span>}</td>
-                        <td data-sort={r.sprintId ? sprintName(meta.sprintList, r.sprintId) : '~'}>{r.sprintId ? sprintName(meta.sprintList, r.sprintId) : <span className="muted">없음</span>}</td>
+                        <td data-sort={r.epicKey || ''}>{r.epicKey ? <span className="iss-epic-tag" style={{ borderColor: epicColor(r.epicKey) }}>{r.epicKey}</span> : <span className="muted">—</span>}</td>
+                        <td data-sort={r.sprintId ? sprintName(meta.sprintList, r.sprintId) : ''}>{r.sprintId ? sprintName(meta.sprintList, r.sprintId) : <span className="muted">없음</span>}</td>
                         <td data-sort={STATUS_ORDER.indexOf(r.status)}><StatusChip s={r.status} /></td>
                         <td data-sort={progressOf(r) ?? ''}><ProgressLine r={r} compact /></td>
                         <td data-sort={r.priority}><PrioTag p={r.priority} /></td>
-                        <td data-sort={r.assignee || '~'}>{r.assignee ? <span className="iss-who"><Avatar name={r.assignee} size={20} />{r.assignee}</span> : <span className="iss-unassigned">미할당</span>}</td>
+                        <td data-sort={r.assignee || ''}>{r.assignee ? <span className="iss-who"><Avatar name={r.assignee} size={20} />{r.assignee}</span> : <span className="iss-unassigned">미할당</span>}</td>
                         <td data-sort={r.dueAt ?? ''}><Due r={r} /></td>
                         <td data-sort={r.updatedAt} className="muted" title={timeText(r.updatedAt)}>{dateText(r.updatedAt)}</td>
                       </tr>

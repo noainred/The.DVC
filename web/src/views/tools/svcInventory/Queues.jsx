@@ -7,23 +7,24 @@ import { fetchJson, postJson } from '../../../api.js';
 import { STable } from '../../../components/STable.jsx';
 import Select from '../../../components/Select.jsx';
 import { Loading, ErrorBox } from '../../../components/ui.jsx';
-import { GROUP_TITLE, groupActions, SRC_LABEL, opErrorText } from '../svcInventoryText.js';
+import { GROUP_TITLE, groupActions, SRC_LABEL, opErrorText, keyText, isMaskedKey, MASKED_KEY_TITLE } from '../svcInventoryText.js';
 
 const btn = { padding: '5px 10px', fontSize: 12, flex: 'none' };
 const svcLabel = (s) => `${s.path ? `${s.path}\\` : ''}${s.name}`;
 
-function useQueues(corp, reloadKey) {
+function useQueues(corp, reloadKey, nocorp = false) {
   const [q, setQ] = useState(null); const [err, setErr] = useState(null); const seq = useRef(0);
   useEffect(() => {
     const my = ++seq.current; setErr(null); setQ(null);
-    fetchJson('/tools/svc-inventory/queues', corp ? { corp } : {}).then((r) => { if (my === seq.current) setQ(r); }).catch((e) => { if (my === seq.current) setErr(e); });
-  }, [corp, reloadKey]);
+    // nocorp = 트리 '(법인 미지정)' — 법인 귀속 없는 항목만(6차 6: 빈 corp 는 '조건 없음' 이라 전 법인 큐가 나왔다)
+    fetchJson('/tools/svc-inventory/queues', nocorp ? { nocorp: '1' } : corp ? { corp } : {}).then((r) => { if (my === seq.current) setQ(r); }).catch((e) => { if (my === seq.current) setErr(e); });
+  }, [corp, reloadKey, nocorp]);
   return { q, err };
 }
 
 /** 미지정 — 출처별 묶음. */
-export function UnassignedView({ corp, reloadKey, servicesOf, writableOf, op, busy, onPinGroup, corpName }) {
-  const { q, err } = useQueues(corp, reloadKey);
+export function UnassignedView({ corp, nocorp = false, reloadKey, servicesOf, writableOf, op, busy, onPinGroup, corpName }) {
+  const { q, err } = useQueues(corp, reloadKey, nocorp);
   const [pick, setPick] = useState({});
   if (err) return <div className="card" style={{ padding: 12 }}><ErrorBox error={err} /></div>;
   if (!q) return <div className="card"><Loading /></div>;
@@ -79,8 +80,8 @@ export function UnassignedView({ corp, reloadKey, servicesOf, writableOf, op, bu
 }
 
 /** 매핑 안 된 값 — 규칙 값은 있는데 서비스가 없는 것(스캔 라벨·태그 값). */
-export function UnmappedView({ corp, reloadKey, servicesOf, writableOf, op, busy, corpName }) {
-  const { q, err } = useQueues(corp, reloadKey);
+export function UnmappedView({ corp, nocorp = false, reloadKey, servicesOf, writableOf, op, busy, corpName }) {
+  const { q, err } = useQueues(corp, reloadKey, nocorp);
   const [pick, setPick] = useState({});
   if (err) return <div className="card" style={{ padding: 12 }}><ErrorBox error={err} /></div>;
   if (!q) return <div className="card"><Loading /></div>;
@@ -118,12 +119,16 @@ export function UnmappedView({ corp, reloadKey, servicesOf, writableOf, op, busy
 }
 
 /** 검토 — 드리프트 · 고정 법인 불일치 · 불필요한 고정 · 유령 키(판정 보류 포함). */
-export function ReviewView({ corp, reloadKey, svcName, writableOf, op, busy, corpName }) {
-  const { q, err } = useQueues(corp, reloadKey);
+export function ReviewView({ corp, nocorp = false, reloadKey, svcName, writableOf, op, busy, corpName }) {
+  const { q, err } = useQueues(corp, reloadKey, nocorp);
   if (err) return <div className="card" style={{ padding: 12 }}><ErrorBox error={err} /></div>;
   if (!q) return <div className="card"><Loading /></div>;
-  const ghostsBy = new Map();
-  for (const g of q.ghosts || []) { if (!ghostsBy.has(g.corp)) ghostsBy.set(g.corp, []); ghostsBy.get(g.corp).push(g); }
+  // 법인별 유령 개수 — 서버는 행을 앞 500건만 싣고 개수는 따로 준다(6차 8). 옛 서버 응답이면 행으로 센다.
+  const ghostsBy = new Map(Object.entries(q.ghostsByCorp || {}));
+  if (!q.ghostsByCorp) for (const g of q.ghosts || []) ghostsBy.set(g.corp, (ghostsBy.get(g.corp) || 0) + 1);
+  const ghostsN = q.ghostsN ?? (q.ghosts || []).length;
+  const heldN = q.ghostsHeldN ?? (q.ghostsHeld || []).length;
+  const shownN = (q.ghosts || []).length + (q.ghostsHeld || []).length;
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12, minWidth: 0 }}>
       <div className="card" style={{ minWidth: 0 }}>
@@ -135,7 +140,7 @@ export function ReviewView({ corp, reloadKey, svcName, writableOf, op, busy, cor
             <thead><tr><th>구성원 · 법인</th><th>고정된 서비스</th><th>자동 판정</th><th data-nosort>조치</th></tr></thead>
             <tbody>{q.drift.map((x) => (
               <tr key={x.key}>
-                <td data-sort={x.name} title={x.key}><b>{x.name}</b><div className="svcinv-sub">{corpName(x.corp)}</div><div className="svcinv-sub" style={{ fontFamily: 'var(--mono)' }}>{x.key}</div></td>
+                <td data-sort={x.name} title={isMaskedKey(x.key) ? MASKED_KEY_TITLE : x.key}><b>{x.name}</b><div className="svcinv-sub">{corpName(x.corp)}</div><div className="svcinv-sub" style={{ fontFamily: 'var(--mono)' }}>{keyText(x.key)}</div></td>
                 <td>{svcName(x.pin.serviceId)}<div className="svcinv-sub">{x.pin.by || '?'}{x.pin.at ? ` · ${new Date(x.pin.at).toLocaleDateString()}` : ''}</div></td>
                 <td>{svcName(x.auto.serviceId)} <span className="badge blue">{SRC_LABEL[x.auto.src] || x.auto.src}</span>
                   {/* 바뀜 표지는 줄을 따로 — 같은 줄에 두면 1440px 에서 조치 열이 가로 스크롤 뒤로 밀린다(실측) */}
@@ -152,31 +157,31 @@ export function ReviewView({ corp, reloadKey, svcName, writableOf, op, busy, cor
           </STable>
         )}
       </div>
-      {q.mismatch?.length ? (
-        <div className="card" style={{ padding: '10px 14px', borderLeft: '3px solid var(--amber)', fontSize: 13 }}>
-          ⚠ 고정한 뒤 법인이 바뀐 구성원 {q.mismatch.length}대 — 그 고정은 무시하고 자동 판정을 씁니다: {q.mismatch.slice(0, 10).map((x) => x.name).join(', ')}{q.mismatch.length > 10 ? ' …' : ''}
-        </div>
-      ) : null}
+      {q.mismatch?.length ? <MismatchCard q={q} svcName={svcName} writableOf={writableOf} op={op} busy={busy} corpName={corpName} /> : null}
       <div className="card" style={{ minWidth: 0 }}>
         <div className="flex wrap gap" style={{ padding: '10px 14px', borderBottom: '1px solid var(--border)', alignItems: 'center' }}>
           <b>유령 키(고정이 가리키는 서버가 없음)</b>
-          <span className="muted" style={{ fontSize: 12 }}>{q.ghosts.length}건{q.ghostsHeld?.length ? ` · 판정 보류 ${q.ghostsHeld.length}건(읽지 못한 법인·베어메탈 출처·VM 식별 키 — 유령으로 보지 않습니다)` : ''}</span>
+          <span className="muted" style={{ fontSize: 12 }}>{ghostsN}건{heldN ? ` · 판정 보류 ${heldN}건(아직 수집 전이거나 읽지 못한 법인·베어메탈 출처·VM 식별 키 — 유령으로 보지 않습니다)` : ''}</span>
         </div>
-        {!q.ghosts.length && !q.ghostsHeld?.length ? <div className="muted" style={{ padding: 14 }}>유령 키가 없습니다.</div> : (
+        {!ghostsN && !heldN ? <div className="muted" style={{ padding: 14 }}>유령 키가 없습니다.</div> : (
           <>
-            <STable className="table svcinv-t" minWidth={680}>
+            <STable className="table svcinv-t" minWidth={680} limit={100}>
               <thead><tr><th>키</th><th>법인</th><th>고정된 서비스</th><th>고정한 사람 · 시각</th><th>상태</th></tr></thead>
               <tbody>
-                {q.ghosts.map((g) => <tr key={g.key}><td style={{ fontFamily: 'var(--mono)', fontSize: 12, wordBreak: 'break-all' }}>{g.key}</td><td>{corpName(g.corp)}</td><td>{g.serviceName || '?'}</td><td>{g.by || '?'}{g.at ? ` · ${new Date(g.at).toLocaleDateString()}` : ''}</td><td><span className="badge amber">정리 대상</span></td></tr>)}
+                {q.ghosts.map((g) => <tr key={g.key}><td style={{ fontFamily: 'var(--mono)', fontSize: 12, wordBreak: 'break-all' }} title={isMaskedKey(g.key) ? MASKED_KEY_TITLE : undefined}>{keyText(g.key)}</td><td>{corpName(g.corp)}</td><td>{g.serviceName || '?'}</td><td>{g.by || '?'}{g.at ? ` · ${new Date(g.at).toLocaleDateString()}` : ''}</td><td><span className="badge amber">정리 대상</span></td></tr>)}
                 {(q.ghostsHeld || []).map((g) => (
                   <tr key={g.key}>
-                    <td style={{ fontFamily: 'var(--mono)', fontSize: 12, wordBreak: 'break-all', opacity: 0.7 }}>{g.key}</td><td>{corpName(g.corp)}</td><td>{g.serviceName || '?'}</td><td>{g.by || '?'}{g.at ? ` · ${new Date(g.at).toLocaleDateString()}` : ''}</td>
+                    <td style={{ fontFamily: 'var(--mono)', fontSize: 12, wordBreak: 'break-all', opacity: 0.7 }} title={isMaskedKey(g.key) ? MASKED_KEY_TITLE : undefined}>{keyText(g.key)}</td><td>{corpName(g.corp)}</td><td>{g.serviceName || '?'}</td><td>{g.by || '?'}{g.at ? ` · ${new Date(g.at).toLocaleDateString()}` : ''}</td>
                     <td><span className="badge gray" title={HELD_TEXT[g.held] || ''}>판정 보류</span>
-                      <div className="svcinv-sub">{HELD_SHORT[g.held] || g.held}{g.heldSince ? ` · ${new Date(g.heldSince).toLocaleString()} 부터` : ''}</div></td>
+                      {/* 사유 · 시작 시각은 줄바꿈한다 — svcinv-sub 기본(한 줄 말줄임 260px)이면 '… 부터' 가 잘렸다(Chromium 1440 실측) */}
+                      <div className="svcinv-sub" style={{ whiteSpace: 'normal', overflow: 'visible' }}>{HELD_SHORT[g.held] || g.held}{g.heldSince ? ` · ${new Date(g.heldSince).toLocaleString()} 부터` : ''}</div>
+                      {/* 보류는 일괄 정리에서 빠진다 — 필요 없는 고정은 한 건씩 직접 지운다(6차 반증 F5: 예전에는 문구만 있고 버튼이 없었다) */}
+                      {writableOf(g.corp) ? <button type="button" className="logout-btn" style={{ ...btn, marginTop: 4 }} disabled={busy} title="이 고정 한 건만 지웁니다(보류 사유와 무관하게 — 서버가 정말 없어진 것을 알 때)" onClick={() => op({ op: 'pins.clear', corp: g.corp, keys: [g.key] }, '보류 중이던 고정 한 건을 지웠습니다.')}>고정 지우기</button> : null}</td>
                   </tr>))}
               </tbody>
             </STable>
-            {q.ghostsHeld?.length ? (
+            {ghostsN + heldN > shownN ? <div className="muted" style={{ padding: '8px 14px 0', fontSize: 12 }}>유령·보류 각각 앞 {Math.max((q.ghosts || []).length, (q.ghostsHeld || []).length)}건까지만 실었습니다(전체 유령 {ghostsN}건 · 보류 {heldN}건). 정리 버튼은 전체 개수 기준입니다.</div> : null}
+            {heldN ? (
               <div className="muted" style={{ padding: '8px 14px', fontSize: 12 }}>
                 ‘부터’ 시각은 보류가 실제로 시작된 때가 아니라 이 포탈이 보류 상태를 처음 확인한 때입니다(검토 화면을 연 시각 기준 · 재시작하면 다시 셉니다). 오래 보류돼 있으면 아래 원인을 먼저 고치십시오 — 원인이 풀리면 유령인지 아닌지 다시 판정합니다.
                 {q.bmBlocked && q.bmBlockedSources?.length ? (
@@ -186,7 +191,7 @@ export function ReviewView({ corp, reloadKey, svcName, writableOf, op, busy, cor
             ) : null}
             <div className="flex wrap gap" style={{ padding: '8px 14px' }}>
               {[...ghostsBy.keys()].filter((c) => writableOf(c)).map((c) => (
-                <GhostPrune key={c} corp={c} n={ghostsBy.get(c).length} corpName={corpName} op={op} busy={busy} />
+                <GhostPrune key={c} corp={c} n={ghostsBy.get(c)} corpName={corpName} op={op} busy={busy} />
               ))}
             </div>
           </>
@@ -201,8 +206,41 @@ export function ReviewView({ corp, reloadKey, svcName, writableOf, op, busy, cor
   );
 }
 
-const HELD_SHORT = { 'corp-unread': '법인 vCenter 를 지금 못 읽음', 'bm-source-unread': '베어메탈 출처를 못 읽음', 'uuid-unread': 'VM 식별 키(instanceUuid)를 못 읽음' };
+/**
+ * 고정한 뒤 법인이 바뀐 구성원(직접 키 · 옛 키 고정 — 6차 4). 판정은 그 고정을 쓰지 않는다. 고정이 있는 법인에 쓰기 권한이 있으면 한 건씩 지운다
+ * (6차 반증 2회차 R2: 보이기만 하고 지울 길이 없었다). 범위 밖 법인의 고정이면 법인·서비스를 싣지 않는다(서버가 비움 — 버튼도 없다).
+ */
+function MismatchCard({ q, svcName, writableOf, op, busy, corpName }) {
+  const rows = q.mismatch || [];
+  const members = new Set(rows.map((x) => x.key)).size;
+  return (
+    <div className="card" style={{ minWidth: 0, borderLeft: '3px solid var(--amber)' }}>
+      <div className="flex wrap gap" style={{ padding: '10px 14px', borderBottom: '1px solid var(--border)', alignItems: 'center' }}>
+        <b>고정한 뒤 법인이 바뀐 구성원</b><span className="muted" style={{ fontSize: 12 }}>{members}대 · 고정 {rows.length}건 — 그 고정은 무시하고 자동 판정을 씁니다(필요 없으면 지웁니다)</span>
+      </div>
+      <STable className="table svcinv-t" minWidth={560} limit={50}>
+        <thead><tr><th>구성원 · 지금 법인</th><th>고정이 있는 법인 · 서비스</th><th data-nosort>조치</th></tr></thead>
+        <tbody>{rows.map((x) => (
+          <tr key={`${x.key}|${x.aliasKey || ''}`}>
+            <td data-sort={x.name}><b>{x.name}</b><div className="svcinv-sub">{corpName(x.corp)}{x.aliasKey ? ' · 옛 키 고정' : ''}</div></td>
+            <td>{x.pinCorpHidden ? <span className="muted" title="이 계정의 조회 범위 밖 법인입니다">범위 밖 법인</span> : <>{corpName(x.pinCorp)}<div className="svcinv-sub">{svcName(x.serviceId)}</div></>}</td>
+            <td>{!x.pinCorpHidden && x.pinCorp && writableOf(x.pinCorp)
+              ? <button type="button" className="logout-btn" style={btn} disabled={busy} title="그 법인에 남은 이 고정만 지웁니다(구성원의 지금 소속은 바뀌지 않습니다)" onClick={() => op({ op: 'pins.clear', corp: x.pinCorp, keys: [x.aliasKey || x.key] }, `${x.name}: ${corpName(x.pinCorp)} 에 남은 고정을 지웠습니다.`)}>고정 지우기</button>
+              : <span className="muted" style={{ fontSize: 12 }}>{x.pinCorpHidden ? '—' : '조회 전용'}</span>}</td>
+          </tr>
+        ))}</tbody>
+      </STable>
+    </div>
+  );
+}
+
+const HELD_SHORT = { 'corp-unread': '법인 vCenter 를 지금 못 읽음', 'bm-source-unread': '베어메탈 출처를 못 읽음', 'uuid-unread': 'VM 식별 키(instanceUuid)를 못 읽음',
+  'snapshot-initial': '포탈 기동 직후 — 첫 수집 전', 'corp-pending': '법인 vCenter 첫 수집 대기', 'corp-disabled': '법인 vCenter 수집 꺼짐', 'corp-no-vms': '법인 VM 이 한 대도 없음' };
 const HELD_TEXT = {
+  'snapshot-initial': '포탈이 막 기동해 아직 어느 vCenter 도 수집하지 않았습니다 — 첫 수집이 끝나면 판정합니다',
+  'corp-pending': '이 법인 vCenter 를 아직 한 번도 수집하지 않았습니다(기동 직후·사이트 에이전트 수집 대기) — 수집되면 판정합니다',
+  'corp-disabled': '이 법인 vCenter 수집이 꺼져 있어 이 키의 서버가 정말 없는지 모릅니다 — 수집을 켜면 판정합니다(필요 없는 고정이면 행의 ‘고정 지우기’ 로 한 건씩 지웁니다)',
+  'corp-no-vms': '이 법인에서 VM 을 한 대도 받지 못했습니다 — VM 이 정말 모두 없어졌는지, 아직 못 받았는지 구분할 수 없어 VM 고정을 지우지 않습니다',
   'corp-unread': '그 법인 vCenter 를 지금 읽지 못해 이 키의 VM 이 정말 없는지 모릅니다 — 다시 읽히면 판정합니다',
   'bm-source-unread': 'iDRAC 등록부·OME·수집 서버·엣지 중 읽지 못한 출처가 있어 이 베어메탈이 정말 없는지 모릅니다 — 어느 출처에 있는지 알 수 없어 법인을 가리지 않고 보류합니다',
   'uuid-unread': '이 법인 vCenter 에서 VM 의 instanceUuid 를 하나도 읽지 못했습니다(REST 폴백 수집 등) — 이 키의 VM 이 정말 없는지 모릅니다. 다시 읽히면 판정합니다',
@@ -217,7 +255,7 @@ function GhostPrune({ corp, n, corpName, op, busy }) {
   if (ask) {
     return (
       <span className="flex wrap gap" style={{ alignItems: 'center', padding: '4px 8px', border: '1px solid var(--amber)', borderRadius: 6 }}>
-        <span style={{ fontSize: 12 }}>{corpName(corp)} 유령 고정 <b>{ask.keys.length}</b>건을 지웁니다(판정 보류는 남깁니다){ask.held ? ` · 보류 ${ask.held}건 제외` : ''}.</span>
+        <span style={{ fontSize: 12 }}>{corpName(corp)} 유령 고정 <b>{ask.keys.length}</b>건을 지웁니다(판정 보류는 남깁니다){ask.held ? ` · 보류 ${ask.held}건 제외` : ''}{ask.total > ask.keys.length ? ` · 전체 ${ask.total}건 중 앞 ${ask.keys.length}건 — 지운 뒤 다시 누르면 다음 묶음` : ''}.</span>
         {/* 미리 본 키를 그대로 보낸다 — 서버는 그 키 ∩ 지금 유령만 지운다(3차 반증 3: 개수만 보내면 확인창에 없던 키가 끼어 지워졌다) */}
         <button type="button" className="login-btn" style={btn} disabled={busy || !ask.keys.length} onClick={async () => { const r = await op({ op: 'ghosts.prune', corp, keys: ask.keys }, `${corpName(corp)} 의 유령 고정을 정리했습니다(미리 본 ${ask.keys.length}건 중 지금도 유령인 것만).`); if (r) setAsk(null); }}>지우기</button>
         <button type="button" className="logout-btn" style={btn} onClick={() => setAsk(null)}>취소</button>
@@ -232,7 +270,7 @@ function GhostPrune({ corp, n, corpName, op, busy }) {
           const r = await postJson('/tools/svc-inventory/op', { op: 'ghosts.prune', corp, dry: true });
           if (my !== cur.current) return;
           if (!r || r.ok === false) throw new Error(r?.reason || '개수를 확인하지 못했습니다.');
-          setAsk({ keys: r.result?.keys || [], held: r.result?.held || 0 });
+          setAsk({ keys: r.result?.keys || [], held: r.result?.held || 0, total: r.result?.total || 0 });
         } catch (e) { if (my === cur.current) setErr(opErrorText(e)); }
       }}>{corpName(corp)} 유령 {n}건 정리…</button>
       {err ? <span style={{ color: 'var(--red)', fontSize: 12 }}>{err}</span> : null}
@@ -277,19 +315,33 @@ function AliasPinsCard({ q, svcName, writableOf, op, busy, corpName }) {
   const items = q.aliasPins?.items || [];
   const n = q.aliasPins?.n || 0;
   if (!n) return null;
-  const corps = q.aliasPins?.corps || [...new Set(items.map((x) => x.corp))];   // 200건에서 잘리기 전 전체 법인(4차 반증 8)
+  // '새 키로 옮기기' 는 옮길 것이 있는 법인만(서버 movable — 충돌만 남은 법인에는 할 일이 없다). 옛 서버 응답이면 전체 법인.
+  const corps = q.aliasPins?.movable || q.aliasPins?.corps || [...new Set(items.map((x) => x.corp))];   // 200건에서 잘리기 전 전체 법인(4차 반증 8)
+  const conflicts = items.filter((x) => x.state === 'conflict').length;
   return (
     <div className="card" style={{ minWidth: 0 }}>
       <div className="flex wrap gap" style={{ padding: '10px 14px', borderBottom: '1px solid var(--border)', alignItems: 'center' }}>
-        <b>옛 키로 저장된 고정</b><span className="muted" style={{ fontSize: 12 }}>{n}대 · 서버 식별 키가 한 단계 올라(VM: moref → instanceUuid · 베어메탈: fleetId → 서비스태그) 고정이 옛 키에 남아 있습니다 — 소속은 그대로이고, 옮기면 정리됩니다</span>
+        <b>옛 키로 저장된 고정</b><span className="muted" style={{ fontSize: 12 }}>{n}건 · 서버 식별 키가 한 단계 올라(VM: moref → instanceUuid · 베어메탈: fleetId → 서비스태그) 고정이 옛 키에 남아 있습니다 — 옛 키만 있으면 소속은 그대로이고 옮기면 정리됩니다.
+          새 키에도 고정이 있으면 판정은 새 키를 씁니다{conflicts ? <> — <b style={{ color: 'var(--amber)' }}>서비스가 다른 {conflicts}건</b>은 어느 쪽을 남길지 고르십시오(‘새 키로 옮기기’ 는 이 행을 건너뜁니다)</> : ''}.</span>
       </div>
-      <STable className="table svcinv-t" minWidth={560} limit={50}>
-        <thead><tr><th>구성원 · 법인</th><th>고정된 서비스</th><th>옛 키</th></tr></thead>
+      <STable className="table svcinv-t" minWidth={640} limit={50}>
+        <thead><tr><th>구성원 · 법인</th><th>판정에 쓰는 고정</th><th>옛 키</th><th data-nosort>조치</th></tr></thead>
         <tbody>{items.map((x) => (
-          <tr key={x.key}>
+          <tr key={`${x.key}|${x.aliasKey}`}>
             <td data-sort={x.name}><b>{x.name}</b><div className="svcinv-sub">{corpName(x.corp)} · {x.kind === 'vm' ? 'VM' : '베어메탈'}</div></td>
-            <td>{svcName(x.serviceId)}</td>
-            <td style={{ fontFamily: 'var(--mono)', fontSize: 12, wordBreak: 'break-all' }}>{x.aliasKey}</td>
+            <td>{svcName(x.serviceId)}
+              {x.state === 'conflict' ? <div><span className="badge amber" title="새 키 고정과 옛 키 고정의 서비스가 다릅니다 — 판정은 새 키를 쓰고 있습니다">충돌 — 옛 키: {svcName(x.aliasServiceId)}</span></div>
+                : x.state === 'dup' ? <div><span className="badge gray" title="새 키에도 같은 서비스로 고정돼 있습니다 — 옛 키는 지워도 소속이 바뀌지 않습니다">중복(같은 서비스)</span></div>
+                  : <div className="svcinv-sub">옛 키 고정을 쓰는 중</div>}</td>
+            <td style={{ fontFamily: 'var(--mono)', fontSize: 12, wordBreak: 'break-all' }} title={isMaskedKey(x.aliasKey) ? MASKED_KEY_TITLE : undefined}>{keyText(x.aliasKey)}</td>
+            <td>{!writableOf(x.corp) ? <span className="muted">조회 전용</span> : x.state === 'conflict' ? (
+              <span className="flex wrap gap">
+                <button type="button" className="logout-btn" style={btn} disabled={busy} title="새 키 고정을 남기고 옛 키 고정을 지웁니다(소속은 지금과 같습니다)" onClick={() => op({ op: 'pins.rekey', corp: x.corp, keys: [x.key], keepNew: true }, `${x.name}: 새 키 고정(‘${svcName(x.serviceId)}’)을 남기고 옛 키 고정을 지웠습니다.`)}>지금 것 유지</button>
+                <button type="button" className="logout-btn" style={btn} disabled={busy} title="옛 키의 서비스로 새 키를 고정합니다(옛 키는 정리됩니다)" onClick={() => op({ op: 'pins.set', corp: x.corp, keys: [x.key], serviceId: x.aliasServiceId }, `${x.name} 을(를) 옛 키의 서비스 ‘${svcName(x.aliasServiceId)}’ 로 고정했습니다.`)}>옛 키 서비스로</button>
+              </span>
+            ) : x.state === 'dup' ? (
+              <button type="button" className="logout-btn" style={btn} disabled={busy} onClick={() => op({ op: 'pins.rekey', corp: x.corp, keys: [x.key] }, `${x.name}: 중복된 옛 키 고정을 지웠습니다(소속은 그대로).`)}>옛 키 지우기</button>
+            ) : <span className="muted" style={{ fontSize: 12 }}>아래 법인 단위로</span>}</td>
           </tr>
         ))}</tbody>
       </STable>
@@ -365,9 +417,32 @@ function RedundantCard({ q, svcName, writableOf, op, busy, corpName }) {
 /** 소속 규칙 탭 — 판정 순서 + 이 법인의 규칙·별칭·이름 규칙 · 태그 켜기 · (전체 범위 관리자) 태그 카테고리. */
 export function RulesView({ corp, corpRow, servicesOf, writable, op, busy, canFleet, tagCategory, corpName }) {
   const [f, setF] = useState({ prefix: '', svc: '', match: 'prefix', nv: '', nsvc: '', cat: tagCategory || '' });
+  // 추가 입력칸은 '＋ 폴더 규칙'·'＋ 이름 규칙' 을 눌렀을 때만 연다(예약 2) · 행의 '대상 바꾸기' 는 한 행씩(예약 1-d — 지우고 다시 넣는 사이에 소속이 비지 않게 한 연산)
+  const [adding, setAdding] = useState('');            // '' | 'folder' | 'name'
+  const [edit, setEdit] = useState(null);              // { k, body, svc } | null
   useEffect(() => { setF((x) => ({ ...x, cat: tagCategory || '' })); }, [tagCategory]);
+  useEffect(() => { setAdding(''); setEdit(null); }, [corp]);
   const svcs = corp ? servicesOf(corp) : [];
   const nameOf = (id) => svcs.find((s) => s.id === id)?.name || '?';
+  const closeAdd = () => { setAdding(''); setF((x) => ({ ...x, prefix: '', svc: '', nv: '', nsvc: '', match: 'prefix' })); };
+  /** 규칙 한 행의 '→ 서비스' 칸과 조치 칸. body = 그 규칙을 가리키는 연산 인자(update 는 serviceId 만 더한다). */
+  const ruleCells = (k, serviceId, body, label) => (edit?.k === k ? (
+    <>
+      <td><Select className="select" value={edit.svc} onChange={(e) => setEdit({ ...edit, svc: e.target.value })} style={{ maxWidth: 200 }} aria-label="새 대상 서비스">{svcs.map((s) => <option key={s.id} value={s.id}>{svcLabel(s)}</option>)}</Select></td>
+      <td><span className="flex wrap gap">
+        <button type="button" className="login-btn" style={btn} disabled={busy || !edit.svc || edit.svc === serviceId} onClick={async () => { const r = await op({ ...body, op: body.op.replace('.remove', '.update'), serviceId: edit.svc }, `${label} 의 대상을 ‘${nameOf(edit.svc)}’ 로 바꿨습니다.`); if (r) setEdit(null); }}>저장</button>
+        <button type="button" className="logout-btn" style={btn} onClick={() => setEdit(null)}>취소</button>
+      </span></td>
+    </>
+  ) : (
+    <>
+      <td><b>{nameOf(serviceId)}</b></td>
+      <td>{writable ? <span className="flex wrap gap">
+        <button type="button" className="logout-btn" style={btn} disabled={busy || svcs.length < 2} title={svcs.length < 2 ? '이 법인에 다른 서비스가 없습니다' : '이 규칙이 가리키는 서비스를 바꿉니다(규칙 값은 그대로)'} onClick={() => setEdit({ k, svc: serviceId })}>대상 바꾸기</button>
+        <button type="button" className="logout-btn" style={btn} disabled={busy} onClick={() => op(body, `${label} 을(를) 지웠습니다.`)}>지우기</button>
+      </span> : null}</td>
+    </>
+  ));
   const ORDER = [
     ['고정(수동)', '한 대씩 추가한 지정. 자동 판정과 다르면 드리프트로 검토 탭에 오릅니다.'],
     ['vCenter 폴더 규칙(VM 1순위)', '정확한 vSphere 위치(‘/ERP/prod’ 꼴)의 ‘/’ 경계 접두 · 가장 긴 접두가 이깁니다 · 대소문자를 구분합니다(vSphere 폴더 이름이 구분하므로 ‘/ERP’ 와 ‘/erp’ 는 다른 폴더). 매 수집 주기로 반영됩니다.'],
@@ -399,29 +474,41 @@ export function RulesView({ corp, corpRow, servicesOf, writable, op, busy, canFl
         </div>
         {!corp ? <div className="muted" style={{ padding: 14 }}>왼쪽 트리에서 법인을 고르면 그 법인의 규칙이 나옵니다.</div> : (
           <>
-            <STable className="table" minWidth={520}>
+            <STable className="table" minWidth={560}>
               <thead><tr><th>종류</th><th>값</th><th>→ 서비스</th><th data-nosort /></tr></thead>
               <tbody>
-                {(corpRow?.folderRules || []).map((r) => <tr key={`f${r.prefix}`}><td>폴더 접두</td><td style={{ fontFamily: 'var(--mono)' }}>{r.prefix}</td><td><b>{nameOf(r.serviceId)}</b></td><td>{writable ? <button type="button" className="logout-btn" style={btn} disabled={busy} onClick={() => op({ op: 'rule.remove', corp, prefix: r.prefix }, `규칙 ‘${r.prefix}’ 을 지웠습니다.`)}>지우기</button> : null}</td></tr>)}
-                {(corpRow?.aliases || []).map((a) => <tr key={`a${a.kind}${a.value}`}><td>{a.kind === 'scan' ? '스캔 라벨 별칭' : '태그 별칭'}</td><td style={{ fontFamily: 'var(--mono)' }}>{a.value}</td><td><b>{nameOf(a.serviceId)}</b></td><td>{writable ? <button type="button" className="logout-btn" style={btn} disabled={busy} onClick={() => op({ op: 'alias.remove', corp, kind: a.kind, value: a.value }, `별칭 ‘${a.value}’ 을 지웠습니다.`)}>지우기</button> : null}</td></tr>)}
-                {(corpRow?.nameRules || []).map((r) => <tr key={`n${r.match}${r.value}`}><td>이름 {r.match === 'prefix' ? '접두' : r.match === 'suffix' ? '접미' : '포함'}{r.order ? <span className="badge gray" style={{ marginLeft: 4 }} title="이름 규칙 적용 순서 — 접두·접미가 포함보다 먼저, 같은 종류면 긴 값 먼저, 그다음 등록 순">{r.order}번째</span> : null}</td><td style={{ fontFamily: 'var(--mono)' }}>{r.value}</td><td><b>{nameOf(r.serviceId)}</b></td><td>{writable ? <button type="button" className="logout-btn" style={btn} disabled={busy} onClick={() => op({ op: 'namerule.remove', corp, match: r.match, value: r.value }, '이름 규칙을 지웠습니다.')}>지우기</button> : null}</td></tr>)}
+                {(corpRow?.folderRules || []).map((r) => <tr key={`f${r.prefix}`}><td>폴더 접두</td><td style={{ fontFamily: 'var(--mono)' }}>{r.prefix}</td>{ruleCells(`f${r.prefix}`, r.serviceId, { op: 'rule.remove', corp, prefix: r.prefix }, `폴더 규칙 ‘${r.prefix}’`)}</tr>)}
+                {(corpRow?.aliases || []).map((a) => <tr key={`a${a.kind}${a.value}`}><td>{a.kind === 'scan' ? '스캔 라벨 별칭' : '태그 별칭'}</td><td style={{ fontFamily: 'var(--mono)' }}>{a.value}</td>{ruleCells(`a${a.kind}${a.value}`, a.serviceId, { op: 'alias.remove', corp, kind: a.kind, value: a.value }, `별칭 ‘${a.value}’`)}</tr>)}
+                {(corpRow?.nameRules || []).map((r) => <tr key={`n${r.match}${r.value}`}><td>이름 {r.match === 'prefix' ? '접두' : r.match === 'suffix' ? '접미' : '포함'}{r.order ? <span className="badge gray" style={{ marginLeft: 4 }} title="이름 규칙 적용 순서 — 접두·접미가 포함보다 먼저, 같은 종류면 긴 값 먼저, 그다음 등록 순">{r.order}번째</span> : null}</td><td style={{ fontFamily: 'var(--mono)' }}>{r.value}</td>{ruleCells(`n${r.match}${r.value}`, r.serviceId, { op: 'namerule.remove', corp, match: r.match, value: r.value }, `이름 규칙 ‘${r.value}’`)}</tr>)}
               </tbody>
             </STable>
             {writable ? (
               <div style={{ padding: '10px 14px', display: 'flex', flexDirection: 'column', gap: 8 }}>
-                <div className="flex wrap gap" style={{ alignItems: 'center' }}>
-                  <span className="muted" style={{ fontSize: 12 }}>폴더 규칙</span>
-                  <input className="input" value={f.prefix} onChange={(e) => setF({ ...f, prefix: e.target.value })} placeholder="/ERP" style={{ maxWidth: 180 }} />
-                  <Select className="select" value={f.svc} onChange={(e) => setF({ ...f, svc: e.target.value })} style={{ maxWidth: 200 }} aria-label="서비스"><option value="">서비스 선택…</option>{svcs.map((s) => <option key={s.id} value={s.id}>{svcLabel(s)}</option>)}</Select>
-                  <button type="button" className="login-btn" style={btn} disabled={busy || !f.prefix || !f.svc} onClick={() => op({ op: 'rule.add', corp, prefix: f.prefix, serviceId: f.svc }, `폴더 규칙 ‘${f.prefix}’ 을 만들었습니다.`)}>추가</button>
-                </div>
-                <div className="flex wrap gap" style={{ alignItems: 'center' }}>
-                  <span className="muted" style={{ fontSize: 12 }}>이름 규칙</span>
-                  <Select className="select" sort={false} value={f.match} onChange={(e) => setF({ ...f, match: e.target.value })} style={{ maxWidth: 110 }} aria-label="방식"><option value="prefix">접두</option><option value="suffix">접미</option><option value="contains">포함</option></Select>
-                  <input className="input" value={f.nv} onChange={(e) => setF({ ...f, nv: e.target.value })} placeholder="erp-" style={{ maxWidth: 140 }} />
-                  <Select className="select" value={f.nsvc} onChange={(e) => setF({ ...f, nsvc: e.target.value })} style={{ maxWidth: 200 }} aria-label="서비스"><option value="">서비스 선택…</option>{svcs.map((s) => <option key={s.id} value={s.id}>{svcLabel(s)}</option>)}</Select>
-                  <button type="button" className="login-btn" style={btn} disabled={busy || !f.nv || !f.nsvc} onClick={() => op({ op: 'namerule.add', corp, match: f.match, value: f.nv, serviceId: f.nsvc }, '이름 규칙을 만들었습니다.')}>추가</button>
-                </div>
+                {!adding ? (
+                  <div className="flex wrap gap">
+                    <button type="button" className="logout-btn" style={btn} disabled={!svcs.length} title={svcs.length ? undefined : '먼저 이 법인에 서비스를 만드십시오'} onClick={() => setAdding('folder')}>＋ 폴더 규칙</button>
+                    <button type="button" className="logout-btn" style={btn} disabled={!svcs.length} title={svcs.length ? undefined : '먼저 이 법인에 서비스를 만드십시오'} onClick={() => setAdding('name')}>＋ 이름 규칙</button>
+                  </div>
+                ) : null}
+                {adding === 'folder' ? (
+                  <div className="flex wrap gap" style={{ alignItems: 'center' }}>
+                    <span className="muted" style={{ fontSize: 12 }}>폴더 규칙</span>
+                    <input className="input" autoFocus value={f.prefix} onChange={(e) => setF({ ...f, prefix: e.target.value })} placeholder="/ERP" style={{ maxWidth: 180 }} aria-label="vCenter 폴더 접두" />
+                    <Select className="select" value={f.svc} onChange={(e) => setF({ ...f, svc: e.target.value })} style={{ maxWidth: 200 }} aria-label="서비스"><option value="">서비스 선택…</option>{svcs.map((s) => <option key={s.id} value={s.id}>{svcLabel(s)}</option>)}</Select>
+                    <button type="button" className="login-btn" style={btn} disabled={busy || !f.prefix || !f.svc} onClick={async () => { const r = await op({ op: 'rule.add', corp, prefix: f.prefix, serviceId: f.svc }, `폴더 규칙 ‘${f.prefix}’ 을 만들었습니다.`); if (r) closeAdd(); }}>추가</button>
+                    <button type="button" className="logout-btn" style={btn} onClick={closeAdd}>취소</button>
+                  </div>
+                ) : null}
+                {adding === 'name' ? (
+                  <div className="flex wrap gap" style={{ alignItems: 'center' }}>
+                    <span className="muted" style={{ fontSize: 12 }}>이름 규칙</span>
+                    <Select className="select" sort={false} value={f.match} onChange={(e) => setF({ ...f, match: e.target.value })} style={{ maxWidth: 110 }} aria-label="방식"><option value="prefix">접두</option><option value="suffix">접미</option><option value="contains">포함</option></Select>
+                    <input className="input" autoFocus value={f.nv} onChange={(e) => setF({ ...f, nv: e.target.value })} placeholder="erp-" style={{ maxWidth: 140 }} aria-label="이름 규칙 값" />
+                    <Select className="select" value={f.nsvc} onChange={(e) => setF({ ...f, nsvc: e.target.value })} style={{ maxWidth: 200 }} aria-label="서비스"><option value="">서비스 선택…</option>{svcs.map((s) => <option key={s.id} value={s.id}>{svcLabel(s)}</option>)}</Select>
+                    <button type="button" className="login-btn" style={btn} disabled={busy || !f.nv || !f.nsvc} onClick={async () => { const r = await op({ op: 'namerule.add', corp, match: f.match, value: f.nv, serviceId: f.nsvc }, '이름 규칙을 만들었습니다.'); if (r) closeAdd(); }}>추가</button>
+                    <button type="button" className="logout-btn" style={btn} onClick={closeAdd}>취소</button>
+                  </div>
+                ) : null}
               </div>
             ) : <div className="muted" style={{ padding: '8px 14px', fontSize: 12 }}>조회 전용 법인입니다.</div>}
           </>

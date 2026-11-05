@@ -77,7 +77,7 @@ function finishStat(st, hostByKey) {
  * @param {{members:object[], map:object, pins:object, hostByKey:Map, allowed:Set|null, unreadCorps:Set, bmBlocked:boolean,
  *          corpNames:Map, scanEntries?:Map, adminView?:boolean}} input
  */
-export function buildInventory({ members = [], map, pins = {}, hostByKey = new Map(), allowed = null, unreadCorps = new Set(), bmBlocked = false, uuidUnreadCorps = new Set(), corpNames = new Map(), scanEntries = new Map(), adminView = true, knownCorps = null } = {}) {
+export function buildInventory({ members = [], map, pins = {}, hostByKey = new Map(), allowed = null, unreadCorps = new Set(), bmBlocked = false, uuidUnreadCorps = new Set(), corpHold = new Map(), snapInitial = false, corpNames = new Map(), scanEntries = new Map(), adminView = true, knownCorps = null } = {}) {
   const idx = buildIndex(map);
   const ctx = { tagCategory: map?.settings?.tagCategory || '' };
   const inScope = (vc) => (allowed ? !!vc && allowed.has(vc) : true);
@@ -146,7 +146,7 @@ export function buildInventory({ members = [], map, pins = {}, hostByKey = new M
   const unlinked = services.filter((s) => !s.globalId || !globalById.has(s.globalId))
     .map((s) => ({ id: s.id, corp: s.corp, name: s.name, suggest: globalNames.get(lc(s.name)) || null, n: s.stat.n.total }));
 
-  return { resolved, corps, services, noCorp, global: { globals, cells, unlinked }, queues: buildQueues({ members, resolved, pins, allowed, unreadCorps, bmBlocked, uuidUnreadCorps, idx, scanEntries, adminView, knownCorps }) };
+  return { resolved, corps, services, noCorp, global: { globals, cells, unlinked }, queues: buildQueues({ members, resolved, pins, allowed, unreadCorps, bmBlocked, uuidUnreadCorps, corpHold, snapInitial, idx, scanEntries, adminView, knownCorps }) };
 }
 
 /**
@@ -154,16 +154,29 @@ export function buildInventory({ members = [], map, pins = {}, hostByKey = new M
  * ⚠ 유령 판정은 **읽지 못한 출처를 막는다**(4차 반증 5): 그 법인 vCenter 를 지금 못 읽거나(unreadCorps) 베어메탈 출처를 못 읽으면
  *   (bmBlocked — 등록부 손상·엣지 만료 등) 그 고정은 유령이 아니라 '판정 보류' 다. v2.783 P-B3 와 같은 사고 유형.
  */
-export function buildQueues({ members = [], resolved, pins = {}, allowed = null, unreadCorps = new Set(), bmBlocked = false, uuidUnreadCorps = new Set(), idx, scanEntries = new Map(), adminView = true, knownCorps = null }) {
+export function buildQueues({ members = [], resolved, pins = {}, allowed = null, unreadCorps = new Set(), bmBlocked = false, uuidUnreadCorps = new Set(), corpHold = new Map(), snapInitial = false, idx, scanEntries = new Map(), adminView = true, knownCorps = null }) {
   const inScope = (vc) => (allowed ? !!vc && allowed.has(vc) : true);
   const groups = new Map();
   const unmapped = new Map();
   const drift = []; const mismatch = []; const redundant = []; const tagAmbiguous = []; const ruleOverlap = []; const aliasPins = [];
   const NAME_CAP = 40;
+  // 옛 키 → 그 옛 키를 가진 구성원들의 법인(범위와 무관한 전체 집합 — 고정이 범위 밖 법인 구성원의 것이어도 거짓 불일치가 되지 않게)
+  const aliasCorps = new Map();
+  for (const m of members) for (const a of m.aliasKeys || []) { if (!m.corp) continue; if (!aliasCorps.has(a)) aliasCorps.set(a, new Set()); aliasCorps.get(a).add(m.corp); }
   for (const m of members) {
     if (!inScope(m.corp)) continue;
     const r = resolved.get(m.key);
     if (r.pinMismatch) mismatch.push({ key: m.key, name: m.name, kind: m.kind, corp: m.corp, pinCorp: r.pinMismatch.corp, serviceId: r.pinMismatch.serviceId });
+    // 다른 법인에 남은 옛 키(별칭) 고정(6차 4 — 예전에는 유령·불일치·옛 키 큐 어디에도 없었다). 법인 귀속을 모르는 구성원은 판단하지 않는다(F1).
+    // ⚠ 고정이 있는 법인에 **같은 옛 키를 가진 다른 구성원**이 있으면 그 구성원이 승계한 고정이다 — 불일치가 아니다(남긴 것 ① 점검: 이름이 같은 ESXi 호스트가
+    //   두 법인에서 베어메탈이면 태그를 읽기 전 옛 키가 같다. 예전에는 다른 법인 쪽에 거짓 불일치 행이 뜨고 그 '고정 지우기' 가 원래 서버의 고정을 지웠다).
+    if (m.corp && Array.isArray(m.aliasKeys)) {
+      for (const a of m.aliasKeys) {
+        const pa = pins[a];
+        if (!pa || pa.corp === m.corp || aliasCorps.get(a)?.has(pa.corp)) continue;
+        mismatch.push({ key: m.key, name: m.name, kind: m.kind, corp: m.corp, pinCorp: pa.corp, serviceId: pa.serviceId, aliasKey: a });
+      }
+    }
     if (r.drift) drift.push({ key: m.key, name: m.name, kind: m.kind, corp: m.corp, pin: { serviceId: r.serviceId, by: pins[r.pinKey || m.key]?.by || '', at: pins[r.pinKey || m.key]?.at || 0 }, auto: { serviceId: r.auto.serviceId, src: r.auto.src, via: r.auto.via || '' },
       ...(r.driftChanged ? { changed: r.driftChanged.legacy ? { legacy: true } : { reviewedAuto: r.driftChanged.reviewedAuto } } : {}) });
     // 불필요한 고정 — 단 '모호한 자동 판정을 사람이 확인한 고정'(태그 모호·규칙 겹침)은 불필요하지 않다: 지우면 다시 모호로 돌아간다(3차 반증 4 — 순환)
@@ -171,7 +184,16 @@ export function buildQueues({ members = [], resolved, pins = {}, allowed = null,
     // 태그가 둘 이상의 서비스에 걸림(5차 M5·R14) — 첫 값으로 정했지만 사람이 봐야 한다. 고정한 구성원은 사람이 이미 정했다.
     if (r.src === 'tag' && r.tagAmbiguous) tagAmbiguous.push({ key: m.key, name: m.name, kind: m.kind, corp: m.corp, serviceId: r.serviceId, tags: r.tagValues || [] });
     // 낮은 등급 키(별칭)로 저장된 고정 — 판정은 이미 쓰고 있다. '새 키로 옮기기' 대상(5차 R15)
-    if (r.src === 'pin' && r.pinKey) aliasPins.push({ key: m.key, name: m.name, kind: m.kind, corp: m.corp, aliasKey: r.pinKey, serviceId: r.serviceId });
+    if (r.src === 'pin' && r.pinKey) aliasPins.push({ key: m.key, name: m.name, kind: m.kind, corp: m.corp, aliasKey: r.pinKey, serviceId: r.serviceId, state: 'alias' });
+    // 새 키 고정과 옛 키(별칭) 고정이 **함께** 있다(6차 3·9) — 판정은 새 키를 쓰고 옛 키는 어디에도 안 보였다. 서비스가 같으면 '중복'(지워도 그만),
+    // 다르면 '충돌'(REST 폴백 중 단 vm: 고정이 SOAP 복구 뒤 옛 iu: 고정에 조용히 지던 경우 등 — 사람이 고른다).
+    else if (pins[m.key] && pins[m.key].corp === m.corp && Array.isArray(m.aliasKeys)) {
+      for (const a of m.aliasKeys) {
+        const pa = pins[a];
+        if (!pa || pa.corp !== m.corp) continue;
+        aliasPins.push({ key: m.key, name: m.name, kind: m.kind, corp: m.corp, aliasKey: a, serviceId: pins[m.key].serviceId, aliasServiceId: pa.serviceId, state: pa.serviceId === pins[m.key].serviceId ? 'dup' : 'conflict' });
+      }
+    }
     // 이름 규칙 둘 이상(다른 서비스)이 걸림 — 결과가 적용 순서에 달렸다(3차 반증 1: 순서를 바꾼 업그레이드에서 조용히 옮겨 간 구성원).
     if (r.src === 'rule' && r.ruleOverlap) ruleOverlap.push({ key: m.key, name: m.name, kind: m.kind, corp: m.corp, serviceId: r.serviceId, via: r.via, others: r.ruleOverlap });
     if (r.serviceId) continue;
@@ -209,7 +231,12 @@ export function buildQueues({ members = [], resolved, pins = {}, allowed = null,
 
   // 유령 키 — 범위 안 법인의 고정 중 지금 구성원 전체 집합에 없는 키.
   const live = new Set(members.map((m) => m.key));
-  for (const m of members) for (const a of m.aliasKeys || []) live.add(a);   // 별칭 고정은 유령이 아니다(5차 R15)
+  // 별칭 고정은 유령이 아니다(5차 R15). 다른 법인의 별칭 고정은 위에서 '법인 불일치' 로 드러낸다(6차 4) — 유령으로 만들면 안 된다:
+  // ⚠ 6차 반증 F1(재현): 법인 귀속이 잠시 빈 베어메탈(귀속 오류·태그가 두 법인에 걸림)의 옛 고정이 유령이 되어 정리 버튼으로 지워졌다.
+  //   직접 키 고정은 같은 상황에서 불일치로 남는다 — 별칭도 같은 규칙(지우지 않고 보인다).
+  for (const m of members) for (const a of m.aliasKeys || []) live.add(a);
+  // VM 이 한 대도 없는 법인 — VM 고정(iu:·vm:)이 있으면 '그 VM 이 사라졌다' 가 아니라 '아직 못 받았다' 일 수 있다(6차 1: 기동 직후 첫 수집 전 pending 법인)
+  const vmCorps = new Set(); for (const m of members) if (m.kind === 'vm' && m.corp) vmCorps.add(m.corp);
   const ghosts = []; const held = []; const orphaned = [];
   for (const [k, p] of Object.entries(pins || {})) {
     if (live.has(k) || !inScope(p.corp)) continue;
@@ -219,8 +246,14 @@ export function buildQueues({ members = [], resolved, pins = {}, allowed = null,
     const isBm = k.startsWith('st:') || k.startsWith('fl:');
     // VM 식별 키(instanceUuid)를 못 읽는 법인(REST 폴백 수집 등)의 iu: 고정 — 그 VM 이 정말 없는지 모른다(4차 반증 5).
     // ⚠ 4차 반증 2: 'st: 태그를 함대가 아직 안다' 로 보류하던 것은 되돌렸다 — 함대 키 집합에 ESXi 호스트 태그가 들어 있어 가상화 호스트가 된 서버의 고정을 영원히 붙잡았다.
+    const isVm = k.startsWith('iu:') || k.startsWith('vm:');
     const uuidUnread = k.startsWith('iu:') && uuidUnreadCorps instanceof Set && uuidUnreadCorps.has(p.corp);
-    const why = unreadCorps.has(p.corp) ? 'corp-unread' : (isBm && bmBlocked ? 'bm-source-unread' : uuidUnread ? 'uuid-unread' : '');
+    // ⚠ 6차 1(높음 — 재현): unreadVcenters 는 pending(첫 수집 전)을 일부러 뺀다(다른 합계를 영원히 막지 않으려고). 그래서 기동 직후·꺼진 vCenter 의
+    //   VM 고정이 전부 '유령 — 정리 대상' 이 됐고 정리 버튼으로 지워졌다. 수집 전 골격 스냅샷(initial)·pending·disabled 법인, 그리고
+    //   **VM 이 한 대도 없는데 VM 고정이 있는** 법인은 판정 보류다(일괄 정리하지 않는다 — 보류 행의 '고정 지우기'(pins.clear)로 한 건씩 지울 수 있다).
+    const why = snapInitial ? 'snapshot-initial'
+      : unreadCorps.has(p.corp) ? 'corp-unread'
+        : corpHold.get(p.corp) || (isVm && !vmCorps.has(p.corp) ? 'corp-no-vms' : isBm && bmBlocked ? 'bm-source-unread' : uuidUnread ? 'uuid-unread' : '');
     (why ? held : ghosts).push({ key: k, serviceId: p.serviceId, serviceName: svcName, corp: p.corp, by: p.by, at: p.at, ...(why ? { held: why } : {}) });
   }
   return {

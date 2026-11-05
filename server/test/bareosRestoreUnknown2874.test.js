@@ -184,3 +184,33 @@ test('③ 붙잡기는 시한이 있다(웹과 같은 값) · jobid 가 있으�
   const web = fs.readFileSync(new URL('../../web/src/views/tools/bareosRestoreText.js', import.meta.url), 'utf8');
   assert.match(web, /export const RESTORE_UNKNOWN_HOLD_MS = 6 \* 3600_000;/);
 });
+
+test('④ v2.906 단건 새 VM 복원도 이름 예약을 본다 — 진행 중 · 방금 보낸 같은 이름은 409(OTP · Director 전) · 보내는 중 이름도', async () => {
+  // 별건 정리(재해 복구 버그 점검 '남김: 단건 복원 라우트는 이름 예약을 보지 않는다') — 예전에는 인벤토리 동명 VM 만 봐서 202 로 보냈다
+  store.snapshot = { ...store.snapshot, vms: [...store.snapshot.vms, { id: 'vc-a:vm-7', vcenterId: 'vc-a', name: 'api-07', powerState: 'POWERED_OFF', snapshotCount: 0, vcDcPath: 'DC-A', folderPath: '/api', storageGB: 40 }] };
+  let r = await call('admin', 'POST', '/jobs', { vcenterId: 'vc-a', vmId: 'vc-a:vm-7' });
+  assert.equal(r.s, 201, r.t);
+  ID.api = r.j.job.id;
+  const body = (name, otp) => ({ jobid: H('api', 130), mode: 'newVm', newVm: { name }, otp });
+  const before = D.cmds.length;
+  r = await call('adm2', 'POST', `/jobs/${ID.api}/restore`, body('WEB-01-R', 'x'));   // ① 의 결과 모름 묶음 복원이 쓴 이름(대소문자 무시)
+  assert.equal(r.s, 409, r.t);
+  assert.equal(r.j.code, 'name-reserved');
+  assert.match(r.j.reason, /최근 복원이 ‘WEB-01-R’/);
+  assert.equal(D.cmds.length, before, 'Director 에 닿지 않는다(OTP 도 보지 않는다 — 틀린 OTP 인데 403 이 아니다)');
+  // 보내는 중인 이름(다른 요청이 잡은 것)도 막는다 — OTP 앞
+  const locks = await import('../src/bareos/jobLocks.js');
+  const k = locks.restoreNameKey('vc-a', 'api-07-r');
+  assert.equal(locks.tryHoldNames([k]), true);
+  r = await call('adm2', 'POST', `/jobs/${ID.api}/restore`, body('api-07-r', 'x'));
+  assert.equal(r.s, 409, r.t);
+  assert.equal(r.j.code, 'name-held');
+  locks.releaseNames([k]);
+  // 겹치지 않는 이름은 그대로 보낸다 · 끝나면 잡은 이름을 놓는다
+  r = await call('adm2', 'POST', `/jobs/${ID.api}/restore`, body('api-07-r', otpNow()));
+  assert.equal(r.s, 202, r.t);
+  assert.equal(locks.heldRestoreNames().has(k), false, '원장 기록 뒤 놓는다');
+  // 방금 보낸 이름은 이제 예약 — 같은 이름 두 번째는 409
+  r = await call('adm2', 'POST', `/jobs/${ID.web}/restore`, { jobid: H('web', 130), mode: 'newVm', newVm: { name: 'API-07-R' }, otp: 'x' });
+  assert.equal(r.s === 409 && (r.j.code === 'name-reserved' || r.j.code === 'unknown-held'), true, r.t);
+});

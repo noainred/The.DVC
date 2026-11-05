@@ -1,6 +1,6 @@
 # 설정·데이터 파일 레퍼런스 (자동 생성)
 
-포탈이 `CONFIG_DIR`(설치본 기본 `/etc/vmware-portal`) 아래에 만드는 파일 **270개**의 목록이다.
+포탈이 `CONFIG_DIR`(설치본 기본 `/etc/vmware-portal`) 아래에 만드는 파일 **273개**의 목록이다.
 시계열 DB 는 `db-location.json` 이 가리키는 `dbDir` 로 옮길 수 있다.
 
 - 생성: `node scripts/config-doc.mjs` (마지막 갱신 2026-11-05)
@@ -149,17 +149,20 @@
 | `isidu-push.json` | 설정 | 아이실론 디렉터리 사용량 엣지 push 커서(상태, v2.736) | ✅ |  | ✅ | isidu/push.js |
 | `isidu-settings.json` | 설정 | 아이실론 디렉터리 사용량 조사 대상(v2.736 — 아이실론·경로·주기·실행 노드·보존일. 비밀 없음) | ✅ | ✅ | ✅ | isidu/settings.js |
 | `isidu.db` | DB | 아이실론 디렉터리 사용량 이력 DB(v2.736). 파일: `<dbDir>/isidu.db` |  |  | ✅ | isidu/db.js |
+| `issue-alert-auto.json` | 설정 | 다른 알람 · 백업 실패 → 이슈 자동 등록 설정(v2.908 — 종류 켬/끔 · 우선순위 · 지연 분 · 하루 상한 · 라벨 · 해소 처리. 비밀 없음) | ✅ | ✅ | ✅ | issues/alertIssues.js |
 | `issue-autocreate.json` | 설정 | 파트 장애 → 이슈 자동 등록 설정(v2.880 — 켜기 · 부품 종류 × 장비군 칸(끔/fault/fault+warn) · 우선순위 · 라벨 · 제목 틀 · 폭주 묶음 · 하루 상한 · 해소 처리 · 법인 예외. 비밀 없음) | ✅ | ✅ | ✅ | issues/autoCreate.js |
 | `issue-filter-mail-state.json` | 설정 | 저장 필터 주간 메일 기록(상태, v2.883) |  |  |  | (외부/설치 스크립트) |
 | `issue-filters.json` | 설정 | 이슈 저장 필터(v2.882 — 사람마다 검색식 50개 · 공유 여부. 비밀 없음) | ✅ | ✅ | ✅ | issues/filters.js |
+| `issue-inbox.json` | 설정 | 포탈 알림함(상태, v2.908) |  |  |  | (외부/설치 스크립트) |
 | `issue-notify-state.json` | 설정 | 이슈 기한 알림 기록(상태, v2.871) |  |  |  | (외부/설치 스크립트) |
 | `issue-settings.json` | 설정 | 이슈 트래커 설정(v2.871 — 자동 할당 규칙 · 알림 켜기·이벤트 · 사람별 메일 주소. 비밀 없음) | ✅ | ✅ | ✅ | issues/settings.js |
 | `issue-sprints.json` | 설정 | 이슈 스프린트(v2.882 — 이름 · 기간(포탈 날짜) · 목표 · 상태 예정/진행 중/끝남. 비밀 없음) | ✅ | ✅ | ✅ | issues/sprints.js |
+| `issue-templates.json` | 설정 | 이슈 관리자 템플릿(v2.907 — 이름 · 유형 · 우선순위 · 라벨 · 컴포넌트 · 설명, 30개. 비밀 없음) | ✅ | ✅ | ✅ | issues/templates.js |
 | `issues.json` | 설정 | 이슈 트래커 이슈·댓글·이력(v2.864 — 로그인 사용자가 쓰는 사용자 데이터. 비밀 없음) | ✅ | ✅ | ✅ | issues/store.js |
 | `link-check.db` | DB | 통신 점검 로그 **3단 DB**(v2.552). 파일: `<dbDir>/link-check.db` |  |  | ✅ | linkcheck/db.js |
 | `linkcheck-settings.json` | 설정 | 통신 점검 설정(v2.552). 파일: `CONFIG_DIR/linkcheck-settings.json` | ✅ | ✅ | ✅ | linkcheck/settings.js |
 | `llm.json` | 설정 | Local LLM (Ollama) settings for natural-language search. Stored in | ✅ | ✅ | ✅ | llm/config.js |
-| `log-analysis-stats.json` | 설정 | 이 포탈 로그의 **누적** 집계(v2.583). 설정 › Log › 로그 분석의 기본 원천. | ✅ |  |  | loganalysis/live.js |
+| `log-analysis-stats.json` | 설정 | 이 포탈 로그의 **누적** 집계(v2.583). 설정 › 로그 › 로그 분석의 기본 원천. | ✅ |  |  | loganalysis/live.js |
 | `login-fails.ndjson` | 로그(NDJSON) | 로그인 실패 저장소(분석용) — 포탈 자체 실패 + 게스트 OS 조사 결과를 적재한다. | ✅ | ✅ | ✅ | security/loginStore.js |
 | `login-monitor.json` | 설정 | 로그인 실패 주기 모니터 — 일정 주기로 로그인 실패를 분석하고, 브루트포스(임계 이상 반복) 의심이 | ✅ |  | ✅ | security/loginMonitor.js |
 | `login-policy-users.txt` | 텍스트 | 세션 보안 설정 — 유휴 자동 로그아웃(분) 등. CONFIG_DIR/security-session.json. | ✅ | ✅ | ✅ | security/securitySettings.js |
@@ -329,6 +332,9 @@
 - **`attachments.json`** — 파일 본체는 CONFIG_DIR/attachments/<id>(서버가 만든 이름 · 0600). **포탈 백업에는 목록만 들어가고 본체는 들어가지 않는다**(사용자 결정) — 관리자가 이슈 › 설정 › 첨부 파일 › 전체 내려받기(tar.gz)로 따로 보관. 목록을 되살렸는데 본체가 없으면 화면이 ‘파일 없음’ 으로 밝힌다. 변경 감시 지문에서는 빠진다
 - **`attach-settings.json`** — 손상이면 보존하고 기본 상한으로 읽는다(관리 화면이 알린다). 넘기게 되는 올리기는 409 attach-full
 - **`wiki-templates.json`** — 내장 템플릿 뒤에 붙어 모든 스페이스의 새 문서 화면에 보인다. 손상이면 보존하고 빈 목록으로 읽는다
+- **`issue-alert-auto.json`** — 기본 꺼짐. 알람이 지연 분 넘게 이어지면 이슈를 만들고 해소되면 댓글(설정에 따라 검토). 손상이면 보존하고 기본값(꺼짐)으로 읽는다
+- **`issue-inbox.json`** — 상태 파일(백업 감시 제외). 사람마다 최근 100줄 · 30일 — 언급 · 할당 · 상태 · 기한 · SLA · 멈춤 · 위키 줄. 지우면 알림함이 비고 그 밖의 영향은 없다
+- **`issue-templates.json`** — 내장 3개(장애 보고 · 작업 · 요청) 뒤에 붙어 새 이슈 화면의 템플릿 고르기에 보인다. 손상이면 보존하고 빈 목록으로 읽는다
 - **`issue-autocreate.json`** — 손상이면 보존하고 기본값(꺼짐)으로 읽는다 — 이슈 › 설정 › 자동 등록 화면이 그 사실을 말한다. 지우면 자동 등록이 꺼진다(이미 만든 이슈는 그대로)
 - **`issue-settings.json`** — 손상이면 보존하고 기본값(자동 할당·알림 꺼짐)으로 읽는다 — 이슈 › 설정 화면이 그 사실을 말한다. 지우면 자동 할당·알림이 꺼지고 메일 주소 표가 비어 이슈 메일이 나가지 않는다
 - **`issue-filter-mail-state.json`** — 상태 파일(백업 감시 제외). 필터 · 받는 사람마다 마지막으로 주간 메일을 보낸 포탈 날짜(3주 지난 것은 지운다). 지우면 그 주 메일이 한 번 더 나갈 수 있다

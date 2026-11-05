@@ -116,7 +116,7 @@ export default function BareosLiveTab({ hashSub = 'live' } = {}) {
       </div>
       {error && <div className="banner warn">새로 읽지 못했습니다({error?.body?.reason || error.message}) — 아래는 마지막으로 읽은 값입니다.</div>}
       {data.registryLoadError && <div className="banner bad">백업 대상 원장을 읽지 못했습니다(손상본 보존) — 진행 현황이 비어 보일 수 있습니다.</div>}
-      {!corps.length && <div className="card" style={{ padding: 14, fontSize: 13 }}>볼 수 있는 법인이 없습니다 — 설정 › vCenter 관리 › Bareos 백업 서버에서 법인별 Director 를 묶으세요(범위 계정은 자기 법인만 보입니다).</div>}
+      {!corps.length && <div className="card" style={{ padding: 14, fontSize: 13 }}>볼 수 있는 법인이 없습니다 — 설정 › 백업 › Bareos 백업 서버에서 법인별 Director 를 묶으세요(범위 계정은 자기 법인만 보입니다).</div>}
 
       {corps.length > 0 && view === 'all' && <AllView data={data} corps={corps} counts={counts} filter={filter} setFilter={setFilter} q={q} setQ={setQ} onOpen={open} />}
       {corps.length > 0 && view === 'corp' && corp && <CorpView corps={corps} c={corp} onPick={setCorp} limits={data.relayLimits} waitMs={data.cancelWaitMs} onChanged={reload} />}

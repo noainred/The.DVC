@@ -294,6 +294,13 @@ export function renderBareosMail(rows, vcName = (id) => id, dirName = () => '') 
   return { subject, html, text };
 }
 
+/**
+ * v2.908 백업 실패 구독(이슈 자동 등록 — issues/alertIssues.js). 새로 판정한 실패 행(백업 · 복원)을 준다 — 메일 발송 여부 · 커서와 무관하게
+ * 판정한 그 틱에 한 번(메일이 실패해 다음 틱에 같은 행이 다시 오면 구독자가 jobid 로 거른다). 이 모듈이 이슈를 모르게 한다.
+ */
+const _failListeners = new Set();
+export function onBareosFailures(fn) { if (typeof fn === 'function') _failListeners.add(fn); return () => _failListeners.delete(fn); }
+
 let _busy = false;
 let _timer = null;
 let _last = null;   // { at, sent, rows, reason }
@@ -305,6 +312,7 @@ export async function tick(now = Date.now()) {
     const st = state();
     const jobs = listJobs();   // v2.847 C2-4: 원장 깊은 복사는 틱마다 한 번(예전 두 번 — 두 번째는 id 만 썼다)
     const { rows, marks } = collectBareosFailures(jobs, st);
+    if (rows.length && _failListeners.size) for (const fn of _failListeners) { try { fn(rows.map((r) => ({ ...r })), now); } catch { /* 구독자 오류는 메일과 무관 */ } }
     const advance = () => {
       Object.assign(st.runs, marks.runs); Object.assign(st.restores, marks.restores); st.epochs = Object.assign(st.epochs || {}, marks.epochs);
       st.seen = st.seen || {};

@@ -29,7 +29,29 @@ export function defaultIssueSettings() {
     autoAssign: { enabled: false, components: [], pool: [] },
     notify: { enabled: false, mail: true, chat: false, events: { assigned: true, status: true, progress: true, comment: true, due: true, wiki: true, sla: true }, people: [] },
     sla: defaultSla(), // v2.888 C-3 — 기본 꺼짐(issues/sla.js)
+    automation: defaultAutomation(), // v2.908 기능 6 — 고정 규칙 4개, 기본 전부 꺼짐(issues/automation.js)
+    inbox: { enabled: true }, // v2.908 기능 9 — 포탈 알림함(밖으로 나가는 것이 없어 기본 켬 — issues/inbox.js)
   };
+}
+/**
+ * v2.908 자동화 규칙(시안 ⑪ '자동화 규칙' — 고정 목록 · 자유 스크립트 없음). 실행 기록은 이슈 이력에 '자동화: …' 메모로 남는다.
+ *  · wikiCheck — 이슈가 완료되면 그 이슈 키(ISS-n)를 적은 위키 체크리스트 항목을 완료로(판을 만들지 않는 체크 — 보기에서 체크와 같은 경로).
+ *  · stale — 진행 중인데 staleDays 일 동안 갱신이 없으면 담당자에게 알림(같은 멈춤에 staleDays 일마다 한 번) · 보드 · 목록에 '멈춤' 배지.
+ *  · p0Chat — 유형 장애 · 우선순위 P0 이슈가 만들어지면 팀 채팅에 바로(1분 묶음을 기다리지 않는다). 채널은 설정 › 알림.
+ *  · childrenReview — 하위 작업(에픽이면 그 이슈)이 모두 완료되면 상위 이슈를 '검토' 로(완료는 사람이).
+ */
+export const STALE_DAYS = Object.freeze([1, 90]);
+export function defaultAutomation() { return { wikiCheck: false, stale: false, staleDays: 7, p0Chat: false, childrenReview: false }; }
+export function normalizeAutomation(raw, { strict = true } = {}) {
+  const d = defaultAutomation();
+  const r = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
+  let staleDays = d.staleDays;
+  if (r.staleDays != null && r.staleDays !== '') {
+    const n = typeof r.staleDays === 'number' ? r.staleDays : (typeof r.staleDays === 'string' && /^\d{1,3}$/.test(r.staleDays.trim()) ? Number(r.staleDays) : NaN);
+    if (Number.isInteger(n) && n >= STALE_DAYS[0] && n <= STALE_DAYS[1]) staleDays = n;
+    else if (strict) throw fieldError('automation.staleDays', `${STALE_DAYS[0]}~${STALE_DAYS[1]} 일 정수여야 합니다`);
+  }
+  return { wikiCheck: r.wikiCheck === true, stale: r.stale === true, staleDays, p0Chat: r.p0Chat === true, childrenReview: r.childrenReview === true };
 }
 
 let cache = null;
@@ -99,6 +121,8 @@ export function normalizeIssueSettings(raw, { strict = true } = {}) {
       autoAssign: { enabled: a.enabled === true, components, pool },
       notify: { enabled: n.enabled === true, mail: n.mail !== false, chat: n.chat === true, events, people },
       sla: tryOr(() => normalizeSla(r.sla, { strict })) || normalizeSla(r.sla, { strict: false }),
+      automation: tryOr(() => normalizeAutomation(r.automation, { strict })) || normalizeAutomation(r.automation, { strict: false }),
+      inbox: { enabled: !(r.inbox && typeof r.inbox === 'object' && r.inbox.enabled === false) },
     },
     dropped,
   };
@@ -130,7 +154,12 @@ export function issueSettingsLoadError() { loadIssueSettings(); return loadErr.g
 
 export function saveIssueSettings(body) {
   // v2.888: sla 칸이 없는 저장(옛 화면)은 지금 SLA 설정을 그대로 둔다 — 알림만 고쳤는데 SLA 가 기본값(꺼짐)으로 돌아가지 않게
-  const b = body && typeof body === 'object' && !Array.isArray(body) && !Object.hasOwn(body, 'sla') ? { ...body, sla: loadIssueSettings().sla } : body;
+  // v2.908: 자동화 · 알림함도 같은 규칙(옛 화면 · 부분 저장이 끄지 않게)
+  let b = body;
+  if (b && typeof b === 'object' && !Array.isArray(b)) {
+    const cur = loadIssueSettings();
+    for (const k of ['sla', 'automation', 'inbox']) if (!Object.hasOwn(b, k)) b = { ...b, [k]: cur[k] };
+  }
   const { value } = normalizeIssueSettings(b, { strict: true });
   atomicWriteFileSync(fileOf(), JSON.stringify(value, null, 1), { mode: 0o600 });
   cache = value; loadErr.clear();

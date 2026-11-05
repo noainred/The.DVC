@@ -38,6 +38,8 @@
 - (v2.895 추가) vCenter 상세 탭 12개(시안 `docs/design/vcenter-tabs` ①~⑦) — 탭 목록 · 옛 키 · 하위 칸 · 묶음은 `views/vcd/vcdTabs.js` 하나 · 도구 데이터는 그 도구 권한일 때만 · 포탈 알람은 '포탈 규칙'
 - (v2.895 추가) VM · ESXi 호스트 개체 보기(시안 ⑧~⑪) — 주소 `#/vcenters/<vc>/vm|host/<id>[/<탭>]` 는 `views/vcd/vcdRoute.js` 하나 · 트리 행 · 상세 창의 '⤢ 개체 보기' · 섹션은 EntityDetail 것을 재사용
 - (v2.898 추가) vCenter 개체 보기 2차 — '수집하지 않음' 칸을 채웠다(알람 · 작업 · 권한 목록 · Linked Mode · 업데이트 · vLCM · 스냅샷 트리 · NIC) · 카드는 `vcd/VcInfoParts.jsx` 하나 · 권한 목록은 관리자 판본만 부른다
+- (v2.901 추가) 개체 보기 3차(NIC 팀 · DS 마운트 · 리소스 풀) · useOnce 열쇠 · 관리자 전용 버튼은 `adminToolAllowed` · Bareos 그룹 기준 시계 선택
+- (v2.906 추가) 호스트 네트워크 탭 '분산 포트그룹' 카드(vDS 팀 구성 · LACP · VLAN) · 팀 구성 문구는 `vcd/vcInfo.js` 한 벌 · Bareos 행마다 취소 회차 표시
 - (v2.895 추가) 개체 보기 › 성능 튜닝(시안 ⑫⑬) — 판정은 기존 모듈(rightsize verdict · contention · vmcfg · hcfg · 가상화율 RATIO_LEVELS · 사용률 75/90 · DS 90/95)을 `vcd/tuning.js` 한 곳에서 모은다 · 새 서버 경로 없음 · 계획은 저장 없이 내보내기만
 - (원래 5663행) v2.708 — 드롭다운은 공용 `Select`·`DataList` 하나다(자동 정렬)
 - (원래 5801행) 특수 기능 화면(v2.679) — 표시 이름·설명·개발 단계는 '덮어쓰기' 이고 키는 그대로다
@@ -564,6 +566,59 @@
   ⑤ 남은 하위 작업(에픽이면 소속 이슈)이 있으면 서버가 409 `open-children` 로 묻고 화면은 확인을 받아 `closeChildren:true` 로 다시 보낸다(취소하면 아무것도 바꾸지 않는다).
      자식이 있는 이슈의 진행률 입력은 잠기고 메모만 보낸다(서버 409 `progress-auto` 와 같은 판정).
   ⑥ 스프린트 · 필터 공유 버튼은 서버 값(`canSprints` · `canShareFilters` — 전체 범위 쓰기 계정)일 때만 그린다. 필터 저장은 쓰기 역할만(viewer 상태변경 예외를 늘리지 않았다).
+- **v2.908 — 이슈 기능 추천 6~10(사용자 '모두 적용' · 시안 없이 기존 화면 틀대로 — 사용자 선택)**. 회귀 `server/test/issuesR4_2908.test.js` · `web/src/views/issues/features2908.test.js`.
+  - 자동화 규칙은 **고정 4개**(`issues/automation.js` · 설정 `automation` — 기본 전부 꺼짐). 저장소 이벤트는 동기라 **setImmediate 로 미뤄** 돈다 — 상위를 하위와 함께
+    완료(closeChildren)하는 도중 자식 완료 이벤트가 상위를 '검토' 로 되돌리지 않게(테스트가 고정). 위키 체크는 보기에서 체크와 같은 경로(판 없음 · checkLog · checkRev) ·
+    키 뒤에 숫자가 이어지면 다른 키다(ISS-1 ≠ ISS-10). 멈춤은 30분 검사(`notify.js scanStale` — 기록 `stale:<키>`)와 목록 배지(`store.js staleDaysOf`)가 **같은 기준**.
+  - 포탈 알림함(`issues/inbox.js` · `issue-inbox.json` 상태 파일)은 **받을 사람 판정을 메일과 같이**(`recipientsOf(…, { force:true })`) 쓰고 스위치만 따로다(기본 켬 —
+    밖으로 나가는 것이 없다). 줄에 법인을 적고 **읽을 때 지금 범위로 다시 거른다**. 메일이 꺼져 있어도 기한 · SLA · 멈춤 기록은 남긴다(30분마다 같은 줄이 쌓이지 않게).
+    안 읽은 수는 마운트 1회 + 새로고침(폴링 없음).
+  - 리포트(`issues/report.js`)는 **서버 집계 하나** — 화면은 다시 세지 않는다. SLA 가 꺼져 있으면 준수율 null('—' — 0% 로 적지 않는다) · 평균 해결은 완료만 · 보류 제외 · 달력 시간.
+    범위 계정은 재료(`reportSource`)를 만들 때 거른다(공용 이슈도 빠진다). CSV 는 'data.csv' 권한.
+  - SLA 업무 시간(`sla.js calendarFor · businessMs · addBusinessMin`): 오프셋은 그 날 정오에 Intl 로 읽어 캐시(서머타임 전환은 새벽) · 휴일은 날짜 번호 집합 · 법인 휴일 목록이 있으면
+    공통 휴일 **대신**. 이슈 설정 화면은 `calendar` 를 늘 같이 보낸다(빠뜨리면 저장이 기본값(24×7)으로 되돌린다). 서버는 automation · inbox · sla 가 빠진 저장을 '지금 값 유지' 로 본다.
+  - 다른 알람 자동 등록(`issues/alertIssues.js` · `issue-alert-auto.json`)은 알람 엔진 · Bareos 쪽에 **구독 훅만**(`alerts.js onAlertState` · `bareos/notify.js onBareosFailures`) — 그 모듈들은
+    이슈를 모른다. 판정 보류로 끊긴 키는 해소가 아니다(resolved 에 넣지 않는다). 인증서 만료는 알람 엔진에 판정이 없어 넣지 않았다(지어내지 않는다).
+  - **CSS 클래스 이름 겹침(Chromium 판독으로 발견 — v2.882 부터)**: 필터 화면의 격자 `.iss-filters`(240px + 나머지)가 보드 필터 줄 · 활동 머리의 같은 이름(줄 배치)을
+    파일 뒤쪽에서 덮어 그 줄들이 2열 격자로 늘어났다. 필터 화면은 `.iss-filterview` 로 바꿨다. **새 클래스를 만들기 전에 `grep -n '^\.<이름>' styles.css` 로 같은 이름이 있는지 볼 것**
+    (`features2908.test.js` 가 `.iss-filters` 한 벌을 고정). 카드 아래 줄(`.iss-card-foot`)은 줄바꿈 — 1440 5열에서 담당자 동그라미가 카드 밖으로 나갔다.
+- **v2.907 — 위키 · 이슈 기능 추천 1~5(사용자 '모두 적용' · 시안 없이 기존 화면 틀대로 — 사용자 선택)**. 회귀 `server/test/wikiIssues2907.test.js` · `web/src/views/wiki/features2907.test.js`.
+  - 댓글 고치기(위키 · 이슈): 쓴 사람만 · 옛 본문 5개 보관 · 판/이력은 만들지 않는다 · **알림은 새로 언급한 사람에게만**(`ev.edit` — 담당 · 보고 · 관찰자에게 다시 가지 않는다).
+  - 문서 지우기는 **휴지통**(30일 — 판 · 댓글 · 첨부 그대로). 첨부 본체 · 즐겨찾기는 영구 삭제(손으로 · 기한) 때 정리하고, 첨부는 삭제가 디스크에 닿은 뒤(`removeOwnerAfterPersist`). 기한 정리는 폴링하지 않고 목록 · 지우기 때.
+  - 문서 링크는 화면 파서와 **같은 규칙**(서버 `pageRefsOf` · `resolveRef` ↔ 웹 `markdown.js` · `resolvePageRef`). 제목을 바꾸면 '[[옛 제목]]' 중 **이 문서로 풀리던 것만** 새 제목으로(같은 제목의 다른 문서를 빼앗지 않는다) — 쓰기 범위 밖 문서는 건너뛰고 센다.
+  - 다른 스페이스로 옮기기는 하위 문서와 함께 · 두 스페이스 모두 쓰기 범위 · 문서 번호가 그대로라 첨부 · 즐겨찾기 · 이슈 '관련 문서' 가 따라간다.
+  - 이슈 템플릿(`issue-templates.json`)은 위키 관리자 템플릿과 같은 틀(전체 범위 관리자만 쓰기 · 내장 3개는 못 고침) · '/issues/templates' 는 '/issues/:key' 보다 먼저 등록(뒤면 404).
+- **v2.907 — 위키 댓글 @멘션 자동완성 · '계정/이름' · 언급한 사람에게 이슈 등록(사용자 요청 + 시안 `docs/design/wiki-mention` · '모두 적용' — 추천안 5개)**. 회귀 `server/test/wikiMention2907.test.js` · `web/src/components/mentionText.test.js`.
+  - 멘션 후보는 **서버가 거른다**(`issues/mentionables.js` — A3-02 그대로 + 문서/이슈 참여자). 역할 · 범위 · 메일 유무 · '그 법인을 볼 수 있는가' 는 전체 범위 쓰기 계정에게만 싣는다.
+  - 자동완성 목록은 글상자 아래 줄을 통째로(`components/MentionBox.jsx` — 떠 있는 상자 금지) · 한글 조합 중 Enter 는 먹지 않는다 · 늦게 온 응답은 버린다 · 폴링 없음.
+  - '@계정/이름' 은 **글자 그대로 저장**한다. 파서 · 알림 해석(가장 긴 접두) · .md · 메일이 같은 글자를 쓰고, 칩만 계정(모노) + 이름으로 나눠 그린다. 이름의 공백 · 멘션을 끊는 글자는 넣을 때 뺀다.
+  - 댓글 → 이슈는 **저장 전에 거를 수 있는 것을 먼저**(담당자 = 언급한 사람 · 그 법인을 볼 수 있는가 · 권한) — 400 이면 댓글도 저장하지 않는다. 같은 댓글로 두 번 만들지 않는다(`origin wiki-comment`).
+- **v2.906 — 분산 포트그룹 카드 · 별건 정리 화면(사용자 선택 '남은 별건 정리 · vDS 팀 구성 수집 · 남은 화면 실검증' · '표준')**. 회귀 `vcd/vcInfo.test.js` · `vcdTabsRender.test.jsx` · `bareosCancelText.test.js`.
+  - `VcInfoParts.DvpgTeamingCard` — 분산 스위치가 없는 호스트 · 호스트 구성을 아직 읽지 않은 호스트에는 **부르지도 그리지도 않는다**(훅은 조기 return 위 · `useOnce` 의 enabled). 업링크 포트그룹은 뺀다.
+    팀 구성 문구(`TEAMING_TEXT` · `teamingText`)는 `vcd/vcInfo.js` 한 벌로 옮겼다(HostObject 는 다시 내보내기만 — 표준 스위치 표와 분산 포트그룹 표가 같은 말).
+  - Bareos 그룹 카드: 회차 중단 없이 행마다 취소한 이번 회차 실행 — '멈추는 중(실행별 취소)' · '실행 중 · 실행별 취소 n'(서버 `cancelPlan.sentFire` · 옛 서버는 예전 판정).
+- **v2.905 — 설정 메뉴 재배치(사용자 요청 '설정에 메뉴가 너무 많아져서 스크롤바가 생긴다 — 재배치' · '9개 묶음 + 2단' · '표준')**. 회귀 `server/test/settingsMenu2905.test.js`.
+  - 1단은 **묶음만**(`Settings.jsx GROUP_ORDER` 9개 — 인프라 등록 · 백업 · 수집 · 엣지·원격 · 사용자 · 보안 · 알림·연동 · 로그 · 시스템). 단독 1단 항목을 만들지 않는다 —
+    v2.904 까지 단독 12개 + 그룹 7개 = 19개라 1,600px 대에서도 가로 스크롤이 생겼다. 새 설정 화면은 `SUB` 에 `group:` 을 달아 묶음 하나에 넣는다(묶음 없으면 테스트 ②가 막는다).
+  - 1단 줄은 줄바꿈(`flexWrap: 'wrap'` — `.vcd-views` 의 가로 스크롤을 여기서만 끈다). 1단 라벨에 이모지를 넣지 않는다(폭).
+  - 키(`#/settings/<k>`)는 묶음과 무관하게 그대로다(테스트 ①이 48개를 고정). 묶음 라벨을 바꾸면 화면 · 서버 · 메일 문구의 '설정 › <묶음> › <항목>' 경로를 함께 고친다 —
+    테스트 ④(옛 이름 잔존)·⑤(항목이 그 묶음에 있는가)가 주석을 뺀 소스를 훑는다. 버전 이력 주석 · 릴리스 노트는 과거 기록이라 고치지 않는다.
+- **v2.904 — 위키 · 이슈 · 첨부 점검 확정분(사용자 요청 '버그 10개 찾아줘' → '모두 적용해줘' · '표준')**. 회귀 `server/test/wikiIssues2904.test.js`(변이 6/6) · `web/src/views/wiki/fixes2904.test.js`.
+  - **'전체 범위' 판정은 조회 ∧ 쓰기 무제한** — `auth/scope.js isFullReadWriteScope` 하나. 위키 · 이슈 · 첨부의 `isMod` 가 조회만 봐서 쓰기 범위 관리자가 남의 위키 댓글을 지우고 해결하고 공유 필터를 지웠다(P-1).
+  - 범위 계정 응답의 **이력도 가린다** — `parentKey · epic · links` 를 `vis()` 로 가리면서 `history` 는 원문이었다(범위 밖 법인 id · 공용 에픽 키). 저장된 이력은 그대로, 응답에서만(`historyFor`).
+  - 판을 만들지 않는 변경(체크 토글)은 **판 번호 말고 따로 센다**(`checkRev` ↔ 편집기 `baseCheckRev`) — 옛 본문을 실은 저장이 409 없이 체크를 되돌렸다. 체크만 바뀐 충돌은 비교 대신 그 사실을 말한다.
+  - 두 저장소의 **내구성 시점을 맞춘다** — 첨부(동기)와 주인(디바운스 300ms): 올리기는 주인 저장 확인 뒤, 주인 삭제의 첨부 정리는 삭제가 디스크에 닿은 뒤(`removeOwnerAfterPersist`).
+  - 표 빈 값 자리표시로 `'~'` 를 쓰지 않는다(Collator 에서 맨 앞) — `data-sort=''` 면 방향과 상관없이 뒤(`EMPTY_TOKENS`). 한글 조합 중 Enter(`isComposing` · 229)는 단축 동작으로 먹지 않는다.
+  - 내려받기 이름은 `Content-Disposition` 의 `filename*=UTF-8''` 먼저(`api.js dispositionName`) · 그림 주소 화이트리스트는 역슬래시도 막는다(`/\host` 는 바깥 호스트) · 줄 끝 판정을 이어 붙인 버퍼의 `endsWith` 로 하지 않는다(제곱 시간).
+- **v2.901 — 개체 보기 3차 · 점검 확정분 화면(사용자 요청 '버그 수정이나 개선' · '표준')**. 회귀 `vcd/objView.test.js` · `vcInfo.test.js` · `vcdTabsRender.test.jsx` · `bareosGroupText.test.js`.
+  - 호스트 네트워크 표에 팀 구성 열(`HostObject.jsx TEAMING_TEXT`) · 데이터스토어 탭 마운트 카드(`objTabs.hostDsMounts` — 못 읽음 · 없음 · 행) · 리소스 풀 카드(`PoolSettingsCard`). '수집하지 않음' 표는 지웠다.
+  - `vcd/useOnce.js` 는 상태에 열쇠를 싣고 **지금 열쇠의 값만** 돌려준다 — 다른 개체로 옮겨 가면 이전 개체의 값 · 오류를 한 번도 그리지 않는다(변이 확인).
+  - 못 읽은 워킹셋은 '—'(W3 — v2.895 가 0 GB 로 그렸다 · 정정). 관리자 전용 API 를 부르는 버튼은 `adminToolAllowed(k)`(= 관리자 ∧ 도구 권한 — W1).
+  - 스프린트를 바꾸면 다른 스프린트의 보드를 그리지 않는다(`cur = board.sprint.id === sel`) · 위키 충돌 저장은 비교가 있을 때만 · 옛 GPU 주소는 `location.replace` · 오류 뒤 effect deps 에 error.
+  - Bareos 그룹 편집: 기준 시각 Select(현지 서버 · 중앙 포탈 + UTC 오프셋 — **한 줄 전체**, 두 칸 폭에서는 오프셋이 잘렸다) · 미리보기의 서버 시간대 이름은 현지 서버 시계일 때만 ·
+    다음 실행 칸은 두 시계를 함께(`nextClockText`) · 새 그룹 기본은 'portal'(옛 그룹은 server — 서버 기본과 같다).
+  - ⚠ **정정(Chromium 판독)**: 새 값을 수집하게 만들면 화면의 '수집하지 않' 문구를 **grep 해 함께 고친다** — v2.901 이 VMXNET3 권장을 넣고도 튜닝 탭에 '(vmxnet3 여부) 수집하지 않습니다(2차)' 가,
+    v2.898 이 업데이트 · vLCM 을 넣고도 vCenter 요약에 '적용 가능 패치: 수집하지 않음' 이 남아 있었다(`vcdTabs.test.js` 가 고정). v2.898 정정(반대 방향 — 수집하는 값을 '수집하지 않음' 으로)과 짝이다.
 - **v2.898 — vCenter 개체 보기 2차(사용자 요청 '수집하지 않음 항목 반영할 수 있어?' · 선택 '①~④ 전부' · '전체 검증')**. 카드 `views/vcd/VcInfoParts.jsx` · 판정 `vcd/vcInfo.js`(순수) ·
   서버 `server/src/vcinfo/`(규칙은 `docs/rules/vcenter.md` v2.898). 회귀 `vcd/vcInfo.test.js` · `vcdTabsRender.test.jsx` · `server/test/vcinfo2898.test.js` · `vcd2898snapNic.test.js`.
   - 값은 `/vcenter-info/<kind>` — 탭을 열 때 1회 + '다시 읽기'(15초 폴링 금지). 갱신 주기 문구는 응답 `refreshMs` 로(화면에 숫자를 박지 않는다). `at:null`+`notCollected` 는 '없음' 이 아니라 '아직 읽지 않음'.

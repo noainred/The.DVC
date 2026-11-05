@@ -349,7 +349,7 @@ async function pullNowInner(signal = null) {
   let regErr = null;
   try { regErr = registryLoadError(); } catch (e) { regErr = { at: Date.now(), reason: e?.message || String(e) }; }
   if (regErr) {
-    if (!pullerStats.registryUnreadableAt) console.warn(`[collector] 수집 서버 등록부(collectors.json)를 읽지 못해 이번 주기 pull·잔류 정리를 건너뜁니다(${summarizeRegistryError(regErr)?.text || '사유 미상'}) — 설정 › 수집 서버에서 보존본을 되돌리거나 다시 저장하세요.`);
+    if (!pullerStats.registryUnreadableAt) console.warn(`[collector] 수집 서버 등록부(collectors.json)를 읽지 못해 이번 주기 pull·잔류 정리를 건너뜁니다(${summarizeRegistryError(regErr)?.text || '사유 미상'}) — 설정 › 엣지·원격 › 수집 서버(원격)에서 보존본을 되돌리거나 다시 저장하세요.`);
     pullerStats.registryUnreadableAt = regErr.at || Date.now();
   } else {
     pullerStats.registryUnreadableAt = null;

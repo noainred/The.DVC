@@ -1,0 +1,289 @@
+/**
+ * issues/alertIssues.js — 다른 알람 → 이슈 자동 등록(v2.908 · 기능 추천 10 · 시안 docs/design/wiki-issues ⑪ '다른 알람(다음 단계)').
+ * 파트 장애 자동 등록(autoCreate.js)과 같은 틀 — 출처(origin) · 중복(열린 이슈가 있으면 댓글) · 하루 상한 · 해소 댓글 · 설정에 따라 '검토'.
+ *
+ * 무엇을(설정 › 자동 등록 › 다른 알람 — 파일 `issue-alert-auto.json`, 비밀 없음 · 기본 꺼짐):
+ *   알람 엔진(alerts.js onAlertState)의 상태 알람 — vCenter 수집 실패(vc) · 엣지 보고 끊김(vcstale) · 호스트 연결 끊김(host) · 데이터스토어 용량(ds) ·
+ *   vCenter 위험 알람(alarm) · VM 동시 전원 꺼짐(massoff). 오버커밋(ramoc · vcpuoc)은 용량 경고라 대상에서 뺐다.
+ *   Bareos 백업 실패(backup — bareos/notify.js onBareosFailures). 인증서 만료는 알람 엔진에 판정이 없어 이번 범위에 없다(지어내지 않는다).
+ *
+ * 언제:
+ *   · 상태 알람은 **delayMin 분 넘게 이어질 때** 만든다(잠깐 깜빡인 알람으로 이슈가 쌓이지 않게). 같은 알람 키의 열린 이슈가 있으면 만들지 않는다.
+ *     해소되면 댓글 · onResolve='review' 면 '검토' 로(완료는 사람이). 해소 뒤 다시 나면 같은 열린 이슈에 '다시 발생 N회째' 댓글.
+ *     판정 보류(못 읽음)로 끊긴 것은 해소가 아니다 — 알람 엔진이 resolved 에 넣지 않는다.
+ *   · 백업 실패는 잡(Director · 잡 이름)마다 열린 이슈 하나 — 같은 잡이 또 실패하면 그 이슈에 댓글(jobid 로 두 번 쓰지 않는다). 성공해도 닫지 않는다(사람이).
+ *   · 하루(포탈 날짜) 상한 dailyMax — 넘으면 만들지 않고 센다(status.capped · 콘솔 하루 한 줄).
+ * 법인: 알람의 vcenterId(없으면 공용 — 지어내지 않는다). 저장은 라우트가 관리자 + 전체 범위 + 쓰기 범위 무제한으로 막는다.
+ */
+import fs from 'node:fs';
+import path from 'node:path';
+import { config } from '../config.js';
+import { atomicWriteFileSync, preserveCorrupt, safeLoadText } from '../util/atomicWrite.js';
+import { makeLoadError } from '../util/registryCore.js';
+import { capStr } from '../util/capStr.js';
+import { dayKey, DAY_MS, DAY_OFFSET_MIN } from '../util/dayKey.js';
+import { createIssue, addComment, setStatus, findByOrigin, patchOrigin, originCreatedSince, issueStats, PRIORITIES } from './store.js';
+import { loadIssueSettings, suggestAssignee } from './settings.js';
+import { issueViewers } from './visibility.js';
+
+export const ALERT_ISSUE_KINDS = Object.freeze(['vc', 'vcstale', 'host', 'ds', 'alarm', 'massoff', 'backup']);
+export const ALERT_KIND_LABEL = Object.freeze({
+  vc: 'vCenter 수집 실패', vcstale: '엣지 보고 끊김', host: '호스트 연결 끊김', ds: '데이터스토어 용량', alarm: 'vCenter 위험 알람', massoff: 'VM 동시 전원 꺼짐', backup: 'Bareos 백업 실패',
+});
+export const ALERT_ISSUE_LIMITS = Object.freeze({ delayMin: [0, 1440], dailyMax: [1, 500], labels: 10, label: 30 });
+export function defaultAlertAuto() {
+  return {
+    enabled: false,
+    kinds: { vc: true, vcstale: true, host: false, ds: false, alarm: false, massoff: true, backup: false },
+    priority: { vc: 'p1', vcstale: 'p1', host: 'p1', ds: 'p2', alarm: 'p1', massoff: 'p0', backup: 'p2' },
+    delayMin: 10, dailyMax: 30, labels: ['alert', 'auto'], onResolve: 'review',
+  };
+}
+function fieldError(field, msg) { const e = new Error(`${field}: ${msg}`); e.status = 400; e.field = field; return e; }
+
+export function normalizeAlertAuto(raw, { strict = true } = {}) {
+  const d = defaultAlertAuto();
+  const r = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
+  let dropped = 0;
+  const bad = (field, msg) => { if (strict) throw fieldError(field, msg); dropped += 1; };
+  const kinds = {}; const priority = {};
+  for (const k of ALERT_ISSUE_KINDS) {
+    const v = r.kinds?.[k];
+    if (v == null) kinds[k] = d.kinds[k]; else if (typeof v === 'boolean') kinds[k] = v; else { bad(`kinds.${k}`, 'true 또는 false 여야 합니다'); kinds[k] = d.kinds[k]; }
+    const p = r.priority?.[k];
+    if (p == null) priority[k] = d.priority[k]; else if (PRIORITIES.includes(p)) priority[k] = p; else { bad(`priority.${k}`, `${PRIORITIES.join('·')} 중 하나여야 합니다`); priority[k] = d.priority[k]; }
+  }
+  const int = (v, [lo, hi], field, def) => {
+    if (v == null || v === '') return def;
+    const n = typeof v === 'number' ? v : (typeof v === 'string' && /^\d{1,5}$/.test(v.trim()) ? Number(v) : NaN);
+    if (Number.isInteger(n) && n >= lo && n <= hi) return n;
+    bad(field, `${lo}~${hi} 의 정수여야 합니다`); return def;
+  };
+  let labels = d.labels;
+  if (r.labels != null) {
+    const list = Array.isArray(r.labels) ? r.labels : (typeof r.labels === 'string' ? r.labels.split(',') : null);
+    if (!list) bad('labels', '배열이어야 합니다');
+    else {
+      labels = [...new Set(list.map((x) => String(x ?? '').trim().toLowerCase().replace(/\s+/g, '-')).filter(Boolean))];
+      if (labels.length > ALERT_ISSUE_LIMITS.labels || labels.some((x) => x.length > ALERT_ISSUE_LIMITS.label)) {
+        bad('labels', `라벨은 ${ALERT_ISSUE_LIMITS.label}자 · ${ALERT_ISSUE_LIMITS.labels}개까지입니다`);
+        labels = labels.filter((x) => x.length <= ALERT_ISSUE_LIMITS.label).slice(0, ALERT_ISSUE_LIMITS.labels);
+      }
+    }
+  }
+  let onResolve = d.onResolve;
+  if (r.onResolve != null) { if (['review', 'keep'].includes(r.onResolve)) onResolve = r.onResolve; else bad('onResolve', 'review·keep 중 하나여야 합니다'); }
+  return {
+    value: {
+      enabled: r.enabled === true, kinds, priority, labels, onResolve,
+      delayMin: int(r.delayMin, ALERT_ISSUE_LIMITS.delayMin, 'delayMin', d.delayMin),
+      dailyMax: int(r.dailyMax, ALERT_ISSUE_LIMITS.dailyMax, 'dailyMax', d.dailyMax),
+    },
+    dropped,
+  };
+}
+
+/* ───── 저장소 ───── */
+const fileOf = () => path.join(config.configDir, 'issue-alert-auto.json');
+let cache = null;
+const loadErr = makeLoadError();
+export function loadAlertAuto() {
+  if (cache) return cache;
+  const f = fileOf();
+  loadErr.clear();
+  try {
+    if (fs.existsSync(f)) {
+      const { value, dropped } = normalizeAlertAuto(JSON.parse(fs.readFileSync(f, 'utf8')), { strict: false });
+      if (dropped) console.warn(`[issues] issue-alert-auto.json 의 형식 밖 항목 ${dropped}개를 읽지 않았습니다`);
+      cache = value;
+      return cache;
+    }
+  } catch (e) {
+    preserveCorrupt(f, e.message);
+    loadErr.set(safeLoadText(e) || '사유 미상');
+    console.warn(`[issues] issue-alert-auto.json 을 읽지 못해 기본값(다른 알람 자동 등록 꺼짐)으로 시작합니다: ${loadErr.get().reason}`);
+  }
+  loadErr.checkCorruptOnly(f);
+  cache = defaultAlertAuto();
+  return cache;
+}
+export function alertAutoLoadError() { loadAlertAuto(); return loadErr.get()?.reason || null; }
+export function saveAlertAuto(body) {
+  const { value } = normalizeAlertAuto(body, { strict: true });
+  atomicWriteFileSync(fileOf(), JSON.stringify(value, null, 1), { mode: 0o600 });
+  cache = value; loadErr.clear();
+  return value;
+}
+
+/* ───── 판정(순수) ───── */
+/** 알람 키 → 종류(대상이 아니면 ''). */
+export function alertKindOf(key) { const k = String(key || '').split(':')[0]; return ALERT_ISSUE_KINDS.includes(k) && k !== 'backup' ? k : ''; }
+
+/**
+ * 알람 상태 → 할 일(순수 — 테스트가 고정).
+ * @param {{ firing:Array<{key,alert,since}>, resolved:Array<{key,alert}> }} st
+ * @param {object} cfg  loadAlertAuto()
+ * @param {{ existing:Array, now:number, createdToday:number }} ctx  existing = findByOrigin(kind 'alert')
+ */
+export function planAlertIssues(st, cfg, { existing = [], now = Date.now(), createdToday = 0 } = {}) {
+  const actions = []; let capped = 0;
+  const byKey = new Map();
+  for (const x of existing) if (x.origin?.alertKey) byKey.set(x.origin.alertKey, x);
+  let room = Math.max(0, cfg.dailyMax - createdToday);
+  for (const f of st?.firing || []) {
+    const kind = alertKindOf(f.key);
+    if (!kind || !cfg.kinds[kind]) continue;
+    const ex = byKey.get(f.key);
+    if (ex) { if (ex.origin.resolvedAt) actions.push({ type: 'again', key: ex.key, f }); continue; }
+    if (now - (Number(f.since) || now) < cfg.delayMin * 60_000) continue;
+    if (room <= 0) { capped += 1; continue; }
+    room -= 1;
+    actions.push({ type: 'create', kind, f });
+  }
+  for (const r of st?.resolved || []) {
+    const ex = byKey.get(r.key);
+    if (ex && !ex.origin.resolvedAt) actions.push({ type: 'resolve', key: ex.key, r });
+  }
+  return { actions, capped };
+}
+
+/** 백업 실패 행 → 할 일(순수). 잡 열쇠 = Director|잡 이름. 복원 실패는 이번 범위에 넣지 않는다(사람이 바로 보고 있는 작업이다). */
+export const backupJobKey = (r) => `${String(r.directorId || '')}|${String(r.jobName || '')}`;
+export function planBackupIssues(rows, cfg, { existing = [], createdToday = 0 } = {}) {
+  const actions = []; let capped = 0;
+  if (!cfg.kinds.backup) return { actions, capped };
+  const byKey = new Map();
+  for (const x of existing) if (x.origin?.alertKey) byKey.set(x.origin.alertKey, x);
+  const groups = new Map();
+  for (const r of rows || []) {
+    if (r?.kind !== 'backup' || !r.jobName) continue;
+    const k = backupJobKey(r);
+    if (!groups.has(k)) groups.set(k, []);
+    groups.get(k).push(r);
+  }
+  let room = Math.max(0, cfg.dailyMax - createdToday);
+  for (const [k, list] of groups) {
+    const ex = byKey.get(k);
+    const fresh = ex ? list.filter((r) => !(ex.origin.partKeys || []).includes(String(r.jobid))) : list;
+    if (!fresh.length) continue;
+    if (ex) { actions.push({ type: 'again', key: ex.key, rows: fresh }); continue; }
+    if (room <= 0) { capped += 1; continue; }
+    room -= 1;
+    actions.push({ type: 'create', jobKey: k, rows: fresh });
+  }
+  return { actions, capped };
+}
+
+/* ───── 실행 ───── */
+const SYSTEM_USER = 'alert-auto';
+const freshStatus = () => ({ ranAt: null, created: 0, commented: 0, review: 0, capped: 0, errors: 0, error: null, cappedAt: null });
+const status = freshStatus();
+let capWarnedDay = '';
+export function alertIssuesStatus() { return { ...status }; }
+function todayStartMs(now) { const k = dayKey(now); return k ? Date.parse(`${k}T00:00:00Z`) - DAY_OFFSET_MIN * 60_000 : now - (now % DAY_MS); }
+function portalTime(ms) { const n = Number(ms); return Number.isFinite(n) && n > 0 ? new Date(n + DAY_OFFSET_MIN * 60_000).toISOString().slice(0, 16).replace('T', ' ') : '모름'; }
+const createdToday = (now) => originCreatedSince('alert', todayStartMs(now)) + originCreatedSince('backup', todayStartMs(now));
+function noteCap(capped, cfg, now) {
+  if (!capped) return;
+  status.capped += capped; status.cappedAt = now;
+  const day = dayKey(now);
+  if (capWarnedDay !== day) { capWarnedDay = day; console.warn(`[issues] 다른 알람 자동 등록 하루 상한(${cfg.dailyMax}건)에 닿아 ${capped}건을 만들지 않았습니다 — 이슈 › 설정 › 자동 등록`); }
+}
+function comment(key, body) {
+  try { addComment(key, { body: capStr(body, 1_900) }, SYSTEM_USER); status.commented += 1; }
+  catch (e) { status.errors += 1; status.error = `comment ${key}: ${String(e?.message || e).slice(0, 160)}`; }
+}
+function make(body, origin, settings, viewers) {
+  let auto = null;
+  if (viewers) auto = suggestAssignee({ component: body.component, vcenterId: body.vcenterId }, settings, issueStats().byAssignee, viewers.canSee);
+  try { return createIssue(body, SYSTEM_USER, { auto, origin }); } catch (e) {
+    if (e?.field !== 'vcenterId') throw e;
+    return createIssue({ ...body, vcenterId: '' }, SYSTEM_USER, { auto, origin }); // 형식 밖 vCenter id — 공용으로
+  }
+}
+
+/** 알람 상태 한 번(알람 엔진 구독). 던지지 않는다. */
+export function applyAlertState(st, { now = Date.now() } = {}) {
+  const cfg = loadAlertAuto();
+  if (!cfg.enabled) return { created: 0 };
+  status.ranAt = now;
+  let plan;
+  try { plan = planAlertIssues(st, cfg, { existing: findByOrigin((o) => o.kind === 'alert'), now, createdToday: createdToday(now) }); }
+  catch (e) { status.errors += 1; status.error = String(e?.message || e).slice(0, 200); return { created: 0 }; }
+  noteCap(plan.capped, cfg, now);
+  const settings = loadIssueSettings();
+  const viewers = settings.autoAssign?.enabled ? issueViewers() : null;
+  let created = 0;
+  for (const a of plan.actions) {
+    try {
+      if (a.type === 'create') {
+        const al = a.f.alert || {};
+        const label = ALERT_KIND_LABEL[a.kind];
+        make({
+          title: capStr(`[알람] ${al.title || a.f.key}`, 200), type: 'incident', priority: cfg.priority[a.kind] || 'p2', labels: cfg.labels, component: label,
+          vcenterId: String(al.vcenterId || ''), status: 'backlog',
+          body: capStr([`알람 ‘${label}’ 이 ${cfg.delayMin}분 넘게 이어져 이슈로 등록했습니다.`, '', `■ ${al.title || ''}`, al.detail ? String(al.detail) : '', `발생: ${portalTime(a.f.since)} · 심각도 ${al.severity || '—'}`, '',
+            '알람 화면: 알림 › 발생 중', '이 이슈는 다른 알람 자동 등록이 만들었습니다(이슈 › 설정 › 자동 등록 › 다른 알람). 알람이 해소되면 댓글이 달리고, 설정에 따라 상태가 ‘검토’ 로 바뀝니다 — 완료는 사람이 합니다.'].join('\n'), 9_000),
+        }, { kind: 'alert', alertKey: a.f.key, alertKind: a.kind, title: al.title || '' }, settings, viewers);
+        created += 1; status.created += 1;
+      } else if (a.type === 'again') {
+        const o = patchOrigin(a.key, (o2) => ({ ...o2, resolvedAt: null, reopen: (o2.reopen || 0) + 1 })).origin;
+        comment(a.key, `다시 발생했습니다(${o.reopen}회째) — ${a.f.alert?.title || a.f.key}`);
+      } else if (a.type === 'resolve') {
+        patchOrigin(a.key, (o2) => ({ ...o2, resolvedAt: now }));
+        comment(a.key, `해소: ${a.r.alert?.title || a.r.key} — 알람이 더 이상 발생하지 않습니다.`);
+        if (cfg.onResolve === 'review') {
+          const cur = findByOrigin((_o, x) => x.key === a.key)[0];
+          if (cur && cur.status !== 'review' && cur.status !== 'done') { setStatus(a.key, 'review', SYSTEM_USER, { note: '자동 등록: 알람 해소' }); status.review += 1; }
+        }
+      }
+    } catch (e) { status.errors += 1; status.error = `${a.type}: ${String(e?.message || e).slice(0, 180)}`; console.warn(`[issues] 다른 알람 자동 등록 실패(${status.error})`); }
+  }
+  return { created };
+}
+
+const ST_TEXT = Object.freeze({ error: '오류', warning: '경고' });
+/** 백업 실패 행(Bareos 구독). 던지지 않는다. */
+export function applyBackupFailures(rows, { now = Date.now() } = {}) {
+  const cfg = loadAlertAuto();
+  if (!cfg.enabled || !cfg.kinds.backup) return { created: 0 };
+  status.ranAt = now;
+  let plan;
+  try { plan = planBackupIssues(rows, cfg, { existing: findByOrigin((o) => o.kind === 'backup'), createdToday: createdToday(now) }); }
+  catch (e) { status.errors += 1; status.error = String(e?.message || e).slice(0, 200); return { created: 0 }; }
+  noteCap(plan.capped, cfg, now);
+  const settings = loadIssueSettings();
+  const viewers = settings.autoAssign?.enabled ? issueViewers() : null;
+  const lineOf = (r) => `· jobid ${r.jobid} ${ST_TEXT[r.state] || r.state}${r.status ? `(${r.status})` : ''}${r.level ? ` · ${r.level}` : ''} · ${portalTime(r.at)}${r.errors != null ? ` · 오류 ${r.errors}` : ''}`;
+  let created = 0;
+  for (const a of plan.actions) {
+    try {
+      if (a.type === 'create') {
+        const r0 = a.rows[0];
+        make({
+          title: capStr(`[백업 실패] ${r0.vmName || r0.jobName}${a.rows.length > 1 ? ` 외 ${a.rows.length - 1}회` : ''}`, 200), type: 'incident', priority: cfg.priority.backup || 'p2', labels: cfg.labels,
+          component: ALERT_KIND_LABEL.backup, vcenterId: String(r0.vcenterId || ''), status: 'backlog',
+          body: capStr([`Bareos 잡 ‘${r0.jobName}’ (VM ${r0.vmName || '—'}) 이 실패해 이슈로 등록했습니다.`, '', ...a.rows.map(lineOf), '',
+            '백업 화면: 운영 작업 › Bareos 백업', '같은 잡이 또 실패하면 이 이슈에 댓글이 달립니다. 다음 백업이 성공해도 자동으로 닫지 않습니다 — 확인한 뒤 사람이 닫습니다.'].join('\n'), 9_000),
+        }, { kind: 'backup', alertKey: a.jobKey, alertKind: 'backup', title: r0.jobName, deviceName: r0.vmName || '', partKeys: a.rows.map((r) => String(r.jobid)) }, settings, viewers);
+        created += 1; status.created += 1;
+      } else if (a.type === 'again') {
+        patchOrigin(a.key, (o) => ({ ...o, partKeys: [...(o.partKeys || []), ...a.rows.map((r) => String(r.jobid))].slice(-64), reopen: (o.reopen || 0) + 1 }));
+        comment(a.key, `같은 잡이 또 실패했습니다(${a.rows.length}회)\n${a.rows.map(lineOf).join('\n')}`);
+      }
+    } catch (e) { status.errors += 1; status.error = `${a.type}: ${String(e?.message || e).slice(0, 180)}`; console.warn(`[issues] 백업 실패 자동 등록 실패(${status.error})`); }
+  }
+  return { created };
+}
+
+let started = false;
+/** index.js 가 기동 때 한 번 — 알람 엔진 · Bareos 실패 메일 틱을 구독한다(그 모듈들은 이슈를 모른다). */
+export async function startAlertIssues() {
+  if (started) return;
+  started = true;
+  const [{ onAlertState }, { onBareosFailures }] = await Promise.all([import('../alerts.js'), import('../bareos/notify.js')]);
+  onAlertState((st) => applyAlertState(st));
+  onBareosFailures((rows, now) => applyBackupFailures(rows, { now }));
+}
+/** 테스트 전용. */
+export function _resetAlertIssuesForTest() { cache = null; loadErr.clear(); Object.assign(status, freshStatus()); capWarnedDay = ''; }

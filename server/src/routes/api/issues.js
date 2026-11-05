@@ -21,17 +21,19 @@ import { userHasPermission } from '../../auth/permissions.js';
 import { logAudit } from '../../audit.js';
 import { pageArgs } from '../../util/pageArgs.js';
 import { clientIp } from '../../util/rateLimit.js';
-import { scopedVcenterIds, writeScopedVcenterIds } from '../../auth/scope.js';
+import { scopedVcenterIds, writeScopedVcenterIds, isFullReadWriteScope } from '../../auth/scope.js';
 import { store } from '../../store.js';
 import { fullScopeOnlyWith } from '../admin/shared.js';
 import {
   listIssues, getIssue, createIssue, updateIssue, setStatus, assignIssue, bulkAssign, setBlocked, setWatch, addComment, deleteComment, deleteIssue, setProgress, activityFeed,
   bulkEdit, moveSprintIssues, sprintBoard, queryContext, addLink, removeLink, LINK_TYPES, addWorklog, removeWorklog,
-  issueStats, knownNames, issuesSeq, waitIssuesPersist, issuesPersist, PERSIST_WAIT_MS,
+  issueStats, knownNames, issuesSeq, waitIssuesPersist, issuesPersist, PERSIST_WAIT_MS, addWatchers, mentionsOf, editComment, reportSource,
   LIMITS, STATUSES, TYPES, PRIORITIES, KEY_RE, ID_RE, RECENT_DONE_MS, KEY_PREFIX,
 } from '../../issues/store.js';
 import { loadIssueSettings, saveIssueSettings, issueSettingsLoadError, suggestAssignee, SETTINGS_LIMITS, NOTIFY_EVENTS } from '../../issues/settings.js';
-import { issueNotifyStatus } from '../../issues/notify.js';
+import { issueNotifyStatus, resolveMentions } from '../../issues/notify.js';
+import { mentionCandidates } from '../../issues/mentionables.js';
+import { allIssueTemplates, saveIssueTemplate, deleteIssueTemplate, issueTemplatesLoadError, ISSUE_TEMPLATE_LIMITS } from '../../issues/templates.js';
 import { issueViewers } from '../../issues/visibility.js';
 import {
   loadAutoCreate, saveAutoCreate, autoCreateLoadError, autoCreateStatus, simulatePartFault,
@@ -44,7 +46,11 @@ import { listFilters, createFilter, updateFilter, deleteFilter, filtersLoadError
 import { QUERY_LIMITS, FIELDS as QUERY_FIELDS, ORDERABLE as QUERY_ORDERABLE } from '../../issues/query.js';
 import { issueDocIndex } from '../../wiki/store.js';
 import { issuesCsv } from '../../issues/exportCsv.js';
-import { removeOwner as removeAttachments } from '../../attach/store.js';
+import { buildIssueReport, issueReportCsv, REPORT_WEEKS } from '../../issues/report.js';
+import { listInbox, markInboxRead, inboxStatus, INBOX_LIMITS } from '../../issues/inbox.js';
+import { automationStatus } from '../../issues/automation.js';
+import { loadAlertAuto, saveAlertAuto, alertAutoLoadError, alertIssuesStatus, ALERT_ISSUE_KINDS, ALERT_KIND_LABEL, ALERT_ISSUE_LIMITS } from '../../issues/alertIssues.js';
+import { removeOwnerAfterPersist } from '../../attach/store.js';
 import { currentVersion } from '../../config.js';
 import { listNotes } from '../../release-notes.js';
 import { fileStamp } from '../../util/dayKey.js';
@@ -71,8 +77,9 @@ const canWrite = (req) => ['admin', 'operator'].includes(req.user?.role) && !isD
  */
 const canRequest = (req) => !!req.user && !isDemoGuest(req.user) && userHasPermission(req.user, 'issues.request');
 /** 관리자 권한(남의 댓글·이슈 삭제) — 관리자(데모 계정 제외) + 전체 범위(게시판 isBoardModerator 와 같은 판정). */
-const isMod = (req) => isAdmin(req) && !scopedVcenterIds(req.user, store.get());
-const SCOPED_MOD_NOTE = '범위 관리자는 이슈 관리 권한(다른 사람의 이슈·댓글 삭제)이 없습니다 — 전체 범위(vCenter 제한 없는) 관리자만 할 수 있습니다';
+// v2.904 점검 P-1: 조회와 쓰기 둘 다 무제한일 때만(조회 무제한 + writeVcenters 관리자가 남의 공유 필터를 지우던 구멍)
+const isMod = (req) => isAdmin(req) && isFullReadWriteScope(req.user, store.get());
+const SCOPED_MOD_NOTE = '범위 관리자는 이슈 관리 권한(다른 사람의 이슈·댓글 삭제)이 없습니다 — 조회 · 쓰기 범위가 모두 지정되지 않은 전체 범위 관리자만 할 수 있습니다';
 
 /** 이 사용자의 법인 접근(v2.871) — read/write: Set|null(제한 없음). */
 function accessOf(req) {
@@ -185,18 +192,85 @@ export function registerIssues(api) {
     const visible = !!s && canWrite(req) && ((!access.read && !access.write) || people(req, access).some((p) => p.username === s.assignee));
     res.json({ ok: true, suggestion: visible ? s : null, ...(s && !visible ? { hidden: true } : {}), autoAssign: loadIssueSettings().autoAssign.enabled });
   });
+  /* ── v2.907 이슈 템플릿(기능 추천 5) — '/issues/:key' 보다 먼저(뒤에 두면 'templates' 가 키로 잡혀 404) ── */
+  api.get('/issues/templates', creators, (req, res) => {
+    res.set('Cache-Control', 'no-store');
+    res.json({ ok: true, items: allIssueTemplates(), loadError: isAdmin(req) ? issueTemplatesLoadError() : null, limits: ISSUE_TEMPLATE_LIMITS, canManage: isAdmin(req) && isFullReadWriteScope(req.user, store.get()) });
+  });
+  api.post('/issues/templates', adminOnly, issueSettingsFleetOnly, fullWriteOnly, (req, res, next) => {
+    if (!isAdmin(req)) return res.status(403).json({ ok: false, reason: '데모 계정은 템플릿을 바꿀 수 없습니다' });
+    try { const t = saveIssueTemplate({ ...(req.body || {}), id: '' }, userOf(req)); audit(req, 'issue.template', t.id, `만듦: ${t.name}`); res.json({ ok: true, template: t }); } catch (e) { fail(res, e, next); }
+  });
+  api.put('/issues/templates/:id', adminOnly, issueSettingsFleetOnly, fullWriteOnly, (req, res, next) => {
+    if (!isAdmin(req)) return res.status(403).json({ ok: false, reason: '데모 계정은 템플릿을 바꿀 수 없습니다' });
+    try { const t = saveIssueTemplate({ ...(req.body || {}), id: str(req.params.id).slice(0, 20) }, userOf(req)); audit(req, 'issue.template', t.id, `고침: ${t.name}`); res.json({ ok: true, template: t }); } catch (e) { fail(res, e, next); }
+  });
+  api.delete('/issues/templates/:id', adminOnly, issueSettingsFleetOnly, fullWriteOnly, (req, res, next) => {
+    if (!isAdmin(req)) return res.status(403).json({ ok: false, reason: '데모 계정은 템플릿을 바꿀 수 없습니다' });
+    try { const r = deleteIssueTemplate(str(req.params.id).slice(0, 20)); audit(req, 'issue.template', r.id, '지움'); res.json({ ok: true, ...r }); } catch (e) { fail(res, e, next); }
+  });
   api.get('/issues/settings', adminOnly, issueSettingsFleetOnly, (req, res) => {
     if (!isAdmin(req)) return res.status(403).json({ ok: false, reason: '데모 계정은 이슈 설정을 볼 수 없습니다' });
     res.set('Cache-Control', 'no-store');
-    res.json({ ok: true, settings: loadIssueSettings(), loadError: issueSettingsLoadError(), limits: SETTINGS_LIMITS, events: NOTIFY_EVENTS, notifyStatus: issueNotifyStatus() });
+    res.json({ ok: true, settings: loadIssueSettings(), loadError: issueSettingsLoadError(), limits: SETTINGS_LIMITS, events: NOTIFY_EVENTS, notifyStatus: issueNotifyStatus(),
+      automationStatus: automationStatus(), inboxStatus: inboxStatus() }); // v2.908
   });
   api.put('/issues/settings', adminOnly, issueSettingsFleetOnly, fullWriteOnly, (req, res, next) => {
     if (!isAdmin(req)) return res.status(403).json({ ok: false, reason: '데모 계정은 이슈 설정을 바꿀 수 없습니다' });
     try {
       const s = saveIssueSettings(req.body || {});
       audit(req, 'issue.settings', 'issue-settings.json', `자동 할당 ${s.autoAssign.enabled ? '켬' : '끔'}(규칙 ${s.autoAssign.components.length} · 후보 ${s.autoAssign.pool.length}) · 알림 ${s.notify.enabled ? '켬' : '끔'}(사람 ${s.notify.people.length})`);
-      res.json({ ok: true, settings: s, loadError: null, notifyStatus: issueNotifyStatus() });
+      res.json({ ok: true, settings: s, loadError: null, notifyStatus: issueNotifyStatus(), automationStatus: automationStatus(), inboxStatus: inboxStatus() });
     } catch (e) { fail(res, e, next); }
+  });
+  /* ── v2.908 다른 알람 · 백업 실패 → 이슈 자동 등록(기능 추천 10) — 파트 장애 자동 등록과 같은 문지기. '/issues/:key' 보다 먼저 ── */
+  api.get('/issues/autocreate/alerts', adminOnly, issueSettingsFleetOnly, (req, res) => {
+    if (!isAdmin(req)) return res.status(403).json({ ok: false, reason: '데모 계정은 이슈 설정을 볼 수 없습니다' });
+    res.set('Cache-Control', 'no-store');
+    res.json({ ok: true, settings: loadAlertAuto(), loadError: alertAutoLoadError(), status: alertIssuesStatus(), kinds: ALERT_ISSUE_KINDS, kindLabels: ALERT_KIND_LABEL, limits: ALERT_ISSUE_LIMITS });
+  });
+  api.put('/issues/autocreate/alerts', adminOnly, issueSettingsFleetOnly, fullWriteOnly, (req, res, next) => {
+    if (!isAdmin(req)) return res.status(403).json({ ok: false, reason: '데모 계정은 이슈 설정을 바꿀 수 없습니다' });
+    try {
+      const s = saveAlertAuto(req.body || {});
+      audit(req, 'issue.autocreate', 'issue-alert-auto.json', `다른 알람 자동 등록 ${s.enabled ? '켬' : '끔'}(${ALERT_ISSUE_KINDS.filter((k) => s.kinds[k]).join(',') || '없음'} · ${s.delayMin}분 · 하루 상한 ${s.dailyMax})`);
+      res.json({ ok: true, settings: s, loadError: null, status: alertIssuesStatus() });
+    } catch (e) { fail(res, e, next); }
+  });
+  /* ── v2.908 포탈 알림함(기능 추천 9) — 내 것만 · 지금 범위로 다시 거른다. 읽음 표시는 이슈 · 위키 댓글을 쓸 수 있는 계정(creators) ── */
+  api.get('/issues/inbox', (req, res) => {
+    res.set('Cache-Control', 'no-store');
+    if (isDemoGuest(req.user)) return res.json({ ok: true, items: [], unread: 0, total: 0, demo: true, limits: INBOX_LIMITS });
+    const access = accessOf(req);
+    const canSee = (vc) => !vc || !access.read || access.read.has(vc);
+    const { limit } = pageArgs(req.query, { def: 50, max: 100 });
+    const r = listInbox(userOf(req), { canSee, limit, unreadOnly: str(req.query.unread) === '1' });
+    res.json({ ok: true, ...r, enabled: loadIssueSettings().inbox?.enabled !== false, limits: INBOX_LIMITS });
+  });
+  api.post('/issues/inbox/read', creators, (req, res) => {
+    const ids = Array.isArray(req.body?.ids) ? req.body.ids : null;
+    res.json({ ok: true, changed: markInboxRead(userOf(req), ids) });
+  });
+  /* ── v2.908 리포트(기능 추천 7) — 범위 안 이슈만(재료를 만들 때 거른다) · 주 1~52 ── */
+  const reportFor = (req) => {
+    const access = accessOf(req);
+    const names = new Map(vcenterChoices(access).map((v) => [v.id, v.name || v.id]));
+    const vc = str(req.query.vcenterId).slice(0, 128);
+    let rows = reportSource({ access });
+    if (vc) rows = rows.filter((r) => (vc === '-' ? !r.vcenterId : r.vcenterId === vc));
+    return buildIssueReport(rows, { weeks: req.query.weeks, vcName: (id) => names.get(id) || id });
+  };
+  api.get('/issues/report', (req, res) => {
+    res.set('Cache-Control', 'no-store');
+    res.json({ ok: true, ...reportFor(req), weeksLimits: REPORT_WEEKS });
+  });
+  api.get('/issues/report.csv', requirePerm('data.csv'), (req, res) => {
+    res.set('Cache-Control', 'no-store');
+    const r = reportFor(req);
+    audit(req, 'issue.export', 'issue-report.csv', `리포트 ${r.weeks}주`);
+    res.set('Content-Type', 'text/csv; charset=utf-8');
+    res.set('Content-Disposition', `attachment; filename="issue-report-${fileStamp()}.csv"`);
+    res.send(issueReportCsv(r));
   });
   // v2.880 파트 장애 → 이슈 자동 등록 설정 — 이슈 설정과 같은 문지기(관리자 + 전체 범위, 저장은 쓰기 범위도 무제한).
   //   ⚠ '/issues/:key' 보다 먼저(뒤에 두면 'autocreate' 가 키로 잡혀 404).
@@ -464,11 +538,47 @@ export function registerIssues(api) {
     if (!KEY_RE.test(req.params.key)) return badKey(res);
     try { const x = setWatch(req.params.key, userOf(req), req.body?.on, { access: accessOf(req) }); res.json({ ok: true, issue: x, persist: await persistView(req, { wait: false }) }); } catch (e) { fail(res, e, next); }
   });
+  // v2.907 멘션 후보(시안 docs/design/wiki-mention ⑥-7) — 위키와 같은 판정(issues/mentionables.js) · 참여자 = 담당 · 보고 · 관찰 · 댓글 쓴 사람
+  api.get('/issues/:key/mentionables', writers, (req, res, next) => {
+    if (!KEY_RE.test(req.params.key)) return badKey(res);
+    res.set('Cache-Control', 'no-store');
+    try {
+      const access = accessOf(req);
+      const it = getIssue(req.params.key, userOf(req), access);
+      const parts = [it.assignee, it.reporter, ...(it.watcherNames || []), ...(it.comments || []).map((c) => c.author)].filter(Boolean);
+      const full = canWrite(req) && isFullReadWriteScope(req.user, store.get());
+      const settings = loadIssueSettings();
+      const viewers = issueViewers();
+      let users = [];
+      try { users = listUsers(); } catch { users = []; }
+      const r = mentionCandidates({ q: str(req.query.q), me: userOf(req), meName: req.user?.name || '', full, participants: parts, knownNames: knownNames(access), users, people: full ? settings.notify?.people || [] : [], canSee: (n) => viewers.canSee(n, it.vcenterId || '') });
+      res.json({ ok: true, ...r, full, notifyOn: !!(settings.notify?.enabled && settings.notify?.mail !== false) });
+    } catch (e) { fail(res, e, next, req); }
+  });
   api.post('/issues/:key/comments', writers, async (req, res, next) => {
     if (!KEY_RE.test(req.params.key)) return badKey(res);
     try {
-      const c = addComment(req.params.key, req.body, userOf(req), { access: accessOf(req) });
+      const access = accessOf(req);
+      const c = addComment(req.params.key, req.body, userOf(req), { access });
       audit(req, 'issue.comment.create', `${req.params.key}/${c.id}`);
+      // v2.907 선택(결정 5): 언급한 사람을 관찰자로 — 알림과 같은 이름 해석 · 그 법인을 볼 수 없는 사람은 빼고 센다
+      let watch = null;
+      if (req.body?.watchMentions === true) {
+        const it = getIssue(req.params.key, userOf(req), access);
+        const viewers = issueViewers();
+        const settings = loadIssueSettings();
+        const known = new Set([...viewers.localNames, ...(settings.notify?.people || []).map((p) => p.username), it.assignee, it.reporter, ...(it.watcherNames || [])].filter(Boolean));
+        watch = addWatchers(req.params.key, resolveMentions(mentionsOf(c.body), known), userOf(req), { access, canSee: viewers.canSee });
+      }
+      res.json({ ok: true, comment: c, ...(watch ? { watch } : {}), persist: await persistView(req) });
+    } catch (e) { fail(res, e, next, req); }
+  });
+  // v2.907 댓글 고치기(기능 추천 1) — 쓴 사람만(저장소가 판정) · 새로 언급한 사람에게만 알림
+  api.put('/issues/:key/comments/:cid', writers, async (req, res, next) => {
+    if (!KEY_RE.test(req.params.key)) return badKey(res);
+    try {
+      const c = editComment(req.params.key, str(req.params.cid).slice(0, 40), req.body || {}, userOf(req), { access: accessOf(req) });
+      audit(req, 'issue.comment.edit', `${req.params.key}/${c.id}`);
       res.json({ ok: true, comment: c, persist: await persistView(req) });
     } catch (e) { fail(res, e, next, req); }
   });
@@ -484,9 +594,12 @@ export function registerIssues(api) {
     if (!KEY_RE.test(req.params.key)) return badKey(res);
     try {
       const x = deleteIssue(req.params.key, userOf(req), { isMod: isMod(req), access: accessOf(req) });
+      const seq = issuesSeq();
       audit(req, 'issue.delete', x.key, `${x.title} (보고자 ${x.reporter})`);
-      try { removeAttachments('issue', x.key); } catch (e) { console.warn(`[issues] ${x.key} 첨부 정리 실패: ${String(e?.message || e).slice(0, 160)}`); } // v2.889
-      res.json({ ok: true, persist: await persistView(req) });
+      const persist = await persistView(req);
+      // v2.904 점검 S-5: 첨부 본체는 이슈 삭제가 디스크에 닿은 뒤에 지운다
+      removeOwnerAfterPersist('issue', x.key, { seq, state: persist.state, wait: waitIssuesPersist });
+      res.json({ ok: true, persist });
     } catch (e) { fail(res, e, next, req); }
   });
 }

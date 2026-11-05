@@ -78,7 +78,7 @@ export function maskFleetPayload(p, match) {
   const row = (r) => {
     if (!r || typeof r !== 'object') return r;
     const o = { ...r };
-    for (const f of ['serverId', 'fleetId', 'tagKey', 'idracServerId']) if (match(o[f])) o[f] = maskedIdToken(o[f]);
+    for (const f of ['serverId', 'fleetId', 'tagKey', 'idracServerId', 'untaggedServerId']) if (match(o[f])) o[f] = maskedIdToken(o[f]);
     if (match(o.name)) o.name = maskedAddressName(o.name);
     return o;
   };
@@ -178,7 +178,10 @@ insightsRouter.get('/fleet', async (req, res) => {
     // 캐시 키: 스냅샷 생성시각 + 플릿 리비전(태그/소속/레지스트리 변경 시 즉시 +1). 매 요청 파일 읽기 없음.
     const key = `${snap.generatedAt}|${fleetRev()}`;
     const full = await snapMemo('fleet', key, 60_000, async () => getFleetInventory(snap));
-    const { liveKeys, ...payload0 } = full; // liveKeys는 prune 내부용 — 응답에서 제외
+    const { liveKeys, ...payload1 } = full; // liveKeys는 prune 내부용 — 응답에서 제외
+    // 서비스 인벤토리 6차 반증 F2: untaggedServerId(엣지 '태그 없을 때 id' — 고정 승계 내부용)도 응답에서 뺀다.
+    //   IP 스캔 등록 iDRAC 은 등록부 id 가 곧 IP 라 'edge:<agent>:10.x.x.x' 가 되어 비관리자 주소 가림(maskFleetPayload)을 비켜 갔다(재현).
+    const payload0 = { ...payload1, bareMetal: Array.isArray(payload1.bareMetal) ? payload1.bareMetal.map(({ untaggedServerId: _u, ...r }) => r) : payload1.bareMetal };
     // v2.607(감사 LEFT2607-02): 엣지 부분 목록·상한 제외·귀속 비움 요약. 이 라우트는 범위 계정에 403 이라(위) 여기서는 늘 싣는다.
     //   부분 상태는 fleetRev 를 올리지 않을 수 있어(목록 내용이 같으면) ETag 키에 요약을 함께 넣는다.
     const fleetPartials = fleetPartialsSummary({ detail: isAdminReq(req) }); // v2.744(회귀 검토 GD-R1): 등록부 손상 사유의 위치는 관리자에게만(maskFleetPayload 는 이 요약을 건드리지 않는다)

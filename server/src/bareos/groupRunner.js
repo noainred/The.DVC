@@ -443,7 +443,8 @@ export async function cancelLive(targets, { by = '', held = false } = {}) {
  *  · phase: queued(줄 대기) · sending(보내는 중) · running(보낸 뒤 Director 에서 도는 이번 회차 실행) · null(멈출 이번 회차 실행이 없음)
  *  · fire: 이번 회차(lastFire)가 시작해 아직 도는 실행 중 취소를 보낼 수 있는 것 · extra: 그룹 VM 의 그 밖 실행(Bareos 스케줄 · 수동)
  *  · sent: 이미 취소를 보내 멈추는 중인 실행 · stuck: 그중 '멈추지 않음'
- * @returns {{ phase: 'queued'|'sending'|'running'|null, fire: number, extra: number, sent: number, stuck: number, progress: object|null, pruning: boolean }}
+ *  · sentFire · stuckFire: sent · stuck 중 **이번 회차** 실행(v2.906 — 회차 중단 없이 행마다 '취소…' 로 멈춘 회차를 화면이 구분하게. v2.870 A1-04 남김)
+ * @returns {{ phase: 'queued'|'sending'|'running'|null, fire: number, extra: number, sent: number, stuck: number, sentFire: number, stuckFire: number, progress: object|null, pruning: boolean }}
  */
 export function cancelPlan(g, jobsByVm, now = Date.now()) {
   const e = _runs.get(g.id);
@@ -454,7 +455,7 @@ export function cancelPlan(g, jobsByVm, now = Date.now()) {
   const sendIds = sending ? (e.sendJobIds || new Set()) : new Set();
   const members = new Set(g.vmIds);
   const demo = isDemoActive();
-  let fire = 0; let extra = 0; let sent = 0; let stuck = 0;
+  let fire = 0; let extra = 0; let sent = 0; let stuck = 0; let sentFire = 0; let stuckFire = 0;
   for (const vmId of targetVmIds(g, true)) {
     const j = jobsByVm.get(vmId);
     const run = j && !!j.demo === demo ? runningRunOf(j) : null;
@@ -462,11 +463,11 @@ export function cancelPlan(g, jobsByVm, now = Date.now()) {
     const isFire = mine.has(run.jobid);
     if (!isFire && !members.has(vmId)) continue;   // 그룹에서 뺀 VM 의 그 밖 실행은 이 그룹 일이 아니다
     const ci = cancelInfo(j, now);
-    if (ci) { sent += 1; if (ci.stuck) stuck += 1; else continue; }
+    if (ci) { sent += 1; if (isFire) sentFire += 1; if (ci.stuck) { stuck += 1; if (isFire) stuckFire += 1; } else continue; }
     if (isFire) fire += 1; else if (!sendIds.has(j.id)) extra += 1;
   }
   const phase = queued ? 'queued' : sending ? 'sending' : fire > 0 ? 'running' : null;
-  return { phase, fire, extra, sent, stuck, progress: groupProgress(g.id), pruning: _pruning.has(g.id) };
+  return { phase, fire, extra, sent, stuck, sentFire, stuckFire, progress: groupProgress(g.id), pruning: _pruning.has(g.id) };
 }
 
 /**
@@ -743,8 +744,8 @@ export async function groupTick(now = Date.now(), { catchupMs = CATCHUP_MS } = {
   try {
     if (groupsLoadError() || registryLoadError()) return { scanned: false, fired, missed };
     const due = []; const miss = []; const byId = new Map();
-    const nowKey = slotKey(now);
     for (const g of listGroups()) {
+      const nowKey = slotKey(now, g.schedule);   // v2.901: 그 그룹의 기준 시계로
       // 버그 점검 S6: 처리한 회차가 지금보다 미래면(시계가 앞섰다 돌아옴) 그 열쇠까지 회차가 돌지 않는다 — 조용히 넘기지 않고 한 번 알린다
       if (g.lastKey && g.lastKey > nowKey && !_clockWarned.has(g.id)) { _clockWarned.add(g.id); console.warn(`[bareos] 백업 그룹 ‘${g.name}’ 의 마지막 처리 회차(${g.lastKey})가 지금(${nowKey})보다 미래입니다 — 서버 시계를 확인하세요. 그 회차까지는 예약 실행이 돌지 않습니다.`); }
       const d = decideFire(g, now, catchupMs);

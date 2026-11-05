@@ -26,7 +26,7 @@ import { initPeerTrust } from './security/peerTrust.js'; // 2026-10-09 검토 S-
 import { loadCaBundle } from './security/tlsTrust.js'; // 2026-10-09 검토 S-02: 사설 CA 번들 오류를 기동 로그에
 import { startRuntimeCheck } from './util/runtimeCheck.js'; // 2026-10-09 검토 I-06: Node 런타임 계약 + 통신 자가 점검
 import { startStallWatch } from './perf/stallWatch.js'; // v2.617: 멈춘 동안에도 stderr 로 보고 + 스택 자동 채취
-import { startLogAnalysis } from './loganalysis/index.js'; // v2.583: 설정 › Log › 로그 분석 — 로그 누적 집계
+import { startLogAnalysis } from './loganalysis/index.js'; // v2.583: 설정 › 로그 › 로그 분석 — 로그 누적 집계
 // v2.498: 서버 성능 측정 — 요청 지연·진행 중 요청 추적(설정 › 서버 성능 측정). 계측 실패는 서비스에 영향 없음.
 import { beginRequest, endRequest, pruneHangLog } from './perf/monitor.js';
 import { sanitizeRid, newRid } from './perf/requestId.js';
@@ -157,6 +157,8 @@ import { startLinkCheckPoller } from './linkcheck/poller.js';   // 통신 점검
 import { startIsiduPoller } from './isidu/poller.js';
 import { startIsiduDigest } from './isidu/digest.js';   // v2.742 아이실론 종합 메일(정한 요일·시각) — 중앙 전용 · 기본 꺼짐
 import { startGuestPartMail } from './guestpart/notify.js';   // v2.749 게스트 파티션 사용률 메일(통합·vCenter 별·95% 즉시·실패) — 중앙 전용 · 기본 꺼짐
+import { startIssueAutomation } from './issues/automation.js'; // v2.908 이슈 자동화 규칙(고정 4개 — 기본 꺼짐) · 저장소 이벤트 구독
+import { startAlertIssues } from './issues/alertIssues.js'; // v2.908 다른 알람 · 백업 실패 → 이슈 자동 등록(기본 꺼짐) — 알람 엔진 · Bareos 틱 구독
 import { startIssueNotify } from './issues/notify.js'; // 이슈 알림(v2.871) — 저장소 이벤트 구독은 시차 기동을 기다리지 않는다(첫 1분 변경을 놓치지 않게) · 설정이 꺼져 있으면 아무것도 보내지 않는다
 import { startStorageUsageMail } from './storage/usageMail.js';   // v2.789 스토리지 사용량 예약 메일(정한 요일·시각) — 중앙 전용 · 기본 꺼짐
 import { startIsiduTargetMail } from './isidu/notify.js';   // v2.745 대상별 결과 메일 정기 발송(보내는 때 '정한 요일·시각') — 중앙 전용 · 30초 틱
@@ -653,6 +655,8 @@ const stagger = [
  *   CPU 평탄화(스태거의 본래 목적)는 그대로다. firstDelayMs 는 각 모듈의 것이라 손대지 않는다.
  */
 try { startIssueNotify(); } catch (e) { console.warn(`[issues] 알림 기동 실패: ${e?.message || e}`); }
+try { startIssueAutomation(); } catch (e) { console.warn(`[issues] 자동화 규칙 기동 실패: ${e?.message || e}`); }
+startAlertIssues().catch((e) => console.warn(`[issues] 다른 알람 자동 등록 기동 실패: ${e?.message || e}`));
 const STAGGER_STEP_MS = Math.min(1500, Math.floor(60_000 / Math.max(1, stagger.length)));
 stagger.forEach((start, i) => setTimeout(() => { try { start(); } catch (e) { console.error('[start] 폴러 기동 실패:', e?.message); } }, i * STAGGER_STEP_MS).unref?.());
 // v2.737: 이전 프로세스가 끝내지 못한 스캔(아이실론 du·iDRAC 대역·IP 대역)을 재개 — 재개 함수는 각 폴러 모듈이 import 될 때 등록한다.

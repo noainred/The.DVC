@@ -33,6 +33,8 @@ import { store } from '../store.js';
 import { loadIssueSettings, emailOf } from './settings.js';
 import { issueViewers } from './visibility.js';
 import { load as loadMailSettings } from '../mail/settings.js';
+import { issueDocIndex, onWikiEvent } from '../wiki/store.js';
+import { addInbox } from './inbox.js';
 
 export const BATCH_MS = 60_000;
 export const DUE_SCAN_MS = 30 * 60_000;
@@ -87,17 +89,18 @@ export function chatSafe(t) {
   return String(t ?? '').replace(/</g, '‹').replace(/>/g, '›').replace(/\[/g, '［').replace(/\]/g, '］');
 }
 
-function lineOf(ev, who) {
+export function lineOf(ev, who) {
   const i = ev.issue || {};
   const head = `${i.key} ${capStr(i.title || '', 120)}`;
   switch (ev.type) {
     case 'created': return `${head} — 새 이슈가 할당됐습니다${ev.auto ? '(자동 할당)' : ''} · ${ev.actor}`;
     case 'assigned':
-      if (who === ev.to) return `${head} — 담당자로 지정됐습니다 · ${ev.actor}`;
+      if (who && who === ev.to) return `${head} — 담당자로 지정됐습니다 · ${ev.actor}`; // v2.904 점검 S-6: 팀 채팅(who='')의 할당 해제(to='')가 '지정됐습니다' 로 찍혔다
       return `${head} — 담당자가 ${ev.from || '미할당'} → ${ev.to || '미할당'} 로 바뀌었습니다 · ${ev.actor}`;
     case 'status': return `${head} — 상태 ${st(ev.from)} → ${st(ev.to)} · ${ev.actor}`;
     case 'progress': return `${head} — 진행 ${ev.to == null ? '보고 없음' : `${ev.to}%`}${ev.note ? ` · ${capStr(ev.note, 120)}` : ''} · ${ev.actor}`;
-    case 'comment': return `${head} — ${ev.mentions?.includes(who) ? '댓글에서 언급했습니다' : '새 댓글'} · ${ev.actor}: ${capStr(ev.excerpt || '', 160)}`;
+    // v2.904 점검 S-9: 멘션은 원시 토큰('@kim님')이라 받는 사람 이름과 같은 규칙(resolveMentions — 가장 긴 접두)으로 맞춘다
+    case 'comment': return `${head} — ${who && resolveMentions(ev.mentions, [who]).length ? (ev.edit ? '댓글을 고쳐 언급했습니다' : '댓글에서 언급했습니다') : '새 댓글'} · ${ev.actor}: ${capStr(ev.excerpt || '', 160)}`;
     // 날짜는 포탈 날짜(dayKey — 하루 한 번 판정과 같은 기준). UTC 로 자르면 KST 09:00 이전 기한이 하루 앞으로 적혔다(감사 A2-07·A4-06).
     case 'due': {
       const d = dueDays(i.dueAt);
@@ -105,7 +108,9 @@ function lineOf(ev, who) {
       return `${head} — ${what}(${dayKey(i.dueAt) || '날짜 모름'})`;
     }
     // v2.888 SLA 초과 — 단계 · 목표 · 흐른 시간(보류 시간 제외)
-    case 'sla': return `${head} — SLA ${ev.kind === 'respond' ? '응답' : '해결'} 목표(${minutesText(ev.targetMin)})를 넘었습니다 · 흐른 시간 ${minutesText(ev.usedMin)}(보류 제외)`;
+    case 'sla': return `${head} — SLA ${ev.kind === 'respond' ? '응답' : '해결'} 목표(${minutesText(ev.targetMin)})를 넘었습니다 · 흐른 시간 ${minutesText(ev.usedMin)}(보류 제외${ev.business ? ' · 업무 시간' : ''})`;
+    // v2.908 자동화 규칙 '7일 멈춤'
+    case 'stale': return `${head} — 진행 중인데 ${ev.days}일째 갱신이 없습니다(자동화 규칙)`;
     default: return head;
   }
 }
@@ -139,20 +144,23 @@ export function resolveMentions(tokens, known) {
 /**
  * 이 이벤트를 받을 사람(변경한 본인 제외). 설정에서 끈 종류면 [].
  * 감사 A3-01: **그 이슈의 법인을 볼 수 있는 사람만** — 판정은 issues/visibility.js(자동 할당과 같은 함수). 범위 밖이면 빼고 센다(outOfScope).
+ * v2.908 force — 알림 스위치를 보지 않는다(포탈 알림함은 메일 · 채팅 스위치와 따로 — 받을 사람 판정만 같이 쓴다).
  */
-export function recipientsOf(ev, settings = loadIssueSettings(), viewers = issueViewers()) {
-  if (!eventOn(ev, settings)) return [];
+export function recipientsOf(ev, settings = loadIssueSettings(), viewers = issueViewers(), { force = false } = {}) {
+  if (!force && !eventOn(ev, settings)) return [];
   const i = ev.issue || {};
   const set = new Set();
   if (ev.type === 'created') { if (i.assignee) set.add(i.assignee); }
   else if (ev.type === 'assigned') { if (ev.to) set.add(ev.to); if (ev.from) set.add(ev.from); }
   else if (ev.type === 'status' || ev.type === 'progress') { for (const x of [i.assignee, i.reporter, ...(i.watchers || [])]) if (x) set.add(x); }
   else if (ev.type === 'comment') {
-    const parts = [i.assignee, i.reporter, ...(i.watchers || [])].filter(Boolean);
-    const known = new Set([...viewers.localNames, ...(settings.notify.people || []).map((p) => p.username), ...parts]);
+    const all = [i.assignee, i.reporter, ...(i.watchers || [])].filter(Boolean);
+    const parts = ev.edit ? [] : all; // v2.907 댓글 고치기 — 새로 언급한 사람에게만
+    const known = new Set([...viewers.localNames, ...(settings.notify.people || []).map((p) => p.username), ...all]);
     for (const x of [...parts, ...resolveMentions(ev.mentions, known)]) set.add(x);
   } else if (ev.type === 'due') { if (i.assignee) set.add(i.assignee); }
   else if (ev.type === 'sla') { for (const x of [i.assignee, i.reporter]) if (x) set.add(x); } // v2.888 담당자 · 보고자(+ 팀 채팅)
+  else if (ev.type === 'stale') { if (i.assignee) set.add(i.assignee); } // v2.908 자동화 규칙
   set.delete(ev.actor);
   const out = [];
   for (const u of set) {
@@ -184,12 +192,14 @@ function pushLine(u, line) {
  * **그 스페이스(법인)를 볼 수 있는 사람만**(이슈와 같은 판정 — visibility.js). 팀 채팅에는 싣지 않는다(문서 편집은 채널 소음이 크다).
  */
 export function queueWikiEvent(ev, settings = loadIssueSettings(), viewers = issueViewers()) {
-  const n = settings?.notify;
-  if (!n?.enabled || n.events?.wiki === false) return 0;
+  const n = settings?.notify || {};
+  const mailOn = !!n.enabled && n.events?.wiki !== false;
+  const inboxOn = settings?.inbox?.enabled !== false; // v2.908 포탈 알림함 — 메일 스위치와 따로
+  if (!mailOn && !inboxOn) return 0;
   const pg = ev.page || {};
   const parts = [...(pg.watchers || []), ...(ev.type === 'comment' && pg.createdBy ? [pg.createdBy] : [])].filter(Boolean);
   const known = new Set([...viewers.localNames, ...(n.people || []).map((p) => p.username), ...parts]);
-  const set = new Set(ev.type === 'created' ? [] : parts);
+  const set = new Set(ev.type === 'created' || ev.edit ? [] : parts); // v2.907 댓글 고치기 — 새로 언급한 사람에게만
   const mentioned = new Set(resolveMentions(ev.mentions, known));
   for (const m of mentioned) set.add(m);
   set.delete(ev.actor);
@@ -198,9 +208,11 @@ export function queueWikiEvent(ev, settings = loadIssueSettings(), viewers = iss
   for (const u of set) {
     if (!viewers.canSee(u, pg.vcenterId || '')) { status.outOfScope += 1; continue; }
     const tag = mentioned.has(u) ? '에서 언급했습니다' : '';
-    const line = ev.type === 'comment' ? `${head} — 댓글${tag ? ` · ${tag}` : ''} · ${ev.actor}: ${capStr(ev.excerpt || '', 160)}`
+    const line = ev.type === 'comment' ? `${head} — 댓글${ev.edit ? '(고침)' : ''}${tag ? ` · ${tag}` : ''} · ${ev.actor}: ${capStr(ev.excerpt || '', 160)}`
       : ev.type === 'saved' ? `${head} — v${ev.version} 고침${tag ? ` · 본문${tag}` : ''} · ${ev.actor}${ev.note ? `: ${capStr(ev.note, 120)}` : ''}`
         : `${head} — 새 문서${tag ? ` · 본문${tag}` : ''} · ${ev.actor}`;
+    if (inboxOn) addInbox(u, { kind: mentioned.has(u) ? 'mention' : 'wiki', text: line, pageId: pg.id, vcenterId: pg.vcenterId || '', actor: ev.actor });
+    if (!mailOn) continue;
     pushLine(u, line); count += 1;
   }
   if (count) schedule();
@@ -210,15 +222,28 @@ export function queueWikiEvent(ev, settings = loadIssueSettings(), viewers = iss
 /** 이벤트 하나를 묶음에 넣는다(라우트·기한 검사가 부른다 — 저장소 훅이 연결한다). */
 export function queueIssueEvent(ev) {
   const settings = loadIssueSettings();
-  if (!eventOn(ev, settings)) return 0;
-  const who = recipientsOf(ev, settings);
+  const mailOn = eventOn(ev, settings);
+  const inboxOn = settings.inbox?.enabled !== false; // v2.908 포탈 알림함 — 받을 사람 판정은 같고 스위치는 따로
+  if (!mailOn && !inboxOn) return 0;
+  const viewers = issueViewers();
+  if (inboxOn) {
+    const all = recipientsOf(ev, settings, viewers, { force: true });
+    const known = ev.type === 'comment' ? new Set(resolveMentions(ev.mentions, all)) : null;
+    for (const u of all) addInbox(u, { kind: known?.has(u) ? 'mention' : ev.type, text: lineOf(ev, u), key: ev.issue?.key, vcenterId: ev.issue?.vcenterId || '', actor: ev.actor });
+  }
+  if (!mailOn) {
+    // 메일 · 채팅이 꺼져 있어도 기한 · SLA · 멈춤 기록은 남긴다 — 알림함에 30분마다 같은 줄이 쌓이지 않게(쓰기는 묶음 flush 가 한다)
+    if ((ev.type === 'due' || ev.type === 'sla' || ev.type === 'stale') && ev.dueDay && ev.issue?.key) { pendingDue.set(ev.markKey || ev.issue.key, ev.dueDay); schedule(); }
+    return 0;
+  }
+  const who = recipientsOf(ev, settings, viewers);
   for (const u of who) pushLine(u, lineOf(ev, u));
   // 팀 채팅은 개인 수신자와 따로다(감사 A2-03 — 받을 사람이 없는 이벤트(예: 담당자 없는 새 요청)도 팀 채널에는 간다). 문구는 chatSafe(A3-03).
   if (settings.notify.chat) {
     chatLines.push(chatSafe(lineOf(ev, '')));
     if (chatLines.length > LINES_MAX) { chatExtra += chatLines.length - LINES_MAX; chatLines = chatLines.slice(-LINES_MAX); }
   }
-  if ((ev.type === 'due' || ev.type === 'sla') && ev.dueDay && ev.issue?.key) pendingDue.set(ev.markKey || ev.issue.key, ev.dueDay); // v2.888 SLA 는 'sla:<키>:<단계>'
+  if ((ev.type === 'due' || ev.type === 'sla' || ev.type === 'stale') && ev.dueDay && ev.issue?.key) pendingDue.set(ev.markKey || ev.issue.key, ev.dueDay); // v2.888 SLA 는 'sla:<키>:<단계>' · v2.908 멈춤은 'stale:<키>'
   if (who.length || settings.notify.chat || pendingDue.size) schedule();
   return who.length;
 }
@@ -314,7 +339,8 @@ function loadDueState() {
 export function scanDue(now = Date.now()) {
   status.lastDueScanAt = now;
   const settings = loadIssueSettings();
-  if (!settings.notify?.enabled || settings.notify.events?.due === false) return 0;
+  const inboxOn = settings.inbox?.enabled !== false; // v2.908 — 메일이 꺼져 있어도 알림함에는 간다
+  if ((!settings.notify?.enabled || settings.notify.events?.due === false) && !inboxOn) return 0;
   const today = dayKey(now);
   const s = loadDueState();
   let n = 0; let changed = false;
@@ -328,7 +354,7 @@ export function scanDue(now = Date.now()) {
   }
   // 오래된 기록 정리(며칠 지난 날짜) — 표가 끝없이 자라지 않게.
   const cut = dayKey(now - STATE_KEEP_DAYS * 86_400_000);
-  for (const [k, v] of Object.entries(s)) if (!k.startsWith('sla:') && v < cut) { delete s[k]; changed = true; } // SLA 기록은 scanSla 가 정리한다
+  for (const [k, v] of Object.entries(s)) if (!k.startsWith('sla:') && !k.startsWith('stale:') && v < cut) { delete s[k]; changed = true; } // SLA · 멈춤 기록은 scanSla · scanStale 이 정리한다
   if (changed) saveDueState(s);
   status.dueSent += n;
   return n;
@@ -341,7 +367,8 @@ export function scanDue(now = Date.now()) {
  */
 export function scanSla(now = Date.now()) {
   const settings = loadIssueSettings();
-  if (!settings.sla?.enabled || !settings.notify?.enabled || settings.notify.events?.sla === false) return 0;
+  const mailOn = settings.notify?.enabled && settings.notify.events?.sla !== false;
+  if (!settings.sla?.enabled || (!mailOn && settings.inbox?.enabled === false)) return 0;
   const today = dayKey(now);
   const s = loadDueState();
   const live = new Set();
@@ -355,7 +382,7 @@ export function scanSla(now = Date.now()) {
       const mk = `sla:${r.key}:${kind}`;
       live.add(mk);
       if (s[mk] || pendingDue.has(mk)) continue;
-      queueIssueEvent({ type: 'sla', actor: '', kind, dueDay: today, markKey: mk, targetMin: st0.targetMin, usedMin: st0.usedMin,
+      queueIssueEvent({ type: 'sla', actor: '', kind, dueDay: today, markKey: mk, targetMin: st0.targetMin, usedMin: st0.usedMin, business: !!sla.calendar,
         issue: { key: r.key, title: r.title, assignee: r.assignee, reporter: r.reporter, vcenterId: r.vcenterId || '' } });
       n += 1;
     }
@@ -364,6 +391,35 @@ export function scanSla(now = Date.now()) {
   for (const k of Object.keys(s)) if (k.startsWith('sla:') && !live.has(k)) { delete s[k]; changed = true; }
   if (changed) saveDueState(s);
   status.slaSent += n;
+  return n;
+}
+/**
+ * v2.908 자동화 규칙 '멈춤' — 진행 중인데 staleDays 일 동안 갱신(updatedAt)이 없는 이슈를 담당자에게. 같은 멈춤에는 staleDays 일마다 한 번
+ * (기록 'stale:<키>' = 보낸 포탈 날짜 — 보낸 뒤에 쓴다). 갱신되거나 진행 중이 아니게 되면 기록을 지운다. 규칙이 꺼져 있으면 아무것도 하지 않는다.
+ */
+export function scanStale(now = Date.now()) {
+  const settings = loadIssueSettings();
+  const a = settings.automation || {};
+  if (!a.stale || (!settings.notify?.enabled && settings.inbox?.enabled === false)) return 0;
+  const days = Number(a.staleDays) || 7;
+  const today = dayKey(now);
+  const again = dayKey(now - days * 86_400_000);
+  const s = loadDueState();
+  const live = new Set();
+  let n = 0;
+  for (const r of listIssues({ done: 'open', status: 'progress', limit: 100_000, now }).rows) {
+    const idle = Math.floor((now - (Number(r.updatedAt) || 0)) / 86_400_000);
+    if (!r.assignee || idle < days) continue;
+    const mk = `stale:${r.key}`;
+    live.add(mk);
+    if ((s[mk] && s[mk] > again) || pendingDue.has(mk)) continue;
+    queueIssueEvent({ type: 'stale', actor: '', days: idle, dueDay: today, markKey: mk, issue: { key: r.key, title: r.title, assignee: r.assignee, vcenterId: r.vcenterId || '' } });
+    n += 1;
+  }
+  let changed = false;
+  for (const k of Object.keys(s)) if (k.startsWith('stale:') && !live.has(k)) { delete s[k]; changed = true; }
+  if (changed) saveDueState(s);
+  status.staleSent = (status.staleSent || 0) + n;
   return n;
 }
 function saveDueState(s) {
@@ -426,8 +482,21 @@ function accessFor(name, byName, snap) {
   if (u.demo) return false;
   return { read: scopedVcenterIds(u, snap), write: null };
 }
-/** @returns {Promise<{ sent: number, skipped: number, deferred: number }>} */
+/**
+ * v2.901(점검 P5): 재진입 가드 — 30분 타이머가 앞 실행(메일 줄이 길거나 SMTP 가 느릴 때)과 겹치면 같은 구독자에게 두 번 보낼 수 있었다
+ * (보냄 표지는 발송이 끝난 뒤에만 선다). 형제 flushIssueNotify 처럼 겹치지 않게 하고, 가드에는 시한을 둔다(끝나지 않는 한 번이 영원히 붙잡지 않게).
+ */
+export const WEEKLY_BUSY_MAX_MS = 2 * 3_600_000;
+let weeklyBusyAt = 0;
+/** @returns {Promise<{ sent: number, skipped: number, deferred: number, busy?: boolean }>} */
 export async function scanWeeklyFilters(now = Date.now()) {
+  if (weeklyBusyAt && Date.now() - weeklyBusyAt < WEEKLY_BUSY_MAX_MS) return { sent: 0, skipped: 0, deferred: 0, busy: true };
+  if (weeklyBusyAt) console.warn(`[issues] 필터 주간 메일 — 앞 실행이 ${Math.round(WEEKLY_BUSY_MAX_MS / 3_600_000)}시간 넘게 끝나지 않아 가드를 풀고 다시 돕니다`);
+  const mine = Date.now(); weeklyBusyAt = mine;
+  try { return await scanWeeklyOnce(now); } finally { if (weeklyBusyAt === mine) weeklyBusyAt = 0; }
+}
+export function _resetWeeklyBusyForTest(at = 0) { weeklyBusyAt = at; }
+async function scanWeeklyOnce(now) {
   const out = { sent: 0, skipped: 0, deferred: 0 };
   const parts = portalParts(now);
   if (parts.dow !== 1 || parts.h < 9) return out;
@@ -451,7 +520,9 @@ export async function scanWeeklyFilters(now = Date.now()) {
       let list;
       try {
         const vcs = (snap?.vcenters || []).filter((v) => v?.id && (!access.read || access.read.has(v.id))).map((v) => ({ id: v.id, name: v.name || v.id }));
-        list = listIssues({ query: f.query, access, me: u, limit: WEEKLY_ROWS, now, ctx: queryContext({ me: u, now, vcenters: vcs }) });
+        // v2.904(점검 S-3 — 재현): 화면(listFor)과 같은 맥락 — 'doc' 조건이면 받는 사람 범위의 문서 색인을 싣는다(없으면 'doc ~' 0건 · 'doc is empty' 전부)
+        const docs = /\bdoc\b/i.test(f.query || '') ? issueDocIndex(access) : null;
+        list = listIssues({ query: f.query, access, me: u, limit: WEEKLY_ROWS, now, ctx: queryContext({ me: u, now, vcenters: vcs, docs: docs ? (k) => docs.get(k) || [] : null }) });
       } catch (e) { out.skipped += 1; status.lastError = `필터 ‘${capStr(f.name, 40)}’ 주간 메일: ${String(e?.message || e).slice(0, 160)}`; continue; }
       const { text, html } = weeklyBody(u, f, list);
       try {
@@ -481,10 +552,12 @@ export function startIssueNotify() {
   started = true;
   onIssueEvent((ev) => queueIssueEvent(ev));
   // v2.881 위키 문서 저장 · 댓글 알림 — 같은 묶음 · 같은 범위 판정
-  import('../wiki/store.js').then(({ onWikiEvent }) => onWikiEvent((ev) => queueWikiEvent(ev))).catch((e) => console.warn(`[issues] 위키 알림 연결 실패: ${String(e?.message || e).slice(0, 160)}`));
+  // v2.904: 위키 저장소를 정적으로 가져오므로(주간 메일 doc 색인 — 점검 S-3) 구독도 바로 — 정적 + 동적 이중 import 금지(audit2613c)
+  try { onWikiEvent((ev) => queueWikiEvent(ev)); } catch (e) { console.warn(`[issues] 위키 알림 연결 실패: ${String(e?.message || e).slice(0, 160)}`); }
   const scan = () => {
     try { scanDue(); } catch (e) { console.warn(`[issues] 기한 알림 검사 실패: ${e?.message || e}`); }
     try { scanSla(); } catch (e) { console.warn(`[issues] SLA 알림 검사 실패: ${String(e?.message || e).slice(0, 160)}`); } // v2.888
+    try { scanStale(); } catch (e) { console.warn(`[issues] 멈춤 알림 검사 실패: ${String(e?.message || e).slice(0, 160)}`); } // v2.908 자동화 규칙
     scanWeeklyFilters().catch((e) => console.warn(`[issues] 필터 주간 메일 실패: ${String(e?.message || e).slice(0, 160)}`)); // v2.883
   };
   dueTimer = setInterval(scan, DUE_SCAN_MS);

@@ -11,7 +11,7 @@
 - (원래 3663행) v2.742 — 아이실론 종합 메일(정한 요일·시각에 전 법인 결과 한 통). 규칙은 `isidu/digestRules.js`(순수), 발송·일정·기록은 `isidu/digest.
 - (원래 3690행) v2.745 — 아이실론 대상별 결과 메일 '보내는 때'(조사마다 | 정한 요일·시각) + 종합 메일 Top N/M 개수. 일정 규칙은 `isidu/mailRules.js`(대상)
 - (원래 3737행) v2.739 — 아이실론 디렉터리 사용량 서브메뉴 4개(v2.740 에 서머리를 지워 지금은 3개 — 옛 summary 주소는 법인 현황으로 열린다) · 수집 대상 일괄 변경 · 
-- (원래 5205행) v2.740 — 아이실론: 서머리 삭제(탭 = 법인 현황 → 전 법인 Top 10 → 수집 상태) · 수집 대상 설정은 설정 › 수집 서버 › 아이실론 디렉터리 사용량(슈퍼 관리자
+- (원래 5205행) v2.740 — 아이실론: 서머리 삭제(탭 = 법인 현황 → 전 법인 Top 10 → 수집 상태) · 수집 대상 설정은 설정 › 수집 › 아이실론 디렉터리 사용량(슈퍼 관리자
 - v2.787.1 — 분리 실행 상태 판정: 프로세스가 없다고 본 뒤 rc 를 다시 본다(GONE 오판 경합)
 
 ## 본문
@@ -73,7 +73,7 @@
   · 라우트 4개(GET·PUT digest · POST send-now(실패 409 — 재시도로 두 번 보내지 않게) · POST preview(보내지 않음))는 adminOnly + fullScopeOnly + **requireSuperAdmin**(수집 대상 설정과 같은 기준).
     조회 응답의 `adminTo` 는 화면이 저장 전 입력으로 받는 사람 수(겹침 포함)를 세는 데 쓴다 — **상태(status)·기록·상태 파일에는 주소를 싣지 않는다**(개수만, 테스트 고정).
   · 상태 파일 `isidu-digest-state.json`(registerStateFile · 원자 0600 · 손상 보존 · 기록 20건). `startIsiduDigest` 30초 틱(index.js). edgeSweep `EXCLUDED` 에 '중앙 전용' 사유.
-  · 화면: 설정 › 수집 서버 › 아이실론 디렉터리 사용량 › **종합 메일** 탭(`#/settings/isilon-dirusage/digest` · `IsiduDigestSettings.jsx` · 판정·문구 `isiduDigestText.js`). 탭을 처음 열 때
+  · 화면: 설정 › 수집 › 아이실론 디렉터리 사용량 › **종합 메일** 탭(`#/settings/isilon-dirusage/digest` · `IsiduDigestSettings.jsx` · 판정·문구 `isiduDigestText.js`). 탭을 처음 열 때
     만들고 오가도 유지한다(저장하지 않은 입력이 탭 전환으로 사라지지 않게). '지금 한 번 보내기' 는 바뀐 칸이 있으면 잠근다(저장된 설정으로 보낸다). 미리보기는 `sandbox` iframe(srcDoc).
   · 메일 HTML 은 표 레이아웃 · 인라인 스타일 · 모든 값 이스케이프(`mailHtml.esc`) · 포탈 링크 없음(주소 설정이 없다 — 메뉴 경로를 글로 적는다). **메뉴 이름을 바꾸면 본문 안내도**(웹 테스트가 '› 종합 메일' 을 대조).
     ⚠ 카드 묶음은 `font-size:0;line-height:0` 래퍼 안의 inline-block 이다 — **안쪽 카드가 글자 크기·줄 높이를 되돌리지 않으면 라벨과 값이 겹친다**(Chromium 판독에서 발견).
@@ -122,7 +122,7 @@
     옛 기본값 이전: 파일에 표지(`timeoutDefaultMin`)가 없을 때 **정확히 30분인 대상만** 120분으로(한 번). 저장할 때마다 표지를 쓰므로 그 뒤 사람이 고른 30분은 다시 옮기지 않는다.
   · ⚠ 정직 기록: Chromium 은 목업(데모 대상 3개 · 전부 정상)으로 네 페이지·대상 화면·일괄 변경(미리보기→저장)을 1440/400 에서 봤다. 실패·진행 중 대상이 섞인 화면과
     엣지 담당 대상의 일괄 변경은 단위 테스트로만 확인했다. 실제 아이실론에서 3시간 du 는 돌려 보지 못했다.
-- ⚠⚠ **v2.740 — 아이실론: 서머리 삭제(탭 = 법인 현황 → 전 법인 Top 10 → 수집 상태) · 수집 대상 설정은 설정 › 수집 서버 › 아이실론 디렉터리 사용량(슈퍼 관리자 전용)**
+- ⚠⚠ **v2.740 — 아이실론: 서머리 삭제(탭 = 법인 현황 → 전 법인 Top 10 → 수집 상태) · 수집 대상 설정은 설정 › 수집 › 아이실론 디렉터리 사용량(슈퍼 관리자 전용)**
   (사용자 요청. 웹 `isiduSettingsLink.js`(주소·안내 문구 한 벌)·`IsiduSettingsPage.jsx`(IsiduSettings 를 `page` 로) · `Settings.jsx superOnly`+`visibleSubs` · 서버 `auth/roles.js requireSuperAdmin`.
   회귀 `server/test/isiduSuper2740.test.js`(실제 api 라우터·인증 켬) + 웹 `isiduSettingsMove2740.test.js`):
   · 메뉴 숨김은 표시 게이팅이다 — **서버 설정 API 6경로(settings GET/PUT·bulk·test·mail-now·key)가 `requireSuperAdmin`** 이고 결과 화면·`/run`·보고서·CSV 는 관리자 그대로.

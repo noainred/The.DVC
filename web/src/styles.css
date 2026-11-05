@@ -2349,6 +2349,8 @@ tr.row-sel > td { background: rgba(59, 130, 246, .10); }
 .iss-card:hover, .iss-card:focus-visible { border-color: var(--accent); }
 .iss-card.done { opacity: .82; }
 .iss-card-top, .iss-card-foot { display: flex; align-items: center; gap: 8px; min-width: 0; font-size: 12px; }
+/* v2.908(Chromium 판독): 우선순위 · 기한 · 댓글 · 담당자가 좁은 칸(5열 · 1440)에서 한 줄을 넘어 담당자 동그라미가 카드 밖으로 밀렸다 — 줄바꿈 */
+.iss-card-foot { flex-wrap: wrap; row-gap: 4px; }
 .iss-card-title { font-size: 13.5px; font-weight: 500; line-height: 1.4; overflow-wrap: anywhere; }
 .iss-key { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; color: var(--text-dim); white-space: nowrap; }
 .iss-type { font-size: 12px; font-weight: 700; white-space: nowrap; }
@@ -2571,6 +2573,8 @@ tr.row-sel > td { background: rgba(59, 130, 246, .10); }
 .wiki-comment-head { font-size: 12.5px; display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
 .wiki-mini-act { margin-left: auto; background: none; border: 0; color: var(--text-dim); cursor: pointer; font-size: 12px; }
 .wiki-mini-act:hover { color: var(--red); }
+/* v2.907 Chromium 판독: 댓글 머리에 버튼이 둘(고치기 · 지우기)이면 둘 다 margin-left:auto 라 남는 폭을 나눠 가져 '고치기' 가 줄 가운데 떴다 — 둘째부터는 붙인다 */
+.wiki-mini-act ~ .wiki-mini-act { margin-left: 10px; }
 .wiki-comment-form { display: flex; flex-direction: column; gap: 6px; align-items: flex-start; }
 .wiki-comment-form textarea { width: 100%; }
 /* 편집 · 새 문서 · 이력 · 찾기 · 설정 */
@@ -2733,8 +2737,9 @@ tr.row-sel > td { background: rgba(59, 130, 246, .10); }
 .iss-backlog-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
 .iss-backlog-row { display: flex; align-items: center; gap: 8px; min-width: 0; padding: 4px 0; border-bottom: 1px solid var(--border-soft); font-size: 13px; }
 .iss-backlog-title { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-decoration: none; }
-/* 검색식 · 저장 필터 */
-.iss-filters { display: grid; grid-template-columns: 240px minmax(0, 1fr); gap: 10px; align-items: start; }
+/* 검색식 · 저장 필터 — v2.908(Chromium 판독): 예전 이름 .iss-filters 가 보드 필터 줄 · 활동 · 알림함 · 리포트의 같은 이름(줄 배치 — 위 2339행)을 덮어
+   그 줄들이 240px + 나머지 2열 격자로 늘어났다(v2.882 부터). 필터 화면 배치는 이름을 따로 쓴다. */
+.iss-filterview { display: grid; grid-template-columns: 240px minmax(0, 1fr); gap: 10px; align-items: start; }
 .iss-filter-side { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
 .iss-filter-group { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
 .iss-filter-group > b { font-size: 12.5px; margin-bottom: 2px; }
@@ -2756,7 +2761,7 @@ tr.row-sel > td { background: rgba(59, 130, 246, .10); }
 .iss-query-help { margin-top: 8px; font-size: 12px; }
 .iss-query-help > div { margin-top: 4px; overflow-wrap: anywhere; }
 @media (max-width: 900px) {
-  .iss-filters { grid-template-columns: minmax(0, 1fr); }
+  .iss-filterview { grid-template-columns: minmax(0, 1fr); }
   .iss-sprint-stats { grid-template-columns: minmax(0, 1fr); }
   .iss-sprint-form-grid { grid-template-columns: minmax(0, 1fr); }
   .iss-span2 { grid-column: auto; }
@@ -2908,3 +2913,71 @@ table.svcinv-t .svcinv-stick { position: sticky; left: 0; z-index: 1; background
 .vcd-axes b { display: block; font-size: 13px; margin-top: 3px; overflow-wrap: anywhere; }
 .vcd-axes i { display: block; font-style: normal; font-size: 11px; color: var(--text-faint); margin-top: 3px; overflow-wrap: anywhere; }
 @media (max-width: 1100px) { .vcd-axes { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+
+/* v2.907 댓글 @멘션 자동완성 · 계정/이름 칩 · 댓글 → 이슈 등록(시안 docs/design/wiki-mention) */
+.md-mention-u { font-family: var(--mono); font-size: 0.95em; }
+.md-mention-s { color: var(--text-faint); padding: 0 1px; font-weight: 400; }
+.md-mention-n { color: var(--text); }
+.mention-box { width: 100%; display: flex; flex-direction: column; gap: 0; min-width: 0; }
+.mention-box textarea { width: 100%; }
+.mention-list { width: 100%; max-width: 560px; margin-top: 4px; scroll-margin-bottom: 72px; border: 1px solid var(--accent); border-radius: 10px; background: var(--panel-deep); overflow: hidden; }
+.mention-list-head { display: flex; justify-content: space-between; gap: 8px; flex-wrap: wrap; padding: 6px 10px; font-size: 11.5px; color: var(--text-dim); border-bottom: 1px solid var(--border-soft); }
+.mention-list-empty { padding: 10px 12px; font-size: 12.5px; color: var(--text-dim); }
+.mention-opt { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 40px; padding: 4px 10px; border: 0; border-bottom: 1px solid var(--border-soft); background: none; color: var(--text); font: inherit; text-align: left; cursor: pointer; flex-wrap: wrap; }
+.mention-opt.on, .mention-opt:hover { background: var(--hover); }
+.mention-u { font-family: var(--mono); font-size: 12.5px; font-weight: 600; min-width: 0; overflow-wrap: anywhere; }
+.mention-n { font-size: 12.5px; }
+.mention-r { margin-left: auto; display: inline-flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.mention-tag { font-size: 11px; padding: 1px 7px; border-radius: 999px; background: rgba(139,155,180,.14); color: var(--text-dim); white-space: nowrap; }
+.mention-tag.warn { background: rgba(245,158,11,.16); color: #fcd34d; }
+.mention-mail { font-size: 11px; color: var(--green); white-space: nowrap; }
+.mention-mail.no { color: var(--text-dim); }
+.mention-list-foot { padding: 5px 10px; font-size: 11px; }
+.wiki-mention-chips { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.wiki-issue-pane { width: 100%; border: 1px solid var(--border); border-radius: 10px; background: var(--panel-deep); padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.wiki-issue-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px 12px; }
+.wiki-issue-grid label, .wiki-issue-title { display: flex; flex-direction: column; gap: 4px; font-size: 11.5px; color: var(--text-dim); min-width: 0; }
+.wiki-issue-fixed { display: flex; flex-direction: column; gap: 4px; font-size: 12.5px; min-width: 0; }
+.wiki-issue-fixed .muted { font-size: 11.5px; }
+.wiki-issue-meta { display: flex; flex-wrap: wrap; gap: 4px 12px; }
+.wiki-warn { color: #fcd34d; }
+.wiki-comment-issue { margin-top: 4px; font-size: 12px; display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+
+.iss-origin-link { font-size: 12px; color: var(--accent-2); }
+
+/* v2.907 기능 추천 1~5 — 댓글 고치기 · 다른 스페이스로 · 정리(휴지통 · 깨진 링크) */
+.wiki-move { display: inline-flex; gap: 6px; align-items: center; flex-wrap: wrap; min-width: 0; }
+.wiki-move .input { min-width: 160px; max-width: 100%; }
+.wiki-comment-edit { display: flex; flex-direction: column; gap: 6px; margin-top: 4px; min-width: 0; }
+
+/* ───── v2.908 이슈 기능 6~10(알림함 · 리포트 · 멈춤 배지 · 업무 시간 달력 · 다른 알람) ───── */
+.iss-tab-n { display: inline-flex; align-items: center; justify-content: center; min-width: 18px; height: 18px; margin-left: 6px; padding: 0 5px; border-radius: 9px; font-size: 11px; font-weight: 700; background: var(--red); color: #fff; font-variant-numeric: tabular-nums; }
+.iss-chip.s-stale { background: color-mix(in srgb, var(--amber) 16%, transparent); color: var(--amber); border-color: color-mix(in srgb, var(--amber) 40%, transparent); }
+.iss-inbox-row { align-items: center; }
+.iss-inbox-row.read .iss-link { color: var(--text-dim); font-weight: 400; }
+.iss-inbox-row:not(.read) .iss-link { font-weight: 600; }
+.iss-inbox-kind { flex: 0 0 auto; background: color-mix(in srgb, var(--text-dim) 16%, transparent); color: var(--text-dim); }
+.iss-inbox-kind.k-mention, .iss-inbox-kind.k-assigned, .iss-inbox-kind.k-created { background: color-mix(in srgb, var(--accent) 18%, transparent); color: var(--accent); }
+.iss-inbox-kind.k-sla, .iss-inbox-kind.k-due { background: color-mix(in srgb, var(--red) 14%, transparent); color: var(--red); }
+.iss-inbox-kind.k-stale { background: color-mix(in srgb, var(--amber) 16%, transparent); color: var(--amber); }
+.iss-inbox-read { margin-left: 0; color: var(--text-dim); flex: 0 0 auto; }
+.iss-report { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.iss-report-kpis .kpi .value { font-size: 26px; }
+.iss-trend { display: flex; align-items: flex-end; gap: 6px; height: 140px; padding: 6px 0; overflow-x: auto; }
+.iss-trend-col { flex: 1 0 28px; display: flex; flex-direction: column; align-items: center; gap: 4px; height: 100%; min-width: 28px; }
+.iss-trend-bars { flex: 1 1 auto; width: 100%; display: flex; align-items: flex-end; justify-content: center; gap: 3px; }
+.iss-trend-bar { width: 40%; max-width: 14px; min-height: 2px; border-radius: 3px 3px 0 0; }
+.iss-trend-bar.c, .iss-trend-key.c { background: var(--accent); }
+.iss-trend-bar.d, .iss-trend-key.d { background: var(--green); }
+.iss-trend-col.cur .iss-trend-bar { opacity: .55; }
+.iss-trend-lbl { font-size: 10.5px; color: var(--text-dim); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.iss-trend-key { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin: 0 4px 0 8px; vertical-align: -1px; }
+.iss-report-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 12px; min-width: 0; }
+.iss-alert-kinds { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 6px 14px; margin: 6px 0; }
+.iss-alert-kind { display: flex; align-items: center; gap: 8px; min-width: 0; flex-wrap: wrap; }
+.iss-alert-kind .iss-check { flex: 1 1 160px; min-width: 0; }
+.iss-alert-kind .select { width: auto; }
+.iss-cal { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; padding-top: 8px; border-top: 1px dashed var(--border); }
+.iss-time { width: 110px; }
+.iss-cal-row { flex-wrap: wrap; }
+.iss-cal-row > * { min-width: 0; }
