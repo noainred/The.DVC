@@ -6,7 +6,7 @@ import {
   PORTAL_ALARM_RULE_TEXT, shortTs,
 } from './vcdTabs.js';
 
-describe('vCenter 탭 12개(v2.890) — 목록 · 옛 키 · 기억', () => {
+describe('vCenter 탭 12개(v2.894) — 목록 · 옛 키 · 기억', () => {
   it('vSphere Client 순서 그대로 12개 · 이모지 없음', () => {
     expect(VCD_TABS.map((t) => t.label)).toEqual([
       '요약', '모니터', '구성', '사용 권한', '데이터 센터', '호스트 및 클러스터', 'VM', '데이터스토어', '네트워크',

@@ -35,7 +35,7 @@
 - (v2.883 추가) C-1 — 이슈 본문 마크다운(breaks) · 위키 체크리스트 체크(줄 번호 · 판 없이) · 이슈 찾기 · 이슈 연결 · 주간 메일 구독
 - (v2.888 추가) C-2 · C-3 — 위키 즐겨찾기 · 최근 본 · 많이 본 · 슬래시 명령 · 이슈 CSV · 보드 끌기 · 보드에 필터 · 작업 기록 · SLA · 버전 · 쓰기 응답 범위
 - (v2.889 추가) C-4 · C-5 — 첨부(인증 붙여 받기 · attach: 주소) · 포탈 매크로 · 포함 · 인라인 댓글 · 담당/당번 · 관리자 템플릿 · 캘린더 · 내보내기
-- (v2.890 추가) vCenter 상세 탭 12개(시안 `docs/design/vcenter-tabs` ①~⑦) — 탭 목록 · 옛 키 · 하위 칸 · 묶음은 `views/vcd/vcdTabs.js` 하나 · 도구 데이터는 그 도구 권한일 때만 · 포탈 알람은 '포탈 규칙'
+- (v2.894 추가) vCenter 상세 탭 12개(시안 `docs/design/vcenter-tabs` ①~⑦) — 탭 목록 · 옛 키 · 하위 칸 · 묶음은 `views/vcd/vcdTabs.js` 하나 · 도구 데이터는 그 도구 권한일 때만 · 포탈 알람은 '포탈 규칙'
 - (원래 5663행) v2.708 — 드롭다운은 공용 `Select`·`DataList` 하나다(자동 정렬)
 - (원래 5801행) 특수 기능 화면(v2.679) — 표시 이름·설명·개발 단계는 '덮어쓰기' 이고 키는 그대로다
 - (원래 5848행) 접속 공지 팝업 · 게시판(v2.722)
@@ -106,7 +106,7 @@
   · **포탈 기본 메뉴는 여전히 `topMenu.js MENU_GROUPS` 하나**다. 저장 메뉴는 주소(탭·도구+조각)만 담고 라벨·id 는 화면이 기본 메뉴·카탈로그에서
     채운다(`sideMenu.resolveMenu` — 서버는 라벨을 모른다). 모르는 항목은 버리고 `unknown` 으로 센다(지어내지 않는다). `locate`·`visibleMenu`·`entryOf` 는
     groups 인자를 받아 사용자 메뉴에도 그대로 쓴다 — **권한 판정은 바뀌지 않는다**(메뉴에 넣어도 넓어지지 않고, 뺀 화면은 카드·주소로 열린다).
-  · ⚠⚠ **저장 모양의 계약**: `{v:1, groups:[{id,label?,tab}|{id,label?,children:[{tab}|{tool,seg?}]}]}` — 같은 항목은 앞의 것만, 빈 그룹은 저장 시 제외,
+  · ⚠⚠ **저장 모양의 계약**: `{v:1, groups:[{id,label?,tab}|{id,label?,tool,seg?}|{id,label?,children:[{tab}|{tool,seg?}]}]}` — 같은 항목은 앞의 것만(단독 · 그룹 통틀어), 빈 그룹은 저장 시 제외,
     상한(그룹 40·항목 400·라벨 40)을 넘으면 400(`field`). 사용자 그룹 id 는 `custom-n`. 특수 기능은 단독 항목(`#/tools`)이다 — 분류 바로가기 하위 메뉴는
     사용자 결정으로 두지 않았다(SpecialTools.jsx 무변경).
   · **배포는 superAdmin 만**(`requireSuperAdmin` — `isSuperAdmin(req.user)`, 범위 superAdmin 도 403 `menuFleetOnly`). `force` 는 직접 만든 사용자의 메뉴를
@@ -118,6 +118,12 @@
     걸지 말 것) / drawer(<720px, 닫히면 `visibility:hidden`). 높이는 App 이 ResizeObserver 로 잰 `--topbar-h`·`--statusbar-h`(숫자를 박지 않는다).
     `localStorage ui.sidebar`('rail'|'open', try/catch) · 저장값 없으면 1200px 미만은 레일. **CSS 는 `.sb`·`.me`·`.app-body` 아래로만**, 전역 `.tab` 그대로,
     uppercase 금지 — `shellStyles.test.js` 가 고정한다. v2.556·v2.573·v2.725 의 상단 메뉴 규칙(`.topbar .tabs`·`.subtabs`·1600px 한 줄)은 지웠다.
+  · **v2.891 단독 메뉴**(사용자 요청 '메뉴 수정에서 단독 메뉴로 추가하는 기능' · 선택 '바로 구현 · 표준 검증'): 아무 항목(그룹 안 항목 · 특수 기능 도구)이나
+    그룹 없이 한 줄로 — 최상위 `{id,tab}`(예전부터) · `{id,tool,seg?}`(새 모양 — 서버 `normalizeMenu` 가 받는다). 판정은 `sideMenu.isSingle` 하나(children 배열 없음).
+    편집: 오른쪽 '+ 단독'(`addSingle` — 추가 대상 그룹 없이 '특수 기능' 앞) · 그룹 항목 '단독'(`detachToSingle` — 그 그룹 바로 아래) · 만든 단독만 ✕
+    (기본 단독은 `fixedSingleKeys` — 자리만). 새 단독(custom id)은 **라벨 · 아이콘을 저장하지 않는다** — 해석 때 항목 라벨(이름 덮어쓰기)과 그 항목의
+    기본 그룹 아이콘(`iconOf` · 특수 기능에서 더한 도구는 특수 기능)으로 채운다. `locate` 는 단독 도구 화면을 그 단독(child null)으로 가리킨다.
+    회귀 웹 `sidebar/singleMenu2891.test.js` · 서버 `userMenuSingle2891.test.js`.
   · 편집 창(`MenuEditor`)의 '바뀐 항목' 은 `menuEdit.changeCount`(LCS 기반 최소 개수 — 항목 하나를 지우면 1 이지 밀린 뒤 항목 전부가 아니다).
     저장·삭제·복원·배포는 `putJson/delJson/postJson` 이고 403 은 `ErrorBox error={}` 로 권한 안내.
   · ⚠ 정직 기록: Chromium 은 인증을 켠 목 서버(비밀번호 로그인 재정의 `login-policy-users.txt`)에서 admin·noainred(super_admin)·operator·viewer × 1440/400 을
@@ -555,7 +561,7 @@
   ⑤ 남은 하위 작업(에픽이면 소속 이슈)이 있으면 서버가 409 `open-children` 로 묻고 화면은 확인을 받아 `closeChildren:true` 로 다시 보낸다(취소하면 아무것도 바꾸지 않는다).
      자식이 있는 이슈의 진행률 입력은 잠기고 메모만 보낸다(서버 409 `progress-auto` 와 같은 판정).
   ⑥ 스프린트 · 필터 공유 버튼은 서버 값(`canSprints` · `canShareFilters` — 전체 범위 쓰기 계정)일 때만 그린다. 필터 저장은 쓰기 역할만(viewer 상태변경 예외를 늘리지 않았다).
-- **v2.890 — vCenter 상세 탭 12개(사용자 요청 'vSphere Client 처럼' · 승인 시안 `docs/design/vcenter-tabs` ①~⑦ · 기본값 1~7)**. 화면 `views/VCenterDetail.jsx` + `views/vcd/`(SummaryTab · MonitorTab · ConfigureTab · InventoryTabs · VcdParts · useOnce). 회귀 `views/vcd/vcdTabs.test.js` · `vcdTabsRender.test.jsx`.
+- **v2.894 — vCenter 상세 탭 12개(사용자 요청 'vSphere Client 처럼' · 승인 시안 `docs/design/vcenter-tabs` ①~⑦ · 기본값 1~7)**. 화면 `views/VCenterDetail.jsx` + `views/vcd/`(SummaryTab · MonitorTab · ConfigureTab · InventoryTabs · VcdParts · useOnce). 회귀 `views/vcd/vcdTabs.test.js` · `vcdTabsRender.test.jsx`.
   - 탭 목록 · 옛 키('trend' → 모니터 › 성능) · 하위 칸 · 데이터센터 묶음 · 확장 상태 · 버전 행은 **`vcd/vcdTabs.js` 하나**. 기본 탭은 예전과 같은 '호스트 및 클러스터', 그 뒤로는 브라우저 기억(`vcd.tab`, try/catch).
   - 탭 줄은 **한 줄**(`.vcd-views` nowrap + overflow-x) — 1440px 에서 12개가 들어가는 폭(패딩 6px 10px)이다. 탭을 더하거나 이름을 늘리면 1440 에서 다시 잰다(넘치면 마지막 탭이 잘려 보인다).
   - 새 탭은 **새 수집이 없다** — 사이트 about · /hosts · /vms · /datastores · /networks · /alarms + 특수 기능 API(licenses · cluster-check · vm-tags · report/certs · host-hygiene · solutions · report/changes)를 `vcenterId` 로 거른다. 그 도구 권한(`toolAllowed`)이 없으면 **부르지 않고** `toolDenied()` 403 을 `ErrorBox` 로 보인다(숨기지 않는다).

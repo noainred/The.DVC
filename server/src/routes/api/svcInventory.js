@@ -26,6 +26,7 @@ import { isDemoGuest, isAdminDetailUser } from '../../auth/demoGuest.js';
 import { todayStamp } from '../../util/dayKey.js';   // 파일명 날짜 = 설정 오프셋의 '오늘'(UTC 날짜 금지 — v2.582 BUG-3)
 import { addressMatcher, maskedAddressName } from '../../auth/addressMask.js';
 import { store } from '../../store.js';
+import { loadVcenterConfig } from '../../config.js';
 import { memoJson, scopeKey } from './shared.js';
 import { logAudit } from '../../audit.js';
 import { numOrNull } from '../../util/numOrNull.js';
@@ -38,7 +39,7 @@ import { latestUsage } from '../../bmusage/db.js';
 import { vmRefOf, vmTagsOf, tagsPartialOf } from '../../tags/analyze.js';
 import { buildInventory, hostKeyOf } from '../../servicemap/build.js';
 import { CORP_OPS, FLEET_OPS } from '../../servicemap/ops.js';
-import { getMap, getPins, storeRev, storeLoadError, mutateMap, mutatePins, flushStore, resetCorrupt, LIMITS } from '../../servicemap/store.js';
+import { getMap, getPins, peekMap, peekPins, storeRev, storeLoadError, mutateMap, mutatePins, flushStore, resetCorrupt, LIMITS } from '../../servicemap/store.js';
 import { mergeLatestRows, rowsByAgentKeyOf, makeCapOf, clampEdgeTs } from './corpUsage.js';
 
 const toolsPerm = requirePerm('tools');
@@ -71,18 +72,76 @@ export function backupOf(view, now) {
   return view.job ? 'fail' : 'none';
 }
 
-// ───────── 입력 수집(스냅샷 세대 + 태그 카테고리마다 1회) ─────────
-let _gather = { key: '', promise: null };
-let _inputRev = 0;   // 저장소 밖 입력(스캔 엔트리 라벨)을 이 화면에서 바꿨을 때 응답 캐시를 넘긴다
+/**
+ * 베어메탈의 스캔 엔트리(순수 — 5차 R6·R18). 등록부 서버는 등록부 scanRangeId, 엣지 push 는 serverId, 수집 서버 pull 은 `remote:<수집기>:<서버>` 로 찾는다.
+ * scan 이 없으면 이유: 'unknown-entry'(엔트리 id 는 왔는데 중앙 등록부에 없음) · 'old-source'(엣지·수집 서버가 필드를 보내지 않음 = 구버전) ·
+ * 'not-reported'(엣지·수집 서버 출처인데 그 서버의 등록 정보가 오지 않음 — OME 장치·서버 목록을 보내지 않는 수집 서버·아직 못 받음) · 없음(수동 등록).
+ * ⚠ 'not-reported' 를 수동 등록으로 단정하지 말 것(2차 반증 1 — 값이 없는 이유를 단정하지 않는다).
+ * 수집 서버 경로가 엔트리 id 를 주지 않으면(null·undefined) **같은 서비스 태그의 엣지 push 값**을 쓴다(2차 반증 5 — 혼합 버전 기간에
+ * 2.887~2.892 엣지가 이미 보낸 id 를 버리지 않게). 태그가 둘 이상의 엣지 기록에서 다른 값이면 쓰지 않는다(edgeScanByTag 에 넣지 않는다).
+ */
+export function scanInfoOf(b, { edgeScan = new Map(), remoteScan = new Map(), regById = new Map(), scanEntries = new Map(), edgeScanByTag = new Map() } = {}) {
+  const sid = t(b?.serverId);
+  const viaEdge = b?.source === 'edge' || b?.source === 'remote';
+  let reported = b?.source === 'edge' ? edgeScan.get(sid) : b?.source === 'remote' ? remoteScan.get(sid) : t(regById.get(sid)?.scanRangeId);
+  if (b?.source === 'remote' && typeof reported !== 'string') {
+    const byTag = edgeScanByTag.get(lc(b?.serviceTag));
+    if (typeof byTag === 'string') reported = byTag;
+  }
+  const entryId = typeof reported === 'string' ? reported : '';
+  const e = entryId ? scanEntries.get(entryId) : null;
+  if (e) return { scan: { entryId, label: e.service }, scanWhy: undefined };
+  if (entryId) return { scan: null, scanWhy: 'unknown-entry' };
+  if (viaEdge && reported === null) return { scan: null, scanWhy: 'old-source' };
+  if (viaEdge && reported === undefined) return { scan: null, scanWhy: 'not-reported' };
+  return { scan: null, scanWhy: undefined };
+}
+/** 엣지 push 의 서비스 태그 → 스캔 엔트리 id(문자열만 · 같은 태그가 다른 값이면 뺀다). 순수. */
+export function edgeScanByTagOf(edgeServers = []) {
+  const out = new Map(); const bad = new Set();
+  for (const s of edgeServers || []) {
+    const tag = lc(s?.serviceTag); if (!tag || bad.has(tag) || typeof s?.scanRangeId !== 'string') continue;
+    const v = t(s.scanRangeId);
+    if (out.has(tag) && out.get(tag) !== v) { out.delete(tag); bad.add(tag); continue; }
+    out.set(tag, v);
+  }
+  return out;
+}
+
+// ───────── 입력 수집(스냅샷 세대 + 태그 카테고리 + 입력 세대마다 1회) ─────────
+let _gather = { key: '', rev: -1, promise: null };
+let _inputRev = 0;   // 저장소 밖 입력을 다시 읽어야 할 때(입력 다시 읽기 · 이 화면의 스캔 라벨 변경) 올린다 — 응답 캐시·판정 memo 도 넘긴다
+const GATHER_CHAIN_MAX_MS = 15_000;
+/**
+ * 단일 비행: 같은 키·같은 입력 세대면 진행 중인 수집을 함께 기다린다.
+ * 입력 세대만 바뀌었으면(같은 스냅샷 — 입력 다시 읽기·라벨 변경) **진행 중인 수집이 끝난 뒤** 새로 모은다 — 예전에는 `_gather` 만 비워
+ * 진행 중 수집과 새 수집이 겹쳐 두 벌 돌았다(2차 반증 4). 앞 수집이 멈춰도 뒤가 영원히 묶이지 않게 기다림에 상한을 둔다.
+ */
 async function gather(snap, tagCategory) {
   const key = `${snap?.generatedAt || 0}|${tagCategory}`;
-  if (_gather.key === key && _gather.promise) return _gather.promise;
-  const p = gatherNow(snap, tagCategory).catch((e) => { if (_gather.promise === p) _gather = { key: '', promise: null }; throw e; });
-  _gather = { key, promise: p };
+  if (_gather.key === key && _gather.rev === _inputRev && _gather.promise) return _gather.promise;
+  const prev = _gather.key === key ? _gather.promise : null;
+  const rev = _inputRev;
+  const p = (async () => {
+    if (prev) {
+      let tm;
+      await Promise.race([prev.catch(() => {}), new Promise((r) => { tm = setTimeout(r, GATHER_CHAIN_MAX_MS); tm.unref?.(); })]);
+      clearTimeout(tm);
+    }
+    return gatherNow(snap, tagCategory);
+  })().catch((e) => { if (_gather.promise === p) _gather = { key: '', rev: -1, promise: null }; throw e; });
+  _gather = { key, rev, promise: p };
   return p;
 }
 
+const _gatherStats = { runs: 0, inFlight: 0, maxInFlight: 0 };
+/** 시험용 — 입력 수집이 몇 번 돌았고 동시에 몇 벌까지 겹쳤는가(2차 반증 4 회귀). */
+export function _gatherStatsForTest() { return { ..._gatherStats }; }
 async function gatherNow(snap, tagCategory) {
+  _gatherStats.runs += 1; _gatherStats.inFlight += 1; _gatherStats.maxInFlight = Math.max(_gatherStats.maxInFlight, _gatherStats.inFlight);
+  try { return await gatherNowInner(snap, tagCategory); } finally { _gatherStats.inFlight -= 1; }
+}
+async function gatherNowInner(snap, tagCategory) {
   const sourceErrors = [];
   const now = Date.now();
   const [{ getFleetInventory, fleetKeySources }, { loadRegistry }, { getInventory }, { allRemoteServers }, edgeUsage, { attributeBareMetalFromSnap },
@@ -92,6 +151,7 @@ async function gatherNow(snap, tagCategory) {
     import('../../metrics/unreadVcenters.js'), import('../../central/fleet.js'), import('../../idrac/scanRanges.js'),
     Promise.all([import('../../partfault/db.js'), import('../../partfault/settings.js')]), import('../../bareos/registry.js'), import('../../bareos/vmView.js'),
   ]);
+  const bareosSet = await import('../../bareos/settings.js');
   const vcenters = snap?.vcenters || [];
   const corpNames = new Map(vcenters.filter((v) => v && t(v.id)).map((v) => [t(v.id), t(v.name) || t(v.id)]));
   const unread = (() => { try { return unreadVcenterReasons(snap); } catch { return new Map(); } })();
@@ -121,20 +181,32 @@ async function gatherNow(snap, tagCategory) {
   };
 
   // ── Bareos(VM 백업) — (vcenterId, vmId) 조인(이름 아님 — 4차 반증 11) ──
+  // 법인 · vCenter · Bareos 는 1:1:1 — 백업 칸은 **그 법인에 Director 매핑(sites[].vcenterId)이 있을 때만** 센다(5차 검토 M1: 예전에는
+  // 함대 어디든 잡이 하나라도 있으면 Bareos 를 안 쓰는 법인 VM 까지 '잡 없음' 으로 셌다). 매핑이 없는 법인 = undefined(해당 없음).
   let backupMeta = { used: false };
   let bareosBy = null;
+  let bareosCorps = new Set();
+  let bareosSettingsUnreadable = false;
+  // ⚠ loadSettings 는 손상이어도 던지지 않고 빈 설정을 준다 — 손상은 settingsLoadError 로만 안다(5차 1차 반증 2: 손상이 '해당 없음' 으로 보였다).
   try {
-    if (bareosReg.registryLoadError()) { backupMeta = { used: true, unreadable: true }; bareosBy = null; }
+    if (bareosSet.settingsLoadError()) throw new Error('Bareos 설정 파일을 읽지 못했습니다');
+    bareosCorps = new Set((bareosSet.loadSettings().sites || []).map((s) => t(s?.vcenterId)).filter(Boolean));
+  } catch (e) { bareosSettingsUnreadable = true; sourceErrors.push(`Bareos 설정: ${String(e?.message || e).slice(0, 160)}`); }
+  try {
+    if (bareosSettingsUnreadable) backupMeta = { used: true, unreadable: true };
+    else if (bareosReg.registryLoadError()) backupMeta = bareosCorps.size ? { used: true, unreadable: true, corps: bareosCorps.size } : { used: false };
     else {
       const jobs = bareosReg.jobDigests();
-      if (jobs.length) {
-        bareosBy = new Map(jobs.map((j) => [`${t(j.vcenterId)}|${t(j.vmId)}`, j]));
-        backupMeta = { used: true };
-      }
+      // 매핑이 지워졌어도 원장에 잡이 남은 법인은 센다(반증 10 — 옛 잡이 '해당 없음' 으로 가려지지 않게)
+      for (const j of jobs) if (t(j.vcenterId)) bareosCorps.add(t(j.vcenterId));
+      bareosBy = new Map(jobs.map((j) => [`${t(j.vcenterId)}|${t(j.vmId)}`, j]));
+      backupMeta = bareosCorps.size ? { used: true, corps: bareosCorps.size } : { used: false };
     }
   } catch (e) { backupMeta = { used: true, unreadable: true }; sourceErrors.push(`Bareos 원장: ${String(e?.message || e).slice(0, 160)}`); }
   const backupOfVm = (vm) => {
     if (!backupMeta.used) return undefined;
+    if (bareosSettingsUnreadable) return null;   // 어느 법인이 Bareos 를 쓰는지 모른다 — 모름
+    if (!bareosCorps.has(t(vm.vcenterId))) return undefined;
     if (backupMeta.unreadable) return null;
     const j = bareosBy?.get(`${t(vm.vcenterId)}|${t(vm.id)}`) || null;
     return backupOf(j ? bareosVmView(j, '') : { job: false }, now);
@@ -192,7 +264,11 @@ async function gatherNow(snap, tagCategory) {
   for (const c of cu.corps || []) for (const x of c.servers || []) judged.set(x.role === 'bm' ? `${c.vcenterId}|bm|${x.key}` : `${c.vcenterId}|virt|${lc(x.name)}`, x);
   for (const x of cu.unassigned?.servers || []) judged.set(`|bm|${x.key}`, x);
   const regById = new Map(registry.map((r) => [t(r.id), r]));
-  const edgeScan = (() => { try { return new Map(getEdgeFleetServers().map((s) => [t(s.serverId), t(s.scanRangeId)])); } catch { return new Map(); } })();
+  // 스캔 엔트리 id — 엣지 push(serverId) · 수집 서버 pull(remote:<수집기>:<엣지 서버 id>). 값 null = 보고한 쪽이 구버전(필드 없음 — 5차 R6·R18).
+  const edgeServers = (() => { try { return getEdgeFleetServers() || []; } catch { return []; } })();
+  const edgeScan = new Map(edgeServers.map((s) => [t(s.serverId), typeof s.scanRangeId === 'string' ? t(s.scanRangeId) : null]));
+  const remoteScan = new Map(remoteServers.map((s) => [`remote:${t(s.collectorId)}:${t(s.id)}`, typeof s.scanRangeId === 'string' ? t(s.scanRangeId) : null]));
+  const edgeScanByTag = edgeScanByTagOf(edgeServers);
   const entries = (() => { try { return listScanRanges(); } catch (e) { sourceErrors.push(`스캔 대역: ${String(e?.message || e).slice(0, 160)}`); return []; } })();
   const scanEntries = new Map(entries.map((e) => [t(e.id), { service: t(e.service), datacenterId: t(e.datacenterId), range: (e.ranges || []).slice(0, 4).join(', ') }]));
   const isAddr = addressMatcher(registry.map((r) => r.host).filter(Boolean));
@@ -206,13 +282,14 @@ async function gatherNow(snap, tagCategory) {
     const id = idOf(b);
     const x = judged.get(`${vc}|bm|${id.key}`) || null;
     const sid = t(b.serverId);
-    const entryId = b.source === 'edge' ? (edgeScan.get(sid) || '') : t(regById.get(sid)?.scanRangeId);
-    const e = entryId ? scanEntries.get(entryId) : null;
+    const { scan, scanWhy } = scanInfoOf(b, { edgeScan, remoteScan, regById, scanEntries, edgeScanByTag });
+    // 법인 귀속이 없는 이유(5차 R18 둘째 절): 귀속 판정 자체가 실패 · 같은 서비스 태그가 두 법인에 걸려 보류 · 어느 규칙에도 맞지 않음
+    const corpWhy = vc ? undefined : attr.error ? 'attr-error' : attr.conflictTags?.has(lc(b.serviceTag)) ? 'tag-conflict' : undefined;
     let powered = null;
     try { const inv = b.source === 'edge' ? null : getInventory(sid); const ps = lc(inv?.powerState); powered = ps === 'on' ? true : ps === 'off' ? false : null; } catch { powered = null; }
     members.push({
       key, keyKind, kind: 'bm', corp: vc, name: t(b.name), nameIsAddr: isAddr(t(b.name)), serviceTag: t(b.serviceTag), source: t(b.source), remoteAgent: t(b.remoteAgent),
-      scan: e ? { entryId, label: e.service } : null, powered, cores: x?.cores ?? null, memGB: x?.memGB ?? null,
+      scan, ...(scanWhy ? { scanWhy } : {}), ...(corpWhy ? { corpWhy } : {}), powered, cores: x?.cores ?? null, memGB: x?.memGB ?? null,
       usage: x ? { state: x.state, cpuPct: x.cpuPct, memPct: x.memPct, src: x.src } : { state: 'unread' },
       faults: faultsOf(b.serviceTag, sid), corpRule: b.vcSource === 'corp-rule',
     });
@@ -226,7 +303,7 @@ async function gatherNow(snap, tagCategory) {
   }
   let bmBlocked = false;
   try { bmBlocked = (fleetKeySources(snap).unreadable || []).some((u) => u.source !== 'vcenter'); } catch { bmBlocked = true; }
-  return { members, hostByKey, unreadCorps, bmBlocked, corpNames, scanEntries, faultsMeta, backupMeta, sourceErrors, at: now };
+  return { members, hostByKey, unreadCorps, bmBlocked, corpNames, scanEntries, faultsMeta, backupMeta, bareosCorps, sourceErrors, at: now };
 }
 
 // ───────── 권한 ─────────
@@ -244,20 +321,80 @@ function writeKeyOf(user, snap) {
   const w = writeScopedVcenterIds(user, snap);
   return w ? [...w].sort().join(',') : 'all';
 }
-const writableOf = (user, snap, vc) => writerOk(user) && inUserWriteScope(user, snap, vc);
+// 등록 해제된 vCenter(스냅샷에 없음)는 쓰기 연산이 전부 404 라 버튼을 열지 않는다(5차 반증 R2 — 예전에는 writable:true 로 버튼이 열렸다).
+const inSnap = (snap, vc) => (snap?.vcenters || []).some((v) => t(v.id) === t(vc));
+const writableOf = (user, snap, vc) => writerOk(user) && inSnap(snap, vc) && inUserWriteScope(user, snap, vc);
+/** vCenter 등록부(vcenters.json)의 id — 못 읽었거나 비었으면 null(모른다). 비밀은 쓰지 않고 id 만 본다. */
+function registryIds() {
+  try { const l = (loadVcenterConfig().vcenters || []).map((v) => t(v?.id)).filter(Boolean); return l.length ? new Set(l) : null; } catch { return null; }
+}
+/**
+ * '알려진 법인' = 스냅샷 vCenter ∪ 등록부 vCenter. 둘 중 하나라도 비었거나 못 읽었으면 null — 그때는 어느 법인도 '등록 해제' 로 보지 않는다.
+ * ⚠ 스냅샷만 보면 안 된다(5차 1차 반증 1 — 재현): 등록 직후 스냅샷이 갱신되기 전(수 초~수십 초)과 mock 데이터 소스(등록부를 무시)에서
+ *   등록된 vCenter 가 '등록 해제' 로 보이고 법인 항목 정리가 그 법인 서비스·규칙을 지웠다.
+ */
+function knownCorpsOf(snap) {
+  const s = (snap?.vcenters || []).map((v) => t(v?.id)).filter(Boolean);
+  const reg = registryIds();
+  if (!s.length || !reg) return null;
+  return new Set([...s, ...reg]);
+}
 const fleetAdmin = (user, snap) => isAdminDetailUser(user) && !scopedVcenterIds(user, snap);   // 관리자 판본 판정은 isAdminDetailUser 하나(role 직접 비교 금지)
 
 // ───────── 응답 조립 ─────────
+// 읽기 경로는 동결 참조(복사 없음 — 5차 검토 R5: 요청마다 고정 5만 건 깊은 복사 114ms). 쓰기는 mutate* 만.
 function loadState() {
-  return { map: getMap(), pins: getPins().pins, rev: storeRev(), err: storeLoadError() };
+  return { map: peekMap(), pins: peekPins(), rev: storeRev(), err: storeLoadError() };
 }
+/**
+ * 판정·집계 결과 memo(5차 검토 M10/R5 — 실측: 6,500 구성원 buildInventory 중앙값 77ms 를 구성원·큐·후보·CSV 요청마다 되풀이했고,
+ * 쓰기 한 번에 화면이 3요청을 보냈다). 키 = 스냅샷 세대 · 저장소 rev · 입력 세대(gather 시각 · inputRev) · 알려진 법인 · 범위 · 관리자 판본.
+ * '세대가 바뀌면 무엇이 지워지는가': 키의 어느 값이 바뀌어도 새 키다 — 쓰기(rev) · 새 스냅샷 · 입력 다시 읽기 · 라벨 변경 · vCenter 등록부 변경.
+ * TTL 12초 · 최대 4개(범위가 다른 계정 몇 명). 결과는 동결 참조를 품으므로 호출부는 고치지 않는다.
+ */
+const INV_MEMO_MS = 12_000;
+const INV_MEMO_MAX = 4;
+const _invMemo = new Map();
+const _invStats = { hits: 0, misses: 0 };
+export function _invMemoStats() { return { ..._invStats, size: _invMemo.size }; }
 async function inventoryFor(req, snap) {
   const st = loadState();
   const g = await gather(snap, st.map.settings.tagCategory || '');
   const allowed = scopedVcenterIds(req.user, snap);
   const admin = isAdminDetailUser(req.user);
-  const inv = buildInventory({ members: g.members, map: st.map, pins: st.pins, hostByKey: g.hostByKey, allowed, unreadCorps: g.unreadCorps, bmBlocked: g.bmBlocked, corpNames: g.corpNames, scanEntries: g.scanEntries, adminView: admin });
+  const known = knownCorpsOf(snap);
+  const key = [snap?.generatedAt || 0, st.rev, g.at, _inputRev, known ? [...known].sort().join(',') : '-', allowed ? [...allowed].sort().join(',') : '*', admin ? 'a' : 'u'].join('|');
+  const now = Date.now();
+  const hit = _invMemo.get(key);
+  if (hit && now - hit.at < INV_MEMO_MS) { _invStats.hits += 1; return { st, g, inv: hit.inv, allowed, admin }; }
+  _invStats.misses += 1;
+  const inv = buildInventory({ members: g.members, map: st.map, pins: st.pins, hostByKey: g.hostByKey, allowed, unreadCorps: g.unreadCorps, bmBlocked: g.bmBlocked, corpNames: g.corpNames, scanEntries: g.scanEntries, adminView: admin, knownCorps: known });
+  for (const [k, v] of _invMemo) if (now - v.at >= INV_MEMO_MS) _invMemo.delete(k);
+  while (_invMemo.size >= INV_MEMO_MAX) _invMemo.delete(_invMemo.keys().next().value);
+  _invMemo.set(key, { at: now, inv });
   return { st, g, inv, allowed, admin };
+}
+
+/**
+ * '입력 다시 읽기'(5차 검토 M2 · 결정 ② 쓰기 계정) — 입력 수집(gather)은 스냅샷 세대마다 한 번이라, 이 화면 밖에서 바뀐 입력
+ * (등록부 법인 귀속 · iDRAC 화면의 스캔 라벨 · 부품 장애 · Bareos 원장)은 다음 수집 주기까지 옛값이었다. 쓰기 계정이 지금 다시 읽게 한다.
+ * 28법인 조인 비용 보호로 프로세스당 FRESH_MIN_MS 에 한 번(화면은 meta.limits 의 값으로 안내 — 숫자를 박지 않는다).
+ */
+const FRESH_MIN_MS = 30_000;
+let _lastFresh = 0;
+export function _resetFreshForTest() { _lastFresh = 0; }
+function forceFresh(now = Date.now()) {
+  if (now - _lastFresh < FRESH_MIN_MS) return { ok: false, waitSec: Math.ceil((FRESH_MIN_MS - (now - _lastFresh)) / 1000), agoSec: Math.max(0, Math.floor((now - _lastFresh) / 1000)) };
+  _lastFresh = now;
+  _inputRev += 1;   // 진행 중 수집은 비우지 않는다 — gather 가 그 뒤에 잇는다(2차 반증 4)
+  return { ok: true };
+}
+/** 백업 메타를 범위로 자른다 — 범위 계정에 함대 전체의 Bareos 매핑 법인 수를 싣지 않는다(5차 1차 Chromium 확인). */
+export function backupMetaFor(g, allowed) {
+  const m = g.backupMeta || { used: false };
+  if (!allowed || !m.used || m.corps == null) return m;
+  const n = [...(g.bareosCorps || [])].filter((vc) => allowed.has(vc)).length;
+  return n ? { ...m, corps: n } : { used: false };
 }
 const maskName = (m, admin) => (!admin && m.kind === 'bm' && m.nameIsAddr ? maskedAddressName(m.name) : m.name);
 
@@ -277,6 +414,12 @@ export function registerSvcInventory(api) {
   // ── 메인: 트리·서비스별 집계·전역 축·큐 개수 ──
   api.get('/tools/svc-inventory', toolsPerm, async (req, res) => {
     const snap = store.get();
+    if (req.query.fresh === '1') {
+      if (!writerOk(req.user)) return res.status(403).json({ ok: false, error: 'forbidden', reason: '입력 다시 읽기는 쓰기 계정(관리자·운영자)만 쓸 수 있습니다.' });
+      const f = forceFresh();
+      // 상한은 포탈 전체에 하나다 — 다른 사용자가 방금 읽었을 수 있고, 그 입력은 일반 새로고침으로 이미 받을 수 있다(2차 반증 3)
+      if (!f.ok) return res.status(429).json({ ok: false, error: 'tooSoon', reason: `입력은 ${f.agoSec}초 전에 이미 다시 읽었습니다(다른 사용자일 수 있습니다) — 새로고침하면 그 입력이 보입니다. ${f.waitSec}초 뒤에 다시 읽을 수 있습니다.`, waitSec: f.waitSec, agoSec: f.agoSec });
+    }
     const err = storeLoadError();
     if (err) return res.status(503).json({ ok: false, error: 'registryUnreadable', reason: `서비스 인벤토리 저장소를 읽지 못했습니다 — ${err.map || err.pins}. 빈 트리로 시작하지 않습니다(백업 복원 또는 전체 범위 관리자의 초기화).`, corrupt: err, canReset: fleetAdmin(req.user, snap) });
     const extraKey = `${scopeKey(req.user, snap)}|w${writeKeyOf(req.user, snap)}|${isAdminDetailUser(req.user) ? 'a' : 'u'}|r${storeRev()}|i${_inputRev}`;
@@ -290,20 +433,22 @@ export function registerSvcInventory(api) {
         corps: inv.corps.map((c) => ({ ...c, writable: writableOf(req.user, s, c.vcenterId) })),
         services: inv.services, noCorp: inv.noCorp,
         global: inv.global,
-        queues: { unassigned: q.unassigned.reduce((a, x) => a + x.n, 0), unassignedGroups: q.unassigned.length, unmapped: q.unmapped.length, drift: q.drift.length, mismatch: q.mismatch.length, redundant: q.redundant.n, ghosts: q.ghosts.length, ghostsHeld: q.ghostsHeld.length },
+        queues: { unassigned: q.unassigned.reduce((a, x) => a + x.n, 0), unassignedGroups: q.unassigned.length, unmapped: q.unmapped.length, drift: q.drift.length, mismatch: q.mismatch.length, redundant: q.redundant.length, ghosts: q.ghosts.length, ghostsHeld: q.ghostsHeld.length, orphaned: q.orphaned.length },
         // 법인을 고른 화면의 탭 숫자가 KPI 와 같은 기준이 되도록 법인별로도 센다(전 법인 숫자를 법인 화면에 쓰지 않는다).
         queuesByCorp: (() => {
           const o = {};
-          const bump = (c, k, n = 1) => { const id = c || ''; (o[id] ||= { unassigned: 0, unmapped: 0, drift: 0, ghosts: 0, ghostsHeld: 0, mismatch: 0 })[k] += n; };
+          const bump = (c, k, n = 1) => { const id = c || ''; (o[id] ||= { unassigned: 0, unmapped: 0, drift: 0, ghosts: 0, ghostsHeld: 0, mismatch: 0, redundant: 0, orphaned: 0 })[k] += n; };
           for (const x of q.unassigned) bump(x.corp, 'unassigned', x.n);
           for (const x of q.unmapped) bump(x.corp, 'unmapped');
           for (const x of q.drift) bump(x.corp, 'drift');
           for (const x of q.ghosts) bump(x.corp, 'ghosts');
           for (const x of q.ghostsHeld) bump(x.corp, 'ghostsHeld');
           for (const x of q.mismatch) bump(x.corp, 'mismatch');
+          for (const x of q.redundant) bump(x.corp, 'redundant');
+          for (const x of q.orphaned) bump(x.corp, 'orphaned');
           return o;
         })(),
-        meta: { faults: g.faultsMeta, backup: g.backupMeta, unreadCorps: [...g.unreadCorps].filter((v) => !allowed || allowed.has(v)), bmBlocked: g.bmBlocked, sourceErrors: allowed ? [] : g.sourceErrors, limits: LIMITS, snapAt: s?.generatedAt || null },
+        meta: { faults: g.faultsMeta, backup: backupMetaFor(g, allowed), unreadCorps: [...g.unreadCorps].filter((v) => !allowed || allowed.has(v)), bmBlocked: g.bmBlocked, sourceErrors: allowed ? [] : g.sourceErrors, limits: { ...LIMITS, freshMinMs: FRESH_MIN_MS }, snapAt: s?.generatedAt || null, inputsAt: g.at },
       };
     }, { ttlMs: 12_000, extraKey });
   });
@@ -331,17 +476,29 @@ export function registerSvcInventory(api) {
       const list = g.members.filter(pick);
       const CAP = 5000;
       const rows = list.slice(0, CAP).map((m) => memberRow(m, inv.resolved.get(m.key), admin));
-      const hostKeys = new Set(list.filter((m) => m.kind === 'vm' && m.host).map((m) => hostKeyOf(m.corp, m.host)));
+      // 영향 호스트 — 호스트별 VM 을 한 번만 묶는다(전 법인 보기에서 호스트 수 × 구성원 수로 돌지 않게).
+      const hostOf = (m) => hostKeyOf(m.corp, m.host);
+      const listByHost = new Map();
+      for (const m of list) if (m.kind === 'vm' && m.host) { const hk = hostOf(m); listByHost.set(hk, (listByHost.get(hk) || 0) + 1); }
+      const onHostBy = new Map();
+      for (const m of g.members) {
+        if (m.kind !== 'vm' || !m.host) continue;
+        const hk = hostOf(m); if (!listByHost.has(hk)) continue;
+        if (!onHostBy.has(hk)) onHostBy.set(hk, []);
+        onHostBy.get(hk).push(m);
+      }
       const nameOfSvc = new Map(inv.services.map((s) => [s.id, s.name]));
-      const hosts = [...hostKeys].map((hk) => {
+      // '함께 떠받치는 서비스' 는 **다른** 서비스다 — 전역 서비스로 볼 때 자기 법인 서비스 id 도 뺀다(예전에는 svc 만 빼서 NTP 호스트에 NTP 가 떴다).
+      const self = new Set([svc, ...(gSvc || [])].filter(Boolean));
+      const hosts = [...listByHost.keys()].map((hk) => {
         const h = g.hostByKey.get(hk) || { name: hk.slice(hk.indexOf('|') + 1), corp: hk.slice(0, hk.indexOf('|')), usage: null, faults: null };
-        const onHost = g.members.filter((m) => m.kind === 'vm' && m.corp === h.corp && lc(m.host) === lc(h.name));
-        const mine = list.filter((m) => m.kind === 'vm' && m.corp === h.corp && lc(m.host) === lc(h.name)).length;
-        const others = [...new Set(onHost.map((m) => inv.resolved.get(m.key)?.serviceId).filter((id) => id && id !== svc).map((id) => nameOfSvc.get(id) || id))].slice(0, 20);
+        const onHost = onHostBy.get(hk) || [];
+        const mine = listByHost.get(hk) || 0;
+        const others = [...new Set(onHost.map((m) => inv.resolved.get(m.key)?.serviceId).filter((id) => id && !self.has(id)).map((id) => nameOfSvc.get(id) || id))].slice(0, 20);
         const unassignedOn = onHost.filter((m) => !inv.resolved.get(m.key)?.serviceId).length;
         return { name: h.name, corp: h.corp, serviceTag: h.serviceTag || '', usage: h.usage, faults: h.faults, vmHere: mine, others, unassignedOn };
       }).sort((a, b) => b.vmHere - a.vmHere || a.name.localeCompare(b.name));
-      res.json({ ok: true, rev: st.rev, members: rows, omitted: Math.max(0, list.length - CAP), hosts, faults: g.faultsMeta, backup: g.backupMeta });
+      res.json({ ok: true, rev: st.rev, members: rows, omitted: Math.max(0, list.length - CAP), hosts, faults: g.faultsMeta, backup: backupMetaFor(g, allowed) });
     } catch (e) { if (!res.headersSent) res.status(500).json({ ok: false, reason: String(e?.message || e).slice(0, 300) }); }
   });
 
@@ -361,7 +518,9 @@ export function registerSvcInventory(api) {
         ok: true, rev: st.rev,
         unassigned: q.unassigned.filter(inCorp).map((x) => ({ ...x, names: mask(x.names) })),
         unmapped: q.unmapped.filter(inCorp), drift: mask(q.drift.filter(inCorp)), mismatch: mask(q.mismatch.filter(inCorp)),
-        redundant: q.redundant, ghosts: q.ghosts.filter(inCorp), ghostsHeld: q.ghostsHeld.filter(inCorp), bmBlocked: g.bmBlocked,
+        // 불필요한 고정 — 고른 법인 것만(5차 반증 R9: 예전에는 법인을 골라도 전 범위 합계였다) · 정리 버튼이 키를 쓰므로 500건까지 싣는다.
+        redundant: (() => { const l = q.redundant.filter(inCorp); return { n: l.length, items: mask(l.slice(0, LIMITS.pinBatch)) }; })(),
+        ghosts: q.ghosts.filter(inCorp), ghostsHeld: q.ghostsHeld.filter(inCorp), orphaned: q.orphaned.filter(inCorp).length, bmBlocked: g.bmBlocked,
       });
     } catch (e) { if (!res.headersSent) res.status(500).json({ ok: false, reason: String(e?.message || e).slice(0, 300) }); }
   });
@@ -370,6 +529,8 @@ export function registerSvcInventory(api) {
   api.get('/tools/svc-inventory/candidates', toolsPerm, async (req, res) => {
     try {
       const snap = store.get();
+      // 손상 저장소면 빈 트리 기준(전부 '미소속')으로 답하지 않는다(5차 검토 M6 — members·queues 와 같은 규칙).
+      if (storeLoadError()) return res.status(503).json({ ok: false, error: 'registryUnreadable', reason: '서비스 인벤토리 저장소를 읽지 못했습니다.' });
       const { g, inv, allowed, admin } = await inventoryFor(req, snap);
       const kind = req.query.kind === 'vm' ? 'vm' : 'bm';
       const corp = t(req.query.corp); const qq = lc(req.query.q).slice(0, 64); const onlyUn = req.query.unassignedOnly !== '0';
@@ -384,6 +545,7 @@ export function registerSvcInventory(api) {
 
   // ── CSV(범위 안 구성원 전부) ──
   api.get('/tools/svc-inventory.csv', toolsPerm, csvPerm, async (req, res) => {
+    if (storeLoadError()) return res.status(503).json({ ok: false, error: 'registryUnreadable', reason: '서비스 인벤토리 저장소를 읽지 못해 내보내지 않았습니다(빈 트리 기준 파일을 만들지 않습니다).' });
     const lock = acquireExport('svc-inventory-csv', req);
     if (!lock.ok) return res.status(lock.status).json(lock.body);
     try {
@@ -398,7 +560,7 @@ export function registerSvcInventory(api) {
         const r = inv.resolved.get(m.key); const s = r.serviceId ? svcById.get(r.serviceId) : null;
         lines.push(csvLine([g.corpNames.get(m.corp) || m.corp || '(법인 미지정)', s?.path || '', s?.name || '(미지정)', m.kind === 'vm' ? 'VM' : '베어메탈', maskName(m, admin), m.key, SRC[r.src] || r.src, r.via || r.reason || '',
           m.powered === true ? '켜짐' : m.powered === false ? '꺼짐' : '모름', m.usage?.cpuPct ?? '', m.usage?.memPct ?? '', m.cores ?? '', m.memGB ?? '', m.kind === 'vm' ? (m.storageGB ?? '') : '',
-          m.faults == null ? '' : m.faults, m.backup === undefined ? '' : (m.backup === null ? '모름' : m.backup), m.host || '', m.kind === 'vm' ? m.ip : '']));
+          m.faults == null ? '' : m.faults, m.kind !== 'vm' ? '' : m.backup === undefined ? '해당 없음' : (m.backup === null ? '모름' : m.backup), m.host || '', m.kind === 'vm' ? m.ip : '']));
       }
       res.setHeader('Content-Type', 'text/csv; charset=utf-8');
       res.setHeader('Content-Disposition', `attachment; filename="svc-inventory-${todayStamp()}.csv"`);
@@ -423,8 +585,32 @@ export function registerSvcInventory(api) {
       };
 
       // 전체 범위 관리자 연산
-      if (FLEET_OPS[op] || op === 'store.reset') {
-        if (!fleetAdmin(user, snap)) return res.status(403).json({ ok: false, error: 'forbidden', reason: '전역 카탈로그·태그 카테고리·초기화는 전체 범위 관리자만 바꿀 수 있습니다.' });
+      if (FLEET_OPS[op] || op === 'store.reset' || op === 'corp.purge') {
+        if (!fleetAdmin(user, snap)) return res.status(403).json({ ok: false, error: 'forbidden', reason: '전역 카탈로그·태그 카테고리·초기화·법인 항목 정리는 전체 범위 관리자만 바꿀 수 있습니다.' });
+        if (op === 'corp.purge') {
+          // 등록 해제된 vCenter 의 법인 항목(서비스·폴더·규칙·별칭·이름 규칙)과 그 법인 고정을 지운다(5차 반증 R2 — 법인 쓰기는 스냅샷에 없으면 404 라
+          // 다른 길이 없었다). 아직 등록된 vCenter·스냅샷이 비었을 때(판단 불가)는 거부한다. dry 는 지울 개수만 돌려준다.
+          const corp = t(b.corp);
+          if (!corp) return res.status(400).json({ ok: false, reason: '법인(vCenter)을 지정하십시오.' });
+          if (storeLoadError()) return res.status(503).json({ ok: false, error: 'registryUnreadable', reason: '저장소를 읽지 못해 쓰기를 막았습니다.' });
+          const known = knownCorpsOf(snap);
+          if (!known) return res.status(409).json({ ok: false, reason: '인벤토리 스냅샷이나 vCenter 등록부를 읽지 못해 등록 해제 여부를 판단할 수 없습니다 — 수집 뒤 다시 시도하십시오.' });
+          if (known.has(corp)) return res.status(409).json({ ok: false, reason: '이 vCenter 는 아직 등록돼 있습니다(등록부 또는 인벤토리) — 법인 항목 정리는 등록 해제된 vCenter 에만 씁니다.' });
+          const c = getMap().corps[corp] || null;
+          const pinKeys = Object.entries(getPins().pins).filter(([, p]) => p.corp === corp).map(([k]) => k);
+          if (!c && !pinKeys.length) return res.status(404).json({ ok: false, reason: '그 법인 항목이 없습니다.' });
+          const counts = { services: c?.services.length || 0, folders: c?.folders.length || 0, folderRules: c?.folderRules.length || 0, aliases: c?.aliases.length || 0, nameRules: c?.nameRules.length || 0, pins: pinKeys.length };
+          if (b.dry === true) return res.json({ ok: true, result: { corp, counts } });
+          // 화면이 본 개수와 지금 개수가 다르면 지우지 않는다(미리보기 뒤 다른 법인을 골랐거나 그 사이 바뀜 — 반증 7)
+          if (b.expect && typeof b.expect === 'object' && Object.keys(counts).some((k) => Number(b.expect[k]) !== counts[k])) return res.status(409).json({ ok: false, reason: '지울 개수가 미리보기와 다릅니다 — 다시 확인하십시오.', result: { counts } });
+          if (c) { const r1 = mutateMap((d) => { delete d.corps[corp]; return { result: {} }; }); if (!r1.ok) return res.status(r1.status).json({ ok: false, reason: r1.error }); }
+          if (pinKeys.length) {
+            const r2 = mutatePins((d) => { for (const k of pinKeys) delete d.pins[k]; return { result: {} }; });
+            if (!r2.ok) return res.status(r2.status).json({ ok: false, reason: `법인 항목은 지웠지만 고정 정리에 실패했습니다 — ${r2.error}` });
+          }
+          audit(corp, `등록 해제된 vCenter 의 법인 항목 정리 ${JSON.stringify(counts)}`);
+          return done({ corp, counts });
+        }
         if (op === 'store.reset') {
           if (!storeLoadError()) return res.status(409).json({ ok: false, reason: '저장소가 정상입니다 — 초기화할 것이 없습니다.' });
           const r = resetCorrupt(); audit('service-map', `손상본 보존: ${r.moved.join(', ') || '(없음)'}`);
@@ -451,7 +637,7 @@ export function registerSvcInventory(api) {
           const rp = mutatePins((d) => { for (const [k, p] of Object.entries(d.pins)) if (p.corp === corp && p.serviceId === r.result.removed) { delete d.pins[k]; pinsRemoved += 1; } return { result: {} }; });
           if (!rp.ok) return res.status(rp.status).json({ ok: false, reason: `서비스는 지웠지만 고정 정리에 실패했습니다 — ${rp.error}` });
         }
-        audit(corp, `${op} ${JSON.stringify({ id: b.id, name: b.name, path: b.path, prefix: b.prefix, kind: b.kind, value: b.value, serviceId: b.serviceId, globalId: b.globalId, enabled: b.enabled }).slice(0, 600)}${pinsRemoved ? ` · 고정 ${pinsRemoved}건 정리` : ''}`);
+        audit(corp, `${op} ${JSON.stringify({ id: b.id, name: b.name, path: b.path, prefix: b.prefix, kind: b.kind, value: b.value, serviceId: b.serviceId, globalId: b.globalId, enabled: b.enabled, keepAlias: Array.isArray(b.keepAlias) ? b.keepAlias.slice(0, 2) : undefined }).slice(0, 600)}${pinsRemoved ? ` · 고정 ${pinsRemoved}건 정리` : ''}`);
         return done({ ...r.result, ...(pinsRemoved ? { pinsRemoved } : {}) });
       }
 
@@ -464,7 +650,13 @@ export function registerSvcInventory(api) {
         if (op === 'pins.set' && !(map.corps[corp]?.services || []).some((s) => s.id === serviceId)) return res.status(404).json({ ok: false, reason: '대상 서비스를 찾지 못했습니다.' });
         const g = await gather(snap, map.settings.tagCategory || '');
         const corpOfKey = new Map(g.members.map((m) => [m.key, m.corp]));
-        let changed = 0; let skipped = 0;
+        // '고정 유지' 는 지금의 자동 판정을 함께 적는다 — 자동 판정이 다른 서비스로 바뀌면 다시 드리프트로 묻는다(5차 반증 R8).
+        // 화면이 본 자동 판정(expectAuto)과 지금 판정이 다르면 그 키는 검토하지 않는다 — 사람이 보지 못한 새 드리프트를 숨기지 않게(5차 1차 반증 3).
+        // pins.clear + onlyIfRedundant: 지금도 '고정 = 자동 판정' 인 키만 지운다(반증 8 — 그 사이 바뀐 고정을 지우면 소속이 조용히 바뀐다).
+        const needNow = op === 'pins.review' || (op === 'pins.clear' && b.onlyIfRedundant === true);
+        const autoNow = needNow ? (await inventoryFor(req, snap)).inv.resolved : null;
+        const expectAuto = op === 'pins.review' && b.expectAuto && typeof b.expectAuto === 'object' && !Array.isArray(b.expectAuto) ? b.expectAuto : null;
+        let changed = 0; let skipped = 0; let stale = 0;
         const r = mutatePins((d) => {
           for (const k of keys) {
             if (op === 'pins.set') {
@@ -474,10 +666,19 @@ export function registerSvcInventory(api) {
             } else {
               const p = d.pins[k];
               if (!p || p.corp !== corp) { skipped += 1; continue; }
-              if (op === 'pins.clear') { delete d.pins[k]; changed += 1; } else { p.reviewed = true; changed += 1; }
+              const cur = autoNow?.get(k);
+              if (op === 'pins.clear') {
+                if (b.onlyIfRedundant === true && !(cur?.src === 'pin' && cur.redundant)) { stale += 1; continue; }
+                delete d.pins[k]; changed += 1;
+              } else {
+                const now = cur?.auto?.serviceId ?? null;
+                if (expectAuto && Object.prototype.hasOwnProperty.call(expectAuto, k) && (expectAuto[k] ?? null) !== now) { stale += 1; continue; }
+                p.reviewed = true; p.reviewedAuto = now; changed += 1;
+              }
             }
           }
-          return { result: { changed, skipped } };
+          if (!changed && stale) return { error: op === 'pins.review' ? '자동 판정이 화면과 달라졌습니다 — 새로 고쳐 다시 확인하십시오.' : '지금은 불필요한 고정이 아닙니다(자동 판정이 바뀜) — 새로 고쳐 다시 확인하십시오.', status: 409 };
+          return { result: { changed, skipped, ...(stale ? { stale } : {}) } };
         });
         if (!r.ok) return res.status(r.status).json({ ok: false, reason: r.error });
         audit(corp, `${op} ${changed}건${serviceId ? ` → ${serviceId}` : ''}${skipped ? ` · 건너뜀 ${skipped}(다른 법인·없는 키)` : ''} · ${keys.slice(0, 20).join(',')}`);
@@ -513,7 +714,7 @@ export function registerSvcInventory(api) {
         const r = setScanRangeLabel(entry.id, b.label, { datacenterId: t(entry.datacenterId) });
         if (!r.ok) return res.status(r.status).json({ ok: false, reason: r.reason });
         audit(corp, `스캔 엔트리 ${entry.id} 라벨 '${t(b.label).slice(0, 128)}'`);
-        _gather = { key: '', promise: null }; _inputRev += 1;   // 라벨은 입력이다 — 다음 조회가 새로 모은다
+        _inputRev += 1;   // 라벨은 입력이다 — 다음 조회가 (진행 중 수집 뒤에) 새로 모은다
         return res.json({ ok: true, rev: storeRev(), result: { entryId: entry.id } });
       }
       return res.status(400).json({ ok: false, reason: `알 수 없는 연산: ${op.slice(0, 40)}` });

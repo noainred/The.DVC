@@ -137,11 +137,15 @@ export function ReviewView({ corp, reloadKey, svcName, writableOf, op, busy, cor
               <tr key={x.key}>
                 <td data-sort={x.name} title={x.key}><b>{x.name}</b><div className="svcinv-sub">{corpName(x.corp)}</div><div className="svcinv-sub" style={{ fontFamily: 'var(--mono)' }}>{x.key}</div></td>
                 <td>{svcName(x.pin.serviceId)}<div className="svcinv-sub">{x.pin.by || '?'}{x.pin.at ? ` · ${new Date(x.pin.at).toLocaleDateString()}` : ''}</div></td>
-                <td>{svcName(x.auto.serviceId)} <span className="badge blue">{SRC_LABEL[x.auto.src] || x.auto.src}</span><div className="svcinv-sub" title={x.auto.via}>{x.auto.via}</div></td>
+                <td>{svcName(x.auto.serviceId)} <span className="badge blue">{SRC_LABEL[x.auto.src] || x.auto.src}</span>
+                  {/* 바뀜 표지는 줄을 따로 — 같은 줄에 두면 1440px 에서 조치 열이 가로 스크롤 뒤로 밀린다(실측) */}
+                  {x.changed?.legacy ? <div><span className="badge amber" title="업그레이드 전에 ‘고정 유지’ 한 항목입니다 — 그때의 자동 판정을 기록하지 않아 바뀌었는지 모릅니다. 한 번 다시 고르면 이후에는 같은 드리프트를 묻지 않습니다">다시 확인</span></div>
+                    : x.changed ? <div><span className="badge amber" title={`‘고정 유지’ 를 누른 뒤 자동 판정이 바뀌었습니다(${x.changed.reviewedAuto ? svcName(x.changed.reviewedAuto) : '자동 판정 없음'} → ${svcName(x.auto.serviceId)}) — 다시 고릅니다`}>바뀜</span></div> : null}
+                  <div className="svcinv-sub" title={x.auto.via}>{x.auto.via}</div></td>
                 <td>{writableOf(x.corp) ? (
                   <span className="flex wrap gap">
                     <button type="button" className="logout-btn" style={btn} disabled={busy} onClick={() => op({ op: 'pins.clear', corp: x.corp, keys: [x.key] }, '고정을 지웠습니다 — 자동 판정으로 돌아갑니다.')}>자동으로 되돌리기</button>
-                    <button type="button" className="logout-btn" style={btn} disabled={busy} onClick={() => op({ op: 'pins.review', corp: x.corp, keys: [x.key] }, '고정을 유지합니다 — 같은 드리프트는 다시 묻지 않습니다.')}>고정 유지</button>
+                    <button type="button" className="logout-btn" style={btn} disabled={busy} onClick={() => op({ op: 'pins.review', corp: x.corp, keys: [x.key], expectAuto: { [x.key]: x.auto.serviceId ?? null } }, '고정을 유지합니다 — 자동 판정이 지금과 같으면 다시 묻지 않습니다(다른 서비스로 바뀌면 다시 묻습니다).')}>고정 유지</button>
                   </span>) : <span className="muted">조회 전용</span>}</td>
               </tr>
             ))}</tbody>
@@ -175,7 +179,39 @@ export function ReviewView({ corp, reloadKey, svcName, writableOf, op, busy, cor
           </>
         )}
       </div>
-      {q.redundant?.n ? <div className="muted" style={{ fontSize: 12 }}>자동 판정과 같은 불필요한 고정 {q.redundant.n}건 — 지워도 소속이 바뀌지 않습니다(구성원 표의 소속 근거 '고정').</div> : null}
+      <RedundantCard q={q} svcName={svcName} writableOf={writableOf} op={op} busy={busy} corpName={corpName} />
+      {q.orphaned ? <div className="muted" style={{ fontSize: 12 }}>등록 해제된 vCenter 의 고정 {q.orphaned}건 — 유령 정리로는 지울 수 없고, 트리에서 그 법인을 골라 ‘법인 항목 정리’ 로 지웁니다(전체 범위 관리자).</div> : null}
+    </div>
+  );
+}
+
+/**
+ * 불필요한 고정(고정 = 자동 판정) — 지워도 소속이 바뀌지 않는다. 폴더 규칙을 나중에 만들면 그 전의 '한 대씩 고정' 이 여기에 쌓인다(5차 검토 M3).
+ * 법인마다 한 번에 지운다(사람이 누른다 — 자동 정리는 하지 않는다). 키는 서버가 고른 법인 것만 싣는다(R9).
+ */
+function RedundantCard({ q, svcName, writableOf, op, busy, corpName }) {
+  const items = q.redundant?.items || [];
+  const n = q.redundant?.n || 0;
+  if (!n) return null;
+  const byCorp = new Map();
+  for (const x of items) { if (!byCorp.has(x.corp)) byCorp.set(x.corp, []); byCorp.get(x.corp).push(x); }
+  return (
+    <div className="card" style={{ minWidth: 0 }}>
+      <div className="flex wrap gap" style={{ padding: '10px 14px', borderBottom: '1px solid var(--border)', alignItems: 'center' }}>
+        <b>불필요한 고정(고정 = 자동 판정)</b><span className="muted" style={{ fontSize: 12 }}>{n}건 · 지워도 소속이 바뀌지 않습니다 — 고정이 남아 있으면 나중에 규칙을 바꿨을 때 드리프트가 됩니다</span>
+      </div>
+      <div style={{ padding: '8px 14px', fontSize: 12, display: 'flex', flexWrap: 'wrap', gap: '4px 12px' }}>
+        {items.slice(0, 30).map((x) => <span key={x.key}><b>{x.name}</b> <span className="muted">→ {svcName(x.serviceId)}</span></span>)}
+        {n > 30 ? <span className="muted">… 외 {n - 30}건</span> : null}
+      </div>
+      <div className="flex wrap gap" style={{ padding: '0 14px 10px' }}>
+        {[...byCorp.entries()].filter(([c]) => writableOf(c)).map(([c, list]) => (
+          <button key={c} type="button" className="logout-btn" style={btn} disabled={busy}
+            onClick={() => op({ op: 'pins.clear', corp: c, keys: list.map((x) => x.key), onlyIfRedundant: true }, `${corpName(c)} 의 불필요한 고정을 지웠습니다 — 자동 판정 그대로 소속됩니다(그 사이 자동 판정이 바뀐 고정은 남깁니다).`)}>
+            {corpName(c)} 불필요한 고정 {list.length}건 지우기
+          </button>
+        ))}
+      </div>
     </div>
   );
 }

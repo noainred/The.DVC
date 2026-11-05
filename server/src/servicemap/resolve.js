@@ -3,6 +3,8 @@
  *
  * 순서(위가 이긴다):
  *   1. 고정(수동, pins)      — 자동 판정과 다르면 drift(검토 큐). 고정의 법인이 구성원의 법인과 다르면 무시하고 pinMismatch(4차 반증 16).
+ *                              '고정 유지'(reviewed)는 **그때의 자동 판정(reviewedAuto)과 같은 드리프트만** 다시 묻지 않는다 — 자동 판정이 다른 서비스로
+ *                              바뀌면 다시 드리프트(5차 반증 R8). reviewedAuto 가 없는 옛 검토 표지는 한 번 다시 묻는다(모르는 것을 '같다' 로 보지 않는다).
  *   2. vCenter 폴더 규칙(VM)  — vmPlacement.folderPath('/ERP/prod') 의 '/' 경계 접두, 가장 긴 접두. folderPath null(vApp 등)은 'placement-unknown'.
  *   3. 스캔 엔트리 라벨(베어메탈) — 등록부 scanRangeId → idrac-scan-ranges.json 엔트리 service 라벨. 라벨 = 서비스명 또는 별칭.
  *   4. vSphere 태그(선택, VM) — 전역 카테고리가 정해지고 그 법인이 켰을 때만. 태그를 못 읽었으면 'unchecked'(미지정과 다르다).
@@ -12,7 +14,8 @@
  * 비교는 전부 소문자(4차 반증 20).
  *
  * 구성원 입력 모양:
- *   { key, kind:'vm'|'bm', corp, name, folderPath?:string|null, tags?:string[]|null, scan?:{entryId,label}|null }
+ *   { key, kind:'vm'|'bm', corp, name, folderPath?:string|null, tags?:string[]|null, scan?:{entryId,label}|null, scanWhy?:'unknown-entry'|'old-source' }
+ *   scanWhy(5차 R18): scan 이 없는 이유 — 보고된 엔트리 id 가 중앙 등록부에 없음 · 보고한 엣지·수집 서버가 엔트리 id 를 보내지 않는 구버전.
  *   tags: undefined = 태그 규칙 꺼짐 · null = 그 vCenter 태그를 못 읽음(unchecked) · [] = 읽었고 카테고리 태그 없음.
  */
 const lc = (s) => String(s ?? '').trim().toLowerCase();
@@ -52,7 +55,7 @@ const hit = (serviceId, src, via) => ({ serviceId, src, via: String(via ?? '') }
 
 /** 자동 판정(고정 제외). 순수. */
 export function autoResolve(m, idx, { tagCategory = '' } = {}) {
-  if (!m || !m.corp) return { serviceId: null, src: 'none', reason: 'no-corp' };
+  if (!m || !m.corp) return { serviceId: null, src: 'none', reason: m?.corpWhy === 'attr-error' ? 'no-corp-error' : m?.corpWhy === 'tag-conflict' ? 'no-corp-conflict' : 'no-corp' };
   const c = idx.get(m.corp);
   if (m.kind === 'vm') {
     const f = typeof m.folderPath === 'string' ? m.folderPath.slice(0, FOLDER_INPUT_MAX) : null;
@@ -85,7 +88,7 @@ export function autoResolve(m, idx, { tagCategory = '' } = {}) {
   }
   const nr = c ? nameRuleOf(c, m.name) : null;
   if (nr) return hit(nr.serviceId, 'rule', `${nr.match}:${nr.value}`);
-  if (!scan) return { serviceId: null, src: 'none', reason: 'no-scan-entry' };
+  if (!scan) return { serviceId: null, src: 'none', reason: m.scanWhy === 'unknown-entry' ? 'scan-entry-unknown' : m.scanWhy === 'old-source' ? 'source-old' : m.scanWhy === 'not-reported' ? 'source-unreported' : 'no-scan-entry' };
   if (!scan.label) return { serviceId: null, src: 'none', reason: 'scan-label-empty', unmapped: { kind: 'entry', value: String(scan.entryId || '') } };
   return { serviceId: null, src: 'none', reason: 'scan-label-unmapped', unmapped: { kind: 'scan', value: scan.label } };
 }
@@ -102,5 +105,8 @@ export function resolveMember(m, idx, ctx = {}, pins = {}) {
   const c = idx.get(m.corp);
   if (!c || !c.svcById.has(pin.serviceId)) return { ...auto, auto, pinDangling: true };
   const differs = !!auto.serviceId && auto.serviceId !== pin.serviceId;
-  return { serviceId: pin.serviceId, src: 'pin', via: pin.by || '', auto, drift: differs && !pin.reviewed, redundant: auto.serviceId === pin.serviceId };
+  const sameAsReviewed = pin.reviewed === true && pin.reviewedAuto !== undefined && (pin.reviewedAuto ?? null) === (auto.serviceId ?? null);
+  return { serviceId: pin.serviceId, src: 'pin', via: pin.by || '', auto, drift: differs && !sameAsReviewed, redundant: auto.serviceId === pin.serviceId,
+    // legacy = 검토 당시 자동 판정을 기록하지 않은 옛 표지(바뀌었는지 모른다 — '바뀜' 이 아니라 '다시 확인')
+    ...(differs && pin.reviewed === true && !sameAsReviewed ? { driftChanged: pin.reviewedAuto === undefined ? { legacy: true } : { reviewedAuto: pin.reviewedAuto } } : {}) };
 }

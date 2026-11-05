@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { folderTreeOf, matrixColumns, faultsView, backupView, powerText, srcSummary, groupActions, GROUP_TITLE, pctText } from './svcInventoryText.js';
+import { folderTreeOf, matrixColumns, faultsView, backupView, powerText, srcSummary, groupActions, GROUP_TITLE, REASON_TEXT, pctText } from './svcInventoryText.js';
 
 const svc = (id, path, n) => ({ id, name: id, path, stat: { n: { total: n } } });
 
@@ -22,6 +22,9 @@ describe('svcInventoryText', () => {
     expect(faultsView({ member: 2, host: 1, memberUnknown: 1 }, true)).toEqual({ member: 2, host: 1, unknown: 1, total: 3 });
     expect(backupView({ ok: 1 }, { used: false })).toBe(null);
     expect(backupView({}, { used: true, unreadable: true })).toEqual({ unknown: true });
+    expect(backupView({ none: 2, na: 5 }, { used: true })).toEqual({ ok: 0, fail: 0, none: 2, unknown: 0, na: 5 });
+    expect(backupView({ na: 5 }, { used: true, unreadable: true })).toEqual({ ok: 0, fail: 0, none: 0, unknown: 0, na: 5 });
+    expect(backupView({ unknown: 3, na: 5 }, { used: true, unreadable: true })).toEqual({ unknown: true });
   });
   it('켜짐: 전원을 모르는 구성원은 분모에서 뺀다 · 값 없으면 단위 없이 —', () => {
     expect(powerText({ on: 3, off: 1, unknown: 2 })).toBe('3/4 (+모름 2)');
@@ -33,5 +36,13 @@ describe('svcInventoryText', () => {
     expect(groupActions({ kind: 'entry', value: 'e1' }).op).toBe('scan.label');
     expect(groupActions({ kind: 'manual' }).pinOnly).toBe(true);
     for (const k of Object.keys(GROUP_TITLE)) expect(GROUP_TITLE[k]({ value: 'x', entry: {} }).includes('`')).toBe(false);
+  });
+  it('이유별 묶음 제목 — 못 받음은 수동 등록으로 단정하지 않고 법인 귀속 없음은 이유를 밝힌다(5차 2차 반증 1 · R18)', () => {
+    expect(GROUP_TITLE.manual({ value: 'not-reported' })).toContain('모릅니다');
+    expect(GROUP_TITLE.manual({ value: 'not-reported' })).not.toContain('수동 등록 iDRAC');
+    expect(GROUP_TITLE.nocorp({ value: 'tag-conflict' })).toContain('두 법인');
+    expect(GROUP_TITLE.nocorp({ value: 'attr-error' })).toContain('오류');
+    expect(GROUP_TITLE.nocorp({ value: '' })).toContain('어느 귀속 규칙에도');
+    for (const k of ['source-unreported', 'no-corp-error', 'no-corp-conflict']) { expect(REASON_TEXT[k]).toBeTruthy(); expect(REASON_TEXT[k].includes('`')).toBe(false); }
   });
 });

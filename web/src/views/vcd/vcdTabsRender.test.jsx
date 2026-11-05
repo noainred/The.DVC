@@ -113,7 +113,7 @@ const { STable } = await import('../../components/STable.jsx');
 beforeEach(() => { H.api = {}; H.denyTools = []; });
 afterEach(() => { H.api = {}; H.denyTools = []; });
 
-describe('v2.890 vCenter 탭 12개 — 렌더(얕게)', () => {
+describe('v2.894 vCenter 탭 12개 — 렌더(얕게)', () => {
   const site = { id: 'vc1', name: 'VC1', status: 'connected', version: '8.0.2', build: '222', metrics: { cpuUsagePct: 41, memUsagePct: 64 }, location: {} };
   const okList = (items) => ({ data: { items }, error: null, loading: false });
 

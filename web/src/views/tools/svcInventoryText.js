@@ -11,11 +11,16 @@ export const SRC_SHORT = Object.freeze({ pin: '고정', folder: '폴더', scan: 
 export const SRC_BADGE = Object.freeze({ pin: 'purple', folder: 'blue', scan: 'teal', tag: 'blue', rule: 'gray', none: 'amber' });
 export const REASON_TEXT = Object.freeze({
   'no-corp': '법인 귀속 없음 — 통합 서버 인벤토리에서 법인을 먼저 정합니다',
+  'no-corp-error': '법인 귀속 판정을 돌리지 못함(오류 — 입력 오류 목록 참고) — 이 서버의 법인을 지금은 모릅니다',
+  'no-corp-conflict': '같은 서비스 태그가 두 법인에 걸려 귀속을 보류함 — 통합 서버 인벤토리에서 법인을 정합니다',
   'no-folder-rule': 'vCenter 폴더 규칙 없음',
   'placement-unknown': 'vSphere 위치를 따라가지 못함(vApp 안 VM 등) — 고정으로만 넣을 수 있습니다',
   'tags-unchecked': '태그를 읽지 못함(확인 안 됨) · 폴더 규칙 없음',
   'tag-unmapped': '태그 값에 맞는 서비스 없음',
-  'no-scan-entry': '스캔 엔트리 없음(수동 등록·엣지 구버전)',
+  'no-scan-entry': '스캔 엔트리 없음(수동 등록)',
+  'scan-entry-unknown': '보고된 스캔 엔트리를 중앙 등록부에서 찾지 못함(엣지가 따로 만든 엔트리 등)',
+  'source-old': '보고한 엣지·수집 서버가 스캔 엔트리 id 를 보내지 않음(구버전 — 최신 버전으로 올리면 엔트리로 묶입니다)',
+  'source-unreported': '엣지·수집 서버가 이 서버의 등록 정보를 보내지 않음(OME 장치 · 서버 목록을 보내지 않는 수집 서버 · 아직 못 받음) — 수동 등록인지 모릅니다',
   'scan-label-empty': '스캔 엔트리 라벨이 비어 있음',
   'scan-label-unmapped': '스캔 라벨에 맞는 서비스 없음',
 });
@@ -25,8 +30,13 @@ export const GROUP_TITLE = Object.freeze({
   entry: (g) => `스캔 엔트리 ${g.entry?.range || `#${String(g.value).slice(0, 8)}`} — 라벨 없음`,
   scan: (g) => `스캔 라벨 ‘${g.value}’ — 서비스 없음`,
   placement: () => 'vSphere 위치 모름(vApp 안 VM 등)',
-  manual: () => '묶을 출처 없음(수동 등록 iDRAC · 엣지 구버전)',
-  nocorp: () => '법인 귀속 없음',
+  manual: (g) => (g.value === 'old-source' ? '스캔 엔트리 id 를 보내지 않는 구버전 엣지·수집 서버 — 최신 버전으로 올리면 엔트리로 묶입니다'
+    : g.value === 'unknown-entry' ? '중앙 등록부에 없는 스캔 엔트리(엣지가 따로 만든 엔트리 등)'
+      : g.value === 'not-reported' ? '등록 정보가 오지 않은 엣지·수집 서버 출처(OME 장치 · 서버 목록 없음 · 아직 못 받음) — 수동 등록인지 모릅니다'
+        : '묶을 출처 없음(수동 등록 iDRAC)'),
+  nocorp: (g) => (g.value === 'attr-error' ? '법인 귀속 없음 — 귀속 판정을 돌리지 못함(오류)'
+    : g.value === 'tag-conflict' ? '법인 귀속 없음 — 같은 서비스 태그가 두 법인에 걸려 보류'
+      : '법인 귀속 없음 — 어느 귀속 규칙에도 맞지 않음(통합 서버 인벤토리에서 법인을 정합니다)'),
 });
 export const TIER_TEXT = Object.freeze({ 1: '등급 1 — 장애·백업 실패를 가장 먼저 본다', 2: '등급 2', 3: '등급 3' });
 export const FAULT_REASON = Object.freeze({ off: '부품 장애 기능이 꺼져 있어 장애 수를 모릅니다', 'no-db': '부품 장애 기록이 아직 없어 장애 수를 모릅니다', unreadable: '부품 장애 DB 를 읽지 못해 장애 수를 모릅니다' });
@@ -44,8 +54,10 @@ export function faultsView(f, available) {
 /** 백업 칸 — Bareos 를 쓰지 않으면 null('해당 없음'). */
 export function backupView(b, meta) {
   if (!meta?.used) return null;
-  if (meta.unreadable) return { unknown: true };
-  return { ok: n0(b?.ok), fail: n0(b?.fail), none: n0(b?.none), unknown: n0(b?.unknown) };
+  // 원장을 못 읽어도 Bareos 를 쓰지 않는 법인(na 만 있는 칸)은 '해당 없음' 그대로 — 구성원 표와 같은 말(5차 1차 반증 6)
+  if (meta.unreadable) return n0(b?.na) && !n0(b?.ok) && !n0(b?.fail) && !n0(b?.none) && !n0(b?.unknown) ? { ok: 0, fail: 0, none: 0, unknown: 0, na: n0(b.na) } : { unknown: true };
+  // na = 이 법인에 Bareos Director 매핑이 없는 VM(해당 없음 — 5차 검토 M1). 잡 없음(none)·모름(unknown)과 섞지 않는다.
+  return { ok: n0(b?.ok), fail: n0(b?.fail), none: n0(b?.none), unknown: n0(b?.unknown), na: n0(b?.na) };
 }
 /** 소속 근거 요약 'pin 1 · 폴더 4 · 스캔 2'. */
 export function srcSummary(src) {

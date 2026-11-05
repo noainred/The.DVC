@@ -10,6 +10,8 @@
  *   편집으로 저장하면 저장돼 있던 내 메뉴가 통째로 사라진다. 다시 읽기에 성공하면 편집 중이던 것을 서버 메뉴 기준으로 되돌린다.
  * v2.727(감사 A-04): '추가 대상' 은 그룹 **id** 로 든다(인덱스면 ▲▼·삭제 뒤 다른 그룹에 들어갔다). A-05: '바뀐 항목'·저장 활성은
  *   저장 결과 기준(`changesToSave`). A-10: 배포자 이름이 응답에 없으면(viewer) '슈퍼 관리자' 로 말한다.
+ * v2.891(사용자 요청 '단독 메뉴로 추가하는 기능'): 오른쪽 '+ 단독' 은 그룹 없이 한 줄 메뉴로 넣고(추가 대상 그룹이 없어도 된다), 왼쪽 그룹 항목의
+ *   '단독' 은 그 항목을 빼서 그룹 바로 아래 단독 메뉴로 옮긴다. 사용자가 만든 단독은 ✕ 로 지운다(기본 단독은 자리만 — menuEdit.removeGroup).
  * ⚠ 문구에 백틱·`**` 를 쓰지 않는다(BoldText 규약). 대문자 변환 금지. 표는 쓰지 않는다(목록이라 STable 대상 아님).
  */
 import React, { useEffect, useMemo, useRef, useState } from 'react';
@@ -21,9 +23,11 @@ import { Icon, iconNameOf } from './sidebarIcons.jsx';
 import { missingDefaults } from './sideMenu.js';
 import {
   toEditable, toStored, defaultEditable, moveGroup, moveItem, removeItem, addItem, newGroup, renameGroup, removeGroup,
-  changesToSave, firstGroupId, prevNoteText, distNoteText, lockedNoteText, availableTools, filterTools, countItems, LIMITS,
+  addSingle, detachToSingle, isSingle, changesToSave, firstGroupId, prevNoteText, distNoteText, lockedNoteText, availableTools, filterTools, countItems, LIMITS,
 } from './menuEdit.js';
 
+/** 기본 메뉴 항목(다시 넣기 목록) → 더할 항목. */
+const missingItem = (m) => ({ key: m.key, id: m.id, label: m.label, ...(m.tab ? { tab: m.tab } : { tool: m.tool, ...(m.seg ? { seg: m.seg } : {}) }), ...(m.groupId ? { iconOf: m.groupId } : {}) });
 const SOURCE_TEXT = { mine: '내 메뉴', distributed: '배포된 메뉴', default: '포탈 기본 메뉴', unknown: '메뉴를 읽지 못했습니다' };
 /** v2.727(A-14): 기본값을 렌더마다 새 객체로 만들지 않는다(useMemo(tools) 가 매 렌더 무효가 됐다). */
 const NO_OVERRIDES = Object.freeze({});
@@ -65,11 +69,13 @@ export default function MenuEditor({ user, data, resolved, catalog = [], menuSta
   const shownTools = filterTools(tools.filter((t) => !catSet || catSet.has(t.k)), q);
   const missing = missingDefaults(groups);
   const target = groups.findIndex((g) => g.id === targetId);
-  const targetGroup = target >= 0 && !groups[target].tab ? groups[target] : null;
+  const targetGroup = target >= 0 && !isSingle(groups[target]) ? groups[target] : null;
   const targetLabel = targetGroup ? targetGroup.label : '(그룹을 고르세요)';
 
   const apply = (r) => { if (r.ok === false) { setNote(r.reason || ''); return; } setNote(''); setGroups(r.groups); };
   const add = (item) => { if (!targetGroup) { setNote('왼쪽에서 "여기에 추가" 로 대상 그룹을 먼저 고르세요'); return; } apply(addItem(groups, target, item)); };
+  // v2.891: 단독 메뉴로 — 추가 대상 그룹과 상관없이 '특수 기능' 앞에 한 줄로 넣는다(▲▼ 로 자리를 옮긴다)
+  const addOne = (item) => apply(addSingle(groups, item));
   const addGroup = () => { const r = newGroup(groups, newName); apply(r); if (r.ok) { setTargetId(r.groups[r.gi].id); setNewName(''); } };
   const delGroup = (gi) => {
     const r = removeGroup(groups, gi);
@@ -143,22 +149,25 @@ export default function MenuEditor({ user, data, resolved, catalog = [], menuSta
               </span>
             </div>
             <div className="me-groups">
-              {groups.map((g, gi) => (
-                <div key={g.id} className={`me-group${g.id === targetId ? ' target' : ''}${g.tab ? ' single' : ''}`}>
+              {groups.map((g, gi) => {
+                const single = isSingle(g);
+                return (
+                <div key={g.id} className={`me-group${g.id === targetId ? ' target' : ''}${single ? ' single' : ''}`}>
                   <div className="me-group-head">
-                    <Icon name={iconNameOf(g.id)} size={15} className="me-gico" />
-                    {g.tab ? <span className="me-gname">{g.label}</span>
+                    <Icon name={iconNameOf(g.iconOf || g.id)} size={15} className="me-gico" />
+                    {single ? <span className="me-gname">{g.label}{g.fromTools && <span className="me-tag">특수 기능</span>}{isAdmin && g.adminOnly && <Icon name="lock" size={11} className="me-lock" title="관리자 전용" />}</span>
                       : <input className="me-gname me-gname-in" value={g.label} aria-label={`${g.label} 그룹 이름`} maxLength={LIMITS.label}
                         onChange={(e) => setGroups(renameGroup(groups, gi, e.target.value))} />}
-                    <span className="me-gcount">{g.tab ? '단독' : `${(g.children || []).length}개`}</span>
+                    <span className="me-gcount">{single ? '단독' : `${(g.children || []).length}개`}</span>
                     <span className="me-gbtns">
-                      {!g.tab && <button type="button" className={`btn btn-sm${g.id === targetId ? ' primary' : ''}`} aria-pressed={g.id === targetId} onClick={() => setTargetId(g.id)}>{g.id === targetId ? '추가 대상' : '여기에 추가'}</button>}
+                      {!single && <button type="button" className={`btn btn-sm${g.id === targetId ? ' primary' : ''}`} aria-pressed={g.id === targetId} onClick={() => setTargetId(g.id)}>{g.id === targetId ? '추가 대상' : '여기에 추가'}</button>}
                       <button type="button" className="btn btn-sm" aria-label="위로" disabled={gi === 0} onClick={() => setGroups(moveGroup(groups, gi, -1))}>▲</button>
                       <button type="button" className="btn btn-sm" aria-label="아래로" disabled={gi === groups.length - 1} onClick={() => setGroups(moveGroup(groups, gi, 1))}>▼</button>
-                      {!g.tab && <button type="button" className="btn btn-sm" aria-label="그룹 삭제" title="그룹을 지웁니다 — 안의 항목은 오른쪽 '기본 메뉴 항목' 으로 돌아갑니다" onClick={() => delGroup(gi)}>✕</button>}
+                      {!single && <button type="button" className="btn btn-sm" aria-label="그룹 삭제" title="그룹을 지웁니다 — 안의 항목은 오른쪽 '기본 메뉴 항목' 으로 돌아갑니다" onClick={() => delGroup(gi)}>✕</button>}
+                      {single && !g.fixed && <button type="button" className="btn btn-sm" aria-label="단독 메뉴 삭제" title="단독 메뉴를 지웁니다 — 이 항목은 오른쪽 목록으로 돌아갑니다(다시 넣을 수 있습니다)" onClick={() => delGroup(gi)}>✕</button>}
                     </span>
                   </div>
-                  {!g.tab && (
+                  {!single && (
                     <ul className="me-items" role="list">
                       {(g.children || []).map((c, ii) => (
                         <li key={c.key} className="me-item">
@@ -169,6 +178,7 @@ export default function MenuEditor({ user, data, resolved, catalog = [], menuSta
                           <span className="me-ibtns">
                             <button type="button" className="btn btn-sm" aria-label="위로" disabled={ii === 0} onClick={() => setGroups(moveItem(groups, gi, ii, -1))}>▲</button>
                             <button type="button" className="btn btn-sm" aria-label="아래로" disabled={ii === g.children.length - 1} onClick={() => setGroups(moveItem(groups, gi, ii, 1))}>▼</button>
+                            <button type="button" className="btn btn-sm" aria-label="단독 메뉴로 빼기" title="그룹에서 빼서 이 그룹 바로 아래 단독 메뉴(한 줄)로 둡니다" onClick={() => apply(detachToSingle(groups, gi, ii))}>단독</button>
                             <button type="button" className="btn btn-sm" aria-label="빼기" onClick={() => setGroups(removeItem(groups, gi, ii))}>✕</button>
                           </span>
                         </li>
@@ -177,12 +187,13 @@ export default function MenuEditor({ user, data, resolved, catalog = [], menuSta
                     </ul>
                   )}
                 </div>
-              ))}
+                );
+              })}
             </div>
           </section>
 
           <section className="me-right">
-            <div className="me-sec-head"><span>기능을 골라 <b>{targetLabel}</b> 그룹에 넣습니다</span></div>
+            <div className="me-sec-head"><span>기능을 골라 <b>{targetLabel}</b> 그룹에 넣습니다 · <b>+ 단독</b> 은 그룹 없이 한 줄 메뉴로 넣습니다</span></div>
             <div className="me-search">
               <input className="input" value={q} onChange={(e) => setQ(e.target.value)} placeholder="기능 이름·키·설명·옛 이름 검색" aria-label="기능 검색" />
             </div>
@@ -202,7 +213,10 @@ export default function MenuEditor({ user, data, resolved, catalog = [], menuSta
                         <div className="me-tool-name">{m.label}</div>
                         <div className="me-tool-desc muted">기본 자리: {m.groupLabel}</div>
                       </div>
-                      <button type="button" className="btn btn-sm" onClick={() => add({ key: m.key, id: m.id, label: m.label, ...(m.tab ? { tab: m.tab } : { tool: m.tool, ...(m.seg ? { seg: m.seg } : {}) }) })}>+ 추가</button>
+                      <span className="me-addbtns">
+                        <button type="button" className="btn btn-sm" onClick={() => add(missingItem(m))}>+ 추가</button>
+                        <button type="button" className="btn btn-sm" title="그룹 없이 한 줄 메뉴로 넣습니다" onClick={() => addOne(missingItem(m))}>+ 단독</button>
+                      </span>
                     </div>
                   ))}
                 </div>
@@ -218,7 +232,10 @@ export default function MenuEditor({ user, data, resolved, catalog = [], menuSta
                   </div>
                   {t.placedLabel
                     ? <span className="me-placed">✓ {t.placedLabel}</span>
-                    : <button type="button" className="btn btn-sm" onClick={() => add(t.item)}>+ 추가</button>}
+                    : <span className="me-addbtns">
+                      <button type="button" className="btn btn-sm" onClick={() => add(t.item)}>+ 추가</button>
+                      <button type="button" className="btn btn-sm" title="그룹 없이 한 줄 메뉴로 넣습니다" onClick={() => addOne(t.item)}>+ 단독</button>
+                    </span>}
                 </div>
               ))}
               {!shownTools.length && <div className="muted" style={{ padding: 8 }}>맞는 기능이 없습니다.</div>}

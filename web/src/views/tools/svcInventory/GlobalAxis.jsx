@@ -25,6 +25,9 @@ function MatrixCell({ c, onClick, faultsOn }) {
   );
 }
 
+/** 전역 서비스 상세에서 '전 법인 구성원 모두 보기' 를 고른 상태(법인 id 와 겹치지 않는 표지 — 법인 행 선택은 그대로 둔다). */
+const ALL_CORPS = '*';
+
 export default function GlobalAxis({ d, regionOf, corpName, writableOf, op, busy, gsel, setGsel, gcorp, setGcorp, reloadKey }) {
   const [first, setFirst] = useState('matrix');
   const [ng, setNg] = useState({ name: '', tier: '2', owner: '' });
@@ -90,7 +93,7 @@ export default function GlobalAxis({ d, regionOf, corpName, writableOf, op, busy
         {/* 오른쪽: 매트릭스 / 목록 / 선택한 서비스 */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12, minWidth: 0 }}>
           <div className="card flex wrap gap" style={{ padding: '10px 14px', alignItems: 'center' }}>
-            <b>서비스별(전 법인)</b>{sel ? <><span className="muted">›</span><b>{sel.name}</b>{gcorp ? <><span className="muted">›</span><span>{corpName(gcorp)}</span></> : null}</> : null}
+            <b>서비스별(전 법인)</b>{sel ? <><span className="muted">›</span><b>{sel.name}</b>{gcorp ? <><span className="muted">›</span><span>{gcorp === ALL_CORPS ? '전 법인 구성원' : corpName(gcorp)}</span></> : null}</> : null}
             <span style={{ flex: 1 }} />
             {!sel ? (
               <div className="tabs" style={{ marginLeft: 0 }}>
@@ -165,6 +168,13 @@ function GlobalDetail({ g, d, corpName, gcorp, setGcorp, faultsOn, reloadKey }) 
       <div className="card" style={{ minWidth: 0 }}>
         <div className="flex wrap gap" style={{ padding: '10px 14px', borderBottom: '1px solid var(--border)', alignItems: 'center' }}>
           <b>{g.name} — 법인별 투입 자원</b><span className="muted" style={{ fontSize: 12 }}>전역 담당자 {g.owner || '미지정'} · 행을 누르면 그 법인의 구성원·영향 호스트</span>
+          <span style={{ flex: 1 }} />
+          {g.corps.length ? (
+            <button type="button" className="logout-btn" aria-pressed={gcorp === ALL_CORPS}
+              style={gcorp === ALL_CORPS ? { ...btn, borderColor: 'var(--accent)', color: 'var(--accent)', background: 'rgba(59,130,246,.12)' } : btn}
+              title="이 서비스에 속한 서버(VM·베어메탈)를 법인을 가리지 않고 한 표로 봅니다 — 보이는 범위의 법인만"
+              onClick={() => setGcorp(gcorp === ALL_CORPS ? '' : ALL_CORPS)}>전 법인 구성원 모두 보기 · {s.n.total}대</button>
+          ) : null}
         </div>
         <STable className="table svcinv-t" minWidth={720}>
           <thead><tr><th>법인</th><th title="VM·베어메탈 · 호스트 = 구성원 VM 이 올라간 ESXi 호스트 수(파생)">구성원</th><th>vCPU</th><th>메모리 GB</th><th>스토리지 GB</th><th title="Σ(사용률×용량)÷Σ용량">사용률</th><th>부품 장애</th><th>백업 24h</th></tr></thead>
@@ -188,7 +198,8 @@ function GlobalDetail({ g, d, corpName, gcorp, setGcorp, faultsOn, reloadKey }) 
         </STable>
         <div className="muted" style={{ padding: '8px 14px', fontSize: 12 }}>vCPU·메모리·스토리지 = 할당 합계 · 사용률은 가중 평균(못 읽은 서버 제외) · 지금 읽지 못한 법인은 사용률·장애가 ‘—’.</div>
       </div>
-      {gcorp ? <MembersPanel title={`${g.name} · ${corpName(gcorp)}`} sub="구성원" query={{ global: g.id, corp: gcorp }} reloadKey={reloadKey} /> : null}
+      {gcorp === ALL_CORPS ? <MembersPanel title={`${g.name} · 전 법인`} sub={`구성원 · 법인 ${g.corps.length}곳`} query={{ global: g.id }} reloadKey={reloadKey} corpName={corpName} />
+        : gcorp ? <MembersPanel title={`${g.name} · ${corpName(gcorp)}`} sub="구성원" query={{ global: g.id, corp: gcorp }} reloadKey={reloadKey} /> : null}
     </>
   );
 }
