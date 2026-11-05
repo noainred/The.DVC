@@ -1,6 +1,6 @@
 import { unitText } from './unitText.js';
 import { numOrNull } from '../numOrNull.js';
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { fetchJson, postJson, usePolling, toolAllowed, canCsv, hasRole } from '../api.js'; // v2.643 canCsv: CSV 내보내기 게이팅 · v2.819 hasRole(포탈 백업 배지)
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid } from 'recharts';
 import { Loading, ErrorBox, StateBadge, UsageCell, EntityDetail, DataTable, SearchBox } from '../components/ui.jsx';
@@ -34,14 +34,18 @@ import { portalMark, saveHandoff } from './tools/backupRunText.js'; // v2.819 �
 const BackupManageModal = React.lazy(() => import('./tools/BackupManageModal.jsx')); // v2.819 — 열 때만 받는다
 import { VeeamTag, VeeamSummaryCard, VeeamSnapSummary, VeeamDetailModal } from './VeeamParts.jsx'; // v2.751: 배지(누르면 상세 창)·요약 카드 · v2.753 스냅샷 기준 요약
 import { authStopNote, authStopCell, authStopSingleText, plainText, skipNote, skipCell, skipSingleText } from './vcAuthStopText.js'; // v2.733(C3-01): 인증 정지로 조회하지 않음 · v2.744(감사 후속 FA-②): 직접 수집 대상 아님
+// v2.890(사용자 요청 — vSphere Client 의 vCenter 탭 12개 · 승인 시안 docs/design/vcenter-tabs ①~⑦ · 기본값 1~7): 탭 목록 · 옛 키 호환은 순수 모듈 하나.
+import { VCD_TABS, loadTab, saveTab, normTab } from './vcd/vcdTabs.js';
+import SummaryTab from './vcd/SummaryTab.jsx';
+import MonitorTab from './vcd/MonitorTab.jsx';
+import ConfigureTab from './vcd/ConfigureTab.jsx';
+import { DatacenterTab, ExtensionsTab, PermsTab, LinkedTab, UpdatesTab } from './vcd/InventoryTabs.jsx';
 
-const VIEWS = [
-  { k: 'hosts', label: '호스트 및 클러스터', icon: '🖥️' },
-  { k: 'vms', label: 'VM 및 폴더', icon: '🧊' },
-  { k: 'storage', label: '데이터스토어', icon: '💾' },
-  { k: 'network', label: '네트워크', icon: '🌐' },
-  { k: 'trend', label: '추이', icon: '📈' },
-];
+/** 브라우저 저장소 — 사생활 모드 · 차단에서 접근만으로 throw 할 수 있다(규약: try/catch). 기억은 사람별 편의라 실패해도 화면은 동작한다. */
+function lsSafe() {
+  try { return typeof window !== 'undefined' ? window.localStorage : null; } catch { return null; }
+}
+const TREE_VIEWS = new Set(['hosts', 'vms', 'storage', 'network']);
 
 // Backing-storage categories for the datastore view filter.
 const STORAGE_KINDS = [
@@ -273,7 +277,17 @@ export default function VCenterDetail({ site, onBack }) {
   // 조기 return 뒤에 두면 렌더 간 훅 개수가 달라져 React #310 으로 화면이 크래시한다
   // (v2.375 에서 실제 발생 → v2.375.1 수정). 추이 탭은 자체적으로 다시 조회한다.
   const { d: miniHist } = useUsageHistory(vcenterId, '24h');
-  const [view, setView] = useState('hosts');
+  // v2.890: 탭 12개 — 처음은 '호스트 및 클러스터'(예전 기본), 그 뒤로는 마지막으로 본 탭(브라우저 기억). 옛 기억값 'trend' 는 모니터 › 성능.
+  const [view, setViewRaw] = useState(() => loadTab(lsSafe()));
+  const [monSub, setMonSub] = useState('alarms');      // 모니터 하위 칸(문제 및 알람 · 이벤트 · 작업 · 성능)
+  const [cfgSub, setCfgSub] = useState('licenses');    // 구성 하위 칸
+  const setView = (k, sub) => {
+    const t = normTab(k);
+    setViewRaw(t);
+    saveTab(lsSafe(), t);
+    if (t === 'monitor' && (sub || k === 'trend')) setMonSub(sub || 'perf');
+    if (t === 'configure' && sub) setCfgSub(sub);
+  };
   const [sel, setSel] = useState(null);     // { type, item } for the detail popup
   const [open, setOpen] = useState({});      // expanded tree nodes
   const [q, setQ] = useState('');            // VM name search (hosts/vms views)
@@ -393,7 +407,7 @@ export default function VCenterDetail({ site, onBack }) {
     () => (inclPoweredOff ? null : countByHost(visibleVms)),
     [inclPoweredOff, visibleVms]
   );
-  const hostVmCount = (h) => (vmCountByHost ? vmCountByHost.get(h.name) || 0 : h.vmCount);
+  const hostVmCount = useCallback((h) => (vmCountByHost ? vmCountByHost.get(h.name) || 0 : h.vmCount), [vmCountByHost]);
   // 호스트 묶음(클러스터·DC)의 할당 vCPU·물리 코어 + 할당 메모리·물리 메모리(MB) 합계.
   const virtSum = (list) => virtSumOf(list, vcpuByHost, vmemByHost, vmCountByHost);
   // '전체 현황' 행 — 표를 열었을 때만 만든다(수천 VM × 20초 폴링에서 불필요한 재계산 방지).
@@ -561,25 +575,33 @@ export default function VCenterDetail({ site, onBack }) {
 
       {comparing && <CompareMatrix onClose={() => setComparing(false)} />}
 
-      <div className="vcd-views">
-        {VIEWS.map((v) => (
-          <button key={v.k} className={view === v.k ? 'login-btn' : 'tab'} style={{ flex: 'none', padding: '7px 13px' }} onClick={() => setView(v.k)}>
-            {v.icon} {v.label}
+      {/* v2.890: vSphere Client 의 vCenter 탭 12개(순서 그대로 · 이모지 없음). 한 줄 — 넘치면 탭 줄만 가로 스크롤(400px 에서 페이지를 밀지 않는다 — 기본값 4). */}
+      <nav className="vcd-views" role="tablist" aria-label="vCenter 보기">
+        {VCD_TABS.map((v) => (
+          <button key={v.k} type="button" role="tab" aria-selected={view === v.k} className={view === v.k ? 'login-btn' : 'tab'} style={{ flex: 'none', padding: '6px 10px', fontSize: 13 }} onClick={() => setView(v.k)}>
+            {v.label}
           </button>
         ))}
-        {/* v2.494: 기간 실사용률은 **옵트인**. vCenter 성능 조회라 화면을 열 때마다 자동으로 나가면
-            부하가 된다(펼친 행만 조회하지만 고RTT 에서는 그마저도 비싸다). 체크하면 기간 선택 줄이
-            나타나고, 해제하면 요청이 0건이 되며 행의 사용률 표시도 사라진다. */}
-        {(view === 'hosts' || view === 'vms') && (
-          <label className="muted flex gap" style={{ alignItems: 'center', fontSize: 12, flex: 'none', cursor: 'pointer', marginLeft: 8 }}
-            title="체크하면 VM 행에 선택한 기간의 평균 CPU·메모리 실사용률을 표시합니다(vCenter 성능 롤업 조회 — 펼친 폴더·검색 결과의 VM 만). 해제하면 조회하지 않습니다.">
-            <input type="checkbox" checked={usageOn} onChange={(e) => setUsageOn(e.target.checked)} /> 📊 사용량 조회
-          </label>
-        )}
-      </div>
+      </nav>
 
-      {/* 📈 추이(v2.377) — 기간 9종 × CPU/메모리/디스크 사용량 vs 할당량 */}
-      {view === 'trend' && <div style={{ marginTop: 10 }}><TrendView vcenterId={vcenterId} clusters={clusters} hosts={hosts} /></div>}
+      {view === 'summary' && (
+        <SummaryTab site={site} vcenterId={vcenterId} hosts={hosts} vms={vms} datastores={datastores} networks={networks}
+          hostsOk={hostsOk} vmsOk={vmsOk} dsOk={dsPart.state === 'ok'} netOk={netPart.state === 'ok'} onGo={setView} />
+      )}
+      {/* 📈 추이(v2.377) — 기간 9종 × CPU/메모리/디스크 사용량 vs 할당량. v2.890 부터 모니터 › 성능(기본값 2 — 내용은 그대로). */}
+      {view === 'monitor' && (
+        <MonitorTab vcenterId={vcenterId} sub={monSub} onSub={setMonSub}
+          perf={<TrendView vcenterId={vcenterId} clusters={clusters} hosts={hosts} />} />
+      )}
+      {view === 'configure' && <ConfigureTab vcenterId={vcenterId} sub={cfgSub} onSub={setCfgSub} />}
+      {view === 'perms' && <PermsTab vcenterId={vcenterId} />}
+      {view === 'datacenter' && (
+        <DatacenterTab hosts={hosts} hostsOk={hostsOk} gate={gateEl(hostsPart, '호스트 목록')} hostVmCount={hostVmCount}
+          onOpenCluster={(name) => { setQ(''); setOverview(false); setOpen((o) => ({ ...o, [`cl:${name}`]: true })); setView('hosts'); }} />
+      )}
+      {view === 'linked' && <LinkedTab site={site} vcenterId={vcenterId} />}
+      {view === 'extensions' && <ExtensionsTab vcenterId={vcenterId} />}
+      {view === 'updates' && <UpdatesTab site={site} hosts={hosts} hostsOk={hostsOk} gate={gateEl(hostsPart, '호스트 목록')} />}
 
       {(view === 'hosts' || view === 'vms') && (
         <>
@@ -603,6 +625,14 @@ export default function VCenterDetail({ site, onBack }) {
             <label className="muted flex gap" style={{ alignItems: 'center', fontSize: 12, flex: 'none', cursor: 'pointer' }}
               title="체크하면 이 vCenter 와 연결된 Veeam 백업 서버가 알려 준 백업 대상 VM 에 'Veeam' 배지를, 지금 백업 중인 VM 에 'Veeam 백업 중' 배지를 붙입니다(목록은 그대로)">
               <input type="checkbox" checked={veeamOn} onChange={(e) => setVeeamOn(e.target.checked)} /> Veeam 백업 VM 표시
+            </label>
+            {/* v2.494: 기간 실사용률은 **옵트인**. vCenter 성능 조회라 화면을 열 때마다 자동으로 나가면
+                부하가 된다(펼친 행만 조회하지만 고RTT 에서는 그마저도 비싸다). 체크하면 기간 선택 줄이
+                나타나고, 해제하면 요청이 0건이 되며 행의 사용률 표시도 사라진다.
+                v2.890: 탭 줄(12개 · 한 줄)에서 이 필터 줄로 옮겼다(기본값 7). */}
+            <label className="muted flex gap" style={{ alignItems: 'center', fontSize: 12, flex: 'none', cursor: 'pointer' }}
+              title="체크하면 VM 행에 선택한 기간의 평균 CPU·메모리 실사용률을 표시합니다(vCenter 성능 롤업 조회 — 펼친 폴더·검색 결과의 VM 만). 해제하면 조회하지 않습니다.">
+              <input type="checkbox" checked={usageOn} onChange={(e) => setUsageOn(e.target.checked)} /> 📊 사용량 조회
             </label>
             {query && <span className="muted" style={{ fontSize: 12 }}>{view === 'hosts' && hostMatches.length ? `호스트 ${hostMatches.length} · ` : ''}{matches.length} VM 일치{matches.length > SEARCH_CAP ? ` (처음 ${SEARCH_CAP}개 표시)` : ''}</span>}
             {q && <button className="tab" style={{ flex: 'none', padding: '6px 10px' }} onClick={() => setQ('')}>지우기</button>}
@@ -710,7 +740,7 @@ export default function VCenterDetail({ site, onBack }) {
         </div>
       )}
 
-      <div className="vcd-tree card">
+      {TREE_VIEWS.has(view) && <div className="vcd-tree card">
         {(view === 'hosts' || view === 'vms') && query && (() => {
           // 목록을 받기 전에는 '일치하는 항목이 없습니다' 라고 말하지 않는다(A5-04).
           if (view === 'hosts' && !hostsOk) return gateEl(hostsPart, '호스트 목록');
@@ -810,7 +840,7 @@ export default function VCenterDetail({ site, onBack }) {
             ]}
             rows={networks} initialSort={{ key: 'name', dir: 'asc' }} emptyText="네트워크 없음" />
         )}
-      </div>
+      </div>}
 
       {sel && <EntityDetail type={sel.type} item={sel.item} onClose={() => setSel(null)} />}
       {veeamVm && <VeeamDetailModal vcenterId={vcenterId} vm={veeamVm} onClose={() => setVeeamVm(null)} />}
