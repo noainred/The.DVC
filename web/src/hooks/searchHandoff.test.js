@@ -38,3 +38,24 @@ describe('v2.617 — 이미 열린 화면도 즉시 받는다', async () => {
     expect(takeSearch('serial-lookup', 1000)).toBe('z');
   });
 });
+
+describe('v2.911 — 한 이동에 검색어 + 고른 장비를 함께', async () => {
+  const { handoffMany, onSearchHandoff } = await import('./searchHandoff.js');
+  it('target 별로 남고 각자 꺼낸다 · 새로 남기면 이전 묶음은 버린다', () => {
+    handoffMany([['storage-mon', 'PMAX-1'], ['storage-mon:focus', 'st-1']], 1000);
+    expect(takeSearch('storage-mon:focus', 1000)).toBe('st-1');
+    expect(takeSearch('storage-mon', 1000)).toBe('PMAX-1');
+    handoffMany([['cvp', 'a'], ['cvp:focus', 'b']], 1000);
+    handoffSearch('ipam', '10.0.0.1', 1000);
+    expect(takeSearch('cvp', 1000)).toBe('');
+    expect(takeSearch('cvp:focus', 1000)).toBe('');
+    expect(takeSearch('ipam', 1000)).toBe('10.0.0.1');
+  });
+  it('이미 열린 화면이 앞의 것을 받아도 뒤의 것은 남는다(앱 상단 필터 + 화면 상세)', () => {
+    const off = onSearchHandoff((t) => { if (t === 'datastores') takeSearch('datastores', 1000); });
+    handoffMany([['datastores', 'ds-1'], ['datastores:focus', 'vc:ds-1']], 1000);
+    off();
+    expect(takeSearch('datastores', 1000)).toBe('');
+    expect(takeSearch('datastores:focus', 1000)).toBe('vc:ds-1');
+  });
+});

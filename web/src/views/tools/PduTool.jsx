@@ -5,7 +5,7 @@ import { STable } from '../../components/STable.jsx';
 import { useHashTab } from '../../hooks/useHashTab.js';
 import { fetchJson, postJson, delJson, downloadFile, usePolling, canCsv } from '../../api.js';
 import { droppedSecretNote } from '../droppedSecretText.js';
-import { Loading, ErrorBox } from '../../components/ui.jsx';
+import { Loading, ErrorBox, SearchBox } from '../../components/ui.jsx';
 import EscClose from '../../components/EscClose.jsx';
 import PduCharts from './PduCharts.jsx';
 import BoldText from '../../components/boldText.jsx';
@@ -17,6 +17,7 @@ import { hostText, addressHiddenNote } from './addressHiddenText.js'; // v2.599 
 import { missingChoice } from '../idrac/scanRangeFormText.js'; // v2.630 WEB2630-03
 import { changedIntervalBody } from '../settingsFormDiff.js'; // v2.630 WEB2630-02
 import { requireChanged } from '../changeResult.js'; // v2.742(WEB-03): 200 {ok:false} 를 성공으로 읽지 않는다
+import useSearchHandoff, { useFocusHandoff } from '../../hooks/useSearchHandoff.js'; // v2.911 ⌘K 통합 장비 검색 — 검색어 · 고른 장비
 
 /**
  * 특수 기능 › PDU 정보 — APC Rack PDU 2G(rpdu2g) 전력·뱅크·온도·습도.
@@ -65,6 +66,16 @@ export default function PduTool() {
   const load = async () => { setRev((r) => r + 1); };
 
   const devices = useMemo(() => data?.devices || [], [data]);
+  // v2.911(A3): 이름 검색 칸 — ⌘K 검색의 ‘모두 보기’ · 고른 PDU 가 이 칸으로 들어온다. 찾는 칸은 이름 · 모델 · 시리얼 · 수집 주체 · 주소
+  //   (주소는 서버가 비관리자에게 비워 보내므로 그때는 걸리지 않는다 — 가린 값으로 찾지 않는다).
+  const [q, setQ] = useState('');
+  useSearchHandoff('pdu', setQ);
+  useFocusHandoff('pdu:focus', data ? devices : undefined, (d) => setOpenId(d.id)); // 고른 PDU 의 상세를 펼친다(받기 전에는 undefined — 빈 배열은 '받았는데 없음' 이다)
+  const shown = useMemo(() => {
+    const n = q.trim().toLowerCase();
+    if (!n) return devices;
+    return devices.filter((d) => [d.name, d.host, d.agent, d.snapshot?.model, d.snapshot?.serial].some((v) => String(v || '').toLowerCase().includes(n)));
+  }, [devices, q]);
   // v2.606 WEB2606-05: 부분 합(unitsIncomplete)·전력 미수집 장비를 개수로 함께 낸다(pduTotals.js — vitest 고정).
   const totals = useMemo(() => pduTotals(devices), [devices]);
 
@@ -177,6 +188,12 @@ export default function PduTool() {
 
       {tab === 'charts' && <PduCharts devices={devices} thresholds={data.thresholds || {}} />}
 
+      {tab === 'list' && devices.length > 0 && (
+        <div className="flex gap" style={{ alignItems: 'center', flexWrap: 'wrap', marginBottom: 8 }}>
+          <SearchBox className="input" style={{ maxWidth: 260, minWidth: 160 }} value={q} onChange={setQ} placeholder="이름 · 모델 · 시리얼 · 수집 주체 찾기" />
+          {q.trim() && <span className="muted" style={{ fontSize: 12 }}>{shown.length} / {devices.length}대</span>}
+        </div>
+      )}
       {tab === 'list' && (devices.length === 0 ? (
         <div className="muted" style={{ fontSize: 13 }}>등록된 PDU 가 없습니다. ‘+ PDU 추가’ 또는 CSV 가져오기로 등록하세요.</div>
       ) : (
@@ -193,7 +210,7 @@ export default function PduTool() {
               </tr>
             </thead>
             <tbody>
-              {devices.map((d) => {
+              {shown.map((d) => {
                 const s = d.snapshot;
                 const sum = s?.summary;
                 return (

@@ -686,3 +686,8 @@
   ③ 묶음 머리의 ‘모두 보기’ 에 **개수를 쓰지 않는다** — 목적 화면의 필터 규칙이 달라(템플릿 · OS 일치) 수가 다르다(목 실측 41 ↔ 43). 검색 칸이 없는 화면(PDU)은 ‘열기’ 로만.
   ④ 메타는 상태를 법인 바로 뒤에 둔다(끝에 두면 1440 에서 잘린다) · 행 이름은 `flex: 0 0 auto; max-width: 42%`(메타와 함께 줄면 이름이 먼저 잘렸다) · 400px 은 행 2줄 · 칩 가로 스크롤.
   ⑤ 최근 연 항목은 localStorage 10개(`ui.invSearch.recent`) — 읽을 때 `#/` 로 시작하지 않는 주소는 버린다(저장소 값을 믿지 않는다). 새 탭(⌘Enter)은 메모리 인계가 닿지 않아 주소만 연다.
+- **v2.911 — ⌘K 통합 장비 검색 개선(완전 일치 우선 · 여러 낱말 AND · 고른 장비 상세 열기 · PDU 검색 칸 · 결과로 돌아가기 · 단축키 OS 표기)** — 설계 `docs/design/inventory-search/README.md` §8.
+  ① **한 이동이 여러 칸을 넘긴다** — `hooks/searchHandoff.js handoffMany([[target, 검색어], [target:focus, id]])`. 칸은 target 별이고 새로 남기면 이전 묶음은 모두 버린다(예전 1칸 규칙과 같은 효과).
+     받는 쪽은 `useSearchHandoff`(검색 칸) · `useFocusHandoff`(상세) — **items 는 받기 전 undefined/null** 로 줄 것(빈 배열이면 '받았는데 없음' 으로 읽고 고른 장비를 잊는다 — PDU 실측).
+     상세 여는 함수가 조기 return 아래에 있으면 ref 로 늦게 묶는다(SanSwitchTool `openDetailRef` — TDZ 를 만들지 않게).
+  ② 단축키 글자는 `headerText.js cmdkLabel · modKeyLabel`(Mac ⌘ · 그 밖 Ctrl) — 화면에 ⌘ 를 박지 않는다.

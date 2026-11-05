@@ -7,7 +7,12 @@
  * 꺼내면 지운다(다음 방문에 옛 검색어가 다시 들어가지 않게). 30초가 지나면 버린다(늦게 열린 화면에 새지 않게).
  */
 const TTL_MS = 30_000;
-let _pending = null; // { target, q, at }
+/*
+ * v2.911(⌘K 통합 장비 검색 — 목적 화면에서 고른 장비의 상세 열기): 한 번의 이동이 **검색어와 고른 장비 id 를 함께** 넘겨야 한다
+ *   (예: 스토리지 모니터링 ← 'storage-mon' 검색어 + 'storage-mon:focus' 장비 id). 그래서 남기는 칸을 target 별로 둔다.
+ *   예전 규칙은 그대로다 — 새로 남기면 **이전에 남긴 것은 모두 버린다**(handoffSearch · handoffMany 둘 다). 한 이동에 쓰는 묶음만 남는다.
+ */
+let _pending = new Map(); // target → { q, at }
 const _subs = new Set();
 
 /**
@@ -19,16 +24,32 @@ export function onSearchHandoff(fn) {
   return () => { _subs.delete(fn); };
 }
 
+function notify(target) {
+  for (const fn of [..._subs]) { try { fn(target); } catch { /* 받는 쪽 오류가 보내는 쪽을 막지 않는다 */ } }
+}
+
 export function handoffSearch(target, q, now = Date.now()) {
-  const s = String(q || '').trim();
-  _pending = s ? { target: String(target || ''), q: s, at: now } : null;
-  if (_pending) for (const fn of [..._subs]) { try { fn(_pending.target); } catch { /* 받는 쪽 오류가 보내는 쪽을 막지 않는다 */ } }
+  handoffMany([[target, q]], now);
+}
+
+/** 여러 target 을 한 번에 남긴다(앞의 것부터 알린다). 빈 값은 건너뛴다. 이전에 남긴 것은 모두 버린다. */
+export function handoffMany(entries, now = Date.now()) {
+  _pending = new Map();
+  const added = [];
+  for (const [target, q] of Array.isArray(entries) ? entries : []) {
+    const s = String(q || '').trim();
+    const t = String(target || '');
+    if (!s || !t) continue;
+    _pending.set(t, { q: s, at: now });
+    added.push(t);
+  }
+  for (const t of added) if (_pending.has(t)) notify(t);
 }
 
 /** target 앞으로 남긴 검색어를 꺼낸다(없으면 ''). 꺼내면 지운다. */
 export function takeSearch(target, now = Date.now()) {
-  const p = _pending;
-  if (!p || p.target !== target) return '';
-  _pending = null;
+  const p = _pending.get(target);
+  if (!p) return '';
+  _pending.delete(target);
   return now - p.at <= TTL_MS ? p.q : '';
 }

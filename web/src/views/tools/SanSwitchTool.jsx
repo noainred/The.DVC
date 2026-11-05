@@ -32,6 +32,7 @@ import { headStatus, lastCollectedAt, sortSwitches, hotCount, rowMark, LIST_SORT
 import { perfAvgOf, perfMaxOf, dcGrandTotals, dcUnmeasuredNote, dcSharePct } from './sanStorageSumText.js'; // v2.721(감사 R1-02·R2-01·R2-02): 측정 없음은 null
 import { missingChoice } from '../idrac/scanRangeFormText.js'; // v2.630 WEB2630-03: 목록에 없는 저장값을 그대로 보인다
 import useSearchHandoff from '../../hooks/useSearchHandoff.js'; // v2.909 헤더 ⌘K 통합 장비 검색 — 검색어 인계
+import { useFocusHandoff } from '../../hooks/useSearchHandoff.js'; // v2.911 고른 장비 상세 열기
 
 /**
  * 특수기능 › SAN 스위치 모니터링(v2.410 — 사용자 요구 'Brocade SAN switch 포트 모니터링 및
@@ -71,6 +72,8 @@ export default function SanSwitchTool() {
   const [error, setError] = useState(null);
   const [q, setQ] = useState('');
   useSearchHandoff('san-switch', setQ); // v2.909: ⌘K 검색에서 고른 장비 · ‘모두 보기’ 검색어
+  // v2.911(A1): 고른 스위치의 포트 상세를 연다. openDetail 은 조기 return 아래에 정의돼 있어 ref 로 늦게 묶는다(TDZ 를 만들지 않게).
+  const openDetailRef = useRef(null);
   const [dcSel, setDcSel] = useState(() => new Set());
   const [form, setForm] = useState(null);          // null = 폼 닫힘
   const [busy, setBusy] = useState(false);
@@ -124,6 +127,7 @@ export default function SanSwitchTool() {
   }, [data]);
 
   const rows = data?.devices || [];
+  useFocusHandoff('san-switch:focus', data?.devices, (r) => openDetailRef.current?.(r)); // v2.911(A1)
   const searched = rows.filter((r) => {
     if (!q.trim()) return true;
     const s = q.trim().toLowerCase();
@@ -216,6 +220,7 @@ export default function SanSwitchTool() {
     catch (e) { if (detailSeq.current === seq) setDetail({ device: r, error: e.message }); }
   };
   const closeDetail = () => { detailSeq.current++; setDetail(null); };
+  openDetailRef.current = openDetail;
 
   return (
     <>
