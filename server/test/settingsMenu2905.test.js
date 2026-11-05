@@ -32,9 +32,12 @@ const KEYS_V2901 = [
   'backup', 'nfs-mounts', 'dir-usage', 'vclogs', 'diagnostics', 'perf-monitor', 'log-analysis', 'audit', 'upgrade', 'about',
 ];
 
-test('① 하위 키 48개는 그대로다(추가 · 삭제 · 이름 변경 없음)', () => {
-  assert.equal(ITEMS.length, 48, `항목을 ${ITEMS.length}개 읽었다 — SUB 줄 모양('  { k: …, label: …, C: …')이 바뀌었는지 확인`);
-  assert.deepEqual([...ITEMS.map((i) => i.k)].sort(), [...KEYS_V2901].sort());
+// v2.911 에 더한 키(설정 › 로그 › 최근 로그인 · 로그인 횟수). 옛 48개는 하나도 빠지거나 이름이 바뀌지 않는다.
+const KEYS_ADDED = ['recent-logins', 'login-counts'];
+
+test('① 하위 키 48개는 그대로다(삭제 · 이름 변경 없음) — 더한 키는 KEYS_ADDED 에만', () => {
+  assert.equal(ITEMS.length, 48 + KEYS_ADDED.length, `항목을 ${ITEMS.length}개 읽었다 — SUB 줄 모양('  { k: …, label: …, C: …')이 바뀌었는지 확인`);
+  assert.deepEqual([...ITEMS.map((i) => i.k)].sort(), [...KEYS_V2901, ...KEYS_ADDED].sort());
   assert.equal(new Set(ITEMS.map((i) => i.k)).size, ITEMS.length, '중복 키');
 });
 

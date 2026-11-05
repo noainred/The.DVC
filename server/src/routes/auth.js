@@ -6,6 +6,7 @@ import { loadAdConfig, saveAdConfig, testAd, adTransportStatus } from '../auth/a
 import { requireSettingsOwner, fullScopeOnlyWith } from './admin/shared.js';
 import { logAudit } from '../audit.js';
 import { recordPortalLoginFail } from '../security/loginStore.js';
+import { recordLoginSuccessEvent } from '../security/loginHistory.js'; // v2.911: 설정 › 로그 › 최근 로그인 · 로그인 횟수
 import { loadSessionSecurity, singleSessionRequired } from '../security/securitySettings.js';
 import { newSessionId, setActiveSession, clearActiveSessionIf } from '../auth/sessions.js';
 import { checkLoginAllowed, recordLoginFailure, recordLoginSuccess } from '../security/loginRateLimit.js';
@@ -119,6 +120,8 @@ authRouter.post('/login', async (req, res) => {
   if (single) setActiveSession(user.username, sid, { at: Date.now(), ip });
   noteIssuedSession({ sub: user.username, sid, exp });
   logAudit({ user: user.username, action: '로그인', detail: `${user.role}${single ? ' · 단일세션' : ''}${user.mustEnrollOtp ? ' · OTP 등록 필요(등록 전용 세션)' : ''}`, ip, xff });
+  // 로그인 기록(감사 로그는 줄 수 상한으로 잘려 기간 집계에 못 쓴다 — security/loginHistory.js 머리말). 기록 실패가 로그인을 막지 않는다.
+  try { recordLoginSuccessEvent({ user: user.username, ip, role: user.role, src: user.source === 'ad' || user.source === 'local' ? user.source : '' }); } catch { /* best effort */ }
   // 로그인 직후에도 프론트가 메뉴를 바로 게이팅할 수 있게 권한/scope 를 함께 내려준다.
   // mustEnrollOtp 이면 프론트는 OTP 등록 화면에 고정된다(서버도 requireEnrolled 로 차단).
   const { adEpoch: _adEpoch, ...userOut } = user; // 정책 epoch 는 토큰에만 싣는다(응답에는 필요 없다)
