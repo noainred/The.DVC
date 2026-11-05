@@ -168,12 +168,17 @@ function VmsList({ filters, onOpen, onVisible, onHub, selectedId }) {
   // v2.746 C안 표 열 — 전원은 VM 이름 앞 점(색 + 글자), vCPU·RAM 은 한 칸(정렬은 vCPU 우선 그다음 메모리).
   //   CPU·메모리 막대는 이 화면 전용 VmUsageBar(공용 UsageCell 은 다른 화면이 쓰므로 바꾸지 않는다).
   const columns = [
-    { key: 'name', label: 'VM', render: (v) => <VmNameCell vm={v} onOpen={openVm} /> },
-    // v2.909: 신호(서버 판정 inventory/vmSignals.js — signals=1 일 때만 실린다. 구버전 서버면 열을 그리지 않는다).
-    //   VM 바로 뒤에 둔다 — 이 표는 1440 에서도 오른쪽 열(디스크·호스트)이 가로 스크롤 밖이라(v2.898 부터 · A/B 확인) 끝에 두면 보이지 않았다.
-    ...(hasSig ? [{ key: 'signals', label: '신호', sortValue: (v) => (v.signals || []).length, render: (v) => (
-      <span className="vmh-sig">{(v.signals || []).map((k) => { const x = signalText(k, { days }); return <span key={k} className={`vmh-badge ${x.badge}`} title={x.desc}>{x.short}</span>; })}</span>
-    ) }] : []),
+    // v2.909: 신호(서버 판정 inventory/vmSignals.js — signals=1 일 때만 실린다)는 **열을 늘리지 않고 VM 이름 아래 줄**에 배지로 둔다.
+    //   이 표는 1440 에서도 오른쪽 열이 가로 스크롤 밖이다(v2.898 부터 · A/B 확인). 신호를 끝 열에 두면 보이지 않았고(1차),
+    //   VM 다음 열로 끼우면 기본 정렬 열인 CPU 값이 밀려 잘렸다(2차 Chromium 확인) — 그래서 이름 칸 안에 둔다.
+    { key: 'name', label: hasSig ? 'VM · 신호' : 'VM', render: (v) => (
+      <>
+        <VmNameCell vm={v} onOpen={openVm} />
+        {Array.isArray(v.signals) && v.signals.length > 0 && (
+          <span className="vmh-sig" style={{ display: 'flex', marginTop: 4 }}>{v.signals.map((k) => { const x = signalText(k, { days }); return <span key={k} className={`vmh-badge ${x.badge}`} title={x.desc}>{x.short}</span>; })}</span>
+        )}
+      </>
+    ) },
     { key: 'vcenterId', label: 'vCenter', render: (v) => <span className="muted">{v.vcenterId}</span> },
     { key: 'guestOS', label: 'Guest OS' },
     { key: 'ipAddress', label: 'IP', render: (v) => ipList(v) },
