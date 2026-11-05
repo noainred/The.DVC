@@ -161,7 +161,7 @@
     `EntityDetail type='vm'` 모달은 다른 화면(검색·호스트 VM 목록 등)에서 그대로 쓴다 — 이 화면만 드로어다.
   · ⚠ 1440 에서 표 오른쪽 열은 가로 스크롤 밖으로 밀린다(현황 표는 v2.898 부터 그랬다 — A/B) — **열을 늘리지 말 것**(신호 열을 끝에 두면 보이지 않았고, VM 다음에 끼우면 기본 정렬 열 CPU 값이 잘렸다 — 그래서 신호는 VM 이름 아래 줄 배지). 법인별 표는 10열로 맞췄다. 이 앱에는 전역 a 글자색이 없다 — class 없는 링크는 `.vmh` 범위 토큰 색.
   · 개체 보기 요약 탭 4/5/3(`.vmo-grid` — 1280 미만 2열 · 760 미만 1열). 신호는 `VCenterDetail` 의 /vms 폴링에 `signals=1`. 시안의 '백업' 카드는 VM 행에 값이 없어 넣지 않았다(지어내지 않는다).
-- **v2.911 — VM 상세 · 성능 그래프(시안 `docs/design/vm-perf` ①②③④ · 사용자 컨펌 2026-11-06 '개선' = 기본값 6가지). 성능 조회는 지표 4개를 한 번에(로그인 1회) · 성능 화면은 개체 보기 › 모니터 첫 섹션 · vCenter 트리의 VM 클릭은 드로어**
+- **v2.913 — VM 상세 · 성능 그래프(코드·테스트 표지는 v2.911 — 준비 중 main 이 2.911.0(장비 검색) · 2.912.0 을 먼저 써서 2.913.0 으로 게시)(시안 `docs/design/vm-perf` ①②③④ · 사용자 컨펌 2026-11-06 '개선' = 기본값 6가지). 성능 조회는 지표 4개를 한 번에(로그인 1회) · 성능 화면은 개체 보기 › 모니터 첫 섹션 · vCenter 트리의 VM 클릭은 드로어**
   (서버 `vcenter/soapClient.js fetchEntityMetrics·pickPerfInterval·parseHistoricalIntervals·perfRetention` · `routes/api/vmMetrics.js parseMetricTypes·synthMetrics` ·
   웹 `components/vmperf/{VmPerfView.jsx,vmPerfText.js,vmPerf.css}` · `components/VmMetrics.jsx`(링크 단추만) · `vcd/{VmObject,HostObject}.jsx` 모니터 탭 · `VCenterDetail.jsx` + `vcd/treeRows.js` · `vms/vmSeries.jsx`.
   회귀 `server/test/vmPerf2911.test.js`(6 — 가짜 vCenter 로그인 수) · 웹 `components/vmperf/vmPerfText.test.js` · `views/vcd/treeRows.test.js` · `views/vmPerf2911.test.jsx` · `audit2744k.test.js`(409 skip 정지를 VmPerfView 로)):

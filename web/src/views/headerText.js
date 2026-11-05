@@ -25,6 +25,19 @@ export function roleLabel(user) {
 export const SEARCH_PLACEHOLDER = '장비 · 기능 찾기 — 이름 · IP · 시리얼';
 export const SEARCH_TITLE = '장비 · 기능 찾기 (⌘K / Ctrl+K)';
 
+/**
+ * v2.911(C1): 단축키 표기를 OS 에 맞춘다 — Mac 은 ⌘, 그 밖은 Ctrl. 단축키 자체는 예전처럼 둘 다 받는다(App 의 keydown).
+ * nav 는 navigator 모양({ userAgentData?.platform, platform, userAgent }) — 못 읽으면 Ctrl(Windows 가 대부분인 현장).
+ */
+export function isMacPlatform(nav) {
+  try {
+    const p = String(nav?.userAgentData?.platform || nav?.platform || nav?.userAgent || '');
+    return /mac|iphone|ipad/i.test(p.slice(0, 200));
+  } catch { return false; }
+}
+export const modKeyLabel = (nav) => (isMacPlatform(nav) ? '⌘' : 'Ctrl');
+export const cmdkLabel = (nav) => (isMacPlatform(nav) ? '⌘K' : 'Ctrl K');
+
 /** 수집 시각을 헤더 한 줄에 붙일 짧은 표기(ko-KR 시각). 읽지 못하면 빈 문자열 — '—' 를 붙이지 않는다(값 자리가 아니라 꼬리). */
 export function generatedAtText(iso) {
   if (!iso) return '';

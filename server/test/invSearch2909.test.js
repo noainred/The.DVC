@@ -73,17 +73,49 @@ test('mkRow: 빈 · 의미 없는 시리얼은 버리고 검색 키를 한 번 �
 
 const row = (kind, f) => IDX.mkRow(kind, f);
 
-test('matchTier: 이름 앞글자 › 이름 포함 › 보조 이름 › IP › 시리얼 › 모델', () => {
+test('matchTier: 완전 일치 › 이름 앞글자 › 이름 포함 › 보조 이름 › IP › 시리얼 › 모델(v2.911 B1)', () => {
   const pq = Q.parseQuery('db0');
-  assert.equal(Q.matchTier(row('vm', { name: 'db01' }), pq), 1);
-  assert.equal(Q.matchTier(row('vm', { name: 'srv-db01' }), pq), 2);
-  assert.equal(Q.matchTier(row('ip', { name: '10.0.0.1', alt: 'db01' }), pq), 3);
-  assert.equal(Q.matchTier(row('vm', { name: 'x', serials: ['DB0-99'] }), pq), 5);
-  assert.equal(Q.matchTier(row('vm', { name: 'x', model: 'db0 model' }), pq), 6);
+  assert.equal(Q.matchTier(row('vm', { name: 'db0' }), pq), 1, '이름 완전 일치');
+  assert.equal(Q.matchTier(row('vm', { name: 'db01' }), pq), 2);
+  assert.equal(Q.matchTier(row('vm', { name: 'srv-db01' }), pq), 3);
+  assert.equal(Q.matchTier(row('ip', { name: '10.0.0.1', alt: 'db01' }), pq), 4);
+  assert.equal(Q.matchTier(row('vm', { name: 'x', serials: ['DB0-99'] }), pq), 6);
+  assert.equal(Q.matchTier(row('vm', { name: 'x', model: 'db0 model' }), pq), 7);
   assert.equal(Q.matchTier(row('vm', { name: 'x' }), pq), null);
   const ip = Q.parseQuery('10.20');
-  assert.equal(Q.matchTier(row('vm', { name: 'x', ips: ['10.20.1.5'] }), ip), 4);
+  assert.equal(Q.matchTier(row('vm', { name: 'x', ips: ['10.20.1.5'] }), ip), 5);
   assert.equal(Q.matchTier(row('vm', { name: 'x', ips: ['110.20.1.5'] }), ip), null, 'IP 는 앞자리 일치만');
+  assert.equal(Q.matchTier(row('vm', { name: 'x', ips: ['10.1.0.1'] }), Q.parseQuery('10.1.0.1')), 1, 'IP 완전 일치');
+  assert.equal(Q.matchTier(row('host', { name: 'x', serials: ['7HX-2K93'] }), Q.parseQuery('7hx2k93')), 1, '시리얼 완전 일치(구분자 무시)');
+});
+
+test('v2.911 B1: 완전 일치가 같은 종류 안에서 맨 앞 — IP 를 치면 그 IP 의 VM 이 10.1.0.1x 보다 먼저', () => {
+  const rows = [
+    row('vm', { id: 'a', name: 'aaa', ips: ['10.1.0.15'] }),
+    row('vm', { id: 'b', name: 'bbb', ips: ['10.1.0.12'] }),
+    row('vm', { id: 'z', name: 'zzz', ips: ['10.1.0.1'] }),
+  ];
+  const r = Q.searchRows(rows, Q.parseQuery('10.1.0.1'));
+  assert.deepEqual(r.groups[0].rows.map((x) => x.id), ['z', 'a', 'b']);
+});
+
+test('v2.911 B2: 여러 낱말은 낱말마다 어느 칸에든 있으면(AND) — 통째 일치보다 뒤 · 가린 칸은 낱말에도 쓰지 않는다', () => {
+  const rows = [
+    row('vm', { id: 'v1', name: 'srv-db-01', sub: 'RHEL 8', corp: 'KR', host: 'esx-kr-07' }),
+    row('vm', { id: 'v2', name: 'srv-web-01', sub: 'RHEL 8' }),
+    row('vm', { id: 'v3', name: 'srv db phrase' }),
+    row('host', { id: 'h1', name: 'esx-kr-07', model: 'Dell R760' }),
+  ];
+  const pq = Q.parseQuery('srv rhel');
+  assert.deepEqual(pq.words.map((w) => w.w), ['srv', 'rhel']);
+  assert.equal(Q.matchTier(rows[0], pq), 8);
+  assert.equal(Q.matchTier(rows[3], pq), null, '한 낱말이라도 없으면 아니다');
+  const r = Q.searchRows(rows, Q.parseQuery('srv db'));
+  assert.deepEqual(r.groups[0].rows.map((x) => x.id), ['v3', 'v1'], '통째 일치(srv db phrase)가 먼저, 낱말 일치가 뒤');
+  assert.equal(Q.parseQuery('a b c d e f g h').words.length, Q.WORDS_MAX);
+  assert.equal(Q.parseQuery('ip:10.1 10.2').words, null, 'ip: · sn: 은 낱말로 나누지 않는다');
+  const masked = row('sanswitch', { id: 's', name: '10.30.0.3 core', addr: '10.30.0.3' });
+  assert.equal(Q.matchTier(masked, Q.parseQuery('10.30.0.3 core'), { addrSearchable: false }), null, '가린 이름 칸은 낱말로도 찾지 않는다');
 });
 
 test('matchTier: ip: 는 주소만 · sn: 은 시리얼만(구분자 무시) · 가린 주소로는 찾지 않는다', () => {
@@ -283,6 +315,9 @@ test('반증 M-2: 구분자로 채운 254자 검색어도 보통 검색어와 �
   const crafted = time('-.'.repeat(127));
   assert.ok(Q.parseQuery('-.'.repeat(127)).snNeedle === '', '구분자만이면 정규화 결과는 빈 값');
   assert.ok(crafted < normal * 8, `조작 검색어 ${crafted.toFixed(1)}ms ↔ 보통 ${normal.toFixed(1)}ms`);
+  // v2.911 B2: 낱말 상한(6) — 공백으로 쪼갠 긴 검색어도 낱말 6개까지만 본다
+  const words = time('- . '.repeat(63));
+  assert.ok(words < normal * 12, `낱말 조작 ${words.toFixed(1)}ms ↔ 보통 ${normal.toFixed(1)}ms`);
 });
 
 test('반증 L-1 · L-3 · L-5: 서버 귀속은 서버 분석과 같은 함수 · 색인 생성은 시간 기준 양보 · 엣지 id 접두 한 번', () => {

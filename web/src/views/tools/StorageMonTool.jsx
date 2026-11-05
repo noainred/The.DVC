@@ -589,6 +589,7 @@ export default function StorageMonTool() {
   // 개수가 달라지면 React #310 으로 화면 전체가 크래시한다(CLAUDE.md 프론트엔드 회귀 방지).
   const [dcQuery, setDcQuery] = useState('');
   useSearchHandoff('storage-mon', setDcQuery); // v2.909: ⌘K 검색에서 고른 장비 · ‘모두 보기’ 검색어
+  useSearchHandoff('storage-mon:focus', setDetail); // v2.911(A1): 고른 장비의 상세 모달(상세는 id 로 보관 — 없는 id 면 모달이 그리지 않는다)
   // 용량 표시 단위(v2.406, 사용자 요구 — PowerScale 사용량 추적). 브라우저에 기억한다.
   const [unit, setUnit] = useState(loadUnit);
   ACTIVE_UNIT = unit; // 아래 자식(표 셀·상세 모달·차트)이 그리기 전에 반영된다(tbFmt 주석 참고)

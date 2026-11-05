@@ -22,6 +22,7 @@
 - (원래 5120행) v2.633 — 손상 보존본만 남은 중앙 설정 파일은 관리자가 '기본값으로 확정' 한다. 나이로 자동 해제하지 않는다
 - (원래 5857행) CLI 계정 관리 메뉴(v2.723) — `server/src/tools/user-admin.js` + 래퍼 `user-admin.sh` → 설치본 `sudo vmware-port
 - (원래 5877행) super_admin 은 '저장 역할' 이고 요청 문맥에서는 admin + `superAdmin:true` 다
+- (v2.912 추가) 로그인 기록(최근 로그인 · 로그인 횟수)은 감사 로그가 아니라 `security/loginHistory.js` 하나로 센다
 
 ## 본문
 
@@ -389,3 +390,10 @@
   ⑥ 검색어에서 파생한 값(시리얼 정규화 등)은 **요청당 한 번**(반증 M-2 — 행마다 하면 조작한 254자 검색어가 5만 행에서 215ms). 색인 생성은 시간 기준 양보(createYielder).
   ④ 색인은 관리자 판본 하나를 30초 공유하고 범위 · 가림은 응답 때 건다(사용자별 색인 금지 — 캐시 키 실수로 새는 것을 막는다). 응답 캐시(memoJson)는 두지 않는다. 검색어 256자 상한(넘으면 아무것도 맞지 않음) · 정규식 없는 선형 일치.
   회귀 `server/test/invSearch2909.test.js` 21건 · 변이 22건 중 21 잡음(살아남은 1건은 `visible()` 의 이중 방어 줄 — 동등 변이) · 반증 1인 결과와 조치는 docs/design/inventory-search/README.md §7.4.
+- **v2.912 — 로그인 기록(설정 › 로그 › 최근 로그인 · 로그인 횟수)은 감사 로그가 아니라 `security/loginHistory.js` 하나로 센다.**
+  ① 감사 로그(`audit.ndjson`)는 모든 관리 작업과 함께 **줄 수 상한**(AUDIT_MAX)으로 잘린다 — 기간 집계(최근 1달 · 사용자 정의)에 쓰면 밀려난 로그인이 '0 회' 로 보인다.
+     로그인 성공은 `routes/auth.js` 토큰 발급 직후 `recordLoginSuccessEvent` 가 `login-history.ndjson` 에 한 줄 덧붙이고(366일 · 10만 줄), 파일이 없는 첫 기동에만
+     감사 로그의 `action === '로그인'` 줄(정확히 일치 — '로그인 실패'·'로그인 차단(잠금)' 아님)을 옮겨 온다. 새 로그인 경로(SSO 등)를 만들면 여기에도 기록할 것.
+  ② 기록이 닿지 않는 구간은 0 이 아니다 — 구간 시작이 가장 오래된 기록보다 앞이면 `partial`, 기록이 없으면 전부 partial, 파일을 못 읽으면 `loadError` 를 화면이 밝힌다.
+  ③ `GET /api/admin/login-history` 는 감사 로그와 같은 문지기(adminOnly + 범위 계정 403)이고 데모 계정 READ_DENY 다. 기간 질의는 `parseLoginRange`(배열 · 한쪽만 · 역순 · 미래 거부).
+  회귀 `server/test/loginHistory2912.test.js`(실제 POST /api/auth/login · 라우트 게이트) · 웹 `web/src/views/loginHistoryText.test.js`.

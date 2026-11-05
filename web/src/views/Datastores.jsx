@@ -3,6 +3,7 @@ import { usePolling } from '../api.js';
 import { DataTable, UsageCell, Kpi, Loading, ErrorBox, ResultCount, EntityDetail } from '../components/ui.jsx';
 import IpmsMatches from '../components/IpmsMatches.jsx';
 import { numOrNull } from '../numOrNull.js';
+import { useFocusHandoff } from '../hooks/useSearchHandoff.js'; // v2.911 ⌘K 통합 장비 검색 — 고른 장비 상세 열기
 // 개별 DS 사용량 추이 모달(v2.354). v2.596(감사 PERFWEB-03): recharts 를 끌고 오므로 모달을 열 때만 받는다.
 const DsTrendModal = lazy(() => import('./tools/DsTrendModal.jsx'));
 
@@ -36,6 +37,8 @@ export default function Datastores({ filters }) {
   const [sel, setSel] = useState(null);
   const [trend, setTrend] = useState(null); // 📈 추이 모달(v2.354) — 훅은 조기 return 위에
   const { data, error, loading } = usePolling('/datastores', filters, 15_000);
+  // v2.911(A2): ⌘K 검색에서 고른 데이터스토어의 상세 창을 연다(필터는 App 이 같은 이동으로 이름을 넣는다) — 훅은 조기 return 위.
+  useFocusHandoff('datastores:focus', data?.items, setSel);
   if (loading && !data) return <Loading />;
   if (error && !data) return <ErrorBox message={error} />; // 데이터 보유 중 일시 폴링 오류는 화면 유지
   const rows = data?.items || [];

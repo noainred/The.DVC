@@ -1,6 +1,6 @@
 # 설계: VM 상세 · 성능 그래프 — ① vCenter 트리의 VM 클릭을 가상화 서버와 같은 드로어로 · ② ‘성능 그래프 보기’ 재설계
 
-작성 2026-11-06 (main v2.910.0 기준 · 브랜치 `claude/wizardly-goodall-2frd1k`) · 상태 **구현됨 v2.911.0**(컨펌 2026-11-06 08:20 '개선' — §6 질문 6가지 모두 기본값 · 검증 표준 · §8. 구현은 규칙상 Opus 이지만 사용자가 모델을 바꾸지 않고 바로 '개선' 이라 답해 이 세션(Fable)이 이어서 구현했다 — 보고에 밝힘) ·
+작성 2026-11-06 (main v2.910.0 기준 · 브랜치 `claude/wizardly-goodall-2frd1k`) · 상태 **구현됨 v2.913.0**(코드 · 테스트 표지는 v2.911 — 준비 중 main 이 2.911.0 · 2.912.0 을 먼저 써서 번호만 올림)(컨펌 2026-11-06 08:20 '개선' — §6 질문 6가지 모두 기본값 · 검증 표준 · §8. 구현은 규칙상 Opus 이지만 사용자가 모델을 바꾸지 않고 바로 '개선' 이라 답해 이 세션(Fable)이 이어서 구현했다 — 보고에 밝힘) ·
 시안 캔버스: https://claude.ai/artifact/EBKGEKL86TmCvytJ2k3KuD (아트보드 6장 — ⓪ 지금 · ① vCenter 트리 → 드로어 · ② 성능 1440 · ③ 성능 400 · ④ 상태 6종 · ⑤ 대안(모달 유지).
 이 폴더의 `*.dc.html` 이 같은 내용의 레퍼런스(HTML 프로토타입 — 복사 대상이 아님). **VM · vCenter 이름(web-kr1-023 · VC-KR1 · esx-kr1-07 …)과 수치는 전부 가상**이고 ⓪ 의 캡처는 목 서버 데이터다.
 색 · 글자는 `web/src/styles.css` `:root` 토큰과 `views/vms/vmHub.css` · `views/tools/xferSpeed.css` 그대로(새 hex 없음). 계정의 ‘Design System’ 아티팩트는 지금도 타입 파일뿐이라(`project/README.md` · `tokens.json` 없음 — 목록으로 확인) 쓰지 않았다.
@@ -112,7 +112,7 @@
 - 문서: `docs/rules/vcenter.md` 에 ‘성능 화면 · 드로어’ 항목 · 이 README §8 에 ‘시안과 달리 한 것’.
 - 릴리스: 포탈 동작이 바뀌므로 버전업 + GitHub 릴리스 게시 1회(`versions.json` latest 확인).
 
-## 8. 구현(v2.911.0 — 2026-11-06 · 시안과 달리 한 것 · 남긴 것)
+## 8. 구현(v2.913.0 — 코드 표지 v2.911 · 2026-11-06 · 시안과 달리 한 것 · 남긴 것)
 
 - 파일: 서버 `vcenter/soapClient.js`(`fetchEntityMetrics` · `pickPerfInterval` · `parseHistoricalIntervals` · `perfRetention` · `queryEntityPerfMulti` 에 `maxSample`) · `routes/api/vmMetrics.js`(`parseMetricTypes` · `synthMetrics` · 두 라우트의 `types=` 분기) ·
   웹 `components/vmperf/{VmPerfView.jsx,vmPerfText.js,vmPerf.css}`(새) · `components/VmMetrics.jsx`(모달 삭제 → 링크 단추 2개) · `vcd/VmObject.jsx` · `vcd/HostObject.jsx`(모니터 탭 첫 섹션) · `VCenterDetail.jsx`(트리 VM 클릭 → `VmDrawer` · `vcd/treeRows.js` 순서) ·
