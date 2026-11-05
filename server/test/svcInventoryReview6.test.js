@@ -23,6 +23,7 @@ const { registerSvcInventory, bmAliasKeys, bmKeyOf } = await import('../src/rout
 const central = await import('../src/central/fleet.js');
 const { fleetUntaggedId } = await import('../src/agent/fleetPush.js');
 const { classifyFleet } = await import('../src/insights/fleetInventory.js');
+const { config } = await import('../src/config.js');
 
 const S = (id, name, path = '') => ({ id, name, path, tier: 2, owner: '', note: '', globalId: '' });
 const corpOf = (c = {}) => ({ folders: [], services: [], folderRules: [], aliases: [], nameRules: [], tagEnabled: false, ...c });
@@ -323,4 +324,46 @@ test('예약 1-d: rule/alias/namerule.update 는 대상 서비스만 바꾼다 �
   assert.deepEqual(CORP_OPS['namerule.update'](d, { corp: 'A', match: 'prefix', value: 'ERP-', serviceId: 's2' }), { result: {} });
   assert.equal(d.corps.A.nameRules[0].serviceId, 's2');
   assert.equal(CORP_OPS['namerule.update'](d, { corp: 'A', match: 'suffix', value: 'erp-', serviceId: 's2' }).status, 404);
+});
+
+// ───────── 6차 남긴 것 ①·③ ─────────
+test('남긴 것 ①(점검 결과): 같은 엣지에서 이름이 같은 두 서버는 중앙 함대 병합이 하나로 합친다 — 옛 키가 두 구성원에 걸리지 않는다 · ③ 옮길 것이 있는 법인만 movable', async () => {
+  const prev = store.snapshot; const prevCfg = { central: config.central, agent: config.agent };
+  try {
+    config.central = { ...(config.central || {}), token: 'tok-r6-amb' }; config.agent = { ...(config.agent || {}), centralUrl: '' };
+    store.snapshot = snapOf([{ id: 'vc-a', name: 'vcenter-a' }], [VM('live')]);
+    central.resetEdgeFleet();
+    central.setEdgeFleet('agt', [{ fleetId: 'esx1', name: 'esx1', serviceTag: '', vcenterId: 'vc-a', untaggedId: 'esx1' }], Date.now());
+    const oldKey = bmKeyOf(classifyFleet({ servers: central.getEdgeFleetServers() }).bareMetal[0]).key;
+    setup({ [oldKey]: P('s1') });
+    central.setEdgeFleet('agt', [{ fleetId: 'taga', name: 'esx1', serviceTag: 'TAGA', vcenterId: 'vc-a', untaggedId: 'esx1' }, { fleetId: 'tagb', name: 'esx1', serviceTag: 'TAGB', vcenterId: 'vc-a', untaggedId: 'esx1' }], Date.now());
+    const m = await call('GET /tools/svc-inventory/members', { query: { corp: 'vc-a' } });
+    assert.equal(m.statusCode, 200, JSON.stringify(m.body));
+    const bms = m.body.members.filter((x) => x.kind === 'bm');
+    assert.equal(bms.length, 1, '이름이 같은 엣지 서버 둘은 중앙 병합(호스트 이름 중복 제거)에서 하나만 남는다 — 이 점검의 전제를 바꾸면 이 시험이 먼저 깨진다');
+    const q = await call('GET /tools/svc-inventory/queues', { query: { corp: 'vc-a' } });
+    assert.deepEqual(q.body.aliasPins.items.map((x) => x.state), ['alias']);
+    assert.deepEqual(q.body.aliasPins.movable, ['vc-a']);
+    // ③: 충돌만 남은 법인은 movable 이 아니다
+    sm.mutatePins((d) => { d.pins[bms[0].key] = P('s2'); return {}; });   // rev 가 올라 판정 memo 도 새로(setup 은 rev 를 0 으로 되돌려 memo 를 맞힌다)
+    const q2 = await call('GET /tools/svc-inventory/queues', { query: { corp: 'vc-a' } });
+    assert.deepEqual(q2.body.aliasPins.items.map((x) => x.state), ['conflict']); assert.deepEqual(q2.body.aliasPins.movable, []);
+  } finally { store.snapshot = prev; config.central = prevCfg.central; config.agent = prevCfg.agent; central.resetEdgeFleet(); }
+});
+
+test('남긴 것 ①(실제로 생기는 경우): 이름이 같은 ESXi 호스트가 두 법인에서 베어메탈이면 옛 키가 같다 — 고정 법인 쪽 구성원이 승계하고, 다른 법인 쪽에 거짓 불일치 행(지우기 버튼)이 뜨지 않는다', () => {
+  const map = { corps: { A: corpOf({ services: [S('s1', 'ERP')] }), B: corpOf({ services: [S('s1', 'ERP')] }) } };
+  const ma = { key: 'st:taga', aliasKeys: ['fl:esx1'], kind: 'bm', corp: 'A', name: 'esx1' };
+  const mb = { key: 'st:tagb', aliasKeys: ['fl:esx1'], kind: 'bm', corp: 'B', name: 'esx1' };
+  const pins = { 'fl:esx1': P('s1', 'A') };
+  const inv = buildInventory({ members: [ma, mb], map, pins });
+  assert.equal(inv.resolved.get('st:taga').src, 'pin', 'A 쪽이 승계');
+  assert.equal(inv.resolved.get('st:tagb').src, 'none', 'B 쪽은 쓰지 않는다');
+  assert.deepEqual(inv.queues.mismatch, [], 'B 쪽에 거짓 불일치 행이 없다(그 행의 지우기가 A 의 고정을 지웠다)');
+  // 범위 계정(B 만)도 같다 — 고정 법인 A 가 범위 밖이어도 A 구성원의 승계다
+  const sc = buildInventory({ members: [ma, mb], map, pins, allowed: new Set(['B']) });
+  assert.deepEqual(sc.queues.mismatch, []);
+  // 고정 법인에 그 옛 키를 가진 구성원이 없으면 여전히 불일치(6차 4 — 옮겨 간 서버)
+  const moved = buildInventory({ members: [mb], map, pins });
+  assert.deepEqual(moved.queues.mismatch.map((x) => [x.key, x.aliasKey, x.pinCorp]), [['st:tagb', 'fl:esx1', 'A']]);
 });
