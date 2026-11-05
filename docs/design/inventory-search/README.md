@@ -1,6 +1,6 @@
 # 설계: 헤더 ⌘K 검색 — 등록된 모든 인벤토리의 장비 찾기(통합 장비 검색)
 
-작성 2026-11-05 (v2.898.0 · main 2d39b16 기준) · 상태 **구현 완료(v2.908.0 · §7)** · 시안 캔버스: https://claude.ai/artifact/HCcyuoSPeN8mpW595MjNnJ
+작성 2026-11-05 (v2.898.0 · main 2d39b16 기준) · 상태 **구현 완료(v2.909.0 · §7)** · 시안 캔버스: https://claude.ai/artifact/HCcyuoSPeN8mpW595MjNnJ
 (아트보드 6장 — 이 폴더의 `*.dc.html` 이 같은 내용의 레퍼런스. 장비 이름 · 법인 · IP · 시리얼 · 사람은 전부 가상이고 색 · 글자는 `web/src/styles.css` `:root` 토큰 그대로.
 개수 중 vCenter 28 · 호스트 658 · VM 5,850 은 루트 CLAUDE.md 의 운영 수치이고, 그 밖의 종류별 개수(스토리지 41 · SAN 36 · 네트워크 128 · PDU 22 · IP 대장 9,412 …)는 **그림용 가상값**이다.
 계정의 ‘Design System’ 아티팩트는 앞 시안들(`docs/design/wiki-mention`)과 같이 내용이 비어 있어 쓰지 않았다.)
@@ -130,12 +130,12 @@
 - 문서: `docs/rules/web.md`(팔레트 항목 갱신) · `docs/rules/security-api.md`(검색 라우트 게이트 1항목) · API 문서 재생성 · 이 README §7.
 - 예상 3~4.5시간(결정 1 · 3 반영 — 11종 · 목적 화면 12곳에 focus + q) — 착수 전 검증 수준을 묻는다(30분 초과 규약).
 
-## 7. 구현 기록(v2.908.0 · 2026-11-06)
+## 7. 구현 기록(v2.909.0 · 2026-11-06)
 
 ### 7.1 만든 것
 - 서버 `server/src/search/` — `inventoryIndex.js`(색인 · 11종 출처 · 출처별 try · 30초 캐시 · 진행 중 생성 공유 · 강제 재생성 10초 스로틀) ·
   `inventoryAccess.js`(`accessPlan` 종류별 권한 · 도구 · 범위 · `publicRow` 주소 가림) · `inventoryQuery.js`(접두 · 일치 등급 · 묶음 상한 — 순수).
-  라우트 `GET /api/search/inventory`(`routes/api/invSearch.js`). 테스트 `server/test/invSearch2908.test.js` 17건 · 변이 15건 중 14 잡음(§7.3).
+  라우트 `GET /api/search/inventory`(`routes/api/invSearch.js`). 테스트 `server/test/invSearch2909.test.js` 17건 · 변이 15건 중 14 잡음(§7.3).
 - 웹 — `components/Palette.jsx`(장비 묶음 · 종류 칩 · 띠 · 빈 입력의 찾는 범위 · 최근 10개 · 키보드) · `components/invSearchQuery.js`(접두 표 · 이동 계획 · 최근 항목 · 행 메타 — 순수) ·
   `hooks/useSearchHandoff.js`(받는 화면 훅) · 문구 `views/headerText.js`('장비 · 기능 찾기'). 테스트 `invSearchQuery.test.js` 13건.
 - 받는 화면(검색어 인계) — App(가상머신 · VM호스트 · 스토리지 탭 상단 필터) · VCenters(빠른 찾기) · 서버 분석 › 정보 · 서버 분석 › GPU · 스토리지 모니터링 · SAN 스위치 · Arista CVP ·
@@ -153,7 +153,7 @@
 | 새 탭(⌘Enter) | 주소만 연다 | 메모리 인계는 다른 문서에 닿지 않는다 — 새 탭에서는 검색 칸이 비어 있다(VM · 호스트 · vCenter 는 주소만으로 열린다) |
 
 ### 7.3 검증
-- 서버 `invSearch2908.test.js` 17/17 · 웹 `invSearchQuery.test.js` 13/13 · `headerText.test.js`(⑤ 문구 계약을 ‘장비 · 기능 찾기’ 로 갱신).
+- 서버 `invSearch2909.test.js` 17/17 · 웹 `invSearchQuery.test.js` 13/13 · `headerText.test.js`(⑤ 문구 계약을 ‘장비 · 기능 찾기’ 로 갱신).
 - 변이 15건(범위 교집합 · 잠금 · 스캔 IP · 도구 판정 · 관리자 판본 · 주소 가림 3종 · role 직접 비교 · 부품 개수 범위 · 잠긴 종류 오류 · 빈 입력 개수 · 검색어 상한 · ip 가림) — 14 잡음.
   살아남은 1건(`visible()` 의 `scope !== 'vc'` 줄 제거)은 앞 단계 `kinds[k] !== 'ok'` 가 같은 행을 이미 막는 **이중 방어 줄**이라 단독 제거로 결과가 바뀌지 않는다(동등 변이). 잠금 판정(M2)이 퇴행하면 이 줄이 행 노출을 막는다.
 - Chromium(목 서버 · 1440/400): 빈 입력 · ‘ash’ 혼합 결과 · `ip:` · `sn:` · 1자 · 결과 없음 · VM 행 Enter → VM 개체 보기 · 스토리지 행 → 스토리지 모니터링 검색 칸 ‘PMAX-FRA-01’ ·

@@ -155,7 +155,7 @@ body {
 .hdr-palette .v3-num, .hdr-palette .v3-mono, .hdr-palette .v3-kbd { font-family: var(--font-mono); }
 .hdr-palette .v3-kbd { font-size: 10.5px; padding: 1px 6px; border: 1px solid var(--border); border-radius: 5px; color: var(--text-dim); }
 .hdr-palette .v3-empty, .hdr-palette .v3-note { padding: 10px; color: var(--text-dim); font-size: 12px; line-height: 1.6; }
-/* v2.908 통합 장비 검색(docs/design/inventory-search) — 팔레트 폭 760 · 종류 칩 · 묶음 · 안내 띠 · 400px 은 행 2줄(이름 / 메타). */
+/* v2.909 통합 장비 검색(docs/design/inventory-search) — 팔레트 폭 760 · 종류 칩 · 묶음 · 안내 띠 · 400px 은 행 2줄(이름 / 메타). */
 .hdr-palette .v4-palette.inv-pal { max-width: 760px; max-height: 78vh; }
 .hdr-palette .inv-pfx { display: inline-flex; align-items: center; gap: 5px; height: 22px; padding: 0 8px; border-radius: 6px; border: none; background: rgba(59,130,246,.2); color: #93c5fd; font-family: inherit; font-size: 11.5px; font-weight: 700; cursor: pointer; white-space: nowrap; }
 .hdr-palette .inv-count { font-size: 11px; white-space: nowrap; }
@@ -2410,6 +2410,8 @@ tr.row-sel > td { background: rgba(59, 130, 246, .10); }
 .iss-card:hover, .iss-card:focus-visible { border-color: var(--accent); }
 .iss-card.done { opacity: .82; }
 .iss-card-top, .iss-card-foot { display: flex; align-items: center; gap: 8px; min-width: 0; font-size: 12px; }
+/* v2.908(Chromium 판독): 우선순위 · 기한 · 댓글 · 담당자가 좁은 칸(5열 · 1440)에서 한 줄을 넘어 담당자 동그라미가 카드 밖으로 밀렸다 — 줄바꿈 */
+.iss-card-foot { flex-wrap: wrap; row-gap: 4px; }
 .iss-card-title { font-size: 13.5px; font-weight: 500; line-height: 1.4; overflow-wrap: anywhere; }
 .iss-key { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; color: var(--text-dim); white-space: nowrap; }
 .iss-type { font-size: 12px; font-weight: 700; white-space: nowrap; }
@@ -2796,8 +2798,9 @@ tr.row-sel > td { background: rgba(59, 130, 246, .10); }
 .iss-backlog-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
 .iss-backlog-row { display: flex; align-items: center; gap: 8px; min-width: 0; padding: 4px 0; border-bottom: 1px solid var(--border-soft); font-size: 13px; }
 .iss-backlog-title { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-decoration: none; }
-/* 검색식 · 저장 필터 */
-.iss-filters { display: grid; grid-template-columns: 240px minmax(0, 1fr); gap: 10px; align-items: start; }
+/* 검색식 · 저장 필터 — v2.908(Chromium 판독): 예전 이름 .iss-filters 가 보드 필터 줄 · 활동 · 알림함 · 리포트의 같은 이름(줄 배치 — 위 2339행)을 덮어
+   그 줄들이 240px + 나머지 2열 격자로 늘어났다(v2.882 부터). 필터 화면 배치는 이름을 따로 쓴다. */
+.iss-filterview { display: grid; grid-template-columns: 240px minmax(0, 1fr); gap: 10px; align-items: start; }
 .iss-filter-side { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
 .iss-filter-group { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
 .iss-filter-group > b { font-size: 12.5px; margin-bottom: 2px; }
@@ -2819,7 +2822,7 @@ tr.row-sel > td { background: rgba(59, 130, 246, .10); }
 .iss-query-help { margin-top: 8px; font-size: 12px; }
 .iss-query-help > div { margin-top: 4px; overflow-wrap: anywhere; }
 @media (max-width: 900px) {
-  .iss-filters { grid-template-columns: minmax(0, 1fr); }
+  .iss-filterview { grid-template-columns: minmax(0, 1fr); }
   .iss-sprint-stats { grid-template-columns: minmax(0, 1fr); }
   .iss-sprint-form-grid { grid-template-columns: minmax(0, 1fr); }
   .iss-span2 { grid-column: auto; }
@@ -3007,3 +3010,35 @@ table.svcinv-t .svcinv-stick { position: sticky; left: 0; z-index: 1; background
 .wiki-move { display: inline-flex; gap: 6px; align-items: center; flex-wrap: wrap; min-width: 0; }
 .wiki-move .input { min-width: 160px; max-width: 100%; }
 .wiki-comment-edit { display: flex; flex-direction: column; gap: 6px; margin-top: 4px; min-width: 0; }
+
+/* ───── v2.908 이슈 기능 6~10(알림함 · 리포트 · 멈춤 배지 · 업무 시간 달력 · 다른 알람) ───── */
+.iss-tab-n { display: inline-flex; align-items: center; justify-content: center; min-width: 18px; height: 18px; margin-left: 6px; padding: 0 5px; border-radius: 9px; font-size: 11px; font-weight: 700; background: var(--red); color: #fff; font-variant-numeric: tabular-nums; }
+.iss-chip.s-stale { background: color-mix(in srgb, var(--amber) 16%, transparent); color: var(--amber); border-color: color-mix(in srgb, var(--amber) 40%, transparent); }
+.iss-inbox-row { align-items: center; }
+.iss-inbox-row.read .iss-link { color: var(--text-dim); font-weight: 400; }
+.iss-inbox-row:not(.read) .iss-link { font-weight: 600; }
+.iss-inbox-kind { flex: 0 0 auto; background: color-mix(in srgb, var(--text-dim) 16%, transparent); color: var(--text-dim); }
+.iss-inbox-kind.k-mention, .iss-inbox-kind.k-assigned, .iss-inbox-kind.k-created { background: color-mix(in srgb, var(--accent) 18%, transparent); color: var(--accent); }
+.iss-inbox-kind.k-sla, .iss-inbox-kind.k-due { background: color-mix(in srgb, var(--red) 14%, transparent); color: var(--red); }
+.iss-inbox-kind.k-stale { background: color-mix(in srgb, var(--amber) 16%, transparent); color: var(--amber); }
+.iss-inbox-read { margin-left: 0; color: var(--text-dim); flex: 0 0 auto; }
+.iss-report { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.iss-report-kpis .kpi .value { font-size: 26px; }
+.iss-trend { display: flex; align-items: flex-end; gap: 6px; height: 140px; padding: 6px 0; overflow-x: auto; }
+.iss-trend-col { flex: 1 0 28px; display: flex; flex-direction: column; align-items: center; gap: 4px; height: 100%; min-width: 28px; }
+.iss-trend-bars { flex: 1 1 auto; width: 100%; display: flex; align-items: flex-end; justify-content: center; gap: 3px; }
+.iss-trend-bar { width: 40%; max-width: 14px; min-height: 2px; border-radius: 3px 3px 0 0; }
+.iss-trend-bar.c, .iss-trend-key.c { background: var(--accent); }
+.iss-trend-bar.d, .iss-trend-key.d { background: var(--green); }
+.iss-trend-col.cur .iss-trend-bar { opacity: .55; }
+.iss-trend-lbl { font-size: 10.5px; color: var(--text-dim); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.iss-trend-key { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin: 0 4px 0 8px; vertical-align: -1px; }
+.iss-report-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 12px; min-width: 0; }
+.iss-alert-kinds { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 6px 14px; margin: 6px 0; }
+.iss-alert-kind { display: flex; align-items: center; gap: 8px; min-width: 0; flex-wrap: wrap; }
+.iss-alert-kind .iss-check { flex: 1 1 160px; min-width: 0; }
+.iss-alert-kind .select { width: auto; }
+.iss-cal { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; padding-top: 8px; border-top: 1px dashed var(--border); }
+.iss-time { width: 110px; }
+.iss-cal-row { flex-wrap: wrap; }
+.iss-cal-row > * { min-width: 0; }

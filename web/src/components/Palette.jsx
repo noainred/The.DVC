@@ -1,7 +1,7 @@
 /**
- * components/Palette.jsx — 헤더 ⌘K 찾기(v2.508 기능 · 탭 → v2.908 장비 · 기능 · 탭).
+ * components/Palette.jsx — 헤더 ⌘K 찾기(v2.508 기능 · 탭 → v2.909 장비 · 기능 · 탭).
  *
- * v2.908(사용자 요청 · 시안 docs/design/inventory-search · 컨펌 2026-11-05): 등록된 모든 인벤토리의 장비(가상머신 · VM호스트 · 베어메탈 ·
+ * v2.909(사용자 요청 · 시안 docs/design/inventory-search · 컨펌 2026-11-05): 등록된 모든 인벤토리의 장비(가상머신 · VM호스트 · 베어메탈 ·
  *   GPU 서버 · 스토리지 · SAN · 네트워크 스위치 · PDU · 데이터스토어 · vCenter · IP 대장)를 함께 찾는다.
  *   - 장비 결과는 서버(`GET /search/inventory`)가 범위 · 권한 · 주소 가림을 적용해 준다 — 여기서 다시 판정하지 않는다.
  *   - 기능 · 탭 찾기는 지금처럼 브라우저 안에서(palette.js) — 장비 색인을 못 읽어도 팔레트는 동작한다.

@@ -1,11 +1,11 @@
 /**
- * search/inventoryQuery.js — 헤더 ⌘K '통합 장비 검색' 의 질의 해석 · 일치 등급 · 묶음(순수, v2.908).
+ * search/inventoryQuery.js — 헤더 ⌘K '통합 장비 검색' 의 질의 해석 · 일치 등급 · 묶음(순수, v2.909).
  *
  * 설계: docs/design/inventory-search/README.md(사용자 컨펌 2026-11-05 — 11종 · 2자 · sn: 은 장비만 · ‘모두 보기’ 는 전용 화면).
  * 색인(행 목록)은 search/inventoryIndex.js, 범위 · 권한 · 가림은 search/inventoryAccess.js 가 정한다. 여기는 **행을 받아 고르기만** 한다.
  *
  * ⚠ 접두 표(PREFIXES)는 웹 `web/src/components/invSearchQuery.js` 에 같은 값이 있다(팔레트가 칩을 그리려고) —
- *   두 벌이므로 `server/test/invSearch2908.test.js` 가 같은 입력으로 대조한다. 한쪽만 고치면 테스트가 깨진다.
+ *   두 벌이므로 `server/test/invSearch2909.test.js` 가 같은 입력으로 대조한다. 한쪽만 고치면 테스트가 깨진다.
  *
  * 성능(docs/rules/perf-db.md): 검색어 소문자화는 1회 · 정규식 없이 includes/startsWith 선형 · 길이 상한(넘으면 아무것도 맞지 않는다 —
  *   잘라서 넓게 맞추지 않는다, deepSearch.js lowerTerm 과 같은 규칙) · 정렬은 일치한 행만.

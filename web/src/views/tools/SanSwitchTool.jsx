@@ -31,7 +31,7 @@ import { FreshNote } from './SanFreshNote.jsx';
 import { headStatus, lastCollectedAt, sortSwitches, hotCount, rowMark, LIST_SORTS } from './sanSwitchViewText.js';
 import { perfAvgOf, perfMaxOf, dcGrandTotals, dcUnmeasuredNote, dcSharePct } from './sanStorageSumText.js'; // v2.721(감사 R1-02·R2-01·R2-02): 측정 없음은 null
 import { missingChoice } from '../idrac/scanRangeFormText.js'; // v2.630 WEB2630-03: 목록에 없는 저장값을 그대로 보인다
-import useSearchHandoff from '../../hooks/useSearchHandoff.js'; // v2.908 헤더 ⌘K 통합 장비 검색 — 검색어 인계
+import useSearchHandoff from '../../hooks/useSearchHandoff.js'; // v2.909 헤더 ⌘K 통합 장비 검색 — 검색어 인계
 
 /**
  * 특수기능 › SAN 스위치 모니터링(v2.410 — 사용자 요구 'Brocade SAN switch 포트 모니터링 및
@@ -70,7 +70,7 @@ export default function SanSwitchTool() {
   const [data, setData] = useState(null);
   const [error, setError] = useState(null);
   const [q, setQ] = useState('');
-  useSearchHandoff('san-switch', setQ); // v2.908: ⌘K 검색에서 고른 장비 · ‘모두 보기’ 검색어
+  useSearchHandoff('san-switch', setQ); // v2.909: ⌘K 검색에서 고른 장비 · ‘모두 보기’ 검색어
   const [dcSel, setDcSel] = useState(() => new Set());
   const [form, setForm] = useState(null);          // null = 폼 닫힘
   const [busy, setBusy] = useState(false);

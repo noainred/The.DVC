@@ -34,7 +34,7 @@ import { versionCellInfo } from './storageVersionText.js';
 import { hardwareSummaryParts } from './storageHardwareText.js'; // v2.599 C2599-06: 빈 슬롯·미확인을 이상과 나눠 말한다
 import { volumeProvisionText } from './powerstoreVolumeText.js'; // v2.603 COL-2603-07: 볼륨 size 결측 안내
 import { serialHeader, showNodeSerialCol, nodeSerialTitle, nodeSerialNote } from './storageSerialText.js';
-import useSearchHandoff from '../../hooks/useSearchHandoff.js'; // v2.908 헤더 ⌘K 통합 장비 검색 — 검색어 인계
+import useSearchHandoff from '../../hooks/useSearchHandoff.js'; // v2.909 헤더 ⌘K 통합 장비 검색 — 검색어 인계
 
 /**
  * 특수기능 › 스토리지 모니터링(v2.302) — 글로벌 법인 스토리지(Isilon 우선, XtremIO·PowerStore·
@@ -588,7 +588,7 @@ export default function StorageMonTool() {
   // ⚠ 훅은 아래 조기 return(`if (!d) return <Loading/>`)보다 위에 선언해야 한다 — 렌더 간 훅
   // 개수가 달라지면 React #310 으로 화면 전체가 크래시한다(CLAUDE.md 프론트엔드 회귀 방지).
   const [dcQuery, setDcQuery] = useState('');
-  useSearchHandoff('storage-mon', setDcQuery); // v2.908: ⌘K 검색에서 고른 장비 · ‘모두 보기’ 검색어
+  useSearchHandoff('storage-mon', setDcQuery); // v2.909: ⌘K 검색에서 고른 장비 · ‘모두 보기’ 검색어
   // 용량 표시 단위(v2.406, 사용자 요구 — PowerScale 사용량 추적). 브라우저에 기억한다.
   const [unit, setUnit] = useState(loadUnit);
   ACTIVE_UNIT = unit; // 아래 자식(표 셀·상세 모달·차트)이 그리기 전에 반영된다(tbFmt 주석 참고)

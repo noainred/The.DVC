@@ -1,5 +1,5 @@
 /**
- * search/inventoryIndex.js — 헤더 ⌘K '통합 장비 검색' 의 색인(v2.908).
+ * search/inventoryIndex.js — 헤더 ⌘K '통합 장비 검색' 의 색인(v2.909).
  *
  * 설계: docs/design/inventory-search/README.md §4.1. 이미 모은 값만 읽는다 — 수집 · 장비 왕복 0.
  *

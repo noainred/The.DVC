@@ -22,7 +22,7 @@ describe('headerText(v2.727) — 헤더 역할 표기', () => {
     expect(generatedAtText('not-a-date')).toBe('');
     expect(generatedAtText('2026-10-08T12:46:25Z')).toMatch(/\d/);
   });
-  it('⑤ 검색 문구는 장비와 기능을 함께 찾는다고 말한다(v2.908 통합 장비 검색 — v2.727 의 기능·탭 전용 문구를 바꿨다)', () => {
+  it('⑤ 검색 문구는 장비와 기능을 함께 찾는다고 말한다(v2.909 통합 장비 검색 — v2.727 의 기능·탭 전용 문구를 바꿨다)', () => {
     expect(SEARCH_PLACEHOLDER).toMatch(/^장비 · 기능 찾기/);
   });
 });

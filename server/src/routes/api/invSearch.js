@@ -1,5 +1,5 @@
 /**
- * 헤더 ⌘K '통합 장비 검색' 라우트(v2.908) — GET /api/search/inventory?q=&kinds=
+ * 헤더 ⌘K '통합 장비 검색' 라우트(v2.909) — GET /api/search/inventory?q=&kinds=
  *
  * 설계: docs/design/inventory-search/README.md(컨펌 2026-11-05). 판정은 search/ 세 모듈이 한다:
  *   색인(inventoryIndex — 관리자 판본 1개 · 30초) → 접근(inventoryAccess.accessPlan — 권한 · 도구 · 범위 · 가림) → 고르기(inventoryQuery).

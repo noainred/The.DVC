@@ -1,5 +1,5 @@
 /**
- * components/invSearchQuery.js — 헤더 ⌘K '통합 장비 검색' 의 화면 쪽 순수 모듈(v2.908).
+ * components/invSearchQuery.js — 헤더 ⌘K '통합 장비 검색' 의 화면 쪽 순수 모듈(v2.909).
  *
  * 설계: docs/design/inventory-search/README.md(컨펌 2026-11-05). 판정(범위 · 권한 · 가림 · 일치)은 **서버**가 한다 —
  * 여기는 ① 접두 표(칩 표시용 — 서버 `server/src/search/inventoryQuery.js` 와 같은 값, 서버 테스트가 대조한다)

@@ -1,4 +1,4 @@
-// v2.908 통합 장비 검색 — 화면 쪽 순수 모듈(접두 · 이동 주소 · 최근 항목 · 행 메타) 고정. 서버 판정과의 접두 대조는 server/test/invSearch2908.test.js.
+// v2.909 통합 장비 검색 — 화면 쪽 순수 모듈(접두 · 이동 주소 · 최근 항목 · 행 메타) 고정. 서버 판정과의 접두 대조는 server/test/invSearch2909.test.js.
 import { describe, it, expect } from 'vitest';
 import {
   splitPrefix, withKindPrefix, focusPlan, listPlan, canFilter, HANDOFF_TARGETS, readRecent, pushRecent, clearRecent, RECENT_MAX, agoText, recentKeyFor,

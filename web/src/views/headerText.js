@@ -19,7 +19,7 @@ export function roleLabel(user) {
 }
 
 /**
- * ⌘K 검색 버튼 문구. v2.908 부터 팔레트가 **등록된 인벤토리의 장비**(VM · 호스트 · 베어메탈 · 스토리지 · SAN · 네트워크 · PDU · IP 대장 …)와
+ * ⌘K 검색 버튼 문구. v2.909 부터 팔레트가 **등록된 인벤토리의 장비**(VM · 호스트 · 베어메탈 · 스토리지 · SAN · 네트워크 · PDU · IP 대장 …)와
  * 기능 · 탭을 함께 찾는다(docs/design/inventory-search — 사용자 컨펌 2026-11-05). v2.727 의 '기능 · 탭만 — VM 이름은 약속하지 않는다' 는 이제 사실이 아니다.
  */
 export const SEARCH_PLACEHOLDER = '장비 · 기능 찾기 — 이름 · IP · 시리얼';

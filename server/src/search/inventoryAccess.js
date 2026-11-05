@@ -1,5 +1,5 @@
 /**
- * search/inventoryAccess.js — 통합 장비 검색의 종류별 접근 판정 · 응답 행 가림(v2.908).
+ * search/inventoryAccess.js — 통합 장비 검색의 종류별 접근 판정 · 응답 행 가림(v2.909).
  *
  * 한 함수(`accessPlan`)가 칩 · 개수 · 행을 모두 정한다 — 화면이 다시 판정하지 않는다(docs/design/inventory-search/README.md §4.2).
  *

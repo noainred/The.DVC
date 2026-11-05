@@ -376,7 +376,7 @@
     인증 off 의 WS 게이트웨이도 HTTP 와 같은 합성 사용자(AUTH_DISABLED_ROLE)로 역할·매핑 판정을 탄다.
   · v2.771(점검 R6-F5): 새 계정 tokenVersion 은 무작위 시작(`initialTokenVersion` — 삭제 후 같은 이름 재생성에 옛 토큰이 살아나지 않게, 기존 계정 값은 불변) · '마지막 관리자' 는 **로그인 수단이 있는** 관리자 계열로 센다(`hasLoginMeans`) ·
     본인 OTP 등록 begin/confirm 도 감사(반복 줄은 계정당 1분 합침). 호스트 접근 자기 잠금 검사는 요청자 IP 를 IPv4-mapped → IPv4 로 정규화(전역 clientIp 는 그대로)·추가 규칙 포트는 범위 겹침 판정. NSX 'Unknown' 지역은 무귀속.
-- ⚠⚠ **v2.908 — 헤더 ⌘K 통합 장비 검색 `GET /api/search/inventory`(`routes/api/invSearch.js` · `search/inventory{Index,Access,Query}.js`)는 종류마다 목적 화면과 같은 문지기를 쓴다**.
+- ⚠⚠ **v2.909 — 헤더 ⌘K 통합 장비 검색 `GET /api/search/inventory`(`routes/api/invSearch.js` · `search/inventory{Index,Access,Query}.js`)는 종류마다 목적 화면과 같은 문지기를 쓴다**.
   ① 판정은 `search/inventoryAccess.js accessPlan` 하나 — 칩 · 개수 · 행 · 출처 오류가 모두 이것을 탄다. 종류별 규칙 `KIND_RULES` 의 권한 키는 App 탭 `perm` · 도구 키와 글자 그대로 같다.
      권한 · 도구가 없는 종류는 응답에 아예 없다. 베어메탈 서버 · 물리 GPU 서버는 목적 화면(서버 분석)이 관리자 전용 API 라 `isAdminDetailUser` 에게만.
   ② **범위 계정**: vCenter 귀속 행만(`allowed.has(row.vcenterId)` — 귀속이 비면 밖) · 스캔 발견 IP 는 밖 · 전체 범위 전용 종류(스토리지 · SAN · 네트워크 스위치 · PDU)는 `locked`(사유만, 개수 · 오류 없음).
@@ -388,4 +388,4 @@
      베어메탈 귀속은 서버 분석 범위 절단과 같은 함수(`idrac/corpAttribution.js idracServerVcOf`) — 사본을 만들지 않는다(반증 L-1).
   ⑥ 검색어에서 파생한 값(시리얼 정규화 등)은 **요청당 한 번**(반증 M-2 — 행마다 하면 조작한 254자 검색어가 5만 행에서 215ms). 색인 생성은 시간 기준 양보(createYielder).
   ④ 색인은 관리자 판본 하나를 30초 공유하고 범위 · 가림은 응답 때 건다(사용자별 색인 금지 — 캐시 키 실수로 새는 것을 막는다). 응답 캐시(memoJson)는 두지 않는다. 검색어 256자 상한(넘으면 아무것도 맞지 않음) · 정규식 없는 선형 일치.
-  회귀 `server/test/invSearch2908.test.js` 21건 · 변이 22건 중 21 잡음(살아남은 1건은 `visible()` 의 이중 방어 줄 — 동등 변이) · 반증 1인 결과와 조치는 docs/design/inventory-search/README.md §7.4.
+  회귀 `server/test/invSearch2909.test.js` 21건 · 변이 22건 중 21 잡음(살아남은 1건은 `visible()` 의 이중 방어 줄 — 동등 변이) · 반증 1인 결과와 조치는 docs/design/inventory-search/README.md §7.4.

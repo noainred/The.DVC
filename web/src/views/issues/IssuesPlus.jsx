@@ -614,7 +614,7 @@ export function FiltersView({ meta, onOpen, onWritten, onBoard = null }) {
   const sharedF = (filters?.filters || []).filter((f) => !f.mine && f.shared);
   const segs = qerr ? errorSegments(q, qerr.errors) : null;
   return (
-    <div className="iss-filters">
+    <div className="iss-filterview">
       <aside className="card iss-filter-side" aria-label="필터">
         <div className="iss-filter-group"><b>빠른 필터</b>
           {QUICK_FILTERS.map((f) => <button key={f.id} type="button" className={`iss-filter-item${ran === f.query ? ' on' : ''}`} onClick={() => pick(f)}>{f.name}</button>)}

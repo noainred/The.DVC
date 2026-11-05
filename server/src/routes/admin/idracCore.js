@@ -9,7 +9,7 @@ import { purgeStalePower, measuredPowerBreakdown } from '../../idrac/service.js'
 import { loadPowerSettings, savePowerSettings } from '../../idrac/powerSettings.js';
 import { getInventory as getIdracInventory } from '../../idrac/invCache.js';
 import { idracGpuCounts, gpuModelOf, gpuCountable } from '../../idrac/gpuCount.js'; // v2.683: Overview GPU 카드와 같은 집계
-import { idracServerVcOf, idracCorpIndex } from '../../idrac/corpAttribution.js'; // v2.630 R2630-01: 범위 귀속 한 벌 · v2.908 판정 함수도 이쪽
+import { idracServerVcOf, idracCorpIndex } from '../../idrac/corpAttribution.js'; // v2.630 R2630-01: 범위 귀속 한 벌 · v2.909 판정 함수도 이쪽
 import { getSensorSeries } from '../../idrac/sensorStore.js';
 import { serverPartsCell } from '../../idrac/serverParts.js'; // v2.728: 서버 목록 '부품 이상' 열(표시 전용)
 import { createYielder } from '../../util/timeSlice.js'; // v2.728: 부품 요약 첫 계산의 시간 기준 양보
@@ -36,7 +36,7 @@ const fleetOnly = fullScopeOnlyWith('iDRAC 등록·연결 테스트·즉시 수�
 //     통합 서버 인벤토리 지정·DataCenter 의 vCenter 가 하나뿐이면 그 vCenter)을 이어 본다. 예전에는 이 판정을 3단으로
 //     줄인 사본이라, 같은 범위 계정이 개요에서는 자기 법인 물리 서버 N대를 보는데 서버 분석·전산실 온도에서는 0대였다.
 //     서비스태그는 등록부에 없으면 인벤토리 캐시 값을 쓴다(vcenter-host 조회와 같은 폴백).
-// v2.908: 귀속 판정(idTag · idracServerVcOf · idracCorpIndex)은 도메인 모듈 idrac/corpAttribution.js 로 옮겼다 — ⌘K 통합 장비 검색
+// v2.909: 귀속 판정(idTag · idracServerVcOf · idracCorpIndex)은 도메인 모듈 idrac/corpAttribution.js 로 옮겼다 — ⌘K 통합 장비 검색
 //   (search/inventoryIndex.js)이 같은 판정을 쓰려고(도메인 → routes 의존을 만들지 않게). 이 파일은 그대로 다시 내보낸다(호출부 · 테스트 무변경).
 export { idracServerVcOf, idracCorpIndex, _resetIdracCorpIndex } from '../../idrac/corpAttribution.js';
 /** 범위 계정이면 { allowed:Set, tagMap, index } · 전체 범위면 null. */

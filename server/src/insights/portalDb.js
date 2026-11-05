@@ -41,6 +41,8 @@ const PURPOSES = {
   'attach-settings.json': '첨부 전체 상한(MB)(설정, v2.889)',
   'wiki-templates.json': '위키 관리자 템플릿(설정, v2.889)',
   'issue-templates.json': '이슈 관리자 템플릿(설정, v2.907)',
+  'issue-alert-auto.json': '다른 알람 · 백업 실패 → 이슈 자동 등록 설정(설정, v2.908)',
+  'issue-inbox.json': '포탈 알림함(상태 — 사람마다 최근 100줄 · 30일, v2.908)',
   'vcenters.json': 'vCenter 등록 정보(호스트·계정·위치)',
   'vcenter-order.json': 'vCenter 화면 표시 순서',
   'users.json': '포탈 사용자/권한/TOTP(2FA) 자격',

@@ -27,7 +27,7 @@ import { fullScopeOnlyWith } from '../admin/shared.js';
 import {
   listIssues, getIssue, createIssue, updateIssue, setStatus, assignIssue, bulkAssign, setBlocked, setWatch, addComment, deleteComment, deleteIssue, setProgress, activityFeed,
   bulkEdit, moveSprintIssues, sprintBoard, queryContext, addLink, removeLink, LINK_TYPES, addWorklog, removeWorklog,
-  issueStats, knownNames, issuesSeq, waitIssuesPersist, issuesPersist, PERSIST_WAIT_MS, addWatchers, mentionsOf, editComment,
+  issueStats, knownNames, issuesSeq, waitIssuesPersist, issuesPersist, PERSIST_WAIT_MS, addWatchers, mentionsOf, editComment, reportSource,
   LIMITS, STATUSES, TYPES, PRIORITIES, KEY_RE, ID_RE, RECENT_DONE_MS, KEY_PREFIX,
 } from '../../issues/store.js';
 import { loadIssueSettings, saveIssueSettings, issueSettingsLoadError, suggestAssignee, SETTINGS_LIMITS, NOTIFY_EVENTS } from '../../issues/settings.js';
@@ -46,6 +46,10 @@ import { listFilters, createFilter, updateFilter, deleteFilter, filtersLoadError
 import { QUERY_LIMITS, FIELDS as QUERY_FIELDS, ORDERABLE as QUERY_ORDERABLE } from '../../issues/query.js';
 import { issueDocIndex } from '../../wiki/store.js';
 import { issuesCsv } from '../../issues/exportCsv.js';
+import { buildIssueReport, issueReportCsv, REPORT_WEEKS } from '../../issues/report.js';
+import { listInbox, markInboxRead, inboxStatus, INBOX_LIMITS } from '../../issues/inbox.js';
+import { automationStatus } from '../../issues/automation.js';
+import { loadAlertAuto, saveAlertAuto, alertAutoLoadError, alertIssuesStatus, ALERT_ISSUE_KINDS, ALERT_KIND_LABEL, ALERT_ISSUE_LIMITS } from '../../issues/alertIssues.js';
 import { removeOwnerAfterPersist } from '../../attach/store.js';
 import { currentVersion } from '../../config.js';
 import { listNotes } from '../../release-notes.js';
@@ -208,15 +212,65 @@ export function registerIssues(api) {
   api.get('/issues/settings', adminOnly, issueSettingsFleetOnly, (req, res) => {
     if (!isAdmin(req)) return res.status(403).json({ ok: false, reason: '데모 계정은 이슈 설정을 볼 수 없습니다' });
     res.set('Cache-Control', 'no-store');
-    res.json({ ok: true, settings: loadIssueSettings(), loadError: issueSettingsLoadError(), limits: SETTINGS_LIMITS, events: NOTIFY_EVENTS, notifyStatus: issueNotifyStatus() });
+    res.json({ ok: true, settings: loadIssueSettings(), loadError: issueSettingsLoadError(), limits: SETTINGS_LIMITS, events: NOTIFY_EVENTS, notifyStatus: issueNotifyStatus(),
+      automationStatus: automationStatus(), inboxStatus: inboxStatus() }); // v2.908
   });
   api.put('/issues/settings', adminOnly, issueSettingsFleetOnly, fullWriteOnly, (req, res, next) => {
     if (!isAdmin(req)) return res.status(403).json({ ok: false, reason: '데모 계정은 이슈 설정을 바꿀 수 없습니다' });
     try {
       const s = saveIssueSettings(req.body || {});
       audit(req, 'issue.settings', 'issue-settings.json', `자동 할당 ${s.autoAssign.enabled ? '켬' : '끔'}(규칙 ${s.autoAssign.components.length} · 후보 ${s.autoAssign.pool.length}) · 알림 ${s.notify.enabled ? '켬' : '끔'}(사람 ${s.notify.people.length})`);
-      res.json({ ok: true, settings: s, loadError: null, notifyStatus: issueNotifyStatus() });
+      res.json({ ok: true, settings: s, loadError: null, notifyStatus: issueNotifyStatus(), automationStatus: automationStatus(), inboxStatus: inboxStatus() });
     } catch (e) { fail(res, e, next); }
+  });
+  /* ── v2.908 다른 알람 · 백업 실패 → 이슈 자동 등록(기능 추천 10) — 파트 장애 자동 등록과 같은 문지기. '/issues/:key' 보다 먼저 ── */
+  api.get('/issues/autocreate/alerts', adminOnly, issueSettingsFleetOnly, (req, res) => {
+    if (!isAdmin(req)) return res.status(403).json({ ok: false, reason: '데모 계정은 이슈 설정을 볼 수 없습니다' });
+    res.set('Cache-Control', 'no-store');
+    res.json({ ok: true, settings: loadAlertAuto(), loadError: alertAutoLoadError(), status: alertIssuesStatus(), kinds: ALERT_ISSUE_KINDS, kindLabels: ALERT_KIND_LABEL, limits: ALERT_ISSUE_LIMITS });
+  });
+  api.put('/issues/autocreate/alerts', adminOnly, issueSettingsFleetOnly, fullWriteOnly, (req, res, next) => {
+    if (!isAdmin(req)) return res.status(403).json({ ok: false, reason: '데모 계정은 이슈 설정을 바꿀 수 없습니다' });
+    try {
+      const s = saveAlertAuto(req.body || {});
+      audit(req, 'issue.autocreate', 'issue-alert-auto.json', `다른 알람 자동 등록 ${s.enabled ? '켬' : '끔'}(${ALERT_ISSUE_KINDS.filter((k) => s.kinds[k]).join(',') || '없음'} · ${s.delayMin}분 · 하루 상한 ${s.dailyMax})`);
+      res.json({ ok: true, settings: s, loadError: null, status: alertIssuesStatus() });
+    } catch (e) { fail(res, e, next); }
+  });
+  /* ── v2.908 포탈 알림함(기능 추천 9) — 내 것만 · 지금 범위로 다시 거른다. 읽음 표시는 이슈 · 위키 댓글을 쓸 수 있는 계정(creators) ── */
+  api.get('/issues/inbox', (req, res) => {
+    res.set('Cache-Control', 'no-store');
+    if (isDemoGuest(req.user)) return res.json({ ok: true, items: [], unread: 0, total: 0, demo: true, limits: INBOX_LIMITS });
+    const access = accessOf(req);
+    const canSee = (vc) => !vc || !access.read || access.read.has(vc);
+    const { limit } = pageArgs(req.query, { def: 50, max: 100 });
+    const r = listInbox(userOf(req), { canSee, limit, unreadOnly: str(req.query.unread) === '1' });
+    res.json({ ok: true, ...r, enabled: loadIssueSettings().inbox?.enabled !== false, limits: INBOX_LIMITS });
+  });
+  api.post('/issues/inbox/read', creators, (req, res) => {
+    const ids = Array.isArray(req.body?.ids) ? req.body.ids : null;
+    res.json({ ok: true, changed: markInboxRead(userOf(req), ids) });
+  });
+  /* ── v2.908 리포트(기능 추천 7) — 범위 안 이슈만(재료를 만들 때 거른다) · 주 1~52 ── */
+  const reportFor = (req) => {
+    const access = accessOf(req);
+    const names = new Map(vcenterChoices(access).map((v) => [v.id, v.name || v.id]));
+    const vc = str(req.query.vcenterId).slice(0, 128);
+    let rows = reportSource({ access });
+    if (vc) rows = rows.filter((r) => (vc === '-' ? !r.vcenterId : r.vcenterId === vc));
+    return buildIssueReport(rows, { weeks: req.query.weeks, vcName: (id) => names.get(id) || id });
+  };
+  api.get('/issues/report', (req, res) => {
+    res.set('Cache-Control', 'no-store');
+    res.json({ ok: true, ...reportFor(req), weeksLimits: REPORT_WEEKS });
+  });
+  api.get('/issues/report.csv', requirePerm('data.csv'), (req, res) => {
+    res.set('Cache-Control', 'no-store');
+    const r = reportFor(req);
+    audit(req, 'issue.export', 'issue-report.csv', `리포트 ${r.weeks}주`);
+    res.set('Content-Type', 'text/csv; charset=utf-8');
+    res.set('Content-Disposition', `attachment; filename="issue-report-${fileStamp()}.csv"`);
+    res.send(issueReportCsv(r));
   });
   // v2.880 파트 장애 → 이슈 자동 등록 설정 — 이슈 설정과 같은 문지기(관리자 + 전체 범위, 저장은 쓰기 범위도 무제한).
   //   ⚠ '/issues/:key' 보다 먼저(뒤에 두면 'autocreate' 가 키로 잡혀 404).

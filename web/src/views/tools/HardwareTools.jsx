@@ -21,7 +21,7 @@ import ScopeOmitBanner from '../ScopeOmitBanner.jsx';
 import { gpuFinderNote } from './gpuFinderText.js';
 import Select from '../../components/Select.jsx';
 import { partsCell } from '../idrac/hwStatusText.js'; // v2.728: '부품 이상' 열(판정은 서버 — 색·문구만)
-import useSearchHandoff from '../../hooks/useSearchHandoff.js'; // v2.908 헤더 ⌘K 통합 장비 검색 — 검색어 인계
+import useSearchHandoff from '../../hooks/useSearchHandoff.js'; // v2.909 헤더 ⌘K 통합 장비 검색 — 검색어 인계
 
 /**
  * v2.622(감사 RECENT-04): 상세 모달 열기 — 행이 벤더를 모르면(온도·GPU·드릴다운) 먼저 'BMC' 로 열고 서버 목록을
@@ -242,7 +242,7 @@ function ServerInfoByVcenter({ vc, onServer }) {
   const [dcs, setDcs] = useState({ datacenters: [], assign: {} });
   const [err, setErr] = useState(null);
   const [q, setQ] = useState('');
-  useSearchHandoff('serveranalysis', setQ); // v2.908: ⌘K 검색 — 고른 서버의 서비스 태그 · ‘모두 보기’ 검색어
+  useSearchHandoff('serveranalysis', setQ); // v2.909: ⌘K 검색 — 고른 서버의 서비스 태그 · ‘모두 보기’ 검색어
   const [modelDetail, setModelDetail] = useState(null); // { corpName, model, servers } → 모델 상세 모달
   const [inlineCorp, setInlineCorp] = useState(null); // 법인명 클릭 → 카드 아래 인라인 상세 표(팝업 아님)
   const inlineRef = useRef(null);
@@ -918,7 +918,7 @@ function ServerGpuFinder({ vc, onServer }) {
   const [d, setD] = useState(null);
   const [err, setErr] = useState(null);
   const [q, setQ] = useState('');
-  useSearchHandoff('serveranalysis-gpu', setQ); // v2.908: ⌘K 검색 — 물리 GPU 서버
+  useSearchHandoff('serveranalysis-gpu', setQ); // v2.909: ⌘K 검색 — 물리 GPU 서버
   const [open, setOpen] = useState(null); // 펼친 모델
   const genRef = useRef(0);
   const load = () => { const g = ++genRef.current; return fetchJson(`/admin/idrac/gpu-inventory${vcQS(vc)}`).then((r) => { if (g === genRef.current) { setD(r); setErr(null); } }).catch((e) => { if (g === genRef.current) setErr(e.message); }); };

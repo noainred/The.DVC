@@ -124,7 +124,7 @@ export function vcIndexFromSnap(snap = null, servers = null) {
   return buildVcIndex(Array.isArray(servers) ? servers : allPhysicalServers(), snap?.hosts || [], opts);
 }
 
-// ── v2.908: 서버 하나의 귀속 vCenter 판정 — routes/admin/idracCore.js 에서 옮겼다(그 파일이 그대로 다시 내보낸다) ──────────
+// ── v2.909: 서버 하나의 귀속 vCenter 판정 — routes/admin/idracCore.js 에서 옮겼다(그 파일이 그대로 다시 내보낸다) ──────────
 // 서버 분석 · iDRAC 조회의 범위 절단(idracScopeOf/idracInScope)과 ⌘K 통합 장비 검색(search/inventoryIndex.js)이 **같은 판정 한 벌**을 쓴다.
 //   순서: 명시 vcenterId → 서비스태그로 찾은 ESXi 호스트의 vCenter(mappedVcenterId · tagMap) → 개요 · 법인별 사용량과 같은 귀속 색인(아래 vcIndexFromSnap).
 //   셋 다 없으면 '' = 귀속 없음 → 범위 계정에 노출하지 않는다. 판정 근거와 이력은 idracCore.js 의 v2.629 · v2.630 주석.
