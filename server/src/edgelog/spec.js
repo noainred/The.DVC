@@ -172,6 +172,9 @@ export const STATUS_SPEC = Object.freeze([
   { key: 'service.runtime', label: 'Node 런타임 호환성', group: 'service', mod: '../util/runtimeCheck.js', fn: 'runtimeStatus' }, // 2026-10-09 검토 I-06
   // v2.871: 이슈 알림 — 묶음 발송 수·실패·주소 없는 사람 수·대기 인원(계정명·주소 없음). 엣지 포탈도 자기 이슈 알림을 보낸다.
   { key: 'service.issueNotify', label: '이슈 알림(메일·팀 채팅)', group: 'service', mod: '../issues/notify.js', fn: 'issueNotifyStatus' },
+  // v2.908: 이슈 자동화 규칙(위키 체크 · 상위 검토 · P0 채팅 실행 수 · 실패) · 다른 알람/백업 실패 → 이슈 자동 등록(만든 수 · 상한 · 실패). 계정명 · 주소 없음.
+  { key: 'service.issueAutomation', label: '이슈 자동화 규칙', group: 'service', mod: '../issues/automation.js', fn: 'automationStatus' },
+  { key: 'service.issueAlertAuto', label: '다른 알람 → 이슈 자동 등록', group: 'service', mod: '../issues/alertIssues.js', fn: 'alertIssuesStatus' },
 ]);
 
 /** 표의 키 집합 — 중앙 수신이 모르는 키를 조용히 받아들이지 않게 한다. */

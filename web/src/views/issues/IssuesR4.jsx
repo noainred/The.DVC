@@ -22,7 +22,7 @@ function useLatest() {
 }
 
 /* ───── 알림함 ───── */
-export function InboxView({ onOpen, onCount = null }) {
+export function InboxView({ onOpen, onCount = null, canMark = true }) {
   const [d, setD] = useState(null);
   const [err, setErr] = useState(null);
   const [unreadOnly, setUnreadOnly] = useState(false);
@@ -41,7 +41,7 @@ export function InboxView({ onOpen, onCount = null }) {
     try { const r = await postJson('/issues/inbox/read', ids ? { ids } : {}); if (r?.ok) load(); else setMsg(saveFailText(r)); } catch (e) { setMsg(saveFailText({ reason: e.message })); }
   };
   const go = (x) => {
-    if (!x.read) markRead([x.id]);
+    if (!x.read && canMark) markRead([x.id]);
     if (x.key) onOpen(x.key);
     else if (x.pageId) window.location.hash = wikiHash({ space: 'pub', id: x.pageId });
   };
@@ -51,7 +51,7 @@ export function InboxView({ onOpen, onCount = null }) {
       <div className="iss-filters">
         <label className="iss-check"><input type="checkbox" checked={unreadOnly} onChange={(e) => setUnreadOnly(e.target.checked)} /> 안 읽은 것만</label>
         <button className="btn" onClick={load}>새로고침</button>
-        <button className="btn" disabled={!d.unread} onClick={() => markRead(null)}>모두 읽음</button>
+        {canMark && <button className="btn" disabled={!d.unread} onClick={() => markRead(null)}>모두 읽음</button>}
         <span className="muted" style={{ fontSize: 12 }}>
           안 읽음 {d.unread}건 · 언급 · 할당 · 상태 · 기한 · SLA · 멈춤 · 위키 알림을 메일과 따로 여기 모읍니다(사람마다 최근 {d.limits?.perUser || 100}건 · {d.limits?.keepDays || 30}일).
         </span>
@@ -74,7 +74,7 @@ export function InboxView({ onOpen, onCount = null }) {
                 <div className="iss-feed-main">
                   <button type="button" className="iss-link" onClick={() => go(x)} disabled={!x.key && !x.pageId}>{x.text}</button>
                 </div>
-                {!x.read && <button type="button" className="iss-mini-act iss-inbox-read" onClick={() => markRead([x.id])}>읽음</button>}
+                {!x.read && canMark && <button type="button" className="iss-mini-act iss-inbox-read" onClick={() => markRead([x.id])}>읽음</button>}
                 <span className="muted iss-feed-at" title={timeText(x.at)}>{timeText(x.at).slice(-5)}</span>
               </div>
             </li>

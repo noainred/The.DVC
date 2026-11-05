@@ -210,7 +210,7 @@ export default function Issues() {
             {sub === 'filters' && <FiltersView meta={metaX} onOpen={openIssue} onWritten={onWritten} onBoard={(bq) => { setBoardQ(bq); setSub('board'); }} />}
             {sub === 'mine' && <MyWorkView rows={rows} stats={stats} meta={meta} onOpen={openIssue} onWritten={onWritten} />}
             {sub === 'activity' && <ActivityView meta={meta} onOpen={openIssue} />}
-            {sub === 'inbox' && <InboxView onOpen={openIssue} onCount={setUnread} />}
+            {sub === 'inbox' && <InboxView onOpen={openIssue} onCount={setUnread} canMark={canWrite || !!meta.canRequest} />}
             {sub === 'report' && <ReportView meta={meta} />}
           </>
         )}
