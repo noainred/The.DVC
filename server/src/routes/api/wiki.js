@@ -78,7 +78,7 @@ async function persistView(req) {
   }
   return out;
 }
-/* ───── v2.905 댓글 @멘션 자동완성 · 댓글 → 이슈(시안 docs/design/wiki-mention · 사용자 '모두 적용' — 추천안 5개 그대로) ───── */
+/* ───── v2.907 댓글 @멘션 자동완성 · 댓글 → 이슈(시안 docs/design/wiki-mention · 사용자 '모두 적용' — 추천안 5개 그대로) ───── */
 /** 댓글 글 → 언급한 실제 이름(알림과 같은 해석 — 로컬 계정 · 메일 주소 표 · 이 문서 참여자 중 가장 긴 접두). */
 function mentionedIn(body, participants) {
   const viewers = issueViewers();
@@ -115,7 +115,7 @@ function issueFromComment(req, pageId, cid, want) {
   audit(req, plan.requestOnly ? 'issue.request' : 'issue.create', x.key, `위키 댓글 ${pageId}/${cid}${x.assignee ? ` → ${x.assignee}` : ''}`);
   return { key: x.key, assignee: x.assignee || '', watchers: plan.watchers, skipped: plan.skipped, requestOnly: plan.requestOnly, relatedTo: prev?.key || '', ...mailOutlook(req, settings, [x.assignee, ...plan.watchers].filter(Boolean)) };
 }
-/** v2.906 기한이 지난 휴지통 항목을 영구히 지우고 그 첨부 · 즐겨찾기를 정리한다(목록 · 지우기 때 — 폴링하지 않는다). */
+/** v2.907 기한이 지난 휴지통 항목을 영구히 지우고 그 첨부 · 즐겨찾기를 정리한다(목록 · 지우기 때 — 폴링하지 않는다). */
 function dropExpiredTrash() {
   let gone = [];
   try { gone = purgeExpiredTrash(); } catch (e) { console.warn(`[wiki] 휴지통 정리 실패: ${String(e?.message || e).slice(0, 160)}`); return; }
@@ -267,14 +267,14 @@ export function registerWiki(api) {
     if (!ID_RE.test(req.params.id)) return badId(res);
     if (!canWrite(req)) return res.status(403).json({ ok: false, reason: '데모 계정은 문서를 지울 수 없습니다' });
     try {
-      // v2.906 휴지통 — 지우기는 휴지통으로(TRASH_DAYS 동안 되살릴 수 있다). 첨부 · 즐겨찾기는 영구 삭제 때 정리한다.
+      // v2.907 휴지통 — 지우기는 휴지통으로(TRASH_DAYS 동안 되살릴 수 있다). 첨부 · 즐겨찾기는 영구 삭제 때 정리한다.
       const r = deletePage(req.params.id, userOf(req), { access: accessOf(req), isMod: isMod(req) });
       audit(req, 'wiki.delete', r.id, '휴지통으로');
       dropExpiredTrash();
       res.json({ ok: true, ...r, persist: await persistView(req) });
     } catch (e) { fail(res, e, next); }
   });
-  /* ── v2.906 휴지통(기능 추천 2) · 링크(3) · 스페이스 이동(4) · 댓글 고치기(1) ── */
+  /* ── v2.907 휴지통(기능 추천 2) · 링크(3) · 스페이스 이동(4) · 댓글 고치기(1) ── */
   api.get('/wiki/trash', writers, (req, res, next) => {
     res.set('Cache-Control', 'no-store');
     try { dropExpiredTrash(); res.json({ ok: true, items: listTrash({ access: accessOf(req), spaceId: str(req.query.space) }), days: TRASH_DAYS, isMod: isMod(req), me: userOf(req) }); } catch (e) { fail(res, e, next); }
@@ -326,7 +326,7 @@ export function registerWiki(api) {
       res.json({ ok: true, comment: cm, persist: await persistView(req) });
     } catch (e) { fail(res, e, next); }
   });
-  // v2.905 멘션 후보 — 서버가 범위로 거른다(issues/mentionables.js). 댓글을 쓸 수 있는 사람만.
+  // v2.907 멘션 후보 — 서버가 범위로 거른다(issues/mentionables.js). 댓글을 쓸 수 있는 사람만.
   api.get('/wiki/pages/:id/mentionables', commenters, (req, res, next) => {
     if (!ID_RE.test(req.params.id)) return badId(res);
     res.set('Cache-Control', 'no-store');
@@ -348,7 +348,7 @@ export function registerWiki(api) {
     try {
       const access = accessOf(req);
       const want = req.body?.issue && typeof req.body.issue === 'object' && !Array.isArray(req.body.issue) ? req.body.issue : null;
-      // v2.905 댓글 → 이슈: 저장 전에 거를 수 있는 것(담당자 = 언급한 사람 · 그 법인을 볼 수 있는가 · 유형 · 우선순위 · 제목 · 권한)을 먼저 — 400 이면 댓글도 저장하지 않는다
+      // v2.907 댓글 → 이슈: 저장 전에 거를 수 있는 것(담당자 = 언급한 사람 · 그 법인을 볼 수 있는가 · 유형 · 우선순위 · 제목 · 권한)을 먼저 — 400 이면 댓글도 저장하지 않는다
       if (want) {
         const pp = pageParticipants(req.params.id, access);
         const { names, viewers } = mentionedIn(str(req.body?.body), pp.names);
@@ -364,7 +364,7 @@ export function registerWiki(api) {
       res.json({ ok: true, comment: { ...cm, ...(issue?.key ? { issueKey: issue.key } : {}) }, ...(want ? { issue, issueError } : {}), persist, ...(issuePersist ? { issuePersist } : {}) });
     } catch (e) { fail(res, e, next); }
   });
-  // v2.905 댓글을 뒤늦게 이슈로(체크를 끄고 단 댓글 · 완료된 이슈를 다시) — 댓글을 쓴 사람 · 운영자/관리자. 같은 댓글의 열린 이슈가 있으면 그 키.
+  // v2.907 댓글을 뒤늦게 이슈로(체크를 끄고 단 댓글 · 완료된 이슈를 다시) — 댓글을 쓴 사람 · 운영자/관리자. 같은 댓글의 열린 이슈가 있으면 그 키.
   api.post('/wiki/pages/:id/comments/:cid/issue', commenters, async (req, res, next) => {
     if (!ID_RE.test(req.params.id)) return badId(res);
     try {

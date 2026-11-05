@@ -151,7 +151,7 @@ export function recipientsOf(ev, settings = loadIssueSettings(), viewers = issue
   else if (ev.type === 'status' || ev.type === 'progress') { for (const x of [i.assignee, i.reporter, ...(i.watchers || [])]) if (x) set.add(x); }
   else if (ev.type === 'comment') {
     const all = [i.assignee, i.reporter, ...(i.watchers || [])].filter(Boolean);
-    const parts = ev.edit ? [] : all; // v2.906 댓글 고치기 — 새로 언급한 사람에게만
+    const parts = ev.edit ? [] : all; // v2.907 댓글 고치기 — 새로 언급한 사람에게만
     const known = new Set([...viewers.localNames, ...(settings.notify.people || []).map((p) => p.username), ...all]);
     for (const x of [...parts, ...resolveMentions(ev.mentions, known)]) set.add(x);
   } else if (ev.type === 'due') { if (i.assignee) set.add(i.assignee); }
@@ -192,7 +192,7 @@ export function queueWikiEvent(ev, settings = loadIssueSettings(), viewers = iss
   const pg = ev.page || {};
   const parts = [...(pg.watchers || []), ...(ev.type === 'comment' && pg.createdBy ? [pg.createdBy] : [])].filter(Boolean);
   const known = new Set([...viewers.localNames, ...(n.people || []).map((p) => p.username), ...parts]);
-  const set = new Set(ev.type === 'created' || ev.edit ? [] : parts); // v2.906 댓글 고치기 — 새로 언급한 사람에게만
+  const set = new Set(ev.type === 'created' || ev.edit ? [] : parts); // v2.907 댓글 고치기 — 새로 언급한 사람에게만
   const mentioned = new Set(resolveMentions(ev.mentions, known));
   for (const m of mentioned) set.add(m);
   set.delete(ev.actor);

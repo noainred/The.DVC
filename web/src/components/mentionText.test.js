@@ -1,5 +1,5 @@
 /**
- * mentionText.test.js — v2.905 댓글 @멘션 자동완성 순수 판정(시안 docs/design/wiki-mention ①②).
+ * mentionText.test.js — v2.907 댓글 @멘션 자동완성 순수 판정(시안 docs/design/wiki-mention ①②).
  * 토큰 끝 판정은 서버 mentionsOf 와 같아야 한다 — 같은 입력으로 대조한다(판정 코어 두 벌 규칙).
  */
 import { describe, expect, it } from 'vitest';

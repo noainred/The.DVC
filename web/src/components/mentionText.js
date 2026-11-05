@@ -1,5 +1,5 @@
 /**
- * mentionText.js — 댓글 @멘션 자동완성의 순수 판정(v2.905 · 시안 docs/design/wiki-mention ①②).
+ * mentionText.js — 댓글 @멘션 자동완성의 순수 판정(v2.907 · 시안 docs/design/wiki-mention ①②).
  *
  * 멘션 토큰의 끝 판정은 서버 `issues/store.js mentionsOf`(`(?:^|[\s(])@([^\s@,()]{1,64})`)와 같다 — 글에 넣는 '@계정/이름' 은
  * 서버가 가장 긴 접두로 계정만 풀어 알림을 보낸다(`issues/notify.js resolveMentions`). 이름에서는 공백 · 멘션을 끊는 글자를 뺀다(서버 `mentionText` 와 같은 규칙).

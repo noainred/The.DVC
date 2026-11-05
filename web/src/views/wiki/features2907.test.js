@@ -1,11 +1,11 @@
 /**
- * features2906.test.js — v2.906 기능 추천 1~5 화면 판정(정리 화면 주소 · 링크 갱신 안내).
+ * features2907.test.js — v2.907 기능 추천 1~5 화면 판정(정리 화면 주소 · 링크 갱신 안내).
  */
 import { describe, expect, it } from 'vitest';
 import { parseWikiHash, wikiHash } from './wikiText.js';
 import { linkFixText } from './Wiki.jsx';
 
-describe('v2.906 위키 정리 · 링크 갱신', () => {
+describe('v2.907 위키 정리 · 링크 갱신', () => {
   it("'정리' 화면 주소가 왕복한다", () => {
     expect(wikiHash({ space: 'pub', view: 'tidy' })).toBe('#/wiki/pub/tidy');
     expect(parseWikiHash('#/wiki/pub/tidy').view).toBe('tidy');

@@ -564,7 +564,7 @@ const WIKI_COMMENT_RE = /^[0-9a-f]{1,40}$/;
 function originField(o) {
   const t = (v, n) => capStr(String(v ?? '').trim(), n);
   const keys = (a) => [...new Set((Array.isArray(a) ? a : []).map((k) => t(k, 300)).filter(Boolean))].slice(0, ORIGIN_KEYS_MAX);
-  // v2.905 위키 댓글에서 만든 이슈(시안 docs/design/wiki-mention ②④) — 문서 · 댓글 id 만(같은 댓글로 두 번 만들지 않는 열쇠)
+  // v2.907 위키 댓글에서 만든 이슈(시안 docs/design/wiki-mention ②④) — 문서 · 댓글 id 만(같은 댓글로 두 번 만들지 않는 열쇠)
   if (o?.kind === 'wiki-comment') {
     return { kind: 'wiki-comment', pageId: WIKI_PAGE_RE.test(String(o.pageId || '')) ? o.pageId : '', commentId: WIKI_COMMENT_RE.test(String(o.commentId || '')) ? o.commentId : '', partKeys: [], resolved: [] };
   }
@@ -1289,7 +1289,7 @@ export function setWatch(key, user, on, { access = FULL_ACCESS } = {}) {
 }
 
 /**
- * v2.905 댓글에서 언급한 사람을 관찰자로(시안 docs/design/wiki-mention ⑥-7 · 결정 5 — 이슈 댓글의 선택). 이슈 쓰기 범위가 필요하다(댓글과 같은 판정).
+ * v2.907 댓글에서 언급한 사람을 관찰자로(시안 docs/design/wiki-mention ⑥-7 · 결정 5 — 이슈 댓글의 선택). 이슈 쓰기 범위가 필요하다(댓글과 같은 판정).
  * 그 법인을 볼 수 없는 사람(canSee) · 이미 관찰자인 사람은 건너뛰고, 상한(watcherMax)을 넘는 만큼은 빼고 센다 — 조용히 버리지 않는다.
  * @returns {{ added:string[], skipped:{name:string,why:string}[] }}
  */
@@ -1381,7 +1381,7 @@ export function addComment(key, body, user, { access = FULL_ACCESS } = {}) {
 }
 
 /**
- * v2.906 댓글 고치기(기능 추천 1) — 쓴 사람만 · 이슈 쓰기 범위(댓글과 같은 판정). 옛 본문은 최근 5개까지(editedAt · edits · prev).
+ * v2.907 댓글 고치기(기능 추천 1) — 쓴 사람만 · 이슈 쓰기 범위(댓글과 같은 판정). 옛 본문은 최근 5개까지(editedAt · edits · prev).
  * 이력에 남기지 않는다(본문 이력과 같다) · 알림은 새로 언급한 사람에게만(ev.edit — 담당 · 보고 · 관찰자에게 다시 가지 않는다).
  */
 export function editComment(key, commentId, body, user, { access = FULL_ACCESS } = {}) {

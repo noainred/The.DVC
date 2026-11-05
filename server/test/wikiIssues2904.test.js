@@ -141,7 +141,7 @@ test('P-5 · S-5 — 첨부는 범위 밖 주인에 본문 전에 거절 · 주�
     out.saUpload = (await up('/attach/wiki/' + pg.j.page.id, 'x.txt', Buffer.alloc(1024 * 1024, 1))).s;
     out.saNoOwner = (await up('/attach/wiki/W999', 'x.txt', Buffer.from('a'))).s;
     as(ADM);
-    // v2.906 휴지통 — 문서 지우기는 휴지통으로(첨부는 그대로) · 영구 삭제가 저장된 뒤에 첨부를 지운다
+    // v2.907 휴지통 — 문서 지우기는 휴지통으로(첨부는 그대로) · 영구 삭제가 저장된 뒤에 첨부를 지운다
     await call('DELETE', '/wiki/pages/' + pg.j.page.id);
     out.inTrash = (await import(${JSON.stringify(path.join(SRC, 'attach/store.js'))})).getItem(out.attId) ? 1 : 0;
     const del = await call('DELETE', '/wiki/trash/' + pg.j.page.id);

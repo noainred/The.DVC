@@ -188,7 +188,7 @@ export function registerIssues(api) {
     const visible = !!s && canWrite(req) && ((!access.read && !access.write) || people(req, access).some((p) => p.username === s.assignee));
     res.json({ ok: true, suggestion: visible ? s : null, ...(s && !visible ? { hidden: true } : {}), autoAssign: loadIssueSettings().autoAssign.enabled });
   });
-  /* ── v2.906 이슈 템플릿(기능 추천 5) — '/issues/:key' 보다 먼저(뒤에 두면 'templates' 가 키로 잡혀 404) ── */
+  /* ── v2.907 이슈 템플릿(기능 추천 5) — '/issues/:key' 보다 먼저(뒤에 두면 'templates' 가 키로 잡혀 404) ── */
   api.get('/issues/templates', creators, (req, res) => {
     res.set('Cache-Control', 'no-store');
     res.json({ ok: true, items: allIssueTemplates(), loadError: isAdmin(req) ? issueTemplatesLoadError() : null, limits: ISSUE_TEMPLATE_LIMITS, canManage: isAdmin(req) && isFullReadWriteScope(req.user, store.get()) });
@@ -484,7 +484,7 @@ export function registerIssues(api) {
     if (!KEY_RE.test(req.params.key)) return badKey(res);
     try { const x = setWatch(req.params.key, userOf(req), req.body?.on, { access: accessOf(req) }); res.json({ ok: true, issue: x, persist: await persistView(req, { wait: false }) }); } catch (e) { fail(res, e, next); }
   });
-  // v2.905 멘션 후보(시안 docs/design/wiki-mention ⑥-7) — 위키와 같은 판정(issues/mentionables.js) · 참여자 = 담당 · 보고 · 관찰 · 댓글 쓴 사람
+  // v2.907 멘션 후보(시안 docs/design/wiki-mention ⑥-7) — 위키와 같은 판정(issues/mentionables.js) · 참여자 = 담당 · 보고 · 관찰 · 댓글 쓴 사람
   api.get('/issues/:key/mentionables', writers, (req, res, next) => {
     if (!KEY_RE.test(req.params.key)) return badKey(res);
     res.set('Cache-Control', 'no-store');
@@ -507,7 +507,7 @@ export function registerIssues(api) {
       const access = accessOf(req);
       const c = addComment(req.params.key, req.body, userOf(req), { access });
       audit(req, 'issue.comment.create', `${req.params.key}/${c.id}`);
-      // v2.905 선택(결정 5): 언급한 사람을 관찰자로 — 알림과 같은 이름 해석 · 그 법인을 볼 수 없는 사람은 빼고 센다
+      // v2.907 선택(결정 5): 언급한 사람을 관찰자로 — 알림과 같은 이름 해석 · 그 법인을 볼 수 없는 사람은 빼고 센다
       let watch = null;
       if (req.body?.watchMentions === true) {
         const it = getIssue(req.params.key, userOf(req), access);
@@ -519,7 +519,7 @@ export function registerIssues(api) {
       res.json({ ok: true, comment: c, ...(watch ? { watch } : {}), persist: await persistView(req) });
     } catch (e) { fail(res, e, next, req); }
   });
-  // v2.906 댓글 고치기(기능 추천 1) — 쓴 사람만(저장소가 판정) · 새로 언급한 사람에게만 알림
+  // v2.907 댓글 고치기(기능 추천 1) — 쓴 사람만(저장소가 판정) · 새로 언급한 사람에게만 알림
   api.put('/issues/:key/comments/:cid', writers, async (req, res, next) => {
     if (!KEY_RE.test(req.params.key)) return badKey(res);
     try {

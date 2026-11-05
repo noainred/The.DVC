@@ -1,5 +1,5 @@
 /**
- * wikiIssues2906.test.js — v2.906 기능 추천 1~5(사용자 '모두 적용' — 기존 화면 틀대로).
+ * wikiIssues2907.test.js — v2.907 기능 추천 1~5(사용자 '모두 적용' — 기존 화면 틀대로).
  *  1 댓글 고치기(위키 · 이슈 — 쓴 사람만 · 옛 본문 보관 · 새로 언급한 사람에게만 알림)
  *  2 문서 휴지통(30일 · 되살리기 · 영구 삭제 권한 · 기한 지나면 정리 · 첨부는 영구 삭제 때)
  *  3 역링크 · 제목 바꿀 때 [[옛 제목]] 갱신(이 문서로 풀리던 것만 · 쓰기 범위 밖은 건너뜀) · 깨진 링크
@@ -19,7 +19,7 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SRC = path.resolve(HERE, '../src');
 
 function run(body, { env = {} } = {}) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'c2906-'));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'c2907-'));
   const script = `
     const express = (await import('express')).default;
     const { api } = await import(${JSON.stringify(path.join(SRC, 'routes/api.js'))});

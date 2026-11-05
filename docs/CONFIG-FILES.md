@@ -155,7 +155,7 @@
 | `issue-notify-state.json` | 설정 | 이슈 기한 알림 기록(상태, v2.871) |  |  |  | (외부/설치 스크립트) |
 | `issue-settings.json` | 설정 | 이슈 트래커 설정(v2.871 — 자동 할당 규칙 · 알림 켜기·이벤트 · 사람별 메일 주소. 비밀 없음) | ✅ | ✅ | ✅ | issues/settings.js |
 | `issue-sprints.json` | 설정 | 이슈 스프린트(v2.882 — 이름 · 기간(포탈 날짜) · 목표 · 상태 예정/진행 중/끝남. 비밀 없음) | ✅ | ✅ | ✅ | issues/sprints.js |
-| `issue-templates.json` | 설정 | 이슈 관리자 템플릿(v2.906 — 이름 · 유형 · 우선순위 · 라벨 · 컴포넌트 · 설명, 30개. 비밀 없음) | ✅ | ✅ | ✅ | issues/templates.js |
+| `issue-templates.json` | 설정 | 이슈 관리자 템플릿(v2.907 — 이름 · 유형 · 우선순위 · 라벨 · 컴포넌트 · 설명, 30개. 비밀 없음) | ✅ | ✅ | ✅ | issues/templates.js |
 | `issues.json` | 설정 | 이슈 트래커 이슈·댓글·이력(v2.864 — 로그인 사용자가 쓰는 사용자 데이터. 비밀 없음) | ✅ | ✅ | ✅ | issues/store.js |
 | `link-check.db` | DB | 통신 점검 로그 **3단 DB**(v2.552). 파일: `<dbDir>/link-check.db` |  |  | ✅ | linkcheck/db.js |
 | `linkcheck-settings.json` | 설정 | 통신 점검 설정(v2.552). 파일: `CONFIG_DIR/linkcheck-settings.json` | ✅ | ✅ | ✅ | linkcheck/settings.js |

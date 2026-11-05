@@ -654,7 +654,7 @@ function CopyLink({ issueKey }) {
 
 /* ───────────── 새 이슈 · 수정 ───────────── */
 
-/* ───── v2.906 이슈 템플릿 관리(기능 추천 5 — 위키 관리자 템플릿과 같은 틀) ───── */
+/* ───── v2.907 이슈 템플릿 관리(기능 추천 5 — 위키 관리자 템플릿과 같은 틀) ───── */
 function IssueTemplatesAdmin() {
   const [data, setData] = useState(null);
   const [err, setErr] = useState(null);
@@ -728,7 +728,7 @@ function IssueEditor({ meta, initial = null, requestOnly = false, onCancel, onSa
   const [msg, setMsg] = useState('');
   const [sug, setSug] = useState(null); // { suggestion, autoAssign } — 새 이슈 창에서만
   const latest = useLatest();
-  // v2.906 이슈 템플릿(기능 추천 5) — 새 이슈 창에서만. 고르면 유형 · 우선순위 · 라벨 · 컴포넌트 · 설명을 채운다(설명이 있으면 묻는다)
+  // v2.907 이슈 템플릿(기능 추천 5) — 새 이슈 창에서만. 고르면 유형 · 우선순위 · 라벨 · 컴포넌트 · 설명을 채운다(설명이 있으면 묻는다)
   const [tpls, setTpls] = useState(null);
   const [tplId, setTplId] = useState('');
   useEffect(() => {
@@ -916,8 +916,8 @@ function IssueDetail({ issueKey, meta, onBack, onOpen, onWritten }) {
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState('');
   const [comment, setComment] = useState('');
-  const [watchMentions, setWatchMentions] = useState(false); // v2.905 언급한 사람을 관찰자로(선택 · 기본 끔)
-  const [cEdit, setCEdit] = useState(null); // v2.906 댓글 고치기 { id, body }
+  const [watchMentions, setWatchMentions] = useState(false); // v2.907 언급한 사람을 관찰자로(선택 · 기본 끔)
+  const [cEdit, setCEdit] = useState(null); // v2.907 댓글 고치기 { id, body }
   const [tab, setTab] = useState('comments');
   const [blockReason, setBlockReason] = useState('');
   const [blockOpen, setBlockOpen] = useState(false);

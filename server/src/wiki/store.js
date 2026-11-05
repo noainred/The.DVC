@@ -80,7 +80,7 @@ function load() {
       const j = JSON.parse(fs.readFileSync(file, 'utf8'));
       if (!j || typeof j !== 'object' || !Array.isArray(j.pages)) throw new Error('pages 배열이 없습니다');
       pages = j.pages.filter((p) => p && typeof p === 'object' && typeof p.id === 'string' && typeof p.spaceId === 'string');
-      // v2.906 휴지통 — 지운 문서는 TRASH_DAYS 동안 따로 둔다(판 · 댓글 · 첨부 그대로). 같은 id 가 살아 있는 문서와 겹치면 휴지통 쪽을 버린다.
+      // v2.907 휴지통 — 지운 문서는 TRASH_DAYS 동안 따로 둔다(판 · 댓글 · 첨부 그대로). 같은 id 가 살아 있는 문서와 겹치면 휴지통 쪽을 버린다.
       const live = new Set(pages.map((p) => p.id));
       trash = (Array.isArray(j.trash) ? j.trash : []).filter((p) => p && typeof p === 'object' && typeof p.id === 'string' && typeof p.spaceId === 'string' && !live.has(p.id));
       spaces = j.spaces && typeof j.spaces === 'object' && !Array.isArray(j.spaces) ? j.spaces : {};
@@ -163,7 +163,7 @@ export function issueKeysScan(...texts) {
 }
 export function issueKeysOf(...texts) { return issueKeysScan(...texts).keys; }
 const keyFields = (...texts) => { const r = issueKeysScan(...texts); return { issueKeys: r.keys, issueKeysDropped: r.dropped }; };
-/** 댓글이 색인에 싣는 글 — 본문 + 그 댓글에서 만든 이슈 키(v2.905 — '관련 이슈' 에 함께 보인다). */
+/** 댓글이 색인에 싣는 글 — 본문 + 그 댓글에서 만든 이슈 키(v2.907 — '관련 이슈' 에 함께 보인다). */
 const commentTexts = (comments) => (comments || []).flatMap((q) => [q.body, q.issueKey || '']);
 
 /* ───── 범위 ───── */
@@ -401,7 +401,7 @@ export function updatePage(id, body, user, { access = FULL_ACCESS } = {}) {
   const oldPages = c.pages;
   c.pages = c.pages.map((q) => (q.id === p.id ? x : q));
   commit({ changed: x });
-  // v2.906 제목이 바뀌면 '[[옛 제목]]' 링크를 새 제목으로(기능 추천 3 — 제목으로 찾는 링크가 조용히 깨졌다)
+  // v2.907 제목이 바뀌면 '[[옛 제목]]' 링크를 새 제목으로(기능 추천 3 — 제목으로 찾는 링크가 조용히 깨졌다)
   const linkFix = title !== p.title ? rewriteLinksAfterRename(c, oldPages, x, p.title, user, access) : null;
   const prevMentions = new Set(mentionsOf(p.body));
   emit({ type: 'saved', actor: user, page: evPage(x), version: x.version, note: has('note') ? capStr(String(b.note || ''), 120) : '', mentions: mentionsOf(md).filter((m) => !prevMentions.has(m)) });
@@ -497,7 +497,7 @@ export function deletePage(id, user, { access = FULL_ACCESS, isMod = false } = {
   const p = findFor(id, access, { write: true });
   if (!isMod && p.createdBy !== user) throw forbidden('문서는 만든 사람이나 전체 범위 관리자만 지울 수 있습니다 — 보관(상태)으로 숨길 수 있습니다');
   if (childrenOf(c.pages, p.id).length) throw fieldError('id', '하위 문서가 있어 지울 수 없습니다 — 먼저 옮기거나 지우세요');
-  // v2.906 휴지통(기능 추천 2): 바로 없애지 않고 TRASH_DAYS 동안 둔다 — 판 · 댓글 · 첨부를 그대로 되살릴 수 있다. 첨부 본체는 영구 삭제 때 지운다.
+  // v2.907 휴지통(기능 추천 2): 바로 없애지 않고 TRASH_DAYS 동안 둔다 — 판 · 댓글 · 첨부를 그대로 되살릴 수 있다. 첨부 본체는 영구 삭제 때 지운다.
   const t = { ...p, deletedAt: Date.now(), deletedBy: user };
   c.pages = c.pages.filter((q) => q.id !== p.id);
   c.trash = [...(c.trash || []), t];
@@ -505,7 +505,7 @@ export function deletePage(id, user, { access = FULL_ACCESS, isMod = false } = {
   return { id: p.id, trashed: true, purgeAt: t.deletedAt + TRASH_DAYS * DAY_MS };
 }
 
-/* ───── v2.906 댓글 고치기(기능 추천 1) ─────
+/* ───── v2.907 댓글 고치기(기능 추천 1) ─────
  * 쓴 사람만 · 댓글을 쓸 수 있는 범위(addComment 와 같은 판정). 옛 본문은 최근 5개까지 남기고(editedAt · edits) 판은 만들지 않는다.
  * 알림은 **새로 언급한 사람에게만**(같은 사람에게 두 번 가지 않게 — 오타 고치기로 메일이 다시 나가던 '지우고 다시 쓰기' 의 대안).
  */
@@ -532,7 +532,7 @@ export function editComment(id, commentId, body, user, { access = FULL_ACCESS } 
   return edited;
 }
 
-/* ───── v2.906 문서 링크 — 역링크 · 제목 바꿀 때 링크 갱신 · 깨진 링크(기능 추천 3) ─────
+/* ───── v2.907 문서 링크 — 역링크 · 제목 바꿀 때 링크 갱신 · 깨진 링크(기능 추천 3) ─────
  * '[[제목]]' · '[[제목|글]]' · '[[W12]]' 를 화면 파서(web markdown.js)와 같은 규칙으로 읽는다: 대괄호 둘 안 200자 · '|' 앞이 가리키는 곳 · 'toc' 는 목차.
  * 가리키는 문서 찾기도 화면 resolvePageRef 와 같다 — W번호면 그 문서, 아니면 제목(대소문자 무시)이 같은 문서 중 같은 스페이스 우선.
  */
@@ -610,7 +610,7 @@ function rewriteLinksAfterRename(c, oldPages, renamed, oldTitle, user, access) {
   return { fixed, skipped };
 }
 
-/* ───── v2.906 다른 스페이스로 옮기기(기능 추천 4) ─────
+/* ───── v2.907 다른 스페이스로 옮기기(기능 추천 4) ─────
  * 문서와 그 아래 문서 전부를 함께(계층 그대로 · 옮긴 맨 위 문서는 새 스페이스의 맨 위로). 두 스페이스 모두 쓰기 범위 · 읽기 전용 아님.
  * 문서 번호(W…)는 그대로라 첨부 · 즐겨찾기 · 이슈 '관련 문서' 가 따라간다(첨부는 문서의 스페이스로 보기 범위를 판정한다).
  */
@@ -638,7 +638,7 @@ export function movePage(id, toSpace, user, { access = FULL_ACCESS, known = null
   return { id: p.id, spaceId: to, moved: moved.length, from: p.spaceId };
 }
 
-/* ───── v2.906 휴지통(기능 추천 2) ───── */
+/* ───── v2.907 휴지통(기능 추천 2) ───── */
 export const TRASH_DAYS = 30;
 const DAY_MS = 86_400_000;
 const trashView = (t) => ({ id: t.id, title: t.title, spaceId: t.spaceId, parentId: t.parentId || '', deletedAt: t.deletedAt, deletedBy: t.deletedBy || '', createdBy: t.createdBy || '', version: t.version, purgeAt: (t.deletedAt || 0) + TRASH_DAYS * DAY_MS });
@@ -699,7 +699,7 @@ export function addComment(id, body, user, { access = FULL_ACCESS } = {}) {
   emit({ type: 'comment', actor: user, page: evPage(x), excerpt: capStr(cm.body, 200), mentions: mentionsOf(cm.body) });
   return cm;
 }
-/** v2.905 한 댓글(볼 수 있는 문서 · 없으면 404) — 댓글에서 이슈를 만들 때 라우트가 읽는다. */
+/** v2.907 한 댓글(볼 수 있는 문서 · 없으면 404) — 댓글에서 이슈를 만들 때 라우트가 읽는다. */
 export function getComment(id, commentId, access = FULL_ACCESS) {
   const p = findFor(id, access);
   const cm = (p.comments || []).find((x) => x.id === commentId);
@@ -713,7 +713,7 @@ export function pageParticipants(id, access = FULL_ACCESS) {
   return { spaceId: p.spaceId, names: [...s] };
 }
 /**
- * v2.905 댓글에서 만든 이슈의 키를 그 댓글에 적는다(같은 댓글로 두 번 만들지 않게 · '관련 이슈' 색인). 판을 만들지 않는다.
+ * v2.907 댓글에서 만든 이슈의 키를 그 댓글에 적는다(같은 댓글로 두 번 만들지 않게 · '관련 이슈' 색인). 판을 만들지 않는다.
  * 쓰기 범위는 보지 않는다 — 이슈를 만든 라우트가 이미 댓글 · 이슈 권한을 봤다(조회 범위만).
  */
 export function setCommentIssue(id, commentId, key, { access = FULL_ACCESS } = {}) {

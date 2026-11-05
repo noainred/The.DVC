@@ -324,7 +324,7 @@ function usePage(id) {
   return { page, info, err, load };
 }
 
-/* ───── v2.906 정리 — 휴지통(기능 추천 2) · 깨진 링크(3) ───── */
+/* ───── v2.907 정리 — 휴지통(기능 추천 2) · 깨진 링크(3) ───── */
 const FLASH_KEY = 'wiki.flash';
 export function setWikiFlash(text) { try { window.sessionStorage.setItem(FLASH_KEY, text); } catch { /* 저장 못 하는 브라우저 */ } }
 function takeWikiFlash() { try { const t = window.sessionStorage.getItem(FLASH_KEY) || ''; window.sessionStorage.removeItem(FLASH_KEY); return t; } catch { return ''; } }
@@ -398,7 +398,7 @@ function TidyView({ space, meta, onWritten }) {
   );
 }
 
-/* ───── v2.905 댓글 @멘션 → 이슈 등록(시안 docs/design/wiki-mention ②⑥ · 추천안: 체크 기본 켬 · 요청 권한은 '요청' 으로 · 계정/이름 글자 그대로) ───── */
+/* ───── v2.907 댓글 @멘션 → 이슈 등록(시안 docs/design/wiki-mention ②⑥ · 추천안: 체크 기본 켬 · 요청 권한은 '요청' 으로 · 계정/이름 글자 그대로) ───── */
 const ISSUE_OPT_KEY = 'wiki.commentIssue.on';
 const COMMENT_ISSUE_TYPES = [['task', '작업'], ['incident', '장애'], ['request', '요청']];
 function loadIssueOn() { try { const v = window.localStorage.getItem(ISSUE_OPT_KEY); return v == null ? true : v === '1'; } catch { return true; } }
@@ -460,13 +460,13 @@ function PageView({ id, space, meta, pages, onWritten }) {
   const [msg, setMsg] = useState('');
   const [comment, setComment] = useState('');
   const [quote, setQuote] = useState(''); // v2.889 인라인 댓글 — 본문에서 고른 글
-  const [issueOpt, setIssueOpt] = useState(() => ({ on: loadIssueOn(), assignee: '', type: 'task', priority: 'p2', title: '', request: false })); // v2.905
-  const [picked, setPicked] = useState({}); // v2.905 자동완성으로 고른 사람(메일 · 범위 표시)
+  const [issueOpt, setIssueOpt] = useState(() => ({ on: loadIssueOn(), assignee: '', type: 'task', priority: 'p2', title: '', request: false })); // v2.907
+  const [picked, setPicked] = useState({}); // v2.907 자동완성으로 고른 사람(메일 · 범위 표시)
   const [mmeta, setMmeta] = useState(null);
-  const [cmsg, setCmsg] = useState(''); // v2.905 댓글 · 이슈 등록 결과(댓글 상자 옆에 — 위 배너는 화면 밖일 수 있다)
-  const [moveTo, setMoveTo] = useState(null); // v2.906 다른 스페이스로(null = 닫힘)
-  const [editing, setEditing] = useState(null); // v2.906 댓글 고치기 { id, body }
-  const [backs, setBacks] = useState(null); // v2.906 역링크
+  const [cmsg, setCmsg] = useState(''); // v2.907 댓글 · 이슈 등록 결과(댓글 상자 옆에 — 위 배너는 화면 밖일 수 있다)
+  const [moveTo, setMoveTo] = useState(null); // v2.907 다른 스페이스로(null = 닫힘)
+  const [editing, setEditing] = useState(null); // v2.907 댓글 고치기 { id, body }
+  const [backs, setBacks] = useState(null); // v2.907 역링크
   useEffect(() => { const f = takeWikiFlash(); if (f) setMsg(f); }, []);
   useEffect(() => {
     let alive = true;
@@ -833,7 +833,7 @@ function Editor({ space, meta, pages, page = null, initial = null, onWritten }) 
       if (r?.ok === false) { setMsg(wikiSaveFailText(r)); return; }
       clearDraft(key);
       onWritten?.(r);
-      if (linkFixText(r.linkFix)) setWikiFlash(linkFixText(r.linkFix)); // v2.906 제목을 바꿔 다른 문서의 링크를 고쳤으면 문서 화면에서 알린다
+      if (linkFixText(r.linkFix)) setWikiFlash(linkFixText(r.linkFix)); // v2.907 제목을 바꿔 다른 문서의 링크를 고쳤으면 문서 화면에서 알린다
       go({ space, id: r.page.id });
     } catch (e) { setMsg(String(e?.message || e)); } finally { setBusy(false); }
   };

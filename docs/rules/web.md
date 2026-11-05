@@ -566,13 +566,13 @@
   ⑤ 남은 하위 작업(에픽이면 소속 이슈)이 있으면 서버가 409 `open-children` 로 묻고 화면은 확인을 받아 `closeChildren:true` 로 다시 보낸다(취소하면 아무것도 바꾸지 않는다).
      자식이 있는 이슈의 진행률 입력은 잠기고 메모만 보낸다(서버 409 `progress-auto` 와 같은 판정).
   ⑥ 스프린트 · 필터 공유 버튼은 서버 값(`canSprints` · `canShareFilters` — 전체 범위 쓰기 계정)일 때만 그린다. 필터 저장은 쓰기 역할만(viewer 상태변경 예외를 늘리지 않았다).
-- **v2.906 — 위키 · 이슈 기능 추천 1~5(사용자 '모두 적용' · 시안 없이 기존 화면 틀대로 — 사용자 선택)**. 회귀 `server/test/wikiIssues2906.test.js` · `web/src/views/wiki/features2906.test.js`.
+- **v2.907 — 위키 · 이슈 기능 추천 1~5(사용자 '모두 적용' · 시안 없이 기존 화면 틀대로 — 사용자 선택)**. 회귀 `server/test/wikiIssues2907.test.js` · `web/src/views/wiki/features2907.test.js`.
   - 댓글 고치기(위키 · 이슈): 쓴 사람만 · 옛 본문 5개 보관 · 판/이력은 만들지 않는다 · **알림은 새로 언급한 사람에게만**(`ev.edit` — 담당 · 보고 · 관찰자에게 다시 가지 않는다).
   - 문서 지우기는 **휴지통**(30일 — 판 · 댓글 · 첨부 그대로). 첨부 본체 · 즐겨찾기는 영구 삭제(손으로 · 기한) 때 정리하고, 첨부는 삭제가 디스크에 닿은 뒤(`removeOwnerAfterPersist`). 기한 정리는 폴링하지 않고 목록 · 지우기 때.
   - 문서 링크는 화면 파서와 **같은 규칙**(서버 `pageRefsOf` · `resolveRef` ↔ 웹 `markdown.js` · `resolvePageRef`). 제목을 바꾸면 '[[옛 제목]]' 중 **이 문서로 풀리던 것만** 새 제목으로(같은 제목의 다른 문서를 빼앗지 않는다) — 쓰기 범위 밖 문서는 건너뛰고 센다.
   - 다른 스페이스로 옮기기는 하위 문서와 함께 · 두 스페이스 모두 쓰기 범위 · 문서 번호가 그대로라 첨부 · 즐겨찾기 · 이슈 '관련 문서' 가 따라간다.
   - 이슈 템플릿(`issue-templates.json`)은 위키 관리자 템플릿과 같은 틀(전체 범위 관리자만 쓰기 · 내장 3개는 못 고침) · '/issues/templates' 는 '/issues/:key' 보다 먼저 등록(뒤면 404).
-- **v2.905 — 위키 댓글 @멘션 자동완성 · '계정/이름' · 언급한 사람에게 이슈 등록(사용자 요청 + 시안 `docs/design/wiki-mention` · '모두 적용' — 추천안 5개)**. 회귀 `server/test/wikiMention2905.test.js` · `web/src/components/mentionText.test.js`.
+- **v2.907 — 위키 댓글 @멘션 자동완성 · '계정/이름' · 언급한 사람에게 이슈 등록(사용자 요청 + 시안 `docs/design/wiki-mention` · '모두 적용' — 추천안 5개)**. 회귀 `server/test/wikiMention2907.test.js` · `web/src/components/mentionText.test.js`.
   - 멘션 후보는 **서버가 거른다**(`issues/mentionables.js` — A3-02 그대로 + 문서/이슈 참여자). 역할 · 범위 · 메일 유무 · '그 법인을 볼 수 있는가' 는 전체 범위 쓰기 계정에게만 싣는다.
   - 자동완성 목록은 글상자 아래 줄을 통째로(`components/MentionBox.jsx` — 떠 있는 상자 금지) · 한글 조합 중 Enter 는 먹지 않는다 · 늦게 온 응답은 버린다 · 폴링 없음.
   - '@계정/이름' 은 **글자 그대로 저장**한다. 파서 · 알림 해석(가장 긴 접두) · .md · 메일이 같은 글자를 쓰고, 칩만 계정(모노) + 이름으로 나눠 그린다. 이름의 공백 · 멘션을 끊는 글자는 넣을 때 뺀다.

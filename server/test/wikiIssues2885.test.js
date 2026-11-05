@@ -152,6 +152,7 @@ test('② 위키 즐겨찾기 · 최근 본 · 많이 본 — 사람 · 날마�
     out.narrowHome = (await call('GET', '/wiki/home?space=vc-a')).j;
     as(ADM);
     out.del = await call('DELETE', '/wiki/pages/' + pz.id);
+    await call('DELETE', '/wiki/trash/' + pz.id); // v2.907 휴지통 — 즐겨찾기 · 최근 정리는 영구 삭제 때
     as(SA);
     out.saAfterDel = (await call('GET', '/wiki/home?space=vc-a')).j.mine;
     as({ username: 'vw', role: 'viewer', scope: null });

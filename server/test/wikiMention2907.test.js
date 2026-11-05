@@ -1,5 +1,5 @@
 /**
- * wikiMention2905.test.js — v2.905 위키 댓글 @멘션 자동완성 · '계정/이름' · 언급한 사람에게 이슈 등록 + 메일(시안 docs/design/wiki-mention · 추천안 5개).
+ * wikiMention2907.test.js — v2.907 위키 댓글 @멘션 자동완성 · '계정/이름' · 언급한 사람에게 이슈 등록 + 메일(시안 docs/design/wiki-mention · 추천안 5개).
  *
  * ① 순수 — mentionCandidates(범위별 후보 · 순위 · 관리 정보는 전체 범위만) · mentionText · planCommentIssue(담당자 = 언급한 사람 · 볼 수 없는 사람 · 요청 등록).
  * ② 라우트 — 후보 API 범위(A3-02 그대로 + 참여자) · 댓글 + 이슈 한 요청 · 400 이면 댓글도 저장하지 않음 · 중복 방지 · 뒤늦은 등록 · 요청 권한 계정 ·

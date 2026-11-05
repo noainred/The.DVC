@@ -1,5 +1,5 @@
 /**
- * MentionBox — '@' 자동완성이 붙은 글상자(v2.905 · 시안 docs/design/wiki-mention ①⑥⑦). 위키 댓글 · 이슈 댓글이 같이 쓴다.
+ * MentionBox — '@' 자동완성이 붙은 글상자(v2.907 · 시안 docs/design/wiki-mention ①⑥⑦). 위키 댓글 · 이슈 댓글이 같이 쓴다.
  *  · 후보는 서버가 거른다(path 의 mentionables — 범위 · A3-02). 1자부터 · 150ms 뒤 1회 · 늦게 온 이전 응답은 버린다 · 폴링 없음.
  *  · 목록은 글상자 **아래 줄을 통째로** 쓴다(떠 있는 상자 금지 — docs/rules/web.md) · ↑↓ 고르기 · Enter/Tab 넣기 · Esc 닫기 · 한글 조합 중 Enter 는 먹지 않는다.
  *  · 고르면 글에 '@계정/이름 ' 이 들어간다(mentionText). onPick(후보) 로 부르는 쪽이 메일 · 범위 표시를 모은다.

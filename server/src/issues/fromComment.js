@@ -1,5 +1,5 @@
 /**
- * issues/fromComment.js — 위키 댓글 → 이슈 1건 만들기의 판정 · 본문 조립(v2.905 · 시안 docs/design/wiki-mention ② · 결정 1 · 2 · 4).
+ * issues/fromComment.js — 위키 댓글 → 이슈 1건 만들기의 판정 · 본문 조립(v2.907 · 시안 docs/design/wiki-mention ② · 결정 1 · 2 · 4).
  *
  * 순수 — 저장은 라우트가 createIssue 로 한다(범위 · 상한 · 자동 할당 판정은 그쪽 하나). 여기서는 저장 **전에** 거를 수 있는 것을 전부 거른다:
  *  · 담당자는 그 댓글에서 언급한 사람 중에서만(기본 = 첫 언급) · 그 법인 이슈를 볼 수 있어야 한다(issues/visibility.js canSee) — 아니면 400.
