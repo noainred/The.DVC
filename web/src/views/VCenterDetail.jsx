@@ -8,7 +8,7 @@ import EscClose from '../components/EscClose.jsx';
 // 검색 로직(다단어 OR·메모 매칭·자원 합계)은 순수 모듈로 분리 — vitest 단위테스트 대상(v2.293).
 import { parseTokens, entityMatches, notesSnippet, sumVmResources, fmtGb } from './vcdSearch.js';
 // 가상화율(할당 vCPU/RAM ÷ 물리) 집계도 순수 모듈 — 'Off VM 포함' 필터가 그대로 반영된다(v2.334).
-import { allocByHost, countByHost, virtSum as virtSumOf } from './vcdVirt.js';
+import { allocByHost, countByHost, virtSum as virtSumOf, ratioLevel } from './vcdVirt.js';
 // '전체 현황' 평면 표/CSV — 트리를 펼치지 않고 모든 클러스터·호스트를 한 번에(v2.335).
 import { buildOverviewRows, overviewCsv, OVERVIEW_COLUMNS, clusterAvgPct, hostUsagePct } from './vcdOverview.js';
 import { STable } from '../components/STable.jsx';
@@ -42,7 +42,8 @@ import ConfigureTab from './vcd/ConfigureTab.jsx';
 import { DatacenterTab, ExtensionsTab, PermsTab, LinkedTab, UpdatesTab } from './vcd/InventoryTabs.jsx';
 // v2.896(사용자 요청 '폴더에서 VM 을 vCenter 처럼 — 별도 버튼 · ESXi 호스트도'): 개체 보기 — 주소 #/vcenters/<vc>/vm|host/<id>[/<탭>] (승인 시안 ⑧~⑪ · 기본값 8~10).
 import { parseVcRoute, vcHash, currentHash, goHash, replaceHash, onHashChange } from './vcd/vcdRoute.js';
-import { normObjTab } from './vcd/objTabs.js';
+import { normObjTab, TUNING_TAB } from './vcd/objTabs.js';
+import { VmTuning, HostTuning } from './vcd/TuningTabs.jsx'; // v2.897 성능 튜닝 탭(승인 시안 ⑫⑬ · 기본값 11~13)
 import VmObject from './vcd/VmObject.jsx';
 import HostObject from './vcd/HostObject.jsx';
 
@@ -589,12 +590,14 @@ export default function VCenterDetail({ site, onBack }) {
       {obj && obj.type === 'vm' && (
         <VmObject site={site} vcenterId={vcenterId} vm={vms.find((v) => v.id === obj.id) || null} vmsOk={vmsOk} gate={gateEl(vmsPart, 'VM 목록')}
           datastores={datastores} hosts={hosts} tab={normObjTab('vm', obj.tab)} onTab={setObjTab} onBack={closeObj}
-          onOpenHost={(id) => openObj('host', id)} />
+          onOpenHost={(id) => openObj('host', id)} extraTabs={[TUNING_TAB]}
+          extra={normObjTab('vm', obj.tab) === 'tuning' && vms.find((v) => v.id === obj.id) ? <VmTuning vm={vms.find((v) => v.id === obj.id)} vms={vms} datastores={datastores} /> : null} />
       )}
       {obj && obj.type === 'host' && (
         <HostObject site={site} vcenterId={vcenterId} host={hosts.find((h) => h.id === obj.id) || null} hostsOk={hostsOk} gate={gateEl(hostsOk ? vmsPart : hostsPart, hostsOk ? 'VM 목록' : '호스트 목록')}
           hosts={hosts} vms={vms} vmsOk={vmsOk} datastores={datastores} tab={normObjTab('host', obj.tab)} onTab={setObjTab} onBack={closeObj}
-          onOpenVm={(id) => openObj('vm', id)} />
+          onOpenVm={(id) => openObj('vm', id)} extraTabs={[TUNING_TAB]}
+          extra={normObjTab('host', obj.tab) === 'tuning' && hosts.find((h) => h.id === obj.id) ? <HostTuning host={hosts.find((h) => h.id === obj.id)} vms={vms} datastores={datastores} includeOff={inclPoweredOff} /> : null} />
       )}
       {!obj && <>
       {/* v2.895: vSphere Client 의 vCenter 탭 12개(순서 그대로 · 이모지 없음). 한 줄 — 넘치면 탭 줄만 가로 스크롤(400px 에서 페이지를 밀지 않는다 — 기본값 4). */}
@@ -994,9 +997,10 @@ export function VmUsageCell({ enabled, u, known, days, loading, synthesized, pow
 
 // 가상화율 색상 임계값 — CPU: 2.5 주의/4 위험, MEM: 1.0 주의(오버커밋)/1.5 위험.
 // 트리 배지(VirtBadge)와 '전체 현황' 표가 같은 기준으로 색을 쓰도록 한 곳에 둔다.
+// 기준값은 vcdVirt.js RATIO_LEVELS 한 곳(v2.897 — 성능 튜닝 탭과 같은 값).
 const ratioColor = (r, isMem) => {
-  const [warn, danger] = isMem ? [1.0, 1.5] : [2.5, 4];
-  return r >= danger ? '#ef4444' : r >= warn ? '#f59e0b' : '#22c55e';
+  const lv = ratioLevel(r, isMem);
+  return lv === 'crit' ? '#ef4444' : lv === 'warn' ? '#f59e0b' : '#22c55e';
 };
 
 // '전체 현황' 표 — 모든 클러스터·호스트를 트리 펼침 없이 한 화면에서 본다(v2.335).

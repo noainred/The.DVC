@@ -268,3 +268,28 @@ describe('v2.896 개체 보기 — 렌더(얕게)', () => {
     unmount(rt);
   });
 });
+
+describe('v2.897 성능 튜닝 탭 — 렌더(얕게)', () => {
+  it('VM — 라이트사이징 권한이 없으면 부르지 않고 권한 안내 · 진단 축 5개', async () => {
+    const { VmTuning } = await import('./TuningTabs.jsx');
+    H.denyTools = ['rightsizing'];
+    const called = [];
+    H.api.fetchJson = (p) => { called.push(p); return Promise.resolve({}); };
+    const vm = { id: 'vc1:vm-1', vcenterId: 'vc1', name: 'web-1', host: 'esx-1', powerState: 'POWERED_ON', cpuCount: 4, memMB: 16384 };
+    const rt = mount(VmTuning, { vm, vms: [vm], datastores: [] });
+    await flush();
+    expect(called).toEqual([]);
+    expect(all(rt, (e) => e.type === ErrorBox && e.props.error?.status === 403).length).toBe(1);
+    unmount(rt);
+  });
+  it('VM — 권한이 있으면 /tools/rightsize(vmId · 30일) 한 번', async () => {
+    const { VmTuning } = await import('./TuningTabs.jsx');
+    const called = [];
+    H.api.fetchJson = (p, q) => { called.push([p, q]); return Promise.resolve({ ok: true, verdict: { state: 'keep', title: '현행 유지' }, cpu: { vcpu: 4 }, mem: { allocMB: 16384, balloon: { n: 0 }, swapped: { n: 0 } } }); };
+    const vm = { id: 'vc1:vm-1', vcenterId: 'vc1', name: 'web-1', host: 'esx-1', powerState: 'POWERED_ON' };
+    const rt = mount(VmTuning, { vm, vms: [vm], datastores: [] });
+    await flush();
+    expect(called).toEqual([['/tools/rightsize', { vmId: 'vc1:vm-1', days: 30 }]]);
+    unmount(rt);
+  });
+});

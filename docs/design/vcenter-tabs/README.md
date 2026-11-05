@@ -1,6 +1,6 @@
 # 설계: vCenter 상세 화면에 vSphere Client 탭 구성 넣기
 
-작성 2026-11-05 (v2.889.0 기준) · 상태 **A 단계 구현됨 v2.895.0**(2.890~2.894 는 다른 세션이 먼저 게시) · **B 단계(개체 보기) 구현됨 v2.896.0**(컨펌 2026-11-05 '기본값대로 구현해' · 범위 A→B→C 연속 · 검증 표준 — §11) · B · C 진행(규칙: 설계는 Fable + Claude Design 시안 → 컨펌 뒤 Opus 구현 — 2026-11-03 '기억해') · 시안 캔버스: https://claude.ai/artifact/KWhkAuJSdxrjDaJAJeS8en
+작성 2026-11-05 (v2.889.0 기준) · 상태 **A 단계 구현됨 v2.895.0**(2.890~2.894 는 다른 세션이 먼저 게시) · **B 단계(개체 보기) 구현됨 v2.896.0** · **C 단계(성능 튜닝) 구현됨 v2.897.0**(컨펌 2026-11-05 '기본값대로 구현해' · 범위 A→B→C 연속 · 검증 표준 — §11) · B · C 진행(규칙: 설계는 Fable + Claude Design 시안 → 컨펌 뒤 Opus 구현 — 2026-11-03 '기억해') · 시안 캔버스: https://claude.ai/artifact/KWhkAuJSdxrjDaJAJeS8en
 (아트보드 14장 — ①~⑦ vCenter 탭 · ⑧~⑪ VM · 호스트 개체 보기(§8) · ⑫~⑬ 성능 튜닝(§9) · ⑭ 포탈 전체 제안(§10) — 이 폴더의 `*.dc.html` 이 같은 내용의 레퍼런스. **법인 · vCenter 이름(VC-DEMO1 · DC-KR1 · esx-kr1-07 …) · 수치는 전부 가상**이고 색 · 글자 · 버튼은 `web/src/styles.css` `:root` 토큰 그대로.
 계정의 ‘Design System’ 아티팩트는 앞 시안(bareos-errlog · bareos-cancel)과 같이 `project/README.md` · `project/tokens.json` 이 없어(타입 파일 + index.html 뿐) 쓰지 않았다. 아트보드에 VMware 로고 · 상표 이미지는 넣지 않았다 — 탭 이름 글자만.)
 이 문서의 §2 는 Opus 세션이 코드로 확인한 사실이고, §3 · §4 는 시안 단계(Fable)에서 채웠다.
