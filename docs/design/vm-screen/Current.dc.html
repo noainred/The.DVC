@@ -23,6 +23,13 @@ a{color:#93c5fd}a:hover{color:#bfdbfe}
 .m2{display:flex;gap:2px;padding:6px 16px;background:#141b2d;border-bottom:1px solid #243049;overflow-x:auto}
 .m2 a{color:#8b9bb4;padding:6px 10px;border-radius:7px;font-weight:600;white-space:nowrap;text-decoration:none}
 .m2 a.on{color:#fff;background:#3b82f6}
+.sb{width:236px;flex:none;background:#0f1626;border-right:1px solid #243049;padding:12px 10px;display:flex;flex-direction:column;gap:2px}
+.sb a{display:flex;align-items:center;gap:8px;padding:9px 12px;border-radius:8px;color:#e6edf6;font-weight:600;text-decoration:none;font-size:13px}
+.sb a.sub{padding:6px 12px 6px 30px;color:#8b9bb4;font-weight:500;font-size:12.5px}
+.sb a.on{background:#1a2236;color:#22d3ee}
+.sb a.grp.on{background:transparent;color:#e6edf6;box-shadow:inset 3px 0 0 #22d3ee}
+.sb .n{margin-left:auto;font-size:11px;color:#8b9bb4;font-weight:600}
+.srch{display:flex;align-items:center;gap:8px;width:420px;height:30px;border:1px solid #243049;border-radius:8px;background:#0a0e17;color:#8b9bb4;font-size:12px;padding:0 10px}
 .fb{display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:10px 24px;border-bottom:1px solid #1f2a40}
 .input{min-height:34px;border:1px solid #243049;border-radius:8px;background:#0a0e17;color:#e6edf6;font:inherit;font-size:13px;padding:0 10px;box-sizing:border-box}
 .btn{display:inline-flex;align-items:center;gap:6px;min-height:34px;padding:0 12px;border-radius:8px;border:1px solid #243049;background:#1a2236;color:#e6edf6;font:inherit;font-size:12.5px;font-weight:600;cursor:pointer;white-space:nowrap;text-decoration:none}
@@ -79,14 +86,19 @@ td{padding:8px 10px;border-bottom:1px solid #1f2a40;vertical-align:middle;white-
     <span class="ver">v2.898</span>
     <span class="mock">MOCK</span>
     <span style="flex:1"></span>
-    <span class="muted" style="font-size:12px">admin · 21:16 KST</span>
+    <span class="srch">기능 · 탭 찾기<span style="margin-left:auto;font-size:10.5px;border:1px solid #243049;border-radius:4px;padding:0 4px">⌘K</span></span>
+    <span style="flex:1"></span>
+    <span class="muted mono" style="font-size:12px">28/28 vCenter <b style="color:#86efac">OK</b> · 21:16:40</span>
+    <span class="muted" style="font-size:12px">admin</span>
   </div>
-  <nav class="m1" aria-label="대메뉴">
-    <a href="#">Overview</a><a href="#">Summary</a><a href="#" class="on">서버</a><a href="#">스토리지</a><a href="#">네트워크</a><a href="#">자원관리</a><a href="#">자원 최적화</a><a href="#">운영관제</a><a href="#">특수 기능</a><a href="#">설정</a>
-  </nav>
-  <nav class="m2" aria-label="서버 하위 메뉴">
-    <a href="#" class="on">가상화 서버</a><a href="#">ESXi 호스트</a><a href="#">vCenter</a><a href="#">물리 서버</a><a href="#">Backup</a><a href="#">알람</a>
-  </nav>
+  <div style="display:flex;flex:1;min-width:0">
+  <aside class="sb" aria-label="메뉴">
+    <a href="#">Overview</a><a href="#">Summary</a>
+    <a href="#" class="grp on">서버 <span class="n">6 ▴</span></a>
+    <a href="#" class="sub on">가상화 서버</a><a href="#" class="sub">ESXi 호스트</a><a href="#" class="sub">vCenter</a><a href="#" class="sub">물리 서버</a><a href="#" class="sub">Backup</a><a href="#" class="sub">알람</a>
+    <a href="#">스토리지 <span class="n">7 ▾</span></a><a href="#">네트워크 <span class="n">6 ▾</span></a><a href="#">자원관리 <span class="n">3 ▾</span></a><a href="#">자원 최적화 <span class="n">2 ▾</span></a><a href="#">특수 기능</a><a href="#">이슈</a><a href="#">위키</a><a href="#">게시판</a><a href="#">설정 <span class="n">2 ▾</span></a>
+  </aside>
+  <div style="flex:1;min-width:0;display:flex;flex-direction:column">
   <div class="fb">
     <label for="scope" class="muted" style="font-size:12px">범위</label>
     <select id="scope" class="input" style="min-width:160px"><option>전체 법인(28)</option></select>
@@ -183,6 +195,8 @@ td{padding:8px 10px;border-bottom:1px solid #1f2a40;vertical-align:middle;white-
     </section>
     <div class="card" style="margin-top:14px;padding:12px 16px"><div style="font-weight:700;margin-bottom:4px">IPMS 일치</div><div class="muted" style="font-size:12px">검색어가 있을 때 IP 관리 원장과 맞춰 보여 줍니다.</div></div>
   </main>
+  </div>
+  </div>
 </div>
 </x-dc>
 <script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1560}}'>
