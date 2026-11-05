@@ -1101,6 +1101,15 @@ async function restoreRoute(req, res, job) {
   const settings = effectiveSettings();
   const plan = restorePlan({ mode: b.mode, job, snapshot: store.get(), newVm: b.newVm, confirmName: b.confirmName, pluginName: settings.defaults.pluginName, jobid, base: restoreBaseOf(settings)(job) });   // v2.847 D2-1: 그 지점의 백업 때 위치로 판정
   if (!plan.ok) return res.status(400).json({ ok: false, reason: plan.issue });
+  // v2.902(별건 정리 — 재해 복구 버그 점검 '남김: 단건 복원 라우트는 이름 예약을 보지 않는다'): 새 VM 이름은 묶음 복원 · 복구 순서와 같은 예약을 본다.
+  //   예전에는 인벤토리의 동명 VM 만 봐서, 아직 인벤토리에 없는 진행 중 · 방금 보낸 같은 이름 복원과 겹칠 수 있었다(같은 이름 VM 둘 — NIC 끊기 · 켜 보기가 손대지 못한다).
+  //   판정 · 문구는 bulkRestorePlan 과 같다. 보내는 중인 이름은 원장 기록 뒤까지 잡는다(B3-04 와 같은 창).
+  const nameKey = b.mode === 'newVm' && plan.target?.name ? restoreNameKey(job.vcenterId, plan.target.name) : '';
+  if (nameKey) {
+    // 보내는 중인 이름(heldRestoreNames)은 아래 tryHoldNames 가 '지금 보내는 중' 으로 따로 말한다
+    const reserved = new Set([...reservedRestoreNames(listJobs(), { snapAt: inventoryAtOf(store.get()), isOpen: restoreOpen }), ...drRunHeldNames()]);
+    if (reserved.has(nameKey)) return res.status(409).json({ ok: false, code: 'name-reserved', reason: `최근 복원이 ‘${plan.target.name}’ 이름으로 VM 을 만들었거나 만드는 중입니다(아직 인벤토리에 없음) — 다른 이름을 쓰세요.` });
+  }
   // v2.825.1 버그 점검(G2 — 재현): 설정만 보면 아는 전제(그 잡의 Director 가 있고 접속값이 갖춰졌는가)도 OTP **앞에서** 본다 —
   //   뒤에서 'not-configured' 로 실패하면 1회용 코드가 이미 쓰여, 설정을 고친 뒤 같은 코드는 '이미 사용됨' 이었다.
   if (!isDemoActive()) {
@@ -1109,11 +1118,18 @@ async function restoreRoute(req, res, job) {
     const miss = directorConn(jd).missing;
     if (miss?.length) return res.status(409).json({ ok: false, code: 'not-configured', reason: `‘${jd.name}’ Director 설정이 덜 됐습니다(${miss.join('·')}) — 설정 › vCenter 관리 › Bareos 백업 서버 › Director 에서 먼저 채우세요.` });
   }
-  // OTP 는 입력·전제 검사를 통과한 뒤에 쓴다(1회용 코드를 입력 실수로 태우지 않게). Director 에 닿기 전이다.
-  if (config.auth.enabled) {
-    const v = verifyUserOtp(name, b.otp);
-    if (!v.ok) return res.status(403).json({ ok: false, reason: `OTP 인증 실패 — ${v.reason}` });
-  }
+  // 이름 잡기도 OTP 앞 — 겹친 요청이 1회용 코드를 태우지 않게(라우트 순서 규약: 전제 판정 → OTP)
+  if (nameKey && !tryHoldNames([nameKey])) return res.status(409).json({ ok: false, code: 'name-held', reason: '같은 새 VM 이름을 다른 요청이 지금 보내는 중입니다 — 잠시 뒤 다시 확인하세요.' });
+  try {
+    // OTP 는 입력·전제 검사를 통과한 뒤에 쓴다(1회용 코드를 입력 실수로 태우지 않게). Director 에 닿기 전이다.
+    if (config.auth.enabled) {
+      const v = verifyUserOtp(name, b.otp);
+      if (!v.ok) return res.status(403).json({ ok: false, reason: `OTP 인증 실패 — ${v.reason}` });
+    }
+    await sendRestore(req, res, job, { b, jobid, plan, settings });
+  } finally { if (nameKey) releaseNames([nameKey]); }
+}
+async function sendRestore(req, res, job, { b, jobid, plan, settings }) {
   const site = settings.sites.find((s) => s.vcenterId === job.vcenterId);
   const client = site?.client || job.client;
   try {
