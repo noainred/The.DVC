@@ -88,14 +88,15 @@ export function osKeyOf(v) {
  * 이름(qs 가 객체·배열로 만든다 — `키[x]=`·`키[]=`·`키[=`)이면 그 키를 넣는다. 원문이 없거나 읽지 못하면 빈 집합
  * (그때는 `req.query` 의 typeof 판정만 남는다 — 정규화기가 없는 경로).
  */
-export function facetShapeIssues(rawQuery) {
+export function facetShapeIssues(rawQuery, keys = VM_FACET_KEYS) {
   const bad = new Set();
   if (typeof rawQuery !== 'string' || rawQuery === '') return bad;
   let sp;
   try { sp = new URLSearchParams(rawQuery); } catch { return bad; }
   const seen = new Set();
   for (const k of sp.keys()) {
-    for (const f of VM_FACET_KEYS) {
+    // v2.909: keys — 신호 선택(`signal`, inventory/vmSignals.js)도 같은 모양 판정을 쓴다. 기본은 패널 선택 키(예전 그대로).
+    for (const f of keys) {
       if (k === f) { if (seen.has(f)) bad.add(f); else seen.add(f); }
       else if (k.startsWith(`${f}[`)) bad.add(f);
     }

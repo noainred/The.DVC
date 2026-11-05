@@ -97,6 +97,25 @@ function ratios(st, vm) {
 }
 
 /**
+ * 법인(vCenter) 한 줄의 신원·수집 상태 칸 — 호스트 법인별(v2.811)과 VM 법인별(v2.909 inventory/vmByVcenter.js)이 같이 쓴다(한 벌).
+ */
+export function corpIdentityOf(vc) {
+  const status = String(vc?.status || '');
+  return {
+    id: vc.id, name: vc.name || vc.id, region: vc.location?.region || null, city: vc.location?.city || null, country: vc.location?.country || null,
+    group: groupOf(vc), status: status || null, stale: vc.stale === true, authStopped: vc.authStopped === true,
+    receivedAt: numOrNull(vc.receivedAt), collect: vc.collectSource === 'site' ? 'site' : 'direct', collectedBy: vc.collectedBy || null,
+    version: vc.version || null,
+  };
+}
+
+/** 이 법인의 개수를 '모름'(null)으로 둘 것인가 — 첫 수집 중·비활성·연결 실패·인증 정지이며 받은 항목이 0 개일 때('0대' 라는 거짓 금지). */
+export function corpUnknownOf(vc, n) {
+  const status = String(vc?.status || '');
+  return (status === 'pending' || status === 'disabled' || status === 'unreachable' || vc?.authStopped === true) && n === 0;
+}
+
+/**
  * @param {object} p
  * @param {object[]} p.vcenters  범위·필터를 적용한 vCenter(법인) 목록
  * @param {object[]} p.hosts     범위·필터를 적용한 호스트
@@ -170,13 +189,9 @@ export function hostCorpOf({ vcenters = [], hosts = [], vms = [], readable, capK
     const vm = vmSumsOf(vmsOf(list));
     const cls = [...clusterHosts.entries()].filter(([, l]) => l[0].vcenterId === vc.id).map(([k, l]) => clusterRow(k, l));
     const standalone = list.filter((h) => !cidx.keyOf(h)).length;
-    const status = String(vc.status || '');
-    const unknownHosts = (status === 'pending' || status === 'disabled' || status === 'unreachable' || vc.authStopped === true) && list.length === 0;
+    const unknownHosts = corpUnknownOf(vc, list.length);
     const corp = {
-      id: vc.id, name: vc.name || vc.id, region: vc.location?.region || null, city: vc.location?.city || null, country: vc.location?.country || null,
-      group: groupOf(vc), status: status || null, stale: vc.stale === true, authStopped: vc.authStopped === true,
-      receivedAt: numOrNull(vc.receivedAt), collect: vc.collectSource === 'site' ? 'site' : 'direct', collectedBy: vc.collectedBy || null,
-      version: vc.version || null,
+      ...corpIdentityOf(vc),
       ...st,
       // 호스트를 모르는 법인(첫 수집 중·비활성·연결 실패이며 이월 값 없음)은 개수를 null 로 — '0대' 라는 거짓 금지.
       ...(unknownHosts ? { hosts: null, connected: null, maint: null, down: null, hot: null } : {}),

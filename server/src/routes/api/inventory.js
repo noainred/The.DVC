@@ -13,6 +13,10 @@ import { recordToolUse, getTopTools } from '../../tool-usage.js';
 import { memoJson, applyFilters, sortBy, scopeKey, osFamily } from './shared.js';
 import { isPagedRequest, prepareVmPage, buildVmPage } from '../../inventory/vmPaging.js'; // v2.730(I-02)
 import { parseVmFacets, passGpu, filterVmsByFacets, vmDistribution, VM_FACET_KEYS } from '../../inventory/vmDist.js'; // v2.746(VM 상세 C안)
+import { parseSignalQuery, filterVmsBySignal, signalCounts, signalContext, vmSignalsOf } from '../../inventory/vmSignals.js'; // v2.909 가상화 서버 허브
+import { vmTotals } from '../../inventory/vmTotals.js';
+import { vmByVcenter } from '../../inventory/vmByVcenter.js';
+import { loadVmHygieneSettings } from '../../vmhygiene/settings.js';
 
 /**
  * 인벤토리 조회 권한 게이트(v2.536 — 인증·인가 전수 감사).
@@ -132,13 +136,21 @@ function matchVms(snap, q, user) {
  * gpuCounts 는 예전에도 GPU 필터 '이전' 집합 기준이었다 — matchVms 가 gpu 키 유무와 무관하게 같은 값을 센다.
  */
 const FACET_STRIP_KEYS = ['gpu', 'gpuType', ...VM_FACET_KEYS];
-function matchVmsFacet(snap, q, user, sel, { sort = null } = {}) {
+// v2.909(가상화 서버 허브): `signal`(inventory/vmSignals.js)도 items 만 거른다 — KPI(totals)·분포(dist)는 따르지 않는다(패널 선택과 같은 규칙).
+//   signal 이 없으면 items 는 예전과 같은 배열이다.
+function matchVmsFacet(snap, q, user, sel, { sort = null, signal = null, ctx = null } = {}) {
   const q0 = { ...q };
   for (const k of FACET_STRIP_KEYS) delete q0[k];
   const pre = matchVms(snap, q0, user);
   let kpiVms = (sel.gpu || sel.gpuTypeRaw) ? pre.vms.filter((v) => passGpu(v, sel)) : pre.vms;
   if (sort) kpiVms = sort(kpiVms);
-  return { pre: pre.vms, gpuCounts: pre.gpuCounts, kpiVms, items: filterVmsByFacets(kpiVms, sel) };
+  return { pre: pre.vms, gpuCounts: pre.gpuCounts, kpiVms, items: filterVmsBySignal(filterVmsByFacets(kpiVms, sel), signal, ctx) };
+}
+
+/** v2.909: 신호 판정 문맥 — 'VM 구성 점검' 설정(스냅샷 기준 일수·예외). 캐시 키에는 설정 개정(rev)을 넣는다(설정을 바꾸면 다음 요청부터 새 판정). */
+function vmSignalCtx() {
+  const s = loadVmHygieneSettings();
+  return { ctx: signalContext(s, Date.now()), rev: s?.rev ?? '-' };
 }
 
 export function registerInventory(api) {
@@ -395,69 +407,71 @@ api.get('/vms', invVms, (req, res) => {
   const fp = parseVmFacets(req.query, { rawQuery: rawQueryOf(req) });
   if (!fp.ok) return res.status(400).json({ ok: false, error: 'bad-facet', reason: 'bad-facet', field: fp.field });
   const sel = fp.sel;
+  // v2.909: 신호 선택(signal)·신호 싣기(signals=1) — 형식 오류는 패널 선택과 같은 400 bad-facet(field:'signal'), 캐시·페이지 판정보다 먼저.
+  const sp = parseSignalQuery(req.query, { rawQuery: rawQueryOf(req) });
+  if (!sp.ok) return res.status(400).json({ ok: false, error: 'bad-facet', reason: 'bad-facet', field: sp.field });
+  const useSig = !!(sp.signal || sp.want);
+  const sig = useSig ? vmSignalCtx() : { ctx: null, rev: '' };
   const paged = isPagedRequest(req.query);
   if (paged) {
     const snapNow = store.get();
     const chk = prepareVmPage({ q: req.query, snapAt: snapNow.generatedAt, scopeKeyStr: scopeKey(req.user, snapNow),
-      matched: () => matchVmsFacet(snapNow, req.query, req.user, sel).items });
+      matched: () => matchVmsFacet(snapNow, req.query, req.user, sel, { signal: sp.signal, ctx: sig.ctx }).items });
     if (!chk.ok) return res.status(chk.status).json({ ok: false, error: chk.code, reason: chk.code, ...(chk.why ? { why: chk.why } : {}) });
   }
   const wantDist = req.query.dist === '1' || req.query.dist === 'true';
   return memoJson(req, res, 'inv:vms', (snap) => {
   const q = req.query;
   // 페이지 순회는 vmPaging 이 전순서(정렬 값 → VM id)로 정렬한다 — 예전 정렬(동률은 스냅샷 순서)은 경계에서 누락·중복이 난다.
-  const matched = matchVmsFacet(snap, q, req.user, sel, { sort: q.sortBy && !paged ? (arr) => sortBy(arr, q.sortBy, q.order) : null });
+  const matched = matchVmsFacet(snap, q, req.user, sel, { sort: q.sortBy && !paged ? (arr) => sortBy(arr, q.sortBy, q.order) : null, signal: sp.signal, ctx: sig.ctx });
   const vms = matched.kpiVms;       // KPI 집합(예전 vms 그대로)
-  const list = matched.items;       // 표·페이지 집합(패널 선택 적용)
+  const list = matched.items;       // 표·페이지 집합(패널 선택 · 신호 선택 적용)
   const gpuCounts = matched.gpuCounts;
   const extra = { facets: fp.facets, ...(wantDist ? { dist: vmDistribution(matched.pre, sel) } : {}) };
+  // v2.909: 신호 개수는 KPI 집합 기준(패널·신호 선택과 무관 — 탭 배지·신호 카드가 선택에 따라 줄지 않게). 기준 일수는 설정값을 그대로 싣는다.
+  if (sp.want) extra.signalCounts = { ...signalCounts(vms, sig.ctx), snapAgeDays: sig.ctx?.hygiene?.snapAgeDays ?? null };
+  if (sp.signal) extra.signal = sp.signal;
+  // 항목별 신호는 signals=1 일 때만(페이지 항목만 — 많아야 limit 개). 원본 스냅샷 객체는 바꾸지 않는다.
+  const withSig = (arr) => (sp.want ? arr.map((v) => ({ ...v, signals: vmSignalsOf(v, sig.ctx) })) : arr);
   const limit = Math.max(1, Math.min(Number(q.limit) || 500, 5000)); // Math.max(1,…): 음수 limit 이 slice(0,-n)로 뒤에서 잘리는 것 방지
 
   // Aggregate over ALL matched VMs (not just the page) so the UI can show the
   // sum of the searched resources: vCPU/RAM/disk allocation + avg usage.
-  const sm = (fn) => vms.reduce((a, v) => a + (fn(v) || 0), 0);
-  const on = vms.filter((v) => v.powerState === 'POWERED_ON');
-  // v2.629(감사 WEB2629-01): 값이 없는 VM 은 평균 분모에 넣지 않는다(REST 폴백 VM 은 사용률 필드가 없다 — 0 으로 세면
-  //   평균이 거짓으로 내려간다). 대상이 0 이면 null('—') — 0% 는 '부하 없음' 이라는 거짓이다. 뺀 수는 usageUnknown 으로 싣는다.
-  const avgOf = (arr, fn) => {
-    let sum = 0; let n = 0;
-    for (const v of arr) { const x = numOrNull(fn(v)); if (x == null) continue; sum += x; n += 1; }
-    return { value: n ? Math.round((sum / n) * 10) / 10 : null, missing: arr.length - n };
-  };
-  const cpuAvg = avgOf(on, (v) => v.cpuUsagePct);
-  const memAvg = avgOf(on, (v) => v.memUsagePct);
-  const avg = (arr, fn) => avgOf(arr, fn).value;
-  const totals = {
-    count: vms.length,
-    poweredOn: on.length,
-    poweredOff: vms.length - on.length,
-    vcpu: sm((v) => v.cpuCount),
-    ramGB: Math.round(sm((v) => v.memMB) / 1024),
-    diskGB: sm((v) => v.storageGB),
-    diskTB: Math.round(sm((v) => v.storageGB) / 1024 * 10) / 10,
-    avgCpuUsagePct: cpuAvg.value,
-    avgMemUsagePct: memAvg.value,
-    usageUnknown: { cpu: cpuAvg.missing, mem: memAvg.missing },   // v2.629 WEB2629-01: 사용률 미수집 구동 VM 수
-    // v2.727(C-01): diskGB·diskTB 는 읽은 VM 만(sm 이 null 을 0 으로 접는다) — 뺀 수를 밝힌다.
-    storageUnknown: vms.filter((v) => numOrNull(v.storageGB) == null).length,
-    // 평균 디스크 사용율 = 프로비저닝(committed+uncommitted) 대비 실제 사용(committed).
-    // thick 디스크는 uncommitted=0 → 100%. 게스트 파일시스템 사용율과는 다름.
-    // v2.727(C-01): committed·uncommitted 를 **둘 다** 읽은 VM 만 — 한쪽이 null 이면 0 으로 접혀 0%·100% 가 지어진다.
-    avgDiskUsagePct: avg(vms.filter((v) => numOrNull(v.storageGB) != null && numOrNull(v.uncommittedGB) != null && v.storageGB + v.uncommittedGB > 0),
-      (v) => (v.storageGB / (v.storageGB + v.uncommittedGB)) * 100),
-    gpu: gpuCounts,
-  };
+  // v2.909: 계산은 inventory/vmTotals.js 한 벌(법인별 집계와 같은 평균 규칙) — 본문은 글자 그대로 옮겼다.
+  const totals = vmTotals(vms, gpuCounts);
   const snapshotAt = snap.generatedAt ?? null;
   if (paged) {
     const pg = buildVmPage({ vms: list, q, snapAt: snap.generatedAt, scopeKeyStr: scopeKey(req.user, snap) });
     // 위 판정과 같은 틱이라 여기서 실패하는 것은 경합뿐이다 — 캐시에 남기지 않도록 던진다(memoJson 500 → 클라이언트 재시도 → 409).
     if (!pg.ok) throw new Error(pg.code);
-    return { total: list.length, items: pg.items, totals, returned: pg.items.length, hasMore: pg.hasMore, nextCursor: pg.nextCursor, snapshotAt, page: pg.page, ...extra };
+    return { total: list.length, items: withSig(pg.items), totals, returned: pg.items.length, hasMore: pg.hasMore, nextCursor: pg.nextCursor, snapshotAt, page: pg.page, ...extra };
   }
   const items = list.slice(0, limit);
   // 예전 응답에는 이어 받는 방법이 없다(nextCursor:null) — 나머지는 paged=1 로 다시 요청한다.
-  return { total: list.length, items, totals, returned: items.length, hasMore: list.length > items.length, nextCursor: null, snapshotAt, ...extra };
-}, { extraKey: scopeKey(req.user, store.get()) });
+  return { total: list.length, items: withSig(items), totals, returned: items.length, hasMore: list.length > items.length, nextCursor: null, snapshotAt, ...extra };
+}, { extraKey: `${scopeKey(req.user, store.get())}${useSig ? `|h${sig.rev}` : ''}` });
+});
+
+// v2.909(가상화 서버 허브 · 시안 ③): 법인(vCenter)별 VM 집계. /vms 와 같은 범위·필터(matchVms — 패널·GPU·신호 선택은 빼고).
+//   법인 목록은 scope 가 먼저(요청 필터보다) — 범위 밖 vCenter 는 이름도 싣지 않는다(호스트 법인별 /hosts/corp 와 같은 규약).
+//   신호 개수는 'VM 구성 점검' 설정(스냅샷 기준 일수·예외)에 따르므로 캐시 키에 설정 개정을 넣는다.
+api.get('/vms/by-vcenter', invVms, (req, res) => {
+  const sig = vmSignalCtx();
+  return memoJson(req, res, 'inv:vms-byvc', (snap) => {
+    const allowed = scopedVcenterIds(req.user, snap);
+    const q0 = { ...req.query };
+    for (const k of [...FACET_STRIP_KEYS, 'signal', 'signals']) delete q0[k];
+    const { vms } = matchVms(snap, q0, req.user);
+    const vcId = typeof req.query.vcenterId === 'string' && req.query.vcenterId ? req.query.vcenterId : null;
+    const region = typeof req.query.region === 'string' && req.query.region ? req.query.region : null;
+    const vcenters = (snap.vcenters || [])
+      .filter((v) => !allowed || allowed.has(v.id))
+      .filter((v) => !vcId || v.id === vcId)
+      .filter((v) => !region || v.location?.region === region);
+    const narrowed = !!(req.query.q || req.query.powerState || req.query.os || req.query.host || req.query.toolsStatus);
+    const r = vmByVcenter({ vcenters, vms, ctx: sig.ctx, dropEmpty: narrowed });
+    return { ok: true, ...r, snapAgeDays: sig.ctx?.hygiene?.snapAgeDays ?? null, snapshotAt: snap.generatedAt ?? null, initial: snap.initial === true };
+  }, { ttlMs: 30_000, extraKey: `${scopeKey(req.user, store.get())}|h${sig.rev}` });
 });
 
 // VM 단건 조회 — 이름/IP/호스트명으로 스냅샷에서 찾아 상세 팝업에 쓴다(모든 화면 공용).
