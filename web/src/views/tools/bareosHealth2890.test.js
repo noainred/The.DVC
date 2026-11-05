@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {
   healthBadge, healthCounts, healthCell, diskCell, healthBand, fmtBytes, sparkPoints, healthSettingsBody, healthSettingsForm, lastRunText, fromText, HEALTH_LIMIT_TEXT,
+  sparkOf, staleText, healthRunWaitMs, healthRunErrorText, isTimeoutError,
 } from './bareosHealthText.js';
 
 const here = path.dirname(new URL(import.meta.url).pathname);
@@ -49,12 +50,39 @@ describe('사전 점검 — 표시', () => {
   });
 });
 
+describe('사전 점검 — 반증 확정분(웹)', () => {
+  it('R4: 지난 회차에서 못 돈 법인 — 칸은 모름 · 디스크 칸은 비움 · 안내 문구', () => {
+    const c = corp('unknown', [{ key: 'vc', status: 'bad', label: 'vCenter 접속', detail: 'x' }, { key: 'disk', status: 'ok', disks: [{ path: '/v', availBytes: 1, sizeBytes: 2, pct: 50, status: 'ok' }] }], { stale: true, staleVerdict: 'bad' });
+    expect(healthCell(c)).toMatchObject({ text: '모름' }); expect(healthCell(c).detail).toMatch(/지난 회차에서 점검하지 못함\(이전 불가\)/);
+    expect(diskCell(c)).toBeNull();
+    expect(staleText(c)).toMatch(/판정은 모름/); expect(staleText(c)).toMatch(/이전 결과\(불가\)/);
+  });
+  it('R7: 추이선은 지금 디스크 항목의 첫 경로', () => {
+    const c = corp('ok', [{ key: 'disk', status: 'ok', disks: [{ path: '/new', availBytes: 1, sizeBytes: 2 }] }], { spark: { '/old': [{ used: 1, size: 2 }], '/new': [{ used: 1, size: 2 }, { used: 2, size: 2 }] } });
+    expect(sparkOf(c)).toHaveLength(2);
+    expect(sparkOf(corp('ok', [], { spark: { '/old': [] } }))).toBeNull();
+  });
+  it('R8: 지금 점검의 브라우저 시한은 서버 시한보다 길다 · 시한 초과는 결과 모름', () => {
+    expect(healthRunWaitMs(270_000)).toBe(285_000);
+    expect(healthRunWaitMs(undefined)).toBe(180_000);
+    expect(isTimeoutError({ name: 'TimeoutError' })).toBe(true);
+    expect(healthRunErrorText({ name: 'TimeoutError', message: 'x' })).toMatch(/서버에서는 끝났을 수 있습니다/);
+    expect(healthRunErrorText(new Error('이 법인에 매핑된 Director 가 없습니다'))).toMatch(/매핑된 Director/);
+  });
+});
+
 describe('사전 점검 — 화면 소스', () => {
   const card = src('BareosHealth.jsx');
   it('관리자가 아니면(403) 조용히 숨긴다 · 늦은 응답 버림 · 표는 STable', () => {
     expect(card).toMatch(/e\?\.status === 403 \|\| e\?\.status === 401\) setD\(\{ hidden: true/);
     expect(card).toMatch(/if \(g === gen\.current\)/);
     expect(card).toMatch(/<STable sortable=\{false\}/);
+  });
+  it('반증 배선 — 시한 옵션 · 추이 경로 · 못 돈 법인 안내', () => {
+    expect(card).toMatch(/\{ timeoutMs: healthRunWaitMs\(d\.deadlineMs\) \}/);
+    expect(card).toMatch(/const spark = sparkOf\(c\)/);
+    expect(card).toMatch(/c\?\.stale && <Note tone="warn">\{staleText\(c\)\}<\/Note>/);
+    expect(card).not.toMatch(/Object\.values\(c\.spark\)\[0\]/);
   });
   it('현황 — 띠 · 열 2개 · 칩 · 열 수에 맞춘 colSpan · KPI 칸은 그대로(사용자 결정)', () => {
     const s = src('BareosSummaryTool.jsx');

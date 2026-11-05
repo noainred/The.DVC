@@ -10,6 +10,7 @@
  *  ⑧ 라우트(실제 라우터 + 가짜 Director) — 범위 · 전 법인 점검 문지기 · 설정 검증 · 지문 기준 범위
  *  ⑨ mailTick(자식 프로세스 — 메일 · 설정 · store 대체) — 나빠짐 한 통 · 반복 없음 · 회복 한 통 · 꺼짐이면 커서만 · 실패면 10분 뒤
  *  ⑩ 일일 요약 절 · 데모
+ *  ⑪ 반증 1인 확정분(R1~R12) — statfs 시한 · 엣지 창 · 한 법인 계획 · 매핑 지운 법인 · 못 돈 법인 · 중앙 지문 · 짧은 이름 · 추이 경로 · 데모 계정 · 범위 순서 · 회차 중 메일 · 정책 차단
  */
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
@@ -53,7 +54,16 @@ test('① judgeCorp — 판정 규칙', () => {
   j = H.judgeCorp({ result: { from: 'central', version: '25', vcs: [{ host: 'vc.corp', ok: false, code: 'ETIMEDOUT', ms: 10000, thumbprint: null }], disks: [], diskSkipped: 'central' }, vcserver: 'vc.corp' });
   assert.equal(st(j, 'vc'), 'info'); assert.equal(st(j, 'disk'), 'unknown'); assert.equal(j.verdict, 'unknown');
   j = H.judgeCorp({ result: { from: 'central', version: '25', vcs: [{ host: 'vc.corp', ok: true, code: null, ms: 600, thumbprint: FP1 }], disks: [], diskSkipped: 'central' }, vcserver: 'vc.corp', prevThumb: { value: FP1 } });
-  assert.equal(st(j, 'thumb'), 'ok'); assert.equal(j.verdict, 'unknown', '중앙에서 지문만 정상이어도 모름');
+  assert.equal(st(j, 'thumb'), 'info', '중앙에서 본 지문은 참고(R5)'); assert.equal(j.verdict, 'unknown', '중앙에서 지문만 정상이어도 모름');
+  j = H.judgeCorp({ result: { from: 'central', version: '25', vcs: [{ host: 'vc.corp', ok: true, code: null, ms: 600, thumbprint: FP2 }], disks: [], diskSkipped: 'central' }, vcserver: 'vc.corp', prevThumb: { value: FP1 } });
+  assert.equal(st(j, 'thumb'), 'info'); assert.equal(j.verdict, 'unknown', 'R5: 중앙에서 본 지문이 달라도 경고가 아니다'); assert.match(j.items.find((x) => x.key === 'thumb').detail, /기준으로 쓰지 않습니다/);
+  // R2 · R12: 접속해 보지 않은 것(부르는 쪽 시한 · 정책 차단 · 형식)은 엣지 시점이어도 불가가 아니라 모름
+  for (const code of ['aborted', 'blocked', 'invalid']) {
+    j = H.judgeCorp({ result: edgeRes({ vcs: [{ host: 'vc.corp', ok: false, code, ms: 1, thumbprint: null }] }), vcserver: 'vc.corp' });
+    assert.equal(st(j, 'vc'), 'unknown', code); assert.notEqual(j.verdict, 'bad', code);
+  }
+  assert.match(H.judgeCorp({ result: edgeRes({ vcs: [{ host: 'vc.corp', ok: false, code: 'aborted', ms: 1 }] }), vcserver: 'vc.corp' }).items.find((x) => x.key === 'vc').detail, /점검 시간 안에 확인하지 못함/);
+  assert.equal(st(H.judgeCorp({ result: edgeRes({ vcs: [{ host: 'vc.corp', ok: false, code: 'ETIMEDOUT', ms: 10000 }] }), vcserver: 'vc.corp' }), 'vc'), 'bad', '진짜 시간 초과는 불가');
   // 지문 바뀜 = 경고
   j = H.judgeCorp({ result: edgeRes({ vcs: [{ host: 'vc.corp', ok: true, ms: 1, thumbprint: FP2 }] }), vcserver: 'vc.corp', prevThumb: { value: FP1 } });
   assert.equal(st(j, 'thumb'), 'warn'); assert.equal(j.verdict, 'warn'); assert.match(j.items.find((x) => x.key === 'thumb').detail, new RegExp(`${FP1} → 지금 ${FP2}`));
@@ -74,6 +84,7 @@ test('① judgeCorp — 판정 규칙', () => {
   assert.equal(st(H.judgeCorp({ result: disk(0.30), vcserver: 'vc.corp', cfg }), 'disk'), 'warn');
   // 디스크 못 읽음 · 건너뜀 · 매핑 vcserver 없음 · Director 오류 분류
   assert.equal(st(H.judgeCorp({ result: edgeRes({ disks: [{ path: '/v', code: 'ENOENT', availBytes: null, sizeBytes: null }] }), vcserver: 'vc.corp' }), 'disk'), 'unknown');
+  assert.match(H.judgeCorp({ result: edgeRes({ disks: [{ path: '/v', code: 'ETIMEDOUT', availBytes: null, sizeBytes: null }] }), vcserver: 'vc.corp' }).items.find((x) => x.key === 'disk').detail, /응답 없음/, 'R1 문구');
   assert.match(H.judgeCorp({ result: edgeRes({ disks: [], diskSkipped: 'remote' }), vcserver: 'vc.corp' }).items.find((x) => x.key === 'disk').detail, /이 엣지 노드에 있지 않습니다/);
   assert.equal(st(H.judgeCorp({ result: edgeRes(), vcserver: '' }), 'vc'), 'unknown');
   const stopped = H.judgeCorp({ error: { code: 'auth-stopped' }, vcserver: 'vc.corp' });
@@ -131,7 +142,12 @@ test('④ healthProbe — 접속 · 지문 · 차단 · 형식 · 시한 · stat
   assert.equal((await P.checkVc('vc.corp', { connect: fake('EWEIRD') })).code, 'error');
   assert.equal((await P.checkVc('vc.corp', { connect: fake('hang'), timeoutMs: 1000 })).code, 'ETIMEDOUT');
   const ac = new AbortController(); setTimeout(() => ac.abort(), 5);
-  assert.equal((await P.checkVc('vc.corp', { connect: fake('hang'), signal: ac.signal, timeoutMs: 20_000 })).code, 'ETIMEDOUT', '시한 신호');
+  assert.equal((await P.checkVc('vc.corp', { connect: fake('hang'), signal: ac.signal, timeoutMs: 20_000 })).code, 'aborted', '부르는 쪽 시한 신호는 시간 초과가 아니다(R2)');
+  // R2: 여러 vCenter 는 동시에 — 응답 없는 3곳이 각 1초면 합쳐 약 1초
+  const t0 = Date.now();
+  const many = await P.checkVcs(['a.corp', 'b.corp', 'c.corp', 'a.corp'], { connect: fake('hang'), timeoutMs: 1000 });
+  assert.deepEqual(many.map((x) => [x.host, x.code]), [['a.corp', 'ETIMEDOUT'], ['b.corp', 'ETIMEDOUT'], ['c.corp', 'ETIMEDOUT']], '중복 제거 · 받은 순서');
+  assert.ok(Date.now() - t0 < 2500, `동시에(${Date.now() - t0}ms)`);
   delete process.env.SSRF_ALLOW_LOOPBACK;
   try {
     let called = false;
@@ -143,6 +159,23 @@ test('④ healthProbe — 접속 · 지문 · 차단 · 형식 · 시한 · stat
   const disks = await P.checkDisks(['/v', '/missing', 'rel/path', '/a/../b'], { statfs: async (p) => { if (p === '/missing') throw Object.assign(new Error('x'), { code: 'ENOENT' }); return { bsize: 4096, blocks: 1000, bfree: 400, bavail: 300 }; } });
   assert.deepEqual(disks.map((d) => [d.path, d.code]), [['/v', null], ['/missing', 'ENOENT'], ['rel/path', 'invalid'], ['/a/../b', 'invalid']]);
   assert.deepEqual([disks[0].sizeBytes, disks[0].availBytes, disks[0].usedBytes], [4096000, 1228800, 2457600]);
+  // R1: statfs 가 돌아오지 않아도 끝난다 · 같은 경로는 다시 부르지 않는다 · 멈춘 것이 상한이면 더 부르지 않는다 · 끊긴 신호면 부르지 않는다
+  const hung = []; let nCalls = 0;
+  const hangFs = (p) => { nCalls += 1; return new Promise((resolve) => hung.push(() => resolve({ bsize: 4096, blocks: 10, bfree: 5, bavail: 5 }))); };
+  let d1 = await P.checkDisks(['/h1'], { statfs: hangFs, timeoutMs: 100 });
+  assert.deepEqual(d1.map((d) => d.code), ['ETIMEDOUT']); assert.ok(P._diskPendingForTest().has('/h1'));
+  d1 = await P.checkDisks(['/h1', '/h2', '/h3'], { statfs: hangFs, timeoutMs: 100 });
+  assert.deepEqual(d1.map((d) => d.code), ['ETIMEDOUT', 'ETIMEDOUT', 'ETIMEDOUT']);
+  assert.equal(nCalls, 2, '멈춘 /h1 은 다시 부르지 않고 · /h2 가 멈추면 상한(2)이라 /h3 은 부르지 않는다');
+  const ab = new AbortController(); ab.abort();
+  assert.deepEqual((await P.checkDisks(['/h9'], { statfs: hangFs, signal: ab.signal })).map((d) => d.code), ['aborted']);
+  for (const f of hung) f();
+  await new Promise((x) => setTimeout(x, 10));
+  assert.equal(P._diskPendingForTest().size, 0, '돌아오면 잊는다');
+  const ac2 = new AbortController(); setTimeout(() => ac2.abort(), 20);
+  assert.deepEqual((await P.checkDisks(['/h4'], { statfs: hangFs, signal: ac2.signal, timeoutMs: 20_000 })).map((d) => d.code), ['aborted'], '도중에 끊긴 신호');
+  for (const f of hung) f();
+  await new Promise((x) => setTimeout(x, 10));
   // 같은 서버
   const ifaces = { eth0: [{ address: '10.20.0.14' }] };
   assert.equal(P.isThisHost('10.20.0.14', { ifaces, hostname: 'edge1' }), true);
@@ -150,6 +183,11 @@ test('④ healthProbe — 접속 · 지문 · 차단 · 형식 · 시한 · stat
   assert.equal(P.isThisHost('127.0.0.1', { ifaces, hostname: 'x' }), true);
   assert.equal(P.isThisHost('10.9.9.9', { ifaces, hostname: 'edge1' }), false);
   assert.equal(P.isThisHost('', { ifaces, hostname: 'edge1' }), false);
+  // R6: 짧은 이름은 한쪽이 점 없는 이름일 때만
+  assert.equal(P.isThisHost('bareos.pl.corp', { ifaces, hostname: 'bareos.kr.corp' }), false);
+  assert.equal(P.isThisHost('edge1', { ifaces, hostname: 'edge1.corp' }), true);
+  assert.equal(P.isThisHost('edge1.corp', { ifaces, hostname: 'edge1' }), true);
+  assert.equal(P.isThisHost('edge1.other', { ifaces, hostname: 'edge1.corp' }), false);
 });
 
 test('⑤ edgeResult.health — 아는 칸만', () => {
@@ -176,6 +214,9 @@ test('⑥ ops.health — 중앙은 디스크를 재지 않는다 · 엣지 + 같
     assert.equal(r.disks[0].path, tmp); assert.ok(r.disks[0].sizeBytes > 0, '실제 statfs');
     r = await OPS.health(s, { vcservers: [], volumeDirs: [tmp], dirHost: '10.123.45.67' });
     assert.deepEqual([r.diskSkipped, r.disks.length], ['remote', 0]);
+    // R1 · R2: 시한 신호가 vCenter 확인과 statfs 까지 간다(끊긴 신호면 둘 다 aborted — 작업이 끝난다)
+    r = await OPS.health(s, { vcservers: ['vc.example'], volumeDirs: [tmp], dirHost: '127.0.0.1' }, { signal: AbortSignal.abort() });
+    assert.deepEqual([r.vcs[0].code, r.disks[0].code], ['aborted', 'aborted']);
   } finally { config.agent.centralUrl = prev; }
   const { MUTATING } = await import('../src/bareos/ops.js');
   assert.equal(MUTATING.has('health'), false, '읽기 전용');
@@ -211,6 +252,12 @@ test('⑦ runDirector · 기록 — 법인마다 · trigger · 지문 기준 · 
   v = H.healthView((id) => id === 'vc-a');
   assert.equal(v.corps[0].history.length, 7);
   assert.equal(Object.values(v.corps[0].spark)[0].length, 1, '같은 날은 표본 하나');
+  // R5: 중앙에서 본 지문은 기준 · 마지막 관측이 되지 않는다(‘새 지문을 기준으로’ 도 쓸 값이 없다)
+  res = { from: 'central', version: '25', vcs: [{ host: 'vc-x.corp', ok: true, ms: 1, thumbprint: FP2 }], disks: [], diskSkipped: 'central' };
+  await H.runDirector({ ...plan, sites: [{ vcenterId: 'vc-x', vcserver: 'vc-x.corp' }] });
+  assert.equal(H.healthView((id) => id === 'vc-x').corps[0].thumbBase, null);
+  assert.throws(() => H.acceptThumb('vc-x'), /지금 본 지문이 없습니다/);
+  res = edgeRes({ vcs: [{ host: 'vc-a.corp', ok: true, ms: 1, thumbprint: FP2 }] });
   // 인증 정지 = 모름 · 동시 실행 거부
   await H.runDirector({ ...plan, directorId: 'dX', sites: [{ vcenterId: 'vc-x', vcserver: 'vc-x.corp' }] });
   assert.equal(H.healthView((id) => id === 'vc-x').corps[0].verdict, 'unknown');
@@ -227,8 +274,13 @@ test('⑦ runDirector · 기록 — 법인마다 · trigger · 지문 기준 · 
 test('⑦-b plansOf · dueOf', () => {
   const plans = H.plansOf({ directors: [{ id: 'd1', name: 'A', host: 'h1', agent: 'e1' }, { id: 'd2', name: 'B' }], sites: [{ vcenterId: 'v1', directorId: 'd1', vcserver: 'vc1' }, { vcenterId: 'v2', directorId: 'd1', vcserver: '' }, { vcenterId: 'v3', directorId: 'gone' }] });
   assert.equal(plans.length, 1, '매핑이 없는 Director · 없는 Director 의 매핑은 점검하지 않는다');
-  assert.deepEqual(plans[0].sites, [{ vcenterId: 'v1', vcserver: 'vc1' }, { vcenterId: 'v2', vcserver: '' }]);
+  assert.deepEqual(plans[0].sites, [{ vcenterId: 'v1', vcserver: 'vc1', volumeDir: H.DEFAULT_VOLUME_DIR }, { vcenterId: 'v2', vcserver: '', volumeDir: H.DEFAULT_VOLUME_DIR }]);
   assert.deepEqual(plans[0].volumeDirs, [H.DEFAULT_VOLUME_DIR], '설치 기록이 없으면 기본 경로');
+  // R3: 한 법인 계획은 그 법인 사이트만
+  const settings = { directors: [{ id: 'd1', name: 'A', host: 'h1' }], sites: [{ vcenterId: 'v1', directorId: 'd1', vcserver: 'vc1' }, { vcenterId: 'v2', directorId: 'd1', vcserver: 'vc2' }] };
+  const one = H.planForCorp(settings, 'v2');
+  assert.deepEqual(one.sites.map((x) => x.vcenterId), ['v2']); assert.deepEqual(one.volumeDirs, [H.DEFAULT_VOLUME_DIR]); assert.equal(one.directorId, 'd1');
+  assert.equal(H.planForCorp(settings, 'v9'), null);
   // dueOf — 포탈 시각(기본 UTC+9) 20:00
   const at = (h, m) => Date.UTC(2026, 10, 5, h - 9, m);
   const cfg = { enabled: true, time: '20:00' };
@@ -246,7 +298,7 @@ test('⑦-b plansOf · dueOf', () => {
 
 /* ── ⑧ 라우트 ── */
 let srv; let base; let fd;
-const USERS = { admin: { username: 'adm', role: 'admin', scope: null }, sadm: { username: 'sadm', role: 'admin', scope: { vcenters: ['vc-a'] } }, wadm: { username: 'wadm', role: 'admin', scope: { writeVcenters: ['vc-a'] } } };
+const USERS = { demo: { username: 'thedvcdemp', role: 'admin', scope: null, demoGuest: true }, admin: { username: 'adm', role: 'admin', scope: null }, sadm: { username: 'sadm', role: 'admin', scope: { vcenters: ['vc-a'] } }, wadm: { username: 'wadm', role: 'admin', scope: { writeVcenters: ['vc-a'] } } };
 before(async () => {
   fd = await startFakeDirector({ name: 'portal', password: 'pw-1', handle: async () => ({ jobs: [] }) });
   fs.writeFileSync(path.join(tmp, 'users.json'), JSON.stringify({ users: [{ username: 'adm', role: 'admin' }, { username: 'sadm', role: 'admin' }, { username: 'wadm', role: 'admin' }] }));
@@ -255,6 +307,7 @@ before(async () => {
     sites: [
       { vcenterId: 'vc-a', directorId: 'dir_kr', vcserver: '127.0.0.1', client: 'kr-fd', storage: 'kr-sd', pool: 'p', configFile: '/etc/bareos/vmware/kr.ini' },
       { vcenterId: 'vc-b', directorId: 'dir_kr', vcserver: '127.0.0.1', client: 'kr-fd', storage: 'kr-sd', pool: 'p', configFile: '/etc/bareos/vmware/kr.ini' },
+      { vcenterId: 'vc-x', directorId: 'dir_kr', vcserver: '127.0.0.2', client: 'kr-fd', storage: 'kr-sd', pool: 'p', configFile: '/etc/bareos/vmware/kr.ini' },
     ],
   }));
   const express = (await import('express')).default;
@@ -284,9 +337,14 @@ test('⑧ 라우트 — 범위 · 전 법인 점검 문지기 · 설정 · 지�
   assert.equal(r.j.corp.vcenterId, 'vc-a'); assert.equal(r.j.corp.from, 'central'); assert.equal(r.j.corp.verdict, 'unknown');
   assert.equal(r.j.corp.items.find((x) => x.key === 'dir').status, 'ok');
   assert.ok(!/pw-1|password/.test(r.t), '비밀 없음');
-  // 조회 — 전체 범위는 설정 · 범위 계정은 자기 법인만 · 설정 없음
+  // R3: 한 법인 점검은 같은 Director 의 다른 법인(vc-b · vc-x)을 점검 · 기록하지 않는다
   r = await call('admin', 'GET');
-  assert.equal(r.s, 200); assert.deepEqual(r.j.corps.map((c) => c.vcenterId).sort(), ['vc-a', 'vc-b']); assert.ok(r.j.config);
+  assert.equal(r.s, 200); assert.deepEqual(r.j.corps.map((c) => c.vcenterId), ['vc-a']); assert.ok(r.j.config);
+  // R9: 데모 계정은 사람이 등록한 Director 가 있어도 합성값만 · 저장한 계정명 없음
+  r = await call('demo', 'GET');
+  assert.equal(r.s, 200, r.t); assert.equal(r.j.demo, true); assert.ok(r.j.corps.every((c) => c.demo)); assert.ok(!/127\.0\.0\.1/.test(r.t), '실제 vcserver 주소 없음');
+  assert.equal(r.j.config.savedBy, '');
+  assert.equal((await call('demo', 'POST', '/run', { vcenterId: 'vc-a' })).s, 403, '데모 계정은 실행하지 못한다');
   r = await call('sadm', 'GET');
   assert.deepEqual(r.j.corps.map((c) => c.vcenterId), ['vc-a']); assert.equal(r.j.config, undefined); assert.equal(r.j.last, null);
   // 범위 밖 법인 = 404 · 쓰기 밖 = 403
@@ -302,6 +360,10 @@ test('⑧ 라우트 — 범위 · 전 법인 점검 문지기 · 설정 · 지�
   r = await call('admin', 'POST', '/run', {});
   assert.equal(r.s, 202, r.t);
   for (let i = 0; i < 100 && H.healthRunning(); i++) await new Promise((x) => setTimeout(x, 20));
+  r = await call('admin', 'GET');
+  assert.deepEqual(r.j.corps.map((c) => c.vcenterId).sort(), ['vc-a', 'vc-b', 'vc-x'], '전 법인 점검은 매핑된 법인 모두');
+  r = await call('sadm', 'GET');
+  assert.deepEqual(r.j.corps.map((c) => c.vcenterId), ['vc-a'], '범위 계정은 상태에 다른 법인이 있어도 자기 법인만');
   // 설정 — 전체 범위만 · 검증 · 저장
   assert.equal((await call('sadm', 'GET', '/settings')).s, 403);
   assert.equal((await call('wadm', 'PUT', '/settings', { time: '19:30' })).s, 403);
@@ -309,6 +371,8 @@ test('⑧ 라우트 — 범위 · 전 법인 점검 문지기 · 설정 · 지�
   r = await call('admin', 'PUT', '/settings', { time: '19:30', disk: { warnPct: 20, warnDays: 21, badPct: 10, badDays: 7 }, mail: { onWorse: true, onRecover: false, inDigest: true } });
   assert.equal(r.s, 200, r.t); assert.equal(r.j.config.time, '19:30'); assert.equal(r.j.config.mail.onRecover, false);
   assert.equal(JSON.parse(fs.readFileSync(path.join(tmp, 'bareos-health.json'), 'utf8')).disk.badDays, 7);
+  assert.equal((await call('admin', 'GET')).j.config.savedBy, 'adm');
+  assert.equal((await call('demo', 'GET')).j.config.savedBy, '', 'R9: 데모 계정에는 저장한 계정명을 싣지 않는다');
   // 지문 기준 — 본 지문이 없으면 400(중앙 직접 · 127.0.0.1:443 은 열려 있지 않다)
   assert.equal((await call('admin', 'POST', '/vc-a/thumb-accept', {})).s, 400);
   // 관리자가 아니면 403
@@ -320,6 +384,7 @@ test('⑨ mailTick — 나빠짐 한 통 · 반복 없음 · 회복 · 꺼짐이
   const cfg = fs.mkdtempSync(path.join(os.tmpdir(), 'bareos2890m-'));
   const corp = (verdict, notified) => ({ at: 1, directorId: 'd1', directorName: '폴란드 Bareos', from: 'edge', verdict, notified, items: [{ key: 'vc', status: verdict === 'ok' ? 'ok' : 'bad', label: 'vCenter 접속', detail: 'vc:443 접속 거부(ECONNREFUSED) · 엣지 노드에서', action: 'FD 서버에서 nc -vz vc 443' }], history: [] });
   fs.writeFileSync(path.join(cfg, 'bareos-health-state.json'), JSON.stringify({ corps: { 'vc-pl': corp('bad', null), 'vc-kr': corp('ok', null) }, disks: {}, mail: {} }));
+  fs.writeFileSync(path.join(cfg, 'bareos.json'), JSON.stringify({ version: 2, directors: [{ id: 'dir_pl', name: 'PL', host: '10.0.0.1', port: 9101, consoleName: 'portal', password: 'x' }], defaults: {}, sites: [{ vcenterId: 'vc-pl', directorId: 'dir_pl', vcserver: 'vc' }, { vcenterId: 'vc-kr', directorId: 'dir_pl', vcserver: 'vc2' }] }));
   const script = `
     import { mock } from 'node:test';
     globalThis.SENT = []; globalThis.MAIL = { enabled: true, kinds: {} }; globalThis.FAIL = false;
@@ -364,16 +429,69 @@ test('⑨ mailTick — 나빠짐 한 통 · 반복 없음 · 회복 · 꺼짐이
 test('⑩ 일일 요약 절 · 데모', () => {
   H._resetHealthForTest();
   fs.writeFileSync(path.join(tmp, 'bareos-health-state.json'), JSON.stringify({ corps: {
-    a: { directorName: 'A', verdict: 'bad', items: [{ key: 'vc', status: 'bad', detail: '접속 거부' }] }, b: { directorName: 'B', verdict: 'ok', items: [] }, c: { directorName: 'C', verdict: 'unknown', items: [] },
+    'vc-a': { directorName: 'A', verdict: 'bad', items: [{ key: 'vc', status: 'bad', detail: '접속 거부' }] }, 'vc-b': { directorName: 'B', verdict: 'ok', items: [] }, 'vc-x': { directorName: 'C', verdict: 'unknown', items: [] },
+    'vc-gone': { directorName: 'G', verdict: 'bad', items: [] },
   }, disks: {}, mail: {}, last: { at: Date.now() } }));
   fs.writeFileSync(path.join(tmp, 'bareos-health.json'), JSON.stringify(H.normHealth({})));
-  let s = H.healthDigestSection((id) => `vc-${id}`);
-  assert.match(s.html, /정상 1 · 불가 1 · 경고 0 · 모름 1/);
-  assert.match(s.html, /vc-a/); assert.doesNotMatch(s.html, /vc-b/, '정상 법인은 싣지 않는다'); assert.match(s.html, /vc-c/);
+  let s = H.healthDigestSection((id) => `n-${id}`);
+  assert.match(s.html, /정상 1 · 불가 1 · 경고 0 · 모름 1/, 'R4: 매핑을 지운 법인(vc-gone)은 세지 않는다');
+  assert.match(s.html, /n-vc-a/); assert.doesNotMatch(s.html, /n-vc-b/, '정상 법인은 싣지 않는다'); assert.match(s.html, /n-vc-x/); assert.doesNotMatch(s.html, /n-vc-gone/);
   fs.writeFileSync(path.join(tmp, 'bareos-health.json'), JSON.stringify(H.normHealth({ mail: { inDigest: false } })));
   H._resetHealthForTest();
   assert.equal(H.healthDigestSection(), null, '설정에서 끄면 절이 없다');
   const d = H.demoHealth(Array.from({ length: 6 }, (_, i) => ({ id: `v${i}`, name: `n${i}` })));
   assert.deepEqual(d.corps.map((c) => c.verdict), ['bad', 'bad', 'warn', 'warn', 'ok', 'unknown']);
   assert.ok(d.demo && d.corps.every((c) => c.demo));
+});
+
+test('⑪ 반증 확정분 — 못 돈 법인 · 매핑 지운 법인 정리 · 회차 중 메일 · 수동 회차가 시각을 걸침 · 추이 경로 · 범위 순서', async () => {
+  H._resetHealthForTest();
+  for (const f of fs.readdirSync(tmp)) if (f.startsWith('bareos-health')) fs.rmSync(path.join(tmp, f));
+  const sf = path.join(tmp, 'bareos-health-state.json');
+  // R4: 마지막 회차(roundAt)보다 앞선 기록 = 그 회차에서 못 돈 것 → 모름(이전 판정은 staleVerdict) · 띠 · 메일에 들어가지 않는다
+  const T = Date.now();
+  fs.writeFileSync(sf, JSON.stringify({ roundAt: T, corps: {
+    'vc-a': { at: T - 86_400_000, directorId: 'dir_kr', verdict: 'bad', notified: 'ok', items: [{ key: 'vc', status: 'bad', label: 'vCenter 접속', detail: 'x' }], history: [] },
+    'vc-b': { at: T + 1, directorId: 'dir_kr', verdict: 'bad', notified: 'ok', items: [], history: [] },
+  }, disks: {}, mail: {} }));
+  let v = H.healthView();
+  const by = Object.fromEntries(v.corps.map((c) => [c.vcenterId, c]));
+  assert.equal(by['vc-a'].verdict, 'unknown'); assert.equal(by['vc-a'].stale, true); assert.equal(by['vc-a'].staleVerdict, 'bad');
+  assert.equal(by['vc-b'].verdict, 'bad'); assert.equal(by['vc-b'].stale, undefined);
+  assert.equal(H.healthDigestSection().html.includes('불가 1'), true, '못 돈 법인은 불가로 세지 않는다(vc-b 만)');
+  // R4: 전 법인 회차가 끝나면 매핑을 지운 법인 · Director 를 상태에서 지운다
+  fs.writeFileSync(sf, JSON.stringify({ corps: { 'vc-gone': { at: 1, directorId: 'dir_old', verdict: 'bad', items: [] }, 'vc-a': { at: 1, directorId: 'dir_kr', verdict: 'bad', notified: 'ok', items: [] } }, disks: { dir_old: { '/v': [{ day: 1, used: 1 }] }, dir_kr: { '/ancient': [{ day: 1, used: 1 }] } }, mail: {} }));
+  H._resetHealthForTest();
+  let release = null; const gate = new Promise((x) => { release = x; });
+  H._setHealthDepsForTest({ onDirector: async () => { await gate; return edgeRes({ vcs: [{ host: '127.0.0.1', ok: true, ms: 1, thumbprint: FP1 }] }); } });
+  const at = (h, m) => Date.UTC(2026, 10, 5, h - 9, m);
+  let clock = at(19, 59);
+  const run = H.runAll({ trigger: 'manual', now: () => clock });
+  // R11: 회차가 도는 동안 메일 틱은 보내지 않는다(끝난 뒤 한 통으로)
+  assert.equal(await H.mailTick(), null, '보낼 줄(vc-a 나빠짐)이 있어도 회차 중에는 보내지 않는다');
+  clock = at(20, 1); release();
+  await run;
+  const saved = JSON.parse(fs.readFileSync(sf, 'utf8'));
+  assert.equal(saved.corps['vc-gone'], undefined); assert.equal(saved.disks.dir_old, undefined);
+  assert.equal(saved.disks.dir_kr['/ancient'], undefined, '30일 넘게 표본이 없는 경로는 지운다');
+  assert.deepEqual(Object.keys(saved.corps).sort(), ['vc-a', 'vc-b', 'vc-x']);
+  // R11: 수동 전 법인 점검이 정한 시각(20:00)을 걸쳐 끝났으면 오늘 몫으로 친다
+  assert.equal(saved.day, '2026-11-05');
+  assert.equal(H.dueOf(H.loadHealthCfg(), saved, at(20, 2)).due, false);
+  // R7: 추이는 지금 디스크 항목의 경로만
+  saved.disks.dir_kr = { '/old/vol': [{ day: 1, used: 1, size: 2 }], '/var/lib/bareos/storage': saved.disks.dir_kr['/var/lib/bareos/storage'] };
+  fs.writeFileSync(sf, JSON.stringify(saved)); H._resetHealthForTest();
+  v = H.healthView((id) => id === 'vc-a');
+  assert.deepEqual(Object.keys(v.corps[0].spark), ['/var/lib/bareos/storage']);
+  H._setHealthDepsForTest({});
+  // R10: 데모 분기보다 범위 판정이 먼저(데모 모드에서 범위 밖 vcenterId 에 합성값으로 답하지 않게) — 배선 소스
+  const { stripComments } = await import('./_stripComments.js');
+  const routes = stripComments(fs.readFileSync(path.join(SRC, 'routes/api/bareosBackup.js'), 'utf8'));
+  const runSrc = routes.slice(routes.indexOf("api.post('/tools/bareos-backup/health/run'"), routes.indexOf("api.post('/tools/bareos-backup/health/:vcenterId/thumb-accept'"));
+  const firstDemo = runSrc.indexOf('isDemoActive()');
+  assert.ok(firstDemo > runSrc.indexOf('scopedVcenterIds(req.user'), '전 법인: 범위 403 이 데모보다 먼저');
+  assert.ok(runSrc.indexOf('isDemoActive()', firstDemo + 1) > runSrc.indexOf('bareosAccess(req.user, vcenterId'), '한 법인: bareosAccess 가 데모보다 먼저');
+  assert.match(runSrc, /healthPlanForCorp\(loadSettings\(\), vcenterId\)/, 'R3 배선');
+  const getSrc = routes.slice(routes.indexOf("api.get('/tools/bareos-backup/health'"), routes.indexOf("api.post('/tools/bareos-backup/health/run'"));
+  assert.match(getSrc, /isDemoActive\(\) \|\| isDemoGuest\(req\.user\)/, 'R9 배선');
 });

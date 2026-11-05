@@ -161,7 +161,7 @@ export const ROUTE_GATE_ALLOW = Object.freeze({
   'POST /api/tools/bareos-backup/jobs/:id/restore': 'bareosAccess + 본인 OTP — 대상의 vCenter 쓰기 범위(v2.820)',
   // v2.861 묶음 복원 — 항목마다 bareosAccess(조회 밖 = 없는 것과 같은 답 · 쓰기 밖 403) · 실행은 본인 OTP 한 번(bareosRestoreBulkRoutes2861 · 변이 M12·M13·M15)
   'POST /api/tools/bareos-backup/restore-points/bulk': 'bareosAccess(조회) — 항목마다 범위 밖은 없는 대상과 같은 답 · 읽기 전용 지점 조회(v2.861)',
-  'POST /api/tools/bareos-backup/health/run': 'v2.890 사전 점검 — 한 법인 = bareosAccess(조회 404 → 쓰기 403) · 전 법인 = 핸들러 안에서 전체 범위(조회 · 쓰기 제한 없음)만 · 읽기 전용 점검',
+  'POST /api/tools/bareos-backup/health/run': 'v2.890 사전 점검 — 한 법인 = bareosAccess(조회 404 → 쓰기 403) · 그 법인 사이트만(planForCorp — 같은 Director 의 다른 법인에 닿지 않는다) · 전 법인 = 핸들러 안에서 전체 범위(조회 · 쓰기 제한 없음)만 · 읽기 전용 점검',
   'POST /api/tools/bareos-backup/health/:vcenterId/thumb-accept': 'v2.890 사전 점검 — bareosAccess(그 법인 쓰기 범위) · 지문 기준값만 바꾼다(장비에 닿지 않음)',
   'POST /api/tools/bareos-backup/logs/bulk': 'bareosAccess(조회) — 항목마다 범위 밖은 없는 대상과 같은 답 · 읽기 전용 첫 오류 줄 조회(v2.872 통합 에러 로그 묶음 로그)',
   'POST /api/tools/bareos-backup/restore-check/bulk': 'bulkRestoreGate → bareosAccess(쓰기) — 항목마다 조회 밖 제외 · 쓰기 밖 사유 · Director · OTP 안 씀(v2.861)',

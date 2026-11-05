@@ -7,6 +7,7 @@ import { Note } from './BareosBits.jsx';
 import { requireChanged } from '../changeResult.js';
 import {
   healthBadge, healthCounts, healthBand, whenShort, fromText, sparkPoints, HEALTH_LIMIT_TEXT, healthSettingsBody, healthSettingsForm, lastRunText,
+  sparkOf, staleText, healthRunWaitMs, healthRunErrorText, isTimeoutError,
 } from './bareosHealthText.js';
 
 export const HEALTH_URL = '/tools/bareos-backup/health';
@@ -67,8 +68,9 @@ export function BareosHealthCard({ vcId }) {
   const c = (d.corps || []).find((x) => x.vcenterId === vcId) || null;
   const run = async () => {
     setBusy(true); setMsg(null);
-    try { const r = await postJson(`${HEALTH_URL}/run`, { vcenterId: vcId }); if (r?.ok === false) throw new Error(r.reason || '점검하지 못했습니다'); await load(); setMsg({ ok: true, text: '점검했습니다.' }); }
-    catch (e) { setMsg({ ok: false, text: e.message }); } finally { setBusy(false); }
+    // 브라우저 시한은 서버 시한(deadlineMs)보다 길게(반증 R8 — 기본 180초가 서버 대기보다 짧아 서버는 기록하는데 화면은 실패로 보였다)
+    try { const r = await postJson(`${HEALTH_URL}/run`, { vcenterId: vcId }, { timeoutMs: healthRunWaitMs(d.deadlineMs) }); if (r?.ok === false) throw new Error(r.reason || '점검하지 못했습니다'); await load(); setMsg({ ok: true, text: '점검했습니다.' }); }
+    catch (e) { setMsg({ ok: false, text: healthRunErrorText(e) }); if (isTimeoutError(e)) load(); } finally { setBusy(false); }
   };
   const accept = async () => {
     if (!window.confirm('지금 본 vCenter 인증서 지문을 기준으로 삼습니다 — FD INI 의 지문을 새 값으로 바꾼 뒤에 누르세요. 계속할까요?')) return;
@@ -77,9 +79,10 @@ export function BareosHealthCard({ vcId }) {
     catch (e) { setMsg({ ok: false, text: e.message }); } finally { setBusy(false); }
   };
   const border = c?.verdict === 'bad' ? 'rgba(239,68,68,.45)' : c?.verdict === 'warn' ? 'rgba(245,158,11,.45)' : undefined;
-  const nBad = (c?.items || []).filter((x) => x.status === 'bad').length; const nWarn = (c?.items || []).filter((x) => x.status === 'warn').length; const nUnk = (c?.items || []).filter((x) => x.status === 'unknown').length;
+  const live = c && !c.stale ? c.items || [] : [];   // 지난 회차에서 못 돈 법인은 이전 항목의 수를 세지 않는다(모름)
+  const nBad = live.filter((x) => x.status === 'bad').length; const nWarn = live.filter((x) => x.status === 'warn').length; const nUnk = live.filter((x) => x.status === 'unknown').length;
   const disk = (c?.items || []).find((x) => x.key === 'disk');
-  const spark = c?.spark ? Object.values(c.spark)[0] : null;
+  const spark = sparkOf(c);
   const pts = sparkPoints(spark);
   const thumbWarn = (c?.items || []).some((x) => x.key === 'thumb' && x.status === 'warn');
   return (
@@ -95,6 +98,7 @@ export function BareosHealthCard({ vcId }) {
       </div>
       <div style={{ padding: '10px 16px 12px', display: 'flex', flexDirection: 'column', gap: 10, minWidth: 0 }}>
         {msg && <Note tone={msg.ok ? 'ok' : 'bad'}>{msg.text}</Note>}
+        {c?.stale && <Note tone="warn">{staleText(c)}</Note>}
         {busy && <div className="muted" style={{ fontSize: 12 }}>엣지 대행 법인은 엣지가 가져가 회신할 때까지 기다립니다(최대 {Math.round((d.deadlineMs || 0) / 1000) || '—'}초).</div>}
         {c?.verdict === 'bad' && <div style={{ padding: '8px 12px', borderRadius: 10, border: '1px solid rgba(239,68,68,.45)', background: 'rgba(239,68,68,.10)', color: '#fca5a5', fontWeight: 700 }}>오늘 밤 백업이 실패할 수 있습니다 — {(c.items.find((x) => x.status === 'bad') || {}).label}.</div>}
         {c && (

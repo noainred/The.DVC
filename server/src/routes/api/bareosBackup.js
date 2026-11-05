@@ -42,7 +42,7 @@ import { normWaves, itemBody as drRunItemBody, createRun, getRun as getDrRun, st
 import { finishRestores } from '../../bareos/restoreFinish.js';
 import { savePolicy, policyLoadError, rehearsalStatus, runNow as runRehearsalNow, normPolicy, rehearsalBusy } from '../../bareos/rehearsal.js';
 import { loadDigest, saveDigest, digestLoadError, digestStatus, sendDigestNow, normDigest } from '../../bareos/digest.js';
-import { loadHealthCfg, saveHealthCfg, healthLoadError, healthView, demoHealth, runAll as runHealthAll, runDirector as runHealthDirector, plansOf as healthPlansOf, healthRunning, acceptThumb, HEALTH_DEADLINE_MS } from '../../bareos/health.js';
+import { loadHealthCfg, saveHealthCfg, healthLoadError, healthView, demoHealth, runAll as runHealthAll, runDirector as runHealthDirector, planForCorp as healthPlanForCorp, healthRunning, acceptThumb, HEALTH_DEADLINE_MS } from '../../bareos/health.js';
 import { osFields } from '../../inventory/osKind.js';
 import { vmGpuMark } from '../../gpu/vgpuProfile.js';
 import { numOrNull } from '../../util/numOrNull.js';
@@ -1517,24 +1517,27 @@ api.get('/tools/bareos-backup/health', adminOnly, (req, res) => {
   res.set('Cache-Control', 'no-store');
   const allow = healthAllowed(req);
   const full = !scopedVcenterIds(req.user, store.get());
-  if (isDemoActive()) {
+  // 데모 계정은 mock 모드에 사람이 등록한 Director 가 있어도 합성값만(반증 R9 — vcserver 주소 · 경로 · 지문 · 저장한 계정명을 읽었다)
+  const cfgOut = () => { const c = loadHealthCfg(); return isAdminDetailUser(req.user) ? c : { ...c, savedBy: '' }; };
+  if (isDemoActive() || isDemoGuest(req.user)) {
     const v = demoHealth((store.get()?.vcenters || []).filter((x) => allow(x.id)));
-    return res.json({ ok: true, ...v, ...(full ? { config: loadHealthCfg(), loadError: false } : {}), deadlineMs: HEALTH_DEADLINE_MS });
+    return res.json({ ok: true, ...v, ...(full ? { config: cfgOut(), loadError: false } : {}), deadlineMs: HEALTH_DEADLINE_MS });
   }
   const v = healthView(allow);
-  res.json({ ok: true, ...v, ...(full ? {} : { last: null, mail: null }), ...(full ? { config: loadHealthCfg(), loadError: !!healthLoadError() } : {}), deadlineMs: HEALTH_DEADLINE_MS });
+  res.json({ ok: true, ...v, ...(full ? {} : { last: null, mail: null }), ...(full ? { config: cfgOut(), loadError: !!healthLoadError() } : {}), deadlineMs: HEALTH_DEADLINE_MS });
 });
 api.post('/tools/bareos-backup/health/run', adminOnly, async (req, res) => {
   if (isDemoGuest(req.user)) return res.status(403).json({ ok: false, demoGuest: true, reason: '데모 계정은 실제 서버에 접속할 수 없습니다.' });
   if (isEdgeNode()) return res.status(409).json({ ok: false, code: 'edge-node', reason: '사전 점검은 중앙 포탈에서 돕니다.' });
   const vcenterId = typeof req.body?.vcenterId === 'string' ? req.body.vcenterId.slice(0, 128) : '';
-  if (isDemoActive()) return res.json({ ok: true, demo: true, started: !vcenterId, ...(vcenterId ? { corp: demoHealth((store.get()?.vcenters || []).filter((x) => x.id === vcenterId)).corps[0] || null } : {}) });
-  if (settingsLoadError()) return res.status(503).json({ ok: false, code: 'settings-unreadable', reason: 'Bareos 설정 파일을 읽지 못해 점검하지 않았습니다(손상본 보존).' });
+  // 범위 판정이 데모 분기보다 먼저(반증 R10 — 데모 모드에서 범위 밖 vcenterId 에 404 대신 그 vCenter 이름이 든 합성값을 답했다)
   if (!vcenterId) {
     // 전 법인 — 전체 범위(조회 · 쓰기) 관리자만 · 진행 중이면 409 · 회신을 기다리지 않는다(화면은 다시 읽는다)
     if (scopedVcenterIds(req.user, store.get())) return res.status(403).json({ ok: false, reason: '전 법인 점검은 전체 범위 관리자만 할 수 있습니다.' });
     let w = null; try { w = writeScopedVcenterIds(req.user, store.get()); } catch { w = new Set(); }
     if (w) return res.status(403).json({ ok: false, reason: '전 법인 점검은 쓰기 범위가 지정되지 않은 관리자만 할 수 있습니다.' });
+    if (isDemoActive()) return res.json({ ok: true, demo: true, started: true });
+    if (settingsLoadError()) return res.status(503).json({ ok: false, code: 'settings-unreadable', reason: 'Bareos 설정 파일을 읽지 못해 점검하지 않았습니다(손상본 보존).' });
     if (healthRunning()) return res.status(409).json({ ok: false, reason: '전 법인 점검이 진행 중입니다.' });
     runHealthAll({ trigger: 'manual' }).catch(() => {});
     audit(req, 'Bareos 사전 점검', '전 법인', '지금 점검(전 법인)');
@@ -1543,7 +1546,10 @@ api.post('/tools/bareos-backup/health/run', adminOnly, async (req, res) => {
   const a = bareosAccess(req.user, vcenterId, { write: true });
   if (a === 404) return res.status(404).json({ ok: false, reason: '법인을 찾을 수 없습니다.' });
   if (a === 403) return res.status(403).json({ ok: false, reason: READ_ONLY });
-  const plan = healthPlansOf(loadSettings()).find((p) => p.sites.some((s) => s.vcenterId === vcenterId));
+  if (isDemoActive()) return res.json({ ok: true, demo: true, corp: demoHealth((store.get()?.vcenters || []).filter((x) => x.id === vcenterId)).corps[0] || null });
+  if (settingsLoadError()) return res.status(503).json({ ok: false, code: 'settings-unreadable', reason: 'Bareos 설정 파일을 읽지 못해 점검하지 않았습니다(손상본 보존).' });
+  // 그 법인 사이트만(반증 R3 — 같은 Director 의 다른 법인 vcserver 에 접속하고 그 법인 상태 · 메일을 바꾸지 않게)
+  const plan = healthPlanForCorp(loadSettings(), vcenterId);
   if (!plan) return res.status(404).json({ ok: false, reason: '이 법인에 매핑된 Director 가 없습니다 — 설정 › 법인별 설정에서 매핑하세요.' });
   try {
     await runHealthDirector(plan, { trigger: 'manual' });

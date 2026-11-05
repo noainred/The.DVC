@@ -29,6 +29,7 @@ const item = (c, key) => (Array.isArray(c?.items) ? c.items.find((x) => x?.key =
 /** 표의 '사전 점검' 칸 — 가장 나쁜 항목의 짧은 글. 점검 기록이 없으면 null(칸은 '—'). */
 export function healthCell(c) {
   if (!c) return null;
+  if (c.stale) return { ...healthBadge('unknown'), detail: `지난 회차에서 점검하지 못함(이전 ${healthBadge(c.staleVerdict).text})` };
   const order = { bad: 0, warn: 1, info: 2, unknown: 3, ok: 4 };
   const worst = (c.items || []).filter((x) => x.status === 'bad' || x.status === 'warn').sort((a, b) => order[a.status] - order[b.status])[0];
   if (c.verdict === 'ok') return { ...healthBadge('ok'), detail: `${whenShort(c.at)}${c.from === 'central' ? ' · 중앙에서' : ''}` };
@@ -37,8 +38,9 @@ export function healthCell(c) {
   return { ...healthBadge(c.verdict), detail: String(why).slice(0, 80) };
 }
 
-/** 표의 'SD 디스크 여유' 칸 — 첫 경로. 못 읽었으면 null('—'). */
+/** 표의 'SD 디스크 여유' 칸 — 첫 경로. 못 읽었으면 null('—'). 지난 회차에서 못 돈 법인은 이전 값을 보이지 않는다. */
 export function diskCell(c) {
+  if (c?.stale) return null;
   const d = item(c, 'disk');
   const x = d?.disks?.find((y) => y && y.availBytes != null && y.sizeBytes != null);
   if (!x) return null;
@@ -61,6 +63,22 @@ export function whenShort(at) {
 }
 
 export const fromText = (from) => (from === 'edge' ? '엣지 노드에서' : from === 'central' ? '중앙에서(FD 시점 아님)' : '—');
+
+/** 법인 카드 추이선의 표본 — 지금 디스크 항목의 첫 경로(반증 R7 — 처음 기록된 옛 경로를 그렸다). 없으면 null. */
+export function sparkOf(c) {
+  const p = item(c, 'disk')?.disks?.find((x) => x && x.path)?.path;
+  return p && c?.spark && Array.isArray(c.spark[p]) ? c.spark[p] : null;
+}
+
+/** 지난 회차에서 못 돈 법인 안내(서버 stale — 회차 도중 재시작 · 실패). */
+export const staleText = (c) => `지난 회차(마지막 전 법인 점검)에서 이 법인을 점검하지 못했습니다 — 판정은 모름입니다. 아래는 ${whenShort(c?.at)} 의 이전 결과(${healthBadge(c?.staleVerdict).text})입니다. ‘지금 점검’ 으로 다시 보세요.`;
+
+/** '지금 점검' 브라우저 시한 — 서버 시한(deadlineMs)보다 15초 길게, 기본 변경 시한(180초)보다 짧지 않게. */
+export const healthRunWaitMs = (deadlineMs) => Math.max(180_000, (numOrNull(deadlineMs) || 0) + 15_000);
+export const isTimeoutError = (e) => /TimeoutError|AbortError|timeout/i.test(`${e?.name || ''} ${e?.message || ''}`);
+export const healthRunErrorText = (e) => (isTimeoutError(e)
+  ? '점검 결과를 기다리지 못했습니다 — 서버에서는 끝났을 수 있습니다. 잠시 뒤 화면을 새로 읽어 보세요.'
+  : String(e?.message || e || '점검하지 못했습니다'));
 
 /** 디스크 사용량 추이 → SVG polyline 점(사용률 0~100% 를 높이로). 표본 2개 미만이면 ''. */
 export function sparkPoints(samples, w = 180, h = 36) {

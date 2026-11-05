@@ -17,7 +17,7 @@ import { parseStatusRaw, parseDirStatusRaw, rawHead } from './liveParse.js';
 import { jobNameFor, isFinalStatus, isResourceName } from './names.js';
 import { chainFromHistory, chainIssue } from './restore.js';
 import { firstErrorLine } from './logFirstError.js';
-import { checkVc, checkDisks, isThisHost, VCS_MAX } from './healthProbe.js';
+import { checkVcs, checkDisks, isThisHost } from './healthProbe.js';
 import { config } from '../config.js';
 import { POLICY_CMDS, POLICY_KEYS, NORMALIZE as POLICY_NORMALIZE, deniedText, normVolumeRows } from './policyParse.js';
 
@@ -390,10 +390,9 @@ export const OPS = Object.freeze({
   async health(s, { vcservers = [], volumeDirs = [], dirHost = '' } = {}, { signal = null } = {}) {
     const { version } = parseBanner(s?.info?.banner);
     const onEdge = !!config.agent?.centralUrl;
-    const vcs = [];
-    for (const h of [...new Set((Array.isArray(vcservers) ? vcservers : []).map(String))].slice(0, VCS_MAX)) vcs.push(await checkVc(h, { signal }));
+    const vcs = await checkVcs(vcservers, { signal });   // 동시에(각 10초) — 엣지 창(ttl)이 vcserver 수에 비례해 모자라지 않게(반증 R2)
     const local = onEdge && isThisHost(dirHost);
-    const disks = local ? await checkDisks(volumeDirs) : [];
+    const disks = local ? await checkDisks(volumeDirs, { signal }) : [];   // 시한 신호를 따른다 — 멈춘 마운트가 엣지 작업 자리를 잡지 않게(반증 R1)
     return { from: onEdge ? 'edge' : 'central', version: version || null, vcs, disks, diskSkipped: local ? null : (onEdge ? 'remote' : 'central'), at: Date.now() };
   },
 

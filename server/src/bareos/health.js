@@ -39,6 +39,7 @@ const CONCURRENCY = 6;
 const HISTORY_MAX = 7;
 const SAMPLES_MAX = 30;
 const KEYS_MAX = 300;
+const PATHS_MAX = 16;
 const MAIL_RETRY_MS = 10 * 60_000;
 const TIME_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
 export const DEFAULTS = Object.freeze({ enabled: true, time: '20:00', disk: Object.freeze({ warnPct: 15, warnDays: 14, badPct: 5, badDays: 3 }), mail: Object.freeze({ onWorse: true, onRecover: true, inDigest: true }) });
@@ -128,12 +129,15 @@ const VC_TEXT = {
   EAI_AGAIN: ['이름 풀이 실패(DNS 응답 없음)', 'FD 서버의 DNS 설정을 확인하세요.'],
   ECONNRESET: ['접속이 끊김', 'TLS 를 가로채는 장비 · 방화벽 정책을 확인하세요.'],
   EPROTO: ['TLS 핸드셰이크 실패', 'vCenter 443 이 TLS 가 아니거나 프로토콜이 맞지 않습니다.'],
-  blocked: ['차단 대역 주소', '루프백 · 링크로컬 같은 주소는 점검하지 않습니다 — 매핑의 vcserver 를 확인하세요.'],
+  blocked: ['포탈 정책상 점검하지 않는 주소', '루프백 · 링크로컬 · IPv6 ULA 같은 주소는 포탈이 접속하지 않습니다(SSRF 가드) — FD 에서 되는지는 모릅니다. 매핑의 vcserver 를 확인하세요.'],
+  aborted: ['점검 시간 안에 확인하지 못함', '같은 Director 의 다른 확인이 시간을 다 썼습니다 — ‘지금 점검’ 으로 다시 보세요.'],
   invalid: ['주소 형식이 틀림', '매핑의 vcserver 를 확인하세요.'],
   error: ['접속 실패', 'FD 서버에서 nc -vz <주소> 443 으로 확인하세요.'],
 };
 const DIR_BAD = new Set(['auth', 'pam', 'tls', 'connect', 'closed', 'protocol', 'refused']);
-const DISK_CODE = { ENOENT: '경로가 없음', EACCES: '읽을 권한 없음', EPERM: '읽을 권한 없음', ENOTDIR: '디렉터리가 아님', invalid: '경로 형식이 틀림', error: '읽지 못함' };
+/** 접속해 보지 않은 것(정책 · 형식 · 부르는 쪽 시한) — 불가가 아니라 모름(반증 R2 · R12 — 모름은 0 이 아니다). */
+const VC_NOT_CHECKED = new Set(['aborted', 'blocked', 'invalid']);
+const DISK_CODE = { ENOENT: '경로가 없음', EACCES: '읽을 권한 없음', EPERM: '읽을 권한 없음', ENOTDIR: '디렉터리가 아님', invalid: '경로 형식이 틀림', ETIMEDOUT: '응답 없음(5초 — 멈춘 마운트일 수 있음)', aborted: '점검 시간 안에 못 읽음', error: '읽지 못함' };
 export const fmtBytes = (n) => {
   if (n == null || !Number.isFinite(Number(n))) return '—';
   const u = ['B', 'KB', 'MB', 'GB', 'TB', 'PB']; let v = Number(n); let i = 0;
@@ -191,12 +195,14 @@ export function judgeCorp({ result = null, error = null, vcserver = '', prevThum
       thumbprint = vc.thumbprint || null;
       const base = prevThumb?.value || null;
       if (!thumbprint) items.push({ key: 'thumb', status: 'unknown', label: 'vCenter 인증서 지문', detail: '지문을 읽지 못했습니다', action: '' });
+      // 중앙에서 본 지문은 참고만(반증 R5) — 기준으로 삼지 않고(record 가 엣지 관측만 기준 · lastSeen 으로) 판정에 넣지 않는다.
+      else if (from !== 'edge') items.push({ key: 'thumb', status: 'info', label: 'vCenter 인증서 지문', detail: `중앙에서 본 값 · ${thumbprint}${base ? (base === thumbprint ? ' · 기준과 같음' : ` · 기준 ${base} 과 다름`) : ''} — FD 시점이 아니라 기준으로 쓰지 않습니다`, action: '' });
       else if (!base) items.push({ key: 'thumb', status: 'ok', label: 'vCenter 인증서 지문', detail: `첫 관측 — 기준으로 기록 · ${thumbprint}`, action: '' });
       else if (base === thumbprint) items.push({ key: 'thumb', status: 'ok', label: 'vCenter 인증서 지문', detail: `변화 없음 · ${thumbprint}`, action: '' });
       else items.push({ key: 'thumb', status: 'warn', label: 'vCenter 인증서 지문', detail: `바뀜 — 기준 ${base} → 지금 ${thumbprint}`, action: 'vCenter 인증서가 갱신됐거나 다른 서버입니다 — FD INI 의 지문을 새 값으로 바꾸고(설정 › 법인별 설정 › FD INI) ‘새 지문을 기준으로’ 를 누르세요(바꾸지 않으면 플러그인이 접속을 거부할 수 있습니다 — 추정).' });
     } else {
       const [t, a] = VC_TEXT[vc.code] || VC_TEXT.error;
-      items.push({ key: 'vc', status: from === 'edge' ? 'bad' : 'info', label: 'vCenter 접속', detail: `${vcserver}:443 ${t}${vc.code && !['blocked', 'invalid', 'error'].includes(vc.code) ? `(${vc.code})` : ''} · ${where}`, action: `${a} FD 서버에서 nc -vz ${vcserver} 443` });
+      items.push({ key: 'vc', status: VC_NOT_CHECKED.has(vc.code) ? 'unknown' : from === 'edge' ? 'bad' : 'info', label: 'vCenter 접속', detail: `${vcserver}:443 ${t}${vc.code && !['blocked', 'invalid', 'error', 'aborted'].includes(vc.code) ? `(${vc.code})` : ''} · ${where}`, action: `${a} FD 서버에서 nc -vz ${vcserver} 443` });
       items.push({ key: 'thumb', status: 'unknown', label: 'vCenter 인증서 지문', detail: `접속되지 않아 읽지 못했습니다${prevThumb?.value ? ` · 기준 ${prevThumb.value}` : ''}`, action: '' });
     }
   }
@@ -256,13 +262,32 @@ export function plansOf(settings) {
     const d = dirs.get(s.directorId);
     if (!d) continue;
     const p = out.get(d.id) || { directorId: d.id, name: d.name || d.id, host: d.host || '', agent: d.agent || '', sites: [], volumeDirs: new Set() };
-    p.sites.push({ vcenterId: s.vcenterId, vcserver: s.vcserver || '' });
     let vd = '';
     try { vd = lastJobFor(s.vcenterId)?.plan?.volumeDir || ''; } catch { vd = ''; }
-    p.volumeDirs.add(vd && !volumeDirIssue(vd) ? vd : DEFAULT_VOLUME_DIR);
+    const volumeDir = vd && !volumeDirIssue(vd) ? vd : DEFAULT_VOLUME_DIR;
+    p.sites.push({ vcenterId: s.vcenterId, vcserver: s.vcserver || '', volumeDir });
+    p.volumeDirs.add(volumeDir);
     out.set(d.id, p);
   }
   return [...out.values()].map((p) => ({ ...p, volumeDirs: [...p.volumeDirs] }));
+}
+/**
+ * 한 법인 '지금 점검' 의 계획 — 그 법인 사이트만(반증 R3: Director 단위 계획이면 같은 Director 에 매핑된 다른 법인의 vcserver 에도 접속하고
+ * 그 법인 상태 · 메일을 바꿨다 — 쓰기 범위 밖 법인까지). 매핑이 없으면 null.
+ */
+export function planForCorp(settings, vcenterId) {
+  const p = plansOf(settings).find((x) => x.sites.some((s) => s.vcenterId === vcenterId));
+  if (!p) return null;
+  const site = p.sites.find((s) => s.vcenterId === vcenterId);
+  return { ...p, sites: [site], volumeDirs: [site.volumeDir] };
+}
+/** 지금 매핑된 법인 id(설정을 못 읽으면 null — 거르지 않는다). */
+function mappedIds() {
+  if (settingsLoadError()) return null;
+  try {
+    const st = loadSettings(); const dirs = new Set((st?.directors || []).map((d) => d.id));
+    return new Set((st?.sites || []).filter((s) => dirs.has(s.directorId)).map((s) => String(s.vcenterId)));   // plansOf 와 같은 기준(설치 기록은 읽지 않는다 — 조회마다 불린다)
+  } catch { return null; }
 }
 
 function record(plan, { result, error }, now) {
@@ -275,10 +300,16 @@ function record(plan, { result, error }, now) {
     list.push({ day: today, used: d.usedBytes, avail: d.availBytes, size: d.sizeBytes });
     dk[d.path] = list.slice(-SAMPLES_MAX);
   }
+  // 경로 키 상한(반증 — Director 안의 경로 수가 늘기만 했다): 30일 넘게 표본이 없는 경로를 지우고, 그래도 많으면 최근 것만
+  for (const k of Object.keys(dk)) { const l = dk[k]; const lastDay = Array.isArray(l) && l.length ? l[l.length - 1].day : -Infinity; if (!(lastDay > today - SAMPLES_MAX)) delete dk[k]; }
+  const keys = Object.keys(dk);
+  if (keys.length > PATHS_MAX) for (const k of keys.sort((a, b) => dk[a][dk[a].length - 1].day - dk[b][dk[b].length - 1].day).slice(0, keys.length - PATHS_MAX)) delete dk[k];
   for (const site of plan.sites) {
     const prev = st.corps[site.vcenterId] || {};
     const j = judgeCorp({ result, error, vcserver: site.vcserver, prevThumb: prev.thumb, diskSamples: dk, cfg, now });
-    const thumb = prev.thumb?.value ? { ...prev.thumb, lastSeen: j.thumbprint || prev.thumb.lastSeen || null } : (j.thumbprint ? { value: j.thumbprint, at: now, lastSeen: j.thumbprint } : null);
+    // 지문 기준 · 마지막 관측은 엣지(FD 시점)에서 본 것만(반증 R5 — 중앙 관측이 기준이 되거나 ‘새 지문을 기준으로’ 가 중앙 값을 쓰지 않게)
+    const seen = j.from === 'edge' ? j.thumbprint : null;
+    const thumb = prev.thumb?.value ? { ...prev.thumb, lastSeen: seen || prev.thumb.lastSeen || null } : (seen ? { value: seen, at: now, lastSeen: seen } : (prev.thumb || null));
     st.corps[site.vcenterId] = {
       at: now, directorId: plan.directorId, directorName: plan.name, from: j.from, verdict: j.verdict, items: j.items,
       history: [...(Array.isArray(prev.history) ? prev.history : []), { at: now, verdict: j.verdict }].slice(-HISTORY_MAX),
@@ -310,12 +341,21 @@ export function runAll({ trigger = 'timer', now = () => Date.now() } = {}) {
   if (_running) return _running;
   _running = (async () => {
     const t0 = now();
-    const plans = settingsLoadError() ? [] : plansOf(loadSettings());
+    const unreadable = !!settingsLoadError();
+    const plans = unreadable ? [] : plansOf(loadSettings());
+    const st0 = state(); st0.roundAt = t0; saveState();   // 회차 시작 — 이보다 앞선 기록은 이번 회차에서 못 돈 것(재시작 · 실패 — corpView 가 모름으로)
     const res = await poolSettled(plans, CONCURRENCY, (p) => runDirector(p, { trigger, now }));
     const ok = res.filter((r) => r.status === 'fulfilled' && !r.value?.error).length;
     const failed = res.length - ok;
     const st = state();
-    st.last = { at: t0, endedAt: now(), directors: plans.length, ok, failed, trigger, settingsUnreadable: !!settingsLoadError() };
+    if (!unreadable) {   // 매핑을 지운 법인 · Director 는 상태에서 지운다(반증 R4 — 띠 · 요약 · 메일에 영원히 남았다)
+      const ids = new Set(plans.flatMap((p) => p.sites.map((s) => String(s.vcenterId)))); const dirIds = new Set(plans.map((p) => p.directorId));
+      for (const id of Object.keys(st.corps)) if (!ids.has(id)) delete st.corps[id];
+      for (const id of Object.keys(st.disks)) if (!dirIds.has(id)) delete st.disks[id];
+    }
+    st.last = { at: t0, endedAt: now(), directors: plans.length, ok, failed, trigger, settingsUnreadable: unreadable };
+    // 수동 전 법인 점검이 정한 시각을 걸쳐 끝났으면 오늘 몫으로 친다(반증 R11 — 끝난 뒤 timer 회차가 한 번 더 돌았다)
+    if (!unreadable) { const d = dueOf(loadHealthCfg(), st, now()); if (d.due) st.day = d.day; }
     saveState();
     return st.last;
   })().finally(() => { _running = null; });
@@ -368,9 +408,10 @@ export async function mailTick(now = Date.now()) {
   if (_mailBusy) return null;
   _mailBusy = true;
   try {
+    if (_running) return null;   // 회차가 끝난 뒤 한 통으로(반증 R11 — 회차 도중 틱이 먼저 기록된 법인만 보내 여러 통으로 나뉘었다)
     const st = state(); const cfg = loadHealthCfg();
     if (st.mail.nextTry && now < st.mail.nextTry) return null;
-    const { rows, marks } = mailPlan(st.corps, cfg);
+    const { rows, marks } = mailPlan(effectiveCorps(st), cfg);
     if (!Object.keys(marks).length) return null;
     const advance = () => { for (const [k, v] of Object.entries(marks)) if (st.corps[k]) st.corps[k].notified = v; st.mail.nextTry = null; saveState(); };
     if (!rows.length) { advance(); return { sent: false, reason: 'no-rows' }; }
@@ -404,7 +445,7 @@ export async function tick(now = Date.now()) {
     const st = state();
     const { due, day } = dueOf(cfg, st, now);
     if (due && !_running) {
-      st.day = day; saveState();   // 돌기 시작하면 오늘 몫은 쓴다(실패한 법인은 모름으로 남고 '지금 점검' 으로 다시)
+      st.day = day; saveState();   // 돌기 시작하면 오늘 몫은 쓴다 — 못 돈 법인(실패 · 도중 재시작)은 roundAt 보다 앞선 기록이라 모름으로 보이고 '지금 점검' 으로 다시
       await runAll({ trigger: 'timer' });
     }
   }
@@ -430,16 +471,34 @@ export function acceptThumb(vcenterId, { now = Date.now() } = {}) {
   return corpView(vcenterId, c, st);
 }
 
-function corpView(vcenterId, c, st) {
-  const samples = st.disks?.[c.directorId] || {};
-  const spark = Object.fromEntries(Object.entries(samples).map(([p, list]) => [p, (list || []).slice(-14).map((x) => ({ day: x.day, used: x.used, size: x.size }))]));
-  return { vcenterId, directorId: c.directorId, directorName: c.directorName, at: c.at, from: c.from, verdict: c.verdict, items: c.items || [], history: c.history || [], spark, thumbBase: c.thumb?.value || null };
+/**
+ * 지금 보일 판정 — 마지막 회차(roundAt)보다 앞선 기록은 그 회차에서 못 돈 것이라 모름(이전 판정은 staleVerdict 로 · 반증 R4 — 도중 재시작이면
+ * 어제 판정을 그대로 보였다). 회차가 도는 중에는 아직 차례가 안 온 것이므로 그대로 둔다.
+ */
+function effective(c, st) {
+  if (!_running && Number.isFinite(st.roundAt) && Number.isFinite(c?.at) && c.at < st.roundAt && c.verdict !== 'unknown') return { ...c, verdict: 'unknown', stale: true, staleVerdict: c.verdict };
+  return c;
+}
+/** 매핑된 법인만(설정을 못 읽으면 전부) · 지금 보일 판정으로. */
+function effectiveCorps(st) {
+  const m = mappedIds();
+  return Object.fromEntries(Object.entries(st.corps).filter(([id]) => !m || m.has(String(id))).map(([id, c]) => [id, effective(c, st)]));
 }
 
-/** 라우트 보기 — allow(vcenterId) 가 true 인 법인만. */
+function corpView(vcenterId, c0, st) {
+  const c = effective(c0, st);
+  const samples = st.disks?.[c.directorId] || {};
+  // 추이선은 지금 디스크 항목의 경로만(반증 R7 — 처음 기록된 옛 경로를 그렸다)
+  const curPaths = new Set(((c.items || []).find((x) => x.key === 'disk')?.disks || []).map((d) => d.path));
+  const spark = Object.fromEntries(Object.entries(samples).filter(([p]) => curPaths.has(p)).map(([p, list]) => [p, (list || []).slice(-14).map((x) => ({ day: x.day, used: x.used, size: x.size }))]));
+  return { vcenterId, directorId: c.directorId, directorName: c.directorName, at: c.at, from: c.from, verdict: c.verdict, items: c.items || [], history: c.history || [], spark, thumbBase: c.thumb?.value || null,
+    ...(c.stale ? { stale: true, staleVerdict: c.staleVerdict } : {}) };
+}
+
+/** 라우트 보기 — allow(vcenterId) 가 true 이고 지금 매핑된 법인만. */
 export function healthView(allow = () => true) {
   const st = state();
-  const corps = Object.entries(st.corps).filter(([id]) => allow(id)).map(([id, c]) => corpView(id, c, st));
+  const corps = Object.entries(effectiveCorps(st)).filter(([id]) => allow(id)).map(([id]) => corpView(id, st.corps[id], st));
   return { corps, last: st.last || null, running: !!_running, mail: st.mail?.last || null };
 }
 
@@ -447,7 +506,7 @@ export function healthView(allow = () => true) {
 export function healthDigestSection(vcName = (id) => id) {
   const cfg = loadHealthCfg();
   if (!cfg.mail.inDigest) return null;
-  const st = state(); const corps = Object.entries(st.corps);
+  const st = state(); const corps = Object.entries(effectiveCorps(st));
   if (!corps.length) return null;
   const n = { ok: 0, warn: 0, bad: 0, unknown: 0 };
   for (const [, c] of corps) n[c.verdict in n ? c.verdict : 'unknown'] += 1;
