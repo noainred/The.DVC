@@ -1,5 +1,5 @@
 /**
- * views/vcd/vcdTabs.js — vCenter 상세의 vSphere Client 식 탭 12개(v2.894 — 승인 시안 `docs/design/vcenter-tabs` ①~⑦ · 기본값 1~7).
+ * views/vcd/vcdTabs.js — vCenter 상세의 vSphere Client 식 탭 12개(v2.895 — 승인 시안 `docs/design/vcenter-tabs` ①~⑦ · 기본값 1~7).
  *
  * 순수 모듈(vitest 고정): 탭 목록 · 옛 키 호환 · 하위 칸 · 탭 본문이 쓰는 묶음 · 문구. 화면은 VCenterDetail.jsx 와 vcd/*Tab.jsx.
  *  - 탭 키는 안정 식별자다(브라우저 기억값). 'trend'(옛 '추이')는 모니터 › 성능으로 옮겼다 — 옛 기억값은 normTab 이 바꿔 준다.

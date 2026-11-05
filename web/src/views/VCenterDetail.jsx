@@ -34,7 +34,7 @@ import { portalMark, saveHandoff } from './tools/backupRunText.js'; // v2.819 �
 const BackupManageModal = React.lazy(() => import('./tools/BackupManageModal.jsx')); // v2.819 — 열 때만 받는다
 import { VeeamTag, VeeamSummaryCard, VeeamSnapSummary, VeeamDetailModal } from './VeeamParts.jsx'; // v2.751: 배지(누르면 상세 창)·요약 카드 · v2.753 스냅샷 기준 요약
 import { authStopNote, authStopCell, authStopSingleText, plainText, skipNote, skipCell, skipSingleText } from './vcAuthStopText.js'; // v2.733(C3-01): 인증 정지로 조회하지 않음 · v2.744(감사 후속 FA-②): 직접 수집 대상 아님
-// v2.894(사용자 요청 — vSphere Client 의 vCenter 탭 12개 · 승인 시안 docs/design/vcenter-tabs ①~⑦ · 기본값 1~7): 탭 목록 · 옛 키 호환은 순수 모듈 하나.
+// v2.895(사용자 요청 — vSphere Client 의 vCenter 탭 12개 · 승인 시안 docs/design/vcenter-tabs ①~⑦ · 기본값 1~7): 탭 목록 · 옛 키 호환은 순수 모듈 하나.
 import { VCD_TABS, loadTab, saveTab, normTab } from './vcd/vcdTabs.js';
 import SummaryTab from './vcd/SummaryTab.jsx';
 import MonitorTab from './vcd/MonitorTab.jsx';
@@ -277,7 +277,7 @@ export default function VCenterDetail({ site, onBack }) {
   // 조기 return 뒤에 두면 렌더 간 훅 개수가 달라져 React #310 으로 화면이 크래시한다
   // (v2.375 에서 실제 발생 → v2.375.1 수정). 추이 탭은 자체적으로 다시 조회한다.
   const { d: miniHist } = useUsageHistory(vcenterId, '24h');
-  // v2.894: 탭 12개 — 처음은 '호스트 및 클러스터'(예전 기본), 그 뒤로는 마지막으로 본 탭(브라우저 기억). 옛 기억값 'trend' 는 모니터 › 성능.
+  // v2.895: 탭 12개 — 처음은 '호스트 및 클러스터'(예전 기본), 그 뒤로는 마지막으로 본 탭(브라우저 기억). 옛 기억값 'trend' 는 모니터 › 성능.
   const [view, setViewRaw] = useState(() => loadTab(lsSafe()));
   const [monSub, setMonSub] = useState('alarms');      // 모니터 하위 칸(문제 및 알람 · 이벤트 · 작업 · 성능)
   const [cfgSub, setCfgSub] = useState('licenses');    // 구성 하위 칸
@@ -575,7 +575,7 @@ export default function VCenterDetail({ site, onBack }) {
 
       {comparing && <CompareMatrix onClose={() => setComparing(false)} />}
 
-      {/* v2.894: vSphere Client 의 vCenter 탭 12개(순서 그대로 · 이모지 없음). 한 줄 — 넘치면 탭 줄만 가로 스크롤(400px 에서 페이지를 밀지 않는다 — 기본값 4). */}
+      {/* v2.895: vSphere Client 의 vCenter 탭 12개(순서 그대로 · 이모지 없음). 한 줄 — 넘치면 탭 줄만 가로 스크롤(400px 에서 페이지를 밀지 않는다 — 기본값 4). */}
       <nav className="vcd-views" role="tablist" aria-label="vCenter 보기">
         {VCD_TABS.map((v) => (
           <button key={v.k} type="button" role="tab" aria-selected={view === v.k} className={view === v.k ? 'login-btn' : 'tab'} style={{ flex: 'none', padding: '6px 10px', fontSize: 13 }} onClick={() => setView(v.k)}>
@@ -588,7 +588,7 @@ export default function VCenterDetail({ site, onBack }) {
         <SummaryTab site={site} vcenterId={vcenterId} hosts={hosts} vms={vms} datastores={datastores} networks={networks}
           hostsOk={hostsOk} vmsOk={vmsOk} dsOk={dsPart.state === 'ok'} netOk={netPart.state === 'ok'} onGo={setView} />
       )}
-      {/* 📈 추이(v2.377) — 기간 9종 × CPU/메모리/디스크 사용량 vs 할당량. v2.894 부터 모니터 › 성능(기본값 2 — 내용은 그대로). */}
+      {/* 📈 추이(v2.377) — 기간 9종 × CPU/메모리/디스크 사용량 vs 할당량. v2.895 부터 모니터 › 성능(기본값 2 — 내용은 그대로). */}
       {view === 'monitor' && (
         <MonitorTab vcenterId={vcenterId} sub={monSub} onSub={setMonSub}
           perf={<TrendView vcenterId={vcenterId} clusters={clusters} hosts={hosts} />} />
@@ -629,7 +629,7 @@ export default function VCenterDetail({ site, onBack }) {
             {/* v2.494: 기간 실사용률은 **옵트인**. vCenter 성능 조회라 화면을 열 때마다 자동으로 나가면
                 부하가 된다(펼친 행만 조회하지만 고RTT 에서는 그마저도 비싸다). 체크하면 기간 선택 줄이
                 나타나고, 해제하면 요청이 0건이 되며 행의 사용률 표시도 사라진다.
-                v2.894: 탭 줄(12개 · 한 줄)에서 이 필터 줄로 옮겼다(기본값 7). */}
+                v2.895: 탭 줄(12개 · 한 줄)에서 이 필터 줄로 옮겼다(기본값 7). */}
             <label className="muted flex gap" style={{ alignItems: 'center', fontSize: 12, flex: 'none', cursor: 'pointer' }}
               title="체크하면 VM 행에 선택한 기간의 평균 CPU·메모리 실사용률을 표시합니다(vCenter 성능 롤업 조회 — 펼친 폴더·검색 결과의 VM 만). 해제하면 조회하지 않습니다.">
               <input type="checkbox" checked={usageOn} onChange={(e) => setUsageOn(e.target.checked)} /> 📊 사용량 조회

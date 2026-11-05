@@ -4,6 +4,9 @@
 
 - **판정 코어는 `resolve.js` 하나**(순수): 고정(pin) → vCenter 폴더 규칙(vmPlacement `/ERP/prod` 모양 · `/` 경계 · 가장 긴 접두 · 루트 규칙은 `/` 만) →
   스캔 엔트리 라벨(서비스명 또는 별칭) → vSphere 태그(전역 카테고리 + 법인 켬일 때만 · 태그 못 읽음 = unchecked, 미지정과 다르다) → 이름 규칙(접두·접미·포함, 정규식 아님) → 미지정.
+  **이름 규칙은 등록 순이 아니다**: 접두·접미 > 포함 · 긴 값 먼저 · 그다음 등록 순(`sortNameRules` — 화면 'N번째' 도 서버가 준 순번). **태그가 여럿이면** 소문자 정렬 뒤 서비스에 걸리는 첫 값,
+  둘 이상의 서비스면 `tagAmbiguous`, 이름 규칙 둘 이상(다른 서비스)이 걸리면 `ruleOverlap` 으로 검토 큐(고정 구성원 제외 · 5차 3차 M4·R13·M5·R14 · 3차 반증 1). 폴더 규칙만 대소문자를 구분한다(R12).
+  이 순서를 바꾸면 업그레이드 뒤 자동 소속이 옮겨 간다 — **옮겨 갈 수 있는 구성원이 검토 큐에 드러나는지** 먼저 답하고 릴리스 노트에 고지할 것. 모호한 자동 판정을 확인한 고정은 '불필요한 고정' 이 아니다(순환 — 3차 반증 4).
   **서비스는 자동으로 만들지 않는다** — 규칙 값에 맞는 서비스가 없으면 '매핑 안 된 값' 큐로 보낸다. 판정은 구성원당 1회, 결과 Map 을 표·큐·전역이 공유한다.
 - **집계는 `corpusage/build.js` 의 `emptyAgg/addAgg/finishAgg` 를 그대로 쓴다**(가중 사용률 = Σ(사용률×용량)÷Σ용량 · 꺼진 VM 제외 · 못 읽음·오래됨·용량 없음은 따로 센다).
   같은 입력이면 법인 사용률 화면과 같은 값이어야 한다 — 복제 판정 금지.
@@ -18,7 +21,9 @@
   화면은 '고정 유지' 에 **자기가 본 자동 판정(`expectAuto`)** 을 보내고, 지금 판정과 다르면 서버가 409 로 막는다(사람이 보지 못한 새 드리프트를 숨기지 않게 — 1차 반증 3).
   '불필요한 고정 지우기' 는 `onlyIfRedundant` — 지금도 고정 = 자동 판정인 키만 지운다(1차 반증 8).
   고정 파일(`service-map-pins.json`)은 **설정 변경 감시 밖**(`backup/service.js CHANGE_WATCH_EXCLUDE` — 번들에는 들어간다). 빼면 고정 한 번이 '설정 변경' 백업을 만든다(R1).
-  유령 키는 그 법인을 못 읽었거나 베어메탈 출처를 못 읽었으면 **판정 보류**로 따로 둔다(지우지 않는다).
+  유령 키는 그 법인을 못 읽었거나 베어메탈 출처를 못 읽었으면 **판정 보류**로 따로 둔다(지우지 않는다). 보류에는 시작 시각(`heldWithSince` — 프로세스 메모리, 전체 범위 계산에서만 정리)과
+  막힌 출처(`bmBlockedSources` — 문구는 **전체 범위** 관리자만, 3차 반증 2)를 싣는다(R10). bmBlocked 는 법인별로 나누지 않는다(막힌 출처가 어느 법인 것인지 모른다 — fail-closed).
+  유령 정리는 dry 의 **키**를 받아 키 ∩ 지금 유령만 지운다(R11 · 3차 반증 3 — 개수만 비교하면 끼어든 키를 지운다).
 - **등록 해제된 vCenter** = **스냅샷에도 등록부(vcenters.json)에도 없는** 법인 키: 법인 행 `orphan` · 쓰기 버튼 잠금(`writable:false` — 법인 쓰기는 `corpWriteAccess` 404) · 그 법인 고정은 유령이 아니라 `orphaned`.
   지우는 길은 전체 범위 관리자 `corp.purge`(dry 로 개수 먼저 · `expect` 개수가 다르면 409) 하나다(5차 반증 R2). **스냅샷만 보지 말 것** — 등록 직후 스냅샷 갱신 전·mock 데이터 소스에서
   등록된 vCenter 를 지웠다(5차 1차 반증 1 — 재현). 스냅샷이나 등록부가 비었거나 못 읽으면 아무것도 orphan 으로 보지 않고 purge 는 409(fail-closed).
@@ -40,4 +45,4 @@
 - **법인 귀속 없음은 이유별**(R18 둘째 절): 귀속 판정 오류 · 서비스 태그가 두 법인에 걸려 보류(`buildVcIndex.conflictTags`) · 어느 규칙에도 맞지 않음. 묶음 키 `nocorp|<이유>`.
 - **구성원 조회 `members?global=<id>`** 는 corp 없이도 범위 안 전 법인을 준다(화면 '전 법인 구성원 모두 보기'). 영향 호스트의 '함께 떠받치는 서비스' 에서는 **그 전역 서비스의 법인 서비스 id 를 모두** 뺀다(`svc` 만 빼면 자기 자신이 뜬다 — v2.887~v2.890 결함).
 - **라우트(`routes/api/svcInventory.js`)·이 폴더를 고치면 커밋 전에 `node scripts/api-doc.mjs` · `node scripts/arch-doc.mjs`** — 줄 번호가 바뀌어 `apiDoc2563`·`audit2613h` 가 깨진다(v2.887·v2.890 두 번 전량 verify 에서 처음 잡혔다).
-- 회귀: `server/test/svcInventory2887.test.js` · `server/test/svcInventoryReview5.test.js`(5차 검토 1차 — 수정 전 코드에서 10/10 실패 확인) · `svcInventoryReview5b.test.js`(2차) · 웹 `web/src/views/tools/svcInventoryText.test.js`.
+- 회귀: `server/test/svcInventory2887.test.js` · `server/test/svcInventoryReview5.test.js`(5차 검토 1차 — 수정 전 코드에서 10/10 실패 확인) · `svcInventoryReview5b.test.js`(2차) · `svcInventoryReview5c.test.js`(3차 — 판정 순서 변이 9종) · 웹 `web/src/views/tools/svcInventoryText.test.js`.

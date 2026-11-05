@@ -15,11 +15,12 @@
  * 파생 호스트(입력): Map(`${corp}|${소문자 이름}` → { name, corp, serviceTag, usage, faults })
  */
 import { emptyAgg, addAgg, finishAgg } from '../corpusage/build.js';
-import { buildIndex, resolveMember } from './resolve.js';
+import { buildIndex, resolveMember, sortNameRules } from './resolve.js';
 
 const lc = (s) => String(s ?? '').trim().toLowerCase();
 const num = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
 const r1 = (v) => (v == null ? null : Math.round(v * 10) / 10);
+const r3 = (v) => (typeof v === 'number' && Number.isFinite(v) ? Math.round(v * 1000) / 1000 : null);
 export const hostKeyOf = (corp, name) => `${corp}|${lc(name)}`;
 
 function emptyStat() {
@@ -63,7 +64,9 @@ function finishStat(st, hostByKey) {
   const u = finishAgg(st.agg);
   return {
     n: st.n, power: st.power, hosts: st.hosts.size,
-    usage: { cpu: u.cpu.pct, mem: u.mem.pct, cpuN: u.cpu.n, memN: u.mem.n, unread: u.unread, stale: u.stale, noCap: u.noCap, src: u.src },
+    // cpuUsed·cpuTotal 은 반올림 전 값(소수 3자리) — 지역 합계가 0.1코어 반올림을 수십 번 더해 '0%' 가 되지 않게(3차 반증 8)
+    usage: { cpu: u.cpu.pct, mem: u.mem.pct, cpuN: u.cpu.n, memN: u.mem.n, unread: u.unread, stale: u.stale, noCap: u.noCap, src: u.src,
+      cpuUsed: r3(st.agg?.cpu?.used), cpuTotal: r3(st.agg?.cpu?.total) },
     alloc: { ...st.alloc, vmMemGB: r1(st.alloc.vmMemGB), storageGB: r1(st.alloc.storageGB), bmMemGB: r1(st.alloc.bmMemGB) },
     faults: st.faults, backup: st.backup, src: st.src, drift: st.drift, unchecked: st.unchecked, byName: st.byName,
   };
@@ -102,7 +105,8 @@ export function buildInventory({ members = [], map, pins = {}, hostByKey = new M
     const c = map?.corps?.[vc] || { folders: [], services: [], folderRules: [], aliases: [], nameRules: [], tagEnabled: false };
     corps.push({
       vcenterId: vc, name: corpNames.get(vc) || vc, folders: c.folders, tagEnabled: !!c.tagEnabled,
-      folderRules: c.folderRules, aliases: c.aliases, nameRules: c.nameRules,
+      // 이름 규칙은 **적용 순서대로** 싣고 순번을 붙인다(5차 M4 — 화면이 순서를 다시 계산하지 않게 · 판정 코어는 resolve.js 하나)
+      folderRules: c.folderRules, aliases: c.aliases, nameRules: sortNameRules(c.nameRules || []).map((r, i) => ({ ...r, order: i + 1 })),
       unassigned: unStat.has(vc) ? finishStat(unStat.get(vc), hostByKey) : null,
       stale: unreadCorps.has(vc),
       // 등록 해제된 vCenter — 저장소에만 남은 법인 항목(5차 반증 R2). knownCorps 가 null(스냅샷 vCenter 0개 — 기동 직후 등)이면 판단하지 않는다.
@@ -136,7 +140,7 @@ export function buildInventory({ members = [], map, pins = {}, hostByKey = new M
   for (const [ck, st] of gCells) {
     const [gid, vc] = [ck.slice(0, ck.indexOf('|')), ck.slice(ck.indexOf('|') + 1)];
     const f = finishStat(st, hostByKey);
-    (cells[gid] ||= {})[vc] = { n: f.n.total, vm: f.n.vm, bm: f.n.bm, faults: f.faults.member + f.faults.host, faultsUnknown: f.faults.memberUnknown + f.faults.hostUnknown, stale: unreadCorps.has(vc), alloc: f.alloc, usage: { cpu: f.usage.cpu, mem: f.usage.mem, unread: f.usage.unread, stale: f.usage.stale }, backup: f.backup, hosts: f.hosts };
+    (cells[gid] ||= {})[vc] = { n: f.n.total, vm: f.n.vm, bm: f.n.bm, faults: f.faults.member + f.faults.host, faultsUnknown: f.faults.memberUnknown + f.faults.hostUnknown, stale: unreadCorps.has(vc), alloc: f.alloc, usage: { cpu: f.usage.cpu, mem: f.usage.mem, unread: f.usage.unread, stale: f.usage.stale, cpuUsed: f.usage.cpuUsed, cpuTotal: f.usage.cpuTotal }, backup: f.backup, hosts: f.hosts };
   }
   const globalNames = new Map((map?.globals || []).map((g) => [lc(g.name), g.id]));
   const unlinked = services.filter((s) => !s.globalId || !globalById.has(s.globalId))
@@ -154,7 +158,7 @@ export function buildQueues({ members = [], resolved, pins = {}, allowed = null,
   const inScope = (vc) => (allowed ? !!vc && allowed.has(vc) : true);
   const groups = new Map();
   const unmapped = new Map();
-  const drift = []; const mismatch = []; const redundant = [];
+  const drift = []; const mismatch = []; const redundant = []; const tagAmbiguous = []; const ruleOverlap = [];
   const NAME_CAP = 40;
   for (const m of members) {
     if (!inScope(m.corp)) continue;
@@ -162,7 +166,12 @@ export function buildQueues({ members = [], resolved, pins = {}, allowed = null,
     if (r.pinMismatch) mismatch.push({ key: m.key, name: m.name, kind: m.kind, corp: m.corp, pinCorp: r.pinMismatch.corp, serviceId: r.pinMismatch.serviceId });
     if (r.drift) drift.push({ key: m.key, name: m.name, kind: m.kind, corp: m.corp, pin: { serviceId: r.serviceId, by: pins[m.key]?.by || '', at: pins[m.key]?.at || 0 }, auto: { serviceId: r.auto.serviceId, src: r.auto.src, via: r.auto.via || '' },
       ...(r.driftChanged ? { changed: r.driftChanged.legacy ? { legacy: true } : { reviewedAuto: r.driftChanged.reviewedAuto } } : {}) });
-    if (r.src === 'pin' && r.redundant) redundant.push({ key: m.key, name: m.name, kind: m.kind, corp: m.corp, serviceId: r.serviceId, via: r.auto.src });
+    // 불필요한 고정 — 단 '모호한 자동 판정을 사람이 확인한 고정'(태그 모호·규칙 겹침)은 불필요하지 않다: 지우면 다시 모호로 돌아간다(3차 반증 4 — 순환)
+    if (r.src === 'pin' && r.redundant && !r.auto?.tagAmbiguous && !r.auto?.ruleOverlap) redundant.push({ key: m.key, name: m.name, kind: m.kind, corp: m.corp, serviceId: r.serviceId, via: r.auto.src });
+    // 태그가 둘 이상의 서비스에 걸림(5차 M5·R14) — 첫 값으로 정했지만 사람이 봐야 한다. 고정한 구성원은 사람이 이미 정했다.
+    if (r.src === 'tag' && r.tagAmbiguous) tagAmbiguous.push({ key: m.key, name: m.name, kind: m.kind, corp: m.corp, serviceId: r.serviceId, tags: r.tagValues || [] });
+    // 이름 규칙 둘 이상(다른 서비스)이 걸림 — 결과가 적용 순서에 달렸다(3차 반증 1: 순서를 바꾼 업그레이드에서 조용히 옮겨 간 구성원).
+    if (r.src === 'rule' && r.ruleOverlap) ruleOverlap.push({ key: m.key, name: m.name, kind: m.kind, corp: m.corp, serviceId: r.serviceId, via: r.via, others: r.ruleOverlap });
     if (r.serviceId) continue;
     let gk; let kind; let value = '';
     if (!m.corp) {   // 이유별로 나눈다(5차 R18 둘째 절) — 귀속 판정 실패 · 서비스 태그가 두 법인에 걸림 · 어느 규칙에도 맞지 않음
@@ -211,6 +220,6 @@ export function buildQueues({ members = [], resolved, pins = {}, allowed = null,
   return {
     unassigned: [...groups.values()].sort((a, b) => b.n - a.n || a.key.localeCompare(b.key)),
     unmapped: [...unmapped.values()].sort((a, b) => b.n - a.n),
-    drift, mismatch, redundant, ghosts, ghostsHeld: held, orphaned,
+    drift, mismatch, redundant, ghosts, ghostsHeld: held, orphaned, tagAmbiguous, ruleOverlap,
   };
 }

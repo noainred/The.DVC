@@ -6,7 +6,7 @@ import {
   PORTAL_ALARM_RULE_TEXT, shortTs,
 } from './vcdTabs.js';
 
-describe('vCenter 탭 12개(v2.894) — 목록 · 옛 키 · 기억', () => {
+describe('vCenter 탭 12개(v2.895) — 목록 · 옛 키 · 기억', () => {
   it('vSphere Client 순서 그대로 12개 · 이모지 없음', () => {
     expect(VCD_TABS.map((t) => t.label)).toEqual([
       '요약', '모니터', '구성', '사용 권한', '데이터 센터', '호스트 및 클러스터', 'VM', '데이터스토어', '네트워크',
@@ -164,7 +164,7 @@ describe('권한 변경 이벤트 · 크기 · 인벤토리', () => {
   });
 });
 
-describe('CSS 이름 충돌 — 새 클래스가 기존 vCenter 트리 규칙과 겹치지 않는다(v2.894 회귀)', () => {
+describe('CSS 이름 충돌 — 새 클래스가 기존 vCenter 트리 규칙과 겹치지 않는다(v2.895 회귀)', () => {
   it('.vcd-sub(트리 보조 문구) · .vcd-row(옛 표 행)는 한 번씩만 정의되고 하위 칸 목록은 .vcd-subnav', async () => {
     const fs = await import('node:fs');
     const path = await import('node:path');
