@@ -27,11 +27,12 @@ import { fullScopeOnlyWith } from '../admin/shared.js';
 import {
   listIssues, getIssue, createIssue, updateIssue, setStatus, assignIssue, bulkAssign, setBlocked, setWatch, addComment, deleteComment, deleteIssue, setProgress, activityFeed,
   bulkEdit, moveSprintIssues, sprintBoard, queryContext, addLink, removeLink, LINK_TYPES, addWorklog, removeWorklog,
-  issueStats, knownNames, issuesSeq, waitIssuesPersist, issuesPersist, PERSIST_WAIT_MS,
+  issueStats, knownNames, issuesSeq, waitIssuesPersist, issuesPersist, PERSIST_WAIT_MS, addWatchers, mentionsOf,
   LIMITS, STATUSES, TYPES, PRIORITIES, KEY_RE, ID_RE, RECENT_DONE_MS, KEY_PREFIX,
 } from '../../issues/store.js';
 import { loadIssueSettings, saveIssueSettings, issueSettingsLoadError, suggestAssignee, SETTINGS_LIMITS, NOTIFY_EVENTS } from '../../issues/settings.js';
-import { issueNotifyStatus } from '../../issues/notify.js';
+import { issueNotifyStatus, resolveMentions } from '../../issues/notify.js';
+import { mentionCandidates } from '../../issues/mentionables.js';
 import { issueViewers } from '../../issues/visibility.js';
 import {
   loadAutoCreate, saveAutoCreate, autoCreateLoadError, autoCreateStatus, simulatePartFault,
@@ -465,12 +466,39 @@ export function registerIssues(api) {
     if (!KEY_RE.test(req.params.key)) return badKey(res);
     try { const x = setWatch(req.params.key, userOf(req), req.body?.on, { access: accessOf(req) }); res.json({ ok: true, issue: x, persist: await persistView(req, { wait: false }) }); } catch (e) { fail(res, e, next); }
   });
+  // v2.905 멘션 후보(시안 docs/design/wiki-mention ⑥-7) — 위키와 같은 판정(issues/mentionables.js) · 참여자 = 담당 · 보고 · 관찰 · 댓글 쓴 사람
+  api.get('/issues/:key/mentionables', writers, (req, res, next) => {
+    if (!KEY_RE.test(req.params.key)) return badKey(res);
+    res.set('Cache-Control', 'no-store');
+    try {
+      const access = accessOf(req);
+      const it = getIssue(req.params.key, userOf(req), access);
+      const parts = [it.assignee, it.reporter, ...(it.watcherNames || []), ...(it.comments || []).map((c) => c.author)].filter(Boolean);
+      const full = canWrite(req) && isFullReadWriteScope(req.user, store.get());
+      const settings = loadIssueSettings();
+      const viewers = issueViewers();
+      let users = [];
+      try { users = listUsers(); } catch { users = []; }
+      const r = mentionCandidates({ q: str(req.query.q), me: userOf(req), meName: req.user?.name || '', full, participants: parts, knownNames: knownNames(access), users, people: full ? settings.notify?.people || [] : [], canSee: (n) => viewers.canSee(n, it.vcenterId || '') });
+      res.json({ ok: true, ...r, full, notifyOn: !!(settings.notify?.enabled && settings.notify?.mail !== false) });
+    } catch (e) { fail(res, e, next, req); }
+  });
   api.post('/issues/:key/comments', writers, async (req, res, next) => {
     if (!KEY_RE.test(req.params.key)) return badKey(res);
     try {
-      const c = addComment(req.params.key, req.body, userOf(req), { access: accessOf(req) });
+      const access = accessOf(req);
+      const c = addComment(req.params.key, req.body, userOf(req), { access });
       audit(req, 'issue.comment.create', `${req.params.key}/${c.id}`);
-      res.json({ ok: true, comment: c, persist: await persistView(req) });
+      // v2.905 선택(결정 5): 언급한 사람을 관찰자로 — 알림과 같은 이름 해석 · 그 법인을 볼 수 없는 사람은 빼고 센다
+      let watch = null;
+      if (req.body?.watchMentions === true) {
+        const it = getIssue(req.params.key, userOf(req), access);
+        const viewers = issueViewers();
+        const settings = loadIssueSettings();
+        const known = new Set([...viewers.localNames, ...(settings.notify?.people || []).map((p) => p.username), it.assignee, it.reporter, ...(it.watcherNames || [])].filter(Boolean));
+        watch = addWatchers(req.params.key, resolveMentions(mentionsOf(c.body), known), userOf(req), { access, canSee: viewers.canSee });
+      }
+      res.json({ ok: true, comment: c, ...(watch ? { watch } : {}), persist: await persistView(req) });
     } catch (e) { fail(res, e, next, req); }
   });
   api.delete('/issues/:key/comments/:cid', writers, async (req, res, next) => {

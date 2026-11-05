@@ -160,6 +160,8 @@ export function issueKeysScan(...texts) {
 }
 export function issueKeysOf(...texts) { return issueKeysScan(...texts).keys; }
 const keyFields = (...texts) => { const r = issueKeysScan(...texts); return { issueKeys: r.keys, issueKeysDropped: r.dropped }; };
+/** 댓글이 색인에 싣는 글 — 본문 + 그 댓글에서 만든 이슈 키(v2.905 — '관련 이슈' 에 함께 보인다). */
+const commentTexts = (comments) => (comments || []).flatMap((q) => [q.body, q.issueKey || '']);
 
 /* ───── 범위 ───── */
 export const FULL_ACCESS = Object.freeze({ read: null, write: null });
@@ -390,7 +392,7 @@ export function updatePage(id, body, user, { access = FULL_ACCESS } = {}) {
   const same = title === p.title && md === p.body && status === p.status && JSON.stringify(labels) === JSON.stringify(p.labels) && parentId === (p.parentId || '');
   if (same) return viewPage(p, user, access);
   const now = Date.now();
-  const nx = { ...p, title, body: md, status, labels, parentId, version: p.version + 1, updatedAt: Math.max(now, (p.updatedAt || 0) + 1), updatedBy: user, ...keyFields(title, md, ...(p.comments || []).map((cm) => cm.body)) };
+  const nx = { ...p, title, body: md, status, labels, parentId, version: p.version + 1, updatedAt: Math.max(now, (p.updatedAt || 0) + 1), updatedBy: user, ...keyFields(title, md, ...commentTexts(p.comments)) };
   const x = { ...nx, ...pushVersion(nx, { by: user, note: has('note') ? text(b.note, LIMITS.note, 'note') : '', at: nx.updatedAt }) };
   assertRoom(c, x, p.id);
   c.pages = c.pages.map((q) => (q.id === p.id ? x : q));
@@ -502,12 +504,40 @@ export function addComment(id, body, user, { access = FULL_ACCESS } = {}) {
   if (comments.length >= LIMITS.comments) throw limitError(`댓글은 문서마다 ${LIMITS.comments}개까지입니다`);
   const quote = text(body?.quote ?? '', LIMITS.quote, 'quote').replace(/\s+/g, ' ').trim(); // v2.889 인라인 댓글 — 선택한 글(본문에 있는지는 보지 않는다 — 판이 바뀌면 사라질 수 있다)
   const cm = { id: crypto.randomBytes(6).toString('hex'), author: user, body: text(body?.body, LIMITS.comment, 'body', { required: true, multiline: true }), at: Date.now(), v: p.version, ...(quote ? { quote } : {}) };
-  const x = { ...p, comments: [...comments, cm], ...keyFields(p.title, p.body, ...comments.map((q) => q.body), cm.body) };
+  const x = { ...p, comments: [...comments, cm], ...keyFields(p.title, p.body, ...commentTexts(comments), cm.body) };
   assertRoom(c, x, p.id);
   c.pages = c.pages.map((q) => (q.id === p.id ? x : q));
   commit({ changed: x });
   emit({ type: 'comment', actor: user, page: evPage(x), excerpt: capStr(cm.body, 200), mentions: mentionsOf(cm.body) });
   return cm;
+}
+/** v2.905 한 댓글(볼 수 있는 문서 · 없으면 404) — 댓글에서 이슈를 만들 때 라우트가 읽는다. */
+export function getComment(id, commentId, access = FULL_ACCESS) {
+  const p = findFor(id, access);
+  const cm = (p.comments || []).find((x) => x.id === commentId);
+  if (!cm) throw notFound();
+  return { page: { id: p.id, title: p.title, spaceId: p.spaceId, createdBy: p.createdBy || '', watchers: [...(p.watchers || [])] }, comment: { ...cm } };
+}
+/** 이 문서의 참여자(만든 사람 · 고친 사람 · 지켜보는 사람 · 댓글 쓴 사람) — 멘션 후보(볼 수 있는 문서만). */
+export function pageParticipants(id, access = FULL_ACCESS) {
+  const p = findFor(id, access);
+  const s = new Set([p.createdBy, p.updatedBy, ...(p.watchers || []), ...(p.comments || []).map((q) => q.author)].filter(Boolean));
+  return { spaceId: p.spaceId, names: [...s] };
+}
+/**
+ * v2.905 댓글에서 만든 이슈의 키를 그 댓글에 적는다(같은 댓글로 두 번 만들지 않게 · '관련 이슈' 색인). 판을 만들지 않는다.
+ * 쓰기 범위는 보지 않는다 — 이슈를 만든 라우트가 이미 댓글 · 이슈 권한을 봤다(조회 범위만).
+ */
+export function setCommentIssue(id, commentId, key, { access = FULL_ACCESS } = {}) {
+  const c = load();
+  const p = findFor(id, access);
+  if (!(p.comments || []).some((x) => x.id === commentId)) throw notFound();
+  const comments = p.comments.map((x) => (x.id === commentId ? { ...x, issueKey: String(key || '').slice(0, 20) } : x));
+  const x = { ...p, comments, ...keyFields(p.title, p.body, ...commentTexts(comments)) };
+  assertRoom(c, x, p.id);
+  c.pages = c.pages.map((q) => (q.id === p.id ? x : q));
+  commit({ changed: x });
+  return comments.find((q) => q.id === commentId);
 }
 export function deleteComment(id, commentId, user, { access = FULL_ACCESS, isMod = false } = {}) {
   const c = load();
@@ -516,7 +546,7 @@ export function deleteComment(id, commentId, user, { access = FULL_ACCESS, isMod
   if (!cm) throw notFound();
   if (!isMod && cm.author !== user) throw forbidden('댓글은 쓴 사람이나 전체 범위 관리자만 지울 수 있습니다');
   const comments = p.comments.filter((x) => x.id !== commentId);
-  const x = { ...p, comments, ...keyFields(p.title, p.body, ...comments.map((q) => q.body)) };
+  const x = { ...p, comments, ...keyFields(p.title, p.body, ...commentTexts(comments)) };
   c.pages = c.pages.map((q) => (q.id === p.id ? x : q));
   commit({ changed: x });
   return { id: commentId };

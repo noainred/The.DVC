@@ -27,6 +27,8 @@ import { MdView } from '../wiki/MdView.jsx';
 import AttachBox from '../attach/AttachBox.jsx';
 import AttachAdmin from '../attach/AttachAdmin.jsx';
 import IssueCalendar from './IssueCalendar.jsx';
+import MentionBox from '../../components/MentionBox.jsx';
+import { mentionsInText } from '../../components/mentionText.js';
 
 const SUBS = [['board', '보드'], ['list', '목록'], ['calendar', '캘린더'], ['mine', '내 작업'], ['activity', '활동'], ['sprint', '스프린트'], ['epics', '에픽'], ['filters', '필터']]; // v2.882 스프린트 · 에픽 · 필터 · v2.889 캘린더
 /** v2.871: 설정 탭은 전체 범위 관리자에게만 보인다(서버가 같은 기준으로 막는다). 해시 키는 늘 유효 — 권한이 없으면 안내만. */
@@ -311,7 +313,7 @@ function IssueCard({ r, meta, onOpen, drag = null }) {
         {r.blockedOpen > 0 && <span className="iss-chip s-linkblock" title="이 이슈를 막고 있는 열린 이슈가 있습니다(연결)">차단됨 {r.blockedOpen}</span>}
         {r.status !== 'done' && <SlaChip sla={r.sla} />}
         {(meta?.vcenters || []).length > 0 && <span className="iss-vc" title="법인(vCenter)">{vcName(meta, r.vcenterId)}</span>}
-        {r.origin && <span className="iss-auto" title={originText(r.origin)}>자동</span>}
+        {r.origin && <span className="iss-auto" title={originText(r.origin)}>{r.origin.kind === 'wiki-comment' ? '위키' : '자동'}</span>}
         {childText(r) && <span className="iss-subn">{childText(r)}</span>}
         {r.parentKey && r.parentKey !== r.epicKey && <span className="iss-subn">하위 · {r.parentKey}</span>}
         {r.sprintId && <span className="iss-subn" title="스프린트">{sprintName(meta?.sprintList, r.sprintId)}</span>}
@@ -392,7 +394,7 @@ function ListView({ rows, total, meta, epics, onOpen, onWritten }) {
                     {r.blocked && <span className="iss-chip s-blocked" style={{ marginLeft: 6 }} title={r.blocked.reason}>보류</span>}
                     {r.blockedOpen > 0 && <span className="iss-chip s-linkblock" style={{ marginLeft: 6 }} title="이 이슈를 막고 있는 열린 이슈가 있습니다(연결)">차단됨 {r.blockedOpen}</span>}
                     {r.status !== 'done' && slaBadge(r.sla) && <span style={{ marginLeft: 6 }}><SlaChip sla={r.sla} /></span>}
-                    {r.origin && <span className="iss-auto" style={{ marginLeft: 6 }} title={originText(r.origin)}>자동</span>}
+                    {r.origin && <span className="iss-auto" style={{ marginLeft: 6 }} title={originText(r.origin)}>{r.origin.kind === 'wiki-comment' ? '위키' : '자동'}</span>}
                     {/* v2.882 에픽 · 하위 · 스프린트는 제목 아래 작은 표시 — 열로 두면 1440px 에서 표가 본문 폭을 넘어 기한 · 갱신이 가로 스크롤 뒤로 숨었다(Chromium 판독).
                         에픽 · 스프린트로 정렬하려면 필터 화면의 결과 표(열이 따로 있다)를 쓴다. */}
                     {(r.epicKey || r.sprintId || childText(r) || (r.parentKey && r.parentKey !== r.epicKey)) && (
@@ -832,6 +834,7 @@ function IssueDetail({ issueKey, meta, onBack, onOpen, onWritten }) {
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState('');
   const [comment, setComment] = useState('');
+  const [watchMentions, setWatchMentions] = useState(false); // v2.905 언급한 사람을 관찰자로(선택 · 기본 끔)
   const [tab, setTab] = useState('comments');
   const [blockReason, setBlockReason] = useState('');
   const [blockOpen, setBlockOpen] = useState(false);
@@ -880,7 +883,9 @@ function IssueDetail({ issueKey, meta, onBack, onOpen, onWritten }) {
             : (
               <>
                 <div className="iss-detail-meta"><TypeTag t={it.type} /><span className="iss-key">{it.key}</span><span className="muted">· {it.reporter} 등록 · {timeText(it.createdAt)}</span>
-                  {it.origin && <><span className="iss-auto">{originText(it.origin)}</span><a href="#/tools/part-faults" style={{ fontSize: 12 }}>파트 장애 화면 →</a></>}
+                  {it.origin && <><span className="iss-auto">{originText(it.origin)}</span>{it.origin.kind === 'wiki-comment'
+                    ? (it.origin.pageId ? <a href={wikiHash({ space: 'pub', id: it.origin.pageId })} style={{ fontSize: 12 }}>문서의 댓글로 →</a> : null)
+                    : <a href="#/tools/part-faults" style={{ fontSize: 12 }}>파트 장애 화면 →</a>}</>}
                 </div>
                 {(it.epic || (it.parent && it.parent.type !== 'epic')) && (
                   <div className="iss-crumb">
@@ -950,8 +955,9 @@ function IssueDetail({ issueKey, meta, onBack, onOpen, onWritten }) {
                 {canWrite
                   ? (
                     <div className="iss-comment-new">
-                      <textarea className="input" rows={2} value={comment} maxLength={meta.limits?.commentBody || 2000} onChange={(e) => setComment(e.target.value)} placeholder="댓글" aria-label="댓글" />
-                      <button className="btn primary" disabled={busy || !comment.trim()} onClick={() => act(() => postJson(`/issues/${it.key}/comments`, { body: comment })).then((ok) => { if (ok) setComment(''); })}>댓글 달기</button>
+                      <MentionBox value={comment} onChange={setComment} path={`/issues/${it.key}/mentionables`} rows={2} maxLength={meta.limits?.commentBody || 2000} placeholder="댓글 — @ 뒤에 계정이나 이름을 치면 사람을 찾습니다" ariaLabel="댓글" />
+                      {mentionsInText(comment).length > 0 && <label className="iss-inline iss-small"><input type="checkbox" checked={watchMentions} onChange={(e) => setWatchMentions(e.target.checked)} /> 언급한 사람을 이 이슈의 관찰자로 추가</label>}
+                      <button className="btn primary" disabled={busy || !comment.trim()} onClick={() => act(() => postJson(`/issues/${it.key}/comments`, { body: comment, ...(watchMentions && mentionsInText(comment).length ? { watchMentions: true } : {}) })).then((ok) => { if (ok) { setComment(''); setWatchMentions(false); } })}>댓글 달기</button>
                     </div>
                   )
                   : <div className="muted" style={{ fontSize: 12, marginTop: 8 }}>{roScope ? '이 법인은 쓰기 범위 밖이라 댓글을 쓸 수 없습니다.' : '댓글은 운영자·관리자만 쓸 수 있습니다.'}</div>}

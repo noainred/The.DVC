@@ -557,11 +557,17 @@ function findFor(key, access = FULL_ACCESS, { write = false } = {}) {
  * 사람이 만든 이슈에는 없다. 서버 내부 경로(issues/autoCreate.js)만 붙이고 라우트 본문으로는 받지 않는다(위조 금지).
  * partKeys 는 한 이슈가 덮는 파트 키(`agent|partKey`) — 장비 단위로 묶은 이슈는 여럿이다. resolved 는 해소된 키.
  */
-export const ORIGIN_KINDS = Object.freeze(['partfault']);
+export const ORIGIN_KINDS = Object.freeze(['partfault', 'wiki-comment']);
 const ORIGIN_KEYS_MAX = 64;
+const WIKI_PAGE_RE = /^W\d{1,9}$/;
+const WIKI_COMMENT_RE = /^[0-9a-f]{1,40}$/;
 function originField(o) {
   const t = (v, n) => capStr(String(v ?? '').trim(), n);
   const keys = (a) => [...new Set((Array.isArray(a) ? a : []).map((k) => t(k, 300)).filter(Boolean))].slice(0, ORIGIN_KEYS_MAX);
+  // v2.905 위키 댓글에서 만든 이슈(시안 docs/design/wiki-mention ②④) — 문서 · 댓글 id 만(같은 댓글로 두 번 만들지 않는 열쇠)
+  if (o?.kind === 'wiki-comment') {
+    return { kind: 'wiki-comment', pageId: WIKI_PAGE_RE.test(String(o.pageId || '')) ? o.pageId : '', commentId: WIKI_COMMENT_RE.test(String(o.commentId || '')) ? o.commentId : '', partKeys: [], resolved: [] };
+  }
   return {
     kind: ORIGIN_KINDS.includes(o?.kind) ? o.kind : 'partfault',
     agent: t(o?.agent, 64), scope: t(o?.scope, 32), deviceId: t(o?.deviceId, 200), deviceName: t(o?.deviceName, 200),
@@ -569,9 +575,10 @@ function originField(o) {
     hold: t(o?.hold, 64),
   };
 }
-const originNote = (o) => `자동 등록: 파트 장애${o?.deviceName || o?.deviceId ? ` · ${capStr(String(o.deviceName || o.deviceId), 80)}` : ''}`;
+const originNote = (o) => (o?.kind === 'wiki-comment' ? `위키 댓글에서 등록: ${o.pageId || '?'}` : `자동 등록: 파트 장애${o?.deviceName || o?.deviceId ? ` · ${capStr(String(o.deviceName || o.deviceId), 80)}` : ''}`);
 /** 화면에 싣는 출처(키 목록 대신 개수 — 목록 응답을 키우지 않는다). */
 function originView(o) {
+  if (o.kind === 'wiki-comment') return { kind: o.kind, pageId: o.pageId || '', commentId: o.commentId || '' };
   return { kind: o.kind, agent: o.agent || '', scope: o.scope || '', deviceId: o.deviceId || '', deviceName: o.deviceName || '', parts: (o.partKeys || []).length, resolved: (o.resolved || []).length };
 }
 /** 출처로 이슈 찾기(서버 내부 — 범위 없음). pred(origin, issue) 가 참인 이슈의 사본. */
@@ -1279,6 +1286,27 @@ export function setWatch(key, user, on, { access = FULL_ACCESS } = {}) {
   if (on && cur.length >= LIMITS.watcherMax) throw limitError(`관찰자는 ${LIMITS.watcherMax}명까지입니다`);
   const next = { ...x, watchers: on ? [...cur, user] : cur.filter((n) => n !== user) };
   return viewIssue(replace(c, next, [], user, { touch: false }), user, access);
+}
+
+/**
+ * v2.905 댓글에서 언급한 사람을 관찰자로(시안 docs/design/wiki-mention ⑥-7 · 결정 5 — 이슈 댓글의 선택). 이슈 쓰기 범위가 필요하다(댓글과 같은 판정).
+ * 그 법인을 볼 수 없는 사람(canSee) · 이미 관찰자인 사람은 건너뛰고, 상한(watcherMax)을 넘는 만큼은 빼고 센다 — 조용히 버리지 않는다.
+ * @returns {{ added:string[], skipped:{name:string,why:string}[] }}
+ */
+export function addWatchers(key, names, user, { access = FULL_ACCESS, canSee = () => true } = {}) {
+  const c = load();
+  const x = findFor(key, access, { write: true });
+  const cur = Array.isArray(x.watchers) ? [...x.watchers] : [];
+  const added = []; const skipped = [];
+  for (const n0 of Array.isArray(names) ? names.slice(0, 10) : []) {
+    const n = String(n0 || '').trim();
+    if (!n || cur.includes(n)) continue;
+    if (!canSee(n, x.vcenterId || '')) { skipped.push({ name: n, why: 'out-of-scope' }); continue; }
+    if (cur.length >= LIMITS.watcherMax) { skipped.push({ name: n, why: 'limit' }); continue; }
+    cur.push(n); added.push(n);
+  }
+  if (added.length) replace(c, { ...x, watchers: cur }, [], user, { touch: false });
+  return { added, skipped };
 }
 
 /**

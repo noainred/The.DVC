@@ -15,6 +15,8 @@ import { makeLatest, persistNote, parseLabels, statusText as issueStatusText } f
 import { MdView, MdToc } from './MdView.jsx';
 import { makeRenderMacro } from './WikiMacros.jsx';
 import AttachBox from '../attach/AttachBox.jsx';
+import MentionBox from '../../components/MentionBox.jsx';
+import { mentionsInText } from '../../components/mentionText.js';
 import { selectionQuote, findQuote, exportMarkdownName, printDocument } from './wikiExport.js';
 import {
   STATUS_ORDER, statusText, parseWikiHash, wikiHash, buildTree, flattenTree, parentOptions, breadcrumb, fillTemplate, wikiSaveFailText, isConflict,
@@ -320,12 +322,72 @@ function usePage(id) {
   return { page, info, err, load };
 }
 
+/* ───── v2.905 댓글 @멘션 → 이슈 등록(시안 docs/design/wiki-mention ②⑥ · 추천안: 체크 기본 켬 · 요청 권한은 '요청' 으로 · 계정/이름 글자 그대로) ───── */
+const ISSUE_OPT_KEY = 'wiki.commentIssue.on';
+const COMMENT_ISSUE_TYPES = [['task', '작업'], ['incident', '장애'], ['request', '요청']];
+function loadIssueOn() { try { const v = window.localStorage.getItem(ISSUE_OPT_KEY); return v == null ? true : v === '1'; } catch { return true; } }
+function saveIssueOn(on) { try { window.localStorage.setItem(ISSUE_OPT_KEY, on ? '1' : '0'); } catch { /* 저장 못 하는 브라우저 — 이번 화면에서만 */ } }
+/** 등록 결과 한 줄(서버 응답 issue · issueError). */
+export function commentIssueText(r) {
+  if (!r) return '';
+  if (r.issueError) return `댓글은 달았지만 이슈는 만들지 못했습니다 — ${r.issueError}. 댓글의 ‘이슈로 등록’ 으로 다시 할 수 있습니다.`;
+  const i = r.issue;
+  if (!i) return '';
+  if (i.existing) return `이 댓글로 만든 열린 이슈 ${i.key} 가 이미 있습니다.`;
+  const who = i.requestOnly ? '요청으로 등록' : `담당자 ${i.assignee}${i.watchers?.length ? ` · 관찰자 ${i.watchers.join(', ')}` : ''}`;
+  const skip = i.skipped?.length ? ` · 이 법인을 볼 수 없어 뺀 사람 ${i.skipped.join(', ')}` : '';
+  const mail = i.notifyOn === false ? ' · 이슈 알림이 꺼져 있어 메일은 가지 않습니다' : i.noEmail?.length ? ` · 메일 주소가 없는 사람 ${i.noEmail.join(', ')}(이슈는 포탈 ‘내 작업’ 에서 보입니다)` : i.notifyOn ? ' · 메일은 1분 안에 한 통씩 갑니다' : '';
+  return `이슈 ${i.key} 를 만들었습니다 — ${who}${i.relatedTo ? ` · 예전 이슈 ${i.relatedTo} 와 ‘관련’ 으로 이음` : ''}${skip}${mail}.`;
+}
+
+function CommentIssuePane({ mentions, picked, mmeta, canIssue, value, onChange, spaceLabel }) {
+  const set = (k) => (e) => onChange({ ...value, [k]: e.target.type === 'checkbox' ? e.target.checked : e.target.value });
+  const users = mentions.map((m) => m.user);
+  const assignee = users.includes(value.assignee) ? value.assignee : users[0] || '';
+  const info = (u) => picked[u] || null;
+  if (!canIssue) {
+    return (
+      <div className="wiki-issue-pane" aria-label="이슈로 등록">
+        <label className="wiki-check"><input type="checkbox" checked={!!value.request} onChange={set('request')} /> 요청으로 등록 <span className="muted">— 담당자를 지정하는 이슈는 운영자 · 관리자만 만듭니다. 요청은 담당자 없이(자동 할당 규칙이 있으면 그것이 정함) · 언급 메일은 그대로</span></label>
+      </div>
+    );
+  }
+  return (
+    <div className="wiki-issue-pane" aria-label="이슈로 등록">
+      <label className="wiki-check wiki-issue-on"><input type="checkbox" checked={!!value.on} onChange={(e) => { saveIssueOn(e.target.checked); onChange({ ...value, on: e.target.checked }); }} /> <b>언급한 사람에게 이슈로 등록</b> <span className="muted">— 댓글 1개 → 이슈 1건 · 마지막 선택을 이 브라우저가 기억</span></label>
+      {value.on && (
+        <>
+          <div className="wiki-issue-grid">
+            <label>담당자(언급한 사람 중)<Select className="input" value={assignee} onChange={set('assignee')} sort={false}>
+              {mentions.map((m) => <option key={m.user} value={m.user}>{m.user}{(info(m.user)?.name || m.name) ? ` / ${info(m.user)?.name || m.name}` : ''}{info(m.user)?.canSee === false ? ' — 이 법인을 볼 수 없음' : ''}</option>)}
+            </Select></label>
+            <label>유형<Select className="input" value={value.type || 'task'} onChange={set('type')} sort={false}>{COMMENT_ISSUE_TYPES.map(([v, t]) => <option key={v} value={v}>{t}</option>)}</Select></label>
+            <label>우선순위<Select className="input" value={value.priority || 'p2'} onChange={set('priority')} sort={false}>{['p0', 'p1', 'p2', 'p3'].map((p) => <option key={p} value={p}>{p.toUpperCase()}</option>)}</Select></label>
+            <div className="wiki-issue-fixed"><span className="muted">법인</span><span>{spaceLabel} <span className="muted wiki-small">— 문서의 스페이스</span></span></div>
+          </div>
+          <label className="wiki-issue-title">제목<input className="input" value={value.title || ''} onChange={set('title')} maxLength={200} placeholder="비우면 ‘[위키] 문서 제목 — 댓글 앞부분’" /></label>
+          <div className="wiki-issue-meta muted wiki-small">
+            {users.length > 1 && <span>관찰자: {users.filter((u) => u !== assignee).join(', ')}</span>}
+            {mmeta?.notifyOn === false && <span className="wiki-warn">이슈 알림이 꺼져 있어 메일은 가지 않습니다(이슈는 만듭니다)</span>}
+            {mmeta?.full && mentions.map((m) => info(m.user)?.email === false && <span key={m.user} className="wiki-warn">{m.user} 메일 주소 없음</span>)}
+            {info(assignee)?.canSee === false && <span className="wiki-warn">{assignee} 는 이 법인 이슈를 볼 수 없어 담당자로 지정할 수 없습니다</span>}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 function PageView({ id, space, meta, pages, onWritten }) {
   const { page, info, err, load } = usePage(id);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState('');
   const [comment, setComment] = useState('');
   const [quote, setQuote] = useState(''); // v2.889 인라인 댓글 — 본문에서 고른 글
+  const [issueOpt, setIssueOpt] = useState(() => ({ on: loadIssueOn(), assignee: '', type: 'task', priority: 'p2', title: '', request: false })); // v2.905
+  const [picked, setPicked] = useState({}); // v2.905 자동완성으로 고른 사람(메일 · 범위 표시)
+  const [mmeta, setMmeta] = useState(null);
+  const [cmsg, setCmsg] = useState(''); // v2.905 댓글 · 이슈 등록 결과(댓글 상자 옆에 — 위 배너는 화면 밖일 수 있다)
   const [pick, setPick] = useState(null); // { text, x, y } — 본문에서 글을 고르면 뜨는 '댓글' 단추
   const [showResolved, setShowResolved] = useState(false);
   const mainRef = useRef(null);
@@ -453,14 +515,50 @@ function PageView({ id, space, meta, pages, onWritten }) {
               </button>
             )}
             <MdView md={c.body} compact idPrefix={`c${c.id}`} pages={pages} spaceId={space} />
+            {c.issueKey
+              ? <div className="wiki-comment-issue">이슈로 등록됨 <a className="md-iss" href={`#/issues/list/${c.issueKey}`}>{c.issueKey}</a></div>
+              : canComment && (info?.canWrite || c.author === info?.me) && mentionsInText(c.body).length > 0 && (
+                <div className="wiki-comment-issue"><button type="button" className="wiki-mini-act" disabled={busy} title="이 댓글에서 언급한 사람에게 이슈를 만듭니다(첫 언급 = 담당자)"
+                  onClick={async () => { setBusy(true); setCmsg(''); try { const r = await postJson(`/wiki/pages/${page.id}/comments/${c.id}/issue`, info?.canWrite ? {} : { request: true }); setCmsg(r?.ok === false ? wikiSaveFailText(r) : commentIssueText({ issue: r.issue })); load(); } catch (e) { setCmsg(String(e?.message || e)); } finally { setBusy(false); } }}>이슈로 등록</button></div>
+              )}
           </div>
         ))}
         {canComment
           ? (
-            <form ref={formRef} className="wiki-comment-form" onSubmit={(e) => { e.preventDefault(); if (comment.trim()) act(() => postJson(`/wiki/pages/${page.id}/comments`, { body: comment, quote }), () => { setComment(''); setQuote(''); load(); }); }}>
+            <form ref={formRef} className="wiki-comment-form" onSubmit={async (e) => {
+              e.preventDefault();
+              if (!comment.trim()) return;
+              const ms = mentionsInText(comment);
+              const users = ms.map((m) => m.user);
+              const wantIssue = ms.length > 0 && (info?.canWrite ? issueOpt.on : issueOpt.request);
+              const issue = !wantIssue ? undefined : info?.canWrite
+                ? { assignee: users.includes(issueOpt.assignee) ? issueOpt.assignee : users[0], type: issueOpt.type, priority: issueOpt.priority, title: issueOpt.title.trim() }
+                : { request: true };
+              setBusy(true); setCmsg('');
+              try {
+                const r = await postJson(`/wiki/pages/${page.id}/comments`, { body: comment, quote, ...(issue ? { issue } : {}) });
+                if (r?.ok === false) { setCmsg(wikiSaveFailText(r)); return; } // 400 이면 댓글도 저장되지 않았다 — 글은 그대로 둔다
+                setComment(''); setQuote(''); setPicked({}); setIssueOpt((o) => ({ ...o, assignee: '', title: '' }));
+                setCmsg(issue ? commentIssueText(r) : persistNote(r?.persist));
+                onWritten?.(r); load();
+              } catch (err2) { setCmsg(String(err2?.message || err2)); } finally { setBusy(false); }
+            }}>
               {quote && <div className="wiki-quote-pick">“{quote}” 에 댓글 <button type="button" className="wiki-mini-act" onClick={() => setQuote('')}>인용 빼기</button></div>}
-              <textarea className="input" rows={3} value={comment} onChange={(e) => setComment(e.target.value)} placeholder="댓글 — @사람 으로 알리고, ISS-번호로 이슈를 잇습니다" maxLength={meta.limits?.comment || 2000} />
-              <button className="btn primary" type="submit" disabled={busy || !comment.trim()}>댓글 달기</button>
+              <MentionBox value={comment} onChange={setComment} path={`/wiki/pages/${page.id}/mentionables`} rows={3} maxLength={meta.limits?.comment || 2000}
+                placeholder="댓글 — @ 뒤에 계정이나 이름을 치면 사람을 찾습니다 · ISS-번호로 이슈를 잇습니다"
+                onPick={(cnd) => setPicked((m) => ({ ...m, [cnd.username]: cnd }))} onMeta={setMmeta} />
+              {(() => {
+                const ms = mentionsInText(comment);
+                if (!ms.length) return null;
+                return (
+                  <>
+                    <div className="wiki-mention-chips"><span className="muted wiki-small">언급 {ms.length}:</span>{ms.map((m) => <span key={m.user} className="md-mention"><span className="md-mention-u">@{m.user}</span>{(picked[m.user]?.name || m.name) && <><span className="md-mention-s">/</span><span className="md-mention-n">{picked[m.user]?.name || m.name}</span></>}</span>)}</div>
+                    <CommentIssuePane mentions={ms} picked={picked} mmeta={mmeta} canIssue={!!info?.canWrite} value={issueOpt} onChange={setIssueOpt} spaceLabel={spaceName(meta.spaces, space)} />
+                  </>
+                );
+              })()}
+              <button className="btn primary" type="submit" disabled={busy || !comment.trim()}>{mentionsInText(comment).length && (info?.canWrite ? issueOpt.on : issueOpt.request) ? '댓글 달기 + 이슈 등록' : '댓글 달기'}</button>
+              {cmsg && <div className="banner" role="status" style={{ whiteSpace: 'normal' }}>{cmsg}</div>}
             </form>
           )
           : <div className="muted wiki-small">댓글은 운영자 · 관리자와 요청 권한이 있는 계정이 쓸 수 있습니다.</div>}

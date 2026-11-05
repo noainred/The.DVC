@@ -324,6 +324,7 @@ export function simulateText(r) {
 }
 /** 자동 등록 이슈의 배지 글(없으면 ''). */
 export function originText(o) {
+  if (o?.kind === 'wiki-comment') return `위키 댓글에서 등록${o.pageId ? ` · ${o.pageId}` : ''}`; // v2.905
   if (!o || o.kind !== 'partfault') return '';
   const dev = o.deviceName || o.deviceId || '';
   return `자동 · 파트 장애${dev ? ` · ${dev}` : ''}${o.parts > 1 ? ` · 부품 ${o.parts}` : ''}`;
