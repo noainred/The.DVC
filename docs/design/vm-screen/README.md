@@ -74,8 +74,11 @@ KPI 한 줄(`kpis-1row`, 30px → 24px 값) · 패널 카드 평탄화 · 관련
 ### 6.1 지금(코드 확인)
 - 행 클릭 → `EntityDetail type='vm'`(`web/src/components/EntityDetail.jsx:626`) **640px 모달**(목록을 가림). 내용: KV 17항목(이름·전원·vCenter·호스트·클러스터·Guest OS·VMware Tools·vCPU·RAM·디스크·CPU/메모리 사용률·Tools 버전·스냅샷·GPU·vCenter ID·태그·메모)
   + `VmPartitionsSection` · `VmCfgSection`(구성 점검) · `PerfcSection`(경합) · `ClusterCfgSection` · `VmTagsSection` · `VmChangesSection` + 버튼 6개(사양 변경 · 콘솔 · 원격 · 메트릭 · 축소 근거 리포트 · ⤢ 개체 보기 — `:708~723`).
-- '⤢ 개체 보기' → `#/vcenters/<vc>/vm/<id>` `views/vcd/VmObject.jsx`(v2.895·v2.898): 탭 요약 · 모니터 · 구성 · 사용 권한 · 데이터스토어 · 네트워크 · 스냅샷 · 업데이트. 요약 탭 카드: VM 하드웨어 · 게스트 OS · 관련 개체 · 사용률 · 구성 점검·클러스터 · 태그·메모 · 최근 변경·이동.
-- 실제 화면 캡처(목 서버 · Chromium)는 이 세션 보고에 첨부(저장소에는 png 를 넣지 않는다).
+- '⤢ 개체 보기' → `#/vcenters/<vc>/vm/<id>` `views/vcd/VmObject.jsx`(v2.895·v2.898): 탭 9개 — 요약 · 모니터 · 구성 · 사용 권한 · 데이터스토어 · 네트워크 · 스냅샷 · 업데이트 · 성능 튜닝(캡처로 확인 — 처음엔 8개로 적었다가 정정).
+  머리 줄: 이름 · On · Running · OS · 호스트 · 클러스터 · 리소스 풀 · IP + 버튼 '사양 변경 · 원격 콘솔 · 원격 접속 · 성능 그래프 보기'.
+  요약 탭 카드: VM 하드웨어 · 게스트 OS · 관련 개체 · 사용률(경합 포함) · 구성 점검·클러스터 · 태그·메모 · 최근 변경·이동.
+  **캡처에서 본 것**: 1440 에서 '사용률' 카드 오른쪽 2열이 비어 있다(카드 7장 3열 grid 의 2행) — 시안 ⑨ 의 4/5/3 그리드가 그 자리를 신호·스냅샷·백업으로 채운다.
+- 실제 화면 캡처(목 서버 · Chromium 1440 — 모달 · 개체 보기 요약)는 이 세션 보고에 첨부(저장소에는 png 를 넣지 않는다). 400px 모달 캡처도 찍었으나(`w400-1-modal`) 판독은 하지 않았다.
 
 ### 6.2 시안 — ⑦ `Drawer.dc.html`(1440) · ⑧ `DrawerNarrow.dc.html`(400) · ⑨ `VmObjectV2.dc.html`
 | 바꾸는 것 | 지금 | 시안 |
