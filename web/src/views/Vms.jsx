@@ -1,12 +1,23 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { usePolling } from '../api.js';
-import { DataTable, Loading, ErrorBox, EntityDetail, GpuBadge } from '../components/ui.jsx';
+import { DataTable, Loading, ErrorBox, GpuBadge } from '../components/ui.jsx';
 import IpmsMatches from '../components/IpmsMatches.jsx';
 import { unitText } from './unitText.js';
 import { VM_PAGE_SIZE, vmPageQueryKey, resetNoticeText, pageNavState, vmPageSummary, vmPageSortNote, navView, navNext, navPrev, navFirst, navSync, navAfterError } from './vmPageText.js';
 // v2.746 C안: '가상머신 상세' = 분포 4패널 + 선택 칩 + 표. 판정·문구는 vmDistText.js, 그리기는 VmDistPanels.jsx.
 import { EMPTY_FACETS, facetParams, facetKey, hasFacet, clearFacet, chipList, facetErrorText, specText, specSort, selectionView } from './vmDistText.js';
 import { VmDistPanels, VmDistChips, VmUsageBar, VmNameCell, VmMobileList, useNarrowScreen } from './VmDistPanels.jsx';
+// v2.909 가상화 서버 허브(시안 docs/design/vm-screen 시안 1): 탭(현황 · 법인별 · 조치 필요 ‖ VM 도구 6) · 타일 5장 · 신호 열 · 드로어.
+import VmHubTabs from './vms/VmHubTabs.jsx';
+import VmDrawer from './vms/VmDrawer.jsx';
+import { HUB_VIEW_KEYS, signalText, usageTone, TONE_COLOR, barW } from './vms/vmHubText.js';
+import { tabFromHash, isUnderBase } from '../hooks/hashTab.js';
+import { currentHash, goHash } from './vcd/vcdRoute.js';
+import './vms/vmHub.css';
+
+const VmsByCorp = React.lazy(() => import('./vms/VmsByCorp.jsx'));
+const VmsAttention = React.lazy(() => import('./vms/VmsAttention.jsx'));
+const HUB_BASE = ['vms'];
 
 /** Render every IPv4 a VM has (multi-homed), one per line; IPv6 is excluded upstream. */
 function ipList(vm) {
@@ -16,8 +27,54 @@ function ipList(vm) {
 }
 
 
-export default function Vms({ filters }) {
-  const [selected, setSelected] = useState(null);
+/**
+ * v2.909: 허브 보기 — #/vms/<list|corp|attention>. 브라우저가 아닌 곳(렌더 시험)에서도 던지지 않는다(currentHash).
+ * useHashTab 과 같은 규약(base 아래의 해시 변화만 받는다)이지만 window 가 없는 렌더 시험을 위해 이 화면 안에 둔다.
+ */
+function useHubView() {
+  const [view, setView] = useState(() => tabFromHash(currentHash(), HUB_BASE, HUB_VIEW_KEYS) || 'list');
+  useEffect(() => {
+    const onHash = () => { const h = currentHash(); if (isUnderBase(h, HUB_BASE)) setView(tabFromHash(h, HUB_BASE, HUB_VIEW_KEYS) || 'list'); };
+    window.addEventListener('hashchange', onHash);
+    return () => window.removeEventListener('hashchange', onHash);
+  }, []);
+  return view;
+}
+
+/** 가상화 서버 화면 셸 — 머리 · 탭 · 보기 전환 · VM 드로어(현황·조치 필요 공용). onPickVcenter = 위 필터 바의 vCenter 를 바꾼다(App). */
+export default function Vms({ filters, onPickVcenter }) {
+  const view = useHubView();
+  const [drawer, setDrawer] = useState(null);       // 열린 VM(드로어) — 목록이 바뀌어도 연 순간의 값을 보여 준다(넘기면 새 값)
+  const rowsRef = useRef([]);                        // 지금 화면에 그린 행(정렬 반영 — DataTable onVisible) → 드로어 ‹ › 순서
+  const [hub, setHub] = useState({ sc: null, snapAt: null });
+  const open = (vm, rows) => { if (rows) rowsRef.current = rows; setDrawer(vm); };
+  const onVisible = (rows) => { rowsRef.current = rows; };
+  const sc = hub.sc;
+  return (
+    <div className="vmh">
+      <header className="vmh-head">
+        <h1>가상화 서버</h1>
+        <span className="vmh-sub">vCenter 가 보고한 VM · 이름 · IP · OS 검색은 위 필터 바에서 합니다</span>
+        {hub.snapAt && <span className="vmh-snap" title="이 화면 값의 기준(인벤토리 스냅샷 시각)">스냅샷 {new Date(hub.snapAt).toLocaleTimeString('ko-KR')}</span>}
+      </header>
+      <VmHubTabs active={view} attention={sc ? sc.any : null} />
+      {view === 'list' && <VmsList filters={filters} onOpen={open} onVisible={onVisible} onHub={setHub} selectedId={drawer?.id} />}
+      {view === 'corp' && (
+        <React.Suspense fallback={<Loading />}>
+          <VmsByCorp filters={filters} onPick={(id) => { if (onPickVcenter) onPickVcenter(id); goHash('#/vms/list'); }} />
+        </React.Suspense>
+      )}
+      {view === 'attention' && (
+        <React.Suspense fallback={<Loading />}>
+          <VmsAttention filters={filters} onOpen={open} onVisible={onVisible} />
+        </React.Suspense>
+      )}
+      {drawer && <VmDrawer vm={drawer} rows={rowsRef.current} onClose={() => setDrawer(null)} onMove={(vm) => setDrawer(vm)} days={sc?.snapAgeDays ?? null} />}
+    </div>
+  );
+}
+
+function VmsList({ filters, onOpen, onVisible, onHub, selectedId }) {
   const [gpuOnly, setGpuOnly] = useState(false);
   const [gpuType, setGpuType] = useState(''); // '' | vgpu | passthrough | mixed
   // v2.746 C안: 분포 패널에서 고른 구간(cpuBin·memBin·power·osName) — 이 화면 안 상태다. GPU 칸은 새 상태를 만들지 않고
@@ -35,11 +92,18 @@ export default function Vms({ filters }) {
   const [nav, setNav] = useState(() => navFirst(queryKey));
   const { stack, notice } = navView(nav, queryKey);
   const cursor = stack.length ? stack[stack.length - 1] : null;
-  const params = { ...filters, limit: VM_PAGE_SIZE, sortBy: 'cpuUsagePct', order: 'desc', paged: '1', dist: '1', ...facetParams(facets) };
+  // v2.909: signals=1 — 항목별 신호(표 '신호' 열 · 드로어)와 신호 개수(탭 배지 · '조치 필요' 줄). 판정은 서버(inventory/vmSignals.js).
+  const params = { ...filters, limit: VM_PAGE_SIZE, sortBy: 'cpuUsagePct', order: 'desc', paged: '1', dist: '1', signals: '1', ...facetParams(facets) };
   if (cursor) params.cursor = cursor;
   if (gpuOnly) params.gpu = '1';
   if (gpuType) { params.gpu = '1'; params.gpuType = gpuType; }
   const { data, error, loading } = usePolling('/vms', params, 15_000);
+  // 셸(탭 배지 · 스냅샷 시각 · 드로어 기준 일수)에 신호 개수를 올린다 — 새 응답이 올 때만.
+  // v2.909: 드로어 ‹ › 순서 — 표가 그린 행(정렬 반영). 훅은 조기 return 위(React #310 규칙).
+  const shownRef = useRef([]);
+  const sigCounts = data?.signalCounts || null;
+  const snapAt = data?.snapshotAt || null;
+  useEffect(() => { if (data && onHub) onHub({ sc: sigCounts, snapAt }); }, [data]); // eslint-disable-line react-hooks/exhaustive-deps
   // 패널을 누르면 요청 조건이 바뀌어 usePolling 이 직전 응답을 비운다. 그때마다 화면 전체를 '불러오는 중' 으로 바꾸면
   //   막대를 누를 때마다 화면이 접혔다 펴진다. 필터·GPU 가 같고 **패널 선택만** 바뀐 동안에만 직전 응답을 흐리게 두고
   //   '선택을 반영하는 중' 이라 말한다(KPI 는 패널 선택과 무관해 그대로 맞는 값이다). 그 밖의 변경은 예전처럼 Loading.
@@ -96,11 +160,25 @@ export default function Vms({ filters }) {
   ) : null;
 
   const showGpuCol = gpuOnly || gpuType || rows.some((v) => v.gpu);
-  const openVm = (v) => setSelected(v);
+  // v2.909: VM 을 누르면 드로어(셸) — ‹ › 순서는 지금 그린 행(표는 정렬 반영 onVisible · 좁은 화면 목록은 받은 순서).
+  const openVm = (v) => onOpen(v, narrow ? rows : shownRef.current);
+  const onShown = (r) => { shownRef.current = r; if (onVisible) onVisible(r); };
+  const days = sigCounts?.snapAgeDays ?? null;
+  const hasSig = rows.some((v) => Array.isArray(v.signals));
   // v2.746 C안 표 열 — 전원은 VM 이름 앞 점(색 + 글자), vCPU·RAM 은 한 칸(정렬은 vCPU 우선 그다음 메모리).
   //   CPU·메모리 막대는 이 화면 전용 VmUsageBar(공용 UsageCell 은 다른 화면이 쓰므로 바꾸지 않는다).
   const columns = [
-    { key: 'name', label: 'VM', render: (v) => <VmNameCell vm={v} onOpen={openVm} /> },
+    // v2.909: 신호(서버 판정 inventory/vmSignals.js — signals=1 일 때만 실린다)는 **열을 늘리지 않고 VM 이름 아래 줄**에 배지로 둔다.
+    //   이 표는 1440 에서도 오른쪽 열이 가로 스크롤 밖이다(v2.898 부터 · A/B 확인). 신호를 끝 열에 두면 보이지 않았고(1차),
+    //   VM 다음 열로 끼우면 기본 정렬 열인 CPU 값이 밀려 잘렸다(2차 Chromium 확인) — 그래서 이름 칸 안에 둔다.
+    { key: 'name', label: hasSig ? 'VM · 신호' : 'VM', render: (v) => (
+      <>
+        <VmNameCell vm={v} onOpen={openVm} />
+        {Array.isArray(v.signals) && v.signals.length > 0 && (
+          <span className="vmh-sig" style={{ display: 'flex', marginTop: 4 }}>{v.signals.map((k) => { const x = signalText(k, { days }); return <span key={k} className={`vmh-badge ${x.badge}`} title={x.desc}>{x.short}</span>; })}</span>
+        )}
+      </>
+    ) },
     { key: 'vcenterId', label: 'vCenter', render: (v) => <span className="muted">{v.vcenterId}</span> },
     { key: 'guestOS', label: 'Guest OS' },
     { key: 'ipAddress', label: 'IP', render: (v) => ipList(v) },
@@ -115,8 +193,7 @@ export default function Vms({ filters }) {
   const t = view.totals;
   const g = t?.gpu || { total: 0, vgpu: 0, passthrough: 0, mixed: 0 };
   const fmt = (n) => (n ?? 0).toLocaleString('en-US');
-  // v2.629(감사 WEB2629-01): 사용률을 수집하지 않은 구동 VM 은 평균에서 뺐다 — 그 개수를 밝힌다(조용한 제외 금지).
-  const usageMeta = (miss) => (miss > 0 ? `구동중 VM 기준 · 사용률 미수집 ${fmt(miss)}대 제외` : '구동중 VM 기준');
+  // v2.629(감사 WEB2629-01): 사용률을 수집하지 않은 구동 VM 은 평균에서 뺐다 — 그 개수를 타일에 밝힌다(조용한 제외 금지).
   const dist = view.dist && typeof view.dist === 'object' ? view.dist : null;
   // 칩 개수는 지금 선택으로 받은 분포에서만 센다 — 흐림 중(직전 응답)에는 개수 없이 라벨만(W-R4).
   const chips = chipList(facets, current ? dist : null, { gpuOnly, gpuType });
@@ -133,25 +210,45 @@ export default function Vms({ filters }) {
       {error && <div className="badge red" style={{ display: 'block', marginBottom: 10, padding: '6px 10px' }}>⚠ 갱신 실패 — 직전 데이터를 표시 중입니다({error}).</div>}
       {t && (
         <>
-          <div className="section-title" style={{ marginTop: 0 }}>글로벌 가상머신 요약</div>
-          <div className="kpis" style={{ marginBottom: 12 }}>
-            <div className="card kpi"><div className="label">전체 VM</div><div className="value">{fmt(t.count)}</div><div className="meta">구동중 {fmt(t.poweredOn)} · 정지 {fmt(t.poweredOff)}</div></div>
-            <div className="card kpi"><div className="label">할당 vCPU / vCore</div><div className="value" style={{ color: 'var(--accent)' }}>{fmt(t.vcpu)}</div><div className="meta">vCPU {fmt(t.vcpu)} · vCore {fmt(t.vcpu)}</div></div>
-            <div className="card kpi"><div className="label">평균 CPU 사용량</div><div className="value">{unitText(t.avgCpuUsagePct, '%')}</div><div className="meta">{usageMeta(t.usageUnknown?.cpu)}</div></div>
-            <div className="card kpi"><div className="label">할당 메모리 합계</div><div className="value" style={{ color: 'var(--purple)' }}>{fmt(t.ramGB)}<small> GB</small></div><div className="meta">≈ {(t.ramGB / 1024).toFixed(1)} TB</div></div>
-            <div className="card kpi"><div className="label">평균 메모리 사용률</div><div className="value">{unitText(t.avgMemUsagePct, '%')}</div><div className="meta">{usageMeta(t.usageUnknown?.mem)}</div></div>
-            <div className="card kpi"><div className="label">할당 디스크 합계</div><div className="value" style={{ color: 'var(--accent-2)' }}>{fmt(t.diskTB)}<small> TB</small></div><div className="meta">{fmt(t.diskGB)} GB{t.storageUnknown ? ` · 용량 미상 ${fmt(t.storageUnknown)}대 제외` : ''}</div></div>
-            <div className="card kpi"><div className="label">평균 디스크 사용률</div><div className="value">{unitText(t.avgDiskUsagePct, '%')}</div><div className="meta">프로비저닝 대비 사용</div></div>
-            <div className="card kpi" role="button" tabIndex={0}
-              style={{ cursor: 'pointer', outline: (gpuOnly || gpuType) ? '1px solid var(--green)' : 'none' }}
-              title="클릭하면 GPU 할당 VM만 표시"
-              onClick={() => { const n = !(gpuOnly || gpuType); setGpuOnly(n); if (!n) setGpuType(''); }}
-              onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); const n = !(gpuOnly || gpuType); setGpuOnly(n); if (!n) setGpuType(''); } }}>
-              <div className="label">GPU 할당 VM {(gpuOnly || gpuType) ? '✓' : '▸'}</div>
-              <div className="value" style={{ color: 'var(--green)' }}>{fmt(g.total)}</div>
-              <div className="meta">vGPU {fmt(g.vgpu)} · 패스쓰루 {fmt(g.passthrough)}{g.mixed ? ` · 혼합 ${fmt(g.mixed)}` : ''}</div>
+          {/* v2.909(시안 ② 타일 5장): 예전 KPI 8장의 값을 묶었다 — 빠진 값 없음(vCore 는 vCPU 와 같은 값이라 한 줄). 값은 unitText(못 읽으면 '—'). */}
+          <div className="section-title" style={{ marginTop: 0, fontSize: 13, color: 'var(--text-dim)' }}>글로벌 가상머신 요약</div>
+          <section className="vmh-tiles" aria-label="요약" style={{ marginBottom: 12 }}>
+            <div className="vmh-tile">
+              <div className="lb"><span>전체 VM</span>{sigCounts && sigCounts.any > 0 && <a href="#/vms/attention" style={{ fontSize: 12 }}>조치 필요 {fmt(sigCounts.any)} ▸</a>}</div>
+              <div className="val">{fmt(t.count)}</div>
+              <div className="vmh-bar" aria-hidden="true"><i style={{ width: `${t.count ? Math.round((t.poweredOn / t.count) * 100) : 0}%`, background: 'var(--green)' }} /></div>
+              <div className="sub"><span>구동중 {fmt(t.poweredOn)}</span><span>정지 {fmt(t.poweredOff)}</span></div>
             </div>
-          </div>
+            <div className="vmh-tile">
+              <div className="lb"><span>평균 CPU 사용량</span><small>구동중 VM 기준</small></div>
+              <div className="val" style={{ color: TONE_COLOR[usageTone(t.avgCpuUsagePct)] === 'var(--text-faint)' ? undefined : 'var(--accent)' }}>{unitText(t.avgCpuUsagePct, '%')}</div>
+              <div className="vmh-bar" aria-hidden="true"><i style={{ width: `${barW(t.avgCpuUsagePct)}%`, background: TONE_COLOR[usageTone(t.avgCpuUsagePct)] }} /></div>
+              <div className="sub"><span>할당 vCPU {fmt(t.vcpu)}</span>{t.usageUnknown?.cpu > 0 && <span>사용률 미수집 {fmt(t.usageUnknown?.cpu)}대 제외</span>}</div>
+            </div>
+            <div className="vmh-tile">
+              <div className="lb"><span>평균 메모리 사용률</span><small>구동중 VM 기준</small></div>
+              <div className="val" style={{ color: TONE_COLOR[usageTone(t.avgMemUsagePct)] === 'var(--text-faint)' ? undefined : 'var(--purple)' }}>{unitText(t.avgMemUsagePct, '%')}</div>
+              <div className="vmh-bar" aria-hidden="true"><i style={{ width: `${barW(t.avgMemUsagePct)}%`, background: TONE_COLOR[usageTone(t.avgMemUsagePct)] === 'var(--accent)' ? 'var(--purple)' : TONE_COLOR[usageTone(t.avgMemUsagePct)] }} /></div>
+              <div className="sub"><span>할당 {fmt(t.ramGB)} GB ≈ {(t.ramGB / 1024).toFixed(1)} TB</span>{t.usageUnknown?.mem > 0 && <span>사용률 미수집 {fmt(t.usageUnknown?.mem)}대 제외</span>}</div>
+            </div>
+            <div className="vmh-tile">
+              <div className="lb"><span>평균 디스크 사용률</span><small>프로비저닝 대비</small></div>
+              <div className="val" style={{ color: 'var(--accent-2)' }}>{unitText(t.avgDiskUsagePct, '%')}</div>
+              <div className="vmh-bar" aria-hidden="true"><i style={{ width: `${barW(t.avgDiskUsagePct)}%`, background: 'var(--accent-2)' }} /></div>
+              <div className="sub"><span>할당 {fmt(t.diskTB)} TB</span>{t.storageUnknown ? <span>용량 미상 {fmt(t.storageUnknown)}대 제외</span> : null}</div>
+            </div>
+            <button type="button" className="vmh-tile btn" aria-pressed={!!(gpuOnly || gpuType)} title="누르면 GPU 할당 VM 만 표시"
+              onClick={() => { const n = !(gpuOnly || gpuType); setGpuOnly(n); if (!n) setGpuType(''); }}>
+              <span className="lb"><span>GPU 할당 VM {(gpuOnly || gpuType) ? '✓' : '▸'}</span><small>누르면 거르기</small></span>
+              <span className="val" style={{ color: 'var(--green)' }}>{fmt(g.total)}</span>
+              <span className="vmh-seg" aria-hidden="true">
+                <i style={{ width: `${g.total ? (g.vgpu / g.total) * 100 : 0}%`, background: 'var(--green)' }} />
+                <i style={{ width: `${g.total ? (g.passthrough / g.total) * 100 : 0}%`, background: 'var(--mint)' }} />
+                <i style={{ width: `${g.total ? ((g.mixed || 0) / g.total) * 100 : 0}%`, background: 'var(--amber)' }} />
+              </span>
+              <span className="sub"><span>vGPU {fmt(g.vgpu)}</span><span>패스쓰루 {fmt(g.passthrough)}</span>{g.mixed ? <span>혼합 {fmt(g.mixed)}</span> : null}</span>
+            </button>
+          </section>
         </>
       )}
       <section className={`vmd${pendingSel ? ' pending' : ''}`} aria-busy={pendingSel || undefined}>
@@ -192,13 +289,13 @@ export default function Vms({ filters }) {
           {pager}
           {narrow
             ? <VmMobileList rows={rows} onOpen={openVm} />
-            : <DataTable columns={columns} rows={rows} className="vmd-table" initialSort={{ key: 'cpuUsagePct', dir: 'desc' }} />}
+            : <DataTable columns={columns} rows={rows} className="vmd-table" initialSort={{ key: 'cpuUsagePct', dir: 'desc' }} onVisible={onShown}
+              rowStyle={(r) => (selectedId && r.id === selectedId ? { background: 'var(--vmh-sel-bg)' } : undefined)} />}
           {rows.length > 30 && pager}
         </div>
       </section>
 
       <IpmsMatches filters={filters} />
-      {selected && <EntityDetail type="vm" item={selected} onClose={() => setSelected(null)} />}
     </>
   );
 }

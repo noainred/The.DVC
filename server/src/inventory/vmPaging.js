@@ -62,6 +62,8 @@ export const VM_FILTER_KEYS = [
   // v2.746(VM 상세 C안) 패널 선택 — 선택을 바꾸면 옛 커서는 400 cursor-query-mismatch. 없으면 지문이 예전과 같다(옛 커서 유효).
   //   `dist` 는 넣지 않는다(목록을 바꾸지 않는다).
   'cpuBin', 'memBin', 'power', 'osName',
+  // v2.909(가상화 서버 허브) 신호 선택 — 목록을 바꾸므로 지문에 넣는다(없으면 예전 지문 그대로). `signals`(개수 싣기)는 넣지 않는다.
+  'signal',
 ];
 export function vmFilterString(q) {
   const parts = [];

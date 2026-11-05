@@ -141,6 +141,26 @@
   · ⚠ (같은 릴리스 CI) ReDoS 비율 테스트의 '옛 정규식 > 40ms' 하한은 **고정 입력 크기로 두지 말 것** — 빠른 러너에서 옛 판정이 34.5ms 로 나와 실패했다
     (`audit2744h` INJPKG-02 ③). 옛 판정이 하한을 넘을 때까지 입력을 두 배로 늘린 뒤 같은 크기로 새 판정을 잰다(`growUntilSlow` — 변이 검증: 새 판정을 O(n²) 로 되돌리면 실패).
   · ⚠ 정직 기록: 실운영 vCenter 의 사용률 분포(값이 한쪽에 몰린 경우의 막대 높이)는 보지 못했다 — 목 데이터 2,242대로 확인했다.
+- ⚠⚠ **v2.910 — 가상화 서버 허브(코드·테스트 표지는 v2.909 — 준비 중 main 이 2.909.0(통합 장비 검색)을 먼저 써서 2.910.0 으로 게시) (시안 `docs/design/vm-screen` 시안 1 · 사용자 컨펌 2026-11-06 '시안 1 · 신호 만들어 · 타일로 줄여 · 드로어로 · ⑨ 포함'). 신호 판정은 서버 `inventory/vmSignals.js` 하나다**
+  (서버 `inventory/{vmSignals,vmByVcenter,vmTotals}.js` + `routes/api/inventory.js /vms`·`/vms/by-vcenter` + `vcenter/hostCorp.js corpIdentityOf·corpUnknownOf`(호스트·VM 법인별 공용) ·
+  웹 `views/vms/*`(VmHubTabs·VmsByCorp·VmsAttention·VmDrawer·vmSeries·vmHubText·vmHub.css) · `Vms.jsx` 셸 · `vcd/VmObject.jsx` 요약 탭 · `topMenu.js vm.also` · `SpecialTools.jsx` 탭 줄.
+  회귀 `server/test/vmHub2909.test.js`(8 · 변이 11/11 — 범위 4 · 판정 4 · 캐시 2 · 커서 1) + 웹 `views/vms/vmHub2909.test.jsx`(13)):
+  · 신호 4종은 **새 기준을 만들지 않는다**: 과부하 = 구동 VM · CPU 또는 메모리 칸 ≥ 18(분포 패널 90%↑ 와 같은 `usageBinOf`) · 사용률 미수집 = 구동 VM · CPU/메모리 중 하나라도 못 읽음
+    (과부하로 세지 않는다) · Tools 구버전 = `reports/compliance.js TOOLS_NEED_UPGRADE`(템플릿 제외 · 전원 무관) · 오래된 스냅샷 = 'VM 구성 점검' `snap-age` 그대로(`snapAgeDays`·예외 목록).
+    '유휴 후보' 는 신호가 아니다(1주 평균 CPU 는 vCenter 성능 조회 — VM 정밀 검색 도구 몫). 웹은 신호를 다시 판정하지 않는다(서버 키 = 웹 `SIGNAL_ORDER` — 테스트가 서버 파일과 대조).
+  · `/vms?signal=<키>` 는 **items·total 만** 거른다(KPI totals·분포는 그대로 — 패널 선택과 같은 규칙) · `signal` 은 `vmPaging.VM_FILTER_KEYS` 에 있다(바꾸면 옛 커서 400) ·
+    `signals=1` 은 개수(`signalCounts` — **KPI 집합 기준**, 패널·신호 선택으로 줄지 않는다)와 항목별 `signals[]`(페이지 항목만 · 스냅샷 원본은 바꾸지 않는다). 둘 다 없으면 응답은 예전 그대로.
+    형식 오류 400 bad-facet(field `signal`) — 같은 키 두 번·`signal[x]=` 도(`vmDist.facetShapeIssues(raw, keys)`). 캐시 키에 vm-hygiene 설정 개정(`rev`)을 넣는다(설정을 바꾸면 다음 요청부터).
+  · `/vms/by-vcenter`: 법인 목록은 **범위가 먼저**(요청 vcenterId·region 으로 넓힐 수 없다 · 범위 밖 법인 이름도 싣지 않는다) · 평균은 구동 VM · 미수집 제외(`vmTotals.usageAvg` — /vms 와 한 벌) ·
+    합계 줄 평균은 법인 평균의 평균이 아니다 · 모르는 법인(첫 수집 중·연결 실패·인증 정지이며 VM 0)은 null · 목록 밖 vCenter 의 VM 은 `unlisted` 줄 · memoJson + `scopeKey` + 설정 rev.
+  · `/vms` totals 계산은 `inventory/vmTotals.js` 로 **글자 그대로** 옮겼다(vmDist2746 ④ 바이트 대조 통과) — 합의 순서를 바꾸지 말 것(부동소수).
+  · 웹: 탭 `#/vms/<list|corp|attention>`(첫 조각 vms — 탭 id 그대로) + 도구 6개 링크(`#/tools/<k>` — 도구 키 그대로 · 권한 없으면 숨김 · 그 도구 화면 위에도 같은 줄 · `topMenu vm.also` 로 메뉴 위치 유지).
+    법인별·조치 필요는 **15초 폴링 금지**(열 때 1회 + 다시 읽기 · 늦은 응답 버림). KPI 8장 → 타일 5장(값은 그대로 `unitText` — v2.629 고정 테스트 · vCore 는 vCPU 와 같은 값이라 한 줄).
+  · VM 클릭 = 오른쪽 드로어(`VmDrawer` — 720 미만 전체 시트). **예전 모달 기능을 빠짐없이**: 버튼 6 · KV 17 · 섹션 6(`EntityDetail.jsx` 에서 꺼내 재사용 — 복제 금지).
+    ‹ › · ↑↓ 는 **표가 그린 순서**(DataTable onVisible — 정렬 반영). z-index 150/151 — 드로어 안에서 여는 공용 Modal(200)이 위에 온다. 24h 추이는 열 때 1회(`vmSeries.useDaySeries` — 꺼진 VM 은 조회 안 함 · AbortController).
+    `EntityDetail type='vm'` 모달은 다른 화면(검색·호스트 VM 목록 등)에서 그대로 쓴다 — 이 화면만 드로어다.
+  · ⚠ 1440 에서 표 오른쪽 열은 가로 스크롤 밖으로 밀린다(현황 표는 v2.898 부터 그랬다 — A/B) — **열을 늘리지 말 것**(신호 열을 끝에 두면 보이지 않았고, VM 다음에 끼우면 기본 정렬 열 CPU 값이 잘렸다 — 그래서 신호는 VM 이름 아래 줄 배지). 법인별 표는 10열로 맞췄다. 이 앱에는 전역 a 글자색이 없다 — class 없는 링크는 `.vmh` 범위 토큰 색.
+  · 개체 보기 요약 탭 4/5/3(`.vmo-grid` — 1280 미만 2열 · 760 미만 1열). 신호는 `VCenterDetail` 의 /vms 폴링에 `signals=1`. 시안의 '백업' 카드는 VM 행에 값이 없어 넣지 않았다(지어내지 않는다).
 - ⚠⚠ **v2.697 — VM 구성 속성(B10)은 30초 인벤토리 요청에 싣지 않는다 — 오래된 VM 부터 주기당 상한만큼 다시 읽는 캐시다**
   (`server/src/vmcfg/`{parse.js(순수 파서·판정·엣지 정제),cache.js,collect.js} + `soapClient.js` 배선 + 웹 `views/vmcfg/vmCfgText.js` + `EntityDetail.jsx VmCfgSection`.
   회귀 `server/test/vmCfg2697.test.js`(변이 5/5) + 웹 `vmCfgText.test.js`(서버·웹 판정 대조)):
