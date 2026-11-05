@@ -310,7 +310,8 @@ export function RulesView({ corp, corpRow, servicesOf, writable, op, busy, canFl
     ['이름 규칙(선택)', '접두·접미·포함 3종(정규식 아님). 적용 순서는 등록 순이 아닙니다 — 접두·접미가 포함보다 먼저, 같은 종류면 긴 값 먼저, 그다음 등록 순(규칙 표의 ‘N번째’). 대소문자는 구분하지 않습니다.'],
   ];
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: 12, minWidth: 0 }}>
+    // 두 카드가 나란히 서려면 칸마다 460px — 1440px 에서는 위아래로 쌓아 규칙 표의 '지우기' 열이 가로 스크롤 뒤로 숨지 않게 한다(5차 3차 Chromium 실측 · 400px 은 min(…, 100%) 로 넘치지 않게)
+    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(460px, 100%), 1fr))', gap: 12, minWidth: 0 }}>
       <div className="card" style={{ minWidth: 0 }}>
         <div style={{ padding: '10px 14px', borderBottom: '1px solid var(--border)' }}><b>소속 판정 순서</b> <span className="muted" style={{ fontSize: 12 }}>위가 이깁니다 · 서비스는 자동으로 만들지 않습니다</span></div>
         {ORDER.map(([h, p], i) => <div key={h} style={{ padding: '8px 14px', borderBottom: '1px solid var(--border)' }}><b>{i + 1}. {h}</b><div className="muted" style={{ fontSize: 12 }}>{p}</div></div>)}

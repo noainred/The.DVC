@@ -431,7 +431,7 @@ function CorpTree({ corps, servicesOf, noCorp, sel, open, onSel, onToggle }) {
     <div className="card" style={{ alignSelf: 'start', minWidth: 0 }}>
       <div style={{ padding: '10px 14px', borderBottom: '1px solid var(--border)' }}><b>법인 › 폴더 › 서비스</b></div>
       <div style={{ padding: '8px 10px 4px' }}>
-        <input className="input" type="search" value={tq} onChange={(e) => setTq(e.target.value)} placeholder="법인 · 서비스 · 폴더 찾기" aria-label="트리 찾기" style={{ width: '100%', minWidth: 0, boxSizing: 'border-box' }} />
+        <input className="input" type="search" value={tq} onChange={(e) => setTq(e.target.value)} placeholder="법인·서비스 찾기" title="법인 이름 · 서비스 이름 · 폴더에서 찾습니다" aria-label="트리 찾기" style={{ width: '100%', minWidth: 0, boxSizing: 'border-box' }} />
         {needle && rows.length <= 1 ? <div className="muted" style={{ fontSize: 12, padding: '6px 2px 0' }}>맞는 법인·서비스가 없습니다.</div> : null}
       </div>
       <div style={{ padding: '6px 2px', maxHeight: '70vh', overflowY: 'auto' }}>
