@@ -156,8 +156,8 @@ export function ReportView({ meta }) {
         <div className="card" style={{ minWidth: 0 }}>
           <h3 className="iss-h3">법인별</h3>
           {d.byCorp.length ? (
-            <STable className="table">
-              <thead><tr><th>법인</th><th>열림(지금)</th><th>생성</th><th>완료</th></tr></thead>
+            <STable className="table" wrap>
+              <thead><tr><th>법인</th><th title="지금 열린 이슈">열림</th><th>생성</th><th>완료</th></tr></thead>
               <tbody>{d.byCorp.map((c) => <tr key={c.vcenterId || '-'}><td>{c.name}</td><td data-sort={c.open}>{c.open}</td><td data-sort={c.created}>{c.created}</td><td data-sort={c.closed}>{c.closed}</td></tr>)}</tbody>
             </STable>
           ) : <div className="muted">이슈가 없습니다.</div>}
@@ -165,17 +165,17 @@ export function ReportView({ meta }) {
         <div className="card" style={{ minWidth: 0 }}>
           <h3 className="iss-h3">담당자별</h3>
           {d.byAssignee.length ? (
-            <STable className="table">
-              <thead><tr><th>사람</th><th>열림(지금)</th><th>완료</th><th>작업 기록</th></tr></thead>
+            <STable className="table" wrap>
+              <thead><tr><th>사람</th><th title="지금 열린 이슈(담당)">열림</th><th>완료</th><th title="기간 안 작업 기록(기록한 사람 기준)">기록</th></tr></thead>
               <tbody>{d.byAssignee.map((p) => <tr key={p.user}><td>{p.user}</td><td data-sort={p.open}>{p.open}</td><td data-sort={p.closed}>{p.closed}</td><td data-sort={p.loggedMin}>{p.loggedMin ? hoursText(Math.round((p.loggedMin / 60) * 10) / 10) : '—'}</td></tr>)}</tbody>
             </STable>
           ) : <div className="muted">담당자가 있는 이슈 · 작업 기록이 없습니다.</div>}
-          <div className="muted" style={{ fontSize: 12 }}>완료는 담당자 기준, 작업 기록은 기록한 사람 기준(시간 추적).</div>
+          <div className="muted" style={{ fontSize: 12 }}>열림은 지금 수 · 완료는 기간 안(담당자 기준) · 기록은 기간 안 작업 기록(기록한 사람 기준 — 시간 추적).</div>
         </div>
         <div className="card" style={{ minWidth: 0 }}>
           <h3 className="iss-h3">유형별 생성</h3>
           {d.byType.length ? (
-            <STable className="table">
+            <STable className="table" wrap>
               <thead><tr><th>유형</th><th>생성</th></tr></thead>
               <tbody>{d.byType.map((t) => <tr key={t.type}><td>{t.label}</td><td data-sort={t.created}>{t.created}</td></tr>)}</tbody>
             </STable>
