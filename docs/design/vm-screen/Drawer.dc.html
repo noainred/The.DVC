@@ -1,0 +1,214 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>VM 클릭 — 상세 드로어(1440)</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=Noto+Sans+KR:wght@400;500;700;800&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+body{margin:0;background:#0a0e17;color:#e6edf6;font-family:"Inter","Noto Sans KR","Apple SD Gothic Neo",sans-serif;font-size:13px}
+a{color:#93c5fd}a:hover{color:#bfdbfe}
+.mono{font-family:"JetBrains Mono",ui-monospace,monospace;font-variant-numeric:tabular-nums}
+.muted{color:#8b9bb4}
+.card{background:#141b2d;border:1px solid #243049;border-radius:12px}
+.btn{display:inline-flex;align-items:center;gap:6px;min-height:32px;padding:0 11px;border-radius:8px;border:1px solid #243049;background:#1a2236;color:#e6edf6;font:inherit;font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap;text-decoration:none}
+.btn.primary{background:#3b82f6;border-color:#3b82f6;color:#fff}
+.btn.icon{width:32px;padding:0;justify-content:center}
+.tag{display:inline-flex;align-items:center;gap:5px;height:20px;padding:0 8px;border-radius:999px;font-size:11px;font-weight:700;white-space:nowrap}
+.tag.blue{background:rgba(59,130,246,.18);color:#93c5fd}.tag.gray{background:rgba(139,155,180,.14);color:#aebbd0}.tag.ok{background:rgba(34,197,94,.14);color:#86efac}.tag.warn{background:rgba(245,158,11,.16);color:#fcd34d}.tag.crit{background:rgba(239,68,68,.16);color:#fca5a5}.tag.purple{background:rgba(168,85,247,.18);color:#d8b4fe}
+.dot{display:inline-block;width:9px;height:9px;border-radius:50%;flex:none}
+/* 뒤의 목록(흐림) */
+.ghost{position:absolute;inset:0;padding:16px 24px;opacity:.38;pointer-events:none;display:flex;flex-direction:column;gap:12px}
+.ghost .bar{height:44px;background:#0f1626;border-bottom:1px solid #243049;margin:-16px -24px 0}
+.ghost .tiles{display:grid;grid-template-columns:repeat(5, minmax(0, 1fr));gap:12px}
+.ghost .tile{height:104px}
+.ghost table{width:100%;border-collapse:collapse;font-size:12.5px}
+.ghost th{text-align:left;font-size:11.5px;color:#8b9bb4;padding:8px 10px;border-bottom:1px solid #243049;background:#0f1626}
+.ghost td{padding:9px 10px;border-bottom:1px solid #1f2a40;white-space:nowrap}
+.ghost tr.sel td{background:rgba(59,130,246,.18)}
+/* 드로어 */
+.drawer{position:absolute;top:0;right:0;bottom:0;width:min(640px,100%);background:#0f1626;border-left:1px solid #243049;box-shadow:-12px 0 40px rgba(0,0,0,.5);display:flex;flex-direction:column;min-width:0}
+.dh{padding:14px 18px 10px;border-bottom:1px solid #1f2a40;display:flex;flex-direction:column;gap:8px}
+.dh .ttl{display:flex;align-items:center;gap:10px;min-width:0}
+.dh h2{margin:0;font-size:18px;font-weight:800;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.crumb{font-size:12px;color:#8b9bb4;display:flex;flex-wrap:wrap;gap:2px 6px;align-items:center}
+.crumb a{color:#93c5fd;text-decoration:none}
+.acts{display:flex;flex-wrap:wrap;gap:6px;padding:10px 18px;border-bottom:1px solid #1f2a40;background:#141b2d}
+.body{flex:1;overflow:auto;padding:14px 18px 18px;display:flex;flex-direction:column;gap:14px}
+.sec{display:flex;flex-direction:column;gap:8px}
+.sh{display:flex;align-items:baseline;justify-content:space-between;gap:8px}
+.sh h3{margin:0;font-size:12.5px;font-weight:700;color:#8b9bb4;letter-spacing:.3px}
+.sh a{font-size:12px}
+.tiles{display:grid;grid-template-columns:repeat(4, minmax(0, 1fr));gap:8px}
+.tile{background:#141b2d;border:1px solid #243049;border-radius:10px;padding:10px 12px;display:flex;flex-direction:column;gap:6px;min-width:0}
+.tile .lb{font-size:11px;color:#8b9bb4;font-weight:600}
+.tile .v{font-size:20px;font-weight:800;line-height:1}
+.tile .v small{font-size:11px;color:#8b9bb4;font-weight:600;margin-left:3px}
+.tile .s{font-size:11px;color:#8b9bb4;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.spark{height:26px;width:100%}
+.sig{display:flex;flex-direction:column;gap:6px}
+.sig .row{display:flex;align-items:center;gap:10px;padding:8px 12px;background:#141b2d;border:1px solid #243049;border-radius:10px;min-width:0}
+.sig .row .t{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
+.sig .row .t b{font-size:12.5px}
+.sig .row .t span{font-size:11.5px;color:#8b9bb4;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.kv{display:grid;grid-template-columns:repeat(2, minmax(0, 1fr));gap:0 18px;background:#141b2d;border:1px solid #243049;border-radius:10px;padding:4px 12px}
+.kv div{display:flex;justify-content:space-between;gap:10px;padding:7px 0;border-bottom:1px solid #1f2a40;font-size:12.5px;min-width:0}
+.kv div:nth-last-child(-n+2){border-bottom:0}
+.kv span{color:#8b9bb4;flex:none}
+.kv b{font-weight:600;text-align:right;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+.tl{display:flex;flex-direction:column;gap:0;background:#141b2d;border:1px solid #243049;border-radius:10px;padding:4px 12px}
+.tl div{display:grid;grid-template-columns:92px 1fr;gap:10px;padding:7px 0;border-bottom:1px solid #1f2a40;font-size:12.5px}
+.tl div:last-child{border-bottom:0}
+.tl time{color:#8b9bb4;font-family:"JetBrains Mono",monospace;font-size:11.5px}
+table.pt{width:100%;border-collapse:collapse;font-size:12px;background:#141b2d;border:1px solid #243049;border-radius:10px;overflow:hidden}
+table.pt th{text-align:left;color:#8b9bb4;font-weight:700;font-size:11px;padding:7px 10px;border-bottom:1px solid #243049;background:#0f1626}
+table.pt td{padding:7px 10px;border-bottom:1px solid #1f2a40;white-space:nowrap}
+.pbar{height:6px;background:#0f1626;border-radius:3px;overflow:hidden;min-width:90px}
+.pbar i{display:block;height:100%;border-radius:3px}
+.df{padding:10px 18px;border-top:1px solid #1f2a40;background:#141b2d;display:flex;flex-wrap:wrap;gap:4px 10px;font-size:12px;align-items:center}
+.df a{text-decoration:none}
+.r{text-align:right}
+</style>
+</helmet>
+
+<div style="position:relative;min-height:1000px;background:#0a0e17;overflow:hidden">
+  <div class="ghost" aria-hidden="true">
+    <div class="bar"></div>
+    <div style="display:flex;gap:12px;align-items:baseline"><span style="font-size:20px;font-weight:800">가상화 서버</span><span class="tag blue">2,242대</span></div>
+    <div class="tiles"><div class="card tile"></div><div class="card tile"></div><div class="card tile"></div><div class="card tile"></div><div class="card tile"></div></div>
+    <div class="card" style="padding:0;overflow:hidden">
+      <table>
+        <thead><tr><th>VM</th><th>법인 · vCenter</th><th>Guest OS</th><th>IP</th><th>vCPU · RAM</th><th>CPU</th><th>메모리</th><th>호스트</th></tr></thead>
+        <tbody>
+          <tr class="sel"><td>web-kr1-023</td><td>VC-KR1</td><td>Windows Server 2019</td><td>10.12.4.23</td><td>8 · 32 GB</td><td>97%</td><td>88%</td><td>esx-kr1-07</td></tr>
+          <tr><td>db-pl1-004</td><td>VC-PL1</td><td>RHEL 8.9</td><td>10.44.1.4</td><td>16 · 128 GB</td><td>96%</td><td>91%</td><td>esx-pl1-02</td></tr>
+          <tr><td>ai-us1-011</td><td>VC-US1</td><td>Ubuntu 22.04</td><td>10.80.3.11</td><td>32 · 256 GB</td><td>95%</td><td>72%</td><td>esx-us1-05</td></tr>
+          <tr><td>app-kr2-108</td><td>VC-KR2</td><td>Windows Server 2022</td><td>10.13.7.108</td><td>4 · 16 GB</td><td>94%</td><td>61%</td><td>esx-kr2-11</td></tr>
+          <tr><td>etl-de1-019</td><td>VC-DE1</td><td>Rocky Linux 9.3</td><td>10.60.2.19</td><td>8 · 64 GB</td><td>93%</td><td>83%</td><td>esx-de1-03</td></tr>
+          <tr><td>render-jp1-002</td><td>VC-JP1</td><td>Windows 10</td><td>10.70.5.2</td><td>16 · 64 GB</td><td>92%</td><td>54%</td><td>esx-jp1-01</td></tr>
+          <tr><td>cache-kr1-077</td><td>VC-KR1</td><td>Ubuntu 20.04</td><td>10.12.6.77</td><td>2 · 8 GB</td><td>91%</td><td>47%</td><td>esx-kr1-12</td></tr>
+          <tr><td>vdi-pl1-230</td><td>VC-PL1</td><td>Windows 10</td><td>—</td><td>2 · 8 GB</td><td>90%</td><td>76%</td><td>esx-pl1-09</td></tr>
+          <tr><td>bi-kr1-140</td><td>VC-KR1</td><td>Windows Server 2019</td><td>10.12.4.140</td><td>8 · 128 GB</td><td>62%</td><td>94%</td><td>esx-kr1-07</td></tr>
+          <tr><td>mq-pl1-017</td><td>VC-PL1</td><td>RHEL 8.9</td><td>10.44.1.17</td><td>4 · 32 GB</td><td>71%</td><td>96%</td><td>esx-pl1-02</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <aside class="drawer" aria-label="VM 상세">
+    <div class="dh">
+      <div class="ttl">
+        <span class="dot" style="background:#22c55e" title="켜짐"></span>
+        <h2>web-kr1-023</h2>
+        <span class="tag warn">Tools 구버전</span>
+        <span class="tag crit">CPU 90%↑</span>
+        <span style="flex:1"></span>
+        <button class="btn icon" type="button" aria-label="이전 VM">‹</button>
+        <button class="btn icon" type="button" aria-label="다음 VM">›</button>
+        <button class="btn icon" type="button" aria-label="닫기">×</button>
+      </div>
+      <div class="crumb">
+        <a href="#">VC-KR1</a><span>›</span><a href="#">DC-KR1</a><span>›</span><a href="#">Cluster-A</a><span>›</span><a href="#">esx-kr1-07</a><span>·</span><span>리소스 풀 prod</span><span>·</span><span>폴더 /web</span>
+        <span style="flex:1"></span><span class="mono">목록 1/48 · 스냅샷 21:16:40</span>
+      </div>
+    </div>
+    <div class="acts">
+      <a href="VmObjectV2.dc.html" class="btn primary">⤢ 개체 보기</a>
+      <button class="btn" type="button">콘솔</button>
+      <button class="btn" type="button">원격 접속</button>
+      <button class="btn" type="button">사양 변경</button>
+      <button class="btn" type="button">메트릭</button>
+      <button class="btn" type="button">축소 근거 리포트</button>
+    </div>
+
+    <div class="body">
+      <section class="sec">
+        <div class="sh"><h3>한눈에 · 구동 중 · 24시간 추이는 열 때 1회 조회</h3></div>
+        <div class="tiles">
+          <div class="tile"><span class="lb">CPU</span><span class="v mono" style="color:#fca5a5">97<small>%</small></span>
+            <svg class="spark" viewBox="0 0 100 26" preserveAspectRatio="none" aria-hidden="true"><polyline fill="none" stroke="#ef4444" stroke-width="1.5" points="0,18 10,16 20,17 30,12 40,13 50,9 60,10 70,6 80,5 90,3 100,2"/></svg>
+            <span class="s">8 vCPU · Ready 6.2%</span></div>
+          <div class="tile"><span class="lb">메모리</span><span class="v mono" style="color:#fcd34d">88<small>%</small></span>
+            <svg class="spark" viewBox="0 0 100 26" preserveAspectRatio="none" aria-hidden="true"><polyline fill="none" stroke="#f59e0b" stroke-width="1.5" points="0,14 10,13 20,13 30,12 40,11 50,10 60,9 70,8 80,7 90,6 100,5"/></svg>
+            <span class="s">32 GB 할당 · 28.2 GB 사용</span></div>
+          <div class="tile"><span class="lb">디스크</span><span class="v mono">71<small>%</small></span>
+            <div class="pbar" style="margin-top:8px"><i style="width:71%;background:#22d3ee"></i></div>
+            <span class="s">142 / 200 GB · 디스크 2개</span></div>
+          <div class="tile"><span class="lb">네트워크 · 게스트</span><span class="v mono">2<small>IP</small></span>
+            <span class="s mono">10.12.4.23 · 10.12.9.23</span>
+            <span class="s">Tools 11.3.5 · 핑 OK</span></div>
+        </div>
+      </section>
+
+      <section class="sec">
+        <div class="sh"><h3>신호 4 — 봐야 할 것</h3><a href="VmObjectV2.dc.html">개체 보기 › 모니터</a></div>
+        <div class="sig">
+          <div class="row"><span class="dot" style="background:#ef4444"></span><div class="t"><b>CPU 90% 이상 — 지금 97%</b><span>같은 호스트 esx-kr1-07 에 과부하 VM 3대 · 경합 Ready 6.2%(평균)</span></div><a href="#" class="btn">메트릭</a></div>
+          <div class="row"><span class="dot" style="background:#f59e0b"></span><div class="t"><b>VMware Tools 구버전 11.3.5</b><span>호스트가 제공하는 12.3.0 보다 낮음 · 업그레이드는 ‘VMware Tools’ 도구</span></div><a href="#" class="btn">Tools</a></div>
+          <div class="row"><span class="dot" style="background:#f59e0b"></span><div class="t"><b>스냅샷 1개 · 12 GB · 31일 경과</b><span>pre-patch-2025-10 · 생성자 admin@vsphere.local(이벤트 추정)</span></div><a href="#" class="btn">스냅샷</a></div>
+          <div class="row"><span class="dot" style="background:#8b9bb4"></span><div class="t"><b>구성 점검 1 — CPU 핫애드 꺼짐</b><span>클러스터 DRS 수동 · HA 재시작 우선순위 보통</span></div><a href="#" class="btn">구성</a></div>
+        </div>
+      </section>
+
+      <section class="sec">
+        <div class="sh"><h3>구성 · 배치</h3><a href="#">vmcfg 읽은 시각 21:10</a></div>
+        <div class="kv">
+          <div><span>Guest OS</span><b>Windows Server 2019 (64-bit)</b></div>
+          <div><span>HW 버전</span><b>vmx-19</b></div>
+          <div><span>vCPU</span><b>8 (소켓 2 × 코어 4)</b></div>
+          <div><span>RAM</span><b>32 GB</b></div>
+          <div><span>디스크</span><b>OS 100 GB · data 100 GB (씬)</b></div>
+          <div><span>데이터스토어</span><b>DS-KR1-SSD-02</b></div>
+          <div><span>NIC</span><b>2 · PG-prod-vlan120</b></div>
+          <div><span>GPU</span><b>—</b></div>
+          <div><span>호스트</span><b>esx-kr1-07</b></div>
+          <div><span>클러스터</span><b>Cluster-A · DRS 수동</b></div>
+          <div><span>태그</span><b>tier:web · owner:platform</b></div>
+          <div><span>백업</span><b style="color:#86efac">Bareos VC-KR1 · 11-05 02:10 성공</b></div>
+          <div style="grid-column:1/3"><span>메모</span><b style="white-space:normal;text-align:left">2025-10 패치 전 스냅샷 유지 — 11월 말 삭제 예정</b></div>
+        </div>
+      </section>
+
+      <section class="sec">
+        <div class="sh"><h3>최근 변경 · 이동 (5건)</h3><a href="#">전체</a></div>
+        <div class="tl">
+          <div><time>11-04 23:12</time><span>vMotion esx-kr1-03 → esx-kr1-07 (DRS 수동 · 관리자)</span></div>
+          <div><time>11-01 09:40</time><span>메모리 24 → 32 GB (핫애드)</span></div>
+          <div><time>10-05 02:00</time><span>스냅샷 생성 pre-patch-2025-10</span></div>
+          <div><time>09-28 14:21</time><span>태그 추가 owner:platform</span></div>
+          <div><time>09-12 11:03</time><span>포트그룹 변경 vlan110 → vlan120</span></div>
+        </div>
+      </section>
+
+      <section class="sec">
+        <div class="sh"><h3>게스트 파티션 · Tools 보고 · 21:10</h3></div>
+        <table class="pt">
+          <thead><tr><th>마운트</th><th>용량</th><th>사용</th><th>사용률</th></tr></thead>
+          <tbody>
+            <tr><td class="mono">C:\</td><td class="r mono">100 GB</td><td class="r mono">81 GB</td><td><span style="display:flex;align-items:center;gap:8px"><span class="pbar"><i style="width:81%;background:#f59e0b"></i></span><span class="mono">81%</span></span></td></tr>
+            <tr><td class="mono">D:\</td><td class="r mono">100 GB</td><td class="r mono">61 GB</td><td><span style="display:flex;align-items:center;gap:8px"><span class="pbar"><i style="width:61%;background:#3b82f6"></i></span><span class="mono">61%</span></span></td></tr>
+          </tbody>
+        </table>
+      </section>
+    </div>
+
+    <div class="df">
+      <span class="muted">개체 보기 탭으로 바로:</span>
+      <a href="VmObjectV2.dc.html">요약</a><a href="#">모니터</a><a href="#">구성</a><a href="#">데이터스토어</a><a href="#">네트워크</a><a href="#">스냅샷</a><a href="#">업데이트</a>
+      <span style="flex:1"></span>
+      <span class="muted mono">Esc 닫기 · ↑↓ 이전/다음 VM</span>
+    </div>
+  </aside>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1000}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

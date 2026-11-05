@@ -1,0 +1,246 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>VM 개체 보기 — 요약 탭 재설계</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=Noto+Sans+KR:wght@400;500;700;800&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+body{margin:0;background:#0a0e17;color:#e6edf6;font-family:"Inter","Noto Sans KR","Apple SD Gothic Neo",sans-serif;font-size:13px}
+a{color:#93c5fd}a:hover{color:#bfdbfe}
+.mono{font-family:"JetBrains Mono",ui-monospace,monospace;font-variant-numeric:tabular-nums}
+.muted{color:#8b9bb4}
+.tb{display:flex;align-items:center;gap:14px;height:44px;padding:0 16px;background:#0f1626;border-bottom:1px solid #243049}
+.logo{display:inline-flex;align-items:center;gap:8px;font-weight:800;font-size:14px}
+.logo .v{width:26px;height:26px;border-radius:7px;background:#3b82f6;display:inline-flex;align-items:center;justify-content:center;font-size:13px;color:#fff}
+.ver{font-size:11px;font-weight:700;color:#5eead4;border:1px solid #2dd4bf;border-radius:6px;padding:1px 6px}
+.mock{font-size:11px;font-weight:800;color:#fcd34d;background:rgba(245,158,11,.16);border-radius:6px;padding:2px 7px}
+.m1{display:flex;gap:4px;padding:6px 16px 0;background:#0f1626;border-bottom:1px solid #1f2a40;overflow-x:auto}
+.m1 a{color:#8b9bb4;padding:8px 12px;border-radius:8px 8px 0 0;font-weight:600;white-space:nowrap;text-decoration:none}
+.m1 a.on{color:#e6edf6;background:#141b2d;box-shadow:inset 0 2px 0 #3b82f6}
+.m2{display:flex;gap:2px;padding:6px 16px;background:#141b2d;border-bottom:1px solid #243049;overflow-x:auto}
+.m2 a{color:#8b9bb4;padding:6px 10px;border-radius:7px;font-weight:600;white-space:nowrap;text-decoration:none}
+.m2 a.on{color:#fff;background:#3b82f6}
+.btn{display:inline-flex;align-items:center;gap:6px;min-height:32px;padding:0 11px;border-radius:8px;border:1px solid #243049;background:#1a2236;color:#e6edf6;font:inherit;font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap;text-decoration:none}
+.btn.primary{background:#3b82f6;border-color:#3b82f6;color:#fff}
+.card{background:#141b2d;border:1px solid #243049;border-radius:12px;min-width:0}
+.ch{display:flex;align-items:baseline;justify-content:space-between;gap:8px;padding:10px 14px;border-bottom:1px solid #1f2a40}
+.ch h3{margin:0;font-size:13px;font-weight:700}
+.ch span{font-size:11.5px;color:#8b9bb4}
+.cb{padding:10px 14px}
+.tag{display:inline-flex;align-items:center;gap:5px;height:20px;padding:0 8px;border-radius:999px;font-size:11px;font-weight:700;white-space:nowrap}
+.tag.blue{background:rgba(59,130,246,.18);color:#93c5fd}.tag.gray{background:rgba(139,155,180,.14);color:#aebbd0}.tag.ok{background:rgba(34,197,94,.14);color:#86efac}.tag.warn{background:rgba(245,158,11,.16);color:#fcd34d}.tag.crit{background:rgba(239,68,68,.16);color:#fca5a5}
+.dot{display:inline-block;width:9px;height:9px;border-radius:50%;flex:none}
+.crumb{font-size:12px;color:#8b9bb4;display:flex;flex-wrap:wrap;gap:2px 6px;align-items:center}
+.crumb a{color:#93c5fd;text-decoration:none}
+.hero{display:flex;flex-wrap:wrap;align-items:center;gap:10px 14px}
+.hero h1{margin:0;font-size:22px;font-weight:800}
+.tabs{display:flex;align-items:center;gap:2px;border-bottom:1px solid #243049;overflow-x:auto}
+.tabs a{display:inline-flex;align-items:center;gap:6px;padding:10px 14px;color:#8b9bb4;font-weight:600;white-space:nowrap;text-decoration:none;border-bottom:2px solid transparent;margin-bottom:-1px}
+.tabs a.on{color:#e6edf6;border-bottom-color:#3b82f6}
+.tabs .cnt{font-size:11px;font-weight:800;background:rgba(245,158,11,.16);color:#fcd34d;border-radius:999px;padding:1px 7px}
+.g{display:grid;grid-template-columns:repeat(12, minmax(0, 1fr));gap:12px}
+.kv{display:flex;flex-direction:column}
+.kv div{display:flex;justify-content:space-between;gap:10px;padding:7px 0;border-bottom:1px solid #1f2a40;font-size:12.5px;min-width:0}
+.kv div:last-child{border-bottom:0}
+.kv span{color:#8b9bb4;flex:none}
+.kv b{font-weight:600;text-align:right;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+.kv b a{text-decoration:none}
+.gauges{display:grid;grid-template-columns:repeat(3, minmax(0, 1fr));gap:12px}
+.gauge{display:flex;flex-direction:column;align-items:center;gap:6px;min-width:0}
+.ring{width:92px;height:92px;border-radius:50%;display:flex;align-items:center;justify-content:center;position:relative}
+.ring i{position:absolute;inset:9px;border-radius:50%;background:#141b2d}
+.ring b{position:relative;font-size:20px;font-weight:800;font-family:"JetBrains Mono",monospace}
+.ring b small{font-size:11px;color:#8b9bb4;font-weight:600}
+.gl{font-size:12px;font-weight:700}
+.gs{font-size:11.5px;color:#8b9bb4;text-align:center}
+.spark{height:40px;width:100%}
+.srow{display:grid;grid-template-columns:72px 1fr 60px;gap:10px;align-items:center;padding:6px 0;border-bottom:1px solid #1f2a40;font-size:12px}
+.srow:last-child{border-bottom:0}
+.sig{display:flex;flex-direction:column;gap:6px}
+.sig .row{display:flex;align-items:flex-start;gap:10px;padding:8px 0;border-bottom:1px solid #1f2a40;min-width:0}
+.sig .row:last-child{border-bottom:0}
+.sig .row .t{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
+.sig .row .t b{font-size:12.5px}
+.sig .row .t span{font-size:11.5px;color:#8b9bb4}
+.tl div{display:grid;grid-template-columns:86px 1fr;gap:10px;padding:7px 0;border-bottom:1px solid #1f2a40;font-size:12px}
+.tl div:last-child{border-bottom:0}
+.tl time{color:#8b9bb4;font-family:"JetBrains Mono",monospace;font-size:11.5px}
+table{width:100%;border-collapse:collapse;font-size:12px}
+th{text-align:left;color:#8b9bb4;font-weight:700;font-size:11px;padding:6px 8px;border-bottom:1px solid #243049}
+td{padding:6px 8px;border-bottom:1px solid #1f2a40;white-space:nowrap}
+.r{text-align:right}
+.tree{font-family:"JetBrains Mono",monospace;font-size:11.5px;line-height:1.7;color:#aebbd0}
+.pbar{height:6px;background:#0f1626;border-radius:3px;overflow:hidden;min-width:80px}
+.pbar i{display:block;height:100%;border-radius:3px}
+</style>
+</helmet>
+
+<div style="min-height:100%;display:flex;flex-direction:column;background:#0a0e17">
+  <div class="tb">
+    <span class="logo"><span class="v">V</span>THE DAVINCI</span>
+    <span class="ver">v2.899</span>
+    <span class="mock">MOCK</span>
+    <span style="flex:1"></span>
+    <span class="muted" style="font-size:12px">admin · 21:16 KST</span>
+  </div>
+  <nav class="m1" aria-label="대메뉴">
+    <a href="#">Overview</a><a href="#">Summary</a><a href="#" class="on">서버</a><a href="#">스토리지</a><a href="#">네트워크</a><a href="#">자원관리</a><a href="#">자원 최적화</a><a href="#">운영관제</a><a href="#">특수 기능</a><a href="#">설정</a>
+  </nav>
+  <nav class="m2" aria-label="서버 하위 메뉴">
+    <a href="#">가상화 서버</a><a href="#">ESXi 호스트</a><a href="#" class="on">vCenter</a><a href="#">물리 서버</a><a href="#">Backup</a><a href="#">알람</a>
+  </nav>
+
+  <main style="padding:14px 24px 24px;display:flex;flex-direction:column;gap:12px;min-width:0">
+    <div class="crumb"><a href="Drawer.dc.html">← 가상화 서버 목록</a><span>·</span><a href="#">VC-KR1</a><span>›</span><a href="#">DC-KR1</a><span>›</span><a href="#">/web</a><span>›</span><span style="color:#e6edf6">web-kr1-023</span></div>
+
+    <header class="hero">
+      <span class="dot" style="background:#22c55e;width:12px;height:12px" title="켜짐"></span>
+      <h1>web-kr1-023</h1>
+      <span class="tag blue">VM</span>
+      <span class="muted">Windows Server 2019 (64-bit) · vmx-19 · 켜진 지 41일</span>
+      <span class="tag crit">CPU 90%↑</span><span class="tag warn">Tools 구버전</span><span class="tag warn">스냅샷 31일</span>
+      <span style="flex:1"></span>
+      <button class="btn" type="button">콘솔</button>
+      <button class="btn" type="button">원격 접속</button>
+      <button class="btn" type="button">사양 변경</button>
+      <button class="btn" type="button">축소 근거 리포트</button>
+      <button class="btn" type="button" aria-label="더 보기">⋯</button>
+    </header>
+
+    <nav class="tabs" aria-label="VM 개체 탭">
+      <a href="#" class="on">요약</a><a href="#">모니터 <span class="cnt">2</span></a><a href="#">구성</a><a href="#">사용 권한</a><a href="#">데이터스토어</a><a href="#">네트워크</a><a href="#">스냅샷 <span class="cnt">1</span></a><a href="#">업데이트</a>
+    </nav>
+
+    <div class="g">
+      <div style="grid-column:span 4;display:flex;flex-direction:column;gap:12px;min-width:0">
+        <section class="card">
+          <div class="ch"><h3>VM 하드웨어</h3><span>/vms · vmcfg 21:10</span></div>
+          <div class="cb kv">
+            <div><span>CPU</span><b>8 vCPU · 소켓 2 × 코어 4 · 핫애드 꺼짐</b></div>
+            <div><span>메모리</span><b>32 GB · 핫애드 켜짐</b></div>
+            <div><span>하드 디스크 1</span><b>100 GB 씬 · DS-KR1-SSD-02</b></div>
+            <div><span>하드 디스크 2</span><b>100 GB 씬 · DS-KR1-SSD-02</b></div>
+            <div><span>네트워크 어댑터 1</span><b>vmxnet3 · PG-prod-vlan120 · 연결됨</b></div>
+            <div><span>네트워크 어댑터 2</span><b>vmxnet3 · PG-mgmt-vlan9 · 연결됨</b></div>
+            <div><span>CD/DVD</span><b>클라이언트 장치 · 분리됨</b></div>
+            <div><span>GPU</span><b>—</b></div>
+            <div><span>호환성</span><b>ESXi 7.0 U2 이상 (vmx-19)</b></div>
+          </div>
+        </section>
+        <section class="card">
+          <div class="ch"><h3>관련 개체</h3><span>vmPlacement</span></div>
+          <div class="cb kv">
+            <div><span>호스트</span><b><a href="#">esx-kr1-07</a></b></div>
+            <div><span>클러스터</span><b><a href="#">Cluster-A</a> · DRS 수동 · HA 켜짐</b></div>
+            <div><span>리소스 풀</span><b>prod</b></div>
+            <div><span>데이터스토어</span><b><a href="#">DS-KR1-SSD-02</a> · 사용 78%</b></div>
+            <div><span>네트워크</span><b>PG-prod-vlan120 · PG-mgmt-vlan9</b></div>
+            <div><span>폴더</span><b>/DC-KR1/web</b></div>
+          </div>
+        </section>
+        <section class="card">
+          <div class="ch"><h3>태그 · 메모</h3><span>vm-tags</span></div>
+          <div class="cb" style="display:flex;flex-direction:column;gap:8px">
+            <div style="display:flex;gap:6px;flex-wrap:wrap"><span class="tag gray">tier:web</span><span class="tag gray">owner:platform</span><span class="tag gray">env:prod</span></div>
+            <div class="muted" style="font-size:12px;white-space:pre-wrap">2025-10 패치 전 스냅샷 유지 — 11월 말 삭제 예정</div>
+          </div>
+        </section>
+      </div>
+
+      <div style="grid-column:span 5;display:flex;flex-direction:column;gap:12px;min-width:0">
+        <section class="card">
+          <div class="ch"><h3>사용률</h3><span>quickStats · 추이 24시간은 열 때 1회 조회(저장 안 함)</span></div>
+          <div class="cb" style="display:flex;flex-direction:column;gap:12px">
+            <div class="gauges">
+              <div class="gauge"><div class="ring" style="background:conic-gradient(#ef4444 97%, #0f1626 0)"><i></i><b>97<small>%</small></b></div><span class="gl">CPU</span><span class="gs">7.8 / 8 vCPU 상당 · 19.4 GHz</span></div>
+              <div class="gauge"><div class="ring" style="background:conic-gradient(#f59e0b 88%, #0f1626 0)"><i></i><b>88<small>%</small></b></div><span class="gl">메모리</span><span class="gs">28.2 / 32 GB · 벌룬 0</span></div>
+              <div class="gauge"><div class="ring" style="background:conic-gradient(#22d3ee 71%, #0f1626 0)"><i></i><b>71<small>%</small></b></div><span class="gl">디스크</span><span class="gs">142 / 200 GB · 지연 4 ms</span></div>
+            </div>
+            <div>
+              <div class="srow"><span class="muted">CPU 24h</span><svg class="spark" viewBox="0 0 300 40" preserveAspectRatio="none" aria-hidden="true"><polyline fill="none" stroke="#ef4444" stroke-width="1.5" points="0,30 25,28 50,29 75,22 100,24 125,16 150,18 175,10 200,9 225,6 250,5 275,3 300,2"/></svg><span class="mono r" style="color:#fca5a5">최대 99%</span></div>
+              <div class="srow"><span class="muted">메모리 24h</span><svg class="spark" viewBox="0 0 300 40" preserveAspectRatio="none" aria-hidden="true"><polyline fill="none" stroke="#f59e0b" stroke-width="1.5" points="0,22 25,21 50,21 75,20 100,18 125,17 150,15 175,14 200,12 225,10 250,9 275,7 300,6"/></svg><span class="mono r">최대 90%</span></div>
+              <div class="srow"><span class="muted">네트워크 24h</span><svg class="spark" viewBox="0 0 300 40" preserveAspectRatio="none" aria-hidden="true"><polyline fill="none" stroke="#3b82f6" stroke-width="1.5" points="0,28 25,20 50,30 75,12 100,26 125,18 150,32 175,14 200,22 225,8 250,26 275,16 300,20"/></svg><span class="mono r">최대 412 Mb/s</span></div>
+            </div>
+          </div>
+        </section>
+        <section class="card">
+          <div class="ch"><h3>경합 · 최근 창</h3><span>perfc · vCPU 당 % · 판정은 평균</span></div>
+          <div class="cb">
+            <table>
+              <thead><tr><th>지표</th><th class="r">평균</th><th class="r">최대</th><th>판정</th></tr></thead>
+              <tbody>
+                <tr><td>CPU Ready</td><td class="r mono">6.2%</td><td class="r mono">11.8%</td><td><span class="tag warn">주의 (5%↑)</span></td></tr>
+                <tr><td>CPU Co-stop</td><td class="r mono">0.4%</td><td class="r mono">1.9%</td><td><span class="tag ok">정상</span></td></tr>
+                <tr><td>메모리 스왑</td><td class="r mono">0 MB</td><td class="r mono">0 MB</td><td><span class="tag ok">정상</span></td></tr>
+                <tr><td>디스크 지연</td><td class="r mono">4 ms</td><td class="r mono">17 ms</td><td><span class="tag ok">정상 (20 ms 기준)</span></td></tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+        <section class="card">
+          <div class="ch"><h3>게스트 OS</h3><span>VMware Tools 보고 · 21:10</span></div>
+          <div class="cb kv">
+            <div><span>OS</span><b>Windows Server 2019 Standard (build 17763)</b></div>
+            <div><span>호스트 이름</span><b>WEB-KR1-023.corp.local</b></div>
+            <div><span>IP</span><b class="mono">10.12.4.23 · 10.12.9.23</b></div>
+            <div><span>DNS 역방향</span><b><span class="tag ok">일치</span> web-kr1-023.corp.local</b></div>
+            <div><span>Tools</span><b><span class="tag warn">구버전</span> 11.3.5 · 실행 중 · 호스트 제공 12.3.0</b></div>
+            <div><span>IP 대장</span><b><a href="#">IPMS 10.12.4.23 — 일치</a></b></div>
+          </div>
+        </section>
+      </div>
+
+      <div style="grid-column:span 3;display:flex;flex-direction:column;gap:12px;min-width:0">
+        <section class="card">
+          <div class="ch"><h3>신호 4</h3><span>서버 판정</span></div>
+          <div class="cb sig">
+            <div class="row"><span class="dot" style="background:#ef4444;margin-top:4px"></span><div class="t"><b>CPU 90% 이상</b><span>지금 97% · 호스트 과부하 3대</span></div></div>
+            <div class="row"><span class="dot" style="background:#f59e0b;margin-top:4px"></span><div class="t"><b>Tools 구버전</b><span>11.3.5 → 12.3.0</span></div></div>
+            <div class="row"><span class="dot" style="background:#f59e0b;margin-top:4px"></span><div class="t"><b>스냅샷 31일 · 12 GB</b><span>pre-patch-2025-10</span></div></div>
+            <div class="row"><span class="dot" style="background:#8b9bb4;margin-top:4px"></span><div class="t"><b>구성 점검 1</b><span>CPU 핫애드 꺼짐</span></div></div>
+          </div>
+        </section>
+        <section class="card">
+          <div class="ch"><h3>스냅샷</h3><span class="tag warn">1개 · 31일</span></div>
+          <div class="cb tree">
+            <div>web-kr1-023</div>
+            <div>└ pre-patch-2025-10 <span class="muted">10-05 · 12 GB</span></div>
+            <div>&nbsp;&nbsp;└ <span style="color:#86efac">● 지금 여기</span></div>
+          </div>
+        </section>
+        <section class="card">
+          <div class="ch"><h3>백업</h3><span>법인 Bareos VC-KR1</span></div>
+          <div class="cb kv">
+            <div><span>마지막 성공</span><b style="color:#86efac">11-05 02:10 · 증분 18 GB</b></div>
+            <div><span>다음 예정</span><b>11-06 02:00</b></div>
+            <div><span>보관</span><b>일 14 · 주 8 · 월 6</b></div>
+            <div><span>복원 지점</span><b><a href="#">28개</a></b></div>
+          </div>
+        </section>
+        <section class="card">
+          <div class="ch"><h3>최근 변경 · 이동</h3><a href="#" style="font-size:11.5px">전체</a></div>
+          <div class="cb tl">
+            <div><time>11-04 23:12</time><span>vMotion → esx-kr1-07</span></div>
+            <div><time>11-01 09:40</time><span>메모리 24 → 32 GB</span></div>
+            <div><time>10-05 02:00</time><span>스냅샷 생성</span></div>
+            <div><time>09-28 14:21</time><span>태그 owner:platform</span></div>
+            <div><time>09-12 11:03</time><span>포트그룹 vlan110 → 120</span></div>
+          </div>
+        </section>
+      </div>
+    </div>
+  </main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1460}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>
