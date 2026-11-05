@@ -7,7 +7,7 @@ import { fetchJson, postJson } from '../../../api.js';
 import { STable } from '../../../components/STable.jsx';
 import Select from '../../../components/Select.jsx';
 import { Loading, ErrorBox } from '../../../components/ui.jsx';
-import { GROUP_TITLE, groupActions, SRC_LABEL, opErrorText } from '../svcInventoryText.js';
+import { GROUP_TITLE, groupActions, SRC_LABEL, opErrorText, keyText, isMaskedKey, MASKED_KEY_TITLE } from '../svcInventoryText.js';
 
 const btn = { padding: '5px 10px', fontSize: 12, flex: 'none' };
 const svcLabel = (s) => `${s.path ? `${s.path}\\` : ''}${s.name}`;
@@ -135,7 +135,7 @@ export function ReviewView({ corp, reloadKey, svcName, writableOf, op, busy, cor
             <thead><tr><th>구성원 · 법인</th><th>고정된 서비스</th><th>자동 판정</th><th data-nosort>조치</th></tr></thead>
             <tbody>{q.drift.map((x) => (
               <tr key={x.key}>
-                <td data-sort={x.name} title={x.key}><b>{x.name}</b><div className="svcinv-sub">{corpName(x.corp)}</div><div className="svcinv-sub" style={{ fontFamily: 'var(--mono)' }}>{x.key}</div></td>
+                <td data-sort={x.name} title={isMaskedKey(x.key) ? MASKED_KEY_TITLE : x.key}><b>{x.name}</b><div className="svcinv-sub">{corpName(x.corp)}</div><div className="svcinv-sub" style={{ fontFamily: 'var(--mono)' }}>{keyText(x.key)}</div></td>
                 <td>{svcName(x.pin.serviceId)}<div className="svcinv-sub">{x.pin.by || '?'}{x.pin.at ? ` · ${new Date(x.pin.at).toLocaleDateString()}` : ''}</div></td>
                 <td>{svcName(x.auto.serviceId)} <span className="badge blue">{SRC_LABEL[x.auto.src] || x.auto.src}</span>
                   {/* 바뀜 표지는 줄을 따로 — 같은 줄에 두면 1440px 에서 조치 열이 가로 스크롤 뒤로 밀린다(실측) */}
@@ -167,10 +167,10 @@ export function ReviewView({ corp, reloadKey, svcName, writableOf, op, busy, cor
             <STable className="table svcinv-t" minWidth={680}>
               <thead><tr><th>키</th><th>법인</th><th>고정된 서비스</th><th>고정한 사람 · 시각</th><th>상태</th></tr></thead>
               <tbody>
-                {q.ghosts.map((g) => <tr key={g.key}><td style={{ fontFamily: 'var(--mono)', fontSize: 12, wordBreak: 'break-all' }}>{g.key}</td><td>{corpName(g.corp)}</td><td>{g.serviceName || '?'}</td><td>{g.by || '?'}{g.at ? ` · ${new Date(g.at).toLocaleDateString()}` : ''}</td><td><span className="badge amber">정리 대상</span></td></tr>)}
+                {q.ghosts.map((g) => <tr key={g.key}><td style={{ fontFamily: 'var(--mono)', fontSize: 12, wordBreak: 'break-all' }} title={isMaskedKey(g.key) ? MASKED_KEY_TITLE : undefined}>{keyText(g.key)}</td><td>{corpName(g.corp)}</td><td>{g.serviceName || '?'}</td><td>{g.by || '?'}{g.at ? ` · ${new Date(g.at).toLocaleDateString()}` : ''}</td><td><span className="badge amber">정리 대상</span></td></tr>)}
                 {(q.ghostsHeld || []).map((g) => (
                   <tr key={g.key}>
-                    <td style={{ fontFamily: 'var(--mono)', fontSize: 12, wordBreak: 'break-all', opacity: 0.7 }}>{g.key}</td><td>{corpName(g.corp)}</td><td>{g.serviceName || '?'}</td><td>{g.by || '?'}{g.at ? ` · ${new Date(g.at).toLocaleDateString()}` : ''}</td>
+                    <td style={{ fontFamily: 'var(--mono)', fontSize: 12, wordBreak: 'break-all', opacity: 0.7 }} title={isMaskedKey(g.key) ? MASKED_KEY_TITLE : undefined}>{keyText(g.key)}</td><td>{corpName(g.corp)}</td><td>{g.serviceName || '?'}</td><td>{g.by || '?'}{g.at ? ` · ${new Date(g.at).toLocaleDateString()}` : ''}</td>
                     <td><span className="badge gray" title={HELD_TEXT[g.held] || ''}>판정 보류</span>
                       <div className="svcinv-sub">{HELD_SHORT[g.held] || g.held}{g.heldSince ? ` · ${new Date(g.heldSince).toLocaleString()} 부터` : ''}</div></td>
                   </tr>))}
@@ -289,7 +289,7 @@ function AliasPinsCard({ q, svcName, writableOf, op, busy, corpName }) {
           <tr key={x.key}>
             <td data-sort={x.name}><b>{x.name}</b><div className="svcinv-sub">{corpName(x.corp)} · {x.kind === 'vm' ? 'VM' : '베어메탈'}</div></td>
             <td>{svcName(x.serviceId)}</td>
-            <td style={{ fontFamily: 'var(--mono)', fontSize: 12, wordBreak: 'break-all' }}>{x.aliasKey}</td>
+            <td style={{ fontFamily: 'var(--mono)', fontSize: 12, wordBreak: 'break-all' }} title={isMaskedKey(x.aliasKey) ? MASKED_KEY_TITLE : undefined}>{keyText(x.aliasKey)}</td>
           </tr>
         ))}</tbody>
       </STable>

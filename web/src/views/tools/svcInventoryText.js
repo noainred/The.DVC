@@ -160,6 +160,14 @@ export function filterServices(list, { q = '', tier1 = false, noOwner = false, c
   });
 }
 
+/**
+ * 범위 계정 판본의 베어메탈 키는 서버가 'masked-' 토큰으로 준다(5차 R7). 화면에는 토큰 문자열 대신 '(가림)' 으로 보인다 —
+ * 토큰은 쓰기 연산에 그대로 돌려보내는 값이라 사람이 읽을 뜻이 없다(다음 단계 실화면 검증에서 찾음).
+ */
+export const isMaskedKey = (k) => typeof k === 'string' && k.startsWith('masked-');
+export const keyText = (k) => (isMaskedKey(k) ? '(가림)' : String(k ?? ''));
+export const MASKED_KEY_TITLE = '범위가 지정된 계정에는 베어메탈 식별 키(서비스태그)를 가린 표지로 보입니다 — 고정·정리는 그대로 됩니다';
+
 /** 서버 오류 → 사람이 읽을 문장. */
 export function opErrorText(e) {
   const m = String(e?.message || e || '').trim();
