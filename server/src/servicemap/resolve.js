@@ -124,14 +124,19 @@ export function autoResolve(m, idx, { tagCategory = '' } = {}) {
  */
 export function resolveMember(m, idx, ctx = {}, pins = {}) {
   const auto = autoResolve(m, idx, ctx);
-  const pin = pins && m ? pins[m.key] : null;
+  let pin = pins && m ? pins[m.key] : null;
+  let pinKey;
+  // 키 등급이 올라 새 키에 고정이 없으면 낮은 등급 키(별칭)의 고정을 쓴다 — 같은 법인 것만(5차 R15: 예전에는 옛 고정이 '정리 대상 유령' 이 됐다)
+  if (!pin && pins && Array.isArray(m?.aliasKeys)) {
+    for (const a of m.aliasKeys) { const p = pins[a]; if (p && p.corp === m.corp) { pin = p; pinKey = a; break; } }
+  }
   if (!pin) return { ...auto, auto };
   if (pin.corp !== m.corp) return { ...auto, auto, pinMismatch: { serviceId: pin.serviceId, corp: pin.corp } };
   const c = idx.get(m.corp);
   if (!c || !c.svcById.has(pin.serviceId)) return { ...auto, auto, pinDangling: true };
   const differs = !!auto.serviceId && auto.serviceId !== pin.serviceId;
   const sameAsReviewed = pin.reviewed === true && pin.reviewedAuto !== undefined && (pin.reviewedAuto ?? null) === (auto.serviceId ?? null);
-  return { serviceId: pin.serviceId, src: 'pin', via: pin.by || '', auto, drift: differs && !sameAsReviewed, redundant: auto.serviceId === pin.serviceId,
+  return { serviceId: pin.serviceId, src: 'pin', via: pin.by || '', auto, drift: differs && !sameAsReviewed, redundant: auto.serviceId === pin.serviceId, ...(pinKey ? { pinKey } : {}),
     // legacy = 검토 당시 자동 판정을 기록하지 않은 옛 표지(바뀌었는지 모른다 — '바뀜' 이 아니라 '다시 확인')
     ...(differs && pin.reviewed === true && !sameAsReviewed ? { driftChanged: pin.reviewedAuto === undefined ? { legacy: true } : { reviewedAuto: pin.reviewedAuto } } : {}) };
 }
