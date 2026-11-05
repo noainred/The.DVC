@@ -15,7 +15,7 @@ import { isDemoGuest, isAdminDetailUser } from '../../auth/demoGuest.js';
 import { userHasPermission } from '../../auth/permissions.js';
 import { logAudit } from '../../audit.js';
 import { clientIp } from '../../util/rateLimit.js';
-import { scopedVcenterIds, writeScopedVcenterIds } from '../../auth/scope.js';
+import { scopedVcenterIds, writeScopedVcenterIds, isFullReadWriteScope } from '../../auth/scope.js';
 import { store } from '../../store.js';
 import {
   listSpaces, spaceView, updateSpace, tree, getPage, createPage, updatePage, revertPage, versionBody, diffVersions, deletePage,
@@ -23,7 +23,7 @@ import {
   TEMPLATES, STATUSES, LIMITS, PUB, metasFor, resolveComment,
 } from '../../wiki/store.js';
 import { listCustomTemplates, getCustomTemplate, saveCustomTemplate, deleteCustomTemplate, customTemplatesLoadError, TEMPLATE_LIMITS } from '../../wiki/templates.js';
-import { removeOwner as removeAttachments } from '../../attach/store.js';
+import { removeOwnerAfterPersist } from '../../attach/store.js';
 import { writeScopedVcenterIds as writeScopeOf } from '../../auth/scope.js';
 import { fullScopeOnlyWith } from '../admin/shared.js';
 import { recordView, setFavorite, userLists, isFavorite, viewCounts, forgetPage, USER_LIMITS } from '../../wiki/userState.js';
@@ -42,7 +42,8 @@ const userOf = (req) => req.user?.username || 'anonymous';
 const isAdmin = (req) => isAdminDetailUser(req.user);
 const canWrite = (req) => ['admin', 'operator'].includes(req.user?.role) && !isDemoGuest(req.user);
 const canComment = (req) => canWrite(req) || (!!req.user && !isDemoGuest(req.user) && userHasPermission(req.user, 'issues.request'));
-const isMod = (req) => isAdmin(req) && !scopedVcenterIds(req.user, store.get());
+// v2.904 점검 P-1: 조회와 쓰기 둘 다 무제한일 때만(쓰기 범위 관리자는 남의 댓글을 지우거나 해결하지 못한다)
+const isMod = (req) => isAdmin(req) && isFullReadWriteScope(req.user, store.get());
 /** 댓글 · 지켜보기 문지기 — 쓰기 역할 또는 요청 권한. 판정 종류를 archScan 이 읽게 태그를 단다. */
 const commenters = (req, res, next) => {
   if (canComment(req)) return next();
@@ -97,6 +98,8 @@ export function registerWiki(api) {
   // v2.889 관리자 템플릿 목록(본문 포함 — 관리 화면) · 만들기 · 고치기 · 지우기
   api.get('/wiki/templates', adminOnly, templateFleetOnly, (req, res) => {
     res.set('Cache-Control', 'no-store');
+    // v2.904 점검 P-3: 관리 목록(본문 · 만든 사람)은 관리자 판본 — 데모 계정은 형제 설정 라우트(/issues/settings · /attach/admin/usage)와 같이 403
+    if (!isAdmin(req)) return res.status(403).json({ ok: false, error: 'forbidden', reason: '템플릿 관리는 관리자만 봅니다' });
     res.json({ ok: true, items: listCustomTemplates(), loadError: customTemplatesLoadError(), limits: TEMPLATE_LIMITS });
   });
   api.post('/wiki/templates', adminOnly, templateFleetOnly, templateFullWrite, (req, res, next) => {
@@ -212,10 +215,13 @@ export function registerWiki(api) {
     if (!canWrite(req)) return res.status(403).json({ ok: false, reason: '데모 계정은 문서를 지울 수 없습니다' });
     try {
       const r = deletePage(req.params.id, userOf(req), { access: accessOf(req), isMod: isMod(req) });
+      const seq = wikiSeq();
       audit(req, 'wiki.delete', r.id);
       forgetPage(r.id); // v2.888 그 문서의 조회 수 · 즐겨찾기 · 최근 기록
-      try { removeAttachments('wiki', r.id); } catch (e) { console.warn(`[wiki] ${r.id} 첨부 정리 실패: ${String(e?.message || e).slice(0, 160)}`); } // v2.889
-      res.json({ ok: true, ...r, persist: await persistView(req) });
+      const persist = await persistView(req);
+      // v2.904 점검 S-5: 첨부 본체는 문서 삭제가 디스크에 닿은 뒤에 지운다(v2.889 는 바로 지워 비정상 종료 때 문서만 되살아났다)
+      removeOwnerAfterPersist('wiki', r.id, { seq, state: persist.state, wait: waitWikiPersist });
+      res.json({ ok: true, ...r, persist });
     } catch (e) { fail(res, e, next); }
   });
   api.post('/wiki/pages/:id/comments', commenters, async (req, res, next) => {
