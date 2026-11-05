@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { parseVcRoute, vcHash, currentHash, goHash, onHashChange, replaceHash } from './vcdRoute.js';
 import {
   VM_OBJ_TABS, HOST_OBJ_TABS, normObjTab, vmDiskRows, vmDatastoreRows, vmsOnHost, resourcePoolRows,
-  hostDatastoresFromVms, sameBuildCount, vmSnapshotFacts, toolsStatusBadge, snapTreeRows, vmNicRows,
+  hostDatastoresFromVms, sameBuildCount, vmSnapshotFacts, toolsStatusBadge, snapTreeRows, vmNicRows, hostDsMounts,
 } from './objTabs.js';
 
 describe('개체 보기 주소(v2.895)', () => {
@@ -106,5 +106,23 @@ describe('v2.898 — 스냅샷 트리 · 네트워크 어댑터(이미 받던 XM
     expect(r[2].netRef).toBe('dvportgroup-404');
     expect(vmNicRows({ vcenterId: 'vc1', dev: { disks: [] } }, nets)).toBe(null);
     expect(vmNicRows({ vcenterId: 'vc1', dev: { nics: [] } }, nets)).toEqual([]);
+  });
+});
+
+describe('v2.901 호스트가 마운트한 데이터스토어(dcfg.mounts)', () => {
+  it('이 호스트가 붙은 DS · 문제 표시 · 목록을 모르는 DS 는 unknown(없음이 아니다) · 다른 vCenter 는 보지 않는다', () => {
+    const host = { vcenterId: 'vc1' };
+    const ds = [
+      { vcenterId: 'vc1', name: 'ds-a', usagePct: 40, dcfg: { mounts: { total: 2, hosts: ['host-1', 'host-2'], bad: [{ h: 'host-1', accessible: false, mounted: true }] } } },
+      { vcenterId: 'vc1', name: 'ds-b', dcfg: { mounts: { total: 1, hosts: ['host-2'], bad: [] } } },
+      { vcenterId: 'vc1', name: 'ds-c', dcfg: { mounts: { total: 3 } } },
+      { vcenterId: 'vc1', name: 'ds-d' },
+      { vcenterId: 'vc1', name: 'ds-e', dcfg: { mounts: { total: 70, hosts: ['host-9'], hostsOmitted: 6 } } },
+      { vcenterId: 'vc2', name: 'ds-x', dcfg: { mounts: { total: 1, hosts: ['host-1'] } } },
+    ];
+    const r = hostDsMounts(ds, host, 'host-1');
+    expect(r.rows.map((x) => [x.datastore, x.state, x.bad])).toEqual([['ds-a', '접근 불가', true]]);
+    expect(r.unknown).toBe(3);
+    expect(hostDsMounts(ds, host, null).none).toBe(true);
   });
 });

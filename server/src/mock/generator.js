@@ -199,12 +199,15 @@ function mkHostCfg(h, site) {
     // v2.701(A10): 가상 스위치·포트그룹(hostcfg/parse.js parseNetwork 와 같은 모양) — 단일 업링크·무차별 모드·VLAN 드리프트가 보이게.
     net: {
       switches: [
-        { name: 'vSwitch0', kind: 'vss', uplinks: i % 10 === 7 ? ['vmnic0'] : ['vmnic0', 'vmnic1'], pgs: 2 },
-        { name: 'DSwitch-Prod', kind: 'dvs', uplinks: ['vmnic2', 'vmnic3'], pgs: null },
+        { name: 'vSwitch0', kind: 'vss', uplinks: i % 10 === 7 ? ['vmnic0'] : ['vmnic0', 'vmnic1'], pgs: 2,
+          // v2.901 팀 구성 — 일부 호스트는 활성/대기(명시적 장애 조치), 그 밖은 포트 ID 기반 부하 분산
+          teaming: i % 4 === 1 ? { policy: 'failover_explicit', active: ['vmnic0'], standby: i % 10 === 7 ? [] : ['vmnic1'], failback: true }
+            : { policy: 'loadbalance_srcid', active: i % 10 === 7 ? ['vmnic0'] : ['vmnic0', 'vmnic1'], standby: [], failback: i % 9 !== 2 } },
+        { name: 'DSwitch-Prod', kind: 'dvs', uplinks: ['vmnic2', 'vmnic3'], pgs: null, teaming: null },
       ],
       pgs: [
-        { name: 'Management Network', vlan: 0, sw: 'vSwitch0', promisc: false },
-        { name: 'VM Network', vlan: i % 14 === 2 ? 20 : 10, sw: 'vSwitch0', promisc: i % 25 === 4 },
+        { name: 'Management Network', vlan: 0, sw: 'vSwitch0', promisc: false, teaming: i % 4 === 1 ? 'failover_explicit' : 'loadbalance_srcid' },
+        { name: 'VM Network', vlan: i % 14 === 2 ? 20 : 10, sw: 'vSwitch0', promisc: i % 25 === 4, teaming: i % 4 === 1 ? 'failover_explicit' : 'loadbalance_srcid' },
       ],
       pgsTotal: 2,
     },
@@ -674,7 +677,8 @@ export function generateSnapshot() {
         : Math.round(clamp(15 + 60 * Math.abs(Math.sin((vm.idx + tick) / 11)), 1, 100));
       const memUsagePct = !powered ? 0 : profile === 'idle' ? Math.round(8 + wave(10, 9)) : profile === 'hot' ? Math.round(91 + wave(6, 6))
         : Math.round(clamp(25 + 55 * Math.abs(Math.cos((vm.idx + tick) / 13)), 1, 100));
-      const snapN = vm.idx % 6 === 0 ? intBetween(1, 4) : 0;
+      // v2.901: 개수를 VM 마다 고정한다 — 예전 intBetween 은 생성할 때마다 바뀌어 같은 VM 의 스냅샷 개수 · 트리가 새로 고칠 때마다 달랐다.
+      const snapN = vm.idx % 6 === 0 ? 1 + (vm.idx % 4) : 0;
       vms.push({
         id: `${site.id}:${vm.name}`,
         vcenterId: site.id,
@@ -756,7 +760,15 @@ export function generateSnapshot() {
           sioc: ds.storageType === 'local' ? false : ds.idx % 4 !== 1,
           vmCount: 8 + (ds.idx * 7) % 45,
           inSdrs: ds.idx % 6 === 0,
-          mounts: ds.storageType === 'local' ? { total: 1, notAccessible: 0, notMounted: 0 } : { total: 8, notAccessible: ds.idx % 13 === 5 ? 1 : 0, notMounted: 0 },
+          // v2.901: 호스트별 마운트(dscfg parseMounts 와 같은 모양) — 로컬은 한 호스트, 공유는 이 사이트 호스트 8대(결정적). 호스트 moref = 데모 호스트 이름.
+          mounts: (() => {
+            const hs = env.hosts.length ? (ds.storageType === 'local' ? [env.hosts[ds.idx % env.hosts.length]] : Array.from({ length: Math.min(8, env.hosts.length) }, (_, k) => env.hosts[(ds.idx + k) % env.hosts.length])) : [];
+            // VM 디스크가 놓인 호스트는 반드시 마운트한 것으로(호스트 데이터스토어 탭의 'VM 디스크로 역산' 과 '마운트' 가 서로 어긋나지 않게 — v2.901 화면 판독)
+            const placed = vms.filter((v) => v.vcenterId === site.id && (v.dev?.disks || []).some((d) => d.datastore === ds.name)).map((v) => v.host).filter(Boolean);
+            const refs = [...new Set([...hs.map((h) => h.name), ...placed])];
+            const bad = ds.idx % 13 === 5 && refs.length > 1 ? [{ h: refs[refs.length - 1], accessible: false, mounted: true }] : [];
+            return { total: refs.length, notAccessible: bad.length, notMounted: 0, hosts: refs, bad, hostsOmitted: 0 };
+          })(),
         } }),
       });
       if (usedFrac > 0.9) {

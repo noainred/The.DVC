@@ -249,6 +249,8 @@ export function getEdgeFleetServers() {
         vcenterId: b.vcenterId || '',
         source: 'edge',
         remoteAgent: agent,
+        // v2.901(점검 E4): 엣지 쪽 출처('idrac' 등록부 · 'ome' · 'remote') — 등록부 밖 장치의 빈 scanRangeId 를 '수동 등록' 으로 읽지 않게(servicemap 2차 반증 1)
+        edgeSource: typeof b.source === 'string' ? b.source : '',
         scanRangeId: typeof b.scanRangeId === 'string' ? b.scanRangeId : null,
         // 태그가 없었을 때의 중앙 serverId — 서비스 인벤토리가 옛 fl: 고정을 승계하는 데 쓴다(6차 2). 구버전 엣지는 null.
         untaggedServerId: typeof b.untaggedId === 'string' && b.untaggedId ? `edge:${agent}:${b.untaggedId}` : null,

@@ -12,7 +12,7 @@ import { Card, Note } from './VcdParts.jsx';
 import { shortTs } from './vcdTabs.js';
 import {
   VC_ALARM_STATUS, TASK_STATE, TASK_REASON, entityTypeText, entityHash, vcAlarmRows, vcAlarmCounts, taskDurText, vcTaskRows, vcTaskCounts, vcPermRows, vcInfoHeadText,
-  NODE_TYPE_TEXT, UPDATE_STATE, UPDATE_SEVERITY, UPDATE_TYPE, VLCM_STATUS, replicationSummary, vlcmRows, vlcmCounts, vlcmForHost,
+  poolRowsForHost, allocText, SHARE_LEVEL_TEXT, NODE_TYPE_TEXT, UPDATE_STATE, UPDATE_SEVERITY, UPDATE_TYPE, VLCM_STATUS, replicationSummary, vlcmRows, vlcmCounts, vlcmForHost,
 } from './vcInfo.js';
 import { vcHash } from './vcdRoute.js';
 import { dayStamp } from '../../dayStamp.js';
@@ -52,6 +52,8 @@ function Status({ d }) {
       {d.error && d.at && <div className="vcd-note" style={{ color: 'var(--amber, #b45309)' }}>{`마지막 갱신 실패: ${d.error} — 아래는 직전에 읽은 값입니다.`}</div>}
       {d.notCollected && <div className="muted" style={{ padding: '10px 14px', fontSize: 12.5 }}>{d.notCollected}</div>}
       {d.omitted > 0 && <Note>{`상한을 넘어 ${d.omitted}건은 받지 않았습니다.`}</Note>}
+      {d.unreadable > 0 && <Note>{`${d.unreadable}건은 응답 모양을 읽지 못해 빠졌습니다 — 목록이 전부가 아닙니다.`}</Note>}
+      {d.stale && <Note>{`엣지가 이 값을 ${d.staleMin}분 넘게 다시 보내지 않았습니다 — 마지막으로 받은 값입니다.`}</Note>}
     </>
   );
 }
@@ -210,13 +212,13 @@ export function VcLinkedCard({ vcenterId, wide = false }) {
                 <STable className="v3-table" minWidth={680}>
                   <thead><tr><th>노드(PNID)</th><th>유형</th><th>포탈 등록</th><th>버전</th><th>복제 파트너</th></tr></thead>
                   <tbody>
-                    {nodes.map((n) => (
-                      <tr key={n.node}>
-                        <td className="mono" style={{ overflowWrap: 'anywhere' }}><b>{n.node}</b></td>
+                    {nodes.map((n, i) => (
+                      <tr key={n.node || `masked-${i}`}>
+                        <td className="mono" style={{ overflowWrap: 'anywhere' }}>{n.masked ? <span className="muted" style={{ fontFamily: 'inherit' }}>가려짐(범위 밖 · 미등록)</span> : <b>{n.node}</b>}</td>
                         <td>{NODE_TYPE_TEXT[n.type] || n.type || '—'}</td>
                         <td>{n.portal ? (n.portal.id === vcenterId ? <span className="badge blue">이 vCenter</span> : <a className="vcd-more" href={vcHash(n.portal.id)}>{n.portal.name} →</a>) : <span className="muted">확인 안 됨</span>}</td>
                         <td>{n.portal?.version ? `${n.portal.version}${n.portal.build ? ` · ${n.portal.build}` : ''}` : '—'}</td>
-                        <td className="mono" style={{ whiteSpace: 'normal', overflowWrap: 'anywhere' }}>{(n.partners || []).join(' · ') || '—'}</td>
+                        <td className="mono" style={{ whiteSpace: 'normal', overflowWrap: 'anywhere' }}>{(n.partners || []).map((p) => p || '가려짐').join(' · ') || '—'}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -228,6 +230,7 @@ export function VcLinkedCard({ vcenterId, wide = false }) {
                 </div>
               )}
               {d.replError && <Note>{`복제 상태는 읽지 못했습니다: ${d.replError}`}</Note>}
+              {d.maskedNodes > 0 && <Note>{`구성원 ${d.maskedNodes}개는 이름을 가렸습니다 — 조회 범위 안 포탈 등록 vCenter 와 짝지어진 노드만 이름을 보입니다(범위 밖 또는 포탈에 등록되지 않은 노드).`}</Note>}
             </>
           )}
         </>
@@ -348,6 +351,41 @@ export function HostVlcmCard({ vcenterId, host, hostRef }) {
           ))}
         </>
       )}
+    </Card>
+  );
+}
+
+/** v2.901: 리소스 풀 예약 · 제한 · 공유(ResourcePool.config — 6시간마다). 호스트 개체 › 리소스 풀. */
+export function PoolSettingsCard({ vcenterId, host, poolNames }) {
+  const ok = can('inv.hosts');
+  const q = useOnce('/vcenter-info/pools', { vcenterId }, ok);
+  const d = q.data;
+  const r = d && !d.notCollected ? poolRowsForHost(d.items, host, poolNames) : { rows: [], byName: false };
+  const sh = (a) => (a ? `${SHARE_LEVEL_TEXT[a.level] || '—'}${a.shares != null ? ` (${a.shares.toLocaleString()})` : ''}` : '—');
+  const ex = (a) => (a?.expandable === true ? '예' : a?.expandable === false ? '아니요' : '—');
+  return (
+    <Card style={WIDE} title={`리소스 풀 설정${d && !d.notCollected ? ` ${r.rows.length}` : ''}`} sub={d ? vcInfoHeadText(d) : null} more={ok ? reloadBtn(q) : null}>
+      {gateBody(ok, q, '리소스 풀 설정') || (
+        <>
+          <Status d={d} />
+          {!d.notCollected && (r.rows.length ? (
+            <STable className="v3-table" minWidth={860}>
+              <thead><tr><th>풀</th><th>CPU 예약</th><th>CPU 제한</th><th>CPU 확장 예약</th><th>CPU 공유</th><th>메모리 예약</th><th>메모리 제한</th><th>메모리 확장 예약</th><th>메모리 공유</th></tr></thead>
+              <tbody>
+                {r.rows.map((p) => (
+                  <tr key={p.ref}>
+                    <td><b>{p.name || p.ref}</b>{p.root && <span className="badge gray" style={{ marginLeft: 6 }}>루트</span>}</td>
+                    <td data-sort={p.cpu?.res ?? ''}>{allocText(p.cpu?.res, 'MHz')}</td><td data-sort={p.cpu?.limit ?? ''}>{allocText(p.cpu?.limit, 'MHz')}</td><td>{ex(p.cpu)}</td><td>{sh(p.cpu)}</td>
+                    <td data-sort={p.mem?.res ?? ''}>{allocText(p.mem?.res, 'GB')}</td><td data-sort={p.mem?.limit ?? ''}>{allocText(p.mem?.limit, 'GB')}</td><td>{ex(p.mem)}</td><td>{sh(p.mem)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </STable>
+          ) : <div className="muted" style={{ padding: '10px 14px', fontSize: 12.5 }}>이 호스트의 클러스터 · VM 풀 이름과 맞는 리소스 풀이 없습니다.</div>)}
+          {r.byName && r.rows.length > 0 && <Note>호스트의 클러스터로 짝짓지 못해 이 호스트 VM 의 풀 이름으로 골랐습니다 — 다른 클러스터의 같은 이름 풀이 섞여 있을 수 있습니다.</Note>}
+        </>
+      )}
+      <Note>vCenter 의 리소스 풀 설정(예약 · 제한 · 공유)입니다. 루트 풀은 클러스터 용량 그 자체라 예약 값이 큽니다. 설정 변경은 두지 않습니다(조회 전용).</Note>
     </Card>
   );
 }

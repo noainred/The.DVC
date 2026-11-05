@@ -96,13 +96,17 @@ export function backupOf(view, now) {
  * 수집 서버 경로가 엔트리 id 를 주지 않으면(null·undefined) **같은 서비스 태그의 엣지 push 값**을 쓴다(2차 반증 5 — 혼합 버전 기간에
  * 2.887~2.892 엣지가 이미 보낸 id 를 버리지 않게). 태그가 둘 이상의 엣지 기록에서 다른 값이면 쓰지 않는다(edgeScanByTag 에 넣지 않는다).
  */
-export function scanInfoOf(b, { edgeScan = new Map(), remoteScan = new Map(), regById = new Map(), scanEntries = new Map(), edgeScanByTag = new Map() } = {}) {
+export function scanInfoOf(b, { edgeScan = new Map(), remoteScan = new Map(), regById = new Map(), scanEntries = new Map(), edgeScanByTag = new Map(), dcOfServer = null } = {}) {
   const sid = t(b?.serverId);
   const viaEdge = b?.source === 'edge' || b?.source === 'remote';
   let reported = b?.source === 'edge' ? edgeScan.get(sid) : b?.source === 'remote' ? remoteScan.get(sid) : t(regById.get(sid)?.scanRangeId);
   if (b?.source === 'remote' && typeof reported !== 'string') {
     const byTag = edgeScanByTag.get(lc(b?.serviceTag));
-    if (typeof byTag === 'string') reported = byTag;
+    // v2.901(점검 E5): 서비스 태그 폴백은 그 엔트리의 DataCenter 가 이 서버 법인의 DataCenter 와 같을 때만 — 다른 법인 엣지가 보낸 같은 태그로
+    //   남의 엔트리(라벨)를 붙이지 않게. 서버 법인의 DataCenter 를 모르거나 중앙에 없는 엔트리면 쓰지 않는다(맞춰 볼 수 없다).
+    //   빈 값(엣지 등록부에 엔트리 없음 = 수동 등록)은 붙일 라벨이 없어 그대로 받는다.
+    const dc = typeof dcOfServer === 'function' ? t(dcOfServer(b)) : '';
+    if (typeof byTag === 'string' && (byTag === '' || (dc && t(scanEntries.get(byTag)?.datacenterId) === dc))) reported = byTag;
   }
   const entryId = typeof reported === 'string' ? reported : '';
   const e = entryId ? scanEntries.get(entryId) : null;
@@ -112,11 +116,20 @@ export function scanInfoOf(b, { edgeScan = new Map(), remoteScan = new Map(), re
   if (viaEdge && reported === undefined) return { scan: null, scanWhy: 'not-reported' };
   return { scan: null, scanWhy: undefined };
 }
-/** 엣지 push 의 서비스 태그 → 스캔 엔트리 id(문자열만 · 같은 태그가 다른 값이면 뺀다). 순수. */
+/**
+ * v2.901(점검 E4): 엣지 push 의 scanRangeId 가 '등록부의 값' 인가 — 엣지는 iDRAC 등록부 밖 장치(OME · 수집 서버 경유)에도 빈 문자열을 싣는다.
+ * 그 빈 값은 '수동 등록' 이 아니라 '보고되지 않음' 이다. 출처를 모르는 옛 기록('')은 받은 값 그대로(지어내지 않는다).
+ */
+export const edgeScanReportable = (s) => !s?.edgeSource || s.edgeSource === 'idrac';
+/** 엣지 push 의 스캔 엔트리 id 표(serverId → id · 등록부 밖 장치는 넣지 않는다 = 보고되지 않음). 순수. */
+export function edgeScanOf(edgeServers = []) {
+  return new Map((edgeServers || []).filter(edgeScanReportable).map((s) => [t(s.serverId), typeof s.scanRangeId === 'string' ? t(s.scanRangeId) : null]));
+}
+/** 엣지 push 의 서비스 태그 → 스캔 엔트리 id(문자열만 · 같은 태그가 다른 값이면 뺀다 · 등록부 밖 장치는 보지 않는다). 순수. */
 export function edgeScanByTagOf(edgeServers = []) {
   const out = new Map(); const bad = new Set();
   for (const s of edgeServers || []) {
-    const tag = lc(s?.serviceTag); if (!tag || bad.has(tag) || typeof s?.scanRangeId !== 'string') continue;
+    const tag = lc(s?.serviceTag); if (!tag || bad.has(tag) || typeof s?.scanRangeId !== 'string' || !edgeScanReportable(s)) continue;
     const v = t(s.scanRangeId);
     if (out.has(tag) && out.get(tag) !== v) { out.delete(tag); bad.add(tag); continue; }
     out.set(tag, v);
@@ -161,11 +174,12 @@ async function gatherNowInner(snap, tagCategory) {
   const sourceErrors = [];
   const now = Date.now();
   const [{ getFleetInventory, fleetKeySources }, { loadRegistry }, { getInventory }, { allRemoteServers }, edgeUsage, { attributeBareMetalFromSnap },
-    { unreadVcenterReasons }, { getEdgeFleetServers }, { listScanRanges }, pf, bareosReg, { bareosVmView }] = await Promise.all([
+    { unreadVcenterReasons }, { getEdgeFleetServers }, { listScanRanges }, pf, bareosReg, { bareosVmView }, { datacenterOfVcenter }] = await Promise.all([
     import('../../insights/fleetInventory.js'), import('../../idrac/registry.js'), import('../../idrac/invCache.js'),
     import('../../collector/remoteInventory.js'), import('../../central/bmUsageEdgePull.js'), import('../../idrac/corpAttribution.js'),
     import('../../metrics/unreadVcenters.js'), import('../../central/fleet.js'), import('../../idrac/scanRanges.js'),
     Promise.all([import('../../partfault/db.js'), import('../../partfault/settings.js')]), import('../../bareos/registry.js'), import('../../bareos/vmView.js'),
+    import('../../datacenter/store.js'),
   ]);
   const bareosSet = await import('../../bareos/settings.js');
   const vcenters = snap?.vcenters || [];
@@ -282,12 +296,14 @@ async function gatherNowInner(snap, tagCategory) {
   const regById = new Map(registry.map((r) => [t(r.id), r]));
   // 스캔 엔트리 id — 엣지 push(serverId) · 수집 서버 pull(remote:<수집기>:<엣지 서버 id>). 값 null = 보고한 쪽이 구버전(필드 없음 — 5차 R6·R18).
   const edgeServers = (() => { try { return getEdgeFleetServers() || []; } catch { return []; } })();
-  const edgeScan = new Map(edgeServers.map((s) => [t(s.serverId), typeof s.scanRangeId === 'string' ? t(s.scanRangeId) : null]));
+  const edgeScan = edgeScanOf(edgeServers);
   const remoteScan = new Map(remoteServers.map((s) => [`remote:${t(s.collectorId)}:${t(s.id)}`, typeof s.scanRangeId === 'string' ? t(s.scanRangeId) : null]));
   const edgeScanByTag = edgeScanByTagOf(edgeServers);
   const entries = (() => { try { return listScanRanges(); } catch (e) { sourceErrors.push(`스캔 대역: ${String(e?.message || e).slice(0, 160)}`); return []; } })();
   const scanEntries = new Map(entries.map((e) => [t(e.id), { service: t(e.service), datacenterId: t(e.datacenterId), range: (e.ranges || []).slice(0, 4).join(', ') }]));
   const isAddr = addressMatcher(registry.map((r) => r.host).filter(Boolean));
+  // 서버 법인의 DataCenter(E5 — 수집 서버가 준 값 우선, 없으면 귀속 vCenter 의 매핑). 매핑을 못 읽으면 '' = 폴백을 쓰지 않는다
+  const dcOfServer = (b) => { if (t(b?.datacenterId)) return t(b.datacenterId); try { return t(datacenterOfVcenter(t(b?.vcenterId))); } catch { return ''; } };
   const seenBm = new Set();
   for (const b of attr.bareMetal || []) {
     if (!b || typeof b !== 'object') continue;
@@ -298,7 +314,7 @@ async function gatherNowInner(snap, tagCategory) {
     const id = idOf(b);
     const x = judged.get(`${vc}|bm|${id.key}`) || null;
     const sid = t(b.serverId);
-    const { scan, scanWhy } = scanInfoOf(b, { edgeScan, remoteScan, regById, scanEntries, edgeScanByTag });
+    const { scan, scanWhy } = scanInfoOf(b, { edgeScan, remoteScan, regById, scanEntries, edgeScanByTag, dcOfServer });
     // 법인 귀속이 없는 이유(5차 R18 둘째 절): 귀속 판정 자체가 실패 · 같은 서비스 태그가 두 법인에 걸려 보류 · 어느 규칙에도 맞지 않음
     const corpWhy = vc ? undefined : attr.error ? 'attr-error' : attr.conflictTags?.has(lc(b.serviceTag)) ? 'tag-conflict' : undefined;
     let powered = null;
@@ -368,7 +384,12 @@ function knownCorpsOf(snap) {
   if (!s.length || !reg) return null;
   return new Set([...s, ...reg]);
 }
-const fleetAdmin = (user, snap) => isAdminDetailUser(user) && !scopedVcenterIds(user, snap);   // 관리자 판본 판정은 isAdminDetailUser 하나(role 직접 비교 금지)
+// v2.901(점검 S1 — 재현): 전 법인 공용 쓰기는 조회 범위만 보면 안 된다(server/CLAUDE.md v2.733) — 조회는 무제한이어도 쓰기 범위(writeVcenters)가 지정된
+//   관리자가 전역 카탈로그 · 태그 카테고리 · 법인 항목 정리 · 초기화를 통과했다. 형제 라우트의 fullWriteOnly 와 같은 판정(던지면 거부).
+const fleetAdmin = (user, snap) => {
+  if (!isAdminDetailUser(user) || scopedVcenterIds(user, snap)) return false;
+  try { return !writeScopedVcenterIds(user, snap); } catch { return false; }
+};   // 관리자 판본 판정은 isAdminDetailUser 하나(role 직접 비교 금지)
 
 // ───────── 응답 조립 ─────────
 // 읽기 경로는 동결 참조(복사 없음 — 5차 검토 R5: 요청마다 고정 5만 건 깊은 복사 114ms). 쓰기는 mutate* 만.

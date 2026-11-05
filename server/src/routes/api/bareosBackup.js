@@ -1609,7 +1609,9 @@ api.post('/tools/bareos-backup/health/:vcenterId/thumb-accept', adminOnly, (req,
   } catch (e) { res.status(400).json({ ok: false, reason: String(e?.message || e).slice(0, 300) }); }
 });
 api.get('/tools/bareos-backup/health/settings', adminOnly, fullScopeOnly, (req, res) => {
-  res.json({ ok: true, config: loadHealthCfg(), loadError: !!healthLoadError() });
+  // v2.901(점검 S3): 저장한 관리자 계정명은 관리자 판본에만(mock 모드 데모 계정은 adminOnly 를 통과한다 — /health 의 cfgOut 과 같은 가림)
+  const c = loadHealthCfg();
+  res.json({ ok: true, config: isAdminDetailUser(req.user) ? c : { ...c, savedBy: '' }, loadError: !!healthLoadError() });
 });
 api.put('/tools/bareos-backup/health/settings', adminOnly, fullScopeOnly, fullWriteOnly, (req, res) => {
   try {
@@ -1643,7 +1645,7 @@ api.get('/tools/bareos-backup/rehearsal', adminOnly, (req, res) => {
   const visDirs = allowed ? new Set(allJobs.filter((j) => allowed.has(j.vcenterId)).map(jobDir)) : null;
   const policy = allowed
     ? { ...st.policy, savedBy: '', datastores: Object.fromEntries(Object.entries(st.policy.datastores || {}).filter(([vc]) => allowed.has(vc))) }
-    : st.policy;
+    : isAdminDetailUser(req.user) ? st.policy : { ...st.policy, savedBy: '' };   // v2.901(점검 S3): 데모 계정에는 계정명을 싣지 않는다
   const runs = st.runs.filter((x) => !visDirs || visDirs.has(x.directorId))   // v2.874 B4-03: 상태가 이미 Director 마다 RUNS_PER_DIR 건 — 여기서 전 법인 공용으로 다시 자르지 않는다
     .map((x) => (allowed ? { ...x, items: (x.items || []).filter((it) => allowed.has(vcOfJob.get(it.jobId))) } : x));
   // v2.863 정책 화면의 vCenter 별 데이터스토어 칸 — 활성 대상이 있는 vCenter(정책 편집은 전체 범위 전용이라 범위 계정에는 싣지 않는다)
@@ -1696,7 +1698,8 @@ api.post('/tools/bareos-backup/rehearsal/run', adminOnly, fullScopeOnly, fullWri
 
 /** 일일 요약 메일 — 설정 · 마지막 발송 · 지금 보내 보기(전 법인 요약이라 전체 범위 관리자). */
 api.get('/tools/bareos-backup/digest', adminOnly, fullScopeOnly, (req, res) => {
-  res.json({ ok: true, config: loadDigest(), loadError: !!digestLoadError(), status: digestStatus() });
+  const c = loadDigest();   // v2.901(점검 S3): 저장한 관리자 계정명은 관리자 판본에만
+  res.json({ ok: true, config: isAdminDetailUser(req.user) ? c : { ...c, savedBy: '' }, loadError: !!digestLoadError(), status: digestStatus() });
 });
 api.put('/tools/bareos-backup/digest', adminOnly, fullScopeOnly, fullWriteOnly, (req, res) => {
   try {

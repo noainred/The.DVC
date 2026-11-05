@@ -13,7 +13,7 @@ import { relayLimits } from '../../bareos/edgeOps.js';
 import { directorById, directorConn, siteMissing } from '../../bareos/settings.js';
 import { jobDigests, MAX_JOBS, registryLoadError } from '../../bareos/registry.js';
 import { listGroups, getGroup, addGroup, updateGroup, deleteGroup, checkGroupInput, groupsLoadError, MAX_MEMBERS, MAX_GROUPS, FIRES_KEEP } from '../../bareos/groups.js';
-import { nextSlot, scheduleText, slotKey, CATCHUP_MS, LEVELS } from '../../bareos/groupSchedule.js';
+import { nextSlot, scheduleText, slotKey, CATCHUP_MS, LEVELS, clockStamp, clockInfo, CLOCKS } from '../../bareos/groupSchedule.js';
 import { queueGroupRun, groupRunning, groupPruning, previewPrune, cancelGroupRun, cancelPlan, groupCanceling, groupProgress } from '../../bareos/groupRunner.js';
 import { cancelInfo, CANCEL_WAIT_MS } from '../../bareos/cancelState.js';
 import { keepText, keepOtpReasons, normKeep, KEEP_MIN, KEEP_MAX, KEEP_PRESETS } from '../../bareos/groupRetention.js';
@@ -41,10 +41,11 @@ const serverTz = () => { try { return Intl.DateTimeFormat().resolvedOptions().ti
 export function groupView(g, now = Date.now()) {
   const next = nextSlot(g.schedule, now);
   // 버그 점검 S6: 마지막으로 처리한 회차가 지금보다 미래 — 서버 시계가 앞섰다 돌아왔다. 그 사이 회차는 돌지 않는다(한 번 이하를 지키려고 열쇠를 내리지 않는다) — 화면이 알린다
-  const clockAhead = !!g.lastKey && g.lastKey > slotKey(now);
+  const clockAhead = !!g.lastKey && g.lastKey > slotKey(now, g.schedule);   // v2.901: 그룹의 기준 시계로
   return {
     ...g, keep: g.keep ?? null, fires: Array.isArray(g.fires) ? g.fires : [], lastPrune: g.lastPrune ?? null, keepText: keepText(g.keep ?? null),
-    scheduleText: scheduleText(g.schedule), next: next ? { at: next.at, key: next.key, level: next.level, ...(g.skipKey && g.skipKey === next.key ? { skip: true } : {}) } : null, running: groupRunning(g.id),
+    // v2.901: 다음 회차를 두 시계로 함께(현지 서버 · 중앙 포탈 — 화면이 브라우저 시각 대신 이 글자를 보인다)
+    scheduleText: scheduleText(g.schedule), next: next ? { at: next.at, key: next.key, level: next.level, server: clockStamp(next.at, 'server'), portal: clockStamp(next.at, 'portal'), ...(g.skipKey && g.skipKey === next.key ? { skip: true } : {}) } : null, running: groupRunning(g.id),
     ...(groupPruning(g.id) ? { pruning: true } : {}), ...(clockAhead ? { clockAhead: true } : {}),
     // v2.867 회차 중단 — 처리 중 요청 · 보내는 진행(보냄 n / N · 줄 대기)
     canceling: groupCanceling(g.id), progress: groupProgress(g.id),
@@ -223,12 +224,12 @@ api.get('/tools/bareos-backup/groups/tree', adminOnly, (req, res) => {
   let dirSt = null;
   try { const di = directorInfo(vcenterId, settings, pollerStatus(), isDemoActive()); dirSt = { state: di.state, resultsKnown: di.resultsKnown }; } catch { dirSt = { state: 'error', resultsKnown: false }; }
   res.json({
-    ok: true, vcenterId, vcName: vc?.name || vcenterId, now, tz: serverTz(), catchupMs: CATCHUP_MS,
+    ok: true, vcenterId, vcName: vc?.name || vcenterId, now, tz: serverTz(), clocks: clockInfo(now), catchupMs: CATCHUP_MS,
     director: si.view ? { ...si.view, ...dirSt } : null, directorState: dirSt, mapped: !!si.site && !si.mappingMissing?.length, mappingMissing: si.mappingMissing, siteDefaults: si.site ? { storage: si.site.storage, pool: si.site.pool, schedule: si.site.schedule || '' } : null,
     writable: bareosAccess(req.user, vcenterId) === 0, marksKnown,
     groupsLoadError: !!groupsLoadError(), registryLoadError: !!registryLoadError(),
     limits: { maxMembers: MAX_MEMBERS, maxGroups: MAX_GROUPS, firesKeep: FIRES_KEEP, maxBulk: MAX_BULK, jobsLeft: Math.max(0, MAX_JOBS - jobDigests().length) },
-    levels: LEVELS, keepLimits: { min: KEEP_MIN, max: KEEP_MAX, presets: KEEP_PRESETS }, relayLimits: relayLimits(), cancelWaitMs: CANCEL_WAIT_MS,   // 화면이 저장(등록)·실행을 기다리는 시간 — 숫자를 화면에 박지 않는다
+    levels: LEVELS, clockKinds: CLOCKS, keepLimits: { min: KEEP_MIN, max: KEEP_MAX, presets: KEEP_PRESETS }, relayLimits: relayLimits(), cancelWaitMs: CANCEL_WAIT_MS,   // 화면이 저장(등록)·실행을 기다리는 시간 — 숫자를 화면에 박지 않는다
     // v2.840 그룹 카드 '적용 풀 · 보존' — 그 Director 정책 수집본(접속하지 않는다 · 수집 전이면 null). 풀 = 그룹 풀 → 법인 매핑 풀(잡 기본값).
     //   dupVms = 그룹 예약이 켜져 있고 잡이 Director 스케줄(수집본)에도 든 멤버 수 — 두 곳에서 돌 수 있다(jobPolicyResolver.dup · 그 Director 수집본이 없으면 0 이 아니라 null)
     vms, groups: (() => {

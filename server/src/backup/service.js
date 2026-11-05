@@ -18,6 +18,9 @@ import { redactEnvSecrets, mergeRedactedEnv, pinHostSecurityEnv } from '../util/
 import { getAllAgentConfigs } from '../central/agentConfig.js';
 import { isRegisteredStateFile } from '../util/stateFiles.js'; // v2.613 PERSIST2613-01·08: 헬퍼가 만든 상태 파일은 스스로 등록한다
 import { DATA_FILE_NAMES, RESTORE_EXCLUDE, stageRestore, stagedNameIssue, reconcileAgentTokensText } from './stagedRestore.js'; // v2.768(점검 R3-C5-02): 복원은 예약 → 기동 시 적용
+import { issuesMaxBytes } from '../issues/store.js';   // v2.901(점검 P1) 사용자 문서 파일의 백업 상한
+import { boardMaxBytes } from '../bulletin/store.js';
+import { wikiMaxBytes } from '../wiki/store.js';
 
 /** 백업 아카이브(gzip JSON) 해제 출력 상한 — 설정 디렉터리 전체가 들어가도 수 MB 다(실측 2KB). */
 const MAX_ARCHIVE_BYTES = 64 * 1024 * 1024;
@@ -37,6 +40,19 @@ const ALLOW_EXT = new Set(['.json', '.env']);
 // 설정이 아니라 '수집 데이터'라서 백업에서 제외(대용량/재생성 가능).
 const DENY_NAMES = DATA_FILE_NAMES; // v2.768: 예약 복원 적용(stagedRestore.js)과 한 벌
 const FILE_SIZE_CAP = 8 * 1024 * 1024; // 파일당 8MB 상한(대용량 데이터 방지)
+/**
+ * v2.901(점검 P1 — 재현 · 사용자 결정 '백업 상한을 올림'): 사용자 문서 저장소(이슈 · 게시판 · 위키)는 저장소 상한(이슈 · 게시판 16MB · 위키 8MB —
+ *   env 로 더 올릴 수 있다)이 파일당 8MB 이상이라, 가득 차면 그 파일이 백업에서 빠졌다(건너뜀 목록에만 남고, 그 백업으로 복원하면 이슈 · 글이 사라진다).
+ *   이 세 파일은 '그 저장소 상한 × 1.25 + 1MB'(감싸는 글자 · 이스케이프 여유) 와 8MB 중 큰 값까지 담는다. 상한 함수는 그 저장소의 것 하나를 쓴다.
+ */
+export const USER_DOC_FILES = Object.freeze({ 'issues.json': issuesMaxBytes, 'board.json': boardMaxBytes, 'wiki.json': wikiMaxBytes });
+export function fileCapFor(name) {
+  const f = USER_DOC_FILES[name];
+  if (!f) return FILE_SIZE_CAP;
+  let max = 0;
+  try { max = Number(f()) || 0; } catch { max = 0; }
+  return Math.max(FILE_SIZE_CAP, Math.ceil(max * 1.25) + 1024 * 1024);
+}
 
 /**
  * v2.590 P1: 설정이 아니라 **폴러·엣지 push 가 스스로 다시 쓰는** 상태·캐시 파일.
@@ -244,7 +260,7 @@ export function collectConfigDir(dir = CONFIG_DIR) {
       const st = fs.statSync(path.join(dir, name));
       // v2.590 D5: 상한 초과 파일을 **조용히** 빼지 않는다 — 대규모 svcmon.json(실측 16.4MB)이 빠진 채 '백업 완료' 로
       // 보고되어 그 백업으로 복원하면 성능점검 대상 전량이 사라졌다. 뺀 파일을 결과·번들에 싣고 화면이 말한다.
-      if (st.size > FILE_SIZE_CAP) { (out[SKIPPED_META] ||= []).push({ name, size: st.size }); continue; }
+      if (st.size > fileCapFor(name)) { (out[SKIPPED_META] ||= []).push({ name, size: st.size }); continue; }
       putCollected(out, name, fs.readFileSync(path.join(dir, name), 'utf8'));
     } catch { /* skip */ }
   }
@@ -266,7 +282,7 @@ export async function collectConfigDirAsync(dir = CONFIG_DIR, { sliceMs = 15 } =
     const name = e.name;
     try {
       const st = await fs.promises.stat(path.join(dir, name));
-      if (st.size > FILE_SIZE_CAP) { (out[SKIPPED_META] ||= []).push({ name, size: st.size }); continue; }
+      if (st.size > fileCapFor(name)) { (out[SKIPPED_META] ||= []).push({ name, size: st.size }); continue; }
       putCollected(out, name, await fs.promises.readFile(path.join(dir, name), 'utf8'));
     } catch { /* skip */ }
     await maybeYield();

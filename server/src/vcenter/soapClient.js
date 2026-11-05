@@ -1127,13 +1127,35 @@ export function parseVmGpu(deviceXml) {
  *   DeviceBackingInfo `<id>`(정적 DirectPath) · DynamicBackingInfo `<assignedId>`(동적 DirectPath — 켜진 VM 에만 값이 있다).
  * vGPU(VmiopBackingInfo) 장치는 건너뛴다. 못 읽으면 그 장치만 빠진다(지어내지 않는다). 16개 상한.
  */
+export const PCI_SEG_MAX = 65_536;
+/**
+ * 장치 조각의 첫 backing — `<backing\b[^>]{0,200}>…</backing>` 와 같은 뜻을 indexOf 로(v2.901 점검 E6 — 실측: 닫히지 않은 `<backing` 이 반복되면
+ * 게으른 `[\s\S]*?` 가 시작점마다 끝까지 훑어 2차 시간이었다 · 250KB 1.6초). 조각은 PCI_SEG_MAX 로 먼저 자른다. 못 찾으면 null.
+ */
+function firstBacking(seg) {
+  const CLOSE = '</backing>';
+  let from = 0;
+  for (let n = 0; n < 64; n++) {
+    const i = seg.indexOf('<backing', from);
+    if (i < 0) return null;
+    from = i + 8;
+    if (/\w/.test(seg[i + 8] || '')) continue;   // \b — <backingObjectId> 같은 다른 태그
+    const gt = seg.indexOf('>', i + 8);
+    if (gt < 0) return null;
+    if (gt - (i + 8) > 200) continue;   // [^>]{0,200}
+    const end = seg.indexOf(CLOSE, gt + 1);
+    if (end < 0) return null;   // 뒤에도 닫힘이 없다 — 다음 <backing 도 맞을 수 없다
+    return { head: seg.slice(i, Math.min(i + 200, end + CLOSE.length)), inner: seg.slice(gt + 1, end) };
+  }
+  return null;
+}
 export function vmPassthroughPciIds(deviceXml) {
   const ids = [];
   const parts = String(deviceXml || '').split(/xsi:type="VirtualPCIPassthrough"/).slice(1);
-  for (const seg of parts) {
-    const b = /<backing\b[^>]{0,200}>([\s\S]*?)<\/backing>/.exec(seg);
-    if (!b || /VmiopBackingInfo/.test(b[0].slice(0, 200))) continue;
-    const id = /<assignedId>([^<]{1,64})<\/assignedId>/.exec(b[1])?.[1] || /<id>([^<]{1,64})<\/id>/.exec(b[1])?.[1] || '';
+  for (const raw of parts) {
+    const b = firstBacking(raw.length > PCI_SEG_MAX ? raw.slice(0, PCI_SEG_MAX) : raw);
+    if (!b || /VmiopBackingInfo/.test(b.head)) continue;
+    const id = /<assignedId>([^<]{1,64})<\/assignedId>/.exec(b.inner)?.[1] || /<id>([^<]{1,64})<\/id>/.exec(b.inner)?.[1] || '';
     const v = id.trim();
     if (/^[0-9a-fA-F:.]{5,32}$/.test(v) && !ids.includes(v)) ids.push(v);
     if (ids.length >= 16) break;
@@ -2265,7 +2287,8 @@ export async function collectFromVCenterSoap(vc, { signal = null, deadlineAt = D
     if (!tagInv || tagInv.skipped) tagInv = getTagInv(vc.id);
     // v2.898: vCenter 알람 · 최근 작업 · 권한 목록(읽기 전용 · 종류별 주기). 결과는 vcinfo 캐시에만 두고 vCenter 객체에 싣지 않는다
     //   (/vcenters 가 객체를 통째로 내보낸다 — 권한 목록이 새면 안 된다). 엣지 push 는 inventoryPush 가 캐시에서 따로 붙인다.
-    await runAux('vcinfo', 'vCenter 알람·작업·권한', VCINFO_BUDGET_MS, (budgetMs) => refreshVcInfo(c, vc, { signal, budgetMs }));
+    await runAux('vcinfo', 'vCenter 알람·작업·권한', VCINFO_BUDGET_MS, (budgetMs) => refreshVcInfo(c, vc, { signal, budgetMs,
+      poolRefs: objs.filter((x) => x.type === 'ResourcePool').map((x) => x.ref) }));   // v2.901: 리소스 풀 설정(6시간마다)
     // v2.898 ④: Linked Mode 구성원 · 어플라이언스 업데이트 · vLCM 이미지 준수(REST GET — 6시간마다 · 때가 아니면 세션도 열지 않는다).
     await runAux('vcrest', 'Linked Mode·업데이트·vLCM', VCREST_BUDGET_MS, (budgetMs) => refreshVcRest(vc,
       objs.filter((x) => x.type === 'ClusterComputeResource').map((x) => ({ ref: x.ref, name: typeof x.props?.name === 'string' ? x.props.name : null })), { signal, budgetMs }));

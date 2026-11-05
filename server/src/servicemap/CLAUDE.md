@@ -50,6 +50,8 @@
 - **스캔 엔트리 id 는 세 경로**: 등록부 `scanRangeId` · 엣지 push(`fleetPush` → `central/fleet.js` — 필드 없음 = null) · 수집 서버 pull(`collector/agent.js buildExport` →
   `remoteInventory.js SERVER_STR_KEYS` — 필드 없음 = 구버전). 판정은 `scanInfoOf` 하나(모르는 엔트리 · 구버전 · **못 받음(not-reported)** · 수동 등록을 나눈다 — R6·R18).
   엣지·수집 서버 출처인데 그 서버 기록이 없으면 '못 받음' 이지 수동 등록이 아니다(2차 반증 1). 수집 서버 경로가 id 를 주지 않으면 같은 서비스 태그의 엣지 push 값을 쓴다(값이 갈리면 쓰지 않는다 — 2차 반증 5).
+  v2.901(점검 E4 · E5): 엣지 push 의 **등록부 밖 장치(OME · 수집 서버 경유 — 중앙 fleet `edgeSource`)** 의 빈 scanRangeId 도 '못 받음'(`edgeScanReportable`) · 태그 폴백은
+  그 엔트리의 DataCenter 가 서버 법인의 DataCenter 와 같을 때만(모르거나 중앙에 없는 엔트리면 쓰지 않는다 · 빈 값은 그대로).
 - **법인 귀속 없음은 이유별**(R18 둘째 절): 귀속 판정 오류 · 서비스 태그가 두 법인에 걸려 보류(`buildVcIndex.conflictTags`) · 어느 규칙에도 맞지 않음. 묶음 키 `nocorp|<이유>`.
 - **트리 '(법인 미지정)'** 은 `members?nocorp=1`·`queues?nocorp=1`(빈 `corp` 는 '조건 없음' 이라 전 법인이 나왔다 — 6차 6). 범위 계정 큐 `mismatch` 는 범위 밖 `pinCorp`·서비스 id 를 비운다(6차 5).
 - **수정 연산**(예약 버그 수정): `folder.rename`(마지막 단계 이름만 · 하위 경로 함께 · 있는 이름이면 409) · `folder.remove`(`moveUp` = 한 단계 걷어 냄 · `expect` 다르면 409) ·

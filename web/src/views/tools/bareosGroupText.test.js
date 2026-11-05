@@ -8,11 +8,17 @@ import {
 // 서버 bareosGroups2830 ① 과 같은 입력·같은 글자(두 벌이라 대조한다)
 describe('scheduleText — 서버 groupSchedule.scheduleText 와 같은 글자', () => {
   it('요일·매일·Full 요일·꺼짐', () => {
-    expect(scheduleText({ enabled: true, days: [1, 3, 5], time: '02:10', level: 'Incremental', fullDays: [5] })).toBe('월·수·금 02:10 Incremental (Full: 금)');
-    expect(scheduleText({ enabled: true, days: [0, 1, 2, 3, 4, 5, 6], time: '02:10', level: 'Incremental' })).toBe('매일 02:10 Incremental');
+    expect(scheduleText({ enabled: true, days: [1, 3, 5], time: '02:10', level: 'Incremental', fullDays: [5] })).toBe('월·수·금 02:10 Incremental (Full: 금) · 현지 서버 시각');
+    expect(scheduleText({ enabled: true, days: [0, 1, 2, 3, 4, 5, 6], time: '02:10', level: 'Incremental', clock: 'portal' })).toBe('매일 02:10 Incremental · 중앙 포탈 시각');
     expect(scheduleText({ enabled: false, days: [1, 3, 5], time: '02:10', level: 'Incremental', fullDays: [5] })).toBe('스케줄 꺼짐(수동 실행만)');
     expect(scheduleText(null)).toBe('스케줄 꺼짐(수동 실행만)');
-    expect(scheduleText(NEW_SCHEDULE)).toBe('매일 02:10 Incremental');
+    expect(scheduleText(NEW_SCHEDULE)).toBe('매일 02:10 Incremental · 중앙 포탈 시각');   // v2.901: 새 그룹은 중앙 포탈 시각이 기본
+  });
+  it('v2.901 서버 scheduleText 와 같은 입력에서 같은 글자(시계 포함)', async () => {
+    const srv = await import('../../../../server/src/bareos/groupSchedule.js');
+    for (const s of [NEW_SCHEDULE, { enabled: true, days: [1, 3, 5], time: '02:10', level: 'Incremental', fullDays: [5] }, { enabled: true, days: [0], time: '23:59', level: 'Full', fullDays: [], clock: 'server' }, { enabled: false, days: [], time: '02:00', level: 'Incremental' }]) {
+      expect(scheduleText(s)).toBe(srv.scheduleText(s));
+    }
   });
 });
 
@@ -175,5 +181,17 @@ describe('v2.831.1 본인 OTP 판정 — 서버 groupRetention.keepOtpReasons �
     expect(keepOtpReasons(g, { keep: undefined, vmIds: ['a', 'b', 'c', 'd'] }, (id) => id === 'c')).toEqual(['백업 기록이 있을 수 있는 VM 1대를 더함']);
     expect(keepOtpReasons(g, { keep: 3, vmIds: ['a', 'c'] }, () => true)).toEqual(['보관 개수를 줄임(7 → 3회)']);
     expect(keepOtpReasons({ keep: null, vmIds: [] }, { keep: undefined, vmIds: ['c'] })).toEqual([]);
+  });
+});
+
+describe('v2.901 기준 시계 — 두 시계 미리 보기', () => {
+  it('UTC 오프셋 글자 · 시각 옮기기(날짜 넘김 표시)', async () => {
+    const { utcOffsetText, shiftTimeText, NEW_SCHEDULE } = await import('./bareosGroupText.js');
+    expect([utcOffsetText(540), utcOffsetText(0), utcOffsetText(-300), utcOffsetText(330), utcOffsetText(null)]).toEqual(['UTC+09:00', 'UTC+00:00', 'UTC-05:00', 'UTC+05:30', '']);
+    expect(shiftTimeText('02:00', 540, 0)).toBe('17:00 (전날)');
+    expect(shiftTimeText('20:00', 0, 540)).toBe('05:00 (다음날)');
+    expect(shiftTimeText('02:00', 540, 540)).toBe('02:00');
+    expect(shiftTimeText('bad', 0, 0)).toBe('');
+    expect(NEW_SCHEDULE.clock).toBe('portal');
   });
 });

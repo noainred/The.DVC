@@ -104,5 +104,19 @@ export function mockVcInfo(kind, vcId, snap, now = Date.now(), allowed = null) {
     });
     return { at: now - ((seed % 300) + 40) * MIN, items, omitted: 0, error: null };
   }
+  if (kind === 'pools') {
+    // v2.901: 데모 리소스 풀 — 이 vCenter VM 의 풀 이름마다 하나(이름순 · 결정적). 'Resources' 는 클러스터 루트 풀.
+    const names = [...new Set(vms.map((v) => v.resourcePool).filter(Boolean))].sort();
+    const items = names.slice(0, 200).map((n, i) => {
+      const root = n === 'Resources';
+      const k = (seed + i) % 5;
+      return {
+        ref: `resgroup-${100 + i}`, name: n, owner: null, root,
+        cpu: { res: root ? 512_000 : [0, 0, 4000, 8000, 0][k], limit: root ? 512_000 : (k === 3 ? 16_000 : -1), expandable: root ? false : k !== 2, shares: [4000, 8000, 2000, 8000, 4000][k], level: ['normal', 'high', 'low', 'high', 'custom'][k] },
+        mem: { res: root ? 2_048_000 : [0, 16_384, 0, 65_536, 0][k], limit: root ? 2_048_000 : (k === 4 ? 32_768 : -1), expandable: root ? false : true, shares: [163_840, 327_680, 81_920, 327_680, 100_000][k], level: ['normal', 'high', 'low', 'high', 'custom'][k] },
+      };
+    });
+    return { at: now - ((seed % 300) + 50) * MIN, items, omitted: 0, error: null };
+  }
   return null;
 }
