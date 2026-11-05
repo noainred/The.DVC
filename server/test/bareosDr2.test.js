@@ -80,8 +80,8 @@ before(async () => {
   ({ store } = await import('../src/store.js'));
   registry = await import('../src/bareos/registry.js');
   store.snapshot = {
-    generatedAt: Date.now(), source: 'mock',
-    vcenters: [{ id: 'vc-a', name: 'Seoul', host: 'https://vc-a.corp', location: { region: 'KR' } }, { id: 'vc-b', name: 'Warsaw', host: 'https://vc-b.corp', location: { region: 'PL' } }],
+    generatedAt: new Date().toISOString(), source: 'mock',   // 운영과 같은 모양(ISO 문자열 · 연결 상태) — 숫자로 두면 B4-01 이 숨는다
+    vcenters: [{ id: 'vc-a', name: 'Seoul', host: 'https://vc-a.corp', location: { region: 'KR' }, status: 'connected' }, { id: 'vc-b', name: 'Warsaw', host: 'https://vc-b.corp', location: { region: 'PL' }, status: 'connected' }],
     hosts: [{ id: 'vc-a:host-1', vcenterId: 'vc-a', name: 'esx-a1', cluster: 'CL-A', vcDatacenter: 'DC-NEW' }, { id: 'vc-a:host-2', vcenterId: 'vc-a', name: 'esx-a2', cluster: 'CL-B', vcDatacenter: 'DC-NEW' }],
     datastores: [{ id: 'vc-a:ds-1', vcenterId: 'vc-a', name: 'ds-a1', freeGB: 5000, capacityGB: 10000 }, { id: 'vc-a:ds-2', vcenterId: 'vc-a', name: 'ds-tight', freeGB: 300, capacityGB: 1000 }],
     vms: [

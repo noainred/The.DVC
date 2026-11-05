@@ -278,15 +278,37 @@ export function bulkRestorePlan({ items, jobOf, dirOf, snapshot, pluginName = 'p
 /** 새 VM 복원 이름을 예약해 두는 시간(진행 중 + 끝난 뒤 하루 — 다음 인벤토리 수집 전 같은 이름을 막는다). */
 export const RESTORE_NAME_RESERVE_MS = 24 * 3600_000;
 /**
+ * vCenter 마다 '새로 읽은 인벤토리' 의 시각(포탈 시계 ms · 순수) — 이름 예약 해제(R4)의 기준.
+ *   버그 점검 B4-01(재현): 예전에는 `Number(snapshot.generatedAt)` 였는데 운영 스냅샷의 generatedAt 은 **ISO 문자열**이라 NaN → 0 이 되어
+ *   해제가 운영에서 한 번도 일어나지 않았다(시험 픽스처만 숫자였다). 정상 수집('connected')이고 낡지 않은(stale · 점검중 아님) vCenter 만 센다 —
+ *   사이트 위임은 엣지 수신 시각(receivedAt), 중앙 수집은 병합 시각(generatedAt). 첫 병합 전 골격 · 못 읽은 값은 0(새 인벤토리 없음 — 풀지 않는 쪽).
+ * @returns {(vcenterId:string)=>number}
+ */
+export function inventoryAtOf(snapshot) {
+  const raw = snapshot?.generatedAt;
+  const gen = typeof raw === 'number' ? raw : Date.parse(String(raw ?? ''));
+  const byId = new Map((Array.isArray(snapshot?.vcenters) ? snapshot.vcenters : []).map((v) => [String(v?.id), v]));
+  return (vcenterId) => {
+    const v = byId.get(String(vcenterId));
+    if (snapshot?.initial || !v || v.status !== 'connected' || v.stale === true || v.maintenance === true) return 0;
+    const t = v.collectSource === 'site' ? Number(v.receivedAt) : gen;
+    return Number.isFinite(t) && t > 0 ? t : 0;
+  };
+}
+/**
  * 최근 · 진행 중 새 VM 복원이 쓰는 이름(`${vcenterId}\u0000${소문자 이름}`) — 묶음 복원 라우트와 재해 복구 단계 실행기(drRunner)가 같은 판정을 쓴다(순수).
- *   반증 R4(재해 복구 1차): 실패 · 취소로 끝난 복원은 그 뒤 인벤토리 수집(snapAt)이 있으면 예약을 푼다 — 껍데기가 생겼으면 인벤토리 이름 대조가 막는다.
+ *   반증 R4(재해 복구 1차): 실패 · 취소로 끝난 복원은 그 뒤 인벤토리 수집이 있으면 예약을 푼다 — 껍데기가 생겼으면 인벤토리 이름 대조가 막는다.
+ *   snapAt: `inventoryAtOf(snapshot)`(vCenter 마다) 또는 숫자. '끝난 시각' 은 **포탈 시계**(폴러가 끝을 본 checkedAt · 기록 at)로 본다 —
+ *   endedAt 은 Director 현지 시각을 포탈 시간대로 읽은 값이라(시간대가 다르면 몇 시간 이르게 읽힌다) 늦추는 쪽으로만 섞는다(max).
  */
 export function reservedRestoreNames(jobs, { now = Date.now(), snapAt = 0, isOpen = () => false } = {}) {
   const out = new Set();
   const since = now - RESTORE_NAME_RESERVE_MS;
+  const invAt = typeof snapAt === 'function' ? snapAt : () => Number(snapAt) || 0;
   for (const j of Array.isArray(jobs) ? jobs : []) {
     for (const r of j.restores || []) {
-      const failedSeen = (r.state === 'error' || r.state === 'canceled') && snapAt > (Number(r.endedAt || r.at) || 0);
+      const seenEnd = Math.max(Number(r.checkedAt) || 0, Number(r.at) || 0, Number(r.endedAt) || 0);
+      const failedSeen = (r.state === 'error' || r.state === 'canceled') && seenEnd > 0 && invAt(j.vcenterId) > seenEnd;
       if (r.mode === 'newVm' && r.target?.name && !failedSeen && (isOpen(r) || (Number(r.at) || 0) >= since)) out.add(`${j.vcenterId}\u0000${String(r.target.name).toLowerCase()}`);
     }
   }
