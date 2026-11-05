@@ -8,6 +8,7 @@ import { toolAllowed } from '../../api.js';
 import { ErrorBox, Loading } from '../../components/ui.jsx';
 import { STable } from '../../components/STable.jsx';
 import { useOnce, toolDenied } from './useOnce.js';
+import { dayStamp } from '../../dayStamp.js';
 import { KV, Note, SubNav, ToolLink, NotCollected } from './VcdParts.jsx';
 import { CertBadge } from './SummaryTab.jsx';
 import { CONFIGURE_SUBS, maskLicenseKey, licenseUsePct, licenseExpiryText } from './vcdTabs.js';
@@ -181,7 +182,7 @@ function CertsPane({ vcenterId }) {
               ['대상', <span className="mono" key="h">{c.hostPort || `${c.host || ''}${c.port ? `:${c.port}` : ''}` || '—'}</span>],
               ['CN', c.cn || '—'],
               ['발급자', c.issuer || '—'],
-              ['유효 기간', c.validTo ? `${c.validFrom ? new Date(c.validFrom).toISOString().slice(0, 10) : '—'} ~ ${new Date(c.validTo).toISOString().slice(0, 10)}` : '—'],
+              ['유효 기간', c.validTo ? `${dayStamp(c.validFrom) || '—'} ~ ${dayStamp(c.validTo) || '—'}` : '—'],
               ['자체 서명', c.selfSigned == null ? '—' : c.selfSigned ? '예' : '아니오'],
               c.error ? ['확인 실패', c.error] : null,
             ]} />
