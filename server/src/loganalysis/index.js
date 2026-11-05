@@ -1,5 +1,5 @@
 /**
- * loganalysis/index.js — 설정 › Log › 로그 분석 파사드(v2.583).
+ * loganalysis/index.js — 설정 › 로그 › 로그 분석 파사드(v2.583).
  * 원천 5가지(누적 · 링 버퍼 · 서비스 저널 · 붙여넣기 · 엣지 로그 보관분)를 같은 엔진으로 분석한다.
  */
 import { CORE_RULES, normalizeRules, CATEGORY_LABEL, SEVERITY_RANK } from './rules.js';

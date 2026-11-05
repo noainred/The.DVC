@@ -55,7 +55,7 @@ function headersFor(kind, target, ctx) {
   if (kind === 'set:collector') {
     const c = ctx.collectors?.get?.(t(target.ref)) || ctx.collectors?.get?.(t(target.name)) || null;
     const tok = t(c?.token);
-    if (!tok) return { skip: '이 수집 서버에 토큰이 저장돼 있지 않습니다 — 설정 › 수집 서버에서 토큰을 넣으세요.' };
+    if (!tok) return { skip: '이 수집 서버에 토큰이 저장돼 있지 않습니다 — 설정 › 엣지·원격 › 수집 서버(원격)에서 토큰을 넣으세요.' };
     return { headers: { ...h, 'X-Collector-Token': tok } };
   }
   if (kind === 'set:central') {

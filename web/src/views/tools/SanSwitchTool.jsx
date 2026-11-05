@@ -687,7 +687,7 @@ function RangePicker({ hours, setHours, range, setRange }) {
           <label>시작 <input className="input" type="datetime-local" value={fromStr} onChange={(e) => setFromStr(e.target.value)} style={{ width: 200 }} /></label>
           <label>끝 <input className="input" type="datetime-local" value={toStr} onChange={(e) => setToStr(e.target.value)} style={{ width: 200 }} placeholder="비우면 지금" /></label>
           <button className="login-btn" style={{ flex: 'none', padding: '4px 12px' }} onClick={apply}>적용</button>
-          <span className="muted">끝을 비우면 지금까지 · 최대 {RANGE_MAX_DAYS}일 · 보관 기간(설정 › 수집 서버) 밖의 시각은 데이터가 없습니다.</span>
+          <span className="muted">끝을 비우면 지금까지 · 최대 {RANGE_MAX_DAYS}일 · 보관 기간(설정 › 수집 › SAN 스위치 포트 사용량) 밖의 시각은 데이터가 없습니다.</span>
           {issue && <span style={{ color: TONE.bad }}>{issue}</span>}
         </div>
       )}
@@ -1197,7 +1197,7 @@ function DcStoragePerf({ dcPerf, onClose }) {
                 있고 장비에서 실패하는 상황에서도 사용자가 멀쩡한 설정을 의심하며 헤맸다(장비별 진단은
                 장비 상세 › 사용량 분석 탭이 `perfDiag` 로 사유를 말한다). */}
             {data.perfEnabled === false
-              ? <><b>설정 › 수집 서버 › SAN 스위치 포트 사용량</b> 에서 수집을 켜야 <code>portperfshow</code> 로 쌓기 시작합니다(기본 꺼짐).</>
+              ? <><b>설정 › 수집 › SAN 스위치 포트 사용량</b> 에서 수집을 켜야 <code>portperfshow</code> 로 쌓기 시작합니다(기본 꺼짐).</>
               : <>포트 사용량 수집은 <b>켜져 있습니다</b> — 표본이 없는 이유는 스위치마다 다릅니다. 장비를 눌러 <b>사용량 분석</b> 탭을 열면 그 스위치의 사유(첫 주기 대기 / 엣지 미보고 / 명령 실패 등)를 알려줍니다.</>}
             {data.unavailable ? <div style={{ color: 'var(--amber)', marginTop: 4 }}>이 서버는 시계열 DB(node:sqlite)를 쓸 수 없어 이력이 저장되지 않습니다.</div> : null}
             {!data.switches.length ? <div style={{ marginTop: 4 }}>이 법인에 등록된 스위치가 없습니다.</div> : null}

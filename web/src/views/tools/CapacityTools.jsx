@@ -546,7 +546,7 @@ export function Waste({ scope, cluster = '', folder = '' }) {
               <div className="muted" style={{ fontSize: 12, marginTop: 6, lineHeight: 1.6 }}>
                 근거 — <b>이벤트</b> 정확(vCenter 로그 수집·보관 기간 안, VM 이름 기준) · <b>점검</b> ≥ 하한({offSince?.sources?.observedIntervalHours || 6}시간 주기) · <b>추적</b> ≥ 하한(12시간 슬롯) · <b>관측 시작</b> ≥ 하한 · <b>없음</b> 세 출처 모두 기록 없음.
                 {offSince && !offSince.error && !offSince.sources?.events && <> 이 조회에서 이벤트 출처는 쓰이지 않았습니다(vCenter 로그 수집 확인).</>}
-                {offSince && !offSince.error && offSince.sources?.observedEnabled === false && <> 전원 꺼짐 점검이 꺼져 있습니다(설정 › 수집 서버에서 켜면 점검 주기 정밀도로 추적).</>}
+                {offSince && !offSince.error && offSince.sources?.observedEnabled === false && <> 전원 꺼짐 점검이 꺼져 있습니다(설정 › 엣지·원격 › 수집 서버(원격)에서 켜면 점검 주기 정밀도로 추적).</>}
                 {offSince?.error && <> 꺼진 시각 조회 실패: {offSince.error}</>}
               </div>
             </section>

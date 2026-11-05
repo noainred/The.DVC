@@ -156,7 +156,7 @@ export function reconcileForApply(name, content, configDir) {
     try { cur = fs.readFileSync(path.join(configDir, name), 'utf8'); } catch { cur = null; }
     const r = reconcileSecuritySessionText(content, cur);
     return r.forcedOn
-      ? { content: r.text, info: { bareosSetupOtpKeptOn: true }, warning: { file: name, reason: '백업에는 Bareos 자동 설정 본인 OTP 재확인이 꺼져 있었지만 복원으로는 끄지 않습니다(켬으로 적용) — 끄려면 설정 › Security › 세션 보안에서 본인 OTP 로 저장하세요.' } }
+      ? { content: r.text, info: { bareosSetupOtpKeptOn: true }, warning: { file: name, reason: '백업에는 Bareos 자동 설정 본인 OTP 재확인이 꺼져 있었지만 복원으로는 끄지 않습니다(켬으로 적용) — 끄려면 설정 › 보안 › 세션 보안에서 본인 OTP 로 저장하세요.' } }
       : { content: r.text };
   }
   if (name === 'bareos-groups.json') {

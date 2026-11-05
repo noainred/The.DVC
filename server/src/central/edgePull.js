@@ -95,7 +95,7 @@ export async function pullFromEdge(agent, path, {
 } = {}) {
   const t0 = Date.now();
   const col = await findCollector(agent);
-  if (!col) return { ok: false, kind: 'not-registered', reason: '수집 서버 등록부에 없는 이름입니다(설정 › 수집 서버에서 등록하세요).', ms: 0, col: null, fetched: false };
+  if (!col) return { ok: false, kind: 'not-registered', reason: '수집 서버 등록부에 없는 이름입니다(설정 › 엣지·원격 › 수집 서버(원격)에서 등록하세요).', ms: 0, col: null, fetched: false };
   if (col.enabled === false) return { ok: false, kind: 'disabled-central', reason: '중앙에서 이 수집 서버를 비활성으로 두었습니다.', ms: 0, col, fetched: false };
   if (!t(col.url)) return { ok: false, kind: 'no-url', reason: '이 수집 서버에 URL 이 없습니다.', ms: 0, col, fetched: false };
 

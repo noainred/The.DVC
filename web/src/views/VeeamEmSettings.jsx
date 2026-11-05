@@ -89,7 +89,7 @@ export default function VeeamEmSettings() {
       <div className="section-title" style={{ marginTop: 0 }}>🛰️ Veeam Enterprise Manager{d ? ` (${ems.length}대)` : ''}</div>
       <div className="muted" style={{ fontSize: 12, lineHeight: 1.6 }}>
         Enterprise Manager 를 등록하면 <b>중앙 포탈이 직접</b> EM REST API(기본 포트 9398)를 읽어 전 백업 서버의 작업 결과·세션·저장소를 <b>Backup 현황 › EM</b> 탭에 보입니다.
-        읽기 전용 계정(EM Portal User 역할)을 권장합니다 — 포탈은 작업을 시작·중지하지 않습니다. 처음 연결하면 EM 인증서가 <b>승인 대기</b>로 멈춥니다(설정 › Security › 장비 신뢰에서 지문 확인 뒤 승인).
+        읽기 전용 계정(EM Portal User 역할)을 권장합니다 — 포탈은 작업을 시작·중지하지 않습니다. 처음 연결하면 EM 인증서가 <b>승인 대기</b>로 멈춥니다(설정 › 보안 › 장비 신뢰에서 지문 확인 뒤 승인).
       </div>
       {d?.registryError && <div className="banner warn" style={{ marginTop: 8 }}>등록부를 읽지 못했습니다(0대라는 뜻이 아닙니다): {d.registryError}</div>}
       {err && <div className="banner warn" style={{ marginTop: 8 }}>목록을 읽지 못했습니다(0대라는 뜻이 아닙니다): {err} <button type="button" className="tab" style={{ marginLeft: 8, padding: '2px 10px' }} onClick={load}>다시 읽기</button></div>}

@@ -119,7 +119,7 @@
 | `issues/` | 10 | 3,462 | `issues/store.js` (4) | issues/store.js — 이슈 트래커 저장소(v2.864). 포탈 공용 이슈(장애·작업·요청·개선)를 등록하고 담당자에게 할당해 끝날 때까지 추적한다. |
 | `linkcheck/` | 12 | 2,724 | `linkcheck/links.js` (4) | linkcheck/links.js — **설정에서 통신 링크를 자동으로 뽑는다**(순수, v2.552). |
 | `llm/` | 5 | 594 | `llm/config.js` (2) | Local LLM (Ollama) settings for natural-language search. Stored in |
-| `loganalysis/` | 8 | 2,076 | `loganalysis/index.js` (2) | loganalysis/index.js — 설정 › Log › 로그 분석 파사드(v2.583). |
+| `loganalysis/` | 8 | 2,076 | `loganalysis/index.js` (2) | loganalysis/index.js — 설정 › 로그 › 로그 분석 파사드(v2.583). |
 | `logs/` | 6 | 2,056 | `logs/db.js` (16) | vCenter 이벤트 로그 장기 보관 DB. vCenter는 이벤트를 단기간만 보관하므로, 포탈이 주기적으로 |
 | `mail/` | 3 | 477 | `mail/settings.js` (16) | mail/settings.js — 포탈 공용 메일(SMTP) 설정 (`mail.json`, v2.454). |
 | `metrics/` | 8 | 2,097 | `metrics/db.js` (12) | Generic metrics time-series store (host temperature, datastore usage, GPU |
@@ -305,7 +305,7 @@ withRollups()  ─ vCenter별 1회 그룹핑 ─▶  store.snapshot (메모리)
 
 - ID 는 **식별용이지 권한 근거가 아닙니다** — 상태 조회는 그 요청을 보낸 계정만(관리자는 전부) 봅니다.
 - `unknown` 은 '서버에 도달하지 않음 · 서버 재시작 · 최근 완료 기록에서 밀려남' 을 구분할 수 없어 **단정하지 않습니다.**
-- 같은 ID 를 설정 › Log › 서버 성능 측정의 '요청 ID 찾기' 와 진단·로그의 라이브 로그에서 찾을 수 있습니다.
+- 같은 ID 를 설정 › 로그 › 서버 성능 측정의 '요청 ID 찾기' 와 진단·로그의 라이브 로그에서 찾을 수 있습니다.
 
 **로그 분석 — `loganalysis/`**
 

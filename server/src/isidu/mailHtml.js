@@ -14,7 +14,7 @@ import { localStamp } from '../util/dayKey.js';
 import { numOrNull } from '../util/numOrNull.js';
 import { slotLabel, daysLabel, failTitleOf, SURGE_MIN_BYTES, SURGE_MIN_RATIO } from './digestRules.js';
 
-export const SETTINGS_PATH = '설정 › 수집 서버 › 아이실론 디렉터리 사용량';
+export const SETTINGS_PATH = '설정 › 수집 › 아이실론 디렉터리 사용량';
 export const VIEW_PATH = '특수 기능 › 아이실론 디렉터리 사용량';
 const FONT = "'Malgun Gothic','맑은 고딕','Apple SD Gothic Neo','Noto Sans KR',sans-serif";
 const MONO = "Consolas,'D2Coding','Courier New',monospace";

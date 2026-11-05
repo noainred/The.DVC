@@ -65,7 +65,7 @@ export function collectDropNote(drops, nameOf = (id) => id, now = Date.now()) {
   }
   const edgeNote = ep ? ` 그중 ${byEdge.length}건은 엣지가 요청을 받았지만 시작하지 않고 버렸다고 알려 왔습니다(${ep.reasons}) — ${ep.fixes}` : '';
   if (untaken === rest.length) {
-    return `${head}엣지${agentText}가 요청을 **가져가지 않은 채** 보관 시한이 지났습니다${tail} — 그 엣지가 켜져 있고 중앙 설정을 받아 가는지(설정 › 수집 서버) 확인하세요.${edgeNote}`;
+    return `${head}엣지${agentText}가 요청을 **가져가지 않은 채** 보관 시한이 지났습니다${tail} — 그 엣지가 켜져 있고 중앙 설정을 받아 가는지(설정 › 엣지·원격 › 수집 서버(원격)) 확인하세요.${edgeNote}`;
   }
   const mixed = untaken ? ` 그중 ${untaken}건은 엣지가 요청을 가져가지도 않았습니다(엣지가 꺼졌거나 설정을 받아 가지 않음).` : '';
   return `${head}엣지${agentText}가 요청을 가져갔지만 새 수집 결과가 오지 않아 한 번 더 요청한 뒤 버렸습니다${tail} — 특수기능 › 엣지 로그에서 그 장비의 수집 오류를 확인하세요.${mixed}${edgeNote}`;

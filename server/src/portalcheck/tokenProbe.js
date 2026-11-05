@@ -73,7 +73,7 @@ export async function probeCollectorPing(row, { fetchImpl = resilientFetch, time
   const t0 = Date.now();
   // v2.767(점검 R2-B4-5): 비활성 수집 서버는 점검하지 않는다 — '토큰 미저장' 으로 말하면 거짓이다(등록부에 토큰은 있다).
   if (row?.disabled === true) {
-    return { at: t0, ms: 0, state: PROBE_STATE.NOT_RUN, httpStatus: null, reason: '비활성 수집 서버라 점검하지 않았습니다 — 설정 › 수집 서버에서 켜면 점검합니다.', evidence: 'unknown', disabled: true };
+    return { at: t0, ms: 0, state: PROBE_STATE.NOT_RUN, httpStatus: null, reason: '비활성 수집 서버라 점검하지 않았습니다 — 설정 › 엣지·원격 › 수집 서버(원격)에서 켜면 점검합니다.', evidence: 'unknown', disabled: true };
   }
   const hasToken = row?.collector?.set === true && t(token) !== '';
   const url = base(row?.url);

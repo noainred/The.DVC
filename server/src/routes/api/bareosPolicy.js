@@ -128,7 +128,7 @@ export function registerBareosPolicy(api) {
     if (asked && asked.some((id) => !scoped.has(id))) return res.status(404).json({ ok: false, reason: 'Director 를 찾을 수 없습니다.' });
     const off = new Set(settings.defaults?.policy?.off || []);
     const ids = asked || [...scoped.keys()].filter((id) => !off.has(id));
-    if (!ids.length) return res.status(400).json({ ok: false, reason: '수집할 Director 가 없습니다 — 설정 › vCenter 관리 › Bareos 백업 서버 › Director 와 매핑을 확인하세요.' });
+    if (!ids.length) return res.status(400).json({ ok: false, reason: '수집할 Director 가 없습니다 — 설정 › 백업 › Bareos 백업 서버 › Director 와 매핑을 확인하세요.' });
     if (policyBusy()) return res.status(409).json({ ok: false, reason: '이미 수집 중입니다 — 끝난 뒤 화면이 새 값을 보입니다.' });
     const wait = manualWaitSec(ids);
     if (wait) return res.status(429).json({ ok: false, reason: `‘지금 수집’ 은 Director 마다 1분에 한 번입니다 — ${wait}초 뒤 다시 누르세요.` });

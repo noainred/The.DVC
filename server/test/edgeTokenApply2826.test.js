@@ -67,7 +67,7 @@ test('1b 업그레이드 push 가 연결돼 있지 않으면 hint 없이 수동 
   const d = fakeDeps();
   const { job } = await J.startTokenApply('agent-WA', { deps: d, wait: true });
   assert.equal(job.state, 'failed'); assert.equal(job.hint, '');
-  assert.match(job.summary, /설정 › 수집 서버 › 업그레이드/);
+  assert.match(job.summary, /설정 › 엣지·원격 › 수집 서버\(원격\) › 업그레이드/);
 });
 
 test('2 판을 모르는데 엣지가 401 → 기능 없음으로 읽고 확정 취소 · hint upgrade · 요약이 다음 수단을 말한다', async () => {

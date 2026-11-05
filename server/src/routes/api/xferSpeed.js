@@ -77,7 +77,7 @@ async function resolveAgent(name) {
 
 /** '지금 측정' 을 시작하지 못한 대상의 사유 — poller.xferTargets 의 reason 코드와 1:1. */
 const RUN_SKIP_TEXT = Object.freeze({
-  'disabled-central': '설정 › 수집 서버에서 이 엣지가 꺼져 있습니다',
+  'disabled-central': '설정 › 엣지·원격 › 수집 서버(원격)에서 이 엣지가 꺼져 있습니다',
   'no-url': '수집 서버에 URL 이 없습니다',
   excluded: '전송 속도 설정에서 측정 대상에서 뺐습니다',
 });
@@ -401,7 +401,7 @@ api.post('/tools/xfer-speed/run', adminOnly, fullScopeOnly, async (req, res) => 
   if (!targets.length) {
     const why = skipped.map((x) => RUN_SKIP_TEXT[x.reason] || x.reason);
     return res.status(409).json({ ok: false, noTargets: true, skipped: skipped.slice(0, 20),
-      reason: only ? `이 엣지는 지금 잴 수 없습니다 — ${why[0] || '대상이 아닙니다'}.` : `잴 엣지가 없습니다${why.length ? ` — ${[...new Set(why)].join(' · ')}` : ' — 설정 › 수집 서버에 엣지를 등록하세요'}.` });
+      reason: only ? `이 엣지는 지금 잴 수 없습니다 — ${why[0] || '대상이 아닙니다'}.` : `잴 엣지가 없습니다${why.length ? ` — ${[...new Set(why)].join(' · ')}` : ' — 설정 › 엣지·원격 › 수집 서버(원격)에 엣지를 등록하세요'}.` });
   }
   const r = startXferRun({ only });
   if (!r.ok) {

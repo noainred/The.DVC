@@ -37,7 +37,7 @@ export default function TaskWho({ task }) {
         </span>
       )}
       {task.rid && (
-        <span className="muted" title="추적 ID — 설정 › Log › 서버 성능 측정(느린 요청)과 진단·로그의 라이브 로그에서 같은 요청을 찾는 열쇠입니다.">
+        <span className="muted" title="추적 ID — 설정 › 로그 › 서버 성능 측정(느린 요청)과 진단·로그의 라이브 로그에서 같은 요청을 찾는 열쇠입니다.">
           {' · 추적 ID '}
           <span style={{ fontFamily: MONO, userSelect: 'all', fontSize: 10 }}>{task.rid}</span>
         </span>
