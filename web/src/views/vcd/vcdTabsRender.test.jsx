@@ -382,6 +382,30 @@ describe('v2.898 ④ 연결된 vCenter · 업데이트 · vLCM 카드 — 렌더
   });
 });
 
+describe('v2.902 분산 포트그룹 팀 구성 카드 — 렌더(얕게)', () => {
+  it('분산 스위치가 없는 호스트에는 부르지 않고 그리지 않는다 · 있으면 /vcenter-info/dvpg 한 번 · 이 vDS 행만(업링크 포트그룹 제외)', async () => {
+    const { DvpgTeamingCard } = await import('./VcInfoParts.jsx');
+    const called = [];
+    H.api.fetchJson = (p, q) => { called.push([p, q]); return Promise.resolve({ ok: true, at: 1, refreshMs: 21_600_000, items: [
+      { ref: 'pg-1', name: 'PG-App', dvsName: 'DS-Prod', uplinkPg: false, vlan: { id: 120 }, teaming: { policy: 'loadbalance_ip', active: ['lag1'], standby: [], failback: true }, lacp: { enabled: true, mode: 'active', lag: 'lag1' } },
+      { ref: 'pg-0', name: 'DS-Prod-DVUplinks', dvsName: 'DS-Prod', uplinkPg: true },
+      { ref: 'pg-9', name: 'PG-Other', dvsName: 'DS-Other', uplinkPg: false },
+    ] }); };
+    let rt = mount(DvpgTeamingCard, { vcenterId: 'vc1', host: { hcfg: { net: { switches: [{ name: 'vSwitch0', kind: 'vss' }] } } } });
+    await flush();
+    expect([rt.out, called.length]).toEqual([null, 0]);
+    unmount(rt);
+    rt = mount(DvpgTeamingCard, { vcenterId: 'vc1', host: { hcfg: { net: { switches: [{ name: 'DS-Prod', kind: 'dvs' }] } } } });
+    await flush();
+    expect(called).toEqual([['/vcenter-info/dvpg', { vcenterId: 'vc1' }]]);
+    const rows = all(rt, (e) => e.type === 'tr').map(textOf).filter((t) => /PG-|DVUplinks/.test(t));
+    expect(rows.length).toBe(1);
+    expect(rows[0]).toMatch(/PG-App/);
+    expect(rows[0]).toMatch(/LAG lag1 · 능동/);
+    unmount(rt);
+  });
+});
+
 describe('v2.895 성능 튜닝 탭 — 렌더(얕게)', () => {
   it('VM — 라이트사이징 권한이 없으면 부르지 않고 권한 안내 · 진단 축 5개', async () => {
     const { VmTuning } = await import('./TuningTabs.jsx');

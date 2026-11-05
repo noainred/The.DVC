@@ -14,7 +14,8 @@ import { Card, KV, Note } from './VcdParts.jsx';
 import { useOnce, toolDenied } from './useOnce.js';
 import { EventRows } from './SummaryTab.jsx';
 import { PermPane, vmRef } from './VmObject.jsx';
-import { VcAlarmsCard, VcTasksCard, HostVlcmCard, PoolSettingsCard } from './VcInfoParts.jsx';
+import { VcAlarmsCard, VcTasksCard, HostVlcmCard, PoolSettingsCard, DvpgTeamingCard } from './VcInfoParts.jsx';
+import { teamingText } from './vcInfo.js';
 import { vmsOnHost, resourcePoolRows, hostDatastoresFromVms, sameBuildCount, hostDsMounts } from './objTabs.js';
 import { gbText } from './vcdTabs.js';
 
@@ -169,6 +170,7 @@ export default function HostObject({ site, vcenterId, host, hostsOk, gate, hosts
             ) : <div className="muted" style={{ padding: '10px 14px', fontSize: 12.5 }}>물리 NIC 를 보고하지 않았습니다(이 vCenter 가 주지 않았거나 아직 읽지 않음).</div>}
           </Card>
           <HostNetCards host={host} />
+          <DvpgTeamingCard vcenterId={vcenterId} host={host} />
 
         </div>
       )}
@@ -234,12 +236,8 @@ function HostMountsCard({ host, datastores }) {
   );
 }
 
-/** v2.901 팀 구성 정책 → 화면 문구(vSphere Client 의 '부하 분산' 이름). 모르면 '—'. */
-const TEAMING_TEXT = Object.freeze({
-  loadbalance_srcid: '원래 가상 포트 기반', loadbalance_srcmac: '원본 MAC 해시 기반', loadbalance_ip: 'IP 해시 기반',
-  failover_explicit: '명시적 장애 조치 순서', loadbalance_loadbased: '물리 NIC 부하 기반',
-});
-export const teamingText = (p) => (p ? TEAMING_TEXT[p] || p : '—');
+// v2.901 팀 구성 문구 — v2.902 부터 vcInfo.js 한 벌(분산 포트그룹 표와 같이 쓴다). 예전 이름으로도 내보낸다.
+export { teamingText };
 
 function HostNetCards({ host }) {
   const hc = host.hcfg && typeof host.hcfg === 'object' && !host.hcfg.error ? host.hcfg : null;
@@ -262,14 +260,14 @@ function HostNetCards({ host }) {
             <tbody>
               {sws.map((w, i) => (
                 <tr key={`${w.name}-${i}`}><td><b>{w.name}</b></td><td>{w.kind === 'dvs' ? '분산(vDS)' : '표준(vSS)'}</td><td className="mono" style={{ whiteSpace: 'normal' }}>{(w.uplinks || []).join(' · ') || '—'}</td><td data-sort={w.pgs == null ? '' : String(w.pgs)}>{w.pgs == null ? '—' : w.pgs}</td>
-                  <td>{w.kind === 'dvs' ? <span className="muted">vDS 포트그룹 설정</span> : teamingText(w.teaming?.policy)}</td>
+                  <td>{w.kind === 'dvs' ? <span className="muted">포트그룹마다(아래 표)</span> : teamingText(w.teaming?.policy)}</td>
                   <td className="mono" style={{ whiteSpace: 'normal' }}>{w.teaming ? `${(w.teaming.active || []).join(' · ') || '—'} / ${(w.teaming.standby || []).join(' · ') || '없음'}` : '—'}{w.teaming && (w.teaming.active || []).length + (w.teaming.standby || []).length === 1 && <span className="badge amber" style={{ marginLeft: 6, fontFamily: 'inherit' }}>단일 경로</span>}</td>
                   <td>{w.teaming?.failback === true ? '예' : w.teaming?.failback === false ? '아니요' : '—'}</td></tr>
               ))}
             </tbody>
           </STable>
         ) : <div className="muted" style={{ padding: '10px 14px', fontSize: 12.5 }}>가상 스위치가 없다고 보고했습니다.</div>}
-        <Note>팀 구성은 표준 스위치의 설정(spec.policy.nicTeaming)입니다. 분산 스위치(vDS)의 팀 구성 · LACP 는 vDS 포트그룹 설정이라 호스트 쪽에서 읽지 않습니다. 포트그룹의 부하 분산은 스위치 기본값을 물려받은 유효 값입니다.</Note>
+        <Note>팀 구성은 표준 스위치의 설정(spec.policy.nicTeaming)입니다. 분산 스위치(vDS)의 팀 구성 · LACP 는 포트그룹마다 달라 아래 ‘분산 포트그룹’ 표에서 봅니다(vCenter 포트그룹 설정). 포트그룹의 부하 분산은 스위치 기본값을 물려받은 유효 값입니다.</Note>
       </Card>
       <Card title={`포트그룹 ${net.pgsTotal != null ? net.pgsTotal : pgs.length}`} sub="표준 스위치 포트그룹(hcfg.net) · 분산 포트그룹은 vCenter › 네트워크 탭">
         {pgs.length ? (

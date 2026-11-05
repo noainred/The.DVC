@@ -8,7 +8,8 @@
 //   - 권한 목록(사용자 · 그룹 이름)은 관리자 판본에서만 응답에 싣는다(라우트 — isAdminDetailUser). 이 모듈은 가리지 않는다.
 // 정규식은 전부 '[^<]*'(다음 '<' 에서 멈춘다) 또는 길이 상한이 있는 반복이고, 입력 길이를 먼저 자른다(정규식 규칙).
 import { xmlUnescape } from '../vcenter/soapParse.js';
-import { flatStr } from '../util/capStr.js';   // v2.901(점검 E2): 캐시에 남는 글자는 응답 원문을 붙잡지 않게 평탄화
+import { flatStr } from '../util/capStr.js';
+import { TEAMING_POLICIES } from '../hostcfg/parse.js';   // v2.902: 팀 구성 정책 이름은 표준 스위치(hcfg)와 한 벌   // v2.901(점검 E2): 캐시에 남는 글자는 응답 원문을 붙잡지 않게 평탄화
 
 export const VCINFO_LIMITS = Object.freeze({ alarms: 500, tasks: 200, perms: 1000, roles: 200, xml: 4_000_000 });
 const MOREF_RE = /^[\w.:-]{1,64}$/;
@@ -219,6 +220,7 @@ export function sanitizeVcInfo(v) {
   if (Object.hasOwn(v, 'tasks')) out.tasks = sanTasks(v.tasks);
   if (Object.hasOwn(v, 'perms')) out.perms = sanPerms(v.perms);
   if (Object.hasOwn(v, 'pools')) out.pools = sanitizePools(v.pools);   // v2.901 리소스 풀
+  if (Object.hasOwn(v, 'dvpg')) out.dvpg = sanitizeDvpg(v.dvpg);   // v2.902 분산 포트그룹 팀 구성
   return sanitizeVcRestInfo(v, out);   // v2.898 ④ linked · updates · vlcm
 }
 
@@ -374,3 +376,113 @@ export function sanitizePools(k) {
       ref: ref(x.ref), name: str(x.name, 128), owner: ref(x.owner), root: bool(x.root), cpu: sanAlloc(x.cpu), mem: sanAlloc(x.mem),
     })).filter((x) => x.ref) };
 }
+
+// ── v2.902: 분산 포트그룹 팀 구성 · LACP · VLAN(DistributedVirtualPortgroup.config.defaultPortConfig — 6시간마다) ──────────────
+//   dvpg: { at, items:[{ ref, name, dvs, dvsName, uplinkPg, vlan:{id,trunk,pvlan}|null, teaming:{policy,active,standby,failback}|null, lacp:{enabled,mode,lag}|null }], omitted, error, lagError, dvsError }
+//   VMwareDVSPortSetting 은 값마다 <inherited>…</inherited><value>…</value> 로 감싼다 — 그 칸의 <value> 를 읽는다(상속받은 유효 값). 못 읽은 값은 null.
+//   failback 은 rollingOrder 의 반대(표준 스위치 teamingOf 와 같은 규칙). LACP: Enhanced LACP 의 LAG(vDS config.lacpGroupConfig)가 활성 업링크에 있으면 그 LAG,
+//   아니면 옛 포트그룹 lacpPolicy.enable. 업링크 포트그룹(tag 'SYSTEM/DVS.UPLINKPG')은 uplinkPg:true(팀 구성 대상이 아니다).
+export const DVPG_MAX = 1000;
+const DVPG_XML_MAX = 65_536;
+const UPLINK_NAME_RE = /^[\w .:()/#-]{1,64}$/;
+const LACP_MODES = new Set(['active', 'passive']);
+const valOf = (xml, tag) => { const b = between(xml, new RegExp(`<${tag}(?=[\\s>])`), `</${tag}>`); return b ? first(b, 'value') : null; };
+const boolTxt = (v) => (v === 'true' ? true : v === 'false' ? false : null);
+const texts = (xml, tag, max = 32) => {
+  const out = [];
+  for (const m of String(xml || '').matchAll(new RegExp(`<${tag}>([^<]{1,128})</${tag}>`, 'g'))) {
+    const t = xmlUnescape(m[1]).trim();
+    if (UPLINK_NAME_RE.test(t) && !out.includes(t)) out.push(flatStr(t));
+    if (out.length >= max) break;
+  }
+  return out;
+};
+const vlanIntOk = (n) => Number.isInteger(n) && n >= 0 && n <= 4095;
+/** VMwareDVSPortSetting XML → { vlan, teaming, lacpLegacy } (순수). */
+export function parseDvPortSetting(xml) {
+  const x = typeof xml === 'string' ? xml.slice(0, DVPG_XML_MAX) : '';
+  if (!x) return { vlan: null, teaming: null, lacpLegacy: null };
+  // VLAN — VlanIdSpec(<vlanId>N</vlanId>) · TrunkVlanSpec(<vlanId><start/><end/></vlanId> 여럿) · PvlanSpec(<pvlanId>)
+  let vlan = null;
+  const vb = between(x, /<vlan(?=[\s>])/, '</vlan>');
+  if (vb) {
+    const head = /^<vlan(\s[^>]{0,200})?>/.exec(vb)?.[1] || '';
+    if (/TrunkVlanSpec/.test(head)) {
+      const trunk = [];
+      for (const m of vb.matchAll(/<start>(\d{1,4})<\/start>\s{0,8}<end>(\d{1,4})<\/end>/g)) { const a = Number(m[1]); const b = Number(m[2]); if (vlanIntOk(a) && vlanIntOk(b) && a <= b) trunk.push([a, b]); if (trunk.length >= 16) break; }
+      vlan = { id: null, trunk, pvlan: null };
+    } else if (/PvlanSpec/.test(head)) {
+      const n = intTag(vb, 'pvlanId');
+      vlan = { id: null, trunk: null, pvlan: vlanIntOk(n) ? n : null };
+    } else {
+      const n = intTag(vb, 'vlanId');
+      vlan = { id: vlanIntOk(n) ? n : null, trunk: null, pvlan: null };
+    }
+  }
+  let teaming = null;
+  const tb = between(x, /<uplinkTeamingPolicy(?=[\s>])/, '</uplinkTeamingPolicy>');
+  if (tb) {
+    const pol = valOf(tb, 'policy');
+    const rolling = boolTxt(valOf(tb, 'rollingOrder'));
+    const ord = between(tb, /<uplinkPortOrder(?=[\s>])/, '</uplinkPortOrder>');
+    teaming = { policy: pol && TEAMING_POLICIES.includes(pol.trim()) ? pol.trim() : null, active: texts(ord, 'activeUplinkPort'), standby: texts(ord, 'standbyUplinkPort'), failback: rolling == null ? null : !rolling };
+  }
+  let lacpLegacy = null;
+  const lb = between(x, /<lacpPolicy(?=[\s>])/, '</lacpPolicy>');
+  if (lb) {
+    const mode = valOf(lb, 'mode');
+    lacpLegacy = { enabled: boolTxt(valOf(lb, 'enable')), mode: mode && LACP_MODES.has(mode.trim()) ? mode.trim() : null };
+  }
+  return { vlan, teaming, lacpLegacy };
+}
+/** RetrieveProperties 결과 [{ref, props}] → 분산 포트그룹 행(dvsName · LAG 는 collect 가 채운다). */
+export function parseDvPortgroups(objs) {
+  const out = [];
+  for (const o of Array.isArray(objs) ? objs : []) {
+    if (!o?.ref || !MOREF_RE.test(o.ref)) continue;
+    const p = o.props || {};
+    const dv = typeof p['config.distributedVirtualSwitch'] === 'string' ? p['config.distributedVirtualSwitch'].trim() : '';
+    const st = parseDvPortSetting(p['config.defaultPortConfig']);
+    out.push({ ref: flatStr(o.ref), name: capTxt(p.name, 128), dvs: MOREF_RE.test(dv) ? flatStr(dv) : null, dvsName: null,
+      uplinkPg: typeof p.tag === 'string' ? p.tag.includes('SYSTEM/DVS.UPLINKPG') : null,
+      vlan: st.vlan, teaming: st.teaming, lacp: st.lacpLegacy ? { ...st.lacpLegacy, lag: null } : null });
+  }
+  return out.sort((a, b) => String(a.name || '').localeCompare(String(b.name || '')));
+}
+/** vDS config.lacpGroupConfig XML → [{ name, mode }] (Enhanced LACP 의 LAG). */
+export function parseLacpGroups(xml) {
+  const out = [];
+  for (const blk of blocks(xml, ['VMwareDvsLacpGroupConfig', 'lacpGroupConfig'])) {
+    const n = first(blk, 'name'); const m = first(blk, 'mode');
+    const name = n ? xmlUnescape(n).trim() : '';
+    if (UPLINK_NAME_RE.test(name)) out.push({ name: flatStr(name), mode: m && LACP_MODES.has(m.trim()) ? m.trim() : null });
+    if (out.length >= 16) break;
+  }
+  return out;
+}
+/** 포트그룹 행에 vDS 이름 · LAG 를 붙인다(순수). lagsByDvs = Map(dvs ref → [{name,mode}] | null(못 읽음)). */
+export function applyDvsInfo(items, dvsName, lagsByDvs) {
+  return items.map((x) => {
+    const lags = x.dvs ? lagsByDvs.get(x.dvs) : null;
+    const lag = Array.isArray(lags) && x.teaming ? lags.find((l) => x.teaming.active.includes(l.name)) : null;
+    const lacp = lag ? { enabled: true, mode: lag.mode, lag: lag.name } : x.lacp;
+    return { ...x, dvsName: x.dvs ? (dvsName.get(x.dvs) ?? null) : null, lacp };
+  });
+}
+const sanUplinks = (a) => (Array.isArray(a) ? a.filter((v) => typeof v === 'string' && UPLINK_NAME_RE.test(v)).slice(0, 32) : []);
+const vlanInt = (v) => (vlanIntOk(v) ? v : null);
+export function sanitizeDvpg(k) {
+  if (!isObj(k)) return null;
+  return { at: ts(k.at), error: str(k.error, 300), lagError: str(k.lagError, 300), dvsError: str(k.dvsError, 300), omitted: cnt(k.omitted),
+    items: (Array.isArray(k.items) ? k.items : []).filter(isObj).slice(0, DVPG_MAX).map((x) => ({
+      ref: ref(x.ref), name: str(x.name, 128), dvs: ref(x.dvs), dvsName: str(x.dvsName, 128), uplinkPg: bool(x.uplinkPg),
+      vlan: isObj(x.vlan) ? { id: vlanInt(x.vlan.id),
+        trunk: Array.isArray(x.vlan.trunk) ? x.vlan.trunk.filter((r) => Array.isArray(r) && vlanIntOk(r[0]) && vlanIntOk(r[1]) && r[0] <= r[1]).slice(0, 16).map((r) => [r[0], r[1]]) : null,
+        pvlan: vlanInt(x.vlan.pvlan) } : null,
+      teaming: isObj(x.teaming) ? { policy: typeof x.teaming.policy === 'string' && TEAMING_POLICIES.includes(x.teaming.policy) ? x.teaming.policy : null,
+        active: sanUplinks(x.teaming.active), standby: sanUplinks(x.teaming.standby), failback: bool(x.teaming.failback) } : null,
+      lacp: isObj(x.lacp) ? { enabled: bool(x.lacp.enabled), mode: typeof x.lacp.mode === 'string' && LACP_MODES.has(x.lacp.mode) ? x.lacp.mode : null,
+        lag: typeof x.lacp.lag === 'string' && UPLINK_NAME_RE.test(x.lacp.lag) ? x.lacp.lag : null } : null,
+    })).filter((x) => x.ref) };
+}
+
