@@ -96,7 +96,7 @@ export function registerBareosPolicy(api) {
     const pool = String(req.query.pool || '').slice(0, 80);
     if (!scopedDirectors(settings, allowed).has(directorId)) return res.status(404).json({ ok: false, reason: 'Director 를 찾을 수 없습니다.' });
     if (!isResourceName(pool)) return res.status(400).json({ ok: false, code: 'invalid', reason: '풀 이름이 올바르지 않습니다(공백 · 따옴표가 든 이름은 즉시 조회를 지원하지 않습니다 — Director 에서 직접 확인하세요).' });
-    // v2.899(점검 S4): 기억 열쇠에 데모 여부를 넣는다 — 사용자와 무관한 열쇠면 관리자가 1분 안에 읽은 실제 Director 볼륨을 데모 계정이 demoOnly 판정 없이 받았다.
+    // v2.901(점검 S4): 기억 열쇠에 데모 여부를 넣는다 — 사용자와 무관한 열쇠면 관리자가 1분 안에 읽은 실제 Director 볼륨을 데모 계정이 demoOnly 판정 없이 받았다.
     const k = `${isDemoGuest(req.user) ? 'demo' : 'real'}|${directorId}|${pool}`;
     const now = Date.now();
     const m = _volMemo.get(k);

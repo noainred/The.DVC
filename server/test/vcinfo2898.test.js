@@ -177,7 +177,7 @@ test('③ 엣지 정제 — 아는 키만 · 형식 밖 null · 상한 · 객체
 test('③ 중앙 수신 — vcenter 객체에서 vcInfo 를 지우고(정제 후) 캐시에만 넣는다 · 스냅샷 vCenter 객체에 권한 목록이 없다', async () => {
   const src = fs.readFileSync(path.join(import.meta.dirname, '..', 'src', 'routes', 'central.js'), 'utf8');
   assert.match(src, /vcInfoIn = sanitizeVcInfo\(vcenter\.vcInfo\)[\s\S]{0,200}delete vcenter\.vcInfo/);
-  assert.match(src, /setInventory\(vcId, slice, agent[^\n]*\n(?:\s*\/\/[^\n]*\n)*\s*if \(vcInfoIn && !edgeVcWriteDenied\(vcId, \{ requireSite: true \}\)\) putVcInfoFromEdge\(vcId, vcInfoIn, agent\)/, '수신이 받아들여진 뒤(setInventory 다음) · 사이트 위임 등록 vCenter 만 · 키가 있을 때만(v2.899 E3)');
+  assert.match(src, /setInventory\(vcId, slice, agent[^\n]*\n(?:\s*\/\/[^\n]*\n)*\s*if \(vcInfoIn && !edgeVcWriteDenied\(vcId, \{ requireSite: true \}\)\) putVcInfoFromEdge\(vcId, vcInfoIn, agent\)/, '수신이 받아들여진 뒤(setInventory 다음) · 사이트 위임 등록 vCenter 만 · 키가 있을 때만(v2.901 E3)');
   // 수집기는 vcenter 객체에 싣지 않는다(soapClient 반환 객체에 vcInfo · vcPerms 키가 없다)
   const soap = fs.readFileSync(path.join(import.meta.dirname, '..', 'src', 'vcenter', 'soapClient.js'), 'utf8');
   const ret = soap.slice(soap.indexOf('solutions, licenses, clusterCfg, tagInv, invFetch'), soap.indexOf('hosts, vms, datastores, networks, alarms,'));
@@ -402,7 +402,7 @@ test('반증 중-1 — 중앙이 vcInfo 를 모르는 버전(또는 미상)이�
   push._setVcInfoCapForTest(() => ({ ok: true }));
   const v = await push.vcenterForPush({ id: 'vcP', name: 'P' });
   assert.equal(v.vcInfo.perms.items.length, 2);
-  // v2.899(점검 E3): 중앙이 안다고 확인되면 캐시가 비어도 {} 를 싣는다(= 비웠다) · 모르면 키를 뺀다(= 직전 값을 그대로 두라)
+  // v2.901(점검 E3): 중앙이 안다고 확인되면 캐시가 비어도 {} 를 싣는다(= 비웠다) · 모르면 키를 뺀다(= 직전 값을 그대로 두라)
   push._setVcInfoCapForTest(() => ({ ok: true }));
   assert.deepEqual((await push.vcenterForPush({ id: 'none' })).vcInfo, {});
   push._setVcInfoCapForTest(null);
@@ -459,7 +459,7 @@ test('반증 하-6 · 하-7 — 데모 Linked 는 범위 안 동료만 · IPv6 �
   assert.deepEqual(nodes.map((n) => n.portal?.id ?? null), ['a', null], '다른 IPv6 노드와 잘못 짝짓지 않는다');
 });
 
-test('v2.899 점검 E7 — 엣지 값이 30분 넘게 안 오면 stale · 하루가 넘으면 아직 읽지 않음', async () => {
+test('v2.901 점검 E7 — 엣지 값이 30분 넘게 안 오면 stale · 하루가 넘으면 아직 읽지 않음', async () => {
   await seedSnapshot({ vcenters: [{ id: 'vcS', name: 'S', status: 'connected' }] });
   C._resetVcInfo();
   C.putFromEdge('vcS', { alarms: { at: Date.now() - 1000, items: [] } }, 'edge-s');

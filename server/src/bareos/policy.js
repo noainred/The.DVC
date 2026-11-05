@@ -48,7 +48,7 @@ const isObj = (v) => v != null && typeof v === 'object' && !Array.isArray(v);
 let _db = null; const _loadErr = makeLoadError(); let _rev = 0;
 let _busy = false; let _timer = null;
 const _collecting = new Set();
-const _callOf = new Map();   // v2.899(점검 B3): Director 마다 지금 도는 호출 표지 — 시한 뒤 늦은 결과가 더 새 호출의 값을 덮지 않게
+const _callOf = new Map();   // v2.901(점검 B3): Director 마다 지금 도는 호출 표지 — 시한 뒤 늦은 결과가 더 새 호출의 값을 덮지 않게
 const _manualAt = new Map();
 
 function empty() { return { version: 1, directors: {}, sched: { day: '', ok: null, tries: 0, nextTry: null, at: null } }; }
@@ -120,7 +120,7 @@ function giveUpAfter(ms, p) {
 }
 
 /**
- * v2.899(점검 B3): 전체 시한은 Director 수에서 유도한다 — 동시 POLICY_CONCURRENCY 개씩 돌고 하나가 DIRECTOR_DEADLINE_MS 까지 걸리므로
+ * v2.901(점검 B3): 전체 시한은 Director 수에서 유도한다 — 동시 POLICY_CONCURRENCY 개씩 돌고 하나가 DIRECTOR_DEADLINE_MS 까지 걸리므로
  * 고정 15분이면 Director 가 많을 때(느리지만 성공하는 Director 가 20개 남짓) 뒤쪽이 시작도 못 한 채 시한에 걸렸다. 바닥은 RUN_DEADLINE_MS.
  */
 export function runDeadlineMs(n) {

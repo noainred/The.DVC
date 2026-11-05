@@ -51,7 +51,7 @@ export default function BackupSummaryErrors({ reloadKey, onOpenDetail }) {
   const c = data?.counts || {};
   const rows = filterErrors(data?.rows, { kind, src });
   const dayText = (ERROR_DAY_OPTS.find(([d]) => d === (data?.days || days)) || [0, '24시간'])[1];
-  const opt = { canBareos: adminToolAllowed('bareos-backup'), canBareosView: toolAllowed('bareos-summary'), admin: hasRole('admin') };   // v2.899(점검 W1): 로그 · 이력은 admin 전용 API
+  const opt = { canBareos: adminToolAllowed('bareos-backup'), canBareosView: toolAllowed('bareos-summary'), admin: hasRole('admin') };   // v2.901(점검 W1): 로그 · 이력은 admin 전용 API
   const go = (r, o) => { if (o.key === 'detail') onOpenDetail?.(r.vc); else window.location.hash = o.hash; };
   const groups = view === 'groups' ? sortGroups(groupErrors(rows), gsort) : null;
   const GH = [['time', '시각(처음 ~ 마지막)'], ['corp', '법인'], ['src', '솔루션'], ['target', '대상'], ['kind', '결과'], ['msg', '메시지(요약)'], ['n', '건수']];

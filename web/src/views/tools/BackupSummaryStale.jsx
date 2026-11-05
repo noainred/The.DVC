@@ -80,7 +80,7 @@ export default function BackupSummaryStale({ scope, rows, sel, onPick, onOpenDet
   const qUnit = (STALE_UNITS.find(([k]) => k === (q?.unit || o.unit)) || ['', '일'])[1];
   const sites = Array.isArray(rows) ? rows : [];
   const selIds = sel?.ids || new Set();
-  const canRun = adminToolAllowed('backup-run'); const canBareos = adminToolAllowed('bareos-backup');   // v2.899(점검 W1): 관리자 전용 도구
+  const canRun = adminToolAllowed('backup-run'); const canBareos = adminToolAllowed('bareos-backup');   // v2.901(점검 W1): 관리자 전용 도구
   const doAction = (x, a) => {
     if (a.key === 'veeam-run') { saveHandoff(x.vc, [x.vm.id]); window.location.hash = '#/tools/backup-run'; return; }
     if (a.key === 'bareos-target') { saveBareosHandoff(x.vc, [x.vm.id]); window.location.hash = '#/tools/bareos-backup/targets'; return; }

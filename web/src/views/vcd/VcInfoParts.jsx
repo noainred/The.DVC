@@ -355,7 +355,7 @@ export function HostVlcmCard({ vcenterId, host, hostRef }) {
   );
 }
 
-/** v2.899: 리소스 풀 예약 · 제한 · 공유(ResourcePool.config — 6시간마다). 호스트 개체 › 리소스 풀. */
+/** v2.901: 리소스 풀 예약 · 제한 · 공유(ResourcePool.config — 6시간마다). 호스트 개체 › 리소스 풀. */
 export function PoolSettingsCard({ vcenterId, host, poolNames }) {
   const ok = can('inv.hosts');
   const q = useOnce('/vcenter-info/pools', { vcenterId }, ok);

@@ -1,5 +1,5 @@
 /**
- * test/bareosPolicyDeadline2899.test.js — v2.899(점검 B3): Bareos 정책 수집의 전체 시한.
+ * test/bareosPolicyDeadline2901.test.js — v2.901(점검 B3): Bareos 정책 수집의 전체 시한.
  *   ① 시한은 Director 수에서 유도(동시 4개 × Director 시한 + 여유, 바닥 15분)
  *   ② 틱 성공은 **모든 대상이 끝났고** 각각 무엇이든 읽었을 때만 — 예전에는 끝난 것만 보고 성공이라 그날 재시도하지 않았다
  *   ③ 시한 뒤 늦게 끝난 Director 의 결과도 파일에 쓴다(예전에는 메모리에만) · 시한 뒤에는 새 Director 를 시작하지 않는다
@@ -10,7 +10,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-const DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'bareos2899pol-'));
+const DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'bareos2901pol-'));
 process.env.CONFIG_DIR = DIR;
 process.env.DATA_SOURCE = 'live';
 const POL = await import('../src/bareos/policy.js');

@@ -41,10 +41,10 @@ const serverTz = () => { try { return Intl.DateTimeFormat().resolvedOptions().ti
 export function groupView(g, now = Date.now()) {
   const next = nextSlot(g.schedule, now);
   // 버그 점검 S6: 마지막으로 처리한 회차가 지금보다 미래 — 서버 시계가 앞섰다 돌아왔다. 그 사이 회차는 돌지 않는다(한 번 이하를 지키려고 열쇠를 내리지 않는다) — 화면이 알린다
-  const clockAhead = !!g.lastKey && g.lastKey > slotKey(now, g.schedule);   // v2.899: 그룹의 기준 시계로
+  const clockAhead = !!g.lastKey && g.lastKey > slotKey(now, g.schedule);   // v2.901: 그룹의 기준 시계로
   return {
     ...g, keep: g.keep ?? null, fires: Array.isArray(g.fires) ? g.fires : [], lastPrune: g.lastPrune ?? null, keepText: keepText(g.keep ?? null),
-    // v2.899: 다음 회차를 두 시계로 함께(현지 서버 · 중앙 포탈 — 화면이 브라우저 시각 대신 이 글자를 보인다)
+    // v2.901: 다음 회차를 두 시계로 함께(현지 서버 · 중앙 포탈 — 화면이 브라우저 시각 대신 이 글자를 보인다)
     scheduleText: scheduleText(g.schedule), next: next ? { at: next.at, key: next.key, level: next.level, server: clockStamp(next.at, 'server'), portal: clockStamp(next.at, 'portal'), ...(g.skipKey && g.skipKey === next.key ? { skip: true } : {}) } : null, running: groupRunning(g.id),
     ...(groupPruning(g.id) ? { pruning: true } : {}), ...(clockAhead ? { clockAhead: true } : {}),
     // v2.867 회차 중단 — 처리 중 요청 · 보내는 진행(보냄 n / N · 줄 대기)

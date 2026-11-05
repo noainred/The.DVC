@@ -2,7 +2,7 @@
 // 테스트가 두 구현을 같은 입력으로 대조한다(웹은 서버 소스를 번들할 수 없다 — 번들 경계).
 // 문구에 백틱 금지(BoldText 는 **강조** 만 해석한다 — uiText.test.js 스윕).
 
-/** v2.899: VMXNET3 로 바꾸기를 권하는 어댑터 유형(서버 vmcfg/parse.js LEGACY_NIC 과 같다 — 테스트 대조). */
+/** v2.901: VMXNET3 로 바꾸기를 권하는 어댑터 유형(서버 vmcfg/parse.js LEGACY_NIC 과 같다 — 테스트 대조). */
 export const LEGACY_NIC = new Set(['E1000', 'E1000E', 'PCNet32', 'VMXNET', 'VMXNET 2']);
 export const VM_CFG_CODES = Object.freeze({
   question: 'crit',
@@ -15,7 +15,7 @@ export const VM_CFG_CODES = Object.freeze({
   'disk-independent': 'info',
   'multi-writer': 'info',
   'rdm-physical': 'info',
-  'nic-legacy': 'info',   // v2.899
+  'nic-legacy': 'info',   // v2.901
   'cbt-off': 'info',
   floppy: 'info',
   reservation: 'info',
@@ -84,7 +84,7 @@ export function vmCfgFindings(vm) {
     if (mw.length) add('multi-writer', { count: mw.length });
     const rdmP = disks.filter((x) => x?.rdm && /physical/i.test(x?.rdmMode || ''));
     if (rdmP.length) add('rdm-physical', { count: rdmP.length });
-    // v2.899: 구형 · 에뮬레이션 네트워크 어댑터(E1000/E1000E/PCNet32/VMXNET/VMXNET 2) — VMXNET3 권장. 어댑터 목록(nics)을 읽은 VM 만 판정한다
+    // v2.901: 구형 · 에뮬레이션 네트워크 어댑터(E1000/E1000E/PCNet32/VMXNET/VMXNET 2) — VMXNET3 권장. 어댑터 목록(nics)을 읽은 VM 만 판정한다
     //   (키가 없으면 이전 판 수집 — 판정하지 않는다). 유형 이름은 vmcfg/parse.js NIC_TYPES 의 화면 이름.
     const legacy = Array.isArray(d.nics) ? d.nics.filter((x) => x && LEGACY_NIC.has(x.adapter)) : [];
     if (legacy.length) add('nic-legacy', { count: legacy.length, adapters: [...new Set(legacy.map((x) => x.adapter))] });

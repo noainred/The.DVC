@@ -100,7 +100,7 @@ export function scanInfoOf(b, { edgeScan = new Map(), remoteScan = new Map(), re
   let reported = b?.source === 'edge' ? edgeScan.get(sid) : b?.source === 'remote' ? remoteScan.get(sid) : t(regById.get(sid)?.scanRangeId);
   if (b?.source === 'remote' && typeof reported !== 'string') {
     const byTag = edgeScanByTag.get(lc(b?.serviceTag));
-    // v2.899(점검 E5): 서비스 태그 폴백은 그 엔트리의 DataCenter 가 이 서버 법인의 DataCenter 와 같을 때만 — 다른 법인 엣지가 보낸 같은 태그로
+    // v2.901(점검 E5): 서비스 태그 폴백은 그 엔트리의 DataCenter 가 이 서버 법인의 DataCenter 와 같을 때만 — 다른 법인 엣지가 보낸 같은 태그로
     //   남의 엔트리(라벨)를 붙이지 않게. 서버 법인의 DataCenter 를 모르거나 중앙에 없는 엔트리면 쓰지 않는다(맞춰 볼 수 없다).
     //   빈 값(엣지 등록부에 엔트리 없음 = 수동 등록)은 붙일 라벨이 없어 그대로 받는다.
     const dc = typeof dcOfServer === 'function' ? t(dcOfServer(b)) : '';
@@ -115,7 +115,7 @@ export function scanInfoOf(b, { edgeScan = new Map(), remoteScan = new Map(), re
   return { scan: null, scanWhy: undefined };
 }
 /**
- * v2.899(점검 E4): 엣지 push 의 scanRangeId 가 '등록부의 값' 인가 — 엣지는 iDRAC 등록부 밖 장치(OME · 수집 서버 경유)에도 빈 문자열을 싣는다.
+ * v2.901(점검 E4): 엣지 push 의 scanRangeId 가 '등록부의 값' 인가 — 엣지는 iDRAC 등록부 밖 장치(OME · 수집 서버 경유)에도 빈 문자열을 싣는다.
  * 그 빈 값은 '수동 등록' 이 아니라 '보고되지 않음' 이다. 출처를 모르는 옛 기록('')은 받은 값 그대로(지어내지 않는다).
  */
 export const edgeScanReportable = (s) => !s?.edgeSource || s.edgeSource === 'idrac';
@@ -377,7 +377,7 @@ function knownCorpsOf(snap) {
   if (!s.length || !reg) return null;
   return new Set([...s, ...reg]);
 }
-// v2.899(점검 S1 — 재현): 전 법인 공용 쓰기는 조회 범위만 보면 안 된다(server/CLAUDE.md v2.733) — 조회는 무제한이어도 쓰기 범위(writeVcenters)가 지정된
+// v2.901(점검 S1 — 재현): 전 법인 공용 쓰기는 조회 범위만 보면 안 된다(server/CLAUDE.md v2.733) — 조회는 무제한이어도 쓰기 범위(writeVcenters)가 지정된
 //   관리자가 전역 카탈로그 · 태그 카테고리 · 법인 항목 정리 · 초기화를 통과했다. 형제 라우트의 fullWriteOnly 와 같은 판정(던지면 거부).
 const fleetAdmin = (user, snap) => {
   if (!isAdminDetailUser(user) || scopedVcenterIds(user, snap)) return false;

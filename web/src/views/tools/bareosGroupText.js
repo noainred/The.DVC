@@ -18,7 +18,7 @@ export function scheduleText(sched) {
   return `${days} ${sched.time} ${sched.level}${full} · ${sched.clock === 'portal' ? '중앙 포탈 시각' : '현지 서버 시각'}`;
 }
 
-/** v2.899: 기준 시계 — 'server'(이 포탈 서버의 현지 시각 · 옛 그룹) · 'portal'(포탈 기준 시간대 — 다른 예약과 같은 시계). */
+/** v2.901: 기준 시계 — 'server'(이 포탈 서버의 현지 시각 · 옛 그룹) · 'portal'(포탈 기준 시간대 — 다른 예약과 같은 시계). */
 export const CLOCK_TEXT = Object.freeze({ server: '현지 서버 시각', portal: '중앙 포탈 시각' });
 /** UTC 오프셋(분) → 'UTC+09:00'. 모르면 ''. */
 export function utcOffsetText(min) {
@@ -37,7 +37,7 @@ export function shiftTimeText(time, fromOffsetMin, toOffsetMin) {
 }
 
 /**
- * v2.899: 다음 실행을 그룹의 기준 시계 글자로(서버가 준 next.server · next.portal — 브라우저 시각이 아니다) + 다른 시계 한 줄.
+ * v2.901: 다음 실행을 그룹의 기준 시계 글자로(서버가 준 next.server · next.portal — 브라우저 시각이 아니다) + 다른 시계 한 줄.
  * 서버가 두 글자를 주지 않으면(옛 판) null — 호출부가 예전 표시(shortTs)로 돌아간다.
  */
 export function nextClockText(g) {
@@ -48,7 +48,7 @@ export function nextClockText(g) {
   return { main: n[own].slice(5), other: `${CLOCK_TEXT[other]} ${n[other].slice(5)}`, own: CLOCK_TEXT[own] };
 }
 
-/** 새 그룹 편집 창의 처음 값 — 매일 02:10 Incremental · 중앙 포탈 시각(v2.899 — 새 그룹은 다른 예약과 같은 시계가 기본).
+/** 새 그룹 편집 창의 처음 값 — 매일 02:10 Incremental · 중앙 포탈 시각(v2.901 — 새 그룹은 다른 예약과 같은 시계가 기본).
  *  옛 그룹(clock 없음)은 서버가 'server' 로 읽는다(실행 시각을 바꾸지 않는다). */
 export const NEW_SCHEDULE = Object.freeze({ enabled: true, days: [0, 1, 2, 3, 4, 5, 6], time: '02:10', level: 'Incremental', fullDays: [], clock: 'portal' });
 

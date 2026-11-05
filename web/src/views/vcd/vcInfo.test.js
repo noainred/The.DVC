@@ -54,7 +54,7 @@ describe('v2.898 ④ Linked Mode · vLCM — 화면 판정', () => {
   });
 });
 
-describe('v2.899 리소스 풀 설정 · 호스트 마운트 · 팀 구성 문구', () => {
+describe('v2.901 리소스 풀 설정 · 호스트 마운트 · 팀 구성 문구', () => {
   it('풀 — 클러스터(owner)로 고르고, 짝이 없으면 이름으로(byName) · 할당 문구(무제한 · 단위 · 값 없음)', () => {
     const items = [{ ref: 'r1', name: 'Prod', owner: 'domain-c7' }, { ref: 'r2', name: 'Prod', owner: 'domain-c9' }, { ref: 'r3', name: 'Dev', owner: null }];
     expect(poolRowsForHost(items, { clusterRef: 'domain-c7' }, ['Dev']).rows.map((x) => x.ref)).toEqual(['r1']);

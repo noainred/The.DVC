@@ -1,5 +1,5 @@
 /**
- * test/bareosVerifyNic2899.test.js — v2.899(점검 B2 — 재현): 복원 검증이 네트워크를 끊은 **뒤에** 실패(Tools 시한 · 켜기 · 끄기)하면
+ * test/bareosVerifyNic2901.test.js — v2.901(점검 B2 — 재현): 복원 검증이 네트워크를 끊은 **뒤에** 실패(Tools 시한 · 켜기 · 끄기)하면
  *   원장 finish.nic 은 'ok'(끊김 확인)여야 한다. 예전에는 검증 실패면 늘 nic 'failed' 라 '네트워크 끊기 실패' 로 적고 세었다(재해 복구 사유 · 요약 메일).
  *   nicOff 를 모르는 옛 엣지 회신(필드 없음)은 예전 판정 그대로 — 끊었다고 지어내지 않는다.
  *   엣지 회신 경로(vmCloneWorker ack → 중앙 sanitizeReport → finishOp)가 nicOff 를 버리지 않는지도 본다.
@@ -10,7 +10,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'bareos2899nic-'));
+const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'bareos2901nic-'));
 process.env.CONFIG_DIR = tmp;
 process.env.DATA_SOURCE = 'mock';
 const registry = await import('../src/bareos/registry.js');

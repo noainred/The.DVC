@@ -664,7 +664,7 @@ const INV_TEXT_KEYS = ['id', 'name', 'host', 'cluster', 'datacenter', 'type', 'v
 /** v2.727(감사 D-05): 글자가 아니면 뜻이 없는 필드(IP 는 수가 아니다) — 문자열 외에는 null 로 버린다. */
 // v2.820: VM 의 정확한 위치(vcenter/vmPlacement.js — Bareos 플러그인이 이 글자로 VM 을 찾는다) — 글자가 아니면 null(모름).
 // v2.887: instanceUuid(서비스 인벤토리 VM 키)도 글자만 — 엣지가 객체를 보내면 null(읽지 못함).
-// v2.899(점검 E8 — 정정): 예전 주석의 '길이는 아래 문자열 상한이 자른다' 는 사실이 아니었다(이 정제에는 문자열 길이 상한이 없다).
+// v2.901(점검 E8 — 정정): 예전 주석의 '길이는 아래 문자열 상한이 자른다' 는 사실이 아니었다(이 정제에는 문자열 길이 상한이 없다).
 //   instanceUuid 는 키가 되므로 모양(INSTANCE_UUID_RE — 글자 · 숫자 · '_' · '-' 64자 이내)이 아니면 null(읽지 못함)로 버린다. 빈 값은 그대로(없음).
 const INV_STR_ONLY_KEYS = ['mgmtIp', 'vcDcPath', 'folderPath', 'instanceUuid'];
 export const INSTANCE_UUID_RE = /^[\w-]{1,64}$/;
@@ -851,7 +851,7 @@ export function sanitizeInventoryList(list, vcId, max, dropped) {
       const v = o[k];
       if (v != null && typeof v !== 'string') { o[k] = null; dropped.coerced += 1; }
     }
-    if (typeof o.instanceUuid === 'string' && o.instanceUuid !== '' && !INSTANCE_UUID_RE.test(o.instanceUuid)) { o.instanceUuid = null; dropped.coerced += 1; }   // v2.899 E8
+    if (typeof o.instanceUuid === 'string' && o.instanceUuid !== '' && !INSTANCE_UUID_RE.test(o.instanceUuid)) { o.instanceUuid = null; dropped.coerced += 1; }   // v2.901 E8
     // v2.605(CEN2605-01): 수치 필드도 좁힌다 — '32' 같은 글자가 오면 store 롤업의 `+=` 가 문자열 연결이 되어 **전 함대**
     //   KPI(global·byRegion)가 오류 없이 틀린다(cpuCores '3232'). 숫자 글자는 수로, 그 밖(객체·'abc')은 null(읽지 못함).
     for (const k of INV_NUM_KEYS) {
@@ -1026,7 +1026,7 @@ centralRouter.post('/inventory', requireCentral(), (req, res) => {
   const saved = setInventory(vcId, slice, agent, b.generatedAt || null) || {};
   // v2.898(반증 하-5): 사이트 위임으로 등록된 vCenter 만 받는다(등록부에 없는 id 를 바꿔 가며 메모리를 늘리지 못하게) ·
   //   받은 것으로 통째로 바꾼다 — 엣지가 접속처를 바꿔 캐시를 비웠으면 옛 vCenter 의 권한 목록을 중앙이 계속 보이지 않게(없으면 지운다).
-  //   v2.899(점검 E3): 키가 없으면(옛 엣지 · 중앙 버전을 확인하지 못한 엣지) 직전 값을 그대로 둔다 — {} 일 때만 지운다.
+  //   v2.901(점검 E3): 키가 없으면(옛 엣지 · 중앙 버전을 확인하지 못한 엣지) 직전 값을 그대로 둔다 — {} 일 때만 지운다.
   if (vcInfoIn && !edgeVcWriteDenied(vcId, { requireSite: true })) putVcInfoFromEdge(vcId, vcInfoIn, agent);   // v2.898
   if (saved.held) console.warn(`[central] inventory: agent=${agent} vc=${vcId} 상태 ${slice.vcenter.status} · 호스트·VM 0 — 마지막 정상 목록을 지우지 않고 상태만 갱신했습니다(엣지가 인벤토리를 읽지 못함)`);
   res.locals.ingestSummary = {

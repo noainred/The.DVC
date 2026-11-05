@@ -1303,7 +1303,7 @@ export function registerBackupStatus(api) {
    * v2.838 '이 조건을 알림으로(메일)'(사용자 결정 '일일 메일로 구현') — 전 법인 자료를 메일로 보내므로 **관리자 · 전체 범위**만 저장 · 지금 보내기(데모 계정 403).
    *   다른 계정은 GET 에 hidden(설정을 싣지 않는다). 저장 · 보내기는 감사에 남긴다. 지금 보내기는 1분에 한 번.
    */
-  // v2.899(점검 S2 — 재현): 쓰기 범위(writeVcenters)가 지정된 관리자도 막는다 — 전 법인 공용 쓰기(형제 bareos-backup digest 의 fullWriteOnly 와 같은 판정).
+  // v2.901(점검 S2 — 재현): 쓰기 범위(writeVcenters)가 지정된 관리자도 막는다 — 전 법인 공용 쓰기(형제 bareos-backup digest 의 fullWriteOnly 와 같은 판정).
   const alertEditor = (req) => {
     if (!isAdminDetailUser(req.user) || scopedVcenterIds(req.user, store.get())) return false;
     try { return !writeScopedVcenterIds(req.user, store.get()); } catch { return false; }
@@ -1315,7 +1315,7 @@ export function registerBackupStatus(api) {
     if (scopedVcenterIds(req.user, store.get())) return res.json({ ok: true, canEdit: false, hidden: true });
     let mail = null;
     try { const m = loadMailSettings(); mail = { enabled: !!m?.enabled, kindEnabled: m?.kinds?.[STALE_MAIL_KIND]?.enabled !== false }; } catch { mail = null; }
-    // v2.899(점검 S3 — 사용자 결정 '관리자 판본에만'): 저장한 관리자 계정명(savedBy)은 관리자 판본에만 — 형제 Bareos 사전 점검 cfgOut 과 같은 가림.
+    // v2.901(점검 S3 — 사용자 결정 '관리자 판본에만'): 저장한 관리자 계정명(savedBy)은 관리자 판본에만 — 형제 Bareos 사전 점검 cfgOut 과 같은 가림.
     const settings = loadAlert();
     return res.json({ ok: true, canEdit: alertEditor(req), settings: isAdminDetailUser(req.user) ? settings : maskSavedBy(settings), unreadable: !!alertLoadError() || undefined, status: alertStatus(), mail });
   });

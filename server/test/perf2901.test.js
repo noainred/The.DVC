@@ -1,5 +1,5 @@
 /**
- * test/perf2899.test.js — v2.899 전체 점검 성능 · 정리 확정분(하).
+ * test/perf2901.test.js — v2.901 전체 점검 성능 · 정리 확정분(하).
  *  P2 엣지 자동 업그레이드 동기화 — 번들 sha256 은 한 번(서명 판정 · push 헤더가 같은 캐시) · 주기 경로는 비동기 읽기
  *  P4 첨부 보관(tar) 목록 — present.includes(제곱) 대신 Set
  *  P5 필터 주간 메일 — 재진입 가드(겹쳐 두 번 보내지 않게) + 가드 시한
@@ -12,7 +12,7 @@ import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
 
-const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'perf2899-'));
+const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'perf2901-'));
 process.env.CONFIG_DIR = tmp;
 process.env.DATA_SOURCE = 'mock';
 after(() => fs.rmSync(tmp, { recursive: true, force: true }));

@@ -60,7 +60,7 @@
 - **v2.825.1 버그 점검**(`bareosBugs2825_1`·`_1b`): 인증 정지 해제는 같은 접속값일 때만(`clearAuthStopIfSame`) · 복원 전제는 OTP 앞 · `ops.poll` 은 대조 먼저 ·
   재시작하면 결과를 잃는 작업은 `inflight.js` · 취소의 끝난 행은 type B 만 — 전문 audits.md 'Bareos v2.825.1 버그 점검 확정분'.
 - **v2.828 결과 창**(`decBytesText` 하나) — audits.md 'v2.833' 끝. **v2.841·842**: 목록 `.schedule` · @@own(job 제외) · 겹침은 화면·서버 둘 다 · 쓰기 OTP 는 세션 보안 `bareosSetupOtp`(기본 켬·불리언 false 만·꺼도 OTP 등록 계정만) — audits.md.
-- **v2.830 백업 그룹 · v2.831 보관 개수**(`groups`·`groupRunner`·`groupRetention` · `bareosGroups2830`): 스케줄은 포탈 · 회차는 보내기 전에 기록 · VM 은 그룹 하나 · 보관 정리는 끝난 뒤 기준 Full 앞만 · 넓히는 저장은 본인 OTP — audits.md(v2.899 기준 시계).
+- **v2.830 백업 그룹 · v2.831 보관 개수**(`groups`·`groupRunner`·`groupRetention` · `bareosGroups2830`): 스케줄은 포탈 · 회차는 보내기 전에 기록 · VM 은 그룹 하나 · 보관 정리는 끝난 뒤 기준 Full 앞만 · 넓히는 저장은 본인 OTP — audits.md(v2.901 기준 시계).
 - **v2.833·834 진행 현황판**(`liveStatus`·`liveParse` · `bareosLive2833`): 화면이 열린 동안만 `status client=`·`status director` · Director 마다 시한 · 흐름은 법인마다 · 모름은 null · 멈춤 의심은 FD 조회 성공일 때만. 전문 audits.md 'v2.833'·'v2.834'(정책 수집 'v2.839'·'v2.840').
 - 실환경 미확인(추정 — `tools/bareos-probe.js` 로 확인할 것): Node↔Director TLS-PSK 협상 · 잡 수준 FdPluginOptions 병합(복원엔 안 옴 — v2.866 실측) ·
   `.bvfs_get_jobids` JSON 모양 · Profile ACL 지시어 이름 · `list jobs days=N` · 25.x `.jobs` enabled 칸(audits.md) · Migration 행의 시작 시각.

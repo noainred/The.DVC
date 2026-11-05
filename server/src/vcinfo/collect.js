@@ -46,7 +46,7 @@ export function putFromEdge(vcId, info, agent) {
   const prev = _byVc.get(vcId);
   if (prev && prev.source === 'local') return;
   if (!info || typeof info !== 'object' || !Object.keys(info).length) { if (prev) _byVc.delete(vcId); return; }
-  // v2.899(점검 E7): 엣지 시계로 적은 '읽은 시각' 은 받은 시각을 넘지 못하게 자른다(원본은 atEdge 로 따로) — 시계가 앞선 엣지의 '미래 시각' 방지.
+  // v2.901(점검 E7): 엣지 시계로 적은 '읽은 시각' 은 받은 시각을 넘지 못하게 자른다(원본은 atEdge 로 따로) — 시계가 앞선 엣지의 '미래 시각' 방지.
   const now = Date.now();
   const clamped = {};
   for (const [k, v] of Object.entries(info)) {
@@ -71,7 +71,7 @@ export function _resetVcInfo() { _byVc.clear(); _alarmNames.clear(); }
  * TaskManager.recentTask(ArrayOfManagedObjectReference) → Task moref. 기존 parseMorefs 는 '[^>]*' 를 두 번 써 닫히지 않은 원소가 반복되면
  * 2차 시간이다(반증 하-4 — 96KB 653ms). 여기서는 원소 모양을 고정하고(속성은 type · 선택 xsi:type) 길이를 먼저 자른다(선형).
  */
-// v2.899(점검 E1 — 정정): v2.898 은 xsi:type 이 type '앞' 인 모양만 받아, 반대 순서면 0건 · 오류 없음이었다(내 회귀 — 기존 parseMorefs 는 순서를 가리지 않았다).
+// v2.901(점검 E1 — 정정): v2.898 은 xsi:type 이 type '앞' 인 모양만 받아, 반대 순서면 0건 · 오류 없음이었다(내 회귀 — 기존 parseMorefs 는 순서를 가리지 않았다).
 //   속성 칸(200자)에서 type="Task" 를 찾는다 — 선형. 원소가 있는데 하나도 못 읽으면 unreadable 로 알린다(호출부가 오류로 남긴다).
 export function taskRefsOf(xml) {
   const out = [];
@@ -179,7 +179,7 @@ export async function refreshVcInfo(c, vc, { now = Date.now(), signal = null, bu
     ['alarms', () => readAlarms(c, vc.id, now)],
     ['tasks', () => readTasks(c, cur.tasks, now)],
     ['perms', () => readPerms(c, now)],
-    // v2.899: 리소스 풀 예약 · 제한 · 공유 — 수집이 이미 가진 풀 moref 를 받을 때만(없으면 이 종류를 건드리지 않는다).
+    // v2.901: 리소스 풀 예약 · 제한 · 공유 — 수집이 이미 가진 풀 moref 를 받을 때만(없으면 이 종류를 건드리지 않는다).
     ...(Array.isArray(poolRefs) ? [['pools', () => readPools(c, poolRefs, now)]] : []),
   ];
   await runJobs(cur, jobs, now, deadline, signal);

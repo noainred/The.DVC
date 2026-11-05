@@ -116,7 +116,7 @@ const PROXY = '<HostProxySwitch xsi:type="HostProxySwitch"><dvsUuid>u</dvsUuid><
 test('⑥ 네트워크 파서 — 업링크는 스위치 직속 pnic(브리지 nicDevice 아님)·유효 정책의 무차별·분산 스위치 이름', () => {
   const n = parseNetwork(VSW('vSwitch0', ['vmnic0', 'vmnic1'], ['VM']) + VSW('vSwitch1', [], []), PG('VM', 10, 'vSwitch0', 'false') + PG('Mon', 4095, 'vSwitch0', 'true'), PROXY);
   assert.deepEqual(n.switches, [
-    // v2.899(ⓓ-1): 팀 구성(teaming) 칸이 늘었다 — 이 고정값의 spec 에는 nicTeaming 이 없어 null(모름) · 분산 스위치는 늘 null
+    // v2.901(ⓓ-1): 팀 구성(teaming) 칸이 늘었다 — 이 고정값의 spec 에는 nicTeaming 이 없어 null(모름) · 분산 스위치는 늘 null
     { name: 'vSwitch0', kind: 'vss', uplinks: ['vmnic0', 'vmnic1'], pgs: 1, teaming: null },
     { name: 'vSwitch1', kind: 'vss', uplinks: [], pgs: 0, teaming: null },
     { name: 'DS-Prod', kind: 'dvs', uplinks: ['vmnic2'], pgs: null, teaming: null },
@@ -170,7 +170,7 @@ test('⑨ 호스트 수집 — 네트워크 선택 묶음이 InvalidProperty 면
 
 test('⑩ 호스트 정제 — 네트워크 아는 필드만·NIC 이름 형식', () => {
   const s = sanitizeHostCfg({ net: { switches: [{ name: 'vs', kind: 'evil', uplinks: ['vmnic0', 'a b', 3], pgs: -1 }, null], pgs: [{ name: 'p', vlan: '10', promisc: 'true' }], pgsTotal: 1 } });
-  assert.deepEqual(s.net, { switches: [{ name: 'vs', kind: 'vss', uplinks: ['vmnic0'], pgs: null, teaming: null }], pgs: [{ name: 'p', vlan: null, sw: null, promisc: null, teaming: null }], pgsTotal: 1 });   // v2.899 ⓓ-1 teaming 칸
+  assert.deepEqual(s.net, { switches: [{ name: 'vs', kind: 'vss', uplinks: ['vmnic0'], pgs: null, teaming: null }], pgs: [{ name: 'p', vlan: null, sw: null, promisc: null, teaming: null }], pgsTotal: 1 });   // v2.901 ⓓ-1 teaming 칸
 });
 
 test('⑪ 엣지 수신 — routes/central.js 가 vcenter.clusterCfg 를 정제한다(소스)', async () => {

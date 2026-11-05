@@ -105,7 +105,7 @@ export function mockVcInfo(kind, vcId, snap, now = Date.now(), allowed = null) {
     return { at: now - ((seed % 300) + 40) * MIN, items, omitted: 0, error: null };
   }
   if (kind === 'pools') {
-    // v2.899: 데모 리소스 풀 — 이 vCenter VM 의 풀 이름마다 하나(이름순 · 결정적). 'Resources' 는 클러스터 루트 풀.
+    // v2.901: 데모 리소스 풀 — 이 vCenter VM 의 풀 이름마다 하나(이름순 · 결정적). 'Resources' 는 클러스터 루트 풀.
     const names = [...new Set(vms.map((v) => v.resourcePool).filter(Boolean))].sort();
     const items = names.slice(0, 200).map((n, i) => {
       const root = n === 'Resources';

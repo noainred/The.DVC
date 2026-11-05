@@ -359,7 +359,7 @@ export async function disconnectRestoredVm(vcenterId, name, { setPhase } = {}) {
 export async function verifyRestoredVm(vcenterId, name, { deleteOnOk = true, retry = false, setPhase } = {}) {
   const t0 = Date.now();
   const ph = phaseRecorder(setPhase);
-  // v2.899(점검 B2): 네트워크 끊기를 확인했는가 — 끊은 뒤의 실패(Tools 시한 · 켜기 · 끄기)를 '네트워크 끊기 실패' 로 적지 않게 결과에 싣는다
+  // v2.901(점검 B2): 네트워크 끊기를 확인했는가 — 끊은 뒤의 실패(Tools 시한 · 켜기 · 끄기)를 '네트워크 끊기 실패' 로 적지 않게 결과에 싣는다
   let nicOff = false;
   const fin = (ok, detail, extra = {}) => ({ ok, detail, ms: Date.now() - t0, phases: ph.end(ok), nicOff, ...extra });
   const vmName = String(name || '').trim();

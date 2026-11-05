@@ -8,7 +8,7 @@
 //   - 권한 목록(사용자 · 그룹 이름)은 관리자 판본에서만 응답에 싣는다(라우트 — isAdminDetailUser). 이 모듈은 가리지 않는다.
 // 정규식은 전부 '[^<]*'(다음 '<' 에서 멈춘다) 또는 길이 상한이 있는 반복이고, 입력 길이를 먼저 자른다(정규식 규칙).
 import { xmlUnescape } from '../vcenter/soapParse.js';
-import { flatStr } from '../util/capStr.js';   // v2.899(점검 E2): 캐시에 남는 글자는 응답 원문을 붙잡지 않게 평탄화
+import { flatStr } from '../util/capStr.js';   // v2.901(점검 E2): 캐시에 남는 글자는 응답 원문을 붙잡지 않게 평탄화
 
 export const VCINFO_LIMITS = Object.freeze({ alarms: 500, tasks: 200, perms: 1000, roles: 200, xml: 4_000_000 });
 const MOREF_RE = /^[\w.:-]{1,64}$/;
@@ -16,7 +16,7 @@ const TYPE_RE = /^[A-Za-z]{1,48}$/;
 const STATUS = new Set(['red', 'yellow', 'gray', 'green']);
 const TASK_STATES = new Set(['queued', 'running', 'success', 'error']);
 
-// ⚠ v2.899(점검 E2 — 재현): xmlUnescape · trim · slice 는 바꿀 것이 없으면 응답 원문의 부분 문자열(SlicedString)을 돌려준다 —
+// ⚠ v2.901(점검 E2 — 재현): xmlUnescape · trim · slice 는 바꿀 것이 없으면 응답 원문의 부분 문자열(SlicedString)을 돌려준다 —
 //   작업 버퍼(24시간) · 권한 목록 캐시가 회차마다 SOAP 응답 원문 전체를 붙잡았다(util/capStr.js 와 같은 메커니즘). 평탄화해서 넣는다.
 const capTxt = (s, n) => {
   if (s == null) return null;
@@ -28,7 +28,7 @@ const first = (blk, tag) => {
   const m = new RegExp(`<${tag}(?:\\s[^>]{0,200})?>([^<]*)</${tag}>`).exec(blk);
   return m ? m[1] : null;
 };
-// v2.899(점검 E1): 속성 순서와 무관하게 받는다(xsi:type 이 type 앞이든 뒤든) — 속성 칸은 200자까지(선형). 'type=' 앞은 공백이어야 한다(xsi:type 과 구분).
+// v2.901(점검 E1): 속성 순서와 무관하게 받는다(xsi:type 이 type 앞이든 뒤든) — 속성 칸은 200자까지(선형). 'type=' 앞은 공백이어야 한다(xsi:type 과 구분).
 const ATTR_TYPE_RE = /(?:^|\s)type="([A-Za-z]{1,48})"/;
 const refOf = (blk, tag) => {
   const m = new RegExp(`<${tag}(\\s[^>]{0,200})>([^<]{1,64})</${tag}>`).exec(blk);
@@ -53,7 +53,7 @@ export function parseTriggeredAlarms(xml) {
   for (const blk of blocks(xml, ['AlarmState', 'triggeredAlarmState'])) {
     const alarm = refOf(blk, 'alarm');
     const ent = refOf(blk, 'entity');
-    if (!alarm || !ent) { unreadable += 1; continue; }   // v2.899(점검 E1): 못 읽은 원소는 센다 — '알람 없음' 과 구분
+    if (!alarm || !ent) { unreadable += 1; continue; }   // v2.901(점검 E1): 못 읽은 원소는 센다 — '알람 없음' 과 구분
     if (out.length >= VCINFO_LIMITS.alarms) { omitted += 1; continue; }
     const st = first(blk, 'overallStatus');
     const ack = first(blk, 'acknowledged');
@@ -218,7 +218,7 @@ export function sanitizeVcInfo(v) {
   if (Object.hasOwn(v, 'alarms')) out.alarms = sanAlarms(v.alarms);
   if (Object.hasOwn(v, 'tasks')) out.tasks = sanTasks(v.tasks);
   if (Object.hasOwn(v, 'perms')) out.perms = sanPerms(v.perms);
-  if (Object.hasOwn(v, 'pools')) out.pools = sanitizePools(v.pools);   // v2.899 리소스 풀
+  if (Object.hasOwn(v, 'pools')) out.pools = sanitizePools(v.pools);   // v2.901 리소스 풀
   return sanitizeVcRestInfo(v, out);   // v2.898 ④ linked · updates · vlcm
 }
 
@@ -332,7 +332,7 @@ export function sanitizeVcRestInfo(v, out = {}) {
   return out;
 }
 
-// ── v2.899: 리소스 풀 예약 · 제한 · 공유(ResourcePool.config.cpuAllocation · memoryAllocation — 6시간마다) ──────────────
+// ── v2.901: 리소스 풀 예약 · 제한 · 공유(ResourcePool.config.cpuAllocation · memoryAllocation — 6시간마다) ──────────────
 //   pools: { at, items:[{ ref, name, owner, root, cpu:{res,limit,expandable,shares,level}, mem:{…} }], omitted, error }
 //   CPU 는 MHz, 메모리는 MB(vSphere ResourceAllocationInfo 단위). limit -1 = 무제한(그대로 -1). 못 읽은 값은 null.
 export const POOLS_MAX = 500;

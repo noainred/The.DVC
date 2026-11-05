@@ -36,7 +36,7 @@ function registryHosts(now = Date.now()) {
  * (등록 여부도 범위 밖 정보다). 접속하지 않는다(발견한 주소로 자동 접속하면 SSRF · TLS 신뢰 규약에 걸린다).
  */
 /**
- * v2.899: 범위 계정에는 **포탈 등록 vCenter(조회 범위 안)로 짝지어진 노드만** 이름을 보인다 — 나머지(범위 밖 등록 · 미등록)는 이름을 가리고
+ * v2.901: 범위 계정에는 **포탈 등록 vCenter(조회 범위 안)로 짝지어진 노드만** 이름을 보인다 — 나머지(범위 밖 등록 · 미등록)는 이름을 가리고
  * 개수만 남긴다(복제 파트너 · 복제 상태의 이름도 같은 규칙). 전체 범위 계정은 그대로. 짝을 못 지은 자기 자신(등록 주소가 IP · 노드가 FQDN 등)도
  * 가려진다 — 이름을 지어내 짝짓지 않는다(화면이 '가려짐' 으로 말한다).
  */
@@ -65,7 +65,7 @@ export function linkedPortalMap(nodes, registry, snapVcs, allowed, { mock = fals
     return { ...n, portal: id ? { id, name: v?.name || id, version: v?.version || null, build: v?.build || null, status: v?.status || null } : null };
   });
 }
-/** v2.899(점검 E7): 엣지 push 값의 낡음 · 만료(엣지는 수집 주기마다 보낸다 — 분 단위). */
+/** v2.901(점검 E7): 엣지 push 값의 낡음 · 만료(엣지는 수집 주기마다 보낸다 — 분 단위). */
 export const EDGE_STALE_MS = 30 * 60_000;
 export const EDGE_EXPIRE_MS = 24 * 3_600_000;
 const NOT_YET_TEXT = '아직 읽지 않았습니다 — 다음 수집 주기에 읽습니다(엣지가 수집하는 vCenter 는 엣지 · 중앙이 v2.898 이상이어야 보냅니다).';
@@ -73,7 +73,7 @@ const NOT_YET_TEXT = '아직 읽지 않았습니다 — 다음 수집 주기에 
 const KIND_LIMITS = Object.freeze({
   alarms: { max: VCINFO_LIMITS.alarms }, tasks: { max: VCINFO_LIMITS.tasks, keepMs: TASK_KEEP_MS }, perms: { max: VCINFO_LIMITS.perms },
   vlcm: { clusters: VCREST_LIMITS.clusters, ncMax: VCREST_LIMITS.nc },
-  pools: { max: POOLS_MAX },   // v2.899
+  pools: { max: POOLS_MAX },   // v2.901
 });
 
 /** 응답 본문(순수 — 테스트 고정). entry 는 캐시의 그 종류 값(없으면 null), admin 은 관리자 판본 여부. */
@@ -96,7 +96,7 @@ export function vcInfoBody(kind, vcenterId, entry, { admin = false, source = nul
   return {
     ...base, at: entry.at ?? null, items, error: entry.error ?? null,
     ...(entry.omitted ? { omitted: entry.omitted } : {}),
-    ...(entry.unreadable ? { unreadable: entry.unreadable } : {}),   // v2.899(점검 E1): 못 읽은 알람 원소 수
+    ...(entry.unreadable ? { unreadable: entry.unreadable } : {}),   // v2.901(점검 E1): 못 읽은 알람 원소 수
     ...(kind === 'perms' ? { roles: Array.isArray(entry.roles) ? entry.roles : [] } : {}),
     ...(userMasked ? { userMasked: true } : {}),
   };
@@ -118,7 +118,7 @@ export function registerVcInfo(api) {
     const admin = isAdminDetailUser(req.user);
     if (kind === 'perms' && !admin) return res.status(403).json({ ok: false, adminOnly: true, reason: '권한 목록(사용자 · 그룹 · 역할)은 관리자 판본에서만 볼 수 있습니다.' });
     let cached = getVcInfo(vcenterId);
-    // v2.899(점검 E7): 엣지가 보낸 값은 받은 지 오래되면 낡았다고 말하고(30분), 하루가 넘으면 보이지 않는다(엣지가 멈춘 뒤 옛 권한 목록을 계속 보이지 않게).
+    // v2.901(점검 E7): 엣지가 보낸 값은 받은 지 오래되면 낡았다고 말하고(30분), 하루가 넘으면 보이지 않는다(엣지가 멈춘 뒤 옛 권한 목록을 계속 보이지 않게).
     const edgeAge = cached?.source === 'edge' && Number.isFinite(cached.pushAt) ? Date.now() - cached.pushAt : null;
     if (edgeAge != null && edgeAge > EDGE_EXPIRE_MS) cached = null;
     const mock = vc.mock === true || config.dataSource === 'mock';

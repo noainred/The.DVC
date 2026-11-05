@@ -209,7 +209,7 @@ function HostEvents({ vcenterId, host }) {
  * v2.898 정정: 호스트 가상 스위치 · 포트그룹은 v2.701(A10)부터 ESXi 호스트 구성 점검 수집(hcfg.net)이 이미 읽고 있었다 — v2.895 가 '수집하지 않음' 이라고
  * 잘못 적었다. hcfg 를 아직 읽지 않았으면 그 사실을, net 이 null 이면 '받지 못함' 을 말한다(원인을 단정하지 않는다).
  */
-/** v2.899: 이 호스트가 마운트한 데이터스토어(데이터스토어 쪽 수집 dcfg.mounts — 새 호출 없음). 경로(활성/대기)는 경로 점검 도구. */
+/** v2.901: 이 호스트가 마운트한 데이터스토어(데이터스토어 쪽 수집 dcfg.mounts — 새 호출 없음). 경로(활성/대기)는 경로 점검 도구. */
 function HostMountsCard({ host, datastores }) {
   const r = hostDsMounts(datastores, host, vmRef(host));
   const bad = r.rows.filter((x) => x.bad).length;
@@ -234,7 +234,7 @@ function HostMountsCard({ host, datastores }) {
   );
 }
 
-/** v2.899 팀 구성 정책 → 화면 문구(vSphere Client 의 '부하 분산' 이름). 모르면 '—'. */
+/** v2.901 팀 구성 정책 → 화면 문구(vSphere Client 의 '부하 분산' 이름). 모르면 '—'. */
 const TEAMING_TEXT = Object.freeze({
   loadbalance_srcid: '원래 가상 포트 기반', loadbalance_srcmac: '원본 MAC 해시 기반', loadbalance_ip: 'IP 해시 기반',
   failover_explicit: '명시적 장애 조치 순서', loadbalance_loadbased: '물리 NIC 부하 기반',

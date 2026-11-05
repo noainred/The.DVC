@@ -1,5 +1,5 @@
 /**
- * v2.899 전체 점검(5축 + 반증 1인) 확정분 — 보안 · 범위(S1~S4). 실제 라우트 체인을 가짜 사용자로 부른다(sweep1 재현 하네스와 같은 방식).
+ * v2.901 전체 점검(5축 + 반증 1인) 확정분 — 보안 · 범위(S1~S4). 실제 라우트 체인을 가짜 사용자로 부른다(sweep1 재현 하네스와 같은 방식).
  *  S1 서비스 인벤토리 전 법인 공용 쓰기 — 쓰기 범위가 지정된 관리자는 403(fleetAdmin = 조회 무제한 ∧ 쓰기 무제한)
  *  S2 백업 서머리 메일 알림 저장 — 쓰기 범위가 지정된 관리자는 403(형제 bareos-backup digest 와 같은 판정)
  *  S3 저장한 관리자 계정명(savedBy)은 관리자 판본에만(사용자 결정) — 데모 계정 · operator 에게 가린다
@@ -11,7 +11,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'sweep2899-'));
+const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'sweep2901-'));
 process.env.CONFIG_DIR = tmp;
 process.env.DATA_SOURCE = 'mock';
 after(() => fs.rmSync(tmp, { recursive: true, force: true }));

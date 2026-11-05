@@ -73,7 +73,7 @@ export function vcPermRows(items, { entityType = null, entity = null } = {}) {
 }
 
 /**
- * v2.899: 리소스 풀 설정 행 — 호스트의 클러스터(clusterRef = 풀 owner)로 고르고, 짝을 못 지으면(데모 · 옛 수집) 이 호스트 VM 의 풀 이름으로 고른다.
+ * v2.901: 리소스 풀 설정 행 — 호스트의 클러스터(clusterRef = 풀 owner)로 고르고, 짝을 못 지으면(데모 · 옛 수집) 이 호스트 VM 의 풀 이름으로 고른다.
  *   이름으로 고르면 다른 클러스터의 같은 이름 풀이 섞일 수 있다 — byName 으로 알려 화면이 그렇게 말한다.
  */
 export function poolRowsForHost(items, host, poolNames = []) {

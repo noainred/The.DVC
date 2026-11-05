@@ -673,7 +673,7 @@ function Editor({ space, meta, pages, page = null, initial = null, onWritten }) 
           <b>v{base} → v{conflict.current.version} 사이에 바뀐 것(다른 사람의 저장)</b>
           {conflict.diff ? <DiffBlock d={conflict.diff} /> : <div className="muted">{conflict.diffErr ? `비교를 읽지 못했습니다 — ${conflict.diffErr}` : '비교를 읽는 중…'}</div>}
           <div className="wiki-actions">
-            {/* v2.899(점검 W4): 비교를 못 읽었으면 '확인하고' 저장을 열지 않는다(상대가 고친 내용을 보지 못한 채 덮어쓰게 된다) — 비교를 다시 읽을 수 있다 */}
+            {/* v2.901(점검 W4): 비교를 못 읽었으면 '확인하고' 저장을 열지 않는다(상대가 고친 내용을 보지 못한 채 덮어쓰게 된다) — 비교를 다시 읽을 수 있다 */}
             <button className="btn primary" disabled={busy || !conflict.diff} title={conflict.diff ? undefined : '바뀐 내용을 먼저 확인해야 저장할 수 있습니다'} onClick={() => { const v = conflict.current.version; setBase(v); setConflict(null); save(v); }}>확인하고 내 글로 저장</button>
             {!conflict.diff && conflict.diffErr && <button className="btn" disabled={busy} onClick={async () => {
               const cur = conflict; let diff = null; let diffErr = '';

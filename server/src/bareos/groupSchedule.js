@@ -5,10 +5,10 @@
  *   그룹의 이름·스케줄·스토리지를 나중에 고칠 수 있게 하려고 그룹 잡은 Director 스케줄 없이 만들고, 시각이 되면 포탈이 `run` 을 보낸다
  *   (스토리지·풀은 `run … storage= pool=` 로 그때 지정). 대가: 포탈이 꺼져 있던 회차는 놓친다 — 다시 켜지면 CATCHUP_MS 안의 마지막 회차를 한 번만 돌린다.
  *
- * 시각의 기준(v2.899 — 사용자 결정 '현지 서버와 중앙 포탈 시간을 둘 다 보여 주고 어느 시간에 맞춰 실행할지 선택'): schedule.clock
+ * 시각의 기준(v2.901 — 사용자 결정 '현지 서버와 중앙 포탈 시간을 둘 다 보여 주고 어느 시간에 맞춰 실행할지 선택'): schedule.clock
  *   · 'server' — 이 포탈 서버 프로세스의 현지 시각(Date 의 지역 시각 메서드). v2.830 부터의 동작이고, clock 이 없는 옛 그룹은 이것이다(실행 시각이 바뀌지 않게).
  *   · 'portal' — 포탈 기준 시간대(util/dayKey DAY_OFFSET_MIN = PORTAL_TZ_OFFSET_MIN, 기본 KST) — 다른 예약(사전 점검 · 복원 검증 · 요약 · 정책 수집)과 같은 시계.
- *   ⚠ 점검(v2.899 B1 — 재현): 패키지 unit 은 TZ 를 지정하지 않아 UTC 서버에서 'server' 의 '02:00' 은 KST 11:00 이다(docs/rules/perf-db.md) — 화면이 두 시각을 같이 보인다.
+ *   ⚠ 점검(v2.901 B1 — 재현): 패키지 unit 은 TZ 를 지정하지 않아 UTC 서버에서 'server' 의 '02:00' 은 KST 11:00 이다(docs/rules/perf-db.md) — 화면이 두 시각을 같이 보인다.
  * Director 현지 시각이 아니다(실행을 보내는 쪽이 포탈이다).
  * 순수 함수만 둔다(파일·타이머 없음) — 회차 열쇠(slot key)는 'YYYY-MM-DD HH:MM'(그 스케줄의 시계) 글자라 같은 회차를 두 번 돌리지 않는 기준이 된다.
  *   시계를 바꾸면 열쇠의 뜻이 바뀌므로 groups.js 가 lastKey 를 비우고 anchorAt 을 지금으로 둔다(그 앞 회차는 돌지 않는다).
@@ -73,7 +73,7 @@ export function normSchedule(input) {
   const fullDays = dayList(s.fullDays).filter((d) => days.includes(d));
   if (!TIME_RE.test(time)) throw fail('실행 시각은 00:00 ~ 23:59 (HH:MM) 로 적으세요.');
   if (enabled && !days.length) throw fail('스케줄을 켜려면 실행할 요일을 하나 이상 고르세요.');
-  // v2.899: 기준 시계 — 모르는 값 · 없음은 'server'(옛 그룹과 같은 동작)
+  // v2.901: 기준 시계 — 모르는 값 · 없음은 'server'(옛 그룹과 같은 동작)
   return { enabled, days, time, level, fullDays: level === 'Full' ? [] : fullDays, clock: clockOf(s) };
 }
 
@@ -150,6 +150,6 @@ export function scheduleText(sched) {
   if (!sched || !sched.enabled) return '스케줄 꺼짐(수동 실행만)';
   const days = sched.days.length === 7 ? '매일' : sched.days.map((d) => DAY_NAMES[d]).join('·');
   const full = sched.fullDays?.length ? ` (Full: ${sched.fullDays.map((d) => DAY_NAMES[d]).join('·')})` : '';
-  // v2.899: 기준 시계를 밝힌다(옛 그룹 'server' 도) — 웹 bareosGroupText.scheduleText 와 같은 글자.
+  // v2.901: 기준 시계를 밝힌다(옛 그룹 'server' 도) — 웹 bareosGroupText.scheduleText 와 같은 글자.
   return `${days} ${sched.time} ${sched.level}${full} · ${sched.clock === 'portal' ? '중앙 포탈 시각' : '현지 서버 시각'}`;
 }

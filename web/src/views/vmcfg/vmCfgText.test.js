@@ -10,7 +10,7 @@ const VMS = [
   { name: 'd', dev: { cdroms: [{ connected: true, iso: false }, { connected: false }], floppies: [{}], disks: [{ mode: 'independent_nonpersistent' }, { mode: 'independent_persistent', sharing: 'sharingMultiWriter' }, { rdm: true, rdmMode: 'physicalMode' }] } },
   { name: 'e' },
   { name: 'f', cfg: {}, dev: {} },
-  // v2.899 nic-legacy — 구형 어댑터 · VMXNET 3 · SR-IOV · 이전 판(nics 키 없음)
+  // v2.901 nic-legacy — 구형 어댑터 · VMXNET 3 · SR-IOV · 이전 판(nics 키 없음)
   { name: 'g', dev: { nics: [{ adapter: 'E1000E' }, { adapter: 'VMXNET 3' }, { adapter: 'E1000' }, { adapter: 'SR-IOV' }, null] } },
   { name: 'h', dev: { nics: [{ adapter: 'VMXNET 3' }] } },
 ];
@@ -24,7 +24,7 @@ describe('vmCfgText', () => {
   it('판정 — 서버와 같은 입력에서 같은 결과', () => {
     for (const vm of VMS) expect(web.vmCfgFindings(vm)).toEqual(srv.vmCfgFindings(vm));
   });
-  it('v2.899 nic-legacy — 구형 어댑터만 · 유형 목록은 서버와 같다 · 어댑터를 읽지 않은 VM 은 판정하지 않는다', () => {
+  it('v2.901 nic-legacy — 구형 어댑터만 · 유형 목록은 서버와 같다 · 어댑터를 읽지 않은 VM 은 판정하지 않는다', () => {
     expect([...web.LEGACY_NIC].sort()).toEqual([...srv.LEGACY_NIC].sort());
     const g = web.vmCfgFindings(VMS.find((v) => v.name === 'g')).find((f) => f.code === 'nic-legacy');
     expect(g.facts).toEqual({ count: 2, adapters: ['E1000E', 'E1000'] });

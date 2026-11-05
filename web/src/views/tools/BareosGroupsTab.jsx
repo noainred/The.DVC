@@ -200,7 +200,7 @@ export default function BareosGroupsTab({ d }) {
     if (!running || view.kind === 'edit') return undefined;
     const t = setTimeout(load, 4000);
     return () => clearTimeout(t);
-    // v2.899(점검 W6): refreshErr 도 본다 — 이어 읽기가 실패해도(트리가 그대로) 다음 시도를 건다
+    // v2.901(점검 W6): refreshErr 도 본다 — 이어 읽기가 실패해도(트리가 그대로) 다음 시도를 건다
   }, [running, tree, view.kind, refreshErr]);   // eslint-disable-line react-hooks/exhaustive-deps
 
   // v2.835: 넘겨받은 VM 의 법인 트리가 오면 새 그룹 창을 연다(그 법인이 아니면 버린다 — 다른 법인 VM 을 섞지 않는다)
@@ -677,7 +677,7 @@ function GroupEdit({ tree, group, initialFilter, initialSel, vms, byId, groupNam
                 <label style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', gap: 4, fontSize: 12, color: 'var(--text-dim)' }}>{`실행 시각(${CLOCK_TEXT[sched.clock === 'portal' ? 'portal' : 'server']})`}
                   <input className="input" type="time" step={60} value={sched.time} disabled={disabledAll} onChange={(e) => setSched((s) => ({ ...s, time: e.target.value }))} style={{ fontSize: 14, minWidth: 0 }} />
                 </label>
-                {/* v2.899: 기준 시계 — 현지 서버(이 포탈 서버의 시간대) · 중앙 포탈(포탈 기준 시간대). 옛 그룹은 현지 서버 그대로 */}
+                {/* v2.901: 기준 시계 — 현지 서버(이 포탈 서버의 시간대) · 중앙 포탈(포탈 기준 시간대). 옛 그룹은 현지 서버 그대로 */}
                 <label style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', gap: 4, fontSize: 12, color: 'var(--text-dim)' }}>기준 시각
                   <Select className="input" sort={false} value={sched.clock === 'portal' ? 'portal' : 'server'} disabled={disabledAll} onChange={(e) => setSched((s) => ({ ...s, clock: e.target.value }))} aria-label="기준 시각" style={{ minWidth: 0, fontSize: 14 }}>
                     <option value="server">{`${CLOCK_TEXT.server}${tree.clocks ? ` (${utcOffsetText(tree.clocks.serverOffsetMin)}${tree.tz ? ` · ${tree.tz}` : ''})` : ''}`}</option>

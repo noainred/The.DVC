@@ -18,7 +18,7 @@ import { redactEnvSecrets, mergeRedactedEnv, pinHostSecurityEnv } from '../util/
 import { getAllAgentConfigs } from '../central/agentConfig.js';
 import { isRegisteredStateFile } from '../util/stateFiles.js'; // v2.613 PERSIST2613-01·08: 헬퍼가 만든 상태 파일은 스스로 등록한다
 import { DATA_FILE_NAMES, RESTORE_EXCLUDE, stageRestore, stagedNameIssue, reconcileAgentTokensText } from './stagedRestore.js'; // v2.768(점검 R3-C5-02): 복원은 예약 → 기동 시 적용
-import { issuesMaxBytes } from '../issues/store.js';   // v2.899(점검 P1) 사용자 문서 파일의 백업 상한
+import { issuesMaxBytes } from '../issues/store.js';   // v2.901(점검 P1) 사용자 문서 파일의 백업 상한
 import { boardMaxBytes } from '../bulletin/store.js';
 import { wikiMaxBytes } from '../wiki/store.js';
 
@@ -41,7 +41,7 @@ const ALLOW_EXT = new Set(['.json', '.env']);
 const DENY_NAMES = DATA_FILE_NAMES; // v2.768: 예약 복원 적용(stagedRestore.js)과 한 벌
 const FILE_SIZE_CAP = 8 * 1024 * 1024; // 파일당 8MB 상한(대용량 데이터 방지)
 /**
- * v2.899(점검 P1 — 재현 · 사용자 결정 '백업 상한을 올림'): 사용자 문서 저장소(이슈 · 게시판 · 위키)는 저장소 상한(이슈 · 게시판 16MB · 위키 8MB —
+ * v2.901(점검 P1 — 재현 · 사용자 결정 '백업 상한을 올림'): 사용자 문서 저장소(이슈 · 게시판 · 위키)는 저장소 상한(이슈 · 게시판 16MB · 위키 8MB —
  *   env 로 더 올릴 수 있다)이 파일당 8MB 이상이라, 가득 차면 그 파일이 백업에서 빠졌다(건너뜀 목록에만 남고, 그 백업으로 복원하면 이슈 · 글이 사라진다).
  *   이 세 파일은 '그 저장소 상한 × 1.25 + 1MB'(감싸는 글자 · 이스케이프 여유) 와 8MB 중 큰 값까지 담는다. 상한 함수는 그 저장소의 것 하나를 쓴다.
  */

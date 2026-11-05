@@ -199,7 +199,7 @@ export function vmNicRows(vm, networks = []) {
 }
 
 /**
- * v2.899: 호스트가 마운트한 데이터스토어 — 데이터스토어 쪽 수집(dcfg.mounts.hosts · bad — 이미 받는 'host' 속성)에서 이 호스트 moref 를 찾는다.
+ * v2.901: 호스트가 마운트한 데이터스토어 — 데이터스토어 쪽 수집(dcfg.mounts.hosts · bad — 이미 받는 'host' 속성)에서 이 호스트 moref 를 찾는다.
  *   unknown = 이 vCenter 데이터스토어 중 호스트 목록을 모르는 것(dcfg 없음 · 이전 판 수집 · 상한으로 잘림) — 그 DS 는 '안 붙음' 이라 단정하지 않는다.
  */
 export function hostDsMounts(datastores, host, hostRef) {

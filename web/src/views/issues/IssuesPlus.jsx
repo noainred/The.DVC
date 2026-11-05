@@ -340,7 +340,7 @@ export function SprintView({ meta, onOpen, onWritten, reloadSprints }) {
   const load = useCallback(() => {
     if (!sel) { setBoard(null); return; }
     const k = latest.next();
-    // v2.899(점검 W2): 다른 스프린트로 바꾸면 이전 보드 · 오류를 바로 비운다 — 응답이 오기 전 A 의 '끝내기' 가 sprints/A 로 나가고, B 가 실패하면 A 보드가 오류 없이 남았다
+    // v2.901(점검 W2): 다른 스프린트로 바꾸면 이전 보드 · 오류를 바로 비운다 — 응답이 오기 전 A 의 '끝내기' 가 sprints/A 로 나가고, B 가 실패하면 A 보드가 오류 없이 남았다
     setBoard((b) => (b?.sprint?.id === sel ? b : null)); setErr((e0) => (e0 && e0.__sprint === sel ? e0 : null));
     fetchJson(`/issues/sprints/${sel}/board`).then((r) => { if (latest.isLatest(k)) { setBoard(r); setErr(null); } }).catch((e) => { if (latest.isLatest(k)) { try { e.__sprint = sel; } catch { /* 얼린 오류 */ } setErr(e); } });
   }, [sel, latest]);

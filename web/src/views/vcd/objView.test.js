@@ -109,7 +109,7 @@ describe('v2.898 — 스냅샷 트리 · 네트워크 어댑터(이미 받던 XM
   });
 });
 
-describe('v2.899 호스트가 마운트한 데이터스토어(dcfg.mounts)', () => {
+describe('v2.901 호스트가 마운트한 데이터스토어(dcfg.mounts)', () => {
   it('이 호스트가 붙은 DS · 문제 표시 · 목록을 모르는 DS 는 unknown(없음이 아니다) · 다른 vCenter 는 보지 않는다', () => {
     const host = { vcenterId: 'vc1' };
     const ds = [

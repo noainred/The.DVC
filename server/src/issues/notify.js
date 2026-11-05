@@ -427,7 +427,7 @@ function accessFor(name, byName, snap) {
   return { read: scopedVcenterIds(u, snap), write: null };
 }
 /**
- * v2.899(점검 P5): 재진입 가드 — 30분 타이머가 앞 실행(메일 줄이 길거나 SMTP 가 느릴 때)과 겹치면 같은 구독자에게 두 번 보낼 수 있었다
+ * v2.901(점검 P5): 재진입 가드 — 30분 타이머가 앞 실행(메일 줄이 길거나 SMTP 가 느릴 때)과 겹치면 같은 구독자에게 두 번 보낼 수 있었다
  * (보냄 표지는 발송이 끝난 뒤에만 선다). 형제 flushIssueNotify 처럼 겹치지 않게 하고, 가드에는 시한을 둔다(끝나지 않는 한 번이 영원히 붙잡지 않게).
  */
 export const WEEKLY_BUSY_MAX_MS = 2 * 3_600_000;

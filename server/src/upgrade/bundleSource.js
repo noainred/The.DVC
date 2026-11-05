@@ -6,7 +6,7 @@
  */
 
 import fs from 'node:fs';
-import { bundleSha } from '../util/bundleSha.js';   // v2.899(점검 P2)
+import { bundleSha } from '../util/bundleSha.js';   // v2.901(점검 P2)
 import { findNewerArchive, checkRemote, vstr, fetchManifestText } from './upgrade.js';
 // v2.730(검토 S-10): 수집 에이전트로 밀어 넣기 전에 배포자 서명을 확인하고, 같은 manifest 를 push 에 싣는다.
 import { decideSignature, manifestPathForArchive, readManifestFile, archiveVersionOf } from './signature.js';
@@ -45,7 +45,7 @@ export function verifyBundleSha(bytes, sha256) {
     console.error(`[upgrade] ${lastReject}`);
     return false;
   }
-  const got = bundleSha(bytes);   // v2.899(점검 P2): 서명 판정 · push 헤더와 같은 해시를 한 번만
+  const got = bundleSha(bytes);   // v2.901(점검 P2): 서명 판정 · push 헤더와 같은 해시를 한 번만
   if (got.toLowerCase() !== String(sha256).toLowerCase()) {
     lastReject = `원격 번들 sha256 불일치 — 손상/변조 가능(기대 ${String(sha256).slice(0, 12)}…, 실제 ${got.slice(0, 12)}…). 푸시를 거부했습니다.`;
     console.error(`[upgrade] ${lastReject}`);
@@ -57,7 +57,7 @@ export function verifyBundleSha(bytes, sha256) {
 /** 읽은 번들 바이트 → push 할 바이트 + 옆의 서명 manifest(서명 확인 후). 실패면 null 이고 사유는 lastReject. */
 function fromBytes(bytes, archivePath, version, source) {
   const manifest = readManifestFile(manifestPathForArchive(archivePath));
-  // v2.899(점검 P2): sha256 은 한 번만 — 서명 판정에 넘기고 같은 값을 push 헤더(util/bundleSha 캐시)가 쓴다
+  // v2.901(점검 P2): sha256 은 한 번만 — 서명 판정에 넘기고 같은 값을 push 헤더(util/bundleSha 캐시)가 쓴다
   const sig = decideSignature({ manifestText: manifest, sha256: bundleSha(bytes), size: bytes.length, name: path.basename(archivePath), kind: 'bundle', expectVersion: version || undefined, where: 'bundle-source' });
   if (!sig.ok) { lastReject = sig.reason; console.error(`[upgrade] ${lastReject}`); return null; }
   return { bytes, version: version || null, source, manifest, signature: sig, path: archivePath }; // v2.865: 파일 경로 — 옛 방식 엣지 push(pushBundleToEdge)가 쓴다
