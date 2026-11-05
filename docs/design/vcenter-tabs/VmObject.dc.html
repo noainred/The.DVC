@@ -1,0 +1,241 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>VM 개체 보기 — 요약 (vSphere 식 탭)</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=Noto+Sans+KR:wght@400;500;700;800&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+body{margin:0;background:#0a0e17;color:#e6edf6;font-family:"Inter","Noto Sans KR","Apple SD Gothic Neo",sans-serif;font-size:13px}
+a{color:#93c5fd}a:hover{color:#bfdbfe}
+.muted{color:#8b9bb4}
+.faint{color:#5d6b85}
+.mono{font-family:"JetBrains Mono",ui-monospace,monospace}
+.card{background:#141b2d;border:1px solid #243049;border-radius:12px;min-width:0}
+.tab{display:inline-flex;align-items:center;gap:6px;padding:8px 14px;border-radius:8px;border:1px solid transparent;background:none;color:#8b9bb4;font:inherit;font-size:13px;font-weight:600;cursor:pointer;text-decoration:none;white-space:nowrap}
+.tab:hover{color:#e6edf6;background:#1a2236}
+.vtab{display:inline-flex;align-items:center;gap:6px;min-height:34px;padding:0 12px;border-radius:8px;border:1px solid transparent;color:#8b9bb4;font:inherit;font-size:13px;font-weight:600;text-decoration:none;white-space:nowrap;flex:none}
+.vtab:hover{color:#e6edf6;background:#1a2236}
+.vtab.on{color:#ffffff;background:#3b82f6;border-color:#3b82f6}
+.vtab .n{font-size:10.5px;font-weight:700;padding:1px 6px;border-radius:999px;background:rgba(139,155,180,.16);color:#aebbd0}
+.vtab.on .n{background:rgba(255,255,255,.22);color:#ffffff}
+.btn{display:inline-flex;align-items:center;gap:6px;min-height:30px;padding:0 12px;border-radius:8px;border:1px solid #243049;background:#1a2236;color:#e6edf6;font:inherit;font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap;text-decoration:none}
+.btn.primary{background:linear-gradient(135deg,#3b82f6,#2563eb);border-color:#2563eb;color:#ffffff;font-weight:700}
+.btn.ghost{background:transparent;border-color:transparent;color:#93c5fd;padding:0 4px}
+.btn.pill{border-radius:999px;min-height:24px;padding:0 10px;font-size:11.5px;color:#7dd3fc;background:rgba(56,189,248,.12);border-color:rgba(56,189,248,.45)}
+.badge{display:inline-flex;align-items:center;padding:2px 9px;border-radius:20px;font-size:11px;font-weight:600;white-space:nowrap}
+.badge.green{background:rgba(34,197,94,.15);color:#4ade80}
+.badge.amber{background:rgba(245,158,11,.15);color:#fbbf24}
+.badge.red{background:rgba(239,68,68,.15);color:#f87171}
+.badge.gray{background:rgba(139,155,180,.15);color:#8b9bb4}
+.badge.blue{background:rgba(59,130,246,.15);color:#60a5fa}
+.badge.purple{background:rgba(168,85,247,.15);color:#c084fc}
+.badge.teal{background:rgba(20,184,166,.16);color:#2dd4bf}
+.ct{display:flex;align-items:center;gap:8px;padding:11px 14px;border-bottom:1px solid #1f2a40;min-width:0}
+.ct b{font-size:13.5px}
+.ct .more{margin-left:auto;font-size:12px;white-space:nowrap}
+.kv{display:grid;grid-template-columns:auto minmax(0,1fr);gap:7px 14px;padding:12px 14px;font-size:12.5px;align-items:baseline}
+.kv span{color:#8b9bb4;white-space:nowrap}
+.kv div{min-width:0;overflow-wrap:anywhere}
+.bar{height:6px;border-radius:999px;background:#243049;overflow:hidden;flex:1 1 0;min-width:60px}
+.bar i{display:block;height:100%;border-radius:999px}
+.row{display:flex;align-items:center;gap:10px;min-width:0}
+table{border-collapse:collapse;width:100%}
+th{font-size:12px;font-weight:600;color:#8b9bb4;text-align:left;padding:9px 10px;background:#0f1626;border-bottom:1px solid #243049;white-space:nowrap;cursor:pointer}
+th.sort{color:#e6edf6}
+td{padding:8px 10px;border-bottom:1px solid #1f2a40;vertical-align:middle;white-space:nowrap;font-size:12.5px}
+.sm{font-size:11.5px;color:#8b9bb4}
+.note{padding:9px 14px;font-size:11.5px;line-height:1.6;color:#8b9bb4;border-top:1px solid #1f2a40}
+.crumb{display:flex;align-items:center;gap:6px;font-size:12px;color:#8b9bb4;flex-wrap:wrap;min-width:0}
+.crumb a{color:#93c5fd;text-decoration:none}
+.leaf{display:flex;align-items:center;gap:8px;padding:6px 10px;border-radius:8px;min-width:0}
+.leaf.hover{background:#1a2236;outline:1px dashed #3b82f6}
+.howto{border:1px dashed #3b82f6;border-radius:12px;background:rgba(59,130,246,.06);padding:10px 14px;display:grid;grid-template-columns:minmax(0,1.2fr) minmax(0,1fr);gap:10px 18px;align-items:start}
+.howto h4{margin:0 0 6px;font-size:12px;color:#93c5fd;font-weight:700}
+.find{display:flex;gap:8px;align-items:flex-start;padding:8px 14px;border-bottom:1px solid #1f2a40;font-size:12.5px}
+.find .badge{flex:none}
+.find small{display:block;color:#8b9bb4;font-size:11.5px}
+</style>
+</helmet>
+<div style="position:relative;width:100%;min-height:1320px;box-sizing:border-box;overflow:hidden;background:#0a0e17">
+<div style="max-width:1440px;margin:0 auto;box-sizing:border-box;padding:18px 24px 28px;display:flex;flex-direction:column;gap:12px;min-width:0">
+
+  <!-- 여는 방법: VM 및 폴더 트리의 행 · 지금 상세 창 — 둘 다 '개체 보기' 버튼 하나로 이 화면에 온다 -->
+  <section class="howto" aria-label="여는 방법">
+    <div style="min-width:0">
+      <h4>여는 방법 ① — VM 및 폴더 트리의 VM 행에 버튼(마우스를 올리면 보인다)</h4>
+      <div class="card" style="padding:6px 8px">
+        <div class="leaf"><span class="muted">▾</span><span style="font-weight:700">Prod</span><span class="sm">· 폴더 · VM 212</span></div>
+        <div class="leaf" style="padding-left:28px"><span class="muted">▾</span><span style="font-weight:700">Web</span><span class="sm">· 폴더 · VM 38</span></div>
+        <div class="leaf hover" style="padding-left:46px">
+          <span class="badge green" style="padding:1px 6px">On</span><span style="font-weight:600">web-kr1-023</span>
+          <span class="sm">Ubuntu 22.04 · 4 vCPU · 16 GB · esx-kr1-03</span>
+          <span style="margin-left:auto;display:inline-flex;gap:6px">
+            <a class="btn pill" href="VmObject.dc.html" aria-label="web-kr1-023 개체 보기">⤢ 개체 보기</a>
+          </span>
+        </div>
+        <div class="leaf" style="padding-left:46px"><span class="badge green" style="padding:1px 6px">On</span><span style="font-weight:600">web-kr1-024</span><span class="sm">Ubuntu 22.04 · 4 vCPU · 16 GB · esx-kr1-05</span></div>
+      </div>
+      <div class="sm" style="margin-top:6px">행 이름을 누르는 동작(지금의 상세 창)은 그대로. 새 버튼이 따로 생긴다 — 호스트 및 클러스터 트리의 호스트 행도 같은 버튼(HostObject 아트보드).</div>
+    </div>
+    <div style="min-width:0">
+      <h4>여는 방법 ② — 지금의 VM 상세 창(640px) 아래 버튼 줄에 하나 더</h4>
+      <div class="card" style="padding:10px 12px">
+        <div class="row" style="justify-content:space-between"><b>VM 상세 — web-kr1-023</b><span class="muted">✕</span></div>
+        <div class="sm" style="margin:6px 0 10px">이름 · 전원 · 호스트 · Guest OS · IP · Tools · vCPU · RAM · … (지금 그대로)</div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end">
+          <span class="btn">⚙ 사양 변경</span><span class="btn">🖥 콘솔</span><span class="btn">↗ 원격</span><span class="btn">📈 메트릭</span><span class="btn">📊 축소 근거 리포트</span>
+          <a class="btn primary" href="VmObject.dc.html">⤢ 개체 보기</a>
+        </div>
+      </div>
+      <div class="sm" style="margin-top:6px">창은 ‘빠른 확인’, 개체 보기는 ‘vSphere 처럼 탭으로 보기’. 둘의 값은 같은 /vms 응답이라 어긋나지 않는다.</div>
+    </div>
+  </section>
+
+  <!-- 경로 줄: 같은 셸 · 같은 vCenter 화면 안에서 VM 탭 자리를 개체 화면이 대신한다 -->
+  <div class="crumb" aria-label="경로">
+    <a href="Main.dc.html">← VM 및 폴더</a><span>›</span><span>VC-DEMO1</span><span>›</span><span>DC-KR1</span><span>›</span><span>Prod / Web</span><span>›</span><b style="color:#e6edf6">web-kr1-023</b>
+  </div>
+
+  <!-- 개체 머리 줄 -->
+  <div class="card" style="padding:14px 16px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px 16px">
+    <div class="row" style="gap:12px;flex-wrap:wrap">
+      <div style="width:40px;height:40px;border-radius:10px;background:#0f1626;border:1px solid #243049;display:flex;align-items:center;justify-content:center" aria-hidden="true">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#93c5fd" stroke-width="1.8"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/></svg>
+      </div>
+      <div style="min-width:0">
+        <div class="row" style="gap:8px;flex-wrap:wrap"><span style="font-size:17px;font-weight:800">web-kr1-023</span><span class="badge green">전원 켜짐</span><span class="badge green">Tools 실행 중</span><span class="badge blue">연결됨</span></div>
+        <div class="muted" style="font-size:12px">Ubuntu Linux (64-bit) · 호스트 esx-kr1-03 · 클러스터 CL-Web01 · 리소스 풀 Resources · <span class="mono">10.20.3.23</span></div>
+      </div>
+    </div>
+    <div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end">
+      <span class="btn">⚙ 사양 변경</span><span class="btn">🖥 콘솔</span><span class="btn">↗ 원격</span><span class="btn">📊 축소 근거 리포트</span><span class="btn ghost">⋯</span>
+    </div>
+  </div>
+
+  <!-- 개체 탭 줄: vSphere Client 의 VM 개체 탭 순서 -->
+  <nav role="tablist" aria-label="VM 보기" style="display:flex;gap:4px;overflow-x:auto;padding-bottom:8px;border-bottom:1px solid #243049;min-width:0">
+    <a class="vtab on" href="VmObject.dc.html" aria-current="page">요약</a>
+    <a class="vtab" href="ObjectTabs.dc.html">모니터</a>
+    <a class="vtab" href="ObjectTabs.dc.html">구성 <span class="n">2</span></a>
+    <a class="vtab" href="ObjectTabs.dc.html">사용 권한</a>
+    <a class="vtab" href="ObjectTabs.dc.html">데이터스토어 <span class="n">2</span></a>
+    <a class="vtab" href="ObjectTabs.dc.html">네트워크</a>
+    <a class="vtab" href="ObjectTabs.dc.html">스냅샷 <span class="n">1</span></a>
+    <a class="vtab" href="ObjectTabs.dc.html">업데이트</a>
+  </nav>
+
+  <!-- 요약 탭 본문: 3열 카드 -->
+  <div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;min-width:0">
+
+    <section class="card" aria-label="VM 하드웨어">
+      <div class="ct"><b>VM 하드웨어</b><span class="sm">/vms · vmcfg 캐시</span><a class="more" href="ObjectTabs.dc.html">구성 →</a></div>
+      <div class="kv">
+        <span>CPU</span><div>4 vCPU <span class="sm">· 핫애드 켜짐 · 예약 — · 제한 —</span></div>
+        <span>메모리</span><div>16 GB <span class="sm">(16,384 MB) · 핫애드 꺼짐</span></div>
+        <span>하드 디스크</span><div>2개 · 300 GB <span class="sm">· 씬 1 · RDM 0</span></div>
+        <span>디스크 사용</span><div>212 GB <span class="sm">· 미할당 88 GB(씬)</span></div>
+        <span>네트워크 어댑터</span><div><span class="muted">장치 수 수집하지 않음</span> <span class="sm">· IP 2개(게스트 보고)</span></div>
+        <span>CD/DVD</span><div>1개 · 연결 안 됨</div>
+        <span>GPU</span><div class="muted">없음</div>
+        <span>호환성</span><div>vmx-19 <span class="sm">(ESXi 7.0 U2 이상)</span></div>
+        <span>펌웨어</span><div>EFI</div>
+      </div>
+    </section>
+
+    <section class="card" aria-label="게스트 OS">
+      <div class="ct"><b>게스트 OS</b><span class="sm">guest.* (VMware Tools 보고)</span></div>
+      <div class="kv">
+        <span>OS(설정)</span><div>ubuntu64Guest</div>
+        <span>OS(Tools 보고)</span><div>Ubuntu Linux (64-bit) 22.04.4 LTS</div>
+        <span>호스트 이름</span><div class="mono">web-kr1-023.demo.corp</div>
+        <span>IP</span><div class="mono">10.20.3.23 <span class="sm">· fe80::…:3a1f</span> <a class="btn ghost" href="VmObject.dc.html" style="min-height:0;font-size:11.5px">핑</a></div>
+        <span>게이트웨이</span><div class="mono">10.20.3.1</div>
+        <span>DNS</span><div class="mono">10.20.0.53 · 10.20.0.54</div>
+        <span>VMware Tools</span><div>12.3.5 <span class="badge green" style="margin-left:4px">최신</span></div>
+        <span>부팅 시각</span><div>2026-10-28 02:14 <span class="sm">· 가동 8일</span></div>
+      </div>
+    </section>
+
+    <section class="card" aria-label="관련 개체">
+      <div class="ct"><b>관련 개체</b><span class="sm">vmPlacement · /hosts</span></div>
+      <div class="kv">
+        <span>vCenter</span><div><a href="Main.dc.html">VC-DEMO1</a></div>
+        <span>데이터센터</span><div><a href="Datacenter.dc.html">DC-KR1</a></div>
+        <span>클러스터</span><div><a href="Configure.dc.html">CL-Web01</a> <span class="sm">· HA 켜짐 · DRS 완전 자동</span></div>
+        <span>호스트</span><div><a href="HostObject.dc.html">esx-kr1-03</a> <span class="sm">· ESXi 8.0.3</span></div>
+        <span>리소스 풀</span><div>Resources</div>
+        <span>폴더</span><div>Prod / Web</div>
+        <span>데이터스토어</span><div><a href="ObjectTabs.dc.html">ds-kr1-san03</a> · <a href="ObjectTabs.dc.html">ds-kr1-san04</a></div>
+        <span>네트워크</span><div><span class="muted">포트그룹 수집하지 않음</span></div>
+        <span>관리 솔루션</span><div class="muted">없음</div>
+      </div>
+    </section>
+
+    <section class="card" aria-label="사용률">
+      <div class="ct"><b>사용률</b><span class="sm">quickStats · 경합은 perfc</span><a class="more" href="ObjectTabs.dc.html">모니터 → 성능</a></div>
+      <div style="padding:12px 14px;display:grid;gap:10px">
+        <div class="row"><span class="muted" style="width:60px">CPU</span><div class="bar"><i style="width:23%;background:#60a5fa"></i></div><b style="width:42px;text-align:right">23%</b><span class="sm">2.3 / 10.0 GHz</span></div>
+        <div class="row"><span class="muted" style="width:60px">메모리</span><div class="bar"><i style="width:61%;background:#4ade80"></i></div><b style="width:42px;text-align:right">61%</b><span class="sm">9.8 / 16 GB</span></div>
+        <div class="row"><span class="muted" style="width:60px">디스크</span><div class="bar"><i style="width:71%;background:#fbbf24"></i></div><b style="width:42px;text-align:right">71%</b><span class="sm">212 / 300 GB</span></div>
+        <div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin-top:4px">
+          <div style="border:1px solid #243049;border-radius:10px;background:#0f1626;padding:8px 10px"><span class="sm">CPU Ready</span><b style="display:block;font-size:16px">1.2%</b><i class="faint" style="font-style:normal;font-size:11px">최근 창 · 정상</i></div>
+          <div style="border:1px solid #243049;border-radius:10px;background:#0f1626;padding:8px 10px"><span class="sm">Co-stop</span><b style="display:block;font-size:16px">0.1%</b><i class="faint" style="font-style:normal;font-size:11px">정상</i></div>
+          <div style="border:1px solid #243049;border-radius:10px;background:#0f1626;padding:8px 10px"><span class="sm">디스크 지연</span><b style="display:block;font-size:16px">4 ms</b><i class="faint" style="font-style:normal;font-size:11px">읽기 3 · 쓰기 5</i></div>
+        </div>
+      </div>
+      <div class="note">기간 실사용률은 ‘📊 사용량 조회’ 를 켰을 때만(vCenter 성능 롤업). 경합 값이 없으면 ‘측정하지 않음’ — ‘경합 없음’ 이 아니다.</div>
+    </section>
+
+    <section class="card" aria-label="구성 점검">
+      <div class="ct"><b>구성 점검</b><span class="badge amber">확인할 항목 2</span><a class="more" href="ObjectTabs.dc.html">구성 →</a></div>
+      <div class="find"><span class="badge amber">주의</span><div><b>스냅샷 오래됨</b><small>1개 · 2.4 GB · 2026-10-01 생성(35일) — 보관이 길면 디스크 지연 · 공간 증가</small></div></div>
+      <div class="find"><span class="badge blue">정보</span><div><b>CPU 핫애드 켜짐</b><small>vNUMA 비활성 — 큰 VM 이면 성능 영향. 작은 VM 은 무시해도 된다</small></div></div>
+      <div class="note">판정은 vmcfg/parse.js 하나(화면에서 다시 판정하지 않음). 읽지 않은 축은 ‘아직 읽지 않음’ 으로 따로.</div>
+    </section>
+
+    <section class="card" aria-label="태그 · 메모 · 백업">
+      <div class="ct"><b>태그 · 메모 · 백업</b><span class="sm">tagInv · annotation · Veeam/Bareos 배지</span></div>
+      <div class="kv">
+        <span>태그</span><div><span class="badge blue">Owner: web-team</span> <span class="badge blue">Env: prod</span> <span class="badge blue">Backup: daily</span></div>
+        <span>사용자 지정 속성</span><div>담당자 홍길동 · 비용센터 CC-1203 · 만료일 —</div>
+        <span>백업</span><div><span class="badge teal">Veeam 매일 02:00</span> <span class="sm">· 마지막 성공 11-05 02:41</span></div>
+        <span>포탈 백업</span><div class="muted">등록 없음</div>
+        <span>메모</span><div style="white-space:normal">프런트 웹 23번. 배포는 Jenkins web-deploy. 담당 web-team.</div>
+        <span>instanceUuid</span><div class="mono" style="font-size:11.5px">5027a1b2-…-9e3f</div>
+      </div>
+    </section>
+  </div>
+
+  <!-- 최근 변경(모니터 › 이벤트의 앞 5건) -->
+  <section class="card" aria-label="최근 변경">
+    <div class="ct"><b>최근 변경</b><span class="sm">이 VM · vm-changes vmHistory · 최근 30일 · 5 / 17건</span><a class="more" href="ObjectTabs.dc.html">모니터 › 이벤트 →</a></div>
+    <div style="overflow-x:auto">
+      <table>
+        <thead><tr><th class="sort">시각 ▾</th><th>종류</th><th>사용자</th><th>내용</th></tr></thead>
+        <tbody>
+          <tr><td class="mono">11-04 23:10</td><td><span class="badge purple">이동</span></td><td class="muted">DRS</td><td style="white-space:normal">esx-kr1-05 → esx-kr1-03 (vMotion · DRS 자동)</td></tr>
+          <tr><td class="mono">11-01 09:40</td><td><span class="badge blue">구성</span></td><td>DEMO\kim.ys</td><td style="white-space:normal">메모리 8 → 16 GB</td></tr>
+          <tr><td class="mono">10-28 02:14</td><td><span class="badge gray">전원</span></td><td>DEMO\svc-sched</td><td style="white-space:normal">재시작(게스트)</td></tr>
+          <tr><td class="mono">10-01 03:00</td><td><span class="badge amber">스냅샷</span></td><td>DEMO\svc-veeam</td><td style="white-space:normal">VEEAM BACKUP TEMPORARY SNAPSHOT 생성 — 남아 있음</td></tr>
+          <tr><td class="mono">09-12 14:02</td><td><span class="badge blue">구성</span></td><td>DEMO\hong.gd</td><td style="white-space:normal">하드 디스크 2 추가 200 GB (ds-kr1-san04)</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <div class="faint" style="font-size:11.5px">가상 데이터 · 요약 탭은 새 수집 없이 지금 있는 값(/vms 한 행 + vmcfg 캐시 + perfc + tagInv + 배지 + vmHistory)만 다시 배치한다. ‘수집하지 않음’ 으로 적은 칸(네트워크 어댑터 수 · 포트그룹)은 지어내지 않는다.</div>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1320}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

@@ -1,7 +1,7 @@
 # 설계: vCenter 상세 화면에 vSphere Client 탭 구성 넣기
 
 작성 2026-11-05 (v2.889.0 기준) · 상태 **시안 완료 · 컨펌 대기**(규칙: 설계는 Fable + Claude Design 시안 → 컨펌 뒤 Opus 구현 — 2026-11-03 '기억해') · 시안 캔버스: https://claude.ai/artifact/KWhkAuJSdxrjDaJAJeS8en
-(아트보드 7장 — 이 폴더의 `*.dc.html` 이 같은 내용의 레퍼런스. **법인 · vCenter 이름(VC-DEMO1 · DC-KR1 · esx-kr1-07 …) · 수치는 전부 가상**이고 색 · 글자 · 버튼은 `web/src/styles.css` `:root` 토큰 그대로.
+(아트보드 11장 — ①~⑦ vCenter 탭 · ⑧~⑪ VM · 호스트 개체 보기(§8, 11:44 추가 요청) — 이 폴더의 `*.dc.html` 이 같은 내용의 레퍼런스. **법인 · vCenter 이름(VC-DEMO1 · DC-KR1 · esx-kr1-07 …) · 수치는 전부 가상**이고 색 · 글자 · 버튼은 `web/src/styles.css` `:root` 토큰 그대로.
 계정의 ‘Design System’ 아티팩트는 앞 시안(bareos-errlog · bareos-cancel)과 같이 `project/README.md` · `project/tokens.json` 이 없어(타입 파일 + index.html 뿐) 쓰지 않았다. 아트보드에 VMware 로고 · 상표 이미지는 넣지 않았다 — 탭 이름 글자만.)
 이 문서의 §2 는 Opus 세션이 코드로 확인한 사실이고, §3 · §4 는 시안 단계(Fable)에서 채웠다.
 
@@ -111,3 +111,50 @@ vCenter 상세(기본 셸 안 · 지금 화면 하나) — 머리 줄은 그대�
 - 새 수집이 생기면: 고RTT(800ms+) · 30 vCenter 전제 — 탭을 열 때만 조회하거나 느린 주기 + 캐시, per-vCenter 시한, 위임(엣지) 수집 환경에서 중앙 화면이 비지 않게(`findRemoteServer`), 새 엣지 export 필드는 중앙 정제 화이트리스트에도.
 - 무거운 API 는 15초 폴링 금지(마운트 1회 + 버튼) · 늦게 온 이전 응답은 버린다.
 - 화면 변경은 Chromium 1440/400 직접 확인.
+
+## 8. 개체 보기(VM · ESXi 호스트) — 추가 요청(2026-11-05 11:44 KST · Fable 메인)
+
+- 요구 원문: "폴더 형태로 볼때 VM 의 정보를 vcenter 에서 보는 것처럼 보는 것같은 메뉴를 별도의 버튼을 누르면 보이게 하고, esxi 호스트도 동일한 기능만들어줘. 시안 만들어서 보여줘"
+- 아트보드 ⑧ `VmObject.dc.html` · ⑨ `HostObject.dc.html` · ⑩ `ObjectTabs.dc.html` · ⑪ `ObjectNarrow.dc.html`(같은 캔버스 넷째 줄). 가상 데이터(web-kr1-023 · esx-kr1-03).
+
+### 8.1 여는 방법(별도 버튼)
+- 트리 행(VM 및 폴더 › VM 행 · 호스트 및 클러스터 › 호스트 행)에 **‘⤢ 개체 보기’** 버튼 — 1440 에서는 마우스를 올리면 보이고 400 에서는 항상 보인다(줄바꿈). 행 이름을 누르는 지금 동작(640px 상세 창 `EntityDetail`)은 그대로.
+- 지금 상세 창의 아래 버튼 줄에도 같은 버튼(`VmReconfigButton · VmConsoleButton · … · ⤢ 개체 보기`). VM 개체 화면의 ‘호스트’ 링크 → 호스트 개체 화면.
+- 누르면 **같은 vCenter 화면 안에서 탭 자리가 개체 화면으로 바뀐다**(새 셸 · 새 창 없음) · 경로 줄 ‘← VM 및 폴더 › VC › DC › 폴더 › 이름’ 으로 복귀. 주소는 `#/vcenter/<id>/vm/<vmId>` 같이 해시에 실어 새로고침 · 공유가 되게(구현 때 라우팅 규약 확인).
+
+### 8.2 탭(vSphere Client 개체 탭 순서)
+| 개체 | 탭 | 1차(지금 값) | 2차(수집 추가) |
+|---|---|---|---|
+| VM | 요약 | VM 하드웨어(/vms 행 + vmcfg cfg·dev) · 게스트 OS(guest.*) · 관련 개체(vmPlacement · host · cluster · resourcePool · 디스크별 DS) · 사용률(quickStats + perfc) · 구성 점검(vmcfg findings) · 태그 · 메모 · 백업 배지 · 최근 변경(vmHistory 5건) | — |
+| VM | 모니터 | 성능(`/vms/:id/metrics` — 지금 ‘📈 메트릭’ 창 본문) · 이벤트(vmHistory) | 작업(TaskManager) |
+| VM | 구성 | 하드웨어 장치 표(cfg.dev: 디스크 · CD-ROM · USB/직렬/병렬) + 설정 점검 행(vmCfgRows) | 네트워크 어댑터 장치(backing) |
+| VM | 사용 권한 | 권한 · 역할 변경 이벤트만 | RetrieveEntityPermissions(관리자 판본) |
+| VM | 데이터스토어 | 디스크별 DS(cfg.dev.datastore) + DS 사용률(/datastores) + 게스트 파티션(`/vms/:id/partitions`) | — |
+| VM | 네트워크 | 게스트 IP · 게이트웨이 · DNS · DNS 역방향(vmdns 판정) · IP 대장 링크 · 핑(VmIpPing) | 포트그룹 / vSwitch |
+| VM | 스냅샷 | 개수 · 크기(snapshotCount · snapshotSizeGB) · 가장 오래된 것 · 생성자(이벤트 추정) | 스냅샷 트리(rootSnapshotList) |
+| VM | 업데이트 | Tools 버전 · 상태(toolsVersionStatus) · 호환성(hwVersion) | — |
+| 호스트 | 요약 | 하드웨어(vendor · model · serviceTag · cpuModel · 코어/스레드/소켓 · 메모리 · HBA · NIC · GPU · 전력 · 온도 · bootTime) · 사용률(+ 가상화율 vcdVirt · perfc) · 관련 개체 · 구성·보안 점검(hcfg) · HBA·NIC 표 | — |
+| 호스트 | 모니터 | 성능(`/hosts/:id/metrics`) · 이벤트(호스트 대상 이벤트) | 작업 |
+| 호스트 | 구성 | hostCfgRows(인증서 · 재부팅 · SSH/Shell · NTP · DNS · syslog · 잠금 모드 …) | 고급 설정 |
+| 호스트 | 사용 권한 | 변경 이벤트만 | 권한 목록 |
+| 호스트 | VM | 지금 `HostVmsModal` 표를 탭으로(검색 · 정렬 · CSV · ‘개체 →’) | — |
+| 호스트 | 리소스 풀 | VM.resourcePool 로 묶은 합(VM · vCPU · 메모리) | 풀 속성(예약 · 제한 · 공유) |
+| 호스트 | 데이터스토어 · 네트워크 | 물리 NIC · HBA(지금 값) · VM 디스크로 역산한 DS 목록 | 호스트별 DS 마운트 · 포트그룹 · vSwitch |
+| 호스트 | 업데이트 | ESXi 버전 · 빌드 · fleet 안 같은 빌드 수 · 재부팅 필요(hcfg) | vLCM 준수 · 패치 |
+
+### 8.3 규약(구현 때)
+- 개체 화면은 **조회 전용**. 상태를 바꾸는 동작(사양 변경 · 콘솔 · Tools 업그레이드)은 지금 버튼 · 도구 그대로(권한 `requirePerm` · 쓰기 범위) — 탭 안에 새 쓰기 경로를 만들지 않는다.
+- 온디맨드 조회(메트릭 · 파티션 · 이벤트)는 **탭을 열 때 1회** + 버튼 · 15초 폴링 금지 · 늦게 온 이전 응답은 버린다 · 도구 권한이 없으면 부르지 않는다(403 을 만들지 않게 — ClusterCfgSection 규약).
+- 단건 라우트는 `inUserScope` 404(존재 은닉). 관리자 판본 값(권한 목록 등)은 `isAdminDetailUser`.
+- 못 읽은 값은 '—' · 수집하지 않는 칸은 숨기지 않고 '수집하지 않음 · 2차' · 꺼진 VM 사용률 '—' · 경합 없음 ≠ 측정하지 않음.
+- 지금 `EntityDetail` 의 섹션 컴포넌트(VmCfgSection · HostCfgSection · PerfcSection · ClusterCfgSection · VmTagsSection · VmChangesSection · HostHbaTable · HostVmsModal 본문)를 **꺼내 재사용**한다 — 복제하지 않는다.
+
+### 8.4 정할 것(기본값)
+8. **개체 화면 위치**: 기본 = 같은 vCenter 화면의 탭 자리(경로 줄로 복귀 · 해시 주소). 대안 = 전체 화면 창(Modal 1200px).
+9. **상세 창 유지**: 기본 = 지금 640px 창은 그대로 두고 버튼만 추가. 대안 = 창을 없애고 행 클릭이 바로 개체 화면.
+10. **버튼 노출**: 기본 = 1440 마우스 올림 · 400 항상. 대안 = 항상 보임.
+
+### 8.5 확인하지 못한 것
+- 호스트 대상 이벤트를 vmHistory 처럼 호스트 단위로 거르는 API 가 있는지(HOSTOPS_TYPES 는 있다 — 라우트는 미확인).
+- 스냅샷 ‘생성자’ 는 이벤트에서 추정 — 이름에 VEEAM 이 있을 때만 백업 계정으로 본다(규칙은 veeamBadge 와 맞춘다).
+- 메인(Fable)이 4장을 Chromium(1500 · 900 안 400 틀)으로 렌더해 봤다(11:58 KST) — 깨짐 · 가로 넘침 0 · 콘솔 오류 0.
