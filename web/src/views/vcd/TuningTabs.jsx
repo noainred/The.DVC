@@ -124,7 +124,8 @@ export function VmTuning({ vm, vms, datastores }) {
                   <KV rows={[
                     ['판정', <span key="v"><b>{rs.verdict?.title || '—'}</b>{rs.verdict?.summary ? <span className="muted"> · {rs.verdict.summary}</span> : null}</span>],
                     ['CPU', c ? `${c.vcpu} vCPU · 사용 p95 ${unitText(c.usagePct?.p95, '%')} · 최대 ${unitText(c.usagePct?.max, '%')}${c.recommendedVcpu != null ? ` · 권장 ${c.recommendedVcpu} vCPU` : ''}` : '—'],
-                    ['메모리', m ? `${gbText(m.allocMB / 1024)} · 워킹셋 ${gbText((m.workingSetMB ?? 0) / 1024)}${m.recommendedMB != null ? ` · 권장 ${gbText(m.recommendedMB / 1024)}` : ''}` : '—'],
+                    // v2.899(점검 W3 — 정정): 워킹셋을 못 읽으면(표본 없음 — 서버 null) '0 GB' 가 아니라 '—'(v2.895 의 ?? 0 은 못 읽은 값을 0 으로 그렸다).
+                    ['메모리', m ? `${gbText(m.allocMB / 1024)} · 워킹셋 ${m.workingSetMB == null ? '—' : gbText(m.workingSetMB / 1024)}${m.recommendedMB != null ? ` · 권장 ${gbText(m.recommendedMB / 1024)}` : ''}` : '—'],
                     ['감축 금지 신호', m ? `벌룬 ${m.balloon?.n ? `${m.balloon.samplesAbove0 || 0}회` : '못 읽음'} · 스왑 ${m.swapped?.n ? `${m.swapped.samplesAbove0 || 0}회` : '못 읽음'} · Ready p95 ${unitText(c?.readyPct?.p95, '%')}` : '—'],
                     ['근거', rs.evidence?.sufficient === false ? <span className="badge amber" key="e">불충분 — {(rs.evidence.reasons || [])[0] || ''}</span> : '충분'],
                   ]} />

@@ -52,6 +52,8 @@ function Status({ d }) {
       {d.error && d.at && <div className="vcd-note" style={{ color: 'var(--amber, #b45309)' }}>{`마지막 갱신 실패: ${d.error} — 아래는 직전에 읽은 값입니다.`}</div>}
       {d.notCollected && <div className="muted" style={{ padding: '10px 14px', fontSize: 12.5 }}>{d.notCollected}</div>}
       {d.omitted > 0 && <Note>{`상한을 넘어 ${d.omitted}건은 받지 않았습니다.`}</Note>}
+      {d.unreadable > 0 && <Note>{`${d.unreadable}건은 응답 모양을 읽지 못해 빠졌습니다 — 목록이 전부가 아닙니다.`}</Note>}
+      {d.stale && <Note>{`엣지가 이 값을 ${d.staleMin}분 넘게 다시 보내지 않았습니다 — 마지막으로 받은 값입니다.`}</Note>}
     </>
   );
 }

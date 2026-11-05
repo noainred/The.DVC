@@ -5,6 +5,7 @@
  */
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
 
 test('ⓐ-1 연결된 vCenter — 범위 계정은 짝지은 노드만 이름 · 전체 범위는 그대로', async () => {
   const { maskLinkedForScope } = await import('../src/routes/api/vcInfo.js');
@@ -97,4 +98,48 @@ test('ⓓ-3 리소스 풀 — 중첩 shares · 무제한 -1 · 루트 판정 · 
   const { VCINFO_PERM, VCINFO_KINDS } = await import('../src/routes/api/vcInfo.js');
   assert.ok(VCINFO_KINDS.includes('pools'));
   assert.equal(VCINFO_PERM.pools, 'inv.hosts');
+});
+
+// ════════════════════════════ 전체 점검 반영(내 코드의 결함 — 정정) ════════════════════════════
+test('점검 E1 — recentTask · 알람 참조를 속성 순서와 무관하게 읽고, 못 읽으면 0건이 아니라 오류', async () => {
+  const C = await import('../src/vcinfo/collect.js');
+  const P = await import('../src/vcinfo/parse.js');
+  const both = '<ManagedObjectReference type="Task" xsi:type="ManagedObjectReference">task-101</ManagedObjectReference>'
+    + '<ManagedObjectReference xsi:type="ManagedObjectReference" type="Task">task-102</ManagedObjectReference>';
+  assert.deepEqual([...C.taskRefsOf(both)], ['task-101', 'task-102']);
+  assert.equal(C.taskRefsOf('<ManagedObjectReference').unreadable, 1, '원소가 있는데 하나도 못 읽음');
+  assert.equal(C.taskRefsOf('').unreadable, 0, '빈 목록은 0건이다');
+  const a = P.parseTriggeredAlarms('<AlarmState><entity type="HostSystem" xsi:type="ManagedObjectReference">host-1</entity><alarm xsi:type="ManagedObjectReference" type="Alarm">alarm-2</alarm></AlarmState><AlarmState><entity>x</entity></AlarmState>');
+  assert.deepEqual([a.items.map((x) => [x.entityType, x.entity, x.alarm]), a.unreadable], [[['HostSystem', 'host-1', 'alarm-2']], 1]);
+  // 수집: 못 읽은 recentTask 는 '0건 · 오류 없음' 이 아니라 오류(직전 값 유지)
+  C._resetVcInfo();
+  const c = { sc: { taskManager: 'TaskManager' },
+    retrieveObjectProps: async (type) => (type === 'TaskManager' ? [{ props: { recentTask: '<ManagedObjectReference' } }] : (() => { throw new Error('skip'); })()),
+    retrieveManyObjectProps: async () => [], callRaw: async () => { throw new Error('skip'); } };
+  const r = await C.refreshVcInfo(c, { id: 'vt' }, { now: Date.parse('2026-11-05T03:00:00Z') });
+  assert.match(r.tasks.error, /읽지 못했습니다/);
+  assert.equal(r.tasks.at, null);
+});
+
+test('점검 E2 — 캐시에 남는 글자는 평탄화(응답 원문을 붙잡지 않는다)', async () => {
+  const P = await import('../src/vcinfo/parse.js');
+  const src = fs.readFileSync(new URL('../src/vcinfo/parse.js', import.meta.url), 'utf8');
+  assert.match(src, /return t \? flatStr\(t\.slice\(0, n\)\) : null;/);
+  assert.match(src, /\{ type: flatStr\(t\), ref: flatStr\(r\) \}/);
+  const t = P.parseTaskInfo('<key>task-1</key><entityName>a-very-long-entity-name-01</entityName><state>success</state>');
+  assert.equal(t.entityName, 'a-very-long-entity-name-01');
+});
+
+test('점검 E3 · E7 — 키가 없으면 직전 값을 지우지 않는다 · 엣지 시각은 받은 시각을 넘지 못한다 · 낡음 · 만료', async () => {
+  const C = await import('../src/vcinfo/collect.js');
+  const R = await import('../src/routes/api/vcInfo.js');
+  const src = fs.readFileSync(new URL('../src/routes/central.js', import.meta.url), 'utf8');
+  assert.match(src, /if \(vcInfoIn && !edgeVcWriteDenied\(vcId, \{ requireSite: true \}\)\) putVcInfoFromEdge/);
+  C._resetVcInfo();
+  const future = Date.now() + 3 * 86_400_000;
+  C.putFromEdge('vE', { alarms: { at: future, items: [] } }, 'edge');
+  const e = C.getVcInfo('vE');
+  assert.ok(e.alarms.at <= Date.now(), '미래 시각을 받은 시각으로 자른다');
+  assert.equal(e.alarms.atEdge, future, '원본은 따로');
+  assert.ok(R.EDGE_STALE_MS < R.EDGE_EXPIRE_MS);
 });

@@ -65,6 +65,9 @@ export function linkedPortalMap(nodes, registry, snapVcs, allowed, { mock = fals
     return { ...n, portal: id ? { id, name: v?.name || id, version: v?.version || null, build: v?.build || null, status: v?.status || null } : null };
   });
 }
+/** v2.899(점검 E7): 엣지 push 값의 낡음 · 만료(엣지는 수집 주기마다 보낸다 — 분 단위). */
+export const EDGE_STALE_MS = 30 * 60_000;
+export const EDGE_EXPIRE_MS = 24 * 3_600_000;
 const NOT_YET_TEXT = '아직 읽지 않았습니다 — 다음 수집 주기에 읽습니다(엣지가 수집하는 vCenter 는 엣지 · 중앙이 v2.898 이상이어야 보냅니다).';
 /** 화면이 말하는 상한 · 보관 기간(숫자를 화면에 박지 않는다 — 반증 하-8). */
 const KIND_LIMITS = Object.freeze({
@@ -93,6 +96,7 @@ export function vcInfoBody(kind, vcenterId, entry, { admin = false, source = nul
   return {
     ...base, at: entry.at ?? null, items, error: entry.error ?? null,
     ...(entry.omitted ? { omitted: entry.omitted } : {}),
+    ...(entry.unreadable ? { unreadable: entry.unreadable } : {}),   // v2.899(점검 E1): 못 읽은 알람 원소 수
     ...(kind === 'perms' ? { roles: Array.isArray(entry.roles) ? entry.roles : [] } : {}),
     ...(userMasked ? { userMasked: true } : {}),
   };
@@ -113,10 +117,14 @@ export function registerVcInfo(api) {
     if (!vc || (allowed && !allowed.has(vcenterId))) return res.status(404).json({ ok: false, reason: 'vCenter 를 찾을 수 없습니다.' });
     const admin = isAdminDetailUser(req.user);
     if (kind === 'perms' && !admin) return res.status(403).json({ ok: false, adminOnly: true, reason: '권한 목록(사용자 · 그룹 · 역할)은 관리자 판본에서만 볼 수 있습니다.' });
-    const cached = getVcInfo(vcenterId);
+    let cached = getVcInfo(vcenterId);
+    // v2.899(점검 E7): 엣지가 보낸 값은 받은 지 오래되면 낡았다고 말하고(30분), 하루가 넘으면 보이지 않는다(엣지가 멈춘 뒤 옛 권한 목록을 계속 보이지 않게).
+    const edgeAge = cached?.source === 'edge' && Number.isFinite(cached.pushAt) ? Date.now() - cached.pushAt : null;
+    if (edgeAge != null && edgeAge > EDGE_EXPIRE_MS) cached = null;
     const mock = vc.mock === true || config.dataSource === 'mock';
     const entry = cached?.[kind] || (mock ? mockVcInfo(kind, vcenterId, snap, Date.now(), allowed) : null);
     const body = vcInfoBody(kind, vcenterId, entry, { admin, source: cached?.[kind] ? cached.source : mock ? 'mock' : null });
+    if (cached?.[kind] && edgeAge != null && edgeAge > EDGE_STALE_MS) { body.stale = true; body.staleMin = Math.round(edgeAge / 60_000); }
     if (kind === 'linked' && entry) {
       body.nodes = linkedPortalMap(entry.nodes, registryHosts(), snap.vcenters, allowed, { mock: body.source === 'mock' });
       return res.json(maskLinkedForScope(body, allowed));

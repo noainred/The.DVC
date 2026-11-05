@@ -1022,7 +1022,8 @@ centralRouter.post('/inventory', requireCentral(), (req, res) => {
   const saved = setInventory(vcId, slice, agent, b.generatedAt || null) || {};
   // v2.898(반증 하-5): 사이트 위임으로 등록된 vCenter 만 받는다(등록부에 없는 id 를 바꿔 가며 메모리를 늘리지 못하게) ·
   //   받은 것으로 통째로 바꾼다 — 엣지가 접속처를 바꿔 캐시를 비웠으면 옛 vCenter 의 권한 목록을 중앙이 계속 보이지 않게(없으면 지운다).
-  if (!edgeVcWriteDenied(vcId, { requireSite: true })) putVcInfoFromEdge(vcId, vcInfoIn, agent);   // v2.898
+  //   v2.899(점검 E3): 키가 없으면(옛 엣지 · 중앙 버전을 확인하지 못한 엣지) 직전 값을 그대로 둔다 — {} 일 때만 지운다.
+  if (vcInfoIn && !edgeVcWriteDenied(vcId, { requireSite: true })) putVcInfoFromEdge(vcId, vcInfoIn, agent);   // v2.898
   if (saved.held) console.warn(`[central] inventory: agent=${agent} vc=${vcId} 상태 ${slice.vcenter.status} · 호스트·VM 0 — 마지막 정상 목록을 지우지 않고 상태만 갱신했습니다(엣지가 인벤토리를 읽지 못함)`);
   res.locals.ingestSummary = {
     vcenterId: vcId.slice(0, 128), hosts: slice.hosts.length, vms: slice.vms.length, datastores: slice.datastores.length,
