@@ -191,3 +191,29 @@ vCenter 상세(기본 셸 안 · 지금 화면 하나) — 머리 줄은 그대�
 | 10 | 알림 규칙 확장 — Ready 지속 · DS 쓰기 지연 · 스냅샷 N일 · 벌룬 | 알림 엔진 규칙 범위 미확인(추정) | 없음 | 보통(폭주 방지) |
 
 우선순위 제안: 1 · 4 · 9 → 2 · 3 · 10 → 8 · 7 · 6 → 5. `rightsizePolicy()` 가 env 전역(`RIGHTSIZE_READY_WARN_PCT`)인 것은 코드로 확인했다 — 워크로드별 기준(프로파일)은 사용자가 취소해 제안에서 뺐다.
+
+## 11. 구현 계획(컨펌 2026-11-05 12:1x KST "기본값대로 구현해" — 정할 것 1~13 전부 기본값 · §10 제안은 범위 밖)
+
+구현은 Opus 세션이 이 절을 따른다. 단계마다 PR 머지 · 릴리스(자동 업그레이드)까지 끝내고 다음 단계로 간다 — 한 번에 다 넣으면 PR 이 커서 되돌리기 어렵다.
+
+### A 단계 — vCenter 탭 12개(§3~§5 · 기본값) · 예상 60~90분
+- `web/src/views/VCenterDetail.jsx`: `VIEWS` 를 vSphere 순서 12개로(키는 유지 — `hosts` · `vms` · `storage` · `network` · `trend`→모니터›성능 매핑, 새 키 `summary` · `monitor` · `configure` · `perms` · `datacenter` · `linked` · `extensions` · `updates`). 이모지 제거 · 탭 줄 `overflow-x:auto`(400px 가로 넘침 0) · ‘VM 및 폴더’→‘VM’ · ‘📊 사용량 조회’ 를 호스트/VM 탭 필터 줄로.
+- 새 탭 본문은 파일을 나눈다: `web/src/views/vcd/SummaryTab.jsx` · `MonitorTab.jsx`(알람 — ‘포탈 규칙’ 배지 · 이벤트 · 작업(수집하지 않음) · 성능 = 기존 `TrendView`) · `ConfigureTab.jsx`(라이선스 · 클러스터 · 태그 · 인증서 · 호스트 구성 — 기존 도구 API 에 `vcenterId` 거름 · ‘도구에서 열기 →’ · 권한 없으면 `ErrorBox` 403) · `DatacenterTab.jsx`(`vcDatacenter` 묶음 · 독립 호스트 ‘데이터센터 확인 필요’) · `ExtensionsTab.jsx`(`solutions` 거름 · `solutionsError` → ‘확인 불가 — 사유’) · `NewCollectTab.jsx`(사용 권한 = 변경 이벤트만 · 연결된 vCenter = ‘모름’ 한 줄 · 업데이트 = 버전·빌드).
+- 서버: 새 수집 없음. 필요하면 조회 라우트에 `vcenterId` 쿼리 거름만(범위 교집합 먼저 · `memoJson extraKey: scopeKey`).
+- 테스트: 탭 키 매핑 · ‘포탈 규칙’ 문구 · 독립 호스트 null · `solutionsError` 분기(vitest) · 라우트 거름(node:test). Chromium 1440/400.
+
+### B 단계 — VM · 호스트 개체 보기(§8 · 기본값 8~10) · 예상 90~120분
+- 해시 주소 `#/vcenter/<vcId>/vm/<vmId>` · `/host/<hostId>` (라우팅 규약은 `web/src/App.jsx` 해시 파서 확인 뒤).
+- 트리 행(`Leaf` · `FolderNodes`)에 ‘⤢ 개체 보기’(1440 hover · 400 항상) · `EntityDetail` 버튼 줄에 같은 버튼.
+- `web/src/views/object/VmObjectView.jsx` · `HostObjectView.jsx` · 공용 `ObjectTabs.jsx`(탭 줄 · 경로 줄). 섹션은 `EntityDetail.jsx` 에서 **꺼내 재사용**(VmCfgSection · HostCfgSection · PerfcSection · ClusterCfgSection · VmTagsSection · VmChangesSection · HostHbaTable · HostVmsModal 본문 · VmPartitionsSection) — 복제 금지.
+- 서버: `GET /vms/:id`(없으면 추가 — `/hosts/:id` 와 같은 꼴 · `inUserScope` 404 · `admin: isAdminDetailUser`). 온디맨드(메트릭 · 파티션 · 이벤트)는 탭 열 때 1회 · 늦은 응답 폐기 · 권한 없으면 안 부름.
+- 테스트: 해시 파서 · 404 규칙 · 재사용 섹션 렌더(vitest) · Chromium.
+
+### C 단계 — 성능 튜닝 탭(§9 · 기본값 11~13) · 예상 90~120분
+- 서버: `GET /vms/:id/tuning` · `GET /hosts/:id/tuning` — rightsize(기간 7/30/90 · 호스트 24h/7d/30d) + contention perfc + vmcfg/hcfg findings + storage-paths 판정 + 센서를 **한 응답**으로(각 축은 독립 — 하나가 실패해도 다른 축은 온다 · 실패 축은 `{ state:'unread', reason }`). 판정은 기존 모듈 함수를 부른다(새 판정 로직 금지). 열 때 1회 · 동시 1건(`exportBusy` 류) · per-vCenter 시한.
+- 웹: `TuningTab.jsx`(진단 띠 · 카드 4 · 조치 계획 — 1차는 저장 없이 ‘체크리스트 내보내기’ CSV/MD). 경고선은 응답의 `policy` 값만 표시.
+- 테스트: 축 독립 실패 · 감축 금지 신호 미수집 시 권장 없음 · 꺼진 VM ‘—’ · 레벨 2 카운터 없음 → ‘—’(node:test) · Chromium.
+
+### 공통
+- 버전 3종 · release-notes · 릴리스 게시 · `versions.json` latest 확인(단계마다). 문구는 `BoldText` 규약(백틱 금지) · 표는 `STable` · `numOrNull`.
+- 보안 변이 검증은 B 의 404 규칙과 C 의 새 라우트 범위 검사에만.
