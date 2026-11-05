@@ -37,6 +37,7 @@ import { vmCfgFindings, vmCfgRows, VM_CFG_TEXT } from '../views/vmcfg/vmCfgText.
 import { hostCfgFindings, hostCfgRows, HOST_CFG_TEXT, findingDetail as hostFindingDetail } from '../views/hostcfg/hostCfgText.js'; // v2.699
 import { MOVE_KIND_LABEL, fmtTs as vmChgTs, routeText, changeText, vmHistoryNotCollectedText, vmHistoryLagText } from '../views/vmchanges/vmChangesText.js'; // v2.702 · v2.733(C1-01) · v2.772(Z4-2)
 import { vmTagLine } from '../views/tags/vmTagsText.js'; // v2.703
+import { vcHash } from '../views/vcd/vcdRoute.js'; // v2.896 개체 보기(같은 vCenter 화면 · 해시 주소)
 import { vmContentionFindings, CONTENTION_TEXT, avgMaxText, msText } from '../views/contention/contentionText.js'; // v2.706(C2·C3)
 import { CLUSTER_TEXT, clusterDetailRows, vmRulesText, findingDetail as clusterFindingDetail, ageText as clusterAgeText, clusterOfParams, clusterMissLine } from '../views/clustercfg/clusterCfgText.js'; // v2.701 · v2.742(VC-05) 조회 인자·빈 사유
 
@@ -368,7 +369,7 @@ const SEV_BADGE = { crit: ['위험', 'red'], warn: ['주의', 'amber'], info: ['
  * 창을 열 때 1회 조회한다(폴링 없음 — 값은 수집 주기마다 바뀐다). 라이브 조회가 아니므로 시각을 반드시 함께 보인다.
  * 값을 모르는 파티션(여유 공간 미보고)은 0% 가 아니라 '값 모름'. 경보 무시 규칙에 걸린 파티션도 보이되 표지를 단다.
  */
-function VmPartitionsSection({ vm }) {
+export function VmPartitionsSection({ vm }) {
   const [st, setSt] = useState({ data: null, error: null });
   useEffect(() => {
     if (!vm?.id) return undefined;
@@ -445,7 +446,7 @@ function VmPartitionsSection({ vm }) {
   );
 }
 
-function VmCfgSection({ vm }) {
+export function VmCfgSection({ vm }) {
   const view = vmCfgRows(vm);
   const findings = vmCfgFindings(vm);
   return (
@@ -701,6 +702,7 @@ export function EntityDetail({ type, item, onClose }) {
         <div className="flex gap" style={{ marginTop: 14, justifyContent: 'flex-end', flexWrap: 'wrap', rowGap: 8 }}>
           <Lazy><HostMetricButton hostId={item.id} hostName={item.name} /></Lazy>
           <Lazy><IdracTrendLinkButton hostId={item.id} hostName={item.name} onClose={onClose} /></Lazy>
+          <ObjectViewButton type="host" item={item} onClose={onClose} />
         </div>
       )}
       {type === 'vm' && (
@@ -717,6 +719,7 @@ export function EntityDetail({ type, item, onClose }) {
           <button className="logout-btn" style={{ flex: 'none', padding: '8px 14px', whiteSpace: 'nowrap' }}
             onClick={() => setShowReport(true)}
             title="이 VM 의 CPU·메모리를 줄여도 되는지 기간별 추이·근거로 확인합니다">📊 축소 근거 리포트</button>
+          <ObjectViewButton type="vm" item={item} onClose={onClose} />
         </div>
       )}
       {type === 'vm' && showReport && (
@@ -726,6 +729,21 @@ export function EntityDetail({ type, item, onClose }) {
         <HostVmsModal host={item.name} vcenterId={item.vcenterId} onClose={() => setShowHostVms(false)} />
       )}
     </Modal>
+  );
+}
+
+/**
+ * v2.896(사용자 요청 '폴더에서 VM 을 vCenter 에서 보는 것처럼 — 별도 버튼으로 · ESXi 호스트도'): 이 창(빠른 확인)을 닫고
+ * 같은 vCenter 화면의 '개체 보기'(vSphere 식 탭)로 간다. 주소는 #/vcenters/<vc>/vm|host/<id> — 새로고침 · 공유가 된다.
+ */
+export function ObjectViewButton({ type, item, onClose }) {
+  if (!item?.id || !item?.vcenterId) return null;
+  return (
+    <button type="button" className="login-btn" style={{ flex: 'none', padding: '8px 14px', whiteSpace: 'nowrap' }}
+      title={type === 'host' ? '이 호스트를 vSphere 처럼 탭(요약 · 모니터 · 구성 · VM · 리소스 풀 …)으로 봅니다' : '이 VM 을 vSphere 처럼 탭(요약 · 모니터 · 구성 · 데이터스토어 · 스냅샷 …)으로 봅니다'}
+      onClick={() => { if (onClose) onClose(); window.location.hash = vcHash(item.vcenterId, { type, id: item.id }); }}>
+      ⤢ 개체 보기
+    </button>
   );
 }
 
@@ -836,7 +854,7 @@ export function ClusterCfgSection({ item, isVm }) {
 /**
  * v2.703(A15): 이 VM 의 vSphere 태그·사용자 지정 속성 + 빠진 필수 태그. 열 때 1회 조회 · 도구 권한이 없으면 부르지 않는다.
  */
-function VmTagsSection({ vm }) {
+export function VmTagsSection({ vm }) {
   const allowed = toolAllowed('vm-tags');
   const [st, setSt] = useState({ data: null, error: null });
   useEffect(() => {
@@ -871,7 +889,7 @@ function VmTagsSection({ vm }) {
  * v2.702(A7·A8): 이 VM 의 최근 이동(vMotion·DRS·Storage vMotion)과 구성 변경 — 이 포탈이 받아 둔 vCenter 이벤트(30일).
  * 열 때 1회 조회(폴링 없음) · 도구 권한이 없으면 부르지 않는다 · 늦게 온 응답은 버린다.
  */
-function VmChangesSection({ vm }) {
+export function VmChangesSection({ vm }) {
   const allowed = toolAllowed('vm-changes');
   const [st, setSt] = useState({ data: null, error: null });
   useEffect(() => {

@@ -40,6 +40,11 @@ import SummaryTab from './vcd/SummaryTab.jsx';
 import MonitorTab from './vcd/MonitorTab.jsx';
 import ConfigureTab from './vcd/ConfigureTab.jsx';
 import { DatacenterTab, ExtensionsTab, PermsTab, LinkedTab, UpdatesTab } from './vcd/InventoryTabs.jsx';
+// v2.896(사용자 요청 '폴더에서 VM 을 vCenter 처럼 — 별도 버튼 · ESXi 호스트도'): 개체 보기 — 주소 #/vcenters/<vc>/vm|host/<id>[/<탭>] (승인 시안 ⑧~⑪ · 기본값 8~10).
+import { parseVcRoute, vcHash, currentHash, goHash, replaceHash, onHashChange } from './vcd/vcdRoute.js';
+import { normObjTab } from './vcd/objTabs.js';
+import VmObject from './vcd/VmObject.jsx';
+import HostObject from './vcd/HostObject.jsx';
 
 /** 브라우저 저장소 — 사생활 모드 · 차단에서 접근만으로 throw 할 수 있다(규약: try/catch). 기억은 사람별 편의라 실패해도 화면은 동작한다. */
 function lsSafe() {
@@ -288,6 +293,12 @@ export default function VCenterDetail({ site, onBack }) {
     if (t === 'monitor' && (sub || k === 'trend')) setMonSub(sub || 'perf');
     if (t === 'configure' && sub) setCfgSub(sub);
   };
+  // v2.896 개체 보기 — 주소가 진실의 원천이다(새로고침 · 공유 · 뒤로 가기). 다른 vCenter 의 주소는 무시한다.
+  const [obj, setObj] = useState(() => { const r = parseVcRoute(currentHash()); return r.vcId === vcenterId ? r.obj : null; });
+  useEffect(() => onHashChange(() => { const r = parseVcRoute(currentHash()); if (r.vcId === vcenterId) setObj(r.obj); }), [vcenterId]);
+  const openObj = (type, id) => { setSel(null); setObj({ type, id, tab: '' }); goHash(vcHash(vcenterId, { type, id })); };
+  const closeObj = () => { if (obj) setView(obj.type === 'host' ? 'hosts' : 'vms'); setObj(null); goHash(vcHash(vcenterId)); };
+  const setObjTab = (t) => { if (!obj) return; const n = { ...obj, tab: t === 'summary' ? '' : t }; setObj(n); replaceHash(vcHash(vcenterId, n)); };
   const [sel, setSel] = useState(null);     // { type, item } for the detail popup
   const [open, setOpen] = useState({});      // expanded tree nodes
   const [q, setQ] = useState('');            // VM name search (hosts/vms views)
@@ -575,6 +586,17 @@ export default function VCenterDetail({ site, onBack }) {
 
       {comparing && <CompareMatrix onClose={() => setComparing(false)} />}
 
+      {obj && obj.type === 'vm' && (
+        <VmObject site={site} vcenterId={vcenterId} vm={vms.find((v) => v.id === obj.id) || null} vmsOk={vmsOk} gate={gateEl(vmsPart, 'VM 목록')}
+          datastores={datastores} hosts={hosts} tab={normObjTab('vm', obj.tab)} onTab={setObjTab} onBack={closeObj}
+          onOpenHost={(id) => openObj('host', id)} />
+      )}
+      {obj && obj.type === 'host' && (
+        <HostObject site={site} vcenterId={vcenterId} host={hosts.find((h) => h.id === obj.id) || null} hostsOk={hostsOk} gate={gateEl(hostsOk ? vmsPart : hostsPart, hostsOk ? 'VM 목록' : '호스트 목록')}
+          hosts={hosts} vms={vms} vmsOk={vmsOk} datastores={datastores} tab={normObjTab('host', obj.tab)} onTab={setObjTab} onBack={closeObj}
+          onOpenVm={(id) => openObj('vm', id)} />
+      )}
+      {!obj && <>
       {/* v2.895: vSphere Client 의 vCenter 탭 12개(순서 그대로 · 이모지 없음). 한 줄 — 넘치면 탭 줄만 가로 스크롤(400px 에서 페이지를 밀지 않는다 — 기본값 4). */}
       <nav className="vcd-views" role="tablist" aria-label="vCenter 보기">
         {VCD_TABS.map((v) => (
@@ -751,12 +773,12 @@ export default function VCenterDetail({ site, onBack }) {
             <Node label="🔍 검색 결과" defaultOpen sub={view === 'hosts' ? `${hm.length} 호스트 · ${matches.length} VM` : `${matches.length} VM`}>
               {empty && <div className="vcd-node vcd-leaf"><span className="vcd-caret" /><span className="muted">일치하는 항목이 없습니다</span></div>}
               {hm.slice(0, SEARCH_CAP).map((h) => (
-                <Leaf key={`h:${h.id}`} icon="🖥️" onClick={() => setSel({ type: 'host', item: h })}
+                <Leaf key={`h:${h.id}`} icon="🖥️" onClick={() => setSel({ type: 'host', item: h })} onObj={() => openObj('host', h.id)}
                   label={<Highlight text={h.name} tokens={tokens} />} badge={<StateBadge state={h.connectionState} />}
                   sub={`🧩 ${h.cluster || 'standalone'} · CPU ${unitText(hostUsagePct(h, 'cpuUsagePct'), '%')} · MEM ${unitText(hostUsagePct(h, 'memUsagePct'), '%')} · VM ${hostVmCount(h) ?? '-'}`} />
               ))}
               {matches.slice(0, SEARCH_CAP).map(({ v: vm, viaNotes, token }) => (
-                <Leaf key={vm.id} icon="🧊" onClick={() => setSel({ type: 'vm', item: vm })}
+                <Leaf key={vm.id} icon="🧊" onClick={() => setSel({ type: 'vm', item: vm })} onObj={() => openObj('vm', vm.id)}
                   label={<Highlight text={vm.name} tokens={tokens} />} badge={<><StateBadge state={vm.powerState} /><VeeamTag vm={vm} veeam={veeamMap} on={veeamOn} ev={veeamEv} onOpen={setVeeamVm} /><PortalTag vm={vm} map={portalMap} onOpen={setPortalVm} /></>}
                   sub={<>
                     {`🧩 ${vm.cluster || '—'} · 🖥️ ${vm.host || '—'} · 📁 ${vm.folder || 'vm'} · ${vm.cpuCount || 0}vCPU · ${Math.round((vm.memMB || 0) / 1024)}GB · 💾 ${vm.storageGB == null ? '—' : fmtGb(vm.storageGB)}`}
@@ -787,11 +809,11 @@ export default function VCenterDetail({ site, onBack }) {
                 sub={<UsageBars lead={<span className="muted">{chosts.length} 호스트 · VM {cv.vmc}</span>} cpu={avgCpu} mem={avgMem}
                   tail={<span style={{ display: 'inline-flex', gap: 10, alignItems: 'center' }}><VirtBadge alloc={cv.alloc} base={cv.cores} kind="cpu" /><VirtBadge alloc={cv.memAlloc} base={cv.memPhys} kind="mem" /></span>} />}>
                 {chosts.map((h) => (
-                  <Tree key={h.id} k={`h:${h.id}`} open={open} toggle={toggle} icon="🖥️"
+                  <Tree key={h.id} k={`h:${h.id}`} open={open} toggle={toggle} icon="🖥️" action={<ObjBtn onClick={() => openObj('host', h.id)} />}
                     label={<span className="vcd-link" onClick={(e) => { e.stopPropagation(); setSel({ type: 'host', item: h }); }}>{h.name}</span>}
                     sub={<UsageBars lead={<StateBadge state={h.connectionState} />} cpu={hostUsagePct(h, 'cpuUsagePct')} mem={hostUsagePct(h, 'memUsagePct')} tail={<span className="muted" style={{ fontSize: 12, display: 'inline-flex', gap: 10, alignItems: 'center' }}><span>VM {hostVmCount(h)}</span><VirtBadge alloc={vcpuByHost.get(h.name) || 0} base={h.cpuCores} kind="cpu" /><VirtBadge alloc={vmemByHost.get(h.name) || 0} base={h.memTotalMB} kind="mem" /></span>} />}>
                     {(vmsByHost.get(h.name) || []).map((vm) => (
-                      <Leaf key={vm.id} icon="🧊" onClick={() => setSel({ type: 'vm', item: vm })}
+                      <Leaf key={vm.id} icon="🧊" onClick={() => setSel({ type: 'vm', item: vm })} onObj={() => openObj('vm', vm.id)}
                         label={vm.name} badge={<><StateBadge state={vm.powerState} /><VeeamTag vm={vm} veeam={veeamMap} on={veeamOn} ev={veeamEv} onOpen={setVeeamVm} /><PortalTag vm={vm} map={portalMap} onOpen={setPortalVm} /></>}
                         sub={<>{`${vm.guestOS} · ${vm.cpuCount}vCPU · ${Math.round(vm.memMB / 1024)}GB`}<VmUsageCell {...usageProps(vm)} /><VmBadges vm={vm} cloneSet={cloneSet} bareosSet={bareosSet} /></>} />
                     ))}
@@ -806,7 +828,7 @@ export default function VCenterDetail({ site, onBack }) {
         {view === 'vms' && !query && !vmsOk && gateEl(vmsPart, 'VM 목록')}
         {view === 'vms' && !query && vmsOk && (
           <Node label={`📁 ${site.name} / vm`} defaultOpen sub={`${visibleVms.length} VM`}>
-            <FolderNodes node={folderTree} path="" open={open} toggle={toggle} cloneSet={cloneSet} bareosSet={bareosSet} veeamMap={veeamMap} veeamOn={veeamOn} veeamEv={veeamEv} setVeeamVm={setVeeamVm} usageProps={usageProps} onSelect={(vm) => setSel({ type: 'vm', item: vm })}
+            <FolderNodes node={folderTree} path="" open={open} toggle={toggle} cloneSet={cloneSet} bareosSet={bareosSet} veeamMap={veeamMap} veeamOn={veeamOn} veeamEv={veeamEv} setVeeamVm={setVeeamVm} usageProps={usageProps} onSelect={(vm) => setSel({ type: 'vm', item: vm })} onObj={(vm) => openObj('vm', vm.id)}
               portalMap={portalMap} setPortalVm={setPortalVm} onFolderBackup={onFolderBackup} />
           </Node>
         )}
@@ -842,6 +864,7 @@ export default function VCenterDetail({ site, onBack }) {
         )}
       </div>}
 
+      </>}
       {sel && <EntityDetail type={sel.type} item={sel.item} onClose={() => setSel(null)} />}
       {veeamVm && <VeeamDetailModal vcenterId={vcenterId} vm={veeamVm} onClose={() => setVeeamVm(null)} />}
       {portalVm && <React.Suspense fallback={null}><BackupManageModal vmId={portalVm} onClose={() => setPortalVm(null)} /></React.Suspense>}
@@ -874,12 +897,17 @@ function Tree({ k, open, toggle, icon, label, sub, action, children }) {
     </div>
   );
 }
-function Leaf({ icon, label, sub, badge, onClick }) {
+function Leaf({ icon, label, sub, badge, onClick, onObj }) {
   return (
     <div className="vcd-node vcd-leaf" onClick={onClick}>
       <span className="vcd-caret" /><span>{icon}</span> <span className="vcd-link">{label}</span> {badge} {sub && <span className="vcd-sub">{sub}</span>}
+      {onObj && <ObjBtn onClick={onObj} />}
     </div>
   );
+}
+/** v2.896: 트리 행의 '개체 보기' — 행 이름(지금의 상세 창)과 따로 · 1440 은 마우스를 올리면 · 400 · 터치는 항상 보인다(CSS .vcd-objbtn). */
+function ObjBtn({ onClick }) {
+  return <button type="button" className="vcd-objbtn" title="vSphere 처럼 탭으로 봅니다(개체 보기)" onClick={(e) => { e.stopPropagation(); onClick(); }}>⤢ 개체 보기</button>;
 }
 
 // 사용률 색상 임계값(승인): 초록 <60% · 주황 60~85% · 빨강 ≥85%.
@@ -1059,7 +1087,7 @@ function Highlight({ text, tokens }) {
   );
 }
 
-function FolderNodes({ node, path, open, toggle, onSelect, cloneSet, bareosSet, veeamMap, veeamOn, veeamEv, setVeeamVm, usageProps, portalMap, setPortalVm, onFolderBackup }) {
+function FolderNodes({ node, path, open, toggle, onSelect, onObj, cloneSet, bareosSet, veeamMap, veeamOn, veeamEv, setVeeamVm, usageProps, portalMap, setPortalVm, onFolderBackup }) {
   const childFolders = Object.keys(node.folders).sort();
   return (
     <>
@@ -1069,10 +1097,10 @@ function FolderNodes({ node, path, open, toggle, onSelect, cloneSet, bareosSet, 
         return (
           <Tree key={key} k={key} open={open} toggle={toggle} icon="📁" label={name} sub={`${f.count} VM`}
             action={onFolderBackup ? <FolderBackupBtn node={f} name={name} onGo={onFolderBackup} /> : null}>
-            <FolderNodes node={f} path={`${path}/${name}`} open={open} toggle={toggle} cloneSet={cloneSet} bareosSet={bareosSet} veeamMap={veeamMap} veeamOn={veeamOn} veeamEv={veeamEv} setVeeamVm={setVeeamVm} usageProps={usageProps} onSelect={onSelect}
+            <FolderNodes node={f} path={`${path}/${name}`} open={open} toggle={toggle} cloneSet={cloneSet} bareosSet={bareosSet} veeamMap={veeamMap} veeamOn={veeamOn} veeamEv={veeamEv} setVeeamVm={setVeeamVm} usageProps={usageProps} onSelect={onSelect} onObj={onObj}
               portalMap={portalMap} setPortalVm={setPortalVm} onFolderBackup={onFolderBackup} />
             {f.vms.map((vm) => (
-              <Leaf key={vm.id} icon="🧊" onClick={() => onSelect(vm)} label={vm.name} badge={<><StateBadge state={vm.powerState} /><VeeamTag vm={vm} veeam={veeamMap} on={veeamOn} ev={veeamEv} onOpen={setVeeamVm} /><PortalTag vm={vm} map={portalMap} onOpen={setPortalVm} /></>}
+              <Leaf key={vm.id} icon="🧊" onClick={() => onSelect(vm)} onObj={onObj ? () => onObj(vm) : null} label={vm.name} badge={<><StateBadge state={vm.powerState} /><VeeamTag vm={vm} veeam={veeamMap} on={veeamOn} ev={veeamEv} onOpen={setVeeamVm} /><PortalTag vm={vm} map={portalMap} onOpen={setPortalVm} /></>}
                 sub={<>{`${vm.guestOS} · ${vm.cpuCount}vCPU · ${Math.round(vm.memMB / 1024)}GB`}<VmUsageCell {...usageProps(vm)} /><VmBadges vm={vm} cloneSet={cloneSet} bareosSet={bareosSet} /></>} />
             ))}
           </Tree>

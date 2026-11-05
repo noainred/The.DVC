@@ -36,6 +36,7 @@
 - (v2.888 추가) C-2 · C-3 — 위키 즐겨찾기 · 최근 본 · 많이 본 · 슬래시 명령 · 이슈 CSV · 보드 끌기 · 보드에 필터 · 작업 기록 · SLA · 버전 · 쓰기 응답 범위
 - (v2.889 추가) C-4 · C-5 — 첨부(인증 붙여 받기 · attach: 주소) · 포탈 매크로 · 포함 · 인라인 댓글 · 담당/당번 · 관리자 템플릿 · 캘린더 · 내보내기
 - (v2.895 추가) vCenter 상세 탭 12개(시안 `docs/design/vcenter-tabs` ①~⑦) — 탭 목록 · 옛 키 · 하위 칸 · 묶음은 `views/vcd/vcdTabs.js` 하나 · 도구 데이터는 그 도구 권한일 때만 · 포탈 알람은 '포탈 규칙'
+- (v2.896 추가) VM · ESXi 호스트 개체 보기(시안 ⑧~⑪) — 주소 `#/vcenters/<vc>/vm|host/<id>[/<탭>]` 는 `views/vcd/vcdRoute.js` 하나 · 트리 행 · 상세 창의 '⤢ 개체 보기' · 섹션은 EntityDetail 것을 재사용
 - (원래 5663행) v2.708 — 드롭다운은 공용 `Select`·`DataList` 하나다(자동 정렬)
 - (원래 5801행) 특수 기능 화면(v2.679) — 표시 이름·설명·개발 단계는 '덮어쓰기' 이고 키는 그대로다
 - (원래 5848행) 접속 공지 팝업 · 게시판(v2.722)
@@ -561,6 +562,12 @@
   ⑤ 남은 하위 작업(에픽이면 소속 이슈)이 있으면 서버가 409 `open-children` 로 묻고 화면은 확인을 받아 `closeChildren:true` 로 다시 보낸다(취소하면 아무것도 바꾸지 않는다).
      자식이 있는 이슈의 진행률 입력은 잠기고 메모만 보낸다(서버 409 `progress-auto` 와 같은 판정).
   ⑥ 스프린트 · 필터 공유 버튼은 서버 값(`canSprints` · `canShareFilters` — 전체 범위 쓰기 계정)일 때만 그린다. 필터 저장은 쓰기 역할만(viewer 상태변경 예외를 늘리지 않았다).
+- **v2.896 — VM · ESXi 호스트 개체 보기(사용자 요청 '폴더에서 VM 을 vCenter 처럼 — 별도 버튼 · 호스트도' · 승인 시안 `docs/design/vcenter-tabs` ⑧~⑪ · 기본값 8~10)**. 화면 `views/vcd/{VmObject,HostObject,ObjectShell}.jsx` · 주소 `vcd/vcdRoute.js` · 묶음 `vcd/objTabs.js`. 회귀 `vcd/objView.test.js` · `vcdTabsRender.test.jsx`.
+  - **주소가 진실의 원천**: `#/vcenters/<vcId>` = 상세, `/vm|host/<id>[/<탭>]` = 개체 보기(id 에 ':' 이 있어 조각마다 encodeURIComponent). `VCenters` 의 연 vCenter 도 주소에서 읽는다(새로고침 · 뒤로 가기 · 공유). 탭 전환은 `replaceHash`(기록을 쌓지 않는다). 다른 vCenter 주소는 무시한다. 브라우저가 아닌 시험에서도 던지지 않게 `currentHash` · `goHash` · `onHashChange` 를 쓴다(직접 `window.location` 금지).
+  - 여는 곳 셋 — 트리 행의 `.vcd-objbtn`(1440 은 마우스를 올릴 때 · 터치/좁은 화면은 항상) · 상세 창 버튼 줄의 `ObjectViewButton`(창을 닫고 간다 — 다른 화면의 상세 창에서도 같은 주소로) · 개체끼리(VM 요약 › 호스트 · 호스트 VM 탭 › 개체 →). 행 이름 클릭(상세 창)은 그대로.
+  - **새 수집 없음** — /vms · /hosts 한 행 + 캐시(vmcfg cfg·dev · hcfg · perfc) + 온디맨드(파티션 · 이벤트 · 메트릭 — 열 때 1회). 섹션은 `EntityDetail` 의 것(VmCfgSection · VmPartitionsSection · VmTagsSection · VmChangesSection · PerfcSection · ClusterCfgSection · HostBasicRows · HostCfgSection · HostHbaTable)을 export 해 재사용 — 복제 금지. 조회 전용이고 상태를 바꾸는 동작은 지금 버튼(권한 · 쓰기 범위) 그대로.
+  - 수집하지 않는 칸(네트워크 어댑터 장치 · 포트그룹 · 권한 목록 · 스냅샷 트리 · 리소스 풀 속성 · 호스트별 DS 마운트 · vLCM · 작업)은 탭을 숨기지 않고 `NotCollected`. vmcfg 가 아직 읽지 않은 디스크는 '아직 읽지 않음'(빈 표 아님) · 호스트 데이터스토어는 VM 디스크로 역산하고 못 읽은 VM 수를 밝힌다.
+  - ⚠ CSS 이름: 새 클래스는 `.vcd-` 접두라도 **기존 트리 규칙(.vcd-sub · .vcd-row · .vcd-node …)과 겹치는지 먼저 grep** — v2.895 가 하위 칸 목록에 `.vcd-sub` 를 써 트리 행이 47px 로 늘었다(Chromium 재판독에서 발견 · `vcdTabs.test.js` 가 고정).
 - **v2.895 — vCenter 상세 탭 12개(사용자 요청 'vSphere Client 처럼' · 승인 시안 `docs/design/vcenter-tabs` ①~⑦ · 기본값 1~7)**. 화면 `views/VCenterDetail.jsx` + `views/vcd/`(SummaryTab · MonitorTab · ConfigureTab · InventoryTabs · VcdParts · useOnce). 회귀 `views/vcd/vcdTabs.test.js` · `vcdTabsRender.test.jsx`.
   - 탭 목록 · 옛 키('trend' → 모니터 › 성능) · 하위 칸 · 데이터센터 묶음 · 확장 상태 · 버전 행은 **`vcd/vcdTabs.js` 하나**. 기본 탭은 예전과 같은 '호스트 및 클러스터', 그 뒤로는 브라우저 기억(`vcd.tab`, try/catch).
   - 탭 줄은 **한 줄**(`.vcd-views` nowrap + overflow-x) — 1440px 에서 12개가 들어가는 폭(패딩 6px 10px)이다. 탭을 더하거나 이름을 늘리면 1440 에서 다시 잰다(넘치면 마지막 탭이 잘려 보인다).

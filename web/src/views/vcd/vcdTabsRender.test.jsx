@@ -198,3 +198,73 @@ describe('v2.895 vCenter 탭 12개 — 렌더(얕게)', () => {
     unmount(rt);
   });
 });
+
+
+describe('v2.896 개체 보기 — 렌더(얕게)', () => {
+  const site = { id: 'vc1', name: 'VC1', status: 'connected', version: '8.0.2', build: '222', metrics: {}, location: {} };
+  const hosts = [{ id: 'vc1:host-1', vcenterId: 'vc1', name: 'esx-1', cluster: 'CL1', connectionState: 'CONNECTED', version: '8.0.2', build: '1', vcDatacenter: 'DC1', vmCount: 2 }];
+  const vms = [
+    { id: 'vc1:vm-1', vcenterId: 'vc1', name: 'web-1', host: 'esx-1', cluster: 'CL1', powerState: 'POWERED_ON', cpuCount: 4, memMB: 16384, resourcePool: 'Resources', folder: 'Prod', dev: { disks: [{ label: 'Hard disk 1', datastore: 'ds1', capacityGB: 80 }], cdroms: [] } },
+    { id: 'vc1:vm-2', vcenterId: 'vc1', name: 'db-1', host: 'esx-1', cluster: 'CL1', powerState: 'POWERED_OFF', cpuCount: 8, memMB: 32768, resourcePool: 'RP-DB', folder: 'Prod' },
+  ];
+  const lists = (p) => (p === '/hosts' ? { data: { items: hosts }, error: null, loading: false }
+    : p === '/vms' ? { data: { items: vms }, error: null, loading: false }
+      : p === '/datastores' ? { data: { items: [{ name: 'ds1', usagePct: 90 }] }, error: null, loading: false }
+        : p === '/networks' ? { data: { items: [] }, error: null, loading: false } : { data: null, loading: true });
+  const withHash = (hash, fn) => async () => {
+    const saved = globalThis.window;
+    globalThis.window = { location: { hash }, history: { replaceState() {} }, addEventListener() {}, removeEventListener() {} };
+    try { await fn(); } finally { if (saved === undefined) delete globalThis.window; else globalThis.window = saved; }
+  };
+
+  it('주소가 VM 개체면 탭 12개 대신 VmObject(찾은 VM)를 그린다', withHash('#/vcenters/vc1/vm/vc1%3Avm-1', async () => {
+    const { default: VCenterDetail } = await import('../VCenterDetail.jsx');
+    const { default: VmObject } = await import('./VmObject.jsx');
+    H.api.usePolling = lists;
+    const rt = mount(VCenterDetail, { site, onBack: () => {} });
+    await flush();
+    const vo = all(rt, (e) => e.type === VmObject);
+    expect(vo.length).toBe(1);
+    expect(vo[0].props.vm?.name).toBe('web-1');
+    expect(vo[0].props.tab).toBe('summary');
+    expect(all(rt, (e) => e.type === 'button' && e.props.role === 'tab').length).toBe(0);
+    unmount(rt);
+  }));
+
+  it('다른 vCenter 의 주소는 무시한다 · 트리 VM 행에 개체 보기 버튼(onObj)', withHash('#/vcenters/vc9/vm/x', async () => {
+    const { default: VCenterDetail } = await import('../VCenterDetail.jsx');
+    const { default: VmObject } = await import('./VmObject.jsx');
+    H.api.usePolling = lists;
+    const rt = mount(VCenterDetail, { site, onBack: () => {} });
+    await flush();
+    expect(all(rt, (e) => e.type === VmObject).length).toBe(0);
+    const leaves = all(rt, (e) => typeof e.type === 'function' && e.type.name === 'Leaf' && typeof e.props.onObj === 'function');
+    expect(leaves.length).toBeGreaterThanOrEqual(2);
+    unmount(rt);
+  }));
+
+  it('VmObject — 디스크 · 데이터스토어는 vmcfg 값 · 못 읽은 VM 은 아직 읽지 않음 · 없는 VM 은 그 사실', async () => {
+    const { default: VmObject } = await import('./VmObject.jsx');
+    const base = { site, vcenterId: 'vc1', vmsOk: true, gate: null, datastores: [{ name: 'ds1', usagePct: 90 }], hosts, onTab: () => {}, onBack: () => {}, onOpenHost: () => {} };
+    let rt = mount(VmObject, { ...base, vm: vms[0], tab: 'datastores' });
+    expect(all(rt, (e) => e.type === 'td' && /ds1/.test(textOf(e))).length).toBe(1);
+    unmount(rt);
+    rt = mount(VmObject, { ...base, vm: vms[1], tab: 'datastores' });
+    expect(all(rt, (e) => /아직 이 VM 의 디스크를 읽지 않았습니다/.test(textOf(e))).length).toBeGreaterThan(0);
+    unmount(rt);
+    rt = mount(VmObject, { ...base, vm: null, tab: 'summary' });
+    expect(all(rt, (e) => /VM 목록에 이 VM 이 없습니다/.test(textOf(e))).length).toBeGreaterThan(0);
+    unmount(rt);
+  });
+
+  it('HostObject — VM 탭은 이 호스트 위 VM · 리소스 풀은 이름별 합', async () => {
+    const { default: HostObject } = await import('./HostObject.jsx');
+    const base = { site, vcenterId: 'vc1', host: hosts[0], hostsOk: true, gate: null, hosts, vms, vmsOk: true, datastores: [], onTab: () => {}, onBack: () => {}, onOpenVm: () => {} };
+    let rt = mount(HostObject, { ...base, tab: 'vms' });
+    expect(all(rt, (e) => e.type === 'button' && textOf(e).trim() === '개체 →').length).toBe(2);
+    unmount(rt);
+    rt = mount(HostObject, { ...base, tab: 'pools' });
+    expect(all(rt, (e) => e.type === 'b' && (textOf(e) === 'Resources' || textOf(e) === 'RP-DB')).length).toBe(2);
+    unmount(rt);
+  });
+});
