@@ -173,7 +173,8 @@ export function ReviewView({ corp, nocorp = false, reloadKey, svcName, writableO
                   <tr key={g.key}>
                     <td style={{ fontFamily: 'var(--mono)', fontSize: 12, wordBreak: 'break-all', opacity: 0.7 }} title={isMaskedKey(g.key) ? MASKED_KEY_TITLE : undefined}>{keyText(g.key)}</td><td>{corpName(g.corp)}</td><td>{g.serviceName || '?'}</td><td>{g.by || '?'}{g.at ? ` · ${new Date(g.at).toLocaleDateString()}` : ''}</td>
                     <td><span className="badge gray" title={HELD_TEXT[g.held] || ''}>판정 보류</span>
-                      <div className="svcinv-sub">{HELD_SHORT[g.held] || g.held}{g.heldSince ? ` · ${new Date(g.heldSince).toLocaleString()} 부터` : ''}</div>
+                      {/* 사유 · 시작 시각은 줄바꿈한다 — svcinv-sub 기본(한 줄 말줄임 260px)이면 '… 부터' 가 잘렸다(Chromium 1440 실측) */}
+                      <div className="svcinv-sub" style={{ whiteSpace: 'normal', overflow: 'visible' }}>{HELD_SHORT[g.held] || g.held}{g.heldSince ? ` · ${new Date(g.heldSince).toLocaleString()} 부터` : ''}</div>
                       {/* 보류는 일괄 정리에서 빠진다 — 필요 없는 고정은 한 건씩 직접 지운다(6차 반증 F5: 예전에는 문구만 있고 버튼이 없었다) */}
                       {writableOf(g.corp) ? <button type="button" className="logout-btn" style={{ ...btn, marginTop: 4 }} disabled={busy} title="이 고정 한 건만 지웁니다(보류 사유와 무관하게 — 서버가 정말 없어진 것을 알 때)" onClick={() => op({ op: 'pins.clear', corp: g.corp, keys: [g.key] }, '보류 중이던 고정 한 건을 지웠습니다.')}>고정 지우기</button> : null}</td>
                   </tr>))}
@@ -314,7 +315,8 @@ function AliasPinsCard({ q, svcName, writableOf, op, busy, corpName }) {
   const items = q.aliasPins?.items || [];
   const n = q.aliasPins?.n || 0;
   if (!n) return null;
-  const corps = q.aliasPins?.corps || [...new Set(items.map((x) => x.corp))];   // 200건에서 잘리기 전 전체 법인(4차 반증 8)
+  // '새 키로 옮기기' 는 옮길 것이 있는 법인만(서버 movable — 충돌만 남은 법인에는 할 일이 없다). 옛 서버 응답이면 전체 법인.
+  const corps = q.aliasPins?.movable || q.aliasPins?.corps || [...new Set(items.map((x) => x.corp))];   // 200건에서 잘리기 전 전체 법인(4차 반증 8)
   const conflicts = items.filter((x) => x.state === 'conflict').length;
   return (
     <div className="card" style={{ minWidth: 0 }}>
