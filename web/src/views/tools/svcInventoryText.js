@@ -15,7 +15,9 @@ export const REASON_TEXT = Object.freeze({
   'placement-unknown': 'vSphere 위치를 따라가지 못함(vApp 안 VM 등) — 고정으로만 넣을 수 있습니다',
   'tags-unchecked': '태그를 읽지 못함(확인 안 됨) · 폴더 규칙 없음',
   'tag-unmapped': '태그 값에 맞는 서비스 없음',
-  'no-scan-entry': '스캔 엔트리 없음(수동 등록·엣지 구버전)',
+  'no-scan-entry': '스캔 엔트리 없음(수동 등록)',
+  'scan-entry-unknown': '보고된 스캔 엔트리를 중앙 등록부에서 찾지 못함(엣지가 따로 만든 엔트리 등)',
+  'source-old': '보고한 엣지·수집 서버가 스캔 엔트리 id 를 보내지 않음(구버전 — 최신 버전으로 올리면 엔트리로 묶입니다)',
   'scan-label-empty': '스캔 엔트리 라벨이 비어 있음',
   'scan-label-unmapped': '스캔 라벨에 맞는 서비스 없음',
 });
@@ -25,7 +27,8 @@ export const GROUP_TITLE = Object.freeze({
   entry: (g) => `스캔 엔트리 ${g.entry?.range || `#${String(g.value).slice(0, 8)}`} — 라벨 없음`,
   scan: (g) => `스캔 라벨 ‘${g.value}’ — 서비스 없음`,
   placement: () => 'vSphere 위치 모름(vApp 안 VM 등)',
-  manual: () => '묶을 출처 없음(수동 등록 iDRAC · 엣지 구버전)',
+  manual: (g) => (g.value === 'old-source' ? '스캔 엔트리 id 를 보내지 않는 구버전 엣지·수집 서버 — 최신 버전으로 올리면 엔트리로 묶입니다'
+    : g.value === 'unknown-entry' ? '중앙 등록부에 없는 스캔 엔트리(엣지가 따로 만든 엔트리 등)' : '묶을 출처 없음(수동 등록 iDRAC)'),
   nocorp: () => '법인 귀속 없음',
 });
 export const TIER_TEXT = Object.freeze({ 1: '등급 1 — 장애·백업 실패를 가장 먼저 본다', 2: '등급 2', 3: '등급 3' });

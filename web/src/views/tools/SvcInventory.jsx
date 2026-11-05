@@ -46,10 +46,15 @@ export default function SvcInventory() {
   const [regions, setRegions] = useState(() => new Map());
   const seq = useRef(0);
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (fresh = false) => {
     const my = ++seq.current;
-    try { const r = await fetchJson('/tools/svc-inventory'); if (my === seq.current) { setD(r); setErr(null); } }
-    catch (e) { if (my === seq.current) setErr(e); }
+    try { const r = await fetchJson('/tools/svc-inventory', fresh ? { fresh: '1' } : {}); if (my === seq.current) { setD(r); setErr(null); } return true; }
+    catch (e) {
+      if (my !== seq.current) return false;
+      // 입력 다시 읽기가 막히면(방금 읽음 429 · 권한 403) 지금 보던 데이터는 그대로 두고 이유만 알린다
+      if (fresh && (e?.status === 429 || e?.status === 403)) { setNote({ ok: false, text: opErrorText(e) }); return false; }
+      setErr(e); return false;
+    }
   }, []);
   useEffect(() => { load(); }, [load]);
   useEffect(() => {   // 지역 이름(매트릭스 열 묶음) — vCenter 목록에서 한 번
@@ -129,11 +134,16 @@ export default function SvcInventory() {
           </div>
           <span style={{ flex: 1 }} />
           <button type="button" className="logout-btn" style={btn} onClick={() => { load(); setReloadKey((k) => k + 1); }}>새로고침</button>
+          {d.canWrite ? (
+            <button type="button" className="logout-btn" style={btn} disabled={busy}
+              title={`등록부 법인 귀속 · 스캔 엔트리 라벨 · 부품 장애 · Bareos 원장을 지금 다시 읽습니다(${Math.round((d.meta?.limits?.freshMinMs || 0) / 1000)}초에 한 번). 그냥 새로고침은 다음 수집 주기까지 같은 입력을 씁니다.`}
+              onClick={async () => { setNote(null); if (await load(true)) { setReloadKey((k) => k + 1); setNote({ ok: true, text: '입력을 다시 읽었습니다.' }); } }}>입력 다시 읽기</button>
+          ) : null}
           {canCsv() ? <button type="button" className="logout-btn" style={btn} onClick={() => downloadFile('/tools/svc-inventory.csv', csvNameOf()).catch((e) => setNote({ ok: false, text: opErrorText(e) }))}>CSV</button> : null}
         </div>
         <div style={{ fontSize: 13 }}><BoldText text={INTRO} /></div>
         <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>
-          {d.scoped ? '범위가 지정된 계정이라 자기 법인만 보입니다. ' : ''}쓰기 범위가 있는 법인만 바꿀 수 있습니다. 전역 서비스·태그 카테고리는 전체 범위 관리자가 정합니다. 못 읽은 값은 ‘—’ 이고 합계에서 빠집니다.
+          {d.meta?.inputsAt ? `입력 읽은 시각 ${new Date(d.meta.inputsAt).toLocaleTimeString()}${d.meta?.snapAt ? ` · 인벤토리 스냅샷 ${new Date(d.meta.snapAt).toLocaleTimeString()}` : ''}. ` : ''}{d.scoped ? '범위가 지정된 계정이라 자기 법인만 보입니다. ' : ''}쓰기 범위가 있는 법인만 바꿀 수 있습니다. 전역 서비스·태그 카테고리는 전체 범위 관리자가 정합니다. 못 읽은 값은 ‘—’ 이고 합계에서 빠집니다.
           {!d.meta?.faults?.available ? ` ${FAULT_REASON[d.meta?.faults?.reason] || ''}.` : ''}
         </div>
       </div>

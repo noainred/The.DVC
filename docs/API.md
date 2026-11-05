@@ -1263,12 +1263,12 @@ Prometheus/OTel 익스포터(선택 토큰).
 | GET | `/tools/storage/intervals` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/storageMon.js:295](../server/src/routes/api/storageMon.js#L295) |
 | PUT | `/tools/storage/intervals` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/storageMon.js:313](../server/src/routes/api/storageMon.js#L313) |
 | POST | `/tools/storage/test` | 역할 `admin` · `fullScopeOnly` | [server/src/routes/api/storageMon.js:149](../server/src/routes/api/storageMon.js#L149) |
-| GET | `/tools/svc-inventory` | 권한 `tools` | [server/src/routes/api/svcInventory.js:357](../server/src/routes/api/svcInventory.js#L357) |
-| GET | `/tools/svc-inventory.csv` | 권한 `tools`, `data.csv` | [server/src/routes/api/svcInventory.js:476](../server/src/routes/api/svcInventory.js#L476) |
-| GET | `/tools/svc-inventory/candidates` | 권한 `tools` | [server/src/routes/api/svcInventory.js:458](../server/src/routes/api/svcInventory.js#L458) |
-| GET | `/tools/svc-inventory/members` | 권한 `tools` | [server/src/routes/api/svcInventory.js:398](../server/src/routes/api/svcInventory.js#L398) |
-| POST | `/tools/svc-inventory/op` | 역할 `admin/operator` · 권한 `tools` | [server/src/routes/api/svcInventory.js:502](../server/src/routes/api/svcInventory.js#L502) |
-| GET | `/tools/svc-inventory/queues` | 권한 `tools` | [server/src/routes/api/svcInventory.js:435](../server/src/routes/api/svcInventory.js#L435) |
+| GET | `/tools/svc-inventory` | 권한 `tools` | [server/src/routes/api/svcInventory.js:367](../server/src/routes/api/svcInventory.js#L367) |
+| GET | `/tools/svc-inventory.csv` | 권한 `tools`, `data.csv` | [server/src/routes/api/svcInventory.js:486](../server/src/routes/api/svcInventory.js#L486) |
+| GET | `/tools/svc-inventory/candidates` | 권한 `tools` | [server/src/routes/api/svcInventory.js:468](../server/src/routes/api/svcInventory.js#L468) |
+| GET | `/tools/svc-inventory/members` | 권한 `tools` | [server/src/routes/api/svcInventory.js:408](../server/src/routes/api/svcInventory.js#L408) |
+| POST | `/tools/svc-inventory/op` | 역할 `admin/operator` · 권한 `tools` | [server/src/routes/api/svcInventory.js:512](../server/src/routes/api/svcInventory.js#L512) |
+| GET | `/tools/svc-inventory/queues` | 권한 `tools` | [server/src/routes/api/svcInventory.js:445](../server/src/routes/api/svcInventory.js#L445) |
 | GET | `/tools/thin-vms` | 권한 `tools` | [server/src/routes/api/toolsCapacity.js:1236](../server/src/routes/api/toolsCapacity.js#L1236) |
 | GET | `/tools/threats` | 권한 `tools` | [server/src/routes/api/toolsAnalytics.js:102](../server/src/routes/api/toolsAnalytics.js#L102) |
 | GET | `/tools/vclogs` | 권한 `tools` | [server/src/routes/api/checksLogs.js:379](../server/src/routes/api/checksLogs.js#L379) |

@@ -72,6 +72,20 @@ export function backupOf(view, now) {
   return view.job ? 'fail' : 'none';
 }
 
+/**
+ * 베어메탈의 스캔 엔트리(순수 — 5차 R6·R18). 등록부 서버는 등록부 scanRangeId, 엣지 push 는 serverId, 수집 서버 pull 은 `remote:<수집기>:<서버>` 로 찾는다.
+ * scan 이 없으면 이유: 'unknown-entry'(엔트리 id 는 왔는데 중앙 등록부에 없음) · 'old-source'(엣지·수집 서버가 필드를 보내지 않음 = 구버전) · 없음(수동 등록).
+ */
+export function scanInfoOf(b, { edgeScan = new Map(), remoteScan = new Map(), regById = new Map(), scanEntries = new Map() } = {}) {
+  const sid = t(b?.serverId);
+  const reported = b?.source === 'edge' ? edgeScan.get(sid) : b?.source === 'remote' ? remoteScan.get(sid) : t(regById.get(sid)?.scanRangeId);
+  const entryId = typeof reported === 'string' ? reported : '';
+  const e = entryId ? scanEntries.get(entryId) : null;
+  if (e) return { scan: { entryId, label: e.service }, scanWhy: undefined };
+  if (entryId) return { scan: null, scanWhy: 'unknown-entry' };
+  return { scan: null, scanWhy: (b?.source === 'edge' || b?.source === 'remote') && reported === null ? 'old-source' : undefined };
+}
+
 // ───────── 입력 수집(스냅샷 세대 + 태그 카테고리마다 1회) ─────────
 let _gather = { key: '', promise: null };
 let _inputRev = 0;   // 저장소 밖 입력(스캔 엔트리 라벨)을 이 화면에서 바꿨을 때 응답 캐시를 넘긴다
@@ -222,16 +236,12 @@ async function gatherNow(snap, tagCategory) {
     const id = idOf(b);
     const x = judged.get(`${vc}|bm|${id.key}`) || null;
     const sid = t(b.serverId);
-    const reported = b.source === 'edge' ? edgeScan.get(sid) : b.source === 'remote' ? remoteScan.get(sid) : t(regById.get(sid)?.scanRangeId);
-    const entryId = typeof reported === 'string' ? reported : '';
-    const e = entryId ? scanEntries.get(entryId) : null;
-    // scan 이 없는 이유: 엔트리 id 는 왔는데 중앙 등록부에 없음 · 보고한 쪽이 엔트리 id 를 보내지 않음(구버전) · 그 밖(수동 등록)
-    const scanWhy = e ? undefined : entryId ? 'unknown-entry' : ((b.source === 'edge' || b.source === 'remote') && reported === null ? 'old-source' : undefined);
+    const { scan, scanWhy } = scanInfoOf(b, { edgeScan, remoteScan, regById, scanEntries });
     let powered = null;
     try { const inv = b.source === 'edge' ? null : getInventory(sid); const ps = lc(inv?.powerState); powered = ps === 'on' ? true : ps === 'off' ? false : null; } catch { powered = null; }
     members.push({
       key, keyKind, kind: 'bm', corp: vc, name: t(b.name), nameIsAddr: isAddr(t(b.name)), serviceTag: t(b.serviceTag), source: t(b.source), remoteAgent: t(b.remoteAgent),
-      scan: e ? { entryId, label: e.service } : null, ...(scanWhy ? { scanWhy } : {}), powered, cores: x?.cores ?? null, memGB: x?.memGB ?? null,
+      scan, ...(scanWhy ? { scanWhy } : {}), powered, cores: x?.cores ?? null, memGB: x?.memGB ?? null,
       usage: x ? { state: x.state, cpuPct: x.cpuPct, memPct: x.memPct, src: x.src } : { state: 'unread' },
       faults: faultsOf(b.serviceTag, sid), corpRule: b.vcSource === 'corp-rule',
     });
