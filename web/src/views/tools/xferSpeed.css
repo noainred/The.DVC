@@ -194,3 +194,9 @@
 .xs .xs-tip-line.sep { border-top: 1px dashed var(--border); margin-top: 4px; padding-top: 4px; }
 .xs .xs-plot { position: relative; min-width: 0; }
 .xs .xs-plot svg { display: block; width: 100%; height: auto; touch-action: pan-y; }
+
+/* ── v2.902 히스토리 보기 — 날짜로 이동 · 측정 기록 쪽 넘김 ── */
+.xs .xs-datejump { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-dim); white-space: nowrap; }
+.xs .xs-datejump input { height: 28px; padding: 0 8px; border-radius: 8px; border: 1px solid var(--border); background: var(--panel-deep); color: var(--text); font: inherit; font-size: 12px; color-scheme: dark; min-width: 0; }
+.xs .xs-logpager { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 8px 12px; padding: 10px 16px 0; font-variant-numeric: tabular-nums; }
+.xs .xs-dim { opacity: .55; transition: opacity .15s; }

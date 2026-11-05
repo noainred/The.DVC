@@ -160,13 +160,22 @@ export function buildQueues({ members = [], resolved, pins = {}, allowed = null,
   const unmapped = new Map();
   const drift = []; const mismatch = []; const redundant = []; const tagAmbiguous = []; const ruleOverlap = []; const aliasPins = [];
   const NAME_CAP = 40;
+  // 옛 키 → 그 옛 키를 가진 구성원들의 법인(범위와 무관한 전체 집합 — 고정이 범위 밖 법인 구성원의 것이어도 거짓 불일치가 되지 않게)
+  const aliasCorps = new Map();
+  for (const m of members) for (const a of m.aliasKeys || []) { if (!m.corp) continue; if (!aliasCorps.has(a)) aliasCorps.set(a, new Set()); aliasCorps.get(a).add(m.corp); }
   for (const m of members) {
     if (!inScope(m.corp)) continue;
     const r = resolved.get(m.key);
     if (r.pinMismatch) mismatch.push({ key: m.key, name: m.name, kind: m.kind, corp: m.corp, pinCorp: r.pinMismatch.corp, serviceId: r.pinMismatch.serviceId });
     // 다른 법인에 남은 옛 키(별칭) 고정(6차 4 — 예전에는 유령·불일치·옛 키 큐 어디에도 없었다). 법인 귀속을 모르는 구성원은 판단하지 않는다(F1).
+    // ⚠ 고정이 있는 법인에 **같은 옛 키를 가진 다른 구성원**이 있으면 그 구성원이 승계한 고정이다 — 불일치가 아니다(남긴 것 ① 점검: 이름이 같은 ESXi 호스트가
+    //   두 법인에서 베어메탈이면 태그를 읽기 전 옛 키가 같다. 예전에는 다른 법인 쪽에 거짓 불일치 행이 뜨고 그 '고정 지우기' 가 원래 서버의 고정을 지웠다).
     if (m.corp && Array.isArray(m.aliasKeys)) {
-      for (const a of m.aliasKeys) { const pa = pins[a]; if (pa && pa.corp !== m.corp) mismatch.push({ key: m.key, name: m.name, kind: m.kind, corp: m.corp, pinCorp: pa.corp, serviceId: pa.serviceId, aliasKey: a }); }
+      for (const a of m.aliasKeys) {
+        const pa = pins[a];
+        if (!pa || pa.corp === m.corp || aliasCorps.get(a)?.has(pa.corp)) continue;
+        mismatch.push({ key: m.key, name: m.name, kind: m.kind, corp: m.corp, pinCorp: pa.corp, serviceId: pa.serviceId, aliasKey: a });
+      }
     }
     if (r.drift) drift.push({ key: m.key, name: m.name, kind: m.kind, corp: m.corp, pin: { serviceId: r.serviceId, by: pins[r.pinKey || m.key]?.by || '', at: pins[r.pinKey || m.key]?.at || 0 }, auto: { serviceId: r.auto.serviceId, src: r.auto.src, via: r.auto.via || '' },
       ...(r.driftChanged ? { changed: r.driftChanged.legacy ? { legacy: true } : { reviewedAuto: r.driftChanged.reviewedAuto } } : {}) });

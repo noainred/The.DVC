@@ -37,7 +37,8 @@
   설정 손상은 `settingsLoadError()` 로만 안다(`loadSettings` 는 던지지 않는다) — 손상이면 모름(null)이지 해당 없음이 아니다(1차 반증 2). 범위 계정 `meta.backup` 은 자기 법인 기준(`backupMetaFor`).
 - **키**: VM = `iu:<vcenterId>:<instanceUuid>`(없으면 `vm:<moref id>`) · 베어메탈 = `st:<서비스태그>`(없으면 `fl:<fleetId sha1 16자>` — 주소 원문을 키에 싣지 않는다).
   키 등급이 오르면 낮은 등급 키를 `aliasKeys` 로 싣고 그 고정을 승계한다(같은 법인 · 유령 아님 · `pins.rekey`·고정 쓰기 때 새 키로 옮김 — 읽기 경로는 쓰지 않는다 · 5차 R15).
-  별칭 고정은 늘 live — 다른 법인 것은 **법인 불일치**(`mismatch` + `aliasKey` — 6차 4)이지 유령이 아니다(반증 F1: 귀속이 잠시 빈 서버의 고정이 정리됐다). 새 키·옛 키 고정이 함께 있으면 `aliasPins` 에 `dup`·`conflict` 로 드러내고, `pins.rekey` 는 충돌을 건너뛴다
+  별칭 고정은 늘 live — 다른 법인 것은 **법인 불일치**(`mismatch` + `aliasKey` — 6차 4)이지 유령이 아니다(반증 F1: 귀속이 잠시 빈 서버의 고정이 정리됐다).
+  단 **고정 법인에 같은 옛 키를 가진 구성원이 있으면** 그 구성원의 승계라 불일치가 아니다(이름이 같은 ESXi 호스트가 두 법인에서 베어메탈 — 거짓 행의 '고정 지우기' 가 원래 서버 고정을 지웠다). 새 키·옛 키 고정이 함께 있으면 `aliasPins` 에 `dup`·`conflict` 로 드러내고, `pins.rekey` 는 충돌을 건너뛴다
   (`keys`+`keepNew` 일 때만 옛 키를 지운다 · 옛 키 서비스로는 `pins.set` — 6차 3·9). 엣지 베어메탈은 `untaggedId`(엣지 `fleetUntaggedId` → 중앙 정제 → `untaggedServerId`)로 별칭을 만든다(6차 2 — 구버전 엣지는 승계 없음 · `/insights/fleet` 응답에는 싣지 않는다 — id 가 IP 일 수 있다, 반증 F2).
   베어메탈 별칭은 **태그가 없을 때의 fleetId**(일반 행 serverId · ESXi 호스트 행 name — 함대 분류와 같은 규칙)다 — lc(fleetId) 로 만들면 태그가 읽힌 뒤 절대 맞지 않는다(4차 반증 1, 시험은 실제 라우트로).
   `st:` 고정을 '함대 키 집합에 태그가 있다' 로 보류하지 말 것 — 그 집합에 ESXi 호스트 태그가 있어 가상화 호스트가 된 서버의 고정을 영원히 붙잡았다(4차 반증 2 — 되돌림). VM instanceUuid 를 하나도 못 읽는 법인의 `iu:` 고정은 보류 `uuid-unread`.
