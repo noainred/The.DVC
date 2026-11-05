@@ -74,30 +74,74 @@ export function backupOf(view, now) {
 
 /**
  * 베어메탈의 스캔 엔트리(순수 — 5차 R6·R18). 등록부 서버는 등록부 scanRangeId, 엣지 push 는 serverId, 수집 서버 pull 은 `remote:<수집기>:<서버>` 로 찾는다.
- * scan 이 없으면 이유: 'unknown-entry'(엔트리 id 는 왔는데 중앙 등록부에 없음) · 'old-source'(엣지·수집 서버가 필드를 보내지 않음 = 구버전) · 없음(수동 등록).
+ * scan 이 없으면 이유: 'unknown-entry'(엔트리 id 는 왔는데 중앙 등록부에 없음) · 'old-source'(엣지·수집 서버가 필드를 보내지 않음 = 구버전) ·
+ * 'not-reported'(엣지·수집 서버 출처인데 그 서버의 등록 정보가 오지 않음 — OME 장치·서버 목록을 보내지 않는 수집 서버·아직 못 받음) · 없음(수동 등록).
+ * ⚠ 'not-reported' 를 수동 등록으로 단정하지 말 것(2차 반증 1 — 값이 없는 이유를 단정하지 않는다).
+ * 수집 서버 경로가 엔트리 id 를 주지 않으면(null·undefined) **같은 서비스 태그의 엣지 push 값**을 쓴다(2차 반증 5 — 혼합 버전 기간에
+ * 2.887~2.892 엣지가 이미 보낸 id 를 버리지 않게). 태그가 둘 이상의 엣지 기록에서 다른 값이면 쓰지 않는다(edgeScanByTag 에 넣지 않는다).
  */
-export function scanInfoOf(b, { edgeScan = new Map(), remoteScan = new Map(), regById = new Map(), scanEntries = new Map() } = {}) {
+export function scanInfoOf(b, { edgeScan = new Map(), remoteScan = new Map(), regById = new Map(), scanEntries = new Map(), edgeScanByTag = new Map() } = {}) {
   const sid = t(b?.serverId);
-  const reported = b?.source === 'edge' ? edgeScan.get(sid) : b?.source === 'remote' ? remoteScan.get(sid) : t(regById.get(sid)?.scanRangeId);
+  const viaEdge = b?.source === 'edge' || b?.source === 'remote';
+  let reported = b?.source === 'edge' ? edgeScan.get(sid) : b?.source === 'remote' ? remoteScan.get(sid) : t(regById.get(sid)?.scanRangeId);
+  if (b?.source === 'remote' && typeof reported !== 'string') {
+    const byTag = edgeScanByTag.get(lc(b?.serviceTag));
+    if (typeof byTag === 'string') reported = byTag;
+  }
   const entryId = typeof reported === 'string' ? reported : '';
   const e = entryId ? scanEntries.get(entryId) : null;
   if (e) return { scan: { entryId, label: e.service }, scanWhy: undefined };
   if (entryId) return { scan: null, scanWhy: 'unknown-entry' };
-  return { scan: null, scanWhy: (b?.source === 'edge' || b?.source === 'remote') && reported === null ? 'old-source' : undefined };
+  if (viaEdge && reported === null) return { scan: null, scanWhy: 'old-source' };
+  if (viaEdge && reported === undefined) return { scan: null, scanWhy: 'not-reported' };
+  return { scan: null, scanWhy: undefined };
+}
+/** 엣지 push 의 서비스 태그 → 스캔 엔트리 id(문자열만 · 같은 태그가 다른 값이면 뺀다). 순수. */
+export function edgeScanByTagOf(edgeServers = []) {
+  const out = new Map(); const bad = new Set();
+  for (const s of edgeServers || []) {
+    const tag = lc(s?.serviceTag); if (!tag || bad.has(tag) || typeof s?.scanRangeId !== 'string') continue;
+    const v = t(s.scanRangeId);
+    if (out.has(tag) && out.get(tag) !== v) { out.delete(tag); bad.add(tag); continue; }
+    out.set(tag, v);
+  }
+  return out;
 }
 
-// ───────── 입력 수집(스냅샷 세대 + 태그 카테고리마다 1회) ─────────
-let _gather = { key: '', promise: null };
-let _inputRev = 0;   // 저장소 밖 입력(스캔 엔트리 라벨)을 이 화면에서 바꿨을 때 응답 캐시를 넘긴다
+// ───────── 입력 수집(스냅샷 세대 + 태그 카테고리 + 입력 세대마다 1회) ─────────
+let _gather = { key: '', rev: -1, promise: null };
+let _inputRev = 0;   // 저장소 밖 입력을 다시 읽어야 할 때(입력 다시 읽기 · 이 화면의 스캔 라벨 변경) 올린다 — 응답 캐시·판정 memo 도 넘긴다
+const GATHER_CHAIN_MAX_MS = 15_000;
+/**
+ * 단일 비행: 같은 키·같은 입력 세대면 진행 중인 수집을 함께 기다린다.
+ * 입력 세대만 바뀌었으면(같은 스냅샷 — 입력 다시 읽기·라벨 변경) **진행 중인 수집이 끝난 뒤** 새로 모은다 — 예전에는 `_gather` 만 비워
+ * 진행 중 수집과 새 수집이 겹쳐 두 벌 돌았다(2차 반증 4). 앞 수집이 멈춰도 뒤가 영원히 묶이지 않게 기다림에 상한을 둔다.
+ */
 async function gather(snap, tagCategory) {
   const key = `${snap?.generatedAt || 0}|${tagCategory}`;
-  if (_gather.key === key && _gather.promise) return _gather.promise;
-  const p = gatherNow(snap, tagCategory).catch((e) => { if (_gather.promise === p) _gather = { key: '', promise: null }; throw e; });
-  _gather = { key, promise: p };
+  if (_gather.key === key && _gather.rev === _inputRev && _gather.promise) return _gather.promise;
+  const prev = _gather.key === key ? _gather.promise : null;
+  const rev = _inputRev;
+  const p = (async () => {
+    if (prev) {
+      let tm;
+      await Promise.race([prev.catch(() => {}), new Promise((r) => { tm = setTimeout(r, GATHER_CHAIN_MAX_MS); tm.unref?.(); })]);
+      clearTimeout(tm);
+    }
+    return gatherNow(snap, tagCategory);
+  })().catch((e) => { if (_gather.promise === p) _gather = { key: '', rev: -1, promise: null }; throw e; });
+  _gather = { key, rev, promise: p };
   return p;
 }
 
+const _gatherStats = { runs: 0, inFlight: 0, maxInFlight: 0 };
+/** 시험용 — 입력 수집이 몇 번 돌았고 동시에 몇 벌까지 겹쳤는가(2차 반증 4 회귀). */
+export function _gatherStatsForTest() { return { ..._gatherStats }; }
 async function gatherNow(snap, tagCategory) {
+  _gatherStats.runs += 1; _gatherStats.inFlight += 1; _gatherStats.maxInFlight = Math.max(_gatherStats.maxInFlight, _gatherStats.inFlight);
+  try { return await gatherNowInner(snap, tagCategory); } finally { _gatherStats.inFlight -= 1; }
+}
+async function gatherNowInner(snap, tagCategory) {
   const sourceErrors = [];
   const now = Date.now();
   const [{ getFleetInventory, fleetKeySources }, { loadRegistry }, { getInventory }, { allRemoteServers }, edgeUsage, { attributeBareMetalFromSnap },
@@ -221,8 +265,10 @@ async function gatherNow(snap, tagCategory) {
   for (const x of cu.unassigned?.servers || []) judged.set(`|bm|${x.key}`, x);
   const regById = new Map(registry.map((r) => [t(r.id), r]));
   // 스캔 엔트리 id — 엣지 push(serverId) · 수집 서버 pull(remote:<수집기>:<엣지 서버 id>). 값 null = 보고한 쪽이 구버전(필드 없음 — 5차 R6·R18).
-  const edgeScan = (() => { try { return new Map(getEdgeFleetServers().map((s) => [t(s.serverId), typeof s.scanRangeId === 'string' ? t(s.scanRangeId) : null])); } catch { return new Map(); } })();
+  const edgeServers = (() => { try { return getEdgeFleetServers() || []; } catch { return []; } })();
+  const edgeScan = new Map(edgeServers.map((s) => [t(s.serverId), typeof s.scanRangeId === 'string' ? t(s.scanRangeId) : null]));
   const remoteScan = new Map(remoteServers.map((s) => [`remote:${t(s.collectorId)}:${t(s.id)}`, typeof s.scanRangeId === 'string' ? t(s.scanRangeId) : null]));
+  const edgeScanByTag = edgeScanByTagOf(edgeServers);
   const entries = (() => { try { return listScanRanges(); } catch (e) { sourceErrors.push(`스캔 대역: ${String(e?.message || e).slice(0, 160)}`); return []; } })();
   const scanEntries = new Map(entries.map((e) => [t(e.id), { service: t(e.service), datacenterId: t(e.datacenterId), range: (e.ranges || []).slice(0, 4).join(', ') }]));
   const isAddr = addressMatcher(registry.map((r) => r.host).filter(Boolean));
@@ -236,12 +282,14 @@ async function gatherNow(snap, tagCategory) {
     const id = idOf(b);
     const x = judged.get(`${vc}|bm|${id.key}`) || null;
     const sid = t(b.serverId);
-    const { scan, scanWhy } = scanInfoOf(b, { edgeScan, remoteScan, regById, scanEntries });
+    const { scan, scanWhy } = scanInfoOf(b, { edgeScan, remoteScan, regById, scanEntries, edgeScanByTag });
+    // 법인 귀속이 없는 이유(5차 R18 둘째 절): 귀속 판정 자체가 실패 · 같은 서비스 태그가 두 법인에 걸려 보류 · 어느 규칙에도 맞지 않음
+    const corpWhy = vc ? undefined : attr.error ? 'attr-error' : attr.conflictTags?.has(lc(b.serviceTag)) ? 'tag-conflict' : undefined;
     let powered = null;
     try { const inv = b.source === 'edge' ? null : getInventory(sid); const ps = lc(inv?.powerState); powered = ps === 'on' ? true : ps === 'off' ? false : null; } catch { powered = null; }
     members.push({
       key, keyKind, kind: 'bm', corp: vc, name: t(b.name), nameIsAddr: isAddr(t(b.name)), serviceTag: t(b.serviceTag), source: t(b.source), remoteAgent: t(b.remoteAgent),
-      scan, ...(scanWhy ? { scanWhy } : {}), powered, cores: x?.cores ?? null, memGB: x?.memGB ?? null,
+      scan, ...(scanWhy ? { scanWhy } : {}), ...(corpWhy ? { corpWhy } : {}), powered, cores: x?.cores ?? null, memGB: x?.memGB ?? null,
       usage: x ? { state: x.state, cpuPct: x.cpuPct, memPct: x.memPct, src: x.src } : { state: 'unread' },
       faults: faultsOf(b.serviceTag, sid), corpRule: b.vcSource === 'corp-rule',
     });
@@ -336,9 +384,9 @@ const FRESH_MIN_MS = 30_000;
 let _lastFresh = 0;
 export function _resetFreshForTest() { _lastFresh = 0; }
 function forceFresh(now = Date.now()) {
-  if (now - _lastFresh < FRESH_MIN_MS) return { ok: false, waitSec: Math.ceil((FRESH_MIN_MS - (now - _lastFresh)) / 1000) };
+  if (now - _lastFresh < FRESH_MIN_MS) return { ok: false, waitSec: Math.ceil((FRESH_MIN_MS - (now - _lastFresh)) / 1000), agoSec: Math.max(0, Math.floor((now - _lastFresh) / 1000)) };
   _lastFresh = now;
-  _gather = { key: '', promise: null }; _inputRev += 1;
+  _inputRev += 1;   // 진행 중 수집은 비우지 않는다 — gather 가 그 뒤에 잇는다(2차 반증 4)
   return { ok: true };
 }
 /** 백업 메타를 범위로 자른다 — 범위 계정에 함대 전체의 Bareos 매핑 법인 수를 싣지 않는다(5차 1차 Chromium 확인). */
@@ -369,7 +417,8 @@ export function registerSvcInventory(api) {
     if (req.query.fresh === '1') {
       if (!writerOk(req.user)) return res.status(403).json({ ok: false, error: 'forbidden', reason: '입력 다시 읽기는 쓰기 계정(관리자·운영자)만 쓸 수 있습니다.' });
       const f = forceFresh();
-      if (!f.ok) return res.status(429).json({ ok: false, error: 'tooSoon', reason: `방금 다시 읽었습니다 — ${f.waitSec}초 뒤에 다시 누르십시오.`, waitSec: f.waitSec });
+      // 상한은 포탈 전체에 하나다 — 다른 사용자가 방금 읽었을 수 있고, 그 입력은 일반 새로고침으로 이미 받을 수 있다(2차 반증 3)
+      if (!f.ok) return res.status(429).json({ ok: false, error: 'tooSoon', reason: `입력은 ${f.agoSec}초 전에 이미 다시 읽었습니다(다른 사용자일 수 있습니다) — 새로고침하면 그 입력이 보입니다. ${f.waitSec}초 뒤에 다시 읽을 수 있습니다.`, waitSec: f.waitSec, agoSec: f.agoSec });
     }
     const err = storeLoadError();
     if (err) return res.status(503).json({ ok: false, error: 'registryUnreadable', reason: `서비스 인벤토리 저장소를 읽지 못했습니다 — ${err.map || err.pins}. 빈 트리로 시작하지 않습니다(백업 복원 또는 전체 범위 관리자의 초기화).`, corrupt: err, canReset: fleetAdmin(req.user, snap) });
@@ -427,13 +476,25 @@ export function registerSvcInventory(api) {
       const list = g.members.filter(pick);
       const CAP = 5000;
       const rows = list.slice(0, CAP).map((m) => memberRow(m, inv.resolved.get(m.key), admin));
-      const hostKeys = new Set(list.filter((m) => m.kind === 'vm' && m.host).map((m) => hostKeyOf(m.corp, m.host)));
+      // 영향 호스트 — 호스트별 VM 을 한 번만 묶는다(전 법인 보기에서 호스트 수 × 구성원 수로 돌지 않게).
+      const hostOf = (m) => hostKeyOf(m.corp, m.host);
+      const listByHost = new Map();
+      for (const m of list) if (m.kind === 'vm' && m.host) { const hk = hostOf(m); listByHost.set(hk, (listByHost.get(hk) || 0) + 1); }
+      const onHostBy = new Map();
+      for (const m of g.members) {
+        if (m.kind !== 'vm' || !m.host) continue;
+        const hk = hostOf(m); if (!listByHost.has(hk)) continue;
+        if (!onHostBy.has(hk)) onHostBy.set(hk, []);
+        onHostBy.get(hk).push(m);
+      }
       const nameOfSvc = new Map(inv.services.map((s) => [s.id, s.name]));
-      const hosts = [...hostKeys].map((hk) => {
+      // '함께 떠받치는 서비스' 는 **다른** 서비스다 — 전역 서비스로 볼 때 자기 법인 서비스 id 도 뺀다(예전에는 svc 만 빼서 NTP 호스트에 NTP 가 떴다).
+      const self = new Set([svc, ...(gSvc || [])].filter(Boolean));
+      const hosts = [...listByHost.keys()].map((hk) => {
         const h = g.hostByKey.get(hk) || { name: hk.slice(hk.indexOf('|') + 1), corp: hk.slice(0, hk.indexOf('|')), usage: null, faults: null };
-        const onHost = g.members.filter((m) => m.kind === 'vm' && m.corp === h.corp && lc(m.host) === lc(h.name));
-        const mine = list.filter((m) => m.kind === 'vm' && m.corp === h.corp && lc(m.host) === lc(h.name)).length;
-        const others = [...new Set(onHost.map((m) => inv.resolved.get(m.key)?.serviceId).filter((id) => id && id !== svc).map((id) => nameOfSvc.get(id) || id))].slice(0, 20);
+        const onHost = onHostBy.get(hk) || [];
+        const mine = listByHost.get(hk) || 0;
+        const others = [...new Set(onHost.map((m) => inv.resolved.get(m.key)?.serviceId).filter((id) => id && !self.has(id)).map((id) => nameOfSvc.get(id) || id))].slice(0, 20);
         const unassignedOn = onHost.filter((m) => !inv.resolved.get(m.key)?.serviceId).length;
         return { name: h.name, corp: h.corp, serviceTag: h.serviceTag || '', usage: h.usage, faults: h.faults, vmHere: mine, others, unassignedOn };
       }).sort((a, b) => b.vmHere - a.vmHere || a.name.localeCompare(b.name));
@@ -653,7 +714,7 @@ export function registerSvcInventory(api) {
         const r = setScanRangeLabel(entry.id, b.label, { datacenterId: t(entry.datacenterId) });
         if (!r.ok) return res.status(r.status).json({ ok: false, reason: r.reason });
         audit(corp, `스캔 엔트리 ${entry.id} 라벨 '${t(b.label).slice(0, 128)}'`);
-        _gather = { key: '', promise: null }; _inputRev += 1;   // 라벨은 입력이다 — 다음 조회가 새로 모은다
+        _inputRev += 1;   // 라벨은 입력이다 — 다음 조회가 (진행 중 수집 뒤에) 새로 모은다
         return res.json({ ok: true, rev: storeRev(), result: { entryId: entry.id } });
       }
       return res.status(400).json({ ok: false, reason: `알 수 없는 연산: ${op.slice(0, 40)}` });

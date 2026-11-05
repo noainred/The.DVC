@@ -100,7 +100,10 @@ const backupMember = (b) => (b === undefined ? <span className="muted" title="�
   : b === 'ok' ? <span className="badge green">성공</span> : b === 'fail' ? <span className="badge red">실패·지연</span> : <span className="badge gray">잡 없음</span>);
 
 /** 구성원 표 + 영향 호스트 표. query 가 바뀌면 다시 읽는다(늦게 온 이전 응답은 버린다). */
-export function MembersPanel({ title, sub, query, reloadKey = 0, selectable = false, selected, onSelect }) {
+/** 법인 열의 짧은 이름(법인 표와 같은 규칙 — 'vcenter-' 접두를 뗀다 · 전체 이름은 title). */
+const shortCorpName = (n) => String(n || '').replace(/^vcenter-/, '');   // 칸이 좁으면 줄을 바꾼다(전역 tbody td nowrap 을 이 칸만 푼다 — 1440 에서 표 안 가로 스크롤이 생겼다)
+/** corpName 을 주면 법인 열을 보인다(전 법인 보기 — 여러 법인이 한 표에 섞일 때). */
+export function MembersPanel({ title, sub, query, reloadKey = 0, selectable = false, selected, onSelect, corpName = null }) {
   const [d, setD] = useState(null);
   const [err, setErr] = useState(null);
   const seq = useRef(0);
@@ -121,10 +124,10 @@ export function MembersPanel({ title, sub, query, reloadKey = 0, selectable = fa
           <b>{title}</b><span className="muted" style={{ fontSize: 12 }}>{sub}{d ? ` · ${ms.length}대${d.omitted ? ` (상한으로 ${d.omitted}대 생략)` : ''}` : ''}</span>
         </div>
         {err ? <div style={{ padding: 12 }}><ErrorBox error={err} /></div> : !d ? <Loading /> : !ms.length ? <div className="muted" style={{ padding: 16 }}>구성원이 없습니다.</div> : (
-          <STable className="table svcinv-t" minWidth={selectable ? 820 : 780}>
+          <STable className="table svcinv-t" minWidth={(selectable ? 820 : 780) + (corpName ? 80 : 0)}>
             <thead><tr>
               {selectable ? <th data-nosort /> : null}
-              <th>이름</th><th>소속 근거</th><th>사용률</th><th title="VM 은 vCPU·할당 메모리, 베어메탈은 코어·설치 메모리">vCPU·메모리</th><th>부품 장애</th><th>백업</th><th>호스트 · IP</th>
+              <th>이름</th>{corpName ? <th>법인</th> : null}<th>소속 근거</th><th>사용률</th><th title="VM 은 vCPU·할당 메모리, 베어메탈은 코어·설치 메모리">vCPU·메모리</th><th>부품 장애</th><th>백업</th><th>호스트 · IP</th>
             </tr></thead>
             <tbody>{ms.map((m) => (
               <tr key={m.key}>
@@ -133,6 +136,7 @@ export function MembersPanel({ title, sub, query, reloadKey = 0, selectable = fa
                   <span style={{ display: 'inline-flex', gap: 6, alignItems: 'center', whiteSpace: 'nowrap' }}>{powerDot(m.powered)}<span className={`badge ${m.kind === 'vm' ? 'blue' : 'amber'}`}>{m.kind === 'vm' ? 'VM' : 'BM'}</span><b>{m.name}</b></span>
                   <div className="svcinv-sub">{m.kind === 'vm' ? (m.folderPath == null ? '위치 모름' : m.folderPath) : (m.serviceTag ? `서비스태그 ${m.serviceTag}` : (m.source || ''))}</div>
                 </td>
+                {corpName ? <td data-sort={corpName(m.corp)} title={corpName(m.corp)} style={{ fontSize: 12, whiteSpace: 'normal', overflowWrap: 'anywhere', minWidth: 64 }}>{shortCorpName(corpName(m.corp))}</td> : null}
                 <td data-sort={m.src}>{memberSrc(m)}</td>
                 <td data-sort={m.usage?.cpu ?? ''}><UsagePair cpu={m.usage?.cpu ?? null} mem={m.usage?.mem ?? null} /></td>
                 <td data-sort={m.cores ?? ''} style={{ whiteSpace: 'nowrap' }}>{numText(m.cores)}<span className="muted"> · {m.memGB == null ? '—' : `${Math.round(m.memGB)}GB`}</span></td>
@@ -149,11 +153,12 @@ export function MembersPanel({ title, sub, query, reloadKey = 0, selectable = fa
           <div className="flex wrap gap" style={{ padding: '10px 14px', borderBottom: '1px solid var(--border)', alignItems: 'center' }}>
             <b>영향 호스트(파생)</b><span className="muted" style={{ fontSize: 12 }}>{hosts.length}대 · 이 VM 들이 올라간 ESXi 호스트와 그 호스트가 함께 떠받치는 서비스</span>
           </div>
-          <STable className="table svcinv-t" minWidth={680}>
-            <thead><tr><th>호스트</th><th>이 목록 VM</th><th>CPU</th><th>메모리</th><th>부품 장애</th><th>함께 떠받치는 서비스</th></tr></thead>
+          <STable className="table svcinv-t" minWidth={680 + (corpName ? 80 : 0)}>
+            <thead><tr><th>호스트</th>{corpName ? <th>법인</th> : null}<th>이 목록 VM</th><th>CPU</th><th>메모리</th><th>부품 장애</th><th>함께 떠받치는 서비스</th></tr></thead>
             <tbody>{hosts.map((h) => (
               <tr key={`${h.corp}|${h.name}`}>
                 <td data-sort={h.name}><b>{h.name}</b><div className="muted" style={{ fontSize: 11, fontFamily: 'var(--mono)' }}>{h.serviceTag || ''}</div></td>
+                {corpName ? <td data-sort={corpName(h.corp)} title={corpName(h.corp)} style={{ fontSize: 12, whiteSpace: 'normal', overflowWrap: 'anywhere', minWidth: 64 }}>{shortCorpName(corpName(h.corp))}</td> : null}
                 <td data-sort={h.vmHere}>{h.vmHere}</td>
                 <td><UsageBar v={h.usage?.cpuPct ?? null} /></td><td><UsageBar v={h.usage?.memPct ?? null} /></td>
                 <td data-sort={h.faults ?? ''}>{h.faults == null ? <span className="muted">—</span> : h.faults ? <span className="badge red">{h.faults} → 영향 서비스 {1 + (h.others?.length || 0)}</span> : <span className="muted">0</span>}</td>

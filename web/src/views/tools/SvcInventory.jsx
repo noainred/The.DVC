@@ -19,6 +19,7 @@ import { UnassignedView, UnmappedView, ReviewView, RulesView } from './svcInvent
 import GlobalAxis from './svcInventory/GlobalAxis.jsx';
 import PinModal from './svcInventory/PinModal.jsx';
 import { folderTreeOf, opErrorText, TIER_TEXT, csvNameOf, FAULT_REASON } from './svcInventoryText.js';
+import { numOrNull } from '../../numOrNull.js';
 
 const AXIS_KEY = 'svcinv.axis';
 const btn = { padding: '6px 12px', flex: 'none' };
@@ -46,16 +47,43 @@ export default function SvcInventory() {
   const [regions, setRegions] = useState(() => new Map());
   const seq = useRef(0);
 
+  // load → 이 응답을 화면에 실었는가(늦게 와서 버린 응답은 false — 2차 반증 2: 예전에는 버리고도 true 라 '다시 읽었습니다' 가 떴다).
+  // fresh 는 재시도하지 않는다(429 를 일시 오류로 보고 두 번 더 물으면 늦게 와 문구를 덮는다). 실패는 던진다 — 부르는 쪽이 나눈다.
   const load = useCallback(async (fresh = false) => {
     const my = ++seq.current;
-    try { const r = await fetchJson('/tools/svc-inventory', fresh ? { fresh: '1' } : {}); if (my === seq.current) { setD(r); setErr(null); } return true; }
+    try { const r = await fetchJson('/tools/svc-inventory', fresh ? { fresh: '1' } : {}, undefined, fresh ? { retries: 0 } : {}); if (my !== seq.current) return false; setD(r); setErr(null); return true; }
     catch (e) {
       if (my !== seq.current) return false;
-      // 입력 다시 읽기가 막히면(방금 읽음 429 · 권한 403) 지금 보던 데이터는 그대로 두고 이유만 알린다
-      if (fresh && (e?.status === 429 || e?.status === 403)) { setNote({ ok: false, text: opErrorText(e) }); return false; }
+      if (fresh) throw e;
       setErr(e); return false;
     }
   }, []);
+  // '입력 다시 읽기' — 진행 중·상한 시간 동안 잠근다(서버 meta.limits.freshMinMs · 429 의 waitSec). 숫자를 박지 않는다.
+  const [freshBusy, setFreshBusy] = useState(false);
+  const [freshUntil, setFreshUntil] = useState(0);
+  useEffect(() => {
+    if (!freshUntil) return undefined;
+    const tm = setTimeout(() => setFreshUntil(0), Math.max(0, freshUntil - Date.now()));
+    return () => clearTimeout(tm);
+  }, [freshUntil]);
+  const readFresh = useCallback(async () => {
+    setFreshBusy(true); setNote(null);
+    try {
+      if (await load(true)) { setReloadKey((k) => k + 1); setNote({ ok: true, text: '입력을 다시 읽었습니다.' }); }
+      setFreshUntil(Date.now() + (numOrNull(d?.meta?.limits?.freshMinMs) || 0));
+    } catch (e) {
+      if (e?.status === 429) {
+        // 상한은 포탈 전체에 하나 — 다른 사용자가 방금 읽은 입력을 일반 새로고침으로 받는다(2차 반증 2·3)
+        const wait = numOrNull(e?.body?.waitSec); const ago = numOrNull(e?.body?.agoSec);
+        if (wait != null) setFreshUntil(Date.now() + wait * 1000);
+        const applied = await load();
+        setReloadKey((k) => k + 1);
+        setNote(applied && ago != null && wait != null
+          ? { ok: true, text: `입력은 ${ago}초 전에 이미 다시 읽었습니다(다른 사용자일 수 있습니다) — 화면을 그 입력으로 새로 고쳤습니다. ${wait}초 뒤에 다시 읽을 수 있습니다.` }
+          : { ok: false, text: opErrorText(e) });
+      } else setNote({ ok: false, text: opErrorText(e) });   // 권한 403 등 — 보던 데이터는 그대로 둔다
+    } finally { setFreshBusy(false); }
+  }, [load, d]);
   useEffect(() => { load(); }, [load]);
   useEffect(() => {   // 지역 이름(매트릭스 열 묶음) — vCenter 목록에서 한 번
     fetchJson('/vcenters').then((r) => {
@@ -135,9 +163,9 @@ export default function SvcInventory() {
           <span style={{ flex: 1 }} />
           <button type="button" className="logout-btn" style={btn} onClick={() => { load(); setReloadKey((k) => k + 1); }}>새로고침</button>
           {d.canWrite ? (
-            <button type="button" className="logout-btn" style={btn} disabled={busy}
-              title={`등록부 법인 귀속 · 스캔 엔트리 라벨 · 부품 장애 · Bareos 원장을 지금 다시 읽습니다(${Math.round((d.meta?.limits?.freshMinMs || 0) / 1000)}초에 한 번). 그냥 새로고침은 다음 수집 주기까지 같은 입력을 씁니다.`}
-              onClick={async () => { setNote(null); if (await load(true)) { setReloadKey((k) => k + 1); setNote({ ok: true, text: '입력을 다시 읽었습니다.' }); } }}>입력 다시 읽기</button>
+            <button type="button" className="logout-btn" style={btn} disabled={busy || freshBusy || freshUntil > 0}
+              title={`등록부 법인 귀속 · 스캔 엔트리 라벨 · 부품 장애 · Bareos 원장을 지금 다시 읽습니다(포탈 전체에서 ${Math.round((d.meta?.limits?.freshMinMs || 0) / 1000)}초에 한 번). 그냥 새로고침은 다음 수집 주기까지 같은 입력을 씁니다.`}
+              onClick={readFresh}>{freshBusy ? '다시 읽는 중…' : '입력 다시 읽기'}</button>
           ) : null}
           {canCsv() ? <button type="button" className="logout-btn" style={btn} onClick={() => downloadFile('/tools/svc-inventory.csv', csvNameOf()).catch((e) => setNote({ ok: false, text: opErrorText(e) }))}>CSV</button> : null}
         </div>

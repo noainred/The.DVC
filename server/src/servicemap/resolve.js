@@ -55,7 +55,7 @@ const hit = (serviceId, src, via) => ({ serviceId, src, via: String(via ?? '') }
 
 /** 자동 판정(고정 제외). 순수. */
 export function autoResolve(m, idx, { tagCategory = '' } = {}) {
-  if (!m || !m.corp) return { serviceId: null, src: 'none', reason: 'no-corp' };
+  if (!m || !m.corp) return { serviceId: null, src: 'none', reason: m?.corpWhy === 'attr-error' ? 'no-corp-error' : m?.corpWhy === 'tag-conflict' ? 'no-corp-conflict' : 'no-corp' };
   const c = idx.get(m.corp);
   if (m.kind === 'vm') {
     const f = typeof m.folderPath === 'string' ? m.folderPath.slice(0, FOLDER_INPUT_MAX) : null;
@@ -88,7 +88,7 @@ export function autoResolve(m, idx, { tagCategory = '' } = {}) {
   }
   const nr = c ? nameRuleOf(c, m.name) : null;
   if (nr) return hit(nr.serviceId, 'rule', `${nr.match}:${nr.value}`);
-  if (!scan) return { serviceId: null, src: 'none', reason: m.scanWhy === 'unknown-entry' ? 'scan-entry-unknown' : m.scanWhy === 'old-source' ? 'source-old' : 'no-scan-entry' };
+  if (!scan) return { serviceId: null, src: 'none', reason: m.scanWhy === 'unknown-entry' ? 'scan-entry-unknown' : m.scanWhy === 'old-source' ? 'source-old' : m.scanWhy === 'not-reported' ? 'source-unreported' : 'no-scan-entry' };
   if (!scan.label) return { serviceId: null, src: 'none', reason: 'scan-label-empty', unmapped: { kind: 'entry', value: String(scan.entryId || '') } };
   return { serviceId: null, src: 'none', reason: 'scan-label-unmapped', unmapped: { kind: 'scan', value: scan.label } };
 }

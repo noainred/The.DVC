@@ -77,7 +77,8 @@ export function buildVcIndex(servers = [], hosts = [], opts = {}) {
       byTag.set(tag, vc);
     },
   });
-  return { byId, byTag, conflicts: conflict.size };
+  // conflictTags(소문자 서비스 태그 집합) — 서비스 인벤토리가 '법인 귀속 없음' 의 이유를 나눌 때 쓴다(5차 R18). 읽기 전용으로 쓸 것.
+  return { byId, byTag, conflicts: conflict.size, conflictTags: conflict };
 }
 
 /**
@@ -105,7 +106,7 @@ export function attributeBareMetalFromSnap(bareMetal = [], snap = null) {
     const { opts } = corpAttribution(vcenters);
     const index = buildVcIndex(allPhysicalServers(), snap?.hosts || [], opts);
     const vcName = new Map(vcenters.map((v) => [String(v.id), v.name || v.id]));
-    return { ...attributeBareMetal(bareMetal, index, vcName), conflicts: index.conflicts };
+    return { ...attributeBareMetal(bareMetal, index, vcName), conflicts: index.conflicts, conflictTags: index.conflictTags };
   } catch (e) {
     return { bareMetal: bareMetal || [], filled: 0, error: String(e?.message || e).slice(0, 200) };
   }
