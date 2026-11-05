@@ -56,7 +56,7 @@ VM(vCenter)과 베어메탈(iDRAC/OS)을 **법인 › 폴더 › 서비스** 로
 | 종류 | 키 | 출처 |
 |---|---|---|
 | VM | `iu:<vcenterId>:<instanceUuid>` — 수집 속성 `config.instanceUuid` 추가(vSphere API 정의상 **vCenter 안에서만 유일** — 반증 17 — 그래서 vcenterId 를 붙인다). 중앙 정제 `INV_STR_ONLY_KEYS` 에 등재. 없는 구버전 스냅샷은 `vm.id`(`vcenterId:moref`)로 폴백하고 키 등급을 밝힌다. Bareos 조인은 `vm.id` 로 하므로 스냅샷에 둘 다 둔다 | 스냅샷 `vms[]` |
-| 베어메탈 | `st:<서비스태그 소문자>`(없으면 serverId 소문자) = `fleetId` | `classifyFleet().bareMetal[]` |
+| 베어메탈 | `st:<서비스태그 소문자>`(없으면 `fl:<fleetId sha1 16자>` — 주소 원문을 키에 싣지 않는다. 정정: 예전 이 칸은 'serverId 소문자' 라고 잘못 적었다) | `classifyFleet().bareMetal[]` |
 | ESXi 호스트 | 구성원이 아니다 — `vm.host` 로 파생. 부품 장애 조인 키는 호스트 `fleetId` | `classifyFleet().virtualizationHosts[]` |
 
 ### 저장소 — `CONFIG_DIR/service-map.json` (비밀 없음 · 원자적 쓰기 · `preserveCorrupt` · mtime+size 무효화 · `bumpFleetRev` · 디바운스 배치 200ms)
@@ -141,7 +141,10 @@ VM(vCenter)과 베어메탈(iDRAC/OS)을 **법인 › 폴더 › 서비스** 로
 
 ⚠ 4차 반증 6: 3차 표는 '쓰기 범위 없음 → 403' 이었는데 저장소 규약과 반대다(미설정 = 조회 범위에 쓰기 가능 — `server/CLAUDE.md` "이 기본값을 바꾸면 전 계정이 잠긴다").
 '조회만' 계정은 viewer 역할 또는 `writeVcenters` 를 다른 vCenter 로 지정한 계정이다. `corpWriteAccess` 는 `inUserScope → 404`, `inUserWriteScope → 403` 두 함수만 쓴다.
-응답의 각 법인 노드에 `writable:true|false` 를 실어 화면이 버튼을 잠근다. 비관리자 판본(`isAdminDetailUser` 아님)에는 스캔 엔트리 **대역(CIDR)·iDRAC 주소·서비스태그를 싣지 않는다**(묶음 제목은 '엔트리 #n' — 반증 13).
+응답의 각 법인 노드에 `writable:true|false` 를 실어 화면이 버튼을 잠근다. 비관리자 판본(`isAdminDetailUser` 아님)에는 스캔 엔트리 **대역(CIDR)·iDRAC 주소를 싣지 않는다**(묶음 제목은 '엔트리 #n' — 반증 13).
+**범위가 지정된 계정 판본에는 베어메탈 서비스태그를 싣지 않는다**(5차 R7 · 결정 ⑤ — 통합 서버 인벤토리 `/insights/fleet` 이 범위 계정에 403 인 것과 같은 기준. 전체 범위 계정은 역할과 무관하게 보인다):
+`serviceTag` 비움 · 베어메탈 키(`st:`·`fl:`)는 프로세스 HMAC 토큰 · 이름이 서비스태그와 같으면 이름도 가림 · 후보 찾기는 서비스태그를 보지 않음 · 쓰기는 토큰을 원래 키로 되돌리고 원문 베어메탈 키는 받지 않는다.
+**정정**: 이 줄은 v2.887 부터 '비관리자 판본은 서비스태그를 싣지 않는다' 라고 적었지만 코드는 그렇게 하지 않았다(반증 R7). 결정 ⑤ 에 따라 기준을 '범위 계정' 으로 바로잡았다.
 
 ## API
 
@@ -152,7 +155,7 @@ VM(vCenter)과 베어메탈(iDRAC/OS)을 **법인 › 폴더 › 서비스** 로
 | `GET …/unassigned?corp=` | 같음 | `{ groups:[{kind:'folder'|'entry'|'manual'|'nocorp',corp,value,range,members:[key…],n}] }` |
 | `GET …/unmapped?corp=` | 같음 | `{ items:[{kind:'scan'|'tag',corp,value,n}] }` |
 | `GET …/review?corp=` | 같음 | `{ drift:[{key,name,pin:{serviceId,by,at},auto:{serviceId,src,via}}], ghosts:[{key,serviceId,by,at,reason}] }` |
-| `GET …/candidates?kind=bm|vm&corp=&unassignedOnly=1&q=` | 같음 + 범위 | 한 대씩 고정용 후보(비관리자 판본은 주소·서비스태그 가림 — `maskIdentityFields`) |
+| `GET …/candidates?kind=bm|vm&corp=&unassignedOnly=1&q=` | 같음 + 범위 | 한 대씩 고정용 후보(비관리자 판본은 주소 가림 · 범위 계정 판본은 서비스태그 가림·토큰 키 — R7) |
 | `GET /api/tools/svc-inventory.csv` | 같음 + `canCsv` | 구성원 표 · `exportBusy` 1건 |
 | `PUT /api/admin/svc-inventory/folder-rules` · `…/aliases` · `…/pins` | admin/operator + `corpWriteAccess` | `{ corp, items:[…] }` ≤ 500 · rev 대조 · 감사. pins 는 법인 불일치 409, 법인 귀속 없는 서버는 fleet-assign 선행(실패 시 되돌림 + `partial`) |
 | `POST/PATCH/DELETE …/services` · `…/folders` | 같음 | 이름 유일 · 이동은 같은 법인 · 삭제 전 영향 대수(`?force=1`) · 감사 |
@@ -432,7 +435,7 @@ A/B: 수정 전 코드(fab5b76)에 시험용 계수·순수 보조 함수만 옮
 빼지 못했다 — 사용자 화면 'NTP' 호스트에 'NTP'). 이제 전역 서비스의 법인 서비스 id 를 모두 뺀다. 호스트별 VM 묶음도 한 번만 만든다(호스트 수 × 구성원 수로 돌지 않게).
 
 **정정(사용자 질문 '총 몇차' 에 답하며 정리)**: 계획은 1~3차였고 아래 8건은 차수가 없었다 — 문구·표시 6건(M5·R10·R12·R18·R19·M11)은 3차에, 권한·키를 바꾸는 R7·R15 는 4차로 권했다. R18 은 R6 과 같은 경로라 2차에서 함께 고쳤다.
-3차는 아래 '3차 반영(v2.894.0)' 에 반영했다. 4차(R7·R15)는 아직이다.
+3차는 아래 '3차 반영(v2.894.0)', 4차(R7·R15)는 '4차 반영(v2.895.0)' 에 반영했다 — 5차 검토 M1~M11·R1~R19 전부 반영(반영하지 않은 것은 근거와 함께 각 표에).
 
 ### 3차 반영(v2.894.0)
 
@@ -479,6 +482,18 @@ A/B: 반증 대상(661c8946)에서 새 단언 5건 실패 → 수정 후 9/9 통
 회귀 `server/test/svcInventoryReview5c.test.js` · 웹 `svcInventoryText.test.js`(칸 모드·지역 합·찾기·검토 요약). 판정 순서 변이 9종(포함 등급 · 길이 · 동률 순서 · 색인 정렬 · 태그 정렬 · 첫 태그만 ·
 모호 표지 · 고정의 모호 큐 · 법인 행 정렬)을 모두 테스트가 잡는다(처음엔 '포함을 접두와 같은 등급' 변이를 놓쳐 단언을 보탰다).
 Chromium 1440/400 에서 소속 규칙 표가 1440 에 122px 가로 스크롤(지우기 열 가림 — 대부분 원래 있던 것) → 두 카드를 1440 에서 위아래로 쌓아 0.
+
+### 4차 반영(v2.895.0)
+
+사용자 '4차 진행해줘' — 검증 '표준 + 반증 1인'.
+
+| # | 반영 |
+|---|---|
+| R7(결정 ⑤) | 범위가 지정된 계정 판본은 베어메탈 서비스태그를 싣지 않는다 — `serviceTag` 비움 · 베어메탈 키(`st:`·`fl:`)는 `maskedIdToken`(프로세스 HMAC — 재시작하면 바뀐다) · 이름이 태그면 이름도 가림 · 파생 호스트 태그 비움 · 후보 찾기는 태그를 보지 않음 · CSV 키 열도 토큰. 쓰기(`pins.*` keys·expectAuto · 유령 정리 keys)는 `keyResolverFor` 로 그 법인 구성원·고정 키 안에서만 되돌리고 **원문 베어메탈 키는 받지 않는다**(태그를 맞혀 보는 길). VM 키는 그대로 |
+| R15 | 키 등급이 오르면(VM moref → instanceUuid · 베어메탈 fleetId → 서비스태그) 구성원에 낮은 등급 키를 `aliasKeys` 로 싣고 그 고정을 승계한다(같은 법인만 · 유령 아님) · 검토 탭 '옛 키로 저장된 고정' + `pins.rekey`(법인 단위 · 새 키에 이미 있으면 옛 키만 지움) · 고정 쓰기는 옛 키를 새 키로 옮긴다 · 반대 방향(서비스태그를 잠시 못 읽어 `fl:` 로 내려감)은 `st:` 고정의 태그가 함대 키 집합에 아직 있으면 유령이 아니라 판정 보류 `key-changed` |
+
+회귀 `server/test/svcInventoryReview5d.test.js` 5건 — 수정 전 main 에 '가리지 않는' 대역(pubKey·keyResolverFor)만 심어 돌리면 5/5 실패(불러오기 실패가 아니라 동작 차이로).
+**남은 것(근거)**: VM 키가 거꾸로 내려가는 경우(instanceUuid 를 잃음)는 승계하지 않는다 — vCenter 가 instanceUuid 를 늘 준다고 보고(실환경 재현 없음 — 추정) 함대 키 집합 같은 보조 근거도 없다. 범위 계정 화면의 Chromium 실측은 인증을 켠 범위 계정이 필요해 단위·라우트 테스트로 대신했다.
 
 ## 이력
 
