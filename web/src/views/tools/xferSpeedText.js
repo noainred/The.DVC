@@ -526,9 +526,12 @@ export function pingModel(p, { w = 1000, h = 170, padL = 52, padR = 12, padT = 1
   const peak = Math.max(0, ...pts.map((b) => b.max ?? b.avg ?? 0));
   const top = niceTop(peak);
   const y = (v) => padT + ih - (Math.min(v, top) / top) * ih;
+  // 선을 끊는 간격 — 칸 크기 × 1.5 와 데이터의 표본 간격(cadenceOf — 아래쪽 중앙값) × 1.6 중 큰 쪽. 칸 크기만 보면 표본 간격이
+  // 칸보다 긴 대상(주기를 늘린 모니터·15분 백필)에서 칸이 하나씩 비어 선이 하나도 이어지지 않았다(v2.890 화면 확인).
+  const gapMs = Math.max(bms * 1.5, (cadenceOf(pts) ?? 0) * 1.6);
   const segs = []; let run = []; let prev = null;
   for (const b of pts) {
-    if (b.avg == null || (prev != null && b.ts - prev > bms * 1.5)) { if (run.length) segs.push(run); run = []; }
+    if (b.avg == null || (prev != null && b.ts - prev > gapMs)) { if (run.length) segs.push(run); run = []; }
     if (b.avg != null) run.push(b);
     prev = b.ts;
   }
@@ -543,10 +546,11 @@ export function pingModel(p, { w = 1000, h = 170, padL = 52, padR = 12, padT = 1
   const singles = segs.filter((s) => s.length === 1).map((s) => ({ x: x(s[0].c), y: y(s[0].avg) }));
   const bw = bms ? Math.max(2, Math.min(4, (bms / (to - from)) * iw - 1)) : 3;
   const lossMarks = pts.filter((b) => b.loss > 0).map((b) => ({ x: x(b.c), w: bw, full: b.avg == null, ts: b.ts }));
-  const grid = Array.from({ length: 5 }, (_, i) => ({ y: y((top / 4) * i), label: String(Math.round((top / 4) * i)) }));
+  // 단위는 맨 위 눈금에 붙인다(따로 쓴 'ms' 가 맨 위 숫자와 겹쳤다 — v2.890 화면 확인).
+  const grid = Array.from({ length: 5 }, (_, i) => ({ y: y((top / 4) * i), label: `${Math.round((top / 4) * i)}${i === 4 ? 'ms' : ''}` }));
   const med = numOrNull(p.stats?.median);
   return {
-    w, h, padL, padR, padT, padB, from, to, bucketMs: bms, top,
+    w, h, padL, padR, padT, padB, from, to, bucketMs: bms, top, gapMs,
     pts: pts.map((b) => ({ ...b, x: x(b.c), y: b.avg == null ? null : y(b.avg) })),
     avgPath, bandPath, singles, lossMarks, grid, medianY: med == null ? null : y(med),
     points: pts.filter((b) => b.avg != null).length,

@@ -192,3 +192,5 @@
 .xs .xs-empty span { font-size: 12px; color: var(--text-dim); max-width: 560px; overflow-wrap: anywhere; }
 .xs .xs-empty .xs-sync { color: #c3cfe2; }
 .xs .xs-tip-line.sep { border-top: 1px dashed var(--border); margin-top: 4px; padding-top: 4px; }
+.xs .xs-plot { position: relative; min-width: 0; }
+.xs .xs-plot svg { display: block; width: 100%; height: auto; touch-action: pan-y; }

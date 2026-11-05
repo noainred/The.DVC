@@ -129,6 +129,22 @@ describe('pingModel — 속도 차트와 같은 x 축 · 결측은 끊는다', (
     expect(pm.pts.find((b) => b.avg == null).y).toBeNull();
     expect(pm.lossMarks.every((l) => l.w >= 2 && l.w <= 4)).toBe(true);
   });
+  it('표본 간격이 칸보다 길어도(15분 표본 · 6분 칸) 선을 잇는다 — 칸 크기만 보면 점만 남았다', () => {
+    const series = [];
+    for (let ts = START; ts < END; ts += 15 * MIN) series.push({ ts: Math.floor(ts / BMS) * BMS, avg: 250, min: 250, max: 250, loss: 0, n: 1 });
+    const pm = pingModel(pingResp({ series }), opts);
+    expect(pm.avgPath.split('M').length - 1).toBe(1);
+    expect(pm.singles.length).toBe(0);
+    expect(pm.gapMs).toBeGreaterThan(15 * MIN);
+    // 그래도 몇 시간 빈 구간은 끊는다
+    const holed = series.filter((b) => b.ts < START + 6 * HOUR || b.ts > START + 9 * HOUR);
+    expect(pingModel(pingResp({ series: holed }), opts).avgPath.split('M').length - 1).toBe(2);
+  });
+  it('단위는 맨 위 눈금에만(따로 그린 ms 가 숫자와 겹치지 않게)', () => {
+    const pm = pingModel(pingResp(), opts);
+    expect(pm.grid.at(-1).label).toBe('400ms');
+    expect(pm.grid.slice(0, -1).every((g) => !g.label.includes('ms'))).toBe(true);
+  });
   it('외톨이 칸은 점으로', () => {
     const p = pingResp({ series: [{ ts: START + HOUR, avg: 200, min: 190, max: 210, loss: 0, n: 6 }] });
     const pm = pingModel(p, opts);

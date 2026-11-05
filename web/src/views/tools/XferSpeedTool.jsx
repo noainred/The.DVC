@@ -532,7 +532,7 @@ function AxisX({ m, offsetMin, h, padB }) {
 }
 
 /** Ping 패널 — 머리(방식·통계) + 상태(사유·불러오는 중·실패) 또는 차트. 차트 x 축은 위 속도 차트와 같다. */
-function PingPanel({ m, pm, ps, hv, setHoverPx, tall, offsetMin }) {
+function PingPanel({ m, pm, ps, hv, setHoverPx, tall, offsetMin, tip }) {
   const { ping, err, loading, onRetry, onSync, syncMsg, syncBusy } = ps;
   const reason = ping?.reason || null;
   const rt = reason ? PING_REASON_TEXT[reason] : null;
@@ -558,6 +558,7 @@ function PingPanel({ m, pm, ps, hv, setHoverPx, tall, offsetMin }) {
     content = box(r2.title, [r2.body, extra].filter(Boolean).join(' '));
   } else {
     content = (
+      <div className="xs-plot">
       <svg viewBox={`0 0 ${pm.w} ${pm.h}`} role="img" aria-label="Ping 추이" onPointerMove={(e) => setHoverPx(pxOf(e, pm.w))} onPointerLeave={() => setHoverPx(null)}>
         {pm.grid.map((g) => (
           <g key={g.y}>
@@ -565,7 +566,6 @@ function PingPanel({ m, pm, ps, hv, setHoverPx, tall, offsetMin }) {
             <text x={pm.padL - 6} y={g.y + 4} fill="#5d6b85" fontSize="11" textAnchor="end" fontFamily="JetBrains Mono, monospace">{g.label}</text>
           </g>
         ))}
-        <text x={pm.padL - 6} y={8} fill="#5d6b85" fontSize="10" textAnchor="end" fontFamily="JetBrains Mono, monospace">ms</text>
         <AxisX m={{ ...m, padT: pm.padT }} offsetMin={offsetMin} h={pm.h} padB={pm.padB} />
         {pm.bandPath ? <path d={pm.bandPath} fill={PING_COLOR} opacity=".22" /> : null}
         {pm.medianY != null ? <line x1={pm.padL} x2={pm.w - pm.padR} y1={pm.medianY} y2={pm.medianY} stroke={PING_COLOR} strokeDasharray="4 4" opacity=".5" /> : null}
@@ -580,6 +580,8 @@ function PingPanel({ m, pm, ps, hv, setHoverPx, tall, offsetMin }) {
         ) : null}
         <rect x={pm.padL} y={pm.padT} width={Math.max(0, pm.w - pm.padL - pm.padR)} height={Math.max(0, pm.h - pm.padT - pm.padB)} fill="transparent" />
       </svg>
+      {tip}
+      </div>
     );
   }
   return (
@@ -619,9 +621,23 @@ function TrendCharts({ hist, view, ps }) {
   const hv = hoverPx == null ? null : comboHover(m, pm && pm.points ? pm : null, hoverPx, hist.offsetMin, view);
   const tipLeftPct = hv ? (hv.x / m.w) * 100 : 0;
   const onMove = (e) => setHoverPx(pxOf(e, m.w));
+  // 오버 상자는 보이는 첫 차트의 위에 붙인다 — 카드 맨 위에 두면 'Ping만'·속도 측정이 없는 창에서 Ping 머리(알약)를 덮었다(v2.890 화면 확인).
+  const tipOnSpeed = showSpeed && !empty;
+  const tip = hv ? (
+    <div className={`xs-tip${tipLeftPct > 62 ? ' left' : ''}`} style={{ left: `${tipLeftPct}%` }} role="status">
+      <div className="xs-tip-head">{hv.head}</div>
+      {hv.lines.map((l) => (
+        <div key={l.dir} className={`xs-tip-line${l.dir === 'ping' && view !== 'ping' ? ' sep' : ''}`}>
+          <span style={{ color: l.dir === 'ping' ? PING_COLOR : DIR_TEXT_COLOR[l.dir] }}>{l.dir === 'ping' ? '●' : l.dir === 'down' ? '↓' : '↑'}</span>
+          <span style={{ color: l.ok === false ? '#fca5a5' : l.ok == null ? 'var(--text-faint)' : 'var(--text)' }}>{l.text}</span>
+        </div>
+      ))}
+    </div>
+  ) : null;
   return (
     <div className="xs-chartwrap" ref={wrap}>
       {showSpeed ? (empty ? <div className="xs-note" style={{ padding: '30px 0', textAlign: 'center' }}>이 기간에 성공한 측정이 없습니다.</div> : (
+        <div className="xs-plot">
         <svg viewBox={`0 0 ${m.w} ${m.h}`} role="img" aria-label="전송 속도 추이" onPointerMove={onMove} onPointerLeave={() => setHoverPx(null)}>
           {m.grid.map((g) => (
             <g key={g.y}>
@@ -647,19 +663,10 @@ function TrendCharts({ hist, view, ps }) {
           {/* 차트 영역 전체에서 마우스를 받는다(선 위가 아니어도) — 투명 사각형 */}
           <rect x={m.padL} y={m.padT} width={Math.max(0, m.w - m.padL - m.padR)} height={Math.max(0, m.h - m.padT - m.padB)} fill="transparent" />
         </svg>
-      )) : null}
-      {showPing ? <PingPanel m={m} pm={pm} ps={ps} hv={hv} setHoverPx={setHoverPx} tall={view === 'ping'} offsetMin={hist.offsetMin} /> : null}
-      {hv ? (
-        <div className={`xs-tip${tipLeftPct > 62 ? ' left' : ''}`} style={{ left: `${tipLeftPct}%` }} role="status">
-          <div className="xs-tip-head">{hv.head}</div>
-          {hv.lines.map((l) => (
-            <div key={l.dir} className={`xs-tip-line${l.dir === 'ping' && view !== 'ping' ? ' sep' : ''}`}>
-              <span style={{ color: l.dir === 'ping' ? PING_COLOR : DIR_TEXT_COLOR[l.dir] }}>{l.dir === 'ping' ? '●' : l.dir === 'down' ? '↓' : '↑'}</span>
-              <span style={{ color: l.ok === false ? '#fca5a5' : l.ok == null ? 'var(--text-faint)' : 'var(--text)' }}>{l.text}</span>
-            </div>
-          ))}
+        {tipOnSpeed ? tip : null}
         </div>
-      ) : null}
+      )) : null}
+      {showPing ? <PingPanel m={m} pm={pm} ps={ps} hv={hv} setHoverPx={setHoverPx} tall={view === 'ping'} offsetMin={hist.offsetMin} tip={tipOnSpeed ? null : tip} /> : null}
     </div>
   );
 }
