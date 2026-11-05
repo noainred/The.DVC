@@ -92,6 +92,13 @@ describe('사전 점검 — 화면 소스', () => {
     expect(s).toMatch(/colSpan=\{hShow \? 9 : 7\}/);
     expect(s).toMatch(/<Stat label="확인 필요"/);
   });
+  it('1440 에서 열 9개가 한 화면에 — 사전 점검 칸은 줄바꿈 · 두 줄 자름 · 카드 상세 · 조치는 줄바꿈(Chromium 결함 수정)', () => {
+    const s = src('BareosSummaryTool.jsx');
+    expect(s).toMatch(/minWidth=\{hShow \? 1120 : 1000\}/);
+    expect(s).toMatch(/WebkitLineClamp: 2/);
+    expect(s).toMatch(/title=\{h\?\.detail \|\| undefined\} style=\{\{ padding: '8px 6px', width: 200, maxWidth: 200, whiteSpace: 'normal' \}\}/);
+    expect((card.match(/whiteSpace: 'normal'/g) || []).length).toBe(2);
+  });
   it('법인 · 설정 화면에 붙는다', () => {
     expect(src('BareosDetailTool.jsx')).toMatch(/<BareosHealthCard key=\{vcId\} vcId=\{vcId\} \/>/);
     expect(src('BareosSettings.jsx')).toMatch(/<BareosHealthSettings writable=\{writable\} \/>/);

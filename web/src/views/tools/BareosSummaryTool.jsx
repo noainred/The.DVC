@@ -90,6 +90,7 @@ function BareosSummaryView() {
     </>
   );
   const WRAP = { display: 'flex', flexDirection: 'column', gap: 14, minWidth: 0 };
+  const HEALTH_CLAMP = { fontSize: 11.5, marginTop: 3, lineHeight: 1.35, overflowWrap: 'anywhere', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' };
   if (!data && error) return <div style={WRAP}>{head}<ErrorBox error={error} /></div>;
   if (!data) return <div style={WRAP}>{head}<Loading /></div>;
 
@@ -151,14 +152,14 @@ function BareosSummaryView() {
             <SearchBox className="input" style={{ maxWidth: 200, minWidth: 140 }} value={q} onChange={setQ} placeholder="법인 이름" />
           </div>
         </div>
-        <STable minWidth={hShow ? 1260 : 1000} style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+        <STable minWidth={hShow ? 1120 : 1000} style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
           <thead>
             <tr style={{ textAlign: 'left', fontSize: 12 }}>
               <th style={{ padding: '8px 16px' }}>법인</th>
               <th style={{ padding: '8px 6px' }}>Director</th>
               <th style={{ padding: '8px 6px', textAlign: 'right' }} title="잡이 등록된 VM / 백업 방식을 Bareos 로 정한 VM">보호 VM</th>
-              <th data-nosort="" style={{ padding: '8px 10px', width: 240 }}>마지막 결과</th>
-              {hShow && <th style={{ padding: '8px 6px' }} title="매일 정한 시각 엣지 노드에서 — FD → vCenter:443 · 인증서 지문 · Director 콘솔 · SD 디스크 여유">사전 점검</th>}
+              <th data-nosort="" style={{ padding: '8px 10px', width: hShow ? 170 : 240 }}>마지막 결과</th>
+              {hShow && <th style={{ padding: '8px 6px', width: 200 }} title="매일 정한 시각 엣지 노드에서 — FD → vCenter:443 · 인증서 지문 · Director 콘솔 · SD 디스크 여유">사전 점검</th>}
               {hShow && <th style={{ padding: '8px 6px' }} title="SD 볼륨 경로의 여유 / 전체 · 가득 찰 때까지(최근 7일 속도)">SD 디스크 여유</th>}
               <th style={{ padding: '8px 6px', textAlign: 'right' }} title="실패 + 미등록 + 오래됨 + 백업 없음">확인 필요</th>
               <th style={{ padding: '8px 6px', textAlign: 'right' }} title="Bareos 관련 VM 디스크 사용(vCenter 인벤토리)">용량</th>
@@ -193,12 +194,13 @@ function BareosSummaryView() {
                     ) : <span className="muted" style={{ fontSize: 12 }}>{bucket === 'unknown' ? `결과 모름 — ${UNKNOWN_WHY[r.director.state] || '조회 전입니다'}` : c.jobs > 0 ? '모름' : '잡 없음'}</span>}
                   </td>
                   {hShow && (() => { const h = healthCell(hmap.get(r.id)); return (
-                    <td data-sort={h ? h.text : ''} style={{ padding: '8px 6px', maxWidth: 280 }}>
-                      {h ? <><HealthTag status={hmap.get(r.id).verdict} /> <span className="muted" style={{ fontSize: 11.5, overflowWrap: 'anywhere' }}>{h.detail}</span></> : <span className="muted">—</span>}
+                    <td data-sort={h ? h.text : ''} title={h?.detail || undefined} style={{ padding: '8px 6px', width: 200, maxWidth: 200, whiteSpace: 'normal' }}>
+                      {/* 1440 에서 열 9개가 한 화면에 들도록 — 상세는 두 줄까지(전문은 title · 법인 화면 카드) */}
+                      {h ? <><HealthTag status={hmap.get(r.id).verdict} /><div className="muted" style={HEALTH_CLAMP}>{h.detail}</div></> : <span className="muted">—</span>}
                     </td>); })()}
                   {hShow && (() => { const k = diskCell(hmap.get(r.id)); return (
                     <td data-sort={k ? k.pct : ''} style={{ padding: '8px 6px', whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' }}>
-                      {k ? <><b style={{ color: k.tone ? TONE[k.tone] : undefined }}>{k.avail}</b> <span className="muted" style={{ fontSize: 11.5 }}>/ {k.size}{k.days != null ? ` · 약 ${k.days}일` : ''}</span></> : <span className="muted">—</span>}
+                      {k ? <><b style={{ color: k.tone ? TONE[k.tone] : undefined }}>{k.avail}</b><div className="muted" style={{ fontSize: 11.5 }}>/ {k.size}{k.days != null ? ` · 약 ${k.days}일` : ''}</div></> : <span className="muted">—</span>}
                     </td>); })()}
                   <td data-sort={a.n ?? ''} style={{ padding: '8px 6px', textAlign: 'right' }}>
                     {a.n === null

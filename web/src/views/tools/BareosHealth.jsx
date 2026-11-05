@@ -103,14 +103,14 @@ export function BareosHealthCard({ vcId }) {
         {c?.verdict === 'bad' && <div style={{ padding: '8px 12px', borderRadius: 10, border: '1px solid rgba(239,68,68,.45)', background: 'rgba(239,68,68,.10)', color: '#fca5a5', fontWeight: 700 }}>오늘 밤 백업이 실패할 수 있습니다 — {(c.items.find((x) => x.status === 'bad') || {}).label}.</div>}
         {c && (
           <div className="table-wrap">
-            <STable sortable={false} minWidth={760} style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12.5 }}>
+            <STable sortable={false} minWidth={600} style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12.5 }}>
               <thead><tr style={{ textAlign: 'left', fontSize: 12 }}><th style={{ padding: '6px 8px', width: 170 }}>항목</th><th style={{ padding: '6px 8px', width: 70 }}>결과</th><th style={{ padding: '6px 8px' }}>상세</th><th style={{ padding: '6px 8px' }}>조치</th></tr></thead>
               <tbody>
                 {c.items.map((x) => (
                   <tr key={x.key} style={{ borderTop: '1px solid var(--border-soft)', verticalAlign: 'top' }}>
                     <td style={{ padding: '7px 8px' }}><b>{x.label}</b></td>
                     <td style={{ padding: '7px 8px' }}><HealthTag status={x.status} /></td>
-                    <td style={{ padding: '7px 8px', overflowWrap: 'anywhere' }}>
+                    <td style={{ padding: '7px 8px', overflowWrap: 'anywhere', whiteSpace: 'normal' }}>
                       {x.detail || '—'}
                       {x.key === 'disk' && pts && (
                         <div style={{ marginTop: 4 }}>
@@ -118,7 +118,7 @@ export function BareosHealthCard({ vcId }) {
                         </div>
                       )}
                     </td>
-                    <td className="muted" style={{ padding: '7px 8px', fontSize: 12, overflowWrap: 'anywhere' }}>{x.action || '없음'}</td>
+                    <td className="muted" style={{ padding: '7px 8px', fontSize: 12, overflowWrap: 'anywhere', whiteSpace: 'normal', minWidth: 180 }}>{x.action || '없음'}</td>
                   </tr>
                 ))}
               </tbody>
