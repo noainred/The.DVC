@@ -884,8 +884,8 @@ function IssueDetail({ issueKey, meta, onBack, onOpen, onWritten }) {
               <>
                 <div className="iss-detail-meta"><TypeTag t={it.type} /><span className="iss-key">{it.key}</span><span className="muted">· {it.reporter} 등록 · {timeText(it.createdAt)}</span>
                   {it.origin && <><span className="iss-auto">{originText(it.origin)}</span>{it.origin.kind === 'wiki-comment'
-                    ? (it.origin.pageId ? <a href={wikiHash({ space: 'pub', id: it.origin.pageId })} style={{ fontSize: 12 }}>문서의 댓글로 →</a> : null)
-                    : <a href="#/tools/part-faults" style={{ fontSize: 12 }}>파트 장애 화면 →</a>}</>}
+                    ? (it.origin.pageId ? <a className="iss-origin-link" href={wikiHash({ space: 'pub', id: it.origin.pageId })}>문서의 댓글로 →</a> : null)
+                    : <a className="iss-origin-link" href="#/tools/part-faults">파트 장애 화면 →</a>}</>}
                 </div>
                 {(it.epic || (it.parent && it.parent.type !== 'epic')) && (
                   <div className="iss-crumb">

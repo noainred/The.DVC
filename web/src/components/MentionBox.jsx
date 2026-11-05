@@ -39,6 +39,9 @@ export default function MentionBox({ value, onChange, path, rows = 3, placeholde
     requestAnimationFrame(() => { try { el.focus(); el.setSelectionRange(r.caret, r.caret); } catch { /* 선택 범위를 못 옮기는 브라우저 */ } });
   };
   const open = menu && query != null;
+  // 목록이 화면 아래(하단 고정 줄 밑)로 숨지 않게 — 열릴 때 한 번 보이는 자리로(Chromium 400px 판독: 글상자가 화면 끝이면 목록이 가려졌다)
+  const listRef = useRef(null);
+  useEffect(() => { if (open && listRef.current?.scrollIntoView) { try { listRef.current.scrollIntoView({ block: 'nearest' }); } catch { /* 옛 브라우저 */ } } }, [open]);
   const onKey = (e) => {
     if (!open) return;
     if (e.nativeEvent?.isComposing || e.keyCode === 229) return; // 한글 조합 확정 Enter 는 글자 입력이다
@@ -57,7 +60,7 @@ export default function MentionBox({ value, onChange, path, rows = 3, placeholde
         onClick={(e) => sync(e.currentTarget.value, e.currentTarget.selectionStart)}
         onBlur={() => setTimeout(() => { setQuery(null); setMenu(null); }, 150)} />
       {open && (
-        <div className="mention-list" role="listbox" aria-label="사람 후보">
+        <div ref={listRef} className="mention-list" role="listbox" aria-label="사람 후보">
           <div className="mention-list-head"><span>사람 찾기 — ‘{menu.q || '…'}’ · 계정 · 이름</span><span>{menu.loading ? '찾는 중…' : `${menu.items.length}명${menu.truncated ? ' · 더 치면 좁힙니다' : ''}`}</span></div>
           {menu.err ? <div className="mention-list-empty">{menu.err}</div>
             : !menu.loading && !menu.items.length ? <div className="mention-list-empty">맞는 사람이 없습니다 — 그대로 두면 글자로 남고 알림 · 이슈 대상이 되지 않습니다.</div>
