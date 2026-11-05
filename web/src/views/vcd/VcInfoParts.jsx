@@ -12,7 +12,7 @@ import { Card, Note } from './VcdParts.jsx';
 import { shortTs } from './vcdTabs.js';
 import {
   VC_ALARM_STATUS, TASK_STATE, TASK_REASON, entityTypeText, entityHash, vcAlarmRows, vcAlarmCounts, taskDurText, vcTaskRows, vcTaskCounts, vcPermRows, vcInfoHeadText,
-  poolRowsForHost, allocText, SHARE_LEVEL_TEXT, NODE_TYPE_TEXT, UPDATE_STATE, UPDATE_SEVERITY, UPDATE_TYPE, VLCM_STATUS, replicationSummary, vlcmRows, vlcmCounts, vlcmForHost,
+  poolRowsForHost, allocText, SHARE_LEVEL_TEXT, dvpgRowsForHost, vlanText, lacpText, teamingText, uplinkOrderText, failbackText, NODE_TYPE_TEXT, UPDATE_STATE, UPDATE_SEVERITY, UPDATE_TYPE, VLCM_STATUS, replicationSummary, vlcmRows, vlcmCounts, vlcmForHost,
 } from './vcInfo.js';
 import { vcHash } from './vcdRoute.js';
 import { dayStamp } from '../../dayStamp.js';
@@ -389,3 +389,45 @@ export function PoolSettingsCard({ vcenterId, host, poolNames }) {
     </Card>
   );
 }
+
+/**
+ * v2.906: 이 호스트가 붙은 분산 스위치의 포트그룹 팀 구성 · LACP · VLAN(vcinfo dvpg — vCenter 포트그룹 설정, 주기 수집).
+ * 분산 스위치가 없는 호스트 · 호스트 구성을 아직 읽지 않은 호스트에는 그리지 않는다(위 '가상 스위치' 카드가 그 사실을 말한다).
+ */
+export function DvpgTeamingCard({ vcenterId, host }) {
+  const ok = can('inv.hosts');
+  const pre = dvpgRowsForHost([], host);
+  const want = !pre.unknown && pre.dvs.length > 0;
+  const q = useOnce('/vcenter-info/dvpg', { vcenterId }, ok && want);   // 훅은 조기 return 위
+  if (!want) return null;
+  const d = q.data;
+  const r = d && !d.notCollected ? dvpgRowsForHost(d.items, host) : { rows: [], noName: 0 };
+  return (
+    <Card style={WIDE} title={`분산 포트그룹${d && !d.notCollected ? ` ${r.rows.length}` : ''}`} sub={d ? `${pre.dvs.join(' · ')} · ${vcInfoHeadText(d)}` : pre.dvs.join(' · ')} more={ok ? reloadBtn(q) : null}>
+      {gateBody(ok, q, '분산 포트그룹 팀 구성') || (
+        <>
+          <Status d={d} />
+          {!d.notCollected && (r.rows.length ? (
+            <STable className="v3-table" minWidth={900}>
+              <thead><tr><th>포트그룹</th><th>vDS</th><th>VLAN</th><th>부하 분산</th><th>활성 / 대기</th><th>장애 복구 후 되돌림</th><th>LACP</th></tr></thead>
+              <tbody>
+                {r.rows.map((x) => (
+                  <tr key={x.ref}>
+                    <td><b>{x.name || x.ref}</b></td><td>{x.dvsName || '—'}</td><td className="mono" style={{ whiteSpace: 'normal' }}>{vlanText(x.vlan)}</td>
+                    <td>{teamingText(x.teaming?.policy)}</td>
+                    <td className="mono" style={{ whiteSpace: 'normal' }}>{uplinkOrderText(x.teaming)}{x.teaming && (x.teaming.active || []).length + (x.teaming.standby || []).length === 1 && !x.lacp?.lag && <span className="badge amber" style={{ marginLeft: 6, fontFamily: 'inherit' }}>단일 경로</span>}</td>
+                    <td>{failbackText(x.teaming)}</td><td>{lacpText(x.lacp)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </STable>
+          ) : <div className="muted" style={{ padding: '10px 14px', fontSize: 12.5 }}>{r.noName ? 'vDS 이름을 읽지 못해 이 호스트의 분산 스위치와 짝짓지 못했습니다.' : '이 호스트의 분산 스위치에 포트그룹이 없다고 읽었습니다.'}</div>)}
+          {d && !d.notCollected && d.lagError && <Note>{`vDS 의 LAG(Enhanced LACP) 구성을 읽지 못했습니다 — LACP 칸은 포트그룹 자체 설정만 봅니다(사유: ${d.lagError}).`}</Note>}
+          {d && !d.notCollected && r.noName > 0 && r.rows.length > 0 && <Note>{`포트그룹 ${r.noName}개는 vDS 이름을 읽지 못해 이 표에 없을 수 있습니다.`}</Note>}
+        </>
+      )}
+      <Note>vCenter 의 분산 포트그룹 설정(기본 포트 설정 — 상속받은 유효 값)입니다. 업링크 포트그룹은 뺐습니다. 활성 업링크가 LAG 이면 LACP 칸에 LAG 이름이 나옵니다. 설정 변경은 두지 않습니다(조회 전용).</Note>
+    </Card>
+  );
+}
+

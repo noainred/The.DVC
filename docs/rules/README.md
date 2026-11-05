@@ -14,14 +14,14 @@
 | [storage.md](storage.md) | 34 | 스토리지 모니터링·증가량·Unity/PowerMax·전력·시리얼 | server/src/storage/ · web/src/views/tools/Storage* · bmstor |
 | [sanswitch.md](sanswitch.md) | 16 | SAN 스위치(수집·조닝·사용량·월간 점검) | server/src/sanswitch/ · web/src/views/tools/SanSwitch*·san* |
 | [idrac-server.md](idrac-server.md) | 24 | iDRAC·베어메탈 사용률·파트 장애·서버 온도·전력·Overview 서버 수량 | server/src/{idrac,bmusage,partfault,corpusage,power}/ · Overview |
-| [vcenter.md](vcenter.md) | 27 | vCenter 점검 기능(VM 구성·호스트·DS·클러스터·라이선스·태그·이벤트·증분 수집·스파이크) | server/src/{vcenter,vcinfo,vmcfg,vmhygiene,hostcfg,dscfg,clustercfg,corelicense,tags,vmchanges,vmlife,contention,availability,cost,migration,vmseries,vmtrack}/ |
+| [vcenter.md](vcenter.md) | 28 | vCenter 점검 기능(VM 구성·호스트·DS·클러스터·라이선스·태그·이벤트·증분 수집·스파이크) | server/src/{vcenter,vcinfo,vmcfg,vmhygiene,hostcfg,dscfg,clustercfg,corelicense,tags,vmchanges,vmlife,contention,availability,cost,migration,vmseries,vmtrack}/ |
 | [gpu.md](gpu.md) | 8 | GPU 모니터링(할당·메모리·온도·수집 점검) | server/src/gpu/ · web/src/views/tools/Gpu* |
 | [cvp.md](cvp.md) | 11 | Arista CVP 수집·장애·GBIC·Overview | server/src/cvp/ · web/src/views/tools/Cvp*·cvp* |
 | [isilon.md](isilon.md) | 7 | 아이실론 디렉터리 사용량·메일 | server/src/isidu/ · web/src/views/tools/Isidu*·isidu* |
 | [ipam.md](ipam.md) | 11 | IP 관리(IPMS·대역·스캔·원장·VM DNS) | server/src/{ipam,vmdns}/ · web/src/views/tools/Ipam*·Ipms*·IpScan*·VmDns* |
 | [horizon-curuser.md](horizon-curuser.md) | 6 | Horizon 세션·앱 사용·현재 사용자(Windows) | server/src/{horizon,curuser}/ · web/src/views/tools/Horizon*·CurrentUsers* |
 | [demo.md](demo.md) | 6 | 데모(mock) 모드·데모 계정 | server/src/mock/ · auth/demoGuest.js |
-| [audits.md](audits.md) | 81 | 회차별 점검(감사) 기록 v2.583~v2.785 | 같은 영역을 다시 점검할 때 — 확정분·남긴 것·작업 방식 교훈 |
+| [audits.md](audits.md) | 82 | 회차별 점검(감사) 기록 v2.583~v2.785 | 같은 영역을 다시 점검할 때 — 확정분·남긴 것·작업 방식 교훈 |
 | [server-security-history.md](server-security-history.md) | 20절 | 서버 보안 감사 조치 기록 | 서버 인증·권한·SSRF·비밀·엣지 수신 코드를 고칠 때 |
 
 ## 남기는 방법

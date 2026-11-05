@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { poolRowsForHost, allocText, entityHash, vcAlarmRows, vcAlarmCounts, taskDurText, vcTaskRows, vcTaskCounts, vcPermRows, vcInfoHeadText, entityTypeText, replicationSummary, vlcmRows, vlcmCounts, vlcmForHost } from './vcInfo.js';
+import { dvpgRowsForHost, vlanText, lacpText, teamingText, uplinkOrderText, failbackText, poolRowsForHost, allocText, entityHash, vcAlarmRows, vcAlarmCounts, taskDurText, vcTaskRows, vcTaskCounts, vcPermRows, vcInfoHeadText, entityTypeText, replicationSummary, vlcmRows, vlcmCounts, vlcmForHost } from './vcInfo.js';
 import { parseVcRoute } from './vcdRoute.js';
 
 describe('v2.898 vCenter 알람 · 최근 작업 · 권한 목록 — 화면 판정', () => {
@@ -63,3 +63,29 @@ describe('v2.901 리소스 풀 설정 · 호스트 마운트 · 팀 구성 문�
     expect([allocText(-1, 'MHz'), allocText(8000, 'MHz'), allocText(65536, 'GB'), allocText(null, 'GB'), allocText(0, 'GB')]).toEqual(['무제한', '8,000 MHz', '64 GB', '—', '0 GB']);
   });
 });
+
+describe('v2.906 분산 포트그룹 팀 구성 — 화면 판정', () => {
+  const host = { hcfg: { net: { switches: [{ name: 'vSwitch0', kind: 'vss' }, { name: 'DS-Prod', kind: 'dvs' }] } } };
+  const items = [
+    { ref: 'pg-1', name: 'App', dvsName: 'DS-Prod', uplinkPg: false },
+    { ref: 'pg-0', name: 'DS-Prod-DVUplinks', dvsName: 'DS-Prod', uplinkPg: true },
+    { ref: 'pg-2', name: 'Other', dvsName: 'DS-Other', uplinkPg: false },
+    { ref: 'pg-3', name: 'NoName', dvsName: null, uplinkPg: false },
+  ];
+  it('이 호스트의 vDS 포트그룹만 · 업링크 포트그룹 제외 · vDS 이름 모름은 따로 센다 · 호스트 구성 모름', () => {
+    const r = dvpgRowsForHost(items, host);
+    expect(r.rows.map((x) => x.ref)).toEqual(['pg-1']);
+    expect([r.dvs, r.unknown, r.noName]).toEqual([['DS-Prod'], false, 1]);
+    expect(dvpgRowsForHost(items, { hcfg: null }).unknown).toBe(true);
+    expect(dvpgRowsForHost(items, { hcfg: { net: { switches: [{ name: 'vSwitch0', kind: 'vss' }] } } }).dvs).toEqual([]);
+  });
+  it('VLAN · LACP · 팀 구성 문구 — 모르면 대시', () => {
+    expect([vlanText({ id: 120 }), vlanText({ id: 0 }), vlanText({ trunk: [[100, 199], [300, 300]] }), vlanText({ trunk: [] }), vlanText({ pvlan: 12 }), vlanText(null), vlanText({ id: null })])
+      .toEqual(['120', '0(없음)', '트렁크 100-199, 300', '트렁크', 'PVLAN 12', '—', '—']);
+    expect([lacpText({ enabled: true, mode: 'active', lag: 'lag1' }), lacpText({ enabled: true, mode: 'passive', lag: null }), lacpText({ enabled: false }), lacpText({ enabled: null }), lacpText(null)])
+      .toEqual(['LAG lag1 · 능동', '사용(포트그룹) · 수동', '안 씀', '—', '—']);
+    expect([teamingText('loadbalance_loadbased'), teamingText(null), uplinkOrderText({ active: ['Uplink 1'], standby: ['Uplink 2'] }), uplinkOrderText(null), failbackText({ failback: false }), failbackText(null)])
+      .toEqual(['물리 NIC 부하 기반', '—', 'Uplink 1 / Uplink 2', '—', '아니요', '—']);
+  });
+});
+
