@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>이슈 상세 — 위키 댓글에서 만든 이슈</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=Noto+Sans+KR:wght@400;500;700;800&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+body{margin:0;background:#0a0e17;color:#e6edf6;font-family:"Inter","Noto Sans KR","Apple SD Gothic Neo",sans-serif;font-size:13px}
+a{color:#93c5fd}a:hover{color:#bfdbfe}
+.tb{display:flex;align-items:center;gap:14px;height:44px;padding:0 16px;background:#0f1626;border-bottom:1px solid #243049}
+.tb .logo{display:inline-flex;align-items:center;gap:8px;font-weight:800;font-size:14px}
+.tb .logo .v{width:26px;height:26px;border-radius:7px;background:#3b82f6;display:inline-flex;align-items:center;justify-content:center;font-size:13px;color:#fff}
+.ver{font-size:11px;font-weight:700;color:#5eead4;border:1px solid #2dd4bf;border-radius:6px;padding:1px 6px}
+.live{font-size:11px;font-weight:800;color:#86efac;background:rgba(34,197,94,.16);border-radius:6px;padding:2px 7px}
+.mock{font-size:11px;font-weight:800;color:#fcd34d;background:rgba(245,158,11,.16);border-radius:6px;padding:2px 7px}
+.card{background:#141b2d;border:1px solid #243049;border-radius:12px}
+.muted{color:#8b9bb4}.faint{color:#5d6b85}
+.mono{font-family:"JetBrains Mono",ui-monospace,monospace}
+.btn{display:inline-flex;align-items:center;gap:6px;min-height:34px;padding:0 12px;border-radius:8px;border:1px solid #243049;background:#1a2236;color:#e6edf6;font:inherit;font-size:12.5px;font-weight:600;cursor:pointer;white-space:nowrap;text-decoration:none}
+.btn.primary{background:#3b82f6;border-color:#3b82f6;color:#fff}
+.btn.sm{min-height:28px;padding:0 9px;font-size:11.5px}
+.tag{display:inline-flex;align-items:center;gap:5px;height:20px;padding:0 8px;border-radius:999px;font-size:11px;font-weight:700;white-space:nowrap}
+.tag.blue{background:rgba(59,130,246,.18);color:#93c5fd}.tag.gray{background:rgba(139,155,180,.14);color:#aebbd0}.tag.ok{background:rgba(34,197,94,.14);color:#86efac}.tag.warn{background:rgba(245,158,11,.16);color:#fcd34d}.tag.purple{background:rgba(168,85,247,.18);color:#d8b4fe}
+.av{display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;border-radius:50%;font-size:11px;font-weight:800;color:#fff;flex:0 0 auto}
+.input{min-height:34px;border:1px solid #243049;border-radius:8px;background:#0a0e17;color:#e6edf6;font:inherit;font-size:13px;padding:0 10px}
+.mention{display:inline-flex;align-items:center;height:22px;padding:0 7px 0 6px;border-radius:6px;background:rgba(59,130,246,.16);font-size:12px;font-weight:600;vertical-align:middle;white-space:nowrap;text-decoration:none}
+.mention .u{font-family:"JetBrains Mono",monospace;font-size:11.5px;color:#93c5fd}
+.mention .s{color:#5d6b85;padding:0 1px}
+.mention .n{color:#e6edf6}
+.origin{display:inline-flex;align-items:center;gap:8px;padding:6px 10px;border-radius:8px;background:rgba(168,85,247,.10);border:1px solid rgba(168,85,247,.45);font-size:12px}
+.kv{display:grid;grid-template-columns:72px minmax(0,1fr);gap:8px 10px;font-size:12.5px;align-items:center}
+.kv .k{color:#8b9bb4;font-size:11.5px}
+.body{font-size:13.5px;line-height:1.7;color:#d6deea}
+.body blockquote{margin:6px 0;padding:6px 12px;border-left:3px solid #3b5a8f;background:#0f1626;border-radius:0 8px 8px 0;color:#aebbd0}
+.hist li{font-size:12.5px;line-height:1.7}
+.sel{display:inline-flex;align-items:center;gap:6px;min-height:30px;padding:0 10px;border-radius:8px;border:1px solid #243049;background:#0a0e17;font-size:12.5px}
+</style>
+</helmet>
+
+<div style="min-height: 100vh; display: flex; flex-direction: column; background: #0a0e17">
+  <header class="tb">
+    <span class="logo"><span class="v">V</span>The Davinci</span>
+    <span class="ver">v2.897.0</span><span class="live">LIVE</span><span class="mock">MOCK</span>
+    <nav style="display: flex; gap: 4px; margin-left: 18px" aria-label="상단 메뉴"><a class="btn sm" href="#">개요</a><a class="btn sm" href="#">도구</a><a class="btn sm" href="Posted.dc.html">위키</a><a class="btn sm primary" href="#">이슈</a><a class="btn sm" href="#">설정</a></nav>
+    <span style="flex: 1"></span>
+    <span class="av" style="background: #a855f7">김</span><span style="font-size: 12.5px">kim.lee <span class="muted">· 운영자 · 전체 범위 — 메일의 링크로 들어온 담당자</span></span>
+  </header>
+
+  <div style="padding: 14px 20px 0; display: flex; gap: 6px; flex-wrap: wrap"><a class="btn sm" href="#">목록</a><a class="btn sm" href="#">보드</a><a class="btn sm" href="#">스프린트</a><a class="btn sm" href="#">캘린더</a><a class="btn sm" href="#">필터</a><a class="btn sm" href="#">설정</a><span style="flex: 1"></span><span class="muted" style="font-size: 11.5px">목록 › ISS-42</span></div>
+
+  <div style="flex: 1; display: flex; gap: 16px; padding: 12px 20px 24px; min-width: 0">
+    <main style="flex: 1 1 560px; min-width: 0; display: flex; flex-direction: column; gap: 12px">
+      <div class="card" style="padding: 18px 22px; display: flex; flex-direction: column; gap: 10px">
+        <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap">
+          <span class="mono" style="font-size: 13px; color: #93c5fd; font-weight: 700">ISS-42</span>
+          <span class="tag gray">작업</span><span class="tag warn">P2</span><span class="tag gray">할 일</span>
+          <span class="origin"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#d8b4fe" stroke-width="2.2" aria-hidden="true"><path d="M4 4h12l4 4v12H4z"/><path d="M8 12h8M8 16h5"/></svg>위키 댓글에서 등록 · <a href="Posted.dc.html">the DVC 주요 기능 소개</a> v5 · 댓글 noainred 16:20</span>
+        </div>
+        <h1 style="margin: 0; font-size: 20px; line-height: 1.35">[위키] the DVC 주요 기능 소개 — US-East 수집도 같은 증상입니다. 수집 시한을 90초로 올려 주세요.</h1>
+        <div class="muted" style="font-size: 11.5px">noainred 가 11-05 16:20 만듦 · 공용(전 법인) · 라벨 <span class="tag blue">wiki</span></div>
+        <div style="display: flex; gap: 6px; flex-wrap: wrap; margin-top: 4px"><button class="btn sm" type="button">진행 중으로</button><button class="btn sm" type="button">검토로</button><button class="btn sm" type="button">완료</button><button class="btn sm" type="button">보류</button><a class="btn sm" href="Posted.dc.html">문서의 댓글로 가기 →</a></div>
+      </div>
+
+      <div class="card" style="padding: 16px 22px; display: flex; flex-direction: column; gap: 8px">
+        <b>설명 <span class="faint" style="font-weight: 400; font-size: 11.5px">— 댓글을 그대로 옮기고 문서 링크를 붙였다(마크다운 · 멘션 칩 그대로)</span></b>
+        <div class="body">
+          <blockquote>위키 댓글 원문(noainred · 11-05 16:20 · <a href="Posted.dc.html">the DVC 주요 기능 소개 › 댓글</a>)</blockquote>
+          <p style="margin: 4px 0">US-East 수집도 같은 증상입니다. <a class="mention" href="#"><span class="u">@kim.lee</span><span class="s">/</span><span class="n">김이령</span></a> 수집 시한을 90초로 올려 주세요. <a class="mention" href="#"><span class="u">@park.ki</span><span class="s">/</span><span class="n">박기태</span></a> 참고 부탁합니다.</p>
+          <p style="margin: 4px 0" class="muted">문서: [[the DVC 주요 기능 소개]] (W7 · 공용) — 이 문서의 ‘관련 이슈’ 에도 이 이슈가 보입니다.</p>
+        </div>
+      </div>
+
+      <div class="card" style="padding: 14px 22px; display: flex; flex-direction: column; gap: 8px">
+        <div style="display: flex; gap: 6px"><button class="btn sm primary" type="button">댓글 0</button><button class="btn sm" type="button">이력 2</button></div>
+        <ol class="hist" style="margin: 0; padding-left: 18px">
+          <li><span class="muted">16:20</span> 위키 댓글에서 등록 — noainred · 담당자 kim.lee · 관찰자 park.ki · 출처 W7/c18</li>
+          <li><span class="muted">16:20</span> 알림 묶음에 넣음 — kim.lee(할당) · park.ki(관찰) <span class="faint">(발송 결과는 이슈 › 설정 › 알림 상태에)</span></li>
+        </ol>
+        <div style="display: flex; gap: 8px; margin-top: 4px"><textarea class="input" rows="2" aria-label="댓글" placeholder="댓글 — @ 로 사람을 찾습니다(위키와 같은 자동완성)" style="flex: 1; padding: 8px 10px"></textarea><button class="btn primary" type="button" disabled style="align-self: flex-end">댓글 달기</button></div>
+      </div>
+    </main>
+
+    <aside class="card" style="flex: 0 0 300px; padding: 14px 16px; display: flex; flex-direction: column; gap: 12px; align-self: flex-start" aria-label="이슈 속성">
+      <div class="kv">
+        <span class="k">상태</span><span class="sel">할 일 <span class="muted" style="margin-left: auto">▾</span></span>
+        <span class="k">담당자</span><span class="sel"><span class="av" style="background: #a855f7; width: 20px; height: 20px; font-size: 10px">김</span>kim.lee <span class="muted">김이령</span></span>
+        <span class="k">보고자</span><span>noainred</span>
+        <span class="k">관찰자</span><span style="display: flex; gap: 4px; flex-wrap: wrap"><span class="mention"><span class="u">park.ki</span><span class="s">/</span><span class="n">박기태</span></span></span>
+        <span class="k">법인</span><span>공용(전 법인)</span>
+        <span class="k">우선순위</span><span class="sel">P2 <span class="muted" style="margin-left: auto">▾</span></span>
+        <span class="k">기한</span><span class="faint">—</span>
+        <span class="k">라벨</span><span><span class="tag blue">wiki</span></span>
+        <span class="k">출처</span><span class="tag purple">위키 댓글</span>
+      </div>
+      <div class="faint" style="font-size: 11.5px; line-height: 1.5">필터 · 검색식에서 <span class="mono">origin = wiki-comment</span> 로 모아 봅니다(파트 장애 자동 등록 <span class="mono">origin = partfault</span> 와 같은 축).</div>
+    </aside>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

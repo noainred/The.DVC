@@ -21,7 +21,7 @@ import { userHasPermission } from '../../auth/permissions.js';
 import { logAudit } from '../../audit.js';
 import { pageArgs } from '../../util/pageArgs.js';
 import { clientIp } from '../../util/rateLimit.js';
-import { scopedVcenterIds, writeScopedVcenterIds } from '../../auth/scope.js';
+import { scopedVcenterIds, writeScopedVcenterIds, isFullReadWriteScope } from '../../auth/scope.js';
 import { store } from '../../store.js';
 import { fullScopeOnlyWith } from '../admin/shared.js';
 import {
@@ -44,7 +44,7 @@ import { listFilters, createFilter, updateFilter, deleteFilter, filtersLoadError
 import { QUERY_LIMITS, FIELDS as QUERY_FIELDS, ORDERABLE as QUERY_ORDERABLE } from '../../issues/query.js';
 import { issueDocIndex } from '../../wiki/store.js';
 import { issuesCsv } from '../../issues/exportCsv.js';
-import { removeOwner as removeAttachments } from '../../attach/store.js';
+import { removeOwnerAfterPersist } from '../../attach/store.js';
 import { currentVersion } from '../../config.js';
 import { listNotes } from '../../release-notes.js';
 import { fileStamp } from '../../util/dayKey.js';
@@ -71,8 +71,9 @@ const canWrite = (req) => ['admin', 'operator'].includes(req.user?.role) && !isD
  */
 const canRequest = (req) => !!req.user && !isDemoGuest(req.user) && userHasPermission(req.user, 'issues.request');
 /** 관리자 권한(남의 댓글·이슈 삭제) — 관리자(데모 계정 제외) + 전체 범위(게시판 isBoardModerator 와 같은 판정). */
-const isMod = (req) => isAdmin(req) && !scopedVcenterIds(req.user, store.get());
-const SCOPED_MOD_NOTE = '범위 관리자는 이슈 관리 권한(다른 사람의 이슈·댓글 삭제)이 없습니다 — 전체 범위(vCenter 제한 없는) 관리자만 할 수 있습니다';
+// v2.904 점검 P-1: 조회와 쓰기 둘 다 무제한일 때만(조회 무제한 + writeVcenters 관리자가 남의 공유 필터를 지우던 구멍)
+const isMod = (req) => isAdmin(req) && isFullReadWriteScope(req.user, store.get());
+const SCOPED_MOD_NOTE = '범위 관리자는 이슈 관리 권한(다른 사람의 이슈·댓글 삭제)이 없습니다 — 조회 · 쓰기 범위가 모두 지정되지 않은 전체 범위 관리자만 할 수 있습니다';
 
 /** 이 사용자의 법인 접근(v2.871) — read/write: Set|null(제한 없음). */
 function accessOf(req) {
@@ -484,9 +485,12 @@ export function registerIssues(api) {
     if (!KEY_RE.test(req.params.key)) return badKey(res);
     try {
       const x = deleteIssue(req.params.key, userOf(req), { isMod: isMod(req), access: accessOf(req) });
+      const seq = issuesSeq();
       audit(req, 'issue.delete', x.key, `${x.title} (보고자 ${x.reporter})`);
-      try { removeAttachments('issue', x.key); } catch (e) { console.warn(`[issues] ${x.key} 첨부 정리 실패: ${String(e?.message || e).slice(0, 160)}`); } // v2.889
-      res.json({ ok: true, persist: await persistView(req) });
+      const persist = await persistView(req);
+      // v2.904 점검 S-5: 첨부 본체는 이슈 삭제가 디스크에 닿은 뒤에 지운다
+      removeOwnerAfterPersist('issue', x.key, { seq, state: persist.state, wait: waitIssuesPersist });
+      res.json({ ok: true, persist });
     } catch (e) { fail(res, e, next, req); }
   });
 }

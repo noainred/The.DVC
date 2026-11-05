@@ -267,7 +267,13 @@ export function dateValue(raw, today) {
   const rel = /^([+-])(\d{1,4})([dw])$/i.exec(s);
   if (rel) { const n = Number(rel[2]) * (rel[3].toLowerCase() === 'w' ? 7 : 1); return today + (rel[1] === '-' ? -n : n); }
   const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s);
-  if (m) { const ms = Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])); return Number.isFinite(ms) ? Math.floor(ms / 86_400_000) : null; }
+  if (m) {
+    const ms = Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+    if (!Number.isFinite(ms)) return null;
+    const u = new Date(ms); // v2.904 점검 S-7: 없는 날짜(2026-02-30)는 Date.UTC 가 3월 2일로 넘긴다 — 되돌려 맞지 않으면 못 읽음
+    if (u.getUTCFullYear() !== Number(m[1]) || u.getUTCMonth() + 1 !== Number(m[2]) || u.getUTCDate() !== Number(m[3])) return null;
+    return Math.floor(ms / 86_400_000);
+  }
   return null;
 }
 const enumOf = (field, raw) => { const r = String(raw); return ALIASES[field]?.[r] || ALIASES[field]?.[r.toLowerCase()] || r.toLowerCase(); };
