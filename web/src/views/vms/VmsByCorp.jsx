@@ -6,7 +6,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { fetchJson } from '../../api.js';
 import { Loading, ErrorBox } from '../../components/ui.jsx';
 import { STable } from '../../components/STable.jsx';
-import { corpMark, placeText } from '../hostCorpText.js';
+import { corpMark } from '../hostCorpText.js';
 import { fmtN, pctText, usageTone, TONE_COLOR, TONE_TEXT, corpVmsSort, corpCollectText, signalText } from './vmHubText.js';
 import { numOrNull } from '../../numOrNull.js';
 
@@ -85,13 +85,15 @@ export default function VmsByCorp({ filters, onPick }) {
         {corps.length === 0 ? (
           <div className="muted" style={{ padding: 16 }}>보여 줄 법인이 없습니다{filters && Object.keys(filters).length ? ' — 위 필터 조건에 맞는 VM 이 없습니다' : ''}.</div>
         ) : (
-          <STable className="vmh-corp-table" minWidth={1180}>
+          <STable className="vmh-corp-table" minWidth={1000}>
             <thead>
               <tr>
-                <th>법인 · vCenter</th><th>지역</th><th style={{ textAlign: 'right' }}>VM</th><th style={{ textAlign: 'right' }}>구동</th><th style={{ textAlign: 'right' }}>정지</th>
-                <th>VM 비중</th><th style={{ textAlign: 'right' }}>vCPU</th><th style={{ textAlign: 'right' }}>메모리 GB</th><th>평균 CPU</th><th>평균 메모리</th>
-                <th style={{ textAlign: 'right' }}>GPU VM</th><th style={{ textAlign: 'right' }}>과부하</th><th style={{ textAlign: 'right' }}>미수집</th>
-                <th style={{ textAlign: 'right' }} title={signalText('toolsOld').desc}>Tools</th><th style={{ textAlign: 'right' }} title={signalText('snapOld', { days }).desc}>{signalText('snapOld', { days }).short}</th><th>수집</th>
+                <th>법인 · vCenter</th><th style={{ textAlign: 'right' }}>VM</th><th style={{ textAlign: 'right' }}>vCPU · 메모리</th>
+                <th>평균 CPU</th><th>평균 메모리</th><th style={{ textAlign: 'right' }}>GPU VM</th>
+                <th style={{ textAlign: 'right' }} title={signalText('overload').desc}>과부하</th>
+                <th style={{ textAlign: 'right' }} title={signalText('usageUnknown').desc}>미수집</th>
+                <th style={{ textAlign: 'right' }} title={signalText('toolsOld').desc}>Tools</th>
+                <th style={{ textAlign: 'right' }} title={signalText('snapOld', { days }).desc}>{signalText('snapOld', { days }).short}</th>
               </tr>
             </thead>
             <tbody>
@@ -99,44 +101,45 @@ export default function VmsByCorp({ filters, onPick }) {
                 const m = corpMark(c);
                 const known = numOrNull(c.vms) != null;
                 const share = known && t.vms ? Math.round((c.vms / t.vms) * 100) : null;
+                const over = numOrNull(c.signals?.overload);
                 return (
                   <tr key={c.id}>
                     <td data-sort={c.name}>
                       <button type="button" className="vmh-name-btn" onClick={() => onPick && onPick(c.id)} title={`${c.name} — 이 법인의 VM 만 현황 탭에서 봅니다`}>{c.name}</button>
                       {c.unlisted && <span className="vmh-badge gray" style={{ marginLeft: 6 }} title="vCenter 목록에 없는 id 의 VM 입니다(이월 값·경합)">목록 밖</span>}
                       {m.mark && <span className="muted" style={{ marginLeft: 6 }} title={m.title}>{m.mark}</span>}
+                      <span className="vmh-l2">
+                        {[c.region, c.city].filter(Boolean).join(' · ') || '지역 모름'} · <span style={{ color: c.stale ? 'var(--vmh-warn-text)' : c.status === 'unreachable' ? 'var(--vmh-crit-text)' : undefined }}>{corpCollectText(c)}</span>
+                      </span>
                     </td>
-                    <td className="muted" data-sort={c.region || ''}>{[c.region, placeText(c)].filter(Boolean).join(' · ') || '—'}</td>
-                    <td className="tabular" style={{ textAlign: 'right', fontWeight: 700 }} data-sort={corpVmsSort(c)}>{fmtN(c.vms)}</td>
-                    <td className="tabular" style={{ textAlign: 'right' }}>{fmtN(c.on)}</td>
-                    <td className="tabular muted" style={{ textAlign: 'right' }}>{fmtN(c.off)}</td>
-                    <td data-sort={share ?? ''}>
-                      {share == null ? <span className="muted">—</span> : (
-                        <span className="vmh-share"><span className="vmh-bar" aria-hidden="true"><i style={{ width: `${Math.round((c.vms / max) * 100)}%`, background: 'var(--accent)' }} /></span><span className="tabular muted" style={{ width: 36 }}>{share}%</span></span>
-                      )}
+                    <td className="tabular" style={{ textAlign: 'right' }} data-sort={corpVmsSort(c)}>
+                      <b>{fmtN(c.vms)}</b>
+                      {share != null && <span className="vmh-mini" style={{ marginLeft: 'auto' }} title={`전체의 ${share}%`} aria-hidden="true"><i style={{ width: `${Math.round((c.vms / max) * 100)}%` }} /></span>}
+                      <span className="vmh-l2">{known ? `구동 ${fmtN(c.on)} · 정지 ${fmtN(c.off)} · ${share}%` : '모름'}</span>
                     </td>
-                    <td className="tabular" style={{ textAlign: 'right' }}>{fmtN(c.vcpu)}</td>
-                    <td className="tabular" style={{ textAlign: 'right' }}>{fmtN(c.ramGB)}</td>
+                    <td className="tabular" style={{ textAlign: 'right' }} data-sort={numOrNull(c.vcpu) ?? ''}>
+                      {fmtN(c.vcpu)}<span className="vmh-l2">{numOrNull(c.ramGB) == null ? '—' : `${fmtN(c.ramGB)} GB`}</span>
+                    </td>
                     <td data-sort={numOrNull(c.avgCpuPct) ?? ''}><Usage v={c.avgCpuPct} /></td>
                     <td data-sort={numOrNull(c.avgMemPct) ?? ''}><Usage v={c.avgMemPct} /></td>
                     <td className="tabular" style={{ textAlign: 'right' }}>{fmtN(c.gpu)}</td>
-                    <td className="tabular" style={{ textAlign: 'right', color: numOrNull(c.signals?.overload) > 0 ? 'var(--vmh-crit-text)' : undefined, fontWeight: numOrNull(c.signals?.overload) > 0 ? 700 : 400 }}>{fmtN(c.signals?.overload)}</td>
+                    <td className="tabular" style={{ textAlign: 'right', color: over > 0 ? 'var(--vmh-crit-text)' : undefined, fontWeight: over > 0 ? 700 : 400 }}>{fmtN(c.signals?.overload)}</td>
                     <td className="tabular muted" style={{ textAlign: 'right' }}>{fmtN(c.signals?.usageUnknown)}</td>
                     <td className="tabular" style={{ textAlign: 'right' }}>{fmtN(c.signals?.toolsOld)}</td>
                     <td className="tabular" style={{ textAlign: 'right' }}>{fmtN(c.signals?.snapOld)}</td>
-                    <td data-sort={c.collect || ''}><span className={`vmh-badge ${c.stale ? 'amber' : c.status === 'unreachable' ? 'red' : 'gray'}`}>{corpCollectText(c)}</span></td>
                   </tr>
                 );
               })}
               <tr data-pin="bottom" style={{ fontWeight: 700 }}>
-                <td>합계 · {fmtN(t.corps)} 법인</td><td />
-                <td className="tabular" style={{ textAlign: 'right' }}>{fmtN(t.vms)}</td><td className="tabular" style={{ textAlign: 'right' }}>{fmtN(t.on)}</td>
-                <td className="tabular" style={{ textAlign: 'right' }}>{fmtN(t.off)}</td><td />
-                <td className="tabular" style={{ textAlign: 'right' }}>{fmtN(t.vcpu)}</td><td className="tabular" style={{ textAlign: 'right' }}>{fmtN(t.ramGB)}</td>
+                <td>합계 · {fmtN(t.corps)} 법인</td>
+                <td className="tabular" style={{ textAlign: 'right' }}>{fmtN(t.vms)}<span className="vmh-l2">구동 {fmtN(t.on)} · 정지 {fmtN(t.off)}</span></td>
+                <td className="tabular" style={{ textAlign: 'right' }}>{fmtN(t.vcpu)}<span className="vmh-l2">{fmtN(t.ramGB)} GB</span></td>
                 <td><Usage v={t.avgCpuPct} /></td><td><Usage v={t.avgMemPct} /></td>
-                <td className="tabular" style={{ textAlign: 'right' }}>{fmtN(t.gpu)}</td><td className="tabular" style={{ textAlign: 'right' }}>{fmtN(t.signals?.overload)}</td>
-                <td className="tabular" style={{ textAlign: 'right' }}>{fmtN(t.signals?.usageUnknown)}</td><td className="tabular" style={{ textAlign: 'right' }}>{fmtN(t.signals?.toolsOld)}</td>
-                <td className="tabular" style={{ textAlign: 'right' }}>{fmtN(t.signals?.snapOld)}</td><td />
+                <td className="tabular" style={{ textAlign: 'right' }}>{fmtN(t.gpu)}</td>
+                <td className="tabular" style={{ textAlign: 'right' }}>{fmtN(t.signals?.overload)}</td>
+                <td className="tabular" style={{ textAlign: 'right' }}>{fmtN(t.signals?.usageUnknown)}</td>
+                <td className="tabular" style={{ textAlign: 'right' }}>{fmtN(t.signals?.toolsOld)}</td>
+                <td className="tabular" style={{ textAlign: 'right' }}>{fmtN(t.signals?.snapOld)}</td>
               </tr>
             </tbody>
           </STable>

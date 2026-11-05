@@ -159,6 +159,7 @@
   · VM 클릭 = 오른쪽 드로어(`VmDrawer` — 720 미만 전체 시트). **예전 모달 기능을 빠짐없이**: 버튼 6 · KV 17 · 섹션 6(`EntityDetail.jsx` 에서 꺼내 재사용 — 복제 금지).
     ‹ › · ↑↓ 는 **표가 그린 순서**(DataTable onVisible — 정렬 반영). z-index 150/151 — 드로어 안에서 여는 공용 Modal(200)이 위에 온다. 24h 추이는 열 때 1회(`vmSeries.useDaySeries` — 꺼진 VM 은 조회 안 함 · AbortController).
     `EntityDetail type='vm'` 모달은 다른 화면(검색·호스트 VM 목록 등)에서 그대로 쓴다 — 이 화면만 드로어다.
+  · ⚠ 1440 에서 표 오른쪽 열은 가로 스크롤 밖으로 밀린다(현황 표는 v2.898 부터 그랬다 — A/B) — **새 열은 끝에 붙이지 말 것**(신호 열을 끝에 뒀다가 보이지 않았다). 법인별 표는 10열로 맞췄다. 이 앱에는 전역 a 글자색이 없다 — class 없는 링크는 `.vmh` 범위 토큰 색.
   · 개체 보기 요약 탭 4/5/3(`.vmo-grid` — 1280 미만 2열 · 760 미만 1열). 신호는 `VCenterDetail` 의 /vms 폴링에 `signals=1`. 시안의 '백업' 카드는 VM 행에 값이 없어 넣지 않았다(지어내지 않는다).
 - ⚠⚠ **v2.697 — VM 구성 속성(B10)은 30초 인벤토리 요청에 싣지 않는다 — 오래된 VM 부터 주기당 상한만큼 다시 읽는 캐시다**
   (`server/src/vmcfg/`{parse.js(순수 파서·판정·엣지 정제),cache.js,collect.js} + `soapClient.js` 배선 + 웹 `views/vmcfg/vmCfgText.js` + `EntityDetail.jsx VmCfgSection`.

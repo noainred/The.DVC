@@ -50,6 +50,7 @@ export default function VmsAttention({ filters, onOpen, onVisible, initial = 'ov
   const now = Date.now();
   const columns = [
     { key: 'name', label: 'VM', render: (v) => <VmNameCell vm={v} onOpen={(x) => onOpen && onOpen(x, rows)} /> },
+    // 호스트는 드로어에 있다 — 1440 에서 마지막 열이 가로 스크롤 밖으로 밀리지 않게 표에서는 뺐다(v2.909 Chromium 확인).
     { key: 'vcenterId', label: '법인 · vCenter', render: (v) => <span className="muted">{v.vcenterId}</span> },
     { key: 'signals', label: '사유', sortValue: (v) => (v.signals || []).length, render: (v) => (
       <span className="vmh-sig">{(v.signals || []).map((k) => { const s = signalText(k, { days }); return <span key={k} className={`vmh-badge ${s.badge}`} title={s.desc}>{s.short}</span>; })}</span>
@@ -64,7 +65,6 @@ export default function VmsAttention({ filters, onOpen, onVisible, initial = 'ov
       const ts = numOrNull(v.snapshotOldestTs);
       return <span className="tabular">{n}개{ts ? ` · ${Math.max(0, Math.floor((now - ts) / DAY))}일` : ' · 생성일 모름'}</span>;
     } },
-    { key: 'host', label: '호스트', render: (v) => <span className="muted">{v.host || '—'}</span> },
   ];
 
   return (

@@ -87,12 +87,15 @@ export default function VmDrawer({ vm, rows, onClose, onMove, days = null }) {
           <div className="ttl">
             <span className="vmh-dot" style={{ background: dotColor }} title={dotLabel} aria-hidden="true" />
             <h2 title={vm.name}>{vm.name}</h2>
-            {(sigs || []).map((k) => { const s = signalText(k, { days }); return <span key={k} className={`vmh-badge ${s.badge}`} title={s.desc}>{s.short}</span>; })}
             <span className="grow" />
             <button type="button" className="vmh-icon-btn" aria-label="이전 VM" title="이전 VM(↑)" disabled={!nb.prev} onClick={() => nb.prev && onMove(nb.prev)}>‹</button>
             <button type="button" className="vmh-icon-btn" aria-label="다음 VM" title="다음 VM(↓)" disabled={!nb.next} onClick={() => nb.next && onMove(nb.next)}>›</button>
             <button type="button" className="vmh-icon-btn" aria-label="닫기" title="닫기(Esc)" onClick={onClose}>×</button>
           </div>
+          {/* 신호 배지는 이름 아래 줄 — 400px 에서 이름 칸을 줄이지 않게(v2.909 Chromium 확인: 'app-ap-...' 로 잘렸다) */}
+          {sigs && sigs.length > 0 && (
+            <div className="vmh-sig">{sigs.map((k) => { const x = signalText(k, { days }); return <span key={k} className={`vmh-badge ${x.badge}`} title={x.desc}>{x.short}</span>; })}</div>
+          )}
           <div className="vmh-crumb">
             <StateBadge state={vm.powerState} />
             <a href={vcHash(vm.vcenterId)}>{vm.vcenterId}</a>

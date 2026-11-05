@@ -14,7 +14,12 @@
   --vmh-info-bg: rgba(59, 130, 246, 0.16);
   --vmh-none-bg: rgba(139, 155, 180, 0.14);
   --vmh-sel-bg: rgba(59, 130, 246, 0.16);
+  --vmh-link: #93c5fd;
+  --vmh-link-hover: #bfdbfe;
 }
+/* 이 앱에는 전역 a 글자색이 없다 — class 없는 링크는 브라우저 기본 파랑(어두운 바탕에서 읽기 어려움 · v2.909 Chromium 확인). 이 화면 안에서만 정한다. */
+.vmh a:not([class]), .vmh-drawer a:not([class]) { color: var(--vmh-link); }
+.vmh a:not([class]):hover, .vmh-drawer a:not([class]):hover { color: var(--vmh-link-hover); }
 .vmh { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
 .vmh-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 14px; min-width: 0; }
 .vmh-head h1 { margin: 0; font-size: 20px; font-weight: 800; color: var(--text); }
@@ -87,6 +92,14 @@
 @media (max-width: 1199px) { .vmh-sigcards { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
 @media (max-width: 719px) { .vmh-sigcards { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; } .vmh-sigcard .val { font-size: 22px; } }
 
+/* 법인별 표 — 10열(1440 본문 안에 들어오게 · v2.909 Chromium 확인: 15열이면 신호 열이 가로 스크롤 밖) · 400 은 첫 열 고정 + 가로 넘김 */
+.vmh-corp-table td { vertical-align: top; }
+.vmh-corp-table th:first-child, .vmh-corp-table td:first-child { position: sticky; left: 0; z-index: 1; background: var(--panel); box-shadow: 1px 0 0 var(--border-soft); }
+.vmh-corp-table .vmh-l2 { display: block; margin-top: 3px; font-size: 11.5px; font-weight: 400; color: var(--text-dim); white-space: nowrap; }
+.vmh-corp-table .vmh-mini { display: block; width: 72px; height: 3px; margin-top: 5px; border-radius: 2px; background: var(--panel-deep); overflow: hidden; }
+.vmh-corp-table .vmh-mini > i { display: block; height: 100%; background: var(--accent); }
+.vmh-corp-table .vmh-ub { min-width: 0; }
+.vmh-corp-table .vmh-ub .vmh-bar { flex: 0 0 48px; }
 /* 법인별 표 — 비중 막대 */
 .vmh-share { display: inline-flex; align-items: center; gap: 8px; min-width: 120px; }
 .vmh-share .vmh-bar { flex: 1 1 auto; height: 8px; border-radius: 4px; }
@@ -103,8 +116,8 @@
   background: var(--bg-soft); border-left: 1px solid var(--border); box-shadow: -12px 0 40px rgba(0, 0, 0, 0.5); outline: none; }
 .vmh-dh { padding: 14px 18px 10px; border-bottom: 1px solid var(--border-soft); display: flex; flex-direction: column; gap: 8px; min-width: 0; }
 .vmh-dh .ttl { display: flex; align-items: center; gap: 8px; min-width: 0; }
-.vmh-dh h2 { margin: 0; font-size: 18px; font-weight: 800; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 0 1 auto; }
-.vmh-dh .grow { flex: 1 1 auto; }
+.vmh-dh h2 { margin: 0; font-size: 18px; font-weight: 800; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1 1 auto; }
+.vmh-dh .grow { flex: 0 0 4px; }
 .vmh-icon-btn { flex: 0 0 auto; width: 34px; height: 34px; display: inline-flex; align-items: center; justify-content: center; border-radius: 8px;
   border: 1px solid var(--border); background: var(--panel-2); color: var(--text); font: inherit; font-size: 16px; cursor: pointer; }
 .vmh-icon-btn:disabled { opacity: 0.4; cursor: default; }

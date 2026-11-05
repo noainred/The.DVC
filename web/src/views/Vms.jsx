@@ -169,6 +169,11 @@ function VmsList({ filters, onOpen, onVisible, onHub, selectedId }) {
   //   CPU·메모리 막대는 이 화면 전용 VmUsageBar(공용 UsageCell 은 다른 화면이 쓰므로 바꾸지 않는다).
   const columns = [
     { key: 'name', label: 'VM', render: (v) => <VmNameCell vm={v} onOpen={openVm} /> },
+    // v2.909: 신호(서버 판정 inventory/vmSignals.js — signals=1 일 때만 실린다. 구버전 서버면 열을 그리지 않는다).
+    //   VM 바로 뒤에 둔다 — 이 표는 1440 에서도 오른쪽 열(디스크·호스트)이 가로 스크롤 밖이라(v2.898 부터 · A/B 확인) 끝에 두면 보이지 않았다.
+    ...(hasSig ? [{ key: 'signals', label: '신호', sortValue: (v) => (v.signals || []).length, render: (v) => (
+      <span className="vmh-sig">{(v.signals || []).map((k) => { const x = signalText(k, { days }); return <span key={k} className={`vmh-badge ${x.badge}`} title={x.desc}>{x.short}</span>; })}</span>
+    ) }] : []),
     { key: 'vcenterId', label: 'vCenter', render: (v) => <span className="muted">{v.vcenterId}</span> },
     { key: 'guestOS', label: 'Guest OS' },
     { key: 'ipAddress', label: 'IP', render: (v) => ipList(v) },
@@ -178,10 +183,6 @@ function VmsList({ filters, onOpen, onVisible, onHub, selectedId }) {
     { key: 'memUsagePct', label: '메모리', render: (v) => <VmUsageBar pct={v.memUsagePct} /> },
     { key: 'storageGB', label: '디스크', align: 'right', render: (v) => (v.storageGB != null ? `${v.storageGB} GB` : '—') },
     { key: 'host', label: '호스트', render: (v) => <span className="muted">{v.host}</span> },
-    // v2.909: 신호(서버 판정 inventory/vmSignals.js — signals=1 일 때만 실린다. 구버전 서버면 열을 그리지 않는다).
-    ...(hasSig ? [{ key: 'signals', label: '신호', sortValue: (v) => (v.signals || []).length, render: (v) => (
-      <span className="vmh-sig">{(v.signals || []).map((k) => { const x = signalText(k, { days }); return <span key={k} className={`vmh-badge ${x.badge}`} title={x.desc}>{x.short}</span>; })}</span>
-    ) }] : []),
   ];
 
   const t = view.totals;
