@@ -9,6 +9,7 @@ import { registerProvision } from './api/provision.js';
 import { registerVcTools } from './api/vcTools.js';
 import { registerReports } from './api/reports.js';
 import { registerSearchNotes } from './api/searchNotes.js';
+import { registerInvSearch } from './api/invSearch.js'; // v2.909 헤더 ⌘K 통합 장비 검색
 import { registerIpamExport } from './api/ipamExport.js';
 import { registerVmExport } from './api/vmExport.js';   // v2.799 VM 전체 정보 내보내기(ipamExport.js 에서 옮김)
 import { registerHostExport } from './api/hostExport.js'; // v2.802 vCenter 화면 '호스트 · 클러스터 엑셀'(호스트 1대 = 시트 1장)
@@ -122,6 +123,7 @@ registerProvision(api);
 registerVcTools(api);
 registerReports(api);
 registerSearchNotes(api);
+registerInvSearch(api);
 registerIpamExport(api);
 registerVmExport(api);
 registerHostExport(api);

@@ -1,0 +1,221 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>통합 장비 검색 — 상태(범위 · 비관리자 · 오류 · 없음 · 잘림)</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=Noto+Sans+KR:wght@400;500;700;800&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+body{margin:0;background:#0a0e17;color:#e6edf6;font-family:"Inter","Noto Sans KR","Apple SD Gothic Neo",sans-serif;font-size:13px}
+a{color:#93c5fd}a:hover{color:#bfdbfe}
+.kbd{display:inline-block;min-width:16px;padding:0 6px;border:1px solid #243049;border-radius:5px;background:#141b2d;color:#aebbd0;font-size:10.5px;font-family:"JetBrains Mono",monospace;line-height:17px;text-align:center}
+.mono{font-family:"JetBrains Mono",ui-monospace,monospace}
+.dim{color:#8b9bb4}
+.dot{width:8px;height:8px;border-radius:50%;display:inline-block;flex:0 0 auto}
+.cell{display:flex;flex-direction:column;gap:8px;min-width:0}
+.cap{font-size:12px;color:#8b9bb4;margin:0;line-height:1.5;min-height:36px}
+.cap b{color:#e6edf6;font-weight:700}
+.pal{background:#141b2d;border:1px solid #243049;border-radius:12px;box-shadow:0 4px 24px rgba(0,0,0,.4);overflow:hidden;display:flex;flex-direction:column;font-size:12px}
+.pal-in{display:flex;align-items:center;gap:8px;padding:9px 12px;border-bottom:1px solid #1f2a40}
+.pal-in input{flex:1;min-width:0;border:none;outline:none;background:transparent;font:inherit;font-size:13px;color:#e6edf6}
+.pfx{display:inline-flex;align-items:center;gap:5px;height:20px;padding:0 7px;border-radius:6px;background:rgba(59,130,246,.2);color:#93c5fd;font-size:11px;font-weight:700;white-space:nowrap}
+.chips{display:flex;gap:5px;padding:7px 8px;border-bottom:1px solid #1f2a40;flex-wrap:wrap}
+.chip{display:inline-flex;align-items:center;gap:4px;height:22px;padding:0 8px;border-radius:999px;border:1px solid #243049;background:#0f1626;color:#aebbd0;font:inherit;font-size:11px;font-weight:600;cursor:pointer;white-space:nowrap}
+.chip.on{border-color:#3b82f6;background:rgba(59,130,246,.18);color:#e6edf6}
+.chip.lock{color:#8b9bb4;border-style:dashed}
+.chip .n{font-family:"JetBrains Mono",monospace;font-weight:500;font-size:10.5px}
+.band{display:flex;gap:8px;align-items:flex-start;margin:6px 8px 0;padding:8px 10px;border-radius:8px;font-size:11.5px;line-height:1.5}
+.band.info{background:rgba(59,130,246,.12);border:1px solid rgba(59,130,246,.4);color:#dbeafe}
+.band.warn{background:rgba(245,158,11,.12);border:1px solid rgba(245,158,11,.45);color:#fde68a}
+.band.err{background:rgba(239,68,68,.12);border:1px solid rgba(239,68,68,.45);color:#fecaca}
+.band svg{flex:0 0 auto;margin-top:1px}
+.list{padding:4px 4px 6px;display:flex;flex-direction:column}
+.gh{display:flex;align-items:center;gap:8px;padding:7px 10px 3px;font-size:10.5px;font-weight:700;color:#8b9bb4}
+.row{display:flex;align-items:center;gap:8px;width:100%;text-align:left;padding:6px 10px;border:none;border-radius:8px;background:transparent;font:inherit;font-size:12px;color:#e6edf6;cursor:pointer;min-width:0}
+.row.on{background:rgba(59,130,246,.14)}
+.row .nm{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;flex:0 1 auto}
+.row .nm mark{background:transparent;color:#fcd34d;font-weight:800}
+.row .meta{display:flex;align-items:center;gap:6px;min-width:0;color:#8b9bb4;font-size:11px;white-space:nowrap;overflow:hidden;flex:1 1 auto}
+.row .meta mark{background:transparent;color:#fcd34d;font-weight:700}
+.row .sep{color:#5d6b85}
+.tag{display:inline-flex;align-items:center;height:18px;padding:0 6px;border-radius:5px;font-size:10px;font-weight:700;white-space:nowrap;flex:0 0 auto;min-width:50px;justify-content:center}
+.k-vm{background:rgba(59,130,246,.2);color:#93c5fd}
+.k-host{background:rgba(34,211,238,.16);color:#a5f3fc}
+.k-st{background:rgba(52,224,180,.16);color:#99f6e4}
+.k-tool{background:#1a2236;border:1px solid #243049;color:#aebbd0}
+.k-ip{background:rgba(139,155,180,.14);color:#c3cee0;border:1px solid #243049}
+.empty{padding:14px 12px;color:#aebbd0;font-size:12px;line-height:1.7}
+.empty .sug{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+.empty .sug a{display:inline-flex;align-items:center;height:24px;padding:0 9px;border-radius:6px;border:1px solid #243049;background:#0f1626;text-decoration:none;font-size:11.5px}
+.foot{display:flex;align-items:center;gap:10px;padding:7px 12px;border-top:1px solid #1f2a40;font-size:10.5px;color:#8b9bb4;flex-wrap:wrap}
+.foot .r{margin-left:auto}
+.st{display:inline-flex;align-items:center;gap:4px}
+</style>
+</helmet>
+<div style="width:1460px;height:1060px;box-sizing:border-box;background:#0a0e17;display:grid;grid-template-columns:repeat(3, minmax(0, 1fr));gap:24px 20px;align-content:start">
+
+  <!-- ⓐ 범위 계정 -->
+  <div class="cell">
+    <p class="cap"><b>ⓐ 범위 계정</b>(vCenter 2곳만) — vCenter 귀속 장비만 색인하고, 귀속 없는 종류는 칩이 잠긴다(서버가 애초에 내려보내지 않는다 — 존재도 흘리지 않음).</p>
+    <div class="pal" role="dialog" aria-label="장비 찾기 — 범위 계정">
+      <div class="pal-in"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#8b9bb4" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg><label for="qa" style="position:absolute;left:-9999px">검색어</label><input id="qa" value="srv-db"><span class="kbd">ESC</span></div>
+      <div class="chips"><button type="button" class="chip on">전체 <span class="n">4</span></button><button type="button" class="chip">가상머신 <span class="n">3</span></button><button type="button" class="chip">VM호스트 <span class="n">1</span></button><button type="button" class="chip lock" title="전체 범위 계정만"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><rect x="4" y="10" width="16" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg>베어메탈</button><button type="button" class="chip lock"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><rect x="4" y="10" width="16" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg>스토리지</button><button type="button" class="chip lock"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><rect x="4" y="10" width="16" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg>SAN · 네트워크 · PDU</button></div>
+      <div class="band info"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 16h.01"/></svg><span>이 계정의 범위는 <b>KR-Seoul · KR-Busan</b> 입니다. 스토리지 · SAN · 네트워크 · PDU · 베어메탈 · 미귀속 IP 는 <b>전체 범위 계정만</b> 찾습니다.</span></div>
+      <div class="list">
+        <div class="gh">가상머신 3</div>
+        <button type="button" class="row on"><span class="tag k-vm">가상머신</span><span class="nm"><mark>srv-db</mark>-01</span><span class="meta"><span>KR-Seoul</span><span class="sep">·</span><span class="mono">10.20.1.11</span><span class="sep">·</span><span class="st"><span class="dot" style="background:#22c55e"></span>켜짐</span></span></button>
+        <button type="button" class="row"><span class="tag k-vm">가상머신</span><span class="nm"><mark>srv-db</mark>-02</span><span class="meta"><span>KR-Seoul</span><span class="sep">·</span><span class="mono">10.20.1.12</span><span class="sep">·</span><span class="st"><span class="dot" style="background:#22c55e"></span>켜짐</span></span></button>
+        <button type="button" class="row"><span class="tag k-vm">가상머신</span><span class="nm"><mark>srv-db</mark>-test</span><span class="meta"><span>KR-Busan</span><span class="sep">·</span><span>IP —</span><span class="sep">·</span><span class="st"><span class="dot" style="background:#22c55e"></span>켜짐</span></span></button>
+        <div class="gh">VM호스트 1</div>
+        <button type="button" class="row"><span class="tag k-host">VM호스트</span><span class="nm">esx-<mark>srv-db</mark>-kr-01</span><span class="meta"><span>KR-Seoul</span><span class="sep">·</span><span class="mono">10.20.0.21</span><span class="sep">·</span><span>R760</span></span></button>
+      </div>
+      <div class="foot"><span>PL-Krakow · US-East 의 같은 이름 VM 3대는 보이지 않습니다(범위 밖 — 개수도 알리지 않음)</span></div>
+    </div>
+  </div>
+
+  <!-- ⓑ 비관리자 -->
+  <div class="cell">
+    <p class="cap"><b>ⓑ 비관리자(operator)</b> — 스토리지 · SAN · PDU 의 관리 주소는 가려지는 값(<span class="mono">addressMask</span>)이라 <span class="mono">ip:</span> 로 걸리지 않고, 행에도 ‘(주소 가림)’ 으로 적는다.</p>
+    <div class="pal" role="dialog" aria-label="장비 찾기 — 비관리자">
+      <div class="pal-in"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#8b9bb4" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg><span class="pfx">IP ×</span><label for="qb" style="position:absolute;left:-9999px">검색어</label><input id="qb" value="10.20.8." class="mono"><span class="kbd">ESC</span></div>
+      <div class="chips"><button type="button" class="chip on">전체 <span class="n">3</span></button><button type="button" class="chip">IP 대장 <span class="n">2</span></button><button type="button" class="chip">가상머신 <span class="n">1</span></button><button type="button" class="chip lock" title="관리 주소는 관리자만">스토리지 · SAN · PDU 주소</button></div>
+      <div class="band info"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 16h.01"/></svg><span>스토리지 · SAN 스위치 · PDU 의 <b>관리 주소는 관리자에게만</b> 보입니다 — 그 장비는 <b>이름 · 모델 · 시리얼</b>로 찾으세요.</span></div>
+      <div class="list">
+        <div class="gh">IP 대장 2</div>
+        <button type="button" class="row on"><span class="tag k-ip">IP</span><span class="nm mono" style="font-weight:500"><mark>10.20.8.</mark>5</span><span class="meta"><span>bk-proxy-01</span><span class="sep">·</span><span>VM</span><span class="sep">·</span><span class="st"><span class="dot" style="background:#22c55e"></span>응답</span></span></button>
+        <button type="button" class="row"><span class="tag k-ip">IP</span><span class="nm mono" style="font-weight:500"><mark>10.20.8.</mark>10</span><span class="meta"><span>(장비 이름 가림)</span><span class="sep">·</span><span>스토리지</span><span class="sep">·</span><span>관리자에게만 이름이 보입니다</span></span></button>
+        <div class="gh">가상머신 1</div>
+        <button type="button" class="row"><span class="tag k-vm">가상머신</span><span class="nm">bk-proxy-01</span><span class="meta"><span class="mono"><mark>10.20.8.</mark>5</span><span class="sep">·</span><span>KR-Seoul</span><span class="sep">·</span><span>Ubuntu 22.04</span></span></button>
+        <div class="gh">참고 — 이름으로 찾으면 이렇게 보입니다</div>
+        <button type="button" class="row"><span class="tag k-st">스토리지</span><span class="nm">unity-srv-db-kr</span><span class="meta"><span>KR-Seoul</span><span class="sep">·</span><span>Unity XT 480</span><span class="sep">·</span><span>(주소 가림)</span><span class="sep">·</span><span class="st"><span class="dot" style="background:#22c55e"></span>정상</span></span></button>
+      </div>
+      <div class="foot"><span>도구 접근이 거부된 종류(예: 스토리지 모니터링 거부)는 칩 · 행 모두 나오지 않습니다 — 서버가 같은 판정으로 뺀다</span></div>
+    </div>
+  </div>
+
+  <!-- ⓒ 출처 일부 실패 -->
+  <div class="cell">
+    <p class="cap"><b>ⓒ 색인 출처 일부 실패</b> — 한 출처가 죽어도 나머지는 찾는다(시리얼 조회와 같은 구획별 try). 빠진 출처를 띠로 밝힌다 — 조용히 ‘없음’ 으로 보이지 않게.</p>
+    <div class="pal" role="dialog" aria-label="장비 찾기 — 출처 오류">
+      <div class="pal-in"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#8b9bb4" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg><label for="qc" style="position:absolute;left:-9999px">검색어</label><input id="qc" value="unity"><span class="kbd">ESC</span></div>
+      <div class="chips"><button type="button" class="chip on">전체 <span class="n">2</span></button><button type="button" class="chip">가상머신 <span class="n">1</span></button><button type="button" class="chip">기능·탭 <span class="n">1</span></button><button type="button" class="chip lock">스토리지 <span class="n">?</span></button></div>
+      <div class="band warn"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M12 3l10 18H2L12 3z"/><path d="M12 10v4M12 17h.01"/></svg><span><b>스토리지 등록부를 읽지 못했습니다</b>(registryUnreadable) — 스토리지 결과가 빠져 있을 수 있습니다. 출처 8/9 · 다음 재시도 22초 뒤. <a href="#id-retry">지금 다시</a></span></div>
+      <div class="list">
+        <div class="gh">가상머신 1</div>
+        <button type="button" class="row on"><span class="tag k-vm">가상머신</span><span class="nm"><mark>unity</mark>-mgr-vm</span><span class="meta"><span>KR-Seoul</span><span class="sep">·</span><span class="mono">10.20.8.12</span><span class="sep">·</span><span>SUSE 15</span></span></button>
+        <div class="gh">기능 · 탭 1</div>
+        <button type="button" class="row"><span class="tag k-tool">기능</span><span class="nm">스토리지 모니터링</span><span class="meta"><span>분류 스토리지 · <mark>Unity</mark>/PowerStore/PowerMax …</span></span></button>
+      </div>
+      <div class="foot"><span>SAN 스위치 — 엣지 2곳 응답 없음(5대 빠짐)은 경고가 아니라 개수로 적는다(빈 입력 화면)</span></div>
+    </div>
+  </div>
+
+  <!-- ⓓ 결과 없음 -->
+  <div class="cell">
+    <p class="cap"><b>ⓓ 결과 없음</b> — 다른 찾기로 넘기는 길을 준다(심층 검색 · VM 정밀 검색 · 시리얼 조회 · IP관리). 검색어는 그대로 넘긴다.</p>
+    <div class="pal" role="dialog" aria-label="장비 찾기 — 없음">
+      <div class="pal-in"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#8b9bb4" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg><label for="qd" style="position:absolute;left:-9999px">검색어</label><input id="qd" value="zzq-9"><span class="kbd">ESC</span></div>
+      <div class="empty">‘zzq-9’ 에 해당하는 장비 · 기능 · 탭이 없습니다.<br><span class="dim">이름 · 호스트명 · IP · 시리얼 · 모델을 봤습니다(내 범위 · 권한 안). 템플릿 VM · 꺼진 수집 장비는 색인에 없습니다.</span>
+        <div class="sug"><a href="#id-deep">‘zzq-9’ 로 심층 검색</a><a href="#id-vmf">VM 정밀 검색</a><a href="#id-sn">시리얼 조회</a><a href="#id-ipam">IP관리에서 찾기</a></div>
+      </div>
+      <div class="foot"><span>시리얼은 <span class="mono">sn:</span> · IP 는 <span class="mono">ip:</span> 를 앞에 붙이면 그 종류만 봅니다</span></div>
+    </div>
+  </div>
+
+  <!-- ⓔ 잘림 -->
+  <div class="cell">
+    <p class="cap"><b>ⓔ 너무 많음</b> — 종류별 5건 · 전체 60건 상한. 잘린 개수를 숨기지 않고 칩의 수가 전체를 말한다. 전부가 필요하면 전용 화면으로.</p>
+    <div class="pal" role="dialog" aria-label="장비 찾기 — 잘림">
+      <div class="pal-in"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#8b9bb4" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg><label for="qe" style="position:absolute;left:-9999px">검색어</label><input id="qe" value="kr"><span class="dim" style="font-size:11px;white-space:nowrap">1,912건</span><span class="kbd">ESC</span></div>
+      <div class="chips"><button type="button" class="chip on">전체 <span class="n">1,912</span></button><button type="button" class="chip">가상머신 <span class="n">1,204</span></button><button type="button" class="chip">VM호스트 <span class="n">141</span></button><button type="button" class="chip">베어메탈 <span class="n">38</span></button><button type="button" class="chip">IP 대장 <span class="n">486</span></button><button type="button" class="chip">그 밖 <span class="n">43</span></button></div>
+      <div class="band warn"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M12 3l10 18H2L12 3z"/><path d="M12 10v4M12 17h.01"/></svg><span>일치 <b>1,912건</b> 중 종류별 5건 · 모두 <b>60건까지</b>만 보입니다. 종류를 고르거나 검색어를 좁히세요 — 전체 목록은 <a href="#id-vms">가상머신 탭 필터 ‘kr’</a> 로.</span></div>
+      <div class="list">
+        <div class="gh">가상머신 1,204 중 5</div>
+        <button type="button" class="row on"><span class="tag k-vm">가상머신</span><span class="nm">app-<mark>kr</mark>-01</span><span class="meta"><span>KR-Seoul</span><span class="sep">·</span><span class="mono">10.20.5.11</span></span></button>
+        <button type="button" class="row"><span class="tag k-vm">가상머신</span><span class="nm">app-<mark>kr</mark>-02</span><span class="meta"><span>KR-Seoul</span><span class="sep">·</span><span class="mono">10.20.5.12</span></span></button>
+        <button type="button" class="row"><span class="tag k-vm">가상머신</span><span class="nm">bk-<mark>kr</mark>-proxy</span><span class="meta"><span>KR-Busan</span><span class="sep">·</span><span class="mono">10.21.8.5</span></span></button>
+      </div>
+      <div class="foot"><span>정렬 — 이름 앞글자 일치 › 이름 포함 › 호스트명 › IP › 시리얼 › 모델 · 같은 등급은 이름순</span></div>
+    </div>
+  </div>
+
+  <!-- ⓕ 색인 못 읽음 -->
+  <div class="cell">
+    <p class="cap"><b>ⓕ 장비 색인을 못 읽음</b>(503 · 네트워크) — 기능 · 탭 찾기는 지금처럼 브라우저 안에서 동작하므로 팔레트가 멈추지 않는다.</p>
+    <div class="pal" role="dialog" aria-label="장비 찾기 — 색인 오류">
+      <div class="pal-in"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#8b9bb4" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg><label for="qf" style="position:absolute;left:-9999px">검색어</label><input id="qf" value="storage"><span class="kbd">ESC</span></div>
+      <div class="band err"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M15 9l-6 6M9 9l6 6"/></svg><span><b>장비 색인을 읽지 못했습니다</b>(503 — 색인 만드는 중 시간 초과). 기능 · 탭만 찾습니다. <a href="#id-retry2">다시 시도</a> · 자동 재시도 10초 뒤</span></div>
+      <div class="list">
+        <div class="gh">기능 · 탭 3</div>
+        <button type="button" class="row on"><span class="tag k-tool">기능</span><span class="nm">스토리지 모니터링</span><span class="meta"><span>키 <mark>storage</mark>-mon · 분류 스토리지</span></span></button>
+        <button type="button" class="row"><span class="tag k-tool">기능</span><span class="nm">베어메탈 스토리지</span><span class="meta"><span>키 bm-<mark>storage</mark></span></span></button>
+        <button type="button" class="row"><span class="tag k-tool">탭</span><span class="nm">스토리지</span><span class="meta"><span>상단 메뉴 · 데이터스토어</span></span></button>
+      </div>
+      <div class="foot"><span>첫 요청에서 색인을 만드는 동안(수 초)은 ‘장비 색인을 만드는 중…’ 으로 적고 기능 · 탭은 바로 보여 준다</span></div>
+    </div>
+  </div>
+
+  <!-- ⓖ 1자 -->
+  <div class="cell">
+    <p class="cap"><b>ⓖ 1자 입력</b> — 장비는 2자부터(1자는 수천 건이 걸려 쓸모가 없다). 기능 · 탭은 지금처럼 1자부터.</p>
+    <div class="pal" role="dialog" aria-label="장비 찾기 — 1자">
+      <div class="pal-in"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#8b9bb4" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg><label for="qg" style="position:absolute;left:-9999px">검색어</label><input id="qg" value="g"><span class="kbd">ESC</span></div>
+      <div class="list">
+        <div class="gh">기능 · 탭 4</div>
+        <button type="button" class="row on"><span class="tag k-tool">기능</span><span class="nm">GPU 인벤토리</span><span class="meta"><span>키 <mark>g</mark>pu</span></span></button>
+        <button type="button" class="row"><span class="tag k-tool">기능</span><span class="nm">GPU 할당율</span><span class="meta"><span>키 <mark>g</mark>pu-alloc</span></span></button>
+        <button type="button" class="row"><span class="tag k-tool">기능</span><span class="nm">게스트 디스크</span><span class="meta"><span>키 <mark>g</mark>uest-disk</span></span></button>
+        <div class="gh" style="color:#aebbd0;font-weight:500">장비는 2자부터 찾습니다 — <span class="mono">ip:</span> · <span class="mono">sn:</span> 뒤는 3자부터</div>
+      </div>
+      <div class="foot"><span>디바운스 150ms · 늦게 온 이전 응답은 버린다 · 검색어 상한 256자</span></div>
+    </div>
+  </div>
+
+  <!-- ⓗ 데모 -->
+  <div class="cell">
+    <p class="cap"><b>ⓗ 데모 계정</b>(mock) — 가상 데이터로 똑같이 동작한다. 데모 계정은 관리자 판본이 아니므로 ⓑ 와 같은 가림.</p>
+    <div class="pal" role="dialog" aria-label="장비 찾기 — 데모">
+      <div class="pal-in"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#8b9bb4" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg><label for="qh" style="position:absolute;left:-9999px">검색어</label><input id="qh" value="web"><span class="dim" style="font-size:11px">데모 데이터</span><span class="kbd">ESC</span></div>
+      <div class="chips"><button type="button" class="chip on">전체 <span class="n">14</span></button><button type="button" class="chip">가상머신 <span class="n">11</span></button><button type="button" class="chip">VM호스트 <span class="n">2</span></button><button type="button" class="chip">스토리지 <span class="n">1</span></button></div>
+      <div class="list">
+        <div class="gh">가상머신 11 중 3</div>
+        <button type="button" class="row on"><span class="tag k-vm">가상머신</span><span class="nm"><mark>web</mark>-demo-01</span><span class="meta"><span>Demo-Seoul</span><span class="sep">·</span><span class="mono">10.0.1.11</span></span></button>
+        <button type="button" class="row"><span class="tag k-vm">가상머신</span><span class="nm"><mark>web</mark>-demo-02</span><span class="meta"><span>Demo-Seoul</span><span class="sep">·</span><span class="mono">10.0.1.12</span></span></button>
+        <button type="button" class="row"><span class="tag k-st">스토리지</span><span class="nm">demo-<mark>web</mark>-unity</span><span class="meta"><span>Demo-Seoul</span><span class="sep">·</span><span>(주소 가림)</span></span></button>
+      </div>
+      <div class="foot"><span>데모 가드(<span class="mono">demoGuest</span>) 판정은 서버 한 곳 — 팔레트가 다시 판정하지 않는다</span></div>
+    </div>
+  </div>
+
+  <!-- ⓘ 키보드 -->
+  <div class="cell">
+    <p class="cap"><b>ⓘ 키보드</b> — 지금 팔레트의 ↑ ↓ Enter Esc 에 <span class="mono">Tab</span>(종류 칩 이동)과 <span class="mono">⌘⏎</span>(새 탭) 만 더한다. 전역 keydown 은 ⌘K 하나(기존).</p>
+    <div class="pal" role="dialog" aria-label="키보드">
+      <div class="list" style="padding:8px 10px;gap:6px">
+        <div style="display:grid;grid-template-columns:110px 1fr;gap:6px 10px;font-size:12px;align-items:center">
+          <span><span class="kbd">⌘K</span> <span class="kbd">Ctrl+K</span></span><span>열기 · 닫기(어디서나 — 입력 중이 아닐 때)</span>
+          <span><span class="kbd">↑</span> <span class="kbd">↓</span></span><span>행 이동(묶음을 넘나든다)</span>
+          <span><span class="kbd">Enter</span></span><span>열기 — 같은 창에서 이동 · 팔레트 닫힘</span>
+          <span><span class="kbd">⌘</span>+<span class="kbd">Enter</span></span><span>새 탭에서 열기(팔레트는 남는다)</span>
+          <span><span class="kbd">Tab</span> <span class="kbd">⇧Tab</span></span><span>종류 칩 다음 · 이전 — 선택하면 그 종류만</span>
+          <span><span class="kbd">vm:</span> …</span><span>접두 = 종류 칩과 같은 뜻 · 칩의 × 로 지운다</span>
+          <span><span class="kbd">Esc</span></span><span>접두가 있으면 접두만 지움 → 다시 Esc 닫기</span>
+          <span><span class="kbd">⌘</span>+<span class="kbd">C</span></span><span>선택 행의 주소 복사(이름 · IP 가 아니라 이동 주소)</span>
+        </div>
+      </div>
+      <div class="foot"><span>마우스 — 행 hover 로 커서 이동 · 칩 클릭 토글 · ‘더 보기’ 는 그 묶음만 펼친다</span></div>
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1460,"height":1060}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>통합 장비 검색 — 빈 입력</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=Noto+Sans+KR:wght@400;500;700;800&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+body{margin:0;background:#0a0e17;color:#e6edf6;font-family:"Inter","Noto Sans KR","Apple SD Gothic Neo",sans-serif;font-size:13px}
+a{color:#93c5fd}a:hover{color:#bfdbfe}
+.kbd{display:inline-block;min-width:16px;padding:0 6px;border:1px solid #243049;border-radius:5px;background:#141b2d;color:#aebbd0;font-size:10.5px;font-family:"JetBrains Mono",monospace;line-height:17px;text-align:center}
+.mono{font-family:"JetBrains Mono",ui-monospace,monospace}
+.dim{color:#8b9bb4}
+.pal{width:760px;background:#141b2d;border:1px solid #243049;border-radius:12px;box-shadow:0 4px 24px rgba(0,0,0,.4);overflow:hidden;display:flex;flex-direction:column}
+.pal-in{display:flex;align-items:center;gap:10px;padding:12px 14px;border-bottom:1px solid #1f2a40}
+.pal-in input{flex:1;min-width:0;border:none;outline:none;background:transparent;font:inherit;font-size:13.5px;color:#e6edf6}
+.pal-in input::placeholder{color:#8b9bb4}
+.sec{padding:10px 14px 4px;font-size:11px;font-weight:700;color:#8b9bb4;display:flex;align-items:center;gap:8px}
+.sec .r{margin-left:auto;font-weight:500}
+.grid{display:grid;grid-template-columns:repeat(4, minmax(0, 1fr));gap:6px;padding:4px 10px}
+.cell{display:flex;flex-direction:column;gap:3px;padding:9px 10px;border-radius:8px;background:#0f1626;border:1px solid #1f2a40;min-width:0}
+.cell .l{display:flex;align-items:center;gap:6px;font-size:11.5px;font-weight:600;white-space:nowrap}
+.cell .n{font-family:"JetBrains Mono",monospace;font-size:15px;font-weight:600}
+.cell .s{font-size:10.5px;color:#8b9bb4;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.cell.warn{border-color:rgba(245,158,11,.5)}
+.cell.warn .s{color:#fcd34d}
+.sw{width:8px;height:8px;border-radius:2px;display:inline-block;flex:0 0 auto}
+.pre{display:flex;flex-wrap:wrap;gap:6px;padding:4px 14px 8px}
+.pre .p{display:inline-flex;align-items:center;gap:6px;height:24px;padding:0 8px;border-radius:6px;background:#0f1626;border:1px solid #243049;font-size:11.5px;color:#aebbd0;white-space:nowrap}
+.pre .p b{font-family:"JetBrains Mono",monospace;font-weight:600;color:#e6edf6}
+.row{display:flex;align-items:center;gap:10px;width:100%;text-align:left;padding:7px 10px;border:none;border-radius:8px;background:transparent;font:inherit;font-size:12.5px;color:#e6edf6;cursor:pointer;min-width:0}
+.row .nm{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.row .meta{display:flex;gap:8px;color:#8b9bb4;font-size:11.5px;white-space:nowrap;overflow:hidden;flex:1 1 auto}
+.row .sep{color:#5d6b85}
+.row .to{margin-left:auto;font-family:"JetBrains Mono",monospace;font-size:10.5px;color:#8b9bb4;white-space:nowrap}
+.tag{display:inline-flex;align-items:center;height:20px;padding:0 7px;border-radius:5px;font-size:10.5px;font-weight:700;white-space:nowrap;flex:0 0 auto;min-width:54px;justify-content:center}
+.k-vm{background:rgba(59,130,246,.2);color:#93c5fd}
+.k-st{background:rgba(52,224,180,.16);color:#99f6e4}
+.k-host{background:rgba(34,211,238,.16);color:#a5f3fc}
+.foot{display:flex;align-items:center;gap:14px;padding:8px 14px;border-top:1px solid #1f2a40;font-size:11px;color:#8b9bb4;flex-wrap:wrap}
+.foot .r{margin-left:auto}
+.note{margin:6px 14px 10px;padding:8px 10px;border-radius:8px;background:#0f1626;border:1px solid #1f2a40;font-size:11.5px;color:#aebbd0;line-height:1.6}
+</style>
+</helmet>
+<div style="width:760px;height:900px;box-sizing:border-box;background:#0a0e17;display:flex;align-items:flex-start">
+  <div class="pal" role="dialog" aria-label="장비 · 기능 찾기">
+    <div class="pal-in">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#8b9bb4" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+      <label for="q" style="position:absolute;left:-9999px">검색어</label>
+      <input id="q" value="" placeholder="장비 · 기능 찾기 — 이름 · 호스트명 · IP · 시리얼/서비스 태그 · 모델 · 기능 이름">
+      <span class="kbd">ESC</span>
+    </div>
+
+    <div class="sec">찾는 범위 — 지금 색인 <span class="r mono">14초 전 · 출처 9/9 · 2.4초 걸림</span></div>
+    <div class="grid">
+      <div class="cell"><div class="l"><span class="sw" style="background:#3b82f6"></span>가상머신</div><div class="n">5,850</div><div class="s">28 vCenter · 템플릿 제외</div></div>
+      <div class="cell"><div class="l"><span class="sw" style="background:#22d3ee"></span>VM호스트</div><div class="n">658</div><div class="s">ESXi · 서비스 태그 포함</div></div>
+      <div class="cell"><div class="l"><span class="sw" style="background:#8b9bb4"></span>데이터스토어</div><div class="n">212</div><div class="s">VMFS · NFS · vSAN</div></div>
+      <div class="cell"><div class="l"><span class="sw" style="background:#a855f7"></span>베어메탈 서버</div><div class="n">184</div><div class="s">iDRAC 161 · OME 9 · 엣지 14</div></div>
+      <div class="cell"><div class="l"><span class="sw" style="background:#34e0b4"></span>스토리지</div><div class="n">41</div><div class="s">어레이 · 어플라이언스 태그</div></div>
+      <div class="cell warn"><div class="l"><span class="sw" style="background:#f59e0b"></span>SAN 스위치</div><div class="n">31<span class="dim" style="font-size:11px;font-weight:500"> /36</span></div><div class="s">엣지 2곳 응답 없음 — 5대 빠짐</div></div>
+      <div class="cell"><div class="l"><span class="sw" style="background:#fb923c"></span>네트워크 스위치</div><div class="n">128</div><div class="s">Arista CVP 3곳</div></div>
+      <div class="cell"><div class="l"><span class="sw" style="background:#ec4899"></span>PDU</div><div class="n">22</div><div class="s">APC rpdu2g</div></div>
+      <div class="cell"><div class="l"><span class="sw" style="background:#c3cee0"></span>IP 대장</div><div class="n">9,412</div><div class="s">VM·호스트·스캔 발견 · 오버라이드</div></div>
+      <div class="cell"><div class="l"><span class="sw" style="background:#22d3ee"></span>vCenter</div><div class="n">28</div><div class="s">법인 28</div></div>
+      <div class="cell"><div class="l"><span class="sw" style="background:#a855f7"></span>GPU 서버</div><div class="n">17</div><div class="s">물리 GPU 등록부</div></div>
+      <div class="cell"><div class="l"><span class="sw" style="background:#aebbd0"></span>기능 · 탭</div><div class="n">131</div><div class="s">지금과 같음(키 · 분류 · 옛 이름)</div></div>
+    </div>
+
+    <div class="sec">접두로 종류를 고를 수 있습니다</div>
+    <div class="pre">
+      <span class="p"><b>vm:</b>가상머신</span><span class="p"><b>host:</b>VM호스트</span><span class="p"><b>ds:</b>데이터스토어</span><span class="p"><b>bm:</b>베어메탈</span><span class="p"><b>st:</b>스토리지</span><span class="p"><b>san:</b>SAN</span><span class="p"><b>net:</b>네트워크</span><span class="p"><b>pdu:</b>PDU</span><span class="p"><b>ip:</b>IP 대장 + IP 보유 장비</span><span class="p"><b>sn:</b>시리얼 · 서비스 태그 · WWN</span><span class="p"><b>vc:</b>vCenter</span>
+    </div>
+    <div class="note">예 — <span class="mono">ip:10.20.1.</span> 10.20.1.x 를 가진 모든 것 · <span class="mono">sn:7HX2K93</span> 대소문자 · 구분자(<span class="mono">:</span> <span class="mono">-</span>) 무시 · <span class="mono">bm:r750</span> 모델명으로 베어메탈 · 접두 없이 치면 모든 종류에서 이름 · 호스트명 · IP · 시리얼 · 모델을 봅니다(2자부터 · 기능 · 탭은 1자부터).</div>
+
+    <div class="sec">최근 연 항목 <span class="r">이 브라우저에만 · 지우기</span></div>
+    <div style="padding:0 6px 6px;display:flex;flex-direction:column">
+      <button type="button" class="row"><span class="tag k-vm">가상머신</span><span class="nm">srv-db-01</span><span class="meta"><span>KR-Seoul</span><span class="sep">·</span><span class="mono">10.20.1.11</span><span class="sep">·</span><span>방금</span></span><span class="to">가상머신 › 상세</span></button>
+      <button type="button" class="row"><span class="tag k-st">스토리지</span><span class="nm">pmax-fin-us</span><span class="meta"><span>US-East</span><span class="sep">·</span><span>PowerMax 2500</span><span class="sep">·</span><span>어제</span></span><span class="to">스토리지 모니터링</span></button>
+      <button type="button" class="row"><span class="tag k-host">VM호스트</span><span class="nm">esx-pl-11.corp.local</span><span class="meta"><span>PL-Krakow</span><span class="sep">·</span><span class="mono">10.44.0.41</span><span class="sep">·</span><span>3일 전</span></span><span class="to">#/hosts/…</span></button>
+    </div>
+
+    <div class="foot">
+      <span><span class="kbd">↑</span> <span class="kbd">↓</span> 이동</span>
+      <span><span class="kbd">Enter</span> 열기</span>
+      <span><span class="kbd">Esc</span> 닫기</span>
+      <span class="r">내 범위 · 권한 안의 장비만 색인에 있습니다</span>
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":760,"height":900}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

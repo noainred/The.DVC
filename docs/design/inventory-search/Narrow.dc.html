@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>통합 장비 검색 — 400px</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=Noto+Sans+KR:wght@400;500;700;800&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+body{margin:0;background:#0a0e17;color:#e6edf6;font-family:"Inter","Noto Sans KR","Apple SD Gothic Neo",sans-serif;font-size:13px}
+a{color:#93c5fd}a:hover{color:#bfdbfe}
+.tb{display:flex;align-items:center;gap:10px;height:44px;padding:0 12px;background:#0f1626;border-bottom:1px solid #1f2a40}
+.tb .logo{display:inline-flex;align-items:center;gap:8px;font-weight:700;font-size:13px;white-space:nowrap}
+.tb .logo .v{width:26px;height:26px;border-radius:7px;background:linear-gradient(135deg,#3b82f6,#22d3ee);display:inline-flex;align-items:center;justify-content:center;font-size:13px;font-weight:800;color:#04101f}
+.ic{width:32px;height:32px;border-radius:8px;border:1px solid #3b82f6;background:#0f1626;display:inline-flex;align-items:center;justify-content:center;color:#e6edf6}
+.kbd{display:inline-block;min-width:16px;padding:0 6px;border:1px solid #243049;border-radius:5px;background:#141b2d;color:#aebbd0;font-size:10.5px;font-family:"JetBrains Mono",monospace;line-height:17px;text-align:center}
+.mono{font-family:"JetBrains Mono",ui-monospace,monospace}
+.dim{color:#8b9bb4}
+.dot{width:8px;height:8px;border-radius:50%;display:inline-block;flex:0 0 auto}
+.pal{position:absolute;left:8px;right:8px;top:52px;bottom:8px;background:#141b2d;border:1px solid #243049;border-radius:12px;box-shadow:0 4px 24px rgba(0,0,0,.4);overflow:hidden;display:flex;flex-direction:column}
+.pal-in{display:flex;align-items:center;gap:8px;padding:10px 12px;border-bottom:1px solid #1f2a40}
+.pal-in input{flex:1;min-width:0;border:none;outline:none;background:transparent;font:inherit;font-size:16px;color:#e6edf6}
+.chips{display:flex;gap:6px;padding:8px 10px;border-bottom:1px solid #1f2a40;overflow-x:auto;white-space:nowrap}
+.chip{display:inline-flex;align-items:center;gap:4px;height:28px;padding:0 10px;border-radius:999px;border:1px solid #243049;background:#0f1626;color:#aebbd0;font:inherit;font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap;flex:0 0 auto}
+.chip.on{border-color:#3b82f6;background:rgba(59,130,246,.18);color:#e6edf6}
+.chip .n{font-family:"JetBrains Mono",monospace;font-weight:500;font-size:11px}
+.list{padding:4px 4px 6px;display:flex;flex-direction:column;overflow:auto;flex:1}
+.gh{display:flex;align-items:center;gap:8px;padding:8px 10px 2px;font-size:11px;font-weight:700;color:#8b9bb4}
+.gh .more{margin-left:auto;font-weight:600;color:#93c5fd;font-size:11px;background:none;border:0;cursor:pointer;font-family:inherit;min-height:28px}
+.row{display:flex;align-items:flex-start;gap:8px;width:100%;text-align:left;padding:8px 10px;border:none;border-radius:8px;background:transparent;font:inherit;font-size:13px;color:#e6edf6;cursor:pointer;min-width:0;min-height:44px}
+.row.on{background:rgba(59,130,246,.14)}
+.row .b{display:flex;flex-direction:column;gap:2px;min-width:0;flex:1}
+.row .nm{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.row .nm mark{background:transparent;color:#fcd34d;font-weight:800}
+.row .meta{display:flex;gap:6px;color:#8b9bb4;font-size:11.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.row .sep{color:#5d6b85}
+.tag{display:inline-flex;align-items:center;height:20px;padding:0 6px;border-radius:5px;font-size:10px;font-weight:700;white-space:nowrap;flex:0 0 auto;min-width:44px;justify-content:center;margin-top:1px}
+.k-vm{background:rgba(59,130,246,.2);color:#93c5fd}
+.k-host{background:rgba(34,211,238,.16);color:#a5f3fc}
+.k-bm{background:rgba(168,85,247,.2);color:#d8b4fe}
+.k-st{background:rgba(52,224,180,.16);color:#99f6e4}
+.k-ip{background:rgba(139,155,180,.14);color:#c3cee0;border:1px solid #243049}
+.k-tool{background:#1a2236;border:1px solid #243049;color:#aebbd0}
+.foot{display:flex;align-items:center;gap:10px;padding:8px 12px;border-top:1px solid #1f2a40;font-size:11px;color:#8b9bb4}
+.foot .r{margin-left:auto}
+.st{display:inline-flex;align-items:center;gap:4px}
+</style>
+</helmet>
+<div style="width:400px;height:860px;position:relative;overflow:hidden;background:#0a0e17;box-sizing:border-box;display:flex;flex-direction:column">
+  <div class="tb">
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#8b9bb4" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+    <span class="logo"><span class="v">D</span>THE DAVINCI</span>
+    <button type="button" class="ic" aria-label="장비 · 기능 찾기" style="margin-left:auto"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg></button>
+    <span class="dim" style="font-size:12px">jhpark</span>
+  </div>
+  <div style="flex:1;padding:14px;opacity:.5"><div style="height:18px;width:120px;border-radius:4px;background:#1a2236"></div><div style="margin-top:12px;height:560px;border:1px dashed #243049;border-radius:10px"></div></div>
+
+  <div style="position:absolute;inset:0;background:rgba(5,8,16,.6)"></div>
+  <div class="pal" role="dialog" aria-label="장비 · 기능 찾기">
+    <div class="pal-in">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#8b9bb4" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+      <label for="qn" style="position:absolute;left:-9999px">검색어</label>
+      <input id="qn" value="srv-db">
+      <button type="button" class="kbd" style="min-height:28px;font-family:inherit" aria-label="닫기">닫기</button>
+    </div>
+    <div class="chips" aria-label="종류">
+      <button type="button" class="chip on">전체 <span class="n">24</span></button>
+      <button type="button" class="chip">가상머신 <span class="n">12</span></button>
+      <button type="button" class="chip">VM호스트 <span class="n">3</span></button>
+      <button type="button" class="chip">베어메탈 <span class="n">2</span></button>
+      <button type="button" class="chip">스토리지 <span class="n">1</span></button>
+      <button type="button" class="chip">네트워크 <span class="n">1</span></button>
+      <button type="button" class="chip">IP <span class="n">4</span></button>
+      <button type="button" class="chip">기능 <span class="n">1</span></button>
+    </div>
+    <div class="list">
+      <div class="gh">가상머신 <span class="dim" style="font-weight:500">12 중 3</span><button type="button" class="more">탭에서 모두 ›</button></div>
+      <button type="button" class="row on"><span class="tag k-vm">VM</span><span class="b"><span class="nm"><mark>srv-db</mark>-01</span><span class="meta"><span>KR-Seoul</span><span class="sep">·</span><span class="mono">10.20.1.11</span><span class="sep">·</span><span class="st"><span class="dot" style="background:#22c55e"></span>켜짐</span><span class="sep">·</span><span>RHEL 8.9</span></span></span></button>
+      <button type="button" class="row"><span class="tag k-vm">VM</span><span class="b"><span class="nm"><mark>srv-db</mark>-02</span><span class="meta"><span>KR-Seoul</span><span class="sep">·</span><span class="mono">10.20.1.12</span><span class="sep">·</span><span class="st"><span class="dot" style="background:#22c55e"></span>켜짐</span></span></span></button>
+      <button type="button" class="row"><span class="tag k-vm">VM</span><span class="b"><span class="nm"><mark>srv-db</mark>-arch</span><span class="meta"><span>PL-Krakow</span><span class="sep">·</span><span class="mono">10.44.3.8</span><span class="sep">·</span><span class="st"><span class="dot" style="background:#5d6b85"></span>꺼짐</span></span></span></button>
+
+      <div class="gh">VM호스트 <span class="dim" style="font-weight:500">3 중 2</span><button type="button" class="more">탭에서 모두 ›</button></div>
+      <button type="button" class="row"><span class="tag k-host">호스트</span><span class="b"><span class="nm">esx-<mark>srv-db</mark>-kr-01.corp.local</span><span class="meta"><span>KR-Seoul</span><span class="sep">·</span><span class="mono">10.20.0.21</span><span class="sep">·</span><span>R760</span><span class="sep">·</span><span class="mono">7HX2K93</span></span></span></button>
+      <button type="button" class="row"><span class="tag k-host">호스트</span><span class="b"><span class="nm">esx-<mark>srv-db</mark>-pl-01.corp.local</span><span class="meta"><span>PL-Krakow</span><span class="sep">·</span><span class="st"><span class="dot" style="background:#f59e0b"></span>유지보수</span></span></span></button>
+
+      <div class="gh">베어메탈 <span class="dim" style="font-weight:500">2</span></div>
+      <button type="button" class="row"><span class="tag k-bm">BM</span><span class="b"><span class="nm">bm-<mark>srv-db</mark>-ora-01</span><span class="meta"><span>KR-Seoul</span><span class="sep">·</span><span>iDRAC <span class="mono">10.20.9.31</span></span><span class="sep">·</span><span>R750</span></span></span></button>
+      <button type="button" class="row"><span class="tag k-bm">BM</span><span class="b"><span class="nm">bm-<mark>srv-db</mark>-ora-02</span><span class="meta"><span>KR-Seoul</span><span class="sep">·</span><span>엣지 수집</span><span class="sep">·</span><span class="st"><span class="dot" style="background:#f59e0b"></span>경고 PSU2</span></span></span></button>
+
+      <div class="gh">스토리지 <span class="dim" style="font-weight:500">1</span></div>
+      <button type="button" class="row"><span class="tag k-st">스토리지</span><span class="b"><span class="nm">unity-<mark>srv-db</mark>-kr</span><span class="meta"><span>KR-Seoul</span><span class="sep">·</span><span>Unity XT 480</span><span class="sep">·</span><span>사용 71%</span></span></span></button>
+
+      <div class="gh">IP 대장 <span class="dim" style="font-weight:500">4 중 1</span><button type="button" class="more">IP관리에서 모두 ›</button></div>
+      <button type="button" class="row"><span class="tag k-ip">IP</span><span class="b"><span class="nm mono" style="font-weight:500">10.20.1.11</span><span class="meta"><span><mark>srv-db</mark>-01</span><span class="sep">·</span><span>VM</span><span class="sep">·</span><span>10.20.1.0/24</span></span></span></button>
+
+      <div class="gh">기능 · 탭 <span class="dim" style="font-weight:500">1</span></div>
+      <button type="button" class="row"><span class="tag k-tool">기능</span><span class="b"><span class="nm">‘srv-db’ 로 심층 검색</span><span class="meta"><span>다조건 + 게스트 탐침</span></span></span></button>
+    </div>
+    <div class="foot"><span>표시 10 · 숨김 14</span><span class="r mono">색인 14초 전</span></div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":400,"height":860}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

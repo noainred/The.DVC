@@ -18,9 +18,12 @@ export function roleLabel(user) {
   return ROLE_LABEL[user.role] || String(user.role ?? '');
 }
 
-/** ⌘K 검색 버튼 문구 — 기능(특수 기능)·탭(상단 메뉴)만 찾는다. VM 이름 검색은 Platform 탭의 검색창이다(여기서 약속하지 않는다). */
-export const SEARCH_PLACEHOLDER = '기능 · 탭 찾기';
-export const SEARCH_TITLE = '기능·탭 찾기 (⌘K / Ctrl+K)';
+/**
+ * ⌘K 검색 버튼 문구. v2.909 부터 팔레트가 **등록된 인벤토리의 장비**(VM · 호스트 · 베어메탈 · 스토리지 · SAN · 네트워크 · PDU · IP 대장 …)와
+ * 기능 · 탭을 함께 찾는다(docs/design/inventory-search — 사용자 컨펌 2026-11-05). v2.727 의 '기능 · 탭만 — VM 이름은 약속하지 않는다' 는 이제 사실이 아니다.
+ */
+export const SEARCH_PLACEHOLDER = '장비 · 기능 찾기 — 이름 · IP · 시리얼';
+export const SEARCH_TITLE = '장비 · 기능 찾기 (⌘K / Ctrl+K)';
 
 /** 수집 시각을 헤더 한 줄에 붙일 짧은 표기(ko-KR 시각). 읽지 못하면 빈 문자열 — '—' 를 붙이지 않는다(값 자리가 아니라 꼬리). */
 export function generatedAtText(iso) {

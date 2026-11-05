@@ -33,6 +33,7 @@ import {
   eventDeviceRefs, eventDeviceSort,
 } from './cvpText.js';
 import Select from '../../components/Select.jsx';
+import useSearchHandoff from '../../hooks/useSearchHandoff.js'; // v2.909 헤더 ⌘K 통합 장비 검색 — 검색어 인계
 
 /**
  * 특수기능 › Arista CloudVision(CVP) — v2.608.
@@ -58,6 +59,7 @@ export default function CvpTool() {
   const [devices, setDevices] = useState(null);
   const [devErr, setDevErr] = useState(null);
   const [q, setQ] = useState('');
+  useSearchHandoff('cvp', setQ); // v2.909: ⌘K 검색에서 고른 장비 · ‘모두 보기’ 검색어(장비 탭)
   const [cvpSel, setCvpSel] = useState('');
   const [msg, setMsg] = useState(null);
   const [collectErr, setCollectErr] = useState(null); // 403 등 — ErrorBox 가 권한 안내로 바꾼다(v2.398)

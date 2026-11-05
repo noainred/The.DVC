@@ -102,6 +102,8 @@ import { modeFromHash } from './views/execOverviewText.js';
 import { MODE_KEY, normMode, resolveMode } from './views/overviewMode.js';
 import { statusCounts } from './views/statusBarText.js'; // v2.675 — 첫 수집 중 상태바는 0 이 아니라 '—'
 import { runtimeBanner } from './views/runtimeBannerText.js'; // 2026-10-09 검토 I-06
+import { takeSearch, onSearchHandoff } from './hooks/searchHandoff.js'; // v2.909 ⌘K 통합 장비 검색 — 검색어 인계(메모리)
+const INV_FILTER_TABS = ['vms', 'hosts', 'datastores'];
 const readOvMode = () => { try { return normMode(window.localStorage.getItem(MODE_KEY)); } catch { return null; } };
 const writeOvMode = (m) => { try { window.localStorage.setItem(MODE_KEY, m); } catch { /* 저장 실패는 기능을 막지 않는다 */ } };
 
@@ -146,6 +148,7 @@ export default function App() {
     (async () => {
       const cfg = await fetchAuthConfig();
       setAuthCfg(cfg);
+      // v2.909: 인증을 끈 단일 사용자 모드에는 계정명이 없다 — ⌘K 최근 항목 키는 'anonymous'(로그인 계정은 /auth/me 의 username).
       if (!cfg.authEnabled) return setUser({ name: 'Anonymous', role: 'admin', serviceHubUrl: cfg.serviceHubUrl || '' }); // v2.613 WEB2613-01: 화면이 /auth/me 를 다시 부르지 않으므로 허브 주소도 여기서
       if (!getToken()) return setUser(null);
       const me = await fetchMe();
@@ -297,6 +300,15 @@ function Portal({ user, onLogout }) {
   const setQ = (v) => patchFilter({ q: v });
   const setQNotes = (v) => patchFilter({ qNotes: v });
   const setQIpms = (v) => patchFilter({ qIpms: v });
+  // v2.909 헤더 ⌘K 통합 장비 검색 — 가상머신 · VM호스트 · 스토리지(데이터스토어) 탭은 상단 필터바의 검색이 그 화면의 검색 칸이다.
+  //   팔레트가 남긴 검색어(장비 이름 · ‘모두 보기’ 검색어)를 그 탭의 필터로 넣는다 — 팔레트가 범위 안 전 vCenter 에서 센 결과이므로
+  //   리전 · vCenter 선택은 비운다(남겨 두면 '모두 보기' 가 일부만 보인다). 인계는 메모리다(hooks/searchHandoff.js — URL 에 싣지 않는다).
+  useEffect(() => onSearchHandoff((t) => {
+    if (!INV_FILTER_TABS.includes(t)) return;
+    const s = takeSearch(t);
+    if (s) patchFilter({ q: s, region: '', vcenterId: '' }, t);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }), []);
 
   // Keep the URL hash in sync with the active tab, and follow back/forward.
   const setTab = (id) => { setTabState(id); window.location.hash = `#/${id}`; setHashNow(`#/${id}`); };
@@ -624,7 +636,7 @@ function Portal({ user, onLogout }) {
       {paletteOn && (
         <Suspense fallback={null}>
           <div className="hdr-palette">{/* v2.727: 팔레트를 다크 토큰으로 — styles.css .hdr-palette */}
-            <Palette tabs={visibleTabs} isAdmin={user.role === 'admin'} toolsAllowed={getCurrentUser()?.toolsAllowed ?? null}
+            <Palette tabs={visibleTabs} isAdmin={user.role === 'admin'} username={user.username || 'anonymous'} toolsAllowed={getCurrentUser()?.toolsAllowed ?? null}
               onClose={() => setPaletteOn(false)}
               onPick={(h) => { setPaletteOn(false); if (h && window.location.hash !== h) window.location.hash = h; }} />
           </div>
