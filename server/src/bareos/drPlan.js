@@ -26,6 +26,17 @@ export function drItemIssue(r) {
 export const DR_TRIAL_MS = 7 * 86_400_000;
 const OK_STATES = new Set(['ok', 'warning']);
 /**
+ * 재해 복구 복원 한 건이 **끝맺음까지** 성공했는가(순수 — 시험 1대 · 실행기 · 웹 drTrialOk 가 같은 조건 · bareosDr2 가 대조).
+ *   버그 점검 B4-02(재현): 시험 판정이 Bareos 상태(ok · warning)만 봐서 NIC 끊기 실패 · 끝맺음 중 · 켜 보기 실패여도 통과했다 —
+ *   점검의 권한 칸은 늘 '?' 라 끊기 권한이 처음 확인되는 곳이 시험 1대인데 그 결과를 버렸다.
+ */
+export function drRestorePassed(r) {
+  if (!r || !OK_STATES.has(String(r.state || ''))) return false;
+  if (r.nic === 'disconnect' && r.finish?.nic !== 'ok') return false;
+  if (r.verify === true && r.finish?.verify !== 'ok') return false;
+  return true;
+}
+/**
  * 반증 R1(플러그인 원문 — 23~25 vmw2 restore): 디스크를 쓰는 덤퍼는 **백업 때 저장한 접속값**(vCenter 주소 · 계정 · 인증서 지문)을 쓰고 VM MoRef 만 새 것으로 바꾼다.
  *   다시 설치로 지문 · 계정이 바뀌면 VM 껍데기만 만들어지고 디스크 쓰기가 실패할 수 있다(실환경 미확인 — 추정). 그래서 그 법인에서 재해 복구 1대가
  *   **성공으로 끝난 뒤에만** 2대 이상 묶음을 보낸다(같은 법인 VM 은 같은 INI 로 백업됐다 — 1대가 되면 나머지도 같은 접속값).
@@ -35,9 +46,9 @@ export function drTrialIssue(jobs, vcenterId, count, now = Date.now()) {
   if (!(count > 1)) return '';
   for (const j of Array.isArray(jobs) ? jobs : []) {
     if (String(j.vcenterId) !== String(vcenterId)) continue;
-    for (const r of j.restores || []) if (r?.dr === true && OK_STATES.has(String(r.state || '')) && now - (Number(r.endedAt || r.at) || 0) < DR_TRIAL_MS) return '';
+    for (const r of j.restores || []) if (r?.dr === true && drRestorePassed(r) && now - (Number(r.endedAt || r.at) || 0) < DR_TRIAL_MS) return '';
   }
-  return '이 법인에서 재해 복구 1대가 성공으로 끝난 뒤에 여러 대를 보냅니다 — Bareos 플러그인은 백업 때 저장한 vCenter 접속값(인증서 지문 · 계정)으로 디스크를 씁니다. vCenter 를 다시 설치해 지문이 바뀌었으면 VM 껍데기만 생기고 실패할 수 있어, 먼저 1대로 확인합니다.';
+  return '이 법인에서 재해 복구 1대가 성공으로 끝난 뒤에(네트워크 끊기 · 켜 보기 끝맺음까지) 여러 대를 보냅니다 — Bareos 플러그인은 백업 때 저장한 vCenter 접속값(인증서 지문 · 계정)으로 디스크를 씁니다. vCenter 를 다시 설치해 지문이 바뀌었으면 VM 껍데기만 생기고 실패할 수 있어, 먼저 1대로 확인합니다.';
 }
 
 export function drCheckView({ vcenterId, snapshot, jobs, site, director, dirPoll, lastOkOf, registryHost = '' }) {
@@ -52,9 +63,15 @@ export function drCheckView({ vcenterId, snapshot, jobs, site, director, dirPoll
   for (const j of mine) { const t = lastOkOf(j.lastRun, j.finishedRuns)?.at ?? null; if (t && (!lastOk || t > lastOk)) lastOk = t; }
   const dcs = [...new Set(hosts.map((h) => h.vcDatacenter).filter((x) => typeof x === 'string' && x))].sort();
   const clusterKey = new Map();
-  for (const h of hosts) if (h.cluster) clusterKey.set(`${h.vcDatacenter || ''}\u0000${h.cluster}`, { name: h.cluster, dc: h.vcDatacenter || null });
+  // 수집기는 독립 호스트에 cluster 'standalone' 을 싣는다 — 클러스터로 세지 않는다(버그 점검 B4-03 · clustercfg/analyze.js 와 같은 규칙: restore_cluster=standalone 이 나갔다)
+  for (const h of hosts) if (h.cluster && h.cluster !== 'standalone') clusterKey.set(`${h.vcDatacenter || ''}\u0000${h.cluster}`, { name: h.cluster, dc: h.vcDatacenter || null });
   const clusters = [...clusterKey.values()].sort((a, b) => String(a.name).localeCompare(String(b.name)));
-  const datastores = dss.map((d) => ({ name: d.name, freeGB: numOrNull(d.freeGB), capacityGB: numOrNull(d.capacityGB), accessible: d.accessible !== false })).sort((a, b) => String(a.name).localeCompare(String(b.name)));
+  // 같은 이름 데이터스토어가 둘 이상(데이터센터가 다름)이면 이름만으로는 어느 것인지 모른다 — 여유를 싣지 않는다(버그 점검 B4-05 ③ — 첫 행의 여유로 판정했다)
+  const dsCount = new Map();
+  for (const d of dss) dsCount.set(d.name, (dsCount.get(d.name) || 0) + 1);
+  const datastores = [...new Map(dss.map((d) => [d.name, d])).values()].map((d) => (dsCount.get(d.name) > 1
+    ? { name: d.name, freeGB: null, capacityGB: null, accessible: dss.filter((x) => x.name === d.name).every((x) => x.accessible !== false), ambiguous: true }
+    : { name: d.name, freeGB: numOrNull(d.freeGB), capacityGB: numOrNull(d.capacityGB), accessible: d.accessible !== false })).sort((a, b) => String(a.name).localeCompare(String(b.name)));
   const checks = [];
   // Director · 카탈로그
   if (!director) checks.push({ key: 'director', state: 'bad', label: 'Bareos Director · 카탈로그', detail: '이 vCenter 의 법인 Director 가 설정에 없습니다 — 설정 › 법인별 Director 에서 매핑하세요.' });
@@ -64,11 +81,13 @@ export function drCheckView({ vcenterId, snapshot, jobs, site, director, dirPoll
   // 새 vCenter
   const status = vc?.status || (vc ? 'ok' : '');
   if (!vc) checks.push({ key: 'vcenter', state: 'bad', label: '새 vCenter 접속', detail: '이 vCenter 가 포탈 인벤토리에 없습니다 — 설정 › vCenter 에서 등록 · 수집을 확인하세요.' });
-  else if (status === 'unreachable' || status === 'disabled' || status === 'pending') checks.push({ key: 'vcenter', state: 'bad', label: '새 vCenter 접속', detail: `수집 상태 ‘${status}’${vc.error ? ` — ${String(vc.error).slice(0, 160)}` : ''} — 인벤토리를 믿을 수 없어 짝짓기를 할 수 없습니다.` });
+  else if (status === 'unreachable' || status === 'disabled' || status === 'pending' || status === 'maintenance' || vc.maintenance === true) checks.push({ key: 'vcenter', state: 'bad', label: '새 vCenter 접속', detail: `수집 상태 ‘${status}’${vc.error ? ` — ${String(vc.error).slice(0, 160)}` : ''} — 인벤토리를 믿을 수 없어 짝짓기를 할 수 없습니다.` });
   else {
-    const re = mine.length && missing === mine.length ? ' (원장 대상이 모두 인벤토리에 없음 — 다시 설치됨으로 보입니다)' : missing ? ` · 원장 대상 중 인벤토리에 없는 VM ${missing}대` : ' · 원장 대상이 모두 인벤토리에 있음 — 재해 복구가 아니라 일반 복원일 수 있습니다';
-    checks.push({ key: 'vcenter', state: hosts.length ? (vc.stale ? 'warn' : 'ok') : 'bad', label: '새 vCenter 접속',
-      detail: `${vc.name || vcenterId} · 인벤토리 VM ${vms.length} · 데이터센터 ${dcs.length} · 클러스터 ${clusters.length} · 데이터스토어 ${datastores.length}${vc.stale ? ' · 마지막 수집이 오래됨' : ''}${hosts.length ? '' : ' · 호스트가 없어 복원할 곳이 없습니다'}${re}` });
+    const re = !mine.length ? ' · 이 법인 원장 대상 0대' : missing === mine.length ? ' (원장 대상이 모두 인벤토리에 없음 — 다시 설치됨으로 보입니다)' : missing ? ` · 원장 대상 중 인벤토리에 없는 VM ${missing}대` : ' · 원장 대상이 모두 인벤토리에 있음 — 재해 복구가 아니라 일반 복원일 수 있습니다';
+    // 호스트는 있는데 데이터센터를 하나도 읽지 못했으면(REST 폴백 · 독립 호스트만) '데이터센터 0' 으로 단정하지 않는다(버그 점검 B4-03 ③ — numOrNull 규칙)
+    const dcUnknown = hosts.length > 0 && !dcs.length;
+    checks.push({ key: 'vcenter', state: !hosts.length ? 'bad' : dcUnknown ? 'unknown' : vc.stale ? 'warn' : 'ok', label: '새 vCenter 접속',
+      detail: `${vc.name || vcenterId} · 인벤토리 VM ${vms.length} · 데이터센터 ${dcUnknown ? '— (호스트의 데이터센터를 읽지 못함 — 수집 방식 · 독립 호스트만 있는지 확인)' : dcs.length} · 클러스터 ${clusters.length} · 데이터스토어 ${datastores.length}${vc.stale ? ' · 마지막 수집이 오래됨' : ''}${hosts.length ? '' : ' · 호스트가 없어 복원할 곳이 없습니다'}${re}` });
   }
   // 사이트 매핑(복원 명령에 싣는 값)
   const miss = [];

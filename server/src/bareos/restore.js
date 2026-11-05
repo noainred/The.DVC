@@ -123,13 +123,16 @@ export function restorePlan({ mode, job, snapshot, newVm = {}, confirmName = '',
   }
   const ds = String(newVm?.datastore ?? '').trim();
   if (ds) {
-    const known = (snapshot?.datastores || []).some((d) => String(d.vcenterId) === String(job.vcenterId) && d.name === ds);
-    if (!known) return { ok: false, issue: `데이터스토어 ‘${ds}’ 이(가) 이 vCenter 인벤토리에 없습니다.` };
+    const same = (snapshot?.datastores || []).filter((d) => String(d.vcenterId) === String(job.vcenterId) && d.name === ds);
+    if (!same.length) return { ok: false, issue: `데이터스토어 ‘${ds}’ 이(가) 이 vCenter 인벤토리에 없습니다.` };
+    // 버그 점검 B4-05 ③: 접근할 수 없는 데이터스토어는 화면만 걸렀다 — 서버도 거부(같은 이름이 여럿이면 모두 접근 가능할 때만)
+    if (same.some((d) => d.accessible === false)) return { ok: false, issue: `데이터스토어 ‘${ds}’ 에 접근할 수 없습니다(인벤토리 accessible false) — 다른 데이터스토어를 고르세요.` };
     kv.restore_datastore = ds;
   }
   const cluster = String(newVm?.cluster ?? '').trim();
   const esx = String(newVm?.esxHost ?? '').trim();
   if (cluster && esx) return { ok: false, issue: '클러스터와 호스트 중 하나만 고르세요.' };
+  if (cluster === 'standalone') return { ok: false, issue: '‘standalone’ 은 클러스터가 아닙니다(독립 호스트 표지) — 클러스터를 고르거나 호스트를 지정하세요.' };   // 버그 점검 B4-03 ②
   if (cluster) {
     if (!hosts.some((h) => h.cluster === cluster && (!dcTo || h.vcDatacenter === dcTo))) return { ok: false, issue: `클러스터 ‘${cluster}’ 이(가) 이 vCenter 인벤토리${dcTo ? `의 데이터센터 ‘${dcTo}’` : ''}에 없습니다.` };
     kv.restore_cluster = cluster;
@@ -258,7 +261,9 @@ export function bulkRestorePlan({ items, jobOf, dirOf, snapshot, pluginName = 'p
   }
   const capacity = [];
   for (const g of byDs.values()) {
-    const dsRow = (snapshot?.datastores || []).find((x) => String(x.vcenterId) === g.vcenterId && x.name === g.datastore);
+    const rows = (snapshot?.datastores || []).filter((x) => String(x.vcenterId) === g.vcenterId && x.name === g.datastore);
+    // 같은 이름 데이터스토어가 둘 이상(데이터센터가 다름)이면 어느 것인지 모른다 — 첫 행의 여유로 판정하지 않고 '모름'(버그 점검 B4-05 ③)
+    const dsRow = rows.length === 1 ? rows[0] : null;
     const freeGB = gbNum(dsRow?.freeGB); const capGB = gbNum(dsRow?.capacityGB);
     if (g.unknownNeed || freeGB === null) {
       capacity.push({ vcenterId: g.vcenterId, datastore: g.datastore, ids: g.ids, needGB: g.unknownNeed ? null : g.needGB, freeGB, capacityGB: capGB, verdict: 'unknown' });
@@ -278,15 +283,44 @@ export function bulkRestorePlan({ items, jobOf, dirOf, snapshot, pluginName = 'p
 /** 새 VM 복원 이름을 예약해 두는 시간(진행 중 + 끝난 뒤 하루 — 다음 인벤토리 수집 전 같은 이름을 막는다). */
 export const RESTORE_NAME_RESERVE_MS = 24 * 3600_000;
 /**
+ * 실패 · 취소로 끝난 복원의 이름을 풀기 전에 둘 여유 — 그 vCenter 의 '새 인벤토리 시각' 이 끝을 본 시각보다 이만큼은 뒤여야 한다.
+ *   반증 1인(버그 점검 B4-01 노트 ①): 중앙 수집의 시각은 **병합 시각**(30초마다 캐시로 다시 만든다)이라 실제 수집(주기 + 수집 시한)보다 늦고,
+ *   사이트의 receivedAt 도 엣지 자신의 수집보다 늦다 — 여유 없이 비교하면 끝나기 전에 읽은 인벤토리로 풀릴 수 있다(R1 의 '껍데기만 생긴 실패' 가 그 창에 든다).
+ *   수집 주기(고RTT 법인 포함) + 수집 시한 + 사이트 push 주기를 덮는 값.
+ */
+export const RESTORE_NAME_RELEASE_MARGIN_MS = 30 * 60_000;
+/**
+ * vCenter 마다 '새로 읽은 인벤토리' 의 시각(포탈 시계 ms · 순수) — 이름 예약 해제(R4)의 기준.
+ *   버그 점검 B4-01(재현): 예전에는 `Number(snapshot.generatedAt)` 였는데 운영 스냅샷의 generatedAt 은 **ISO 문자열**이라 NaN → 0 이 되어
+ *   해제가 운영에서 한 번도 일어나지 않았다(시험 픽스처만 숫자였다). 정상 수집('connected')이고 낡지 않은(stale · 점검중 아님) vCenter 만 센다 —
+ *   사이트 위임은 엣지 수신 시각(receivedAt), 중앙 수집은 병합 시각(generatedAt). 첫 병합 전 골격 · 못 읽은 값은 0(새 인벤토리 없음 — 풀지 않는 쪽).
+ * @returns {(vcenterId:string)=>number}
+ */
+export function inventoryAtOf(snapshot) {
+  const raw = snapshot?.generatedAt;
+  const gen = typeof raw === 'number' ? raw : Date.parse(String(raw ?? ''));
+  const byId = new Map((Array.isArray(snapshot?.vcenters) ? snapshot.vcenters : []).map((v) => [String(v?.id), v]));
+  return (vcenterId) => {
+    const v = byId.get(String(vcenterId));
+    if (snapshot?.initial || !v || v.status !== 'connected' || v.stale === true || v.maintenance === true) return 0;
+    const t = v.collectSource === 'site' ? Number(v.receivedAt) : gen;
+    return Number.isFinite(t) && t > 0 ? t : 0;
+  };
+}
+/**
  * 최근 · 진행 중 새 VM 복원이 쓰는 이름(`${vcenterId}\u0000${소문자 이름}`) — 묶음 복원 라우트와 재해 복구 단계 실행기(drRunner)가 같은 판정을 쓴다(순수).
- *   반증 R4(재해 복구 1차): 실패 · 취소로 끝난 복원은 그 뒤 인벤토리 수집(snapAt)이 있으면 예약을 푼다 — 껍데기가 생겼으면 인벤토리 이름 대조가 막는다.
+ *   반증 R4(재해 복구 1차): 실패 · 취소로 끝난 복원은 그 뒤 인벤토리 수집이 있으면 예약을 푼다 — 껍데기가 생겼으면 인벤토리 이름 대조가 막는다.
+ *   snapAt: `inventoryAtOf(snapshot)`(vCenter 마다) 또는 숫자. '끝난 시각' 은 **포탈 시계**(폴러가 끝을 본 checkedAt · 기록 at)로 본다 —
+ *   endedAt 은 Director 현지 시각을 포탈 시간대로 읽은 값이라(시간대가 다르면 몇 시간 이르게 읽힌다) 늦추는 쪽으로만 섞는다(max).
  */
 export function reservedRestoreNames(jobs, { now = Date.now(), snapAt = 0, isOpen = () => false } = {}) {
   const out = new Set();
   const since = now - RESTORE_NAME_RESERVE_MS;
+  const invAt = typeof snapAt === 'function' ? snapAt : () => Number(snapAt) || 0;
   for (const j of Array.isArray(jobs) ? jobs : []) {
     for (const r of j.restores || []) {
-      const failedSeen = (r.state === 'error' || r.state === 'canceled') && snapAt > (Number(r.endedAt || r.at) || 0);
+      const seenEnd = Math.max(Number(r.checkedAt) || 0, Number(r.at) || 0, Number(r.endedAt) || 0);
+      const failedSeen = (r.state === 'error' || r.state === 'canceled') && seenEnd > 0 && invAt(j.vcenterId) - seenEnd >= RESTORE_NAME_RELEASE_MARGIN_MS;
       if (r.mode === 'newVm' && r.target?.name && !failedSeen && (isOpen(r) || (Number(r.at) || 0) >= since)) out.add(`${j.vcenterId}\u0000${String(r.target.name).toLowerCase()}`);
     }
   }

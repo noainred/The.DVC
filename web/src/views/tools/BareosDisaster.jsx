@@ -18,7 +18,7 @@ import { withRelayWait, outcomeUnknown, unknownOutcomeText, whenText, levelLabel
 import { pickBlock, dsText, capacityText, bulkRestoreOutcome } from './bareosRestoreText.js';
 import { DR_CHUNK, DR_MARK, drBeforeMs, drRows, drSourceDcs, drDefaultMap, drMapIssue, drItem, drNextChunk, drBlocking, drTrialOk,
   drNewWave, drWaveOf, drWaveLabel, drRunWaves, drWavesIssue, drCurrentRun, drRunIds, drRunActive } from './bareosDrText.js';
-import { DrRunBuilder, DrRunCard } from './BareosDrRun.jsx';
+import { DrRunBuilder, DrRunCard, DrActErr } from './BareosDrRun.jsx';
 
 const BASE = '/tools/bareos-backup';
 const DIRECTOR_GET = { retries: 0, timeoutMs: 60_000 };
@@ -27,6 +27,7 @@ const RUN_POLL_MS = 15_000;
 const ROW = { display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' };
 const FIELD = { display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12, minWidth: 0 };
 const TONE = { ok: '#86efac', warn: '#fcd34d', bad: '#fca5a5', info: '#93c5fd' };
+const CHECK_ARIA = { ok: '정상', warn: '주의', bad: '막힘', unknown: '모름' };
 
 function OutcomeList({ items }) {
   if (!items?.length) return null;
@@ -41,6 +42,8 @@ export default function BareosDisaster({ d, reload, onBatch = null }) {
   const jobs = useMemo(() => d.jobs || [], [d.jobs]);
   const vcs = useMemo(() => [...new Set(jobs.filter((j) => j.writable !== false).map((j) => j.vcenterId))].sort(), [jobs]);
   const [vc, setVc] = useState(() => vcs[0] || '');
+  // 마운트 때 쓰기 가능 대상이 없다가 나중에 생기면(또는 그 법인이 목록에서 빠지면) 첫 법인으로(버그 점검 B5-11 — '불러오는 중' 에서 멈췄다)
+  useEffect(() => { if (vcs.length && !vcs.includes(vc)) setVc(vcs[0]); }, [vcs.join('|')]);   // eslint-disable-line react-hooks/exhaustive-deps
   const [check, setCheck] = useState(null);
   const [checkErr, setCheckErr] = useState(null);
   // 반증 R5: 기본값을 비운다 — '지금' 이면 감염 뒤 마지막 백업을 고르기 쉽다(사람이 시각을 정하게)
@@ -66,13 +69,15 @@ export default function BareosDisaster({ d, reload, onBatch = null }) {
   const [runPlanErr, setRunPlanErr] = useState(null);
   const genRuns = useRef(0);
   const genPlan = useRef(0);
+  const pickTouched = useRef(false);   // 사람이 고르기를 바꿨는가(법인을 바꾸면 처음으로)
   // 늦게 온 이전 응답은 버린다 — 점검 · 지점 읽기 · 미리 보기는 서로를 끊지 않게 따로 센다(같은 카운터면 '다시 점검' 이 지점 읽기를 조용히 멈췄다)
   const genCheck = useRef(0);
   const genPts = useRef(0);
   const genPrev = useRef(0);
   const vcRef = useRef(vc);
   vcRef.current = vc;
-  const dirId = check?.directorId || '';
+  // 점검 응답 전에도 원장 대상의 Director 로 엣지 대행 대기 시간을 정한다(버그 점검 B5-07 — 점검 전 지점 읽기가 기본 60초에 끊겼다)
+  const dirId = check?.directorId || jobs.find((j) => String(j.vcenterId) === String(vc) && j.directorId)?.directorId || '';
   const dir = (d.directors || []).find((x) => x.id === dirId) || null;
 
   const loadCheck = () => {
@@ -90,7 +95,7 @@ export default function BareosDisaster({ d, reload, onBatch = null }) {
   useEffect(() => {
     genPts.current++; genPrev.current++; genPlan.current++;
     setPts(null); setPtsErr(null); setPtsProg(null); setPicked(new Set()); setMap({}); setPreview(null); setDone(null); setConfirm('');
-    setWaves([drNewWave(0, 10)]); setAssign({}); setRunPlan(null); setRunPlanErr(null); setRuns(null); setRunsErr(null);
+    setWaves([drNewWave(0, 10)]); setAssign({}); setRunPlan(null); setRunPlanErr(null); setRuns(null); setRunsErr(null); pickTouched.current = false;
     loadCheck(); loadRuns();
   }, [vc]);   // eslint-disable-line react-hooks/exhaustive-deps
   const run = drCurrentRun(runs, vc);
@@ -106,7 +111,7 @@ export default function BareosDisaster({ d, reload, onBatch = null }) {
     if (was && was !== runState && was.endsWith(':running')) reload();
   }, [runState]);   // eslint-disable-line react-hooks/exhaustive-deps
   // 폴링은 공용 usePolling(백그라운드 탭 멈춤 · in-flight 가드) — 진행 중일 때만 경로를 준다(멈춤 · 끝이면 null = 폴링 없음)
-  const { data: polledRuns } = usePolling(run?.state === 'running' ? `${BASE}/dr/runs` : null, { vcenterId: vc }, RUN_POLL_MS);
+  const { data: polledRuns, error: pollErr } = usePolling(run?.state === 'running' ? `${BASE}/dr/runs` : null, { vcenterId: vc }, RUN_POLL_MS);
   useEffect(() => {
     const list = polledRuns?.runs;
     if (Array.isArray(list) && list.every((r) => String(r.vcenterId) === String(vcRef.current))) { genRuns.current++; setRuns(list); setRunsErr(null); }
@@ -150,12 +155,12 @@ export default function BareosDisaster({ d, reload, onBatch = null }) {
       }
       if (g !== genPts.current) return;
       setPts(acc);
-      // 처음 읽으면 고를 수 있는 것을 모두 고른다(시안 — 법인째). 사람이 뺀 것은 다시 읽어도 빼 둔다.
-      setPicked((p) => (p.size ? p : new Set(ids)));
+      // 처음 읽으면 모두 고른다(시안 — 법인째). 사람이 한 번이라도 고르기를 바꿨으면 다시 읽어도 그대로 둔다(버그 점검 B5-05 — 다 뺀 뒤 다시 읽으면 전부 다시 골랐다)
+      if (!pickTouched.current) setPicked(new Set(ids));
     } catch (e) { if (g === genPts.current) { setPtsErr(e); setPts(acc.size ? acc : null); } }
   };
 
-  const toggle = (ids, on) => { if (busy) return; genPrev.current++; setPreview(null); setPicked((p) => { const s = new Set(p); for (const id of ids) { if (on) s.add(id); else s.delete(id); } return s; }); };
+  const toggle = (ids, on) => { if (busy) return; pickTouched.current = true; genPrev.current++; setPreview(null); setPicked((p) => { const s = new Set(p); for (const id of ids) { if (on) s.add(id); else s.delete(id); } return s; }); };
   const setM = (dc, patch) => { genPrev.current++; setPreview(null); setMap((m) => ({ ...m, [dc]: { ...(m[dc] || {}), ...patch } })); };
 
   const doPreview = () => {
@@ -196,21 +201,25 @@ export default function BareosDisaster({ d, reload, onBatch = null }) {
     const vc0 = vc;
     setBusy(true); setRunPlanErr(null);
     try {
-      await postJson(`${BASE}/dr/runs`, { vcenterId: vc0, waves: runPlan.waves, drBefore: runPlan.before, otp });
+      // 409(진행 중 회차 · 엣지 노드 · Director 미완)는 postJson 이 던지지 않는다 — requireChanged 로 오류로(버그 점검 B5-01 — 성공처럼 지워졌다)
+      requireChanged(await postJson(`${BASE}/dr/runs`, { vcenterId: vc0, waves: runPlan.waves, drBefore: runPlan.before, otp }));
       if (vcRef.current !== vc0) return;
       genPlan.current++; setRunPlan(null); setConfirm('');
       loadRuns(); reload();
     } catch (e) {
       if (vcRef.current !== vc0) return;
-      setRunPlanErr(e);
+      // 시한 · 연결 끊김은 결과 모름(회차가 생겼을 수 있다 — 진행 카드로 확인 · B5-10)
+      setRunPlanErr(outcomeUnknown(e) ? new Error(unknownOutcomeText('복구 순서 시작', e)) : e);
       loadRuns();   // 응답을 잃었어도 회차가 생겼을 수 있다 — 진행 카드로 확인
     } finally { setBusy(false); setOtp(''); }
   };
 
   if (!vcs.length) return <div className="card" style={{ padding: 14 }} data-bareos-dr=""><Note tone="info">쓰기 권한이 있는 백업 대상이 없습니다 — 재해 복구는 그 법인에 등록된 백업 대상으로만 합니다.</Note></div>;
   const planOk = !!preview?.plan?.ok;
-  const canStart = planOk && !preview?.needEnroll && confirm.trim() === String(vcName) && /^\d{6}$/.test(otp) && !busy;
-  const canRun = !!runPlan?.ok && !runPlan?.needEnroll && !runActive && confirm.trim() === String(vcName) && /^\d{6}$/.test(otp) && !busy;
+  // 다시 점검해 ✕ 가 생기면 시작도 잠근다(B5-08) · 회차 목록을 못 읽었으면 복구 순서 시작을 열지 않는다(B5-06 — 조회 실패 상태로 저장 버튼을 열지 않는다)
+  const runsReady = Array.isArray(runs) && !runsErr;
+  const canStart = planOk && !preview?.needEnroll && blocking === 0 && confirm.trim() === String(vcName) && /^\d{6}$/.test(otp) && !busy;
+  const canRun = !!runPlan?.ok && !runPlan?.needEnroll && !runActive && runsReady && blocking === 0 && confirm.trim() === String(vcName) && /^\d{6}$/.test(otp) && !busy;
   const allIds = shown.filter((r) => !r.why).map((r) => r.id);
   const allOn = allIds.length > 0 && allIds.every((id) => picked.has(id));
 
@@ -230,7 +239,8 @@ export default function BareosDisaster({ d, reload, onBatch = null }) {
         {done && <div style={{ minWidth: 0 }}><Note tone={done.tone}>{done.text}</Note><OutcomeList items={done.items} /></div>}
       </div>
 
-      <DrRunCard run={run} err={runsErr} onRefresh={loadRuns} onChanged={() => { loadRuns(); reload(); }} />
+      {/* key — 법인 · 회차가 바뀌면 카드 상태(멈추기 확인 · OTP)를 버린다(버그 점검 B5-02 — 다른 법인 회차에 '멈추기 확인' 이 펼쳐진 채 넘어갔다) */}
+      <DrRunCard key={run?.id || `none-${vc}`} run={run} err={runsErr || pollErr} onRefresh={loadRuns} onChanged={() => { loadRuns(); reload(); }} />
 
       {/* ① 새 vCenter 점검 */}
       <section className="card" style={{ padding: 0, overflow: 'hidden', minWidth: 0 }} data-dr-check="">
@@ -246,7 +256,7 @@ export default function BareosDisaster({ d, reload, onBatch = null }) {
           return (
             // 설명은 항목명 아래로 — 3열(표지 · 항목 · 설명)이면 400px 에서 설명 칸이 80px 남짓으로 좁아져 한두 단어씩 길게 늘어졌다(Chromium 판독)
             <div key={c.key} style={{ display: 'grid', gridTemplateColumns: '26px minmax(0, 1fr)', gap: 10, alignItems: 'start', padding: '9px 14px', borderBottom: '1px solid var(--border-soft)' }}>
-              <span aria-label={c.state} style={{ color: TONE[tone], fontWeight: 800, textAlign: 'center' }}>{mk}</span>
+              <span aria-label={CHECK_ARIA[c.state] || '모름'} style={{ color: TONE[tone], fontWeight: 800, textAlign: 'center' }}>{mk}</span>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 }}>
                 <b style={{ fontSize: 12.5, overflowWrap: 'anywhere' }}>{c.label}</b>
                 <span className="muted" style={{ fontSize: 12, overflowWrap: 'anywhere' }}>{c.detail}{c.lastOk ? ` · 마지막 성공 ${whenText(c.lastOk)}` : ''}</span>
@@ -276,7 +286,7 @@ export default function BareosDisaster({ d, reload, onBatch = null }) {
               <input className="input" style={{ minWidth: 0, width: 240 }} placeholder="VM · 폴더 이름" value={q} onChange={(e) => setQ(e.target.value)} aria-label="VM · 폴더 찾기" />
               <span className="muted" style={{ fontSize: 12 }}>고를 수 있음 {rows.filter((r) => !r.why).length} / {rows.length}대 · 고름 {pickedRows.length}대</span>
               <label className="muted" style={{ ...ROW, gap: 6, fontSize: 12, marginLeft: 'auto' }}>
-                <input type="checkbox" checked={allOn} disabled={!allIds.length || busy} onChange={(e) => toggle(allIds, e.target.checked)} />보이는 것 모두
+                <input type="checkbox" checked={allOn} disabled={!allIds.length || busy} onChange={(e) => toggle(e.target.checked ? allIds : shown.map((r) => r.id), e.target.checked)} />보이는 것 모두
               </label>
             </div>
             <div className="table-wrap" style={{ maxHeight: '52vh' }}>
@@ -361,10 +371,11 @@ export default function BareosDisaster({ d, reload, onBatch = null }) {
             <span>복원할 VM <b>{runTotal}</b>대 · <b>{runWaves.length}</b>단계</span>
             {blocking > 0 && <span style={{ fontSize: 12, color: TONE.bad }}>점검 ✕ {blocking}건 — 먼저 해결하세요</span>}
             {runActive && <span style={{ fontSize: 12, color: TONE.warn }}>이 법인에 진행 중인 복구 순서가 있습니다 — 끝나거나 멈춘 뒤 새로 시작하세요</span>}
-            <button type="button" className="tab" style={{ padding: '5px 12px', fontSize: 12, marginLeft: 'auto' }} disabled={busy || runActive || !runTotal || !!mapIssue || !!wavesIssue || blocking > 0 || beforeMs === null} onClick={doRunCheck}>계획 확인 · {runTotal}대</button>
+            <button type="button" className="tab" style={{ padding: '5px 12px', fontSize: 12, marginLeft: 'auto' }} disabled={busy || runActive || !runsReady || !runTotal || !!mapIssue || !!wavesIssue || blocking > 0 || beforeMs === null} onClick={doRunCheck}>계획 확인 · {runTotal}대</button>
           </div>
           {wavesIssue && runTotal > 0 && <span style={{ fontSize: 12, color: TONE.warn }}>{wavesIssue}</span>}
-          {runPlanErr && <ErrorBox error={runPlanErr} />}
+          {!runsReady && <span style={{ fontSize: 12, color: TONE.warn }}>복구 순서 상태를 읽지 못했습니다 — 위 진행 카드의 사유를 확인하세요(읽기 전에는 시작하지 않습니다)</span>}
+          {runPlanErr && <DrActErr error={runPlanErr} />}
           {runPlanErr?.body?.issues?.length > 0 && runPlanErr.body.issues.slice(0, 30).map((x) => <span key={`${x.wave}-${x.id}`} style={{ fontSize: 12, color: TONE.bad, overflowWrap: 'anywhere' }}>{x.wave + 1}단계 · {x.vmName || x.id} — {x.issue}</span>)}
           {runPlan && (
             <>
@@ -407,6 +418,8 @@ export default function BareosDisaster({ d, reload, onBatch = null }) {
               {(preview.plan.capacity || []).map((c) => <Note key={c.datastore} tone={c.verdict === 'short' ? 'bad' : c.verdict === 'unknown' ? 'warn' : 'info'}>{capacityText(c)}</Note>)}
               {preview.needEnroll && <Note tone="bad">복원은 OTP 가 등록된 계정만 실행할 수 있습니다 — 사용자 관리에서 OTP 를 등록하세요.</Note>}
               {planOk && <Note tone="info">이번 묶음 {preview.items.length}대 · 기준 시각 {String(preview.before || '').replace('T', ' ')} 이전 백업 — 새 VM · 꺼진 채 · 네트워크 끊은 채로 만들어집니다. 진행은 아래 최근 묶음 복원에서 보입니다.</Note>}
+              {/* 무엇을 승인하는지 보이게 — 보낼 VM 이름과 짝지은 위치(버그 점검 B5-04) */}
+              {planOk && preview.items.slice(0, 20).map((x) => <span key={x.id} style={{ fontSize: 12, overflowWrap: 'anywhere' }}><b>{x.newVm?.name || x.id}</b> → {[x.newVm?.dc || '백업 당시 데이터센터', x.newVm?.cluster ? `클러스터 ${x.newVm.cluster}` : '', x.newVm?.datastore ? `데이터스토어 ${x.newVm.datastore}` : '데이터스토어 백업 당시 그대로'].filter(Boolean).join(' · ')}</span>)}
               <div style={ROW}>
                 <label className="muted" style={{ ...FIELD, width: 220 }}>법인(vCenter) 확인 — ‘{vcName}’ 입력
                   <input className="input" style={{ minWidth: 0, width: '100%' }} value={confirm} onChange={(e) => setConfirm(e.target.value)} autoComplete="off" aria-label="법인 이름 확인" disabled={!planOk} />
