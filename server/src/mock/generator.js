@@ -674,7 +674,8 @@ export function generateSnapshot() {
         : Math.round(clamp(15 + 60 * Math.abs(Math.sin((vm.idx + tick) / 11)), 1, 100));
       const memUsagePct = !powered ? 0 : profile === 'idle' ? Math.round(8 + wave(10, 9)) : profile === 'hot' ? Math.round(91 + wave(6, 6))
         : Math.round(clamp(25 + 55 * Math.abs(Math.cos((vm.idx + tick) / 13)), 1, 100));
-      const snapN = vm.idx % 6 === 0 ? intBetween(1, 4) : 0;
+      // v2.899: 개수를 VM 마다 고정한다 — 예전 intBetween 은 생성할 때마다 바뀌어 같은 VM 의 스냅샷 개수 · 트리가 새로 고칠 때마다 달랐다.
+      const snapN = vm.idx % 6 === 0 ? 1 + (vm.idx % 4) : 0;
       vms.push({
         id: `${site.id}:${vm.name}`,
         vcenterId: site.id,

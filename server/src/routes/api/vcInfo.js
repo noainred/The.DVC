@@ -35,6 +35,20 @@ function registryHosts(now = Date.now()) {
  * Linked Mode 구성원 → 포탈 등록 vCenter(조회 범위 안만). 노드 이름(FQDN/IP)과 등록 주소의 호스트 부분이 같을 때만 — 범위 밖 등록은 알려 주지 않는다
  * (등록 여부도 범위 밖 정보다). 접속하지 않는다(발견한 주소로 자동 접속하면 SSRF · TLS 신뢰 규약에 걸린다).
  */
+/**
+ * v2.899: 범위 계정에는 **포탈 등록 vCenter(조회 범위 안)로 짝지어진 노드만** 이름을 보인다 — 나머지(범위 밖 등록 · 미등록)는 이름을 가리고
+ * 개수만 남긴다(복제 파트너 · 복제 상태의 이름도 같은 규칙). 전체 범위 계정은 그대로. 짝을 못 지은 자기 자신(등록 주소가 IP · 노드가 FQDN 등)도
+ * 가려진다 — 이름을 지어내 짝짓지 않는다(화면이 '가려짐' 으로 말한다).
+ */
+export function maskLinkedForScope(body, allowed) {
+  if (!allowed || !Array.isArray(body?.nodes)) return body;
+  const visible = new Set(body.nodes.filter((n) => n.portal).map((n) => n.node));
+  const nm = (x) => (visible.has(x) ? x : null);
+  const nodes = body.nodes.map((n) => (n.portal ? { ...n, partners: (n.partners || []).map(nm) } : { node: null, type: n.type ?? null, partners: [], portal: null, masked: true }));
+  const replication = Array.isArray(body.replication) ? body.replication.map((r) => ({ ...r, node: nm(r.node), partner: nm(r.partner) })) : body.replication;
+  const masked = nodes.filter((n) => n.masked).length;
+  return { ...body, nodes, replication, ...(masked ? { maskedNodes: masked } : {}) };
+}
 export function linkedPortalMap(nodes, registry, snapVcs, allowed, { mock = false } = {}) {
   const byHost = new Map();
   for (const r of Array.isArray(registry) ? registry : []) {
@@ -104,6 +118,7 @@ export function registerVcInfo(api) {
     const body = vcInfoBody(kind, vcenterId, entry, { admin, source: cached?.[kind] ? cached.source : mock ? 'mock' : null });
     if (kind === 'linked' && entry) {
       body.nodes = linkedPortalMap(entry.nodes, registryHosts(), snap.vcenters, allowed, { mock: body.source === 'mock' });
+      return res.json(maskLinkedForScope(body, allowed));
     }
     res.json(body);
   });

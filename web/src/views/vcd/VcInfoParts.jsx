@@ -210,13 +210,13 @@ export function VcLinkedCard({ vcenterId, wide = false }) {
                 <STable className="v3-table" minWidth={680}>
                   <thead><tr><th>노드(PNID)</th><th>유형</th><th>포탈 등록</th><th>버전</th><th>복제 파트너</th></tr></thead>
                   <tbody>
-                    {nodes.map((n) => (
-                      <tr key={n.node}>
-                        <td className="mono" style={{ overflowWrap: 'anywhere' }}><b>{n.node}</b></td>
+                    {nodes.map((n, i) => (
+                      <tr key={n.node || `masked-${i}`}>
+                        <td className="mono" style={{ overflowWrap: 'anywhere' }}>{n.masked ? <span className="muted" style={{ fontFamily: 'inherit' }}>가려짐(범위 밖 · 미등록)</span> : <b>{n.node}</b>}</td>
                         <td>{NODE_TYPE_TEXT[n.type] || n.type || '—'}</td>
                         <td>{n.portal ? (n.portal.id === vcenterId ? <span className="badge blue">이 vCenter</span> : <a className="vcd-more" href={vcHash(n.portal.id)}>{n.portal.name} →</a>) : <span className="muted">확인 안 됨</span>}</td>
                         <td>{n.portal?.version ? `${n.portal.version}${n.portal.build ? ` · ${n.portal.build}` : ''}` : '—'}</td>
-                        <td className="mono" style={{ whiteSpace: 'normal', overflowWrap: 'anywhere' }}>{(n.partners || []).join(' · ') || '—'}</td>
+                        <td className="mono" style={{ whiteSpace: 'normal', overflowWrap: 'anywhere' }}>{(n.partners || []).map((p) => p || '가려짐').join(' · ') || '—'}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -228,6 +228,7 @@ export function VcLinkedCard({ vcenterId, wide = false }) {
                 </div>
               )}
               {d.replError && <Note>{`복제 상태는 읽지 못했습니다: ${d.replError}`}</Note>}
+              {d.maskedNodes > 0 && <Note>{`구성원 ${d.maskedNodes}개는 이름을 가렸습니다 — 조회 범위 안 포탈 등록 vCenter 와 짝지어진 노드만 이름을 보입니다(범위 밖 또는 포탈에 등록되지 않은 노드).`}</Note>}
             </>
           )}
         </>
