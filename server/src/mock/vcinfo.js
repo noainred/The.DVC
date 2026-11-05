@@ -66,5 +66,42 @@ export function mockVcInfo(kind, vcId, snap, now = Date.now()) {
     ].map((p) => ({ ...p, role: role(p.roleId) }));
     return { at: now - ((seed % 300) + 10) * MIN, items, roles, omitted: 0, error: null };
   }
+  if (kind === 'linked') {
+    // 같은 지역(id 앞머리 'vc-<지역>') 의 vCenter 들을 한 SSO 도메인으로 묶는다 — 혼자면 자기 1개.
+    const region = String(vcId).split('-').slice(0, 2).join('-');
+    const peers = (snap?.vcenters || []).filter((v) => v.id !== vcId && String(v.id).startsWith(region)).slice(0, 2);
+    const fq = (id) => `${String(id).toLowerCase()}.corp.example`;
+    const all = [vcId, ...peers.map((v) => v.id)];
+    const nodes = all.map((id) => ({ node: fq(id), type: 'VCSA_EMBEDDED', partners: all.filter((x) => x !== id).map(fq) }));
+    const replication = all.length > 1 ? all.filter((x) => x !== vcId).map((id, i) => ({ node: fq(vcId), partner: fq(id), available: !(seed % 7 === 0 && i === 0), replicating: true, lag: (seed % 5) * (i + 1) })) : [];
+    return { at: now - ((seed % 300) + 30) * MIN, nodes, domain: 'vsphere.local', replication, error: null, replError: null };
+  }
+  if (kind === 'updates') {
+    const pendingOn = seed % 3 !== 0;
+    return {
+      at: now - ((seed % 200) + 20) * MIN, state: pendingOn ? 'UPDATES_PENDING' : 'UP_TO_DATE', version: '8.0.2.00300', lastCheck: now - ((seed % 5) + 1) * 86_400_000,
+      pending: pendingOn ? [
+        { version: '8.0.3.00100', name: 'VMware vCenter Server 8.0 Update 3a', severity: 'CRITICAL', priority: 'HIGH', type: 'SECURITY', releaseDate: Date.parse('2026-09-17T00:00:00Z'), reboot: true, sizeMB: 7120 },
+        { version: '8.0.3.00000', name: 'VMware vCenter Server 8.0 Update 3', severity: 'IMPORTANT', priority: 'MEDIUM', type: 'UPDATE', releaseDate: Date.parse('2026-06-25T00:00:00Z'), reboot: true, sizeMB: 6880 },
+      ] : [],
+      error: null, pendingError: null,
+    };
+  }
+  if (kind === 'vlcm') {
+    const byCl = new Map();
+    for (const h of hosts) { const k = h.clusterRef || h.cluster || 'standalone'; if (!byCl.has(k)) byCl.set(k, { name: h.cluster || k, hosts: [] }); byCl.get(k).hosts.push(h); }
+    const items = [...byCl.entries()].slice(0, 64).map(([k, c], i) => {
+      const image = (seed + i) % 3 !== 2;
+      const ncHosts = image && (seed + i) % 4 === 0 ? c.hosts.slice(0, Math.min(2, c.hosts.length)) : [];
+      return {
+        cluster: /^[\w.:-]{1,64}$/.test(k) ? k : `domain-c${i + 8}`, name: c.name, at: now - ((seed % 300) + 40) * MIN, enabled: image,
+        status: image ? (ncHosts.length ? 'NON_COMPLIANT' : 'COMPLIANT') : null, impact: image ? (ncHosts.length ? 'REBOOT_REQUIRED' : 'NO_IMPACT') : null,
+        scanTime: image ? now - ((seed % 48) + 2) * 3_600_000 : null,
+        counts: image ? { compliant: c.hosts.length - ncHosts.length, nonCompliant: ncHosts.length, incompatible: 0, unavailable: 0 } : null,
+        nc: ncHosts.map((h) => ({ id: refOf(h.id), name: h.name })), error: null,
+      };
+    });
+    return { at: now - ((seed % 300) + 40) * MIN, items, omitted: 0, error: null };
+  }
   return null;
 }

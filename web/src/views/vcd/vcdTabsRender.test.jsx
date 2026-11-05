@@ -339,6 +339,26 @@ describe('v2.897 vCenter 알람 · 작업 · 권한 카드 — 렌더(얕게)', 
   });
 });
 
+describe('v2.897 ④ 연결된 vCenter · 업데이트 · vLCM 카드 — 렌더(얕게)', () => {
+  it('세 카드가 각각 /vcenter-info/<kind> 한 번 · 업데이트 대기 목록 · vLCM 미준수 호스트 · 연결된 vCenter 포탈 링크', async () => {
+    const { VcLinkedCard, VcUpdatesCard, VcVlcmCard } = await import('./VcInfoParts.jsx');
+    const called = [];
+    const bodies = {
+      '/vcenter-info/linked': { ok: true, at: 1, refreshMs: 21_600_000, domain: 'vsphere.local', nodes: [{ node: 'vc1.corp', type: 'VCSA_EMBEDDED', partners: ['vc2.corp'], portal: { id: 'vc1' } }, { node: 'vc2.corp', type: 'VCSA_EMBEDDED', partners: [], portal: { id: 'vc2', name: 'VC2', version: '8.0.2' } }], replication: [] },
+      '/vcenter-info/updates': { ok: true, at: 1, refreshMs: 21_600_000, state: 'UPDATES_PENDING', version: '8.0.2', pending: [{ version: '8.0.3.00100', name: 'U3a', severity: 'CRITICAL', type: 'SECURITY', sizeMB: 7120 }] },
+      '/vcenter-info/vlcm': { ok: true, at: 1, refreshMs: 21_600_000, items: [{ cluster: 'domain-c1', name: 'Prod', enabled: true, status: 'NON_COMPLIANT', counts: { compliant: 1, nonCompliant: 1, incompatible: 0, unavailable: 0 }, nc: [{ id: 'host-2', name: 'esx02' }] }] },
+    };
+    H.api.fetchJson = (p, q) => { called.push([p, q]); return Promise.resolve(bodies[p]); };
+    for (const [Comp, re] of [[VcLinkedCard, /VC2 →/], [VcUpdatesCard, /8\.0\.3\.00100/], [VcVlcmCard, /esx02/]]) {
+      const rt = mount(Comp, { vcenterId: 'vc1' });
+      await flush();
+      expect(all(rt, (e) => (e.type === 'td' || e.type === 'a') && re.test(textOf(e))).length).toBeGreaterThan(0);
+      unmount(rt);
+    }
+    expect(called.map((c) => c[0])).toEqual(['/vcenter-info/linked', '/vcenter-info/updates', '/vcenter-info/vlcm']);
+  });
+});
+
 describe('v2.895 성능 튜닝 탭 — 렌더(얕게)', () => {
   it('VM — 라이트사이징 권한이 없으면 부르지 않고 권한 안내 · 진단 축 5개', async () => {
     const { VmTuning } = await import('./TuningTabs.jsx');

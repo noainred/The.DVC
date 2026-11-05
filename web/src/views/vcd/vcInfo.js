@@ -79,3 +79,48 @@ export function vcInfoHeadText(d) {
     ? (d.refreshMs >= 3_600_000 ? `${Math.round(d.refreshMs / 3_600_000)}시간` : `${Math.round(d.refreshMs / 60_000)}분`) : null;
   return [d.at ? `읽은 시각 ${shortTs(d.at)}` : '아직 읽지 않음', every ? `${every}마다 갱신` : null, d.source === 'edge' ? '엣지 수집' : d.source === 'mock' ? '데모 데이터' : null].filter(Boolean).join(' · ');
 }
+
+// ── ④ Linked Mode · 업데이트 · vLCM(v2.897 — REST 읽기 전용, 6시간 주기) ─────────────────────────────
+export const NODE_TYPE_TEXT = Object.freeze({ VCSA_EMBEDDED: 'vCenter(내장 PSC)', VCSA_EXTERNAL: 'vCenter(외부 PSC)', PSC_EXTERNAL: '외부 PSC' });
+export const UPDATE_STATE = Object.freeze({
+  UP_TO_DATE: ['green', '최신'], UPDATES_PENDING: ['amber', '적용 가능 업데이트 있음'], STAGE_IN_PROGRESS: ['blue', '스테이징 중'],
+  INSTALL_IN_PROGRESS: ['blue', '설치 중'], INSTALL_FAILED: ['red', '설치 실패'], ROLLBACK_IN_PROGRESS: ['amber', '롤백 중'],
+});
+export const UPDATE_SEVERITY = Object.freeze({ CRITICAL: ['red', '긴급'], IMPORTANT: ['amber', '중요'], MODERATE: ['blue', '보통'], LOW: ['gray', '낮음'] });
+export const UPDATE_TYPE = Object.freeze({ SECURITY: '보안', FIX: '수정', UPDATE: '업데이트', UPGRADE: '업그레이드', PATCH: '패치' });
+export const VLCM_STATUS = Object.freeze({ COMPLIANT: ['green', '준수'], NON_COMPLIANT: ['amber', '미준수'], INCOMPATIBLE: ['red', '호환 안 됨'], UNAVAILABLE: ['gray', '결과 없음'] });
+
+/** 복제 상태 요약 — 파트너 연결이 끊긴 것 · 복제 안 됨을 센다(모르는 값은 세지 않는다). */
+export function replicationSummary(rows) {
+  const out = { total: 0, down: 0, notReplicating: 0, maxLag: null };
+  for (const r of Array.isArray(rows) ? rows : []) {
+    out.total += 1;
+    if (r?.available === false) out.down += 1;
+    if (r?.replicating === false) out.notReplicating += 1;
+    if (Number.isFinite(r?.lag)) out.maxLag = Math.max(out.maxLag ?? 0, r.lag);
+  }
+  return out;
+}
+
+/** vLCM 행 — 미준수 · 호환 안 됨이 먼저, 이미지 미사용(베이스라인)은 뒤. 개수. */
+export function vlcmRows(items) {
+  const ord = (x) => (x.status === 'INCOMPATIBLE' ? 0 : x.status === 'NON_COMPLIANT' ? 1 : x.error ? 2 : x.status === 'UNAVAILABLE' ? 3 : x.enabled === true ? 4 : 5);
+  return (Array.isArray(items) ? items : []).filter((x) => x && typeof x === 'object')
+    .slice().sort((a, b) => ord(a) - ord(b) || String(a.name || a.cluster).localeCompare(String(b.name || b.cluster)));
+}
+export function vlcmCounts(rows) {
+  const out = { clusters: 0, image: 0, baseline: 0, nonCompliant: 0, unknown: 0 };
+  for (const x of rows || []) {
+    out.clusters += 1;
+    if (x.enabled === true) out.image += 1; else if (x.enabled === false) out.baseline += 1; else out.unknown += 1;
+    if (x.status === 'NON_COMPLIANT' || x.status === 'INCOMPATIBLE') out.nonCompliant += 1;
+  }
+  return out;
+}
+/** 호스트의 클러스터 행 — clusterRef(moref)가 있으면 그것으로, 없으면(데모 · 옛 수집) 클러스터 이름으로. 이 호스트가 미준수 목록에 있는가. */
+export function vlcmForHost(items, host, hostRef) {
+  const list = Array.isArray(items) ? items : [];
+  const row = (host?.clusterRef && list.find((x) => x.cluster === host.clusterRef)) || (host?.cluster && list.find((x) => x.name === host.cluster)) || null;
+  if (!row) return null;
+  return { row, nonCompliant: !!hostRef && (row.nc || []).some((h) => h.id === hostRef) };
+}

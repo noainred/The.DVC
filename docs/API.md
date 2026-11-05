@@ -1370,7 +1370,7 @@ Prometheus/OTel 익스포터(선택 토큰).
 | GET | `/user-menu/distribute` | 역할 `admin` · `menuFleetOnly` · `requireSuperAdmin` | [server/src/routes/api/userMenu.js:107](../server/src/routes/api/userMenu.js#L107) |
 | POST | `/user-menu/distribute` | 역할 `admin` · `menuFleetOnly` · `requireSuperAdmin` | [server/src/routes/api/userMenu.js:118](../server/src/routes/api/userMenu.js#L118) |
 | POST | `/user-menu/restore-prev` | — | [server/src/routes/api/userMenu.js:98](../server/src/routes/api/userMenu.js#L98) |
-| GET | `/vcenter-info/:kind` | 권한 `inv.alarms` | [server/src/routes/api/vcInfo.js:33](../server/src/routes/api/vcInfo.js#L33) |
+| GET | `/vcenter-info/:kind` | — | [server/src/routes/api/vcInfo.js:61](../server/src/routes/api/vcInfo.js#L61) |
 | GET | `/vcenters` | — | [server/src/routes/api/vcTools.js:14](../server/src/routes/api/vcTools.js#L14) |
 | GET | `/vcenters/:id/usage-history` | — | [server/src/routes/api/toolsCapacity.js:790](../server/src/routes/api/toolsCapacity.js#L790) |
 | GET | `/veeam/backup-counts` | — | [server/src/routes/api/veeam.js:400](../server/src/routes/api/veeam.js#L400) |

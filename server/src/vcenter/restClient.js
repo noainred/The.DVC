@@ -181,6 +181,16 @@ export class VCenterClient {
     return this.#request('/api/cis/tagging/tag-association?action=list-attached-objects-on-tags', { method: 'POST', body: { tag_ids: tagIds } });
   }
 
+  // v2.897: Linked Mode 구성원 · 어플라이언스 업데이트 · vLCM 이미지 준수 — 전부 GET(읽기 전용). 스캔 · 업데이트 확인을 새로 일으키는 호출은 두지 않는다
+  //   (pending 은 source_type=LAST_CHECK — 마지막 확인 결과만, 준수는 마지막 스캔 결과만). 필요 권한 · 응답 필드는 docs/design/vcenter-tabs/README.md §12.
+  topologyNodes() { return this.#request('/api/vcenter/topology/nodes'); }
+  topologyNode(node) { return this.#request(`/api/vcenter/topology/nodes/${encodeURIComponent(node)}`); }
+  topologyReplication() { return this.#request('/api/vcenter/topology/replication-status'); }
+  applianceUpdate() { return this.#request('/api/appliance/update'); }
+  applianceUpdatePending() { return this.#request('/api/appliance/update/pending?source_type=LAST_CHECK'); }
+  vlcmEnablement(cluster) { return this.#request(`/api/esx/settings/clusters/${encodeURIComponent(cluster)}/enablement/software`); }
+  vlcmCompliance(cluster) { return this.#request(`/api/esx/settings/clusters/${encodeURIComponent(cluster)}/software/compliance`); }
+
   /** Detailed per-VM metrics (CPU/mem) — best-effort, may not be enabled. */
   getVm(vmId) {
     return this.#request(`/api/vcenter/vm/${vmId}`);

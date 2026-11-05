@@ -626,7 +626,7 @@ export default function VCenterDetail({ site, onBack }) {
       )}
       {view === 'linked' && <LinkedTab site={site} vcenterId={vcenterId} />}
       {view === 'extensions' && <ExtensionsTab vcenterId={vcenterId} />}
-      {view === 'updates' && <UpdatesTab site={site} hosts={hosts} hostsOk={hostsOk} gate={gateEl(hostsPart, '호스트 목록')} />}
+      {view === 'updates' && <UpdatesTab site={site} vcenterId={vcenterId} hosts={hosts} hostsOk={hostsOk} gate={gateEl(hostsPart, '호스트 목록')} />}
 
       {(view === 'hosts' || view === 'vms') && (
         <>

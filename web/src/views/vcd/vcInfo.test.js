@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { entityHash, vcAlarmRows, vcAlarmCounts, taskDurText, vcTaskRows, vcTaskCounts, vcPermRows, vcInfoHeadText, entityTypeText } from './vcInfo.js';
+import { entityHash, vcAlarmRows, vcAlarmCounts, taskDurText, vcTaskRows, vcTaskCounts, vcPermRows, vcInfoHeadText, entityTypeText, replicationSummary, vlcmRows, vlcmCounts, vlcmForHost } from './vcInfo.js';
 import { parseVcRoute } from './vcdRoute.js';
 
 describe('v2.897 vCenter 알람 · 최근 작업 · 권한 목록 — 화면 판정', () => {
@@ -35,5 +35,21 @@ describe('v2.897 vCenter 알람 · 최근 작업 · 권한 목록 — 화면 판
     expect(vcInfoHeadText({ at: null, refreshMs: 300_000 })).toBe('아직 읽지 않음 · 5분마다 갱신');
     expect(vcInfoHeadText({ at: Date.parse('2026-11-05T03:04:00'), refreshMs: 6 * 3_600_000, source: 'edge' })).toBe('읽은 시각 11-05 03:04 · 6시간마다 갱신 · 엣지 수집');
     expect(vcInfoHeadText(null)).toBe('');
+  });
+});
+
+describe('v2.897 ④ Linked Mode · vLCM — 화면 판정', () => {
+  it('복제 요약 — 끊김 · 복제 안 됨 · 최대 지연(모르는 값은 세지 않는다)', () => {
+    expect(replicationSummary([{ available: false, replicating: true, lag: 3 }, { available: true, replicating: false, lag: null }, {}])).toEqual({ total: 3, down: 1, notReplicating: 1, maxLag: 3 });
+    expect(replicationSummary(null).maxLag).toBe(null);
+  });
+  it('vLCM — 호환 안 됨 · 미준수 먼저 · 베이스라인 뒤 · 개수 · 호스트 짝(clusterRef 우선, 없으면 이름)', () => {
+    const items = [{ cluster: 'c1', name: 'B', enabled: false }, { cluster: 'c2', name: 'A', enabled: true, status: 'COMPLIANT' }, { cluster: 'c3', name: 'C', enabled: true, status: 'NON_COMPLIANT', nc: [{ id: 'host-2' }] }, { cluster: 'c4', name: 'D', enabled: true, status: 'INCOMPATIBLE' }];
+    const rows = vlcmRows(items);
+    expect(rows.map((x) => x.cluster)).toEqual(['c4', 'c3', 'c2', 'c1']);
+    expect(vlcmCounts(rows)).toEqual({ clusters: 4, image: 3, baseline: 1, nonCompliant: 2, unknown: 0 });
+    expect(vlcmForHost(items, { clusterRef: 'c3', cluster: 'zzz' }, 'host-2')).toEqual({ row: items[2], nonCompliant: true });
+    expect(vlcmForHost(items, { cluster: 'A' }, 'host-2').nonCompliant).toBe(false);
+    expect(vlcmForHost(items, { cluster: 'nope' }, 'host-2')).toBe(null);
   });
 });

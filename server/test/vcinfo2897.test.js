@@ -264,3 +264,117 @@ test('⑤ 선형 시간 — 닫히지 않은 원소 반복 · 긴 텍스트(8배
   const { a, b: tb } = pairMinTimes(() => P.parseTaskInfo(t(2_000)), () => P.parseTaskInfo(t(16_000)));
   assert.ok(tb / a < 24, `작업 비율 ${(tb / a).toFixed(1)}`);
 });
+
+// ════════════════════════════ ④ REST: Linked Mode · 업데이트 · vLCM ════════════════════════════
+function fakeRest({ loginFail = null, pendingFail = null, complianceFail = {}, slowEn = 0 } = {}) {
+  const calls = [];
+  const rec = (n, v) => async (...a) => { calls.push([n, ...a]); if (slowEn && n === 'en') await new Promise((r) => setTimeout(r, slowEn)); return typeof v === 'function' ? v(...a) : v; };
+  const err = (status, m = 'x') => Object.assign(new Error(`GET -> ${status} ${m}`), { status });
+  return {
+    calls,
+    login: async () => { calls.push(['login']); if (loginFail) throw err(loginFail); },
+    logout: async () => { calls.push(['logout']); },
+    topologyNodes: rec('nodes', [{ node: 'vc1.corp', type: 'VCSA_EMBEDDED', replication_partners: ['vc2.corp'] }, { node: 'vc2.corp', type: 'VCSA_EMBEDDED', replication_partners: ['vc1.corp'] }]),
+    topologyNode: rec('node', { domain: 'vsphere.local', type: 'VCSA_EMBEDDED' }),
+    topologyReplication: rec('repl', [{ node: 'vc1.corp', replication_partner: 'vc2.corp', partner_available: false, status_available: true, replicating: true, change_lag: 3 }]),
+    applianceUpdate: rec('upd', { state: 'UPDATES_PENDING', version: '8.0.2.00300', latest_query_time: '2026-11-01T00:00:00Z' }),
+    applianceUpdatePending: async (...a) => { calls.push(['pending', ...a]); if (pendingFail) throw err(pendingFail); return [{ version: '8.0.3.00100', name: 'U3a', severity: 'CRITICAL', priority: 'HIGH', update_type: 'SECURITY', release_date: '2026-09-17T00:00:00Z', reboot_required: true, size: 7120 }]; },
+    vlcmEnablement: rec('en', (cl) => ({ enabled: cl !== 'domain-c2' })),
+    vlcmCompliance: async (cl) => {
+      calls.push(['comp', cl]);
+      if (complianceFail[cl]) throw err(complianceFail[cl]);
+      return { status: 'NON_COMPLIANT', impact: 'REBOOT_REQUIRED', scan_time: '2026-11-04T00:00:00Z', compliant_hosts: ['host-1'], non_compliant_hosts: ['host-2'], incompatible_hosts: [], unavailable_hosts: [], host_info: { 'host-2': { name: 'esx02' } }, base_image: { huge: 'x'.repeat(1000) } };
+    },
+  };
+}
+
+test('④ REST 파서 — 맨몸 · {value} 둘 다 · 모르는 값 null · 상세 구성요소는 싣지 않는다', () => {
+  assert.deepEqual(P.parseTopologyNodes({ value: [{ node: 'a', type: 'VCSA_EMBEDDED', replication_partners: ['b', 5] }, { type: 'X' }] }), [{ node: 'a', type: 'VCSA_EMBEDDED', partners: ['b'] }]);
+  assert.deepEqual(P.parseApplianceUpdate({ state: 'UP_TO_DATE', version: '8.0.2', latest_query_time: 'bad' }), { state: 'UP_TO_DATE', version: '8.0.2', lastCheck: null });
+  const c = P.parseVlcmCompliance({ status: 'WEIRD', non_compliant_hosts: ['host-2', 'bad id'], incompatible_hosts: ['host-3'], host_info: { 'host-2': { name: 'esx02' } }, components: { a: 1 } });
+  assert.deepEqual(c, { status: null, impact: null, scanTime: null, counts: { compliant: null, nonCompliant: 1, incompatible: 1, unavailable: null }, nc: [{ id: 'host-2', name: 'esx02' }, { id: 'host-3', name: null }] });
+  assert.match(P.restErrText({ status: 403 }), /^권한 없음\(403\)/);
+  assert.match(P.restErrText({ status: 404 }), /API 가 없습니다/);
+});
+
+test('④ REST 갱신 — GET 만 · 베이스라인 클러스터는 준수를 묻지 않는다 · 6시간 안에는 세션도 열지 않는다', async () => {
+  C._resetVcInfo();
+  const rc = fakeRest();
+  const now = Date.parse('2026-11-05T03:00:00Z');
+  const r = await C.refreshVcRest({ id: 'vr1' }, [{ ref: 'domain-c1', name: 'Prod' }, { ref: 'domain-c2', name: 'Legacy' }], { now, client: rc });
+  assert.deepEqual([r.linked.domain, r.linked.nodes.length, r.linked.replication[0].available], ['vsphere.local', 2, false]);
+  assert.deepEqual([r.updates.state, r.updates.pending[0].version, r.updates.pending[0].sizeMB], ['UPDATES_PENDING', '8.0.3.00100', 7120]);
+  const v = Object.fromEntries(r.vlcm.items.map((x) => [x.cluster, x]));
+  assert.equal(v['domain-c1'].status, 'NON_COMPLIANT');
+  assert.deepEqual(v['domain-c1'].nc, [{ id: 'host-2', name: 'esx02' }]);
+  assert.equal(Object.hasOwn(v['domain-c1'], 'base_image'), false);
+  assert.equal(v['domain-c2'].enabled, false);
+  assert.ok(!rc.calls.some((c) => c[0] === 'comp' && c[1] === 'domain-c2'), '베이스라인 클러스터에 준수를 묻지 않는다');
+  assert.deepEqual(rc.calls.at(-1), ['logout']);
+  const rc2 = fakeRest();
+  await C.refreshVcRest({ id: 'vr1' }, [{ ref: 'domain-c1' }], { now: now + 3_600_000, client: rc2 });
+  assert.equal(rc2.calls.length, 0, '6시간 안에는 로그인조차 하지 않는다');
+  // 소스 고정 — REST 클라이언트에 추가한 메서드는 전부 GET 이고 스캔 · 확인을 일으키는 경로가 없다
+  const src = fs.readFileSync(path.join(import.meta.dirname, '..', 'src', 'vcenter', 'restClient.js'), 'utf8');
+  const block = src.slice(src.indexOf('topologyNodes()'), src.indexOf('vlcmCompliance(cluster)') + 200);
+  assert.doesNotMatch(block, /method:|action=scan|vmw-task|LOCAL_AND_ONLINE/);
+  assert.match(block, /source_type=LAST_CHECK/);
+});
+
+test('④ REST 실패 — 로그인 거부는 세 종류의 오류로만 · 대기 목록 403 은 상태와 따로 · 클러스터 하나 실패는 그 행만', async () => {
+  C._resetVcInfo();
+  const now = Date.parse('2026-11-05T03:00:00Z');
+  const r = await C.refreshVcRest({ id: 'vr2' }, [], { now, client: fakeRest({ loginFail: 401 }) });
+  for (const k of ['linked', 'updates', 'vlcm']) assert.match(r[k].error, /REST 로그인 실패 — 권한 없음\(401\)/);
+  C._resetVcInfo();
+  const r2 = await C.refreshVcRest({ id: 'vr3' }, [{ ref: 'domain-c1' }, { ref: 'domain-c3' }], { now, client: fakeRest({ pendingFail: 403, complianceFail: { 'domain-c3': 503 } }) });
+  assert.equal(r2.updates.state, 'UPDATES_PENDING');
+  assert.match(r2.updates.pendingError, /권한 없음\(403\)/);
+  assert.match(r2.vlcm.items.find((x) => x.cluster === 'domain-c3').error, /503/);
+  assert.equal(r2.vlcm.items.find((x) => x.cluster === 'domain-c1').status, 'NON_COMPLIANT');
+});
+
+test('④ vLCM 시한 — 읽지 못한 클러스터는 직전 값 · 다음엔 오래된 것부터 · 짧은 재시도', async () => {
+  C._resetVcInfo();
+  const now = Date.parse('2026-11-05T03:00:00Z');
+  const cl = [{ ref: 'domain-c1' }, { ref: 'domain-c2' }, { ref: 'domain-c3' }];
+  await C.refreshVcRest({ id: 'vr4' }, cl, { now, client: fakeRest() });
+  const later = now + 7 * 3_600_000;
+  // 클러스터 사용 여부 조회만 100ms — 예산 150ms 면 첫 클러스터(또는 둘)까지만 읽고 나머지는 시한에 걸린다(부하가 크면 더 많이 걸릴 뿐 — 단언은 '하나 이상').
+  const r = await C.refreshVcRest({ id: 'vr4' }, cl, { now: later, client: fakeRest({ slowEn: 100 }), budgetMs: 150 });
+  assert.ok(r.vlcm.partial > 0, '일부를 못 읽었다');
+  assert.equal(r.vlcm.items.length, 3, '못 읽은 클러스터는 직전 값으로 남는다');
+  assert.equal(r.vlcm.retryAt, later + C.VCINFO_RETRY_MS);
+  const fresh = r.vlcm.items.filter((x) => x.at === later).map((x) => x.cluster);
+  const rc = fakeRest();
+  await C.refreshVcRest({ id: 'vr4' }, cl, { now: later + C.VCINFO_RETRY_MS, client: rc });
+  const firstEn = rc.calls.find((c) => c[0] === 'en')?.[1];
+  assert.ok(!fresh.includes(firstEn), `다음 시도는 지난번에 못 읽은 클러스터부터(${firstEn})`);
+});
+
+test('④ 라우트 — 종류별 권한 · linked 는 범위 안 등록 vCenter 만 포탈 등록으로 짝짓는다', async () => {
+  const { linkedPortalMap, VCINFO_PERM } = await import('../src/routes/api/vcInfo.js');
+  assert.deepEqual([VCINFO_PERM.linked, VCINFO_PERM.updates, VCINFO_PERM.vlcm, VCINFO_PERM.perms], ['inv.hosts', 'inv.hosts', 'inv.hosts', 'inv.alarms']);
+  const nodes = [{ node: 'VC1.corp' }, { node: 'vc2.corp' }, { node: 'vc9.corp' }];
+  const reg = [{ id: 'a', host: 'https://vc1.corp/sdk' }, { id: 'b', host: 'vc2.corp:443' }];
+  const snapVcs = [{ id: 'a', name: 'A', version: '8.0.2', build: '1' }, { id: 'b', name: 'B' }];
+  assert.deepEqual(linkedPortalMap(nodes, reg, snapVcs, null).map((n) => n.portal?.id ?? null), ['a', 'b', null]);
+  assert.deepEqual(linkedPortalMap(nodes, reg, snapVcs, new Set(['a'])).map((n) => n.portal?.id ?? null), ['a', null, null], '범위 밖 등록은 알려 주지 않는다');
+  await seedSnapshot({ vcenters: [{ id: 'vcA', name: 'A', status: 'connected' }] });
+  C._resetVcInfo();
+  await C.refreshVcRest({ id: 'vcA' }, [], { now: Date.now(), client: fakeRest() });
+  const viewer = await serve({ username: 'v', role: 'viewer', scope: null });
+  const u = await viewer('/vcenter-info/updates?vcenterId=vcA');
+  assert.equal(u.status, 200);
+  assert.equal(u.body.state, 'UPDATES_PENDING');
+  assert.equal(Object.hasOwn(u.body, 'retryAt') || Object.hasOwn(u.body, 'tried'), false);
+});
+
+test('③④ 엣지 정제 — REST 3종도 아는 키만', () => {
+  const v = P.sanitizeVcInfo({ linked: { at: 1, nodes: [{ node: 'a', type: 'evil type', partners: ['b'] }], domain: { x: 1 } }, updates: { state: '<x>', pending: [{ version: '1', sizeMB: -5 }] }, vlcm: { items: [{ cluster: 'domain-c1', status: 'HACK', nc: [{ id: 'bad id' }, { id: 'host-1', name: 'h' }], counts: { compliant: -1 } }] } });
+  assert.deepEqual(v.linked.nodes, [{ node: 'a', type: null, partners: ['b'] }]);
+  assert.equal(v.linked.domain, null);
+  assert.equal(v.updates.state, null);
+  assert.equal(v.updates.pending[0].sizeMB, null);
+  assert.deepEqual([v.vlcm.items[0].status, v.vlcm.items[0].nc, v.vlcm.items[0].counts.compliant], [null, [{ id: 'host-1', name: 'h' }], null]);
+});

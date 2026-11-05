@@ -200,5 +200,115 @@ export function sanitizeVcInfo(v) {
   if (Object.hasOwn(v, 'alarms')) out.alarms = sanAlarms(v.alarms);
   if (Object.hasOwn(v, 'tasks')) out.tasks = sanTasks(v.tasks);
   if (Object.hasOwn(v, 'perms')) out.perms = sanPerms(v.perms);
+  return sanitizeVcRestInfo(v, out);   // v2.897 ④ linked · updates · vlcm
+}
+
+// ── v2.897 ④ REST(읽기 전용): Linked Mode 구성원 · 어플라이언스 업데이트 · vLCM 이미지 준수 ─────────────────────────────
+// 모양:
+//   linked:  { at, nodes:[{ node, type, partners:[] }], domain, replication:[{ node, partner, available, replicating, lag }], error, replError }
+//   updates: { at, state, version, lastCheck, pending:[{ version, name, severity, priority, type, releaseDate, reboot, sizeMB }], error, pendingError }
+//   vlcm:    { at, items:[{ cluster, name, enabled, status, impact, scanTime, counts:{compliant,nonCompliant,incompatible,unavailable}, nc:[{id,name}], error }], omitted, error }
+// REST 응답은 /api 의 맨몸 JSON 이지만 옛 래핑({value}) 도 받는다. 모르는 값은 null.
+export const VCREST_LIMITS = Object.freeze({ nodes: 32, partners: 16, pending: 30, clusters: 64, nc: 100 });
+const UPD_STATES = new Set(['UP_TO_DATE', 'UPDATES_PENDING', 'STAGE_IN_PROGRESS', 'INSTALL_IN_PROGRESS', 'INSTALL_FAILED', 'ROLLBACK_IN_PROGRESS']);
+const VLCM_STATUS = new Set(['COMPLIANT', 'NON_COMPLIANT', 'INCOMPATIBLE', 'UNAVAILABLE']);
+const unwrap = (v) => (isObj(v) && Object.hasOwn(v, 'value') && Object.keys(v).length === 1 ? v.value : v);
+const strU = (v, n) => (typeof v === 'string' && v.trim() ? v.trim().slice(0, n) : null);
+const tsStr = (v) => (typeof v === 'string' ? tsOf(v) : ts(v));
+const enumOf = (v, re) => (typeof v === 'string' && re.test(v) ? v : null);
+
+export function parseTopologyNodes(raw) {
+  const arr = unwrap(raw);
+  return (Array.isArray(arr) ? arr : []).filter(isObj).slice(0, VCREST_LIMITS.nodes).map((n) => ({
+    node: strU(n.node, 255),
+    type: enumOf(n.type, /^[A-Z_]{1,32}$/),
+    partners: (Array.isArray(n.replication_partners) ? n.replication_partners : []).map((x) => strU(x, 255)).filter(Boolean).slice(0, VCREST_LIMITS.partners),
+  })).filter((n) => n.node);
+}
+export function parseReplication(raw) {
+  const arr = unwrap(raw);
+  return (Array.isArray(arr) ? arr : []).filter(isObj).slice(0, VCREST_LIMITS.nodes * 4).map((r) => ({
+    node: strU(r.node, 255), partner: strU(r.replication_partner, 255),
+    available: r.partner_available === true ? true : r.partner_available === false ? false : null,
+    replicating: r.replicating === true ? true : r.replicating === false ? false : null,
+    lag: typeof r.change_lag === 'number' && Number.isFinite(r.change_lag) && r.change_lag >= 0 ? Math.trunc(r.change_lag) : null,
+  })).filter((r) => r.node);
+}
+export function parseApplianceUpdate(raw) {
+  const v = unwrap(raw);
+  if (!isObj(v)) return { state: null, version: null, lastCheck: null };
+  return { state: UPD_STATES.has(v.state) ? v.state : enumOf(v.state, /^[A-Z_]{1,40}$/), version: strU(v.version, 64), lastCheck: tsStr(v.latest_query_time) };
+}
+export function parsePendingUpdates(raw) {
+  const arr = unwrap(raw);
+  return (Array.isArray(arr) ? arr : []).filter(isObj).slice(0, VCREST_LIMITS.pending).map((u) => ({
+    version: strU(u.version, 64), name: strU(u.name, 200) || strU(u.description?.default_message, 200),
+    severity: enumOf(u.severity, /^[A-Z_]{1,20}$/), priority: enumOf(u.priority, /^[A-Z_]{1,20}$/), type: enumOf(u.update_type, /^[A-Z_]{1,20}$/),
+    releaseDate: tsStr(u.release_date), reboot: u.reboot_required === true ? true : u.reboot_required === false ? false : null,
+    sizeMB: typeof u.size === 'number' && Number.isFinite(u.size) && u.size >= 0 ? Math.round(u.size) : null,
+  })).filter((u) => u.version);
+}
+/** 준수 결과 → 상태 · 호스트 집합 수 · 미준수 호스트(이름은 host_info) — 상세 구성요소(base_image · components …)는 싣지 않는다. */
+export function parseVlcmCompliance(raw) {
+  const v = unwrap(raw);
+  if (!isObj(v)) return { status: null, impact: null, scanTime: null, counts: null, nc: [] };
+  const ids = (k) => (Array.isArray(v[k]) ? v[k].filter((x) => typeof x === 'string' && MOREF_RE.test(x)) : null);
+  const info = isObj(v.host_info) ? v.host_info : {};
+  const nameOf = (id) => strU(isObj(info[id]) ? info[id].name : null, 128);
+  const nc = [...(ids('non_compliant_hosts') || []), ...(ids('incompatible_hosts') || [])].slice(0, VCREST_LIMITS.nc).map((id) => ({ id, name: nameOf(id) }));
+  const n = (k) => { const a = ids(k); return a ? a.length : null; };
+  return {
+    status: VLCM_STATUS.has(v.status) ? v.status : null,
+    impact: enumOf(v.impact, /^[A-Z_]{1,40}$/),
+    scanTime: tsStr(v.scan_time),
+    counts: { compliant: n('compliant_hosts'), nonCompliant: n('non_compliant_hosts'), incompatible: n('incompatible_hosts'), unavailable: n('unavailable_hosts') },
+    nc,
+  };
+}
+/** REST 오류 → 화면 문구(상태 코드로만 가른다 — 원문은 200자까지만 붙인다). */
+export function restErrText(err, what = '') {
+  const st = err?.status;
+  const raw = String(err?.message || err || '').slice(0, 200);
+  if (st === 401 || st === 403) return `권한 없음(${st})${what ? ` — ${what}` : ''}`;
+  if (st === 404) return '이 vCenter 에 이 API 가 없습니다(404 — 버전이 낮거나 사용하지 않는 기능)';
+  if (st === 503) return '서비스를 쓸 수 없습니다(503)';
+  return raw || '조회 실패';
+}
+
+function sanLinked(k) {
+  if (!isObj(k)) return null;
+  return { at: ts(k.at), error: str(k.error, 300), replError: str(k.replError, 300), domain: str(k.domain, 255),
+    nodes: parseTopologyNodes((Array.isArray(k.nodes) ? k.nodes : []).map((x) => (isObj(x) ? { node: x.node, type: x.type, replication_partners: x.partners } : null))),
+    replication: (Array.isArray(k.replication) ? k.replication : []).filter(isObj).slice(0, VCREST_LIMITS.nodes * 4).map((r) => ({
+      node: str(r.node, 255), partner: str(r.partner, 255), available: bool(r.available), replicating: bool(r.replicating), lag: cnt(r.lag) || (r.lag === 0 ? 0 : null),
+    })).filter((r) => r.node) };
+}
+function sanUpdates(k) {
+  if (!isObj(k)) return null;
+  return { at: ts(k.at), error: str(k.error, 300), pendingError: str(k.pendingError, 300),
+    state: typeof k.state === 'string' && /^[A-Z_]{1,40}$/.test(k.state) ? k.state : null, version: str(k.version, 64), lastCheck: ts(k.lastCheck),
+    pending: (Array.isArray(k.pending) ? k.pending : []).filter(isObj).slice(0, VCREST_LIMITS.pending).map((u) => ({
+      version: str(u.version, 64), name: str(u.name, 200), severity: enumOf(u.severity, /^[A-Z_]{1,20}$/), priority: enumOf(u.priority, /^[A-Z_]{1,20}$/),
+      type: enumOf(u.type, /^[A-Z_]{1,20}$/), releaseDate: ts(u.releaseDate), reboot: bool(u.reboot), sizeMB: int(u.sizeMB) != null && u.sizeMB >= 0 ? u.sizeMB : null,
+    })).filter((u) => u.version) };
+}
+function sanVlcm(k) {
+  if (!isObj(k)) return null;
+  const c = (v) => { const n = int(v); return n != null && n >= 0 ? n : null; };
+  return { at: ts(k.at), error: str(k.error, 300), omitted: cnt(k.omitted), partial: cnt(k.partial),
+    items: (Array.isArray(k.items) ? k.items : []).filter(isObj).slice(0, VCREST_LIMITS.clusters).map((x) => ({
+      cluster: ref(x.cluster), name: str(x.name, 128), at: ts(x.at), enabled: bool(x.enabled), status: VLCM_STATUS.has(x.status) ? x.status : null,
+      impact: enumOf(x.impact, /^[A-Z_]{1,40}$/), scanTime: ts(x.scanTime),
+      counts: isObj(x.counts) ? { compliant: c(x.counts.compliant), nonCompliant: c(x.counts.nonCompliant), incompatible: c(x.counts.incompatible), unavailable: c(x.counts.unavailable) } : null,
+      nc: (Array.isArray(x.nc) ? x.nc : []).filter(isObj).slice(0, VCREST_LIMITS.nc).map((h) => ({ id: ref(h.id), name: str(h.name, 128) })).filter((h) => h.id),
+      error: str(x.error, 300),
+    })).filter((x) => x.cluster) };
+}
+/** sanitizeVcInfo 의 REST 3종 몫 — 같은 규칙(받은 종류만 · 객체가 아니면 null). */
+export function sanitizeVcRestInfo(v, out = {}) {
+  if (!isObj(v)) return out;
+  if (Object.hasOwn(v, 'linked')) out.linked = sanLinked(v.linked);
+  if (Object.hasOwn(v, 'updates')) out.updates = sanUpdates(v.updates);
+  if (Object.hasOwn(v, 'vlcm')) out.vlcm = sanVlcm(v.vlcm);
   return out;
 }

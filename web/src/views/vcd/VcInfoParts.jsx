@@ -12,7 +12,10 @@ import { Card, Note } from './VcdParts.jsx';
 import { shortTs } from './vcdTabs.js';
 import {
   VC_ALARM_STATUS, TASK_STATE, TASK_REASON, entityTypeText, entityHash, vcAlarmRows, vcAlarmCounts, taskDurText, vcTaskRows, vcTaskCounts, vcPermRows, vcInfoHeadText,
+  NODE_TYPE_TEXT, UPDATE_STATE, UPDATE_SEVERITY, UPDATE_TYPE, VLCM_STATUS, replicationSummary, vlcmRows, vlcmCounts, vlcmForHost,
 } from './vcInfo.js';
+import { vcHash } from './vcdRoute.js';
+import { dayStamp } from '../../dayStamp.js';
 
 const adminOnlyError = () => new HttpError('forbidden', { status: 403, body: { requiredRole: ['admin'], reason: '권한 목록(사용자 · 그룹 · 역할)은 관리자 판본에서만 볼 수 있어 이 칸을 불러오지 않았습니다.' } });
 
@@ -172,6 +175,173 @@ export function VcPermsCard({ vcenterId, entityType = null, entity = null, what 
             </>
           )}
       <Note>{entity ? `${what}에 직접 정의된 권한만입니다(상속은 이 목록으로 알 수 없습니다). ` : ''}vCenter 에 정의된 권한(사용자/그룹 · 역할 · 정의 위치 · 전파)입니다. 읽기 전용 — 권한 추가 · 변경은 두지 않습니다.</Note>
+    </Card>
+  );
+}
+
+/* ── ④ Linked Mode · 업데이트 · vLCM(v2.897 — REST 읽기 전용 · 6시간 주기) ─────────────────────────── */
+const reloadBtn = (q) => <button type="button" className="vcd-more" onClick={q.reload} disabled={q.loading}>{q.loading ? '불러오는 중…' : '다시 읽기'}</button>;
+const gateBody = (ok, q, label) => (!ok ? <div style={{ padding: 12 }}><ErrorBox error={toolDenied(label)} /></div>
+  : q.error && !q.data ? <div style={{ padding: 12 }}><ErrorBox error={q.error} /></div> : !q.data ? <Loading label={label} /> : null);
+
+/** 연결된 vCenter Server 시스템(Enhanced Linked Mode) — /api/vcenter/topology/nodes · replication-status. */
+export function VcLinkedCard({ vcenterId }) {
+  const ok = can('inv.hosts');
+  const q = useOnce('/vcenter-info/linked', { vcenterId }, ok);
+  const d = q.data;
+  const nodes = Array.isArray(d?.nodes) ? d.nodes : [];
+  const rep = Array.isArray(d?.replication) ? d.replication : [];
+  const rs = replicationSummary(rep);
+  return (
+    <Card title={`연결된 vCenter${d && !d.notCollected ? ` ${nodes.length}` : ''}`} badge={rs.down ? <span className="badge red">복제 파트너 끊김 {rs.down}</span> : null} sub={d ? vcInfoHeadText(d) : null} more={ok ? reloadBtn(q) : null}>
+      {gateBody(ok, q, '연결된 vCenter') || (
+        <>
+          <Status d={d} />
+          {!d.notCollected && (
+            <>
+              {d.domain && <div style={{ padding: '8px 14px 0', fontSize: 12.5 }}>SSO 도메인 <b className="mono">{d.domain}</b></div>}
+              {nodes.length ? (
+                <STable className="v3-table" minWidth={680}>
+                  <thead><tr><th>노드(PNID)</th><th>유형</th><th>포탈 등록</th><th>버전</th><th>복제 파트너</th></tr></thead>
+                  <tbody>
+                    {nodes.map((n) => (
+                      <tr key={n.node}>
+                        <td className="mono" style={{ overflowWrap: 'anywhere' }}><b>{n.node}</b></td>
+                        <td>{NODE_TYPE_TEXT[n.type] || n.type || '—'}</td>
+                        <td>{n.portal ? (n.portal.id === vcenterId ? <span className="badge blue">이 vCenter</span> : <a className="vcd-more" href={vcHash(n.portal.id)}>{n.portal.name} →</a>) : <span className="muted">확인 안 됨</span>}</td>
+                        <td>{n.portal?.version ? `${n.portal.version}${n.portal.build ? ` · ${n.portal.build}` : ''}` : '—'}</td>
+                        <td className="mono" style={{ whiteSpace: 'normal', overflowWrap: 'anywhere' }}>{(n.partners || []).join(' · ') || '—'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </STable>
+              ) : <div className="muted" style={{ padding: '10px 14px', fontSize: 12.5 }}>구성원을 보고하지 않았습니다.</div>}
+              {rep.length > 0 && (
+                <div style={{ padding: '8px 14px 0', fontSize: 12.5 }}>
+                  {`복제 ${rs.total}쌍 · 파트너 끊김 ${rs.down} · 복제 안 됨 ${rs.notReplicating}${rs.maxLag != null ? ` · 최대 지연 ${rs.maxLag}(변경 수)` : ''}`}
+                </div>
+              )}
+              {d.replError && <Note>{`복제 상태는 읽지 못했습니다: ${d.replError}`}</Note>}
+            </>
+          )}
+        </>
+      )}
+      <Note>vCenter 가 보고한 같은 SSO 도메인의 구성원입니다. ‘포탈 등록’ 은 노드 이름과 포탈에 등록한 주소가 같을 때만(조회 범위 안) 보이고, 포탈은 발견한 주소로 접속하지 않습니다. 버전 · 빌드는 포탈이 수집한 값입니다(이 API 에는 없습니다).</Note>
+    </Card>
+  );
+}
+
+/** vCenter 어플라이언스 업데이트 — /api/appliance/update · pending?source_type=LAST_CHECK(마지막 확인 결과만 — 새 확인을 일으키지 않는다). */
+export function VcUpdatesCard({ vcenterId }) {
+  const ok = can('inv.hosts');
+  const q = useOnce('/vcenter-info/updates', { vcenterId }, ok);
+  const d = q.data;
+  const pend = Array.isArray(d?.pending) ? d.pending : [];
+  const [b, t] = UPDATE_STATE[d?.state] || ['gray', d?.state || '—'];
+  return (
+    <Card title="vCenter 업데이트" badge={d && !d.notCollected && d.state ? <span className={`badge ${b}`}>{t}</span> : null} sub={d ? vcInfoHeadText(d) : null} more={ok ? reloadBtn(q) : null}>
+      {gateBody(ok, q, 'vCenter 업데이트') || (
+        <>
+          <Status d={d} />
+          {!d.notCollected && !(d.error && !d.at) && (
+            <>
+              <div style={{ padding: '8px 14px 0', fontSize: 12.5 }}>
+                {`어플라이언스 버전 ${d.version || '—'} · 저장소 마지막 확인 ${d.lastCheck ? dayStamp(d.lastCheck) : '—'}`}
+              </div>
+              {pend.length ? (
+                <STable className="v3-table" minWidth={720}>
+                  <thead><tr><th>버전</th><th>이름</th><th>심각도</th><th>종류</th><th>출시일</th><th>재부팅</th><th>크기</th></tr></thead>
+                  <tbody>
+                    {pend.map((u) => {
+                      const [sb, st] = UPDATE_SEVERITY[u.severity] || ['gray', u.severity || '—'];
+                      return (
+                        <tr key={u.version}>
+                          <td className="mono"><b>{u.version}</b></td>
+                          <td style={{ whiteSpace: 'normal', minWidth: 200 }}>{u.name || '—'}</td>
+                          <td><span className={`badge ${sb}`}>{st}</span></td>
+                          <td>{UPDATE_TYPE[u.type] || u.type || '—'}</td>
+                          <td data-sort={u.releaseDate == null ? '' : String(u.releaseDate)}>{u.releaseDate ? dayStamp(u.releaseDate) : '—'}</td>
+                          <td>{u.reboot === true ? '필요' : u.reboot === false ? '아니요' : '—'}</td>
+                          <td data-sort={u.sizeMB == null ? '' : String(u.sizeMB)}>{u.sizeMB == null ? '—' : `${u.sizeMB.toLocaleString()} MB`}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </STable>
+              ) : d.pendingError ? <Note>{`대기 목록을 읽지 못했습니다: ${d.pendingError}`}</Note>
+                : <div className="muted" style={{ padding: '10px 14px', fontSize: 12.5 }}>마지막 확인에서 적용 가능한 업데이트가 없었습니다.</div>}
+            </>
+          )}
+        </>
+      )}
+      <Note>vCenter 가 마지막으로 저장소를 확인한 결과만 읽습니다(포탈이 새 확인을 일으키지 않습니다). 이 API 는 vCenter 역할이 아니라 SSO 그룹(읽기 전용 운영 그룹)으로 권한이 정해져, 읽기 전용 수집 계정이면 ‘권한 없음’ 일 수 있습니다. 업데이트 적용은 두지 않습니다(조회 전용).</Note>
+    </Card>
+  );
+}
+
+/** vLCM 이미지 준수 — 클러스터마다 enablement/software(이미지 관리인가) → software/compliance(마지막 스캔 결과). */
+export function VcVlcmCard({ vcenterId }) {
+  const ok = can('inv.hosts');
+  const q = useOnce('/vcenter-info/vlcm', { vcenterId }, ok);
+  const d = q.data;
+  const rows = vlcmRows(d?.items);
+  const c = vlcmCounts(rows);
+  return (
+    <Card title={`vLCM 이미지 준수${d && !d.notCollected ? ` ${c.image}/${c.clusters}` : ''}`} badge={c.nonCompliant ? <span className="badge amber">미준수 {c.nonCompliant}</span> : null} sub={d ? vcInfoHeadText(d) : null} more={ok ? reloadBtn(q) : null}>
+      {gateBody(ok, q, 'vLCM 이미지 준수') || (
+        <>
+          <Status d={d} />
+          {!d.notCollected && (rows.length ? (
+            <STable className="v3-table" minWidth={760}>
+              <thead><tr><th>클러스터</th><th>관리 방식</th><th>준수</th><th>호스트(준수 · 미준수 · 호환 안 됨 · 결과 없음)</th><th>마지막 스캔</th><th>미준수 호스트</th></tr></thead>
+              <tbody>
+                {rows.map((x) => {
+                  const [sb, st] = VLCM_STATUS[x.status] || ['gray', '—'];
+                  return (
+                    <tr key={x.cluster}>
+                      <td><b>{x.name || x.cluster}</b></td>
+                      <td>{x.enabled === true ? '이미지' : x.enabled === false ? <span className="muted">베이스라인(이미지 아님)</span> : '—'}</td>
+                      <td>{x.error ? <span className="muted" style={{ fontSize: 12 }}>{x.error}</span> : x.enabled === true ? <span className={`badge ${sb}`}>{st}</span> : '—'}</td>
+                      <td>{x.counts ? [x.counts.compliant, x.counts.nonCompliant, x.counts.incompatible, x.counts.unavailable].map((n) => (n == null ? '—' : n)).join(' · ') : '—'}</td>
+                      <td data-sort={x.scanTime == null ? '' : String(x.scanTime)}>{x.scanTime ? shortTs(x.scanTime) : '—'}</td>
+                      <td style={{ whiteSpace: 'normal', overflowWrap: 'anywhere' }}>{(x.nc || []).map((h) => h.name || h.id).join(' · ') || '—'}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </STable>
+          ) : <div className="muted" style={{ padding: '10px 14px', fontSize: 12.5 }}>클러스터가 없습니다.</div>)}
+          {d?.partial > 0 && <Note>{`이번 갱신은 시한 때문에 클러스터 ${d.partial}개를 읽지 못해 직전 값을 보입니다 — 곧 다시 읽습니다.`}</Note>}
+          {d?.omitted > 0 && <Note>{`클러스터 상한을 넘어 ${d.omitted}개는 읽지 않았습니다.`}</Note>}
+        </>
+      )}
+      <Note>마지막 스캔 결과만 읽습니다(포탈이 스캔 · 재조정을 일으키지 않습니다). 베이스라인으로 관리하는 클러스터는 이 API 의 대상이 아닙니다(그 패치 준수는 수집하지 않습니다).</Note>
+    </Card>
+  );
+}
+
+/** 호스트 개체 › 업데이트 — 이 호스트가 속한 클러스터의 이미지 준수 · 이 호스트가 미준수 목록에 있는가. */
+export function HostVlcmCard({ vcenterId, host, hostRef }) {
+  const ok = can('inv.hosts');
+  const q = useOnce('/vcenter-info/vlcm', { vcenterId }, ok);
+  const d = q.data;
+  const m = d && !d.notCollected ? vlcmForHost(d.items, host, hostRef) : null;
+  const [sb, st] = VLCM_STATUS[m?.row?.status] || ['gray', '—'];
+  return (
+    <Card title="vLCM 이미지 준수" sub={d ? vcInfoHeadText(d) : null} more={ok ? reloadBtn(q) : null}>
+      {gateBody(ok, q, 'vLCM 이미지 준수') || (
+        <>
+          <Status d={d} />
+          {!d.notCollected && (!m ? <div className="muted" style={{ padding: '10px 14px', fontSize: 12.5 }}>{host?.cluster ? `클러스터 ‘${host.cluster}’ 의 결과가 없습니다.` : '클러스터에 속하지 않은 호스트입니다(vLCM 이미지는 클러스터 단위).'}</div> : (
+            <div style={{ padding: '10px 14px', display: 'grid', gap: 6, fontSize: 12.5 }}>
+              <div>{`클러스터 ${m.row.name || m.row.cluster} · 관리 방식 ${m.row.enabled === true ? '이미지' : m.row.enabled === false ? '베이스라인(이미지 아님)' : '—'}`}</div>
+              {m.row.enabled === true && <div>클러스터 준수 <span className={`badge ${sb}`}>{st}</span>{m.row.scanTime ? <span className="muted"> · 마지막 스캔 {shortTs(m.row.scanTime)}</span> : null}</div>}
+              {m.row.enabled === true && <div>{m.nonCompliant ? <span className="badge amber">이 호스트는 미준수 · 호환 안 됨 목록에 있습니다</span> : (m.row.nc || []).length >= 100 ? <span className="muted">미준수 목록이 상한(100)이라 이 호스트를 단정하지 않습니다.</span> : '이 호스트는 미준수 목록에 없습니다.'}</div>}
+              {m.row.error && <div className="muted">{m.row.error}</div>}
+            </div>
+          ))}
+        </>
+      )}
     </Card>
   );
 }

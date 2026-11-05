@@ -14,7 +14,7 @@ import { inferGpuMemGB } from '../gpu/gpuModelMem.js';
 import tls from 'node:tls';
 import { config } from '../config.js';
 import { loadMetricsSettings } from '../metrics/settings.js';
-import { refreshVcInfo, VCINFO_BUDGET_MS } from '../vcinfo/collect.js';   // v2.897 vCenter 알람·작업·권한
+import { refreshVcInfo, refreshVcRest, VCINFO_BUDGET_MS, VCREST_BUDGET_MS } from '../vcinfo/collect.js';   // v2.897 vCenter 알람·작업·권한
 import { parseObjectContent, xmlUnescape, snapshotInfo, effectiveRequestTimeoutMs, retrieveResultToObjectXml } from './soapParse.js';
 import { vcDispatcher, vcRequestSignal } from './restClient.js';
 import { parseObjectContentAsync } from '../util/soapParsePool.js';
@@ -2266,6 +2266,9 @@ export async function collectFromVCenterSoap(vc, { signal = null, deadlineAt = D
     // v2.897: vCenter 알람 · 최근 작업 · 권한 목록(읽기 전용 · 종류별 주기). 결과는 vcinfo 캐시에만 두고 vCenter 객체에 싣지 않는다
     //   (/vcenters 가 객체를 통째로 내보낸다 — 권한 목록이 새면 안 된다). 엣지 push 는 inventoryPush 가 캐시에서 따로 붙인다.
     await runAux('vcinfo', 'vCenter 알람·작업·권한', VCINFO_BUDGET_MS, (budgetMs) => refreshVcInfo(c, vc, { signal, budgetMs }));
+    // v2.897 ④: Linked Mode 구성원 · 어플라이언스 업데이트 · vLCM 이미지 준수(REST GET — 6시간마다 · 때가 아니면 세션도 열지 않는다).
+    await runAux('vcrest', 'Linked Mode·업데이트·vLCM', VCREST_BUDGET_MS, (budgetMs) => refreshVcRest(vc,
+      objs.filter((x) => x.type === 'ClusterComputeResource').map((x) => ({ ref: x.ref, name: typeof x.props?.name === 'string' ? x.props.name : null })), { signal, budgetMs }));
 
     const [solRes, licRes] = await Promise.allSettled([c.retrieveExtensions(), c.retrieveLicenses()]);
     // v2.742(감사 VC-06): 조회 실패를 빈 배열로 싣지 않는다 — [] 는 '보고 0개(라이선스·확장 없음)' 와 구분되지 않아 권한 부족

@@ -14,7 +14,7 @@ import { Card, KV, Note, NotCollected } from './VcdParts.jsx';
 import { useOnce, toolDenied } from './useOnce.js';
 import { EventRows } from './SummaryTab.jsx';
 import { PermPane, vmRef } from './VmObject.jsx';
-import { VcAlarmsCard, VcTasksCard } from './VcInfoParts.jsx';
+import { VcAlarmsCard, VcTasksCard, HostVlcmCard } from './VcInfoParts.jsx';
 import { vmsOnHost, resourcePoolRows, hostDatastoresFromVms, sameBuildCount } from './objTabs.js';
 import { gbText } from './vcdTabs.js';
 
@@ -183,7 +183,7 @@ export default function HostObject({ site, vcenterId, host, hostsOk, gate, hosts
               ['재부팅 필요', hc ? (hc.rebootRequired === true ? <span className="badge amber" key="r">예</span> : hc.rebootRequired === false ? '아니오' : '—') : <span className="muted" key="r">아직 읽지 않음</span>],
             ]} />
           </Card>
-          <div className="card" style={{ padding: 14 }}><NotCollected title="vLCM 이미지 준수 · 패치">클러스터 이미지 준수 · 적용 가능 패치는 수집하지 않습니다.</NotCollected></div>
+          <HostVlcmCard vcenterId={vcenterId} host={host} hostRef={vmRef(host)} />
         </div>
       )}
 
