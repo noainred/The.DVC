@@ -1,0 +1,167 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>VM 개체 보기 — 400px</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=Noto+Sans+KR:wght@400;500;700;800&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+body{margin:0;background:#0a0e17;color:#e6edf6;font-family:"Inter","Noto Sans KR","Apple SD Gothic Neo",sans-serif;font-size:13px}
+a{color:#93c5fd}a:hover{color:#bfdbfe}
+.muted{color:#8b9bb4}
+.faint{color:#5d6b85}
+.mono{font-family:"JetBrains Mono",ui-monospace,monospace}
+.card{background:#141b2d;border:1px solid #243049;border-radius:12px;min-width:0}
+.vtab{display:inline-flex;align-items:center;gap:6px;min-height:34px;padding:0 12px;border-radius:8px;border:1px solid transparent;color:#8b9bb4;font:inherit;font-size:13px;font-weight:600;text-decoration:none;white-space:nowrap;flex:none}
+.vtab.on{color:#ffffff;background:#3b82f6;border-color:#3b82f6}
+.vtab .n{font-size:10.5px;font-weight:700;padding:1px 6px;border-radius:999px;background:rgba(139,155,180,.16);color:#aebbd0}
+.vtab.on .n{background:rgba(255,255,255,.22);color:#ffffff}
+.btn{display:inline-flex;align-items:center;gap:6px;min-height:34px;padding:0 12px;border-radius:8px;border:1px solid #243049;background:#1a2236;color:#e6edf6;font:inherit;font-size:12px;font-weight:600;white-space:nowrap;text-decoration:none}
+.btn.primary{background:linear-gradient(135deg,#3b82f6,#2563eb);border-color:#2563eb;color:#ffffff;font-weight:700}
+.btn.pill{border-radius:999px;min-height:26px;padding:0 10px;font-size:11.5px;color:#7dd3fc;background:rgba(56,189,248,.12);border-color:rgba(56,189,248,.45)}
+.badge{display:inline-flex;align-items:center;padding:2px 9px;border-radius:20px;font-size:11px;font-weight:600;white-space:nowrap}
+.badge.green{background:rgba(34,197,94,.15);color:#4ade80}
+.badge.amber{background:rgba(245,158,11,.15);color:#fbbf24}
+.badge.gray{background:rgba(139,155,180,.15);color:#8b9bb4}
+.badge.blue{background:rgba(59,130,246,.15);color:#60a5fa}
+.badge.teal{background:rgba(20,184,166,.16);color:#2dd4bf}
+.ct{display:flex;align-items:center;gap:8px;padding:10px 12px;border-bottom:1px solid #1f2a40;min-width:0}
+.ct b{font-size:13px}
+.ct .more{margin-left:auto;font-size:12px;white-space:nowrap}
+.kv{display:grid;grid-template-columns:auto minmax(0,1fr);gap:7px 12px;padding:10px 12px;font-size:12.5px;align-items:baseline}
+.kv span{color:#8b9bb4;white-space:nowrap}
+.kv div{min-width:0;overflow-wrap:anywhere}
+.bar{height:6px;border-radius:999px;background:#243049;overflow:hidden;flex:1 1 0;min-width:40px}
+.bar i{display:block;height:100%;border-radius:999px}
+.row{display:flex;align-items:center;gap:8px;min-width:0}
+.sm{font-size:11.5px;color:#8b9bb4}
+.note{padding:8px 12px;font-size:11.5px;line-height:1.6;color:#8b9bb4;border-top:1px solid #1f2a40}
+.leaf{display:flex;align-items:center;gap:6px;padding:6px 8px;border-radius:8px;min-width:0;flex-wrap:wrap}
+.leaf.hover{background:#1a2236;outline:1px dashed #3b82f6}
+.find{display:flex;gap:8px;align-items:flex-start;padding:8px 12px;border-bottom:1px solid #1f2a40;font-size:12.5px}
+.find .badge{flex:none}
+.find small{display:block;color:#8b9bb4;font-size:11.5px}
+.tabs{position:relative;min-width:0}
+.tabs nav{display:flex;gap:4px;overflow-x:auto;padding-bottom:8px;border-bottom:1px solid #243049;scrollbar-width:none}
+.tabs:after{content:"";position:absolute;right:0;top:0;width:40px;height:34px;background:linear-gradient(90deg,rgba(10,14,23,0),#0a0e17);pointer-events:none}
+</style>
+</helmet>
+<div style="position:relative;width:100%;min-height:1700px;box-sizing:border-box;overflow:hidden;background:#0a0e17">
+<div style="max-width:400px;margin:0 auto;box-sizing:border-box;padding:14px 16px 24px;display:flex;flex-direction:column;gap:10px;min-width:0">
+
+  <!-- 트리 행: 400px 에서는 버튼이 항상 보인다(마우스 올림이 없다) · 다음 줄로 접힌다 -->
+  <div class="card" style="padding:4px 6px">
+    <div class="leaf hover">
+      <span class="badge green" style="padding:1px 6px">On</span><span style="font-weight:600">web-kr1-023</span>
+      <span class="sm" style="flex-basis:100%">Ubuntu 22.04 · 4 vCPU · 16 GB · esx-kr1-03</span>
+      <a class="btn pill" href="ObjectNarrow.dc.html" aria-label="web-kr1-023 개체 보기">⤢ 개체 보기</a>
+    </div>
+  </div>
+
+  <div class="sm" style="display:flex;gap:6px;flex-wrap:wrap"><a href="Main.dc.html" style="text-decoration:none">← VM 및 폴더</a><span>›</span><span>DC-KR1</span><span>›</span><span>Prod / Web</span></div>
+
+  <div class="card" style="padding:12px;display:flex;flex-direction:column;gap:8px">
+    <div class="row" style="gap:8px;flex-wrap:wrap"><span style="font-size:16px;font-weight:800;overflow-wrap:anywhere">web-kr1-023</span><span class="badge green">켜짐</span><span class="badge green">Tools</span></div>
+    <div class="muted" style="font-size:12px">Ubuntu Linux (64-bit) · esx-kr1-03 · CL-Web01 · <span class="mono">10.20.3.23</span></div>
+    <div style="display:flex;gap:6px;flex-wrap:wrap"><span class="btn">⚙ 사양</span><span class="btn">🖥 콘솔</span><span class="btn">↗ 원격</span><span class="btn">📊 리포트</span></div>
+  </div>
+
+  <div class="tabs">
+    <nav role="tablist" aria-label="VM 보기">
+      <a class="vtab on" href="ObjectNarrow.dc.html" aria-current="page">요약</a>
+      <a class="vtab" href="ObjectTabs.dc.html">모니터</a>
+      <a class="vtab" href="ObjectTabs.dc.html">구성 <span class="n">2</span></a>
+      <a class="vtab" href="ObjectTabs.dc.html">사용 권한</a>
+      <a class="vtab" href="ObjectTabs.dc.html">데이터스토어</a>
+      <a class="vtab" href="ObjectTabs.dc.html">네트워크</a>
+      <a class="vtab" href="ObjectTabs.dc.html">스냅샷</a>
+      <a class="vtab" href="ObjectTabs.dc.html">업데이트</a>
+    </nav>
+  </div>
+
+  <section class="card" aria-label="VM 하드웨어">
+    <div class="ct"><b>VM 하드웨어</b><a class="more" href="ObjectTabs.dc.html">구성 →</a></div>
+    <div class="kv">
+      <span>CPU</span><div>4 vCPU</div>
+      <span>메모리</span><div>16 GB</div>
+      <span>하드 디스크</span><div>2개 · 300 GB · 씬 1</div>
+      <span>디스크 사용</span><div>212 GB</div>
+      <span>네트워크 어댑터</span><div class="muted">수집하지 않음</div>
+      <span>호환성</span><div>vmx-19 · EFI</div>
+    </div>
+  </section>
+
+  <section class="card" aria-label="게스트 OS">
+    <div class="ct"><b>게스트 OS</b></div>
+    <div class="kv">
+      <span>OS</span><div>Ubuntu Linux (64-bit) 22.04.4</div>
+      <span>호스트 이름</span><div class="mono">web-kr1-023.demo.corp</div>
+      <span>IP</span><div class="mono">10.20.3.23</div>
+      <span>DNS</span><div class="mono">10.20.0.53 · 10.20.0.54</div>
+      <span>Tools</span><div>12.3.5 <span class="badge green">최신</span></div>
+      <span>부팅</span><div>10-28 02:14 · 8일</div>
+    </div>
+  </section>
+
+  <section class="card" aria-label="사용률">
+    <div class="ct"><b>사용률</b><a class="more" href="ObjectTabs.dc.html">성능 →</a></div>
+    <div style="padding:10px 12px;display:grid;gap:8px">
+      <div class="row"><span class="muted" style="width:48px">CPU</span><div class="bar"><i style="width:23%;background:#60a5fa"></i></div><b style="width:36px;text-align:right">23%</b></div>
+      <div class="row"><span class="muted" style="width:48px">메모리</span><div class="bar"><i style="width:61%;background:#4ade80"></i></div><b style="width:36px;text-align:right">61%</b></div>
+      <div class="row"><span class="muted" style="width:48px">디스크</span><div class="bar"><i style="width:71%;background:#fbbf24"></i></div><b style="width:36px;text-align:right">71%</b></div>
+      <div class="sm">CPU Ready 1.2% · Co-stop 0.1% · 디스크 지연 4 ms</div>
+    </div>
+  </section>
+
+  <section class="card" aria-label="관련 개체">
+    <div class="ct"><b>관련 개체</b></div>
+    <div class="kv">
+      <span>vCenter</span><div><a href="Main.dc.html">VC-DEMO1</a></div>
+      <span>데이터센터</span><div>DC-KR1</div>
+      <span>클러스터</span><div>CL-Web01</div>
+      <span>호스트</span><div><a href="HostObject.dc.html">esx-kr1-03</a></div>
+      <span>리소스 풀</span><div>Resources</div>
+      <span>데이터스토어</span><div>ds-kr1-san03 · san04</div>
+    </div>
+  </section>
+
+  <section class="card" aria-label="구성 점검">
+    <div class="ct"><b>구성 점검</b><span class="badge amber">2</span></div>
+    <div class="find"><span class="badge amber">주의</span><div><b>스냅샷 오래됨</b><small>1개 · 2.4 GB · 35일</small></div></div>
+    <div class="find"><span class="badge blue">정보</span><div><b>CPU 핫애드 켜짐</b><small>vNUMA 비활성</small></div></div>
+  </section>
+
+  <section class="card" aria-label="태그 · 백업">
+    <div class="ct"><b>태그 · 백업</b></div>
+    <div class="kv">
+      <span>태그</span><div style="display:flex;gap:4px;flex-wrap:wrap"><span class="badge blue">Owner: web-team</span><span class="badge blue">Env: prod</span></div>
+      <span>백업</span><div><span class="badge teal">Veeam 매일</span> <span class="sm">11-05 02:41</span></div>
+      <span>메모</span><div style="white-space:normal">프런트 웹 23번. 배포 Jenkins web-deploy.</div>
+    </div>
+  </section>
+
+  <section class="card" aria-label="최근 변경">
+    <div class="ct"><b>최근 변경</b><a class="more" href="ObjectTabs.dc.html">이벤트 →</a></div>
+    <div style="padding:8px 12px;display:grid;gap:8px;font-size:12.5px">
+      <div><span class="badge" style="background:rgba(168,85,247,.15);color:#c084fc">이동</span> <span class="mono sm">11-04 23:10</span><div style="margin-top:2px">esx-kr1-05 → esx-kr1-03 (DRS)</div></div>
+      <div><span class="badge blue">구성</span> <span class="mono sm">11-01 09:40</span><div style="margin-top:2px">메모리 8 → 16 GB · DEMO\kim.ys</div></div>
+      <div><span class="badge amber">스냅샷</span> <span class="mono sm">10-01 03:00</span><div style="margin-top:2px">VEEAM 임시 스냅샷 — 남아 있음</div></div>
+    </div>
+    <div class="note">400px 에서는 표 대신 카드 줄 · 탭 줄은 가로 스크롤(오른쪽 흐림) · 페이지 가로 넘침 0.</div>
+  </section>
+
+  <div class="faint" style="font-size:11.5px">가상 데이터 · 호스트 개체도 같은 틀(탭 9개 · 카드 한 열).</div>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":400,"height":1700}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

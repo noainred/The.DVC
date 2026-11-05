@@ -250,16 +250,16 @@ describe('A5-04 vCenter 상세 — 조회 중·실패·403 을 "없음·0 VM" �
     const vmHead = all(rt, (e) => e.type === 'span' && /VM 전체/.test(String(e.props.title || '')))[0];
     expect(textOf(vmHead).replace(/\s+/g, ' ').trim()).toBe('VM —');
 
-    btnText(rt, '💾 데이터스토어').props.onClick(); await flush();
+    btnText(rt, '데이터스토어').props.onClick(); await flush();
     expect(all(rt, (e) => e.type === DataTable).length).toBe(0);
     expect(all(rt, (e) => e.type === Loading).length).toBe(1);
     expect(textOf(btn(rt, (e) => /^💾 전체 /.test(textOf(e))))).toBe('💾 전체 —');   // 받기 전 칩 개수는 0 이 아니라 —
 
-    btnText(rt, '🌐 네트워크').props.onClick(); await flush();
+    btnText(rt, '네트워크').props.onClick(); await flush();
     expect(all(rt, (e) => e.type === DataTable).length).toBe(0);
     expect(all(rt, (e) => e.type === ErrorBox && e.props.error === '/networks -> 500').length).toBe(1);
 
-    btnText(rt, '🧊 VM 및 폴더').props.onClick(); await flush();
+    btnText(rt, 'VM').props.onClick(); await flush();
     expect(all(rt, (e) => / VM$/.test(String(e.props?.sub ?? ''))).length).toBe(0);
     expect(all(rt, (e) => e.type === ErrorBox && e.props.error === forbidden).length).toBe(1);
     unmount(rt);
@@ -271,11 +271,11 @@ describe('A5-04 vCenter 상세 — 조회 중·실패·403 을 "없음·0 VM" �
       ? { data: { items: [] }, error: null, loading: false } : { data: null, loading: true });
     const rt = mount(VCenterDetail, { site, onBack: () => {} });
     await flush();
-    btnText(rt, '💾 데이터스토어').props.onClick(); await flush();
+    btnText(rt, '데이터스토어').props.onClick(); await flush();
     const ds = all(rt, (e) => e.type === DataTable);
     expect(ds.length).toBe(1);
     expect(ds[0].props.emptyText).toBe('데이터스토어 없음');
-    btnText(rt, '🌐 네트워크').props.onClick(); await flush();
+    btnText(rt, '네트워크').props.onClick(); await flush();
     expect(all(rt, (e) => e.type === DataTable)[0].props.emptyText).toBe('네트워크 없음');
     unmount(rt);
   });
