@@ -79,13 +79,13 @@ a{color:#93c5fd}a:hover{color:#bfdbfe}
         <button type="button" class="chip zero">PDU <span class="n">0</span></button>
       </div>
       <div class="list">
-        <div class="gh">IP 대장 <span class="dim" style="font-weight:500">19 중 4</span><button type="button" class="more">15개 더 보기 ›</button></div>
+        <div class="gh">IP 대장 <span class="dim" style="font-weight:500">19 중 4</span><button type="button" class="more">IP관리 10.20.1.0/24 에서 19개 모두 ›</button></div>
         <button type="button" class="row on"><span class="tag k-ip">IP</span><span class="nm mono" style="font-weight:500"><mark>10.20.1.</mark>11</span><span class="meta"><span>srv-db-01</span><span class="sep">·</span><span>VM</span><span class="sep">·</span><span>KR-Seoul 10.20.1.0/24</span><span class="sep">·</span><span class="st"><span class="dot" style="background:#22c55e"></span>응답 2분 전</span></span><span class="to">IP관리 › 10.20.1.0/24</span></button>
         <button type="button" class="row"><span class="tag k-ip">IP</span><span class="nm mono" style="font-weight:500"><mark>10.20.1.</mark>13</span><span class="meta"><span>srv-db-03-old</span><span class="sep">·</span><span>스캔 발견</span><span class="sep">·</span><span style="color:#fcd34d">예약(오버라이드)</span><span class="sep">·</span><span class="st"><span class="dot" style="background:#5d6b85"></span>응답 없음 41일</span></span><span class="to">IP관리 › 10.20.1.0/24</span></button>
         <button type="button" class="row"><span class="tag k-ip">IP</span><span class="nm mono" style="font-weight:500"><mark>10.20.1.</mark>20</span><span class="meta"><span>fw-kr-core (방화벽)</span><span class="sep">·</span><span>수동 등록</span><span class="sep">·</span><span class="st"><span class="dot" style="background:#22c55e"></span>응답 2분 전</span></span><span class="to">IP관리 › 10.20.1.0/24</span></button>
         <button type="button" class="row"><span class="tag k-ip">IP</span><span class="nm mono" style="font-weight:500"><mark>10.20.1.</mark>254</span><span class="meta"><span>게이트웨이</span><span class="sep">·</span><span>대역 정책</span><span class="sep">·</span><span class="st"><span class="dot" style="background:#22c55e"></span>응답 2분 전</span></span><span class="to">IP관리 › 10.20.1.0/24</span></button>
 
-        <div class="gh">가상머신 <span class="dim" style="font-weight:500">9 중 3</span><button type="button" class="more">6개 더 보기 ›</button></div>
+        <div class="gh">가상머신 <span class="dim" style="font-weight:500">9 중 3</span><button type="button" class="more">가상머신 탭에서 9개 모두 ›</button></div>
         <button type="button" class="row"><span class="tag k-vm">가상머신</span><span class="nm">srv-db-01</span><span class="meta"><span class="mono"><mark>10.20.1.</mark>11</span><span class="sep">·</span><span>KR-Seoul</span><span class="sep">·</span><span>RHEL 8.9</span><span class="sep">·</span><span class="st"><span class="dot" style="background:#22c55e"></span>켜짐</span></span><span class="to">가상머신 › 상세</span></button>
         <button type="button" class="row"><span class="tag k-vm">가상머신</span><span class="nm">srv-db-02</span><span class="meta"><span class="mono"><mark>10.20.1.</mark>12</span><span class="sep">·</span><span>KR-Seoul</span><span class="sep">·</span><span>RHEL 8.9</span><span class="sep">·</span><span class="st"><span class="dot" style="background:#22c55e"></span>켜짐</span></span><span class="to">가상머신 › 상세</span></button>
         <button type="button" class="row"><span class="tag k-vm">가상머신</span><span class="nm">app-web-04</span><span class="meta"><span class="mono"><mark>10.20.1.</mark>44</span><span class="sep">·</span><span class="mono">10.20.5.44</span><span class="sep">·</span><span>KR-Seoul</span><span class="sep">·</span><span>Windows 2022</span><span class="sep">·</span><span class="st"><span class="dot" style="background:#22c55e"></span>켜짐</span></span><span class="to">가상머신 › 상세</span></button>
@@ -108,23 +108,22 @@ a{color:#93c5fd}a:hover{color:#bfdbfe}
 
   <!-- 오른쪽: sn: 접두 -->
   <div style="display:flex;flex-direction:column;width:700px">
-    <p class="cap"><b>sn:</b> — 시리얼 · 서비스 태그 · 자산 태그 · UUID · WWN · 부품(PSU · 디스크 · DIMM · NIC · SFP) 시리얼. 지금의 ‘시리얼 조회’ 색인(<span class="mono">insights/serialLookup.js</span>)을 그대로 쓰고, 대소문자 · <span class="mono">:</span> <span class="mono">-</span> 공백을 무시한다. 완전 일치가 먼저.</p>
+    <p class="cap"><b>sn:</b> — 장비 단위 시리얼 · 서비스 태그 · 자산 태그 · UUID · WWN(컨펌 ⑤: 부품 · SFP 는 ‘시리얼 조회’ 화면에서). 지금의 ‘시리얼 조회’ 색인(<span class="mono">insights/serialLookup.js</span>)의 장비 행을 그대로 쓰고, 대소문자 · <span class="mono">:</span> <span class="mono">-</span> 공백을 무시한다. 완전 일치가 먼저.</p>
     <div class="pal" role="dialog" aria-label="장비 찾기 — sn:">
       <div class="pal-in">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#8b9bb4" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
         <span class="pfx">시리얼 <span class="x">×</span></span>
         <label for="q2" style="position:absolute;left:-9999px">검색어</label>
         <input id="q2" value="7hx2k9" class="mono">
-        <span class="dim" style="font-size:11px;white-space:nowrap">7건 · 3ms</span>
+        <span class="dim" style="font-size:11px;white-space:nowrap">3건 · 3ms</span>
         <span class="kbd">ESC</span>
       </div>
       <div class="chips" aria-label="종류">
-        <button type="button" class="chip on">전체 <span class="n">7</span></button>
+        <button type="button" class="chip on">전체 <span class="n">3</span></button>
         <button type="button" class="chip">VM호스트 <span class="n">2</span></button>
         <button type="button" class="chip">베어메탈 <span class="n">1</span></button>
-        <button type="button" class="chip">서버 부품 <span class="n">3</span></button>
-        <button type="button" class="chip">SAN 부품 <span class="n">1</span></button>
         <button type="button" class="chip zero">스토리지 <span class="n">0</span></button>
+        <button type="button" class="chip zero">SAN <span class="n">0</span></button>
       </div>
       <div class="list">
         <div class="gh">VM호스트 <span class="dim" style="font-weight:500">2</span></div>
@@ -134,17 +133,11 @@ a{color:#93c5fd}a:hover{color:#bfdbfe}
         <div class="gh">베어메탈 서버 <span class="dim" style="font-weight:500">1</span></div>
         <button type="button" class="row"><span class="tag k-bm">베어메탈</span><span class="nm">bm-cache-kr-05</span><span class="meta"><span>서비스 태그 <span class="mono"><mark>7HX2K9</mark>Q</span></span><span class="sep">·</span><span>KR-Busan</span><span class="sep">·</span><span>PowerEdge R650</span><span class="sep">·</span><span>OME 발견</span></span><span class="to">서버 분석 › 정보</span></button>
 
-        <div class="gh">서버 부품 <span class="dim" style="font-weight:500">3</span> <span class="dim" style="font-weight:500">— 부품이 꽂힌 서버로 이동</span></div>
-        <button type="button" class="row"><span class="tag k-bmp">부품</span><span class="nm">esx-srv-db-kr-01 › 디스크 Bay 3</span><span class="meta"><span class="mono"><mark>7HX2K9</mark>-D3A1</span><span class="sep">·</span><span>SSD 1.92TB SAS</span><span class="sep">·</span><span>Dell</span><span class="sep">·</span><span class="st"><span class="dot" style="background:#22c55e"></span>정상</span></span><span class="to">서버 분석 › 정보 › 부품</span></button>
-        <button type="button" class="row"><span class="tag k-bmp">부품</span><span class="nm">esx-srv-db-kr-01 › PSU 1</span><span class="meta"><span class="mono">CN-<mark>7HX2K9</mark>-0M</span><span class="sep">·</span><span>1400W</span><span class="sep">·</span><span class="st"><span class="dot" style="background:#22c55e"></span>정상</span></span><span class="to">서버 분석 › 정보 › 부품</span></button>
-        <button type="button" class="row"><span class="tag k-bmp">부품</span><span class="nm">bm-cache-kr-05 › DIMM A2</span><span class="meta"><span class="mono">부품번호 <mark>7HX2K9</mark>8</span><span class="sep">·</span><span>64GB DDR5</span><span class="sep">·</span><span class="st"><span class="dot" style="background:#ef4444"></span>장애 · 파트 장애 ISS-118</span></span><span class="to">서버 분석 › 정보 › 부품</span></button>
-
-        <div class="gh">SAN 스위치 부품 <span class="dim" style="font-weight:500">1</span></div>
-        <button type="button" class="row"><span class="tag k-sanp">SFP</span><span class="nm">san-kr-dir-01 › 포트 3/14</span><span class="meta"><span class="mono"><mark>7HX2K9</mark>FJ</span><span class="sep">·</span><span>Brocade 32G SWL</span><span class="sep">·</span><span>Rx −2.1 dBm</span><span class="sep">·</span><span class="st"><span class="dot" style="background:#22c55e"></span>정상</span></span><span class="to">SAN 스위치 › 포트</span></button>
+        <div class="gh" style="color:#aebbd0;font-weight:500">부품(PSU · 디스크 · DIMM · NIC · SFP) 시리얼 4건은 여기 없습니다 — <a href="#id-serial">시리얼 조회에서 ‘7hx2k9’ 보기 ›</a></div>
       </div>
       <div class="foot">
         <span><span class="kbd">↑</span> <span class="kbd">↓</span> 이동</span><span><span class="kbd">Enter</span> 열기</span><span><span class="kbd">Esc</span> 닫기</span>
-        <span class="r"><span>전체 보기 · CSV 는 <a href="#id-serial">시리얼 조회</a>에서</span><span class="mono">색인 6초 전</span></span>
+        <span class="r"><span>부품 · 전체 보기 · CSV 는 <a href="#id-serial">시리얼 조회</a>에서</span><span class="mono">색인 6초 전</span></span>
       </div>
     </div>
   </div>
