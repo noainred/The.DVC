@@ -107,7 +107,7 @@ export function historyLine(h, vcName = (id) => id) {
 export function collectNote(c) {
   if (!c) return '';
   if (!c.dbAvailable) return '게스트 디스크 DB 를 열 수 없습니다(설정 › 진단에서 확인).';
-  if (c.empty && !c.enabled) return '아직 수집된 값이 없습니다 — 주기 수집이 꺼져 있습니다(설정 › 수집 서버 › 게스트 파티션 사용률에서 켜거나 지금 수집).';
+  if (c.empty && !c.enabled) return '아직 수집된 값이 없습니다 — 주기 수집이 꺼져 있습니다(설정 › 수집 › 게스트 파티션 사용률에서 켜거나 지금 수집).';
   if (c.empty) return '아직 수집된 값이 없습니다 — 다음 수집이 끝나면 채워집니다(업그레이드 직후라면 첫 수집 전입니다).';
   if (!c.enabled) return '주기 수집이 꺼져 있어 값이 더 갱신되지 않습니다(엣지 위임 vCenter 는 엣지가 보낸 값으로 갱신됩니다).';
   return '';
@@ -131,7 +131,7 @@ export function agoText(ts, now = Date.now()) {
  */
 export function vmPartNote(d, now = Date.now()) {
   if (!d) return { empty: '', stale: '' };
-  const where = '설정 › 수집 서버 › 게스트 파티션 사용률';
+  const where = '설정 › 수집 › 게스트 파티션 사용률';
   const enabled = !!d.collect?.enabled;
   const iv = numOrNull(d.collect?.intervalHours);
   if (!d.dbAvailable) return { empty: '게스트 디스크 DB 를 열 수 없어 파티션 값을 보여 줄 수 없습니다(설정 › 진단에서 확인).', stale: '' };

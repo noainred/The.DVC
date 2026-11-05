@@ -29,13 +29,16 @@ import { createYielder } from '../../util/timeSlice.js';
 import { acquireExport } from '../../util/exportBusy.js';
 import { loadXferSpeedSettings, saveXferSpeedSettings, xferSpeedEnabled, xferSettingsLoadError, DEFAULTS, RANGES } from '../../xferspeed/settings.js';
 import { xferSpeedStatus, xferTargets, startXferRun } from '../../xferspeed/poller.js';
-import { latestAll, samplesSince, samplesSinceChunked, recentFailures, dailyOf, oldestOf, exportRows, dbStatus, dataMark } from '../../xferspeed/db.js';
+import { latestAll, samplesSince, samplesSinceChunked, recentFailures, dailyOf, oldestOf, exportRows, dbStatus, dataMark, logPage } from '../../xferspeed/db.js';
 import { edgeRowsAsync, kpisOf, trafficOf, heatOfAsync, seriesOf, dailySeriesOf, statsOf, staleMsOf, latencyMsOf, MIN_BASELINE, BASELINE_DAYS } from '../../xferspeed/analyze.js';
 import { MIN_XFER_EDGE_VERSION, XFER_FAIL_KINDS } from '../../xferspeed/probe.js';
 import { SCHEDULE_KINDS, SCHEDULE_MAX, GRACE_MS, MISSED_REASONS } from '../../xferspeed/schedule.js';
 import { isDemoGuest } from '../../auth/demoGuest.js';
 import { isDemoCollector, isDemoEdgeId } from '../../mock/demo/edge.js';
 import { waitDrain } from '../../util/waitDrain.js'; // v2.783(점검 Q5 — O-B4): 공용 백프레셔 대기
+import { config } from '../../config.js';
+import { getTarget, edgeTargetId } from '../../ping/store.js';
+import { windowOf, targetBoundsOf } from '../../ping/service.js';
 
 const adminOnly = requireRole('admin');
 const csvPerm = requirePerm('data.csv');
@@ -74,7 +77,7 @@ async function resolveAgent(name) {
 
 /** '지금 측정' 을 시작하지 못한 대상의 사유 — poller.xferTargets 의 reason 코드와 1:1. */
 const RUN_SKIP_TEXT = Object.freeze({
-  'disabled-central': '설정 › 수집 서버에서 이 엣지가 꺼져 있습니다',
+  'disabled-central': '설정 › 엣지·원격 › 수집 서버(원격)에서 이 엣지가 꺼져 있습니다',
   'no-url': '수집 서버에 URL 이 없습니다',
   excluded: '전송 속도 설정에서 측정 대상에서 뺐습니다',
 });
@@ -84,6 +87,35 @@ const daysArg = (v, def, max) => {
   if (n == null) return def;
   return Math.max(1, Math.min(max, Math.floor(n)));
 };
+
+/**
+ * 상세 창 — `/history` 와 `/ping`(v2.890)이 **같은 함수**로 만든다(두 차트가 같은 시간 축을 그린다).
+ * `end`(ms)가 없거나 숫자가 아니거나 지금보다 뒤면 '지금 창'(past:false — 끝이 열려 있다). 창 = [end − days, end].
+ */
+export function detailWindowOf(query, now = Date.now()) {
+  const days = daysArg(query?.days, 7, HISTORY_MAX_DAYS);
+  const wantEnd = numOrNull(query?.end);
+  const end = wantEnd == null ? now : Math.max(days * DAY, Math.min(now, Math.floor(wantEnd)));
+  const past = end < now;   // 과거 창이면 끝을 닫는다(지금 창은 끝이 열려 있다 — 조회 사이에 들어온 표본을 빼지 않게)
+  return { days, now, end, past, since: end - days * DAY };
+}
+
+/** 측정 기록 한 행(화면 표 · `/history` 의 log 와 `/log` 가 같은 모양). 실패 행의 속도는 null(0 아님). */
+function logRowOf(x) {
+  return {
+    ts: x.ts, dir: x.dir, ok: Number(x.ok) === 1, mbps: Number(x.ok) === 1 ? numOrNull(x.mbps) : null,
+    ttfbMs: latencyMsOf(x), totalMs: numOrNull(x.total_ms), xferMs: numOrNull(x.xfer_ms), bytes: numOrNull(x.bytes),
+    basis: x.basis || null, kind: x.kind || null, error: x.err || '',
+  };
+}
+/** `/log` 쪽 크기 — 기본 50, [10, 200]. */
+const LOG_LIMIT_DEFAULT = 50;
+const LOG_CURSOR_RE = /^(\d{1,15}):(down|up)$/;
+
+/** v2.890 — Ping 패널이 값을 못 그리는 이유(웹 `xferSpeedText.PING_REASON_TEXT` 와 1:1 — 테스트가 대조한다). */
+export const PING_REASONS = Object.freeze(['no-target', 'monitor-off', 'disabled', 'before-retention', 'no-samples']);
+/** Ping 칸 수 — 기본 240(24시간이면 6분 칸), [60, 480]. */
+const PING_POINTS_DEFAULT = 240;
 
 /**
  * 화면 기억(v2.740 E-02·E-04) — 화면이 30초(측정 중 4초)마다 부르는데 데이터는 측정 주기(기본 30분)에만 바뀐다.
@@ -233,13 +265,8 @@ api.get('/tools/xfer-speed/history', adminOnly, fullScopeOnly, async (req, res) 
   // v2.768(점검 R3-C2-2): 데모 계정에는 실등록 엣지의 기록이 없는 것과 같다(존재도 흘리지 않게 같은 404).
   if (a && isDemoGuest(req.user) && !demoAgentSet(loadCollectors())(a.id)) return res.status(404).json({ ok: false, reason: '등록부와 측정 기록 어디에도 없는 엣지입니다.' });
   if (!a) return res.status(404).json({ ok: false, reason: '등록부와 측정 기록 어디에도 없는 엣지입니다.' });
-  const days = daysArg(req.query.days, 7, HISTORY_MAX_DAYS);
-  const now = Date.now();
-  const wantEnd = numOrNull(req.query.end);
-  const end = wantEnd == null ? now : Math.max(days * DAY, Math.min(now, Math.floor(wantEnd)));
-  const past = end < now;   // 과거 창이면 끝을 닫는다(지금 창은 예전처럼 끝이 열려 있다 — 조회 사이에 들어온 표본을 빼지 않게)
+  const { days, now, end, past, since } = detailWindowOf(req.query);
   const until = past ? end : null;
-  const since = end - days * DAY;
   let source; let series; let stats; let truncated = false;
   if (days <= RAW_MAX_DAYS) {
     const r = await samplesSince(since, { agent: a.id, limit: 100_000, until });
@@ -267,12 +294,8 @@ api.get('/tools/xfer-speed/history', adminOnly, fullScopeOnly, async (req, res) 
     };
     stats = { down: agg('down'), up: agg('up') };
   }
-  const logR = await samplesSince(end - 14 * DAY, { agent: a.id, limit: 100_000, until });
-  const log = logR.rows.slice(-40).reverse().map((x) => ({
-    ts: x.ts, dir: x.dir, ok: Number(x.ok) === 1, mbps: Number(x.ok) === 1 ? numOrNull(x.mbps) : null,
-    ttfbMs: latencyMsOf(x), totalMs: numOrNull(x.total_ms), xferMs: numOrNull(x.xfer_ms), bytes: numOrNull(x.bytes),
-    basis: x.basis || null, kind: x.kind || null, error: x.err || '',
-  }));
+  // v2.902: 화면은 측정 기록을 `/log`(창 전체 · 쪽 넘김)로 읽는다 — `log=0` 이면 예전 '끝 이전 14일 중 최근 40건' 을 읽지 않는다(1분 폴링마다 14일을 읽지 않게).
+  const log = String(req.query.log ?? '') === '0' ? [] : (await samplesSince(end - 14 * DAY, { agent: a.id, limit: 100_000, until })).rows.slice(-40).reverse().map(logRowOf);
   const col = a.col;
   res.json({
     ok: true, agent: a.id, name: t(col?.name) || a.id, datacenter: t(col?.datacenter), origin: col ? originOf(col) : null, registered: !!col,
@@ -280,6 +303,87 @@ api.get('/tools/xfer-speed/history', adminOnly, fullScopeOnly, async (req, res) 
     start: since, end, now, past,
     oldest: await oldestOf(a.id),
     retention: (({ sampleRetentionDays, dailyRetentionDays }) => ({ sampleDays: numOrNull(sampleRetentionDays), dailyDays: numOrNull(dailyRetentionDays) }))(loadXferSpeedSettings()),
+  });
+});
+
+/**
+ * v2.890 — 한 엣지의 Ping 추이(전송 속도 상세의 'Ping 함께 보기' · 시안 docs/design/xfer-ping · 사용자 컨펌 2026-11-05 '기본값대로').
+ *
+ * 새로 재지 않는다 — Ping 모니터가 엣지 노드를 자동 대상(`edge_<id>` · TCP 연결 · 1분 주기)으로 이미 잰 기록을 읽는다.
+ * 창은 `/history` 와 같은 `detailWindowOf` 이고, 값이 없으면 빈 배열 대신 사유(`reason` — PING_REASONS)를 싣는다.
+ *  · 권한은 형제 라우트와 같다(adminOnly + fullScopeOnly) · 데모 계정은 데모 엣지만(같은 404).
+ *  · 응답에 대상 호스트를 싣지 않는다(id·kind·포트·enabled 만 — 포트는 화면 문구 'TCP 연결(443)' 용).
+ *  · 저장소를 못 읽으면 503 — 빈 차트를 '측정 없음' 으로 보이지 않게.
+ */
+api.get('/tools/xfer-speed/ping', adminOnly, fullScopeOnly, async (req, res) => {
+  const a = await resolveAgent(req.query.agent);
+  if (a && isDemoGuest(req.user) && !demoAgentSet(loadCollectors())(a.id)) return res.status(404).json({ ok: false, reason: '등록부와 측정 기록 어디에도 없는 엣지입니다.' });
+  if (!a) return res.status(404).json({ ok: false, reason: '등록부와 측정 기록 어디에도 없는 엣지입니다.' });
+  const { days, now, end, past, since } = detailWindowOf(req.query);
+  const pn = numOrNull(req.query.points);
+  const points = pn == null ? PING_POINTS_DEFAULT : Math.max(60, Math.min(480, Math.floor(pn)));
+  const base = {
+    ok: true, agent: a.id, days, start: since, end, now, past, offsetMin: DAY_OFFSET_MIN,
+    monitorEnabled: !!config.ping.enabled, intervalMs: config.ping.pollIntervalMs, timeoutMs: config.ping.timeoutMs,
+    retentionDays: numOrNull(config.ping.retentionDays),
+  };
+  const tid = edgeTargetId(a.col || { id: a.id });
+  const tgt = tid ? getTarget(tid) : null;
+  if (!tgt) return res.json({ ...base, reason: 'no-target', target: null, method: null, bucketMs: null, source: null, series: [], stats: null, last: null, oldest: { sampleTs: null } });
+  let w; let b;
+  try {
+    w = await windowOf(tgt.id, { start: since, end, past, points });
+    b = await targetBoundsOf(tgt.id);
+  } catch (e) {
+    return res.status(503).json({ ok: false, reason: `Ping 기록을 읽지 못했습니다 — ${String(e?.message || e).slice(0, 200)}` });
+  }
+  const oldestTs = numOrNull(b.oldestTs);
+  let reason = null;
+  if (!config.ping.enabled) reason = 'monitor-off';
+  else if (tgt.enabled === false) reason = 'disabled';
+  else if (!w.series.length) reason = oldestTs != null && end <= oldestTs ? 'before-retention' : 'no-samples';
+  const last = !past && b.latest ? { ts: numOrNull(b.latest.ts), rtt: b.latest.ok ? numOrNull(b.latest.rtt) : null, ok: !!b.latest.ok } : null;
+  res.json({
+    ...base, reason,
+    target: { id: tgt.id, kind: tgt.kind, port: numOrNull(tgt.port), enabled: tgt.enabled !== false },
+    method: tgt.kind === 'icmp' ? 'icmp' : 'tcp-connect',
+    bucketMs: w.bucketMs, source: w.source, series: w.series, stats: w.stats, last,
+    oldest: { sampleTs: oldestTs },
+  });
+});
+
+/**
+ * v2.902 — 한 엣지의 측정 기록(상세 '측정 기록' 표 · 사용자 요청 "히스토리 보는 기능 강화 및 버그 수정").
+ * 예전 표는 기간·구간과 상관없이 '끝 이전 14일 중 최근 40건' 이었다. 이제 **보고 있는 창 전체**를 쪽 단위로 준다.
+ *  · 창은 `/history` 와 같은 `detailWindowOf`(지금 창은 끝이 열려 있다 — 닫힌 끝은 `/history` 와 같이 ts ≤ end).
+ *  · 쪽 넘김은 커서 `before=<ts>:<down|up>`(앞 쪽 응답의 `next`) — 형식이 틀리면 400(field:'before'). `limit` [10, 200] · `only=fail` 은 실패만.
+ *  · 원시 측정은 보관 기간(`sampleRetentionDays`)만 남는다 — 창이 그보다 길면 화면이 그 사실을 말하도록 `oldest`·`retention` 을 싣는다.
+ *  · 권한·데모 가림은 형제 라우트와 같다(adminOnly + fullScopeOnly · 데모 계정은 데모 엣지만 404).
+ */
+api.get('/tools/xfer-speed/log', adminOnly, fullScopeOnly, async (req, res) => {
+  const a = await resolveAgent(req.query.agent);
+  if (a && isDemoGuest(req.user) && !demoAgentSet(loadCollectors())(a.id)) return res.status(404).json({ ok: false, reason: '등록부와 측정 기록 어디에도 없는 엣지입니다.' });
+  if (!a) return res.status(404).json({ ok: false, reason: '등록부와 측정 기록 어디에도 없는 엣지입니다.' });
+  const { days, now, end, past, since } = detailWindowOf(req.query);
+  let before = null;
+  const rawBefore = t(req.query.before);
+  if (rawBefore) {
+    const m = LOG_CURSOR_RE.exec(rawBefore);
+    if (!m) return res.status(400).json({ ok: false, field: 'before', reason: '쪽 커서 형식이 다릅니다(앞 쪽 응답의 next 를 그대로 보내세요).' });
+    before = { ts: Number(m[1]), dir: m[2] };
+  }
+  const ln = numOrNull(req.query.limit);
+  const limit = ln == null ? LOG_LIMIT_DEFAULT : Math.max(10, Math.min(200, Math.floor(ln)));
+  const only = t(req.query.only) === 'fail' ? 'fail' : 'all';
+  const r = await logPage(a.id, { sinceTs: since, until: past ? end : null, before, limit, onlyFail: only === 'fail' });
+  if (r.error) return res.status(503).json({ ok: false, reason: `측정 기록을 읽지 못했습니다 — ${r.error}` });
+  res.json({
+    ok: true, agent: a.id, days, start: since, end, now, past, offsetMin: DAY_OFFSET_MIN,
+    only, limit, total: r.total, failTotal: r.failTotal, available: r.available,
+    rows: r.rows.map(logRowOf),
+    next: r.next ? `${r.next.ts}:${r.next.dir}` : null,
+    oldest: await oldestOf(a.id),
+    retention: { sampleDays: numOrNull(loadXferSpeedSettings().sampleRetentionDays) },
   });
 });
 
@@ -297,7 +401,7 @@ api.post('/tools/xfer-speed/run', adminOnly, fullScopeOnly, async (req, res) => 
   if (!targets.length) {
     const why = skipped.map((x) => RUN_SKIP_TEXT[x.reason] || x.reason);
     return res.status(409).json({ ok: false, noTargets: true, skipped: skipped.slice(0, 20),
-      reason: only ? `이 엣지는 지금 잴 수 없습니다 — ${why[0] || '대상이 아닙니다'}.` : `잴 엣지가 없습니다${why.length ? ` — ${[...new Set(why)].join(' · ')}` : ' — 설정 › 수집 서버에 엣지를 등록하세요'}.` });
+      reason: only ? `이 엣지는 지금 잴 수 없습니다 — ${why[0] || '대상이 아닙니다'}.` : `잴 엣지가 없습니다${why.length ? ` — ${[...new Set(why)].join(' · ')}` : ' — 설정 › 엣지·원격 › 수집 서버(원격)에 엣지를 등록하세요'}.` });
   }
   const r = startXferRun({ only });
   if (!r.ok) {

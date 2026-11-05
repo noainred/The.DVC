@@ -38,11 +38,11 @@ export function validateTopology(topo, collectors = []) {
     const reach = e.publicIp || e.privateIp;
     if (reach && cols.length) {
       const edgeCol = cols.find((c) => c.host === reach && c.port === (main.portalPort || 4000));
-      if (!edgeCol) add('warn', s.dc, 'collector-edge-missing', `${s.dc}: 수집 서버 목록에 Edge 포탈(http://${reach}:${main.portalPort || 4000})이 없습니다.`, '설정 › 수집 서버에 Edge 포탈 등록(또는 엣지 자기등록)');
+      if (!edgeCol) add('warn', s.dc, 'collector-edge-missing', `${s.dc}: 수집 서버 목록에 Edge 포탈(http://${reach}:${main.portalPort || 4000})이 없습니다.`, '설정 › 엣지·원격 › 수집 서버(원격)에 Edge 포탈 등록(또는 엣지 자기등록)');
       else if (edgeCol.dc && edgeCol.dc !== s.dc) add('warn', s.dc, 'collector-dc-mismatch', `${s.dc}: Edge 포탈 수집 서버 '${edgeCol.id}' 의 법인이 '${edgeCol.dc}' 로 다릅니다.`, '수집 서버의 법인을 맞춤');
       if (irsPortalSvc && (i.privateIp || i.publicIp)) {
         const irsCol = cols.find((c) => c.host === reach && c.port === irsPortalSvc.listenPort);
-        if (!irsCol) add('warn', s.dc, 'collector-irs-missing', `${s.dc}: 수집 서버 목록에 IRS 포탈(http://${reach}:${irsPortalSvc.listenPort}, 중계 엣지 경유)이 없습니다.`, `설정 › 수집 서버에 http://${reach}:${irsPortalSvc.listenPort} 등록`);
+        if (!irsCol) add('warn', s.dc, 'collector-irs-missing', `${s.dc}: 수집 서버 목록에 IRS 포탈(http://${reach}:${irsPortalSvc.listenPort}, 중계 엣지 경유)이 없습니다.`, `설정 › 엣지·원격 › 수집 서버(원격)에 http://${reach}:${irsPortalSvc.listenPort} 등록`);
         else if (edgeCol && irsCol.id === edgeCol.id) add('error', s.dc, 'collector-same-id', `${s.dc}: Edge 와 IRS 포탈이 같은 수집 서버 id 로 등록돼 있습니다.`, '서로 다른 id 로 등록');
       }
       const direct = cols.find((c) => (c.host === i.privateIp || c.host === i.publicIp) && c.host);

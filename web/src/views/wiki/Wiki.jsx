@@ -15,6 +15,8 @@ import { makeLatest, persistNote, parseLabels, statusText as issueStatusText } f
 import { MdView, MdToc } from './MdView.jsx';
 import { makeRenderMacro } from './WikiMacros.jsx';
 import AttachBox from '../attach/AttachBox.jsx';
+import MentionBox from '../../components/MentionBox.jsx';
+import { mentionsInText } from '../../components/mentionText.js';
 import { selectionQuote, findQuote, exportMarkdownName, printDocument } from './wikiExport.js';
 import {
   STATUS_ORDER, statusText, parseWikiHash, wikiHash, buildTree, flattenTree, parentOptions, breadcrumb, fillTemplate, wikiSaveFailText, isConflict,
@@ -100,6 +102,7 @@ export default function Wiki() {
         <button className="btn wiki-tree-toggle" onClick={() => setTreeOpen((v) => !v)} aria-expanded={treeOpen}>문서 목록</button>
         <button className={`btn${route.view === 'home' ? ' primary' : ''}`} onClick={() => go({ space })}>대문</button>
         <button className="btn" onClick={() => { loadMeta(); loadTree(); }}>새로고침</button>
+        {meta.canWrite && <button className={`btn${route.view === 'tidy' ? ' primary' : ''}`} onClick={() => go({ space, view: 'tidy' })} title="휴지통 · 깨진 링크">정리</button>}
         {canWriteHere && <button className="btn primary" onClick={() => go({ space, view: 'new' })}>+ 새 문서</button>}
       </div>
       {meta.scoped && <div className="muted wiki-hint">범위가 지정된 계정이라 내 법인(vCenter) 스페이스만 보입니다 — 공용 스페이스는 보이지 않습니다.</div>}
@@ -120,6 +123,7 @@ export default function Wiki() {
             : <div className="card muted">이 스페이스에는 문서를 만들 수 없습니다(쓰기 권한 · 쓰기 범위 · 읽기 전용).</div>)}
           {route.view === 'settings' && <SpaceSettings key={space} space={space} meta={meta} spaceInfo={spaceInfo} onWritten={onWritten} />}
           {route.view === 'templates' && <TemplatesAdmin space={space} meta={meta} onWritten={() => loadMeta()} />}
+          {route.view === 'tidy' && <TidyView key={space} space={space} meta={meta} onWritten={onWritten} />}
           {route.view === 'page' && <PageView key={route.id} id={route.id} space={space} meta={meta} pages={list || []} onWritten={onWritten} />}
           {route.view === 'edit' && <EditPage key={route.id} id={route.id} space={space} meta={meta} pages={list || []} onWritten={onWritten} />}
           {route.view === 'history' && <HistoryView key={route.id} id={route.id} space={space} meta={meta} onWritten={onWritten} />}
@@ -320,12 +324,156 @@ function usePage(id) {
   return { page, info, err, load };
 }
 
+/* ───── v2.907 정리 — 휴지통(기능 추천 2) · 깨진 링크(3) ───── */
+const FLASH_KEY = 'wiki.flash';
+export function setWikiFlash(text) { try { window.sessionStorage.setItem(FLASH_KEY, text); } catch { /* 저장 못 하는 브라우저 */ } }
+function takeWikiFlash() { try { const t = window.sessionStorage.getItem(FLASH_KEY) || ''; window.sessionStorage.removeItem(FLASH_KEY); return t; } catch { return ''; } }
+/** 제목 바꾼 뒤 링크 갱신 결과(서버 linkFix). 고친 것이 없으면 ''. */
+export function linkFixText(f) {
+  if (!f || (!f.fixed && !f.skipped)) return '';
+  return `제목이 바뀌어 다른 문서 ${f.fixed}개의 링크를 새 제목으로 고쳤습니다(각 문서에 새 판 · 메모 ‘링크 갱신’)${f.skipped ? ` · 쓰기 범위 밖이거나 읽기 전용이라 못 고친 문서 ${f.skipped}개` : ''}.`;
+}
+function TidyView({ space, meta, onWritten }) {
+  const [trash, setTrash] = useState(null);
+  const [broken, setBroken] = useState(null);
+  const [err, setErr] = useState(null);
+  const [allSpaces, setAllSpaces] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState('');
+  const latest = useMemo(() => makeLatest(), []);
+  const load = useCallback(() => {
+    const k = latest.next();
+    const sp = allSpaces ? '' : space;
+    Promise.all([fetchJson('/wiki/trash', { space: sp }), fetchJson('/wiki/broken-links', { space: sp })])
+      .then(([t, b]) => { if (latest.isLatest(k)) { setTrash(t); setBroken(b); setErr(null); } })
+      .catch((e) => { if (latest.isLatest(k)) setErr(e); });
+  }, [space, allSpaces, latest]);
+  useEffect(() => { load(); }, [load]);
+  const act = async (fn, okText) => {
+    setBusy(true); setMsg('');
+    try { const r = await fn(); setMsg(r?.ok === false ? wikiSaveFailText(r) : okText); onWritten?.(r); load(); } catch (e) { setMsg(String(e?.message || e)); } finally { setBusy(false); }
+  };
+  if (err && !trash) return <ErrorBox error={err} />;
+  if (!trash || !broken) return <Loading label="정리" />;
+  const days = trash.days || 30;
+  return (
+    <div className="wiki-settings">
+      <div className="wiki-editor-head"><h2 className="wiki-title">정리 — 휴지통 · 깨진 링크</h2>
+        <label className="wiki-check"><input type="checkbox" checked={allSpaces} onChange={(e) => setAllSpaces(e.target.checked)} /> 모든 스페이스</label></div>
+      {err && <div className="banner warn" style={{ whiteSpace: 'normal' }}>새로 읽지 못했습니다 — 아래는 직전에 읽은 목록입니다({err.message || String(err)}).</div>}
+      {msg && <div className="banner" role="status" style={{ whiteSpace: 'normal' }}>{msg}</div>}
+      <section className="card">
+        <h3 className="wiki-h3">휴지통 {trash.items.length}</h3>
+        <div className="muted wiki-small">지운 문서는 {days}일 동안 여기 남습니다(판 · 댓글 · 첨부 그대로). 기한이 지나면 첨부와 함께 영구히 지워집니다.</div>
+        {trash.items.length === 0 ? <div className="muted">비어 있습니다.</div> : (
+          <div className="table-wrap"><STable className="tbl">
+            <thead><tr><th>문서</th><th>스페이스</th><th>지운 사람</th><th>지운 때</th><th>영구 삭제 예정</th><th data-nosort>동작</th></tr></thead>
+            <tbody>{trash.items.map((t) => (
+              <tr key={t.id}>
+                <td><span className="mono">{t.id}</span> {t.title}</td><td>{spaceName(meta.spaces, t.spaceId)}</td><td>{t.deletedBy || '—'}</td>
+                <td data-sort={t.deletedAt}>{timeText(t.deletedAt)}</td><td data-sort={t.purgeAt}>{dateText(t.purgeAt)}</td>
+                <td><div className="wiki-actions">
+                  <button type="button" className="btn btn-sm" disabled={busy} onClick={() => act(() => postJson(`/wiki/trash/${t.id}/restore`, {}), `${t.id} ‘${t.title}’ 를 되살렸습니다.`)}>되살리기</button>
+                  {(trash.isMod || t.deletedBy === trash.me || t.createdBy === trash.me) && <button type="button" className="btn btn-sm" disabled={busy} onClick={() => { if (window.confirm(`‘${t.title}’ 를 영구히 지울까요? 첨부도 함께 지워지고 되살릴 수 없습니다.`)) act(() => delJson(`/wiki/trash/${t.id}`), `${t.id} 를 영구히 지웠습니다.`); }}>영구 삭제</button>}
+                </div></td>
+              </tr>
+            ))}</tbody>
+          </STable></div>
+        )}
+      </section>
+      <section className="card">
+        <h3 className="wiki-h3">깨진 링크 {broken.total}</h3>
+        <div className="muted wiki-small">‘[[제목]]’ · ‘[[W번호]]’ 가 가리키는 문서가 없습니다(지웠거나 · 제목이 바뀌었거나 · 볼 수 없는 스페이스). 제목을 바꾸면 이 문서로 풀리던 링크는 저절로 고쳐집니다.</div>
+        {broken.rows.length === 0 ? <div className="muted">없습니다.</div> : (
+          <div className="table-wrap"><STable className="tbl">
+            <thead><tr><th>문서</th><th>스페이스</th><th>깨진 링크</th></tr></thead>
+            <tbody>{broken.rows.map((r, i) => (
+              <tr key={`${r.id}-${i}`}><td><a href={wikiHash({ space: r.spaceId, id: r.id })}>{r.title}</a></td><td>{spaceName(meta.spaces, r.spaceId)}</td><td className="mono">[[{r.ref}]]</td></tr>
+            ))}</tbody>
+          </STable></div>
+        )}
+        {broken.total > broken.rows.length && <div className="muted wiki-small">{broken.total}개 중 {broken.rows.length}개만 보입니다.</div>}
+      </section>
+    </div>
+  );
+}
+
+/* ───── v2.907 댓글 @멘션 → 이슈 등록(시안 docs/design/wiki-mention ②⑥ · 추천안: 체크 기본 켬 · 요청 권한은 '요청' 으로 · 계정/이름 글자 그대로) ───── */
+const ISSUE_OPT_KEY = 'wiki.commentIssue.on';
+const COMMENT_ISSUE_TYPES = [['task', '작업'], ['incident', '장애'], ['request', '요청']];
+function loadIssueOn() { try { const v = window.localStorage.getItem(ISSUE_OPT_KEY); return v == null ? true : v === '1'; } catch { return true; } }
+function saveIssueOn(on) { try { window.localStorage.setItem(ISSUE_OPT_KEY, on ? '1' : '0'); } catch { /* 저장 못 하는 브라우저 — 이번 화면에서만 */ } }
+/** 등록 결과 한 줄(서버 응답 issue · issueError). */
+export function commentIssueText(r) {
+  if (!r) return '';
+  if (r.issueError) return `댓글은 달았지만 이슈는 만들지 못했습니다 — ${r.issueError}. 댓글의 ‘이슈로 등록’ 으로 다시 할 수 있습니다.`;
+  const i = r.issue;
+  if (!i) return '';
+  if (i.existing) return `이 댓글로 만든 열린 이슈 ${i.key} 가 이미 있습니다.`;
+  const who = i.requestOnly ? '요청으로 등록' : `담당자 ${i.assignee}${i.watchers?.length ? ` · 관찰자 ${i.watchers.join(', ')}` : ''}`;
+  const skip = i.skipped?.length ? ` · 이 법인을 볼 수 없어 뺀 사람 ${i.skipped.join(', ')}` : '';
+  const mail = i.notifyOn === false ? ' · 이슈 알림이 꺼져 있어 메일은 가지 않습니다' : i.noEmail?.length ? ` · 메일 주소가 없는 사람 ${i.noEmail.join(', ')}(이슈는 포탈 ‘내 작업’ 에서 보입니다)` : i.notifyOn ? ' · 메일은 1분 안에 한 통씩 갑니다' : '';
+  return `이슈 ${i.key} 를 만들었습니다 — ${who}${i.relatedTo ? ` · 예전 이슈 ${i.relatedTo} 와 ‘관련’ 으로 이음` : ''}${skip}${mail}.`;
+}
+
+function CommentIssuePane({ mentions, picked, mmeta, canIssue, value, onChange, spaceLabel }) {
+  const set = (k) => (e) => onChange({ ...value, [k]: e.target.type === 'checkbox' ? e.target.checked : e.target.value });
+  const users = mentions.map((m) => m.user);
+  const assignee = users.includes(value.assignee) ? value.assignee : users[0] || '';
+  const info = (u) => picked[u] || null;
+  if (!canIssue) {
+    return (
+      <div className="wiki-issue-pane" aria-label="이슈로 등록">
+        <label className="wiki-check"><input type="checkbox" checked={!!value.request} onChange={set('request')} /> 요청으로 등록 <span className="muted">— 담당자를 지정하는 이슈는 운영자 · 관리자만 만듭니다. 요청은 담당자 없이(자동 할당 규칙이 있으면 그것이 정함) · 언급 메일은 그대로</span></label>
+      </div>
+    );
+  }
+  return (
+    <div className="wiki-issue-pane" aria-label="이슈로 등록">
+      <label className="wiki-check wiki-issue-on"><input type="checkbox" checked={!!value.on} onChange={(e) => { saveIssueOn(e.target.checked); onChange({ ...value, on: e.target.checked }); }} /> <b>언급한 사람에게 이슈로 등록</b> <span className="muted">— 댓글 1개 → 이슈 1건 · 마지막 선택을 이 브라우저가 기억</span></label>
+      {value.on && (
+        <>
+          <div className="wiki-issue-grid">
+            <label>담당자(언급한 사람 중)<Select className="input" value={assignee} onChange={set('assignee')} sort={false}>
+              {mentions.map((m) => <option key={m.user} value={m.user}>{m.user}{(info(m.user)?.name || m.name) ? ` / ${info(m.user)?.name || m.name}` : ''}{info(m.user)?.canSee === false ? ' — 이 법인을 볼 수 없음' : ''}</option>)}
+            </Select></label>
+            <label>유형<Select className="input" value={value.type || 'task'} onChange={set('type')} sort={false}>{COMMENT_ISSUE_TYPES.map(([v, t]) => <option key={v} value={v}>{t}</option>)}</Select></label>
+            <label>우선순위<Select className="input" value={value.priority || 'p2'} onChange={set('priority')} sort={false}>{['p0', 'p1', 'p2', 'p3'].map((p) => <option key={p} value={p}>{p.toUpperCase()}</option>)}</Select></label>
+            <div className="wiki-issue-fixed"><span className="muted">법인</span><span>{spaceLabel} <span className="muted wiki-small">— 문서의 스페이스</span></span></div>
+          </div>
+          <label className="wiki-issue-title">제목<input className="input" value={value.title || ''} onChange={set('title')} maxLength={200} placeholder="비우면 ‘[위키] 문서 제목 — 댓글 앞부분’" /></label>
+          <div className="wiki-issue-meta muted wiki-small">
+            {users.length > 1 && <span>관찰자: {users.filter((u) => u !== assignee).join(', ')}</span>}
+            {mmeta?.notifyOn === false && <span className="wiki-warn">이슈 알림이 꺼져 있어 메일은 가지 않습니다(이슈는 만듭니다)</span>}
+            {mmeta?.full && mentions.map((m) => info(m.user)?.email === false && <span key={m.user} className="wiki-warn">{m.user} 메일 주소 없음</span>)}
+            {info(assignee)?.canSee === false && <span className="wiki-warn">{assignee} 는 이 법인 이슈를 볼 수 없어 담당자로 지정할 수 없습니다</span>}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 function PageView({ id, space, meta, pages, onWritten }) {
   const { page, info, err, load } = usePage(id);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState('');
   const [comment, setComment] = useState('');
   const [quote, setQuote] = useState(''); // v2.889 인라인 댓글 — 본문에서 고른 글
+  const [issueOpt, setIssueOpt] = useState(() => ({ on: loadIssueOn(), assignee: '', type: 'task', priority: 'p2', title: '', request: false })); // v2.907
+  const [picked, setPicked] = useState({}); // v2.907 자동완성으로 고른 사람(메일 · 범위 표시)
+  const [mmeta, setMmeta] = useState(null);
+  const [cmsg, setCmsg] = useState(''); // v2.907 댓글 · 이슈 등록 결과(댓글 상자 옆에 — 위 배너는 화면 밖일 수 있다)
+  const [moveTo, setMoveTo] = useState(null); // v2.907 다른 스페이스로(null = 닫힘)
+  const [editing, setEditing] = useState(null); // v2.907 댓글 고치기 { id, body }
+  const [backs, setBacks] = useState(null); // v2.907 역링크
+  useEffect(() => { const f = takeWikiFlash(); if (f) setMsg(f); }, []);
+  useEffect(() => {
+    let alive = true;
+    setBacks(null);
+    fetchJson(`/wiki/pages/${id}/backlinks`).then((r) => { if (alive) setBacks(r.items || []); }).catch(() => { if (alive) setBacks(false); });
+    return () => { alive = false; };
+  }, [id]);
   const [pick, setPick] = useState(null); // { text, x, y } — 본문에서 글을 고르면 뜨는 '댓글' 단추
   const [showResolved, setShowResolved] = useState(false);
   const mainRef = useRef(null);
@@ -364,6 +512,7 @@ function PageView({ id, space, meta, pages, onWritten }) {
   const writable = !!info?.canWrite && page.writable;
   const canDelete = writable && (info?.isMod || page.createdBy === info?.me);
   const canComment = !!info?.canComment && page.commentable !== false;
+  const movable = (meta.spaces || []).filter((sp) => sp.writable && !sp.readOnly && sp.id !== page.spaceId);
   return (
     <article className="wiki-doc">
       <div className="wiki-crumbs">
@@ -393,8 +542,21 @@ function PageView({ id, space, meta, pages, onWritten }) {
           {writable && <button className="btn" onClick={() => go({ space, view: 'new', params: { parent: page.id } })}>+ 하위 문서</button>}
           {canDelete && <button className="btn" disabled={busy} onClick={() => {
             if (children.length) { setMsg('하위 문서가 있어 지울 수 없습니다 — 먼저 옮기거나 지우세요. 숨기려면 상태를 ‘보관’ 으로 바꾸세요.'); return; }
-            if (window.confirm(`‘${page.title}’ 문서를 지울까요? 판 · 댓글도 함께 지워집니다. 숨기기만 하려면 상태를 ‘보관’ 으로 바꾸세요.`)) act(() => delJson(`/wiki/pages/${page.id}`), () => go({ space }));
+            if (window.confirm(`‘${page.title}’ 문서를 휴지통으로 옮길까요? 30일 안에는 ‘정리 › 휴지통’ 에서 판 · 댓글 · 첨부와 함께 되살릴 수 있습니다.`)) act(() => delJson(`/wiki/pages/${page.id}`), () => { setWikiFlash(`‘${page.title}’ 를 휴지통으로 옮겼습니다 — 30일 안에 ‘정리’ 에서 되살릴 수 있습니다.`); go({ space }); });
           }}>지우기</button>}
+          {writable && movable.length > 0 && (moveTo == null
+            ? <button className="btn" disabled={busy} onClick={() => setMoveTo('')} title="이 문서와 하위 문서를 다른 스페이스(법인)로 옮깁니다">다른 스페이스로</button>
+            : <span className="wiki-move">
+                <Select className="input" value={moveTo} onChange={(e) => setMoveTo(e.target.value)} sort={false} aria-label="옮길 스페이스">
+                  <option value="">옮길 스페이스…</option>
+                  {movable.map((sp) => <option key={sp.id} value={sp.id}>{sp.name}</option>)}
+                </Select>
+                <button className="btn" disabled={busy || !moveTo} onClick={() => {
+                  if (!window.confirm(`‘${page.title}’ 와 하위 문서 ${children.length ? `${children.length}개 이상` : '없음'}을(를) ‘${spaceName(meta.spaces, moveTo)}’ 로 옮길까요? 그 스페이스를 볼 수 있는 사람만 보게 됩니다.`)) return;
+                  act(() => postJson(`/wiki/pages/${page.id}/move`, { spaceId: moveTo }), (r) => { setMoveTo(null); setWikiFlash(`문서 ${r.moved}개를 ‘${spaceName(meta.spaces, r.spaceId)}’ 로 옮겼습니다.`); go({ space: r.spaceId, id: page.id }); });
+                }}>옮기기</button>
+                <button className="btn" onClick={() => setMoveTo(null)}>취소</button>
+              </span>)}
         </div>
       </div>
       {msg && <div className="banner warn">{msg}</div>}
@@ -420,6 +582,14 @@ function PageView({ id, space, meta, pages, onWritten }) {
             {page.issueKeys.length
               ? <div className="wiki-keys">{page.issueKeys.map((k) => <a key={k} className="md-iss" href={`#/issues/list/${k}`}>{k}</a>)}</div>
               : <div className="muted wiki-small">본문 · 댓글에 ISS-번호를 적으면 여기와 그 이슈의 ‘관련 문서’ 에 서로 이어집니다.</div>}
+            {page.issueKeysDropped > 0 && <div className="muted wiki-small">외 {page.issueKeysDropped}개는 색인 상한({page.issueKeys.length}개)을 넘어 그 이슈의 ‘관련 문서’ 에 나오지 않습니다.</div>}
+          </div>
+          <div className="wiki-aside-box">
+            <div className="wiki-aside-title">이 문서를 가리키는 문서{Array.isArray(backs) ? ` · ${backs.length}` : ''}</div>
+            {backs === null ? <div className="muted wiki-small">읽는 중…</div>
+              : backs === false ? <div className="muted wiki-small">역링크를 읽지 못했습니다.</div>
+              : backs.length ? <ul className="wiki-list">{backs.map((b) => <li key={b.id}><a href={wikiHash({ space: b.spaceId, id: b.id })}>{b.title}</a></li>)}</ul>
+              : <div className="muted wiki-small">다른 문서의 ‘[[{page.title}]]’ 링크가 여기 모입니다.</div>}
           </div>
           {(page.checkLog || []).length > 0 && (
             <div className="wiki-aside-box">
@@ -442,7 +612,8 @@ function PageView({ id, space, meta, pages, onWritten }) {
         </div>
         {page.comments.filter((c) => showResolved || !c.resolved).map((c) => (
           <div key={c.id} className={`wiki-comment${c.resolved ? ' resolved' : ''}`}>
-            <div className="wiki-comment-head"><b>{c.author}</b><span className="muted"> · {timeText(c.at)} · v{c.v}</span>
+            <div className="wiki-comment-head"><b>{c.author}</b><span className="muted"> · {timeText(c.at)} · v{c.v}</span>{c.editedAt && <span className="muted" title={`${timeText(c.editedAt)} 고침 · ${c.edits || 1}번`}> · 고침</span>}
+              {canComment && c.author === info?.me && editing?.id !== c.id && <button type="button" className="wiki-mini-act" disabled={busy} onClick={() => setEditing({ id: c.id, body: c.body })}>고치기</button>}
               {c.quote && canComment && <button type="button" className="wiki-mini-act" disabled={busy} title={c.resolved ? `${c.resolvedBy || ''} 가 해결로 표시함` : '해결로 표시하면 목록에서 접힙니다'} onClick={() => act(() => postJson(`/wiki/pages/${page.id}/comments/${c.id}/resolve`, { on: !c.resolved }))}>{c.resolved ? '다시 열기' : '해결'}</button>}
               {(info?.isMod || c.author === info?.me) && canComment && <button type="button" className="wiki-mini-act" disabled={busy} onClick={() => { if (window.confirm('이 댓글을 지울까요?')) act(() => delJson(`/wiki/pages/${page.id}/comments/${c.id}`)); }}>지우기</button>}
             </div>
@@ -451,15 +622,64 @@ function PageView({ id, space, meta, pages, onWritten }) {
                 “{c.quote}”
               </button>
             )}
-            <MdView md={c.body} compact idPrefix={`c${c.id}`} pages={pages} spaceId={space} />
+            {editing?.id === c.id
+              ? (
+                <div className="wiki-comment-edit">
+                  <MentionBox value={editing.body} onChange={(v) => setEditing((e0) => ({ ...e0, body: v }))} path={`/wiki/pages/${page.id}/mentionables`} rows={3} maxLength={meta.limits?.comment || 2000} ariaLabel="댓글 고치기" />
+                  <div className="wiki-actions">
+                    <button type="button" className="btn primary btn-sm" disabled={busy || !editing.body.trim()} onClick={async () => {
+                      setBusy(true); setCmsg('');
+                      try { const r = await putJson(`/wiki/pages/${page.id}/comments/${c.id}`, { body: editing.body }); if (r?.ok === false) setCmsg(wikiSaveFailText(r)); else { setEditing(null); setCmsg('댓글을 고쳤습니다 — 새로 언급한 사람에게만 알림이 갑니다.'); load(); } } catch (e) { setCmsg(String(e?.message || e)); } finally { setBusy(false); }
+                    }}>저장</button>
+                    <button type="button" className="btn btn-sm" onClick={() => setEditing(null)}>취소</button>
+                  </div>
+                </div>
+              )
+              : <MdView md={c.body} compact idPrefix={`c${c.id}`} pages={pages} spaceId={space} />}
+            {c.issueKey
+              ? <div className="wiki-comment-issue">이슈로 등록됨 <a className="md-iss" href={`#/issues/list/${c.issueKey}`}>{c.issueKey}</a></div>
+              : canComment && (info?.canWrite || c.author === info?.me) && mentionsInText(c.body).length > 0 && (
+                <div className="wiki-comment-issue"><button type="button" className="wiki-mini-act" disabled={busy} title="이 댓글에서 언급한 사람에게 이슈를 만듭니다(첫 언급 = 담당자)"
+                  onClick={async () => { setBusy(true); setCmsg(''); try { const r = await postJson(`/wiki/pages/${page.id}/comments/${c.id}/issue`, info?.canWrite ? {} : { request: true }); setCmsg(r?.ok === false ? wikiSaveFailText(r) : commentIssueText({ issue: r.issue })); load(); } catch (e) { setCmsg(String(e?.message || e)); } finally { setBusy(false); } }}>이슈로 등록</button></div>
+              )}
           </div>
         ))}
         {canComment
           ? (
-            <form ref={formRef} className="wiki-comment-form" onSubmit={(e) => { e.preventDefault(); if (comment.trim()) act(() => postJson(`/wiki/pages/${page.id}/comments`, { body: comment, quote }), () => { setComment(''); setQuote(''); load(); }); }}>
+            <form ref={formRef} className="wiki-comment-form" onSubmit={async (e) => {
+              e.preventDefault();
+              if (!comment.trim()) return;
+              const ms = mentionsInText(comment);
+              const users = ms.map((m) => m.user);
+              const wantIssue = ms.length > 0 && (info?.canWrite ? issueOpt.on : issueOpt.request);
+              const issue = !wantIssue ? undefined : info?.canWrite
+                ? { assignee: users.includes(issueOpt.assignee) ? issueOpt.assignee : users[0], type: issueOpt.type, priority: issueOpt.priority, title: issueOpt.title.trim() }
+                : { request: true };
+              setBusy(true); setCmsg('');
+              try {
+                const r = await postJson(`/wiki/pages/${page.id}/comments`, { body: comment, quote, ...(issue ? { issue } : {}) });
+                if (r?.ok === false) { setCmsg(wikiSaveFailText(r)); return; } // 400 이면 댓글도 저장되지 않았다 — 글은 그대로 둔다
+                setComment(''); setQuote(''); setPicked({}); setIssueOpt((o) => ({ ...o, assignee: '', title: '' }));
+                setCmsg(issue ? commentIssueText(r) : persistNote(r?.persist));
+                onWritten?.(r); load();
+              } catch (err2) { setCmsg(String(err2?.message || err2)); } finally { setBusy(false); }
+            }}>
               {quote && <div className="wiki-quote-pick">“{quote}” 에 댓글 <button type="button" className="wiki-mini-act" onClick={() => setQuote('')}>인용 빼기</button></div>}
-              <textarea className="input" rows={3} value={comment} onChange={(e) => setComment(e.target.value)} placeholder="댓글 — @사람 으로 알리고, ISS-번호로 이슈를 잇습니다" maxLength={meta.limits?.comment || 2000} />
-              <button className="btn primary" type="submit" disabled={busy || !comment.trim()}>댓글 달기</button>
+              <MentionBox value={comment} onChange={setComment} path={`/wiki/pages/${page.id}/mentionables`} rows={3} maxLength={meta.limits?.comment || 2000}
+                placeholder="댓글 — @ 뒤에 계정이나 이름을 치면 사람을 찾습니다 · ISS-번호로 이슈를 잇습니다"
+                onPick={(cnd) => setPicked((m) => ({ ...m, [cnd.username]: cnd }))} onMeta={setMmeta} />
+              {(() => {
+                const ms = mentionsInText(comment);
+                if (!ms.length) return null;
+                return (
+                  <>
+                    <div className="wiki-mention-chips"><span className="muted wiki-small">언급 {ms.length}:</span>{ms.map((m) => <span key={m.user} className="md-mention"><span className="md-mention-u">@{m.user}</span>{(picked[m.user]?.name || m.name) && <><span className="md-mention-s">/</span><span className="md-mention-n">{picked[m.user]?.name || m.name}</span></>}</span>)}</div>
+                    <CommentIssuePane mentions={ms} picked={picked} mmeta={mmeta} canIssue={!!info?.canWrite} value={issueOpt} onChange={setIssueOpt} spaceLabel={spaceName(meta.spaces, space)} />
+                  </>
+                );
+              })()}
+              <button className="btn primary" type="submit" disabled={busy || !comment.trim()}>{mentionsInText(comment).length && (info?.canWrite ? issueOpt.on : issueOpt.request) ? '댓글 달기 + 이슈 등록' : '댓글 달기'}</button>
+              {cmsg && <div className="banner" role="status" style={{ whiteSpace: 'normal' }}>{cmsg}</div>}
             </form>
           )
           : <div className="muted wiki-small">댓글은 운영자 · 관리자와 요청 권한이 있는 계정이 쓸 수 있습니다.</div>}
@@ -539,6 +759,7 @@ function Editor({ space, meta, pages, page = null, initial = null, onWritten }) 
   const [parentId, setParentId] = useState(src.parentId || '');
   const [noteText, setNoteText] = useState('');
   const [base, setBase] = useState(page ? page.version : null);
+  const [baseCheck, setBaseCheck] = useState(page ? (page.checkRev ?? 0) : null); // v2.904 점검 S-1 — 편집 시작 뒤의 체크 토글도 충돌로
   const [mode, setMode] = useState('split');
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState('');
@@ -567,8 +788,14 @@ function Editor({ space, meta, pages, page = null, initial = null, onWritten }) 
   };
   const onSlashKey = (e) => {
     if (!slash) return;
+    if (e.nativeEvent?.isComposing || e.keyCode === 229) return; // v2.904 점검 W-6: 한글 조합 중 Enter(조합 확정)를 메뉴 선택으로 먹지 않는다
     if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); const d = e.key === 'ArrowDown' ? 1 : -1; setSlash((s0) => ({ ...s0, i: (s0.i + d + s0.items.length) % s0.items.length })); }
-    else if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); pickSlash(slash.items[slash.i]); }
+    else if (e.key === 'Enter' || e.key === 'Tab') {
+      // v2.904 점검 W-5: 메뉴가 뜬 뒤 커서를 다른 자리로 옮겼으면 메뉴는 낡은 것 — 닫고 키는 그대로 둔다(Enter 한 번이 사라졌다)
+      const caret = ta.current?.selectionStart ?? body.length;
+      if (!slashQuery(body, caret)) { setSlash(null); return; }
+      e.preventDefault(); pickSlash(slash.items[slash.i]);
+    }
     else if (e.key === 'Escape') { e.preventDefault(); setSlash(null); }
   };
   const dirty = title !== (src.title || '') || body !== (src.body || '') || status !== (src.status || 'draft') || labels !== (src.labels || []).join(', ') || parentId !== (src.parentId || '');
@@ -587,23 +814,26 @@ function Editor({ space, meta, pages, page = null, initial = null, onWritten }) 
     setBody(next);
     requestAnimationFrame(() => { try { el.focus(); el.setSelectionRange(a + snip.length, a + snip.length); } catch { /* 선택 범위를 못 옮기는 브라우저 */ } });
   };
-  const save = async (overrideBase = null) => {
+  const save = async (overrideBase = null, overrideCheck = null) => {
     setBusy(true); setMsg('');
     const payload = { title: title.trim(), body, status, labels: parseLabels(labels), parentId, note: noteText.trim() };
     try {
       const r = page
-        ? await putJson(`/wiki/pages/${page.id}`, { ...payload, baseVersion: overrideBase ?? base })
+        ? await putJson(`/wiki/pages/${page.id}`, { ...payload, baseVersion: overrideBase ?? base, baseCheckRev: overrideCheck ?? baseCheck })
         : await postJson('/wiki/pages', { ...payload, spaceId: space, template: src.template || '', note: noteText.trim() || '처음 만듦' });
       if (isConflict(r)) {
         setMsg(wikiSaveFailText(r));
         let diff = null; let diffErr = '';
-        try { diff = await fetchJson(`/wiki/pages/${page.id}/diff`, { from: base, to: r.current.version }); } catch (e) { diffErr = String(e?.message || e); }
-        setConflict({ current: r.current, diff, diffErr });
+        const from = overrideBase ?? base; // v2.904 점검 W-11: 두 번째 충돌의 비교도 방금 실은 판에서
+        if (r.kind === 'check' && r.current.version === from) diff = { checkOnly: true }; // 판은 그대로 — 체크만 바뀌었다(비교할 본문 차이 없음)
+        else { try { diff = await fetchJson(`/wiki/pages/${page.id}/diff`, { from, to: r.current.version }); } catch (e) { diffErr = String(e?.message || e); } }
+        setConflict({ current: r.current, kind: r.kind || '', diff, diffErr });
         return;
       }
       if (r?.ok === false) { setMsg(wikiSaveFailText(r)); return; }
       clearDraft(key);
       onWritten?.(r);
+      if (linkFixText(r.linkFix)) setWikiFlash(linkFixText(r.linkFix)); // v2.907 제목을 바꿔 다른 문서의 링크를 고쳤으면 문서 화면에서 알린다
       go({ space, id: r.page.id });
     } catch (e) { setMsg(String(e?.message || e)); } finally { setBusy(false); }
   };
@@ -670,10 +900,19 @@ function Editor({ space, meta, pages, page = null, initial = null, onWritten }) 
       {msg && <div className="banner warn" style={{ whiteSpace: 'normal' }}>{msg}</div>}
       {conflict && (
         <div className="card wiki-conflict">
-          <b>v{base} → v{conflict.current.version} 사이에 바뀐 것(다른 사람의 저장)</b>
-          {conflict.diff ? <DiffBlock d={conflict.diff} /> : <div className="muted">{conflict.diffErr ? `비교를 읽지 못했습니다 — ${conflict.diffErr}` : '비교를 읽는 중…'}</div>}
+          {conflict.diff?.checkOnly
+            ? <><b>편집을 시작한 뒤 체크리스트가 바뀌었습니다({conflict.current.by || '다른 사람'} · {timeText(conflict.current.at)})</b>
+              <div className="muted wiki-small">본문의 판은 그대로이고 체크 상태만 달라졌습니다. 내 글로 저장하면 그 체크가 내 글의 체크 상태로 돌아갑니다 — 지금 판을 새 창으로 열어 확인하세요.</div></>
+            : <><b>v{base} → v{conflict.current.version} 사이에 바뀐 것(다른 사람의 저장)</b>
+              {conflict.diff ? <DiffBlock d={conflict.diff} /> : <div className="muted">{conflict.diffErr ? `비교를 읽지 못했습니다 — ${conflict.diffErr}` : '비교를 읽는 중…'}</div>}</>}
           <div className="wiki-actions">
-            <button className="btn primary" disabled={busy} onClick={() => { const v = conflict.current.version; setBase(v); setConflict(null); save(v); }}>확인하고 내 글로 저장</button>
+            {/* v2.901(점검 W4): 비교를 못 읽었으면 '확인하고' 저장을 열지 않는다(상대가 고친 내용을 보지 못한 채 덮어쓰게 된다) — 비교를 다시 읽을 수 있다 */}
+            <button className="btn primary" disabled={busy || !conflict.diff} title={conflict.diff ? undefined : '바뀐 내용을 먼저 확인해야 저장할 수 있습니다'} onClick={() => { const v = conflict.current.version; const cr = conflict.current.checkRev ?? baseCheck; setBase(v); setBaseCheck(cr); setConflict(null); save(v, cr); }}>확인하고 내 글로 저장</button>
+            {!conflict.diff && conflict.diffErr && <button className="btn" disabled={busy} onClick={async () => {
+              const cur = conflict; let diff = null; let diffErr = '';
+              try { diff = await fetchJson(`/wiki/pages/${page.id}/diff`, { from: base, to: cur.current.version }); } catch (e) { diffErr = String(e?.message || e); }
+              setConflict((c) => (c && c.current.version === cur.current.version ? { ...c, diff, diffErr } : c));
+            }}>비교 다시 읽기</button>}
             <a className="btn" href={wikiHash({ space, id: page.id })} target="_blank" rel="noopener noreferrer">지금 판 새 창으로 보기</a>
           </div>
         </div>
@@ -833,7 +1072,7 @@ function SearchView({ space, params, meta }) {
   const label = params.label || '';
   useEffect(() => {
     const k = latest.next();
-    setData(null);
+    setData(null); setErr(null); // v2.904 점검 W-12: 옛 오류가 새 검색 동안 남아 Loading 을 가렸다
     fetchJson('/wiki/search', { q, label, space: allSpaces ? '' : space, status, archived: archived ? '1' : '', limit: 50 })
       .then((r) => { if (latest.isLatest(k)) { setData(r); setErr(null); } }).catch((e) => { if (latest.isLatest(k)) setErr(e); });
   }, [q, label, space, allSpaces, status, archived, latest]);
@@ -907,6 +1146,7 @@ function TemplatesAdmin({ space, meta, onWritten }) {
   return (
     <div className="wiki-settings">
       <div className="wiki-editor-head"><h2 className="wiki-title">관리자 템플릿</h2><span className="muted">내장 템플릿 뒤에 붙습니다 · {lim.max ?? 30}개까지 · 전 법인 공용</span></div>
+      {err && <div className="banner warn" style={{ whiteSpace: 'normal' }}>템플릿 목록을 새로 읽지 못했습니다 — 아래는 직전에 읽은 목록입니다({err.message || String(err)}).</div>}{/* v2.904 점검 W-9 */}
       {data.loadError && <div className="banner bad" style={{ whiteSpace: 'normal' }}>템플릿 파일(wiki-templates.json)을 읽지 못해 빈 목록으로 보입니다 — 손상본은 옆에 보존했습니다. 원인: {data.loadError}</div>}
       {msg && <div className="banner">{msg}</div>}
       {(data.items || []).length === 0 && !form && <div className="muted">아직 관리자 템플릿이 없습니다.</div>}

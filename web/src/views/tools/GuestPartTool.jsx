@@ -347,7 +347,7 @@ export default function GuestPartTool() {
     <div style={{ minWidth: 0 }}>
       {/* 제목·뒤로 가기는 SpecialTools 셸이 그린다(docs/rules/storage.md — 셸 제목을 다시 넣지 않는다). 범위 선택도 이 화면 안의 vCenter 이동이 맡는다. */}
       <div style={{ marginBottom: 8 }}>
-        <div className="muted" style={{ fontSize: 12.5 }}>{head} · VMware Tools 가 보고한 게스트 파일시스템의 할당 대비 사용률 · 수집 주기는 설정 › 수집 서버 › 게스트 파티션 사용률</div>
+        <div className="muted" style={{ fontSize: 12.5 }}>{head} · VMware Tools 가 보고한 게스트 파일시스템의 할당 대비 사용률 · 수집 주기는 설정 › 수집 › 게스트 파티션 사용률</div>
       </div>
       {vc ? <VcDetail vcId={vc} onBack={() => setVc(null)} onPick={setVc} /> : <Overview onOpenVc={setVc} />}
     </div>

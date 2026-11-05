@@ -33,11 +33,15 @@ export function _setVcInfoCapForTest(fn) { _vcInfoCapImpl = typeof fn === 'funct
 async function vcInfoAllowed() {
   try { return !!(await (_vcInfoCapImpl ? _vcInfoCapImpl() : centralStatusOnlySupport({ minVersion: VCINFO_MIN_CENTRAL })))?.ok; } catch { return false; }
 }
-/** push 본문의 vcenter — 중앙이 vcInfo 를 알 때만 붙인다(순수에 가깝게 — 테스트가 부른다). */
+/**
+ * push 본문의 vcenter — 중앙이 vcInfo 를 알 때만 붙인다(순수에 가깝게 — 테스트가 부른다).
+ * v2.901(점검 E3 — 정정): 계약을 '키가 없으면 그대로 두라' 로 바꿨다. v2.898 은 버전 확인이 한 번 실패(고RTT 시한 · 5분 기억)하면 키를 빼고 보냈고,
+ *   중앙은 그것을 '엣지가 캐시를 비웠다' 로 읽어 알람 · 작업 · 권한 목록을 지웠다. 이제 ① 중앙이 안다고 확인되면 항상 키를 싣고(캐시가 비면 {} — 중앙도 지운다)
+ *   ② 모르거나 옛 중앙이면 키를 빼며 중앙은 직전 값을 그대로 둔다(낡음은 중앙 라우트가 pushAt 으로 말한다).
+ */
 export async function vcenterForPush(vc) {
-  const vi = vcInfoForPush(vc.id);
-  if (!vi || !(await vcInfoAllowed())) return vc;
-  return { ...vc, vcInfo: vi };
+  if (!(await vcInfoAllowed())) return vc;
+  return { ...vc, vcInfo: vcInfoForPush(vc.id) || {} };
 }
 // 인벤토리 push 본문 gzip 압축(기본 on). 인벤토리 JSON은 반복 필드가 많아 ~5~10× 줄어 WAN
 // 수신량을 크게 낮춘다. 중앙(express.json)은 Content-Encoding: gzip 본문을 자동 해제한다.

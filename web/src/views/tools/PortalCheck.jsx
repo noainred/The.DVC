@@ -246,7 +246,7 @@ function TokenCheckView() {
               })}
               {rows.length === 0 && (
                 <tr><td colSpan={10} style={{ color: 'var(--muted)', whiteSpace: 'normal' }}>
-                  표시할 엣지가 없습니다{q || onlyBad ? ' — 검색·필터를 지워 보세요.' : ' — 설정 › 수집 서버에 엣지를 등록하세요.'}
+                  표시할 엣지가 없습니다{q || onlyBad ? ' — 검색·필터를 지워 보세요.' : ' — 설정 › 엣지·원격 › 수집 서버(원격)에 엣지를 등록하세요.'}
                 </td></tr>
               )}
             </tbody>

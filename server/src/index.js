@@ -26,7 +26,7 @@ import { initPeerTrust } from './security/peerTrust.js'; // 2026-10-09 검토 S-
 import { loadCaBundle } from './security/tlsTrust.js'; // 2026-10-09 검토 S-02: 사설 CA 번들 오류를 기동 로그에
 import { startRuntimeCheck } from './util/runtimeCheck.js'; // 2026-10-09 검토 I-06: Node 런타임 계약 + 통신 자가 점검
 import { startStallWatch } from './perf/stallWatch.js'; // v2.617: 멈춘 동안에도 stderr 로 보고 + 스택 자동 채취
-import { startLogAnalysis } from './loganalysis/index.js'; // v2.583: 설정 › Log › 로그 분석 — 로그 누적 집계
+import { startLogAnalysis } from './loganalysis/index.js'; // v2.583: 설정 › 로그 › 로그 분석 — 로그 누적 집계
 // v2.498: 서버 성능 측정 — 요청 지연·진행 중 요청 추적(설정 › 서버 성능 측정). 계측 실패는 서비스에 영향 없음.
 import { beginRequest, endRequest, pruneHangLog } from './perf/monitor.js';
 import { sanitizeRid, newRid } from './perf/requestId.js';

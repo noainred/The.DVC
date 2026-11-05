@@ -115,7 +115,7 @@ export function addLink(key, body, user, { access = FULL_ACCESS } = {}) {
   if (!y || !canSee(y, access)) throw fieldError('key', '없는 이슈입니다');
   const idx = treeIndex(c.issues);
   if (relationsOf(x, idx, null).some((l) => l.type === b.type && l.key === target)) return { ...viewIssue(x, user, access), writable: canEdit(x, access) };
-  const mine = linksOf(x);
+  const mine = linksOf(x).filter((l) => idx.byKey.has(l.key)); // v2.904 점검 S-2: 이미 쌓인 죽은 연결은 세지 않고 이번 저장에서 걷어 낸다
   if (mine.length >= LIMITS.linkMax) throw limitError(`연결은 이슈마다 ${LIMITS.linkMax}개까지입니다`);
   const now = Date.now();
   const next = { ...x, links: [...mine, { type: b.type, key: target, at: now, by: user }] };
@@ -557,11 +557,17 @@ function findFor(key, access = FULL_ACCESS, { write = false } = {}) {
  * 사람이 만든 이슈에는 없다. 서버 내부 경로(issues/autoCreate.js)만 붙이고 라우트 본문으로는 받지 않는다(위조 금지).
  * partKeys 는 한 이슈가 덮는 파트 키(`agent|partKey`) — 장비 단위로 묶은 이슈는 여럿이다. resolved 는 해소된 키.
  */
-export const ORIGIN_KINDS = Object.freeze(['partfault']);
+export const ORIGIN_KINDS = Object.freeze(['partfault', 'wiki-comment']);
 const ORIGIN_KEYS_MAX = 64;
+const WIKI_PAGE_RE = /^W\d{1,9}$/;
+const WIKI_COMMENT_RE = /^[0-9a-f]{1,40}$/;
 function originField(o) {
   const t = (v, n) => capStr(String(v ?? '').trim(), n);
   const keys = (a) => [...new Set((Array.isArray(a) ? a : []).map((k) => t(k, 300)).filter(Boolean))].slice(0, ORIGIN_KEYS_MAX);
+  // v2.907 위키 댓글에서 만든 이슈(시안 docs/design/wiki-mention ②④) — 문서 · 댓글 id 만(같은 댓글로 두 번 만들지 않는 열쇠)
+  if (o?.kind === 'wiki-comment') {
+    return { kind: 'wiki-comment', pageId: WIKI_PAGE_RE.test(String(o.pageId || '')) ? o.pageId : '', commentId: WIKI_COMMENT_RE.test(String(o.commentId || '')) ? o.commentId : '', partKeys: [], resolved: [] };
+  }
   return {
     kind: ORIGIN_KINDS.includes(o?.kind) ? o.kind : 'partfault',
     agent: t(o?.agent, 64), scope: t(o?.scope, 32), deviceId: t(o?.deviceId, 200), deviceName: t(o?.deviceName, 200),
@@ -569,9 +575,10 @@ function originField(o) {
     hold: t(o?.hold, 64),
   };
 }
-const originNote = (o) => `자동 등록: 파트 장애${o?.deviceName || o?.deviceId ? ` · ${capStr(String(o.deviceName || o.deviceId), 80)}` : ''}`;
+const originNote = (o) => (o?.kind === 'wiki-comment' ? `위키 댓글에서 등록: ${o.pageId || '?'}` : `자동 등록: 파트 장애${o?.deviceName || o?.deviceId ? ` · ${capStr(String(o.deviceName || o.deviceId), 80)}` : ''}`);
 /** 화면에 싣는 출처(키 목록 대신 개수 — 목록 응답을 키우지 않는다). */
 function originView(o) {
+  if (o.kind === 'wiki-comment') return { kind: o.kind, pageId: o.pageId || '', commentId: o.commentId || '' };
   return { kind: o.kind, agent: o.agent || '', scope: o.scope || '', deviceId: o.deviceId || '', deviceName: o.deviceName || '', parts: (o.partKeys || []).length, resolved: (o.resolved || []).length };
 }
 /** 출처로 이슈 찾기(서버 내부 — 범위 없음). pred(origin, issue) 가 참인 이슈의 사본. */
@@ -631,16 +638,28 @@ function enumField(v, list, field, def) {
   return v;
 }
 /** 기한: 빈 값 = 없음(null). 숫자(epoch ms) 또는 날짜 문자열. 못 읽으면 오류. */
+/** epoch ms 로 받는 가장 이른 값(2001-09-09) — 그보다 작은 수는 '20261105' 같은 날짜 숫자를 ms 로 잘못 읽은 것이다(v2.904 점검 S-7). */
+const MIN_EPOCH_MS = 1e12;
 function timeField(v, field) {
   if (v == null || v === '') return null;
-  const n = typeof v === 'number' ? v : (/^\d+$/.test(String(v)) ? Number(v) : Date.parse(String(v)));
-  if (!Number.isFinite(n) || n <= 0) throw fieldError(field, '시각을 읽지 못했습니다');
+  const str = typeof v === 'number' ? '' : String(v).trim();
+  // v2.904(점검 S-7 — 재현): 숫자만 있는 문자열을 무조건 epoch ms 로 읽어 '20261105' 가 1970-01-01 기한(초과 알림 대상)이 됐다 —
+  // 숫자는 13자리 이상(ms)만, 날짜 글자('2026-02-30')는 실제 있는 날짜인지 되돌려 맞춰 본다(Date.parse 는 3월 2일로 넘긴다).
+  const n = typeof v === 'number' ? v : (/^\d+$/.test(str) ? Number(str) : Date.parse(str));
+  if (!Number.isFinite(n) || n < MIN_EPOCH_MS) throw fieldError(field, '시각을 읽지 못했습니다 — 날짜는 2026-11-05 꼴로 보내세요');
+  const d = /^(\d{4})-(\d{2})-(\d{2})/.exec(str);
+  if (d) {
+    const u = new Date(Date.UTC(Number(d[1]), Number(d[2]) - 1, Number(d[3])));
+    if (u.getUTCFullYear() !== Number(d[1]) || u.getUTCMonth() + 1 !== Number(d[2]) || u.getUTCDate() !== Number(d[3])) throw fieldError(field, '없는 날짜입니다');
+  }
   return Math.trunc(n);
 }
 /** v2.888 예상(분): 빈 값 = 없음(null) · 0~estimateMaxMin 정수. */
 function estimateField(v) {
-  if (v == null || v === '') return null;
-  const n = Number(v);
+  if (v == null || (typeof v === 'string' && !v.trim())) return null; // 빈 · 공백만 = 없음
+  // v2.904 점검 S-10: Number(' ')·Number([]) 는 0, Number(true) 는 1 — 수 · 숫자 글자만 받고 나머지는 거부(numOrNull 규칙)
+  const n = typeof v === 'number' || typeof v === 'string' ? numOrNull(v) : null;
+  if (n == null) throw fieldError('estimateMin', `0~${LIMITS.estimateMaxMin} 분 정수여야 합니다`);
   if (!Number.isInteger(n) || n < 0 || n > LIMITS.estimateMaxMin) throw fieldError('estimateMin', `0~${LIMITS.estimateMaxMin} 분 정수여야 합니다`);
   return n;
 }
@@ -810,6 +829,25 @@ export function summary(x, idx = null, access = FULL_ACCESS, now = Date.now()) {
   };
 }
 /** 상세 — 댓글·이력 포함. `me` 는 보는 사람(관찰 여부). */
+/**
+ * v2.904(점검 P-2 — 재현): 이력 **응답**에서 범위 밖 식별자를 가린다 — 범위 밖 법인 id 와 볼 수 없는 이슈 키(상위 · 연결 · 상위 완료 메모).
+ * 같은 응답의 parentKey · epic · links 는 vis() 로 가리면서 이력만 원문이던 비대칭을 닫는다. 저장된 이력(감사 기록)은 바꾸지 않는다.
+ * 조회 무제한이면 그대로(모든 이슈 · 법인을 본다). 사람이 쓴 글(본문 · 댓글 · 메모 글)은 본문과 같이 가리지 않는다.
+ */
+export const HIDDEN_ISSUE_TEXT = '(볼 수 없는 이슈)';
+export const HIDDEN_VCENTER_TEXT = '(볼 수 없는 법인)';
+const HIST_KEY_RE = new RegExp(`\\b${KEY_PREFIX}-\\d{1,9}\\b`, 'g');
+function historyFor(list, idx, access) {
+  if (!access?.read) return list;
+  const maskKeys = (v) => String(v ?? '').replace(HIST_KEY_RE, (k) => { const y = idx.byKey.get(k); return y && canSee(y, access) ? k : HIDDEN_ISSUE_TEXT; });
+  const maskVc = (v) => (!v || access.read.has(v) ? (v ?? '') : HIDDEN_VCENTER_TEXT);
+  return list.map((h) => {
+    if (h.field === 'vcenterId') return { ...h, from: maskVc(h.from), to: maskVc(h.to) };
+    if (h.field === 'parent' || h.field === 'link' || h.field === 'status') return { ...h, from: maskKeys(h.from), to: maskKeys(h.to), ...(h.note ? { note: maskKeys(h.note) } : {}) };
+    return h;
+  });
+}
+
 export function viewIssue(x, me = '', access = FULL_ACCESS) {
   const idx = treeIndex(load().issues);
   const s = summary(x, idx, access);
@@ -825,8 +863,8 @@ export function viewIssue(x, me = '', access = FULL_ACCESS) {
     links: relationsOf(x, idx, access),
     body: x.body || '', watcherNames: Array.isArray(x.watchers) ? x.watchers : [], watching: !!me && Array.isArray(x.watchers) && x.watchers.includes(me),
     createdBy: x.createdBy || x.reporter || '', updatedBy: x.updatedBy || '',
-    comments: commentsOf(x).map((c) => ({ id: c.id, author: c.author, body: c.body, createdAt: c.createdAt })),
-    history: historyOf(x), historyDropped: Number(x.historyDropped) || 0,
+    comments: commentsOf(x).map((c) => ({ id: c.id, author: c.author, body: c.body, createdAt: c.createdAt, ...(c.editedAt ? { editedAt: c.editedAt, edits: c.edits || 1 } : {}) })),
+    history: historyFor(historyOf(x), idx, access), historyDropped: Number(x.historyDropped) || 0,
     worklog: worklogOf(x).map((w) => ({ id: w.id, by: w.by, at: w.at, on: w.on || '', minutes: w.minutes, note: w.note || '' })).reverse(), // v2.888 최신 먼저
   };
 }
@@ -1251,6 +1289,27 @@ export function setWatch(key, user, on, { access = FULL_ACCESS } = {}) {
 }
 
 /**
+ * v2.907 댓글에서 언급한 사람을 관찰자로(시안 docs/design/wiki-mention ⑥-7 · 결정 5 — 이슈 댓글의 선택). 이슈 쓰기 범위가 필요하다(댓글과 같은 판정).
+ * 그 법인을 볼 수 없는 사람(canSee) · 이미 관찰자인 사람은 건너뛰고, 상한(watcherMax)을 넘는 만큼은 빼고 센다 — 조용히 버리지 않는다.
+ * @returns {{ added:string[], skipped:{name:string,why:string}[] }}
+ */
+export function addWatchers(key, names, user, { access = FULL_ACCESS, canSee = () => true } = {}) {
+  const c = load();
+  const x = findFor(key, access, { write: true });
+  const cur = Array.isArray(x.watchers) ? [...x.watchers] : [];
+  const added = []; const skipped = [];
+  for (const n0 of Array.isArray(names) ? names.slice(0, 10) : []) {
+    const n = String(n0 || '').trim();
+    if (!n || cur.includes(n)) continue;
+    if (!canSee(n, x.vcenterId || '')) { skipped.push({ name: n, why: 'out-of-scope' }); continue; }
+    if (cur.length >= LIMITS.watcherMax) { skipped.push({ name: n, why: 'limit' }); continue; }
+    cur.push(n); added.push(n);
+  }
+  if (added.length) replace(c, { ...x, watchers: cur }, [], user, { touch: false });
+  return { added, skipped };
+}
+
+/**
  * 진행률·진행 메모(v2.871 — 사용자 요청 '진행상태를 다른 사람이 볼 수 있게'). pct 는 0~100 정수 · null 이면 '보고 없음' 으로 되돌린다.
  * 메모는 300자. 쓰기 범위가 필요하다(조회 밖 404 → 쓰기 밖 403). 이력·이벤트에 남는다. 값이 그대로면 아무것도 하지 않는다.
  */
@@ -1290,10 +1349,13 @@ export function activityFeed({ access = FULL_ACCESS, limit = 100, since = 0 } = 
   const lim = Math.max(1, Math.min(LIMITS.activityMax, Math.trunc(Number(limit)) || 100));
   const out = [];
   const FIELDS = new Set(['created', 'assignee', 'status', 'progress', 'blocked', 'priority', 'dueAt', 'parent', 'sprint']);
-  for (const x of load().issues) {
+  const all = load().issues;
+  const idx = access?.read ? treeIndex(all) : null;
+  for (const x of all) {
     if (!canSee(x, access)) continue;
     const base = { key: x.key, title: capStr(x.title || '', 120), vcenterId: x.vcenterId || '' };
-    for (const h of historyOf(x).slice(-20)) {
+    const hist = historyOf(x).slice(-20);
+    for (const h of (idx ? historyFor(hist, idx, access) : hist)) { // v2.904 점검 P-2
       if (!FIELDS.has(h.field) || !(h.at > since)) continue;
       out.push({ ...base, at: h.at, by: h.by || '', field: h.field, from: h.from ?? '', to: h.to ?? '', note: h.note ? capStr(String(h.note), 120) : '' });
     }
@@ -1318,6 +1380,27 @@ export function addComment(key, body, user, { access = FULL_ACCESS } = {}) {
   return cm;
 }
 
+/**
+ * v2.907 댓글 고치기(기능 추천 1) — 쓴 사람만 · 이슈 쓰기 범위(댓글과 같은 판정). 옛 본문은 최근 5개까지(editedAt · edits · prev).
+ * 이력에 남기지 않는다(본문 이력과 같다) · 알림은 새로 언급한 사람에게만(ev.edit — 담당 · 보고 · 관찰자에게 다시 가지 않는다).
+ */
+export function editComment(key, commentId, body, user, { access = FULL_ACCESS } = {}) {
+  const c = load();
+  const x = findFor(key, access, { write: true });
+  const comments = commentsOf(x);
+  const cm = comments.find((q) => q.id === commentId);
+  if (!cm) throw notFound();
+  if (cm.author !== user) throw forbidden('댓글은 쓴 사람만 고칠 수 있습니다');
+  const nextBody = text(body?.body, LIMITS.commentBody, 'body', { required: true });
+  if (nextBody === cm.body) return cm;
+  const edited = { ...cm, body: nextBody, editedAt: Date.now(), edits: (Number(cm.edits) || 0) + 1, prev: [...(Array.isArray(cm.prev) ? cm.prev : []), { at: cm.editedAt || cm.createdAt, body: cm.body }].slice(-5) };
+  const y = replace(c, { ...x, comments: comments.map((q) => (q.id === commentId ? edited : q)) }, [], user);
+  const before = new Set(mentionsOf(cm.body));
+  const fresh = mentionsOf(nextBody).filter((m) => !before.has(m));
+  if (fresh.length) emit({ type: 'comment', edit: true, actor: user, issue: evIssue(y), commentId, excerpt: capStr(nextBody, 200), mentions: fresh });
+  return edited;
+}
+
 /** 댓글 삭제 — 작성자 본인 또는 관리자(isMod). */
 export function deleteComment(key, commentId, user, { isMod = false, access = FULL_ACCESS } = {}) {
   const c = load();
@@ -1337,5 +1420,12 @@ export function deleteIssue(key, user, { isMod = false, access = FULL_ACCESS } =
   if (!isMod && x.reporter !== user) throw forbidden('보고자 본인이나 관리자만 지울 수 있습니다');
   if ((treeIndex(c.issues).kids.get(x.key) || []).length) throw fieldError('key', `${x.type === 'epic' ? '담긴 이슈가' : '하위 작업이'} 있어 지울 수 없습니다 — 먼저 빼거나 지우세요`);
   commit(c.issues.filter((y) => y.id !== x.id), { removedId: x.id });
+  // v2.904(점검 S-2 — 재현): 지운 이슈를 가리키는 남의 연결도 정리한다 — 화면에는 안 보이면서 연결 상한(30)을 차지하고 지울 수도 없었다
+  for (const y of load().issues) {
+    const dead = linksOf(y).filter((l) => l.key === x.key);
+    if (!dead.length) continue;
+    const at = Date.now();
+    replace(load(), { ...y, links: linksOf(y).filter((l) => l.key !== x.key) }, dead.map((l) => ({ at, by: user, field: 'link', from: `${l.type} ${x.key}`, to: '', note: '상대 이슈를 지움' })), user, { touch: false });
+  }
   return summary(x, null, access);
 }

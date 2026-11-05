@@ -148,9 +148,12 @@ export function addAttachment(kind, owner, rawName, buf, user, { now = Date.now(
   const id = crypto.randomBytes(16).toString('hex');
   fs.mkdirSync(attachDir(), { recursive: true, mode: 0o700 });
   const tmp = `${blobPath(id)}.tmp-${process.pid}`;
-  const fd = fs.openSync(tmp, 'w', 0o600);
-  try { fs.writeSync(fd, buf); fs.fsyncSync(fd); } finally { fs.closeSync(fd); }
-  fs.renameSync(tmp, blobPath(id));
+  // v2.901(점검 P6): 쓰기 · fsync · 이름 바꾸기가 던지면(디스크 가득 등) 임시 파일을 지운다 — attachUsage 는 본체(ID_RE)만 세어 남은 tmp 를 보지도 정리하지도 않았다
+  try {
+    const fd = fs.openSync(tmp, 'w', 0o600);
+    try { fs.writeSync(fd, buf); fs.fsyncSync(fd); } finally { fs.closeSync(fd); }
+    fs.renameSync(tmp, blobPath(id));
+  } catch (e) { try { fs.unlinkSync(tmp); } catch { /* 만들지 못했거나 이미 없다 */ } throw e; }
   const item = {
     id, kind, owner, name, ext, mime: EXT[ext], size: buf.length, sha256: crypto.createHash('sha256').update(buf).digest('hex'), by: user, at: now,
     image: ['png', 'jpg', 'jpeg', 'gif', 'webp'].includes(ext) && imageMagicOk(ext, buf),
@@ -179,6 +182,26 @@ export function removeOwner(kind, owner) {
   save();
   for (const x of gone) { try { fs.unlinkSync(blobPath(x.id)); } catch { /* 이미 없다 */ } }
   return gone.length;
+}
+
+/**
+ * v2.904(점검 S-5 — 재현): 주인(문서 · 이슈) 삭제가 **디스크에 닿은 뒤에만** 첨부를 지운다. 첨부 목록 · 본체는 동기로 바로 쓰이는데 주인 파일은
+ * 디바운스(300ms)라, 그 사이 비정상 종료하면 재기동 뒤 주인은 되살아나고 첨부 본체만 영구히 사라졌다.
+ *  · state 'saved' → 지금 지운다. 아니면 그 변경(seq)이 저장되기를 백그라운드로 기다렸다가(waitMs) 'saved' 일 때만 지운다.
+ *  · 끝내 저장되지 않으면 지우지 않는다(주인이 되살아날 수 있으므로) — 콘솔에 남기고, 주인이 정말 없어졌다면 관리자 '목록 · 본체' 점검이 보인다.
+ * @returns 'now' | 'deferred'
+ */
+export function removeOwnerAfterPersist(kind, owner, { seq, state, wait, waitMs = 60_000, log = console } = {}) {
+  const run = () => { try { removeOwner(kind, owner); } catch (e) { log.warn(`[attach] ${kind}:${owner} 첨부 정리 실패: ${String(e?.message || e).slice(0, 160)}`); } };
+  if (state === 'saved' || typeof wait !== 'function') { run(); return 'now'; }
+  Promise.resolve()
+    .then(() => wait(seq, { maxMs: waitMs }))
+    .then((p) => {
+      if (p?.state === 'saved') run();
+      else log.warn(`[attach] ${kind}:${owner} 주인 삭제가 아직 저장되지 않아 첨부를 지우지 않았습니다(${p?.state || '?'})`);
+    })
+    .catch(() => { /* 기다리기 실패 — 지우지 않는다(안전한 쪽) */ });
+  return 'deferred';
 }
 
 /** 관리자 사용량 — 전체 · 종류별 · 본체 없는 항목 수 · 목록에 없는 본체 파일 수(고아). */
@@ -219,7 +242,8 @@ const pad512 = (n) => Buffer.alloc((512 - (n % 512)) % 512, 0);
 export async function writeArchive(write) {
   const items = load().items.map((x) => ({ ...x }));
   const present = items.filter((x) => fs.existsSync(blobPath(x.id)));
-  const index = Buffer.from(JSON.stringify({ v: 1, createdAt: Date.now(), note: '파일 본체는 files/<id> — 원래 이름은 이 목록의 name', items: items.map((x) => ({ ...x, missing: !present.includes(x) })) }, null, 1), 'utf8');
+  const has = new Set(present);   // v2.901(점검 P4): present.includes 는 항목 수의 제곱이었다
+  const index = Buffer.from(JSON.stringify({ v: 1, createdAt: Date.now(), note: '파일 본체는 files/<id> — 원래 이름은 이 목록의 name', items: items.map((x) => ({ ...x, missing: !has.has(x) })) }, null, 1), 'utf8');
   const now = Date.now() / 1000;
   await write(tarHeader('index.json', index.length, now)); await write(index); await write(pad512(index.length));
   let files = 0; let bytes = 0;

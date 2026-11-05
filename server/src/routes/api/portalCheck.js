@@ -246,7 +246,7 @@ api.post('/tools/portal-check/tokens/probe', adminOnly, fullScopeOnly, async (re
   const only = norm(req.body?.agent);
   const scan = localScan();
   const rows = only ? scan.rows.filter((r) => norm(r.agent) === only) : scan.rows;
-  if (!rows.length) return res.status(400).json({ ok: false, reason: only ? `그 이름의 엣지가 없습니다: ${req.body?.agent}` : '점검할 엣지가 없습니다(설정 › 수집 서버에서 등록하세요).' });
+  if (!rows.length) return res.status(400).json({ ok: false, reason: only ? `그 이름의 엣지가 없습니다: ${req.body?.agent}` : '점검할 엣지가 없습니다(설정 › 엣지·원격 › 수집 서버(원격)에서 등록하세요).' });
   running = 'probe';
   try {
     // v2.708: 데모(mock) 모드의 데모 엣지(mock- · .demo.invalid)는 접속하지 않고 합성 결과를 쓴다.

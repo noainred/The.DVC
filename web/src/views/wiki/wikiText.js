@@ -11,7 +11,7 @@ export const statusText = (s) => STATUS_TEXT[s] || s || '—';
 export const STALE_DAYS = 90;
 export const MAX_DEPTH = 3;
 const ID_RE = /^W\d{1,9}$/;
-const VIEWS = Object.freeze(['home', 'search', 'new', 'settings', 'templates']); // v2.889 templates — 관리자 템플릿
+const VIEWS = Object.freeze(['home', 'search', 'new', 'settings', 'templates', 'tidy']); // v2.889 templates — 관리자 템플릿 · v2.907 tidy — 휴지통 · 깨진 링크
 
 /* ───── 주소 ───── */
 function dec(s) { try { return decodeURIComponent(s); } catch { return ''; } }
@@ -120,6 +120,7 @@ export function wikiSaveFailText(r) {
 /** 충돌(409) — 편집을 시작한 판과 지금 판이 다르다. */
 export function conflictText(r) {
   const c = r?.current || {};
+  if (r?.kind === 'check') return `편집을 시작한 뒤 체크리스트가 바뀌었습니다(${c.by || '알 수 없음'} · ${timeText(c.at)}). 내 글은 그대로 두었습니다. 지금 판을 확인한 뒤 '확인하고 내 글로 저장' 을 누르세요.`; // v2.904 점검 S-1
   return `다른 사람이 먼저 저장했습니다 — 지금 판 v${c.version ?? '?'}(${c.by || '알 수 없음'} · ${timeText(c.at)}). 내 글은 그대로 두었습니다. 바뀐 내용을 비교한 뒤 '확인하고 내 글로 저장' 을 누르세요.`;
 }
 export const isConflict = (r) => r?.ok === false && r?.code === 'conflict';

@@ -4,7 +4,7 @@
  * restarts. Best-effort and isolated per agent.
  */
 
-import { createHash } from 'node:crypto';
+import { bundleSha } from '../util/bundleSha.js';
 import { readJsonCapped } from '../util/readCapped.js'; // v2.604: 엣지 응답 크기 상한
 import { strOf } from '../util/coercionTrap.js';
 import { reqTimeoutMs } from '../agent/envTimeout.js'; // v2.607 TIM2607-02: push 시한 정규화
@@ -53,8 +53,7 @@ export function netFailReason(msg) {
   return m;
 }
 
-const _shaCache = new WeakMap(); // 같은 번들 버퍼는 1회만 해시(수집기 수만큼 반복 해시 방지)
-function bundleSha(bytes) { let v = _shaCache.get(bytes); if (!v) { v = createHash('sha256').update(bytes).digest('hex'); _shaCache.set(bytes, v); } return v; }
+// 같은 번들 버퍼는 1회만 해시(수집기 수만큼 반복 해시 방지) — v2.901(점검 P2): 서명 판정(bundleSource)과 같은 캐시를 쓴다(util/bundleSha.js)
 export async function pushBundleToCollector(c, bytes, { restart = true, force = false, timeout = process.env.EDGE_PUSH_TIMEOUT_MS, manifest = null } = {}) {
   const url = `${String(c.url).replace(/\/+$/, '')}/api/collector/upgrade?restart=${restart}${force ? '&force=true' : ''}`;
   const manHeader = encodeManifestHeader(manifest); // 없거나 상한을 넘으면 null — 보내지 않는다(수신측이 '서명 없음' 으로 판정)

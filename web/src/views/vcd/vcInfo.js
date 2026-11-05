@@ -72,6 +72,60 @@ export function vcPermRows(items, { entityType = null, entity = null } = {}) {
     .slice().sort((a, b) => String(a.entityName || a.entity || '').localeCompare(String(b.entityName || b.entity || '')) || String(a.principal).localeCompare(String(b.principal)));
 }
 
+/**
+ * v2.901: 리소스 풀 설정 행 — 호스트의 클러스터(clusterRef = 풀 owner)로 고르고, 짝을 못 지으면(데모 · 옛 수집) 이 호스트 VM 의 풀 이름으로 고른다.
+ *   이름으로 고르면 다른 클러스터의 같은 이름 풀이 섞일 수 있다 — byName 으로 알려 화면이 그렇게 말한다.
+ */
+export function poolRowsForHost(items, host, poolNames = []) {
+  const list = (Array.isArray(items) ? items : []).filter((x) => x && typeof x === 'object');
+  const own = host?.clusterRef ? list.filter((x) => x.owner === host.clusterRef) : [];
+  if (own.length) return { rows: own, byName: false };
+  const names = new Set(poolNames);
+  return { rows: list.filter((x) => names.has(x.name)), byName: true };
+}
+/** 할당 값 문구 — limit -1 = 무제한 · 값이 없으면 '—'(단위를 붙이지 않는다). unit: 'MHz' | 'GB'(MB 를 GB 로). */
+export function allocText(v, unit) {
+  if (v == null || !Number.isFinite(v)) return '—';
+  if (v === -1) return '무제한';
+  return unit === 'GB' ? `${(Math.round((v / 1024) * 10) / 10).toLocaleString()} GB` : `${v.toLocaleString()} MHz`;
+}
+export const SHARE_LEVEL_TEXT = Object.freeze({ low: '낮음', normal: '보통', high: '높음', custom: '사용자 지정' });
+
+// ── v2.906: 팀 구성 문구(표준 스위치 hcfg · 분산 포트그룹 vcinfo dvpg 한 벌 — 서버 TEAMING_POLICIES 와 같은 키) ─────────────
+export const TEAMING_TEXT = Object.freeze({
+  loadbalance_srcid: '원래 가상 포트 기반', loadbalance_srcmac: '원본 MAC 해시 기반', loadbalance_ip: 'IP 해시 기반',
+  failover_explicit: '명시적 장애 조치 순서', loadbalance_loadbased: '물리 NIC 부하 기반',
+});
+export const teamingText = (p) => (p ? TEAMING_TEXT[p] || p : '—');
+/** 활성 / 대기 글자 — 팀 구성을 모르면 '—'. */
+export const uplinkOrderText = (t) => (t ? `${(t.active || []).join(' · ') || '—'} / ${(t.standby || []).join(' · ') || '없음'}` : '—');
+export const failbackText = (t) => (t?.failback === true ? '예' : t?.failback === false ? '아니요' : '—');
+/**
+ * 이 호스트가 붙은 분산 스위치(hcfg.net 의 kind 'dvs' 이름)의 포트그룹 — 업링크 포트그룹은 뺀다(팀 구성 대상이 아니다).
+ * 호스트 구성(hcfg.net)을 아직 읽지 않았으면 unknown(분산 스위치를 모른다). vDS 이름을 못 읽은 포트그룹 수는 noName(짝짓지 못함 — 지어내지 않는다).
+ */
+export function dvpgRowsForHost(items, host) {
+  const sws = host?.hcfg && typeof host.hcfg === 'object' ? host.hcfg.net?.switches : null;
+  if (!Array.isArray(sws)) return { rows: [], dvs: [], unknown: true, noName: 0 };
+  const dvs = [...new Set(sws.filter((w) => w && w.kind === 'dvs' && w.name).map((w) => w.name))];
+  const set = new Set(dvs);
+  const list = (Array.isArray(items) ? items : []).filter((x) => x && typeof x === 'object' && x.uplinkPg !== true);
+  return { rows: list.filter((x) => x.dvsName && set.has(x.dvsName)), dvs, unknown: false, noName: list.filter((x) => !x.dvsName).length };
+}
+/** 분산 포트그룹 VLAN — VLAN ID(0 = 없음) · 트렁크 범위 · PVLAN. 모르면 '—'. */
+export function vlanText(v) {
+  if (!v || typeof v !== 'object') return '—';
+  if (Array.isArray(v.trunk)) return v.trunk.length ? `트렁크 ${v.trunk.map(([a, b]) => (a === b ? `${a}` : `${a}-${b}`)).join(', ')}` : '트렁크';
+  if (Number.isInteger(v.pvlan)) return `PVLAN ${v.pvlan}`;
+  return Number.isInteger(v.id) ? (v.id === 0 ? '0(없음)' : String(v.id)) : '—';
+}
+/** LACP — Enhanced LACP 의 LAG(활성 업링크에 있을 때) · 옛 포트그룹 LACP · 안 씀 · 모름. */
+export function lacpText(l) {
+  if (!l || typeof l !== 'object' || l.enabled == null) return '—';
+  if (!l.enabled) return '안 씀';
+  return `${l.lag ? `LAG ${l.lag}` : '사용(포트그룹)'}${l.mode === 'active' ? ' · 능동' : l.mode === 'passive' ? ' · 수동' : ''}`;
+}
+
 /** 머리 문구 — 읽은 시각 · 갱신 주기(API 값). 주기를 화면에 박지 않는다. */
 export function vcInfoHeadText(d) {
   if (!d) return '';

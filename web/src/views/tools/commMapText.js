@@ -33,7 +33,7 @@ export const PUSH_LABEL = Object.freeze({ ok: '수신 중', stale: '낡음', rej
  * 사유 코드 → {title, fix}. ⚠ 서버 `REASON_SEVERITY` 와 키 집합 동일(테스트 대조). 문구에 ` — ` 3단 금지.
  */
 export const REASON_TEXT = Object.freeze({
-  'disabled': { title: '등록부에서 비활성으로 둔 엣지입니다.', fix: '수집이 필요하면 설정 › 수집 서버에서 활성으로 바꾸세요.' },
+  'disabled': { title: '등록부에서 비활성으로 둔 엣지입니다.', fix: '수집이 필요하면 설정 › 엣지·원격 › 수집 서버(원격)에서 활성으로 바꾸세요.' },
   'pull-fail': { title: '중앙이 이 엣지의 export 를 당기지 못하고 있습니다(연속 실패).', fix: '엣지 포탈이 떠 있는지, 중앙에서 그 주소·포트가 열려 있는지 확인하세요. 통신 점검 화면이 어느 단계에서 막혔는지 보여줍니다.' },
   'pull-auth': { title: '중앙이 보낸 수집 토큰을 엣지가 거부했습니다(401/403).', fix: '포탈 점검 › 토큰 점검에서 중앙 등록값과 엣지 저장값을 대조하세요. 다시 눌러도 같은 결과입니다.' },
   'pull-degraded': { title: '직전 pull 한 번이 실패했습니다(직전 데이터를 유지 중).', fix: '다음 주기에서 회복되면 정상으로 돌아옵니다. 두 번 연속 실패하면 장애로 바뀝니다.' },
@@ -123,7 +123,7 @@ export function resourceSummary(r, now = Date.now()) {
 export function headerNote(data, now = Date.now()) {
   if (!data) return { tone: 'muted', text: '' };
   const c = data.counts || {}; const by = c.byState || {};
-  if (!c.edges) return { tone: 'muted', text: '등록된 수집 서버(엣지)가 없습니다. 설정 › 수집 서버에서 엣지를 등록하면 이 지도에 나타납니다. 중앙이 직접 수집하는 자원은 허브 옆에 표시됩니다.' };
+  if (!c.edges) return { tone: 'muted', text: '등록된 수집 서버(엣지)가 없습니다. 설정 › 엣지·원격 › 수집 서버(원격)에서 엣지를 등록하면 이 지도에 나타납니다. 중앙이 직접 수집하는 자원은 허브 옆에 표시됩니다.' };
   const bits = [];
   if (by.fail) bits.push(`**장애 ${by.fail}곳**`);
   if (by.warn) bits.push(`주의 ${by.warn}곳`);

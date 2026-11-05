@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>보기 메뉴 · 마우스 오버 상자</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=Noto+Sans+KR:wght@400;500;700&family=JetBrains+Mono:wght@400;500;600&display=swap">
+<style>
+body{margin:0;background:#0a0e17;color:#e6edf6;font-family:"Inter","Noto Sans KR","Apple SD Gothic Neo",sans-serif;font-size:13px;line-height:1.45}
+a{color:#7dd3fc}a:hover{color:#bae6fd}
+.mono{font-family:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,monospace}
+.card{background:#141b2d;border:1px solid #1f2a40;border-radius:14px}
+.seg{display:inline-flex;border:1px solid #243049;border-radius:8px;overflow:hidden;flex-wrap:wrap}
+.seg button{height:30px;padding:0 11px;border:0;border-left:1px solid #243049;background:transparent;color:#8b9bb4;font:inherit;font-size:12px;cursor:pointer;white-space:nowrap}
+.seg button:first-child{border-left:0}
+.seg button.on{background:#1a2236;color:#e6edf6}
+.note{font-size:12px;color:#5d6b85;overflow-wrap:anywhere}
+.lbl{font-size:11.5px;letter-spacing:.04em;color:#5d6b85;font-family:"JetBrains Mono",ui-monospace,monospace}
+.tip{position:relative;width:260px;padding:8px 10px;border-radius:8px;border:1px solid #243049;background:rgba(11,18,32,.94);box-shadow:0 6px 18px rgba(0,0,0,.35);font-size:12px;line-height:1.55}
+.tip .h{font-family:"JetBrains Mono",ui-monospace,monospace;color:#e6edf6;font-weight:600;margin-bottom:2px;white-space:nowrap}
+.tip .l{display:flex;gap:6px;align-items:baseline;font-variant-numeric:tabular-nums}
+.tip .d{border-top:1px dashed #243049;margin:5px 0 4px}
+.row{display:flex;flex-wrap:wrap;align-items:center;gap:12px}
+</style>
+</helmet>
+<div style="width:880px;height:560px;box-sizing:border-box;padding:28px 32px;display:flex;flex-direction:column;gap:22px">
+
+  <div style="display:flex;flex-direction:column;gap:10px">
+    <div class="lbl">보기 메뉴 — 차트 제목 줄 · 세그먼트 3칸 · 고른 값은 이 브라우저에 기억</div>
+    <div style="display:grid;grid-template-columns:repeat(3, minmax(0, 1fr));gap:14px">
+      <div class="card" style="padding:12px 14px;display:flex;flex-direction:column;gap:8px">
+        <div class="row"><h3 style="margin:0;font-size:15px;font-weight:600">24시간 추이</h3><div class="seg"><button type="button" class="on">전송 속도</button><button type="button">전송 속도 + Ping</button><button type="button">Ping만</button></div></div>
+        <div class="note">기본값(처음 열 때) — 지금 화면과 같음 · Ping 조회를 하지 않음</div>
+      </div>
+      <div class="card" style="padding:12px 14px;display:flex;flex-direction:column;gap:8px;border-color:#3b82f6">
+        <div class="row"><h3 style="margin:0;font-size:15px;font-weight:600">24시간 추이</h3><div class="seg"><button type="button">전송 속도</button><button type="button" class="on">전송 속도 + Ping</button><button type="button">Ping만</button></div></div>
+        <div class="note">속도 차트 아래 Ping 패널(높이 170) · 시간 축·오버 세로선 공유</div>
+      </div>
+      <div class="card" style="padding:12px 14px;display:flex;flex-direction:column;gap:8px">
+        <div class="row"><h3 style="margin:0;font-size:15px;font-weight:600">24시간 추이</h3><div class="seg"><button type="button">전송 속도</button><button type="button">전송 속도 + Ping</button><button type="button" class="on">Ping만</button></div></div>
+        <div class="note">속도 차트 숨김 · Ping 패널 높이 280 · 통계 칸·측정 기록은 그대로</div>
+      </div>
+    </div>
+  </div>
+
+  <div style="display:flex;flex-direction:column;gap:10px">
+    <div class="lbl">마우스 오버 상자 — 한 상자에 같은 시각의 ↓ · ↑ · Ping (Ping 은 그 6분 칸)</div>
+    <div style="display:grid;grid-template-columns:repeat(3, minmax(0, 1fr));gap:14px;align-items:start">
+      <div style="display:flex;flex-direction:column;gap:6px">
+        <div class="tip" role="status">
+          <div class="h">11-04 10:41</div>
+          <div class="l"><span style="color:#67e8f9">↓</span><span>2.25 Mbps · 10.0MB · 지연 484ms</span></div>
+          <div class="l"><span style="color:#fbbf24">↑</span><span>8.82 Mbps · 10.0MB · 지연 263ms</span></div>
+          <div class="d"></div>
+          <div class="l"><span style="color:#a78bfa">●</span><span>Ping 247ms 평균 · 243~250 · 손실 0% (6회)</span></div>
+        </div>
+        <div class="note">정상 — 전송 회차와 같은 시각의 Ping 칸</div>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:6px">
+        <div class="tip" role="status">
+          <div class="h">11-05 02:52</div>
+          <div class="l"><span style="color:#67e8f9">↓</span><span>2.47 Mbps · 10.0MB · 지연 506ms</span></div>
+          <div class="l"><span style="color:#fca5a5">↑</span><span>실패 — 시한 초과(60초 안에 3.2MB / 10.0MB)</span></div>
+          <div class="d"></div>
+          <div class="l"><span style="color:#a78bfa">●</span><span>Ping 523ms 평균 · 426~570 · 손실 17% (1/6)</span></div>
+        </div>
+        <div class="note">같은 시각에 ↑ 실패와 Ping 급등·손실이 겹침 — 회선 문제로 읽을 수 있음</div>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:6px">
+        <div class="tip" role="status">
+          <div class="h">11-04 15:47</div>
+          <div class="l"><span style="color:#8b9bb4">↓</span><span style="color:#5d6b85">이 시각엔 전송 측정 없음</span></div>
+          <div class="l"><span style="color:#8b9bb4">↑</span><span style="color:#5d6b85">이 시각엔 전송 측정 없음</span></div>
+          <div class="d"></div>
+          <div class="l"><span style="color:#a78bfa">●</span><span>Ping 248ms 평균 · 244~252 · 손실 33% (2/6)</span></div>
+        </div>
+        <div class="note">전송 회차 사이(30분)의 Ping 칸 — 속도 줄은 '측정 없음' 으로 비움(0 으로 쓰지 않음)</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="note" style="margin-top:auto">Ping 줄의 색·점은 보라(#a78bfa) 하나 — ↓ 청록·↑ 호박과 색상·명도가 다름 · 손실은 빨강 눈금(값이 없으므로 선으로 잇지 않음) · 숫자가 없으면 단위 없이 '—'</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":880,"height":560}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

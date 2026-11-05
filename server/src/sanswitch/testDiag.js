@@ -80,7 +80,7 @@ export function classifyFailure(message, phase = '', { agentDelegated = false, r
     return { phase: phase || 'timeout', hint: `전체 제한 시간 안에 끝나지 않았습니다. 추적 로그에서 **마지막으로 찍힌 단계**가 멈춘 곳입니다 — TCP 연결 단계에서 멈췄다면 방화벽/경로, 인증 뒤에서 멈췄다면 명령 응답 지연입니다.${edgeNote}` };
   }
   if (/엣지가 .*가져가지|엣지 응답 없음|pull/.test(m)) {
-    return { phase: 'edge', hint: '엣지가 테스트 요청을 가져가지 않았습니다. 엣지 포탈이 켜져 있고 중앙과 통신(설정 pull)이 되는지 — 설정 › 수집 서버 › 엣지 상태에서 마지막 pull 시각을 확인하세요.' };
+    return { phase: 'edge', hint: '엣지가 테스트 요청을 가져가지 않았습니다. 엣지 포탈이 켜져 있고 중앙과 통신(설정 pull)이 되는지 — 설정 › 엣지·원격 › 수집 서버(원격) › 엣지 상태에서 마지막 pull 시각을 확인하세요.' };
   }
   return { phase: phase || 'unknown', hint: '분류되지 않은 오류입니다. 추적 로그의 오류 원문과 마지막 단계를 확인하세요. "자세히 테스트"를 켜면 SSH 프로토콜 단계별 로그(ssh -vvv 상당)가 함께 남습니다.' };
 }

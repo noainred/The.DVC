@@ -127,7 +127,7 @@ export function diffTargets(targets = [], collectors = []) {
       row.action = 'add'; row.canAdd = true;
       // S-09: 평문 HTTP 대상은 등록부가 승인된 예외만 받는다 — 추가 전에 그 사실을 말한다(추가는 막지 않는다 — 허용 목록·예외가 있을 수 있다).
       if (row.transport.blocked) {
-        row.transportNote = `수집 URL ${url} 은 평문 HTTP 라 그대로는 추가되지 않습니다 — 엣지에 TLS(TLS_CERT_FILE·TLS_KEY_FILE)를 켜고 광고 URL(advertiseUrl)을 https:// 로 지정하거나, 설정 › 수집 서버에서 사유와 함께 평문 HTTP 예외로 등록하거나, 중앙 portal.env 의 COLLECTOR_HTTP_ALLOW 에 넣으세요.`;
+        row.transportNote = `수집 URL ${url} 은 평문 HTTP 라 그대로는 추가되지 않습니다 — 엣지에 TLS(TLS_CERT_FILE·TLS_KEY_FILE)를 켜고 광고 URL(advertiseUrl)을 https:// 로 지정하거나, 설정 › 엣지·원격 › 수집 서버(원격)에서 사유와 함께 평문 HTTP 예외로 등록하거나, 중앙 portal.env 의 COLLECTOR_HTTP_ALLOW 에 넣으세요.`;
       }
     } else if (key && urlKey(col.url) !== key) {
       row.status = 'url-mismatch';

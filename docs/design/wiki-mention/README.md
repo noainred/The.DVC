@@ -1,6 +1,6 @@
 # 설계: 위키 댓글 @멘션 자동완성 · ‘계정/이름’ 표시 · 언급한 사람에게 이슈 등록 + 메일
 
-작성 2026-11-05 (v2.897.0 · main 4f96dbac 기준) · 상태 **시안 — 컨펌 대기** · 시안 캔버스: https://claude.ai/artifact/Y2JKKKq4ce3pDxQEXJmtKb
+작성 2026-11-05 (v2.897.0 · main 4f96dbac 기준) · 상태 **구현 v2.907.0**(사용자 '모두 적용해줘' — 결정 5개는 추천안 그대로) · 시안 캔버스: https://claude.ai/artifact/Y2JKKKq4ce3pDxQEXJmtKb
 (아트보드 7장 — 이 폴더의 `*.dc.html` 이 같은 내용의 레퍼런스. 사람 이름 · 계정 · 이슈 키 · 문서는 전부 가상이고 색 · 글자는 `web/src/styles.css` `:root` 토큰 그대로.
 계정의 ‘Design System’ 아티팩트는 앞 시안들(`docs/design/wiki-issues`)과 같이 내용이 비어 있어 쓰지 않았다.)
 
@@ -87,4 +87,15 @@
 
 ## 7. 구현 기록
 
-(컨펌 뒤 채운다)
+- **v2.907.0** — 사용자 '모두 적용해줘'(기능 10 · 버그 20 과 함께 · 검증 '표준'). §5 의 결정 5개는 추천안 그대로(체크 기본 켬 · 요청 권한은 '요청' 으로 · 후보는 A3-02 + 참여자 ·
+  '@계정/이름' 글자 그대로 · 이슈 댓글의 관찰자 추가 넣음).
+  - 서버: `issues/mentionables.js`(후보 — 순수) · `issues/fromComment.js`(댓글 → 이슈 판정 · 본문 조립 — 순수) · `GET /wiki/pages/:id/mentionables` · `GET /issues/:key/mentionables` ·
+    `POST /wiki/pages/:id/comments`(`issue` 칸) · `POST /wiki/pages/:id/comments/:cid/issue`(뒤늦은 등록 · 다시 등록) · `POST /issues/:key/comments`(`watchMentions`) ·
+    이슈 `origin.kind = 'wiki-comment'`(pageId · commentId) · 위키 댓글 `issueKey`(관련 이슈 색인). 회귀 `server/test/wikiMention2907.test.js`.
+  - 웹: `components/MentionBox.jsx`(위키 · 이슈 댓글 공용) · `components/mentionText.js`(+ 테스트) · `Wiki.jsx` 댓글 상자 · 등록 줄 · 결과 안내 · `MdView` 칩 분리 · `Issues.jsx` 출처 배지('위키').
+  - **정정(시안과 다른 것)**:
+    ① 시안 ⑥-2 는 메일 주소가 없는 사람이 '포탈 안 알림' 을 받는다고 적었는데, 포탈에 알림함이 없습니다(그것은 기능 추천 9번 — 따로 만든다). 결과 문구는 '이슈는 포탈 내 작업에서 보입니다' 로 고쳤습니다.
+    ② 이름 없이 친 '@kim.lee' 에 서버가 아는 이름을 붙여 보여 주는 것(⑥-8)은 넣지 않았습니다. 그리는 쪽(MdView)이 계정 목록을 모르기 때문입니다. 글자 그대로 '@kim.lee' 로 보입니다.
+    ③ 반쪽 저장 없음(②)은 '저장 전에 거를 수 있는 것' 까지입니다. 담당자 · 범위 · 유형 · 우선순위 · 제목 · 권한을 댓글 저장 전에 거릅니다(400 이면 댓글도 저장하지 않습니다).
+       그 뒤 이슈 저장소가 꽉 찬 경우 같은 드문 실패는 댓글을 남기고 `issueError` 로 밝힙니다. 댓글의 '이슈로 등록' 으로 다시 할 수 있습니다.
+    ④ 메일 줄에 이슈 · 댓글 링크를 덧붙이는 것(§4.4)은 넣지 않았습니다. 기존 묶음 문구만 씁니다(언급 줄 + 할당 줄이 한 통으로 가는 것은 테스트로 확인했습니다).

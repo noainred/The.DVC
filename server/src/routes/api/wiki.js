@@ -15,18 +15,26 @@ import { isDemoGuest, isAdminDetailUser } from '../../auth/demoGuest.js';
 import { userHasPermission } from '../../auth/permissions.js';
 import { logAudit } from '../../audit.js';
 import { clientIp } from '../../util/rateLimit.js';
-import { scopedVcenterIds, writeScopedVcenterIds } from '../../auth/scope.js';
+import { scopedVcenterIds, writeScopedVcenterIds, isFullReadWriteScope } from '../../auth/scope.js';
 import { store } from '../../store.js';
 import {
   listSpaces, spaceView, updateSpace, tree, getPage, createPage, updatePage, revertPage, versionBody, diffVersions, deletePage,
   addComment, deleteComment, setWatch, searchPages, backrefs, homeOf, toggleTask, wikiSeq, waitWikiPersist, wikiPersist, PERSIST_WAIT_MS,
-  TEMPLATES, STATUSES, LIMITS, PUB, metasFor, resolveComment,
+  TEMPLATES, STATUSES, LIMITS, PUB, metasFor, resolveComment, getComment, pageParticipants, setCommentIssue,
+  listTrash, restorePage, purgeTrashItem, purgeExpiredTrash, TRASH_DAYS, backlinks, brokenLinks, movePage, editComment,
 } from '../../wiki/store.js';
 import { listCustomTemplates, getCustomTemplate, saveCustomTemplate, deleteCustomTemplate, customTemplatesLoadError, TEMPLATE_LIMITS } from '../../wiki/templates.js';
-import { removeOwner as removeAttachments } from '../../attach/store.js';
+import { removeOwnerAfterPersist } from '../../attach/store.js';
 import { writeScopedVcenterIds as writeScopeOf } from '../../auth/scope.js';
 import { fullScopeOnlyWith } from '../admin/shared.js';
 import { recordView, setFavorite, userLists, isFavorite, viewCounts, forgetPage, USER_LIMITS } from '../../wiki/userState.js';
+import { listUsers } from '../../auth/auth.js';
+import { createIssue, findByOrigin, knownNames, mentionsOf, addLink, issueStats, issuesSeq, waitIssuesPersist } from '../../issues/store.js';
+import { issueViewers } from '../../issues/visibility.js';
+import { resolveMentions } from '../../issues/notify.js';
+import { loadIssueSettings, suggestAssignee, emailOf } from '../../issues/settings.js';
+import { mentionCandidates } from '../../issues/mentionables.js';
+import { planCommentIssue, vcenterOfSpace } from '../../issues/fromComment.js';
 
 const writers = requireRole('admin', 'operator');
 // v2.889 관리자 템플릿 — 전 법인 공용(모든 스페이스의 '새 문서') · 관리자 + 전체 범위 + 쓰기 범위 무제한
@@ -42,7 +50,8 @@ const userOf = (req) => req.user?.username || 'anonymous';
 const isAdmin = (req) => isAdminDetailUser(req.user);
 const canWrite = (req) => ['admin', 'operator'].includes(req.user?.role) && !isDemoGuest(req.user);
 const canComment = (req) => canWrite(req) || (!!req.user && !isDemoGuest(req.user) && userHasPermission(req.user, 'issues.request'));
-const isMod = (req) => isAdmin(req) && !scopedVcenterIds(req.user, store.get());
+// v2.904 점검 P-1: 조회와 쓰기 둘 다 무제한일 때만(쓰기 범위 관리자는 남의 댓글을 지우거나 해결하지 못한다)
+const isMod = (req) => isAdmin(req) && isFullReadWriteScope(req.user, store.get());
 /** 댓글 · 지켜보기 문지기 — 쓰기 역할 또는 요청 권한. 판정 종류를 archScan 이 읽게 태그를 단다. */
 const commenters = (req, res, next) => {
   if (canComment(req)) return next();
@@ -68,6 +77,51 @@ async function persistView(req) {
     if (h.lastWriteError) out.error = { code: h.lastWriteError.code, phase: h.lastWriteError.phase, message: h.lastWriteError.message };
   }
   return out;
+}
+/* ───── v2.907 댓글 @멘션 자동완성 · 댓글 → 이슈(시안 docs/design/wiki-mention · 사용자 '모두 적용' — 추천안 5개 그대로) ───── */
+/** 댓글 글 → 언급한 실제 이름(알림과 같은 해석 — 로컬 계정 · 메일 주소 표 · 이 문서 참여자 중 가장 긴 접두). */
+function mentionedIn(body, participants) {
+  const viewers = issueViewers();
+  const settings = loadIssueSettings();
+  const known = new Set([...viewers.localNames, ...(settings.notify?.people || []).map((p) => p.username), ...participants]);
+  return { names: resolveMentions(mentionsOf(body), known), viewers, settings };
+}
+const fullWriter = (req) => canWrite(req) && isFullReadWriteScope(req.user, store.get());
+/** 메일이 갈지 — 알림이 켜져 있고(메일 · 위키/할당 종류) 주소 표에 있는 사람. 주소 유무 이름은 전체 범위 쓰기 계정에게만. */
+function mailOutlook(req, settings, names) {
+  const n = settings.notify || {};
+  const on = !!(n.enabled && n.mail !== false);
+  const out = { notifyOn: on };
+  if (fullWriter(req)) out.noEmail = names.filter((u) => !emailOf(settings, u));
+  return out;
+}
+/**
+ * 댓글 하나 → 이슈 1건(planCommentIssue 가 거르고 createIssue 가 저장). 같은 댓글로 만든 열린 이슈가 있으면 만들지 않고 그 키를 돌려준다 —
+ * 그 이슈가 완료됐으면 새로 만들고 '관련' 으로 잇는다.
+ */
+function issueFromComment(req, pageId, cid, want) {
+  const access = accessOf(req);
+  const { page, comment } = getComment(pageId, cid, access);
+  const sameOrigin = (o) => o.kind === 'wiki-comment' && o.pageId === page.id && o.commentId === comment.id;
+  const open = findByOrigin(sameOrigin);
+  if (open.length) return { key: open[0].key, existing: true };
+  const prev = findByOrigin(sameOrigin, { openOnly: false }).sort((a, b) => b.createdAt - a.createdAt)[0] || null;
+  const { names, viewers, settings } = mentionedIn(comment.body, pageParticipants(pageId, access).names);
+  const plan = planCommentIssue({ page, comment, req: want || {}, mentioned: names, canWrite: canWrite(req), canSee: viewers.canSee });
+  const auto = plan.requestOnly && settings.autoAssign?.enabled ? suggestAssignee({ component: '', vcenterId: plan.body.vcenterId }, settings, issueStats().byAssignee, viewers.canSee) : null;
+  const x = createIssue(plan.body, userOf(req), { access, known: knownSpaces(), auto, requestOnly: plan.requestOnly, origin: plan.origin });
+  if (prev) { try { addLink(x.key, { type: 'relates', key: prev.key }, userOf(req), { access }); } catch { /* 옛 이슈를 볼 수 없거나 연결 상한 — 잇지 않는다 */ } }
+  setCommentIssue(pageId, cid, x.key, { access });
+  audit(req, plan.requestOnly ? 'issue.request' : 'issue.create', x.key, `위키 댓글 ${pageId}/${cid}${x.assignee ? ` → ${x.assignee}` : ''}`);
+  return { key: x.key, assignee: x.assignee || '', watchers: plan.watchers, skipped: plan.skipped, requestOnly: plan.requestOnly, relatedTo: prev?.key || '', ...mailOutlook(req, settings, [x.assignee, ...plan.watchers].filter(Boolean)) };
+}
+/** v2.907 기한이 지난 휴지통 항목을 영구히 지우고 그 첨부 · 즐겨찾기를 정리한다(목록 · 지우기 때 — 폴링하지 않는다). */
+function dropExpiredTrash() {
+  let gone = [];
+  try { gone = purgeExpiredTrash(); } catch (e) { console.warn(`[wiki] 휴지통 정리 실패: ${String(e?.message || e).slice(0, 160)}`); return; }
+  if (!gone.length) return;
+  const seq = wikiSeq();
+  for (const id of gone) { forgetPage(id); removeOwnerAfterPersist('wiki', id, { seq, state: 'pending', wait: waitWikiPersist }); }
 }
 function fail(res, e, next) {
   if (e && Number.isInteger(e.status)) return res.status(e.status).json({ ok: false, reason: e.message, ...(e.field ? { field: e.field } : {}), ...(e.extra && typeof e.extra === 'object' ? e.extra : {}) });
@@ -97,6 +151,8 @@ export function registerWiki(api) {
   // v2.889 관리자 템플릿 목록(본문 포함 — 관리 화면) · 만들기 · 고치기 · 지우기
   api.get('/wiki/templates', adminOnly, templateFleetOnly, (req, res) => {
     res.set('Cache-Control', 'no-store');
+    // v2.904 점검 P-3: 관리 목록(본문 · 만든 사람)은 관리자 판본 — 데모 계정은 형제 설정 라우트(/issues/settings · /attach/admin/usage)와 같이 403
+    if (!isAdmin(req)) return res.status(403).json({ ok: false, error: 'forbidden', reason: '템플릿 관리는 관리자만 봅니다' });
     res.json({ ok: true, items: listCustomTemplates(), loadError: customTemplatesLoadError(), limits: TEMPLATE_LIMITS });
   });
   api.post('/wiki/templates', adminOnly, templateFleetOnly, templateFullWrite, (req, res, next) => {
@@ -176,9 +232,9 @@ export function registerWiki(api) {
     if (!ID_RE.test(req.params.id)) return badId(res);
     if (!canWrite(req)) return res.status(403).json({ ok: false, reason: '데모 계정은 문서를 고칠 수 없습니다' });
     try {
-      const p = updatePage(req.params.id, req.body || {}, userOf(req), { access: accessOf(req) });
-      audit(req, 'wiki.save', p.id, `v${p.version}`);
-      res.json({ ok: true, page: p, persist: await persistView(req) });
+      const { linkFix, ...p } = updatePage(req.params.id, req.body || {}, userOf(req), { access: accessOf(req) });
+      audit(req, 'wiki.save', p.id, `v${p.version}${linkFix?.fixed ? ` · 링크 갱신 ${linkFix.fixed}` : ''}`);
+      res.json({ ok: true, page: p, ...(linkFix ? { linkFix } : {}), persist: await persistView(req) });
     } catch (e) { fail(res, e, next); }
   });
   api.post('/wiki/pages/:id/revert', writers, async (req, res, next) => {
@@ -211,18 +267,113 @@ export function registerWiki(api) {
     if (!ID_RE.test(req.params.id)) return badId(res);
     if (!canWrite(req)) return res.status(403).json({ ok: false, reason: '데모 계정은 문서를 지울 수 없습니다' });
     try {
+      // v2.907 휴지통 — 지우기는 휴지통으로(TRASH_DAYS 동안 되살릴 수 있다). 첨부 · 즐겨찾기는 영구 삭제 때 정리한다.
       const r = deletePage(req.params.id, userOf(req), { access: accessOf(req), isMod: isMod(req) });
-      audit(req, 'wiki.delete', r.id);
-      forgetPage(r.id); // v2.888 그 문서의 조회 수 · 즐겨찾기 · 최근 기록
-      try { removeAttachments('wiki', r.id); } catch (e) { console.warn(`[wiki] ${r.id} 첨부 정리 실패: ${String(e?.message || e).slice(0, 160)}`); } // v2.889
+      audit(req, 'wiki.delete', r.id, '휴지통으로');
+      dropExpiredTrash();
       res.json({ ok: true, ...r, persist: await persistView(req) });
+    } catch (e) { fail(res, e, next); }
+  });
+  /* ── v2.907 휴지통(기능 추천 2) · 링크(3) · 스페이스 이동(4) · 댓글 고치기(1) ── */
+  api.get('/wiki/trash', writers, (req, res, next) => {
+    res.set('Cache-Control', 'no-store');
+    try { dropExpiredTrash(); res.json({ ok: true, items: listTrash({ access: accessOf(req), spaceId: str(req.query.space) }), days: TRASH_DAYS, isMod: isMod(req), me: userOf(req) }); } catch (e) { fail(res, e, next); }
+  });
+  api.post('/wiki/trash/:id/restore', writers, async (req, res, next) => {
+    if (!ID_RE.test(req.params.id)) return badId(res);
+    if (!canWrite(req)) return res.status(403).json({ ok: false, reason: '데모 계정은 되살릴 수 없습니다' });
+    try {
+      const page = restorePage(req.params.id, userOf(req), { access: accessOf(req) });
+      audit(req, 'wiki.restore', page.id, page.title);
+      res.json({ ok: true, page, persist: await persistView(req) });
+    } catch (e) { fail(res, e, next); }
+  });
+  api.delete('/wiki/trash/:id', writers, async (req, res, next) => {
+    if (!ID_RE.test(req.params.id)) return badId(res);
+    if (!canWrite(req)) return res.status(403).json({ ok: false, reason: '데모 계정은 지울 수 없습니다' });
+    try {
+      const r = purgeTrashItem(req.params.id, userOf(req), { access: accessOf(req), isMod: isMod(req) });
+      const seq = wikiSeq();
+      audit(req, 'wiki.purge', r.id, '영구 삭제');
+      forgetPage(r.id); // v2.888 그 문서의 조회 수 · 즐겨찾기 · 최근 기록
+      const persist = await persistView(req);
+      // v2.904 점검 S-5: 첨부 본체는 삭제가 디스크에 닿은 뒤에 지운다
+      removeOwnerAfterPersist('wiki', r.id, { seq, state: persist.state, wait: waitWikiPersist });
+      res.json({ ok: true, ...r, persist });
+    } catch (e) { fail(res, e, next); }
+  });
+  api.get('/wiki/pages/:id/backlinks', (req, res, next) => {
+    if (!ID_RE.test(req.params.id)) return badId(res);
+    try { res.json({ ok: true, items: backlinks(req.params.id, accessOf(req)) }); } catch (e) { fail(res, e, next); }
+  });
+  api.get('/wiki/broken-links', (req, res, next) => {
+    res.set('Cache-Control', 'no-store');
+    try { res.json({ ok: true, ...brokenLinks({ access: accessOf(req), spaceId: str(req.query.space) }) }); } catch (e) { fail(res, e, next); }
+  });
+  api.post('/wiki/pages/:id/move', writers, async (req, res, next) => {
+    if (!ID_RE.test(req.params.id)) return badId(res);
+    if (!canWrite(req)) return res.status(403).json({ ok: false, reason: '데모 계정은 옮길 수 없습니다' });
+    try {
+      const r = movePage(req.params.id, str(req.body?.spaceId), userOf(req), { access: accessOf(req), known: knownSpaces() });
+      audit(req, 'wiki.move', r.id, `${r.from} → ${r.spaceId} · 문서 ${r.moved}개`);
+      res.json({ ok: true, ...r, persist: await persistView(req) });
+    } catch (e) { fail(res, e, next); }
+  });
+  api.put('/wiki/pages/:id/comments/:cid', commenters, async (req, res, next) => {
+    if (!ID_RE.test(req.params.id)) return badId(res);
+    try {
+      const cm = editComment(req.params.id, String(req.params.cid).slice(0, 40), req.body || {}, userOf(req), { access: accessOf(req) });
+      res.json({ ok: true, comment: cm, persist: await persistView(req) });
+    } catch (e) { fail(res, e, next); }
+  });
+  // v2.907 멘션 후보 — 서버가 범위로 거른다(issues/mentionables.js). 댓글을 쓸 수 있는 사람만.
+  api.get('/wiki/pages/:id/mentionables', commenters, (req, res, next) => {
+    if (!ID_RE.test(req.params.id)) return badId(res);
+    res.set('Cache-Control', 'no-store');
+    try {
+      const access = accessOf(req);
+      const { spaceId, names } = pageParticipants(req.params.id, access);
+      const full = fullWriter(req);
+      const settings = loadIssueSettings();
+      const viewers = issueViewers();
+      const vc = vcenterOfSpace(spaceId);
+      let users = [];
+      try { users = listUsers(); } catch { users = []; }
+      const r = mentionCandidates({ q: str(req.query.q), me: userOf(req), meName: req.user?.name || '', full, participants: names, knownNames: knownNames(access), users, people: full ? settings.notify?.people || [] : [], canSee: (n) => viewers.canSee(n, vc) });
+      res.json({ ok: true, ...r, full, notifyOn: !!(settings.notify?.enabled && settings.notify?.mail !== false), canIssue: canWrite(req), canRequest: !canWrite(req) && canComment(req) });
     } catch (e) { fail(res, e, next); }
   });
   api.post('/wiki/pages/:id/comments', commenters, async (req, res, next) => {
     if (!ID_RE.test(req.params.id)) return badId(res);
     try {
-      const cm = addComment(req.params.id, req.body || {}, userOf(req), { access: accessOf(req) });
-      res.json({ ok: true, comment: cm, persist: await persistView(req) });
+      const access = accessOf(req);
+      const want = req.body?.issue && typeof req.body.issue === 'object' && !Array.isArray(req.body.issue) ? req.body.issue : null;
+      // v2.907 댓글 → 이슈: 저장 전에 거를 수 있는 것(담당자 = 언급한 사람 · 그 법인을 볼 수 있는가 · 유형 · 우선순위 · 제목 · 권한)을 먼저 — 400 이면 댓글도 저장하지 않는다
+      if (want) {
+        const pp = pageParticipants(req.params.id, access);
+        const { names, viewers } = mentionedIn(str(req.body?.body), pp.names);
+        planCommentIssue({ page: { id: req.params.id, title: '', spaceId: pp.spaceId }, comment: { id: '0', body: str(req.body?.body), author: userOf(req) }, req: want, mentioned: names, canWrite: canWrite(req), canSee: viewers.canSee });
+      }
+      const cm = addComment(req.params.id, req.body || {}, userOf(req), { access });
+      let issue = null; let issueError = '';
+      if (want) {
+        try { issue = issueFromComment(req, req.params.id, cm.id, want); } catch (e) { issueError = String(e?.message || e).slice(0, 300); }
+      }
+      const persist = await persistView(req);
+      const issuePersist = issue && !issue.existing ? (await waitIssuesPersist(issuesSeq(), { maxMs: PERSIST_WAIT_MS })).state : undefined;
+      res.json({ ok: true, comment: { ...cm, ...(issue?.key ? { issueKey: issue.key } : {}) }, ...(want ? { issue, issueError } : {}), persist, ...(issuePersist ? { issuePersist } : {}) });
+    } catch (e) { fail(res, e, next); }
+  });
+  // v2.907 댓글을 뒤늦게 이슈로(체크를 끄고 단 댓글 · 완료된 이슈를 다시) — 댓글을 쓴 사람 · 운영자/관리자. 같은 댓글의 열린 이슈가 있으면 그 키.
+  api.post('/wiki/pages/:id/comments/:cid/issue', commenters, async (req, res, next) => {
+    if (!ID_RE.test(req.params.id)) return badId(res);
+    try {
+      const cid = String(req.params.cid).slice(0, 40);
+      const { comment } = getComment(req.params.id, cid, accessOf(req));
+      if (!canWrite(req) && comment.author !== userOf(req)) return res.status(403).json({ ok: false, reason: '이 댓글을 쓴 사람이나 운영자 · 관리자만 이슈로 등록합니다' });
+      const want = req.body && typeof req.body === 'object' ? req.body : {};
+      const issue = issueFromComment(req, req.params.id, cid, want);
+      res.json({ ok: true, issue, persist: await persistView(req) });
     } catch (e) { fail(res, e, next); }
   });
   // v2.889 인라인 댓글 해결 표시 — 문지기는 댓글과 같고, 쓴 사람 · 고칠 수 있는 사람 · 전체 범위 관리자만(저장소가 판정)

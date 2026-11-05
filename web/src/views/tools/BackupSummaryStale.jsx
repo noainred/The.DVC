@@ -7,7 +7,7 @@
  *   한쪽(Veeam·Bareos)을 모르는 VM 은 '모름' 으로 따로 센다(미달로 단정하지 않는다). 행은 서버 상한까지만 오고 수는 전부 센다(CSV 는 전부).
  */
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { fetchJson, downloadFile, canCsv, toolAllowed } from '../../api.js';
+import { fetchJson, downloadFile, canCsv, adminToolAllowed } from '../../api.js';
 import { STable } from '../../components/STable.jsx';
 import Select from '../../components/Select.jsx';
 import { fmtNum, staleReason, STALE_UNITS, loadStaleOpts, saveStaleOpts, lastOkText, agoText, folderTail, methodOf, veeamCell, bareosCell } from './backupViewText.js';
@@ -80,7 +80,7 @@ export default function BackupSummaryStale({ scope, rows, sel, onPick, onOpenDet
   const qUnit = (STALE_UNITS.find(([k]) => k === (q?.unit || o.unit)) || ['', '일'])[1];
   const sites = Array.isArray(rows) ? rows : [];
   const selIds = sel?.ids || new Set();
-  const canRun = toolAllowed('backup-run'); const canBareos = toolAllowed('bareos-backup');
+  const canRun = adminToolAllowed('backup-run'); const canBareos = adminToolAllowed('bareos-backup');   // v2.901(점검 W1): 관리자 전용 도구
   const doAction = (x, a) => {
     if (a.key === 'veeam-run') { saveHandoff(x.vc, [x.vm.id]); window.location.hash = '#/tools/backup-run'; return; }
     if (a.key === 'bareos-target') { saveBareosHandoff(x.vc, [x.vm.id]); window.location.hash = '#/tools/bareos-backup/targets'; return; }

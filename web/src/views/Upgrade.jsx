@@ -214,7 +214,7 @@ function EdgeSyncCard({ status, busy, onSync, msg }) {
           {busy === 'edge-sync' ? '동기화 중…' : '지금 동기화'}
         </button>
         <span className="muted" style={{ fontSize: 11.5, whiteSpace: 'normal' }}>
-          수동으로 전부 맞추려면 설정 › 수집 서버 화면의 ‘모두 업그레이드’ 를 누르세요. 엣지별 push 결과는 그 화면의 버전 칸에 남습니다.
+          수동으로 전부 맞추려면 설정 › 엣지·원격 › 수집 서버(원격) 화면의 ‘모두 업그레이드’ 를 누르세요. 엣지별 push 결과는 그 화면의 버전 칸에 남습니다.
         </span>
       </div>
       {syncMsg && (

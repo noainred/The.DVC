@@ -8,6 +8,8 @@
 //   - 권한 목록(사용자 · 그룹 이름)은 관리자 판본에서만 응답에 싣는다(라우트 — isAdminDetailUser). 이 모듈은 가리지 않는다.
 // 정규식은 전부 '[^<]*'(다음 '<' 에서 멈춘다) 또는 길이 상한이 있는 반복이고, 입력 길이를 먼저 자른다(정규식 규칙).
 import { xmlUnescape } from '../vcenter/soapParse.js';
+import { flatStr } from '../util/capStr.js';
+import { TEAMING_POLICIES } from '../hostcfg/parse.js';   // v2.906: 팀 구성 정책 이름은 표준 스위치(hcfg)와 한 벌   // v2.901(점검 E2): 캐시에 남는 글자는 응답 원문을 붙잡지 않게 평탄화
 
 export const VCINFO_LIMITS = Object.freeze({ alarms: 500, tasks: 200, perms: 1000, roles: 200, xml: 4_000_000 });
 const MOREF_RE = /^[\w.:-]{1,64}$/;
@@ -15,19 +17,25 @@ const TYPE_RE = /^[A-Za-z]{1,48}$/;
 const STATUS = new Set(['red', 'yellow', 'gray', 'green']);
 const TASK_STATES = new Set(['queued', 'running', 'success', 'error']);
 
+// ⚠ v2.901(점검 E2 — 재현): xmlUnescape · trim · slice 는 바꿀 것이 없으면 응답 원문의 부분 문자열(SlicedString)을 돌려준다 —
+//   작업 버퍼(24시간) · 권한 목록 캐시가 회차마다 SOAP 응답 원문 전체를 붙잡았다(util/capStr.js 와 같은 메커니즘). 평탄화해서 넣는다.
 const capTxt = (s, n) => {
   if (s == null) return null;
   const t = xmlUnescape(String(s)).trim();
-  return t ? t.slice(0, n) : null;
+  return t ? flatStr(t.slice(0, n)) : null;
 };
 const tsOf = (s) => { if (!s) return null; const t = Date.parse(s); return Number.isFinite(t) && t > 0 ? t : null; };
 const first = (blk, tag) => {
   const m = new RegExp(`<${tag}(?:\\s[^>]{0,200})?>([^<]*)</${tag}>`).exec(blk);
   return m ? m[1] : null;
 };
+// v2.901(점검 E1): 속성 순서와 무관하게 받는다(xsi:type 이 type 앞이든 뒤든) — 속성 칸은 200자까지(선형). 'type=' 앞은 공백이어야 한다(xsi:type 과 구분).
+const ATTR_TYPE_RE = /(?:^|\s)type="([A-Za-z]{1,48})"/;
 const refOf = (blk, tag) => {
-  const m = new RegExp(`<${tag} type="([A-Za-z]{1,48})">([^<]{1,64})</${tag}>`).exec(blk);
-  return m && MOREF_RE.test(m[2].trim()) ? { type: m[1], ref: m[2].trim() } : null;
+  const m = new RegExp(`<${tag}(\\s[^>]{0,200})>([^<]{1,64})</${tag}>`).exec(blk);
+  const t = m ? ATTR_TYPE_RE.exec(m[1])?.[1] : null;
+  const r = m ? m[2].trim() : '';
+  return t && MOREF_RE.test(r) ? { type: flatStr(t), ref: flatStr(r) } : null;
 };
 /** 첫 open(정규식) 부터 그 뒤 첫 close(글자)까지 — indexOf 로 찾는다(되짚는 반복 없이 선형). 없으면 ''. */
 function between(s, open, close) {
@@ -42,11 +50,11 @@ const blocks = (xml, names) => String(xml || '').slice(0, VCINFO_LIMITS.xml).spl
 /** Folder(rootFolder) 'triggeredAlarmState' XML → [{alarm, entityType, entity, status, time, ack, ackBy, ackTime}] (이름은 collect 가 채운다). */
 export function parseTriggeredAlarms(xml) {
   const out = [];
-  let omitted = 0;
+  let omitted = 0; let unreadable = 0;
   for (const blk of blocks(xml, ['AlarmState', 'triggeredAlarmState'])) {
     const alarm = refOf(blk, 'alarm');
     const ent = refOf(blk, 'entity');
-    if (!alarm || !ent) continue;
+    if (!alarm || !ent) { unreadable += 1; continue; }   // v2.901(점검 E1): 못 읽은 원소는 센다 — '알람 없음' 과 구분
     if (out.length >= VCINFO_LIMITS.alarms) { omitted += 1; continue; }
     const st = first(blk, 'overallStatus');
     const ack = first(blk, 'acknowledged');
@@ -59,7 +67,7 @@ export function parseTriggeredAlarms(xml) {
       ackTime: tsOf(first(blk, 'acknowledgedTime')),
     });
   }
-  return { items: out, omitted };
+  return { items: out, omitted, unreadable };
 }
 
 /** TaskManager 'recentTask' 의 Task 하나의 'info'(TaskInfo) XML → 작업 행. 필드 순서(vim25): … entity → entityName → state → … error → result → progress → reason → queueTime … */
@@ -180,7 +188,7 @@ function sanAlarms(k) {
     alarm: ref(x.alarm), name: str(x.name, 256), entityType: typ(x.entityType), entity: ref(x.entity), entityName: str(x.entityName, 128),
     status: STATUS.has(x.status) ? x.status : null, time: ts(x.time), ack: bool(x.ack), ackBy: str(x.ackBy, 128), ackTime: ts(x.ackTime),
   }));
-  return { ...head(k), items, omitted: cnt(k.omitted) };
+  return { ...head(k), items, omitted: cnt(k.omitted), ...(cnt(k.unreadable) ? { unreadable: cnt(k.unreadable) } : {}) };
 }
 function sanTasks(k) {
   if (!isObj(k)) return null;
@@ -211,6 +219,8 @@ export function sanitizeVcInfo(v) {
   if (Object.hasOwn(v, 'alarms')) out.alarms = sanAlarms(v.alarms);
   if (Object.hasOwn(v, 'tasks')) out.tasks = sanTasks(v.tasks);
   if (Object.hasOwn(v, 'perms')) out.perms = sanPerms(v.perms);
+  if (Object.hasOwn(v, 'pools')) out.pools = sanitizePools(v.pools);   // v2.901 리소스 풀
+  if (Object.hasOwn(v, 'dvpg')) out.dvpg = sanitizeDvpg(v.dvpg);   // v2.906 분산 포트그룹 팀 구성
   return sanitizeVcRestInfo(v, out);   // v2.898 ④ linked · updates · vlcm
 }
 
@@ -323,3 +333,156 @@ export function sanitizeVcRestInfo(v, out = {}) {
   if (Object.hasOwn(v, 'vlcm')) out.vlcm = sanVlcm(v.vlcm);
   return out;
 }
+
+// ── v2.901: 리소스 풀 예약 · 제한 · 공유(ResourcePool.config.cpuAllocation · memoryAllocation — 6시간마다) ──────────────
+//   pools: { at, items:[{ ref, name, owner, root, cpu:{res,limit,expandable,shares,level}, mem:{…} }], omitted, error }
+//   CPU 는 MHz, 메모리는 MB(vSphere ResourceAllocationInfo 단위). limit -1 = 무제한(그대로 -1). 못 읽은 값은 null.
+export const POOLS_MAX = 500;
+const SHARE_LEVELS = new Set(['low', 'normal', 'high', 'custom']);
+const intTag = (x, t) => { const v = first(x, t); return v != null && /^-?\d{1,15}$/.test(v.trim()) ? Number(v) : null; };
+export function parseAllocation(xml) {
+  if (typeof xml !== 'string' || !xml) return null;
+  // shares 는 <shares><shares>N</shares><level>…</level></shares> 로 중첩된다 — 글자만 든 안쪽 <shares> 와 하나뿐인 <level> 을 바로 읽는다.
+  const lv = first(xml, 'level');
+  const ex = first(xml, 'expandableReservation');
+  return {
+    res: intTag(xml, 'reservation'), limit: intTag(xml, 'limit'),
+    expandable: ex === 'true' ? true : ex === 'false' ? false : null,
+    shares: intTag(xml, 'shares'),
+    level: lv && SHARE_LEVELS.has(lv) ? lv : null,
+  };
+}
+/** RetrieveProperties 결과 [{ref, props}] → 풀 행. 루트 풀(부모가 클러스터 · 단독 호스트 — 'domain-' 으로 시작)은 root:true(클러스터 용량 그 자체라 예약 값이 크다). */
+export function parsePools(objs) {
+  const out = [];
+  for (const o of Array.isArray(objs) ? objs : []) {
+    if (!o?.ref || !MOREF_RE.test(o.ref)) continue;
+    const p = o.props || {};
+    const parent = typeof p.parent === 'string' ? p.parent.trim() : '';
+    const owner = typeof p.owner === 'string' && MOREF_RE.test(p.owner.trim()) ? p.owner.trim() : null;
+    out.push({ ref: o.ref, name: capTxt(p.name, 128), owner, root: parent ? parent.startsWith('domain-') : null,
+      cpu: parseAllocation(p['config.cpuAllocation']), mem: parseAllocation(p['config.memoryAllocation']) });
+  }
+  return out.sort((a, b) => String(a.name || '').localeCompare(String(b.name || '')));
+}
+const sanAlloc = (a) => (isObj(a) ? {
+  res: int(a.res), limit: int(a.limit), expandable: bool(a.expandable), shares: int(a.shares) != null && a.shares >= 0 ? a.shares : null,
+  level: typeof a.level === 'string' && SHARE_LEVELS.has(a.level) ? a.level : null,
+} : null);
+export function sanitizePools(k) {
+  if (!isObj(k)) return null;
+  return { at: ts(k.at), error: str(k.error, 300), omitted: cnt(k.omitted),
+    items: (Array.isArray(k.items) ? k.items : []).filter(isObj).slice(0, POOLS_MAX).map((x) => ({
+      ref: ref(x.ref), name: str(x.name, 128), owner: ref(x.owner), root: bool(x.root), cpu: sanAlloc(x.cpu), mem: sanAlloc(x.mem),
+    })).filter((x) => x.ref) };
+}
+
+// ── v2.906: 분산 포트그룹 팀 구성 · LACP · VLAN(DistributedVirtualPortgroup.config.defaultPortConfig — 6시간마다) ──────────────
+//   dvpg: { at, items:[{ ref, name, dvs, dvsName, uplinkPg, vlan:{id,trunk,pvlan}|null, teaming:{policy,active,standby,failback}|null, lacp:{enabled,mode,lag}|null }], omitted, error, lagError, dvsError }
+//   VMwareDVSPortSetting 은 값마다 <inherited>…</inherited><value>…</value> 로 감싼다 — 그 칸의 <value> 를 읽는다(상속받은 유효 값). 못 읽은 값은 null.
+//   failback 은 rollingOrder 의 반대(표준 스위치 teamingOf 와 같은 규칙). LACP: Enhanced LACP 의 LAG(vDS config.lacpGroupConfig)가 활성 업링크에 있으면 그 LAG,
+//   아니면 옛 포트그룹 lacpPolicy.enable. 업링크 포트그룹(tag 'SYSTEM/DVS.UPLINKPG')은 uplinkPg:true(팀 구성 대상이 아니다).
+export const DVPG_MAX = 1000;
+const DVPG_XML_MAX = 65_536;
+const UPLINK_NAME_RE = /^[\w .:()/#-]{1,64}$/;
+const LACP_MODES = new Set(['active', 'passive']);
+const valOf = (xml, tag) => { const b = between(xml, new RegExp(`<${tag}(?=[\\s>])`), `</${tag}>`); return b ? first(b, 'value') : null; };
+const boolTxt = (v) => (v === 'true' ? true : v === 'false' ? false : null);
+const texts = (xml, tag, max = 32) => {
+  const out = [];
+  for (const m of String(xml || '').matchAll(new RegExp(`<${tag}>([^<]{1,128})</${tag}>`, 'g'))) {
+    const t = xmlUnescape(m[1]).trim();
+    if (UPLINK_NAME_RE.test(t) && !out.includes(t)) out.push(flatStr(t));
+    if (out.length >= max) break;
+  }
+  return out;
+};
+const vlanIntOk = (n) => Number.isInteger(n) && n >= 0 && n <= 4095;
+/** VMwareDVSPortSetting XML → { vlan, teaming, lacpLegacy } (순수). */
+export function parseDvPortSetting(xml) {
+  const x = typeof xml === 'string' ? xml.slice(0, DVPG_XML_MAX) : '';
+  if (!x) return { vlan: null, teaming: null, lacpLegacy: null };
+  // VLAN — VlanIdSpec(<vlanId>N</vlanId>) · TrunkVlanSpec(<vlanId><start/><end/></vlanId> 여럿) · PvlanSpec(<pvlanId>)
+  let vlan = null;
+  const vb = between(x, /<vlan(?=[\s>])/, '</vlan>');
+  if (vb) {
+    const head = /^<vlan(\s[^>]{0,200})?>/.exec(vb)?.[1] || '';
+    if (/TrunkVlanSpec/.test(head)) {
+      const trunk = [];
+      for (const m of vb.matchAll(/<start>(\d{1,4})<\/start>\s{0,8}<end>(\d{1,4})<\/end>/g)) { const a = Number(m[1]); const b = Number(m[2]); if (vlanIntOk(a) && vlanIntOk(b) && a <= b) trunk.push([a, b]); if (trunk.length >= 16) break; }
+      vlan = { id: null, trunk, pvlan: null };
+    } else if (/PvlanSpec/.test(head)) {
+      const n = intTag(vb, 'pvlanId');
+      vlan = { id: null, trunk: null, pvlan: vlanIntOk(n) ? n : null };
+    } else {
+      const n = intTag(vb, 'vlanId');
+      vlan = { id: vlanIntOk(n) ? n : null, trunk: null, pvlan: null };
+    }
+  }
+  let teaming = null;
+  const tb = between(x, /<uplinkTeamingPolicy(?=[\s>])/, '</uplinkTeamingPolicy>');
+  if (tb) {
+    const pol = valOf(tb, 'policy');
+    const rolling = boolTxt(valOf(tb, 'rollingOrder'));
+    const ord = between(tb, /<uplinkPortOrder(?=[\s>])/, '</uplinkPortOrder>');
+    teaming = { policy: pol && TEAMING_POLICIES.includes(pol.trim()) ? pol.trim() : null, active: texts(ord, 'activeUplinkPort'), standby: texts(ord, 'standbyUplinkPort'), failback: rolling == null ? null : !rolling };
+  }
+  let lacpLegacy = null;
+  const lb = between(x, /<lacpPolicy(?=[\s>])/, '</lacpPolicy>');
+  if (lb) {
+    const mode = valOf(lb, 'mode');
+    lacpLegacy = { enabled: boolTxt(valOf(lb, 'enable')), mode: mode && LACP_MODES.has(mode.trim()) ? mode.trim() : null };
+  }
+  return { vlan, teaming, lacpLegacy };
+}
+/** RetrieveProperties 결과 [{ref, props}] → 분산 포트그룹 행(dvsName · LAG 는 collect 가 채운다). */
+export function parseDvPortgroups(objs) {
+  const out = [];
+  for (const o of Array.isArray(objs) ? objs : []) {
+    if (!o?.ref || !MOREF_RE.test(o.ref)) continue;
+    const p = o.props || {};
+    const dv = typeof p['config.distributedVirtualSwitch'] === 'string' ? p['config.distributedVirtualSwitch'].trim() : '';
+    const st = parseDvPortSetting(p['config.defaultPortConfig']);
+    out.push({ ref: flatStr(o.ref), name: capTxt(p.name, 128), dvs: MOREF_RE.test(dv) ? flatStr(dv) : null, dvsName: null,
+      uplinkPg: typeof p.tag === 'string' ? p.tag.includes('SYSTEM/DVS.UPLINKPG') : null,
+      vlan: st.vlan, teaming: st.teaming, lacp: st.lacpLegacy ? { ...st.lacpLegacy, lag: null } : null });
+  }
+  return out.sort((a, b) => String(a.name || '').localeCompare(String(b.name || '')));
+}
+/** vDS config.lacpGroupConfig XML → [{ name, mode }] (Enhanced LACP 의 LAG). */
+export function parseLacpGroups(xml) {
+  const out = [];
+  for (const blk of blocks(xml, ['VMwareDvsLacpGroupConfig', 'lacpGroupConfig'])) {
+    const n = first(blk, 'name'); const m = first(blk, 'mode');
+    const name = n ? xmlUnescape(n).trim() : '';
+    if (UPLINK_NAME_RE.test(name)) out.push({ name: flatStr(name), mode: m && LACP_MODES.has(m.trim()) ? m.trim() : null });
+    if (out.length >= 16) break;
+  }
+  return out;
+}
+/** 포트그룹 행에 vDS 이름 · LAG 를 붙인다(순수). lagsByDvs = Map(dvs ref → [{name,mode}] | null(못 읽음)). */
+export function applyDvsInfo(items, dvsName, lagsByDvs) {
+  return items.map((x) => {
+    const lags = x.dvs ? lagsByDvs.get(x.dvs) : null;
+    const lag = Array.isArray(lags) && x.teaming ? lags.find((l) => x.teaming.active.includes(l.name)) : null;
+    const lacp = lag ? { enabled: true, mode: lag.mode, lag: lag.name } : x.lacp;
+    return { ...x, dvsName: x.dvs ? (dvsName.get(x.dvs) ?? null) : null, lacp };
+  });
+}
+const sanUplinks = (a) => (Array.isArray(a) ? a.filter((v) => typeof v === 'string' && UPLINK_NAME_RE.test(v)).slice(0, 32) : []);
+const vlanInt = (v) => (vlanIntOk(v) ? v : null);
+export function sanitizeDvpg(k) {
+  if (!isObj(k)) return null;
+  return { at: ts(k.at), error: str(k.error, 300), lagError: str(k.lagError, 300), dvsError: str(k.dvsError, 300), omitted: cnt(k.omitted),
+    items: (Array.isArray(k.items) ? k.items : []).filter(isObj).slice(0, DVPG_MAX).map((x) => ({
+      ref: ref(x.ref), name: str(x.name, 128), dvs: ref(x.dvs), dvsName: str(x.dvsName, 128), uplinkPg: bool(x.uplinkPg),
+      vlan: isObj(x.vlan) ? { id: vlanInt(x.vlan.id),
+        trunk: Array.isArray(x.vlan.trunk) ? x.vlan.trunk.filter((r) => Array.isArray(r) && vlanIntOk(r[0]) && vlanIntOk(r[1]) && r[0] <= r[1]).slice(0, 16).map((r) => [r[0], r[1]]) : null,
+        pvlan: vlanInt(x.vlan.pvlan) } : null,
+      teaming: isObj(x.teaming) ? { policy: typeof x.teaming.policy === 'string' && TEAMING_POLICIES.includes(x.teaming.policy) ? x.teaming.policy : null,
+        active: sanUplinks(x.teaming.active), standby: sanUplinks(x.teaming.standby), failback: bool(x.teaming.failback) } : null,
+      lacp: isObj(x.lacp) ? { enabled: bool(x.lacp.enabled), mode: typeof x.lacp.mode === 'string' && LACP_MODES.has(x.lacp.mode) ? x.lacp.mode : null,
+        lag: typeof x.lacp.lag === 'string' && UPLINK_NAME_RE.test(x.lacp.lag) ? x.lacp.lag : null } : null,
+    })).filter((x) => x.ref) };
+}
+

@@ -96,7 +96,8 @@ export function registerBareosPolicy(api) {
     const pool = String(req.query.pool || '').slice(0, 80);
     if (!scopedDirectors(settings, allowed).has(directorId)) return res.status(404).json({ ok: false, reason: 'Director 를 찾을 수 없습니다.' });
     if (!isResourceName(pool)) return res.status(400).json({ ok: false, code: 'invalid', reason: '풀 이름이 올바르지 않습니다(공백 · 따옴표가 든 이름은 즉시 조회를 지원하지 않습니다 — Director 에서 직접 확인하세요).' });
-    const k = `${directorId}|${pool}`;
+    // v2.901(점검 S4): 기억 열쇠에 데모 여부를 넣는다 — 사용자와 무관한 열쇠면 관리자가 1분 안에 읽은 실제 Director 볼륨을 데모 계정이 demoOnly 판정 없이 받았다.
+    const k = `${isDemoGuest(req.user) ? 'demo' : 'real'}|${directorId}|${pool}`;
     const now = Date.now();
     const m = _volMemo.get(k);
     if (m && now - m.at < VOLUME_QUERY_GAP_MS) return res.json({ ok: true, cached: true, at: m.at, nextSec: Math.ceil((VOLUME_QUERY_GAP_MS - (now - m.at)) / 1000), ...m.result });
@@ -127,7 +128,7 @@ export function registerBareosPolicy(api) {
     if (asked && asked.some((id) => !scoped.has(id))) return res.status(404).json({ ok: false, reason: 'Director 를 찾을 수 없습니다.' });
     const off = new Set(settings.defaults?.policy?.off || []);
     const ids = asked || [...scoped.keys()].filter((id) => !off.has(id));
-    if (!ids.length) return res.status(400).json({ ok: false, reason: '수집할 Director 가 없습니다 — 설정 › vCenter 관리 › Bareos 백업 서버 › Director 와 매핑을 확인하세요.' });
+    if (!ids.length) return res.status(400).json({ ok: false, reason: '수집할 Director 가 없습니다 — 설정 › 백업 › Bareos 백업 서버 › Director 와 매핑을 확인하세요.' });
     if (policyBusy()) return res.status(409).json({ ok: false, reason: '이미 수집 중입니다 — 끝난 뒤 화면이 새 값을 보입니다.' });
     const wait = manualWaitSec(ids);
     if (wait) return res.status(429).json({ ok: false, reason: `‘지금 수집’ 은 Director 마다 1분에 한 번입니다 — ${wait}초 뒤 다시 누르세요.` });

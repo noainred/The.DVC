@@ -43,7 +43,7 @@ export const REASON_TEXT = Object.freeze({
 
 /** 실패 종류 — 서버 probe.XFER_FAIL_KINDS 와 1:1(조치가 다르므로 한 문구로 덮지 않는다). */
 export const FAIL_TEXT = Object.freeze({
-  'no-url': { label: 'URL 없음', fix: '설정 › 수집 서버에서 이 엣지의 URL 을 넣으세요.' },
+  'no-url': { label: 'URL 없음', fix: '설정 › 엣지·원격 › 수집 서버(원격)에서 이 엣지의 URL 을 넣으세요.' },
   timeout: { label: '시한 초과', fix: '회선이 시한 안에 다 보내지 못했습니다. 회선 상태를 보거나 설정에서 시한을 늘리세요.' },
   unreachable: { label: '연결 실패', fix: '메인에서 이 엣지의 포탈 포트에 닿지 않습니다. 엣지 서비스·방화벽·경로를 확인하세요.' },
   auth: { label: '토큰 거부', fix: '중앙 등록값과 그 엣지의 COLLECTOR_TOKEN 이 다릅니다. 포탈 점검 › 토큰 점검으로 대조하세요.' },
@@ -405,16 +405,101 @@ export function hoverAt(m, px, offsetMin = 540) {
  * 1분 갱신 사이에 창이 밀려 같은 칸이 다른 구간이 된다. back=0 은 예전 그대로 '최근 구간'(1분마다 갱신)이다.
  */
 /** 몇 칸까지 과거로 갈 수 있나 — 그 보기가 읽는 표(원시 / 일 요약)의 가장 오래된 기록이 들어가는 칸까지. 기록이 없으면 0(스크롤을 숨긴다). */
-export function maxBackOf(hist, anchorEnd) {
+export function maxBackOf(hist, anchorEnd, { extraOldestTs = null } = {}) {
   const days = numOrNull(hist?.days); const end = numOrNull(anchorEnd);
   if (!(days > 0) || end == null) return 0;
   const span = days * 86_400_000;
-  const off = numOrNull(hist?.offsetMin) ?? 540;
-  const raw = days <= (numOrNull(hist?.rawMaxDays) ?? 31);
-  const oldest = raw ? numOrNull(hist?.oldest?.sampleTs)
-    : (typeof hist?.oldest?.day === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(hist.oldest.day) ? Date.parse(`${hist.oldest.day}T00:00:00Z`) - off * 60_000 : null);
+  const oldest = historyOldestOf(hist, { extraOldestTs });
   if (oldest == null || !(end > oldest)) return 0;
   return Math.max(0, Math.min(Math.floor(3650 / days), Math.ceil((end - oldest) / span) - 1));
+}
+/**
+ * 이 보기가 갈 수 있는 가장 오래된 시각(ms) — 전송 기록(원시 또는 일 요약)과, Ping 을 함께 볼 때는 Ping 기록 중 **더 오래된 쪽**.
+ * v2.902(사용자 요청 "히스토리 … 버그 수정" — B1): 예전엔 전송 기록만 봐서, 전송 측정이 꺼져 있거나(기본 꺼짐) 원시 보관(180일)이
+ * Ping 보관(365일)보다 짧으면 'Ping만' 보기에서 남아 있는 Ping 과거로 넘어가지 못했다. 둘 다 없으면 null.
+ */
+export function historyOldestOf(hist, { extraOldestTs = null } = {}) {
+  const days = numOrNull(hist?.days);
+  const off = numOrNull(hist?.offsetMin) ?? 540;
+  const raw = !(days > 0) || days <= (numOrNull(hist?.rawMaxDays) ?? 31);
+  const own = raw ? numOrNull(hist?.oldest?.sampleTs)
+    : (typeof hist?.oldest?.day === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(hist.oldest.day) ? Date.parse(`${hist.oldest.day}T00:00:00Z`) - off * 60_000 : null);
+  const extra = numOrNull(extraOldestTs);
+  const list = [own, extra].filter((v) => v != null);
+  return list.length ? Math.min(...list) : null;
+}
+
+/**
+ * x 축 눈금 글자 정렬 — 오른쪽 여백(padR)이 좁아 축 끝 눈금을 가운데 정렬하면 글자 반이 잘린다.
+ * v2.902: '날짜로 이동' 창은 끝이 자정이라 끝 눈금(00:00)이 늘 축 끝에 온다(화면 확인 — '00:0(' 로 잘렸다). 끝 근처는 끝 정렬.
+ */
+export function tickAnchor(x, m, room = 26) {
+  if (!m || !Number.isFinite(x)) return 'middle';
+  // 왼쪽은 세로 축 글자 자리(padL)가 넉넉해 가운데 정렬로 잘리지 않는다.
+  return x > m.w - m.padR - room ? 'end' : 'middle';
+}
+
+/** 포탈 시각 날짜 'YYYY-MM-DD'(ms → 그 시각이 속한 포탈 날짜). */
+export function portalDateOf(ts, offsetMin = 540) {
+  const t = numOrNull(ts);
+  if (t == null) return '';
+  const d = new Date(t + offsetMin * 60_000);
+  const p = (x) => String(x).padStart(2, '0');
+  return `${d.getUTCFullYear()}-${p(d.getUTCMonth() + 1)}-${p(d.getUTCDate())}`;
+}
+
+/**
+ * '날짜로 이동'(v2.902 사용자 요청 "히스토리 보는 기능 강화") — 고른 포탈 날짜가 **끝나는 시각**(다음 날 0시)을 창 끝으로 한다.
+ * 스크롤 모델(창 끝 = anchor − back × 기간)에 맞게 anchor 를 '지금 이후의 첫 칸 경계' 로 잡는다 — 그러면 ◀▶ 가 그날 경계에 맞춰 한 기간씩 움직이고,
+ * back 이 0 이 되면 예전처럼 '최근 구간' 이다. 오늘(또는 미래)·형식 오류면 최근 구간({back:0, anchor:null}).
+ * maxBack 을 넘으면 가장 오래된 칸으로 자르고 clamped 를 알린다.
+ * @returns {{back:number, anchor:number|null, clamped?:boolean}}
+ */
+export function jumpToDate(dateStr, { days, now = Date.now(), offsetMin = 540, maxBack = Infinity } = {}) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(dateStr || ''));
+  const span = (numOrNull(days) ?? 0) * 86_400_000;
+  if (!m || !(span > 0)) return { back: 0, anchor: null };
+  const dayEnd = Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]) + 1) - offsetMin * 60_000;
+  if (!Number.isFinite(dayEnd) || dayEnd >= now) return { back: 0, anchor: null };
+  let back = Math.max(1, Math.ceil((now - dayEnd) / span));
+  const anchor = dayEnd + back * span;
+  const lim = Number.isFinite(maxBack) ? Math.max(0, Math.floor(maxBack)) : Infinity;
+  if (back > lim) { back = lim; return lim ? { back, anchor, clamped: true } : { back: 0, anchor: null, clamped: true }; }
+  return { back, anchor };
+}
+
+/** 과거 구간에서 '이 법인만 지금 측정' 결과 안내(B2) — 과거 구간은 갱신하지 않으므로 '1분 안에 추이에 나온다' 고 하지 않는다. */
+export function runOneText(r, past = false) {
+  if (r?.ok === false) return r.reason || '시작하지 못했습니다';
+  return past
+    ? '이 법인만 지금 잽니다 — 결과는 최신 구간에 나옵니다(지금은 과거 구간을 보고 있어 이 화면은 갱신하지 않습니다).'
+    : '이 법인만 지금 잽니다 — 끝나면 1분 안에 추이에 나옵니다.';
+}
+
+/** 측정 기록 쪽 표시 — '1–50 / 312건'(실패만이면 실패 건수 기준). 행이 없으면 ''. */
+export function logPagerText(page, { index = 0, limit = 50 } = {}) {
+  const rows = page?.rows?.length || 0;
+  if (!rows) return '';
+  const total = page?.only === 'fail' ? numOrNull(page?.failTotal) : numOrNull(page?.total);
+  const from = index * limit + 1; const to = from + rows - 1;
+  return `${from.toLocaleString()}–${to.toLocaleString()}${total != null ? ` / ${total.toLocaleString()}건` : ''}`;
+}
+
+/** 측정 기록 응답이 지금 창과 같은 창인가(늦게 온 다른 창 응답을 그리지 않는다). */
+export function sameLogWindow(page, hist) {
+  if (!page || !hist || page.ok === false) return false;
+  if (String(page.agent ?? '').toLowerCase() !== String(hist.agent ?? '').toLowerCase()) return false;
+  if (numOrNull(page.days) !== numOrNull(hist.days) || !!page.past !== !!hist.past) return false;
+  return !hist.past || numOrNull(page.end) === numOrNull(hist.end);
+}
+
+/** 창이 원시 측정 보관 기간보다 앞까지 걸치는가 — 그러면 표에 그 앞 측정이 없다는 것을 말한다. */
+export function logRetentionNote(page, offsetMin = 540) {
+  const start = numOrNull(page?.start);
+  const oldest = numOrNull(page?.oldest?.sampleTs);
+  const keep = numOrNull(page?.retention?.sampleDays);
+  if (start == null || oldest == null || !(start < oldest)) return '';
+  return `원시 측정 기록은 ${keep != null ? `${keep}일` : '정해진 기간'} 보관합니다 — 가장 오래된 기록은 ${clockText(oldest, offsetMin)} 이고, 이 구간에서 그보다 앞은 표에 없습니다.`;
 }
 /** back 칸 과거 창의 끝(ms) — back 은 [0, maxBack] 로 자른다. */
 export function windowEndOf(anchorEnd, back, days, maxBack = Infinity) {
@@ -431,6 +516,196 @@ export function windowLabel(back, days) {
 export function windowRangeText(end, days, offsetMin = 540) {
   const e = numOrNull(end); if (e == null || !(days > 0)) return '';
   return `${clockText(e - days * 86_400_000, offsetMin)} ~ ${clockText(e, offsetMin)}`;
+}
+
+/* ── v2.890 Ping 함께 보기(시안 docs/design/xfer-ping · 사용자 컨펌 2026-11-05 '기본값대로') ───────────────────────
+ * 서버 `/tools/xfer-speed/ping` 이 Ping 모니터의 엣지 기록(TCP 연결 · 1분 주기)을 창 단위 칸(평균·최저·최고·손실)으로 준다.
+ * 이 모듈은 좌표·문구만 만든다. 측정 방식·주기·칸 크기는 응답 값을 쓴다(문장에 박지 않는다).
+ */
+export const PING_COLOR = '#a78bfa';
+export const PING_TEXT_COLOR = '#c4b5fd';
+/** 차트 보기 — 기본은 '전송 속도'(지금 화면과 같다). 고른 값은 브라우저에 기억한다(VIEW_STORE_KEY). */
+export const VIEW_MODES = Object.freeze([
+  { key: 'speed', label: '전송 속도' },
+  { key: 'both', label: '전송 속도 + Ping' },
+  { key: 'ping', label: 'Ping만' },
+]);
+export const DEFAULT_VIEW = 'speed';
+export const VIEW_STORE_KEY = 'xs.detail.view';
+export function viewOf(v) { return VIEW_MODES.some((m) => m.key === v) ? v : DEFAULT_VIEW; }
+
+/** Ping 패널이 값을 그리지 못하는 이유 — 서버 `PING_REASONS` 와 1:1(서버 테스트가 대조한다). 원인을 단정하지 않는다. */
+export const PING_REASON_TEXT = Object.freeze({
+  'no-target': { title: '이 엣지는 Ping 대상에 없습니다', body: '엣지 노드는 Ping 모니터가 시작될 때 자동 등록됩니다 — 그 뒤에 추가한 엣지이거나, Ping 대상에서 지운 적이 있으면 기록이 없습니다.' },
+  'monitor-off': { title: 'Ping 모니터가 꺼져 있습니다', body: '이 포탈은 지금 Ping 을 재지 않아 새 기록이 쌓이지 않습니다 — 남아 있는 기록은 그대로 그립니다.' },
+  disabled: { title: '이 엣지의 Ping 대상이 꺼져 있습니다', body: '네트워크 › 네트워크 체크에서 다시 켜면 다음 주기부터 쌓입니다 — 남아 있는 기록은 그대로 그립니다.' },
+  'before-retention': { title: '이 구간의 Ping 기록은 보관 기간 밖입니다', body: 'Ping 기록과 전송 속도 기록은 보관 기간이 달라 한쪽만 비는 구간이 생깁니다.' },
+  'no-samples': { title: '이 구간에 Ping 기록이 없습니다', body: '모니터가 이 대상을 재지 않았던 구간(등록 전·포탈이 꺼져 있던 때)이거나 기록이 정리됐을 수 있습니다.' },
+});
+
+/** ms 표기 — 10 이상은 정수, 그 아래는 소수 한 자리. 값이 없으면 '—'(단위 없음). */
+export function msText(v, { unit = true } = {}) {
+  const n = numOrNull(v);
+  if (n == null) return '—';
+  const s = n >= 10 ? String(Math.round(n)) : n.toFixed(1);
+  return unit ? `${s}ms` : s;
+}
+
+/** 측정 방식 한 줄 — 'tcp-connect' 는 ICMP 가 아니다(사용자가 'Ping' 이라 부르는 것과 다를 수 있어 밝힌다). */
+export function pingMethodText(p) {
+  if (!p?.method) return '';
+  if (p.method === 'icmp') return 'ICMP';
+  const port = numOrNull(p?.target?.port);
+  return `엣지 포탈 TCP 연결${port ? `(${port})` : ''}`;
+}
+
+/** 패널 머리 설명 — 방식 · 주기 · 칸 크기(응답 값). */
+export function pingHeadNote(p) {
+  if (!p) return '';
+  const parts = [pingMethodText(p)];
+  const iv = numOrNull(p.intervalMs); if (iv) parts.push(`${spanText(iv)} 간격`);
+  const b = numOrNull(p.bucketMs); if (b) parts.push(`${spanText(b)} 평균${p.source === 'hourly' ? '(시간 요약)' : ''}`);
+  parts.push('네트워크 › 네트워크 체크와 같은 기록');
+  return parts.filter(Boolean).join(' · ');
+}
+
+/** 통계 알약 — 값이 없으면 '—'. 중앙값은 긴 기간(시간 요약)에서 만들 수 없어 '—' 이고 그 이유를 title 로 단다. */
+export function pingStatChips(p) {
+  const s = p?.stats || {};
+  const n = numOrNull(s.n); const fail = numOrNull(s.fail);
+  const out = [
+    { label: '평균', value: msText(s.avg) },
+    { label: '중앙값', value: msText(s.median), title: s.median == null && p?.source === 'hourly' ? '긴 기간은 시간 요약으로 읽어 중앙값을 만들 수 없습니다' : '' },
+    { label: '최고', value: msText(s.max) },
+    { label: '손실', value: numOrNull(s.lossPct) == null ? '—' : `${s.lossPct}%`, sub: n ? `${fail ?? 0}/${n.toLocaleString()}` : '' },
+  ];
+  const last = p?.last;
+  if (last && numOrNull(last.ts) != null) out.push({ label: '마지막', value: last.ok ? msText(last.rtt) : '응답 없음', sub: clockText(last.ts, p.offsetMin ?? 540, { date: false }) });
+  return out;
+}
+
+/** 세로 축 상한 — 눈금 4칸이 1·2·2.5·5 × 10^k 단위로 떨어지게 올린다. 값이 없으면 100. */
+export function niceTop(v) {
+  const n = numOrNull(v);
+  if (n == null || !(n > 0)) return 100;
+  const raw = n / 4;
+  const pow = 10 ** Math.floor(Math.log10(raw));
+  const step = [1, 1.5, 2, 2.5, 5, 10].map((k) => k * pow).find((k) => k >= raw) ?? 10 * pow;
+  return step * 4;
+}
+
+/**
+ * Ping 차트 모델 — 속도 차트와 **같은 x 축**(from·to·padL·padR·w)을 받아 칸 중심에 점을 찍는다.
+ * 평균선은 칸이 비거나(표본 없음) 모두 실패한 칸에서 끊는다(0 으로 잇지 않는다). 손실은 위쪽 빨간 눈금.
+ */
+export function pingModel(p, { w = 1000, h = 170, padL = 52, padR = 12, padT = 12, padB = 26, from, to } = {}) {
+  if (!p || !Array.isArray(p.series) || from == null || to == null || !(to > from)) return null;
+  const bms = numOrNull(p.bucketMs) ?? 0;
+  const iw = w - padL - padR; const ih = h - padT - padB;
+  const x = (ts) => padL + ((Math.min(to, Math.max(from, ts)) - from) / (to - from)) * iw;
+  const pts = p.series.map((b) => {
+    const ts = numOrNull(b.ts);
+    const n = numOrNull(b.n) ?? 0; const loss = numOrNull(b.loss) ?? 0;
+    return { ts, c: ts == null ? null : ts + bms / 2, avg: numOrNull(b.avg), min: numOrNull(b.min), max: numOrNull(b.max), loss, n, fail: Math.round(loss * n) };
+  }).filter((b) => b.ts != null && b.ts + bms >= from && b.ts <= to);
+  const peak = Math.max(0, ...pts.map((b) => b.max ?? b.avg ?? 0));
+  const top = niceTop(peak);
+  const y = (v) => padT + ih - (Math.min(v, top) / top) * ih;
+  // 선을 끊는 간격 — 칸 크기 × 1.5 와 데이터의 표본 간격(cadenceOf — 아래쪽 중앙값) × 1.6 중 큰 쪽. 칸 크기만 보면 표본 간격이
+  // 칸보다 긴 대상(주기를 늘린 모니터·15분 백필)에서 칸이 하나씩 비어 선이 하나도 이어지지 않았다(v2.890 화면 확인).
+  const gapMs = Math.max(bms * 1.5, (cadenceOf(pts) ?? 0) * 1.6);
+  const segs = []; let run = []; let prev = null;
+  for (const b of pts) {
+    if (b.avg == null || (prev != null && b.ts - prev > gapMs)) { if (run.length) segs.push(run); run = []; }
+    if (b.avg != null) run.push(b);
+    prev = b.ts;
+  }
+  if (run.length) segs.push(run);
+  const f1 = (v) => v.toFixed(1);
+  const avgPath = segs.filter((s) => s.length > 1).map((s) => s.map((b, i) => `${i ? 'L' : 'M'}${f1(x(b.c))},${f1(y(b.avg))}`).join(' ')).join(' ');
+  const bandPath = segs.filter((s) => s.length > 1 && s.every((b) => b.min != null && b.max != null)).map((s) => {
+    const upper = s.map((b) => `${f1(x(b.c))},${f1(y(b.max))}`);
+    const lower = [...s].reverse().map((b) => `${f1(x(b.c))},${f1(y(b.min))}`);
+    return `M${upper.join(' L')} L${lower.join(' L')} Z`;
+  }).join(' ');
+  const singles = segs.filter((s) => s.length === 1).map((s) => ({ x: x(s[0].c), y: y(s[0].avg) }));
+  const bw = bms ? Math.max(2, Math.min(4, (bms / (to - from)) * iw - 1)) : 3;
+  const lossMarks = pts.filter((b) => b.loss > 0).map((b) => ({ x: x(b.c), w: bw, full: b.avg == null, ts: b.ts }));
+  // 단위는 맨 위 눈금에 붙인다(따로 쓴 'ms' 가 맨 위 숫자와 겹쳤다 — v2.890 화면 확인).
+  const grid = Array.from({ length: 5 }, (_, i) => ({ y: y((top / 4) * i), label: `${Math.round((top / 4) * i)}${i === 4 ? 'ms' : ''}` }));
+  const med = numOrNull(p.stats?.median);
+  return {
+    w, h, padL, padR, padT, padB, from, to, bucketMs: bms, top, gapMs,
+    pts: pts.map((b) => ({ ...b, x: x(b.c), y: b.avg == null ? null : y(b.avg) })),
+    avgPath, bandPath, singles, lossMarks, grid, medianY: med == null ? null : y(med),
+    points: pts.filter((b) => b.avg != null).length,
+  };
+}
+
+/**
+ * 그 시각에 가장 가까운 Ping 칸 — 허용 거리는 칸 하나와 '선을 끊는 간격의 절반'(hoverAt 과 같은 규칙) 중 큰 쪽.
+ * 칸 하나만 허용하면 표본이 칸보다 성긴 대상에서 Ping 칸이 바로 옆에 있어도 'Ping —' 였다(v2.890 화면 확인). 선이 끊긴 구간은 고르지 않는다.
+ */
+export function pingAt(pm, ts) {
+  if (!pm?.pts?.length || !Number.isFinite(ts)) return null;
+  const tol = Math.max(pm.bucketMs || 0, (pm.gapMs || 0) / 2, 60_000);
+  let best = null;
+  for (const b of pm.pts) { const d = Math.abs(b.c - ts); if (d <= tol && (!best || d < best.d)) best = { b, d }; }
+  return best ? best.b : null;
+}
+
+/** 마우스 오버 상자의 Ping 줄. */
+export function pingLineText(b) {
+  if (!b) return { text: 'Ping —', ok: null };
+  const pct = Math.round((b.loss || 0) * 1000) / 10;
+  if (b.avg == null) return { text: `Ping 응답 없음 · ${b.n}회 모두 실패`, ok: false };
+  const range = b.min != null && b.max != null ? ` · ${msText(b.min, { unit: false })}~${msText(b.max)}` : '';
+  return { text: `Ping ${msText(b.avg)} 평균${range} · 손실 ${pct}% (${b.n}회 중 ${b.fail}회)`, ok: true };
+}
+
+/**
+ * 두 차트를 함께 보는 마우스 오버 — 전송 측정(hoverAt)이 있으면 그 시각, 없으면 커서 시각의 Ping 칸.
+ * 전송 측정이 없는 시각이면 속도 줄은 '이 시각엔 전송 측정 없음'(0 으로 쓰지 않는다). 둘 다 없으면 null.
+ * @param view 'speed' | 'both' | 'ping'
+ */
+export function comboHover(m, pm, px, offsetMin = 540, view = 'both') {
+  if (!m) return null;
+  const wantSpeed = view !== 'ping'; const wantPing = view !== 'speed' && !!pm;
+  const speed = wantSpeed ? hoverAt(m, px, offsetMin) : null;
+  if (!wantPing) return speed;
+  const iw = m.w - m.padL - m.padR;
+  if (!(iw > 0) || !Number.isFinite(px) || px < 0 || px > m.w) return null;
+  const cx = Math.min(m.w - m.padR, Math.max(m.padL, px));
+  const cursorTs = m.from + ((cx - m.padL) / iw) * (m.to - m.from);
+  const pb = pingAt(pm, speed ? speed.ts : cursorTs);
+  if (!speed && !pb) return null;
+  const pl = pingLineText(pb);
+  const pingLine = { dir: 'ping', text: pl.text, ok: pl.ok };
+  const pingDot = pb && pb.y != null ? { dir: 'ping', x: pb.x, y: pb.y } : null;
+  if (speed) return { ...speed, lines: [...speed.lines, pingLine], pingDot };
+  const head = `${clockText(pb.ts, offsetMin)} ~ ${clockText(pb.ts + (pm.bucketMs || 0), offsetMin, { date: false })}`;
+  const none = (dir) => ({ dir, text: '이 시각엔 전송 측정 없음', ok: null });
+  return {
+    x: pb.x, ts: pb.c, head,
+    lines: view === 'ping' ? [pingLine] : [none('down'), none('up'), pingLine],
+    dots: [], pingDot,
+  };
+}
+
+/** Ping 응답이 지금 보는 속도 차트와 같은 창인가 — 아니면 그리지 않는다(축이 다르다). */
+export function samePingWindow(ping, hist) {
+  if (!ping || !hist || ping.ok === false) return false;
+  if (String(ping.agent ?? '').toLowerCase() !== String(hist.agent ?? '').toLowerCase()) return false;
+  if (numOrNull(ping.days) !== numOrNull(hist.days) || !!ping.past !== !!hist.past) return false;
+  return !hist.past || numOrNull(ping.end) === numOrNull(hist.end);
+}
+
+/** 보기 선택 기억 — 못 읽거나 못 쓰면(사생활 모드·차단) 기본값으로 조용히 넘어간다. */
+export function loadView(storage) {
+  try { return viewOf(storage?.getItem?.(VIEW_STORE_KEY)); } catch { return DEFAULT_VIEW; }
+}
+export function saveView(storage, v) {
+  try { storage?.setItem?.(VIEW_STORE_KEY, viewOf(v)); } catch { /* 기억은 편의 — 실패해도 보기는 바뀐다 */ }
 }
 
 /** '지연' 칸 설명 — 방향마다 재는 방법이 다르다(서버 `analyze.latencyMsOf` 와 같은 정의). */

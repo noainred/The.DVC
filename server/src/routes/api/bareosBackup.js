@@ -330,7 +330,7 @@ function setupGate(req, res, dirId, plan, { otp = true } = {}) {
   const hostKey = String(req.body?.host || '').trim().toLowerCase();
   if (hostKey && setupBusyReason(dirId, hostKey)) { res.status(409).json({ ok: false, reason: '같은 서버에 다른 Director 의 자동 설정(또는 설정 변경 · 설치)이 진행 중입니다 — 끝난 뒤 다시 시도하세요.' }); return false; }
   // v2.822.3(I2-6 — 재현): 데모 Director 를 쓰는 동안은 화면 매핑이 데모 값이라 실제 서버 설정과 섞인다
-  if (isDemoActive()) { res.status(409).json({ ok: false, reason: '데모 Director 를 쓰는 중입니다 — 자동 설정은 실제 Director 를 등록한 뒤(설정 › vCenter 관리 › Bareos 백업 서버 › Director 에서 추가) 쓸 수 있습니다.' }); return false; }
+  if (isDemoActive()) { res.status(409).json({ ok: false, reason: '데모 Director 를 쓰는 중입니다 — 자동 설정은 실제 Director 를 등록한 뒤(설정 › 백업 › Bareos 백업 서버 › Director 에서 추가) 쓸 수 있습니다.' }); return false; }
   const name = req.user?.username || '';
   // v2.842: 쓰기 단계의 본인 OTP 재확인은 '설정 › Security › 세션 보안' 값(기본 켬 · 소유자 + OTP 로만 끔)을 따른다 — 요청마다 지금 값을 읽는다.
   //   끈 상태로 지난 요청은 감사에 표시한다(req.bareosOtpOff). 인증이 꺼진 설치(AUTH_ENABLED=false)는 예전처럼 OTP 를 보지 않는다.
@@ -1101,19 +1101,35 @@ async function restoreRoute(req, res, job) {
   const settings = effectiveSettings();
   const plan = restorePlan({ mode: b.mode, job, snapshot: store.get(), newVm: b.newVm, confirmName: b.confirmName, pluginName: settings.defaults.pluginName, jobid, base: restoreBaseOf(settings)(job) });   // v2.847 D2-1: 그 지점의 백업 때 위치로 판정
   if (!plan.ok) return res.status(400).json({ ok: false, reason: plan.issue });
+  // v2.906(별건 정리 — 재해 복구 버그 점검 '남김: 단건 복원 라우트는 이름 예약을 보지 않는다'): 새 VM 이름은 묶음 복원 · 복구 순서와 같은 예약을 본다.
+  //   예전에는 인벤토리의 동명 VM 만 봐서, 아직 인벤토리에 없는 진행 중 · 방금 보낸 같은 이름 복원과 겹칠 수 있었다(같은 이름 VM 둘 — NIC 끊기 · 켜 보기가 손대지 못한다).
+  //   판정 · 문구는 bulkRestorePlan 과 같다. 보내는 중인 이름은 원장 기록 뒤까지 잡는다(B3-04 와 같은 창).
+  const nameKey = b.mode === 'newVm' && plan.target?.name ? restoreNameKey(job.vcenterId, plan.target.name) : '';
+  if (nameKey) {
+    // 보내는 중인 이름(heldRestoreNames)은 아래 tryHoldNames 가 '지금 보내는 중' 으로 따로 말한다
+    const reserved = new Set([...reservedRestoreNames(listJobs(), { snapAt: inventoryAtOf(store.get()), isOpen: restoreOpen }), ...drRunHeldNames()]);
+    if (reserved.has(nameKey)) return res.status(409).json({ ok: false, code: 'name-reserved', reason: `최근 복원이 ‘${plan.target.name}’ 이름으로 VM 을 만들었거나 만드는 중입니다(아직 인벤토리에 없음) — 다른 이름을 쓰세요.` });
+  }
   // v2.825.1 버그 점검(G2 — 재현): 설정만 보면 아는 전제(그 잡의 Director 가 있고 접속값이 갖춰졌는가)도 OTP **앞에서** 본다 —
   //   뒤에서 'not-configured' 로 실패하면 1회용 코드가 이미 쓰여, 설정을 고친 뒤 같은 코드는 '이미 사용됨' 이었다.
   if (!isDemoActive()) {
     const jd = directorById(jobDir(job), settings);
-    if (!jd) return res.status(409).json({ ok: false, code: 'not-configured', reason: '이 백업 대상의 법인 Director 가 설정에 없습니다 — 설정 › vCenter 관리 › Bareos 백업 서버 › Director 에서 확인하세요.' });
+    if (!jd) return res.status(409).json({ ok: false, code: 'not-configured', reason: '이 백업 대상의 법인 Director 가 설정에 없습니다 — 설정 › 백업 › Bareos 백업 서버 › Director 에서 확인하세요.' });
     const miss = directorConn(jd).missing;
-    if (miss?.length) return res.status(409).json({ ok: false, code: 'not-configured', reason: `‘${jd.name}’ Director 설정이 덜 됐습니다(${miss.join('·')}) — 설정 › vCenter 관리 › Bareos 백업 서버 › Director 에서 먼저 채우세요.` });
+    if (miss?.length) return res.status(409).json({ ok: false, code: 'not-configured', reason: `‘${jd.name}’ Director 설정이 덜 됐습니다(${miss.join('·')}) — 설정 › 백업 › Bareos 백업 서버 › Director 에서 먼저 채우세요.` });
   }
-  // OTP 는 입력·전제 검사를 통과한 뒤에 쓴다(1회용 코드를 입력 실수로 태우지 않게). Director 에 닿기 전이다.
-  if (config.auth.enabled) {
-    const v = verifyUserOtp(name, b.otp);
-    if (!v.ok) return res.status(403).json({ ok: false, reason: `OTP 인증 실패 — ${v.reason}` });
-  }
+  // 이름 잡기도 OTP 앞 — 겹친 요청이 1회용 코드를 태우지 않게(라우트 순서 규약: 전제 판정 → OTP)
+  if (nameKey && !tryHoldNames([nameKey])) return res.status(409).json({ ok: false, code: 'name-held', reason: '같은 새 VM 이름을 다른 요청이 지금 보내는 중입니다 — 잠시 뒤 다시 확인하세요.' });
+  try {
+    // OTP 는 입력·전제 검사를 통과한 뒤에 쓴다(1회용 코드를 입력 실수로 태우지 않게). Director 에 닿기 전이다.
+    if (config.auth.enabled) {
+      const v = verifyUserOtp(name, b.otp);
+      if (!v.ok) return res.status(403).json({ ok: false, reason: `OTP 인증 실패 — ${v.reason}` });
+    }
+    await sendRestore(req, res, job, { b, jobid, plan, settings });
+  } finally { if (nameKey) releaseNames([nameKey]); }
+}
+async function sendRestore(req, res, job, { b, jobid, plan, settings }) {
   const site = settings.sites.find((s) => s.vcenterId === job.vcenterId);
   const client = site?.client || job.client;
   try {
@@ -1317,9 +1333,9 @@ api.post('/tools/bareos-backup/restore/bulk', adminOnly, async (req, res) => {
     const dir = plan.directorId;
     if (!isDemoActive()) {
       const jd = directorById(dir, settings);
-      if (!jd) return res.status(409).json({ ok: false, code: 'not-configured', reason: '이 법인의 Director 가 설정에 없습니다 — 설정 › vCenter 관리 › Bareos 백업 서버 › Director 에서 확인하세요.' });
+      if (!jd) return res.status(409).json({ ok: false, code: 'not-configured', reason: '이 법인의 Director 가 설정에 없습니다 — 설정 › 백업 › Bareos 백업 서버 › Director 에서 확인하세요.' });
       const miss = directorConn(jd).missing;
-      if (miss?.length) return res.status(409).json({ ok: false, code: 'not-configured', reason: `‘${jd.name}’ Director 설정이 덜 됐습니다(${miss.join('·')}) — 설정 › vCenter 관리 › Bareos 백업 서버 › Director 에서 먼저 채우세요.` });
+      if (miss?.length) return res.status(409).json({ ok: false, code: 'not-configured', reason: `‘${jd.name}’ Director 설정이 덜 됐습니다(${miss.join('·')}) — 설정 › 백업 › Bareos 백업 서버 › Director 에서 먼저 채우세요.` });
     }
     // OTP 는 입력 · 전제 검사를 통과한 뒤에 한 번(1회용 코드를 입력 실수로 태우지 않게). Director 에 닿기 전이다.
     if (config.auth.enabled) {
@@ -1440,9 +1456,9 @@ function drRunGate(req) {
     const settings0 = effectiveSettings();
     const site0 = settings0.sites.find((x) => String(x.vcenterId) === vcenterId);
     const jd = site0?.directorId ? directorById(site0.directorId, settings0) : null;
-    if (!jd) return { status: 409, code: 'not-configured', reason: '이 법인의 Director 가 설정에 없습니다 — 설정 › vCenter 관리 › Bareos 백업 서버 › Director 에서 확인하세요.' };
+    if (!jd) return { status: 409, code: 'not-configured', reason: '이 법인의 Director 가 설정에 없습니다 — 설정 › 백업 › Bareos 백업 서버 › Director 에서 확인하세요.' };
     const miss = directorConn(jd).missing;
-    if (miss?.length) return { status: 409, code: 'not-configured', reason: `‘${jd.name}’ Director 설정이 덜 됐습니다(${miss.join('·')}) — 설정 › vCenter 관리 › Bareos 백업 서버 › Director 에서 먼저 채우세요.` };
+    if (miss?.length) return { status: 409, code: 'not-configured', reason: `‘${jd.name}’ Director 설정이 덜 됐습니다(${miss.join('·')}) — 설정 › 백업 › Bareos 백업 서버 › Director 에서 먼저 채우세요.` };
   }
   // 시험 1대 규칙은 회차 **전체** 대수로 — 50대씩 나눈 묶음마다 보면 단계마다 1대인 회차가 규칙을 비켜 간다
   const total = waves.reduce((n, w) => n + w.items.length, 0);
@@ -1609,7 +1625,9 @@ api.post('/tools/bareos-backup/health/:vcenterId/thumb-accept', adminOnly, (req,
   } catch (e) { res.status(400).json({ ok: false, reason: String(e?.message || e).slice(0, 300) }); }
 });
 api.get('/tools/bareos-backup/health/settings', adminOnly, fullScopeOnly, (req, res) => {
-  res.json({ ok: true, config: loadHealthCfg(), loadError: !!healthLoadError() });
+  // v2.901(점검 S3): 저장한 관리자 계정명은 관리자 판본에만(mock 모드 데모 계정은 adminOnly 를 통과한다 — /health 의 cfgOut 과 같은 가림)
+  const c = loadHealthCfg();
+  res.json({ ok: true, config: isAdminDetailUser(req.user) ? c : { ...c, savedBy: '' }, loadError: !!healthLoadError() });
 });
 api.put('/tools/bareos-backup/health/settings', adminOnly, fullScopeOnly, fullWriteOnly, (req, res) => {
   try {
@@ -1643,7 +1661,7 @@ api.get('/tools/bareos-backup/rehearsal', adminOnly, (req, res) => {
   const visDirs = allowed ? new Set(allJobs.filter((j) => allowed.has(j.vcenterId)).map(jobDir)) : null;
   const policy = allowed
     ? { ...st.policy, savedBy: '', datastores: Object.fromEntries(Object.entries(st.policy.datastores || {}).filter(([vc]) => allowed.has(vc))) }
-    : st.policy;
+    : isAdminDetailUser(req.user) ? st.policy : { ...st.policy, savedBy: '' };   // v2.901(점검 S3): 데모 계정에는 계정명을 싣지 않는다
   const runs = st.runs.filter((x) => !visDirs || visDirs.has(x.directorId))   // v2.874 B4-03: 상태가 이미 Director 마다 RUNS_PER_DIR 건 — 여기서 전 법인 공용으로 다시 자르지 않는다
     .map((x) => (allowed ? { ...x, items: (x.items || []).filter((it) => allowed.has(vcOfJob.get(it.jobId))) } : x));
   // v2.863 정책 화면의 vCenter 별 데이터스토어 칸 — 활성 대상이 있는 vCenter(정책 편집은 전체 범위 전용이라 범위 계정에는 싣지 않는다)
@@ -1685,7 +1703,7 @@ api.post('/tools/bareos-backup/rehearsal/run', adminOnly, fullScopeOnly, fullWri
   if (rehearsalBusy()) return res.status(409).json({ ok: false, code: 'busy', reason: '다른 복원 검증이 진행 중입니다 — 끝난 뒤 다시 누르세요.' });
   if (!isDemoActive()) {
     const miss = directorConn(directorById(dirId, settings)).missing;
-    if (miss?.length) return res.status(409).json({ ok: false, code: 'not-configured', reason: `그 Director 설정이 덜 됐습니다(${miss.join('·')}) — 설정 › vCenter 관리 › Bareos 백업 서버 › Director 에서 먼저 채우세요.` });
+    if (miss?.length) return res.status(409).json({ ok: false, code: 'not-configured', reason: `그 Director 설정이 덜 됐습니다(${miss.join('·')}) — 설정 › 백업 › Bareos 백업 서버 › Director 에서 먼저 채우세요.` });
   }
   if (config.auth.enabled) { const v = verifyUserOtp(name, req.body?.otp); if (!v.ok) return res.status(403).json({ ok: false, reason: `OTP 인증 실패 — ${v.reason}` }); }
   try {
@@ -1696,7 +1714,8 @@ api.post('/tools/bareos-backup/rehearsal/run', adminOnly, fullScopeOnly, fullWri
 
 /** 일일 요약 메일 — 설정 · 마지막 발송 · 지금 보내 보기(전 법인 요약이라 전체 범위 관리자). */
 api.get('/tools/bareos-backup/digest', adminOnly, fullScopeOnly, (req, res) => {
-  res.json({ ok: true, config: loadDigest(), loadError: !!digestLoadError(), status: digestStatus() });
+  const c = loadDigest();   // v2.901(점검 S3): 저장한 관리자 계정명은 관리자 판본에만
+  res.json({ ok: true, config: isAdminDetailUser(req.user) ? c : { ...c, savedBy: '' }, loadError: !!digestLoadError(), status: digestStatus() });
 });
 api.put('/tools/bareos-backup/digest', adminOnly, fullScopeOnly, fullWriteOnly, (req, res) => {
   try {

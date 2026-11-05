@@ -18,7 +18,7 @@ import { TierBadge, UsagePair, MemberCount, FaultCell, BackupCell, SrcCell, Memb
 import { UnassignedView, UnmappedView, ReviewView, RulesView } from './svcInventory/Queues.jsx';
 import GlobalAxis from './svcInventory/GlobalAxis.jsx';
 import PinModal from './svcInventory/PinModal.jsx';
-import { folderTreeOf, opErrorText, TIER_TEXT, csvNameOf, FAULT_REASON, filterServices, reviewSummary } from './svcInventoryText.js';
+import { folderTreeOf, opErrorText, TIER_TEXT, csvNameOf, FAULT_REASON, filterServices, reviewSummary, writeResultNote } from './svcInventoryText.js';
 import { numOrNull } from '../../numOrNull.js';
 
 const AXIS_KEY = 'svcinv.axis';
@@ -99,7 +99,7 @@ export default function SvcInventory() {
     try {
       const r = await postJson('/tools/svc-inventory/op', body);
       if (!r || r.ok === false) throw new Error(r?.reason || '요청을 처리하지 못했습니다.');
-      setNote({ ok: true, text: okText || '저장했습니다.' });
+      setNote(writeResultNote(okText, r.result));   // 바뀐 것이 0건이면 성공 문구를 띄우지 않는다(6차 7)
       await load(); setReloadKey((k) => k + 1);
       return r;
     } catch (e) { setNote({ ok: false, text: opErrorText(e) }); return null; }
@@ -140,7 +140,9 @@ export default function SvcInventory() {
   if (!d) return <Loading />;
 
   // 큐 숫자는 지금 고른 범위 기준 — 법인을 골랐으면 그 법인 것만(전 법인 합계를 법인 화면 탭에 붙이면 KPI 와 숫자가 어긋난다 · 1440 실측).
-  const q = selCorp ? (d.queuesByCorp?.[selCorp] || { unassigned: 0, unmapped: 0, drift: 0, ghosts: 0, ghostsHeld: 0, mismatch: 0 }) : (d.queues || {});
+  // '(법인 미지정)' 노드 — 법인 귀속이 없는 구성원만(6차 6: 예전에는 selCorp 가 빈 값이라 '전체 법인' 숫자·큐가 나왔다). 서버 법인별 묶음의 '' 키가 그것이다.
+  const noCorpSel = sel.type === 'un' && !sel.corp;
+  const q = selCorp || noCorpSel ? (d.queuesByCorp?.[selCorp || ''] || { unassigned: 0, unmapped: 0, drift: 0, ghosts: 0, ghostsHeld: 0, mismatch: 0 }) : (d.queues || {});
   const review = reviewSummary(q);   // 수에 들어가는 것을 부제에 전부(5차 R17)
   const reviewN = review.n;
   // 서비스·폴더를 골랐을 때 앞 두 KPI 는 그 서비스 기준, 뒤 셋은 법인 기준이다 — 섞인 것을 밝힌다(5차 R16)
@@ -148,7 +150,8 @@ export default function SvcInventory() {
   const listed = filterServices(shown, { ...flt, corpName });
   const filtering = !!(flt.q.trim() || flt.tier1 || flt.noOwner);
   const totals = shown.reduce((a, s) => ({ vm: a.vm + s.stat.n.vm, bm: a.bm + s.stat.n.bm }), { vm: 0, bm: 0 });
-  const unassignedHere = (sel.type === 'all' ? corps : corps.filter((c) => c.vcenterId === selCorp)).reduce((a, c) => a + (c.unassigned?.n?.total || 0), 0) + (sel.type === 'all' && d.noCorp ? d.noCorp.n.total : 0);
+  const unassignedHere = noCorpSel ? (d.noCorp?.n?.total || 0)
+    : (sel.type === 'all' ? corps : corps.filter((c) => c.vcenterId === selCorp)).reduce((a, c) => a + (c.unassigned?.n?.total || 0), 0) + (sel.type === 'all' && d.noCorp ? d.noCorp.n.total : 0);
   const crumb = [<b key="a">전체 법인</b>];
   if (sel.type !== 'all') crumb.push(<span key="c">{corpName(sel.corp)}</span>);
   if (sel.type === 'folder') sel.path.split('\\').forEach((p, i) => crumb.push(<span key={`f${i}`}>{p}</span>));
@@ -156,9 +159,13 @@ export default function SvcInventory() {
   if (sel.type === 'un') crumb.push(<b key="u" style={{ color: 'var(--amber)' }}>(미지정)</b>);
   const canWriteHere = selCorp && writableOf(selCorp);
   const selCorpRow = selCorp ? corps.find((c) => c.vcenterId === selCorp) : null;
+  // 고른 폴더 아래 서비스 수(폴더 삭제 확인 · 서버에 expect 로 보내 그 사이 바뀌면 409) · 부모 경로
+  const folderSvcN = sel.type === 'folder' ? services.filter((x) => x.corp === selCorp && (x.path === sel.path || String(x.path || '').startsWith(`${sel.path}\\`))).length : 0;
+  const folderParent = sel.type === 'folder' && sel.path.includes('\\') ? sel.path.slice(0, sel.path.lastIndexOf('\\')) : '';
   const orphanOf = (vc) => !!corps.find((c) => c.vcenterId === vc)?.orphan;
   const folderOptions = selCorp ? [...new Set([...(corps.find((c) => c.vcenterId === selCorp)?.folders || []), ...servicesOf(selCorp).map((s) => s.path).filter(Boolean)])].sort() : [];
-  const membersQuery = selRow ? (selRow.startsWith('un:') ? { corp: selRow.slice(3), unassigned: '1' } : { service: selRow }) : null;
+  // '(법인 미지정)' 은 법인 귀속이 없는 구성원만 — corp:'' 로 보내면 빈 값이 빠져 전 법인 미지정이 나왔다(6차 6)
+  const membersQuery = selRow ? (selRow.startsWith('un:') ? (selRow.slice(3) ? { corp: selRow.slice(3), unassigned: '1' } : { nocorp: '1' }) : { service: selRow }) : null;
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12, minWidth: 0 }}>
@@ -183,7 +190,7 @@ export default function SvcInventory() {
           {!d.meta?.faults?.available ? ` ${FAULT_REASON[d.meta?.faults?.reason] || ''}.` : ''}
         </div>
       </div>
-      {note ? <div className="card" style={{ padding: '8px 12px', borderLeft: `3px solid ${note.ok ? 'var(--green)' : 'var(--red)'}`, fontSize: 13 }}>{note.ok ? '✓ ' : '⚠ '}{note.text}</div> : null}
+      {note ? <div className="card" style={{ padding: '8px 12px', borderLeft: `3px solid ${note.warn ? 'var(--amber)' : note.ok ? 'var(--green)' : 'var(--red)'}`, fontSize: 13 }}>{note.ok && !note.warn ? '✓ ' : '⚠ '}{note.text}</div> : null}
       {d.meta?.unreadCorps?.length ? <div className="card" style={{ padding: '8px 12px', borderLeft: '3px solid var(--amber)', fontSize: 13 }}>⚠ 지금 읽지 못하는 법인 {d.meta.unreadCorps.length}곳({d.meta.unreadCorps.slice(0, 5).map(corpName).join(', ')}) — 그 법인의 사용률은 지금 값이 아니라 ‘오래됨’ 으로 빠지고, 그 법인의 고정은 유령으로 보지 않습니다(판정 보류).</div> : null}
 
       {axis === 'svc' ? (
@@ -220,9 +227,32 @@ export default function SvcInventory() {
                       <button type="button" className="logout-btn" style={btn} disabled={busy} onClick={() => { setForm(form === 'folder' ? '' : 'folder'); setFv({ path: sel.type === 'folder' ? `${sel.path}\\` : '' }); }}>＋ 폴더</button>
                       <button type="button" className="logout-btn" style={btn} disabled={busy} onClick={() => { setForm(form === 'svc' ? '' : 'svc'); setFv({ path: sel.type === 'folder' ? sel.path : '', name: '', tier: '2', owner: '' }); }}>＋ 서비스</button>
                       <button type="button" className="logout-btn" style={btn} disabled={busy} onClick={() => setPin({ corp: selCorp, service: sel.type === 'svc' ? sel.id : '' })}>⊕ 한 대씩 고정</button>
+                      {/* 고른 폴더의 이름 바꾸기·삭제(예약 1-b) — 폴더는 화면용 묶음이라 판정·고정에는 영향이 없다 */}
+                      {sel.type === 'folder' ? <>
+                        <span className="muted" style={{ fontSize: 12 }}>· 폴더 ‘{sel.path}’</span>
+                        <button type="button" className="logout-btn" style={btn} disabled={busy} onClick={() => { setForm(form === 'frename' ? '' : 'frename'); setFv({ name: sel.path.slice(sel.path.lastIndexOf('\\') + 1) }); }}>이름 바꾸기</button>
+                        <button type="button" className="logout-btn" style={btn} disabled={busy} onClick={() => setForm(form === 'fremove' ? '' : 'fremove')}>폴더 삭제…</button>
+                      </> : null}
                     </>
                   )}
                 </div>
+                {form === 'frename' && canWriteHere && sel.type === 'folder' ? (
+                  <div className="flex wrap gap" style={{ padding: '8px 14px', background: 'var(--panel-2)', alignItems: 'center' }}>
+                    <span className="muted" style={{ fontSize: 12 }}>‘{sel.path}’ 새 이름(같은 위치 · 아래 하위 폴더·서비스 {folderSvcN}개 경로도 함께)</span>
+                    <input className="input" autoFocus value={fv.name || ''} onChange={(e) => setFv({ ...fv, name: e.target.value })} placeholder="새 폴더 이름" aria-label="새 폴더 이름" style={{ maxWidth: 220 }} />
+                    <button type="button" className="login-btn" style={btn} disabled={busy || !String(fv.name || '').trim()} onClick={async () => { const r = await op({ op: 'folder.rename', corp: selCorp, path: sel.path, name: fv.name }, `폴더 이름을 ‘${fv.name}’ 로 바꿨습니다.`); if (r) { setForm(''); if (r.result?.to) setSel({ type: 'folder', corp: selCorp, path: r.result.to }); } }}>저장</button>
+                    <button type="button" className="logout-btn" style={btn} onClick={() => setForm('')}>취소</button>
+                  </div>
+                ) : null}
+                {form === 'fremove' && canWriteHere && sel.type === 'folder' ? (
+                  <div className="flex wrap gap" style={{ padding: '8px 14px', background: 'var(--panel-2)', alignItems: 'center', borderLeft: '3px solid var(--amber)' }}>
+                    <span style={{ fontSize: 12, flex: '1 1 260px', minWidth: 0 }}>{folderSvcN
+                      ? <>폴더 ‘{sel.path}’ 아래에 서비스 <b>{folderSvcN}</b>개가 있습니다 — 이 폴더 한 단계만 걷어 내고 그 아래(하위 폴더·서비스)를 ‘{folderParent || '(루트)'}’ 로 올립니다. 서비스·구성원·규칙·고정은 그대로입니다.</>
+                      : <>빈 폴더 ‘{sel.path}’ 을(를) 지웁니다(아래 빈 하위 폴더 포함).</>}</span>
+                    <button type="button" className="login-btn" style={btn} disabled={busy} onClick={async () => { const r = await op({ op: 'folder.remove', corp: selCorp, path: sel.path, expect: folderSvcN, ...(folderSvcN ? { moveUp: true } : {}) }, folderSvcN ? `폴더 ‘${sel.path}’ 을 걷어 내고 서비스 ${folderSvcN}개를 한 단계 위로 올렸습니다.` : `폴더 ‘${sel.path}’ 을 지웠습니다.`); if (r) { setForm(''); setSel(folderParent ? { type: 'folder', corp: selCorp, path: folderParent } : { type: 'corp', corp: selCorp }); } }}>{folderSvcN ? '걷어 내기' : '지우기'}</button>
+                    <button type="button" className="logout-btn" style={btn} onClick={() => setForm('')}>취소</button>
+                  </div>
+                ) : null}
                 {form === 'folder' && canWriteHere ? (
                   <div className="flex wrap gap" style={{ padding: '8px 14px', background: 'var(--panel-2)', alignItems: 'center' }}>
                     <span className="muted" style={{ fontSize: 12 }}>새 폴더(구분자 \ · 최대 10단계)</span>
@@ -274,15 +304,15 @@ export default function SvcInventory() {
                   {membersQuery ? <MembersPanel title={selRow.startsWith('un:') ? `(미지정) · ${corpName(selRow.slice(3))}` : svcName(selRow)} sub={selRow.startsWith('un:') ? '미지정 구성원' : '구성원'} query={membersQuery} reloadKey={reloadKey} showReason={selRow.startsWith('un:')} /> : null}
                 </>
               ) : null}
-              {view === 'un' ? <UnassignedView corp={selCorp} reloadKey={reloadKey} servicesOf={servicesOf} writableOf={writableOf} op={op} busy={busy} corpName={corpName} onPinGroup={(g) => setPin({ corp: g.corp, service: '' })} /> : null}
-              {view === 'unmapped' ? <UnmappedView corp={selCorp} reloadKey={reloadKey} servicesOf={servicesOf} writableOf={writableOf} op={op} busy={busy} corpName={corpName} /> : null}
-              {view === 'review' ? <ReviewView corp={selCorp} reloadKey={reloadKey} svcName={svcName} writableOf={writableOf} op={op} busy={busy} corpName={corpName} /> : null}
+              {view === 'un' ? <UnassignedView corp={selCorp} nocorp={noCorpSel} reloadKey={reloadKey} servicesOf={servicesOf} writableOf={writableOf} op={op} busy={busy} corpName={corpName} onPinGroup={(g) => setPin({ corp: g.corp, service: '' })} /> : null}
+              {view === 'unmapped' ? <UnmappedView corp={selCorp} nocorp={noCorpSel} reloadKey={reloadKey} servicesOf={servicesOf} writableOf={writableOf} op={op} busy={busy} corpName={corpName} /> : null}
+              {view === 'review' ? <ReviewView corp={selCorp} nocorp={noCorpSel} reloadKey={reloadKey} svcName={svcName} writableOf={writableOf} op={op} busy={busy} corpName={corpName} /> : null}
               {view === 'rules' ? <RulesView corp={selCorp} corpRow={corps.find((c) => c.vcenterId === selCorp)} servicesOf={servicesOf} writable={!!canWriteHere} op={op} busy={busy} canFleet={d.canFleet} tagCategory={d.settings?.tagCategory} corpName={corpName} /> : null}
             </div>
           </div>
         </>
       )}
-      {pin ? <PinModal corp={pin.corp} defaultService={pin.service} corps={corps} servicesOf={servicesOf} writableOf={writableOf} op={op} busy={busy} corpName={corpName} onClose={() => setPin(null)} /> : null}
+      {pin ? <PinModal corp={pin.corp} defaultService={pin.service} corps={corps} servicesOf={servicesOf} writableOf={writableOf} op={op} busy={busy} corpName={corpName} scoped={!!d?.scoped} onClose={() => setPin(null)} /> : null}
     </div>
   );
 }

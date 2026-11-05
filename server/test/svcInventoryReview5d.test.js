@@ -40,7 +40,10 @@ function setup(pins = {}) {
   fs.writeFileSync(path.join(tmp, 'service-map.json'), JSON.stringify({ rev: 0, globals: [], settings: { tagCategory: '' }, corps: { 'vc-a': corpOf({ services: [S('s1', 'ERP'), S('s2', 'MES')], folderRules: [{ prefix: '/ERP', serviceId: 's1' }] }) } }));
   fs.writeFileSync(path.join(tmp, 'service-map-pins.json'), JSON.stringify({ rev: 0, pins }));
 }
-const snapOf = (n, vms = []) => ({ ...store.snapshot, generatedAt: Date.now() + n, vcenters: [{ id: 'vc-a', name: 'vcenter-a' }], hosts: [], vms });
+// v2.906: 세대(generatedAt)는 늘 커지게 — 예전 'Date.now() + n' 은 앞 테스트(n 이 더 큰)와 시각 차가 정확히 n 차이면 같은 세대가 되어
+//   수집 기억(열쇠 = generatedAt)이 앞 테스트의 구성원을 돌려줬다(전량 실행에서만 간헐 실패 — R15 '0 !== 3'). 운영 세대는 수집마다 새 시각이다.
+let _gen = Date.now();
+const snapOf = (n, vms = []) => ({ ...store.snapshot, generatedAt: (_gen += 10_000) + n, vcenters: [{ id: 'vc-a', name: 'vcenter-a' }], hosts: [], vms });
 
 test('R7: 범위 계정 판본의 구성원·큐·후보·CSV·유령 정리 미리보기에 서비스태그가 없다(키는 토큰) — 전체 범위 관리자는 그대로', async () => {
   setup({ [`st:${TAG2.toLowerCase()}`]: { serviceId: 's1', corp: 'vc-a', by: 'a', at: 1 } });   // 유령(서버 없음)
@@ -114,8 +117,9 @@ test('R15: 키 등급이 오르면 옛 키 고정을 승계한다(유령 아님 
   const inv = buildInventory({ members: [vm], map, pins, uuidUnreadCorps: new Set(['A']) });
   assert.deepEqual(inv.queues.aliasPins.map((x) => [x.key, x.aliasKey]), [['iu:A:u1', 'vm:A:vm-1']]);
   assert.deepEqual(inv.queues.drift.map((x) => [x.key, x.pin.by, x.pin.at]), [['iu:A:u1', 'kim', 7]], '별칭 고정의 드리프트 행도 고정한 사람·시각(4차 반증 6)');
-  assert.deepEqual(inv.queues.ghosts.map((x) => x.key).sort(), ['iu:B:gone', 'st:zz9gone'], "별칭 고정은 유령이 아니다 · st: 고정은 '함대가 안다' 로 붙잡지 않는다(4차 반증 2 — ESXi 가 된 서버)");
-  assert.deepEqual(inv.queues.ghostsHeld.map((x) => [x.key, x.held]), [['iu:A:gone', 'uuid-unread']], 'instanceUuid 를 못 읽는 법인만 보류(4차 반증 5)');
+  assert.deepEqual(inv.queues.ghosts.map((x) => x.key).sort(), ['st:zz9gone'], "별칭 고정은 유령이 아니다 · st: 고정은 '함대가 안다' 로 붙잡지 않는다(4차 반증 2 — ESXi 가 된 서버)");
+  // instanceUuid 를 못 읽는 법인은 보류(4차 반증 5) · VM 이 한 대도 없는 법인 B 의 VM 고정도 보류(6차 1 — 예전에는 유령)
+  assert.deepEqual(inv.queues.ghostsHeld.map((x) => [x.key, x.held]).sort(), [['iu:A:gone', 'uuid-unread'], ['iu:B:gone', 'corp-no-vms']]);
   const otherCorp = resolveMember({ ...vm, corp: 'B', key: 'iu:B:u9' }, buildIndex(map), {}, pins);
   assert.equal(otherCorp.src, 'none', '다른 법인의 별칭 고정은 쓰지 않는다');
 });

@@ -354,7 +354,7 @@ export function upsertCollectorFromAgent({ name, url, token, datacenter = '', un
   //   미검증 새 항목은 작게(SELF_REG_UNVERIFIED_MAX), 자기등록 항목 전체는 넉넉히(SELF_REG_MAX — 현장 28곳·30+ 확장).
   if (shared) {
     const selfReg = list.filter((c) => !c.managed);
-    if (selfReg.length >= SELF_REG_MAX) return { ok: false, capped: true, reason: `자기등록 수집 서버가 상한(${SELF_REG_MAX}개)에 닿아 새 이름 '${id}' 을 받지 않습니다 — 관리자가 설정 › 수집 서버에서 등록하거나 엣지별 개별 토큰을 쓰세요.` };
+    if (selfReg.length >= SELF_REG_MAX) return { ok: false, capped: true, reason: `자기등록 수집 서버가 상한(${SELF_REG_MAX}개)에 닿아 새 이름 '${id}' 을 받지 않습니다 — 관리자가 설정 › 엣지·원격 › 수집 서버(원격)에서 등록하거나 엣지별 개별 토큰을 쓰세요.` };
     if (unverified && selfReg.filter((c) => c.selfRegUnverified).length >= SELF_REG_UNVERIFIED_MAX) return { ok: false, capped: true, reason: `검증되지 않은 자기등록이 상한(${SELF_REG_UNVERIFIED_MAX}개)에 닿아 새 이름 '${id}' 을 받지 않습니다 — 등록 URL(EDGE_ADVERTISE_URL)이 이 엣지에 닿는지 확인하거나 관리자가 직접 등록하세요.` };
   }
   const r = addCollector({ id, name: id, url, token, datacenter, enabled: true }, { managed: false, transport });

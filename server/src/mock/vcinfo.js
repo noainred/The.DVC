@@ -104,5 +104,40 @@ export function mockVcInfo(kind, vcId, snap, now = Date.now(), allowed = null) {
     });
     return { at: now - ((seed % 300) + 40) * MIN, items, omitted: 0, error: null };
   }
+  if (kind === 'pools') {
+    // v2.901: 데모 리소스 풀 — 이 vCenter VM 의 풀 이름마다 하나(이름순 · 결정적). 'Resources' 는 클러스터 루트 풀.
+    const names = [...new Set(vms.map((v) => v.resourcePool).filter(Boolean))].sort();
+    const items = names.slice(0, 200).map((n, i) => {
+      const root = n === 'Resources';
+      const k = (seed + i) % 5;
+      return {
+        ref: `resgroup-${100 + i}`, name: n, owner: null, root,
+        cpu: { res: root ? 512_000 : [0, 0, 4000, 8000, 0][k], limit: root ? 512_000 : (k === 3 ? 16_000 : -1), expandable: root ? false : k !== 2, shares: [4000, 8000, 2000, 8000, 4000][k], level: ['normal', 'high', 'low', 'high', 'custom'][k] },
+        mem: { res: root ? 2_048_000 : [0, 16_384, 0, 65_536, 0][k], limit: root ? 2_048_000 : (k === 4 ? 32_768 : -1), expandable: root ? false : true, shares: [163_840, 327_680, 81_920, 327_680, 100_000][k], level: ['normal', 'high', 'low', 'high', 'custom'][k] },
+      };
+    });
+    return { at: now - ((seed % 300) + 50) * MIN, items, omitted: 0, error: null };
+  }
+  if (kind === 'dvpg') {
+    // v2.906: 데모 분산 포트그룹 팀 구성 — 이 vCenter 의 분산 포트그룹(스냅샷 networks) + 업링크 포트그룹 하나. vDS 이름은 데모 호스트 hcfg 의 분산 스위치와 같다.
+    //   갈래가 보이게: 포트 ID 기반 · 물리 NIC 부하 기반 · LAG(Enhanced LACP) · 명시적 장애 조치(대기 업링크) · 트렁크 VLAN.
+    const dvsName = hosts.flatMap((h) => h.hcfg?.net?.switches || []).find((w) => w.kind === 'dvs')?.name || 'DSwitch-Prod';
+    const nets = (snap?.networks || []).filter((n) => n.vcenterId === vcId && n.type === 'DISTRIBUTED_PORTGROUP').slice(0, 200);
+    const items = nets.map((n, i) => {
+      const k = (seed + i) % 4;
+      const teaming = [
+        { policy: 'loadbalance_srcid', active: ['Uplink 1', 'Uplink 2'], standby: [], failback: true },
+        { policy: 'loadbalance_loadbased', active: ['Uplink 1', 'Uplink 2'], standby: [], failback: true },
+        { policy: 'loadbalance_ip', active: ['lag1'], standby: [], failback: true },
+        { policy: 'failover_explicit', active: ['Uplink 1'], standby: ['Uplink 2'], failback: false },
+      ][k];
+      return { ref: `dvportgroup-${200 + i}`, name: n.name, dvs: 'dvs-21', dvsName, uplinkPg: false,
+        vlan: k === 3 ? { id: null, trunk: [[100, 199], [300, 300]], pvlan: null } : { id: Number.isInteger(n.vlanId) ? n.vlanId : null, trunk: null, pvlan: null },
+        teaming, lacp: k === 2 ? { enabled: true, mode: 'active', lag: 'lag1' } : { enabled: false, mode: null, lag: null } };
+    });
+    items.push({ ref: 'dvportgroup-199', name: `${dvsName}-DVUplinks-20`, dvs: 'dvs-21', dvsName, uplinkPg: true, vlan: { id: null, trunk: [[0, 4094]], pvlan: null },
+      teaming: { policy: 'loadbalance_srcid', active: ['Uplink 1', 'Uplink 2'], standby: [], failback: true }, lacp: { enabled: false, mode: null, lag: null } });
+    return { at: now - ((seed % 300) + 40) * MIN, items, omitted: 0, error: null };
+  }
   return null;
 }

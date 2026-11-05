@@ -160,6 +160,14 @@ export function filterServices(list, { q = '', tier1 = false, noOwner = false, c
   });
 }
 
+/**
+ * 범위 계정 판본의 베어메탈 키는 서버가 'masked-' 토큰으로 준다(5차 R7). 화면에는 토큰 문자열 대신 '(가림)' 으로 보인다 —
+ * 토큰은 쓰기 연산에 그대로 돌려보내는 값이라 사람이 읽을 뜻이 없다(다음 단계 실화면 검증에서 찾음).
+ */
+export const isMaskedKey = (k) => typeof k === 'string' && k.startsWith('masked-');
+export const keyText = (k) => (isMaskedKey(k) ? '(가림)' : String(k ?? ''));
+export const MASKED_KEY_TITLE = '범위가 지정된 계정에는 베어메탈 식별 키(서비스태그)를 가린 표지로 보입니다 — 고정·정리는 그대로 됩니다';
+
 /** 서버 오류 → 사람이 읽을 문장. */
 export function opErrorText(e) {
   const m = String(e?.message || e || '').trim();
@@ -182,6 +190,28 @@ export function reviewSummary(q = {}) {
   const n = parts.reduce((a, [, x]) => a + n0(x), 0);
   const meta = `${parts.length ? parts.map(([l, x]) => `${l} ${n0(x)}`).join(' · ') : '드리프트·불일치·유령·모호 없음'}${n0(q.ghostsHeld) ? ` (판정 보류 ${n0(q.ghostsHeld)} — 수에 넣지 않음)` : ''}`;
   return { n, meta };
+}
+
+/**
+ * 쓰기 결과 문구(순수 — 6차 7). 서버가 200 을 줘도 **바뀐 것이 0 건**일 수 있다(범위 계정의 가린 키가 재시작으로 바뀌었거나 다른 법인·사라진 구성원).
+ * 그때 '고정했습니다' 를 띄우지 않는다. @returns {{ok:boolean, warn?:boolean, text:string}}
+ */
+export function writeResultNote(okText, result) {
+  const r = result && typeof result === 'object' ? result : {};
+  const skip = n0(r.skipped);
+  const why = '다른 법인이거나 사라진 구성원, 또는 화면이 오래돼 키가 맞지 않습니다 — 새로 고쳐 다시 고르십시오';
+  if (typeof r.changed === 'number') {
+    if (r.changed === 0) return { ok: false, warn: true, text: `바뀐 것이 없습니다${skip ? ` — ${skip}건을 건너뛰었습니다(${why})` : ''}.` };
+    if (skip) return { ok: true, warn: true, text: `${okText} 단, ${skip}건은 건너뛰었습니다(${why}).` };
+  }
+  if (typeof r.moved === 'number') {
+    const c = n0(r.conflicts); const o = n0(r.otherCorp);
+    const why = [c ? `서비스가 다른 ${c}건(충돌 행에서 고르십시오)` : '', o ? `새 키가 다른 법인에 고정된 ${o}건(법인 불일치 — 검토 탭)` : ''].filter(Boolean).join(' · ');
+    if (!r.moved && !n0(r.dropped)) return { ok: false, warn: true, text: why ? `옮긴 것이 없습니다 — ${why}은 옮기지 않았습니다.` : '옮길 옛 키 고정이 없습니다.' };
+    if (why) return { ok: true, warn: true, text: `${okText} 단, ${why}은 옮기지 않았습니다.` };
+  }
+  if (typeof r.removed === 'number' && r.removed === 0) return { ok: false, warn: true, text: `지운 것이 없습니다${skip ? ` — 미리 본 뒤 유령이 아니게 된 ${skip}건을 건너뛰었습니다` : ''}.` };
+  return { ok: true, text: okText || '저장했습니다.' };
 }
 
 /** CSV 파일 이름. */
