@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>받는 메일 — 1분 묶음 한 통</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=Noto+Sans+KR:wght@400;500;700;800&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+body{margin:0;background:#0a0e17;color:#e6edf6;font-family:"Inter","Noto Sans KR","Apple SD Gothic Neo",sans-serif;font-size:13px}
+a{color:#2563eb}a:hover{color:#1d4ed8}
+.mono{font-family:"JetBrains Mono",ui-monospace,monospace}
+.muted{color:#8b9bb4}.faint{color:#5d6b85}
+.client{background:#141b2d;border:1px solid #243049;border-radius:12px;overflow:hidden}
+.hdr{padding:12px 16px;border-bottom:1px solid #243049;display:flex;flex-direction:column;gap:4px;font-size:12.5px}
+.hdr b{font-size:14px}
+.mail{background:#ffffff;color:#101828;padding:18px 20px;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Malgun Gothic",sans-serif;font-size:13.5px;line-height:1.65}
+.mail h2{margin:0 0 10px;font-size:16px}
+.mail ul{margin:0;padding-left:18px}
+.mail li{margin:4px 0}
+.mail .foot{margin-top:14px;color:#667085;font-size:12px}
+.note{border:1px solid rgba(245,158,11,.5);background:rgba(245,158,11,.10);border-radius:8px;padding:8px 10px;font-size:12px;line-height:1.55;margin-top:12px}
+.ok{border-color:rgba(34,197,94,.5);background:rgba(34,197,94,.10)}
+</style>
+</helmet>
+
+<div style="width: 760px; min-height: 700px; box-sizing: border-box; padding: 20px; display: flex; flex-direction: column; gap: 12px; background: #0a0e17">
+  <div class="muted" style="font-size: 12px">kim.lee(담당자)가 받는 메일 — 댓글 언급과 이슈 할당이 같은 1분 묶음에 들어가 <b style="color: #e6edf6">한 통</b>이 된다. park.ki(관찰자)도 같은 꼴로 한 통.</div>
+  <div class="client">
+    <div class="hdr">
+      <b>[포탈] 이슈 변경 2건</b>
+      <span class="muted">보낸 사람: vmware-portal &lt;portal@corp.example&gt; · 받는 사람: kim.lee &lt;kim.lee@corp.example&gt;(이슈 › 설정 › 알림의 사람 → 주소 표) · 11-05 16:21</span>
+    </div>
+    <div class="mail">
+      <h2>이슈 변경 2건</h2>
+      <p style="margin: 0 0 8px">kim.lee 님,</p>
+      <ul>
+        <li><b>[위키] the DVC 주요 기능 소개</b> — 댓글 · 에서 언급했습니다 · noainred: US-East 수집도 같은 증상입니다. @kim.lee/김이령 수집 시한을 90초로 올려 주세요. @park.ki/박기태 참고 부탁합니다.</li>
+        <li><b>[이슈] ISS-42 [위키] the DVC 주요 기능 소개 — US-East 수집도 같은 증상입니다…</b> — 할당 · noainred → kim.lee · P2 · 작업 · 공용(전 법인)</li>
+      </ul>
+      <p style="margin: 12px 0 0"><a href="#">ISS-42 열기</a> · <a href="#">문서의 댓글로 가기</a></p>
+      <div class="foot">포탈 › 이슈에서 확인하세요. 이 메일은 1분 안의 변경을 모아 한 통으로 보냅니다.</div>
+    </div>
+  </div>
+
+  <div class="note ok">기존 경로 그대로 — 위키 댓글 알림(queueWikiEvent)과 이슈 할당 알림(queueIssueEvent)이 사람별 pending 에 줄을 쌓고 flush 가 한 통으로 보낸다. 새 메일 종류 · 템플릿 없음. 링크 두 개(이슈 · 댓글 앵커)만 줄에 덧붙인다.</div>
+  <div class="note">보이는 조건 — 이슈 › 설정 › 알림이 <b>켜짐</b> + 종류 ‘위키’ · ‘할당’ 켜짐 + 그 사람이 주소 표에 있음. 하나라도 아니면 메일은 가지 않고 화면(②·⑥ 장)이 그 사실을 미리 보여 준다. 팀 채팅(Slack · Teams)에는 이슈 생성 줄만(위키 댓글은 채널 소음이 커서 기존대로 안 보냄).</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":760,"height":700}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>위키 댓글 @멘션 — 400px</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=Noto+Sans+KR:wght@400;500;700;800&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+body{margin:0;background:#0a0e17;color:#e6edf6;font-family:"Inter","Noto Sans KR","Apple SD Gothic Neo",sans-serif;font-size:13px}
+a{color:#93c5fd}a:hover{color:#bfdbfe}
+.tb{display:flex;align-items:center;gap:10px;height:44px;padding:0 12px;background:#0f1626;border-bottom:1px solid #243049}
+.tb .logo{display:inline-flex;align-items:center;gap:8px;font-weight:800;font-size:14px}
+.tb .logo .v{width:26px;height:26px;border-radius:7px;background:#3b82f6;display:inline-flex;align-items:center;justify-content:center;font-size:13px;color:#fff}
+.ver{font-size:11px;font-weight:700;color:#5eead4;border:1px solid #2dd4bf;border-radius:6px;padding:1px 6px}
+.mock{font-size:11px;font-weight:800;color:#fcd34d;background:rgba(245,158,11,.16);border-radius:6px;padding:2px 7px}
+.card{background:#141b2d;border:1px solid #243049;border-radius:12px}
+.muted{color:#8b9bb4}.faint{color:#5d6b85}
+.mono{font-family:"JetBrains Mono",ui-monospace,monospace}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;min-height:36px;padding:0 12px;border-radius:8px;border:1px solid #243049;background:#1a2236;color:#e6edf6;font:inherit;font-size:12.5px;font-weight:600;cursor:pointer;white-space:nowrap;text-decoration:none}
+.btn.primary{background:#3b82f6;border-color:#3b82f6;color:#fff}
+.btn.sm{min-height:28px;padding:0 9px;font-size:11.5px}
+.tag{display:inline-flex;align-items:center;gap:5px;height:20px;padding:0 8px;border-radius:999px;font-size:11px;font-weight:700;white-space:nowrap}
+.tag.gray{background:rgba(139,155,180,.14);color:#aebbd0}.tag.warn{background:rgba(245,158,11,.16);color:#fcd34d}
+.iss{display:inline-flex;align-items:center;gap:6px;height:22px;padding:0 8px 0 6px;border-radius:6px;border:1px solid #243049;background:#0f1626;color:#e6edf6;font-size:12px;font-weight:600;text-decoration:none;vertical-align:middle}
+.iss .k{font-family:"JetBrains Mono",monospace;color:#93c5fd;font-size:11.5px}
+.iss .st{width:8px;height:8px;border-radius:50%}
+.av{display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:50%;font-size:11px;font-weight:800;color:#fff;flex:0 0 auto}
+.input{min-height:36px;border:1px solid #243049;border-radius:8px;background:#0a0e17;color:#e6edf6;font:inherit;font-size:13px;padding:0 10px;width:100%;box-sizing:border-box}
+.mention{display:inline-flex;align-items:center;height:22px;padding:0 7px 0 6px;border-radius:6px;background:rgba(59,130,246,.16);font-size:12px;font-weight:600;vertical-align:middle;white-space:nowrap;text-decoration:none}
+.mention .u{font-family:"JetBrains Mono",monospace;font-size:11.5px;color:#93c5fd}
+.mention .s{color:#5d6b85;padding:0 1px}
+.mention .n{color:#e6edf6}
+.ac{background:#0f1626;border:1px solid #3b82f6;border-radius:10px;overflow:hidden}
+.ac-h{display:flex;justify-content:space-between;gap:8px;padding:7px 10px;font-size:11px;color:#8b9bb4;border-bottom:1px solid #1f2a40}
+.ac-i{display:flex;align-items:center;gap:8px;min-height:46px;padding:0 10px;border:0;border-bottom:1px solid #1f2a40;background:none;width:100%;text-align:left;color:#e6edf6;font:inherit;cursor:pointer}
+.ac-i.on{background:rgba(59,130,246,.2)}
+.ac-i .u{font-family:"JetBrains Mono",monospace;font-size:12.5px;font-weight:600}
+.ac-i mark{background:transparent;color:#fcd34d;font-weight:800}
+.ac-i .r{margin-left:auto;display:flex;gap:4px;align-items:center;white-space:nowrap;font-size:11px;color:#8b9bb4}
+.ac-f{padding:6px 10px;font-size:11px;color:#5d6b85}
+.pane{border:1px solid #243049;border-radius:10px;background:#0f1626;padding:10px;display:flex;flex-direction:column;gap:8px}
+.chk{display:inline-flex;align-items:flex-start;gap:8px;font-size:13px;font-weight:700;line-height:1.4}
+.chk input{width:16px;height:16px;accent-color:#3b82f6;flex:0 0 auto;margin-top:1px}
+.lbl{font-size:11.5px;color:#8b9bb4}
+.fld{display:flex;flex-direction:column;gap:4px;min-width:0}
+.ml{display:inline-flex;align-items:center;gap:4px;font-size:11.5px;color:#86efac}
+.bottom{position:sticky;bottom:0;display:flex;gap:6px;padding:8px 10px;background:#0f1626;border-top:1px solid #243049}
+.bottom .btn{flex:1;min-width:0}
+.cm{display:flex;gap:8px}
+.cm .b{min-width:0;flex:1;font-size:13px;line-height:1.6}
+.linked{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-top:6px;padding:6px 8px;border-radius:8px;background:rgba(34,197,94,.08);border:1px solid rgba(34,197,94,.35);font-size:12px}
+</style>
+</helmet>
+
+<div style="min-height: 100vh; display: flex; flex-direction: column; background: #0a0e17; max-width: 100%">
+  <header class="tb">
+    <button class="btn sm" type="button" aria-label="메뉴" style="min-width: 34px; padding: 0">☰</button>
+    <span class="logo"><span class="v">V</span>The Davinci</span>
+    <span class="ver">v2.897.0</span><span class="mock">MOCK</span>
+    <span style="flex: 1"></span>
+    <span class="av" style="background: #3b82f6">N</span>
+  </header>
+
+  <main style="flex: 1; padding: 12px 12px 16px; display: flex; flex-direction: column; gap: 10px; min-width: 0">
+    <select class="input" aria-label="스페이스"><option selected>공용(전 법인) · 1</option></select>
+    <article class="card" style="padding: 14px 12px; min-width: 0">
+      <h1 style="font-size: 19px; margin: 0 0 6px; line-height: 1.3">the DVC 주요 기능 소개</h1>
+      <div class="muted" style="font-size: 11.5px; display: flex; gap: 6px; align-items: center; flex-wrap: wrap"><span class="tag gray">초안</span><span>v5 · noainred · 16:15</span></div>
+      <p class="faint" style="font-size: 12px; margin: 8px 0 0">(본문 생략)</p>
+    </article>
+
+    <section class="card" style="padding: 12px; display: flex; flex-direction: column; gap: 10px">
+      <b>댓글 2</b>
+      <div class="cm"><span class="av" style="background: #22c55e">C</span><div class="b"><b>choi</b> <span class="muted" style="font-size: 11.5px">14:02</span><div>첫 화면 바로 가기에 넣을까요? <a class="mention" href="#"><span class="u">@noainred</span></a></div></div></div>
+      <div class="cm"><span class="av" style="background: #3b82f6">N</span><div class="b"><b>noainred</b> <span class="muted" style="font-size: 11.5px">16:20</span>
+        <div>US-East 수집도 같은 증상입니다. <a class="mention" href="#"><span class="u">@kim.lee</span><span class="s">/</span><span class="n">김이령</span></a> 수집 시한을 90초로 올려 주세요.</div>
+        <div class="linked"><span>이슈로 등록됨</span><a class="iss" href="Issue.dc.html"><span class="st" style="background: #8b9bb4"></span><span class="k">ISS-42</span></a><span class="muted">담당 kim.lee</span></div>
+      </div></div>
+
+      <form style="display: flex; flex-direction: column; gap: 8px" aria-label="새 댓글">
+        <label for="cmt" class="lbl">새 댓글</label>
+        <textarea id="cmt" class="input" rows="3" style="padding: 8px 10px; line-height: 1.6; border-color: #3b82f6">재발 여부도 봐 주세요 @pa</textarea>
+        <div class="ac" role="listbox" aria-label="사람 후보">
+          <div class="ac-h"><span>사람 찾기 — ‘pa’</span><span>2명</span></div>
+          <button class="ac-i on" type="button" role="option" aria-selected="true"><span class="av" style="background: #22c55e">박</span><div style="display: flex; flex-direction: column; min-width: 0"><span class="u"><mark>pa</mark>rk.ki</span><span style="font-size: 12px">박기태</span></div><span class="r"><span class="ml"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 7l9 6 9-6"/></svg></span>운영자</span></button>
+          <button class="ac-i" type="button" role="option" aria-selected="false"><span class="av" style="background: #3b82f6">박</span><div style="display: flex; flex-direction: column; min-width: 0"><span class="u"><mark>pa</mark>rk.sw</span><span style="font-size: 12px">박선우</span></div><span class="r"><span class="ml"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 7l9 6 9-6"/></svg></span>운영자</span></button>
+          <div class="ac-f">목록은 글상자 아래 전폭 · 누르면 넣습니다 · 바깥을 누르면 닫힘</div>
+        </div>
+        <div class="faint" style="font-size: 11.5px">좁은 화면에서는 키보드 안내 줄을 숨기고 행을 46px 로.</div>
+
+        <div class="pane" aria-label="이슈로 등록">
+          <label class="chk" for="mk"><input id="mk" type="checkbox" checked>언급한 사람에게 이슈로 등록</label>
+          <div class="fld"><label class="lbl" for="asg">담당자</label><select id="asg" class="input"><option selected>park.ki / 박기태</option></select></div>
+          <div style="display: flex; gap: 8px"><div class="fld" style="flex: 1"><label class="lbl" for="typ">유형</label><select id="typ" class="input"><option selected>작업</option><option>장애</option><option>요청</option></select></div><div class="fld" style="flex: 1"><label class="lbl" for="pri">우선순위</label><select id="pri" class="input"><option>P0</option><option>P1</option><option selected>P2</option><option>P3</option></select></div></div>
+          <div class="fld"><label class="lbl" for="ttl">제목</label><input id="ttl" class="input" value="[위키] the DVC 주요 기능 소개 — 재발 여부도 봐 주세요"></div>
+          <div class="lbl">법인 공용(전 법인) · 메일 <span class="ml"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 7l9 6 9-6"/></svg>park.ki 주소 있음</span></div>
+        </div>
+        <button class="btn primary" type="submit">댓글 달기 + 이슈 등록</button>
+      </form>
+    </section>
+  </main>
+
+  <div class="bottom" aria-label="동작"><a class="btn" href="#">수정</a><button class="btn" type="button">지켜보기</button><a class="btn" href="#">이력</a></div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":400,"height":1560}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>
