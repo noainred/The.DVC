@@ -14,6 +14,7 @@ import STable from '../components/STable.jsx';
 import { vmSearchTerm, vmSearchSummary, vcNameOf, powerLabel, memText, VM_SEARCH_LIMIT } from './vcVmSearchText.js';
 import { countableTotals, PARTIAL_TITLE } from './corpSiteStatus.js'; // v2.741(WEB-01) 법인 표와 같은 '셀 수 있는 vCenter' 판정
 import { hostCapShort, hostCapFootnote, hostCapTotal } from './hostCapacityText.js'; // v2.742(LEFT-06): 용량 모름 호스트는 총량에서 빠졌다
+import { parseVcRoute, vcHash, currentHash, goHash, onHashChange } from './vcd/vcdRoute.js'; // v2.895: 상세 · 개체 보기 주소(#/vcenters/<id>[/vm|host/<id>])
 import { backupPairCell, backupTotals } from './veeamBadge.js'; // v2.757 카드의 VM 백업 수량 · v2.778.1 veeam/snapshot 두 수
 
 /**
@@ -186,7 +187,13 @@ function Bar({ label, pct, detail, title }) {
 
 export default function VCenters({ onSelectSite, resetSignal }) {
   const { data, error, loading } = usePolling('/vcenters', {}, 15_000);
-  const [openId, setOpenId] = useState(null);
+  // v2.895: 연 vCenter 는 주소에서 읽는다(#/vcenters/<id> — 새로고침 · 공유 · 뒤로 가기). 열고 닫기는 주소를 바꾸고, hashchange 가 상태를 맞춘다.
+  const [openId, setOpenIdState] = useState(() => parseVcRoute(currentHash()).vcId);
+  const setOpenId = (id) => { goHash(vcHash(id || null)); setOpenIdState(id || null); };
+  useEffect(() => onHashChange(() => {
+    const h = currentHash();
+    if (/^#\/?vcenters(\/|$)/.test(h)) setOpenIdState(parseVcRoute(h).vcId);
+  }), []);
   // v2.757(사용자 요청): 카드의 'VM 백업 수량' — Veeam 연동이면 Veeam 기준, 아니면 스냅샷 기준. 60초마다(v2.759 — 상세를 연 동안은 멈춘다).
   //   실패해도 카드는 그대로 — 첫 응답 전 실패면 백업 칸만 그리지 않고, 받은 뒤의 갱신 실패는 칸에 '최근 갱신 실패' 표지(v2.763 V5-I1).
   //   v2.759: 서버는 전용 DB 에서 바로 답한다(응답 캐시 60초) — 고정 60초. 업그레이드 직후 '준비 중' 인 vCenter 도 1분 안에 채워진다.
@@ -198,7 +205,14 @@ export default function VCenters({ onSelectSite, resetSignal }) {
   // 빠른 찾기(특수 기능의 '메뉴 빠른 찾기'와 동일 UX) — 훅은 조기 return 위에 선언(React #310).
   const [query, setQuery] = useState('');
   // 상단메뉴 Platform 재클릭(resetSignal 증가) 시 vCenter 상세 드릴다운을 닫고 전체 목록으로 복귀.
-  useEffect(() => { setOpenId(null); }, [resetSignal]);
+  // v2.895: 첫 렌더(주소로 바로 연 상세)에는 닫지 않는다 — 신호가 실제로 바뀐 뒤에만.
+  const resetSeen = useRef(resetSignal);
+  useEffect(() => {
+    if (resetSeen.current === resetSignal) return;
+    resetSeen.current = resetSignal;
+    setOpenIdState(null);
+    goHash('#/vcenters');
+  }, [resetSignal]);
   const cardRefs = useRef({}); // vCenter id → 카드 DOM(바로가기 스크롤/반짝용)
   // 바로가기 버튼 클릭: 해당 카드로 스크롤 이동 + 반짝 하이라이트.
   const gotoCard = (id) => {
