@@ -426,8 +426,21 @@ function accessFor(name, byName, snap) {
   if (u.demo) return false;
   return { read: scopedVcenterIds(u, snap), write: null };
 }
-/** @returns {Promise<{ sent: number, skipped: number, deferred: number }>} */
+/**
+ * v2.899(점검 P5): 재진입 가드 — 30분 타이머가 앞 실행(메일 줄이 길거나 SMTP 가 느릴 때)과 겹치면 같은 구독자에게 두 번 보낼 수 있었다
+ * (보냄 표지는 발송이 끝난 뒤에만 선다). 형제 flushIssueNotify 처럼 겹치지 않게 하고, 가드에는 시한을 둔다(끝나지 않는 한 번이 영원히 붙잡지 않게).
+ */
+export const WEEKLY_BUSY_MAX_MS = 2 * 3_600_000;
+let weeklyBusyAt = 0;
+/** @returns {Promise<{ sent: number, skipped: number, deferred: number, busy?: boolean }>} */
 export async function scanWeeklyFilters(now = Date.now()) {
+  if (weeklyBusyAt && Date.now() - weeklyBusyAt < WEEKLY_BUSY_MAX_MS) return { sent: 0, skipped: 0, deferred: 0, busy: true };
+  if (weeklyBusyAt) console.warn(`[issues] 필터 주간 메일 — 앞 실행이 ${Math.round(WEEKLY_BUSY_MAX_MS / 3_600_000)}시간 넘게 끝나지 않아 가드를 풀고 다시 돕니다`);
+  const mine = Date.now(); weeklyBusyAt = mine;
+  try { return await scanWeeklyOnce(now); } finally { if (weeklyBusyAt === mine) weeklyBusyAt = 0; }
+}
+export function _resetWeeklyBusyForTest(at = 0) { weeklyBusyAt = at; }
+async function scanWeeklyOnce(now) {
   const out = { sent: 0, skipped: 0, deferred: 0 };
   const parts = portalParts(now);
   if (parts.dow !== 1 || parts.h < 9) return out;

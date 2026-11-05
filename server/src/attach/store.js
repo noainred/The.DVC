@@ -148,9 +148,12 @@ export function addAttachment(kind, owner, rawName, buf, user, { now = Date.now(
   const id = crypto.randomBytes(16).toString('hex');
   fs.mkdirSync(attachDir(), { recursive: true, mode: 0o700 });
   const tmp = `${blobPath(id)}.tmp-${process.pid}`;
-  const fd = fs.openSync(tmp, 'w', 0o600);
-  try { fs.writeSync(fd, buf); fs.fsyncSync(fd); } finally { fs.closeSync(fd); }
-  fs.renameSync(tmp, blobPath(id));
+  // v2.899(점검 P6): 쓰기 · fsync · 이름 바꾸기가 던지면(디스크 가득 등) 임시 파일을 지운다 — attachUsage 는 본체(ID_RE)만 세어 남은 tmp 를 보지도 정리하지도 않았다
+  try {
+    const fd = fs.openSync(tmp, 'w', 0o600);
+    try { fs.writeSync(fd, buf); fs.fsyncSync(fd); } finally { fs.closeSync(fd); }
+    fs.renameSync(tmp, blobPath(id));
+  } catch (e) { try { fs.unlinkSync(tmp); } catch { /* 만들지 못했거나 이미 없다 */ } throw e; }
   const item = {
     id, kind, owner, name, ext, mime: EXT[ext], size: buf.length, sha256: crypto.createHash('sha256').update(buf).digest('hex'), by: user, at: now,
     image: ['png', 'jpg', 'jpeg', 'gif', 'webp'].includes(ext) && imageMagicOk(ext, buf),
@@ -219,7 +222,8 @@ const pad512 = (n) => Buffer.alloc((512 - (n % 512)) % 512, 0);
 export async function writeArchive(write) {
   const items = load().items.map((x) => ({ ...x }));
   const present = items.filter((x) => fs.existsSync(blobPath(x.id)));
-  const index = Buffer.from(JSON.stringify({ v: 1, createdAt: Date.now(), note: '파일 본체는 files/<id> — 원래 이름은 이 목록의 name', items: items.map((x) => ({ ...x, missing: !present.includes(x) })) }, null, 1), 'utf8');
+  const has = new Set(present);   // v2.899(점검 P4): present.includes 는 항목 수의 제곱이었다
+  const index = Buffer.from(JSON.stringify({ v: 1, createdAt: Date.now(), note: '파일 본체는 files/<id> — 원래 이름은 이 목록의 name', items: items.map((x) => ({ ...x, missing: !has.has(x) })) }, null, 1), 'utf8');
   const now = Date.now() / 1000;
   await write(tarHeader('index.json', index.length, now)); await write(index); await write(pad512(index.length));
   let files = 0; let bytes = 0;

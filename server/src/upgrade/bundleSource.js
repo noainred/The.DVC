@@ -6,7 +6,7 @@
  */
 
 import fs from 'node:fs';
-import crypto from 'node:crypto';
+import { bundleSha } from '../util/bundleSha.js';   // v2.899(점검 P2)
 import { findNewerArchive, checkRemote, vstr, fetchManifestText } from './upgrade.js';
 // v2.730(검토 S-10): 수집 에이전트로 밀어 넣기 전에 배포자 서명을 확인하고, 같은 manifest 를 push 에 싣는다.
 import { decideSignature, manifestPathForArchive, readManifestFile, archiveVersionOf } from './signature.js';
@@ -45,7 +45,7 @@ export function verifyBundleSha(bytes, sha256) {
     console.error(`[upgrade] ${lastReject}`);
     return false;
   }
-  const got = crypto.createHash('sha256').update(bytes).digest('hex');
+  const got = bundleSha(bytes);   // v2.899(점검 P2): 서명 판정 · push 헤더와 같은 해시를 한 번만
   if (got.toLowerCase() !== String(sha256).toLowerCase()) {
     lastReject = `원격 번들 sha256 불일치 — 손상/변조 가능(기대 ${String(sha256).slice(0, 12)}…, 실제 ${got.slice(0, 12)}…). 푸시를 거부했습니다.`;
     console.error(`[upgrade] ${lastReject}`);
@@ -54,14 +54,26 @@ export function verifyBundleSha(bytes, sha256) {
   return true;
 }
 
-/** 번들 파일 하나 → push 할 바이트 + 옆의 서명 manifest(서명 확인 후). 실패면 null 이고 사유는 lastReject. */
-function fromArchive(archivePath, version, source) {
-  let bytes;
-  try { bytes = fs.readFileSync(archivePath); } catch (e) { lastReject = `번들을 읽지 못했습니다(${path.basename(String(archivePath))}): ${e?.code || e?.message || e}`; return null; }
+/** 읽은 번들 바이트 → push 할 바이트 + 옆의 서명 manifest(서명 확인 후). 실패면 null 이고 사유는 lastReject. */
+function fromBytes(bytes, archivePath, version, source) {
   const manifest = readManifestFile(manifestPathForArchive(archivePath));
-  const sig = decideSignature({ manifestText: manifest, bytes, name: path.basename(archivePath), kind: 'bundle', expectVersion: version || undefined, where: 'bundle-source' });
+  // v2.899(점검 P2): sha256 은 한 번만 — 서명 판정에 넘기고 같은 값을 push 헤더(util/bundleSha 캐시)가 쓴다
+  const sig = decideSignature({ manifestText: manifest, sha256: bundleSha(bytes), size: bytes.length, name: path.basename(archivePath), kind: 'bundle', expectVersion: version || undefined, where: 'bundle-source' });
   if (!sig.ok) { lastReject = sig.reason; console.error(`[upgrade] ${lastReject}`); return null; }
   return { bytes, version: version || null, source, manifest, signature: sig, path: archivePath }; // v2.865: 파일 경로 — 옛 방식 엣지 push(pushBundleToEdge)가 쓴다
+}
+const readFail = (archivePath, e) => { lastReject = `번들을 읽지 못했습니다(${path.basename(String(archivePath))}): ${e?.code || e?.message || e}`; return null; };
+/** 번들 파일 하나(동기 — 적용 직후 push · bundleFromArchive). */
+function fromArchive(archivePath, version, source) {
+  let bytes;
+  try { bytes = fs.readFileSync(archivePath); } catch (e) { return readFail(archivePath, e); }
+  return fromBytes(bytes, archivePath, version, source);
+}
+/** 번들 파일 하나(비동기 — 주기 동기화 · 수집 서버 push 가 부르는 resolveBundleBytes. 수십 MB 를 이벤트 루프를 막고 읽지 않게 · 점검 P2). */
+async function fromArchiveAsync(archivePath, version, source) {
+  let bytes;
+  try { bytes = await fs.promises.readFile(archivePath); } catch (e) { return readFail(archivePath, e); }
+  return fromBytes(bytes, archivePath, version, source);
 }
 
 /**
@@ -96,7 +108,7 @@ export async function resolveBundleBytes(settings, { exactVersion = null, localD
       if (!d) continue;
       const p = path.join(d, `vmware-portal-${exact}.tar.gz`);
       if (!fs.existsSync(p)) continue;
-      const b = fromArchive(p, exact, 'package');
+      const b = await fromArchiveAsync(p, exact, 'package');
       if (b) return b;
       rejects.push(`패키지 폴더 번들 v${exact}: ${lastReject}`);
       lastReject = null;
@@ -111,7 +123,7 @@ export async function resolveBundleBytes(settings, { exactVersion = null, localD
     const found = findNewerArchive(s.watchDir, '0.0.0');
     const fits = found?.path && fs.existsSync(found.path) && (exactTuple ? cmp3(found.version, exactTuple) === 0 : cmp3(found.version, cur) >= 0);
     if (fits) {
-      const b = fromArchive(found.path, vstr(found.version), 'watch');
+      const b = await fromArchiveAsync(found.path, vstr(found.version), 'watch');
       if (b) return b;
       rejects.push(`감시 폴더 번들 v${vstr(found.version)}: ${lastReject}`);
       lastReject = null;
@@ -145,7 +157,7 @@ export async function resolveBundleBytes(settings, { exactVersion = null, localD
         // v2.730(S-10): sha 는 같은 채널(versions.json)이다 — 배포자 서명을 확인한 뒤에만 수집기로 민다.
         const man = info.manifestUrl ? await fetchManifestText(info.manifestUrl, { token: s.token }) : { text: null, missing: true };
         const sig = decideSignature({
-          manifestText: man.text, bytes, name: path.basename(String(info.tarGz || '')), kind: 'bundle', expectVersion: info.latest, where: 'bundle-source',
+          manifestText: man.text, sha256: bundleSha(bytes), size: bytes.length, name: path.basename(String(info.tarGz || '')), kind: 'bundle', expectVersion: info.latest, where: 'bundle-source',
           unavailableReason: man.missing ? undefined : man.reason, malformedReason: man.malformed,
         });
         if (!sig.ok) { lastReject = sig.reason; console.error(`[upgrade] ${lastReject}`); return finish(); }
