@@ -101,7 +101,8 @@ test('R11: 유령 정리는 미리 본 개수(expect)와 지금이 다르면 409
     'iu:vc-a:gone-1': { serviceId: 's1', corp: 'vc-a', by: 'a', at: 1 }, 'iu:vc-a:gone-2': { serviceId: 's1', corp: 'vc-a', by: 'a', at: 1 } } }));
   const prev = store.snapshot;
   try {
-    store.snapshot = { ...prev, generatedAt: Date.now() + 51, vcenters: [{ id: 'vc-a', name: 'vcenter-a' }], hosts: [], vms: [] };
+    // 살아 있는 VM 1대 — VM 이 0대인 법인의 VM 고정은 6차 1 부터 판정 보류(corp-no-vms)라 유령이 아니다
+    store.snapshot = { ...prev, generatedAt: Date.now() + 51, vcenters: [{ id: 'vc-a', name: 'vcenter-a' }], hosts: [], vms: [{ id: 'vm-live', vcenterId: 'vc-a', name: 'live1', instanceUuid: 'u-live', powerState: 'POWERED_ON' }] };
     const dry = await call('POST /tools/svc-inventory/op', { body: { op: 'ghosts.prune', corp: 'vc-a', dry: true } });
     assert.equal(dry.statusCode, 200, JSON.stringify(dry.body)); assert.equal(dry.body.result.keys.length, 2);
     const stale = await call('POST /tools/svc-inventory/op', { body: { op: 'ghosts.prune', corp: 'vc-a', expect: 1 } });

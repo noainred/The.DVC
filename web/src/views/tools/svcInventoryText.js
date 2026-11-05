@@ -192,5 +192,27 @@ export function reviewSummary(q = {}) {
   return { n, meta };
 }
 
+/**
+ * 쓰기 결과 문구(순수 — 6차 7). 서버가 200 을 줘도 **바뀐 것이 0 건**일 수 있다(범위 계정의 가린 키가 재시작으로 바뀌었거나 다른 법인·사라진 구성원).
+ * 그때 '고정했습니다' 를 띄우지 않는다. @returns {{ok:boolean, warn?:boolean, text:string}}
+ */
+export function writeResultNote(okText, result) {
+  const r = result && typeof result === 'object' ? result : {};
+  const skip = n0(r.skipped);
+  const why = '다른 법인이거나 사라진 구성원, 또는 화면이 오래돼 키가 맞지 않습니다 — 새로 고쳐 다시 고르십시오';
+  if (typeof r.changed === 'number') {
+    if (r.changed === 0) return { ok: false, warn: true, text: `바뀐 것이 없습니다${skip ? ` — ${skip}건을 건너뛰었습니다(${why})` : ''}.` };
+    if (skip) return { ok: true, warn: true, text: `${okText} 단, ${skip}건은 건너뛰었습니다(${why}).` };
+  }
+  if (typeof r.moved === 'number') {
+    const c = n0(r.conflicts); const o = n0(r.otherCorp);
+    const why = [c ? `서비스가 다른 ${c}건(충돌 행에서 고르십시오)` : '', o ? `새 키가 다른 법인에 고정된 ${o}건(법인 불일치 — 검토 탭)` : ''].filter(Boolean).join(' · ');
+    if (!r.moved && !n0(r.dropped)) return { ok: false, warn: true, text: why ? `옮긴 것이 없습니다 — ${why}은 옮기지 않았습니다.` : '옮길 옛 키 고정이 없습니다.' };
+    if (why) return { ok: true, warn: true, text: `${okText} 단, ${why}은 옮기지 않았습니다.` };
+  }
+  if (typeof r.removed === 'number' && r.removed === 0) return { ok: false, warn: true, text: `지운 것이 없습니다${skip ? ` — 미리 본 뒤 유령이 아니게 된 ${skip}건을 건너뛰었습니다` : ''}.` };
+  return { ok: true, text: okText || '저장했습니다.' };
+}
+
 /** CSV 파일 이름. */
 export const csvNameOf = (d = new Date()) => `svc-inventory-${dayStamp(d)}.csv`;   // 사용자 로컬 날짜(UTC 날짜 금지 — v2.582 BUG-3)
