@@ -40,7 +40,10 @@ function setup(pins = {}) {
   fs.writeFileSync(path.join(tmp, 'service-map.json'), JSON.stringify({ rev: 0, globals: [], settings: { tagCategory: '' }, corps: { 'vc-a': corpOf({ services: [S('s1', 'ERP'), S('s2', 'MES')], folderRules: [{ prefix: '/ERP', serviceId: 's1' }] }) } }));
   fs.writeFileSync(path.join(tmp, 'service-map-pins.json'), JSON.stringify({ rev: 0, pins }));
 }
-const snapOf = (n, vms = []) => ({ ...store.snapshot, generatedAt: Date.now() + n, vcenters: [{ id: 'vc-a', name: 'vcenter-a' }], hosts: [], vms });
+// v2.906: 세대(generatedAt)는 늘 커지게 — 예전 'Date.now() + n' 은 앞 테스트(n 이 더 큰)와 시각 차가 정확히 n 차이면 같은 세대가 되어
+//   수집 기억(열쇠 = generatedAt)이 앞 테스트의 구성원을 돌려줬다(전량 실행에서만 간헐 실패 — R15 '0 !== 3'). 운영 세대는 수집마다 새 시각이다.
+let _gen = Date.now();
+const snapOf = (n, vms = []) => ({ ...store.snapshot, generatedAt: (_gen += 10_000) + n, vcenters: [{ id: 'vc-a', name: 'vcenter-a' }], hosts: [], vms });
 
 test('R7: 범위 계정 판본의 구성원·큐·후보·CSV·유령 정리 미리보기에 서비스태그가 없다(키는 토큰) — 전체 범위 관리자는 그대로', async () => {
   setup({ [`st:${TAG2.toLowerCase()}`]: { serviceId: 's1', corp: 'vc-a', by: 'a', at: 1 } });   // 유령(서버 없음)

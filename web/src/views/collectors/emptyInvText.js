@@ -184,16 +184,16 @@ export const CAUSE_WHY = Object.freeze({
 export const CAUSE_FIX = Object.freeze({
   mock: [
     '그 엣지 호스트의 portal.env 에 DATA_SOURCE=live 를 넣습니다.',
-    '그 엣지 포탈의 설정 › vCenter 관리에서 실제 vCenter 를 등록하고 연결 테스트를 통과시킵니다.',
+    '그 엣지 포탈의 설정 › 인프라 등록 › vCenter 등록·관리에서 실제 vCenter 를 등록하고 연결 테스트를 통과시킵니다.',
     '엣지 포탈을 재시작합니다(systemctl restart vmware-portal).',
   ],
   'no-vcenter': [
-    '그 엣지 포탈에 접속해 설정 › vCenter 관리에서 그 법인의 vCenter 를 등록합니다.',
+    '그 엣지 포탈에 접속해 설정 › 인프라 등록 › vCenter 등록·관리에서 그 법인의 vCenter 를 등록합니다.',
     '등록 후 연결 테스트로 자격증명을 확인합니다.',
   ],
   pending: ['그대로 기다립니다 — 다음 수집 주기에 채워집니다.'],
   unreachable: [
-    '그 엣지 포탈의 설정 › vCenter 관리에서 그 vCenter 의 연결 테스트를 눌러 오류를 확인합니다.',
+    '그 엣지 포탈의 설정 › 인프라 등록 › vCenter 등록·관리에서 그 vCenter 의 연결 테스트를 눌러 오류를 확인합니다.',
     '계정·비밀번호, 인증서, 방화벽(443)을 확인합니다.',
     '아래 로그의 실패 원문이 어느 단계에서 끊겼는지 가리킵니다.',
   ],

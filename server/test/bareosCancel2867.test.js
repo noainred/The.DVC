@@ -265,6 +265,7 @@ test('⑤ Director 실행 중 — 이번 회차 실행을 한 번에 취소 · �
   r = await call('admin', 'GET', '/groups/tree?vcenterId=vc-a');
   const t2 = r.j.groups.find((x) => x.id === g.id);
   assert.equal(t2.stop.sent, 2, '멈추는 중 2');
+  assert.deepEqual([t2.stop.sentFire, t2.stop.stuckFire], [2, 0], 'v2.906: 이번 회차 실행의 취소 수를 따로(sentFire)');
   assert.equal(r.j.vms.find((v) => v.id === 'vc-a:vm-2').cancel.via, 'group');
   // 진행 현황판 — 그룹 회차 띠 · 행의 멈추는 중
   r = await call('admin', 'GET', '/live');
@@ -422,6 +423,7 @@ test('⑥ 범위 확대 · 다음 회차 건너뛰기 — 그 밖 실행(Bareos 
   assert.ok(D.cmds.includes(`cancel jobid=${sid}`), 'Bareos 스케줄 실행도 취소');
   r = await call('admin', 'GET', '/groups/tree?vcenterId=vc-a');
   assert.equal(r.j.groups.find((x) => x.id === g.id).next.skip, true, '다음 회차에 건너뜀 표시');
+  { const st = r.j.groups.find((x) => x.id === g.id).stop; assert.deepEqual([st.sent, st.sentFire], [2, 1], 'v2.906: 그 밖 실행(스케줄)의 취소는 sentFire 에 넣지 않는다'); }
   // 스케줄을 고치면 건너뛰기 표지는 지운다(옛 스케줄의 회차였다)
   const cur = groups.getGroup(g.id);
   r = await call('admin', 'PUT', `/groups/${g.id}`, { name: cur.name, vmIds: cur.vmIds, schedule: { ...DAILY, time: '03:20' }, storage: '', pool: '', updatedAt: cur.updatedAt });

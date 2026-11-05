@@ -42,7 +42,7 @@ export function specFor(link = {}, ctx = {}) {
     const token = t(c?.token);
     if (!token) {
       // 토큰이 없으면 엣지가 403 을 준다 — 그것을 '인증 실패' 로 기록하면 원인을 거꾸로 말한다.
-      return { skip: '이 수집 서버에 토큰이 저장돼 있지 않습니다 — 설정 › 수집 서버에서 토큰을 넣으세요.' };
+      return { skip: '이 수집 서버에 토큰이 저장돼 있지 않습니다 — 설정 › 엣지·원격 › 수집 서버(원격)에서 토큰을 넣으세요.' };
     }
     const others = (ctx.collectorIds || []).filter((x) => x !== t(c?.id));
     return {

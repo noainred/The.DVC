@@ -219,7 +219,8 @@ test('R8: 검토(pins.review) 라우트는 그 순간의 자동 판정을 review
   writeStore(mapOf({ 'vc-a': { services: [S('s1', 'ERP'), S('s2', 'MES')], folderRules: [{ prefix: '/ERP', serviceId: 's1' }] } }));
   const prev = store.snapshot;
   try {
-    store.snapshot = { ...prev, generatedAt: Date.now() + 1, vcenters: [{ id: 'vc-a', name: 'vcenter-a' }], hosts: [],
+    // v2.906: 앞 테스트의 세대(+7)보다 크게 — 'Date.now() + 1' 은 6ms 뒤에 돌면 앞 세대와 같아져 수집 기억을 같이 썼다(5d R15 와 같은 간헐 실패 모양)
+    store.snapshot = { ...prev, generatedAt: Date.now() + 8, vcenters: [{ id: 'vc-a', name: 'vcenter-a' }], hosts: [],
       vms: [{ id: 'vm-1', vcenterId: 'vc-a', name: 'app1', folderPath: '/ERP', powerState: 'POWERED_ON', cpuCount: 2, memMB: 4096 }] };
     const set = await call('POST /tools/svc-inventory/op', { body: { op: 'pins.set', corp: 'vc-a', keys: ['vm:vm-1'], serviceId: 's2' } });
     assert.equal(set.statusCode, 200, JSON.stringify(set.body)); assert.equal(set.body.result.changed, 1);

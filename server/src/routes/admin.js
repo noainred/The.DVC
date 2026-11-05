@@ -23,9 +23,9 @@ import { registerDirUsage } from './admin/dirUsage.js'; // 폴더 사용량 Top-
 import { registerHostAccess } from './admin/hostAccess.js'; // 호스트 접근 제어(SSH/웹/OS 방화벽, v2.485)
 import { registerPerfMonitor } from './admin/perfMonitor.js'; // v2.498: 설정 › 서버 성능 측정
 import { registerSecurityCheck } from './admin/securityCheck.js'; // v2.500: 설정 › 보안 자가진단
-import { registerLogAnalysis } from './admin/logAnalysis.js'; // v2.583: 설정 › Log › 로그 분석(개선점 도출)
+import { registerLogAnalysis } from './admin/logAnalysis.js'; // v2.583: 설정 › 로그 › 로그 분석(개선점 도출)
 import { registerPeerTrust } from './admin/peerTrust.js'; // 2026-10-09 S-01·S-02: 설정 › 장비 신뢰(SSH 호스트키·TLS 인증서)
-import { registerVeeam } from './admin/veeam.js'; // v2.751: 설정 › vCenter 관리 › Veeam 백업 서버
+import { registerVeeam } from './admin/veeam.js'; // v2.751: 설정 › 백업 › Veeam 백업 서버
 import { registerVeeamEm } from './admin/veeamEm.js'; // v2.788: 설정 › Veeam 백업 서버 › Enterprise Manager
 
 // 관리자 API 집계 라우터 — v2.285.0 대형 파일 분할.

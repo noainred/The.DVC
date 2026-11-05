@@ -2386,7 +2386,7 @@ centralRouter.post('/isidu-data', requireCentral(), async (req, res) => {
 // 어느 엣지의 것인지 가릴 수 없어 `?agent=<아무 엣지>` 로 그 엣지의 Veeam 비밀번호를 받아 갈 수 있다(storage-config 의 레거시 동작을
 // 새 라우트에 복사하지 않는다). 공유 토큰 엣지는 설정 › 수집 서버에서 그 엣지의 개별 토큰을 발급해야 Veeam 위임을 쓴다.
 // 등록부를 못 읽으면 503(빈 목록을 ok 로 주면 엣지가 사본을 지운다 — v2.612).
-const VEEAM_AGENT_TOKEN_ONLY = 'Veeam 위임은 엣지별(개별) 토큰으로만 받습니다 — 공유 CENTRAL_TOKEN 으로는 엣지를 가릴 수 없습니다. 중앙 설정 › 수집 서버에서 이 엣지의 개별 토큰을 발급해 엣지 CENTRAL_TOKEN 에 넣으세요.';
+const VEEAM_AGENT_TOKEN_ONLY = 'Veeam 위임은 엣지별(개별) 토큰으로만 받습니다 — 공유 CENTRAL_TOKEN 으로는 엣지를 가릴 수 없습니다. 중앙 설정 › 엣지·원격 › 수집 서버(원격)에서 이 엣지의 개별 토큰을 발급해 엣지 CENTRAL_TOKEN 에 넣으세요.';
 // v2.763(V2-3): 403 의도(v2.751 검토 #5)는 그대로 — 거부 기록의 사유만 사실대로('토큰 불일치' 가 아니라 '개별 토큰 필요').
 const veeamAgentTokenOnly = (res) => {
   res.locals.ingestReject = { kind: REJECT_KIND.AUTH, reason: '개별 토큰 필요 — 공유 토큰으로는 Veeam 위임을 받지 않습니다(토큰 자체는 맞습니다)' };
@@ -2478,7 +2478,7 @@ centralRouter.post('/veeam-run-result', requireCentral({ notFound: { ok: false }
  *  · POST /bareos-op-result  — 회신(그 작업의 대상 엣지만 · 결과는 sanitizeEdgeResult).
  * 키는 req.centralAuth.agent 만(요청의 agent 값으로 고르지 않는다 — 공통 미들웨어가 토큰 ↔ agent 를 대조한다).
  */
-const BAREOS_AGENT_TOKEN_ONLY = 'Bareos 법인 Director 대행은 엣지별(개별) 토큰으로만 받습니다 — 공유 CENTRAL_TOKEN 으로는 엣지를 가릴 수 없습니다. 중앙 설정 › 수집 서버에서 이 엣지의 개별 토큰을 발급해 엣지 CENTRAL_TOKEN 에 넣으세요.';
+const BAREOS_AGENT_TOKEN_ONLY = 'Bareos 법인 Director 대행은 엣지별(개별) 토큰으로만 받습니다 — 공유 CENTRAL_TOKEN 으로는 엣지를 가릴 수 없습니다. 중앙 설정 › 엣지·원격 › 수집 서버(원격)에서 이 엣지의 개별 토큰을 발급해 엣지 CENTRAL_TOKEN 에 넣으세요.';
 const bareosAgentTokenOnly = (res) => {
   res.locals.ingestReject = { kind: REJECT_KIND.AUTH, reason: '개별 토큰 필요 — 공유 토큰으로는 Bareos 대행을 받지 않습니다(토큰 자체는 맞습니다)' };
   return res.status(403).json({ ok: false, reason: BAREOS_AGENT_TOKEN_ONLY, agentTokenRequired: true });

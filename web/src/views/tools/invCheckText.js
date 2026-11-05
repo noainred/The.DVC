@@ -145,7 +145,7 @@ const FINDING_TEXT = Object.freeze({
   'inv-agent-mock': { title: '엣지가 mock 데이터로 동작 중입니다', fix: '그 엣지 portal.env 의 DATA_SOURCE 를 live 로 바꾸세요.' },
   'inv-owner-conflict': { title: '같은 vCenter 를 서로 다른 엣지가 번갈아 보내고 있습니다', fix: '두 사이트의 vCenter 등록이 겹치지 않는지 확인하세요.' },
   'inv-agent-rejected-only': { title: '보낸 push 가 전부 거부돼 수신 기록이 없는 엣지가 있습니다', fix: '엣지별 표의 거부 사유를 확인하세요. 토큰 거부면 포탈 점검 › 토큰 점검에서 대조합니다(엣지 이름은 요청이 주장한 값이라 검증되지 않았습니다).' },
-  'inv-unregistered-vcenter': { title: '등록부에 없는 vCenter 로 인벤토리가 저장돼 있습니다', fix: '어느 화면에도 나오지 않는 데이터입니다. 설정 › vCenter 관리에서 그 id 를 엣지 위임으로 등록하거나, 보내는 엣지의 vCenter 설정을 정리하세요.' },
+  'inv-unregistered-vcenter': { title: '등록부에 없는 vCenter 로 인벤토리가 저장돼 있습니다', fix: '어느 화면에도 나오지 않는 데이터입니다. 설정 › 인프라 등록 › vCenter 등록·관리에서 그 id 를 엣지 위임으로 등록하거나, 보내는 엣지의 vCenter 설정을 정리하세요.' },
   'inv-no-site-vcenter': { title: '엣지 위임(collectMode=site) vCenter 가 없습니다', fix: '이 점검은 위임 vCenter 전용입니다 — 대상이 없으면 점검할 것도 없습니다.' },
 });
 
@@ -185,7 +185,7 @@ export function findingGroupLine(g) {
 export function bannerText(scan) {
   const k = scan?.kpis || {};
   if (!n(k.total)) {
-    return { tone: 'gray', text: '엣지 위임(collectMode=site) vCenter 가 없습니다 — 이 점검은 그 대상 전용입니다. 설정 › vCenter 관리에서 수집 방식을 확인하세요.' };
+    return { tone: 'gray', text: '엣지 위임(collectMode=site) vCenter 가 없습니다 — 이 점검은 그 대상 전용입니다. 설정 › 인프라 등록 › vCenter 등록·관리에서 수집 방식을 확인하세요.' };
   }
   if (n(k.rejected)) {
     return { tone: 'red', text: `**${k.rejected}곳이 중앙에 거부되고 있습니다** — 안 보내는 것이 아니라 중앙이 막고 있는 것입니다. 아래 사유부터 확인하세요.` };

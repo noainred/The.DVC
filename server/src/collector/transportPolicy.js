@@ -133,8 +133,8 @@ function cleanReason(v) {
 
 const SOURCE_FIX = {
   admin: "엣지에 TLS(TLS_CERT_FILE·TLS_KEY_FILE)를 켜고 https:// 주소로 등록하세요. VPN·IPsec 처럼 별도로 보호된 구간이라 HTTP 가 꼭 필요하면 '평문 HTTP 예외' 를 체크하고 사유를 적으세요.",
-  'self-register': '엣지에 TLS(TLS_CERT_FILE·TLS_KEY_FILE)를 켜고 EDGE_ADVERTISE_URL=https://… 로 알리거나, 관리자가 설정 › 수집 서버에서 사유와 함께 예외로 등록하거나, 중앙 portal.env 의 COLLECTOR_HTTP_ALLOW 에 이 주소를 넣으세요.',
-  internal: '엣지에 TLS 를 켜고 https:// 주소(광고 URL)를 쓰거나, 관리자가 설정 › 수집 서버에서 사유와 함께 예외로 등록하거나, 중앙 portal.env 의 COLLECTOR_HTTP_ALLOW 에 이 주소를 넣으세요.',
+  'self-register': '엣지에 TLS(TLS_CERT_FILE·TLS_KEY_FILE)를 켜고 EDGE_ADVERTISE_URL=https://… 로 알리거나, 관리자가 설정 › 엣지·원격 › 수집 서버(원격)에서 사유와 함께 예외로 등록하거나, 중앙 portal.env 의 COLLECTOR_HTTP_ALLOW 에 이 주소를 넣으세요.',
+  internal: '엣지에 TLS 를 켜고 https:// 주소(광고 URL)를 쓰거나, 관리자가 설정 › 엣지·원격 › 수집 서버(원격)에서 사유와 함께 예외로 등록하거나, 중앙 portal.env 의 COLLECTOR_HTTP_ALLOW 에 이 주소를 넣으세요.',
 };
 
 /**
@@ -301,7 +301,7 @@ export function wanTransportCheckItem({ collectors = [], env = process.env, list
     detail: notes.length ? notes.join(' ') : `수집 서버 ${s.total}대 전부 HTTPS 또는 루프백${listener?.tls ? ' · 이 포탈은 HTTPS 로 받는다' : ''}.`,
     rows,
     evidence: 'collectors.json · TLS_CERT_FILE/TLS_KEY_FILE · WAN_TLS_CA_FILE · COLLECTOR_HTTP_ALLOW · CENTRAL_URL',
-    howto: status === 'ok' ? '' : '엣지·중앙에 TLS(TLS_CERT_FILE·TLS_KEY_FILE)를 켜고 수집 서버 URL·CENTRAL_URL 을 https:// 로 바꾼다. 사설 CA 는 WAN_TLS_CA_FILE 로 신뢰시킨다. HTTP 가 꼭 필요한 보호 구간만 설정 › 수집 서버에서 사유와 함께 예외로 둔다.',
+    howto: status === 'ok' ? '' : '엣지·중앙에 TLS(TLS_CERT_FILE·TLS_KEY_FILE)를 켜고 수집 서버 URL·CENTRAL_URL 을 https:// 로 바꾼다. 사설 CA 는 WAN_TLS_CA_FILE 로 신뢰시킨다. HTTP 가 꼭 필요한 보호 구간만 설정 › 엣지·원격 › 수집 서버(원격)에서 사유와 함께 예외로 둔다.',
     summary: s,
   };
 }

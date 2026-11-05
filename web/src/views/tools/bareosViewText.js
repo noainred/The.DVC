@@ -44,7 +44,7 @@ export const DIRECTOR_STATE = {
 export const directorStateOf = (s) => DIRECTOR_STATE[s] || { text: s ? String(s) : '—', color: '#64748b' };
 /** Director 한 줄 — '이름 · 상태 · 담당'(이름이 없으면 미설정). */
 export function directorLineText(dir) {
-  if (!dir || !dir.name) return 'Director 미설정 — 설정 › vCenter 관리 › Bareos 백업 서버에서 이 vCenter 를 법인 Director 에 묶어야 Bareos 결과가 보입니다';
+  if (!dir || !dir.name) return 'Director 미설정 — 설정 › 백업 › Bareos 백업 서버에서 이 vCenter 를 법인 Director 에 묶어야 Bareos 결과가 보입니다';
   const st = directorStateOf(dir.state).text;
   const via = dir.via === 'edge' ? '엣지 대행' : '중앙 직접';
   return `Director ‘${dir.name}’ · ${st} · ${via}${isFin(dir.at) ? ` · 마지막 조회 ${shortTs(dir.at)}` : ''}`;

@@ -483,7 +483,7 @@ export function loadVcenterConfig() {
           // (secretVault 도 config 를 import — 상단 정적 import 시 TDZ 기동 실패).
           if (file.endsWith('vcenters.example.json') && !warnedExample) {
             warnedExample = true;
-            console.warn('[config] ⚠ vCenter 가 등록되지 않아 **예제 템플릿**(vcenters.example.json)을 읽었습니다 — vc-us-east 같은 가짜 vCenter 를 수집 시도하고 중앙에 빈 인벤토리를 보냅니다. 설정 › vCenter 관리에서 실제 vCenter 를 등록하세요(이 폴백은 VCENTERS_EXAMPLE_FALLBACK=true 로 켜져 있습니다).');
+            console.warn('[config] ⚠ vCenter 가 등록되지 않아 **예제 템플릿**(vcenters.example.json)을 읽었습니다 — vc-us-east 같은 가짜 vCenter 를 수집 시도하고 중앙에 빈 인벤토리를 보냅니다. 설정 › 인프라 등록 › vCenter 등록·관리에서 실제 vCenter 를 등록하세요(이 폴백은 VCENTERS_EXAMPLE_FALLBACK=true 로 켜져 있습니다).');
           }
           return { file, vcenters: openSecretsDeepRef ? openSecretsDeepRef(vcenters) : vcenters };
         }

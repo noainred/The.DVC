@@ -8,12 +8,12 @@ import { isAdminDetailUser } from '../../auth/demoGuest.js';
 import { store } from '../../store.js';
 import { config, loadVcenterConfig } from '../../config.js';
 import { getVcInfo, VCINFO_REFRESH_MS } from '../../vcinfo/collect.js';
-import { VCINFO_LIMITS, VCREST_LIMITS, TASK_KEEP_MS, POOLS_MAX } from '../../vcinfo/parse.js';
+import { VCINFO_LIMITS, VCREST_LIMITS, TASK_KEEP_MS, POOLS_MAX, DVPG_MAX } from '../../vcinfo/parse.js';
 import { mockVcInfo } from '../../mock/vcinfo.js';
 
-export const VCINFO_KINDS = Object.freeze(['alarms', 'tasks', 'perms', 'linked', 'updates', 'vlcm', 'pools']);
+export const VCINFO_KINDS = Object.freeze(['alarms', 'tasks', 'perms', 'linked', 'updates', 'vlcm', 'pools', 'dvpg']);
 /** 종류별 기능 권한 — 알람 · 작업 · 권한 목록은 알람 권한, Linked Mode · 업데이트 · vLCM 은 호스트 조회 권한(버전 · 구성 정보). */
-export const VCINFO_PERM = Object.freeze({ alarms: 'inv.alarms', tasks: 'inv.alarms', perms: 'inv.alarms', linked: 'inv.hosts', updates: 'inv.hosts', vlcm: 'inv.hosts', pools: 'inv.hosts' });
+export const VCINFO_PERM = Object.freeze({ alarms: 'inv.alarms', tasks: 'inv.alarms', perms: 'inv.alarms', linked: 'inv.hosts', updates: 'inv.hosts', vlcm: 'inv.hosts', pools: 'inv.hosts', dvpg: 'inv.hosts' });
 /** 등록 주소 · 노드 이름의 호스트 부분 — 스킴 · 경로 · 포트를 뗀다. IPv6 는 '[…]' 안, 괄호 없는 IPv6(콜론 2개 이상)는 통째로(반증 하-7). */
 export function hostKey(h) {
   let s = String(h || '').trim().toLowerCase().replace(/^[a-z][a-z0-9+.-]{0,15}:\/\//, '');
@@ -74,6 +74,7 @@ const KIND_LIMITS = Object.freeze({
   alarms: { max: VCINFO_LIMITS.alarms }, tasks: { max: VCINFO_LIMITS.tasks, keepMs: TASK_KEEP_MS }, perms: { max: VCINFO_LIMITS.perms },
   vlcm: { clusters: VCREST_LIMITS.clusters, ncMax: VCREST_LIMITS.nc },
   pools: { max: POOLS_MAX },   // v2.901
+  dvpg: { max: DVPG_MAX },     // v2.906
 });
 
 /** 응답 본문(순수 — 테스트 고정). entry 는 캐시의 그 종류 값(없으면 null), admin 은 관리자 판본 여부. */
@@ -97,6 +98,7 @@ export function vcInfoBody(kind, vcenterId, entry, { admin = false, source = nul
     ...base, at: entry.at ?? null, items, error: entry.error ?? null,
     ...(entry.omitted ? { omitted: entry.omitted } : {}),
     ...(entry.unreadable ? { unreadable: entry.unreadable } : {}),   // v2.901(점검 E1): 못 읽은 알람 원소 수
+    ...(kind === 'dvpg' ? { lagError: entry.lagError ?? null, dvsError: entry.dvsError ?? null } : {}),   // v2.906: LAG · vDS 이름을 못 읽은 사유
     ...(kind === 'perms' ? { roles: Array.isArray(entry.roles) ? entry.roles : [] } : {}),
     ...(userMasked ? { userMasked: true } : {}),
   };

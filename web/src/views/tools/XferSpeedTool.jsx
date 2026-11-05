@@ -351,7 +351,7 @@ function SettingsModal({ data, onClose, onSaved }) {
                 );
               })}
             </div>
-          ) : <div className="xs-note">등록된 수집 서버(엣지)가 없습니다 — 설정 › 수집 서버에서 등록하세요.</div>}
+          ) : <div className="xs-note">등록된 수집 서버(엣지)가 없습니다 — 설정 › 엣지·원격 › 수집 서버(원격)에서 등록하세요.</div>}
         </div>
         <div className="xs-setfoot">
           {err ? <span className="xs-err">{err}</span> : note ? <span className="xs-note">{note}</span> : null}
@@ -467,7 +467,7 @@ function Main({ onOpen }) {
                 {rows.map((r) => <EdgeRow key={r.id} r={r} now={now} slowPct={s.slowPct} minEdgeVersion={data.minEdgeVersion} onOpen={onOpen} offsetMin={data.offsetMin} />)}
               </div>
             </div>
-          ) : <div className="xs-note" style={{ padding: 16 }}>등록된 수집 서버(엣지)가 없습니다 — 설정 › 수집 서버에서 엣지를 등록하면 여기에 나옵니다.</div>}
+          ) : <div className="xs-note" style={{ padding: 16 }}>등록된 수집 서버(엣지)가 없습니다 — 설정 › 엣지·원격 › 수집 서버(원격)에서 엣지를 등록하면 여기에 나옵니다.</div>}
           <div className="xs-foot">
             <span>{rows.length}곳 · {data.staleMs == null ? '반복 측정 일정이 없어 오래됨을 판정하지 않습니다' : `오래됨 기준 ${spanText(data.staleMs)} 넘게 측정 없음`}{data.recentTruncated ? ' · 최근 7일 측정이 상한을 넘어 오래된 측정은 평소 대비·스파크라인 계산에서 뺐습니다' : ''}</span>
             <span>Mbps = 받은 바이트 × 8 ÷ 받는 쪽에서 첫 바이트부터 마지막 바이트까지 걸린 시간</span>

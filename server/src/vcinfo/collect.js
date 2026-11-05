@@ -8,14 +8,14 @@
 import { parseObjectContent } from '../vcenter/soapParse.js';
 import { flatStr } from '../util/capStr.js';
 import { parseTriggeredAlarms, parseTaskInfo, parsePermissions, parseRoleList, nameMapOf, mergeTasks, VCINFO_LIMITS,
-  parsePools, POOLS_MAX, parseTopologyNodes, parseReplication, parseApplianceUpdate, parsePendingUpdates, parseVlcmCompliance, restErrText, VCREST_LIMITS } from './parse.js';
+  parsePools, POOLS_MAX, parseDvPortgroups, parseLacpGroups, applyDvsInfo, DVPG_MAX, parseTopologyNodes, parseReplication, parseApplianceUpdate, parsePendingUpdates, parseVlcmCompliance, restErrText, VCREST_LIMITS } from './parse.js';
 import { VCenterClient } from '../vcenter/restClient.js';   // v2.898 ④(restClient 는 soapClient 를 import 하지 않는다 — 순환 없음)
 
 /** 종류별 갱신 주기(ms) — 화면은 API 의 refreshMs 로 말한다(숫자를 화면에 박지 않는다). */
-export const VCINFO_REFRESH_MS = Object.freeze({ alarms: 5 * 60_000, tasks: 3 * 60_000, perms: 6 * 3_600_000, linked: 6 * 3_600_000, updates: 6 * 3_600_000, vlcm: 6 * 3_600_000, pools: 6 * 3_600_000 });
+export const VCINFO_REFRESH_MS = Object.freeze({ alarms: 5 * 60_000, tasks: 3 * 60_000, perms: 6 * 3_600_000, linked: 6 * 3_600_000, updates: 6 * 3_600_000, vlcm: 6 * 3_600_000, pools: 6 * 3_600_000, dvpg: 6 * 3_600_000 });
 /** ④ REST 묶음(Linked Mode · 업데이트 · vLCM)의 예산 — 클러스터마다 2번 왕복(고RTT 800ms+)이라 SOAP 묶음과 따로 둔다. */
 export const VCREST_BUDGET_MS = 30_000;
-export const VCINFO_KIND_LIST = Object.freeze(['alarms', 'tasks', 'perms', 'linked', 'updates', 'vlcm', 'pools']);
+export const VCINFO_KIND_LIST = Object.freeze(['alarms', 'tasks', 'perms', 'linked', 'updates', 'vlcm', 'pools', 'dvpg']);
 /** 중단 · 시한 실패는 '이번에 못 읽었다' — 주기를 기다리지 않고 이 간격 뒤 다시 읽는다(tags 의 TAG_RETRY_MS 와 같은 판단). */
 export const VCINFO_RETRY_MS = 5 * 60_000;
 export const VCINFO_BUDGET_MS = 20_000;
@@ -151,6 +151,34 @@ async function readPools(c, refs, now) {
   return { at: now, items: parsePools(objs), omitted: Math.max(0, refs.length - list.length), error: null };
 }
 
+/**
+ * v2.906: 분산 포트그룹 팀 구성 · LACP · VLAN — 수집이 이미 가진 포트그룹 moref 만 묻는다(읽기 전용 RetrieveProperties).
+ *   vDS 는 이름(호스트 hcfg 의 분산 스위치 이름과 짝짓는다)과 Enhanced LACP 의 LAG(config.lacpGroupConfig)를 한 번에 — LAG 를 못 읽으면 이름만 다시 읽고
+ *   LACP 는 옛 포트그룹 설정으로만 판정한다(lagError). vDS 이름까지 못 읽으면 이름 없이(화면이 호스트와 짝짓지 못한다고 말한다).
+ */
+async function readDvpg(c, refs, now) {
+  const list = refs.filter((r) => typeof r === 'string').slice(0, DVPG_MAX);
+  const objs = list.length ? await c.retrieveManyObjectProps('DistributedVirtualPortgroup', list, ['name', 'tag', 'config.distributedVirtualSwitch', 'config.defaultPortConfig']) : [];
+  const items = parseDvPortgroups(objs);
+  const dvsRefs = [...new Set(items.map((x) => x.dvs).filter(Boolean))];
+  const dvsName = new Map(); const lagsByDvs = new Map();
+  let lagError = null; let dvsError = null;
+  if (dvsRefs.length) {
+    let rows = null;
+    try { rows = await c.retrieveManyObjectProps('VmwareDistributedVirtualSwitch', dvsRefs, ['name', 'config.lacpGroupConfig']); }
+    catch (e) {
+      lagError = msg(e);
+      try { rows = await c.retrieveManyObjectProps('VmwareDistributedVirtualSwitch', dvsRefs, ['name']); } catch (e2) { dvsError = msg(e2); }
+    }
+    for (const o of rows || []) {
+      if (typeof o?.props?.name === 'string') dvsName.set(o.ref, o.props.name.trim().slice(0, 128));
+      if (!lagError) lagsByDvs.set(o.ref, parseLacpGroups(o.props?.['config.lacpGroupConfig'] || ''));
+    }
+  }
+  return { at: now, items: applyDvsInfo(items, dvsName, lagsByDvs), omitted: Math.max(0, refs.length - list.length), error: null,
+    ...(lagError ? { lagError } : {}), ...(dvsError ? { dvsError } : {}) };
+}
+
 async function readPerms(c, now) {
   const am = c.sc?.authorizationManager;
   if (!am) throw new Error('authorizationManager 없음');
@@ -171,7 +199,7 @@ async function readPerms(c, now) {
  * @param c 로그인된 SOAP 클라이언트 · vc 등록 항목
  * @returns 이 vCenter 의 캐시(종류별 — 갱신한 것만 새 값)
  */
-export async function refreshVcInfo(c, vc, { now = Date.now(), signal = null, budgetMs = VCINFO_BUDGET_MS, poolRefs = null } = {}) {
+export async function refreshVcInfo(c, vc, { now = Date.now(), signal = null, budgetMs = VCINFO_BUDGET_MS, poolRefs = null, dvpgRefs = null } = {}) {
   const prev = _byVc.get(vc.id);
   const cur = prev && prev.source === 'local' ? { ...prev } : { source: 'local' };
   const deadline = Date.now() + budgetMs;   // 예산은 실제 시계로 잰다(now 는 기록 · 주기 판정용 — 테스트가 고정한다)
@@ -181,6 +209,8 @@ export async function refreshVcInfo(c, vc, { now = Date.now(), signal = null, bu
     ['perms', () => readPerms(c, now)],
     // v2.901: 리소스 풀 예약 · 제한 · 공유 — 수집이 이미 가진 풀 moref 를 받을 때만(없으면 이 종류를 건드리지 않는다).
     ...(Array.isArray(poolRefs) ? [['pools', () => readPools(c, poolRefs, now)]] : []),
+    // v2.906: 분산 포트그룹 팀 구성 — 수집이 이미 가진 포트그룹 moref 를 받을 때만
+    ...(Array.isArray(dvpgRefs) ? [['dvpg', () => readDvpg(c, dvpgRefs, now)]] : []),
   ];
   await runJobs(cur, jobs, now, deadline, signal);
   _byVc.set(vc.id, cur);

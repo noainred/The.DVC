@@ -726,7 +726,8 @@ export function generateSnapshot() {
         orphanDeltaGB: vm.idx % 6 === 0 ? null : (vm.idx % 71 === 0 ? 12.5 : 0), // v2.698(A3): 스냅샷 0개인데 델타 파일(유령 스냅샷)
         gpu: vm.idx % 17 === 0 ? null : mkVmGpu(hostState, vm.idx, ord), // 템플릿은 GPU 를 받지 않는다
         // v2.697(B10): 구성 속성·장치 위생 — 일부(idx%41)는 아직 수집 전(키 없음)이라 화면의 '수집 중' 을 보인다.
-        ...(vm.idx % 41 === 0 ? {} : { cfg: mkVmCfg(vm, powered), dev: mkVmDev(vm, env.datastores.map((d) => d.name), env.networks) }),
+        // v2.906: 로컬 데이터스토어에는 그 호스트(마운트 목록의 한 대)의 VM 디스크만 — 예전에는 모든 호스트 VM 이 로컬 DS 에 놓여 마운트 카드가 '공유 호스트 24대' 였다(화면 판독)
+        ...(vm.idx % 41 === 0 ? {} : { cfg: mkVmCfg(vm, powered), dev: mkVmDev(vm, env.datastores.filter((d) => d.storageType !== 'local' || !env.hosts.length || env.hosts[d.idx % env.hosts.length]?.name === vm.host.name).map((d) => d.name), env.networks) }),
         ...((() => { const pc = powered ? mkVmPerfc(vm.idx) : null; return pc ? { perfc: pc } : {}; })()),
       });
     }

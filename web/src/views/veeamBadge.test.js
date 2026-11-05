@@ -400,13 +400,13 @@ describe('v2.763 — Veeam 등록·관리 화면 점검 수정(웹, 그룹 A)', 
   });
 });
 
-describe('v2.765 — stale-events 에 수집이 며칠 뒤처졌는지와 원인을 볼 곳(설정 › Log)을 한 줄 더한다', () => {
+describe('v2.765 — stale-events 에 수집이 며칠 뒤처졌는지와 원인을 볼 곳(설정 › 로그)을 한 줄 더한다', () => {
   const now = new Date(2026, 9, 23, 12, 0).getTime();
   const DAY = 86_400_000;
   it('카드: backupCounts 의 collectedAt 으로 N일(하루 미만은 시간)을 계산한다 · 백틱 없음', () => {
     const c = backupCell({ src: 'snap', n: null, reason: 'stale-events', collectedAt: now - 13 * DAY - 3_600_000, snapNow: 0 }, null, now);
     expect(c.text).toBe('—');
-    expect(c.title).toMatch(/수집이 13일 뒤처짐 — 설정 › Log/);
+    expect(c.title).toMatch(/수집이 13일 뒤처짐 — 설정 › 로그/);
     expect(c.title).toMatch(/2026-10-10/);
     expect(backupCell({ src: 'snap', n: null, reason: 'stale-events', collectedAt: now - 7 * 3_600_000 }, null, now).title).toMatch(/수집이 7시간 뒤처짐/);
     expect(backupCell({ src: 'snap', n: null, reason: 'stale-events', collectedAt: null }, null, now).title).not.toMatch(/뒤처짐/); // 시각을 모르면 지어내지 않는다
@@ -417,7 +417,7 @@ describe('v2.765 — stale-events 에 수집이 며칠 뒤처졌는지와 원인
   it('VM 칩·상태 문구도 같은 줄(서버 시각 at 기준)', () => {
     const ev = { status: 'ok', byVm: { a: [1, 1] }, accounts: 1, at: now, collectedAt: now - 13 * DAY, verdict: { ok: false, reason: 'stale-events' } };
     const r = veeamEventChip(ev);
-    expect(r.n).toBe(null); expect(r.why).toMatch(/수집이 13일 뒤처짐 — 설정 › Log/);
+    expect(r.n).toBe(null); expect(r.why).toMatch(/수집이 13일 뒤처짐 — 설정 › 로그/);
     expect(veeamEventStatusText({ status: 'ok', accounts: 1, byVm: {}, at: now, collectedAt: now - 13 * DAY })).toMatch(/수집이 13일 뒤처짐/);
   });
 });

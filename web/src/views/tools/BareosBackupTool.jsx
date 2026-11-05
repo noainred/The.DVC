@@ -126,7 +126,7 @@ export default function BareosBackupTool() {
       {tab === 'restore' && <BareosRestore d={data} reload={reload} preselect={restorePre} onPreselectUsed={() => setRestorePre('')} />}
       {tab === 'groups' && <BareosGroupsTab d={data} />}
       {tab === 'runs' && <RunsTab d={data} boardHint={boardHint} focus={focus} />}
-      {tab === 'settings' && moveTo && <div className="muted" style={{ padding: 16 }}>Bareos 설정은 설정 › 🖥️ vCenter 관리 › Bareos 백업 서버 로 옮겼습니다 — <a href={moveTo}>그 화면으로 이동</a></div>}
+      {tab === 'settings' && moveTo && <div className="muted" style={{ padding: 16 }}>Bareos 설정은 설정 › 백업 › Bareos 백업 서버 로 옮겼습니다 — <a href={moveTo}>그 화면으로 이동</a></div>}
       {tab === 'settings' && !moveTo && fullScope && <SettingsTab onSaved={reload} writable={data.settingsWritable !== false} hashBase={LEGACY_SETTINGS_BASE} />}
       {tab === 'settings' && !fullScope && <div className="muted" style={{ padding: 16 }}>Director 설정은 전체 범위 관리자만 볼 수 있습니다 — 운영 › 백업 대상을 쓰세요.</div>}
       </div>
@@ -521,8 +521,8 @@ function AddForm({ d, initial = null, onInitialUsed, onClose, onChanged }) {
       {vc && !cand && !candErr && <Loading />}
       {cand && (
         <>
-          <div className="muted" style={{ fontSize: 12, marginBottom: 6 }}>{candidateSummary(cand)}{cand.director ? ` · 잡을 만들 법인 Director ‘${cand.director.name}’` : ' · 이 vCenter 는 어느 법인 Director 에도 묶여 있지 않습니다(설정 › vCenter 관리 › Bareos 백업 서버 › Director)'}{cand.director && cand.mappingMissing?.length ? ` · 매핑이 덜 됐습니다(${cand.mappingMissing.join('·')})` : ''}{!cand.writable ? ' · 조회 전용 범위라 등록할 수 없습니다' : ''}</div>
-          {dirNotReady && <div className="banner warn" style={{ marginBottom: 8, fontSize: 12 }}>법인 Director ‘{cand.director.name}’ 의 콘솔 접속값이 덜 됐습니다({(cand.director.missing || []).join('·') || '접속값'}) — 등록할 수 없습니다. 설정 › vCenter 관리 › Bareos 백업 서버 › Director 에서 채우세요(주소·포트·콘솔 이름을 바꾸면 저장 비밀번호가 지워집니다).</div>}
+          <div className="muted" style={{ fontSize: 12, marginBottom: 6 }}>{candidateSummary(cand)}{cand.director ? ` · 잡을 만들 법인 Director ‘${cand.director.name}’` : ' · 이 vCenter 는 어느 법인 Director 에도 묶여 있지 않습니다(설정 › 백업 › Bareos 백업 서버 › Director)'}{cand.director && cand.mappingMissing?.length ? ` · 매핑이 덜 됐습니다(${cand.mappingMissing.join('·')})` : ''}{!cand.writable ? ' · 조회 전용 범위라 등록할 수 없습니다' : ''}</div>
+          {dirNotReady && <div className="banner warn" style={{ marginBottom: 8, fontSize: 12 }}>법인 Director ‘{cand.director.name}’ 의 콘솔 접속값이 덜 됐습니다({(cand.director.missing || []).join('·') || '접속값'}) — 등록할 수 없습니다. 설정 › 백업 › Bareos 백업 서버 › Director 에서 채우세요(주소·포트·콘솔 이름을 바꾸면 저장 비밀번호가 지워집니다).</div>}
           <div style={{ ...ROW, marginBottom: 6 }}>
             <button type="button" className="logout-btn" style={BTN} disabled={!visiblePickable.length || sel.size >= cap} onClick={pickVisible}>보이는 등록 가능 VM 전체 선택({visiblePickable.length}대)</button>
             <button type="button" className="logout-btn" style={BTN} disabled={!sel.size} onClick={() => setSel(new Set())}>선택 해제</button>

@@ -77,7 +77,7 @@ describe('WEB2599-06 3단 지도 엣지 0곳', () => {
     expect(layoutDeviceFlow({ edges: [{ id: 'a', name: 'A', groups: [] }] }).emptyEdges).toBe(null);
   });
   it('문구 — 등록 경로를 말하고, 담당 장비가 있으면 붙일 곳 없음을 말하고, 없으면 정상일 수 있다고 말한다', () => {
-    expect(noEdgesNote({})).toMatch(/설정 › 수집 서버/);
+    expect(noEdgesNote({})).toMatch(/설정 › 엣지·원격 › 수집 서버\(원격\)/);
     expect(noEdgesNote({})).toMatch(/정상/);
     const n = noEdgesNote({ totals: { unassignedDevices: 4 } });
     expect(n).toMatch(/4대/);

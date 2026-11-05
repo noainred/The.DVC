@@ -14,7 +14,7 @@ export default function BareosTabs({ active, right = null }) {
   const fullScope = !me?.scope || (!(me.scope.vcenters || []).length && !(me.scope.regions || []).length);
   const tabs = bareosSubTabs({
     summaryOk: toolAllowed('bareos-summary'), detailOk: toolAllowed('bareos-detail'), manageOk: toolAllowed('bareos-backup'), admin: hasRole('admin'), fullScope,
-    settingsHome: settingsHomeOk(me),   // v2.878 설정은 전체 설정 › vCenter 관리 › Bareos 백업 서버(열 수 있는 계정에게는 탭을 그리지 않는다)
+    settingsHome: settingsHomeOk(me),   // v2.878 설정은 전체 설정 › 백업 › Bareos 백업 서버(열 수 있는 계정에게는 탭을 그리지 않는다)
   });
   if (tabs.length < 2 && !right) return null;
   return (

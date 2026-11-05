@@ -201,7 +201,7 @@ const EDGE_NO_REPORT_TEXT = Object.freeze({
   }),
   'unknown-version': () => ({
     tone: 'warn', label: '보고 없음 · 버전 미상',
-    detail: '이 엣지가 중앙에 보고한 적이 없고 엣지 버전도 확인되지 않았습니다(export 를 한 번도 받지 못함). 설정 › 수집 서버에서 그 엣지 연결부터 확인하세요.',
+    detail: '이 엣지가 중앙에 보고한 적이 없고 엣지 버전도 확인되지 않았습니다(export 를 한 번도 받지 못함). 설정 › 엣지·원격 › 수집 서버(원격)에서 그 엣지 연결부터 확인하세요.',
   }),
   silent: () => ({
     tone: 'warn', label: '보고 없음',
