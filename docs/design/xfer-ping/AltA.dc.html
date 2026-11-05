@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>A안(비교용) — 한 차트에 두 축</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=Noto+Sans+KR:wght@400;500;700&family=JetBrains+Mono:wght@400;500;600&display=swap">
+<style>
+body{margin:0;background:#0a0e17;color:#e6edf6;font-family:"Inter","Noto Sans KR","Apple SD Gothic Neo",sans-serif;font-size:13px;line-height:1.45}
+a{color:#7dd3fc}a:hover{color:#bae6fd}
+.card{background:#141b2d;border:1px solid #1f2a40;border-radius:14px}
+.seg{display:inline-flex;border:1px solid #243049;border-radius:8px;overflow:hidden;flex-wrap:wrap}
+.seg button{height:30px;padding:0 11px;border:0;border-left:1px solid #243049;background:transparent;color:#8b9bb4;font:inherit;font-size:12px;cursor:pointer;white-space:nowrap}
+.seg button:first-child{border-left:0}
+.seg button.on{background:#1a2236;color:#e6edf6}
+.legend{display:flex;flex-wrap:wrap;align-items:center;gap:12px;font-size:12.5px;color:#8b9bb4}
+.legend i{display:inline-block;width:14px;height:6px;border-radius:3px;margin-right:6px;vertical-align:middle}
+.note{font-size:12px;color:#5d6b85;overflow-wrap:anywhere}
+.callout{display:flex;gap:10px;padding:10px 12px;border-radius:10px;border:1px solid rgba(245,158,11,.35);background:rgba(245,158,11,.07);color:#fcd34d;font-size:12.5px;line-height:1.5}
+svg text{font-family:"JetBrains Mono",ui-monospace,monospace}
+</style>
+</helmet>
+<div style="box-sizing:border-box;padding:18px 24px 28px;max-width:1680px;display:flex;flex-direction:column;gap:14px;min-width:0">
+  <section class="card" style="padding:14px 16px;display:flex;flex-direction:column;gap:10px;min-width:0">
+    <div style="display:flex;flex-wrap:wrap;justify-content:space-between;gap:10px;align-items:center">
+      <div style="display:flex;flex-wrap:wrap;align-items:center;gap:12px">
+        <h3 style="margin:0;font-size:15px;font-weight:600">24시간 추이</h3>
+        <div class="seg" role="tablist" aria-label="보기"><button type="button">전송 속도</button><button type="button" class="on">전송 속도 + Ping</button><button type="button">Ping만</button></div>
+      </div>
+      <div class="legend">
+        <span><i style="background:#22d3ee"></i>↓ 엣지 → 메인 (Mbps · 왼쪽 축)</span>
+        <span><i style="background:#f59e0b"></i>↑ 메인 → 엣지 (Mbps · 왼쪽 축)</span>
+        <span><i style="background:#a78bfa"></i>Ping (ms · 오른쪽 축)</span>
+      </div>
+    </div>
+    <div style="position:relative;width:100%;min-width:0">
+      <svg viewBox="0 0 1360 300" role="img" aria-label="전송 속도와 Ping — 두 축" style="display:block;width:100%;height:auto">
+        <line x1="46" x2="1314" y1="274" y2="274" stroke="#1f2a40"></line><text x="40" y="278" fill="#5d6b85" font-size="11" text-anchor="end">0.00</text><text x="1320" y="278" fill="#8b7cc8" font-size="11" text-anchor="start">0</text>
+        <line x1="46" x2="1314" y1="209" y2="209" stroke="#1f2a40"></line><text x="40" y="213" fill="#5d6b85" font-size="11" text-anchor="end">9.43</text><text x="1320" y="213" fill="#8b7cc8" font-size="11" text-anchor="start">150</text>
+        <line x1="46" x2="1314" y1="144" y2="144" stroke="#1f2a40"></line><text x="40" y="148" fill="#5d6b85" font-size="11" text-anchor="end">18.9</text><text x="1320" y="148" fill="#8b7cc8" font-size="11" text-anchor="start">300</text>
+        <line x1="46" x2="1314" y1="79" y2="79" stroke="#1f2a40"></line><text x="40" y="83" fill="#5d6b85" font-size="11" text-anchor="end">28.3</text><text x="1320" y="83" fill="#8b7cc8" font-size="11" text-anchor="start">450</text>
+        <line x1="46" x2="1314" y1="14" y2="14" stroke="#1f2a40"></line><text x="40" y="18" fill="#5d6b85" font-size="11" text-anchor="end">37.7</text><text x="1320" y="18" fill="#8b7cc8" font-size="11" text-anchor="start">600</text>
+        <text x="40" y="6" fill="#5d6b85" font-size="10" text-anchor="end">Mbps</text><text x="1320" y="6" fill="#8b7cc8" font-size="10" text-anchor="start">ms</text>
+        <line x1="119.97" x2="119.97" y1="14" y2="274" stroke="#1a2236"></line><text x="119.97" y="292" fill="#5d6b85" font-size="11" text-anchor="middle">12:00</text>
+        <line x1="436.97" x2="436.97" y1="14" y2="274" stroke="#1a2236"></line><text x="436.97" y="292" fill="#5d6b85" font-size="11" text-anchor="middle">18:00</text>
+        <line x1="753.97" x2="753.97" y1="14" y2="274" stroke="#1a2236"></line><text x="753.97" y="292" fill="#5d6b85" font-size="11" text-anchor="middle">00:00</text>
+        <line x1="1070.97" x2="1070.97" y1="14" y2="274" stroke="#1a2236"></line><text x="1070.97" y="292" fill="#5d6b85" font-size="11" text-anchor="middle">06:00</text>
+        <line x1="46" x2="1314" y1="258.76" y2="258.76" stroke="#22d3ee" stroke-dasharray="4 4" opacity=".5"></line>
+        <line x1="46" x2="1314" y1="123.79" y2="123.79" stroke="#f59e0b" stroke-dasharray="4 4" opacity=".5"></line>
+        <path d="M48.64 167.05 L53.93 167.81 L59.21 166.96 L64.49 167.15 L69.78 168.02 L75.06 166.39 L80.34 166 L85.63 167.23 L90.91 167.5 L96.19 168.97 L101.48 167.78 L106.76 168.17 L112.04 166.46 L117.33 167.34 L122.61 167.4 L127.89 167.47 L133.18 167.83 L138.46 167.17 L143.74 167.94 L149.03 167.51 L154.31 167.91 L159.59 168.15 L164.88 167.79 L170.16 166.34 L175.44 148.37 L180.73 150.23 L186.01 149.33 L191.29 153.58 L196.58 150.52 L201.86 148.88 L207.14 136.88 L212.43 152.25 L217.71 149.46 L222.99 147.19 L228.27 148.71 L233.56 152.38 L238.84 148.69 L244.13 148.36 L249.41 137.79 L254.69 151.25 L259.98 148.91 L265.26 147.7 L270.54 148.78 L275.83 149.59 L281.11 167.66 L286.39 167.28 L291.68 167.69 L296.96 166.99 L302.24 166.75 L307.52 168.2 L312.81 167.25 L318.09 167.33 L323.38 167.33 L328.66 166.78 L333.94 167.67 L339.23 167.12 L344.51 168.44 L349.79 167.36 L355.08 167.89 L360.36 166.74 L365.64 167.76 L370.92 167.49 L376.21 166.85 L381.49 168.97 L386.78 167.63 L392.06 166.82 L397.34 167.73 L402.63 167.98 L407.91 167.26 L413.19 167.01 L418.48 167.04 L423.76 167.42 L429.04 167.26 L434.33 167.2 L439.61 166.94 L444.89 167.33 L450.17 168.06 L455.46 168.13 L460.74 167.56 L466.03 167.27 L471.31 157.76 L476.59 167.55 L481.88 167.31 L487.16 167.83 L492.44 168.29 L497.73 167.24 L503.01 167.52 L508.29 167.53 L513.58 167.32 L518.86 168.07 L524.14 167.26 L529.42 167.1 L534.71 167.6 L539.99 166.78 L545.28 167.36 L550.56 167.5 L555.84 167.94 L561.13 166.67 L566.41 160.2 L571.69 168.75 L576.98 167.33 L582.26 168.12 L587.54 167.23 L592.83 166.97 L598.11 166.78 L603.39 167.89 L608.67 167.53 L613.96 167.31 L619.24 167.84 L624.53 167.84 L629.81 167.21 L635.09 167.24 L640.38 166.95 L645.66 167.37 L650.94 166.96 L656.23 168.09 L661.51 166.89 L666.79 167.32 L672.08 167.45 L677.36 167.23 L682.64 166.77 L687.93 167.19 L693.21 166.31 L698.49 167.24 L703.78 167.55 L709.06 167.46 L714.34 167.21 L719.63 166.41 L724.91 167.37 L730.19 168.19 L735.47 167.81 L740.76 166.98 L746.04 167.81 L751.33 167.89 L756.61 167.55 L761.89 168.18 L767.18 167.63 L772.46 167.62 L777.74 166.2 L783.03 167.22 L788.31 167.75 L793.59 167.28 L798.88 167.88 L804.16 167.44 L809.44 167.89 L814.72 168.51 L820.01 167.8 L825.29 167.43 L830.58 167.03 L835.86 166.26 L841.14 166.84 L846.43 167.63 L851.71 167.6 L856.99 167.74 L862.28 167.41 L867.56 168.22 L872.84 167.12 L878.13 167.92 L883.41 167.16 L888.69 168.04 L893.97 167.24 L899.26 167.64 L904.54 167.52 L909.83 166.92 L915.11 166.84 L920.39 166.91 L925.68 167.45 L930.96 167.99 L936.24 167.11 L941.53 167.24 L946.81 167.82 L952.09 167.27 L957.38 112.39 L962.66 47.23 L967.94 53.63 L973.22 120.08 L978.51 168.29 L983.79 166.53 L989.08 167.99 L994.36 158.03 L999.64 168.56 L1004.93 167.95 L1010.21 167.19 L1015.49 168.54 L1020.78 167.08 L1026.06 167.95 L1031.34 167.38 L1036.63 167.11 L1041.91 167.57 L1047.19 167.14 L1052.47 166.65 L1057.76 167.46 L1063.04 167.08 L1068.33 167.66 L1073.61 167.4 L1078.89 167.19 L1084.18 168.04 L1089.46 168.18 L1094.74 166.32 L1100.03 167.63 L1105.31 167.89 L1110.59 168.12 L1115.88 167.97 L1121.16 167.21 L1126.44 167.43 L1131.72 167.46 L1137.01 167.44 L1142.29 167.73 L1147.58 167.85 L1152.86 167.52 L1158.14 167.25 L1163.43 166.53 L1168.71 166.27 L1173.99 167.31 L1179.28 166.9 L1184.56 167.14 L1189.84 168.27 L1195.13 167.76 L1200.41 167.07 L1205.69 167.23 L1210.97 167.53 L1216.26 167.14 L1221.54 166.98 L1226.83 166.2 L1232.11 166.61 L1237.39 167.6 L1242.68 167.98 L1247.96 167.13 L1253.24 167.47 L1258.53 167.71 L1263.81 166.92 L1269.09 167.98 L1274.38 167.45 L1279.66 167.82 L1284.94 167 L1290.22 168.2 L1295.51 167.4 L1300.79 167.04 L1306.08 167.26 L1311.36 166.46" fill="none" stroke="#a78bfa" stroke-width="1.6" stroke-linejoin="round" opacity=".9"></path>
+        <path d="M50.4 258.48 L76.82 257.45 L103.24 256.34 L129.65 261.24 L156.07 262.76 L182.49 265.24 L208.9 254.97 L235.32 263.17 L261.74 259.38 L288.15 257.45 L314.57 263.45 L340.99 257.1 L367.4 257.45 L393.82 265.52 L420.24 264.07 L446.65 258.34 L473.07 264.41 L499.49 157.45 L525.9 263.03 L552.32 260.48 L578.74 259.31 L605.15 260.21 L631.57 256.34 L657.99 263.03 L684.4 255.38 L710.82 260.07 L737.24 256 L763.65 257.66 L790.07 264.97 L816.49 259.79 L842.9 260.48 L869.32 258.83 L895.74 258.34 L922.15 256.97 L948.57 255.66 L974.99 257.38 L1001.4 257.52 L1027.82 260.97 L1054.24 260.21 L1080.65 262 L1107.07 258.76 L1133.49 210.55 L1159.9 255.52 L1186.32 256.69 L1212.74 260.69 L1239.15 255.52 L1265.57 258.28 L1291.99 263.1" fill="none" stroke="#22d3ee" stroke-width="1.8" stroke-linejoin="round"></path>
+        <path d="M50.4 213.17 L76.82 209.1 L103.24 190.9 L129.65 70 L156.07 201.66 L182.49 180.9 L208.9 193.03 L235.32 190.21 L261.74 189.17 L288.15 205.1 L314.57 73.52 L340.99 185.52 L367.4 212.14 L393.82 198.69 L420.24 189.93 L446.65 112.07 L473.07 68.83 L499.49 32.62 L525.9 54.21 L552.32 60.55 L578.74 137.79 L605.15 151.38 L631.57 110.97 L657.99 114.76 L684.4 32.62 L710.82 123.79 L737.24 91.17 L763.65 152.21 L790.07 82.55 M842.9 72.28 L869.32 32.62 L895.74 97.86 L922.15 75.31 L948.57 135.03 L974.99 141.24 L1001.4 154.41 L1027.82 89.38 L1054.24 32.62 L1080.65 84.41 L1107.07 103.31 L1133.49 107.66 L1159.9 148.28 L1186.32 154.62 L1212.74 54.9 L1239.15 98.83 L1265.57 209.03 L1291.99 215.86" fill="none" stroke="#f59e0b" stroke-width="1.8" stroke-linejoin="round"></path>
+        <text x="816.49" y="266" fill="#ef4444" font-size="12" text-anchor="middle" font-weight="700">✕</text>
+        <rect x="316.5" y="14" width="3" height="9" rx="1" fill="#ef4444"></rect><rect x="322" y="14" width="3" height="9" rx="1" fill="#ef4444"></rect>
+        <rect x="961" y="14" width="3" height="9" rx="1" fill="#ef4444"></rect><rect x="966.5" y="14" width="3" height="9" rx="1" fill="#ef4444"></rect>
+      </svg>
+    </div>
+    <div class="note">A안 — 같은 차트에 Ping 을 오른쪽 ms 축으로 겹침(비교용 · 권장하지 않음)</div>
+  </section>
+
+  <div style="display:grid;grid-template-columns:repeat(3, minmax(0, 1fr));gap:12px">
+    <div class="callout"><span aria-hidden="true">!</span><span>Ping 선(보라)이 ↑ 선(호박)과 세로 범위를 같이 쓰면서 <b>서로 관계없는 두 값이 교차</b>합니다 — 02:50 의 Ping 급등이 ↑ 속도 상승처럼 읽힙니다.</span></div>
+    <div class="callout"><span aria-hidden="true">!</span><span>왼쪽 Mbps · 오른쪽 ms 두 축을 눈으로 번갈아 읽어야 합니다. 400px 폭에서는 오른쪽 축 글자까지 더해 그리는 폭이 약 20% 줄어듭니다.</span></div>
+    <div class="callout"><span aria-hidden="true">!</span><span>최저~최고 띠(연보라)를 같이 그리면 ↓ 선(청록)을 덮습니다 — 띠를 빼면 1분 단위 흔들림(지터)을 잃습니다. B안은 패널을 나눠 둘 다 유지합니다.</span></div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":640}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>
