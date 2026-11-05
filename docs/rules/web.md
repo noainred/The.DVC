@@ -37,6 +37,7 @@
 - (v2.889 추가) C-4 · C-5 — 첨부(인증 붙여 받기 · attach: 주소) · 포탈 매크로 · 포함 · 인라인 댓글 · 담당/당번 · 관리자 템플릿 · 캘린더 · 내보내기
 - (v2.895 추가) vCenter 상세 탭 12개(시안 `docs/design/vcenter-tabs` ①~⑦) — 탭 목록 · 옛 키 · 하위 칸 · 묶음은 `views/vcd/vcdTabs.js` 하나 · 도구 데이터는 그 도구 권한일 때만 · 포탈 알람은 '포탈 규칙'
 - (v2.895 추가) VM · ESXi 호스트 개체 보기(시안 ⑧~⑪) — 주소 `#/vcenters/<vc>/vm|host/<id>[/<탭>]` 는 `views/vcd/vcdRoute.js` 하나 · 트리 행 · 상세 창의 '⤢ 개체 보기' · 섹션은 EntityDetail 것을 재사용
+- (v2.898 추가) vCenter 개체 보기 2차 — '수집하지 않음' 칸을 채웠다(알람 · 작업 · 권한 목록 · Linked Mode · 업데이트 · vLCM · 스냅샷 트리 · NIC) · 카드는 `vcd/VcInfoParts.jsx` 하나 · 권한 목록은 관리자 판본만 부른다
 - (v2.895 추가) 개체 보기 › 성능 튜닝(시안 ⑫⑬) — 판정은 기존 모듈(rightsize verdict · contention · vmcfg · hcfg · 가상화율 RATIO_LEVELS · 사용률 75/90 · DS 90/95)을 `vcd/tuning.js` 한 곳에서 모은다 · 새 서버 경로 없음 · 계획은 저장 없이 내보내기만
 - (원래 5663행) v2.708 — 드롭다운은 공용 `Select`·`DataList` 하나다(자동 정렬)
 - (원래 5801행) 특수 기능 화면(v2.679) — 표시 이름·설명·개발 단계는 '덮어쓰기' 이고 키는 그대로다
@@ -563,6 +564,13 @@
   ⑤ 남은 하위 작업(에픽이면 소속 이슈)이 있으면 서버가 409 `open-children` 로 묻고 화면은 확인을 받아 `closeChildren:true` 로 다시 보낸다(취소하면 아무것도 바꾸지 않는다).
      자식이 있는 이슈의 진행률 입력은 잠기고 메모만 보낸다(서버 409 `progress-auto` 와 같은 판정).
   ⑥ 스프린트 · 필터 공유 버튼은 서버 값(`canSprints` · `canShareFilters` — 전체 범위 쓰기 계정)일 때만 그린다. 필터 저장은 쓰기 역할만(viewer 상태변경 예외를 늘리지 않았다).
+- **v2.898 — vCenter 개체 보기 2차(사용자 요청 '수집하지 않음 항목 반영할 수 있어?' · 선택 '①~④ 전부' · '전체 검증')**. 카드 `views/vcd/VcInfoParts.jsx` · 판정 `vcd/vcInfo.js`(순수) ·
+  서버 `server/src/vcinfo/`(규칙은 `docs/rules/vcenter.md` v2.898). 회귀 `vcd/vcInfo.test.js` · `vcdTabsRender.test.jsx` · `server/test/vcinfo2898.test.js` · `vcd2898snapNic.test.js`.
+  - 값은 `/vcenter-info/<kind>` — 탭을 열 때 1회 + '다시 읽기'(15초 폴링 금지). 갱신 주기 문구는 응답 `refreshMs` 로(화면에 숫자를 박지 않는다). `at:null`+`notCollected` 는 '없음' 이 아니라 '아직 읽지 않음'.
+  - 권한 목록 카드는 `hasRole('admin')` 일 때만 부른다(아니면 부르지 않고 `ErrorBox` 403 — 서버도 `isAdminDetailUser` 로 403). 작업 시작 사용자 · 알람 확인자는 관리자 판본에서만 이름이 온다(`userMasked`).
+  - VM · 호스트 개체의 알람 · 작업 · 권한은 같은 카드에 `entityType`+`entity`(moref — `VmObject.vmRef`)를 준다. 권한은 **그 개체에 직접 정의된 것만**이라 상속은 '알 수 없음' 으로 말한다.
+  - 함수 컴포넌트에 `ref` 라는 prop 이름을 쓰지 말 것(React 가 떼어 간다 — `Target` 의 `mref`). JSX 컴포넌트 미정의는 eslint `no-undef` 가 잡지 않는다(react 플러그인 없음) — 새 카드를 꽂을 때 import 를 손으로 확인했다.
+  - 스냅샷 트리는 트리 모양 목록(`role=tree` · `aria-level`)이라 STable 이 아니다(정렬하면 부모 관계가 깨진다). 들여쓰기는 6단까지만 키운다(400px).
 - **v2.895 — 성능 튜닝 탭(VM · ESXi 호스트 개체 보기 — 사용자 요청 '성능 튜닝을 위한 기능' · 승인 시안 ⑫⑬ · 기본값 11~13)**. 화면 `views/vcd/TuningTabs.jsx` · 판정 · 계획 `vcd/tuning.js`(순수). 회귀 `vcd/tuning.test.js` · `vcdTabsRender.test.jsx`.
   - **새 판정 · 새 서버 경로 없음** — 자원 적정화는 서버 `/tools/rightsize`(analyzeRightsize) verdict 그대로(reduce · hold = 주의 · keep = 적정 · insufficient = 판정 보류) · CPU 경합 · 디스크 지연은 `contentionText.vmContentionFindings` · 구성은 `vmCfgFindings` · `hostCfgFindings` · 가상화율은 `vcdVirt.js RATIO_LEVELS`(트리 색 `ratioColor` 도 이 값을 쓴다 — 한 곳) · 사용률은 usageColor 의 75/90 · 데이터스토어는 포탈 알람 규칙 90/95. 기준을 바꾸려면 원래 모듈을 바꾼다(여기서 숫자를 새로 정하지 않는다).
   - 축마다 ok · warn · crit · **unknown** — 꺼짐 · 측정 없음 · 권한 없음 · 조회 실패 · 레벨 2 카운터(벌룬 · 스왑) 표본 없음은 unknown('—')이고 정상으로 세지 않는다. 점수 · 등급 없음.
@@ -572,7 +580,9 @@
   - **주소가 진실의 원천**: `#/vcenters/<vcId>` = 상세, `/vm|host/<id>[/<탭>]` = 개체 보기(id 에 ':' 이 있어 조각마다 encodeURIComponent). `VCenters` 의 연 vCenter 도 주소에서 읽는다(새로고침 · 뒤로 가기 · 공유). 탭 전환은 `replaceHash`(기록을 쌓지 않는다). 다른 vCenter 주소는 무시한다. 브라우저가 아닌 시험에서도 던지지 않게 `currentHash` · `goHash` · `onHashChange` 를 쓴다(직접 `window.location` 금지).
   - 여는 곳 셋 — 트리 행의 `.vcd-objbtn`(1440 은 마우스를 올릴 때 · 터치/좁은 화면은 항상) · 상세 창 버튼 줄의 `ObjectViewButton`(창을 닫고 간다 — 다른 화면의 상세 창에서도 같은 주소로) · 개체끼리(VM 요약 › 호스트 · 호스트 VM 탭 › 개체 →). 행 이름 클릭(상세 창)은 그대로.
   - **새 수집 없음** — /vms · /hosts 한 행 + 캐시(vmcfg cfg·dev · hcfg · perfc) + 온디맨드(파티션 · 이벤트 · 메트릭 — 열 때 1회). 섹션은 `EntityDetail` 의 것(VmCfgSection · VmPartitionsSection · VmTagsSection · VmChangesSection · PerfcSection · ClusterCfgSection · HostBasicRows · HostCfgSection · HostHbaTable)을 export 해 재사용 — 복제 금지. 조회 전용이고 상태를 바꾸는 동작은 지금 버튼(권한 · 쓰기 범위) 그대로.
-  - 수집하지 않는 칸(네트워크 어댑터 장치 · 포트그룹 · 권한 목록 · 스냅샷 트리 · 리소스 풀 속성 · 호스트별 DS 마운트 · vLCM · 작업)은 탭을 숨기지 않고 `NotCollected`. vmcfg 가 아직 읽지 않은 디스크는 '아직 읽지 않음'(빈 표 아님) · 호스트 데이터스토어는 VM 디스크로 역산하고 못 읽은 VM 수를 밝힌다.
+  - 수집하지 않는 칸(리소스 풀 속성 · 호스트별 DS 마운트 · NIC 팀 구성 · 고급 설정)은 탭을 숨기지 않고 `NotCollected`.
+    ⚠ **정정(v2.898)**: v2.895 는 여기에 '포트그룹' 도 적고 호스트 네트워크 탭을 '수집하지 않음' 으로 그렸다 — 호스트 가상 스위치 · 포트그룹은 **v2.701(A10)부터 `hcfg.net`** 에 있었다(틀린 문구 ·
+    사용자 보고에도 그대로 나갔다). '수집하지 않음' 으로 적기 전에 그 값의 수집 모듈(hostcfg · vmcfg · soapParse)을 grep 할 것. 네트워크 어댑터 · 권한 목록 · 스냅샷 트리 · vLCM · 작업은 v2.898 에 채웠다. vmcfg 가 아직 읽지 않은 디스크는 '아직 읽지 않음'(빈 표 아님) · 호스트 데이터스토어는 VM 디스크로 역산하고 못 읽은 VM 수를 밝힌다.
   - ⚠ CSS 이름: 새 클래스는 `.vcd-` 접두라도 **기존 트리 규칙(.vcd-sub · .vcd-row · .vcd-node …)과 겹치는지 먼저 grep** — v2.895 가 하위 칸 목록에 `.vcd-sub` 를 써 트리 행이 47px 로 늘었다(Chromium 재판독에서 발견 · `vcdTabs.test.js` 가 고정).
 - **v2.895 — vCenter 상세 탭 12개(사용자 요청 'vSphere Client 처럼' · 승인 시안 `docs/design/vcenter-tabs` ①~⑦ · 기본값 1~7)**. 화면 `views/VCenterDetail.jsx` + `views/vcd/`(SummaryTab · MonitorTab · ConfigureTab · InventoryTabs · VcdParts · useOnce). 회귀 `views/vcd/vcdTabs.test.js` · `vcdTabsRender.test.jsx`.
   - 탭 목록 · 옛 키('trend' → 모니터 › 성능) · 하위 칸 · 데이터센터 묶음 · 확장 상태 · 버전 행은 **`vcd/vcdTabs.js` 하나**. 기본 탭은 예전과 같은 '호스트 및 클러스터', 그 뒤로는 브라우저 기억(`vcd.tab`, try/catch).

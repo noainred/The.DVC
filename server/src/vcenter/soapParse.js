@@ -117,7 +117,75 @@ export function snapshotInfo(snapXml, layoutXml) {
     snapshotNames: names,
     // Veeam 임시 스냅샷이 있을 때만 싣는다(없는 VM 의 응답 모양은 예전 그대로). 시각을 못 읽었으면 veeamSnapTs 는 null.
     ...(veeamSnaps ? { veeamSnaps, veeamSnapTs } : {}),
+    // v2.898: 스냅샷 트리(부모 관계 · 설명 · 생성 시각 · 현재 위치) — 스냅샷이 있는 VM 에만 싣는다(없는 VM 의 모양은 예전 그대로).
+    ...(snapshotCount > 0 && snapXml ? { snapshotTree: snapshotTreeNodes(snapXml) } : {}),
   };
+}
+
+/** 스냅샷 트리 상한 — 화면 한 장에 그리는 만큼(넘치면 snapshotCount 와 비교해 '일부' 로 말한다). */
+export const SNAP_TREE_MAX = 64;
+const SNAP_TREE_XML_MAX = 1_000_000;
+const SNAP_TREE_TEXT = { name: 80, desc: 200 };
+// 한 번의 선형 훑기로 읽는 토큰 — 목록 원소 열고 닫기 · 노드 ref · 노드 필드 · currentSnapshot. 반복은 전부 '[^<]*'(다음 '<' 에서 멈춘다)
+// 또는 길이 상한이 있는 '[^>]{0,256}' 이다(닫는 '>' 가 없는 입력에서 끝까지 되짚지 않게 — 정규식 규칙).
+const SNAP_TOKEN_RE = /<(\/?)(rootSnapshotList|childSnapshotList)(?=[\s>])[^>]{0,256}>|<snapshot type="VirtualMachineSnapshot">([^<]*)<\/snapshot>|<(name|description|createTime|state|quiesced)>([^<]*)<\/\4>|<currentSnapshot[^>]{0,256}>([^<]*)<\/currentSnapshot>/g;
+
+/**
+ * VM 'snapshot'(VirtualMachineSnapshotInfo) XML → 트리를 전위 순서로 편 목록 [{d, name, desc, ts, state, quiesced, current}] (순수).
+ *   d = 깊이(루트 0). 노드는 '<snapshot type="VirtualMachineSnapshot">' 하나로 시작하고(currentSnapshot 은 태그가 달라 섞이지 않는다),
+ *   깊이는 그때 열려 있는 rootSnapshotList · childSnapshotList 수 - 1 이다. 원소 묶음(<VirtualMachineSnapshotTree>)이 있어도 없어도 같다.
+ *   필드는 그 노드의 깊이에서 처음 나온 값만 받는다(자식 목록 뒤에 다시 나온 값으로 덮지 않는다). 못 읽은 값은 null.
+ *   ref(snapshot-NN)는 싣지 않는다 — 화면은 '현재 위치' 만 알면 되고, 동작(되돌리기 · 삭제)은 두지 않는다.
+ */
+export function snapshotTreeNodes(snapXml) {
+  const out = [];
+  if (!snapXml) return out;
+  const s = String(snapXml).slice(0, SNAP_TREE_XML_MAX);
+  const re = new RegExp(SNAP_TOKEN_RE.source, 'g');
+  let depth = 0; let cur = null; let currentRef = null; let curRef = null;
+  const refs = [];
+  let m;
+  while ((m = re.exec(s))) {
+    if (m[2]) { depth = Math.max(0, depth + (m[1] ? -1 : 1)); continue; }
+    if (m[6] != null) { currentRef = m[6].trim() || null; continue; }
+    if (m[3] != null) {
+      curRef = m[3].trim();
+      if (out.length >= SNAP_TREE_MAX) { cur = null; continue; }
+      cur = { d: Math.max(0, depth - 1), name: null, desc: null, ts: null, state: null, quiesced: null, current: false };
+      out.push(cur); refs.push(curRef);
+      continue;
+    }
+    if (!cur || cur.d !== Math.max(0, depth - 1)) continue;
+    const f = m[4]; const raw = xmlUnescape(m[5]).trim();
+    if (f === 'name' && cur.name == null) cur.name = raw ? raw.slice(0, SNAP_TREE_TEXT.name) : null;
+    else if (f === 'description' && cur.desc == null) cur.desc = raw ? raw.slice(0, SNAP_TREE_TEXT.desc) : null;
+    else if (f === 'createTime' && cur.ts == null) { const t = Date.parse(raw); cur.ts = Number.isFinite(t) ? t : null; }
+    else if (f === 'state' && cur.state == null) cur.state = /^(poweredOn|poweredOff|suspended)$/.test(raw) ? raw : null;
+    else if (f === 'quiesced' && cur.quiesced == null) cur.quiesced = raw === 'true' ? true : raw === 'false' ? false : null;
+  }
+  if (currentRef) { const i = refs.indexOf(currentRef); if (i >= 0) out[i].current = true; }
+  return out;
+}
+
+/** 엣지가 보낸 vm.snapshotTree → 같은 모양으로 다시 좁힌다(배열이 아니면 null = 모름). 모르는 키는 싣지 않는다. */
+export function sanitizeSnapTree(v) {
+  if (!Array.isArray(v)) return null;
+  const txt = (x, n) => (typeof x === 'string' && x.trim() ? x.trim().slice(0, n) : null);
+  const out = [];
+  for (const x of v.slice(0, SNAP_TREE_MAX)) {
+    if (x == null || typeof x !== 'object' || Array.isArray(x)) continue;
+    const d = typeof x.d === 'number' && Number.isInteger(x.d) && x.d >= 0 && x.d < SNAP_TREE_MAX ? x.d : 0;
+    out.push({
+      d,
+      name: txt(x.name, SNAP_TREE_TEXT.name),
+      desc: txt(x.desc, SNAP_TREE_TEXT.desc),
+      ts: typeof x.ts === 'number' && Number.isFinite(x.ts) && x.ts > 0 ? x.ts : null,
+      state: typeof x.state === 'string' && /^(poweredOn|poweredOff|suspended)$/.test(x.state) ? x.state : null,
+      quiesced: x.quiesced === true || x.quiesced === false ? x.quiesced : null,
+      current: x.current === true,
+    });
+  }
+  return out;
 }
 
 /** Parse RetrieveProperties response into [{type, ref, props:{path:value}}]. */
@@ -148,7 +216,8 @@ export function parseObjectContent(xml) {
 /* ------------------- VM 전체 정보 CSV export 용 파서 (v2.275) ------------------- */
 
 // NIC 로 취급하는 VirtualDevice 구체 타입(xsi:type) — VirtualEthernetCard 하위 전부.
-const NIC_TYPE_RE = /^Virtual(E1000e?|Vmxnet\d?|Vmxnet3Vrdma|PCNet32|SriovEthernetCard)$/i;
+// v2.898: vmcfg/parse.js(개체 보기 어댑터 표)도 이 판정 하나를 쓴다 — 'NIC 인가' 를 두 벌로 두지 않는다.
+export const NIC_TYPE_RE = /^Virtual(E1000e?|Vmxnet\d?|Vmxnet3Vrdma|PCNet32|SriovEthernetCard)$/i;
 
 /**
  * VM 'config.hardware.device'(ArrayOfVirtualDevice) XML → NIC/디스크 상세.

@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { parseVcRoute, vcHash, currentHash, goHash, onHashChange, replaceHash } from './vcdRoute.js';
 import {
   VM_OBJ_TABS, HOST_OBJ_TABS, normObjTab, vmDiskRows, vmDatastoreRows, vmsOnHost, resourcePoolRows,
-  hostDatastoresFromVms, sameBuildCount, vmSnapshotFacts, toolsStatusBadge,
+  hostDatastoresFromVms, sameBuildCount, vmSnapshotFacts, toolsStatusBadge, snapTreeRows, vmNicRows,
 } from './objTabs.js';
 
 describe('개체 보기 주소(v2.895)', () => {
@@ -80,5 +80,31 @@ describe('개체 탭 · 묶음', () => {
     expect(toolsStatusBadge('guestToolsCurrent')).toEqual(['green', '최신']);
     expect(toolsStatusBadge('')).toEqual(['gray', '—']);
     expect(toolsStatusBadge('somethingNew')[1]).toBe('somethingNew');
+  });
+});
+
+describe('v2.898 — 스냅샷 트리 · 네트워크 어댑터(이미 받던 XML 을 넓혀 읽은 값)', () => {
+  const NOW = Date.parse('2026-11-05T00:00:00Z');
+  it('트리 — 키가 없으면 null(아직 읽지 않음) · 깊이 · 현재 위치 · 상태 문구 · 개수보다 적으면 일부', () => {
+    expect(snapTreeRows({ snapshotCount: 2 })).toBe(null);
+    const t = snapTreeRows({ snapshotCount: 3, snapshotTree: [
+      { d: 0, name: 'a', ts: NOW - 10 * 86_400_000, state: 'poweredOn', quiesced: true },
+      { d: 1, name: '', desc: 'x', ts: null, state: 'weird', current: true }, null] }, NOW);
+    expect(t.rows.map((r) => [r.d, r.name, r.current, r.days, r.state, r.quiesced])).toEqual([
+      [0, 'a', false, 10, '켜짐(메모리 포함)', '예'], [1, null, true, null, null, null]]);
+    expect(t.partial).toBe(true);
+    expect(snapTreeRows({ snapshotCount: 1, snapshotTree: [{ d: 0, name: 'a' }] }).partial).toBe(false);
+  });
+  it('어댑터 — 분산 포트그룹은 /networks 에서 이름 · VLAN 을 찾는다(같은 vCenter 만) · 못 찾으면 참조만', () => {
+    const vm = { vcenterId: 'vc1', dev: { nics: [
+      { label: 'n1', adapter: 'VMXNET 3', backing: 'dvs', netRef: 'dvportgroup-9', connected: true },
+      { label: 'n2', backing: 'std', net: 'VM Network', netRef: 'network-1', connected: false, startConnected: false },
+      { label: 'n3', backing: 'dvs', netRef: 'dvportgroup-404' }] } };
+    const nets = [{ id: 'vc1:dvportgroup-9', vcenterId: 'vc1', name: 'pg-prod', vlanId: 120 }, { id: 'vc2:dvportgroup-404', vcenterId: 'vc2', name: '남의 것' }];
+    const r = vmNicRows(vm, nets);
+    expect(r.map((x) => [x.net, x.vlan, x.backing, x.connected])).toEqual([['pg-prod', 120, '분산 포트그룹', true], ['VM Network', null, '표준 포트그룹', false], [null, null, '분산 포트그룹', null]]);
+    expect(r[2].netRef).toBe('dvportgroup-404');
+    expect(vmNicRows({ vcenterId: 'vc1', dev: { disks: [] } }, nets)).toBe(null);
+    expect(vmNicRows({ vcenterId: 'vc1', dev: { nics: [] } }, nets)).toEqual([]);
   });
 });

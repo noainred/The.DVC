@@ -1,14 +1,15 @@
 /**
  * views/vcd/InventoryTabs.jsx — vCenter › 데이터 센터 · 확장 프로그램 · 사용 권한 · 연결된 vCenter Server 시스템 · 업데이트
- * (승인 시안 ④⑤⑥ · 기본값 1: 새 수집 없음 — 지금 아는 것만, 수집하지 않는 것은 '수집하지 않음 · 2차').
+ * (승인 시안 ④⑤⑥ · 기본값 1). v2.898: 권한 목록 · 연결된 vCenter · vCenter 업데이트 · vLCM 준수는 vcinfo 캐시(VcInfoParts.jsx)로 채웠다.
  */
 import React, { useMemo, useState } from 'react';
 import { toolAllowed } from '../../api.js';
 import { ErrorBox, Loading, StateBadge, UsageCell, SearchBox } from '../../components/ui.jsx';
 import { STable } from '../../components/STable.jsx';
 import { useOnce, toolDenied } from './useOnce.js';
-import { Card, KV, Note, ToolLink, NotCollected } from './VcdParts.jsx';
+import { Card, KV, Note, ToolLink } from './VcdParts.jsx';
 import { EventRows } from './SummaryTab.jsx';
+import { VcPermsCard, VcLinkedCard, VcUpdatesCard, VcVlcmCard } from './VcInfoParts.jsx'; // v2.898
 import { clusterAvgPct } from '../vcdOverview.js';
 import { groupByDatacenter, extensionsState, extensionVendor, fleetKeyStats, esxiVersionRows, versionNewer, PERM_CATEGORY } from './vcdTabs.js';
 
@@ -131,6 +132,7 @@ export function PermsTab({ vcenterId }) {
   const q = useOnce('/tools/report/changes', { vcenterId, days: 90, category: PERM_CATEGORY, limit: 300 }, ok);
   return (
     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(460px, 100%), 1fr))', gap: 12, marginTop: 10, minWidth: 0 }}>
+      <VcPermsCard vcenterId={vcenterId} wide />
       <Card title="지금 아는 것" badge={<span className="badge blue">권한 · 역할 변경 이벤트</span>} sub="최근 90일 · 구성 변경 이력의 ‘권한’ 분류"
         more={<ToolLink tool="change-history">변경 이력에서 열기 →</ToolLink>}>
         {!ok ? <div style={{ padding: 12 }}><ErrorBox error={toolDenied('구성 변경 이력')} /></div>
@@ -138,11 +140,6 @@ export function PermsTab({ vcenterId }) {
             : !q.data ? <Loading label="권한 변경 이벤트" /> : <EventRows data={q.data} vcenterId={vcenterId} empty="최근 90일에 권한 · 역할 변경 이벤트가 없습니다." />}
         <Note>목록이 아니라 변경 기록입니다 — 지금 누가 어떤 역할인지는 이 표로 알 수 없습니다.</Note>
       </Card>
-      <div className="card" style={{ padding: 14, minWidth: 0 }}>
-        <NotCollected title="권한 목록">
-          사용자/그룹 · 역할 · 정의 위치(개체) · 전파(상속)는 포탈이 수집하지 않습니다. 추가한다면 읽기 전용(AuthorizationManager) · 탭을 열 때만 조회 · 관리자 판본에서만 보입니다.
-        </NotCollected>
-      </div>
     </div>
   );
 }
@@ -151,26 +148,21 @@ export function PermsTab({ vcenterId }) {
 export function LinkedTab({ site, vcenterId }) {
   return (
     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(460px, 100%), 1fr))', gap: 12, marginTop: 10, minWidth: 0 }}>
+      <VcLinkedCard vcenterId={vcenterId} wide />
       <Card title="지금 아는 것" badge={<span className="badge blue">이 vCenter</span>}>
         <KV rows={[
           ['이름', <b key="n">{site.name || vcenterId}</b>],
           ['포탈 vCenter id', <span className="mono" key="i">{vcenterId}</span>],
           ['상태', <StateBadge key="s" state={site.status} />],
-          ['SSO 도메인 · 연결된 다른 vCenter', <span className="muted" key="m">모름 — 수집하지 않습니다</span>],
         ]} />
-        <Note>포탈 등록부의 다른 vCenter 는 Enhanced Linked Mode 연결 여부와 무관한 목록입니다 — 이 탭에 그 목록을 ‘연결된’ 것처럼 보이지 않습니다. ‘연결된 vCenter 없음’ 이 아니라 모르는 상태입니다.</Note>
+        <Note>포탈 등록부의 다른 vCenter 는 Enhanced Linked Mode 연결 여부와 무관한 목록입니다 — 연결 여부는 위 표(vCenter 가 보고한 같은 SSO 도메인 구성원)로만 말합니다.</Note>
       </Card>
-      <div className="card" style={{ padding: 14, minWidth: 0 }}>
-        <NotCollected title="연결된 vCenter Server 시스템">
-          Linked Mode 구성원을 어느 API 로 읽을지 아직 확인하지 않았습니다(추정 단계). 확인되면 vCenter · SSO 도메인 · 버전 · 포탈 등록 여부 · 상태를 보입니다.
-        </NotCollected>
-      </div>
     </div>
   );
 }
 
 /* ── 업데이트 ────────────────────────────────────────────────────────────── */
-export function UpdatesTab({ site, hosts, hostsOk, gate }) {
+export function UpdatesTab({ site, vcenterId, hosts, hostsOk, gate }) {
   const esxi = useMemo(() => esxiVersionRows(hostsOk ? hosts : []), [hosts, hostsOk]);
   return (
     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(460px, 100%), 1fr))', gap: 12, marginTop: 10, minWidth: 0 }}>
@@ -196,11 +188,8 @@ export function UpdatesTab({ site, hosts, hostsOk, gate }) {
         ) : <div className="muted" style={{ padding: '10px 14px', fontSize: 12.5 }}>버전을 보고한 호스트가 없습니다.</div>}
         {hostsOk && esxi.unknown > 0 && <Note>버전을 보고하지 않은 호스트 {esxi.unknown}대(끊김 등)는 어느 행에도 세지 않았습니다.</Note>}
       </Card>
-      <div className="card" style={{ padding: 14, minWidth: 0 }}>
-        <NotCollected title="패치 · 이미지 준수">
-          vCenter 적용 가능 패치(VAMI)와 vLCM 이미지 준수(클러스터별 준수 · 미준수)는 수집하지 않습니다. VAMI 는 별도 접속 · 자격이 필요할 수 있습니다(확인하지 않음). 이 탭은 조회 전용입니다.
-        </NotCollected>
-      </div>
+      <VcUpdatesCard vcenterId={vcenterId} wide />
+      <VcVlcmCard vcenterId={vcenterId} wide />
     </div>
   );
 }

@@ -1,6 +1,7 @@
 /**
  * views/vcd/VmObject.jsx — VM '개체 보기'(v2.895 — 승인 시안 ⑧⑩⑪ · 기본값 8~10). vSphere Client 의 VM 개체 탭 8개.
- *   값은 /vms 한 행 + 캐시(vmcfg cfg · dev · perfc) + 온디맨드(파티션 · 이벤트 · 메트릭 — 열 때 1회)만 — 새 수집 없음.
+ *   값은 /vms 한 행 + 캐시(vmcfg cfg · dev · perfc) + 온디맨드(파티션 · 이벤트 · 메트릭 — 열 때 1회)만.
+ *   v2.898: 네트워크 어댑터(dev.nics) · 스냅샷 트리(snapshotTree) — 주기 수집이 이미 받던 장치 · 스냅샷 XML 을 넓혀 읽은 값(새 vCenter 호출 없음).
  *   섹션은 지금 VM 상세 창(components/EntityDetail.jsx)의 것을 그대로 쓴다(복제 금지). 상태를 바꾸는 동작은 지금 버튼(권한 · 쓰기 범위) 그대로.
  */
 import React, { useMemo } from 'react';
@@ -12,20 +13,25 @@ import { VmConsoleButton } from '../../components/VmConsole.jsx';
 import { VmRemoteButton } from '../../components/VmRemote.jsx';
 import { VmReconfigButton } from '../../components/VmReconfig.jsx';
 import { dayStamp } from '../../dayStamp.js';
+import { numOrNull } from '../../numOrNull.js';
 import ObjectShell from './ObjectShell.jsx';
-import { Card, KV, Note, NotCollected } from './VcdParts.jsx';
+import { Card, KV, Note } from './VcdParts.jsx';
+import { VcAlarmsCard, VcTasksCard, VcPermsCard } from './VcInfoParts.jsx';
 import { useOnce, toolDenied } from './useOnce.js';
 import { EventRows } from './SummaryTab.jsx';
-import { vmDiskRows, vmDatastoreRows, vmSnapshotFacts, toolsStatusBadge } from './objTabs.js';
+import { vmDiskRows, vmDatastoreRows, vmSnapshotFacts, toolsStatusBadge, snapTreeRows, vmNicRows } from './objTabs.js';
 import { gbText, PERM_CATEGORY } from './vcdTabs.js';
 
 const VmMetricButton = React.lazy(() => import('../../components/VmMetrics.jsx').then((m) => ({ default: m.VmMetricButton })));
 const Lazy = ({ children }) => <React.Suspense fallback={null}>{children}</React.Suspense>;
 const GRID = 'vcd-obj-grid';
+/** 포탈 VM · 호스트 id('<vcenterId>:<moref>')의 moref — vCenter id 에 콜론이 있어도 vcenterId 앞머리로 자른다. */
+export const vmRef = (o) => (o?.id && o?.vcenterId && String(o.id).startsWith(`${o.vcenterId}:`) ? String(o.id).slice(String(o.vcenterId).length + 1) : null);
 const tsText = (t) => (Number.isFinite(t) && t > 0 ? new Date(t).toLocaleString('ko-KR') : '—');
 
-export default function VmObject({ site, vcenterId, vm, vmsOk, gate, datastores, hosts, tab, onTab, onBack, onOpenHost, extraTabs, extra }) {
+export default function VmObject({ site, vcenterId, vm, vmsOk, gate, datastores, hosts, networks, tab, onTab, onBack, onOpenHost, extraTabs, extra }) {
   const disks = useMemo(() => (vm ? vmDiskRows(vm, datastores) : null), [vm, datastores]);
+  const nics = useMemo(() => (vm ? vmNicRows(vm, networks) : null), [vm, networks]);
   const dsRows = useMemo(() => vmDatastoreRows(disks), [disks]);
   if (!vm) {
     return (
@@ -61,7 +67,7 @@ export default function VmObject({ site, vcenterId, vm, vmsOk, gate, datastores,
                 ['하드 디스크', disks ? `${disks.length}개 · ${gbText(capSum)}${disks.some((d) => d.rdm) ? ` · RDM ${disks.filter((d) => d.rdm).length}` : ''}` : <span className="muted" key="d">아직 읽지 않음</span>],
                 ['디스크 사용', `${gbText(vm.storageGB)}${vm.uncommittedGB ? ` · 미할당 ${gbText(vm.uncommittedGB)}(씬)` : ''}`],
                 ['CD/DVD', Array.isArray(vm.dev?.cdroms) ? `${vm.dev.cdroms.length}개 · 연결 ${vm.dev.cdroms.filter((c) => c.connected).length}` : '—'],
-                ['네트워크 어댑터', <span className="muted" key="n">장치는 수집하지 않음 · IP {ips.length}개(게스트 보고)</span>],
+                ['네트워크 어댑터', nics ? `${nics.length}개 · 연결 ${nics.filter((n) => n.connected).length}${nics[0]?.adapter ? ` · ${[...new Set(nics.map((n) => n.adapter).filter(Boolean))].join(' · ')}` : ''}` : <span className="muted" key="n">아직 읽지 않음 · IP {ips.length}개(게스트 보고)</span>],
                 ['GPU', vm.gpu ? <GpuBadge key="g" gpu={vm.gpu} /> : <span className="muted" key="g">없음</span>],
                 ['호환성', vm.hwVersion || '—'],
                 ['펌웨어', cfg?.firmware ? (cfg.firmware === 'efi' ? 'EFI' : cfg.firmware === 'bios' ? 'BIOS' : cfg.firmware) : '—'],
@@ -88,7 +94,7 @@ export default function VmObject({ site, vcenterId, vm, vmsOk, gate, datastores,
                 ['리소스 풀', vm.resourcePool || '—'],
                 ['폴더', vm.folder || '—'],
                 ['데이터스토어', dsRows ? (dsRows.map((d) => d.datastore || '—').join(' · ') || '—') : <span className="muted" key="ds">아직 읽지 않음</span>],
-                ['네트워크', <span className="muted" key="pg">포트그룹은 수집하지 않음</span>],
+                ['네트워크', nics ? ([...new Set(nics.map((n) => n.net || n.netRef).filter(Boolean))].join(' · ') || '—') : <span className="muted" key="pg">아직 읽지 않음</span>],
                 ['관리 솔루션', cfg?.managedBy ? [cfg.managedBy.extensionKey, cfg.managedBy.type].filter(Boolean).join(' · ') : '없음'],
               ]} />
             </Card>
@@ -117,7 +123,8 @@ export default function VmObject({ site, vcenterId, vm, vmsOk, gate, datastores,
             </div>
           </Card>
           <Card title="이벤트 · 이동"><div style={{ padding: '0 14px 12px' }}>{toolAllowed('vm-changes') ? <VmChangesSection vm={vm} /> : <ErrorBox error={toolDenied('VM 이동·구성 변경 이력')} />}</div></Card>
-          <div className="card" style={{ padding: 14 }}><NotCollected title="최근 작업">이 VM 을 대상으로 한 작업 목록(TaskManager)은 수집하지 않습니다.</NotCollected></div>
+          <VcAlarmsCard vcenterId={vcenterId} entityType="VirtualMachine" entity={vmRef(vm)} wide />
+          <VcTasksCard vcenterId={vcenterId} entityType="VirtualMachine" entity={vmRef(vm)} wide />
         </div>
       )}
 
@@ -134,16 +141,19 @@ export default function VmObject({ site, vcenterId, vm, vmsOk, gate, datastores,
                   {(vm.dev.cdroms || []).map((c, i) => (
                     <tr key={`cd-${i}`}><td><b>{c.label || 'CD/DVD'}</b></td><td>—</td><td className="mono">{c.file || (c.host ? '호스트 장치' : '—')}</td><td>{c.connected ? '연결됨' : '연결 안 됨'}</td><td>—</td></tr>
                   ))}
+                  {(nics || []).map((n, i) => (
+                    <tr key={`nic-${i}`}><td><b>{n.label}</b></td><td>{n.adapter || '—'}</td><td className="mono">{n.net || n.netRef || '—'}</td><td>{n.connected == null ? '—' : n.connected ? '연결됨' : '연결 안 됨'}</td><td>—</td></tr>
+                  ))}
                 </tbody>
               </STable>
             )}
-            <Note>네트워크 어댑터 장치(유형 · 포트그룹 · 연결)는 수집하지 않습니다(2차). USB {vm.dev?.usb ?? '—'} · 직렬 {vm.dev?.serial ?? '—'} · 병렬 {vm.dev?.parallel ?? '—'}.</Note>
+            <Note>{nics ? '' : '네트워크 어댑터는 아직 이 판의 수집기가 읽지 않았습니다(장치를 다시 읽으면 채워집니다). '}USB {vm.dev?.usb ?? '—'} · 직렬 {vm.dev?.serial ?? '—'} · 병렬 {vm.dev?.parallel ?? '—'}.</Note>
           </Card>
           <Card title="설정 점검"><div style={{ padding: '0 14px 12px' }}><VmCfgSection vm={vm} /></div></Card>
         </>
       )}
 
-      {tab === 'perms' && <PermPane vcenterId={vcenterId} entity={vm.name} what="이 VM" />}
+      {tab === 'perms' && <PermPane vcenterId={vcenterId} entity={vm.name} what="이 VM" objType="VirtualMachine" objRef={vmRef(vm)} />}
 
       {tab === 'datastores' && (
         <>
@@ -174,7 +184,7 @@ export default function VmObject({ site, vcenterId, vm, vmsOk, gate, datastores,
             ]} />
             <Note>IP 는 VMware Tools 가 보고한 값입니다 — 꺼졌거나 Tools 가 없으면 비어 있습니다(‘IP 없음’ 이 아닙니다). 핑은 버튼을 누를 때만.</Note>
           </Card>
-          <div className="card" style={{ padding: 14 }}><NotCollected title="네트워크 어댑터 · 포트그룹 · vSwitch">VM 장치의 백킹(어댑터 유형 vmxnet3/e1000 · 포트그룹 · 연결 상태)은 수집하지 않습니다. 추가하면 이 탭과 성능 튜닝의 구성 권장에 들어갑니다.</NotCollected></div>
+          <VmNicCard vm={vm} nics={nics} />
         </div>
       )}
 
@@ -189,7 +199,7 @@ export default function VmObject({ site, vcenterId, vm, vmsOk, gate, datastores,
             ]} />
             <Note>스냅샷 삭제 · 되돌리기 같은 동작은 두지 않습니다(조회 전용). 나이 기준 목록은 특수 기능 ‘스냅샷 나이 감시’.</Note>
           </Card>
-          <div className="card" style={{ padding: 14 }}><NotCollected title="스냅샷 트리">스냅샷의 부모 관계 · 설명 · 생성 시각별 트리(rootSnapshotList)는 수집하지 않습니다. 지금은 개수 · 크기 · 가장 오래된 것 · 이름만 압니다.</NotCollected></div>
+          <SnapTreeCard vm={vm} />
         </div>
       )}
 
@@ -211,8 +221,70 @@ export default function VmObject({ site, vcenterId, vm, vmsOk, gate, datastores,
   );
 }
 
+/** v2.898: 네트워크 어댑터 표(vm.dev.nics — 장치 XML). 분산 포트그룹 이름 · VLAN 은 /networks 에서 찾는다. */
+function VmNicCard({ vm, nics }) {
+  return (
+    <Card style={{ gridColumn: '1 / -1' }} title={`네트워크 어댑터${nics ? ` ${nics.length}` : ''}`} sub={vm.dev?.at ? `vmcfg 장치 · 읽은 시각 ${tsText(vm.dev.at)}` : 'vmcfg 장치'}>
+      {!nics ? <div className="muted" style={{ padding: '10px 14px', fontSize: 12.5 }}>{vm.dev ? '이 VM 의 장치는 이전 판 수집기가 읽어 어댑터 정보가 없습니다 — 장치를 다시 읽으면 채워집니다(오래된 VM 부터 나눠 읽습니다).' : 'vmcfg 가 아직 이 VM 의 장치를 읽지 않았습니다 — 빈 표가 아닙니다.'}</div>
+        : !nics.length ? <div className="muted" style={{ padding: '10px 14px', fontSize: 12.5 }}>네트워크 어댑터가 없습니다.</div> : (
+          <STable className="v3-table" minWidth={720}>
+            <thead><tr><th>어댑터</th><th>유형</th><th>네트워크</th><th>종류</th><th>VLAN</th><th>MAC</th><th>연결</th><th>시작 시 연결</th></tr></thead>
+            <tbody>
+              {nics.map((n, i) => (
+                <tr key={`${n.label}-${i}`}>
+                  <td><b>{n.label}</b></td><td>{n.adapter || '—'}</td>
+                  <td className="mono" style={{ overflowWrap: 'anywhere' }}>{n.net || (n.netRef ? <span className="muted">{n.netRef}</span> : '—')}</td>
+                  <td>{n.backing}</td><td data-sort={n.vlan == null ? '' : String(n.vlan)}>{n.vlan ?? '—'}</td>
+                  <td className="mono">{n.mac || '—'}</td>
+                  <td>{n.connected == null ? '—' : <span className={`badge ${n.connected ? 'green' : 'amber'}`}>{n.connected ? '연결됨' : '연결 안 됨'}</span>}</td>
+                  <td>{n.startConnected == null ? '—' : n.startConnected ? '예' : '아니요'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </STable>
+        )}
+      <Note>장치 설정 기준입니다(vCenter 가 보고한 구성 — 게스트 안의 링크 상태가 아닙니다). 분산 포트그룹 이름 · VLAN 은 이 vCenter 의 네트워크 목록에서 찾은 값이고, 못 찾으면 참조(dvportgroup-…)만 보입니다.</Note>
+    </Card>
+  );
+}
+
+/** v2.898: 스냅샷 트리(vm.snapshotTree — 전위 순서 · d=깊이). 동작(되돌리기 · 삭제)은 두지 않는다. */
+function SnapTreeCard({ vm }) {
+  const t = snapTreeRows(vm);
+  // 개수를 못 읽었으면(REST 폴백 등 — 키 없음) '스냅샷 없음' 이 아니라 모른다(반증 하-1 · vmSnapshotFacts 와 같은 numOrNull 판정).
+  const count = numOrNull(vm.snapshotCount);
+  return (
+    <Card title="스냅샷 트리" sub="주기 수집 · snapshot 속성" badge={t?.rows.length ? <span className="badge blue">{t.rows.length}개</span> : null}>
+      {count == null && !t?.rows.length ? <div className="muted" style={{ padding: '10px 14px', fontSize: 12.5 }}>이 VM 의 스냅샷 정보를 받지 못했습니다(‘없음’ 이 아닙니다).</div>
+        : count === 0 && !t?.rows.length ? <div className="muted" style={{ padding: '10px 14px', fontSize: 12.5 }}>스냅샷이 없습니다.</div>
+        : !t ? <div className="muted" style={{ padding: '10px 14px', fontSize: 12.5 }}>이 VM 의 스냅샷 트리는 아직 이 판의 수집기가 읽지 않았습니다(다음 수집 주기에 채워집니다). 개수 · 이름은 위 카드에 있습니다.</div>
+          : (
+            <div role="tree" aria-label="스냅샷 트리" style={{ padding: '6px 14px 10px', display: 'grid', gap: 2 }}>
+              {t.rows.map((r, i) => (
+                // 들여쓰기는 6단까지만 키운다(400px 에서 이름 칸이 사라지지 않게 — 깊이 자체는 aria-level 에 그대로).
+                <div key={i} role="treeitem" aria-level={r.d + 1} aria-current={r.current ? 'true' : undefined}
+                  style={{ marginLeft: Math.min(r.d, 6) * 16, padding: r.d ? '5px 0 5px 10px' : '5px 0', borderLeft: r.d ? '2px solid var(--border)' : 'none', minWidth: 0 }}>
+                  <div className="vcd-line" style={{ gap: 6, flexWrap: 'wrap' }}>
+                    <b style={{ overflowWrap: 'anywhere' }}>{r.name || '(이름 없음)'}</b>
+                    {r.current && <span className="badge green">현재 위치</span>}
+                    {r.days != null && r.days > 7 && <span className="badge amber">{r.days}일</span>}
+                  </div>
+                  <div className="muted" style={{ fontSize: 12, overflowWrap: 'anywhere' }}>
+                    {[r.ts ? `${dayStamp(r.ts)}${r.days != null ? ` · ${r.days}일 전` : ''}` : '생성 시각 —', r.state ? `상태 ${r.state}` : null, r.quiesced ? `정지(quiesce) ${r.quiesced}` : null].filter(Boolean).join(' · ')}
+                  </div>
+                  {r.desc && <div style={{ fontSize: 12.5, overflowWrap: 'anywhere' }}>{r.desc}</div>}
+                </div>
+              ))}
+            </div>
+          )}
+      {t?.partial && <Note>{`트리에 ${t.rows.length}개만 보입니다(전체 ${t.count}개) — 수집 상한을 넘었거나 일부 노드를 읽지 못했습니다.`}</Note>}
+      <Note>위에서 아래로 만든 순서이고, 들여쓴 것이 그 위 스냅샷의 자식입니다. ‘현재 위치’ 는 VM 이 지금 딛고 있는 스냅샷입니다. 되돌리기 · 삭제는 두지 않습니다(조회 전용).</Note>
+    </Card>
+  );
+}
+
 /** 사용 권한 탭(VM · 호스트 공용) — 이 개체가 대상인 권한 · 역할 변경 이벤트(최근 90일) + 권한 목록은 수집하지 않음. */
-export function PermPane({ vcenterId, entity, what }) {
+export function PermPane({ vcenterId, entity, what, objType = null, objRef = null }) {
   const ok = toolAllowed('change-history');
   const q = useOnce('/tools/report/changes', { vcenterId, days: 90, category: PERM_CATEGORY, entity, limit: 300 }, ok && !!entity);
   return (
@@ -223,7 +295,7 @@ export function PermPane({ vcenterId, entity, what }) {
             : !q.data ? <Loading label="권한 변경 이벤트" /> : <EventRows data={q.data} vcenterId={vcenterId} empty={`최근 90일에 ${what}을(를) 대상으로 한 권한 · 역할 변경 이벤트가 없습니다.`} />}
         <Note>대상 이름이 들어간 이벤트를 찾은 것입니다(부분 일치). 목록이 아니라 변경 기록이라, 지금 누가 어떤 역할인지는 알 수 없습니다.</Note>
       </Card>
-      <div className="card" style={{ padding: 14 }}><NotCollected title="권한 목록">사용자/그룹 · 역할 · 정의 위치 · 전파(상속)는 수집하지 않습니다. 추가한다면 읽기 전용 · 탭을 열 때만 · 관리자 판본에서만 보입니다.</NotCollected></div>
+      <VcPermsCard vcenterId={vcenterId} entityType={objType} entity={objRef} what={what} wide />
     </div>
   );
 }

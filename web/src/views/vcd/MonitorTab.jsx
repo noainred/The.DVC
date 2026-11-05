@@ -1,13 +1,15 @@
 /**
  * views/vcd/MonitorTab.jsx — vCenter › 모니터(승인 시안 ② · 기본값 2: 예전 '추이' 는 모니터 › 성능).
- *   문제 및 알람 = 포탈 알람(포탈 규칙 — vCenter 자체 알람 아님) · 이벤트 = 구성 변경 이력(이 vCenter) · 작업 = 수집하지 않음 · 성능 = TrendView 그대로.
+ *   문제 및 알람 = vCenter 트리거 알람(v2.898 — vcinfo) + 포탈 알람(포탈 규칙 — 따로 보인다) · 이벤트 = 구성 변경 이력(이 vCenter) ·
+ *   작업 = vCenter 최근 작업(v2.898 — vcinfo) · 성능 = TrendView 그대로.
  */
 import React, { useState } from 'react';
 import { usePolling, toolAllowed, can } from '../../api.js';
 import { ErrorBox, Loading } from '../../components/ui.jsx';
 import { STable } from '../../components/STable.jsx';
 import { useOnce, toolDenied } from './useOnce.js';
-import { Note, SubNav, ToolLink, NotCollected } from './VcdParts.jsx';
+import { Note, SubNav, ToolLink } from './VcdParts.jsx';
+import { VcAlarmsCard, VcTasksCard } from './VcInfoParts.jsx';
 import { EventRows } from './SummaryTab.jsx';
 import { MONITOR_SUBS, alarmsOf, alarmCounts, SEV_LABEL, SEV_BADGE, PORTAL_ALARM_RULE_TEXT, shortTs } from './vcdTabs.js';
 
@@ -18,21 +20,14 @@ export default function MonitorTab({ vcenterId, sub, onSub, perf }) {
   const alarmsP = usePolling(can('inv.alarms') ? '/alarms' : null, { vcenterId }, 60_000);
   const alarms = alarmsOf(alarmsP.data?.items, vcenterId);
   const ac = alarmCounts(alarms);
-  const items = MONITOR_SUBS.map((s) => ({ ...s, n: s.k === 'alarms' ? (alarmsP.data ? ac.total : null) : s.k === 'tasks' ? '—' : null }));
+  const items = MONITOR_SUBS.map((s) => ({ ...s, n: s.k === 'alarms' ? (alarmsP.data ? ac.total : null) : null }));
   return (
     <div className="vcd-pane card" style={{ marginTop: 10 }}>
       <SubNav items={items} value={sub} onChange={onSub} label="모니터 하위 칸" />
       <div style={{ minWidth: 0 }}>
-        {sub === 'alarms' && <AlarmsPane p={alarmsP} alarms={alarms} ac={ac} />}
+        {sub === 'alarms' && <><VcAlarmsCard vcenterId={vcenterId} embedded /><div style={{ borderTop: '1px solid var(--border)', marginTop: 6 }} /><AlarmsPane p={alarmsP} alarms={alarms} ac={ac} /></>}
         {sub === 'events' && <EventsPane vcenterId={vcenterId} />}
-        {sub === 'tasks' && (
-          <div style={{ padding: 14 }}>
-            <NotCollected title="최근 작업">
-              포탈은 이 vCenter 의 작업 목록(TaskManager 최근 작업)을 수집하지 않습니다. 수집을 추가하면 작업 이름 · 대상 · 상태 · 시작한 사용자 · 진행률 · 걸린 시간을 이 칸에 보입니다(탭을 열 때만 조회하는 방식으로).
-              vCenter 자체 트리거 알람도 같은 묶음(2차)입니다 — 추가하면 ‘문제 및 알람’ 에 포탈 규칙과 따로 보입니다.
-            </NotCollected>
-          </div>
-        )}
+        {sub === 'tasks' && <VcTasksCard vcenterId={vcenterId} embedded />}
         {sub === 'perf' && <div style={{ padding: '10px 12px' }}>{perf}</div>}
       </div>
     </div>

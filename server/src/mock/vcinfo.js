@@ -1,0 +1,108 @@
+// 데모(mock) vCenter 의 알람 · 최근 작업 · 권한 목록(v2.898) — vcinfo/parse.js 와 같은 모양. 인벤토리(그 vCenter 의 호스트 · VM · DS 이름)에서
+// 결정적으로 만든다(같은 vCenter 는 같은 목록). 시각만 '지금' 기준으로 움직인다. 실데이터와 섞이지 않는다(라우트가 mock vCenter 일 때만 부른다).
+const MIN = 60_000;
+const refOf = (id) => String(id || '').split(':').pop();
+
+export function mockVcInfo(kind, vcId, snap, now = Date.now(), allowed = null) {
+  const hosts = (snap?.hosts || []).filter((h) => h.vcenterId === vcId);
+  const vms = (snap?.vms || []).filter((v) => v.vcenterId === vcId && !v.template);
+  const dss = (snap?.datastores || []).filter((d) => d.vcenterId === vcId);
+  const seed = [...String(vcId)].reduce((a, c) => (a * 31 + c.charCodeAt(0)) >>> 0, 7);
+  const pickN = (arr, n, k = 0) => (arr.length ? Array.from({ length: Math.min(n, arr.length) }, (_, i) => arr[(seed + k + i * 7) % arr.length]) : []);
+  if (kind === 'alarms') {
+    const items = [];
+    for (const h of pickN(hosts.filter((x) => x.connectionState !== 'CONNECTED' || x.cpuUsagePct > 70), 3)) {
+      items.push({ alarm: 'alarm-12', name: h.connectionState === 'DISCONNECTED' ? 'Host connection and power state' : 'Host CPU usage', entityType: 'HostSystem', entity: refOf(h.id), entityName: h.name, status: h.connectionState === 'DISCONNECTED' ? 'red' : 'yellow', time: now - ((seed % 50) + 5) * MIN, ack: false, ackBy: null, ackTime: null });
+    }
+    for (const d of pickN(dss.filter((x) => x.usagePct > 85), 2, 3)) {
+      items.push({ alarm: 'alarm-27', name: 'Datastore usage on disk', entityType: 'Datastore', entity: refOf(d.id), entityName: d.name, status: d.usagePct > 95 ? 'red' : 'yellow', time: now - ((seed % 300) + 40) * MIN, ack: d.usagePct <= 95, ackBy: d.usagePct <= 95 ? 'VSPHERE.LOCAL\\infra-ops' : null, ackTime: d.usagePct <= 95 ? now - 30 * MIN : null });
+    }
+    for (const v of pickN(vms.filter((x) => (x.snapshotCount || 0) > 0), 2, 5)) {
+      items.push({ alarm: 'alarm-41', name: 'Virtual machine consolidation needed status', entityType: 'VirtualMachine', entity: refOf(v.id), entityName: v.name, status: 'yellow', time: now - ((seed % 900) + 120) * MIN, ack: false, ackBy: null, ackTime: null });
+    }
+    items.push({ alarm: 'alarm-3', name: 'vSphere Health detected new issues', entityType: 'Folder', entity: 'group-d1', entityName: 'Datacenters', status: 'yellow', time: now - 26 * 60 * MIN, ack: false, ackBy: null, ackTime: null });
+    items.sort((a, b) => b.time - a.time);
+    return { at: now - (seed % 4) * MIN, items, omitted: 0, error: null };
+  }
+  if (kind === 'tasks') {
+    const ops = [
+      ['VirtualMachine.powerOn', 'success', 'VSPHERE.LOCAL\\infra-ops'], ['VirtualMachine.createSnapshot', 'success', 'CORP\\svc-veeam'],
+      ['VirtualMachine.removeSnapshot', 'success', 'CORP\\svc-veeam'], ['VirtualMachine.reconfigure', 'error', 'CORP\\kim.ops'],
+      ['Drm.ExecuteVMotionLRO', 'success', null], ['VirtualMachine.migrate', 'running', 'VSPHERE.LOCAL\\infra-ops'],
+      ['HostSystem.enterMaintenanceMode', 'success', 'CORP\\lee.infra'], ['VirtualMachine.clone', 'queued', 'CORP\\svc-provision'],
+    ];
+    const targets = [...pickN(vms, 10, 1)];
+    const items = ops.concat(ops).slice(0, Math.max(6, Math.min(14, targets.length))).map(([op, state, user], i) => {
+      const host = op.startsWith('HostSystem');
+      const t = host ? pickN(hosts, 1, i)[0] : targets[i % Math.max(1, targets.length)];
+      const started = now - (i * 17 + 2) * MIN;
+      return {
+        key: `task-${4000 + i}`, op, entityType: host ? 'HostSystem' : 'VirtualMachine', entity: t ? refOf(t.id) : null, entityName: t?.name || null,
+        state, progress: state === 'running' ? 45 : null, queued: started - 2000, started: state === 'queued' ? null : started,
+        completed: state === 'success' || state === 'error' ? started + ((i % 5) + 1) * 9000 : null,
+        user, reason: user ? 'user' : 'system', error: state === 'error' ? 'A specified parameter was not correct: spec.deviceChange.device' : null,
+      };
+    });
+    return { at: now - (seed % 3) * MIN, items, error: null };
+  }
+  if (kind === 'perms') {
+    const roles = [
+      { id: -1, name: 'Admin', label: 'Administrator', system: true, privileges: 712 },
+      { id: -2, name: 'ReadOnly', label: 'Read-only', system: true, privileges: 3 },
+      { id: -5, name: 'NoAccess', label: 'No access', system: true, privileges: 0 },
+      { id: 1001, name: 'Portal Monitoring', label: 'Portal Monitoring', system: false, privileges: 6 },
+      { id: 1002, name: 'Backup Operator', label: 'Backup Operator', system: false, privileges: 41 },
+    ];
+    const role = (id) => roles.find((r) => r.id === id)?.label || null;
+    const [h0] = pickN(hosts, 1); const [v0, v1] = pickN(vms, 2, 2);
+    const items = [
+      { entityType: 'Folder', entity: 'group-d1', entityName: 'Datacenters', principal: 'VSPHERE.LOCAL\\Administrators', group: true, roleId: -1, propagate: true },
+      { entityType: 'Folder', entity: 'group-d1', entityName: 'Datacenters', principal: 'CORP\\vm-portal-ro', group: false, roleId: 1001, propagate: true },
+      { entityType: 'Folder', entity: 'group-d1', entityName: 'Datacenters', principal: 'CORP\\svc-veeam', group: false, roleId: 1002, propagate: true },
+      { entityType: 'Datacenter', entity: 'datacenter-21', entityName: `${vcId}-dc`, principal: 'CORP\\Infra-Team', group: true, roleId: -1, propagate: true },
+      ...(h0 ? [{ entityType: 'HostSystem', entity: refOf(h0.id), entityName: h0.name, principal: 'CORP\\lee.infra', group: false, roleId: -2, propagate: false }] : []),
+      ...(v0 ? [{ entityType: 'VirtualMachine', entity: refOf(v0.id), entityName: v0.name, principal: 'CORP\\app-owners', group: true, roleId: -1, propagate: false }] : []),
+      ...(v1 ? [{ entityType: 'VirtualMachine', entity: refOf(v1.id), entityName: v1.name, principal: 'CORP\\contractor01', group: false, roleId: -5, propagate: false }] : []),
+    ].map((p) => ({ ...p, role: role(p.roleId) }));
+    return { at: now - ((seed % 300) + 10) * MIN, items, roles, omitted: 0, error: null };
+  }
+  if (kind === 'linked') {
+    // 같은 지역(id 앞머리 'vc-<지역>') 의 vCenter 들을 한 SSO 도메인으로 묶는다 — 혼자면 자기 1개.
+    const region = String(vcId).split('-').slice(0, 2).join('-');
+    // 범위 계정에는 범위 안 동료만(데모라도 범위 밖 vCenter id 를 노드 이름으로 보이지 않는다 — 반증 하-6).
+    const peers = (snap?.vcenters || []).filter((v) => v.id !== vcId && String(v.id).startsWith(region) && (!allowed || allowed.has(v.id))).slice(0, 2);
+    const fq = (id) => `${String(id).toLowerCase()}.corp.example`;
+    const all = [vcId, ...peers.map((v) => v.id)];
+    const nodes = all.map((id) => ({ node: fq(id), type: 'VCSA_EMBEDDED', partners: all.filter((x) => x !== id).map(fq) }));
+    const replication = all.length > 1 ? all.filter((x) => x !== vcId).map((id, i) => ({ node: fq(vcId), partner: fq(id), available: !(seed % 7 === 0 && i === 0), replicating: true, lag: (seed % 5) * (i + 1) })) : [];
+    return { at: now - ((seed % 300) + 30) * MIN, nodes, domain: 'vsphere.local', replication, error: null, replError: null };
+  }
+  if (kind === 'updates') {
+    const pendingOn = seed % 3 !== 0;
+    return {
+      at: now - ((seed % 200) + 20) * MIN, state: pendingOn ? 'UPDATES_PENDING' : 'UP_TO_DATE', version: '8.0.2.00300', lastCheck: now - ((seed % 5) + 1) * 86_400_000,
+      pending: pendingOn ? [
+        { version: '8.0.3.00100', name: 'VMware vCenter Server 8.0 Update 3a', severity: 'CRITICAL', priority: 'HIGH', type: 'SECURITY', releaseDate: Date.parse('2026-09-17T00:00:00Z'), reboot: true, sizeMB: 7120 },
+        { version: '8.0.3.00000', name: 'VMware vCenter Server 8.0 Update 3', severity: 'IMPORTANT', priority: 'MEDIUM', type: 'UPDATE', releaseDate: Date.parse('2026-06-25T00:00:00Z'), reboot: true, sizeMB: 6880 },
+      ] : [],
+      error: null, pendingError: null,
+    };
+  }
+  if (kind === 'vlcm') {
+    const byCl = new Map();
+    for (const h of hosts) { const k = h.clusterRef || h.cluster || 'standalone'; if (!byCl.has(k)) byCl.set(k, { name: h.cluster || k, hosts: [] }); byCl.get(k).hosts.push(h); }
+    const items = [...byCl.entries()].slice(0, 64).map(([k, c], i) => {
+      const image = (seed + i) % 3 !== 2;
+      const ncHosts = image && (seed + i) % 4 === 0 ? c.hosts.slice(0, Math.min(2, c.hosts.length)) : [];
+      return {
+        cluster: /^[\w.:-]{1,64}$/.test(k) ? k : `domain-c${i + 8}`, name: c.name, at: now - ((seed % 300) + 40) * MIN, enabled: image,
+        status: image ? (ncHosts.length ? 'NON_COMPLIANT' : 'COMPLIANT') : null, impact: image ? (ncHosts.length ? 'REBOOT_REQUIRED' : 'NO_IMPACT') : null,
+        scanTime: image ? now - ((seed % 48) + 2) * 3_600_000 : null,
+        counts: image ? { compliant: c.hosts.length - ncHosts.length, nonCompliant: ncHosts.length, incompatible: 0, unavailable: 0 } : null,
+        nc: ncHosts.map((h) => ({ id: refOf(h.id), name: h.name })), error: null,
+      };
+    });
+    return { at: now - ((seed % 300) + 40) * MIN, items, omitted: 0, error: null };
+  }
+  return null;
+}

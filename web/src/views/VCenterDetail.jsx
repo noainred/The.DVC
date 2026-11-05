@@ -589,7 +589,7 @@ export default function VCenterDetail({ site, onBack }) {
 
       {obj && obj.type === 'vm' && (
         <VmObject site={site} vcenterId={vcenterId} vm={vms.find((v) => v.id === obj.id) || null} vmsOk={vmsOk} gate={gateEl(vmsPart, 'VM 목록')}
-          datastores={datastores} hosts={hosts} tab={normObjTab('vm', obj.tab)} onTab={setObjTab} onBack={closeObj}
+          datastores={datastores} hosts={hosts} networks={networks} tab={normObjTab('vm', obj.tab)} onTab={setObjTab} onBack={closeObj}
           onOpenHost={(id) => openObj('host', id)} extraTabs={[TUNING_TAB]}
           extra={normObjTab('vm', obj.tab) === 'tuning' && vms.find((v) => v.id === obj.id) ? <VmTuning vm={vms.find((v) => v.id === obj.id)} vms={vms} datastores={datastores} /> : null} />
       )}
@@ -626,7 +626,7 @@ export default function VCenterDetail({ site, onBack }) {
       )}
       {view === 'linked' && <LinkedTab site={site} vcenterId={vcenterId} />}
       {view === 'extensions' && <ExtensionsTab vcenterId={vcenterId} />}
-      {view === 'updates' && <UpdatesTab site={site} hosts={hosts} hostsOk={hostsOk} gate={gateEl(hostsPart, '호스트 목록')} />}
+      {view === 'updates' && <UpdatesTab site={site} vcenterId={vcenterId} hosts={hosts} hostsOk={hostsOk} gate={gateEl(hostsPart, '호스트 목록')} />}
 
       {(view === 'hosts' || view === 'vms') && (
         <>

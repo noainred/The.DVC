@@ -2,7 +2,9 @@
  * views/vcd/objTabs.js — VM · ESXi 호스트 '개체 보기' 의 탭과 묶음(v2.895 — 승인 시안 ⑧~⑪ · 기본값 8~10).
  * 순수 모듈(vitest 고정). 화면은 vcd/VmObject.jsx · HostObject.jsx · ObjectShell.jsx.
  *  - 새 수집 없음: /vms · /hosts 한 행 + 캐시(vmcfg cfg·dev · hcfg · perfc) + 온디맨드(메트릭 · 파티션 · 이벤트)만.
- *  - 수집하지 않는 것(네트워크 어댑터 장치 · 포트그룹 · 권한 목록 · 스냅샷 트리 · 리소스 풀 속성 · 호스트별 DS 마운트 · vLCM)은 탭을 숨기지 않고 '수집하지 않음 · 2차'.
+ *  - 수집하지 않는 것(리소스 풀 속성 · 호스트별 DS 마운트 · NIC 팀 구성 등)은 탭을 숨기지 않고 '수집하지 않음'.
+ *  - v2.898: VM 네트워크 어댑터(vm.dev.nics) · 스냅샷 트리(vm.snapshotTree)는 같은 주기 수집이 이미 받던 XML 을 넓혀 읽는다(새 vCenter 호출 없음).
+ *    호스트 가상 스위치 · 포트그룹은 v2.701 부터 hcfg.net 에 있었다(v2.895 가 '수집하지 않음' 으로 잘못 적었다 — 정정).
  */
 import { numOrNull } from '../../numOrNull.js';
 
@@ -144,6 +146,56 @@ export function vmSnapshotFacts(vm, now = Date.now()) {
     names: Array.isArray(vm?.snapshotNames) ? vm.snapshotNames.filter((x) => typeof x === 'string').slice(0, 20) : [],
     orphanDeltaGB: numOrNull(vm?.orphanDeltaGB),
   };
+}
+
+/**
+ * v2.898: 스냅샷 트리(vm.snapshotTree — 전위 순서 · d=깊이) → 화면 행. 키가 없으면 null(= 아직 이 판으로 읽지 않음 · '없음' 이 아니다).
+ *   partial: 트리 노드 수가 snapshotCount 보다 적다(수집 상한 64 또는 파싱 실패) — 화면이 '일부' 로 말한다.
+ */
+export function snapTreeRows(vm, now = Date.now()) {
+  if (!Array.isArray(vm?.snapshotTree)) return null;
+  const rows = vm.snapshotTree.filter((x) => x && typeof x === 'object').map((x) => {
+    const ts = numOrNull(x.ts);
+    return {
+      d: Number.isInteger(x.d) && x.d >= 0 ? Math.min(x.d, 12) : 0,
+      name: typeof x.name === 'string' && x.name ? x.name : null,
+      desc: typeof x.desc === 'string' && x.desc ? x.desc : null,
+      ts: ts != null && ts > 0 ? ts : null,
+      days: ts != null && ts > 0 ? Math.max(0, Math.floor((now - ts) / 86_400_000)) : null,
+      state: x.state === 'poweredOn' ? '켜짐(메모리 포함)' : x.state === 'poweredOff' ? '꺼짐' : x.state === 'suspended' ? '일시 중단' : null,
+      quiesced: x.quiesced === true ? '예' : x.quiesced === false ? '아니요' : null,
+      current: x.current === true,
+    };
+  });
+  const count = numOrNull(vm?.snapshotCount);
+  return { rows, partial: count != null && rows.length < count, count };
+}
+
+/** 어댑터 백킹 종류 → 화면 문구. */
+export const NIC_BACKING_TEXT = Object.freeze({ std: '표준 포트그룹', dvs: '분산 포트그룹', nsx: 'NSX 세그먼트', other: '기타' });
+
+/**
+ * v2.898: VM 네트워크 어댑터(vm.dev.nics) + /networks → 화면 행. 분산 포트그룹은 장치에 이름이 없어 netRef(dvportgroup-NN)로 /networks 의
+ *   '<vcenterId>:<ref>' 를 찾는다(못 찾으면 이름 '—' · 참조만). nics 키가 없으면 null(= 아직 이 판으로 읽지 않음).
+ */
+export function vmNicRows(vm, networks = []) {
+  const nics = vm?.dev?.nics;
+  if (!Array.isArray(nics)) return null;
+  const byId = new Map((networks || []).filter((n) => n && n.vcenterId === vm.vcenterId).map((n) => [n.id, n]));
+  return nics.filter((x) => x && typeof x === 'object').map((x) => {
+    const n = x.netRef ? byId.get(`${vm.vcenterId}:${x.netRef}`) : null;
+    return {
+      label: x.label || '—',
+      adapter: x.adapter || null,
+      backing: NIC_BACKING_TEXT[x.backing] || NIC_BACKING_TEXT.other,
+      net: x.net || n?.name || null,
+      netRef: x.netRef || null,
+      vlan: numOrNull(n?.vlanId),
+      mac: x.mac || null,
+      connected: x.connected === true ? true : x.connected === false ? false : null,
+      startConnected: x.startConnected === true ? true : x.startConnected === false ? false : null,
+    };
+  });
 }
 
 /** VMware Tools 버전 상태 문구(vSphere toolsVersionStatus2). 모르는 값은 원문. */

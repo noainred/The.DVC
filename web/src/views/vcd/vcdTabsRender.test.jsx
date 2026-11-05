@@ -257,6 +257,47 @@ describe('v2.895 개체 보기 — 렌더(얕게)', () => {
     unmount(rt);
   });
 
+  it('v2.898 VmObject — 네트워크 탭은 어댑터 표 · 스냅샷 탭은 트리(현재 위치) · 키가 없으면 아직 읽지 않음', async () => {
+    const { default: VmObject } = await import('./VmObject.jsx');
+    const base = { site, vcenterId: 'vc1', vmsOk: true, gate: null, datastores: [], hosts, networks: [{ id: 'vc1:dvportgroup-9', vcenterId: 'vc1', name: 'pg-prod', vlanId: 120 }], onTab: () => {}, onBack: () => {}, onOpenHost: () => {} };
+    const vm = { ...vms[0], snapshotCount: 2, snapshotTree: [{ d: 0, name: 'pre-patch' }, { d: 1, name: 'after', current: true }],
+      dev: { ...(vms[0].dev || {}), at: 1, disks: vms[0].dev?.disks || [], nics: [{ label: 'Network adapter 1', adapter: 'VMXNET 3', backing: 'dvs', netRef: 'dvportgroup-9', connected: true }] } };
+    let rt = mount(VmObject, { ...base, vm, tab: 'network' });
+    const nic = all(rt, (e) => typeof e.type === 'function' && e.type.name === 'VmNicCard')[0];
+    const nicOut = nic.type(nic.props);
+    expect([...walk(nicOut)].some((e) => e.type === 'td' && textOf(e).includes('pg-prod'))).toBe(true);
+    expect([...walk(nicOut)].some((e) => e.type === 'td' && textOf(e) === '120')).toBe(true);
+    unmount(rt);
+    rt = mount(VmObject, { ...base, vm, tab: 'snapshots' });
+    const st = all(rt, (e) => typeof e.type === 'function' && e.type.name === 'SnapTreeCard')[0];
+    const items = [...walk(st.type(st.props))].filter((e) => e.props?.role === 'treeitem');
+    expect(items.map((e) => [e.props['aria-level'], e.props['aria-current'] || null])).toEqual([[1, null], [2, 'true']]);
+    unmount(rt);
+    const old = { ...vm, snapshotTree: undefined, dev: { ...vm.dev, nics: undefined } };
+    rt = mount(VmObject, { ...base, vm: old, tab: 'snapshots' });
+    const st2 = all(rt, (e) => typeof e.type === 'function' && e.type.name === 'SnapTreeCard')[0];
+    expect(textOf(st2.type(st2.props))).toMatch(/아직 이 판의 수집기가 읽지 않았습니다/);
+    unmount(rt);
+    rt = mount(VmObject, { ...base, vm: old, tab: 'network' });
+    const nic2 = all(rt, (e) => typeof e.type === 'function' && e.type.name === 'VmNicCard')[0];
+    expect(textOf(nic2.type(nic2.props))).toMatch(/이전 판 수집기/);
+    unmount(rt);
+  });
+
+  it('v2.898 HostObject — 네트워크 탭은 hcfg.net 의 가상 스위치 · 포트그룹(v2.701 부터 수집 — 정정)', async () => {
+    const { default: HostObject } = await import('./HostObject.jsx');
+    const net = { switches: [{ name: 'vSwitch0', kind: 'vss', uplinks: ['vmnic0'], pgs: 2 }], pgs: [{ name: 'VM Network', vlan: 0, sw: 'vSwitch0', promisc: false }, { name: 'Mgmt', vlan: 10, sw: 'vSwitch0', promisc: null }], pgsTotal: 2 };
+    const base = { site, vcenterId: 'vc1', host: { ...hosts[0], hcfg: { at: 1, net } }, hostsOk: true, gate: null, hosts, vms, vmsOk: true, datastores: [], onTab: () => {}, onBack: () => {}, onOpenVm: () => {} };
+    const rt = mount(HostObject, { ...base, tab: 'network' });
+    const card = all(rt, (e) => typeof e.type === 'function' && e.type.name === 'HostNetCards')[0];
+    const out = [...walk(card.type(card.props))];
+    expect(out.some((e) => e.type === 'td' && textOf(e).includes('vSwitch0'))).toBe(true);
+    expect(out.some((e) => e.type === 'td' && textOf(e).includes('Mgmt'))).toBe(true);
+    const none = all(mount(HostObject, { ...base, host: { ...hosts[0], hcfg: undefined }, tab: 'network' }), (e) => typeof e.type === 'function' && e.type.name === 'HostNetCards')[0];
+    expect(textOf(none.type(none.props))).toMatch(/아직 이 호스트의 구성을 읽지 않았습니다/);
+    unmount(rt);
+  });
+
   it('HostObject — VM 탭은 이 호스트 위 VM · 리소스 풀은 이름별 합', async () => {
     const { default: HostObject } = await import('./HostObject.jsx');
     const base = { site, vcenterId: 'vc1', host: hosts[0], hostsOk: true, gate: null, hosts, vms, vmsOk: true, datastores: [], onTab: () => {}, onBack: () => {}, onOpenVm: () => {} };
@@ -266,6 +307,78 @@ describe('v2.895 개체 보기 — 렌더(얕게)', () => {
     rt = mount(HostObject, { ...base, tab: 'pools' });
     expect(all(rt, (e) => e.type === 'b' && (textOf(e) === 'Resources' || textOf(e) === 'RP-DB')).length).toBe(2);
     unmount(rt);
+  });
+});
+
+describe('v2.898 vCenter 알람 · 작업 · 권한 카드 — 렌더(얕게)', () => {
+  it('권한 목록 — 관리자가 아니면 부르지 않고 권한 안내(403) · 작업 카드는 /vcenter-info/tasks 한 번 · 실패 메시지가 보인다', async () => {
+    const { VcPermsCard, VcTasksCard, VcAlarmsCard } = await import('./VcInfoParts.jsx');
+    const called = [];
+    H.api.fetchJson = (p, q) => {
+      called.push([p, q]);
+      return Promise.resolve(p.endsWith('/tasks')
+        ? { ok: true, kind: 'tasks', at: 1, refreshMs: 180_000, items: [{ key: 't1', op: 'VirtualMachine.powerOn', entityType: 'VirtualMachine', entity: 'vm-1', entityName: 'web', state: 'error', error: 'bad-param' }] }
+        : { ok: true, kind: 'alarms', at: null, refreshMs: 300_000, items: [], notCollected: '아직 읽지 않았습니다 — 다음 수집 주기에 읽습니다.' });
+    };
+    let rt = mount(VcPermsCard, { vcenterId: 'vc1' });
+    await flush();
+    expect(called).toEqual([]);
+    expect(all(rt, (e) => e.type === ErrorBox && e.props.error?.status === 403).length).toBe(1);
+    unmount(rt);
+    rt = mount(VcTasksCard, { vcenterId: 'vc1' });
+    await flush();
+    expect(called).toEqual([['/vcenter-info/tasks', { vcenterId: 'vc1' }]]);
+    expect(all(rt, (e) => e.type === 'td' && /bad-param/.test(textOf(e))).length).toBe(1);
+    unmount(rt);
+    rt = mount(VcAlarmsCard, { vcenterId: 'vc1' });
+    await flush();
+    const st = all(rt, (e) => typeof e.type === 'function' && e.type.name === 'Status')[0];
+    expect(textOf(st.type(st.props))).toMatch(/아직 읽지 않았습니다/);
+    expect(all(rt, (e) => e.type === STable).length).toBe(0);
+    unmount(rt);
+  });
+});
+
+describe('v2.898 반증 하-8 — vCenter 를 옮기면 이전 vCenter 의 값을 보이지 않는다(useOnce 키)', () => {
+  it('A 의 작업을 읽은 뒤 B 로 바꾸면 B 를 읽는 동안 A 표를 그리지 않고, B 가 실패하면 A 값으로 오류를 가리지 않는다', async () => {
+    const { VcTasksCard } = await import('./VcInfoParts.jsx');
+    let failB = null;
+    H.api.fetchJson = (p, q) => (q.vcenterId === 'vcA'
+      ? Promise.resolve({ ok: true, at: 1, refreshMs: 1, items: [{ key: 't1', op: 'VirtualMachine.powerOn', state: 'success' }] })
+      : new Promise((_, rej) => { failB = rej; }));
+    const rt = mount(VcTasksCard, { vcenterId: 'vcA' });
+    await flush();
+    expect(all(rt, (e) => e.type === STable).length).toBe(1);
+    rt.props = { vcenterId: 'vcB' };
+    H.render(rt);
+    await flush();
+    expect(all(rt, (e) => e.type === STable).length).toBe(0);
+    expect(all(rt, (e) => e.type === Loading).length).toBe(1);
+    failB(Object.assign(new Error('boom'), { status: 502 }));
+    await flush();
+    expect(all(rt, (e) => e.type === STable).length).toBe(0);
+    expect(all(rt, (e) => e.type === ErrorBox).length).toBe(1);
+    unmount(rt);
+  });
+});
+
+describe('v2.898 ④ 연결된 vCenter · 업데이트 · vLCM 카드 — 렌더(얕게)', () => {
+  it('세 카드가 각각 /vcenter-info/<kind> 한 번 · 업데이트 대기 목록 · vLCM 미준수 호스트 · 연결된 vCenter 포탈 링크', async () => {
+    const { VcLinkedCard, VcUpdatesCard, VcVlcmCard } = await import('./VcInfoParts.jsx');
+    const called = [];
+    const bodies = {
+      '/vcenter-info/linked': { ok: true, at: 1, refreshMs: 21_600_000, domain: 'vsphere.local', nodes: [{ node: 'vc1.corp', type: 'VCSA_EMBEDDED', partners: ['vc2.corp'], portal: { id: 'vc1' } }, { node: 'vc2.corp', type: 'VCSA_EMBEDDED', partners: [], portal: { id: 'vc2', name: 'VC2', version: '8.0.2' } }], replication: [] },
+      '/vcenter-info/updates': { ok: true, at: 1, refreshMs: 21_600_000, state: 'UPDATES_PENDING', version: '8.0.2', pending: [{ version: '8.0.3.00100', name: 'U3a', severity: 'CRITICAL', type: 'SECURITY', sizeMB: 7120 }] },
+      '/vcenter-info/vlcm': { ok: true, at: 1, refreshMs: 21_600_000, items: [{ cluster: 'domain-c1', name: 'Prod', enabled: true, status: 'NON_COMPLIANT', counts: { compliant: 1, nonCompliant: 1, incompatible: 0, unavailable: 0 }, nc: [{ id: 'host-2', name: 'esx02' }] }] },
+    };
+    H.api.fetchJson = (p, q) => { called.push([p, q]); return Promise.resolve(bodies[p]); };
+    for (const [Comp, re] of [[VcLinkedCard, /VC2 →/], [VcUpdatesCard, /8\.0\.3\.00100/], [VcVlcmCard, /esx02/]]) {
+      const rt = mount(Comp, { vcenterId: 'vc1' });
+      await flush();
+      expect(all(rt, (e) => (e.type === 'td' || e.type === 'a') && re.test(textOf(e))).length).toBeGreaterThan(0);
+      unmount(rt);
+    }
+    expect(called.map((c) => c[0])).toEqual(['/vcenter-info/linked', '/vcenter-info/updates', '/vcenter-info/vlcm']);
   });
 });
 
