@@ -247,6 +247,7 @@ export const KNOWN_CONFIG_FILES = Object.freeze({
   'attachments.json': '위키 · 이슈 첨부 목록(attach/store.js — 사용자 데이터 · 원래 이름 · 주인 · 크기 · sha256. 본체는 attachments/<id> — 포탈 백업에 넣지 않는다(사용자 결정), v2.889)',
   'attach-settings.json': '첨부 전체 상한(MB)(attach/store.js — 관리자 + 전체 범위 · 원자 쓰기 · 손상 보존, v2.889)',
   'wiki-templates.json': '위키 관리자 템플릿(wiki/templates.js — 이름 · 꼬리표 · 본문, 30개 · 원자 쓰기 · 손상 보존, v2.889)',
+  'issue-templates.json': '이슈 관리자 템플릿(issues/templates.js — 이름 · 유형 · 우선순위 · 라벨 · 컴포넌트 · 설명, 30개 · 원자 쓰기 · 손상 보존, v2.906)',
   'issue-settings.json': '이슈 트래커 설정(issues/settings.js — 자동 할당 규칙 · 알림 · 사람별 메일 주소, 비밀 없음 · 원자 쓰기 · 손상 보존, v2.871)',
 });
 

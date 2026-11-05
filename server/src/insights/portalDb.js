@@ -40,6 +40,7 @@ const PURPOSES = {
   'attachments.json': '위키 · 이슈 첨부 목록(사용자 데이터 · 본체는 attachments/ 폴더 — 백업 제외, v2.889)',
   'attach-settings.json': '첨부 전체 상한(MB)(설정, v2.889)',
   'wiki-templates.json': '위키 관리자 템플릿(설정, v2.889)',
+  'issue-templates.json': '이슈 관리자 템플릿(설정, v2.906)',
   'vcenters.json': 'vCenter 등록 정보(호스트·계정·위치)',
   'vcenter-order.json': 'vCenter 화면 표시 순서',
   'users.json': '포탈 사용자/권한/TOTP(2FA) 자격',

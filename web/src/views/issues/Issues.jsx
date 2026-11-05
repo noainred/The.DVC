@@ -182,7 +182,7 @@ export default function Issues() {
       {creating && <IssueEditor meta={meta} requestOnly={creating === 'request'} onCancel={() => setCreating(false)} onSaved={(r) => { setCreating(false); onWritten(r); openIssue(r.issue.key); }} />}
 
       {sub === 'settings' && !openKey
-        ? (meta.canSettings ? <><IssueSettings /><AutoCreateSettings /><AttachAdmin /></> : <div className="card muted">이슈 설정은 전체 범위(vCenter 제한 없는) 관리자만 볼 수 있습니다.</div>)
+        ? (meta.canSettings ? <><IssueSettings /><AutoCreateSettings /><IssueTemplatesAdmin /><AttachAdmin /></> : <div className="card muted">이슈 설정은 전체 범위(vCenter 제한 없는) 관리자만 볼 수 있습니다.</div>)
         : openKey
         ? <IssueDetail key={openKey} issueKey={openKey} meta={metaX} onBack={() => openIssue('')} onOpen={openIssue} onWritten={(r) => { onWritten(r); reloadEpics(); }} />
         : (
@@ -654,6 +654,66 @@ function CopyLink({ issueKey }) {
 
 /* ───────────── 새 이슈 · 수정 ───────────── */
 
+/* ───── v2.906 이슈 템플릿 관리(기능 추천 5 — 위키 관리자 템플릿과 같은 틀) ───── */
+function IssueTemplatesAdmin() {
+  const [data, setData] = useState(null);
+  const [err, setErr] = useState(null);
+  const [form, setForm] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState('');
+  const load = useCallback(() => { fetchJson('/issues/templates').then((r) => { setData(r); setErr(null); }).catch(setErr); }, []);
+  useEffect(() => { load(); }, [load]);
+  if (err && !data) return <div className="card iss-editor"><h3 className="iss-h3">이슈 템플릿</h3><ErrorBox error={err} /></div>;
+  if (!data) return null;
+  const custom = (data.items || []).filter((t) => !t.builtin);
+  const lim = data.limits || {};
+  const save = async () => {
+    setBusy(true); setMsg('');
+    try {
+      const body = { name: form.name, type: form.type, priority: form.priority, labels: form.labels, component: form.component, body: form.body };
+      const r = form.id ? await putJson(`/issues/templates/${form.id}`, body) : await postJson('/issues/templates', body);
+      if (r?.ok === false) { setMsg(saveFailText(r)); return; }
+      setForm(null); setMsg('저장했습니다 — 새 이슈 화면의 ‘템플릿’ 에 보입니다.'); load();
+    } catch (e) { setMsg(saveFailText({ reason: e.message })); } finally { setBusy(false); }
+  };
+  const del = async (t) => {
+    if (!window.confirm(`템플릿 ‘${t.name}’ 를 지울까요? 이미 만든 이슈는 그대로입니다.`)) return;
+    setBusy(true); setMsg('');
+    try { const r = await delJson(`/issues/templates/${t.id}`); setMsg(r?.ok === false ? saveFailText(r) : '지웠습니다.'); load(); } catch (e) { setMsg(saveFailText({ reason: e.message })); } finally { setBusy(false); }
+  };
+  return (
+    <div className="card iss-editor">
+      <h3 className="iss-h3">이슈 템플릿</h3>
+      <div className="muted" style={{ fontSize: 12.5 }}>내장 3개(장애 보고 · 작업 · 요청) 뒤에 붙습니다 · {lim.max ?? 30}개까지 · 전 법인 공용. 새 이슈 화면에서 고르면 유형 · 우선순위 · 라벨 · 컴포넌트 · 설명을 채웁니다.</div>
+      {err && <div className="banner warn">새로 읽지 못했습니다 — 아래는 직전에 읽은 목록입니다.</div>}
+      {data.loadError && <div className="banner bad" style={{ whiteSpace: 'normal' }}>템플릿 파일(issue-templates.json)을 읽지 못해 빈 목록으로 보입니다 — 손상본은 옆에 보존했습니다. 원인: {data.loadError}</div>}
+      {msg && <div className="banner">{msg}</div>}
+      {custom.length === 0 ? <div className="muted">관리자 템플릿이 없습니다.</div> : (
+        <div className="table-wrap"><STable className="tbl">
+          <thead><tr><th>이름</th><th>유형</th><th>우선순위</th><th>라벨</th><th>고친 때</th><th data-nosort>동작</th></tr></thead>
+          <tbody>{custom.map((t) => (
+            <tr key={t.id}><td>{t.name}</td><td>{TYPE_TEXT[t.type] || t.type}</td><td>{t.priority?.toUpperCase()}</td><td>{(t.labels || []).join(', ') || '—'}</td><td data-sort={t.updatedAt ?? ''}>{t.updatedAt ? timeText(t.updatedAt) : '—'}</td>
+              <td><div className="flex" style={{ gap: 6, flexWrap: 'wrap' }}><button type="button" className="btn btn-sm" disabled={busy} onClick={() => setForm({ ...t, labels: (t.labels || []).join(', ') })}>고치기</button><button type="button" className="btn btn-sm" disabled={busy} onClick={() => del(t)}>지우기</button></div></td></tr>
+          ))}</tbody>
+        </STable></div>
+      )}
+      {form ? (
+        <div className="iss-form-grid">
+          <label className="iss-field">이름<input className="input" value={form.name} maxLength={lim.name || 40} onChange={(e) => setForm({ ...form, name: e.target.value })} /></label>
+          <label className="iss-field">유형<Select className="select" value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value })} sort={false}>{['task', 'incident', 'request', 'improve'].map((x) => <option key={x} value={x}>{TYPE_TEXT[x] || x}</option>)}</Select></label>
+          <label className="iss-field">우선순위<Select className="select" value={form.priority} onChange={(e) => setForm({ ...form, priority: e.target.value })} sort={false}>{['p0', 'p1', 'p2', 'p3'].map((x) => <option key={x} value={x}>{x.toUpperCase()}</option>)}</Select></label>
+          <label className="iss-field">라벨(쉼표)<input className="input" value={form.labels} onChange={(e) => setForm({ ...form, labels: e.target.value })} /></label>
+          <label className="iss-field">컴포넌트<input className="input" value={form.component || ''} maxLength={lim.component || 60} onChange={(e) => setForm({ ...form, component: e.target.value })} /></label>
+          <label className="iss-field" style={{ gridColumn: '1 / -1' }}>설명(마크다운)<textarea className="input" rows={6} value={form.body} maxLength={lim.body || 10000} onChange={(e) => setForm({ ...form, body: e.target.value })} /></label>
+          <div className="flex" style={{ gap: 6, flexWrap: 'wrap' }}><button type="button" className="btn primary" disabled={busy || !form.name.trim() || !form.body.trim()} onClick={() => save()}>저장</button><button type="button" className="btn" onClick={() => setForm(null)}>취소</button></div>
+        </div>
+      ) : (
+        <div><button type="button" className="btn" disabled={busy || custom.length >= (lim.max || 30)} onClick={() => setForm({ id: '', name: '', type: 'task', priority: 'p2', labels: '', component: '', body: '' })}>+ 템플릿</button></div>
+      )}
+    </div>
+  );
+}
+
 function IssueEditor({ meta, initial = null, requestOnly = false, onCancel, onSaved }) {
   const vcOpts = vcenterOptions(meta, initial ? (initial.vcenterId || '') : null);
   const needVc = vcenterRequired(meta);
@@ -668,6 +728,22 @@ function IssueEditor({ meta, initial = null, requestOnly = false, onCancel, onSa
   const [msg, setMsg] = useState('');
   const [sug, setSug] = useState(null); // { suggestion, autoAssign } — 새 이슈 창에서만
   const latest = useLatest();
+  // v2.906 이슈 템플릿(기능 추천 5) — 새 이슈 창에서만. 고르면 유형 · 우선순위 · 라벨 · 컴포넌트 · 설명을 채운다(설명이 있으면 묻는다)
+  const [tpls, setTpls] = useState(null);
+  const [tplId, setTplId] = useState('');
+  useEffect(() => {
+    if (initial) return undefined;
+    let alive = true;
+    fetchJson('/issues/templates').then((r) => { if (alive) setTpls(r.items || []); }).catch(() => { if (alive) setTpls([]); });
+    return () => { alive = false; };
+  }, [initial]);
+  const applyTpl = (id) => {
+    setTplId(id);
+    const t = (tpls || []).find((x) => x.id === id);
+    if (!t) return;
+    if (f.body.trim() && !window.confirm(`템플릿 ‘${t.name}’ 의 설명으로 지금 설명을 바꿀까요?`)) return;
+    setF((x) => ({ ...x, body: t.body, ...(requestOnly ? {} : { type: t.type || x.type }), priority: t.priority || x.priority, labels: (t.labels || []).join(', ') || x.labels, component: t.component || x.component }));
+  };
   // 담당자 제안 — 컴포넌트·법인이 바뀌면 잠깐 뒤 다시 묻는다(타자마다 묻지 않게). 늦게 온 이전 응답은 버린다.
   useEffect(() => {
     if (initial) return undefined;
@@ -701,6 +777,12 @@ function IssueEditor({ meta, initial = null, requestOnly = false, onCancel, onSa
     <div className="card iss-editor">
       <h3 className="iss-h3">{title}</h3>
       {requestOnly && <div className="muted" style={{ fontSize: 12.5 }}>요청 유형으로 백로그에 등록합니다. 담당자·상태는 운영자가 정합니다{sug?.autoAssign ? '(자동 할당 규칙이 켜져 있으면 담당자가 바로 정해집니다)' : ''}.</div>}
+      {!initial && (tpls || []).length > 0 && (
+        <label className="iss-field">템플릿<Select className="select" value={tplId} onChange={(e) => applyTpl(e.target.value)} sort={false}>
+          <option value="">템플릿 없이</option>
+          {tpls.filter((t) => !requestOnly || t.type === 'request' || !t.builtin).map((t) => <option key={t.id} value={t.id}>{t.name}{t.builtin ? '' : ' · 관리자'}</option>)}
+        </Select></label>
+      )}
       <label className="iss-field">제목<input className="input" value={f.title} onChange={set('title')} maxLength={meta.limits?.title || 200} placeholder="무엇이 문제인지 한 줄로" /></label>
       <label className="iss-field">설명<textarea className="input" rows={5} value={f.body} onChange={set('body')} maxLength={meta.limits?.body || 10000} placeholder="재현 절차 · 기대 결과 · 관련 장비" /></label>
       <div className="iss-form-grid">
@@ -835,6 +917,7 @@ function IssueDetail({ issueKey, meta, onBack, onOpen, onWritten }) {
   const [msg, setMsg] = useState('');
   const [comment, setComment] = useState('');
   const [watchMentions, setWatchMentions] = useState(false); // v2.905 언급한 사람을 관찰자로(선택 · 기본 끔)
+  const [cEdit, setCEdit] = useState(null); // v2.906 댓글 고치기 { id, body }
   const [tab, setTab] = useState('comments');
   const [blockReason, setBlockReason] = useState('');
   const [blockOpen, setBlockOpen] = useState(false);
@@ -945,10 +1028,21 @@ function IssueDetail({ issueKey, meta, onBack, onOpen, onWritten }) {
                   <div key={c.id} className="iss-comment">
                     <Avatar name={c.author} size={26} />
                     <div className="iss-comment-main">
-                      <div className="iss-comment-head"><b>{c.author}</b><span className="muted"> · {timeText(c.createdAt)}</span>
+                      <div className="iss-comment-head"><b>{c.author}</b><span className="muted"> · {timeText(c.createdAt)}</span>{c.editedAt && <span className="muted" title={`${timeText(c.editedAt)} 고침 · ${c.edits || 1}번`}> · 고침</span>}
+                        {canWrite && c.author === x.me && cEdit?.id !== c.id && <button type="button" className="iss-mini-act" disabled={busy} onClick={() => setCEdit({ id: c.id, body: c.body })}>고치기</button>}
                         {canWrite && mineComment(c) && <button type="button" className="iss-mini-act" disabled={busy} onClick={() => { if (window.confirm('이 댓글을 지울까요?')) act(() => delJson(`/issues/${it.key}/comments/${c.id}`)); }}>삭제</button>}
                       </div>
-                      <div className="iss-comment-body md"><MdView md={c.body} compact breaks unresolvedAsSearch idPrefix={`c${c.id}`} /></div>
+                      {cEdit?.id === c.id
+                        ? (
+                          <div className="iss-comment-new">
+                            <MentionBox value={cEdit.body} onChange={(v) => setCEdit((e0) => ({ ...e0, body: v }))} path={`/issues/${it.key}/mentionables`} rows={2} maxLength={meta.limits?.commentBody || 2000} ariaLabel="댓글 고치기" />
+                            <div className="flex" style={{ gap: 6, flexWrap: 'wrap' }}>
+                              <button type="button" className="btn primary" disabled={busy || !cEdit.body.trim()} onClick={() => act(() => putJson(`/issues/${it.key}/comments/${c.id}`, { body: cEdit.body })).then((ok) => { if (ok) setCEdit(null); })}>저장</button>
+                              <button type="button" className="btn" onClick={() => setCEdit(null)}>취소</button>
+                            </div>
+                          </div>
+                        )
+                        : <div className="iss-comment-body md"><MdView md={c.body} compact breaks unresolvedAsSearch idPrefix={`c${c.id}`} /></div>}
                     </div>
                   </div>
                 ))}

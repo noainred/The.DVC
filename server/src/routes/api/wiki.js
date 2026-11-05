@@ -21,6 +21,7 @@ import {
   listSpaces, spaceView, updateSpace, tree, getPage, createPage, updatePage, revertPage, versionBody, diffVersions, deletePage,
   addComment, deleteComment, setWatch, searchPages, backrefs, homeOf, toggleTask, wikiSeq, waitWikiPersist, wikiPersist, PERSIST_WAIT_MS,
   TEMPLATES, STATUSES, LIMITS, PUB, metasFor, resolveComment, getComment, pageParticipants, setCommentIssue,
+  listTrash, restorePage, purgeTrashItem, purgeExpiredTrash, TRASH_DAYS, backlinks, brokenLinks, movePage, editComment,
 } from '../../wiki/store.js';
 import { listCustomTemplates, getCustomTemplate, saveCustomTemplate, deleteCustomTemplate, customTemplatesLoadError, TEMPLATE_LIMITS } from '../../wiki/templates.js';
 import { removeOwnerAfterPersist } from '../../attach/store.js';
@@ -113,6 +114,14 @@ function issueFromComment(req, pageId, cid, want) {
   setCommentIssue(pageId, cid, x.key, { access });
   audit(req, plan.requestOnly ? 'issue.request' : 'issue.create', x.key, `위키 댓글 ${pageId}/${cid}${x.assignee ? ` → ${x.assignee}` : ''}`);
   return { key: x.key, assignee: x.assignee || '', watchers: plan.watchers, skipped: plan.skipped, requestOnly: plan.requestOnly, relatedTo: prev?.key || '', ...mailOutlook(req, settings, [x.assignee, ...plan.watchers].filter(Boolean)) };
+}
+/** v2.906 기한이 지난 휴지통 항목을 영구히 지우고 그 첨부 · 즐겨찾기를 정리한다(목록 · 지우기 때 — 폴링하지 않는다). */
+function dropExpiredTrash() {
+  let gone = [];
+  try { gone = purgeExpiredTrash(); } catch (e) { console.warn(`[wiki] 휴지통 정리 실패: ${String(e?.message || e).slice(0, 160)}`); return; }
+  if (!gone.length) return;
+  const seq = wikiSeq();
+  for (const id of gone) { forgetPage(id); removeOwnerAfterPersist('wiki', id, { seq, state: 'pending', wait: waitWikiPersist }); }
 }
 function fail(res, e, next) {
   if (e && Number.isInteger(e.status)) return res.status(e.status).json({ ok: false, reason: e.message, ...(e.field ? { field: e.field } : {}), ...(e.extra && typeof e.extra === 'object' ? e.extra : {}) });
@@ -223,9 +232,9 @@ export function registerWiki(api) {
     if (!ID_RE.test(req.params.id)) return badId(res);
     if (!canWrite(req)) return res.status(403).json({ ok: false, reason: '데모 계정은 문서를 고칠 수 없습니다' });
     try {
-      const p = updatePage(req.params.id, req.body || {}, userOf(req), { access: accessOf(req) });
-      audit(req, 'wiki.save', p.id, `v${p.version}`);
-      res.json({ ok: true, page: p, persist: await persistView(req) });
+      const { linkFix, ...p } = updatePage(req.params.id, req.body || {}, userOf(req), { access: accessOf(req) });
+      audit(req, 'wiki.save', p.id, `v${p.version}${linkFix?.fixed ? ` · 링크 갱신 ${linkFix.fixed}` : ''}`);
+      res.json({ ok: true, page: p, ...(linkFix ? { linkFix } : {}), persist: await persistView(req) });
     } catch (e) { fail(res, e, next); }
   });
   api.post('/wiki/pages/:id/revert', writers, async (req, res, next) => {
@@ -258,14 +267,63 @@ export function registerWiki(api) {
     if (!ID_RE.test(req.params.id)) return badId(res);
     if (!canWrite(req)) return res.status(403).json({ ok: false, reason: '데모 계정은 문서를 지울 수 없습니다' });
     try {
+      // v2.906 휴지통 — 지우기는 휴지통으로(TRASH_DAYS 동안 되살릴 수 있다). 첨부 · 즐겨찾기는 영구 삭제 때 정리한다.
       const r = deletePage(req.params.id, userOf(req), { access: accessOf(req), isMod: isMod(req) });
+      audit(req, 'wiki.delete', r.id, '휴지통으로');
+      dropExpiredTrash();
+      res.json({ ok: true, ...r, persist: await persistView(req) });
+    } catch (e) { fail(res, e, next); }
+  });
+  /* ── v2.906 휴지통(기능 추천 2) · 링크(3) · 스페이스 이동(4) · 댓글 고치기(1) ── */
+  api.get('/wiki/trash', writers, (req, res, next) => {
+    res.set('Cache-Control', 'no-store');
+    try { dropExpiredTrash(); res.json({ ok: true, items: listTrash({ access: accessOf(req), spaceId: str(req.query.space) }), days: TRASH_DAYS, isMod: isMod(req), me: userOf(req) }); } catch (e) { fail(res, e, next); }
+  });
+  api.post('/wiki/trash/:id/restore', writers, async (req, res, next) => {
+    if (!ID_RE.test(req.params.id)) return badId(res);
+    if (!canWrite(req)) return res.status(403).json({ ok: false, reason: '데모 계정은 되살릴 수 없습니다' });
+    try {
+      const page = restorePage(req.params.id, userOf(req), { access: accessOf(req) });
+      audit(req, 'wiki.restore', page.id, page.title);
+      res.json({ ok: true, page, persist: await persistView(req) });
+    } catch (e) { fail(res, e, next); }
+  });
+  api.delete('/wiki/trash/:id', writers, async (req, res, next) => {
+    if (!ID_RE.test(req.params.id)) return badId(res);
+    if (!canWrite(req)) return res.status(403).json({ ok: false, reason: '데모 계정은 지울 수 없습니다' });
+    try {
+      const r = purgeTrashItem(req.params.id, userOf(req), { access: accessOf(req), isMod: isMod(req) });
       const seq = wikiSeq();
-      audit(req, 'wiki.delete', r.id);
+      audit(req, 'wiki.purge', r.id, '영구 삭제');
       forgetPage(r.id); // v2.888 그 문서의 조회 수 · 즐겨찾기 · 최근 기록
       const persist = await persistView(req);
-      // v2.904 점검 S-5: 첨부 본체는 문서 삭제가 디스크에 닿은 뒤에 지운다(v2.889 는 바로 지워 비정상 종료 때 문서만 되살아났다)
+      // v2.904 점검 S-5: 첨부 본체는 삭제가 디스크에 닿은 뒤에 지운다
       removeOwnerAfterPersist('wiki', r.id, { seq, state: persist.state, wait: waitWikiPersist });
       res.json({ ok: true, ...r, persist });
+    } catch (e) { fail(res, e, next); }
+  });
+  api.get('/wiki/pages/:id/backlinks', (req, res, next) => {
+    if (!ID_RE.test(req.params.id)) return badId(res);
+    try { res.json({ ok: true, items: backlinks(req.params.id, accessOf(req)) }); } catch (e) { fail(res, e, next); }
+  });
+  api.get('/wiki/broken-links', (req, res, next) => {
+    res.set('Cache-Control', 'no-store');
+    try { res.json({ ok: true, ...brokenLinks({ access: accessOf(req), spaceId: str(req.query.space) }) }); } catch (e) { fail(res, e, next); }
+  });
+  api.post('/wiki/pages/:id/move', writers, async (req, res, next) => {
+    if (!ID_RE.test(req.params.id)) return badId(res);
+    if (!canWrite(req)) return res.status(403).json({ ok: false, reason: '데모 계정은 옮길 수 없습니다' });
+    try {
+      const r = movePage(req.params.id, str(req.body?.spaceId), userOf(req), { access: accessOf(req), known: knownSpaces() });
+      audit(req, 'wiki.move', r.id, `${r.from} → ${r.spaceId} · 문서 ${r.moved}개`);
+      res.json({ ok: true, ...r, persist: await persistView(req) });
+    } catch (e) { fail(res, e, next); }
+  });
+  api.put('/wiki/pages/:id/comments/:cid', commenters, async (req, res, next) => {
+    if (!ID_RE.test(req.params.id)) return badId(res);
+    try {
+      const cm = editComment(req.params.id, String(req.params.cid).slice(0, 40), req.body || {}, userOf(req), { access: accessOf(req) });
+      res.json({ ok: true, comment: cm, persist: await persistView(req) });
     } catch (e) { fail(res, e, next); }
   });
   // v2.905 멘션 후보 — 서버가 범위로 거른다(issues/mentionables.js). 댓글을 쓸 수 있는 사람만.

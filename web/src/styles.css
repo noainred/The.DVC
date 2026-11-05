@@ -2939,3 +2939,8 @@ table.svcinv-t .svcinv-stick { position: sticky; left: 0; z-index: 1; background
 .wiki-comment-issue { margin-top: 4px; font-size: 12px; display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
 
 .iss-origin-link { font-size: 12px; color: var(--accent-2); }
+
+/* v2.906 기능 추천 1~5 — 댓글 고치기 · 다른 스페이스로 · 정리(휴지통 · 깨진 링크) */
+.wiki-move { display: inline-flex; gap: 6px; align-items: center; flex-wrap: wrap; min-width: 0; }
+.wiki-move .input { min-width: 160px; max-width: 100%; }
+.wiki-comment-edit { display: flex; flex-direction: column; gap: 6px; margin-top: 4px; min-width: 0; }

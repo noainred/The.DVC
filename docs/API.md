@@ -22,14 +22,14 @@
 
 | 항목 | 값 |
 |---|---|
-| 엔드포인트 | **1267개** |
+| 엔드포인트 | **1279개** |
 | 마운트 그룹 | 14개 |
 | 라우트 파일 | 123개 |
-| GET | 663개 |
-| POST | 409개 |
-| PUT | 125개 |
+| GET | 667개 |
+| POST | 412개 |
+| PUT | 128개 |
 | PATCH | 3개 |
-| DELETE | 67개 |
+| DELETE | 69개 |
 
 | 그룹 | 엔드포인트 | 설명 |
 |---|---:|---|
@@ -45,7 +45,7 @@
 | [`/api/ping`](#apiping) | 14 | 네트워크 Ping 모니터링(조회=인증, 대상 관리=관리자). |
 | [`/metrics`](#metrics) | 1 | Prometheus/OTel 익스포터(선택 토큰). |
 | [`/api/v1`](#apiv1) | 10 | **외부 포탈용 공개 조회 API**(v2.562). 전용 API 키(`X-Api-Key`)로 인증하고 조회 전용이다. 상세는 [API-PUBLIC.md](API-PUBLIC.md). |
-| [`/api`](#api) | 687 | 포탈 화면이 쓰는 **주 조회·작업 API**. `authMiddleware + requireEnrolled` 뒤이고, `/tools/*` 는 `toolGate` 가 사용자별 도구 권한을 집행한다. |
+| [`/api`](#api) | 699 | 포탈 화면이 쓰는 **주 조회·작업 API**. `authMiddleware + requireEnrolled` 뒤이고, `/tools/*` 는 `toolGate` 가 사용자별 도구 권한을 집행한다. |
 | [`/dl`](#dl) | 2 | 중앙 업그레이드 소스(`versions.json` + 번들). **공개**다. |
 
 ---
@@ -766,46 +766,51 @@ Prometheus/OTel 익스포터(선택 토큰).
 | GET | `/hosts/checks` | 권한 `inv.hosts` | [server/src/routes/api/hostChecks.js:42](../server/src/routes/api/hostChecks.js#L42) |
 | GET | `/hosts/corp` | 권한 `inv.hosts` | [server/src/routes/api/hostCorp.js:38](../server/src/routes/api/hostCorp.js#L38) |
 | GET | `/idrac/host-power` | 권한 `inv.hosts` | [server/src/routes/api/vmMetrics.js:213](../server/src/routes/api/vmMetrics.js#L213) |
-| GET | `/issues` | — | [server/src/routes/api/issues.js:261](../server/src/routes/api/issues.js#L261) |
-| POST | `/issues` | `creators` | [server/src/routes/api/issues.js:364](../server/src/routes/api/issues.js#L364) |
-| DELETE | `/issues/:key` | 역할 `admin/operator` | [server/src/routes/api/issues.js:512](../server/src/routes/api/issues.js#L512) |
-| GET | `/issues/:key` | — | [server/src/routes/api/issues.js:359](../server/src/routes/api/issues.js#L359) |
-| PUT | `/issues/:key` | 역할 `admin/operator` | [server/src/routes/api/issues.js:391](../server/src/routes/api/issues.js#L391) |
-| POST | `/issues/:key/assign` | 역할 `admin/operator` | [server/src/routes/api/issues.js:448](../server/src/routes/api/issues.js#L448) |
-| POST | `/issues/:key/block` | 역할 `admin/operator` | [server/src/routes/api/issues.js:456](../server/src/routes/api/issues.js#L456) |
-| POST | `/issues/:key/comments` | 역할 `admin/operator` | [server/src/routes/api/issues.js:486](../server/src/routes/api/issues.js#L486) |
-| DELETE | `/issues/:key/comments/:cid` | 역할 `admin/operator` | [server/src/routes/api/issues.js:504](../server/src/routes/api/issues.js#L504) |
-| POST | `/issues/:key/links` | 역할 `admin/operator` | [server/src/routes/api/issues.js:408](../server/src/routes/api/issues.js#L408) |
-| POST | `/issues/:key/links/remove` | 역할 `admin/operator` | [server/src/routes/api/issues.js:416](../server/src/routes/api/issues.js#L416) |
-| GET | `/issues/:key/mentionables` | 역할 `admin/operator` | [server/src/routes/api/issues.js:470](../server/src/routes/api/issues.js#L470) |
-| POST | `/issues/:key/progress` | 역할 `admin/operator` | [server/src/routes/api/issues.js:440](../server/src/routes/api/issues.js#L440) |
-| POST | `/issues/:key/status` | 역할 `admin/operator` | [server/src/routes/api/issues.js:399](../server/src/routes/api/issues.js#L399) |
-| POST | `/issues/:key/watch` | 역할 `admin/operator` | [server/src/routes/api/issues.js:465](../server/src/routes/api/issues.js#L465) |
-| POST | `/issues/:key/worklog` | 역할 `admin/operator` | [server/src/routes/api/issues.js:426](../server/src/routes/api/issues.js#L426) |
-| POST | `/issues/:key/worklog/remove` | 역할 `admin/operator` | [server/src/routes/api/issues.js:433](../server/src/routes/api/issues.js#L433) |
-| GET | `/issues/activity` | — | [server/src/routes/api/issues.js:235](../server/src/routes/api/issues.js#L235) |
-| GET | `/issues/autocreate` | 역할 `admin` · `issueSettingsFleetOnly` | [server/src/routes/api/issues.js:205](../server/src/routes/api/issues.js#L205) |
-| PUT | `/issues/autocreate` | 역할 `admin` · `issueSettingsFleetOnly` · `fullWriteOnly` | [server/src/routes/api/issues.js:216](../server/src/routes/api/issues.js#L216) |
-| POST | `/issues/autocreate/simulate` | 역할 `admin` · `issueSettingsFleetOnly` | [server/src/routes/api/issues.js:227](../server/src/routes/api/issues.js#L227) |
-| POST | `/issues/bulk/assign` | 역할 `admin/operator` | [server/src/routes/api/issues.js:384](../server/src/routes/api/issues.js#L384) |
-| POST | `/issues/bulk/edit` | 역할 `admin/operator` | [server/src/routes/api/issues.js:377](../server/src/routes/api/issues.js#L377) |
-| GET | `/issues/export.csv` | 권한 `data.csv` | [server/src/routes/api/issues.js:281](../server/src/routes/api/issues.js#L281) |
-| GET | `/issues/filters` | — | [server/src/routes/api/issues.js:337](../server/src/routes/api/issues.js#L337) |
-| POST | `/issues/filters` | 역할 `admin/operator` | [server/src/routes/api/issues.js:342](../server/src/routes/api/issues.js#L342) |
-| DELETE | `/issues/filters/:id` | 역할 `admin/operator` | [server/src/routes/api/issues.js:355](../server/src/routes/api/issues.js#L355) |
-| PUT | `/issues/filters/:id` | 역할 `admin/operator` | [server/src/routes/api/issues.js:346](../server/src/routes/api/issues.js#L346) |
-| POST | `/issues/filters/:id/subscribe` | 역할 `admin/operator` | [server/src/routes/api/issues.js:351](../server/src/routes/api/issues.js#L351) |
-| GET | `/issues/meta` | — | [server/src/routes/api/issues.js:156](../server/src/routes/api/issues.js#L156) |
-| GET | `/issues/settings` | 역할 `admin` · `issueSettingsFleetOnly` | [server/src/routes/api/issues.js:190](../server/src/routes/api/issues.js#L190) |
-| PUT | `/issues/settings` | 역할 `admin` · `issueSettingsFleetOnly` · `fullWriteOnly` | [server/src/routes/api/issues.js:195](../server/src/routes/api/issues.js#L195) |
-| GET | `/issues/sprints` | — | [server/src/routes/api/issues.js:295](../server/src/routes/api/issues.js#L295) |
-| POST | `/issues/sprints` | 역할 `admin/operator` · `sprintFleetOnly` · `fullWriteOnly` | [server/src/routes/api/issues.js:304](../server/src/routes/api/issues.js#L304) |
-| PUT | `/issues/sprints/:id` | 역할 `admin/operator` · `sprintFleetOnly` · `fullWriteOnly` | [server/src/routes/api/issues.js:312](../server/src/routes/api/issues.js#L312) |
-| GET | `/issues/sprints/:id/board` | — | [server/src/routes/api/issues.js:300](../server/src/routes/api/issues.js#L300) |
-| POST | `/issues/sprints/:id/close` | 역할 `admin/operator` · `sprintFleetOnly` · `fullWriteOnly` | [server/src/routes/api/issues.js:321](../server/src/routes/api/issues.js#L321) |
-| GET | `/issues/stats` | — | [server/src/routes/api/issues.js:174](../server/src/routes/api/issues.js#L174) |
-| GET | `/issues/suggest` | — | [server/src/routes/api/issues.js:179](../server/src/routes/api/issues.js#L179) |
-| GET | `/issues/versions` | — | [server/src/routes/api/issues.js:269](../server/src/routes/api/issues.js#L269) |
+| GET | `/issues` | — | [server/src/routes/api/issues.js:279](../server/src/routes/api/issues.js#L279) |
+| POST | `/issues` | `creators` | [server/src/routes/api/issues.js:382](../server/src/routes/api/issues.js#L382) |
+| DELETE | `/issues/:key` | 역할 `admin/operator` | [server/src/routes/api/issues.js:539](../server/src/routes/api/issues.js#L539) |
+| GET | `/issues/:key` | — | [server/src/routes/api/issues.js:377](../server/src/routes/api/issues.js#L377) |
+| PUT | `/issues/:key` | 역할 `admin/operator` | [server/src/routes/api/issues.js:409](../server/src/routes/api/issues.js#L409) |
+| POST | `/issues/:key/assign` | 역할 `admin/operator` | [server/src/routes/api/issues.js:466](../server/src/routes/api/issues.js#L466) |
+| POST | `/issues/:key/block` | 역할 `admin/operator` | [server/src/routes/api/issues.js:474](../server/src/routes/api/issues.js#L474) |
+| POST | `/issues/:key/comments` | 역할 `admin/operator` | [server/src/routes/api/issues.js:504](../server/src/routes/api/issues.js#L504) |
+| DELETE | `/issues/:key/comments/:cid` | 역할 `admin/operator` | [server/src/routes/api/issues.js:531](../server/src/routes/api/issues.js#L531) |
+| PUT | `/issues/:key/comments/:cid` | 역할 `admin/operator` | [server/src/routes/api/issues.js:523](../server/src/routes/api/issues.js#L523) |
+| POST | `/issues/:key/links` | 역할 `admin/operator` | [server/src/routes/api/issues.js:426](../server/src/routes/api/issues.js#L426) |
+| POST | `/issues/:key/links/remove` | 역할 `admin/operator` | [server/src/routes/api/issues.js:434](../server/src/routes/api/issues.js#L434) |
+| GET | `/issues/:key/mentionables` | 역할 `admin/operator` | [server/src/routes/api/issues.js:488](../server/src/routes/api/issues.js#L488) |
+| POST | `/issues/:key/progress` | 역할 `admin/operator` | [server/src/routes/api/issues.js:458](../server/src/routes/api/issues.js#L458) |
+| POST | `/issues/:key/status` | 역할 `admin/operator` | [server/src/routes/api/issues.js:417](../server/src/routes/api/issues.js#L417) |
+| POST | `/issues/:key/watch` | 역할 `admin/operator` | [server/src/routes/api/issues.js:483](../server/src/routes/api/issues.js#L483) |
+| POST | `/issues/:key/worklog` | 역할 `admin/operator` | [server/src/routes/api/issues.js:444](../server/src/routes/api/issues.js#L444) |
+| POST | `/issues/:key/worklog/remove` | 역할 `admin/operator` | [server/src/routes/api/issues.js:451](../server/src/routes/api/issues.js#L451) |
+| GET | `/issues/activity` | — | [server/src/routes/api/issues.js:253](../server/src/routes/api/issues.js#L253) |
+| GET | `/issues/autocreate` | 역할 `admin` · `issueSettingsFleetOnly` | [server/src/routes/api/issues.js:223](../server/src/routes/api/issues.js#L223) |
+| PUT | `/issues/autocreate` | 역할 `admin` · `issueSettingsFleetOnly` · `fullWriteOnly` | [server/src/routes/api/issues.js:234](../server/src/routes/api/issues.js#L234) |
+| POST | `/issues/autocreate/simulate` | 역할 `admin` · `issueSettingsFleetOnly` | [server/src/routes/api/issues.js:245](../server/src/routes/api/issues.js#L245) |
+| POST | `/issues/bulk/assign` | 역할 `admin/operator` | [server/src/routes/api/issues.js:402](../server/src/routes/api/issues.js#L402) |
+| POST | `/issues/bulk/edit` | 역할 `admin/operator` | [server/src/routes/api/issues.js:395](../server/src/routes/api/issues.js#L395) |
+| GET | `/issues/export.csv` | 권한 `data.csv` | [server/src/routes/api/issues.js:299](../server/src/routes/api/issues.js#L299) |
+| GET | `/issues/filters` | — | [server/src/routes/api/issues.js:355](../server/src/routes/api/issues.js#L355) |
+| POST | `/issues/filters` | 역할 `admin/operator` | [server/src/routes/api/issues.js:360](../server/src/routes/api/issues.js#L360) |
+| DELETE | `/issues/filters/:id` | 역할 `admin/operator` | [server/src/routes/api/issues.js:373](../server/src/routes/api/issues.js#L373) |
+| PUT | `/issues/filters/:id` | 역할 `admin/operator` | [server/src/routes/api/issues.js:364](../server/src/routes/api/issues.js#L364) |
+| POST | `/issues/filters/:id/subscribe` | 역할 `admin/operator` | [server/src/routes/api/issues.js:369](../server/src/routes/api/issues.js#L369) |
+| GET | `/issues/meta` | — | [server/src/routes/api/issues.js:157](../server/src/routes/api/issues.js#L157) |
+| GET | `/issues/settings` | 역할 `admin` · `issueSettingsFleetOnly` | [server/src/routes/api/issues.js:208](../server/src/routes/api/issues.js#L208) |
+| PUT | `/issues/settings` | 역할 `admin` · `issueSettingsFleetOnly` · `fullWriteOnly` | [server/src/routes/api/issues.js:213](../server/src/routes/api/issues.js#L213) |
+| GET | `/issues/sprints` | — | [server/src/routes/api/issues.js:313](../server/src/routes/api/issues.js#L313) |
+| POST | `/issues/sprints` | 역할 `admin/operator` · `sprintFleetOnly` · `fullWriteOnly` | [server/src/routes/api/issues.js:322](../server/src/routes/api/issues.js#L322) |
+| PUT | `/issues/sprints/:id` | 역할 `admin/operator` · `sprintFleetOnly` · `fullWriteOnly` | [server/src/routes/api/issues.js:330](../server/src/routes/api/issues.js#L330) |
+| GET | `/issues/sprints/:id/board` | — | [server/src/routes/api/issues.js:318](../server/src/routes/api/issues.js#L318) |
+| POST | `/issues/sprints/:id/close` | 역할 `admin/operator` · `sprintFleetOnly` · `fullWriteOnly` | [server/src/routes/api/issues.js:339](../server/src/routes/api/issues.js#L339) |
+| GET | `/issues/stats` | — | [server/src/routes/api/issues.js:175](../server/src/routes/api/issues.js#L175) |
+| GET | `/issues/suggest` | — | [server/src/routes/api/issues.js:180](../server/src/routes/api/issues.js#L180) |
+| GET | `/issues/templates` | `creators` | [server/src/routes/api/issues.js:192](../server/src/routes/api/issues.js#L192) |
+| POST | `/issues/templates` | 역할 `admin` · `issueSettingsFleetOnly` · `fullWriteOnly` | [server/src/routes/api/issues.js:196](../server/src/routes/api/issues.js#L196) |
+| DELETE | `/issues/templates/:id` | 역할 `admin` · `issueSettingsFleetOnly` · `fullWriteOnly` | [server/src/routes/api/issues.js:204](../server/src/routes/api/issues.js#L204) |
+| PUT | `/issues/templates/:id` | 역할 `admin` · `issueSettingsFleetOnly` · `fullWriteOnly` | [server/src/routes/api/issues.js:200](../server/src/routes/api/issues.js#L200) |
+| GET | `/issues/versions` | — | [server/src/routes/api/issues.js:287](../server/src/routes/api/issues.js#L287) |
 | GET | `/networks` | 권한 `inv.networks` | [server/src/routes/api/inventory.js:517](../server/src/routes/api/inventory.js#L517) |
 | GET | `/notices` | — | [server/src/routes/api/bulletin.js:103](../server/src/routes/api/bulletin.js#L103) |
 | POST | `/notices` | 역할 `admin` · `noticeFleetOnly` | [server/src/routes/api/bulletin.js:107](../server/src/routes/api/bulletin.js#L107) |
@@ -1394,33 +1399,40 @@ Prometheus/OTel 익스포터(선택 토큰).
 | GET | `/vms/lookup` | 권한 `inv.vms` | [server/src/routes/api/inventory.js:464](../server/src/routes/api/inventory.js#L464) |
 | POST | `/vms/upgrade-tools` | 역할 `admin/operator` · 권한 `tools` · `auditMiddleware` | [server/src/routes/api/toolsInfo.js:299](../server/src/routes/api/toolsInfo.js#L299) |
 | POST | `/vms/usage` | 권한 `inv.vms` | [server/src/routes/api/toolsCapacity.js:338](../server/src/routes/api/toolsCapacity.js#L338) |
-| GET | `/wiki/backrefs` | — | [server/src/routes/api/wiki.js:188](../server/src/routes/api/wiki.js#L188) |
-| GET | `/wiki/home` | — | [server/src/routes/api/wiki.js:166](../server/src/routes/api/wiki.js#L166) |
-| GET | `/wiki/meta` | — | [server/src/routes/api/wiki.js:132](../server/src/routes/api/wiki.js#L132) |
-| POST | `/wiki/pages` | 역할 `admin/operator` | [server/src/routes/api/wiki.js:204](../server/src/routes/api/wiki.js#L204) |
-| DELETE | `/wiki/pages/:id` | 역할 `admin/operator` | [server/src/routes/api/wiki.js:257](../server/src/routes/api/wiki.js#L257) |
-| GET | `/wiki/pages/:id` | — | [server/src/routes/api/wiki.js:212](../server/src/routes/api/wiki.js#L212) |
-| PUT | `/wiki/pages/:id` | 역할 `admin/operator` | [server/src/routes/api/wiki.js:222](../server/src/routes/api/wiki.js#L222) |
-| POST | `/wiki/pages/:id/check` | 역할 `admin/operator` | [server/src/routes/api/wiki.js:241](../server/src/routes/api/wiki.js#L241) |
-| POST | `/wiki/pages/:id/comments` | `commenters` | [server/src/routes/api/wiki.js:288](../server/src/routes/api/wiki.js#L288) |
-| DELETE | `/wiki/pages/:id/comments/:cid` | `commenters` | [server/src/routes/api/wiki.js:329](../server/src/routes/api/wiki.js#L329) |
-| POST | `/wiki/pages/:id/comments/:cid/issue` | `commenters` | [server/src/routes/api/wiki.js:310](../server/src/routes/api/wiki.js#L310) |
-| POST | `/wiki/pages/:id/comments/:cid/resolve` | `commenters` | [server/src/routes/api/wiki.js:322](../server/src/routes/api/wiki.js#L322) |
-| GET | `/wiki/pages/:id/diff` | — | [server/src/routes/api/wiki.js:253](../server/src/routes/api/wiki.js#L253) |
-| POST | `/wiki/pages/:id/fav` | `commenters` | [server/src/routes/api/wiki.js:337](../server/src/routes/api/wiki.js#L337) |
-| GET | `/wiki/pages/:id/mentionables` | `commenters` | [server/src/routes/api/wiki.js:272](../server/src/routes/api/wiki.js#L272) |
-| POST | `/wiki/pages/:id/revert` | 역할 `admin/operator` | [server/src/routes/api/wiki.js:231](../server/src/routes/api/wiki.js#L231) |
-| GET | `/wiki/pages/:id/versions/:v` | — | [server/src/routes/api/wiki.js:249](../server/src/routes/api/wiki.js#L249) |
-| POST | `/wiki/pages/:id/watch` | `commenters` | [server/src/routes/api/wiki.js:344](../server/src/routes/api/wiki.js#L344) |
-| GET | `/wiki/search` | — | [server/src/routes/api/wiki.js:181](../server/src/routes/api/wiki.js#L181) |
-| GET | `/wiki/spaces/:id` | — | [server/src/routes/api/wiki.js:200](../server/src/routes/api/wiki.js#L200) |
-| PUT | `/wiki/spaces/:id` | 역할 `admin` | [server/src/routes/api/wiki.js:192](../server/src/routes/api/wiki.js#L192) |
-| GET | `/wiki/templates` | 역할 `admin` · `templateFleetOnly` | [server/src/routes/api/wiki.js:143](../server/src/routes/api/wiki.js#L143) |
-| POST | `/wiki/templates` | 역할 `admin` · `templateFleetOnly` · `templateFullWrite` | [server/src/routes/api/wiki.js:149](../server/src/routes/api/wiki.js#L149) |
-| DELETE | `/wiki/templates/:id` | 역할 `admin` · `templateFleetOnly` · `templateFullWrite` | [server/src/routes/api/wiki.js:157](../server/src/routes/api/wiki.js#L157) |
-| GET | `/wiki/templates/:id` | — | [server/src/routes/api/wiki.js:161](../server/src/routes/api/wiki.js#L161) |
-| PUT | `/wiki/templates/:id` | 역할 `admin` · `templateFleetOnly` · `templateFullWrite` | [server/src/routes/api/wiki.js:153](../server/src/routes/api/wiki.js#L153) |
-| GET | `/wiki/tree` | — | [server/src/routes/api/wiki.js:177](../server/src/routes/api/wiki.js#L177) |
+| GET | `/wiki/backrefs` | — | [server/src/routes/api/wiki.js:197](../server/src/routes/api/wiki.js#L197) |
+| GET | `/wiki/broken-links` | — | [server/src/routes/api/wiki.js:309](../server/src/routes/api/wiki.js#L309) |
+| GET | `/wiki/home` | — | [server/src/routes/api/wiki.js:175](../server/src/routes/api/wiki.js#L175) |
+| GET | `/wiki/meta` | — | [server/src/routes/api/wiki.js:141](../server/src/routes/api/wiki.js#L141) |
+| POST | `/wiki/pages` | 역할 `admin/operator` | [server/src/routes/api/wiki.js:213](../server/src/routes/api/wiki.js#L213) |
+| DELETE | `/wiki/pages/:id` | 역할 `admin/operator` | [server/src/routes/api/wiki.js:266](../server/src/routes/api/wiki.js#L266) |
+| GET | `/wiki/pages/:id` | — | [server/src/routes/api/wiki.js:221](../server/src/routes/api/wiki.js#L221) |
+| PUT | `/wiki/pages/:id` | 역할 `admin/operator` | [server/src/routes/api/wiki.js:231](../server/src/routes/api/wiki.js#L231) |
+| GET | `/wiki/pages/:id/backlinks` | — | [server/src/routes/api/wiki.js:305](../server/src/routes/api/wiki.js#L305) |
+| POST | `/wiki/pages/:id/check` | 역할 `admin/operator` | [server/src/routes/api/wiki.js:250](../server/src/routes/api/wiki.js#L250) |
+| POST | `/wiki/pages/:id/comments` | `commenters` | [server/src/routes/api/wiki.js:346](../server/src/routes/api/wiki.js#L346) |
+| DELETE | `/wiki/pages/:id/comments/:cid` | `commenters` | [server/src/routes/api/wiki.js:387](../server/src/routes/api/wiki.js#L387) |
+| PUT | `/wiki/pages/:id/comments/:cid` | `commenters` | [server/src/routes/api/wiki.js:322](../server/src/routes/api/wiki.js#L322) |
+| POST | `/wiki/pages/:id/comments/:cid/issue` | `commenters` | [server/src/routes/api/wiki.js:368](../server/src/routes/api/wiki.js#L368) |
+| POST | `/wiki/pages/:id/comments/:cid/resolve` | `commenters` | [server/src/routes/api/wiki.js:380](../server/src/routes/api/wiki.js#L380) |
+| GET | `/wiki/pages/:id/diff` | — | [server/src/routes/api/wiki.js:262](../server/src/routes/api/wiki.js#L262) |
+| POST | `/wiki/pages/:id/fav` | `commenters` | [server/src/routes/api/wiki.js:395](../server/src/routes/api/wiki.js#L395) |
+| GET | `/wiki/pages/:id/mentionables` | `commenters` | [server/src/routes/api/wiki.js:330](../server/src/routes/api/wiki.js#L330) |
+| POST | `/wiki/pages/:id/move` | 역할 `admin/operator` | [server/src/routes/api/wiki.js:313](../server/src/routes/api/wiki.js#L313) |
+| POST | `/wiki/pages/:id/revert` | 역할 `admin/operator` | [server/src/routes/api/wiki.js:240](../server/src/routes/api/wiki.js#L240) |
+| GET | `/wiki/pages/:id/versions/:v` | — | [server/src/routes/api/wiki.js:258](../server/src/routes/api/wiki.js#L258) |
+| POST | `/wiki/pages/:id/watch` | `commenters` | [server/src/routes/api/wiki.js:402](../server/src/routes/api/wiki.js#L402) |
+| GET | `/wiki/search` | — | [server/src/routes/api/wiki.js:190](../server/src/routes/api/wiki.js#L190) |
+| GET | `/wiki/spaces/:id` | — | [server/src/routes/api/wiki.js:209](../server/src/routes/api/wiki.js#L209) |
+| PUT | `/wiki/spaces/:id` | 역할 `admin` | [server/src/routes/api/wiki.js:201](../server/src/routes/api/wiki.js#L201) |
+| GET | `/wiki/templates` | 역할 `admin` · `templateFleetOnly` | [server/src/routes/api/wiki.js:152](../server/src/routes/api/wiki.js#L152) |
+| POST | `/wiki/templates` | 역할 `admin` · `templateFleetOnly` · `templateFullWrite` | [server/src/routes/api/wiki.js:158](../server/src/routes/api/wiki.js#L158) |
+| DELETE | `/wiki/templates/:id` | 역할 `admin` · `templateFleetOnly` · `templateFullWrite` | [server/src/routes/api/wiki.js:166](../server/src/routes/api/wiki.js#L166) |
+| GET | `/wiki/templates/:id` | — | [server/src/routes/api/wiki.js:170](../server/src/routes/api/wiki.js#L170) |
+| PUT | `/wiki/templates/:id` | 역할 `admin` · `templateFleetOnly` · `templateFullWrite` | [server/src/routes/api/wiki.js:162](../server/src/routes/api/wiki.js#L162) |
+| GET | `/wiki/trash` | 역할 `admin/operator` | [server/src/routes/api/wiki.js:278](../server/src/routes/api/wiki.js#L278) |
+| DELETE | `/wiki/trash/:id` | 역할 `admin/operator` | [server/src/routes/api/wiki.js:291](../server/src/routes/api/wiki.js#L291) |
+| POST | `/wiki/trash/:id/restore` | 역할 `admin/operator` | [server/src/routes/api/wiki.js:282](../server/src/routes/api/wiki.js#L282) |
+| GET | `/wiki/tree` | — | [server/src/routes/api/wiki.js:186](../server/src/routes/api/wiki.js#L186) |
 
 ## `/dl`
 
@@ -1445,17 +1457,17 @@ Prometheus/OTel 익스포터(선택 토큰).
 | `requireSettingsOwner` | 41 | **설정 소유 계정**(`settings-owners.txt`·`SETTINGS_OWNERS`·중앙 배포 admin). admin 이라도 소유자가 아니면 403. 그리고 **소유자이면서 전체 범위(vCenter 제한 없음) 계정만** 통과한다 — 범위가 지정된 소유자는 403(v2.744 AUTHZ-02). 백업 아카이브·중앙 토큰 배달 등 **비밀을 다루는 경로**에 붙는다. |
 | `csvPerm` | 37 | **CSV 가져오기/내보내기 권한**(`requirePerm('data.csv')` — v2.643). 관리자 이상만(super_admin 항상, admin 은 권한 설정에서 super_admin 이 끌 수 있다). operator·viewer 는 403. |
 | `fleetWideOnly` | 23 | **전체 범위 계정만**(v2.607 AUTHZ2607-03 — vCenter 등록·데이터 소스 전환·표시 순서). 범위 제한 계정은 403. |
-| `fullWriteOnly` | 20 | **쓰기 범위도 무제한인 계정만**(v2.823 Bareos 설정 쓰기). 조회는 무제한이어도 수정 가능 vCenter(writeVcenters)가 지정된 계정은 403 — 전 법인 공용 쓰기라 쓰기 범위와 교집합할 수 없다. |
+| `fullWriteOnly` | 23 | **쓰기 범위도 무제한인 계정만**(v2.823 Bareos 설정 쓰기). 조회는 무제한이어도 수정 가능 vCenter(writeVcenters)가 지정된 계정은 403 — 전 법인 공용 쓰기라 쓰기 범위와 교집합할 수 없다. |
 | `requireSuperAdmin` | 13 | **super_admin 전용**(v2.726 좌측 메뉴 배포·철회 · v2.740 아이실론 디렉터리 사용량 수집 대상 설정 — 조회·저장·일괄 변경·연결 시험·메일·SSH 키). 저장 역할이 super_admin 인 계정만(`req.user.superAdmin`). 역할 admin 은 403 `super-admin-only`(`requiredRole: ['super_admin']`). |
 | `fleetReadOnly` | 10 | **전체 범위 계정만**(v2.621 SEC-03 — 폴더 사용량 조회. 응답이 RMA 엣지 IP·호스트명·마운트 경로를 싣는다 · v2.622 SEC-03 — GPU 게스트 엣지 배포 설정·엣지 배포 사용자·수집 진단 조회). 범위 제한 계정은 403. |
 | `fullScopeOnlyWith` | 10 | **전체 범위 계정만**(사유 문구를 받는 `fullScopeOnly` — v2.628 SEC2628-01 업그레이드 제어·SEC2628-05 리소스 적정성 진단 등). 범위 제한 계정은 403. |
 | `reauth` | 9 | 통합 계정 관리의 재인증 — 로컬 OTP 계정은 OTP, OTP 없는 계정은 설정 소유자만. |
+| `issueSettingsFleetOnly` | 8 | **전체 범위 계정만**(v2.871 — 이슈 설정: 자동 할당 규칙 · 알림 · 사람별 메일 주소. 전 법인 공용 설정이다). 범위 제한 계정은 403 · 핸들러가 관리자 판본(데모 제외)을 한 번 더 본다. |
+| `commenters` | 8 | **admin·operator 또는 권한 키 `issues.request`**(v2.881 위키 — 댓글 · 지켜보기. 데모 계정 제외 · 문서의 스페이스가 쓰기 범위 안이어야 한다 — 저장소 `addComment`). |
 | `authMiddleware` | 8 | 세션 토큰 검증(`resolveTokenUser`). 대부분의 `/api/*` 는 마운트에서 이미 걸리고, 여기 보이는 것은 **라우터가 따로 건** 경우다(`/api/auth` 안의 admin 라우트 등). |
 | `guarded` | 8 | 공개 API 전용 래퍼 — 허용 목록 검사 + 스냅샷 준비 + async throw 안전 처리. 미들웨어가 아니라 핸들러를 감싼 것이다. |
-| `commenters` | 7 | **admin·operator 또는 권한 키 `issues.request`**(v2.881 위키 — 댓글 · 지켜보기. 데모 계정 제외 · 문서의 스페이스가 쓰기 범위 안이어야 한다 — 저장소 `addComment`). |
 | `tokenFirst` | 6 | **수집 토큰 확인을 본문 해석보다 먼저** 한다(v2.741 — 토큰 없는 요청이 본문 파서·큰 본문 한도에 닿지 않게). 토큰이 없거나 틀리면 403, 수집 토큰 미설정이면 404. |
 | `express.json` | 6 | 본문 파서(대용량 JSON 한도). ⚠ 게이트가 아니다 — 이 자리에 있는 이유는 **인증보다 먼저 파싱하지 않기 위해** 라우트 단위로 붙였기 때문이다(`util/bigJsonGate.js` 규약). |
-| `issueSettingsFleetOnly` | 5 | **전체 범위 계정만**(v2.871 — 이슈 설정: 자동 할당 규칙 · 알림 · 사람별 메일 주소. 전 법인 공용 설정이다). 범위 제한 계정은 403 · 핸들러가 관리자 판본(데모 제외)을 한 번 더 본다. |
 | `prefsWrite` | 4 | VM 목록 내보내기 내 저장값 쓰기(v2.798) — **데모 손님 403** · 저장 키는 인증된 계정 이름(본문 값 무시) · 손상 파일이면 503 · 감사 로그. |
 | `templateFleetOnly` | 4 | **전체 범위 계정만**(v2.889 — 위키 관리자 템플릿: 모든 스페이스의 새 문서 화면에 보이는 전 법인 공용 설정). 범위 제한 계정은 403 · 핸들러가 관리자 판본(데모 제외)을 한 번 더 본다. |
 | `requireEnrolled` | 4 | OTP **강제 등록 미완료 세션을 차단**한다(v2.206). 부트스트랩 admin 이 등록 전에 API 를 쓰지 못하게 하는 게이트로, 대부분의 `/api/*` 는 마운트에서 이미 걸린다 — 여기 보이는 것은 `/api/auth` 안의 admin 라우트처럼 **라우터가 따로 건** 경우다. |
@@ -1469,13 +1481,13 @@ Prometheus/OTel 익스포터(선택 토큰).
 | `adFleetOnly` | 3 | **전체 범위 계정만**(v2.628 SEC2628-04 — AD 설정 조회·저장·연결 테스트. AD 는 전 사용자 공통 인증 소스다). 범위 제한 계정은 403. |
 | `ownerIfAutoCentralToken` | 2 | 요청이 `autoCentralToken` 옵션을 쓸 때만 **설정 소유자**를 요구한다(평문 CENTRAL_TOKEN 을 원격 호스트에 기록하는 경로라 백업과 같은 등급). |
 | `requireOwnOtp` | 2 | **본인 OTP 재인증**(1회용·실패 잠금). 호스트 접근 제어 적용·확정처럼 되돌리기 어려운 동작에 붙는다. |
+| `creators` | 2 | **admin·operator 또는 권한 키 `issues.request`**(v2.871 — 이슈 생성. 쓰기 역할이 아니면 요청 유형만 — 백로그 · 담당자·상태·관찰자 지정 없음, 저장소 `requestOnly`). viewer 상태변경 예외는 이것과 v2.881 위키 `commenters`(댓글 · 지켜보기) 둘뿐이다. |
 | `alertFullScope` | 2 | **전체 범위 계정만**(v2.838 Backup › Summary 백업 안 된 VM 일일 메일 저장 · 지금 보내기 — `fullScopeOnlyWith` 의 산물 · 전 법인 자료를 메일로 보낸다). 범위 제한 계정은 403 · 핸들러가 관리자 판본(데모 제외)을 한 번 더 본다. |
 | `rawIpFleetOnly` | 1 | **전체 범위 계정만**(v2.621 SEC-02 — 요청 본문 IP 로 직접 SSH 접속하는 테스트. 정규형 IPv4·차단 대역 검사가 뒤따른다). 범위 제한 계정은 403. |
 | `liveFleetOnly` | 1 | **전체 범위 계정만**(v2.629 A6-02 — iDRAC 에 실시간 로그인하는 GPU 조사). 범위 제한 계정은 403. |
 | `uploadPrecheck` | 1 | **첨부 올리기 사전 검사**(v2.904 — 본문을 받기 전에): 데모 계정 403 · 주인(문서 · 이슈)을 볼 수 없으면 404(존재 은닉) · 쓰기 범위 밖이거나 읽기 전용이면 403. 본문(최대 8MB)은 이 검사를 통과한 뒤에만 받는다. |
 | `settingsFleetOnly` | 1 | **전체 범위 계정만**(v2.633 — 손상 보존본만 남은 중앙 설정 파일을 기본값으로 확정. 그 기본값이 모든 엣지에 배포된다). 범위 제한 계정은 403. |
 | `csvPermIfDownload` | 1 | `csvPerm` 과 같되 **download=1(파일 내보내기)일 때만** 요구한다 — 화면 조회(JSON)는 통과(v2.741 AUTHZ-02 — VMware 구성 백업). |
-| `creators` | 1 | **admin·operator 또는 권한 키 `issues.request`**(v2.871 — 이슈 생성. 쓰기 역할이 아니면 요청 유형만 — 백로그 · 담당자·상태·관찰자 지정 없음, 저장소 `requestOnly`). viewer 상태변경 예외는 이것과 v2.881 위키 `commenters`(댓글 · 지켜보기) 둘뿐이다. |
 | `csvPermUnlessJson` | 1 | `csvPerm` 과 같되 **format=json(화면의 표·붙여넣기 등록)은 통과**(v2.643 — 성능점검 대상 등록 마법사). |
 
 ---

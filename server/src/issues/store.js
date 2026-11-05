@@ -863,7 +863,7 @@ export function viewIssue(x, me = '', access = FULL_ACCESS) {
     links: relationsOf(x, idx, access),
     body: x.body || '', watcherNames: Array.isArray(x.watchers) ? x.watchers : [], watching: !!me && Array.isArray(x.watchers) && x.watchers.includes(me),
     createdBy: x.createdBy || x.reporter || '', updatedBy: x.updatedBy || '',
-    comments: commentsOf(x).map((c) => ({ id: c.id, author: c.author, body: c.body, createdAt: c.createdAt })),
+    comments: commentsOf(x).map((c) => ({ id: c.id, author: c.author, body: c.body, createdAt: c.createdAt, ...(c.editedAt ? { editedAt: c.editedAt, edits: c.edits || 1 } : {}) })),
     history: historyFor(historyOf(x), idx, access), historyDropped: Number(x.historyDropped) || 0,
     worklog: worklogOf(x).map((w) => ({ id: w.id, by: w.by, at: w.at, on: w.on || '', minutes: w.minutes, note: w.note || '' })).reverse(), // v2.888 최신 먼저
   };
@@ -1378,6 +1378,27 @@ export function addComment(key, body, user, { access = FULL_ACCESS } = {}) {
   const y = replace(c, next, [], user);
   emit({ type: 'comment', actor: user, issue: evIssue(y), commentId: cm.id, excerpt: capStr(cm.body, 200), mentions: mentionsOf(cm.body) });
   return cm;
+}
+
+/**
+ * v2.906 댓글 고치기(기능 추천 1) — 쓴 사람만 · 이슈 쓰기 범위(댓글과 같은 판정). 옛 본문은 최근 5개까지(editedAt · edits · prev).
+ * 이력에 남기지 않는다(본문 이력과 같다) · 알림은 새로 언급한 사람에게만(ev.edit — 담당 · 보고 · 관찰자에게 다시 가지 않는다).
+ */
+export function editComment(key, commentId, body, user, { access = FULL_ACCESS } = {}) {
+  const c = load();
+  const x = findFor(key, access, { write: true });
+  const comments = commentsOf(x);
+  const cm = comments.find((q) => q.id === commentId);
+  if (!cm) throw notFound();
+  if (cm.author !== user) throw forbidden('댓글은 쓴 사람만 고칠 수 있습니다');
+  const nextBody = text(body?.body, LIMITS.commentBody, 'body', { required: true });
+  if (nextBody === cm.body) return cm;
+  const edited = { ...cm, body: nextBody, editedAt: Date.now(), edits: (Number(cm.edits) || 0) + 1, prev: [...(Array.isArray(cm.prev) ? cm.prev : []), { at: cm.editedAt || cm.createdAt, body: cm.body }].slice(-5) };
+  const y = replace(c, { ...x, comments: comments.map((q) => (q.id === commentId ? edited : q)) }, [], user);
+  const before = new Set(mentionsOf(cm.body));
+  const fresh = mentionsOf(nextBody).filter((m) => !before.has(m));
+  if (fresh.length) emit({ type: 'comment', edit: true, actor: user, issue: evIssue(y), commentId, excerpt: capStr(nextBody, 200), mentions: fresh });
+  return edited;
 }
 
 /** 댓글 삭제 — 작성자 본인 또는 관리자(isMod). */
