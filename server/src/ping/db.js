@@ -60,6 +60,10 @@ function initSqlite() {
     const hourBucket = db.prepare(`SELECT CAST(h/? AS INTEGER)*? AS b,
         SUM(rtt_sum) s, SUM(rtt_n) rn, MIN(mn) min, MAX(mx) max, SUM(fail) fail, SUM(n) n
       FROM samples_hourly WHERE target=? AND h>=? GROUP BY b ORDER BY b DESC LIMIT ?`);
+    // v2.890: 끝이 닫힌 창(전송 속도 상세의 '이전 구간') — h < 끝(시간 경계로 내림). 이웃한 두 창이 같은 시간 칸을 두 번 세지 않는다.
+    const hourBucketUntil = db.prepare(`SELECT CAST(h/? AS INTEGER)*? AS b,
+        SUM(rtt_sum) s, SUM(rtt_n) rn, MIN(mn) min, MAX(mx) max, SUM(fail) fail, SUM(n) n
+      FROM samples_hourly WHERE target=? AND h>=? AND h<? GROUP BY b ORDER BY b DESC LIMIT ?`);
     const metaGet = db.prepare('SELECT v FROM ping_meta WHERE k=?');
     const metaSet = db.prepare('INSERT INTO ping_meta (k, v) VALUES (?, ?) ON CONFLICT(k) DO UPDATE SET v = excluded.v');
     // 롤업 시드(구버전 DB) — 여는 시점의 원시 행(rowid ≤ upto)만 청크로 더한다. 그 뒤 적재분은 insertMany 가 이미 더했으므로
@@ -119,6 +123,13 @@ function initSqlite() {
         AVG(CASE WHEN ok=1 THEN rtt END) avg, MIN(CASE WHEN ok=1 THEN rtt END) min, MAX(CASE WHEN ok=1 THEN rtt END) max,
         SUM(CASE WHEN ok=1 THEN 0 ELSE 1 END) fail, COUNT(*) n
       FROM samples WHERE target=? AND ts>=? GROUP BY b ORDER BY b DESC LIMIT ?`);
+    // v2.890: 끝이 닫힌 창 [since, until) — (target, ts) 인덱스 범위 하나. 반개구간이라 이웃 창이 경계 표본을 두 번 세지 않는다.
+    const bucketUntil = db.prepare(`SELECT CAST(ts/? AS INTEGER)*? AS b,
+        AVG(CASE WHEN ok=1 THEN rtt END) avg, MIN(CASE WHEN ok=1 THEN rtt END) min, MAX(CASE WHEN ok=1 THEN rtt END) max,
+        SUM(CASE WHEN ok=1 THEN 0 ELSE 1 END) fail, COUNT(*) n
+      FROM samples WHERE target=? AND ts>=? AND ts<? GROUP BY b ORDER BY b DESC LIMIT ?`);
+    // v2.890: 창 안 성공 RTT(중앙값용 — 호출부가 짧은 창(원시 칸)에서만 부른다: 7일 1분 주기 ≈ 1만 행).
+    const okRttWindow = db.prepare('SELECT rtt FROM samples WHERE target=? AND ts>=? AND ts<? AND ok=1 AND rtt IS NOT NULL');
     // 진단·테스트용 건수 포함 meta — 파티션 전체를 훑는다(52만 행 약 40ms). 조회 응답 경로에서 쓰지 말 것.
     const metaStmt = db.prepare('SELECT MIN(ts) mn, MAX(ts) mx, COUNT(*) n FROM samples WHERE target=?');
     // v2.612 LEFT2612-05: 조회 응답(seriesOf)은 bounds 를 쓴다 — aggregate 하나씩은 인덱스 끝만 본다(0.0x ms, v2.550.3 규칙).
@@ -195,14 +206,23 @@ function initSqlite() {
       },
       latest: (target) => { const r = latestOne.get(target); return r ? { rtt: r.rtt, ok: !!r.ok, ts: r.ts } : null; },
       recentOkRtt: (target, limit, sinceTs = 0) => recentOk.all(target, Number.isFinite(Number(sinceTs)) ? Number(sinceTs) : 0, limit).map((r) => r.rtt).filter((v) => v != null),
-      history: (target, sinceTs, bucketMs, limit) => bucket.all(bucketMs, bucketMs, target, sinceTs, limit).reverse()
-        .map((r) => ({ ts: r.b, avg: round2(r.avg), min: round2(r.min), max: round2(r.max), loss: r.n ? Number((r.fail / r.n).toFixed(3)) : 0, n: Number(r.n) })),
-      /** 롤업에서 읽는 버킷 — rollupReady 가 아니면 null(호출부가 원시로 떨어진다). bucketMs 는 HOUR_MS 의 배수. */
-      historyHourly: (target, sinceTs, bucketMs, limit) => {
+      // untilTs(v2.890): 주면 [sinceTs, untilTs) — 없으면 예전처럼 끝이 열려 있다. fail(실패 표본 수)은 창 통계가 손실을 정확히 세게 싣는다.
+      history: (target, sinceTs, bucketMs, limit, untilTs = null) => (untilOf(untilTs) == null
+        ? bucket.all(bucketMs, bucketMs, target, sinceTs, limit)
+        : bucketUntil.all(bucketMs, bucketMs, target, sinceTs, untilOf(untilTs), limit)).reverse()
+        .map((r) => ({ ts: r.b, avg: round2(r.avg), min: round2(r.min), max: round2(r.max), loss: r.n ? Number((r.fail / r.n).toFixed(3)) : 0, n: Number(r.n), fail: Number(r.fail) })),
+      /** 롤업에서 읽는 버킷 — rollupReady 가 아니면 null(호출부가 원시로 떨어진다). bucketMs 는 HOUR_MS 의 배수. untilTs 는 시간 경계로 내린다. */
+      historyHourly: (target, sinceTs, bucketMs, limit, untilTs = null) => {
         if (!rollupReady || bucketMs < HOUR_MS || bucketMs % HOUR_MS) return null;
-        return hourBucket.all(bucketMs, bucketMs, target, Math.floor(sinceTs / HOUR_MS) * HOUR_MS, limit).reverse()
-          .map((r) => ({ ts: r.b, avg: r.rn ? round2(r.s / r.rn) : null, min: round2(r.min), max: round2(r.max), loss: r.n ? Number((r.fail / r.n).toFixed(3)) : 0, n: Number(r.n) }));
+        const from = Math.floor(sinceTs / HOUR_MS) * HOUR_MS;
+        const to = untilOf(untilTs);
+        return (to == null
+          ? hourBucket.all(bucketMs, bucketMs, target, from, limit)
+          : hourBucketUntil.all(bucketMs, bucketMs, target, from, Math.floor(to / HOUR_MS) * HOUR_MS, limit)).reverse()
+          .map((r) => ({ ts: r.b, avg: r.rn ? round2(r.s / r.rn) : null, min: round2(r.min), max: round2(r.max), loss: r.n ? Number((r.fail / r.n).toFixed(3)) : 0, n: Number(r.n), fail: Number(r.fail) }));
       },
+      /** v2.890: 창 [sinceTs, untilTs) 안 성공 RTT 목록(중앙값 계산용). 호출부가 창 길이를 제한한다. */
+      okRttIn: (target, sinceTs, untilTs) => okRttWindow.all(target, sinceTs, untilTs).map((r) => Number(r.rtt)).filter((v) => Number.isFinite(v)),
       rollupState: () => ({ ready: rollupReady }),
       _rollupSeed: () => rollupSeed,
       meta: (target) => { const r = metaStmt.get(target); return { firstTs: r?.mn ?? null, lastTs: r?.mx ?? null, count: Number(r?.n || 0) }; },
@@ -224,17 +244,20 @@ function initJson() {
     insertMany: (recs) => { const lines = recs.map((r) => ({ g: r.target, t: r.ts, v: r.rtt == null ? null : r.rtt, o: r.ok ? 1 : 0 })); rows.push(...lines); try { fs.appendFileSync(file, lines.map((r) => JSON.stringify(r)).join('\n') + '\n', { mode: 0o600 }); } catch { /* */ } },
     latest: (target) => { let best = null; for (const r of rows) if (r.g === target && (!best || r.t > best.t)) best = r; return best ? { rtt: best.v, ok: !!best.o, ts: best.t } : null; },
     recentOkRtt: (target, limit, sinceTs = 0) => rows.filter((r) => r.g === target && r.o && r.v != null && r.t >= (Number(sinceTs) || 0)).sort((a, b) => b.t - a.t).slice(0, limit).map((r) => r.v),
-    history: (target, sinceTs, bucketMs, limit) => {
+    history: (target, sinceTs, bucketMs, limit, untilTs = null) => {
       const buckets = new Map();
-      for (const r of rows) if (r.g === target && r.t >= sinceTs) {
+      const to = untilOf(untilTs);
+      for (const r of rows) if (r.g === target && r.t >= sinceTs && (to == null || r.t < to)) {
         const b = Math.floor(r.t / bucketMs) * bucketMs; const g = buckets.get(b) || { sum: 0, n: 0, ok: 0, min: Infinity, max: -Infinity };
         g.n++; if (r.o && r.v != null) { g.ok++; g.sum += r.v; g.min = Math.min(g.min, r.v); g.max = Math.max(g.max, r.v); } buckets.set(b, g);
       }
       return [...buckets.entries()].sort((a, b) => a[0] - b[0]).slice(-limit).map(([b, g]) => ({
         ts: b, avg: g.ok ? round2(g.sum / g.ok) : null, min: g.ok ? round2(g.min) : null, max: g.ok ? round2(g.max) : null,
-        loss: g.n ? Number(((g.n - g.ok) / g.n).toFixed(3)) : 0, n: g.n,
+        loss: g.n ? Number(((g.n - g.ok) / g.n).toFixed(3)) : 0, n: g.n, fail: g.n - g.ok,
       }));
     },
+    okRttIn: (target, sinceTs, untilTs) => rows.filter((r) => r.g === target && r.o && r.v != null && r.t >= sinceTs && r.t < untilTs).map((r) => Number(r.v)),
+    bounds: (target) => { let mn = null, mx = null; for (const r of rows) if (r.g === target) { if (mn == null || r.t < mn) mn = r.t; if (mx == null || r.t > mx) mx = r.t; } return { firstTs: mn, lastTs: mx, count: null }; },
     meta: (target) => { let mn = null, mx = null, n = 0; for (const r of rows) if (r.g === target) { n++; if (mn == null || r.t < mn) mn = r.t; if (mx == null || r.t > mx) mx = r.t; } return { firstTs: mn, lastTs: mx, count: n }; },
     // v2.741(감사 LEFT-13): 재기록은 원자적으로(tmp → fsync → rename) — writeFileSync 는 먼저 0바이트로 자르므로 그 사이 종료면 이력을 잃는다.
     prune: (beforeTs) => { const n = rows.filter((r) => r.t >= beforeTs); if (n.length !== rows.length) { rows = n; rewrite(); } },
@@ -249,6 +272,8 @@ export const HOUR_MS = 3_600_000;
 const SEED_CHUNK_ROWS = 50_000;   // 청크당 GROUP BY 가 수십 ms 안에 끝나게
 
 const round2 = (x) => (x == null || !Number.isFinite(x) ? null : Number(x.toFixed(2)));
+/** 창 끝(ms) — 숫자가 아니면 null(끝이 열린 예전 동작). */
+const untilOf = (v) => { if (v == null) return null; const n = Number(v); return Number.isFinite(n) ? n : null; };
 
 export async function getPingDb() {
   if (impl) return impl;

@@ -14,6 +14,11 @@ import { atomicWriteFileSync, preserveCorrupt, safeLoadText } from '../util/atom
 const FILE = path.join(config.configDir, 'ping-targets.json');
 const norm = (s) => String(s || '').trim();
 const idOf = (s) => norm(s).toLowerCase();
+/**
+ * 엣지 노드(수집 서버 등록부 항목)의 Ping 대상 id — `edge_<id 또는 이름, 소문자>`. 자동 등록(seedEdgeTargets)과
+ * 전송 속도 상세의 Ping 조회(v2.890 routes/api/xferSpeed.js)가 **이 함수 하나**로 만든다(사본을 두면 한쪽만 바뀐다).
+ */
+export function edgeTargetId(c) { const cid = idOf(c && (c.id || c.name)); return cid ? `edge_${cid}` : ''; }
 const SAFE_HOST = /^[a-zA-Z0-9._:-]+$/; // 명령/주소 인젝션 방지
 
 let cache = null;
@@ -186,7 +191,7 @@ export function seedEdgeTargets(collectors = []) {
     if (!host || !SAFE_HOST.test(host)) continue;
     let port = 443;
     try { const u = new URL(/^https?:\/\//i.test(c.url) ? c.url : `http://${c.url}`); port = Number(u.port) || (u.protocol === 'https:' ? 443 : 80); } catch { /* 기본 443 */ }
-    const id = `edge_${cid}`;
+    const id = edgeTargetId(c);
     if (existing.has(id)) continue;
     added.push({ id, name: (norm(c.name) || host).slice(0, 80), host, port, kind: 'tcp', enabled: true, baselineMs: null, note: '엣지 노드 자동 등록', source: 'edge', datacenterId: idOf(c.datacenter) });
   }
