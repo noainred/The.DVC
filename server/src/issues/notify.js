@@ -94,11 +94,11 @@ export function lineOf(ev, who) {
   switch (ev.type) {
     case 'created': return `${head} — 새 이슈가 할당됐습니다${ev.auto ? '(자동 할당)' : ''} · ${ev.actor}`;
     case 'assigned':
-      if (who && who === ev.to) return `${head} — 담당자로 지정됐습니다 · ${ev.actor}`; // v2.902 점검 S-6: 팀 채팅(who='')의 할당 해제(to='')가 '지정됐습니다' 로 찍혔다
+      if (who && who === ev.to) return `${head} — 담당자로 지정됐습니다 · ${ev.actor}`; // v2.904 점검 S-6: 팀 채팅(who='')의 할당 해제(to='')가 '지정됐습니다' 로 찍혔다
       return `${head} — 담당자가 ${ev.from || '미할당'} → ${ev.to || '미할당'} 로 바뀌었습니다 · ${ev.actor}`;
     case 'status': return `${head} — 상태 ${st(ev.from)} → ${st(ev.to)} · ${ev.actor}`;
     case 'progress': return `${head} — 진행 ${ev.to == null ? '보고 없음' : `${ev.to}%`}${ev.note ? ` · ${capStr(ev.note, 120)}` : ''} · ${ev.actor}`;
-    // v2.902 점검 S-9: 멘션은 원시 토큰('@kim님')이라 받는 사람 이름과 같은 규칙(resolveMentions — 가장 긴 접두)으로 맞춘다
+    // v2.904 점검 S-9: 멘션은 원시 토큰('@kim님')이라 받는 사람 이름과 같은 규칙(resolveMentions — 가장 긴 접두)으로 맞춘다
     case 'comment': return `${head} — ${who && resolveMentions(ev.mentions, [who]).length ? '댓글에서 언급했습니다' : '새 댓글'} · ${ev.actor}: ${capStr(ev.excerpt || '', 160)}`;
     // 날짜는 포탈 날짜(dayKey — 하루 한 번 판정과 같은 기준). UTC 로 자르면 KST 09:00 이전 기한이 하루 앞으로 적혔다(감사 A2-07·A4-06).
     case 'due': {
@@ -466,7 +466,7 @@ async function scanWeeklyOnce(now) {
       let list;
       try {
         const vcs = (snap?.vcenters || []).filter((v) => v?.id && (!access.read || access.read.has(v.id))).map((v) => ({ id: v.id, name: v.name || v.id }));
-        // v2.902(점검 S-3 — 재현): 화면(listFor)과 같은 맥락 — 'doc' 조건이면 받는 사람 범위의 문서 색인을 싣는다(없으면 'doc ~' 0건 · 'doc is empty' 전부)
+        // v2.904(점검 S-3 — 재현): 화면(listFor)과 같은 맥락 — 'doc' 조건이면 받는 사람 범위의 문서 색인을 싣는다(없으면 'doc ~' 0건 · 'doc is empty' 전부)
         const docs = /\bdoc\b/i.test(f.query || '') ? issueDocIndex(access) : null;
         list = listIssues({ query: f.query, access, me: u, limit: WEEKLY_ROWS, now, ctx: queryContext({ me: u, now, vcenters: vcs, docs: docs ? (k) => docs.get(k) || [] : null }) });
       } catch (e) { out.skipped += 1; status.lastError = `필터 ‘${capStr(f.name, 40)}’ 주간 메일: ${String(e?.message || e).slice(0, 160)}`; continue; }
@@ -498,7 +498,7 @@ export function startIssueNotify() {
   started = true;
   onIssueEvent((ev) => queueIssueEvent(ev));
   // v2.881 위키 문서 저장 · 댓글 알림 — 같은 묶음 · 같은 범위 판정
-  // v2.902: 위키 저장소를 정적으로 가져오므로(주간 메일 doc 색인 — 점검 S-3) 구독도 바로 — 정적 + 동적 이중 import 금지(audit2613c)
+  // v2.904: 위키 저장소를 정적으로 가져오므로(주간 메일 doc 색인 — 점검 S-3) 구독도 바로 — 정적 + 동적 이중 import 금지(audit2613c)
   try { onWikiEvent((ev) => queueWikiEvent(ev)); } catch (e) { console.warn(`[issues] 위키 알림 연결 실패: ${String(e?.message || e).slice(0, 160)}`); }
   const scan = () => {
     try { scanDue(); } catch (e) { console.warn(`[issues] 기한 알림 검사 실패: ${e?.message || e}`); }

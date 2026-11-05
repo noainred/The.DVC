@@ -25,7 +25,7 @@ export function AttachImg({ id, alt = '', className = 'md-img' }) {
   return <img src={url} alt={alt} className={className} loading="lazy" />;
 }
 
-/** 인증 붙여 받아 내려받기. 이름을 모르면(본문 안 첨부 링크) 서버 Content-Disposition 의 원래 이름으로(v2.902 점검 W-3 — 'download' 로 저장되던 것). */
+/** 인증 붙여 받아 내려받기. 이름을 모르면(본문 안 첨부 링크) 서버 Content-Disposition 의 원래 이름으로(v2.904 점검 W-3 — 'download' 로 저장되던 것). */
 export async function downloadAttach(id, name) {
   return downloadFile(`/attach/file/${id}`, name || '');
 }
@@ -90,7 +90,7 @@ export default function AttachBox({ kind, owner, onInsert = null, compact = fals
         )}
         <span className="muted attach-note">파일당 {attachSizeText(lim.fileBytes)} · {lim.perOwner || 20}개까지 · 포탈 백업에는 들어가지 않습니다</span>
       </div>
-      {err && <div className="banner warn" style={{ whiteSpace: 'normal' }}>첨부 목록을 새로 읽지 못했습니다 — 아래는 직전에 읽은 목록입니다({err.message || String(err)}).</div>}{/* v2.902 점검 W-9 */}
+      {err && <div className="banner warn" style={{ whiteSpace: 'normal' }}>첨부 목록을 새로 읽지 못했습니다 — 아래는 직전에 읽은 목록입니다({err.message || String(err)}).</div>}{/* v2.904 점검 W-9 */}
       {msg && <div className="banner" style={{ whiteSpace: 'normal' }}>{msg}</div>}
       {items.length > 0 && (
         <ul className="attach-list">

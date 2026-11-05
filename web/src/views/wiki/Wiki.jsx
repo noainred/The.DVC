@@ -540,7 +540,7 @@ function Editor({ space, meta, pages, page = null, initial = null, onWritten }) 
   const [parentId, setParentId] = useState(src.parentId || '');
   const [noteText, setNoteText] = useState('');
   const [base, setBase] = useState(page ? page.version : null);
-  const [baseCheck, setBaseCheck] = useState(page ? (page.checkRev ?? 0) : null); // v2.902 점검 S-1 — 편집 시작 뒤의 체크 토글도 충돌로
+  const [baseCheck, setBaseCheck] = useState(page ? (page.checkRev ?? 0) : null); // v2.904 점검 S-1 — 편집 시작 뒤의 체크 토글도 충돌로
   const [mode, setMode] = useState('split');
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState('');
@@ -569,10 +569,10 @@ function Editor({ space, meta, pages, page = null, initial = null, onWritten }) 
   };
   const onSlashKey = (e) => {
     if (!slash) return;
-    if (e.nativeEvent?.isComposing || e.keyCode === 229) return; // v2.902 점검 W-6: 한글 조합 중 Enter(조합 확정)를 메뉴 선택으로 먹지 않는다
+    if (e.nativeEvent?.isComposing || e.keyCode === 229) return; // v2.904 점검 W-6: 한글 조합 중 Enter(조합 확정)를 메뉴 선택으로 먹지 않는다
     if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); const d = e.key === 'ArrowDown' ? 1 : -1; setSlash((s0) => ({ ...s0, i: (s0.i + d + s0.items.length) % s0.items.length })); }
     else if (e.key === 'Enter' || e.key === 'Tab') {
-      // v2.902 점검 W-5: 메뉴가 뜬 뒤 커서를 다른 자리로 옮겼으면 메뉴는 낡은 것 — 닫고 키는 그대로 둔다(Enter 한 번이 사라졌다)
+      // v2.904 점검 W-5: 메뉴가 뜬 뒤 커서를 다른 자리로 옮겼으면 메뉴는 낡은 것 — 닫고 키는 그대로 둔다(Enter 한 번이 사라졌다)
       const caret = ta.current?.selectionStart ?? body.length;
       if (!slashQuery(body, caret)) { setSlash(null); return; }
       e.preventDefault(); pickSlash(slash.items[slash.i]);
@@ -605,7 +605,7 @@ function Editor({ space, meta, pages, page = null, initial = null, onWritten }) 
       if (isConflict(r)) {
         setMsg(wikiSaveFailText(r));
         let diff = null; let diffErr = '';
-        const from = overrideBase ?? base; // v2.902 점검 W-11: 두 번째 충돌의 비교도 방금 실은 판에서
+        const from = overrideBase ?? base; // v2.904 점검 W-11: 두 번째 충돌의 비교도 방금 실은 판에서
         if (r.kind === 'check' && r.current.version === from) diff = { checkOnly: true }; // 판은 그대로 — 체크만 바뀌었다(비교할 본문 차이 없음)
         else { try { diff = await fetchJson(`/wiki/pages/${page.id}/diff`, { from, to: r.current.version }); } catch (e) { diffErr = String(e?.message || e); } }
         setConflict({ current: r.current, kind: r.kind || '', diff, diffErr });
@@ -852,7 +852,7 @@ function SearchView({ space, params, meta }) {
   const label = params.label || '';
   useEffect(() => {
     const k = latest.next();
-    setData(null); setErr(null); // v2.902 점검 W-12: 옛 오류가 새 검색 동안 남아 Loading 을 가렸다
+    setData(null); setErr(null); // v2.904 점검 W-12: 옛 오류가 새 검색 동안 남아 Loading 을 가렸다
     fetchJson('/wiki/search', { q, label, space: allSpaces ? '' : space, status, archived: archived ? '1' : '', limit: 50 })
       .then((r) => { if (latest.isLatest(k)) { setData(r); setErr(null); } }).catch((e) => { if (latest.isLatest(k)) setErr(e); });
   }, [q, label, space, allSpaces, status, archived, latest]);
@@ -926,7 +926,7 @@ function TemplatesAdmin({ space, meta, onWritten }) {
   return (
     <div className="wiki-settings">
       <div className="wiki-editor-head"><h2 className="wiki-title">관리자 템플릿</h2><span className="muted">내장 템플릿 뒤에 붙습니다 · {lim.max ?? 30}개까지 · 전 법인 공용</span></div>
-      {err && <div className="banner warn" style={{ whiteSpace: 'normal' }}>템플릿 목록을 새로 읽지 못했습니다 — 아래는 직전에 읽은 목록입니다({err.message || String(err)}).</div>}{/* v2.902 점검 W-9 */}
+      {err && <div className="banner warn" style={{ whiteSpace: 'normal' }}>템플릿 목록을 새로 읽지 못했습니다 — 아래는 직전에 읽은 목록입니다({err.message || String(err)}).</div>}{/* v2.904 점검 W-9 */}
       {data.loadError && <div className="banner bad" style={{ whiteSpace: 'normal' }}>템플릿 파일(wiki-templates.json)을 읽지 못해 빈 목록으로 보입니다 — 손상본은 옆에 보존했습니다. 원인: {data.loadError}</div>}
       {msg && <div className="banner">{msg}</div>}
       {(data.items || []).length === 0 && !form && <div className="muted">아직 관리자 템플릿이 없습니다.</div>}

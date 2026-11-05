@@ -1,5 +1,5 @@
 /**
- * wikiIssues2902.test.js — v2.902 위키 · 이슈 · 첨부 점검(2026-11-05 · 3축 분석 + 메인 재현) 확정분 회귀.
+ * wikiIssues2904.test.js — v2.904 위키 · 이슈 · 첨부 점검(2026-11-05 · 3축 분석 + 메인 재현) 확정분 회귀.
  *
  * P-1 isMod 가 쓰기 범위(writeVcenters)를 보지 않았다 — 위키 남의 댓글 삭제 · 해결 · 남의 공유 필터 삭제가 쓰기 범위 밖에서 열렸다.
  * P-2 범위 계정의 이슈 상세 history · 활동 피드에 범위 밖 법인 id · 이슈 키가 원문으로 실렸다.
@@ -26,7 +26,7 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SRC = path.resolve(HERE, '../src');
 
 function run(body, { env = {} } = {}) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'c2902-'));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'c2904-'));
   const script = `
     const express = (await import('express')).default;
     const { api } = await import(${JSON.stringify(path.join(SRC, 'routes/api.js'))});
@@ -156,7 +156,7 @@ test('P-5 · S-5 — 첨부는 범위 밖 주인에 본문 전에 거절 · 주�
 });
 
 test('S-5 — removeOwnerAfterPersist: 저장 전이면 기다렸다가 저장됐을 때만 지운다 · 저장 실패면 남긴다', async () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'c2902s5-'));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'c2904s5-'));
   const r = spawnSync(process.execPath, ['--input-type=module', '-e', `
     const at = await import(${JSON.stringify(path.join(SRC, 'attach/store.js'))});
     at.addAttachment('issue', 'ISS-1', 'a.txt', Buffer.from('a'), 'u');
@@ -239,7 +239,7 @@ test('S-10 · S-7(검색식) — SLA 목표 공백은 기본값 · 없는 날짜
 });
 
 test('S-6 · S-9 — 팀 채팅 할당 해제 문구 · 조사가 붙은 멘션의 메일 문구', async () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'c2902n-'));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'c2904n-'));
   const r = spawnSync(process.execPath, ['--input-type=module', '-e', `
     const n = await import(${JSON.stringify(path.join(SRC, 'issues/notify.js'))});
     const issue = { key: 'ISS-1', title: 't', assignee: '', reporter: 'alice', watchers: [], vcenterId: '' };

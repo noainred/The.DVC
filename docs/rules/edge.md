@@ -626,6 +626,16 @@
     · 웹: 보기 `전송 속도 | 전송 속도 + Ping | Ping만`(기본 '전송 속도' · localStorage `xs.detail.view` — 편의라 못 읽으면 기본값) · '전송 속도' 보기면 Ping 을 **조회하지 않는다** ·
       다른 창의 Ping 응답은 그리지 않는다(`samePingWindow`) · 오버 상자는 보이는 첫 차트 위(카드 맨 위면 Ping 알약을 덮었다) · 선을 끊는 간격은 칸 × 1.5 와 표본 간격 × 1.6 중 큰 쪽
       (칸 크기만 보면 표본이 칸보다 성긴 대상에서 점만 남았다 — 화면 확인으로 잡았다).
+  · **v2.902 — 상세 히스토리 보기(사용자 요청 "히스토리 보는 기능 강화 및 버그 수정")**. 회귀 `server/test/xferLog2902.test.js`(실제 api 라우터 — 게이트 변이 2/2) +
+    웹 `xferHistory.test.js`:
+    · ⚠ **스크롤 범위는 `historyOldestOf` 하나**(전송 기록 — 원시 또는 일 요약 — 과, Ping 을 함께 보는 보기면 Ping 기록 중 **더 오래된 쪽**). 전송 기록만 보면
+      전송 측정이 꺼져 있거나(기본 꺼짐) 원시 보관(180일)이 Ping(365일)보다 짧을 때 'Ping만' 에서 남은 Ping 과거로 못 갔다(B1).
+    · 측정 기록 표는 **보고 있는 창 전체**다(예전 '끝 이전 14일 중 최근 40건' — 기간·구간과 무관했다). `GET /tools/xfer-speed/log` — 창은 `detailWindowOf`(닫힌 끝 ts ≤ end, `/history` 와 같다) ·
+      **커서 쪽 넘김**(`before=<ts>:<down|up>` = 앞 쪽의 `next`, 순서 ts 내림 · 같은 ts 는 down 먼저). `xferspeed/db.js logPage` 는 방향마다 PK(agent, dir, ts) 범위를
+      거꾸로 읽어 합친다 — **OFFSET·정렬로 바꾸지 말 것**(쪽마다 1.7만 행 정렬 · 새 측정이 들어오면 뒤 쪽이 밀린다). 건수는 방향마다 단일 COUNT. 형식이 틀린 커서는 400(field:'before').
+      원시 보관보다 앞까지 걸친 창은 화면이 '그보다 앞은 표에 없다' 고 말한다(`oldest`·`retention`). 화면은 `/history?log=0` 으로 예전 14일 읽기를 끈다(1분 폴링).
+    · 날짜로 이동(`jumpToDate`): 고른 포탈 날짜의 끝(다음 날 0시)이 창 끝 — anchor 를 '지금 이후 첫 칸 경계' 로 잡아 ◀▶ 가 날짜 경계로 움직이고 back 0 이면 예전처럼 최근 구간.
+      기록보다 앞이면 가장 오래된 칸으로 자르고 알린다. 과거 구간의 '지금 측정' 안내는 `runOneText`(과거 구간은 갱신하지 않는다 — B2).
 - ⚠⚠ **v2.737 — 업그레이드·재시작으로 끊긴 스캔은 '실행 중 스캔 기록' 으로 자동 재개한다. 기록 판정은 `util/scanJournal.js` 하나**
   (사용자 신고 "업그레이드 되면 scan 하던게 중단되는 버그" · 선택 ①+②+③ · 전체 검증. `util/scanJournal.js` + `isidu/detach.js` + 재개 함수 3곳
   (`isidu/poller.js resumeIsidu`·`idrac/scanPoller.js resumeIdracScan`·`ipam/scanPoller.js resumeIpScan`) + `upgrade/manager.js` 대기 + 웹

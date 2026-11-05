@@ -37,7 +37,7 @@ export const STATUSES = Object.freeze(['draft', 'review', 'approved', 'archived'
 export const LIMITS = Object.freeze({
   pages: 2000, title: 200, body: 65_536, labels: 10, label: 30, depth: 3, versionsMeta: 200, versionsBody: 30,
   comments: 300, comment: 2000, note: 200, homeMd: 10_000, notice: 1000, quickLinks: 12, quickTitle: 40, quickHref: 300,
-  watchers: 100, issueKeys: 200, search: 50, // v2.902 점검 S-8: 색인 50 → 200(넘친 수는 issueKeysDropped 로 밝힌다)
+  watchers: 100, issueKeys: 200, search: 50, // v2.904 점검 S-8: 색인 50 → 200(넘친 수는 issueKeysDropped 로 밝힌다)
   // v2.889 C-5 — 대문 담당(10명) · 당번 표(30줄 · 메모 60자) · 인라인 댓글 인용(200자)
   owners: 10, oncall: 30, oncallNote: 60, quote: 200,
 });
@@ -151,7 +151,7 @@ function labelsField(v) {
 const enumField = (v, list, field, def) => { if (v == null || v === '') return def; if (!list.includes(v)) throw fieldError(field, `${list.join('·')} 중 하나여야 합니다`); return v; };
 /**
  * 본문 · 댓글의 이슈 키 — 색인 상한(LIMITS.issueKeys)까지와 넘친 수.
- * v2.902(점검 S-8 — 재현): 50개에서 조용히 잘려 51번째 키부터 '관련 문서' · issue= 찾기 · 검색식 doc 에서 빠졌다 — 상한을 200 으로 올리고 넘친 수를 싣는다.
+ * v2.904(점검 S-8 — 재현): 50개에서 조용히 잘려 51번째 키부터 '관련 문서' · issue= 찾기 · 검색식 doc 에서 빠졌다 — 상한을 200 으로 올리고 넘친 수를 싣는다.
  */
 export function issueKeysScan(...texts) {
   const keys = []; const seen = new Set();
@@ -220,7 +220,7 @@ function viewPage(p, me = '', access = FULL_ACCESS) {
     writable: writableBy(p, access) && !load().spaces[p.spaceId]?.readOnly,
     commentable: writableBy(p, access), // 댓글은 읽기 전용 스페이스에서도 된다(쓰기 범위만 본다 — addComment 와 같은 판정)
     checkLog: (Array.isArray(p.checkLog) ? p.checkLog : []).slice(-10).reverse(), // v2.883 체크리스트 기록(최근 10)
-    checkRev: Number(p.checkRev) || 0, // v2.902 점검 S-1 — 편집기가 baseCheckRev 로 되돌려 싣는다
+    checkRev: Number(p.checkRev) || 0, // v2.904 점검 S-1 — 편집기가 baseCheckRev 로 되돌려 싣는다
   };
 }
 
@@ -371,7 +371,7 @@ export function updatePage(id, body, user, { access = FULL_ACCESS } = {}) {
   if (base == null || Math.trunc(base) !== p.version) {
     throw limitError(`다른 사람이 먼저 저장했습니다(v${p.version} · ${p.updatedBy}) — 비교한 뒤 다시 저장하세요`, { code: 'conflict', current: { version: p.version, by: p.updatedBy, at: p.updatedAt, checkRev } });
   }
-  // v2.902(점검 S-1 — 재현): 체크 토글은 판을 만들지 않아 판 번호로는 '편집을 시작한 뒤의 체크' 를 못 잡았다 — 옛 본문을 실은 저장이
+  // v2.904(점검 S-1 — 재현): 체크 토글은 판을 만들지 않아 판 번호로는 '편집을 시작한 뒤의 체크' 를 못 잡았다 — 옛 본문을 실은 저장이
   // 409 없이 체크를 되돌렸다. 편집기가 싣는 baseCheckRev(편집 시작 때의 체크 순번)로 한 번 더 본다. 싣지 않은 호출(API 스크립트)은 예전처럼 판만.
   if (Object.hasOwn(b, 'baseCheckRev')) {
     const cr = numOrNull(b.baseCheckRev);
@@ -463,7 +463,7 @@ export function toggleTask(id, body, user, { access = FULL_ACCESS } = {}) {
   const now = Date.now();
   const versions = (p.versions || []).map((v, k, arr) => (k === arr.length - 1 && typeof v.body === 'string' ? { ...v, body: md, len: md.length } : v));
   const log = [...(Array.isArray(p.checkLog) ? p.checkLog : []), { at: now, by: user, line: n, checked: b.checked, text: capStr(lines[n].trim(), 80) }].slice(-CHECK_LOG_MAX);
-  const x = { ...p, body: md, versions, checkLog: log, checkRev: (Number(p.checkRev) || 0) + 1 }; // v2.902 점검 S-1 — 저장 충돌 판정용 순번
+  const x = { ...p, body: md, versions, checkLog: log, checkRev: (Number(p.checkRev) || 0) + 1 }; // v2.904 점검 S-1 — 저장 충돌 판정용 순번
   assertRoom(c, x, p.id);
   c.pages = c.pages.map((q) => (q.id === p.id ? x : q));
   commit({ changed: x });

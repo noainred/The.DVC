@@ -52,7 +52,7 @@ export function inUserWriteScope(user, snap, vcenterId) {
 }
 
 /**
- * v2.902(점검 P-1 — 재현): '전체 범위' = 조회 **와** 쓰기가 모두 무제한. 조회만 보고 판정하면 조회 무제한 + writeVcenters 계정이
+ * v2.904(점검 P-1 — 재현): '전체 범위' = 조회 **와** 쓰기가 모두 무제한. 조회만 보고 판정하면 조회 무제한 + writeVcenters 계정이
  * 전체 범위로 읽힌다(server/CLAUDE.md v2.733 함정 — 위키 댓글 삭제 · 해결 · 남의 공유 필터 삭제가 쓰기 범위 밖에서 열렸다).
  * 판정이 던지면 false(거부 기본값).
  */

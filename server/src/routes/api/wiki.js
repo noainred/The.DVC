@@ -42,7 +42,7 @@ const userOf = (req) => req.user?.username || 'anonymous';
 const isAdmin = (req) => isAdminDetailUser(req.user);
 const canWrite = (req) => ['admin', 'operator'].includes(req.user?.role) && !isDemoGuest(req.user);
 const canComment = (req) => canWrite(req) || (!!req.user && !isDemoGuest(req.user) && userHasPermission(req.user, 'issues.request'));
-// v2.902 점검 P-1: 조회와 쓰기 둘 다 무제한일 때만(쓰기 범위 관리자는 남의 댓글을 지우거나 해결하지 못한다)
+// v2.904 점검 P-1: 조회와 쓰기 둘 다 무제한일 때만(쓰기 범위 관리자는 남의 댓글을 지우거나 해결하지 못한다)
 const isMod = (req) => isAdmin(req) && isFullReadWriteScope(req.user, store.get());
 /** 댓글 · 지켜보기 문지기 — 쓰기 역할 또는 요청 권한. 판정 종류를 archScan 이 읽게 태그를 단다. */
 const commenters = (req, res, next) => {
@@ -98,7 +98,7 @@ export function registerWiki(api) {
   // v2.889 관리자 템플릿 목록(본문 포함 — 관리 화면) · 만들기 · 고치기 · 지우기
   api.get('/wiki/templates', adminOnly, templateFleetOnly, (req, res) => {
     res.set('Cache-Control', 'no-store');
-    // v2.902 점검 P-3: 관리 목록(본문 · 만든 사람)은 관리자 판본 — 데모 계정은 형제 설정 라우트(/issues/settings · /attach/admin/usage)와 같이 403
+    // v2.904 점검 P-3: 관리 목록(본문 · 만든 사람)은 관리자 판본 — 데모 계정은 형제 설정 라우트(/issues/settings · /attach/admin/usage)와 같이 403
     if (!isAdmin(req)) return res.status(403).json({ ok: false, error: 'forbidden', reason: '템플릿 관리는 관리자만 봅니다' });
     res.json({ ok: true, items: listCustomTemplates(), loadError: customTemplatesLoadError(), limits: TEMPLATE_LIMITS });
   });
@@ -219,7 +219,7 @@ export function registerWiki(api) {
       audit(req, 'wiki.delete', r.id);
       forgetPage(r.id); // v2.888 그 문서의 조회 수 · 즐겨찾기 · 최근 기록
       const persist = await persistView(req);
-      // v2.902 점검 S-5: 첨부 본체는 문서 삭제가 디스크에 닿은 뒤에 지운다(v2.889 는 바로 지워 비정상 종료 때 문서만 되살아났다)
+      // v2.904 점검 S-5: 첨부 본체는 문서 삭제가 디스크에 닿은 뒤에 지운다(v2.889 는 바로 지워 비정상 종료 때 문서만 되살아났다)
       removeOwnerAfterPersist('wiki', r.id, { seq, state: persist.state, wait: waitWikiPersist });
       res.json({ ok: true, ...r, persist });
     } catch (e) { fail(res, e, next); }

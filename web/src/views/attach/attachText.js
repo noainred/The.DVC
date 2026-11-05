@@ -2,7 +2,7 @@
  * attachText.js — 첨부 화면 문구(v2.889 · 순수).
  */
 /** 바이트 → '8 MB' · '512 KB' · '120 B'. 못 읽으면 '—'.
- * v2.902 점검 W-7: 아래 단위에서 반올림한 값이 1024 에 닿으면 위 단위로 올린다(1,048,575 B 가 '1024 KB' 로 나왔다). */
+ * v2.904 점검 W-7: 아래 단위에서 반올림한 값이 1024 에 닿으면 위 단위로 올린다(1,048,575 B 가 '1024 KB' 로 나왔다). */
 export function attachSizeText(n) {
   if (!Number.isFinite(n) || n < 0) return '—';
   const UNITS = ['B', 'KB', 'MB', 'GB'];
@@ -25,7 +25,7 @@ export function attachFailText(r, limits = {}) {
 }
 /** 본문에 넣을 마크다운 — 그림은 ![이름](attach:id), 그 밖은 [이름](attach:id). 이름의 ] · [ 는 뺀다. */
 export function attachMarkdown(x) {
-  // v2.902 점검 W-8: '[' · ']' 에 더해 머리의 '^'(각주 참조 '[^낱말]' 로 읽혔다)는 빼고 '|' 는 '\|' 로(표 안에서 칸을 갈랐다)
+  // v2.904 점검 W-8: '[' · ']' 에 더해 머리의 '^'(각주 참조 '[^낱말]' 로 읽혔다)는 빼고 '|' 는 '\|' 로(표 안에서 칸을 갈랐다)
   const name = (String(x?.name || '첨부').replace(/[[\]]/g, '').replace(/^\^+/, '').replace(/\|/g, '\\|')) || '첨부';
   return x?.image ? `![${name}](attach:${x.id})` : `[${name}](attach:${x.id})`;
 }

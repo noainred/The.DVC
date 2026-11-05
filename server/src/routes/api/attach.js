@@ -31,12 +31,12 @@ import zlib from 'node:zlib';
 
 const writers = requireRole('admin', 'operator');
 const adminOnly = requireRole('admin');
-/** v2.902 점검 S-5: 올리기 전에 주인 저장을 기다리는 상한(라우트 응답 시한과 같은 3초) */
+/** v2.904 점검 S-5: 올리기 전에 주인 저장을 기다리는 상한(라우트 응답 시한과 같은 3초) */
 const OWNER_PERSIST_WAIT_MS = 3000;
 const fleetOnly = fullScopeOnlyWith('첨부 관리(사용량 · 전체 상한 · 전체 내려받기)는 전 법인 공용이라 전체 범위(vCenter 제한 없는) 관리자만 봅니다.');
 const userOf = (req) => req.user?.username || 'anonymous';
 const canWrite = (req) => ['admin', 'operator'].includes(req.user?.role) && !isDemoGuest(req.user);
-// v2.902 점검 P-1: 조회와 쓰기 둘 다 무제한일 때만
+// v2.904 점검 P-1: 조회와 쓰기 둘 다 무제한일 때만
 const isMod = (req) => isAdminDetailUser(req.user) && isFullReadWriteScope(req.user, store.get());
 function accessOf(req) {
   const snap = store.get();
@@ -137,7 +137,7 @@ export function registerAttach(api) {
       res.json({ ok: true, items: listFor(req.params.kind, req.params.owner), canUpload: canWrite(req) && o.writable, me: userOf(req), isMod: isMod(req), limits: ATTACH_LIMITS, exts: Object.keys(EXT) });
     } catch (e) { fail(res, e, next); }
   });
-  // v2.902 점검 P-5: 주인 · 쓰기 범위를 **본문(최대 8MB)을 받기 전에** 본다 — 범위 밖 · 없는 주인에 본문을 다 받은 뒤 404/403 하던 순서를 바꿨다
+  // v2.904 점검 P-5: 주인 · 쓰기 범위를 **본문(최대 8MB)을 받기 전에** 본다 — 범위 밖 · 없는 주인에 본문을 다 받은 뒤 404/403 하던 순서를 바꿨다
   const uploadPrecheck = (req, res, next) => {
     if (!canWrite(req)) return res.status(403).json({ ok: false, reason: '데모 계정은 첨부를 올릴 수 없습니다' });
     try {
@@ -151,7 +151,7 @@ export function registerAttach(api) {
       const o = ownerOf(req, req.params.kind, req.params.owner); // 본문을 받는 사이 바뀌었을 수 있어 한 번 더
       if (!o.writable) return writeDenied(res);
       if (!Buffer.isBuffer(req.body)) return res.status(415).json({ ok: false, reason: '파일 본문(application/octet-stream)이 아닙니다' });
-      // v2.902 점검 S-5: 주인(새 문서 · 이슈)이 디스크에 닿은 뒤에만 첨부를 적는다 — 그 전 비정상 종료면 번호(W<n> · ISS-<n>)가
+      // v2.904 점검 S-5: 주인(새 문서 · 이슈)이 디스크에 닿은 뒤에만 첨부를 적는다 — 그 전 비정상 종료면 번호(W<n> · ISS-<n>)가
       // 되돌아가 다음 새 문서가 남의 첨부를 물려받았다
       const op = req.params.kind === 'wiki' ? await waitWikiPersist(wikiSeq(), { maxMs: OWNER_PERSIST_WAIT_MS }) : await waitIssuesPersist(issuesSeq(), { maxMs: OWNER_PERSIST_WAIT_MS });
       if (op?.state !== 'saved') return res.status(503).json({ ok: false, code: 'owner-unsaved', reason: '문서 · 이슈 저장이 아직 디스크에 닿지 않아 첨부를 받지 않았습니다 — 잠시 뒤 다시 올리세요' });

@@ -361,7 +361,7 @@ export async function fetchBlob(path) {
   return res.blob();
 }
 /**
- * Content-Disposition → 파일 이름. RFC 5987 의 filename*=UTF-8''… 을 먼저 본다(v2.902 점검 W-3 — 한글 이름이 ASCII 대체본 '___.txt' 로 저장되던 것).
+ * Content-Disposition → 파일 이름. RFC 5987 의 filename*=UTF-8''… 을 먼저 본다(v2.904 점검 W-3 — 한글 이름이 ASCII 대체본 '___.txt' 로 저장되던 것).
  * 못 읽으면 ''.
  */
 export function dispositionName(cd) {

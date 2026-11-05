@@ -37,7 +37,7 @@ export function normalizeSla(raw, { strict = true } = {}) {
     const t = r.targets && typeof r.targets === 'object' ? r.targets[p] : null;
     const one = (k) => {
       if (t == null || t[k] == null || (typeof t[k] === 'string' && !t[k].trim())) return d.targets[p][k];
-      // v2.902 점검 S-10: Number(' ')·Number([]) 는 0(= 그 단계 보지 않음) — 수 · 숫자 글자만 받는다(numOrNull 규칙)
+      // v2.904 점검 S-10: Number(' ')·Number([]) 는 0(= 그 단계 보지 않음) — 수 · 숫자 글자만 받는다(numOrNull 규칙)
       const n = typeof t[k] === 'number' || typeof t[k] === 'string' ? numOrNull(t[k]) : null;
       if (!Number.isInteger(n) || n < 0 || n > SLA_MAX_MIN) { bad(`sla.targets.${p}.${k}`, `0~${SLA_MAX_MIN} 분 정수여야 합니다(0 = 보지 않음)`); return d.targets[p][k]; }
       return n;

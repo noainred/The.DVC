@@ -33,7 +33,7 @@ export default function AttachAdmin() {
   return (
     <div className="card iss-editor">
       <h3 className="iss-h3">첨부 파일(위키 · 이슈)</h3>
-      {err && <div className="banner warn" style={{ whiteSpace: 'normal' }}>사용량을 새로 읽지 못했습니다 — 아래는 직전에 읽은 값입니다({err.message || String(err)}).</div>}{/* v2.902 점검 W-9 */}
+      {err && <div className="banner warn" style={{ whiteSpace: 'normal' }}>사용량을 새로 읽지 못했습니다 — 아래는 직전에 읽은 값입니다({err.message || String(err)}).</div>}{/* v2.904 점검 W-9 */}
       {data.loadError && <div className="banner bad" style={{ whiteSpace: 'normal' }}>첨부 설정 파일(attach-settings.json)을 읽지 못해 기본 상한으로 동작 중입니다 — 손상본은 옆에 보존했습니다. 원인: {data.loadError}</div>}
       <div>
         사용 <b>{attachSizeText(u.bytes)}</b> / 상한 {attachSizeText(max)}{pct != null ? ` (${pct}%)` : ''} · 파일 {unitText(u.count, '개')}(위키 {unitText(u.wiki?.count, '개')} · 이슈 {unitText(u.issue?.count, '개')})

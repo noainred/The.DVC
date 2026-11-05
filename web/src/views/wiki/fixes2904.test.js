@@ -1,5 +1,5 @@
 /**
- * fixes2902.test.js — v2.902 위키 · 이슈 · 첨부 점검(웹) 확정분 회귀.
+ * fixes2904.test.js — v2.904 위키 · 이슈 · 첨부 점검(웹) 확정분 회귀.
  * W-1 safeImg 역슬래시 · W-3 Content-Disposition UTF-8 이름 · W-4 짧은 줄 문단 선형 · W-7 크기 단위 경계 · W-8 첨부 이름 이스케이프 ·
  * S-1 체크 충돌 문구 · W-2 빈 값 정렬(자리표시 '~' 금지 — 소스 스윕).
  */
@@ -13,7 +13,7 @@ import { attachSizeText, attachMarkdown } from '../attach/attachText.js';
 import { dispositionName } from '../../api.js';
 import { compareKeys, sortKeyOf } from '../../components/sortableText.js';
 
-describe('v2.902 위키 · 첨부', () => {
+describe('v2.904 위키 · 첨부', () => {
   it('W-1 그림 주소는 같은 출처 경로만 — 역슬래시 우회 거부', () => {
     expect(safeImg('/\\evil.com/x.png')).toBe(null);
     expect(safeImg('/a\\b.png')).toBe(null);

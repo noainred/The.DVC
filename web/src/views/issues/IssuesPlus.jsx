@@ -644,7 +644,7 @@ export function FiltersView({ meta, onOpen, onWritten, onBoard = null }) {
           </div>
           <form className="iss-query" onSubmit={submit}>
             <textarea className="input iss-query-input" rows={2} value={q} onChange={(e) => setQ(e.target.value)} maxLength={meta.queryLimits?.length || 500} spellCheck={false} aria-label="검색식"
-              onKeyDown={(e) => { if (e.nativeEvent?.isComposing || e.keyCode === 229) return; /* v2.902 점검 W-6 — 한글 조합 확정 Enter */ if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); submit(e); } }} />
+              onKeyDown={(e) => { if (e.nativeEvent?.isComposing || e.keyCode === 229) return; /* v2.904 점검 W-6 — 한글 조합 확정 Enter */ if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); submit(e); } }} />
             <button className="btn primary" type="submit">찾기</button>
           </form>
           {segs && (

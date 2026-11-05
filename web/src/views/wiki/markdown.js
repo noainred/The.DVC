@@ -22,7 +22,7 @@ let BREAKS = false;
 
 /* ───── 주소 판정 ───── */
 const SAFE_HREF_RE = /^(https?:\/\/[^\s<>"'`]{1,2000}|#\/[^\s<>"'`]{0,2000}|mailto:[^\s<>"'`:/]{1,200})$/i;
-// v2.902 점검 W-1: 같은 출처 경로만 — 역슬래시도 막는다(브라우저는 '/\\evil.com/x' 를 '//evil.com/x' 로 풀어 바깥 호스트로 간다)
+// v2.904 점검 W-1: 같은 출처 경로만 — 역슬래시도 막는다(브라우저는 '/\\evil.com/x' 를 '//evil.com/x' 로 풀어 바깥 호스트로 간다)
 const SAFE_IMG_RE = /^(\/(?![\/\\])[^\s<>"'`\\]{0,2000}|data:image\/(png|jpeg|gif|webp);base64,[A-Za-z0-9+/=]{1,200000})$/i;
 /** 링크로 쓸 수 있는 주소인가 — 아니면 null. */
 export function safeHref(u) {
@@ -89,7 +89,7 @@ export function parseInline(src, depth = 0) {
     }
     if (ch === '\n') {
       // 줄 끝 공백 둘 = 줄바꿈, 아니면 공백 하나
-      // v2.902 점검 W-4: buf.endsWith 는 줄마다 이어 붙인 문자열 전체를 펼쳐 짧은 줄이 많은 문단에서 제곱 시간 — 원문 두 글자로 본다
+      // v2.904 점검 W-4: buf.endsWith 는 줄마다 이어 붙인 문자열 전체를 펼쳐 짧은 줄이 많은 문단에서 제곱 시간 — 원문 두 글자로 본다
       if (BREAKS || (prev === ' ' && s[i - 2] === ' ')) { buf = buf.trimEnd(); push({ t: 'br' }); } else buf += ' ';
       i += 1; continue;
     }

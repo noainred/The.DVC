@@ -120,7 +120,7 @@ export function wikiSaveFailText(r) {
 /** 충돌(409) — 편집을 시작한 판과 지금 판이 다르다. */
 export function conflictText(r) {
   const c = r?.current || {};
-  if (r?.kind === 'check') return `편집을 시작한 뒤 체크리스트가 바뀌었습니다(${c.by || '알 수 없음'} · ${timeText(c.at)}). 내 글은 그대로 두었습니다. 지금 판을 확인한 뒤 '확인하고 내 글로 저장' 을 누르세요.`; // v2.902 점검 S-1
+  if (r?.kind === 'check') return `편집을 시작한 뒤 체크리스트가 바뀌었습니다(${c.by || '알 수 없음'} · ${timeText(c.at)}). 내 글은 그대로 두었습니다. 지금 판을 확인한 뒤 '확인하고 내 글로 저장' 을 누르세요.`; // v2.904 점검 S-1
   return `다른 사람이 먼저 저장했습니다 — 지금 판 v${c.version ?? '?'}(${c.by || '알 수 없음'} · ${timeText(c.at)}). 내 글은 그대로 두었습니다. 바뀐 내용을 비교한 뒤 '확인하고 내 글로 저장' 을 누르세요.`;
 }
 export const isConflict = (r) => r?.ok === false && r?.code === 'conflict';

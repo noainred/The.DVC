@@ -565,7 +565,7 @@
   ⑤ 남은 하위 작업(에픽이면 소속 이슈)이 있으면 서버가 409 `open-children` 로 묻고 화면은 확인을 받아 `closeChildren:true` 로 다시 보낸다(취소하면 아무것도 바꾸지 않는다).
      자식이 있는 이슈의 진행률 입력은 잠기고 메모만 보낸다(서버 409 `progress-auto` 와 같은 판정).
   ⑥ 스프린트 · 필터 공유 버튼은 서버 값(`canSprints` · `canShareFilters` — 전체 범위 쓰기 계정)일 때만 그린다. 필터 저장은 쓰기 역할만(viewer 상태변경 예외를 늘리지 않았다).
-- **v2.902 — 위키 · 이슈 · 첨부 점검 확정분(사용자 요청 '버그 10개 찾아줘' → '모두 적용해줘' · '표준')**. 회귀 `server/test/wikiIssues2902.test.js`(변이 6/6) · `web/src/views/wiki/fixes2902.test.js`.
+- **v2.904 — 위키 · 이슈 · 첨부 점검 확정분(사용자 요청 '버그 10개 찾아줘' → '모두 적용해줘' · '표준')**. 회귀 `server/test/wikiIssues2904.test.js`(변이 6/6) · `web/src/views/wiki/fixes2904.test.js`.
   - **'전체 범위' 판정은 조회 ∧ 쓰기 무제한** — `auth/scope.js isFullReadWriteScope` 하나. 위키 · 이슈 · 첨부의 `isMod` 가 조회만 봐서 쓰기 범위 관리자가 남의 위키 댓글을 지우고 해결하고 공유 필터를 지웠다(P-1).
   - 범위 계정 응답의 **이력도 가린다** — `parentKey · epic · links` 를 `vis()` 로 가리면서 `history` 는 원문이었다(범위 밖 법인 id · 공용 에픽 키). 저장된 이력은 그대로, 응답에서만(`historyFor`).
   - 판을 만들지 않는 변경(체크 토글)은 **판 번호 말고 따로 센다**(`checkRev` ↔ 편집기 `baseCheckRev`) — 옛 본문을 실은 저장이 409 없이 체크를 되돌렸다. 체크만 바뀐 충돌은 비교 대신 그 사실을 말한다.

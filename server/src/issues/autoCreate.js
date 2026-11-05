@@ -385,7 +385,7 @@ export async function applyPartFaultIssues(tr, { now = Date.now() } = {}) {
   }
   const settings = loadIssueSettings();
   const viewers = settings.autoAssign?.enabled ? issueViewers() : null;
-  // v2.902(점검 S-4 — 재현): 자동 댓글이 실패해도(이슈당 댓글 200개 상한 등) 그 전이의 나머지('검토' 로 옮기기)는 한다 — 출처(해소 · 다시 열림)는
+  // v2.904(점검 S-4 — 재현): 자동 댓글이 실패해도(이슈당 댓글 200개 상한 등) 그 전이의 나머지('검토' 로 옮기기)는 한다 — 출처(해소 · 다시 열림)는
   // 이미 기록돼 다음 폴링에 같은 전이가 다시 오지 않으므로, 댓글에서 던지면 상태 전이가 영영 빠졌다. 실패는 errors · error 로 밝힌다.
   const comment = (key, body) => {
     try { addComment(key, { body: capStr(body, 1_900) }, SYSTEM_USER); out.commented += 1; status.commented += 1; }

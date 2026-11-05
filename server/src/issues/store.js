@@ -115,7 +115,7 @@ export function addLink(key, body, user, { access = FULL_ACCESS } = {}) {
   if (!y || !canSee(y, access)) throw fieldError('key', '없는 이슈입니다');
   const idx = treeIndex(c.issues);
   if (relationsOf(x, idx, null).some((l) => l.type === b.type && l.key === target)) return { ...viewIssue(x, user, access), writable: canEdit(x, access) };
-  const mine = linksOf(x).filter((l) => idx.byKey.has(l.key)); // v2.902 점검 S-2: 이미 쌓인 죽은 연결은 세지 않고 이번 저장에서 걷어 낸다
+  const mine = linksOf(x).filter((l) => idx.byKey.has(l.key)); // v2.904 점검 S-2: 이미 쌓인 죽은 연결은 세지 않고 이번 저장에서 걷어 낸다
   if (mine.length >= LIMITS.linkMax) throw limitError(`연결은 이슈마다 ${LIMITS.linkMax}개까지입니다`);
   const now = Date.now();
   const next = { ...x, links: [...mine, { type: b.type, key: target, at: now, by: user }] };
@@ -631,12 +631,12 @@ function enumField(v, list, field, def) {
   return v;
 }
 /** 기한: 빈 값 = 없음(null). 숫자(epoch ms) 또는 날짜 문자열. 못 읽으면 오류. */
-/** epoch ms 로 받는 가장 이른 값(2001-09-09) — 그보다 작은 수는 '20261105' 같은 날짜 숫자를 ms 로 잘못 읽은 것이다(v2.902 점검 S-7). */
+/** epoch ms 로 받는 가장 이른 값(2001-09-09) — 그보다 작은 수는 '20261105' 같은 날짜 숫자를 ms 로 잘못 읽은 것이다(v2.904 점검 S-7). */
 const MIN_EPOCH_MS = 1e12;
 function timeField(v, field) {
   if (v == null || v === '') return null;
   const str = typeof v === 'number' ? '' : String(v).trim();
-  // v2.902(점검 S-7 — 재현): 숫자만 있는 문자열을 무조건 epoch ms 로 읽어 '20261105' 가 1970-01-01 기한(초과 알림 대상)이 됐다 —
+  // v2.904(점검 S-7 — 재현): 숫자만 있는 문자열을 무조건 epoch ms 로 읽어 '20261105' 가 1970-01-01 기한(초과 알림 대상)이 됐다 —
   // 숫자는 13자리 이상(ms)만, 날짜 글자('2026-02-30')는 실제 있는 날짜인지 되돌려 맞춰 본다(Date.parse 는 3월 2일로 넘긴다).
   const n = typeof v === 'number' ? v : (/^\d+$/.test(str) ? Number(str) : Date.parse(str));
   if (!Number.isFinite(n) || n < MIN_EPOCH_MS) throw fieldError(field, '시각을 읽지 못했습니다 — 날짜는 2026-11-05 꼴로 보내세요');
@@ -650,7 +650,7 @@ function timeField(v, field) {
 /** v2.888 예상(분): 빈 값 = 없음(null) · 0~estimateMaxMin 정수. */
 function estimateField(v) {
   if (v == null || (typeof v === 'string' && !v.trim())) return null; // 빈 · 공백만 = 없음
-  // v2.902 점검 S-10: Number(' ')·Number([]) 는 0, Number(true) 는 1 — 수 · 숫자 글자만 받고 나머지는 거부(numOrNull 규칙)
+  // v2.904 점검 S-10: Number(' ')·Number([]) 는 0, Number(true) 는 1 — 수 · 숫자 글자만 받고 나머지는 거부(numOrNull 규칙)
   const n = typeof v === 'number' || typeof v === 'string' ? numOrNull(v) : null;
   if (n == null) throw fieldError('estimateMin', `0~${LIMITS.estimateMaxMin} 분 정수여야 합니다`);
   if (!Number.isInteger(n) || n < 0 || n > LIMITS.estimateMaxMin) throw fieldError('estimateMin', `0~${LIMITS.estimateMaxMin} 분 정수여야 합니다`);
@@ -823,7 +823,7 @@ export function summary(x, idx = null, access = FULL_ACCESS, now = Date.now()) {
 }
 /** 상세 — 댓글·이력 포함. `me` 는 보는 사람(관찰 여부). */
 /**
- * v2.902(점검 P-2 — 재현): 이력 **응답**에서 범위 밖 식별자를 가린다 — 범위 밖 법인 id 와 볼 수 없는 이슈 키(상위 · 연결 · 상위 완료 메모).
+ * v2.904(점검 P-2 — 재현): 이력 **응답**에서 범위 밖 식별자를 가린다 — 범위 밖 법인 id 와 볼 수 없는 이슈 키(상위 · 연결 · 상위 완료 메모).
  * 같은 응답의 parentKey · epic · links 는 vis() 로 가리면서 이력만 원문이던 비대칭을 닫는다. 저장된 이력(감사 기록)은 바꾸지 않는다.
  * 조회 무제한이면 그대로(모든 이슈 · 법인을 본다). 사람이 쓴 글(본문 · 댓글 · 메모 글)은 본문과 같이 가리지 않는다.
  */
@@ -1327,7 +1327,7 @@ export function activityFeed({ access = FULL_ACCESS, limit = 100, since = 0 } = 
     if (!canSee(x, access)) continue;
     const base = { key: x.key, title: capStr(x.title || '', 120), vcenterId: x.vcenterId || '' };
     const hist = historyOf(x).slice(-20);
-    for (const h of (idx ? historyFor(hist, idx, access) : hist)) { // v2.902 점검 P-2
+    for (const h of (idx ? historyFor(hist, idx, access) : hist)) { // v2.904 점검 P-2
       if (!FIELDS.has(h.field) || !(h.at > since)) continue;
       out.push({ ...base, at: h.at, by: h.by || '', field: h.field, from: h.from ?? '', to: h.to ?? '', note: h.note ? capStr(String(h.note), 120) : '' });
     }
@@ -1371,7 +1371,7 @@ export function deleteIssue(key, user, { isMod = false, access = FULL_ACCESS } =
   if (!isMod && x.reporter !== user) throw forbidden('보고자 본인이나 관리자만 지울 수 있습니다');
   if ((treeIndex(c.issues).kids.get(x.key) || []).length) throw fieldError('key', `${x.type === 'epic' ? '담긴 이슈가' : '하위 작업이'} 있어 지울 수 없습니다 — 먼저 빼거나 지우세요`);
   commit(c.issues.filter((y) => y.id !== x.id), { removedId: x.id });
-  // v2.902(점검 S-2 — 재현): 지운 이슈를 가리키는 남의 연결도 정리한다 — 화면에는 안 보이면서 연결 상한(30)을 차지하고 지울 수도 없었다
+  // v2.904(점검 S-2 — 재현): 지운 이슈를 가리키는 남의 연결도 정리한다 — 화면에는 안 보이면서 연결 상한(30)을 차지하고 지울 수도 없었다
   for (const y of load().issues) {
     const dead = linksOf(y).filter((l) => l.key === x.key);
     if (!dead.length) continue;
