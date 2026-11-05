@@ -257,6 +257,47 @@ describe('v2.895 개체 보기 — 렌더(얕게)', () => {
     unmount(rt);
   });
 
+  it('v2.897 VmObject — 네트워크 탭은 어댑터 표 · 스냅샷 탭은 트리(현재 위치) · 키가 없으면 아직 읽지 않음', async () => {
+    const { default: VmObject } = await import('./VmObject.jsx');
+    const base = { site, vcenterId: 'vc1', vmsOk: true, gate: null, datastores: [], hosts, networks: [{ id: 'vc1:dvportgroup-9', vcenterId: 'vc1', name: 'pg-prod', vlanId: 120 }], onTab: () => {}, onBack: () => {}, onOpenHost: () => {} };
+    const vm = { ...vms[0], snapshotCount: 2, snapshotTree: [{ d: 0, name: 'pre-patch' }, { d: 1, name: 'after', current: true }],
+      dev: { ...(vms[0].dev || {}), at: 1, disks: vms[0].dev?.disks || [], nics: [{ label: 'Network adapter 1', adapter: 'VMXNET 3', backing: 'dvs', netRef: 'dvportgroup-9', connected: true }] } };
+    let rt = mount(VmObject, { ...base, vm, tab: 'network' });
+    const nic = all(rt, (e) => typeof e.type === 'function' && e.type.name === 'VmNicCard')[0];
+    const nicOut = nic.type(nic.props);
+    expect([...walk(nicOut)].some((e) => e.type === 'td' && textOf(e).includes('pg-prod'))).toBe(true);
+    expect([...walk(nicOut)].some((e) => e.type === 'td' && textOf(e) === '120')).toBe(true);
+    unmount(rt);
+    rt = mount(VmObject, { ...base, vm, tab: 'snapshots' });
+    const st = all(rt, (e) => typeof e.type === 'function' && e.type.name === 'SnapTreeCard')[0];
+    const items = [...walk(st.type(st.props))].filter((e) => e.props?.role === 'treeitem');
+    expect(items.map((e) => [e.props['aria-level'], e.props['aria-current'] || null])).toEqual([[1, null], [2, 'true']]);
+    unmount(rt);
+    const old = { ...vm, snapshotTree: undefined, dev: { ...vm.dev, nics: undefined } };
+    rt = mount(VmObject, { ...base, vm: old, tab: 'snapshots' });
+    const st2 = all(rt, (e) => typeof e.type === 'function' && e.type.name === 'SnapTreeCard')[0];
+    expect(textOf(st2.type(st2.props))).toMatch(/아직 이 판의 수집기가 읽지 않았습니다/);
+    unmount(rt);
+    rt = mount(VmObject, { ...base, vm: old, tab: 'network' });
+    const nic2 = all(rt, (e) => typeof e.type === 'function' && e.type.name === 'VmNicCard')[0];
+    expect(textOf(nic2.type(nic2.props))).toMatch(/이전 판 수집기/);
+    unmount(rt);
+  });
+
+  it('v2.897 HostObject — 네트워크 탭은 hcfg.net 의 가상 스위치 · 포트그룹(v2.701 부터 수집 — 정정)', async () => {
+    const { default: HostObject } = await import('./HostObject.jsx');
+    const net = { switches: [{ name: 'vSwitch0', kind: 'vss', uplinks: ['vmnic0'], pgs: 2 }], pgs: [{ name: 'VM Network', vlan: 0, sw: 'vSwitch0', promisc: false }, { name: 'Mgmt', vlan: 10, sw: 'vSwitch0', promisc: null }], pgsTotal: 2 };
+    const base = { site, vcenterId: 'vc1', host: { ...hosts[0], hcfg: { at: 1, net } }, hostsOk: true, gate: null, hosts, vms, vmsOk: true, datastores: [], onTab: () => {}, onBack: () => {}, onOpenVm: () => {} };
+    const rt = mount(HostObject, { ...base, tab: 'network' });
+    const card = all(rt, (e) => typeof e.type === 'function' && e.type.name === 'HostNetCards')[0];
+    const out = [...walk(card.type(card.props))];
+    expect(out.some((e) => e.type === 'td' && textOf(e).includes('vSwitch0'))).toBe(true);
+    expect(out.some((e) => e.type === 'td' && textOf(e).includes('Mgmt'))).toBe(true);
+    const none = all(mount(HostObject, { ...base, host: { ...hosts[0], hcfg: undefined }, tab: 'network' }), (e) => typeof e.type === 'function' && e.type.name === 'HostNetCards')[0];
+    expect(textOf(none.type(none.props))).toMatch(/아직 이 호스트의 구성을 읽지 않았습니다/);
+    unmount(rt);
+  });
+
   it('HostObject — VM 탭은 이 호스트 위 VM · 리소스 풀은 이름별 합', async () => {
     const { default: HostObject } = await import('./HostObject.jsx');
     const base = { site, vcenterId: 'vc1', host: hosts[0], hostsOk: true, gate: null, hosts, vms, vmsOk: true, datastores: [], onTab: () => {}, onBack: () => {}, onOpenVm: () => {} };

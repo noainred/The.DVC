@@ -18,6 +18,7 @@
 
 import { sanitizeVmDns } from '../central/vmDnsSanitize.js';
 import { sanitizeVmCfg, sanitizeVmDev } from '../vmcfg/parse.js';   // v2.697(B10)
+import { sanitizeSnapTree } from '../vcenter/soapParse.js';   // v2.897 스냅샷 트리
 import { sanitizeHostCfg } from '../hostcfg/parse.js';   // v2.699
 import { sanitizeDsCfg } from '../dscfg/parse.js';   // v2.700
 import { sanitizeVmPerfc, sanitizeHostPerfc } from '../contention/parse.js'; // v2.706(C2·C3)
@@ -861,6 +862,8 @@ export function sanitizeInventoryList(list, vcId, max, dropped) {
     // v2.697(B10): VM 구성 속성·장치 위생 요약 — 아는 필드만(모양이 아니면 null = 모름).
     if (Object.hasOwn(o, 'cfg') && o.cfg != null) { const v = sanitizeVmCfg(o.cfg); if (v == null) dropped.coerced += 1; o.cfg = v; }
     if (Object.hasOwn(o, 'dev') && o.dev != null) { const v = sanitizeVmDev(o.dev); if (v == null) dropped.coerced += 1; o.dev = v; }
+    // v2.897: 스냅샷 트리(soapParse.snapshotTreeNodes) — 아는 키만 · 64개 상한(배열이 아니면 null = 모름).
+    if (Object.hasOwn(o, 'snapshotTree') && o.snapshotTree != null) { const v = sanitizeSnapTree(o.snapshotTree); if (v == null) dropped.coerced += 1; o.snapshotTree = v; }
     // v2.699: 호스트 구성·보안(hostcfg/parse.js) — 아는 필드만.
     if (Object.hasOwn(o, 'hcfg') && o.hcfg != null) { const v = sanitizeHostCfg(o.hcfg); if (v == null) dropped.coerced += 1; o.hcfg = v; }
     // v2.700(A17): 데이터스토어 운영 속성(dscfg/parse.js) — 아는 필드만.

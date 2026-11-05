@@ -318,8 +318,29 @@ function mkVmCfg(vm, powered) {
   };
 }
 // v2.862: 디스크의 데이터스토어는 그 사이트의 실제 데이터스토어 이름(데모 — Bareos 복원 검증이 홈 데이터스토어 여유를 인벤토리로 본다). 이름을 모르면 예전 값.
-function mkVmDev(vm, dsNames = []) {
+/** v2.897 데모 스냅샷 트리 — n 개를 한 줄기(+ 넷째는 둘째의 형제 가지)로. 현재 위치는 마지막 노드. 시각은 오래된 것부터. */
+function mkSnapTree(i, n) {
+  const names = ['pre-patch', 'before-upgrade', 'app-2.4-deploy', 'rollback-point'];
+  const descs = ['월간 패치 전', 'OS 업그레이드 전 — 담당 인프라팀', null, '배포 실패 시 되돌릴 지점'];
+  const d0 = Date.now() - ((i % 180) + 1) * 86_400_000;
+  const out = [];
+  for (let k = 0; k < n; k++) {
+    out.push({ d: k === 3 ? 1 : k, name: names[k], desc: descs[k], ts: d0 + k * 3 * 86_400_000, state: k === 1 && i % 4 === 0 ? 'poweredOn' : 'poweredOff', quiesced: k === 0 ? (i % 3 === 0) : false, current: false });
+  }
+  out[n === 4 ? 2 : n - 1].current = true;
+  return out;
+}
+
+function mkVmDev(vm, dsNames = [], nets = []) {
   const i = vm.idx;
+  const netAt = (k) => (nets.length ? nets[(i + k) % nets.length] : null);
+  const nic = (k, label) => {
+    const n = netAt(k);
+    const dvs = n?.type === 'DISTRIBUTED_PORTGROUP';
+    return { label, adapter: i % 29 === 0 ? 'E1000E' : 'VMXNET 3', backing: n ? (dvs ? 'dvs' : 'std') : 'other', net: n && !dvs ? n.name : null, netRef: n ? n.name : null,
+      mac: `00:50:56:${((i >> 8) & 0xff).toString(16).padStart(2, '0')}:${(i & 0xff).toString(16).padStart(2, '0')}:${(10 + k).toString(16).padStart(2, '0')}`,
+      connected: !(i % 31 === 0 && k === 0), startConnected: true };
+  };
   const dsAt = (k, fb) => (dsNames.length ? dsNames[(i + k) % dsNames.length] : fb);
   const cdConnected = i % 13 === 0;
   return {
@@ -333,6 +354,7 @@ function mkVmDev(vm, dsNames = []) {
       ...(i % 59 === 0 ? [{ label: 'Hard disk 3', mode: 'independent_persistent', sharing: 'sharingNone', rdm: true, rdmMode: 'physicalMode', datastore: dsAt(0, 'ds-01'), capacityGB: 500 }] : []),
     ],
     usb: i % 67 === 0 ? 1 : 0, serial: 0, parallel: 0, omitted: 0,
+    nics: [nic(0, 'Network adapter 1'), ...(i % 5 === 0 ? [nic(1, 'Network adapter 2')] : [])],   // v2.897
   };
 }
 
@@ -652,6 +674,7 @@ export function generateSnapshot() {
         : Math.round(clamp(15 + 60 * Math.abs(Math.sin((vm.idx + tick) / 11)), 1, 100));
       const memUsagePct = !powered ? 0 : profile === 'idle' ? Math.round(8 + wave(10, 9)) : profile === 'hot' ? Math.round(91 + wave(6, 6))
         : Math.round(clamp(25 + 55 * Math.abs(Math.cos((vm.idx + tick) / 13)), 1, 100));
+      const snapN = vm.idx % 6 === 0 ? intBetween(1, 4) : 0;
       vms.push({
         id: `${site.id}:${vm.name}`,
         vcenterId: site.id,
@@ -689,16 +712,17 @@ export function generateSnapshot() {
         connectionState: vm.idx % 53 === 0 ? 'orphaned' : vm.idx % 47 === 0 ? 'inaccessible' : 'connected',
         notes: vm.idx % 4 === 0 ? `${pick(['운영', '백업대상', '마이그레이션 예정', 'PoC', '담당: 인프라팀'])} · ${site.id}` : '',
         tags: VM_TAGS[vm.idx % VM_TAGS.length],
-        snapshotCount: vm.idx % 6 === 0 ? intBetween(1, 4) : 0,
+        snapshotCount: snapN,
         snapshotSizeGB: vm.idx % 6 === 0 ? Math.round(vm.storageGB * (0.05 + (vm.idx % 5) * 0.06) * 10) / 10 : 0,
         // 스냅샷 나이 감시 데모용 — 1일~180일 분포의 생성일.
         snapshotOldestTs: vm.idx % 6 === 0 ? Date.now() - ((vm.idx % 180) + 1) * 86_400_000 : null,
         snapshotNewestTs: vm.idx % 6 === 0 ? Date.now() - ((vm.idx % 30) + 1) * 86_400_000 : null,
         snapshotNames: vm.idx % 6 === 0 ? ['pre-patch', 'before-upgrade'].slice(0, 1 + (vm.idx % 2)) : [],
+        ...(snapN ? { snapshotTree: mkSnapTree(vm.idx, snapN) } : {}),   // v2.897 스냅샷 트리(개수와 같은 노드 수)
         orphanDeltaGB: vm.idx % 6 === 0 ? null : (vm.idx % 71 === 0 ? 12.5 : 0), // v2.698(A3): 스냅샷 0개인데 델타 파일(유령 스냅샷)
         gpu: vm.idx % 17 === 0 ? null : mkVmGpu(hostState, vm.idx, ord), // 템플릿은 GPU 를 받지 않는다
         // v2.697(B10): 구성 속성·장치 위생 — 일부(idx%41)는 아직 수집 전(키 없음)이라 화면의 '수집 중' 을 보인다.
-        ...(vm.idx % 41 === 0 ? {} : { cfg: mkVmCfg(vm, powered), dev: mkVmDev(vm, env.datastores.map((d) => d.name)) }),
+        ...(vm.idx % 41 === 0 ? {} : { cfg: mkVmCfg(vm, powered), dev: mkVmDev(vm, env.datastores.map((d) => d.name), env.networks) }),
         ...((() => { const pc = powered ? mkVmPerfc(vm.idx) : null; return pc ? { perfc: pc } : {}; })()),
       });
     }

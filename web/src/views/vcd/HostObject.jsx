@@ -166,7 +166,8 @@ export default function HostObject({ site, vcenterId, host, hostsOk, gate, hosts
               </STable>
             ) : <div className="muted" style={{ padding: '10px 14px', fontSize: 12.5 }}>물리 NIC 를 보고하지 않았습니다(이 vCenter 가 주지 않았거나 아직 읽지 않음).</div>}
           </Card>
-          <div className="card" style={{ padding: 14 }}><NotCollected title="포트그룹 · vSwitch · 팀 구성">호스트의 포트그룹 배치 · vSwitch · 팀 구성(LACP · 액티브/스탠바이)은 수집하지 않습니다.</NotCollected></div>
+          <HostNetCards host={host} />
+          <div className="card" style={{ padding: 14 }}><NotCollected title="팀 구성">NIC 팀 구성(LACP · 액티브/스탠바이 · 부하 분산 정책)은 수집하지 않습니다. 가상 스위치 · 포트그룹은 위 표(ESXi 호스트 구성 점검 수집 — hcfg)입니다.</NotCollected></div>
         </div>
       )}
 
@@ -199,5 +200,52 @@ function HostEvents({ vcenterId, host }) {
           : !q.data ? <Loading label="이벤트" /> : <EventRows data={q.data} vcenterId={vcenterId} empty="최근 7일에 이 호스트가 대상인 변경 이벤트가 없습니다." />}
       <Note>대상 이름에 호스트 이름이 들어간 이벤트입니다(부분 일치).</Note>
     </Card>
+  );
+}
+
+/**
+ * v2.897 정정: 호스트 가상 스위치 · 포트그룹은 v2.701(A10)부터 ESXi 호스트 구성 점검 수집(hcfg.net)이 이미 읽고 있었다 — v2.895 가 '수집하지 않음' 이라고
+ * 잘못 적었다. hcfg 를 아직 읽지 않았으면 그 사실을, net 이 null 이면 '받지 못함' 을 말한다(원인을 단정하지 않는다).
+ */
+function HostNetCards({ host }) {
+  const hc = host.hcfg && typeof host.hcfg === 'object' && !host.hcfg.error ? host.hcfg : null;
+  const net = hc ? hc.net : undefined;
+  if (!hc || net == null) {
+    return (
+      <Card title="가상 스위치 · 포트그룹" sub="ESXi 호스트 구성 점검 수집(hcfg)">
+        <div className="muted" style={{ padding: '10px 14px', fontSize: 12.5 }}>{!hc ? '아직 이 호스트의 구성을 읽지 않았습니다(오래된 호스트부터 나눠 읽습니다).' : '이 호스트의 가상 스위치 · 포트그룹 값을 받지 못했습니다.'}</div>
+      </Card>
+    );
+  }
+  const sws = Array.isArray(net.switches) ? net.switches : [];
+  const pgs = Array.isArray(net.pgs) ? net.pgs : [];
+  return (
+    <>
+      <Card title={`가상 스위치 ${sws.length}`} sub="hcfg.net · 표준(vSS) · 분산(vDS)">
+        {sws.length ? (
+          <STable className="v3-table" minWidth={520}>
+            <thead><tr><th>이름</th><th>종류</th><th>업링크</th><th>포트그룹</th></tr></thead>
+            <tbody>
+              {sws.map((w, i) => (
+                <tr key={`${w.name}-${i}`}><td><b>{w.name}</b></td><td>{w.kind === 'dvs' ? '분산(vDS)' : '표준(vSS)'}</td><td className="mono" style={{ whiteSpace: 'normal' }}>{(w.uplinks || []).join(' · ') || '—'}</td><td data-sort={w.pgs == null ? '' : String(w.pgs)}>{w.pgs == null ? '—' : w.pgs}</td></tr>
+              ))}
+            </tbody>
+          </STable>
+        ) : <div className="muted" style={{ padding: '10px 14px', fontSize: 12.5 }}>가상 스위치가 없다고 보고했습니다.</div>}
+      </Card>
+      <Card title={`포트그룹 ${net.pgsTotal != null ? net.pgsTotal : pgs.length}`} sub="표준 스위치 포트그룹(hcfg.net) · 분산 포트그룹은 vCenter › 네트워크 탭">
+        {pgs.length ? (
+          <STable className="v3-table" minWidth={520} limit={200}>
+            <thead><tr><th>이름</th><th>VLAN</th><th>vSwitch</th><th>무차별 모드</th></tr></thead>
+            <tbody>
+              {pgs.map((g, i) => (
+                <tr key={`${g.name}-${i}`}><td><b>{g.name}</b></td><td data-sort={g.vlan == null ? '' : String(g.vlan)}>{g.vlan == null ? '—' : g.vlan}</td><td>{g.sw || '—'}</td><td>{g.promisc === true ? <span className="badge amber">허용</span> : g.promisc === false ? '거부' : '—'}</td></tr>
+              ))}
+            </tbody>
+          </STable>
+        ) : <div className="muted" style={{ padding: '10px 14px', fontSize: 12.5 }}>표준 스위치 포트그룹이 없다고 보고했습니다.</div>}
+        {net.pgsTotal != null && net.pgsTotal > pgs.length && <Note>포트그룹 {net.pgsTotal}개 중 {pgs.length}개만 받았습니다(수집 상한).</Note>}
+      </Card>
+    </>
   );
 }

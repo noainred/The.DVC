@@ -10,7 +10,9 @@
 //   - managedBy·question·bootTime 은 **설정되지 않은 것이 정상**이라 응답에 없으면 null(=없음)이다.
 // 모양(vm.dev — 장치 위생 요약, 장치 목록을 읽었을 때만):
 //   { at, cdroms:[{label,connected,startConnected,iso,host,file}], floppies:[{label,connected}],
-//     disks:[{label,mode,sharing,rdm,rdmMode,datastore,capacityGB}], usb, serial, parallel, omitted }
+//     disks:[{label,mode,sharing,rdm,rdmMode,datastore,capacityGB}], usb, serial, parallel, omitted,
+//     nics:[{label,adapter,backing,net,netRef,mac,connected,startConnected}] }   ← v2.897(같은 장치 XML — 새 vCenter 호출 없음)
+//   - nics 는 v2.897 이후 수집기만 싣는다 — 키가 없으면 '아직 읽지 않음'(빈 배열 = 어댑터 없음 과 다르다).
 import { xmlUnescape } from '../vcenter/soapParse.js';
 
 /** 이 모듈이 vCenter 에 요청하는 VM 속성 경로 — 전부 vSphere 5.0+ 에 있는 경로만(없는 경로는 요청 전체를 InvalidProperty 로 만든다). */
@@ -80,9 +82,32 @@ export function parseVmCfgProps(props = {}, at = Date.now()) {
 }
 
 const DEV_LIST_MAX = 32;
+/** v2.897: VirtualEthernetCard 하위 형식 → 화면 이름(vSphere Client 의 '어댑터 유형'). 모르는 형식은 형식 이름 그대로(Virtual 앞머리만 뗀다). */
+const NIC_TYPES = Object.freeze({
+  VirtualVmxnet3: 'VMXNET 3', VirtualVmxnet3Vrdma: 'PVRDMA', VirtualVmxnet2: 'VMXNET 2', VirtualVmxnet: 'VMXNET',
+  VirtualE1000: 'E1000', VirtualE1000e: 'E1000E', VirtualPCNet32: 'PCNet32', VirtualSriovEthernetCard: 'SR-IOV',
+});
+const NIC_TYPE_RE = /^Virtual(?:Vmxnet\w*|E1000e?|PCNet32|SriovEthernetCard|EthernetCard)$/;
+const MAC_RE = /^[0-9a-f]{2}(?::[0-9a-f]{2}){5}$/i;
+const MOREF_RE = /^[\w.:-]{1,64}$/;
+/** 어댑터 백킹 → { backing:'std'|'dvs'|'nsx'|'other', net, netRef }. 분산 포트그룹 이름은 장치에 없다 — netRef(dvportgroup-NN)로 화면이 /networks 에서 찾는다. */
+function nicBacking(blk) {
+  const bt = /<backing xsi:type="([^"]+)"/.exec(blk)?.[1] || '';
+  if (/DistributedVirtualPortBackingInfo/.test(bt)) {
+    const key = cap(tag(blk, 'portgroupKey'), 64);
+    return { backing: 'dvs', net: null, netRef: key && MOREF_RE.test(key) ? key : null };
+  }
+  if (/OpaqueNetworkBackingInfo/.test(bt)) return { backing: 'nsx', net: cap(tag(blk, 'opaqueNetworkId'), 128), netRef: null };
+  if (/EthernetCardNetworkBackingInfo/.test(bt)) {
+    const ref = cap(/<network type="(?:Network|OpaqueNetwork)">([^<]*)<\/network>/.exec(blk)?.[1], 64);
+    return { backing: 'std', net: cap(tag(blk, 'deviceName'), 128), netRef: ref && MOREF_RE.test(ref) ? ref : null };
+  }
+  return { backing: 'other', net: null, netRef: null };
+}
+
 /** 'config.hardware.device' XML → 장치 위생 요약(vm.dev). 목록은 종류마다 32개까지이고 넘친 개수는 omitted. */
 export function parseVmDeviceHygiene(deviceXml, at = Date.now()) {
-  const out = { at, cdroms: [], floppies: [], disks: [], usb: 0, serial: 0, parallel: 0, omitted: 0 };
+  const out = { at, cdroms: [], floppies: [], disks: [], usb: 0, serial: 0, parallel: 0, omitted: 0, nics: [] };
   if (typeof deviceXml !== 'string' || !deviceXml) return out;
   const push = (arr, v) => { if (arr.length < DEV_LIST_MAX) arr.push(v); else out.omitted += 1; };
   for (const blk of deviceXml.split(/<VirtualDevice(?=[ >])/).slice(1)) {
@@ -112,6 +137,12 @@ export function parseVmDeviceHygiene(deviceXml, at = Date.now()) {
         rdmMode: /RawDiskMapping/i.test(backingType) ? cap(tag(blk, 'compatibilityMode'), 32) : null,
         datastore: /^\[([^\]]+)\]/.exec(fileName)?.[1] || null,
         capacityGB: capKB == null ? null : Math.round((capKB / 1048576) * 10) / 10,
+      });
+    } else if (NIC_TYPE_RE.test(xsiType)) {
+      const mac = cap(tag(blk, 'macAddress'), 17);
+      push(out.nics, {
+        label, adapter: NIC_TYPES[xsiType] || xsiType.replace(/^Virtual/, ''), ...nicBacking(blk),
+        mac: mac && MAC_RE.test(mac) ? mac.toLowerCase() : null, connected, startConnected,
       });
     } else if (/^VirtualUSB/.test(xsiType) && xsiType !== 'VirtualUSBController' && !/Controller$/.test(xsiType)) {
       out.usb += 1;
@@ -239,5 +270,13 @@ export function sanitizeVmDev(d) {
     floppies: arr(d.floppies).map((x) => ({ label: str(x.label, 64) || '', connected: boolOrNull(x.connected) })),
     disks: arr(d.disks).map((x) => ({ label: str(x.label, 64) || '', mode: str(x.mode, 32), sharing: str(x.sharing, 32), rdm: x.rdm === true, rdmMode: str(x.rdmMode, 32), datastore: str(x.datastore, 128), capacityGB: typeof x.capacityGB === 'number' && Number.isFinite(x.capacityGB) ? x.capacityGB : null })),
     usb: cnt(d.usb), serial: cnt(d.serial), parallel: cnt(d.parallel), omitted: cnt(d.omitted),
+    // v2.897: 어댑터 — 키가 없으면(이전 판 엣지) 싣지 않는다(= 아직 읽지 않음). 형식 밖 값은 null.
+    ...(Array.isArray(d.nics) ? { nics: arr(d.nics).map((x) => ({
+      label: str(x.label, 64) || '', adapter: str(x.adapter, 32),
+      backing: ['std', 'dvs', 'nsx', 'other'].includes(x.backing) ? x.backing : 'other',
+      net: str(x.net, 128), netRef: typeof x.netRef === 'string' && MOREF_RE.test(x.netRef) ? x.netRef : null,
+      mac: typeof x.mac === 'string' && MAC_RE.test(x.mac) ? x.mac.toLowerCase() : null,
+      connected: boolOrNull(x.connected), startConnected: boolOrNull(x.startConnected),
+    })) } : {}),
   };
 }
