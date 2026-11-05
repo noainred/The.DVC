@@ -1,0 +1,231 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>vCenter 상세 — 모니터(문제 및 알람 · 이벤트 · 작업 · 성능)</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=Noto+Sans+KR:wght@400;500;700;800&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+body{margin:0;background:#0a0e17;color:#e6edf6;font-family:"Inter","Noto Sans KR","Apple SD Gothic Neo",sans-serif;font-size:13px}
+a{color:#93c5fd}a:hover{color:#bfdbfe}
+.muted{color:#8b9bb4}
+.faint{color:#5d6b85}
+.mono{font-family:"JetBrains Mono",ui-monospace,monospace}
+.card{background:#141b2d;border:1px solid #243049;border-radius:12px;min-width:0}
+.tab{display:inline-flex;align-items:center;gap:6px;padding:8px 14px;border-radius:8px;border:1px solid transparent;background:none;color:#8b9bb4;font:inherit;font-size:13px;font-weight:600;cursor:pointer;text-decoration:none;white-space:nowrap}
+.vtab{display:inline-flex;align-items:center;gap:6px;min-height:34px;padding:0 12px;border-radius:8px;border:1px solid transparent;color:#8b9bb4;font:inherit;font-size:13px;font-weight:600;text-decoration:none;white-space:nowrap;flex:none}
+.vtab:hover{color:#e6edf6;background:#1a2236}
+.vtab.on{color:#ffffff;background:#3b82f6;border-color:#3b82f6}
+.vtab .n{font-size:10.5px;font-weight:700;padding:1px 6px;border-radius:999px;background:rgba(139,155,180,.16);color:#aebbd0}
+.vtab.on .n{background:rgba(255,255,255,.22);color:#ffffff}
+.btn{display:inline-flex;align-items:center;gap:6px;min-height:30px;padding:0 12px;border-radius:8px;border:1px solid #243049;background:#1a2236;color:#e6edf6;font:inherit;font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap;text-decoration:none}
+.btn.primary{background:linear-gradient(135deg,#3b82f6,#2563eb);border-color:#2563eb;color:#ffffff;font-weight:700}
+.btn.ghost{background:transparent;border-color:transparent;color:#93c5fd;padding:0 4px}
+.chip{display:inline-flex;align-items:center;gap:6px;min-height:30px;padding:0 12px;border-radius:8px;border:1px solid #243049;background:#1a2236;color:#8b9bb4;font:inherit;font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap;text-decoration:none}
+.chip.on{background:#e6edf6;border-color:#e6edf6;color:#0a0e17}
+.badge{display:inline-flex;align-items:center;padding:2px 9px;border-radius:20px;font-size:11px;font-weight:600;white-space:nowrap}
+.badge.green{background:rgba(34,197,94,.15);color:#4ade80}
+.badge.amber{background:rgba(245,158,11,.15);color:#fbbf24}
+.badge.red{background:rgba(239,68,68,.15);color:#f87171}
+.badge.gray{background:rgba(139,155,180,.15);color:#8b9bb4}
+.badge.blue{background:rgba(59,130,246,.15);color:#60a5fa}
+.badge.purple{background:rgba(168,85,247,.15);color:#c084fc}
+.sub{display:flex;flex-direction:column;gap:2px;width:190px;flex:none;padding:8px;border-right:1px solid #1f2a40}
+.sub a{display:flex;align-items:center;gap:8px;min-height:36px;padding:0 12px;border-radius:8px;color:#8b9bb4;font-weight:600;text-decoration:none;font-size:12.5px}
+.sub a:hover{background:#1a2236;color:#e6edf6}
+.sub a.on{background:rgba(59,130,246,.14);color:#e6edf6;box-shadow:inset 3px 0 0 #3b82f6}
+.sub a .n{margin-left:auto;font-size:10.5px;font-weight:700;padding:1px 6px;border-radius:999px;background:rgba(139,155,180,.16);color:#aebbd0}
+.sub a .n.red{background:rgba(239,68,68,.18);color:#f87171}
+.sub a .n.gray{color:#5d6b85}
+.sec{display:flex;min-width:0}
+.body{flex:1 1 0;min-width:0;display:flex;flex-direction:column}
+.bar{display:flex;align-items:center;flex-wrap:wrap;gap:6px 8px;padding:10px 14px;border-bottom:1px solid #1f2a40}
+.crumb{font-size:11.5px;color:#5d6b85;padding:0 2px}
+table{border-collapse:collapse;width:100%}
+th{font-size:12px;font-weight:600;color:#8b9bb4;text-align:left;padding:9px 10px;background:#0f1626;border-bottom:1px solid #243049;white-space:nowrap;cursor:pointer}
+th.sort{color:#e6edf6}
+td{padding:8px 10px;border-bottom:1px solid #1f2a40;vertical-align:middle;white-space:nowrap;font-size:12.5px}
+.sm{font-size:11.5px;color:#8b9bb4}
+.note{padding:9px 14px;font-size:11.5px;line-height:1.6;color:#8b9bb4;border-top:1px solid #1f2a40}
+.empty{margin:14px;padding:22px 20px;border:1px dashed #243049;border-radius:10px;background:#0f1626;display:flex;flex-direction:column;gap:8px}
+.ghost th,.ghost td{color:#5d6b85}
+.ghost td i{display:inline-block;height:10px;border-radius:5px;background:#1f2a40;vertical-align:middle}
+</style>
+</helmet>
+<div style="position:relative;width:100%;min-height:1760px;box-sizing:border-box;overflow:hidden;background:#0a0e17">
+<div style="max-width:1440px;margin:0 auto;box-sizing:border-box;padding:18px 24px 28px;display:flex;flex-direction:column;gap:12px;min-width:0">
+
+  <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px 12px;min-width:0">
+    <div style="display:flex;align-items:center;gap:12px;min-width:0">
+      <a class="tab" href="Main.dc.html">← 목록</a>
+      <div style="min-width:0"><div style="font-size:16px;font-weight:800">VC-DEMO1</div><div class="muted" style="font-size:12px">대전, Korea · v8.0.3 · vc-demo1</div></div>
+      <span class="badge green">Connected</span>
+    </div>
+    <div class="muted" style="display:flex;align-items:center;gap:10px;font-size:12px;flex-wrap:wrap">
+      <span>호스트 <b style="color:#e6edf6">89</b></span><span>VM <b style="color:#e6edf6">911</b></span><span>CPU <b style="color:#e6edf6">41%</b></span><span>메모리 <b style="color:#e6edf6">64%</b></span>
+      <a class="btn primary" href="Main.dc.html">⇄ 비교하기</a>
+    </div>
+  </div>
+
+  <nav role="tablist" aria-label="vCenter 보기" style="display:flex;gap:4px;overflow-x:auto;padding-bottom:8px;border-bottom:1px solid #243049;min-width:0">
+    <a class="vtab" href="Main.dc.html">요약</a>
+    <a class="vtab on" href="Monitor.dc.html" aria-current="page">모니터 <span class="n">2</span></a>
+    <a class="vtab" href="Configure.dc.html">구성</a>
+    <a class="vtab" href="NewCollect.dc.html">사용 권한</a>
+    <a class="vtab" href="Datacenter.dc.html">데이터 센터</a>
+    <a class="vtab" href="Main.dc.html">호스트 및 클러스터</a>
+    <a class="vtab" href="Main.dc.html">VM</a>
+    <a class="vtab" href="Main.dc.html">데이터스토어</a>
+    <a class="vtab" href="Main.dc.html">네트워크</a>
+    <a class="vtab" href="NewCollect.dc.html">연결된 vCenter Server 시스템</a>
+    <a class="vtab" href="Extensions.dc.html">확장 프로그램</a>
+    <a class="vtab" href="NewCollect.dc.html">업데이트</a>
+  </nav>
+
+  <!-- (A) 모니터 › 문제 및 알람 — 포탈 규칙 -->
+  <div class="crumb">모니터 › 문제 및 알람 — 왼쪽 하위 칸 4개 · 숫자는 그 칸의 건수(수집하지 않는 칸은 회색 ‘—’)</div>
+  <section class="card sec" aria-label="모니터 — 문제 및 알람" style="overflow:hidden">
+    <nav class="sub" aria-label="모니터 하위">
+      <a class="on" href="Monitor.dc.html" aria-current="page">문제 및 알람 <span class="n red">2</span></a>
+      <a href="Monitor.dc.html">이벤트 <span class="n">143</span></a>
+      <a href="Monitor.dc.html">작업 <span class="n gray">—</span></a>
+      <a href="Monitor.dc.html">성능</a>
+    </nav>
+    <div class="body">
+      <div class="bar">
+        <b style="font-size:13.5px">포탈 알람</b><span class="badge amber">포탈 규칙</span>
+        <a class="chip on" href="Monitor.dc.html">전체 8</a><a class="chip" href="Monitor.dc.html">심각 2</a><a class="chip" href="Monitor.dc.html">경고 5</a><a class="chip" href="Monitor.dc.html">정보 1</a>
+        <span class="chip" style="cursor:default;margin-left:auto">종류 전체 ▾</span>
+        <span class="sm">처음 본 시각 = 포탈이 처음 판정한 시각</span>
+      </div>
+      <div style="overflow-x:auto">
+        <table>
+          <thead><tr><th class="sort">심각도 ▾</th><th>종류(규칙)</th><th>대상</th><th>대상 종류</th><th>메시지</th><th>처음 본 시각</th><th>지속</th><th>열기</th></tr></thead>
+          <tbody>
+            <tr><td><span class="badge red">심각</span></td><td>호스트 끊김</td><td><b>esx-kr1-07</b></td><td>호스트</td><td style="white-space:normal">Host disconnected from vCenter</td><td class="mono">11-05 09:12</td><td>1시간 23분</td><td><a class="btn ghost" href="Main.dc.html">호스트 →</a></td></tr>
+            <tr><td><span class="badge red">심각</span></td><td>DS 사용률 &gt; 95%</td><td><b>ds-kr1-nfs02</b></td><td>데이터스토어</td><td style="white-space:normal">Datastore usage at 96%</td><td class="mono">11-04 22:40</td><td>11시간 55분</td><td><a class="btn ghost" href="Main.dc.html">데이터스토어 →</a></td></tr>
+            <tr><td><span class="badge amber">경고</span></td><td>CPU &gt; 90</td><td><b>esx-kr1-12</b></td><td>호스트</td><td style="white-space:normal">High CPU usage (93%)</td><td class="mono">11-05 10:16</td><td>19분</td><td><a class="btn ghost" href="Main.dc.html">호스트 →</a></td></tr>
+            <tr><td><span class="badge amber">경고</span></td><td>MEM &gt; 92</td><td><b>esx-kr1-21</b></td><td>호스트</td><td style="white-space:normal">High memory usage (94%)</td><td class="mono">11-05 06:48</td><td>3시간 47분</td><td><a class="btn ghost" href="Main.dc.html">호스트 →</a></td></tr>
+            <tr><td><span class="badge amber">경고</span></td><td>DS 접근 불가</td><td><b>ds-kr1-san07</b></td><td>데이터스토어</td><td style="white-space:normal">Datastore inaccessible (usage unknown)</td><td class="mono">11-05 08:02</td><td>2시간 33분</td><td><a class="btn ghost" href="Main.dc.html">데이터스토어 →</a></td></tr>
+            <tr><td><span class="badge amber">경고</span></td><td>DS 사용률 &gt; 90%</td><td><b>ds-kr1-san03</b></td><td>데이터스토어</td><td style="white-space:normal">Datastore usage at 92%</td><td class="mono">11-03 14:10</td><td>1일 20시간</td><td><a class="btn ghost" href="Main.dc.html">데이터스토어 →</a></td></tr>
+            <tr><td><span class="badge amber">경고</span></td><td>DS 사용률 &gt; 90%</td><td><b>ds-kr1-san09</b></td><td>데이터스토어</td><td style="white-space:normal">Datastore usage at 91%</td><td class="mono">11-02 03:55</td><td>3일 6시간</td><td><a class="btn ghost" href="Main.dc.html">데이터스토어 →</a></td></tr>
+            <tr><td><span class="badge blue">정보</span></td><td>유지보수</td><td><b>esx-kr1-30</b></td><td>호스트</td><td style="white-space:normal">Host in maintenance mode</td><td class="mono">11-05 09:00</td><td>1시간 35분</td><td><a class="btn ghost" href="Main.dc.html">호스트 →</a></td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="note">이 표는 vCenter 의 알람이 아니라 <b style="color:#cbd5e1">포탈이 수집값으로 판정한 규칙</b>이다 — 호스트 끊김 · 유지보수 · CPU&gt;90 · MEM&gt;92 · DS&gt;90(경고)/95%(심각) · DS 접근 불가. 못 읽은 호스트 · 데이터스토어는 알람에 넣지 않고 따로 센다(이 vCenter: 못 읽음 0).
+        vCenter 자체의 트리거 알람(AlarmManager)은 <b style="color:#cbd5e1">수집하지 않음</b> — 2차 후보(아래 작업과 같은 ‘수집 추가 필요’).</div>
+    </div>
+  </section>
+
+  <!-- (B) 모니터 › 이벤트 -->
+  <div class="crumb">모니터 › 이벤트 — 포탈이 EventManager 에서 증분 수집한 값(도구 ‘변경 이력’ · ‘VM 변경’ 과 같은 출처)을 이 vCenter 로 거른 표</div>
+  <section class="card sec" aria-label="모니터 — 이벤트" style="overflow:hidden">
+    <nav class="sub" aria-label="모니터 하위">
+      <a href="Monitor.dc.html">문제 및 알람 <span class="n red">2</span></a>
+      <a class="on" href="Monitor.dc.html" aria-current="page">이벤트 <span class="n">143</span></a>
+      <a href="Monitor.dc.html">작업 <span class="n gray">—</span></a>
+      <a href="Monitor.dc.html">성능</a>
+    </nav>
+    <div class="body">
+      <div class="bar">
+        <b style="font-size:13.5px">이벤트</b>
+        <span class="chip" style="cursor:default">24시간 ▾</span>
+        <a class="chip on" href="Monitor.dc.html">전체 143</a><a class="chip" href="Monitor.dc.html">오류 3</a><a class="chip" href="Monitor.dc.html">경고 11</a><a class="chip" href="Monitor.dc.html">정보 129</a>
+        <label style="display:flex;align-items:center;gap:6px;margin-left:auto;min-width:0"><span class="sm">검색</span><input type="search" aria-label="이벤트 검색" placeholder="대상 · 사용자 · 메시지" style="min-height:30px;padding:0 10px;border-radius:8px;border:1px solid #243049;background:#0f1626;color:#e6edf6;font:inherit;font-size:12px;width:220px"></label>
+        <a class="btn" href="Monitor.dc.html">변경 이력 도구에서 열기 →</a>
+      </div>
+      <div style="overflow-x:auto">
+        <table>
+          <thead><tr><th class="sort">시각 ▾</th><th>심각도</th><th>유형</th><th>대상</th><th>사용자</th><th>메시지</th></tr></thead>
+          <tbody>
+            <tr><td class="mono">11-05 10:28</td><td><span class="badge red">오류</span></td><td>HostConnectionLostEvent</td><td>esx-kr1-07</td><td class="muted">—</td><td style="white-space:normal">Host esx-kr1-07 in DC-KR1 is not responding</td></tr>
+            <tr><td class="mono">11-05 10:16</td><td><span class="badge amber">경고</span></td><td>AlarmStatusChangedEvent</td><td>esx-kr1-12</td><td class="muted">—</td><td style="white-space:normal">Alarm ‘Host CPU usage’ changed from Green to Yellow</td></tr>
+            <tr><td class="mono">11-05 09:51</td><td><span class="badge blue">정보</span></td><td>VmPoweredOnEvent</td><td>web-kr1-023</td><td>DEMO\hong.gd</td><td style="white-space:normal">web-kr1-023 on esx-kr1-03 is powered on</td></tr>
+            <tr><td class="mono">11-05 09:40</td><td><span class="badge blue">정보</span></td><td>VmReconfiguredEvent</td><td>db-kr1-004</td><td>DEMO\kim.ys</td><td style="white-space:normal">Reconfigured db-kr1-004 — 메모리 32 → 48 GB</td></tr>
+            <tr><td class="mono">11-05 09:03</td><td><span class="badge blue">정보</span></td><td>PermissionUpdatedEvent</td><td>DC-KR1</td><td>DEMO\admin.lee</td><td style="white-space:normal">Permission role changed to ‘Read-only’ for DEMO\ops-team on DC-KR1</td></tr>
+            <tr><td class="mono">11-05 08:02</td><td><span class="badge amber">경고</span></td><td>DatastoreInaccessibleEvent</td><td>ds-kr1-san07</td><td class="muted">—</td><td style="white-space:normal">Datastore ds-kr1-san07 is inaccessible from esx-kr1-05</td></tr>
+            <tr><td class="mono">11-05 07:30</td><td><span class="badge blue">정보</span></td><td>UserLoginSessionEvent</td><td>vc-demo1</td><td>DEMO\svc-portal</td><td style="white-space:normal">User DEMO\svc-portal@10.20.0.15 logged in</td></tr>
+            <tr><td class="mono">11-05 02:44</td><td><span class="badge red">오류</span></td><td>VmFailedToPowerOnEvent</td><td>batch-kr1-011</td><td>DEMO\svc-sched</td><td style="white-space:normal">Cannot power on batch-kr1-011 — insufficient resources</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="note">8 / 143건 · 열 제목으로 정렬 · 더 보기는 페이지 단위(무거운 조회를 15초마다 되풀이하지 않는다 — 마운트 1회 + 버튼).</div>
+    </div>
+  </section>
+
+  <!-- (C) 모니터 › 작업 — 수집하지 않음 -->
+  <div class="crumb">모니터 › 작업 — 최근 작업(TaskManager.recentTask)은 지금 수집하지 않는다. 수집하기 전의 화면(단정하지 않고 사실만).</div>
+  <section class="card sec" aria-label="모니터 — 작업" style="overflow:hidden">
+    <nav class="sub" aria-label="모니터 하위">
+      <a href="Monitor.dc.html">문제 및 알람 <span class="n red">2</span></a>
+      <a href="Monitor.dc.html">이벤트 <span class="n">143</span></a>
+      <a class="on" href="Monitor.dc.html" aria-current="page">작업 <span class="n gray">—</span></a>
+      <a href="Monitor.dc.html">성능</a>
+    </nav>
+    <div class="body">
+      <div class="empty">
+        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap"><b style="font-size:14px">최근 작업</b><span class="badge gray">수집하지 않음</span><span class="badge purple">2차 · 수집 추가 필요</span></div>
+        <div class="sm" style="line-height:1.6">포탈은 이 vCenter 의 작업(TaskManager) 을 수집하지 않는다. 수집을 추가하면 아래 열로 보인다 — 탭을 열 때만 조회(주기 수집 아님) · vCenter 당 시한 · 엣지 위임 법인은 엣지가 대신 읽는다.</div>
+        <div style="overflow-x:auto;border:1px solid #1f2a40;border-radius:8px">
+          <table class="ghost">
+            <thead><tr><th>시각</th><th>작업</th><th>대상</th><th>상태</th><th>시작한 사용자</th><th>진행률</th><th>걸린 시간</th></tr></thead>
+            <tbody>
+              <tr><td><i style="width:80px"></i></td><td><i style="width:140px"></i></td><td><i style="width:110px"></i></td><td><i style="width:50px"></i></td><td><i style="width:90px"></i></td><td><i style="width:40px"></i></td><td><i style="width:50px"></i></td></tr>
+              <tr><td><i style="width:80px"></i></td><td><i style="width:120px"></i></td><td><i style="width:90px"></i></td><td><i style="width:50px"></i></td><td><i style="width:90px"></i></td><td><i style="width:40px"></i></td><td><i style="width:50px"></i></td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="sm">vCenter 트리거 알람도 같은 묶음(2차)이다 — 추가하면 ‘문제 및 알람’ 에 ‘vCenter 알람’ 구획이 포탈 규칙 표 위에 생긴다(두 출처를 한 표에 섞지 않는다).</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- (D) 모니터 › 성능 = 지금의 '추이' 탭 -->
+  <div class="crumb">모니터 › 성능 — 지금의 ‘추이’ 탭(TrendView)을 그대로 옮긴다(기간 9종 × CPU · 메모리 · 디스크 사용량 vs 할당량). 내용 변경 없음.</div>
+  <section class="card sec" aria-label="모니터 — 성능" style="overflow:hidden">
+    <nav class="sub" aria-label="모니터 하위">
+      <a href="Monitor.dc.html">문제 및 알람 <span class="n red">2</span></a>
+      <a href="Monitor.dc.html">이벤트 <span class="n">143</span></a>
+      <a href="Monitor.dc.html">작업 <span class="n gray">—</span></a>
+      <a class="on" href="Monitor.dc.html" aria-current="page">성능</a>
+    </nav>
+    <div class="body">
+      <div class="bar">
+        <b style="font-size:13.5px">추이</b>
+        <a class="chip" href="Monitor.dc.html">1시간</a><a class="chip" href="Monitor.dc.html">6시간</a><a class="chip on" href="Monitor.dc.html">24시간</a><a class="chip" href="Monitor.dc.html">7일</a><a class="chip" href="Monitor.dc.html">30일</a><a class="chip" href="Monitor.dc.html">90일</a><a class="chip" href="Monitor.dc.html">6개월</a><a class="chip" href="Monitor.dc.html">1년</a><a class="chip" href="Monitor.dc.html">전체</a>
+        <span class="chip" style="cursor:default;margin-left:auto">클러스터 전체 ▾</span>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;padding:12px 14px">
+        <div style="border:1px solid #243049;border-radius:10px;background:#0f1626;padding:10px 12px;min-width:0">
+          <div class="sm" style="display:flex;justify-content:space-between"><span>CPU 사용 vs 할당</span><b style="color:#60a5fa">41%</b></div>
+          <svg viewBox="0 0 320 90" style="width:100%;height:90px;display:block" role="img" aria-label="CPU 추이 24시간"><polyline fill="none" stroke="#243049" stroke-width="1" points="0,30 320,30"/><polyline fill="none" stroke="#60a5fa" stroke-width="2" points="0,62 40,58 80,60 120,50 160,54 200,44 240,48 280,42 320,40"/></svg>
+        </div>
+        <div style="border:1px solid #243049;border-radius:10px;background:#0f1626;padding:10px 12px;min-width:0">
+          <div class="sm" style="display:flex;justify-content:space-between"><span>메모리 사용 vs 할당</span><b style="color:#4ade80">64%</b></div>
+          <svg viewBox="0 0 320 90" style="width:100%;height:90px;display:block" role="img" aria-label="메모리 추이 24시간"><polyline fill="none" stroke="#243049" stroke-width="1" points="0,20 320,20"/><polyline fill="none" stroke="#4ade80" stroke-width="2" points="0,38 40,38 80,36 120,36 160,34 200,34 240,35 280,34 320,33"/></svg>
+        </div>
+        <div style="border:1px solid #243049;border-radius:10px;background:#0f1626;padding:10px 12px;min-width:0">
+          <div class="sm" style="display:flex;justify-content:space-between"><span>디스크 사용 vs 용량</span><b style="color:#fbbf24">58%</b></div>
+          <svg viewBox="0 0 320 90" style="width:100%;height:90px;display:block" role="img" aria-label="디스크 추이 24시간"><polyline fill="none" stroke="#243049" stroke-width="1" points="0,20 320,20"/><polyline fill="none" stroke="#fbbf24" stroke-width="2" points="0,44 40,44 80,43 120,43 160,43 200,42 240,42 280,42 320,41"/></svg>
+        </div>
+      </div>
+      <div class="note">그래프 · 기간 · 기준선 문구는 지금 TrendView 그대로(시안에서는 자리만). ‘추이’ 를 1단 탭으로 남길지는 정할 것 ②.</div>
+    </div>
+  </section>
+
+  <div class="faint" style="font-size:11.5px">가상 데이터 · 하위 칸은 vSphere 의 모니터(문제 및 알람 · 이벤트 · 작업 · 성능) 순서를 따른다.</div>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1760}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,249 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>vCenter 상세 — 구성(라이선스 · 클러스터 · 태그 · 인증서 · 호스트 구성 · 고급 설정)</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=Noto+Sans+KR:wght@400;500;700;800&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+body{margin:0;background:#0a0e17;color:#e6edf6;font-family:"Inter","Noto Sans KR","Apple SD Gothic Neo",sans-serif;font-size:13px}
+a{color:#93c5fd}a:hover{color:#bfdbfe}
+.muted{color:#8b9bb4}
+.faint{color:#5d6b85}
+.mono{font-family:"JetBrains Mono",ui-monospace,monospace}
+.card{background:#141b2d;border:1px solid #243049;border-radius:12px;min-width:0}
+.tab{display:inline-flex;align-items:center;gap:6px;padding:8px 14px;border-radius:8px;border:1px solid transparent;background:none;color:#8b9bb4;font:inherit;font-size:13px;font-weight:600;cursor:pointer;text-decoration:none;white-space:nowrap}
+.vtab{display:inline-flex;align-items:center;gap:6px;min-height:34px;padding:0 12px;border-radius:8px;border:1px solid transparent;color:#8b9bb4;font:inherit;font-size:13px;font-weight:600;text-decoration:none;white-space:nowrap;flex:none}
+.vtab:hover{color:#e6edf6;background:#1a2236}
+.vtab.on{color:#ffffff;background:#3b82f6;border-color:#3b82f6}
+.vtab .n{font-size:10.5px;font-weight:700;padding:1px 6px;border-radius:999px;background:rgba(139,155,180,.16);color:#aebbd0}
+.btn{display:inline-flex;align-items:center;gap:6px;min-height:30px;padding:0 12px;border-radius:8px;border:1px solid #243049;background:#1a2236;color:#e6edf6;font:inherit;font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap;text-decoration:none}
+.btn.primary{background:linear-gradient(135deg,#3b82f6,#2563eb);border-color:#2563eb;color:#ffffff;font-weight:700}
+.btn.ghost{background:transparent;border-color:transparent;color:#93c5fd;padding:0 4px}
+.chip{display:inline-flex;align-items:center;gap:6px;min-height:30px;padding:0 12px;border-radius:8px;border:1px solid #243049;background:#1a2236;color:#8b9bb4;font:inherit;font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap;text-decoration:none}
+.chip.on{background:#e6edf6;border-color:#e6edf6;color:#0a0e17}
+.badge{display:inline-flex;align-items:center;padding:2px 9px;border-radius:20px;font-size:11px;font-weight:600;white-space:nowrap}
+.badge.green{background:rgba(34,197,94,.15);color:#4ade80}
+.badge.amber{background:rgba(245,158,11,.15);color:#fbbf24}
+.badge.red{background:rgba(239,68,68,.15);color:#f87171}
+.badge.gray{background:rgba(139,155,180,.15);color:#8b9bb4}
+.badge.blue{background:rgba(59,130,246,.15);color:#60a5fa}
+.badge.purple{background:rgba(168,85,247,.15);color:#c084fc}
+.badge.teal{background:rgba(20,184,166,.16);color:#2dd4bf}
+.sub{display:flex;flex-direction:column;gap:2px;width:190px;flex:none;padding:8px;border-right:1px solid #1f2a40}
+.sub a{display:flex;align-items:center;gap:8px;min-height:36px;padding:0 12px;border-radius:8px;color:#8b9bb4;font-weight:600;text-decoration:none;font-size:12.5px}
+.sub a:hover{background:#1a2236;color:#e6edf6}
+.sub a.on{background:rgba(59,130,246,.14);color:#e6edf6;box-shadow:inset 3px 0 0 #3b82f6}
+.sub a .n{margin-left:auto;font-size:10.5px;font-weight:700;padding:1px 6px;border-radius:999px;background:rgba(139,155,180,.16);color:#aebbd0}
+.sub a .n.amber{background:rgba(245,158,11,.18);color:#fbbf24}
+.sub a .n.gray{color:#5d6b85}
+.sub .h{font-size:10.5px;color:#5d6b85;padding:8px 12px 2px;font-weight:700}
+.sec{display:flex;min-width:0}
+.body{flex:1 1 0;min-width:0;display:flex;flex-direction:column}
+.bar{display:flex;align-items:center;flex-wrap:wrap;gap:6px 8px;padding:10px 14px;border-bottom:1px solid #1f2a40}
+.crumb{font-size:11.5px;color:#5d6b85;padding:0 2px}
+table{border-collapse:collapse;width:100%}
+th{font-size:12px;font-weight:600;color:#8b9bb4;text-align:left;padding:9px 10px;background:#0f1626;border-bottom:1px solid #243049;white-space:nowrap;cursor:pointer}
+th.sort{color:#e6edf6}
+td{padding:8px 10px;border-bottom:1px solid #1f2a40;vertical-align:middle;white-space:nowrap;font-size:12.5px}
+.sm{font-size:11.5px;color:#8b9bb4}
+.note{padding:9px 14px;font-size:11.5px;line-height:1.6;color:#8b9bb4;border-top:1px solid #1f2a40}
+.empty{margin:14px;padding:22px 20px;border:1px dashed #243049;border-radius:10px;background:#0f1626;display:flex;flex-direction:column;gap:8px}
+.kv{display:grid;grid-template-columns:auto minmax(0,1fr);gap:7px 14px;padding:12px 14px;font-size:12.5px;align-items:baseline}
+.kv span{color:#8b9bb4;white-space:nowrap}
+.kv div{min-width:0;overflow-wrap:anywhere}
+.bar2{height:6px;border-radius:999px;background:#243049;overflow:hidden;width:120px;display:inline-block;vertical-align:middle}
+.bar2 i{display:block;height:100%;border-radius:999px;background:#60a5fa}
+</style>
+</helmet>
+<div style="position:relative;width:100%;min-height:1960px;box-sizing:border-box;overflow:hidden;background:#0a0e17">
+<div style="max-width:1440px;margin:0 auto;box-sizing:border-box;padding:18px 24px 28px;display:flex;flex-direction:column;gap:12px;min-width:0">
+
+  <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px 12px;min-width:0">
+    <div style="display:flex;align-items:center;gap:12px;min-width:0">
+      <a class="tab" href="Main.dc.html">← 목록</a>
+      <div style="min-width:0"><div style="font-size:16px;font-weight:800">VC-DEMO1</div><div class="muted" style="font-size:12px">대전, Korea · v8.0.3 · vc-demo1</div></div>
+      <span class="badge green">Connected</span>
+    </div>
+    <div class="muted" style="display:flex;align-items:center;gap:10px;font-size:12px;flex-wrap:wrap">
+      <span>호스트 <b style="color:#e6edf6">89</b></span><span>VM <b style="color:#e6edf6">911</b></span><span>CPU <b style="color:#e6edf6">41%</b></span><span>메모리 <b style="color:#e6edf6">64%</b></span>
+      <a class="btn primary" href="Main.dc.html">⇄ 비교하기</a>
+    </div>
+  </div>
+
+  <nav role="tablist" aria-label="vCenter 보기" style="display:flex;gap:4px;overflow-x:auto;padding-bottom:8px;border-bottom:1px solid #243049;min-width:0">
+    <a class="vtab" href="Main.dc.html">요약</a>
+    <a class="vtab" href="Monitor.dc.html">모니터 <span class="n">2</span></a>
+    <a class="vtab on" href="Configure.dc.html" aria-current="page">구성</a>
+    <a class="vtab" href="NewCollect.dc.html">사용 권한</a>
+    <a class="vtab" href="Datacenter.dc.html">데이터 센터</a>
+    <a class="vtab" href="Main.dc.html">호스트 및 클러스터</a>
+    <a class="vtab" href="Main.dc.html">VM</a>
+    <a class="vtab" href="Main.dc.html">데이터스토어</a>
+    <a class="vtab" href="Main.dc.html">네트워크</a>
+    <a class="vtab" href="NewCollect.dc.html">연결된 vCenter Server 시스템</a>
+    <a class="vtab" href="Extensions.dc.html">확장 프로그램</a>
+    <a class="vtab" href="NewCollect.dc.html">업데이트</a>
+  </nav>
+
+  <!-- (A) 구성 › 라이선스 -->
+  <div class="crumb">구성 › 라이선스 — fleet 도구(라이선스 · 라이선스 만료 · 코어 라이선스)의 데이터를 이 vCenter 로 거른 표 + ‘도구에서 열기 →’. 하위 칸 구획: 설정 · 보안 · 점검.</div>
+  <section class="card sec" aria-label="구성 — 라이선스" style="overflow:hidden">
+    <nav class="sub" aria-label="구성 하위">
+      <div class="h">설정</div>
+      <a class="on" href="Configure.dc.html" aria-current="page">라이선스 <span class="n">3</span></a>
+      <a href="Configure.dc.html">클러스터 · HA · DRS <span class="n amber">1</span></a>
+      <a href="Configure.dc.html">태그 · 사용자 지정 속성</a>
+      <a href="Configure.dc.html">고급 설정 <span class="n gray">—</span></a>
+      <div class="h">보안</div>
+      <a href="Configure.dc.html">인증서</a>
+      <div class="h">점검</div>
+      <a href="Configure.dc.html">호스트 구성 점검 <span class="n amber">4</span></a>
+    </nav>
+    <div class="body">
+      <div class="bar">
+        <b style="font-size:13.5px">라이선스</b><span class="sm">LicenseManager · 주기 수집 · 마지막 10:31</span>
+        <a class="btn" href="Configure.dc.html" style="margin-left:auto">라이선스 도구에서 열기 →</a>
+        <a class="btn" href="Configure.dc.html">코어 라이선스 →</a>
+      </div>
+      <div style="overflow-x:auto">
+        <table>
+          <thead><tr><th class="sort">이름 ▾</th><th>에디션</th><th>키</th><th>단위</th><th>사용 / 총</th><th>사용률</th><th>만료</th></tr></thead>
+          <tbody>
+            <tr><td><b>vSphere 8 Enterprise Plus</b></td><td>esx.enterprisePlus</td><td class="mono muted">XXXXX-XXXXX-XXXXX-XXXXX-7K2QD</td><td>코어</td><td>1,536 / 1,792</td><td><span class="bar2"><i style="width:86%"></i></span> <span class="sm">86%</span></td><td><span class="badge green">영구</span></td></tr>
+            <tr><td><b>vCenter Server 8 Standard</b></td><td>vc.standard</td><td class="mono muted">XXXXX-XXXXX-XXXXX-XXXXX-M9A1C</td><td>인스턴스</td><td>1 / 1</td><td><span class="bar2"><i style="width:100%"></i></span> <span class="sm">100%</span></td><td><span class="badge green">영구</span></td></tr>
+            <tr><td><b>vSAN 8 Enterprise</b></td><td>vsan.enterprise</td><td class="mono muted">XXXXX-XXXXX-XXXXX-XXXXX-R4E8N</td><td>코어</td><td>64 / 96</td><td><span class="bar2"><i style="width:67%"></i></span> <span class="sm">67%</span></td><td><span class="badge amber">2027-03-31 · D-146</span></td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="note">키 가림은 제안(뒤 5자리만 — 지금 라이선스 도구의 가림 규칙을 따른다, 확인 필요). 사용 / 총 은 vim25 에서 선택 항목이라 없으면 ‘—’(0 코어 아님). 조회 실패(권한 부족 등)면 표 대신 ‘확인 불가 — 사유’ 한 줄.</div>
+    </div>
+  </section>
+
+  <!-- (B) 구성 › 클러스터 HA · DRS -->
+  <div class="crumb">구성 › 클러스터 · HA · DRS — 도구 ‘클러스터 점검’(clustercfg) 데이터를 이 vCenter 로 거른 표</div>
+  <section class="card sec" aria-label="구성 — 클러스터" style="overflow:hidden">
+    <nav class="sub" aria-label="구성 하위">
+      <div class="h">설정</div>
+      <a href="Configure.dc.html">라이선스 <span class="n">3</span></a>
+      <a class="on" href="Configure.dc.html" aria-current="page">클러스터 · HA · DRS <span class="n amber">1</span></a>
+      <a href="Configure.dc.html">태그 · 사용자 지정 속성</a>
+      <a href="Configure.dc.html">고급 설정 <span class="n gray">—</span></a>
+      <div class="h">보안</div>
+      <a href="Configure.dc.html">인증서</a>
+      <div class="h">점검</div>
+      <a href="Configure.dc.html">호스트 구성 점검 <span class="n amber">4</span></a>
+    </nav>
+    <div class="body">
+      <div class="bar">
+        <b style="font-size:13.5px">클러스터 11</b><span class="sm">HA 켜짐 10 · 꺼짐 1 · DRS 켜짐 11 · 규칙 23(위반 1)</span>
+        <a class="btn" href="Configure.dc.html" style="margin-left:auto">클러스터 점검 도구에서 열기 →</a>
+      </div>
+      <div style="overflow-x:auto">
+        <table>
+          <thead><tr><th class="sort">클러스터 ▾</th><th>데이터센터</th><th>호스트(유효)</th><th>HA</th><th>승인 제어</th><th>DRS</th><th>DRS 수준</th><th>EVC</th><th>규칙(위반)</th><th>점검</th></tr></thead>
+          <tbody>
+            <tr><td><b>CL-Web01</b></td><td>DC-KR1</td><td>12 (12)</td><td><span class="badge green">켜짐</span></td><td>켜짐 · 호스트 1대</td><td><span class="badge green">켜짐</span></td><td>완전 자동</td><td>intel-icelake</td><td>4 (0)</td><td><span class="badge green">정상</span></td></tr>
+            <tr><td><b>CL-DB01</b></td><td>DC-KR1</td><td>8 (7)</td><td><span class="badge green">켜짐</span></td><td>켜짐 · 호스트 1대</td><td><span class="badge green">켜짐</span></td><td>완전 자동</td><td>intel-icelake</td><td>6 (1)</td><td><span class="badge amber">규칙 위반 1</span></td></tr>
+            <tr><td><b>CL-GPU01</b></td><td>DC-KR1</td><td>4 (4)</td><td><span class="badge red">꺼짐</span></td><td class="muted">—</td><td><span class="badge green">켜짐</span></td><td>수동</td><td class="muted">—</td><td>2 (0)</td><td><span class="badge amber">HA 꺼짐</span></td></tr>
+            <tr><td><b>CL-Sandbox</b></td><td>DC-KR2</td><td>6 (6)</td><td><span class="badge green">켜짐</span></td><td>꺼짐</td><td><span class="badge green">켜짐</span></td><td>부분 자동</td><td>intel-cascadelake</td><td>0</td><td><span class="badge green">정상</span></td></tr>
+            <tr><td class="muted" colspan="10">… 7개 더(열 제목으로 정렬 · 전부 보기)</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="note">HA · DRS 의 켜짐/꺼짐은 수집값이 true/false 일 때만 적고, 못 읽었으면 ‘—’ 로 둔다(꺼짐으로 세지 않는다). 점검 열의 판정은 clustercfg/analyze.js 하나를 그대로 쓴다(웹에서 다시 판정하지 않는다).</div>
+    </div>
+  </section>
+
+  <!-- (C) 구성 › 인증서 -->
+  <div class="crumb">구성 › 인증서 — 포탈이 12시간마다 443 을 읽은 값(cert-expiry). vCenter 안의 STS · 솔루션 사용자 인증서는 수집하지 않는다.</div>
+  <section class="card sec" aria-label="구성 — 인증서" style="overflow:hidden">
+    <nav class="sub" aria-label="구성 하위">
+      <div class="h">설정</div>
+      <a href="Configure.dc.html">라이선스 <span class="n">3</span></a>
+      <a href="Configure.dc.html">클러스터 · HA · DRS <span class="n amber">1</span></a>
+      <a href="Configure.dc.html">태그 · 사용자 지정 속성</a>
+      <a href="Configure.dc.html">고급 설정 <span class="n gray">—</span></a>
+      <div class="h">보안</div>
+      <a class="on" href="Configure.dc.html" aria-current="page">인증서</a>
+      <div class="h">점검</div>
+      <a href="Configure.dc.html">호스트 구성 점검 <span class="n amber">4</span></a>
+    </nav>
+    <div class="body">
+      <div class="bar">
+        <b style="font-size:13.5px">443 인증서</b><span class="badge green">정상 · D-211</span><span class="sm">마지막 확인 11-05 04:00 · 다음 16:00</span>
+        <a class="btn" href="Configure.dc.html" style="margin-left:auto">인증서 만료 도구에서 열기 →</a>
+      </div>
+      <div class="kv">
+        <span>대상</span><div class="mono">vc-demo1.example.corp:443</div>
+        <span>CN</span><div>vc-demo1.example.corp</div>
+        <span>발급자</span><div>DEMO-Issuing-CA (DEMO Corp)</div>
+        <span>만료</span><div>2027-06-04 09:00 KST · <b>D-211</b> <span class="sm">(D-90 경고 · D-30 위험)</span></div>
+        <span>지문(SHA-256)</span><div class="mono" style="font-size:11.5px">7A:3E:…:C1:9F</div>
+      </div>
+      <div class="note">읽지 못했으면 ‘확인 불가 — 사유’(만료로 단정하지 않는다). STS · 머신 · 솔루션 사용자 인증서(vCenter 내부)는 수집하지 않음 — 2차 후보.</div>
+    </div>
+  </section>
+
+  <!-- (D) 구성 › 태그 · 호스트 구성 점검 — 요약 카드 두 개 -->
+  <div class="crumb">구성 › 태그 · 사용자 지정 속성 / 호스트 구성 점검 — 도구 화면이 크므로 요약 카드 + ‘도구에서 열기 →’(이 vCenter 가 미리 골라진 채)</div>
+  <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;min-width:0">
+    <section class="card" aria-label="태그 · 사용자 지정 속성">
+      <div class="bar"><b style="font-size:13.5px">태그 · 사용자 지정 속성</b><a class="btn" href="Configure.dc.html" style="margin-left:auto">VM 태그 도구에서 열기 →</a></div>
+      <div class="kv">
+        <span>태그 범주</span><div>6 <span class="sm">(Owner · Env · Backup · Cost · Tier · Service)</span></div>
+        <span>태그</span><div>41</div>
+        <span>태그 없는 VM</span><div><b style="color:#fbbf24">37</b> / 911 <span class="sm">(정책: Backup · Owner 필수)</span></div>
+        <span>사용자 지정 속성 정의</span><div>4 <span class="sm">(담당자 · 비용센터 · 만료일 · 비고)</span></div>
+      </div>
+      <div class="note">숫자는 tags 수집(tagInv) 의 이 vCenter 몫. 정책 판정은 tags/policy.js 그대로.</div>
+    </section>
+    <section class="card" aria-label="호스트 구성 점검">
+      <div class="bar"><b style="font-size:13.5px">호스트 구성 점검</b><span class="badge amber">주의 4</span><a class="btn" href="Configure.dc.html" style="margin-left:auto">호스트 구성 도구에서 열기 →</a></div>
+      <div class="kv">
+        <span>NTP 불일치</span><div><b style="color:#fbbf24">2</b> 대 <span class="sm">esx-kr1-18 · esx-kr1-19</span></div>
+        <span>SSH 켜짐</span><div><b style="color:#fbbf24">1</b> 대 <span class="sm">esx-kr1-30(유지보수 중)</span></div>
+        <span>Lockdown 꺼짐</span><div><b style="color:#fbbf24">1</b> 대</div>
+        <span>점검 못 함</span><div>1 대 <span class="sm">esx-kr1-07 · 끊김</span></div>
+      </div>
+      <div class="note">점검 항목과 판정은 host-hygiene 도구 그대로. 끊긴 호스트는 ‘정상’ 에도 ‘주의’ 에도 넣지 않고 따로 센다.</div>
+    </section>
+  </div>
+
+  <!-- (E) 구성 › 고급 설정 — 수집하지 않음 -->
+  <div class="crumb">구성 › 고급 설정 — vCenter 고급 설정(OptionManager) · 예약 작업은 수집하지 않는다.</div>
+  <section class="card sec" aria-label="구성 — 고급 설정" style="overflow:hidden">
+    <nav class="sub" aria-label="구성 하위">
+      <div class="h">설정</div>
+      <a href="Configure.dc.html">라이선스 <span class="n">3</span></a>
+      <a href="Configure.dc.html">클러스터 · HA · DRS <span class="n amber">1</span></a>
+      <a href="Configure.dc.html">태그 · 사용자 지정 속성</a>
+      <a class="on" href="Configure.dc.html" aria-current="page">고급 설정 <span class="n gray">—</span></a>
+      <div class="h">보안</div>
+      <a href="Configure.dc.html">인증서</a>
+      <div class="h">점검</div>
+      <a href="Configure.dc.html">호스트 구성 점검 <span class="n amber">4</span></a>
+    </nav>
+    <div class="body">
+      <div class="empty">
+        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap"><b style="font-size:14px">고급 설정</b><span class="badge gray">수집하지 않음</span><span class="badge purple">2차 · 수집 추가 필요</span></div>
+        <div class="sm" style="line-height:1.6">vCenter 고급 설정(OptionManager.setting) · 예약 작업(ScheduledTaskManager)은 포탈이 읽지 않는다. 추가한다면 읽기 전용 · 탭을 열 때만 조회 · 키 목록은 관리자 판본에서만.</div>
+      </div>
+    </div>
+  </section>
+
+  <div class="faint" style="font-size:11.5px">가상 데이터 · 끼우는 도구의 권한(toolAllowed · 카탈로그 adminOnly)을 하위 칸 단위로 따른다 — 권한 없는 칸은 숨기지 않고 ErrorBox 403 권한 안내(정할 것 ⑤).</div>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1960}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>
