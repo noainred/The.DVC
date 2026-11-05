@@ -1,6 +1,6 @@
 # 설계: vCenter 상세 화면에 vSphere Client 탭 구성 넣기
 
-작성 2026-11-05 (v2.889.0 기준) · 상태 **A · B · C 모두 구현됨 — v2.895.0 한 릴리스**(2.890~2.894 는 다른 세션이 먼저 게시 · 단계별 릴리스 계획(§11)을 main 경합 때문에 한 번으로 합침)(컨펌 2026-11-05 '기본값대로 구현해' · 범위 A→B→C 연속 · 검증 표준 — §11) · B · C 진행(규칙: 설계는 Fable + Claude Design 시안 → 컨펌 뒤 Opus 구현 — 2026-11-03 '기억해') · 시안 캔버스: https://claude.ai/artifact/KWhkAuJSdxrjDaJAJeS8en
+작성 2026-11-05 (v2.889.0 기준) · 상태 **A · B · C 모두 구현됨 — v2.895.0 한 릴리스 · 2차('수집하지 않음' 칸 채우기)는 §12 — v2.897**(2.890~2.894 는 다른 세션이 먼저 게시 · 단계별 릴리스 계획(§11)을 main 경합 때문에 한 번으로 합침)(컨펌 2026-11-05 '기본값대로 구현해' · 범위 A→B→C 연속 · 검증 표준 — §11) · B · C 진행(규칙: 설계는 Fable + Claude Design 시안 → 컨펌 뒤 Opus 구현 — 2026-11-03 '기억해') · 시안 캔버스: https://claude.ai/artifact/KWhkAuJSdxrjDaJAJeS8en
 (아트보드 14장 — ①~⑦ vCenter 탭 · ⑧~⑪ VM · 호스트 개체 보기(§8) · ⑫~⑬ 성능 튜닝(§9) · ⑭ 포탈 전체 제안(§10) — 이 폴더의 `*.dc.html` 이 같은 내용의 레퍼런스. **법인 · vCenter 이름(VC-DEMO1 · DC-KR1 · esx-kr1-07 …) · 수치는 전부 가상**이고 색 · 글자 · 버튼은 `web/src/styles.css` `:root` 토큰 그대로.
 계정의 ‘Design System’ 아티팩트는 앞 시안(bareos-errlog · bareos-cancel)과 같이 `project/README.md` · `project/tokens.json` 이 없어(타입 파일 + index.html 뿐) 쓰지 않았다. 아트보드에 VMware 로고 · 상표 이미지는 넣지 않았다 — 탭 이름 글자만.)
 이 문서의 §2 는 Opus 세션이 코드로 확인한 사실이고, §3 · §4 는 시안 단계(Fable)에서 채웠다.
@@ -217,3 +217,30 @@ vCenter 상세(기본 셸 안 · 지금 화면 하나) — 머리 줄은 그대�
 ### 공통
 - 버전 3종 · release-notes · 릴리스 게시 · `versions.json` latest 확인(단계마다). 문구는 `BoldText` 규약(백틱 금지) · 표는 `STable` · `numOrNull`.
 - 보안 변이 검증은 B 의 404 규칙과 C 의 새 라우트 범위 검사에만.
+
+## 12. 2차 — '수집하지 않음' 칸 채우기(사용자 2026-11-05 14:29 KST "이거 반영할 수 있어?" · 선택 '①~④ 전부' · '전체 검증')
+
+시안 없이 진행했다 — 새 화면이 아니라 v2.895 시안의 '수집하지 않음 · 2차' 자리에 같은 카드 모양(카드 머리 · 표 · 주석)으로 값을 넣는 일이라서다(설계 규칙의 '새 설계' 에 해당하지 않는다고 판단 — 판단 근거를 여기 남긴다).
+
+**정정(사용자 보고에 그대로 나간 오류)**: v2.895 보고에서 '포트그룹' 을 수집하지 않는 항목에 넣었다 — 호스트 가상 스위치 · 포트그룹은 **v2.701(A10)부터 `hcfg.net`** 으로 수집되고 있었다.
+
+| 칸 | 원천(읽기 전용) | 주기 | 화면 |
+|---|---|---|---|
+| ① 호스트 가상 스위치 · 포트그룹 | 기존 `hcfg.net`(새 호출 없음) | 기존 | 호스트 › 네트워크 |
+| ② VM 네트워크 어댑터 | 기존 `config.hardware.device`(파싱만 넓힘) | 기존 vmcfg | VM › 요약 · 구성 · 네트워크 |
+| ② 스냅샷 트리 | 기존 `snapshot` 속성(파싱만 넓힘) | 기존 인벤토리 | VM › 스냅샷 |
+| ③ vCenter 트리거 알람 | `rootFolder.triggeredAlarmState` + `Alarm.info.name` | 5분 | 모니터 › 문제 및 알람 · VM/호스트 › 모니터 |
+| ③ 최근 작업 | `TaskManager.recentTask` + `Task.info`(24시간 버퍼) | 3분 | 모니터 › 작업 · VM/호스트 › 모니터 |
+| ③ 권한 목록(관리자 판본) | `RetrieveAllPermissions` + `roleList` | 6시간 | 사용 권한 · VM/호스트 › 사용 권한 |
+| ④ 연결된 vCenter | REST `GET /api/vcenter/topology/nodes`(+ node · replication-status) | 6시간 | 연결된 vCenter Server 시스템 |
+| ④ vCenter 업데이트 | REST `GET /api/appliance/update` · `pending?source_type=LAST_CHECK` | 6시간 | 업데이트 |
+| ④ vLCM 이미지 준수 | REST `GET .../clusters/{c}/enablement/software` · `software/compliance` | 6시간 | 업데이트 · 호스트 › 업데이트 |
+
+API 조사(④)는 공식 바인딩 `vmware-vcenter==8.0.3.0` docstring · 공식 샘플 · govmomi 소스로 했다(docs.vmware.com · knowledge.broadcom.com 은 이 세션에서 열리지 않음). **실 vCenter 로 확인하지 못한 것**:
+- `appliance/update` 권한은 vCenter 역할이 아니라 SSO 그룹(읽기 전용 운영 그룹)이라 지금 읽기 전용 수집 계정이면 403 일 가능성이 높다(추정 — 화면은 '권한 없음(403)' 으로 말한다).
+- 베이스라인 클러스터에 compliance 를 부르면 무엇이 오는지 모른다 → 부르지 않는다(`enabled=false` 면 건너뜀).
+- `topology/nodes` 의 `System.Read` 가 기본 Read-only 역할에 들어 있는지(추정 — 예).
+- 확인 한 번도 안 한 어플라이언스의 `pending?source_type=LAST_CHECK` 응답(빈 목록 또는 404 — 추정).
+- Lookup Service(SSO 사이트 · 서비스 UUID)는 쓰지 않았다(별도 SOAP 엔드포인트 · 익명 호출 여부 미확인).
+
+남은 '수집하지 않음': 리소스 풀 속성(예약 · 제한 · 공유) · 호스트별 데이터스토어 마운트 · NIC 팀 구성 · 고급 설정 · 베이스라인(VUM) 패치 준수.

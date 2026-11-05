@@ -40,9 +40,9 @@ const NOT_YET_TEXT = '아직 읽지 않았습니다 — 다음 수집 주기에 
 export function vcInfoBody(kind, vcenterId, entry, { admin = false, source = null } = {}) {
   const base = { ok: true, kind, vcenterId, refreshMs: VCINFO_REFRESH_MS[kind], source };
   if (!entry) return { ...base, at: null, items: [], notCollected: NOT_YET_TEXT, error: null };
-  // ④ REST 3종은 모양이 달라 값을 그대로 싣는다(정제된 캐시 · 사람 이름 없음). retryAt · tried 는 내부 값이라 뺀다.
+  // ④ REST 3종은 모양이 달라 값을 그대로 싣는다(정제된 캐시 · 사람 이름 없음). retryAt 은 내부 값이라 뺀다.
   if (kind === 'linked' || kind === 'updates' || kind === 'vlcm') {
-    const { retryAt, tried, ...rest } = entry; void retryAt; void tried;
+    const { retryAt, ...rest } = entry; void retryAt;
     return { ...base, items: [], ...rest, at: entry.at ?? null, error: entry.error ?? null };
   }
   let items = Array.isArray(entry.items) ? entry.items : [];

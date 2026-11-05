@@ -53,6 +53,12 @@ test('① 작업 파서 — result · reason 안의 entityName · error 에 속�
   const t2 = P.parseTaskInfo(alarmReason);
   assert.deepEqual([t2.entityName, t2.entity, t2.user, t2.reason, t2.error], ['db01', 'vm-2', null, 'alarm', 'A specified parameter was not correct']);
   assert.equal(P.parseTaskInfo('<state>success</state>'), null, 'key 가 없으면 행이 아니다');
+  // 작업 자체에 대상이 없고(entity · entityName 없음) 사유(알람) · 결과 안에만 이름이 있으면 대상은 모른다(null) — 사유의 대상을 작업 대상으로 읽지 않는다
+  const noEnt = '<key>task-3</key><descriptionId>Alarm.trigger</descriptionId><state>success</state>'
+    + '<result xsi:type="X"><entityName>R</entityName><localizedMessage>결과 안 메시지</localizedMessage></result>'
+    + '<reason xsi:type="TaskReasonAlarm"><alarmName>a</alarmName><entityName>OTHER</entityName><entity type="HostSystem">host-1</entity></reason>';
+  const t3 = P.parseTaskInfo(noEnt);
+  assert.deepEqual([t3.entityName, t3.entity, t3.error, t3.reason], [null, null, null, 'alarm']);
 });
 
 test('① 권한 · 역할 파서 — 권한 이름은 싣지 않고 개수만', () => {
@@ -145,7 +151,7 @@ test('② 실패 — 직전 값 유지 + 오류 · 한 번도 못 읽은 권한 
   assert.equal(C.vcInfoDue(C.getVcInfo('vc3').perms, 'perms', now + C.VCINFO_REFRESH_MS.perms), true);
 });
 
-test('② 예산 0 — 건너뛴 종류는 retryAt 만 · 직전 값 그대로 · push 본문에 retryAt · tried 를 싣지 않는다', async () => {
+test('② 예산 0 — 건너뛴 종류는 retryAt 만 · 직전 값 그대로 · push 본문에 retryAt 을 싣지 않는다', async () => {
   C._resetVcInfo();
   const now = Date.parse('2026-11-05T03:00:00Z');
   await C.refreshVcInfo(fakeClient(), { id: 'vc4' }, { now });
@@ -154,7 +160,6 @@ test('② 예산 0 — 건너뛴 종류는 retryAt 만 · 직전 값 그대로 �
   assert.ok(r.alarms.retryAt > now);
   const push = C.vcInfoForPush('vc4');
   assert.equal(Object.hasOwn(push.alarms, 'retryAt'), false);
-  assert.equal(Object.hasOwn(push.alarms, 'tried'), false);
 });
 
 test('③ 엣지 정제 — 아는 키만 · 형식 밖 null · 상한 · 객체가 아니면 null', () => {
@@ -367,7 +372,7 @@ test('④ 라우트 — 종류별 권한 · linked 는 범위 안 등록 vCenter
   const u = await viewer('/vcenter-info/updates?vcenterId=vcA');
   assert.equal(u.status, 200);
   assert.equal(u.body.state, 'UPDATES_PENDING');
-  assert.equal(Object.hasOwn(u.body, 'retryAt') || Object.hasOwn(u.body, 'tried'), false);
+  assert.equal(Object.hasOwn(u.body, 'retryAt'), false);
 });
 
 test('③④ 엣지 정제 — REST 3종도 아는 키만', () => {

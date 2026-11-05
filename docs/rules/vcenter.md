@@ -24,6 +24,7 @@
 - (원래 5716행) v2.704 — vCenter 속성 조회는 페이지로 받는다(B2 — RetrievePropertiesEx). 파서는 한 벌이다
 - (원래 5725행) v2.703 — 코어 라이선스 산정(A13) + 태그·사용자 지정 속성 점검(A15). 규칙을 모르면 산정하지 않고, 못 읽은 vCenter 는 '확인 안 됨' 이다
 - (원래 5738행) v2.702 — VM 이동·구성 변경 이력(A7·A8). 원천은 logs DB 의 vCenter 이벤트이고 상세는 수집 시점에 `detail` 열로 싣는다
+- v2.897 — vCenter 알람 · 최근 작업 · 권한 목록 · Linked Mode · 업데이트 · vLCM(`vcinfo/`) + 스냅샷 트리 · VM NIC. 캐시는 스냅샷 vCenter 객체 밖이고 호출은 읽기 전용뿐이다
 - (원래 5751행) v2.701 — 클러스터 HA·DRS 점검(A6) + 호스트 네트워크(A10). 클러스터 구성은 클러스터 전용 캐시(`clustercfg/`)이고 vcenter.clusterCfg
 
 ## 본문
@@ -387,3 +388,21 @@
   · v2.814: Detail 응답 VM 에 `gb`(디스크 사용 GB — `backupStatus.gbOf`: 0 이상 유한수·1자리·모르면 null) · 웹 `backupViewText.fmtGb`·`methodGbTotals`·트리 agg `gb`/`gbUnknown` — 모르는 VM 은 합에 넣지 않고 따로 센다.
   · v2.817 EM 연결 현황: EM `hierarchyRoots` 수집(soft — 실패해도 다른 섹션 유지 · 응답 모양 추정) · `em/view.js matchVcenter` 는 host·이름 **정확 일치**만(autoBrMatch 의 앞 마디 비교를 되풀이하지 말 것) · 화면 연결 현황은 `ems` 전체(선택 EM 아님) — 회귀 `veeamEmLinks2817`.
     서머리 응답 캐시 키에도 `c${jobsRev()}`. Detail 단축키 V·C·G·N(`backupViewText.methodKeyOf` — 조합키·IME·반복·입력 칸이면 무시 · 같은 값이면 저장하지 않음).
+- **v2.897 — vCenter 알람 · 최근 작업 · 권한 목록 · Linked Mode · 업데이트 · vLCM(`server/src/vcinfo/`) + 스냅샷 트리 · VM NIC**(사용자 요청 '수집하지 않음 항목 반영' · '전체 검증' — 변이 20건 중 2건 생존: 1건(작업 파서의 사유 구간 자르기)은 테스트를 보강해 검출, 1건(`tried`)은 판정에 영향이 없는 값이라 코드에서 뺐다).
+  - **호출은 읽기 전용뿐**: SOAP `RetrieveProperties`(rootFolder.triggeredAlarmState · TaskManager.recentTask · Task.info · Alarm.info.name · AuthorizationManager.roleList · 이름) +
+    `RetrieveAllPermissions`, REST `GET` 7개(topology/nodes · nodes/{n} · replication-status · appliance/update · update/pending?source_type=**LAST_CHECK** ·
+    esx/settings/clusters/{c}/enablement/software · software/compliance). 확인 · 스캔을 일으키는 호출(`LOCAL_AND_ONLINE` · `action=scan`)을 넣지 말 것(`vcinfo2897` 이 소스로 고정).
+  - **캐시는 스냅샷 vCenter 객체에 싣지 않는다** — `/vcenters` 가 vCenter 객체를 모든 인증 사용자에게 통째로 준다(권한 목록이 샌다). 엣지는 push 본문 `vcenter.vcInfo` 로 따로 보내고,
+    중앙은 `sanitizeVcInfo` 로 정제한 뒤 vcenter 객체에서 **지우고**, `setInventory`(소유권 검사 통과) 다음에만 캐시에 넣는다.
+  - 주기(`VCINFO_REFRESH_MS`): 알람 5분 · 작업 3분 · 권한 · Linked · 업데이트 · vLCM 6시간. 실패하면 직전 값 + 오류, 다음 시도는 `retryAt`(시한 · 중단은 5분, 그 밖은 주기 뒤) —
+    권한 부족 vCenter 에 매 수집 주기 묻지 않는다. REST 는 셋 중 하나라도 때가 됐을 때만 세션을 열고, 그 로그인 거부는 그 종류의 오류로만 남긴다(authGuard 로 올리지 않는다 — tags 와 같은 판단).
+  - vLCM: 이미지 관리(`enabled=true`) 클러스터만 준수를 묻는다. 시한에 걸리면 못 읽은 클러스터는 직전 값 + `partial`, 다음 시도는 오래 전에 읽은 클러스터부터.
+  - 작업은 recentTask(끝나면 몇 분 뒤 사라진다)를 갱신 때마다 key 로 모아 24시간 · 200건 버퍼로 둔다 — 갱신 사이에 시작해 끝난 짧은 작업은 빠질 수 있다(화면이 그렇게 말한다).
+    TaskInfo 파싱은 `<result>` · `<reason>` 앞까지만 본다(TaskReasonAlarm 의 entityName 을 작업 대상으로 읽지 않게).
+  - 라우트 `GET /api/vcenter-info/:kind` — 종류별 requirePerm(알람 · 작업 · 권한 = inv.alarms, Linked · 업데이트 · vLCM = inv.hosts) → 범위 밖 · 없는 vCenter 404 → 권한 목록은
+    `isAdminDetailUser` 만(403) → 작업 시작 사용자 · 알람 확인자 이름은 관리자 판본만. Linked 노드의 '포탈 등록' 짝은 **조회 범위 안 등록 주소와 같을 때만**(범위 밖 등록 여부도 알리지 않는다) ·
+    발견한 노드 주소로 접속하지 않는다(SSRF · TLS 신뢰 규약).
+  - 스냅샷 트리(`soapParse.snapshotTreeNodes`)는 이미 받는 `snapshot` XML 을 한 번 선형으로 훑는다(64개 · 이름 80자 · 설명 200자). VM NIC(`vmcfg dev.nics`)는 이미 받는
+    `config.hardware.device` 를 넓혀 읽고, 'NIC 인가' 판정은 `soapParse.NIC_TYPE_RE` 하나(VM CSV 내보내기와 같다). 둘 다 키가 없으면 '아직 읽지 않음'(빈 배열 = 없음과 다르다).
+  - 실 vCenter 로 확인하지 못한 것(정직 기록 — 조사 `docs/design/vcenter-tabs/README.md` §12): Lookup Service 는 쓰지 않았다 · `appliance/update` 는 SSO 그룹 권한이라 읽기 전용 계정에서
+    403 일 가능성이 높다(추정) · 베이스라인 클러스터에 compliance 를 부르면 무엇이 오는지 모른다(그래서 부르지 않는다) · 응답 필드는 공식 바인딩(8.0.3) docstring 기준.

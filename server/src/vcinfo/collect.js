@@ -35,7 +35,7 @@ export function vcInfoForPush(vcId) {
   for (const k of VCINFO_KIND_LIST) if (e[k]) out[k] = stripRetry(e[k]);
   return Object.keys(out).length ? out : null;
 }
-const stripRetry = (k) => { const { retryAt, tried, ...rest } = k; void retryAt; void tried; return rest; };
+const stripRetry = (k) => { const { retryAt, ...rest } = k; void retryAt; return rest; };
 /** 중앙 수신(central.js) — 정제된 값만 넣는다. 받은 종류만 덮는다(엣지가 그 종류를 아직 안 읽었으면 키가 없다). */
 export function putFromEdge(vcId, info, agent) {
   if (!info || typeof info !== 'object') return;
@@ -57,9 +57,9 @@ export function _resetVcInfo() { _byVc.clear(); _alarmNames.clear(); }
 const msg = (e) => String(e?.message || e || '조회 실패').slice(0, 300);
 const isTransient = (err, signal) => !!signal?.aborted || err?.name === 'AbortError' || err?.name === 'TimeoutError'
   || /abort|timed? ?out|timeout|데드라인|시한|중단/i.test(String(err?.message || err || ''));
-// 다음 시도: retryAt 이 있으면 그때(실패 · 건너뜀), 없으면 마지막 시도(tried — 성공이면 at 과 같다) + 주기. 한 번도 성공하지 못한 종류도
-//   주기마다만 다시 묻는다(권한 부족 vCenter 에 매 수집 주기 요청을 보내지 않게).
-export const vcInfoDue = (k, kind, now) => !k || (k.retryAt != null ? now >= k.retryAt : now - (k.tried ?? k.at ?? 0) >= VCINFO_REFRESH_MS[kind]);
+// 다음 시도: retryAt 이 있으면 그때(실패 · 건너뜀은 항상 retryAt 을 단다), 없으면 마지막 성공(at) + 주기. 한 번도 성공하지 못한 종류도
+//   retryAt(주기 뒤)까지는 묻지 않는다 — 권한 부족 vCenter 에 매 수집 주기 요청을 보내지 않게.
+export const vcInfoDue = (k, kind, now) => !k || (k.retryAt != null ? now >= k.retryAt : now - (k.at ?? 0) >= VCINFO_REFRESH_MS[kind]);
 
 /** 여러 타입의 객체 이름을 한 번에 — 하나라도 없는 객체(방금 지워짐)가 있으면 vCenter 가 요청 전체를 거부하므로 실패는 이름 없음으로 둔다. */
 async function lookupNames(c, refs) {
@@ -150,11 +150,11 @@ async function runJobs(cur, jobs, now, deadline, signal) {
     if (!vcInfoDue(cur[kind], kind, now)) continue;
     if (signal?.aborted || Date.now() >= deadline) { cur[kind] = { ...(cur[kind] || { at: null, items: [] }), retryAt: now + VCINFO_RETRY_MS }; continue; }
     try {
-      cur[kind] = { ...(await fn()), tried: now };
+      cur[kind] = await fn();
     } catch (err) {
       // 직전 값을 지우지 않는다 — 오류만 싣는다. 중단 · 시한이면 짧게(VCINFO_RETRY_MS), 권한 부족 같은 실패는 주기 뒤에 다시.
       const keep = cur[kind] || { at: null, items: [] };
-      cur[kind] = { ...keep, error: kind === 'linked' || kind === 'updates' || kind === 'vlcm' ? restErrText(err) : msg(err), tried: now, retryAt: now + (isTransient(err, signal) ? VCINFO_RETRY_MS : VCINFO_REFRESH_MS[kind]) };
+      cur[kind] = { ...keep, error: kind === 'linked' || kind === 'updates' || kind === 'vlcm' ? restErrText(err) : msg(err), retryAt: now + (isTransient(err, signal) ? VCINFO_RETRY_MS : VCINFO_REFRESH_MS[kind]) };
     }
   }
 }
@@ -210,7 +210,7 @@ export async function refreshVcRest(vc, clusters, { now = Date.now(), signal = n
   try {
     await rc.login();
   } catch (err) {
-    for (const k of kinds) cur[k] = { ...(cur[k] || { at: null }), error: `REST 로그인 실패 — ${restErrText(err)}`, tried: now, retryAt: now + (isTransient(err, signal) ? VCINFO_RETRY_MS : VCINFO_REFRESH_MS[k]) };
+    for (const k of kinds) cur[k] = { ...(cur[k] || { at: null }), error: `REST 로그인 실패 — ${restErrText(err)}`, retryAt: now + (isTransient(err, signal) ? VCINFO_RETRY_MS : VCINFO_REFRESH_MS[k]) };
     _byVc.set(vc.id, cur);
     return cur;
   }
