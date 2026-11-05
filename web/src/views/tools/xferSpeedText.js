@@ -429,6 +429,16 @@ export function historyOldestOf(hist, { extraOldestTs = null } = {}) {
   return list.length ? Math.min(...list) : null;
 }
 
+/**
+ * x 축 눈금 글자 정렬 — 오른쪽 여백(padR)이 좁아 축 끝 눈금을 가운데 정렬하면 글자 반이 잘린다.
+ * v2.902: '날짜로 이동' 창은 끝이 자정이라 끝 눈금(00:00)이 늘 축 끝에 온다(화면 확인 — '00:0(' 로 잘렸다). 끝 근처는 끝 정렬.
+ */
+export function tickAnchor(x, m, room = 26) {
+  if (!m || !Number.isFinite(x)) return 'middle';
+  // 왼쪽은 세로 축 글자 자리(padL)가 넉넉해 가운데 정렬로 잘리지 않는다.
+  return x > m.w - m.padR - room ? 'end' : 'middle';
+}
+
 /** 포탈 시각 날짜 'YYYY-MM-DD'(ms → 그 시각이 속한 포탈 날짜). */
 export function portalDateOf(ts, offsetMin = 540) {
   const t = numOrNull(ts);

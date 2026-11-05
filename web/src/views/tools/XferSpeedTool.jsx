@@ -30,7 +30,7 @@ import {
   newSchedule, nextOccurrence, runsPerDayPreview, scheduleStateText, countText, planSummary, LATENCY_NOTE,
   PING_COLOR, PING_TEXT_COLOR, VIEW_MODES, PING_REASON_TEXT, pingModel, comboHover, pingHeadNote, pingStatChips,
   samePingWindow, loadView, saveView,
-  historyOldestOf, portalDateOf, jumpToDate, runOneText, logPagerText, sameLogWindow, logRetentionNote,
+  historyOldestOf, portalDateOf, jumpToDate, runOneText, logPagerText, sameLogWindow, logRetentionNote, tickAnchor,
 } from './xferSpeedText.js';
 import './xferSpeed.css';
 
@@ -527,7 +527,7 @@ function AxisX({ m, offsetMin, h, padB }) {
   return m.xticks.map((t) => (
     <g key={t.ts}>
       <line x1={t.x} x2={t.x} y1={m.padT} y2={h - padB} stroke="#1a2236" />
-      <text x={t.x} y={h - 8} fill="#5d6b85" fontSize="11" textAnchor="middle">{clockText(t.ts, offsetMin, { date: !(m.to - m.from <= 2 * 86_400_000) }).replace(/ 00:00$/, '')}</text>
+      <text x={t.x} y={h - 8} fill="#5d6b85" fontSize="11" textAnchor={tickAnchor(t.x, m)}>{clockText(t.ts, offsetMin, { date: !(m.to - m.from <= 2 * 86_400_000) }).replace(/ 00:00$/, '')}</text>
     </g>
   ));
 }

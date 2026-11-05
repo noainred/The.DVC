@@ -9,7 +9,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
-  maxBackOf, windowEndOf, historyOldestOf, portalDateOf, jumpToDate, runOneText, logPagerText, sameLogWindow, logRetentionNote,
+  maxBackOf, windowEndOf, historyOldestOf, portalDateOf, jumpToDate, runOneText, logPagerText, sameLogWindow, logRetentionNote, tickAnchor,
 } from './xferSpeedText.js';
 
 const HOUR = 3_600_000;
@@ -64,6 +64,17 @@ describe('C2 — 날짜로 이동', () => {
     const c = jumpToDate('2026-01-01', { days: 1, now: NOW, maxBack: 20 });
     expect(c).toMatchObject({ back: 20, clamped: true });
     expect(jumpToDate('2026-01-01', { days: 1, now: NOW, maxBack: 0 })).toEqual({ back: 0, anchor: null, clamped: true });
+  });
+});
+
+describe('x 축 끝 눈금 — 날짜로 이동한 창은 끝이 자정이라 끝 눈금이 축 끝에 온다', () => {
+  it('축 끝 근처는 끝 정렬(가운데 정렬이면 글자 반이 잘렸다)', () => {
+    const m = { w: 1000, padL: 52, padR: 12 };
+    expect(tickAnchor(988, m)).toBe('end');
+    expect(tickAnchor(970, m)).toBe('end');
+    expect(tickAnchor(500, m)).toBe('middle');
+    expect(tickAnchor(52, m)).toBe('middle');
+    expect(tickAnchor(NaN, m)).toBe('middle');
   });
 });
 
