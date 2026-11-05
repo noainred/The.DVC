@@ -34,6 +34,7 @@ import {
 } from './cvpText.js';
 import Select from '../../components/Select.jsx';
 import useSearchHandoff from '../../hooks/useSearchHandoff.js'; // v2.909 헤더 ⌘K 통합 장비 검색 — 검색어 인계
+import { useFocusHandoff } from '../../hooks/useSearchHandoff.js'; // v2.911 고른 장비 상세 열기
 
 /**
  * 특수기능 › Arista CloudVision(CVP) — v2.608.
@@ -83,6 +84,9 @@ export default function CvpTool() {
 
   const u = getCurrentUser();
   const isAdmin = !u || u.role === 'admin';
+  // v2.911(A1): ⌘K 검색에서 고른 스위치(id = '<cvpId>|<장비 키>')의 상세를 연다 — 장비 목록이 온 뒤.
+  useFocusHandoff('cvp:focus', devices?.devices, (d) => setDetailKey({ cvpId: d.cvpId, key: d.key, hostname: d.hostname }),
+    (d, id) => `${d?.cvpId}|${d?.key}` === id);
   const mayCollect = canCollect(u); // 서버가 admin·operator 만 받는다 — 누를 수 없는 버튼은 보이지 않게(WEB2611-11)
 
   const load = useCallback(async () => {

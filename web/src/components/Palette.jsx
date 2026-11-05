@@ -15,7 +15,8 @@ import { can, toolAllowed, fetchJson } from '../api.js';
 import { TOOLS } from '../views/specialToolsList.js';
 import { visibleTools, lockReasonOf } from '../views/toolVisibility.js'; // v2.613 CATALOG2613-07: 잠금 사유도 같은 모듈
 import { search, flatten, catsOfFrom } from './palette.js';
-import { handoffSearch } from '../hooks/searchHandoff.js'; // v2.616 검색어 인계 — 검색어 · IP · 시리얼을 URL 에 싣지 않는다
+import { handoffMany } from '../hooks/searchHandoff.js'; // v2.616 검색어 인계 — 검색어 · IP · 시리얼을 URL 에 싣지 않는다(v2.911 여러 칸)
+import { modKeyLabel } from '../views/headerText.js';
 import {
   KIND_LABEL, KIND_SHORT, MODE_LABEL, splitPrefix, focusPlan, listPlan, canFilter, LIST_SCREEN, TO_LABEL,
   readRecent, pushRecent, clearRecent, recentKeyFor, agoText, builtAgoText, highlightParts, metaParts,
@@ -31,11 +32,23 @@ function Hl({ text, needle }) {
   return <>{a}{b && <mark className="inv-hl">{b}</mark>}{c}</>;
 }
 
+/*
+ * v2.911(A4): 검색 결과로 돌아가기 — 결과를 골라 이동한 뒤 ⌘K 를 다시 열면 직전 검색어 · 종류 칩이 그대로 있다(입력 칸 글자는 선택돼 있어
+ *   새로 치면 바로 바뀐다). 모듈 메모리(새로 고침하면 사라진다 — 검색어는 저장소에 남기지 않는다) · 10분이 지나면 버린다.
+ */
+const LAST_TTL_MS = 10 * 60_000;
+let _lastSearch = null; // { q, kindSel, at }
+function takeLast(now = Date.now()) {
+  const l = _lastSearch;
+  return l && now - l.at <= LAST_TTL_MS ? l : null;
+}
+
 export default function Palette({ onClose, onPick, isAdmin, username = '', toolsAllowed = null, tabs = [] }) {
-  const [q, setQ] = useState('');
+  const [restored] = useState(() => takeLast());
+  const [q, setQ] = useState(() => restored?.q || '');
   const [cur, setCur] = useState(0);
   const [catCfg, setCatCfg] = useState(null);
-  const [kindSel, setKindSel] = useState(null);     // 칩으로 고른 종류(접두와 별개 — IP 대장 칩은 접두로 표현할 수 없다)
+  const [kindSel, setKindSel] = useState(() => restored?.kindSel || null); // 칩으로 고른 종류(접두와 별개 — IP 대장 칩은 접두로 표현할 수 없다)
   const [inv, setInv] = useState(null);             // 마지막으로 받은 장비 응답(지금 입력의 것만)
   const [stats, setStats] = useState(null);         // 빈 입력 — 종류별 개수
   const [invErr, setInvErr] = useState(null);
@@ -103,7 +116,7 @@ export default function Palette({ onClose, onPick, isAdmin, username = '', tools
     return () => { clearTimeout(t); ctl.abort(); };
   }, [q, kindSel, devActive, nonce]);
 
-  useEffect(() => { inputRef.current?.focus(); }, []);
+  useEffect(() => { inputRef.current?.focus(); if (restored) inputRef.current?.select(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { setCur(0); }, [q, kindSel, inv]);
 
   const groups = useMemo(() => (devActive && inv?.groups ? inv.groups : []), [devActive, inv]);
@@ -118,7 +131,7 @@ export default function Palette({ onClose, onPick, isAdmin, username = '', tools
     if (!q.trim()) return recent.map((r) => ({ type: 'recent', key: `r:${r.plan.hash}|${r.at}`, plan: r.plan, item: r }));
     const dev = [];
     for (const g of groups) for (const row of g.rows) dev.push({ type: 'dev', key: `d:${row.kind}:${row.id}:${row.name}`, plan: focusPlan(row), row });
-    return [...dev, ...toolRows.map((it) => ({ type: 'tool', key: `${it.kind}:${it.k || it.id}`, plan: { hash: it.hash, handoff: null }, it }))];
+    return [...dev, ...toolRows.map((it) => ({ type: 'tool', key: `${it.kind}:${it.k || it.id}`, plan: { hash: it.hash, handoffs: [] }, it }))];
   }, [q, recent, groups, toolRows]);
 
   // 이동 = 주소 + (있으면) 검색어 인계. 인계를 먼저 남기고 주소를 바꾼다 — 이미 열린 화면은 구독으로, 새로 열리는 화면은 마운트 때 받는다.
@@ -129,7 +142,8 @@ export default function Palette({ onClose, onPick, isAdmin, username = '', tools
       try { window.open(`${window.location.pathname}${window.location.search}${plan.hash}`, '_blank', 'noopener'); } catch { /* 팝업 차단 */ }
       return;
     }
-    if (plan.handoff) handoffSearch(plan.handoff[0], plan.handoff[1]);
+    if (q.trim()) _lastSearch = { q, kindSel, at: Date.now() };
+    handoffMany(plan.handoffs || []);
     onPick(plan.hash);
   };
   const pick = (item, newTab = false) => {
@@ -224,6 +238,9 @@ export default function Palette({ onClose, onPick, isAdmin, username = '', tools
         )}
 
         <div className="v4-palette-list">
+          {restored && q === restored.q && q.trim() && (
+            <div className="v3-note inv-restored">직전에 고른 검색입니다 — 새로 입력하면 바뀝니다.</div>
+          )}
           {!q.trim() && (
             <>
               {stats?.kinds?.length > 0 && (
@@ -334,7 +351,7 @@ export default function Palette({ onClose, onPick, isAdmin, username = '', tools
         <div className="inv-foot">
           <span><span className="v3-kbd">↑</span> <span className="v3-kbd">↓</span> 이동</span>
           <span><span className="v3-kbd">Enter</span> 열기</span>
-          <span className="inv-hide-narrow"><span className="v3-kbd">⌘</span>+<span className="v3-kbd">Enter</span> 새 탭</span>
+          <span className="inv-hide-narrow"><span className="v3-kbd">{modKeyLabel(typeof navigator !== 'undefined' ? navigator : null)}</span>+<span className="v3-kbd">Enter</span> 새 탭</span>
           <span className="inv-hide-narrow"><span className="v3-kbd">Tab</span> 종류</span>
           <span><span className="v3-kbd">Esc</span> {kindSel || pre.prefix ? '종류 · 접두 지우기' : '닫기'}</span>
           <span className="r">
