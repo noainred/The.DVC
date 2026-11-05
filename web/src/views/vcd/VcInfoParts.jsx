@@ -109,8 +109,9 @@ export function VcTasksCard({ vcenterId, entityType = null, entity = null, embed
         <>
           <Status d={q.data} />
           {!q.data.notCollected && (rows.length ? (
-            <STable className="v3-table" minWidth={880} limit={200}>
-              <thead><tr><th>작업</th>{!entity && <th>대상</th>}<th>상태</th><th>시작한 사용자</th><th>대기</th><th>시작</th><th>완료</th><th>걸린 시간</th></tr></thead>
+            <STable className="v3-table" minWidth={entity ? 640 : 780} limit={200}>
+              {/* 1440 의 하위 칸 옆 폭(약 950px)에 8열이 넘쳐 '걸린 시간' 이 가려졌다(Chromium 재판독) — 대기 시각은 시작 칸에 합치고 걸린 시간을 상태 옆으로. */}
+              <thead><tr><th>작업</th>{!entity && <th>대상</th>}<th>상태</th><th>걸린 시간</th><th>시작한 사용자</th><th>시작</th><th>완료</th></tr></thead>
               <tbody>
                 {rows.map((t) => {
                   const [b, s] = TASK_STATE[t.state] || ['gray', '—'];
@@ -119,11 +120,12 @@ export function VcTasksCard({ vcenterId, entityType = null, entity = null, embed
                       <td className="mono" style={{ whiteSpace: 'normal', minWidth: 180, overflowWrap: 'anywhere' }}>{t.op ? t.op.replace(/\./g, '.\u200b') : '—'}{t.error && <div style={{ fontFamily: 'inherit', fontSize: 12, color: 'var(--red, #b91c1c)' }}>{t.error}</div>}</td>
                       {!entity && <td><Target vcenterId={vcenterId} type={t.entityType} mref={t.entity} name={t.entityName} /></td>}
                       <td data-sort={t.state || ''}>{t.lost ? <span className="badge gray" title="실행 중으로 본 뒤 끝난 모습을 보지 못하고 vCenter 최근 작업에서 사라졌습니다">상태 모름</span> : <span className={`badge ${b}`}>{s}{t.state === 'running' && t.progress != null ? ` ${t.progress}%` : ''}</span>}</td>
-                      <td style={{ overflowWrap: 'anywhere' }}>{t.user || (t.reason && t.reason !== 'user' ? <span className="muted">{TASK_REASON[t.reason]}</span> : '—')}</td>
-                      <td className="mono" data-sort={t.queued == null ? '' : String(t.queued)}>{shortTs(t.queued)}</td>
-                      <td className="mono" data-sort={t.started == null ? '' : String(t.started)}>{shortTs(t.started)}</td>
-                      <td className="mono" data-sort={t.completed == null ? '' : String(t.completed)}>{shortTs(t.completed)}</td>
                       <td>{taskDurText(t)}</td>
+                      <td style={{ overflowWrap: 'anywhere' }}>{t.user || (t.reason && t.reason !== 'user' ? <span className="muted">{TASK_REASON[t.reason]}</span> : '—')}</td>
+                      <td className="mono" data-sort={String(t.started ?? t.queued ?? '')} title={t.queued ? `대기 ${shortTs(t.queued)}` : undefined}>
+                        {t.started ? shortTs(t.started) : t.queued ? <span className="muted">{`대기 ${shortTs(t.queued)}`}</span> : '—'}
+                      </td>
+                      <td className="mono" data-sort={t.completed == null ? '' : String(t.completed)}>{shortTs(t.completed)}</td>
                     </tr>
                   );
                 })}
