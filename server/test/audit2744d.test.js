@@ -62,6 +62,9 @@ test('EDGE-01: 엣지 iDRAC 등록부가 손상이면 fleet push 는 빈 목록�
     const row = () => cf.listEdgeFleet().find((x) => x.agent === 'edge-gd2744');
     const n0 = row()?.baremetal;
     assert.ok(n0 >= 1, `정상 push 가 중앙 목록을 만든다: ${JSON.stringify(row())}`);
+    // 서비스 인벤토리 6차 2: 실제 push 본문이 '태그 없을 때 id' 를 싣고 중앙이 serverId 로 받는다(옛 fl: 고정 승계 — 실제 push 경로로 확인)
+    const us = cf.getEdgeFleetServers().filter((x) => x.remoteAgent === 'edge-gd2744').map((x) => x.untaggedServerId).sort();
+    assert.deepEqual(us, ['edge:edge-gd2744:bm-1', 'edge:edge-gd2744:bm-2'], JSON.stringify(us));
 
     corruptIdrac();
     assert.ok(registry.registryLoadError(), '손상이면 등록부가 읽지 못함을 말한다');
