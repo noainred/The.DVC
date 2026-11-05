@@ -359,12 +359,14 @@ export async function disconnectRestoredVm(vcenterId, name, { setPhase } = {}) {
 export async function verifyRestoredVm(vcenterId, name, { deleteOnOk = true, retry = false, setPhase } = {}) {
   const t0 = Date.now();
   const ph = phaseRecorder(setPhase);
-  const fin = (ok, detail, extra = {}) => ({ ok, detail, ms: Date.now() - t0, phases: ph.end(ok), ...extra });
+  // v2.899(점검 B2): 네트워크 끊기를 확인했는가 — 끊은 뒤의 실패(Tools 시한 · 켜기 · 끄기)를 '네트워크 끊기 실패' 로 적지 않게 결과에 싣는다
+  let nicOff = false;
+  const fin = (ok, detail, extra = {}) => ({ ok, detail, ms: Date.now() - t0, phases: ph.end(ok), nicOff, ...extra });
   const vmName = String(name || '').trim();
   if (!vmName) return fin(false, '검증할 VM 이름이 없습니다');
   if (getDataSource() === 'mock') {
     ph.step('VM 찾기'); await sleep(200);
-    ph.step('네트워크 끊기'); await sleep(200);
+    ph.step('네트워크 끊기'); await sleep(200); nicOff = true;
     ph.step('전원 켜기 · Tools 대기'); await sleep(800);
     const bad = demoHash(`bareos-verify|${vmName}`) % 5 === 0;
     ph.step('끄기'); await sleep(200);
@@ -390,6 +392,7 @@ export async function verifyRestoredVm(vcenterId, name, { deleteOnOk = true, ret
     if (st.powerState !== 'poweredOff') return fin(false, retry ? `'${vmName}' 이 켜져 있습니다 — 앞 검증(재시작 전)이 켠 채 끊겼을 수 있습니다. 네트워크가 끊겼는지 확인한 뒤 끄고 지우세요` : `'${vmName}' 이 이미 켜져 있어(${st.powerState}) 검증하지 않았습니다 — 누군가 쓰는 중일 수 있습니다${NIC_WARN}`);
     ph.step('네트워크 끊기');
     await disconnectAllNics(c, ref);   // 확인 못 하면 throw — 아래 켜기에 닿지 않는다
+    nicOff = true;
     ph.step('전원 켜기');
     powered = true;
     await powerOnVm(c, ref);

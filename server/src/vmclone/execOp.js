@@ -83,7 +83,7 @@ export async function executeOp(op) {
     return perVcenter(vcenterId, async (setPhase) => {
       const r = await verifyRestoredVm(vcenterId, name, { deleteOnOk: spec.deleteOnOk !== false, retry: spec.retry === true, setPhase });
       logAudit({ user: by, action: r.ok ? 'Bareos 복원 검증 성공' : 'Bareos 복원 검증 실패', target: `${vcenterId}/${name.slice(0, 60)}`, detail: String(r.detail).slice(0, 200) });
-      return { ok: r.ok, detail: r.detail, ms: r.ms, toolsMs: r.toolsMs ?? null, deleted: !!r.deleted };
+      return { ok: r.ok, detail: r.detail, ms: r.ms, toolsMs: r.toolsMs ?? null, deleted: !!r.deleted, nicOff: r.nicOff === true };   // v2.899(점검 B2)
     }, { id: op.id, kind, name });
   }
 

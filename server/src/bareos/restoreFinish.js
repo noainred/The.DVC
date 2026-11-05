@@ -83,7 +83,9 @@ onOpFinish('bareos-verify', (op) => {
   if (!bareosJobId || !rid) return;
   const ok = !!op.result?.ok;
   patchRestoreFinish(String(bareosJobId), Number(rid), {
-    nic: ok ? 'ok' : 'failed', verify: ok ? 'ok' : 'failed', detail: String(op.result?.detail || '').slice(0, 400), at: op.doneAt || Date.now(), opId: op.id,
+    // v2.899(점검 B2 — 재현): 끊기를 확인한 뒤의 실패(Tools 시한 · 켜기 · 끄기)는 nic 'ok' — 예전엔 검증 실패면 늘 '네트워크 끊기 실패' 로 적고 세었다(재해 복구 사유 · 요약 메일).
+    //   nicOff 를 모르는 옛 엣지 회신은 예전 판정(실패면 failed)을 그대로 — 끊었다고 지어내지 않는다.
+    nic: ok || op.result?.nicOff === true ? 'ok' : 'failed', verify: ok ? 'ok' : 'failed', detail: String(op.result?.detail || '').slice(0, 400), at: op.doneAt || Date.now(), opId: op.id,
     ...(Number.isFinite(op.result?.toolsMs) ? { toolsMs: op.result.toolsMs } : {}), ...(typeof op.result?.deleted === 'boolean' ? { deleted: op.result.deleted } : {}), ...(op.result?.late ? { late: true } : {}),   // v2.874 B3-01 남김(false)도 — 없으면 화면이 '모름'
   }, sameOp(op));
 });
