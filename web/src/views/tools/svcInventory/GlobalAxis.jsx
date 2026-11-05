@@ -8,28 +8,45 @@ import { STable } from '../../../components/STable.jsx';
 import Select from '../../../components/Select.jsx';
 import { Card } from '../shared.jsx';
 import { TierBadge, UsagePair, BackupCell, MembersPanel } from './parts.jsx';
-import { matrixColumns, numText, gbText, faultsView } from '../svcInventoryText.js';
+import { matrixColumns, numText, gbText, faultsView, MATRIX_MODES, matrixCellValue, regionCell } from '../svcInventoryText.js';
 
 const btn = { padding: '5px 10px', fontSize: 12, flex: 'none' };
 const shortCorp = (n) => String(n || '').replace(/^vcenter-/, '');
 
-function MatrixCell({ c, onClick, faultsOn }) {
+function MatrixCell({ c, onClick, faultsOn, mode = 'n' }) {
   if (!c) return <td className="muted" style={{ textAlign: 'center' }}>–</td>;
-  const f = faultsOn ? (c.faults || 0) : null;
+  const f = faultsOn && !c.stale ? (c.faults || 0) : null;
+  const x = matrixCellValue(c, mode, faultsOn);
   return (
-    <td style={{ textAlign: 'center', cursor: 'pointer', fontWeight: 700 }} onClick={onClick} data-sort={c.n}
-      title={`VM ${c.vm} · 베어메탈 ${c.bm}${c.stale ? ' · 이 법인을 지금 읽지 못해 사용률·장애가 지금 값이 아닙니다' : ''}${f ? ` · 부품 장애 ${f}` : ''}`}>
-      {c.n}{c.stale ? <span className="muted" title="지금 읽지 못함">?</span> : null}
-      {f ? <span className="badge red" style={{ marginLeft: 4 }}>{f}</span> : null}
+    <td style={{ textAlign: 'center', cursor: 'pointer', fontWeight: 700, whiteSpace: 'nowrap' }} onClick={onClick} data-sort={x?.v ?? ''}
+      title={`VM ${c.vm} · 베어메탈 ${c.bm}${c.stale ? ' · 이 법인을 지금 읽지 못해 사용률·장애가 지금 값이 아닙니다' : ''}${f ? ` · 부품 장애 ${f}` : ''}${faultsOn && c.faultsUnknown ? ` · 장애를 못 읽은 서버 ${c.faultsUnknown}` : ''}`}>
+      {mode === 'faults' ? (x.v ? <span className="badge red">{x.text}</span> : <span className={x.v == null ? 'muted' : ''}>{x.text}</span>) : x.text}
+      {c.stale ? <span className="muted" title="지금 읽지 못함">?</span> : null}
+      {mode === 'n' && f ? <span className="badge red" style={{ marginLeft: 4 }}>{f}</span> : null}
     </td>
   );
 }
+/** 접은 지역 한 칸 — 법인 칸들을 모은 값(구성원·장애·vCPU 합 · CPU 는 Σ사용÷Σ용량). */
+function RegionCell({ list, mode, faultsOn }) {
+  const x = regionCell(list, mode, faultsOn);
+  if (!x) return <td className="muted" style={{ textAlign: 'center', borderLeft: '1px solid var(--border)' }}>–</td>;
+  return (
+    <td style={{ textAlign: 'center', fontWeight: 700, whiteSpace: 'nowrap', borderLeft: '1px solid var(--border)', background: 'var(--panel-2)' }} data-sort={x.v ?? ''}
+      title={`지역 합계 · 법인 ${x.corps}곳${x.stale ? ` · 지금 읽지 못한 법인 ${x.stale}곳은 CPU·장애에서 뺐습니다` : ''}${x.unknown ? ` · 장애를 못 읽은 서버 ${x.unknown}` : ''}`}>
+      {mode === 'faults' && x.v ? <span className="badge red">{x.text}</span> : x.text}{x.stale ? <span className="muted">?</span> : null}
+    </td>
+  );
+}
+const MODE_LEGEND = { n: '칸 = 구성원 수(붉은 배지 = 열린 부품 장애)', faults: '칸 = 열린 부품 장애(구성원 + 영향 호스트 · ‘+?’ = 장애를 못 읽은 서버가 있음)', cpu: '칸 = CPU 가중 사용률(Σ사용÷Σ용량 · 꺼진 VM·못 읽은 서버 제외)', vcpu: '칸 = vCPU 할당 합(투입 자원)' };
 
 /** 전역 서비스 상세에서 '전 법인 구성원 모두 보기' 를 고른 상태(법인 id 와 겹치지 않는 표지 — 법인 행 선택은 그대로 둔다). */
 const ALL_CORPS = '*';
 
 export default function GlobalAxis({ d, regionOf, corpName, writableOf, op, busy, gsel, setGsel, gcorp, setGcorp, reloadKey }) {
   const [first, setFirst] = useState('matrix');
+  const [mode, setMode] = useState('n');                      // 매트릭스 칸 모드(5차 M9)
+  const [folded, setFolded] = useState(() => new Set());     // 접은 지역 — 28열이면 1440px 에 다 안 보인다
+  const fold = (r) => setFolded((s0) => { const n = new Set(s0); if (n.has(r)) n.delete(r); else n.add(r); return n; });
   const [ng, setNg] = useState({ name: '', tier: '2', owner: '' });
   const [linkPick, setLinkPick] = useState({});
   const globals = d.global?.globals || [];
@@ -105,19 +122,32 @@ export default function GlobalAxis({ d, regionOf, corpName, writableOf, op, busy
 
           {!sel && first === 'matrix' ? (
             <div className="card" style={{ minWidth: 0 }}>
-              <div className="muted" style={{ padding: '8px 14px', fontSize: 12, borderBottom: '1px solid var(--border)' }}>행 = 전역 서비스 · 열 = 법인(지역별) · 칸 = 구성원 수(붉은 배지 = 열린 부품 장애, ? = 지금 읽지 못한 법인, – = 없음) · 칸을 누르면 그 법인의 구성원</div>
+              <div className="flex wrap gap" style={{ padding: '8px 14px', alignItems: 'center', borderBottom: '1px solid var(--border)' }}>
+                <div className="tabs" style={{ marginLeft: 0 }} role="group" aria-label="칸에 보일 값">
+                  {MATRIX_MODES.map(([k, l]) => <button key={k} type="button" className={`tab${mode === k ? ' active' : ''}`} aria-pressed={mode === k} onClick={() => setMode(k)}>{l}</button>)}
+                </div>
+                {cols.length > 1 ? <button type="button" className="logout-btn" style={btn} onClick={() => setFolded(folded.size === cols.length ? new Set() : new Set(cols.map((g) => g.region)))}>{folded.size === cols.length ? '지역 모두 펼치기' : '지역 모두 접기'}</button> : null}
+              </div>
+              <div className="muted" style={{ padding: '6px 14px', fontSize: 12, borderBottom: '1px solid var(--border)' }}>행 = 전역 서비스 · 열 = 법인(지역별 — 지역 이름을 누르면 접어 합계 한 칸) · {MODE_LEGEND[mode]} · ? = 지금 읽지 못한 법인 · – = 없음 · 칸을 누르면 그 법인의 구성원</div>
               {!globals.length ? <div className="muted" style={{ padding: 16 }}>전역 서비스를 만들고 법인 서비스를 연결하면 여기에 행이 생깁니다.</div> : (
-                <STable className="table svcinv-t" minWidth={Math.max(560, 200 + d.corps.length * 56)} sortable={false}>
+                <STable className="table svcinv-t" minWidth={Math.max(560, 200 + cols.reduce((a, g) => a + (folded.has(g.region) ? 1 : g.corps.length), 0) * 56)} sortable={false}>
                   <thead>
                     {/* 법인 수·합계는 등급 바로 뒤 — 28열 매트릭스 끝에 두면 1440px 에서 가로 스크롤 뒤로 숨는다(실측). */}
-                    <tr><th rowSpan={2} className="svcinv-stick">서비스</th><th rowSpan={2}>등급</th><th rowSpan={2} title="이 전역 서비스가 연결된 법인 수">법인</th><th rowSpan={2}>합계</th>{cols.map((g) => <th key={g.region} colSpan={g.corps.length} style={{ textAlign: 'center', background: 'var(--panel-2)' }}>{g.region}</th>)}</tr>
-                    <tr>{cols.flatMap((g) => g.corps.map((c) => <th key={c.vcenterId} title={c.name} style={{ textAlign: 'center', fontSize: 11 }}>{shortCorp(c.name).replace(/-0?1$/, '')}</th>))}</tr>
+                    <tr><th rowSpan={2} className="svcinv-stick">서비스</th><th rowSpan={2}>등급</th><th rowSpan={2} title="이 전역 서비스가 연결된 법인 수">법인</th><th rowSpan={2}>합계</th>{cols.map((g) => (
+                      <th key={g.region} colSpan={folded.has(g.region) ? 1 : g.corps.length} style={{ textAlign: 'center', background: 'var(--panel-2)', padding: 0 }}>
+                        <button type="button" onClick={() => fold(g.region)} aria-expanded={!folded.has(g.region)} title={folded.has(g.region) ? '펼쳐 법인별로 봅니다' : '접어 지역 합계 한 칸으로 봅니다'}
+                          style={{ background: 'none', border: 0, color: 'inherit', font: 'inherit', fontWeight: 700, cursor: 'pointer', padding: '7px 6px', width: '100%' }}>{folded.has(g.region) ? '▸' : '▾'} {g.region}{folded.has(g.region) ? ` (${g.corps.length})` : ''}</button>
+                      </th>))}</tr>
+                    <tr>{cols.flatMap((g) => (folded.has(g.region) ? [<th key={`r:${g.region}`} style={{ textAlign: 'center', fontSize: 11 }}>합계</th>]
+                      : g.corps.map((c) => <th key={c.vcenterId} title={c.name} style={{ textAlign: 'center', fontSize: 11 }}>{shortCorp(c.name).replace(/-0?1$/, '')}</th>)))}</tr>
                   </thead>
                   <tbody>{globals.map((g) => (
                     <tr key={g.id}>
                       <td className="svcinv-stick"><b style={{ cursor: 'pointer' }} onClick={() => pick(g.id)}>{g.name}</b></td><td><TierBadge tier={g.tier} /></td>
                       <td style={{ textAlign: 'center' }}>{g.corps.length}</td><td style={{ textAlign: 'center', borderRight: '1px solid var(--border)' }}><b>{g.stat.n.total}</b></td>
-                      {cols.flatMap((col) => col.corps.map((c) => <MatrixCell key={c.vcenterId} c={cells[g.id]?.[c.vcenterId]} faultsOn={faultsOn} onClick={() => pick(g.id, c.vcenterId)} />))}
+                      {cols.flatMap((col) => (folded.has(col.region)
+                        ? [<RegionCell key={`r:${col.region}`} list={col.corps.map((c) => cells[g.id]?.[c.vcenterId])} mode={mode} faultsOn={faultsOn} />]
+                        : col.corps.map((c) => <MatrixCell key={c.vcenterId} c={cells[g.id]?.[c.vcenterId]} faultsOn={faultsOn} mode={mode} onClick={() => pick(g.id, c.vcenterId)} />)))}
                     </tr>
                   ))}</tbody>
                 </STable>

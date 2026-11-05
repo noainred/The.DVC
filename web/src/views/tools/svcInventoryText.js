@@ -104,6 +104,62 @@ export function matrixColumns(corps, regionOf = () => '') {
   return [...groups.entries()].sort((a, b) => a[0].localeCompare(b[0], 'ko')).map(([region, cs]) => ({ region, corps: cs.sort((a, b) => a.name.localeCompare(b.name, 'en', { numeric: true })) }));
 }
 
+/**
+ * 매트릭스 칸 모드(5차 M9) — 구성원 수 · 부품 장애 · CPU(가중) · vCPU 할당. 값은 서버가 준 칸 통계에서 읽기만 한다(판정·집계 복제 아님).
+ * 반환 { v: 정렬·색 기준 수(null = 모름), text }.
+ */
+export const MATRIX_MODES = Object.freeze([['n', '구성원 수'], ['faults', '부품 장애'], ['cpu', 'CPU(가중)'], ['vcpu', 'vCPU 할당']]);
+export function matrixCellValue(c, mode, faultsOn) {
+  if (!c) return null;
+  if (mode === 'faults') {
+    if (!faultsOn || c.stale) return { v: null, text: '—' };
+    // 못 읽은 장애(faultsUnknown)는 0 이 아니다 — '?' 로 밝힌다(3차 반증 5: 예전에는 0 장애 + 모름 2 가 '0')
+    const f = n0(c.faults); const u = n0(c.faultsUnknown);
+    return { v: f, unknown: u, text: u ? (f ? `${f}+?` : '?') : String(f) };
+  }
+  if (mode === 'cpu') { const p = c.stale ? null : numOrNull(c.usage?.cpu); return { v: p, text: p == null ? '—' : `${Math.round(p)}%` }; }
+  if (mode === 'vcpu') { const x = numOrNull(c.alloc?.vcpu); return { v: x, text: x == null ? '—' : Math.round(x).toLocaleString() }; }
+  return { v: n0(c.n), text: String(n0(c.n)) };
+}
+/**
+ * 지역을 접었을 때 한 칸(5차 M9) — 구성원·장애·vCPU 는 합, CPU 는 Σ사용÷Σ용량(서버가 준 cpuUsed·cpuTotal — 법인 평균을 다시 평균하지 않는다).
+ * 못 읽는 법인(stale)은 CPU·장애 합에서 빼고 stale 개수로 밝힌다. 칸이 하나도 없으면 null.
+ */
+export function regionCell(list, mode, faultsOn) {
+  const cs = (list || []).filter(Boolean);
+  if (!cs.length) return null;
+  const stale = cs.filter((c) => c.stale).length;
+  if (mode === 'cpu') {
+    let used = 0; let total = 0;
+    for (const c of cs) { if (c.stale) continue; const u = numOrNull(c.usage?.cpuUsed); const t = numOrNull(c.usage?.cpuTotal); if (u != null && t != null && t > 0) { used += u; total += t; } }
+    const p = total > 0 ? (used / total) * 100 : null;
+    return { v: p, text: p == null ? '—' : `${Math.round(p)}%`, stale, corps: cs.length };
+  }
+  if (mode === 'faults') {
+    const live = cs.filter((c) => !c.stale);
+    if (!faultsOn || !live.length) return { v: null, text: '—', stale, corps: cs.length };   // 전부 못 읽는 지역은 '0' 이 아니다(3차 반증 5)
+    const f = live.reduce((a, c) => a + n0(c.faults), 0); const u = live.reduce((a, c) => a + n0(c.faultsUnknown), 0);
+    return { v: f, unknown: u, text: u ? (f ? `${f}+?` : '?') : String(f), stale, corps: cs.length };
+  }
+  if (mode === 'vcpu') { const x = cs.reduce((a, c) => a + n0(c.alloc?.vcpu), 0); return { v: x, text: Math.round(x).toLocaleString(), stale, corps: cs.length }; }
+  const n = cs.reduce((a, c) => a + n0(c.n), 0);
+  return { v: n, text: String(n), stale, corps: cs.length };
+}
+
+/**
+ * 서비스별 현황 표 검색·필터(5차 M8 — 28법인이면 수백 행). q 는 서비스명·폴더·담당자·법인 이름에서 찾는다(대소문자 무시).
+ * tier1 = 등급 1만 · noOwner = 담당자 미지정만.
+ */
+export function filterServices(list, { q = '', tier1 = false, noOwner = false, corpName = (x) => x } = {}) {
+  const needle = String(q || '').trim().toLowerCase();
+  return (list || []).filter((s) => {
+    if (tier1 && s.tier !== 1) return false;
+    if (noOwner && String(s.owner || '').trim()) return false;
+    if (!needle) return true;
+    return [s.name, s.path, s.owner, corpName(s.corp)].some((x) => String(x || '').toLowerCase().includes(needle));
+  });
+}
+
 /** 서버 오류 → 사람이 읽을 문장. */
 export function opErrorText(e) {
   const m = String(e?.message || e || '').trim();
@@ -118,6 +174,14 @@ export function groupActions(g) {
   if (g.kind === 'entry') return { link: '이 엔트리에 서비스 라벨 붙이기', create: false, op: 'scan.label' };
   if (g.kind === 'placement' || g.kind === 'manual') return { pinOnly: true };
   return { none: true };
+}
+
+/** '검토 필요' 수와 부제(5차 R17 — 수에 들어가는 것을 부제에 전부 적는다). */
+export function reviewSummary(q = {}) {
+  const parts = [['드리프트', q.drift], ['법인 불일치', q.mismatch], ['유령', q.ghosts], ['태그 모호', q.tagAmbiguous], ['규칙 겹침', q.ruleOverlap]].filter(([, n]) => n0(n) > 0);
+  const n = parts.reduce((a, [, x]) => a + n0(x), 0);
+  const meta = `${parts.length ? parts.map(([l, x]) => `${l} ${n0(x)}`).join(' · ') : '드리프트·불일치·유령·모호 없음'}${n0(q.ghostsHeld) ? ` (판정 보류 ${n0(q.ghostsHeld)} — 수에 넣지 않음)` : ''}`;
+  return { n, meta };
 }
 
 /** CSV 파일 이름. */

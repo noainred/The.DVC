@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { folderTreeOf, matrixColumns, faultsView, backupView, powerText, srcSummary, groupActions, GROUP_TITLE, REASON_TEXT, pctText } from './svcInventoryText.js';
+import { folderTreeOf, matrixColumns, faultsView, backupView, powerText, srcSummary, groupActions, GROUP_TITLE, REASON_TEXT, pctText, matrixCellValue, regionCell, filterServices, reviewSummary } from './svcInventoryText.js';
 
 const svc = (id, path, n) => ({ id, name: id, path, stat: { n: { total: n } } });
 
@@ -44,5 +44,39 @@ describe('svcInventoryText', () => {
     expect(GROUP_TITLE.nocorp({ value: 'attr-error' })).toContain('오류');
     expect(GROUP_TITLE.nocorp({ value: '' })).toContain('어느 귀속 규칙에도');
     for (const k of ['source-unreported', 'no-corp-error', 'no-corp-conflict']) { expect(REASON_TEXT[k]).toBeTruthy(); expect(REASON_TEXT[k].includes('`')).toBe(false); }
+  });
+  it('매트릭스 칸 모드 · 지역 합계(5차 M9) — CPU 는 Σ사용÷Σ용량(법인 평균의 평균 아님) · 못 읽는 법인은 CPU·장애에서 뺀다', () => {
+    const a = { n: 3, faults: 2, stale: false, alloc: { vcpu: 8 }, usage: { cpu: 50, cpuUsed: 10, cpuTotal: 20 } };
+    const b = { n: 1, faults: 1, stale: false, alloc: { vcpu: 4 }, usage: { cpu: 10, cpuUsed: 1, cpuTotal: 10 } };
+    const st = { n: 5, faults: 9, stale: true, alloc: { vcpu: 2 }, usage: { cpu: 90, cpuUsed: 90, cpuTotal: 100 } };
+    expect(matrixCellValue(a, 'n', true).text).toBe('3');
+    expect(matrixCellValue(a, 'cpu', true).text).toBe('50%');
+    expect(matrixCellValue(st, 'cpu', true).text).toBe('—');
+    expect(matrixCellValue(a, 'faults', false).text).toBe('—');
+    expect(matrixCellValue(a, 'vcpu', true).text).toBe('8');
+    expect(regionCell([a, b, st, undefined], 'cpu', true).text).toBe('37%');   // (10+1)/(20+10) — (50+10)/2=30 이 아니다
+    expect(regionCell([a, b, st], 'faults', true)).toMatchObject({ v: 3, stale: 1, corps: 3 });
+    expect(regionCell([a, b, st], 'n', true).v).toBe(9);
+    expect(regionCell([a, b], 'vcpu', true).v).toBe(12);
+    expect(regionCell([undefined], 'n', true)).toBe(null);
+    expect(regionCell([{ n: 1, usage: { cpu: null } }], 'cpu', true).text).toBe('—');
+    // 3차 반증 5: 못 읽은 장애는 0 이 아니다 · 전부 못 읽는 지역은 '0' 이 아니라 '—'
+    expect(matrixCellValue({ faults: 0, faultsUnknown: 2 }, 'faults', true).text).toBe('?');
+    expect(matrixCellValue({ faults: 1, faultsUnknown: 2 }, 'faults', true).text).toBe('1+?');
+    expect(regionCell([st], 'faults', true).text).toBe('—');
+    expect(regionCell([a, { ...b, faultsUnknown: 1 }], 'faults', true)).toMatchObject({ text: '3+?', unknown: 1 });
+    expect(reviewSummary({ ruleOverlap: 2 }).meta).toContain('규칙 겹침 2');
+  });
+  it('서비스 표 찾기·필터(5차 M8) · 검토 필요 요약(R17 — 수에 들어가는 것을 부제에 전부)', () => {
+    const list = [{ name: 'ERP', path: '업무', owner: 'kim', corp: 'vc-a', tier: 1 }, { name: 'MES', path: '', owner: '', corp: 'vc-b', tier: 2 }];
+    const cn = (id) => ({ 'vc-a': 'vcenter-seoul', 'vc-b': 'vcenter-pl' }[id]);
+    expect(filterServices(list, { q: 'seoul', corpName: cn }).map((x) => x.name)).toEqual(['ERP']);
+    expect(filterServices(list, { q: '업무' }).map((x) => x.name)).toEqual(['ERP']);
+    expect(filterServices(list, { tier1: true }).map((x) => x.name)).toEqual(['ERP']);
+    expect(filterServices(list, { noOwner: true }).map((x) => x.name)).toEqual(['MES']);
+    const r = reviewSummary({ drift: 2, mismatch: 1, ghosts: 0, tagAmbiguous: 3, ghostsHeld: 4 });
+    expect(r.n).toBe(6);
+    expect(r.meta).toContain('법인 불일치 1'); expect(r.meta).toContain('태그 모호 3'); expect(r.meta).toContain('판정 보류 4');
+    expect(reviewSummary({}).n).toBe(0);
   });
 });
