@@ -21,7 +21,7 @@ import {
   directorStateOf, numText, resultBar, shortTs, fmtGb, PRIORITY_TEXT, PRIORITY_TONE, BAREOS_RPO_DAYS, BAREOS_DETAIL_VC_KEY, stText, priorityChips, priorityEmptyText,
   corpAttention, corpBucket, CORP_BUCKETS, partialText,
 } from './bareosViewText.js';
-import { useHealth, HealthBand, HealthTag } from './BareosHealth.jsx';   // v2.890 사전 점검(관리자 — 403 이면 띠 · 열을 그리지 않는다)
+import { useHealth, HealthBand, HealthTag } from './BareosHealth.jsx';   // v2.891 사전 점검(관리자 — 403 이면 띠 · 열을 그리지 않는다)
 import { healthCell, diskCell } from './bareosHealthText.js';
 
 const TONE = { ok: '#86efac', warn: '#fcd34d', bad: '#fca5a5', run: '#93c5fd', muted: 'var(--text-dim)', bareos: '#fdba74' };
@@ -100,7 +100,7 @@ function BareosSummaryView() {
   for (const r of rows) bucketN[corpBucket(r)] += 1;
   const needle = q.trim().toLowerCase();
   const order = { attn: 0, unknown: 1, ok: 2 };
-  // v2.890 사전 점검 — 관리자에게만(서버 GET /health 가 관리자 · 범위 계정은 자기 법인만)
+  // v2.891 사전 점검 — 관리자에게만(서버 GET /health 가 관리자 · 범위 계정은 자기 법인만)
   const hShow = !!health.d && !health.d.hidden;
   const hmap = new Map((hShow ? health.d.corps || [] : []).map((c) => [c.vcenterId, c]));
   const hBadN = rows.filter((r) => ['bad', 'warn'].includes(hmap.get(r.id)?.verdict)).length;

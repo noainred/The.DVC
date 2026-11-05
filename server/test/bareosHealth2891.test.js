@@ -1,5 +1,5 @@
 /**
- * test/bareosHealth2890.test.js — v2.890 Bareos 사전 점검(시안 docs/design/bareos-precheck · 컨펌 2026-11-05).
+ * test/bareosHealth2891.test.js — v2.891 Bareos 사전 점검(시안 docs/design/bareos-precheck · 컨펌 2026-11-05).
  *  ① judgeCorp · verdictOf — 엣지에서 본 vCenter 접속 실패 = 불가 · 중앙에서 본 것 = 참고(판정 밖) · 지문 첫 관측 · 바뀜 = 경고 · 디스크 기준 · 모름은 수에 넣지 않음
  *  ② daysToFull — 최근 7일 · 표본 3개 미만 · 늘지 않으면 null
  *  ③ transitionOf · mailPlan — 나빠짐 · 회복 · 좋아짐(메일 없음) · 모름은 커서를 옮기지 않음 · 메일 끄기 설정
@@ -22,7 +22,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const SRC = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../src');
 const J = (p) => JSON.stringify(pathToFileURL(path.join(SRC, p)).href);
-const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'bareos2890-'));
+const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'bareos2891-'));
 process.env.CONFIG_DIR = tmp;
 process.env.DATA_SOURCE = 'mock';
 process.env.AUTH_ENABLED = 'true';
@@ -381,7 +381,7 @@ test('⑧ 라우트 — 범위 · 전 법인 점검 문지기 · 설정 · 지�
 
 /* ── ⑨ 메일 ── */
 test('⑨ mailTick — 나빠짐 한 통 · 반복 없음 · 회복 · 꺼짐이면 커서만 · 실패면 10분 뒤', () => {
-  const cfg = fs.mkdtempSync(path.join(os.tmpdir(), 'bareos2890m-'));
+  const cfg = fs.mkdtempSync(path.join(os.tmpdir(), 'bareos2891m-'));
   const corp = (verdict, notified) => ({ at: 1, directorId: 'd1', directorName: '폴란드 Bareos', from: 'edge', verdict, notified, items: [{ key: 'vc', status: verdict === 'ok' ? 'ok' : 'bad', label: 'vCenter 접속', detail: 'vc:443 접속 거부(ECONNREFUSED) · 엣지 노드에서', action: 'FD 서버에서 nc -vz vc 443' }], history: [] });
   fs.writeFileSync(path.join(cfg, 'bareos-health-state.json'), JSON.stringify({ corps: { 'vc-pl': corp('bad', null), 'vc-kr': corp('ok', null) }, disks: {}, mail: {} }));
   fs.writeFileSync(path.join(cfg, 'bareos.json'), JSON.stringify({ version: 2, directors: [{ id: 'dir_pl', name: 'PL', host: '10.0.0.1', port: 9101, consoleName: 'portal', password: 'x' }], defaults: {}, sites: [{ vcenterId: 'vc-pl', directorId: 'dir_pl', vcserver: 'vc' }, { vcenterId: 'vc-kr', directorId: 'dir_pl', vcserver: 'vc2' }] }));

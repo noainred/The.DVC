@@ -2909,11 +2909,11 @@ high 0 · 반증 1(A3-01 — 경로 오독, 데모 계정은 READ_DENY 하위라
 - 변이 22/22(처음 10/12 — '회신 ok 확인' · '요약 호출부' 생존 → 단언 추가 · 반증 반영 뒤 '세대 키' · 'L2' · 'L3(ops)' · 'L6' 생존 → 세대만 다른 단언 + 배선 소스 단언).
 - server/src/bareos/CLAUDE.md 크기 상한(15000B) 때문에 옮긴 문구: 실환경 미확인 목록의 '25.x `.jobs` 의 enabled 칸(master 소스 기준 — 없으면 다시 끄기를 하지 않는다)'.
 
-## v2.890 Bareos 사전 점검 — FD → vCenter:443 매일 점검 · SD 디스크 여유 감시(2026-11-05 · 시안 docs/design/bareos-precheck · 사용자 컨펌 '구현해' · 검증 표준)
+## v2.891 Bareos 사전 점검 — FD → vCenter:443 매일 점검 · SD 디스크 여유 감시(2026-11-05 · 시안 docs/design/bareos-precheck · 사용자 컨펌 '구현해' · 검증 표준)
 
 - 배경: v2.877 사용자 로그(JobId 32)의 실패 원인은 FD 가 vCenter:443 에 못 붙은 것이었는데, 백업이 실패한 **뒤에야** 알았다. SD 디스크가 차는 것도 실패 메일로만 알았다.
   사용자 결정(시안 README §8): 매일 20:00 · 기본 켬 · 디스크 경고 15%/14일 · 위험 5%/3일 · 메일은 나빠질 때 1통 + 회복 1통 + 일일 요약 절 · 현황 KPI '확인 필요' 칸은 그대로(띠 + 표 열만).
-- 규칙(`bareos/health.js` · `healthProbe.js` · `ops.health` · 시험 `bareosHealth2890` 서버 12 · 웹 13):
+- 규칙(`bareos/health.js` · `healthProbe.js` · `ops.health` · 시험 `bareosHealth2891` 서버 12 · 웹 13):
   ① **판정은 `judgeCorp` 하나**(웹 `bareosHealthText.js` 는 글자만 고른다). 항목 dir · vc · thumb · disk, 법인 판정은 bad·warn 중 가장 나쁜 것 · 없으면 **vc 나 disk 가 ok 일 때만 정상**, 아니면 모름
   (중앙 직접 법인이 지문만 같다고 '정상' 이 되던 것을 시험 중에 고쳤다). 모름·참고(info)는 수에 넣지 않는다.
   ② **vCenter 접속은 엣지 시점만 판정**한다 — 포탈 완전 설치(v2.844)는 FD · SD 가 엣지 노드에 같이 있어서 엣지에서 잰 값이 FD 시점이다. 중앙 직접 Director 는 중앙에서 잰 값을 '참고' 로만 보인다(FD 시점이 아니다).

@@ -114,6 +114,8 @@ export default function SvcInventory() {
   if (sel.type === 'svc' && selSvc) { if (selSvc.path) selSvc.path.split('\\').forEach((p, i) => crumb.push(<span key={`p${i}`}>{p}</span>)); crumb.push(<b key="s">{selSvc.name}</b>); }
   if (sel.type === 'un') crumb.push(<b key="u" style={{ color: 'var(--amber)' }}>(미지정)</b>);
   const canWriteHere = selCorp && writableOf(selCorp);
+  const selCorpRow = selCorp ? corps.find((c) => c.vcenterId === selCorp) : null;
+  const orphanOf = (vc) => !!corps.find((c) => c.vcenterId === vc)?.orphan;
   const folderOptions = selCorp ? [...new Set([...(corps.find((c) => c.vcenterId === selCorp)?.folders || []), ...servicesOf(selCorp).map((s) => s.path).filter(Boolean)])].sort() : [];
   const membersQuery = selRow ? (selRow.startsWith('un:') ? { corp: selRow.slice(3), unassigned: '1' } : { service: selRow }) : null;
 
@@ -165,7 +167,9 @@ export default function SvcInventory() {
                   </div>
                 </div>
                 <div className="flex wrap gap" style={{ padding: '8px 14px', alignItems: 'center' }}>
-                  {!selCorp ? <span className="muted" style={{ fontSize: 12 }}>왼쪽 트리에서 법인을 고르면 폴더·서비스를 만들고 바꿀 수 있습니다.</span> : !canWriteHere ? <span className="muted" style={{ fontSize: 12 }}>이 법인은 조회 전용입니다.</span> : (
+                  {!selCorp ? <span className="muted" style={{ fontSize: 12 }}>왼쪽 트리에서 법인을 고르면 폴더·서비스를 만들고 바꿀 수 있습니다.</span> : selCorpRow?.orphan ? (
+                    <OrphanBar corp={selCorp} corpName={corpName} canFleet={d.canFleet} busy={busy} op={op} onPurged={() => { setSel({ type: 'all' }); setSelRow(''); }} />
+                  ) : !canWriteHere ? <span className="muted" style={{ fontSize: 12 }}>이 법인은 조회 전용입니다.</span> : (
                     <>
                       <button type="button" className="logout-btn" style={btn} disabled={busy} onClick={() => { setForm(form === 'folder' ? '' : 'folder'); setFv({ path: sel.type === 'folder' ? `${sel.path}\\` : '' }); }}>＋ 폴더</button>
                       <button type="button" className="logout-btn" style={btn} disabled={busy} onClick={() => { setForm(form === 'svc' ? '' : 'svc'); setFv({ path: sel.type === 'folder' ? sel.path : '', name: '', tier: '2', owner: '' }); }}>＋ 서비스</button>
@@ -203,9 +207,9 @@ export default function SvcInventory() {
                       <STable className="table svcinv-t" minWidth={sel.type === 'all' ? 760 : 680}>
                         <thead><tr><th>서비스</th><th>등급</th>{sel.type === 'all' ? <th>법인</th> : null}<th title="VM·베어메탈 · 호스트 = 구성원 VM 이 올라간 ESXi 호스트 수(파생)">구성원</th><th title="Σ(사용률×용량)÷Σ용량">사용률</th><th>부품 장애</th><th>백업 24h</th><th>소속 근거</th></tr></thead>
                         <tbody>
-                          {shown.map((s) => <ServiceRow key={s.id} s={s} d={d} corpName={corpName} showCorp={sel.type === 'all'} on={selRow === s.id} onClick={() => setSelRow(selRow === s.id ? '' : s.id)} />)}
+                          {shown.map((s) => <ServiceRow key={s.id} s={s} d={d} corpName={corpName} showCorp={sel.type === 'all'} orphanOf={orphanOf} on={selRow === s.id} onClick={() => setSelRow(selRow === s.id ? '' : s.id)} />)}
                           {(sel.type === 'all' ? corps : corps.filter((c) => c.vcenterId === selCorp)).filter((c) => c.unassigned && sel.type !== 'svc' && sel.type !== 'folder').map((c) => (
-                            <ServiceRow key={`un:${c.vcenterId}`} s={{ id: `un:${c.vcenterId}`, name: '(미지정)', path: '', corp: c.vcenterId, tier: null, stat: c.unassigned, unassigned: true }} d={d} corpName={corpName} showCorp={sel.type === 'all'} on={selRow === `un:${c.vcenterId}`} onClick={() => setSelRow(selRow === `un:${c.vcenterId}` ? '' : `un:${c.vcenterId}`)} />
+                            <ServiceRow key={`un:${c.vcenterId}`} s={{ id: `un:${c.vcenterId}`, name: '(미지정)', path: '', corp: c.vcenterId, tier: null, stat: c.unassigned, unassigned: true }} d={d} corpName={corpName} showCorp={sel.type === 'all'} orphanOf={orphanOf} on={selRow === `un:${c.vcenterId}`} onClick={() => setSelRow(selRow === `un:${c.vcenterId}` ? '' : `un:${c.vcenterId}`)} />
                           ))}
                         </tbody>
                       </STable>
@@ -228,7 +232,7 @@ export default function SvcInventory() {
   );
 }
 
-function ServiceRow({ s, d, corpName, showCorp, on, onClick }) {
+function ServiceRow({ s, d, corpName, showCorp, on, onClick, orphanOf }) {
   const st = s.stat;
   const stale = (d.meta?.unreadCorps || []).includes(s.corp);
   const sub = s.unassigned ? '어느 규칙에도 안 걸린 구성원' : [s.path || '(루트)', s.owner || '담당자 미지정'].join(' · ');
@@ -239,7 +243,7 @@ function ServiceRow({ s, d, corpName, showCorp, on, onClick }) {
         <div className="svcinv-sub" style={!s.unassigned && !s.owner ? { color: 'var(--text-faint)' } : undefined}>{sub}</div>
       </td>
       <td data-sort={s.tier ?? 9}>{s.tier ? <TierBadge tier={s.tier} /> : <span className="muted">—</span>}</td>
-      {showCorp ? <td data-sort={corpName(s.corp)}>{corpName(s.corp).replace(/^vcenter-/, '')}</td> : null}
+      {showCorp ? <td data-sort={corpName(s.corp)}>{corpName(s.corp).replace(/^vcenter-/, '')}{orphanOf?.(s.corp) ? <div><span className="badge gray" title="등록 해제된 vCenter — 서비스·규칙·고정만 남아 있습니다">등록 해제</span></div> : null}</td> : null}
       <td data-sort={st.n.total}><MemberCount st={st} /></td>
       <td data-sort={st.usage.cpu ?? ''}><UsagePair cpu={st.usage.cpu} mem={st.usage.mem} missing={st.usage.unread + st.usage.stale} /></td>
       <td><FaultCell f={st.faults} meta={d.meta?.faults} stale={stale} /></td>
@@ -252,7 +256,21 @@ function ServiceRow({ s, d, corpName, showCorp, on, onClick }) {
 /** 서비스 속성 — 등급 · 담당자 · 메모 · 폴더 이동 · 전역 연결 · 삭제. */
 function AttrCard({ s, d, writable, op, busy, folderOptions, onDeleted }) {
   const [v, setV] = useState({ tier: String(s.tier), owner: s.owner || '', note: s.note || '', path: s.path || '', globalId: s.globalId || '', name: s.name });
+  const [ask, setAsk] = useState(null);   // 개명 확인(5차 반증 R3) — { kinds, n }
   const globals = d.global?.globals || [];
+  const byName = s.stat?.byName || {};
+  const renamed = v.name.trim() && v.name.trim().toLowerCase() !== s.name.toLowerCase();
+  const save = (keepAlias) => {
+    setAsk(null);
+    const kept = (keepAlias || []).map((k) => (k === 'scan' ? '스캔 라벨' : '태그 값')).join('·');
+    return op({ op: 'service.update', corp: s.corp, id: s.id, name: v.name, tier: Number(v.tier), owner: v.owner, note: v.note, path: v.path, globalId: v.globalId, ...(keepAlias ? { keepAlias } : {}) },
+      `‘${v.name}’ 속성을 저장했습니다${kept ? ` — 옛 이름 ‘${s.name}’ 을(를) ${kept} 별칭으로 남겼습니다` : ''}.`);
+  };
+  const onSave = () => {
+    const kinds = ['scan', 'tag'].filter((k) => byName[k] > 0);
+    if (renamed && kinds.length) { setAsk({ kinds, n: kinds.reduce((a, k) => a + byName[k], 0) }); return; }
+    save(null);
+  };
   return (
     <div className="card" style={{ minWidth: 0 }}>
       <div className="flex wrap gap" style={{ padding: '10px 14px', borderBottom: '1px solid var(--border)', alignItems: 'center' }}>
@@ -266,9 +284,19 @@ function AttrCard({ s, d, writable, op, busy, folderOptions, onDeleted }) {
         <span className="muted">폴더</span><Select className="select" value={v.path} disabled={!writable} onChange={(e) => setV({ ...v, path: e.target.value })} style={{ maxWidth: 260 }} aria-label="폴더"><option value="">(루트)</option>{folderOptions.map((p) => <option key={p} value={p}>{p}</option>)}</Select>
         <span className="muted">전역 서비스</span><Select className="select" value={v.globalId} disabled={!writable} onChange={(e) => setV({ ...v, globalId: e.target.value })} style={{ maxWidth: 260 }} aria-label="전역 서비스"><option value="">(연결 없음 — 이 법인 전용)</option>{globals.map((g) => <option key={g.id} value={g.id}>{g.name}</option>)}</Select>
       </div>
+      {ask ? (
+        <div style={{ margin: '0 14px 10px', padding: '10px 12px', border: '1px solid var(--amber)', borderRadius: 8, fontSize: 13, display: 'flex', flexDirection: 'column', gap: 8, minWidth: 0 }}>
+          <div>이름을 <b>‘{v.name.trim()}’</b> 로 바꿉니다. {ask.kinds.map((k) => `${k === 'scan' ? '스캔 라벨' : '태그 값'} ‘${s.name}’ 로 ${byName[k]}대`).join(' · ')}가 이 서비스 이름으로 소속돼 있습니다. 옛 이름을 별칭으로 남기면 그대로 유지됩니다.</div>
+          <div className="flex wrap gap" style={{ alignItems: 'center' }}>
+            <button type="button" className="login-btn" style={btn} disabled={busy} onClick={() => save(ask.kinds)}>별칭 남기고 저장</button>
+            <button type="button" className="logout-btn" style={btn} disabled={busy} onClick={() => save(null)}>별칭 없이 저장({ask.n}대가 미지정으로)</button>
+            <button type="button" className="logout-btn" style={btn} disabled={busy} onClick={() => setAsk(null)}>취소</button>
+          </div>
+        </div>
+      ) : null}
       {writable ? (
         <div className="flex wrap gap" style={{ padding: '0 14px 10px' }}>
-          <button type="button" className="login-btn" style={btn} disabled={busy || !v.name.trim()} onClick={() => op({ op: 'service.update', corp: s.corp, id: s.id, name: v.name, tier: Number(v.tier), owner: v.owner, note: v.note, path: v.path, globalId: v.globalId }, `‘${v.name}’ 속성을 저장했습니다.`)}>저장</button>
+          <button type="button" className="login-btn" style={btn} disabled={busy || !v.name.trim() || !!ask} onClick={onSave}>저장</button>
           <button type="button" className="logout-btn" style={{ ...btn, color: 'var(--red)' }} disabled={busy} onClick={async () => {
             if (!window.confirm(`서비스 ‘${s.name}’ 을 지웁니다. 이 서비스를 가리키는 폴더 규칙·별칭·이름 규칙·고정도 함께 지워지고, 구성원 ${s.stat.n.total}대는 미지정(또는 다른 규칙)으로 돌아갑니다. 계속할까요?`)) return;
             const r = await op({ op: 'service.remove', corp: s.corp, id: s.id }, `서비스 ‘${s.name}’ 을 지웠습니다.`); if (r) onDeleted();
@@ -276,6 +304,38 @@ function AttrCard({ s, d, writable, op, busy, folderOptions, onDeleted }) {
         </div>
       ) : null}
     </div>
+  );
+}
+
+/**
+ * 등록 해제된 vCenter 의 법인 행(5차 반증 R2) — 법인 쓰기는 전부 막히고(서버 404), 전체 범위 관리자만 '법인 항목 정리' 로 지운다.
+ * 먼저 지울 개수를 받아(dry) 보여 주고, 두 번째 누름으로 지운다.
+ */
+function OrphanBar({ corp, corpName, canFleet, busy, op, onPurged }) {
+  const [plan, setPlan] = useState(null);
+  const [err, setErr] = useState('');
+  const cur = useRef(corp);
+  useEffect(() => { cur.current = corp; setPlan(null); setErr(''); }, [corp]);
+  const c = plan?.counts;
+  return (
+    <span className="flex wrap gap" style={{ alignItems: 'center', fontSize: 12, minWidth: 0 }}>
+      <span className="muted">이 vCenter 는 등록이 해제됐습니다 — 서비스·규칙·고정만 남아 있어 바꿀 수 없습니다.</span>
+      {!canFleet ? <span className="muted">정리는 전체 범위 관리자가 합니다.</span> : !plan ? (
+        <button type="button" className="logout-btn" style={btn} disabled={busy} onClick={async () => {
+          setErr('');
+          const asked = corp;   // 늦게 온 응답은 버린다 — 응답 전에 다른 법인을 고르면 그 법인 화면에 이 개수를 띄우지 않는다(5차 1차 반증 7)
+          try { const r = await postJson('/tools/svc-inventory/op', { op: 'corp.purge', corp: asked, dry: true }); if (cur.current !== asked) return; if (r?.ok) setPlan(r.result); else setErr(r?.reason || '개수를 읽지 못했습니다.'); }
+          catch (e) { if (cur.current === asked) setErr(opErrorText(e)); }
+        }}>법인 항목 정리…</button>
+      ) : (
+        <>
+          <span>서비스 {c.services} · 폴더 {c.folders} · 폴더 규칙 {c.folderRules} · 별칭 {c.aliases} · 이름 규칙 {c.nameRules} · 고정 {c.pins} 를 지웁니다. 되돌릴 수 없습니다(서비스·규칙은 설정 변경 백업에 남고, 고정은 남지 않을 수 있습니다).</span>
+          <button type="button" className="logout-btn" style={{ ...btn, color: 'var(--red)' }} disabled={busy || plan.corp !== corp} onClick={async () => { const r = await op({ op: 'corp.purge', corp, expect: plan.counts }, `${corpName(corp)} 의 법인 항목을 정리했습니다.`); if (r) onPurged(); }}>지우기</button>
+          <button type="button" className="logout-btn" style={btn} disabled={busy} onClick={() => setPlan(null)}>취소</button>
+        </>
+      )}
+      {err ? <span style={{ color: 'var(--red)' }}>{err}</span> : null}
+    </span>
   );
 }
 
@@ -288,7 +348,7 @@ function CorpTree({ corps, servicesOf, noCorp, sel, open, onSel, onToggle }) {
   for (const c of corps) {
     const k = `c:${c.vcenterId}`; const op = open.has(k);
     const tree = folderTreeOf(c, servicesOf(c.vcenterId));
-    rows.push({ key: k, depth: 0, icon: '🏢', tw: op ? '▾' : '▸', name: c.name.replace(/^vcenter-/, ''), n: tree.n + (c.unassigned?.n?.total || 0), x: { type: 'corp', corp: c.vcenterId }, toggle: k });
+    rows.push({ key: k, depth: 0, icon: '🏢', tw: op ? '▾' : '▸', name: c.name.replace(/^vcenter-/, ''), n: tree.n + (c.unassigned?.n?.total || 0), x: { type: 'corp', corp: c.vcenterId }, toggle: k, orphan: !!c.orphan });
     if (!op) continue;
     const walk = (node, depth) => {
       for (const ch of node.children) {
@@ -312,6 +372,7 @@ function CorpTree({ corps, servicesOf, noCorp, sel, open, onSel, onToggle }) {
             <span style={{ width: 10, color: 'var(--text-faint)', fontSize: 10 }}>{r.tw || ''}</span>
             <span>{r.icon}</span>
             <span className="nm" title={r.name} style={r.un ? { color: 'var(--amber)' } : undefined}>{r.name}{r.empty ? <span className="muted"> (빈)</span> : null}</span>
+            {r.orphan ? <span className="badge gray" style={{ flex: 'none' }} title="등록 해제된 vCenter — 서비스·규칙·고정만 남아 있습니다">해제</span> : null}
             {r.tier ? <TierBadge tier={r.tier} /> : null}
             <span className="cnt">{r.n}</span>
           </div>

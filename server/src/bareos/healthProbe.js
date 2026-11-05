@@ -1,5 +1,5 @@
 /**
- * bareos/healthProbe.js — v2.890 사전 점검(시안 docs/design/bareos-precheck · 사용자 컨펌 2026-11-05)의 **읽기 전용** 측정.
+ * bareos/healthProbe.js — v2.891 사전 점검(시안 docs/design/bareos-precheck · 사용자 컨펌 2026-11-05)의 **읽기 전용** 측정.
  * 작업 표 `ops.health` 가 부른다 — 엣지 대행이면 엣지 노드 안에서(포탈 완전 설치는 FD · SD 가 같은 서버), 중앙 직접이면 중앙 포탈에서.
  *
  *  · vCenter 접속: `tls.connect(vcserver, 443)` — 이름 풀이 · TCP · TLS 핸드셰이크까지만(아무것도 보내지 않는다 · 인증서 검증 없이 지문만 읽는다).

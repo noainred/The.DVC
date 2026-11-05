@@ -146,7 +146,7 @@ export const VALUE = Object.freeze({
   restore: (v) => { const r = obj(v); return { rid: posInt(r.rid), chain: arr(r.chain).slice(0, 400).map(posInt).filter(Boolean) }; },
   // v2.861 묶음 복원 지점(읽기 전용) — 아는 칸만 · 지점 60 · 레벨 한 글자 · 체인 길이는 양의 정수만(못 만들면 null — 그 지점은 고를 수 없다)
   // v2.872 묶음 로그 — 항목마다 첫 오류 줄만(원문 없음) · 아는 칸 · 상한. 성공인데 firstError 칸이 문자열도 null 도 아니면 그 항목은 '못 읽음'.
-  // v2.890 사전 점검 — 아는 칸만 · 코드는 짧은 글자만 · 지문은 SHA1 콜론 모양만 · 바이트는 음수 아닌 수(못 읽음 null)
+  // v2.891 사전 점검 — 아는 칸만 · 코드는 짧은 글자만 · 지문은 SHA1 콜론 모양만 · 바이트는 음수 아닌 수(못 읽음 null)
   health: (v) => {
     const r = obj(v);
     const code = (c) => (typeof c === 'string' && /^[A-Za-z_]{1,24}$/.test(c) ? c : null);
