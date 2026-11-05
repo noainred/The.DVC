@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { folderTreeOf, matrixColumns, faultsView, backupView, powerText, srcSummary, groupActions, GROUP_TITLE, REASON_TEXT, pctText, matrixCellValue, regionCell, filterServices, reviewSummary } from './svcInventoryText.js';
+import { folderTreeOf, matrixColumns, faultsView, backupView, powerText, srcSummary, groupActions, GROUP_TITLE, REASON_TEXT, pctText, matrixCellValue, regionCell, filterServices, reviewSummary, keyText, isMaskedKey } from './svcInventoryText.js';
 
 const svc = (id, path, n) => ({ id, name: id, path, stat: { n: { total: n } } });
 
@@ -78,5 +78,9 @@ describe('svcInventoryText', () => {
     expect(r.n).toBe(6);
     expect(r.meta).toContain('법인 불일치 1'); expect(r.meta).toContain('태그 모호 3'); expect(r.meta).toContain('판정 보류 4');
     expect(reviewSummary({}).n).toBe(0);
+  });
+  it('범위 계정의 가린 키는 토큰 대신 (가림)으로 보인다 · 다른 키는 그대로', () => {
+    expect(keyText('masked-5b889f93adbf')).toBe('(가림)'); expect(isMaskedKey('masked-x')).toBe(true);
+    expect(keyText('st:abc')).toBe('st:abc'); expect(keyText('iu:vc:u1')).toBe('iu:vc:u1'); expect(keyText(null)).toBe('');
   });
 });

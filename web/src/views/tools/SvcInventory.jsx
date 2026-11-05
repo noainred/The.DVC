@@ -282,7 +282,7 @@ export default function SvcInventory() {
           </div>
         </>
       )}
-      {pin ? <PinModal corp={pin.corp} defaultService={pin.service} corps={corps} servicesOf={servicesOf} writableOf={writableOf} op={op} busy={busy} corpName={corpName} onClose={() => setPin(null)} /> : null}
+      {pin ? <PinModal corp={pin.corp} defaultService={pin.service} corps={corps} servicesOf={servicesOf} writableOf={writableOf} op={op} busy={busy} corpName={corpName} scoped={!!d?.scoped} onClose={() => setPin(null)} /> : null}
     </div>
   );
 }
