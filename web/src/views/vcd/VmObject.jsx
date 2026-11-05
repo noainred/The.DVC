@@ -21,6 +21,10 @@ import { useOnce, toolDenied } from './useOnce.js';
 import { EventRows } from './SummaryTab.jsx';
 import { vmDiskRows, vmDatastoreRows, vmSnapshotFacts, toolsStatusBadge, snapTreeRows, vmNicRows } from './objTabs.js';
 import { gbText, PERM_CATEGORY } from './vcdTabs.js';
+// v2.909(가상화 서버 허브 시안 ⑨): 요약 탭 4/5/3 — 사용률 게이지 · 24시간 추이(열 때 1회) · 신호(서버 판정) · 스냅샷 · 최근 변경.
+import { useDaySeries, Spark } from '../vms/vmSeries.jsx';
+import { signalText, usageTone, TONE_COLOR, TONE_TEXT, barW, pctText } from '../vms/vmHubText.js';
+import '../vms/vmHub.css';
 
 const VmMetricButton = React.lazy(() => import('../../components/VmMetrics.jsx').then((m) => ({ default: m.VmMetricButton })));
 const Lazy = ({ children }) => <React.Suspense fallback={null}>{children}</React.Suspense>;
@@ -29,10 +33,12 @@ const GRID = 'vcd-obj-grid';
 export const vmRef = (o) => (o?.id && o?.vcenterId && String(o.id).startsWith(`${o.vcenterId}:`) ? String(o.id).slice(String(o.vcenterId).length + 1) : null);
 const tsText = (t) => (Number.isFinite(t) && t > 0 ? new Date(t).toLocaleString('ko-KR') : '—');
 
-export default function VmObject({ site, vcenterId, vm, vmsOk, gate, datastores, hosts, networks, tab, onTab, onBack, onOpenHost, extraTabs, extra }) {
+export default function VmObject({ site, vcenterId, vm, vmsOk, gate, datastores, hosts, networks, tab, onTab, onBack, onOpenHost, extraTabs, extra, sigCounts = null }) {
   const disks = useMemo(() => (vm ? vmDiskRows(vm, datastores) : null), [vm, datastores]);
   const nics = useMemo(() => (vm ? vmNicRows(vm, networks) : null), [vm, networks]);
   const dsRows = useMemo(() => vmDatastoreRows(disks), [disks]);
+  // v2.909: 24시간 추이 — 요약 탭을 볼 때만 · 켜진 VM 만(훅은 조기 return 위 — React #310).
+  const series = useDaySeries(vm?.id, !!vm && vm.powerState === 'POWERED_ON' && tab === 'summary');
   if (!vm) {
     return (
       <div style={{ marginTop: 10 }}>
@@ -49,68 +55,125 @@ export default function VmObject({ site, vcenterId, vm, vmsOk, gate, datastores,
   const [tb, tt] = toolsStatusBadge(vm.toolsVersionStatus);
   const capSum = disks ? disks.reduce((a, d) => a + (d.capacityGB ?? 0), 0) : null;
   const crumbs = [site?.name || vcenterId, vm.vcDcPath || null, vm.folder && vm.folder !== 'vm' ? vm.folder : null];
+  const sigDays = numOrNull(sigCounts?.snapAgeDays);
+  const sigs = Array.isArray(vm.signals) ? vm.signals : null;
+  const sto = numOrNull(vm.storageGB);
+  const unc = numOrNull(vm.uncommittedGB);
+  const diskPct = sto != null && unc != null && sto + unc > 0 ? Math.round((sto / (sto + unc)) * 100) : null;
+  const cpuPct = powered ? numOrNull(vm.cpuUsagePct) : null;
+  const memPct = powered ? numOrNull(vm.memUsagePct) : null;
 
   return (
     <ObjectShell type="vm" crumbs={crumbs} onBack={onBack} backLabel="VM 및 폴더" title={vm.name}
-      badges={<><StateBadge state={vm.powerState} /><StateBadge state={vm.toolsStatus} />{vm.template && <span className="badge gray">템플릿</span>}{vm.connectionState && vm.connectionState !== 'connected' && <span className="badge amber">{vm.connectionState}</span>}</>}
+      badges={<><StateBadge state={vm.powerState} /><StateBadge state={vm.toolsStatus} />{vm.template && <span className="badge gray">템플릿</span>}{vm.connectionState && vm.connectionState !== 'connected' && <span className="badge amber">{vm.connectionState}</span>}
+        {(vm.signals || []).map((k) => { const x = signalText(k, { days: sigDays }); return <span key={k} className={`vmh-badge ${x.badge}`} title={x.desc}>{x.short}</span>; })}</>}
       sub={`${vm.guestOS || '—'} · 호스트 ${vm.host || '—'} · 클러스터 ${vm.cluster || '—'}${vm.resourcePool ? ` · 리소스 풀 ${vm.resourcePool}` : ''}${ips[0] ? ` · ${ips[0]}` : ''}`}
       actions={<><VmReconfigButton vm={vm} /><VmConsoleButton vmId={vm.id} vmName={vm.name} /><VmRemoteButton item={vm} /><Lazy><VmMetricButton vmId={vm.id} vmName={vm.name} /></Lazy></>}
       tab={tab} onTab={onTab} extraTabs={extraTabs}>
 
       {tab === 'summary' && (
         <>
-          <div className={GRID}>
-            <Card title="VM 하드웨어" sub="/vms · vmcfg">
-              <KV rows={[
-                ['CPU', `${vm.cpuCount ?? '—'} vCPU${cfg ? ` · 핫애드 ${cfg.cpuHotAdd === true ? '켜짐' : cfg.cpuHotAdd === false ? '꺼짐' : '—'}` : ''}`],
-                ['메모리', vm.memMB != null ? `${gbText(vm.memMB / 1024)}${cfg ? ` · 핫애드 ${cfg.memHotAdd === true ? '켜짐' : cfg.memHotAdd === false ? '꺼짐' : '—'}` : ''}` : '—'],
-                ['하드 디스크', disks ? `${disks.length}개 · ${gbText(capSum)}${disks.some((d) => d.rdm) ? ` · RDM ${disks.filter((d) => d.rdm).length}` : ''}` : <span className="muted" key="d">아직 읽지 않음</span>],
-                ['디스크 사용', `${gbText(vm.storageGB)}${vm.uncommittedGB ? ` · 미할당 ${gbText(vm.uncommittedGB)}(씬)` : ''}`],
-                ['CD/DVD', Array.isArray(vm.dev?.cdroms) ? `${vm.dev.cdroms.length}개 · 연결 ${vm.dev.cdroms.filter((c) => c.connected).length}` : '—'],
-                ['네트워크 어댑터', nics ? `${nics.length}개 · 연결 ${nics.filter((n) => n.connected).length}${nics[0]?.adapter ? ` · ${[...new Set(nics.map((n) => n.adapter).filter(Boolean))].join(' · ')}` : ''}` : <span className="muted" key="n">아직 읽지 않음 · IP {ips.length}개(게스트 보고)</span>],
-                ['GPU', vm.gpu ? <GpuBadge key="g" gpu={vm.gpu} /> : <span className="muted" key="g">없음</span>],
-                ['호환성', vm.hwVersion || '—'],
-                ['펌웨어', cfg?.firmware ? (cfg.firmware === 'efi' ? 'EFI' : cfg.firmware === 'bios' ? 'BIOS' : cfg.firmware) : '—'],
-              ]} />
-            </Card>
-            <Card title="게스트 OS" sub="VMware Tools 보고">
-              <KV rows={[
-                ['OS(설정)', cfg?.guestIdConfig || vm.guestOS || '—'],
-                ['OS(Tools 보고)', cfg?.guestNameTools || cfg?.guestIdTools || '—'],
-                ['호스트 이름', cfg?.guestHostName ? <span className="mono" key="h">{cfg.guestHostName}</span> : '—'],
-                ['IP', ips.length ? <VmIpPing key="ip" vcenterId={vm.vcenterId} ips={ips} /> : '—'],
-                ['게이트웨이', (vm.gateways || []).length ? <span className="mono" key="gw">{vm.gateways.join(' · ')}</span> : '—'],
-                ['DNS', (vm.dns || []).length ? <span className="mono" key="dns">{vm.dns.join(' · ')}</span> : '—'],
-                ['VMware Tools', <span key="t">{vm.toolsVersion || '—'} <span className={`badge ${tb}`}>{tt}</span></span>],
-                ['부팅 시각', tsText(cfg?.bootTime)],
-              ]} />
-            </Card>
-            <Card title="관련 개체">
-              <KV rows={[
-                ['vCenter', site?.name || vcenterId],
-                ['데이터센터', vm.vcDcPath || '—'],
-                ['클러스터', vm.cluster || '—'],
-                ['호스트', host ? <button key="h" type="button" className="vcd-more" onClick={() => onOpenHost(host.id)}>{host.name} →</button> : (vm.host || '—')],
-                ['리소스 풀', vm.resourcePool || '—'],
-                ['폴더', vm.folder || '—'],
-                ['데이터스토어', dsRows ? (dsRows.map((d) => d.datastore || '—').join(' · ') || '—') : <span className="muted" key="ds">아직 읽지 않음</span>],
-                ['네트워크', nics ? ([...new Set(nics.map((n) => n.net || n.netRef).filter(Boolean))].join(' · ') || '—') : <span className="muted" key="pg">아직 읽지 않음</span>],
-                ['관리 솔루션', cfg?.managedBy ? [cfg.managedBy.extensionKey, cfg.managedBy.type].filter(Boolean).join(' · ') : '없음'],
-              ]} />
-            </Card>
-            <Card title="사용률" sub="quickStats · 경합은 최근 창(perfc)">
-              <div style={{ padding: '12px 14px', display: 'grid', gap: 9 }}>
-                <div className="vcd-line"><span className="muted" style={{ width: 64 }}>CPU</span>{powered ? <UsageCell pct={vm.cpuUsagePct} /> : <span className="muted">— (꺼짐)</span>}</div>
-                <div className="vcd-line"><span className="muted" style={{ width: 64 }}>메모리</span>{powered ? <UsageCell pct={vm.memUsagePct} /> : <span className="muted">— (꺼짐)</span>}</div>
-              </div>
-              <div style={{ padding: '0 14px 12px' }}><PerfcSection item={vm} isVm /></div>
-            </Card>
+          {/* v2.909(시안 ⑨): 4 / 5 / 3 세 열 — 왼쪽 구성(하드웨어 · 관련 개체 · 태그), 가운데 상태(사용률 · 경합 · 게스트), 오른쪽 할 일(신호 · 스냅샷 · 변경).
+              예전 2열 격자는 1440 에서 '사용률' 카드 옆 두 칸이 비었다(캡처). 1280 미만은 두 열 · 760 미만은 한 열(vmHub.css .vmo-grid). */}
+          <div className="vmo-grid">
+            <div className="vmo-col">
+              <Card title="VM 하드웨어" sub="/vms · vmcfg">
+                <KV rows={[
+                  ['CPU', `${vm.cpuCount ?? '—'} vCPU${cfg ? ` · 핫애드 ${cfg.cpuHotAdd === true ? '켜짐' : cfg.cpuHotAdd === false ? '꺼짐' : '—'}` : ''}`],
+                  ['메모리', vm.memMB != null ? `${gbText(vm.memMB / 1024)}${cfg ? ` · 핫애드 ${cfg.memHotAdd === true ? '켜짐' : cfg.memHotAdd === false ? '꺼짐' : '—'}` : ''}` : '—'],
+                  ['하드 디스크', disks ? `${disks.length}개 · ${gbText(capSum)}${disks.some((d) => d.rdm) ? ` · RDM ${disks.filter((d) => d.rdm).length}` : ''}` : <span className="muted" key="d">아직 읽지 않음</span>],
+                  ['디스크 사용', `${gbText(vm.storageGB)}${vm.uncommittedGB ? ` · 미할당 ${gbText(vm.uncommittedGB)}(씬)` : ''}`],
+                  ['CD/DVD', Array.isArray(vm.dev?.cdroms) ? `${vm.dev.cdroms.length}개 · 연결 ${vm.dev.cdroms.filter((c) => c.connected).length}` : '—'],
+                  ['네트워크 어댑터', nics ? `${nics.length}개 · 연결 ${nics.filter((n) => n.connected).length}${nics[0]?.adapter ? ` · ${[...new Set(nics.map((n) => n.adapter).filter(Boolean))].join(' · ')}` : ''}` : <span className="muted" key="n">아직 읽지 않음 · IP {ips.length}개(게스트 보고)</span>],
+                  ['GPU', vm.gpu ? <GpuBadge key="g" gpu={vm.gpu} /> : <span className="muted" key="g">없음</span>],
+                  ['호환성', vm.hwVersion || '—'],
+                  ['펌웨어', cfg?.firmware ? (cfg.firmware === 'efi' ? 'EFI' : cfg.firmware === 'bios' ? 'BIOS' : cfg.firmware) : '—'],
+                ]} />
+              </Card>
+              <Card title="관련 개체">
+                <KV rows={[
+                  ['vCenter', site?.name || vcenterId],
+                  ['데이터센터', vm.vcDcPath || '—'],
+                  ['클러스터', vm.cluster || '—'],
+                  ['호스트', host ? <button key="h" type="button" className="vcd-more" onClick={() => onOpenHost(host.id)}>{host.name} →</button> : (vm.host || '—')],
+                  ['리소스 풀', vm.resourcePool || '—'],
+                  ['폴더', vm.folder || '—'],
+                  ['데이터스토어', dsRows ? (dsRows.map((d) => d.datastore || '—').join(' · ') || '—') : <span className="muted" key="ds">아직 읽지 않음</span>],
+                  ['네트워크', nics ? ([...new Set(nics.map((n) => n.net || n.netRef).filter(Boolean))].join(' · ') || '—') : <span className="muted" key="pg">아직 읽지 않음</span>],
+                  ['관리 솔루션', cfg?.managedBy ? [cfg.managedBy.extensionKey, cfg.managedBy.type].filter(Boolean).join(' · ') : '없음'],
+                ]} />
+              </Card>
+              <Card title="태그 · 메모"><div style={{ padding: '0 14px 12px' }}><VmTagsSection vm={vm} /><KV rows={[['메모', vm.notes ? <span key="m" style={{ whiteSpace: 'pre-wrap' }}>{vm.notes}</span> : '—']]} /></div></Card>
+            </div>
+            <div className="vmo-col">
+              <Card title="사용률" sub={powered ? 'quickStats · 24시간 추이는 이 탭을 열 때 1회 조회(저장 안 함)' : '꺼진 VM — 사용률이 없습니다'}>
+                <div className="vmo-gauges">
+                  {[['CPU', cpuPct, vm.cpuCount != null ? `${vm.cpuCount} vCPU` : 'vCPU 모름'], ['메모리', memPct, vm.memMB != null ? gbText(vm.memMB / 1024) : '할당 모름'], ['디스크', diskPct, `${gbText(vm.storageGB)} 사용 · 프로비저닝 대비`]].map(([label, v, sub]) => {
+                    const tone = label === '디스크' ? (v == null ? 'none' : 'ok') : usageTone(v);
+                    const color = label === '디스크' ? 'var(--accent-2)' : TONE_COLOR[tone];
+                    return (
+                      <div key={label} className="vmo-gauge">
+                        <div className="vmo-ring" role="img" aria-label={`${label} ${pctText(v)}`} style={{ background: `conic-gradient(${color} ${barW(v)}%, var(--panel-deep) 0)` }}>
+                          <i /><b style={{ color: label === '디스크' ? undefined : TONE_TEXT[tone] }}>{v == null ? '—' : <>{v}<small>%</small></>}</b>
+                        </div>
+                        <span className="gl">{label}</span><span className="gs">{sub}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+                {powered && (
+                  <div className="vmo-sparks">
+                    <div className="vmo-srow"><span className="muted">CPU 24h</span><span className="vmo-sp"><Spark series={series.cpu} color="var(--red)" /></span></div>
+                    <div className="vmo-srow"><span className="muted">메모리 24h</span><span className="vmo-sp"><Spark series={series.mem} color="var(--amber)" /></span></div>
+                  </div>
+                )}
+              </Card>
+              <Card title="경합 · 최근 창" sub="perfc · vCPU 당 % · 판정은 평균"><div style={{ padding: '0 14px 12px' }}><PerfcSection item={vm} isVm /></div></Card>
+              <Card title="게스트 OS" sub="VMware Tools 보고">
+                <KV rows={[
+                  ['OS(설정)', cfg?.guestIdConfig || vm.guestOS || '—'],
+                  ['OS(Tools 보고)', cfg?.guestNameTools || cfg?.guestIdTools || '—'],
+                  ['호스트 이름', cfg?.guestHostName ? <span className="mono" key="h">{cfg.guestHostName}</span> : '—'],
+                  ['IP', ips.length ? <VmIpPing key="ip" vcenterId={vm.vcenterId} ips={ips} /> : '—'],
+                  ['게이트웨이', (vm.gateways || []).length ? <span className="mono" key="gw">{vm.gateways.join(' · ')}</span> : '—'],
+                  ['DNS', (vm.dns || []).length ? <span className="mono" key="dns">{vm.dns.join(' · ')}</span> : '—'],
+                  ['VMware Tools', <span key="t">{vm.toolsVersion || '—'} <span className={`badge ${tb}`}>{tt}</span></span>],
+                  ['부팅 시각', tsText(cfg?.bootTime)],
+                ]} />
+              </Card>
+            </div>
+            <div className="vmo-col">
+              <Card title={`신호 ${sigs ? sigs.length : '—'}`} sub="서버 판정">
+                <div style={{ padding: '8px 14px 12px' }}>
+                  {!sigs ? <span className="muted" style={{ fontSize: 12 }}>이 목록은 신호를 함께 받지 않았습니다.</span>
+                    : !sigs.length ? <span className="muted" style={{ fontSize: 12 }}>신호 없음 — 과부하 · 사용률 미수집 · Tools 업그레이드 · 오래된 스냅샷 모두 해당하지 않습니다.</span>
+                      : (
+                        <div className="vmh-sigrows">
+                          {sigs.map((k) => {
+                            const x = signalText(k, { days: sigDays });
+                            return (
+                              <div key={k} className="vmh-sigrow">
+                                <span className="vmh-dot" style={{ background: x.tone === 'crit' ? 'var(--red)' : x.tone === 'warn' ? 'var(--amber)' : 'var(--text-faint)' }} aria-hidden="true" />
+                                <div className="t"><b>{x.label}</b><span>{x.desc}</span></div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                </div>
+              </Card>
+              <Card title="스냅샷" badge={snap.count ? <span className={`badge ${snap.oldestDays != null && sigDays != null && snap.oldestDays >= sigDays ? 'amber' : 'blue'}`}>{snap.count}개</span> : null}>
+                <KV rows={[
+                  ['개수 · 크기', snap.count == null ? '—' : `${snap.count}개 · ${gbText(snap.sizeGB)}`],
+                  ['가장 오래된 것', snap.oldestTs ? `${dayStamp(snap.oldestTs)} · ${snap.oldestDays}일` : '—'],
+                  ['이름', snap.names.length ? snap.names.slice(0, 3).join(' · ') + (snap.names.length > 3 ? ` 외 ${snap.names.length - 3}` : '') : '—'],
+                ]} />
+                <div style={{ padding: '0 14px 12px' }}><button type="button" className="vcd-more" onClick={() => onTab('snapshots')}>스냅샷 트리 보기 →</button></div>
+              </Card>
+              <Card title="최근 변경 · 이동"><div style={{ padding: '0 14px 12px' }}>{toolAllowed('vm-changes') ? <VmChangesSection vm={vm} /> : <ErrorBox error={toolDenied('VM 이동·구성 변경 이력')} />}</div></Card>
+            </div>
           </div>
           <Card title="구성 점검 · 클러스터"><div style={{ padding: '0 14px 12px' }}><VmCfgSection vm={vm} /><ClusterCfgSection item={vm} isVm /></div></Card>
-          <div className={GRID}>
-            <Card title="태그 · 메모"><div style={{ padding: '0 14px 12px' }}><VmTagsSection vm={vm} /><KV rows={[['메모', vm.notes ? <span key="m" style={{ whiteSpace: 'pre-wrap' }}>{vm.notes}</span> : '—']]} /></div></Card>
-            <Card title="최근 변경 · 이동"><div style={{ padding: '0 14px 12px' }}>{toolAllowed('vm-changes') ? <VmChangesSection vm={vm} /> : <ErrorBox error={toolDenied('VM 이동·구성 변경 이력')} />}</div></Card>
-          </div>
         </>
       )}
 

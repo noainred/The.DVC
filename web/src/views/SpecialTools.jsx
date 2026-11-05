@@ -3,6 +3,8 @@
 // 이 파일은 목록/권한 게이트/딥링크/최근검색 셸과 ToolPanel 라우팅만 가진다.
 // Summary.jsx(GuestOsVmsModal) 호환을 위해 아래에서 재export 한다(IpamStandalone 재수출은 v2.613 WEB2613-08 에 삭제 — App 이 IpamCore 를 직접 lazy 한다).
 import React, { useEffect, useState } from 'react';
+import VmHubTabs from './vms/VmHubTabs.jsx';   // v2.909 가상화 서버 허브 탭 줄
+import { HUB_TOOL_KEYS } from './vms/vmHubText.js';
 import { fetchJson, postJson, usePolling, toolAllowed, can, getCurrentUser, hasRole } from '../api.js';
 import BoldText from '../components/boldText.jsx';
 import { TOOLS } from './specialToolsList.js';
@@ -563,6 +565,8 @@ function ToolPanel({ tool, onBack, isAdmin, defaultScope = '', cfg = null }) {
   return (
     <React.Suspense fallback={<div className="card" style={{ padding: 20, textAlign: 'center' }}><span className="muted">도구를 불러오는 중…</span></div>}>
     <>
+      {/* v2.909 가상화 서버 허브: VM 도구 6개는 '서버 › 가상화 서버' 의 탭이기도 하다 — 같은 탭 줄을 위에 둔다(도구 키·주소는 그대로). */}
+      {HUB_TOOL_KEYS.includes(tool) && <div style={{ marginBottom: 10 }}><VmHubTabs active={tool} /></div>}
       <div className="flex wrap" style={{ marginBottom: 12, alignItems: 'center', gap: 12 }}>
         <button className="tab" onClick={onBack}>← 특수 기능</button>
         <div className="section-title" style={{ margin: 0 }}>{meta.icon} {displayLabel(cfg, meta)}</div>

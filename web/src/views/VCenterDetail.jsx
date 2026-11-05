@@ -352,7 +352,8 @@ export default function VCenterDetail({ site, onBack }) {
   const [portalVm, setPortalVm] = useState(null);   // 관리 창을 연 VM id
   // 폴더 단위 백업 — 그 폴더(하위 포함) VM 을 백업 실행 화면으로 넘긴다(실행은 그 화면에서 미리보기·OTP — 여기서 보내지 않는다).
   const onFolderBackup = canPortal ? (ids) => { saveHandoff(vcenterId, ids); window.location.hash = '#/tools/backup-run'; } : null;
-  const vmsP = usePolling('/vms', { vcenterId, limit: 5000 }, 20_000);
+  // v2.909: signals=1 — VM 개체 보기 요약 탭의 신호(서버 판정 inventory/vmSignals.js · 같은 스냅샷 응답 기억이라 추가 vCenter 호출 없음).
+  const vmsP = usePolling('/vms', { vcenterId, limit: 5000, signals: '1' }, 20_000);
   const dsP = usePolling('/datastores', { vcenterId }, 30_000);
   const netP = usePolling('/networks', { vcenterId }, 30_000);
   const vmsD = vmsP.data;
@@ -590,7 +591,7 @@ export default function VCenterDetail({ site, onBack }) {
       {obj && obj.type === 'vm' && (
         <VmObject site={site} vcenterId={vcenterId} vm={vms.find((v) => v.id === obj.id) || null} vmsOk={vmsOk} gate={gateEl(vmsPart, 'VM 목록')}
           datastores={datastores} hosts={hosts} networks={networks} tab={normObjTab('vm', obj.tab)} onTab={setObjTab} onBack={closeObj}
-          onOpenHost={(id) => openObj('host', id)} extraTabs={[TUNING_TAB]}
+          onOpenHost={(id) => openObj('host', id)} extraTabs={[TUNING_TAB]} sigCounts={vmsD?.signalCounts || null}
           extra={normObjTab('vm', obj.tab) === 'tuning' && vms.find((v) => v.id === obj.id) ? <VmTuning vm={vms.find((v) => v.id === obj.id)} vms={vms} datastores={datastores} /> : null} />
       )}
       {obj && obj.type === 'host' && (

@@ -1,0 +1,172 @@
+/*
+ * vmHub.css — 가상화 서버 허브(v2.909 · 시안 docs/design/vm-screen 시안 1 ②~⑧).
+ * 선택자는 전부 .vmh 로 시작한다(탭 줄은 특수 기능 도구 패널에서도 쓰므로 .vmh-tabs 가 단독으로 선다).
+ * 색은 CSS 변수로만 — :root 에 없는 색(배지 바탕)은 아래 토큰 블록에서 rgba 로 정한다(새 hex 를 흩뿌리지 않는다).
+ * 그리드·플렉스 자식은 min-width:0, 트랙은 minmax(0,…) — 긴 이름이 카드를 밀어 늘리지 않게. uppercase 금지.
+ */
+.vmh, .vmh-tabs, .vmh-drawer, .vmh-drawer-overlay {
+  --vmh-crit-text: #fca5a5;
+  --vmh-warn-text: #fcd34d;
+  --vmh-ok-text: #86efac;
+  --vmh-crit-bg: rgba(239, 68, 68, 0.14);
+  --vmh-warn-bg: rgba(245, 158, 11, 0.14);
+  --vmh-ok-bg: rgba(34, 197, 94, 0.14);
+  --vmh-info-bg: rgba(59, 130, 246, 0.16);
+  --vmh-none-bg: rgba(139, 155, 180, 0.14);
+  --vmh-sel-bg: rgba(59, 130, 246, 0.16);
+}
+.vmh { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+.vmh-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 14px; min-width: 0; }
+.vmh-head h1 { margin: 0; font-size: 20px; font-weight: 800; color: var(--text); }
+.vmh-head .vmh-sub { font-size: 12px; color: var(--text-dim); min-width: 0; }
+.vmh-head .vmh-snap { margin-left: auto; font-size: 12px; color: var(--text-dim); font-family: var(--mono); white-space: nowrap; }
+
+/* 탭 줄 — 아래 선은 안쪽 그림자(열린 탭 밑줄이 덮는다) · 세로 스크롤바를 만들지 않는다(VeeamHeader v2.825.1 과 같은 이유) */
+.vmh-tabs { display: flex; align-items: stretch; gap: 2px; box-shadow: inset 0 -1px 0 var(--border); overflow-x: auto; overflow-y: hidden; min-width: 0; margin-bottom: 2px; }
+.vmh-tab { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 6px; min-height: 40px; padding: 0 14px; white-space: nowrap; text-decoration: none;
+  font-size: 14px; font-weight: 600; color: var(--text-dim); border-bottom: 3px solid transparent; }
+.vmh-tab:hover { color: var(--text); }
+.vmh-tab.on { color: var(--text); font-weight: 800; border-bottom-color: var(--accent); }
+.vmh-tab.tool { font-weight: 500; font-size: 13px; color: var(--text-faint); }
+.vmh-tab.tool:hover, .vmh-tab.tool.on { color: var(--text); }
+.vmh-tab-cnt { font-size: 11px; font-weight: 800; color: var(--vmh-crit-text); background: var(--vmh-crit-bg); border-radius: 999px; padding: 1px 7px; }
+.vmh-tab-sep { flex: 0 0 1px; align-self: stretch; margin: 9px 6px; background: var(--border); }
+
+/* 타일 5장 — 1440 5열 · 1200 미만 3열 · 720 미만 2열(마지막 GPU 는 두 칸) */
+.vmh-tiles { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 12px; min-width: 0; }
+.vmh-tile { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 13px 15px; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.vmh-tile .lb { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; font-size: 12px; font-weight: 600; color: var(--text-dim); min-width: 0; }
+.vmh-tile .lb small { font-size: 11px; font-weight: 500; color: var(--text-faint); white-space: nowrap; }
+.vmh-tile .val { font-family: var(--mono); font-size: 28px; font-weight: 800; line-height: 1; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.vmh-tile .val small { font-size: 13px; font-weight: 600; color: var(--text-dim); margin-left: 3px; }
+.vmh-tile .sub { display: flex; flex-wrap: wrap; gap: 2px 10px; font-size: 12px; color: var(--text-dim); min-width: 0; }
+.vmh-tile .sub a { font-weight: 600; text-decoration: none; }
+.vmh-tile.btn { cursor: pointer; text-align: left; font: inherit; color: inherit; }
+.vmh-tile.btn:hover { border-color: var(--accent); }
+.vmh-tile.btn[aria-pressed="true"] { box-shadow: inset 0 0 0 1px var(--green); border-color: var(--green); }
+.vmh-bar { height: 6px; background: var(--panel-deep); border-radius: 3px; overflow: hidden; }
+.vmh-bar > i { display: block; height: 100%; border-radius: 3px; }
+.vmh-seg { display: flex; height: 6px; border-radius: 3px; overflow: hidden; background: var(--panel-deep); }
+.vmh-seg > i { display: block; height: 100%; }
+@media (max-width: 1199px) { .vmh-tiles { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+@media (max-width: 719px) {
+  .vmh-tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+  .vmh-tiles > :last-child { grid-column: 1 / -1; }
+  .vmh-tile .val { font-size: 22px; }
+}
+
+/* 신호 배지(표 '신호' 열 · 드로어 머리) */
+.vmh-sig { display: inline-flex; flex-wrap: wrap; gap: 4px; min-width: 0; }
+.vmh-badge { display: inline-flex; align-items: center; height: 20px; padding: 0 8px; border-radius: 999px; font-size: 11px; font-weight: 700; white-space: nowrap; }
+.vmh-badge.red { color: var(--vmh-crit-text); background: var(--vmh-crit-bg); }
+.vmh-badge.amber { color: var(--vmh-warn-text); background: var(--vmh-warn-bg); }
+.vmh-badge.gray { color: var(--text-dim); background: var(--vmh-none-bg); }
+.vmh-badge.green { color: var(--vmh-ok-text); background: var(--vmh-ok-bg); }
+.vmh-badge.blue { color: #93c5fd; background: var(--vmh-info-bg); }
+
+/* 카드(법인별 · 조치 필요) */
+.vmh-card { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; min-width: 0; overflow: hidden; }
+.vmh-card-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding: 10px 14px; border-bottom: 1px solid var(--border-soft); min-width: 0; }
+.vmh-card-head b { font-size: 14px; }
+.vmh-card-head .vmh-note { font-size: 12px; color: var(--text-dim); min-width: 0; }
+.vmh-card-head .vmh-grow { flex: 1 1 auto; }
+.vmh-card-foot { padding: 10px 14px; border-top: 1px solid var(--border-soft); font-size: 12px; color: var(--text-dim); }
+.vmh-kpis { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+@media (max-width: 899px) { .vmh-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+
+/* 조치 필요 — 신호 카드(버튼) */
+.vmh-sigcards { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 12px; }
+.vmh-sigcard { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 13px 15px; display: flex; flex-direction: column; gap: 6px;
+  min-width: 0; text-align: left; font: inherit; color: var(--text); cursor: pointer; }
+.vmh-sigcard:hover { border-color: var(--accent); }
+.vmh-sigcard[aria-pressed="true"] { box-shadow: inset 0 0 0 2px var(--accent); }
+.vmh-sigcard .lb { display: flex; justify-content: space-between; gap: 8px; font-size: 12px; font-weight: 700; color: var(--text-dim); }
+.vmh-sigcard .val { font-family: var(--mono); font-size: 28px; font-weight: 800; line-height: 1; }
+.vmh-sigcard .sub { font-size: 12px; color: var(--text-dim); line-height: 1.5; overflow-wrap: anywhere; }
+.vmh-sigcard.link { cursor: default; }
+@media (max-width: 1199px) { .vmh-sigcards { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+@media (max-width: 719px) { .vmh-sigcards { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; } .vmh-sigcard .val { font-size: 22px; } }
+
+/* 법인별 표 — 비중 막대 */
+.vmh-share { display: inline-flex; align-items: center; gap: 8px; min-width: 120px; }
+.vmh-share .vmh-bar { flex: 1 1 auto; height: 8px; border-radius: 4px; }
+.vmh-ub { display: inline-flex; align-items: center; gap: 8px; min-width: 110px; }
+.vmh-ub .vmh-bar { flex: 1 1 auto; }
+.vmh-ub span { font-family: var(--mono); width: 40px; text-align: right; }
+.vmh-name-btn { border: 0; background: transparent; color: var(--text); font: inherit; font-weight: 700; padding: 0; cursor: pointer; text-align: left; }
+.vmh-name-btn:hover { text-decoration: underline; }
+
+/* 드로어 — 목록 위 오른쪽(640px) · 720 미만은 전체 화면 시트 + 아래 고정 버튼 줄.
+   z-index 150/151: 드로어 안에서 여는 공용 Modal(200 — 사양 변경 · 콘솔 · 메트릭 · 축소 근거)이 위에 오게, 고정 머리줄(40)보다는 위. */
+.vmh-drawer-overlay { position: fixed; inset: 0; background: rgba(5, 8, 15, 0.45); z-index: 150; }
+.vmh-drawer { position: fixed; top: 0; right: 0; bottom: 0; width: min(640px, 100vw); z-index: 151; display: flex; flex-direction: column; min-width: 0;
+  background: var(--bg-soft); border-left: 1px solid var(--border); box-shadow: -12px 0 40px rgba(0, 0, 0, 0.5); outline: none; }
+.vmh-dh { padding: 14px 18px 10px; border-bottom: 1px solid var(--border-soft); display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.vmh-dh .ttl { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.vmh-dh h2 { margin: 0; font-size: 18px; font-weight: 800; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 0 1 auto; }
+.vmh-dh .grow { flex: 1 1 auto; }
+.vmh-icon-btn { flex: 0 0 auto; width: 34px; height: 34px; display: inline-flex; align-items: center; justify-content: center; border-radius: 8px;
+  border: 1px solid var(--border); background: var(--panel-2); color: var(--text); font: inherit; font-size: 16px; cursor: pointer; }
+.vmh-icon-btn:disabled { opacity: 0.4; cursor: default; }
+.vmh-crumb { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 6px; font-size: 12px; color: var(--text-dim); min-width: 0; }
+.vmh-crumb .pos { margin-left: auto; font-family: var(--mono); white-space: nowrap; }
+.vmh-dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; flex: 0 0 auto; }
+.vmh-acts { display: flex; flex-wrap: wrap; gap: 6px; padding: 10px 18px; border-bottom: 1px solid var(--border-soft); background: var(--panel); min-width: 0; }
+.vmh-acts > * { flex: 0 0 auto; }
+.vmh-db { flex: 1 1 auto; overflow-y: auto; overflow-x: hidden; padding: 14px 18px 18px; display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.vmh-sec { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.vmh-sec > .sh { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+.vmh-sec > .sh h3 { margin: 0; font-size: 12.5px; font-weight: 700; color: var(--text-dim); }
+.vmh-sec > .sh a, .vmh-sec > .sh span { font-size: 12px; }
+.vmh-dtiles { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+.vmh-dtile { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.vmh-dtile .lb { font-size: 11px; font-weight: 600; color: var(--text-dim); }
+.vmh-dtile .v { font-family: var(--mono); font-size: 20px; font-weight: 800; line-height: 1; }
+.vmh-dtile .v small { font-size: 11px; font-weight: 600; color: var(--text-dim); margin-left: 2px; }
+.vmh-dtile .s { font-size: 11px; color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.vmh-spark { display: block; width: 100%; height: 26px; }
+.vmh-sigrows { display: flex; flex-direction: column; gap: 6px; }
+.vmh-sigrow { display: flex; align-items: flex-start; gap: 10px; padding: 9px 12px; background: var(--panel); border: 1px solid var(--border); border-radius: 10px; min-width: 0; }
+.vmh-sigrow .t { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.vmh-sigrow .t b { font-size: 12.5px; }
+.vmh-sigrow .t span { font-size: 11.5px; color: var(--text-dim); overflow-wrap: anywhere; }
+.vmh-sigrow .vmh-dot { margin-top: 4px; }
+.vmh-kv { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 18px; background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 2px 12px; min-width: 0; }
+.vmh-kv > div { display: flex; justify-content: space-between; gap: 10px; padding: 7px 0; border-bottom: 1px solid var(--border-soft); font-size: 12.5px; min-width: 0; }
+.vmh-kv > div.full { grid-column: 1 / -1; }
+.vmh-kv > div > span { color: var(--text-dim); flex: 0 0 auto; }
+.vmh-kv > div > b { font-weight: 600; text-align: right; min-width: 0; overflow-wrap: anywhere; }
+.vmh-more { border: 1px solid var(--border); border-radius: 10px; background: var(--panel); min-width: 0; }
+.vmh-more > summary { cursor: pointer; padding: 9px 12px; font-size: 12.5px; font-weight: 700; color: var(--text-dim); list-style-position: inside; }
+.vmh-more > div { padding: 0 12px 12px; min-width: 0; }
+.vmh-df { padding: 10px 18px; border-top: 1px solid var(--border-soft); background: var(--panel); display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: center; font-size: 12px; min-width: 0; }
+.vmh-df a { text-decoration: none; }
+.vmh-df .muted-key { margin-left: auto; color: var(--text-faint); font-family: var(--mono); white-space: nowrap; }
+@media (max-width: 719px) {
+  .vmh-drawer { width: 100vw; border-left: 0; }
+  .vmh-dh { padding: 12px 14px 10px; }
+  .vmh-acts { padding: 10px 14px; }
+  .vmh-db { padding: 12px 14px 16px; }
+  .vmh-dtiles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .vmh-kv { grid-template-columns: minmax(0, 1fr); }
+  .vmh-df .muted-key { display: none; }
+}
+
+/* 개체 보기 요약 탭(시안 ⑨ · vcd/VmObject.jsx) — 4 / 5 / 3. 1280 미만은 두 열(오른쪽 열이 아래로) · 760 미만은 한 열. */
+.vmo-grid { display: grid; grid-template-columns: minmax(0, 4fr) minmax(0, 5fr) minmax(0, 3fr); gap: 12px; align-items: start; min-width: 0; margin-bottom: 12px; }
+.vmo-col { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.vmo-gauges { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; padding: 14px; }
+.vmo-gauge { display: flex; flex-direction: column; align-items: center; gap: 6px; min-width: 0; text-align: center; }
+.vmo-ring { width: 92px; height: 92px; border-radius: 50%; display: flex; align-items: center; justify-content: center; position: relative; }
+.vmo-ring > i { position: absolute; inset: 9px; border-radius: 50%; background: var(--panel); }
+.vmo-ring > b { position: relative; font-family: var(--mono); font-size: 20px; font-weight: 800; }
+.vmo-ring > b small { font-size: 11px; color: var(--text-dim); font-weight: 600; }
+.vmo-gauge .gl { font-size: 12px; font-weight: 700; }
+.vmo-gauge .gs { font-size: 11.5px; color: var(--text-dim); overflow-wrap: anywhere; }
+.vmo-sparks { padding: 0 14px 12px; display: flex; flex-direction: column; }
+.vmo-srow { display: grid; grid-template-columns: 76px minmax(0, 1fr); gap: 10px; align-items: center; padding: 6px 0; border-top: 1px solid var(--border-soft); font-size: 12px; }
+.vmo-sp { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.vmo-sp .s { font-size: 11px; color: var(--text-dim); }
+.vmo-sp .vmh-spark { height: 32px; }
+@media (max-width: 1279px) { .vmo-grid { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); } .vmo-grid > .vmo-col:last-child { grid-column: 1 / -1; } }
+@media (max-width: 759px) { .vmo-grid { grid-template-columns: minmax(0, 1fr); } .vmo-gauges { gap: 6px; padding: 12px 8px; } .vmo-ring { width: 76px; height: 76px; } .vmo-ring > i { inset: 8px; } .vmo-ring > b { font-size: 16px; } }

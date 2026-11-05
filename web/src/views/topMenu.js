@@ -21,7 +21,9 @@ export const MENU_GROUPS = Object.freeze([
   { id: 'overview', label: 'Overview', tab: 'overview' },
   { id: 'summary', label: 'Summary', tab: 'summary' },
   { id: 'server', label: '서버', children: [
-    { id: 'vm', label: '가상화 서버', tab: 'vms' },
+    // v2.909(가상화 서버 허브 · 시안 docs/design/vm-screen): VM 도구 6개는 이 화면 위 탭이기도 하다 — 그 도구를 열어도 이 메뉴가 켜진다(locate · also).
+    //   도구 키는 그대로(권한 파일의 값). 목록은 views/vms/vmHubText.js HUB_TOOL_KEYS 와 같다(테스트 대조).
+    { id: 'vm', label: '가상화 서버', tab: 'vms', also: ['vmfinder', 'guestos', 'vmtools', 'vm-track', 'curuser', 'real-os'] },
     { id: 'esxi', label: 'ESXi 호스트', tab: 'hosts' },
     { id: 'vc', label: 'vCenter', tab: 'vcenters' },
     { id: 'bm', label: '물리 서버', tool: 'serveranalysis', seg: BAREMETAL_SEG },

@@ -573,7 +573,8 @@ function Portal({ user, onLogout }) {
           {tab === 'svcmon' && <SvcMonitor />}
           {tab === 'ipam' && <Ipam />}
           {tab === 'hosts' && <Hosts filters={filters} />}
-          {tab === 'vms' && <Vms filters={filters} />}
+          {/* v2.909: 법인별 탭에서 법인을 고르면 이 탭(vms)의 vCenter 필터를 바꾼다(현황 탭으로 돌아간다) */}
+          {tab === 'vms' && <Vms filters={filters} onPickVcenter={(id) => patchFilter({ vcenterId: id, region: '' }, 'vms')} />}
           {tab === 'datastores' && <Datastores filters={filters} />}
           {tab === 'networks' && <Networks filters={filters} />}
           {tab === 'alarms' && <Alarms filters={filters} />}
