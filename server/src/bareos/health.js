@@ -1,5 +1,5 @@
 /**
- * bareos/health.js — v2.891 Bareos 사전 점검(시안 docs/design/bareos-precheck · 사용자 컨펌 2026-11-05: 20:00 기본 켬 · 디스크 15%/14일 · 5%/3일 ·
+ * bareos/health.js — v2.892 Bareos 사전 점검(시안 docs/design/bareos-precheck · 사용자 컨펌 2026-11-05: 20:00 기본 켬 · 디스크 15%/14일 · 5%/3일 ·
  * 메일 나빠질 때 + 회복 + 일일 요약 절 · 현황 KPI 칸은 그대로).
  *
  * 하루 한 번(정한 포탈 시각) 법인(Director)마다 작업 표 `health` 한 건을 보낸다(trigger 'timer' — 인증 정지된 Director 에 닿지 않는다).

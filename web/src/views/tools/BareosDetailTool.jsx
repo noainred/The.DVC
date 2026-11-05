@@ -16,7 +16,7 @@ import BareosTabs from './BareosTabs.jsx';
 import { CritIcon, MethodBadge } from './BackupMarkIcons.jsx';
 import { Note, ReadGuide, Stat, STAT_GRID, Dot, ResultBar, FilterChip } from './BareosBits.jsx';
 import { snapshotChip, SNAPSHOT_TITLE } from './bareosRestoreText.js';
-import { BareosHealthCard } from './BareosHealth.jsx';   // v2.891 사전 점검(관리자 — 403 이면 카드를 그리지 않는다)   // v2.861 남은 스냅샷 칩
+import { BareosHealthCard } from './BareosHealth.jsx';   // v2.892 사전 점검(관리자 — 403 이면 카드를 그리지 않는다)   // v2.861 남은 스냅샷 칩
 import {
   bareosClass, directorStateOf, directorLineText, resultsUnknownText, numText, shortTs, fmtGb, stText, ST_TONE, runLine, bytesText,
   DETAIL_FILTERS, DETAIL_FILTERS_MAIN, DETAIL_FILTERS_MORE, detailFilterCounts, lvText, buildBareosTree, flattenBareosTree, initialBareosOpen, BAREOS_RPO_DAYS, BAREOS_DETAIL_VC_KEY,

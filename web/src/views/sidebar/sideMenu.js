@@ -11,6 +11,9 @@
  *  · **모르는 항목은 버리고 개수를 밝힌다**(`unknown`) — 삭제된 탭·도구 키·카탈로그에 없는 키. 지어내지 않는다.
  *  · 권한 판정은 여기 없다 — 호출부가 topMenu.visibleMenu(tabOk·toolOk) 로 거른다(메뉴에 넣어도 권한이 넓어지지 않는다).
  *  · 특수 기능은 단독 항목(`#/tools`)이다 — 분류 바로가기(하위 메뉴)는 사용자 결정으로 두지 않았다(2026-10-08 "분류 바로가기 제외").
+ *  · v2.891(사용자 요청 '단독 메뉴로 추가하는 기능'): **단독 메뉴**(하위 메뉴 없이 한 줄) = 최상위 `{ id, tab }` 또는 `{ id, tool, seg? }`.
+ *    기본 단독(Overview·Summary·특수 기능 …)뿐 아니라 그룹 안 항목 · 특수 기능 도구도 단독으로 둘 수 있다. 라벨 · 아이콘은 저장하지 않고
+ *    항목에서 채운다(이름 덮어쓰기를 따라간다 · 아이콘 = 그 항목의 기본 그룹 · 특수 기능에서 더한 도구는 특수 기능 아이콘). 판정은 `isSingle` 하나.
  *  · v2.727(감사 A-01): **`GET /user-menu` 를 못 읽은 상태는 '포탈 기본 메뉴' 가 아니다** — `failed:true` 면 그리기는 기본(또는 마지막으로
  *    읽은 메뉴)으로 하되 `source:'unknown'` 이다. 화면은 그것을 '메뉴를 읽지 못했습니다 · 다시 시도' 로 말하고 편집 창의 저장을 잠근다
  *    (조회 실패 → 기본 메뉴 + 편집 저장 → 저장돼 있던 내 메뉴 소실 경로, v2.618 WEB-2 계열).
@@ -22,6 +25,14 @@ export const CUSTOM_GROUP_LABEL = '내 그룹';
 
 /** 항목의 정체 키 — 같은 화면은 같은 키(탭 / 도구+조각). */
 export const itemKey = (it) => (it?.tool ? `tool:${it.tool}${it.seg ? `/${it.seg}` : ''}` : (it?.tab ? `tab:${it.tab}` : ''));
+
+/** v2.891: 단독 메뉴인가(하위 메뉴 배열이 없다) — 해석된 그룹 · 편집 모양 둘 다. */
+export const isSingle = (g) => !!g && typeof g === 'object' && !Array.isArray(g.children);
+
+/** v2.891: 포탈 기본 메뉴의 단독 항목 키(Overview 등) — 지울 수 없고 자리만 옮긴다(지우면 그 화면으로 갈 길이 없다). */
+export function fixedSingleKeys() {
+  return new Set(MENU_GROUPS.filter((g) => !g.children).map((g) => itemKey(g)).filter(Boolean));
+}
 
 /** 카탈로그 항목이 메뉴에 넣을 수 있는 도구인가 — 이 앱에 화면이 있는 것만(외부 포탈·승격 탭·준비 중은 제외). */
 export const toolEligible = (t) => !!(t && t.k && !t.external && !t.topTab && !t.comingSoon);
@@ -77,13 +88,25 @@ export function resolveMenu({ mine = null, distributed = null, catalog = null, o
     const id = String(g.id);
     const custom = !groupLabel.has(id);
     const label = String(g.label || '').trim() || groupLabel.get(id) || LEGACY_GROUP_LABELS[id] || (custom ? CUSTOM_GROUP_LABEL : id);
-    if (g.tab) {
-      const key = `tab:${g.tab}`;
-      const d = items.get(key);
-      if (!d) { unknown += 1; continue; }
+    if (g.tab || g.tool) {
+      // 단독 메뉴(v2.891 — 예전에는 탭만 · 기본 단독 항목만 알아봤다). 항목을 기본 메뉴(어느 그룹의 항목이든) → 특수 기능 카탈로그 순으로 찾는다
+      const key = itemKey(g);
       if (seen.has(key)) continue;
+      const d = items.get(key);
+      let one = null;
+      if (d) {
+        const rest = { ...d };
+        delete rest.groupId; delete rest.groupLabel; delete rest.id;   // 그룹 자리 표지는 버리고 항목(라벨 · 주소)만
+        const meta = rest.tool ? toolMap.get(rest.tool) : null;
+        one = { ...rest, iconOf: d.groupId, ...(meta?.adminOnly ? { adminOnly: true } : {}) };
+      } else if (g.tool && !g.seg && toolMap.has(g.tool)) {
+        const t = toolMap.get(g.tool);
+        one = { label: String(overrides?.[g.tool]?.label || '').trim() || t.label, tool: g.tool, fromTools: true, iconOf: 'tools', ...(t.adminOnly ? { adminOnly: true } : {}) };
+      }
+      if (!one) { unknown += 1; continue; }
       seen.add(key);
-      groups.push({ id, label, tab: d.tab, custom });
+      // 기본 단독(Overview …)은 예전 규칙(저장 라벨 > 기본 그룹 라벨) · 새 단독은 저장 라벨 > 항목 라벨
+      groups.push({ ...one, id, label: String(g.label || '').trim() || groupLabel.get(id) || one.label, custom });
       continue;
     }
     const children = [];
@@ -116,7 +139,7 @@ export function resolveMenu({ mine = null, distributed = null, catalog = null, o
 export function missingDefaults(groups) {
   const present = new Set();
   for (const g of groups || []) {
-    if (g.tab) present.add(`tab:${g.tab}`);
+    if (isSingle(g)) { present.add(itemKey(g)); continue; }   // v2.891: 단독 도구도
     for (const c of g.children || []) present.add(itemKey(c));
   }
   const out = [];

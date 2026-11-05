@@ -1,4 +1,4 @@
-// v2.891 Bareos 사전 점검 화면 문구(bareosHealthText.js) + 화면 소스 규약.
+// v2.892 Bareos 사전 점검 화면 문구(bareosHealthText.js) + 화면 소스 규약.
 import { describe, it, expect } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';

@@ -68,6 +68,6 @@
 - **v2.846~848**(`bareosBugs2846a`·`c`·`2847a`~`c`·`bareosConfigurePerm2848`): 보관 정리 새 쪽부터 · 옛 TLS 정지 이관 · 등록 도중 끊김 = 결과 모름 · configure 권한 · 포탈 리소스 판정은 `configurePerm.js` 하나 — audits.md.
 - **v2.867 중단 · 취소**(`cancelState`·`bareosCancel2867`): 판정은 `cancelState.js` 하나 · `cancelJobs` = 단건 `cancelOne` · 그룹 중단은 덩어리 사이에서만 · 중단 회차는 보관 정리 안 함 — audits.md 'v2.867'.
 - **v2.872 묶음 로그**(`logFirstError`·`ops.logs` · `bareosErrLog2872`): 첫 오류 줄만 · 15건 · 이 잡의 실행 검사 · 범위 밖 = 없는 대상. v2.885 메일 원인 칸(timer · 웹 표 사본 `issueHints.js`) — audits.md.
-- **v2.891 사전 점검**(`health.js` · `bareosHealth2891`): 판정 `judgeCorp` 하나 · vCenter 접속은 엣지 시점만 판정(중앙 = 참고) · 디스크는 엣지 + Director 가 그 서버일 때만 · timer · 지문 기준은 라우트로만 — audits.md.
+- **v2.892 사전 점검**(`health.js` · `bareosHealth2892`): 판정 `judgeCorp` 하나 · vCenter 접속은 엣지 시점만 판정(중앙 = 참고) · 디스크는 엣지 + Director 가 그 서버일 때만 · timer · 지문 기준은 라우트로만 — audits.md.
 - **v2.844 완전 설치**: 규칙 전문은 `install/CLAUDE.md`(엣지 노드 안 러너 · 그 단계만 되돌림 · 볼륨 삭제 세 겹 · 번들 서명 · OTP 코드 없음).
 - **v2.845 법인별 설정 · 계정 통합**: 규칙 전문은 `manage/CLAUDE.md`(표지 파일만 · 재시작 직전 재확인 · 등록부 SSH 는 담당 엣지 것만).
