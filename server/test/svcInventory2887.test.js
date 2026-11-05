@@ -80,7 +80,8 @@ test('고정: 자동보다 우선 · 다르면 drift(검토하면 해제) · 같
   const m = vm('k1', 'A', '/ERP');
   const r1 = resolveMember(m, idx, {}, { k1: { serviceId: 's2', corp: 'A' } });
   assert.equal(r1.serviceId, 's2'); assert.equal(r1.src, 'pin'); assert.equal(r1.drift, true);
-  assert.equal(resolveMember(m, idx, {}, { k1: { serviceId: 's2', corp: 'A', reviewed: true } }).drift, false);
+  // 5차 반증 R8: '고정 유지' 는 그때의 자동 판정(reviewedAuto)과 같은 드리프트만 가린다 — 자세한 경우는 svcInventoryReview5.test.js
+  assert.equal(resolveMember(m, idx, {}, { k1: { serviceId: 's2', corp: 'A', reviewed: true, reviewedAuto: 's1' } }).drift, false);
   assert.equal(resolveMember(m, idx, {}, { k1: { serviceId: 's1', corp: 'A' } }).redundant, true);
   const r4 = resolveMember(m, idx, {}, { k1: { serviceId: 's2', corp: 'B' } });
   assert.equal(r4.serviceId, 's1'); assert.ok(r4.pinMismatch);

@@ -22,6 +22,9 @@ describe('svcInventoryText', () => {
     expect(faultsView({ member: 2, host: 1, memberUnknown: 1 }, true)).toEqual({ member: 2, host: 1, unknown: 1, total: 3 });
     expect(backupView({ ok: 1 }, { used: false })).toBe(null);
     expect(backupView({}, { used: true, unreadable: true })).toEqual({ unknown: true });
+    expect(backupView({ none: 2, na: 5 }, { used: true })).toEqual({ ok: 0, fail: 0, none: 2, unknown: 0, na: 5 });
+    expect(backupView({ na: 5 }, { used: true, unreadable: true })).toEqual({ ok: 0, fail: 0, none: 0, unknown: 0, na: 5 });
+    expect(backupView({ unknown: 3, na: 5 }, { used: true, unreadable: true })).toEqual({ unknown: true });
   });
   it('켜짐: 전원을 모르는 구성원은 분모에서 뺀다 · 값 없으면 단위 없이 —', () => {
     expect(powerText({ on: 3, off: 1, unknown: 2 })).toBe('3/4 (+모름 2)');
