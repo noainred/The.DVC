@@ -18,7 +18,7 @@ import { TierBadge, UsagePair, MemberCount, FaultCell, BackupCell, SrcCell, Memb
 import { UnassignedView, UnmappedView, ReviewView, RulesView } from './svcInventory/Queues.jsx';
 import GlobalAxis from './svcInventory/GlobalAxis.jsx';
 import PinModal from './svcInventory/PinModal.jsx';
-import { folderTreeOf, opErrorText, TIER_TEXT, csvNameOf, FAULT_REASON } from './svcInventoryText.js';
+import { folderTreeOf, opErrorText, TIER_TEXT, csvNameOf, FAULT_REASON, filterServices, reviewSummary } from './svcInventoryText.js';
 import { numOrNull } from '../../numOrNull.js';
 
 const AXIS_KEY = 'svcinv.axis';
@@ -44,6 +44,7 @@ export default function SvcInventory() {
   const [gsel, setGsel] = useState('');
   const [gcorp, setGcorp] = useState('');
   const [reloadKey, setReloadKey] = useState(0);
+  const [flt, setFlt] = useState({ q: '', tier1: false, noOwner: false });   // 서비스별 현황 표 검색·필터(5차 M8)
   const [regions, setRegions] = useState(() => new Map());
   const seq = useRef(0);
 
@@ -128,7 +129,9 @@ export default function SvcInventory() {
       <div className="card" style={{ padding: 16 }}>
         <ErrorBox error={err} />
         {corrupt ? <div className="muted" style={{ marginTop: 8, fontSize: 13 }}>서비스 인벤토리 저장소 파일이 손상돼 빈 트리로 시작하지 않았습니다. 백업에서 복원하거나, 전체 범위 관리자가 초기화(손상본은 보존)할 수 있습니다.
-          <div style={{ marginTop: 8 }}><button type="button" className="logout-btn" onClick={async () => { const r = await postJson('/tools/svc-inventory/op', { op: 'store.reset' }).catch((e) => ({ ok: false, reason: opErrorText(e) })); if (r?.ok) load(); else setNote({ ok: false, text: r?.reason || '초기화하지 못했습니다.' }); }}>초기화(손상본 보존)</button></div>
+          {/* 초기화 버튼은 서버가 허락한 계정에만(canReset — 전체 범위 관리자 · 5차 R17: 예전에는 누구에게나 보이고 누르면 403) */}
+          {err?.body?.canReset === true ? <div style={{ marginTop: 8 }}><button type="button" className="logout-btn" onClick={async () => { const r = await postJson('/tools/svc-inventory/op', { op: 'store.reset' }).catch((e) => ({ ok: false, reason: opErrorText(e) })); if (r?.ok) load(); else setNote({ ok: false, text: r?.reason || '초기화하지 못했습니다.' }); }}>초기화(손상본 보존)</button></div>
+            : <div style={{ marginTop: 8 }}>초기화는 전체 범위 관리자만 할 수 있습니다.</div>}
           {note ? <div style={{ marginTop: 6, color: 'var(--red)' }}>{note.text}</div> : null}
         </div> : null}
       </div>
@@ -138,7 +141,12 @@ export default function SvcInventory() {
 
   // 큐 숫자는 지금 고른 범위 기준 — 법인을 골랐으면 그 법인 것만(전 법인 합계를 법인 화면 탭에 붙이면 KPI 와 숫자가 어긋난다 · 1440 실측).
   const q = selCorp ? (d.queuesByCorp?.[selCorp] || { unassigned: 0, unmapped: 0, drift: 0, ghosts: 0, ghostsHeld: 0, mismatch: 0 }) : (d.queues || {});
-  const reviewN = (q.drift || 0) + (q.ghosts || 0) + (q.mismatch || 0);
+  const review = reviewSummary(q);   // 수에 들어가는 것을 부제에 전부(5차 R17)
+  const reviewN = review.n;
+  // 서비스·폴더를 골랐을 때 앞 두 KPI 는 그 서비스 기준, 뒤 셋은 법인 기준이다 — 섞인 것을 밝힌다(5차 R16)
+  const corpBasis = sel.type === 'svc' || sel.type === 'folder' ? `${corpName(selCorp)} 법인 기준 · ` : '';
+  const listed = filterServices(shown, { ...flt, corpName });
+  const filtering = !!(flt.q.trim() || flt.tier1 || flt.noOwner);
   const totals = shown.reduce((a, s) => ({ vm: a.vm + s.stat.n.vm, bm: a.bm + s.stat.n.bm }), { vm: 0, bm: 0 });
   const unassignedHere = (sel.type === 'all' ? corps : corps.filter((c) => c.vcenterId === selCorp)).reduce((a, c) => a + (c.unassigned?.n?.total || 0), 0) + (sel.type === 'all' && d.noCorp ? d.noCorp.n.total : 0);
   const crumb = [<b key="a">전체 법인</b>];
@@ -185,9 +193,9 @@ export default function SvcInventory() {
           <div className="kpis" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))' }}>
             <Card label="서비스" value={shown.length} meta={`등급1 ${shown.filter((s) => s.tier === 1).length} · 법인 ${new Set(shown.map((s) => s.corp)).size}`} onClick={() => setView('svc')} active={view === 'svc'} />
             <Card label="구성원(소속)" value={totals.vm + totals.bm} meta={`VM ${totals.vm} · 베어메탈 ${totals.bm}`} onClick={() => setView('svc')} />
-            <Card label="(미지정)" value={unassignedHere} accent={unassignedHere ? 'var(--amber)' : 'var(--green)'} meta="출처별로 묶어 연결합니다" onClick={() => setView('un')} active={view === 'un'} />
-            <Card label="매핑 안 된 값" value={q.unmapped || 0} accent={q.unmapped ? 'var(--amber)' : 'var(--green)'} meta="규칙 값에 맞는 서비스 없음" onClick={() => setView('unmapped')} active={view === 'unmapped'} />
-            <Card label="검토 필요" value={reviewN} accent={reviewN ? 'var(--red)' : 'var(--green)'} meta={`드리프트 ${q.drift || 0} · 유령 ${q.ghosts || 0}${q.ghostsHeld ? ` (보류 ${q.ghostsHeld})` : ''}`} onClick={() => setView('review')} active={view === 'review'} />
+            <Card label="(미지정)" value={unassignedHere} accent={unassignedHere ? 'var(--amber)' : 'var(--green)'} meta={`${corpBasis}출처별로 묶어 연결합니다`} onClick={() => setView('un')} active={view === 'un'} />
+            <Card label="매핑 안 된 값" value={q.unmapped || 0} accent={q.unmapped ? 'var(--amber)' : 'var(--green)'} meta={`${corpBasis}규칙 값에 맞는 서비스 없음`} onClick={() => setView('unmapped')} active={view === 'unmapped'} />
+            <Card label="검토 필요" value={reviewN} accent={reviewN ? 'var(--red)' : 'var(--green)'} meta={`${corpBasis}${review.meta}`} onClick={() => setView('review')} active={view === 'review'} />
           </div>
           <div className="svcinv-layout">
             <CorpTree corps={corps} servicesOf={servicesOf} noCorp={d.noCorp} sel={sel} open={open}
@@ -239,14 +247,23 @@ export default function SvcInventory() {
                   {selSvc ? <AttrCard key={selSvc.id} s={selSvc} d={d} writable={writableOf(selSvc.corp)} op={op} busy={busy} folderOptions={folderOptions} onDeleted={() => { setSel({ type: 'corp', corp: selSvc.corp }); setSelRow(''); }} /> : null}
                   <div className="card" style={{ minWidth: 0 }}>
                     <div className="flex wrap gap" style={{ padding: '10px 14px', borderBottom: '1px solid var(--border)', alignItems: 'center' }}>
-                      <b>서비스별 현황</b><span className="muted" style={{ fontSize: 12 }}>{shown.length}개 · 행을 누르면 아래 구성원·영향 호스트</span>
+                      <b>서비스별 현황</b><span className="muted" style={{ fontSize: 12 }}>{filtering ? `${listed.length}개 / ${shown.length}개` : `${shown.length}개`} · 행을 누르면 아래 구성원·영향 호스트</span>
                     </div>
+                    {shown.length > 1 || filtering ? (
+                      <div className="flex wrap gap" style={{ padding: '8px 14px', alignItems: 'center', borderBottom: '1px solid var(--border)' }}>
+                        <input className="input" type="search" value={flt.q} onChange={(e) => setFlt({ ...flt, q: e.target.value })} placeholder="서비스 · 폴더 · 담당자 · 법인 찾기" aria-label="서비스 찾기" style={{ minWidth: 0, flex: '1 1 220px', maxWidth: 320 }} />
+                        <label style={{ fontSize: 12, display: 'inline-flex', gap: 4, alignItems: 'center' }}><input type="checkbox" checked={flt.tier1} onChange={(e) => setFlt({ ...flt, tier1: e.target.checked })} /> 등급 1만</label>
+                        <label style={{ fontSize: 12, display: 'inline-flex', gap: 4, alignItems: 'center' }}><input type="checkbox" checked={flt.noOwner} onChange={(e) => setFlt({ ...flt, noOwner: e.target.checked })} /> 담당자 미지정만</label>
+                        {filtering ? <button type="button" className="logout-btn" style={btn} onClick={() => setFlt({ q: '', tier1: false, noOwner: false })}>지우기</button> : null}
+                        {filtering ? <span className="muted" style={{ fontSize: 12 }}>찾는 동안 (미지정) 행은 숨깁니다</span> : null}
+                      </div>
+                    ) : null}
                     {!shown.length && sel.type !== 'all' && !corps.find((c) => c.vcenterId === selCorp)?.unassigned ? <div className="muted" style={{ padding: 16 }}>서비스가 없습니다{canWriteHere ? ' — ＋ 서비스로 만듭니다' : ''}.</div> : (
                       <STable className="table svcinv-t" minWidth={sel.type === 'all' ? 760 : 680}>
                         <thead><tr><th>서비스</th><th>등급</th>{sel.type === 'all' ? <th>법인</th> : null}<th title="VM·베어메탈 · 호스트 = 구성원 VM 이 올라간 ESXi 호스트 수(파생)">구성원</th><th title="Σ(사용률×용량)÷Σ용량">사용률</th><th>부품 장애</th><th>백업 24h</th><th>소속 근거</th></tr></thead>
                         <tbody>
-                          {shown.map((s) => <ServiceRow key={s.id} s={s} d={d} corpName={corpName} showCorp={sel.type === 'all'} orphanOf={orphanOf} on={selRow === s.id} onClick={() => setSelRow(selRow === s.id ? '' : s.id)} />)}
-                          {(sel.type === 'all' ? corps : corps.filter((c) => c.vcenterId === selCorp)).filter((c) => c.unassigned && sel.type !== 'svc' && sel.type !== 'folder').map((c) => (
+                          {listed.map((s) => <ServiceRow key={s.id} s={s} d={d} corpName={corpName} showCorp={sel.type === 'all'} orphanOf={orphanOf} on={selRow === s.id} onClick={() => setSelRow(selRow === s.id ? '' : s.id)} />)}
+                          {(sel.type === 'all' ? corps : corps.filter((c) => c.vcenterId === selCorp)).filter((c) => c.unassigned && sel.type !== 'svc' && sel.type !== 'folder' && !filtering).map((c) => (
                             <ServiceRow key={`un:${c.vcenterId}`} s={{ id: `un:${c.vcenterId}`, name: '(미지정)', path: '', corp: c.vcenterId, tier: null, stat: c.unassigned, unassigned: true }} d={d} corpName={corpName} showCorp={sel.type === 'all'} orphanOf={orphanOf} on={selRow === `un:${c.vcenterId}`} onClick={() => setSelRow(selRow === `un:${c.vcenterId}` ? '' : `un:${c.vcenterId}`)} />
                           ))}
                         </tbody>
@@ -254,7 +271,7 @@ export default function SvcInventory() {
                     )}
                     <div className="muted" style={{ padding: '8px 14px', fontSize: 12 }}>CPU·메모리 = Σ(사용률×용량)÷Σ용량 · 꺼진 VM·못 읽은 서버는 합산에서 빠집니다 · 부품 장애 = 구성원 장애(+영향 호스트 장애, 다른 서비스와 공유) · 백업 = 그 법인 Bareos 최근 24시간</div>
                   </div>
-                  {membersQuery ? <MembersPanel title={selRow.startsWith('un:') ? `(미지정) · ${corpName(selRow.slice(3))}` : svcName(selRow)} sub={selRow.startsWith('un:') ? '미지정 구성원' : '구성원'} query={membersQuery} reloadKey={reloadKey} /> : null}
+                  {membersQuery ? <MembersPanel title={selRow.startsWith('un:') ? `(미지정) · ${corpName(selRow.slice(3))}` : svcName(selRow)} sub={selRow.startsWith('un:') ? '미지정 구성원' : '구성원'} query={membersQuery} reloadKey={reloadKey} showReason={selRow.startsWith('un:')} /> : null}
                 </>
               ) : null}
               {view === 'un' ? <UnassignedView corp={selCorp} reloadKey={reloadKey} servicesOf={servicesOf} writableOf={writableOf} op={op} busy={busy} corpName={corpName} onPinGroup={(g) => setPin({ corp: g.corp, service: '' })} /> : null}
@@ -379,11 +396,21 @@ function OrphanBar({ corp, corpName, canFleet, busy, op, onPurged }) {
 
 /** 법인 › 폴더 › 서비스 트리. */
 function CorpTree({ corps, servicesOf, noCorp, sel, open, onSel, onToggle }) {
+  const [tq, setTq] = useState('');   // 트리 찾기(5차 M8) — 법인 이름 · 서비스 이름 · 폴더
+  const needle = tq.trim().toLowerCase();
   const isOn = (x) => sel.type === x.type && (x.type === 'all' || (sel.corp === x.corp && (x.type === 'folder' ? sel.path === x.path : x.type === 'svc' ? sel.id === x.id : true)));
   const rows = [];
   const total = corps.reduce((a, c) => a + servicesOf(c.vcenterId).reduce((b, s) => b + s.stat.n.total, 0) + (c.unassigned?.n?.total || 0), 0) + (noCorp?.n?.total || 0);
   rows.push({ key: 'all', depth: 0, icon: '🌐', name: '전체 법인', n: total, x: { type: 'all' } });
   for (const c of corps) {
+    if (needle) {   // 찾는 중 — 맞는 법인·서비스만 평평하게(폴더 열림 상태와 무관)
+      const corpHit = String(c.name || '').toLowerCase().includes(needle);
+      const hits = servicesOf(c.vcenterId).filter((s) => `${s.name}\u0000${s.path || ''}`.toLowerCase().includes(needle));
+      if (!corpHit && !hits.length) continue;
+      rows.push({ key: `c:${c.vcenterId}`, depth: 0, icon: '🏢', name: c.name.replace(/^vcenter-/, ''), n: servicesOf(c.vcenterId).reduce((a, s) => a + s.stat.n.total, 0) + (c.unassigned?.n?.total || 0), x: { type: 'corp', corp: c.vcenterId }, orphan: !!c.orphan });
+      for (const s of hits) rows.push({ key: `s:${s.id}`, depth: 1, icon: '🧩', name: s.name, sub: s.path ? s.path.replace(/\\/g, ' › ') : '', n: s.stat.n.total, tier: s.tier, x: { type: 'svc', corp: c.vcenterId, id: s.id } });
+      continue;
+    }
     const k = `c:${c.vcenterId}`; const op = open.has(k);
     const tree = folderTreeOf(c, servicesOf(c.vcenterId));
     rows.push({ key: k, depth: 0, icon: '🏢', tw: op ? '▾' : '▸', name: c.name.replace(/^vcenter-/, ''), n: tree.n + (c.unassigned?.n?.total || 0), x: { type: 'corp', corp: c.vcenterId }, toggle: k, orphan: !!c.orphan });
@@ -399,17 +426,21 @@ function CorpTree({ corps, servicesOf, noCorp, sel, open, onSel, onToggle }) {
     walk(tree, 1);
     if (c.unassigned?.n?.total) rows.push({ key: `u:${c.vcenterId}`, depth: 1, icon: '⚠', name: '(미지정)', n: c.unassigned.n.total, un: true, x: { type: 'un', corp: c.vcenterId } });
   }
-  if (noCorp?.n?.total) rows.push({ key: 'nocorp', depth: 0, icon: '❔', name: '(법인 미지정)', n: noCorp.n.total, un: true, x: { type: 'un', corp: '' } });
+  if (noCorp?.n?.total && !needle) rows.push({ key: 'nocorp', depth: 0, icon: '❔', name: '(법인 미지정)', n: noCorp.n.total, un: true, x: { type: 'un', corp: '' } });
   return (
     <div className="card" style={{ alignSelf: 'start', minWidth: 0 }}>
       <div style={{ padding: '10px 14px', borderBottom: '1px solid var(--border)' }}><b>법인 › 폴더 › 서비스</b></div>
+      <div style={{ padding: '8px 10px 4px' }}>
+        <input className="input" type="search" value={tq} onChange={(e) => setTq(e.target.value)} placeholder="법인 · 서비스 · 폴더 찾기" aria-label="트리 찾기" style={{ width: '100%', minWidth: 0, boxSizing: 'border-box' }} />
+        {needle && rows.length <= 1 ? <div className="muted" style={{ fontSize: 12, padding: '6px 2px 0' }}>맞는 법인·서비스가 없습니다.</div> : null}
+      </div>
       <div style={{ padding: '6px 2px', maxHeight: '70vh', overflowY: 'auto' }}>
         {rows.map((r) => (
           <div key={r.key} className={`svcinv-tn${isOn(r.x) ? ' on' : ''}`} style={{ paddingLeft: 6 + r.depth * 10 }}
             onClick={() => { if (r.toggle && (isOn(r.x) || !open.has(r.toggle))) onToggle(r.toggle); onSel(r.x); }}>
             <span style={{ width: 10, color: 'var(--text-faint)', fontSize: 10 }}>{r.tw || ''}</span>
             <span>{r.icon}</span>
-            <span className="nm" title={r.name} style={r.un ? { color: 'var(--amber)' } : undefined}>{r.name}{r.empty ? <span className="muted"> (빈)</span> : null}</span>
+            <span className="nm" title={r.sub ? `${r.sub} › ${r.name}` : r.name} style={r.un ? { color: 'var(--amber)' } : undefined}>{r.name}{r.sub ? <span className="muted" style={{ fontSize: 11 }}> · {r.sub}</span> : null}{r.empty ? <span className="muted"> (빈)</span> : null}</span>
             {r.orphan ? <span className="badge gray" style={{ flex: 'none' }} title="등록 해제된 vCenter — 서비스·규칙·고정만 남아 있습니다">해제</span> : null}
             {r.tier ? <TierBadge tier={r.tier} /> : null}
             <span className="cnt">{r.n}</span>

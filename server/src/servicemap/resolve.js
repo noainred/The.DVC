@@ -8,13 +8,16 @@
  *   2. vCenter 폴더 규칙(VM)  — vmPlacement.folderPath('/ERP/prod') 의 '/' 경계 접두, 가장 긴 접두. folderPath null(vApp 등)은 'placement-unknown'.
  *   3. 스캔 엔트리 라벨(베어메탈) — 등록부 scanRangeId → idrac-scan-ranges.json 엔트리 service 라벨. 라벨 = 서비스명 또는 별칭.
  *   4. vSphere 태그(선택, VM) — 전역 카테고리가 정해지고 그 법인이 켰을 때만. 태그를 못 읽었으면 'unchecked'(미지정과 다르다).
- *   5. 이름 규칙(선택)        — 접두/접미/포함 3종(정규식 아님 — 4차 반증 14 ReDoS).
+ *                              태그가 여럿이면 **서비스(이름·별칭)에 걸리는 값**을 고른다(5차 M5·R14 — 예전에는 첫 값만 봤다). 값은 소문자 정렬 순으로 본다
+ *                              (수집 순서가 바뀌어도 판정이 흔들리지 않게). 둘 이상의 다른 서비스에 걸리면 첫 값을 쓰되 `tagAmbiguous` 로 검토 큐에 올린다(조용히 이기지 않는다).
+ *   5. 이름 규칙(선택)        — 접두/접미/포함 3종(정규식 아님 — 4차 반증 14 ReDoS). **적용 순서는 등록 순이 아니다**(5차 M4·R13):
+ *                              접두·접미가 포함보다 먼저, 같은 등급 안에서는 긴 값 먼저, 그다음 등록 순(`sortNameRules` — 화면 '적용 순서' 열도 이것).
  *   6. 없음 → (미지정). reason 으로 왜인지 밝히고, 사람이 묶어 연결할 값은 unmapped 로 싣는다.
  * 서비스를 **자동으로 만드는 경로는 없다** — 규칙·별칭은 기존 서비스에만 붙는다.
- * 비교는 전부 소문자(4차 반증 20).
+ * 비교는 소문자(4차 반증 20) — **단 vCenter 폴더 규칙은 대소문자를 구분한다**(vSphere 폴더 이름이 대소문자를 구분하므로 '/ERP' 와 '/erp' 는 다른 폴더다 — 5차 R12 머리말 정정).
  *
  * 구성원 입력 모양:
- *   { key, kind:'vm'|'bm', corp, name, folderPath?:string|null, tags?:string[]|null, scan?:{entryId,label}|null, scanWhy?:'unknown-entry'|'old-source' }
+ *   { key, kind:'vm'|'bm', corp, name, folderPath?:string|null, tags?:string[]|null, scan?:{entryId,label}|null, scanWhy?:'unknown-entry'|'old-source'|'not-reported', corpWhy? }
  *   scanWhy(5차 R18): scan 이 없는 이유 — 보고된 엔트리 id 가 중앙 등록부에 없음 · 보고한 엣지·수집 서버가 엔트리 id 를 보내지 않는 구버전.
  *   tags: undefined = 태그 규칙 꺼짐 · null = 그 vCenter 태그를 못 읽음(unchecked) · [] = 읽었고 카테고리 태그 없음.
  */
@@ -31,10 +34,17 @@ export function buildIndex(map) {
     const rules = (c.folderRules || []).filter((r) => svcById.has(r.serviceId)).slice().sort((a, b) => b.prefix.length - a.prefix.length);
     const aliasScan = new Map(); const aliasTag = new Map();
     for (const a of c.aliases || []) { if (!svcById.has(a.serviceId)) continue; (a.kind === 'scan' ? aliasScan : aliasTag).set(lc(a.value), a.serviceId); }
-    const nameRules = (c.nameRules || []).filter((r) => svcById.has(r.serviceId)).map((r) => ({ ...r, v: lc(r.value) }));
+    const nameRules = sortNameRules((c.nameRules || []).filter((r) => svcById.has(r.serviceId))).map((r) => ({ ...r, v: lc(r.value) }));
     idx.set(vc, { svcById, svcByName, rules, aliasScan, aliasTag, nameRules, tagEnabled: c.tagEnabled === true });
   }
   return idx;
+}
+
+/** 이름 규칙 적용 순서(순수 — 5차 M4·R13). 접두·접미(앵커) > 포함 · 같은 등급이면 긴 값 먼저 · 그다음 등록 순(안정 정렬). */
+const MATCH_RANK = { prefix: 0, suffix: 0, contains: 1 };
+export function sortNameRules(rules = []) {
+  return (rules || []).map((r, i) => ({ r, i, n: lc(r?.value).length, k: MATCH_RANK[r?.match] ?? 2 }))
+    .sort((a, b) => a.k - b.k || b.n - a.n || a.i - b.i).map((x) => x.r);
 }
 
 /** 폴더 접두 일치 — '/' 경계. 루트 규칙('/')은 루트 VM('/')만(모든 VM 을 삼키지 않게). */
@@ -64,12 +74,16 @@ export function autoResolve(m, idx, { tagCategory = '' } = {}) {
     if (c && tagCategory && c.tagEnabled) {
       if (m.tags === null) unchecked = true;
       else if (Array.isArray(m.tags) && m.tags.length) {
-        const t0 = String(m.tags[0]);
-        const s = c.svcByName.get(lc(t0)) || null;
-        const viaAlias = s ? null : c.aliasTag.get(lc(t0));
-        if (s) return { ...hit(s.id, 'tag', t0), ...(m.tags.length > 1 ? { multi: true } : {}) };
-        if (viaAlias) return { ...hit(viaAlias, 'tag', t0), ...(m.tags.length > 1 ? { multi: true } : {}) };
-        tagUnmapped = t0;
+        const vals = [...new Set(m.tags.map((x) => String(x ?? '').slice(0, NAME_INPUT_MAX)).filter((x) => x.trim()))]
+          .sort((a, b) => (lc(a) < lc(b) ? -1 : lc(a) > lc(b) ? 1 : (a < b ? -1 : a > b ? 1 : 0)));
+        const hits = [];
+        for (const v of vals) { const id = c.svcByName.get(lc(v))?.id || c.aliasTag.get(lc(v)); if (id) hits.push({ v, id }); }
+        const multi = vals.length > 1 ? { multi: true, tagValues: vals.slice(0, 8) } : {};
+        if (hits.length) {
+          const ambiguous = new Set(hits.map((x) => x.id)).size > 1;
+          return { ...hit(hits[0].id, 'tag', hits[0].v), ...multi, ...(ambiguous ? { tagAmbiguous: true } : {}) };
+        }
+        if (vals.length) tagUnmapped = vals[0];
       }
     }
     const nr = c ? nameRuleOf(c, m.name) : null;
