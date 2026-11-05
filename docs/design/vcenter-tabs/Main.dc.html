@@ -1,0 +1,210 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>vCenter 상세 — 탭 12개 줄 · 요약</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=Noto+Sans+KR:wght@400;500;700;800&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+body{margin:0;background:#0a0e17;color:#e6edf6;font-family:"Inter","Noto Sans KR","Apple SD Gothic Neo",sans-serif;font-size:13px}
+a{color:#93c5fd}a:hover{color:#bfdbfe}
+.muted{color:#8b9bb4}
+.faint{color:#5d6b85}
+.mono{font-family:"JetBrains Mono",ui-monospace,monospace}
+.card{background:#141b2d;border:1px solid #243049;border-radius:12px;min-width:0}
+.tab{display:inline-flex;align-items:center;gap:6px;padding:8px 14px;border-radius:8px;border:1px solid transparent;background:none;color:#8b9bb4;font:inherit;font-size:13px;font-weight:600;cursor:pointer;text-decoration:none;white-space:nowrap}
+.tab:hover{color:#e6edf6;background:#1a2236}
+.vtab{display:inline-flex;align-items:center;gap:6px;min-height:34px;padding:0 12px;border-radius:8px;border:1px solid transparent;color:#8b9bb4;font:inherit;font-size:13px;font-weight:600;text-decoration:none;white-space:nowrap;flex:none}
+.vtab:hover{color:#e6edf6;background:#1a2236}
+.vtab.on{color:#ffffff;background:#3b82f6;border-color:#3b82f6}
+.vtab .n{font-size:10.5px;font-weight:700;padding:1px 6px;border-radius:999px;background:rgba(139,155,180,.16);color:#aebbd0}
+.vtab.on .n{background:rgba(255,255,255,.22);color:#ffffff}
+.btn{display:inline-flex;align-items:center;gap:6px;min-height:30px;padding:0 12px;border-radius:8px;border:1px solid #243049;background:#1a2236;color:#e6edf6;font:inherit;font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap;text-decoration:none}
+.btn.primary{background:linear-gradient(135deg,#3b82f6,#2563eb);border-color:#2563eb;color:#ffffff;font-weight:700}
+.btn.ghost{background:transparent;border-color:transparent;color:#93c5fd;padding:0 4px}
+.badge{display:inline-flex;align-items:center;padding:2px 9px;border-radius:20px;font-size:11px;font-weight:600;white-space:nowrap}
+.badge.green{background:rgba(34,197,94,.15);color:#4ade80}
+.badge.amber{background:rgba(245,158,11,.15);color:#fbbf24}
+.badge.red{background:rgba(239,68,68,.15);color:#f87171}
+.badge.gray{background:rgba(139,155,180,.15);color:#8b9bb4}
+.badge.blue{background:rgba(59,130,246,.15);color:#60a5fa}
+.badge.purple{background:rgba(168,85,247,.15);color:#c084fc}
+.badge.teal{background:rgba(20,184,166,.16);color:#2dd4bf}
+.ct{display:flex;align-items:center;gap:8px;padding:11px 14px;border-bottom:1px solid #1f2a40;min-width:0}
+.ct b{font-size:13.5px}
+.ct .more{margin-left:auto;font-size:12px;white-space:nowrap}
+.kv{display:grid;grid-template-columns:auto minmax(0,1fr);gap:7px 14px;padding:12px 14px;font-size:12.5px;align-items:baseline}
+.kv span{color:#8b9bb4;white-space:nowrap}
+.kv div{min-width:0;overflow-wrap:anywhere}
+.num{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;padding:12px 14px}
+.num div{border:1px solid #243049;border-radius:10px;background:#0f1626;padding:8px 10px;min-width:0}
+.num b{display:block;font-size:18px;font-weight:800;line-height:1.2}
+.num span{font-size:11px;color:#8b9bb4;display:block}
+.num i{font-style:normal;font-size:11px;color:#5d6b85;display:block;margin-top:2px}
+.bar{height:6px;border-radius:999px;background:#243049;overflow:hidden;flex:1 1 0;min-width:60px}
+.bar i{display:block;height:100%;border-radius:999px}
+.row{display:flex;align-items:center;gap:10px;min-width:0}
+table{border-collapse:collapse;width:100%}
+th{font-size:12px;font-weight:600;color:#8b9bb4;text-align:left;padding:9px 10px;background:#0f1626;border-bottom:1px solid #243049;white-space:nowrap;cursor:pointer}
+th.sort{color:#e6edf6}
+td{padding:8px 10px;border-bottom:1px solid #1f2a40;vertical-align:middle;white-space:nowrap;font-size:12.5px}
+.sm{font-size:11.5px;color:#8b9bb4}
+.note{padding:9px 14px;font-size:11.5px;line-height:1.6;color:#8b9bb4;border-top:1px solid #1f2a40}
+.spark{display:inline-block;width:56px;height:16px;vertical-align:middle}
+</style>
+</helmet>
+<div style="position:relative;width:100%;min-height:1320px;box-sizing:border-box;overflow:hidden;background:#0a0e17">
+<div style="max-width:1440px;margin:0 auto;box-sizing:border-box;padding:18px 24px 28px;display:flex;flex-direction:column;gap:12px;min-width:0">
+
+  <!-- 머리 줄: 지금 화면 그대로(← 목록 · 이름 · 위치 · 버전 · id · 상태 · KPI · 비교하기) -->
+  <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px 12px;min-width:0">
+    <div class="row" style="gap:12px">
+      <a class="tab" href="Main.dc.html">← 목록</a>
+      <div style="min-width:0">
+        <div style="font-size:16px;font-weight:800">VC-DEMO1</div>
+        <div class="muted" style="font-size:12px">대전, Korea · v8.0.3 · vc-demo1</div>
+      </div>
+      <span class="badge green">Connected</span>
+    </div>
+    <div class="row" style="font-size:12px;flex-wrap:wrap;row-gap:6px">
+      <span class="muted">호스트 <b style="color:#e6edf6">89</b></span>
+      <span class="muted">VM <b style="color:#e6edf6">911</b></span>
+      <span class="muted row" style="gap:5px">CPU <b style="color:#e6edf6">41%</b>
+        <svg class="spark" viewBox="0 0 56 16" aria-hidden="true"><polyline fill="none" stroke="#60a5fa" stroke-width="1.5" points="0,11 8,10 16,12 24,8 32,9 40,6 48,7 56,6"/></svg></span>
+      <span class="muted row" style="gap:5px">메모리 <b style="color:#e6edf6">64%</b>
+        <svg class="spark" viewBox="0 0 56 16" aria-hidden="true"><polyline fill="none" stroke="#4ade80" stroke-width="1.5" points="0,7 8,7 16,6 24,6 32,5 40,5 48,6 56,5"/></svg></span>
+      <span class="muted row" style="gap:5px">디스크
+        <svg class="spark" viewBox="0 0 56 16" aria-hidden="true"><polyline fill="none" stroke="#fbbf24" stroke-width="1.5" points="0,9 8,9 16,8 24,8 32,8 40,7 48,7 56,7"/></svg></span>
+      <a class="btn primary" href="Main.dc.html" style="margin-left:6px">⇄ 비교하기</a>
+    </div>
+  </div>
+
+  <!-- 탭 줄: vSphere Client 의 vCenter 개체 탭 12개 · 순서 그대로 · 아이콘 없음 · 한 줄(넘치면 가로 스크롤, 페이지는 밀지 않는다) -->
+  <nav role="tablist" aria-label="vCenter 보기" style="display:flex;gap:4px;overflow-x:auto;padding-bottom:8px;border-bottom:1px solid #243049;min-width:0">
+    <a class="vtab on" href="Main.dc.html" aria-current="page">요약</a>
+    <a class="vtab" href="Monitor.dc.html">모니터 <span class="n">2</span></a>
+    <a class="vtab" href="Configure.dc.html">구성</a>
+    <a class="vtab" href="NewCollect.dc.html">사용 권한</a>
+    <a class="vtab" href="Datacenter.dc.html">데이터 센터</a>
+    <a class="vtab" href="Main.dc.html">호스트 및 클러스터</a>
+    <a class="vtab" href="Main.dc.html">VM</a>
+    <a class="vtab" href="Main.dc.html">데이터스토어</a>
+    <a class="vtab" href="Main.dc.html">네트워크</a>
+    <a class="vtab" href="NewCollect.dc.html">연결된 vCenter Server 시스템</a>
+    <a class="vtab" href="Extensions.dc.html">확장 프로그램</a>
+    <a class="vtab" href="NewCollect.dc.html">업데이트</a>
+  </nav>
+
+  <!-- 요약 탭 본문 -->
+  <div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;min-width:0">
+
+    <section class="card" aria-label="vCenter 정보">
+      <div class="ct"><b>vCenter 정보</b><span class="sm">수집한 about 값</span></div>
+      <div class="kv">
+        <span>제품</span><div>VMware vCenter Server 8.0.3 build-24322831</div>
+        <span>버전 · 빌드</span><div>8.0.3 · <span class="mono">24322831</span></div>
+        <span>API 버전</span><div>8.0.3.0</div>
+        <span>인스턴스 UUID</span><div class="mono" style="font-size:11.5px">3f1c2a6e-9b4d-4e0a-8c21-5d7e0f9a1b2c</div>
+        <span>포탈 vCenter id</span><div class="mono">vc-demo1</div>
+        <span>마지막 수집</span><div>2026-11-05 10:31 <span class="sm">(4분 전 · 주기 수집)</span></div>
+      </div>
+      <div class="note">인증서 · 라이선스는 아래 카드, 적용 가능 패치는 업데이트 탭(지금은 버전만 안다).</div>
+    </section>
+
+    <section class="card" aria-label="인벤토리">
+      <div class="ct"><b>인벤토리</b><a class="more" href="Datacenter.dc.html">데이터 센터 →</a></div>
+      <div class="num">
+        <div><span>vSphere 데이터센터</span><b>2</b></div>
+        <div><span>클러스터</span><b>11</b></div>
+        <div><span>호스트</span><b>89</b><i>연결 88 · 끊김 1 · 유지보수 0</i></div>
+        <div><span>VM</span><b>911</b><i>켜짐 702 · 꺼짐 209 · 템플릿 14</i></div>
+        <div><span>데이터스토어</span><b>42</b><i>접근 불가 1</i></div>
+        <div><span>네트워크(포트그룹)</span><b>36</b></div>
+      </div>
+      <div class="note">호스트 · VM 수는 머리 줄과 같은 집계(‘Off VM 포함’ 설정은 호스트 및 클러스터 · VM 탭에서).</div>
+    </section>
+
+    <section class="card" aria-label="용량">
+      <div class="ct"><b>용량</b><a class="more" href="Monitor.dc.html">성능(추이) →</a></div>
+      <div style="display:flex;flex-direction:column;gap:12px;padding:12px 14px">
+        <div class="row"><span style="width:62px;color:#8b9bb4">CPU</span><div class="bar"><i style="width:41%;background:#60a5fa"></i></div><b style="width:44px;text-align:right">41%</b><span class="sm" style="width:118px">가상화 3.2:1</span></div>
+        <div class="row"><span style="width:62px;color:#8b9bb4">메모리</span><div class="bar"><i style="width:64%;background:#4ade80"></i></div><b style="width:44px;text-align:right">64%</b><span class="sm" style="width:118px">가상화 0.9:1</span></div>
+        <div class="row"><span style="width:62px;color:#8b9bb4">스토리지</span><div class="bar"><i style="width:58%;background:#fbbf24"></i></div><b style="width:44px;text-align:right">58%</b><span class="sm" style="width:118px">412 / 710 TB</span></div>
+        <div class="row"><span style="width:62px;color:#8b9bb4">디스크 추이</span><span class="sm">최근 24시간 +0.4%p</span></div>
+      </div>
+      <div class="note">CPU · 메모리 % 는 호스트 실사용률 합, 스토리지는 데이터스토어 용량 합(접근 불가 1개는 합에서 뺀다 — 따로 센다).</div>
+    </section>
+
+    <section class="card" aria-label="포탈 알람">
+      <div class="ct"><b>포탈 알람</b><span class="badge amber">포탈 규칙</span><a class="more" href="Monitor.dc.html">모니터 →</a></div>
+      <div class="num" style="grid-template-columns:repeat(3,minmax(0,1fr))">
+        <div><span>심각</span><b style="color:#f87171">2</b></div>
+        <div><span>경고</span><b style="color:#fbbf24">5</b></div>
+        <div><span>정보</span><b>1</b></div>
+      </div>
+      <div style="padding:0 14px 10px;display:flex;flex-direction:column;gap:6px;font-size:12px">
+        <div class="row"><span class="badge red">심각</span><span style="min-width:0;overflow:hidden;text-overflow:ellipsis">esx-kr1-07 · vCenter 와 연결 끊김</span><span class="sm" style="margin-left:auto">09:12 부터</span></div>
+        <div class="row"><span class="badge red">심각</span><span style="min-width:0;overflow:hidden;text-overflow:ellipsis">ds-kr1-nfs02 · 사용률 96%</span><span class="sm" style="margin-left:auto">어제 22:40 부터</span></div>
+        <div class="row"><span class="badge amber">경고</span><span style="min-width:0;overflow:hidden;text-overflow:ellipsis">esx-kr1-12 · CPU 사용률 높음(93%)</span><span class="sm" style="margin-left:auto">10:16 부터</span></div>
+        <div class="row"><span class="badge amber">경고</span><span style="min-width:0;overflow:hidden;text-overflow:ellipsis">ds-kr1-san07 · 접근 불가(사용량 모름)</span><span class="sm" style="margin-left:auto">08:02 부터</span></div>
+      </div>
+      <div class="note">포탈이 수집값으로 판정한 알람(호스트 끊김 · 유지보수 · CPU&gt;90 · MEM&gt;92 · DS&gt;90/95% · DS 접근 불가). vCenter 자체 트리거 알람은 수집하지 않음.</div>
+    </section>
+
+    <section class="card" aria-label="라이선스 · 인증서">
+      <div class="ct"><b>라이선스 · 인증서</b><a class="more" href="Configure.dc.html">구성 →</a></div>
+      <div style="padding:10px 14px;display:flex;flex-direction:column;gap:7px;font-size:12.5px">
+        <div class="row"><span style="min-width:0;overflow:hidden;text-overflow:ellipsis">vSphere 8 Enterprise Plus</span><span class="sm" style="margin-left:auto">코어 1,536 / 1,792</span></div>
+        <div class="row"><span style="min-width:0;overflow:hidden;text-overflow:ellipsis">vCenter Server 8 Standard</span><span class="sm" style="margin-left:auto">인스턴스 1 / 1</span></div>
+        <div class="row"><span style="min-width:0;overflow:hidden;text-overflow:ellipsis">vSAN 8 Enterprise</span><span class="sm" style="margin-left:auto">코어 64 / 96</span></div>
+        <div class="row" style="padding-top:7px;border-top:1px solid #1f2a40"><span class="muted">443 인증서</span><span class="mono" style="font-size:11.5px;min-width:0;overflow:hidden;text-overflow:ellipsis">vc-demo1.example.corp</span><span class="badge green" style="margin-left:auto">D-211</span></div>
+        <div class="row"><span class="muted">발급자 · 만료</span><span class="sm">DEMO-Issuing-CA · 2027-06-04</span></div>
+      </div>
+      <div class="note">라이선스는 LicenseManager 값(조회 실패면 ‘확인 불가’). 인증서는 포탈이 12시간마다 443 을 읽은 값(D-90 경고 · D-30 위험).</div>
+    </section>
+
+    <section class="card" aria-label="확장 프로그램 · 버전">
+      <div class="ct"><b>확장 프로그램 · 버전</b><a class="more" href="Extensions.dc.html">확장 프로그램 →</a></div>
+      <div style="padding:10px 14px;display:flex;flex-direction:column;gap:7px;font-size:12.5px">
+        <div class="row"><span>확장 프로그램</span><b style="margin-left:auto">12개</b></div>
+        <div class="row"><span class="sm" style="min-width:0;overflow:hidden;text-overflow:ellipsis">NSX · vSAN Health · Update Manager(vLCM) · SMS · 외 8</span></div>
+        <div class="row" style="padding-top:7px;border-top:1px solid #1f2a40"><span>ESXi 버전</span><span class="sm" style="margin-left:auto">8.0.3 ×84 · 7.0.3 ×5</span></div>
+        <div class="row"><span>적용 가능 패치</span><span class="badge gray" style="margin-left:auto">수집하지 않음</span></div>
+      </div>
+      <div class="note">확장 목록은 주기 수집에 이미 실린다(ExtensionManager). 패치 · vLCM 준수 상태는 수집하지 않음 — 업데이트 탭 참고.</div>
+    </section>
+  </div>
+
+  <section class="card" aria-label="최근 이벤트" style="overflow:hidden">
+    <div class="ct"><b>최근 이벤트</b><span class="sm">이 vCenter · 최근 24시간 · 6 / 143건</span><a class="more" href="Monitor.dc.html">모니터 › 이벤트 →</a></div>
+    <div style="overflow-x:auto">
+      <table>
+        <thead><tr><th class="sort">시각 ▾</th><th>심각도</th><th>유형</th><th>대상</th><th>사용자</th><th>메시지</th></tr></thead>
+        <tbody>
+          <tr><td class="mono">11-05 10:28</td><td><span class="badge red">오류</span></td><td>HostConnectionLostEvent</td><td>esx-kr1-07</td><td class="muted">—</td><td style="white-space:normal">Host esx-kr1-07 in DC-KR1 is not responding</td></tr>
+          <tr><td class="mono">11-05 10:16</td><td><span class="badge amber">경고</span></td><td>AlarmStatusChangedEvent</td><td>esx-kr1-12</td><td class="muted">—</td><td style="white-space:normal">Alarm ‘Host CPU usage’ changed from Green to Yellow</td></tr>
+          <tr><td class="mono">11-05 09:51</td><td><span class="badge blue">정보</span></td><td>VmPoweredOnEvent</td><td>web-kr1-023</td><td>DEMO\hong.gd</td><td style="white-space:normal">web-kr1-023 on esx-kr1-03 is powered on</td></tr>
+          <tr><td class="mono">11-05 09:40</td><td><span class="badge blue">정보</span></td><td>VmReconfiguredEvent</td><td>db-kr1-004</td><td>DEMO\kim.ys</td><td style="white-space:normal">Reconfigured db-kr1-004 — 메모리 32 → 48 GB</td></tr>
+          <tr><td class="mono">11-05 08:02</td><td><span class="badge amber">경고</span></td><td>DatastoreInaccessibleEvent</td><td>ds-kr1-san07</td><td class="muted">—</td><td style="white-space:normal">Datastore ds-kr1-san07 is inaccessible from esx-kr1-05</td></tr>
+          <tr><td class="mono">11-05 07:30</td><td><span class="badge blue">정보</span></td><td>UserLoginSessionEvent</td><td>vc-demo1</td><td>DEMO\svc-portal</td><td style="white-space:normal">User DEMO\svc-portal@10.20.0.15 logged in</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="note">이벤트는 포탈이 EventManager 에서 증분 수집한 값(도구 ‘변경 이력’ 과 같은 출처). 열 제목으로 정렬.</div>
+  </section>
+
+  <div class="faint" style="font-size:11.5px">가상 데이터 · 요약 탭은 새 수집 없이 지금 있는 값(about · /hosts · /vms · /datastores · /networks · /alarms · 라이선스 · 인증서 · 확장 · 이벤트)만 모은다.</div>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1320}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

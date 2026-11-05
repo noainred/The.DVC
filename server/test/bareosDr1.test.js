@@ -75,8 +75,8 @@ before(async () => {
   ({ store } = await import('../src/store.js'));
   registry = await import('../src/bareos/registry.js');
   store.snapshot = {
-    generatedAt: Date.now(), source: 'mock',
-    vcenters: [{ id: 'vc-a', name: 'Seoul', host: 'https://vc-a.corp', location: { region: 'KR' } }, { id: 'vc-b', name: 'Warsaw', host: 'https://vc-b.corp', location: { region: 'PL' } }],
+    generatedAt: new Date().toISOString(), source: 'mock',   // 운영과 같은 모양(ISO 문자열 · 연결 상태) — 숫자로 두면 B4-01 이 숨는다
+    vcenters: [{ id: 'vc-a', name: 'Seoul', host: 'https://vc-a.corp', location: { region: 'KR' }, status: 'connected' }, { id: 'vc-b', name: 'Warsaw', host: 'https://vc-b.corp', location: { region: 'PL' }, status: 'connected' }],
     hosts: [{ id: 'vc-a:host-1', vcenterId: 'vc-a', name: 'esx-a1', cluster: 'CL-A', vcDatacenter: 'DC-NEW' }, { id: 'vc-a:host-2', vcenterId: 'vc-a', name: 'esx-a2', cluster: 'CL-B', vcDatacenter: 'DC-NEW' }],
     datastores: [{ id: 'vc-a:ds-1', vcenterId: 'vc-a', name: 'ds-a1', freeGB: 5000, capacityGB: 10000 }, { id: 'vc-a:ds-2', vcenterId: 'vc-a', name: 'ds-tight', freeGB: 300, capacityGB: 1000 }],
     vms: [
@@ -254,6 +254,12 @@ test('⑥ 라우트 — 2대 묶음은 시험 1대 성공 뒤 · 재해 복구 �
   assert.ok(rec, '재해 복구 복원에 표지(dr)');
   registry.applyRestoreRow(ID.web, { jobid: rec.jobid, status: 'T', type: 'R', endedAt: Date.now() });
   r = await call('admin', 'POST', '/restore-check/bulk', { items: two, dr: true });
+  assert.match(r.j.plan.issue || '', /1대가 성공으로 끝난 뒤/, '버그 점검 B4-02: 끝맺음(네트워크 끊기) 전에는 시험이 끝나지 않았다');
+  registry.patchRestoreFinish(ID.web, rec.jobid, { nic: 'failed', detail: '권한 없음', at: Date.now() });
+  r = await call('admin', 'POST', '/restore-check/bulk', { items: two, dr: true });
+  assert.match(r.j.plan.issue || '', /1대가 성공으로 끝난 뒤/, '끊기 실패한 시험은 통과가 아니다');
+  registry.patchRestoreFinish(ID.web, rec.jobid, { nic: 'ok', at: Date.now() });
+  r = await call('admin', 'POST', '/restore-check/bulk', { items: two, dr: true });
   assert.equal(r.j.plan.ok, true, JSON.stringify(r.j.plan));
   // R4 — 실패로 끝난 복원의 이름: 그 뒤 인벤토리 수집(generatedAt)이 있으면 예약을 푼다
   const app = job('app');
@@ -261,10 +267,19 @@ test('⑥ 라우트 — 2대 묶음은 시험 1대 성공 뒤 · 재해 복구 �
   registry.applyRestoreRow(app.id, { jobid: 9001, status: 'f', type: 'R', endedAt: Date.now() - 60_000 });
   const one = [{ id: ID.app, jobid: H('app', 130), mode: 'newVm', newVm: { name: 'app-05-fail' } }];
   const gen0 = store.snapshot.generatedAt;
-  store.snapshot.generatedAt = Date.now() - 120_000;   // 실패보다 앞선 인벤토리 — 아직 예약
+  const iso = (ms) => new Date(ms).toISOString();   // 운영 스냅샷의 generatedAt 은 ISO 문자열(B4-01 — Number() 로 읽으면 0 이라 풀리지 않았다)
+  store.snapshot.generatedAt = iso(Date.now() - 120_000);   // 실패보다 앞선 인벤토리 — 아직 예약
   r = await call('admin', 'POST', '/restore-check/bulk', { items: one });
   assert.match(r.j.plan.items[0].issue || '', /최근 복원/);
-  store.snapshot.generatedAt = Date.now();             // 실패 뒤 인벤토리 — 껍데기가 없으면 다시 보낼 수 있다
+  store.snapshot.generatedAt = iso(Date.now() + 60_000);    // 실패 뒤 병합이지만 여유(수집 주기 · 시한) 안 — 끝나기 전에 읽은 인벤토리일 수 있다
+  r = await call('admin', 'POST', '/restore-check/bulk', { items: one });
+  assert.match(r.j.plan.items[0].issue || '', /최근 복원/, '여유 안에서는 풀지 않는다(반증 노트 ①)');
+  store.snapshot.generatedAt = iso(Date.now() + 31 * 60_000); // 끝을 본 뒤 여유를 넘긴 새 인벤토리 — 껍데기가 없으면 다시 보낼 수 있다
+  const vcA = store.snapshot.vcenters.find((v) => v.id === 'vc-a');
+  vcA.maintenance = true; vcA.status = 'maintenance';       // 점검중 vCenter 의 값은 낡은 인벤토리다 — 풀지 않는다
+  r = await call('admin', 'POST', '/restore-check/bulk', { items: one });
+  assert.match(r.j.plan.items[0].issue || '', /최근 복원/, '점검중 vCenter 는 새 인벤토리로 세지 않는다');
+  delete vcA.maintenance; vcA.status = 'connected';
   r = await call('admin', 'POST', '/restore-check/bulk', { items: one });
   assert.equal(r.j.plan.items[0].ok, true, JSON.stringify(r.j.plan.items[0]));
   store.snapshot.generatedAt = gen0;

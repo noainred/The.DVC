@@ -127,6 +127,8 @@ export const _dirtyForTest = () => _dirty;
 
 const copy = (j) => (j ? JSON.parse(JSON.stringify(j)) : null);
 export function listJobs() { return load().jobs.map(copy); }
+/** 한 vCenter 의 대상만 깊은 복사(재해 복구 실행기 — 판정 · 이름 예약 키가 모두 vCenter 로 나뉜다 · 버그 점검 B3-01: 회차마다 원장 전체를 복사해 28회차 × 원장 28,000 에서 틱이 14초 막혔다). */
+export function listJobsOf(vcenterId) { const k = String(vcenterId); return load().jobs.filter((j) => String(j.vcenterId) === k).map(copy); }
 /**
  * v2.828 조회 화면용 가벼운 읽기 — 깊은 복사 없이 화면이 쓰는 칸만(얕은 사본 · 복원 이력·끝난 실행 원문은 싣지 않는다).
  *   listJobs 는 대상마다 JSON 왕복이라 3,000개에서 약 30ms 다(MAX_JOBS 실측). 돌려준 객체를 고쳐도 원장은 바뀌지 않는다(lastRun·pending 도 사본).

@@ -21,6 +21,8 @@ import {
   directorStateOf, numText, resultBar, shortTs, fmtGb, PRIORITY_TEXT, PRIORITY_TONE, BAREOS_RPO_DAYS, BAREOS_DETAIL_VC_KEY, stText, priorityChips, priorityEmptyText,
   corpAttention, corpBucket, CORP_BUCKETS, partialText,
 } from './bareosViewText.js';
+import { useHealth, HealthBand, HealthTag } from './BareosHealth.jsx';   // v2.892 사전 점검(관리자 — 403 이면 띠 · 열을 그리지 않는다)
+import { healthCell, diskCell } from './bareosHealthText.js';
 
 const TONE = { ok: '#86efac', warn: '#fcd34d', bad: '#fca5a5', run: '#93c5fd', muted: 'var(--text-dim)', bareos: '#fdba74' };
 const TAG = {
@@ -54,13 +56,15 @@ function BareosSummaryView() {
   const [pKind, setPKind] = useState('all');
   const [pAll, setPAll] = useState(false);
   const [csvErr, setCsvErr] = useState(null);
+  const [hOnly, setHOnly] = useState(false);
+  const health = useHealth();
   // 공용 usePolling(60초 · 403 이면 멈춤 · 늦은 응답 버림 — WEB2613-09 '도구 화면의 수제 setInterval 금지'). 새로고침(_r)은 데이터를 비우므로
   //   직전 응답을 들고 있는다(BareosBackupTool 과 같은 이유 — 비면 필터·찾기가 다시 마운트돼 사라진다). 기준 일수를 바꾸면 새 값이 올 때까지 이전 값.
   const { data: polled, error, loading } = usePolling('/tools/bareos-summary', { rpoDays, _r: tick }, 60_000);
   const lastRef = useRef(null);
   if (polled) lastRef.current = polled;
   const data = polled || lastRef.current;
-  const load = () => setTick((t) => t + 1);
+  const load = () => { setTick((t) => t + 1); health.load(); };
   const changeRpo = (v) => { setRpoDays(v); try { localStorage.setItem(RPO_KEY, String(v)); } catch { /* 이 브라우저에만 — 못 쓰면 기본 1일 */ } };
   const csv = async () => {
     setCsvErr(null);
@@ -86,6 +90,7 @@ function BareosSummaryView() {
     </>
   );
   const WRAP = { display: 'flex', flexDirection: 'column', gap: 14, minWidth: 0 };
+  const HEALTH_CLAMP = { fontSize: 11.5, marginTop: 3, lineHeight: 1.35, overflowWrap: 'anywhere', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' };
   if (!data && error) return <div style={WRAP}>{head}<ErrorBox error={error} /></div>;
   if (!data) return <div style={WRAP}>{head}<Loading /></div>;
 
@@ -96,7 +101,11 @@ function BareosSummaryView() {
   for (const r of rows) bucketN[corpBucket(r)] += 1;
   const needle = q.trim().toLowerCase();
   const order = { attn: 0, unknown: 1, ok: 2 };
-  const shown = rows.filter((r) => (chip === 'all' || corpBucket(r) === chip) && (!needle || r.name.toLowerCase().includes(needle)))
+  // v2.892 사전 점검 — 관리자에게만(서버 GET /health 가 관리자 · 범위 계정은 자기 법인만)
+  const hShow = !!health.d && !health.d.hidden;
+  const hmap = new Map((hShow ? health.d.corps || [] : []).map((c) => [c.vcenterId, c]));
+  const hBadN = rows.filter((r) => ['bad', 'warn'].includes(hmap.get(r.id)?.verdict)).length;
+  const shown = rows.filter((r) => (chip === 'all' || corpBucket(r) === chip) && (!needle || r.name.toLowerCase().includes(needle)) && (!hOnly || ['bad', 'warn'].includes(hmap.get(r.id)?.verdict)))
     .slice().sort((a, b) => order[corpBucket(a)] - order[corpBucket(b)]);   // 확인 필요 · 모름이 위(정렬은 제목을 누르면 바뀐다)
   const prio = Array.isArray(data.priority) ? data.priority : [];
   const pShown = prio.filter((x) => pKind === 'all' || x.kind === pKind);
@@ -113,6 +122,9 @@ function BareosSummaryView() {
       {data.marksUnreadable && <Note tone="bad">백업 표시 파일(backup-marks.json)을 읽지 못해 Bareos 방식 VM·미등록·방식 불일치 수를 모릅니다(—).</Note>}
       {data.registryUnreadable && <Note tone="bad">Bareos 백업 대상 원장(bareos-jobs.json)을 읽지 못해 잡·결과 수를 모릅니다(—) — 손상본은 설정 폴더에 보존돼 있습니다.</Note>}
       {csvErr && <Note tone="bad">CSV 내보내기 실패 — {csvErr?.status === 403 ? 'CSV 권한이 없습니다.' : String(csvErr.message || csvErr)}</Note>}
+
+      {hShow && <HealthBand corps={[...hmap.values()].filter((c) => rows.some((r) => r.id === c.vcenterId))} nameOf={(id) => rows.find((r) => r.id === id)?.name || id} onOpen={openBareosDetail} />}
+      {health.err && <Note tone="bad">사전 점검을 읽지 못했습니다 — {String(health.err.message || health.err).slice(0, 160)}</Note>}
 
       <div data-bareos-stats="" style={STAT_GRID}>
         <Stat label="법인 · Director" value={numText(rows.length)}
@@ -136,16 +148,19 @@ function BareosSummaryView() {
           <span className="muted" style={{ fontSize: 12 }}>법인 이름을 누르면 법인 화면 · 막대 = 잡의 마지막 결과 · 모르는 값은 —</span>
           <div className="flex gap wrap" role="group" aria-label="보기" style={{ marginLeft: 'auto', rowGap: 6, alignItems: 'center' }}>
             {CORP_BUCKETS.map(([k, label]) => <FilterChip key={k} on={chip === k} onClick={() => setChip(k)}>{label} {bucketN[k]}</FilterChip>)}
+            {hShow && <FilterChip on={hOnly} onClick={() => setHOnly(!hOnly)} title="사전 점검 불가 · 경고 법인만">점검 경고 {hBadN}</FilterChip>}
             <SearchBox className="input" style={{ maxWidth: 200, minWidth: 140 }} value={q} onChange={setQ} placeholder="법인 이름" />
           </div>
         </div>
-        <STable minWidth={1000} style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+        <STable minWidth={hShow ? 1120 : 1000} style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
           <thead>
             <tr style={{ textAlign: 'left', fontSize: 12 }}>
               <th style={{ padding: '8px 16px' }}>법인</th>
               <th style={{ padding: '8px 6px' }}>Director</th>
               <th style={{ padding: '8px 6px', textAlign: 'right' }} title="잡이 등록된 VM / 백업 방식을 Bareos 로 정한 VM">보호 VM</th>
-              <th data-nosort="" style={{ padding: '8px 10px', width: 240 }}>마지막 결과</th>
+              <th data-nosort="" style={{ padding: '8px 10px', width: hShow ? 170 : 240 }}>마지막 결과</th>
+              {hShow && <th style={{ padding: '8px 6px', width: 200 }} title="매일 정한 시각 엣지 노드에서 — FD → vCenter:443 · 인증서 지문 · Director 콘솔 · SD 디스크 여유">사전 점검</th>}
+              {hShow && <th style={{ padding: '8px 6px' }} title="SD 볼륨 경로의 여유 / 전체 · 가득 찰 때까지(최근 7일 속도)">SD 디스크 여유</th>}
               <th style={{ padding: '8px 6px', textAlign: 'right' }} title="실패 + 미등록 + 오래됨 + 백업 없음">확인 필요</th>
               <th style={{ padding: '8px 6px', textAlign: 'right' }} title="Bareos 관련 VM 디스크 사용(vCenter 인벤토리)">용량</th>
               <th style={{ padding: '8px 16px 8px 6px' }}>마지막 백업</th>
@@ -178,6 +193,15 @@ function BareosSummaryView() {
                       </>
                     ) : <span className="muted" style={{ fontSize: 12 }}>{bucket === 'unknown' ? `결과 모름 — ${UNKNOWN_WHY[r.director.state] || '조회 전입니다'}` : c.jobs > 0 ? '모름' : '잡 없음'}</span>}
                   </td>
+                  {hShow && (() => { const h = healthCell(hmap.get(r.id)); return (
+                    <td data-sort={h ? h.text : ''} title={h?.detail || undefined} style={{ padding: '8px 6px', width: 200, maxWidth: 200, whiteSpace: 'normal' }}>
+                      {/* 1440 에서 열 9개가 한 화면에 들도록 — 상세는 두 줄까지(전문은 title · 법인 화면 카드) */}
+                      {h ? <><HealthTag status={hmap.get(r.id).verdict} /><div className="muted" style={HEALTH_CLAMP}>{h.detail}</div></> : <span className="muted">—</span>}
+                    </td>); })()}
+                  {hShow && (() => { const k = diskCell(hmap.get(r.id)); return (
+                    <td data-sort={k ? k.pct : ''} style={{ padding: '8px 6px', whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' }}>
+                      {k ? <><b style={{ color: k.tone ? TONE[k.tone] : undefined }}>{k.avail}</b><div className="muted" style={{ fontSize: 11.5 }}>/ {k.size}{k.days != null ? ` · 약 ${k.days}일` : ''}</div></> : <span className="muted">—</span>}
+                    </td>); })()}
                   <td data-sort={a.n ?? ''} style={{ padding: '8px 6px', textAlign: 'right' }}>
                     {a.n === null
                       ? <span className="flex" style={{ gap: 6, justifyContent: 'flex-end', alignItems: 'center', flexWrap: 'wrap' }}><Tag>모름</Tag>{a.parts.missing ? <span className="muted" style={{ fontSize: 11.5 }}>미등록 {a.parts.missing}</span> : null}</span>
@@ -188,7 +212,7 @@ function BareosSummaryView() {
                 </tr>
               );
             })}
-            {!shown.length && <tr><td colSpan={7} className="muted" style={{ padding: 16 }}>{rows.length ? '조건에 맞는 법인이 없습니다.' : '볼 수 있는 vCenter 가 없습니다.'}</td></tr>}
+            {!shown.length && <tr><td colSpan={hShow ? 9 : 7} className="muted" style={{ padding: 16 }}>{rows.length ? '조건에 맞는 법인이 없습니다.' : '볼 수 있는 vCenter 가 없습니다.'}</td></tr>}
           </tbody>
         </STable>
       </div>

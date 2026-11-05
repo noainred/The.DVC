@@ -50,3 +50,15 @@ export function virtSum(hosts, vcpu, vmem, vmCount) {
   }
   return { alloc, cores, vmc, memAlloc, memPhys };
 }
+
+/**
+ * 가상화율 색 기준 — 트리 · 전체 현황 표(VCenterDetail ratioColor)와 성능 튜닝 탭(v2.895)이 같은 값을 쓴다(한 곳).
+ * CPU: 2.5:1 이상 주의 · 4:1 이상 위험 / MEM: 1.0:1 이상 주의(오버커밋) · 1.5:1 이상 위험.
+ */
+export const RATIO_LEVELS = Object.freeze({ cpu: [2.5, 4], mem: [1.0, 1.5] });
+/** 가상화율 → 'ok' | 'warn' | 'crit' | null(못 셈). */
+export function ratioLevel(r, isMem = false) {
+  if (r == null || !Number.isFinite(Number(r))) return null;
+  const [warn, danger] = isMem ? RATIO_LEVELS.mem : RATIO_LEVELS.cpu;
+  return r >= danger ? 'crit' : r >= warn ? 'warn' : 'ok';
+}

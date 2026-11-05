@@ -11,6 +11,18 @@ const under = (p, base) => p === base || p.startsWith(`${base}\\`);
 
 function svcIn(c, id) { return (c.services || []).find((s) => s.id === id) || null; }
 function nameTaken(c, name, exceptId = '') { return (c.services || []).some((s) => s.id !== exceptId && sameName(s.name, name)); }
+/**
+ * 별칭 ↔ 서비스명 충돌(5차 반증 R4) — 판정은 서비스명을 별칭보다 먼저 보므로(resolve.js), 다른 서비스 이름과 같은 별칭은 조용히 무시된다.
+ * 그래서 양쪽에서 막는다: 다른 서비스의 별칭과 같은 이름으로 서비스를 만들거나 바꾸지 못하고, 다른 서비스 이름과 같은 별칭을 만들지 못한다.
+ */
+function aliasOwnerOf(c, name, exceptServiceId = '') { return (c.aliases || []).find((a) => a.serviceId !== exceptServiceId && lc(a.value) === lc(name)) || null; }
+const KIND_TEXT = { scan: '스캔 라벨', tag: '태그 값' };
+function aliasConflict(c, name, exceptServiceId = '') {
+  const a = aliasOwnerOf(c, name, exceptServiceId);
+  if (!a) return null;
+  const owner = svcIn(c, a.serviceId);
+  return err(`'${name}' 은(는) 서비스 '${owner?.name || '?'}' 의 ${KIND_TEXT[a.kind] || ''} 별칭입니다 — 그 별칭을 먼저 지우십시오(서비스명이 별칭보다 먼저 걸려 소속이 바뀝니다)`, 409);
+}
 function optText(v, max, label) { return v === undefined ? { skip: true } : cleanText(v, max, { allowEmpty: true, label }); }
 
 /** 법인 연산 — body.corp 는 라우트가 쓰기 범위로 확인한 vCenter id. */
@@ -36,6 +48,7 @@ export const CORP_OPS = {
     const c = corpOf(d, b.corp);
     if (c.services.length >= LIMITS.servicesPerCorp) return err(`서비스는 법인당 ${LIMITS.servicesPerCorp}개까지입니다`);
     if (nameTaken(c, n.value)) return err(`'${n.value}' 은(는) 이 법인에 이미 있습니다(법인 안에서 서비스명은 유일)`, 409);
+    const ac = aliasConflict(c, n.value); if (ac) return ac;
     const owner = cleanText(b.owner, LIMITS.owner, { allowEmpty: true, label: '담당자' }); if (owner.error) return err(owner.error);
     const note = cleanText(b.note, LIMITS.note, { allowEmpty: true, label: '메모' }); if (note.error) return err(note.error);
     const gid = typeof b.globalId === 'string' && d.globals.some((g) => g.id === b.globalId) ? b.globalId : '';
@@ -46,10 +59,28 @@ export const CORP_OPS = {
   'service.update'(d, b) {
     const c = corpOf(d, b.corp);
     const s = svcIn(c, b.id); if (!s) return err('서비스를 찾지 못했습니다', 404);
+    const keep = { added: [], skipped: [] };
     if (b.name !== undefined) {
       const n = cleanText(b.name, LIMITS.name, { label: '서비스명' }); if (n.error) return err(n.error);
       if (nameTaken(c, n.value, s.id)) return err(`'${n.value}' 은(는) 이 법인에 이미 있습니다`, 409);
+      const old = s.name;
+      if (!sameName(old, n.value)) {   // 이름이 실제로 바뀔 때만 — 등급·담당자만 저장할 때 옛 충돌 데이터로 막히지 않게(5차 1차 반증 5)
+        const ac = aliasConflict(c, n.value, s.id); if (ac) return ac;
+        // 옛 이름이 다른 서비스의 별칭이기도 하면(검사 전 옛 데이터) 개명하는 순간 그 별칭이 살아나 구성원이 그 서비스로 옮겨 간다(반증 4) — 사람이 먼저 정리한다.
+        const shadow = aliasOwnerOf(c, old, s.id);
+        if (shadow) return err(`옛 이름 '${old}' 은(는) 서비스 '${svcIn(c, shadow.serviceId)?.name || '?'}' 의 ${KIND_TEXT[shadow.kind] || ''} 별칭이기도 합니다 — 이름을 바꾸면 그 별칭이 살아나 '${old}' 로 걸리던 구성원이 그 서비스로 옮겨 갑니다. 소속 규칙 탭에서 그 별칭을 먼저 정리하십시오`, 409);
+      }
       s.name = n.value;
+      // 개명하면 옛 이름으로 걸리던 스캔 라벨·태그 값 소속이 끊긴다(5차 반증 R3) — 화면이 영향 대수를 보이고 사람이 고른 종류만 별칭으로 남긴다.
+      const kinds = Array.isArray(b.keepAlias) ? [...new Set(b.keepAlias)].filter((k) => k === 'scan' || k === 'tag') : [];
+      if (!sameName(old, n.value)) {
+        for (const kind of kinds) {
+          const ex = c.aliases.find((a) => a.kind === kind && lc(a.value) === lc(old));
+          if (ex) { (ex.serviceId === s.id ? keep.added : keep.skipped).push(kind); continue; }
+          if (c.aliases.length >= LIMITS.aliasesPerCorp) return err(`별칭은 법인당 ${LIMITS.aliasesPerCorp}개까지입니다 — 옛 이름 '${old}' 을(를) 별칭으로 남길 수 없습니다`);
+          c.aliases.push({ kind, value: old, serviceId: s.id }); keep.added.push(kind);
+        }
+      }
     }
     if (b.path !== undefined) { const p = cleanFolderPath(b.path); if (p.error) return err(p.error); s.path = p.value; }
     if (b.tier !== undefined) s.tier = tierOf(b.tier);
@@ -60,7 +91,7 @@ export const CORP_OPS = {
       if (b.globalId && !d.globals.some((g) => g.id === b.globalId)) return err('전역 서비스를 찾지 못했습니다', 404);
       s.globalId = b.globalId || '';
     }
-    return { result: { service: { ...s } } };
+    return { result: { service: { ...s }, ...(keep.added.length || keep.skipped.length ? { keepAlias: keep } : {}) } };
   },
   'service.remove'(d, b) {
     const c = corpOf(d, b.corp);
@@ -94,6 +125,12 @@ export const CORP_OPS = {
     const v = cleanText(b.value, LIMITS.alias, { label: '값' }); if (v.error) return err(v.error);
     const c = corpOf(d, b.corp);
     if (!svcIn(c, b.serviceId)) return err('대상 서비스를 찾지 못했습니다', 404);
+    // 값이 서비스 이름과 같으면 별칭이 필요 없거나(그 서비스) 쓰이지 않는다(다른 서비스 — 이름이 먼저 걸린다, 5차 반증 R4).
+    const byName = (c.services || []).find((s) => sameName(s.name, v.value));
+    if (byName) {
+      if (byName.id === b.serviceId) return { result: { kind: b.kind, value: v.value, same: true, byName: true } };
+      return err(`'${v.value}' 은(는) 서비스 '${byName.name}' 의 이름입니다 — 이 값은 그 서비스로 바로 걸립니다(별칭이 쓰이지 않습니다)`, 409);
+    }
     if (c.aliases.length >= LIMITS.aliasesPerCorp) return err(`별칭은 법인당 ${LIMITS.aliasesPerCorp}개까지입니다`);
     const ex = c.aliases.find((a) => a.kind === b.kind && lc(a.value) === lc(v.value));
     if (ex) { if (ex.serviceId === b.serviceId) return { result: { same: true } }; return err(`'${v.value}' 별칭이 이미 다른 서비스에 있습니다`, 409); }

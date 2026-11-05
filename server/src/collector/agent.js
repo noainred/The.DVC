@@ -133,6 +133,8 @@ function localServersForExport({ sdSince = null } = {}) {
       //   구버전 중앙은 hostNames 를 모르는 필드라 버린다. 상한: 별칭 16개 · 글자 255자.
       ...(typeof s.hostName === 'string' && s.hostName ? { hostName: s.hostName.slice(0, 255) } : {}),
       ...(Array.isArray(s.hostNames) ? { hostNames: s.hostNames.filter((h) => typeof h === 'string' && h.trim()).slice(0, 16).map((h) => h.trim().slice(0, 255)) } : {}),
+      // 서비스 인벤토리(5차 검토 R6): 그 서버를 등록한 스캔 엔트리 id — **필드를 항상** 싣는다('' = 엔트리 없음 · 필드 없음 = 구버전 수집 서버).
+      scanRangeId: typeof s.scanRangeId === 'string' ? s.scanRangeId.slice(0, 128) : '',
       inv: compactInv(inv),
       sensors: compactSensors(s.id), // 최신 온도(중앙 '법인별 온도'용) — 구버전 중앙은 무시(하위호환)
       // v2.659: 센서 상세(임계값·상태·전압 등 — 콤팩트, 서버당 상한). 구버전 중앙은 모르는 필드라 버린다.

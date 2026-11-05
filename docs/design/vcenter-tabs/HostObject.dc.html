@@ -1,0 +1,194 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>ESXi 호스트 개체 보기 — 요약 (vSphere 식 탭)</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=Noto+Sans+KR:wght@400;500;700;800&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+body{margin:0;background:#0a0e17;color:#e6edf6;font-family:"Inter","Noto Sans KR","Apple SD Gothic Neo",sans-serif;font-size:13px}
+a{color:#93c5fd}a:hover{color:#bfdbfe}
+.muted{color:#8b9bb4}
+.faint{color:#5d6b85}
+.mono{font-family:"JetBrains Mono",ui-monospace,monospace}
+.card{background:#141b2d;border:1px solid #243049;border-radius:12px;min-width:0}
+.vtab{display:inline-flex;align-items:center;gap:6px;min-height:34px;padding:0 12px;border-radius:8px;border:1px solid transparent;color:#8b9bb4;font:inherit;font-size:13px;font-weight:600;text-decoration:none;white-space:nowrap;flex:none}
+.vtab:hover{color:#e6edf6;background:#1a2236}
+.vtab.on{color:#ffffff;background:#3b82f6;border-color:#3b82f6}
+.vtab .n{font-size:10.5px;font-weight:700;padding:1px 6px;border-radius:999px;background:rgba(139,155,180,.16);color:#aebbd0}
+.vtab.on .n{background:rgba(255,255,255,.22);color:#ffffff}
+.btn{display:inline-flex;align-items:center;gap:6px;min-height:30px;padding:0 12px;border-radius:8px;border:1px solid #243049;background:#1a2236;color:#e6edf6;font:inherit;font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap;text-decoration:none}
+.btn.primary{background:linear-gradient(135deg,#3b82f6,#2563eb);border-color:#2563eb;color:#ffffff;font-weight:700}
+.btn.ghost{background:transparent;border-color:transparent;color:#93c5fd;padding:0 4px}
+.btn.pill{border-radius:999px;min-height:24px;padding:0 10px;font-size:11.5px;color:#7dd3fc;background:rgba(56,189,248,.12);border-color:rgba(56,189,248,.45)}
+.badge{display:inline-flex;align-items:center;padding:2px 9px;border-radius:20px;font-size:11px;font-weight:600;white-space:nowrap}
+.badge.green{background:rgba(34,197,94,.15);color:#4ade80}
+.badge.amber{background:rgba(245,158,11,.15);color:#fbbf24}
+.badge.red{background:rgba(239,68,68,.15);color:#f87171}
+.badge.gray{background:rgba(139,155,180,.15);color:#8b9bb4}
+.badge.blue{background:rgba(59,130,246,.15);color:#60a5fa}
+.badge.purple{background:rgba(168,85,247,.15);color:#c084fc}
+.badge.teal{background:rgba(20,184,166,.16);color:#2dd4bf}
+.ct{display:flex;align-items:center;gap:8px;padding:11px 14px;border-bottom:1px solid #1f2a40;min-width:0}
+.ct b{font-size:13.5px}
+.ct .more{margin-left:auto;font-size:12px;white-space:nowrap}
+.kv{display:grid;grid-template-columns:auto minmax(0,1fr);gap:7px 14px;padding:12px 14px;font-size:12.5px;align-items:baseline}
+.kv span{color:#8b9bb4;white-space:nowrap}
+.kv div{min-width:0;overflow-wrap:anywhere}
+.bar{height:6px;border-radius:999px;background:#243049;overflow:hidden;flex:1 1 0;min-width:60px}
+.bar i{display:block;height:100%;border-radius:999px}
+.row{display:flex;align-items:center;gap:10px;min-width:0}
+table{border-collapse:collapse;width:100%}
+th{font-size:12px;font-weight:600;color:#8b9bb4;text-align:left;padding:9px 10px;background:#0f1626;border-bottom:1px solid #243049;white-space:nowrap;cursor:pointer}
+th.sort{color:#e6edf6}
+td{padding:8px 10px;border-bottom:1px solid #1f2a40;vertical-align:middle;white-space:nowrap;font-size:12.5px}
+.sm{font-size:11.5px;color:#8b9bb4}
+.note{padding:9px 14px;font-size:11.5px;line-height:1.6;color:#8b9bb4;border-top:1px solid #1f2a40}
+.crumb{display:flex;align-items:center;gap:6px;font-size:12px;color:#8b9bb4;flex-wrap:wrap;min-width:0}
+.crumb a{color:#93c5fd;text-decoration:none}
+.leaf{display:flex;align-items:center;gap:8px;padding:6px 10px;border-radius:8px;min-width:0}
+.leaf.hover{background:#1a2236;outline:1px dashed #3b82f6}
+.howto{border:1px dashed #3b82f6;border-radius:12px;background:rgba(59,130,246,.06);padding:10px 14px}
+.howto h4{margin:0 0 6px;font-size:12px;color:#93c5fd;font-weight:700}
+.find{display:flex;gap:8px;align-items:flex-start;padding:8px 14px;border-bottom:1px solid #1f2a40;font-size:12.5px}
+.find .badge{flex:none}
+.find small{display:block;color:#8b9bb4;font-size:11.5px}
+</style>
+</helmet>
+<div style="position:relative;width:100%;min-height:1020px;box-sizing:border-box;overflow:hidden;background:#0a0e17">
+<div style="max-width:1440px;margin:0 auto;box-sizing:border-box;padding:18px 24px 28px;display:flex;flex-direction:column;gap:12px;min-width:0">
+
+  <section class="howto" aria-label="여는 방법">
+    <h4>여는 방법 — 호스트 및 클러스터 트리의 호스트 행(마우스를 올리면 버튼) · 지금 호스트 상세 창 아래 버튼 줄의 ‘⤢ 개체 보기’ · VM 개체 화면의 ‘호스트’ 링크</h4>
+    <div class="card" style="padding:6px 8px">
+      <div class="leaf"><span class="muted">▾</span><span style="font-weight:700">CL-Web01</span><span class="sm">· 12 호스트 · VM 174 · CPU 37% · MEM 62%</span></div>
+      <div class="leaf hover" style="padding-left:28px">
+        <span class="badge green" style="padding:1px 6px">연결</span><span style="font-weight:600">esx-kr1-03</span>
+        <span class="sm">ESXi 8.0.3 · VM 41 · CPU 44% · MEM 71% · Dell R760</span>
+        <span style="margin-left:auto;display:inline-flex;gap:6px"><a class="btn pill" href="HostObject.dc.html" aria-label="esx-kr1-03 개체 보기">⤢ 개체 보기</a></span>
+      </div>
+      <div class="leaf" style="padding-left:28px"><span class="badge green" style="padding:1px 6px">연결</span><span style="font-weight:600">esx-kr1-04</span><span class="sm">ESXi 8.0.3 · VM 38 · CPU 29% · MEM 58% · Dell R760</span></div>
+    </div>
+  </section>
+
+  <div class="crumb" aria-label="경로">
+    <a href="Main.dc.html">← 호스트 및 클러스터</a><span>›</span><span>VC-DEMO1</span><span>›</span><span>DC-KR1</span><span>›</span><span>CL-Web01</span><span>›</span><b style="color:#e6edf6">esx-kr1-03</b>
+  </div>
+
+  <div class="card" style="padding:14px 16px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px 16px">
+    <div class="row" style="gap:12px;flex-wrap:wrap">
+      <div style="width:40px;height:40px;border-radius:10px;background:#0f1626;border:1px solid #243049;display:flex;align-items:center;justify-content:center" aria-hidden="true">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#93c5fd" stroke-width="1.8"><rect x="3" y="3" width="18" height="7" rx="1.5"/><rect x="3" y="14" width="18" height="7" rx="1.5"/><path d="M7 6.5h.01M7 17.5h.01"/></svg>
+      </div>
+      <div style="min-width:0">
+        <div class="row" style="gap:8px;flex-wrap:wrap"><span style="font-size:17px;font-weight:800">esx-kr1-03</span><span class="badge green">연결됨</span><span class="badge green">전원 켜짐</span><span class="badge gray">유지보수 아님</span></div>
+        <div class="muted" style="font-size:12px">VMware ESXi 8.0.3 build-24280767 · Dell Inc. PowerEdge R760 · 서비스 태그 <b class="mono" style="color:#e6edf6">ABC1234</b> · 관리 IP <span class="mono">10.20.1.13</span></div>
+      </div>
+    </div>
+    <div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end">
+      <span class="btn">🖥 VM 41대</span><span class="btn">📈 메트릭</span><span class="btn">🌡 iDRAC 추이</span><span class="btn">⌨ SSH</span><span class="btn ghost">⋯</span>
+    </div>
+  </div>
+
+  <nav role="tablist" aria-label="호스트 보기" style="display:flex;gap:4px;overflow-x:auto;padding-bottom:8px;border-bottom:1px solid #243049;min-width:0">
+    <a class="vtab on" href="HostObject.dc.html" aria-current="page">요약</a>
+    <a class="vtab" href="ObjectTabs.dc.html">모니터</a>
+    <a class="vtab" href="ObjectTabs.dc.html">구성 <span class="n">3</span></a>
+    <a class="vtab" href="ObjectTabs.dc.html">사용 권한</a>
+    <a class="vtab" href="ObjectTabs.dc.html">VM <span class="n">41</span></a>
+    <a class="vtab" href="ObjectTabs.dc.html">리소스 풀</a>
+    <a class="vtab" href="ObjectTabs.dc.html">데이터스토어</a>
+    <a class="vtab" href="ObjectTabs.dc.html">네트워크</a>
+    <a class="vtab" href="ObjectTabs.dc.html">업데이트</a>
+  </nav>
+
+  <div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;min-width:0">
+
+    <section class="card" aria-label="하드웨어">
+      <div class="ct"><b>하드웨어</b><span class="sm">summary.hardware · runtime</span></div>
+      <div class="kv">
+        <span>제조사 / 모델</span><div>Dell Inc. / PowerEdge R760</div>
+        <span>서비스 태그</span><div class="mono">ABC1234</div>
+        <span>CPU</span><div>2 소켓 · 64 코어 / 128 스레드 · 2.0 GHz</div>
+        <span>CPU 모델</span><div>Intel Xeon Gold 6438Y+</div>
+        <span>메모리</span><div>1,024 GB</div>
+        <span>HBA / 물리 NIC</span><div>4개 / 6개 <span class="sm">· 25 GbE ×4 · 1 GbE ×2</span></div>
+        <span>GPU</span><div class="muted">없음</div>
+        <span>소비 전력</span><div>612 W <span class="sm">· IPMI 센서 · iDRAC 실측 618 W</span></div>
+        <span>온도</span><div>흡기 22 °C · CPU1 48 °C · CPU2 51 °C</div>
+        <span>부팅 시각</span><div>2026-09-12 03:40 <span class="sm">· 가동 54일</span></div>
+      </div>
+    </section>
+
+    <section class="card" aria-label="사용률">
+      <div class="ct"><b>사용률</b><span class="sm">quickStats · 경합은 perfc</span><a class="more" href="ObjectTabs.dc.html">모니터 → 성능</a></div>
+      <div style="padding:12px 14px;display:grid;gap:10px">
+        <div class="row"><span class="muted" style="width:60px">CPU</span><div class="bar"><i style="width:44%;background:#60a5fa"></i></div><b style="width:42px;text-align:right">44%</b><span class="sm">56 / 128 GHz</span></div>
+        <div class="row"><span class="muted" style="width:60px">메모리</span><div class="bar"><i style="width:71%;background:#4ade80"></i></div><b style="width:42px;text-align:right">71%</b><span class="sm">727 / 1,024 GB</span></div>
+        <div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin-top:4px">
+          <div style="border:1px solid #243049;border-radius:10px;background:#0f1626;padding:8px 10px"><span class="sm">CPU 가상화</span><b style="display:block;font-size:16px">3.4:1</b><i class="faint" style="font-style:normal;font-size:11px">vCPU 218 / 코어 64</i></div>
+          <div style="border:1px solid #243049;border-radius:10px;background:#0f1626;padding:8px 10px"><span class="sm">MEM 가상화</span><b style="display:block;font-size:16px">0.9:1</b><i class="faint" style="font-style:normal;font-size:11px">할당 940 GB</i></div>
+          <div style="border:1px solid #243049;border-radius:10px;background:#0f1626;padding:8px 10px"><span class="sm">CPU Ready(합)</span><b style="display:block;font-size:16px">2.8%</b><i class="faint" style="font-style:normal;font-size:11px">최근 창 · 정상</i></div>
+        </div>
+        <div class="row" style="margin-top:2px"><span class="muted" style="width:60px">24시간</span>
+          <svg style="width:100%;height:36px" viewBox="0 0 300 36" preserveAspectRatio="none" role="img" aria-label="24시간 CPU · 메모리 추이"><polyline fill="none" stroke="#60a5fa" stroke-width="1.5" points="0,24 30,22 60,25 90,18 120,20 150,14 180,16 210,12 240,15 270,13 300,14"/><polyline fill="none" stroke="#4ade80" stroke-width="1.5" points="0,12 30,12 60,11 90,11 120,10 150,10 180,10 210,9 240,9 270,10 300,9"/></svg>
+        </div>
+      </div>
+      <div class="note">가상화율은 ‘Off VM 포함’ 설정을 따른다(호스트 및 클러스터 탭과 같은 계산 — vcdVirt). 끊긴 호스트는 값을 지어내지 않고 ‘—’.</div>
+    </section>
+
+    <section class="card" aria-label="관련 개체">
+      <div class="ct"><b>관련 개체</b><span class="sm">/hosts · /vms 집계</span></div>
+      <div class="kv">
+        <span>vCenter</span><div><a href="Main.dc.html">VC-DEMO1</a></div>
+        <span>데이터센터</span><div><a href="Datacenter.dc.html">DC-KR1</a> <span class="sm">(vcDatacenter)</span></div>
+        <span>클러스터</span><div><a href="Configure.dc.html">CL-Web01</a> <span class="sm">· HA 켜짐 · DRS 완전 자동 · EVC intel-icelake</span></div>
+        <span>VM</span><div><a href="ObjectTabs.dc.html">41대</a> <span class="sm">· 켜짐 37 · 꺼짐 4 · 템플릿 0</span></div>
+        <span>리소스 풀</span><div>Resources <span class="sm">· 하위 풀 2(VM 의 resourcePool 로 셈)</span></div>
+        <span>데이터스토어</span><div><span class="muted">호스트별 마운트 목록 수집하지 않음</span> <span class="sm">· VM 디스크로 역산 가능: ds-kr1-san03 · san04 · nfs02</span></div>
+        <span>네트워크</span><div><span class="muted">포트그룹 수집하지 않음</span> <span class="sm">· 물리 NIC 6개는 아래</span></div>
+        <span>iDRAC</span><div><a href="HostObject.dc.html">idrac-esx-kr1-03</a> <span class="sm">· 등록됨 · 온도 · 전력 추이</span></div>
+      </div>
+    </section>
+
+    <section class="card" aria-label="구성 · 보안 점검">
+      <div class="ct"><b>구성 · 보안 점검</b><span class="badge amber">확인할 항목 3</span><a class="more" href="ObjectTabs.dc.html">구성 →</a></div>
+      <div class="find"><span class="badge amber">주의</span><div><b>호스트 인증서 만료 임박</b><small>D-42 (2026-12-17) · ‘인증서 갱신’ 은 vSphere 에서</small></div></div>
+      <div class="find"><span class="badge amber">주의</span><div><b>SSH 실행 중</b><small>작업 끝나면 끄는 것을 권장 · 잠금 모드 꺼짐</small></div></div>
+      <div class="find"><span class="badge blue">정보</span><div><b>NTP 서버 1개</b><small>ntp1.demo.corp · 2개 이상 권장</small></div></div>
+      <div class="note">값은 수집 서버가 오래된 호스트부터 나눠 읽은 캐시(host.hcfg). 판정은 hostCfgText.hostCfgFindings(서버와 같은 규칙). 클러스터 간 드리프트는 도구 ‘ESXi 호스트 구성 점검’ 에서.</div>
+    </section>
+
+    <section class="card" aria-label="스토리지 어댑터" style="grid-column:span 2">
+      <div class="ct"><b>스토리지 어댑터(HBA) · 물리 NIC</b><span class="sm">hostBusAdapter · pnic + pciDevice</span><a class="more" href="ObjectTabs.dc.html">네트워크 →</a></div>
+      <div style="overflow-x:auto">
+        <table>
+          <thead><tr><th class="sort">장치 ▾</th><th>종류</th><th>모델</th><th>상태</th><th>속도 / WWN</th></tr></thead>
+          <tbody>
+            <tr><td class="mono">vmhba2</td><td>FC</td><td>QLogic QLE2772</td><td><span class="badge green">online</span></td><td class="mono">32 Gb · 21:00:f4:e9:d4:5a:1b:2c</td></tr>
+            <tr><td class="mono">vmhba3</td><td>FC</td><td>QLogic QLE2772</td><td><span class="badge green">online</span></td><td class="mono">32 Gb · 21:00:f4:e9:d4:5a:1b:2d</td></tr>
+            <tr><td class="mono">vmnic0</td><td>NIC</td><td>Broadcom BCM57508</td><td><span class="badge green">up</span></td><td>25 GbE</td></tr>
+            <tr><td class="mono">vmnic1</td><td>NIC</td><td>Broadcom BCM57508</td><td><span class="badge green">up</span></td><td>25 GbE</td></tr>
+            <tr><td class="mono">vmnic4</td><td>NIC</td><td>Broadcom BCM5720</td><td><span class="badge gray">down</span></td><td>1 GbE <span class="sm">· 정격</span></td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="note">… 3개 더 · 열 제목으로 정렬. 다운 포트는 지원 속도로 정격을 판별(수집 규칙 그대로).</div>
+    </section>
+  </div>
+
+  <div class="faint" style="font-size:11.5px">가상 데이터 · 요약 탭은 새 수집 없이 지금 있는 값(/hosts 한 행 + hcfg + perfc + 온도 · 전력 센서 + HBA · NIC + iDRAC 등록)만 다시 배치한다. 호스트별 데이터스토어 마운트 · 포트그룹은 수집하지 않으므로 ‘수집하지 않음’ 으로 둔다.</div>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1020}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

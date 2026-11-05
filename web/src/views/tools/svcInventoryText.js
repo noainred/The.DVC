@@ -11,11 +11,16 @@ export const SRC_SHORT = Object.freeze({ pin: '고정', folder: '폴더', scan: 
 export const SRC_BADGE = Object.freeze({ pin: 'purple', folder: 'blue', scan: 'teal', tag: 'blue', rule: 'gray', none: 'amber' });
 export const REASON_TEXT = Object.freeze({
   'no-corp': '법인 귀속 없음 — 통합 서버 인벤토리에서 법인을 먼저 정합니다',
+  'no-corp-error': '법인 귀속 판정을 돌리지 못함(오류 — 입력 오류 목록 참고) — 이 서버의 법인을 지금은 모릅니다',
+  'no-corp-conflict': '같은 서비스 태그가 두 법인에 걸려 귀속을 보류함 — 통합 서버 인벤토리에서 법인을 정합니다',
   'no-folder-rule': 'vCenter 폴더 규칙 없음',
   'placement-unknown': 'vSphere 위치를 따라가지 못함(vApp 안 VM 등) — 고정으로만 넣을 수 있습니다',
   'tags-unchecked': '태그를 읽지 못함(확인 안 됨) · 폴더 규칙 없음',
   'tag-unmapped': '태그 값에 맞는 서비스 없음',
-  'no-scan-entry': '스캔 엔트리 없음(수동 등록·엣지 구버전)',
+  'no-scan-entry': '스캔 엔트리 없음(수동 등록)',
+  'scan-entry-unknown': '보고된 스캔 엔트리를 중앙 등록부에서 찾지 못함(엣지가 따로 만든 엔트리 등)',
+  'source-old': '보고한 엣지·수집 서버가 스캔 엔트리 id 를 보내지 않음(구버전 — 최신 버전으로 올리면 엔트리로 묶입니다)',
+  'source-unreported': '엣지·수집 서버가 이 서버의 등록 정보를 보내지 않음(OME 장치 · 서버 목록을 보내지 않는 수집 서버 · 아직 못 받음) — 수동 등록인지 모릅니다',
   'scan-label-empty': '스캔 엔트리 라벨이 비어 있음',
   'scan-label-unmapped': '스캔 라벨에 맞는 서비스 없음',
 });
@@ -25,8 +30,13 @@ export const GROUP_TITLE = Object.freeze({
   entry: (g) => `스캔 엔트리 ${g.entry?.range || `#${String(g.value).slice(0, 8)}`} — 라벨 없음`,
   scan: (g) => `스캔 라벨 ‘${g.value}’ — 서비스 없음`,
   placement: () => 'vSphere 위치 모름(vApp 안 VM 등)',
-  manual: () => '묶을 출처 없음(수동 등록 iDRAC · 엣지 구버전)',
-  nocorp: () => '법인 귀속 없음',
+  manual: (g) => (g.value === 'old-source' ? '스캔 엔트리 id 를 보내지 않는 구버전 엣지·수집 서버 — 최신 버전으로 올리면 엔트리로 묶입니다'
+    : g.value === 'unknown-entry' ? '중앙 등록부에 없는 스캔 엔트리(엣지가 따로 만든 엔트리 등)'
+      : g.value === 'not-reported' ? '등록 정보가 오지 않은 엣지·수집 서버 출처(OME 장치 · 서버 목록 없음 · 아직 못 받음) — 수동 등록인지 모릅니다'
+        : '묶을 출처 없음(수동 등록 iDRAC)'),
+  nocorp: (g) => (g.value === 'attr-error' ? '법인 귀속 없음 — 귀속 판정을 돌리지 못함(오류)'
+    : g.value === 'tag-conflict' ? '법인 귀속 없음 — 같은 서비스 태그가 두 법인에 걸려 보류'
+      : '법인 귀속 없음 — 어느 귀속 규칙에도 맞지 않음(통합 서버 인벤토리에서 법인을 정합니다)'),
 });
 export const TIER_TEXT = Object.freeze({ 1: '등급 1 — 장애·백업 실패를 가장 먼저 본다', 2: '등급 2', 3: '등급 3' });
 export const FAULT_REASON = Object.freeze({ off: '부품 장애 기능이 꺼져 있어 장애 수를 모릅니다', 'no-db': '부품 장애 기록이 아직 없어 장애 수를 모릅니다', unreadable: '부품 장애 DB 를 읽지 못해 장애 수를 모릅니다' });
@@ -44,8 +54,10 @@ export function faultsView(f, available) {
 /** 백업 칸 — Bareos 를 쓰지 않으면 null('해당 없음'). */
 export function backupView(b, meta) {
   if (!meta?.used) return null;
-  if (meta.unreadable) return { unknown: true };
-  return { ok: n0(b?.ok), fail: n0(b?.fail), none: n0(b?.none), unknown: n0(b?.unknown) };
+  // 원장을 못 읽어도 Bareos 를 쓰지 않는 법인(na 만 있는 칸)은 '해당 없음' 그대로 — 구성원 표와 같은 말(5차 1차 반증 6)
+  if (meta.unreadable) return n0(b?.na) && !n0(b?.ok) && !n0(b?.fail) && !n0(b?.none) && !n0(b?.unknown) ? { ok: 0, fail: 0, none: 0, unknown: 0, na: n0(b.na) } : { unknown: true };
+  // na = 이 법인에 Bareos Director 매핑이 없는 VM(해당 없음 — 5차 검토 M1). 잡 없음(none)·모름(unknown)과 섞지 않는다.
+  return { ok: n0(b?.ok), fail: n0(b?.fail), none: n0(b?.none), unknown: n0(b?.unknown), na: n0(b?.na) };
 }
 /** 소속 근거 요약 'pin 1 · 폴더 4 · 스캔 2'. */
 export function srcSummary(src) {
@@ -92,6 +104,70 @@ export function matrixColumns(corps, regionOf = () => '') {
   return [...groups.entries()].sort((a, b) => a[0].localeCompare(b[0], 'ko')).map(([region, cs]) => ({ region, corps: cs.sort((a, b) => a.name.localeCompare(b.name, 'en', { numeric: true })) }));
 }
 
+/**
+ * 매트릭스 칸 모드(5차 M9) — 구성원 수 · 부품 장애 · CPU(가중) · vCPU 할당. 값은 서버가 준 칸 통계에서 읽기만 한다(판정·집계 복제 아님).
+ * 반환 { v: 정렬·색 기준 수(null = 모름), text }.
+ */
+export const MATRIX_MODES = Object.freeze([['n', '구성원 수'], ['faults', '부품 장애'], ['cpu', 'CPU(가중)'], ['vcpu', 'vCPU 할당']]);
+export function matrixCellValue(c, mode, faultsOn) {
+  if (!c) return null;
+  if (mode === 'faults') {
+    if (!faultsOn || c.stale) return { v: null, text: '—' };
+    // 못 읽은 장애(faultsUnknown)는 0 이 아니다 — '?' 로 밝힌다(3차 반증 5: 예전에는 0 장애 + 모름 2 가 '0')
+    const f = n0(c.faults); const u = n0(c.faultsUnknown);
+    return { v: f, unknown: u, text: u ? (f ? `${f}+?` : '?') : String(f) };
+  }
+  if (mode === 'cpu') { const p = c.stale ? null : numOrNull(c.usage?.cpu); return { v: p, text: p == null ? '—' : `${Math.round(p)}%` }; }
+  if (mode === 'vcpu') { const x = numOrNull(c.alloc?.vcpu); return { v: x, text: x == null ? '—' : Math.round(x).toLocaleString() }; }
+  return { v: n0(c.n), text: String(n0(c.n)) };
+}
+/**
+ * 지역을 접었을 때 한 칸(5차 M9) — 구성원·장애·vCPU 는 합, CPU 는 Σ사용÷Σ용량(서버가 준 cpuUsed·cpuTotal — 법인 평균을 다시 평균하지 않는다).
+ * 못 읽는 법인(stale)은 CPU·장애 합에서 빼고 stale 개수로 밝힌다. 칸이 하나도 없으면 null.
+ */
+export function regionCell(list, mode, faultsOn) {
+  const cs = (list || []).filter(Boolean);
+  if (!cs.length) return null;
+  const stale = cs.filter((c) => c.stale).length;
+  if (mode === 'cpu') {
+    let used = 0; let total = 0;
+    for (const c of cs) { if (c.stale) continue; const u = numOrNull(c.usage?.cpuUsed); const t = numOrNull(c.usage?.cpuTotal); if (u != null && t != null && t > 0) { used += u; total += t; } }
+    const p = total > 0 ? (used / total) * 100 : null;
+    return { v: p, text: p == null ? '—' : `${Math.round(p)}%`, stale, corps: cs.length };
+  }
+  if (mode === 'faults') {
+    const live = cs.filter((c) => !c.stale);
+    if (!faultsOn || !live.length) return { v: null, text: '—', stale, corps: cs.length };   // 전부 못 읽는 지역은 '0' 이 아니다(3차 반증 5)
+    const f = live.reduce((a, c) => a + n0(c.faults), 0); const u = live.reduce((a, c) => a + n0(c.faultsUnknown), 0);
+    return { v: f, unknown: u, text: u ? (f ? `${f}+?` : '?') : String(f), stale, corps: cs.length };
+  }
+  if (mode === 'vcpu') { const x = cs.reduce((a, c) => a + n0(c.alloc?.vcpu), 0); return { v: x, text: Math.round(x).toLocaleString(), stale, corps: cs.length }; }
+  const n = cs.reduce((a, c) => a + n0(c.n), 0);
+  return { v: n, text: String(n), stale, corps: cs.length };
+}
+
+/**
+ * 서비스별 현황 표 검색·필터(5차 M8 — 28법인이면 수백 행). q 는 서비스명·폴더·담당자·법인 이름에서 찾는다(대소문자 무시).
+ * tier1 = 등급 1만 · noOwner = 담당자 미지정만.
+ */
+export function filterServices(list, { q = '', tier1 = false, noOwner = false, corpName = (x) => x } = {}) {
+  const needle = String(q || '').trim().toLowerCase();
+  return (list || []).filter((s) => {
+    if (tier1 && s.tier !== 1) return false;
+    if (noOwner && String(s.owner || '').trim()) return false;
+    if (!needle) return true;
+    return [s.name, s.path, s.owner, corpName(s.corp)].some((x) => String(x || '').toLowerCase().includes(needle));
+  });
+}
+
+/**
+ * 범위 계정 판본의 베어메탈 키는 서버가 'masked-' 토큰으로 준다(5차 R7). 화면에는 토큰 문자열 대신 '(가림)' 으로 보인다 —
+ * 토큰은 쓰기 연산에 그대로 돌려보내는 값이라 사람이 읽을 뜻이 없다(다음 단계 실화면 검증에서 찾음).
+ */
+export const isMaskedKey = (k) => typeof k === 'string' && k.startsWith('masked-');
+export const keyText = (k) => (isMaskedKey(k) ? '(가림)' : String(k ?? ''));
+export const MASKED_KEY_TITLE = '범위가 지정된 계정에는 베어메탈 식별 키(서비스태그)를 가린 표지로 보입니다 — 고정·정리는 그대로 됩니다';
+
 /** 서버 오류 → 사람이 읽을 문장. */
 export function opErrorText(e) {
   const m = String(e?.message || e || '').trim();
@@ -106,6 +182,14 @@ export function groupActions(g) {
   if (g.kind === 'entry') return { link: '이 엔트리에 서비스 라벨 붙이기', create: false, op: 'scan.label' };
   if (g.kind === 'placement' || g.kind === 'manual') return { pinOnly: true };
   return { none: true };
+}
+
+/** '검토 필요' 수와 부제(5차 R17 — 수에 들어가는 것을 부제에 전부 적는다). */
+export function reviewSummary(q = {}) {
+  const parts = [['드리프트', q.drift], ['법인 불일치', q.mismatch], ['유령', q.ghosts], ['태그 모호', q.tagAmbiguous], ['규칙 겹침', q.ruleOverlap]].filter(([, n]) => n0(n) > 0);
+  const n = parts.reduce((a, [, x]) => a + n0(x), 0);
+  const meta = `${parts.length ? parts.map(([l, x]) => `${l} ${n0(x)}`).join(' · ') : '드리프트·불일치·유령·모호 없음'}${n0(q.ghostsHeld) ? ` (판정 보류 ${n0(q.ghostsHeld)} — 수에 넣지 않음)` : ''}`;
+  return { n, meta };
 }
 
 /** CSV 파일 이름. */

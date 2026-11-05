@@ -1,0 +1,189 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>ESXi 호스트 개체 보기 — 성능 튜닝 탭</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=Noto+Sans+KR:wght@400;500;700;800&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+body{margin:0;background:#0a0e17;color:#e6edf6;font-family:"Inter","Noto Sans KR","Apple SD Gothic Neo",sans-serif;font-size:13px}
+a{color:#93c5fd}a:hover{color:#bfdbfe}
+.muted{color:#8b9bb4}
+.faint{color:#5d6b85}
+.mono{font-family:"JetBrains Mono",ui-monospace,monospace}
+.card{background:#141b2d;border:1px solid #243049;border-radius:12px;min-width:0}
+.vtab{display:inline-flex;align-items:center;gap:6px;min-height:34px;padding:0 12px;border-radius:8px;border:1px solid transparent;color:#8b9bb4;font:inherit;font-size:13px;font-weight:600;text-decoration:none;white-space:nowrap;flex:none}
+.vtab.on{color:#ffffff;background:#3b82f6;border-color:#3b82f6}
+.vtab .n{font-size:10.5px;font-weight:700;padding:1px 6px;border-radius:999px;background:rgba(139,155,180,.16);color:#aebbd0}
+.vtab.on .n{background:rgba(255,255,255,.22);color:#ffffff}
+.btn{display:inline-flex;align-items:center;gap:6px;min-height:30px;padding:0 12px;border-radius:8px;border:1px solid #243049;background:#1a2236;color:#e6edf6;font:inherit;font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap;text-decoration:none}
+.chip{display:inline-flex;align-items:center;gap:6px;min-height:28px;padding:0 11px;border-radius:8px;border:1px solid #243049;background:#1a2236;color:#8b9bb4;font-size:12px;font-weight:700;white-space:nowrap;text-decoration:none}
+.chip.on{background:#e6edf6;border-color:#e6edf6;color:#0a0e17}
+.badge{display:inline-flex;align-items:center;padding:2px 9px;border-radius:20px;font-size:11px;font-weight:600;white-space:nowrap}
+.badge.green{background:rgba(34,197,94,.15);color:#4ade80}
+.badge.amber{background:rgba(245,158,11,.15);color:#fbbf24}
+.badge.red{background:rgba(239,68,68,.15);color:#f87171}
+.badge.gray{background:rgba(139,155,180,.15);color:#8b9bb4}
+.badge.blue{background:rgba(59,130,246,.15);color:#60a5fa}
+.badge.purple{background:rgba(168,85,247,.15);color:#c084fc}
+.ct{display:flex;align-items:center;gap:8px;padding:11px 14px;border-bottom:1px solid #1f2a40;min-width:0;flex-wrap:wrap}
+.ct b{font-size:13.5px}
+.ct .more{margin-left:auto;font-size:12px;white-space:nowrap}
+.kv{display:grid;grid-template-columns:auto minmax(0,1fr);gap:7px 14px;padding:12px 14px;font-size:12.5px;align-items:baseline}
+.kv span{color:#8b9bb4;white-space:nowrap}
+.kv div{min-width:0;overflow-wrap:anywhere}
+.row{display:flex;align-items:center;gap:10px;min-width:0}
+table{border-collapse:collapse;width:100%}
+th{font-size:12px;font-weight:600;color:#8b9bb4;text-align:left;padding:9px 10px;background:#0f1626;border-bottom:1px solid #243049;white-space:nowrap;cursor:pointer}
+th.sort{color:#e6edf6}
+td{padding:8px 10px;border-bottom:1px solid #1f2a40;vertical-align:middle;white-space:nowrap;font-size:12.5px}
+.sm{font-size:11.5px;color:#8b9bb4}
+.note{padding:9px 14px;font-size:11.5px;line-height:1.6;color:#8b9bb4;border-top:1px solid #1f2a40}
+.crumb{display:flex;align-items:center;gap:6px;font-size:12px;color:#8b9bb4;flex-wrap:wrap;min-width:0}
+.crumb a{color:#93c5fd;text-decoration:none}
+.diag{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:8px;padding:12px 14px}
+.diag div{border:1px solid #243049;border-radius:10px;background:#0f1626;padding:9px 11px;min-width:0}
+.diag b{display:block;font-size:13px;margin-top:3px}
+.diag span{font-size:11px;color:#8b9bb4}
+.diag i{font-style:normal;display:block;font-size:11px;color:#5d6b85;margin-top:3px;white-space:normal}
+.bar{height:6px;border-radius:999px;background:#243049;overflow:hidden;flex:1 1 0;min-width:60px}
+.bar i{display:block;height:100%;border-radius:999px}
+.find{display:flex;gap:8px;align-items:flex-start;padding:9px 14px;border-bottom:1px solid #1f2a40;font-size:12.5px}
+.find .badge{flex:none}
+.find small{display:block;color:#8b9bb4;font-size:11.5px;white-space:normal}
+.plan td{white-space:normal}
+</style>
+</helmet>
+<div style="position:relative;width:100%;min-height:1300px;box-sizing:border-box;overflow:hidden;background:#0a0e17">
+<div style="max-width:1440px;margin:0 auto;box-sizing:border-box;padding:18px 24px 28px;display:flex;flex-direction:column;gap:12px;min-width:0">
+
+  <div class="crumb" aria-label="경로">
+    <a href="Main.dc.html">← 호스트 및 클러스터</a><span>›</span><span>VC-DEMO1</span><span>›</span><span>DC-KR1</span><span>›</span><span>CL-Web01</span><span>›</span><b style="color:#e6edf6">esx-kr1-03</b>
+  </div>
+
+  <div class="card" style="padding:14px 16px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px 16px">
+    <div class="row" style="gap:12px;flex-wrap:wrap">
+      <div style="width:40px;height:40px;border-radius:10px;background:#0f1626;border:1px solid #243049;display:flex;align-items:center;justify-content:center" aria-hidden="true">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#93c5fd" stroke-width="1.8"><rect x="3" y="3" width="18" height="7" rx="1.5"/><rect x="3" y="14" width="18" height="7" rx="1.5"/><path d="M7 6.5h.01M7 17.5h.01"/></svg>
+      </div>
+      <div style="min-width:0">
+        <div class="row" style="gap:8px;flex-wrap:wrap"><span style="font-size:17px;font-weight:800">esx-kr1-03</span><span class="badge green">연결됨</span><span class="badge gray">유지보수 아님</span></div>
+        <div class="muted" style="font-size:12px">ESXi 8.0.3 · Dell PowerEdge R760 · 2 소켓 · 64 코어 · 1,024 GB · VM 41</div>
+      </div>
+    </div>
+    <div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end"><span class="btn">🖥 VM 41대</span><span class="btn">📈 메트릭</span><span class="btn">🌡 iDRAC 추이</span></div>
+  </div>
+
+  <nav role="tablist" aria-label="호스트 보기" style="display:flex;gap:4px;overflow-x:auto;padding-bottom:8px;border-bottom:1px solid #243049;min-width:0;align-items:center">
+    <a class="vtab" href="HostObject.dc.html">요약</a>
+    <a class="vtab" href="ObjectTabs.dc.html">모니터</a>
+    <a class="vtab" href="ObjectTabs.dc.html">구성 <span class="n">3</span></a>
+    <a class="vtab" href="ObjectTabs.dc.html">사용 권한</a>
+    <a class="vtab" href="ObjectTabs.dc.html">VM <span class="n">41</span></a>
+    <a class="vtab" href="ObjectTabs.dc.html">리소스 풀</a>
+    <a class="vtab" href="ObjectTabs.dc.html">데이터스토어</a>
+    <a class="vtab" href="ObjectTabs.dc.html">네트워크</a>
+    <a class="vtab" href="ObjectTabs.dc.html">업데이트</a>
+    <span style="width:1px;height:22px;background:#243049;margin:0 4px" aria-hidden="true"></span>
+    <a class="vtab on" href="HostTuning.dc.html" aria-current="page">성능 튜닝 <span class="n">3</span></a>
+  </nav>
+
+  <section class="card" aria-label="진단">
+    <div class="ct"><b>진단</b><span class="sm">기간</span><span class="chip">24시간</span><span class="chip on">7일</span><span class="chip">30일</span><span class="sm" style="margin-left:6px">호스트 성능 롤업(5분) · perfc 최근 창 · 산정 11-05 11:40</span><span class="more sm">열 때 1회 조회 · 다시 계산</span></div>
+    <div class="diag">
+      <div><span>CPU 여력 · 가상화율</span><b style="color:#fbbf24">높음 — 3.4:1</b><i>vCPU 218 / 코어 64 · 사용 p95 61% · 피크 88%</i></div>
+      <div><span>CPU 경합(호스트 합)</span><b style="color:#fbbf24">Ready 2.8%</b><i>경고선 5% 아래 · VM 3대가 Ready 3% 넘음</i></div>
+      <div><span>메모리</span><b style="color:#f87171">압박 — 71% · 벌룬 있음</b><i>벌룬 합 12 GB · 스왑 0 · consumed p95 78%</i></div>
+      <div><span>스토리지 지연</span><b style="color:#f87171">느림 — 1 DS</b><i>ds-kr1-san03 쓰기 p95 26 ms · 경로 2/4 활성</i></div>
+      <div><span>네트워크 · 하드웨어</span><b style="color:#fbbf24">확인 1</b><i>vmnic4 down(1 GbE 정격) · 온도 · 전력 정상</i></div>
+    </div>
+    <div class="note">판정은 서버 값 그대로(contention 코드 · clustercfg · storage-paths 판정 · hcfg). 벌룬 · 스왑은 레벨 2 카운터라 못 읽으면 ‘—’. 점수 · 등급 없음.</div>
+  </section>
+
+  <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;min-width:0">
+
+    <section class="card" aria-label="VM 배치">
+      <div class="ct"><b>VM 배치 — 이 호스트를 무겁게 하는 VM</b><span class="sm">/vms (host=esx-kr1-03) · perfc</span><a class="more" href="ObjectTabs.dc.html">VM 41대 →</a></div>
+      <div style="overflow-x:auto">
+        <table>
+          <thead><tr><th>VM</th><th class="sort">CPU 사용 ▾</th><th>vCPU</th><th>메모리 consumed</th><th>Ready</th><th>적정화</th></tr></thead>
+          <tbody>
+            <tr><td>db-kr1-004</td><td>64% · 25.6 GHz</td><td>16</td><td>118 / 128 GB</td><td><span class="badge amber">3.8%</span></td><td><span class="badge gray">유지</span></td></tr>
+            <tr><td>etl-kr1-002</td><td>41% · 13.1 GHz</td><td>8</td><td>24 / 32 GB</td><td><span class="badge amber">3.1%</span></td><td><span class="badge gray">유지</span></td></tr>
+            <tr><td>analytics-kr1-009</td><td>22% · 7.0 GHz</td><td>8</td><td>61 / 64 GB</td><td>1.9%</td><td><span class="badge gray">유지</span></td></tr>
+            <tr><td>web-kr1-023</td><td>23% · 2.3 GHz</td><td>4</td><td>9.8 / 16 GB</td><td>1.2%</td><td><span class="badge amber">vCPU 4 → 2</span></td></tr>
+            <tr><td>legacy-kr1-017</td><td>1% · 0.1 GHz</td><td>8</td><td>2 / 32 GB</td><td>0.4%</td><td><span class="badge amber">유휴 · vCPU 8 → 2 · 메모리 32 → 8</span></td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="note">… 36개 더. ‘적정화’ 열은 Optimization(waste) · rightsize 와 같은 판정. 과다 할당 VM 11대의 vCPU 합 62 — 줄이면 가상화율 3.4 → 2.4:1(산술 — DRS 재배치는 포함하지 않는다).</div>
+    </section>
+
+    <section class="card" aria-label="메모리 압박">
+      <div class="ct"><b>메모리 압박</b><span class="badge red">벌룬 12 GB</span><span class="sm">mem.vmmemctl · mem.swapped(호스트 합) · 7일</span></div>
+      <div style="padding:12px 14px;display:grid;gap:8px">
+        <div class="row"><span class="sm" style="width:88px">consumed p95</span><div class="bar"><i style="width:78%;background:#4ade80"></i></div><span class="mono sm" style="width:110px;text-align:right">799 / 1,024 GB</span></div>
+        <div class="row"><span class="sm" style="width:88px">active p95</span><div class="bar"><i style="width:34%;background:#22c55e"></i></div><span class="mono sm" style="width:110px;text-align:right">348 GB</span></div>
+        <div class="row"><span class="sm" style="width:88px">벌룬 합</span><div class="bar"><i style="width:1.2%;background:#f87171"></i></div><span class="mono sm" style="width:110px;text-align:right">12 GB · VM 3대</span></div>
+        <div class="row"><span class="sm" style="width:88px">스왑 합</span><div class="bar"><i style="width:0;background:#f87171"></i></div><span class="mono sm" style="width:110px;text-align:right">0</span></div>
+      </div>
+      <div class="kv" style="border-top:1px solid #1f2a40">
+        <span>벌룬 VM</span><div>db-kr1-004 9 GB · analytics-kr1-009 2 GB · etl-kr1-002 1 GB</div>
+        <span>메모리 예약 합</span><div>184 GB <span class="sm">(VM 4대 · vmcfg)</span></div>
+        <span>해석</span><div style="white-space:normal">active(348) 는 여유가 있는데 consumed(799) 가 높다 — 큰 VM 의 메모리 할당이 실사용보다 크다. 줄일 후보는 위 표 ‘적정화’ 열. 벌룬이 있는 동안은 그 VM 의 메모리를 줄이지 않는다(감축 금지 신호).</div>
+      </div>
+      <div class="note">호스트 메모리 압축(mem.compressed) · 호스트 캐시는 수집하지 않는다 — 2차.</div>
+    </section>
+
+    <section class="card" aria-label="스토리지 · 네트워크 경로">
+      <div class="ct"><b>스토리지 · 네트워크 경로</b><span class="sm">HBA · pnic · storage-paths 판정</span><a class="more" href="VmTuning.dc.html">데이터스토어·경로 점검 →</a></div>
+      <div class="find"><span class="badge red">위험</span><div><b>ds-kr1-san03 — 활성 경로 2 / 4</b><small>vmhba3 쪽 경로 2개 dead · 쓰기 지연 p95 26 ms · DS 사용률 92% · 이 호스트의 VM 디스크 9개가 이 DS 에 있다</small></div></div>
+      <div class="find"><span class="badge amber">주의</span><div><b>vmnic4 down — 1 GbE 정격</b><small>관리 · vMotion 포트그룹이 이 NIC 를 쓰는지 확인(포트그룹 배치는 수집하지 않는다 — 2차)</small></div></div>
+      <div class="find"><span class="badge green">정상</span><div><b>vmnic0 · vmnic1 25 GbE up · HBA 펌웨어 일치</b><small>팀 구성(LACP · 액티브/스탠바이)은 수집하지 않는다</small></div></div>
+      <div class="note">경로 수 · dead 는 storage-paths 도구 값(dscfg). 경로 복구 · 재스캔은 포탈이 하지 않는다 — vSphere · 스토리지 팀.</div>
+    </section>
+
+    <section class="card" aria-label="하드웨어 · 전력 · 온도">
+      <div class="ct"><b>하드웨어 · 전력 · 온도</b><span class="sm">IPMI 센서 · iDRAC 추이 · hcfg</span><a class="more" href="HostObject.dc.html">iDRAC 추이 →</a></div>
+      <div class="kv">
+        <span>전력</span><div>612 W <span class="sm">· 7일 평균 598 · 최대 701(PSU 2×1,100 W)</span></div>
+        <span>온도</span><div>흡기 22 °C · CPU1 48 · CPU2 51 <span class="sm">· 7일 최대 CPU2 63 °C — 임계(85) 아래</span></div>
+        <span>CPU 전원 정책</span><div class="muted">수집하지 않음 — 2차(hostconfig.powerSystemInfo · ‘고성능’ 인지 ‘균형’ 인지)</div>
+        <span>NUMA</span><div>2 소켓 × 32 코어 <span class="sm">· VM 별 NUMA 배치는 수집하지 않음</span></div>
+        <span>가동</span><div>54일 · 재부팅 필요 아니오</div>
+      </div>
+      <div class="note">온도 · 전력에서 ‘스로틀링’ 을 추정하지 않는다(센서 값 그대로).</div>
+    </section>
+  </div>
+
+  <section class="card" aria-label="조치 계획">
+    <div class="ct"><b>조치 계획</b><span class="sm">호스트 단위 · 적용은 vSphere · 스토리지 팀 · VM 사양 변경 도구에서</span><span class="more" style="display:inline-flex;gap:6px"><a class="btn" href="HostTuning.dc.html">⬇ 체크리스트 내보내기</a><a class="btn" href="HostTuning.dc.html">🔁 변경 뒤 다시 평가</a></span></div>
+    <div style="overflow-x:auto">
+      <table class="plan">
+        <thead><tr><th>#</th><th>조치</th><th>기대 효과</th><th>위험 · 조건</th><th>어디서</th><th>상태</th></tr></thead>
+        <tbody>
+          <tr><td>1</td><td><b>ds-kr1-san03 dead 경로 2개 복구</b></td><td>쓰기 지연 26 → 10 ms 이하 · 단일 장애점 제거</td><td>vmhba3 · 스위치 포트 · 조닝 확인(SAN 스위치 도구)</td><td>스토리지 팀 · vSphere 재스캔</td><td><span class="badge red">긴급</span></td></tr>
+          <tr><td>2</td><td><b>과다 할당 VM 11대 vCPU 축소</b> (합 62 → 24)</td><td>가상화율 3.4 → 2.4:1 · Ready 감소</td><td>VM 마다 담당 확인 · 전원 off 필요</td><td>VM 개체 › 성능 튜닝 › 사양 변경</td><td><span class="badge blue">담당 확인</span></td></tr>
+          <tr><td>3</td><td><b>벌룬 VM 3대 메모리 실사용 확인</b></td><td>압박 해소 · 벌룬 0</td><td>줄이지 말고 먼저 원인(db-kr1-004 118/128 GB — 진짜 쓰는지)</td><td>VM 개체 › 성능 튜닝</td><td><span class="badge gray">대기</span></td></tr>
+          <tr><td>4</td><td><b>vmnic4 down 확인</b></td><td>관리 · vMotion 이중화</td><td>케이블 · 스위치 포트</td><td>네트워크 팀</td><td><span class="badge gray">대기</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="note">상태는 사람이 바꾼다 · 저장은 호스트 id(vcenterId:moref) 기준 · 변경 뒤 ‘다시 평가’ 는 같은 기간 전후 나란히.</div>
+  </section>
+
+  <div class="faint" style="font-size:11.5px">가상 데이터 · 호스트 성능 튜닝은 기존 값(호스트 롤업 · perfc · rightsize · waste · storage-paths · hcfg · 센서)을 이 호스트 몫으로 모은 것. 전원 정책 · NUMA 배치 · 포트그룹 · 팀 구성 · 메모리 압축은 수집하지 않아 ‘2차’.</div>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1300}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

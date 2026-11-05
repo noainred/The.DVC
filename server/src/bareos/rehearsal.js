@@ -32,6 +32,7 @@ import { bulkRestorePlan, placementDrift } from './restore.js';
 import { capacityShortfall } from '../vmclone/capacity.js';
 import { onDirector, isDemoActive, effectiveSettings, isEdgeNode } from './service.js';
 import { noteRestoreBatchStart, noteRestoreBatchEnd } from './inflight.js';
+import { drActiveVcenterIds } from './drRunner.js';
 import { RESTORES_DEADLINE_MS } from './edgeOps.js';
 import { logAudit } from '../audit.js';
 
@@ -236,7 +237,9 @@ export async function runRehearsal(dirId, { trigger = 'timer', by = 'rehearsal',
   //   순서대로 판정해 통과한 것으로 perCorp 대를 채우고(후보 상한 EXTRA_TRIES), 건너뛴 VM 은 시도 시각(triedAt)을 남겨 다음 회차에 뒤로 보낸다.
   const order = { ...st.lastAt };
   for (const [id, t] of Object.entries(st.triedAt || {})) if ((Number(t) || 0) > (order[id] || 0)) order[id] = Number(t) || 0;
-  const cands = pickCandidates(jobs, dirId, policy.perCorp + EXTRA_TRIES, dirOf, order, (j) => placementDrift(j, vmById.get(j.vmId)));
+  // 재해 복구 회차가 진행 중 · 멈춤인 법인(vCenter)은 이번 검증에서 뺀다(버그 점검 B1-07 · B2-07)
+  const drBusy = drActiveVcenterIds();
+  const cands = pickCandidates(jobs.filter((j) => !drBusy.has(String(j.vcenterId))), dirId, policy.perCorp + EXTRA_TRIES, dirOf, order, (j) => placementDrift(j, vmById.get(j.vmId)));
   const skip = (j, reason) => { run.items.push({ jobId: j.id, vmName: j.vmName, ok: false, reason }); st.triedAt[j.id] = now; };
   const finishBlock = finishBlockOf();
   // 판정은 묶음 복원과 같은 함수 — 이름 겹침 · 여유 · 덮어쓰기 없음(새 VM 만)

@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>Bareos 사전 점검 — 400px</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=Noto+Sans+KR:wght@400;500;700;800&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+body{margin:0;background:#0a0e17;color:#e6edf6;font-family:"Inter","Noto Sans KR","Apple SD Gothic Neo",sans-serif;font-size:13px}
+a{color:#93c5fd}a:hover{color:#bfdbfe}
+.card{background:#141b2d;border:1px solid #243049;border-radius:12px}
+.muted{color:#8b9bb4}
+.mono{font-family:"JetBrains Mono",ui-monospace,monospace}
+.pill{display:inline-flex;align-items:center;gap:6px;min-height:30px;padding:0 12px;border-radius:8px;text-decoration:none;color:#8b9bb4;font-weight:700;font-size:12.5px}
+.pill.on{background:#3b82f6;color:#ffffff}
+.btn{display:inline-flex;align-items:center;gap:6px;min-height:30px;padding:0 11px;border-radius:8px;border:1px solid #243049;background:#1a2236;color:#e6edf6;font:inherit;font-size:12px;font-weight:600;cursor:pointer}
+.btn.primary{background:#3b82f6;border-color:#3b82f6;color:#ffffff}
+.tag{display:inline-flex;align-items:center;gap:5px;height:20px;padding:0 8px;border-radius:999px;font-size:11px;font-weight:700;white-space:nowrap}
+.tag.bad{background:rgba(239,68,68,.16);color:#fca5a5}.tag.warn{background:rgba(245,158,11,.16);color:#fcd34d}.tag.ok{background:rgba(34,197,94,.16);color:#86efac}.tag.unk{background:rgba(139,155,180,.14);color:#aebbd0}
+.sm{font-size:11.5px;color:#8b9bb4}
+.dot{display:inline-block;width:8px;height:8px;border-radius:50%}
+.dot.ok{background:#4ade80}.dot.warn{background:#fbbf24}.dot.bad{background:#f87171}.dot.unk{background:#64748b}
+.band{display:flex;flex-direction:column;gap:6px;padding:10px 12px;border-radius:10px;border:1px solid rgba(239,68,68,.45);background:rgba(239,68,68,.08);min-width:0}
+.row{display:flex;flex-wrap:wrap;align-items:center;gap:6px 10px;min-width:0}
+.corp{padding:10px 12px;display:flex;flex-direction:column;gap:6px;min-width:0}
+.chk{display:flex;flex-direction:column;gap:3px;padding:8px 0;border-top:1px solid #1f2a40;min-width:0}
+.chk .t{display:flex;align-items:center;gap:8px;font-weight:700}
+</style>
+</helmet>
+<div style="box-sizing:border-box;min-height:100vh;background:#0a0e17">
+<div style="box-sizing:border-box;padding:14px 16px 24px;display:flex;flex-direction:column;gap:12px;min-width:0">
+
+  <div style="font-size:19px;font-weight:800">Backup 현황</div>
+  <nav aria-label="Bareos 보기" style="display:flex;flex-wrap:wrap;gap:4px;background:#0f1626;border:1px solid #243049;border-radius:10px;padding:3px">
+    <a class="pill on" href="Narrow.dc.html" aria-current="page">현황</a>
+    <a class="pill" href="Narrow.dc.html">법인</a>
+    <a class="pill" href="Narrow.dc.html">운영</a>
+    <a class="pill" href="Narrow.dc.html">정책 · 보존</a>
+    <a class="pill" href="Narrow.dc.html">설정</a>
+  </nav>
+
+  <div class="band" role="status">
+    <div style="font-weight:800;color:#fca5a5">사전 점검(11-04 20:00) — 오늘 밤 백업이 실패할 수 있는 법인 2곳</div>
+    <div style="line-height:1.5;overflow-wrap:anywhere"><b>vcenter-pl-krakow-01</b> — FD → vCenter 192.0.2.21:443 접속 거부</div>
+    <div style="line-height:1.5;overflow-wrap:anywhere"><b>vcenter-eu-central-01</b> — SD 디스크 여유 3% · 약 2일</div>
+    <div class="sm">경고 3곳 · 모름 3곳 · 점검은 백업 성공을 보장하지 않습니다</div>
+  </div>
+
+  <div class="row">
+    <button class="btn" type="button">전체 28</button>
+    <button class="btn" type="button" style="background:#e6edf6;color:#0a0e17;border-color:#e6edf6">점검 경고 5</button>
+    <button class="btn" type="button">모름 3</button>
+  </div>
+
+  <!-- 400px: 표 대신 법인 카드 -->
+  <div class="card corp" style="border-color:rgba(239,68,68,.45)">
+    <div class="row"><b style="overflow-wrap:anywhere">vcenter-pl-krakow-01</b><span class="sm">241 VM</span><span class="tag bad" style="margin-left:auto">점검 불가</span></div>
+    <div class="row sm"><span><i class="dot ok"></i> Director 정상</span><span>보호 38 / 40</span><span>마지막 11-04 02:41</span></div>
+    <div class="sm" style="overflow-wrap:anywhere">vCenter 192.0.2.21:443 접속 거부(FD 서버에서) · SD 여유 1.2 TB / 4.0 TB · 약 60일</div>
+    <a href="Narrow.dc.html" style="text-decoration:none;font-weight:700;align-self:flex-end">열기 →</a>
+  </div>
+  <div class="card corp" style="border-color:rgba(239,68,68,.45)">
+    <div class="row"><b style="overflow-wrap:anywhere">vcenter-eu-central-01</b><span class="sm">451 VM</span><span class="tag bad" style="margin-left:auto">점검 위험</span></div>
+    <div class="row sm"><span><i class="dot ok"></i> Director 정상</span><span>보호 212 / 214</span><span>마지막 11-04 02:58</span></div>
+    <div class="sm">SD 디스크 여유 <span style="color:#fca5a5;font-weight:700">120 GB</span> / 4.0 TB (3%) · 약 2일 뒤 가득 참</div>
+    <a href="Narrow.dc.html" style="text-decoration:none;font-weight:700;align-self:flex-end">열기 →</a>
+  </div>
+  <div class="card corp">
+    <div class="row"><b style="overflow-wrap:anywhere">vcenter-me-uae-01</b><span class="sm">88 VM</span><span class="tag warn" style="margin-left:auto">점검 경고</span></div>
+    <div class="row sm"><span><i class="dot ok"></i> Director 정상</span><span>보호 40 / 44</span><span>마지막 11-04 02:09</span></div>
+    <div class="sm">vCenter 인증서 지문 바뀜(10-28 → 11-04) · SD 여유 1.5 TB / 2.0 TB</div>
+    <a href="Narrow.dc.html" style="text-decoration:none;font-weight:700;align-self:flex-end">열기 →</a>
+  </div>
+  <div class="card corp">
+    <div class="row"><b style="overflow-wrap:anywhere">vcenter-jp-tokyo-01</b><span class="sm">96 VM</span><span class="tag unk" style="margin-left:auto">점검 모름</span></div>
+    <div class="row sm"><span><i class="dot ok"></i> Director 정상 · 중앙 직접</span><span>보호 52 / 52</span></div>
+    <div class="sm">중앙 직접 — vCenter 접속은 중앙에서 본 것(FD 시점 아님) · 디스크 못 봄</div>
+    <a href="Narrow.dc.html" style="text-decoration:none;font-weight:700;align-self:flex-end">열기 →</a>
+  </div>
+
+  <!-- 법인 화면의 사전 점검 카드(400px) -->
+  <div class="sm" style="margin-top:6px">법인 화면 › 사전 점검 카드</div>
+  <div class="card" style="padding:10px 12px;display:flex;flex-direction:column;gap:6px;border-color:rgba(239,68,68,.45);min-width:0">
+    <div class="row"><b>사전 점검</b><span class="tag bad">불가 1</span><span class="tag unk">모름 1</span><button class="btn primary" type="button" style="margin-left:auto">지금 점검</button></div>
+    <div class="sm">11-04 20:00 · 엣지 edge-pl-01(FD 와 같은 서버) · 1.4초</div>
+    <div class="band" style="padding:8px 10px"><div style="color:#fca5a5;font-weight:700;line-height:1.45">오늘 밤 02:00 백업(잡 38개)이 실패할 수 있습니다 — FD 가 vCenter 에 접속하지 못합니다.</div></div>
+    <div class="chk">
+      <div class="t"><span class="tag bad">불가</span> vCenter 접속 <span class="sm">FD → 192.0.2.21:443</span></div>
+      <div class="sm mono">ECONNREFUSED · 0.8초</div>
+      <div class="sm" style="overflow-wrap:anywhere">조치: INI 의 vcserver · vCenter 웹 서비스 · 방화벽. FD 서버에서 nc -vz 192.0.2.21 443</div>
+    </div>
+    <div class="chk">
+      <div class="t"><span class="tag unk">모름</span> vCenter 인증서 지문</div>
+      <div class="sm">접속되지 않아 읽지 못함 · 마지막 관측 10-28</div>
+    </div>
+    <div class="chk">
+      <div class="t"><span class="tag ok">정상</span> Director 콘솔</div>
+      <div class="sm">25.1.2 · 0.3초</div>
+    </div>
+    <div class="chk">
+      <div class="t"><span class="tag ok">정상</span> SD 디스크 여유</div>
+      <div class="sm">/var/lib/bareos/storage · 여유 1.2 TB / 4.0 TB (30%) · +18 GB/일 · 약 60일</div>
+      <svg width="100%" height="28" viewBox="0 0 320 28" preserveAspectRatio="none" role="img" aria-label="최근 14일 사용량 추이 — 완만히 증가"><polyline points="2,24 26,23 50,23 74,21 98,21 122,20 146,18 170,17 194,15 218,14 242,13 266,11 290,10 318,8" fill="none" stroke="#4ade80" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"></polyline></svg>
+    </div>
+    <div class="sm">최근 7회: 정상 6 → 11-04 불가 · ‘정상’ 은 백업 성공을 보장하지 않습니다.</div>
+  </div>
+
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":400,"height":1560}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

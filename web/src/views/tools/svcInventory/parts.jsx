@@ -68,7 +68,8 @@ export function BackupCell({ b, meta }) {
       {v.ok ? <span className="badge green" title="24시간 안에 성공">{v.ok}</span> : null}
       {v.fail ? <span className="badge red" title="실패 또는 24시간 넘게 성공 없음">{v.fail}</span> : null}
       {v.none ? <span className="badge gray" title="잡 없음">잡 없음 {v.none}</span> : null}
-      {!v.ok && !v.fail && !v.none ? <span className="muted">—</span> : null}
+      {v.unknown ? <span className="muted" title="Bareos 원장을 읽지 못한 VM">모름 {v.unknown}</span> : null}
+      {!v.ok && !v.fail && !v.none && !v.unknown ? (v.na ? <span className="muted" title="이 법인은 Bareos 를 쓰지 않습니다(Director 매핑 없음)">해당 없음</span> : <span className="muted">—</span>) : null}
     </span>
   );
 }
@@ -84,9 +85,15 @@ export function SrcCell({ src }) {
 }
 
 function memberSrc(m) {
+  const multi = Array.isArray(m.tagValues) && m.tagValues.length > 1;
   return (
-    <span className={`badge ${SRC_BADGE[m.src] || 'gray'}`} title={`${SRC_LABEL[m.src] || m.src}${m.via ? ` — ${m.via}` : ''}${m.reason ? ` — ${REASON_TEXT[m.reason] || m.reason}` : ''}`}>
-      {SRC_SHORT[m.src] || '미지정'}{m.drift ? ' · 드리프트' : ''}{m.unchecked ? ' · 확인 안 됨' : ''}
+    <span style={{ display: 'inline-flex', gap: 4, flexWrap: 'wrap', alignItems: 'center' }}>
+      <span className={`badge ${SRC_BADGE[m.src] || 'gray'}`} title={`${SRC_LABEL[m.src] || m.src}${m.via ? ` — ${m.via}` : ''}${m.reason ? ` — ${REASON_TEXT[m.reason] || m.reason}` : ''}`}>
+        {SRC_SHORT[m.src] || '미지정'}{m.drift ? ' · 드리프트' : ''}{m.unchecked ? ' · 확인 안 됨' : ''}
+      </span>
+      {/* 태그 여럿(5차 M5·R14) — 서비스에 걸리는 값으로 정했다. 둘 이상의 서비스에 걸리면 '모호'(검토 탭 · 고정으로 정한다) */}
+      {Array.isArray(m.ruleOverlap) && m.ruleOverlap.length ? <span className="badge amber" title={`다른 서비스로 가는 이름 규칙도 걸립니다: ${m.ruleOverlap.join(', ')} — 적용 순서(접두·접미 > 포함 · 긴 값)로 정했습니다. 맞지 않으면 고정하십시오`}>규칙 겹침</span> : null}
+      {multi ? <span className={`badge ${m.tagAmbiguous ? 'amber' : 'gray'}`} title={`태그 ${m.tagValues.length}개: ${m.tagValues.join(', ')}${m.tagAmbiguous ? ' — 둘 이상의 서비스에 걸립니다(정렬 첫 값으로 정함 · 고정으로 정하십시오)' : ' — 서비스에 걸리는 값으로 정했습니다'}`}>{m.tagAmbiguous ? '태그 모호' : `태그 ${m.tagValues.length}`}</span> : null}
     </span>
   );
 }
@@ -95,11 +102,14 @@ function powerDot(p) {
   if (p === false) return <span className="muted" title="꺼짐">○</span>;
   return <span className="muted" title="전원 상태를 모릅니다(엣지 보고 서버 등)">◌</span>;
 }
-const backupMember = (b) => (b === undefined ? <span className="muted">—</span> : b === null ? <span className="muted">모름</span>
+const backupMember = (b) => (b === undefined ? <span className="muted" title="이 법인은 Bareos 를 쓰지 않습니다(Director 매핑 없음)">해당 없음</span> : b === null ? <span className="muted">모름</span>
   : b === 'ok' ? <span className="badge green">성공</span> : b === 'fail' ? <span className="badge red">실패·지연</span> : <span className="badge gray">잡 없음</span>);
 
 /** 구성원 표 + 영향 호스트 표. query 가 바뀌면 다시 읽는다(늦게 온 이전 응답은 버린다). */
-export function MembersPanel({ title, sub, query, reloadKey = 0, selectable = false, selected, onSelect }) {
+/** 법인 열의 짧은 이름(법인 표와 같은 규칙 — 'vcenter-' 접두를 뗀다 · 전체 이름은 title). */
+const shortCorpName = (n) => String(n || '').replace(/^vcenter-/, '');   // 칸이 좁으면 줄을 바꾼다(전역 tbody td nowrap 을 이 칸만 푼다 — 1440 에서 표 안 가로 스크롤이 생겼다)
+/** corpName 을 주면 법인 열을 보인다(전 법인 보기 — 여러 법인이 한 표에 섞일 때). */
+export function MembersPanel({ title, sub, query, reloadKey = 0, selectable = false, selected, onSelect, corpName = null, showReason = false }) {
   const [d, setD] = useState(null);
   const [err, setErr] = useState(null);
   const seq = useRef(0);
@@ -120,10 +130,10 @@ export function MembersPanel({ title, sub, query, reloadKey = 0, selectable = fa
           <b>{title}</b><span className="muted" style={{ fontSize: 12 }}>{sub}{d ? ` · ${ms.length}대${d.omitted ? ` (상한으로 ${d.omitted}대 생략)` : ''}` : ''}</span>
         </div>
         {err ? <div style={{ padding: 12 }}><ErrorBox error={err} /></div> : !d ? <Loading /> : !ms.length ? <div className="muted" style={{ padding: 16 }}>구성원이 없습니다.</div> : (
-          <STable className="table svcinv-t" minWidth={selectable ? 820 : 780}>
+          <STable className="table svcinv-t" minWidth={(selectable ? 820 : 780) + (corpName ? 80 : 0) + (showReason ? 180 : 0)}>
             <thead><tr>
               {selectable ? <th data-nosort /> : null}
-              <th>이름</th><th>소속 근거</th><th>사용률</th><th title="VM 은 vCPU·할당 메모리, 베어메탈은 코어·설치 메모리">vCPU·메모리</th><th>부품 장애</th><th>백업</th><th>호스트 · IP</th>
+              <th>이름</th>{corpName ? <th>법인</th> : null}<th>소속 근거</th>{showReason ? <th title="왜 서비스에 들어가지 않았는가 — 미지정 묶음 제목과 같은 문구">이유</th> : null}<th>사용률</th><th title="VM 은 vCPU·할당 메모리, 베어메탈은 코어·설치 메모리">vCPU·메모리</th><th>부품 장애</th><th>백업</th><th>호스트 · IP</th>
             </tr></thead>
             <tbody>{ms.map((m) => (
               <tr key={m.key}>
@@ -132,7 +142,9 @@ export function MembersPanel({ title, sub, query, reloadKey = 0, selectable = fa
                   <span style={{ display: 'inline-flex', gap: 6, alignItems: 'center', whiteSpace: 'nowrap' }}>{powerDot(m.powered)}<span className={`badge ${m.kind === 'vm' ? 'blue' : 'amber'}`}>{m.kind === 'vm' ? 'VM' : 'BM'}</span><b>{m.name}</b></span>
                   <div className="svcinv-sub">{m.kind === 'vm' ? (m.folderPath == null ? '위치 모름' : m.folderPath) : (m.serviceTag ? `서비스태그 ${m.serviceTag}` : (m.source || ''))}</div>
                 </td>
+                {corpName ? <td data-sort={corpName(m.corp)} title={corpName(m.corp)} style={{ fontSize: 12, whiteSpace: 'normal', overflowWrap: 'anywhere', minWidth: 64 }}>{shortCorpName(corpName(m.corp))}</td> : null}
                 <td data-sort={m.src}>{memberSrc(m)}</td>
+                {showReason ? <td data-sort={m.reason || ''} style={{ whiteSpace: 'normal', minWidth: 180, fontSize: 12 }}>{m.reason ? (REASON_TEXT[m.reason] || m.reason) : <span className="muted">—</span>}</td> : null}
                 <td data-sort={m.usage?.cpu ?? ''}><UsagePair cpu={m.usage?.cpu ?? null} mem={m.usage?.mem ?? null} /></td>
                 <td data-sort={m.cores ?? ''} style={{ whiteSpace: 'nowrap' }}>{numText(m.cores)}<span className="muted"> · {m.memGB == null ? '—' : `${Math.round(m.memGB)}GB`}</span></td>
                 <td data-sort={m.faults ?? ''}>{m.faults == null ? <span className="muted">{m.kind === 'vm' ? '' : '—'}</span> : m.faults ? <span className="badge red">{m.faults}</span> : <span className="muted">0</span>}</td>
@@ -148,11 +160,12 @@ export function MembersPanel({ title, sub, query, reloadKey = 0, selectable = fa
           <div className="flex wrap gap" style={{ padding: '10px 14px', borderBottom: '1px solid var(--border)', alignItems: 'center' }}>
             <b>영향 호스트(파생)</b><span className="muted" style={{ fontSize: 12 }}>{hosts.length}대 · 이 VM 들이 올라간 ESXi 호스트와 그 호스트가 함께 떠받치는 서비스</span>
           </div>
-          <STable className="table svcinv-t" minWidth={680}>
-            <thead><tr><th>호스트</th><th>이 목록 VM</th><th>CPU</th><th>메모리</th><th>부품 장애</th><th>함께 떠받치는 서비스</th></tr></thead>
+          <STable className="table svcinv-t" minWidth={680 + (corpName ? 80 : 0)}>
+            <thead><tr><th>호스트</th>{corpName ? <th>법인</th> : null}<th>이 목록 VM</th><th>CPU</th><th>메모리</th><th>부품 장애</th><th>함께 떠받치는 서비스</th></tr></thead>
             <tbody>{hosts.map((h) => (
               <tr key={`${h.corp}|${h.name}`}>
                 <td data-sort={h.name}><b>{h.name}</b><div className="muted" style={{ fontSize: 11, fontFamily: 'var(--mono)' }}>{h.serviceTag || ''}</div></td>
+                {corpName ? <td data-sort={corpName(h.corp)} title={corpName(h.corp)} style={{ fontSize: 12, whiteSpace: 'normal', overflowWrap: 'anywhere', minWidth: 64 }}>{shortCorpName(corpName(h.corp))}</td> : null}
                 <td data-sort={h.vmHere}>{h.vmHere}</td>
                 <td><UsageBar v={h.usage?.cpuPct ?? null} /></td><td><UsageBar v={h.usage?.memPct ?? null} /></td>
                 <td data-sort={h.faults ?? ''}>{h.faults == null ? <span className="muted">—</span> : h.faults ? <span className="badge red">{h.faults} → 영향 서비스 {1 + (h.others?.length || 0)}</span> : <span className="muted">0</span>}</td>

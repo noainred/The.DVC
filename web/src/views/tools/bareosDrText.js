@@ -21,9 +21,16 @@ const FAILED = new Set(['error', 'canceled']);
 export function drTrialOk(jobs, vcenterId, now = Date.now()) {
   for (const j of Array.isArray(jobs) ? jobs : []) {
     if (String(j.vcenterId) !== String(vcenterId)) continue;
-    for (const r of j.restores || []) if (r?.dr === true && (r.state === 'ok' || r.state === 'warning') && now - (Number(r.endedAt || r.at) || 0) < DR_TRIAL_MS) return true;
+    for (const r of j.restores || []) if (r?.dr === true && drRestorePassed(r) && now - (Number(r.endedAt || r.at) || 0) < DR_TRIAL_MS) return true;
   }
   return false;
+}
+/** 재해 복구 복원 한 건이 끝맺음(네트워크 끊기 · 켜 보기)까지 성공했는가 — 서버 drPlan.js drRestorePassed 와 같은 조건(server/test/bareosDr2 가 같은 입력으로 대조 · 버그 점검 B4-02). */
+export function drRestorePassed(r) {
+  if (!r || !(r.state === 'ok' || r.state === 'warning')) return false;
+  if (r.nic === 'disconnect' && r.finish?.nic !== 'ok') return false;
+  if (r.verify === true && r.finish?.verify !== 'ok') return false;
+  return true;
 }
 /** 반증 R3: 이 이름으로 최근(24시간) 보낸 새 VM 복원 — 끝났어도 다음 묶음에 다시 넣지 않는다(실패 · 취소는 서버가 다시 판정 — 그 뒤 인벤토리에 없으면 다시 보낼 수 있다). */
 export function drRecentlySent(job, name, now = Date.now()) {
@@ -206,10 +213,10 @@ export const DR_RUN_STATE = Object.freeze({ running: ['진행 중', 'info'], pau
 /** 항목 상태 → [문구, 색]. 'sent' 는 Director 에서 복원 중이거나 끝맺음(네트워크 끊기 · 켜 보기) 중. */
 export const DR_ITEM_STATE = Object.freeze({ queued: ['대기', 'muted'], sending: ['보내는 중', 'info'], sent: ['복원 중', 'info'], ok: ['성공', 'ok'], failed: ['실패', 'bad'], unknown: ['결과 모름', 'warn'], skipped: ['건너뜀', 'muted'] });
 const COUNT_ORDER = ['ok', 'sent', 'sending', 'queued', 'failed', 'unknown', 'skipped'];
-/** 단계 한 줄 — '성공 3 · 복원 중 2 · 대기 10 / 15대'(0 인 상태는 뺀다 · 대수를 모르면 '— / —'). */
-export function drWaveCountsText(w) {
+/** 단계 한 줄 — '성공 3 · 복원 중 2 · 대기 10 / 15대'(0 인 상태는 뺀다 · 대수를 모르면 '— / —'). 멈춘 회차의 대기는 '보내지 않음'(B5-12 — 다시 보내지 않는다). */
+export function drWaveCountsText(w, runState = '') {
   const c = w?.counts || {};
-  const parts = COUNT_ORDER.filter((k) => Number(c[k]) > 0).map((k) => `${DR_ITEM_STATE[k][0]} ${c[k]}`);
+  const parts = COUNT_ORDER.filter((k) => Number(c[k]) > 0).map((k) => `${k === 'queued' && runState === 'stopped' ? '보내지 않음' : DR_ITEM_STATE[k][0]} ${c[k]}`);
   return `${parts.join(' · ') || '—'} / ${unitText(numOrNull(w?.total), '대')}`;   // 못 읽은 대수는 '—'(단위를 붙이지 않는다)
 }
 /** 진행 중(running · paused)인가 — 이 법인에 새 회차를 시작할 수 없다. */
