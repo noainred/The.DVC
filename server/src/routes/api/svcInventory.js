@@ -72,8 +72,10 @@ export function bmAliasKeys(b, keyKind) {
   if (keyKind !== 'serviceTag') return [];
   // 태그가 없을 때의 fleetId — 함대 분류(`insights/fleetInventory.js`)와 같은 규칙: 일반 행 norm(serverId) · ESXi 호스트 행(host:) norm(name).
   // ⚠ 4차 반증 1: 예전에는 lc(fleetId) 로 만들었는데 태그가 읽힌 뒤 fleetId 는 태그라서 옛 키와 절대 맞지 않았다(승계가 동작하지 않음).
-  const sid = t(b?.serverId);
-  const f = sid.startsWith('host:') ? lc(b?.name) : lc(sid);
+  // 엣지 보고분은 serverId 자체가 `edge:<agent>:<fleetId>` 라 태그가 읽히면 바뀐다 — 엣지가 보낸 '태그 없을 때 id' 로 만든 serverId 를 쓴다(6차 2).
+  //   구버전 엣지(필드 없음)는 승계하지 못한다(예전과 같다 — 옛 고정은 유령으로 보인다).
+  const sid = t(b?.untaggedServerId) || t(b?.serverId);
+  const f = !b?.untaggedServerId && sid.startsWith('host:') ? lc(b?.name) : lc(sid);
   return f ? [`fl:${crypto.createHash('sha1').update(f).digest('hex').slice(0, 16)}`] : [];
 }
 /** Bareos 원장 → VM 백업 칸(순수). undefined = Bareos 미사용 · null = 원장 못 읽음 · 'ok' 24h 내 성공 · 'fail' 실패/지연 · 'none' 잡 없음. */
@@ -325,7 +327,12 @@ async function gatherNowInner(snap, tagCategory) {
   const vmTotal = new Map(); const vmUuid = new Map();
   for (const vm of snap?.vms || []) { if (!vm || vm.template) continue; const vc = t(vm.vcenterId); vmTotal.set(vc, (vmTotal.get(vc) || 0) + 1); if (t(vm.instanceUuid)) vmUuid.set(vc, (vmUuid.get(vc) || 0) + 1); }
   const uuidUnreadCorps = new Set([...vmTotal.keys()].filter((vc) => !vmUuid.get(vc)));
-  return { members, hostByKey, unreadCorps, bmBlocked, bmBlockedSources, uuidUnreadCorps, corpNames, scanEntries, faultsMeta, backupMeta, bareosCorps, sourceErrors, at: now };
+  // 첫 수집 전(pending)·꺼진(disabled) vCenter — 그 법인 구성원이 '없다' 가 아니라 '아직 모른다'(6차 1 — unreadVcenters 는 pending 을 일부러 뺀다).
+  // 수집 전 골격 스냅샷(initial)이면 어느 법인 구성원도 모른다.
+  const corpHold = new Map();
+  for (const v of vcenters) { const id = t(v?.id); if (!id) continue; if (v.status === 'pending') corpHold.set(id, 'corp-pending'); else if (v.status === 'disabled') corpHold.set(id, 'corp-disabled'); }
+  const snapInitial = !snap || snap.initial === true;
+  return { members, hostByKey, unreadCorps, bmBlocked, bmBlockedSources, uuidUnreadCorps, corpHold, snapInitial, corpNames, scanEntries, faultsMeta, backupMeta, bareosCorps, sourceErrors, at: now };
 }
 
 // ───────── 권한 ─────────
@@ -390,7 +397,7 @@ async function inventoryFor(req, snap) {
   const hit = _invMemo.get(key);
   if (hit && now - hit.at < INV_MEMO_MS) { _invStats.hits += 1; return { st, g, inv: hit.inv, allowed, admin }; }
   _invStats.misses += 1;
-  const inv = buildInventory({ members: g.members, map: st.map, pins: st.pins, hostByKey: g.hostByKey, allowed, unreadCorps: g.unreadCorps, bmBlocked: g.bmBlocked, uuidUnreadCorps: g.uuidUnreadCorps, corpNames: g.corpNames, scanEntries: g.scanEntries, adminView: admin, knownCorps: known });
+  const inv = buildInventory({ members: g.members, map: st.map, pins: st.pins, hostByKey: g.hostByKey, allowed, unreadCorps: g.unreadCorps, bmBlocked: g.bmBlocked, uuidUnreadCorps: g.uuidUnreadCorps, corpHold: g.corpHold, snapInitial: g.snapInitial, corpNames: g.corpNames, scanEntries: g.scanEntries, adminView: admin, knownCorps: known });
   for (const [k, v] of _invMemo) if (now - v.at >= INV_MEMO_MS) _invMemo.delete(k);
   while (_invMemo.size >= INV_MEMO_MAX) _invMemo.delete(_invMemo.keys().next().value);
   _invMemo.set(key, { at: now, inv });
@@ -446,6 +453,8 @@ export function heldWithSince(list, full, now = Date.now()) {
  * 쓰기 연산은 토큰을 원래 키로 되돌린다(`keyResolverFor`) — 범위 계정이 **원문 베어메탈 키를 보내면 받지 않는다**(태그를 맞혀 보는 길을 막는다).
  * VM 키(iu:·vm:)는 그대로다(instanceUuid·moref 는 서비스태그 기준 밖).
  */
+const GHOST_SHOW = 500;          // 검토 화면에 싣는 유령·보류 행 상한(6차 8)
+const GHOST_PRUNE_MAX = 5000;    // 유령 정리 한 번에 받는·미리 보여 주는 키 상한
 const isBmKey = (k) => typeof k === 'string' && (k.startsWith('st:') || k.startsWith('fl:'));
 export const pubKey = (k, hide) => (hide && isBmKey(k) ? maskedIdToken(k) : k);
 /** 범위 계정이 보낸 키 → 원래 키(모르면 ''). 후보는 그 계정 범위 안 구성원·고정 키만. */
@@ -517,7 +526,7 @@ export function registerSvcInventory(api) {
         corps: inv.corps.map((c) => ({ ...c, writable: writableOf(req.user, s, c.vcenterId) })),
         services: inv.services, noCorp: inv.noCorp,
         global: inv.global,
-        queues: { unassigned: q.unassigned.reduce((a, x) => a + x.n, 0), unassignedGroups: q.unassigned.length, unmapped: q.unmapped.length, drift: q.drift.length, mismatch: q.mismatch.length, redundant: q.redundant.length, ghosts: q.ghosts.length, ghostsHeld: q.ghostsHeld.length, orphaned: q.orphaned.length, tagAmbiguous: q.tagAmbiguous.length, ruleOverlap: q.ruleOverlap.length, aliasPins: q.aliasPins.length },
+        queues: { unassigned: q.unassigned.reduce((a, x) => a + x.n, 0), unassignedGroups: q.unassigned.length, unmapped: q.unmapped.length, drift: q.drift.length, mismatch: new Set(q.mismatch.map((x) => x.key)).size, redundant: q.redundant.length, ghosts: q.ghosts.length, ghostsHeld: q.ghostsHeld.length, orphaned: q.orphaned.length, tagAmbiguous: q.tagAmbiguous.length, ruleOverlap: q.ruleOverlap.length, aliasPins: q.aliasPins.length },
         // 법인을 고른 화면의 탭 숫자가 KPI 와 같은 기준이 되도록 법인별로도 센다(전 법인 숫자를 법인 화면에 쓰지 않는다).
         queuesByCorp: (() => {
           const o = {};
@@ -527,7 +536,8 @@ export function registerSvcInventory(api) {
           for (const x of q.drift) bump(x.corp, 'drift');
           for (const x of q.ghosts) bump(x.corp, 'ghosts');
           for (const x of q.ghostsHeld) bump(x.corp, 'ghostsHeld');
-          for (const x of q.mismatch) bump(x.corp, 'mismatch');
+          // 구성원 수로 센다 — 한 구성원이 새 키·옛 키 불일치를 함께 가지면 행이 둘이다(6차 반증 2회차 R1)
+          { const seen = new Set(); for (const x of q.mismatch) { if (seen.has(x.key)) continue; seen.add(x.key); bump(x.corp, 'mismatch'); } }
           for (const x of q.redundant) bump(x.corp, 'redundant');
           for (const x of q.tagAmbiguous) bump(x.corp, 'tagAmbiguous');
           for (const x of q.ruleOverlap) bump(x.corp, 'ruleOverlap');
@@ -547,12 +557,15 @@ export function registerSvcInventory(api) {
       if (storeLoadError()) return res.status(503).json({ ok: false, error: 'registryUnreadable' });
       const { g, inv, allowed, admin, st } = await inventoryFor(req, snap);
       const corp = t(req.query.corp); const svc = t(req.query.service); const gid = t(req.query.global); const unassigned = req.query.unassigned === '1';
+      // 법인 귀속이 없는 미지정 구성원만(6차 6 — 예전에는 corp='' 가 '조건 없음' 으로 읽혀 전 법인 미지정이 나왔다). 범위 계정에는 싣지 않는다.
+      const nocorp = req.query.nocorp === '1';
       if (corp && allowed && !allowed.has(corp)) return res.status(404).json({ ok: false, reason: '법인(vCenter)을 찾지 못했습니다.' });
       const svcCorp = svc ? inv.services.find((s) => s.id === svc)?.corp : null;
       if (svc && !svcCorp) return res.status(404).json({ ok: false, reason: '서비스를 찾지 못했습니다.' });
       const gSvc = gid ? new Set(inv.services.filter((s) => s.globalId === gid).map((s) => s.id)) : null;
       const pick = (m) => {
         if (allowed && !allowed.has(m.corp)) return false;
+        if (nocorp) return !m.corp && !inv.resolved.get(m.key)?.serviceId;
         if (corp && m.corp !== corp) return false;
         const r = inv.resolved.get(m.key);
         if (svc) return r.serviceId === svc;
@@ -598,7 +611,9 @@ export function registerSvcInventory(api) {
       const corp = t(req.query.corp);
       if (corp && allowed && !allowed.has(corp)) return res.status(404).json({ ok: false, reason: '법인(vCenter)을 찾지 못했습니다.' });
       const q = inv.queues;
-      const inCorp = (x) => !corp || x.corp === corp;
+      // nocorp=1 — 트리 '(법인 미지정)': 법인 귀속 없는 항목만(6차 6). 범위 계정 큐에는 원래 법인 없는 항목이 없다(buildQueues inScope).
+      const nocorp = req.query.nocorp === '1';
+      const inCorp = (x) => (nocorp ? !x.corp : !corp || x.corp === corp);
       const byKey = new Map(g.members.map((m) => [m.key, m]));
       const hide = !!allowed;   // R7 — 범위 계정 판본은 베어메탈 키를 토큰으로
       const mask = (list) => list.map((x) => ({ ...x, key: pubKey(x.key, hide), name: byKey.get(x.key) ? maskName(byKey.get(x.key), admin, hide) : x.name }));
@@ -606,7 +621,11 @@ export function registerSvcInventory(api) {
       res.json({
         ok: true, rev: st.rev,
         unassigned: q.unassigned.filter(inCorp).map((x) => ({ ...x, names: mask(x.names), keys: x.keys.map((k) => pubKey(k, hide)) })),
-        unmapped: q.unmapped.filter(inCorp), drift: mask(q.drift.filter(inCorp)), mismatch: mask(q.mismatch.filter(inCorp)),
+        unmapped: q.unmapped.filter(inCorp), drift: mask(q.drift.filter(inCorp)),
+        // 고정이 가리키는 법인이 이 계정 범위 밖이면 그 법인 id·서비스 id 를 싣지 않는다(6차 5 — '어딘가 다른 법인에 고정돼 있다' 만)
+        // 옛 키(별칭) 불일치 행의 aliasKey 도 베어메탈이면 토큰으로(R7 — fl:·st: 원문을 범위 계정에 싣지 않는다)
+        mismatch: mask(q.mismatch.filter(inCorp)).map((x) => ({ ...x, ...(x.aliasKey ? { aliasKey: pubKey(x.aliasKey, hide) } : {}) }))
+          .map((x) => (allowed && !allowed.has(x.pinCorp) ? { ...x, pinCorp: '', serviceId: '', pinCorpHidden: true } : x)),
         // 불필요한 고정 — 고른 법인 것만(5차 반증 R9: 예전에는 법인을 골라도 전 범위 합계였다) · 정리 버튼이 키를 쓰므로 500건까지 싣는다.
         redundant: (() => { const l = q.redundant.filter(inCorp); return { n: l.length, items: mask(l.slice(0, LIMITS.pinBatch)) }; })(),
         tagAmbiguous: (() => { const l = q.tagAmbiguous.filter(inCorp); return { n: l.length, items: mask(l.slice(0, 200)) }; })(),
@@ -614,7 +633,13 @@ export function registerSvcInventory(api) {
         // 옛 키로 저장된 고정(R15) — 옛 키(aliasKey)도 베어메탈이면 토큰으로
         aliasPins: (() => { const l = q.aliasPins.filter(inCorp); return { n: l.length, corps: [...new Set(l.map((x) => x.corp))], items: mask(l.slice(0, 200)).map((x) => ({ ...x, aliasKey: pubKey(x.aliasKey, hide) })) }; })(),
         // 판정 보류(5차 R10): 언제부터(이 포탈 프로세스가 처음 본 시각 — 재시작하면 다시 센다) · 무엇이 막혔는지. 출처 문구는 관리자 판본만(장비·수집 서버 이름).
-        ghosts: maskKeyOnly(q.ghosts.filter(inCorp)), ghostsHeld: maskKeyOnly(heldWithSince(q.ghostsHeld, !allowed).filter(inCorp)), orphaned: q.orphaned.filter(inCorp).length, bmBlocked: g.bmBlocked,
+        // 유령·보류는 앞 GHOST_SHOW 건만 싣고 전체 개수·법인별 개수를 따로 준다(6차 8 — 실측: 상한 없이 고정 5만 건이면 응답 4.8MB). 정리 버튼은 법인별 개수로 연다.
+        ...(() => {
+          const gl = q.ghosts.filter(inCorp); const hl = heldWithSince(q.ghostsHeld, !allowed).filter(inCorp);
+          const byCorp = {}; for (const x of gl) byCorp[x.corp] = (byCorp[x.corp] || 0) + 1;
+          return { ghosts: maskKeyOnly(gl.slice(0, GHOST_SHOW)), ghostsN: gl.length, ghostsByCorp: byCorp, ghostsHeld: maskKeyOnly(hl.slice(0, GHOST_SHOW)), ghostsHeldN: hl.length };
+        })(),
+        orphaned: q.orphaned.filter(inCorp).length, bmBlocked: g.bmBlocked,
         // 문구(장비·수집 서버 이름)는 **전체 범위** 관리자만 — 범위가 지정된 관리자에게 다른 법인 출처 이름을 싣지 않는다(3차 반증 2 · sourceErrors 와 같은 기준)
         bmBlockedSources: g.bmBlocked ? (g.bmBlockedSources || []).map((u) => (admin && !allowed ? u : { source: u.source })) : [],
       });
@@ -743,7 +768,7 @@ export function registerSvcInventory(api) {
           const rp = mutatePins((d) => { for (const [k, p] of Object.entries(d.pins)) if (p.corp === corp && p.serviceId === r.result.removed) { delete d.pins[k]; pinsRemoved += 1; } return { result: {} }; });
           if (!rp.ok) return res.status(rp.status).json({ ok: false, reason: `서비스는 지웠지만 고정 정리에 실패했습니다 — ${rp.error}` });
         }
-        audit(corp, `${op} ${JSON.stringify({ id: b.id, name: b.name, path: b.path, prefix: b.prefix, kind: b.kind, value: b.value, serviceId: b.serviceId, globalId: b.globalId, enabled: b.enabled, keepAlias: Array.isArray(b.keepAlias) ? b.keepAlias.slice(0, 2) : undefined }).slice(0, 600)}${pinsRemoved ? ` · 고정 ${pinsRemoved}건 정리` : ''}`);
+        audit(corp, `${op} ${JSON.stringify({ id: b.id, name: b.name, path: b.path, prefix: b.prefix, kind: b.kind, match: b.match, value: b.value, serviceId: b.serviceId, globalId: b.globalId, enabled: b.enabled, moveUp: b.moveUp === true || undefined, keepAlias: Array.isArray(b.keepAlias) ? b.keepAlias.slice(0, 2) : undefined }).slice(0, 600)}${pinsRemoved ? ` · 고정 ${pinsRemoved}건 정리` : ''}`);
         return done({ ...r.result, ...(pinsRemoved ? { pinsRemoved } : {}) });
       }
 
@@ -796,7 +821,8 @@ export function registerSvcInventory(api) {
               } else {
                 const now = cur?.auto?.serviceId ?? null;
                 if (expectAuto && Object.prototype.hasOwnProperty.call(expectAuto, k) && (expectAuto[k] ?? null) !== now) { stale += 1; continue; }
-                p.reviewed = true; p.reviewedAuto = now; changed += 1;
+                // 항목은 동결된 지금 값이다 — 고치지 않고 새 객체로 바꿔 넣는다(6차 8 — mutatePins 는 바뀐 키만 정리한다)
+                d.pins[k] = { ...p, reviewed: true, reviewedAuto: now }; changed += 1;
               }
             }
           }
@@ -809,23 +835,39 @@ export function registerSvcInventory(api) {
       }
 
       // 낮은 등급 키(별칭)로 저장된 고정을 새 키로 옮긴다(5차 R15) — 판정은 이미 별칭 고정을 쓰고 있으므로 소속은 바뀌지 않는다.
-      // 새 키에도 고정이 있으면 새 키가 이기고 있던 것이므로 별칭 쪽만 지운다(dropped).
+      // 새 키에도 고정이 있으면: 서비스가 같으면(중복) 옛 키만 지운다(dropped). **서비스가 다르면(충돌 — 6차 3) 건너뛴다**(conflicts) —
+      // 판정은 새 키를 쓰고 있지만 옛 키 쪽이 사람이 의도한 값일 수 있다. 충돌은 `keys` 로 그 구성원을 고르고 `keepNew:true` 일 때만 옛 키를 지운다
+      // (옛 키 서비스를 남기려면 화면이 그 서비스로 pins.set 을 보낸다 — 그때 moveAlias 가 옛 키를 정리한다).
       if (op === 'pins.rekey') {
         const g = await gather(snap, getMap().settings.tagCategory || '');
-        let moved = 0; let dropped = 0;
+        const hideKeys = !!scopedVcenterIds(user, snap);
+        const corpMembers = g.members.filter((m) => m.corp === corp && m.aliasKeys?.length);
+        let only = null;
+        if (Array.isArray(b.keys)) {
+          const resolveKey = keyResolverFor(hideKeys, corpMembers.map((m) => m.key));
+          const known = new Set(corpMembers.map((m) => m.key));   // 이 법인에서 옛 키를 가진 구성원만(모르는 키는 건너뛴다 — 조용히 0건 성공이 되지 않게)
+          only = new Set(b.keys.slice(0, LIMITS.pinBatch).map((k) => resolveKey(t(k))).filter((k) => k && known.has(k)));
+          if (!only.size) return res.status(400).json({ ok: false, reason: '대상이 없습니다(새로 고쳐 다시 고르십시오).' });
+        }
+        const keepNew = only && b.keepNew === true;
+        let moved = 0; let dropped = 0; let conflicts = 0; let otherCorp = 0;
         const r = mutatePins((d) => {
-          for (const m of g.members) {
-            if (m.corp !== corp || !m.aliasKeys?.length) continue;
+          for (const m of corpMembers) {
+            if (only && !only.has(m.key)) continue;
             for (const a of m.aliasKeys) {
               const p = d.pins[a]; if (!p || p.corp !== corp) continue;
-              if (d.pins[m.key]) dropped += 1; else { d.pins[m.key] = { ...p }; moved += 1; }
+              const cur = d.pins[m.key];
+              // 새 키 고정이 다른 법인 것(법인 불일치 — 판정이 쓰지 않는다)이면 '이미 있음' 으로 보고 이 법인 고정을 지우지 않는다(6차 반증 F6)
+              if (cur && cur.corp !== corp) { otherCorp += 1; continue; }
+              if (cur && cur.serviceId !== p.serviceId && !keepNew) { conflicts += 1; continue; }
+              if (cur) dropped += 1; else { d.pins[m.key] = { ...p }; moved += 1; }
               delete d.pins[a];
             }
           }
-          return { result: { moved, dropped } };
+          return { result: { moved, dropped, ...(conflicts ? { conflicts } : {}), ...(otherCorp ? { otherCorp } : {}) } };
         });
         if (!r.ok) return res.status(r.status).json({ ok: false, reason: r.error });
-        audit(corp, `옛 키 고정 ${moved}건을 새 키로 옮김${dropped ? ` · 새 키에 이미 있던 ${dropped}건은 옛 키만 지움` : ''}`);
+        audit(corp, `옛 키 고정 ${moved}건을 새 키로 옮김${dropped ? ` · 새 키에 이미 있던 ${dropped}건은 옛 키만 지움${keepNew ? '(충돌 — 새 키 유지 선택)' : ''}` : ''}${conflicts ? ` · 서비스가 다른 ${conflicts}건은 건너뜀` : ''}${otherCorp ? ` · 새 키가 다른 법인에 고정된 ${otherCorp}건은 건너뜀` : ''}`);
         return done(r.result);
       }
 
@@ -833,13 +875,14 @@ export function registerSvcInventory(api) {
         const { inv } = await inventoryFor(req, snap);
         const ghostKeys = new Set(inv.queues.ghosts.filter((x) => x.corp === corp).map((x) => x.key));
         const hideKeys = !!scopedVcenterIds(user, snap);   // R7 — 범위 계정에는 토큰으로 보이고 토큰으로 받는다
-        if (b.dry === true) return res.json({ ok: true, result: { keys: [...ghostKeys].map((k) => pubKey(k, hideKeys)), held: inv.queues.ghostsHeld.filter((x) => x.corp === corp).length } });
+        // dry 는 앞 GHOST_PRUNE_MAX 건의 키만 준다(6차 8 — 받는 쪽 상한과 같다). 그보다 많으면 total 로 알리고 화면이 '다시 누르면 다음' 을 안내한다.
+        if (b.dry === true) return res.json({ ok: true, result: { keys: [...ghostKeys].slice(0, GHOST_PRUNE_MAX).map((k) => pubKey(k, hideKeys)), total: ghostKeys.size, max: GHOST_PRUNE_MAX, held: inv.queues.ghostsHeld.filter((x) => x.corp === corp).length } });
         const resolveGhost = keyResolverFor(hideKeys, [...ghostKeys]);
         // 화면이 미리 본 **키**와 지금 유령의 교집합만 지운다(5차 R11 · 3차 반증 3 — 개수만 비교하면 확인창에 없던 키가 끼어 지워졌다. insights fleet/prune 과 같은 방식).
         // 옛 화면(키 없이 개수만 · 아무것도 없이)도 받는다: expect 는 정수만, 다르면 409.
         let targets = ghostKeys; let skipped = 0;
         if (Array.isArray(b.keys)) {
-          const raw = [...new Set(b.keys.slice(0, 5000).map((k) => t(k)).filter(Boolean))];   // 같은 키 두 번은 한 번(4차 반증 7)
+          const raw = [...new Set(b.keys.slice(0, GHOST_PRUNE_MAX).map((k) => t(k)).filter(Boolean))];   // 같은 키 두 번은 한 번(4차 반증 7)
           const asked = [...new Set(raw.map(resolveGhost).filter(Boolean))];
           skipped = raw.length - asked.length;   // 되돌리지 못한 토큰
           targets = new Set(asked.filter((k) => ghostKeys.has(k)));

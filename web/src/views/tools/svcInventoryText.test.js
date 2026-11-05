@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { folderTreeOf, matrixColumns, faultsView, backupView, powerText, srcSummary, groupActions, GROUP_TITLE, REASON_TEXT, pctText, matrixCellValue, regionCell, filterServices, reviewSummary, keyText, isMaskedKey } from './svcInventoryText.js';
+import { folderTreeOf, matrixColumns, faultsView, backupView, powerText, srcSummary, groupActions, GROUP_TITLE, REASON_TEXT, pctText, matrixCellValue, regionCell, filterServices, reviewSummary, keyText, isMaskedKey, writeResultNote } from './svcInventoryText.js';
 
 const svc = (id, path, n) => ({ id, name: id, path, stat: { n: { total: n } } });
 
@@ -82,5 +82,18 @@ describe('svcInventoryText', () => {
   it('범위 계정의 가린 키는 토큰 대신 (가림)으로 보인다 · 다른 키는 그대로', () => {
     expect(keyText('masked-5b889f93adbf')).toBe('(가림)'); expect(isMaskedKey('masked-x')).toBe(true);
     expect(keyText('st:abc')).toBe('st:abc'); expect(keyText('iu:vc:u1')).toBe('iu:vc:u1'); expect(keyText(null)).toBe('');
+  });
+  it('쓰기 결과 문구(6차 7): 바뀐 것 0건이면 성공 문구가 아니라 경고 · 일부 건너뜀·충돌·다른 법인은 덧붙인다', () => {
+    expect(writeResultNote('고정했습니다.', { changed: 0, skipped: 2 })).toMatchObject({ ok: false, warn: true });
+    expect(writeResultNote('고정했습니다.', { changed: 0, skipped: 2 }).text).toContain('2건을 건너뛰었습니다');
+    expect(writeResultNote('고정했습니다.', { changed: 3, skipped: 1 })).toMatchObject({ ok: true, warn: true });
+    expect(writeResultNote('고정했습니다.', { changed: 3, skipped: 0 })).toEqual({ ok: true, text: '고정했습니다.' });
+    expect(writeResultNote('옮겼습니다.', { moved: 0, dropped: 0, conflicts: 1 })).toMatchObject({ ok: false, warn: true });
+    expect(writeResultNote('옮겼습니다.', { moved: 0, dropped: 0, otherCorp: 1 }).text).toContain('다른 법인');
+    expect(writeResultNote('옮겼습니다.', { moved: 2, dropped: 0, conflicts: 1 })).toMatchObject({ ok: true, warn: true });
+    expect(writeResultNote('옮겼습니다.', { moved: 0, dropped: 0 }).text).toBe('옮길 옛 키 고정이 없습니다.');
+    expect(writeResultNote('지웠습니다.', { removed: 0, skipped: 1 })).toMatchObject({ ok: false, warn: true });
+    expect(writeResultNote('지웠습니다.', { removed: 'svc_1', name: 'ERP' })).toEqual({ ok: true, text: '지웠습니다.' });   // service.remove 의 removed 는 id 문자열
+    expect(writeResultNote('', undefined)).toEqual({ ok: true, text: '저장했습니다.' });
   });
 });

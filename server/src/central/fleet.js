@@ -151,6 +151,8 @@ export function setEdgeFleet(agent, baremetal, generatedAt, { verified = true, v
     // v2.887(서비스 인벤토리): 엣지 등록부의 중앙 스캔 엔트리 id — 글자만(객체·수는 빈 값), 128자 상한. 구버전 엣지는 없다(빈 값).
     // 필드가 없으면(2.887 전 엣지) null — '' (엔트리 없음)와 구분한다(서비스 인벤토리 5차 R18: '구버전 엣지' 사유)
     scanRangeId: typeof b.scanRangeId === 'string' ? capStr(b.scanRangeId, 128) : null,
+    // 6차 2(서비스 인벤토리): 태그가 없을 때의 엣지 fleetId — 글자만 · 256자. 구버전 엣지는 없다(null — 승계 없음, 예전과 같다).
+    untaggedId: typeof b.untaggedId === 'string' && b.untaggedId.trim() ? capStr(b.untaggedId.trim().toLowerCase(), 256) : null,
   }));
   if (omitted) console.warn(`[central-fleet] '${a}' 베어메탈 ${valid.length}대 중 ${omitted}대를 상한으로 받지 않았습니다(에이전트당 ${PER_AGENT_MAX} · 전체 ${TOTAL_MAX}${verified ? '' : ` · 미검증 이름 합 ${UNVERIFIED_TOTAL_MAX}`}).`);
   if (vcenterBlanked) console.warn(`[central-fleet] '${a}' 가 소유하지 않은 vCenter 로 귀속된 베어메탈 ${vcenterBlanked}대 — 귀속(vcenterId)을 비웠습니다.`);
@@ -248,6 +250,8 @@ export function getEdgeFleetServers() {
         source: 'edge',
         remoteAgent: agent,
         scanRangeId: typeof b.scanRangeId === 'string' ? b.scanRangeId : null,
+        // 태그가 없었을 때의 중앙 serverId — 서비스 인벤토리가 옛 fl: 고정을 승계하는 데 쓴다(6차 2). 구버전 엣지는 null.
+        untaggedServerId: typeof b.untaggedId === 'string' && b.untaggedId ? `edge:${agent}:${b.untaggedId}` : null,
       });
     }
   }

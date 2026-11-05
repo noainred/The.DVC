@@ -151,6 +151,8 @@ export function classifyFleet({ hosts = [], vcenters = [], servers = [], tags = 
       model: s.model || '', serviceTag: s.serviceTag || '', source: s.source,
       watts: posOrNull(s.watts), forced: t === 'baremetal', tag: t || '', tagKey: dk,
       remoteAgent: s.remoteAgent || '', // 엣지 보고 시 출처 DC/에이전트
+      // 엣지 보고분만: 태그가 없었을 때의 serverId(서비스 인벤토리 고정 승계 — 6차 2). 그 밖의 행에는 싣지 않는다.
+      ...(s.untaggedServerId ? { untaggedServerId: s.untaggedServerId } : {}),
       ...vcRow(vc.id, vc.src),
     });
   }

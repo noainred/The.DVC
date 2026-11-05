@@ -10,7 +10,7 @@
   **서비스는 자동으로 만들지 않는다** — 규칙 값에 맞는 서비스가 없으면 '매핑 안 된 값' 큐로 보낸다. 판정은 구성원당 1회, 결과 Map 을 표·큐·전역이 공유한다.
 - **집계는 `corpusage/build.js` 의 `emptyAgg/addAgg/finishAgg` 를 그대로 쓴다**(가중 사용률 = Σ(사용률×용량)÷Σ용량 · 꺼진 VM 제외 · 못 읽음·오래됨·용량 없음은 따로 센다).
   같은 입력이면 법인 사용률 화면과 같은 값이어야 한다 — 복제 판정 금지.
-- **저장소(`store.js`)**: 메모리가 진실 · 200ms 디바운스 원자 쓰기 · rev 단조 증가. 파일이 손상이면 **빈 트리로 시작하지 않고** 503 + 쓰기 차단,
+- **저장소(`store.js`)**: 메모리가 진실 · 200ms 디바운스 원자 쓰기 · rev 단조 증가. 고정 쓰기(`mutatePins`)는 **바뀐 키만** 정리·동결한다(6차 8 — 5만 건 깊은 복사가 쓰기마다 130ms) — fn 은 항목을 고치지 말고 새 객체로 바꿔 넣는다(고치면 던진다). 파일이 손상이면 **빈 트리로 시작하지 않고** 503 + 쓰기 차단,
   초기화(`store.reset`)는 전체 범위 관리자만이고 손상본을 보존한다(`preserveCorrupt`). 비밀은 싣지 않는다.
 - **범위**: 조회는 `scopedVcenterIds` 교집합이 요청 필터보다 먼저 · 법인 대상 쓰기는 `corpWriteAccess`(모르는 법인·조회 밖 404 → 쓰기 밖 403, writeVcenters 미설정 = 조회 범위) ·
   전역 카탈로그·태그 카테고리·초기화는 전체 범위 관리자(`FLEET_OPS`). 법인 미지정 구성원은 범위 계정에 싣지 않는다. 응답 캐시는 범위·쓰기 범위·관리자·저장소 rev 를 키에 넣는다.
@@ -23,7 +23,8 @@
   화면은 '고정 유지' 에 **자기가 본 자동 판정(`expectAuto`)** 을 보내고, 지금 판정과 다르면 서버가 409 로 막는다(사람이 보지 못한 새 드리프트를 숨기지 않게 — 1차 반증 3).
   '불필요한 고정 지우기' 는 `onlyIfRedundant` — 지금도 고정 = 자동 판정인 키만 지운다(1차 반증 8).
   고정 파일(`service-map-pins.json`)은 **설정 변경 감시 밖**(`backup/service.js CHANGE_WATCH_EXCLUDE` — 번들에는 들어간다). 빼면 고정 한 번이 '설정 변경' 백업을 만든다(R1).
-  유령 키는 그 법인을 못 읽었거나 베어메탈 출처를 못 읽었으면 **판정 보류**로 따로 둔다(지우지 않는다). 보류에는 시작 시각(`heldWithSince` — 프로세스 메모리, 전체 범위 계산에서만 정리)과
+  유령 키는 그 법인을 못 읽었거나 베어메탈 출처를 못 읽었으면 **판정 보류**로 따로 둔다(지우지 않는다). **골격 스냅샷(initial)·pending·disabled vCenter · VM 이 0대인 법인의 VM 키**도 보류다
+  (6차 1 높음 — `unreadVcenters` 는 pending 을 일부러 빼서 기동 직후 VM 고정이 전부 '정리 대상' 이 됐다). 유령·보류 응답은 앞 500행 + 개수(`ghostsN`·`ghostsByCorp`), 정리 dry 키는 5000건 상한(`total`). 보류에는 시작 시각(`heldWithSince` — 프로세스 메모리, 전체 범위 계산에서만 정리)과
   막힌 출처(`bmBlockedSources` — 문구는 **전체 범위** 관리자만, 3차 반증 2)를 싣는다(R10). bmBlocked 는 법인별로 나누지 않는다(막힌 출처가 어느 법인 것인지 모른다 — fail-closed).
   유령 정리는 dry 의 **키**를 받아 키 ∩ 지금 유령만 지운다(R11 · 3차 반증 3 — 개수만 비교하면 끼어든 키를 지운다).
 - **등록 해제된 vCenter** = **스냅샷에도 등록부(vcenters.json)에도 없는** 법인 키: 법인 행 `orphan` · 쓰기 버튼 잠금(`writable:false` — 법인 쓰기는 `corpWriteAccess` 404) · 그 법인 고정은 유령이 아니라 `orphaned`.
@@ -36,6 +37,8 @@
   설정 손상은 `settingsLoadError()` 로만 안다(`loadSettings` 는 던지지 않는다) — 손상이면 모름(null)이지 해당 없음이 아니다(1차 반증 2). 범위 계정 `meta.backup` 은 자기 법인 기준(`backupMetaFor`).
 - **키**: VM = `iu:<vcenterId>:<instanceUuid>`(없으면 `vm:<moref id>`) · 베어메탈 = `st:<서비스태그>`(없으면 `fl:<fleetId sha1 16자>` — 주소 원문을 키에 싣지 않는다).
   키 등급이 오르면 낮은 등급 키를 `aliasKeys` 로 싣고 그 고정을 승계한다(같은 법인 · 유령 아님 · `pins.rekey`·고정 쓰기 때 새 키로 옮김 — 읽기 경로는 쓰지 않는다 · 5차 R15).
+  별칭 고정은 늘 live — 다른 법인 것은 **법인 불일치**(`mismatch` + `aliasKey` — 6차 4)이지 유령이 아니다(반증 F1: 귀속이 잠시 빈 서버의 고정이 정리됐다). 새 키·옛 키 고정이 함께 있으면 `aliasPins` 에 `dup`·`conflict` 로 드러내고, `pins.rekey` 는 충돌을 건너뛴다
+  (`keys`+`keepNew` 일 때만 옛 키를 지운다 · 옛 키 서비스로는 `pins.set` — 6차 3·9). 엣지 베어메탈은 `untaggedId`(엣지 `fleetUntaggedId` → 중앙 정제 → `untaggedServerId`)로 별칭을 만든다(6차 2 — 구버전 엣지는 승계 없음 · `/insights/fleet` 응답에는 싣지 않는다 — id 가 IP 일 수 있다, 반증 F2).
   베어메탈 별칭은 **태그가 없을 때의 fleetId**(일반 행 serverId · ESXi 호스트 행 name — 함대 분류와 같은 규칙)다 — lc(fleetId) 로 만들면 태그가 읽힌 뒤 절대 맞지 않는다(4차 반증 1, 시험은 실제 라우트로).
   `st:` 고정을 '함대 키 집합에 태그가 있다' 로 보류하지 말 것 — 그 집합에 ESXi 호스트 태그가 있어 가상화 호스트가 된 서버의 고정을 영원히 붙잡았다(4차 반증 2 — 되돌림). VM instanceUuid 를 하나도 못 읽는 법인의 `iu:` 고정은 보류 `uuid-unread`.
 - **의존 방향**: 도메인 모듈(`servicemap/*`)은 `routes/` 를 import 하지 않는다(arch 테스트) — 스냅샷·fleet·장애·백업 입력 수집은 라우트 층에서 한다.
@@ -48,6 +51,9 @@
   `remoteInventory.js SERVER_STR_KEYS` — 필드 없음 = 구버전). 판정은 `scanInfoOf` 하나(모르는 엔트리 · 구버전 · **못 받음(not-reported)** · 수동 등록을 나눈다 — R6·R18).
   엣지·수집 서버 출처인데 그 서버 기록이 없으면 '못 받음' 이지 수동 등록이 아니다(2차 반증 1). 수집 서버 경로가 id 를 주지 않으면 같은 서비스 태그의 엣지 push 값을 쓴다(값이 갈리면 쓰지 않는다 — 2차 반증 5).
 - **법인 귀속 없음은 이유별**(R18 둘째 절): 귀속 판정 오류 · 서비스 태그가 두 법인에 걸려 보류(`buildVcIndex.conflictTags`) · 어느 규칙에도 맞지 않음. 묶음 키 `nocorp|<이유>`.
+- **트리 '(법인 미지정)'** 은 `members?nocorp=1`·`queues?nocorp=1`(빈 `corp` 는 '조건 없음' 이라 전 법인이 나왔다 — 6차 6). 범위 계정 큐 `mismatch` 는 범위 밖 `pinCorp`·서비스 id 를 비운다(6차 5).
+- **수정 연산**(예약 버그 수정): `folder.rename`(마지막 단계 이름만 · 하위 경로 함께 · 있는 이름이면 409) · `folder.remove`(`moveUp` = 한 단계 걷어 냄 · `expect` 다르면 409) ·
+  `rule/alias/namerule.update`(대상 서비스만 — 지우고 다시 넣는 사이 소속이 비지 않게) · 전역 `global.update/remove`(화면은 전체 범위 관리자만). 쓰기 결과가 0건이면 화면이 성공 문구 대신 경고(`writeResultNote`).
 - **구성원 조회 `members?global=<id>`** 는 corp 없이도 범위 안 전 법인을 준다(화면 '전 법인 구성원 모두 보기'). 영향 호스트의 '함께 떠받치는 서비스' 에서는 **그 전역 서비스의 법인 서비스 id 를 모두** 뺀다(`svc` 만 빼면 자기 자신이 뜬다 — v2.887~v2.890 결함).
 - **라우트(`routes/api/svcInventory.js`)·이 폴더를 고치면 커밋 전에 `node scripts/api-doc.mjs` · `node scripts/arch-doc.mjs`** — 줄 번호가 바뀌어 `apiDoc2563`·`audit2613h` 가 깨진다(v2.887·v2.890 두 번 전량 verify 에서 처음 잡혔다).
-- 회귀: `server/test/svcInventory2887.test.js` · `server/test/svcInventoryReview5.test.js`(5차 검토 1차 — 수정 전 코드에서 10/10 실패 확인) · `svcInventoryReview5b.test.js`(2차) · `svcInventoryReview5c.test.js`(3차 — 판정 순서 변이 13종) · `svcInventoryReview5d.test.js`(4차 — 범위 가림·키 승계 · 반증 대상에서 3건 실패 확인) · 웹 `web/src/views/tools/svcInventoryText.test.js`.
+- 회귀: `server/test/svcInventory2887.test.js` · `server/test/svcInventoryReview5.test.js`(5차 검토 1차 — 수정 전 코드에서 10/10 실패 확인) · `svcInventoryReview5b.test.js`(2차) · `svcInventoryReview5c.test.js`(3차 — 판정 순서 변이 13종) · `svcInventoryReview5d.test.js`(4차 — 범위 가림·키 승계 · 반증 대상에서 3건 실패 확인) · `svcInventoryReview6.test.js`·`6b`(6차 + 예약 수정 + 반증 F1~F6 — 수정 전 10/10 실패 · 변이 32/32) · 웹 `web/src/views/tools/svcInventoryText.test.js`.
