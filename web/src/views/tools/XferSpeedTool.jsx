@@ -28,11 +28,16 @@ import {
   hoverAt, maxBackOf, windowEndOf, windowLabel, windowRangeText,
   SCHEDULE_KINDS, SCHEDULE_KIND_TEXT, WEEKDAYS, INTERVAL_PRESETS, intervalText, scheduleText, checkScheduleForm,
   newSchedule, nextOccurrence, runsPerDayPreview, scheduleStateText, countText, planSummary, LATENCY_NOTE,
+  PING_COLOR, PING_TEXT_COLOR, VIEW_MODES, PING_REASON_TEXT, pingModel, comboHover, pingHeadNote, pingStatChips,
+  samePingWindow, loadView, saveView,
 } from './xferSpeedText.js';
 import './xferSpeed.css';
 
 const BASE = ['tools', 'xfer-speed'];
 const HOUR = 3_600_000;
+/** 브라우저 저장소 — 접근만으로 던지는 환경(차단·사생활 모드)이 있어 감싼다. */
+const browserStorage = () => { try { return typeof window === 'undefined' ? null : window.localStorage; } catch { return null; } };
+const PING_NOTE = 'Ping 은 Ping 모니터의 엣지 기록입니다 — 전송 측정의 ‘지연’(응답 머리까지)과 다른 값입니다. 칸마다 평균선 + 최저~최고 띠 · 응답이 없던 표본은 손실로 셉니다.';
 
 function useHashEdge() {
   const read = () => {
@@ -511,40 +516,136 @@ function useWidth(ref) {
   return w;
 }
 
-function Chart({ hist }) {
+/** 차트 안 마우스 위치 → viewBox x(두 svg 가 같은 폭·같은 x 축이라 어느 쪽에서 재도 같다). */
+const pxOf = (e, w) => {
+  const r = e.currentTarget?.getBoundingClientRect?.();
+  return r && r.width ? ((e.clientX - r.left) / r.width) * w : null;
+};
+
+function AxisX({ m, offsetMin, h, padB }) {
+  return m.xticks.map((t) => (
+    <g key={t.ts}>
+      <line x1={t.x} x2={t.x} y1={m.padT} y2={h - padB} stroke="#1a2236" />
+      <text x={t.x} y={h - 8} fill="#5d6b85" fontSize="11" textAnchor="middle">{clockText(t.ts, offsetMin, { date: !(m.to - m.from <= 2 * 86_400_000) }).replace(/ 00:00$/, '')}</text>
+    </g>
+  ));
+}
+
+/** Ping 패널 — 머리(방식·통계) + 상태(사유·불러오는 중·실패) 또는 차트. 차트 x 축은 위 속도 차트와 같다. */
+function PingPanel({ m, pm, ps, hv, setHoverPx, tall, offsetMin, tip }) {
+  const { ping, err, loading, onRetry, onSync, syncMsg, syncBusy } = ps;
+  const reason = ping?.reason || null;
+  const rt = reason ? PING_REASON_TEXT[reason] : null;
+  const chips = ping && !loading && reason !== 'no-target' ? pingStatChips(ping) : [];
+  const box = (title, body, extra = null) => (
+    <div className="xs-empty"><b>{title}</b>{body ? <span>{body}</span> : null}{extra}</div>
+  );
+  let content;
+  if (loading && err) content = box('Ping 기록을 불러오지 못했습니다', String(err?.message || err), <button type="button" className="xs-linkbtn" onClick={onRetry}>다시 시도</button>);
+  else if (loading) content = box('Ping 기록을 불러오는 중…', '');
+  else if (reason === 'no-target') {
+    content = box(rt.title, rt.body, (
+      <>
+        <button type="button" className="xs-btn sm" disabled={syncBusy} onClick={onSync}>엣지 노드 다시 등록</button>
+        {syncMsg ? <span className="xs-sync">{syncMsg}</span> : null}
+      </>
+    ));
+  } else if (!pm?.points) {
+    const r2 = rt || PING_REASON_TEXT['no-samples'];
+    const extra = reason === 'before-retention' && ping?.retentionDays
+      ? `Ping 기록 보관 ${ping.retentionDays}일${ping.oldest?.sampleTs ? ` · 가장 오래된 기록 ${clockText(ping.oldest.sampleTs, offsetMin)}` : ''}.`
+      : '';
+    content = box(r2.title, [r2.body, extra].filter(Boolean).join(' '));
+  } else {
+    content = (
+      <div className="xs-plot">
+      <svg viewBox={`0 0 ${pm.w} ${pm.h}`} role="img" aria-label="Ping 추이" onPointerMove={(e) => setHoverPx(pxOf(e, pm.w))} onPointerLeave={() => setHoverPx(null)}>
+        {pm.grid.map((g) => (
+          <g key={g.y}>
+            <line x1={pm.padL} x2={pm.w - pm.padR} y1={g.y} y2={g.y} stroke="#1f2a40" />
+            <text x={pm.padL - 6} y={g.y + 4} fill="#5d6b85" fontSize="11" textAnchor="end" fontFamily="JetBrains Mono, monospace">{g.label}</text>
+          </g>
+        ))}
+        <AxisX m={{ ...m, padT: pm.padT }} offsetMin={offsetMin} h={pm.h} padB={pm.padB} />
+        {pm.bandPath ? <path d={pm.bandPath} fill={PING_COLOR} opacity=".22" /> : null}
+        {pm.medianY != null ? <line x1={pm.padL} x2={pm.w - pm.padR} y1={pm.medianY} y2={pm.medianY} stroke={PING_COLOR} strokeDasharray="4 4" opacity=".5" /> : null}
+        {pm.avgPath ? <path d={pm.avgPath} fill="none" stroke={PING_COLOR} strokeWidth="1.6" strokeLinejoin="round" /> : null}
+        {pm.singles.map((p) => <circle key={`s${p.x}`} cx={p.x} cy={p.y} r="2.6" fill={PING_COLOR} />)}
+        {pm.lossMarks.map((l) => <rect key={`l${l.ts}`} x={l.x - l.w / 2} y={pm.padT} width={l.w} height="9" rx="1" fill="#ef4444"><title>{`손실 · ${clockText(l.ts, offsetMin)}`}</title></rect>)}
+        {hv ? (
+          <g pointerEvents="none">
+            <line x1={hv.x} x2={hv.x} y1={pm.padT} y2={pm.h - pm.padB} stroke="#8b9bb4" strokeDasharray="3 3" />
+            {hv.pingDot ? <circle cx={hv.pingDot.x} cy={hv.pingDot.y} r="4" fill={PING_COLOR} stroke="#0b1220" strokeWidth="1.5" /> : null}
+          </g>
+        ) : null}
+        <rect x={pm.padL} y={pm.padT} width={Math.max(0, pm.w - pm.padL - pm.padR)} height={Math.max(0, pm.h - pm.padT - pm.padB)} fill="transparent" />
+      </svg>
+      {tip}
+      </div>
+    );
+  }
+  return (
+    <div className={`xs-pingpanel${tall ? ' tall' : ''}`}>
+      <div className="xs-pinghead">
+        <div className="xs-pingtitle"><h4 style={{ color: PING_TEXT_COLOR }}>Ping</h4>{ping && reason !== 'no-target' ? <span className="xs-note">{pingHeadNote(ping)}</span> : null}</div>
+        {chips.length ? (
+          <div className="xs-chips">
+            {chips.map((c) => <span key={c.label} className="xs-chip" title={c.title || undefined}>{c.label} <b>{c.value}</b>{c.sub ? <small>{c.sub}</small> : null}</span>)}
+          </div>
+        ) : null}
+      </div>
+      {!loading && err ? <div className="xs-banner amber">Ping 기록을 다시 읽지 못했습니다 — 직전 값을 보여 줍니다 ({String(err?.message || err)}) · <button type="button" className="xs-linkbtn" onClick={onRetry}>다시 시도</button></div> : null}
+      {!loading && (reason === 'monitor-off' || reason === 'disabled') && pm?.points ? <div className="xs-banner amber">{rt.title} — {rt.body}</div> : null}
+      {content}
+    </div>
+  );
+}
+
+/**
+ * v2.890 추이 카드의 차트 영역 — 속도 차트(그대로) + Ping 패널(보기에 따라). 마우스 오버 위치는 여기 하나가 가진다(두 svg 가 같은 세로선).
+ * 속도 차트 모델(`chartModel`)은 'Ping만' 보기에서도 만든다 — x 축(창·눈금)을 Ping 이 같이 쓴다.
+ */
+function TrendCharts({ hist, view, ps }) {
   const wrap = useRef(null);
-  const svgRef = useRef(null);
   const w = useWidth(wrap);
-  const h = w < 600 ? 220 : 280;
+  const narrow = w < 600;
+  const h = narrow ? 220 : 280;
   const [hoverPx, setHoverPx] = useState(null);
   const m = chartModel(hist, { w, h, now: Date.now() });
   if (!m) return null;
+  const showSpeed = view !== 'ping'; const showPing = view !== 'speed';
+  const pingOk = showPing && ps.ping && !ps.loading && ps.ping.reason !== 'no-target';
+  const pm = pingOk ? pingModel(ps.ping, { w, h: view === 'ping' ? h : (narrow ? 150 : 170), padL: m.padL, padR: m.padR, from: m.from, to: m.to }) : null;
   const empty = !m.points.down && !m.points.up;
   const bd = m.baseline('down'); const bu = m.baseline('up');
-  // v2.735.3: 마우스 오버 — 화면 좌표를 viewBox 좌표로 바꿔 가장 가까운 측정을 보인다(판정·문구는 hoverAt).
-  const hv = hoverPx == null ? null : hoverAt(m, hoverPx, hist.offsetMin);
-  const onMove = (e) => {
-    const r = svgRef.current?.getBoundingClientRect();
-    if (!r || !r.width) return;
-    setHoverPx(((e.clientX - r.left) / r.width) * m.w);
-  };
+  const hv = hoverPx == null ? null : comboHover(m, pm && pm.points ? pm : null, hoverPx, hist.offsetMin, view);
   const tipLeftPct = hv ? (hv.x / m.w) * 100 : 0;
+  const onMove = (e) => setHoverPx(pxOf(e, m.w));
+  // 오버 상자는 보이는 첫 차트의 위에 붙인다 — 카드 맨 위에 두면 'Ping만'·속도 측정이 없는 창에서 Ping 머리(알약)를 덮었다(v2.890 화면 확인).
+  const tipOnSpeed = showSpeed && !empty;
+  const tip = hv ? (
+    <div className={`xs-tip${tipLeftPct > 62 ? ' left' : ''}`} style={{ left: `${tipLeftPct}%` }} role="status">
+      <div className="xs-tip-head">{hv.head}</div>
+      {hv.lines.map((l) => (
+        <div key={l.dir} className={`xs-tip-line${l.dir === 'ping' && view !== 'ping' ? ' sep' : ''}`}>
+          <span style={{ color: l.dir === 'ping' ? PING_COLOR : DIR_TEXT_COLOR[l.dir] }}>{l.dir === 'ping' ? '●' : l.dir === 'down' ? '↓' : '↑'}</span>
+          <span style={{ color: l.ok === false ? '#fca5a5' : l.ok == null ? 'var(--text-faint)' : 'var(--text)' }}>{l.text}</span>
+        </div>
+      ))}
+    </div>
+  ) : null;
   return (
     <div className="xs-chartwrap" ref={wrap}>
-      {empty ? <div className="xs-note" style={{ padding: '30px 0', textAlign: 'center' }}>이 기간에 성공한 측정이 없습니다.</div> : (
-        <svg ref={svgRef} viewBox={`0 0 ${m.w} ${m.h}`} role="img" aria-label="전송 속도 추이" onPointerMove={onMove} onPointerLeave={() => setHoverPx(null)}>
+      {showSpeed ? (empty ? <div className="xs-note" style={{ padding: '30px 0', textAlign: 'center' }}>이 기간에 성공한 측정이 없습니다.</div> : (
+        <div className="xs-plot">
+        <svg viewBox={`0 0 ${m.w} ${m.h}`} role="img" aria-label="전송 속도 추이" onPointerMove={onMove} onPointerLeave={() => setHoverPx(null)}>
           {m.grid.map((g) => (
             <g key={g.y}>
               <line x1={m.padL} x2={m.w - m.padR} y1={g.y} y2={g.y} stroke="#1f2a40" />
               <text x={m.padL - 6} y={g.y + 4} fill="#5d6b85" fontSize="11" textAnchor="end" fontFamily="JetBrains Mono, monospace">{g.label}</text>
             </g>
           ))}
-          {m.xticks.map((t) => (
-            <g key={t.ts}>
-              <line x1={t.x} x2={t.x} y1={m.padT} y2={m.h - m.padB} stroke="#1a2236" />
-              <text x={t.x} y={m.h - 8} fill="#5d6b85" fontSize="11" textAnchor="middle">{clockText(t.ts, hist.offsetMin, { date: !(m.to - m.from <= 2 * 86_400_000) }).replace(/ 00:00$/, '')}</text>
-            </g>
-          ))}
+          <AxisX m={m} offsetMin={hist.offsetMin} h={m.h} padB={m.padB} />
           {m.band.map((b) => <path key={b.dir} d={b.d} fill={DIR_COLOR[b.dir]} opacity=".10" />)}
           {bd != null ? <line x1={m.padL} x2={m.w - m.padR} y1={bd} y2={bd} stroke={DIR_COLOR.down} strokeDasharray="4 4" opacity=".5" /> : null}
           {bu != null ? <line x1={m.padL} x2={m.w - m.padR} y1={bu} y2={bu} stroke={DIR_COLOR.up} strokeDasharray="4 4" opacity=".5" /> : null}
@@ -556,26 +657,51 @@ function Chart({ hist }) {
           {hv ? (
             <g pointerEvents="none">
               <line x1={hv.x} x2={hv.x} y1={m.padT} y2={m.h - m.padB} stroke="#8b9bb4" strokeDasharray="3 3" />
-              {hv.dots.map((d) => <circle key={d.dir} cx={d.x} cy={d.y} r="4" fill={DIR_COLOR[d.dir]} stroke="#0b1220" strokeWidth="1.5" />)}
+              {(hv.dots || []).map((d) => <circle key={d.dir} cx={d.x} cy={d.y} r="4" fill={DIR_COLOR[d.dir]} stroke="#0b1220" strokeWidth="1.5" />)}
             </g>
           ) : null}
           {/* 차트 영역 전체에서 마우스를 받는다(선 위가 아니어도) — 투명 사각형 */}
           <rect x={m.padL} y={m.padT} width={Math.max(0, m.w - m.padL - m.padR)} height={Math.max(0, m.h - m.padT - m.padB)} fill="transparent" />
         </svg>
-      )}
-      {hv ? (
-        <div className={`xs-tip${tipLeftPct > 62 ? ' left' : ''}`} style={{ left: `${tipLeftPct}%` }} role="status">
-          <div className="xs-tip-head">{hv.head}</div>
-          {hv.lines.map((l) => (
-            <div key={l.dir} className="xs-tip-line">
-              <span style={{ color: DIR_TEXT_COLOR[l.dir] }}>{l.dir === 'down' ? '↓' : '↑'}</span>
-              <span style={{ color: l.ok === false ? '#fca5a5' : l.ok == null ? 'var(--text-faint)' : 'var(--text)' }}>{l.text}</span>
-            </div>
-          ))}
+        {tipOnSpeed ? tip : null}
         </div>
-      ) : null}
+      )) : null}
+      {showPing ? <PingPanel m={m} pm={pm} ps={ps} hv={hv} setHoverPx={setHoverPx} tall={view === 'ping'} offsetMin={hist.offsetMin} tip={tipOnSpeed ? null : tip} /> : null}
     </div>
   );
+}
+
+/**
+ * v2.890 Ping 창 조회 — 보기가 Ping 을 쓸 때만 부른다('전송 속도' 보기면 조회하지 않는다). 최근 창만 60초 갱신, 과거 창은 한 번.
+ * 늦게 온 이전 응답은 버린다(seq) · 403/404 는 다음 틱을 걸지 않는다(shouldStopPolling) · 실패해도 직전 값을 지우지 않는다.
+ */
+function usePingWindow({ agent, days, end, enabled }) {
+  const [ping, setPing] = useState(null);
+  const [err, setErr] = useState(null);
+  const [errKey, setErrKey] = useState(null);
+  const seq = useRef(0);
+  const key = `${agent}|${days}|${end ?? ''}`;
+  const load = useCallback(async () => {
+    const my = ++seq.current;
+    const k = `${agent}|${days}|${end ?? ''}`;
+    try {
+      const d = await fetchJson('/tools/xfer-speed/ping', end == null ? { agent, days } : { agent, days, end });
+      if (my === seq.current) { setPing({ ...d, _key: k }); setErr(null); setErrKey(null); }
+      return null;
+    } catch (e) { if (my === seq.current) { setErr(e); setErrKey(k); } return e; }
+  }, [agent, days, end]);
+  useEffect(() => {
+    if (!enabled) { seq.current += 1; return undefined; }   // 보기를 끄면 진행 중 응답도 버린다
+    let alive = true; let timer = null;
+    const loop = async () => {
+      if (!alive) return;
+      const e = (typeof document === 'undefined' || !document.hidden) ? await load() : null;
+      if (alive && end == null && !shouldStopPolling(e)) timer = setTimeout(loop, 60_000);
+    };
+    loop();
+    return () => { alive = false; if (timer) clearTimeout(timer); };
+  }, [load, enabled, end]);
+  return { ping, err, errKey, key, reload: load };
 }
 
 /**
@@ -623,6 +749,20 @@ function Detail({ agent, onBack }) {
   const seq = useRef(0);
   const past = back > 0 && anchor != null;
   const end = past ? windowEndOf(anchor, back, days).end : null;
+  // v2.890 보기(전송 속도 · + Ping · Ping만) — 브라우저에 기억(편의 · 못 읽으면 기본 '전송 속도'). Ping 은 쓰는 보기에서만 조회한다.
+  const [view, setViewState] = useState(() => loadView(browserStorage()));
+  const setView = (v) => { setViewState(v); saveView(browserStorage(), v); };
+  const pingWin = usePingWindow({ agent, days, end, enabled: view !== 'speed' });
+  const [sync, setSync] = useState({ busy: false, msg: '' });
+  const onSync = async () => {
+    setSync({ busy: true, msg: '' });
+    try {
+      const r = await postJson('/ping/edge/sync', {});
+      if (r?.ok === false) setSync({ busy: false, msg: r.reason || '등록하지 못했습니다.' });
+      else if (r?.added) { setSync({ busy: false, msg: `엣지 노드 ${r.added}개를 Ping 대상으로 등록했습니다 — 다음 주기부터 기록이 쌓입니다.` }); pingWin.reload(); }
+      else setSync({ busy: false, msg: '새로 등록할 엣지가 없습니다 — Ping 대상에서 지운 엣지는 자동 등록이 되살리지 않습니다. 네트워크 › Ping 모니터링에서 직접 추가하세요.' });
+    } catch (e) { setSync({ busy: false, msg: e?.message || String(e) }); }
+  };
   // 실패한 요청의 키 — 그 구간을 못 불러왔으면 '불러오는 중' 대신 실패와 다시 시도를 보인다(v2.735.3: 과거 구간은 자동 재시도가 없다).
   const reqKey = `${agent}|${days}|${end ?? ''}`;
   const [errKey, setErrKey] = useState(null);
@@ -663,6 +803,14 @@ function Detail({ agent, onBack }) {
   if (!hist) return <div className="xs"><button type="button" className="xs-back" onClick={onBack}>← 법인별 전송 속도</button><Loading /></div>;
   const shown = hist;
   const cells = statCells(shown.stats);
+  const pingReady = samePingWindow(pingWin.ping, shown);
+  const ps = {
+    ping: pingReady ? pingWin.ping : null,
+    loading: !pingReady,
+    err: pingWin.err && pingWin.errKey === pingWin.key ? pingWin.err : null,
+    onRetry: pingWin.reload, onSync, syncMsg: sync.msg, syncBusy: sync.busy,
+  };
+  const showSpeed = view !== 'ping'; const showPing = view !== 'speed';
   return (
     <div className="xs">
       <div className="xs-head">
@@ -696,19 +844,40 @@ function Detail({ agent, onBack }) {
       </div>
       <section className="xs-card">
         <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', gap: 10, alignItems: 'center' }}>
-          <h3>{PERIODS.find((p) => p.days === shown.days)?.label || `${shown.days}일`} 추이{shown.past ? <span className="xs-pastbadge">과거 구간</span> : null}</h3>
+          <div className="xs-cardtitle">
+            <h3>{PERIODS.find((p) => p.days === shown.days)?.label || `${shown.days}일`} 추이{shown.past ? <span className="xs-pastbadge">과거 구간</span> : null}</h3>
+            <div className="xs-seg" role="tablist" aria-label="보기">
+              {VIEW_MODES.map((v) => <button key={v.key} type="button" role="tab" aria-selected={view === v.key} className={view === v.key ? 'on' : ''} onClick={() => setView(v.key)}>{v.label}</button>)}
+            </div>
+          </div>
           <div className="xs-legend">
-            <span><i style={{ background: DIR_COLOR.down, height: 2 }} />↓ 엣지 → 메인</span>
-            <span><i style={{ background: DIR_COLOR.up, height: 2 }} />↑ 메인 → 엣지</span>
-            {shown.source === 'raw' ? <span><i style={{ borderTop: '1px dashed #8b9bb4', background: 'none', height: 0 }} />기간 중앙값</span> : <span><i style={{ background: 'rgba(34,211,238,.25)' }} />하루 최저~최고</span>}
+            {showSpeed ? (
+              <>
+                <span><i style={{ background: DIR_COLOR.down, height: 2 }} />↓ 엣지 → 메인</span>
+                <span><i style={{ background: DIR_COLOR.up, height: 2 }} />↑ 메인 → 엣지</span>
+                {shown.source === 'raw' ? <span><i style={{ borderTop: '1px dashed #8b9bb4', background: 'none', height: 0 }} />기간 중앙값</span> : <span><i style={{ background: 'rgba(34,211,238,.25)' }} />하루 최저~최고</span>}
+              </>
+            ) : null}
+            {showSpeed && showPing ? <span className="xs-legend-sep" aria-hidden="true">|</span> : null}
+            {showPing ? (
+              <>
+                <span><i style={{ background: PING_COLOR, height: 2 }} />Ping 평균</span>
+                <span><i style={{ background: 'rgba(167,139,250,.28)', height: 8 }} />최저~최고</span>
+                {view === 'ping' ? <span><i style={{ borderTop: `1px dashed ${PING_COLOR}`, background: 'none', height: 0 }} />기간 중앙값</span> : null}
+                <span><i style={{ background: '#ef4444', width: 3, height: 9, borderRadius: 1 }} />손실</span>
+              </>
+            ) : null}
           </div>
         </div>
-        <div className="xs-note">
-          {shown.source === 'raw'
-            ? `측정 1회 = 1점 · 실패는 ✕ · 측정이 없던 구간은 선을 잇지 않습니다${shown.truncated ? ' · 점이 많아 앞부분을 잘랐습니다' : ''}`
-            : `${shown.rawMaxDays}일보다 긴 기간은 하루 요약(성공 측정의 하루 평균·최저·최고)으로 그립니다 — 분위수는 만들 수 없어 '—' 입니다`}
-        </div>
-        <Chart hist={shown} />
+        {showSpeed ? (
+          <div className="xs-note">
+            {shown.source === 'raw'
+              ? `측정 1회 = 1점 · 실패는 ✕ · 측정이 없던 구간은 선을 잇지 않습니다${shown.truncated ? ' · 점이 많아 앞부분을 잘랐습니다' : ''}`
+              : `${shown.rawMaxDays}일보다 긴 기간은 하루 요약(성공 측정의 하루 평균·최저·최고)으로 그립니다 — 분위수는 만들 수 없어 '—' 입니다`}
+          </div>
+        ) : null}
+        <TrendCharts hist={shown} view={view} ps={ps} />
+        {showPing ? <div className="xs-note">{PING_NOTE}</div> : null}
         <WindowScroll hist={shown} days={days} back={back} dragBack={dragBack} anchor={anchor}
           onDrag={setDragBack}
           onGo={(b, maxB) => {
