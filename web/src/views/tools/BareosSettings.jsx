@@ -337,7 +337,7 @@ function AgentIssueLine({ value, agents, withToken }) {
   return (
     <div style={{ fontSize: 11.5, lineHeight: 1.6, marginTop: 6, color: 'var(--amber)' }}>{why === 'gone'
       ? `담당 ‘${value}’ 는 중앙이 아는 엣지 목록에 없습니다 — 엣지 이름이 바뀌었거나 등록에서 빠졌을 수 있습니다.`
-      : `담당 ‘${value}’ 엣지에 개별 토큰이 없어 대행 작업을 가져가지 못합니다 — 중앙 설정 › 수집 서버에서 개별 토큰을 발급하세요.`}</div>
+      : `담당 ‘${value}’ 엣지에 개별 토큰이 없어 대행 작업을 가져가지 못합니다 — 중앙 설정 › 엣지·원격 › 수집 서버(원격)에서 개별 토큰을 발급하세요.`}</div>
   );
 }
 
@@ -798,7 +798,7 @@ function AutoSetupPanel({ s, dir, rows, editCount, cat, unsaved, locked, onDirec
       {s.demo && <div className="banner warn" style={{ marginTop: 8 }}>데모 모드에서는 자동 설정을 실행하지 않습니다(실제 서버에 접속하는 작업).</div>}
       {!otpNeeded && <div className="banner warn" role="status" style={{ marginTop: 8, fontSize: 12, lineHeight: 1.6 }}>{s.setupOtpOff === 'auth-off'
         ? '이 포탈은 로그인 인증이 꺼져 있어 쓰기 단계에 본인 OTP 를 묻지 않습니다.'
-        : '쓰기 단계(2 · 3 · 5단계)의 본인 OTP 재확인이 꺼져 있습니다 — 설정 › Security › 세션 보안에서 설정 소유자가 바꿉니다. OTP 를 등록한 계정만 실행할 수 있고, 실행 기록에는 감사 로그 ‘[본인 OTP 재확인 꺼짐]’ 표시가 붙습니다.'}</div>}
+        : '쓰기 단계(2 · 3 · 5단계)의 본인 OTP 재확인이 꺼져 있습니다 — 설정 › 보안 › 세션 보안에서 설정 소유자가 바꿉니다. OTP 를 등록한 계정만 실행할 수 있고, 실행 기록에는 감사 로그 ‘[본인 OTP 재확인 꺼짐]’ 표시가 붙습니다.'}</div>}
       {dir.agent && !s.demo && <div className="banner" style={{ marginTop: 8, fontSize: 12, lineHeight: 1.6 }}>법인 엣지 ‘{dir.agent}’ 가 대행합니다 — 아래 SSH 접속·Director 확인은 그 엣지에서 실행합니다. 입력한 SSH·vCenter 비밀번호는 이 요청 한 번에만 엣지로 전달하고 어디에도 저장하지 않습니다(중앙 대기열의 사본은 엣지가 가져가는 즉시 지우고, 요청을 처리하는 동안에만 중앙 메모리에 있습니다). 엣지가 {s.relayLimits?.secretPickupMs ? secText(s.relayLimits.secretPickupMs) : '정해진 시간'} 안에 가져가지 않으면 보내지 않은 것으로 끝납니다.</div>}
       <div style={GRID}>
         <label className="muted" style={FIELD}>SSH 주소(Director 서버)<input className="input" id="bareos-auto-host" style={INP} value={ssh.host} onChange={(e) => setS2('host', e.target.value.trim())} placeholder={dir.host || 'bareos.corp'} /></label>

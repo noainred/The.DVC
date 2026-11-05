@@ -203,7 +203,7 @@ export default function SanSwitchPerf() {
         {!(data.edges || []).length ? (
           <div className="muted" style={{ fontSize: 12, lineHeight: 1.8 }}>
             엣지가 보고한 수집 상태가 없습니다. 위임 스위치가 없다면 정상이고, 있다면 그 엣지의 포탈 버전이 낮거나
-            (상태 보고는 v2.517 부터) 중앙 설정을 받아가지 못하는 상태입니다 — 설정 › 수집 서버에서 그 엣지의
+            (상태 보고는 v2.517 부터) 중앙 설정을 받아가지 못하는 상태입니다 — 설정 › 엣지·원격 › 수집 서버(원격)에서 그 엣지의
             마지막 연결 시각을 확인하세요.
           </div>
         ) : (

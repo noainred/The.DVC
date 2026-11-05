@@ -127,7 +127,7 @@ test('③ 2단계가 사람이 만든 콘솔에 막히면: 아무것도 쓰지 �
   // 종류별 안내
   assert.match(A.conflictMessage([{ type: 'console', name: 'portal', path: '/x/console/portal.conf' }], 'portal'), /콘솔 ‘portal’ 은\(는\) 이미 있고/);
   assert.match(A.conflictMessage([{ type: 'profile', name: 'portal', path: '/x/profile/portal.conf' }], 'portal'), /Profile ‘portal’/);
-  assert.match(A.conflictMessage([{ type: 'jobdefs', name: 'PortalVmwareDefaults', path: '/x' }], 'portal'), /설정 › vCenter 관리 › Bareos 백업 서버 › 공통 기본값/);
+  assert.match(A.conflictMessage([{ type: 'jobdefs', name: 'PortalVmwareDefaults', path: '/x' }], 'portal'), /설정 › 백업 › Bareos 백업 서버 › 공통 기본값/);
   assert.match(A.conflictMessage([{ type: 'pool', name: 'PortalVmwareFull', path: '/x' }], 'portal'), /전용 Pool · Schedule 만들기를 끄고/);
 });
 

@@ -43,7 +43,7 @@ export const REASON_TEXT = Object.freeze({
 
 /** 실패 종류 — 서버 probe.XFER_FAIL_KINDS 와 1:1(조치가 다르므로 한 문구로 덮지 않는다). */
 export const FAIL_TEXT = Object.freeze({
-  'no-url': { label: 'URL 없음', fix: '설정 › 수집 서버에서 이 엣지의 URL 을 넣으세요.' },
+  'no-url': { label: 'URL 없음', fix: '설정 › 엣지·원격 › 수집 서버(원격)에서 이 엣지의 URL 을 넣으세요.' },
   timeout: { label: '시한 초과', fix: '회선이 시한 안에 다 보내지 못했습니다. 회선 상태를 보거나 설정에서 시한을 늘리세요.' },
   unreachable: { label: '연결 실패', fix: '메인에서 이 엣지의 포탈 포트에 닿지 않습니다. 엣지 서비스·방화벽·경로를 확인하세요.' },
   auth: { label: '토큰 거부', fix: '중앙 등록값과 그 엣지의 COLLECTOR_TOKEN 이 다릅니다. 포탈 점검 › 토큰 점검으로 대조하세요.' },

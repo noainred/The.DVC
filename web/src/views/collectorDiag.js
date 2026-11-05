@@ -98,7 +98,7 @@ export function denyCard(status) {
   if (kind === DENY_KIND.DISABLED) {
     steps = [
       '이 엣지의 portal.env 에 COLLECTOR_TOKEN 이 없습니다 — 수집 기능 자체가 꺼져 있습니다.',
-      '설정 › 수집 서버에서 이 항목의 토큰을 확인한 뒤, 엣지 portal.env 에 같은 값으로 COLLECTOR_TOKEN 을 넣고 재시작하세요.',
+      '설정 › 엣지·원격 › 수집 서버(원격)에서 이 항목의 토큰을 확인한 뒤, 엣지 portal.env 에 같은 값으로 COLLECTOR_TOKEN 을 넣고 재시작하세요.',
       '또는 설정 › 엣지 노드 포탈 설치 › 수집 서버 연결 상태에서 "대상 → 엣지(SSH)" 로 토큰을 반영할 수 있습니다.',
     ];
   } else if (kind === DENY_KIND.NO_HEADER) {
@@ -165,7 +165,7 @@ export function identityCards(collector, ident) {
         '두 장비 중 한 쪽의 portal.env 에서 AGENT_NAME 을 다른 값으로 바꾸세요(대개 한 엣지의 portal.env 를 복사해 설치한 것이 원인입니다).',
         'IRS 엣지는 중계 엣지와 다른 이름을 쓰세요 — 예: 중계가 hd 면 IRS 는 hd-irs.',
         '이름을 바꾼 뒤 그 엣지를 재시작하고, 중앙에서 이 항목의 등록 id 도 새 이름과 맞추세요.',
-        '개별 토큰(설정 › 수집 서버 › 엣지별 central 토큰)을 발급하면 body.agent 위조·혼선이 원천 차단됩니다.',
+        '개별 토큰(설정 › 엣지·원격 › 수집 서버(원격) › 엣지별 central 토큰)을 발급하면 body.agent 위조·혼선이 원천 차단됩니다.',
       ],
       where: [
         '이 판정은 중앙 인메모리(central/agentIdentity.js)이며 30분 창 + 중앙 재시작 시 초기화됩니다.',

@@ -333,13 +333,13 @@ sudo firewall-cmd --permanent --add-port=4000/tcp && sudo firewall-cmd --reload
 > **HTTPS 전환(v2.730+, 검토 S-09)**: 포탈은 기본으로 평문 HTTP(4000)로 받습니다. 중앙↔엣지 구간에는 수집 토큰·배포 자격증명이 흐르므로
 > HTTPS 로 바꾸기를 권장합니다. ① 각 노드 `portal.env` 에 `TLS_CERT_FILE`·`TLS_KEY_FILE`(+ 중간 CA 체인 `TLS_CA_FILE`)을 주고 전환 기간에는
 > `TLS_PORT=4443` + `TLS_HTTP_ALSO=true` 로 평문과 함께 연다(설정이 틀리면 평문으로 열지 않고 기동이 멈춘다) ② 사설 CA 면 상대 노드에
-> `WAN_TLS_CA_FILE`(PEM)을 둔다 — `WAN_TLS_INSECURE=true` 대신 ③ 설정 › 수집 서버의 URL·엣지의 `CENTRAL_URL`·`EDGE_ADVERTISE_URL` 을
+> `WAN_TLS_CA_FILE`(PEM)을 둔다 — `WAN_TLS_INSECURE=true` 대신 ③ 설정 › 엣지·원격 › 수집 서버(원격)의 URL·엣지의 `CENTRAL_URL`·`EDGE_ADVERTISE_URL` 을
 > `https://` 로 바꾼다 ④ 확인 뒤 `TLS_HTTP_ALSO` 를 지운다. 방화벽에는 TLS_PORT 를 연다.
 > v2.730 부터 **새 원격 `http://` 수집 서버 등록은 거부**됩니다(스킴 없는 주소는 https 로 해석). 업그레이드 전에 저장된 http 항목은 그대로
-> 동작하되 화면·보안 자가진단이 경고합니다. 꼭 필요한 보호 구간은 설정 › 수집 서버에서 **사유와 함께 예외**로 두거나 중앙
+> 동작하되 화면·보안 자가진단이 경고합니다. 꼭 필요한 보호 구간은 설정 › 엣지·원격 › 수집 서버(원격)에서 **사유와 함께 예외**로 두거나 중앙
 > `COLLECTOR_HTTP_ALLOW`(대역) 로 허용합니다.
 
-> **호스트 접근 제어(v2.485)**: 설치 후에는 설정 › Security › **호스트 접근 제어**에서 이 호스트의 SSH/포탈 포트 인바운드를 출발지 허용목록으로 좁히거나 SSH 를 완전 차단할 수 있다(firewalld, 런타임 적용 → 미확정 시 자동 복원). 포탈 서비스 계정에 `firewall-cmd` sudo 가 필요하며 `packaging/offline/install.sh` 가 `/etc/sudoers.d/vmware-portal-hostaccess` 로 설치한다. 수동 설치(이 문서 방식)나 v2.485 이전에 설치한 서버는 화면이 안내하는 두 줄을 root 가 `visudo -f /etc/sudoers.d/vmware-portal-hostaccess` 로 추가한다. 상세: [docs/HOST-ACCESS.md](HOST-ACCESS.md).
+> **호스트 접근 제어(v2.485)**: 설치 후에는 설정 › 보안 › **호스트 접근 제어**에서 이 호스트의 SSH/포탈 포트 인바운드를 출발지 허용목록으로 좁히거나 SSH 를 완전 차단할 수 있다(firewalld, 런타임 적용 → 미확정 시 자동 복원). 포탈 서비스 계정에 `firewall-cmd` sudo 가 필요하며 `packaging/offline/install.sh` 가 `/etc/sudoers.d/vmware-portal-hostaccess` 로 설치한다. 수동 설치(이 문서 방식)나 v2.485 이전에 설치한 서버는 화면이 안내하는 두 줄을 root 가 `visudo -f /etc/sudoers.d/vmware-portal-hostaccess` 로 추가한다. 상세: [docs/HOST-ACCESS.md](HOST-ACCESS.md).
 
 ---
 
@@ -441,7 +441,7 @@ sudo cat /etc/vmware-portal/portal.env    # 현재 설정(민감정보 포함 �
 **백업/복원**: 설정·데이터는 전부 `/etc/vmware-portal` 아래에 있습니다. 이 디렉터리를 백업하면
 계정·토큰·vCenter·수집기·시계열 DB가 보존됩니다(포탈 **설정 → 포탈 백업**에서 스냅샷 내보내기도 가능).
 
-**로그 분석(설정 › Log › 로그 분석(개선점), v2.583) 준비**: 폐쇄망에서 저널을 반출하지 않고 포탈이 직접 읽어
+**로그 분석(설정 › 로그 › 로그 분석(개선점), v2.583) 준비**: 폐쇄망에서 저널을 반출하지 않고 포탈이 직접 읽어
 분석합니다. 원천 중 **서비스 저널**은 포탈 서비스 계정(`install.sh` 기본 `vmportal`, `--user` 로 바꾼 경우 그 계정)이
 시스템 저널을 읽을 권한이 있어야 합니다. 권한이 없으면 `journalctl` 이 빈 결과를 주고 화면이 '권한 없음' 과 조치를
 안내합니다(빈 결과를 '로그 없음' 으로 말하지 않습니다). `install.sh` 는 이 그룹을 추가하지 않으므로 한 번 직접 넣으세요:
@@ -507,7 +507,7 @@ sudo cat /etc/dc-service-hub/initial-settings-password.txt
 | vCenter 인증서 오류 | `VC_TLS_REJECT_UNAUTHORIZED=false` |
 | 브라우저 교차출처(CORS) 차단 | 별도 프론트 출처면 `CORS_ORIGINS`에 그 출처 추가(§7) |
 | 로그 분석 '서비스 저널' 이 권한 없음 | 서비스 계정을 `systemd-journal` 그룹에 추가 후 재시작(§10). 그 전에는 '누적'·'붙여넣기' 원천을 쓴다 |
-| 화면이 '불러오는 중…' 에서 오래 멈춤 | 작업 줄 아래의 **요청 ID** 로 설정 › Log › 서버 성능 측정의 '요청 ID 찾기' 에서 같은 요청을 찾는다(서버 처리 중 / 이미 응답 / 기록 없음) |
+| 화면이 '불러오는 중…' 에서 오래 멈춤 | 작업 줄 아래의 **요청 ID** 로 설정 › 로그 › 서버 성능 측정의 '요청 ID 찾기' 에서 같은 요청을 찾는다(서버 처리 중 / 이미 응답 / 기록 없음) |
 
 ---
 

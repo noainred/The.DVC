@@ -759,7 +759,7 @@ function UnsupportedServers({ vc }) {
       </div>
       {!rows.length ? (
         <div className="muted" style={{ padding: 20, textAlign: 'center' }}>
-          {d.scoped ? '스캔 발견 장비는 법인(vCenter) 귀속이 없어 범위 제한 계정에는 보이지 않습니다 — 목록이 비어 있다는 뜻이 아닙니다.' : groups.length ? '스캔 대역에서 Dell 이 아닌 Redfish 장비를 발견하지 않았습니다.' : '아직 스캔 결과가 없습니다 — 설정 › 수집 서버 › iDRAC 스캔 대역에서 스캔이 한 번 돌아야 채워집니다(v2.495 이후 스캔부터).'}
+          {d.scoped ? '스캔 발견 장비는 법인(vCenter) 귀속이 없어 범위 제한 계정에는 보이지 않습니다 — 목록이 비어 있다는 뜻이 아닙니다.' : groups.length ? '스캔 대역에서 Dell 이 아닌 Redfish 장비를 발견하지 않았습니다.' : '아직 스캔 결과가 없습니다 — 설정 › 인프라 등록 › iDRAC 서버 등록의 스캔 대역에서 스캔이 한 번 돌아야 채워집니다(v2.495 이후 스캔부터).'}
         </div>
       ) : (
         <div className="table-wrap" style={{ maxHeight: '64vh' }}>

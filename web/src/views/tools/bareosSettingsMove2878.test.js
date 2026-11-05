@@ -1,6 +1,6 @@
 // v2.878(사용자 요청 'Bareos 의 설정을 전체 메뉴 설정으로 위치 변경 — B안'): Backup › Bareos › 설정 탭 → 설정 › 🖥️ vCenter 관리 › Bareos 백업 서버.
 //   ① 설정 화면을 열 수 있는 계정에게는 Bareos 탭 줄에 '설정' 을 그리지 않는다 · 못 여는 관리자(설정 소유 계정 아님)는 예전 자리를 그대로 쓴다
-//   ② 옛 주소는 구획 그대로 새 주소로(북마크) ③ 설정 화면의 vCenter 관리 묶음에 'bareos' 하위 키 · 도구 권한으로 보인다
+//   ② 옛 주소는 구획 그대로 새 주소로(북마크) ③ 설정 화면의 백업 묶음(v2.902 — 예전 vCenter 관리 묶음)에 'bareos' 하위 키 · 도구 권한으로 보인다
 import { describe, it, expect } from 'vitest';
 import fs from 'node:fs';
 import { stripComments } from '../../test/_stripComments.js';
@@ -31,9 +31,9 @@ describe('Bareos 설정 자리 옮김(v2.878)', () => {
     expect(legacySettingsHash('#/settings/bareos')).toBe(null);
     expect(legacySettingsHash('')).toBe(null);
   });
-  it('설정 화면 — vCenter 관리 묶음에 bareos 하위 키(도구 권한으로 보임) · 본문은 BareosSettingsPage', () => {
+  it('설정 화면 — 백업 묶음(v2.902 재배치)에 bareos 하위 키(도구 권한으로 보임) · 본문은 BareosSettingsPage', () => {
     const s = read('../Settings.jsx');
-    expect(s).toMatch(new RegExp(`\\{ k: '${BAREOS_SETTINGS_KEY}', label: 'Bareos 백업 서버', C: BareosSettingsPage, group: 'vcenter', show: \\(\\) => toolAllowed\\('bareos-backup'\\) \\}`));
+    expect(s).toMatch(new RegExp(`\\{ k: '${BAREOS_SETTINGS_KEY}', label: 'Bareos 백업 서버', C: BareosSettingsPage, group: 'backups', show: \\(\\) => toolAllowed\\('bareos-backup'\\) \\}`));
     expect(s).toMatch(/\(!s\.show \|\| s\.show\(\)\)/);   // visibleSubs 가 show 를 본다
     const page = read('../BareosSettingsPage.jsx');
     expect(page).toMatch(/toolAllowed\('bareos-backup'\) && fullScope/);   // 도구 권한 + 전체 범위(서버 fullScopeOnly 와 같은 화면 게이트)

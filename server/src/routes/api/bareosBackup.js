@@ -330,7 +330,7 @@ function setupGate(req, res, dirId, plan, { otp = true } = {}) {
   const hostKey = String(req.body?.host || '').trim().toLowerCase();
   if (hostKey && setupBusyReason(dirId, hostKey)) { res.status(409).json({ ok: false, reason: '같은 서버에 다른 Director 의 자동 설정(또는 설정 변경 · 설치)이 진행 중입니다 — 끝난 뒤 다시 시도하세요.' }); return false; }
   // v2.822.3(I2-6 — 재현): 데모 Director 를 쓰는 동안은 화면 매핑이 데모 값이라 실제 서버 설정과 섞인다
-  if (isDemoActive()) { res.status(409).json({ ok: false, reason: '데모 Director 를 쓰는 중입니다 — 자동 설정은 실제 Director 를 등록한 뒤(설정 › vCenter 관리 › Bareos 백업 서버 › Director 에서 추가) 쓸 수 있습니다.' }); return false; }
+  if (isDemoActive()) { res.status(409).json({ ok: false, reason: '데모 Director 를 쓰는 중입니다 — 자동 설정은 실제 Director 를 등록한 뒤(설정 › 백업 › Bareos 백업 서버 › Director 에서 추가) 쓸 수 있습니다.' }); return false; }
   const name = req.user?.username || '';
   // v2.842: 쓰기 단계의 본인 OTP 재확인은 '설정 › Security › 세션 보안' 값(기본 켬 · 소유자 + OTP 로만 끔)을 따른다 — 요청마다 지금 값을 읽는다.
   //   끈 상태로 지난 요청은 감사에 표시한다(req.bareosOtpOff). 인증이 꺼진 설치(AUTH_ENABLED=false)는 예전처럼 OTP 를 보지 않는다.
@@ -1105,9 +1105,9 @@ async function restoreRoute(req, res, job) {
   //   뒤에서 'not-configured' 로 실패하면 1회용 코드가 이미 쓰여, 설정을 고친 뒤 같은 코드는 '이미 사용됨' 이었다.
   if (!isDemoActive()) {
     const jd = directorById(jobDir(job), settings);
-    if (!jd) return res.status(409).json({ ok: false, code: 'not-configured', reason: '이 백업 대상의 법인 Director 가 설정에 없습니다 — 설정 › vCenter 관리 › Bareos 백업 서버 › Director 에서 확인하세요.' });
+    if (!jd) return res.status(409).json({ ok: false, code: 'not-configured', reason: '이 백업 대상의 법인 Director 가 설정에 없습니다 — 설정 › 백업 › Bareos 백업 서버 › Director 에서 확인하세요.' });
     const miss = directorConn(jd).missing;
-    if (miss?.length) return res.status(409).json({ ok: false, code: 'not-configured', reason: `‘${jd.name}’ Director 설정이 덜 됐습니다(${miss.join('·')}) — 설정 › vCenter 관리 › Bareos 백업 서버 › Director 에서 먼저 채우세요.` });
+    if (miss?.length) return res.status(409).json({ ok: false, code: 'not-configured', reason: `‘${jd.name}’ Director 설정이 덜 됐습니다(${miss.join('·')}) — 설정 › 백업 › Bareos 백업 서버 › Director 에서 먼저 채우세요.` });
   }
   // OTP 는 입력·전제 검사를 통과한 뒤에 쓴다(1회용 코드를 입력 실수로 태우지 않게). Director 에 닿기 전이다.
   if (config.auth.enabled) {
@@ -1317,9 +1317,9 @@ api.post('/tools/bareos-backup/restore/bulk', adminOnly, async (req, res) => {
     const dir = plan.directorId;
     if (!isDemoActive()) {
       const jd = directorById(dir, settings);
-      if (!jd) return res.status(409).json({ ok: false, code: 'not-configured', reason: '이 법인의 Director 가 설정에 없습니다 — 설정 › vCenter 관리 › Bareos 백업 서버 › Director 에서 확인하세요.' });
+      if (!jd) return res.status(409).json({ ok: false, code: 'not-configured', reason: '이 법인의 Director 가 설정에 없습니다 — 설정 › 백업 › Bareos 백업 서버 › Director 에서 확인하세요.' });
       const miss = directorConn(jd).missing;
-      if (miss?.length) return res.status(409).json({ ok: false, code: 'not-configured', reason: `‘${jd.name}’ Director 설정이 덜 됐습니다(${miss.join('·')}) — 설정 › vCenter 관리 › Bareos 백업 서버 › Director 에서 먼저 채우세요.` });
+      if (miss?.length) return res.status(409).json({ ok: false, code: 'not-configured', reason: `‘${jd.name}’ Director 설정이 덜 됐습니다(${miss.join('·')}) — 설정 › 백업 › Bareos 백업 서버 › Director 에서 먼저 채우세요.` });
     }
     // OTP 는 입력 · 전제 검사를 통과한 뒤에 한 번(1회용 코드를 입력 실수로 태우지 않게). Director 에 닿기 전이다.
     if (config.auth.enabled) {
@@ -1440,9 +1440,9 @@ function drRunGate(req) {
     const settings0 = effectiveSettings();
     const site0 = settings0.sites.find((x) => String(x.vcenterId) === vcenterId);
     const jd = site0?.directorId ? directorById(site0.directorId, settings0) : null;
-    if (!jd) return { status: 409, code: 'not-configured', reason: '이 법인의 Director 가 설정에 없습니다 — 설정 › vCenter 관리 › Bareos 백업 서버 › Director 에서 확인하세요.' };
+    if (!jd) return { status: 409, code: 'not-configured', reason: '이 법인의 Director 가 설정에 없습니다 — 설정 › 백업 › Bareos 백업 서버 › Director 에서 확인하세요.' };
     const miss = directorConn(jd).missing;
-    if (miss?.length) return { status: 409, code: 'not-configured', reason: `‘${jd.name}’ Director 설정이 덜 됐습니다(${miss.join('·')}) — 설정 › vCenter 관리 › Bareos 백업 서버 › Director 에서 먼저 채우세요.` };
+    if (miss?.length) return { status: 409, code: 'not-configured', reason: `‘${jd.name}’ Director 설정이 덜 됐습니다(${miss.join('·')}) — 설정 › 백업 › Bareos 백업 서버 › Director 에서 먼저 채우세요.` };
   }
   // 시험 1대 규칙은 회차 **전체** 대수로 — 50대씩 나눈 묶음마다 보면 단계마다 1대인 회차가 규칙을 비켜 간다
   const total = waves.reduce((n, w) => n + w.items.length, 0);
@@ -1687,7 +1687,7 @@ api.post('/tools/bareos-backup/rehearsal/run', adminOnly, fullScopeOnly, fullWri
   if (rehearsalBusy()) return res.status(409).json({ ok: false, code: 'busy', reason: '다른 복원 검증이 진행 중입니다 — 끝난 뒤 다시 누르세요.' });
   if (!isDemoActive()) {
     const miss = directorConn(directorById(dirId, settings)).missing;
-    if (miss?.length) return res.status(409).json({ ok: false, code: 'not-configured', reason: `그 Director 설정이 덜 됐습니다(${miss.join('·')}) — 설정 › vCenter 관리 › Bareos 백업 서버 › Director 에서 먼저 채우세요.` });
+    if (miss?.length) return res.status(409).json({ ok: false, code: 'not-configured', reason: `그 Director 설정이 덜 됐습니다(${miss.join('·')}) — 설정 › 백업 › Bareos 백업 서버 › Director 에서 먼저 채우세요.` });
   }
   if (config.auth.enabled) { const v = verifyUserOtp(name, req.body?.otp); if (!v.ok) return res.status(403).json({ ok: false, reason: `OTP 인증 실패 — ${v.reason}` }); }
   try {

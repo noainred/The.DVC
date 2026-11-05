@@ -221,7 +221,7 @@ export function EdgeLog() {
           </tbody>
         </STable>
         </div>
-        {!shown.length && <p style={{ fontSize: 12, color: 'var(--muted)' }}>표시할 엣지가 없습니다. 설정 › 수집 서버에 등록된 항목이 없으면 여기도 비어 있습니다.</p>}
+        {!shown.length && <p style={{ fontSize: 12, color: 'var(--muted)' }}>표시할 엣지가 없습니다. 설정 › 엣지·원격 › 수집 서버(원격)에 등록된 항목이 없으면 여기도 비어 있습니다.</p>}
         {/* 각주 — 눌러도 안 되는 종류의 조치는 표 아래에서 **한 번만** 말한다(행마다 반복하면 셀이 길어진다 — v2.509). */}
         {tableFootnotes(data?.counts || {}, { minVersion: data?.minVersion }).map((f, i) => (
           <p key={i} style={{ margin: '6px 0 0', fontSize: 12, color: 'var(--muted)', lineHeight: 1.6 }}><BoldText text={f} /></p>

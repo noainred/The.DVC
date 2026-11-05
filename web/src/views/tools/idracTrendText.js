@@ -696,7 +696,7 @@ export function idracStateBanner(st) {
     return { tone: 'amber', title: '엣지의 iDRAC 수집이 멈췄습니다', lines };
   }
   const err = c.error ? ` 사유: ${c.error}` : (c.errorHidden ? ' (사유는 전체 범위 관리자에게만 보입니다)' : '');
-  lines.push(`중앙 → 엣지(${c.id}) pull 이 실패하고 있습니다(마지막 정상 ${pulled}${c.fails ? ` · 연속 실패 ${c.fails}회` : ''}).${err} 설정 › 수집 서버에서 그 엣지 상태를 확인하세요.`);
+  lines.push(`중앙 → 엣지(${c.id}) pull 이 실패하고 있습니다(마지막 정상 ${pulled}${c.fails ? ` · 연속 실패 ${c.fails}회` : ''}).${err} 설정 › 엣지·원격 › 수집 서버(원격)에서 그 엣지 상태를 확인하세요.`);
   return { tone: 'red', title: '엣지에서 데이터를 가져오지 못하고 있습니다', lines };
 }
 

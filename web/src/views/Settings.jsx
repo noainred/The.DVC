@@ -53,21 +53,27 @@ const GuestPartSettings = lazy(() => import('./tools/GuestPartSettings.jsx')); /
 const VeeamSettings = lazy(() => import('./VeeamSettings.jsx')); // v2.751 Veeam 백업 서버(vCenter 별 · 중앙 또는 그 법인 엣지가 읽음)
 const BareosSettingsPage = lazy(() => import('./BareosSettingsPage.jsx')); // v2.878 Bareos 설정(예전 Backup › Bareos › 설정 탭)
 
-// 모든 하위 화면 정의(키→라벨→컴포넌트). 그룹에 속한 항목은 group 키로 묶는다.
+// 모든 하위 화면 정의(키→라벨→컴포넌트). 모든 항목은 group 키로 1단 묶음 하나에 속한다.
+// v2.902(사용자 요청 '설정에 메뉴가 너무 많아져서 스크롤바가 생긴다 — 재배치'): 1단이 19개(단독 항목 12개 + 그룹 7개)라 1,600px 대에서도
+//   가로 스크롤이 생겼다. 단독 항목을 없애고 1단을 9개 묶음(GROUP_ORDER)으로 줄였다 — 키(#/settings/<k>)는 하나도 바꾸지 않았다(딥링크 · 권한 문서).
+//   묶음 순서는 이 배열의 첫 등장 순서이고 server/test/settingsMenu2902.test.js 가 GROUP_ORDER 와 대조한다(같은 묶음은 붙어 있어야 한다).
 const SUB = [
-  { k: 'datacenter-admin', label: 'DataCenter(법인)', C: DatacenterAdmin },
-  // --- vCenter 관리 그룹 ---
-  { k: 'vcenter-admin', label: 'vCenter 등록·관리', C: VCenterAdmin, group: 'vcenter' },
-  { k: 'vcenter-test', label: 'vCenter 연결 테스트', C: VCenterConnTest, group: 'vcenter' },
-  { k: 'veeam', label: 'Veeam 백업 서버', C: VeeamSettings, group: 'vcenter' }, // v2.751 — VM 및 폴더 'Veeam 백업 VM 표시' 의 출처
+  // --- 인프라 등록: 모니터링할 대상(법인 · vCenter · NSX · Horizon · iDRAC) ---
+  { k: 'datacenter-admin', label: 'DataCenter(법인)', C: DatacenterAdmin, group: 'infra' },
+  { k: 'vcenter-admin', label: 'vCenter 등록·관리', C: VCenterAdmin, group: 'infra' },
+  { k: 'vcenter-test', label: 'vCenter 연결 테스트', C: VCenterConnTest, group: 'infra' },
+  { k: 'nsx-admin', label: 'NSX 관리', C: NsxAdmin, group: 'infra' },
+  { k: 'horizon-admin', label: 'Horizon 연결 서버', C: HorizonAdmin, group: 'infra' }, // v2.685: 라이선스 만료 도구 안에만 있던 등록을 설정에도
+  { k: 'idrac-admin', label: 'iDRAC 서버 등록', C: IdracAdmin, group: 'infra' },
+  { k: 'idrac-scan-log', label: 'iDRAC 스캔 로그', C: IdracScanLog, group: 'infra' }, // v2.902: '스캔 로그' → 묶음이 바뀌어 무엇의 로그인지 이름에 넣었다
+  // --- 백업: VM 백업 서버(Veeam · Bareos) + 포탈 자체 백업 ---
+  { k: 'veeam', label: 'Veeam 백업 서버', C: VeeamSettings, group: 'backups' }, // v2.751 — VM 및 폴더 'Veeam 백업 VM 표시' 의 출처
   // v2.878(사용자 요청 'Bareos 의 설정을 전체 메뉴 설정으로 — B안'): Backup › Bareos 탭 줄의 '설정' 을 여기로 옮겼다. 키 'bareos' 는 bareosViewText BAREOS_SETTINGS_KEY 와 같다.
   //   Bareos 도구 권한(bareos-backup)이 있는 계정에게만 보인다(서버 API 는 adminOnly · fullScopeOnly 로 따로 집행).
-  { k: 'bareos', label: 'Bareos 백업 서버', C: BareosSettingsPage, group: 'vcenter', show: () => toolAllowed('bareos-backup') },
-  { k: 'nsx-admin', label: 'NSX 관리', C: NsxAdmin },
-  { k: 'horizon-admin', label: 'Horizon 연결 서버', C: HorizonAdmin }, // v2.685: 라이선스 만료 도구 안에만 있던 등록을 설정에도
-  // --- 수집 서버 그룹 ---
-  { k: 'idrac-admin', label: 'iDRAC 서버 등록', C: IdracAdmin, group: 'collect' },
-  { k: 'idrac-scan-log', label: '스캔 로그', C: IdracScanLog, group: 'collect' },
+  { k: 'bareos', label: 'Bareos 백업 서버', C: BareosSettingsPage, group: 'backups', show: () => toolAllowed('bareos-backup') },
+  { k: 'backup', label: '포탈 백업', C: PortalBackup, group: 'backups' },
+  { k: 'nfs-mounts', label: 'NFS 마운트(백업 대상)', C: NfsMounts, group: 'backups' },
+  // --- 수집: 수집 주기 · 대상 · 임계(GPU 포함) ---
   { k: 'metrics', label: '지표 수집', C: MetricsSettings, group: 'collect' },
   { k: 'storage-intervals', label: '스토리지 수집 주기', C: StorageIntervals, group: 'collect' },
   { k: 'power-off-check', label: '전원 꺼짐 점검', C: PowerOffCheckSettings, group: 'collect' },
@@ -77,58 +83,62 @@ const SUB = [
   //   superOnly — 슈퍼 관리자에게만 메뉴가 보인다(표시 게이팅). 서버 설정 API 는 requireSuperAdmin 이 집행한다.
   { k: 'isilon-dirusage', label: '아이실론 디렉터리 사용량', C: IsiduSettingsPage, group: 'collect', superOnly: true },
   { k: 'guest-partition', label: '게스트 파티션 사용률', C: GuestPartSettings, group: 'collect' },
-  // --- GPU 사용량 수집 그룹 ---
-  { k: 'gpu-collect', label: 'GPU 수집', C: GpuSettings, group: 'gpu' },
-  { k: 'gpu-guest', label: 'GPU 게스트 수집', C: GpuGuestSettings, group: 'gpu' },
-  { k: 'gpu-guest-diag', label: 'GPU 수집 진단', C: GpuGuestDiag, group: 'gpu' },
+  { k: 'dir-usage', label: '폴더 사용량 리포트', C: DirUsageSettings, group: 'collect' },
+  { k: 'gpu-collect', label: 'GPU 수집', C: GpuSettings, group: 'collect' },
+  { k: 'gpu-guest', label: 'GPU 게스트 수집', C: GpuGuestSettings, group: 'collect' },
+  { k: 'gpu-guest-diag', label: 'GPU 수집 진단', C: GpuGuestDiag, group: 'collect' },
   { k: 'guest-account', label: '게스트 계정 추가', C: GuestAccount, group: 'collect' },
-  { k: 'collectors', label: '수집 서버(원격)', C: Collectors, group: 'collect' },
+  // --- 엣지·원격: 원격 수집 서버(엣지) · 엣지 설치 · 브라우저 원격접속 중계 ---
+  { k: 'collectors', label: '수집 서버(원격)', C: Collectors, group: 'edge' },
   // v2.825 의 '엣지 토큰 맞추기'(edge-tokens) 하위 탭은 v2.827 에 독립 도구(#/tools/edge-tokens · 공통 메뉴 설정 › 엣지 토큰 맞추기)로 옮겼다 —
   //   옛 주소 #/settings/edge-tokens 는 hooks/hashTab.js MOVED_SUBS 가 새 주소로 보낸다.
-  { k: 'agent-deploy', label: '원격 법인(DC)에 Edge 노드 포탈 설치', C: AgentDeploy, group: 'collect' },
-  // --- 원격 접속 서버 그룹 ---
-  { k: 'proxy', label: '중계 서버', C: ProxySettings, group: 'remote-srv' },
-  { k: 'remote', label: '원격접속 설정', C: RemoteAccess, group: 'remote-srv' },
-  // --- User Control 그룹 ---
+  { k: 'agent-deploy', label: '원격 법인(DC)에 Edge 노드 포탈 설치', C: AgentDeploy, group: 'edge' },
+  { k: 'proxy', label: '중계 서버', C: ProxySettings, group: 'edge' },
+  { k: 'remote', label: '원격접속 설정', C: RemoteAccess, group: 'edge' },
+  // --- 사용자 ---
   { k: 'users', label: '메인포탈 사용자 관리', C: UserAdmin, group: 'usercontrol' },
   { k: 'edge-users', label: '엣지 사용자 배포', C: EdgeUserDeploy, group: 'usercontrol' },
   { k: 'auth-ad', label: '인증(AD)', C: AdSettings, group: 'usercontrol' },
-  // --- Security 그룹 ---
+  // --- 보안 ---
   { k: 'session-security', label: '세션 보안', C: SessionSecurity, group: 'security' },
   { k: 'secrets', label: '자격증명 저장 방식', C: SecretsSettings, group: 'security' },
-  // 외부 포탈이 상시 조회하는 자격증명이라 '자격증명 저장 방식' 과 같은 묶음(Security)에 둔다.
+  // 외부 포탈이 상시 조회하는 자격증명이라 '자격증명 저장 방식' 과 같은 묶음(보안)에 둔다.
   { k: 'api-keys', label: '연동 키(외부 포탈 조회 API)', C: ApiKeys, group: 'security' },
   { k: 'anomaly', label: '이상동작 탐지', C: AnomalyDetection, group: 'security' },
   { k: 'host-access', label: '호스트 접근 제어', C: HostAccessSettings, group: 'security' },
   { k: 'peer-trust', label: '장비 신뢰(SSH 호스트키·TLS 인증서)', C: PeerTrustSettings, group: 'security' },
   { k: 'security-self-check', label: '보안 자가진단', C: SecuritySelfCheck, group: 'security' },
-  { k: 'ai-search', label: 'AI 검색', C: LlmSettings },
-  { k: 'alerts', label: '알림', C: Alerts2 },
-  { k: 'mail', label: '메일 발송', C: MailSettings },
-  { k: 'tool-categories', label: '특수 기능 카테고리', C: ToolCategories },
-  { k: 'backup', label: '포탈 백업', C: PortalBackup },
-  { k: 'nfs-mounts', label: 'NFS 마운트(백업 대상)', C: NfsMounts },
-  { k: 'dir-usage', label: '폴더 사용량 리포트', C: DirUsageSettings },
+  // --- 알림·연동 ---
+  { k: 'alerts', label: '알림', C: Alerts2, group: 'notify' },
+  { k: 'mail', label: '메일 발송', C: MailSettings, group: 'notify' },
+  { k: 'ai-search', label: 'AI 검색', C: LlmSettings, group: 'notify' },
+  { k: 'tool-categories', label: '특수 기능 카테고리', C: ToolCategories, group: 'notify' },
+  // --- 로그 ---
   { k: 'vclogs', label: 'vCenter 로그 보관', C: VcenterLogs, group: 'log' },
   { k: 'diagnostics', label: '진단·로그', C: Diagnostics, group: 'log' },
   { k: 'perf-monitor', label: '서버 성능 측정', C: PerfMonitor, group: 'log' },
   { k: 'log-analysis', label: '로그 분석(개선점)', C: LogAnalysis, group: 'log' },
   { k: 'audit', label: '감사 로그', C: Audit, group: 'log' },
+  // --- 시스템 ---
   // 업그레이드: 상단 '업그레이드' 탭은 SHOW_UPGRADE_TAB로 숨겨져 있어도, 관리자 설정 안에서는
   // 항상 접근 가능하게 둔다(오프라인 업그레이드 번들 적용/원격 자동 업그레이드 설정).
-  { k: 'upgrade', label: '⬆ 업그레이드', C: Upgrade },
-  { k: 'about', label: 'About', C: About },
+  { k: 'upgrade', label: '⬆ 업그레이드', C: Upgrade, group: 'system' },
+  { k: 'about', label: 'About', C: About, group: 'system' },
 ];
 
-// 수집/원격접속 관련 화면을 2개 그룹으로 묶어 상단을 단순화(서버가 많아 보이지 않게).
+// 1단 묶음 9개(v2.902). 라벨에 이모지를 넣지 않는다(폭을 줄이고 1,440px 사이드바 펼침에서도 한 줄). 화면 문구 · 딥링크 안내의 메뉴 경로
+// ('설정 › 수집 › …')는 이 라벨을 쓴다 — 라벨을 바꾸면 server/test/settingsMenu2902.test.js 가 옛 경로 문구를 찾아낸다.
+const GROUP_ORDER = ['infra', 'backups', 'collect', 'edge', 'usercontrol', 'security', 'notify', 'log', 'system'];
 const GROUPS = {
-  vcenter: { label: '🖥️ vCenter 관리', desc: 'vCenter 등록·관리와 연결 테스트, vCenter 별 Veeam 백업 서버 · 법인별 Bareos(Director · 설치 · 계정)를 한 곳에서.' },
-  collect: { label: '🗄 수집 서버', desc: 'iDRAC 전력·지표 수집 + 게스트 계정 + 원격 수집 서버 등록 + 엣지 토큰 맞추기 + 분산 에이전트 배포를 한 곳에서.' },
-  gpu: { label: '🎮 GPU 사용량 수집', desc: 'GPU 수집(ESXi vGPU/사용률) · GPU 게스트 수집(패스쓰루, 게스트 OS 내부) · GPU 수집 진단을 한 곳에서.' },
-  'remote-srv': { label: '🔌 원격 접속 서버', desc: '브라우저 SSH/RDP 중계 서버(프록시)와 원격접속 설정을 한 곳에서.' },
-  usercontrol: { label: '👤 User Control', desc: '사용자 계정(역할·2FA)·엣지 사용자 배포(중앙→엣지)·인증(AD/LDAP) 연동을 한 곳에서.' },
-  security: { label: '🛡️ Security', desc: '세션 보안·자격증명 저장 방식·연동 키(외부 포탈 조회 API)·이상동작 탐지·호스트 접근 제어(SSH/웹/OS 방화벽)·장비 신뢰(SSH 호스트키·TLS 인증서)를 한 곳에서.' },
-  log: { label: '📋 Log', desc: 'vCenter 로그 보관 · 진단·로그 · 서버 성능 측정 · 로그 분석(개선점) · 감사 로그를 한 곳에서.' },
+  infra: { label: '인프라 등록', desc: '모니터링할 대상을 등록하는 곳 — 법인(DataCenter) · vCenter 등록과 연결 테스트 · NSX · Horizon 연결 서버 · iDRAC 서버 등록과 스캔 로그.' },
+  backups: { label: '백업', desc: 'vCenter 별 Veeam 백업 서버 · 법인별 Bareos(Director · 설치 · 계정) · 포탈 자체 백업과 백업 대상 NFS 마운트.' },
+  collect: { label: '수집', desc: '수집 주기 · 대상 · 임계 — 지표 · 스토리지 · 전원 꺼짐 점검 · VM 실시간 스파이크 · SAN 스위치 포트 · 아이실론 · 게스트 파티션 · 폴더 사용량 · GPU(수집 · 게스트 · 진단) · 게스트 계정.' },
+  edge: { label: '엣지·원격', desc: '원격 수집 서버(엣지) 등록 · 원격 법인에 Edge 노드 포탈 설치 · 브라우저 SSH/RDP 중계 서버와 원격접속 설정.' },
+  usercontrol: { label: '사용자', desc: '사용자 계정(역할·2FA)·엣지 사용자 배포(중앙→엣지)·인증(AD/LDAP) 연동.' },
+  security: { label: '보안', desc: '세션 보안·자격증명 저장 방식·연동 키(외부 포탈 조회 API)·이상동작 탐지·호스트 접근 제어(SSH/웹/OS 방화벽)·장비 신뢰(SSH 호스트키·TLS 인증서)·보안 자가진단.' },
+  notify: { label: '알림·연동', desc: '알림 · 포탈 공용 메일(SMTP) 발송 · AI 검색 연동 · 특수 기능 카테고리.' },
+  log: { label: '로그', desc: 'vCenter 로그 보관 · 진단·로그 · 서버 성능 측정 · 로그 분석(개선점) · 감사 로그.' },
+  system: { label: '시스템', desc: '업그레이드(온라인 · 오프라인 번들 · 자동 업그레이드)와 버전 정보(About).' },
 };
 /** 이 사용자에게 보이는 하위 항목(v2.740 — superOnly 는 슈퍼 관리자에게만). 주소로 직접 들어오면 그 화면이 권한 안내를 그린다. */
 const visibleSubs = () => SUB.filter((s) => (!s.superOnly || isSuperAdminUser()) && (!s.show || s.show()));
@@ -138,7 +148,7 @@ const DEFAULT_SUB = 'vcenter-admin';
 const SUB_KEYS = SUB.map((s) => s.k);
 
 
-/** 설정 — 관리자용 하위 메뉴. 수집/원격접속은 2개 그룹으로 묶어 2단 탭으로 표시. */
+/** 설정 — 관리자용 하위 메뉴. 1단 묶음 9개 → 2단 항목(v2.902). */
 export default function Settings({ initialSub }) {
   // 하위 탭을 URL(#/settings/<키>)에 싣는다(v2.438) — 새로고침해도 보던 화면이 유지되고,
   // 하위 항목이 30개가 넘어 매번 다시 찾아 들어가야 했던 불편이 사라진다. 링크 공유도 된다.
@@ -150,24 +160,20 @@ export default function Settings({ initialSub }) {
   const Cur = cur.C;
   const activeGroup = cur.group || null;
 
-  // 상단 1단 탭: 그룹에 속하지 않은 항목 + 각 그룹 대표 버튼(순서 유지).
-  const topItems = [];
-  const seen = new Set();
-  for (const s of visibleSubs()) {
-    if (s.group) { if (!seen.has(s.group)) { seen.add(s.group); topItems.push({ type: 'group', key: s.group, label: GROUPS[s.group].label }); } }
-    else topItems.push({ type: 'leaf', key: s.k, label: s.label });
-  }
+  // 상단 1단: 묶음 9개(GROUP_ORDER). 이 사용자에게 보이는 항목이 하나도 없는 묶음은 뺀다.
+  const topItems = GROUP_ORDER.filter((g) => groupChildren(g).length > 0).map((g) => ({ key: g, label: GROUPS[g].label }));
   const selectGroup = (g) => { const first = groupChildren(g)[0]; if (first) setSub(first.k); };
 
   return (
     <>
       <div className="section-title" style={{ marginTop: 0 }}>⚙️ 설정</div>
-      <div className="vcd-views" style={{ marginBottom: activeGroup ? 8 : 16 }}>
+      {/* v2.902: 1단은 9개라 1,440px(사이드바 펼침)에서 한 줄이다. 좁은 화면은 가로 스크롤 대신 줄바꿈(.vcd-views 의 nowrap · overflow 를 여기서만 끈다). */}
+      <div className="vcd-views" style={{ marginBottom: activeGroup ? 8 : 16, flexWrap: 'wrap', overflowX: 'visible' }}>
         {topItems.map((t) => {
-          const active = t.type === 'group' ? activeGroup === t.key : sub === t.key;
+          const active = activeGroup === t.key;
           return (
             <button key={t.key} className={active ? 'login-btn' : 'tab'} style={{ flex: 'none', padding: '8px 14px' }}
-              onClick={() => (t.type === 'group' ? selectGroup(t.key) : setSub(t.key))}>{t.label}</button>
+              aria-pressed={active} onClick={() => selectGroup(t.key)}>{t.label}</button>
           );
         })}
       </div>

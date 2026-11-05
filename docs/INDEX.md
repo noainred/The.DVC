@@ -225,7 +225,7 @@
 | [GUIDE-ADMIN.md](GUIDE-ADMIN.md) | 관리자 가이드 — 설치·구성·보안 운영 |
 | [GUIDE-BEGINNER.md](GUIDE-BEGINNER.md) | 처음 사용자 가이드 — VMware Global Monitoring Portal |
 | [GUIDE-INTERMEDIATE.md](GUIDE-INTERMEDIATE.md) | 중급 사용자 가이드 — 운영 실무 기능 활용 |
-| [HOST-ACCESS.md](HOST-ACCESS.md) | 호스트 접근 제어 (설정 › Security › 호스트 접근 제어, v2.485) |
+| [HOST-ACCESS.md](HOST-ACCESS.md) | 호스트 접근 제어 (설정 › 보안 › 호스트 접근 제어, v2.485) |
 | [HUB-PASSWORD-RECOVERY.md](HUB-PASSWORD-RECOVERY.md) | 비밀번호 분실·잠금 복구 (관리자 비밀번호 초기화) |
 | [INDEX.md](INDEX.md) | 문서 목차 (INDEX) |
 | [INSTALL.md](INSTALL.md) | 설치 가이드 (The Davinci Virtual Platform) |

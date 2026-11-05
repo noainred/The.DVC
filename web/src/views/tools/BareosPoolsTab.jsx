@@ -139,7 +139,7 @@ export default function BareosPoolsTab({ bare = false, reloadKey = 0 } = {}) {
               </tbody>
             </STable>
           </div>
-        ) : <div className="muted" style={{ padding: '10px 14px', fontSize: 12.5 }}>범위 안에 Director 가 없습니다 — 설정 › vCenter 관리 › Bareos 백업 서버 › Director 와 매핑을 확인하세요.</div>}
+        ) : <div className="muted" style={{ padding: '10px 14px', fontSize: 12.5 }}>범위 안에 Director 가 없습니다 — 설정 › 백업 › Bareos 백업 서버 › Director 와 매핑을 확인하세요.</div>}
       </Section>}
 
       <Section title={`풀 ${fmtNum(pools.length)}개`} data-pools-table=""
