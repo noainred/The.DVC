@@ -1,0 +1,273 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>기능 사용 현황 — 개요</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=Noto+Sans+KR:wght@400;500;700;800&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+body{margin:0;background:#0a0e17;color:#e6edf6;font-family:"Inter","Noto Sans KR","Apple SD Gothic Neo",sans-serif;font-size:13px}
+a{color:#93c5fd}a:hover{color:#bfdbfe}
+.tb{display:flex;align-items:center;gap:14px;height:44px;padding:0 16px;background:#0f1626;border-bottom:1px solid #243049}
+.logo{display:inline-flex;align-items:center;gap:8px;font-weight:800;font-size:14px}
+.logo .v{width:26px;height:26px;border-radius:7px;background:#3b82f6;display:inline-flex;align-items:center;justify-content:center;font-size:13px;color:#fff}
+.ver{font-size:11px;font-weight:700;color:#5eead4;border:1px solid #2dd4bf;border-radius:6px;padding:1px 6px}
+.mock{font-size:11px;font-weight:800;color:#fcd34d;background:rgba(245,158,11,.16);border-radius:6px;padding:2px 7px}
+.srch{display:flex;align-items:center;gap:8px;width:420px;height:30px;border:1px solid #243049;border-radius:8px;background:#0a0e17;color:#8b9bb4;font-size:12px;padding:0 10px}
+.sb{width:236px;flex:none;background:#0f1626;border-right:1px solid #243049;padding:12px 10px;display:flex;flex-direction:column;gap:2px}
+.sb a{display:flex;align-items:center;gap:8px;padding:9px 12px;border-radius:8px;color:#e6edf6;font-weight:600;text-decoration:none;font-size:13px}
+.sb a.sub{padding:6px 12px 6px 30px;color:#8b9bb4;font-weight:500;font-size:12.5px}
+.sb a.on{background:#1a2236;color:#22d3ee}
+.sb a.grp.on{background:transparent;color:#e6edf6;box-shadow:inset 3px 0 0 #22d3ee}
+.sb .n{margin-left:auto;font-size:11px;color:#8b9bb4;font-weight:600}
+.st{font-size:15px;font-weight:800;display:flex;align-items:center;gap:8px}
+.gb{display:flex;gap:6px;flex-wrap:wrap}
+.gb a{padding:8px 14px;border-radius:8px;border:1px solid #243049;background:#1a2236;color:#e6edf6;font-weight:600;font-size:12.5px;text-decoration:none;white-space:nowrap}
+.gb a.on{background:#3b82f6;border-color:#3b82f6;color:#fff}
+.g2{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-left:14px;padding:8px 12px;border-radius:10px;background:rgba(37,99,235,.07);border-left:3px solid #3b82f6}
+.g2 .pre{font-size:11px;color:#8b9bb4;opacity:.8;white-space:nowrap}
+.g2 a{padding:6px 12px;font-size:12.5px;border-radius:7px;color:#9aa4b2;border:1px solid transparent;text-decoration:none;white-space:nowrap}
+.g2 a.on{background:rgba(37,99,235,.22);color:#93c5fd;border-color:rgba(37,99,235,.55);font-weight:600}
+.input{min-height:34px;border:1px solid #243049;border-radius:8px;background:#0a0e17;color:#e6edf6;font:inherit;font-size:13px;padding:0 10px;box-sizing:border-box}
+.btn{display:inline-flex;align-items:center;gap:6px;min-height:34px;padding:0 12px;border-radius:8px;border:1px solid #243049;background:#1a2236;color:#e6edf6;font:inherit;font-size:12.5px;font-weight:600;cursor:pointer;white-space:nowrap;text-decoration:none}
+.btn.primary{background:#3b82f6;border-color:#3b82f6;color:#fff}
+.btn.sm{min-height:28px;padding:0 9px;font-size:11.5px}
+.card{background:#141b2d;border:1px solid #243049;border-radius:12px}
+.muted{color:#8b9bb4}.faint{color:#5d6b85}
+.mono{font-family:"JetBrains Mono",ui-monospace,monospace;font-variant-numeric:tabular-nums}
+.tag{display:inline-flex;align-items:center;gap:5px;height:20px;padding:0 8px;border-radius:999px;font-size:11px;font-weight:700;white-space:nowrap}
+.tag.blue{background:rgba(59,130,246,.18);color:#93c5fd}.tag.gray{background:rgba(139,155,180,.14);color:#aebbd0}.tag.ok{background:rgba(34,197,94,.14);color:#86efac}.tag.warn{background:rgba(245,158,11,.16);color:#fcd34d}.tag.purple{background:rgba(168,85,247,.18);color:#d8b4fe}.tag.teal{background:rgba(13,148,136,.22);color:#5eead4}
+.seg2{display:inline-flex;border:1px solid #243049;border-radius:8px;overflow:hidden}
+.seg2 a{padding:7px 11px;color:#8b9bb4;font-weight:600;text-decoration:none;font-size:12px;white-space:nowrap}
+.seg2 a.on{background:#3b82f6;color:#fff}
+.tabs{display:flex;align-items:center;gap:2px;border-bottom:1px solid #243049;overflow-x:auto}
+.tabs a{display:inline-flex;align-items:center;gap:6px;padding:10px 14px;color:#8b9bb4;font-weight:600;white-space:nowrap;text-decoration:none;border-bottom:2px solid transparent;margin-bottom:-1px}
+.tabs a.on{color:#e6edf6;border-bottom-color:#3b82f6}
+.band{display:flex;gap:10px;align-items:flex-start;padding:9px 12px;border-radius:10px;font-size:12px;border:1px solid;line-height:1.5}
+.band.info{background:rgba(59,130,246,.08);border-color:rgba(59,130,246,.35);color:#bfdbfe}
+.kpis{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:12px}
+.tile{padding:14px 16px;display:flex;flex-direction:column;gap:8px;min-width:0}
+.tile .lb{font-size:12px;font-weight:600;color:#8b9bb4;display:flex;justify-content:space-between;gap:8px}
+.tile .val{font-size:28px;font-weight:800;line-height:1}
+.tile .val small{font-size:13px;font-weight:600;color:#8b9bb4;margin-left:4px}
+.tile .sub{font-size:12px;color:#8b9bb4}
+.grid{display:grid;grid-template-columns:minmax(0,2fr) minmax(0,1fr);gap:16px}
+.panel{padding:12px 14px;display:flex;flex-direction:column;gap:10px;min-width:0}
+.ph{display:flex;justify-content:space-between;align-items:baseline;gap:8px;flex-wrap:wrap}
+.pt{font-size:13px;font-weight:700}
+.tw{overflow-x:auto}
+table{width:100%;border-collapse:collapse;font-size:12.5px;min-width:820px}
+th{text-align:left;font-size:11.5px;font-weight:700;color:#8b9bb4;padding:8px 10px;border-bottom:1px solid #243049;background:#0f1626;white-space:nowrap}
+th.s::after{content:" ↕";color:#5d6b85}
+th.sd::after{content:" ▼";color:#93c5fd}
+td{padding:7px 10px;border-bottom:1px solid #1f2a40;vertical-align:middle;white-space:nowrap}
+tr:hover td{background:rgba(59,130,246,.06)}
+.r{text-align:right}
+.bar{height:6px;background:#0f1626;border-radius:3px;overflow:hidden;min-width:90px}
+.bar i{display:block;height:100%;border-radius:3px;background:#3b82f6}
+.ub{display:flex;align-items:center;gap:8px}
+.ub .bar{flex:1}
+.trend{font-weight:600}.trend.up{color:#86efac}.trend.dn{color:#fca5a5}.trend.flat{color:#8b9bb4}
+.stack{display:flex;height:14px;border-radius:7px;overflow:hidden;gap:2px;background:#141b2d}
+.stack i{display:block;height:100%}
+.lgd{display:grid;grid-template-columns:12px minmax(0,1fr) auto auto;gap:6px 10px;align-items:center;font-size:12px}
+.lgd i{width:12px;height:12px;border-radius:3px;display:block}
+.bars{height:96px;display:flex;align-items:flex-end;gap:2px}
+.bars i{flex:1;display:block;background:#3b82f6;border-radius:3px 3px 0 0;min-height:2px}
+.bars i.we{background:#1e3a5f}
+.bars i.part{background:repeating-linear-gradient(135deg,#3b82f6 0 3px,#141b2d 3px 6px)}
+.axis{display:flex;justify-content:space-between;font-family:"JetBrains Mono",monospace;font-size:10.5px;color:#8b9bb4}
+.rb{display:grid;grid-template-columns:70px minmax(0,1fr) 72px;gap:6px 10px;align-items:center;font-size:12px}
+.rb .bar{height:10px;border-radius:5px}
+.hint{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
+.hint .h{padding:12px 14px;border:1px solid #243049;border-radius:10px;background:#0f1626;display:flex;flex-direction:column;gap:8px;min-width:0}
+.hint h4{margin:0;font-size:12.5px;display:flex;align-items:center;gap:8px}
+.hint ul{margin:0;padding-left:16px;display:flex;flex-direction:column;gap:6px;font-size:12px;color:#aebbd0;line-height:1.45}
+.hint li b{color:#e6edf6;font-weight:600}
+.pos{color:#8b9bb4;font-size:11.5px}
+.ic{width:14px;height:14px;flex:none}
+</style>
+</helmet>
+
+<div style="min-height:100%;display:flex;flex-direction:column;background:#0a0e17">
+
+  <div class="tb">
+    <span class="logo"><span class="v">V</span>THE DAVINCI</span>
+    <span class="ver">v2.912</span>
+    <span class="mock">MOCK</span>
+    <span style="flex:1"></span>
+    <span class="srch">장비 · 기능 · 탭 찾기<span style="margin-left:auto;font-size:10.5px;border:1px solid #243049;border-radius:4px;padding:0 4px">⌘K</span></span>
+    <span style="flex:1"></span>
+    <span class="muted mono" style="font-size:12px">28/28 vCenter <b style="color:#86efac">OK</b> · 17:42:10</span>
+    <span class="muted" style="font-size:12px">jh.park</span>
+  </div>
+
+  <div style="display:flex;flex-wrap:wrap;flex:1;min-width:0">
+  <aside class="sb" aria-label="메뉴">
+    <a href="#">Overview</a><a href="#">Summary</a>
+    <a href="#">서버 <span class="n">6 ▾</span></a><a href="#">스토리지 <span class="n">7 ▾</span></a><a href="#">네트워크 <span class="n">6 ▾</span></a><a href="#">자원관리 <span class="n">3 ▾</span></a><a href="#">자원 최적화 <span class="n">2 ▾</span></a><a href="#">특수 기능</a><a href="#">이슈</a><a href="#">위키</a><a href="#">게시판</a>
+    <a href="#" class="grp on">설정 <span class="n">3 ▴</span></a>
+    <a href="#" class="sub on">설정</a><a href="#" class="sub">업그레이드</a><a href="#" class="sub">엣지 토큰 맞추기</a>
+  </aside>
+
+  <main style="flex:999 1 560px;min-width:0;display:flex;flex-direction:column;gap:12px;padding:16px 24px 28px;box-sizing:border-box">
+
+    <div class="st">⚙️ 설정</div>
+    <div class="gb">
+      <a href="#">인프라 등록</a><a href="#">백업</a><a href="#">수집</a><a href="#">엣지·원격</a><a href="#" class="on">사용자</a><a href="#">보안</a><a href="#">알림·연동</a><a href="#">로그</a><a href="#">시스템</a>
+    </div>
+    <div class="g2">
+      <span class="pre">사용자 ›</span>
+      <a href="#">메인포탈 사용자 관리</a><a href="#">엣지 사용자 배포</a><a href="#">인증(AD)</a><a href="#" class="on">기능 사용 현황</a>
+    </div>
+    <div class="muted" style="font-size:12px;margin-left:14px">사용자 계정(역할·2FA)·엣지 사용자 배포(중앙→엣지)·인증(AD/LDAP) 연동·<b style="color:#e6edf6;font-weight:600">기능 사용 현황(누가 어느 화면을 얼마나 — UI 개선 자료)</b>.</div>
+
+    <!-- ===== 화면 머리 ===== -->
+    <div style="display:flex;justify-content:space-between;align-items:flex-end;gap:12px;flex-wrap:wrap;margin-top:6px">
+      <div style="min-width:0">
+        <h2 style="margin:0;font-size:18px">기능 사용 현황</h2>
+        <div class="muted" style="font-size:12px;margin-top:4px">이 포탈에서 연 화면(탭 · 특수 기능 도구 · 설정 하위 · 관제 콘솔)을 사용자 · 날짜별로 셉니다. 입력 내용 · 검색어 · 본 데이터는 기록하지 않습니다.</div>
+      </div>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <span class="seg2" role="group" aria-label="기간"><a href="#">7일</a><a href="#" class="on">30일</a><a href="#">90일</a><a href="#">직접</a></span>
+        <span class="muted mono" style="font-size:12px">2026-10-07 ~ 11-05 (KST)</span>
+        <button class="btn" type="button">CSV</button>
+        <button class="btn" type="button">새로고침</button>
+      </div>
+    </div>
+
+    <div class="tabs" role="tablist">
+      <a href="#" class="on">개요</a><a href="Features.dc.html">기능별 <span class="muted" style="font-weight:500">71 / 190</span></a><a href="Users.dc.html">사용자별 <span class="muted" style="font-weight:500">23</span></a><a href="Settings.dc.html">수집 설정</a>
+    </div>
+
+    <div class="band info">
+      <svg class="ic" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><circle cx="8" cy="8" r="6.5"/><path d="M8 7v4M8 5v.2"/></svg>
+      <div>엣지 포탈(법인)에서 연 화면은 들어 있지 않습니다 — 이 포탈 것만 셉니다. ‘머문 시간’ 은 창이 보이고 마지막 입력 뒤 5분 이내인 시간만 더합니다(수집 설정에서 조정). 오늘(11-05)은 아직 진행 중이라 <b>부분</b>으로 표시하고 추이 막대를 빗금으로 구분합니다.</div>
+    </div>
+
+    <!-- ===== KPI ===== -->
+    <div class="kpis">
+      <div class="card tile"><div class="lb">활성 사용자</div><div class="val">23<small>/ 41 명</small></div><div class="sub">30일 안에 한 번 이상 열람 · 미접속 18명</div></div>
+      <div class="card tile"><div class="lb">열람</div><div class="val mono">4,507<small>회</small></div><div class="sub">하루 평균 150회 · 평일 199 · 주말 40</div></div>
+      <div class="card tile"><div class="lb">머문 시간</div><div class="val">286<small>시간 05분</small></div><div class="sub">1회 평균 3분 48초</div></div>
+      <div class="card tile"><div class="lb">쓰인 기능</div><div class="val">71<small>/ 약 190</small></div><div class="sub">탭 14 · 도구 31 · 설정 하위 22 · 콘솔 4</div></div>
+      <div class="card tile"><div class="lb">30일간 0회 <a href="Features.dc.html" style="font-weight:500;font-size:11.5px">기능별에서 보기 →</a></div><div class="val" style="color:#fcd34d">119</div><div class="sub">메뉴 항목 6 · 카드 전용 도구 93 · 설정 하위 20</div></div>
+    </div>
+
+    <div class="grid">
+      <!-- ===== 상위 기능 표 ===== -->
+      <div class="card panel">
+        <div class="ph"><span class="pt">많이 쓰는 기능 — 상위 15</span><span class="muted" style="font-size:12px">열람 내림차순 · 제목을 누르면 정렬 · 전체는 ‘기능별’ 탭</span></div>
+        <div class="tw">
+        <table>
+          <thead><tr><th class="r">#</th><th class="s">기능</th><th class="s">위치</th><th class="sd r">열람</th><th class="s r">사용자</th><th class="s r">머문 시간</th><th class="s r">1회 평균</th><th class="s">비중</th><th class="s r">지난 30일 대비</th></tr></thead>
+          <tbody>
+            <tr><td class="r muted">1</td><td><b>가상화 서버</b></td><td class="pos">서버 › 가상화 서버 <span class="tag gray">탭</span></td><td class="r mono">1,004</td><td class="r mono">21</td><td class="r mono">66h 20m</td><td class="r mono">3.9분</td><td><div class="ub"><div class="bar"><i style="width:100%"></i></div><span class="mono muted">22.3%</span></div></td><td class="r trend up">+6%</td></tr>
+            <tr><td class="r muted">2</td><td><b>Overview</b></td><td class="pos">Overview <span class="tag gray">탭</span></td><td class="r mono">742</td><td class="r mono">23</td><td class="r mono">51h 10m</td><td class="r mono">4.1분</td><td><div class="ub"><div class="bar"><i style="width:74%"></i></div><span class="mono muted">16.5%</span></div></td><td class="r trend dn">−2%</td></tr>
+            <tr><td class="r muted">3</td><td><b>ESXi 호스트</b></td><td class="pos">서버 › ESXi 호스트 <span class="tag gray">탭</span></td><td class="r mono">418</td><td class="r mono">17</td><td class="r mono">22h 05m</td><td class="r mono">3.2분</td><td><div class="ub"><div class="bar"><i style="width:42%"></i></div><span class="mono muted">9.3%</span></div></td><td class="r trend flat">+1%</td></tr>
+            <tr><td class="r muted">4</td><td><b>알람</b></td><td class="pos">서버 › 알람 <span class="tag gray">탭</span></td><td class="r mono">377</td><td class="r mono">19</td><td class="r mono">14h 30m</td><td class="r mono">2.3분</td><td><div class="ub"><div class="bar"><i style="width:38%"></i></div><span class="mono muted">8.4%</span></div></td><td class="r trend up">+12%</td></tr>
+            <tr><td class="r muted">5</td><td><b>스토리지 현황</b></td><td class="pos">스토리지 › 스토리지 현황 <span class="tag blue">도구</span></td><td class="r mono">296</td><td class="r mono">11</td><td class="r mono">24h 50m</td><td class="r mono">5.0분</td><td><div class="ub"><div class="bar"><i style="width:29%"></i></div><span class="mono muted">6.6%</span></div></td><td class="r trend up">+9%</td></tr>
+            <tr><td class="r muted">6</td><td><b>VM 정밀 검색</b></td><td class="pos">가상화 서버 탭 · 특수 기능 카드 <span class="tag blue">도구</span></td><td class="r mono">231</td><td class="r mono">14</td><td class="r mono">9h 40m</td><td class="r mono">2.5분</td><td><div class="ub"><div class="bar"><i style="width:23%"></i></div><span class="mono muted">5.1%</span></div></td><td class="r trend flat">+3%</td></tr>
+            <tr><td class="r muted">7</td><td><b>이슈</b></td><td class="pos">이슈 <span class="tag gray">탭</span></td><td class="r mono">205</td><td class="r mono">16</td><td class="r mono">17h 15m</td><td class="r mono">5.0분</td><td><div class="ub"><div class="bar"><i style="width:20%"></i></div><span class="mono muted">4.5%</span></div></td><td class="r trend up">+31%</td></tr>
+            <tr><td class="r muted">8</td><td><b>데이터스토어</b></td><td class="pos">스토리지 › 데이터스토어 <span class="tag gray">탭</span></td><td class="r mono">164</td><td class="r mono">12</td><td class="r mono">6h 50m</td><td class="r mono">2.5분</td><td><div class="ub"><div class="bar"><i style="width:16%"></i></div><span class="mono muted">3.6%</span></div></td><td class="r trend dn">−4%</td></tr>
+            <tr><td class="r muted">9</td><td><b>특수 기능(카드 그리드)</b></td><td class="pos">특수 기능 <span class="tag gray">탭</span></td><td class="r mono">158</td><td class="r mono">20</td><td class="r mono">3h 10m</td><td class="r mono">1.2분</td><td><div class="ub"><div class="bar"><i style="width:16%"></i></div><span class="mono muted">3.5%</span></div></td><td class="r trend dn">−8%</td></tr>
+            <tr><td class="r muted">10</td><td><b>전체 네트워크 장비</b></td><td class="pos">네트워크 › 전체 네트워크 장비 <span class="tag blue">도구</span></td><td class="r mono">142</td><td class="r mono">7</td><td class="r mono">11h 20m</td><td class="r mono">4.8분</td><td><div class="ub"><div class="bar"><i style="width:14%"></i></div><span class="mono muted">3.2%</span></div></td><td class="r trend flat">+2%</td></tr>
+            <tr><td class="r muted">11</td><td><b>감사 로그</b></td><td class="pos">설정 › 로그 › 감사 로그 <span class="tag purple">설정</span></td><td class="r mono">121</td><td class="r mono">4</td><td class="r mono">6h 05m</td><td class="r mono">3.0분</td><td><div class="ub"><div class="bar"><i style="width:12%"></i></div><span class="mono muted">2.7%</span></div></td><td class="r trend up">+15%</td></tr>
+            <tr><td class="r muted">12</td><td><b>게시판</b></td><td class="pos">게시판 <span class="tag gray">탭</span></td><td class="r mono">118</td><td class="r mono">18</td><td class="r mono">4h 20m</td><td class="r mono">2.2분</td><td><div class="ub"><div class="bar"><i style="width:12%"></i></div><span class="mono muted">2.6%</span></div></td><td class="r trend dn">−12%</td></tr>
+            <tr><td class="r muted">13</td><td><b>Backup</b></td><td class="pos">서버 › Backup <span class="tag blue">도구</span></td><td class="r mono">96</td><td class="r mono">6</td><td class="r mono">8h 40m</td><td class="r mono">5.4분</td><td><div class="ub"><div class="bar"><i style="width:10%"></i></div><span class="mono muted">2.1%</span></div></td><td class="r trend flat">+4%</td></tr>
+            <tr><td class="r muted">14</td><td><b>위키</b></td><td class="pos">위키 <span class="tag gray">탭</span></td><td class="r mono">89</td><td class="r mono">13</td><td class="r mono">7h 30m</td><td class="r mono">5.1분</td><td><div class="ub"><div class="bar"><i style="width:9%"></i></div><span class="mono muted">2.0%</span></div></td><td class="r trend up">+22%</td></tr>
+            <tr><td class="r muted">15</td><td><b>서버 분석</b></td><td class="pos">자원관리 › 서버 분석 <span class="tag blue">도구</span></td><td class="r mono">77</td><td class="r mono">5</td><td class="r mono">6h 10m</td><td class="r mono">4.8분</td><td><div class="ub"><div class="bar"><i style="width:8%"></i></div><span class="mono muted">1.7%</span></div></td><td class="r trend flat">−1%</td></tr>
+          </tbody>
+        </table>
+        </div>
+        <div class="muted" style="font-size:11.5px">나머지 56개 기능 269회(6.0%) · ‘지난 30일 대비’ 는 직전 같은 길이 기간의 열람과 비교 · 직전 기간 기록이 없으면 ‘—’</div>
+      </div>
+
+      <!-- ===== 오른쪽 열 ===== -->
+      <div style="display:flex;flex-direction:column;gap:16px;min-width:0">
+        <div class="card panel">
+          <div class="ph"><span class="pt">메뉴 묶음별 비중</span><span class="muted" style="font-size:11.5px">열람 기준</span></div>
+          <div class="stack" role="img" aria-label="메뉴 묶음별 열람 비중">
+            <i style="width:42.8%;background:#3b82f6"></i><i style="width:18.2%;background:#d97706"></i><i style="width:10.8%;background:#0891b2"></i><i style="width:9.1%;background:#9333ea"></i><i style="width:8%;background:#0d9488"></i><i style="width:11.1%;background:#5d6b85"></i>
+          </div>
+          <div class="lgd">
+            <i style="background:#3b82f6"></i><span>서버(가상화 서버 · ESXi · 알람 · Backup · vCenter)</span><span class="mono">1,930</span><span class="mono muted">42.8%</span>
+            <i style="background:#d97706"></i><span>Overview · Summary</span><span class="mono">820</span><span class="mono muted">18.2%</span>
+            <i style="background:#0891b2"></i><span>스토리지</span><span class="mono">486</span><span class="mono muted">10.8%</span>
+            <i style="background:#9333ea"></i><span>이슈 · 위키 · 게시판</span><span class="mono">412</span><span class="mono muted">9.1%</span>
+            <i style="background:#0d9488"></i><span>특수 기능(카드 전용 도구 포함)</span><span class="mono">360</span><span class="mono muted">8.0%</span>
+            <i style="background:#5d6b85"></i><span>기타(설정 268 · 네트워크 181 · 자원관리 50)</span><span class="mono">499</span><span class="mono muted">11.1%</span>
+          </div>
+        </div>
+
+        <div class="card panel">
+          <div class="ph"><span class="pt">일별 열람 추이</span><span class="muted" style="font-size:11.5px">최고 10-21(화) 230회 · 오늘 96회(부분)</span></div>
+          <div class="bars" role="img" aria-label="일별 열람 추이 30일">
+            <i style="height:82%"></i><i style="height:87%"></i><i style="height:77%"></i><i style="height:73%"></i><i class="we" style="height:18%"></i><i class="we" style="height:17%"></i><i style="height:93%"></i><i style="height:86%"></i><i style="height:97%"></i><i style="height:83%"></i><i style="height:74%"></i><i class="we" style="height:22%"></i><i class="we" style="height:14%"></i><i style="height:90%"></i><i style="height:100%"></i><i style="height:92%"></i><i style="height:80%"></i><i style="height:70%"></i><i class="we" style="height:20%"></i><i class="we" style="height:13%"></i><i style="height:95%"></i><i style="height:89%"></i><i style="height:85%"></i><i style="height:77%"></i><i style="height:66%"></i><i class="we" style="height:19%"></i><i class="we" style="height:16%"></i><i style="height:93%"></i><i style="height:90%"></i><i class="part" style="height:42%"></i>
+          </div>
+          <div class="axis"><span>10-07</span><span>10-16</span><span>10-26</span><span>11-05</span></div>
+          <div class="lgd" style="grid-template-columns:12px auto 12px auto 12px auto;font-size:11.5px"><i style="background:#3b82f6"></i><span>평일</span><i style="background:#1e3a5f"></i><span>주말</span><i style="background:repeating-linear-gradient(135deg,#3b82f6 0 3px,#141b2d 3px 6px)"></i><span>오늘(부분)</span></div>
+        </div>
+
+        <div class="card panel">
+          <div class="ph"><span class="pt">역할별</span><span class="muted" style="font-size:11.5px">열람 · 활성 인원</span></div>
+          <div class="rb">
+            <span>admin</span><div class="bar"><i style="width:100%"></i></div><span class="mono r">2,040 · 9명</span>
+            <span>operator</span><div class="bar"><i style="width:81%"></i></div><span class="mono r">1,650 · 8명</span>
+            <span>viewer</span><div class="bar"><i style="width:40%"></i></div><span class="mono r">817 · 6명</span>
+          </div>
+          <div class="muted" style="font-size:11.5px">viewer 는 Overview · 가상화 서버 · 게시판 세 화면이 열람의 81% — 역할별 첫 화면 기본값의 근거가 된다.</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===== UI 개선 단서 ===== -->
+    <div class="card panel">
+      <div class="ph"><span class="pt">UI 개선 단서</span><span class="muted" style="font-size:12px">아래 규칙으로 집계에서 자동으로 뽑는다 — 판단은 사람이 한다</span></div>
+      <div class="hint">
+        <div class="h">
+          <h4><span class="tag ok">승격 후보</span> 메뉴에 없는데 많이 쓰는 도구</h4>
+          <ul>
+            <li><b>VM 복제(백업)</b> 88회 · 7명 — 특수 기능 카드로만 연다. ‘서버 › Backup’ 탭 줄에 넣을 후보</li>
+            <li><b>로그인 실패 분석</b> 64회 · 3명(관리자) — 설정 › 보안 묶음에 바로 가기 후보</li>
+            <li><b>시리얼 조회</b> 59회 · 9명 — ⌘K 검색의 ‘sn:’ 접두로 대체됐는지 다음 기간에 확인</li>
+          </ul>
+          <div class="pos">규칙: 메뉴 항목이 아닌 도구 중 열람 상위 3 · 2명 이상</div>
+        </div>
+        <div class="h">
+          <h4><span class="tag warn">정리 후보</span> 메뉴에 있는데 30일간 0회</h4>
+          <ul>
+            <li><b>스토리지 › 베어메탈 스토리지</b> — 직전 30일도 0회</li>
+            <li><b>네트워크 › 글로벌 네트워크 점검</b> — 직전 30일 2회</li>
+            <li><b>자원 최적화 › Infra Observability</b> — 직전 30일 0회</li>
+            <li class="faint">+ 3개 더 (기능별 탭 › ‘안 씀’ 필터)</li>
+          </ul>
+          <div class="pos">규칙: 메뉴 항목(상단 메뉴 · 설정 하위) 중 이 기간 0회 · 권한으로 아무도 못 보는 항목은 제외</div>
+        </div>
+        <div class="h">
+          <h4><span class="tag blue">깊이</span> 자주 쓰는데 두 번 이상 들어가야 하는 화면</h4>
+          <ul>
+            <li><b>설정 › 로그 › 감사 로그</b> 121회 · 4명 — 설정 묶음 → 하위 2단 · 주 7회 이상 여는 사람 2명</li>
+            <li><b>설정 › 사용자 › 메인포탈 사용자 관리</b> 73회 · 3명</li>
+            <li><b>특수 기능 › VM 정밀 검색</b> — 카드 그리드를 거쳐 여는 비율 38% (가상화 서버 탭 줄에서 62%)</li>
+          </ul>
+          <div class="pos">규칙: 설정 하위 · 카드 전용 도구 중 열람 상위 · 사용자당 주 3회 이상</div>
+        </div>
+      </div>
+    </div>
+
+  </main>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1260}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>
