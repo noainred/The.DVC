@@ -663,8 +663,11 @@ const INV_TEXT_KEYS = ['id', 'name', 'host', 'cluster', 'datacenter', 'type', 'v
   'hostName', 'serviceTag', 'mgmtIp'];
 /** v2.727(감사 D-05): 글자가 아니면 뜻이 없는 필드(IP 는 수가 아니다) — 문자열 외에는 null 로 버린다. */
 // v2.820: VM 의 정확한 위치(vcenter/vmPlacement.js — Bareos 플러그인이 이 글자로 VM 을 찾는다) — 글자가 아니면 null(모름).
-// v2.887: instanceUuid(서비스 인벤토리 VM 키)도 글자만 — 엣지가 객체를 보내면 null(읽지 못함). 길이는 아래 문자열 상한이 자른다.
+// v2.887: instanceUuid(서비스 인벤토리 VM 키)도 글자만 — 엣지가 객체를 보내면 null(읽지 못함).
+// v2.899(점검 E8 — 정정): 예전 주석의 '길이는 아래 문자열 상한이 자른다' 는 사실이 아니었다(이 정제에는 문자열 길이 상한이 없다).
+//   instanceUuid 는 키가 되므로 모양(INSTANCE_UUID_RE — 글자 · 숫자 · '_' · '-' 64자 이내)이 아니면 null(읽지 못함)로 버린다. 빈 값은 그대로(없음).
 const INV_STR_ONLY_KEYS = ['mgmtIp', 'vcDcPath', 'folderPath', 'instanceUuid'];
+export const INSTANCE_UUID_RE = /^[\w-]{1,64}$/;
 /**
  * 롤업·화면이 수로 계산하는 인벤토리 필드(v2.605 CEN2605-01) — 호스트·VM·DS·네트워크의 수치 필드 합집합.
  * 정상 엣지(inventoryPush.js)는 숫자를 보내므로 정상 입력에는 무변경이다.
@@ -848,6 +851,7 @@ export function sanitizeInventoryList(list, vcId, max, dropped) {
       const v = o[k];
       if (v != null && typeof v !== 'string') { o[k] = null; dropped.coerced += 1; }
     }
+    if (typeof o.instanceUuid === 'string' && o.instanceUuid !== '' && !INSTANCE_UUID_RE.test(o.instanceUuid)) { o.instanceUuid = null; dropped.coerced += 1; }   // v2.899 E8
     // v2.605(CEN2605-01): 수치 필드도 좁힌다 — '32' 같은 글자가 오면 store 롤업의 `+=` 가 문자열 연결이 되어 **전 함대**
     //   KPI(global·byRegion)가 오류 없이 틀린다(cpuCores '3232'). 숫자 글자는 수로, 그 밖(객체·'abc')은 null(읽지 못함).
     for (const k of INV_NUM_KEYS) {

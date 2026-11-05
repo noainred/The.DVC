@@ -175,3 +175,55 @@ test('점검 B1 — 기준 시계를 바꾸면 회차 열쇠를 비우고 anchor
   const runner = fs.readFileSync(new URL('../src/bareos/groupRunner.js', import.meta.url), 'utf8');
   assert.match(runner, /const nowKey = slotKey\(now, g\.schedule\);/);
 });
+
+test('점검 E6 — VM PCI 패스스루 주소 파싱: 옛 정규식과 같은 결과 · 닫히지 않은 <backing 반복에도 선형(비율)', async () => {
+  const { vmPassthroughPciIds, PCI_SEG_MAX } = await import('../src/vcenter/soapClient.js');
+  const dev = (backing) => `<device xsi:type="VirtualPCIPassthrough"><key>13000</key>${backing}</device>`;
+  const xml = [
+    dev('<backing xsi:type="VirtualPCIPassthroughDeviceBackingInfo"><id>0000:3b:00.0</id><deviceId>1eb8</deviceId></backing>'),
+    dev('<backing xsi:type="VirtualPCIPassthroughDynamicBackingInfo"><assignedId>0000:af:00.0</assignedId></backing>'),
+    dev('<backing xsi:type="VirtualPCIPassthroughVmiopBackingInfo"><vgpu>grid_t4-4q</vgpu></backing>'),   // vGPU — 건너뛴다
+    dev('<backingObjectId>x</backingObjectId><backing xsi:type="VirtualPCIPassthroughDeviceBackingInfo"><id>0000:5e:00.0</id></backing>'),   // \b
+    dev('<backing xsi:type="VirtualPCIPassthroughDeviceBackingInfo"><id>not-a-pci</id></backing>'),
+    dev('<backing xsi:type="x"><id>0000:3b:00.0</id></backing>'),   // 중복은 한 번
+  ].join('');
+  assert.deepEqual(vmPassthroughPciIds(xml), ['0000:3b:00.0', '0000:af:00.0', '0000:5e:00.0']);
+  // 옛 정규식(35d4475)과 같은 결과 — 정상 출력에서 뜻이 바뀌지 않았다
+  const old = (deviceXml) => {
+    const ids = [];
+    for (const seg of String(deviceXml || '').split(/xsi:type="VirtualPCIPassthrough"/).slice(1)) {
+      const b = /<backing\b[^>]{0,200}>([\s\S]*?)<\/backing>/.exec(seg);
+      if (!b || /VmiopBackingInfo/.test(b[0].slice(0, 200))) continue;
+      const v = (/<assignedId>([^<]{1,64})<\/assignedId>/.exec(b[1])?.[1] || /<id>([^<]{1,64})<\/id>/.exec(b[1])?.[1] || '').trim();
+      if (/^[0-9a-fA-F:.]{5,32}$/.test(v) && !ids.includes(v)) ids.push(v);
+      if (ids.length >= 16) break;
+    }
+    return ids;
+  };
+  assert.deepEqual(vmPassthroughPciIds(xml), old(xml));
+  const longHead = dev(`<backing ${'a'.repeat(250)}><id>0000:11:00.0</id></backing><backing x="1"><id>0000:12:00.0</id></backing>`);
+  assert.deepEqual(vmPassthroughPciIds(longHead), old(longHead), '[^>]{0,200} 을 넘는 머리는 다음 <backing 으로');
+  // 비율 — 닫히지 않은 <backing 반복(크기 4배 → 시간이 2차면 16배)
+  const evil = (n) => `xsi:type="VirtualPCIPassthrough"${'<backing x>'.repeat(n)}`;
+  const time = (s) => { const t0 = process.hrtime.bigint(); for (let i = 0; i < 3; i++) vmPassthroughPciIds(s); return Number(process.hrtime.bigint() - t0) / 1e6; };
+  const small = evil(3000); const big = evil(12000);
+  time(small);
+  const a = time(small); const b = time(big);
+  assert.ok(b < Math.max(a * 8, 30), `선형이어야 한다(${a.toFixed(1)}ms → ${b.toFixed(1)}ms)`);
+  assert.ok(PCI_SEG_MAX >= 16_384 && PCI_SEG_MAX <= 262_144);
+});
+
+test('점검 E8 — 엣지가 보낸 instanceUuid 는 모양 · 길이를 본다(키가 되는 값 — 예전 주석의 문자열 상한은 없었다)', async () => {
+  const { sanitizeInventoryList } = await import('../src/routes/central.js');
+  const dropped = { notObject: 0, otherVcenter: 0, badId: 0, coerced: 0 };
+  const out = sanitizeInventoryList([
+    { id: 'vm-1', instanceUuid: '502e1f4b-8c3a-4d2b-9e1f-0a1b2c3d4e5f' },
+    { id: 'vm-2', instanceUuid: 'x'.repeat(65) },
+    { id: 'vm-3', instanceUuid: 'a b<script>' },
+    { id: 'vm-4', instanceUuid: '' },
+    { id: 'vm-5', instanceUuid: { $: 1 } },
+    { id: 'vm-6' },
+  ], 'vc-a', 100, dropped);
+  assert.deepEqual(out.map((v) => v.instanceUuid), ['502e1f4b-8c3a-4d2b-9e1f-0a1b2c3d4e5f', null, null, '', null, undefined]);
+  assert.equal(dropped.coerced, 3);
+});

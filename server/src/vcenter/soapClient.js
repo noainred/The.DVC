@@ -1127,13 +1127,35 @@ export function parseVmGpu(deviceXml) {
  *   DeviceBackingInfo `<id>`(정적 DirectPath) · DynamicBackingInfo `<assignedId>`(동적 DirectPath — 켜진 VM 에만 값이 있다).
  * vGPU(VmiopBackingInfo) 장치는 건너뛴다. 못 읽으면 그 장치만 빠진다(지어내지 않는다). 16개 상한.
  */
+export const PCI_SEG_MAX = 65_536;
+/**
+ * 장치 조각의 첫 backing — `<backing\b[^>]{0,200}>…</backing>` 와 같은 뜻을 indexOf 로(v2.899 점검 E6 — 실측: 닫히지 않은 `<backing` 이 반복되면
+ * 게으른 `[\s\S]*?` 가 시작점마다 끝까지 훑어 2차 시간이었다 · 250KB 1.6초). 조각은 PCI_SEG_MAX 로 먼저 자른다. 못 찾으면 null.
+ */
+function firstBacking(seg) {
+  const CLOSE = '</backing>';
+  let from = 0;
+  for (let n = 0; n < 64; n++) {
+    const i = seg.indexOf('<backing', from);
+    if (i < 0) return null;
+    from = i + 8;
+    if (/\w/.test(seg[i + 8] || '')) continue;   // \b — <backingObjectId> 같은 다른 태그
+    const gt = seg.indexOf('>', i + 8);
+    if (gt < 0) return null;
+    if (gt - (i + 8) > 200) continue;   // [^>]{0,200}
+    const end = seg.indexOf(CLOSE, gt + 1);
+    if (end < 0) return null;   // 뒤에도 닫힘이 없다 — 다음 <backing 도 맞을 수 없다
+    return { head: seg.slice(i, Math.min(i + 200, end + CLOSE.length)), inner: seg.slice(gt + 1, end) };
+  }
+  return null;
+}
 export function vmPassthroughPciIds(deviceXml) {
   const ids = [];
   const parts = String(deviceXml || '').split(/xsi:type="VirtualPCIPassthrough"/).slice(1);
-  for (const seg of parts) {
-    const b = /<backing\b[^>]{0,200}>([\s\S]*?)<\/backing>/.exec(seg);
-    if (!b || /VmiopBackingInfo/.test(b[0].slice(0, 200))) continue;
-    const id = /<assignedId>([^<]{1,64})<\/assignedId>/.exec(b[1])?.[1] || /<id>([^<]{1,64})<\/id>/.exec(b[1])?.[1] || '';
+  for (const raw of parts) {
+    const b = firstBacking(raw.length > PCI_SEG_MAX ? raw.slice(0, PCI_SEG_MAX) : raw);
+    if (!b || /VmiopBackingInfo/.test(b.head)) continue;
+    const id = /<assignedId>([^<]{1,64})<\/assignedId>/.exec(b.inner)?.[1] || /<id>([^<]{1,64})<\/id>/.exec(b.inner)?.[1] || '';
     const v = id.trim();
     if (/^[0-9a-fA-F:.]{5,32}$/.test(v) && !ids.includes(v)) ids.push(v);
     if (ids.length >= 16) break;
