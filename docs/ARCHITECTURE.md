@@ -153,7 +153,7 @@
 | `toolcats/` | 2 | 362 | `toolcats/settings.js` (3) | toolcats/settings.js — 특수 기능 카테고리 설정 (`tool-categories.json`, v2.455). |
 | `tools/` | 17 | 3,256 | `tools/powerOffPoller.js` (3) | tools/powerOffPoller.js — 전원 꺼짐 점검기(v2.484). 설정 주기(기본 6시간)마다 스냅샷의 꺼진 VM 을 |
 | `upgrade/` | 19 | 4,160 | `upgrade/manager.js` (7) | Orchestrates the auto-upgrade feature for the running portal: tracks the last |
-| `usermenu/` | 1 | 355 | `usermenu/store.js` (1) | usermenu/store.js — 계정별 좌측 메뉴(내 메뉴)와 슈퍼 관리자 배포 메뉴 저장소(v2.726, `user-menus.json`). |
+| `usermenu/` | 1 | 370 | `usermenu/store.js` (1) | usermenu/store.js — 계정별 좌측 메뉴(내 메뉴)와 슈퍼 관리자 배포 메뉴 저장소(v2.726, `user-menus.json`). |
 | `util/` | 84 | 8,607 | `util/numOrNull.js` (189) | `numOrNull` — '읽지 못한 수치' 를 0 으로 둔갑시키지 않는 단일 판정 (v2.561). |
 | `vcenter/` | 26 | 7,404 | `vcenter/registry.js` (28) | vCenter registry — read/write the managed list of vCenters in |
 | `veeam/` | 49 | 9,355 | `veeam/backupStatus.js` (11) | veeam/backupStatus.js — '백업' 메뉴(백업 서머리 · 백업 세부내용, v2.779 — 사용자 요청 "1개 vcenter 를 선택하면 VM 백업 전체 현황 · |
@@ -168,7 +168,7 @@
 | `wiki/` | 4 | 921 | `wiki/store.js` (4) | wiki/store.js — 위키(컨플루언스 같은 문서 공간) 저장소(v2.881 · 시안 docs/design/wiki-issues ①~⑤ · ⑫). |
 | `xferspeed/` | 7 | 1,946 | `xferspeed/schedule.js` (4) | xferspeed/schedule.js — 전송 속도 측정의 **실행 일정**(순수 — 파일·타이머 없음, v2.735). |
 
-디렉터리 91개 · 파일 1138개 · 256,612줄. 대표 파일은 `index.js` 가 있으면 그것, 없으면 그 디렉터리 밖에서 가장 많이 import 되는 파일이고, 설명은 그 파일 머리말의 첫 줄을 그대로 옮긴 것이다(따라서 머리말이 곧 문서다 — 첫 줄을 잘 쓸 것).
+디렉터리 91개 · 파일 1138개 · 256,627줄. 대표 파일은 `index.js` 가 있으면 그것, 없으면 그 디렉터리 밖에서 가장 많이 import 되는 파일이고, 설명은 그 파일 머리말의 첫 줄을 그대로 옮긴 것이다(따라서 머리말이 곧 문서다 — 첫 줄을 잘 쓸 것).
 <!-- arch-doc:modules:end -->
 
 ### 3-3. 라우트 그룹 → 게이트

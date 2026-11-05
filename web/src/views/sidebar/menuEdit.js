@@ -5,18 +5,31 @@
  *  · 모든 연산은 **새 배열**을 돌려준다(React 상태). 실패는 조용히 무시하지 않고 `{ ok:false, reason }` 또는 입력 그대로를 돌려준다.
  *  · 같은 항목(같은 키)은 한 그룹에만 있다 — 다른 그룹에 넣으려면 먼저 빼야 한다(한 화면이 두 자리에 있지 않게, v2.725 규약).
  *  · 하위 메뉴 없는 단독 항목(Overview·Summary·특수 기능·게시판)은 **자리만 옮길 수 있고 지울 수 없다**(지우면 그 화면으로 갈 길이 없다).
+ *  · v2.891(사용자 요청 '단독 메뉴로 추가하는 기능'): 아무 항목(그룹 안 항목 · 특수 기능 도구)이나 **단독 메뉴**로 둘 수 있다 —
+ *    `addSingle`(오른쪽 목록에서) · `detachToSingle`(그룹 항목을 빼서 그 그룹 바로 아래로). 이렇게 만든 단독은 ✕ 로 지운다(기본 단독만 못 지움 —
+ *    `fixedSingleKeys`). 단독 판정은 `sideMenu.isSingle` 하나(편집 모양의 단독 = children 배열이 없다). 라벨은 저장하지 않는다(항목에서 채운다).
  *  · 새 그룹 id 는 `custom-<n>`(겹치지 않는 n). 저장 모양에는 그룹 라벨을 **기본과 다를 때만** 싣는다(기본 라벨이 바뀌어도 따라가게).
  */
-import { itemKey, defaultIndex, defaultMenu, resolveMenu, CUSTOM_PREFIX, CUSTOM_GROUP_LABEL } from './sideMenu.js';
+import { itemKey, defaultIndex, defaultMenu, resolveMenu, isSingle, fixedSingleKeys, CUSTOM_PREFIX, CUSTOM_GROUP_LABEL } from './sideMenu.js';
+
+export { isSingle };
 
 export const LIMITS = Object.freeze({ groups: 40, items: 400, label: 40 });
 
 /** 해석된 그룹(resolveMenu().groups 또는 MENU_GROUPS) → 편집 모양. */
 export function toEditable(groups) {
   const { groupLabel } = defaultIndex();
-  return (groups || []).map((g) => (g.tab
-    ? { id: g.id, label: g.label, custom: !groupLabel.has(g.id), tab: g.tab }
+  const fixed = fixedSingleKeys();
+  return (groups || []).map((g) => (isSingle(g)
+    ? { ...singleFields(g), id: g.id, label: g.label, custom: !groupLabel.has(g.id), key: itemKey(g), fixed: fixed.has(itemKey(g)) }
     : { id: g.id, label: g.label, custom: !groupLabel.has(g.id), children: (g.children || []).map((c) => ({ key: itemKey(c), ...c })) }));
+}
+
+/** 단독 메뉴가 들고 가는 칸(주소 + 표시용 표지) — 라벨 · id 는 부르는 쪽이 정한다. */
+function singleFields(g) {
+  return g.tool
+    ? { tool: g.tool, ...(g.seg ? { seg: g.seg } : {}), ...(g.fromTools ? { fromTools: true } : {}), ...(g.adminOnly ? { adminOnly: true } : {}), ...(g.iconOf ? { iconOf: g.iconOf } : {}) }
+    : { tab: g.tab, ...(g.adminOnly ? { adminOnly: true } : {}), ...(g.iconOf ? { iconOf: g.iconOf } : {}) };
 }
 
 /** 편집 모양 → 저장 모양. 빈 그룹은 뺀다. */
@@ -26,7 +39,12 @@ export function toStored(groups) {
   for (const g of groups || []) {
     const label = String(g.label || '').trim();
     const withLabel = label && label !== (groupLabel.get(g.id) || '') ? { label } : {};
-    if (g.tab) { out.push({ id: g.id, ...withLabel, tab: g.tab }); continue; }
+    if (isSingle(g)) {
+      // v2.891: 새로 만든 단독(custom id)은 라벨을 싣지 않는다 — 항목 라벨(이름 덮어쓰기)을 따라간다. 기본 단독은 예전 규칙 그대로
+      const lab = g.custom ? {} : withLabel;
+      out.push(g.tool ? { id: g.id, ...lab, tool: g.tool, ...(g.seg ? { seg: g.seg } : {}) } : { id: g.id, ...lab, tab: g.tab });
+      continue;
+    }
     const children = (g.children || []).map((c) => (c.tool ? { tool: c.tool, ...(c.seg ? { seg: c.seg } : {}) } : { tab: c.tab }));
     if (!children.length) continue;
     out.push({ id: g.id, ...withLabel, children });
@@ -49,7 +67,7 @@ export function moveGroup(groups, i, dir) {
 
 export function moveItem(groups, gi, ii, dir) {
   const g = groups[gi];
-  if (!g?.children) return groups;
+  if (!g || isSingle(g)) return groups;
   const j = ii + dir;
   if (ii < 0 || ii >= g.children.length || j < 0 || j >= g.children.length) return groups;
   const next = groups.slice();
@@ -59,7 +77,7 @@ export function moveItem(groups, gi, ii, dir) {
 
 export function removeItem(groups, gi, ii) {
   const g = groups[gi];
-  if (!g?.children || ii < 0 || ii >= g.children.length) return groups;
+  if (!g || isSingle(g) || ii < 0 || ii >= g.children.length) return groups;
   const next = groups.slice();
   next[gi] = { ...g, children: g.children.filter((_, k) => k !== ii) };
   return next;
@@ -68,7 +86,7 @@ export function removeItem(groups, gi, ii) {
 /** 어느 그룹에 있는가 — 없으면 null. 단독 그룹도 본다. */
 export function placedIn(groups, key) {
   for (const g of groups || []) {
-    if (g.tab && `tab:${g.tab}` === key) return { gi: groups.indexOf(g), group: g, single: true };
+    if (isSingle(g)) { if (itemKey(g) === key) return { gi: groups.indexOf(g), group: g, single: true }; continue; }
     const ii = (g.children || []).findIndex((c) => c.key === key);
     if (ii >= 0) return { gi: groups.indexOf(g), ii, group: g, single: false };
   }
@@ -78,11 +96,11 @@ export function placedIn(groups, key) {
 /** 항목을 그룹에 더한다(끝에). 이미 어딘가 있으면 넣지 않고 사유를 돌려준다. */
 export function addItem(groups, gi, item) {
   const g = groups[gi];
-  if (!g || g.tab) return { ok: false, reason: '하위 메뉴가 있는 그룹을 고르세요', groups };
+  if (!g || isSingle(g)) return { ok: false, reason: '하위 메뉴가 있는 그룹을 고르세요', groups };
   const key = item.key || itemKey(item);
   if (!key) return { ok: false, reason: '항목을 알 수 없습니다', groups };
   const where = placedIn(groups, key);
-  if (where) return { ok: false, reason: `이미 '${where.group.label}' 에 있습니다`, groups };
+  if (where) return { ok: false, reason: placedReason(where), groups };
   const total = countItems(groups);
   if (total >= LIMITS.items) return { ok: false, reason: `메뉴 항목은 최대 ${LIMITS.items}개입니다`, groups };
   const next = groups.slice();
@@ -90,14 +108,51 @@ export function addItem(groups, gi, item) {
   return { ok: true, groups: next };
 }
 
-/** 새 그룹 — '특수 기능' 앞에(없으면 끝에). 이름이 비면 '내 그룹'. */
-export function newGroup(groups, label = '') {
-  if (groups.length >= LIMITS.groups) return { ok: false, reason: `그룹은 최대 ${LIMITS.groups}개입니다`, groups };
+const placedReason = (where) => (where.single ? `이미 단독 메뉴 '${where.group.label}' 로 있습니다` : `이미 '${where.group.label}' 에 있습니다`);
+function nextCustomId(groups) {
   const ids = new Set(groups.map((g) => g.id));
   let n = 1;
   while (ids.has(`${CUSTOM_PREFIX}${n}`)) n += 1;
-  const g = { id: `${CUSTOM_PREFIX}${n}`, label: String(label || '').trim().slice(0, LIMITS.label) || CUSTOM_GROUP_LABEL, custom: true, children: [] };
-  const at = groups.findIndex((x) => x.tab === 'tools');
+  return `${CUSTOM_PREFIX}${n}`;
+}
+
+/**
+ * v2.891 단독 메뉴로 더하기 — 그룹 없이 한 줄. at 이 없으면 '특수 기능' 앞(없으면 끝 — 새 그룹과 같은 자리).
+ * 아이콘은 그 항목의 기본 그룹(특수 기능에서 더한 도구는 특수 기능) — 저장하지 않고 해석 때 다시 정한다(sideMenu.resolveMenu 와 같은 규칙).
+ */
+export function addSingle(groups, item, at = null) {
+  if (!item) return { ok: false, reason: '항목을 알 수 없습니다', groups };
+  const key = item.key || itemKey(item);
+  if (!key || !(item.tab || item.tool)) return { ok: false, reason: '항목을 알 수 없습니다', groups };
+  const where = placedIn(groups, key);
+  if (where) return { ok: false, reason: placedReason(where), groups };
+  if (groups.length >= LIMITS.groups) return { ok: false, reason: `그룹 · 단독 메뉴는 합쳐 최대 ${LIMITS.groups}개입니다`, groups };
+  if (countItems(groups) >= LIMITS.items) return { ok: false, reason: `메뉴 항목은 최대 ${LIMITS.items}개입니다`, groups };
+  const iconOf = item.iconOf || defaultIndex().items.get(key)?.groupId || (item.tool ? 'tools' : '');
+  const g = { ...singleFields({ ...item, iconOf }), id: nextCustomId(groups), label: String(item.label || '').trim() || key, custom: true, key, fixed: false };
+  const tools = groups.findIndex((x) => isSingle(x) && x.tab === 'tools');
+  const pos = Number.isInteger(at) && at >= 0 && at <= groups.length ? at : (tools >= 0 ? tools : groups.length);
+  const next = groups.slice();
+  next.splice(pos, 0, g);
+  return { ok: true, groups: next, gi: pos };
+}
+
+/** v2.891 그룹 항목을 빼서 그 그룹 바로 아래 단독 메뉴로. 그룹이 비면 저장할 때 빠진다(예전 규칙 그대로). */
+export function detachToSingle(groups, gi, ii) {
+  const g = groups[gi];
+  if (!g || isSingle(g) || !Number.isInteger(ii) || ii < 0 || ii >= g.children.length) return { ok: false, reason: '항목을 알 수 없습니다', groups };
+  if (groups.length >= LIMITS.groups) return { ok: false, reason: `그룹 · 단독 메뉴는 합쳐 최대 ${LIMITS.groups}개입니다`, groups };
+  const c = g.children[ii];
+  const without = groups.slice();
+  without[gi] = { ...g, children: g.children.filter((_, k) => k !== ii) };
+  return addSingle(without, c, gi + 1);
+}
+
+/** 새 그룹 — '특수 기능' 앞에(없으면 끝에). 이름이 비면 '내 그룹'. */
+export function newGroup(groups, label = '') {
+  if (groups.length >= LIMITS.groups) return { ok: false, reason: `그룹은 최대 ${LIMITS.groups}개입니다`, groups };
+  const g = { id: nextCustomId(groups), label: String(label || '').trim().slice(0, LIMITS.label) || CUSTOM_GROUP_LABEL, custom: true, children: [] };
+  const at = groups.findIndex((x) => isSingle(x) && x.tab === 'tools');
   const next = groups.slice();
   next.splice(at >= 0 ? at : groups.length, 0, g);
   return { ok: true, groups: next, gi: at >= 0 ? at : groups.length };
@@ -113,15 +168,18 @@ export function renameGroup(groups, gi, label) {
   return next;
 }
 
-/** 그룹 삭제 — 단독 항목 그룹은 지울 수 없다(그 화면으로 갈 길이 사라진다). 하위 항목은 '다시 넣기' 목록으로 간다. */
+/**
+ * 그룹 삭제 — 포탈 기본 단독 항목(Overview 등)은 지울 수 없다(그 화면으로 갈 길이 사라진다). 하위 항목은 '다시 넣기' 목록으로 간다.
+ * v2.891: 사용자가 만든 단독 메뉴는 지운다 — 그 항목은 오른쪽 목록(기본 메뉴 항목 · 특수 기능)으로 돌아간다.
+ */
 export function removeGroup(groups, gi) {
   const g = groups[gi];
-  if (!g || g.tab) return { ok: false, reason: '이 항목은 지울 수 없습니다 — 자리만 옮길 수 있습니다', groups };
+  if (!g || (isSingle(g) && fixedSingleKeys().has(itemKey(g)))) return { ok: false, reason: '이 항목은 지울 수 없습니다 — 자리만 옮길 수 있습니다', groups };
   return { ok: true, groups: groups.filter((_, k) => k !== gi) };
 }
 
 export function countItems(groups) {
-  return (groups || []).reduce((n, g) => n + (g.tab ? 1 : (g.children || []).length), 0);
+  return (groups || []).reduce((n, g) => n + (isSingle(g) ? 1 : (g.children || []).length), 0);
 }
 
 /** 두 편집 상태가 같은 저장 결과를 내는가. */
@@ -135,13 +193,13 @@ export function sameMenu(a, b) {
  */
 export function changesToSave(base, cur) {
   if (sameMenu(base, cur)) return 0;
-  const saved = (groups) => (groups || []).filter((g) => g.tab || (g.children || []).length); // 저장에서 빠지는 빈 그룹은 세지 않는다
+  const saved = (groups) => (groups || []).filter((g) => isSingle(g) || (g.children || []).length); // 저장에서 빠지는 빈 그룹은 세지 않는다
   return changeCount(saved(base), saved(cur));
 }
 
 /** '추가 대상' 기본값 — 하위 메뉴가 있는 첫 그룹의 **id**(v2.727 A-04: 인덱스로 들면 ▲▼·삭제 뒤 다른 그룹을 가리킨다). 없으면 null. */
 export function firstGroupId(groups) {
-  return (groups || []).find((g) => !g.tab)?.id ?? null;
+  return (groups || []).find((g) => !isSingle(g))?.id ?? null;
 }
 
 /** 편집 창 '이전 메뉴 복원' 버튼의 설명(v2.727 A-01·A-10) — 보관한 동작(저장/강제 배포)을 가르고, 배포자 이름이 없으면 '슈퍼 관리자'. */
@@ -183,7 +241,7 @@ export function changeCount(base, cur) {
   const pos = (groups) => {
     const m = new Map();
     for (const g of groups || []) {
-      if (g.tab) { m.set(`tab:${g.tab}`, g.id); continue; }
+      if (isSingle(g)) { m.set(itemKey(g), g.id); continue; }
       for (const c of g.children || []) m.set(c.key, g.id);
     }
     return m;
@@ -203,9 +261,9 @@ export function changeCount(base, cur) {
   // 같은 그룹 안 순서
   const seqOf = (g) => (g.children || []).map((c) => c.key);
   for (const g of cur || []) {
-    if (g.tab) continue;
+    if (isSingle(g)) continue;
     const bg = (base || []).find((x) => x.id === g.id);
-    if (!bg || bg.tab) continue;
+    if (!bg || isSingle(bg)) continue;
     const stay = new Set(seqOf(g).filter((k) => a.get(k) === g.id));
     const sb = seqOf(g).filter((k) => stay.has(k));
     const sa = seqOf(bg).filter((k) => stay.has(k));
@@ -230,7 +288,7 @@ export function availableTools(catalog, groups, { overrides = null, lockOf = nul
     return {
       k: t.k, key, label: String(overrides?.[t.k]?.label || '').trim() || t.label, origLabel: t.label, desc: t.desc || '', icon: t.icon || '',
       adminOnly: !!t.adminOnly, aka: t.aka || [], lock: typeof lockOf === 'function' ? lockOf(t) : null,
-      placedLabel: where ? where.group.label : '',
+      placedLabel: where ? (where.single ? '단독 메뉴' : where.group.label) : '',
       item: { key, id: `t-${t.k}`, label: String(overrides?.[t.k]?.label || '').trim() || t.label, tool: t.k, fromTools: true, ...(t.adminOnly ? { adminOnly: true } : {}) },
     };
   });

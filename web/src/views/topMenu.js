@@ -110,10 +110,13 @@ export function locate(tab, hash, groups = MENU_GROUPS) {
 function groupOfTool(k, seg3, groups) {
   let plain = null;
   for (const g of groups) {
-    for (const c of g.children || []) {
+    // v2.891: 단독 메뉴(최상위 도구)도 자기 자리다 — child 는 null(단독 탭과 같은 모양)
+    const list = Array.isArray(g.children) ? g.children : [g];
+    for (const c of list) {
       if (c.tool !== k && !(Array.isArray(c.also) && c.also.includes(k))) continue;
-      if (c.seg) { if (seg3 === c.seg) return { group: g.id, child: c.id }; }
-      else if (!plain) plain = { group: g.id, child: c.id };
+      const at = { group: g.id, child: Array.isArray(g.children) ? c.id : null };
+      if (c.seg) { if (seg3 === c.seg) return at; }
+      else if (!plain) plain = at;
     }
   }
   return plain;
