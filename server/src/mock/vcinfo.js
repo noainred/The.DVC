@@ -1,4 +1,4 @@
-// 데모(mock) vCenter 의 알람 · 최근 작업 · 권한 목록(v2.897) — vcinfo/parse.js 와 같은 모양. 인벤토리(그 vCenter 의 호스트 · VM · DS 이름)에서
+// 데모(mock) vCenter 의 알람 · 최근 작업 · 권한 목록(v2.898) — vcinfo/parse.js 와 같은 모양. 인벤토리(그 vCenter 의 호스트 · VM · DS 이름)에서
 // 결정적으로 만든다(같은 vCenter 는 같은 목록). 시각만 '지금' 기준으로 움직인다. 실데이터와 섞이지 않는다(라우트가 mock vCenter 일 때만 부른다).
 const MIN = 60_000;
 const refOf = (id) => String(id || '').split(':').pop();

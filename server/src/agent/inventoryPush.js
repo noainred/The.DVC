@@ -20,10 +20,10 @@ import { readCentralReply, dropSummaryOf, warnDrop } from './centralReply.js'; /
 const gzipAsync = promisify(zlib.gzip);
 import { agentNameHeader } from '../util/agentNameHeader.js'; // v2.620(RECENT2620-02)
 import { agentHostnameHeader } from './agentNameCarry.js'; // v2.681 R2F-01
-import { vcInfoForPush } from '../vcinfo/collect.js'; // v2.897
+import { vcInfoForPush } from '../vcinfo/collect.js'; // v2.898
 import { centralStatusOnlySupport } from './centralStatusOnly.js';
 /**
- * v2.897(반증 중-1): vcInfo(권한 목록 · 작업 사용자)를 아는 첫 중앙 버전. 그 전 중앙은 /inventory 의 vcenter 객체에서 **모르는 키를 남겨**
+ * v2.898(반증 중-1): vcInfo(권한 목록 · 작업 사용자)를 아는 첫 중앙 버전. 그 전 중앙은 /inventory 의 vcenter 객체에서 **모르는 키를 남겨**
  *   저장하고 /api/vcenters 로 모든 인증 사용자에게 내보낸다 — 이 버전 미만 · 미상이면 붙이지 않는다(health-probe · 1시간 캐시 · fleetPush 와 같은 판단).
  */
 export const VCINFO_MIN_CENTRAL = '2.898.0';
@@ -63,7 +63,7 @@ async function pushVcenter(snap, vc) {
     // v2.443: auto 폴백으로 채워진 vCenter 는 DATA_SOURCE 가 'auto' 여도 내용은 가짜다 —
     // 그 슬라이스는 아래에서 아예 보내지 않지만, 만에 하나 도달해도 중앙이 막도록 source 도 'mock' 으로 보낸다.
     source: vc?.mock === true ? 'mock' : config.dataSource,
-    // v2.897: vCenter 알람 · 최근 작업 · 권한 목록 — 스냅샷 vCenter 객체에는 없다(vcinfo 캐시). 이 엣지가 읽은 것만 붙인다(없으면 키 없음).
+    // v2.898: vCenter 알람 · 최근 작업 · 권한 목록 — 스냅샷 vCenter 객체에는 없다(vcinfo 캐시). 이 엣지가 읽은 것만 붙인다(없으면 키 없음).
     vcenter: await vcenterForPush(vc),
     hosts: snap.hosts.filter((h) => h.vcenterId === vc.id),
     vms: snap.vms.filter((v) => v.vcenterId === vc.id),

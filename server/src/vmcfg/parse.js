@@ -11,8 +11,8 @@
 // 모양(vm.dev — 장치 위생 요약, 장치 목록을 읽었을 때만):
 //   { at, cdroms:[{label,connected,startConnected,iso,host,file}], floppies:[{label,connected}],
 //     disks:[{label,mode,sharing,rdm,rdmMode,datastore,capacityGB}], usb, serial, parallel, omitted,
-//     nics:[{label,adapter,backing,net,netRef,mac,connected,startConnected}] }   ← v2.897(같은 장치 XML — 새 vCenter 호출 없음)
-//   - nics 는 v2.897 이후 수집기만 싣는다 — 키가 없으면 '아직 읽지 않음'(빈 배열 = 어댑터 없음 과 다르다).
+//     nics:[{label,adapter,backing,net,netRef,mac,connected,startConnected}] }   ← v2.898(같은 장치 XML — 새 vCenter 호출 없음)
+//   - nics 는 v2.898 이후 수집기만 싣는다 — 키가 없으면 '아직 읽지 않음'(빈 배열 = 어댑터 없음 과 다르다).
 import { xmlUnescape, NIC_TYPE_RE } from '../vcenter/soapParse.js';
 
 /** 이 모듈이 vCenter 에 요청하는 VM 속성 경로 — 전부 vSphere 5.0+ 에 있는 경로만(없는 경로는 요청 전체를 InvalidProperty 로 만든다). */
@@ -82,7 +82,7 @@ export function parseVmCfgProps(props = {}, at = Date.now()) {
 }
 
 const DEV_LIST_MAX = 32;
-/** v2.897: VirtualEthernetCard 하위 형식 → 화면 이름(vSphere Client 의 '어댑터 유형'). 모르는 형식은 형식 이름 그대로(Virtual 앞머리만 뗀다).
+/** v2.898: VirtualEthernetCard 하위 형식 → 화면 이름(vSphere Client 의 '어댑터 유형'). 모르는 형식은 형식 이름 그대로(Virtual 앞머리만 뗀다).
  *  'NIC 인가' 판정은 soapParse.NIC_TYPE_RE 하나(VM CSV 내보내기와 같은 판정). */
 const NIC_TYPES = Object.freeze({
   VirtualVmxnet3: 'VMXNET 3', VirtualVmxnet3Vrdma: 'PVRDMA', VirtualVmxnet2: 'VMXNET 2', VirtualVmxnet: 'VMXNET',
@@ -270,7 +270,7 @@ export function sanitizeVmDev(d) {
     floppies: arr(d.floppies).map((x) => ({ label: str(x.label, 64) || '', connected: boolOrNull(x.connected) })),
     disks: arr(d.disks).map((x) => ({ label: str(x.label, 64) || '', mode: str(x.mode, 32), sharing: str(x.sharing, 32), rdm: x.rdm === true, rdmMode: str(x.rdmMode, 32), datastore: str(x.datastore, 128), capacityGB: typeof x.capacityGB === 'number' && Number.isFinite(x.capacityGB) ? x.capacityGB : null })),
     usb: cnt(d.usb), serial: cnt(d.serial), parallel: cnt(d.parallel), omitted: cnt(d.omitted),
-    // v2.897: 어댑터 — 키가 없으면(이전 판 엣지) 싣지 않는다(= 아직 읽지 않음). 형식 밖 값은 null.
+    // v2.898: 어댑터 — 키가 없으면(이전 판 엣지) 싣지 않는다(= 아직 읽지 않음). 형식 밖 값은 null.
     ...(Array.isArray(d.nics) ? { nics: arr(d.nics).map((x) => ({
       label: str(x.label, 64) || '', adapter: str(x.adapter, 32),
       backing: ['std', 'dvs', 'nsx', 'other'].includes(x.backing) ? x.backing : 'other',

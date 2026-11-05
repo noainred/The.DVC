@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { entityHash, vcAlarmRows, vcAlarmCounts, taskDurText, vcTaskRows, vcTaskCounts, vcPermRows, vcInfoHeadText, entityTypeText, replicationSummary, vlcmRows, vlcmCounts, vlcmForHost } from './vcInfo.js';
 import { parseVcRoute } from './vcdRoute.js';
 
-describe('v2.897 vCenter 알람 · 최근 작업 · 권한 목록 — 화면 판정', () => {
+describe('v2.898 vCenter 알람 · 최근 작업 · 권한 목록 — 화면 판정', () => {
   it('개체 링크 — VM · 호스트만 개체 보기 주소(콜론 든 vCenter id 도 왕복) · 그 밖은 null', () => {
     expect(parseVcRoute(entityHash('vc:1', 'VirtualMachine', 'vm-3'))).toEqual({ vcId: 'vc:1', obj: { type: 'vm', id: 'vc:1:vm-3', tab: '' } });
     expect(parseVcRoute(entityHash('vc1', 'HostSystem', 'host-9')).obj.type).toBe('host');
@@ -38,7 +38,7 @@ describe('v2.897 vCenter 알람 · 최근 작업 · 권한 목록 — 화면 판
   });
 });
 
-describe('v2.897 ④ Linked Mode · vLCM — 화면 판정', () => {
+describe('v2.898 ④ Linked Mode · vLCM — 화면 판정', () => {
   it('복제 요약 — 끊김 · 복제 안 됨 · 최대 지연(모르는 값은 세지 않는다)', () => {
     expect(replicationSummary([{ available: false, replicating: true, lag: 3 }, { available: true, replicating: false, lag: null }, {}])).toEqual({ total: 3, down: 1, notReplicating: 1, maxLag: 3 });
     expect(replicationSummary(null).maxLag).toBe(null);

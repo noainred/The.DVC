@@ -1,5 +1,5 @@
 /**
- * v2.897 — vCenter 개체 보기 2차: 스냅샷 트리(soapParse.snapshotTreeNodes) · VM 네트워크 어댑터(vmcfg dev.nics) ·
+ * v2.898 — vCenter 개체 보기 2차: 스냅샷 트리(soapParse.snapshotTreeNodes) · VM 네트워크 어댑터(vmcfg dev.nics) ·
  * 엣지 수신 정제(central sanitizeInventoryList → sanitizeSnapTree · sanitizeVmDev). 새 vCenter 호출 없이 이미 받던 XML 을 넓혀 읽는다.
  * 시간 비율 테스트는 docs/rules/common.md 규칙대로 8배 크기 · 기준 24배 · 번갈아 5회 최솟값.
  */

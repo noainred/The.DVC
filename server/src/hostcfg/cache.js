@@ -11,7 +11,7 @@ import { dropVcCache as dropTags } from '../tags/collect.js';
 //   쉬게 했다(dscfg·clustercfg 는 자기 dropVcCache 안에서 지운다 — 형제 비대칭). 순환 없음: 두 collect.js 는 config·parse·cache·dscfg/collect 만 import 한다.
 import { dropVcRetry as dropVmCfgRetry } from '../vmcfg/collect.js';
 import { dropVcRetry as dropContentionRetry } from '../contention/collect.js';
-import { dropVcCache as dropVcInfo, vcInfoIds } from '../vcinfo/collect.js'; // v2.897
+import { dropVcCache as dropVcInfo, vcInfoIds } from '../vcinfo/collect.js'; // v2.898
 const _byVc = new Map();
 const _status = new Map();
 // v2.720(감사 R1-02): 요청 시한으로 계속 못 읽는 호스트 — vcId -> Map(ref -> { count, retryAt }).
@@ -90,7 +90,7 @@ const accessKeyOf = (vc) => String(vc?.host ?? '').trim().toLowerCase();
 const CACHE_DROPPERS = [
   dropVcCache, dropVmCfg, dropContention, dropDsCfg, dropClusterCfg, dropTags,
   dropVmCfgRetry, dropContentionRetry, // v2.727(F-04)
-  dropVcInfo, // v2.897 vCenter 알람·작업·권한
+  dropVcInfo, // v2.898 vCenter 알람·작업·권한
 ];
 export function dropVcConfigCaches(vcId) { for (const d of CACHE_DROPPERS) d(vcId); }
 /** @param {Array<{id:string, host?:string}>} vcenters 등록부 전체 @returns {{dropped:string[]}} */
@@ -99,7 +99,7 @@ export function syncVcConfigCaches(vcenters) {
   const live = new Map();
   for (const vc of list) if (vc && vc.id != null) live.set(String(vc.id), accessKeyOf(vc));
   const dropped = [];
-  const known = new Set([..._accessByVc.keys(), ..._byVc.keys(), ..._status.keys(), ...vcInfoIds()]);   // v2.897: vcinfo 캐시도(엣지 push 로만 생긴 항목)
+  const known = new Set([..._accessByVc.keys(), ..._byVc.keys(), ..._status.keys(), ...vcInfoIds()]);   // v2.898: vcinfo 캐시도(엣지 push 로만 생긴 항목)
   for (const id of known) if (!live.has(id)) { dropVcConfigCaches(id); _accessByVc.delete(id); dropped.push(id); }
   for (const [id, key] of live) {
     const prev = _accessByVc.get(id);

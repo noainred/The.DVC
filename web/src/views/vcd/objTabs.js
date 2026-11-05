@@ -3,7 +3,7 @@
  * 순수 모듈(vitest 고정). 화면은 vcd/VmObject.jsx · HostObject.jsx · ObjectShell.jsx.
  *  - 새 수집 없음: /vms · /hosts 한 행 + 캐시(vmcfg cfg·dev · hcfg · perfc) + 온디맨드(메트릭 · 파티션 · 이벤트)만.
  *  - 수집하지 않는 것(리소스 풀 속성 · 호스트별 DS 마운트 · NIC 팀 구성 등)은 탭을 숨기지 않고 '수집하지 않음'.
- *  - v2.897: VM 네트워크 어댑터(vm.dev.nics) · 스냅샷 트리(vm.snapshotTree)는 같은 주기 수집이 이미 받던 XML 을 넓혀 읽는다(새 vCenter 호출 없음).
+ *  - v2.898: VM 네트워크 어댑터(vm.dev.nics) · 스냅샷 트리(vm.snapshotTree)는 같은 주기 수집이 이미 받던 XML 을 넓혀 읽는다(새 vCenter 호출 없음).
  *    호스트 가상 스위치 · 포트그룹은 v2.701 부터 hcfg.net 에 있었다(v2.895 가 '수집하지 않음' 으로 잘못 적었다 — 정정).
  */
 import { numOrNull } from '../../numOrNull.js';
@@ -149,7 +149,7 @@ export function vmSnapshotFacts(vm, now = Date.now()) {
 }
 
 /**
- * v2.897: 스냅샷 트리(vm.snapshotTree — 전위 순서 · d=깊이) → 화면 행. 키가 없으면 null(= 아직 이 판으로 읽지 않음 · '없음' 이 아니다).
+ * v2.898: 스냅샷 트리(vm.snapshotTree — 전위 순서 · d=깊이) → 화면 행. 키가 없으면 null(= 아직 이 판으로 읽지 않음 · '없음' 이 아니다).
  *   partial: 트리 노드 수가 snapshotCount 보다 적다(수집 상한 64 또는 파싱 실패) — 화면이 '일부' 로 말한다.
  */
 export function snapTreeRows(vm, now = Date.now()) {
@@ -175,7 +175,7 @@ export function snapTreeRows(vm, now = Date.now()) {
 export const NIC_BACKING_TEXT = Object.freeze({ std: '표준 포트그룹', dvs: '분산 포트그룹', nsx: 'NSX 세그먼트', other: '기타' });
 
 /**
- * v2.897: VM 네트워크 어댑터(vm.dev.nics) + /networks → 화면 행. 분산 포트그룹은 장치에 이름이 없어 netRef(dvportgroup-NN)로 /networks 의
+ * v2.898: VM 네트워크 어댑터(vm.dev.nics) + /networks → 화면 행. 분산 포트그룹은 장치에 이름이 없어 netRef(dvportgroup-NN)로 /networks 의
  *   '<vcenterId>:<ref>' 를 찾는다(못 찾으면 이름 '—' · 참조만). nics 키가 없으면 null(= 아직 이 판으로 읽지 않음).
  */
 export function vmNicRows(vm, networks = []) {

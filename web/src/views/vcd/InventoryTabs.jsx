@@ -1,6 +1,6 @@
 /**
  * views/vcd/InventoryTabs.jsx — vCenter › 데이터 센터 · 확장 프로그램 · 사용 권한 · 연결된 vCenter Server 시스템 · 업데이트
- * (승인 시안 ④⑤⑥ · 기본값 1). v2.897: 권한 목록 · 연결된 vCenter · vCenter 업데이트 · vLCM 준수는 vcinfo 캐시(VcInfoParts.jsx)로 채웠다.
+ * (승인 시안 ④⑤⑥ · 기본값 1). v2.898: 권한 목록 · 연결된 vCenter · vCenter 업데이트 · vLCM 준수는 vcinfo 캐시(VcInfoParts.jsx)로 채웠다.
  */
 import React, { useMemo, useState } from 'react';
 import { toolAllowed } from '../../api.js';
@@ -9,7 +9,7 @@ import { STable } from '../../components/STable.jsx';
 import { useOnce, toolDenied } from './useOnce.js';
 import { Card, KV, Note, ToolLink } from './VcdParts.jsx';
 import { EventRows } from './SummaryTab.jsx';
-import { VcPermsCard, VcLinkedCard, VcUpdatesCard, VcVlcmCard } from './VcInfoParts.jsx'; // v2.897
+import { VcPermsCard, VcLinkedCard, VcUpdatesCard, VcVlcmCard } from './VcInfoParts.jsx'; // v2.898
 import { clusterAvgPct } from '../vcdOverview.js';
 import { groupByDatacenter, extensionsState, extensionVendor, fleetKeyStats, esxiVersionRows, versionNewer, PERM_CATEGORY } from './vcdTabs.js';
 

@@ -1,4 +1,4 @@
-// vCenter 알람 · 최근 작업 · 권한 목록(v2.897) — vCenter 상세의 모니터 › 문제 및 알람 · 작업, 사용 권한 탭(VM · 호스트 개체 보기 포함).
+// vCenter 알람 · 최근 작업 · 권한 목록(v2.898) — vCenter 상세의 모니터 › 문제 및 알람 · 작업, 사용 권한 탭(VM · 호스트 개체 보기 포함).
 // 값은 vcinfo 캐시(수집 주기 안에서 종류별 주기로 읽은 것 — 이 라우트는 vCenter 에 묻지 않는다)이고, 데모 vCenter 는 mock/vcinfo.js.
 // 규칙(server/CLAUDE.md): 조회 범위 밖 vCenter 는 404(존재 은닉) → 권한 목록은 관리자 판본(isAdminDetailUser)만, 아니면 403.
 //   작업을 시작한 사용자 · 알람 확인자 이름도 관리자 판본에서만 싣는다(그 밖에는 null + userMasked).
@@ -51,7 +51,7 @@ export function linkedPortalMap(nodes, registry, snapVcs, allowed, { mock = fals
     return { ...n, portal: id ? { id, name: v?.name || id, version: v?.version || null, build: v?.build || null, status: v?.status || null } : null };
   });
 }
-const NOT_YET_TEXT = '아직 읽지 않았습니다 — 다음 수집 주기에 읽습니다(엣지가 수집하는 vCenter 는 엣지 · 중앙이 v2.897 이상이어야 보냅니다).';
+const NOT_YET_TEXT = '아직 읽지 않았습니다 — 다음 수집 주기에 읽습니다(엣지가 수집하는 vCenter 는 엣지 · 중앙이 v2.898 이상이어야 보냅니다).';
 /** 화면이 말하는 상한 · 보관 기간(숫자를 화면에 박지 않는다 — 반증 하-8). */
 const KIND_LIMITS = Object.freeze({
   alarms: { max: VCINFO_LIMITS.alarms }, tasks: { max: VCINFO_LIMITS.tasks, keepMs: TASK_KEEP_MS }, perms: { max: VCINFO_LIMITS.perms },

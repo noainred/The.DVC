@@ -18,8 +18,8 @@
 
 import { sanitizeVmDns } from '../central/vmDnsSanitize.js';
 import { sanitizeVmCfg, sanitizeVmDev } from '../vmcfg/parse.js';   // v2.697(B10)
-import { sanitizeSnapTree } from '../vcenter/soapParse.js';   // v2.897 스냅샷 트리
-import { sanitizeVcInfo } from '../vcinfo/parse.js';   // v2.897 vCenter 알람·작업·권한
+import { sanitizeSnapTree } from '../vcenter/soapParse.js';   // v2.898 스냅샷 트리
+import { sanitizeVcInfo } from '../vcinfo/parse.js';   // v2.898 vCenter 알람·작업·권한
 import { putFromEdge as putVcInfoFromEdge } from '../vcinfo/collect.js';
 import { sanitizeHostCfg } from '../hostcfg/parse.js';   // v2.699
 import { sanitizeDsCfg } from '../dscfg/parse.js';   // v2.700
@@ -864,7 +864,7 @@ export function sanitizeInventoryList(list, vcId, max, dropped) {
     // v2.697(B10): VM 구성 속성·장치 위생 요약 — 아는 필드만(모양이 아니면 null = 모름).
     if (Object.hasOwn(o, 'cfg') && o.cfg != null) { const v = sanitizeVmCfg(o.cfg); if (v == null) dropped.coerced += 1; o.cfg = v; }
     if (Object.hasOwn(o, 'dev') && o.dev != null) { const v = sanitizeVmDev(o.dev); if (v == null) dropped.coerced += 1; o.dev = v; }
-    // v2.897: 스냅샷 트리(soapParse.snapshotTreeNodes) — 아는 키만 · 64개 상한(배열이 아니면 null = 모름).
+    // v2.898: 스냅샷 트리(soapParse.snapshotTreeNodes) — 아는 키만 · 64개 상한(배열이 아니면 null = 모름).
     if (Object.hasOwn(o, 'snapshotTree') && o.snapshotTree != null) { const v = sanitizeSnapTree(o.snapshotTree); if (v == null) dropped.coerced += 1; o.snapshotTree = v; }
     // v2.699: 호스트 구성·보안(hostcfg/parse.js) — 아는 필드만.
     if (Object.hasOwn(o, 'hcfg') && o.hcfg != null) { const v = sanitizeHostCfg(o.hcfg); if (v == null) dropped.coerced += 1; o.hcfg = v; }
@@ -987,7 +987,7 @@ centralRouter.post('/inventory', requireCentral(), (req, res) => {
     if (ti.dropped) dropped.coerced += ti.dropped;
     vcenter.tagInv = ti.value;
   }
-  // v2.897: vCenter 알람 · 최근 작업 · 권한 목록 — vcenter 객체에 남기지 않는다(스냅샷 vCenter 객체는 /vcenters 로 모든 인증 사용자에게
+  // v2.898: vCenter 알람 · 최근 작업 · 권한 목록 — vcenter 객체에 남기지 않는다(스냅샷 vCenter 객체는 /vcenters 로 모든 인증 사용자에게
   //   나간다 — 권한 목록이 새면 안 된다). 정제한 값은 아래 저장(setInventory)이 끝난 뒤 vcinfo 캐시에 넣는다(수신이 받아들여졌을 때만).
   let vcInfoIn = null;
   if (Object.hasOwn(vcenter, 'vcInfo')) {
@@ -1020,9 +1020,9 @@ centralRouter.post('/inventory', requireCentral(), (req, res) => {
   if (droppedN) console.warn(`[central] inventory: agent=${agent} vc=${vcId} 원소 ${droppedN}건 제외(객체 아님 ${dropped.notObject} · 다른 vCenter ${dropped.otherVcenter} · id 형식 ${dropped.badId}${dropped.overCount ? ` · 상한 초과 ${dropped.overCount}` : ''})`);
   if (dropped.vcLicenses || dropped.vcSolutions) console.warn(`[central] inventory: agent=${agent} vc=${vcId} vCenter 라이선스 ${dropped.vcLicenses || 0}건 · 솔루션 ${dropped.vcSolutions || 0}건을 모양이 달라 뺐습니다(배열 아님·객체 아닌 원소·모르는 형식의 필드·상한 초과)`);
   const saved = setInventory(vcId, slice, agent, b.generatedAt || null) || {};
-  // v2.897(반증 하-5): 사이트 위임으로 등록된 vCenter 만 받는다(등록부에 없는 id 를 바꿔 가며 메모리를 늘리지 못하게) ·
+  // v2.898(반증 하-5): 사이트 위임으로 등록된 vCenter 만 받는다(등록부에 없는 id 를 바꿔 가며 메모리를 늘리지 못하게) ·
   //   받은 것으로 통째로 바꾼다 — 엣지가 접속처를 바꿔 캐시를 비웠으면 옛 vCenter 의 권한 목록을 중앙이 계속 보이지 않게(없으면 지운다).
-  if (!edgeVcWriteDenied(vcId, { requireSite: true })) putVcInfoFromEdge(vcId, vcInfoIn, agent);   // v2.897
+  if (!edgeVcWriteDenied(vcId, { requireSite: true })) putVcInfoFromEdge(vcId, vcInfoIn, agent);   // v2.898
   if (saved.held) console.warn(`[central] inventory: agent=${agent} vc=${vcId} 상태 ${slice.vcenter.status} · 호스트·VM 0 — 마지막 정상 목록을 지우지 않고 상태만 갱신했습니다(엣지가 인벤토리를 읽지 못함)`);
   res.locals.ingestSummary = {
     vcenterId: vcId.slice(0, 128), hosts: slice.hosts.length, vms: slice.vms.length, datastores: slice.datastores.length,

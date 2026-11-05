@@ -117,7 +117,7 @@ export function snapshotInfo(snapXml, layoutXml) {
     snapshotNames: names,
     // Veeam 임시 스냅샷이 있을 때만 싣는다(없는 VM 의 응답 모양은 예전 그대로). 시각을 못 읽었으면 veeamSnapTs 는 null.
     ...(veeamSnaps ? { veeamSnaps, veeamSnapTs } : {}),
-    // v2.897: 스냅샷 트리(부모 관계 · 설명 · 생성 시각 · 현재 위치) — 스냅샷이 있는 VM 에만 싣는다(없는 VM 의 모양은 예전 그대로).
+    // v2.898: 스냅샷 트리(부모 관계 · 설명 · 생성 시각 · 현재 위치) — 스냅샷이 있는 VM 에만 싣는다(없는 VM 의 모양은 예전 그대로).
     ...(snapshotCount > 0 && snapXml ? { snapshotTree: snapshotTreeNodes(snapXml) } : {}),
   };
 }
@@ -216,7 +216,7 @@ export function parseObjectContent(xml) {
 /* ------------------- VM 전체 정보 CSV export 용 파서 (v2.275) ------------------- */
 
 // NIC 로 취급하는 VirtualDevice 구체 타입(xsi:type) — VirtualEthernetCard 하위 전부.
-// v2.897: vmcfg/parse.js(개체 보기 어댑터 표)도 이 판정 하나를 쓴다 — 'NIC 인가' 를 두 벌로 두지 않는다.
+// v2.898: vmcfg/parse.js(개체 보기 어댑터 표)도 이 판정 하나를 쓴다 — 'NIC 인가' 를 두 벌로 두지 않는다.
 export const NIC_TYPE_RE = /^Virtual(E1000e?|Vmxnet\d?|Vmxnet3Vrdma|PCNet32|SriovEthernetCard)$/i;
 
 /**

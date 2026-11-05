@@ -83,7 +83,7 @@ describe('개체 탭 · 묶음', () => {
   });
 });
 
-describe('v2.897 — 스냅샷 트리 · 네트워크 어댑터(이미 받던 XML 을 넓혀 읽은 값)', () => {
+describe('v2.898 — 스냅샷 트리 · 네트워크 어댑터(이미 받던 XML 을 넓혀 읽은 값)', () => {
   const NOW = Date.parse('2026-11-05T00:00:00Z');
   it('트리 — 키가 없으면 null(아직 읽지 않음) · 깊이 · 현재 위치 · 상태 문구 · 개수보다 적으면 일부', () => {
     expect(snapTreeRows({ snapshotCount: 2 })).toBe(null);

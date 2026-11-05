@@ -318,7 +318,7 @@ function mkVmCfg(vm, powered) {
   };
 }
 // v2.862: 디스크의 데이터스토어는 그 사이트의 실제 데이터스토어 이름(데모 — Bareos 복원 검증이 홈 데이터스토어 여유를 인벤토리로 본다). 이름을 모르면 예전 값.
-/** v2.897 데모 스냅샷 트리 — n 개를 한 줄기(+ 넷째는 둘째의 형제 가지)로. 현재 위치는 마지막 노드. 시각은 오래된 것부터. */
+/** v2.898 데모 스냅샷 트리 — n 개를 한 줄기(+ 넷째는 둘째의 형제 가지)로. 현재 위치는 마지막 노드. 시각은 오래된 것부터. */
 function mkSnapTree(i, n) {
   const names = ['pre-patch', 'before-upgrade', 'app-2.4-deploy', 'rollback-point'];
   const descs = ['월간 패치 전', 'OS 업그레이드 전 — 담당 인프라팀', null, '배포 실패 시 되돌릴 지점'];
@@ -354,7 +354,7 @@ function mkVmDev(vm, dsNames = [], nets = []) {
       ...(i % 59 === 0 ? [{ label: 'Hard disk 3', mode: 'independent_persistent', sharing: 'sharingNone', rdm: true, rdmMode: 'physicalMode', datastore: dsAt(0, 'ds-01'), capacityGB: 500 }] : []),
     ],
     usb: i % 67 === 0 ? 1 : 0, serial: 0, parallel: 0, omitted: 0,
-    nics: [nic(0, 'Network adapter 1'), ...(i % 5 === 0 ? [nic(1, 'Network adapter 2')] : [])],   // v2.897
+    nics: [nic(0, 'Network adapter 1'), ...(i % 5 === 0 ? [nic(1, 'Network adapter 2')] : [])],   // v2.898
   };
 }
 
@@ -718,7 +718,7 @@ export function generateSnapshot() {
         snapshotOldestTs: vm.idx % 6 === 0 ? Date.now() - ((vm.idx % 180) + 1) * 86_400_000 : null,
         snapshotNewestTs: vm.idx % 6 === 0 ? Date.now() - ((vm.idx % 30) + 1) * 86_400_000 : null,
         snapshotNames: vm.idx % 6 === 0 ? ['pre-patch', 'before-upgrade'].slice(0, 1 + (vm.idx % 2)) : [],
-        ...(snapN ? { snapshotTree: mkSnapTree(vm.idx, snapN) } : {}),   // v2.897 스냅샷 트리(개수와 같은 노드 수)
+        ...(snapN ? { snapshotTree: mkSnapTree(vm.idx, snapN) } : {}),   // v2.898 스냅샷 트리(개수와 같은 노드 수)
         orphanDeltaGB: vm.idx % 6 === 0 ? null : (vm.idx % 71 === 0 ? 12.5 : 0), // v2.698(A3): 스냅샷 0개인데 델타 파일(유령 스냅샷)
         gpu: vm.idx % 17 === 0 ? null : mkVmGpu(hostState, vm.idx, ord), // 템플릿은 GPU 를 받지 않는다
         // v2.697(B10): 구성 속성·장치 위생 — 일부(idx%41)는 아직 수집 전(키 없음)이라 화면의 '수집 중' 을 보인다.

@@ -1,5 +1,5 @@
 /**
- * views/vcd/vcInfo.js — vCenter 알람 · 최근 작업 · 권한 목록(v2.897) 화면 판정(순수 · vitest 고정).
+ * views/vcd/vcInfo.js — vCenter 알람 · 최근 작업 · 권한 목록(v2.898) 화면 판정(순수 · vitest 고정).
  * 값은 /vcenter-info/<alarms|tasks|perms>?vcenterId (서버 vcinfo 캐시 — 수집 주기 안에서 종류별 주기로 읽은 것).
  * 못 읽은 값은 '—'(지어내지 않는다). 권한 목록은 관리자 판본에서만 서버가 준다(그 밖은 403 — 화면은 부르지 않는다).
  */
@@ -80,7 +80,7 @@ export function vcInfoHeadText(d) {
   return [d.at ? `읽은 시각 ${shortTs(d.at)}` : '아직 읽지 않음', every ? `${every}마다 갱신` : null, d.source === 'edge' ? '엣지 수집' : d.source === 'mock' ? '데모 데이터' : null].filter(Boolean).join(' · ');
 }
 
-// ── ④ Linked Mode · 업데이트 · vLCM(v2.897 — REST 읽기 전용, 6시간 주기) ─────────────────────────────
+// ── ④ Linked Mode · 업데이트 · vLCM(v2.898 — REST 읽기 전용, 6시간 주기) ─────────────────────────────
 export const NODE_TYPE_TEXT = Object.freeze({ VCSA_EMBEDDED: 'vCenter(내장 PSC)', VCSA_EXTERNAL: 'vCenter(외부 PSC)', PSC_EXTERNAL: '외부 PSC' });
 export const UPDATE_STATE = Object.freeze({
   UP_TO_DATE: ['green', '최신'], UPDATES_PENDING: ['amber', '적용 가능 업데이트 있음'], STAGE_IN_PROGRESS: ['blue', '스테이징 중'],

@@ -1,4 +1,4 @@
-// vCenter 알람 · 최근 작업 · 권한 목록 갱신(v2.897). 인벤토리 수집 한 주기 안에서(soapClient runAux) vCenter 마다 종류별 주기로 한 번.
+// vCenter 알람 · 최근 작업 · 권한 목록 갱신(v2.898). 인벤토리 수집 한 주기 안에서(soapClient runAux) vCenter 마다 종류별 주기로 한 번.
 // 캐시는 인메모리다(재시작 뒤 첫 주기에 다시 읽는다). 실패는 격리한다(인벤토리 수집은 성공) — 실패하면 직전 값을 유지하고 오류를 싣는다
 // (조용히 비우지 않는다). 전부 읽기 전용 호출이다: RetrieveProperties(rootFolder.triggeredAlarmState · TaskManager.recentTask · Task.info ·
 // Alarm.info.name · AuthorizationManager.roleList · 이름) + AuthorizationManager.RetrieveAllPermissions. 상태를 바꾸는 호출은 없다.
@@ -8,7 +8,7 @@
 import { parseObjectContent } from '../vcenter/soapParse.js';
 import { parseTriggeredAlarms, parseTaskInfo, parsePermissions, parseRoleList, nameMapOf, mergeTasks, VCINFO_LIMITS,
   parseTopologyNodes, parseReplication, parseApplianceUpdate, parsePendingUpdates, parseVlcmCompliance, restErrText, VCREST_LIMITS } from './parse.js';
-import { VCenterClient } from '../vcenter/restClient.js';   // v2.897 ④(restClient 는 soapClient 를 import 하지 않는다 — 순환 없음)
+import { VCenterClient } from '../vcenter/restClient.js';   // v2.898 ④(restClient 는 soapClient 를 import 하지 않는다 — 순환 없음)
 
 /** 종류별 갱신 주기(ms) — 화면은 API 의 refreshMs 로 말한다(숫자를 화면에 박지 않는다). */
 export const VCINFO_REFRESH_MS = Object.freeze({ alarms: 5 * 60_000, tasks: 3 * 60_000, perms: 6 * 3_600_000, linked: 6 * 3_600_000, updates: 6 * 3_600_000, vlcm: 6 * 3_600_000 });

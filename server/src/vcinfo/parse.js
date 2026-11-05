@@ -1,4 +1,4 @@
-// vCenter 알람 · 최근 작업 · 권한 목록(v2.897) — 순수 파서 · 정제. 수집(collect.js) · 엣지 수신 정제(central) · 라우트가 같은 모양을 쓴다.
+// vCenter 알람 · 최근 작업 · 권한 목록(v2.898) — 순수 파서 · 정제. 수집(collect.js) · 엣지 수신 정제(central) · 라우트가 같은 모양을 쓴다.
 //
 // 모양(캐시 · 엣지 push · API 공통 — 종류마다 { at, items, error, ... }. at 이 null 이면 아직 읽지 않음):
 //   alarms: { at, items:[{ alarm, name, entityType, entity, entityName, status:'red'|'yellow'|'gray'|'green'|null, time, ack, ackBy, ackTime }], omitted, error }
@@ -211,10 +211,10 @@ export function sanitizeVcInfo(v) {
   if (Object.hasOwn(v, 'alarms')) out.alarms = sanAlarms(v.alarms);
   if (Object.hasOwn(v, 'tasks')) out.tasks = sanTasks(v.tasks);
   if (Object.hasOwn(v, 'perms')) out.perms = sanPerms(v.perms);
-  return sanitizeVcRestInfo(v, out);   // v2.897 ④ linked · updates · vlcm
+  return sanitizeVcRestInfo(v, out);   // v2.898 ④ linked · updates · vlcm
 }
 
-// ── v2.897 ④ REST(읽기 전용): Linked Mode 구성원 · 어플라이언스 업데이트 · vLCM 이미지 준수 ─────────────────────────────
+// ── v2.898 ④ REST(읽기 전용): Linked Mode 구성원 · 어플라이언스 업데이트 · vLCM 이미지 준수 ─────────────────────────────
 // 모양:
 //   linked:  { at, nodes:[{ node, type, partners:[] }], domain, replication:[{ node, partner, available, replicating, lag }], error, replError }
 //   updates: { at, state, version, lastCheck, pending:[{ version, name, severity, priority, type, releaseDate, reboot, sizeMB }], error, pendingError }

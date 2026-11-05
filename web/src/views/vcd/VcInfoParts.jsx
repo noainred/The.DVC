@@ -1,5 +1,5 @@
 /**
- * views/vcd/VcInfoParts.jsx — vCenter 알람 · 최근 작업 · 권한 목록 카드(v2.897). vCenter 상세(모니터 · 사용 권한)와 VM · 호스트 개체 보기가 함께 쓴다.
+ * views/vcd/VcInfoParts.jsx — vCenter 알람 · 최근 작업 · 권한 목록 카드(v2.898). vCenter 상세(모니터 · 사용 권한)와 VM · 호스트 개체 보기가 함께 쓴다.
  *   값은 서버 캐시(/vcenter-info/*) — 탭을 열 때 1회 + '다시 읽기'(15초 폴링 금지). 판정 · 문구는 vcInfo.js(순수).
  *   권한 목록은 관리자 판본에서만 부른다(아니면 부르지 않고 권한 안내 — 403 을 만들지 않는다).
  */
@@ -183,7 +183,7 @@ export function VcPermsCard({ vcenterId, entityType = null, entity = null, what 
   );
 }
 
-/* ── ④ Linked Mode · 업데이트 · vLCM(v2.897 — REST 읽기 전용 · 6시간 주기) ─────────────────────────── */
+/* ── ④ Linked Mode · 업데이트 · vLCM(v2.898 — REST 읽기 전용 · 6시간 주기) ─────────────────────────── */
 const reloadBtn = (q) => <button type="button" className="vcd-more" onClick={q.reload} disabled={q.loading}>{q.loading ? '불러오는 중…' : '다시 읽기'}</button>;
 const gateBody = (ok, q, label) => (!ok ? <div style={{ padding: 12 }}><ErrorBox error={toolDenied(label)} /></div>
   : q.error && !q.data ? <div style={{ padding: 12 }}><ErrorBox error={q.error} /></div> : !q.data ? <Loading label={label} /> : null);

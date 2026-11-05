@@ -1,7 +1,7 @@
 /**
  * views/vcd/MonitorTab.jsx — vCenter › 모니터(승인 시안 ② · 기본값 2: 예전 '추이' 는 모니터 › 성능).
- *   문제 및 알람 = vCenter 트리거 알람(v2.897 — vcinfo) + 포탈 알람(포탈 규칙 — 따로 보인다) · 이벤트 = 구성 변경 이력(이 vCenter) ·
- *   작업 = vCenter 최근 작업(v2.897 — vcinfo) · 성능 = TrendView 그대로.
+ *   문제 및 알람 = vCenter 트리거 알람(v2.898 — vcinfo) + 포탈 알람(포탈 규칙 — 따로 보인다) · 이벤트 = 구성 변경 이력(이 vCenter) ·
+ *   작업 = vCenter 최근 작업(v2.898 — vcinfo) · 성능 = TrendView 그대로.
  */
 import React, { useState } from 'react';
 import { usePolling, toolAllowed, can } from '../../api.js';

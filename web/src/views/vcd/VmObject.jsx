@@ -1,7 +1,7 @@
 /**
  * views/vcd/VmObject.jsx — VM '개체 보기'(v2.895 — 승인 시안 ⑧⑩⑪ · 기본값 8~10). vSphere Client 의 VM 개체 탭 8개.
  *   값은 /vms 한 행 + 캐시(vmcfg cfg · dev · perfc) + 온디맨드(파티션 · 이벤트 · 메트릭 — 열 때 1회)만.
- *   v2.897: 네트워크 어댑터(dev.nics) · 스냅샷 트리(snapshotTree) — 주기 수집이 이미 받던 장치 · 스냅샷 XML 을 넓혀 읽은 값(새 vCenter 호출 없음).
+ *   v2.898: 네트워크 어댑터(dev.nics) · 스냅샷 트리(snapshotTree) — 주기 수집이 이미 받던 장치 · 스냅샷 XML 을 넓혀 읽은 값(새 vCenter 호출 없음).
  *   섹션은 지금 VM 상세 창(components/EntityDetail.jsx)의 것을 그대로 쓴다(복제 금지). 상태를 바꾸는 동작은 지금 버튼(권한 · 쓰기 범위) 그대로.
  */
 import React, { useMemo } from 'react';
@@ -221,7 +221,7 @@ export default function VmObject({ site, vcenterId, vm, vmsOk, gate, datastores,
   );
 }
 
-/** v2.897: 네트워크 어댑터 표(vm.dev.nics — 장치 XML). 분산 포트그룹 이름 · VLAN 은 /networks 에서 찾는다. */
+/** v2.898: 네트워크 어댑터 표(vm.dev.nics — 장치 XML). 분산 포트그룹 이름 · VLAN 은 /networks 에서 찾는다. */
 function VmNicCard({ vm, nics }) {
   return (
     <Card style={{ gridColumn: '1 / -1' }} title={`네트워크 어댑터${nics ? ` ${nics.length}` : ''}`} sub={vm.dev?.at ? `vmcfg 장치 · 읽은 시각 ${tsText(vm.dev.at)}` : 'vmcfg 장치'}>
@@ -248,7 +248,7 @@ function VmNicCard({ vm, nics }) {
   );
 }
 
-/** v2.897: 스냅샷 트리(vm.snapshotTree — 전위 순서 · d=깊이). 동작(되돌리기 · 삭제)은 두지 않는다. */
+/** v2.898: 스냅샷 트리(vm.snapshotTree — 전위 순서 · d=깊이). 동작(되돌리기 · 삭제)은 두지 않는다. */
 function SnapTreeCard({ vm }) {
   const t = snapTreeRows(vm);
   // 개수를 못 읽었으면(REST 폴백 등 — 키 없음) '스냅샷 없음' 이 아니라 모른다(반증 하-1 · vmSnapshotFacts 와 같은 numOrNull 판정).

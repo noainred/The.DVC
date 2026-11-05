@@ -81,7 +81,7 @@ test('S1-01·B1-09 가짜 vCenter 수집: 데드라인이 모자라면 부가 �
   // 데드라인이 이미 지난 수집 — 부가 갱신 6종을 시작하지 않고 사유를 남긴다(본 인벤토리는 그대로 성공).
   const s2 = await collectFromVCenterSoap(vc, { deadlineAt: Date.now() + 1_000 });
   const kinds = (s2.vcenter.auxSkipped || []).map((x) => x.kind).sort();
-  // v2.897: vCenter 알람 · 작업 · 권한(vcinfo) · Linked Mode · 업데이트 · vLCM(vcrest) 갱신이 더해졌다 — 같은 실행기(runAux)라 같이 건너뛴다.
+  // v2.898: vCenter 알람 · 작업 · 권한(vcinfo) · Linked Mode · 업데이트 · vLCM(vcrest) 갱신이 더해졌다 — 같은 실행기(runAux)라 같이 건너뛴다.
   assert.deepEqual(kinds, ['clustercfg', 'dscfg', 'hostcfg', 'tags', 'vcinfo', 'vcrest', 'vmcfg'], '부가 갱신 7종(perfManager 없는 vCenter 라 경합 제외)');
   assert.ok((s2.vcenter.auxSkipped || []).every((x) => x.reason === 'deadline'));
   assert.equal(s2.vms.length, 2, '부가 갱신을 건너뛰어도 인벤토리는 그대로');

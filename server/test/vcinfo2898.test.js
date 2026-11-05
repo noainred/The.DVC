@@ -1,5 +1,5 @@
 /**
- * v2.897 — vCenter 알람 · 최근 작업 · 권한 목록(vcinfo). 고정하는 것:
+ * v2.898 — vCenter 알람 · 최근 작업 · 권한 목록(vcinfo). 고정하는 것:
  *  ① 파서: AlarmState(타입 이름 · 속성 이름 둘 다) · TaskInfo(result · reason 안의 같은 이름 태그에 속지 않는다) · Permission · AuthorizationRole
  *  ② 수집: 읽기 전용 호출만 · 종류별 주기 · 실패하면 직전 값 유지 + 오류 · 권한 부족 vCenter 에 매 주기 묻지 않는다 · 작업 버퍼 24시간
  *  ③ 엣지 정제(sanitizeVcInfo) · 중앙 수신이 vcenter 객체에서 vcInfo 를 지우고 캐시에만 넣는다(/vcenters 로 권한 목록이 새지 않는다)
@@ -12,7 +12,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-const DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'vcinfo2897-'));
+const DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'vcinfo2898-'));
 process.env.CONFIG_DIR = DIR;
 process.env.DATA_SOURCE = 'live';
 
@@ -390,7 +390,7 @@ test('③④ 엣지 정제 — REST 3종도 아는 키만', () => {
   assert.deepEqual([v.vlcm.items[0].status, v.vlcm.items[0].nc, v.vlcm.items[0].counts.compliant], [null, [{ id: 'host-1', name: 'h' }], null]);
 });
 
-// ════════════════════════════ 반증 지적 반영(v2.897) ════════════════════════════
+// ════════════════════════════ 반증 지적 반영(v2.898) ════════════════════════════
 test('반증 중-1 — 중앙이 vcInfo 를 모르는 버전(또는 미상)이면 push 에 붙이지 않는다', async () => {
   const push = await import('../src/agent/inventoryPush.js');
   C._resetVcInfo();
