@@ -171,7 +171,11 @@ export function buildQueues({ members = [], resolved, pins = {}, allowed = null,
     else if (r.unmapped?.kind === 'entry') { kind = 'entry'; value = r.unmapped.value; gk = `entry|${m.corp}|${value}`; }
     else if (r.unmapped?.kind === 'scan') { kind = 'scan'; value = r.unmapped.value; gk = `scan|${m.corp}|${lc(value)}`; }
     else if (r.reason === 'placement-unknown') { kind = 'placement'; gk = `placement|${m.corp}`; }
-    else { kind = 'manual'; gk = `manual|${m.corp}`; }
+    else {
+      // 묶을 출처 없음 — 이유별로 나눈다(5차 R18: 예전에는 수동 등록·구버전 엣지·모르는 엔트리를 한 묶음으로 뭉뚱그렸다)
+      kind = 'manual'; value = r.reason === 'scan-entry-unknown' ? 'unknown-entry' : r.reason === 'source-old' ? 'old-source' : '';
+      gk = `manual|${m.corp}|${value}`;
+    }
     if (!groups.has(gk)) {
       const e = kind === 'entry' ? scanEntries.get(value) : null;
       groups.set(gk, { key: gk, kind, corp: m.corp, value, n: 0, vm: 0, bm: 0, unchecked: 0, names: [], keys: [],

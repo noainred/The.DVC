@@ -39,7 +39,7 @@ import { latestUsage } from '../../bmusage/db.js';
 import { vmRefOf, vmTagsOf, tagsPartialOf } from '../../tags/analyze.js';
 import { buildInventory, hostKeyOf } from '../../servicemap/build.js';
 import { CORP_OPS, FLEET_OPS } from '../../servicemap/ops.js';
-import { getMap, getPins, storeRev, storeLoadError, mutateMap, mutatePins, flushStore, resetCorrupt, LIMITS } from '../../servicemap/store.js';
+import { getMap, getPins, peekMap, peekPins, storeRev, storeLoadError, mutateMap, mutatePins, flushStore, resetCorrupt, LIMITS } from '../../servicemap/store.js';
 import { mergeLatestRows, rowsByAgentKeyOf, makeCapOf, clampEdgeTs } from './corpUsage.js';
 
 const toolsPerm = requirePerm('tools');
@@ -206,7 +206,9 @@ async function gatherNow(snap, tagCategory) {
   for (const c of cu.corps || []) for (const x of c.servers || []) judged.set(x.role === 'bm' ? `${c.vcenterId}|bm|${x.key}` : `${c.vcenterId}|virt|${lc(x.name)}`, x);
   for (const x of cu.unassigned?.servers || []) judged.set(`|bm|${x.key}`, x);
   const regById = new Map(registry.map((r) => [t(r.id), r]));
-  const edgeScan = (() => { try { return new Map(getEdgeFleetServers().map((s) => [t(s.serverId), t(s.scanRangeId)])); } catch { return new Map(); } })();
+  // 스캔 엔트리 id — 엣지 push(serverId) · 수집 서버 pull(remote:<수집기>:<엣지 서버 id>). 값 null = 보고한 쪽이 구버전(필드 없음 — 5차 R6·R18).
+  const edgeScan = (() => { try { return new Map(getEdgeFleetServers().map((s) => [t(s.serverId), typeof s.scanRangeId === 'string' ? t(s.scanRangeId) : null])); } catch { return new Map(); } })();
+  const remoteScan = new Map(remoteServers.map((s) => [`remote:${t(s.collectorId)}:${t(s.id)}`, typeof s.scanRangeId === 'string' ? t(s.scanRangeId) : null]));
   const entries = (() => { try { return listScanRanges(); } catch (e) { sourceErrors.push(`스캔 대역: ${String(e?.message || e).slice(0, 160)}`); return []; } })();
   const scanEntries = new Map(entries.map((e) => [t(e.id), { service: t(e.service), datacenterId: t(e.datacenterId), range: (e.ranges || []).slice(0, 4).join(', ') }]));
   const isAddr = addressMatcher(registry.map((r) => r.host).filter(Boolean));
@@ -220,13 +222,16 @@ async function gatherNow(snap, tagCategory) {
     const id = idOf(b);
     const x = judged.get(`${vc}|bm|${id.key}`) || null;
     const sid = t(b.serverId);
-    const entryId = b.source === 'edge' ? (edgeScan.get(sid) || '') : t(regById.get(sid)?.scanRangeId);
+    const reported = b.source === 'edge' ? edgeScan.get(sid) : b.source === 'remote' ? remoteScan.get(sid) : t(regById.get(sid)?.scanRangeId);
+    const entryId = typeof reported === 'string' ? reported : '';
     const e = entryId ? scanEntries.get(entryId) : null;
+    // scan 이 없는 이유: 엔트리 id 는 왔는데 중앙 등록부에 없음 · 보고한 쪽이 엔트리 id 를 보내지 않음(구버전) · 그 밖(수동 등록)
+    const scanWhy = e ? undefined : entryId ? 'unknown-entry' : ((b.source === 'edge' || b.source === 'remote') && reported === null ? 'old-source' : undefined);
     let powered = null;
     try { const inv = b.source === 'edge' ? null : getInventory(sid); const ps = lc(inv?.powerState); powered = ps === 'on' ? true : ps === 'off' ? false : null; } catch { powered = null; }
     members.push({
       key, keyKind, kind: 'bm', corp: vc, name: t(b.name), nameIsAddr: isAddr(t(b.name)), serviceTag: t(b.serviceTag), source: t(b.source), remoteAgent: t(b.remoteAgent),
-      scan: e ? { entryId, label: e.service } : null, powered, cores: x?.cores ?? null, memGB: x?.memGB ?? null,
+      scan: e ? { entryId, label: e.service } : null, ...(scanWhy ? { scanWhy } : {}), powered, cores: x?.cores ?? null, memGB: x?.memGB ?? null,
       usage: x ? { state: x.state, cpuPct: x.cpuPct, memPct: x.memPct, src: x.src } : { state: 'unread' },
       faults: faultsOf(b.serviceTag, sid), corpRule: b.vcSource === 'corp-rule',
     });
@@ -279,16 +284,52 @@ function knownCorpsOf(snap) {
 const fleetAdmin = (user, snap) => isAdminDetailUser(user) && !scopedVcenterIds(user, snap);   // 관리자 판본 판정은 isAdminDetailUser 하나(role 직접 비교 금지)
 
 // ───────── 응답 조립 ─────────
+// 읽기 경로는 동결 참조(복사 없음 — 5차 검토 R5: 요청마다 고정 5만 건 깊은 복사 114ms). 쓰기는 mutate* 만.
 function loadState() {
-  return { map: getMap(), pins: getPins().pins, rev: storeRev(), err: storeLoadError() };
+  return { map: peekMap(), pins: peekPins(), rev: storeRev(), err: storeLoadError() };
 }
+/**
+ * 판정·집계 결과 memo(5차 검토 M10/R5 — 실측: 6,500 구성원 buildInventory 중앙값 77ms 를 구성원·큐·후보·CSV 요청마다 되풀이했고,
+ * 쓰기 한 번에 화면이 3요청을 보냈다). 키 = 스냅샷 세대 · 저장소 rev · 입력 세대(gather 시각 · inputRev) · 알려진 법인 · 범위 · 관리자 판본.
+ * '세대가 바뀌면 무엇이 지워지는가': 키의 어느 값이 바뀌어도 새 키다 — 쓰기(rev) · 새 스냅샷 · 입력 다시 읽기 · 라벨 변경 · vCenter 등록부 변경.
+ * TTL 12초 · 최대 4개(범위가 다른 계정 몇 명). 결과는 동결 참조를 품으므로 호출부는 고치지 않는다.
+ */
+const INV_MEMO_MS = 12_000;
+const INV_MEMO_MAX = 4;
+const _invMemo = new Map();
+const _invStats = { hits: 0, misses: 0 };
+export function _invMemoStats() { return { ..._invStats, size: _invMemo.size }; }
 async function inventoryFor(req, snap) {
   const st = loadState();
   const g = await gather(snap, st.map.settings.tagCategory || '');
   const allowed = scopedVcenterIds(req.user, snap);
   const admin = isAdminDetailUser(req.user);
-  const inv = buildInventory({ members: g.members, map: st.map, pins: st.pins, hostByKey: g.hostByKey, allowed, unreadCorps: g.unreadCorps, bmBlocked: g.bmBlocked, corpNames: g.corpNames, scanEntries: g.scanEntries, adminView: admin, knownCorps: knownCorpsOf(snap) });
+  const known = knownCorpsOf(snap);
+  const key = [snap?.generatedAt || 0, st.rev, g.at, _inputRev, known ? [...known].sort().join(',') : '-', allowed ? [...allowed].sort().join(',') : '*', admin ? 'a' : 'u'].join('|');
+  const now = Date.now();
+  const hit = _invMemo.get(key);
+  if (hit && now - hit.at < INV_MEMO_MS) { _invStats.hits += 1; return { st, g, inv: hit.inv, allowed, admin }; }
+  _invStats.misses += 1;
+  const inv = buildInventory({ members: g.members, map: st.map, pins: st.pins, hostByKey: g.hostByKey, allowed, unreadCorps: g.unreadCorps, bmBlocked: g.bmBlocked, corpNames: g.corpNames, scanEntries: g.scanEntries, adminView: admin, knownCorps: known });
+  for (const [k, v] of _invMemo) if (now - v.at >= INV_MEMO_MS) _invMemo.delete(k);
+  while (_invMemo.size >= INV_MEMO_MAX) _invMemo.delete(_invMemo.keys().next().value);
+  _invMemo.set(key, { at: now, inv });
   return { st, g, inv, allowed, admin };
+}
+
+/**
+ * '입력 다시 읽기'(5차 검토 M2 · 결정 ② 쓰기 계정) — 입력 수집(gather)은 스냅샷 세대마다 한 번이라, 이 화면 밖에서 바뀐 입력
+ * (등록부 법인 귀속 · iDRAC 화면의 스캔 라벨 · 부품 장애 · Bareos 원장)은 다음 수집 주기까지 옛값이었다. 쓰기 계정이 지금 다시 읽게 한다.
+ * 28법인 조인 비용 보호로 프로세스당 FRESH_MIN_MS 에 한 번(화면은 meta.limits 의 값으로 안내 — 숫자를 박지 않는다).
+ */
+const FRESH_MIN_MS = 30_000;
+let _lastFresh = 0;
+export function _resetFreshForTest() { _lastFresh = 0; }
+function forceFresh(now = Date.now()) {
+  if (now - _lastFresh < FRESH_MIN_MS) return { ok: false, waitSec: Math.ceil((FRESH_MIN_MS - (now - _lastFresh)) / 1000) };
+  _lastFresh = now;
+  _gather = { key: '', promise: null }; _inputRev += 1;
+  return { ok: true };
 }
 /** 백업 메타를 범위로 자른다 — 범위 계정에 함대 전체의 Bareos 매핑 법인 수를 싣지 않는다(5차 1차 Chromium 확인). */
 export function backupMetaFor(g, allowed) {
@@ -315,6 +356,11 @@ export function registerSvcInventory(api) {
   // ── 메인: 트리·서비스별 집계·전역 축·큐 개수 ──
   api.get('/tools/svc-inventory', toolsPerm, async (req, res) => {
     const snap = store.get();
+    if (req.query.fresh === '1') {
+      if (!writerOk(req.user)) return res.status(403).json({ ok: false, error: 'forbidden', reason: '입력 다시 읽기는 쓰기 계정(관리자·운영자)만 쓸 수 있습니다.' });
+      const f = forceFresh();
+      if (!f.ok) return res.status(429).json({ ok: false, error: 'tooSoon', reason: `방금 다시 읽었습니다 — ${f.waitSec}초 뒤에 다시 누르십시오.`, waitSec: f.waitSec });
+    }
     const err = storeLoadError();
     if (err) return res.status(503).json({ ok: false, error: 'registryUnreadable', reason: `서비스 인벤토리 저장소를 읽지 못했습니다 — ${err.map || err.pins}. 빈 트리로 시작하지 않습니다(백업 복원 또는 전체 범위 관리자의 초기화).`, corrupt: err, canReset: fleetAdmin(req.user, snap) });
     const extraKey = `${scopeKey(req.user, snap)}|w${writeKeyOf(req.user, snap)}|${isAdminDetailUser(req.user) ? 'a' : 'u'}|r${storeRev()}|i${_inputRev}`;
@@ -343,7 +389,7 @@ export function registerSvcInventory(api) {
           for (const x of q.orphaned) bump(x.corp, 'orphaned');
           return o;
         })(),
-        meta: { faults: g.faultsMeta, backup: backupMetaFor(g, allowed), unreadCorps: [...g.unreadCorps].filter((v) => !allowed || allowed.has(v)), bmBlocked: g.bmBlocked, sourceErrors: allowed ? [] : g.sourceErrors, limits: LIMITS, snapAt: s?.generatedAt || null },
+        meta: { faults: g.faultsMeta, backup: backupMetaFor(g, allowed), unreadCorps: [...g.unreadCorps].filter((v) => !allowed || allowed.has(v)), bmBlocked: g.bmBlocked, sourceErrors: allowed ? [] : g.sourceErrors, limits: { ...LIMITS, freshMinMs: FRESH_MIN_MS }, snapAt: s?.generatedAt || null, inputsAt: g.at },
       };
     }, { ttlMs: 12_000, extraKey });
   });

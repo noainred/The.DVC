@@ -160,20 +160,28 @@ function readJson(file) {
   try { return { value: JSON.parse(txt) }; } catch (e) { return { error: `형식 오류(${safeLoadText(e, 120)})` }; }
 }
 const mtimeOf = (file) => { try { return fs.statSync(file).mtimeMs; } catch { return null; } };
+/**
+ * 메모리 상태는 **깊게 동결**한다 — 읽기 경로(peekMap·peekPins)가 복사 없이 참조를 넘기므로, 누가 고치려 하면 조용히 상태가 바뀌는 대신
+ * 즉시 던진다(ESM 은 엄격 모드). 쓰기는 늘 draft 깊은 복사 → normalize → 동결 순서다(5차 검토 R5: 요청마다 고정 5만 건 깊은 복사 114ms).
+ */
+function deepFreeze(o) {
+  if (o && typeof o === 'object' && !Object.isFrozen(o)) { Object.freeze(o); for (const v of Object.values(o)) deepFreeze(v); }
+  return o;
+}
 
 function ensureLoaded() {
   // 손상 상태에서는 파일이 바뀌었으면(사람이 고쳤거나 복원) 다시 읽어 본다 — 그 밖에는 메모리가 진실이다.
   if (S.map && !(S.mapErr && mtimeOf(MAP_FILE()) !== S.mapMtime)) { /* keep */ } else {
     const r = readJson(MAP_FILE());
     S.mapMtime = mtimeOf(MAP_FILE());
-    if (r.error) { S.mapErr = r.error; S.map = emptyMap(); console.error(`[servicemap] service-map.json 을 읽지 못했습니다 — ${r.error}. 빈 트리로 시작하지 않고 쓰기를 막습니다(복원하거나 관리자 '초기화').`); }
-    else { S.mapErr = null; S.map = normalizeMap(r.missing ? null : r.value); }
+    if (r.error) { S.mapErr = r.error; S.map = deepFreeze(emptyMap()); console.error(`[servicemap] service-map.json 을 읽지 못했습니다 — ${r.error}. 빈 트리로 시작하지 않고 쓰기를 막습니다(복원하거나 관리자 '초기화').`); }
+    else { S.mapErr = null; S.map = deepFreeze(normalizeMap(r.missing ? null : r.value)); }
   }
   if (S.pins && !(S.pinErr && mtimeOf(PIN_FILE()) !== S.pinMtime)) { /* keep */ } else {
     const r = readJson(PIN_FILE());
     S.pinMtime = mtimeOf(PIN_FILE());
-    if (r.error) { S.pinErr = r.error; S.pins = emptyPins(); console.error(`[servicemap] service-map-pins.json 을 읽지 못했습니다 — ${r.error}. 고정 쓰기를 막습니다.`); }
-    else { S.pinErr = null; S.pins = normalizePins(r.missing ? null : r.value); }
+    if (r.error) { S.pinErr = r.error; S.pins = deepFreeze(emptyPins()); console.error(`[servicemap] service-map-pins.json 을 읽지 못했습니다 — ${r.error}. 고정 쓰기를 막습니다.`); }
+    else { S.pinErr = null; S.pins = deepFreeze(normalizePins(r.missing ? null : r.value)); }
   }
 }
 
@@ -209,6 +217,9 @@ function schedule() {
 export function getMap() { ensureLoaded(); return JSON.parse(JSON.stringify(S.map)); }
 export function getPins() { ensureLoaded(); return JSON.parse(JSON.stringify(S.pins)); }
 export function storeRev() { ensureLoaded(); return `${S.map.rev}.${S.pins.rev}`; }
+/** 읽기 전용 참조(동결 — 복사 없음). 판정·집계처럼 읽기만 하는 경로 전용. 고치려면 getMap/getPins 사본이나 mutate* 를 쓴다. */
+export function peekMap() { ensureLoaded(); return S.map; }
+export function peekPins() { ensureLoaded(); return S.pins.pins; }
 
 /**
  * 변경 한 번 — fn(draft) 이 { error } 를 돌려주면 아무것도 바꾸지 않는다. 성공이면 rev 를 올리고 디바운스 저장.
@@ -221,7 +232,7 @@ export function mutateMap(fn) {
   const r = fn(draft) || {};
   if (r.error) return { ok: false, status: r.status || 400, error: r.error };
   draft.rev = (S.map.rev || 0) + 1;
-  S.map = normalizeMap(draft);
+  S.map = deepFreeze(normalizeMap(draft));
   S.dirtyMap = true; schedule();
   return { ok: true, result: r.result };
 }
@@ -233,7 +244,7 @@ export function mutatePins(fn) {
   if (r.error) return { ok: false, status: r.status || 400, error: r.error };
   if (Object.keys(draft.pins).length > LIMITS.pins) return { ok: false, status: 400, error: `고정은 최대 ${LIMITS.pins}건입니다` };
   draft.rev = (S.pins.rev || 0) + 1;
-  S.pins = normalizePins(draft);
+  S.pins = deepFreeze(normalizePins(draft));
   S.dirtyPins = true; schedule();
   return { ok: true, result: r.result };
 }
@@ -242,8 +253,8 @@ export function mutatePins(fn) {
 export function resetCorrupt() {
   ensureLoaded();
   const moved = [];
-  if (S.mapErr) { const b = preserveCorrupt(MAP_FILE(), S.mapErr); if (b) moved.push(path.basename(b)); S.mapErr = null; S.map = emptyMap(); S.dirtyMap = true; }
-  if (S.pinErr) { const b = preserveCorrupt(PIN_FILE(), S.pinErr); if (b) moved.push(path.basename(b)); S.pinErr = null; S.pins = emptyPins(); S.dirtyPins = true; }
+  if (S.mapErr) { const b = preserveCorrupt(MAP_FILE(), S.mapErr); if (b) moved.push(path.basename(b)); S.mapErr = null; S.map = deepFreeze(emptyMap()); S.dirtyMap = true; }
+  if (S.pinErr) { const b = preserveCorrupt(PIN_FILE(), S.pinErr); if (b) moved.push(path.basename(b)); S.pinErr = null; S.pins = deepFreeze(emptyPins()); S.dirtyPins = true; }
   const ok = flush();
   return { ok, moved };
 }

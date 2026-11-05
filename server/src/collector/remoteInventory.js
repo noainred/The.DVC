@@ -195,7 +195,9 @@ export function sanitizeRemoteSensorDetail(x, { now = null } = {}) {
     list,
   };
 }
-const SERVER_STR_KEYS = ['name', 'host', 'serviceTag', 'model', 'vcenterId', 'datacenterId', 'type', 'hostName'];
+// scanRangeId(5차 검토 R6 — 서비스 인벤토리의 스캔 엔트리 조인): 글자만 · 128자. 필드가 없으면 싣지 않는다(구버전 수집 서버 구분).
+const SERVER_STR_KEYS = ['name', 'host', 'serviceTag', 'model', 'vcenterId', 'datacenterId', 'type', 'hostName', 'scanRangeId'];
+const SERVER_STR_MAX = { scanRangeId: 128 };
 /**
  * v2.621(감사 WEB-04): BMC 벤더 — 엣지(2.621+)가 등록부 판정으로 'hpe' | 'dell' 을 싣는다. 이 둘만 값으로 받고
  *   그 밖(모르는 글자·객체)은 **버린다**(필드 없음 = 벤더 미상). 'dell' 도 받는 이유: 구버전 엣지(필드 없음)와
@@ -232,7 +234,7 @@ export function sanitizeRemoteServers(list, { max = REMOTE_SERVERS_MAX, now = Da
     const o = { id };
     for (const k of SERVER_STR_KEYS) {
       if (!Object.hasOwn(s, k) || s[k] == null) continue;
-      o[k] = remoteStr(s[k]);
+      o[k] = remoteStr(s[k], SERVER_STR_MAX[k]);
       if (o[k] == null) coerced += 1;
     }
     if (Object.hasOwn(s, 'vendor') && s.vendor != null) {
