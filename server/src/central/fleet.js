@@ -247,6 +247,8 @@ export function getEdgeFleetServers() {
         vcenterId: b.vcenterId || '',
         source: 'edge',
         remoteAgent: agent,
+        // v2.899(점검 E4): 엣지 쪽 출처('idrac' 등록부 · 'ome' · 'remote') — 등록부 밖 장치의 빈 scanRangeId 를 '수동 등록' 으로 읽지 않게(servicemap 2차 반증 1)
+        edgeSource: typeof b.source === 'string' ? b.source : '',
         scanRangeId: typeof b.scanRangeId === 'string' ? b.scanRangeId : null,
       });
     }
