@@ -211,6 +211,7 @@ export function sanitizeVcInfo(v) {
   if (Object.hasOwn(v, 'alarms')) out.alarms = sanAlarms(v.alarms);
   if (Object.hasOwn(v, 'tasks')) out.tasks = sanTasks(v.tasks);
   if (Object.hasOwn(v, 'perms')) out.perms = sanPerms(v.perms);
+  if (Object.hasOwn(v, 'pools')) out.pools = sanitizePools(v.pools);   // v2.899 리소스 풀
   return sanitizeVcRestInfo(v, out);   // v2.898 ④ linked · updates · vlcm
 }
 
@@ -322,4 +323,47 @@ export function sanitizeVcRestInfo(v, out = {}) {
   if (Object.hasOwn(v, 'updates')) out.updates = sanUpdates(v.updates);
   if (Object.hasOwn(v, 'vlcm')) out.vlcm = sanVlcm(v.vlcm);
   return out;
+}
+
+// ── v2.899: 리소스 풀 예약 · 제한 · 공유(ResourcePool.config.cpuAllocation · memoryAllocation — 6시간마다) ──────────────
+//   pools: { at, items:[{ ref, name, owner, root, cpu:{res,limit,expandable,shares,level}, mem:{…} }], omitted, error }
+//   CPU 는 MHz, 메모리는 MB(vSphere ResourceAllocationInfo 단위). limit -1 = 무제한(그대로 -1). 못 읽은 값은 null.
+export const POOLS_MAX = 500;
+const SHARE_LEVELS = new Set(['low', 'normal', 'high', 'custom']);
+const intTag = (x, t) => { const v = first(x, t); return v != null && /^-?\d{1,15}$/.test(v.trim()) ? Number(v) : null; };
+export function parseAllocation(xml) {
+  if (typeof xml !== 'string' || !xml) return null;
+  // shares 는 <shares><shares>N</shares><level>…</level></shares> 로 중첩된다 — 글자만 든 안쪽 <shares> 와 하나뿐인 <level> 을 바로 읽는다.
+  const lv = first(xml, 'level');
+  const ex = first(xml, 'expandableReservation');
+  return {
+    res: intTag(xml, 'reservation'), limit: intTag(xml, 'limit'),
+    expandable: ex === 'true' ? true : ex === 'false' ? false : null,
+    shares: intTag(xml, 'shares'),
+    level: lv && SHARE_LEVELS.has(lv) ? lv : null,
+  };
+}
+/** RetrieveProperties 결과 [{ref, props}] → 풀 행. 루트 풀(부모가 클러스터 · 단독 호스트 — 'domain-' 으로 시작)은 root:true(클러스터 용량 그 자체라 예약 값이 크다). */
+export function parsePools(objs) {
+  const out = [];
+  for (const o of Array.isArray(objs) ? objs : []) {
+    if (!o?.ref || !MOREF_RE.test(o.ref)) continue;
+    const p = o.props || {};
+    const parent = typeof p.parent === 'string' ? p.parent.trim() : '';
+    const owner = typeof p.owner === 'string' && MOREF_RE.test(p.owner.trim()) ? p.owner.trim() : null;
+    out.push({ ref: o.ref, name: capTxt(p.name, 128), owner, root: parent ? parent.startsWith('domain-') : null,
+      cpu: parseAllocation(p['config.cpuAllocation']), mem: parseAllocation(p['config.memoryAllocation']) });
+  }
+  return out.sort((a, b) => String(a.name || '').localeCompare(String(b.name || '')));
+}
+const sanAlloc = (a) => (isObj(a) ? {
+  res: int(a.res), limit: int(a.limit), expandable: bool(a.expandable), shares: int(a.shares) != null && a.shares >= 0 ? a.shares : null,
+  level: typeof a.level === 'string' && SHARE_LEVELS.has(a.level) ? a.level : null,
+} : null);
+export function sanitizePools(k) {
+  if (!isObj(k)) return null;
+  return { at: ts(k.at), error: str(k.error, 300), omitted: cnt(k.omitted),
+    items: (Array.isArray(k.items) ? k.items : []).filter(isObj).slice(0, POOLS_MAX).map((x) => ({
+      ref: ref(x.ref), name: str(x.name, 128), owner: ref(x.owner), root: bool(x.root), cpu: sanAlloc(x.cpu), mem: sanAlloc(x.mem),
+    })).filter((x) => x.ref) };
 }

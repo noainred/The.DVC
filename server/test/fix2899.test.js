@@ -40,3 +40,61 @@ test('ⓐ-2 데모 — 같은 VM 의 스냅샷 개수 · 트리 노드 수가 �
   }
   assert.ok(n > 0, '스냅샷이 있는 데모 VM 이 있다');
 });
+
+test('ⓓ-1 NIC 팀 구성 — 스위치 spec 의 중첩 policy 에 속지 않는다 · 포트그룹은 유효 정책 · 엣지 정제', async () => {
+  const { parseNetwork, sanitizeHostCfg } = await import('../src/hostcfg/parse.js');
+  const vs = '<HostVirtualSwitch><name>vSwitch0</name><pnic>key-vim.host.PhysicalNic-vmnic0</pnic><pnic>key-vim.host.PhysicalNic-vmnic1</pnic>'
+    + '<spec><policy><security><allowPromiscuous>false</allowPromiscuous></security><nicTeaming><policy>failover_explicit</policy><rollingOrder>true</rollingOrder>'
+    + '<nicOrder><activeNic>vmnic0</activeNic><standbyNic>vmnic1</standbyNic></nicOrder></nicTeaming></policy></spec></HostVirtualSwitch>';
+  const pg = '<HostPortGroup><spec><name>VM Network</name><vlanId>10</vlanId><vswitchName>vSwitch0</vswitchName><policy></policy></spec>'
+    + '<computedPolicy><nicTeaming><policy>loadbalance_ip</policy></nicTeaming></computedPolicy></HostPortGroup>';
+  const n = parseNetwork(vs, pg, '<HostProxySwitch><dvsName>DS</dvsName><pnic>key-vim.host.PhysicalNic-vmnic2</pnic></HostProxySwitch>');
+  assert.deepEqual(n.switches[0].teaming, { policy: 'failover_explicit', active: ['vmnic0'], standby: ['vmnic1'], failback: false });
+  assert.equal(n.switches[1].teaming, null, '분산 스위치 팀 구성은 호스트 쪽에 없다(모름)');
+  assert.equal(n.pgs[0].teaming, 'loadbalance_ip');
+  assert.equal(parseNetwork('<HostVirtualSwitch><name>v</name><spec><policy><nicTeaming><policy>weird</policy></nicTeaming></policy></spec></HostVirtualSwitch>', '', '').switches[0].teaming.policy, null);
+  const s = sanitizeHostCfg({ at: 1, net: { switches: [{ name: 'v', kind: 'vss', uplinks: [], teaming: { policy: '<x>', active: ['vmnic0', { a: 1 }, 'bad name!'], failback: 'yes' } }], pgs: [{ name: 'p', teaming: 'evil' }] } });
+  assert.deepEqual(s.net.switches[0].teaming, { policy: null, active: ['vmnic0'], standby: [], failback: null });
+  assert.equal(s.net.pgs[0].teaming, null);
+});
+
+test('ⓓ-2 호스트별 데이터스토어 마운트 — 앞 원소의 호스트 키를 줍지 않는다 · 상한 · 엣지 정제 · 판정 사실에 목록을 싣지 않는다', async () => {
+  const { parseMounts, sanitizeDsCfg, DS_MOUNT_HOSTS_MAX, dsCfgFindings } = await import('../src/dscfg/parse.js');
+  const one = (h, acc = 'true', mnt = 'true') => `<DatastoreHostMount><key type="HostSystem">${h}</key><mountInfo><mounted>${mnt}</mounted><accessible>${acc}</accessible></mountInfo></DatastoreHostMount>`;
+  const noKey = '<DatastoreHostMount><mountInfo><mounted>true</mounted><accessible>true</accessible></mountInfo></DatastoreHostMount>';
+  const m = parseMounts(one('host-1') + noKey + one('host-3', 'false'));
+  assert.deepEqual([m.total, m.hosts, m.bad], [3, ['host-1', 'host-3'], [{ h: 'host-3', accessible: false, mounted: true }]], '키 없는 원소에 앞 호스트를 붙이지 않는다');
+  const big = parseMounts(Array.from({ length: DS_MOUNT_HOSTS_MAX + 5 }, (_, i) => one(`host-${i}`)).join(''));
+  assert.deepEqual([big.hosts.length, big.hostsOmitted], [DS_MOUNT_HOSTS_MAX, 5]);
+  const s = sanitizeDsCfg({ mounts: { total: 2, hosts: ['host-1', 'bad id', 7], bad: [{ h: 'host-1', accessible: 'no' }, { h: '' }], hostsOmitted: -1 } });
+  assert.deepEqual(s.mounts, { total: 2, notAccessible: 0, notMounted: 0, hosts: ['host-1'], bad: [{ h: 'host-1', accessible: null, mounted: null }], hostsOmitted: 0 });
+  assert.equal(Object.hasOwn(sanitizeDsCfg({ mounts: { total: 1 } }).mounts, 'hosts'), false, '이전 판 엣지(목록 없음)는 키를 만들지 않는다 = 모름');
+  if (typeof dsCfgFindings === 'function') {
+    const f = dsCfgFindings({ type: 'VMFS', dcfg: { mounts: { total: 2, notAccessible: 1, notMounted: 0, hosts: ['host-1', 'host-2'], bad: [{ h: 'host-2' }] } } }).find((x) => x.code === 'ds-mount-partial');
+    assert.deepEqual(Object.keys(f.facts).sort(), ['notAccessible', 'notMounted', 'total']);
+  }
+});
+
+test('ⓓ-3 리소스 풀 — 중첩 shares · 무제한 -1 · 루트 판정 · 엣지 정제 · 수집은 받은 풀 moref 만 · 라우트 권한', async () => {
+  const P = await import('../src/vcinfo/parse.js');
+  const C = await import('../src/vcinfo/collect.js');
+  assert.deepEqual(P.parseAllocation('<reservation>2000</reservation><expandableReservation>false</expandableReservation><limit>-1</limit><shares><shares>8000</shares><level>high</level></shares><overheadLimit>9</overheadLimit>'),
+    { res: 2000, limit: -1, expandable: false, shares: 8000, level: 'high' });
+  assert.equal(P.parseAllocation(''), null);
+  const rows = P.parsePools([{ ref: 'resgroup-8', props: { name: 'Resources', parent: 'domain-c7', owner: 'domain-c7' } }, { ref: 'resgroup-9', props: { name: 'Prod', parent: 'resgroup-8', owner: 'domain-c7' } }, { ref: 'bad ref', props: {} }]);
+  assert.deepEqual(rows.map((r) => [r.ref, r.root, r.owner]), [['resgroup-9', false, 'domain-c7'], ['resgroup-8', true, 'domain-c7']]);
+  assert.deepEqual(P.sanitizeVcInfo({ pools: { items: [{ ref: 'resgroup-1', cpu: { res: '5', level: 'x', shares: -1 } }, { ref: 'x y' }] } }).pools.items,
+    [{ ref: 'resgroup-1', name: null, owner: null, root: null, cpu: { res: null, limit: null, expandable: null, shares: null, level: null }, mem: null }]);
+  C._resetVcInfo();
+  const calls = [];
+  const c = { sc: {}, retrieveObjectProps: async () => { throw new Error('skip'); }, callRaw: async () => { throw new Error('skip'); },
+    retrieveManyObjectProps: async (type, refs, paths) => { calls.push([type, refs.length, paths.join(',')]); return refs.map((r) => ({ type, ref: r, props: { name: r, parent: 'resgroup-1' } })); } };
+  const r = await C.refreshVcInfo(c, { id: 'vp' }, { now: Date.parse('2026-11-05T03:00:00Z'), poolRefs: ['resgroup-2', 'resgroup-3'] });
+  assert.deepEqual(calls.filter((x) => x[0] === 'ResourcePool'), [['ResourcePool', 2, 'name,parent,owner,config.cpuAllocation,config.memoryAllocation']]);
+  assert.equal(r.pools.items.length, 2);
+  const r2 = await C.refreshVcInfo(c, { id: 'vq' }, { now: Date.parse('2026-11-05T03:00:00Z') });
+  assert.equal(Object.hasOwn(r2, 'pools'), false, '풀 moref 를 받지 않으면 이 종류를 건드리지 않는다');
+  const { VCINFO_PERM, VCINFO_KINDS } = await import('../src/routes/api/vcInfo.js');
+  assert.ok(VCINFO_KINDS.includes('pools'));
+  assert.equal(VCINFO_PERM.pools, 'inv.hosts');
+});

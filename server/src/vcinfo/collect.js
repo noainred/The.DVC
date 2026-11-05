@@ -7,14 +7,14 @@
 // 엣지는 inventoryPush 가 push 본문의 vcenter.vcInfo 로 보내고, 중앙은 정제해 이 캐시에 넣은 뒤 vcenter 객체에서 지운다(central.js).
 import { parseObjectContent } from '../vcenter/soapParse.js';
 import { parseTriggeredAlarms, parseTaskInfo, parsePermissions, parseRoleList, nameMapOf, mergeTasks, VCINFO_LIMITS,
-  parseTopologyNodes, parseReplication, parseApplianceUpdate, parsePendingUpdates, parseVlcmCompliance, restErrText, VCREST_LIMITS } from './parse.js';
+  parsePools, POOLS_MAX, parseTopologyNodes, parseReplication, parseApplianceUpdate, parsePendingUpdates, parseVlcmCompliance, restErrText, VCREST_LIMITS } from './parse.js';
 import { VCenterClient } from '../vcenter/restClient.js';   // v2.898 ④(restClient 는 soapClient 를 import 하지 않는다 — 순환 없음)
 
 /** 종류별 갱신 주기(ms) — 화면은 API 의 refreshMs 로 말한다(숫자를 화면에 박지 않는다). */
-export const VCINFO_REFRESH_MS = Object.freeze({ alarms: 5 * 60_000, tasks: 3 * 60_000, perms: 6 * 3_600_000, linked: 6 * 3_600_000, updates: 6 * 3_600_000, vlcm: 6 * 3_600_000 });
+export const VCINFO_REFRESH_MS = Object.freeze({ alarms: 5 * 60_000, tasks: 3 * 60_000, perms: 6 * 3_600_000, linked: 6 * 3_600_000, updates: 6 * 3_600_000, vlcm: 6 * 3_600_000, pools: 6 * 3_600_000 });
 /** ④ REST 묶음(Linked Mode · 업데이트 · vLCM)의 예산 — 클러스터마다 2번 왕복(고RTT 800ms+)이라 SOAP 묶음과 따로 둔다. */
 export const VCREST_BUDGET_MS = 30_000;
-export const VCINFO_KIND_LIST = Object.freeze(['alarms', 'tasks', 'perms', 'linked', 'updates', 'vlcm']);
+export const VCINFO_KIND_LIST = Object.freeze(['alarms', 'tasks', 'perms', 'linked', 'updates', 'vlcm', 'pools']);
 /** 중단 · 시한 실패는 '이번에 못 읽었다' — 주기를 기다리지 않고 이 간격 뒤 다시 읽는다(tags 의 TAG_RETRY_MS 와 같은 판단). */
 export const VCINFO_RETRY_MS = 5 * 60_000;
 export const VCINFO_BUDGET_MS = 20_000;
@@ -129,6 +129,12 @@ async function readTasks(c, prev, now) {
   return { at: now, items: mergeTasks(prev?.items, fresh, { now }), error: null };
 }
 
+async function readPools(c, refs, now) {
+  const list = refs.filter((r) => typeof r === 'string').slice(0, POOLS_MAX);
+  const objs = list.length ? await c.retrieveManyObjectProps('ResourcePool', list, ['name', 'parent', 'owner', 'config.cpuAllocation', 'config.memoryAllocation']) : [];
+  return { at: now, items: parsePools(objs), omitted: Math.max(0, refs.length - list.length), error: null };
+}
+
 async function readPerms(c, now) {
   const am = c.sc?.authorizationManager;
   if (!am) throw new Error('authorizationManager 없음');
@@ -149,7 +155,7 @@ async function readPerms(c, now) {
  * @param c 로그인된 SOAP 클라이언트 · vc 등록 항목
  * @returns 이 vCenter 의 캐시(종류별 — 갱신한 것만 새 값)
  */
-export async function refreshVcInfo(c, vc, { now = Date.now(), signal = null, budgetMs = VCINFO_BUDGET_MS } = {}) {
+export async function refreshVcInfo(c, vc, { now = Date.now(), signal = null, budgetMs = VCINFO_BUDGET_MS, poolRefs = null } = {}) {
   const prev = _byVc.get(vc.id);
   const cur = prev && prev.source === 'local' ? { ...prev } : { source: 'local' };
   const deadline = Date.now() + budgetMs;   // 예산은 실제 시계로 잰다(now 는 기록 · 주기 판정용 — 테스트가 고정한다)
@@ -157,6 +163,8 @@ export async function refreshVcInfo(c, vc, { now = Date.now(), signal = null, bu
     ['alarms', () => readAlarms(c, vc.id, now)],
     ['tasks', () => readTasks(c, cur.tasks, now)],
     ['perms', () => readPerms(c, now)],
+    // v2.899: 리소스 풀 예약 · 제한 · 공유 — 수집이 이미 가진 풀 moref 를 받을 때만(없으면 이 종류를 건드리지 않는다).
+    ...(Array.isArray(poolRefs) ? [['pools', () => readPools(c, poolRefs, now)]] : []),
   ];
   await runJobs(cur, jobs, now, deadline, signal);
   _byVc.set(vc.id, cur);

@@ -10,12 +10,12 @@ import { STable } from '../../components/STable.jsx';
 import { HostBasicRows, HostCfgSection, PerfcSection, ClusterCfgSection, HostHbaTable } from '../../components/EntityDetail.jsx';
 import { hostUsagePct } from '../vcdOverview.js';
 import ObjectShell from './ObjectShell.jsx';
-import { Card, KV, Note, NotCollected } from './VcdParts.jsx';
+import { Card, KV, Note } from './VcdParts.jsx';
 import { useOnce, toolDenied } from './useOnce.js';
 import { EventRows } from './SummaryTab.jsx';
 import { PermPane, vmRef } from './VmObject.jsx';
-import { VcAlarmsCard, VcTasksCard, HostVlcmCard } from './VcInfoParts.jsx';
-import { vmsOnHost, resourcePoolRows, hostDatastoresFromVms, sameBuildCount } from './objTabs.js';
+import { VcAlarmsCard, VcTasksCard, HostVlcmCard, PoolSettingsCard } from './VcInfoParts.jsx';
+import { vmsOnHost, resourcePoolRows, hostDatastoresFromVms, sameBuildCount, hostDsMounts } from './objTabs.js';
 import { gbText } from './vcdTabs.js';
 
 const HostMetricButton = React.lazy(() => import('../../components/VmMetrics.jsx').then((m) => ({ default: m.HostMetricButton })));
@@ -131,7 +131,7 @@ export default function HostObject({ site, vcenterId, host, hostsOk, gate, hosts
               </STable>
             ) : <div className="muted" style={{ padding: '10px 14px', fontSize: 12.5 }}>이 호스트 위에 VM 이 없습니다.</div>}
           </Card>
-          <div className="card" style={{ padding: 14 }}><NotCollected title="리소스 풀 속성">풀 자체의 예약 · 제한 · 공유 값(ResourcePool.config)은 수집하지 않습니다 — 지금은 VM 쪽 이름으로만 묶습니다.</NotCollected></div>
+          <PoolSettingsCard vcenterId={vcenterId} host={host} poolNames={pools.map((p) => p.pool).filter(Boolean)} />
         </div>
       )}
 
@@ -150,7 +150,7 @@ export default function HostObject({ site, vcenterId, host, hostsOk, gate, hosts
             ) : <div className="muted" style={{ padding: '10px 14px', fontSize: 12.5 }}>디스크를 읽은 VM 이 없습니다.</div>}
             {dsFromVms.unread > 0 && <Note>vmcfg 가 아직 디스크를 읽지 않은 VM {dsFromVms.unread}대는 빠졌습니다 — 그 VM 의 데이터스토어가 이 목록에 없을 수 있습니다.</Note>}
           </Card>
-          <div className="card" style={{ padding: 14 }}><NotCollected title="호스트별 데이터스토어 마운트">호스트가 마운트한 데이터스토어 목록 · 경로(활성/대기)는 이 화면이 직접 읽지 않습니다. 경로 상태는 ‘전체 페이지 상세’ 와 특수 기능 ‘데이터스토어 · 경로 점검’ 에 있습니다.</NotCollected></div>
+          <HostMountsCard host={host} datastores={datastores} />
         </div>
       )}
 
@@ -169,7 +169,7 @@ export default function HostObject({ site, vcenterId, host, hostsOk, gate, hosts
             ) : <div className="muted" style={{ padding: '10px 14px', fontSize: 12.5 }}>물리 NIC 를 보고하지 않았습니다(이 vCenter 가 주지 않았거나 아직 읽지 않음).</div>}
           </Card>
           <HostNetCards host={host} />
-          <div className="card" style={{ padding: 14 }}><NotCollected title="팀 구성">NIC 팀 구성(LACP · 액티브/스탠바이 · 부하 분산 정책)은 수집하지 않습니다. 가상 스위치 · 포트그룹은 위 표(ESXi 호스트 구성 점검 수집 — hcfg)입니다.</NotCollected></div>
+
         </div>
       )}
 
@@ -209,6 +209,38 @@ function HostEvents({ vcenterId, host }) {
  * v2.898 정정: 호스트 가상 스위치 · 포트그룹은 v2.701(A10)부터 ESXi 호스트 구성 점검 수집(hcfg.net)이 이미 읽고 있었다 — v2.895 가 '수집하지 않음' 이라고
  * 잘못 적었다. hcfg 를 아직 읽지 않았으면 그 사실을, net 이 null 이면 '받지 못함' 을 말한다(원인을 단정하지 않는다).
  */
+/** v2.899: 이 호스트가 마운트한 데이터스토어(데이터스토어 쪽 수집 dcfg.mounts — 새 호출 없음). 경로(활성/대기)는 경로 점검 도구. */
+function HostMountsCard({ host, datastores }) {
+  const r = hostDsMounts(datastores, host, vmRef(host));
+  const bad = r.rows.filter((x) => x.bad).length;
+  return (
+    <Card style={{ gridColumn: '1 / -1' }} title={`마운트한 데이터스토어 ${r.rows.length}`} badge={bad ? <span className="badge red">문제 {bad}</span> : null} sub="데이터스토어 운영 점검 수집(dcfg) · 데이터스토어마다 붙은 호스트">
+      {r.rows.length ? (
+        <STable className="v3-table" minWidth={560}>
+          <thead><tr><th>데이터스토어</th><th>유형</th><th>마운트 상태</th><th>공유 호스트</th><th>사용률</th></tr></thead>
+          <tbody>
+            {r.rows.map((d) => (
+              <tr key={d.datastore}><td className="mono"><b>{d.datastore}</b></td><td>{d.type || '—'}</td>
+                <td>{d.bad ? <span className="badge red">{d.state}</span> : <span className="badge green">{d.state}</span>}</td>
+                <td data-sort={d.shared == null ? '' : String(d.shared)}>{d.shared == null ? '—' : `${d.shared}대`}</td>
+                <td data-sort={d.usagePct == null ? '' : String(d.usagePct)}><UsageCell pct={d.usagePct} /></td></tr>
+            ))}
+          </tbody>
+        </STable>
+      ) : <div className="muted" style={{ padding: '10px 14px', fontSize: 12.5 }}>{r.unknown ? '호스트 목록을 받은 데이터스토어 중 이 호스트가 마운트한 것이 없습니다.' : '이 호스트가 마운트한 데이터스토어가 없다고 보고했습니다.'}</div>}
+      {r.unknown > 0 && <Note>{`데이터스토어 ${r.unknown}개는 붙은 호스트 목록을 아직 받지 못했습니다(운영 점검 수집 전 · 이전 판 수집 · 목록 상한) — 그 데이터스토어는 이 표에 없어도 '안 붙음' 이 아닙니다.`}</Note>}
+      <Note>경로(활성 · 대기 · 끊김)는 특수 기능 ‘데이터스토어 · 경로 점검’ 과 ‘전체 페이지 상세’ 에 있습니다.</Note>
+    </Card>
+  );
+}
+
+/** v2.899 팀 구성 정책 → 화면 문구(vSphere Client 의 '부하 분산' 이름). 모르면 '—'. */
+const TEAMING_TEXT = Object.freeze({
+  loadbalance_srcid: '원래 가상 포트 기반', loadbalance_srcmac: '원본 MAC 해시 기반', loadbalance_ip: 'IP 해시 기반',
+  failover_explicit: '명시적 장애 조치 순서', loadbalance_loadbased: '물리 NIC 부하 기반',
+});
+export const teamingText = (p) => (p ? TEAMING_TEXT[p] || p : '—');
+
 function HostNetCards({ host }) {
   const hc = host.hcfg && typeof host.hcfg === 'object' && !host.hcfg.error ? host.hcfg : null;
   const net = hc ? hc.net : undefined;
@@ -223,25 +255,29 @@ function HostNetCards({ host }) {
   const pgs = Array.isArray(net.pgs) ? net.pgs : [];
   return (
     <>
-      <Card title={`가상 스위치 ${sws.length}`} sub="hcfg.net · 표준(vSS) · 분산(vDS)">
+      <Card style={{ gridColumn: '1 / -1' }} title={`가상 스위치 ${sws.length}`} sub="hcfg.net · 표준(vSS) · 분산(vDS)">
         {sws.length ? (
-          <STable className="v3-table" minWidth={520}>
-            <thead><tr><th>이름</th><th>종류</th><th>업링크</th><th>포트그룹</th></tr></thead>
+          <STable className="v3-table" minWidth={760}>
+            <thead><tr><th>이름</th><th>종류</th><th>업링크</th><th>포트그룹</th><th>부하 분산</th><th>활성 / 대기</th><th>장애 복구 후 되돌림</th></tr></thead>
             <tbody>
               {sws.map((w, i) => (
-                <tr key={`${w.name}-${i}`}><td><b>{w.name}</b></td><td>{w.kind === 'dvs' ? '분산(vDS)' : '표준(vSS)'}</td><td className="mono" style={{ whiteSpace: 'normal' }}>{(w.uplinks || []).join(' · ') || '—'}</td><td data-sort={w.pgs == null ? '' : String(w.pgs)}>{w.pgs == null ? '—' : w.pgs}</td></tr>
+                <tr key={`${w.name}-${i}`}><td><b>{w.name}</b></td><td>{w.kind === 'dvs' ? '분산(vDS)' : '표준(vSS)'}</td><td className="mono" style={{ whiteSpace: 'normal' }}>{(w.uplinks || []).join(' · ') || '—'}</td><td data-sort={w.pgs == null ? '' : String(w.pgs)}>{w.pgs == null ? '—' : w.pgs}</td>
+                  <td>{w.kind === 'dvs' ? <span className="muted">vDS 포트그룹 설정</span> : teamingText(w.teaming?.policy)}</td>
+                  <td className="mono" style={{ whiteSpace: 'normal' }}>{w.teaming ? `${(w.teaming.active || []).join(' · ') || '—'} / ${(w.teaming.standby || []).join(' · ') || '없음'}` : '—'}{w.teaming && (w.teaming.active || []).length + (w.teaming.standby || []).length === 1 && <span className="badge amber" style={{ marginLeft: 6, fontFamily: 'inherit' }}>단일 경로</span>}</td>
+                  <td>{w.teaming?.failback === true ? '예' : w.teaming?.failback === false ? '아니요' : '—'}</td></tr>
               ))}
             </tbody>
           </STable>
         ) : <div className="muted" style={{ padding: '10px 14px', fontSize: 12.5 }}>가상 스위치가 없다고 보고했습니다.</div>}
+        <Note>팀 구성은 표준 스위치의 설정(spec.policy.nicTeaming)입니다. 분산 스위치(vDS)의 팀 구성 · LACP 는 vDS 포트그룹 설정이라 호스트 쪽에서 읽지 않습니다. 포트그룹의 부하 분산은 스위치 기본값을 물려받은 유효 값입니다.</Note>
       </Card>
       <Card title={`포트그룹 ${net.pgsTotal != null ? net.pgsTotal : pgs.length}`} sub="표준 스위치 포트그룹(hcfg.net) · 분산 포트그룹은 vCenter › 네트워크 탭">
         {pgs.length ? (
           <STable className="v3-table" minWidth={520} limit={200}>
-            <thead><tr><th>이름</th><th>VLAN</th><th>vSwitch</th><th>무차별 모드</th></tr></thead>
+            <thead><tr><th>이름</th><th>VLAN</th><th>vSwitch</th><th>무차별 모드</th><th>부하 분산(유효)</th></tr></thead>
             <tbody>
               {pgs.map((g, i) => (
-                <tr key={`${g.name}-${i}`}><td><b>{g.name}</b></td><td data-sort={g.vlan == null ? '' : String(g.vlan)}>{g.vlan == null ? '—' : g.vlan}</td><td>{g.sw || '—'}</td><td>{g.promisc === true ? <span className="badge amber">허용</span> : g.promisc === false ? '거부' : '—'}</td></tr>
+                <tr key={`${g.name}-${i}`}><td><b>{g.name}</b></td><td data-sort={g.vlan == null ? '' : String(g.vlan)}>{g.vlan == null ? '—' : g.vlan}</td><td>{g.sw || '—'}</td><td>{g.promisc === true ? <span className="badge amber">허용</span> : g.promisc === false ? '거부' : '—'}</td><td>{teamingText(g.teaming)}</td></tr>
               ))}
             </tbody>
           </STable>

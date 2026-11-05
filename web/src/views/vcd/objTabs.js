@@ -198,6 +198,28 @@ export function vmNicRows(vm, networks = []) {
   });
 }
 
+/**
+ * v2.899: 호스트가 마운트한 데이터스토어 — 데이터스토어 쪽 수집(dcfg.mounts.hosts · bad — 이미 받는 'host' 속성)에서 이 호스트 moref 를 찾는다.
+ *   unknown = 이 vCenter 데이터스토어 중 호스트 목록을 모르는 것(dcfg 없음 · 이전 판 수집 · 상한으로 잘림) — 그 DS 는 '안 붙음' 이라 단정하지 않는다.
+ */
+export function hostDsMounts(datastores, host, hostRef) {
+  const rows = []; let unknown = 0;
+  if (!host || !hostRef) return { rows, unknown: 0, none: true };
+  for (const d of datastores || []) {
+    if (!d || d.vcenterId !== host.vcenterId) continue;
+    const m = d.dcfg?.mounts;
+    const listed = Array.isArray(m?.hosts);
+    if (!listed) { unknown += 1; continue; }
+    if (m.hosts.includes(hostRef)) {
+      const b = (m.bad || []).find((x) => x?.h === hostRef);
+      rows.push({ datastore: d.name || d.id, type: d.type || null, usagePct: numOrNull(d.usagePct), shared: numOrNull(m.total),
+        state: b ? (b.accessible === false ? '접근 불가' : b.mounted === false ? '마운트 안 됨' : '확인 필요') : '정상', bad: !!b });
+    } else if ((m.hostsOmitted || 0) > 0) unknown += 1;
+  }
+  rows.sort((a, b) => Number(b.bad) - Number(a.bad) || String(a.datastore).localeCompare(String(b.datastore)));
+  return { rows, unknown, none: false };
+}
+
 /** VMware Tools 버전 상태 문구(vSphere toolsVersionStatus2). 모르는 값은 원문. */
 export const TOOLS_STATUS_TEXT = Object.freeze({
   guestToolsCurrent: ['green', '최신'],

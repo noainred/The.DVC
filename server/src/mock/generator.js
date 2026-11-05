@@ -199,12 +199,15 @@ function mkHostCfg(h, site) {
     // v2.701(A10): 가상 스위치·포트그룹(hostcfg/parse.js parseNetwork 와 같은 모양) — 단일 업링크·무차별 모드·VLAN 드리프트가 보이게.
     net: {
       switches: [
-        { name: 'vSwitch0', kind: 'vss', uplinks: i % 10 === 7 ? ['vmnic0'] : ['vmnic0', 'vmnic1'], pgs: 2 },
-        { name: 'DSwitch-Prod', kind: 'dvs', uplinks: ['vmnic2', 'vmnic3'], pgs: null },
+        { name: 'vSwitch0', kind: 'vss', uplinks: i % 10 === 7 ? ['vmnic0'] : ['vmnic0', 'vmnic1'], pgs: 2,
+          // v2.899 팀 구성 — 일부 호스트는 활성/대기(명시적 장애 조치), 그 밖은 포트 ID 기반 부하 분산
+          teaming: i % 4 === 1 ? { policy: 'failover_explicit', active: ['vmnic0'], standby: i % 10 === 7 ? [] : ['vmnic1'], failback: true }
+            : { policy: 'loadbalance_srcid', active: i % 10 === 7 ? ['vmnic0'] : ['vmnic0', 'vmnic1'], standby: [], failback: i % 9 !== 2 } },
+        { name: 'DSwitch-Prod', kind: 'dvs', uplinks: ['vmnic2', 'vmnic3'], pgs: null, teaming: null },
       ],
       pgs: [
-        { name: 'Management Network', vlan: 0, sw: 'vSwitch0', promisc: false },
-        { name: 'VM Network', vlan: i % 14 === 2 ? 20 : 10, sw: 'vSwitch0', promisc: i % 25 === 4 },
+        { name: 'Management Network', vlan: 0, sw: 'vSwitch0', promisc: false, teaming: i % 4 === 1 ? 'failover_explicit' : 'loadbalance_srcid' },
+        { name: 'VM Network', vlan: i % 14 === 2 ? 20 : 10, sw: 'vSwitch0', promisc: i % 25 === 4, teaming: i % 4 === 1 ? 'failover_explicit' : 'loadbalance_srcid' },
       ],
       pgsTotal: 2,
     },
@@ -757,7 +760,13 @@ export function generateSnapshot() {
           sioc: ds.storageType === 'local' ? false : ds.idx % 4 !== 1,
           vmCount: 8 + (ds.idx * 7) % 45,
           inSdrs: ds.idx % 6 === 0,
-          mounts: ds.storageType === 'local' ? { total: 1, notAccessible: 0, notMounted: 0 } : { total: 8, notAccessible: ds.idx % 13 === 5 ? 1 : 0, notMounted: 0 },
+          // v2.899: 호스트별 마운트(dscfg parseMounts 와 같은 모양) — 로컬은 한 호스트, 공유는 이 사이트 호스트 8대(결정적). 호스트 moref = 데모 호스트 이름.
+          mounts: (() => {
+            const hs = env.hosts.length ? (ds.storageType === 'local' ? [env.hosts[ds.idx % env.hosts.length]] : Array.from({ length: Math.min(8, env.hosts.length) }, (_, k) => env.hosts[(ds.idx + k) % env.hosts.length])) : [];
+            const refs = [...new Set(hs.map((h) => h.name))];
+            const bad = ds.idx % 13 === 5 && refs.length > 1 ? [{ h: refs[refs.length - 1], accessible: false, mounted: true }] : [];
+            return { total: refs.length, notAccessible: bad.length, notMounted: 0, hosts: refs, bad, hostsOmitted: 0 };
+          })(),
         } }),
       });
       if (usedFrac > 0.9) {

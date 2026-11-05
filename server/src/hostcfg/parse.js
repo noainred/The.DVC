@@ -212,14 +212,38 @@ const countAll = (xml, t) => (xml.match(new RegExp(`<${t}>`, 'g')) || []).length
  * 세 응답이 모두 없으면 null(모름). 업링크 = 스위치 바로 아래 <pnic> 키(브리지 사양의 nicDevice 가 아니다).
  * 포트그룹의 무차별 모드는 **유효 정책(computedPolicy)** 기준이다(스위치 기본값을 물려받은 값까지).
  */
+/** v2.899: 팀 구성 정책 값(HostNicTeamingPolicy.policy — vSphere 문서의 문자열). 모르는 값은 null. */
+export const TEAMING_POLICIES = Object.freeze(['loadbalance_srcid', 'loadbalance_srcmac', 'loadbalance_ip', 'failover_explicit', 'loadbalance_loadbased']);
+/**
+ * v2.899: 팀 구성(HostNicTeamingPolicy) — 이미 받는 표준 스위치 spec.policy.nicTeaming · 포트그룹 computedPolicy.nicTeaming 을 읽는다(새 호출 없음).
+ * { policy, active:[], standby:[], failback } — failback 은 rollingOrder 의 반대(rollingOrder=true 면 복구 뒤 되돌리지 않는다). 못 읽으면 null.
+ * 분산 스위치(vDS)의 팀 구성 · LACP 는 vDS 포트그룹 설정이라 호스트 프록시 스위치에 없다(null — 화면이 그렇게 말한다).
+ */
+// ⚠ spec.policy 안에 같은 이름(nicTeaming.policy)이 중첩돼 inner('policy') 는 안쪽 닫는 태그에서 끊긴다 — nicTeaming 을 바로 찾는다(한 번만 나온다).
+function teamingOf(containerXml) {
+  const nt = containerXml ? inner(containerXml, 'nicTeaming') : null;
+  if (!nt) return null;
+  const pol = tag(nt, 'policy');
+  const order = inner(nt, 'nicOrder') || '';
+  const rolling = boolOf(tag(nt, 'rollingOrder'));
+  return {
+    policy: pol && TEAMING_POLICIES.includes(pol) ? pol : null,
+    active: tagsAll(order, 'activeNic', 16).map(pnicName),
+    standby: tagsAll(order, 'standbyNic', 16).map(pnicName),
+    failback: rolling == null ? null : !rolling,
+  };
+}
+
 export function parseNetwork(vswitchXml, pgXml, proxyXml) {
   if (typeof vswitchXml !== 'string' && typeof pgXml !== 'string' && typeof proxyXml !== 'string') return null;
   const switches = [];
   for (const b of elems(vswitchXml, 'HostVirtualSwitch', NET_SW_MAX)) {
-    switches.push({ name: cap(tag(b, 'name'), 64) || '(이름 없음)', kind: 'vss', uplinks: tagsAll(b, 'pnic', 16).map(pnicName), pgs: countAll(b, 'portgroup') });
+    const spec = inner(b, 'spec') || '';
+    switches.push({ name: cap(tag(b, 'name'), 64) || '(이름 없음)', kind: 'vss', uplinks: tagsAll(b, 'pnic', 16).map(pnicName), pgs: countAll(b, 'portgroup'),
+      teaming: teamingOf(spec) });
   }
   for (const b of elems(proxyXml, 'HostProxySwitch', NET_SW_MAX - switches.length)) {
-    switches.push({ name: cap(tag(b, 'dvsName'), 64) || '(이름 없음)', kind: 'dvs', uplinks: tagsAll(b, 'pnic', 16).map(pnicName), pgs: null });
+    switches.push({ name: cap(tag(b, 'dvsName'), 64) || '(이름 없음)', kind: 'dvs', uplinks: tagsAll(b, 'pnic', 16).map(pnicName), pgs: null, teaming: null });
   }
   const all = elems(pgXml, 'HostPortGroup', 10_000);
   const pgs = [];
@@ -227,7 +251,8 @@ export function parseNetwork(vswitchXml, pgXml, proxyXml) {
     const spec = inner(b, 'spec') || '';
     const comp = inner(b, 'computedPolicy') || '';
     const vlan = intOf(tag(spec, 'vlanId'));
-    pgs.push({ name: cap(tag(spec, 'name'), 64) || '(이름 없음)', vlan, sw: cap(tag(spec, 'vswitchName'), 64), promisc: boolOf(tag(comp, 'allowPromiscuous')) });
+    pgs.push({ name: cap(tag(spec, 'name'), 64) || '(이름 없음)', vlan, sw: cap(tag(spec, 'vswitchName'), 64), promisc: boolOf(tag(comp, 'allowPromiscuous')),
+      teaming: teamingOf(comp)?.policy ?? null });   // v2.899: 유효 정책(스위치 기본값을 물려받은 값까지)의 부하 분산 방식
   }
   return { switches, pgs, pgsTotal: typeof pgXml === 'string' ? all.length : null };
 }
@@ -436,6 +461,12 @@ export function sanitizeHostCfg(v) {
   };
 }
 const nicName = (x) => (typeof x === 'string' && /^[A-Za-z0-9_.:-]{1,32}$/.test(x) ? x : null);
+/** v2.899: 엣지가 보낸 팀 구성 — 아는 정책 값 · NIC 이름 목록(16개) · 불리언만. 객체가 아니면 null(모름). */
+function sanitizeTeaming(t) {
+  if (!t || typeof t !== 'object' || Array.isArray(t)) return null;
+  const nics = (v) => (Array.isArray(v) ? v.map(nicName).filter(Boolean).slice(0, 16) : []);
+  return { policy: typeof t.policy === 'string' && TEAMING_POLICIES.includes(t.policy) ? t.policy : null, active: nics(t.active), standby: nics(t.standby), failback: typeof t.failback === 'boolean' ? t.failback : null };
+}
 function sanitizeNet(n) {
   if (!n || typeof n !== 'object' || Array.isArray(n)) return null;
   const sw = Array.isArray(n.switches) ? n.switches.slice(0, NET_SW_MAX).filter((x) => x && typeof x === 'object' && !Array.isArray(x)).map((x) => ({
@@ -443,11 +474,13 @@ function sanitizeNet(n) {
     kind: x.kind === 'dvs' ? 'dvs' : 'vss',
     uplinks: Array.isArray(x.uplinks) ? x.uplinks.map(nicName).filter(Boolean).slice(0, 16) : [],
     pgs: numOr(x.pgs) != null && numOr(x.pgs) >= 0 ? numOr(x.pgs) : null,
+    teaming: sanitizeTeaming(x.teaming),   // v2.899
   })) : [];
   const pgs = Array.isArray(n.pgs) ? n.pgs.slice(0, NET_PG_MAX).filter((x) => x && typeof x === 'object' && !Array.isArray(x)).map((x) => ({
     name: cap(typeof x.name === 'string' ? x.name : '', 64) || '(이름 없음)',
     vlan: numOr(x.vlan), sw: typeof x.sw === 'string' ? cap(x.sw, 64) : null,
     promisc: typeof x.promisc === 'boolean' ? x.promisc : null,
+    teaming: typeof x.teaming === 'string' && TEAMING_POLICIES.includes(x.teaming) ? x.teaming : null,   // v2.899
   })) : [];
   const total = numOr(n.pgsTotal);
   return { switches: sw, pgs, pgsTotal: total != null && total >= 0 ? total : null };

@@ -20,10 +20,12 @@ test('① DS 운영 파서 — 마운트·유지보수·미할당 약정·SIOC·
     host: MOUNT('true', 'true') + MOUNT('false', 'true') + MOUNT('true', 'false'),
     parent: 'group-p12',
   }, NOW);
-  assert.deepEqual(d, { at: NOW, maintenance: 'inMaintenance', uncommittedGB: 500, sioc: false, vmCount: 2, inSdrs: true, mounts: { total: 3, notAccessible: 1, notMounted: 1 } });
+  // v2.899: mounts 에 호스트별 목록(hosts · bad · hostsOmitted)이 더해졌다 — 픽스처는 세 원소 모두 host-1 이다.
+  assert.deepEqual(d, { at: NOW, maintenance: 'inMaintenance', uncommittedGB: 500, sioc: false, vmCount: 2, inSdrs: true,
+    mounts: { total: 3, notAccessible: 1, notMounted: 1, hosts: ['host-1', 'host-1', 'host-1'], bad: [{ h: 'host-1', accessible: false, mounted: true }, { h: 'host-1', accessible: true, mounted: false }], hostsOmitted: 0 } });
   const e = parseDsCfgProps({}, NOW);
   assert.equal(e.vmCount, null); assert.equal(e.mounts, null); assert.equal(e.sioc, null); assert.equal(e.uncommittedGB, null);
-  assert.deepEqual(parseMounts(''), { total: 0, notAccessible: 0, notMounted: 0 });
+  assert.deepEqual(parseMounts(''), { total: 0, notAccessible: 0, notMounted: 0, hosts: [], bad: [], hostsOmitted: 0 });   // v2.899 호스트별 목록
 });
 
 test('② DS 판정 — 오버할당 기준·SIOC 는 공유 VMFS/NFS 만·운영 속성 없으면 접근 불가·VMFS 만', () => {
