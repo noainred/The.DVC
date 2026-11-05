@@ -269,7 +269,7 @@ function HostNetCards({ host }) {
         ) : <div className="muted" style={{ padding: '10px 14px', fontSize: 12.5 }}>가상 스위치가 없다고 보고했습니다.</div>}
         <Note>팀 구성은 표준 스위치의 설정(spec.policy.nicTeaming)입니다. 분산 스위치(vDS)의 팀 구성 · LACP 는 포트그룹마다 달라 아래 ‘분산 포트그룹’ 표에서 봅니다(vCenter 포트그룹 설정). 포트그룹의 부하 분산은 스위치 기본값을 물려받은 유효 값입니다.</Note>
       </Card>
-      <Card title={`포트그룹 ${net.pgsTotal != null ? net.pgsTotal : pgs.length}`} sub="표준 스위치 포트그룹(hcfg.net) · 분산 포트그룹은 vCenter › 네트워크 탭">
+      <Card title={`포트그룹 ${net.pgsTotal != null ? net.pgsTotal : pgs.length}`} sub="표준 스위치 포트그룹(hcfg.net) · 분산 포트그룹은 아래 ‘분산 포트그룹’ 표">
         {pgs.length ? (
           <STable className="v3-table" minWidth={520} limit={200}>
             <thead><tr><th>이름</th><th>VLAN</th><th>vSwitch</th><th>무차별 모드</th><th>부하 분산(유효)</th></tr></thead>
