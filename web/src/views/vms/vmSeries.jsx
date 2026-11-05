@@ -13,11 +13,11 @@ export function useDaySeries(vmId, enabled) {
     const ac = new AbortController();
     let alive = true;
     setS({ id: vmId, cpu: { loading: true }, mem: { loading: true } });
-    for (const type of ['cpu', 'mem']) {
-      fetchJson(`/vms/${encodeURIComponent(vmId)}/metrics`, { type, interval: 'day' }, ac.signal, { retries: 0, timeoutMs: 30_000 })
-        .then((d) => { if (alive) setS((p) => (p.id === vmId ? { ...p, [type]: { points: Array.isArray(d?.points) ? d.points : [], mock: d?.mock === true } } : p)); })
-        .catch((e) => { if (alive && e?.name !== 'AbortError') setS((p) => (p.id === vmId ? { ...p, [type]: { error: e?.message || String(e) } } : p)); });
-    }
+    // v2.911: 두 지표를 한 번에(types=cpu,mem — 서버 로그인 1회 · QueryPerf 1회). 예전에는 지표마다 호출해 로그인이 2회였다.
+    const pick = (d, k) => { const s = d?.series?.[k]; return s?.error ? { error: s.error } : { points: Array.isArray(s?.points) ? s.points : [], mock: d?.mock === true }; };
+    fetchJson(`/vms/${encodeURIComponent(vmId)}/metrics`, { types: 'cpu,mem', interval: 'day' }, ac.signal, { retries: 0, timeoutMs: 30_000 })
+      .then((d) => { if (alive) setS((p) => (p.id === vmId ? { ...p, cpu: pick(d, 'cpu'), mem: pick(d, 'mem') } : p)); })
+      .catch((e) => { if (alive && e?.name !== 'AbortError') { const err = { error: e?.message || String(e) }; setS((p) => (p.id === vmId ? { ...p, cpu: err, mem: err } : p)); } });
     return () => { alive = false; ac.abort(); };
   }, [vmId, enabled]);
   return s.id === vmId ? s : { id: vmId, cpu: null, mem: null };

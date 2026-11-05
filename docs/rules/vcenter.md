@@ -161,6 +161,23 @@
     `EntityDetail type='vm'` 모달은 다른 화면(검색·호스트 VM 목록 등)에서 그대로 쓴다 — 이 화면만 드로어다.
   · ⚠ 1440 에서 표 오른쪽 열은 가로 스크롤 밖으로 밀린다(현황 표는 v2.898 부터 그랬다 — A/B) — **열을 늘리지 말 것**(신호 열을 끝에 두면 보이지 않았고, VM 다음에 끼우면 기본 정렬 열 CPU 값이 잘렸다 — 그래서 신호는 VM 이름 아래 줄 배지). 법인별 표는 10열로 맞췄다. 이 앱에는 전역 a 글자색이 없다 — class 없는 링크는 `.vmh` 범위 토큰 색.
   · 개체 보기 요약 탭 4/5/3(`.vmo-grid` — 1280 미만 2열 · 760 미만 1열). 신호는 `VCenterDetail` 의 /vms 폴링에 `signals=1`. 시안의 '백업' 카드는 VM 행에 값이 없어 넣지 않았다(지어내지 않는다).
+- **v2.911 — VM 상세 · 성능 그래프(시안 `docs/design/vm-perf` ①②③④ · 사용자 컨펌 2026-11-06 '개선' = 기본값 6가지). 성능 조회는 지표 4개를 한 번에(로그인 1회) · 성능 화면은 개체 보기 › 모니터 첫 섹션 · vCenter 트리의 VM 클릭은 드로어**
+  (서버 `vcenter/soapClient.js fetchEntityMetrics·pickPerfInterval·parseHistoricalIntervals·perfRetention` · `routes/api/vmMetrics.js parseMetricTypes·synthMetrics` ·
+  웹 `components/vmperf/{VmPerfView.jsx,vmPerfText.js,vmPerf.css}` · `components/VmMetrics.jsx`(링크 단추만) · `vcd/{VmObject,HostObject}.jsx` 모니터 탭 · `VCenterDetail.jsx` + `vcd/treeRows.js` · `vms/vmSeries.jsx`.
+  회귀 `server/test/vmPerf2911.test.js`(6 — 가짜 vCenter 로그인 수) · 웹 `components/vmperf/vmPerfText.test.js` · `views/vcd/treeRows.test.js` · `views/vmPerf2911.test.jsx` · `audit2744k.test.js`(409 skip 정지를 VmPerfView 로)):
+  · `GET /vms|hosts/:id/metrics?types=cpu,mem,disk,net` 은 **login 1회 · QueryPerf 1회**(`queryEntityPerfMulti` — 축소 근거 리포트와 같은 길). 단건 `type=` 은 그대로(호환). 응답 `series{cpu,mem,disk,net}{unit,points|null,error}` ·
+    실제 쓴 롤업 `interval`·`sampleSec` · `retention`(vCenter `historicalInterval` — 6시간 캐시 · 못 읽으면 기본값 + `retentionSource:'default'`) · `refreshSec` · `overloadPct`(= `vmSignals.OVERLOAD_PCT` — 화면에 90 을 박지 않는다).
+    범위 밖 404 · 인증 정지 409 `authStopped`(manual 통과) · 직접 수집 대상 아님 409 `skipReason`(manual 도 막음)은 **복수 지표에서도 같다**(authStopGate 한 벌).
+  · 과거 창은 `start/end` + 서버가 창의 **나이**로 롤업을 고른다(`pickPerfInterval` — 요청보다 가늘게 가지 않는다 · 보관 밖은 1년 롤업 — vCenter 가 빈 답을 주면 화면이 '표본 없음'). 실시간은 창 없음(최근 1시간 · maxSample 180).
+    카운터가 없는 지표는 던지지 않고 그 계열만 `error`(나머지는 그린다).
+  · 웹 `VmPerfView`: 기본 24시간(모달은 실시간이 기본이었다 — 열 때 로그인 1회) · 실시간만 응답 `refreshSec` 마다 자동 갱신 · 409 authStopped/skip 이면 멈춤(`vmMetricsText` 한 벌 · `audit2744k` 가 고정) ·
+    ◀ 이전 · 슬라이더(놓을 때만) · 날짜로 이동 — 뒤로 갈 수 있는 칸은 응답 `retention` 에서 `maxBackOf`(24시간 창은 1달 · 7일·30일 창은 1년 · 실시간·1년은 없음) · 결측은 선을 끊고 분모에서 뺀다(`seriesStats`) ·
+    차트는 SVG 직접(recharts 를 개체 보기 경로에 더 싣지 않는다) · CSV 는 받은 값으로 브라우저가 만든다(서버 호출 없음 · `canCsv`). 꺼진 개체는 실시간 세그먼트를 잠근다.
+  · `📈 성능 그래프 보기` 7곳(VM 모달 · 드로어 · VM 개체 머리 · 호스트 모달 · 호스트 개체 머리 · 호스트 전체 페이지)은 **링크**(`#/vcenters/<vc>/vm|host/<id>/monitor`) — vcenterId 를 모르면 그리지 않는다(id 를 콜론에서 자르지 않는다). `MetricModal` 은 지웠다(대안 ⑤ 미채택).
+  · vCenter 트리(호스트 및 클러스터 · VM 및 폴더 · 검색 결과)의 VM 클릭 = `VmDrawer`(가상화 서버와 같은 컴포넌트) · ‹ › ↑↓ 는 `treeVmRows`(보이는 트리 순서 · 펼침 무관 · 검색은 cap) · 개체 보기로 가면(해시에 obj) 드로어를 닫는다 ·
+    호스트 · 데이터스토어 모달은 그대로 · `EntityDetail type='vm'` 을 쓰는 다른 5곳(알람 · 탐색 · Platform VM 검색 · VmLink · 호스트 전체 페이지)은 **그대로**(질문 ① 기본값 — 다음 후보).
+  · 드로어 · 개체 보기 요약의 24h 스파크(`vmSeries.useDaySeries`)는 `types=cpu,mem` 한 번(예전 2회 로그인 → 1회).
+  · 남긴 것: 엣지 위임 vCenter 의 성능을 그 엣지 포탈에서 보는 링크(`findRemoteServer` 안내)는 넣지 않았다(옛 모달에도 없던 것 — 다음 후보).
 - ⚠⚠ **v2.697 — VM 구성 속성(B10)은 30초 인벤토리 요청에 싣지 않는다 — 오래된 VM 부터 주기당 상한만큼 다시 읽는 캐시다**
   (`server/src/vmcfg/`{parse.js(순수 파서·판정·엣지 정제),cache.js,collect.js} + `soapClient.js` 배선 + 웹 `views/vmcfg/vmCfgText.js` + `EntityDetail.jsx VmCfgSection`.
   회귀 `server/test/vmCfg2697.test.js`(변이 5/5) + 웹 `vmCfgText.test.js`(서버·웹 판정 대조)):

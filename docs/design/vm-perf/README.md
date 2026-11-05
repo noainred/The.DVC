@@ -1,6 +1,6 @@
 # 설계: VM 상세 · 성능 그래프 — ① vCenter 트리의 VM 클릭을 가상화 서버와 같은 드로어로 · ② ‘성능 그래프 보기’ 재설계
 
-작성 2026-11-06 (main v2.910.0 기준 · 브랜치 `claude/wizardly-goodall-2frd1k`) · 상태 **시안 — 컨펌 대기(컨펌 뒤 Opus 구현 · §6 질문 6가지의 기본값)** ·
+작성 2026-11-06 (main v2.910.0 기준 · 브랜치 `claude/wizardly-goodall-2frd1k`) · 상태 **구현됨 v2.911.0**(컨펌 2026-11-06 08:20 '개선' — §6 질문 6가지 모두 기본값 · 검증 표준 · §8. 구현은 규칙상 Opus 이지만 사용자가 모델을 바꾸지 않고 바로 '개선' 이라 답해 이 세션(Fable)이 이어서 구현했다 — 보고에 밝힘) ·
 시안 캔버스: https://claude.ai/artifact/EBKGEKL86TmCvytJ2k3KuD (아트보드 6장 — ⓪ 지금 · ① vCenter 트리 → 드로어 · ② 성능 1440 · ③ 성능 400 · ④ 상태 6종 · ⑤ 대안(모달 유지).
 이 폴더의 `*.dc.html` 이 같은 내용의 레퍼런스(HTML 프로토타입 — 복사 대상이 아님). **VM · vCenter 이름(web-kr1-023 · VC-KR1 · esx-kr1-07 …)과 수치는 전부 가상**이고 ⓪ 의 캡처는 목 서버 데이터다.
 색 · 글자는 `web/src/styles.css` `:root` 토큰과 `views/vms/vmHub.css` · `views/tools/xferSpeed.css` 그대로(새 hex 없음). 계정의 ‘Design System’ 아티팩트는 지금도 타입 파일뿐이라(`project/README.md` · `tokens.json` 없음 — 목록으로 확인) 쓰지 않았다.
@@ -112,6 +112,27 @@
 - 문서: `docs/rules/vcenter.md` 에 ‘성능 화면 · 드로어’ 항목 · 이 README §8 에 ‘시안과 달리 한 것’.
 - 릴리스: 포탈 동작이 바뀌므로 버전업 + GitHub 릴리스 게시 1회(`versions.json` latest 확인).
 
-## 8. 구현(컨펌 뒤 채움)
+## 8. 구현(v2.911.0 — 2026-11-06 · 시안과 달리 한 것 · 남긴 것)
 
-(비어 있음 — 구현 세션이 ‘시안과 달리 한 것 · Chromium 에서 고친 것 · 남긴 것’ 을 적는다.)
+- 파일: 서버 `vcenter/soapClient.js`(`fetchEntityMetrics` · `pickPerfInterval` · `parseHistoricalIntervals` · `perfRetention` · `queryEntityPerfMulti` 에 `maxSample`) · `routes/api/vmMetrics.js`(`parseMetricTypes` · `synthMetrics` · 두 라우트의 `types=` 분기) ·
+  웹 `components/vmperf/{VmPerfView.jsx,vmPerfText.js,vmPerf.css}`(새) · `components/VmMetrics.jsx`(모달 삭제 → 링크 단추 2개) · `vcd/VmObject.jsx` · `vcd/HostObject.jsx`(모니터 탭 첫 섹션) · `VCenterDetail.jsx`(트리 VM 클릭 → `VmDrawer` · `vcd/treeRows.js` 순서) ·
+  `vms/vmSeries.jsx`(스파크 1회 호출) · `EntityDetail.jsx` · `HostDetail.jsx` · `VmDrawer.jsx`(단추에 vcenterId · 닫기).
+- 테스트: `server/test/vmPerf2911.test.js`(가짜 vCenter 로그인 수로 '복수 지표 = 로그인 1회 · 단건 4회 = 4회' · 범위 404 · skip 409 · 순수 4) · 웹 `vmPerfText.test.js`(10) · `treeRows.test.js`(4) · `vmPerf2911.test.jsx`(소스 스윕 · 단추 렌더) · `audit2744k.test.js` 의 성능 모달 409 정지 시험을 `VmPerfView` 로 옮김.
+- 시안과 달리 한 것:
+  1. **기본 기간은 24시간**(옛 모달은 실시간이 기본 — 열자마자 20초 갱신 = 분당 3회 로그인). 실시간은 세그먼트로 고른다.
+  2. 지표 카드에 '최저 시각' 은 넣지 않았다(요약 표에 있다 — 카드가 넓어진다).
+  3. 겹쳐 보기(두 지표)에서는 기간 평균 점선을 생략했다(어느 지표의 평균인지 헷갈린다) — 한 지표일 때만.
+  4. ④ 상태 '직접 수집 대상 아님' 의 **엣지 포탈 링크는 넣지 않았다**(옛 모달에도 없었고 `findRemoteServer` 안내 모양을 정하지 않았다 — 남긴 것).
+  5. 드로어의 ‹ › 순서는 **트리에 보이는 순서 전체**(펼친 호스트만이 아니라 접힌 호스트의 VM 으로도 넘어간다 — 시안은 '보이는 VM 순서' 라고만 적었다).
+  6. 슬라이더 범위(`maxBackOf`)는 '그 창을 아직 보관하는 가장 거친 롤업으로도 점이 6개 이상' 규칙 그대로 — 24시간 창 29칸(1달) · 7일 창 51칸 · 30일 창 11칸(기본 보관 기준 · vCenter 값을 읽으면 그 값).
+  7. 롤업이 요청보다 거칠어진 구간은 차트 주석 줄과 창 설명 두 곳에서 말한다(시안은 창 설명만).
+- 남긴 것(다음 후보): `EntityDetail type='vm'` 모달을 쓰는 다른 5곳(알람 · 탐색 · Platform VM 검색 · VmLink · 호스트 전체 페이지의 VM 열)은 그대로(질문 ① 기본값) · 엣지 위임 vCenter 성능의 엣지 포탈 링크 · 축소 근거 리포트(`RightsizeReport`)는 별도 모달 그대로.
+
+### 8.1 Chromium 확인(1440 · 400 · 목 서버 v2.911 빌드 · pageerror/console error 0 · 가로 넘침 0)
+- 1440: 호스트 및 클러스터(검색 결과) · VM 및 폴더 트리에서 VM 클릭 → 드로어(옛 모달 0) · ↓ 로 다음 VM(목록 1/2 → app-us-0007) · 드로어의 📈 → 해시 `…/monitor` · 드로어 닫힘 · 성능 섹션 렌더(5분 평균 · 288점) ·
+  마우스 오버 상자(같은 시각 4지표) · 7일 → ◀ 이전 7일 → '과거 구간' 배지 + '이 구간은 2시간 평균(vCenter 보관 주기)' · 실시간 → 20초 · 180점 · 20초마다 갱신 · 겹쳐 보기 CPU + 메모리 · 호스트 모니터 탭 같은 섹션 · 가상화 서버 드로어의 📈 → 그 VM 의 모니터 탭.
+- 찾아 고친 것: ① 모니터 탭 아래 '이벤트 · 이동'(VM) · '이벤트'(호스트) 카드가 성능 카드가 빠지며 3열 격자에 혼자 좁게 남았다 → 한 줄 전체(`gridColumn 1 / -1`).
+  ② 400px 에서 차트 SVG 가 뷰박스 1360 그대로라 340px 폭에서 **높이 68px 띠 · 글자 6px** 였다 → 720 미만은 뷰박스 400(높이 약 230px) · 눈금 3개 · 긴 창은 MM-DD 만(`ticksOf short`).
+- 400: 드로어는 v2.909 에서 확인한 전체 시트 그대로 · 성능 섹션은 카드 2×2 · 세그먼트 줄바꿈 · 요약 표는 가로 넘김(페이지 넘침 0).
+- 남긴 것(기존 · A/B 미확인): 같은 페이지에서 해시로 **다른 vCenter 의 VM 개체**로 바로 건너뛴 직후 한 번 '이 vCenter 의 VM 목록에 이 VM 이 없습니다' 가 보였다(새 창에서 같은 주소를 열면 정상 — 옛 vCenter 의 VM 목록이 잠시 남는 경합으로 추정 · 이번 변경과 무관한 경로). 머리 줄 '← 목록' 이 400 에서 두 줄로 접히는 것도 기존.
+- fullPage 캡처에서 고정 하단 상태 막대가 본문 중간에 겹쳐 보이는 것은 캡처 방식 때문(실제 뷰포트에서는 맨 아래) — 결함 아님.

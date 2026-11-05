@@ -20,6 +20,7 @@ import { vmsOnHost, resourcePoolRows, hostDatastoresFromVms, sameBuildCount, hos
 import { gbText } from './vcdTabs.js';
 
 const HostMetricButton = React.lazy(() => import('../../components/VmMetrics.jsx').then((m) => ({ default: m.HostMetricButton })));
+const VmPerfView = React.lazy(() => import('../../components/vmperf/VmPerfView.jsx')); // v2.911 성능 — 모니터 탭 첫 섹션(VM 과 같은 컴포넌트 · entity=host)
 const Lazy = ({ children }) => <React.Suspense fallback={null}>{children}</React.Suspense>;
 const GRID = 'vcd-obj-grid';
 
@@ -44,7 +45,7 @@ export default function HostObject({ site, vcenterId, host, hostsOk, gate, hosts
     <ObjectShell type="host" crumbs={crumbs} onBack={onBack} backLabel="호스트 및 클러스터" title={host.name}
       badges={<><StateBadge state={host.connectionState} />{host.powerState && <span className={`badge ${host.powerState === 'POWERED_ON' ? 'green' : 'gray'}`}>{host.powerState === 'POWERED_ON' ? '전원 켜짐' : '전원 꺼짐'}</span>}</>}
       sub={`${host.version ? `ESXi ${host.version}${host.build ? ` build-${host.build}` : ''}` : 'ESXi —'} · ${[host.vendor, host.model].filter(Boolean).join(' ') || '모델 —'}${host.serviceTag ? ` · 서비스 태그 ${host.serviceTag}` : ''}`}
-      actions={<><Lazy><HostMetricButton hostId={host.id} hostName={host.name} /></Lazy><a className="tab" style={{ flex: 'none', padding: '8px 14px' }} href={`#/hosts/${encodeURIComponent(host.id)}`}>전체 페이지 상세 →</a></>}
+      actions={<><Lazy><HostMetricButton hostId={host.id} hostName={host.name} vcenterId={host.vcenterId} /></Lazy><a className="tab" style={{ flex: 'none', padding: '8px 14px' }} href={`#/hosts/${encodeURIComponent(host.id)}`}>전체 페이지 상세 →</a></>}
       tab={tab} onTab={onTab} extraTabs={tabs}>
 
       {tab === 'summary' && (
@@ -68,17 +69,16 @@ export default function HostObject({ site, vcenterId, host, hostsOk, gate, hosts
       )}
 
       {tab === 'monitor' && (
+        <>
+          {/* v2.911(시안 docs/design/vm-perf ② · 질문 ⑤ 기본값): 호스트 성능도 같은 화면 — 모니터 탭 첫 섹션. */}
+          <Lazy><VmPerfView entityType="host" id={host.id} name={host.name} powered={host.powerState !== 'POWERED_OFF'} /></Lazy>
         <div className={GRID}>
-          <Card title="성능" sub="vCenter 성능 롤업 · 누를 때 조회">
-            <div style={{ padding: 14, display: 'grid', gap: 10 }}>
-              <div className="muted" style={{ fontSize: 12.5 }}>CPU · 메모리 · 디스크 · 네트워크를 실시간 ~ 1년 기간으로 봅니다.</div>
-              <div><Lazy><HostMetricButton hostId={host.id} hostName={host.name} /></Lazy></div>
-            </div>
-          </Card>
-          <HostEvents vcenterId={vcenterId} host={host} />
+          {/* 성능 카드가 빠져 혼자 남은 줄 — 한 줄을 다 쓴다(v2.911 Chromium 확인). */}
+          <div style={{ gridColumn: '1 / -1', minWidth: 0 }}><HostEvents vcenterId={vcenterId} host={host} /></div>
           <VcAlarmsCard vcenterId={vcenterId} entityType="HostSystem" entity={vmRef(host)} wide />
           <VcTasksCard vcenterId={vcenterId} entityType="HostSystem" entity={vmRef(host)} wide />
         </div>
+        </>
       )}
 
       {tab === 'configure' && (
