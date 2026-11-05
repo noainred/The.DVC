@@ -301,9 +301,12 @@ async function gatherNowInner(snap, tagCategory) {
     const x = judged.get(`${vc}|virt|${lc(h.name)}`) || null;
     hostByKey.set(hostKeyOf(vc, h.name), { name: t(h.name), corp: vc, serviceTag: t(h.serviceTag), usage: x ? { state: x.state, cpuPct: x.cpuPct, memPct: x.memPct } : null, faults: faultsOf(h.serviceTag), connectionState: t(h.connectionState) });
   }
-  let bmBlocked = false;
-  try { bmBlocked = (fleetKeySources(snap).unreadable || []).some((u) => u.source !== 'vcenter'); } catch { bmBlocked = true; }
-  return { members, hostByKey, unreadCorps, bmBlocked, corpNames, scanEntries, faultsMeta, backupMeta, bareosCorps, sourceErrors, at: now };
+  let bmBlocked = false; let bmBlockedSources = [];
+  try {
+    bmBlockedSources = (fleetKeySources(snap).unreadable || []).filter((u) => u.source !== 'vcenter').slice(0, 20).map((u) => ({ source: t(u.source), reason: t(u.reason).slice(0, 200) }));
+    bmBlocked = bmBlockedSources.length > 0;
+  } catch (e) { bmBlocked = true; bmBlockedSources = [{ source: 'fleet-keys', reason: `베어메탈 출처 목록을 만들지 못했습니다(${String(e?.message || e).slice(0, 120)})` }]; }
+  return { members, hostByKey, unreadCorps, bmBlocked, bmBlockedSources, corpNames, scanEntries, faultsMeta, backupMeta, bareosCorps, sourceErrors, at: now };
 }
 
 // ───────── 권한 ─────────
@@ -396,6 +399,27 @@ export function backupMetaFor(g, allowed) {
   const n = [...(g.bareosCorps || [])].filter((vc) => allowed.has(vc)).length;
   return n ? { ...m, corps: n } : { used: false };
 }
+/**
+ * 판정 보류 시작 시각(5차 R10 — '보류에는 시한'). 저장하지 않는다 — 이 프로세스가 처음 보류로 본 시각이고 재시작하면 다시 센다(화면이 그렇게 밝힌다).
+ * 지우지는 않는다(보류는 지우지 않는 것이 목적) — 오래 보류된 것을 사람이 보고 원인(못 읽는 법인·출처)을 고치게 한다.
+ * 정리는 전체 범위 계산에서만 한다(범위 계정 계산은 일부만 보므로 남의 기록을 지우지 않게) · 상한으로 메모리를 묶는다.
+ */
+const HELD_SINCE_MAX = 50_000;
+const _heldSince = new Map();
+export function _resetHeldSinceForTest() { _heldSince.clear(); }
+export function heldWithSince(list, full, now = Date.now()) {
+  const seen = new Set();
+  const out = (list || []).map((x) => {
+    seen.add(x.key);
+    if (!_heldSince.has(x.key)) {
+      if (_heldSince.size >= HELD_SINCE_MAX) _heldSince.delete(_heldSince.keys().next().value);   // 가장 오래 넣은 것부터 버린다(새 보류가 null 이 되지 않게 — 3차 반증 6)
+      _heldSince.set(x.key, now);
+    }
+    return { ...x, heldSince: _heldSince.get(x.key) ?? null };
+  });
+  if (full) for (const k of [..._heldSince.keys()]) if (!seen.has(k)) _heldSince.delete(k);
+  return out;
+}
 const maskName = (m, admin) => (!admin && m.kind === 'bm' && m.nameIsAddr ? maskedAddressName(m.name) : m.name);
 
 function memberRow(m, r, admin) {
@@ -407,6 +431,9 @@ function memberRow(m, r, admin) {
     usage: m.usage ? { state: m.usage.state, cpu: m.usage.cpuPct ?? null, mem: m.usage.memPct ?? null, src: m.usage.src || null } : null,
     faults: m.faults, backup: m.backup, host: m.host || '', ip: m.kind === 'vm' ? m.ip : '', folderPath: m.kind === 'vm' ? m.folderPath : undefined,
     serviceTag: m.kind === 'bm' ? m.serviceTag : undefined, source: m.kind === 'bm' ? m.source : undefined, scanEntry: m.scan ? m.scan.entryId : undefined,
+    // 태그 여럿(5차 M5·R14) — 태그로 정해진 구성원만. 값은 소문자 정렬 순 최대 8개 · 둘 이상의 서비스에 걸리면 tagAmbiguous
+    tagValues: r.src === 'tag' && r.multi ? r.tagValues : undefined, tagAmbiguous: r.src === 'tag' && r.tagAmbiguous ? true : undefined,
+    ruleOverlap: r.src === 'rule' && r.ruleOverlap ? r.ruleOverlap : undefined,
   };
 }
 
@@ -433,11 +460,11 @@ export function registerSvcInventory(api) {
         corps: inv.corps.map((c) => ({ ...c, writable: writableOf(req.user, s, c.vcenterId) })),
         services: inv.services, noCorp: inv.noCorp,
         global: inv.global,
-        queues: { unassigned: q.unassigned.reduce((a, x) => a + x.n, 0), unassignedGroups: q.unassigned.length, unmapped: q.unmapped.length, drift: q.drift.length, mismatch: q.mismatch.length, redundant: q.redundant.length, ghosts: q.ghosts.length, ghostsHeld: q.ghostsHeld.length, orphaned: q.orphaned.length },
+        queues: { unassigned: q.unassigned.reduce((a, x) => a + x.n, 0), unassignedGroups: q.unassigned.length, unmapped: q.unmapped.length, drift: q.drift.length, mismatch: q.mismatch.length, redundant: q.redundant.length, ghosts: q.ghosts.length, ghostsHeld: q.ghostsHeld.length, orphaned: q.orphaned.length, tagAmbiguous: q.tagAmbiguous.length, ruleOverlap: q.ruleOverlap.length },
         // 법인을 고른 화면의 탭 숫자가 KPI 와 같은 기준이 되도록 법인별로도 센다(전 법인 숫자를 법인 화면에 쓰지 않는다).
         queuesByCorp: (() => {
           const o = {};
-          const bump = (c, k, n = 1) => { const id = c || ''; (o[id] ||= { unassigned: 0, unmapped: 0, drift: 0, ghosts: 0, ghostsHeld: 0, mismatch: 0, redundant: 0, orphaned: 0 })[k] += n; };
+          const bump = (c, k, n = 1) => { const id = c || ''; (o[id] ||= { unassigned: 0, unmapped: 0, drift: 0, ghosts: 0, ghostsHeld: 0, mismatch: 0, redundant: 0, orphaned: 0, tagAmbiguous: 0, ruleOverlap: 0 })[k] += n; };
           for (const x of q.unassigned) bump(x.corp, 'unassigned', x.n);
           for (const x of q.unmapped) bump(x.corp, 'unmapped');
           for (const x of q.drift) bump(x.corp, 'drift');
@@ -445,6 +472,8 @@ export function registerSvcInventory(api) {
           for (const x of q.ghostsHeld) bump(x.corp, 'ghostsHeld');
           for (const x of q.mismatch) bump(x.corp, 'mismatch');
           for (const x of q.redundant) bump(x.corp, 'redundant');
+          for (const x of q.tagAmbiguous) bump(x.corp, 'tagAmbiguous');
+          for (const x of q.ruleOverlap) bump(x.corp, 'ruleOverlap');
           for (const x of q.orphaned) bump(x.corp, 'orphaned');
           return o;
         })(),
@@ -520,7 +549,12 @@ export function registerSvcInventory(api) {
         unmapped: q.unmapped.filter(inCorp), drift: mask(q.drift.filter(inCorp)), mismatch: mask(q.mismatch.filter(inCorp)),
         // 불필요한 고정 — 고른 법인 것만(5차 반증 R9: 예전에는 법인을 골라도 전 범위 합계였다) · 정리 버튼이 키를 쓰므로 500건까지 싣는다.
         redundant: (() => { const l = q.redundant.filter(inCorp); return { n: l.length, items: mask(l.slice(0, LIMITS.pinBatch)) }; })(),
-        ghosts: q.ghosts.filter(inCorp), ghostsHeld: q.ghostsHeld.filter(inCorp), orphaned: q.orphaned.filter(inCorp).length, bmBlocked: g.bmBlocked,
+        tagAmbiguous: (() => { const l = q.tagAmbiguous.filter(inCorp); return { n: l.length, items: mask(l.slice(0, 200)) }; })(),
+        ruleOverlap: (() => { const l = q.ruleOverlap.filter(inCorp); return { n: l.length, items: mask(l.slice(0, 200)) }; })(),
+        // 판정 보류(5차 R10): 언제부터(이 포탈 프로세스가 처음 본 시각 — 재시작하면 다시 센다) · 무엇이 막혔는지. 출처 문구는 관리자 판본만(장비·수집 서버 이름).
+        ghosts: q.ghosts.filter(inCorp), ghostsHeld: heldWithSince(q.ghostsHeld, !allowed).filter(inCorp), orphaned: q.orphaned.filter(inCorp).length, bmBlocked: g.bmBlocked,
+        // 문구(장비·수집 서버 이름)는 **전체 범위** 관리자만 — 범위가 지정된 관리자에게 다른 법인 출처 이름을 싣지 않는다(3차 반증 2 · sourceErrors 와 같은 기준)
+        bmBlockedSources: g.bmBlocked ? (g.bmBlockedSources || []).map((u) => (admin && !allowed ? u : { source: u.source })) : [],
       });
     } catch (e) { if (!res.headersSent) res.status(500).json({ ok: false, reason: String(e?.message || e).slice(0, 300) }); }
   });
@@ -553,14 +587,23 @@ export function registerSvcInventory(api) {
       const { g, inv, allowed, admin } = await inventoryFor(req, snap);
       const svcById = new Map(inv.services.map((s) => [s.id, s]));
       const SRC = { pin: '고정', folder: 'vCenter 폴더 규칙', scan: '스캔 엔트리', tag: '태그', rule: '이름 규칙', none: '미지정' };
-      const lines = [CSV_BOM + csvLine(['법인', '폴더', '서비스', '종류', '이름', '키', '소속 근거', '근거 값', '전원', 'CPU%', '메모리%', 'vCPU/코어', '메모리GB', '스토리지GB', '부품 장애', '백업 24h', '호스트', 'IP'])];
+      // 5차 M11·R19: 전역 서비스·등급·담당자 · 드리프트 · 키 종류 · 백업은 화면과 같은 말(영문 코드 금지)
+      const BACKUP = { ok: '성공', fail: '실패·지연', none: '잡 없음' };
+      const KEY_KIND = { instanceUuid: 'instanceUuid', moref: 'moref(임시)', serviceTag: '서비스태그', fleetId: 'fleetId(임시)' };
+      const globalById = new Map((inv.global?.globals || []).map((x) => [x.id, x]));
+      const lines = [CSV_BOM + csvLine(['법인', '폴더', '서비스', '전역 서비스', '등급', '담당자', '종류', '이름', '키', '키 종류', '소속 근거', '근거 값', '드리프트', '전원', 'CPU%', '메모리%', 'vCPU/코어', '메모리GB', '스토리지GB', '부품 장애', '백업 24h', '호스트', 'IP'])];
       for (const m of g.members) {
         if (allowed && !allowed.has(m.corp)) continue;
         if (!m.corp && allowed) continue;
         const r = inv.resolved.get(m.key); const s = r.serviceId ? svcById.get(r.serviceId) : null;
-        lines.push(csvLine([g.corpNames.get(m.corp) || m.corp || '(법인 미지정)', s?.path || '', s?.name || '(미지정)', m.kind === 'vm' ? 'VM' : '베어메탈', maskName(m, admin), m.key, SRC[r.src] || r.src, r.via || r.reason || '',
+        const gl = s?.globalId ? globalById.get(s.globalId) : null;
+        // 드리프트 칸 — 고정한 구성원만 뜻이 있다. 자동 판정을 모르면(태그 못 읽음) '없음' 과 구별해 적는다(3차 반증 9)
+        const drift = r.src !== 'pin' ? '' : r.drift ? `고정과 다름(자동: ${svcById.get(r.auto?.serviceId)?.name || r.auto?.serviceId || '—'})`
+          : r.auto?.unchecked && !r.auto?.serviceId ? '모름(태그를 못 읽어 자동 판정 확인 안 됨)' : r.auto?.serviceId ? '같음' : '자동 판정 없음';
+        lines.push(csvLine([g.corpNames.get(m.corp) || m.corp || '(법인 미지정)', s?.path || '', s?.name || '(미지정)', gl?.name || '', s ? (s.tier ?? '') : '', s?.owner || '',
+          m.kind === 'vm' ? 'VM' : '베어메탈', maskName(m, admin), m.key, KEY_KIND[m.keyKind] || m.keyKind || '', SRC[r.src] || r.src, r.via || r.reason || '', drift,
           m.powered === true ? '켜짐' : m.powered === false ? '꺼짐' : '모름', m.usage?.cpuPct ?? '', m.usage?.memPct ?? '', m.cores ?? '', m.memGB ?? '', m.kind === 'vm' ? (m.storageGB ?? '') : '',
-          m.faults == null ? '' : m.faults, m.kind !== 'vm' ? '' : m.backup === undefined ? '해당 없음' : (m.backup === null ? '모름' : m.backup), m.host || '', m.kind === 'vm' ? m.ip : '']));
+          m.faults == null ? '' : m.faults, m.kind !== 'vm' ? '' : m.backup === undefined ? '해당 없음' : (m.backup === null ? '모름' : (BACKUP[m.backup] || m.backup)), m.host || '', m.kind === 'vm' ? m.ip : '']));
       }
       res.setHeader('Content-Type', 'text/csv; charset=utf-8');
       res.setHeader('Content-Disposition', `attachment; filename="svc-inventory-${todayStamp()}.csv"`);
@@ -689,10 +732,21 @@ export function registerSvcInventory(api) {
         const { inv } = await inventoryFor(req, snap);
         const ghostKeys = new Set(inv.queues.ghosts.filter((x) => x.corp === corp).map((x) => x.key));
         if (b.dry === true) return res.json({ ok: true, result: { keys: [...ghostKeys], held: inv.queues.ghostsHeld.filter((x) => x.corp === corp).length } });
+        // 화면이 미리 본 **키**와 지금 유령의 교집합만 지운다(5차 R11 · 3차 반증 3 — 개수만 비교하면 확인창에 없던 키가 끼어 지워졌다. insights fleet/prune 과 같은 방식).
+        // 옛 화면(키 없이 개수만 · 아무것도 없이)도 받는다: expect 는 정수만, 다르면 409.
+        let targets = ghostKeys; let skipped = 0;
+        if (Array.isArray(b.keys)) {
+          const asked = [...new Set(b.keys.slice(0, 5000).map((k) => t(k)).filter(Boolean))];
+          targets = new Set(asked.filter((k) => ghostKeys.has(k)));
+          skipped = asked.length - targets.size;
+        } else if (b.expect != null) {
+          if (!Number.isInteger(b.expect)) return res.status(400).json({ ok: false, reason: 'expect 는 정수여야 합니다.' });
+          if (b.expect !== ghostKeys.size) return res.status(409).json({ ok: false, reason: `유령 고정 수가 미리 본 것(${b.expect})과 지금(${ghostKeys.size})이 다릅니다 — 새로 고쳐 다시 확인하십시오.` });
+        }
         let removed = 0;
-        const r = mutatePins((d) => { for (const k of ghostKeys) if (d.pins[k]) { delete d.pins[k]; removed += 1; } return { result: { removed } }; });
+        const r = mutatePins((d) => { for (const k of targets) if (d.pins[k]) { delete d.pins[k]; removed += 1; } return { result: { removed, skipped } }; });
         if (!r.ok) return res.status(r.status).json({ ok: false, reason: r.error });
-        audit(corp, `유령 고정 ${removed}건 정리(판정 보류 제외)`);
+        audit(corp, `유령 고정 ${removed}건 정리(판정 보류 제외)${skipped ? ` · 미리 본 뒤 유령이 아니게 된 ${skipped}건 건너뜀` : ''}`);
         return done(r.result);
       }
 
