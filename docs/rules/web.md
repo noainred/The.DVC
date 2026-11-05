@@ -570,7 +570,10 @@
   - `vcd/useOnce.js` 는 상태에 열쇠를 싣고 **지금 열쇠의 값만** 돌려준다 — 다른 개체로 옮겨 가면 이전 개체의 값 · 오류를 한 번도 그리지 않는다(변이 확인).
   - 못 읽은 워킹셋은 '—'(W3 — v2.895 가 0 GB 로 그렸다 · 정정). 관리자 전용 API 를 부르는 버튼은 `adminToolAllowed(k)`(= 관리자 ∧ 도구 권한 — W1).
   - 스프린트를 바꾸면 다른 스프린트의 보드를 그리지 않는다(`cur = board.sprint.id === sel`) · 위키 충돌 저장은 비교가 있을 때만 · 옛 GPU 주소는 `location.replace` · 오류 뒤 effect deps 에 error.
-  - Bareos 그룹 편집: 기준 시각 Select(현지 서버 · 중앙 포탈 + UTC 오프셋) · 미리보기 · 다음 실행 칸은 두 시계를 함께(`nextClockText`) · 새 그룹 기본은 'portal'(옛 그룹은 server — 서버 기본과 같다).
+  - Bareos 그룹 편집: 기준 시각 Select(현지 서버 · 중앙 포탈 + UTC 오프셋 — **한 줄 전체**, 두 칸 폭에서는 오프셋이 잘렸다) · 미리보기의 서버 시간대 이름은 현지 서버 시계일 때만 ·
+    다음 실행 칸은 두 시계를 함께(`nextClockText`) · 새 그룹 기본은 'portal'(옛 그룹은 server — 서버 기본과 같다).
+  - ⚠ **정정(Chromium 판독)**: 새 값을 수집하게 만들면 화면의 '수집하지 않' 문구를 **grep 해 함께 고친다** — v2.901 이 VMXNET3 권장을 넣고도 튜닝 탭에 '(vmxnet3 여부) 수집하지 않습니다(2차)' 가,
+    v2.898 이 업데이트 · vLCM 을 넣고도 vCenter 요약에 '적용 가능 패치: 수집하지 않음' 이 남아 있었다(`vcdTabs.test.js` 가 고정). v2.898 정정(반대 방향 — 수집하는 값을 '수집하지 않음' 으로)과 짝이다.
 - **v2.898 — vCenter 개체 보기 2차(사용자 요청 '수집하지 않음 항목 반영할 수 있어?' · 선택 '①~④ 전부' · '전체 검증')**. 카드 `views/vcd/VcInfoParts.jsx` · 판정 `vcd/vcInfo.js`(순수) ·
   서버 `server/src/vcinfo/`(규칙은 `docs/rules/vcenter.md` v2.898). 회귀 `vcd/vcInfo.test.js` · `vcdTabsRender.test.jsx` · `server/test/vcinfo2898.test.js` · `vcd2898snapNic.test.js`.
   - 값은 `/vcenter-info/<kind>` — 탭을 열 때 1회 + '다시 읽기'(15초 폴링 금지). 갱신 주기 문구는 응답 `refreshMs` 로(화면에 숫자를 박지 않는다). `at:null`+`notCollected` 는 '없음' 이 아니라 '아직 읽지 않음'.
