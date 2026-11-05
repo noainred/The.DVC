@@ -32,7 +32,7 @@ const KEYS_V2901 = [
   'backup', 'nfs-mounts', 'dir-usage', 'vclogs', 'diagnostics', 'perf-monitor', 'log-analysis', 'audit', 'upgrade', 'about',
 ];
 
-// v2.911 에 더한 키(설정 › 로그 › 최근 로그인 · 로그인 횟수). 옛 48개는 하나도 빠지거나 이름이 바뀌지 않는다.
+// v2.912 에 더한 키(설정 › 로그 › 최근 로그인 · 로그인 횟수). 옛 48개는 하나도 빠지거나 이름이 바뀌지 않는다.
 const KEYS_ADDED = ['recent-logins', 'login-counts'];
 
 test('① 하위 키 48개는 그대로다(삭제 · 이름 변경 없음) — 더한 키는 KEYS_ADDED 에만', () => {

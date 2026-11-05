@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { roleLabel, generatedAtText, SEARCH_PLACEHOLDER } from './headerText.js';
+import { roleLabel, generatedAtText, SEARCH_PLACEHOLDER, isMacPlatform, cmdkLabel, modKeyLabel } from './headerText.js';
 
 describe('headerText(v2.727) — 헤더 역할 표기', () => {
   it('① super_admin 은 요청 문맥 표지(superAdmin)로 판정한다 — role 원문을 보이지 않는다', () => {
@@ -24,6 +24,14 @@ describe('headerText(v2.727) — 헤더 역할 표기', () => {
   });
   it('⑤ 검색 문구는 장비와 기능을 함께 찾는다고 말한다(v2.909 통합 장비 검색 — v2.727 의 기능·탭 전용 문구를 바꿨다)', () => {
     expect(SEARCH_PLACEHOLDER).toMatch(/^장비 · 기능 찾기/);
+  });
+  it('⑩ 단축키 표기는 OS 에 맞춘다(v2.911 C1) — 못 읽으면 Ctrl', () => {
+    expect(cmdkLabel({ userAgentData: { platform: 'macOS' } })).toBe('⌘K');
+    expect(cmdkLabel({ platform: 'MacIntel' })).toBe('⌘K');
+    expect(cmdkLabel({ platform: 'Win32' })).toBe('Ctrl K');
+    expect(modKeyLabel({ userAgent: 'Mozilla/5.0 (X11; Linux x86_64)' })).toBe('Ctrl');
+    expect(isMacPlatform(undefined)).toBe(false);
+    expect(isMacPlatform({ get platform() { throw new Error('x'); } })).toBe(false);
   });
 });
 

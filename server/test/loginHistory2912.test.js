@@ -1,4 +1,4 @@
-// v2.911 — 로그인 기록(설정 › 로그 › 최근 로그인 · 로그인 횟수).
+// v2.912 — 로그인 기록(설정 › 로그 › 최근 로그인 · 로그인 횟수).
 // 고정하는 것:
 //   ① 첫 기동(파일 없음)에는 감사 로그의 '로그인' 줄만 옮겨 온다('로그인 실패'·'로그인 차단(잠금)'·'세션 연장' 은 아니다) — 역할은 알려진 값만.
 //   ② 집계: 최근 1일 · 7일 · 30일 · 사용자 정의 [from, to) · 사용자별 마지막 로그인 · 한 번도 로그인하지 않은 로컬 계정도 목록에(값 0, last null)
@@ -14,7 +14,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'loginhist2911-'));
+const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'loginhist2912-'));
 process.env.CONFIG_DIR = tmp;
 process.env.DATA_SOURCE = 'mock';
 process.env.AUTH_ENABLED = 'true';
@@ -133,7 +133,7 @@ test('⑤ 실제 로그인 성공은 한 줄을 남기고(src local · peer IP),
   reset();
   fs.writeFileSync(FILE, '');
   const auth = await import('../src/auth/auth.js');
-  const made = auth.createUser({ username: 'lh-viewer', role: 'viewer', name: 'V', password: 'Lh!2911-pass-word' }, { trusted: true });
+  const made = auth.createUser({ username: 'lh-viewer', role: 'viewer', name: 'V', password: 'Lh!2912-pass-word' }, { trusted: true });
   assert.equal(made.ok, true, JSON.stringify(made));
   const { authRouter } = await import('../src/routes/auth.js');
   const app = express();
@@ -147,7 +147,7 @@ test('⑤ 실제 로그인 성공은 한 줄을 남기고(src local · peer IP),
     });
     assert.equal((await login('wrong-password')).status, 401);
     assert.equal(fileRows().length, 0, '실패는 로그인 기록에 남지 않는다');
-    const ok = await login('Lh!2911-pass-word');
+    const ok = await login('Lh!2912-pass-word');
     assert.equal(ok.status, 200, await ok.text());
     const rows = fileRows();
     assert.equal(rows.length, 1);

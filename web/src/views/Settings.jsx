@@ -21,7 +21,7 @@ import EdgeUserDeploy from './EdgeUserDeploy.jsx';
 const Diagnostics = lazy(() => import('./Diagnostics.jsx'));
 import Alerts2 from './Alerts2.jsx';
 import Audit from './Audit.jsx';
-import { RecentLogins, LoginCounts } from './LoginHistory.jsx'; // v2.911: 설정 › 로그 › 최근 로그인 · 로그인 횟수
+import { RecentLogins, LoginCounts } from './LoginHistory.jsx'; // v2.912: 설정 › 로그 › 최근 로그인 · 로그인 횟수
 const MetricsSettings = lazy(() => import('./MetricsSettings.jsx'));
 import StorageIntervals from './StorageIntervals.jsx'; // 스토리지 수집 주기(중앙→엣지 배포, v2.409)
 import PowerOffCheckSettings from './PowerOffCheckSettings.jsx'; // 전원 꺼짐 점검 주기(v2.484)
@@ -120,7 +120,7 @@ const SUB = [
   { k: 'perf-monitor', label: '서버 성능 측정', C: PerfMonitor, group: 'log' },
   { k: 'log-analysis', label: '로그 분석(개선점)', C: LogAnalysis, group: 'log' },
   { k: 'audit', label: '감사 로그', C: Audit, group: 'log' },
-  // v2.911(사용자 요청 '전체 사용자가 최근에 로그인 한 정보 · 최근 1일/7일/1달/사용자 정의 기간에 몇 번 로그인했는지'): 같은 API 를 쓰는 두 화면.
+  // v2.912(사용자 요청 '전체 사용자가 최근에 로그인 한 정보 · 최근 1일/7일/1달/사용자 정의 기간에 몇 번 로그인했는지'): 같은 API 를 쓰는 두 화면.
   { k: 'recent-logins', label: '최근 로그인', C: RecentLogins, group: 'log' },
   { k: 'login-counts', label: '로그인 횟수', C: LoginCounts, group: 'log' },
   // --- 시스템 ---

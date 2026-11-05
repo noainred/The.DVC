@@ -1,4 +1,4 @@
-// v2.911 — 설정 › 로그 › 최근 로그인 · 로그인 횟수: 기간 계산 · 문구(순수 함수) + 화면 소스 규약.
+// v2.912 — 설정 › 로그 › 최근 로그인 · 로그인 횟수: 기간 계산 · 문구(순수 함수) + 화면 소스 규약.
 import { describe, it, expect } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';

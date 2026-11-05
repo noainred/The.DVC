@@ -6,7 +6,7 @@ import { loadSecretsPolicy, saveSecretsPolicy, migrateSecretFiles, SECRET_FILES 
 import { saveOsScanSettings, runOsScanNow, osScanStatus } from '../../inventory/osScanner.js';
 import { getOsResults, osSummary } from '../../inventory/osStore.js';
 import { listAudit, logAudit } from '../../audit.js';
-import { loginHistorySummary, parseLoginRange } from '../../security/loginHistory.js'; // v2.911: 설정 › 로그 › 최근 로그인 · 로그인 횟수
+import { loginHistorySummary, parseLoginRange } from '../../security/loginHistory.js'; // v2.912: 설정 › 로그 › 최근 로그인 · 로그인 횟수
 import { alertStatus, saveAlertConfig, testAlert, getAnomalySettings, saveAnomalySettings } from '../../alerts.js';
 import { createJob as createProvisionJob } from '../../provision/jobs.js';
 import { updateSaved, removeSaved, getSaved } from '../../provision/saved.js';
@@ -102,7 +102,7 @@ adminRouter.get('/audit', adminOnly, (req, res) => {
   res.json(listAudit({ limit: req.query.limit, offset: req.query.offset, user: req.query.user, q: req.query.q }));
 });
 
-// v2.911 — 로그인 기록(설정 › 로그 › 최근 로그인 · 로그인 횟수). 전 사용자의 로그인 시각·IP 라 감사 로그와 같은 기준이다:
+// v2.912 — 로그인 기록(설정 › 로그 › 최근 로그인 · 로그인 횟수). 전 사용자의 로그인 시각·IP 라 감사 로그와 같은 기준이다:
 //   관리자 + 전체 범위 계정만(범위 계정 403). 집계는 메모리 배열 한 번 훑기라 캐시하지 않는다(화면은 열 때 · 버튼으로만 부른다).
 adminRouter.get('/login-history', adminOnly, (req, res) => {
   if (scopedVcenterIds(req.user, store.get())) return res.status(403).json({ ok: false, error: 'forbidden', requiredOwner: true, reason: '로그인 기록은 전 사용자의 접속 기록이라 전체 범위(vCenter 제한 없는) 계정만 볼 수 있습니다.' });

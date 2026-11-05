@@ -7,7 +7,7 @@ import {
 } from './loginHistoryText.js';
 
 /**
- * 설정 › 로그 › 최근 로그인 · 로그인 횟수(v2.911). 두 화면이 같은 API(GET /admin/login-history)를 쓴다.
+ * 설정 › 로그 › 최근 로그인 · 로그인 횟수(v2.912). 두 화면이 같은 API(GET /admin/login-history)를 쓴다.
  * 숫자는 서버(security/loginHistory.js)가 만든다. 화면은 열 때 한 번 + '새로고침' 버튼으로만 부른다(폴링하지 않는다).
  */
 function useLoginHistory(range) {
@@ -29,7 +29,7 @@ function useLoginHistory(range) {
   return { data, error, busy, load };
 }
 
-// 안내 줄(호박색 · 작은 글씨). 큰 오류 상자(error-box)는 화면 절반을 차지해 표를 밀어낸다(v2.911 Chromium 1440 확인).
+// 안내 줄(호박색 · 작은 글씨). 큰 오류 상자(error-box)는 화면 절반을 차지해 표를 밀어낸다(v2.912 Chromium 1440 확인).
 const WARN = { fontSize: 12, lineHeight: 1.6, marginBottom: 8, color: 'var(--amber,#d97706)' };
 // 숫자 열은 머리글도 오른쪽 정렬(값과 같은 줄에 선다).
 // 요약 카드 — 400px 에서도 두 장씩(기본 .kpis 의 180px 최소폭이면 한 장씩 쌓여 표가 한참 아래로 밀린다).

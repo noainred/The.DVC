@@ -222,7 +222,7 @@ export function listAudit({ limit = 100, offset = 0, user = '', q = '' } = {}) {
 }
 
 /**
- * 감사 로그에 남아 있는 줄 중 `action` 이 **정확히** 같은 것(오래된 것이 앞, 읽기 소독 후). v2.911: 로그인 기록
+ * 감사 로그에 남아 있는 줄 중 `action` 이 **정확히** 같은 것(오래된 것이 앞, 읽기 소독 후). v2.912: 로그인 기록
  * (`security/loginHistory.js`)이 처음 만들어질 때 한 번 옮겨 오는 데 쓴다 — 접두 매칭이 아니다('로그인 실패' 는 들어오지 않는다).
  */
 export function auditEntriesWithAction(action) {

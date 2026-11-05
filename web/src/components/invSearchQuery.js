@@ -61,40 +61,47 @@ const enc = encodeURIComponent;
  * 이동 — 기존 화면 주소 + 검색어 인계(hooks/searchHandoff.js, v2.616 규약: 검색어 · IP · 시리얼은 **URL 에 싣지 않고 메모리로** 넘긴다).
  *   시안 ④ 는 `#/vms?focus=` 처럼 주소에 실었지만 위 규약과 어긋나 바꿨다(docs/design/inventory-search/README.md §7).
  *   - 행 하나: 이미 있는 상세 주소가 있으면 그것(VM `#/vcenters/<vc>/vm/<id>` v2.895 · 호스트 `#/hosts/<id>` v2.805 · vCenter `#/vcenters/<id>`),
- *     없으면 그 화면의 검색 칸에 장비 이름(베어메탈은 서비스 태그)을 넣는다.
- *   - ‘모두 보기’(컨펌 ③): 그 화면의 검색 칸에 지금 검색어를 넣는다. 검색 칸이 없는 화면(PDU)은 열기만 한다.
- * 받는 쪽 target 은 hooks/useSearchHandoff.js 를 쓰는 화면 · App(가상머신 · VM호스트 · 스토리지 탭의 상단 검색)과 글자 그대로 같아야 한다.
+ *     없으면 그 화면의 검색 칸에 장비 이름(베어메탈은 서비스 태그)을 넣고, **v2.911(A1 · A2)부터 고른 장비 id 를 함께 넘겨 그 화면이 상세를 연다**
+ *     (`<target>:focus` — 받는 쪽은 hooks/useSearchHandoff.js useFocusHandoff).
+ *   - ‘모두 보기’(컨펌 ③): 그 화면의 검색 칸에 지금 검색어를 넣는다. v2.911(A3) PDU 화면에 검색 칸이 생겨 모든 종류가 걸러 보기가 된다.
+ * 받는 쪽 target 은 useSearchHandoff · useFocusHandoff 를 쓰는 화면 · App(가상머신 · VM호스트 · 스토리지 탭의 상단 검색)과 글자 그대로 같아야 한다
+ * (invSearchQuery.test.js 가 소스로 대조한다).
  */
 const SCREEN = Object.freeze({
   vm: { hash: '#/vms', target: 'vms' },
   host: { hash: '#/hosts', target: 'hosts' },
-  datastore: { hash: '#/datastores', target: 'datastores' },
+  datastore: { hash: '#/datastores', target: 'datastores', focus: 'datastores:focus' },
   vcenter: { hash: '#/vcenters', target: 'vcenters' },
-  server: { hash: '#/tools/serveranalysis/info', target: 'serveranalysis' },
+  server: { hash: '#/tools/serveranalysis/info', target: 'serveranalysis', focus: 'serveranalysis:focus' },
+  // 물리 GPU 서버는 서버 분석 › GPU 에서 상세 창이 없다(iDRAC 서버만 연다) — 검색 칸만.
   gpu: { hash: '#/tools/serveranalysis/gpu', target: 'serveranalysis-gpu' },
-  storage: { hash: '#/tools/storage-mon/devices', target: 'storage-mon' },
-  sanswitch: { hash: '#/tools/san-switch', target: 'san-switch' },
-  netswitch: { hash: '#/tools/cvp/devices', target: 'cvp' },
-  pdu: { hash: '#/tools/pdu/list', target: null },
+  storage: { hash: '#/tools/storage-mon/devices', target: 'storage-mon', focus: 'storage-mon:focus' },
+  sanswitch: { hash: '#/tools/san-switch', target: 'san-switch', focus: 'san-switch:focus' },
+  netswitch: { hash: '#/tools/cvp/devices', target: 'cvp', focus: 'cvp:focus' },
+  pdu: { hash: '#/tools/pdu/list', target: 'pdu', focus: 'pdu:focus' },
   ip: { hash: '#/ipam', target: 'ipam' },
   parts: { hash: '#/tools/serial-lookup', target: 'serial-lookup' },
 });
 /** 검색어를 받을 수 있는 화면인가(‘모두 보기’ 문구가 달라진다). */
 export const canFilter = (kind) => !!SCREEN[kind]?.target;
 export const HANDOFF_TARGETS = Object.freeze([...new Set(Object.values(SCREEN).map((s) => s.target).filter(Boolean))]);
+export const FOCUS_TARGETS = Object.freeze(Object.values(SCREEN).map((s) => s.focus).filter(Boolean));
 
 const masked = (row) => !!row?.addrHidden && String(row?.name || '').endsWith('(이름 가림)');
 
-/** 결과 행 → { hash, handoff:[target, 검색어]|null }. 모르는 종류는 null. */
+/** 결과 행 → { hash, handoffs:[[target, 값], …] }. 모르는 종류는 null. */
 export function focusPlan(row) {
   const sc = SCREEN[row?.kind];
   if (!sc) return null;
   const id = row.id ? String(row.id) : '';
-  if (row.kind === 'vm' && id && row.vcenterId) return { hash: `#/vcenters/${enc(row.vcenterId)}/vm/${enc(id)}`, handoff: null };
-  if (row.kind === 'host' && id) return { hash: `#/hosts/${enc(id)}`, handoff: null };
-  if (row.kind === 'vcenter' && id) return { hash: `#/vcenters/${enc(id)}`, handoff: null };
+  if (row.kind === 'vm' && id && row.vcenterId) return { hash: `#/vcenters/${enc(row.vcenterId)}/vm/${enc(id)}`, handoffs: [] };
+  if (row.kind === 'host' && id) return { hash: `#/hosts/${enc(id)}`, handoffs: [] };
+  if (row.kind === 'vcenter' && id) return { hash: `#/vcenters/${enc(id)}`, handoffs: [] };
   const term = row.kind === 'server' ? (row.serials?.[0] || row.name) : row.kind === 'ip' ? (row.id || row.name) : row.name;
-  return { hash: sc.hash, handoff: sc.target && term && !masked(row) ? [sc.target, String(term)] : null };
+  const handoffs = [];
+  if (sc.target && term && !masked(row)) handoffs.push([sc.target, String(term)]);
+  if (sc.focus && id) handoffs.push([sc.focus, id]);
+  return { hash: sc.hash, handoffs };
 }
 
 /** 종류 + 검색어 → ‘모두 보기’ 이동(그 화면의 검색 칸으로 — 컨펌 ③). */
@@ -102,7 +109,16 @@ export function listPlan(kind, text) {
   const sc = SCREEN[kind];
   if (!sc) return null;
   const q = String(text || '').trim();
-  return { hash: sc.hash, handoff: sc.target && q ? [sc.target, q] : null };
+  return { hash: sc.hash, handoffs: sc.target && q ? [[sc.target, q]] : [] };
+}
+
+/** 저장된 이동(최근 항목)을 지금 모양으로 — v2.909 의 `handoff:[t,q]` 하나짜리도 읽는다. 값은 길이를 자른다. */
+export function normPlan(plan) {
+  if (!plan || typeof plan.hash !== 'string' || !plan.hash.startsWith('#/')) return null;
+  const raw = Array.isArray(plan.handoffs) ? plan.handoffs : (Array.isArray(plan.handoff) ? [plan.handoff] : []);
+  const handoffs = raw.filter((h) => Array.isArray(h) && h.length === 2 && h[0] && h[1]).slice(0, 4)
+    .map(([t, q]) => [String(t).slice(0, 40), String(q).slice(0, 200)]);
+  return { hash: plan.hash.slice(0, 400), handoffs };
 }
 
 /** ‘모두 보기’ 링크의 화면 이름. */
@@ -127,18 +143,18 @@ export function readRecent(storage = globalThis.localStorage, key = RECENT_KEY) 
   if (!key) return [];
   try {
     const v = JSON.parse(storage?.getItem(key) || '[]');
-    return Array.isArray(v) ? v.filter((x) => x && x.plan && typeof x.plan.hash === 'string' && x.plan.hash.startsWith('#/') && typeof x.name === 'string').slice(0, RECENT_MAX) : [];
+    if (!Array.isArray(v)) return [];
+    return v.filter((x) => x && typeof x.name === 'string' && normPlan(x.plan)).slice(0, RECENT_MAX).map((x) => ({ ...x, plan: normPlan(x.plan) }));
   } catch { return []; }
 }
 
 /** 맨 앞에 넣고 같은 이동은 하나만. 저장하는 것은 이름 · 종류 · 법인 · 이동(plan) · 시각뿐(상태 값은 낡으므로 넣지 않는다). */
 export function pushRecent(item, storage = globalThis.localStorage, now = Date.now(), key = RECENT_KEY) {
   if (!key) return [];
-  const plan = item?.plan;
-  if (!plan || typeof plan.hash !== 'string' || !plan.hash) return readRecent(storage, key);
-  const handoff = Array.isArray(plan.handoff) && plan.handoff.length === 2 ? [String(plan.handoff[0]).slice(0, 40), String(plan.handoff[1]).slice(0, 200)] : null;
-  const entry = { kind: String(item.kind || ''), name: String(item.name || '').slice(0, 120), corp: String(item.corp || '').slice(0, 80), plan: { hash: plan.hash.slice(0, 400), handoff }, at: now };
-  const sig = (x) => `${x.plan.hash}|${x.plan.handoff ? x.plan.handoff.join('|') : ''}`;
+  const plan = normPlan(item?.plan);
+  if (!plan) return readRecent(storage, key);
+  const entry = { kind: String(item.kind || ''), name: String(item.name || '').slice(0, 120), corp: String(item.corp || '').slice(0, 80), plan, at: now };
+  const sig = (x) => `${x.plan.hash}|${x.plan.handoffs.map((h) => h.join('|')).join('|')}`;
   const next = [entry, ...readRecent(storage, key).filter((x) => sig(x) !== sig(entry))].slice(0, RECENT_MAX);
   try { storage?.setItem(key, JSON.stringify(next)); } catch { /* 저장 차단 — 무시 */ }
   return next;
@@ -162,13 +178,20 @@ export function agoText(at, now = Date.now()) {
 
 // ── 행 표시(순수) ─────────────────────────────────────────────────────────────
 
-/** 이름에서 검색어 위치를 찾아 [앞, 일치, 뒤] — 대소문자 무시. 없으면 [이름, '', '']. */
+/**
+ * 이름에서 검색어 위치를 찾아 [앞, 일치, 뒤] — 대소문자 무시. 없으면 [이름, '', ''].
+ * v2.911(B2): 통째로 없고 여러 낱말이면 처음 나오는 낱말 하나를 표시한다(나머지 낱말은 다른 칸에 있을 수 있다).
+ */
 export function highlightParts(text, needle) {
   const s = String(text ?? '');
   const n = String(needle ?? '').trim().toLowerCase();
   if (!n) return [s, '', ''];
-  const i = s.toLowerCase().indexOf(n);
-  return i < 0 ? [s, '', ''] : [s.slice(0, i), s.slice(i, i + n.length), s.slice(i + n.length)];
+  const low = s.toLowerCase();
+  let i = low.indexOf(n); let len = n.length;
+  if (i < 0 && /\s/.test(n)) {
+    for (const w of n.split(/\s+/)) { const j = w ? low.indexOf(w) : -1; if (j >= 0 && (i < 0 || j < i)) { i = j; len = w.length; } }
+  }
+  return i < 0 ? [s, '', ''] : [s.slice(0, i), s.slice(i, i + len), s.slice(i + len)];
 }
 
 const normSn = (v) => String(v ?? '').toLowerCase().replace(/[\s:_.-]/g, '');
@@ -189,7 +212,8 @@ export function shownSerial(row, mode, needle) {
 export function shownIp(row, needle) {
   const ips = Array.isArray(row?.ips) ? row.ips : [];
   const n = String(needle ?? '').trim().toLowerCase();
-  return (n && ips.find((ip) => ip.toLowerCase().startsWith(n))) || ips[0] || '';
+  // 완전 일치를 먼저(v2.911 B1 — 멀티홈 VM 이 10.1.0.1 로 맨 앞에 왔는데 메타에는 10.1.0.11 이 보였다: Chromium 실측)
+  return (n && (ips.find((ip) => ip.toLowerCase() === n) || ips.find((ip) => ip.toLowerCase().startsWith(n)))) || ips[0] || '';
 }
 
 /**

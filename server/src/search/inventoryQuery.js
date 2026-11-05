@@ -40,6 +40,7 @@ export const MIN_FIELD = 3;        // ip: · sn: 뒤 최소 글자
 export const PER_KIND = 5;         // 묶음당 기본 행 수
 export const PER_KIND_SINGLE = 30; // 종류 하나만 고른 경우
 export const TOTAL_MAX = 60;       // 응답 전체 상한
+export const WORDS_MAX = 6;        // 여러 낱말(AND) 검색에서 보는 낱말 수 상한
 
 /** 시리얼 정규화 — insights/serialLookup.js normKey 와 같은 규칙(대소문자 · 공백 · : _ . - 무시). */
 export const normSerial = (v) => String(v ?? '').toLowerCase().replace(/[\s:_.-]/g, '');
@@ -52,7 +53,7 @@ const PREFIX_RE = /^([a-z]{2,4}):/i;
  */
 export function parseQuery(raw) {
   const s0 = typeof raw === 'string' ? raw : '';
-  if (s0.length > QUERY_MAX) return { raw: '', mode: 'all', kind: null, text: '', needle: '', snNeedle: '', tooShort: false, tooLong: true };
+  if (s0.length > QUERY_MAX) return { raw: '', mode: 'all', kind: null, text: '', needle: '', snNeedle: '', words: null, tooShort: false, tooLong: true };
   let s = s0.trim();
   let mode = 'all'; let kind = null;
   const m = PREFIX_RE.exec(s);
@@ -64,7 +65,10 @@ export function parseQuery(raw) {
   const needle = s.toLowerCase();
   const min = mode === 'all' ? MIN_TEXT : MIN_FIELD;
   // 시리얼 정규화는 **요청당 한 번**(반증 M-2 — 행마다 다시 하면 구분자로 채운 254자 검색어가 14k 행에서 55~82ms, 5만 행에서 215ms 를 잡았다).
-  return { raw: s0, mode, kind, text: s, needle, snNeedle: normSerial(needle), tooShort: needle.length < min, tooLong: false };
+  // v2.911(B2): 공백으로 나뉜 낱말이 둘 이상이면 낱말마다 어느 칸에든 들어 있는 행도 찾는다(AND) — 낱말 · 낱말의 정규화도 여기서 한 번만.
+  const parts = mode === 'all' ? needle.split(/\s+/).filter(Boolean).slice(0, WORDS_MAX) : [];
+  const words = parts.length > 1 ? parts.map((w) => ({ w, sn: normSerial(w) })) : null;
+  return { raw: s0, mode, kind, text: s, needle, snNeedle: normSerial(needle), words, tooShort: needle.length < min, tooLong: false };
 }
 
 /**
@@ -78,14 +82,29 @@ export function matchTier(row, pq, { addrSearchable = true } = {}) {
   const sn = pq.snNeedle ?? normSerial(n);
   if (pq.mode === 'ip') return ipTier(row, n, addrSearchable);
   if (pq.mode === 'sn') return snTier(row, sn);
+  const whole = textTier(row, n, sn, addrSearchable);
+  if (whole != null || !pq.words) return whole;
+  // 여러 낱말: 낱말마다 어느 칸에든 있어야 한다(AND). 통째 일치보다 뒤(8).
+  for (const { w, sn: wsn } of pq.words) if (textTier(row, w, wsn, addrSearchable) == null) return null;
+  return 8;
+}
+
+/**
+ * 한 덩어리 검색어의 등급. v2.911(B1): **완전 일치가 맨 앞**(1) — 이름 · IP · 관리 주소 · 시리얼 중 하나가 검색어와 같으면.
+ * 예전에는 IP 일치가 등급 하나뿐이라 `10.1.0.1` 을 치면 그 IP 를 가진 VM 이 10.1.0.1x 대 VM 사이에 이름순으로 섞였다.
+ * 그 다음 이름 앞글자(2) › 이름 포함(3) › 보조 이름(4) › IP · 주소(5) › 시리얼(6) › 모델(7).
+ */
+function textTier(row, n, sn, addrSearchable) {
   const nameOk = addrSearchable || !row._nAddr;
-  if (nameOk && row._n.startsWith(n)) return 1;
-  if (nameOk && row._n.includes(n)) return 2;
-  if (row._a && (addrSearchable || !row._aAddr) && row._a.includes(n)) return 3;
-  const it = ipTier(row, n, addrSearchable);
-  if (it != null) return 4;
-  if (sn.length >= MIN_FIELD && snTier(row, sn) != null) return 5;
-  if (row._m && (addrSearchable || !row._mAddr) && row._m.includes(n)) return 6;
+  const snOk = sn.length >= MIN_FIELD;
+  if ((nameOk && row._n === n) || row._ip.includes(n) || (addrSearchable && row._addr && row._addr === n)
+    || (snOk && row._sn.includes(sn))) return 1;
+  if (nameOk && row._n.startsWith(n)) return 2;
+  if (nameOk && row._n.includes(n)) return 3;
+  if (row._a && (addrSearchable || !row._aAddr) && row._a.includes(n)) return 4;
+  if (ipTier(row, n, addrSearchable) != null) return 5;
+  if (snOk && snTier(row, sn) != null) return 6;
+  if (row._m && (addrSearchable || !row._mAddr) && row._m.includes(n)) return 7;
   return null;
 }
 

@@ -164,7 +164,7 @@
 | `llm.json` | 설정 | Local LLM (Ollama) settings for natural-language search. Stored in | ✅ | ✅ | ✅ | llm/config.js |
 | `log-analysis-stats.json` | 설정 | 이 포탈 로그의 **누적** 집계(v2.583). 설정 › 로그 › 로그 분석의 기본 원천. | ✅ |  |  | loganalysis/live.js |
 | `login-fails.ndjson` | 로그(NDJSON) | 로그인 실패 저장소(분석용) — 포탈 자체 실패 + 게스트 OS 조사 결과를 적재한다. | ✅ | ✅ | ✅ | security/loginStore.js |
-| `login-history.ndjson` | 로그(NDJSON) | 로그인 성공 기록(v2.911) — 설정 › 로그 › 최근 로그인 · 로그인 횟수. | ✅ | ✅ | ✅ | security/loginHistory.js |
+| `login-history.ndjson` | 로그(NDJSON) | 로그인 성공 기록(v2.912) — 설정 › 로그 › 최근 로그인 · 로그인 횟수. | ✅ | ✅ | ✅ | security/loginHistory.js |
 | `login-monitor.json` | 설정 | 로그인 실패 주기 모니터 — 일정 주기로 로그인 실패를 분석하고, 브루트포스(임계 이상 반복) 의심이 | ✅ |  | ✅ | security/loginMonitor.js |
 | `login-policy-users.txt` | 텍스트 | 세션 보안 설정 — 유휴 자동 로그아웃(분) 등. CONFIG_DIR/security-session.json. | ✅ | ✅ | ✅ | security/securitySettings.js |
 | `mail-auth-stops.json` | 설정 | 인증 실패(자격증명 거부) 주기 수집 정지 기록 — util/authGuard.js | ✅ |  | ✅ | mail/service.js |

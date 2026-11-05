@@ -40,7 +40,7 @@ import { lockReasonOf } from './views/toolVisibility.js';
 import Sidebar from './views/sidebar/Sidebar.jsx';
 import { Icon } from './views/sidebar/sidebarIcons.jsx';
 import { resolveMenu, retryDelayMs } from './views/sidebar/sideMenu.js';
-import { roleLabel, generatedAtText, SEARCH_PLACEHOLDER, SEARCH_TITLE } from './views/headerText.js'; // v2.727 헤더 C안
+import { roleLabel, generatedAtText, SEARCH_PLACEHOLDER, SEARCH_TITLE, cmdkLabel } from './views/headerText.js'; // v2.727 헤더 C안
 const Palette = lazy(() => import('./components/Palette.jsx')); // v2.727: 헤더 ⌘K(v2.747 에 version_4 에서 옮김)
 const MenuEditor = lazy(() => import('./views/sidebar/MenuEditor.jsx'));
 const ReleaseNotes = lazy(() => import('./views/ReleaseNotes.jsx'));
@@ -715,7 +715,7 @@ function Portal({ user, onLogout }) {
           <button type="button" className="tb-cmdk" onClick={() => setPaletteOn(true)} title={SEARCH_TITLE} aria-label={SEARCH_TITLE}>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7" /><path d="M20 20l-3.5-3.5" /></svg>
             <span className="tb-cmdk-text">{SEARCH_PLACEHOLDER}</span>
-            <kbd className="tb-cmdk-kbd">⌘K</kbd>
+            <kbd className="tb-cmdk-kbd">{cmdkLabel(typeof navigator !== 'undefined' ? navigator : null)}</kbd>
           </button>
         </div>
         <div className="status-pill">

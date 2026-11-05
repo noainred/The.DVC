@@ -6,7 +6,7 @@ import { loadAdConfig, saveAdConfig, testAd, adTransportStatus } from '../auth/a
 import { requireSettingsOwner, fullScopeOnlyWith } from './admin/shared.js';
 import { logAudit } from '../audit.js';
 import { recordPortalLoginFail } from '../security/loginStore.js';
-import { recordLoginSuccessEvent } from '../security/loginHistory.js'; // v2.911: 설정 › 로그 › 최근 로그인 · 로그인 횟수
+import { recordLoginSuccessEvent } from '../security/loginHistory.js'; // v2.912: 설정 › 로그 › 최근 로그인 · 로그인 횟수
 import { loadSessionSecurity, singleSessionRequired } from '../security/securitySettings.js';
 import { newSessionId, setActiveSession, clearActiveSessionIf } from '../auth/sessions.js';
 import { checkLoginAllowed, recordLoginFailure, recordLoginSuccess } from '../security/loginRateLimit.js';
