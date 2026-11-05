@@ -64,13 +64,15 @@ export default function Sidebar({
 
   const renderGroup = (g) => {
     const active = here.group === g.id;
-    const icon = iconNameOf(g.id);
+    // v2.891: 사용자가 만든 단독 메뉴(custom-n)는 그 항목의 기본 그룹 아이콘(iconOf — sideMenu.resolveMenu)으로
+    const icon = iconNameOf(g.iconOf || g.id);
     if (!g.children) {
       return (
         <button key={g.id} type="button" className={`sb-item sb-top${active ? ' active' : ''}`} aria-current={active ? 'page' : undefined}
           title={rail ? g.label : undefined} onClick={() => go(g, null)}>
           <Icon name={icon} className="sb-ico" />
           <span className="sb-label">{g.label}</span>
+          {isAdmin && g.adminOnly && <Icon name="lock" size={11} className="sb-lock" title="관리자 전용" />}
         </button>
       );
     }

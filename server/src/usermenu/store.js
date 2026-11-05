@@ -10,7 +10,9 @@
  *     users: { [userKey]: { menu, updatedAt, prev?: { menu, at, by, mode } } },    // 내 메뉴 · 직전 메뉴(강제 배포가 밀어낸 것 또는 저장이 덮은 것)
  *     distributed: { menu, at, by, mode, counts: { users, custom, forced } } | null, // 슈퍼 관리자가 배포한 기본 메뉴
  *     history: [ { at, by, mode, counts } … ] }                                      // 최근 배포 기록(최대 20)
- *   menu = { v: 1, groups: [ { id, label?, tab } | { id, label?, children: [ { tab } | { tool, seg? } ] } ] }
+ *   menu = { v: 1, groups: [ { id, label?, tab } | { id, label?, tool, seg? } | { id, label?, children: [ { tab } | { tool, seg? } ] } ] }
+ *   v2.891(사용자 요청 '단독 메뉴로 추가하는 기능'): 최상위 `{ id, tool, seg? }` = 특수 기능 도구를 그룹 없이 한 줄로 둔 **단독 메뉴**.
+ *   최상위 `{ id, tab }` 은 예전부터 단독이다. 같은 항목은 단독 · 그룹 어디에든 **한 곳에만**(앞의 것만 남김 — 같은 키 규칙).
  *
  * ── 규칙 ──────────────────────────────────────────────────────────────────────
  *  · 메뉴는 **주소를 가리킬 뿐**이다 — 탭 id(`#/<tab>`)와 특수 기능 도구 키(`#/tools/<k>`). 라벨은 저장하지 않는 것이 기본이고
@@ -183,6 +185,19 @@ export function normalizeMenu(input) {
     // v2.727(A-07): 상한을 넘으면 자르지 않고 거부한다(머리말·CLAUDE.md 계약 — 조용히 자르면 사용자는 잘린 줄 모른다).
     if (label.length > LIMITS.label) throw fail(400, `그룹 이름은 최대 ${LIMITS.label}자입니다(받은 ${label.length}자)`, 'groups');
     const tabTop = strField(g.tab, '탭 id', 'groups');
+    // v2.891: 단독 도구(최상위 tool) — 그룹 항목과 같은 형식 검사 · 같은 키(tool:<k>[/<seg>])로 중복을 센다
+    const toolTop = tabTop ? '' : strField(g.tool, '도구 키', 'groups');
+    if (toolTop) {
+      if (!ID_RE.test(toolTop)) throw fail(400, `도구 키 형식이 올바르지 않습니다: ${capStr(toolTop, 40)}`, 'groups');
+      const segTop = strField(g.seg, '주소 조각', 'groups');
+      if (segTop && !ID_RE.test(segTop)) throw fail(400, `주소 조각 형식이 올바르지 않습니다: ${capStr(segTop, 40)}`, 'groups');
+      const key = `tool:${toolTop}${segTop ? `/${segTop}` : ''}`;
+      if (seenItem.has(key)) { dedup += 1; continue; }
+      seenItem.add(key);
+      items += 1;
+      groups.push({ id, ...(label ? { label } : {}), tool: toolTop, ...(segTop ? { seg: segTop } : {}) });
+      continue;
+    }
     if (tabTop) {
       if (!ID_RE.test(tabTop)) throw fail(400, `탭 id 형식이 올바르지 않습니다: ${capStr(tabTop, 40)}`, 'groups');
       const key = `tab:${tabTop}`;
