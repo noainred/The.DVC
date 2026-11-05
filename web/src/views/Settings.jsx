@@ -54,9 +54,9 @@ const VeeamSettings = lazy(() => import('./VeeamSettings.jsx')); // v2.751 Veeam
 const BareosSettingsPage = lazy(() => import('./BareosSettingsPage.jsx')); // v2.878 Bareos 설정(예전 Backup › Bareos › 설정 탭)
 
 // 모든 하위 화면 정의(키→라벨→컴포넌트). 모든 항목은 group 키로 1단 묶음 하나에 속한다.
-// v2.903(사용자 요청 '설정에 메뉴가 너무 많아져서 스크롤바가 생긴다 — 재배치'): 1단이 19개(단독 항목 12개 + 그룹 7개)라 1,600px 대에서도
+// v2.904(사용자 요청 '설정에 메뉴가 너무 많아져서 스크롤바가 생긴다 — 재배치'): 1단이 19개(단독 항목 12개 + 그룹 7개)라 1,600px 대에서도
 //   가로 스크롤이 생겼다. 단독 항목을 없애고 1단을 9개 묶음(GROUP_ORDER)으로 줄였다 — 키(#/settings/<k>)는 하나도 바꾸지 않았다(딥링크 · 권한 문서).
-//   묶음 순서는 이 배열의 첫 등장 순서이고 server/test/settingsMenu2903.test.js 가 GROUP_ORDER 와 대조한다(같은 묶음은 붙어 있어야 한다).
+//   묶음 순서는 이 배열의 첫 등장 순서이고 server/test/settingsMenu2904.test.js 가 GROUP_ORDER 와 대조한다(같은 묶음은 붙어 있어야 한다).
 const SUB = [
   // --- 인프라 등록: 모니터링할 대상(법인 · vCenter · NSX · Horizon · iDRAC) ---
   { k: 'datacenter-admin', label: 'DataCenter(법인)', C: DatacenterAdmin, group: 'infra' },
@@ -65,7 +65,7 @@ const SUB = [
   { k: 'nsx-admin', label: 'NSX 관리', C: NsxAdmin, group: 'infra' },
   { k: 'horizon-admin', label: 'Horizon 연결 서버', C: HorizonAdmin, group: 'infra' }, // v2.685: 라이선스 만료 도구 안에만 있던 등록을 설정에도
   { k: 'idrac-admin', label: 'iDRAC 서버 등록', C: IdracAdmin, group: 'infra' },
-  { k: 'idrac-scan-log', label: 'iDRAC 스캔 로그', C: IdracScanLog, group: 'infra' }, // v2.903: '스캔 로그' → 묶음이 바뀌어 무엇의 로그인지 이름에 넣었다
+  { k: 'idrac-scan-log', label: 'iDRAC 스캔 로그', C: IdracScanLog, group: 'infra' }, // v2.904: '스캔 로그' → 묶음이 바뀌어 무엇의 로그인지 이름에 넣었다
   // --- 백업: VM 백업 서버(Veeam · Bareos) + 포탈 자체 백업 ---
   { k: 'veeam', label: 'Veeam 백업 서버', C: VeeamSettings, group: 'backups' }, // v2.751 — VM 및 폴더 'Veeam 백업 VM 표시' 의 출처
   // v2.878(사용자 요청 'Bareos 의 설정을 전체 메뉴 설정으로 — B안'): Backup › Bareos 탭 줄의 '설정' 을 여기로 옮겼다. 키 'bareos' 는 bareosViewText BAREOS_SETTINGS_KEY 와 같다.
@@ -126,8 +126,8 @@ const SUB = [
   { k: 'about', label: 'About', C: About, group: 'system' },
 ];
 
-// 1단 묶음 9개(v2.903). 라벨에 이모지를 넣지 않는다(폭을 줄이고 1,440px 사이드바 펼침에서도 한 줄). 화면 문구 · 딥링크 안내의 메뉴 경로
-// ('설정 › 수집 › …')는 이 라벨을 쓴다 — 라벨을 바꾸면 server/test/settingsMenu2903.test.js 가 옛 경로 문구를 찾아낸다.
+// 1단 묶음 9개(v2.904). 라벨에 이모지를 넣지 않는다(폭을 줄이고 1,440px 사이드바 펼침에서도 한 줄). 화면 문구 · 딥링크 안내의 메뉴 경로
+// ('설정 › 수집 › …')는 이 라벨을 쓴다 — 라벨을 바꾸면 server/test/settingsMenu2904.test.js 가 옛 경로 문구를 찾아낸다.
 const GROUP_ORDER = ['infra', 'backups', 'collect', 'edge', 'usercontrol', 'security', 'notify', 'log', 'system'];
 const GROUPS = {
   infra: { label: '인프라 등록', desc: '모니터링할 대상을 등록하는 곳 — 법인(DataCenter) · vCenter 등록과 연결 테스트 · NSX · Horizon 연결 서버 · iDRAC 서버 등록과 스캔 로그.' },
@@ -148,7 +148,7 @@ const DEFAULT_SUB = 'vcenter-admin';
 const SUB_KEYS = SUB.map((s) => s.k);
 
 
-/** 설정 — 관리자용 하위 메뉴. 1단 묶음 9개 → 2단 항목(v2.903). */
+/** 설정 — 관리자용 하위 메뉴. 1단 묶음 9개 → 2단 항목(v2.904). */
 export default function Settings({ initialSub }) {
   // 하위 탭을 URL(#/settings/<키>)에 싣는다(v2.438) — 새로고침해도 보던 화면이 유지되고,
   // 하위 항목이 30개가 넘어 매번 다시 찾아 들어가야 했던 불편이 사라진다. 링크 공유도 된다.
@@ -167,7 +167,7 @@ export default function Settings({ initialSub }) {
   return (
     <>
       <div className="section-title" style={{ marginTop: 0 }}>⚙️ 설정</div>
-      {/* v2.903: 1단은 9개라 1,440px(사이드바 펼침)에서 한 줄이다. 좁은 화면은 가로 스크롤 대신 줄바꿈(.vcd-views 의 nowrap · overflow 를 여기서만 끈다). */}
+      {/* v2.904: 1단은 9개라 1,440px(사이드바 펼침)에서 한 줄이다. 좁은 화면은 가로 스크롤 대신 줄바꿈(.vcd-views 의 nowrap · overflow 를 여기서만 끈다). */}
       <div className="vcd-views" style={{ marginBottom: activeGroup ? 8 : 16, flexWrap: 'wrap', overflowX: 'visible' }}>
         {topItems.map((t) => {
           const active = activeGroup === t.key;

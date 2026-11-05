@@ -59,7 +59,7 @@ describe('② Settings.jsx — 슈퍼 관리자 전용 항목', () => {
     // v2.878: Bareos 백업 서버의 show(도구 권한)도 같은 필터가 본다 — superOnly 판정은 그대로 앞에 있어야 한다
     expect(SETTINGS).toMatch(/const visibleSubs = \(\) => SUB\.filter\(\(s\) => \(!s\.superOnly \|\| isSuperAdminUser\(\)\) && \(!s\.show \|\| s\.show\(\)\)\)/);
     expect(SETTINGS).toMatch(/const groupChildren = \(g\) => visibleSubs\(\)\.filter/);
-    // v2.903: 1단은 묶음 9개(GROUP_ORDER)이고 '보이는 하위가 있는 묶음' 만 그린다 — groupChildren(= visibleSubs)을 거친다.
+    // v2.904: 1단은 묶음 9개(GROUP_ORDER)이고 '보이는 하위가 있는 묶음' 만 그린다 — groupChildren(= visibleSubs)을 거친다.
     expect(SETTINGS).toMatch(/GROUP_ORDER\.filter\(\(g\) => groupChildren\(g\)\.length > 0\)/);
     // SUB 를 직접 훑어 탭을 만드는 곳이 남아 있으면 superOnly 가 새는 길이 된다.
     expect(SETTINGS).not.toMatch(/for \(const s of SUB\)/);
