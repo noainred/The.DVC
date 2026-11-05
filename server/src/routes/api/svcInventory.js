@@ -652,7 +652,8 @@ export function registerSvcInventory(api) {
         tagAmbiguous: (() => { const l = q.tagAmbiguous.filter(inCorp); return { n: l.length, items: mask(l.slice(0, 200)) }; })(),
         ruleOverlap: (() => { const l = q.ruleOverlap.filter(inCorp); return { n: l.length, items: mask(l.slice(0, 200)) }; })(),
         // 옛 키로 저장된 고정(R15) — 옛 키(aliasKey)도 베어메탈이면 토큰으로
-        aliasPins: (() => { const l = q.aliasPins.filter(inCorp); return { n: l.length, corps: [...new Set(l.map((x) => x.corp))], items: mask(l.slice(0, 200)).map((x) => ({ ...x, aliasKey: pubKey(x.aliasKey, hide) })) }; })(),
+        // movable = '새 키로 옮기기' 가 실제로 무언가 할 법인(옛 키만 있음·중복) — 충돌만 남은 법인에는 버튼을 열지 않는다(6차 남긴 것 ③)
+        aliasPins: (() => { const l = q.aliasPins.filter(inCorp); return { n: l.length, corps: [...new Set(l.map((x) => x.corp))], movable: [...new Set(l.filter((x) => x.state === 'alias' || x.state === 'dup').map((x) => x.corp))], items: mask(l.slice(0, 200)).map((x) => ({ ...x, aliasKey: pubKey(x.aliasKey, hide) })) }; })(),
         // 판정 보류(5차 R10): 언제부터(이 포탈 프로세스가 처음 본 시각 — 재시작하면 다시 센다) · 무엇이 막혔는지. 출처 문구는 관리자 판본만(장비·수집 서버 이름).
         // 유령·보류는 앞 GHOST_SHOW 건만 싣고 전체 개수·법인별 개수를 따로 준다(6차 8 — 실측: 상한 없이 고정 5만 건이면 응답 4.8MB). 정리 버튼은 법인별 개수로 연다.
         ...(() => {
