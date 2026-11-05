@@ -15,7 +15,7 @@ const { buildInventory } = await import('../src/servicemap/build.js');
 const sm = await import('../src/servicemap/store.js');
 const registry = await import('../src/idrac/registry.js');
 const { store } = await import('../src/store.js');
-const { registerSvcInventory, keyResolverFor, pubKey } = await import('../src/routes/api/svcInventory.js');
+const { registerSvcInventory, keyResolverFor, pubKey, stripTag } = await import('../src/routes/api/svcInventory.js');
 
 const S = (id, name) => ({ id, name, path: '', tier: 2, owner: '', note: '', globalId: '' });
 const corpOf = (c = {}) => ({ folders: [], services: [], folderRules: [], aliases: [], nameRules: [], tagEnabled: false, ...c });
@@ -105,18 +105,70 @@ test('R7: 토큰 되돌리기는 후보 안에서만(다른 법인 키의 토큰
   assert.equal(keyResolverFor(false, [])('st:aaa'), 'st:aaa', '전체 범위는 그대로');
 });
 
-test('R15: 키 등급이 오르면 옛 키 고정을 승계한다(유령 아님 · 옮기기 큐) · 반대 방향(태그를 잠시 못 읽음)은 판정 보류', () => {
-  const map = { corps: { A: corpOf({ services: [S('s1', 'ERP')] }) } };
-  const vm = { key: 'iu:A:u1', aliasKeys: ['vm:A:vm-1'], kind: 'vm', corp: 'A', name: 'v1', folderPath: '/' };
-  const pins = { 'vm:A:vm-1': { serviceId: 's1', corp: 'A', by: 'x', at: 1 }, 'st:zz9gone': { serviceId: 's1', corp: 'A', by: 'x', at: 1 }, 'st:dead1': { serviceId: 's1', corp: 'A', by: 'x', at: 1 } };
+test('R15: 키 등급이 오르면 옛 키 고정을 승계한다(유령 아님 · 옮기기 큐) · VM 식별 키를 못 읽는 법인의 iu: 고정은 판정 보류 · 드리프트 행은 실제 고정의 사람·시각', () => {
+  const map = { corps: { A: corpOf({ services: [S('s1', 'ERP'), S('s2', 'MES')], folderRules: [{ prefix: '/ERP', serviceId: 's2' }] }) } };
+  const vm = { key: 'iu:A:u1', aliasKeys: ['vm:A:vm-1'], kind: 'vm', corp: 'A', name: 'v1', folderPath: '/ERP' };
+  const pins = { 'vm:A:vm-1': { serviceId: 's1', corp: 'A', by: 'kim', at: 7 }, 'st:zz9gone': { serviceId: 's1', corp: 'A', by: 'x', at: 1 }, 'iu:A:gone': { serviceId: 's1', corp: 'A', by: 'x', at: 1 }, 'iu:B:gone': { serviceId: 's1', corp: 'B', by: 'x', at: 1 } };
   const r = resolveMember(vm, buildIndex(map), {}, pins);
   assert.equal(r.src, 'pin'); assert.equal(r.serviceId, 's1'); assert.equal(r.pinKey, 'vm:A:vm-1');
-  const other = resolveMember({ ...vm, corp: 'B' }, buildIndex(map), {}, pins);
-  assert.equal(other.src, 'none', '다른 법인의 별칭 고정은 쓰지 않는다');
-  const inv = buildInventory({ members: [vm], map, pins, fleetLive: new Set(['zz9gone']) });
+  const inv = buildInventory({ members: [vm], map, pins, uuidUnreadCorps: new Set(['A']) });
   assert.deepEqual(inv.queues.aliasPins.map((x) => [x.key, x.aliasKey]), [['iu:A:u1', 'vm:A:vm-1']]);
-  assert.deepEqual(inv.queues.ghosts.map((x) => x.key), ['st:dead1'], '별칭 고정은 유령이 아니다 · 함대가 아는 태그도 유령이 아니다');
-  assert.deepEqual(inv.queues.ghostsHeld.map((x) => [x.key, x.held]), [['st:zz9gone', 'key-changed']]);
+  assert.deepEqual(inv.queues.drift.map((x) => [x.key, x.pin.by, x.pin.at]), [['iu:A:u1', 'kim', 7]], '별칭 고정의 드리프트 행도 고정한 사람·시각(4차 반증 6)');
+  assert.deepEqual(inv.queues.ghosts.map((x) => x.key).sort(), ['iu:B:gone', 'st:zz9gone'], "별칭 고정은 유령이 아니다 · st: 고정은 '함대가 안다' 로 붙잡지 않는다(4차 반증 2 — ESXi 가 된 서버)");
+  assert.deepEqual(inv.queues.ghostsHeld.map((x) => [x.key, x.held]), [['iu:A:gone', 'uuid-unread']], 'instanceUuid 를 못 읽는 법인만 보류(4차 반증 5)');
+  const otherCorp = resolveMember({ ...vm, corp: 'B', key: 'iu:B:u9' }, buildIndex(map), {}, pins);
+  assert.equal(otherCorp.src, 'none', '다른 법인의 별칭 고정은 쓰지 않는다');
+});
+
+test('R7: 이름에 서비스태그가 부분 문자열로 들어 있으면 그 부분을 가린다(4차 반증 3) — 찾기·CSV 도', async () => {
+  assert.equal(stripTag('idrac-ABC1234', 'abc1234'), 'idrac-•••');
+  assert.equal(stripTag('ABC1234-abc1234', 'ABC1234'), '•••-•••');
+  assert.equal(stripTag('web01', 'abc1234'), 'web01');
+  registry.importServers([{ id: 'bm-9', name: 'idrac-ABC1234', host: 'https://192.0.2.61', username: 'root', password: 'x', serviceTag: 'ABC1234', vcenterId: 'vc-a' }], 'replace');
+  sm._resetForTest();
+  fs.writeFileSync(path.join(tmp, 'service-map.json'), JSON.stringify({ rev: 0, globals: [], settings: { tagCategory: '' }, corps: { 'vc-a': corpOf({ services: [S('s1', 'ERP')] }) } }));
+  fs.writeFileSync(path.join(tmp, 'service-map-pins.json'), JSON.stringify({ rev: 0, pins: {} }));
+  const prev = store.snapshot;
+  try {
+    store.snapshot = snapOf(131);
+    const m = await call('GET /tools/svc-inventory/members', { user: SCOPED, query: { corp: 'vc-a', unassigned: '1' } });
+    assert.equal(m.body.members[0].name, 'idrac-•••'); assert.equal(/abc1234/i.test(JSON.stringify(m.body)), false);
+    const c = await call('GET /tools/svc-inventory/candidates', { user: SCOPED, query: { kind: 'bm', corp: 'vc-a', q: 'abc12' } });
+    assert.equal(c.body.items.length, 0);
+    const csv = await call('GET /tools/svc-inventory.csv', { user: SCOPED });
+    assert.equal(/abc1234/i.test(String(csv.body)), false);
+    const full = await call('GET /tools/svc-inventory/members', { query: { corp: 'vc-a', unassigned: '1' } });
+    assert.equal(full.body.members[0].name, 'idrac-ABC1234', '전체 범위는 그대로');
+  } finally { store.snapshot = prev; }
+});
+
+test('R15: 베어메탈 — 서비스태그가 나중에 읽혀도(fl: → st:) 그 전 고정을 실제 라우트에서 승계한다(4차 반증 1: 예전에는 별칭이 맞지 않아 유령) · 같은 키 두 번 정리는 한 번', async () => {
+  registry.importServers([{ id: 'bm-7', name: 'rack7-db', host: 'https://192.0.2.62', username: 'root', password: 'x', vcenterId: 'vc-a' }], 'replace');
+  sm._resetForTest();
+  fs.writeFileSync(path.join(tmp, 'service-map.json'), JSON.stringify({ rev: 0, globals: [], settings: { tagCategory: '' }, corps: { 'vc-a': corpOf({ services: [S('s1', 'ERP')] }) } }));
+  fs.writeFileSync(path.join(tmp, 'service-map-pins.json'), JSON.stringify({ rev: 0, pins: {} }));
+  const prev = store.snapshot;
+  try {
+    store.snapshot = snapOf(141);
+    const m1 = await call('GET /tools/svc-inventory/members', { query: { corp: 'vc-a', unassigned: '1' } });
+    const flKey = m1.body.members[0].key; assert.match(flKey, /^fl:/);
+    const set = await call('POST /tools/svc-inventory/op', { body: { op: 'pins.set', corp: 'vc-a', keys: [flKey], serviceId: 's1' } });
+    assert.deepEqual(set.body.result, { changed: 1, skipped: 0 });
+    // 서비스태그가 읽혔다 — 키가 st: 로 오른다
+    registry.importServers([{ id: 'bm-7', name: 'rack7-db', host: 'https://192.0.2.62', username: 'root', password: 'x', serviceTag: 'NEW7TAG', vcenterId: 'vc-a' }], 'replace');
+    store.snapshot = snapOf(142);
+    const m2 = await call('GET /tools/svc-inventory/members', { query: { service: 's1' } });
+    assert.equal(m2.statusCode, 200, JSON.stringify(m2.body));
+    assert.deepEqual(m2.body.members.map((x) => [x.key, x.src]), [['st:new7tag', 'pin']], '옛 fl: 고정이 소속을 정한다');
+    const q = await call('GET /tools/svc-inventory/queues', { query: { corp: 'vc-a' } });
+    assert.equal(q.body.ghosts.length, 0, '유령이 아니다'); assert.equal(q.body.aliasPins.n, 1); assert.deepEqual(q.body.aliasPins.corps, ['vc-a']);
+    const rk = await call('POST /tools/svc-inventory/op', { body: { op: 'pins.rekey', corp: 'vc-a' } });
+    assert.deepEqual(rk.body.result, { moved: 1, dropped: 0 }); assert.deepEqual(Object.keys(sm.getPins().pins), ['st:new7tag']);
+    // 같은 유령 키를 두 번 보내도 건너뜀으로 세지 않는다(4차 반증 7)
+    sm.mutatePins((d) => { d.pins['st:ghost7'] = { serviceId: 's1', corp: 'vc-a', by: 'a', at: 1 }; return { result: {} }; });
+    const pr = await call('POST /tools/svc-inventory/op', { body: { op: 'ghosts.prune', corp: 'vc-a', keys: ['st:ghost7', 'st:ghost7'] } });
+    assert.deepEqual(pr.body.result, { removed: 1, skipped: 0 });
+  } finally { store.snapshot = prev; }
 });
 
 test('R15: 새 키로 옮기기(pins.rekey) · 고정 쓰기는 별칭을 새 키로 옮긴다 · 별칭 고정을 지우면 정말 지워진다', async () => {

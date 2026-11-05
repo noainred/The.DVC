@@ -77,7 +77,7 @@ function finishStat(st, hostByKey) {
  * @param {{members:object[], map:object, pins:object, hostByKey:Map, allowed:Set|null, unreadCorps:Set, bmBlocked:boolean,
  *          corpNames:Map, scanEntries?:Map, adminView?:boolean}} input
  */
-export function buildInventory({ members = [], map, pins = {}, hostByKey = new Map(), allowed = null, unreadCorps = new Set(), bmBlocked = false, fleetLive = null, corpNames = new Map(), scanEntries = new Map(), adminView = true, knownCorps = null } = {}) {
+export function buildInventory({ members = [], map, pins = {}, hostByKey = new Map(), allowed = null, unreadCorps = new Set(), bmBlocked = false, uuidUnreadCorps = new Set(), corpNames = new Map(), scanEntries = new Map(), adminView = true, knownCorps = null } = {}) {
   const idx = buildIndex(map);
   const ctx = { tagCategory: map?.settings?.tagCategory || '' };
   const inScope = (vc) => (allowed ? !!vc && allowed.has(vc) : true);
@@ -146,7 +146,7 @@ export function buildInventory({ members = [], map, pins = {}, hostByKey = new M
   const unlinked = services.filter((s) => !s.globalId || !globalById.has(s.globalId))
     .map((s) => ({ id: s.id, corp: s.corp, name: s.name, suggest: globalNames.get(lc(s.name)) || null, n: s.stat.n.total }));
 
-  return { resolved, corps, services, noCorp, global: { globals, cells, unlinked }, queues: buildQueues({ members, resolved, pins, allowed, unreadCorps, bmBlocked, fleetLive, idx, scanEntries, adminView, knownCorps }) };
+  return { resolved, corps, services, noCorp, global: { globals, cells, unlinked }, queues: buildQueues({ members, resolved, pins, allowed, unreadCorps, bmBlocked, uuidUnreadCorps, idx, scanEntries, adminView, knownCorps }) };
 }
 
 /**
@@ -154,7 +154,7 @@ export function buildInventory({ members = [], map, pins = {}, hostByKey = new M
  * ⚠ 유령 판정은 **읽지 못한 출처를 막는다**(4차 반증 5): 그 법인 vCenter 를 지금 못 읽거나(unreadCorps) 베어메탈 출처를 못 읽으면
  *   (bmBlocked — 등록부 손상·엣지 만료 등) 그 고정은 유령이 아니라 '판정 보류' 다. v2.783 P-B3 와 같은 사고 유형.
  */
-export function buildQueues({ members = [], resolved, pins = {}, allowed = null, unreadCorps = new Set(), bmBlocked = false, fleetLive = null, idx, scanEntries = new Map(), adminView = true, knownCorps = null }) {
+export function buildQueues({ members = [], resolved, pins = {}, allowed = null, unreadCorps = new Set(), bmBlocked = false, uuidUnreadCorps = new Set(), idx, scanEntries = new Map(), adminView = true, knownCorps = null }) {
   const inScope = (vc) => (allowed ? !!vc && allowed.has(vc) : true);
   const groups = new Map();
   const unmapped = new Map();
@@ -164,7 +164,7 @@ export function buildQueues({ members = [], resolved, pins = {}, allowed = null,
     if (!inScope(m.corp)) continue;
     const r = resolved.get(m.key);
     if (r.pinMismatch) mismatch.push({ key: m.key, name: m.name, kind: m.kind, corp: m.corp, pinCorp: r.pinMismatch.corp, serviceId: r.pinMismatch.serviceId });
-    if (r.drift) drift.push({ key: m.key, name: m.name, kind: m.kind, corp: m.corp, pin: { serviceId: r.serviceId, by: pins[m.key]?.by || '', at: pins[m.key]?.at || 0 }, auto: { serviceId: r.auto.serviceId, src: r.auto.src, via: r.auto.via || '' },
+    if (r.drift) drift.push({ key: m.key, name: m.name, kind: m.kind, corp: m.corp, pin: { serviceId: r.serviceId, by: pins[r.pinKey || m.key]?.by || '', at: pins[r.pinKey || m.key]?.at || 0 }, auto: { serviceId: r.auto.serviceId, src: r.auto.src, via: r.auto.via || '' },
       ...(r.driftChanged ? { changed: r.driftChanged.legacy ? { legacy: true } : { reviewedAuto: r.driftChanged.reviewedAuto } } : {}) });
     // 불필요한 고정 — 단 '모호한 자동 판정을 사람이 확인한 고정'(태그 모호·규칙 겹침)은 불필요하지 않다: 지우면 다시 모호로 돌아간다(3차 반증 4 — 순환)
     if (r.src === 'pin' && r.redundant && !r.auto?.tagAmbiguous && !r.auto?.ruleOverlap) redundant.push({ key: m.key, name: m.name, kind: m.kind, corp: m.corp, serviceId: r.serviceId, via: r.auto.src });
@@ -217,9 +217,10 @@ export function buildQueues({ members = [], resolved, pins = {}, allowed = null,
     if (knownCorps && !knownCorps.has(p.corp)) { orphaned.push({ key: k, serviceId: p.serviceId, corp: p.corp }); continue; }
     const svcName = idx?.get(p.corp)?.svcById.get(p.serviceId)?.name || '';
     const isBm = k.startsWith('st:') || k.startsWith('fl:');
-    // 서비스태그 고정인데 그 태그를 함대가 아직 안다(그 구성원이 잠시 fl: 키로 내려감) — 지우면 태그가 다시 읽힐 때 고정이 사라져 있다(R15 반대 방향)
-    const keyChanged = k.startsWith('st:') && fleetLive instanceof Set && fleetLive.has(k.slice(3));
-    const why = unreadCorps.has(p.corp) ? 'corp-unread' : (isBm && bmBlocked ? 'bm-source-unread' : keyChanged ? 'key-changed' : '');
+    // VM 식별 키(instanceUuid)를 못 읽는 법인(REST 폴백 수집 등)의 iu: 고정 — 그 VM 이 정말 없는지 모른다(4차 반증 5).
+    // ⚠ 4차 반증 2: 'st: 태그를 함대가 아직 안다' 로 보류하던 것은 되돌렸다 — 함대 키 집합에 ESXi 호스트 태그가 들어 있어 가상화 호스트가 된 서버의 고정을 영원히 붙잡았다.
+    const uuidUnread = k.startsWith('iu:') && uuidUnreadCorps instanceof Set && uuidUnreadCorps.has(p.corp);
+    const why = unreadCorps.has(p.corp) ? 'corp-unread' : (isBm && bmBlocked ? 'bm-source-unread' : uuidUnread ? 'uuid-unread' : '');
     (why ? held : ghosts).push({ key: k, serviceId: p.serviceId, serviceName: svcName, corp: p.corp, by: p.by, at: p.at, ...(why ? { held: why } : {}) });
   }
   return {

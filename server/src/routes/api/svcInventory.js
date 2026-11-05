@@ -70,7 +70,10 @@ export function bmKeyOf(b) {
 export function vmAliasKeys(vm, keyKind) { return keyKind === 'instanceUuid' && t(vm?.id) ? [`vm:${t(vm.id)}`] : []; }
 export function bmAliasKeys(b, keyKind) {
   if (keyKind !== 'serviceTag') return [];
-  const f = lc(b?.fleetId || b?.serverId || b?.name);
+  // 태그가 없을 때의 fleetId — 함대 분류(`insights/fleetInventory.js`)와 같은 규칙: 일반 행 norm(serverId) · ESXi 호스트 행(host:) norm(name).
+  // ⚠ 4차 반증 1: 예전에는 lc(fleetId) 로 만들었는데 태그가 읽힌 뒤 fleetId 는 태그라서 옛 키와 절대 맞지 않았다(승계가 동작하지 않음).
+  const sid = t(b?.serverId);
+  const f = sid.startsWith('host:') ? lc(b?.name) : lc(sid);
   return f ? [`fl:${crypto.createHash('sha1').update(f).digest('hex').slice(0, 16)}`] : [];
 }
 /** Bareos 원장 → VM 백업 칸(순수). undefined = Bareos 미사용 · null = 원장 못 읽음 · 'ok' 24h 내 성공 · 'fail' 실패/지연 · 'none' 잡 없음. */
@@ -312,15 +315,17 @@ async function gatherNowInner(snap, tagCategory) {
     const x = judged.get(`${vc}|virt|${lc(h.name)}`) || null;
     hostByKey.set(hostKeyOf(vc, h.name), { name: t(h.name), corp: vc, serviceTag: t(h.serviceTag), usage: x ? { state: x.state, cpuPct: x.cpuPct, memPct: x.memPct } : null, faults: faultsOf(h.serviceTag), connectionState: t(h.connectionState) });
   }
-  let bmBlocked = false; let bmBlockedSources = []; let fleetLive = null;
+  let bmBlocked = false; let bmBlockedSources = [];
   try {
     const fk = fleetKeySources(snap);
-    // 함대가 아직 아는 키(서비스태그 등 소문자) — 서비스태그를 잠시 못 읽어 `st:` 고정의 구성원이 `fl:` 로 내려간 경우 유령이 아니라 판정 보류(R15 반대 방향)
-    fleetLive = fk.live instanceof Set ? fk.live : null;
     bmBlockedSources = (fk.unreadable || []).filter((u) => u.source !== 'vcenter').slice(0, 20).map((u) => ({ source: t(u.source), reason: t(u.reason).slice(0, 200) }));
     bmBlocked = bmBlockedSources.length > 0;
   } catch (e) { bmBlocked = true; bmBlockedSources = [{ source: 'fleet-keys', reason: `베어메탈 출처 목록을 만들지 못했습니다(${String(e?.message || e).slice(0, 120)})` }]; }
-  return { members, hostByKey, unreadCorps, bmBlocked, bmBlockedSources, fleetLive, corpNames, scanEntries, faultsMeta, backupMeta, bareosCorps, sourceErrors, at: now };
+  // VM 식별 키(instanceUuid)를 못 읽는 법인 — VM 이 있는데 instanceUuid 가 하나도 없다(REST 폴백 수집 등). 그 법인의 iu: 고정은 유령이 아니라 판정 보류(4차 반증 5).
+  const vmTotal = new Map(); const vmUuid = new Map();
+  for (const vm of snap?.vms || []) { if (!vm || vm.template) continue; const vc = t(vm.vcenterId); vmTotal.set(vc, (vmTotal.get(vc) || 0) + 1); if (t(vm.instanceUuid)) vmUuid.set(vc, (vmUuid.get(vc) || 0) + 1); }
+  const uuidUnreadCorps = new Set([...vmTotal.keys()].filter((vc) => !vmUuid.get(vc)));
+  return { members, hostByKey, unreadCorps, bmBlocked, bmBlockedSources, uuidUnreadCorps, corpNames, scanEntries, faultsMeta, backupMeta, bareosCorps, sourceErrors, at: now };
 }
 
 // ───────── 권한 ─────────
@@ -385,7 +390,7 @@ async function inventoryFor(req, snap) {
   const hit = _invMemo.get(key);
   if (hit && now - hit.at < INV_MEMO_MS) { _invStats.hits += 1; return { st, g, inv: hit.inv, allowed, admin }; }
   _invStats.misses += 1;
-  const inv = buildInventory({ members: g.members, map: st.map, pins: st.pins, hostByKey: g.hostByKey, allowed, unreadCorps: g.unreadCorps, bmBlocked: g.bmBlocked, fleetLive: g.fleetLive, corpNames: g.corpNames, scanEntries: g.scanEntries, adminView: admin, knownCorps: known });
+  const inv = buildInventory({ members: g.members, map: st.map, pins: st.pins, hostByKey: g.hostByKey, allowed, unreadCorps: g.unreadCorps, bmBlocked: g.bmBlocked, uuidUnreadCorps: g.uuidUnreadCorps, corpNames: g.corpNames, scanEntries: g.scanEntries, adminView: admin, knownCorps: known });
   for (const [k, v] of _invMemo) if (now - v.at >= INV_MEMO_MS) _invMemo.delete(k);
   while (_invMemo.size >= INV_MEMO_MAX) _invMemo.delete(_invMemo.keys().next().value);
   _invMemo.set(key, { at: now, inv });
@@ -460,8 +465,19 @@ const maskName = (m, admin, hide = false) => {
   if (!admin && m.kind === 'bm' && m.nameIsAddr) return maskedAddressName(m.name);
   // 이름이 곧 서비스태그인 베어메탈(호스트 이름 없이 등록) — 범위 계정 판본에서는 이름도 가린다(R7)
   if (hide && m.kind === 'bm' && m.serviceTag && lc(m.name) === lc(m.serviceTag)) return `서버 ${pubKey(m.key, true).slice(-6)}`;
+  // 이름에 태그가 들어 있으면(iDRAC 기본 이름 'idrac-<태그>' 등) 그 부분만 가린다(4차 반증 3). 정규식 없이 선형으로(외부 입력).
+  if (hide && m.kind === 'bm' && t(m.serviceTag).length >= 4) return stripTag(m.name, m.serviceTag);
   return m.name;
 };
+
+/** 이름에서 태그(대소문자 무시)를 '•••' 로 바꾼다 — 길이를 먼저 자르고 indexOf 로(외부 입력에 정규식 금지). */
+export function stripTag(name, tag) {
+  const n = String(name ?? '').slice(0, 256); const tg = lc(tag);
+  if (!tg) return n;
+  const low = n.toLowerCase(); let out = ''; let i = 0;
+  for (let j = low.indexOf(tg); j >= 0; j = low.indexOf(tg, i)) { out += `${n.slice(i, j)}•••`; i = j + tg.length; }
+  return out + n.slice(i);
+}
 
 function memberRow(m, r, admin, hide = false) {
   return {
@@ -596,7 +612,7 @@ export function registerSvcInventory(api) {
         tagAmbiguous: (() => { const l = q.tagAmbiguous.filter(inCorp); return { n: l.length, items: mask(l.slice(0, 200)) }; })(),
         ruleOverlap: (() => { const l = q.ruleOverlap.filter(inCorp); return { n: l.length, items: mask(l.slice(0, 200)) }; })(),
         // 옛 키로 저장된 고정(R15) — 옛 키(aliasKey)도 베어메탈이면 토큰으로
-        aliasPins: (() => { const l = q.aliasPins.filter(inCorp); return { n: l.length, items: mask(l.slice(0, 200)).map((x) => ({ ...x, aliasKey: pubKey(x.aliasKey, hide) })) }; })(),
+        aliasPins: (() => { const l = q.aliasPins.filter(inCorp); return { n: l.length, corps: [...new Set(l.map((x) => x.corp))], items: mask(l.slice(0, 200)).map((x) => ({ ...x, aliasKey: pubKey(x.aliasKey, hide) })) }; })(),
         // 판정 보류(5차 R10): 언제부터(이 포탈 프로세스가 처음 본 시각 — 재시작하면 다시 센다) · 무엇이 막혔는지. 출처 문구는 관리자 판본만(장비·수집 서버 이름).
         ghosts: maskKeyOnly(q.ghosts.filter(inCorp)), ghostsHeld: maskKeyOnly(heldWithSince(q.ghostsHeld, !allowed).filter(inCorp)), orphaned: q.orphaned.filter(inCorp).length, bmBlocked: g.bmBlocked,
         // 문구(장비·수집 서버 이름)는 **전체 범위** 관리자만 — 범위가 지정된 관리자에게 다른 법인 출처 이름을 싣지 않는다(3차 반증 2 · sourceErrors 와 같은 기준)
@@ -823,8 +839,9 @@ export function registerSvcInventory(api) {
         // 옛 화면(키 없이 개수만 · 아무것도 없이)도 받는다: expect 는 정수만, 다르면 409.
         let targets = ghostKeys; let skipped = 0;
         if (Array.isArray(b.keys)) {
-          const asked = [...new Set(b.keys.slice(0, 5000).map((k) => resolveGhost(t(k))).filter(Boolean))];
-          skipped = Math.min(5000, b.keys.length) - asked.length;   // 되돌리지 못한 토큰
+          const raw = [...new Set(b.keys.slice(0, 5000).map((k) => t(k)).filter(Boolean))];   // 같은 키 두 번은 한 번(4차 반증 7)
+          const asked = [...new Set(raw.map(resolveGhost).filter(Boolean))];
+          skipped = raw.length - asked.length;   // 되돌리지 못한 토큰
           targets = new Set(asked.filter((k) => ghostKeys.has(k)));
           skipped += asked.length - targets.size;
         } else if (b.expect != null) {
