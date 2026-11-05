@@ -146,7 +146,11 @@ export function groupStopState(g) {
   if (g?.canceling || ((st.sent ?? 0) > (st.stuck ?? 0) && c && c.effective !== false)) {
     return { kind: 'stopping', text: st.stuck ? `멈추는 중 · 멈추지 않음 ${st.stuck}` : '멈추는 중', tone: 'stop', canStop };
   }
-  if (st.phase && !(c && c.effective === false)) return { kind: 'cancelable', text: st.phase === 'queued' ? '차례 대기' : st.phase === 'sending' ? '보내는 중' : '실행 중', tone: 'run', canStop };
+  // v2.902(별건 정리 — v2.870 A1-04 남김): 회차 중단 없이 이번 회차 실행을 행마다 '취소…' 로 멈춘 경우 — 회차 중단 기록(c)이 없어 예전에는
+  //   남은 실행이 그것뿐이면 아무 표지도 없었고(phase null), 다른 실행이 돌면 그냥 '실행 중' 이었다. 서버 cancelPlan 의 sentFire(이번 회차 실행 중 취소를 보낸 수)로 구분한다.
+  const byRow = !c && st.phase !== 'queued' && st.phase !== 'sending' ? (st.sentFire ?? 0) : 0;
+  if (byRow > 0 && !st.phase) return { kind: 'stopping', text: '멈추는 중(실행별 취소)', tone: 'stop', canStop };
+  if (st.phase && !(c && c.effective === false)) return { kind: 'cancelable', text: st.phase === 'queued' ? '차례 대기' : st.phase === 'sending' ? '보내는 중' : `실행 중${byRow ? ` · 실행별 취소 ${byRow}` : ''}`, tone: 'run', canStop };
   if (c && c.effective === false) return { kind: 'stopfail', text: '중단하지 못함', tone: 'warn', canStop };
   if (c) return { kind: 'stopped', text: '중단됨', tone: 'muted', canStop };
   return { kind: null, text: '', tone: 'muted', canStop };
