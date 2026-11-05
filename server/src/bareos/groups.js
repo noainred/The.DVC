@@ -181,6 +181,8 @@ export function updateGroup(id, input, { by = '', now = Date.now(), expectUpdate
       if (d.action === 'fire' || d.action === 'miss') { g.lastKey = d.slot.key; g.missed = { key: d.slot.key, at: d.slot.at, reason: d.action === 'fire' ? 'edited' : 'down' }; }
       else g.missed = null;
       g.anchorAt = now;
+      // v2.899: 기준 시계가 바뀌면 회차 열쇠의 뜻이 바뀐다 — 옛 시계 열쇠와 글자로 비교하면 하루를 건너뛰거나(시계가 뒤로) 놓친다. 지우고 anchorAt 으로만 막는다.
+      if ((v.schedule?.clock || 'server') !== (g.schedule?.clock || 'server')) g.lastKey = '';
     }
     Object.assign(g, { name: v.name, vmIds: v.vmIds, schedule: v.schedule, storage: v.storage, pool: v.pool, updatedBy: String(by), updatedAt: now });
     if (v.keep !== undefined) g.keep = v.keep;

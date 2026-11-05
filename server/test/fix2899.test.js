@@ -143,3 +143,35 @@ test('점검 E3 · E7 — 키가 없으면 직전 값을 지우지 않는다 · 
   assert.equal(e.alarms.atEdge, future, '원본은 따로');
   assert.ok(R.EDGE_STALE_MS < R.EDGE_EXPIRE_MS);
 });
+
+test('점검 B1 — 그룹 예약 기준 시계(사용자 결정: 두 시계를 보이고 고르게) · 옛 그룹은 현지 서버 · 포탈 시계는 프로세스 TZ 와 무관', async () => {
+  const S = await import('../src/bareos/groupSchedule.js');
+  assert.equal(S.normSchedule({ enabled: true, days: [1], time: '02:00' }).clock, 'server', 'clock 없는 옛 입력 = 현지 서버(실행 시각을 바꾸지 않는다)');
+  assert.equal(S.normSchedule({ enabled: true, days: [1], time: '02:00', clock: 'evil' }).clock, 'server');
+  const sched = S.normSchedule({ enabled: true, days: [0, 1, 2, 3, 4, 5, 6], time: '02:00', level: 'Incremental', fullDays: [5], clock: 'portal' });
+  const now = Date.parse('2026-11-05T09:00:00Z');   // 포탈(KST, 오프셋 540) 18:00
+  const n = S.nextSlot(sched, now);
+  assert.equal(n.at, Date.parse('2026-11-05T17:00:00Z'), '포탈 02:00 = UTC 17:00(전날) — 프로세스 TZ 와 무관');
+  assert.equal(n.key, '2026-11-06 02:00');
+  assert.equal(n.level, 'Full', 'Full 요일도 포탈 시계의 요일(2026-11-06 금)');
+  assert.equal(S.lastDueSlot(sched, now).key, '2026-11-05 02:00');
+  assert.equal(S.clockStamp(n.at, 'portal'), '2026-11-06 02:00');
+  // 프로세스 TZ 를 바꿔도(자식 프로세스) 포탈 시계의 회차 시각은 같다
+  const { spawnSync } = await import('node:child_process');
+  const code = `import(${JSON.stringify(new URL('../src/bareos/groupSchedule.js', import.meta.url).href)}).then((S) => { const s = S.normSchedule({ enabled: true, days: [0,1,2,3,4,5,6], time: '02:00', clock: 'portal' }); console.log(S.nextSlot(s, ${now}).at); })`;
+  for (const tz of ['UTC', 'Asia/Seoul', 'America/New_York']) {
+    const r = spawnSync(process.execPath, ['--input-type=module', '-e', code], { encoding: 'utf8', env: { ...process.env, TZ: tz } });
+    assert.equal(Number(r.stdout.trim()), n.at, `TZ=${tz}`);
+  }
+  assert.equal(S.scheduleText(sched), '매일 02:00 Incremental (Full: 금) · 중앙 포탈 시각');
+});
+
+test('점검 B1 — 기준 시계를 바꾸면 회차 열쇠를 비우고 anchorAt 으로만 막는다 · 화면용 두 시계 글자', async () => {
+  const src = fs.readFileSync(new URL('../src/bareos/groups.js', import.meta.url), 'utf8');
+  assert.match(src, /if \(\(v\.schedule\?\.clock \|\| 'server'\) !== \(g\.schedule\?\.clock \|\| 'server'\)\) g\.lastKey = '';/);
+  const route = fs.readFileSync(new URL('../src/routes/api/bareosGroups.js', import.meta.url), 'utf8');
+  assert.match(route, /server: clockStamp\(next\.at, 'server'\), portal: clockStamp\(next\.at, 'portal'\)/);
+  assert.match(route, /clocks: clockInfo\(now\)/);
+  const runner = fs.readFileSync(new URL('../src/bareos/groupRunner.js', import.meta.url), 'utf8');
+  assert.match(runner, /const nowKey = slotKey\(now, g\.schedule\);/);
+});
