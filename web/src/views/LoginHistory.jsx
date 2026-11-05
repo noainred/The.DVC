@@ -29,15 +29,22 @@ function useLoginHistory(range) {
   return { data, error, busy, load };
 }
 
+// 안내 줄(호박색 · 작은 글씨). 큰 오류 상자(error-box)는 화면 절반을 차지해 표를 밀어낸다(v2.911 Chromium 1440 확인).
+const WARN = { fontSize: 12, lineHeight: 1.6, marginBottom: 8, color: 'var(--amber,#d97706)' };
+// 숫자 열은 머리글도 오른쪽 정렬(값과 같은 줄에 선다).
+// 요약 카드 — 400px 에서도 두 장씩(기본 .kpis 의 180px 최소폭이면 한 장씩 쌓여 표가 한참 아래로 밀린다).
+const KPIS = { marginBottom: 12, gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))' };
+const NUM = { textAlign: 'right' };
+
 /** 기록 상태 안내(인증 꺼짐 · 읽기 실패 · 첫 이관 · 깨진 줄 · 가장 오래된 기록). */
 function HistoryNotes({ data }) {
   return (
     <>
       {data.authEnabled === false && (
-        <div className="error-box" style={{ marginBottom: 8 }}>인증이 꺼져 있어(AUTH_ENABLED=false) 로그인 자체가 없으므로 기록이 쌓이지 않습니다.</div>
+        <div style={WARN}>⚠ 인증이 꺼져 있어(AUTH_ENABLED=false) 로그인 자체가 없으므로 기록이 쌓이지 않습니다.</div>
       )}
       {data.loadError && (
-        <div className="error-box" style={{ marginBottom: 8 }}>로그인 기록 파일을 읽지 못했습니다({data.loadError}) — 원본은 보존했고 이번 기동 뒤의 로그인부터 다시 셉니다. 아래 횟수는 그 이전을 포함하지 않습니다.</div>
+        <div style={{ ...WARN, color: 'var(--red,#ef4444)' }}>⚠ 로그인 기록 파일을 읽지 못했습니다({data.loadError}) — 원본은 보존했고 이번 기동 뒤의 로그인부터 다시 셉니다. 아래 횟수는 그 이전을 포함하지 않습니다.</div>
       )}
       <div className="muted" style={{ fontSize: 12, marginBottom: 10, lineHeight: 1.6 }}>
         {data.coverageFrom != null
@@ -82,7 +89,7 @@ export function RecentLogins() {
       </div>
       <HistoryNotes data={data} />
       {error && <ErrorBox error={error} />}
-      <div className="kpis" style={{ marginBottom: 14 }}>
+      <div className="kpis" style={KPIS}>
         <Kpi label="사용자" value={all.length.toLocaleString()} meta="로컬 계정 + 기록에 있는 계정" />
         <Kpi label="최근 1일 로그인" value={active('d1').toLocaleString()} unit="명" meta={`${Number(data.totals?.d1 || 0).toLocaleString()}회`} />
         <Kpi label="최근 7일 로그인" value={active('d7').toLocaleString()} unit="명" meta={`${Number(data.totals?.d7 || 0).toLocaleString()}회`} />
@@ -94,18 +101,18 @@ export function RecentLogins() {
         <span className="muted" style={{ fontSize: 12 }}>{users.length.toLocaleString()}명</span>
       </div>
       <STable minWidth={760}>
-        <thead><tr><th>사용자</th><th>역할</th><th>계정</th><th>마지막 로그인</th><th>경과</th><th>마지막 접속 IP</th><th>{periodLabel('d30', data.windows)}</th></tr></thead>
+        <thead><tr><th>사용자</th><th>마지막 로그인</th><th>경과</th><th>마지막 접속 IP</th><th style={NUM}>{periodLabel('d30', data.windows)}</th><th>역할</th><th>계정</th></tr></thead>
         <tbody>
           {users.length === 0 && <tr><td colSpan={7} className="center muted" style={{ padding: 22 }}>표시할 사용자가 없습니다.</td></tr>}
           {users.map((u) => (
             <tr key={u.user}>
               <td><b>{u.user}</b>{u.name ? <span className="muted" style={{ fontSize: 11 }}> · {u.name}</span> : null}</td>
-              <td className="muted" style={{ fontSize: 12 }}>{roleText(u.role)}</td>
-              <td className="muted" style={{ fontSize: 12 }}>{accountText(u.account)}</td>
               <td data-sort={u.last ?? ''} style={{ whiteSpace: 'nowrap' }}>{u.last != null ? fmtDateTime(u.last) : <span className="muted">기록 없음</span>}</td>
               <td data-sort={u.last != null ? data.now - u.last : ''} className="muted" style={{ fontSize: 12, whiteSpace: 'nowrap' }}>{agoText(u.last, data.now)}</td>
               <td className="muted" style={{ fontSize: 12 }}>{u.lastIp || '—'}</td>
-              <td data-sort={u.d30} style={{ textAlign: 'right' }}>{u.d30.toLocaleString()}회</td>
+              <td data-sort={u.d30} style={NUM}>{u.d30.toLocaleString()}회</td>
+              <td className="muted" style={{ fontSize: 12 }}>{roleText(u.role)}</td>
+              <td className="muted" style={{ fontSize: 12 }}>{accountText(u.account)}</td>
             </tr>
           ))}
         </tbody>
@@ -115,16 +122,16 @@ export function RecentLogins() {
       <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>최신 {Number(data.recent?.length || 0).toLocaleString()}건{data.recentMax ? `(최대 ${data.recentMax}건)` : ''}입니다. 더 오래된 이력은 감사 로그에서 봅니다.</div>
       <div className="table-wrap" style={{ maxHeight: '50vh' }}>
         <STable minWidth={560} wrap={false}>
-          <thead><tr><th>시각</th><th>사용자</th><th>역할</th><th>계정</th><th>접속 IP</th></tr></thead>
+          <thead><tr><th>시각</th><th>사용자</th><th>접속 IP</th><th>역할</th><th>계정</th></tr></thead>
           <tbody>
             {recent.length === 0 && <tr><td colSpan={5} className="center muted" style={{ padding: 22 }}>기록이 없습니다.</td></tr>}
             {recent.map((r, i) => (
               <tr key={`${r.ts}-${r.user}-${i}`}>
                 <td data-sort={r.ts} className="muted" style={{ fontSize: 12, whiteSpace: 'nowrap' }}>{fmtDateTime(r.ts)}</td>
                 <td><b>{r.user}</b></td>
+                <td className="muted" style={{ fontSize: 12 }}>{r.ip || '—'}</td>
                 <td className="muted" style={{ fontSize: 12 }}>{roleText(r.role)}</td>
                 <td className="muted" style={{ fontSize: 12 }}>{r.src === 'local' ? '로컬' : r.src === 'ad' ? 'AD' : '모름'}</td>
-                <td className="muted" style={{ fontSize: 12 }}>{r.ip || '—'}</td>
               </tr>
             ))}
           </tbody>
@@ -203,14 +210,14 @@ export function LoginCounts() {
       )}
       {error && <ErrorBox error={error} />}
       {key ? (
-        <div className="kpis" style={{ marginBottom: 10 }}>
+        <div className="kpis" style={KPIS}>
           <Kpi label={`${label} 로그인`} value={Number(total || 0).toLocaleString()} unit="회" meta={periodSpanText(data, key)} />
           <Kpi label="로그인한 사용자" value={Number(activeUsers || 0).toLocaleString()} unit="명" meta={`전체 ${(data.users || []).length.toLocaleString()}명 중`} />
         </div>
       ) : (
         <div className="muted" style={{ fontSize: 12, marginBottom: 10 }}>시작일과 종료일을 고르고 조회를 누르세요.</div>
       )}
-      {note && <div className="muted" style={{ fontSize: 12, marginBottom: 10, color: 'var(--amber,#d97706)' }}>⚠ {note}</div>}
+      {note && <div style={WARN}>⚠ {note}</div>}
       <div className="flex gap wrap" style={{ marginBottom: 8, alignItems: 'center' }}>
         <label className="muted" style={{ fontSize: 12, display: 'flex', alignItems: 'center', gap: 6 }}>
           <input type="checkbox" checked={onlyActive} disabled={!key} onChange={(e) => setOnlyActive(e.target.checked)} /> 선택 기간에 로그인한 사용자만
@@ -220,10 +227,10 @@ export function LoginCounts() {
       <STable minWidth={showRange ? 860 : 720}>
         <thead>
           <tr>
-            <th>사용자</th><th>역할</th>
-            {['d1', 'd7', 'd30'].map((k) => <th key={k} style={hi(k)}>{periodLabel(k, data.windows)}</th>)}
-            {showRange && <th style={hi('range')}>{periodLabel('range')}</th>}
-            <th>마지막 로그인</th>
+            <th>사용자</th>
+            {['d1', 'd7', 'd30'].map((k) => <th key={k} style={{ ...NUM, ...hi(k) }}>{periodLabel(k, data.windows)}</th>)}
+            {showRange && <th style={{ ...NUM, ...hi('range') }}>{periodLabel('range')}</th>}
+            <th>마지막 로그인</th><th>역할</th>
           </tr>
         </thead>
         <tbody>
@@ -231,18 +238,18 @@ export function LoginCounts() {
           {rows.map((u) => (
             <tr key={u.user}>
               <td><b>{u.user}</b>{u.name ? <span className="muted" style={{ fontSize: 11 }}> · {u.name}</span> : null}</td>
-              <td className="muted" style={{ fontSize: 12 }}>{roleText(u.role)}</td>
               {['d1', 'd7', 'd30'].map((k) => (
-                <td key={k} data-sort={u[k]} style={{ textAlign: 'right', ...hi(k) }}>{u[k] > 0 ? `${u[k].toLocaleString()}회` : <span className="muted">0회</span>}</td>
+                <td key={k} data-sort={u[k]} style={{ ...NUM, ...hi(k) }}>{u[k] > 0 ? `${u[k].toLocaleString()}회` : <span className="muted">0회</span>}</td>
               ))}
               {showRange && (
-                <td data-sort={u.range ?? ''} style={{ textAlign: 'right', ...hi('range') }}>
+                <td data-sort={u.range ?? ''} style={{ ...NUM, ...hi('range') }}>
                   {u.range > 0 ? `${u.range.toLocaleString()}회` : <span className="muted">0회</span>}
                 </td>
               )}
               <td data-sort={u.last ?? ''} style={{ whiteSpace: 'nowrap', fontSize: 12 }}>
                 {u.last != null ? <>{fmtDateTime(u.last)} <span className="muted">· {agoText(u.last, data.now)}</span></> : <span className="muted">기록 없음</span>}
               </td>
+              <td className="muted" style={{ fontSize: 12 }}>{roleText(u.role)}</td>
             </tr>
           ))}
         </tbody>
