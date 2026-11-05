@@ -1,11 +1,12 @@
 // 감사·알림·일일리포트·인증서·이상탐지·세션보안·OS스캔·프로비저닝 저장 — admin.js(구 2,410줄) 분할(v2.285.0). 본문은 원본 그대로, 등록 순서는 admin.js 호출 순서가 보존한다.
 import { config } from '../../config.js';
-import { verifyUserOtp, getUser } from '../../auth/auth.js';
+import { verifyUserOtp, getUser, listUsers } from '../../auth/auth.js';
 import { saveSessionSecurity, loadConfiguredSecurity, managedAdminOwners } from '../../security/securitySettings.js';
 import { loadSecretsPolicy, saveSecretsPolicy, migrateSecretFiles, SECRET_FILES } from '../../security/secretVault.js';
 import { saveOsScanSettings, runOsScanNow, osScanStatus } from '../../inventory/osScanner.js';
 import { getOsResults, osSummary } from '../../inventory/osStore.js';
 import { listAudit, logAudit } from '../../audit.js';
+import { loginHistorySummary, parseLoginRange } from '../../security/loginHistory.js'; // v2.912: 설정 › 로그 › 최근 로그인 · 로그인 횟수
 import { alertStatus, saveAlertConfig, testAlert, getAnomalySettings, saveAnomalySettings } from '../../alerts.js';
 import { createJob as createProvisionJob } from '../../provision/jobs.js';
 import { updateSaved, removeSaved, getSaved } from '../../provision/saved.js';
@@ -99,6 +100,18 @@ adminRouter.get('/audit', adminOnly, (req, res) => {
   //   없다 — 범위 계정 403(v2.525 규약. 같은 파일 /alerts 는 범위로 거른다).
   if (scopedVcenterIds(req.user, store.get())) return res.status(403).json({ ok: false, error: 'forbidden', requiredOwner: true, reason: '감사 로그는 전 사용자·전 법인 기록이라 전체 범위(vCenter 제한 없는) 계정만 볼 수 있습니다.' });
   res.json(listAudit({ limit: req.query.limit, offset: req.query.offset, user: req.query.user, q: req.query.q }));
+});
+
+// v2.912 — 로그인 기록(설정 › 로그 › 최근 로그인 · 로그인 횟수). 전 사용자의 로그인 시각·IP 라 감사 로그와 같은 기준이다:
+//   관리자 + 전체 범위 계정만(범위 계정 403). 집계는 메모리 배열 한 번 훑기라 캐시하지 않는다(화면은 열 때 · 버튼으로만 부른다).
+adminRouter.get('/login-history', adminOnly, (req, res) => {
+  if (scopedVcenterIds(req.user, store.get())) return res.status(403).json({ ok: false, error: 'forbidden', requiredOwner: true, reason: '로그인 기록은 전 사용자의 접속 기록이라 전체 범위(vCenter 제한 없는) 계정만 볼 수 있습니다.' });
+  const now = Date.now();
+  const range = parseLoginRange(req.query.from, req.query.to, now);
+  if (range?.error) return res.status(400).json({ ok: false, error: 'bad-range', reason: range.error });
+  let accounts = [];
+  try { accounts = listUsers().map((u) => ({ username: u.username, name: u.name, role: u.role })); } catch { accounts = []; }
+  res.json({ ok: true, authEnabled: config.auth.enabled, ...loginHistorySummary({ now, range, accounts }) });
 });
 
 // Alerting: config + current firing/recent, save config, send a test notification.
