@@ -579,6 +579,9 @@
     공통 휴일 **대신**. 이슈 설정 화면은 `calendar` 를 늘 같이 보낸다(빠뜨리면 저장이 기본값(24×7)으로 되돌린다). 서버는 automation · inbox · sla 가 빠진 저장을 '지금 값 유지' 로 본다.
   - 다른 알람 자동 등록(`issues/alertIssues.js` · `issue-alert-auto.json`)은 알람 엔진 · Bareos 쪽에 **구독 훅만**(`alerts.js onAlertState` · `bareos/notify.js onBareosFailures`) — 그 모듈들은
     이슈를 모른다. 판정 보류로 끊긴 키는 해소가 아니다(resolved 에 넣지 않는다). 인증서 만료는 알람 엔진에 판정이 없어 넣지 않았다(지어내지 않는다).
+  - **CSS 클래스 이름 겹침(Chromium 판독으로 발견 — v2.882 부터)**: 필터 화면의 격자 `.iss-filters`(240px + 나머지)가 보드 필터 줄 · 활동 머리의 같은 이름(줄 배치)을
+    파일 뒤쪽에서 덮어 그 줄들이 2열 격자로 늘어났다. 필터 화면은 `.iss-filterview` 로 바꿨다. **새 클래스를 만들기 전에 `grep -n '^\.<이름>' styles.css` 로 같은 이름이 있는지 볼 것**
+    (`features2908.test.js` 가 `.iss-filters` 한 벌을 고정). 카드 아래 줄(`.iss-card-foot`)은 줄바꿈 — 1440 5열에서 담당자 동그라미가 카드 밖으로 나갔다.
 - **v2.907 — 위키 · 이슈 기능 추천 1~5(사용자 '모두 적용' · 시안 없이 기존 화면 틀대로 — 사용자 선택)**. 회귀 `server/test/wikiIssues2907.test.js` · `web/src/views/wiki/features2907.test.js`.
   - 댓글 고치기(위키 · 이슈): 쓴 사람만 · 옛 본문 5개 보관 · 판/이력은 만들지 않는다 · **알림은 새로 언급한 사람에게만**(`ev.edit` — 담당 · 보고 · 관찰자에게 다시 가지 않는다).
   - 문서 지우기는 **휴지통**(30일 — 판 · 댓글 · 첨부 그대로). 첨부 본체 · 즐겨찾기는 영구 삭제(손으로 · 기한) 때 정리하고, 첨부는 삭제가 디스크에 닿은 뒤(`removeOwnerAfterPersist`). 기한 정리는 폴링하지 않고 목록 · 지우기 때.

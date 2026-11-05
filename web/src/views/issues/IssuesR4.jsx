@@ -10,7 +10,6 @@ import { fetchJson, postJson, putJson, downloadFile, canCsv } from '../../api.js
 import { STable } from '../../components/STable.jsx';
 import { Loading, ErrorBox } from '../../components/primitives.jsx';
 import Select from '../../components/Select.jsx';
-import { PrioTag } from './issueParts.jsx';
 import { makeLatest, timeText, dateText, saveFailText, inboxKindText, pctText, hoursText, PRIORITY_TEXT } from './issueText.js';
 import { wikiHash } from '../wiki/wikiText.js';
 
@@ -96,6 +95,9 @@ export function ReportView({ meta }) {
   const [msg, setMsg] = useState('');
   const latest = useLatest();
   const params = { weeks, vcenterId: vc };
+  // 좁은 화면에서 주별 막대가 가로로 넘치면 이번 주(오른쪽 끝)가 먼저 보이게 — 읽을 때마다 한 번
+  const trendRef = useRef(null);
+  useEffect(() => { const el = trendRef.current; if (el) el.scrollLeft = el.scrollWidth; }, [d]);
   const load = useCallback(() => {
     const k = latest.next();
     fetchJson('/issues/report', { weeks, vcenterId: vc }).then((r) => { if (latest.isLatest(k)) { setD(r); setErr(null); } }).catch((e) => { if (latest.isLatest(k)) setErr(e); });
@@ -137,7 +139,7 @@ export function ReportView({ meta }) {
       </div>
       <div className="card">
         <h3 className="iss-h3">주별 생성 · 완료</h3>
-        <div className="iss-trend" role="img" aria-label={`최근 ${d.weeks}주 주별 생성 · 완료 수`}>
+        <div className="iss-trend" ref={trendRef} role="img" aria-label={`최근 ${d.weeks}주 주별 생성 · 완료 수`}>
           {d.trend.map((t) => (
             <div key={t.week} className={`iss-trend-col${t.current ? ' cur' : ''}`} title={`${t.week} 주 — 생성 ${t.created} · 완료 ${t.closed}${t.current ? ' (진행 중)' : ''}`}>
               <div className="iss-trend-bars">
@@ -154,7 +156,7 @@ export function ReportView({ meta }) {
         <div className="card" style={{ minWidth: 0 }}>
           <h3 className="iss-h3">법인별</h3>
           {d.byCorp.length ? (
-            <STable className="table" minWidth={320}>
+            <STable className="table">
               <thead><tr><th>법인</th><th>열림(지금)</th><th>생성</th><th>완료</th></tr></thead>
               <tbody>{d.byCorp.map((c) => <tr key={c.vcenterId || '-'}><td>{c.name}</td><td data-sort={c.open}>{c.open}</td><td data-sort={c.created}>{c.created}</td><td data-sort={c.closed}>{c.closed}</td></tr>)}</tbody>
             </STable>
@@ -163,7 +165,7 @@ export function ReportView({ meta }) {
         <div className="card" style={{ minWidth: 0 }}>
           <h3 className="iss-h3">담당자별</h3>
           {d.byAssignee.length ? (
-            <STable className="table" minWidth={320}>
+            <STable className="table">
               <thead><tr><th>사람</th><th>열림(지금)</th><th>완료</th><th>작업 기록</th></tr></thead>
               <tbody>{d.byAssignee.map((p) => <tr key={p.user}><td>{p.user}</td><td data-sort={p.open}>{p.open}</td><td data-sort={p.closed}>{p.closed}</td><td data-sort={p.loggedMin}>{p.loggedMin ? hoursText(Math.round((p.loggedMin / 60) * 10) / 10) : '—'}</td></tr>)}</tbody>
             </STable>
@@ -173,7 +175,7 @@ export function ReportView({ meta }) {
         <div className="card" style={{ minWidth: 0 }}>
           <h3 className="iss-h3">유형별 생성</h3>
           {d.byType.length ? (
-            <STable className="table" minWidth={200}>
+            <STable className="table">
               <thead><tr><th>유형</th><th>생성</th></tr></thead>
               <tbody>{d.byType.map((t) => <tr key={t.type}><td>{t.label}</td><td data-sort={t.created}>{t.created}</td></tr>)}</tbody>
             </STable>
@@ -227,7 +229,6 @@ export function AlertAutoSettings() {
             <Select className="select" value={form.priority[k]} onChange={(e) => upd({ priority: { ...form.priority, [k]: e.target.value } })} aria-label={`${d.kindLabels?.[k] || k} 우선순위`}>
               {['p0', 'p1', 'p2', 'p3'].map((p) => <option key={p} value={p}>{PRIORITY_TEXT[p] || p}</option>)}
             </Select>
-            <PrioTag p={form.priority[k]} />
           </div>
         ))}
       </div>

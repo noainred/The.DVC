@@ -47,4 +47,14 @@ describe('v2.908 기능 6~10 문구', () => {
     expect(wiki).toMatch(/href="#\/issues\/inbox"/);
     expect(wiki).not.toMatch(/setInterval\([^)]*inbox/);
   });
+  it('CSS — .iss-filters 는 줄 배치 한 벌뿐(필터 화면 격자는 .iss-filterview) · 카드 아래 줄은 줄바꿈', () => {
+    const css = fs.readFileSync(path.join(HERE, '../../styles.css'), 'utf8');
+    const rules = [...css.matchAll(/^\s*\.iss-filters\s*\{([^}]*)\}/gm)].map((m) => m[1]);
+    expect(rules.length).toBe(1);
+    expect(rules[0]).toMatch(/display:\s*flex/);
+    expect(css).toMatch(/\.iss-filterview\s*\{[^}]*display:\s*grid/);
+    expect(css).toMatch(/\.iss-card-foot\s*\{[^}]*flex-wrap:\s*wrap/);
+    const plus = fs.readFileSync(path.join(HERE, 'IssuesPlus.jsx'), 'utf8');
+    expect(plus).toMatch(/className="iss-filterview"/);
+  });
 });
