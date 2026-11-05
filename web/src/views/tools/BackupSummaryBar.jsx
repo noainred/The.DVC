@@ -5,7 +5,7 @@
  *   화면의 쓰기 가능 여부는 서버가 법인 줄에 싣는 w(marksWritable 과 같은 판정)로만 정한다 — 버튼을 숨기는 것은 UX 일 뿐이다.
  */
 import React, { useState } from 'react';
-import { putJson, toolAllowed } from '../../api.js';
+import { putJson, adminToolAllowed } from '../../api.js';
 import { fmtNum, POLICIES } from './backupViewText.js';
 import { saveHandoff } from './backupRunText.js';
 import { saveBareosHandoff, HANDOFF_MAX as BAREOS_HANDOFF_MAX } from './bareosViewText.js';
@@ -62,10 +62,10 @@ export default function BackupSummaryBar({ sel, rows, onClear, onSaved }) {
       </div>
       <div className="flex wrap" role="group" aria-label="백업 등록" data-backup-register="" style={{ alignItems: 'center', gap: '6px 10px' }}>
         <span className="muted" style={{ whiteSpace: 'nowrap' }}>백업 등록</span>
-        {toolAllowed('backup-run') && <button type="button" className="tab" disabled={!n} onClick={() => go(saveHandoff, '#/tools/backup-run')} title="고른 VM 을 백업 실행 화면으로 가져갑니다 — 거기서 미리보기 · OTP 를 거쳐 실행합니다" style={{ padding: '3px 10px', fontSize: 12, color: '#86efac' }}>Veeam 백업 실행 →</button>}
+        {adminToolAllowed('backup-run') && <button type="button" className="tab" disabled={!n} onClick={() => go(saveHandoff, '#/tools/backup-run')} title="고른 VM 을 백업 실행 화면으로 가져갑니다 — 거기서 미리보기 · OTP 를 거쳐 실행합니다" style={{ padding: '3px 10px', fontSize: 12, color: '#86efac' }}>Veeam 백업 실행 →</button>}
         <button type="button" className="tab" disabled title="SSH 백업 기능은 아직 없습니다 — 지금은 백업 정책 값(SSH)만 정할 수 있습니다" style={{ padding: '3px 10px', fontSize: 12, color: '#93c5fd' }}>SSH 스크립트 등록(준비 중)</button>
-        {toolAllowed('bareos-backup') && <button type="button" className="tab" disabled={!n} onClick={() => go(saveBareosHandoff, '#/tools/bareos-backup/targets')} title="고른 VM 을 Bareos 백업 대상 추가 창으로 가져갑니다 — 거기서 레벨을 고르고 등록합니다" style={{ padding: '3px 10px', fontSize: 12, color: '#fdba74' }}>Bareos 대상 등록{over} →</button>}
-        {toolAllowed('bareos-backup') && <button type="button" className="tab" disabled={!n} onClick={() => go(saveBareosGroupHandoff, '#/tools/bareos-backup/groups')} title="고른 VM 으로 Bareos 백업 그룹을 만듭니다 — 그룹 창에서 이름 · 스케줄 · 보관 개수를 정하고 저장합니다" style={{ padding: '3px 10px', fontSize: 12, color: '#fdba74' }}>Bareos 그룹 등록{over} →</button>}
+        {adminToolAllowed('bareos-backup') && <button type="button" className="tab" disabled={!n} onClick={() => go(saveBareosHandoff, '#/tools/bareos-backup/targets')} title="고른 VM 을 Bareos 백업 대상 추가 창으로 가져갑니다 — 거기서 레벨을 고르고 등록합니다" style={{ padding: '3px 10px', fontSize: 12, color: '#fdba74' }}>Bareos 대상 등록{over} →</button>}
+        {adminToolAllowed('bareos-backup') && <button type="button" className="tab" disabled={!n} onClick={() => go(saveBareosGroupHandoff, '#/tools/bareos-backup/groups')} title="고른 VM 으로 Bareos 백업 그룹을 만듭니다 — 그룹 창에서 이름 · 스케줄 · 보관 개수를 정하고 저장합니다" style={{ padding: '3px 10px', fontSize: 12, color: '#fdba74' }}>Bareos 그룹 등록{over} →</button>}
       </div>
     </section>
   );

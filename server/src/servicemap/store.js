@@ -132,6 +132,13 @@ export function normalizeMap(raw) {
   }
   return out;
 }
+/** 고정 한 건 정리(순수) — 모르는 모양이면 null. normalizePins 와 mutatePins(바뀐 키만)가 같은 함수를 쓴다(판정 복제 금지). */
+export function normalizePin(k, p) {
+  if (!k || typeof k !== 'string' || k.length > 256 || !isObj(p) || typeof p.serviceId !== 'string' || typeof p.corp !== 'string') return null;
+  const o = { serviceId: p.serviceId.slice(0, 64), corp: p.corp.slice(0, 128), by: String(p.by || '').slice(0, 64), at: Number.isFinite(p.at) ? p.at : 0, reviewed: p.reviewed === true };
+  if (o.reviewed && (p.reviewedAuto === null || typeof p.reviewedAuto === 'string')) o.reviewedAuto = p.reviewedAuto === null ? null : p.reviewedAuto.slice(0, 64);
+  return o;
+}
 export function normalizePins(raw) {
   const out = emptyPins();
   if (!isObj(raw)) return out;
@@ -139,9 +146,9 @@ export function normalizePins(raw) {
   let n = 0;
   for (const [k, p] of Object.entries(isObj(raw.pins) ? raw.pins : {})) {
     if (n >= LIMITS.pins) break;
-    if (!k || k.length > 256 || !isObj(p) || typeof p.serviceId !== 'string' || typeof p.corp !== 'string') continue;
-    out.pins[k] = { serviceId: p.serviceId.slice(0, 64), corp: p.corp.slice(0, 128), by: String(p.by || '').slice(0, 64), at: Number.isFinite(p.at) ? p.at : 0, reviewed: p.reviewed === true };
-    if (out.pins[k].reviewed && (p.reviewedAuto === null || typeof p.reviewedAuto === 'string')) out.pins[k].reviewedAuto = p.reviewedAuto === null ? null : p.reviewedAuto.slice(0, 64);
+    const o = normalizePin(k, p);
+    if (!o) continue;
+    out.pins[k] = o;
     n += 1;
   }
   return out;
@@ -162,7 +169,8 @@ function readJson(file) {
 const mtimeOf = (file) => { try { return fs.statSync(file).mtimeMs; } catch { return null; } };
 /**
  * 메모리 상태는 **깊게 동결**한다 — 읽기 경로(peekMap·peekPins)가 복사 없이 참조를 넘기므로, 누가 고치려 하면 조용히 상태가 바뀌는 대신
- * 즉시 던진다(ESM 은 엄격 모드). 쓰기는 늘 draft 깊은 복사 → normalize → 동결 순서다(5차 검토 R5: 요청마다 고정 5만 건 깊은 복사 114ms).
+ * 즉시 던진다(ESM 은 엄격 모드). 지도 쓰기는 draft 깊은 복사 → normalize → 동결 순서다(5차 검토 R5: 요청마다 고정 5만 건 깊은 복사 114ms).
+ * 고정 쓰기는 바뀐 키만 정리·동결한다(6차 8 — mutatePins 머리말).
  */
 function deepFreeze(o) {
   if (o && typeof o === 'object' && !Object.isFrozen(o)) { Object.freeze(o); for (const v of Object.values(o)) deepFreeze(v); }
@@ -236,15 +244,31 @@ export function mutateMap(fn) {
   S.dirtyMap = true; schedule();
   return { ok: true, result: r.result };
 }
+/**
+ * 고정 쓰기 — **바뀐 키만** 정리·동결한다(6차 8 — 실측: 고정 5만 건이면 예전 방식(전체 깊은 복사 → 전체 normalize → 전체 동결)이 쓰기 1건에
+ * 이벤트 루프를 약 130ms 막았다). draft.pins 는 **얕은 사본**이고 그 안의 항목은 지금 상태의 동결 객체다 — fn 은 항목을 고치지 말고
+ * 새 객체로 바꿔 넣거나(`d.pins[k] = { ...p, reviewed: true }`) 지운다(고치면 던진다 — ESM 엄격 모드). 바뀌지 않은 항목은 그대로 공유한다.
+ * fn 이 오류를 돌려주거나 던지면 상태는 그대로다(사본만 버린다).
+ */
 export function mutatePins(fn) {
   ensureLoaded();
   if (S.pinErr) return { ok: false, status: 503, error: `service-map-pins.json 을 읽지 못해 쓰기를 막았습니다 — ${S.pinErr}` };
-  const draft = JSON.parse(JSON.stringify(S.pins));
+  const prev = S.pins.pins;
+  const draft = { rev: S.pins.rev, pins: { ...prev } };
   const r = fn(draft) || {};
   if (r.error) return { ok: false, status: r.status || 400, error: r.error };
-  if (Object.keys(draft.pins).length > LIMITS.pins) return { ok: false, status: 400, error: `고정은 최대 ${LIMITS.pins}건입니다` };
-  draft.rev = (S.pins.rev || 0) + 1;
-  S.pins = deepFreeze(normalizePins(draft));
+  // fn 이 draft.pins 를 통째로 바꿨으면(얕은 사본이 아니면) 그 객체를 고치지 않고 새로 담는다.
+  const next = draft.pins === undefined || !isObj(draft.pins) ? {} : (Object.isFrozen(draft.pins) ? { ...draft.pins } : draft.pins);
+  // 바뀐 키(새로 넣었거나 다른 객체로 바뀐 키)만 정리한다. 지운 키는 next 에 없으므로 할 일이 없다. 바뀌지 않은 항목은 이미 정리·동결된 지금 값이다.
+  const keys = Object.keys(next);
+  for (const k of keys) {
+    const v = next[k];
+    if (v === prev[k]) continue;
+    const o = normalizePin(k, v);
+    if (o) next[k] = Object.freeze(o); else delete next[k];
+  }
+  if (Object.keys(next).length > LIMITS.pins) return { ok: false, status: 400, error: `고정은 최대 ${LIMITS.pins}건입니다` };
+  S.pins = Object.freeze({ rev: (S.pins.rev || 0) + 1, pins: Object.freeze(next) });
   S.dirtyPins = true; schedule();
   return { ok: true, result: r.result };
 }

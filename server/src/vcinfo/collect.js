@@ -6,15 +6,16 @@
 // 이 캐시는 스냅샷의 vCenter 객체에 싣지 않는다 — /vcenters 등 모든 인증 사용자 응답에 vCenter 객체가 통째로 나가므로(권한 목록이 새면 안 된다).
 // 엣지는 inventoryPush 가 push 본문의 vcenter.vcInfo 로 보내고, 중앙은 정제해 이 캐시에 넣은 뒤 vcenter 객체에서 지운다(central.js).
 import { parseObjectContent } from '../vcenter/soapParse.js';
+import { flatStr } from '../util/capStr.js';
 import { parseTriggeredAlarms, parseTaskInfo, parsePermissions, parseRoleList, nameMapOf, mergeTasks, VCINFO_LIMITS,
-  parseTopologyNodes, parseReplication, parseApplianceUpdate, parsePendingUpdates, parseVlcmCompliance, restErrText, VCREST_LIMITS } from './parse.js';
+  parsePools, POOLS_MAX, parseTopologyNodes, parseReplication, parseApplianceUpdate, parsePendingUpdates, parseVlcmCompliance, restErrText, VCREST_LIMITS } from './parse.js';
 import { VCenterClient } from '../vcenter/restClient.js';   // v2.898 ④(restClient 는 soapClient 를 import 하지 않는다 — 순환 없음)
 
 /** 종류별 갱신 주기(ms) — 화면은 API 의 refreshMs 로 말한다(숫자를 화면에 박지 않는다). */
-export const VCINFO_REFRESH_MS = Object.freeze({ alarms: 5 * 60_000, tasks: 3 * 60_000, perms: 6 * 3_600_000, linked: 6 * 3_600_000, updates: 6 * 3_600_000, vlcm: 6 * 3_600_000 });
+export const VCINFO_REFRESH_MS = Object.freeze({ alarms: 5 * 60_000, tasks: 3 * 60_000, perms: 6 * 3_600_000, linked: 6 * 3_600_000, updates: 6 * 3_600_000, vlcm: 6 * 3_600_000, pools: 6 * 3_600_000 });
 /** ④ REST 묶음(Linked Mode · 업데이트 · vLCM)의 예산 — 클러스터마다 2번 왕복(고RTT 800ms+)이라 SOAP 묶음과 따로 둔다. */
 export const VCREST_BUDGET_MS = 30_000;
-export const VCINFO_KIND_LIST = Object.freeze(['alarms', 'tasks', 'perms', 'linked', 'updates', 'vlcm']);
+export const VCINFO_KIND_LIST = Object.freeze(['alarms', 'tasks', 'perms', 'linked', 'updates', 'vlcm', 'pools']);
 /** 중단 · 시한 실패는 '이번에 못 읽었다' — 주기를 기다리지 않고 이 간격 뒤 다시 읽는다(tags 의 TAG_RETRY_MS 와 같은 판단). */
 export const VCINFO_RETRY_MS = 5 * 60_000;
 export const VCINFO_BUDGET_MS = 20_000;
@@ -45,7 +46,13 @@ export function putFromEdge(vcId, info, agent) {
   const prev = _byVc.get(vcId);
   if (prev && prev.source === 'local') return;
   if (!info || typeof info !== 'object' || !Object.keys(info).length) { if (prev) _byVc.delete(vcId); return; }
-  _byVc.set(vcId, { ...info, source: 'edge', agent: String(agent || '').slice(0, 64) || null, pushAt: Date.now() });
+  // v2.901(점검 E7): 엣지 시계로 적은 '읽은 시각' 은 받은 시각을 넘지 못하게 자른다(원본은 atEdge 로 따로) — 시계가 앞선 엣지의 '미래 시각' 방지.
+  const now = Date.now();
+  const clamped = {};
+  for (const [k, v] of Object.entries(info)) {
+    clamped[k] = v && typeof v === 'object' && typeof v.at === 'number' && v.at > now ? { ...v, at: now, atEdge: v.at } : v;
+  }
+  _byVc.set(vcId, { ...clamped, source: 'edge', agent: String(agent || '').slice(0, 64) || null, pushAt: now });
 }
 /** 캐시에 있는 vCenter id(hostcfg/cache.js syncVcConfigCaches 가 등록부에 없는 것을 지운다). */
 export function vcInfoIds() { return [..._byVc.keys()]; }
@@ -64,12 +71,18 @@ export function _resetVcInfo() { _byVc.clear(); _alarmNames.clear(); }
  * TaskManager.recentTask(ArrayOfManagedObjectReference) → Task moref. 기존 parseMorefs 는 '[^>]*' 를 두 번 써 닫히지 않은 원소가 반복되면
  * 2차 시간이다(반증 하-4 — 96KB 653ms). 여기서는 원소 모양을 고정하고(속성은 type · 선택 xsi:type) 길이를 먼저 자른다(선형).
  */
+// v2.901(점검 E1 — 정정): v2.898 은 xsi:type 이 type '앞' 인 모양만 받아, 반대 순서면 0건 · 오류 없음이었다(내 회귀 — 기존 parseMorefs 는 순서를 가리지 않았다).
+//   속성 칸(200자)에서 type="Task" 를 찾는다 — 선형. 원소가 있는데 하나도 못 읽으면 unreadable 로 알린다(호출부가 오류로 남긴다).
 export function taskRefsOf(xml) {
   const out = [];
-  const re = /<ManagedObjectReference(?: xsi:type="ManagedObjectReference")? type="Task">([\w.:-]{1,64})<\/ManagedObjectReference>/g;
+  const re = /<ManagedObjectReference(\s[^>]{0,200})>([\w.:-]{1,64})<\/ManagedObjectReference>/g;
   const s = String(xml || '').slice(0, 1_000_000);
-  let m;
-  while ((m = re.exec(s)) && out.length < 1000) out.push(m[1]);
+  let m; let seen = 0;
+  while ((m = re.exec(s)) && out.length < 1000) {
+    seen += 1;
+    if (/(?:^|\s)type="Task"/.test(m[1])) out.push(flatStr(m[2]));
+  }
+  out.unreadable = seen === 0 && s.includes('<ManagedObjectReference') ? 1 : 0;
   return out;
 }
 const msg = (e) => String(e?.message || e || '조회 실패').slice(0, 300);
@@ -95,7 +108,8 @@ async function readAlarms(c, vcId, now) {
   const root = c.sc?.rootFolder;
   if (!root) throw new Error('rootFolder 없음');
   const objs = await c.retrieveObjectProps('Folder', root, ['triggeredAlarmState']);
-  const { items, omitted } = parseTriggeredAlarms(objs[0]?.props?.triggeredAlarmState || '');
+  const { items, omitted, unreadable } = parseTriggeredAlarms(objs[0]?.props?.triggeredAlarmState || '');
+  if (unreadable && !items.length) throw new Error(`트리거된 알람 ${unreadable}건을 읽지 못했습니다 — '알람 없음' 이 아닙니다`);
   // 알람 정의 이름 — 정의는 거의 바뀌지 않으므로 6시간 기억한다(매 갱신마다 묻지 않게).
   const names = _alarmNames.get(vcId) || new Map();
   const need = [...new Set(items.map((a) => a.alarm))].filter((r) => { const n = names.get(r); return !n || now - n.at > ALARM_NAME_TTL_MS; });
@@ -111,14 +125,16 @@ async function readAlarms(c, vcId, now) {
   const ent = await lookupNames(c, items.map((a) => ({ type: a.entityType, ref: a.entity })));
   for (const a of items) { a.name = names.get(a.alarm)?.name || null; a.entityName = ent.get(`${a.entityType}:${a.entity}`) || null; }
   items.sort((a, b) => (b.time ?? 0) - (a.time ?? 0));
-  return { at: now, items, omitted, error: null };
+  return { at: now, items, omitted, ...(unreadable ? { unreadable } : {}), error: null };
 }
 
 async function readTasks(c, prev, now) {
   const tm = c.sc?.taskManager;
   if (!tm) throw new Error('taskManager 없음');
   const objs = await c.retrieveObjectProps('TaskManager', tm, ['recentTask']);
-  const refs = taskRefsOf(objs[0]?.props?.recentTask).slice(0, VCINFO_LIMITS.tasks);
+  const all = taskRefsOf(objs[0]?.props?.recentTask);
+  if (all.unreadable) throw new Error('최근 작업 목록(recentTask) 응답을 읽지 못했습니다 — 0건이 아닙니다');
+  const refs = all.slice(0, VCINFO_LIMITS.tasks);
   let fresh = [];
   if (refs.length) {
     // 작업은 끝나면 곧 사라진다 — 목록과 info 사이에 지워진 작업이 있으면 vCenter 가 요청 전체를 거부한다(ManagedObjectNotFound).
@@ -127,6 +143,12 @@ async function readTasks(c, prev, now) {
     fresh = infos.map((o) => parseTaskInfo(o.props?.info)).filter(Boolean);
   }
   return { at: now, items: mergeTasks(prev?.items, fresh, { now }), error: null };
+}
+
+async function readPools(c, refs, now) {
+  const list = refs.filter((r) => typeof r === 'string').slice(0, POOLS_MAX);
+  const objs = list.length ? await c.retrieveManyObjectProps('ResourcePool', list, ['name', 'parent', 'owner', 'config.cpuAllocation', 'config.memoryAllocation']) : [];
+  return { at: now, items: parsePools(objs), omitted: Math.max(0, refs.length - list.length), error: null };
 }
 
 async function readPerms(c, now) {
@@ -149,7 +171,7 @@ async function readPerms(c, now) {
  * @param c 로그인된 SOAP 클라이언트 · vc 등록 항목
  * @returns 이 vCenter 의 캐시(종류별 — 갱신한 것만 새 값)
  */
-export async function refreshVcInfo(c, vc, { now = Date.now(), signal = null, budgetMs = VCINFO_BUDGET_MS } = {}) {
+export async function refreshVcInfo(c, vc, { now = Date.now(), signal = null, budgetMs = VCINFO_BUDGET_MS, poolRefs = null } = {}) {
   const prev = _byVc.get(vc.id);
   const cur = prev && prev.source === 'local' ? { ...prev } : { source: 'local' };
   const deadline = Date.now() + budgetMs;   // 예산은 실제 시계로 잰다(now 는 기록 · 주기 판정용 — 테스트가 고정한다)
@@ -157,6 +179,8 @@ export async function refreshVcInfo(c, vc, { now = Date.now(), signal = null, bu
     ['alarms', () => readAlarms(c, vc.id, now)],
     ['tasks', () => readTasks(c, cur.tasks, now)],
     ['perms', () => readPerms(c, now)],
+    // v2.901: 리소스 풀 예약 · 제한 · 공유 — 수집이 이미 가진 풀 moref 를 받을 때만(없으면 이 종류를 건드리지 않는다).
+    ...(Array.isArray(poolRefs) ? [['pools', () => readPools(c, poolRefs, now)]] : []),
   ];
   await runJobs(cur, jobs, now, deadline, signal);
   _byVc.set(vc.id, cur);

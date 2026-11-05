@@ -743,8 +743,8 @@ export async function groupTick(now = Date.now(), { catchupMs = CATCHUP_MS } = {
   try {
     if (groupsLoadError() || registryLoadError()) return { scanned: false, fired, missed };
     const due = []; const miss = []; const byId = new Map();
-    const nowKey = slotKey(now);
     for (const g of listGroups()) {
+      const nowKey = slotKey(now, g.schedule);   // v2.901: 그 그룹의 기준 시계로
       // 버그 점검 S6: 처리한 회차가 지금보다 미래면(시계가 앞섰다 돌아옴) 그 열쇠까지 회차가 돌지 않는다 — 조용히 넘기지 않고 한 번 알린다
       if (g.lastKey && g.lastKey > nowKey && !_clockWarned.has(g.id)) { _clockWarned.add(g.id); console.warn(`[bareos] 백업 그룹 ‘${g.name}’ 의 마지막 처리 회차(${g.lastKey})가 지금(${nowKey})보다 미래입니다 — 서버 시계를 확인하세요. 그 회차까지는 예약 실행이 돌지 않습니다.`); }
       const d = decideFire(g, now, catchupMs);

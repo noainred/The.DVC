@@ -8,11 +8,11 @@ import { Modal } from '../../../components/Modal.jsx';
 import { STable } from '../../../components/STable.jsx';
 import Select from '../../../components/Select.jsx';
 import { Loading, ErrorBox } from '../../../components/ui.jsx';
-import { SRC_LABEL } from '../svcInventoryText.js';
+import { SRC_LABEL, keyText, isMaskedKey, MASKED_KEY_TITLE } from '../svcInventoryText.js';
 
 const btn = { padding: '5px 10px', fontSize: 12, flex: 'none' };
 
-export default function PinModal({ corp: corp0, corps, servicesOf, writableOf, defaultService = '', op, busy, onClose, corpName }) {
+export default function PinModal({ corp: corp0, corps, servicesOf, writableOf, defaultService = '', op, busy, onClose, corpName, scoped = false }) {
   const [kind, setKind] = useState('bm');
   const [corp, setCorp] = useState(corp0 || '');
   const [q, setQ] = useState('');
@@ -47,7 +47,7 @@ export default function PinModal({ corp: corp0, corps, servicesOf, writableOf, d
           {corps.filter((c) => writableOf(c.vcenterId)).map((c) => <option key={c.vcenterId} value={c.vcenterId}>{c.name}</option>)}
         </Select>
         <label className="muted" style={{ fontSize: 12, display: 'inline-flex', gap: 6, alignItems: 'center' }}><input type="checkbox" checked={onlyUn} onChange={(e) => setOnlyUn(e.target.checked)} /> 미소속만</label>
-        <input className="input" value={q} onChange={(e) => setQ(e.target.value)} placeholder="이름·서비스태그·폴더·IP" style={{ maxWidth: 220 }} />
+        <input className="input" value={q} onChange={(e) => setQ(e.target.value)} placeholder={scoped ? '이름·폴더·IP' : '이름·서비스태그·폴더·IP'} title={scoped ? '범위가 지정된 계정은 서비스태그로 찾지 않습니다(서비스태그를 가립니다)' : undefined} style={{ maxWidth: 220 }} />
         <span className="muted" style={{ fontSize: 12 }}>{items ? `${list.length}대 후보${items.omitted ? ` (상한으로 ${items.omitted}대 생략)` : ''}` : ''}</span>
       </div>
       {!corp ? <div className="muted" style={{ padding: 12 }}>고정할 법인을 먼저 고르십시오(쓰기 범위가 있는 법인만 보입니다). 법인 귀속이 없는 서버는 통합 서버 인벤토리에서 법인을 먼저 정합니다.</div>
@@ -62,7 +62,7 @@ export default function PinModal({ corp: corp0, corps, servicesOf, writableOf, d
                 <tr key={x.key}>
                   <td><input type="checkbox" checked={checked.has(x.key)} onChange={(e) => toggle(x.key, e.target.checked)} aria-label={`${x.name} 선택`} /></td>
                   <td><b>{x.name}</b></td>
-                  <td style={{ fontFamily: 'var(--mono)', fontSize: 12 }}>{x.key}</td>
+                  <td style={{ fontFamily: isMaskedKey(x.key) ? undefined : 'var(--mono)', fontSize: 12 }} className={isMaskedKey(x.key) ? 'muted' : undefined} title={isMaskedKey(x.key) ? MASKED_KEY_TITLE : undefined}>{keyText(x.key)}</td>
                   <td className="muted">{x.kind === 'vm' ? (x.folderPath == null ? '위치 모름' : x.folderPath) : (x.scanEntry ? '스캔 엔트리' : (x.source || '—'))}</td>
                   <td>{x.serviceId ? <span>{svcs.find((s) => s.id === x.serviceId)?.name || '?'} <span className="badge blue">{SRC_LABEL[x.src]}</span></span> : <span className="badge amber">(미지정)</span>}</td>
                 </tr>

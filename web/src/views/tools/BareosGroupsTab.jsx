@@ -17,7 +17,7 @@ import { fmtGb, flattenBareosTree, initialBareosOpen, shortTs, stText, runLine, 
 import { takeBareosGroupHandoff } from './backupViewText.js';   // v2.835 Backup › Detail 'Bareos 그룹 등록 →' 이 넘긴 VM
 import { relayWaitMs, outcomeUnknown, unknownOutcomeText } from './bareosText.js';
 import {
-  DAY_NAMES, LEVELS, NEW_SCHEDULE, scheduleText, draftIssues, toggleDay, GROUP_FILTERS, groupFilterCounts, pickable, buildGroupTree, checkState,
+  DAY_NAMES, LEVELS, NEW_SCHEDULE, scheduleText, draftIssues, CLOCK_TEXT, utcOffsetText, shiftTimeText, nextClockText, toggleDay, GROUP_FILTERS, groupFilterCounts, pickable, buildGroupTree, checkState,
   FIRE_STATE_TEXT, FIRE_STATE_TONE, fireText, fireTone, isDaily, setCadence, scheduleParts,
   KEEP_PRESETS, KEEP_DEFAULT, NEW_GROUP_KEEP, keepOtpReasons, keepText, stepKeep, keepMeaning, keepParts, fireKeepBadge, KEEP_BADGE_TEXT, untilText,
   memberResults, resultBadge, folderSummary, sizeSum, prunePreviewText, unscheduledAfter, unscheduledText, groupDeleteConfirmText,
@@ -200,7 +200,8 @@ export default function BareosGroupsTab({ d }) {
     if (!running || view.kind === 'edit') return undefined;
     const t = setTimeout(load, 4000);
     return () => clearTimeout(t);
-  }, [running, tree, view.kind]);   // eslint-disable-line react-hooks/exhaustive-deps
+    // v2.901(점검 W6): refreshErr 도 본다 — 이어 읽기가 실패해도(트리가 그대로) 다음 시도를 건다
+  }, [running, tree, view.kind, refreshErr]);   // eslint-disable-line react-hooks/exhaustive-deps
 
   // v2.835: 넘겨받은 VM 의 법인 트리가 오면 새 그룹 창을 연다(그 법인이 아니면 버린다 — 다른 법인 VM 을 섞지 않는다)
   useEffect(() => {
@@ -355,7 +356,7 @@ function GroupList({ tree, groups, byId, q, setQ, writable, busy, ovl, onRun, on
     <>
       <div style={{ ...ROW, marginBottom: 12 }}>
         <b style={{ fontSize: 15 }}>백업 그룹 {groups.length}개</b>
-        <span className="muted" style={{ fontSize: 12, flex: '1 1 260px', minWidth: 0 }}>VM 하나는 그룹 하나에만 들어갑니다 · 스케줄은 포탈이 실행합니다(시각은 포탈 서버 시각{tree.tz ? ` ${tree.tz}` : ''})</span>
+        <span className="muted" style={{ fontSize: 12, flex: '1 1 260px', minWidth: 0 }}>VM 하나는 그룹 하나에만 들어갑니다 · 스케줄은 포탈이 실행합니다(기준 시각은 그룹마다 — 현지 서버{tree.clocks ? ` ${utcOffsetText(tree.clocks.serverOffsetMin)}` : ''}{tree.tz ? ` ${tree.tz}` : ''} 또는 중앙 포탈{tree.clocks ? ` ${utcOffsetText(tree.clocks.portalOffsetMin)}` : ''})</span>
         <input className="input" type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="그룹 · VM 이름 검색" aria-label="그룹 검색" style={{ flex: '1 1 180px', minWidth: 0, maxWidth: 260 }} />
         <button type="button" className="login-btn" style={{ flex: 'none', padding: '8px 16px' }} disabled={!writable} onClick={() => onNew('all')}>＋ 새 그룹</button>
       </div>
@@ -419,7 +420,7 @@ function GroupCard({ g, tree, byId, writable, busy, marking = false, ovl, onRun,
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 10, padding: '10px 0', borderTop: '1px solid var(--border-soft)', borderBottom: '1px solid var(--border-soft)' }}>
         <Cell label="스케줄" main={sp.main} sub={sp.sub} />
         <Cell label="보관" main={kp.main} sub={kp.sub} tone={kp.bad ? 'bad' : undefined} />
-        <Cell label="다음 실행" main={g.next ? shortTs(g.next.at) : '—'} sub={g.next ? (g.next.skip ? '건너뜀(회차 중단 때 고름)' : g.next.level) : (g.schedule?.enabled ? '—' : '스케줄 꺼짐')} tone={g.next?.skip ? 'warn' : undefined} />
+        <Cell label="다음 실행" main={g.next ? (nextClockText(g)?.main || shortTs(g.next.at)) : '—'} sub={g.next ? `${g.next.skip ? '건너뜀(회차 중단 때 고름)' : g.next.level}${nextClockText(g) ? ` · ${nextClockText(g).own} · ${nextClockText(g).other}` : ''}` : (g.schedule?.enabled ? '—' : '스케줄 꺼짐')} tone={g.next?.skip ? 'warn' : undefined} />
       </div>
       <StopLines g={g} ss={ss} />
       <div data-group-card-info="" style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', gap: 4, marginTop: -4 }}>
@@ -673,7 +674,14 @@ function GroupEdit({ tree, group, initialFilter, initialSel, vms, byId, groupNam
               </div>
               {!daily && <div role="group" aria-label="요일" style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>{[1, 2, 3, 4, 5, 6, 0].map((day) => dayBtn('days', day, sched.days.includes(day)))}</div>}
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 8 }}>
-                <label style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', gap: 4, fontSize: 12, color: 'var(--text-dim)' }}>실행 시각(포탈 서버 시각)
+                {/* v2.901: 기준 시계 — 현지 서버(이 포탈 서버의 시간대) · 중앙 포탈(포탈 기준 시간대). 옛 그룹은 현지 서버 그대로. 한 줄 전체(UTC 오프셋이 잘리지 않게 — 화면 판독) */}
+                <label style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', gap: 4, fontSize: 12, color: 'var(--text-dim)', gridColumn: '1 / -1' }}>기준 시각
+                  <Select className="input" sort={false} value={sched.clock === 'portal' ? 'portal' : 'server'} disabled={disabledAll} onChange={(e) => setSched((s) => ({ ...s, clock: e.target.value }))} aria-label="기준 시각" style={{ minWidth: 0, fontSize: 14 }}>
+                    <option value="server">{`${CLOCK_TEXT.server}${tree.clocks ? ` (${utcOffsetText(tree.clocks.serverOffsetMin)}${tree.tz ? ` · ${tree.tz}` : ''})` : ''}`}</option>
+                    <option value="portal">{`${CLOCK_TEXT.portal}${tree.clocks ? ` (${utcOffsetText(tree.clocks.portalOffsetMin)})` : ''}`}</option>
+                  </Select>
+                </label>
+                <label style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', gap: 4, fontSize: 12, color: 'var(--text-dim)' }}>{`실행 시각(${CLOCK_TEXT[sched.clock === 'portal' ? 'portal' : 'server']})`}
                   <input className="input" type="time" step={60} value={sched.time} disabled={disabledAll} onChange={(e) => setSched((s) => ({ ...s, time: e.target.value }))} style={{ fontSize: 14, minWidth: 0 }} />
                 </label>
                 <label style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', gap: 4, fontSize: 12, color: 'var(--text-dim)' }}>레벨
@@ -689,7 +697,13 @@ function GroupEdit({ tree, group, initialFilter, initialSel, vms, byId, groupNam
                 </div>
               )}
             </div>
-            <div style={{ background: 'var(--panel-deep)', borderRadius: 8, padding: '8px 12px', fontSize: 12.5 }}>미리 보기: <b>{scheduleText(sched)}</b>{tree.tz ? <span className="muted"> · {tree.tz}</span> : null}</div>
+            <div style={{ background: 'var(--panel-deep)', borderRadius: 8, padding: '8px 12px', fontSize: 12.5 }}>미리 보기: <b>{scheduleText(sched)}</b>{tree.tz && sched.clock !== 'portal' ? <span className="muted"> · {tree.tz}</span> : null}
+              {tree.clocks && tree.clocks.serverOffsetMin !== tree.clocks.portalOffsetMin && (() => {
+                const own = sched.clock === 'portal' ? 'portal' : 'server'; const other = own === 'portal' ? 'server' : 'portal';
+                const t = shiftTimeText(sched.time, tree.clocks[`${own}OffsetMin`], tree.clocks[`${other}OffsetMin`]);
+                return t ? <div className="muted" style={{ marginTop: 4 }}>{`${CLOCK_TEXT[other]}으로는 ${t} — 두 시계가 다릅니다(현지 서버 ${utcOffsetText(tree.clocks.serverOffsetMin)} · 중앙 포탈 ${utcOffsetText(tree.clocks.portalOffsetMin)}).`}</div> : null;
+              })()}
+            </div>
           </section>
 
           <section className="card" style={{ padding: 14, display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', gap: 10, minWidth: 0 }}>
@@ -827,7 +841,7 @@ function GroupDetail({ tree, g, byId, writable, busy, marking = false, onBack, o
       {g.keep != null && <PrunePreview tree={tree} groupId={g.id} keep={g.keep} />}
       <section aria-label="정책 요약" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 220px), 1fr))', gap: 12 }}>
         <Box label="스케줄" main={sp.main} sub={`${sp.sub} · 포탈이 실행`} />
-        <Box label="다음 실행" main={g.next ? shortTs(g.next.at) : '—'} sub={g.next ? `${g.next.skip ? '건너뜀(회차 중단 때 고름)' : g.next.level}${untilText(g.next.at - (tree.now || Date.now())) ? ` · ${untilText(g.next.at - (tree.now || Date.now()))}` : ''}` : (g.schedule?.enabled ? '—' : '스케줄 꺼짐 — 수동 실행만')} />
+        <Box label="다음 실행" main={g.next ? (nextClockText(g)?.main || shortTs(g.next.at)) : '—'} sub={g.next ? `${g.next.skip ? '건너뜀(회차 중단 때 고름)' : g.next.level}${untilText(g.next.at - (tree.now || Date.now())) ? ` · ${untilText(g.next.at - (tree.now || Date.now()))}` : ''}${nextClockText(g) ? ` · ${nextClockText(g).own} · ${nextClockText(g).other}` : ''}` : (g.schedule?.enabled ? '—' : '스케줄 꺼짐 — 수동 실행만')} />
         <Box label="보관" main={kp.main} sub={kp.sub}>
           {slots > 0 && (
             <div role="img" aria-label={`보관 ${g.keep}개 중 ${p?.keptMin ?? '모름'}개 보유`} style={{ display: 'flex', gap: 2, margin: '4px 0' }}>

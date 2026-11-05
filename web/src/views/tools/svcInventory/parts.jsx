@@ -78,8 +78,10 @@ export function SrcCell({ src }) {
   const list = srcSummary(src);
   if (!list.length) return <span className="muted">—</span>;
   return (
-    <span style={{ whiteSpace: 'nowrap', fontSize: 12 }}>
-      {list.map((x, i) => <span key={x.k} title={SRC_LABEL[x.k]}>{i ? <span className="muted"> · </span> : null}{x.label} <b>{x.n}</b></span>)}
+    // 항목('폴더 23')만 줄바꿈을 막고 항목 사이는 줄바꿈된다 — 표 칸은 전역 `tbody td { white-space: nowrap }` 이라 여기서 normal 로 연다.
+    //   출처가 셋 이상이면 칸 전체 nowrap 이 1440px '전체 법인' 표를 넘쳤다(6차 10 — 실측 27px · 구분자는 nowrap 밖에 둬야 줄바꿈 자리가 생긴다)
+    <span style={{ fontSize: 12, whiteSpace: 'normal' }}>
+      {list.map((x, i) => <React.Fragment key={x.k}>{i ? <span className="muted"> · </span> : null}<span title={SRC_LABEL[x.k]} style={{ whiteSpace: 'nowrap' }}>{x.label} <b>{x.n}</b></span></React.Fragment>)}
     </span>
   );
 }

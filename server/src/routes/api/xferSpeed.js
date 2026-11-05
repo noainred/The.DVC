@@ -36,6 +36,9 @@ import { SCHEDULE_KINDS, SCHEDULE_MAX, GRACE_MS, MISSED_REASONS } from '../../xf
 import { isDemoGuest } from '../../auth/demoGuest.js';
 import { isDemoCollector, isDemoEdgeId } from '../../mock/demo/edge.js';
 import { waitDrain } from '../../util/waitDrain.js'; // v2.783(점검 Q5 — O-B4): 공용 백프레셔 대기
+import { config } from '../../config.js';
+import { getTarget, edgeTargetId } from '../../ping/store.js';
+import { windowOf, targetBoundsOf } from '../../ping/service.js';
 
 const adminOnly = requireRole('admin');
 const csvPerm = requirePerm('data.csv');
@@ -84,6 +87,23 @@ const daysArg = (v, def, max) => {
   if (n == null) return def;
   return Math.max(1, Math.min(max, Math.floor(n)));
 };
+
+/**
+ * 상세 창 — `/history` 와 `/ping`(v2.890)이 **같은 함수**로 만든다(두 차트가 같은 시간 축을 그린다).
+ * `end`(ms)가 없거나 숫자가 아니거나 지금보다 뒤면 '지금 창'(past:false — 끝이 열려 있다). 창 = [end − days, end].
+ */
+export function detailWindowOf(query, now = Date.now()) {
+  const days = daysArg(query?.days, 7, HISTORY_MAX_DAYS);
+  const wantEnd = numOrNull(query?.end);
+  const end = wantEnd == null ? now : Math.max(days * DAY, Math.min(now, Math.floor(wantEnd)));
+  const past = end < now;   // 과거 창이면 끝을 닫는다(지금 창은 끝이 열려 있다 — 조회 사이에 들어온 표본을 빼지 않게)
+  return { days, now, end, past, since: end - days * DAY };
+}
+
+/** v2.890 — Ping 패널이 값을 못 그리는 이유(웹 `xferSpeedText.PING_REASON_TEXT` 와 1:1 — 테스트가 대조한다). */
+export const PING_REASONS = Object.freeze(['no-target', 'monitor-off', 'disabled', 'before-retention', 'no-samples']);
+/** Ping 칸 수 — 기본 240(24시간이면 6분 칸), [60, 480]. */
+const PING_POINTS_DEFAULT = 240;
 
 /**
  * 화면 기억(v2.740 E-02·E-04) — 화면이 30초(측정 중 4초)마다 부르는데 데이터는 측정 주기(기본 30분)에만 바뀐다.
@@ -233,13 +253,8 @@ api.get('/tools/xfer-speed/history', adminOnly, fullScopeOnly, async (req, res) 
   // v2.768(점검 R3-C2-2): 데모 계정에는 실등록 엣지의 기록이 없는 것과 같다(존재도 흘리지 않게 같은 404).
   if (a && isDemoGuest(req.user) && !demoAgentSet(loadCollectors())(a.id)) return res.status(404).json({ ok: false, reason: '등록부와 측정 기록 어디에도 없는 엣지입니다.' });
   if (!a) return res.status(404).json({ ok: false, reason: '등록부와 측정 기록 어디에도 없는 엣지입니다.' });
-  const days = daysArg(req.query.days, 7, HISTORY_MAX_DAYS);
-  const now = Date.now();
-  const wantEnd = numOrNull(req.query.end);
-  const end = wantEnd == null ? now : Math.max(days * DAY, Math.min(now, Math.floor(wantEnd)));
-  const past = end < now;   // 과거 창이면 끝을 닫는다(지금 창은 예전처럼 끝이 열려 있다 — 조회 사이에 들어온 표본을 빼지 않게)
+  const { days, now, end, past, since } = detailWindowOf(req.query);
   const until = past ? end : null;
-  const since = end - days * DAY;
   let source; let series; let stats; let truncated = false;
   if (days <= RAW_MAX_DAYS) {
     const r = await samplesSince(since, { agent: a.id, limit: 100_000, until });
@@ -280,6 +295,52 @@ api.get('/tools/xfer-speed/history', adminOnly, fullScopeOnly, async (req, res) 
     start: since, end, now, past,
     oldest: await oldestOf(a.id),
     retention: (({ sampleRetentionDays, dailyRetentionDays }) => ({ sampleDays: numOrNull(sampleRetentionDays), dailyDays: numOrNull(dailyRetentionDays) }))(loadXferSpeedSettings()),
+  });
+});
+
+/**
+ * v2.890 — 한 엣지의 Ping 추이(전송 속도 상세의 'Ping 함께 보기' · 시안 docs/design/xfer-ping · 사용자 컨펌 2026-11-05 '기본값대로').
+ *
+ * 새로 재지 않는다 — Ping 모니터가 엣지 노드를 자동 대상(`edge_<id>` · TCP 연결 · 1분 주기)으로 이미 잰 기록을 읽는다.
+ * 창은 `/history` 와 같은 `detailWindowOf` 이고, 값이 없으면 빈 배열 대신 사유(`reason` — PING_REASONS)를 싣는다.
+ *  · 권한은 형제 라우트와 같다(adminOnly + fullScopeOnly) · 데모 계정은 데모 엣지만(같은 404).
+ *  · 응답에 대상 호스트를 싣지 않는다(id·kind·포트·enabled 만 — 포트는 화면 문구 'TCP 연결(443)' 용).
+ *  · 저장소를 못 읽으면 503 — 빈 차트를 '측정 없음' 으로 보이지 않게.
+ */
+api.get('/tools/xfer-speed/ping', adminOnly, fullScopeOnly, async (req, res) => {
+  const a = await resolveAgent(req.query.agent);
+  if (a && isDemoGuest(req.user) && !demoAgentSet(loadCollectors())(a.id)) return res.status(404).json({ ok: false, reason: '등록부와 측정 기록 어디에도 없는 엣지입니다.' });
+  if (!a) return res.status(404).json({ ok: false, reason: '등록부와 측정 기록 어디에도 없는 엣지입니다.' });
+  const { days, now, end, past, since } = detailWindowOf(req.query);
+  const pn = numOrNull(req.query.points);
+  const points = pn == null ? PING_POINTS_DEFAULT : Math.max(60, Math.min(480, Math.floor(pn)));
+  const base = {
+    ok: true, agent: a.id, days, start: since, end, now, past, offsetMin: DAY_OFFSET_MIN,
+    monitorEnabled: !!config.ping.enabled, intervalMs: config.ping.pollIntervalMs, timeoutMs: config.ping.timeoutMs,
+    retentionDays: numOrNull(config.ping.retentionDays),
+  };
+  const tid = edgeTargetId(a.col || { id: a.id });
+  const tgt = tid ? getTarget(tid) : null;
+  if (!tgt) return res.json({ ...base, reason: 'no-target', target: null, method: null, bucketMs: null, source: null, series: [], stats: null, last: null, oldest: { sampleTs: null } });
+  let w; let b;
+  try {
+    w = await windowOf(tgt.id, { start: since, end, past, points });
+    b = await targetBoundsOf(tgt.id);
+  } catch (e) {
+    return res.status(503).json({ ok: false, reason: `Ping 기록을 읽지 못했습니다 — ${String(e?.message || e).slice(0, 200)}` });
+  }
+  const oldestTs = numOrNull(b.oldestTs);
+  let reason = null;
+  if (!config.ping.enabled) reason = 'monitor-off';
+  else if (tgt.enabled === false) reason = 'disabled';
+  else if (!w.series.length) reason = oldestTs != null && end <= oldestTs ? 'before-retention' : 'no-samples';
+  const last = !past && b.latest ? { ts: numOrNull(b.latest.ts), rtt: b.latest.ok ? numOrNull(b.latest.rtt) : null, ok: !!b.latest.ok } : null;
+  res.json({
+    ...base, reason,
+    target: { id: tgt.id, kind: tgt.kind, port: numOrNull(tgt.port), enabled: tgt.enabled !== false },
+    method: tgt.kind === 'icmp' ? 'icmp' : 'tcp-connect',
+    bucketMs: w.bucketMs, source: w.source, series: w.series, stats: w.stats, last,
+    oldest: { sampleTs: oldestTs },
   });
 });
 

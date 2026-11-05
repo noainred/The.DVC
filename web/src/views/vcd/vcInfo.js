@@ -72,6 +72,25 @@ export function vcPermRows(items, { entityType = null, entity = null } = {}) {
     .slice().sort((a, b) => String(a.entityName || a.entity || '').localeCompare(String(b.entityName || b.entity || '')) || String(a.principal).localeCompare(String(b.principal)));
 }
 
+/**
+ * v2.901: 리소스 풀 설정 행 — 호스트의 클러스터(clusterRef = 풀 owner)로 고르고, 짝을 못 지으면(데모 · 옛 수집) 이 호스트 VM 의 풀 이름으로 고른다.
+ *   이름으로 고르면 다른 클러스터의 같은 이름 풀이 섞일 수 있다 — byName 으로 알려 화면이 그렇게 말한다.
+ */
+export function poolRowsForHost(items, host, poolNames = []) {
+  const list = (Array.isArray(items) ? items : []).filter((x) => x && typeof x === 'object');
+  const own = host?.clusterRef ? list.filter((x) => x.owner === host.clusterRef) : [];
+  if (own.length) return { rows: own, byName: false };
+  const names = new Set(poolNames);
+  return { rows: list.filter((x) => names.has(x.name)), byName: true };
+}
+/** 할당 값 문구 — limit -1 = 무제한 · 값이 없으면 '—'(단위를 붙이지 않는다). unit: 'MHz' | 'GB'(MB 를 GB 로). */
+export function allocText(v, unit) {
+  if (v == null || !Number.isFinite(v)) return '—';
+  if (v === -1) return '무제한';
+  return unit === 'GB' ? `${(Math.round((v / 1024) * 10) / 10).toLocaleString()} GB` : `${v.toLocaleString()} MHz`;
+}
+export const SHARE_LEVEL_TEXT = Object.freeze({ low: '낮음', normal: '보통', high: '높음', custom: '사용자 지정' });
+
 /** 머리 문구 — 읽은 시각 · 갱신 주기(API 값). 주기를 화면에 박지 않는다. */
 export function vcInfoHeadText(d) {
   if (!d) return '';

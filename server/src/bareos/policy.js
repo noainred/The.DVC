@@ -33,7 +33,7 @@ const FILE = () => path.join(config.configDir, 'bareos-policy.json');   // ⚠ �
 registerStateFile('bareos-policy.json');
 export const POLICY_CONCURRENCY = 4;
 export const DIRECTOR_DEADLINE_MS = 180_000;
-export const RUN_DEADLINE_MS = 15 * 60_000;
+export const RUN_DEADLINE_MS = 15 * 60_000;   // 전체 시한의 바닥 — 실제 시한은 runDeadlineMs(Director 수)
 export const TICK_MS = 60_000;
 export const RETRY_MS = 30 * 60_000;
 export const TRIES_MAX = 3;
@@ -48,6 +48,7 @@ const isObj = (v) => v != null && typeof v === 'object' && !Array.isArray(v);
 let _db = null; const _loadErr = makeLoadError(); let _rev = 0;
 let _busy = false; let _timer = null;
 const _collecting = new Set();
+const _callOf = new Map();   // v2.901(점검 B3): Director 마다 지금 도는 호출 표지 — 시한 뒤 늦은 결과가 더 새 호출의 값을 덮지 않게
 const _manualAt = new Map();
 
 function empty() { return { version: 1, directors: {}, sched: { day: '', ok: null, tries: 0, nextTry: null, at: null } }; }
@@ -119,32 +120,54 @@ function giveUpAfter(ms, p) {
 }
 
 /**
- * 수집 — Director 들(또는 고른 것만). 이미 도는 중이면 { busy:true }.
- * @param {{ trigger?:'timer'|'manual', directorIds?:string[]|null, demoOnly?:boolean, now?:number }} o
- * @returns {Promise<{ busy?:boolean, done:{ id, ok, any, code? }[] }>}
+ * v2.901(점검 B3): 전체 시한은 Director 수에서 유도한다 — 동시 POLICY_CONCURRENCY 개씩 돌고 하나가 DIRECTOR_DEADLINE_MS 까지 걸리므로
+ * 고정 15분이면 Director 가 많을 때(느리지만 성공하는 Director 가 20개 남짓) 뒤쪽이 시작도 못 한 채 시한에 걸렸다. 바닥은 RUN_DEADLINE_MS.
  */
-export async function collectPolicy({ trigger = 'timer', directorIds = null, demoOnly = false } = {}) {
-  if (_busy) return { busy: true, done: [] };
+export function runDeadlineMs(n) {
+  const k = Number.isFinite(n) && n > 0 ? Math.ceil(n / POLICY_CONCURRENCY) : 0;
+  return Math.max(RUN_DEADLINE_MS, k * DIRECTOR_DEADLINE_MS + 60_000);
+}
+/** 틱의 성공 판정(순수) — **모든 대상이 끝났고** 각각 무엇이든 읽었을 때만. 시한으로 남은 Director 가 있으면 성공이 아니다(그날 재시도 — 점검 B3). */
+export const runOk = (r) => !!r && Array.isArray(r.done) && r.done.length > 0 && r.done.length === r.total && r.done.every((x) => x.any);
+
+/**
+ * 수집 — Director 들(또는 고른 것만). 이미 도는 중이면 { busy:true }.
+ * @param {{ trigger?:'timer'|'manual', directorIds?:string[]|null, demoOnly?:boolean, deadlineMs?:number }} o deadlineMs 는 테스트용(없으면 runDeadlineMs)
+ * @returns {Promise<{ busy?:boolean, total:number, timedOut?:boolean, done:{ id, ok, any, code? }[] }>}
+ */
+export async function collectPolicy({ trigger = 'timer', directorIds = null, demoOnly = false, deadlineMs = null } = {}) {
+  if (_busy) return { busy: true, total: 0, done: [] };
   _busy = true;
   const done = [];
+  let total = 0; let timedOut = false;
   try {
     const settings = effectiveSettings();
     const ps = settings.defaults?.policy || {};
     const keys = policyKeys(ps);
     const off = new Set(Array.isArray(ps.off) ? ps.off : []);
     const targets = settings.directors.filter((d) => (directorIds ? directorIds.includes(d.id) : !off.has(d.id)));
+    total = targets.length;
     for (const d of targets) _collecting.add(d.id);
     const work = poolSettled(targets, POLICY_CONCURRENCY, async (d) => {
+      // 전체 시한 뒤에는 새 Director 를 시작하지 않는다 — 가드(_busy) 밖에서 도는 호출이 Director 시한(180초)보다 길게 남지 않게. 남은 것은 done 에 없어 그날 재시도
+      if (timedOut) { _collecting.delete(d.id); return; }
+      const call = Symbol(d.id);
+      _callOf.set(d.id, call);
       let res = null; let err = null;
       try {
         res = normPolicyResult(await onDirector(d.id, 'policy', { keys }, { trigger, signal: AbortSignal.timeout(DIRECTOR_DEADLINE_MS), demoOnly }));
       } catch (e) { err = { code: e?.code || 'error', message: e?.message || String(e) }; }
+      // 시한 뒤 다음 수집이 같은 Director 를 다시 부르기 시작했으면 이 늦은 결과는 버린다(더 새 호출이 쓴다)
+      if (_callOf.get(d.id) !== call) return;
+      _callOf.delete(d.id);
       const db = loadPolicy();
       db.directors[d.id] = mergeDirector(db.directors[d.id], { name: d.name, keys, res, err, at: Date.now(), trigger });
       done.push({ id: d.id, ok: db.directors[d.id].ok, any: db.directors[d.id].any, ...(err ? { code: err.code } : {}) });
       _collecting.delete(d.id);
+      // 전체 시한 뒤에 끝난 Director — 예전에는 메모리에만 합쳐 다음 수집 · 재시작 전까지 파일과 화면이 옛 값이었다
+      if (timedOut) { try { persist(); } catch (e) { console.warn(`[bareos] 정책 수집본(늦은 결과) 저장 실패: ${String(e?.message || e).slice(0, 200)}`); } }
     });
-    try { await giveUpAfter(RUN_DEADLINE_MS, work); } catch (e) { console.warn(`[bareos] ${e.message}`); }
+    try { await giveUpAfter(deadlineMs ?? runDeadlineMs(targets.length), work); } catch (e) { timedOut = true; console.warn(`[bareos] ${e.message}`); }
     // 설정에서 사라진 Director 의 저장본은 지운다(매핑이 없으면 화면이 쓸 곳이 없다)
     const db = loadPolicy();
     if (!directorIds) for (const id of Object.keys(db.directors)) if (!settings.directors.some((d) => d.id === id)) delete db.directors[id];
@@ -155,7 +178,7 @@ export async function collectPolicy({ trigger = 'timer', directorIds = null, dem
     _busy = false;
     _collecting.clear();
   }
-  return { done };
+  return { done: [...done], total, ...(timedOut ? { timedOut: true } : {}) };
 }
 export const policyCollecting = () => new Set(_collecting);
 export const policyBusy = () => _busy;
@@ -195,7 +218,7 @@ export async function policyTick(now = Date.now()) {
   if (!settings.directors.length) return null;
   const r = await collectPolicy({ trigger: 'timer' });
   if (r.busy) return null;
-  const ok = r.done.length > 0 && r.done.every((x) => x.any);
+  const ok = runOk(r);
   if (due) {
     const tries = db.sched.day === day ? (Number(db.sched.tries) || 0) + 1 : 1;
     loadPolicy().sched = { day, ok, tries, at: now, nextTry: ok ? null : now + RETRY_MS };
@@ -210,7 +233,7 @@ export function startBareosPolicy() {
   _timer.unref?.();
 }
 
-export function _resetPolicyForTest() { _db = null; _loadErr.clear(); _rev = 0; _busy = false; _collecting.clear(); _manualAt.clear(); if (_timer) { clearInterval(_timer); _timer = null; } }
+export function _resetPolicyForTest() { _db = null; _loadErr.clear(); _rev = 0; _busy = false; _collecting.clear(); _callOf.clear(); _manualAt.clear(); if (_timer) { clearInterval(_timer); _timer = null; } }
 
 /* ───────────────────────── 화면 값(Director 에 접속하지 않는다) ───────────────────────── */
 

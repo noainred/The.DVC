@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { entityHash, vcAlarmRows, vcAlarmCounts, taskDurText, vcTaskRows, vcTaskCounts, vcPermRows, vcInfoHeadText, entityTypeText, replicationSummary, vlcmRows, vlcmCounts, vlcmForHost } from './vcInfo.js';
+import { poolRowsForHost, allocText, entityHash, vcAlarmRows, vcAlarmCounts, taskDurText, vcTaskRows, vcTaskCounts, vcPermRows, vcInfoHeadText, entityTypeText, replicationSummary, vlcmRows, vlcmCounts, vlcmForHost } from './vcInfo.js';
 import { parseVcRoute } from './vcdRoute.js';
 
 describe('v2.898 vCenter 알람 · 최근 작업 · 권한 목록 — 화면 판정', () => {
@@ -51,5 +51,15 @@ describe('v2.898 ④ Linked Mode · vLCM — 화면 판정', () => {
     expect(vlcmForHost(items, { clusterRef: 'c3', cluster: 'zzz' }, 'host-2')).toEqual({ row: items[2], nonCompliant: true });
     expect(vlcmForHost(items, { cluster: 'A' }, 'host-2').nonCompliant).toBe(false);
     expect(vlcmForHost(items, { cluster: 'nope' }, 'host-2')).toBe(null);
+  });
+});
+
+describe('v2.901 리소스 풀 설정 · 호스트 마운트 · 팀 구성 문구', () => {
+  it('풀 — 클러스터(owner)로 고르고, 짝이 없으면 이름으로(byName) · 할당 문구(무제한 · 단위 · 값 없음)', () => {
+    const items = [{ ref: 'r1', name: 'Prod', owner: 'domain-c7' }, { ref: 'r2', name: 'Prod', owner: 'domain-c9' }, { ref: 'r3', name: 'Dev', owner: null }];
+    expect(poolRowsForHost(items, { clusterRef: 'domain-c7' }, ['Dev']).rows.map((x) => x.ref)).toEqual(['r1']);
+    const byName = poolRowsForHost(items, { clusterRef: null }, ['Prod']);
+    expect([byName.byName, byName.rows.map((x) => x.ref)]).toEqual([true, ['r1', 'r2']]);
+    expect([allocText(-1, 'MHz'), allocText(8000, 'MHz'), allocText(65536, 'GB'), allocText(null, 'GB'), allocText(0, 'GB')]).toEqual(['무제한', '8,000 MHz', '64 GB', '—', '0 GB']);
   });
 });
