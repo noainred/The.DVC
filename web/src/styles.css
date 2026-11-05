@@ -2571,6 +2571,8 @@ tr.row-sel > td { background: rgba(59, 130, 246, .10); }
 .wiki-comment-head { font-size: 12.5px; display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
 .wiki-mini-act { margin-left: auto; background: none; border: 0; color: var(--text-dim); cursor: pointer; font-size: 12px; }
 .wiki-mini-act:hover { color: var(--red); }
+/* v2.907 Chromium 판독: 댓글 머리에 버튼이 둘(고치기 · 지우기)이면 둘 다 margin-left:auto 라 남는 폭을 나눠 가져 '고치기' 가 줄 가운데 떴다 — 둘째부터는 붙인다 */
+.wiki-mini-act ~ .wiki-mini-act { margin-left: 10px; }
 .wiki-comment-form { display: flex; flex-direction: column; gap: 6px; align-items: flex-start; }
 .wiki-comment-form textarea { width: 100%; }
 /* 편집 · 새 문서 · 이력 · 찾기 · 설정 */
