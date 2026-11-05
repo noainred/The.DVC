@@ -557,10 +557,13 @@ export function pingModel(p, { w = 1000, h = 170, padL = 52, padR = 12, padT = 1
   };
 }
 
-/** 그 시각에 가장 가까운 Ping 칸 — 허용 거리는 칸 하나(칸이 없던 구간은 고르지 않는다). */
+/**
+ * 그 시각에 가장 가까운 Ping 칸 — 허용 거리는 칸 하나와 '선을 끊는 간격의 절반'(hoverAt 과 같은 규칙) 중 큰 쪽.
+ * 칸 하나만 허용하면 표본이 칸보다 성긴 대상에서 Ping 칸이 바로 옆에 있어도 'Ping —' 였다(v2.890 화면 확인). 선이 끊긴 구간은 고르지 않는다.
+ */
 export function pingAt(pm, ts) {
   if (!pm?.pts?.length || !Number.isFinite(ts)) return null;
-  const tol = Math.max(pm.bucketMs || 0, 60_000);
+  const tol = Math.max(pm.bucketMs || 0, (pm.gapMs || 0) / 2, 60_000);
   let best = null;
   for (const b of pm.pts) { const d = Math.abs(b.c - ts); if (d <= tol && (!best || d < best.d)) best = { b, d }; }
   return best ? best.b : null;

@@ -186,6 +186,16 @@ describe('마우스 오버 — 한 상자에 같은 시각의 ↓ · ↑ · Ping
     expect(pingLineText({ avg: null, n: 6, loss: 1, fail: 6 })).toEqual({ text: 'Ping 응답 없음 · 6회 모두 실패', ok: false });
     expect(pingLineText(null).text).toBe('Ping —');
   });
+  it('표본이 칸보다 성겨도(15분) 전송 회차 옆 Ping 칸을 고른다 — Ping — 로 비우지 않는다', () => {
+    const series = [];
+    for (let ts = START; ts < END; ts += 15 * MIN) series.push({ ts: Math.floor(ts / BMS) * BMS, avg: 250, min: 250, max: 250, loss: 0, n: 1 });
+    const pm3 = pingModel(pingResp({ series }), { w: 1000, h: 170, padL: m.padL, padR: m.padR, from: m.from, to: m.to });
+    // 이웃한 두 칸 중심의 가운데(간격이 칸 두 개보다 넓은 곳) — 가장 가까운 칸 중심에서 6분(칸 하나) 넘게 떨어진 시각
+    const i = pm3.pts.findIndex((b, k) => k + 1 < pm3.pts.length && pm3.pts[k + 1].c - b.c > 2 * BMS);
+    const at = (pm3.pts[i].c + pm3.pts[i + 1].c) / 2;
+    expect(Math.min(...pm3.pts.map((b) => Math.abs(b.c - at)))).toBeGreaterThan(BMS);
+    expect(pingAt(pm3, at)).not.toBeNull();
+  });
   it('칸이 없던 구간은 고르지 않는다', () => {
     const p = pingResp({ series: [{ ts: START, avg: 100, min: 100, max: 100, loss: 0, n: 6 }] });
     const pm2 = pingModel(p, { w: 1000, h: 170, padL: m.padL, padR: m.padR, from: m.from, to: m.to });
