@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { folderTreeOf, matrixColumns, faultsView, backupView, powerText, srcSummary, groupActions, GROUP_TITLE, pctText } from './svcInventoryText.js';
+import { folderTreeOf, matrixColumns, faultsView, backupView, powerText, srcSummary, groupActions, GROUP_TITLE, REASON_TEXT, pctText } from './svcInventoryText.js';
 
 const svc = (id, path, n) => ({ id, name: id, path, stat: { n: { total: n } } });
 
@@ -36,5 +36,13 @@ describe('svcInventoryText', () => {
     expect(groupActions({ kind: 'entry', value: 'e1' }).op).toBe('scan.label');
     expect(groupActions({ kind: 'manual' }).pinOnly).toBe(true);
     for (const k of Object.keys(GROUP_TITLE)) expect(GROUP_TITLE[k]({ value: 'x', entry: {} }).includes('`')).toBe(false);
+  });
+  it('이유별 묶음 제목 — 못 받음은 수동 등록으로 단정하지 않고 법인 귀속 없음은 이유를 밝힌다(5차 2차 반증 1 · R18)', () => {
+    expect(GROUP_TITLE.manual({ value: 'not-reported' })).toContain('모릅니다');
+    expect(GROUP_TITLE.manual({ value: 'not-reported' })).not.toContain('수동 등록 iDRAC');
+    expect(GROUP_TITLE.nocorp({ value: 'tag-conflict' })).toContain('두 법인');
+    expect(GROUP_TITLE.nocorp({ value: 'attr-error' })).toContain('오류');
+    expect(GROUP_TITLE.nocorp({ value: '' })).toContain('어느 귀속 규칙에도');
+    for (const k of ['source-unreported', 'no-corp-error', 'no-corp-conflict']) { expect(REASON_TEXT[k]).toBeTruthy(); expect(REASON_TEXT[k].includes('`')).toBe(false); }
   });
 });

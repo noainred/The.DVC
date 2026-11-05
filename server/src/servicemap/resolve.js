@@ -14,7 +14,8 @@
  * 비교는 전부 소문자(4차 반증 20).
  *
  * 구성원 입력 모양:
- *   { key, kind:'vm'|'bm', corp, name, folderPath?:string|null, tags?:string[]|null, scan?:{entryId,label}|null }
+ *   { key, kind:'vm'|'bm', corp, name, folderPath?:string|null, tags?:string[]|null, scan?:{entryId,label}|null, scanWhy?:'unknown-entry'|'old-source' }
+ *   scanWhy(5차 R18): scan 이 없는 이유 — 보고된 엔트리 id 가 중앙 등록부에 없음 · 보고한 엣지·수집 서버가 엔트리 id 를 보내지 않는 구버전.
  *   tags: undefined = 태그 규칙 꺼짐 · null = 그 vCenter 태그를 못 읽음(unchecked) · [] = 읽었고 카테고리 태그 없음.
  */
 const lc = (s) => String(s ?? '').trim().toLowerCase();
@@ -54,7 +55,7 @@ const hit = (serviceId, src, via) => ({ serviceId, src, via: String(via ?? '') }
 
 /** 자동 판정(고정 제외). 순수. */
 export function autoResolve(m, idx, { tagCategory = '' } = {}) {
-  if (!m || !m.corp) return { serviceId: null, src: 'none', reason: 'no-corp' };
+  if (!m || !m.corp) return { serviceId: null, src: 'none', reason: m?.corpWhy === 'attr-error' ? 'no-corp-error' : m?.corpWhy === 'tag-conflict' ? 'no-corp-conflict' : 'no-corp' };
   const c = idx.get(m.corp);
   if (m.kind === 'vm') {
     const f = typeof m.folderPath === 'string' ? m.folderPath.slice(0, FOLDER_INPUT_MAX) : null;
@@ -87,7 +88,7 @@ export function autoResolve(m, idx, { tagCategory = '' } = {}) {
   }
   const nr = c ? nameRuleOf(c, m.name) : null;
   if (nr) return hit(nr.serviceId, 'rule', `${nr.match}:${nr.value}`);
-  if (!scan) return { serviceId: null, src: 'none', reason: 'no-scan-entry' };
+  if (!scan) return { serviceId: null, src: 'none', reason: m.scanWhy === 'unknown-entry' ? 'scan-entry-unknown' : m.scanWhy === 'old-source' ? 'source-old' : m.scanWhy === 'not-reported' ? 'source-unreported' : 'no-scan-entry' };
   if (!scan.label) return { serviceId: null, src: 'none', reason: 'scan-label-empty', unmapped: { kind: 'entry', value: String(scan.entryId || '') } };
   return { serviceId: null, src: 'none', reason: 'scan-label-unmapped', unmapped: { kind: 'scan', value: scan.label } };
 }

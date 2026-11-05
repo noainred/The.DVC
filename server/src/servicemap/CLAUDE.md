@@ -29,5 +29,15 @@
   설정 손상은 `settingsLoadError()` 로만 안다(`loadSettings` 는 던지지 않는다) — 손상이면 모름(null)이지 해당 없음이 아니다(1차 반증 2). 범위 계정 `meta.backup` 은 자기 법인 기준(`backupMetaFor`).
 - **키**: VM = `iu:<vcenterId>:<instanceUuid>`(없으면 `vm:<moref id>`) · 베어메탈 = `st:<서비스태그>`(없으면 `fl:<fleetId sha1 16자>` — 주소 원문을 키에 싣지 않는다).
 - **의존 방향**: 도메인 모듈(`servicemap/*`)은 `routes/` 를 import 하지 않는다(arch 테스트) — 스냅샷·fleet·장애·백업 입력 수집은 라우트 층에서 한다.
+- **판정 결과 memo(`inventoryFor`)**: 키 = 스냅샷 세대 · 저장소 rev · 입력 세대(gather 시각 · inputRev) · 알려진 법인 · 범위 · 관리자 판본(12초 · 4개). 판정에 새 입력을 더하면
+  **그 입력이 바뀔 때 키도 바뀌는지** 먼저 답할 것(5차 2차 M10/R5). 읽기 경로는 깊게 동결한 참조(`peekMap`·`peekPins`)만 쓰고 고치지 않는다 — 고치면 던진다.
+- **입력 다시 읽기**(`?fresh=1`): 쓰기 계정 · 프로세스당 `FRESH_MIN_MS` 한 번(429 + `waitSec`·`agoSec` — 상한은 포탈 전체에 하나라 다른 사용자가 읽은 입력은 일반 새로고침으로 받는다) —
+  화면은 `meta.limits.freshMinMs` 로 안내하고(숫자를 박지 않는다) 진행 중·상한 동안 버튼을 잠근다. fresh 는 **재시도하지 않는다**(429 를 일시 오류로 다시 물으면 늦게 와 문구를 덮는다).
+  `_gather` 를 비우지 말고 `_inputRev` 만 올린다 — gather 가 같은 스냅샷의 진행 중 수집 뒤에 잇는다(2차 반증 4: 비우면 수집이 두 벌 겹쳐 돈다).
+- **스캔 엔트리 id 는 세 경로**: 등록부 `scanRangeId` · 엣지 push(`fleetPush` → `central/fleet.js` — 필드 없음 = null) · 수집 서버 pull(`collector/agent.js buildExport` →
+  `remoteInventory.js SERVER_STR_KEYS` — 필드 없음 = 구버전). 판정은 `scanInfoOf` 하나(모르는 엔트리 · 구버전 · **못 받음(not-reported)** · 수동 등록을 나눈다 — R6·R18).
+  엣지·수집 서버 출처인데 그 서버 기록이 없으면 '못 받음' 이지 수동 등록이 아니다(2차 반증 1). 수집 서버 경로가 id 를 주지 않으면 같은 서비스 태그의 엣지 push 값을 쓴다(값이 갈리면 쓰지 않는다 — 2차 반증 5).
+- **법인 귀속 없음은 이유별**(R18 둘째 절): 귀속 판정 오류 · 서비스 태그가 두 법인에 걸려 보류(`buildVcIndex.conflictTags`) · 어느 규칙에도 맞지 않음. 묶음 키 `nocorp|<이유>`.
+- **구성원 조회 `members?global=<id>`** 는 corp 없이도 범위 안 전 법인을 준다(화면 '전 법인 구성원 모두 보기'). 영향 호스트의 '함께 떠받치는 서비스' 에서는 **그 전역 서비스의 법인 서비스 id 를 모두** 뺀다(`svc` 만 빼면 자기 자신이 뜬다 — v2.887~v2.890 결함).
 - **라우트(`routes/api/svcInventory.js`)·이 폴더를 고치면 커밋 전에 `node scripts/api-doc.mjs` · `node scripts/arch-doc.mjs`** — 줄 번호가 바뀌어 `apiDoc2563`·`audit2613h` 가 깨진다(v2.887·v2.890 두 번 전량 verify 에서 처음 잡혔다).
-- 회귀: `server/test/svcInventory2887.test.js` · `server/test/svcInventoryReview5.test.js`(5차 검토 1차 — 수정 전 코드에서 10/10 실패 확인) · 웹 `web/src/views/tools/svcInventoryText.test.js`.
+- 회귀: `server/test/svcInventory2887.test.js` · `server/test/svcInventoryReview5.test.js`(5차 검토 1차 — 수정 전 코드에서 10/10 실패 확인) · `svcInventoryReview5b.test.js`(2차) · 웹 `web/src/views/tools/svcInventoryText.test.js`.

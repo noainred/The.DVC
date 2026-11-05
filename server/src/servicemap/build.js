@@ -165,13 +165,20 @@ export function buildQueues({ members = [], resolved, pins = {}, allowed = null,
     if (r.src === 'pin' && r.redundant) redundant.push({ key: m.key, name: m.name, kind: m.kind, corp: m.corp, serviceId: r.serviceId, via: r.auto.src });
     if (r.serviceId) continue;
     let gk; let kind; let value = '';
-    if (!m.corp) { gk = 'nocorp'; kind = 'nocorp'; }
+    if (!m.corp) {   // 이유별로 나눈다(5차 R18 둘째 절) — 귀속 판정 실패 · 서비스 태그가 두 법인에 걸림 · 어느 규칙에도 맞지 않음
+      kind = 'nocorp'; value = r.reason === 'no-corp-error' ? 'attr-error' : r.reason === 'no-corp-conflict' ? 'tag-conflict' : '';
+      gk = value ? `nocorp|${value}` : 'nocorp';
+    }
     else if (r.unmapped?.kind === 'folder') { kind = 'folder'; value = r.unmapped.value; gk = `folder|${m.corp}|${value}`; }
     else if (r.unmapped?.kind === 'tag') { kind = 'tag'; value = r.unmapped.value; gk = `tag|${m.corp}|${lc(value)}`; }
     else if (r.unmapped?.kind === 'entry') { kind = 'entry'; value = r.unmapped.value; gk = `entry|${m.corp}|${value}`; }
     else if (r.unmapped?.kind === 'scan') { kind = 'scan'; value = r.unmapped.value; gk = `scan|${m.corp}|${lc(value)}`; }
     else if (r.reason === 'placement-unknown') { kind = 'placement'; gk = `placement|${m.corp}`; }
-    else { kind = 'manual'; gk = `manual|${m.corp}`; }
+    else {
+      // 묶을 출처 없음 — 이유별로 나눈다(5차 R18: 예전에는 수동 등록·구버전 엣지·모르는 엔트리를 한 묶음으로 뭉뚱그렸다)
+      kind = 'manual'; value = r.reason === 'scan-entry-unknown' ? 'unknown-entry' : r.reason === 'source-old' ? 'old-source' : r.reason === 'source-unreported' ? 'not-reported' : '';
+      gk = `manual|${m.corp}|${value}`;
+    }
     if (!groups.has(gk)) {
       const e = kind === 'entry' ? scanEntries.get(value) : null;
       groups.set(gk, { key: gk, kind, corp: m.corp, value, n: 0, vm: 0, bm: 0, unchecked: 0, names: [], keys: [],
