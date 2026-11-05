@@ -53,13 +53,20 @@ export function folderMatches(prefix, folderPath) {
   if (prefix === '/') return folderPath === '/';
   return folderPath === prefix || folderPath.startsWith(`${prefix}/`);
 }
+/**
+ * 이름 규칙 — 적용 순서(sortNameRules) 첫 일치가 이긴다. **다른 서비스를 가리키는 규칙도 걸리면 `overlap`** 으로 밝힌다(3차 반증 1:
+ * 판정 순서를 바꾼 업그레이드에서 소속이 조용히 옮겨 간 구성원이 바로 이것이다 — 순서에 결과가 달린 구성원을 검토 큐에 올린다).
+ */
 function nameRuleOf(c, name) {
   const n = lc(String(name ?? '').slice(0, NAME_INPUT_MAX));
   if (!n) return null;
+  let first = null; const others = [];
   for (const r of c.nameRules) {
-    if ((r.match === 'prefix' && n.startsWith(r.v)) || (r.match === 'suffix' && n.endsWith(r.v)) || (r.match === 'contains' && n.includes(r.v))) return r;
+    if (!((r.match === 'prefix' && n.startsWith(r.v)) || (r.match === 'suffix' && n.endsWith(r.v)) || (r.match === 'contains' && n.includes(r.v)))) continue;
+    if (!first) first = r;
+    else if (r.serviceId !== first.serviceId && others.length < 4) others.push(`${r.match}:${r.value}`);
   }
-  return null;
+  return first ? { r: first, others } : null;
 }
 const hit = (serviceId, src, via) => ({ serviceId, src, via: String(via ?? '') });
 
@@ -74,11 +81,15 @@ export function autoResolve(m, idx, { tagCategory = '' } = {}) {
     if (c && tagCategory && c.tagEnabled) {
       if (m.tags === null) unchecked = true;
       else if (Array.isArray(m.tags) && m.tags.length) {
-        const vals = [...new Set(m.tags.map((x) => String(x ?? '').slice(0, NAME_INPUT_MAX)).filter((x) => x.trim()))]
-          .sort((a, b) => (lc(a) < lc(b) ? -1 : lc(a) > lc(b) ? 1 : (a < b ? -1 : a > b ? 1 : 0)));
+        // 대소문자만 다른 값은 한 값이다('DB'·'db' 가 '태그 2' 로 보이지 않게 — 3차 반증 10). 정렬은 소문자 → 원문 순(결정적).
+        const seen = new Set(); const vals = [];
+        for (const x of m.tags) { const v = String(x ?? '').slice(0, NAME_INPUT_MAX); if (!v.trim() || seen.has(lc(v))) continue; seen.add(lc(v)); vals.push(v); }
+        vals.sort((a, b) => (lc(a) < lc(b) ? -1 : lc(a) > lc(b) ? 1 : (a < b ? -1 : a > b ? 1 : 0)));
         const hits = [];
         for (const v of vals) { const id = c.svcByName.get(lc(v))?.id || c.aliasTag.get(lc(v)); if (id) hits.push({ v, id }); }
-        const multi = vals.length > 1 ? { multi: true, tagValues: vals.slice(0, 8) } : {};
+        // 보이는 값(최대 8)은 서비스에 걸린 값을 먼저 — 잘려서 '왜 모호한지' 가 안 보이지 않게(3차 반증 7)
+        const shown = [...hits.map((x) => x.v), ...vals.filter((v) => !hits.some((x) => x.v === v))].slice(0, 8);
+        const multi = vals.length > 1 ? { multi: true, tagValues: shown } : {};
         if (hits.length) {
           const ambiguous = new Set(hits.map((x) => x.id)).size > 1;
           return { ...hit(hits[0].id, 'tag', hits[0].v), ...multi, ...(ambiguous ? { tagAmbiguous: true } : {}) };
@@ -87,7 +98,7 @@ export function autoResolve(m, idx, { tagCategory = '' } = {}) {
       }
     }
     const nr = c ? nameRuleOf(c, m.name) : null;
-    if (nr) return hit(nr.serviceId, 'rule', `${nr.match}:${nr.value}`);
+    if (nr) return { ...hit(nr.r.serviceId, 'rule', `${nr.r.match}:${nr.r.value}`), ...(nr.others.length ? { ruleOverlap: nr.others } : {}) };
     if (tagUnmapped != null) return { serviceId: null, src: 'none', reason: 'tag-unmapped', unmapped: { kind: 'tag', value: tagUnmapped }, ...(unchecked ? { unchecked } : {}) };
     if (f == null) return { serviceId: null, src: 'none', reason: 'placement-unknown', ...(unchecked ? { unchecked } : {}) };
     return { serviceId: null, src: 'none', reason: unchecked ? 'tags-unchecked' : 'no-folder-rule', unmapped: { kind: 'folder', value: f }, ...(unchecked ? { unchecked } : {}) };
@@ -101,7 +112,7 @@ export function autoResolve(m, idx, { tagCategory = '' } = {}) {
     if (a) return hit(a, 'scan', scan.label);
   }
   const nr = c ? nameRuleOf(c, m.name) : null;
-  if (nr) return hit(nr.serviceId, 'rule', `${nr.match}:${nr.value}`);
+  if (nr) return { ...hit(nr.r.serviceId, 'rule', `${nr.r.match}:${nr.r.value}`), ...(nr.others.length ? { ruleOverlap: nr.others } : {}) };
   if (!scan) return { serviceId: null, src: 'none', reason: m.scanWhy === 'unknown-entry' ? 'scan-entry-unknown' : m.scanWhy === 'old-source' ? 'source-old' : m.scanWhy === 'not-reported' ? 'source-unreported' : 'no-scan-entry' };
   if (!scan.label) return { serviceId: null, src: 'none', reason: 'scan-label-empty', unmapped: { kind: 'entry', value: String(scan.entryId || '') } };
   return { serviceId: null, src: 'none', reason: 'scan-label-unmapped', unmapped: { kind: 'scan', value: scan.label } };

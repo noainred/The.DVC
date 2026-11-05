@@ -66,7 +66,7 @@ test('M5·R14: 태그 여럿 — 서비스에 걸리는 값을 고르고(첫 값
   const ctx = { tagCategory: 'svc' };
   const r1 = autoResolve(vm('k1', 'A', { name: 'zz-1', tags: ['backup-daily', 'DB'] }), idx, ctx);
   assert.equal(r1.serviceId, 'db', "첫 값('backup-daily')이 서비스가 아니어도 걸리는 값으로(예전에는 이름 규칙으로 갔다)");
-  assert.equal(r1.src, 'tag'); assert.equal(r1.multi, true); assert.deepEqual(r1.tagValues, ['backup-daily', 'DB']); assert.equal(r1.tagAmbiguous, undefined);
+  assert.equal(r1.src, 'tag'); assert.equal(r1.multi, true); assert.deepEqual(r1.tagValues, ['DB', 'backup-daily'], '걸린 값 먼저'); assert.equal(r1.tagAmbiguous, undefined);
   const a = autoResolve(vm('k2', 'A', { tags: ['www', 'DB'] }), idx, ctx);
   const b = autoResolve(vm('k2', 'A', { tags: ['DB', 'www'] }), idx, ctx);
   assert.equal(a.serviceId, b.serviceId, '태그 순서가 바뀌어도 같은 판정');
@@ -133,4 +133,67 @@ test('M11·R19: CSV 에 전역 서비스·등급·담당자·키 종류·드리�
     assert.match(at(r2, '드리프트'), /고정과 다름\(자동: ERP\)/);
     for (const x of rows.slice(1)) assert.ok(!['ok', 'fail', 'none'].includes(at(x, '백업 24h')), '백업 칸에 영문 코드 없음');
   } finally { store.snapshot = prev; }
+});
+
+// ───────── 3차 반증 반영 ─────────
+test('3차 반증 1: 이름 규칙 둘 이상(다른 서비스)이 걸리면 규칙 겹침으로 검토 큐 — 순서를 바꾼 업그레이드에서 옮겨 간 구성원이 드러난다(같은 서비스면 아님)', () => {
+  const map = mapOf({ A: { services: [S('erp', 'ERP'), S('erpdb', 'ERP-DB'), S('db', 'DB')], nameRules: [
+    { match: 'prefix', value: 'erp-', serviceId: 'erp' }, { match: 'prefix', value: 'erp-db-', serviceId: 'erpdb' },
+    { match: 'contains', value: 'db', serviceId: 'db' }, { match: 'suffix', value: '-01', serviceId: 'erpdb' }] } });
+  const idx = buildIndex(map);
+  const r = autoResolve(vm('erp-db-01', 'A', { name: 'erp-db-01', folderPath: '/' }), idx);
+  assert.equal(r.serviceId, 'erpdb'); assert.deepEqual(r.ruleOverlap, ['prefix:erp-', 'contains:db'], '같은 서비스(-01 → erpdb)는 겹침이 아니다');
+  assert.equal(autoResolve(vm('erp-app-02', 'A', { name: 'erp-app-02', folderPath: '/' }), idx).ruleOverlap, undefined);
+  const inv = buildInventory({ members: [vm('erp-db-01', 'A', { name: 'erp-db-01', folderPath: '/' }), vm('erp-app-02', 'A', { name: 'erp-app-02', folderPath: '/' })], map });
+  assert.deepEqual(inv.queues.ruleOverlap.map((x) => [x.key, x.serviceId, x.via]), [['erp-db-01', 'erpdb', 'prefix:erp-db-']]);
+});
+
+test('3차 반증 4·7·10: 모호한 자동 판정을 확인한 고정은 불필요한 고정이 아니다 · 태그 표시값은 걸린 값 먼저 · 대소문자만 다른 태그는 한 값', () => {
+  const map = mapOf({ A: { tagEnabled: true, services: [S('db', 'DB'), S('web', 'Web')] } }, { settings: { tagCategory: 'svc' } });
+  const member = vm('k1', 'A', { tags: ['a1', 'a2', 'a3', 'a4', 'a5', 'a6', 'a7', 'a8', 'web', 'DB'] });
+  const inv = buildInventory({ members: [member], map, pins: { k1: { serviceId: 'db', corp: 'A', by: 'x', at: 1 } } });
+  assert.equal(inv.queues.redundant.length, 0, "'이대로 고정' 을 '불필요한 고정' 정리가 지우면 다시 모호로 돌아간다(순환)");
+  const r = autoResolve(member, buildIndex(map), { tagCategory: 'svc' });
+  assert.equal(r.tagAmbiguous, true); assert.deepEqual(r.tagValues.slice(0, 2), ['DB', 'web'], '모호의 원인(걸린 값)이 잘리지 않는다');
+  const same = autoResolve(vm('k2', 'A', { tags: ['DB', 'db'] }), buildIndex(map), { tagCategory: 'svc' });
+  assert.equal(same.multi, undefined, "'DB'·'db' 는 태그 하나");
+  assert.equal(autoResolve(vm('k3', 'A', { tags: ['db', 'DB'] }), buildIndex(map), { tagCategory: 'svc' }).multi, undefined, '순서가 바뀌어도(변이 검증에서 놓친 경우)');
+});
+
+test('3차 반증 3: 유령 정리는 미리 본 키 ∩ 지금 유령만 지운다(개수만 같아 끼어든 키를 지우지 않는다) · expect 는 정수만', async () => {
+  sm._resetForTest();
+  fs.writeFileSync(path.join(tmp, 'service-map.json'), JSON.stringify(mapOf({ 'vc-a': { services: [S('s1', 'ERP')] } })));
+  fs.writeFileSync(path.join(tmp, 'service-map-pins.json'), JSON.stringify({ rev: 0, pins: Object.fromEntries(['vm:vm-a', 'vm:vm-b', 'vm:vm-c'].map((k) => [k, { serviceId: 's1', corp: 'vc-a', by: 'a', at: 1 }])) }));
+  const prev = store.snapshot;
+  const vmOf = (id) => ({ id, vcenterId: 'vc-a', name: id, folderPath: '/', powerState: 'POWERED_ON', cpuCount: 1, memMB: 1024 });
+  try {
+    store.snapshot = { ...prev, generatedAt: Date.now() + 71, vcenters: [{ id: 'vc-a', name: 'vcenter-a' }], hosts: [], vms: [vmOf('vm-c')] };
+    const dry = await call('POST /tools/svc-inventory/op', { body: { op: 'ghosts.prune', corp: 'vc-a', dry: true } });
+    assert.deepEqual(dry.body.result.keys.sort(), ['vm:vm-a', 'vm:vm-b']);
+    // 미리 본 뒤 상태가 바뀜: vm-a 가 살아나고 vm-c 가 사라짐(유령 수는 그대로 2)
+    store.snapshot = { ...store.snapshot, generatedAt: Date.now() + 72, vms: [vmOf('vm-a')] };
+    assert.equal((await call('POST /tools/svc-inventory/op', { body: { op: 'ghosts.prune', corp: 'vc-a', expect: '2' } })).statusCode, 400, "문자열 '2' 는 정수가 아니다");
+    const r = await call('POST /tools/svc-inventory/op', { body: { op: 'ghosts.prune', corp: 'vc-a', keys: dry.body.result.keys } });
+    assert.equal(r.statusCode, 200, JSON.stringify(r.body)); assert.deepEqual(r.body.result, { removed: 1, skipped: 1 });
+    assert.deepEqual(Object.keys(sm.getPins().pins).sort(), ['vm:vm-a', 'vm:vm-c'], '확인창에 없던 vm-c 는 남는다 · 살아난 vm-a 도 남는다');
+  } finally { store.snapshot = prev; }
+});
+
+test('3차 반증 2: 막힌 베어메탈 출처 문구(수집 서버 이름)는 전체 범위 관리자만 — 범위가 지정된 관리자에게는 출처 종류만', async () => {
+  fs.writeFileSync(path.join(tmp, 'collectors.json'), JSON.stringify({ collectors: [{ id: 'c-pl', name: 'collector-poland-dc2', url: 'https://192.0.2.9:8443', enabled: false }] }));
+  sm._resetForTest();
+  fs.writeFileSync(path.join(tmp, 'service-map.json'), JSON.stringify(mapOf({ 'vc-a': { services: [S('s1', 'ERP')] } })));
+  fs.writeFileSync(path.join(tmp, 'service-map-pins.json'), JSON.stringify({ rev: 0, pins: {} }));
+  const prev = store.snapshot;
+  try {
+    store.snapshot = { ...prev, generatedAt: Date.now() + 81, vcenters: [{ id: 'vc-a', name: 'vcenter-a' }, { id: 'vc-b', name: 'vcenter-b' }], hosts: [], vms: [] };
+    const full = await call('GET /tools/svc-inventory/queues');
+    assert.equal(full.statusCode, 200, JSON.stringify(full.body)); assert.equal(full.body.bmBlocked, true);
+    assert.ok(full.body.bmBlockedSources.some((u) => /collector-poland-dc2/.test(u.reason || '')), '전체 범위 관리자는 이유 문구');
+    const scopedAdmin = { username: 'adm-a', role: 'admin', scope: { vcenters: ['vc-a'], regions: [], writeVcenters: [] } };
+    const sc = await call('GET /tools/svc-inventory/queues', { user: scopedAdmin });
+    assert.equal(sc.statusCode, 200, JSON.stringify(sc.body));
+    assert.ok(sc.body.bmBlockedSources.length && sc.body.bmBlockedSources.every((u) => !('reason' in u)), '범위 관리자는 출처 종류만');
+    assert.ok(!JSON.stringify(sc.body).includes('collector-poland-dc2'));
+  } finally { store.snapshot = prev; fs.rmSync(path.join(tmp, 'collectors.json'), { force: true }); }
 });

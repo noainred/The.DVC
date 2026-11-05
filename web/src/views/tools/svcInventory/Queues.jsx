@@ -178,7 +178,7 @@ export function ReviewView({ corp, reloadKey, svcName, writableOf, op, busy, cor
             </STable>
             {q.ghostsHeld?.length ? (
               <div className="muted" style={{ padding: '8px 14px', fontSize: 12 }}>
-                판정 보류 시작 시각은 이 포탈이 처음 보류로 본 시각입니다(재시작하면 다시 셉니다). 오래 보류돼 있으면 아래 원인을 먼저 고치십시오 — 원인이 풀리면 유령인지 아닌지 다시 판정합니다.
+                ‘부터’ 시각은 보류가 실제로 시작된 때가 아니라 이 포탈이 보류 상태를 처음 확인한 때입니다(검토 화면을 연 시각 기준 · 재시작하면 다시 셉니다). 오래 보류돼 있으면 아래 원인을 먼저 고치십시오 — 원인이 풀리면 유령인지 아닌지 다시 판정합니다.
                 {q.bmBlocked && q.bmBlockedSources?.length ? (
                   <ul style={{ margin: '4px 0 0', paddingLeft: 18 }}>{q.bmBlockedSources.slice(0, 8).map((u, i) => <li key={i}>{u.reason || SOURCE_TEXT[u.source] || u.source}</li>)}</ul>
                 ) : null}
@@ -193,6 +193,7 @@ export function ReviewView({ corp, reloadKey, svcName, writableOf, op, busy, cor
         )}
       </div>
       <TagAmbiguousCard q={q} svcName={svcName} writableOf={writableOf} op={op} busy={busy} corpName={corpName} />
+      <RuleOverlapCard q={q} svcName={svcName} writableOf={writableOf} op={op} busy={busy} corpName={corpName} />
       <RedundantCard q={q} svcName={svcName} writableOf={writableOf} op={op} busy={busy} corpName={corpName} />
       {q.orphaned ? <div className="muted" style={{ fontSize: 12 }}>등록 해제된 vCenter 의 고정 {q.orphaned}건 — 유령 정리로는 지울 수 없고, 트리에서 그 법인을 골라 ‘법인 항목 정리’ 로 지웁니다(전체 범위 관리자).</div> : null}
     </div>
@@ -215,7 +216,8 @@ function GhostPrune({ corp, n, corpName, op, busy }) {
     return (
       <span className="flex wrap gap" style={{ alignItems: 'center', padding: '4px 8px', border: '1px solid var(--amber)', borderRadius: 6 }}>
         <span style={{ fontSize: 12 }}>{corpName(corp)} 유령 고정 <b>{ask.keys.length}</b>건을 지웁니다(판정 보류는 남깁니다){ask.held ? ` · 보류 ${ask.held}건 제외` : ''}.</span>
-        <button type="button" className="login-btn" style={btn} disabled={busy || !ask.keys.length} onClick={async () => { const r = await op({ op: 'ghosts.prune', corp, expect: ask.keys.length }, `${corpName(corp)} 의 유령 고정 ${ask.keys.length}건을 정리했습니다.`); if (r) setAsk(null); }}>지우기</button>
+        {/* 미리 본 키를 그대로 보낸다 — 서버는 그 키 ∩ 지금 유령만 지운다(3차 반증 3: 개수만 보내면 확인창에 없던 키가 끼어 지워졌다) */}
+        <button type="button" className="login-btn" style={btn} disabled={busy || !ask.keys.length} onClick={async () => { const r = await op({ op: 'ghosts.prune', corp, keys: ask.keys }, `${corpName(corp)} 의 유령 고정을 정리했습니다(미리 본 ${ask.keys.length}건 중 지금도 유령인 것만).`); if (r) setAsk(null); }}>지우기</button>
         <button type="button" className="logout-btn" style={btn} onClick={() => setAsk(null)}>취소</button>
       </span>
     );
@@ -256,6 +258,35 @@ function TagAmbiguousCard({ q, svcName, writableOf, op, busy, corpName }) {
             <td data-sort={x.name}><b>{x.name}</b><div className="svcinv-sub">{corpName(x.corp)}</div></td>
             <td>{svcName(x.serviceId)}</td>
             <td style={{ whiteSpace: 'normal', fontSize: 12 }}>{(x.tags || []).join(', ')}</td>
+            <td>{writableOf(x.corp) ? <button type="button" className="logout-btn" style={btn} disabled={busy} onClick={() => op({ op: 'pins.set', corp: x.corp, keys: [x.key], serviceId: x.serviceId }, `${x.name} 을(를) ‘${svcName(x.serviceId)}’ 에 고정했습니다.`)}>이대로 고정</button> : <span className="muted">조회 전용</span>}</td>
+          </tr>
+        ))}</tbody>
+      </STable>
+      {n > items.length ? <div className="muted" style={{ padding: '8px 14px', fontSize: 12 }}>앞 {items.length}대만 보입니다(전체 {n}대).</div> : null}
+    </div>
+  );
+}
+
+/**
+ * 이름 규칙 둘 이상(다른 서비스)이 걸린 구성원(3차 반증 1) — 결과가 적용 순서에 달렸다. v2.894 에서 순서를 '등록 순' 에서 '접두·접미 > 포함 · 긴 값' 으로
+ * 바꿨으므로 업그레이드 뒤 소속이 옮겨 간 구성원은 여기에 모두 있다. '이대로 고정' 은 지금 판정을 사람이 확인한 것으로 남긴다.
+ */
+function RuleOverlapCard({ q, svcName, writableOf, op, busy, corpName }) {
+  const items = q.ruleOverlap?.items || [];
+  const n = q.ruleOverlap?.n || 0;
+  if (!n) return null;
+  return (
+    <div className="card" style={{ minWidth: 0 }}>
+      <div className="flex wrap gap" style={{ padding: '10px 14px', borderBottom: '1px solid var(--border)', alignItems: 'center' }}>
+        <b>이름 규칙이 겹침</b><span className="muted" style={{ fontSize: 12 }}>{n}대 · 다른 서비스로 가는 이름 규칙도 걸립니다 — 적용 순서(접두·접미 &gt; 포함 · 긴 값)로 정했습니다. 맞으면 ‘이대로 고정’, 아니면 규칙을 고치거나 ‘한 대씩 고정’</span>
+      </div>
+      <STable className="table svcinv-t" minWidth={640}>
+        <thead><tr><th>구성원 · 법인</th><th>지금 판정(이긴 규칙)</th><th>함께 걸린 규칙</th><th data-nosort>조치</th></tr></thead>
+        <tbody>{items.map((x) => (
+          <tr key={x.key}>
+            <td data-sort={x.name}><b>{x.name}</b><div className="svcinv-sub">{corpName(x.corp)} · {x.kind === 'vm' ? 'VM' : '베어메탈'}</div></td>
+            <td>{svcName(x.serviceId)}<div className="svcinv-sub" style={{ fontFamily: 'var(--mono)' }}>{x.via}</div></td>
+            <td style={{ whiteSpace: 'normal', fontSize: 12, fontFamily: 'var(--mono)' }}>{(x.others || []).join(', ')}</td>
             <td>{writableOf(x.corp) ? <button type="button" className="logout-btn" style={btn} disabled={busy} onClick={() => op({ op: 'pins.set', corp: x.corp, keys: [x.key], serviceId: x.serviceId }, `${x.name} 을(를) ‘${svcName(x.serviceId)}’ 에 고정했습니다.`)}>이대로 고정</button> : <span className="muted">조회 전용</span>}</td>
           </tr>
         ))}</tbody>

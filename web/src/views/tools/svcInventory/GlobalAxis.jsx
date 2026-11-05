@@ -19,7 +19,7 @@ function MatrixCell({ c, onClick, faultsOn, mode = 'n' }) {
   const x = matrixCellValue(c, mode, faultsOn);
   return (
     <td style={{ textAlign: 'center', cursor: 'pointer', fontWeight: 700, whiteSpace: 'nowrap' }} onClick={onClick} data-sort={x?.v ?? ''}
-      title={`VM ${c.vm} · 베어메탈 ${c.bm}${c.stale ? ' · 이 법인을 지금 읽지 못해 사용률·장애가 지금 값이 아닙니다' : ''}${f ? ` · 부품 장애 ${f}` : ''}`}>
+      title={`VM ${c.vm} · 베어메탈 ${c.bm}${c.stale ? ' · 이 법인을 지금 읽지 못해 사용률·장애가 지금 값이 아닙니다' : ''}${f ? ` · 부품 장애 ${f}` : ''}${faultsOn && c.faultsUnknown ? ` · 장애를 못 읽은 서버 ${c.faultsUnknown}` : ''}`}>
       {mode === 'faults' ? (x.v ? <span className="badge red">{x.text}</span> : <span className={x.v == null ? 'muted' : ''}>{x.text}</span>) : x.text}
       {c.stale ? <span className="muted" title="지금 읽지 못함">?</span> : null}
       {mode === 'n' && f ? <span className="badge red" style={{ marginLeft: 4 }}>{f}</span> : null}
@@ -32,12 +32,12 @@ function RegionCell({ list, mode, faultsOn }) {
   if (!x) return <td className="muted" style={{ textAlign: 'center', borderLeft: '1px solid var(--border)' }}>–</td>;
   return (
     <td style={{ textAlign: 'center', fontWeight: 700, whiteSpace: 'nowrap', borderLeft: '1px solid var(--border)', background: 'var(--panel-2)' }} data-sort={x.v ?? ''}
-      title={`지역 합계 · 법인 ${x.corps}곳${x.stale ? ` · 지금 읽지 못한 법인 ${x.stale}곳은 CPU·장애에서 뺐습니다` : ''}`}>
+      title={`지역 합계 · 법인 ${x.corps}곳${x.stale ? ` · 지금 읽지 못한 법인 ${x.stale}곳은 CPU·장애에서 뺐습니다` : ''}${x.unknown ? ` · 장애를 못 읽은 서버 ${x.unknown}` : ''}`}>
       {mode === 'faults' && x.v ? <span className="badge red">{x.text}</span> : x.text}{x.stale ? <span className="muted">?</span> : null}
     </td>
   );
 }
-const MODE_LEGEND = { n: '칸 = 구성원 수(붉은 배지 = 열린 부품 장애)', faults: '칸 = 열린 부품 장애(구성원 + 영향 호스트)', cpu: '칸 = CPU 가중 사용률(Σ사용÷Σ용량 · 꺼진 VM·못 읽은 서버 제외)', vcpu: '칸 = vCPU 할당 합(투입 자원)' };
+const MODE_LEGEND = { n: '칸 = 구성원 수(붉은 배지 = 열린 부품 장애)', faults: '칸 = 열린 부품 장애(구성원 + 영향 호스트 · ‘+?’ = 장애를 못 읽은 서버가 있음)', cpu: '칸 = CPU 가중 사용률(Σ사용÷Σ용량 · 꺼진 VM·못 읽은 서버 제외)', vcpu: '칸 = vCPU 할당 합(투입 자원)' };
 
 /** 전역 서비스 상세에서 '전 법인 구성원 모두 보기' 를 고른 상태(법인 id 와 겹치지 않는 표지 — 법인 행 선택은 그대로 둔다). */
 const ALL_CORPS = '*';

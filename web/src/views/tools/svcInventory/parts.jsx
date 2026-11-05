@@ -92,6 +92,7 @@ function memberSrc(m) {
         {SRC_SHORT[m.src] || '미지정'}{m.drift ? ' · 드리프트' : ''}{m.unchecked ? ' · 확인 안 됨' : ''}
       </span>
       {/* 태그 여럿(5차 M5·R14) — 서비스에 걸리는 값으로 정했다. 둘 이상의 서비스에 걸리면 '모호'(검토 탭 · 고정으로 정한다) */}
+      {Array.isArray(m.ruleOverlap) && m.ruleOverlap.length ? <span className="badge amber" title={`다른 서비스로 가는 이름 규칙도 걸립니다: ${m.ruleOverlap.join(', ')} — 적용 순서(접두·접미 > 포함 · 긴 값)로 정했습니다. 맞지 않으면 고정하십시오`}>규칙 겹침</span> : null}
       {multi ? <span className={`badge ${m.tagAmbiguous ? 'amber' : 'gray'}`} title={`태그 ${m.tagValues.length}개: ${m.tagValues.join(', ')}${m.tagAmbiguous ? ' — 둘 이상의 서비스에 걸립니다(정렬 첫 값으로 정함 · 고정으로 정하십시오)' : ' — 서비스에 걸리는 값으로 정했습니다'}`}>{m.tagAmbiguous ? '태그 모호' : `태그 ${m.tagValues.length}`}</span> : null}
     </span>
   );

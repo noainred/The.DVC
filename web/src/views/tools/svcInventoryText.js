@@ -111,7 +111,12 @@ export function matrixColumns(corps, regionOf = () => '') {
 export const MATRIX_MODES = Object.freeze([['n', '구성원 수'], ['faults', '부품 장애'], ['cpu', 'CPU(가중)'], ['vcpu', 'vCPU 할당']]);
 export function matrixCellValue(c, mode, faultsOn) {
   if (!c) return null;
-  if (mode === 'faults') { if (!faultsOn || c.stale) return { v: null, text: '—' }; const f = n0(c.faults); return { v: f, text: String(f) }; }
+  if (mode === 'faults') {
+    if (!faultsOn || c.stale) return { v: null, text: '—' };
+    // 못 읽은 장애(faultsUnknown)는 0 이 아니다 — '?' 로 밝힌다(3차 반증 5: 예전에는 0 장애 + 모름 2 가 '0')
+    const f = n0(c.faults); const u = n0(c.faultsUnknown);
+    return { v: f, unknown: u, text: u ? (f ? `${f}+?` : '?') : String(f) };
+  }
   if (mode === 'cpu') { const p = c.stale ? null : numOrNull(c.usage?.cpu); return { v: p, text: p == null ? '—' : `${Math.round(p)}%` }; }
   if (mode === 'vcpu') { const x = numOrNull(c.alloc?.vcpu); return { v: x, text: x == null ? '—' : Math.round(x).toLocaleString() }; }
   return { v: n0(c.n), text: String(n0(c.n)) };
@@ -131,9 +136,10 @@ export function regionCell(list, mode, faultsOn) {
     return { v: p, text: p == null ? '—' : `${Math.round(p)}%`, stale, corps: cs.length };
   }
   if (mode === 'faults') {
-    if (!faultsOn) return { v: null, text: '—', stale, corps: cs.length };
-    const f = cs.filter((c) => !c.stale).reduce((a, c) => a + n0(c.faults), 0);
-    return { v: f, text: String(f), stale, corps: cs.length };
+    const live = cs.filter((c) => !c.stale);
+    if (!faultsOn || !live.length) return { v: null, text: '—', stale, corps: cs.length };   // 전부 못 읽는 지역은 '0' 이 아니다(3차 반증 5)
+    const f = live.reduce((a, c) => a + n0(c.faults), 0); const u = live.reduce((a, c) => a + n0(c.faultsUnknown), 0);
+    return { v: f, unknown: u, text: u ? (f ? `${f}+?` : '?') : String(f), stale, corps: cs.length };
   }
   if (mode === 'vcpu') { const x = cs.reduce((a, c) => a + n0(c.alloc?.vcpu), 0); return { v: x, text: Math.round(x).toLocaleString(), stale, corps: cs.length }; }
   const n = cs.reduce((a, c) => a + n0(c.n), 0);
@@ -172,9 +178,9 @@ export function groupActions(g) {
 
 /** '검토 필요' 수와 부제(5차 R17 — 수에 들어가는 것을 부제에 전부 적는다). */
 export function reviewSummary(q = {}) {
-  const parts = [['드리프트', q.drift], ['법인 불일치', q.mismatch], ['유령', q.ghosts], ['태그 모호', q.tagAmbiguous]].filter(([, n]) => n0(n) > 0);
+  const parts = [['드리프트', q.drift], ['법인 불일치', q.mismatch], ['유령', q.ghosts], ['태그 모호', q.tagAmbiguous], ['규칙 겹침', q.ruleOverlap]].filter(([, n]) => n0(n) > 0);
   const n = parts.reduce((a, [, x]) => a + n0(x), 0);
-  const meta = `${parts.length ? parts.map(([l, x]) => `${l} ${n0(x)}`).join(' · ') : '드리프트·불일치·유령·태그 모호 없음'}${n0(q.ghostsHeld) ? ` (판정 보류 ${n0(q.ghostsHeld)} — 수에 넣지 않음)` : ''}`;
+  const meta = `${parts.length ? parts.map(([l, x]) => `${l} ${n0(x)}`).join(' · ') : '드리프트·불일치·유령·모호 없음'}${n0(q.ghostsHeld) ? ` (판정 보류 ${n0(q.ghostsHeld)} — 수에 넣지 않음)` : ''}`;
   return { n, meta };
 }
 

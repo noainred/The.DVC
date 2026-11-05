@@ -60,6 +60,12 @@ describe('svcInventoryText', () => {
     expect(regionCell([a, b], 'vcpu', true).v).toBe(12);
     expect(regionCell([undefined], 'n', true)).toBe(null);
     expect(regionCell([{ n: 1, usage: { cpu: null } }], 'cpu', true).text).toBe('—');
+    // 3차 반증 5: 못 읽은 장애는 0 이 아니다 · 전부 못 읽는 지역은 '0' 이 아니라 '—'
+    expect(matrixCellValue({ faults: 0, faultsUnknown: 2 }, 'faults', true).text).toBe('?');
+    expect(matrixCellValue({ faults: 1, faultsUnknown: 2 }, 'faults', true).text).toBe('1+?');
+    expect(regionCell([st], 'faults', true).text).toBe('—');
+    expect(regionCell([a, { ...b, faultsUnknown: 1 }], 'faults', true)).toMatchObject({ text: '3+?', unknown: 1 });
+    expect(reviewSummary({ ruleOverlap: 2 }).meta).toContain('규칙 겹침 2');
   });
   it('서비스 표 찾기·필터(5차 M8) · 검토 필요 요약(R17 — 수에 들어가는 것을 부제에 전부)', () => {
     const list = [{ name: 'ERP', path: '업무', owner: 'kim', corp: 'vc-a', tier: 1 }, { name: 'MES', path: '', owner: '', corp: 'vc-b', tier: 2 }];
