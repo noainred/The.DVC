@@ -478,6 +478,43 @@ export function toggleTask(id, body, user, { access = FULL_ACCESS } = {}) {
   return viewPage(x, user, access);
 }
 
+/**
+ * v2.908 자동화 규칙 '완료 → 위키 체크 항목 완료'(서버 내부 — 범위 없음). 이슈 키(ISS-n — 뒤에 숫자가 이어지지 않는 것)를 적은 **체크 안 된**
+ * 체크리스트 항목을 체크한다. 보기에서 체크(toggleTask)와 같은 방식 — 판을 만들지 않고 지금 판 본문도 같이 고치고 checkLog · checkRev 를 남긴다.
+ * 읽기 전용 스페이스 · 보관(archived) 문서는 건드리지 않는다. 문서 50개 · 문서당 50줄까지. @returns {{ pages: number, items: number, skipped: number }}
+ */
+export const AUTO_CHECK_LIMITS = Object.freeze({ pages: 50, lines: 50 });
+export function checkIssueTasks(issueKey, user = 'automation', { now = Date.now() } = {}) {
+  const out = { pages: 0, items: 0, skipped: 0 };
+  const key = String(issueKey || '');
+  if (!/^ISS-\d{1,9}$/.test(key)) return out;
+  const re = new RegExp(`\\b${key}(?!\\d)`);
+  const c = load();
+  for (const p of c.pages) {
+    if (out.pages >= AUTO_CHECK_LIMITS.pages) { out.skipped += 1; continue; }
+    if (!(p.issueKeys || []).includes(key)) continue;
+    if (p.status === 'archived' || c.spaces[p.spaceId]?.readOnly) { out.skipped += 1; continue; }
+    const lines = String(p.body || '').split(/\r\n?|\n/);
+    const hit = [];
+    for (let n = 0; n < lines.length && hit.length < AUTO_CHECK_LIMITS.lines; n += 1) {
+      const pos = taskMarkAt(lines[n]);
+      if (pos < 0 || lines[n][pos] !== ' ' || !re.test(lines[n])) continue;
+      lines[n] = `${lines[n].slice(0, pos)}x${lines[n].slice(pos + 1)}`;
+      hit.push(n);
+    }
+    if (!hit.length) continue;
+    const md = lines.join('\n');
+    const versions = (p.versions || []).map((v, k, arr) => (k === arr.length - 1 && typeof v.body === 'string' ? { ...v, body: md, len: md.length } : v));
+    const log = [...(Array.isArray(p.checkLog) ? p.checkLog : []), ...hit.map((n) => ({ at: now, by: user, line: n, checked: true, text: capStr(`자동화: ${key} 완료 — ${lines[n].trim()}`, 80) }))].slice(-CHECK_LOG_MAX);
+    const x = { ...p, body: md, versions, checkLog: log, checkRev: (Number(p.checkRev) || 0) + 1 };
+    try { assertRoom(c, x, p.id); } catch { out.skipped += 1; continue; }
+    c.pages = c.pages.map((q) => (q.id === p.id ? x : q));
+    commit({ changed: x });
+    out.pages += 1; out.items += hit.length;
+  }
+  return out;
+}
+
 export function versionBody(id, v, access = FULL_ACCESS) {
   const p = findFor(id, access);
   const target = (p.versions || []).find((x) => x.v === Math.trunc(Number(v)));

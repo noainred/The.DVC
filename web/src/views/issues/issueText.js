@@ -325,6 +325,9 @@ export function simulateText(r) {
 /** 자동 등록 이슈의 배지 글(없으면 ''). */
 export function originText(o) {
   if (o?.kind === 'wiki-comment') return `위키 댓글에서 등록${o.pageId ? ` · ${o.pageId}` : ''}`; // v2.907
+  // v2.908 다른 알람 · 백업 실패 자동 등록
+  if (o?.kind === 'alert') return `자동 · 알람${o.title ? ` · ${o.title}` : ''}${o.reopen ? ` · 다시 발생 ${o.reopen}회` : ''}${o.resolvedAt ? ' · 해소됨' : ''}`;
+  if (o?.kind === 'backup') return `자동 · 백업 실패${o.deviceName ? ` · ${o.deviceName}` : ''}${o.parts > 1 ? ` · 실패 ${o.parts}회` : ''}`;
   if (!o || o.kind !== 'partfault') return '';
   const dev = o.deviceName || o.deviceId || '';
   return `자동 · 파트 장애${dev ? ` · ${dev}` : ''}${o.parts > 1 ? ` · 부품 ${o.parts}` : ''}`;
@@ -529,10 +532,41 @@ export function slaBadge(sla, now = Date.now()) {
   if (!stage) return null;
   const st = sla[stage];
   const name = STAGE_TEXT[stage];
-  if (st.state === 'breached') return { cls: 'bad', text: `SLA ${name} 초과`, title: `${name} 목표 ${minutesText(st.targetMin)} — 흐른 시간 ${minutesText(st.usedMin)}(보류 제외)` };
-  if (st.state === 'paused') return { cls: 'mute', text: `SLA 멈춤`, title: `보류 중이라 ${name} 시계가 멈췄습니다 — 흐른 시간 ${minutesText(st.usedMin)} / 목표 ${minutesText(st.targetMin)}` };
-  return { cls: 'warn', text: `SLA ${name} ${st.dueAt ? `${leftText(st.dueAt, now)} 남음` : '임박'}`, title: `${name} 목표 ${minutesText(st.targetMin)} — 흐른 시간 ${minutesText(st.usedMin)}(보류 제외)` };
+  const cal = sla.calendar ? ` · 업무 시간 기준(${sla.calendar.tz})` : ''; // v2.908 업무 시간 달력
+  if (st.state === 'breached') return { cls: 'bad', text: `SLA ${name} 초과`, title: `${name} 목표 ${minutesText(st.targetMin)} — 흐른 시간 ${minutesText(st.usedMin)}(보류 제외${cal})` };
+  if (st.state === 'paused') return { cls: 'mute', text: `SLA 멈춤`, title: `보류 중이라 ${name} 시계가 멈췄습니다 — 흐른 시간 ${minutesText(st.usedMin)} / 목표 ${minutesText(st.targetMin)}${cal}` };
+  return { cls: 'warn', text: `SLA ${name} ${st.dueAt ? `${leftText(st.dueAt, now)} 남음` : '임박'}`, title: `${name} 목표 ${minutesText(st.targetMin)} — 흐른 시간 ${minutesText(st.usedMin)}(보류 제외${cal})` };
 }
+
+/* ───── v2.908 기능 6~10 ───── */
+/** 알림함 줄 종류 → 짧은 이름. */
+export const INBOX_KIND_TEXT = Object.freeze({ assigned: '할당', created: '할당', status: '상태', progress: '진행', comment: '댓글', mention: '언급', due: '기한', sla: 'SLA', stale: '멈춤', wiki: '위키' });
+export const inboxKindText = (k) => INBOX_KIND_TEXT[k] || '알림';
+/** 퍼센트 — 값이 없으면 '—'(0% 로 적지 않는다). */
+export const pctText = (v) => (v == null || !Number.isFinite(Number(v)) ? '—' : `${v}%`);
+/** 시간(소수 1자리) — 48시간 이상이면 일로. 없으면 '—'. */
+export function hoursText(h) {
+  if (h == null || !Number.isFinite(Number(h))) return '—';
+  const n = Number(h);
+  return n >= 48 ? `${Math.round((n / 24) * 10) / 10}일` : `${n}시간`;
+}
+/** 분(0~1440) ↔ 'HH:MM'. 형식 밖이면 null. */
+export function minToHHMM(m) {
+  const n = Number(m);
+  if (!Number.isInteger(n) || n < 0 || n > 1440) return '';
+  return `${String(Math.floor(n / 60)).padStart(2, '0')}:${String(n % 60).padStart(2, '0')}`;
+}
+export function hhmmToMin(s) {
+  const m = /^(\d{1,2}):(\d{2})$/.exec(String(s || '').trim());
+  if (!m) return null;
+  const n = Number(m[1]) * 60 + Number(m[2]);
+  return Number(m[2]) < 60 && n >= 0 && n <= 1440 ? n : null;
+}
+/** 휴일 입력 — 쉼표 · 공백 · 줄바꿈으로 나눈 'YYYY-MM-DD'(형식 검사는 서버가 한다 — 여기서는 나누기만). */
+export const splitDates = (s) => [...new Set(String(s || '').split(/[\s,]+/).map((x) => x.trim()).filter(Boolean))];
+/** 멈춤 배지 문구. */
+export const staleText = (days) => (Number.isInteger(days) && days > 0 ? `멈춤 ${days}일` : '');
+export const WEEKDAY_TEXT = Object.freeze(['일', '월', '화', '수', '목', '금', '토']);
 /** 상세의 단계 한 줄 — '응답: 지킴 · 12m / 목표 15m' · '해결: 진행 · 1h 2m / 목표 4h · 2h 58m 남음'. */
 export function slaStageText(kind, st, now = Date.now()) {
   if (!st) return '';

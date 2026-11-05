@@ -21,7 +21,9 @@ import {
   groupByStatus, filterRows, myWork, loadPct, LOAD_CAP, toDateInput, fromDateInput, parseLabels, saveFailText, persistNote, historyText,
   peopleOptions, makeLatest, vcName, vcenterOptions, vcenterRequired, notifyStatusText, childText, sprintName, statusConfirmText, STATUS_CONFIRM_FLAG, AUTO_LEVEL_TEXT, autoKindRows, autoOnCount, autoStatusText, simulateText, originText, progressOf, staleInfo, myRequests, activityText, issueLink, STALE_DAYS,
   minutesText, parseDuration, timeTrackText, slaBadge, slaStageText, fixVersionState, csvParams,
+  staleText, minToHHMM, hhmmToMin, splitDates, WEEKDAY_TEXT,
 } from './issueText.js';
+import { InboxView, ReportView, AlertAutoSettings } from './IssuesR4.jsx';
 import { wikiHash, statusText as wikiStatusText } from '../wiki/wikiText.js';
 import { MdView } from '../wiki/MdView.jsx';
 import AttachBox from '../attach/AttachBox.jsx';
@@ -30,7 +32,7 @@ import IssueCalendar from './IssueCalendar.jsx';
 import MentionBox from '../../components/MentionBox.jsx';
 import { mentionsInText } from '../../components/mentionText.js';
 
-const SUBS = [['board', '보드'], ['list', '목록'], ['calendar', '캘린더'], ['mine', '내 작업'], ['activity', '활동'], ['sprint', '스프린트'], ['epics', '에픽'], ['filters', '필터']]; // v2.882 스프린트 · 에픽 · 필터 · v2.889 캘린더
+const SUBS = [['board', '보드'], ['list', '목록'], ['calendar', '캘린더'], ['mine', '내 작업'], ['inbox', '알림함'], ['activity', '활동'], ['sprint', '스프린트'], ['epics', '에픽'], ['filters', '필터'], ['report', '리포트']]; // v2.882 스프린트 · 에픽 · 필터 · v2.889 캘린더 · v2.908 알림함 · 리포트
 /** v2.871: 설정 탭은 전체 범위 관리자에게만 보인다(서버가 같은 기준으로 막는다). 해시 키는 늘 유효 — 권한이 없으면 안내만. */
 const SETTINGS_SUB = ['settings', '설정'];
 const EMPTY_FILTERS = Object.freeze({ q: '', assignee: '', priority: '', type: '', status: '', vcenterId: '', mine: false });
@@ -138,6 +140,10 @@ export default function Issues() {
     } catch (e) { setNote(`${key}: ${saveFailText({ reason: e.message })}`); } finally { moving.current.delete(key); }
   }, [onWritten]);
   const [csvBusy, setCsvBusy] = useState(false);
+  // v2.908 알림함 안 읽은 수 — 마운트 1회 + 새로고침 · 알림함을 열 때(폴링 없음)
+  const [unread, setUnread] = useState(null);
+  const loadUnread = useCallback(() => { fetchJson('/issues/inbox', { limit: 1 }, undefined, { retries: 0 }).then((r) => setUnread(r.unread || 0)).catch(() => setUnread(null)); }, []);
+  useEffect(() => { loadUnread(); }, [loadUnread]);
 
   if (err && !list) return <ErrorBox error={err} />;
   if (!list || !meta || !metaX) return <Loading label="이슈" />;
@@ -163,14 +169,14 @@ export default function Issues() {
       <div className="iss-head">
         <div className="flex" style={{ gap: 6, flexWrap: 'wrap' }}>
           {subs.map(([k, label]) => (
-            <button key={k} className={`btn${sub === k ? ' primary' : ''}`} onClick={() => { setSub(k); }}>{label}</button>
+            <button key={k} className={`btn${sub === k ? ' primary' : ''}`} onClick={() => { setSub(k); }}>{label}{k === 'inbox' && unread ? <span className="iss-tab-n">{unread > 99 ? '99+' : unread}</span> : null}</button>
           ))}
         </div>
         <span className="muted iss-summary">
           열린 이슈 {stats?.open ?? '—'} · 미할당 {stats?.unassigned ?? '—'} · 기한 초과 {stats?.overdue ?? '—'}
         </span>
         <span className="iss-grow" />
-        <button className="btn" onClick={load}>새로고침</button>
+        <button className="btn" onClick={() => { load(); loadUnread(); }}>새로고침</button>
         {(sub === 'board' || sub === 'list') && !openKey && canCsv() && <button className="btn" disabled={csvBusy} onClick={exportCsv} title="지금 걸러 본 조건(열린 이슈 + 최근 완료)을 CSV 로 — 서버가 범위로 다시 거릅니다">{csvBusy ? 'CSV…' : 'CSV'}</button>}
         {canWrite && <button className="btn primary" onClick={() => setCreating('issue')}>+ 새 이슈</button>}
         {canRequest && <button className="btn primary" onClick={() => setCreating('request')} title="요청 유형으로 등록합니다 — 담당자·상태는 운영자가 정합니다">+ 요청 등록</button>}
@@ -182,7 +188,7 @@ export default function Issues() {
       {creating && <IssueEditor meta={meta} requestOnly={creating === 'request'} onCancel={() => setCreating(false)} onSaved={(r) => { setCreating(false); onWritten(r); openIssue(r.issue.key); }} />}
 
       {sub === 'settings' && !openKey
-        ? (meta.canSettings ? <><IssueSettings /><AutoCreateSettings /><IssueTemplatesAdmin /><AttachAdmin /></> : <div className="card muted">이슈 설정은 전체 범위(vCenter 제한 없는) 관리자만 볼 수 있습니다.</div>)
+        ? (meta.canSettings ? <><IssueSettings meta={meta} /><AutoCreateSettings /><AlertAutoSettings /><IssueTemplatesAdmin /><AttachAdmin /></> : <div className="card muted">이슈 설정은 전체 범위(vCenter 제한 없는) 관리자만 볼 수 있습니다.</div>)
         : openKey
         ? <IssueDetail key={openKey} issueKey={openKey} meta={metaX} onBack={() => openIssue('')} onOpen={openIssue} onWritten={(r) => { onWritten(r); reloadEpics(); }} />
         : (
@@ -204,6 +210,8 @@ export default function Issues() {
             {sub === 'filters' && <FiltersView meta={metaX} onOpen={openIssue} onWritten={onWritten} onBoard={(bq) => { setBoardQ(bq); setSub('board'); }} />}
             {sub === 'mine' && <MyWorkView rows={rows} stats={stats} meta={meta} onOpen={openIssue} onWritten={onWritten} />}
             {sub === 'activity' && <ActivityView meta={meta} onOpen={openIssue} />}
+            {sub === 'inbox' && <InboxView onOpen={openIssue} onCount={setUnread} />}
+            {sub === 'report' && <ReportView meta={meta} />}
           </>
         )}
     </div>
@@ -312,6 +320,7 @@ function IssueCard({ r, meta, onOpen, drag = null }) {
         {r.blocked && <span className="iss-chip s-blocked" title={r.blocked.reason}>보류</span>}
         {r.blockedOpen > 0 && <span className="iss-chip s-linkblock" title="이 이슈를 막고 있는 열린 이슈가 있습니다(연결)">차단됨 {r.blockedOpen}</span>}
         {r.status !== 'done' && <SlaChip sla={r.sla} />}
+        {staleText(r.stale) && <span className="iss-chip s-stale" title="진행 중인데 갱신이 없습니다(자동화 규칙 — 이슈 › 설정)">{staleText(r.stale)}</span>}
         {(meta?.vcenters || []).length > 0 && <span className="iss-vc" title="법인(vCenter)">{vcName(meta, r.vcenterId)}</span>}
         {r.origin && <span className="iss-auto" title={originText(r.origin)}>{r.origin.kind === 'wiki-comment' ? '위키' : '자동'}</span>}
         {childText(r) && <span className="iss-subn">{childText(r)}</span>}
@@ -394,6 +403,7 @@ function ListView({ rows, total, meta, epics, onOpen, onWritten }) {
                     {r.blocked && <span className="iss-chip s-blocked" style={{ marginLeft: 6 }} title={r.blocked.reason}>보류</span>}
                     {r.blockedOpen > 0 && <span className="iss-chip s-linkblock" style={{ marginLeft: 6 }} title="이 이슈를 막고 있는 열린 이슈가 있습니다(연결)">차단됨 {r.blockedOpen}</span>}
                     {r.status !== 'done' && slaBadge(r.sla) && <span style={{ marginLeft: 6 }}><SlaChip sla={r.sla} /></span>}
+                    {staleText(r.stale) && <span className="iss-chip s-stale" style={{ marginLeft: 6 }} title="진행 중인데 갱신이 없습니다(자동화 규칙)">{staleText(r.stale)}</span>}
                     {r.origin && <span className="iss-auto" style={{ marginLeft: 6 }} title={originText(r.origin)}>{r.origin.kind === 'wiki-comment' ? '위키' : '자동'}</span>}
                     {/* v2.882 에픽 · 하위 · 스프린트는 제목 아래 작은 표시 — 열로 두면 1440px 에서 표가 본문 폭을 넘어 기한 · 갱신이 가로 스크롤 뒤로 숨었다(Chromium 판독).
                         에픽 · 스프린트로 정렬하려면 필터 화면의 결과 표(열이 따로 있다)를 쓴다. */}
@@ -968,6 +978,7 @@ function IssueDetail({ issueKey, meta, onBack, onOpen, onWritten }) {
                 <div className="iss-detail-meta"><TypeTag t={it.type} /><span className="iss-key">{it.key}</span><span className="muted">· {it.reporter} 등록 · {timeText(it.createdAt)}</span>
                   {it.origin && <><span className="iss-auto">{originText(it.origin)}</span>{it.origin.kind === 'wiki-comment'
                     ? (it.origin.pageId ? <a className="iss-origin-link" href={wikiHash({ space: 'pub', id: it.origin.pageId })}>문서의 댓글로 →</a> : null)
+                    : it.origin.kind === 'alert' || it.origin.kind === 'backup' ? null // v2.908 — 알람 · 백업 화면 위치는 본문에 적는다(권한 · 메뉴가 계정마다 달라 링크를 단정하지 않는다)
                     : <a className="iss-origin-link" href="#/tools/part-faults">파트 장애 화면 →</a>}</>}
                 </div>
                 {(it.epic || (it.parent && it.parent.type !== 'epic')) && (
@@ -1280,8 +1291,69 @@ function AutoCreateSettings() {
 const EVENT_TEXT = Object.freeze({ sla: 'SLA 초과(담당자 · 보고자 — 응답 · 해결 단계마다 한 번 · 아래 SLA 가 켜져 있을 때)', assigned: '할당(새 담당자 · 이전 담당자)', status: '상태 변경(담당자 · 보고자 · 관찰자)', progress: '진행률·진행 메모(담당자 · 보고자 · 관찰자)', comment: '댓글 · @멘션(담당자 · 보고자 · 관찰자 · 언급된 사람)', due: '기한 내일 · 오늘 · 지남(담당자 — 포탈 날짜로 하루 한 번)', wiki: '위키 문서 저장 · 댓글 · @멘션(지켜보는 사람 · 언급된 사람)' });
 const splitNames = (s) => String(s || '').split(/[,\s]+/).map((x) => x.trim()).filter(Boolean);
 
+/* v2.908 SLA 업무 시간 달력(기능 8) — 화면 값 ↔ 저장 본문. 형식 판정은 서버(normalizeCalendar)가 한다(여기서는 옮기기만). */
+function calForm(c = {}) {
+  return {
+    mode: c.mode === 'business' ? 'business' : '24x7', start: minToHHMM(c.startMin ?? 540) || '09:00', end: minToHHMM(c.endMin ?? 1080) || '18:00',
+    days: Array.isArray(c.days) ? [...c.days] : [1, 2, 3, 4, 5], holidays: (c.holidays || []).join(', '), tz: c.tz || 'Asia/Seoul',
+    byVc: Object.entries(c.byVcenter || {}).map(([vc, v]) => ({ vc, tz: v.tz || '', own: Array.isArray(v.holidays), holidays: (v.holidays || []).join(', ') })),
+  };
+}
+function calBody(f) {
+  if (!f) return undefined;
+  const byVcenter = {};
+  for (const r of f.byVc) if (r.vc) byVcenter[r.vc] = { ...(r.tz.trim() ? { tz: r.tz.trim() } : {}), ...(r.own ? { holidays: splitDates(r.holidays) } : {}) };
+  return { mode: f.mode, startMin: hhmmToMin(f.start) ?? f.start, endMin: hhmmToMin(f.end) ?? f.end, days: f.days, holidays: splitDates(f.holidays), tz: f.tz.trim(), byVcenter };
+}
+const TZ_HINTS = ['Asia/Seoul', 'Asia/Shanghai', 'Asia/Singapore', 'Asia/Tokyo', 'Europe/Warsaw', 'Europe/Berlin', 'Europe/London', 'America/New_York', 'America/Chicago', 'America/Los_Angeles', 'UTC'];
+function SlaCalendarForm({ cal, vcenters, onChange }) {
+  if (!cal) return null;
+  const set = (p) => onChange({ ...cal, ...p });
+  const setRow = (i, p) => set({ byVc: cal.byVc.map((r, j) => (j === i ? { ...r, ...p } : r)) });
+  return (
+    <div className="iss-cal">
+      <div className="iss-checks">
+        <span className="muted" style={{ fontSize: 12.5 }}>시간 세는 방식</span>
+        <label className="iss-check"><input type="radio" name="sla-cal-mode" checked={cal.mode === '24x7'} onChange={() => set({ mode: '24x7' })} /> 달력 시간(24×7)</label>
+        <label className="iss-check"><input type="radio" name="sla-cal-mode" checked={cal.mode === 'business'} onChange={() => set({ mode: 'business' })} /> 업무 시간만(밤 · 주말 · 휴일은 세지 않음)</label>
+      </div>
+      {cal.mode === 'business' && (
+        <>
+          <div className="iss-checks">
+            <label className="iss-inline">시작<input className="input iss-time" type="time" value={cal.start} onChange={(e) => set({ start: e.target.value })} /></label>
+            <label className="iss-inline">끝<input className="input iss-time" type="time" value={cal.end} onChange={(e) => set({ end: e.target.value })} /></label>
+            {WEEKDAY_TEXT.map((w, d) => (
+              <label key={w} className="iss-check"><input type="checkbox" checked={cal.days.includes(d)} onChange={(e) => set({ days: e.target.checked ? [...cal.days, d].sort() : cal.days.filter((x) => x !== d) })} /> {w}</label>
+            ))}
+          </div>
+          <label className="iss-field">기본 시간대(IANA 이름)<input className="input" list="iss-tz-hints" value={cal.tz} onChange={(e) => set({ tz: e.target.value })} placeholder="Asia/Seoul" /></label>
+          <DataList id="iss-tz-hints">{TZ_HINTS.map((t) => <option key={t} value={t} />)}</DataList>
+          <label className="iss-field">공통 휴일(YYYY-MM-DD, 쉼표 구분 · 200개까지)<textarea className="input" rows={2} value={cal.holidays} onChange={(e) => set({ holidays: e.target.value })} placeholder="2026-12-25, 2027-01-01" /></label>
+          <div className="muted" style={{ fontSize: 12.5 }}>법인별 — 그 법인 이슈는 그 시간대로 셉니다(예: 폴란드 Europe/Warsaw · 미국 동부 America/New_York). ‘법인 휴일’ 을 켜면 공통 휴일 대신 그 목록을 씁니다.</div>
+          <div className="iss-rows">
+            {cal.byVc.map((r, i) => (
+              <div key={i} className="iss-row-edit iss-cal-row">
+                <Select className="select" value={r.vc} onChange={(e) => setRow(i, { vc: e.target.value })} aria-label={`법인 ${i + 1}`}>
+                  <option value="">법인 고르기</option>
+                  {vcenters.map((v) => <option key={v.id} value={v.id}>{v.name || v.id}</option>)}
+                  {r.vc && !vcenters.some((v) => v.id === r.vc) && <option value={r.vc}>{r.vc}(목록에 없음)</option>}
+                </Select>
+                <input className="input" list="iss-tz-hints" value={r.tz} onChange={(e) => setRow(i, { tz: e.target.value })} placeholder="시간대(비우면 기본)" aria-label={`법인 ${i + 1} 시간대`} />
+                <label className="iss-check"><input type="checkbox" checked={r.own} onChange={(e) => setRow(i, { own: e.target.checked })} /> 법인 휴일</label>
+                {r.own && <input className="input" value={r.holidays} onChange={(e) => setRow(i, { holidays: e.target.value })} placeholder="2026-11-11, …" aria-label={`법인 ${i + 1} 휴일`} />}
+                <button type="button" className="btn" onClick={() => set({ byVc: cal.byVc.filter((_, j) => j !== i) })}>삭제</button>
+              </div>
+            ))}
+            <button type="button" className="btn" disabled={cal.byVc.length >= 100} onClick={() => set({ byVc: [...cal.byVc, { vc: '', tz: '', own: false, holidays: '' }] })}>+ 법인별 시간대</button>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 /** 전체 범위 관리자 전용 — 서버가 같은 기준으로 막는다(GET·PUT /issues/settings). 조회 실패면 저장 버튼을 열지 않는다. */
-function IssueSettings() {
+function IssueSettings({ meta = null }) {
   const [data, setData] = useState(null);
   const [err, setErr] = useState(null);
   const [form, setForm] = useState(null);
@@ -1298,7 +1370,11 @@ function IssueSettings() {
         autoEnabled: !!st.autoAssign.enabled, components: st.autoAssign.components.map((c) => ({ ...c })), pool: st.autoAssign.pool.join(', '),
         notifyEnabled: !!st.notify.enabled, mail: st.notify.mail !== false, chat: !!st.notify.chat, events: { ...st.notify.events }, people: st.notify.people.map((p) => ({ ...p })),
         // v2.888 SLA(서버 issues/sla.js normalizeSla 가 다시 검사한다)
-        sla: st.sla ? { enabled: !!st.sla.enabled, types: [...(st.sla.types || [])], warnPct: st.sla.warnPct ?? 80, targets: Object.fromEntries(Object.entries(st.sla.targets || {}).map(([k, v]) => [k, { respondMin: String(v.respondMin), resolveMin: String(v.resolveMin) }])) } : null,
+        sla: st.sla ? { enabled: !!st.sla.enabled, types: [...(st.sla.types || [])], warnPct: st.sla.warnPct ?? 80, targets: Object.fromEntries(Object.entries(st.sla.targets || {}).map(([k, v]) => [k, { respondMin: String(v.respondMin), resolveMin: String(v.resolveMin) }])),
+          // v2.908 업무 시간 달력(서버 normalizeCalendar 가 다시 검사한다)
+          cal: calForm(st.sla.calendar) } : null,
+        automation: { ...(st.automation || {}), staleDays: String(st.automation?.staleDays ?? 7) }, // v2.908 자동화 규칙
+        inbox: st.inbox?.enabled !== false, // v2.908 포탈 알림함
       });
     }).catch((e) => { if (latest.isLatest(k)) setErr(e); });
   }, [latest]);
@@ -1314,7 +1390,9 @@ function IssueSettings() {
     const body = {
       autoAssign: { enabled: form.autoEnabled, components: form.components.filter((c) => c.name.trim() || c.assignee.trim()), pool: splitNames(form.pool) },
       notify: { enabled: form.notifyEnabled, mail: form.mail, chat: form.chat, events: form.events, people: form.people.filter((p) => p.username.trim() || p.email.trim()) },
-      ...(form.sla ? { sla: { enabled: form.sla.enabled, types: form.sla.types, warnPct: Number(form.sla.warnPct), targets: Object.fromEntries(Object.entries(form.sla.targets).map(([k, v]) => [k, { respondMin: Number(v.respondMin), resolveMin: Number(v.resolveMin) }])) } } : {}),
+      ...(form.sla ? { sla: { enabled: form.sla.enabled, types: form.sla.types, warnPct: Number(form.sla.warnPct), targets: Object.fromEntries(Object.entries(form.sla.targets).map(([k, v]) => [k, { respondMin: Number(v.respondMin), resolveMin: Number(v.resolveMin) }])), calendar: calBody(form.sla.cal) } } : {}),
+      automation: { ...form.automation, staleDays: Number(form.automation.staleDays) },
+      inbox: { enabled: form.inbox },
     };
     try {
       const r = await putJson('/issues/settings', body);
@@ -1368,13 +1446,32 @@ function IssueSettings() {
           <button type="button" className="btn" disabled={form.people.length >= (lim.people || 500)} onClick={() => upd({ people: [...form.people, { username: '', email: '' }] })}>+ 사람</button>
         </div>
         {st && <div className="muted" style={{ fontSize: 12.5 }}>발송 상태: {notifyStatusText(st)}{st.lastError ? ` · 마지막 문제: ${st.lastError}` : ''}</div>}
+        <label className="iss-check"><input type="checkbox" checked={form.inbox} onChange={(e) => upd({ inbox: e.target.checked })} /> 포탈 알림함 — 위 알림 · 메일 스위치와 따로, 받을 사람마다 포탈 안에 쌓습니다(이슈 › 알림함 · 메일 주소가 없는 사람도 받습니다)</label>
+        {data.inboxStatus && <div className="muted" style={{ fontSize: 12.5 }}>알림함: {data.inboxStatus.users}명 · {data.inboxStatus.items}줄(안 읽음 {data.inboxStatus.unread}){data.inboxStatus.writeFail ? ` · 쓰기 실패 ${data.inboxStatus.writeFail}(${data.inboxStatus.lastError || ''})` : ''}</div>}
+      </div>
+
+      <div className="card iss-editor">
+        <h3 className="iss-h3">자동화 규칙</h3>
+        <div className="muted" style={{ fontSize: 12.5 }}>정해진 목록에서 켜고 끕니다(자유 스크립트 없음). 실행 기록은 이슈 이력 · 위키 체크 기록에 ‘automation’ 으로 남습니다.</div>
+        {[
+          ['wikiCheck', '이슈가 완료되면 → 그 이슈 키(ISS-번호)를 적은 위키 체크리스트 항목을 완료로(판을 만들지 않는 체크 · 읽기 전용 스페이스와 보관 문서는 건너뜀)'],
+          ['childrenReview', '하위 작업이 모두 완료되면 → 상위 이슈를 ‘검토’ 로(완료는 사람이)'],
+          ['p0Chat', 'P0 장애(유형 장애 · 우선순위 P0)가 등록되면 → 팀 채팅에 바로(1분 묶음을 기다리지 않음 · 채널은 설정 › 알림)'],
+        ].map(([k, label]) => (
+          <label key={k} className="iss-check"><input type="checkbox" checked={!!form.automation[k]} onChange={(e) => upd({ automation: { ...form.automation, [k]: e.target.checked } })} /> {label}</label>
+        ))}
+        <div className="iss-checks">
+          <label className="iss-check"><input type="checkbox" checked={!!form.automation.stale} onChange={(e) => upd({ automation: { ...form.automation, stale: e.target.checked } })} /> 진행 중인데</label>
+          <label className="iss-inline"><input className="input iss-num" type="number" min={1} max={90} value={form.automation.staleDays} onChange={(e) => upd({ automation: { ...form.automation, staleDays: e.target.value } })} aria-label="멈춤 일 수" />일 갱신이 없으면 → 담당자에게 알림(같은 멈춤에 그 일 수마다 한 번) · 보드 · 목록에 ‘멈춤’ 배지</label>
+        </div>
+        {data.automationStatus && <div className="muted" style={{ fontSize: 12.5 }}>실행: 위키 체크 {data.automationStatus.wikiChecked}항목({data.automationStatus.wikiPages}문서) · 상위 검토 {data.automationStatus.reviewed} · P0 채팅 {data.automationStatus.p0Chat}{data.automationStatus.p0ChatFail ? ` · 채팅 실패 ${data.automationStatus.p0ChatFail}` : ''}{data.automationStatus.errors ? ` · 실패 ${data.automationStatus.errors}(${data.automationStatus.error || ''})` : ''} — 포탈을 다시 시작하면 0 부터 셉니다</div>}
       </div>
 
       {form.sla && (
         <div className="card iss-editor">
           <h3 className="iss-h3">SLA(응답 · 해결 목표)</h3>
           <label className="iss-check"><input type="checkbox" checked={form.sla.enabled} onChange={(e) => upd({ sla: { ...form.sla, enabled: e.target.checked } })} /> SLA 시계 켜기 — 카드 · 목록에 초과 · 임박 배지, 위 알림이 켜져 있으면 초과 때 담당자 · 보고자에게 한 번</label>
-          <div className="muted" style={{ fontSize: 12.5 }}>달력 시간(24×7)으로 셉니다(업무 시간 · 휴일 달력은 아직 없습니다). 보류로 표시한 동안은 시계가 멈춥니다. 응답 = 진행 중 · 검토 · 완료로 옮기거나 보고자가 아닌 사람의 첫 댓글. 해결 = 완료. 목표 0 은 그 단계를 보지 않습니다.</div>
+          <div className="muted" style={{ fontSize: 12.5 }}>아래 ‘시간 세는 방식’ 으로 셉니다. 보류로 표시한 동안은 시계가 멈춥니다. 응답 = 진행 중 · 검토 · 완료로 옮기거나 보고자가 아닌 사람의 첫 댓글. 해결 = 완료. 목표 0 은 그 단계를 보지 않습니다.</div>
           <div className="iss-checks">
             <span className="muted" style={{ fontSize: 12.5 }}>대상 유형</span>
             {['incident', 'request', 'task', 'improve'].map((t) => (
@@ -1397,6 +1494,7 @@ function IssueSettings() {
               </React.Fragment>
             ))}
           </div>
+          <SlaCalendarForm cal={form.sla.cal} vcenters={meta?.vcenters || []} onChange={(cal) => upd({ sla: { ...form.sla, cal } })} />
         </div>
       )}
       {msg && <div className="banner">{msg}</div>}

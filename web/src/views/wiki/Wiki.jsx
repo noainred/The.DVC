@@ -59,6 +59,10 @@ export default function Wiki() {
     fetchJson('/wiki/meta').then((m) => { if (latestMeta.isLatest(k)) { setMeta(m); setErr(null); } }).catch((e) => { if (latestMeta.isLatest(k)) setErr(e); });
   }, [latestMeta]);
   useEffect(() => { loadMeta(); }, [loadMeta]);
+  // v2.908 포탈 알림함 — 안 읽은 수(마운트 1회 + 새로고침 · 폴링 없음). 못 읽으면 버튼에 수를 붙이지 않는다.
+  const [unread, setUnread] = useState(null);
+  const loadUnread = useCallback(() => { fetchJson('/issues/inbox', { limit: 1 }, undefined, { retries: 0 }).then((r) => setUnread(r.demo ? null : (r.unread || 0))).catch(() => setUnread(null)); }, []);
+  useEffect(() => { loadUnread(); }, [loadUnread]);
 
   const spaces = meta?.spaces || [];
   const space = route.space && spaces.some((s) => s.id === route.space) ? route.space : (route.space || spaces[0]?.id || '');
@@ -101,7 +105,8 @@ export default function Wiki() {
         <span className="wiki-grow" />
         <button className="btn wiki-tree-toggle" onClick={() => setTreeOpen((v) => !v)} aria-expanded={treeOpen}>문서 목록</button>
         <button className={`btn${route.view === 'home' ? ' primary' : ''}`} onClick={() => go({ space })}>대문</button>
-        <button className="btn" onClick={() => { loadMeta(); loadTree(); }}>새로고침</button>
+        <button className="btn" onClick={() => { loadMeta(); loadTree(); loadUnread(); }}>새로고침</button>
+        {unread != null && <a className="btn" href="#/issues/inbox" title="언급 · 할당 · 위키 알림(이슈 › 알림함)">알림함{unread ? <span className="iss-tab-n">{unread > 99 ? '99+' : unread}</span> : null}</a>}
         {meta.canWrite && <button className={`btn${route.view === 'tidy' ? ' primary' : ''}`} onClick={() => go({ space, view: 'tidy' })} title="휴지통 · 깨진 링크">정리</button>}
         {canWriteHere && <button className="btn primary" onClick={() => go({ space, view: 'new' })}>+ 새 문서</button>}
       </div>

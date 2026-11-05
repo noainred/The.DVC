@@ -658,6 +658,18 @@ let vmPowerPrev = null;      // vmId -> powerState (직전 스냅샷, 동시 다
 function pushRecent(entry) { recent.unshift(entry); if (recent.length > 200) recent.pop(); }
 
 /**
+ * v2.908 알람 상태 구독(이슈 자동 등록 — issues/alertIssues.js). 평가가 끝날 때마다 { now, firing:[{key, alert, since}], resolved:[{key, alert}] } 를 준다.
+ * 판정 보류(못 읽음)로 끊긴 키는 resolved 에 넣지 않는다(해소가 아니라 모르는 것이다). 구독자는 미뤄서 돈다(setImmediate) — 평가를 막지 않는다.
+ * 이 모듈이 이슈를 모르게 한다(의존 방향: 이슈 → 알람).
+ */
+const _stateListeners = new Set();
+export function onAlertState(fn) { if (typeof fn === 'function') _stateListeners.add(fn); return () => _stateListeners.delete(fn); }
+function emitAlertState(ev) {
+  if (!_stateListeners.size) return;
+  for (const fn of _stateListeners) setImmediate(() => { try { const r = fn(ev); if (r?.catch) r.catch(() => {}); } catch { /* 구독자 오류는 알람 평가와 무관 */ } });
+}
+
+/**
  * v2.742(감사 TIMING-01): 발송이 **실패**하면(받은 채널 없이 오류) 쿨다운(기본 60분)을 다 기다리지 않고 짧게 다시 시도한다.
  *   예전에는 보내기 전에 lastNotified 를 찍어 웹훅 한 번의 일시 오류로 그 알림이 한 시간 동안 사라졌다.
  *   · 재시도는 키마다 RETRY_DELAYS_MS 길이(2번)까지 — 그 뒤는 예전처럼 쿨다운이다. 메일 인증 실패는 첫 거부에서 메일 쪽 정지가
@@ -769,6 +781,7 @@ async function refreshState(cfg, sendEnabled) {
     }
   }
   // resolve
+  const resolvedNow = []; // v2.908 이슈 자동 등록 구독자에게
   for (const [key, st] of [...firing.entries()]) {
     if (seen.has(key)) { if (st.heldSince) { st.heldSince = 0; changed = true; } continue; }
     // v2.598 RECENT2598-03: 값을 못 읽은 항목은 해소가 아니다 — 발생 상태를 유지한다. 오래(HELD_MAX_MS) 못 읽으면 알림 없이
@@ -782,7 +795,9 @@ async function refreshState(cfg, sendEnabled) {
     }
     firing.delete(key); rememberEnded(restored, key, st, now, cooldownMs); changed = true;
     pushRecent({ at: new Date().toISOString(), key, title: `해소: ${st.alert.title}`, severity: 'resolved' });
+    resolvedNow.push({ key, alert: st.alert });
   }
+  emitAlertState({ now, firing: [...firing.entries()].map(([key, st]) => ({ key, alert: st.alert, since: st.since })), resolved: resolvedNow });
   // 복원 목록은 **쿨다운이 남은 동안만** 들고 있는다 — 기동 직후에는 스냅샷이 아직 비어(첫 수집 중) 활성 목록이 0 이라
   // 첫 평가에서 비우면 수집이 끝난 뒤 전부 다시 발송된다. 쿨다운이 지난 항목은 어차피 재발송 대상이라 버린다.
   for (const [k, r] of restored) {
