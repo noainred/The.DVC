@@ -74,7 +74,11 @@ describe('재해 복구 1차 — 반증 반영', () => {
   it('R1 첫 재해 복구는 1대 — 그 법인 재해 복구 성공(7일 안)이 있으면 50대', () => {
     const jobs = [J('a', { restores: [{ dr: true, state: 'error', at: now - 1000 }] })];
     expect(T.drTrialOk(jobs, 'vc-a', now)).toBe(false);
-    jobs[0].restores.push({ dr: true, state: 'ok', at: now - 5000, endedAt: now - 4000 });
+    jobs[0].restores.push({ dr: true, state: 'ok', nic: 'disconnect', at: now - 5000, endedAt: now - 4000 });
+    expect(T.drTrialOk(jobs, 'vc-a', now)).toBe(false, '버그 점검 B4-02: 끝맺음(네트워크 끊기) 전에는 시험이 끝나지 않았다');
+    jobs[0].restores[1].finish = { nic: 'failed' };
+    expect(T.drTrialOk(jobs, 'vc-a', now)).toBe(false, '끊기 실패는 통과가 아니다');
+    jobs[0].restores[1].finish = { nic: 'ok' };
     expect(T.drTrialOk(jobs, 'vc-a', now)).toBe(true);
     expect(T.drTrialOk(jobs, 'vc-b', now)).toBe(false);
     expect(T.drTrialOk(jobs, 'vc-a', now + T.DR_TRIAL_MS)).toBe(false);
@@ -120,6 +124,7 @@ describe('재해 복구 2차 — 복구 순서(단계)', () => {
   it('진행 카드 — 상태 줄 · 보일 회차 · 회차에 든 VM 은 고르기에서 막는다', () => {
     expect(T.drWaveCountsText({ total: 15, counts: { queued: 10, ok: 3, sent: 2 } })).toBe('성공 3 · 복원 중 2 · 대기 10 / 15대');
     expect(T.drWaveCountsText({})).toBe('— / —', '못 읽은 대수에 단위를 붙이지 않는다');
+    expect(T.drWaveCountsText({ total: 3, counts: { ok: 1, queued: 2 } }, 'stopped')).toBe('성공 1 · 보내지 않음 2 / 3대', '멈춘 회차의 대기는 보내지 않음');
     const runs = [{ id: 'o', vcenterId: 'vc-a', state: 'done', at: 5 }, { id: 'p', vcenterId: 'vc-a', state: 'paused', at: 1 }, { id: 'q', vcenterId: 'vc-b', state: 'running', at: 9 }];
     expect(T.drCurrentRun(runs, 'vc-a').id).toBe('p');
     expect(T.drCurrentRun(runs.filter((r) => r.id !== 'p'), 'vc-a').id).toBe('o');

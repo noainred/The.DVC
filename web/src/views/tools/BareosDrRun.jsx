@@ -6,6 +6,7 @@
  */
 import React, { useState } from 'react';
 import { postJson } from '../../api.js';
+import { requireChanged } from '../changeResult.js';
 import { ErrorBox } from '../../components/ui.jsx';
 import Select from '../../components/Select.jsx';
 import { Note } from './BareosBits.jsx';
@@ -17,6 +18,19 @@ const ROW = { display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' };
 const FIELD = { display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12, minWidth: 0 };
 const TONE = { ok: '#86efac', warn: '#fcd34d', bad: '#fca5a5', info: '#93c5fd', muted: 'var(--text-muted, #94a3b8)' };
 const CHIP = { padding: '2px 8px', borderRadius: 999, border: '1px solid var(--border-soft)', fontSize: 11.5, overflowWrap: 'anywhere' };
+
+/**
+ * 동작 오류 — 틀린 OTP(403)는 문구로(ErrorBox 는 403 을 '권한이 없습니다' 화면으로 그린다 · 버그 점검 B5-03), 상태 파일 못 읽음(503 state-unreadable)도 사유 그대로(B5-06).
+ *   그 밖(진짜 권한 403 · 5xx)은 ErrorBox 의 안내를 그대로 쓴다.
+ */
+export function DrActErr({ error }) {
+  if (!error) return null;
+  const code = error?.body?.code || '';
+  if ((error.status === 403 && /OTP/.test(String(error.message || ''))) || code === 'state-unreadable' || code === 'registry-unreadable' || error.changeRejected) {
+    return <Note tone="bad">{String(error.message || error.body?.reason || '요청이 거부됐습니다')}</Note>;
+  }
+  return <ErrorBox error={error} />;
+}
 
 /** 단계 만들기 — waves · assign 은 부모 상태(표의 단계 칸과 함께 쓴다). rows 는 고른 행(why 없음). */
 export function DrRunBuilder({ waves, setWaves, assign, setAssign, rows, shownPicked, disabled }) {
@@ -77,13 +91,15 @@ export function DrRunCard({ run, err, onRefresh, onChanged }) {
   const [otp, setOtp] = useState('');
   const [busy, setBusy] = useState(false);
   const [actErr, setActErr] = useState(null);
+  const [warn, setWarn] = useState('');
   if (!run && !err) return null;
-  if (!run) return <section className="card" style={{ padding: 12 }} data-dr-run=""><ErrorBox error={err} /></section>;
+  if (!run) return <section className="card" style={{ padding: 12 }} data-dr-run=""><DrActErr error={err} /></section>;
   const [label, tone] = DR_RUN_STATE[run.state] || [run.state, 'muted'];
   const active = drRunActive(run);
   const act = async (path, body) => {
-    setBusy(true); setActErr(null);
-    try { await postJson(`${BASE}/dr/runs/${encodeURIComponent(run.id)}/${path}`, body); setStopAsk(false); onChanged?.(); } catch (e) { setActErr(e); onRefresh?.(); } finally { setBusy(false); setOtp(''); }
+    setBusy(true); setActErr(null); setWarn('');
+    // 409(멈춤 아님 · 엣지 노드 · 전제)는 postJson 이 던지지 않고 본문을 돌려준다 — requireChanged 로 오류로 바꾼다(버그 점검 B5-01)
+    try { const r = requireChanged(await postJson(`${BASE}/dr/runs/${encodeURIComponent(run.id)}/${path}`, body)); if (r?.warning) setWarn(String(r.warning)); setStopAsk(false); onChanged?.(); } catch (e) { setActErr(e); onRefresh?.(); } finally { setBusy(false); setOtp(''); }
   };
   const bad = [];
   run.waves.forEach((w, wi) => { for (const it of w.items || []) if (it.state === 'failed' || it.state === 'unknown') bad.push({ ...it, wave: wi }); });
@@ -98,14 +114,16 @@ export function DrRunCard({ run, err, onRefresh, onChanged }) {
         <button type="button" className="tab" style={{ padding: '3px 10px', fontSize: 12, marginLeft: 'auto' }} onClick={onRefresh} disabled={busy}>새로 고침</button>
       </div>
       {run.reason && <Note tone={run.state === 'paused' ? 'warn' : 'info'}>{run.reason}</Note>}
-      {err && <ErrorBox error={err} />}
+      {warn && <Note tone="warn">{warn}</Note>}
+      {err && <DrActErr error={err} />}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 4, minWidth: 0 }}>
         {run.waves.map((w, i) => {
-          const mk = i < run.cur || run.state === 'done' ? '✓' : i === run.cur ? '▶' : '·';
+          // 멈춘 회차의 지금 단계는 ▶(진행)가 아니라 ■ — 남은 VM 은 '대기' 가 아니라 '보내지 않음'(버그 점검 B5-12)
+          const mk = i < run.cur || run.state === 'done' ? '✓' : i === run.cur ? (run.state === 'stopped' ? '■' : '▶') : '·';
           return (
             <div key={i} style={{ display: 'grid', gridTemplateColumns: '20px minmax(0, 1fr)', gap: 8, alignItems: 'start', fontSize: 12.5 }}>
               <span style={{ textAlign: 'center', fontWeight: 800, color: i === run.cur && active ? TONE.info : undefined }}>{mk}</span>
-              <span style={{ minWidth: 0, overflowWrap: 'anywhere' }}><b>{i + 1}. {w.name}</b> <span className="muted">· 동시 {w.concurrency}대{w.verify ? ' · 켜 보기' : ''}</span> — {drWaveCountsText(w)}</span>
+              <span style={{ minWidth: 0, overflowWrap: 'anywhere' }}><b>{i + 1}. {w.name}</b> <span className="muted">· 동시 {w.concurrency}대{w.verify ? ' · 켜 보기' : ''}</span> — {drWaveCountsText(w, run.state)}</span>
             </div>
           );
         })}
@@ -123,8 +141,9 @@ export function DrRunCard({ run, err, onRefresh, onChanged }) {
           {bad.length > 50 && <li className="muted">외 {bad.length - 50}대</li>}
         </ul>
       )}
-      {actErr && <ErrorBox error={actErr} />}
-      {active && (
+      {actErr && <DrActErr error={actErr} />}
+      {active && run.writable === false && <span className="muted" style={{ fontSize: 12 }}>이 법인은 쓰기 권한이 없어 멈추기 · 계속을 할 수 없습니다.</span>}
+      {active && run.writable !== false && (
         <div style={ROW}>
           {run.state === 'paused' && (
             <>
