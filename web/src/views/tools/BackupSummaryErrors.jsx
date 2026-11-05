@@ -8,7 +8,7 @@
  *   [이력 →] = 진행 · 이력에서 그 VM · jobid 를 연 채로(예전 고정 주소는 대상 목록의 첫 VM 을 보였다) · 보기 [따로 보기 | 묶어 보기](서버 묶음 id) · 묶음 로그(첫 오류 줄 대조).
  */
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { fetchJson, hasRole, toolAllowed } from '../../api.js';
+import { fetchJson, hasRole, toolAllowed, adminToolAllowed } from '../../api.js';
 import { STable } from '../../components/STable.jsx';
 import Select from '../../components/Select.jsx';
 import { fmtNum } from './backupViewText.js';
@@ -51,7 +51,7 @@ export default function BackupSummaryErrors({ reloadKey, onOpenDetail }) {
   const c = data?.counts || {};
   const rows = filterErrors(data?.rows, { kind, src });
   const dayText = (ERROR_DAY_OPTS.find(([d]) => d === (data?.days || days)) || [0, '24시간'])[1];
-  const opt = { canBareos: toolAllowed('bareos-backup'), canBareosView: toolAllowed('bareos-summary'), admin: hasRole('admin') };
+  const opt = { canBareos: adminToolAllowed('bareos-backup'), canBareosView: toolAllowed('bareos-summary'), admin: hasRole('admin') };   // v2.899(점검 W1): 로그 · 이력은 admin 전용 API
   const go = (r, o) => { if (o.key === 'detail') onOpenDetail?.(r.vc); else window.location.hash = o.hash; };
   const groups = view === 'groups' ? sortGroups(groupErrors(rows), gsort) : null;
   const GH = [['time', '시각(처음 ~ 마지막)'], ['corp', '법인'], ['src', '솔루션'], ['target', '대상'], ['kind', '결과'], ['msg', '메시지(요약)'], ['n', '건수']];
@@ -133,7 +133,7 @@ export default function BackupSummaryErrors({ reloadKey, onOpenDetail }) {
                           <td style={PAD}>
                             <div className="flex" style={{ gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
                               {g.n > 1 && <button type="button" className="logout-btn" aria-expanded={isOpenG} onClick={() => toggle(g.id)} style={{ padding: '3px 10px', fontSize: 12 }}>{isOpenG ? '접기 ▴' : '펼치기 ▾'}</button>}
-                              {g.runs > 1 ? <button type="button" className={bulkOn ? 'login-btn' : 'logout-btn'} aria-pressed={bulkOn} onClick={() => setDrawer({ kind: 'bulk', group: g })} style={{ padding: '3px 10px', fontSize: 12 }} title="이 묶음의 로그를 차례로 읽어 첫 오류 줄을 대조합니다">{bulkOn ? '묶음 로그 열림' : '묶음 로그'}</button>
+                              {g.runs > 1 && opt.canBareos ? <button type="button" className={bulkOn ? 'login-btn' : 'logout-btn'} aria-pressed={bulkOn} onClick={() => setDrawer({ kind: 'bulk', group: g })} style={{ padding: '3px 10px', fontSize: 12 }} title="이 묶음의 로그를 차례로 읽어 첫 오류 줄을 대조합니다">{bulkOn ? '묶음 로그 열림' : '묶음 로그'}</button>
                                 : g.n === 1 ? actions(r) : null}
                             </div>
                           </td>

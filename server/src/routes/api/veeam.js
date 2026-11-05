@@ -1303,13 +1303,21 @@ export function registerBackupStatus(api) {
    * v2.838 '이 조건을 알림으로(메일)'(사용자 결정 '일일 메일로 구현') — 전 법인 자료를 메일로 보내므로 **관리자 · 전체 범위**만 저장 · 지금 보내기(데모 계정 403).
    *   다른 계정은 GET 에 hidden(설정을 싣지 않는다). 저장 · 보내기는 감사에 남긴다. 지금 보내기는 1분에 한 번.
    */
-  const alertEditor = (req) => isAdminDetailUser(req.user) && !scopedVcenterIds(req.user, store.get());   // 관리자 판본 판정 하나(데모 계정 제외 포함)
+  // v2.899(점검 S2 — 재현): 쓰기 범위(writeVcenters)가 지정된 관리자도 막는다 — 전 법인 공용 쓰기(형제 bareos-backup digest 의 fullWriteOnly 와 같은 판정).
+  const alertEditor = (req) => {
+    if (!isAdminDetailUser(req.user) || scopedVcenterIds(req.user, store.get())) return false;
+    try { return !writeScopedVcenterIds(req.user, store.get()); } catch { return false; }
+  };   // 관리자 판본 판정 하나(데모 계정 제외 포함)
+  /** 저장한 사람(관리자 계정명) 가림 — 화면은 '· 저장' 만 보인다. */
+  const maskSavedBy = (st) => (st && typeof st === 'object' && Object.hasOwn(st, 'savedBy') ? { ...st, savedBy: '' } : st);
   const alertFullScope = fullScopeOnlyWith('전 법인 자료를 메일로 보내는 설정이라 전체 범위(vCenter 제한 없는) 관리자만 바꾸거나 보낼 수 있습니다.');   // 게이트 태그(archScan route-gate) — 핸들러의 alertEditor 와 이중
   api.get('/tools/backup-summary/alert', toolsPerm, (req, res) => {
     if (scopedVcenterIds(req.user, store.get())) return res.json({ ok: true, canEdit: false, hidden: true });
     let mail = null;
     try { const m = loadMailSettings(); mail = { enabled: !!m?.enabled, kindEnabled: m?.kinds?.[STALE_MAIL_KIND]?.enabled !== false }; } catch { mail = null; }
-    return res.json({ ok: true, canEdit: alertEditor(req), settings: loadAlert(), unreadable: !!alertLoadError() || undefined, status: alertStatus(), mail });
+    // v2.899(점검 S3 — 사용자 결정 '관리자 판본에만'): 저장한 관리자 계정명(savedBy)은 관리자 판본에만 — 형제 Bareos 사전 점검 cfgOut 과 같은 가림.
+    const settings = loadAlert();
+    return res.json({ ok: true, canEdit: alertEditor(req), settings: isAdminDetailUser(req.user) ? settings : maskSavedBy(settings), unreadable: !!alertLoadError() || undefined, status: alertStatus(), mail });
   });
   api.put('/tools/backup-summary/alert', toolsPerm, requireRole('admin'), alertFullScope, (req, res) => {
     if (!alertEditor(req)) return res.status(403).json({ ok: false, reason: '전 법인 자료를 메일로 보내는 설정이라 전체 범위 관리자만 바꿀 수 있습니다.' });

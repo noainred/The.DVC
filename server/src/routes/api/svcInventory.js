@@ -361,7 +361,12 @@ function knownCorpsOf(snap) {
   if (!s.length || !reg) return null;
   return new Set([...s, ...reg]);
 }
-const fleetAdmin = (user, snap) => isAdminDetailUser(user) && !scopedVcenterIds(user, snap);   // 관리자 판본 판정은 isAdminDetailUser 하나(role 직접 비교 금지)
+// v2.899(점검 S1 — 재현): 전 법인 공용 쓰기는 조회 범위만 보면 안 된다(server/CLAUDE.md v2.733) — 조회는 무제한이어도 쓰기 범위(writeVcenters)가 지정된
+//   관리자가 전역 카탈로그 · 태그 카테고리 · 법인 항목 정리 · 초기화를 통과했다. 형제 라우트의 fullWriteOnly 와 같은 판정(던지면 거부).
+const fleetAdmin = (user, snap) => {
+  if (!isAdminDetailUser(user) || scopedVcenterIds(user, snap)) return false;
+  try { return !writeScopedVcenterIds(user, snap); } catch { return false; }
+};   // 관리자 판본 판정은 isAdminDetailUser 하나(role 직접 비교 금지)
 
 // ───────── 응답 조립 ─────────
 // 읽기 경로는 동결 참조(복사 없음 — 5차 검토 R5: 요청마다 고정 5만 건 깊은 복사 114ms). 쓰기는 mutate* 만.

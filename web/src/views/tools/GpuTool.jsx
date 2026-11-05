@@ -105,7 +105,8 @@ export function Gpu({ scope }) {
   // 하위 탭을 URL 에 실어 새로고침·북마크·뒤로가기에서 유지한다(v2.438, hooks/useHashTab.js).
   const [view, setView] = useHashTab({ base: ['tools', 'gpu'], valid: ['host', 'cluster', 'vc', 'model', 'alloc'], fallback: 'host' });
   // v2.857: '할당 계층' 보기는 특수 기능 'GPU 할당율'(#/tools/gpu-alloc)로 독립했다 — 옛 주소(#/tools/gpu/alloc 북마크)는 그쪽으로 넘긴다.
-  useEffect(() => { if (view === 'alloc') window.location.hash = '#/tools/gpu-alloc'; }, [view]);
+  // v2.899(점검 W5): 기록을 쌓지 않고 바꾼다(replace) — 해시 대입은 기록을 쌓아 '뒤로' 가 옛 주소로 돌아갔다가 다시 밀려 갇혔다
+  useEffect(() => { if (view === 'alloc') window.location.replace('#/tools/gpu-alloc'); }, [view]);
   const [hist, setHist] = useState(null);   // { level, key, metric } — v2.650: GpuHistModal 이 조회한다
   const [vmList, setVmList] = useState(null); // { title, params } for GpuVmsModal
   const [checkOpen, setCheckOpen] = useState(false); // v2.658 수집 점검 창

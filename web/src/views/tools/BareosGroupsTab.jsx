@@ -200,7 +200,8 @@ export default function BareosGroupsTab({ d }) {
     if (!running || view.kind === 'edit') return undefined;
     const t = setTimeout(load, 4000);
     return () => clearTimeout(t);
-  }, [running, tree, view.kind]);   // eslint-disable-line react-hooks/exhaustive-deps
+    // v2.899(점검 W6): refreshErr 도 본다 — 이어 읽기가 실패해도(트리가 그대로) 다음 시도를 건다
+  }, [running, tree, view.kind, refreshErr]);   // eslint-disable-line react-hooks/exhaustive-deps
 
   // v2.835: 넘겨받은 VM 의 법인 트리가 오면 새 그룹 창을 연다(그 법인이 아니면 버린다 — 다른 법인 VM 을 섞지 않는다)
   useEffect(() => {

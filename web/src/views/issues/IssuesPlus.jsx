@@ -340,7 +340,9 @@ export function SprintView({ meta, onOpen, onWritten, reloadSprints }) {
   const load = useCallback(() => {
     if (!sel) { setBoard(null); return; }
     const k = latest.next();
-    fetchJson(`/issues/sprints/${sel}/board`).then((r) => { if (latest.isLatest(k)) { setBoard(r); setErr(null); } }).catch((e) => { if (latest.isLatest(k)) setErr(e); });
+    // v2.899(점검 W2): 다른 스프린트로 바꾸면 이전 보드 · 오류를 바로 비운다 — 응답이 오기 전 A 의 '끝내기' 가 sprints/A 로 나가고, B 가 실패하면 A 보드가 오류 없이 남았다
+    setBoard((b) => (b?.sprint?.id === sel ? b : null)); setErr((e0) => (e0 && e0.__sprint === sel ? e0 : null));
+    fetchJson(`/issues/sprints/${sel}/board`).then((r) => { if (latest.isLatest(k)) { setBoard(r); setErr(null); } }).catch((e) => { if (latest.isLatest(k)) { try { e.__sprint = sel; } catch { /* 얼린 오류 */ } setErr(e); } });
   }, [sel, latest]);
   useEffect(() => { load(); }, [load]);
   const act = async (fn, okMsg = '') => {
@@ -351,13 +353,15 @@ export function SprintView({ meta, onOpen, onWritten, reloadSprints }) {
       setMsg(saveFailText(r)); return false;
     } catch (e) { setMsg(saveFailText({ reason: e.message })); return false; } finally { setBusy(false); }
   };
-  const sp = board?.sprint || sprints.find((s) => s.id === sel) || null;
-  const rows = useMemo(() => (board?.rows || []).filter((r) => r.type !== 'epic' && (!mine || r.assignee === meta.me)), [board, mine, meta.me]);
+  // 보드는 고른 스프린트의 것일 때만 쓴다(늦게 온 이전 응답 · 바꾼 직후 — 동작이 다른 스프린트에 가지 않게)
+  const cur = board?.sprint?.id === sel ? board : null;
+  const sp = cur?.sprint || sprints.find((s) => s.id === sel) || null;
+  const rows = useMemo(() => (cur?.rows || []).filter((r) => r.type !== 'epic' && (!mine || r.assignee === meta.me)), [cur, mine, meta.me]);
   const nextSprints = sprints.filter((s) => s.state !== 'closed' && s.id !== sel);
   const canManage = !!meta.canSprints;
   const open = sp && sp.state !== 'closed';
-  const counts = board?.counts || {};
-  const total = board?.total ?? 0;
+  const counts = cur?.counts || {};
+  const total = cur?.total ?? 0;
   const donePct = total ? Math.round(((counts.done || 0) / total) * 100) : null;
   return (
     <div className="iss-sprint">
@@ -375,9 +379,9 @@ export function SprintView({ meta, onOpen, onWritten, reloadSprints }) {
       </div>
       {form && <SprintForm initial={form === 'edit' ? sp : null} limits={meta.sprintLimits} onCancel={() => setForm(null)} onSaved={(s) => { setForm(null); setSel(s.id); reloadSprints?.(); }} />}
       {msg && <div className="banner">{msg}</div>}
-      {err && !board && <ErrorBox error={err} />}
-      {sel && !board && !err && <Loading label="스프린트" />}
-      {sp && board && (
+      {err && !cur && <ErrorBox error={err} />}
+      {sel && !cur && !err && <Loading label="스프린트" />}
+      {sp && cur && (
         <>
           <div className="card iss-sprint-head">
             <div className="iss-sprint-title">
@@ -415,18 +419,18 @@ export function SprintView({ meta, onOpen, onWritten, reloadSprints }) {
             )}
           </div>
           <div className="iss-sprint-stats">
-            <div className="card"><Burndown bd={board.burndown} /></div>
+            <div className="card"><Burndown bd={cur.burndown} /></div>
             <div className="card iss-people">
               <b>사람별 · 열린 이슈</b>
-              {(board.people || []).length === 0 && <div className="muted iss-small">담당자가 정해진 열린 이슈가 없습니다.</div>}
-              {(board.people || []).map((p) => (
+              {(cur.people || []).length === 0 && <div className="muted iss-small">담당자가 정해진 열린 이슈가 없습니다.</div>}
+              {(cur.people || []).map((p) => (
                 <div key={p.assignee} className="iss-load">
                   <span className="iss-load-name iss-who"><Avatar name={p.assignee} size={20} />{p.assignee}</span>
                   <span className="iss-bar" role="img" aria-label={`열린 이슈 ${p.open}건`}><span style={{ width: `${loadPct(p.open)}%` }} /></span>
                   <span className="iss-load-n">{p.open}</span>
                 </div>
               ))}
-              <div className="muted iss-small">막대는 {LOAD_CAP}건을 가득으로(표시 기준). 미할당 {board.unassigned ?? 0}.</div>
+              <div className="muted iss-small">막대는 {LOAD_CAP}건을 가득으로(표시 기준). 미할당 {cur.unassigned ?? 0}.</div>
             </div>
           </div>
           <div className="iss-sprint-tools">
@@ -434,7 +438,7 @@ export function SprintView({ meta, onOpen, onWritten, reloadSprints }) {
             <span className="muted iss-small">카드 왼쪽 띠 = 에픽(색은 에픽 키마다 같다 · 없음은 띠 없음)</span>
           </div>
           <div className="iss-board-wrap">
-            <div className="iss-board cols4">
+            <div className="iss-cur cols4">
               {BOARD_COLS.map((s) => {
                 const list = rows.filter((r) => (s === 'todo' ? r.status === 'todo' || r.status === 'backlog' : r.status === s));
                 return (
@@ -450,13 +454,13 @@ export function SprintView({ meta, onOpen, onWritten, reloadSprints }) {
           {open && (
             <div className="card iss-backlog">
               <div className="iss-backlog-head">
-                <b>백로그 · {board.backlogTotal ?? 0} · 스프린트 밖 열린 이슈</b>
+                <b>백로그 · {cur.backlogTotal ?? 0} · 스프린트 밖 열린 이슈</b>
                 <button className="btn" onClick={() => setBacklogOpen((v) => !v)}>{backlogOpen ? '접기' : '펼치기'}</button>
               </div>
               {backlogOpen && (
                 <>
-                  {(board.backlog || []).length === 0 && <div className="muted iss-small">스프린트 밖 열린 이슈가 없습니다.</div>}
-                  {(board.backlog || []).map((r) => (
+                  {(cur.backlog || []).length === 0 && <div className="muted iss-small">스프린트 밖 열린 이슈가 없습니다.</div>}
+                  {(cur.backlog || []).map((r) => (
                     <div key={r.key} className="iss-backlog-row">
                       <TypeTag t={r.type} /><button type="button" className="iss-key iss-link" onClick={() => onOpen(r.key)}>{r.key}</button><PrioTag p={r.priority} />
                       <button type="button" className="iss-link iss-backlog-title" onClick={() => onOpen(r.key)}>{r.title}</button>
@@ -465,7 +469,7 @@ export function SprintView({ meta, onOpen, onWritten, reloadSprints }) {
                         : <span className="muted iss-small">조회만</span>}
                     </div>
                   ))}
-                  {board.backlogTotal > (board.backlog || []).length && <div className="muted iss-small">위 {(board.backlog || []).length}건만 보입니다(우선순위 · 최근 순). 나머지는 필터에서 ‘sprint is empty’.</div>}
+                  {cur.backlogTotal > (cur.backlog || []).length && <div className="muted iss-small">위 {(cur.backlog || []).length}건만 보입니다(우선순위 · 최근 순). 나머지는 필터에서 ‘sprint is empty’.</div>}
                   <div className="muted iss-small">넣기 · 빼기는 이력에 남습니다. 범위 계정은 자기 법인 이슈만 넣고, 스프린트 자체(이름 · 기간 · 목표)는 전체 범위 운영자 · 관리자가 만듭니다.</div>
                 </>
               )}

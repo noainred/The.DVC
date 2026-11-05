@@ -87,6 +87,12 @@ export const toolAllowed = (k) => {
   const denied = Array.isArray(u.toolsDenied) ? u.toolsDenied : [];
   return !denied.includes(k);
 };
+/**
+ * v2.899(점검 W1): 관리자(admin) 전용 도구로 가는 버튼 · 링크 판정 — toolAllowed 는 비관리자에게 toolsDenied 만 보므로 카탈로그 adminOnly 도구에도 참이다
+ *   (operator · viewer 에게 누르면 늘 잠금 화면 · 403 인 버튼이 보였다). 서버가 admin 으로 집행하는 도구(Veeam 백업 실행 · Bareos 백업 관리)는 이것으로 가린다.
+ */
+export const adminToolAllowed = (k) => hasRole('admin') && toolAllowed(k);
+
 
 /**
  * 관리자가 **이 계정에 명시적으로 허용한** 도구인가(v2.555).
