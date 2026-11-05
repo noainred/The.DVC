@@ -192,6 +192,7 @@ export function ReviewView({ corp, reloadKey, svcName, writableOf, op, busy, cor
           </>
         )}
       </div>
+      <AliasPinsCard q={q} svcName={svcName} writableOf={writableOf} op={op} busy={busy} corpName={corpName} />
       <TagAmbiguousCard q={q} svcName={svcName} writableOf={writableOf} op={op} busy={busy} corpName={corpName} />
       <RuleOverlapCard q={q} svcName={svcName} writableOf={writableOf} op={op} busy={busy} corpName={corpName} />
       <RedundantCard q={q} svcName={svcName} writableOf={writableOf} op={op} busy={busy} corpName={corpName} />
@@ -200,10 +201,11 @@ export function ReviewView({ corp, reloadKey, svcName, writableOf, op, busy, cor
   );
 }
 
-const HELD_SHORT = { 'corp-unread': '법인 vCenter 를 지금 못 읽음', 'bm-source-unread': '베어메탈 출처를 못 읽음' };
+const HELD_SHORT = { 'corp-unread': '법인 vCenter 를 지금 못 읽음', 'bm-source-unread': '베어메탈 출처를 못 읽음', 'key-changed': '서버는 아직 있음 — 키가 바뀜' };
 const HELD_TEXT = {
   'corp-unread': '그 법인 vCenter 를 지금 읽지 못해 이 키의 VM 이 정말 없는지 모릅니다 — 다시 읽히면 판정합니다',
   'bm-source-unread': 'iDRAC 등록부·OME·수집 서버·엣지 중 읽지 못한 출처가 있어 이 베어메탈이 정말 없는지 모릅니다 — 어느 출처에 있는지 알 수 없어 법인을 가리지 않고 보류합니다',
+  'key-changed': '이 서비스태그의 서버를 함대가 아직 압니다 — 서비스태그를 잠시 못 읽어 다른 키로 보이거나(다시 읽히면 고정이 돌아옵니다), 가상화 호스트로 바뀌었을 수 있습니다. 지우지 않고 보류합니다',
 };
 const SOURCE_TEXT = { 'idrac-registry': 'iDRAC 등록부를 읽지 못함', ome: 'OME 장비 목록을 아직 받지 못함', 'collector-registry': '수집 서버 등록부를 읽지 못함', collector: '수집 서버 목록을 아직 받지 못함', edge: '엣지 보고를 받지 못함', snapshot: '인벤토리 스냅샷 없음', 'fleet-keys': '베어메탈 출처 목록을 만들지 못함' };
 
@@ -263,6 +265,39 @@ function TagAmbiguousCard({ q, svcName, writableOf, op, busy, corpName }) {
         ))}</tbody>
       </STable>
       {n > items.length ? <div className="muted" style={{ padding: '8px 14px', fontSize: 12 }}>앞 {items.length}대만 보입니다(전체 {n}대).</div> : null}
+    </div>
+  );
+}
+
+/**
+ * 옛 키로 저장된 고정(5차 R15) — 서버 키가 한 단계 올라(VM: moref → instanceUuid · 베어메탈: fleetId → 서비스태그) 고정이 옛 키에 남아 있다.
+ * 판정은 이미 그 고정을 쓰므로 소속은 그대로다. '새 키로 옮기기' 는 법인마다 한 번에(사람이 누른다 — 읽기 경로는 쓰지 않는다).
+ */
+function AliasPinsCard({ q, svcName, writableOf, op, busy, corpName }) {
+  const items = q.aliasPins?.items || [];
+  const n = q.aliasPins?.n || 0;
+  if (!n) return null;
+  const corps = [...new Set(items.map((x) => x.corp))];
+  return (
+    <div className="card" style={{ minWidth: 0 }}>
+      <div className="flex wrap gap" style={{ padding: '10px 14px', borderBottom: '1px solid var(--border)', alignItems: 'center' }}>
+        <b>옛 키로 저장된 고정</b><span className="muted" style={{ fontSize: 12 }}>{n}대 · 서버 식별 키가 한 단계 올라(VM: moref → instanceUuid · 베어메탈: fleetId → 서비스태그) 고정이 옛 키에 남아 있습니다 — 소속은 그대로이고, 옮기면 정리됩니다</span>
+      </div>
+      <STable className="table svcinv-t" minWidth={560} limit={50}>
+        <thead><tr><th>구성원 · 법인</th><th>고정된 서비스</th><th>옛 키</th></tr></thead>
+        <tbody>{items.map((x) => (
+          <tr key={x.key}>
+            <td data-sort={x.name}><b>{x.name}</b><div className="svcinv-sub">{corpName(x.corp)} · {x.kind === 'vm' ? 'VM' : '베어메탈'}</div></td>
+            <td>{svcName(x.serviceId)}</td>
+            <td style={{ fontFamily: 'var(--mono)', fontSize: 12, wordBreak: 'break-all' }}>{x.aliasKey}</td>
+          </tr>
+        ))}</tbody>
+      </STable>
+      <div className="flex wrap gap" style={{ padding: '8px 14px' }}>
+        {corps.filter((c) => writableOf(c)).map((c) => (
+          <button key={c} type="button" className="logout-btn" style={btn} disabled={busy} onClick={() => op({ op: 'pins.rekey', corp: c }, `${corpName(c)} 의 옛 키 고정을 새 키로 옮겼습니다(소속은 그대로).`)}>{corpName(c)} 새 키로 옮기기</button>
+        ))}
+      </div>
     </div>
   );
 }
