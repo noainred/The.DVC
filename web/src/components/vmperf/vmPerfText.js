@@ -36,7 +36,8 @@ export function chartKeys(overlay, metric) {
   return o && o.keys ? [...o.keys] : [METRIC_KEYS.includes(metric) ? metric : 'cpu'];
 }
 
-const num = (v) => (v == null || v === '' || !Number.isFinite(Number(v)) ? null : Number(v));
+import { numOrNull } from '../../numOrNull.js'; // 결측 판정은 한 벌(audit2617 스윕 — 사본 금지)
+const num = numOrNull;
 
 /** KBps → KB/s · MB/s · GB/s (축 라벨이 짧게). */
 export function fmtRate(kbps) {
