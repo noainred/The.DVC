@@ -29,7 +29,7 @@ import { createYielder } from '../../util/timeSlice.js';
 import { acquireExport } from '../../util/exportBusy.js';
 import { loadXferSpeedSettings, saveXferSpeedSettings, xferSpeedEnabled, xferSettingsLoadError, DEFAULTS, RANGES } from '../../xferspeed/settings.js';
 import { xferSpeedStatus, xferTargets, startXferRun } from '../../xferspeed/poller.js';
-import { latestAll, samplesSince, samplesSinceChunked, recentFailures, dailyOf, oldestOf, exportRows, dbStatus, dataMark } from '../../xferspeed/db.js';
+import { latestAll, samplesSince, samplesSinceChunked, recentFailures, dailyOf, oldestOf, exportRows, dbStatus, dataMark, logPage } from '../../xferspeed/db.js';
 import { edgeRowsAsync, kpisOf, trafficOf, heatOfAsync, seriesOf, dailySeriesOf, statsOf, staleMsOf, latencyMsOf, MIN_BASELINE, BASELINE_DAYS } from '../../xferspeed/analyze.js';
 import { MIN_XFER_EDGE_VERSION, XFER_FAIL_KINDS } from '../../xferspeed/probe.js';
 import { SCHEDULE_KINDS, SCHEDULE_MAX, GRACE_MS, MISSED_REASONS } from '../../xferspeed/schedule.js';
@@ -99,6 +99,18 @@ export function detailWindowOf(query, now = Date.now()) {
   const past = end < now;   // 과거 창이면 끝을 닫는다(지금 창은 끝이 열려 있다 — 조회 사이에 들어온 표본을 빼지 않게)
   return { days, now, end, past, since: end - days * DAY };
 }
+
+/** 측정 기록 한 행(화면 표 · `/history` 의 log 와 `/log` 가 같은 모양). 실패 행의 속도는 null(0 아님). */
+function logRowOf(x) {
+  return {
+    ts: x.ts, dir: x.dir, ok: Number(x.ok) === 1, mbps: Number(x.ok) === 1 ? numOrNull(x.mbps) : null,
+    ttfbMs: latencyMsOf(x), totalMs: numOrNull(x.total_ms), xferMs: numOrNull(x.xfer_ms), bytes: numOrNull(x.bytes),
+    basis: x.basis || null, kind: x.kind || null, error: x.err || '',
+  };
+}
+/** `/log` 쪽 크기 — 기본 50, [10, 200]. */
+const LOG_LIMIT_DEFAULT = 50;
+const LOG_CURSOR_RE = /^(\d{1,15}):(down|up)$/;
 
 /** v2.890 — Ping 패널이 값을 못 그리는 이유(웹 `xferSpeedText.PING_REASON_TEXT` 와 1:1 — 테스트가 대조한다). */
 export const PING_REASONS = Object.freeze(['no-target', 'monitor-off', 'disabled', 'before-retention', 'no-samples']);
@@ -282,12 +294,8 @@ api.get('/tools/xfer-speed/history', adminOnly, fullScopeOnly, async (req, res) 
     };
     stats = { down: agg('down'), up: agg('up') };
   }
-  const logR = await samplesSince(end - 14 * DAY, { agent: a.id, limit: 100_000, until });
-  const log = logR.rows.slice(-40).reverse().map((x) => ({
-    ts: x.ts, dir: x.dir, ok: Number(x.ok) === 1, mbps: Number(x.ok) === 1 ? numOrNull(x.mbps) : null,
-    ttfbMs: latencyMsOf(x), totalMs: numOrNull(x.total_ms), xferMs: numOrNull(x.xfer_ms), bytes: numOrNull(x.bytes),
-    basis: x.basis || null, kind: x.kind || null, error: x.err || '',
-  }));
+  // v2.902: 화면은 측정 기록을 `/log`(창 전체 · 쪽 넘김)로 읽는다 — `log=0` 이면 예전 '끝 이전 14일 중 최근 40건' 을 읽지 않는다(1분 폴링마다 14일을 읽지 않게).
+  const log = String(req.query.log ?? '') === '0' ? [] : (await samplesSince(end - 14 * DAY, { agent: a.id, limit: 100_000, until })).rows.slice(-40).reverse().map(logRowOf);
   const col = a.col;
   res.json({
     ok: true, agent: a.id, name: t(col?.name) || a.id, datacenter: t(col?.datacenter), origin: col ? originOf(col) : null, registered: !!col,
@@ -341,6 +349,41 @@ api.get('/tools/xfer-speed/ping', adminOnly, fullScopeOnly, async (req, res) => 
     method: tgt.kind === 'icmp' ? 'icmp' : 'tcp-connect',
     bucketMs: w.bucketMs, source: w.source, series: w.series, stats: w.stats, last,
     oldest: { sampleTs: oldestTs },
+  });
+});
+
+/**
+ * v2.902 — 한 엣지의 측정 기록(상세 '측정 기록' 표 · 사용자 요청 "히스토리 보는 기능 강화 및 버그 수정").
+ * 예전 표는 기간·구간과 상관없이 '끝 이전 14일 중 최근 40건' 이었다. 이제 **보고 있는 창 전체**를 쪽 단위로 준다.
+ *  · 창은 `/history` 와 같은 `detailWindowOf`(지금 창은 끝이 열려 있다 — 닫힌 끝은 `/history` 와 같이 ts ≤ end).
+ *  · 쪽 넘김은 커서 `before=<ts>:<down|up>`(앞 쪽 응답의 `next`) — 형식이 틀리면 400(field:'before'). `limit` [10, 200] · `only=fail` 은 실패만.
+ *  · 원시 측정은 보관 기간(`sampleRetentionDays`)만 남는다 — 창이 그보다 길면 화면이 그 사실을 말하도록 `oldest`·`retention` 을 싣는다.
+ *  · 권한·데모 가림은 형제 라우트와 같다(adminOnly + fullScopeOnly · 데모 계정은 데모 엣지만 404).
+ */
+api.get('/tools/xfer-speed/log', adminOnly, fullScopeOnly, async (req, res) => {
+  const a = await resolveAgent(req.query.agent);
+  if (a && isDemoGuest(req.user) && !demoAgentSet(loadCollectors())(a.id)) return res.status(404).json({ ok: false, reason: '등록부와 측정 기록 어디에도 없는 엣지입니다.' });
+  if (!a) return res.status(404).json({ ok: false, reason: '등록부와 측정 기록 어디에도 없는 엣지입니다.' });
+  const { days, now, end, past, since } = detailWindowOf(req.query);
+  let before = null;
+  const rawBefore = t(req.query.before);
+  if (rawBefore) {
+    const m = LOG_CURSOR_RE.exec(rawBefore);
+    if (!m) return res.status(400).json({ ok: false, field: 'before', reason: '쪽 커서 형식이 다릅니다(앞 쪽 응답의 next 를 그대로 보내세요).' });
+    before = { ts: Number(m[1]), dir: m[2] };
+  }
+  const ln = numOrNull(req.query.limit);
+  const limit = ln == null ? LOG_LIMIT_DEFAULT : Math.max(10, Math.min(200, Math.floor(ln)));
+  const only = t(req.query.only) === 'fail' ? 'fail' : 'all';
+  const r = await logPage(a.id, { sinceTs: since, until: past ? end : null, before, limit, onlyFail: only === 'fail' });
+  if (r.error) return res.status(503).json({ ok: false, reason: `측정 기록을 읽지 못했습니다 — ${r.error}` });
+  res.json({
+    ok: true, agent: a.id, days, start: since, end, now, past, offsetMin: DAY_OFFSET_MIN,
+    only, limit, total: r.total, failTotal: r.failTotal, available: r.available,
+    rows: r.rows.map(logRowOf),
+    next: r.next ? `${r.next.ts}:${r.next.dir}` : null,
+    oldest: await oldestOf(a.id),
+    retention: { sampleDays: numOrNull(loadXferSpeedSettings().sampleRetentionDays) },
   });
 });
 

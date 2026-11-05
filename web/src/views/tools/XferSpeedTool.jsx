@@ -30,6 +30,7 @@ import {
   newSchedule, nextOccurrence, runsPerDayPreview, scheduleStateText, countText, planSummary, LATENCY_NOTE,
   PING_COLOR, PING_TEXT_COLOR, VIEW_MODES, PING_REASON_TEXT, pingModel, comboHover, pingHeadNote, pingStatChips,
   samePingWindow, loadView, saveView,
+  historyOldestOf, portalDateOf, jumpToDate, runOneText, logPagerText, sameLogWindow, logRetentionNote, tickAnchor,
 } from './xferSpeedText.js';
 import './xferSpeed.css';
 
@@ -526,7 +527,7 @@ function AxisX({ m, offsetMin, h, padB }) {
   return m.xticks.map((t) => (
     <g key={t.ts}>
       <line x1={t.x} x2={t.x} y1={m.padT} y2={h - padB} stroke="#1a2236" />
-      <text x={t.x} y={h - 8} fill="#5d6b85" fontSize="11" textAnchor="middle">{clockText(t.ts, offsetMin, { date: !(m.to - m.from <= 2 * 86_400_000) }).replace(/ 00:00$/, '')}</text>
+      <text x={t.x} y={h - 8} fill="#5d6b85" fontSize="11" textAnchor={tickAnchor(t.x, m)}>{clockText(t.ts, offsetMin, { date: !(m.to - m.from <= 2 * 86_400_000) }).replace(/ 00:00$/, '')}</text>
     </g>
   ));
 }
@@ -705,17 +706,56 @@ function usePingWindow({ agent, days, end, enabled }) {
 }
 
 /**
+ * v2.902 측정 기록 쪽 조회 — 창(agent·days·end) · 걸러 보기(only) · 커서(cursor = 앞 쪽의 next)가 바뀌면 다시 읽는다.
+ * 지금 창의 첫 쪽만 60초마다 갱신한다(뒤 쪽은 커서로 고정 — 새 측정이 들어와도 밀리지 않는다). 늦게 온 이전 응답은 버린다.
+ */
+function useXferLog({ agent, days, end, only, cursor }) {
+  const [page, setPage] = useState(null);
+  const [err, setErr] = useState(null);
+  const [errKey, setErrKey] = useState(null);
+  const seq = useRef(0);
+  const key = `${agent}|${days}|${end ?? ''}|${only}|${cursor ?? ''}`;
+  const load = useCallback(async () => {
+    const my = ++seq.current;
+    const k = `${agent}|${days}|${end ?? ''}|${only}|${cursor ?? ''}`;
+    const q = { agent, days };
+    if (end != null) q.end = end;
+    if (only === 'fail') q.only = 'fail';
+    if (cursor) q.before = cursor;
+    try {
+      const d = await fetchJson('/tools/xfer-speed/log', q);
+      if (my === seq.current) { setPage({ ...d, _key: k }); setErr(null); setErrKey(null); }
+      return null;
+    } catch (e) { if (my === seq.current) { setErr(e); setErrKey(k); } return e; }
+  }, [agent, days, end, only, cursor]);
+  useEffect(() => {
+    let alive = true; let timer = null;
+    const loop = async () => {
+      if (!alive) return;
+      const e = (typeof document === 'undefined' || !document.hidden) ? await load() : null;
+      if (alive && end == null && !cursor && !shouldStopPolling(e)) timer = setTimeout(loop, 60_000);
+    };
+    loop();
+    return () => { alive = false; if (timer) clearTimeout(timer); };
+  }, [load, end, cursor]);
+  return { page, err, errKey, key, reload: load };
+}
+
+/**
  * v2.735.3 차트 아래 '이전 구간' 스크롤 — ◀ 이전 · 슬라이더(오른쪽 끝 = 최근) · 다음 ▶ · 최신. iDRAC 통합 추이(v2.666)와 같은 모양.
  * 기록이 없어 갈 곳이 없으면(maxBack 0) 그리지 않는다. 슬라이더는 놓을 때만 조회한다(끄는 동안 수십 번 조회하지 않게).
  */
-function WindowScroll({ hist, days, back, dragBack, anchor, onDrag, onGo }) {
+function WindowScroll({ hist, days, back, dragBack, anchor, onDrag, onGo, extraOldest = null, onJump }) {
   if (hist.days !== days) return null;
   const a = anchor ?? hist.end;
-  const maxB = maxBackOf(hist, a);
+  // v2.902 B1: 갈 수 있는 범위는 전송 기록과(Ping 을 함께 보면) Ping 기록 중 더 오래된 쪽까지.
+  const maxB = maxBackOf(hist, a, { extraOldestTs: extraOldest });
   if (!maxB) return null;
   const cur = Math.min(maxB, dragBack ?? back);
   const lbl = PERIODS.find((p) => p.days === days)?.label || `${days}일`;
   const { end } = windowEndOf(a, cur, days, maxB);
+  const off = hist.offsetMin ?? 540;
+  const oldest = historyOldestOf(hist, { extraOldestTs: extraOldest });
   return (
     <div className="xs-winscroll">
       <div className="xs-winrow">
@@ -726,6 +766,12 @@ function WindowScroll({ hist, days, back, dragBack, anchor, onDrag, onGo }) {
           onKeyUp={(e) => onGo(maxB - Number(e.currentTarget.value), maxB)} />
         <button type="button" className="xs-btn sm" disabled={cur <= 0} onClick={() => onGo(cur - 1, maxB)}>다음 {lbl} ▶</button>
         <button type="button" className={`xs-btn sm${cur === 0 ? ' primary' : ''}`} disabled={cur === 0} onClick={() => onGo(0, maxB)}>최신</button>
+        {/* v2.902 날짜로 이동 — 그 포탈 날짜가 끝나는 시각(다음 날 0시)을 창 끝으로 */}
+        <label className="xs-datejump">
+          <span>날짜로 이동</span>
+          <input type="date" value={portalDateOf(end - 1, off)} min={oldest != null ? portalDateOf(oldest, off) : undefined} max={portalDateOf(Date.now(), off)}
+            onChange={(e) => { if (e.target.value) onJump(e.target.value); }} />
+        </label>
       </div>
       <div className="xs-note xs-wintext">
         {windowLabel(cur, days)} · {windowRangeText(end, days, hist.offsetMin)}{cur > 0 ? ' · 과거 구간은 자동 갱신하지 않습니다' : ''}{dragBack != null ? ' · 놓으면 조회합니다' : ''}
@@ -753,6 +799,11 @@ function Detail({ agent, onBack }) {
   const [view, setViewState] = useState(() => loadView(browserStorage()));
   const setView = (v) => { setViewState(v); saveView(browserStorage(), v); };
   const pingWin = usePingWindow({ agent, days, end, enabled: view !== 'speed' });
+  // v2.902 측정 기록 — 보고 있는 창 전체를 쪽 단위로(커서). 창이 바뀌면 첫 쪽부터(걸러 보기는 유지).
+  const winKey = `${agent}|${days}|${end ?? ''}`;
+  const [logState, setLogState] = useState({ key: winKey, only: 'all', stack: [] });
+  const ls = logState.key === winKey ? logState : { key: winKey, only: logState.only, stack: [] };
+  const logWin = useXferLog({ agent, days, end, only: ls.only, cursor: ls.stack.length ? ls.stack[ls.stack.length - 1] : null });
   const [sync, setSync] = useState({ busy: false, msg: '' });
   const onSync = async () => {
     setSync({ busy: true, msg: '' });
@@ -770,7 +821,8 @@ function Detail({ agent, onBack }) {
     const my = ++seq.current;
     const key = `${agent}|${days}|${end ?? ''}`;
     try {
-      const d = await fetchJson('/tools/xfer-speed/history', end == null ? { agent, days } : { agent, days, end });
+      // v2.902: 측정 기록은 /log 가 따로 준다 — log=0 으로 예전 14일 기록을 읽지 않게 한다.
+      const d = await fetchJson('/tools/xfer-speed/history', end == null ? { agent, days, log: 0 } : { agent, days, end, log: 0 });
       if (my === seq.current) { setHist(d); setErr(null); setErrKey(null); }
       return null;
     } catch (e) { if (my === seq.current) { setErr(e); setErrKey(key); } return e; }
@@ -792,7 +844,7 @@ function Detail({ agent, onBack }) {
     setMsg('');
     try {
       const r = await postJson('/tools/xfer-speed/run', { agent });
-      setMsg(r?.ok === false ? (r.reason || '시작하지 못했습니다') : '이 법인만 지금 잽니다 — 끝나면 1분 안에 추이에 나옵니다.');
+      setMsg(runOneText(r, end != null));   // v2.902 B2: 과거 구간이면 '1분 안에 추이에 나온다' 고 하지 않는다
     } catch (e) { setMsg(e?.message || String(e)); }
   };
   const csv = async () => {
@@ -811,6 +863,28 @@ function Detail({ agent, onBack }) {
     onRetry: pingWin.reload, onSync, syncMsg: sync.msg, syncBusy: sync.busy,
   };
   const showSpeed = view !== 'ping'; const showPing = view !== 'speed';
+  // B1: Ping 을 보는 보기면 Ping 기록의 가장 오래된 시각도 스크롤 범위에 넣는다(같은 법인 응답만).
+  const pingOldest = showPing && pingWin.ping && String(pingWin.ping.agent ?? '').toLowerCase() === String(shown.agent ?? '').toLowerCase()
+    ? (pingWin.ping.oldest?.sampleTs ?? null) : null;
+  const onJump = (dateStr) => {
+    const j = jumpToDate(dateStr, { days, now: Date.now(), offsetMin: shown.offsetMin ?? 540 });
+    if (j.anchor == null) { setScroll({ key, back: 0, anchor: null }); return; }
+    const mb = maxBackOf(shown, j.anchor, { extraOldestTs: pingOldest });
+    setDragBack(null);
+    if (j.back > mb) {
+      setMsg('그 날짜에는 기록이 없어 가장 오래된 기록이 있는 구간으로 이동했습니다.');
+      setScroll(mb ? { key, back: mb, anchor: j.anchor } : { key, back: 0, anchor: null });
+    } else setScroll({ key, back: j.back, anchor: j.anchor });
+  };
+  const logReady = sameLogWindow(logWin.page, shown);
+  const logPage = logReady ? logWin.page : null;
+  const logLoading = !logReady || logWin.page?._key !== logWin.key;
+  const logErr = logWin.err && logWin.errKey === logWin.key ? logWin.err : null;
+  const logIndex = ls.stack.length;
+  const setLogOnly = (only) => setLogState({ key: winKey, only, stack: [] });
+  const logNext = () => { if (logPage?.next) setLogState({ key: winKey, only: ls.only, stack: [...ls.stack, logPage.next] }); };
+  const logPrev = () => setLogState({ key: winKey, only: ls.only, stack: ls.stack.slice(0, -1) });
+  const retentionNote = logPage ? logRetentionNote(logPage, shown.offsetMin) : '';
   return (
     <div className="xs">
       <div className="xs-head">
@@ -879,6 +953,7 @@ function Detail({ agent, onBack }) {
         <TrendCharts hist={shown} view={view} ps={ps} />
         {showPing ? <div className="xs-note">{PING_NOTE}</div> : null}
         <WindowScroll hist={shown} days={days} back={back} dragBack={dragBack} anchor={anchor}
+          extraOldest={pingOldest} onJump={onJump}
           onDrag={setDragBack}
           onGo={(b, maxB) => {
             const nb = Math.max(0, Math.min(maxB, b));
@@ -889,28 +964,52 @@ function Detail({ agent, onBack }) {
           }} />
       </section>
       <section className="xs-card" style={{ padding: 0, overflow: 'hidden' }}>
-        <div className="xs-sechead"><h3>측정 기록</h3><span className="xs-note">{shown.past ? `${clockText(shown.end, shown.offsetMin)} 이전` : '최근'} {shown.log.length}건(14일 안) · 시각은 포탈 시각</span></div>
-        {shown.log.length ? (
-          <STable minWidth={760}>
-            <thead><tr><th>시각</th><th>방향</th><th>속도</th><th title={LATENCY_NOTE}>지연</th><th>전송</th><th>전체</th><th>바이트</th><th>결과</th></tr></thead>
-            <tbody>
-              {shown.log.map((l) => (
-                <tr key={`${l.dir}${l.ts}`}>
-                  <td data-sort={l.ts} style={{ fontFamily: 'var(--mono)' }}>{clockText(l.ts, shown.offsetMin)}</td>
-                  <td style={{ color: DIR_TEXT_COLOR[l.dir] }}>{DIR_TEXT[l.dir]}</td>
-                  <td data-sort={l.mbps ?? ''} style={{ fontFamily: 'var(--mono)' }}>{mbpsText(l.mbps)}</td>
-                  <td data-sort={l.ttfbMs ?? ''}>{l.ttfbMs == null ? '—' : `${l.ttfbMs}ms`}</td>
-                  <td data-sort={l.xferMs ?? ''} title={l.basis ? BASIS_TEXT[l.basis] || l.basis : ''}>{spanText(l.xferMs)}{l.basis === 'sender-total' ? ' *' : ''}</td>
-                  <td data-sort={l.totalMs ?? ''}>{spanText(l.totalMs)}</td>
-                  <td data-sort={l.bytes ?? ''}>{bytesText(l.bytes)}</td>
-                  <td style={{ color: l.ok ? '#6ee7c8' : '#fca5a5', whiteSpace: 'normal' }}>{l.ok ? '성공' : `${FAIL_TEXT[l.kind]?.label || '실패'}${l.error ? ` — ${l.error}` : ''}`}</td>
-                </tr>
-              ))}
-            </tbody>
-          </STable>
-        ) : <div className="xs-note" style={{ padding: 16 }}>{shown.past ? `${clockText(shown.end, shown.offsetMin)} 이전 14일` : '최근 14일'} 측정 기록이 없습니다.</div>}
-        {shown.log.length ? <div className="xs-note" style={{ padding: '8px 16px 0', whiteSpace: 'normal' }}>{LATENCY_NOTE}</div> : null}
-        {shown.log.some((l) => l.basis === 'sender-total') ? <div className="xs-note" style={{ padding: '8px 16px 12px' }}>* {BASIS_TEXT['sender-total']}</div> : null}
+        <div className="xs-sechead">
+          <div className="xs-cardtitle">
+            <h3>측정 기록</h3>
+            <div className="xs-seg" role="tablist" aria-label="측정 기록 걸러 보기">
+              <button type="button" role="tab" aria-selected={ls.only === 'all'} className={ls.only === 'all' ? 'on' : ''} onClick={() => setLogOnly('all')}>전체</button>
+              <button type="button" role="tab" aria-selected={ls.only === 'fail'} className={ls.only === 'fail' ? 'on' : ''} onClick={() => setLogOnly('fail')}>실패만</button>
+            </div>
+          </div>
+          <span className="xs-note">
+            {logPage ? `이 구간 ${Number(logPage.total || 0).toLocaleString()}건 · 실패 ${Number(logPage.failTotal || 0).toLocaleString()}건 · ` : ''}시각은 포탈 시각
+          </span>
+        </div>
+        {retentionNote ? <div className="xs-note" style={{ padding: '8px 16px 0', whiteSpace: 'normal' }}>{retentionNote}</div> : null}
+        {logErr ? <div className="xs-banner amber" style={{ margin: '10px 16px 0' }}>측정 기록을 불러오지 못했습니다 — {String(logErr?.message || logErr)} · <button type="button" className="xs-linkbtn" onClick={logWin.reload}>다시 시도</button></div> : null}
+        {!logPage ? (
+          <div className="xs-note" style={{ padding: 16 }}>{logErr ? '' : '측정 기록을 불러오는 중…'}</div>
+        ) : logPage.rows.length ? (
+          <div className={logLoading ? 'xs-dim' : undefined}>
+            <STable minWidth={760}>
+              <thead><tr><th>시각</th><th>방향</th><th>속도</th><th title={LATENCY_NOTE}>지연</th><th>전송</th><th>전체</th><th>바이트</th><th>결과</th></tr></thead>
+              <tbody>
+                {logPage.rows.map((l) => (
+                  <tr key={`${l.dir}${l.ts}`}>
+                    <td data-sort={l.ts} style={{ fontFamily: 'var(--mono)' }}>{clockText(l.ts, shown.offsetMin)}</td>
+                    <td style={{ color: DIR_TEXT_COLOR[l.dir] }}>{DIR_TEXT[l.dir]}</td>
+                    <td data-sort={l.mbps ?? ''} style={{ fontFamily: 'var(--mono)' }}>{mbpsText(l.mbps)}</td>
+                    <td data-sort={l.ttfbMs ?? ''}>{l.ttfbMs == null ? '—' : `${l.ttfbMs}ms`}</td>
+                    <td data-sort={l.xferMs ?? ''} title={l.basis ? BASIS_TEXT[l.basis] || l.basis : ''}>{spanText(l.xferMs)}{l.basis === 'sender-total' ? ' *' : ''}</td>
+                    <td data-sort={l.totalMs ?? ''}>{spanText(l.totalMs)}</td>
+                    <td data-sort={l.bytes ?? ''}>{bytesText(l.bytes)}</td>
+                    <td style={{ color: l.ok ? '#6ee7c8' : '#fca5a5', whiteSpace: 'normal' }}>{l.ok ? '성공' : `${FAIL_TEXT[l.kind]?.label || '실패'}${l.error ? ` — ${l.error}` : ''}`}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </STable>
+          </div>
+        ) : <div className="xs-note" style={{ padding: 16 }}>{ls.only === 'fail' ? '이 구간에 실패한 측정이 없습니다.' : '이 구간에 측정 기록이 없습니다.'}</div>}
+        {logPage && (logIndex > 0 || logPage.next) ? (
+          <div className="xs-logpager">
+            <button type="button" className="xs-btn sm" disabled={logIndex === 0} onClick={logPrev}>◀ 더 최근</button>
+            <span className="xs-note">{logPagerText(logPage, { index: logIndex, limit: logPage.limit || 50 })}{logLoading ? ' · 불러오는 중…' : ''}</span>
+            <button type="button" className="xs-btn sm" disabled={!logPage.next || logLoading} onClick={logNext}>더 과거 ▶</button>
+          </div>
+        ) : null}
+        {logPage?.rows.length ? <div className="xs-note" style={{ padding: '8px 16px 0', whiteSpace: 'normal' }}>{LATENCY_NOTE} · 제목을 누르면 이 쪽 안에서 정렬합니다.</div> : null}
+        {logPage?.rows.some((l) => l.basis === 'sender-total') ? <div className="xs-note" style={{ padding: '8px 16px 12px' }}>* {BASIS_TEXT['sender-total']}</div> : <div style={{ height: 12 }} />}
       </section>
       {!canCsv() ? <div className="xs-note">{CSV_DENIED_NOTE}</div> : null}
     </div>
