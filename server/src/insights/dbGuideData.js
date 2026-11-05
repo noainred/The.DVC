@@ -4872,6 +4872,32 @@ export const DB_GUIDE_DATA = {
     "cautions": ["상한을 지금 사용량보다 낮추면 새 첨부만 막히고 있는 첨부는 지우지 않습니다."],
     "sources": ["server/src/attach/store.js", "server/src/routes/api/attach.js"]
   },
+  "issue-alert-auto.json": {
+    "title": "이슈 — 다른 알람 · 백업 실패 자동 등록 설정",
+    "summary": "알람 엔진의 상태 알람(vCenter 수집 실패 · 엣지 보고 끊김 · 호스트 연결 끊김 · 데이터스토어 용량 · 위험 알람 · VM 동시 전원 꺼짐)과 Bareos 백업 실패를 이슈로 자동 등록할지 정하는 설정입니다.",
+    "stores": ["켬/끔 · 종류별 켬/끔 · 종류별 우선순위 · 지연(분) · 하루 상한 · 라벨 · 해소 처리(검토/그대로)"],
+    "writer": "이슈 › 설정 › 자동 등록 › 다른 알람에서 전체 범위 관리자가 저장할 때 원자적으로 씁니다.",
+    "usedBy": ["알람 엔진 평가 뒤(issues/alertIssues.js applyAlertState)", "Bareos 실패 메일 틱(applyBackupFailures)"],
+    "retention": "자동으로 지우지 않습니다.",
+    "growth": "고정 크기(1KB 안팎)입니다.",
+    "shrink": "해당 없습니다.",
+    "ifDeleted": "기본값(꺼짐)으로 돌아갑니다. 이미 만든 이슈는 그대로입니다. 손상되면 보존하고 기본값으로 읽습니다(설정 화면이 알립니다).",
+    "cautions": ["전 법인 공용 설정입니다 — 범위가 지정된 계정은 바꿀 수 없습니다.", "인증서 만료는 알람 엔진에 판정이 없어 대상이 아닙니다."],
+    "sources": ["server/src/issues/alertIssues.js", "server/src/routes/api/issues.js"]
+  },
+  "issue-inbox.json": {
+    "title": "이슈 — 포탈 알림함",
+    "summary": "이슈 · 위키 알림을 메일 · 팀 채팅과 따로 사람마다 쌓아 두는 상태 파일입니다. 메일 주소 표에 없는 사람도 포탈 안에서 언급 · 할당을 받습니다.",
+    "stores": ["사람마다 줄 목록 — id · 시각 · 종류 · 문구 · 이슈 키나 문서 번호 · 법인 id · 한 사람 · 읽음"],
+    "writer": "포탈 서버의 이슈 알림(issues/notify.js)이 이벤트마다 쌓고, 읽음 표시 때 씁니다(0.5초 묶음 · 원자적 쓰기).",
+    "usedBy": ["이슈 › 알림함 · 위키 머리의 알림함"],
+    "retention": "사람마다 최근 100줄 · 30일까지만 둡니다.",
+    "growth": "사람 수 × 100줄로 상한이 있습니다(사람 2,000명).",
+    "shrink": "줄일 필요가 없습니다.",
+    "ifDeleted": "알림함이 비고 그 밖의 영향은 없습니다. 손상되면 보존하고 빈 알림함으로 읽습니다.",
+    "cautions": ["읽을 때 그 사람의 지금 조회 범위로 다시 거릅니다 — 범위가 줄면 예전 범위 밖 줄은 보이지 않습니다."],
+    "sources": ["server/src/issues/inbox.js", "server/src/issues/notify.js", "server/src/routes/api/issues.js"]
+  },
   "issue-templates.json": {
     "title": "이슈 — 관리자 템플릿",
     "summary": "관리자가 더한 이슈 템플릿입니다. 내장 3개(장애 보고 · 작업 · 요청) 뒤에 붙어 ‘새 이슈’ 화면의 템플릿 고르기에 보입니다.",

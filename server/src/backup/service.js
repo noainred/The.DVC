@@ -64,6 +64,7 @@ export function fileCapFor(name) {
 export const RUNTIME_STATE_NAMES = new Set([
   'issue-notify-state.json', // v2.871 이슈 기한 알림 기록(issues/notify.js — registerStateFile 과 이중 안전망)
   'issue-filter-mail-state.json', // v2.883 저장 필터 주간 메일 기록(issues/notify.js — 같은 이중 안전망)
+  'issue-inbox.json', // v2.908 포탈 알림함(issues/inbox.js — 같은 이중 안전망)
   'backup.json', 'central-agent-config.json', 'central-inventory.json', 'central-fleet.json', 'central-pdu.json',
   'central-agent-storage.json', 'central-agent-sanswitch.json', 'central-agent-sanswitch-perf.json',
   'central-agent-gpu-guest.json', 'central-unsupported-servers.json', 'agent-results.json',

@@ -566,6 +566,22 @@
   ⑤ 남은 하위 작업(에픽이면 소속 이슈)이 있으면 서버가 409 `open-children` 로 묻고 화면은 확인을 받아 `closeChildren:true` 로 다시 보낸다(취소하면 아무것도 바꾸지 않는다).
      자식이 있는 이슈의 진행률 입력은 잠기고 메모만 보낸다(서버 409 `progress-auto` 와 같은 판정).
   ⑥ 스프린트 · 필터 공유 버튼은 서버 값(`canSprints` · `canShareFilters` — 전체 범위 쓰기 계정)일 때만 그린다. 필터 저장은 쓰기 역할만(viewer 상태변경 예외를 늘리지 않았다).
+- **v2.908 — 이슈 기능 추천 6~10(사용자 '모두 적용' · 시안 없이 기존 화면 틀대로 — 사용자 선택)**. 회귀 `server/test/issuesR4_2908.test.js` · `web/src/views/issues/features2908.test.js`.
+  - 자동화 규칙은 **고정 4개**(`issues/automation.js` · 설정 `automation` — 기본 전부 꺼짐). 저장소 이벤트는 동기라 **setImmediate 로 미뤄** 돈다 — 상위를 하위와 함께
+    완료(closeChildren)하는 도중 자식 완료 이벤트가 상위를 '검토' 로 되돌리지 않게(테스트가 고정). 위키 체크는 보기에서 체크와 같은 경로(판 없음 · checkLog · checkRev) ·
+    키 뒤에 숫자가 이어지면 다른 키다(ISS-1 ≠ ISS-10). 멈춤은 30분 검사(`notify.js scanStale` — 기록 `stale:<키>`)와 목록 배지(`store.js staleDaysOf`)가 **같은 기준**.
+  - 포탈 알림함(`issues/inbox.js` · `issue-inbox.json` 상태 파일)은 **받을 사람 판정을 메일과 같이**(`recipientsOf(…, { force:true })`) 쓰고 스위치만 따로다(기본 켬 —
+    밖으로 나가는 것이 없다). 줄에 법인을 적고 **읽을 때 지금 범위로 다시 거른다**. 메일이 꺼져 있어도 기한 · SLA · 멈춤 기록은 남긴다(30분마다 같은 줄이 쌓이지 않게).
+    안 읽은 수는 마운트 1회 + 새로고침(폴링 없음).
+  - 리포트(`issues/report.js`)는 **서버 집계 하나** — 화면은 다시 세지 않는다. SLA 가 꺼져 있으면 준수율 null('—' — 0% 로 적지 않는다) · 평균 해결은 완료만 · 보류 제외 · 달력 시간.
+    범위 계정은 재료(`reportSource`)를 만들 때 거른다(공용 이슈도 빠진다). CSV 는 'data.csv' 권한.
+  - SLA 업무 시간(`sla.js calendarFor · businessMs · addBusinessMin`): 오프셋은 그 날 정오에 Intl 로 읽어 캐시(서머타임 전환은 새벽) · 휴일은 날짜 번호 집합 · 법인 휴일 목록이 있으면
+    공통 휴일 **대신**. 이슈 설정 화면은 `calendar` 를 늘 같이 보낸다(빠뜨리면 저장이 기본값(24×7)으로 되돌린다). 서버는 automation · inbox · sla 가 빠진 저장을 '지금 값 유지' 로 본다.
+  - 다른 알람 자동 등록(`issues/alertIssues.js` · `issue-alert-auto.json`)은 알람 엔진 · Bareos 쪽에 **구독 훅만**(`alerts.js onAlertState` · `bareos/notify.js onBareosFailures`) — 그 모듈들은
+    이슈를 모른다. 판정 보류로 끊긴 키는 해소가 아니다(resolved 에 넣지 않는다). 인증서 만료는 알람 엔진에 판정이 없어 넣지 않았다(지어내지 않는다).
+  - **CSS 클래스 이름 겹침(Chromium 판독으로 발견 — v2.882 부터)**: 필터 화면의 격자 `.iss-filters`(240px + 나머지)가 보드 필터 줄 · 활동 머리의 같은 이름(줄 배치)을
+    파일 뒤쪽에서 덮어 그 줄들이 2열 격자로 늘어났다. 필터 화면은 `.iss-filterview` 로 바꿨다. **새 클래스를 만들기 전에 `grep -n '^\.<이름>' styles.css` 로 같은 이름이 있는지 볼 것**
+    (`features2908.test.js` 가 `.iss-filters` 한 벌을 고정). 카드 아래 줄(`.iss-card-foot`)은 줄바꿈 — 1440 5열에서 담당자 동그라미가 카드 밖으로 나갔다.
 - **v2.907 — 위키 · 이슈 기능 추천 1~5(사용자 '모두 적용' · 시안 없이 기존 화면 틀대로 — 사용자 선택)**. 회귀 `server/test/wikiIssues2907.test.js` · `web/src/views/wiki/features2907.test.js`.
   - 댓글 고치기(위키 · 이슈): 쓴 사람만 · 옛 본문 5개 보관 · 판/이력은 만들지 않는다 · **알림은 새로 언급한 사람에게만**(`ev.edit` — 담당 · 보고 · 관찰자에게 다시 가지 않는다).
   - 문서 지우기는 **휴지통**(30일 — 판 · 댓글 · 첨부 그대로). 첨부 본체 · 즐겨찾기는 영구 삭제(손으로 · 기한) 때 정리하고, 첨부는 삭제가 디스크에 닿은 뒤(`removeOwnerAfterPersist`). 기한 정리는 폴링하지 않고 목록 · 지우기 때.

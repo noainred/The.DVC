@@ -40,7 +40,7 @@ import { registerExitFlush } from '../util/exitFlush.js';
 import { dayKey, dayIndex, dayLabel, dayStartMs, DAY_MS } from '../util/dayKey.js';
 import { getSprint, listSprints, activeSprintIds, findSprintByName } from './sprints.js';
 import { parseQuery, compileQuery, orderComparator } from './query.js';
-import { slaOf, slaQueryState } from './sla.js';
+import { slaOf, slaQueryState, slaTimes, usedMin } from './sla.js';
 import { loadIssueSettings } from './settings.js';
 
 export const KEY_PREFIX = 'ISS';
@@ -557,7 +557,7 @@ function findFor(key, access = FULL_ACCESS, { write = false } = {}) {
  * 사람이 만든 이슈에는 없다. 서버 내부 경로(issues/autoCreate.js)만 붙이고 라우트 본문으로는 받지 않는다(위조 금지).
  * partKeys 는 한 이슈가 덮는 파트 키(`agent|partKey`) — 장비 단위로 묶은 이슈는 여럿이다. resolved 는 해소된 키.
  */
-export const ORIGIN_KINDS = Object.freeze(['partfault', 'wiki-comment']);
+export const ORIGIN_KINDS = Object.freeze(['partfault', 'wiki-comment', 'alert', 'backup']); // v2.908 alert · backup — issues/alertIssues.js
 const ORIGIN_KEYS_MAX = 64;
 const WIKI_PAGE_RE = /^W\d{1,9}$/;
 const WIKI_COMMENT_RE = /^[0-9a-f]{1,40}$/;
@@ -568,6 +568,14 @@ function originField(o) {
   if (o?.kind === 'wiki-comment') {
     return { kind: 'wiki-comment', pageId: WIKI_PAGE_RE.test(String(o.pageId || '')) ? o.pageId : '', commentId: WIKI_COMMENT_RE.test(String(o.commentId || '')) ? o.commentId : '', partKeys: [], resolved: [] };
   }
+  // v2.908 다른 알람(알람 키 하나) · Bareos 백업 실패(잡 하나 — 실패한 jobid 를 partKeys 에 쌓는다)
+  if (o?.kind === 'alert' || o?.kind === 'backup') {
+    return {
+      kind: o.kind, alertKey: t(o.alertKey, 300), alertKind: t(o.alertKind, 32), title: t(o.title, 200), deviceName: t(o.deviceName, 200),
+      partKeys: keys(o.partKeys), resolved: [], reopen: Math.max(0, Math.min(9999, Math.trunc(Number(o.reopen) || 0))),
+      resolvedAt: Number.isFinite(Number(o.resolvedAt)) && Number(o.resolvedAt) > 0 ? Number(o.resolvedAt) : null,
+    };
+  }
   return {
     kind: ORIGIN_KINDS.includes(o?.kind) ? o.kind : 'partfault',
     agent: t(o?.agent, 64), scope: t(o?.scope, 32), deviceId: t(o?.deviceId, 200), deviceName: t(o?.deviceName, 200),
@@ -575,10 +583,14 @@ function originField(o) {
     hold: t(o?.hold, 64),
   };
 }
-const originNote = (o) => (o?.kind === 'wiki-comment' ? `위키 댓글에서 등록: ${o.pageId || '?'}` : `자동 등록: 파트 장애${o?.deviceName || o?.deviceId ? ` · ${capStr(String(o.deviceName || o.deviceId), 80)}` : ''}`);
+const originNote = (o) => (o?.kind === 'wiki-comment' ? `위키 댓글에서 등록: ${o.pageId || '?'}`
+  : o?.kind === 'alert' ? `자동 등록: 알람 · ${capStr(String(o.title || o.alertKey || ''), 80)}`
+    : o?.kind === 'backup' ? `자동 등록: 백업 실패 · ${capStr(String(o.deviceName || o.alertKey || ''), 80)}`
+      : `자동 등록: 파트 장애${o?.deviceName || o?.deviceId ? ` · ${capStr(String(o.deviceName || o.deviceId), 80)}` : ''}`);
 /** 화면에 싣는 출처(키 목록 대신 개수 — 목록 응답을 키우지 않는다). */
 function originView(o) {
   if (o.kind === 'wiki-comment') return { kind: o.kind, pageId: o.pageId || '', commentId: o.commentId || '' };
+  if (o.kind === 'alert' || o.kind === 'backup') return { kind: o.kind, alertKind: o.alertKind || '', title: o.title || '', deviceName: o.deviceName || '', parts: (o.partKeys || []).length, reopen: o.reopen || 0, resolvedAt: o.resolvedAt ?? null };
   return { kind: o.kind, agent: o.agent || '', scope: o.scope || '', deviceId: o.deviceId || '', deviceName: o.deviceName || '', parts: (o.partKeys || []).length, resolved: (o.resolved || []).length };
 }
 /** 출처로 이슈 찾기(서버 내부 — 범위 없음). pred(origin, issue) 가 참인 이슈의 사본. */
@@ -826,7 +838,35 @@ export function summary(x, idx = null, access = FULL_ACCESS, now = Date.now()) {
     estimateMin: Number.isInteger(x.estimateMin) ? x.estimateMin : null, spentMin: spentOf(x), worklogCount: worklogOf(x).length,
     fixVersion: x.fixVersion || '', affectsVersion: x.affectsVersion || '',
     sla: slaOf(x, loadIssueSettings().sla, now),
+    stale: staleDaysOf(x, loadIssueSettings().automation, now), // v2.908 자동화 규칙 '멈춤' 배지(규칙이 꺼져 있으면 null)
   };
+}
+/**
+ * v2.908 리포트 재료(기능 7 — issues/report.js 가 집계한다). 볼 수 있는 이슈마다 집계에 쓰는 칸만 — 이력 원문은 싣지 않는다.
+ * resolveMin = 완료 이슈의 만든 → 완료(보류 시간 제외 · 달력 시간). auto = 자동 등록(파트 장애 · 다른 알람) — 위키 댓글에서 만든 것은 사람이 만든 것이다.
+ */
+export function reportSource({ access = FULL_ACCESS, now = Date.now() } = {}) {
+  const sla = loadIssueSettings().sla;
+  const out = [];
+  for (const x of load().issues) {
+    if (!canSee(x, access)) continue;
+    const done = x.status === 'done' && Number.isFinite(Number(x.closedAt));
+    let resolveMin = null;
+    if (done && x.type !== 'epic') { const t = slaTimes(x, now); resolveMin = Math.round(usedMin(t.created, Number(x.closedAt), t.pauses)); }
+    out.push({
+      key: x.key, type: x.type, priority: x.priority, status: x.status, assignee: x.assignee || '', vcenterId: x.vcenterId || '',
+      createdAt: Number(x.createdAt) || 0, closedAt: done ? Number(x.closedAt) : null, resolveMin,
+      auto: !!x.origin && x.origin.kind !== 'wiki-comment', originKind: x.origin?.kind || '',
+      sla: slaOf(x, sla, now), worklog: worklogOf(x).map((w) => ({ by: w.by || '', at: Number(w.at) || 0, minutes: w.minutes })),
+    });
+  }
+  return out;
+}
+/** v2.908 진행 중인데 staleDays 일 넘게 갱신이 없으면 그 일 수 — 아니면 null(notify.js scanStale 과 같은 기준). */
+export function staleDaysOf(x, automation, now = Date.now()) {
+  if (!automation?.stale || x?.status !== 'progress') return null;
+  const idle = Math.floor((now - (Number(x.updatedAt || x.createdAt) || 0)) / DAY_MS);
+  return idle >= (Number(automation.staleDays) || 7) ? idle : null;
 }
 /** 상세 — 댓글·이력 포함. `me` 는 보는 사람(관찰 여부). */
 /**
@@ -1189,7 +1229,7 @@ export function removeWorklog(key, id, user, { access = FULL_ACCESS, isMod = fal
 }
 
 /** 상태 전이. progress 는 담당자 필수 · done 은 closedAt · done 에서 나오면 closedAt 해제. 같은 상태면 그대로. */
-export function setStatus(key, status, user, { access = FULL_ACCESS, closeChildren = false, ignoreBlockers = false } = {}) {
+export function setStatus(key, status, user, { access = FULL_ACCESS, closeChildren = false, ignoreBlockers = false, note = '' } = {}) {
   const c = load();
   const x = findFor(key, access, { write: true });
   const s = enumField(status, STATUSES, 'status');
@@ -1225,9 +1265,25 @@ export function setStatus(key, status, user, { access = FULL_ACCESS, closeChildr
   const now = Date.now();
   const fresh = load().issues.find((y0) => y0.id === x.id) || x;
   const next = { ...fresh, status: s, closedAt: s === 'done' ? now : null };
-  const y = replace(load(), next, [{ at: now, by: user, field: 'status', from: x.status, to: s }], user);
+  const y = replace(load(), next, [{ at: now, by: user, field: 'status', from: x.status, to: s, ...(note ? { note: capStr(String(note), 200) } : {}) }], user);
   emit({ type: 'status', actor: user, issue: evIssue(y), from: x.status, to: s });
   return viewIssue(y, user, access);
+}
+
+/**
+ * v2.908 자동화 규칙 '하위 전부 완료 → 상위 검토' 의 판정(서버 내부 — 범위 없음). 이 이슈의 상위가 있고, 그 상위의 자식이 모두 완료이며,
+ * 상위가 아직 검토 · 완료가 아니면 상위 키 — 아니면 ''.
+ */
+export function parentReadyForReview(childKey) {
+  const c = load();
+  const x = c.issues.find((i) => i.key === childKey);
+  const pk = x?.parentKey || '';
+  if (!pk) return '';
+  const ix = treeIndex(c.issues);
+  const parent = ix.byKey.get(pk);
+  if (!parent || parent.status === 'review' || parent.status === 'done') return '';
+  const kids = ix.kids.get(pk) || [];
+  return kids.length && kids.every((k) => k.status === 'done') ? pk : '';
 }
 
 /** 담당자 변경('' = 할당 해제). 재할당 이력 + 선택 사유. 같은 담당자면 그대로. */
