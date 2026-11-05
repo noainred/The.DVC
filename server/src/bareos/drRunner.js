@@ -348,7 +348,7 @@ async function step(run, now) {
       const k = restoreNameKey(run.vcenterId, ready[i].p.plan?.target?.name || ready[i].it.newVm?.name);
       if (tryHoldNames([k])) nameKeys.push(k); else ready.splice(i, 1);
     }
-    held.push(...nameKeys);
+    for (const k of nameKeys) held.push(k);
     if (!ready.length) { pauseBlocked(); run.updatedAt = now; save(); return; }
     const dirId = plan.directorId || run.directorId;
     const batchId = `${run.id}-${now.toString(36)}`;
