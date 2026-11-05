@@ -2416,7 +2416,8 @@ server/src/bareos/CLAUDE.md 크기 상한(15,000B)으로 원문 그대로 옮겼
 
 - **왜 포탈이 실행하나**: Bareos 에는 만든 잡의 Schedule 을 바꾸는 콘솔 명령이 없다(`configure add` 만). 그룹 잡은 **Director 스케줄 없이** 등록하고(`createBackupTargets({ schedule: '' })`),
   시각이 되면 포탈이 `run job=… level=… [storage=… pool=…] yes` 를 보낸다. 이미 Director 스케줄이 있는 잡을 그룹에 넣으면 두 번 돈다 — 저장 응답(`doubleScheduled`)·편집 창이 경고만 한다(고칠 콘솔 명령이 없다).
-- **회차 판정은 `groupSchedule.js` 하나**(웹 `bareosGroupText.scheduleText` 와 같은 글자 — 테스트 대조). 시각은 **포탈 서버 현지 시각**. 회차 열쇠 'YYYY-MM-DD HH:MM' 은 글자 순서 = 시각 순서 —
+- **회차 판정은 `groupSchedule.js` 하나**(웹 `bareosGroupText.scheduleText` 와 같은 글자 — 테스트 대조). 시각은 **포탈 서버 현지 시각**(v2.899 — 그룹마다 `schedule.clock` 으로
+  '현지 서버'(server · 옛 그룹 기본) 또는 '중앙 포탈'(portal · `DAY_OFFSET_MIN` — 프로세스 TZ 와 무관) 중 고른다. 아래 v2.899 절). 회차 열쇠 'YYYY-MM-DD HH:MM' 은 글자 순서 = 시각 순서 —
   `lastKey` 보다 앞선 회차는 보지 않는다(L1: 시계 역행 시 어제 회차가 lastKey 를 덮어 오늘 회차가 다시 나갔다). 스케줄을 만들거나 바꾼 시각(`anchorAt`) 앞의 회차는 돌리지 않는다.
   따라잡기 6시간(`CATCHUP_MS`) — 넘긴 회차는 `missed{reason:'down'}`. 돌 차례인 회차를 틱 전에 스케줄을 고치면 `missed{reason:'edited'}` 로 남긴다(M4 — 조용히 사라졌다).
 - **한 번 이하**: 회차는 실행을 **보내기 전에** 원장 파일에 기록한다(`claimSlots` — 보내는 중 표지 `sending` 도 같은 쓰기). 한 틱의 차지·놓침은 **쓰기 한 번**(M1 실측: 그룹마다 쓰면 300그룹 691KB 에 3초 정지).
@@ -2984,3 +2985,19 @@ high 0 · 반증 1(A3-01 — 경로 오독, 데모 계정은 READ_DENY 하위라
 - 남김: B4-05 ① DR 필요 용량은 옛 vmId 가 새 인벤토리에 없어 '모름'(정직한 모름 — 백업 바이트 하한 추정은 '추정' 표지를 붙여 별건) · ② moref 재사용(추정 · 미확인) ·
   B3-01 의 극단 규모(원장 28,000 × 동시 28회차)는 측정 가정 밖 · 단건 복원 라우트는 이름 예약(reservedRestoreNames)을 원래 보지 않는다(재해 복구 밖 — 별건) · 실환경(실제 Director · 엣지 · 디스크 고장) 미확인.
 
+## v2.899 버그 수정 · 개선 · 포탈 전체 점검(5축 + 반증 1인 — 2026-11-05 · 사용자 '버그 수정이나 개선을 위한 작업 진행' · 범위 '버그 2건 · VMXNET3 권장 · 수집 확장 3종 · 포탈 전체 버그 점검' · 검증 '표준')
+
+- 방식: 점검 5축(보안 · 백업 · 엣지 · 웹 · 성능) → 반증 1인이 HEAD 를 따로 풀어 재현(31건 확정 · 재현 7건 · 코드 판정 15건). 기록 원문은 세션 scratchpad sweep1~5 · verify2899.md(저장소 밖).
+- **내 코드의 결함(정정)**: E1 작업 참조 정규식이 속성 순서에 묶였다(v2.898 taskRefsOf) · E2 캐시 글자가 응답 원문을 붙잡았다(flatStr) · E3 엣지 push 에 키가 없으면 직전 값을 지웠다 ·
+  E7 엣지 값의 낡음 · 만료가 없었다(30분 낡음 · 24시간 만료) · W3 워킹셋을 못 읽으면 '0 GB'(v2.895) · ⓓ-1 이 `clusterCfg2701` 기대값을 깨뜨렸다(그 파일을 돌리지 않아 놓쳤다 — teaming 칸 반영).
+- **B1(사용자 결정)**: Bareos 그룹 예약은 '현지 서버' · '중앙 포탈' 두 시계를 함께 보이고 그룹마다 고른다(`groupSchedule.clockOf` · 옛 그룹 = server). 시계를 바꾸면 회차 열쇠를 비우고 `anchorAt` 으로만 막는다.
+- **B2**: 복원 검증이 네트워크를 끊은 **뒤** 실패하면 nic 'ok'(`verifyRestoredVm` → `nicOff` → execOp · 엣지 ack · 중앙 정제 · finishOp · restoreFinish) — nicOff 를 모르는 옛 엣지 회신은 예전 판정.
+- **B3**: 정책 수집 전체 시한 `runDeadlineMs(n)`(바닥 15분) · 틱 성공은 모든 대상이 끝났을 때만(`runOk`) · 시한 뒤 늦은 결과도 파일에 · 시한 뒤에는 새 Director 를 시작하지 않는다.
+- **보안 · 범위**: S1 서비스 인벤토리 전 법인 공용 쓰기 = 조회 무제한 ∧ 쓰기 무제한 관리자 · S2 백업 서머리 알림 저장도 쓰기 범위 · S3 savedBy 는 관리자 판본만(사용자 결정) · S4 볼륨 즉시 조회 기억 열쇠에 데모 여부.
+- **엣지 · 수신**: E4 엣지의 OME 장치(등록부 밖)의 빈 scanRangeId 는 '보고되지 않음'(중앙 fleet `edgeSource`) · E5 서비스 태그 폴백은 같은 DataCenter 엔트리만 · E6 PCI 주소 파싱 선형(indexOf · 64KB) ·
+  E8 instanceUuid 모양 · 64자(예전 주석 '문자열 상한이 자른다' 는 사실이 아니었다 — 정정).
+- **성능 · 정리**: P1 사용자 문서 파일(이슈 · 게시판 · 위키)은 저장소 상한까지 백업(사용자 결정) · P2 번들 sha256 1회(`util/bundleSha.js`) · 주기 경로 비동기 읽기 · P4 첨부 tar 목록 Set ·
+  P5 주간 메일 재진입 가드 + 시한 · P6 첨부 업로드 임시 파일 정리. **P3 은 관찰만**(반증 '실익 낮음' — 고치지 않았다).
+- **화면**: W1 백업 서머리 버튼은 관리자 + 도구 권한(`adminToolAllowed`) · W2 스프린트를 바꾸면 이전 보드를 보이지 않는다 · W4 위키 충돌 저장은 비교가 있을 때만 · W5 GPU 옛 주소 replace · W6 오류 뒤 재시도 deps.
+- 회귀: `server/test/{fix2899,sweep2899,perf2899,bareosVerifyNic2899,bareosPolicyDeadline2899,vcinfo2898,svcInventoryReview5b,clusterCfg2701}.test.js` · 웹 `vcd/*.test.js` · `bareosGroupText.test.js`.
+- 남김: 실 vCenter · 실 Director · 실 엣지로 확인하지 않았다(추정 — 리소스 풀 shares 모양 · NIC 팀 중첩 policy 는 공식 바인딩 기준) · P3 관찰.

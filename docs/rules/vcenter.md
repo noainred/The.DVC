@@ -25,6 +25,7 @@
 - (원래 5725행) v2.703 — 코어 라이선스 산정(A13) + 태그·사용자 지정 속성 점검(A15). 규칙을 모르면 산정하지 않고, 못 읽은 vCenter 는 '확인 안 됨' 이다
 - (원래 5738행) v2.702 — VM 이동·구성 변경 이력(A7·A8). 원천은 logs DB 의 vCenter 이벤트이고 상세는 수집 시점에 `detail` 열로 싣는다
 - v2.898 — vCenter 알람 · 최근 작업 · 권한 목록 · Linked Mode · 업데이트 · vLCM(`vcinfo/`) + 스냅샷 트리 · VM NIC. 캐시는 스냅샷 vCenter 객체 밖이고 호출은 읽기 전용뿐이다
+- v2.899 — 리소스 풀 설정(`vcinfo` pools) · NIC 팀 구성(hcfg.net teaming) · 호스트별 DS 마운트(dscfg mounts) · VMXNET3 권장(nic-legacy) · Linked 범위 가림 · 엣지 vcInfo 계약(키 없음 = 유지 · 낡음 · 만료)
 - (원래 5751행) v2.701 — 클러스터 HA·DRS 점검(A6) + 호스트 네트워크(A10). 클러스터 구성은 클러스터 전용 캐시(`clustercfg/`)이고 vcenter.clusterCfg
 
 ## 본문
@@ -406,3 +407,14 @@
     `config.hardware.device` 를 넓혀 읽고, 'NIC 인가' 판정은 `soapParse.NIC_TYPE_RE` 하나(VM CSV 내보내기와 같다). 둘 다 키가 없으면 '아직 읽지 않음'(빈 배열 = 없음과 다르다).
   - 실 vCenter 로 확인하지 못한 것(정직 기록 — 조사 `docs/design/vcenter-tabs/README.md` §12): Lookup Service 는 쓰지 않았다 · `appliance/update` 는 SSO 그룹 권한이라 읽기 전용 계정에서
     403 일 가능성이 높다(추정) · 베이스라인 클러스터에 compliance 를 부르면 무엇이 오는지 모른다(그래서 부르지 않는다) · 응답 필드는 공식 바인딩(8.0.3) docstring 기준.
+- **v2.899 — 수집 확장 3종 · VMXNET3 권장 · 점검 확정분**(사용자 요청 '버그 수정이나 개선' · '표준'). 회귀 `server/test/fix2899.test.js` · `vcinfo2898.test.js` · `dsCfg2700.test.js` · `clusterCfg2701.test.js`.
+  - **NIC 팀 구성**: `hostcfg/parse.js teamingOf` 는 `inner(container,'nicTeaming')` 으로 읽는다 — 스위치 spec 의 `<policy>` 가 중첩이라 `inner(spec,'policy')` 는 안쪽 `</policy>` 에서 멈춘다.
+    표준 스위치만 `teaming{policy,active,standby,failback}` · 분산 스위치는 null(모름) · 포트그룹은 유효 정책 글자. 엣지 정제 `sanitizeTeaming`(아는 정책 · NIC 이름 형식만).
+  - **호스트별 DS 마운트**: `dscfg/parse.js parseMounts` 는 앞 mountInfo 끝과 이 원소 사이에서만 호스트 키를 찾는다(앞 원소의 키를 줍지 않게) · `hosts`(상한 · `hostsOmitted`) · `bad`(접근 불가 · 미마운트) ·
+    판정 사실(ds-mount-partial)에는 개수만 싣는다(목록은 화면 값).
+  - **리소스 풀**: `vcinfo` 종류 'pools'(inv.hosts) — 수집은 이미 받은 ResourcePool moref 만(`poolRefs`) · `parseAllocation` 은 중첩 `<shares>` 를 `first(xml,'shares')` 로 · 무제한 -1 · 상한 `POOLS_MAX`.
+  - **VMXNET3 권장**: 판정은 `vmcfg/parse.js LEGACY_NIC`(E1000 · E1000E · PCNet32 · VMXNET · VMXNET 2) → 'nic-legacy'(info) 하나 — 웹 `vmCfgText.js` 와 대조 테스트 · 튜닝 계획 행 `cfg:nic-legacy`.
+  - **Linked Mode 범위 가림**: 범위 계정에는 조회 범위 안 등록 vCenter 와 짝지은 노드만 이름(파트너 · 복제 이름도 — `maskLinkedForScope`) · 짝 못 지은 자기 자신도 가린다(이름을 지어내 짝짓지 않는다).
+  - **엣지 vcInfo 계약(E3 · E7)**: 중앙 지원이 확인되면 키를 늘 싣고(`{}` = 비움) 모르면 키를 뺀다 — 중앙은 키가 없으면 직전 값을 유지 · `putFromEdge` 는 종류째 교체 · 엣지 `at` 은 받은 시각으로 자른다 ·
+    받은 지 30분이면 낡음(`stale`) · 24시간이면 보이지 않는다(`EDGE_EXPIRE_MS` — 엣지가 멈춘 뒤 옛 권한 목록을 계속 보이지 않게). 못 읽은 알람 원소는 `unreadable` 로 센다(0건이 아니다 — E1).
+  - **E6**: 장비 출력 정규식 규칙 — VM PCI 패스스루 주소는 `firstBacking`(indexOf · 조각 64KB). 게으른 `[\s\S]*?` 를 닫힘 없는 반복 태그 위에 두지 말 것(실측 132KB 1.3초).
