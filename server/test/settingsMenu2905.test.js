@@ -1,4 +1,4 @@
-// v2.904 — 설정 메뉴 재배치(사용자 요청 "설정에 메뉴가 너무 많아져서 스크롤바가 생기는데 … 최적화해서 재배치해줘").
+// v2.905 — 설정 메뉴 재배치(사용자 요청 "설정에 메뉴가 너무 많아져서 스크롤바가 생기는데 … 최적화해서 재배치해줘").
 // 1단이 19개(단독 항목 12개 + 그룹 7개)라 넓은 화면에서도 가로 스크롤이 생겼다 → 1단 묶음 9개 + 2단 항목으로.
 // 고정하는 것:
 //   ① 하위 키(#/settings/<k>) 48개는 하나도 바뀌지 않았다 — 딥링크 · linkcheck SETTINGS_PATHS · 문서가 이 키를 쓴다.
@@ -22,7 +22,7 @@ const ITEMS = [...SRC.matchAll(/^ {2}\{ k: '([a-z0-9-]+)', label: '([^']+)', C: 
 const GROUP_ORDER = JSON.parse((/const GROUP_ORDER = (\[[^\]]+\]);/.exec(SRC)?.[1] || '[]').replace(/'/g, '"'));
 const GROUP_LABEL = Object.fromEntries([...SRC.matchAll(/^ {2}'?([a-z-]+)'?: \{ label: '([^']+)', desc: '/gm)].map((m) => [m[1], m[2]]));
 
-// v2.903 까지의 48개 키 — 재배치는 묶음만 바꾼다(키를 바꾸면 북마크 · 딥링크 · 권한 문서가 깨진다).
+// v2.904 까지의 48개 키 — 재배치는 묶음만 바꾼다(키를 바꾸면 북마크 · 딥링크 · 권한 문서가 깨진다).
 const KEYS_V2901 = [
   'datacenter-admin', 'vcenter-admin', 'vcenter-test', 'veeam', 'bareos', 'nsx-admin', 'horizon-admin',
   'idrac-admin', 'idrac-scan-log', 'metrics', 'storage-intervals', 'power-off-check', 'vmseries', 'sansw-perf',
@@ -75,7 +75,7 @@ test('④ 옛 묶음 이름의 메뉴 경로가 화면 · 서버 문구에 남�
       for (const m of s.matchAll(OLD_PATH)) hits.push(`${path.relative(ROOT, f)}:${lineOf(s, m.index)} ${m[0]}`);
     }
   }
-  assert.deepEqual(hits, [], '옛 경로(v2.903 까지의 묶음 이름) — 새 묶음 이름으로 고칠 것');
+  assert.deepEqual(hits, [], '옛 경로(v2.904 까지의 묶음 이름) — 새 묶음 이름으로 고칠 것');
 });
 
 test('⑤ ‘설정 › <묶음> › <항목>’ 의 항목은 실제로 그 묶음에 있다', () => {
