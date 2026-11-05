@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>위키 댓글 — 달린 뒤</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=Noto+Sans+KR:wght@400;500;700;800&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+body{margin:0;background:#0a0e17;color:#e6edf6;font-family:"Inter","Noto Sans KR","Apple SD Gothic Neo",sans-serif;font-size:13px}
+a{color:#93c5fd}a:hover{color:#bfdbfe}
+.tb{display:flex;align-items:center;gap:14px;height:44px;padding:0 16px;background:#0f1626;border-bottom:1px solid #243049}
+.tb .logo{display:inline-flex;align-items:center;gap:8px;font-weight:800;font-size:14px}
+.tb .logo .v{width:26px;height:26px;border-radius:7px;background:#3b82f6;display:inline-flex;align-items:center;justify-content:center;font-size:13px;color:#fff}
+.ver{font-size:11px;font-weight:700;color:#5eead4;border:1px solid #2dd4bf;border-radius:6px;padding:1px 6px}
+.live{font-size:11px;font-weight:800;color:#86efac;background:rgba(34,197,94,.16);border-radius:6px;padding:2px 7px}
+.mock{font-size:11px;font-weight:800;color:#fcd34d;background:rgba(245,158,11,.16);border-radius:6px;padding:2px 7px}
+.card{background:#141b2d;border:1px solid #243049;border-radius:12px}
+.muted{color:#8b9bb4}.faint{color:#5d6b85}
+.mono{font-family:"JetBrains Mono",ui-monospace,monospace}
+.btn{display:inline-flex;align-items:center;gap:6px;min-height:34px;padding:0 12px;border-radius:8px;border:1px solid #243049;background:#1a2236;color:#e6edf6;font:inherit;font-size:12.5px;font-weight:600;cursor:pointer;white-space:nowrap;text-decoration:none}
+.btn.primary{background:#3b82f6;border-color:#3b82f6;color:#fff}
+.btn.sm{min-height:28px;padding:0 9px;font-size:11.5px}
+.btn.xs{min-height:22px;padding:0 7px;font-size:11px;font-weight:500}
+.tag{display:inline-flex;align-items:center;gap:5px;height:20px;padding:0 8px;border-radius:999px;font-size:11px;font-weight:700;white-space:nowrap}
+.tag.blue{background:rgba(59,130,246,.18);color:#93c5fd}.tag.gray{background:rgba(139,155,180,.14);color:#aebbd0}.tag.ok{background:rgba(34,197,94,.14);color:#86efac}.tag.warn{background:rgba(245,158,11,.16);color:#fcd34d}
+.iss{display:inline-flex;align-items:center;gap:6px;height:22px;padding:0 8px 0 6px;border-radius:6px;border:1px solid #243049;background:#0f1626;color:#e6edf6;font-size:12px;font-weight:600;text-decoration:none;vertical-align:middle}
+.iss .k{font-family:"JetBrains Mono",monospace;color:#93c5fd;font-size:11.5px}
+.iss .st{width:8px;height:8px;border-radius:50%}
+.av{display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;border-radius:50%;font-size:11px;font-weight:800;color:#fff;flex:0 0 auto}
+.input{min-height:34px;border:1px solid #243049;border-radius:8px;background:#0a0e17;color:#e6edf6;font:inherit;font-size:13px;padding:0 10px}
+.side{flex:0 0 250px;display:flex;flex-direction:column;gap:10px;min-width:0}
+.tree{padding:10px 8px;display:flex;flex-direction:column;gap:2px}
+.tree .h{font-size:11px;color:#8b9bb4;padding:4px 8px}
+.tree a{display:flex;align-items:center;gap:8px;min-height:32px;padding:0 10px;border-radius:8px;color:#e6edf6;text-decoration:none;font-size:13px}
+.tree a.on{background:#3b82f6;color:#fff}
+.doc h1{font-size:22px;margin:0 0 6px;line-height:1.3}
+.doc p{font-size:13.5px;line-height:1.7;color:#d6deea;margin:4px 0}
+.cm{display:flex;gap:10px}
+.cm .b{min-width:0;flex:1;font-size:13px;line-height:1.65}
+.mention{display:inline-flex;align-items:center;height:22px;padding:0 7px 0 6px;border-radius:6px;background:rgba(59,130,246,.16);font-size:12px;font-weight:600;vertical-align:middle;white-space:nowrap;text-decoration:none}
+.mention .u{font-family:"JetBrains Mono",monospace;font-size:11.5px;color:#93c5fd}
+.mention .s{color:#5d6b85;padding:0 1px}
+.mention .n{color:#e6edf6}
+.linked{display:inline-flex;align-items:center;gap:8px;margin-top:6px;padding:4px 8px 4px 6px;border-radius:8px;background:rgba(34,197,94,.08);border:1px solid rgba(34,197,94,.35);font-size:12px}
+.toast{position:absolute;right:20px;top:54px;background:#141b2d;border:1px solid #22c55e;border-radius:10px;padding:10px 14px;font-size:12.5px;box-shadow:0 12px 32px rgba(0,0,0,.55);max-width:520px;line-height:1.6;display:flex;gap:10px;align-items:flex-start;z-index:5}
+.aside-box{padding:10px 12px;display:flex;flex-direction:column;gap:6px}
+.aside-title{font-size:11px;color:#8b9bb4;font-weight:700}
+.tip{position:absolute;background:#0f1626;border:1px solid #243049;border-radius:8px;padding:6px 9px;font-size:11.5px;box-shadow:0 8px 24px rgba(0,0,0,.5);white-space:nowrap}
+</style>
+</helmet>
+
+<div style="min-height: 100vh; display: flex; flex-direction: column; background: #0a0e17; position: relative">
+  <header class="tb">
+    <span class="logo"><span class="v">V</span>The Davinci</span>
+    <span class="ver">v2.897.0</span><span class="live">LIVE</span><span class="mock">MOCK</span>
+    <nav style="display: flex; gap: 4px; margin-left: 18px" aria-label="상단 메뉴"><a class="btn sm" href="#">개요</a><a class="btn sm" href="#">도구</a><a class="btn sm primary" href="#">위키</a><a class="btn sm" href="Issue.dc.html">이슈</a><a class="btn sm" href="#">설정</a></nav>
+    <span style="flex: 1"></span>
+    <span class="av" style="background: #3b82f6">N</span><span style="font-size: 12.5px">noainred <span class="muted">· 관리자 · 전체 범위</span></span>
+  </header>
+
+  <div class="toast" role="status">
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#22c55e" stroke-width="2.4" aria-hidden="true" style="flex: 0 0 auto; margin-top: 2px"><path d="M5 12l5 5L20 7"/></svg>
+    <div>댓글을 달고 <a href="Issue.dc.html" class="mono" style="font-weight: 700">ISS-42</a> 를 만들었습니다 — 담당자 kim.lee/김이령 · 관찰자 park.ki/박기태.<br><span class="muted">메일은 1분 안에 2명에게 한 통씩 갑니다(언급 + 이슈 두 줄). 주소가 없는 사람이 있으면 여기에 이름을 밝힙니다.</span></div>
+  </div>
+
+  <div style="flex: 1; display: flex; gap: 16px; padding: 16px 20px 24px; min-width: 0">
+    <aside class="side" aria-label="문서 목록">
+      <select class="input" aria-label="스페이스"><option selected>공용(전 법인) · 1</option></select>
+      <div class="card tree"><div class="h">문서 1</div><a class="on" href="Posted.dc.html">the DVC 주요 기능 소개</a></div>
+    </aside>
+
+    <main class="card" style="flex: 1 1 560px; min-width: 0; padding: 18px 22px 22px; display: flex; flex-direction: column; gap: 10px">
+      <div class="doc">
+        <div class="muted" style="font-size: 11.5px">공용(전 법인)</div>
+        <h1>the DVC 주요 기능 소개</h1>
+        <div class="muted" style="font-size: 11.5px; display: flex; gap: 8px; align-items: center"><span class="tag gray">초안</span><span>v5 · noainred · 11-05 16:15</span></div>
+        <p class="faint" style="font-size: 12px">(본문 생략)</p>
+      </div>
+
+      <section style="display: flex; flex-direction: column; gap: 14px; margin-top: 4px; padding-top: 12px; border-top: 1px solid #1f2a40">
+        <b style="font-size: 14px">댓글 2</b>
+        <div class="cm"><span class="av" style="background: #22c55e">C</span><div class="b"><b>choi</b> <span class="muted" style="font-size: 11.5px">· 11-05 14:02 · v4</span><div>이 문서를 첫 화면 바로 가기에 넣을까요? <a class="mention" href="#"><span class="u">@noainred</span></a></div></div></div>
+
+        <div class="cm" style="position: relative">
+          <span class="av" style="background: #3b82f6">N</span>
+          <div class="b">
+            <b>noainred</b> <span class="muted" style="font-size: 11.5px">· 11-05 16:20 · v5</span> <button class="btn xs" type="button" style="margin-left: 6px">지우기</button>
+            <div>US-East 수집도 같은 증상입니다. <a class="mention" href="#" title="kim.lee · 김이령 · 운영자"><span class="u">@kim.lee</span><span class="s">/</span><span class="n">김이령</span></a> 수집 시한을 90초로 올려 주세요. <a class="mention" href="#"><span class="u">@park.ki</span><span class="s">/</span><span class="n">박기태</span></a> 참고 부탁합니다.</div>
+            <div class="linked">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#86efac" stroke-width="2.2" aria-hidden="true"><path d="M10 13a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1 1"/><path d="M14 11a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1-1"/></svg>
+              <span>이슈로 등록됨</span>
+              <a class="iss" href="Issue.dc.html"><span class="st" style="background: #8b9bb4"></span><span class="k">ISS-42</span>할 일</a>
+              <span class="muted">담당 kim.lee/김이령 · 관찰 park.ki/박기태 · 메일 2</span>
+            </div>
+            <div class="tip" style="left: 120px; top: 50px">칩 위에 올리면: kim.lee · 김이령 · 운영자 — 이름은 글에 적힌 그대로(그때의 이름)</div>
+          </div>
+        </div>
+
+        <form style="display: flex; flex-direction: column; gap: 8px; margin-top: 50px" aria-label="새 댓글">
+          <textarea class="input" rows="2" aria-label="댓글" placeholder="댓글 — @사람 으로 알리고, ISS-번호로 이슈를 잇습니다" style="padding: 8px 10px"></textarea>
+          <button class="btn primary" type="submit" style="align-self: flex-end" disabled>댓글 달기</button>
+        </form>
+      </section>
+    </main>
+
+    <aside class="side" aria-label="문서 정보">
+      <div class="card aside-box">
+        <div class="aside-title">관련 이슈 · 1</div>
+        <a class="iss" href="Issue.dc.html" style="justify-content: flex-start; height: 30px"><span class="st" style="background: #8b9bb4"></span><span class="k">ISS-42</span><span style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap">[위키] the DVC 주요 기능 소개 — US-East 수집도…</span></a>
+        <div class="faint" style="font-size: 11.5px">댓글에서 만든 이슈(출처 ‘위키 댓글’)는 본문의 ISS 키와 같은 색인에 들어갑니다. 이슈가 닫히면 점이 초록으로.</div>
+      </div>
+      <div class="card aside-box"><div class="aside-title">페이지 정보</div><div style="font-size: 12.5px">지켜보기 2 · 첨부 0 · 최근 판 v5</div></div>
+      <div class="card aside-box" style="gap: 8px">
+        <div class="aside-title">저장되는 것</div>
+        <div style="font-size: 12px; line-height: 1.55; color: #d6deea">댓글 body 는 친 글자 그대로(‘@kim.lee/김이령’) — 파서 · 알림 해석 · .md 내보내기 · 메일 본문에 모두 같은 글자. 댓글에 issueKey 하나 더. 이슈에 origin { kind:'wiki-comment', pageId, commentId }.</div>
+      </div>
+    </aside>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":980}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

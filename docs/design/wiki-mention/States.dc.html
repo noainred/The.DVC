@@ -1,0 +1,161 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>상태 변형 — 알림 꺼짐 · 주소 없음 · 요청 권한 · 범위 밖 · 후보 없음 · 중복 · 이슈 댓글</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=Noto+Sans+KR:wght@400;500;700;800&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+body{margin:0;background:#0a0e17;color:#e6edf6;font-family:"Inter","Noto Sans KR","Apple SD Gothic Neo",sans-serif;font-size:13px}
+a{color:#93c5fd}a:hover{color:#bfdbfe}
+.card{background:#141b2d;border:1px solid #243049;border-radius:12px}
+.muted{color:#8b9bb4}.faint{color:#5d6b85}
+.mono{font-family:"JetBrains Mono",ui-monospace,monospace}
+.btn{display:inline-flex;align-items:center;gap:6px;min-height:34px;padding:0 12px;border-radius:8px;border:1px solid #243049;background:#1a2236;color:#e6edf6;font:inherit;font-size:12.5px;font-weight:600;cursor:pointer;white-space:nowrap;text-decoration:none}
+.btn.primary{background:#3b82f6;border-color:#3b82f6;color:#fff}
+.btn.sm{min-height:28px;padding:0 9px;font-size:11.5px}
+.btn:disabled{opacity:.55;cursor:not-allowed}
+.tag{display:inline-flex;align-items:center;gap:5px;height:20px;padding:0 8px;border-radius:999px;font-size:11px;font-weight:700;white-space:nowrap}
+.tag.blue{background:rgba(59,130,246,.18);color:#93c5fd}.tag.gray{background:rgba(139,155,180,.14);color:#aebbd0}.tag.ok{background:rgba(34,197,94,.14);color:#86efac}.tag.warn{background:rgba(245,158,11,.16);color:#fcd34d}.tag.bad{background:rgba(239,68,68,.16);color:#fca5a5}
+.iss{display:inline-flex;align-items:center;gap:6px;height:22px;padding:0 8px 0 6px;border-radius:6px;border:1px solid #243049;background:#0f1626;color:#e6edf6;font-size:12px;font-weight:600;text-decoration:none;vertical-align:middle}
+.iss .k{font-family:"JetBrains Mono",monospace;color:#93c5fd;font-size:11.5px}
+.iss .st{width:8px;height:8px;border-radius:50%}
+.av{display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:50%;font-size:11px;font-weight:800;color:#fff;flex:0 0 auto}
+.input{min-height:34px;border:1px solid #243049;border-radius:8px;background:#0a0e17;color:#e6edf6;font:inherit;font-size:13px;padding:0 10px}
+.mention{display:inline-flex;align-items:center;height:22px;padding:0 7px 0 6px;border-radius:6px;background:rgba(59,130,246,.16);font-size:12px;font-weight:600;vertical-align:middle;white-space:nowrap;text-decoration:none}
+.mention .u{font-family:"JetBrains Mono",monospace;font-size:11.5px;color:#93c5fd}
+.mention .s{color:#5d6b85;padding:0 1px}
+.mention .n{color:#e6edf6}
+.mention.plain{background:rgba(139,155,180,.12)}.mention.plain .u{color:#aebbd0}
+.ac{background:#0f1626;border:1px solid #3b82f6;border-radius:10px;overflow:hidden}
+.ac-h{display:flex;justify-content:space-between;gap:8px;padding:7px 10px;font-size:11px;color:#8b9bb4;border-bottom:1px solid #1f2a40}
+.ac-i{display:flex;align-items:center;gap:10px;min-height:44px;padding:0 10px;border:0;border-bottom:1px solid #1f2a40;background:none;width:100%;text-align:left;color:#e6edf6;font:inherit;cursor:pointer}
+.ac-i.on{background:rgba(59,130,246,.2)}
+.ac-i.off{opacity:.55;cursor:not-allowed}
+.ac-i .u{font-family:"JetBrains Mono",monospace;font-size:12.5px;font-weight:600}
+.ac-i mark{background:transparent;color:#fcd34d;font-weight:800}
+.ac-i .r{margin-left:auto;display:flex;gap:6px;align-items:center;white-space:nowrap}
+.ac-f{display:flex;gap:12px;padding:6px 10px;font-size:11px;color:#5d6b85;align-items:center;flex-wrap:wrap}
+.kbd{display:inline-block;min-width:16px;padding:0 5px;border:1px solid #243049;border-radius:4px;background:#141b2d;color:#aebbd0;font-size:10.5px;font-family:"JetBrains Mono",monospace;line-height:16px;text-align:center}
+.ml{display:inline-flex;align-items:center;gap:4px;font-size:11.5px;color:#86efac}
+.ml.no{color:#fcd34d}
+.pane{border:1px solid #243049;border-radius:10px;background:#0f1626;padding:10px 12px;display:flex;flex-direction:column;gap:8px}
+.row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.chk{display:inline-flex;align-items:center;gap:8px;font-size:13px;font-weight:700}
+.chk input{width:16px;height:16px;accent-color:#3b82f6}
+.chk.off{color:#8b9bb4}
+.note{border:1px solid rgba(245,158,11,.5);background:rgba(245,158,11,.10);border-radius:8px;padding:7px 10px;font-size:12px;line-height:1.55;display:flex;gap:8px;align-items:flex-start}
+.note.bad{border-color:rgba(239,68,68,.5);background:rgba(239,68,68,.10)}
+.note.info{border-color:rgba(59,130,246,.5);background:rgba(59,130,246,.10)}
+.c{padding:14px 16px;display:flex;flex-direction:column;gap:10px;min-width:0}
+.c h3{margin:0;font-size:14px;display:flex;align-items:center;gap:8px}
+.c h3 .n{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:50%;background:#3b82f6;color:#fff;font-size:12px}
+.lbl{font-size:11.5px;color:#8b9bb4}
+</style>
+</helmet>
+
+<div style="min-height: 100vh; box-sizing: border-box; padding: 20px; display: flex; flex-direction: column; gap: 14px; background: #0a0e17">
+  <div class="muted" style="font-size: 12.5px">같은 댓글 상자 · 같은 ‘이슈로 등록’ 줄이 상황에 따라 어떻게 달라지는가. 어느 경우에도 <b style="color: #e6edf6">조용히 빼지 않고 화면이 이유를 말한다</b>.</div>
+  <div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px">
+
+    <section class="card c">
+      <h3><span class="n">1</span>이슈 알림이 꺼져 있음</h3>
+      <div class="pane">
+        <label class="chk" for="s1"><input id="s1" type="checkbox" checked>언급한 사람에게 이슈로 등록</label>
+        <div class="row"><span class="lbl">담당자</span><span class="mention"><span class="u">kim.lee</span><span class="s">/</span><span class="n">김이령</span></span><span class="lbl">유형 작업 · P2 · 공용</span></div>
+        <div class="note"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#fcd34d" stroke-width="2.4" aria-hidden="true" style="flex: 0 0 auto; margin-top: 2px"><path d="M12 3L2 21h20L12 3z"/><path d="M12 10v5M12 18h.01"/></svg><span>이슈 알림이 꺼져 있어 <b>메일은 가지 않습니다</b> — 이슈는 만들고, 담당자의 이슈 탭 ‘내 이슈’ 에는 보입니다. 켜기: <a href="#">이슈 › 설정 › 알림</a>(전체 범위 관리자)</span></div>
+      </div>
+      <div class="faint" style="font-size: 11.5px">판정값은 /issues/meta 의 notify 상태(이미 내려옴) — 화면이 지어내지 않는다.</div>
+    </section>
+
+    <section class="card c">
+      <h3><span class="n">2</span>메일 주소가 없는 사람</h3>
+      <div class="pane">
+        <label class="chk" for="s2"><input id="s2" type="checkbox" checked>언급한 사람에게 이슈로 등록</label>
+        <div class="row"><span class="lbl">담당자</span><span class="mention"><span class="u">kimsh</span><span class="s">/</span><span class="n">김수현</span></span></div>
+        <div class="row"><span class="lbl">메일</span><span class="ml no"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 7l9 6 9-6"/><path d="M4 20L20 4"/></svg>kimsh 주소 없음</span><span class="muted" style="font-size: 11.5px">— 이슈는 만들고 포탈 안 알림(내 이슈)만. 주소는 관리자가 <a href="#">이슈 › 설정 › 알림 › 사람</a> 에 넣습니다.</span></div>
+      </div>
+      <div class="faint" style="font-size: 11.5px">계정에는 메일 칸이 없다(지금 구조). 후보 목록의 ‘메일 없음’ 표시와 같은 판정(emailOf).</div>
+    </section>
+
+    <section class="card c">
+      <h3><span class="n">3</span>요청 권한(viewer) 계정이 댓글을 쓸 때</h3>
+      <div class="pane" style="opacity: .9">
+        <label class="chk off" for="s3"><input id="s3" type="checkbox" disabled>언급한 사람에게 이슈로 등록</label>
+        <div class="note info"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#93c5fd" stroke-width="2.4" aria-hidden="true" style="flex: 0 0 auto; margin-top: 2px"><circle cx="12" cy="12" r="9"/><path d="M12 8h.01M12 11v5"/></svg><span>담당자를 지정하는 이슈는 운영자 · 관리자만 만듭니다. 댓글을 달면 <b>언급 메일은 그대로</b> 갑니다. 대신 <a href="#">‘요청’ 으로 등록</a>(담당자 없음 · 자동 할당 규칙이 있으면 그것이 정함)을 고를 수 있습니다.</span></div>
+      </div>
+      <div class="faint" style="font-size: 11.5px">선택지 — 줄을 숨기기 vs 잠그고 사유 보이기 vs ‘요청’ 으로 등록. 시안은 세 번째(추천).</div>
+    </section>
+
+    <section class="card c">
+      <h3><span class="n">4</span>후보가 그 법인 이슈를 볼 수 없음(범위 밖)</h3>
+      <div class="lbl">문서: vc-pl-waw(바르샤바) 스페이스 · 보는 사람: 전체 범위 운영자</div>
+      <div class="ac" role="listbox" aria-label="사람 후보">
+        <div class="ac-h"><span>사람 찾기 — ‘pa’</span><span>2명</span></div>
+        <button class="ac-i on" type="button" role="option" aria-selected="true"><span class="av" style="background: #22c55e">박</span><span class="u"><mark>pa</mark>rk.ki</span><span>박기태</span><span class="r"><span class="tag gray">운영자 · vc-kr-01 범위</span><span class="tag warn">이 법인 이슈를 볼 수 없음</span></span></button>
+        <button class="ac-i" type="button" role="option" aria-selected="false"><span class="av" style="background: #3b82f6">박</span><span class="u"><mark>pa</mark>rk.sw</span><span>박선우</span><span class="r"><span class="tag gray">운영자</span><span class="ml"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 7l9 6 9-6"/></svg>메일</span></span></button>
+        <div class="ac-f"><span>언급은 되지만 <b>담당자로는 고를 수 없음</b> — 서버가 visibility.canSee 로 다시 판정(400 + 사유). 범위 표시는 전체 범위 계정에게만.</span></div>
+      </div>
+    </section>
+
+    <section class="card c">
+      <h3><span class="n">5</span>맞는 사람이 없음 · 오타</h3>
+      <textarea class="input" rows="2" aria-label="댓글" style="padding: 8px 10px">확인 부탁드립니다 @kmi</textarea>
+      <div class="ac">
+        <div class="ac-h"><span>사람 찾기 — ‘kmi’</span><span>0명</span></div>
+        <div style="padding: 10px 12px; font-size: 12.5px; line-height: 1.55">맞는 사람이 없습니다. 그대로 두면 <span class="mention plain"><span class="u">@kmi</span></span> 글자로 남고 알림 · 이슈 대상이 되지 않습니다(지금과 같음).</div>
+        <div class="ac-f"><span><span class="kbd">Esc</span> 닫기</span><span>후보 조회 실패(네트워크 · 403)면 ‘후보를 읽지 못했습니다 — 계정을 직접 치세요’</span></div>
+      </div>
+      <div class="faint" style="font-size: 11.5px">이름이 없는 옛 댓글의 ‘@kim’ 도 회색 칩 — 서버가 아는 계정이면 파란 칩(해석은 지금의 resolveMentions).</div>
+    </section>
+
+    <section class="card c">
+      <h3><span class="n">6</span>이미 이슈가 있는 댓글(중복 방지)</h3>
+      <div style="display: flex; gap: 10px"><span class="av" style="background: #3b82f6">N</span><div style="min-width: 0; flex: 1; font-size: 13px; line-height: 1.6"><b>noainred</b> <span class="muted" style="font-size: 11.5px">· 16:20</span><div>US-East 수집도 같은 증상입니다. <span class="mention"><span class="u">@kim.lee</span><span class="s">/</span><span class="n">김이령</span></span> …</div><div class="row" style="margin-top: 4px; font-size: 12px"><span class="muted">이슈로 등록됨</span><a class="iss" href="Issue.dc.html"><span class="st" style="background: #3b82f6"></span><span class="k">ISS-42</span>진행 중</a><button class="btn sm" type="button" disabled title="같은 댓글(W7/c18)로 만든 이슈가 이미 있습니다">다시 등록</button></div></div></div>
+      <div class="note info"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#93c5fd" stroke-width="2.4" aria-hidden="true" style="flex: 0 0 auto; margin-top: 2px"><circle cx="12" cy="12" r="9"/><path d="M12 8h.01M12 11v5"/></svg><span>origin(pageId · commentId)이 같은 열린 이슈가 있으면 만들지 않고 그 키를 돌려준다. 그 이슈가 <b>완료된 뒤</b>라면 ‘다시 등록’ 이 열리고 새 이슈에 ‘관련’ 연결.</span></div>
+      <div class="faint" style="font-size: 11.5px">체크를 끄고 단 댓글은 나중에 이 ‘등록’ 버튼으로 뒤늦게 만들 수 있다(쓴 사람 · 운영자).</div>
+    </section>
+
+    <section class="card c" style="grid-column: span 2">
+      <h3><span class="n">7</span>이슈 댓글 — 같은 자동완성(MentionBox 공용)</h3>
+      <div style="display: flex; gap: 14px; align-items: flex-start">
+        <div style="flex: 1 1 420px; min-width: 0; display: flex; flex-direction: column; gap: 8px">
+          <div class="lbl">ISS-17 PL-WAW 수집 타임아웃 › 댓글</div>
+          <textarea class="input" rows="2" aria-label="댓글" style="padding: 8px 10px; border-color: #3b82f6">시한 90초로 올린 뒤 재발 없음 @ch</textarea>
+          <div class="ac" style="width: 420px">
+            <div class="ac-h"><span>사람 찾기 — ‘ch’</span><span>2명</span></div>
+            <button class="ac-i on" type="button" role="option" aria-selected="true"><span class="av" style="background: #22c55e">최</span><span class="u"><mark>ch</mark>oi</span><span>최민재</span><span class="r"><span class="tag gray">관리자</span><span class="tag blue">보고자</span></span></button>
+            <button class="ac-i" type="button" role="option" aria-selected="false"><span class="av" style="background: #f59e0b">최</span><span class="u"><mark>ch</mark>ung.y</span><span>정연우</span><span class="r"><span class="tag gray">운영자</span></span></button>
+            <div class="ac-f"><span>이슈 쪽 후보 = 담당자 후보(people — A3-02 그대로) + 이 이슈의 참여자(담당 · 보고 · 관찰 · 댓글)</span></div>
+          </div>
+        </div>
+        <div style="flex: 1 1 380px; min-width: 0; display: flex; flex-direction: column; gap: 8px">
+          <div class="pane">
+            <label class="chk" for="s7"><input id="s7" type="checkbox">언급한 사람을 이 이슈의 관찰자로 추가 <span class="muted" style="font-weight: 400">(선택 · 기본 끔)</span></label>
+            <div class="faint" style="font-size: 11.5px">이슈 댓글의 멘션은 새 이슈를 만들지 않는다 — 이미 이슈 안이다. 관찰자가 되면 그 뒤 상태 변경 알림도 받는다.</div>
+          </div>
+          <div class="note info"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#93c5fd" stroke-width="2.4" aria-hidden="true" style="flex: 0 0 auto; margin-top: 2px"><circle cx="12" cy="12" r="9"/><path d="M12 8h.01M12 11v5"/></svg><span>자동완성 한 벌(web/src/components/MentionBox.jsx)을 위키 댓글 · 이슈 댓글 · 이슈 설명 · 위키 본문 편집기(슬래시 명령과 나란히)에서 같이 쓴다. 후보 API 만 다르다(/wiki/pages/:id/mentionables · /issues/:key/mentionables).</span></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="card c">
+      <h3><span class="n">8</span>댓글을 ‘고른 사람’ 없이 그냥 칠 때</h3>
+      <textarea class="input" rows="2" aria-label="댓글" style="padding: 8px 10px">@kim.lee 확인 부탁</textarea>
+      <div class="row" style="gap: 6px"><span class="lbl">언급 1:</span><span class="mention"><span class="u">@kim.lee</span><span class="s">/</span><span class="n">김이령</span></span><span class="faint" style="font-size: 11.5px">(서버가 아는 계정이면 이름을 붙여 보여 준다 — 글자는 ‘@kim.lee’ 그대로)</span></div>
+      <div class="faint" style="font-size: 11.5px; line-height: 1.5">자동완성을 거치지 않아도 ‘이슈로 등록’ 줄은 똑같이 펼쳐진다. 이름을 붙여 저장하고 싶으면 후보에서 고르면 된다.</div>
+    </section>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":2120,"height":1120}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>
