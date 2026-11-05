@@ -37,6 +37,7 @@ export const RESULT_MS = Object.freeze({
   cancel: 120_000, log: 150_000, restore: 210_000, poll: 180_000,
   cancelJobs: 150_000,      // v2.867 그룹 회차 중단(VM 50대 · 잡마다 llist jobid + cancel — 단건 cancel 120초보다 조금 길게)
   restorePoints: 240_000,   // v2.861 묶음 복원 지점(VM 50대 · 잡마다 list jobs 한 번 · 읽기 전용)
+  health: 90_000,           // v2.892 사전 점검(엣지 창 = 이 값 − MARGIN 30초: 콘솔 세션 + vCenter TLS 접속 동시 10초 + statfs 경로마다 5초 · 멈춘 것 2개까지 — 읽기 전용)
   logs: 240_000,            // v2.872 묶음 로그(실행 15건 · 건마다 llist jobid + list joblog · 첫 오류 줄만 회신 · 읽기 전용)
   restores: 330_000,        // v2.861 묶음 복원(VM 마다 jobStatus · list jobs · restore — runJobs 와 같은 예산)
   policy: 240_000,   // v2.839 정책 수집(읽기 전용 명령 7개 · 볼륨 목록이 크다)
