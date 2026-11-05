@@ -117,7 +117,7 @@ export function VcTasksCard({ vcenterId, entityType = null, entity = null, embed
                   const [b, s] = TASK_STATE[t.state] || ['gray', '—'];
                   return (
                     <tr key={t.key}>
-                      <td className="mono" style={{ whiteSpace: 'normal', minWidth: 180, overflowWrap: 'anywhere' }}>{t.op ? t.op.replace(/\./g, '.\u200b') : '—'}{t.error && <div style={{ fontFamily: 'inherit', fontSize: 12, color: 'var(--red, #b91c1c)' }}>{t.error}</div>}</td>
+                      <td className="mono" style={{ whiteSpace: 'normal', minWidth: 150, overflowWrap: 'anywhere' }}>{t.op ? t.op.replace(/\./g, '.\u200b') : '—'}{t.error && <div style={{ fontFamily: 'inherit', fontSize: 12, color: 'var(--red, #b91c1c)' }}>{t.error}</div>}</td>
                       {!entity && <td><Target vcenterId={vcenterId} type={t.entityType} mref={t.entity} name={t.entityName} /></td>}
                       <td data-sort={t.state || ''}>{t.lost ? <span className="badge gray" title="실행 중으로 본 뒤 끝난 모습을 보지 못하고 vCenter 최근 작업에서 사라졌습니다">상태 모름</span> : <span className={`badge ${b}`}>{s}{t.state === 'running' && t.progress != null ? ` ${t.progress}%` : ''}</span>}</td>
                       <td>{taskDurText(t)}</td>
