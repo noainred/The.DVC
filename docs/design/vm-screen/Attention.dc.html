@@ -1,0 +1,186 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>가상화 서버 — 시안 1 조치 필요 탭</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=Noto+Sans+KR:wght@400;500;700;800&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+body{margin:0;background:#0a0e17;color:#e6edf6;font-family:"Inter","Noto Sans KR","Apple SD Gothic Neo",sans-serif;font-size:13px}
+a{color:#93c5fd}a:hover{color:#bfdbfe}
+.tb{display:flex;align-items:center;gap:14px;height:44px;padding:0 16px;background:#0f1626;border-bottom:1px solid #243049}
+.logo{display:inline-flex;align-items:center;gap:8px;font-weight:800;font-size:14px}
+.logo .v{width:26px;height:26px;border-radius:7px;background:#3b82f6;display:inline-flex;align-items:center;justify-content:center;font-size:13px;color:#fff}
+.ver{font-size:11px;font-weight:700;color:#5eead4;border:1px solid #2dd4bf;border-radius:6px;padding:1px 6px}
+.mock{font-size:11px;font-weight:800;color:#fcd34d;background:rgba(245,158,11,.16);border-radius:6px;padding:2px 7px}
+.m1{display:flex;gap:4px;padding:6px 16px 0;background:#0f1626;border-bottom:1px solid #1f2a40;overflow-x:auto}
+.m1 a{color:#8b9bb4;padding:8px 12px;border-radius:8px 8px 0 0;font-weight:600;white-space:nowrap;text-decoration:none}
+.m1 a.on{color:#e6edf6;background:#141b2d;box-shadow:inset 0 2px 0 #3b82f6}
+.m2{display:flex;gap:2px;padding:6px 16px;background:#141b2d;border-bottom:1px solid #243049;overflow-x:auto}
+.m2 a{color:#8b9bb4;padding:6px 10px;border-radius:7px;font-weight:600;white-space:nowrap;text-decoration:none}
+.m2 a.on{color:#fff;background:#3b82f6}
+.fb{display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:10px 24px;border-bottom:1px solid #1f2a40}
+.input{min-height:34px;border:1px solid #243049;border-radius:8px;background:#0a0e17;color:#e6edf6;font:inherit;font-size:13px;padding:0 10px;box-sizing:border-box}
+.btn{display:inline-flex;align-items:center;gap:6px;min-height:34px;padding:0 12px;border-radius:8px;border:1px solid #243049;background:#1a2236;color:#e6edf6;font:inherit;font-size:12.5px;font-weight:600;cursor:pointer;white-space:nowrap;text-decoration:none}
+.btn.sm{min-height:28px;padding:0 9px;font-size:11.5px}
+.card{background:#141b2d;border:1px solid #243049;border-radius:12px}
+.muted{color:#8b9bb4}
+.mono{font-family:"JetBrains Mono",ui-monospace,monospace;font-variant-numeric:tabular-nums}
+.tag{display:inline-flex;align-items:center;gap:5px;height:20px;padding:0 8px;border-radius:999px;font-size:11px;font-weight:700;white-space:nowrap}
+.tag.blue{background:rgba(59,130,246,.18);color:#93c5fd}.tag.gray{background:rgba(139,155,180,.14);color:#aebbd0}.tag.ok{background:rgba(34,197,94,.14);color:#86efac}.tag.warn{background:rgba(245,158,11,.16);color:#fcd34d}.tag.crit{background:rgba(239,68,68,.16);color:#fca5a5}.tag.purple{background:rgba(168,85,247,.18);color:#d8b4fe}
+.tabs{display:flex;align-items:center;gap:2px;border-bottom:1px solid #243049;overflow-x:auto}
+.tabs a{display:inline-flex;align-items:center;gap:6px;padding:10px 14px;color:#8b9bb4;font-weight:600;white-space:nowrap;text-decoration:none;border-bottom:2px solid transparent;margin-bottom:-1px}
+.tabs a.on{color:#e6edf6;border-bottom-color:#3b82f6}
+.tabs .sep{width:1px;align-self:stretch;background:#243049;margin:8px 6px}
+.tabs .cnt{font-size:11px;font-weight:800;background:rgba(239,68,68,.16);color:#fca5a5;border-radius:999px;padding:1px 7px}
+.tabs .tool{color:#6f7f9a;font-weight:500}
+.sig{padding:14px 16px;display:flex;flex-direction:column;gap:6px;min-width:0;text-align:left;cursor:pointer;color:#e6edf6;font:inherit}
+.sig .lb{font-size:12px;font-weight:700;color:#8b9bb4;display:flex;justify-content:space-between;gap:8px}
+.sig .val{font-size:30px;font-weight:800;line-height:1}
+.sig .sub{font-size:12px;color:#8b9bb4;line-height:1.5}
+.sig.on{box-shadow:inset 0 0 0 2px #3b82f6}
+table{width:100%;border-collapse:collapse;font-size:12.5px}
+th{text-align:left;font-size:11.5px;font-weight:700;color:#8b9bb4;padding:8px 10px;border-bottom:1px solid #243049;background:#0f1626;white-space:nowrap}
+td{padding:8px 10px;border-bottom:1px solid #1f2a40;vertical-align:middle;white-space:nowrap}
+tr:hover td{background:rgba(59,130,246,.06)}
+.r{text-align:right}
+.ub{display:flex;align-items:center;gap:8px;min-width:120px}
+.bar{height:6px;background:#0f1626;border-radius:3px;overflow:hidden;flex:1}
+.bar i{display:block;height:100%;border-radius:3px}
+.dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px;vertical-align:middle}
+</style>
+</helmet>
+
+<div style="min-height:100%;display:flex;flex-direction:column;background:#0a0e17">
+  <div class="tb">
+    <span class="logo"><span class="v">V</span>THE DAVINCI</span>
+    <span class="ver">v2.899</span>
+    <span class="mock">MOCK</span>
+    <span style="flex:1"></span>
+    <span class="muted" style="font-size:12px">admin · 21:16 KST</span>
+  </div>
+  <nav class="m1" aria-label="대메뉴">
+    <a href="#">Overview</a><a href="#">Summary</a><a href="#" class="on">서버</a><a href="#">스토리지</a><a href="#">네트워크</a><a href="#">자원관리</a><a href="#">자원 최적화</a><a href="#">운영관제</a><a href="#">특수 기능</a><a href="#">설정</a>
+  </nav>
+  <nav class="m2" aria-label="서버 하위 메뉴">
+    <a href="#" class="on">가상화 서버</a><a href="#">ESXi 호스트</a><a href="#">vCenter</a><a href="#">물리 서버</a><a href="#">Backup</a><a href="#">알람</a>
+  </nav>
+  <div class="fb">
+    <label for="scope" class="muted" style="font-size:12px">범위</label>
+    <select id="scope" class="input" style="min-width:160px"><option>전체 법인(28)</option></select>
+    <label for="q" class="muted" style="font-size:12px">검색</label>
+    <input id="q" class="input" placeholder="이름 · IP · Guest OS" style="width:260px">
+    <label for="pw" class="muted" style="font-size:12px">전원</label>
+    <select id="pw" class="input"><option>전체 전원</option></select>
+    <span style="flex:1"></span>
+    <button class="btn" type="button">VM 목록 내보내기</button>
+  </div>
+
+  <main style="padding:16px 24px 24px;display:flex;flex-direction:column;gap:14px;min-width:0">
+    <header style="display:flex;flex-wrap:wrap;align-items:baseline;gap:8px 14px">
+      <h1 style="margin:0;font-size:20px;font-weight:800">가상화 서버</h1>
+      <span class="tag blue">2,242대</span>
+      <span class="muted" style="font-size:12px">구동 1,980 · 정지 262 · 28 vCenter</span>
+      <span style="flex:1"></span>
+      <span class="muted mono" style="font-size:12px"><span class="dot" style="background:#22c55e"></span>스냅샷 21:16:40</span>
+    </header>
+
+    <nav class="tabs" aria-label="가상화 서버 보기">
+      <a href="Main.dc.html">현황</a>
+      <a href="ByCorp.dc.html">법인별</a>
+      <a href="#" class="on">조치 필요 <span class="cnt">267</span></a>
+      <span class="sep"></span>
+      <a href="#" class="tool">VM 정밀 검색</a><a href="#" class="tool">Guest OS</a><a href="#" class="tool">VMware Tools</a><a href="#" class="tool">수량 추이</a><a href="#" class="tool">현재 사용자</a><a href="#" class="tool">실제 OS 확인</a>
+    </nav>
+
+    <section style="display:grid;grid-template-columns:repeat(5, minmax(0, 1fr));gap:12px" aria-label="신호별 개수 — 누르면 아래 목록이 바뀝니다">
+      <button class="card sig on" type="button" aria-pressed="true">
+        <span class="lb"><span>과부하</span><span class="tag crit">지금</span></span>
+        <span class="val mono" style="color:#fca5a5">48</span>
+        <span class="sub">구동 VM 중 CPU 90%↑ 또는 메모리 90%↑<br>CPU 41 · 메모리 71 · 둘 다 64</span>
+      </button>
+      <button class="card sig" type="button" aria-pressed="false">
+        <span class="lb"><span>사용률 미수집</span><span class="tag gray">수집</span></span>
+        <span class="val mono">37</span>
+        <span class="sub">구동 중인데 CPU·메모리 값이 없음<br>평균에서 빠져 있음 — 0 이 아님</span>
+      </button>
+      <button class="card sig" type="button" aria-pressed="false">
+        <span class="lb"><span>VMware Tools 구버전</span><span class="tag warn">유지보수</span></span>
+        <span class="val mono" style="color:#fcd34d">118</span>
+        <span class="sub">OUTDATED 118 · 미실행(구동 VM) 9<br>업그레이드는 ‘VMware Tools’ 도구에서</span>
+      </button>
+      <button class="card sig" type="button" aria-pressed="false">
+        <span class="lb"><span>스냅샷 30일↑</span><span class="tag warn">용량</span></span>
+        <span class="val mono" style="color:#fcd34d">64</span>
+        <span class="sub">가장 오래된 스냅샷 30일 넘김<br>합계 2.8 TB · 최장 184일</span>
+      </button>
+      <button class="card sig" type="button" aria-pressed="false">
+        <span class="lb"><span>유휴 후보</span><span class="tag blue">비용</span></span>
+        <span class="val mono muted">—</span>
+        <span class="sub">1주 평균 CPU 로 판정 — ‘VM 정밀 검색’ 결과를 씀<br>아직 계산한 결과가 없으면 ‘—’</span>
+      </button>
+    </section>
+
+    <section class="card" style="padding:0;overflow:hidden" aria-label="과부하 VM 목록">
+      <div style="display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;padding:10px 14px;border-bottom:1px solid #1f2a40">
+        <span style="font-weight:700">과부하 VM</span>
+        <span class="tag crit">48대</span>
+        <span class="muted" style="font-size:12px">이번 스냅샷 기준 · CPU 높은 순 · 열 머리 클릭 정렬</span>
+        <span style="flex:1"></span>
+        <button class="btn sm" type="button">CSV</button>
+        <button class="btn sm" type="button">알림 규칙으로 만들기</button>
+      </div>
+      <div style="overflow-x:auto">
+      <table>
+        <thead><tr><th>VM</th><th>법인 · vCenter</th><th>사유</th><th>CPU</th><th>메모리</th><th class="r">vCPU · RAM</th><th>호스트</th><th>같은 호스트 과부하</th><th>조치</th></tr></thead>
+        <tbody>
+          <sc-for list="{{rows}}" as="v" hint-placeholder-count="8">
+          <tr>
+            <td><span class="dot" style="background:#22c55e"></span><a href="#" style="font-weight:600;color:#e6edf6;text-decoration:none">{{v.name}}</a></td>
+            <td class="muted">{{v.vc}}</td>
+            <td><span style="display:inline-flex;gap:4px"><sc-for list="{{v.why}}" as="w" hint-placeholder-count="1"><span class="tag {{w.cls}}">{{w.t}}</span></sc-for></span></td>
+            <td><span class="ub"><span class="bar"><i style="{{v.cpuStyle}}"></i></span><span class="mono" style="width:34px;text-align:right">{{v.cpu}}%</span></span></td>
+            <td><span class="ub"><span class="bar"><i style="{{v.memStyle}}"></i></span><span class="mono" style="width:34px;text-align:right">{{v.mem}}%</span></span></td>
+            <td class="r mono">{{v.spec}}</td>
+            <td class="muted">{{v.host}}</td>
+            <td class="mono muted">{{v.hostHot}}</td>
+            <td><span style="display:inline-flex;gap:6px"><a href="#" class="btn sm" style="text-decoration:none">상세</a><a href="#" class="btn sm" style="text-decoration:none">⤢ 개체 보기</a></span></td>
+          </tr>
+          </sc-for>
+        </tbody>
+      </table>
+      </div>
+      <div class="muted" style="font-size:12px;padding:10px 14px;border-top:1px solid #1f2a40">꺼진 VM 의 사용률은 낡은 값이라 과부하에 넣지 않습니다 · 사용률 미수집 VM 은 과부하가 아니라 ‘미수집’ 으로 따로 셉니다 · 시안은 8행만(실제 48행 · 페이지)</div>
+    </section>
+  </main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1300}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const col = (p) => p >= 90 ? '#ef4444' : p >= 75 ? '#f59e0b' : '#3b82f6';
+    const raw = [
+      ['web-kr1-023', 'VC-KR1', 97, 88, '8 · 32 GB', 'esx-kr1-07', '3대'],
+      ['db-pl1-004', 'VC-PL1', 96, 91, '16 · 128 GB', 'esx-pl1-02', '1대'],
+      ['ai-us1-011', 'VC-US1', 95, 72, '32 · 256 GB', 'esx-us1-05', '—'],
+      ['app-kr2-108', 'VC-KR2', 94, 61, '4 · 16 GB', 'esx-kr2-11', '—'],
+      ['etl-de1-019', 'VC-DE1', 93, 83, '8 · 64 GB', 'esx-de1-03', '2대'],
+      ['mq-pl1-017', 'VC-PL1', 71, 96, '4 · 32 GB', 'esx-pl1-02', '1대'],
+      ['bi-kr1-140', 'VC-KR1', 62, 94, '8 · 128 GB', 'esx-kr1-07', '3대'],
+      ['render-jp1-002', 'VC-JP1', 92, 54, '16 · 64 GB', 'esx-jp1-01', '—']
+    ];
+    const rows = raw.map(([name, vc, c, m, spec, host, hostHot]) => ({
+      name, vc, cpu: c, mem: m, spec, host, hostHot,
+      cpuStyle: 'width:' + c + '%;background:' + col(c), memStyle: 'width:' + m + '%;background:' + col(m),
+      why: [c >= 90 ? { t: 'CPU 90%↑', cls: 'crit' } : null, m >= 90 ? { t: '메모리 90%↑', cls: 'crit' } : null].filter(Boolean)
+    }));
+    return { rows };
+  }
+}
+</script>
+</body>
+</html>
