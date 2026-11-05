@@ -22,8 +22,8 @@ describe('headerText(v2.727) — 헤더 역할 표기', () => {
     expect(generatedAtText('not-a-date')).toBe('');
     expect(generatedAtText('2026-10-08T12:46:25Z')).toMatch(/\d/);
   });
-  it('⑤ 검색 문구는 VM 이름을 약속하지 않는다(팔레트는 기능·화면만 찾는다)', () => {
-    expect(SEARCH_PLACEHOLDER).not.toMatch(/VM/);
+  it('⑤ 검색 문구는 장비와 기능을 함께 찾는다고 말한다(v2.908 통합 장비 검색 — v2.727 의 기능·탭 전용 문구를 바꿨다)', () => {
+    expect(SEARCH_PLACEHOLDER).toMatch(/^장비 · 기능 찾기/);
   });
 });
 
