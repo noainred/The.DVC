@@ -63,9 +63,9 @@ export default function SummaryTab({ site, vcenterId, hosts, vms, datastores, ne
 
         <Card title="용량" more={<button type="button" className="vcd-more" onClick={() => onGo('monitor', 'perf')}>성능(추이) →</button>}>
           <div style={{ padding: '12px 14px', display: 'grid', gap: 9 }}>
-            <div className="vcd-row"><span className="muted" style={{ width: 64 }}>CPU</span><UsageCell pct={m.cpuUsagePct} /></div>
-            <div className="vcd-row"><span className="muted" style={{ width: 64 }}>메모리</span><UsageCell pct={m.memUsagePct} /></div>
-            <div className="vcd-row"><span className="muted" style={{ width: 64 }}>스토리지</span><UsageCell pct={inv.storage?.pct} />
+            <div className="vcd-line"><span className="muted" style={{ width: 64 }}>CPU</span><UsageCell pct={m.cpuUsagePct} /></div>
+            <div className="vcd-line"><span className="muted" style={{ width: 64 }}>메모리</span><UsageCell pct={m.memUsagePct} /></div>
+            <div className="vcd-line"><span className="muted" style={{ width: 64 }}>스토리지</span><UsageCell pct={inv.storage?.pct} />
               <span className="muted" style={{ fontSize: 11.5 }}>{inv.storage ? `${gbText(inv.storage.usedGB)} / ${gbText(inv.storage.capGB)}` : ''}</span></div>
           </div>
           <Note>CPU · 메모리는 호스트 실사용률 합, 스토리지는 데이터스토어 용량 합{inv.storage?.unread ? ` — 용량을 읽지 못했거나 접근 불가인 데이터스토어 ${inv.storage.unread}개는 합에서 뺐습니다` : ''}.</Note>
@@ -82,7 +82,7 @@ export default function SummaryTab({ site, vcenterId, hosts, vms, datastores, ne
                 </div>
                 <div style={{ padding: '0 14px 10px', display: 'grid', gap: 6 }}>
                   {alarms.slice(0, 4).map((a) => (
-                    <div key={a.id} className="vcd-row" style={{ fontSize: 12.5 }}>
+                    <div key={a.id} className="vcd-line" style={{ fontSize: 12.5 }}>
                       <span className={`badge ${SEV_BADGE[a.severity] || 'gray'}`}>{SEV_LABEL[a.severity] || a.severity || '—'}</span>
                       <span style={{ minWidth: 0, overflowWrap: 'anywhere' }}>{a.entity} · {a.message}</span>
                     </div>
@@ -103,7 +103,7 @@ export default function SummaryTab({ site, vcenterId, hosts, vms, datastores, ne
                   {(lic.data.items || []).slice(0, 4).map((l, i) => {
                     const pct = licenseUsePct(l);
                     return (
-                      <div key={`${l.name}-${i}`} className="vcd-row" style={{ justifyContent: 'space-between' }}>
+                      <div key={`${l.name}-${i}`} className="vcd-line" style={{ justifyContent: 'space-between' }}>
                         <span style={{ minWidth: 0, overflowWrap: 'anywhere' }}>{l.name || l.edition || '—'}</span>
                         <span className="muted" style={{ whiteSpace: 'nowrap' }}>{l.used == null ? '—' : Number(l.used).toLocaleString()} / {l.total == null ? '—' : Number(l.total).toLocaleString()}{pct != null ? ` · ${pct}%` : ''}</span>
                       </div>
@@ -117,7 +117,7 @@ export default function SummaryTab({ site, vcenterId, hosts, vms, datastores, ne
               : certs.error && !certs.data ? <ErrorBox error={certs.error} />
                 : !certs.data ? <span className="muted">인증서 불러오는 중…</span>
                   : !cert ? <span className="muted">인증서 — 아직 확인하지 않았습니다(포탈이 주기적으로 443 을 읽습니다).</span>
-                    : <div className="vcd-row" style={{ justifyContent: 'space-between', flexWrap: 'wrap' }}>
+                    : <div className="vcd-line" style={{ justifyContent: 'space-between', flexWrap: 'wrap' }}>
                       <span>인증서 <span className="mono">{cert.cn || cert.hostPort || '—'}</span></span>
                       <CertBadge c={cert} />
                     </div>}

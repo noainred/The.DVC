@@ -163,3 +163,18 @@ describe('권한 변경 이벤트 · 크기 · 인벤토리', () => {
     expect(shortTs(Date.UTC(2026, 10, 5, 3, 4))).toMatch(/^\d{2}-\d{2} \d{2}:\d{2}$/);
   });
 });
+
+describe('CSS 이름 충돌 — 새 클래스가 기존 vCenter 트리 규칙과 겹치지 않는다(v2.894 회귀)', () => {
+  it('.vcd-sub(트리 보조 문구) · .vcd-row(옛 표 행)는 한 번씩만 정의되고 하위 칸 목록은 .vcd-subnav', async () => {
+    const fs = await import('node:fs');
+    const path = await import('node:path');
+    const css = fs.readFileSync(path.resolve(path.dirname(new URL(import.meta.url).pathname), '../../styles.css'), 'utf8');
+    const defs = (sel) => (css.match(new RegExp(`(^|\\n)\\s*\\${sel}\\s*\\{`, 'g')) || []).length;
+    expect(defs('.vcd-sub')).toBe(1);      // 트리 행 보조 문구 — 하위 칸 목록이 같은 이름을 쓰면 트리 행에 여백 · 세로 줄이 생긴다(실제 발생)
+    expect(defs('.vcd-row')).toBe(1);
+    expect(defs('.vcd-subnav')).toBeGreaterThanOrEqual(1);
+    const parts = fs.readFileSync(path.resolve(path.dirname(new URL(import.meta.url).pathname), './VcdParts.jsx'), 'utf8');
+    expect(parts).toMatch(/className="vcd-subnav"/);
+    expect(parts).not.toMatch(/className="vcd-sub"/);
+  });
+});

@@ -47,13 +47,13 @@ export function ToolLink({ tool, children }) {
 export function SubNav({ items, value, onChange, label }) {
   let lastGroup = null;
   return (
-    <nav className="vcd-sub" aria-label={label}>
+    <nav className="vcd-subnav" aria-label={label}>
       {items.map((it) => {
         const head = it.group && it.group !== lastGroup ? it.group : null;
         lastGroup = it.group || lastGroup;
         return (
           <React.Fragment key={it.k}>
-            {head && <span className="vcd-sub-h">{head}</span>}
+            {head && <span className="vcd-subnav-h">{head}</span>}
             <button type="button" className={value === it.k ? 'on' : ''} aria-current={value === it.k ? 'true' : undefined} onClick={() => onChange(it.k)}>
               <span>{it.label}</span>
               {it.n != null && <span className="vcd-n">{it.n}</span>}
