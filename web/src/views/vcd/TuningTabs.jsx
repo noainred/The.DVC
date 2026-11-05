@@ -177,7 +177,7 @@ export function VmTuning({ vm, vms, datastores }) {
                 ))}
               </div>
             ) : <div className="muted" style={{ padding: '10px 14px', fontSize: 12.5 }}>읽은 값에서 확인할 항목이 없습니다.</div>}
-          <Note>전원 정책 · NUMA 배치 · 지연 민감도 · 네트워크 어댑터 유형(vmxnet3 여부)은 수집하지 않습니다(2차).</Note>
+          <Note>네트워크 어댑터 유형(E1000 · E1000E 등 옛 NIC → VMXNET3 권장)은 VM 구성 점검이 판정합니다. 전원 정책 · NUMA 배치 · 지연 민감도는 수집하지 않습니다.</Note>
         </Card>
       </div>
 

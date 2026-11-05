@@ -674,15 +674,15 @@ function GroupEdit({ tree, group, initialFilter, initialSel, vms, byId, groupNam
               </div>
               {!daily && <div role="group" aria-label="요일" style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>{[1, 2, 3, 4, 5, 6, 0].map((day) => dayBtn('days', day, sched.days.includes(day)))}</div>}
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 8 }}>
-                <label style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', gap: 4, fontSize: 12, color: 'var(--text-dim)' }}>{`실행 시각(${CLOCK_TEXT[sched.clock === 'portal' ? 'portal' : 'server']})`}
-                  <input className="input" type="time" step={60} value={sched.time} disabled={disabledAll} onChange={(e) => setSched((s) => ({ ...s, time: e.target.value }))} style={{ fontSize: 14, minWidth: 0 }} />
-                </label>
-                {/* v2.901: 기준 시계 — 현지 서버(이 포탈 서버의 시간대) · 중앙 포탈(포탈 기준 시간대). 옛 그룹은 현지 서버 그대로 */}
-                <label style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', gap: 4, fontSize: 12, color: 'var(--text-dim)' }}>기준 시각
+                {/* v2.901: 기준 시계 — 현지 서버(이 포탈 서버의 시간대) · 중앙 포탈(포탈 기준 시간대). 옛 그룹은 현지 서버 그대로. 한 줄 전체(UTC 오프셋이 잘리지 않게 — 화면 판독) */}
+                <label style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', gap: 4, fontSize: 12, color: 'var(--text-dim)', gridColumn: '1 / -1' }}>기준 시각
                   <Select className="input" sort={false} value={sched.clock === 'portal' ? 'portal' : 'server'} disabled={disabledAll} onChange={(e) => setSched((s) => ({ ...s, clock: e.target.value }))} aria-label="기준 시각" style={{ minWidth: 0, fontSize: 14 }}>
                     <option value="server">{`${CLOCK_TEXT.server}${tree.clocks ? ` (${utcOffsetText(tree.clocks.serverOffsetMin)}${tree.tz ? ` · ${tree.tz}` : ''})` : ''}`}</option>
                     <option value="portal">{`${CLOCK_TEXT.portal}${tree.clocks ? ` (${utcOffsetText(tree.clocks.portalOffsetMin)})` : ''}`}</option>
                   </Select>
+                </label>
+                <label style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', gap: 4, fontSize: 12, color: 'var(--text-dim)' }}>{`실행 시각(${CLOCK_TEXT[sched.clock === 'portal' ? 'portal' : 'server']})`}
+                  <input className="input" type="time" step={60} value={sched.time} disabled={disabledAll} onChange={(e) => setSched((s) => ({ ...s, time: e.target.value }))} style={{ fontSize: 14, minWidth: 0 }} />
                 </label>
                 <label style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', gap: 4, fontSize: 12, color: 'var(--text-dim)' }}>레벨
                   <Select className="input" sort={false} value={sched.level} disabled={disabledAll} onChange={(e) => setSched((s) => ({ ...s, level: e.target.value, fullDays: e.target.value === 'Full' ? [] : s.fullDays }))} aria-label="기본 레벨" style={{ minWidth: 0, fontSize: 14 }}>
@@ -697,7 +697,7 @@ function GroupEdit({ tree, group, initialFilter, initialSel, vms, byId, groupNam
                 </div>
               )}
             </div>
-            <div style={{ background: 'var(--panel-deep)', borderRadius: 8, padding: '8px 12px', fontSize: 12.5 }}>미리 보기: <b>{scheduleText(sched)}</b>{tree.tz ? <span className="muted"> · {tree.tz}</span> : null}
+            <div style={{ background: 'var(--panel-deep)', borderRadius: 8, padding: '8px 12px', fontSize: 12.5 }}>미리 보기: <b>{scheduleText(sched)}</b>{tree.tz && sched.clock !== 'portal' ? <span className="muted"> · {tree.tz}</span> : null}
               {tree.clocks && tree.clocks.serverOffsetMin !== tree.clocks.portalOffsetMin && (() => {
                 const own = sched.clock === 'portal' ? 'portal' : 'server'; const other = own === 'portal' ? 'server' : 'portal';
                 const t = shiftTimeText(sched.time, tree.clocks[`${own}OffsetMin`], tree.clocks[`${other}OffsetMin`]);

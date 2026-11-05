@@ -763,7 +763,9 @@ export function generateSnapshot() {
           // v2.901: 호스트별 마운트(dscfg parseMounts 와 같은 모양) — 로컬은 한 호스트, 공유는 이 사이트 호스트 8대(결정적). 호스트 moref = 데모 호스트 이름.
           mounts: (() => {
             const hs = env.hosts.length ? (ds.storageType === 'local' ? [env.hosts[ds.idx % env.hosts.length]] : Array.from({ length: Math.min(8, env.hosts.length) }, (_, k) => env.hosts[(ds.idx + k) % env.hosts.length])) : [];
-            const refs = [...new Set(hs.map((h) => h.name))];
+            // VM 디스크가 놓인 호스트는 반드시 마운트한 것으로(호스트 데이터스토어 탭의 'VM 디스크로 역산' 과 '마운트' 가 서로 어긋나지 않게 — v2.901 화면 판독)
+            const placed = vms.filter((v) => v.vcenterId === site.id && (v.dev?.disks || []).some((d) => d.datastore === ds.name)).map((v) => v.host).filter(Boolean);
+            const refs = [...new Set([...hs.map((h) => h.name), ...placed])];
             const bad = ds.idx % 13 === 5 && refs.length > 1 ? [{ h: refs[refs.length - 1], accessible: false, mounted: true }] : [];
             return { total: refs.length, notAccessible: bad.length, notMounted: 0, hosts: refs, bad, hostsOmitted: 0 };
           })(),
