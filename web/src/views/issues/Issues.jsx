@@ -124,12 +124,16 @@ export default function Issues() {
   const onWritten = useCallback((r) => { setNote(persistNote(r?.persist)); load(); loadBoardQ(boardQ); }, [load, loadBoardQ, boardQ]);
   const [epics, reloadEpics] = useEpics(!!meta?.canWrite);
   // v2.888 보드 끌어 옮기기 — 상세와 같은 확인 흐름
+  // v2.902 점검 W-10: 같은 카드를 응답 전에 또 떨어뜨리면 상태 변경이 두 번 나갔다(캘린더는 busy 로 막는다) — 진행 중인 키는 건너뛴다
+  const moving = useRef(new Set());
   const moveIssue = useCallback(async (key, st) => {
+    if (moving.current.has(key)) { setNote(`${key}: 앞의 옮기기가 끝나기를 기다리는 중입니다`); return; }
+    moving.current.add(key);
     setNote('');
     try {
       const r = await postStatusConfirmed(key, st);
       if (r?.ok) onWritten(r); else setNote(`${key}: ${saveFailText(r)}`);
-    } catch (e) { setNote(`${key}: ${saveFailText({ reason: e.message })}`); }
+    } catch (e) { setNote(`${key}: ${saveFailText({ reason: e.message })}`); } finally { moving.current.delete(key); }
   }, [onWritten]);
   const [csvBusy, setCsvBusy] = useState(false);
 
@@ -400,11 +404,11 @@ function ListView({ rows, total, meta, epics, onOpen, onWritten }) {
                       </span>
                     )}
                   </td>
-                  <td data-sort={r.vcenterId ? vcName(meta, r.vcenterId) : '~'}>{r.vcenterId ? <span className="iss-vc-cell" title={vcName(meta, r.vcenterId)}>{vcName(meta, r.vcenterId)}</span> : <span className="muted">공용</span>}</td>
+                  <td data-sort={r.vcenterId ? vcName(meta, r.vcenterId) : ''}>{r.vcenterId ? <span className="iss-vc-cell" title={vcName(meta, r.vcenterId)}>{vcName(meta, r.vcenterId)}</span> : <span className="muted">공용</span>}</td>
                   <td data-sort={STATUS_ORDER.indexOf(r.status)}><StatusChip s={r.status} /></td>
                   <td data-sort={progressOf(r) ?? ''}><ProgressLine r={r} compact /></td>
                   <td data-sort={r.priority}><PrioTag p={r.priority} /></td>
-                  <td data-sort={r.assignee || '~'}>{r.assignee ? <span className="iss-who"><Avatar name={r.assignee} size={22} />{r.assignee}</span> : <span className="iss-unassigned">미할당</span>}</td>
+                  <td data-sort={r.assignee || ''}>{r.assignee ? <span className="iss-who"><Avatar name={r.assignee} size={22} />{r.assignee}</span> : <span className="iss-unassigned">미할당</span>}</td>
                   <td>{r.reporter}</td>
                   <td data-sort={r.dueAt ?? ''}><Due r={r} /></td>
                   <td data-sort={r.updatedAt} className="muted" style={{ whiteSpace: 'nowrap' }} title={timeText(r.updatedAt)}>{dateText(r.updatedAt)}</td>

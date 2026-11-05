@@ -221,6 +221,8 @@
   ⚠ v2.733(C3-02a 게스트 조사 작업): **바깥 조건을 `scopedVcenterIds` 로 두지 말 것** — 조회 무제한 + writeVcenters 계정이
   통째로 검사에서 빠진다. 판정은 '조회 밖 404 → 쓰기 밖 403' 순서의 **한 함수**(`backupNetSec.js guestScanAccess`)이고, 대상 vCenter 가 없는
   작업은 범위 계정에 밖이다. GET 은 조회 범위로 보여 주고 쓰기 밖 항목에 `writable:false` 를 달아 화면이 버튼을 잠근다.
+  ⚠ v2.902(점검 P-1 — 재현): '전체 범위 관리자'(남의 글 삭제 · 공유 필터 관리 등 isMod 류)는 `auth/scope.js isFullReadWriteScope`(조회 ∧ 쓰기 무제한) 하나로 —
+  `!scopedVcenterIds(...)` 만 보면 같은 함정이다. 회귀 `test/wikiIssues2902.test.js`.
 
 ## 옮긴 절 (2026-10-20 — 이 파일을 짧게 유지하려고)
 

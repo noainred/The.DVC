@@ -565,6 +565,13 @@
   ⑤ 남은 하위 작업(에픽이면 소속 이슈)이 있으면 서버가 409 `open-children` 로 묻고 화면은 확인을 받아 `closeChildren:true` 로 다시 보낸다(취소하면 아무것도 바꾸지 않는다).
      자식이 있는 이슈의 진행률 입력은 잠기고 메모만 보낸다(서버 409 `progress-auto` 와 같은 판정).
   ⑥ 스프린트 · 필터 공유 버튼은 서버 값(`canSprints` · `canShareFilters` — 전체 범위 쓰기 계정)일 때만 그린다. 필터 저장은 쓰기 역할만(viewer 상태변경 예외를 늘리지 않았다).
+- **v2.902 — 위키 · 이슈 · 첨부 점검 확정분(사용자 요청 '버그 10개 찾아줘' → '모두 적용해줘' · '표준')**. 회귀 `server/test/wikiIssues2902.test.js`(변이 6/6) · `web/src/views/wiki/fixes2902.test.js`.
+  - **'전체 범위' 판정은 조회 ∧ 쓰기 무제한** — `auth/scope.js isFullReadWriteScope` 하나. 위키 · 이슈 · 첨부의 `isMod` 가 조회만 봐서 쓰기 범위 관리자가 남의 위키 댓글을 지우고 해결하고 공유 필터를 지웠다(P-1).
+  - 범위 계정 응답의 **이력도 가린다** — `parentKey · epic · links` 를 `vis()` 로 가리면서 `history` 는 원문이었다(범위 밖 법인 id · 공용 에픽 키). 저장된 이력은 그대로, 응답에서만(`historyFor`).
+  - 판을 만들지 않는 변경(체크 토글)은 **판 번호 말고 따로 센다**(`checkRev` ↔ 편집기 `baseCheckRev`) — 옛 본문을 실은 저장이 409 없이 체크를 되돌렸다. 체크만 바뀐 충돌은 비교 대신 그 사실을 말한다.
+  - 두 저장소의 **내구성 시점을 맞춘다** — 첨부(동기)와 주인(디바운스 300ms): 올리기는 주인 저장 확인 뒤, 주인 삭제의 첨부 정리는 삭제가 디스크에 닿은 뒤(`removeOwnerAfterPersist`).
+  - 표 빈 값 자리표시로 `'~'` 를 쓰지 않는다(Collator 에서 맨 앞) — `data-sort=''` 면 방향과 상관없이 뒤(`EMPTY_TOKENS`). 한글 조합 중 Enter(`isComposing` · 229)는 단축 동작으로 먹지 않는다.
+  - 내려받기 이름은 `Content-Disposition` 의 `filename*=UTF-8''` 먼저(`api.js dispositionName`) · 그림 주소 화이트리스트는 역슬래시도 막는다(`/\host` 는 바깥 호스트) · 줄 끝 판정을 이어 붙인 버퍼의 `endsWith` 로 하지 않는다(제곱 시간).
 - **v2.901 — 개체 보기 3차 · 점검 확정분 화면(사용자 요청 '버그 수정이나 개선' · '표준')**. 회귀 `vcd/objView.test.js` · `vcInfo.test.js` · `vcdTabsRender.test.jsx` · `bareosGroupText.test.js`.
   - 호스트 네트워크 표에 팀 구성 열(`HostObject.jsx TEAMING_TEXT`) · 데이터스토어 탭 마운트 카드(`objTabs.hostDsMounts` — 못 읽음 · 없음 · 행) · 리소스 풀 카드(`PoolSettingsCard`). '수집하지 않음' 표는 지웠다.
   - `vcd/useOnce.js` 는 상태에 열쇠를 싣고 **지금 열쇠의 값만** 돌려준다 — 다른 개체로 옮겨 가면 이전 개체의 값 · 오류를 한 번도 그리지 않는다(변이 확인).

@@ -11,6 +11,7 @@
  *  · 달력 시간(24×7)이다 — 업무 시간 · 휴일 달력은 이번 범위 밖(화면이 그 사실을 적는다).
  *  · 이력은 이슈마다 300줄까지라 넘쳐 지워진 줄이 있으면(historyDropped) 결과에 `partial` 을 붙인다(조용히 정확한 척하지 않는다).
  */
+import { numOrNull } from '../util/numOrNull.js';
 
 export const SLA_TYPES = Object.freeze(['incident', 'task', 'request', 'improve']); // 에픽은 SLA 대상이 아니다
 export const SLA_PRIOS = Object.freeze(['p0', 'p1', 'p2', 'p3']);
@@ -35,8 +36,9 @@ export function normalizeSla(raw, { strict = true } = {}) {
   for (const p of SLA_PRIOS) {
     const t = r.targets && typeof r.targets === 'object' ? r.targets[p] : null;
     const one = (k) => {
-      if (t == null || t[k] == null || t[k] === '') return d.targets[p][k];
-      const n = Number(t[k]);
+      if (t == null || t[k] == null || (typeof t[k] === 'string' && !t[k].trim())) return d.targets[p][k];
+      // v2.902 점검 S-10: Number(' ')·Number([]) 는 0(= 그 단계 보지 않음) — 수 · 숫자 글자만 받는다(numOrNull 규칙)
+      const n = typeof t[k] === 'number' || typeof t[k] === 'string' ? numOrNull(t[k]) : null;
       if (!Number.isInteger(n) || n < 0 || n > SLA_MAX_MIN) { bad(`sla.targets.${p}.${k}`, `0~${SLA_MAX_MIN} 분 정수여야 합니다(0 = 보지 않음)`); return d.targets[p][k]; }
       return n;
     };

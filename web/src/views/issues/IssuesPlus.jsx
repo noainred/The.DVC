@@ -157,7 +157,7 @@ export function ChildrenBox({ it, meta, canWrite, busy, act, onOpen }) {
               <tr key={k.key}>
                 <td data-sort={k.num} className="iss-key">{k.key}</td>
                 <td style={{ whiteSpace: 'normal' }}><button type="button" className="iss-link" onClick={() => onOpen(k.key)}>{k.title}</button>{childText(k) && <span className="iss-subn">{childText(k)}</span>}</td>
-                <td data-sort={k.assignee || '~'}>{k.assignee ? <span className="iss-who"><Avatar name={k.assignee} size={20} />{k.assignee}</span> : <span className="iss-unassigned">미할당</span>}</td>
+                <td data-sort={k.assignee || ''}>{k.assignee ? <span className="iss-who"><Avatar name={k.assignee} size={20} />{k.assignee}</span> : <span className="iss-unassigned">미할당</span>}</td>
                 <td data-sort={STATUS_ORDER.indexOf(k.status)}><StatusChip s={k.status} /></td>
                 <td data-sort={progressOf(k) ?? ''}><ProgressLine r={k} compact /></td>
                 <td data-sort={k.dueAt ?? ''}><Due r={k} /></td>
@@ -524,11 +524,11 @@ export function EpicsView({ meta, onOpen, onWritten }) {
                 <tr key={e.key}>
                   <td data-sort={e.num} className="iss-key"><span className="iss-epic-dot" style={{ background: epicColor(e.key) }} />{e.key}</td>
                   <td style={{ whiteSpace: 'normal' }}><button type="button" className="iss-link" onClick={() => onOpen(e.key)}>{e.title}</button></td>
-                  <td data-sort={e.vcenterId ? vcName(meta, e.vcenterId) : '~'}>{e.vcenterId ? vcName(meta, e.vcenterId) : <span className="muted">공용</span>}</td>
+                  <td data-sort={e.vcenterId ? vcName(meta, e.vcenterId) : ''}>{e.vcenterId ? vcName(meta, e.vcenterId) : <span className="muted">공용</span>}</td>
                   <td data-sort={STATUS_ORDER.indexOf(e.status)}><StatusChip s={e.status} /></td>
                   <td data-sort={progressOf(e) ?? ''}><ProgressLine r={e} compact /></td>
                   <td data-sort={e.childCount}>{e.childCount ? `${e.childDone}/${e.childCount}` : <span className="muted">0</span>}</td>
-                  <td data-sort={e.assignee || '~'}>{e.assignee || <span className="muted">—</span>}</td>
+                  <td data-sort={e.assignee || ''}>{e.assignee || <span className="muted">—</span>}</td>
                   <td data-sort={e.updatedAt} className="muted" title={timeText(e.updatedAt)}>{dateText(e.updatedAt)}</td>
                 </tr>
               ))}
@@ -644,7 +644,7 @@ export function FiltersView({ meta, onOpen, onWritten, onBoard = null }) {
           </div>
           <form className="iss-query" onSubmit={submit}>
             <textarea className="input iss-query-input" rows={2} value={q} onChange={(e) => setQ(e.target.value)} maxLength={meta.queryLimits?.length || 500} spellCheck={false} aria-label="검색식"
-              onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); submit(e); } }} />
+              onKeyDown={(e) => { if (e.nativeEvent?.isComposing || e.keyCode === 229) return; /* v2.902 점검 W-6 — 한글 조합 확정 Enter */ if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); submit(e); } }} />
             <button className="btn primary" type="submit">찾기</button>
           </form>
           {segs && (
@@ -696,12 +696,12 @@ export function FiltersView({ meta, onOpen, onWritten, onBoard = null }) {
                         <td data-sort={r.num} className="iss-key">{r.key}</td>
                         <td><TypeTag t={r.type} /></td>
                         <td style={{ whiteSpace: 'normal' }}><button type="button" className="iss-link" onClick={() => onOpen(r.key)}>{r.title}</button>{r.parentKey && r.parentKey !== r.epicKey && <span className="iss-subn">하위 · {r.parentKey}</span>}{childText(r) && <span className="iss-subn">{childText(r)}</span>}</td>
-                        <td data-sort={r.epicKey || '~'}>{r.epicKey ? <span className="iss-epic-tag" style={{ borderColor: epicColor(r.epicKey) }}>{r.epicKey}</span> : <span className="muted">—</span>}</td>
-                        <td data-sort={r.sprintId ? sprintName(meta.sprintList, r.sprintId) : '~'}>{r.sprintId ? sprintName(meta.sprintList, r.sprintId) : <span className="muted">없음</span>}</td>
+                        <td data-sort={r.epicKey || ''}>{r.epicKey ? <span className="iss-epic-tag" style={{ borderColor: epicColor(r.epicKey) }}>{r.epicKey}</span> : <span className="muted">—</span>}</td>
+                        <td data-sort={r.sprintId ? sprintName(meta.sprintList, r.sprintId) : ''}>{r.sprintId ? sprintName(meta.sprintList, r.sprintId) : <span className="muted">없음</span>}</td>
                         <td data-sort={STATUS_ORDER.indexOf(r.status)}><StatusChip s={r.status} /></td>
                         <td data-sort={progressOf(r) ?? ''}><ProgressLine r={r} compact /></td>
                         <td data-sort={r.priority}><PrioTag p={r.priority} /></td>
-                        <td data-sort={r.assignee || '~'}>{r.assignee ? <span className="iss-who"><Avatar name={r.assignee} size={20} />{r.assignee}</span> : <span className="iss-unassigned">미할당</span>}</td>
+                        <td data-sort={r.assignee || ''}>{r.assignee ? <span className="iss-who"><Avatar name={r.assignee} size={20} />{r.assignee}</span> : <span className="iss-unassigned">미할당</span>}</td>
                         <td data-sort={r.dueAt ?? ''}><Due r={r} /></td>
                         <td data-sort={r.updatedAt} className="muted" title={timeText(r.updatedAt)}>{dateText(r.updatedAt)}</td>
                       </tr>

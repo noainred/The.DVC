@@ -1,13 +1,17 @@
 /**
  * attachText.js — 첨부 화면 문구(v2.889 · 순수).
  */
-/** 바이트 → '8 MB' · '512 KB' · '120 B'. 못 읽으면 '—'. */
+/** 바이트 → '8 MB' · '512 KB' · '120 B'. 못 읽으면 '—'.
+ * v2.902 점검 W-7: 아래 단위에서 반올림한 값이 1024 에 닿으면 위 단위로 올린다(1,048,575 B 가 '1024 KB' 로 나왔다). */
 export function attachSizeText(n) {
   if (!Number.isFinite(n) || n < 0) return '—';
-  if (n >= 1024 * 1024 * 1024) return `${(n / 1024 / 1024 / 1024).toFixed(n >= 10 * 1024 ** 3 ? 0 : 1)} GB`;
-  if (n >= 1024 * 1024) return `${(n / 1024 / 1024).toFixed(n >= 10 * 1024 * 1024 ? 0 : 1)} MB`;
-  if (n >= 1024) return `${Math.round(n / 1024)} KB`;
-  return `${n} B`;
+  const UNITS = ['B', 'KB', 'MB', 'GB'];
+  let v = n; let u = 0;
+  while (v >= 1024 && u < UNITS.length - 1) { v /= 1024; u += 1; }
+  const fmt = (x, unit) => (unit === 0 ? String(Math.round(x)) : unit === 1 ? String(Math.round(x)) : x.toFixed(x >= 10 ? 0 : 1));
+  let t = fmt(v, u);
+  if (u > 0 && u < UNITS.length - 1 && Number(t) >= 1024) { u += 1; v /= 1024; t = fmt(v, u); }
+  return `${t} ${UNITS[u]}`;
 }
 /** 올리기 · 지우기 실패 → 사유(서버 code 우선). */
 export function attachFailText(r, limits = {}) {
@@ -21,6 +25,7 @@ export function attachFailText(r, limits = {}) {
 }
 /** 본문에 넣을 마크다운 — 그림은 ![이름](attach:id), 그 밖은 [이름](attach:id). 이름의 ] · [ 는 뺀다. */
 export function attachMarkdown(x) {
-  const name = String(x?.name || '첨부').replace(/[[\]]/g, '');
+  // v2.902 점검 W-8: '[' · ']' 에 더해 머리의 '^'(각주 참조 '[^낱말]' 로 읽혔다)는 빼고 '|' 는 '\|' 로(표 안에서 칸을 갈랐다)
+  const name = (String(x?.name || '첨부').replace(/[[\]]/g, '').replace(/^\^+/, '').replace(/\|/g, '\\|')) || '첨부';
   return x?.image ? `![${name}](attach:${x.id})` : `[${name}](attach:${x.id})`;
 }
