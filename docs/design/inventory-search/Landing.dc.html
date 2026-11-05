@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>통합 장비 검색 — 선택 뒤 이동(가상머신 상세)</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=Noto+Sans+KR:wght@400;500;700;800&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+body{margin:0;background:#0a0e17;color:#e6edf6;font-family:"Inter","Noto Sans KR","Apple SD Gothic Neo",sans-serif;font-size:13px}
+a{color:#93c5fd}a:hover{color:#bfdbfe}
+.url{display:flex;align-items:center;gap:8px;height:28px;padding:0 12px;background:#05080f;border-bottom:1px solid #1f2a40;font-family:"JetBrains Mono",monospace;font-size:11.5px;color:#aebbd0}
+.url .hl{color:#fcd34d}
+.tb{display:flex;align-items:center;gap:14px;height:44px;padding:0 20px;background:#0f1626;border-bottom:1px solid #1f2a40}
+.tb .logo{display:inline-flex;align-items:center;gap:10px;font-weight:700;font-size:13px;white-space:nowrap}
+.tb .logo .v{width:26px;height:26px;border-radius:7px;background:linear-gradient(135deg,#3b82f6,#22d3ee);display:inline-flex;align-items:center;justify-content:center;font-size:13px;font-weight:800;color:#04101f}
+.ver{font-size:11px;font-weight:700;color:#22d3ee;background:rgba(34,211,238,.12);border:1px solid rgba(34,211,238,.3);padding:1px 7px;border-radius:10px}
+.cmdk{display:inline-flex;align-items:center;gap:10px;width:420px;height:32px;padding:0 12px;border-radius:8px;background:#0f1626;border:1px solid #243049;color:#8b9bb4;font-size:12px}
+.cmdk .kbd{margin-left:auto}
+.kbd{display:inline-block;min-width:16px;padding:0 6px;border:1px solid #243049;border-radius:5px;background:#141b2d;color:#aebbd0;font-size:10.5px;font-family:"JetBrains Mono",monospace;line-height:17px;text-align:center}
+.pill{display:inline-flex;align-items:center;gap:6px;height:24px;padding:0 10px;border-radius:999px;border:1px solid #243049;background:#141b2d;font-size:11.5px;color:#aebbd0;white-space:nowrap}
+.dot{width:8px;height:8px;border-radius:50%;display:inline-block;flex:0 0 auto}
+.mono{font-family:"JetBrains Mono",ui-monospace,monospace}
+.dim{color:#8b9bb4}
+.sb{width:220px;background:#0f1626;border-right:1px solid #1f2a40;padding:10px 8px;display:flex;flex-direction:column;gap:2px}
+.sb .h{font-size:11px;color:#8b9bb4;padding:6px 10px 4px}
+.sb a{display:flex;align-items:center;min-height:32px;padding:0 10px;border-radius:8px;color:#e6edf6;text-decoration:none;font-size:13px}
+.sb a.on{background:#3b82f6;color:#fff}
+.card{background:#141b2d;border:1px solid #243049;border-radius:12px}
+table{border-collapse:collapse;width:100%;font-size:12.5px}
+th{text-align:left;font-weight:600;color:#8b9bb4;font-size:11.5px;padding:8px 10px;border-bottom:1px solid #243049;background:#0f1626;white-space:nowrap}
+td{padding:8px 10px;border-bottom:1px solid #1f2a40;white-space:nowrap}
+tr.hl td{background:rgba(59,130,246,.14)}
+.btn{display:inline-flex;align-items:center;gap:6px;min-height:30px;padding:0 11px;border-radius:8px;border:1px solid #243049;background:#1a2236;color:#e6edf6;font:inherit;font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap}
+.btn.primary{background:#3b82f6;border-color:#3b82f6;color:#fff}
+.modal{width:760px;background:#141b2d;border:1px solid #243049;border-radius:12px;box-shadow:0 4px 24px rgba(0,0,0,.4);overflow:hidden;display:flex;flex-direction:column}
+.mh{display:flex;align-items:center;gap:10px;padding:12px 16px;border-bottom:1px solid #1f2a40}
+.mh h2{margin:0;font-size:16px}
+.k-vm{display:inline-flex;align-items:center;height:20px;padding:0 7px;border-radius:5px;font-size:10.5px;font-weight:700;background:rgba(59,130,246,.2);color:#93c5fd}
+.from{display:inline-flex;align-items:center;gap:6px;height:22px;padding:0 8px;border-radius:6px;background:rgba(252,211,77,.12);border:1px solid rgba(252,211,77,.4);color:#fcd34d;font-size:11px;font-weight:600;white-space:nowrap}
+.dl{display:grid;grid-template-columns:repeat(2, minmax(0, 1fr));gap:0 24px;padding:12px 16px}
+.dr{display:flex;gap:10px;padding:6px 0;border-bottom:1px solid #1f2a40;font-size:12.5px;min-width:0}
+.dr .k{width:96px;flex:0 0 auto;color:#8b9bb4;font-size:11.5px}
+.dr .v{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.toast{position:absolute;right:20px;top:84px;display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:10px;background:#0f1626;border:1px solid #3b82f6;box-shadow:0 4px 24px rgba(0,0,0,.4);font-size:12px}
+.toast .k{color:#8b9bb4}
+</style>
+</helmet>
+<div style="width:1280px;height:780px;position:relative;overflow:hidden;background:radial-gradient(1200px 600px at 70% -10%,#16213a 0%,#0a0e17 55%);box-sizing:border-box;display:flex;flex-direction:column">
+
+  <div class="url" aria-label="주소">
+    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#8b9bb4" stroke-width="2" stroke-linecap="round" aria-hidden="true"><rect x="4" y="10" width="16" height="10" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg>
+    <span>portal.corp/#/vms<span class="hl">?focus=vc-kr01:vm-1183</span></span>
+    <span class="dim" style="margin-left:auto;font-family:'Inter','Noto Sans KR',sans-serif">선택한 행의 주소 — 복사해 공유하면 같은 상세가 열린다(범위 밖이면 404 안내)</span>
+  </div>
+
+  <div class="tb">
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#8b9bb4" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+    <span class="logo"><span class="v">D</span>THE DAVINCI <span class="dim" style="font-weight:500">· VMware Global Monitoring</span> <span class="ver">v2.898</span></span>
+    <button type="button" class="cmdk" aria-label="장비 · 기능 찾기 (⌘K)">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+      <span>장비 · 기능 찾기 — 이름 · IP · 시리얼 · 모델</span>
+      <span class="kbd">⌘K</span>
+    </button>
+    <span class="pill" style="margin-left:auto"><span class="dot" style="background:#22c55e"></span>vCenter 28/28</span>
+    <span class="pill">관리자 · <span class="mono">jhpark</span></span>
+  </div>
+
+  <div style="flex:1;display:flex;min-height:0">
+    <nav class="sb" aria-label="메뉴">
+      <div class="h">모니터링</div>
+      <a href="#id-overview">Overview</a><a href="#id-summary">Summary</a><a href="#id-platform">Platform</a><a href="#id-mon">Monitoring</a>
+      <div class="h">인벤토리</div>
+      <a href="#id-hosts">VM호스트</a><a class="on" href="#id-vms">가상머신</a><a href="#id-ds">스토리지</a><a href="#id-net">네트워크</a><a href="#id-ipam">IP관리</a><a href="#id-alarms">알람</a>
+      <div class="h">작업</div>
+      <a href="#id-tools">특수 기능</a><a href="#id-issues">이슈</a><a href="#id-wiki">위키</a>
+    </nav>
+    <main style="flex:1;padding:20px;display:flex;flex-direction:column;gap:12px;min-width:0">
+      <div style="display:flex;align-items:center;gap:10px"><h1 style="margin:0;font-size:18px">가상머신</h1><span class="dim">5,850대 · 28 vCenter</span><span class="from" style="margin-left:8px">검색 ‘srv-db’ 에서 이동 · 목록 필터는 그대로</span></div>
+      <div class="card" style="overflow:hidden">
+        <table>
+          <thead><tr><th>이름</th><th>vCenter</th><th>전원</th><th>IP</th><th>OS</th><th>vCPU</th><th>메모리</th><th>호스트</th></tr></thead>
+          <tbody>
+            <tr><td>app-web-03</td><td>KR-Seoul</td><td><span class="dot" style="background:#22c55e"></span> 켜짐</td><td class="mono">10.20.5.43</td><td>Windows 2022</td><td>4</td><td>16 GB</td><td>esx-kr-05</td></tr>
+            <tr class="hl"><td><b>srv-db-01</b></td><td>KR-Seoul</td><td><span class="dot" style="background:#22c55e"></span> 켜짐</td><td class="mono">10.20.1.11</td><td>RHEL 8.9</td><td>16</td><td>128 GB</td><td>esx-kr-07</td></tr>
+            <tr><td>srv-db-02</td><td>KR-Seoul</td><td><span class="dot" style="background:#22c55e"></span> 켜짐</td><td class="mono">10.20.1.12</td><td>RHEL 8.9</td><td>16</td><td>128 GB</td><td>esx-kr-07</td></tr>
+            <tr><td>srv-mq-01</td><td>KR-Seoul</td><td><span class="dot" style="background:#22c55e"></span> 켜짐</td><td class="mono">10.20.1.31</td><td>Ubuntu 22.04</td><td>8</td><td>32 GB</td><td>esx-kr-08</td></tr>
+            <tr><td>srv-cache-01</td><td>KR-Seoul</td><td><span class="dot" style="background:#5d6b85"></span> 꺼짐</td><td class="mono">—</td><td>Ubuntu 22.04</td><td>8</td><td>64 GB</td><td>esx-kr-08</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </main>
+  </div>
+
+  <!-- 상세 모달(기존 EntityDetail — 그대로) -->
+  <div style="position:absolute;inset:0;background:rgba(5,8,16,.6);display:flex;justify-content:center;align-items:flex-start;padding:140px 16px 16px">
+    <div class="modal" role="dialog" aria-label="srv-db-01 상세">
+      <div class="mh">
+        <span class="k-vm">가상머신</span>
+        <h2>srv-db-01</h2>
+        <span class="dim">KR-Seoul · vc-kr01 · <span class="mono">vm-1183</span></span>
+        <span style="margin-left:auto;display:flex;gap:6px">
+          <button type="button" class="btn">콘솔</button><button type="button" class="btn">성능</button><button type="button" class="btn">변경 이력</button><button type="button" class="btn" aria-label="닫기">✕</button>
+        </span>
+      </div>
+      <div class="dl">
+        <div class="dr"><span class="k">전원</span><span class="v"><span class="dot" style="background:#22c55e"></span> 켜짐 · Tools 실행 중</span></div>
+        <div class="dr"><span class="k">OS</span><span class="v">Red Hat Enterprise Linux 8.9</span></div>
+        <div class="dr"><span class="k">IP</span><span class="v mono">10.20.1.11 · fe80::20c:29ff:fe1a:2b3c</span></div>
+        <div class="dr"><span class="k">호스트</span><span class="v">esx-kr-07.corp.local · 클러스터 KR-DB</span></div>
+        <div class="dr"><span class="k">vCPU · 메모리</span><span class="v">16 · 128 GB</span></div>
+        <div class="dr"><span class="k">디스크</span><span class="v">3개 · 1.2 TB · ds-kr-db-01(VMFS)</span></div>
+        <div class="dr"><span class="k">사용률(1시간)</span><span class="v">CPU 34% · 메모리 71%</span></div>
+        <div class="dr"><span class="k">백업</span><span class="v">Bareos kr-dir · 어제 02:10 성공</span></div>
+        <div class="dr"><span class="k">태그</span><span class="v">db · prod · oracle</span></div>
+        <div class="dr"><span class="k">이슈</span><span class="v">열린 이슈 없음</span></div>
+      </div>
+      <div style="padding:10px 16px;border-top:1px solid #1f2a40;display:flex;gap:10px;align-items:center;font-size:11.5px;color:#8b9bb4">
+        <span>이 상세는 지금의 ‘가상머신’ 목록 상세와 같은 창입니다 — 검색이 새 화면을 만들지 않습니다.</span>
+        <a href="#id-back" style="margin-left:auto;white-space:nowrap">검색으로 돌아가기 (⌘K)</a>
+      </div>
+    </div>
+  </div>
+
+  <div class="toast" role="status">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#93c5fd" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+    <span><span class="k">검색에서 이동</span> · srv-db-01 · 가상머신</span>
+    <a href="#id-back2" style="white-space:nowrap">다른 결과 보기</a>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1280,"height":780}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

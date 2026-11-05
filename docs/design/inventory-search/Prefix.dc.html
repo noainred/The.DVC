@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>통합 장비 검색 — 접두 검색(IP · 시리얼)</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=Noto+Sans+KR:wght@400;500;700;800&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+body{margin:0;background:#0a0e17;color:#e6edf6;font-family:"Inter","Noto Sans KR","Apple SD Gothic Neo",sans-serif;font-size:13px}
+a{color:#93c5fd}a:hover{color:#bfdbfe}
+.kbd{display:inline-block;min-width:16px;padding:0 6px;border:1px solid #243049;border-radius:5px;background:#141b2d;color:#aebbd0;font-size:10.5px;font-family:"JetBrains Mono",monospace;line-height:17px;text-align:center}
+.mono{font-family:"JetBrains Mono",ui-monospace,monospace}
+.dim{color:#8b9bb4}
+.dot{width:8px;height:8px;border-radius:50%;display:inline-block;flex:0 0 auto}
+.pal{width:700px;background:#141b2d;border:1px solid #243049;border-radius:12px;box-shadow:0 4px 24px rgba(0,0,0,.4);overflow:hidden;display:flex;flex-direction:column}
+.pal-in{display:flex;align-items:center;gap:10px;padding:12px 14px;border-bottom:1px solid #1f2a40}
+.pal-in input{flex:1;min-width:0;border:none;outline:none;background:transparent;font:inherit;font-size:13.5px;color:#e6edf6}
+.pfx{display:inline-flex;align-items:center;gap:5px;height:22px;padding:0 8px;border-radius:6px;background:rgba(59,130,246,.2);color:#93c5fd;font-size:11.5px;font-weight:700;white-space:nowrap}
+.pfx .x{color:#aebbd0;font-weight:500}
+.chips{display:flex;gap:6px;padding:8px 10px;border-bottom:1px solid #1f2a40;flex-wrap:wrap}
+.chip{display:inline-flex;align-items:center;gap:5px;height:24px;padding:0 9px;border-radius:999px;border:1px solid #243049;background:#0f1626;color:#aebbd0;font:inherit;font-size:11.5px;font-weight:600;cursor:pointer;white-space:nowrap}
+.chip.on{border-color:#3b82f6;background:rgba(59,130,246,.18);color:#e6edf6}
+.chip.zero{color:#8b9bb4}
+.chip .n{font-family:"JetBrains Mono",monospace;font-weight:500;font-size:11px}
+.list{padding:6px;display:flex;flex-direction:column}
+.gh{display:flex;align-items:center;gap:8px;padding:8px 10px 4px;font-size:11px;font-weight:700;color:#8b9bb4}
+.gh .more{margin-left:auto;font-weight:600;color:#93c5fd;font-size:11px;background:none;border:0;cursor:pointer;font-family:inherit}
+.row{display:flex;align-items:center;gap:10px;width:100%;text-align:left;padding:7px 10px;border:none;border-radius:8px;background:transparent;font:inherit;font-size:12.5px;color:#e6edf6;cursor:pointer;min-width:0}
+.row.on{background:rgba(59,130,246,.14)}
+.row .nm{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;flex:0 1 auto}
+.row .nm mark{background:transparent;color:#fcd34d;font-weight:800}
+.row .meta{display:flex;align-items:center;gap:8px;min-width:0;color:#8b9bb4;font-size:11.5px;white-space:nowrap;overflow:hidden;flex:1 1 auto}
+.row .meta mark{background:transparent;color:#fcd34d;font-weight:700}
+.row .sep{color:#5d6b85}
+.row .to{margin-left:auto;font-family:"JetBrains Mono",monospace;font-size:10.5px;color:#8b9bb4;white-space:nowrap;flex:0 0 auto}
+.tag{display:inline-flex;align-items:center;height:20px;padding:0 7px;border-radius:5px;font-size:10.5px;font-weight:700;white-space:nowrap;flex:0 0 auto;min-width:54px;justify-content:center}
+.k-vm{background:rgba(59,130,246,.2);color:#93c5fd}
+.k-host{background:rgba(34,211,238,.16);color:#a5f3fc}
+.k-bm{background:rgba(168,85,247,.2);color:#d8b4fe}
+.k-bmp{background:rgba(168,85,247,.12);color:#d8b4fe;border:1px solid rgba(168,85,247,.4)}
+.k-st{background:rgba(52,224,180,.16);color:#99f6e4}
+.k-san{background:rgba(245,158,11,.18);color:#fcd34d}
+.k-sanp{background:rgba(245,158,11,.1);color:#fcd34d;border:1px solid rgba(245,158,11,.4)}
+.k-pdu{background:rgba(236,72,153,.18);color:#f9a8d4}
+.k-ip{background:rgba(139,155,180,.14);color:#c3cee0;border:1px solid #243049}
+.st{display:inline-flex;align-items:center;gap:5px}
+.foot{display:flex;align-items:center;gap:14px;padding:8px 14px;border-top:1px solid #1f2a40;font-size:11px;color:#8b9bb4;flex-wrap:wrap}
+.foot .r{margin-left:auto;display:flex;gap:14px}
+.cap{font-size:12px;color:#8b9bb4;margin:0 0 10px;line-height:1.6}
+.cap b{color:#e6edf6;font-weight:600}
+</style>
+</helmet>
+<div style="width:1500px;height:780px;box-sizing:border-box;background:#0a0e17;padding:0;display:flex;gap:40px;align-items:flex-start">
+
+  <!-- 왼쪽: ip: 접두 -->
+  <div style="display:flex;flex-direction:column;width:700px">
+    <p class="cap"><b>ip:</b> — IP 대장 행과, 그 주소를 가진 VM · 호스트 · 베어메탈(iDRAC) · 스토리지 · SAN · PDU 관리 주소를 함께 찾는다. 접두만 쳐도 부분 일치(앞자리). 범위 밖 · 주소가 가려진 종류는 서버가 빼고 그 사실을 아래에 적는다.</p>
+    <div class="pal" role="dialog" aria-label="장비 찾기 — ip:">
+      <div class="pal-in">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#8b9bb4" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+        <span class="pfx">IP <span class="x">×</span></span>
+        <label for="q1" style="position:absolute;left:-9999px">검색어</label>
+        <input id="q1" value="10.20.1." class="mono">
+        <span class="dim" style="font-size:11px;white-space:nowrap">31건 · 4ms</span>
+        <span class="kbd">ESC</span>
+      </div>
+      <div class="chips" aria-label="종류">
+        <button type="button" class="chip on">전체 <span class="n">31</span></button>
+        <button type="button" class="chip">IP 대장 <span class="n">19</span></button>
+        <button type="button" class="chip">가상머신 <span class="n">9</span></button>
+        <button type="button" class="chip">VM호스트 <span class="n">1</span></button>
+        <button type="button" class="chip">베어메탈 <span class="n">1</span></button>
+        <button type="button" class="chip">스토리지 <span class="n">1</span></button>
+        <button type="button" class="chip zero">SAN <span class="n">0</span></button>
+        <button type="button" class="chip zero">PDU <span class="n">0</span></button>
+      </div>
+      <div class="list">
+        <div class="gh">IP 대장 <span class="dim" style="font-weight:500">19 중 4</span><button type="button" class="more">IP관리 10.20.1.0/24 에서 19개 모두 ›</button></div>
+        <button type="button" class="row on"><span class="tag k-ip">IP</span><span class="nm mono" style="font-weight:500"><mark>10.20.1.</mark>11</span><span class="meta"><span>srv-db-01</span><span class="sep">·</span><span>VM</span><span class="sep">·</span><span>KR-Seoul 10.20.1.0/24</span><span class="sep">·</span><span class="st"><span class="dot" style="background:#22c55e"></span>응답 2분 전</span></span><span class="to">IP관리 › 10.20.1.0/24</span></button>
+        <button type="button" class="row"><span class="tag k-ip">IP</span><span class="nm mono" style="font-weight:500"><mark>10.20.1.</mark>13</span><span class="meta"><span>srv-db-03-old</span><span class="sep">·</span><span>스캔 발견</span><span class="sep">·</span><span style="color:#fcd34d">예약(오버라이드)</span><span class="sep">·</span><span class="st"><span class="dot" style="background:#5d6b85"></span>응답 없음 41일</span></span><span class="to">IP관리 › 10.20.1.0/24</span></button>
+        <button type="button" class="row"><span class="tag k-ip">IP</span><span class="nm mono" style="font-weight:500"><mark>10.20.1.</mark>20</span><span class="meta"><span>fw-kr-core (방화벽)</span><span class="sep">·</span><span>수동 등록</span><span class="sep">·</span><span class="st"><span class="dot" style="background:#22c55e"></span>응답 2분 전</span></span><span class="to">IP관리 › 10.20.1.0/24</span></button>
+        <button type="button" class="row"><span class="tag k-ip">IP</span><span class="nm mono" style="font-weight:500"><mark>10.20.1.</mark>254</span><span class="meta"><span>게이트웨이</span><span class="sep">·</span><span>대역 정책</span><span class="sep">·</span><span class="st"><span class="dot" style="background:#22c55e"></span>응답 2분 전</span></span><span class="to">IP관리 › 10.20.1.0/24</span></button>
+
+        <div class="gh">가상머신 <span class="dim" style="font-weight:500">9 중 3</span><button type="button" class="more">가상머신 탭에서 9개 모두 ›</button></div>
+        <button type="button" class="row"><span class="tag k-vm">가상머신</span><span class="nm">srv-db-01</span><span class="meta"><span class="mono"><mark>10.20.1.</mark>11</span><span class="sep">·</span><span>KR-Seoul</span><span class="sep">·</span><span>RHEL 8.9</span><span class="sep">·</span><span class="st"><span class="dot" style="background:#22c55e"></span>켜짐</span></span><span class="to">가상머신 › 상세</span></button>
+        <button type="button" class="row"><span class="tag k-vm">가상머신</span><span class="nm">srv-db-02</span><span class="meta"><span class="mono"><mark>10.20.1.</mark>12</span><span class="sep">·</span><span>KR-Seoul</span><span class="sep">·</span><span>RHEL 8.9</span><span class="sep">·</span><span class="st"><span class="dot" style="background:#22c55e"></span>켜짐</span></span><span class="to">가상머신 › 상세</span></button>
+        <button type="button" class="row"><span class="tag k-vm">가상머신</span><span class="nm">app-web-04</span><span class="meta"><span class="mono"><mark>10.20.1.</mark>44</span><span class="sep">·</span><span class="mono">10.20.5.44</span><span class="sep">·</span><span>KR-Seoul</span><span class="sep">·</span><span>Windows 2022</span><span class="sep">·</span><span class="st"><span class="dot" style="background:#22c55e"></span>켜짐</span></span><span class="to">가상머신 › 상세</span></button>
+
+        <div class="gh">VM호스트 <span class="dim" style="font-weight:500">1</span></div>
+        <button type="button" class="row"><span class="tag k-host">VM호스트</span><span class="nm">esx-kr-07.corp.local</span><span class="meta"><span>관리 <span class="mono"><mark>10.20.1.</mark>7</span></span><span class="sep">·</span><span>KR-Seoul</span><span class="sep">·</span><span>PowerEdge R760</span><span class="sep">·</span><span class="st"><span class="dot" style="background:#22c55e"></span>연결됨</span></span><span class="to">#/hosts/…</span></button>
+
+        <div class="gh">베어메탈 서버 <span class="dim" style="font-weight:500">1</span></div>
+        <button type="button" class="row"><span class="tag k-bm">베어메탈</span><span class="nm">bm-gpu-kr-03</span><span class="meta"><span>iDRAC <span class="mono"><mark>10.20.1.</mark>203</span></span><span class="sep">·</span><span>KR-Seoul</span><span class="sep">·</span><span>PowerEdge XE9680</span><span class="sep">·</span><span class="st"><span class="dot" style="background:#22c55e"></span>정상</span></span><span class="to">서버 분석 › 베어메탈</span></button>
+
+        <div class="gh">스토리지 <span class="dim" style="font-weight:500">1</span></div>
+        <button type="button" class="row"><span class="tag k-st">스토리지</span><span class="nm">unity-kr-02</span><span class="meta"><span>관리 <span class="mono"><mark>10.20.1.</mark>240</span></span><span class="sep">·</span><span>KR-Seoul</span><span class="sep">·</span><span>Unity XT 380</span><span class="sep">·</span><span class="st"><span class="dot" style="background:#22c55e"></span>정상</span></span><span class="to">스토리지 모니터링</span></button>
+      </div>
+      <div class="foot">
+        <span><span class="kbd">↑</span> <span class="kbd">↓</span> 이동</span><span><span class="kbd">Enter</span> 열기</span><span><span class="kbd">Esc</span> 닫기</span>
+        <span class="r"><span>표시 10 · 숨김 21</span><span class="mono">색인 6초 전 · 출처 9/9</span></span>
+      </div>
+    </div>
+  </div>
+
+  <!-- 오른쪽: sn: 접두 -->
+  <div style="display:flex;flex-direction:column;width:700px">
+    <p class="cap"><b>sn:</b> — 장비 단위 시리얼 · 서비스 태그 · 자산 태그 · UUID · WWN(컨펌 ⑤: 부품 · SFP 는 ‘시리얼 조회’ 화면에서). 지금의 ‘시리얼 조회’ 색인(<span class="mono">insights/serialLookup.js</span>)의 장비 행을 그대로 쓰고, 대소문자 · <span class="mono">:</span> <span class="mono">-</span> 공백을 무시한다. 완전 일치가 먼저.</p>
+    <div class="pal" role="dialog" aria-label="장비 찾기 — sn:">
+      <div class="pal-in">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#8b9bb4" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+        <span class="pfx">시리얼 <span class="x">×</span></span>
+        <label for="q2" style="position:absolute;left:-9999px">검색어</label>
+        <input id="q2" value="7hx2k9" class="mono">
+        <span class="dim" style="font-size:11px;white-space:nowrap">3건 · 3ms</span>
+        <span class="kbd">ESC</span>
+      </div>
+      <div class="chips" aria-label="종류">
+        <button type="button" class="chip on">전체 <span class="n">3</span></button>
+        <button type="button" class="chip">VM호스트 <span class="n">2</span></button>
+        <button type="button" class="chip">베어메탈 <span class="n">1</span></button>
+        <button type="button" class="chip zero">스토리지 <span class="n">0</span></button>
+        <button type="button" class="chip zero">SAN <span class="n">0</span></button>
+      </div>
+      <div class="list">
+        <div class="gh">VM호스트 <span class="dim" style="font-weight:500">2</span></div>
+        <button type="button" class="row on"><span class="tag k-host">VM호스트</span><span class="nm">esx-srv-db-kr-01.corp.local</span><span class="meta"><span>서비스 태그 <span class="mono"><mark>7HX2K9</mark>3</span></span><span class="sep">·</span><span>KR-Seoul</span><span class="sep">·</span><span>PowerEdge R760</span><span class="sep">·</span><span>iDRAC 등록 있음</span></span><span class="to">#/hosts/…</span></button>
+        <button type="button" class="row"><span class="tag k-host">VM호스트</span><span class="nm">esx-srv-db-kr-02.corp.local</span><span class="meta"><span>서비스 태그 <span class="mono"><mark>7HX2K9</mark>4</span></span><span class="sep">·</span><span>KR-Seoul</span><span class="sep">·</span><span>PowerEdge R760</span><span class="sep">·</span><span>iDRAC 등록 있음</span></span><span class="to">#/hosts/…</span></button>
+
+        <div class="gh">베어메탈 서버 <span class="dim" style="font-weight:500">1</span></div>
+        <button type="button" class="row"><span class="tag k-bm">베어메탈</span><span class="nm">bm-cache-kr-05</span><span class="meta"><span>서비스 태그 <span class="mono"><mark>7HX2K9</mark>Q</span></span><span class="sep">·</span><span>KR-Busan</span><span class="sep">·</span><span>PowerEdge R650</span><span class="sep">·</span><span>OME 발견</span></span><span class="to">서버 분석 › 정보</span></button>
+
+        <div class="gh" style="color:#aebbd0;font-weight:500">부품(PSU · 디스크 · DIMM · NIC · SFP) 시리얼 4건은 여기 없습니다 — <a href="#id-serial">시리얼 조회에서 ‘7hx2k9’ 보기 ›</a></div>
+      </div>
+      <div class="foot">
+        <span><span class="kbd">↑</span> <span class="kbd">↓</span> 이동</span><span><span class="kbd">Enter</span> 열기</span><span><span class="kbd">Esc</span> 닫기</span>
+        <span class="r"><span>부품 · 전체 보기 · CSV 는 <a href="#id-serial">시리얼 조회</a>에서</span><span class="mono">색인 6초 전</span></span>
+      </div>
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1500,"height":780}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

@@ -141,7 +141,7 @@
   · ⚠ (같은 릴리스 CI) ReDoS 비율 테스트의 '옛 정규식 > 40ms' 하한은 **고정 입력 크기로 두지 말 것** — 빠른 러너에서 옛 판정이 34.5ms 로 나와 실패했다
     (`audit2744h` INJPKG-02 ③). 옛 판정이 하한을 넘을 때까지 입력을 두 배로 늘린 뒤 같은 크기로 새 판정을 잰다(`growUntilSlow` — 변이 검증: 새 판정을 O(n²) 로 되돌리면 실패).
   · ⚠ 정직 기록: 실운영 vCenter 의 사용률 분포(값이 한쪽에 몰린 경우의 막대 높이)는 보지 못했다 — 목 데이터 2,242대로 확인했다.
-- ⚠⚠ **v2.909 — 가상화 서버 허브(시안 `docs/design/vm-screen` 시안 1 · 사용자 컨펌 2026-11-06 '시안 1 · 신호 만들어 · 타일로 줄여 · 드로어로 · ⑨ 포함'). 신호 판정은 서버 `inventory/vmSignals.js` 하나다**
+- ⚠⚠ **v2.910 — 가상화 서버 허브(코드·테스트 표지는 v2.909 — 준비 중 main 이 2.909.0(통합 장비 검색)을 먼저 써서 2.910.0 으로 게시) (시안 `docs/design/vm-screen` 시안 1 · 사용자 컨펌 2026-11-06 '시안 1 · 신호 만들어 · 타일로 줄여 · 드로어로 · ⑨ 포함'). 신호 판정은 서버 `inventory/vmSignals.js` 하나다**
   (서버 `inventory/{vmSignals,vmByVcenter,vmTotals}.js` + `routes/api/inventory.js /vms`·`/vms/by-vcenter` + `vcenter/hostCorp.js corpIdentityOf·corpUnknownOf`(호스트·VM 법인별 공용) ·
   웹 `views/vms/*`(VmHubTabs·VmsByCorp·VmsAttention·VmDrawer·vmSeries·vmHubText·vmHub.css) · `Vms.jsx` 셸 · `vcd/VmObject.jsx` 요약 탭 · `topMenu.js vm.also` · `SpecialTools.jsx` 탭 줄.
   회귀 `server/test/vmHub2909.test.js`(8 · 변이 11/11 — 범위 4 · 판정 4 · 캐시 2 · 커서 1) + 웹 `views/vms/vmHub2909.test.jsx`(13)):

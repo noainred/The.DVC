@@ -16,6 +16,7 @@ import { countableTotals, PARTIAL_TITLE } from './corpSiteStatus.js'; // v2.741(
 import { hostCapShort, hostCapFootnote, hostCapTotal } from './hostCapacityText.js'; // v2.742(LEFT-06): 용량 모름 호스트는 총량에서 빠졌다
 import { parseVcRoute, vcHash, currentHash, goHash, onHashChange } from './vcd/vcdRoute.js'; // v2.895: 상세 · 개체 보기 주소(#/vcenters/<id>[/vm|host/<id>])
 import { backupPairCell, backupTotals } from './veeamBadge.js'; // v2.757 카드의 VM 백업 수량 · v2.778.1 veeam/snapshot 두 수
+import useSearchHandoff from '../hooks/useSearchHandoff.js'; // v2.909 헤더 ⌘K 통합 장비 검색 — 검색어 인계
 
 /**
  * v2.732(점검 2회차 B2-01 후속, 그룹 i3): 위임(site) vCenter 의 담당 엣지 push 가 끊겨 값이 낡으면 서버는 status 를 엣지가 마지막으로 보낸
@@ -204,6 +205,7 @@ export default function VCenters({ onSelectSite, resetSignal }) {
   const backupRefreshErr = backupP.data && backupP.error ? String(backupP.error) : '';
   // 빠른 찾기(특수 기능의 '메뉴 빠른 찾기'와 동일 UX) — 훅은 조기 return 위에 선언(React #310).
   const [query, setQuery] = useState('');
+  useSearchHandoff('vcenters', setQuery); // v2.909: ⌘K 검색의 ‘모두 보기’ 검색어
   // 상단메뉴 Platform 재클릭(resetSignal 증가) 시 vCenter 상세 드릴다운을 닫고 전체 목록으로 복귀.
   // v2.895: 첫 렌더(주소로 바로 연 상세)에는 닫지 않는다 — 신호가 실제로 바뀐 뒤에만.
   const resetSeen = useRef(resetSignal);

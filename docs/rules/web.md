@@ -677,3 +677,12 @@
      줄 판정 `taskMarkAt` 은 웹 · 서버 두 벌이라 `server/test/wikiIssues2883.test.js` ① 이 같은 입력으로 대조한다(한쪽만 고치면 다른 칸이 체크된다).
   ④ 펼친 목록은 떠 있는 상자(absolute)로 두지 말고 그 줄을 통째로 쓴다 — 이슈 찾기 목록이 1440px 에서 화면 오른쪽 끝을 넘어 글자가 잘렸다(Chromium 판독). 키 칩(`.md-iss`)은 줄바꿈하지 않는다.
   ⑤ 완료 전에 서버가 묻는 것(409 `open-children` · `open-blockers`)은 `statusConfirmText` · `STATUS_CONFIRM_FLAG` 하나로 차례로 확인받는다(최대 3번 · 취소하면 아무것도 바꾸지 않는다).
+- **v2.909 — 헤더 ⌘K 통합 장비 검색(사용자 요청 '상단 검색창에서 VM · 베어메탈 · 스토리지 등 등록된 모든 인벤토리 장비 검색' · 승인 시안 `docs/design/inventory-search`)**.
+  화면 `components/Palette.jsx` · 순수 `components/invSearchQuery.js`(+ test) · 받는 훅 `hooks/useSearchHandoff.js` · 서버 `GET /api/search/inventory`(security-api.md 같은 버전 항목).
+  ① **장비 판정(범위 · 권한 · 주소 가림 · 일치)은 서버가 한다** — 팔레트는 응답의 `kinds`(잠금 포함) · `counts` · `groups` 를 그리기만 한다. 기능 · 탭 찾기는 지금처럼 브라우저 안(`palette.js`)이라 장비 색인을 못 읽어도 팔레트는 동작한다.
+  ② **이동은 이미 있는 상세 주소 + 검색어 인계**(`hooks/searchHandoff.js` v2.616 — 검색어 · IP · 시리얼을 URL 에 싣지 않는다). VM `#/vcenters/<vc>/vm/<id>` · 호스트 `#/hosts/<id>` · vCenter `#/vcenters/<id>`,
+     그 밖은 그 화면 검색 칸으로(`focusPlan` · `listPlan`). ⚠ 해시에 `?q=` 를 붙이지 말 것 — App 의 탭 판정이 `split('/')[0]` 이라 `vms?q=x` 가 탭 이름이 되어 이동이 실패한다(구현 중 확인).
+     받는 쪽 target 표(`SCREEN`)와 `useSearchHandoff('<target>'` · `takeSearch('<target>')` · App `INV_FILTER_TABS` 는 글자 그대로 같아야 한다 — `invSearchQuery.test.js` 가 소스로 대조한다.
+  ③ 묶음 머리의 ‘모두 보기’ 에 **개수를 쓰지 않는다** — 목적 화면의 필터 규칙이 달라(템플릿 · OS 일치) 수가 다르다(목 실측 41 ↔ 43). 검색 칸이 없는 화면(PDU)은 ‘열기’ 로만.
+  ④ 메타는 상태를 법인 바로 뒤에 둔다(끝에 두면 1440 에서 잘린다) · 행 이름은 `flex: 0 0 auto; max-width: 42%`(메타와 함께 줄면 이름이 먼저 잘렸다) · 400px 은 행 2줄 · 칩 가로 스크롤.
+  ⑤ 최근 연 항목은 localStorage 10개(`ui.invSearch.recent`) — 읽을 때 `#/` 로 시작하지 않는 주소는 버린다(저장소 값을 믿지 않는다). 새 탭(⌘Enter)은 메모리 인계가 닿지 않아 주소만 연다.
