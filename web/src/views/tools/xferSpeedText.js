@@ -405,16 +405,91 @@ export function hoverAt(m, px, offsetMin = 540) {
  * 1분 갱신 사이에 창이 밀려 같은 칸이 다른 구간이 된다. back=0 은 예전 그대로 '최근 구간'(1분마다 갱신)이다.
  */
 /** 몇 칸까지 과거로 갈 수 있나 — 그 보기가 읽는 표(원시 / 일 요약)의 가장 오래된 기록이 들어가는 칸까지. 기록이 없으면 0(스크롤을 숨긴다). */
-export function maxBackOf(hist, anchorEnd) {
+export function maxBackOf(hist, anchorEnd, { extraOldestTs = null } = {}) {
   const days = numOrNull(hist?.days); const end = numOrNull(anchorEnd);
   if (!(days > 0) || end == null) return 0;
   const span = days * 86_400_000;
-  const off = numOrNull(hist?.offsetMin) ?? 540;
-  const raw = days <= (numOrNull(hist?.rawMaxDays) ?? 31);
-  const oldest = raw ? numOrNull(hist?.oldest?.sampleTs)
-    : (typeof hist?.oldest?.day === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(hist.oldest.day) ? Date.parse(`${hist.oldest.day}T00:00:00Z`) - off * 60_000 : null);
+  const oldest = historyOldestOf(hist, { extraOldestTs });
   if (oldest == null || !(end > oldest)) return 0;
   return Math.max(0, Math.min(Math.floor(3650 / days), Math.ceil((end - oldest) / span) - 1));
+}
+/**
+ * 이 보기가 갈 수 있는 가장 오래된 시각(ms) — 전송 기록(원시 또는 일 요약)과, Ping 을 함께 볼 때는 Ping 기록 중 **더 오래된 쪽**.
+ * v2.902(사용자 요청 "히스토리 … 버그 수정" — B1): 예전엔 전송 기록만 봐서, 전송 측정이 꺼져 있거나(기본 꺼짐) 원시 보관(180일)이
+ * Ping 보관(365일)보다 짧으면 'Ping만' 보기에서 남아 있는 Ping 과거로 넘어가지 못했다. 둘 다 없으면 null.
+ */
+export function historyOldestOf(hist, { extraOldestTs = null } = {}) {
+  const days = numOrNull(hist?.days);
+  const off = numOrNull(hist?.offsetMin) ?? 540;
+  const raw = !(days > 0) || days <= (numOrNull(hist?.rawMaxDays) ?? 31);
+  const own = raw ? numOrNull(hist?.oldest?.sampleTs)
+    : (typeof hist?.oldest?.day === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(hist.oldest.day) ? Date.parse(`${hist.oldest.day}T00:00:00Z`) - off * 60_000 : null);
+  const extra = numOrNull(extraOldestTs);
+  const list = [own, extra].filter((v) => v != null);
+  return list.length ? Math.min(...list) : null;
+}
+
+/** 포탈 시각 날짜 'YYYY-MM-DD'(ms → 그 시각이 속한 포탈 날짜). */
+export function portalDateOf(ts, offsetMin = 540) {
+  const t = numOrNull(ts);
+  if (t == null) return '';
+  const d = new Date(t + offsetMin * 60_000);
+  const p = (x) => String(x).padStart(2, '0');
+  return `${d.getUTCFullYear()}-${p(d.getUTCMonth() + 1)}-${p(d.getUTCDate())}`;
+}
+
+/**
+ * '날짜로 이동'(v2.902 사용자 요청 "히스토리 보는 기능 강화") — 고른 포탈 날짜가 **끝나는 시각**(다음 날 0시)을 창 끝으로 한다.
+ * 스크롤 모델(창 끝 = anchor − back × 기간)에 맞게 anchor 를 '지금 이후의 첫 칸 경계' 로 잡는다 — 그러면 ◀▶ 가 그날 경계에 맞춰 한 기간씩 움직이고,
+ * back 이 0 이 되면 예전처럼 '최근 구간' 이다. 오늘(또는 미래)·형식 오류면 최근 구간({back:0, anchor:null}).
+ * maxBack 을 넘으면 가장 오래된 칸으로 자르고 clamped 를 알린다.
+ * @returns {{back:number, anchor:number|null, clamped?:boolean}}
+ */
+export function jumpToDate(dateStr, { days, now = Date.now(), offsetMin = 540, maxBack = Infinity } = {}) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(dateStr || ''));
+  const span = (numOrNull(days) ?? 0) * 86_400_000;
+  if (!m || !(span > 0)) return { back: 0, anchor: null };
+  const dayEnd = Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]) + 1) - offsetMin * 60_000;
+  if (!Number.isFinite(dayEnd) || dayEnd >= now) return { back: 0, anchor: null };
+  let back = Math.max(1, Math.ceil((now - dayEnd) / span));
+  const anchor = dayEnd + back * span;
+  const lim = Number.isFinite(maxBack) ? Math.max(0, Math.floor(maxBack)) : Infinity;
+  if (back > lim) { back = lim; return lim ? { back, anchor, clamped: true } : { back: 0, anchor: null, clamped: true }; }
+  return { back, anchor };
+}
+
+/** 과거 구간에서 '이 법인만 지금 측정' 결과 안내(B2) — 과거 구간은 갱신하지 않으므로 '1분 안에 추이에 나온다' 고 하지 않는다. */
+export function runOneText(r, past = false) {
+  if (r?.ok === false) return r.reason || '시작하지 못했습니다';
+  return past
+    ? '이 법인만 지금 잽니다 — 결과는 최신 구간에 나옵니다(지금은 과거 구간을 보고 있어 이 화면은 갱신하지 않습니다).'
+    : '이 법인만 지금 잽니다 — 끝나면 1분 안에 추이에 나옵니다.';
+}
+
+/** 측정 기록 쪽 표시 — '1–50 / 312건'(실패만이면 실패 건수 기준). 행이 없으면 ''. */
+export function logPagerText(page, { index = 0, limit = 50 } = {}) {
+  const rows = page?.rows?.length || 0;
+  if (!rows) return '';
+  const total = page?.only === 'fail' ? numOrNull(page?.failTotal) : numOrNull(page?.total);
+  const from = index * limit + 1; const to = from + rows - 1;
+  return `${from.toLocaleString()}–${to.toLocaleString()}${total != null ? ` / ${total.toLocaleString()}건` : ''}`;
+}
+
+/** 측정 기록 응답이 지금 창과 같은 창인가(늦게 온 다른 창 응답을 그리지 않는다). */
+export function sameLogWindow(page, hist) {
+  if (!page || !hist || page.ok === false) return false;
+  if (String(page.agent ?? '').toLowerCase() !== String(hist.agent ?? '').toLowerCase()) return false;
+  if (numOrNull(page.days) !== numOrNull(hist.days) || !!page.past !== !!hist.past) return false;
+  return !hist.past || numOrNull(page.end) === numOrNull(hist.end);
+}
+
+/** 창이 원시 측정 보관 기간보다 앞까지 걸치는가 — 그러면 표에 그 앞 측정이 없다는 것을 말한다. */
+export function logRetentionNote(page, offsetMin = 540) {
+  const start = numOrNull(page?.start);
+  const oldest = numOrNull(page?.oldest?.sampleTs);
+  const keep = numOrNull(page?.retention?.sampleDays);
+  if (start == null || oldest == null || !(start < oldest)) return '';
+  return `원시 측정 기록은 ${keep != null ? `${keep}일` : '정해진 기간'} 보관합니다 — 가장 오래된 기록은 ${clockText(oldest, offsetMin)} 이고, 이 구간에서 그보다 앞은 표에 없습니다.`;
 }
 /** back 칸 과거 창의 끝(ms) — back 은 [0, maxBack] 로 자른다. */
 export function windowEndOf(anchorEnd, back, days, maxBack = Infinity) {
