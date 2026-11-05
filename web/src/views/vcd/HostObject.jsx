@@ -75,8 +75,8 @@ export default function HostObject({ site, vcenterId, host, hostsOk, gate, hosts
             </div>
           </Card>
           <HostEvents vcenterId={vcenterId} host={host} />
-          <VcAlarmsCard vcenterId={vcenterId} entityType="HostSystem" entity={vmRef(host)} />
-          <VcTasksCard vcenterId={vcenterId} entityType="HostSystem" entity={vmRef(host)} />
+          <VcAlarmsCard vcenterId={vcenterId} entityType="HostSystem" entity={vmRef(host)} wide />
+          <VcTasksCard vcenterId={vcenterId} entityType="HostSystem" entity={vmRef(host)} wide />
         </div>
       )}
 

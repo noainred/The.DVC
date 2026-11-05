@@ -11,7 +11,7 @@ import { dropVcCache as dropTags } from '../tags/collect.js';
 //   쉬게 했다(dscfg·clustercfg 는 자기 dropVcCache 안에서 지운다 — 형제 비대칭). 순환 없음: 두 collect.js 는 config·parse·cache·dscfg/collect 만 import 한다.
 import { dropVcRetry as dropVmCfgRetry } from '../vmcfg/collect.js';
 import { dropVcRetry as dropContentionRetry } from '../contention/collect.js';
-import { dropVcCache as dropVcInfo } from '../vcinfo/collect.js'; // v2.897
+import { dropVcCache as dropVcInfo, vcInfoIds } from '../vcinfo/collect.js'; // v2.897
 const _byVc = new Map();
 const _status = new Map();
 // v2.720(감사 R1-02): 요청 시한으로 계속 못 읽는 호스트 — vcId -> Map(ref -> { count, retryAt }).
@@ -99,7 +99,7 @@ export function syncVcConfigCaches(vcenters) {
   const live = new Map();
   for (const vc of list) if (vc && vc.id != null) live.set(String(vc.id), accessKeyOf(vc));
   const dropped = [];
-  const known = new Set([..._accessByVc.keys(), ..._byVc.keys(), ..._status.keys()]);
+  const known = new Set([..._accessByVc.keys(), ..._byVc.keys(), ..._status.keys(), ...vcInfoIds()]);   // v2.897: vcinfo 캐시도(엣지 push 로만 생긴 항목)
   for (const id of known) if (!live.has(id)) { dropVcConfigCaches(id); _accessByVc.delete(id); dropped.push(id); }
   for (const [id, key] of live) {
     const prev = _accessByVc.get(id);

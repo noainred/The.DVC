@@ -5,7 +5,7 @@
 //
 // 이 캐시는 스냅샷의 vCenter 객체에 싣지 않는다 — /vcenters 등 모든 인증 사용자 응답에 vCenter 객체가 통째로 나가므로(권한 목록이 새면 안 된다).
 // 엣지는 inventoryPush 가 push 본문의 vcenter.vcInfo 로 보내고, 중앙은 정제해 이 캐시에 넣은 뒤 vcenter 객체에서 지운다(central.js).
-import { parseMorefs, parseObjectContent } from '../vcenter/soapParse.js';
+import { parseObjectContent } from '../vcenter/soapParse.js';
 import { parseTriggeredAlarms, parseTaskInfo, parsePermissions, parseRoleList, nameMapOf, mergeTasks, VCINFO_LIMITS,
   parseTopologyNodes, parseReplication, parseApplianceUpdate, parsePendingUpdates, parseVlcmCompliance, restErrText, VCREST_LIMITS } from './parse.js';
 import { VCenterClient } from '../vcenter/restClient.js';   // v2.897 ④(restClient 는 soapClient 를 import 하지 않는다 — 순환 없음)
@@ -36,13 +36,19 @@ export function vcInfoForPush(vcId) {
   return Object.keys(out).length ? out : null;
 }
 const stripRetry = (k) => { const { retryAt, ...rest } = k; void retryAt; return rest; };
-/** 중앙 수신(central.js) — 정제된 값만 넣는다. 받은 종류만 덮는다(엣지가 그 종류를 아직 안 읽었으면 키가 없다). */
+/**
+ * 중앙 수신(central.js) — 정제된 값만. **받은 것으로 통째로 바꾼다**: 엣지가 그 종류를 아직 안 읽었으면 키가 없고, 엣지가 캐시를 비웠으면
+ * (접속처 변경 · 삭제) vcInfo 자체가 없다 — 그때 중앙도 엣지 출처 항목을 지운다(옛 vCenter 의 권한 목록을 계속 보이지 않게).
+ * 이 포탈이 직접 읽은 항목(source 'local')은 엣지 push 로 지우지 않는다(direct vCenter 는 central.js 가 미리 거부한다).
+ */
 export function putFromEdge(vcId, info, agent) {
-  if (!info || typeof info !== 'object') return;
   const prev = _byVc.get(vcId);
-  const base = prev && prev.source === 'edge' ? prev : {};
-  _byVc.set(vcId, { ...base, ...info, source: 'edge', agent: String(agent || '').slice(0, 64) || null, pushAt: Date.now() });
+  if (prev && prev.source === 'local') return;
+  if (!info || typeof info !== 'object' || !Object.keys(info).length) { if (prev) _byVc.delete(vcId); return; }
+  _byVc.set(vcId, { ...info, source: 'edge', agent: String(agent || '').slice(0, 64) || null, pushAt: Date.now() });
 }
+/** 캐시에 있는 vCenter id(hostcfg/cache.js syncVcConfigCaches 가 등록부에 없는 것을 지운다). */
+export function vcInfoIds() { return [..._byVc.keys()]; }
 export function vcInfoStatus() {
   const out = [];
   for (const [vcId, e] of _byVc) {
@@ -54,6 +60,18 @@ export function vcInfoStatus() {
 export function dropVcCache(vcId) { _byVc.delete(vcId); _alarmNames.delete(vcId); }
 export function _resetVcInfo() { _byVc.clear(); _alarmNames.clear(); }
 
+/**
+ * TaskManager.recentTask(ArrayOfManagedObjectReference) → Task moref. 기존 parseMorefs 는 '[^>]*' 를 두 번 써 닫히지 않은 원소가 반복되면
+ * 2차 시간이다(반증 하-4 — 96KB 653ms). 여기서는 원소 모양을 고정하고(속성은 type · 선택 xsi:type) 길이를 먼저 자른다(선형).
+ */
+export function taskRefsOf(xml) {
+  const out = [];
+  const re = /<ManagedObjectReference(?: xsi:type="ManagedObjectReference")? type="Task">([\w.:-]{1,64})<\/ManagedObjectReference>/g;
+  const s = String(xml || '').slice(0, 1_000_000);
+  let m;
+  while ((m = re.exec(s)) && out.length < 1000) out.push(m[1]);
+  return out;
+}
 const msg = (e) => String(e?.message || e || '조회 실패').slice(0, 300);
 const isTransient = (err, signal) => !!signal?.aborted || err?.name === 'AbortError' || err?.name === 'TimeoutError'
   || /abort|timed? ?out|timeout|데드라인|시한|중단/i.test(String(err?.message || err || ''));
@@ -100,7 +118,7 @@ async function readTasks(c, prev, now) {
   const tm = c.sc?.taskManager;
   if (!tm) throw new Error('taskManager 없음');
   const objs = await c.retrieveObjectProps('TaskManager', tm, ['recentTask']);
-  const refs = parseMorefs(objs[0]?.props?.recentTask || '', 'Task').slice(0, VCINFO_LIMITS.tasks);
+  const refs = taskRefsOf(objs[0]?.props?.recentTask).slice(0, VCINFO_LIMITS.tasks);
   let fresh = [];
   if (refs.length) {
     // 작업은 끝나면 곧 사라진다 — 목록과 info 사이에 지워진 작업이 있으면 vCenter 가 요청 전체를 거부한다(ManagedObjectNotFound).

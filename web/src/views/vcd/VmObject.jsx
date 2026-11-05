@@ -13,6 +13,7 @@ import { VmConsoleButton } from '../../components/VmConsole.jsx';
 import { VmRemoteButton } from '../../components/VmRemote.jsx';
 import { VmReconfigButton } from '../../components/VmReconfig.jsx';
 import { dayStamp } from '../../dayStamp.js';
+import { numOrNull } from '../../numOrNull.js';
 import ObjectShell from './ObjectShell.jsx';
 import { Card, KV, Note } from './VcdParts.jsx';
 import { VcAlarmsCard, VcTasksCard, VcPermsCard } from './VcInfoParts.jsx';
@@ -122,8 +123,8 @@ export default function VmObject({ site, vcenterId, vm, vmsOk, gate, datastores,
             </div>
           </Card>
           <Card title="이벤트 · 이동"><div style={{ padding: '0 14px 12px' }}>{toolAllowed('vm-changes') ? <VmChangesSection vm={vm} /> : <ErrorBox error={toolDenied('VM 이동·구성 변경 이력')} />}</div></Card>
-          <VcAlarmsCard vcenterId={vcenterId} entityType="VirtualMachine" entity={vmRef(vm)} />
-          <VcTasksCard vcenterId={vcenterId} entityType="VirtualMachine" entity={vmRef(vm)} />
+          <VcAlarmsCard vcenterId={vcenterId} entityType="VirtualMachine" entity={vmRef(vm)} wide />
+          <VcTasksCard vcenterId={vcenterId} entityType="VirtualMachine" entity={vmRef(vm)} wide />
         </div>
       )}
 
@@ -223,7 +224,7 @@ export default function VmObject({ site, vcenterId, vm, vmsOk, gate, datastores,
 /** v2.897: 네트워크 어댑터 표(vm.dev.nics — 장치 XML). 분산 포트그룹 이름 · VLAN 은 /networks 에서 찾는다. */
 function VmNicCard({ vm, nics }) {
   return (
-    <Card title={`네트워크 어댑터${nics ? ` ${nics.length}` : ''}`} sub={vm.dev?.at ? `vmcfg 장치 · 읽은 시각 ${tsText(vm.dev.at)}` : 'vmcfg 장치'}>
+    <Card style={{ gridColumn: '1 / -1' }} title={`네트워크 어댑터${nics ? ` ${nics.length}` : ''}`} sub={vm.dev?.at ? `vmcfg 장치 · 읽은 시각 ${tsText(vm.dev.at)}` : 'vmcfg 장치'}>
       {!nics ? <div className="muted" style={{ padding: '10px 14px', fontSize: 12.5 }}>{vm.dev ? '이 VM 의 장치는 이전 판 수집기가 읽어 어댑터 정보가 없습니다 — 장치를 다시 읽으면 채워집니다(오래된 VM 부터 나눠 읽습니다).' : 'vmcfg 가 아직 이 VM 의 장치를 읽지 않았습니다 — 빈 표가 아닙니다.'}</div>
         : !nics.length ? <div className="muted" style={{ padding: '10px 14px', fontSize: 12.5 }}>네트워크 어댑터가 없습니다.</div> : (
           <STable className="v3-table" minWidth={720}>
@@ -250,10 +251,12 @@ function VmNicCard({ vm, nics }) {
 /** v2.897: 스냅샷 트리(vm.snapshotTree — 전위 순서 · d=깊이). 동작(되돌리기 · 삭제)은 두지 않는다. */
 function SnapTreeCard({ vm }) {
   const t = snapTreeRows(vm);
-  const count = Number(vm.snapshotCount) || 0;
+  // 개수를 못 읽었으면(REST 폴백 등 — 키 없음) '스냅샷 없음' 이 아니라 모른다(반증 하-1 · vmSnapshotFacts 와 같은 numOrNull 판정).
+  const count = numOrNull(vm.snapshotCount);
   return (
     <Card title="스냅샷 트리" sub="주기 수집 · snapshot 속성" badge={t?.rows.length ? <span className="badge blue">{t.rows.length}개</span> : null}>
-      {!count ? <div className="muted" style={{ padding: '10px 14px', fontSize: 12.5 }}>스냅샷이 없습니다.</div>
+      {count == null && !t?.rows.length ? <div className="muted" style={{ padding: '10px 14px', fontSize: 12.5 }}>이 VM 의 스냅샷 정보를 받지 못했습니다(‘없음’ 이 아닙니다).</div>
+        : count === 0 && !t?.rows.length ? <div className="muted" style={{ padding: '10px 14px', fontSize: 12.5 }}>스냅샷이 없습니다.</div>
         : !t ? <div className="muted" style={{ padding: '10px 14px', fontSize: 12.5 }}>이 VM 의 스냅샷 트리는 아직 이 판의 수집기가 읽지 않았습니다(다음 수집 주기에 채워집니다). 개수 · 이름은 위 카드에 있습니다.</div>
           : (
             <div role="tree" aria-label="스냅샷 트리" style={{ padding: '6px 14px 10px', display: 'grid', gap: 2 }}>
@@ -274,7 +277,7 @@ function SnapTreeCard({ vm }) {
               ))}
             </div>
           )}
-      {t?.partial && <Note>{`트리에 ${t.rows.length}개만 보입니다(전체 ${t.count}개) — 수집 상한(64개)을 넘었거나 일부 노드를 읽지 못했습니다.`}</Note>}
+      {t?.partial && <Note>{`트리에 ${t.rows.length}개만 보입니다(전체 ${t.count}개) — 수집 상한을 넘었거나 일부 노드를 읽지 못했습니다.`}</Note>}
       <Note>위에서 아래로 만든 순서이고, 들여쓴 것이 그 위 스냅샷의 자식입니다. ‘현재 위치’ 는 VM 이 지금 딛고 있는 스냅샷입니다. 되돌리기 · 삭제는 두지 않습니다(조회 전용).</Note>
     </Card>
   );
@@ -292,7 +295,7 @@ export function PermPane({ vcenterId, entity, what, objType = null, objRef = nul
             : !q.data ? <Loading label="권한 변경 이벤트" /> : <EventRows data={q.data} vcenterId={vcenterId} empty={`최근 90일에 ${what}을(를) 대상으로 한 권한 · 역할 변경 이벤트가 없습니다.`} />}
         <Note>대상 이름이 들어간 이벤트를 찾은 것입니다(부분 일치). 목록이 아니라 변경 기록이라, 지금 누가 어떤 역할인지는 알 수 없습니다.</Note>
       </Card>
-      <VcPermsCard vcenterId={vcenterId} entityType={objType} entity={objRef} what={what} />
+      <VcPermsCard vcenterId={vcenterId} entityType={objType} entity={objRef} what={what} wide />
     </div>
   );
 }

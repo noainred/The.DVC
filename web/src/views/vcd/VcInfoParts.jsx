@@ -17,6 +17,10 @@ import {
 import { vcHash } from './vcdRoute.js';
 import { dayStamp } from '../../dayStamp.js';
 
+/** 작업 보관 기간 문구 — API 의 limits.keepMs(모르면 '보관 기간'). */
+const keepText = (d) => { const ms = d?.limits?.keepMs; return Number.isFinite(ms) && ms > 0 ? `${Math.round(ms / 3_600_000)}시간` : '보관 기간'; };
+/** 넓은 표가 든 카드는 격자 한 줄을 다 쓴다(1440px 반폭 카드에서 오른쪽 열이 가려졌다 — Chromium 재판독 · v2.780 과 같은 종류). */
+const WIDE = Object.freeze({ gridColumn: '1 / -1' });
 const adminOnlyError = () => new HttpError('forbidden', { status: 403, body: { requiredRole: ['admin'], reason: '권한 목록(사용자 · 그룹 · 역할)은 관리자 판본에서만 볼 수 있어 이 칸을 불러오지 않았습니다.' } });
 
 function Target({ vcenterId, type, mref: r, name }) {
@@ -45,7 +49,7 @@ function Status({ d }) {
   if (!d) return null;
   return (
     <>
-      {d.error && <div className="vcd-note" style={{ color: 'var(--amber, #b45309)' }}>{`마지막 갱신 실패: ${d.error}${d.at ? ' — 아래는 직전에 읽은 값입니다.' : ''}`}</div>}
+      {d.error && d.at && <div className="vcd-note" style={{ color: 'var(--amber, #b45309)' }}>{`마지막 갱신 실패: ${d.error} — 아래는 직전에 읽은 값입니다.`}</div>}
       {d.notCollected && <div className="muted" style={{ padding: '10px 14px', fontSize: 12.5 }}>{d.notCollected}</div>}
       {d.omitted > 0 && <Note>{`상한을 넘어 ${d.omitted}건은 받지 않았습니다.`}</Note>}
     </>
@@ -53,7 +57,7 @@ function Status({ d }) {
 }
 
 /** vCenter 트리거된 알람(rootFolder.triggeredAlarmState — 하위 개체 전부). 포탈 규칙 알람과 다른 표다. */
-export function VcAlarmsCard({ vcenterId, entityType = null, entity = null, embedded = false }) {
+export function VcAlarmsCard({ vcenterId, entityType = null, entity = null, embedded = false, wide = false }) {
   const ok = can('inv.alarms');
   const q = useOnce('/vcenter-info/alarms', { vcenterId }, ok);
   const all = vcAlarmRows(q.data?.items);
@@ -88,12 +92,12 @@ export function VcAlarmsCard({ vcenterId, entityType = null, entity = null, embe
       );
   const note = <Note>vCenter 가 스스로 발화한 알람입니다(알람 정의 · 임계값은 vCenter 설정). 포탈 규칙 알람과 별개이고, 확인 · 초기화 같은 동작은 두지 않습니다(조회 전용).</Note>;
   if (embedded) return <>{<Head q={q} title={`vCenter 알람${q.data && !q.data.notCollected ? ` ${c.total}` : ''}`} />}{body}{note}</>;
-  return <Card title={`vCenter 알람${q.data && !q.data.notCollected ? ` ${c.total}` : ''}`} badge={c.red ? <span className="badge red">경보 {c.red}</span> : null} sub={q.data ? vcInfoHeadText(q.data) : null}
+  return <Card style={wide ? WIDE : undefined} title={`vCenter 알람${q.data && !q.data.notCollected ? ` ${c.total}` : ''}`} badge={c.red ? <span className="badge red">경보 {c.red}</span> : null} sub={q.data ? vcInfoHeadText(q.data) : null}
     more={<button type="button" className="vcd-more" onClick={q.reload} disabled={q.loading}>{q.loading ? '불러오는 중…' : '다시 읽기'}</button>}>{body}{note}</Card>;
 }
 
 /** 최근 작업(TaskManager.recentTask + 포탈이 모아 둔 24시간 버퍼). entity 를 주면 그 개체 대상만. */
-export function VcTasksCard({ vcenterId, entityType = null, entity = null, embedded = false }) {
+export function VcTasksCard({ vcenterId, entityType = null, entity = null, embedded = false, wide = false }) {
   const ok = can('inv.alarms');
   const q = useOnce('/vcenter-info/tasks', { vcenterId }, ok);
   const rows = vcTaskRows(q.data?.items, { entityType, entity });
@@ -112,9 +116,9 @@ export function VcTasksCard({ vcenterId, entityType = null, entity = null, embed
                   const [b, s] = TASK_STATE[t.state] || ['gray', '—'];
                   return (
                     <tr key={t.key}>
-                      <td className="mono" style={{ whiteSpace: 'normal', minWidth: 180, overflowWrap: 'anywhere' }}>{t.op || '—'}{t.error && <div style={{ fontFamily: 'inherit', fontSize: 12, color: 'var(--red, #b91c1c)' }}>{t.error}</div>}</td>
+                      <td className="mono" style={{ whiteSpace: 'normal', minWidth: 180, overflowWrap: 'anywhere' }}>{t.op ? t.op.replace(/\./g, '.\u200b') : '—'}{t.error && <div style={{ fontFamily: 'inherit', fontSize: 12, color: 'var(--red, #b91c1c)' }}>{t.error}</div>}</td>
                       {!entity && <td><Target vcenterId={vcenterId} type={t.entityType} mref={t.entity} name={t.entityName} /></td>}
-                      <td data-sort={t.state || ''}><span className={`badge ${b}`}>{s}{t.state === 'running' && t.progress != null ? ` ${t.progress}%` : ''}</span></td>
+                      <td data-sort={t.state || ''}>{t.lost ? <span className="badge gray" title="실행 중으로 본 뒤 끝난 모습을 보지 못하고 vCenter 최근 작업에서 사라졌습니다">상태 모름</span> : <span className={`badge ${b}`}>{s}{t.state === 'running' && t.progress != null ? ` ${t.progress}%` : ''}</span>}</td>
                       <td style={{ overflowWrap: 'anywhere' }}>{t.user || (t.reason && t.reason !== 'user' ? <span className="muted">{TASK_REASON[t.reason]}</span> : '—')}</td>
                       <td className="mono" data-sort={t.queued == null ? '' : String(t.queued)}>{shortTs(t.queued)}</td>
                       <td className="mono" data-sort={t.started == null ? '' : String(t.started)}>{shortTs(t.started)}</td>
@@ -125,24 +129,24 @@ export function VcTasksCard({ vcenterId, entityType = null, entity = null, embed
                 })}
               </tbody>
             </STable>
-          ) : <div className="muted" style={{ padding: '10px 14px', fontSize: 12.5 }}>{entity ? '포탈이 모아 둔 최근 24시간 작업 중 이 개체를 대상으로 한 것이 없습니다.' : '포탈이 모아 둔 최근 24시간 작업이 없습니다.'}</div>)}
+          ) : <div className="muted" style={{ padding: '10px 14px', fontSize: 12.5 }}>{`포탈이 모아 둔 최근 ${keepText(q.data)} 작업${entity ? ' 중 이 개체를 대상으로 한 것' : ''}이 없습니다.`}</div>)}
           {q.data.userMasked && <Note>작업을 시작한 사용자 이름은 관리자 판본에서만 보입니다.</Note>}
         </>
       );
-  const note = <Note>vCenter 의 최근 작업 목록(끝난 뒤 몇 분만 남는다)을 갱신 때마다 모아 최근 24시간 · 200건까지 보관합니다 — 갱신 사이에 시작해 끝난 짧은 작업은 빠질 수 있습니다. 작업 이름은 vCenter 의 작업 식별자(descriptionId)입니다.</Note>;
+  const note = <Note>{`vCenter 의 최근 작업 목록(끝난 뒤 몇 분만 남는다)을 갱신 때마다 모아 최근 ${keepText(q.data)}${q.data?.limits?.max ? ` · ${q.data.limits.max}건` : ''}까지 보관합니다 — 갱신 사이에 시작해 끝난 짧은 작업은 빠질 수 있습니다. 작업 이름은 vCenter 의 작업 식별자(descriptionId)입니다.`}</Note>;
   if (embedded) return <><Head q={q} title={title} />{body}{note}</>;
-  return <Card title={title} badge={c.error ? <span className="badge red">실패 {c.error}</span> : null} sub={q.data ? vcInfoHeadText(q.data) : null}
+  return <Card style={wide ? WIDE : undefined} title={title} badge={c.error ? <span className="badge red">실패 {c.error}</span> : null} sub={q.data ? vcInfoHeadText(q.data) : null}
     more={<button type="button" className="vcd-more" onClick={q.reload} disabled={q.loading}>{q.loading ? '불러오는 중…' : '다시 읽기'}</button>}>{body}{note}</Card>;
 }
 
 /** 권한 목록(AuthorizationManager.RetrieveAllPermissions) — 관리자 판본만. entity 를 주면 그 개체에 직접 정의된 것만. */
-export function VcPermsCard({ vcenterId, entityType = null, entity = null, what = '이 vCenter' }) {
+export function VcPermsCard({ vcenterId, entityType = null, entity = null, what = '이 vCenter', wide = false }) {
   const admin = hasRole('admin');
   const q = useOnce('/vcenter-info/perms', { vcenterId }, admin);
   const rows = vcPermRows(q.data?.items, { entityType, entity });
   const roles = Array.isArray(q.data?.roles) ? q.data.roles : [];
   return (
-    <Card title={`권한 목록${q.data && !q.data.notCollected ? ` ${rows.length}` : ''}`} badge={<span className="badge amber">관리자 판본</span>} sub={q.data ? vcInfoHeadText(q.data) : null}
+    <Card style={wide ? WIDE : undefined} title={`권한 목록${q.data && !q.data.notCollected ? ` ${rows.length}` : ''}`} badge={<span className="badge amber">관리자 판본</span>} sub={q.data ? vcInfoHeadText(q.data) : null}
       more={admin ? <button type="button" className="vcd-more" onClick={q.reload} disabled={q.loading}>{q.loading ? '불러오는 중…' : '다시 읽기'}</button> : null}>
       {!admin ? <div style={{ padding: 12 }}><ErrorBox error={adminOnlyError()} /></div>
         : q.error && !q.data ? <div style={{ padding: 12 }}><ErrorBox error={q.error} /></div>
@@ -185,7 +189,7 @@ const gateBody = (ok, q, label) => (!ok ? <div style={{ padding: 12 }}><ErrorBox
   : q.error && !q.data ? <div style={{ padding: 12 }}><ErrorBox error={q.error} /></div> : !q.data ? <Loading label={label} /> : null);
 
 /** 연결된 vCenter Server 시스템(Enhanced Linked Mode) — /api/vcenter/topology/nodes · replication-status. */
-export function VcLinkedCard({ vcenterId }) {
+export function VcLinkedCard({ vcenterId, wide = false }) {
   const ok = can('inv.hosts');
   const q = useOnce('/vcenter-info/linked', { vcenterId }, ok);
   const d = q.data;
@@ -193,7 +197,7 @@ export function VcLinkedCard({ vcenterId }) {
   const rep = Array.isArray(d?.replication) ? d.replication : [];
   const rs = replicationSummary(rep);
   return (
-    <Card title={`연결된 vCenter${d && !d.notCollected ? ` ${nodes.length}` : ''}`} badge={rs.down ? <span className="badge red">복제 파트너 끊김 {rs.down}</span> : null} sub={d ? vcInfoHeadText(d) : null} more={ok ? reloadBtn(q) : null}>
+    <Card style={wide ? WIDE : undefined} title={`연결된 vCenter${d && !d.notCollected ? ` ${nodes.length}` : ''}`} badge={rs.down ? <span className="badge red">복제 파트너 끊김 {rs.down}</span> : null} sub={d ? vcInfoHeadText(d) : null} more={ok ? reloadBtn(q) : null}>
       {gateBody(ok, q, '연결된 vCenter') || (
         <>
           <Status d={d} />
@@ -232,14 +236,14 @@ export function VcLinkedCard({ vcenterId }) {
 }
 
 /** vCenter 어플라이언스 업데이트 — /api/appliance/update · pending?source_type=LAST_CHECK(마지막 확인 결과만 — 새 확인을 일으키지 않는다). */
-export function VcUpdatesCard({ vcenterId }) {
+export function VcUpdatesCard({ vcenterId, wide = false }) {
   const ok = can('inv.hosts');
   const q = useOnce('/vcenter-info/updates', { vcenterId }, ok);
   const d = q.data;
   const pend = Array.isArray(d?.pending) ? d.pending : [];
   const [b, t] = UPDATE_STATE[d?.state] || ['gray', d?.state || '—'];
   return (
-    <Card title="vCenter 업데이트" badge={d && !d.notCollected && d.state ? <span className={`badge ${b}`}>{t}</span> : null} sub={d ? vcInfoHeadText(d) : null} more={ok ? reloadBtn(q) : null}>
+    <Card style={wide ? WIDE : undefined} title="vCenter 업데이트" badge={d && !d.notCollected && d.state ? <span className={`badge ${b}`}>{t}</span> : null} sub={d ? vcInfoHeadText(d) : null} more={ok ? reloadBtn(q) : null}>
       {gateBody(ok, q, 'vCenter 업데이트') || (
         <>
           <Status d={d} />
@@ -280,14 +284,14 @@ export function VcUpdatesCard({ vcenterId }) {
 }
 
 /** vLCM 이미지 준수 — 클러스터마다 enablement/software(이미지 관리인가) → software/compliance(마지막 스캔 결과). */
-export function VcVlcmCard({ vcenterId }) {
+export function VcVlcmCard({ vcenterId, wide = false }) {
   const ok = can('inv.hosts');
   const q = useOnce('/vcenter-info/vlcm', { vcenterId }, ok);
   const d = q.data;
   const rows = vlcmRows(d?.items);
   const c = vlcmCounts(rows);
   return (
-    <Card title={`vLCM 이미지 준수${d && !d.notCollected ? ` ${c.image}/${c.clusters}` : ''}`} badge={c.nonCompliant ? <span className="badge amber">미준수 {c.nonCompliant}</span> : null} sub={d ? vcInfoHeadText(d) : null} more={ok ? reloadBtn(q) : null}>
+    <Card style={wide ? WIDE : undefined} title={`vLCM 이미지 준수${d && !d.notCollected ? ` ${c.image}/${c.clusters}` : ''}`} badge={c.nonCompliant ? <span className="badge amber">미준수 {c.nonCompliant}</span> : null} sub={d ? vcInfoHeadText(d) : null} more={ok ? reloadBtn(q) : null}>
       {gateBody(ok, q, 'vLCM 이미지 준수') || (
         <>
           <Status d={d} />
@@ -336,7 +340,7 @@ export function HostVlcmCard({ vcenterId, host, hostRef }) {
             <div style={{ padding: '10px 14px', display: 'grid', gap: 6, fontSize: 12.5 }}>
               <div>{`클러스터 ${m.row.name || m.row.cluster} · 관리 방식 ${m.row.enabled === true ? '이미지' : m.row.enabled === false ? '베이스라인(이미지 아님)' : '—'}`}</div>
               {m.row.enabled === true && <div>클러스터 준수 <span className={`badge ${sb}`}>{st}</span>{m.row.scanTime ? <span className="muted"> · 마지막 스캔 {shortTs(m.row.scanTime)}</span> : null}</div>}
-              {m.row.enabled === true && <div>{m.nonCompliant ? <span className="badge amber">이 호스트는 미준수 · 호환 안 됨 목록에 있습니다</span> : (m.row.nc || []).length >= 100 ? <span className="muted">미준수 목록이 상한(100)이라 이 호스트를 단정하지 않습니다.</span> : '이 호스트는 미준수 목록에 없습니다.'}</div>}
+              {m.row.enabled === true && <div>{m.nonCompliant ? <span className="badge amber">이 호스트는 미준수 · 호환 안 됨 목록에 있습니다</span> : (m.row.nc || []).length >= (d.limits?.ncMax ?? Infinity) ? <span className="muted">{`미준수 목록이 수집 상한(${d.limits.ncMax})에 걸려 이 호스트를 단정하지 않습니다.`}</span> : '이 호스트는 미준수 목록에 없습니다.'}</div>}
               {m.row.error && <div className="muted">{m.row.error}</div>}
             </div>
           ))}

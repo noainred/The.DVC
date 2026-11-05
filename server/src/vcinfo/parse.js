@@ -67,14 +67,16 @@ export function parseTaskInfo(xml) {
   const s = String(xml || '').slice(0, 200_000);
   const key = capTxt(first(s, 'key'), 64);
   if (!key) return null;
-  // result · reason 안에도 같은 이름 태그가 있을 수 있다(TaskReasonAlarm.entityName) — 그 앞까지만 본다.
-  const cut = s.search(/<(?:result|reason)(?=[\s>])/);
-  const head = cut >= 0 ? s.slice(0, cut) : s;
+  // error(LocalizedMethodFault) 안에는 fault 필드로 <reason> 이 올 수 있다(DasConfigFault 등 — 반증 하-2) — 오류 블록을 먼저 떼어 낸다.
+  //   그 뒤 result · reason 안에도 같은 이름 태그가 있을 수 있다(TaskReasonAlarm.entityName) — 그 앞까지만 본다.
+  const errBlk = between(s, /<error(?=[\s>])/, '</error>');
+  const rest = errBlk ? s.replace(errBlk, '') : s;
+  const cut = rest.search(/<(?:result|reason)(?=[\s>])/);
+  const head = cut >= 0 ? rest.slice(0, cut) : rest;
   const ent = refOf(head, 'entity');
   const state = first(head, 'state');
-  const errBlk = between(head, /<error(?=[\s>])/, '</error>');
-  const rs = s.search(/<reason(?=[\s>])/);
-  const reasonBlk = rs >= 0 ? between(s.slice(rs), /<reason(?=[\s>])/, '</reason>') : '';
+  const rs = rest.search(/<reason(?=[\s>])/);
+  const reasonBlk = rs >= 0 ? between(rest.slice(rs), /<reason(?=[\s>])/, '</reason>') : '';
   const reasonType = reasonBlk ? /^<reason[^>]{0,200}xsi:type="(TaskReason\w{1,32})"/.exec(reasonBlk)?.[1] || null : null;
   const prog = first(head, 'progress');
   const progress = prog != null && /^\d{1,3}$/.test(prog) ? Math.min(100, Number(prog)) : null;
@@ -140,14 +142,23 @@ export function nameMapOf(objs) {
   return m;
 }
 
-/** 작업 버퍼 병합 — 새로 읽은 것이 같은 key 를 덮고, keepMs 보다 오래 끝난 것과 상한 밖은 버린다(최신 순). */
-export function mergeTasks(prev, fresh, { now = Date.now(), keepMs = 24 * 3_600_000, max = VCINFO_LIMITS.tasks } = {}) {
+/** 작업 버퍼 보관 기간(화면은 API 의 limits.keepMs 로 말한다). */
+export const TASK_KEEP_MS = 24 * 3_600_000;
+/**
+ * 작업 버퍼 병합 — 새로 읽은 것이 같은 key 를 덮고, keepMs 보다 오래된 것(끝났든 아니든)과 상한 밖은 버린다(최신 순).
+ * 실행 중 · 대기로 기억한 작업이 새 목록(recentTask)에서 끝난 모습을 보이지 않고 사라졌으면 상태를 모른다(null) — 영원히 '실행 중' 으로 두지 않는다(반증 하-3).
+ */
+export function mergeTasks(prev, fresh, { now = Date.now(), keepMs = TASK_KEEP_MS, max = VCINFO_LIMITS.tasks } = {}) {
   const byKey = new Map();
-  for (const t of Array.isArray(prev) ? prev : []) if (t?.key) byKey.set(t.key, t);
+  const freshKeys = new Set((Array.isArray(fresh) ? fresh : []).map((t) => t?.key).filter(Boolean));
+  for (const t of Array.isArray(prev) ? prev : []) {
+    if (!t?.key) continue;
+    byKey.set(t.key, !freshKeys.has(t.key) && (t.state === 'running' || t.state === 'queued') ? { ...t, state: null, progress: null, lost: true } : t);
+  }
   for (const t of Array.isArray(fresh) ? fresh : []) if (t?.key) byKey.set(t.key, t);
   const when = (t) => t.completed ?? t.started ?? t.queued ?? 0;
   return [...byKey.values()]
-    .filter((t) => !(t.completed != null && now - t.completed > keepMs))
+    .filter((t) => !(when(t) && now - when(t) > keepMs))
     .sort((a, b) => when(b) - when(a))
     .slice(0, max);
 }
@@ -177,7 +188,7 @@ function sanTasks(k) {
     key: str(x.key, 64), op: str(x.op, 128), entityType: typ(x.entityType), entity: ref(x.entity), entityName: str(x.entityName, 128),
     state: TASK_STATES.has(x.state) ? x.state : null, progress: int(x.progress) != null && x.progress >= 0 && x.progress <= 100 ? x.progress : null,
     queued: ts(x.queued), started: ts(x.started), completed: ts(x.completed), user: str(x.user, 128),
-    reason: ['user', 'schedule', 'alarm', 'system'].includes(x.reason) ? x.reason : null, error: str(x.error, 300),
+    reason: ['user', 'schedule', 'alarm', 'system'].includes(x.reason) ? x.reason : null, error: str(x.error, 300), ...(x.lost === true ? { lost: true } : {}),
   })).filter((x) => x.key);
   return { ...head(k), items };
 }

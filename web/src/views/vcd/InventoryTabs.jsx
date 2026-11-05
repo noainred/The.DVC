@@ -132,6 +132,7 @@ export function PermsTab({ vcenterId }) {
   const q = useOnce('/tools/report/changes', { vcenterId, days: 90, category: PERM_CATEGORY, limit: 300 }, ok);
   return (
     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(460px, 100%), 1fr))', gap: 12, marginTop: 10, minWidth: 0 }}>
+      <VcPermsCard vcenterId={vcenterId} wide />
       <Card title="지금 아는 것" badge={<span className="badge blue">권한 · 역할 변경 이벤트</span>} sub="최근 90일 · 구성 변경 이력의 ‘권한’ 분류"
         more={<ToolLink tool="change-history">변경 이력에서 열기 →</ToolLink>}>
         {!ok ? <div style={{ padding: 12 }}><ErrorBox error={toolDenied('구성 변경 이력')} /></div>
@@ -139,7 +140,6 @@ export function PermsTab({ vcenterId }) {
             : !q.data ? <Loading label="권한 변경 이벤트" /> : <EventRows data={q.data} vcenterId={vcenterId} empty="최근 90일에 권한 · 역할 변경 이벤트가 없습니다." />}
         <Note>목록이 아니라 변경 기록입니다 — 지금 누가 어떤 역할인지는 이 표로 알 수 없습니다.</Note>
       </Card>
-      <VcPermsCard vcenterId={vcenterId} />
     </div>
   );
 }
@@ -148,15 +148,15 @@ export function PermsTab({ vcenterId }) {
 export function LinkedTab({ site, vcenterId }) {
   return (
     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(460px, 100%), 1fr))', gap: 12, marginTop: 10, minWidth: 0 }}>
+      <VcLinkedCard vcenterId={vcenterId} wide />
       <Card title="지금 아는 것" badge={<span className="badge blue">이 vCenter</span>}>
         <KV rows={[
           ['이름', <b key="n">{site.name || vcenterId}</b>],
           ['포탈 vCenter id', <span className="mono" key="i">{vcenterId}</span>],
           ['상태', <StateBadge key="s" state={site.status} />],
         ]} />
-        <Note>포탈 등록부의 다른 vCenter 는 Enhanced Linked Mode 연결 여부와 무관한 목록입니다 — 연결 여부는 오른쪽(vCenter 가 보고한 같은 SSO 도메인 구성원)으로만 말합니다.</Note>
+        <Note>포탈 등록부의 다른 vCenter 는 Enhanced Linked Mode 연결 여부와 무관한 목록입니다 — 연결 여부는 위 표(vCenter 가 보고한 같은 SSO 도메인 구성원)로만 말합니다.</Note>
       </Card>
-      <VcLinkedCard vcenterId={vcenterId} />
     </div>
   );
 }
@@ -188,8 +188,8 @@ export function UpdatesTab({ site, vcenterId, hosts, hostsOk, gate }) {
         ) : <div className="muted" style={{ padding: '10px 14px', fontSize: 12.5 }}>버전을 보고한 호스트가 없습니다.</div>}
         {hostsOk && esxi.unknown > 0 && <Note>버전을 보고하지 않은 호스트 {esxi.unknown}대(끊김 등)는 어느 행에도 세지 않았습니다.</Note>}
       </Card>
-      <VcUpdatesCard vcenterId={vcenterId} />
-      <VcVlcmCard vcenterId={vcenterId} />
+      <VcUpdatesCard vcenterId={vcenterId} wide />
+      <VcVlcmCard vcenterId={vcenterId} wide />
     </div>
   );
 }

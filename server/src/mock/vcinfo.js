@@ -3,7 +3,7 @@
 const MIN = 60_000;
 const refOf = (id) => String(id || '').split(':').pop();
 
-export function mockVcInfo(kind, vcId, snap, now = Date.now()) {
+export function mockVcInfo(kind, vcId, snap, now = Date.now(), allowed = null) {
   const hosts = (snap?.hosts || []).filter((h) => h.vcenterId === vcId);
   const vms = (snap?.vms || []).filter((v) => v.vcenterId === vcId && !v.template);
   const dss = (snap?.datastores || []).filter((d) => d.vcenterId === vcId);
@@ -69,7 +69,8 @@ export function mockVcInfo(kind, vcId, snap, now = Date.now()) {
   if (kind === 'linked') {
     // 같은 지역(id 앞머리 'vc-<지역>') 의 vCenter 들을 한 SSO 도메인으로 묶는다 — 혼자면 자기 1개.
     const region = String(vcId).split('-').slice(0, 2).join('-');
-    const peers = (snap?.vcenters || []).filter((v) => v.id !== vcId && String(v.id).startsWith(region)).slice(0, 2);
+    // 범위 계정에는 범위 안 동료만(데모라도 범위 밖 vCenter id 를 노드 이름으로 보이지 않는다 — 반증 하-6).
+    const peers = (snap?.vcenters || []).filter((v) => v.id !== vcId && String(v.id).startsWith(region) && (!allowed || allowed.has(v.id))).slice(0, 2);
     const fq = (id) => `${String(id).toLowerCase()}.corp.example`;
     const all = [vcId, ...peers.map((v) => v.id)];
     const nodes = all.map((id) => ({ node: fq(id), type: 'VCSA_EMBEDDED', partners: all.filter((x) => x !== id).map(fq) }));

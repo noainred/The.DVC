@@ -177,15 +177,21 @@ test('③ 엣지 정제 — 아는 키만 · 형식 밖 null · 상한 · 객체
 test('③ 중앙 수신 — vcenter 객체에서 vcInfo 를 지우고(정제 후) 캐시에만 넣는다 · 스냅샷 vCenter 객체에 권한 목록이 없다', async () => {
   const src = fs.readFileSync(path.join(import.meta.dirname, '..', 'src', 'routes', 'central.js'), 'utf8');
   assert.match(src, /vcInfoIn = sanitizeVcInfo\(vcenter\.vcInfo\)[\s\S]{0,200}delete vcenter\.vcInfo/);
-  assert.match(src, /setInventory\(vcId, slice, agent[^\n]*\n\s*if \(vcInfoIn\) putVcInfoFromEdge\(vcId, vcInfoIn, agent\)/, '수신이 받아들여진 뒤(setInventory 다음)에만 넣는다');
+  assert.match(src, /setInventory\(vcId, slice, agent[^\n]*\n(?:\s*\/\/[^\n]*\n)*\s*if \(!edgeVcWriteDenied\(vcId, \{ requireSite: true \}\)\) putVcInfoFromEdge\(vcId, vcInfoIn, agent\)/, '수신이 받아들여진 뒤(setInventory 다음) · 사이트 위임 등록 vCenter 만');
   // 수집기는 vcenter 객체에 싣지 않는다(soapClient 반환 객체에 vcInfo · vcPerms 키가 없다)
   const soap = fs.readFileSync(path.join(import.meta.dirname, '..', 'src', 'vcenter', 'soapClient.js'), 'utf8');
   const ret = soap.slice(soap.indexOf('solutions, licenses, clusterCfg, tagInv, invFetch'), soap.indexOf('hosts, vms, datastores, networks, alarms,'));
   assert.doesNotMatch(ret, /vcInfo|perms|vcAlarms|vcTasks/);
+  // 반증 하-5 ②: 받은 것으로 통째로 바꾼다 — 엣지가 캐시를 비웠으면(접속처 변경) 중앙도 옛 권한 목록을 지운다 · 직접 읽은 항목은 엣지가 못 지운다
   C._resetVcInfo();
-  C.putFromEdge('vcE', { alarms: { at: 1, items: [] } }, 'edge-a');
-  C.putFromEdge('vcE', { perms: { at: 2, items: [], roles: [] } }, 'edge-a');
-  assert.deepEqual([C.getVcInfo('vcE').alarms.at, C.getVcInfo('vcE').perms.at, C.getVcInfo('vcE').source], [1, 2, 'edge'], '받은 종류만 덮는다');
+  C.putFromEdge('vcE', { alarms: { at: 1, items: [] }, perms: { at: 2, items: [], roles: [] } }, 'edge-a');
+  C.putFromEdge('vcE', { alarms: { at: 3, items: [] } }, 'edge-a');
+  assert.deepEqual([C.getVcInfo('vcE').alarms.at, C.getVcInfo('vcE').perms, C.getVcInfo('vcE').source], [3, undefined, 'edge'], '보내지 않은 종류는 남기지 않는다');
+  C.putFromEdge('vcE', null, 'edge-a');
+  assert.equal(C.getVcInfo('vcE'), null, 'vcInfo 가 없으면 엣지 출처 항목을 지운다');
+  await C.refreshVcInfo(fakeClient(), { id: 'vcL' }, { now: Date.parse('2026-11-05T03:00:00Z') });
+  C.putFromEdge('vcL', null, 'edge-x');
+  assert.equal(C.getVcInfo('vcL').source, 'local', '직접 읽은 항목은 엣지 push 로 지우지 않는다');
 });
 
 async function seedSnapshot(patch) {
@@ -382,4 +388,74 @@ test('③④ 엣지 정제 — REST 3종도 아는 키만', () => {
   assert.equal(v.updates.state, null);
   assert.equal(v.updates.pending[0].sizeMB, null);
   assert.deepEqual([v.vlcm.items[0].status, v.vlcm.items[0].nc, v.vlcm.items[0].counts.compliant], [null, [{ id: 'host-1', name: 'h' }], null]);
+});
+
+// ════════════════════════════ 반증 지적 반영(v2.897) ════════════════════════════
+test('반증 중-1 — 중앙이 vcInfo 를 모르는 버전(또는 미상)이면 push 에 붙이지 않는다', async () => {
+  const push = await import('../src/agent/inventoryPush.js');
+  C._resetVcInfo();
+  await C.refreshVcInfo(fakeClient(), { id: 'vcP' }, { now: Date.parse('2026-11-05T03:00:00Z') });
+  push._setVcInfoCapForTest(() => ({ ok: false, reason: 'central-too-old' }));
+  assert.equal(Object.hasOwn(await push.vcenterForPush({ id: 'vcP', name: 'P' }), 'vcInfo'), false);
+  push._setVcInfoCapForTest(() => { throw new Error('probe down'); });
+  assert.equal(Object.hasOwn(await push.vcenterForPush({ id: 'vcP', name: 'P' }), 'vcInfo'), false, '확인 실패도 붙이지 않는다');
+  push._setVcInfoCapForTest(() => ({ ok: true }));
+  const v = await push.vcenterForPush({ id: 'vcP', name: 'P' });
+  assert.equal(v.vcInfo.perms.items.length, 2);
+  let probed = 0;
+  push._setVcInfoCapForTest(() => { probed += 1; return { ok: true }; });
+  await push.vcenterForPush({ id: 'none' });
+  assert.equal(probed, 0, '붙일 것이 없으면 중앙에 묻지도 않는다');
+  push._setVcInfoCapForTest(null);
+  assert.equal(push.VCINFO_MIN_CENTRAL, '2.898.0');
+});
+
+test('반증 중-2 — 한 번도 읽지 못한 상태는 0건이 아니라 아직 읽지 않음(오류와 함께)', async () => {
+  const { vcInfoBody } = await import('../src/routes/api/vcInfo.js');
+  const b = vcInfoBody('tasks', 'v', { at: null, items: [], error: 'NoPermission' }, { admin: true });
+  assert.equal(b.at, null);
+  assert.match(b.notCollected, /아직 한 번도 읽지 못했습니다 — NoPermission/);
+  assert.match(vcInfoBody('vlcm', 'v', { at: null, error: 'REST 로그인 실패 — 권한 없음(401)' }).notCollected, /REST 로그인 실패/);
+  assert.match(vcInfoBody('perms', 'v', { at: null, items: [], retryAt: 5 }).notCollected, /아직 읽지 않았습니다/);
+  assert.equal(vcInfoBody('tasks', 'v', { at: 1, items: [] }).notCollected, undefined, '읽었는데 0건이면 0건이다');
+  assert.deepEqual(vcInfoBody('tasks', 'v', null).limits, { max: P.VCINFO_LIMITS.tasks, keepMs: P.TASK_KEEP_MS }, '상한 · 보관 기간은 API 값으로');
+  // 첫 주기에 시한으로 건너뛰면(직전 값 없음) 라우트는 아직 읽지 않음으로 말한다
+  C._resetVcInfo();
+  const r = await C.refreshVcInfo(fakeClient(), { id: 'vcZ' }, { now: Date.parse('2026-11-05T03:00:00Z'), budgetMs: -1 });
+  assert.match(vcInfoBody('alarms', 'vcZ', r.alarms).notCollected, /아직 읽지 않았습니다/);
+});
+
+test('반증 하-2 · 하-3 · 하-4 — fault 안의 reason · 사라진 실행 중 작업 · recentTask 선형 파싱', () => {
+  const t = P.parseTaskInfo('<key>task-9</key><descriptionId>ClusterComputeResource.reconfigureEx</descriptionId><entity type="ClusterComputeResource">domain-c1</entity><entityName>Prod</entityName><state>error</state>'
+    + '<error><fault xsi:type="DasConfigFault"><reason>HostFailed</reason><output>x</output></fault><localizedMessage>HA 구성 실패</localizedMessage></error>'
+    + '<reason xsi:type="TaskReasonUser"><userName>CORP\\lee</userName></reason><startTime>2026-11-05T01:00:00Z</startTime>');
+  assert.deepEqual([t.error, t.user, t.reason, t.entityName], ['HA 구성 실패', 'CORP\\lee', 'user', 'Prod']);
+  const now = Date.parse('2026-11-05T12:00:00Z');
+  const m = P.mergeTasks([{ key: 'r', state: 'running', progress: 40, started: now - 60_000 }, { key: 'q', state: 'queued', queued: now - 1000 }, { key: 'old', state: 'running', started: now - 25 * 3_600_000 }], [{ key: 'q', state: 'success', started: now - 900, completed: now - 100 }], { now });
+  assert.deepEqual(m.map((x) => [x.key, x.state, x.lost ?? false]), [['q', 'success', false], ['r', null, true]], '사라진 실행 중 작업은 상태 모름 · 24시간 넘은 것은 끝나지 않았어도 버린다');
+  assert.deepEqual(C.taskRefsOf('<ManagedObjectReference type="Task">task-1</ManagedObjectReference><ManagedObjectReference xsi:type="ManagedObjectReference" type="Task">task-2</ManagedObjectReference><ManagedObjectReference type="VirtualMachine">vm-1</ManagedObjectReference>'), ['task-1', 'task-2']);
+  const mk = (n) => '<ManagedObjectReference '.repeat(n) + ' type="Task"'.repeat(n);
+  const { a, b } = pairMinTimes(() => C.taskRefsOf(mk(3_000)), () => C.taskRefsOf(mk(24_000)));
+  assert.ok(b / a < 24, `비율 ${(b / a).toFixed(1)}`);
+});
+
+test('반증 하-5 ① — 등록부에 없는 vCenter 의 vcinfo 항목은 등록부 동기화가 지운다', async () => {
+  const { syncVcConfigCaches } = await import('../src/hostcfg/cache.js');
+  C._resetVcInfo();
+  C.putFromEdge('ghost-1', { alarms: { at: 1, items: [] } }, 'e');
+  C.putFromEdge('real', { alarms: { at: 1, items: [] } }, 'e');
+  syncVcConfigCaches([{ id: 'real', host: 'vc.corp' }]);
+  assert.equal(C.getVcInfo('ghost-1'), null);
+  assert.ok(C.getVcInfo('real'));
+});
+
+test('반증 하-6 · 하-7 — 데모 Linked 는 범위 안 동료만 · IPv6 주소를 포트로 자르지 않는다', async () => {
+  const { mockVcInfo } = await import('../src/mock/vcinfo.js');
+  const snap = { vcenters: [{ id: 'vc-us-east' }, { id: 'vc-us-west' }], hosts: [], vms: [], datastores: [] };
+  assert.equal(mockVcInfo('linked', 'vc-us-east', snap, Date.now(), null).nodes.length, 2);
+  assert.deepEqual(mockVcInfo('linked', 'vc-us-east', snap, Date.now(), new Set(['vc-us-east'])).nodes.map((n) => n.node), ['vc-us-east.corp.example']);
+  const { hostKey, linkedPortalMap } = await import('../src/routes/api/vcInfo.js');
+  assert.deepEqual(['https://VC1.corp:443/sdk', 'vc1.corp', 'https://[fd00::10]:443', 'fd00::10', '10.0.0.5:443'].map(hostKey), ['vc1.corp', 'vc1.corp', 'fd00::10', 'fd00::10', '10.0.0.5']);
+  const nodes = linkedPortalMap([{ node: 'fd00::10' }, { node: 'fd00::11' }], [{ id: 'a', host: 'https://[fd00::10]' }], [{ id: 'a', name: 'A' }], null);
+  assert.deepEqual(nodes.map((n) => n.portal?.id ?? null), ['a', null], '다른 IPv6 노드와 잘못 짝짓지 않는다');
 });

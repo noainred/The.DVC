@@ -339,6 +339,29 @@ describe('v2.897 vCenter 알람 · 작업 · 권한 카드 — 렌더(얕게)', 
   });
 });
 
+describe('v2.897 반증 하-8 — vCenter 를 옮기면 이전 vCenter 의 값을 보이지 않는다(useOnce 키)', () => {
+  it('A 의 작업을 읽은 뒤 B 로 바꾸면 B 를 읽는 동안 A 표를 그리지 않고, B 가 실패하면 A 값으로 오류를 가리지 않는다', async () => {
+    const { VcTasksCard } = await import('./VcInfoParts.jsx');
+    let failB = null;
+    H.api.fetchJson = (p, q) => (q.vcenterId === 'vcA'
+      ? Promise.resolve({ ok: true, at: 1, refreshMs: 1, items: [{ key: 't1', op: 'VirtualMachine.powerOn', state: 'success' }] })
+      : new Promise((_, rej) => { failB = rej; }));
+    const rt = mount(VcTasksCard, { vcenterId: 'vcA' });
+    await flush();
+    expect(all(rt, (e) => e.type === STable).length).toBe(1);
+    rt.props = { vcenterId: 'vcB' };
+    H.render(rt);
+    await flush();
+    expect(all(rt, (e) => e.type === STable).length).toBe(0);
+    expect(all(rt, (e) => e.type === Loading).length).toBe(1);
+    failB(Object.assign(new Error('boom'), { status: 502 }));
+    await flush();
+    expect(all(rt, (e) => e.type === STable).length).toBe(0);
+    expect(all(rt, (e) => e.type === ErrorBox).length).toBe(1);
+    unmount(rt);
+  });
+});
+
 describe('v2.897 ④ 연결된 vCenter · 업데이트 · vLCM 카드 — 렌더(얕게)', () => {
   it('세 카드가 각각 /vcenter-info/<kind> 한 번 · 업데이트 대기 목록 · vLCM 미준수 호스트 · 연결된 vCenter 포탈 링크', async () => {
     const { VcLinkedCard, VcUpdatesCard, VcVlcmCard } = await import('./VcInfoParts.jsx');

@@ -8,12 +8,29 @@ import { isAdminDetailUser } from '../../auth/demoGuest.js';
 import { store } from '../../store.js';
 import { config, loadVcenterConfig } from '../../config.js';
 import { getVcInfo, VCINFO_REFRESH_MS } from '../../vcinfo/collect.js';
+import { VCINFO_LIMITS, VCREST_LIMITS, TASK_KEEP_MS } from '../../vcinfo/parse.js';
 import { mockVcInfo } from '../../mock/vcinfo.js';
 
 export const VCINFO_KINDS = Object.freeze(['alarms', 'tasks', 'perms', 'linked', 'updates', 'vlcm']);
 /** 종류별 기능 권한 — 알람 · 작업 · 권한 목록은 알람 권한, Linked Mode · 업데이트 · vLCM 은 호스트 조회 권한(버전 · 구성 정보). */
 export const VCINFO_PERM = Object.freeze({ alarms: 'inv.alarms', tasks: 'inv.alarms', perms: 'inv.alarms', linked: 'inv.hosts', updates: 'inv.hosts', vlcm: 'inv.hosts' });
-const hostKey = (h) => String(h || '').trim().toLowerCase().replace(/^[a-z]+:\/\//, '').replace(/[/:].*$/, '');
+/** 등록 주소 · 노드 이름의 호스트 부분 — 스킴 · 경로 · 포트를 뗀다. IPv6 는 '[…]' 안, 괄호 없는 IPv6(콜론 2개 이상)는 통째로(반증 하-7). */
+export function hostKey(h) {
+  let s = String(h || '').trim().toLowerCase().replace(/^[a-z][a-z0-9+.-]{0,15}:\/\//, '');
+  s = s.split('/')[0];
+  if (s.startsWith('[')) { const e = s.indexOf(']'); return e > 0 ? s.slice(1, e) : ''; }
+  if ((s.match(/:/g) || []).length >= 2) return s;
+  return s.split(':')[0];
+}
+// 등록부(id · host)만 짧게 기억한다 — 요청마다 파일을 읽고 비밀을 풀지 않게(반증 하-8).
+let _reg = { at: 0, list: [] };
+function registryHosts(now = Date.now()) {
+  if (now - _reg.at < 30_000) return _reg.list;
+  let list = [];
+  try { list = (loadVcenterConfig().vcenters || []).filter((r) => r && r.id != null).map((r) => ({ id: String(r.id), host: r.host })); } catch { list = []; }
+  _reg = { at: now, list };
+  return list;
+}
 /**
  * Linked Mode 구성원 → 포탈 등록 vCenter(조회 범위 안만). 노드 이름(FQDN/IP)과 등록 주소의 호스트 부분이 같을 때만 — 범위 밖 등록은 알려 주지 않는다
  * (등록 여부도 범위 밖 정보다). 접속하지 않는다(발견한 주소로 자동 접속하면 SSRF · TLS 신뢰 규약에 걸린다).
@@ -34,12 +51,21 @@ export function linkedPortalMap(nodes, registry, snapVcs, allowed, { mock = fals
     return { ...n, portal: id ? { id, name: v?.name || id, version: v?.version || null, build: v?.build || null, status: v?.status || null } : null };
   });
 }
-const NOT_YET_TEXT = '아직 읽지 않았습니다 — 다음 수집 주기에 읽습니다(엣지가 수집하는 vCenter 는 엣지가 v2.897 이상이어야 보냅니다).';
+const NOT_YET_TEXT = '아직 읽지 않았습니다 — 다음 수집 주기에 읽습니다(엣지가 수집하는 vCenter 는 엣지 · 중앙이 v2.897 이상이어야 보냅니다).';
+/** 화면이 말하는 상한 · 보관 기간(숫자를 화면에 박지 않는다 — 반증 하-8). */
+const KIND_LIMITS = Object.freeze({
+  alarms: { max: VCINFO_LIMITS.alarms }, tasks: { max: VCINFO_LIMITS.tasks, keepMs: TASK_KEEP_MS }, perms: { max: VCINFO_LIMITS.perms },
+  vlcm: { clusters: VCREST_LIMITS.clusters, ncMax: VCREST_LIMITS.nc },
+});
 
 /** 응답 본문(순수 — 테스트 고정). entry 는 캐시의 그 종류 값(없으면 null), admin 은 관리자 판본 여부. */
 export function vcInfoBody(kind, vcenterId, entry, { admin = false, source = null } = {}) {
-  const base = { ok: true, kind, vcenterId, refreshMs: VCINFO_REFRESH_MS[kind], source };
-  if (!entry) return { ...base, at: null, items: [], notCollected: NOT_YET_TEXT, error: null };
+  const base = { ok: true, kind, vcenterId, refreshMs: VCINFO_REFRESH_MS[kind], source, ...(KIND_LIMITS[kind] ? { limits: KIND_LIMITS[kind] } : {}) };
+  // 한 번도 읽지 못했으면(at 없음 — 첫 시도 실패 · 시한으로 건너뜀 · REST 로그인 거부) '0건 · 없음' 이 아니라 '아직 읽지 않음' 이다(반증 중-2).
+  if (!entry || entry.at == null) {
+    const err = entry?.error ?? null;
+    return { ...base, at: null, items: [], notCollected: err ? `아직 한 번도 읽지 못했습니다 — ${err}` : NOT_YET_TEXT, error: err };
+  }
   // ④ REST 3종은 모양이 달라 값을 그대로 싣는다(정제된 캐시 · 사람 이름 없음). retryAt 은 내부 값이라 뺀다.
   if (kind === 'linked' || kind === 'updates' || kind === 'vlcm') {
     const { retryAt, ...rest } = entry; void retryAt;
@@ -74,12 +100,10 @@ export function registerVcInfo(api) {
     if (kind === 'perms' && !admin) return res.status(403).json({ ok: false, adminOnly: true, reason: '권한 목록(사용자 · 그룹 · 역할)은 관리자 판본에서만 볼 수 있습니다.' });
     const cached = getVcInfo(vcenterId);
     const mock = vc.mock === true || config.dataSource === 'mock';
-    const entry = cached?.[kind] || (mock ? mockVcInfo(kind, vcenterId, snap) : null);
+    const entry = cached?.[kind] || (mock ? mockVcInfo(kind, vcenterId, snap, Date.now(), allowed) : null);
     const body = vcInfoBody(kind, vcenterId, entry, { admin, source: cached?.[kind] ? cached.source : mock ? 'mock' : null });
     if (kind === 'linked' && entry) {
-      let reg = [];
-      try { reg = loadVcenterConfig().vcenters || []; } catch { reg = []; }
-      body.nodes = linkedPortalMap(entry.nodes, reg, snap.vcenters, allowed, { mock: body.source === 'mock' });
+      body.nodes = linkedPortalMap(entry.nodes, registryHosts(), snap.vcenters, allowed, { mock: body.source === 'mock' });
     }
     res.json(body);
   });
