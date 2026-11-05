@@ -216,7 +216,8 @@ export function parseObjectContent(xml) {
 /* ------------------- VM 전체 정보 CSV export 용 파서 (v2.275) ------------------- */
 
 // NIC 로 취급하는 VirtualDevice 구체 타입(xsi:type) — VirtualEthernetCard 하위 전부.
-const NIC_TYPE_RE = /^Virtual(E1000e?|Vmxnet\d?|Vmxnet3Vrdma|PCNet32|SriovEthernetCard)$/i;
+// v2.897: vmcfg/parse.js(개체 보기 어댑터 표)도 이 판정 하나를 쓴다 — 'NIC 인가' 를 두 벌로 두지 않는다.
+export const NIC_TYPE_RE = /^Virtual(E1000e?|Vmxnet\d?|Vmxnet3Vrdma|PCNet32|SriovEthernetCard)$/i;
 
 /**
  * VM 'config.hardware.device'(ArrayOfVirtualDevice) XML → NIC/디스크 상세.

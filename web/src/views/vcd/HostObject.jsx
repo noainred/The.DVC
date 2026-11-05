@@ -13,7 +13,8 @@ import ObjectShell from './ObjectShell.jsx';
 import { Card, KV, Note, NotCollected } from './VcdParts.jsx';
 import { useOnce, toolDenied } from './useOnce.js';
 import { EventRows } from './SummaryTab.jsx';
-import { PermPane } from './VmObject.jsx';
+import { PermPane, vmRef } from './VmObject.jsx';
+import { VcAlarmsCard, VcTasksCard } from './VcInfoParts.jsx';
 import { vmsOnHost, resourcePoolRows, hostDatastoresFromVms, sameBuildCount } from './objTabs.js';
 import { gbText } from './vcdTabs.js';
 
@@ -74,7 +75,8 @@ export default function HostObject({ site, vcenterId, host, hostsOk, gate, hosts
             </div>
           </Card>
           <HostEvents vcenterId={vcenterId} host={host} />
-          <div className="card" style={{ padding: 14 }}><NotCollected title="최근 작업">이 호스트를 대상으로 한 작업 목록(TaskManager)은 수집하지 않습니다.</NotCollected></div>
+          <VcAlarmsCard vcenterId={vcenterId} entityType="HostSystem" entity={vmRef(host)} />
+          <VcTasksCard vcenterId={vcenterId} entityType="HostSystem" entity={vmRef(host)} />
         </div>
       )}
 
@@ -85,7 +87,7 @@ export default function HostObject({ site, vcenterId, host, hostsOk, gate, hosts
         </>
       )}
 
-      {tab === 'perms' && <PermPane vcenterId={vcenterId} entity={host.name} what="이 호스트" />}
+      {tab === 'perms' && <PermPane vcenterId={vcenterId} entity={host.name} what="이 호스트" objType="HostSystem" objRef={vmRef(host)} />}
 
       {tab === 'vms' && (
         <Card title={`VM ${vmsOk ? onHost.length : '—'}`} sub="이 호스트 위(수집기가 VM 행에 실은 호스트 이름으로 대조)">

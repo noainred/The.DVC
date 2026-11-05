@@ -310,6 +310,35 @@ describe('v2.895 개체 보기 — 렌더(얕게)', () => {
   });
 });
 
+describe('v2.897 vCenter 알람 · 작업 · 권한 카드 — 렌더(얕게)', () => {
+  it('권한 목록 — 관리자가 아니면 부르지 않고 권한 안내(403) · 작업 카드는 /vcenter-info/tasks 한 번 · 실패 메시지가 보인다', async () => {
+    const { VcPermsCard, VcTasksCard, VcAlarmsCard } = await import('./VcInfoParts.jsx');
+    const called = [];
+    H.api.fetchJson = (p, q) => {
+      called.push([p, q]);
+      return Promise.resolve(p.endsWith('/tasks')
+        ? { ok: true, kind: 'tasks', at: 1, refreshMs: 180_000, items: [{ key: 't1', op: 'VirtualMachine.powerOn', entityType: 'VirtualMachine', entity: 'vm-1', entityName: 'web', state: 'error', error: 'bad-param' }] }
+        : { ok: true, kind: 'alarms', at: null, refreshMs: 300_000, items: [], notCollected: '아직 읽지 않았습니다 — 다음 수집 주기에 읽습니다.' });
+    };
+    let rt = mount(VcPermsCard, { vcenterId: 'vc1' });
+    await flush();
+    expect(called).toEqual([]);
+    expect(all(rt, (e) => e.type === ErrorBox && e.props.error?.status === 403).length).toBe(1);
+    unmount(rt);
+    rt = mount(VcTasksCard, { vcenterId: 'vc1' });
+    await flush();
+    expect(called).toEqual([['/vcenter-info/tasks', { vcenterId: 'vc1' }]]);
+    expect(all(rt, (e) => e.type === 'td' && /bad-param/.test(textOf(e))).length).toBe(1);
+    unmount(rt);
+    rt = mount(VcAlarmsCard, { vcenterId: 'vc1' });
+    await flush();
+    const st = all(rt, (e) => typeof e.type === 'function' && e.type.name === 'Status')[0];
+    expect(textOf(st.type(st.props))).toMatch(/아직 읽지 않았습니다/);
+    expect(all(rt, (e) => e.type === STable).length).toBe(0);
+    unmount(rt);
+  });
+});
+
 describe('v2.895 성능 튜닝 탭 — 렌더(얕게)', () => {
   it('VM — 라이트사이징 권한이 없으면 부르지 않고 권한 안내 · 진단 축 5개', async () => {
     const { VmTuning } = await import('./TuningTabs.jsx');

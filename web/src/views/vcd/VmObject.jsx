@@ -14,7 +14,8 @@ import { VmRemoteButton } from '../../components/VmRemote.jsx';
 import { VmReconfigButton } from '../../components/VmReconfig.jsx';
 import { dayStamp } from '../../dayStamp.js';
 import ObjectShell from './ObjectShell.jsx';
-import { Card, KV, Note, NotCollected } from './VcdParts.jsx';
+import { Card, KV, Note } from './VcdParts.jsx';
+import { VcAlarmsCard, VcTasksCard, VcPermsCard } from './VcInfoParts.jsx';
 import { useOnce, toolDenied } from './useOnce.js';
 import { EventRows } from './SummaryTab.jsx';
 import { vmDiskRows, vmDatastoreRows, vmSnapshotFacts, toolsStatusBadge, snapTreeRows, vmNicRows } from './objTabs.js';
@@ -23,6 +24,8 @@ import { gbText, PERM_CATEGORY } from './vcdTabs.js';
 const VmMetricButton = React.lazy(() => import('../../components/VmMetrics.jsx').then((m) => ({ default: m.VmMetricButton })));
 const Lazy = ({ children }) => <React.Suspense fallback={null}>{children}</React.Suspense>;
 const GRID = 'vcd-obj-grid';
+/** 포탈 VM · 호스트 id('<vcenterId>:<moref>')의 moref — vCenter id 에 콜론이 있어도 vcenterId 앞머리로 자른다. */
+export const vmRef = (o) => (o?.id && o?.vcenterId && String(o.id).startsWith(`${o.vcenterId}:`) ? String(o.id).slice(String(o.vcenterId).length + 1) : null);
 const tsText = (t) => (Number.isFinite(t) && t > 0 ? new Date(t).toLocaleString('ko-KR') : '—');
 
 export default function VmObject({ site, vcenterId, vm, vmsOk, gate, datastores, hosts, networks, tab, onTab, onBack, onOpenHost, extraTabs, extra }) {
@@ -119,7 +122,8 @@ export default function VmObject({ site, vcenterId, vm, vmsOk, gate, datastores,
             </div>
           </Card>
           <Card title="이벤트 · 이동"><div style={{ padding: '0 14px 12px' }}>{toolAllowed('vm-changes') ? <VmChangesSection vm={vm} /> : <ErrorBox error={toolDenied('VM 이동·구성 변경 이력')} />}</div></Card>
-          <div className="card" style={{ padding: 14 }}><NotCollected title="최근 작업">이 VM 을 대상으로 한 작업 목록(TaskManager)은 수집하지 않습니다.</NotCollected></div>
+          <VcAlarmsCard vcenterId={vcenterId} entityType="VirtualMachine" entity={vmRef(vm)} />
+          <VcTasksCard vcenterId={vcenterId} entityType="VirtualMachine" entity={vmRef(vm)} />
         </div>
       )}
 
@@ -148,7 +152,7 @@ export default function VmObject({ site, vcenterId, vm, vmsOk, gate, datastores,
         </>
       )}
 
-      {tab === 'perms' && <PermPane vcenterId={vcenterId} entity={vm.name} what="이 VM" />}
+      {tab === 'perms' && <PermPane vcenterId={vcenterId} entity={vm.name} what="이 VM" objType="VirtualMachine" objRef={vmRef(vm)} />}
 
       {tab === 'datastores' && (
         <>
@@ -277,7 +281,7 @@ function SnapTreeCard({ vm }) {
 }
 
 /** 사용 권한 탭(VM · 호스트 공용) — 이 개체가 대상인 권한 · 역할 변경 이벤트(최근 90일) + 권한 목록은 수집하지 않음. */
-export function PermPane({ vcenterId, entity, what }) {
+export function PermPane({ vcenterId, entity, what, objType = null, objRef = null }) {
   const ok = toolAllowed('change-history');
   const q = useOnce('/tools/report/changes', { vcenterId, days: 90, category: PERM_CATEGORY, entity, limit: 300 }, ok && !!entity);
   return (
@@ -288,7 +292,7 @@ export function PermPane({ vcenterId, entity, what }) {
             : !q.data ? <Loading label="권한 변경 이벤트" /> : <EventRows data={q.data} vcenterId={vcenterId} empty={`최근 90일에 ${what}을(를) 대상으로 한 권한 · 역할 변경 이벤트가 없습니다.`} />}
         <Note>대상 이름이 들어간 이벤트를 찾은 것입니다(부분 일치). 목록이 아니라 변경 기록이라, 지금 누가 어떤 역할인지는 알 수 없습니다.</Note>
       </Card>
-      <div className="card" style={{ padding: 14 }}><NotCollected title="권한 목록">사용자/그룹 · 역할 · 정의 위치 · 전파(상속)는 수집하지 않습니다. 추가한다면 읽기 전용 · 탭을 열 때만 · 관리자 판본에서만 보입니다.</NotCollected></div>
+      <VcPermsCard vcenterId={vcenterId} entityType={objType} entity={objRef} what={what} />
     </div>
   );
 }

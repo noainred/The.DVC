@@ -9,6 +9,7 @@ import { STable } from '../../components/STable.jsx';
 import { useOnce, toolDenied } from './useOnce.js';
 import { Card, KV, Note, ToolLink, NotCollected } from './VcdParts.jsx';
 import { EventRows } from './SummaryTab.jsx';
+import { VcPermsCard } from './VcInfoParts.jsx'; // v2.897
 import { clusterAvgPct } from '../vcdOverview.js';
 import { groupByDatacenter, extensionsState, extensionVendor, fleetKeyStats, esxiVersionRows, versionNewer, PERM_CATEGORY } from './vcdTabs.js';
 
@@ -138,11 +139,7 @@ export function PermsTab({ vcenterId }) {
             : !q.data ? <Loading label="권한 변경 이벤트" /> : <EventRows data={q.data} vcenterId={vcenterId} empty="최근 90일에 권한 · 역할 변경 이벤트가 없습니다." />}
         <Note>목록이 아니라 변경 기록입니다 — 지금 누가 어떤 역할인지는 이 표로 알 수 없습니다.</Note>
       </Card>
-      <div className="card" style={{ padding: 14, minWidth: 0 }}>
-        <NotCollected title="권한 목록">
-          사용자/그룹 · 역할 · 정의 위치(개체) · 전파(상속)는 포탈이 수집하지 않습니다. 추가한다면 읽기 전용(AuthorizationManager) · 탭을 열 때만 조회 · 관리자 판본에서만 보입니다.
-        </NotCollected>
-      </div>
+      <VcPermsCard vcenterId={vcenterId} />
     </div>
   );
 }

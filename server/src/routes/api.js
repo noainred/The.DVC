@@ -72,6 +72,7 @@ import { registerClusterCheck } from './api/clusterCheck.js'; // 클러스터 HA
 import { registerVmChanges } from './api/vmChanges.js'; // VM 이동·구성 변경 이력(v2.702)
 import { registerCoreLicense } from './api/coreLicense.js'; // 코어 라이선스 산정(v2.703)
 import { registerVmTags } from './api/vmTags.js'; // 태그·사용자 지정 속성 점검(v2.703)
+import { registerVcInfo } from './api/vcInfo.js'; // v2.897 vCenter 알람·작업·권한 목록
 import { registerVmLifecycle } from './api/vmLifecycle.js'; // VM 생성·삭제 이력(v2.706 C5)
 import { registerContention } from './api/contention.js'; // CPU 경합·디스크 지연(v2.706 C2·C3)
 import { registerVmAvailability } from './api/vmAvailability.js'; // VM 가용성 SLA(v2.707 C6)
@@ -184,6 +185,7 @@ registerClusterCheck(api);
 registerVmChanges(api);
 registerCoreLicense(api);
 registerVmTags(api);
+registerVcInfo(api); // v2.897
 registerVmLifecycle(api);
 registerContention(api);
 registerVmAvailability(api);

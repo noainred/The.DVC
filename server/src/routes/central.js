@@ -19,6 +19,8 @@
 import { sanitizeVmDns } from '../central/vmDnsSanitize.js';
 import { sanitizeVmCfg, sanitizeVmDev } from '../vmcfg/parse.js';   // v2.697(B10)
 import { sanitizeSnapTree } from '../vcenter/soapParse.js';   // v2.897 스냅샷 트리
+import { sanitizeVcInfo } from '../vcinfo/parse.js';   // v2.897 vCenter 알람·작업·권한
+import { putFromEdge as putVcInfoFromEdge } from '../vcinfo/collect.js';
 import { sanitizeHostCfg } from '../hostcfg/parse.js';   // v2.699
 import { sanitizeDsCfg } from '../dscfg/parse.js';   // v2.700
 import { sanitizeVmPerfc, sanitizeHostPerfc } from '../contention/parse.js'; // v2.706(C2·C3)
@@ -985,6 +987,14 @@ centralRouter.post('/inventory', requireCentral(), (req, res) => {
     if (ti.dropped) dropped.coerced += ti.dropped;
     vcenter.tagInv = ti.value;
   }
+  // v2.897: vCenter 알람 · 최근 작업 · 권한 목록 — vcenter 객체에 남기지 않는다(스냅샷 vCenter 객체는 /vcenters 로 모든 인증 사용자에게
+  //   나간다 — 권한 목록이 새면 안 된다). 정제한 값은 아래 저장(setInventory)이 끝난 뒤 vcinfo 캐시에 넣는다(수신이 받아들여졌을 때만).
+  let vcInfoIn = null;
+  if (Object.hasOwn(vcenter, 'vcInfo')) {
+    vcInfoIn = sanitizeVcInfo(vcenter.vcInfo);
+    if (vcInfoIn == null && vcenter.vcInfo != null) dropped.coerced += 1;
+    delete vcenter.vcInfo;
+  }
   // v2.742(감사 VC-07): 라이선스·설치 솔루션 — 배열·객체 원소·아는 필드·상한만. 뺀 개수는 dropped.vcLicenses·vcSolutions(0 이면 키 없음 — 예전 모양).
   for (const [k, fn, dk] of [['licenses', sanitizeVcLicenses, 'vcLicenses'], ['solutions', sanitizeVcSolutions, 'vcSolutions']]) {
     // 조회 실패 사유(`licensesError`·`solutionsError` — corelicense/analyze.js vcListUnread 가 읽는다)도 글자만·상한으로.
@@ -1010,6 +1020,7 @@ centralRouter.post('/inventory', requireCentral(), (req, res) => {
   if (droppedN) console.warn(`[central] inventory: agent=${agent} vc=${vcId} 원소 ${droppedN}건 제외(객체 아님 ${dropped.notObject} · 다른 vCenter ${dropped.otherVcenter} · id 형식 ${dropped.badId}${dropped.overCount ? ` · 상한 초과 ${dropped.overCount}` : ''})`);
   if (dropped.vcLicenses || dropped.vcSolutions) console.warn(`[central] inventory: agent=${agent} vc=${vcId} vCenter 라이선스 ${dropped.vcLicenses || 0}건 · 솔루션 ${dropped.vcSolutions || 0}건을 모양이 달라 뺐습니다(배열 아님·객체 아닌 원소·모르는 형식의 필드·상한 초과)`);
   const saved = setInventory(vcId, slice, agent, b.generatedAt || null) || {};
+  if (vcInfoIn) putVcInfoFromEdge(vcId, vcInfoIn, agent);   // v2.897
   if (saved.held) console.warn(`[central] inventory: agent=${agent} vc=${vcId} 상태 ${slice.vcenter.status} · 호스트·VM 0 — 마지막 정상 목록을 지우지 않고 상태만 갱신했습니다(엣지가 인벤토리를 읽지 못함)`);
   res.locals.ingestSummary = {
     vcenterId: vcId.slice(0, 128), hosts: slice.hosts.length, vms: slice.vms.length, datastores: slice.datastores.length,

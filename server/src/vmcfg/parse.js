@@ -13,7 +13,7 @@
 //     disks:[{label,mode,sharing,rdm,rdmMode,datastore,capacityGB}], usb, serial, parallel, omitted,
 //     nics:[{label,adapter,backing,net,netRef,mac,connected,startConnected}] }   ← v2.897(같은 장치 XML — 새 vCenter 호출 없음)
 //   - nics 는 v2.897 이후 수집기만 싣는다 — 키가 없으면 '아직 읽지 않음'(빈 배열 = 어댑터 없음 과 다르다).
-import { xmlUnescape } from '../vcenter/soapParse.js';
+import { xmlUnescape, NIC_TYPE_RE } from '../vcenter/soapParse.js';
 
 /** 이 모듈이 vCenter 에 요청하는 VM 속성 경로 — 전부 vSphere 5.0+ 에 있는 경로만(없는 경로는 요청 전체를 InvalidProperty 로 만든다). */
 export const VM_CFG_PATHS = Object.freeze([
@@ -82,12 +82,12 @@ export function parseVmCfgProps(props = {}, at = Date.now()) {
 }
 
 const DEV_LIST_MAX = 32;
-/** v2.897: VirtualEthernetCard 하위 형식 → 화면 이름(vSphere Client 의 '어댑터 유형'). 모르는 형식은 형식 이름 그대로(Virtual 앞머리만 뗀다). */
+/** v2.897: VirtualEthernetCard 하위 형식 → 화면 이름(vSphere Client 의 '어댑터 유형'). 모르는 형식은 형식 이름 그대로(Virtual 앞머리만 뗀다).
+ *  'NIC 인가' 판정은 soapParse.NIC_TYPE_RE 하나(VM CSV 내보내기와 같은 판정). */
 const NIC_TYPES = Object.freeze({
   VirtualVmxnet3: 'VMXNET 3', VirtualVmxnet3Vrdma: 'PVRDMA', VirtualVmxnet2: 'VMXNET 2', VirtualVmxnet: 'VMXNET',
   VirtualE1000: 'E1000', VirtualE1000e: 'E1000E', VirtualPCNet32: 'PCNet32', VirtualSriovEthernetCard: 'SR-IOV',
 });
-const NIC_TYPE_RE = /^Virtual(?:Vmxnet\w*|E1000e?|PCNet32|SriovEthernetCard|EthernetCard)$/;
 const MAC_RE = /^[0-9a-f]{2}(?::[0-9a-f]{2}){5}$/i;
 const MOREF_RE = /^[\w.:-]{1,64}$/;
 /** 어댑터 백킹 → { backing:'std'|'dvs'|'nsx'|'other', net, netRef }. 분산 포트그룹 이름은 장치에 없다 — netRef(dvportgroup-NN)로 화면이 /networks 에서 찾는다. */

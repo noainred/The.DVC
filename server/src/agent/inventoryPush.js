@@ -20,6 +20,7 @@ import { readCentralReply, dropSummaryOf, warnDrop } from './centralReply.js'; /
 const gzipAsync = promisify(zlib.gzip);
 import { agentNameHeader } from '../util/agentNameHeader.js'; // v2.620(RECENT2620-02)
 import { agentHostnameHeader } from './agentNameCarry.js'; // v2.681 R2F-01
+import { vcInfoForPush } from '../vcinfo/collect.js'; // v2.897
 // 인벤토리 push 본문 gzip 압축(기본 on). 인벤토리 JSON은 반복 필드가 많아 ~5~10× 줄어 WAN
 // 수신량을 크게 낮춘다. 중앙(express.json)은 Content-Encoding: gzip 본문을 자동 해제한다.
 // AGENT_PUSH_GZIP=false 로 끌 수 있다(구버전 중앙 호환 등).
@@ -44,7 +45,8 @@ async function pushVcenter(snap, vc) {
     // v2.443: auto 폴백으로 채워진 vCenter 는 DATA_SOURCE 가 'auto' 여도 내용은 가짜다 —
     // 그 슬라이스는 아래에서 아예 보내지 않지만, 만에 하나 도달해도 중앙이 막도록 source 도 'mock' 으로 보낸다.
     source: vc?.mock === true ? 'mock' : config.dataSource,
-    vcenter: vc,
+    // v2.897: vCenter 알람 · 최근 작업 · 권한 목록 — 스냅샷 vCenter 객체에는 없다(vcinfo 캐시). 이 엣지가 읽은 것만 붙인다(없으면 키 없음).
+    vcenter: (() => { const vi = vcInfoForPush(vc.id); return vi ? { ...vc, vcInfo: vi } : vc; })(),
     hosts: snap.hosts.filter((h) => h.vcenterId === vc.id),
     vms: snap.vms.filter((v) => v.vcenterId === vc.id),
     datastores: snap.datastores.filter((d) => d.vcenterId === vc.id),
