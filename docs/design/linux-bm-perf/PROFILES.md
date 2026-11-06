@@ -69,3 +69,23 @@ OS 요구값(“Configuring Your Systems”): `vm.overcommit_memory=2`(“the on
 | R3 | Rocky Linux · Release notes 9.4 — https://docs.rockylinux.org/9/release_notes/9_4/ | ● 원문 |
 
 정직 기록: ① Rocky 9.4 의 공식 ‘정상 동작 점검’ 항목은 릴리스 노트의 세 가지(업그레이드 경로·알려진 문제 분류·폐기 스트림)뿐이라 나머지는 ○(일반 관행)이거나 GPDB 요구(●)에서 가져왔다. ② Airflow 메트릭은 StatsD/OTel 수신기가 있어야 보인다 — 이번 범위 밖. ③ Airflow 3 의 파싱 설정 위치는 미확인. ④ GPDB SQL 점검은 gpadmin 권한이 전제. ⑤ 피크 수집 B 안의 CPU 부담은 실측 전. ⑥ Ubuntu · Windows · Hadoop 프로파일은 만들지 않았다. ⑦ docs.vmware.com 의 Greenplum 주소는 techdocs.broadcom.com 으로 넘어갔다(리다이렉트 확인).
+
+## 8. 추이 탭(②-추이) — 평균/피크 화면을 서버 상세 탭 열로 · 추천 지표 출처 (5차 · 2026-11-06 22:38~)
+
+요청: "⑧ 아트보드를 서버 상세 ‘추이’ 탭 안으로 넣어줘" · "성능 측정, 장애 분석, 서버 성능을 분석할때 보면 좋은 지표도 레딧, 각종 커뮤니티, 벤더사에서 자료 찾아서 차트에 넣어줘".
+
+- ⑧ 은 **서버 상세의 ‘추이’ 탭**이 됐다(아트보드 제목 ②-추이 · ② 와 같은 행에 배치). 서버 상세 ②·⑤·⑦ 의 탭 열을 하나로 통일(요약 · 자원 · 하드웨어 · 장애 기록 · 튜닝 · 용도 · 진단 스냅샷 · 추이(평균 · 피크)). ② 의 24시간 추이 카드에 ‘추이 탭에서 두 화면으로 보기’ 링크.
+- 추천 지표 묶음(출처별) + 추가 차트 행 12 를 추이 탭에 넣었다. 각 행은 출처 태그(SRE · NF · USE · DELL · ND · CM)를 달고 평균(회색)·피크(색) 두 선으로 그린다. 읽는 곳은 전부 기존·추가 SSH 구획 안(새 명령 없음).
+
+| 태그 | 출처 | 채택 지표 | 확인 | 등급 |
+|---|---|---|---|---|
+| SRE | Google SRE Book ch.6 Monitoring Distributed Systems — https://sre.google/sre-book/monitoring-distributed-systems/ | 골든 시그널 4(지연·트래픽·오류·포화). **평균의 위험**(“Observing CPU load over the time span of a minute won’t reveal even quite long-lived spikes”) · 비용 절감은 “internal sampling on the server, then … aggregate” → 평균/피크 두 화면과 B 안의 근거 | 원문(HTTP 200) | ● |
+| NF | Netflix TechBlog · Linux Performance Analysis in 60,000 Milliseconds — https://netflixtechblog.com/linux-performance-analysis-in-60-000-milliseconds-accc10403c55 | 60초 체크리스트 10(uptime · dmesg · vmstat · mpstat -P ALL · pidstat · iostat -xz · free · sar -n DEV · sar -n TCP,ETCP · top) — 오류·포화 먼저 | Medium 403 — 미러·요약(sdtimes · SlideShare SREcon 2016 · 노션 미러) | ◐ |
+| USE | Brendan Gregg · USE Method: Linux Performance Checklist — https://brendangregg.com/USEmethod/use-linux.html | CPU 포화 = vmstat r > CPU · sar -q(로드 평균 제외 사유: D-state) · 메모리 si/so · sar -B · OOM dmesg · 네트워크 sar -n DEV/EDEV(drop·fifo·rxerr/txerr) | 프록시에서 연결 실패(000) — 검색 발췌 | ◐ |
+| DELL | Dell · iDRAC9 Telemetry Streaming Performance Report 백서 — https://dl.dell.com/manuals/common/dell-emc-idrac9-telemetry-streaming-performance-report.pdf | SystemUsage(CPUUsage · MemoryUsage · IOUsage · AggregateUsage, 4.40+ 스키마 · 이전 CUPS) · Power/Thermal 리포트 · 펌웨어 4.00+ · Datacenter 라이선스 | PDF 403 — 검색 발췌 | ◐ |
+| ND | Netdata · system CPU · ctxt · softnet 차트(community 가이드 · proc.plugin 문서) | CPU dimensions(user system nice iowait irq softirq steal guest) · 컨텍스트 스위치/s · softirq | 검색 발췌 | ◐ |
+| CM | 커뮤니티 블로그 합의(linuxblog.io · sematext · netdata academy · xitoring 등) | 로드 ÷ 코어(1.0× 주의·2.0× 심각 — 출처마다 다름) · iowait 10~30% 지속 → 디스크 · await 20~25ms · %util 80%+ · 2~5분 지속 알림 · 베이스라인 | Reddit r/sysadmin·r/linuxadmin 스레드는 검색 엔진이 돌려주지 않아 직접 인용 못 함 | ○ |
+
+추가 차트 행 12: 로드 1분÷코어(NF·CM) · 런큐 r(USE·NF) · iowait·steal(NF·ND) · 컨텍스트 스위치/s(ND) · softirq·irq(ND·R2) · 코어별 불균형 max−avg(NF) · 스왑 si/so·주요 폴트(USE·NF) · 디스크 avgqu-sz·await(NF·CM) · 디스크 %util(NF·CM) · NIC %ifutil·rxkB/txkB(NF·USE) · NIC rxerr·drop·fifo(USE·R2) · TCP retrans·active/passive(NF). 임계값은 출처마다 달라 **설정값**으로 두고 화면은 출처 범위를 적는다.
+
+정직 기록: Netflix(Medium)·Dell PDF 는 403, brendangregg.com 은 프록시 연결 실패라 원문을 열지 못했다(사용자 에이전트 변경 등 우회는 하지 않았다). Reddit 스레드는 두 번의 검색(extended)에서 하나도 돌아오지 않아 ‘커뮤니티’ 는 블로그 합의(○)로만 적었다. SRE Book 은 원문 확인(●).

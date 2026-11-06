@@ -8,7 +8,7 @@
 <body>
 <x-dc>
 <helmet>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Noto+Sans+KR:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&amp;family=Noto+Sans+KR:wght@400;500;600;700&amp;family=JetBrains+Mono:wght@400;600&amp;display=swap">
 <style>
 body{margin:0;background:#0a0e17;color:#e6edf6;font-family:Inter,"Noto Sans KR","Apple SD Gothic Neo",sans-serif;font-size:13px;line-height:1.45}
 a{color:#22d3ee}a:hover{color:#67e8f9}
@@ -20,6 +20,9 @@ a{color:#22d3ee}a:hover{color:#67e8f9}
 .chip.warn{color:#fbbf24;border-color:rgba(245,158,11,.35);background:rgba(245,158,11,.1)}
 .chip.bad{color:#f87171;border-color:rgba(239,68,68,.35);background:rgba(239,68,68,.1)}
 .chip.info{color:#67e8f9;border-color:rgba(34,211,238,.3);background:rgba(34,211,238,.08)}
+.tabs{display:flex;flex-wrap:wrap;gap:2px;border-bottom:1px solid #243049}
+.tabs a{padding:10px 14px;color:#8b9bb4;font-weight:600;text-decoration:none;border-bottom:2px solid transparent;min-height:40px;box-sizing:border-box;display:inline-flex;align-items:center}
+.tabs a.on{color:#e6edf6;border-bottom-color:#22d3ee}
 .seg{display:inline-flex;border:1px solid #243049;border-radius:8px;overflow:hidden;background:#0f1626}
 .seg button{min-height:34px;padding:0 14px;border:0;background:transparent;color:#8b9bb4;font:inherit;font-weight:600;cursor:pointer}
 .seg button.on{background:#1a2236;color:#e6edf6;box-shadow:inset 0 -2px 0 #22d3ee}
@@ -55,6 +58,7 @@ td{padding:7px 8px;border-bottom:1px solid #1f2a40;vertical-align:top}
     <button class="btn primary" type="button">진단 스냅샷 실행</button>
     <button class="btn" type="button">지금 수집</button>
   </div>
+  <nav class="tabs" aria-label="서버 상세 탭"><a class="on" href="Server.dc.html" aria-current="page">요약</a><a href="Server.dc.html">자원 (USE)</a><a href="Server.dc.html">하드웨어 (iDRAC)</a><a href="Faults.dc.html">장애 기록</a><a href="Tuning.dc.html">튜닝</a><a href="Profiles.dc.html">용도</a><a href="Server.dc.html">진단 스냅샷</a><a href="AvgPeak.dc.html">추이 (평균 · 피크)</a></nav>
 
   <!-- 판정 띠 -->
   <div class="card" style="border-color:rgba(239,68,68,.4);padding:12px 16px;display:flex;flex-wrap:wrap;gap:8px 18px;align-items:center">
@@ -64,6 +68,9 @@ td{padding:7px 8px;border-bottom:1px solid #1f2a40;vertical-align:top}
   </div>
 
   <!-- 자원 4면 -->
+  
+
+  <!-- 하드웨어(iDRAC) + 교차 판정 -->
   <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(min(560px,100%),1fr));gap:14px">
 
     <div class="card">
@@ -145,10 +152,7 @@ td{padding:7px 8px;border-bottom:1px solid #1f2a40;vertical-align:top}
       </div>
       <dl class="kv" style="margin:10px 0 0"><dt>소켓 (ss -s · 스냅샷)</dt><dd>TCP 1,240 · TIME-WAIT 318 · estab 802</dd><dt>net.core.somaxconn</dt><dd>4096 ✓</dd><dt>conntrack</dt><dd>12k / 262k</dd></dl>
     </div>
-  </div>
-
-  <!-- 하드웨어(iDRAC) + 교차 판정 -->
-  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(min(560px,100%),1fr));gap:14px;align-items:start">
+  </div><div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(min(560px,100%),1fr));gap:14px;align-items:start">
     <div class="card" style="border-color:rgba(245,158,11,.35)">
       <div style="display:flex;flex-wrap:wrap;align-items:baseline;gap:8px 12px"><h2 style="margin:0;font-size:15px;font-weight:700">하드웨어 (iDRAC)</h2><span class="chip ok">정상 · 경고 1</span><span class="dim" style="margin-left:auto;font-size:12px">센서 컬렉션 · Power · 부품 장애 · SEL/LC</span></div>
       <div class="use">
@@ -175,17 +179,17 @@ td{padding:7px 8px;border-bottom:1px solid #1f2a40;vertical-align:top}
   <!-- 추이 + 튜닝 포인트 -->
   <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(min(560px,100%),1fr));gap:14px;align-items:start">
     <div class="card">
-      <div style="display:flex;flex-wrap:wrap;align-items:baseline;gap:8px 12px;margin-bottom:6px"><h2 style="margin:0;font-size:15px;font-weight:700">24시간 추이 — 디스크 busy · PSI io full (%)</h2><span class="dim" style="font-size:12px">5분 평균 · 288점 · 결측 3점(선 끊김)</span></div>
+      <div style="display:flex;flex-wrap:wrap;align-items:baseline;gap:8px 12px;margin-bottom:6px"><h2 style="margin:0;font-size:15px;font-weight:700">24시간 추이 — 디스크 busy · PSI io full (%)</h2><span class="dim" style="font-size:12px">5분 평균 · 288점 · 결측 3점(선 끊김)</span><a href="AvgPeak.dc.html" style="margin-left:auto;font-weight:600;font-size:12.5px">추이 탭에서 평균 · 피크 두 화면으로 보기 →</a></div>
       <svg viewBox="0 0 640 200" role="img" aria-label="24시간 동안 nvme1n1 busy 가 새벽 2시부터 5시까지 90% 대, 그 뒤 40% 대였다가 12시 이후 다시 90% 대로 오르고, await 와 PSI io full 이 같은 모양으로 따라간다" style="width:100%;height:auto;display:block">
-        <line x1="40" y1="16" x2="40" y2="160" stroke="#243049"/><line x1="40" y1="160" x2="630" y2="160" stroke="#243049"/>
-        <line x1="40" y1="88" x2="630" y2="88" stroke="#1f2a40"/><line x1="40" y1="30" x2="630" y2="30" stroke="#f87171" stroke-dasharray="3 4" opacity=".6"/>
+        <line x1="40" y1="16" x2="40" y2="160" stroke="#243049"></line><line x1="40" y1="160" x2="630" y2="160" stroke="#243049"></line>
+        <line x1="40" y1="88" x2="630" y2="88" stroke="#1f2a40"></line><line x1="40" y1="30" x2="630" y2="30" stroke="#f87171" stroke-dasharray="3 4" opacity=".6"></line>
         <text x="34" y="164" fill="#8b9bb4" font-size="11" text-anchor="end">0</text><text x="34" y="92" fill="#8b9bb4" font-size="11" text-anchor="end">50</text><text x="34" y="34" fill="#8b9bb4" font-size="11" text-anchor="end">90</text>
         <text x="40" y="182" fill="#8b9bb4" font-size="11">13:40 어제</text><text x="335" y="182" fill="#8b9bb4" font-size="11" text-anchor="middle">02:00</text><text x="630" y="182" fill="#8b9bb4" font-size="11" text-anchor="end">13:35</text>
-        <polyline fill="none" stroke="#f59e0b" stroke-width="2" stroke-linejoin="round" points="40,120 80,118 120,124 160,120 200,118 240,116 280,60 310,34 340,30 370,36 400,40 420,70 440,110 480,112 520,108 560,60 600,34 630,28"/>
-        <polyline fill="none" stroke="#a855f7" stroke-width="2" stroke-linejoin="round" points="40,158 80,158 120,158 160,158 200,158 240,156 280,146 310,138 340,136 370,140 400,142 420,152 440,158 480,158"/>
-        <polyline fill="none" stroke="#a855f7" stroke-width="2" stroke-linejoin="round" points="520,158 560,146 600,138 630,134"/>
-        <line x1="630" y1="16" x2="630" y2="160" stroke="#8b9bb4" stroke-dasharray="3 3"/>
-        <rect x="430" y="12" width="196" height="46" rx="6" fill="#0f1626" stroke="#243049"/>
+        <polyline fill="none" stroke="#f59e0b" stroke-width="2" stroke-linejoin="round" points="40,120 80,118 120,124 160,120 200,118 240,116 280,60 310,34 340,30 370,36 400,40 420,70 440,110 480,112 520,108 560,60 600,34 630,28"></polyline>
+        <polyline fill="none" stroke="#a855f7" stroke-width="2" stroke-linejoin="round" points="40,158 80,158 120,158 160,158 200,158 240,156 280,146 310,138 340,136 370,140 400,142 420,152 440,158 480,158"></polyline>
+        <polyline fill="none" stroke="#a855f7" stroke-width="2" stroke-linejoin="round" points="520,158 560,146 600,138 630,134"></polyline>
+        <line x1="630" y1="16" x2="630" y2="160" stroke="#8b9bb4" stroke-dasharray="3 3"></line>
+        <rect x="430" y="12" width="196" height="46" rx="6" fill="#0f1626" stroke="#243049"></rect>
         <text x="440" y="28" fill="#e6edf6" font-size="11" font-weight="700">13:35 · 5분 평균</text>
         <text x="440" y="42" fill="#f59e0b" font-size="11">busy 94%</text><text x="440" y="54" fill="#c084fc" font-size="11">PSI io full 12% · await 18ms(아래 차트)</text>
       </svg>

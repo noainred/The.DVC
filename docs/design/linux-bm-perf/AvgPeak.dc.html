@@ -2,7 +2,7 @@
 <html lang="ko">
 <head>
 <meta charset="utf-8">
-<title>평균 · 피크 — 시간축 동기화</title>
+<title>서버 상세 — 추이 탭 (평균 · 피크)</title>
 <script src="./support.js"></script>
 </head>
 <body>
@@ -20,6 +20,9 @@ a{color:#22d3ee}a:hover{color:#67e8f9}
 .chip.warn{color:#fbbf24;border-color:rgba(245,158,11,.35);background:rgba(245,158,11,.1)}
 .chip.bad{color:#f87171;border-color:rgba(239,68,68,.35);background:rgba(239,68,68,.1)}
 .chip.info{color:#67e8f9;border-color:rgba(34,211,238,.3);background:rgba(34,211,238,.08)}
+.tabs{display:flex;flex-wrap:wrap;gap:2px;border-bottom:1px solid #243049}
+.tabs a{padding:10px 14px;color:#8b9bb4;font-weight:600;text-decoration:none;border-bottom:2px solid transparent;min-height:40px;box-sizing:border-box;display:inline-flex;align-items:center}
+.tabs a.on{color:#e6edf6;border-bottom-color:#22d3ee}
 .seg{display:inline-flex;border:1px solid #243049;border-radius:8px;overflow:hidden;background:#0f1626}
 .seg button{min-height:34px;padding:0 14px;border:0;background:transparent;color:#8b9bb4;font:inherit;font-weight:600;cursor:pointer}
 .seg button.on{background:#1a2236;color:#e6edf6;box-shadow:inset 0 -2px 0 #22d3ee}
@@ -39,9 +42,9 @@ h2{margin:0;font-size:15px;font-weight:700}
 
   <div style="display:flex;flex-wrap:wrap;align-items:center;gap:12px">
     <div style="min-width:0">
-      <div style="font-size:12px;color:#8b9bb4"><a href="Main.dc.html">리눅스 베어메탈 통합 성능</a> › KR-SEL › <a href="Server.dc.html">bm-kr1-db01</a> › <b style="color:#e6edf6">추이 — 평균 · 피크</b></div>
-      <h1 style="margin:0;font-size:20px;font-weight:700;letter-spacing:-.01em">평균 화면과 피크 화면 — 시간축 하나로 동기화</h1>
-      <div class="dim" style="font-size:12px;margin-top:4px">왼쪽 축·커서·구간(brush)을 두 화면이 공유한다. 평균 = 5분 주기 평균(지금 bmusage) · 피크 = 같은 5분 안의 최대값과 그 시각(아래 ‘수집 방식’ 중 선택) · 수치는 가상</div>
+      <div style="font-size:12px;color:#8b9bb4"><a href="Main.dc.html">리눅스 베어메탈 통합 성능</a> › KR-SEL › <b style="color:#e6edf6">bm-kr1-db01</b></div>
+      <h1 style="margin:0;font-size:20px;font-weight:700;letter-spacing:-.01em;display:flex;flex-wrap:wrap;align-items:center;gap:10px">bm-kr1-db01 <span class="chip bad">디스크 포화</span> <span class="chip warn">튜닝 권고 3</span> <span class="chip ok">경로 OS + iDRAC</span></h1>
+      <div class="dim" style="font-size:12px;margin-top:4px">Rocky Linux 9.4 · 커널 5.14.0 · 32코어 · 256GB · NVMe×2 · bond0 10G · 역할 ‘DB’ · OS 13:35 · iDRAC 13:34</div>
     </div>
     <div style="flex:1 1 20px"></div>
     <div class="seg" role="group" aria-label="기간"><button type="button">6시간</button><button class="on" type="button">24시간</button><button type="button">7일</button><button type="button">30일</button></div>
@@ -49,6 +52,8 @@ h2{margin:0;font-size:15px;font-weight:700}
     <label style="display:flex;align-items:center;gap:8px;font-size:12.5px"><input type="checkbox" checked style="width:18px;height:18px"> 시간축 동기화</label>
     <button class="btn" type="button">CSV (평균·피크 두 열)</button>
   </div>
+  <nav class="tabs" aria-label="서버 상세 탭"><a href="Server.dc.html">요약</a><a href="Server.dc.html">자원 (USE)</a><a href="Server.dc.html">하드웨어 (iDRAC)</a><a href="Faults.dc.html">장애 기록</a><a href="Tuning.dc.html">튜닝</a><a href="Profiles.dc.html">용도</a><a href="Server.dc.html">진단 스냅샷</a><a class="on" href="AvgPeak.dc.html" aria-current="page">추이 (평균 · 피크)</a></nav>
+  <div class="card" style="padding:10px 16px;font-size:12.5px"><b>추이 탭 — 평균 화면과 피크 화면을 시간축 하나로 동기화</b> <span class="dim">· 왼쪽 축·커서·구간(brush)을 두 화면이 공유한다 · 평균 = 5분 주기 평균(지금 bmusage) · 피크 = 같은 5분 안의 최대값과 그 시각(아래 ‘수집 방식’ 중 선택) · 수치는 가상</span></div>
 
   <!-- 지표군 선택 -->
   <div class="card" style="padding:10px 16px;display:flex;flex-wrap:wrap;gap:8px 14px;align-items:center;font-size:12.5px">
@@ -133,6 +138,89 @@ h2{margin:0;font-size:15px;font-weight:700}
     <div class="dim" style="font-size:11.5px;margin-top:8px">읽기: 새벽 구간의 디스크 await 피크(212ms)는 대기열 깊이 63 과 Dirty 4GB(상한 도달)가 같이 올라 있다 — 큐 한계(nr_requests)가 아니라 쓰기 폭주에 writeback 이 밀린 쪽. 평균만 보면 await 18ms 로 ‘경계’ 에 머문다. 판정 문장은 상관을 ‘후보’ 로만 말한다.</div>
   </div>
 
+  <!-- 추천 지표 — 출처별 -->
+  <div class="card">
+    <div style="display:flex;flex-wrap:wrap;align-items:baseline;gap:8px 12px;margin-bottom:8px"><h2>추천 지표 묶음 — 커뮤니티 · 벤더 출처별 (이 탭의 차트 행이 된다)</h2><span class="dim" style="font-size:12px">근거 등급: <span class="ev a">●</span> 원문 확인 · <span class="ev b">◐</span> 검색 발췌·미러 · <span class="ev c">○</span> 블로그 합의(Reddit 스레드는 검색에 잡히지 않음)</span></div>
+    <div style="overflow-x:auto"><table>
+      <thead><tr><th style="width:190px">출처</th><th>묶음 · 지표</th><th>왜 (문서 요지)</th><th style="width:60px">등급</th></tr></thead>
+      <tbody>
+        <tr><td><b>SRE</b> Google SRE Book ch.6<br><span class="dim">Monitoring Distributed Systems</span></td><td>골든 시그널 4 — <b>지연 · 트래픽 · 오류 · 포화</b>. 호스트에서는 포화(가장 제약된 자원) + 오류, 서비스는 Airflow/GPDB 프로파일의 지연·오류로</td><td>“If you can only measure four metrics of your user-facing system, focus on these four.” · <b>평균의 위험</b>: “it’s tempting to design a system based upon the mean … CPUs and databases can easily be utilized in a very imbalanced way” · “Observing CPU load over the time span of a minute won’t reveal even quite long-lived spikes” · 비용은 “performing internal sampling on the server, then configuring an external system to collect and aggregate” 로 줄인다 → <b>이 탭의 평균/피크 두 화면과 B 안(서버 안 1초 샘플 → 5분 집계)의 근거</b></td><td><span class="ev a">●</span></td></tr>
+        <tr><td><b>NF</b> Netflix TechBlog<br><span class="dim">Linux Performance Analysis in 60,000 ms</span></td><td>60초 체크리스트 10 — uptime(로드 1/5/15) · dmesg(오류) · vmstat 1(r · free · si/so · us/sy/id/wa/st) · mpstat -P ALL(코어별) · pidstat(프로세스별) · iostat -xz(r/s w/s rkB wkB await avgqu-sz %util) · free -m · sar -n DEV(rxkB txkB %ifutil) · sar -n TCP,ETCP(active passive retrans) · top</td><td>오류·포화를 먼저, 그다음 사용률 — USE 를 명령으로 푼 것. 원문은 Medium 이 비브라우저 요청을 막아 미러·요약으로 확인</td><td><span class="ev b">◐</span></td></tr>
+        <tr><td><b>USE</b> Brendan Gregg<br><span class="dim">USE Method: Linux Performance Checklist</span></td><td>CPU 포화 = vmstat r &gt; CPU 수 · sar -q runq-sz(로드 평균은 D-state 를 포함해 제외) · 메모리 포화 = si/so · sar -B · 오류 = dmesg OOM · 네트워크 사용률 = sar -n DEV 대 링크 대역 · 포화 = sar -n EDEV drop/fifo · 오류 = rxerr/txerr</td><td>자원 × (U·S·E) 표 — 이 시안의 매트릭스 틀. 사이트가 이 세션 프록시에서 열리지 않아 검색 발췌로 확인</td><td><span class="ev b">◐</span></td></tr>
+        <tr><td><b>DELL</b> iDRAC9 Telemetry<br><span class="dim">Streaming Performance Report 백서</span></td><td>SystemUsage(CPUUsage · MemoryUsage · IOUsage · AggregateUsage — 4.40 이후 스키마, 이전 CUPS) · Power/Thermal 리포트 · NIC/FC/Storage 리포트</td><td>펌웨어 4.00+ · Datacenter 라이선스 필요 — 하드웨어 축의 원천. PDF 가 403 이라 검색 발췌</td><td><span class="ev b">◐</span></td></tr>
+        <tr><td><b>ND</b> Netdata<br><span class="dim">system CPU · ctxt · softnet 차트</span></td><td>CPU 차트 dimensions(user system nice iowait irq softirq steal guest) · 컨텍스트 스위치/s · 인터럽트·softirq·softnet</td><td>초 단위 대시보드의 기본 차트 구성 — 어느 열을 차트로 둘지의 참고(채택: 컨텍스트 스위치 · softirq)</td><td><span class="ev b">◐</span></td></tr>
+        <tr><td><b>CM</b> 커뮤니티 블로그 합의<br><span class="dim">linuxblog.io · sematext · netdata academy 등</span></td><td>로드는 코어 수 대비(1.0× 주의 · 2.0× 심각 — 출처마다 다름) · iowait 10~30% 지속이면 디스크 지표로 · await 20~25ms 이상 주의 · %util 80%+ 포화 · 2~5분 지속 알림 · 베이스라인 먼저</td><td>임계값이 출처마다 달라 <b>기본 임계는 설정값</b>으로 두고 화면은 ‘출처 범위’ 를 적는다. Reddit r/sysadmin · r/linuxadmin 스레드는 검색 엔진이 돌려주지 않아 직접 인용하지 못했다</td><td><span class="ev c">○</span></td></tr>
+      </tbody></table></div>
+  </div>
+
+  <!-- 추가 차트 행 -->
+  <div class="card">
+    <div style="display:flex;flex-wrap:wrap;align-items:baseline;gap:8px 12px;margin-bottom:8px"><h2>추가 차트 행 12 — 출처별 채택 지표 (평균 회색 · 피크 색 · 선택 구간 음영)</h2><span class="dim" style="font-size:12px">두 화면(①②)에 행으로 들어가며 여기서는 축소판 · 칩 = 출처 태그 · 결측은 끊는다</span></div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(min(200px,100%),1fr));gap:10px">
+      <div style="border:1px solid #243049;border-radius:10px;padding:8px 10px;background:#0f1626;min-width:0;display:flex;flex-direction:column;gap:4px">
+        <div style="display:flex;justify-content:space-between;gap:6px;align-items:baseline"><span style="font-size:12px;font-weight:700">로드 1분 ÷ 코어</span><span class="chip" style="font-size:10px;padding:0 6px">NF · CM</span></div>
+        <svg viewBox="0 0 220 44" role="img" aria-label="로드 1분 ÷ 코어 24시간 평균과 피크" style="width:100%;height:auto;display:block"><rect x="72" y="2" width="34" height="40" fill="rgba(34,211,238,.08)"></rect><polyline fill="none" stroke="#8b9bb4" stroke-width="1.5" points="0,34 40,33 72,30 90,20 106,22 140,32 180,30 220,28"></polyline><polyline fill="none" stroke="#f87171" stroke-width="2" points="0,30 40,28 72,22 90,6 106,8 140,26 180,24 220,22"></polyline></svg>
+        <div class="dim" style="font-size:11px;line-height:1.4">0.3 평균 · 피크 1.3 · 로드는 코어 수 대비 — D-state 포함이라 런큐와 같이 본다</div>
+      </div>
+      <div style="border:1px solid #243049;border-radius:10px;padding:8px 10px;background:#0f1626;min-width:0;display:flex;flex-direction:column;gap:4px">
+        <div style="display:flex;justify-content:space-between;gap:6px;align-items:baseline"><span style="font-size:12px;font-weight:700">런큐 r (vmstat)</span><span class="chip" style="font-size:10px;padding:0 6px">USE · NF</span></div>
+        <svg viewBox="0 0 220 44" role="img" aria-label="런큐 r (vmstat) 24시간 평균과 피크" style="width:100%;height:auto;display:block"><rect x="72" y="2" width="34" height="40" fill="rgba(34,211,238,.08)"></rect><polyline fill="none" stroke="#8b9bb4" stroke-width="1.5" points="0,36 40,35 72,33 90,24 106,26 140,34 180,33 220,32"></polyline><polyline fill="none" stroke="#f87171" stroke-width="2" points="0,32 40,30 72,24 90,6 106,10 140,28 180,27 220,26"></polyline></svg>
+        <div class="dim" style="font-size:11px;line-height:1.4">9.8 · 피크 41 · r &gt; CPU 수면 CPU 포화 — USE 의 CPU 포화 지표</div>
+      </div>
+      <div style="border:1px solid #243049;border-radius:10px;padding:8px 10px;background:#0f1626;min-width:0;display:flex;flex-direction:column;gap:4px">
+        <div style="display:flex;justify-content:space-between;gap:6px;align-items:baseline"><span style="font-size:12px;font-weight:700">iowait · steal %</span><span class="chip" style="font-size:10px;padding:0 6px">NF · ND</span></div>
+        <svg viewBox="0 0 220 44" role="img" aria-label="iowait · steal % 24시간 평균과 피크" style="width:100%;height:auto;display:block"><rect x="72" y="2" width="34" height="40" fill="rgba(34,211,238,.08)"></rect><polyline fill="none" stroke="#8b9bb4" stroke-width="1.5" points="0,32 40,32 72,30 90,22 106,23 140,31 180,30 220,29"></polyline><polyline fill="none" stroke="#fbbf24" stroke-width="2" points="0,28 40,27 72,22 90,8 106,10 140,25 180,24 220,24"></polyline></svg>
+        <div class="dim" style="font-size:11px;line-height:1.4">11% / 0% · 피크 34% / 0% · iowait 가 높아도 디스크가 느린 것은 아니다 — await 와 같이</div>
+      </div>
+      <div style="border:1px solid #243049;border-radius:10px;padding:8px 10px;background:#0f1626;min-width:0;display:flex;flex-direction:column;gap:4px">
+        <div style="display:flex;justify-content:space-between;gap:6px;align-items:baseline"><span style="font-size:12px;font-weight:700">컨텍스트 스위치 /s</span><span class="chip" style="font-size:10px;padding:0 6px">ND</span></div>
+        <svg viewBox="0 0 220 44" role="img" aria-label="컨텍스트 스위치 /s 24시간 평균과 피크" style="width:100%;height:auto;display:block"><rect x="72" y="2" width="34" height="40" fill="rgba(34,211,238,.08)"></rect><polyline fill="none" stroke="#8b9bb4" stroke-width="1.5" points="0,34 40,33 72,31 90,26 106,27 140,33 180,32 220,31"></polyline><polyline fill="none" stroke="#4ade80" stroke-width="2" points="0,30 40,29 72,24 90,12 106,14 140,28 180,27 220,26"></polyline></svg>
+        <div class="dim" style="font-size:11px;line-height:1.4">18.2k · 피크 61k · 급증은 락 경합·스레드 폭주 후보</div>
+      </div>
+      <div style="border:1px solid #243049;border-radius:10px;padding:8px 10px;background:#0f1626;min-width:0;display:flex;flex-direction:column;gap:4px">
+        <div style="display:flex;justify-content:space-between;gap:6px;align-items:baseline"><span style="font-size:12px;font-weight:700">softirq · irq %</span><span class="chip" style="font-size:10px;padding:0 6px">ND · R2</span></div>
+        <svg viewBox="0 0 220 44" role="img" aria-label="softirq · irq % 24시간 평균과 피크" style="width:100%;height:auto;display:block"><rect x="72" y="2" width="34" height="40" fill="rgba(34,211,238,.08)"></rect><polyline fill="none" stroke="#8b9bb4" stroke-width="1.5" points="0,38 40,38 72,37 90,34 106,35 140,38 180,37 220,37"></polyline><polyline fill="none" stroke="#4ade80" stroke-width="2" points="0,36 40,35 72,33 90,22 106,24 140,34 180,34 220,33"></polyline></svg>
+        <div class="dim" style="font-size:11px;line-height:1.4">1% · 피크 9% · 네트워크 부하 신호 · time_squeeze 와 같이</div>
+      </div>
+      <div style="border:1px solid #243049;border-radius:10px;padding:8px 10px;background:#0f1626;min-width:0;display:flex;flex-direction:column;gap:4px">
+        <div style="display:flex;justify-content:space-between;gap:6px;align-items:baseline"><span style="font-size:12px;font-weight:700">코어별 불균형 (max−avg)</span><span class="chip" style="font-size:10px;padding:0 6px">NF</span></div>
+        <svg viewBox="0 0 220 44" role="img" aria-label="코어별 불균형 (max−avg) 24시간 평균과 피크" style="width:100%;height:auto;display:block"><rect x="72" y="2" width="34" height="40" fill="rgba(34,211,238,.08)"></rect><polyline fill="none" stroke="#8b9bb4" stroke-width="1.5" points="0,30 40,30 72,28 90,24 106,25 140,29 180,28 220,27"></polyline><polyline fill="none" stroke="#fbbf24" stroke-width="2" points="0,24 40,23 72,20 90,8 106,10 140,22 180,21 220,20"></polyline></svg>
+        <div class="dim" style="font-size:11px;line-height:1.4">35%p · 피크 58%p · mpstat -P ALL — 단일 스레드 병목은 평균에 묻힌다</div>
+      </div>
+      <div style="border:1px solid #243049;border-radius:10px;padding:8px 10px;background:#0f1626;min-width:0;display:flex;flex-direction:column;gap:4px">
+        <div style="display:flex;justify-content:space-between;gap:6px;align-items:baseline"><span style="font-size:12px;font-weight:700">스왑 si/so · 주요 폴트</span><span class="chip" style="font-size:10px;padding:0 6px">USE · NF</span></div>
+        <svg viewBox="0 0 220 44" role="img" aria-label="스왑 si/so · 주요 폴트 24시간 평균과 피크" style="width:100%;height:auto;display:block"><rect x="72" y="2" width="34" height="40" fill="rgba(34,211,238,.08)"></rect><polyline fill="none" stroke="#8b9bb4" stroke-width="1.5" points="0,40 40,40 72,40 90,38 106,38 140,40 180,40 220,40"></polyline><polyline fill="none" stroke="#4ade80" stroke-width="2" points="0,40 40,40 72,39 90,30 106,32 140,39 180,39 220,39"></polyline></svg>
+        <div class="dim" style="font-size:11px;line-height:1.4">0/0 · 2/s · 피크 0/0 · 180/s · 메모리 포화는 사용률이 아니라 스왑·폴트로</div>
+      </div>
+      <div style="border:1px solid #243049;border-radius:10px;padding:8px 10px;background:#0f1626;min-width:0;display:flex;flex-direction:column;gap:4px">
+        <div style="display:flex;justify-content:space-between;gap:6px;align-items:baseline"><span style="font-size:12px;font-weight:700">디스크 avgqu-sz · await</span><span class="chip" style="font-size:10px;padding:0 6px">NF · CM</span></div>
+        <svg viewBox="0 0 220 44" role="img" aria-label="디스크 avgqu-sz · await 24시간 평균과 피크" style="width:100%;height:auto;display:block"><rect x="72" y="2" width="34" height="40" fill="rgba(34,211,238,.08)"></rect><polyline fill="none" stroke="#8b9bb4" stroke-width="1.5" points="0,34 40,33 72,30 90,20 106,21 140,32 180,30 220,29"></polyline><polyline fill="none" stroke="#f87171" stroke-width="2" points="0,30 40,28 72,22 90,4 106,6 140,26 180,24 220,22"></polyline></svg>
+        <div class="dim" style="font-size:11px;line-height:1.4">9.2 / 18ms · 피크 63 / 212ms · iostat -xz — await 는 큐 대기 + 서비스 시간</div>
+      </div>
+      <div style="border:1px solid #243049;border-radius:10px;padding:8px 10px;background:#0f1626;min-width:0;display:flex;flex-direction:column;gap:4px">
+        <div style="display:flex;justify-content:space-between;gap:6px;align-items:baseline"><span style="font-size:12px;font-weight:700">디스크 %util</span><span class="chip" style="font-size:10px;padding:0 6px">NF · CM</span></div>
+        <svg viewBox="0 0 220 44" role="img" aria-label="디스크 %util 24시간 평균과 피크" style="width:100%;height:auto;display:block"><rect x="72" y="2" width="34" height="40" fill="rgba(34,211,238,.08)"></rect><polyline fill="none" stroke="#8b9bb4" stroke-width="1.5" points="0,16 40,17 72,14 90,6 106,6 140,15 180,8 220,6"></polyline><polyline fill="none" stroke="#f87171" stroke-width="2" points="0,10 40,11 72,8 90,2 106,2 140,9 180,3 220,2"></polyline></svg>
+        <div class="dim" style="font-size:11px;line-height:1.4">94% · 피크 100% · 100% 가까우면 포화 — NVMe 는 병렬이라 %util 과대 가능</div>
+      </div>
+      <div style="border:1px solid #243049;border-radius:10px;padding:8px 10px;background:#0f1626;min-width:0;display:flex;flex-direction:column;gap:4px">
+        <div style="display:flex;justify-content:space-between;gap:6px;align-items:baseline"><span style="font-size:12px;font-weight:700">NIC %ifutil · rxkB/txkB</span><span class="chip" style="font-size:10px;padding:0 6px">NF · USE</span></div>
+        <svg viewBox="0 0 220 44" role="img" aria-label="NIC %ifutil · rxkB/txkB 24시간 평균과 피크" style="width:100%;height:auto;display:block"><rect x="72" y="2" width="34" height="40" fill="rgba(34,211,238,.08)"></rect><polyline fill="none" stroke="#8b9bb4" stroke-width="1.5" points="0,34 40,34 72,32 90,24 106,25 140,33 180,32 220,32"></polyline><polyline fill="none" stroke="#4ade80" stroke-width="2" points="0,28 40,27 72,24 90,10 106,12 140,26 180,25 220,25"></polyline></svg>
+        <div class="dim" style="font-size:11px;line-height:1.4">23% · 피크 61% · sar -n DEV — 링크 대역 대비</div>
+      </div>
+      <div style="border:1px solid #243049;border-radius:10px;padding:8px 10px;background:#0f1626;min-width:0;display:flex;flex-direction:column;gap:4px">
+        <div style="display:flex;justify-content:space-between;gap:6px;align-items:baseline"><span style="font-size:12px;font-weight:700">NIC rxerr · drop · fifo</span><span class="chip" style="font-size:10px;padding:0 6px">USE · R2</span></div>
+        <svg viewBox="0 0 220 44" role="img" aria-label="NIC rxerr · drop · fifo 24시간 평균과 피크" style="width:100%;height:auto;display:block"><rect x="72" y="2" width="34" height="40" fill="rgba(34,211,238,.08)"></rect><polyline fill="none" stroke="#8b9bb4" stroke-width="1.5" points="0,40 40,40 72,40 90,40 106,40 140,40 180,40 220,40"></polyline><polyline fill="none" stroke="#4ade80" stroke-width="2" points="0,40 40,40 72,40 90,40 106,40 140,40 180,40 220,40"></polyline></svg>
+        <div class="dim" style="font-size:11px;line-height:1.4">0 · 피크 0 · sar -n EDEV — 오류(E)·포화(S) 칸의 원천</div>
+      </div>
+      <div style="border:1px solid #243049;border-radius:10px;padding:8px 10px;background:#0f1626;min-width:0;display:flex;flex-direction:column;gap:4px">
+        <div style="display:flex;justify-content:space-between;gap:6px;align-items:baseline"><span style="font-size:12px;font-weight:700">TCP retrans/s · active/passive</span><span class="chip" style="font-size:10px;padding:0 6px">NF</span></div>
+        <svg viewBox="0 0 220 44" role="img" aria-label="TCP retrans/s · active/passive 24시간 평균과 피크" style="width:100%;height:auto;display:block"><rect x="72" y="2" width="34" height="40" fill="rgba(34,211,238,.08)"></rect><polyline fill="none" stroke="#8b9bb4" stroke-width="1.5" points="0,36 40,36 72,35 90,30 106,31 140,35 180,35 220,34"></polyline><polyline fill="none" stroke="#fbbf24" stroke-width="2" points="0,32 40,31 72,29 90,16 106,18 140,30 180,30 220,29"></polyline></svg>
+        <div class="dim" style="font-size:11px;line-height:1.4">0.8% · 피크 2.3% · sar -n TCP,ETCP — 재전송은 회선·수신측 포화 신호</div>
+      </div>
+    </div>
+    <div class="dim" style="font-size:11.5px;margin-top:10px">읽는 곳: 로드·런큐 /proc/loadavg · /proc/stat(procs_running) · iowait/steal/softirq /proc/stat 분해 · 컨텍스트 스위치 /proc/stat ctxt · 코어별 /proc/stat cpuN · 스왑·폴트 /proc/vmstat · 디스크 /proc/diskstats(7·11·12·13열) · NIC /proc/net/dev · TCP /proc/net/snmp. 전부 SSH 1회 명령의 기존·추가 구획 안이다 — 새 명령은 없다.</div>
+  </div>
+
   <!-- 수집 방식 -->
   <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(min(560px,100%),1fr));gap:14px;align-items:start">
     <div class="card">
@@ -141,7 +229,7 @@ h2{margin:0;font-size:15px;font-weight:700}
         <thead><tr><th>안</th><th>방법</th><th>피크의 뜻</th><th>부담</th><th>판정</th></tr></thead>
         <tbody>
           <tr><td><b>A</b> 세션 안 짧은 샘플</td><td>지금 SSH 1회 안에서 1초 × N(예 10)회 /proc 를 읽어 그 안의 최대</td><td>5분 중 <b>10초 창의 피크</b> — 나머지 290초는 모른다</td><td class="ok">추가 설치 없음 · 세션 +10초(예산 50초 안)</td><td><span class="chip">기본값 — 작게 시작</span></td></tr>
-          <tr><td><b>B</b> 서버 경량 샘플러 <span class="chip warn">권장(옵트인)</span></td><td>systemd timer + 셸 스크립트가 1초마다 /proc 를 읽어 5분 avg/max/peak_at 을 로컬 파일에 쓰고, SSH 가 그 파일을 가져간다(원시 1초 샘플은 서버에 7일)</td><td>5분 전체의 <b>진짜 피크</b>(1초 해상도)</td><td class="warn">서버마다 스크립트 배포(패키지·데몬 아님 — 포탈이 SSH 로 설치·검증 · 법인 단위 옵트인) · CPU 1% 미만 목표(실측 필요)</td><td><span class="chip warn">피크가 필요한 서버만</span></td></tr>
+          <tr><td><b>B</b> 서버 경량 샘플러 <span class="chip warn">권장(옵트인)</span><div class="dim" style="font-size:11px;white-space:normal">SRE Book: “performing internal sampling on the server, then configuring an external system to collect and aggregate” ●</div></td><td>systemd timer + 셸 스크립트가 1초마다 /proc 를 읽어 5분 avg/max/peak_at 을 로컬 파일에 쓰고, SSH 가 그 파일을 가져간다(원시 1초 샘플은 서버에 7일)</td><td>5분 전체의 <b>진짜 피크</b>(1초 해상도)</td><td class="warn">서버마다 스크립트 배포(패키지·데몬 아님 — 포탈이 SSH 로 설치·검증 · 법인 단위 옵트인) · CPU 1% 미만 목표(실측 필요)</td><td><span class="chip warn">피크가 필요한 서버만</span></td></tr>
           <tr><td><b>C</b> 커널·BMC 가 주는 근사</td><td>PSI avg10/avg60(커널 10초·60초 창) · iDRAC 텔레메트리 리포트의 집계(장비·리포트에 따라 Peak 필드가 있을 수 있음 — 미확인)</td><td>포화의 10초 근사만 · 사용률 피크는 아님</td><td class="ok">추가 없음</td><td><span class="chip">A·B 의 보조</span></td></tr>
         </tbody></table></div>
       <div class="dim" style="font-size:11.5px;margin-top:8px">화면은 피크 값 옆에 <b style="color:#e6edf6">어느 안으로 모은 것인지</b>(창 10초 / 1초 샘플 300개 / PSI 근사)를 항상 적는다 — ‘피크’ 라는 한 단어로 다른 세 가지를 섞지 않는다. 평균은 세 안 모두 지금 그대로다.</div>
@@ -160,7 +248,7 @@ h2{margin:0;font-size:15px;font-weight:700}
   </div>
 </div>
 </x-dc>
-<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1900}}'>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":2900}}'>
 class Component extends DCLogic {
   renderVals() { return {}; }
 }
