@@ -1,5 +1,5 @@
 /**
- * baremetalBoardText.js — 서버 › 물리 서버 '상태 보드' 탭의 집계·문구(순수, v2.916).
+ * baremetalBoardText.js — 서버 › 물리 서버 '상태 보드' 탭의 집계·문구(순수, v2.917).
  * 설계 레퍼런스: docs/design/baremetal/ (Claude Design 시안 A — 사용자 컨펌 2026-11-06).
  *
  * ⚠ 부품 판정은 서버가 한다(CLAUDE.md '판정 코어는 하나'): 행의 `parts` 는 서버 idrac/serverParts.js serverPartsCell 이고,

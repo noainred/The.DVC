@@ -1,5 +1,5 @@
 /**
- * BaremetalBoard.jsx — 서버 › 물리 서버 '상태 보드' 탭(v2.916).
+ * BaremetalBoard.jsx — 서버 › 물리 서버 '상태 보드' 탭(v2.917).
  * 설계 레퍼런스: docs/design/baremetal/ (Claude Design 시안 A — Datadog Host Map · Infrastructure List 구성 참고).
  *
  *   ① KPI 띠(클릭 = 호스트 맵·표 필터)  ② 호스트 맵(서버 1대 = 타일 1개 · 법인별 묶음)
@@ -38,12 +38,22 @@ const KPI_DEF = [
 ];
 const KPI_META = {
   all: (c, b) => (b.omeSkipped ? `OME 콘솔 ${b.omeSkipped}개는 세지 않음` : '서버 1대 = 타일 1개'),
-  fault: () => '장애 부품이 있는 서버',
-  warn: () => '경고 부품이 있는 서버(장애 없음)',
-  ok: () => '확인한 부품이 모두 정상',
-  partial: () => '읽지 못한 부품이 있음 — 정상으로 세지 않음',
+  fault: () => '장애 부품 있음',
+  warn: () => '경고 부품 있음',
+  ok: () => '확인한 부품 모두 정상',
+  partial: () => '읽지 못한 부품 있음',
   nojudge: (c, b) => (b.reasons.length ? b.reasons.slice(0, 2).map((r) => `${nojudgeShortText(r.key)} ${r.n}`).join(' · ') : '정상도 장애도 아님'),
-  stale: () => '인벤토리가 오래됨 — 판정은 유지하고 따로 셈',
+  stale: () => '판정은 유지 · 따로 셈',
+};
+
+const KPI_HINT = {
+  all: '이 범위의 등록 서버 전부(OME 관리 콘솔 등록 제외) — 누르면 필터 해제',
+  fault: '장애(이상) 부품이 1개 이상인 서버',
+  warn: '장애는 없고 경고(주의) 부품이 1개 이상인 서버',
+  ok: '판정했고 확인한 부품이 모두 정상인 서버',
+  partial: '장애·경고는 없지만 상태를 읽지 못한 부품이 있거나 일부 종류 수집이 실패한 서버 — 정상으로 세지 않습니다',
+  nojudge: '인벤토리 없음·장비 불통·엣지 구판 등으로 부품 상태를 판정하지 못한 서버 — 정상도 장애도 아닙니다',
+  stale: '인벤토리가 오래된 서버 — 마지막 판정을 보여 주되 따로 셉니다(지금 상태와 다를 수 있음)',
 };
 
 export default function BaremetalBoard({ vc, onServer, bm = false, dcLabel = '' }) {
@@ -131,7 +141,7 @@ export default function BaremetalBoard({ vc, onServer, bm = false, dcLabel = '' 
       {/* KPI 띠 */}
       <div className="bmb-kpis" role="group" aria-label="상태별 서버 수 — 누르면 그 상태만 강조">
         {KPI_DEF.map((x) => (
-          <button key={x.k} type="button" className="bmb-kpi" data-on={filter === x.k ? '1' : '0'} aria-pressed={filter === x.k} onClick={() => pickFilter(x.k)}>
+          <button key={x.k} type="button" className="bmb-kpi" data-on={filter === x.k ? '1' : '0'} aria-pressed={filter === x.k} onClick={() => pickFilter(x.k)} title={KPI_HINT[x.k]}>
             <span className="bmb-kpi-label"><i style={{ background: x.dot }} />{x.label}</span>
             <span className="bmb-kpi-value">{(counts[x.k] || 0).toLocaleString()}</span>
             <span className="bmb-kpi-meta">{KPI_META[x.k](counts, board)}</span>

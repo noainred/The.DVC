@@ -1,4 +1,4 @@
-// v2.916 서버 › 물리 서버 '상태 보드' — 서버 1대 상태 접기 · 집계 · 소속 규칙(서버 serverInScope 와 대조).
+// v2.917 서버 › 물리 서버 '상태 보드' — 서버 1대 상태 접기 · 집계 · 소속 규칙(서버 serverInScope 와 대조).
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
