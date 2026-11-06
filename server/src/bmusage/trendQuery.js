@@ -46,14 +46,17 @@ export async function trendFor({ agent = '', key, q = {}, settings = {}, now = D
   const rule = await db.migrationReadRule();
   if (kind === 'server') {
     if (res === '5m') {
-      const r = await db.rawRangeMerged({ key, agent, from: win.from, to: win.to, limit: 50_000 });
+      // v2.922(반증 D11): 필요한 열만(지표 · 피크 · 피크 시각 · 출처) — 140열 SELECT * 로 5만 행을 읽지 않는다.
+      const r = await db.rawRangeMerged({ key, agent, from: win.from, to: win.to, limit: 50_000, cols: [pq.metric, `${pq.metric}_peak`, `${pq.metric}_peak_at`, 'peak_src'] });
       rows = r.rows; meta = { missingPeriods: r.missingPeriods, filesCapped: r.filesCapped, truncatedRows: r.truncated };
     } else if (res === '1h') {
       const r = await month.readHourlyRange({ agent, key, from: win.from, to: win.to });
       rows = r.rows; meta = { missingPeriods: (r.missingPeriods || []).filter((x) => x.reason !== 'none'), filesCapped: r.filesCapped, truncatedRows: r.truncated };
       if (rule.hourlyPending && rule.legacyMaxTs != null && win.from <= rule.legacyMaxTs) extraGaps.push({ from: win.from, to: Math.min(win.to, month.hourOf(rule.legacyMaxTs) + RES_MS['1h']), reason: 'migrating' });
     } else {
-      rows = await db.dailyRangeMerged({ key, agent, from: win.from, to: win.to });
+      // v2.922(반증 D8): 1일도 열기 실패·파일 상한을 밝힌다(예전에는 버렸다 — 10년 창이면 가장 오래된 해가 소리 없이 빠졌다).
+      const r = await db.dailyRangeMergedMeta({ key, agent, from: win.from, to: win.to });
+      rows = r.rows; meta = { missingPeriods: r.missingPeriods, filesCapped: r.filesCapped, ...(r.error ? { error: r.error } : {}) };
     }
   } else if (kind === 'mount') {
     const r = await month.readMountDaily({ agent, key, mount: pq.dev, from: win.from, to: win.to });
@@ -73,6 +76,7 @@ export async function trendFor({ agent = '', key, q = {}, settings = {}, now = D
     ...(truncated ? { truncated } : {}), ...(meta.truncatedRows ? { truncatedRows: true } : {}),
     ...(meta.missingPeriods?.length ? { missingPeriods: meta.missingPeriods } : {}), ...(meta.filesCapped ? { filesCapped: meta.filesCapped } : {}),
     ...(rule.phase !== 'none' && rule.phase !== 'done' ? { migration: rule.phase } : {}),
+    ...(meta.error ? { error: meta.error } : {}),
   };
 }
 

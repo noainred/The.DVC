@@ -115,7 +115,8 @@ export const DEFAULTS = Object.freeze({
  *  · hourlyDays 365(1시간 롤업) · 1일 롤업은 기존 dailyRetentionDays(5년) 그대로 · 장치 5분 14일 · 장치 1시간 90일(설계).
  *  · deviceMax 32(서버당 장치 수 상한 — 넘으면 ‘상한 초과 n’) · partitionIo 꺼짐(파티션 I/O 는 옵트인) · blkqMax 64(##BLKQ 장치 수 — D7).
  *  · peakWindowS 10(A 안: 같은 SSH 세션 안 1초 간격 창 — 0 이면 끔. 세션 예산이 모자라면 줄이고 행에 적는다).
- *  · peakSampler 꺼짐(B 안 — 서버 샘플러 파일 수거. 이번 단계는 수거 구획·형식 명세·sha256 대조 자리만; 스크립트 배포는 7단계).
+ *  · peakSampler 꺼짐(B 안 — 서버 샘플러 파일 수거. 이번 단계는 수거 구획·형식 명세·해시 **기록** 자리만 — 파일 머리 줄의 sha256 은 자기 신고 값이라
+ *    설정값과 같아도 위조 방지가 아니다(반증 D13). 스크립트 실물 대조·배포는 7단계).
  *  · portTolPct 5(CVP 양쪽 대조 ⑤ 의 어긋남 기준 — 설계 ‘예 5%’ · 임의 시작값).
  */
 export const STORE_DEFAULTS = Object.freeze({

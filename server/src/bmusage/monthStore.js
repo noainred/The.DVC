@@ -260,7 +260,7 @@ export function openFileNames() { return [..._open.keys()].sort(); }
 export function failedFiles() { return [..._failed.entries()].map(([name, v]) => ({ name, ...v })); }
 export function _resetMonthStoreForTest() {
   for (const h of _open.values()) { try { h.db.close(); } catch { /* */ } }
-  _open.clear(); opening.clear(); _failed.clear(); _prepCache.clear(); _pruning = null; _counts = null;
+  _open.clear(); opening.clear(); _failed.clear(); _prepCache.clear(); _pruning = null; _counts = null; _countsRunning = null; _chain = Promise.resolve();
 }
 
 /* ════════════════════════ 적재 ════════════════════════ */
@@ -503,12 +503,12 @@ async function repairPendingInner({ dailyLiveAfter, rawKeepFrom, max }) {
       }
       for (const d of days.values()) {
         const [ds, de] = dayRange(d.day);
-        if (rawKeepFrom != null && ds < rawKeepFrom) { out.expiredDaily += 1; done.push(...d.items); continue; }
+        if (rawKeepFrom != null && ds < rawKeepFrom) { out.expiredDaily += 1; for (const it of d.items) done.push(it); continue; }
         const rows = rawDb.prepare('SELECT * FROM usage_history WHERE agent=? AND key=? AND ts>=? AND ts<?').all(d.agent, d.key, ds, de)
           .filter((r) => dailyLiveAfter == null || Number(r.ts) > dailyLiveAfter);
         const ok = await replaceRollup('d1', d.day.slice(0, 4), 'usage_daily', D1_COLS, 'day', d.day, rows, { agent: d.agent, key: d.key, rolls: D1_ROLL_ALL }, out);
         if (!ok) continue;
-        out.days += 1; done.push(...d.items);
+        out.days += 1; for (const it of d.items) done.push(it);
       }
       if (done.length) {
         try { txn(rawDb, () => { const del = rawDb.prepare('DELETE FROM _pend WHERE agent=? AND key=? AND h=?'); for (const pd of done) del.run(pd.agent, pd.key, pd.h); }); }
@@ -516,7 +516,6 @@ async function repairPendingInner({ dailyLiveAfter, rawKeepFrom, max }) {
       }
     });
   }
-  if (out.buckets || out.days) _counts = null;
   return out;
 }
 const month0 = (family, ts) => periodKeyOf(family, ts);
@@ -804,29 +803,47 @@ export function mergeDailyRows(a, b) {
 
 /* ════════════════════════ 행 수(진단) ════════════════════════ */
 let _counts = null;
-const COUNT_CACHE_MS = Math.max(0, Number(process.env.BMUSAGE_COUNT_CACHE_MS) || 60_000);
+let _countsRunning = null;
+/** v2.922(반증 D11): 파일별 행 수는 비싸다(장치 5분 월 파일 수천만 행 — 추정) → 10분 캐시 · 계산은 뒤에서(화면 로드가 기다리지 않는다). */
+const COUNT_CACHE_MS = Math.max(0, Number(process.env.BMUSAGE_MONTH_COUNT_CACHE_MS) || 10 * 60_000);
 /**
- * 가족별 파일 수·행 수·바이트. COUNT 는 파일마다 **집계 하나짜리 문장**이고 짧게 캐시한다(캐시임을 숨기지 않는다 — countsAt).
- * ⚠ 화면 로드마다 돈다 — 파일이 많아도 각 COUNT 는 커버링 인덱스 하나다(db.js dbStatus 와 같은 판단).
+ * 가족별 파일 수·행 수·바이트. COUNT 는 파일마다 **집계 하나짜리 문장**.
+ *  · v2.922(반증 D11): 캐시 10분 · 낡았으면 **지난 값을 바로 돌려주고** 뒤에서 다시 센다(stale-while-revalidate — 첫 호출만 기다린다) ·
+ *    파일 사이 시간 기준 양보 · 캐시에 없는 파일은 **잠깐 열고 바로 닫는다**(LRU 핸들 캐시를 갈아 끼우지 않게).
+ *  · 캐시라는 사실은 숨기지 않는다(countsAt · stale).
  */
-export async function monthStoreStatus({ force = false } = {}) {
-  if (!force && _counts && Date.now() - _counts.at < COUNT_CACHE_MS) return _counts.v;
+export async function monthStoreStatus({ force = false, wait = false } = {}) {
+  const fresh = _counts && Date.now() - _counts.at < COUNT_CACHE_MS;
+  if (!force && fresh) return _counts.v;
+  if (!_countsRunning) _countsRunning = countAll().finally(() => { _countsRunning = null; });
+  if (_counts && !force && !wait) return { ..._counts.v, stale: true };
+  return _countsRunning;
+}
+async function countAll() {
   const out = {};
+  const maybeYield = createYielder(15);
+  const mod = await sqliteMod();
   for (const fam of Object.keys(FAMILIES)) {
     const files = listFamilyFiles(fam);
     let rows = 0; let bytes = 0;
     for (const f of files) {
-      try { bytes += fs.statSync(path.join(dbDir(), f.name)).size; } catch { /* */ }
-      const db = await openPeriodFile(fam, f.key, { create: false });
-      if (!db) continue;
-      try { rows += Number(db.prepare(`SELECT COUNT(*) c FROM ${FAMILIES[fam].table}`).get()?.c ?? 0); } catch { /* */ }
+      const file = path.join(dbDir(), f.name);
+      try { bytes += fs.statSync(file).size; } catch { /* */ }
+      const h = _open.get(f.name);
+      let tmp = null;
+      try {
+        const db = h ? h.db : (mod ? (tmp = new mod.DatabaseSync(file, { readOnly: true })) : null);
+        if (db) rows += Number(db.prepare(`SELECT COUNT(*) c FROM ${FAMILIES[fam].table}`).get()?.c ?? 0);
+      } catch { /* 못 연 파일은 행 수에서 빠진다(failed 로 밝힌다) */ } finally { try { tmp?.close(); } catch { /* */ } }
+      await maybeYield();
     }
     out[fam] = { files: files.length, first: files[0]?.key ?? null, last: files.at(-1)?.key ?? null, rows, bytes };
   }
   _counts = { at: Date.now(), v: { ...out, countsAt: Date.now(), failed: failedFiles().slice(0, 8) } };
   return _counts.v;
 }
-export function invalidateMonthCounts() { _counts = null; }
+/** 낡음 표시만(지난 값은 남긴다 — 다음 조회가 바로 돌려받고 뒤에서 다시 센다). */
+export function invalidateMonthCounts() { if (_counts) _counts.at = 0; }
 
 /* ════════════════════════ 보존 — 파일 삭제 + 파일 안 잔여 청크 ════════════════════════ */
 let _pruning = null;
@@ -876,7 +893,7 @@ export async function pruneMonthFiles({ keepDays = {}, now = Date.now(), paused 
         }
       }
     }
-    if (out.filesDeleted.length || out.residualDeleted) _counts = null;
+    if (out.filesDeleted.length || out.residualDeleted) invalidateMonthCounts();
     return out;
   })().finally(() => { _pruning = null; });
   return _pruning;

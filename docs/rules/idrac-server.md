@@ -401,8 +401,11 @@
     한 종류가 상한을 다 차지하지 않게) · 넘은 수는 최신값 `dev_over` + 노트. 장치 목록(usage_devices)은 처음 본 순서 `ord` 가 색 순서(바뀌지 않는다). 마운트는 일 롤업만.
   - **피크 A 안**: 본 명령 뒤 **같은 세션**에서 `/proc/stat`·`/proc/diskstats`·`/proc/net/dev` 를 1초 간격 N+1 번(`store.peakWindowS` 10 · 0 이면 끔) — 세션 예산(50초)에서 남은 시간으로
     줄이고(2초 미만이면 0) 행에 `peak_window_s` · 노트. 시각은 원격 /proc/uptime 간격 + 이 노드 시계. `peak_src`: window10 | sampler | psi | none.
-    ⚠⚠ **주기 예산 자동 맞춤(v2.922 메인 지시 — `bmusage/peakPlan.js`)**: 창은 서버마다 수집 시간을 늘려 1,000대 · 동시 32 에서 주기를 넘겼다(재진입 가드가 다음 틱을 건너뛰면
-      **기존 다섯 지표까지 굶는다**). 매 주기 예상 소요 = max(1, 대상 ÷ 동시성) × (서버당 기본 소요 + OS 비율 × 창) 가 주기 × `store.peakCycleRatio`(0.7) 를 넘으면 창을 10 → 5 → 3 → 0초로 줄인다 —
+    ⚠⚠ **주기 예산 자동 맞춤(v2.922 메인 지시 — `bmusage/peakPlan.js`)**: 창은 서버마다 수집 시간을 늘려 1,000대 · 동시 32 에서 한 번 도는 데 주기보다 오래 걸렸다.
+      ⚠ 정정(반증 D2): 타이머는 **실행이 끝난 뒤 재무장**한다(util/adaptiveTimer) — 틱을 건너뛰는 것이 아니라 **실제 간격 = 실행 소요 + 주기**로 늘어난다
+      (예: 실행 6.9분 + 5분 ≈ 12분). 추이(trendWindow.gapsOf)는 기대 간격 × 2(5분 주기면 10분)를 넘는 빈틈을 결측으로 끊으므로 **다섯 지표의 5분 추이까지 전부 결측**이 된다.
+      매 주기 예상 실행 소요 = max(1, 대상 ÷ 동시성) × (서버당 기본 소요 + OS 비율 × 창) 가 주기 × `store.peakCycleRatio`(0.7) 를 넘으면 창을 10 → 5 → 3 → 0초로 줄인다
+      — 그러면 예상 간격(실행 + 주기, `expectedPeriodMs`) ≤ 주기 × 1.7 < 결측 경계(주기 × 2). 비율 상한은 0.95(1 이상이면 이 보장이 깨진다) —
       `peakWindowS` 는 상한(줄이기만) · 기본 소요는 직전 주기 실측(서버별 소요 − 실제 창, 평균), 없으면 보수적 8초(추정) · 결정은 `_last.peakPlan`·`bmUsageStatus().peakPlan`(수집 건강 ⑫) · 행 노트와 `peak_window_s` 에 실제 값.
       **이 맞춤을 지우거나 상한 대신 결정값을 그대로 쓰지 말 것**(회귀 `server/test/bmPerf2921Plan.test.js` — 변이 11/11).
     B 샘플러: `store.peakSampler` 옵트인일 때만 `##SAMPLER`(고정 경로 · 없으면 absent) · 형식 v1 · 기대 sha256(`store.peakSamplerSha256`)이 없거나 다르면 unverified(값을 쓰지 않는다) — **배포 기능 없음(7단계)**.
@@ -413,7 +416,19 @@
   - **CVP 대조(서버 쪽)**: 후보는 `cvp/hostMatch.js matchUplinks` **하나**(v2.920 업링크 매칭 — 별칭·리눅스 NIC 이름을 받게 넓혔다 · 구분자 있는 이름 매칭 결함 수정) · 수동 매핑 `bmusage-portmap.json`
     (admin · 원자 쓰기 · 손상 보존 후 저장 거부 · 감사 로그 · 범위 계정은 자기 법인 CVP 로만 — 안 보이면 404, 보이는데 다른 법인이면 403) · 상태 no-cvp · no-mapping · candidate · no-counters · stale · mapped ·
     대조 ⑤ 는 창(끝 시각·길이)이 20% 안일 때만, 기준 `store.portTolPct` 5%. LLDP·MAC 은 만들지 않았다.
-  - **행 크기 실측**(설계 §4.4 정정): 원시 655B · 1시간 1,110B · 1일 1,147B · 장치 5분 213B · 장치 1시간 296B → 1,000대 약 25GB(보존 정확) · 최악 약 40GB(추정).
+  - **행 크기 실측**(설계 §4.4 정정): 원시 655B · 1시간 1,110B · 1일 1,147B · 장치 5분 213B · 장치 1시간 296B → 1,000대 약 25GB(보존 정확) · 최악 42.7GB(표 — 설계 README §4.4 · 선택지별 크기).
+  - ⚠⚠ **반증(review-s3a) 반영 — 되돌리지 말 것**(회귀 `server/test/bmPerf2921Review.test.js` · `bmPerf2921CvpRecv.test.js`):
+    · **D1** port-map 쓰기는 `inUserWriteScope` 를 **조건 없이**(조회 밖 404 → 쓰기 밖 403) · 법인 CVP 검사는 `!isFullReadWriteScope` 일 때 · PUT/DELETE 한 함수(`portMapWrite`) · 실제 라우터 테스트(조회 무제한 + writeVcenters).
+    · **D3** 중앙 CVP 정제는 12칸 표본을 12칸으로(구 엣지 10칸은 10칸) · 10칸 표본은 port_latest 드롭을 덮지 않는다 — 실제 수신 라우트로 시험.
+    · **D4·D5** 원시와 롤업은 다른 파일이라 원시 트랜잭션에 ‘보정 대기’(`_pend` — agent·key·시간 버킷)를 남기고 롤업이 모두 성공하면 지운다 · 남은 대기는 매 틱
+      `repairRollups` 가 **원시에서 그 버킷을 다시 집계해 교체**(1일은 legacyMaxTs 뒤 행만 — 예전 일은 사본 표) · 마이그레이션은 보존 안 행의 버킷을 전부 대기로(라이브 선행 이중 계수 없음 m3)
+      · 보존 밖 행은 **agent 별 커서**(m1) · 경계(rawCopyFrom·hourlyFrom)는 정시로 맞춰 고정 · 대조에 1시간 표본 수(예전 행만 있는 시간 = 같음 · 경계 시간 ≥).
+    · **D6** 마이그레이션 시도 횟수는 재시작하면 0 부터 · 다 쓴 뒤 6시간이면 다시 · 옮기는 중·실패 대기 중에는 예전 표 정리와 원시·롤업 파일 보존을 멈춘다 · 상태(다음 재시도)는 `_last.migration`.
+    · **D2** 타이머는 실행 뒤 재무장 — 간격 = 실행 + 주기(`peakPlan.expectedPeriodMs`) · 자동 맞춤이면 간격 ≤ 주기 × 1.7 < 결측 경계.
+    · **D7** hostMatch 경계 보강(cvp.md v2.922) · **D8** 1일 추이도 missingPeriods·filesCapped · **D9** 롤업 peak_src = 피크를 낸 행의 출처(섞이면 mixed) ·
+      **D11** 5분 추이는 필요한 열만 · 파일 행 수 상태는 10분 캐시(낡으면 지난 값 + stale, 뒤에서 다시 센다) · 마이그레이션 청크 500 · **D12** 피크 노트는 원인을 단정하지 않는다 ·
+      **D13** 샘플러 머리 줄 sha256 은 자기 신고 값(설정값과 같아도 위조 방지 아님 · 미래 시각은 형식 오류) · **D14** iDRAC 통합 추이가 원시 보존 밖 구간을 `cpuHistoryNote` 로 밝힌다 ·
+      **D15** 포트 대조는 CVP 도구 접근이 있어야 포트 값을 준다(없으면 ‘권한 없음’) · 비관리자에게 포트 설명 주소 가림 · **D10** 은 기록만(README §6-14).
   - ⚠ **정직 기록**: 표본은 커널 문서 형식 + 이 개발 컨테이너(커널 6.18 · dash) 실행 출력이다 — 이 현장 Rocky 9 / RHEL 8 베어메탈 출력은 보지 못했다. `/proc/interrupts` 의 NIC 큐 이름 패턴 ·
     PSI 유무 · `/etc/tuned/active_profile` 존재는 첫 실수집에서 `detail.sections`·`tuning.sections` 를 보고 좁힌다. 화면(2단계)·월 파일/3단 보존/장치별 이력(3단계)·진단 스냅샷(4단계)은 아직이다.
 - ⚠⚠ **iDRAC 텔레메트리는 Datacenter 전용이다 — Enterprise 서버는 '대체 경로' 로 읽고, 그 부하에

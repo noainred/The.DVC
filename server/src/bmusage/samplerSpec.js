@@ -2,9 +2,11 @@
  * bmusage/samplerSpec.js — 피크 수집 B 안(서버 경량 샘플러)의 **수거 자리**(v2.922 · 3a). 설계 PROFILES §6 끝 · §19(16차 보안).
  *
  * 이번 단계에서 만드는 것: ① 옵트인 설정 키(store.peakSampler — 기본 꺼짐) ② 수거 구획 `##SAMPLER`(파일이 있으면 읽고 없으면 absent)
- *   ③ 파일 형식 명세(아래) ④ sha256 대조 자리(store.peakSamplerSha256 — 비어 있으면 ‘검증 안 됨’ 이라 값을 쓰지 않는다).
- * 만들지 않는 것: **스크립트 배포**(서버에 파일을 쓰는 기능) — 번들 고정·해시 대조는 7단계(16차 보안 설계). 그래서 지금은 어떤 서버에서도
- *   state 가 'ok' 가 될 수 없다(기대 해시를 정하는 경로가 배포와 함께 온다) — 화면은 피크 출처를 window10/psi/none 으로 적는다.
+ *   ③ 파일 형식 명세(아래) ④ 해시 **기록** 자리(store.peakSamplerSha256).
+ * ⚠⚠ 정정(v2.922 반증 D13): 머리 줄의 sha256 은 **파일을 쓴 쪽이 스스로 적은 값(자기 신고)** 이다 — 이 모듈은 스크립트를 해시하지 않는다.
+ *   그래서 설정값과 비교하는 것은 ‘대조(검증)’ 가 아니라 **기록 일치 확인**이고, 파일을 쓸 수 있는 누구든 같은 값을 적을 수 있다(위조 방지 아님).
+ *   예전 주석의 “지금은 어떤 서버에서도 state 가 'ok' 가 될 수 없다” 도 틀렸다 — 관리자가 설정에 해시를 넣으면 같은 머리 줄을 쓴 파일은 ok 가 된다.
+ *   스크립트 실물을 해시해 대조하는 것(번들 고정)은 배포 기능과 함께 7단계(16차 보안 설계)다. 화면은 sampler 출처 옆에 ‘자기 신고 해시’ 를 적어야 한다.
  *
  * ── 파일 형식 v1(샘플러가 5분마다 원자적으로 바꿔 쓴다 — 1초 원시는 서버 로컬에 7일, 이 파일은 마지막 5분 요약만) ─────────────
  *   1줄 머리:  `#dvc-bmperf v1 sha256=<스크립트 sha256 64자리> at=<요약 끝 epoch 초> window=<초>`
@@ -45,8 +47,10 @@ export function parseSamplerFile(lines, { expectedSha = '', now = Date.now(), ma
     metrics[f[0]] = { avg, peak: max, at: at * 1000 };
   }
   const at = Number(h[2]) * 1000;
-  const base = { sha256: h[1], at, windowS: Number(h[3]), metrics };
-  if (!expectedSha || expectedSha !== h[1]) return { ...base, state: 'unverified', reason: expectedSha ? '스크립트 해시가 기대값과 다릅니다' : '기대 해시가 설정되지 않았습니다(배포 기능은 7단계)' };
+  // v2.922(반증 D13): 원격 시계가 쓴 요약 끝 시각 — 미래(5분 넘게)면 형식 오류로 본다(오래됨 판정을 피해 가지 못하게).
+  if (at > now + 5 * 60_000) return { state: 'bad', metrics: null, reason: '요약 시각이 미래입니다(원격 시계 확인 필요)' };
+  const base = { sha256: h[1], at, windowS: Number(h[3]), metrics, shaSelfReported: true };
+  if (!expectedSha || expectedSha !== h[1]) return { ...base, state: 'unverified', reason: expectedSha ? '파일이 적은 해시가 설정값과 다릅니다(자기 신고 값 — 위조 방지 아님)' : '설정에 해시가 없습니다(스크립트 실물 대조·배포는 7단계)' };
   if (now - at > maxAgeMs) return { ...base, state: 'stale' };
   return { ...base, state: 'ok' };
 }

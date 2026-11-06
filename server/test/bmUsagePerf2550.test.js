@@ -70,7 +70,7 @@ test('같은 ts 재삽입은 INSERT OR IGNORE + changes 검사로 이중 계수�
   const s = bare('bmusage/db.js') + bare('bmusage/monthStore.js');
   assert.match(s, /INSERT OR IGNORE INTO usage_history/);
   assert.ok(!/INSERT OR REPLACE INTO usage_history/.test(s), 'REPLACE 면 롤업이 두 번 누적된다');
-  assert.match(s, /if \(Number\(out\?\.changes\)\) \{ res\.inserted \+= 1; res\.insertedRows\.push\(r\); \} else res\.duplicates \+= 1;/, 'changes 0 이면 롤업을 건드리지 않는다');
+  assert.match(s, /const isNew = !!Number\(out\?\.changes\);\s*if \(isNew\) \{ res\.inserted \+= 1; res\.insertedRows\.push\(r\); \} else res\.duplicates \+= 1;/, 'changes 0 이면 롤업을 건드리지 않는다(v2.922: 보정 대기도 새 행만 — pend inserted)');
 });
 test('최신값은 ts 가 더 클 때만 갱신한다 — 엣지 push 는 순서대로 오지 않는다', () => {
   assert.match(bare('bmusage/db.js'), /WHERE excluded\.ts > usage_latest\.ts/);

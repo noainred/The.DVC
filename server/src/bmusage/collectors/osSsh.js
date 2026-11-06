@@ -304,7 +304,8 @@ export async function collectOsUsage(osHost = {}, { signal, budgetMs = SESSION_B
             const nicInfo = Object.fromEntries((shaped.counters?.nets || []).map((x) => [x.iface, { bitsPerSec: x.bitsPerSec ?? null, virtual: !!x.virtual }]));
             const pk = computePeaks({ samples: parsed.samples, startWall, nicInfo });
             peak = { ...peak, windowS: pk.windowS, server: pk.server, devices: Object.fromEntries(pk.devices), truncated: parsed.truncated,
-              reduced: plan.reduced || pk.windowS < plan.windowS, reason: plan.reason || (pk.windowS < plan.windowS ? 'short' : '') };
+              // v2.922(반증 D12): 예산으로 줄인 것(plan)과 창을 돌렸는데 표본 구간이 모자란 것(short — 원인 미확인)을 따로 남긴다.
+              plannedS: plan.windowS, reduced: plan.reduced || pk.windowS < plan.windowS, reason: plan.reason, shortBy: Math.max(0, plan.windowS - pk.windowS) };
           } catch (e) { peak = { ...peak, windowS: 0, reason: 'error', error: String(e?.message || e).slice(0, 160) }; }
         }
         return { ...shaped, peak, ok: true, stderr: (r.stderr || '').slice(0, 300) };

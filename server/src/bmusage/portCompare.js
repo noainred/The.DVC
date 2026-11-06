@@ -15,7 +15,8 @@
 import { numOrNull } from '../util/numOrNull.js';
 
 const n = numOrNull;
-export const PORT_STATES = Object.freeze(['mapped', 'candidate', 'no-mapping', 'no-cvp', 'no-counters', 'stale']);
+// v2.922(반증 D15): 'no-permission' — CVP 도구 접근이 없는 계정(포트 값을 내주지 않는다).
+export const PORT_STATES = Object.freeze(['mapped', 'candidate', 'no-mapping', 'no-cvp', 'no-counters', 'stale', 'no-permission']);
 export const COMPARE_VERDICTS = Object.freeze(['ok', 'mismatch', 'port-errors', 'server-drops', 'idle', 'window-mismatch', 'no-data']);
 
 /*

@@ -347,6 +347,9 @@ export async function bmPortsView(req, snap, deps = {}) {
     portsByDesc: async (t2) => (await import('../../cvp/db.js')).portsByDesc(t2),
     cvpIntervalMs: async () => { try { return (await import('../../cvp/settings.js')).loadSettings().intervalMs; } catch { return null; } },
     listPortMap: async (o) => (await import('../../bmusage/portMap.js')).listPortMap(o),
+    // v2.922(반증 D15): CVP 도구 접근(권한 파일의 도구 키 'cvp') — 없으면 포트 설명·처리량을 내주지 않는다.
+    cvpToolIssue: async (user) => (await import('../../auth/toolAccess.js')).issueFor(user, 'cvp'),
+    maskText: async (v, hosts) => (await import('./cvp.js')).maskErrText(v, hosts),
     ...deps,
   };
   const P = await import('../../bmusage/portCompare.js');
@@ -370,6 +373,14 @@ export async function bmPortsView(req, snap, deps = {}) {
   if (found.via === 'local') nicRes = await D.nicLatestFor({ agent: found.agent, key: found.realKey, intervalMs: s.intervalMs });
   else { const r = await D.pullBmTrend(found.agent, 'nics', found.realKey, {}); nicRes = r?.ok ? r.body : { ok: false, nics: [], reason: r?.reason || '엣지에서 NIC 값을 읽지 못했습니다.' }; }
   const nics = nicRes?.nics || [];
+  /*
+   * v2.922(반증 D15): 포트 설명(주소·호스트명이 흔하다)·처리량은 **CVP 도구 접근이 있는 계정만** 본다 — bm-usage 권한만으로는 CVP 화면이 막힌
+   *   사용자도 볼 수 있었다. 없으면 NIC 마다 상태 ‘권한 없음’ 만(매핑·후보·포트 값 없음). 비관리자에게는 설명의 주소를 가린다(cvp.maskErrText — CVP 화면과 같은 함수).
+   */
+  const cvpIssue = await D.cvpToolIssue(req.user);
+  if (cvpIssue) return { ...base, cvpAccess: false, reason: cvpIssue.reason, nics: nics.map((x) => ({ nic: x.nic, state: 'no-permission' })), candidates: [] };
+  const hosts = isAdmin ? [] : await D.bmAddressHosts(null).catch(() => []);
+  const mask = async (v) => (isAdmin || v == null ? v : D.maskText(v, hosts));
   if (!corpCvpIds.length) return { ...base, cvpRegistered: false, nics: nics.map((x) => ({ nic: x.nic, state: 'no-cvp' })), candidates: [] };
   const corpSet = new Set(corpCvpIds);
   const maps0 = await D.listPortMap({ agent: found.agent, key: found.realKey });
@@ -381,13 +392,16 @@ export async function bmPortsView(req, snap, deps = {}) {
   const host = { name: found.target.name || '', aliases: [found.target.serviceTag, found.target.osHostName].filter(Boolean), nics: nics.map((x) => ({ device: x.nic })) };
   const terms = H.hostMatchTerms(host).names;
   const byDesc = terms.length ? ((await D.portsByDesc(terms).catch(() => ({ rows: [] }))).rows || []).filter((p) => corpSet.has(String(p.cvpId))) : [];
-  const candidates = H.matchUplinks(byDesc, host).uplinks.slice(0, 32)
-    .map((u) => ({ cvpId: String(u.cvpId), deviceKey: String(u.key), deviceName: u.hostname || '', port: u.port, descr: String(u.desc).slice(0, 200), nic: u.nic, basis: u.basis }));
+  const candidates = [];
+  for (const u of H.matchUplinks(byDesc, host).uplinks.slice(0, 32)) {
+    candidates.push({ cvpId: String(u.cvpId), deviceKey: String(u.key), deviceName: u.hostname || '', port: u.port, descr: await mask(String(u.desc).slice(0, 200)), nic: u.nic, basis: u.basis });
+  }
   const maps = maps0;
   let hiddenOutOfScope = 0;
   const cvpSpan = Number(await D.cvpIntervalMs()) || null;
   const freshMs = Math.max(30 * 60_000, 3 * (cvpSpan || 300_000));
-  const rows = nics.map((x) => {
+  const rows = [];
+  for (const x of nics) rows.push(await (async () => {
     let mapping = maps.find((m) => m.nic === x.nic) || null;
     if (mapping && allowed && !corpSet.has(String(mapping.cvpId))) { hiddenOutOfScope += 1; mapping = null; }
     const port = mapping ? (portsAll.find((p) => String(p.cvp_id) === String(mapping.cvpId) && String(p.device_key) === String(mapping.deviceKey) && String(p.port) === String(mapping.port)) || null) : null;
@@ -395,11 +409,11 @@ export async function bmPortsView(req, snap, deps = {}) {
     const compare = state === 'mapped' ? P.compareTraffic({ server: { txBps: x.txBps, rxBps: x.rxBps, at: x.at, spanMs: x.spanMs, dropDelta: x.dropDelta, errDelta: x.errDelta },
       port: { ...port, spanMs: cvpSpan }, tolPct: tol }) : null;
     return { nic: x.nic, state, mapping: mapping ? { cvpId: mapping.cvpId, deviceKey: mapping.deviceKey, port: mapping.port, by: isAdmin ? mapping.by : undefined, at: mapping.at } : null,
-      port: port ? { device: port.hostname || port.device_key, port: port.port, descr: port.descr, speedBps: port.speed_bps, oper: port.oper, inBps: port.in_bps, outBps: port.out_bps, inUtil: port.in_util, outUtil: port.out_util,
+      port: port ? { device: port.hostname || port.device_key, port: port.port, descr: await mask(port.descr), speedBps: port.speed_bps, oper: port.oper, inBps: port.in_bps, outBps: port.out_bps, inUtil: port.in_util, outUtil: port.out_util,
         inErr: port.in_err, outErr: port.out_err, inDrop: port.in_drop ?? null, outDrop: port.out_drop ?? null, rateAt: port.rate_ts } : null,
       server: { rxBps: x.rxBps, txBps: x.txBps, at: x.at, dropDelta: x.dropDelta, errDelta: x.errDelta }, compare };
-  });
-  return { ...base, cvpRegistered: true, nics: rows, candidates, ...(hiddenOutOfScope ? { hiddenOutOfScope } : {}), ...(nicRes?.ok === false ? { nicError: nicRes.reason } : {}) };
+  })());
+  return { ...base, cvpAccess: true, cvpRegistered: true, nics: rows, candidates, ...(hiddenOutOfScope ? { hiddenOutOfScope } : {}), ...(nicRes?.ok === false ? { nicError: nicRes.reason } : {}) };
 }
 /** 성능 상세 대상 해석(이 노드 · 엣지 보관분) — bmTrendView 와 같은 규칙. 범위 밖이면 { denied }. */
 async function resolvePerfTarget(req, D, { allowed, isAdmin, key }) {

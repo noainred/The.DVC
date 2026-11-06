@@ -169,7 +169,7 @@ test('피크 A: 예산이 모자라면 N 축소 · 2초 미만이면 0 · 창 �
 test('피크가 행으로: buildUsage 가 peak 열·peak_src·peak_window_s 를 싣고 1초 표본 배열은 행에 없다(DB 적재 금지)', async () => {
   const U = await import('../src/bmusage/usage.js');
   const os = { ok: true, osKind: 'linux', counters: { cpu: { total: 100, idle: 50 }, disks: [], nets: [] }, mounts: [], perf: {},
-    peak: { windowS: 6, wantS: 10, reduced: true, reason: 'budget', server: { cpu_pct: { peak: 77, at: 123 } }, devices: {} } };
+    peak: { windowS: 6, wantS: 10, plannedS: 6, shortBy: 0, reduced: true, reason: 'budget', server: { cpu_pct: { peak: 77, at: 123 } }, devices: {} } };
   const b = U.buildUsage({ target: { key: 'K', name: 'k' }, os, now: 10_000 });
   assert.equal(b.row.cpu_pct_peak, 77); assert.equal(b.row.cpu_pct_peak_at, 123); assert.equal(b.row.peak_src, 'window10'); assert.equal(b.row.peak_window_s, 6);
   assert.ok(b.notes.some((x) => x.includes('10초에서 6초로')), b.notes.join('|'));

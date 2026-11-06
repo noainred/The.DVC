@@ -520,10 +520,11 @@ export async function rawRangeMerged({ db = null, key, agent = '', from, to, lim
   try {
     if (rule.legacyRaw && rule.legacyMaxTs != null && from <= rule.legacyMaxTs) {
       legacyTo = Math.min(to, rule.legacyMaxTs);
-      // 예전 표는 열이 더 적다(피크 열 없음) — 늘 * 로 읽고 없는 열은 결과에 없다(= null 로 읽힌다).
+      // 예전 표는 열이 더 적다(피크 열 없음) — cols 를 주면 **예전 표에 있는 열만** 고르고(v2.922 반증 D11 — 140열 SELECT * 를 줄인다), 없는 열은 결과에 없다(= null).
+      const sel = cols ? ['ts', ...cols.filter((c) => legacyCols(db).has(c) && c !== 'ts')].join(',') : '*';
       const q = newestFirst
-        ? db.prepare('SELECT * FROM usage_history WHERE key=? AND agent=? AND ts>=? AND ts<=? ORDER BY ts DESC LIMIT ?').all(String(key), String(agent), from, legacyTo, limit + 1).reverse()
-        : db.prepare('SELECT * FROM usage_history WHERE key=? AND agent=? AND ts>=? AND ts<=? ORDER BY ts LIMIT ?').all(String(key), String(agent), from, legacyTo, limit + 1);
+        ? db.prepare(`SELECT ${sel} FROM usage_history WHERE key=? AND agent=? AND ts>=? AND ts<=? ORDER BY ts DESC LIMIT ?`).all(String(key), String(agent), from, legacyTo, limit + 1).reverse()
+        : db.prepare(`SELECT ${sel} FROM usage_history WHERE key=? AND agent=? AND ts>=? AND ts<=? ORDER BY ts LIMIT ?`).all(String(key), String(agent), from, legacyTo, limit + 1);
       for (const x of (q)) out.push(x);   // 큰 배열 전개 push 금지(v2.603 — RangeError)
     }
   } catch { /* 예전 표가 없으면(새 설치) 건너뛴다 */ }
@@ -540,6 +541,12 @@ export async function rawRangeMerged({ db = null, key, agent = '', from, to, lim
   return { rows, truncated, ...meta, source: { legacy: legacyTo !== -Infinity, files: fFrom <= to } };
 }
 
+let _legacyCols = null;
+/** 예전 표 열 이름(한 번 읽어 둔다 — 열 이름은 상수 표와 대조해서만 SQL 에 들어간다). */
+function legacyCols(db) {
+  if (!_legacyCols) { try { _legacyCols = new Set(db.prepare('PRAGMA table_info(usage_history)').all().map((r) => r.name)); } catch { _legacyCols = new Set(); } }
+  return _legacyCols;
+}
 /**
  * v2.665: 출처가 iDRAC 뿐인 행만(serverTrendSeries.bmSrcIsIdrac 과 같은 판정 — 'os' 가 섞이면 CPU 가 OS 값일 수 있다,
  * 출처를 모르는 빈 src 도 쓰지 않는다). src 는 '+' 로 이은 토큰이라 양끝에 '+' 를 붙여 토큰 단위로 비교한다.
@@ -590,9 +597,14 @@ export async function usageDaily({ key = '', agent = '', days = 90 } = {}) {
   return dailyRangeMerged({ key, agent, from: now - Math.max(1, Number(days) || 90) * 86_400_000, to: now });
 }
 /** 일 롤업 구간(같은 날 합치기 — usageDaily 의 본체 · 추이 API 1일 해상도도 이것). */
-export async function dailyRangeMerged({ key = '', agent = '', from: fromMs, to: toMs } = {}) {
+export async function dailyRangeMerged(opt = {}) { return (await dailyRangeMergedMeta(opt)).rows; }
+/**
+ * v2.922(반증 D8): 1일 구간 + **열기 실패·파일 상한** — 추이 API 가 그대로 밝힌다(조용한 상한·조용한 실패 금지). 오류는 [] 로 삼키지 않고 error 로.
+ * @returns {Promise<{rows:Array, missingPeriods:Array, filesCapped:number, error?:string}>}
+ */
+export async function dailyRangeMergedMeta({ key = '', agent = '', from: fromMs, to: toMs } = {}) {
   const db = await getDb();
-  if (!db) return [];
+  if (!db) return { rows: [], missingPeriods: [], filesCapped: 0, error: 'db-unavailable' };
   const from = dayKey(fromMs); const to = dayKey(toMs);
   try {
     const rule = readRule(readMeta(db, MIGRATE_KEY));
@@ -613,12 +625,15 @@ export async function dailyRangeMerged({ key = '', agent = '', from: fromMs, to:
       map.set(k, month.mergeDailyRows(map.get(k) || null, r));
     }
     const rows = [...map.values()].sort((a, b) => (a.day < b.day ? -1 : a.day > b.day ? 1 : a.key < b.key ? -1 : a.key > b.key ? 1 : 0));
-    return rows.map((r) => ({
-      ...r,
-      cpu_avg: r.cpu_n > 0 ? Math.round((r.cpu_sum / r.cpu_n) * 10) / 10 : null,
-      mem_avg: r.mem_n > 0 ? Math.round((r.mem_sum / r.mem_n) * 10) / 10 : null,
-    }));
-  } catch { return []; }
+    return {
+      rows: rows.map((r) => ({
+        ...r,
+        cpu_avg: r.cpu_n > 0 ? Math.round((r.cpu_sum / r.cpu_n) * 10) / 10 : null,
+        mem_avg: r.mem_n > 0 ? Math.round((r.mem_sum / r.mem_n) * 10) / 10 : null,
+      })),
+      missingPeriods: (files.missingPeriods || []).filter((x) => x.reason !== 'none'), filesCapped: files.filesCapped || 0,
+    };
+  } catch (e) { return { rows: [], missingPeriods: [], filesCapped: 0, error: String(e?.message || e).slice(0, 200) }; }
 }
 
-export function _resetForTest() { _perfCols = null; _migrateError = null; _latestLiteSql = null; lockRetry.ok(); try { _db?.close?.(); } catch { /* */ } _db = null; _tried = false; _opening = null; _tick = 0; _counts = null; month._resetMonthStoreForTest(); }
+export function _resetForTest() { _legacyCols = null; _perfCols = null; _migrateError = null; _latestLiteSql = null; lockRetry.ok(); try { _db?.close?.(); } catch { /* */ } _db = null; _tried = false; _opening = null; _tick = 0; _counts = null; month._resetMonthStoreForTest(); }

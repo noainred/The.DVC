@@ -2,7 +2,10 @@
  * bmusage/peakPlan.js — 피크 A 안(같은 세션 1초 창)의 **주기 예산 자동 맞춤**(v2.922 · 3a 반증 전 수정 — 메인 지시). 순수 모듈.
  *
  * 왜: 창은 서버마다 수집 시간에 창 길이(기본 10초)만큼을 더한다. 1,000대 · 동시 32 · 서버당 약 5초면 한 주기가
- *   1,000 ÷ 32 × (5 + 10)초 ≈ 469초로 주기(300초)를 넘고, 재진입 가드가 다음 틱을 건너뛰어 **기존 다섯 지표 수집까지 굶는다**.
+ *   1,000 ÷ 32 × (5 + 10)초 ≈ 469초로 주기(300초)를 넘는다. 타이머는 실행이 끝난 뒤 재무장하므로(util/adaptiveTimer) 틱을 건너뛰는 것이 아니라
+ *   **실제 간격 = 실행 + 주기**(≈ 769초)로 늘어나고, 추이(trendWindow.gapsOf)는 주기 × 2(600초)를 넘는 빈틈을 결측으로 끊어
+ *   **기존 다섯 지표의 5분 추이까지 결측**이 된다(반증 D2 정정 — 예전 주석의 ‘재진입 가드가 건너뛴다’ 는 틀렸다).
+ *   실행 ≤ 주기 × ratio(< 1) 이면 간격 ≤ 주기 × (1 + ratio) < 주기 × 2 — 결측 경계 안이다(expectedPeriodMs 로 밝힌다).
  *   사용자가 동시성 32 를 고른 이유가 ‘한 주기 안에 끝내기’ 라, 피크 때문에 그것을 깨는 기본값은 둘 수 없다.
  *
  * 규칙(매 주기 시작):
@@ -62,21 +65,24 @@ export function expectedCycleMs({ targets, osTargets = targets, concurrency, bas
 /**
  * 이번 주기의 창 길이 결정(순수).
  * @param {{targets:number, osTargets?:number, concurrency:number, intervalMs:number, ratio?:number, capS:number, baseMs:number, baseSource?:string}} p
- * @returns {{windowS:number, capS:number, reason:'off'|'fits'|'reduced'|'base-over-budget'|'no-targets', expectedMs:number, budgetMs:number, baseMs:number, baseSource:string, steps:Array<{s:number, expectedMs:number}>}}
+ * @returns {{windowS:number, capS:number, reason:'off'|'fits'|'reduced'|'base-over-budget'|'no-targets', expectedMs:number, expectedPeriodMs:number, budgetMs:number, baseMs:number, baseSource:string, steps:Array<{s:number, expectedMs:number}>}}
+ *   expectedMs = 예상 실행 소요 · expectedPeriodMs = 예상 간격(실행 + 주기 — 타이머가 실행 뒤 재무장).
  */
 export function planCycleWindow({ targets = 0, osTargets = targets, concurrency = 1, intervalMs, ratio = CYCLE_RATIO_DEFAULT, capS = 10, baseMs = BASE_DEFAULT_MS, baseSource = 'default' } = {}) {
   const cap = Math.max(0, Math.floor(n(capS) ?? 0));
   const r = Math.min(0.95, Math.max(0.1, n(ratio) ?? CYCLE_RATIO_DEFAULT));
   const budgetMs = Math.round(Math.max(0, n(intervalMs) ?? 0) * r);
   const base = { capS: cap, budgetMs, baseMs: n(baseMs) ?? BASE_DEFAULT_MS, baseSource, ratio: r, targets: n(targets) ?? 0, osTargets: n(osTargets) ?? 0, concurrency: n(concurrency) ?? 1 };
-  if (!cap) return { ...base, windowS: 0, reason: 'off', expectedMs: expectedCycleMs({ targets, osTargets, concurrency, baseMs, windowS: 0 }), steps: [] };
-  if (!(n(targets) > 0)) return { ...base, windowS: cap, reason: 'no-targets', expectedMs: 0, steps: [] };
+  const iv = Math.max(0, n(intervalMs) ?? 0);
+  const per = (ms) => ms + iv;   // 타이머는 실행이 끝난 뒤 재무장 — 실제 간격 = 실행 + 주기
+  if (!cap) { const e = expectedCycleMs({ targets, osTargets, concurrency, baseMs, windowS: 0 }); return { ...base, windowS: 0, reason: 'off', expectedMs: e, expectedPeriodMs: per(e), steps: [] }; }
+  if (!(n(targets) > 0)) return { ...base, windowS: cap, reason: 'no-targets', expectedMs: 0, expectedPeriodMs: iv, steps: [] };
   const steps = [];
   for (const s of ladderFor(cap)) {
     const expectedMs = expectedCycleMs({ targets, osTargets, concurrency, baseMs, windowS: s });
     steps.push({ s, expectedMs });
-    if (expectedMs <= budgetMs) return { ...base, windowS: s, reason: s === cap ? 'fits' : 'reduced', expectedMs, steps };
+    if (expectedMs <= budgetMs) return { ...base, windowS: s, reason: s === cap ? 'fits' : 'reduced', expectedMs, expectedPeriodMs: per(expectedMs), steps };
   }
   const last = steps.at(-1);
-  return { ...base, windowS: 0, reason: 'base-over-budget', expectedMs: last.expectedMs, steps };
+  return { ...base, windowS: 0, reason: 'base-over-budget', expectedMs: last.expectedMs, expectedPeriodMs: per(last.expectedMs), steps };
 }
