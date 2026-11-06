@@ -15,6 +15,8 @@ import { TestWizard } from './svcmon/TestWizard.jsx';
 import { blankOr } from './blankOr.js';
 import { edgeCardKind, edgeCardWarn, edgeCardMeta, edgeNoReportTotal } from './svcmon/edgeCardText.js';
 import Select from '../components/Select.jsx';
+import OverviewDash from './svcmon/OverviewDash.jsx';   // v2.915 개요(기술 뷰 — Datadog 대시보드 참고)
+import './svcmon/techView.css';
 
 /**
  * 성능점검 — Claude Design 핸드오프(design_handoff_perf_check) 기준 구현.
@@ -87,6 +89,7 @@ function TreeRows({ node, depth, sel, setSel, expanded, toggle, q, onCtx, dnd })
                 <span className="pc-tog">·</span>
                 <span className={`pc-dot ${STATUS[st.worst]?.cls || 'pc-off'}`} />
                 <span className={`pc-tree-label leaf${st.alarms ? ' alarm' : ''}${sel === id ? ' on' : ''}`}>{t.name}</span>
+                {t.origin && <span className={`tv-origin${t.origin.gone ? ' gone' : ''}`} title={`설정 연동 — ${t.origin.key}`}>{t.origin.gone ? '설정에서 사라짐' : '설정'}</span>}
                 {st.alarms > 0 && <span className="pc-badge">{st.alarms}</span>}
               </div>
             );
@@ -157,6 +160,10 @@ export default function SvcMonitor() {
   const [tplApply, setTplApply] = useState(null);
   // 통합 등록 마법사 모달 — 트리 '＋ 등록'/우클릭 '이 폴더에 등록…'. { path } | null
   const [register, setRegister] = useState(null);
+  // v2.915: 화면 — '트리'(등록·편집) | '개요'(기술 뷰 · 읽기). 마지막 선택을 기억한다(실패해도 기본 트리).
+  const [view, setViewState] = useState(() => { try { return localStorage.getItem('perfcheck.view') === 'overview' ? 'overview' : 'tree'; } catch { return 'tree'; } });
+  const setView = (v) => { setViewState(v); try { localStorage.setItem('perfcheck.view', v); } catch { /* noop */ } };
+  const [driftHidden, setDriftHidden] = useState(false);   // '설정이 바뀌었습니다' 배너 — 이 화면을 연 동안만 숨김
 
   // 선택 노드나 모드가 바뀌면 표시 개수를 처음으로 되돌린다(이전 폴더에서 늘려 둔 값 승계 금지).
   useEffect(() => { setPageN(TARGET_PAGE); }, [sel, mode]);
@@ -458,6 +465,39 @@ export default function SvcMonitor() {
     try { requireChanged(await delJson(`/svcmon/targets/${selTarget.id}`)); setSel(''); refresh(); } catch (e) { window.alert(e.message); }
   };
 
+  const viewSeg = (
+    <span className="tv-seg" role="group" aria-label="화면">
+      <button type="button" className={view === 'tree' ? 'on' : ''} onClick={() => setView('tree')}>트리</button>
+      <button type="button" className={view === 'overview' ? 'on' : ''} onClick={() => setView('overview')}>개요</button>
+    </span>
+  );
+  // v2.915: 설정 연동 감지 배너 — 수만(서버 /state settingsDrift). 편집 권한이 있을 때만(검토 화면이 canEdit + 전체 범위다).
+  //   '새 항목' 은 미등록 전부가 아니라 기준점(첫 감지 · 마지막 확인) 이후 설정에 생긴 것만(서버 driftSummary 머리말).
+  //   검토 화면이 전체 범위 계정 전용이라 범위 계정에는 띄우지 않는다.
+  const drift = data?.settingsDrift;
+  const driftN = drift ? (drift.new || 0) + (drift.changed || 0) + (drift.gone || 0) : 0;
+  const fullScope = !(me?.scope?.vcenters?.length);
+  const ackDrift = async () => { try { await postJson('/svcmon/settings-sync/ack', {}); setDriftHidden(true); refresh(); } catch (e) { window.alert(e.message); } };
+  const driftBanner = canEdit && fullScope && !driftHidden && driftN > 0 ? (
+    <div className="tv-banner" role="status">
+      <span><b>설정이 바뀌었습니다</b>{` — 새 항목 ${drift.new || 0} · 주소 변경 ${drift.changed || 0} · 설정에서 사라짐 ${drift.gone || 0}`}
+        {drift.at ? ` · 마지막 확인 ${new Date(drift.at).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', hour12: false })}(5분 주기 · 카탈로그 읽기만)` : ''}</span>
+      <a className="pc-btn accent" style={{ marginLeft: 'auto', textDecoration: 'none' }} href="#/tools/svcmon-config/sync">설정 연동에서 검토</a>
+      {(drift.new || 0) > 0 && <button type="button" className="pc-btn" title="지금까지 생긴 새 항목을 본 것으로 둡니다(미등록은 설정 연동 탭에 그대로 남습니다)" onClick={ackDrift}>새 항목 확인</button>}
+      <button type="button" className="pc-btn" onClick={() => setDriftHidden(true)}>나중에</button>
+    </div>
+  ) : null;
+
+  if (view === 'overview') {
+    return (
+      <div className="pc-root">
+        <div className="pc-modebar">{viewSeg}</div>
+        {driftBanner}
+        <OverviewDash onPickTarget={(h) => { setView('tree'); setTreeQ(h?.name || ''); }} />
+      </div>
+    );
+  }
+
   return (
     <div className="pc-root">
       <div className="pc-modebar">
@@ -465,7 +505,9 @@ export default function SvcMonitor() {
           {mode === 'infra' && <span className="pc-pulse" />}인프라</button>
         <button className={`pc-mode${mode === 'service' ? ' on' : ''}`} onClick={() => { setMode('service'); setSel(''); doReset(); }}>
           {mode === 'service' && <span className="pc-pulse" />}서비스</button>
+        {viewSeg}
       </div>
+      {driftBanner}
 
       <div className="pc-sectionbar">
         <span className="pc-sectitle">{mode === 'service' ? 'SERVICE HEALTH & SLA TESTS' : 'INFRASTRUCTURE PERFORMANCE TESTS'}</span>
@@ -531,7 +573,7 @@ export default function SvcMonitor() {
               toggle={(id) => setExpanded((e) => ({ ...e, [id]: e[id] === false }))}
               onCtx={(c) => { setCtx(c); closeSubs(); }} dnd={dnd} />
             {targets.length === 0 && <div className="pc-empty" style={{ padding: 24 }}>
-              등록된 {mode === 'service' ? '서비스' : '대상'}이 없습니다.{canEdit ? ' ＋ Add 로 등록하세요.' : ' 관리자에게 요청하세요.'}</div>}
+              등록된 {mode === 'service' ? '서비스' : '대상'}이 없습니다.{canEdit ? ' ＋ 등록 또는 Monitoring 설정 › 설정 연동으로 등록하세요.' : ' 관리자에게 요청하세요.'}</div>}
           </div>
         </div>
 
@@ -581,7 +623,7 @@ export default function SvcMonitor() {
                   <React.Fragment key={target.id}>
                     <div className="pc-group">
                       <span>🗀 Root\{target.path}\{target.name}\{target.host}</span>
-                      <span className="pc-group-meta">{tests.length} tests{alarms ? ` · ${alarms} alarm` : ''}</span>
+                      <span className="pc-group-meta">{tests.length} tests{alarms ? ` · ${alarms} alarm` : ''}{target.origin ? ` · 출처 설정 연동` : ''}{target.agent ? ` · 엣지 ${target.agent}` : ''}</span>
                     </div>
                     {tests.map((x) => {
                       const st = statusOf(target, x);
@@ -797,6 +839,22 @@ export default function SvcMonitor() {
               <span>주기</span><span>{detail.test.intervalSec}초</span>
               <span>Path</span><span className="pc-modal-path">Root\{detail.target.path}\{detail.target.name}\{detail.target.host}</span>
             </div>
+            {detail.target.origin && (
+              <div className="tv-obox">
+                이 대상은 <b>설정 연동</b>으로 만들어졌습니다(출처 <span style={{ fontFamily: 'var(--mono)' }}>{detail.target.origin.key}</span>
+                {detail.target.origin.corp ? ` · 법인 ${detail.target.origin.corp}` : ''}). 주소·이름은 포탈 설정을 따릅니다 — 여기서 호스트를 고치면 다음 감지에서 ‘주소 변경’으로 다시 뜹니다.
+                {detail.target.origin.gone ? ' 이 항목은 설정에서 사라졌습니다.' : ''}
+                <div style={{ marginTop: 6, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                  <a href="#/tools/svcmon-config/sync">설정 연동에서 보기</a>
+                  {canEdit && (
+                    <button type="button" className="pc-btn" onClick={async () => {
+                      if (!window.confirm(`'${detail.target.name}' 의 설정 연동을 해제할까요? 대상·점검은 그대로 남고 수동 대상이 됩니다.`)) return;
+                      try { await postJson(`/svcmon/settings-sync/detach/${detail.target.id}`, {}); setDetail(null); refresh(); } catch (e) { window.alert(e.message); }
+                    }}>연동 해제(수동 대상으로)</button>
+                  )}
+                </div>
+              </div>
+            )}
             {canEdit && (
               <div className="pc-modal-actions">
                 <button className="pc-btn" onClick={() => { const d = detail; setDetail(null); openWizard(d.target.id, d.target.name, d.test); }}>✎ 수정</button>

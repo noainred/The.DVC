@@ -6,6 +6,8 @@ import TemplateTab from './svcmon/TemplateTab.jsx';
 import AssignTab from './svcmon/AssignTab.jsx';
 import LogSettingsTab from './svcmon/LogSettingsTab.jsx';
 import AnalyzeTab from './svcmon/AnalyzeTab.jsx';
+import SettingsSyncTab from './svcmon/SettingsSyncTab.jsx';
+import AlertTab from './svcmon/AlertTab.jsx';
 
 /**
  * Monitoring 설정 — 특수 기능 > 'Monitoring 설정' 카드로 들어온다.
@@ -25,6 +27,9 @@ const TABS = [
   { k: 'assign', label: '엣지 배정', desc: '어느 엣지가 어느 대상을 점검할지 배정합니다. 엣지가 받아 적용하고 결과를 보고하면 활성이 됩니다.' },
   { k: 'log', label: '로그 설정', desc: '점검 결과 CSV 의 저장 경로·분할 단위·보관 기간·용량 상한을 정합니다.' },
   { k: 'analyze', label: '로그 분석', desc: '지난 기록을 시간/일/주/월/분기/반기/연간 단위로 집계해 봅니다(원천: CSV 로그).' },
+  // v2.915 — 포탈 설정에 등록된 시스템(vCenter·엣지·NSX·iDRAC·스토리지·SAN·PDU·CVP·Veeam·Bareos …)을 골라 Monitoring 대상으로.
+  { k: 'sync', label: '설정 연동', desc: '포탈 설정에 등록된 시스템을 골라 Monitoring 대상으로 등록하고, 설정이 바뀌면(새 항목·주소 변경·사라짐) 차이를 보여 줍니다. 전체 범위 operator 이상.' },
+  { k: 'alert', label: '알림', desc: '점검이 연속 N회 실패하면 포탈 알림 채널로 보냅니다(기본 꺼짐 · 복구 알림 · 대량이면 요약).' },
 ];
 
 /** 트리 우클릭에서 넘어온 1회용 프리필(경로·구분). 읽고 바로 지운다. */
@@ -70,6 +75,8 @@ export default function SvcMonConfig() {
       {tab === 'assign' && <AssignTab canEdit={canEdit} />}
       {tab === 'log' && <LogSettingsTab isAdmin={me?.role === 'admin'} />}
       {tab === 'analyze' && <AnalyzeTab />}
+      {tab === 'sync' && <SettingsSyncTab canEdit={canEdit} />}
+      {tab === 'alert' && <AlertTab isAdmin={me?.role === 'admin'} />}
     </div>
   );
 }

@@ -999,7 +999,9 @@ tbody tr:last-child td { border-bottom: none; }
 }
 .pc-secbtn:hover { background: var(--accent, #3b82f6); border-color: var(--accent, #3b82f6); color: #fff; }
 
-.pc-cards { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; padding: 4px 0 14px; }
+.pc-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; padding: 4px 0 14px; }
+/* v2.915(개선 ①): 5열 고정이면 1440 에서 7장이 5+2 두 줄, 400 에서 '경고' 카드가 글자 단위로 세로로 찌그러졌다(Chromium 실측). */
+@media (max-width: 520px) { .pc-cards { grid-template-columns: repeat(2, minmax(0, 1fr)); } .pc-card { min-width: 0; } }
 .pc-card { background: var(--pc-panel); border: 1px solid var(--pc-line); border-radius: 8px; padding: 12px 14px; border-top: 2px solid var(--pc-line2); }
 .pc-card.b { border-top-color: var(--pc-pline); } .pc-card.g { border-top-color: var(--pc-ok); }
 .pc-card.a { border-top-color: var(--pc-warn); } .pc-card.r { border-top-color: var(--pc-bad); }

@@ -101,10 +101,23 @@ export async function buildSettingsTargets(deps = {}) {
   };
 
   /* ── 가상화 ───────────────────────────────────────────────────────────── */
+  /*
+   * v2.915(설정 연동 — 정직 정정): vCenter 등록부(vcenter/registry.js normalize)에는 `remoteAgent` 필드가 **없다** — 예전 코드는
+   *   현지 수집(site) vCenter 의 담당 엣지를 늘 빈 값으로 읽었다. 담당 엣지는 스냅샷이 관측한 push 엣지(`collectedBy`)로 보완한다
+   *   (commmap/build.js 의 '등록값 → 관측값' 순서와 같다). 스냅샷을 못 읽으면 빈 값 — 지어내지 않는다.
+   */
+  const observedBy = new Map();
+  {
+    const snap = deps.snapshot !== undefined ? deps.snapshot
+      : await (async () => { try { return (await import('../store.js')).store.get(); } catch { return null; } })();
+    for (const sv of (Array.isArray(snap?.vcenters) ? snap.vcenters : [])) {
+      if (t(sv?.id) && t(sv?.collectedBy)) observedBy.set(t(sv.id), t(sv.collectedBy));
+    }
+  }
   for (const v of await load('vcenters', '../vcenter/registry.js', ['listRegistry'], (m, n) => m[n]())) {
     push(makeTarget('set:vcenter', {
       ref: t(v.id), name: t(v.name) || t(v.id), address: v.host, vcenterId: t(v.id), enabled: v.enabled !== false,
-      agent: t(v.collectMode) === 'site' ? t(v.remoteAgent) : '',
+      agent: t(v.collectMode) === 'site' ? (t(v.remoteAgent) || observedBy.get(t(v.id)) || '') : '',
       facts: { collectMode: t(v.collectMode) || 'direct', username: t(v.username), hasPassword: v.hasPassword !== false },
     }));
   }
@@ -196,10 +209,74 @@ export async function buildSettingsTargets(deps = {}) {
     }));
   }
   for (const d of await load('pdu', '../pdu/registry.js', ['listDevices'], (m, n) => m[n]())) {
+    // v2.915: PDU 는 SSH 로 수집한다 — 등록된 sshPort(기본 22)를 잰다(예전에는 관리 웹 443 을 찔렀다).
     push(makeTarget('set:pdu', {
-      ref: t(d.id), name: t(d.name) || t(d.host), address: d.host, agent: t(d.agent), vcenterId: t(d.datacenterId), enabled: d.enabled !== false,
-      facts: { username: t(d.username), model: t(d.model) },
+      ref: t(d.id), name: t(d.name) || t(d.host), address: d.host, port: Number(d.sshPort) || 22,
+      agent: t(d.agent), vcenterId: t(d.datacenterId), enabled: d.enabled !== false,
+      facts: { username: t(d.username), model: t(d.model), sshPort: Number(d.sshPort) || 22 },
     }));
+  }
+  /* ── v2.915(설정 연동): 카탈로그에 없던 등록부 — CVP · Veeam · Veeam EM · Bareos Director · 아이실론 직접 대상 · LLM ── */
+  for (const c of await load('cvp', '../cvp/registry.js', ['listServers'], (m, n) => m[n]())) {
+    push(makeTarget('set:cvp', {
+      ref: t(c.id), name: t(c.name) || t(c.host), address: c.host, agent: t(c.agent), vcenterId: t(c.datacenterId), enabled: c.enabled !== false,
+      facts: { authMode: t(c.authMode), hasToken: !!c.hasToken, hasPassword: !!c.hasPassword },
+    }));
+  }
+  for (const v of await load('veeam', '../veeam/registry.js', ['listServers'], (m, n) => m[n]())) {
+    const vcs = Array.isArray(v.vcenterIds) ? v.vcenterIds.map(t).filter(Boolean) : [];
+    push(makeTarget('set:veeam', {
+      ref: t(v.id), name: t(v.name) || t(v.host), address: v.host, port: Number(v.port) || 9419, agent: t(v.agent),
+      vcenterId: vcs[0] || '', enabled: v.enabled !== false,
+      facts: { vcenterIds: vcs.slice(0, 20), username: t(v.username), hasPassword: !!v.hasPassword },
+    }));
+  }
+  for (const e of await load('veeamEm', '../veeam/em/registry.js', ['listEms'], (m, n) => m[n]())) {
+    push(makeTarget('set:veeam-em', {
+      ref: t(e.id), name: t(e.name) || t(e.host), address: e.host, port: Number(e.port) || 9398, agent: t(e.agent), enabled: e.enabled !== false,
+      facts: { username: t(e.username), hasPassword: !!e.hasPassword },
+    }));
+  }
+  {
+    // ⚠ publicSettings(비밀 제거본)만 읽는다 — loadSettings 는 Director 비밀번호를 담는다.
+    const bs = deps.bareos || (await safe('bareos', async () => {
+      const m = await import('../bareos/settings.js');
+      if (typeof m.publicSettings !== 'function') throw new Error('bareos/settings.js 에 publicSettings 가 없습니다(모듈이 바뀌었습니다).');
+      return m.publicSettings();
+    }, errors)) || {};
+    const sites = Array.isArray(bs.sites) ? bs.sites : [];
+    for (const d of (Array.isArray(bs.directors) ? bs.directors : [])) {
+      if (!t(d?.host)) continue;
+      const vcs = sites.filter((x) => t(x?.directorId) === t(d.id)).map((x) => t(x.vcenterId)).filter(Boolean);
+      push(makeTarget('set:bareos-dir', {
+        ref: t(d.id), name: t(d.name) || t(d.host), address: d.host, port: Number(d.port) || 9101, agent: t(d.agent),
+        vcenterId: vcs[0] || '',
+        facts: { vcenterIds: vcs.slice(0, 20), consoleName: t(d.consoleName) },
+      }));
+    }
+  }
+  {
+    // 장치 연결(deviceId) 대상은 스토리지 등록부 항목과 같은 장비라 빼고, 주소를 직접 적은 대상만 싣는다(중복 측정 방지).
+    const isd = deps.isidu || (await safe('isidu', async () => {
+      const m = await import('../isidu/settings.js');
+      if (typeof m.loadSettings !== 'function') throw new Error('isidu/settings.js 에 loadSettings 가 없습니다(모듈이 바뀌었습니다).');
+      return m.loadSettings();
+    }, errors)) || {};
+    for (const x of (Array.isArray(isd.targets) ? isd.targets : [])) {
+      if (!x || x.deviceId || !t(x.host)) continue;
+      push(makeTarget('set:isidu-host', {
+        ref: t(x.id) || t(x.host), name: t(x.label) || t(x.host), address: x.host, port: Number(x.port) || 22,
+        agent: t(x.agent), vcenterId: t(x.datacenterId), enabled: x.enabled !== false,
+        facts: { path: t(x.path).slice(0, 200), auth: t(x.auth) },
+      }));
+    }
+  }
+  {
+    const llm = deps.llm || (await safe('llm', async () => (await import('../llm/config.js')).loadLlmConfig(), errors)) || {};
+    // 꺼져 있으면 싣지 않는다 — 기본값(http://localhost:11434)이 늘 보여 '설정한 것' 처럼 읽힌다.
+    if (llm.enabled === true && t(llm.url)) {
+      push(makeTarget('set:llm', { ref: 'llm', name: `LLM (${t(llm.provider) || 'ollama'})`, address: llm.url, facts: { model: t(llm.model) } }));
+    }
   }
 
   /* ── 원격접속 · 캡처 · 통합 계정 ───────────────────────────────────────── */

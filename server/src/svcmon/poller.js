@@ -22,6 +22,7 @@ import { appendResult, logStats } from './csvlog.js';
 import { ensureSvcmonDemo, splitSvcmonDue, demoSvcmonResult } from '../mock/demo/svcmon.js'; // v2.716: 데모 대상은 접속하지 않는다
 
 const envNum = (k, d) => { const n = Number(process.env[k]); return Number.isFinite(n) ? n : d; };
+import { noteResult } from './transitions.js'; // v2.915 Monitoring 개요 · 실패 알림
 // v2.628(감사 EDGE2628-05): 상한이 없어 2^31-1ms 를 넘는 값이 setInterval 1ms 루프가 됐다 — config.js 관문으로 [1초, MAX_TIMER_MS].
 const TICK_MS = clampIntervalMs(envNum('SVCMON_TICK_MS', 5000), 5000, 1000);
 const MAX_PER_TICK = Math.max(100, envNum('SVCMON_MAX_PER_TICK', 4000));
@@ -236,6 +237,9 @@ async function sweep(force = false) {
         const rec = { status: r.status, reply: r.reply, ms: r.ms, ts, streak: changed ? 1 : prev.streak + 1 };
         results.set(test.id, rec);
         appendResult({ ts, target, test, result: rec, changed });
+        // v2.915: 전이 이력 · 시간별 집계 · 실패 알림(svcmon/transitions.js — 판정은 그 파일 하나, O(1)).
+        noteResult({ at: ts, scope: '', testId: test.id, prev: prev?.status || null, status: rec.status, reply: rec.reply, ms: rec.ms, streak: rec.streak,
+          target: { name: target.name, path: target.path, host: target.host }, test: { name: test.name, type: test.type } });
       }
       if (i + APPLY_CHUNK < due.length) await new Promise((r) => setImmediate(r));
     }

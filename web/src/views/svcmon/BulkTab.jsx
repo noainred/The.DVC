@@ -11,6 +11,7 @@ import { TABLE_CAP, MAX_COUNT, ipMsg, EMPTY_ROW, parseFree, validateRows, buildT
 import { STable } from '../../components/STable.jsx';
 import Select from '../../components/Select.jsx';
 import DataList from '../../components/DataList.jsx';
+import SettingsSyncTab from './SettingsSyncTab.jsx'; // v2.915 '설정된 시스템에서 선택' 모드
 
 /**
  * 대량 자동등록 — 줄마다 {엣지·호스트네임·IP} 를 직접 입력해 대상을 한꺼번에 만든다.
@@ -33,7 +34,7 @@ export default function BulkTab({ canEdit, prefill }) {
   const [path, setPath] = useState(prefill?.path || '');
   const [count, setCount] = useState(1);            // 줄 수 진실값 — 소량(1개) 직접 입력이 주 사용
   const [countText, setCountText] = useState('1');  // 입력 필드 원문 — 빈칸·중간 타이핑을 허용하려면 숫자와 분리해야 한다
-  const [inputMode, setInputMode] = useState('table');   // 'table' | 'free' | 'file'
+  const [inputMode, setInputMode] = useState('table');   // 'table' | 'free' | 'file' | 'settings'(v2.915 설정 연동)
   const [rows, setRows] = useState(() => [EMPTY_ROW()]);
   const [freeText, setFreeText] = useState('');
   const [fileImp, setFileImp] = useState({ format: 'csv', content: '', fileName: '' });   // 파일(CSV/JSON/XLSX) 가져오기
@@ -196,6 +197,38 @@ export default function BulkTab({ canEdit, prefill }) {
 
   const parsedFreeCount = inputMode === 'free' ? parseFree(freeText).length : 0;
 
+  // 입력 방식 — v2.915 '설정된 시스템에서 선택'(설정 연동)은 편집 권한이 있을 때만(서버가 canEdit + 전체 범위로 막는다).
+  const MODES = [['table', '표로 입력'], ['free', '자유형식 붙여넣기'], ...(csvOk ? [['file', '파일(CSV/XLSX)']] : []), ...(canEdit ? [['settings', '설정된 시스템에서 선택']] : [])];
+  const modeRadios = (
+    <div className="flex gap wrap" style={{ alignItems: 'center' }}>
+      {MODES.map(([v, t]) => (
+        <label key={v} className={`tab ${inputMode === v ? 'active' : ''}`} style={{ cursor: 'pointer' }}>
+          <input type="radio" name="inputMode" checked={inputMode === v} onChange={() => { setInputMode(v); setValidation(null); setPreview(null); }} style={{ marginRight: 6 }} />
+          {t}
+        </label>
+      ))}
+    </div>
+  );
+
+  // v2.915: 설정된 시스템 모드 — 위치(설정 연동\그룹\법인)·점검(종류별 무인증 기본 점검)·엣지(담당 엣지)가 카탈로그에서 정해지므로
+  //   ①·③ 단계를 쓰지 않는다. 같은 화면을 두 벌 만들지 않고 설정 연동 탭의 목록 판본(compact)을 그대로 쓴다.
+  if (inputMode === 'settings') {
+    return (
+      <div className="flex col gap">
+        <div className="card" style={{ padding: 14 }}>
+          <b>② 등록할 대상 입력</b>
+          <div style={{ marginTop: 10 }}>{modeRadios}</div>
+          <div className="muted" style={{ fontSize: 12, marginTop: 8, lineHeight: 1.6 }}>
+            포탈 설정에 등록된 시스템(vCenter · 엣지 · NSX · iDRAC · 스토리지 · SAN · PDU · CVP · Veeam · Bareos …)을 고릅니다. 위치는 ‘설정 연동\그룹\법인’,
+            점검은 종류별 무인증 기본 점검(자격증명을 옮기지 않습니다), 점검 위치는 담당 엣지로 정해지고 <b>중지 상태</b>로 등록됩니다.
+            운영 중 차이(새 항목·주소 변경·사라짐)는 Monitoring 설정 › 설정 연동 탭에서 봅니다.
+          </div>
+        </div>
+        <SettingsSyncTab canEdit={canEdit} compact />
+      </div>
+    );
+  }
+
   return (
     <div className="flex col gap">
       {err && <ErrorBox message={err} />}
@@ -275,14 +308,7 @@ export default function BulkTab({ canEdit, prefill }) {
             <input className="input" type="number" min={1} max={MAX_COUNT} value={countText}
               onChange={(e) => onCountChange(e.target.value)} onBlur={onCountBlur} disabled={inputMode !== 'table'} />
           </label>
-          <div className="flex gap" style={{ alignItems: 'center' }}>
-            {[['table', '표로 입력'], ['free', '자유형식 붙여넣기'], ...(csvOk ? [['file', '파일(CSV/XLSX)']] : [])].map(([v, t]) => (
-              <label key={v} className={`tab ${inputMode === v ? 'active' : ''}`} style={{ cursor: 'pointer' }}>
-                <input type="radio" name="inputMode" checked={inputMode === v} onChange={() => { setInputMode(v); setValidation(null); setPreview(null); }} style={{ marginRight: 6 }} />
-                {t}
-              </label>
-            ))}
-          </div>
+          {modeRadios}
         </div>
 
         {/* 표 모드 */}
@@ -450,7 +476,7 @@ export default function BulkTab({ canEdit, prefill }) {
                 <tr key={b.id}>
                   <td><code>{b.id}</code></td>
                   <td className="muted" style={{ fontSize: 11 }}>{b.createdAt ? new Date(b.createdAt).toLocaleString('ko-KR', { hour12: false }) : '—'}</td>
-                  <td>{b.source === 'generate' ? '대량등록' : b.source === 'import' ? '가져오기' : b.source}</td>
+                  <td>{b.source === 'generate' ? '대량등록' : b.source === 'import' ? '가져오기' : b.source === 'settings' ? '설정 연동' : b.source}</td>
                   <td><code style={{ fontSize: 11 }}>{b.path || '—'}</code></td>
                   <td style={{ textAlign: 'right' }}>{b.targets}{b.liveTargets !== undefined && b.liveTargets !== b.targets && <span className="muted"> / {b.liveTargets}</span>}</td>
                   <td style={{ textAlign: 'right' }}>{b.tests}</td>

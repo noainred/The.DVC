@@ -32,6 +32,7 @@ import { logAudit } from '../audit.js';
 import { capStr } from '../util/capStr.js';
 import { numOrNull } from '../util/numOrNull.js';
 import { listAssignments, noteExpectMs } from './svcmonAssign.js';
+import { noteResult } from '../svcmon/transitions.js'; // v2.915 Monitoring 개요 · 실패 알림
 
 const envNum = (k, d) => { const n = Number(process.env[k]); return Number.isFinite(n) && n > 0 ? Math.round(n) : d; };
 
@@ -180,6 +181,12 @@ export function ingestReport(agent, body, recvAt = Date.now(), net = {}) {
       measuredAt,
       snapId,
     });
+    // v2.915: 같은 측정의 재전송(prev.measuredAt === measuredAt)은 새 결과가 아니다 — 시간별 집계·알림에 두 번 세지 않는다.
+    if (!prev || prev.measuredAt !== measuredAt) {
+      const row = a.rows.get(id); const mm = a.meta.get(id);
+      noteResult({ at: measuredAt, scope: a.agent, testId: id, prev: prev?.s || null, status: row.s, reply: row.r, ms: row.m, streak: row.k,
+        target: { name: mm?.n, path: mm?.p, host: mm?.h }, test: { name: mm?.t, type: mm?.y } });
+    }
     accepted += 1;
   }
   a.counters.accepted += accepted;
