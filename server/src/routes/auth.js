@@ -12,6 +12,8 @@ import { checkLoginAllowed, recordLoginFailure, recordLoginSuccess } from '../se
 import { wrapAsyncRouter } from '../util/asyncRoute.js';
 import { clientIp } from '../util/rateLimit.js';   // v2.503: 잠금 출발지 판정을 전역 레이트리밋과 통일(trust proxy 규약)
 import { createDenyAuditGate, foldedNote } from '../util/denyAuditGate.js';
+import { loadUsageSettings, noticeText, userKeyOf } from '../usage/settings.js'; // v2.912 기능 사용 추적 — 로그인 고지 · 화면 추적기 켜짐
+import { isDemoGuest } from '../auth/demoGuest.js';
 const loginFailGate = createDenyAuditGate();
 const loginBlockedGate = createDenyAuditGate();
 
@@ -39,6 +41,9 @@ authRouter.get('/config', (_req, res) => {
     // 세션이 길어지지 않는다(경고를 늦게 볼 뿐).
     sessionWarnEnabled: sec.sessionWarnEnabled, sessionWarnMin: sec.sessionWarnMin,
     sessionExtendMin: sec.sessionExtendMin, sessionMaxHours: sec.sessionMaxHours,
+    // v2.912 기능 사용 추적 고지(설정 › 사용자 › 기능 사용 현황) — 켜져 있고 고지가 켜져 있을 때만 **문구 하나**를 싣는다.
+    //   계정명 · 수치는 넣지 않는다(미인증 응답 — 계정 열거 단서 금지).
+    ...usageNoticeField(),
     ...setupState(),
   });
 });
@@ -137,6 +142,8 @@ authRouter.post('/login', async (req, res) => {
     // (routes/admin/shared.js requireSettingsOwner 주석 참고: 4차 재감사에서 승계 우회 재현).
     // v2.744(감사 후속 FB-3): 판정은 ownerFields 한 곳(/auth/me 와 같은 함수 — 아래 머리말).
     ...ownerFields({ ...user, scope: local ? local.scope : user.scope }),
+    // v2.912 기능 사용 추적 — /auth/me 와 같은 함수(로그인 직후에도 추적기가 바로 선다).
+    ...usageTrackField(user),
     // 서비스 허브 주소는 인증 후에만 — 미인증 응답에 내부 호스트를 노출하지 않는다.
     serviceHubUrl: config.serviceHubUrl || '',
     scope: (local && local.scope) ? { vcenters: local.scope.vcenters || [], regions: local.scope.regions || [] } : { vcenters: [], regions: [] },
@@ -177,13 +184,30 @@ function toolFields(user) {
 }
 
 // Returns the current user when a valid token is presented.
+/** /auth/config 의 고지 칸 — 못 읽으면 싣지 않는다(설정은 꺼짐으로 읽힌다). */
+function usageNoticeField() {
+  try {
+    const s = loadUsageSettings();
+    return s.enabled && s.noticeEnabled ? { usageNotice: noticeText(s) } : {};
+  } catch { return {}; }
+}
+/** /auth/me · 로그인 응답의 화면 추적기 칸 — 꺼짐 · 데모 계정 · 제외 계정이면 enabled:false(화면이 신호를 만들지 않는다 — 서버도 버린다). */
+function usageTrackField(user) {
+  try {
+    const s = loadUsageSettings();
+    const uk = userKeyOf(user?.username);
+    const excluded = (s.excluded || []).some((e) => userKeyOf(e) === uk);
+    return { usageTrack: { enabled: !!s.enabled && !isDemoGuest(user) && !excluded, idleMin: s.idleMin } };
+  } catch { return { usageTrack: { enabled: false, idleMin: 5 } }; }
+}
+
 authRouter.get('/me', authMiddleware, (req, res) => {
   const u = getUser(req.user.username);
   // permissions: 현재 매트릭스 기준 '내 기능 권한'(프론트 메뉴/버튼 게이팅용, 매 조회 시 최신 반영).
   // scope: 볼 수 있는 vCenter/리전 제한(빈 배열 = 전체).
   // isSettingsOwner: '설정' 탭 노출 여부(계정명 목록 대신 불리언만 — 열거 단서 제거).
   // settingsOwnerTier(v2.744 감사 후속 FB-3): 소유자 등급 라우트를 실제로 통과하는가(소유자 + 전체 범위) — ownerFields 머리말.
-  res.json({ user: { ...req.user, totpEnabled: !!u?.totpEnabled, local: !!u, permissions: userPermissions(req.user), ...toolFields(req.user), ...ownerFields(req.user), serviceHubUrl: config.serviceHubUrl || '' } });
+  res.json({ user: { ...req.user, totpEnabled: !!u?.totpEnabled, local: !!u, permissions: userPermissions(req.user), ...toolFields(req.user), ...ownerFields(req.user), ...usageTrackField(req.user), serviceHubUrl: config.serviceHubUrl || '' } });
 });
 
 /**
