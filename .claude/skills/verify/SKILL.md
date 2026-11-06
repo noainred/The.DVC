@@ -1,6 +1,6 @@
 ---
 name: verify
-description: 빌드·테스트 검증(npm run verify = 서버 node:test + 웹 eslint + vitest + vite build)을 올바르게 실행하고 결과를 요약한다. 샌드박스가 테스트의 127.0.0.1 바인딩을 막아 멈추는 문제를 인지해 처리. "verify", "테스트 돌려", "빌드 확인", "검증" 요청과, 화면이 바뀌는 변경을 Chromium 으로 확인할 때(목 서버 실행·Playwright 경로·1440/400 점검·A/B) 사용. 작업 시간 추정 기준값도 여기 있다.
+description: 빌드·테스트 검증(npm run verify = 서버 node:test + 웹 eslint + vitest + vite build)을 올바르게 실행하고 결과를 요약한다. 샌드박스가 테스트의 127.0.0.1 바인딩을 막아 멈추는 문제를 인지해 처리. "verify", "테스트 돌려", "빌드 확인", "검증" 요청과, 화면이 바뀌는 변경을 Chromium 으로 확인할 때 사용. 작업 시간 추정 기준값도 여기 있다.
 ---
 
 # 빌드·테스트 검증
@@ -37,9 +37,9 @@ vitest 파일/케이스 수, 빌드 성공)를 요약한다. exit 0 이 아니�
 (축소·미화 금지). 다중 창 동시작업 중이면 "검증 대상이 다른 창 커밋으로 바뀔 수 있음"을 명시.
 
 ## 시간이 어디서 나가는지 (추정 기준값)
-- 실측(v2.513): `npm test` 전량 115초(당시 1,910건). 지금은 서버 테스트 파일 799개·웹 363개로 늘어 더 길다(미측정).
+- 실측(v2.611, `docs/AUDIT-2026-09-25c.md` TESTDOC2613-07): `npm test` 전량 약 220초(3,941건). 그 뒤 테스트가 늘어 더 길다(미측정).
   CI 한 번(서버 테스트 + 웹 빌드)은 약 10.5분(2026-10-20 실측 3회).
-- 개발 중에는 바꾼 모듈의 테스트만 돌린다(`node --test server/test/<파일>` ≈ 2초). 전량은 커밋 직전 1회이거나 CI 에 맡긴다 — 맡겼으면 보고에 적는다.
+- 바꾼 모듈의 테스트만: `node --test server/test/<파일>` ≈ 2초. 언제 전량을 돌리는지는 CLAUDE.md '작업 규모 기본값'.
 - `npm run build`(vite) 약 20초. Chromium 검증은 `web/dist` 를 서빙하므로 웹 코드를 고칠 때마다 다시 빌드해야 한다.
 - Chromium 1라운드 1~2분. 라운드를 나누지 말고 한 번에 몰아서 본다. 변경 전 커밋으로 되돌린 A/B 재빌드는 약 2분(넘침·깨짐을 발견했을 때만).
 - 시한(60초)을 기다려야 하는 실제 연결 확인은 진행 표시까지만 보고 끊는다.
@@ -51,7 +51,7 @@ vitest 파일/케이스 수, 빌드 성공)를 요약한다. exit 0 이 아니�
 - 실행(이 환경에서 그대로 동작):
   ```
   cd server && mkdir -p tmp && CONFIG_DIR=tmp DATA_SOURCE=mock AUTH_ENABLED=false PORT=<포트> \
-    node src/index.js &          # 목 데이터 · 인증 없음. web/dist 를 서빙하므로 먼저 vite build
+    node src/index.js &          # 목 데이터 · 인증 없음 · 먼저 vite build
   until curl -sf http://127.0.0.1:<포트>/api/health >/dev/null; do sleep 2; done
   ```
   Playwright 는 전역 설치분을 `createRequire('/opt/node22/lib/node_modules/playwright/package.json')` 로 불러오고

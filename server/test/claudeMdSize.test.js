@@ -9,6 +9,7 @@ import { fileURLToPath } from 'node:url';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const size = (p) => fs.statSync(path.join(ROOT, p)).size;
+const read = (p) => fs.readFileSync(path.join(ROOT, p), 'utf8');
 
 const LIMITS = {
   'CLAUDE.md': 30_000,
@@ -38,12 +39,13 @@ test('디렉터리 CLAUDE.md 는 각각 작게 유지한다', () => {
   for (const p of out) assert.ok(size(p) <= 15_000, `${p} ${size(p)}B > 15000B`);
 });
 
-test('루트 CLAUDE.md 가 가리키는 규칙 문서가 실재하고, 색인이 docs/rules 전부를 싣는다', () => {
-  const root = fs.readFileSync(path.join(ROOT, 'CLAUDE.md'), 'utf8');
-  const named = [...root.matchAll(/docs\/rules\/([\w-]+\.md)/g)].map((m) => m[1]);
-  assert.ok(named.length >= 10, '루트에 영역 문서 색인이 없다');
-  for (const f of named) assert.ok(fs.existsSync(path.join(ROOT, 'docs/rules', f)), `없는 문서: docs/rules/${f}`);
-  const readme = fs.readFileSync(path.join(ROOT, 'docs/rules/README.md'), 'utf8');
+test('루트 CLAUDE.md 가 가리키는 문서·스킬이 실재하고, 색인이 docs/rules 전부를 싣는다', () => {
+  const root = read('CLAUDE.md');
+  assert.ok((root.match(/docs\/rules\/[\w-]+\.md/g) || []).length >= 10, '루트에 영역 문서 색인이 없다');
+  for (const [p] of root.matchAll(/(?:docs|\.claude\/skills)\/[\w./-]+\.md/g)) {
+    assert.ok(fs.existsSync(path.join(ROOT, p)), `루트가 가리키는 문서가 없다: ${p}`);
+  }
+  const readme = read('docs/rules/README.md');
   for (const f of fs.readdirSync(path.join(ROOT, 'docs/rules'))) {
     if (f === 'README.md') continue;
     assert.ok(readme.includes(`(${f})`), `docs/rules/README.md 에 ${f} 가 없다`);
@@ -53,19 +55,24 @@ test('루트 CLAUDE.md 가 가리키는 규칙 문서가 실재하고, 색인이
   }
 });
 
-test('루트 CLAUDE.md 는 사용자 선호 절을 유지한다', () => {
-  const root = fs.readFileSync(path.join(ROOT, 'CLAUDE.md'), 'utf8');
-  for (const s of ['## 사용자 선호 (반드시 준수)', '작업 현황', 'TZ=Asia/Seoul', 'versions.json', '존댓말']) {
-    assert.ok(root.includes(s), `사용자 선호 절에서 빠졌다: ${s}`);
+test('루트 CLAUDE.md 는 사용자 선호·작업 규모 절을 유지한다', () => {
+  const root = read('CLAUDE.md');
+  for (const s of ['## 사용자 선호 (반드시 준수)', '## 작업 규모 기본값', '작업 현황', 'TZ=Asia/Seoul', 'versions.json', '존댓말']) {
+    assert.ok(root.includes(s), `루트 CLAUDE.md 에서 빠졌다: ${s}`);
   }
 });
 
+// 루트에서 스킬로 옮긴 절차 — 스킬 경로 → 그 스킬에 남아 있어야 할 문자열.
+const SKILL_PINS = {
+  '.claude/skills/verify/SKILL.md': ['/opt/pw-browsers/chromium', 'DATA_SOURCE=mock', 'pgrep -af', '1440'],
+  '.claude/skills/release/SKILL.md': ['scripts/release.sh', 'workflow_dispatch', 'versions.json', '1000'],
+};
+
 test('절차는 스킬에 있고 루트가 그 스킬을 가리킨다', () => {
-  const root = fs.readFileSync(path.join(ROOT, 'CLAUDE.md'), 'utf8');
-  const verify = fs.readFileSync(path.join(ROOT, '.claude/skills/verify/SKILL.md'), 'utf8');
-  const release = fs.readFileSync(path.join(ROOT, '.claude/skills/release/SKILL.md'), 'utf8');
-  assert.ok(root.includes('.claude/skills/verify/SKILL.md') && root.includes('.claude/skills/release/SKILL.md'));
-  for (const s of ['/opt/pw-browsers/chromium', 'DATA_SOURCE=mock', 'pgrep -af', '1440']) assert.ok(verify.includes(s), `verify 스킬에서 빠졌다: ${s}`);
-  for (const s of ['scripts/release.sh', 'workflow_dispatch', 'versions.json', '1000']) assert.ok(release.includes(s), `release 스킬에서 빠졌다: ${s}`);
-  assert.ok(root.includes('## 작업 규모 기본값'), '작업 규모 기본값 절이 없다');
+  const root = read('CLAUDE.md');
+  for (const [p, pins] of Object.entries(SKILL_PINS)) {
+    assert.ok(root.includes(p), `루트가 ${p} 를 가리키지 않는다`);
+    const body = read(p);
+    for (const s of pins) assert.ok(body.includes(s), `${p} 에서 빠졌다: ${s}`);
+  }
 });
