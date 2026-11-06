@@ -1,6 +1,15 @@
 {
   "notes": [
     {
+      "version": "2.916.0",
+      "date": "2026-11-06",
+      "title": "베어메탈 사용률 수집 동시성 기본값 4 → 32 · 리눅스 베어메탈 통합 성능 설계 문서(시안 1~9차)",
+      "notes": [
+        "bmusage 폴러 BMUSAGE_CONCURRENCY 기본 32(1,000대 법인에서 동시 4 는 한 주기 약 21분) · env 로 낮출 수 있음",
+        "docs/design/linux-bm-perf/ 설계·근거 문서(포탈 동작 변경 없음)"
+      ]
+    },
+    {
       "version": "2.915.0",
       "date": "2026-11-06",
       "title": "Monitoring › 설정 연동 — 포탈에 설정된 시스템을 골라 Monitoring 대상으로 · 개요 기술 뷰 · 점검 실패 알림",

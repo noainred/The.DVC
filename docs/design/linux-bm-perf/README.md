@@ -109,11 +109,17 @@
 항목 26개와 근거 문서 11건의 전체 표는 **`TUNING-SOURCES.md`** 에 있다(3차 · 2026-11-06 사용자 요청 "redhat, rocky 홈페이지의 공식 튜닝 가이드, best practice 문서 참고해서 튜닝할 수 있는 포인트를 찾아서 튜닝 탭을 추가로 만들고, 튜닝에 대한 근거와 근거문서에 대한 출처를 기록해줘").
 분류는 ① TuneD 프로파일 ② CPU·전력·인터럽트·NUMA ③ 메모리 ④ 스토리지 I/O ⑤ 네트워크. 추가로 읽을 것: `tuned-adm active` · `ethtool -g/-l/-S` · `ip -s link` · `/proc/net/softnet_stat`.
 
-### 4.4 DB · API(개요 — 구현 때 확정)
-- `usage_history`/`usage_latest` 에 열 추가(지표를 열로 — 기존 판단 유지): `load1 · runq_ratio · cpu_user/sys/iowait/steal · psi_cpu_some · psi_mem_full · psi_io_full · swap_out_ps · majfault_ps · oom_kills · disk_await_ms · disk_iops · disk_qdepth · net_drops · net_errs · tcp_retrans_pct` 등 + iDRAC 쪽 `cpu_pct_idrac · mem_pct_idrac · power_w · power_cap_w · inlet_c · throttled · ecc_corr · ecc_uncorr · smart_pred_fail · nic_crc · sel_crit · sel_warn` + 출처 `src_*`·읽은 시각 `os_at`·`idrac_at`. 튜닝 항목은 **별도 표**(`tuning_latest(agent,key,item,value,read_at)` — 항목이 동적이라 행). 온도·전력·부품은 기존 표(`sensorStore`·`partfault`)를 **조회로 붙이고 복제 적재하지 않는다**.
-- 엣지 봉투 `GET /api/collector/bm-usage` 에 필드 추가(중앙 정제 화이트리스트에도 추가 — 루트 CLAUDE.md ‘엣지가 보낸 것은 정제한다’).
-- 스냅샷: `POST /tools/bm-perf/:key/snapshot`(엣지 대행 — 작업 하나를 법인에 보내 로컬에서 돌리고 결과만 올린다 · 동시 1건/서버 · 진행 중 잠금은 그 서버만) · `GET …/snapshot`(최근 1건).
-- 권한은 기존 bmusage 와 같다(`tools` + vCenter scope · 법인 귀속 없는 서버는 범위 계정에 미노출 · 스냅샷 실행은 operator 이상).
+### 4.4 DB · API — 저장 구조(2026-11-06 사용자 결정 "DB 에 데이터 저장은 추천하는대로 구성" · "동시성을 32개로")
+**법인(엣지)당 DB 하나를 유지하되 시간 단위 파일 분할 + 해상도 3단.** 서버별 파일은 쓰지 않는다(보드 조회가 1,000 파일을 모아야 하고 SQLite ATTACH 상한 10 · 핸들·백업·prune·마이그레이션이 1,000배).
+- **월 파일**: `bm-usage-YYYY-MM.db` — 원시·롤업은 월 파일에, 보존은 **파일 삭제**로(수천만 행 `DELETE` 대신). 조회는 창에 걸리는 달만 붙인다(보통 1~3개).
+- **해상도 3단**: 5분 원시 **30일** → 1시간 롤업(평균+최대) **1년** → 1일 롤업(평균+최대) **5년**(지금 '원시 90일 + 일 5년' 사이에 1시간 단을 넣고 원시를 줄인다). 30일 넘는 화면은 롤업으로.
+- **장치별 표**(`usage_device_history`): 5분 **14일** → 1시간 **90일** · 대상은 물리 디스크 · dm/md · 물리 NIC · bond 만(파티션·가상 장치 제외, 서버당 5개 안팎). 파티션 I/O 는 옵션으로 켠 서버만.
+- **메인 파일**(`bm-usage.db`): `usage_latest` · `tuning_latest` · 장치 목록 · 설정 — 보드는 이 파일만 읽는다.
+- **피크 1초 샘플은 DB 에 넣지 않는다** — 서버 로컬 파일 7일(B 안).
+- 열: 서버 행은 '지표를 열로'(기존 판단) + `_peak · _peak_at` · 출처 `src_*` · `os_at · idrac_at`. 온도·전력·부품·CVP 포트·장애 기록은 기존 표를 조회로 붙이고 복제 적재하지 않는다.
+- 크기 추정(1,000대 법인 · SQLite 행 크기 실측 전): 대표값 원시 30일 약 2.6GB + 1시간 1년 약 4GB + 일 5년 약 1GB + 장치별 약 5~6GB ≈ **10GB 안팎**. 상한은 설정값. 중앙 크기는 변하지 않는다(이력 복제 없음). 구현 때 1,000행 샘플로 행 크기를 재서 이 수치를 정정한다.
+- **수집 동시성 32**(v2.916 에서 기본값 4 → 32 적용 · `BMUSAGE_CONCURRENCY`): 1,000대 · 서버당 ~5초면 동시 4 는 약 21분(재진입 가드로 실제 주기 20분+), 32 는 약 2.6분. 엣지 자원이 작은 법인은 env 로 낮춘다.
+- 엣지 봉투 `GET /api/collector/bm-usage` 필드 추가(중앙 정제 화이트리스트에도) · 스냅샷 `POST /tools/bm-perf/:key/snapshot`(엣지 대행 · 동시 1건/서버) · 권한은 기존 bmusage 와 같다(`tools` + vCenter scope · 귀속 없는 서버는 범위 계정에 미노출 · 스냅샷 실행은 operator 이상).
 
 ## 5. 화면(IA) — 아트보드 5장
 
@@ -153,6 +159,7 @@
 8. (4차) 피크 수집 — **A 세션 안 10초 창(기본) + B 서버 경량 샘플러를 법인 옵트인** / A 만 / B 만.
 9. (4차) 용도 감지 — **자동 감지(유닛·프로세스·포트·계정) + 수동 태그 우선(기본)** / 수동 태그만.
 10. (4차) 장애 기록 탭 — **서버 탭 + 보드 E 칸 + 함대 표(기본)** / 서버 탭만.
+11. (확정 2026-11-06) 저장 구조 — 월 파일 + 해상도 3단 + 장치별 축소 + 메인 파일 최신값(§4.4) · 동시성 32(v2.916 적용).
 
 ## 8. 구현 범위(컨펌 뒤 — Opus)
 `bmusage/collectors/osSsh.js linuxCommand` 구획 추가 → `parse/linuxProc.js` 파서(순수 · 테스트) → `rates.js`·`usage.js` 열 추가 → `db.js` 열·튜닝 표 → USE 판정 순수 모듈(테스트가 웹·서버 같은 입력으로 대조) → `edgePull.js` 봉투 + 중앙 정제 화이트리스트 → 스냅샷 엣지 대행 라우트 → 웹(보드 · 상세 · 400 · 상태) → 목 데이터 → Chromium 1440/400 → 릴리스.

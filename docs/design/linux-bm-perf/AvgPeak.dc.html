@@ -335,7 +335,7 @@ h2{margin:0;font-size:15px;font-weight:700}
         <li><b style="color:#e6edf6">한 시간축</b>: 두 화면은 같은 start/end · 같은 롤업(5분 → 7일은 30분, 30일은 2시간 — 롤업은 avg 는 평균의 평균, peak 는 최대의 최대)을 쓰고 응답이 실제 롤업을 돌려준다.</li>
         <li><b style="color:#e6edf6">커서·구간 공유</b>: 한쪽에서 hover·brush 하면 다른 쪽이 같은 x 로 움직이고, 아래 표가 선택 구간의 평균/피크로 바뀐다. 동기화 체크를 끄면 각자 움직인다.</li>
         <li><b style="color:#e6edf6">결측</b>: 못 읽은 주기는 두 화면 모두 선을 끊는다 · 피크 샘플이 없는 주기(옵트인 전)는 피크 화면에 ‘—’ 띠로 표시(0 으로 그리지 않음).</li>
-        <li><b style="color:#e6edf6">저장</b>: usage_history 에 지표마다 <span class="mono">_avg · _peak · _peak_at</span> 열 — 지표를 열로 두는 기존 판단 그대로(행 수 불변). 일 롤업은 이미 평균+최대를 함께 둔다.</li>
+        <li><b style="color:#e6edf6">저장</b>(확정): 법인 엣지당 DB 하나 · <span class="mono">bm-usage-YYYY-MM.db</span> 월 파일(보존 = 파일 삭제) · 해상도 3단(5분 30일 → 1시간 1년 → 1일 5년, 롤업은 평균+최대) · 장치별 표는 5분 14일 → 1시간 90일(물리 장치만) · 최신값은 메인 파일 · 1초 샘플은 서버 로컬 7일. 지표는 열로, <span class="mono">_peak · _peak_at</span> 같은 행.</li>
         <li><b style="color:#e6edf6">큐·버퍼의 ‘상한’</b> 은 튜닝 탭(⑤)이 읽는 같은 값(nr_requests · dirty_bytes · netdev_max_backlog · somaxconn · tcp_mem · ring)을 재사용한다 — 두 곳에서 따로 읽지 않는다.</li>
         <li>400 폭: 두 화면을 세로로, 표는 가로 스크롤 — ③ 과 같은 규칙.</li>
       </ul>
