@@ -89,3 +89,12 @@ OS 요구값(“Configuring Your Systems”): `vm.overcommit_memory=2`(“the on
 추가 차트 행 12: 로드 1분÷코어(NF·CM) · 런큐 r(USE·NF) · iowait·steal(NF·ND) · 컨텍스트 스위치/s(ND) · softirq·irq(ND·R2) · 코어별 불균형 max−avg(NF) · 스왑 si/so·주요 폴트(USE·NF) · 디스크 avgqu-sz·await(NF·CM) · 디스크 %util(NF·CM) · NIC %ifutil·rxkB/txkB(NF·USE) · NIC rxerr·drop·fifo(USE·R2) · TCP retrans·active/passive(NF). 임계값은 출처마다 달라 **설정값**으로 두고 화면은 출처 범위를 적는다.
 
 정직 기록: Netflix(Medium)·Dell PDF 는 403, brendangregg.com 은 프록시 연결 실패라 원문을 열지 못했다(사용자 에이전트 변경 등 우회는 하지 않았다). Reddit 스레드는 두 번의 검색(extended)에서 하나도 돌아오지 않아 ‘커뮤니티’ 는 블로그 합의(○)로만 적었다. SRE Book 은 원문 확인(●).
+
+## 9. 장치별 보기 — 디스크 · 파티션/마운트 · 인터페이스 (6차 · 2026-11-06 22:53~)
+
+요청: "디스크별, 파티션별, 사용량 · 네트워크 인터페이스별 사용량 보는 기능 추가". 추이 탭(②-추이)에 ‘장치별 보기’ 절을 더했다 — 장치 축 세그먼트(서버 전체 · 디스크별 · 파티션·마운트별 · 인터페이스별)와 장치 칩. 장치를 고르면 위 평균/피크 두 화면이 그 장치 계열로 바뀐다(시간축·구간 유지).
+
+- **A 디스크별 I/O**: `/proc/diskstats` 장치 행 — busy 평균/피크 · await 평균/피크 · IOPS r/w · 처리량 · 대기열/상한(nr_requests) · 오류·SMART(iDRAC) · 추이. 물리 디스크 + dm/md, loop·ram·zram·sr 제외(기존 `isWholeDisk`). **파티션 행은 옵션**(기본 접힘) — 파티션 I/O 는 병합·캐시 때문에 디스크 합과 다를 수 있다고 화면이 말한다. 저장: 장치별 행(`usage_device_history(agent,key,ts,dev,…)` — 장치 수 × 5분, 90일; 서버 대표값과 별개 표).
+- **B 파티션·마운트별 공간**: `df -P -k`(가상 FS 제외) + `df -i` — 마운트 · 장치(파티션) · FS · 크기 · 사용/가용 · 사용률 · inode · 7일 증가(일 롤업 기울기) · **가득 예상(선형 추정 — 기울기 0 이거나 7일 미만이면 ‘—’)** · 30일 추이. NFS 등 원격은 제외(스토리지 화면 소관). 기존 `bmstor mounts` 는 그대로 쓰고 나머지 마운트는 이 화면에서만 읽는다(등록부에 넣지 않는다). GPDB 프로파일이 있으면 데이터 볼륨에 75% 임계(G3)를 같이 그린다. 수집: Linux 명령의 `##DF` 를 전체 마운트로 넓힌다(`df -P -k -x tmpfs -x devtmpfs -x overlay -x squashfs` · `df -P -i …`).
+- **C 인터페이스별**: `/proc/net/dev` + `/sys/class/net`(speed · operstate · bonding 멤버) + iDRAC NICStatistics(CRC · 링크) — 종류(물리/논리/가상) · 속도·상태 · rx/tx 평균·피크 · 사용률 평균/피크 · 드롭 · 오류·CRC · 추이. 사용률은 물리 회선과 bond(멤버 속도 합)만(tun/tap·veth·bridge 제외 — 기존 규칙) · 속도 없으면 처리량만 · 드롭(OS)과 CRC(iDRAC)는 다른 칸.
+- 서버 대표값(‘가장 바쁜 장치·회선’)은 그대로이고, 이 절이 그 장치가 어느 것인지 보여 준다. 수치는 가상.
