@@ -1,10 +1,10 @@
 /**
- * featureUsage2912.test.js — v2.912 설정 › 사용자 › 기능 사용 현황(사용자별 기능 사용 추적) 서버 회귀.
+ * featureUsage2913.test.js — v2.913 설정 › 사용자 › 기능 사용 현황(사용자별 기능 사용 추적) 서버 회귀.
  * 설계 docs/design/feature-usage. 고정하는 것:
  *  ① 키 등록부 — 웹 App.jsx TABS · Settings.jsx SUB · console PAGES · usageTracker TOOL_SEGS 와 서버 usage/keys.js 가 같다(소스 대조)
  *  ② 설정 — 기본 꺼짐 · 데모 계정 기본 제외 · 형식 400 · 켜고 끈 기록 · 손상 파일은 보존하고 꺼짐(fail-closed) + loadError
  *  ③ 수신 — 꺼짐이면 세지 않는다 · 계정은 req.user 만(본문 user 무시) · 데모/제외/모르는 키 버림 · 2초 안 같은 열람 1회 ·
- *     머문 조각 15초 상한 + 계정당 벽시계 상한 · 분당 상한
+ *     머문 조각 45초 상한 + 계정당 벽시계 상한 · 분당 상한
  *  ④ 집계 — 저장 전 메모리 분 포함 · 기록 꺼진 날은 'off'(0 아님) · 직전 기간 기록 없으면 비교 null · 미접속 계정 · 계정 출처
  *  ⑤ 라우트 — 수신은 viewer 도 200 · 조회 · 설정은 설정 소유자(소유자 ∧ 전체 범위)만 · 지우기는 OTP 재인증 · 감사 줄에 무엇이 어떻게(detail)
  *  ⑥ 미인증 /auth/config 는 문구 하나만(계정 · 수치 없음) · AUDIT_SKIP 등재 · 등록부(DB 목록 · 설명 · 설정 파일 분류)
@@ -16,7 +16,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'fu2912-'));
+const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'fu2913-'));
 process.env.CONFIG_DIR = tmp;
 process.env.DATA_SOURCE = 'mock';
 process.env.AUTH_ENABLED = 'true';
@@ -112,10 +112,10 @@ test('③ 수신 — 꺼짐 · 계정 · 버림 · 중복 열람 · 머문 시�
   assert.equal(store.recordUsage({ user: { username: 'demo2', demoGuest: true }, k: 'tab:vms', hit: true, now: NOW }).reason, 'excluded', '데모 표지면 이름과 무관하게 버림');
   assert.equal(store.recordUsage({ user: u, k: 'tab:nope', hit: true, now: NOW }).reason, 'unknown-key');
   assert.equal(store.recordUsage({ user: null, k: 'tab:vms', hit: true, now: NOW }).reason, 'no-user');
-  // 머문 시간: 첫 조각 15초 상한, 다음은 직전 조각 뒤 흐른 시간까지
+  // 머문 시간: 첫 조각 45초 상한, 다음은 직전 조각 뒤 흐른 시간까지
   const b = { username: 'bob', role: 'viewer' };
   store.recordUsage({ user: b, k: 'tab:hosts', ms: 60_000, now: NOW });
-  store.recordUsage({ user: b, k: 'tab:hosts', ms: 10_000, now: NOW + 4_000 });   // 창 두 개 — 4초만
+  store.recordUsage({ user: b, k: 'tab:hosts', ms: 30_000, now: NOW + 4_000 });   // 창 두 개 — 4초만
   store.recordUsage({ user: b, k: 'tab:hosts', ms: -5, now: NOW + 5_000 });
   store.recordUsage({ user: b, k: 'tab:hosts', ms: 'x', now: NOW + 6_000 });
   // 분당 상한
@@ -128,7 +128,7 @@ test('③ 수신 — 꺼짐 · 계정 · 버림 · 중복 열람 · 머문 시�
     assert.equal(vms.views, 2);
     const hosts = r.byKey.find((x) => x.k === 'tab:hosts');
     assert.equal(hosts.views, 0);
-    assert.equal(hosts.ms, 15_000 + 4_000, '15초 상한 + 벽시계 상한');
+    assert.equal(hosts.ms, store.BEAT_MAX_MS + 4_000, '조각 상한(45초) + 벽시계 상한');
     const alice = r.users.find((x) => x.user === 'alice');
     assert.ok(alice, '계정 키는 소문자');
     assert.equal(alice.name, '앨리스');

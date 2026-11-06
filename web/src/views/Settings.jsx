@@ -53,7 +53,7 @@ const IsiduSettingsPage = lazy(() => import('./tools/IsiduSettingsPage.jsx')); /
 const GuestPartSettings = lazy(() => import('./tools/GuestPartSettings.jsx')); // v2.749 게스트 파티션 사용률 — 조회 주기·임계·무시 규칙·메일
 const VeeamSettings = lazy(() => import('./VeeamSettings.jsx')); // v2.751 Veeam 백업 서버(vCenter 별 · 중앙 또는 그 법인 엣지가 읽음)
 const BareosSettingsPage = lazy(() => import('./BareosSettingsPage.jsx')); // v2.878 Bareos 설정(예전 Backup › Bareos › 설정 탭)
-const FeatureUsage = lazy(() => import('./FeatureUsage.jsx')); // v2.912 기능 사용 현황(사용자별 기능 사용 추적 — 설정 소유자)
+const FeatureUsage = lazy(() => import('./FeatureUsage.jsx')); // v2.913 기능 사용 현황(사용자별 기능 사용 추적 — 설정 소유자)
 
 // 모든 하위 화면 정의(키→라벨→컴포넌트). 모든 항목은 group 키로 1단 묶음 하나에 속한다.
 // v2.905(사용자 요청 '설정에 메뉴가 너무 많아져서 스크롤바가 생긴다 — 재배치'): 1단이 19개(단독 항목 12개 + 그룹 7개)라 1,600px 대에서도
@@ -101,7 +101,7 @@ const SUB = [
   { k: 'users', label: '메인포탈 사용자 관리', C: UserAdmin, group: 'usercontrol' },
   { k: 'edge-users', label: '엣지 사용자 배포', C: EdgeUserDeploy, group: 'usercontrol' },
   { k: 'auth-ad', label: '인증(AD)', C: AdSettings, group: 'usercontrol' },
-  // v2.912(사용자 요청 '사용자별로 어떤 기능을 사용하는지 트래킹 — UI 개선을 위해' · 설계 docs/design/feature-usage): 설정 소유자 게이트를 그대로 탄다(서버 requireSettingsOwner).
+  // v2.913(사용자 요청 '사용자별로 어떤 기능을 사용하는지 트래킹 — UI 개선을 위해' · 설계 docs/design/feature-usage): 설정 소유자 게이트를 그대로 탄다(서버 requireSettingsOwner).
   { k: 'feature-usage', label: '기능 사용 현황', C: FeatureUsageEntry, group: 'usercontrol' },
   // --- 보안 ---
   { k: 'session-security', label: '세션 보안', C: SessionSecurity, group: 'security' },
@@ -147,7 +147,7 @@ const GROUPS = {
   log: { label: '로그', desc: 'vCenter 로그 보관 · 진단·로그 · 서버 성능 측정 · 로그 분석(개선점) · 감사 로그 · 최근 로그인 · 로그인 횟수.' },
   system: { label: '시스템', desc: '업그레이드(온라인 · 오프라인 번들 · 자동 업그레이드)와 버전 정보(About).' },
 };
-/** v2.912 기능 사용 현황이 설정 하위 키의 이름 · 메뉴 경로를 쓰도록 넘기는 목록(FeatureUsage 가 Settings 를 import 하면 순환이 된다). */
+/** v2.913 기능 사용 현황이 설정 하위 키의 이름 · 메뉴 경로를 쓰도록 넘기는 목록(FeatureUsage 가 Settings 를 import 하면 순환이 된다). */
 function FeatureUsageEntry() { return <FeatureUsage settingsMeta={settingsMeta()} />; }
 function settingsMeta() { return SUB.map((s) => ({ k: s.k, label: s.label, groupLabel: GROUPS[s.group]?.label || '', superOnly: !!s.superOnly })); }
 /** 이 사용자에게 보이는 하위 항목(v2.740 — superOnly 는 슈퍼 관리자에게만). 주소로 직접 들어오면 그 화면이 권한 안내를 그린다. */

@@ -397,3 +397,12 @@
   ② 기록이 닿지 않는 구간은 0 이 아니다 — 구간 시작이 가장 오래된 기록보다 앞이면 `partial`, 기록이 없으면 전부 partial, 파일을 못 읽으면 `loadError` 를 화면이 밝힌다.
   ③ `GET /api/admin/login-history` 는 감사 로그와 같은 문지기(adminOnly + 범위 계정 403)이고 데모 계정 READ_DENY 다. 기간 질의는 `parseLoginRange`(배열 · 한쪽만 · 역순 · 미래 거부).
   회귀 `server/test/loginHistory2912.test.js`(실제 POST /api/auth/login · 라우트 게이트) · 웹 `web/src/views/loginHistoryText.test.js`.
+- **v2.913 — 기능 사용 추적(설정 › 사용자 › 기능 사용 현황)의 수신은 viewer 도 쓰는 POST 이고, 그 예외의 조건은 셋이다.**
+  ① `POST /api/usage/track` 은 `POST /tool-usage` 와 같은 '자기 화면 사용 기록' 예외다(requireRole 없음 · AUDIT_SKIP) — 계정은 **`req.user` 로만**
+     적고(본문 계정 칸 무시) · **아는 화면 키만**(`usage/keys.js` — 웹 TABS · Settings SUB · 콘솔 PAGES 와 소스 대조 테스트) · 계정당 분당 상한 · 데모 · 제외 계정은 버린다.
+     새 '모든 계정이 쓰는 POST' 를 만들면 이 셋을 같이 갖출 것.
+  ② 조회 · 설정 · CSV · 지우기는 `adminOnly + requireSettingsOwner`(소유자 ∧ 전체 범위 — 전 법인 사용자의 개인 활동 기록) · 지우기는 `reauth`(본인 OTP) · 데모 READ_DENY.
+     미인증 `/auth/config` 에는 고지 **문구 하나**만(계정 · 수치 금지).
+  ③ 라우트가 감사 줄에 '무엇이 어떻게' 를 남기려면 `res.locals.auditDetail`(문자열)을 세운다 — `auditMiddleware` 가 같은 줄의 detail 로 싣는다.
+     쓰기 경로를 AUDIT_SKIP 에 넣어 두 줄을 피하지 말 것(데모 계정 쓰기 차단이 그 목록을 '읽기성 POST' 로 본다).
+  회귀 `server/test/featureUsage2913.test.js` · 웹 `web/src/usageTracker.test.js` · `web/src/views/featureUsageText.test.js` · 설계 `docs/design/feature-usage/`.

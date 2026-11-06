@@ -1,6 +1,6 @@
 # 설계: 설정 › 사용자 › 기능 사용 현황(`#/settings/feature-usage`) — 사용자별 기능 사용 추적
 
-작성 2026-11-06 (v2.911.0 · main 349e9e5 기준) · 상태 **시안 — 컨펌 대기(§6)** · 시안 캔버스: https://claude.ai/artifact/GuLA7wngifiCeeXE9teFrW
+작성 2026-11-06 (v2.911.0 · main 349e9e5 기준) · 상태 **구현 — v2.913.0(§7)** · 컨펌 2026-11-06 '진행해'(§5 기본값 8개 그대로) · 시안 캔버스: https://claude.ai/artifact/GuLA7wngifiCeeXE9teFrW
 (아트보드 7장 — 이 폴더의 `*.dc.html` 이 같은 내용의 레퍼런스. **모든 수치 · 사용자 · 날짜는 그림용 가상값**이고 기능 이름 · 메뉴 경로 · 도구 키만 실제 포탈 것이다.
 색 · 글자는 `web/src/styles.css` `:root` 토큰 그대로. 범주 색 6개(묶음 비중)는 포탈 토큰의 밝은 색이 어두운 패널 위 범주 색 기준(밝기 띠)을 넘겨
 한 단계 어두운 값으로 바꿨다 — `#3b82f6 #d97706 #0891b2 #9333ea #0d9488` + 중립 `#5d6b85`(기타) · dataviz 검증기 통과(2026-11-06 실측).
@@ -67,7 +67,7 @@
 ### 4.2 머문 시간의 정의(컨펌 항목 ①)
 - ‘창이 보이고(`visibilityState === 'visible'`) **마지막 입력 뒤 N분 이내**’ 인 시간만 더한다. N 기본 **5분**, 1~30분, 수집 설정에서 바꾼다.
 - 입력 사건은 `sessionActivity.js ACTIVITY_EVENTS` 와 **같은 목록**(판정 코어 하나).
-- 화면은 보고 있는 동안 **10초마다 머문 조각**(`{k, ms}`)을 보낸다. 창이 가려지거나 유휴 한도를 넘으면 멈춘다. 창을 닫는 순간의 마지막 조각(최대 10초)은 `fetch keepalive` 로 시도하되 **빠질 수 있다고 화면에 적는다**(§3 ⑤ 문구).
+- 화면은 보고 있는 동안 **30초마다 머문 조각**(구현에서 10초 → 30초 — §7 12)(`{k, ms}`)을 보낸다. 창이 가려지거나 유휴 한도를 넘으면 멈춘다. 창을 닫는 순간의 마지막 조각(최대 10초)은 `fetch keepalive` 로 시도하되 **빠질 수 있다고 화면에 적는다**(§3 ⑤ 문구).
 
 ### 4.3 저장 — 일 단위 집계만, 원본 이벤트 없음
 - `usage.db`(`<dbDir>/usage.db`) 표 하나: `feature_usage_daily(day, user, key, views, active_ms, last_ts, name, role, PRIMARY KEY(day,user,key))` + `day` 인덱스(prune).
@@ -96,7 +96,7 @@
 - `web/src/usageTracker.js`(순수 판정 + 전송) · App 의 `tab` · `hashNow` 변화에서 키를 만든다(`locate` 와 같은 조각 규칙). 전송은 `sessionActivity.js` 처럼 **조용히**(api.js 헬퍼 금지 — 401 전역 처리 · 진행 표시에 올리지 않는다). 실패는 버린다(재시도 폭주 금지).
 - 수집이 꺼져 있으면(`/auth/me` 의 `usageEnabled:false`) 신호를 보내지 않는다 — 서버가 버리더라도 쓸데없는 요청을 만들지 않는다.
 
-## 5. 컨펌 항목
+## 5. 컨펌 항목(2026-11-06 '진행해' — 기본값 그대로)
 
 | # | 결정 | 시안의 기본값 | 다른 선택 |
 |---|---|---|---|
@@ -116,6 +116,30 @@
 - 테스트: 키 검증(웹 SUB ⊆ 서버) · 머문 시간 판정(유휴 · 가려짐 · 경계) · 일 집계 합산 · 꺼짐 구간이 합계 · 분모에 안 들어감 · 직전 기간 없음 ‘—’ · 범위 소유자 403 · 본문 계정명 무시 · 분당 상한 · purge OTP · `/auth/config` 에 계정 없음 · 설정 묶음 테스트 갱신.
 - 검증(표준): 관련 테스트 + Chromium 1440/400 1회 + 전량 verify + 릴리스.
 
-## 7. 구현 기록
+## 7. 구현 기록(v2.913.0 — Opus)
 
-(구현 뒤 채운다 — 버전 · 실측 규모 · 시안과 달라진 점.)
+번호: main 이 같은 날 v2.912.0(설정 › 로그 › 최근 로그인 · 로그인 횟수)을 먼저 써서 v2.913.0 이 됐다. 그 기능과 겹치지 않는다(그쪽은 로그인 성공 기록, 이쪽은 화면 사용).
+
+| 영역 | 파일 |
+|---|---|
+| 서버 | `server/src/usage/{keys,settings,db,store}.js` · `routes/api/usage.js`(POST /usage/track) · `routes/admin/usage.js`(report · user · export.csv · settings · purge) · `routes/auth.js`(로그인 응답 · /auth/me `usageTrack`, /auth/config `usageNotice`) · `audit.js`(AUDIT_SKIP · 라벨 2 · `res.locals.auditDetail`) |
+| 웹 | `web/src/usageTracker.js` · `App.jsx`(추적기 연결) · `views/FeatureUsage.jsx` · `views/featureUsageText.js` · `views/featureUsage.css` · `views/Settings.jsx`(하위 탭) · `views/Login.jsx` · `loginThemes.jsx`(고지) |
+| 등록부 | `insights/dbLocation.js` · `portalDb.js` · `dbGuideData.js` · `docs/SETTINGS.md`(31번) · 생성 문서 3종 |
+| 테스트 | `server/test/featureUsage2913.test.js`(7) · `web/src/usageTracker.test.js` · `web/src/views/featureUsageText.test.js`(18) · `settingsMenu2905.test.js`(KEYS_ADDED) |
+
+**시안과 달라진 점(정직 기록)**
+1. 기능별 표의 **‘볼 수 있는 사람’ 열은 넣지 않았다** — AD 계정은 서버가 열거할 수 없어(로그인 때만 존재) 계정 수가 틀린 값이 된다. 대신 **권한 열**(관리자 전용 · tools 권한 · 설정 소유자 · 슈퍼 관리자)을 보이고, ‘안 씀’ 안내에 '권한 때문에 아무도 열 수 없는 화면일 수 있다' 를 적었다. 정리 후보 규칙 문구도 같은 내용이다.
+2. **Overview 보기 모드(경영 · 엔지니어)는 따로 세지 않는다** — `#/overview/exec` 도 `tab:overview` 다(모드는 대개 저장값이라 주소로 갈리지 않는다 — 주소로 세면 같은 화면이 두 키로 갈린다).
+3. 개인 상세 드로어는 **주소에 싣지 않았다**(화면 상태). 탭 4개는 주소에 싣는다(`#/settings/feature-usage/<탭>`).
+4. 기간은 7 · 30 · 90 · **365**일(‘직접’ 대신). API 는 `from`·`to`(최대 366일)도 받는다.
+5. 400px 의 상위 기능은 2줄 목록 대신 **STable + 가로 스크롤**(표 규약 하나로).
+6. 정리 주기: ‘03:10 하루 1회’ 대신 **저장 60번(약 1시간)마다**(perf-db `(++tick % N) === 0` — 기동 첫 틱 금지).
+7. 열람은 **1초 넘게 머문 화면만** 1회로 센다(메뉴를 훑으며 지나간 화면 제외) · 서버는 2초 안 같은 키를 한 번으로 센다(마지막으로 센 열람 기준).
+8. 머문 시간은 계정당 **벽시계 상한**을 둔다 — 창 두 개가 동시에 보내도 직전 조각 뒤 흐른 시간까지만 더한다(조각당 45초 상한 + 이것).
+9. 켜고 끈 것은 각 사용자가 **다시 로그인 · 새로고침해야** 화면 추적기에 반영된다(설정은 /auth/me 로 받는다). 그 사이 신호는 서버가 버린다 — 설정이 진실의 원천이다.
+10. 감사 로그: 설정 저장 · 지우기는 자동 감사 줄 하나에 `detail`(무엇이 어떻게 · 범위 · 행 수)을 싣는다 — 라우트가 `res.locals.auditDetail` 을 남기면 `auditMiddleware` 가 같은 줄에 붙인다(두 줄 방지 · AUDIT_SKIP 에 쓰기 경로를 넣지 않는다 — 데모 계정 쓰기 차단도 그 목록을 본다).
+11. 범주 색 5 + 중립은 시안 그대로(dataviz 검증 통과 값) · 묶음에 고정(순위로 칠하지 않는다).
+12. 머문 조각 주기 **10초 → 30초**(서버 조각 상한 15초 → 45초) — 전역 요청 상한(`util/rateLimit.js`)이 **IP당 분당 1,800회**라, 프록시 뒤 한 IP 로 50명이 들어오면 10초 주기만으로 분당 300회가 더해진다. 30초면 분당 100회. 대가: 창을 닫는 순간 잃을 수 있는 몫이 최대 30초로 늘어난다(창이 가려질 때 · pagehide 때 남은 몫을 keepalive 로 보내는 것은 그대로).
+
+**검증**: 서버 단위 테스트 7 + 웹 18(위 표) · 수동 스모크(열람 1 · 머문 시간 · 중복 1회 · 파일 0600) · Chromium 1440/400 은 PR 보고에 적는다.
+**남은 것(다음 점검 후보)**: 엣지 포탈 사용분 합산(2단계 — 엣지 push + 중앙 정제 화이트리스트) · 화면 안 주요 버튼 계측(사용자가 이번에 고르지 않음).

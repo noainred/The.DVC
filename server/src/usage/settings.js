@@ -1,5 +1,5 @@
 /**
- * usage/settings.js — 기능 사용 추적 설정(v2.912). 파일 `usage-settings.json`(CONFIG_DIR, 비밀 없음).
+ * usage/settings.js — 기능 사용 추적 설정(v2.913). 파일 `usage-settings.json`(CONFIG_DIR, 비밀 없음).
  *
  * 값: { enabled, idleMin, keepDays, excluded[], noticeEnabled, notice(null = 기본 문구), toggles[{at,by,on}], updatedAt, updatedBy }
  *  · **기본 꺼짐**(사용자 결정 2026-11-06 · 설계 §5 ⑥) — 설치 직후에는 아무것도 세지 않는다. 설정 소유자가 켠다.

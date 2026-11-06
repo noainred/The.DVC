@@ -1,11 +1,11 @@
 /**
- * usage/store.js — 기능 사용 추적의 수신 · 모으기 · 저장 · 집계(v2.912, 설계 docs/design/feature-usage §4).
+ * usage/store.js — 기능 사용 추적의 수신 · 모으기 · 저장 · 집계(v2.913, 설계 docs/design/feature-usage §4).
  *
- * 수신(`recordUsage`) — 화면이 주소를 바꿀 때 열람 1회(hit), 보고 있는 동안 10초마다 머문 조각(ms)을 보낸다.
+ * 수신(`recordUsage`) — 화면이 주소를 바꿀 때 열람 1회(hit), 보고 있는 동안 30초마다 머문 조각(ms)을 보낸다.
  *   · **계정은 인증된 사용자(req.user)로만** 적는다 — 본문의 계정명은 받지 않는다.
  *   · 꺼짐 · 설정 못 읽음 · 데모/제외 계정 · 모르는 키 · 분당 상한 초과는 조용히 버리고 사유별로 센다(상태 화면 '버린 신호').
  *   · 같은 키 열람이 2초 안에 다시 오면 한 번으로 센다(React 이펙트 · hashchange 가 같은 전환을 두 번 알리는 것).
- *   · 머문 조각은 한 번에 15초까지 · **계정당 벽시계를 넘지 않게**(창 두 개가 동시에 보내도 직전 조각 뒤 흐른 시간까지만 더한다).
+ *   · 머문 조각은 한 번에 45초까지(화면은 30초마다 보낸다) · **계정당 벽시계를 넘지 않게**(창 두 개가 동시에 보내도 직전 조각 뒤 흐른 시간까지만 더한다).
  * 모으기 — 메모리 맵(날 × 계정 × 키)에 더했다가 60초마다 **한 트랜잭션**으로 DB 에 더한다(perf-db '대량 쓰기는 트랜잭션'). 종료 때는 동기로 한 번 더.
  *   DB 를 못 쓰면 버리지 않고 다음 주기에 다시 시도한다(상한 2만 칸 — 넘으면 새 칸은 버리고 센다).
  * 정리 — 저장 60번(약 1시간)마다 보관 기간 밖을 청크로(기동 첫 틱 금지 — `(++tick % N) === 0`).
@@ -24,7 +24,7 @@ import { loadUsageSettings, usageSettingsLoadError, userKeyOf, onIntervals } fro
 import { writeBatch, writeBatchSync, dayRows, knownUsers, pruneUsage, purgeUsage, usageDbInfo } from './db.js';
 
 export const FLUSH_MS = 60_000;
-export const BEAT_MAX_MS = 15_000;
+export const BEAT_MAX_MS = 45_000;
 export const HIT_DEDUP_MS = 2_000;
 export const RATE_PER_MIN = 120;
 export const PENDING_MAX = 20_000;

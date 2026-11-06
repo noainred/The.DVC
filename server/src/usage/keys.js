@@ -1,5 +1,5 @@
 /**
- * usage/keys.js — 기능 사용 추적이 받는 '화면 키' 등록부(v2.912, 설계 docs/design/feature-usage §4.1).
+ * usage/keys.js — 기능 사용 추적이 받는 '화면 키' 등록부(v2.913, 설계 docs/design/feature-usage §4.1).
  *
  * 키 4종(주소가 바뀌는 화면 전환만 센다 — 검색어·입력 값·조회한 장비·화면 안 버튼은 세지 않는다):
  *   · `tab:<id>`          상단 탭(#/<id>) — 웹 App.jsx TABS 와 같은 목록
@@ -9,7 +9,7 @@
  *
  * 규칙(회귀 방지):
  *  · **아는 키만** 받는다 — 예전 tool-usage 가 형식만 봐서 viewer 가 임의 키를 무제한으로 쌓던 것(v2.598 AUTHZ-2598-05)과 같은 함정을 막는다.
- *  · 웹 목록과 이 목록은 test/featureUsage2912.test.js 가 소스로 대조한다(웹에 탭·설정 하위·콘솔 페이지를 더하면 여기도 더할 것 —
+ *  · 웹 목록과 이 목록은 test/featureUsage2913.test.js 가 소스로 대조한다(웹에 탭·설정 하위·콘솔 페이지를 더하면 여기도 더할 것 —
  *    빠지면 그 화면의 신호는 'unknown-key' 로 버려지고 상태 화면의 '버린 신호' 에 보인다).
  *  · 도구 키는 바꾸지 않는다(권한 파일의 값) — 여기서도 이름을 바꾸지 않는다.
  */
@@ -29,7 +29,7 @@ export const SETTINGS_KEYS = Object.freeze([
   'users', 'edge-users', 'auth-ad', 'feature-usage',
   'session-security', 'secrets', 'api-keys', 'anomaly', 'host-access', 'peer-trust', 'security-self-check',
   'alerts', 'mail', 'ai-search', 'tool-categories',
-  'vclogs', 'diagnostics', 'perf-monitor', 'log-analysis', 'audit',
+  'vclogs', 'diagnostics', 'perf-monitor', 'log-analysis', 'audit', 'recent-logins', 'login-counts',
   'upgrade', 'about',
 ]);
 

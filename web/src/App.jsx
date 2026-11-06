@@ -7,7 +7,7 @@ import ForceOtpEnroll from './views/ForceOtpEnroll.jsx';
 import ErrorBoundary from './components/ErrorBoundary.jsx';
 import SessionExpiryGuard from './components/SessionExpiryGuard.jsx';
 import { createActivityPinger, sendActivity, serverLogout, ACTIVITY_EVENTS } from './sessionActivity.js'; // 2026-10-09 검토 S-05 — 서버 로그아웃·활동 신호
-import { createUsageTracker, sendUsage, POLL_MS as USAGE_POLL_MS } from './usageTracker.js'; // v2.912 기능 사용 추적(설정 › 사용자 › 기능 사용 현황)
+import { createUsageTracker, sendUsage, POLL_MS as USAGE_POLL_MS } from './usageTracker.js'; // v2.913 기능 사용 추적(설정 › 사용자 › 기능 사용 현황)
 import GlobalProgress from './components/GlobalProgress.jsx'; // 3초 넘는 대기의 진행상태(v2.501)
 import { STable } from './components/STable.jsx';
 
@@ -184,8 +184,8 @@ export default function App() {
     return () => { ACTIVITY_EVENTS.forEach((e) => window.removeEventListener(e, on)); };
   }, [user, authCfg]);
 
-  // v2.912 기능 사용 추적 — 설정 소유자가 켰을 때만(/auth/me usageTrack · 데모 계정은 서버가 false 로 준다). 주소를 1초마다 읽어 화면 키를 정하고
-  //   보고 있는 동안(창 보임 + 마지막 입력 뒤 idleMin 분 이내) 10초마다 머문 시간을 보낸다. 판정 · 전송은 usageTracker.js 하나.
+  // v2.913 기능 사용 추적 — 설정 소유자가 켰을 때만(/auth/me usageTrack · 데모 계정은 서버가 false 로 준다). 주소를 1초마다 읽어 화면 키를 정하고
+  //   보고 있는 동안(창 보임 + 마지막 입력 뒤 idleMin 분 이내) 30초마다 머문 시간을 보낸다. 판정 · 전송은 usageTracker.js 하나.
   //   켜고 끈 것은 다시 로그인(또는 새로고침)해야 이 화면에 반영된다 — 그 사이 신호는 서버가 버린다(설정이 진실의 원천).
   useEffect(() => {
     if (!user || user === 'loading' || !user.usageTrack?.enabled) return undefined;

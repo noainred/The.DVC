@@ -31,7 +31,7 @@ export const READ_DENY = [
   '/api/admin/central/agent-tokens', '/api/admin/agent-deploy', '/api/admin/collectors', '/api/admin/vcenters',
   '/api/admin/nsx', '/api/admin/horizon', '/api/admin/mail', '/api/admin/alerts', '/api/admin/llm-config',
   '/api/admin/packages', '/api/admin/data-source', '/api/admin/log-analysis', '/api/admin/perf', '/api/admin/memtrack',
-  '/api/admin/codex-check', '/api/admin/login-history', '/api/admin/nfs-mounts', '/api/admin/edge-users', '/api/admin/gpu-guest', '/api/admin/gpu-physical',
+  '/api/admin/codex-check', '/api/admin/login-history', '/api/admin/usage', '/api/admin/nfs-mounts', '/api/admin/edge-users', '/api/admin/gpu-guest', '/api/admin/gpu-physical',
   '/api/admin/portal-db', '/api/admin/status', '/api/admin/emergency-stop', '/api/admin/net', '/api/admin/dir-usage',
   '/api/admin/os-scan', '/api/admin/idrac/scan-ranges', '/api/admin/veeam', '/api/admin/report', '/api/admin/logs',
   '/api/auth/ad-config', '/api/upgrade', '/api/tools/credentials', '/api/remote',

@@ -1,4 +1,4 @@
-/* 설정 › 사용자 › 기능 사용 현황(v2.912) — 스코프 .fu. 색은 :root 토큰 · 범주 색은 featureUsageText.js BUCKETS(검증 통과 값).
+/* 설정 › 사용자 › 기능 사용 현황(v2.913) — 스코프 .fu. 색은 :root 토큰 · 범주 색은 featureUsageText.js BUCKETS(검증 통과 값).
    규약: uppercase 금지 · 그리드/플렉스 자식 min-width:0 · 버튼 줄은 flex-wrap · 표는 STable(minWidth + 래퍼). */
 .fu { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
 .fu .mono { font-family: var(--mono); font-variant-numeric: tabular-nums; }

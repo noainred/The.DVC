@@ -1,5 +1,5 @@
 /**
- * views/featureUsageText.js — 설정 › 사용자 › 기능 사용 현황의 순수 판정 · 문구(v2.912, 설계 docs/design/feature-usage).
+ * views/featureUsageText.js — 설정 › 사용자 › 기능 사용 현황의 순수 판정 · 문구(v2.913, 설계 docs/design/feature-usage).
  *
  * 화면 키(서버 usage/keys.js) → 사람이 읽는 이름 · 메뉴 위치 · 종류 · 묶음. 이름의 원천은 하나씩이다:
  *   탭 · 메뉴 위치 = views/topMenu.js MENU_GROUPS · 도구 이름 · 관리자 전용 · 준비 중 = views/specialToolsList.js TOOLS ·

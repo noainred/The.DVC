@@ -1,7 +1,7 @@
 /**
- * routes/api/usage.js — 기능 사용 추적 수신(v2.912, 설계 docs/design/feature-usage §4.4).
+ * routes/api/usage.js — 기능 사용 추적 수신(v2.913, 설계 docs/design/feature-usage §4.4).
  *
- * `POST /usage/track { k, hit?, ms? }` — 화면이 주소를 바꿀 때(hit:true) · 보고 있는 동안 10초마다(ms) 부른다.
+ * `POST /usage/track { k, hit?, ms? }` — 화면이 주소를 바꿀 때(hit:true) · 보고 있는 동안 30초마다(ms) 부른다.
  *
  * 권한: **로그인 사용자 전부**(viewer 포함). 서버 불변조건 '/api 상태변경은 requireRole(admin, operator)' 은 다른 사람 · 장비에 닿는 상태를
  *   말한다 — 이 신호는 `POST /tool-usage`(사용 횟수)와 같이 **자기 화면 사용 기록**이고 아무 권한도 넓히지 않는다. 그래서 감사 로그에서 빼고

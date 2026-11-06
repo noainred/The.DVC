@@ -1,4 +1,4 @@
-// v2.912 기능 사용 현황 — 순수 판정 · 문구(키 이름 · 위치 · 묶음 · 결측 '—' · 단서 규칙).
+// v2.913 기능 사용 현황 — 순수 판정 · 문구(키 이름 · 위치 · 묶음 · 결측 '—' · 단서 규칙).
 import { describe, it, expect } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';

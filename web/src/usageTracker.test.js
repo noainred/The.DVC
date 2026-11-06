@@ -1,4 +1,4 @@
-// v2.912 기능 사용 추적 — 화면 쪽 판정(주소 → 키 · 1초 머문 화면만 열람 · 보임 + 유휴 한도 안에서만 머문 시간 · 10초 묶음).
+// v2.913 기능 사용 추적 — 화면 쪽 판정(주소 → 키 · 1초 머문 화면만 열람 · 보임 + 유휴 한도 안에서만 머문 시간 · 30초 묶음).
 import { describe, it, expect } from 'vitest';
 import { usageKeyFromHash, createUsageTracker, sendUsage, BEAT_MS, MAX_TICK_MS } from './usageTracker.js';
 
@@ -47,10 +47,10 @@ describe('createUsageTracker', () => {
     h.step(1000);
     expect(h.sent.filter((s) => s.hit).map((s) => s.k)).toEqual(['tab:overview', 'tab:hosts']);
   });
-  it('머문 시간은 10초마다 보내고, 화면이 바뀌면 앞 화면 몫을 먼저 보낸다', () => {
+  it('머문 시간은 30초마다 보내고, 화면이 바뀌면 앞 화면 몫을 먼저 보낸다', () => {
     const h = harness();
     h.step(1000, 2);
-    h.step(1000, 10);
+    h.step(1000, 30);
     const beats = h.sent.filter((s) => s.ms);
     expect(beats.length).toBe(1);
     expect(beats[0]).toMatchObject({ k: 'tab:overview' });

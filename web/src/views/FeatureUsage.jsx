@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { fetchJson, postJson, putJson, downloadFile } from '../api.js';
+import { fetchJson, postJson, putJson, downloadFile, canCsv } from '../api.js';
 import { Loading, ErrorBox } from '../components/ui.jsx';
 import STable from '../components/STable.jsx';
 import BoldText from '../components/boldText.jsx';
@@ -12,7 +12,7 @@ import {
 import './featureUsage.css';
 
 /**
- * 설정 › 사용자 › 기능 사용 현황(v2.912 · 설계 docs/design/feature-usage · 사용자 요청 "사용자별로 어떤 기능을 사용하는지 트래킹 — UI 개선을 위해").
+ * 설정 › 사용자 › 기능 사용 현황(v2.913 · 설계 docs/design/feature-usage · 사용자 요청 "사용자별로 어떤 기능을 사용하는지 트래킹 — UI 개선을 위해").
  *
  * 탭 4개(#/settings/feature-usage/<탭>): 개요 · 기능별 · 사용자별 · 수집 설정. 서버는 설정 소유자(소유자 ∧ 전체 범위)만 통과시킨다 — 403 은 ErrorBox 가
  * 권한 안내로 그린다. 폴링하지 않는다(마운트 1회 + 기간 변경 + 새로고침 — 집계는 날마다 DB 를 읽는다). 늦게 온 이전 기간 응답은 버린다.
@@ -63,7 +63,7 @@ export default function FeatureUsage({ settingsMeta = [] }) {
               {PERIODS.map((d) => <button key={d} type="button" className={d === days ? 'on' : ''} aria-pressed={d === days} onClick={() => setDays(d)}>{d}일</button>)}
             </span>
             {rep?.range && <span className="muted mono fu-range">{rep.range.from} ~ {rep.range.to} (KST)</span>}
-            <button type="button" className="btn" onClick={exportCsv} disabled={csvBusy}>{csvBusy ? 'CSV 만드는 중…' : 'CSV'}</button>
+            {canCsv() && <button type="button" className="btn" onClick={exportCsv} disabled={csvBusy}>{csvBusy ? 'CSV 만드는 중…' : 'CSV'}</button>}
             <button type="button" className="btn" onClick={() => setSeq((n) => n + 1)} disabled={loading}>새로고침</button>
           </div>
         )}
@@ -586,7 +586,7 @@ function UsageSettings() {
               <input className="input fu-num" type="number" min={data.limits.idleMin[0]} max={data.limits.idleMin[1]} aria-label="유휴 한도(분)" value={form.idleMin} onChange={(e) => set({ idleMin: e.target.value })} />
               <span>분 이내인 시간만 더합니다</span>
             </div>
-            <div className="note">벽면 모니터에 띄워 둔 화면이 하루 종일을 채우지 않게 하는 장치입니다({data.limits.idleMin[0]}~{data.limits.idleMin[1]}분). 화면이 10초마다 조각을 보내므로 창을 닫는 순간의 마지막 조각은 빠질 수 있습니다.</div>
+            <div className="note">벽면 모니터에 띄워 둔 화면이 하루 종일을 채우지 않게 하는 장치입니다({data.limits.idleMin[0]}~{data.limits.idleMin[1]}분). 화면이 30초마다 조각을 보내고 창이 가려질 때 남은 몫을 보내지만, 창을 닫는 순간의 마지막 조각은 빠질 수 있습니다.</div>
           </div>
         </div>
         <div className="fu-row">

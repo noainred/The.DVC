@@ -76,7 +76,7 @@ export default function Login({ onSuccess, notice, setup }) {
       <style>{THEMES_CSS}</style>
       <Comp f={f} />
 
-      {/* v2.912 기능 사용 기록 고지(설정 › 사용자 › 기능 사용 현황 › 수집 설정의 문구) — 서버가 켜져 있을 때만 싣는다. */}
+      {/* v2.913 기능 사용 기록 고지(설정 › 사용자 › 기능 사용 현황 › 수집 설정의 문구) — 서버가 켜져 있을 때만 싣는다. */}
       {typeof setup?.usageNotice === 'string' && setup.usageNotice && (
         <div className="lt-usage-notice" role="note">{setup.usageNotice}</div>
       )}

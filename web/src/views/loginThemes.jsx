@@ -614,7 +614,7 @@ export const THEMES_CSS = `
   border: 1px solid rgba(255,255,255,.16); color: #cbd5e1; border-radius: 20px; padding: 7px 15px;
   font-size: 11px; letter-spacing: .1em; cursor: pointer; font-family: 'JetBrains Mono', monospace; }
 .lt-reshuffle:hover { border-color: #94a3b8; color: #fff; }
-/* v2.912 기능 사용 기록 고지 — 수집이 켜져 있을 때만(/auth/config usageNotice). 오른쪽 아래 테마 버튼 자리를 비운다. */
+/* v2.913 기능 사용 기록 고지 — 수집이 켜져 있을 때만(/auth/config usageNotice). 오른쪽 아래 테마 버튼 자리를 비운다. */
 .lt-usage-notice { position: fixed; z-index: 5; left: 16px; right: 170px; bottom: 12px; max-width: 760px; box-sizing: border-box;
   background: rgba(0,0,0,.45); border: 1px solid rgba(255,255,255,.12); color: #cbd5e1; border-radius: 10px; padding: 7px 11px;
   font-size: 11px; line-height: 1.55; }

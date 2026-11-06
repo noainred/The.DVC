@@ -1,5 +1,5 @@
 /**
- * usage/db.js — 기능 사용 일 집계 DB(v2.912). 파일: `<dbDir>/usage.db`.
+ * usage/db.js — 기능 사용 일 집계 DB(v2.913). 파일: `<dbDir>/usage.db`.
  *
  * 원본 이벤트는 남기지 않는다 — **사용자 × 화면 키 × 날(KST)** 한 줄에 열람 수 · 머문 시간을 더한다(설계 §4.3).
  *   · `fu_daily(day, user, k, views, active_ms, last_ts)` — PK (day, user, k). PK 의 첫 열이 day 라 하루 조회(`WHERE day=?`)와

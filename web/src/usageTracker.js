@@ -1,9 +1,9 @@
 /**
- * usageTracker.js — 기능 사용 추적(화면 쪽, v2.912 · 설계 docs/design/feature-usage §4.2·§4.6).
+ * usageTracker.js — 기능 사용 추적(화면 쪽, v2.913 · 설계 docs/design/feature-usage §4.2·§4.6).
  *
  * 무엇을 보내나: 주소(#/…)가 가리키는 **화면 키** 하나와, 그 화면을 보고 있던 시간.
  *   · 열람(hit) — 키가 바뀌고 **1초 이상 머물면** 1회(메뉴를 훑으며 지나간 화면은 세지 않는다). 같은 화면 새로고침은 서버가 2초 안 중복을 한 번으로 센다.
- *   · 머문 시간(ms) — 창이 보이고(visibilityState) **마지막 입력 뒤 idleMs 이내**인 시간만 1초 단위로 더해 10초마다 보낸다. 창이 가려지면 그때까지 보낸다.
+ *   · 머문 시간(ms) — 창이 보이고(visibilityState) **마지막 입력 뒤 idleMs 이내**인 시간만 1초 단위로 더해 30초마다 보낸다(전역 요청 상한이 IP 기준이라 — 프록시 뒤 50명이면 10초 주기는 분당 300회를 더한다). 창이 가려지면 그때까지 보낸다.
  *   검색어 · 입력 값 · 조회한 장비 · 화면 안 버튼은 보내지 않는다(사용자 선택 '열람 횟수 + 머문 시간').
  * 주소를 1초마다 읽는다 — 하위 탭이 `history.replaceState` 로 주소를 채우면 hashchange 가 오지 않기 때문이다(useHashTab 진입 규칙).
  * 전송은 조용히(api.js 헬퍼를 쓰지 않는다 — 401 전역 처리 · 진행 표시에 올리지 않는다 · sessionActivity.js 와 같은 판단). 실패는 버린다(재시도 폭주 금지).
@@ -15,7 +15,7 @@
 
 export const POLL_MS = 1_000;
 export const STABLE_MS = 1_000;
-export const BEAT_MS = 10_000;
+export const BEAT_MS = 30_000;
 /** 한 번의 틱에 더할 수 있는 최대 시간 — 노트북 절전 · 탭 일시정지 뒤 깨어난 첫 틱이 몇 시간을 더하지 않게. */
 export const MAX_TICK_MS = 3_000;
 

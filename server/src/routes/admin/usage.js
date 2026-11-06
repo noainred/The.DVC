@@ -1,18 +1,19 @@
 /**
- * routes/admin/usage.js — 설정 › 사용자 › 기능 사용 현황 API(v2.912, 설계 docs/design/feature-usage §4.4).
+ * routes/admin/usage.js — 설정 › 사용자 › 기능 사용 현황 API(v2.913, 설계 docs/design/feature-usage §4.4).
  *
  * 권한: **adminOnly + requireSettingsOwner**(설정 소유자 ∧ 전체 범위) — 사용자 선택 '설정 소유자만'(2026-11-06).
  *   계정마다 어느 화면을 얼마나 썼는지는 개인 활동 기록이고 법인 축으로 나눌 수 없다(전 법인 사용자의 기록이 한 표에 있다).
  *   범위가 지정된 소유자는 requireSettingsOwner 가 403(SETTINGS_OWNER_FULL_SCOPE_REASON).
  *   · GET  /usage/report?days|from&to        개요 · 기능별 · 사용자별 집계(설정을 못 읽었으면 503 settingsUnreadable — 꺼짐 구간을 지어내지 않는다)
  *   · GET  /usage/user/:user?days|from&to    개인 상세(드로어)
- *   · GET  /usage/export.csv?days|from&to   일 집계 그대로(날 · 계정 · 이름 · 역할 · 키 · 열람 · 머문 초) — 동시 1건(util/exportBusy)
+ *   · GET  /usage/export.csv?days|from&to   일 집계 그대로(날 · 계정 · 이름 · 역할 · 키 · 열람 · 머문 초) — data.csv 권한 + 동시 1건(util/exportBusy)
  *   · GET  /usage/settings · PUT /usage/settings  수집 설정 + 지금 상태 · 저장은 감사 로그(무엇이 어떻게 — res.locals.auditDetail)
  *   · POST /usage/purge {scope, user?, before?, otp}  기록 지우기 — **본인 OTP 재인증**(routes/api/reauth.js — 민감 작업 재인증 규칙) + 감사 로그
  * DB 를 못 열면 503(빈 표를 그리지 않는다).
  */
 import { adminOnly, requireSettingsOwner } from './shared.js';
 import { reauth } from '../api/reauth.js';
+import { requirePerm } from '../../auth/auth.js';
 import { acquireExport } from '../../util/exportBusy.js';
 import { csvLine, CSV_BOM } from '../../util/csv.js';
 import { fileStamp } from '../../util/dayKey.js';
@@ -20,6 +21,7 @@ import { buildUsageReport, buildUserUsage, usageCsvRows, usageStatus, purgeUsage
 import { loadUsageSettings, saveUsageSettings, usageSettingsLoadError, noticeText, defaultNotice, USAGE_LIMITS, IDLE_MIN_RANGE, KEEP_DAYS_RANGE } from '../../usage/settings.js';
 
 const gate = [adminOnly, requireSettingsOwner];
+const csvPerm = requirePerm('data.csv');   // CSV 는 data.csv 권한 + 동시 1건(v2.643 · v2.575 규약)
 // eslint-disable-next-line no-control-regex
 const NAME_RE = /^[^\s\u0000-\u001f\u007f]{1,64}$/;
 const DAY_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -44,7 +46,7 @@ export function registerUsageAdmin(adminRouter) {
     try { res.json(await buildUserUsage({ user: u, ...rangeOf(req.query) })); } catch (e) { fail(res, e, next); }
   });
 
-  adminRouter.get('/usage/export.csv', ...gate, async (req, res, next) => {
+  adminRouter.get('/usage/export.csv', ...gate, csvPerm, async (req, res, next) => {
     if (usageSettingsLoadError()) return unreadable(res);
     const lock = acquireExport('feature-usage', req);
     if (!lock.ok) return res.status(lock.status).json(lock.body);

@@ -13,7 +13,7 @@ import { checkLoginAllowed, recordLoginFailure, recordLoginSuccess } from '../se
 import { wrapAsyncRouter } from '../util/asyncRoute.js';
 import { clientIp } from '../util/rateLimit.js';   // v2.503: 잠금 출발지 판정을 전역 레이트리밋과 통일(trust proxy 규약)
 import { createDenyAuditGate, foldedNote } from '../util/denyAuditGate.js';
-import { loadUsageSettings, noticeText, userKeyOf } from '../usage/settings.js'; // v2.912 기능 사용 추적 — 로그인 고지 · 화면 추적기 켜짐
+import { loadUsageSettings, noticeText, userKeyOf } from '../usage/settings.js'; // v2.913 기능 사용 추적 — 로그인 고지 · 화면 추적기 켜짐
 import { isDemoGuest } from '../auth/demoGuest.js';
 const loginFailGate = createDenyAuditGate();
 const loginBlockedGate = createDenyAuditGate();
@@ -42,7 +42,7 @@ authRouter.get('/config', (_req, res) => {
     // 세션이 길어지지 않는다(경고를 늦게 볼 뿐).
     sessionWarnEnabled: sec.sessionWarnEnabled, sessionWarnMin: sec.sessionWarnMin,
     sessionExtendMin: sec.sessionExtendMin, sessionMaxHours: sec.sessionMaxHours,
-    // v2.912 기능 사용 추적 고지(설정 › 사용자 › 기능 사용 현황) — 켜져 있고 고지가 켜져 있을 때만 **문구 하나**를 싣는다.
+    // v2.913 기능 사용 추적 고지(설정 › 사용자 › 기능 사용 현황) — 켜져 있고 고지가 켜져 있을 때만 **문구 하나**를 싣는다.
     //   계정명 · 수치는 넣지 않는다(미인증 응답 — 계정 열거 단서 금지).
     ...usageNoticeField(),
     ...setupState(),
@@ -145,7 +145,7 @@ authRouter.post('/login', async (req, res) => {
     // (routes/admin/shared.js requireSettingsOwner 주석 참고: 4차 재감사에서 승계 우회 재현).
     // v2.744(감사 후속 FB-3): 판정은 ownerFields 한 곳(/auth/me 와 같은 함수 — 아래 머리말).
     ...ownerFields({ ...user, scope: local ? local.scope : user.scope }),
-    // v2.912 기능 사용 추적 — /auth/me 와 같은 함수(로그인 직후에도 추적기가 바로 선다).
+    // v2.913 기능 사용 추적 — /auth/me 와 같은 함수(로그인 직후에도 추적기가 바로 선다).
     ...usageTrackField(user),
     // 서비스 허브 주소는 인증 후에만 — 미인증 응답에 내부 호스트를 노출하지 않는다.
     serviceHubUrl: config.serviceHubUrl || '',

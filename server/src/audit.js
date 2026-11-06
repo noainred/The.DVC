@@ -45,7 +45,7 @@ function describe(method, urlPath) {
     [/^\/ping\/targets/, { POST: 'Ping 대상 추가', PUT: 'Ping 대상 수정', DELETE: 'Ping 대상 삭제' }],
     [/^\/ping\/seed-vcenters$/, { POST: 'Ping 대상 vCenter 시드' }],
     [/^\/ping\/vcport\/ports$/, { PUT: 'vCenter 포트 점검 설정 변경' }],
-    [/^\/admin\/usage\/settings$/, { PUT: '기능 사용 기록 설정 변경' }],   // v2.912 설정 › 사용자 › 기능 사용 현황
+    [/^\/admin\/usage\/settings$/, { PUT: '기능 사용 기록 설정 변경' }],   // v2.913 설정 › 사용자 › 기능 사용 현황
     [/^\/admin\/usage\/purge$/, { POST: '기능 사용 기록 삭제' }],
   ];
   for (const [re, map] of rules) if (re.test(p) && map[method]) return map[method];
@@ -158,7 +158,7 @@ function maybeTrim() {
  */
 const AUDIT_SKIP = new Set([
   'POST /tool-usage',               // 메뉴 사용 횟수 집계 — 화면이 도구를 열 때마다 부른다(viewer 포함)
-  'POST /usage/track',              // v2.912 기능 사용 추적 — 화면 전환 · 10초 머문 조각(viewer 포함 · 계정은 req.user · usage/store.js)
+  'POST /usage/track',              // v2.913 기능 사용 추적 — 화면 전환 · 10초 머문 조각(viewer 포함 · 계정은 req.user · usage/store.js)
   'POST /vms/usage',                // VM 사용률 조회(본문 = VM 목록)
   'POST /perf/client-stall',        // 브라우저 지연 보고(텔레메트리, 자체 스로틀)
   'POST /provision/preview',        // VM 생성 미리보기(실행 아님)
@@ -194,7 +194,7 @@ export function auditMiddleware(req, res, next) {
       user: req.user?.username || 'anonymous',
       action: describe(req.method, urlPath),
       target: urlPath,
-      // v2.912: 라우트가 '무엇을 어떻게' 를 res.locals.auditDetail(문자열)로 남기면 같은 줄에 싣는다(두 줄을 만들지 않는다 — vm-export 가 AUDIT_SKIP 으로 피한 문제).
+      // v2.913: 라우트가 '무엇을 어떻게' 를 res.locals.auditDetail(문자열)로 남기면 같은 줄에 싣는다(두 줄을 만들지 않는다 — vm-export 가 AUDIT_SKIP 으로 피한 문제).
       ...(typeof res.locals?.auditDetail === 'string' ? { detail: res.locals.auditDetail } : {}),
       ip: clientIp(req), // 프록시 없는 배포에서 임의 클라이언트가 헤더로 감사 IP 를 위조하던 경로 차단
     });
