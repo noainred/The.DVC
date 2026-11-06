@@ -2,7 +2,7 @@
 <html lang="ko">
 <head>
 <meta charset="utf-8">
-<title>리눅스 베어메탈 성능 — 함대 보드</title>
+<title>리눅스 베어메탈 통합 성능 — 함대 보드</title>
 <script src="./support.js"></script>
 </head>
 <body>
@@ -34,6 +34,10 @@ td{padding:7px 8px;border-bottom:1px solid #1f2a40;vertical-align:middle;white-s
 .u.warn{background:rgba(245,158,11,.16);color:#fbbf24}
 .u.bad{background:rgba(239,68,68,.18);color:#f87171}
 .u.none{background:transparent;color:#8b9bb4;border:1px dashed #243049}
+.src{display:inline-block;padding:1px 7px;border-radius:999px;font-size:11px;font-weight:700;border:1px solid #243049;white-space:nowrap;color:#8b9bb4}
+.src.os{color:#67e8f9;border-color:rgba(34,211,238,.35);background:rgba(34,211,238,.08)}
+.src.hw{color:#fbbf24;border-color:rgba(245,158,11,.35);background:rgba(245,158,11,.1)}
+.src.both{color:#4ade80;border-color:rgba(34,197,94,.35);background:rgba(34,197,94,.1)}
 .kpi .label{color:#8b9bb4;font-size:12px;font-weight:600;letter-spacing:.5px}
 .kpi .value{font-size:30px;font-weight:800;margin-top:6px;line-height:1;text-align:center}
 .kpi .meta{font-size:12px;color:#8b9bb4;margin-top:8px}
@@ -45,7 +49,7 @@ td{padding:7px 8px;border-bottom:1px solid #1f2a40;vertical-align:middle;white-s
   <div style="display:flex;flex-wrap:wrap;align-items:center;gap:12px">
     <div style="display:flex;flex-direction:column;gap:2px;min-width:0">
       <div style="font-size:12px;color:#8b9bb4">특수 기능 › 서버 분석 › <b style="color:#e6edf6">리눅스 베어메탈 성능</b></div>
-      <h1 style="margin:0;font-size:20px;font-weight:700;letter-spacing:-.01em">리눅스 베어메탈 성능 · 병목 진단</h1>
+      <h1 style="margin:0;font-size:20px;font-weight:700;letter-spacing:-.01em">리눅스 베어메탈 통합 성능 · 병목 진단 <span class="dim" style="font-size:13px;font-weight:500">(OS · SSH + iDRAC · Redfish)</span></h1>
     </div>
     <div style="flex:1 1 20px"></div>
     <label style="display:flex;align-items:center;gap:8px;font-size:12px;color:#8b9bb4">범위
@@ -64,10 +68,11 @@ td{padding:7px 8px;border-bottom:1px solid #1f2a40;vertical-align:middle;white-s
   <!-- 신뢰 띠: 이 숫자를 믿어도 되는가 -->
   <div class="card" style="padding:10px 16px;display:flex;flex-wrap:wrap;align-items:center;gap:10px 18px;font-size:12.5px">
     <span class="chip info">엣지 보관분 · 중앙이 방금 당겨옴</span>
+    <span><b>경로</b> <span class="src both">둘 다 142</span> <span class="src os">OS 만 31</span> <span class="src hw">iDRAC 만 34</span> <span class="src">없음 6</span></span>
     <span><b>켠 법인 6/28</b> <span class="dim">· 대상 213대 (Linux)</span></span>
     <span><b>이번 주기 읽음 207</b> <span class="dim">· 주기 5분 (API 값) · 가장 오래된 읽음 4분 전</span></span>
     <span class="chip">첫 주기 3 — 다음 주기부터 값</span>
-    <span class="chip warn">못 읽음 3 — 시한 초과 2 · SSH 거부 1</span>
+    <span class="chip warn">못 읽음 5 — SSH 시한 2 · SSH 거부 1 · iDRAC 401 2</span>
     <span class="chip">PSI 없음 41 — 커널 4.20 미만</span>
     <span style="flex:1 1 20px"></span>
     <a href="#" style="font-weight:600">못 읽은 서버 · 이유 보기</a>
@@ -75,9 +80,10 @@ td{padding:7px 8px;border-bottom:1px solid #1f2a40;vertical-align:middle;white-s
 
   <!-- KPI 5 -->
   <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(min(200px,100%),1fr));gap:14px">
+    <div class="card kpi"><div class="label">두 경로 다 읽힘</div><div class="value" style="color:#4ade80">142<small style="font-size:14px;color:#8b9bb4;font-weight:600"> / 213</small></div><div class="meta">교차 판정 가능 · OS 만 31 · iDRAC 만 34 · 없음 6</div></div>
     <div class="card kpi"><div class="label">병목 의심</div><div class="value" style="color:#f87171">7</div><div class="meta">포화 + 오류 동반 · 213대 중</div></div>
     <div class="card kpi"><div class="label">포화 (자원별)</div><div class="value" style="color:#fbbf24">12</div><div class="meta">CPU 3 · 메모리 1 · 디스크 6 · 네트워크 2</div></div>
-    <div class="card kpi"><div class="label">오류 카운트 증가</div><div class="value" style="color:#fbbf24">4</div><div class="meta">NIC drop 2 · 디스크 I/O 오류 1 · MCE 1</div></div>
+    <div class="card kpi"><div class="label">오류 카운트 증가</div><div class="value" style="color:#fbbf24">4</div><div class="meta">NIC drop 2 · ECC 정정 ↑ 1 · MCE 1 (OS+iDRAC 나란히)</div></div>
     <div class="card kpi"><div class="label">튜닝 권고</div><div class="value">31<small style="font-size:14px;color:#8b9bb4;font-weight:600"> 건</small></div><div class="meta">58대 · swappiness 19 · THP 14 · governor 9 …</div></div>
     <div class="card kpi"><div class="label">정상</div><div class="value" style="color:#4ade80">190</div><div class="meta">세 칸(U·S·E) 모두 기준 아래</div></div>
   </div>
@@ -87,84 +93,91 @@ td{padding:7px 8px;border-bottom:1px solid #1f2a40;vertical-align:middle;white-s
 
     <div class="card" style="grid-column:span 1;min-width:0">
       <div style="display:flex;flex-wrap:wrap;align-items:baseline;gap:8px 12px;margin-bottom:10px">
-        <h2 style="margin:0;font-size:15px;font-weight:700">USE 매트릭스 — 자원 × (사용률 · 포화 · 오류)</h2>
+        <h2 style="margin:0;font-size:15px;font-weight:700">USE 매트릭스 — 자원 5 × (사용률 · 포화 · 오류) · 경로 표시</h2>
         <span class="dim" style="font-size:12px">심각도 순 상위 10 · 나머지 203대는 ‘표’ 보기</span>
       </div>
       <div style="overflow-x:auto">
       <table>
         <thead><tr>
-          <th rowspan="2" style="vertical-align:bottom">서버</th><th rowspan="2" style="vertical-align:bottom">법인</th>
-          <th colspan="3" style="text-align:center">CPU</th><th colspan="3" style="text-align:center">메모리</th><th colspan="3" style="text-align:center">디스크</th><th colspan="3" style="text-align:center">네트워크</th>
+          <th rowspan="2" style="vertical-align:bottom">서버</th><th rowspan="2" style="vertical-align:bottom">법인</th><th rowspan="2" style="vertical-align:bottom">경로</th>
+          <th colspan="3" style="text-align:center">CPU</th><th colspan="3" style="text-align:center">메모리</th><th colspan="3" style="text-align:center">디스크</th><th colspan="3" style="text-align:center">네트워크</th><th colspan="3" style="text-align:center;color:#fbbf24">하드웨어 (iDRAC)</th>
           <th rowspan="2" style="vertical-align:bottom">판정 한 줄</th>
         </tr><tr>
-          <th>U</th><th>S</th><th>E</th><th>U</th><th>S</th><th>E</th><th>U</th><th>S</th><th>E</th><th>U</th><th>S</th><th>E</th>
+          <th>U</th><th>S</th><th>E</th><th>U</th><th>S</th><th>E</th><th>U</th><th>S</th><th>E</th><th>U</th><th>S</th><th>E</th><th>전력</th><th>온도</th><th>부품</th>
         </tr></thead>
         <tbody>
-          <tr><td><a href="Server.dc.html" style="font-weight:600">bm-kr1-db01</a></td><td class="dim">KR-SEL</td>
+          <tr><td><a href="Server.dc.html" style="font-weight:600">bm-kr1-db01</a></td><td class="dim">KR-SEL</td><td><span class="src both">둘 다</span></td>
             <td><span class="u warn">62%</span></td><td><span class="u ok">0.3</span></td><td><span class="u ok">0</span></td>
             <td><span class="u ok">71%</span></td><td><span class="u ok">0/s</span></td><td><span class="u ok">0</span></td>
             <td><span class="u bad">94%</span></td><td><span class="u bad">9.2</span></td><td><span class="u ok">0</span></td>
             <td><span class="u ok">23%</span></td><td><span class="u ok">0</span></td><td><span class="u ok">0</span></td>
-            <td>디스크 포화 — nvme1n1 await 18ms · PSI io full 12%</td></tr>
-          <tr><td><a href="Server.dc.html" style="font-weight:600">bm-pl1-app03</a></td><td class="dim">PL-WAW</td>
+            <td><span class="u ok">61%</span></td><td><span class="u ok">24℃</span></td><td><span class="u ok">0</span></td>
+            <td>디스크 포화 — await 18ms · PSI io full 12% · SMART 깨끗 → I/O 양 문제(교차 ②)</td></tr>
+          <tr><td><a href="Server.dc.html" style="font-weight:600">bm-pl1-app03</a></td><td class="dim">PL-WAW</td><td><span class="src both">둘 다</span></td>
             <td><span class="u bad">97%</span></td><td><span class="u bad">2.1</span></td><td><span class="u ok">0</span></td>
             <td><span class="u ok">44%</span></td><td><span class="u ok">0/s</span></td><td><span class="u ok">0</span></td>
             <td><span class="u ok">12%</span></td><td><span class="u ok">0.1</span></td><td><span class="u ok">0</span></td>
             <td><span class="u ok">8%</span></td><td><span class="u ok">0</span></td><td><span class="u ok">0</span></td>
-            <td>CPU 포화 — 런큐 34 / 16코어 · PSI cpu some 41%</td></tr>
-          <tr><td><a href="Server.dc.html" style="font-weight:600">bm-us1-cache02</a></td><td class="dim">US-EAST</td>
+            <td><span class="u bad">cap</span></td><td><span class="u bad">스로틀</span></td><td><span class="u ok">0</span></td>
+            <td>CPU 포화 — 런큐 34/16코어 · iDRAC 전력 cap 적용 중 → 코어 부족 아님(교차 ①)</td></tr>
+          <tr><td><a href="Server.dc.html" style="font-weight:600">bm-us1-cache02</a></td><td class="dim">US-EAST</td><td><span class="src both">둘 다</span></td>
             <td><span class="u ok">31%</span></td><td><span class="u ok">0.2</span></td><td><span class="u ok">0</span></td>
             <td><span class="u bad">96%</span></td><td><span class="u bad">412/s</span></td><td><span class="u ok">0</span></td>
             <td><span class="u warn">61%</span></td><td><span class="u ok">0.8</span></td><td><span class="u ok">0</span></td>
             <td><span class="u ok">17%</span></td><td><span class="u ok">0</span></td><td><span class="u ok">0</span></td>
+            <td><span class="u ok">48%</span></td><td><span class="u ok">23℃</span></td><td><span class="u ok">0</span></td>
             <td>메모리 포화 — 스왑아웃 412/s · 주요 폴트 ↑ · PSI mem full 7%</td></tr>
-          <tr><td><a href="Server.dc.html" style="font-weight:600">bm-kr1-fs02</a></td><td class="dim">KR-SEL</td>
+          <tr><td><a href="Server.dc.html" style="font-weight:600">bm-kr1-fs02</a></td><td class="dim">KR-SEL</td><td><span class="src both">둘 다</span></td>
             <td><span class="u ok">18%</span></td><td><span class="u ok">0.1</span></td><td><span class="u ok">0</span></td>
             <td><span class="u ok">52%</span></td><td><span class="u ok">0/s</span></td><td><span class="u ok">0</span></td>
             <td><span class="u ok">40%</span></td><td><span class="u ok">0.6</span></td><td><span class="u ok">0</span></td>
             <td><span class="u bad">91%</span></td><td><span class="u warn">드롭 ↑</span></td><td><span class="u bad">+1.2k</span></td>
-            <td>네트워크 포화 — bond0 9.1/10G · rx_dropped +1.2k/5분</td></tr>
-          <tr><td><a href="Server.dc.html" style="font-weight:600">bm-pl1-db02</a></td><td class="dim">PL-WAW</td>
+            <td><span class="u ok">44%</span></td><td><span class="u ok">25℃</span></td><td><span class="u ok">CRC 0</span></td>
+            <td>네트워크 포화 — bond0 9.1/10G · rx_dropped +1.2k · CRC 0 → 커널/큐 쪽(교차 ④)</td></tr>
+          <tr><td><a href="Server.dc.html" style="font-weight:600">bm-pl1-db02</a></td><td class="dim">PL-WAW</td><td><span class="src both">둘 다</span></td>
             <td><span class="u ok">27%</span></td><td><span class="u ok">0.2</span></td><td><span class="u bad">MCE 1</span></td>
             <td><span class="u ok">63%</span></td><td><span class="u ok">0/s</span></td><td><span class="u ok">0</span></td>
             <td><span class="u warn">58%</span></td><td><span class="u ok">0.4</span></td><td><span class="u ok">0</span></td>
             <td><span class="u ok">11%</span></td><td><span class="u ok">0</span></td><td><span class="u ok">0</span></td>
-            <td>오류 — dmesg MCE 1건 (하드웨어 점검 권고)</td></tr>
-          <tr><td><a href="Server.dc.html" style="font-weight:600">bm-us1-app07</a></td><td class="dim">US-EAST</td>
+            <td><span class="u ok">39%</span></td><td><span class="u ok">22℃</span></td><td><span class="u bad">ECC +212</span></td>
+            <td>오류 — ECC 정정 +212(DIMM A3) + MCE 1 → DIMM 교체 후보(교차 ③)</td></tr>
+          <tr><td><a href="Server.dc.html" style="font-weight:600">bm-us1-app07</a></td><td class="dim">US-EAST</td><td><span class="src os">OS 만</span></td>
             <td><span class="u warn">78%</span></td><td><span class="u warn">1.1</span></td><td><span class="u ok">0</span></td>
             <td><span class="u ok">49%</span></td><td><span class="u ok">0/s</span></td><td><span class="u ok">0</span></td>
             <td><span class="u ok">9%</span></td><td><span class="u ok">0.1</span></td><td><span class="u ok">0</span></td>
             <td><span class="u ok">21%</span></td><td><span class="u ok">0</span></td><td><span class="u ok">0</span></td>
-            <td>CPU 경계 — iowait 0% · steal 0% · governor powersave</td></tr>
-          <tr><td><a href="Server.dc.html" style="font-weight:600">bm-kr1-bk01</a></td><td class="dim">KR-SEL</td>
+            <td><span class="u none">—</span></td><td><span class="u none">—</span></td><td><span class="u none">—</span></td>
+            <td>CPU 경계 — iowait 0% · governor powersave · iDRAC 등록 없음(하드웨어 경로 없음)</td></tr>
+          <tr><td><a href="Server.dc.html" style="font-weight:600">bm-kr1-bk01</a></td><td class="dim">KR-SEL</td><td><span class="src both">둘 다</span></td>
             <td><span class="u ok">22%</span></td><td><span class="u ok">0.1</span></td><td><span class="u ok">0</span></td>
             <td><span class="u ok">37%</span></td><td><span class="u ok">0/s</span></td><td><span class="u ok">0</span></td>
             <td><span class="u bad">99%</span></td><td><span class="u warn">3.4</span></td><td><span class="u ok">0</span></td>
             <td><span class="u warn">64%</span></td><td><span class="u ok">0</span></td><td><span class="u ok">0</span></td>
+            <td><span class="u ok">52%</span></td><td><span class="u ok">26℃</span></td><td><span class="u ok">0</span></td>
             <td>디스크 포화 — 백업 창(02:00~05:00) 한정 · 평소 12%</td></tr>
-          <tr><td><a href="Server.dc.html" style="font-weight:600">bm-pl1-web04</a></td><td class="dim">PL-WAW</td>
+          <tr><td><a href="Server.dc.html" style="font-weight:600">bm-pl1-web04</a></td><td class="dim">PL-WAW</td><td><span class="src both">둘 다</span></td>
             <td><span class="u ok">35%</span></td><td><span class="u none">—</span></td><td><span class="u ok">0</span></td>
             <td><span class="u ok">58%</span></td><td><span class="u none">—</span></td><td><span class="u ok">0</span></td>
             <td><span class="u ok">21%</span></td><td><span class="u none">—</span></td><td><span class="u ok">0</span></td>
             <td><span class="u ok">14%</span></td><td><span class="u ok">0</span></td><td><span class="u ok">0</span></td>
+            <td><span class="u ok">31%</span></td><td><span class="u ok">24℃</span></td><td><span class="u ok">0</span></td>
             <td class="dim">포화 칸 없음 — 커널 4.18 (PSI 없음 · 런큐·스왑으로만 판정)</td></tr>
-          <tr><td><a href="Server.dc.html" style="font-weight:600">bm-us1-db05</a></td><td class="dim">US-EAST</td>
+          <tr><td><a href="Server.dc.html" style="font-weight:600">bm-us1-db05</a></td><td class="dim">US-EAST</td><td><span class="src hw">iDRAC 만</span></td>
+            <td><span class="u ok">31%</span></td><td><span class="u none">—</span></td><td><span class="u none">—</span></td><td><span class="u ok">52%</span></td><td><span class="u none">—</span></td><td><span class="u none">—</span></td><td><span class="u none">—</span></td><td><span class="u none">—</span></td><td><span class="u none">—</span></td><td><span class="u ok">12%</span></td><td><span class="u none">—</span></td><td><span class="u none">—</span></td>
+            <td><span class="u ok">57%</span></td><td><span class="u warn">33℃</span></td><td><span class="u ok">0</span></td>
+            <td class="dim">iDRAC 만 — CPU·메모리·NIC 는 텔레메트리 집계 · 런큐·PSI·디스크 성능은 경로 없음(OS 계정 미등록) · 흡기 33℃ 경계</td></tr>
+          <tr><td><a href="Server.dc.html" style="font-weight:600">bm-kr1-gw01</a></td><td class="dim">KR-SEL</td><td><span class="src os">OS 만</span></td>
             <td><span class="u none">—</span></td><td><span class="u none">—</span></td><td><span class="u none">—</span></td>
             <td><span class="u none">—</span></td><td><span class="u none">—</span></td><td><span class="u none">—</span></td>
             <td><span class="u none">—</span></td><td><span class="u none">—</span></td><td><span class="u none">—</span></td>
             <td><span class="u none">—</span></td><td><span class="u none">—</span></td><td><span class="u none">—</span></td>
-            <td class="dim">첫 주기 — 누적 카운터 차이가 필요 (다음 주기부터)</td></tr>
-          <tr><td><a href="Server.dc.html" style="font-weight:600">bm-kr1-gw01</a></td><td class="dim">KR-SEL</td>
             <td><span class="u none">—</span></td><td><span class="u none">—</span></td><td><span class="u none">—</span></td>
-            <td><span class="u none">—</span></td><td><span class="u none">—</span></td><td><span class="u none">—</span></td>
-            <td><span class="u none">—</span></td><td><span class="u none">—</span></td><td><span class="u none">—</span></td>
-            <td><span class="u none">—</span></td><td><span class="u none">—</span></td><td><span class="u none">—</span></td>
-            <td class="dim">못 읽음 — SSH 시한 초과 (50초 예산) · 직전 값 23분 전</td></tr>
+            <td class="dim">OS 만 · 못 읽음 — SSH 시한 초과 (50초 예산) · 직전 값 23분 전 · iDRAC 등록 없음</td></tr>
         </tbody>
       </table>
       </div>
       <div class="dim" style="font-size:11.5px;margin-top:10px;line-height:1.6">
-        U = 사용률(가장 높은 장치·회선 기준) · S = 포화(CPU 런큐/코어, 메모리 스왑아웃/s, 디스크 대기열 깊이, 네트워크 드롭) · E = 오류 카운트의 5분 증가분.
+        U = 사용률(가장 높은 장치·회선 기준) · S = 포화(CPU 런큐/코어, 메모리 스왑아웃/s, 디스크 대기열 깊이, 네트워크 드롭) · E = 오류 카운트의 5분 증가분(OS 의 MCE·I/O 오류와 iDRAC 의 ECC·CRC 는 합산하지 않고 나란히). 하드웨어 축(iDRAC) — 전력 = cap 대비 사용(‘cap’ 은 제한 적용 중), 온도 = 흡기, 부품 = 부품 장애·SEL Critical·ECC. 경로 = 이 행이 읽힌 경로(둘 다 · OS 만 · iDRAC 만).
         ‘—’ 는 0 이 아니라 못 읽음·첫 주기·그 커널에 없음이다 — 행 끝 문장이 이유를 말한다. 정렬은 머리글 클릭.
       </div>
     </div>
@@ -173,19 +186,19 @@ td{padding:7px 8px;border-bottom:1px solid #1f2a40;vertical-align:middle;white-s
       <div class="card">
         <div style="display:flex;align-items:baseline;gap:10px;margin-bottom:10px">
           <h2 style="margin:0;font-size:15px;font-weight:700">병목 Top — 판정과 근거</h2>
-          <span class="dim" style="font-size:12px">포화 + 오류가 같이 있는 서버 먼저</span>
+          <span class="dim" style="font-size:12px">포화 + 오류가 같이 있는 서버 먼저 · 두 경로가 다 있으면 교차 판정을 붙인다</span>
         </div>
         <div style="display:flex;flex-direction:column;gap:8px">
           <div style="display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:10px;align-items:center;padding:10px 12px;border:1px solid #243049;border-radius:10px;background:#0f1626">
             <span class="chip bad">디스크</span>
             <div style="min-width:0"><div><a href="Server.dc.html" style="font-weight:700;color:#e6edf6">bm-kr1-db01</a> <span class="dim">KR-SEL · 32코어 · NVMe×2</span></div>
-              <div class="dim" style="font-size:12px">nvme1n1 busy 94% · await 18ms · 대기열 9.2 · PSI io full 12% — 사용률과 포화가 같이 높다. CPU iowait 11%.</div></div>
+              <div class="dim" style="font-size:12px">nvme1n1 busy 94% · await 18ms · 대기열 9.2 · PSI io full 12%(OS) · SMART 예측 장애 0 · 재할당 0(iDRAC) → 고장 전조 아님, I/O 양 문제 — 교차 ②.</div></div>
             <span class="chip">진단 스냅샷 →</span>
           </div>
           <div style="display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:10px;align-items:center;padding:10px 12px;border:1px solid #243049;border-radius:10px;background:#0f1626">
             <span class="chip bad">CPU</span>
             <div style="min-width:0"><div><a href="Server.dc.html" style="font-weight:700;color:#e6edf6">bm-pl1-app03</a> <span class="dim">PL-WAW · 16코어</span></div>
-              <div class="dim" style="font-size:12px">사용률 97% · 런큐 34 (코어 16 의 2.1배) · PSI cpu some 41% · steal 0% — 코어 부족 또는 런어웨이 프로세스.</div></div>
+              <div class="dim" style="font-size:12px">사용률 97% · 런큐 34 (코어 16 의 2.1배) · PSI cpu some 41%(OS) · 전력 cap 적용 중 · CPU 스로틀링(iDRAC) → 코어 부족이 아니라 전력 제한 후보 — 교차 ①.</div></div>
             <span class="chip">진단 스냅샷 →</span>
           </div>
           <div style="display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:10px;align-items:center;padding:10px 12px;border:1px solid #243049;border-radius:10px;background:#0f1626">
@@ -197,7 +210,7 @@ td{padding:7px 8px;border-bottom:1px solid #1f2a40;vertical-align:middle;white-s
           <div style="display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:10px;align-items:center;padding:10px 12px;border:1px solid #243049;border-radius:10px;background:#0f1626">
             <span class="chip warn">네트워크</span>
             <div style="min-width:0"><div><a href="Server.dc.html" style="font-weight:700;color:#e6edf6">bm-kr1-fs02</a> <span class="dim">KR-SEL · bond0 10G</span></div>
-              <div class="dim" style="font-size:12px">9.1Gbps / 10G · rx_dropped +1,204 (5분) · TCP 재전송 2.3% — 회선 포화에 드롭이 따라온다.</div></div>
+              <div class="dim" style="font-size:12px">9.1Gbps / 10G · rx_dropped +1,204 (5분) · 재전송 2.3%(OS) · CRC 0(iDRAC) → 케이블이 아니라 커널/큐 쪽 — 교차 ④.</div></div>
             <span class="chip">진단 스냅샷 →</span>
           </div>
         </div>
@@ -249,7 +262,7 @@ td{padding:7px 8px;border-bottom:1px solid #1f2a40;vertical-align:middle;white-s
   </div>
 </div>
 </x-dc>
-<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1180}}'>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1240}}'>
 class Component extends DCLogic {
   renderVals() { return {}; }
 }

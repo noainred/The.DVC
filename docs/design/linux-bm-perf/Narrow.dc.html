@@ -40,7 +40,7 @@ td{padding:6px 6px;border-bottom:1px solid #1f2a40;vertical-align:top;white-spac
 
   <div style="font-size:12px;color:#8b9bb4;overflow-wrap:anywhere"><a href="Main.dc.html">베어메탈 성능</a> › KR-SEL</div>
   <h1 style="margin:0;font-size:18px;font-weight:700;display:flex;flex-wrap:wrap;align-items:center;gap:8px">bm-kr1-db01 <span class="chip bad">디스크 포화</span></h1>
-  <div class="dim" style="font-size:12px;overflow-wrap:anywhere">Rocky 9.4 · 32코어 · 256GB · 역할 DB · 출처 OS(SSH) · 13:35 (4분 전)</div>
+  <div class="dim" style="font-size:12px;overflow-wrap:anywhere">Rocky 9.4 · 32코어 · 256GB · 역할 DB · <span class="chip ok" style="font-size:10.5px">경로 OS + iDRAC</span> OS 13:35 · iDRAC 13:34</div>
 
   <div style="display:flex;flex-wrap:wrap;gap:8px">
     <div class="seg" role="group" aria-label="기간" style="flex:1 1 100%"><button class="on" type="button" style="flex:1">24시간</button><button type="button" style="flex:1">7일</button><button type="button" style="flex:1">30일</button><button type="button" style="flex:1">1년</button></div>
@@ -50,7 +50,7 @@ td{padding:6px 6px;border-bottom:1px solid #1f2a40;vertical-align:top;white-spac
 
   <div class="card" style="border-color:rgba(239,68,68,.4)">
     <span class="chip bad">판정</span>
-    <div style="margin-top:6px"><b>디스크 포화</b> — nvme1n1 busy 94% · await 18ms · 대기열 9.2 · PSI io full 12%. CPU iowait 11%.</div>
+    <div style="margin-top:6px"><b>디스크 포화</b> — nvme1n1 busy 94% · await 18ms · 대기열 9.2 · PSI io full 12% (OS). SMART 예측 0 (iDRAC) → 고장 전조 아님 · I/O 양 문제 후보 — 교차 ②.</div>
   </div>
 
   <div class="card">
@@ -125,6 +125,26 @@ td{padding:6px 6px;border-bottom:1px solid #1f2a40;vertical-align:top;white-spac
     </div>
   </div>
 
+  <div class="card" style="border-color:rgba(245,158,11,.35)">
+    <div style="display:flex;align-items:baseline;gap:8px"><h2 style="margin:0;font-size:14px;font-weight:700">하드웨어 (iDRAC)</h2><span class="chip ok">정상 · 경고 1</span></div>
+    <div class="use">
+      <div><div class="h">전력</div><div class="v ok">61%</div><div class="s">412/680W · cap 없음</div></div>
+      <div><div class="h">열</div><div class="v ok">24℃</div><div class="s">CPU 61℃ · 스로틀 없음</div></div>
+      <div><div class="h">부품</div><div class="v warn">경고 1</div><div class="s">PSU2 입력 저하 11-05</div></div>
+    </div>
+    <div class="dim" style="font-size:11.5px;margin-top:8px;overflow-wrap:anywhere">DIMM 16/16 · ECC 0 · 디스크 3/3 · 예측 장애 0 · PSU 2/2</div>
+  </div>
+
+  <div class="card" style="border-color:rgba(34,197,94,.35)">
+    <h2 style="margin:0;font-size:14px;font-weight:700">교차 판정</h2>
+    <div style="display:flex;flex-direction:column;gap:6px;margin-top:8px">
+      <div style="display:flex;justify-content:space-between;gap:8px;align-items:center;border:1px solid rgba(239,68,68,.4);border-radius:8px;padding:8px 10px;background:rgba(239,68,68,.06)"><span style="font-size:12px;min-width:0">② await 급등 — SMART 깨끗 → I/O 양 문제 후보</span><span class="chip bad">판정</span></div>
+      <div style="display:flex;justify-content:space-between;gap:8px;align-items:center;border:1px solid #243049;border-radius:8px;padding:8px 10px;background:#0f1626"><span style="font-size:12px">① 전력·열 제한</span><span class="chip ok">해당 없음</span></div>
+      <div style="display:flex;justify-content:space-between;gap:8px;align-items:center;border:1px solid #243049;border-radius:8px;padding:8px 10px;background:#0f1626"><span style="font-size:12px">③ ECC · MCE</span><span class="chip ok">해당 없음</span></div>
+      <div style="display:flex;justify-content:space-between;gap:8px;align-items:center;border:1px solid #243049;border-radius:8px;padding:8px 10px;background:#0f1626"><span style="font-size:12px">④ 드롭 · CRC</span><span class="chip ok">해당 없음</span></div>
+    </div>
+  </div>
+
   <div class="card">
     <h2 style="margin:0;font-size:14px;font-weight:700">24시간 — 디스크 busy · PSI io full (%)</h2>
     <svg viewBox="0 0 360 150" role="img" aria-label="24시간 nvme1n1 busy 와 PSI io full 추이 — 새벽 2~5시와 12시 이후 두 번 포화" style="width:100%;height:auto;display:block;margin-top:6px">
@@ -168,7 +188,7 @@ ss -s: TCP 1240 · estab 802 · timewait 318</div>
   </div>
 </div>
 </x-dc>
-<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":400,"height":1460}}'>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":400,"height":1900}}'>
 class Component extends DCLogic {
   renderVals() { return {}; }
 }

@@ -1,7 +1,8 @@
 # 설계: 리눅스 베어메탈 성능 모니터링 · 병목 진단 · 튜닝 포인트 — 방식 검토와 화면 시안
 
-작성 2026-11-06 (main v2.915.0 기준 · 브랜치 `claude/sleepy-pasteur-v6ap1x`) · 상태 **시안 — 컨펌 대기**(구현은 컨펌 뒤 Opus) ·
-시안 캔버스: https://claude.ai/artifact/QcfijJnPxj8Tp6q4vLQNoE (아트보드 5장 — ⓪ 방식 검토 · ① 함대 보드 1440 · ② 서버 상세 1440 · ③ 서버 상세 400 · ④ 상태 6종).
+작성 2026-11-06 (main v2.915.0 기준 · 브랜치 `claude/sleepy-pasteur-v6ap1x`) · 상태 **시안 2차(통합 OS + iDRAC) — 컨펌 대기**(구현은 컨펌 뒤 Opus) ·
+시안 캔버스: https://claude.ai/artifact/QcfijJnPxj8Tp6q4vLQNoE (아트보드 5장 — ⓪ 통합 방식 검토 · ① 함대 보드 1440 · ② 서버 상세 1440 · ③ 서버 상세 400 · ④ 상태 9종).
+2차(2026-11-06 20:52 KST 사용자 요청 "OS 에 ssh 로 들어가서 하는 방법과 idrac 에서 수집된 정보를 혼합해서 모니터링 하는 통합 모니터링 방안 검토해서 다시 그려줘"): §3.2 레이어 분담 · 교차 판정 · 커버리지 4등급을 더하고 다섯 아트보드를 전부 그 틀로 고쳤다.
 이 폴더의 `*.dc.html` 이 같은 내용의 레퍼런스(HTML 프로토타입 — 복사 대상이 아님). **서버 이름(bm-kr1-db01 …) · 법인 코드(KR-SEL · PL-WAW · US-EAST) · 수치는 전부 가상**이다.
 색 · 글자는 `web/src/styles.css` `:root` 토큰 그대로(새 hex 없음 — 강조색은 `#4ade80 #fbbf24 #f87171 #67e8f9` 와 rgba 오버레이뿐).
 규칙(2026-11-03 ‘기억해’): 설계는 Fable + Claude Design 시안 → **컨펌 뒤** Opus 구현. §2 는 이 세션(Fable)이 코드로 확인한 사실이다.
@@ -48,6 +49,34 @@
 - **Grafana ‘Node Exporter Full’ 식 묶음**: CPU 분해 · 메모리 구성 · 디스크 await/IOPS · 네트워크 오류를 자원별로 묶는 구성(커뮤니티 대시보드의 일반적 구성 — 특정 판본을 복제하지 않는다).
 - **Netdata**: 초 단위 수집 + 지표별 ML 이상 탐지 — **이번에 채택하지 않는다**(5분 주기 · 에이전트 없음). 이상 탐지는 앞으로의 후보로만 적어 둔다.
 
+### 3.2 통합 방식(2차) — 서버 1대를 두 경로로 읽어 엣지에서 한 행으로 합친다(아트보드 ⓪)
+
+**원칙**: OS(SSH) 는 커널이 보는 것(부하·포화·프로세스·튜닝), iDRAC(Redfish) 은 하드웨어가 보는 것(온도·전력·부품·ECC·SMART·SEL). 둘 다 법인 엣지가 5분 주기로 읽고 **키(서비스 태그 · `hostKey()` 로 정규화한 host)** 로 합친다. 지금 `bmusage/poller.js` 가 이미 한 주기에 iDRAC `fetchUsage` + `osSsh` 를 읽고 `usage.js srcOf` 로 출처를 적는다 — 그 규칙을 지표 전체로 넓히는 것이고, 센서 폴러(`idrac/sensorStore.js`)·부품 장애(`partfault/`)·전력(`redfish.js fetchPower`)·SEL/LC(`fetchInventory` 의 최근 하드웨어 이벤트)의 최신값을 같은 키로 붙인다. 새 폴러·새 포트·새 인증은 없다.
+
+**레이어 분담 표(통합 규칙의 단일 원천 — 순수 모듈 + 테스트)**:
+
+| 지표 | OS (SSH) | iDRAC (Redfish) | 통합 규칙 |
+|---|---|---|---|
+| CPU 사용률 | /proc/stat 분해 · 코어별 | 텔레메트리 SystemUsage CPUUsage | 둘 다 — OS 를 쓰고 iDRAC 을 곁에. 차이 ≥ 기준(기본 15%p · API 값)이면 ‘불일치’ (어느 쪽이 맞는지 단정 안 함) |
+| CPU 포화·오류 | loadavg · 런큐 · PSI cpu · MCE | 스로틀링 · 전력 cap · CPU 온도 · SEL CPU 이벤트 | 포화는 OS, 원인 후보는 iDRAC → 교차 ① |
+| 메모리 | MemAvailable · 스왑 · 폴트 · PSI mem · OOM | MEM 집계 · DIMM 상태 · ECC 정정/비정정 · SEL | 사용·포화는 OS, 오류 칸은 ECC(iDRAC)+OOM(OS) **나란히(합산 금지)** → 교차 ③ |
+| 디스크 | diskstats(busy·await·IOPS·대기열) · PSI io · df | StorageDisk SMART(예측 장애·재할당·온도) · 컨트롤러·물리 디스크 상태 | 성능은 OS, 건강은 iDRAC → 교차 ② |
+| 네트워크 | net/dev bps·drop·err · snmp 재전송 | NICStatistics(링크·CRC·수신 오류) | OS 있으면 OS, 없으면 iDRAC bps. 드롭(OS)과 CRC(iDRAC)는 다른 칸 → 교차 ④ |
+| HBA | fc_host words · 속도 | FCPortStatistics | 지금 규칙 그대로(OS 우선 · 속도 모르면 % 없음) |
+| 온도·전력·팬·PSU | — (lm-sensors 설치 여부 미확정 — 쓰지 않음) | 센서 컬렉션 · 전력 W/cap · 팬 · PSU | **iDRAC 만** → 새 ‘하드웨어’ 자원 축: U = 전력 cap 대비 · S = 흡기 온도·스로틀 · E = 부품 장애·SEL Critical |
+| 프로세스·소켓·dmesg·sysctl | 스냅샷 · sysctl · /sys | — | **OS 만** → iDRAC 만인 서버는 ‘경로 없음’(못 읽음과 구분) |
+| 부품·펌웨어·이벤트 로그 | — | 인벤토리 · 펌웨어 · partfault · SEL/LC | **iDRAC 만** → 기존 부품 장애 모듈의 판정을 그대로(복제 금지) |
+
+**교차 판정(둘 다 읽힌 서버에서만 켜진다 · 상관은 ‘후보’ 로만 말한다)**:
+① CPU 느림의 원인이 전력·열인가 — OS 런큐↑ + iDRAC 전력 cap/스로틀 → ‘코어 부족이 아니라 제한’ ·
+② await 급등이 고장 전조인가 — OS await↑ + SMART 예측 장애/재할당 → ‘교체 대상’, SMART 깨끗이면 ‘I/O 양(스냅샷)’ ·
+③ 메모리 오류 — iDRAC ECC↑ + OS MCE → DIMM 슬롯 특정 ·
+④ 드롭의 층 — OS rx_dropped↑ · iDRAC CRC 0 → 커널/큐(irq·ring), CRC↑ → 케이블/광모듈.
+
+**커버리지 4등급(보드 KPI 첫 칸)**: OS+iDRAC(전부 + 교차) · OS 만(USE+튜닝+스냅샷, 하드웨어 축 ‘경로 없음’) · iDRAC 만(집계 CPU·MEM · NIC/FC · 하드웨어 축, 런큐·PSI·프로세스·디스크 성능 ‘경로 없음’) · 없음(행만, 이유를 행이 말한다 — 등록부 링크). ‘경로 없음’ 은 ‘못 읽음(missing)’·‘그 커널에 없음(absent)’ 과 또 다른 칸이다.
+
+**시각·신선도**: 두 경로의 읽은 시각을 각각 적고, ‘오래됨’ 은 둘 중 늦은 쪽 기준. 진단 스냅샷도 두 경로(OS: top·ss·dmesg / iDRAC: SEL·LC 최근 N건 + 센서 순간값).
+
 ## 4. 데이터 — 무엇을 더 읽는가(Linux 명령 1회에 구획 추가)
 
 | 구획 | 파일 | 얻는 것(USE 칸) | 비고 |
@@ -79,18 +108,18 @@
 역할(DB·웹·캐시·파일·일반)별 **권장 프로파일을 관리자가 설정에서** 정한다(기본 프로파일은 문서화된 일반값에서 시작 — 자동 적용은 없다, 읽기 전용). 항목마다 `현재 · 권장 · 근거(이 서버에서 읽은 것) · 상태(권고/적합/참고/확인 불가)`. ‘확인 불가’ 는 ‘적합’ 과 다른 칸이다.
 
 ### 4.4 DB · API(개요 — 구현 때 확정)
-- `usage_history`/`usage_latest` 에 열 추가(지표를 열로 — 기존 판단 유지): `load1 · runq_ratio · cpu_user/sys/iowait/steal · psi_cpu_some · psi_mem_full · psi_io_full · swap_out_ps · majfault_ps · oom_kills · disk_await_ms · disk_iops · disk_qdepth · net_drops · net_errs · tcp_retrans_pct` 등. 튜닝 항목은 **별도 표**(`tuning_latest(agent,key,item,value,read_at)` — 항목이 동적이라 행).
+- `usage_history`/`usage_latest` 에 열 추가(지표를 열로 — 기존 판단 유지): `load1 · runq_ratio · cpu_user/sys/iowait/steal · psi_cpu_some · psi_mem_full · psi_io_full · swap_out_ps · majfault_ps · oom_kills · disk_await_ms · disk_iops · disk_qdepth · net_drops · net_errs · tcp_retrans_pct` 등 + iDRAC 쪽 `cpu_pct_idrac · mem_pct_idrac · power_w · power_cap_w · inlet_c · throttled · ecc_corr · ecc_uncorr · smart_pred_fail · nic_crc · sel_crit · sel_warn` + 출처 `src_*`·읽은 시각 `os_at`·`idrac_at`. 튜닝 항목은 **별도 표**(`tuning_latest(agent,key,item,value,read_at)` — 항목이 동적이라 행). 온도·전력·부품은 기존 표(`sensorStore`·`partfault`)를 **조회로 붙이고 복제 적재하지 않는다**.
 - 엣지 봉투 `GET /api/collector/bm-usage` 에 필드 추가(중앙 정제 화이트리스트에도 추가 — 루트 CLAUDE.md ‘엣지가 보낸 것은 정제한다’).
 - 스냅샷: `POST /tools/bm-perf/:key/snapshot`(엣지 대행 — 작업 하나를 법인에 보내 로컬에서 돌리고 결과만 올린다 · 동시 1건/서버 · 진행 중 잠금은 그 서버만) · `GET …/snapshot`(최근 1건).
 - 권한은 기존 bmusage 와 같다(`tools` + vCenter scope · 법인 귀속 없는 서버는 범위 계정에 미노출 · 스냅샷 실행은 operator 이상).
 
 ## 5. 화면(IA) — 아트보드 5장
 
-- ⓪ **방식 검토** — 법인 안(서버 ←SSH 1회/5분— 엣지 ←Redfish— iDRAC) · 중앙(볼 때만 pull) · 점선 = 온디맨드(진단 스냅샷) · 4안 비교표 · 참고 솔루션 · 한계.
-- ① **함대 보드 1440** — 머리(범위 · 보기 세그먼트 보드/USE 매트릭스/튜닝 점검/표 · 기간 · 지금 수집 · CSV) → 신뢰 띠(켠 법인 · 대상 · 읽음 · 첫 주기 · 못 읽음 · PSI 없음) → KPI 5(병목 의심 · 포화 · 오류 · 튜닝 권고 · 정상) → **USE 매트릭스**(서버 × 자원 4 × U/S/E, 심각도 순 상위 10, 행 끝 ‘판정 한 줄’) + **병목 Top**(판정·근거·스냅샷 링크) + 24시간 포화 서버 수(자원별 선 4) → 튜닝 포인트 항목별 서버 수.
-- ② **서버 상세 1440** — 머리(판정 배지 · 출처·신선도 · 기간 · 스냅샷 실행 · 지금 수집) → 판정 띠 → **자원 4면**(CPU 분해 띠 + U/S/E 3칸 + 보조 KV · 메모리 · 디스크 장치표(busy·await·IOPS·대기열·스케줄러·오류) · 네트워크 인터페이스표) → 24시간 추이(같은 % 축만 겹친다 — 단위 다른 await·IOPS 는 소형 차트 따로) + **튜닝 포인트 표**(현재·권장·근거·상태) → **진단 스냅샷**(I/O 상위 · CPU·메모리 상위 · dmesg·ss).
-- ③ **서버 상세 400** — 같은 내용을 세로로. 세그먼트 전폭 · 버튼 44px · 표는 가로 스크롤 박스 · 긴 문구 `overflow-wrap:anywhere`.
-- ④ **상태 6종** — 꺼짐(법인 미선택) · 첫 주기 · PSI 없음(absent) · 권한 부족(일부만 읽음) · 오래됨(엣지 무응답 → 보관분 흐리게) · 인증 정지(자동 재시도 없음). 칸 표기 규약(값/경계/초과/‘—’).
+- ⓪ **통합 방식 검토** — 서버 1대 = 두 얼굴(OS ←SSH 1회/5분 · iDRAC ←Redfish/5분) → 엣지 ‘통합 행’(키 = 서비스 태그·host) → 중앙(볼 때만 pull) · **레이어 분담 표** · **교차 판정 ①~④** · **커버리지 4등급**.
+- ① **함대 보드 1440** — 머리 → 신뢰 띠(경로 분포 둘 다/OS 만/iDRAC 만/없음 · 읽음 · 첫 주기 · 못 읽음(SSH·iDRAC 따로) · PSI 없음) → KPI 6(**두 경로 다 읽힘** · 병목 의심 · 포화 · 오류 · 튜닝 권고 · 정상) → **USE 매트릭스**(서버 × 자원 **5**(CPU·메모리·디스크·네트워크·**하드웨어 iDRAC**: 전력/온도/부품) × U/S/E + **경로 칩**, 행 끝 ‘판정 한 줄’ 에 교차 판정 번호) + **병목 Top**(OS 근거 + iDRAC 근거 → 교차 결론) + 24시간 포화 서버 수 → 튜닝 항목별 서버 수.
+- ② **서버 상세 1440** — 머리(판정 배지 · **경로 OS + iDRAC** · 두 경로 읽은 시각 · 기간 · 스냅샷 · 지금 수집) → 판정 띠(OS 근거 + iDRAC 근거 → 교차 ②) → **자원 4면**(CPU: OS 62% 와 iDRAC 58% 를 나란히 + 스로틀·cap · 메모리: ECC(iDRAC)+OOM(OS) 나란히 · 디스크: 장치표 + **건강(iDRAC) 줄** · 네트워크: errors(OS)+CRC(iDRAC)) → **하드웨어(iDRAC) 면**(전력 U · 열/스로틀 S · 부품/이벤트 E + DIMM·디스크·PSU·펌웨어) + **교차 판정 패널**(①~④ 해당/판정) → 24시간 추이 + 튜닝 포인트 표 → 진단 스냅샷(OS 3칸 + **iDRAC 순간값·최근 SEL/LC**).
+- ③ **서버 상세 400** — 같은 내용을 세로로(하드웨어 카드 · 교차 판정 카드 추가). 세그먼트 전폭 · 버튼 44px · 표는 가로 스크롤 박스.
+- ④ **상태 9종** — 꺼짐 · 첫 주기 · PSI 없음(absent) · 권한 부족 · 오래됨 · 인증 정지 + **⑦ OS 만(iDRAC 등록 없음 → 하드웨어 면 ‘경로 없음’ · 등록부 링크) · ⑧ iDRAC 만(OS 계정 없음 → 런큐·PSI·프로세스 ‘경로 없음’) · ⑨ 불일치(두 경로 값이 기준 이상 어긋남 → 둘 다 보여 주고 단정 안 함)**. 칸 표기 규약.
 
 표는 전부 `STable`(머리글 클릭 정렬 · `—` 는 항상 뒤) · 문구에 백틱 없음 · 주기·상한·기준 숫자는 API 값.
 
@@ -101,6 +130,8 @@
 4. 진단 스냅샷의 프로세스별 I/O 는 권한이 없으면 비고, ‘확인 불가’ 로 둔다. sudo 를 자동으로 시도하지 않는다.
 5. B(에이전트) 를 보류한 것은 운영 부담 판단이지 기능 우열이 아니다 — 이미 node_exporter 를 쓰는 법인이 있으면 그 값을 읽는 연동이 더 싸다(다음 단계 후보).
 6. 참고 솔루션 서술 중 Grafana ‘Node Exporter Full’ 의 패널 구성은 검색으로 재확인하지 않았다(훈련 지식 — 일반적 구성이라는 수준으로만 썼다).
+7. (2차) iDRAC 쪽 항목 중 이 저장소에서 **이미 읽는 것**은 텔레메트리 리포트(system·nic·fc·storage·cpumem — `REPORT_KINDS`)·센서·전력·인벤토리의 최근 SEL/LC 이벤트·부품 장애다. **스로틀링·전력 cap 적용 여부·ECC 정정 카운트·SMART 재할당**은 Redfish/텔레메트리에 있다고 보고 설계했지만 이 현장 장비에서 어느 리포트·속성으로 오는지 확인하지 못했다(Dell 문서 기반 추정 — `usedIds`·`seenReports` 로 첫 실수집에서 좁힌다). 없으면 그 칸은 ‘리포트 없음’ 이다.
+8. (2차) OS 와 iDRAC 의 CPU 값이 다른 이유(샘플링 창·메트릭 정의)를 단정할 근거가 없다 — ‘불일치’ 기준값(기본 15%p)은 임의 시작값이고 설정으로 둔다.
 
 ## 7. 컨펌 때 정할 것(기본값을 적어 둔다)
 1. 방식 — **D(권장)** / B 연동 병행 / 다른 것.
@@ -108,6 +139,8 @@
 3. 튜닝 프로파일 — **역할 5종(DB·웹·캐시·파일·일반) 기본 프로파일 동봉, 설정에서 수정(기본)** / 항목만 보여 주고 권장값 없음.
 4. 보드의 기본 보기 — **USE 매트릭스 포함 보드(기본)** / 기존 표 유지 + 상세만 확장.
 5. 검증 수준 — 표준(관련 테스트 + Chromium 1440/400) / 전체 검증(엣지 수신 계약·권한이 바뀌므로 반증 1인 권장).
+6. (2차) 통합 — **두 경로를 한 행으로 합치고 하드웨어 축·교차 판정을 둔다(기본)** / 하드웨어 축은 기존 서버 센서·부품 장애 화면 링크로만 / 교차 판정 없이 출처 표시만.
+7. (2차) 불일치 처리 — **OS 값 사용 + iDRAC 값 곁에 + ‘불일치’ 표시(기본)** / 둘 다 ‘—’ 로 두고 사람이 본다.
 
 ## 8. 구현 범위(컨펌 뒤 — Opus)
 `bmusage/collectors/osSsh.js linuxCommand` 구획 추가 → `parse/linuxProc.js` 파서(순수 · 테스트) → `rates.js`·`usage.js` 열 추가 → `db.js` 열·튜닝 표 → USE 판정 순수 모듈(테스트가 웹·서버 같은 입력으로 대조) → `edgePull.js` 봉투 + 중앙 정제 화이트리스트 → 스냅샷 엣지 대행 라우트 → 웹(보드 · 상세 · 400 · 상태) → 목 데이터 → Chromium 1440/400 → 릴리스.

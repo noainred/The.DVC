@@ -46,11 +46,11 @@ td{padding:7px 8px;border-bottom:1px solid #1f2a40;vertical-align:top}
   <div style="display:flex;flex-wrap:wrap;align-items:center;gap:12px">
     <div style="min-width:0">
       <div style="font-size:12px;color:#8b9bb4"><a href="Main.dc.html">리눅스 베어메탈 성능</a> › KR-SEL › <b style="color:#e6edf6">bm-kr1-db01</b></div>
-      <h1 style="margin:0;font-size:20px;font-weight:700;letter-spacing:-.01em;display:flex;flex-wrap:wrap;align-items:center;gap:10px">bm-kr1-db01 <span class="chip bad">디스크 포화</span> <span class="chip warn">튜닝 권고 3</span></h1>
+      <h1 style="margin:0;font-size:20px;font-weight:700;letter-spacing:-.01em;display:flex;flex-wrap:wrap;align-items:center;gap:10px">bm-kr1-db01 <span class="chip bad">디스크 포화</span> <span class="chip warn">튜닝 권고 3</span> <span class="chip ok">경로 OS + iDRAC</span></h1>
       <div class="dim" style="font-size:12px;margin-top:4px">Rocky Linux 9.4 · 커널 5.14.0 · 32코어 (2소켓 · NUMA 2) · 256GB · NVMe×2 · bond0 10G · 서비스 태그 ‘7H2K3L2’ · 역할 ‘DB’(설정)</div>
     </div>
     <div style="flex:1 1 20px"></div>
-    <span class="chip info">출처 OS(SSH) · 엣지 KR-SEL 보관분 · 마지막 읽음 13:35 (4분 전) · 주기 5분</span>
+    <span class="chip info">OS(SSH) 13:35 · iDRAC(Redfish) 13:34 · 엣지 KR-SEL 보관분 · 주기 5분</span>
     <div class="seg" role="group" aria-label="기간"><button class="on" type="button">24시간</button><button type="button">7일</button><button type="button">30일</button><button type="button">1년</button></div>
     <button class="btn primary" type="button">진단 스냅샷 실행</button>
     <button class="btn" type="button">지금 수집</button>
@@ -59,7 +59,7 @@ td{padding:7px 8px;border-bottom:1px solid #1f2a40;vertical-align:top}
   <!-- 판정 띠 -->
   <div class="card" style="border-color:rgba(239,68,68,.4);padding:12px 16px;display:flex;flex-wrap:wrap;gap:8px 18px;align-items:center">
     <span class="chip bad">판정</span>
-    <span><b>디스크 포화</b> — nvme1n1 busy 94% · await 18ms · 대기열 9.2 · PSI io full 12% (5분 평균). CPU iowait 11% 가 같이 올라 있다.</span>
+    <span><b>디스크 포화</b> — nvme1n1 busy 94% · await 18ms · 대기열 9.2 · PSI io full 12% (OS, 5분 평균). SMART 예측 장애 0 · 재할당 0 (iDRAC) → 고장 전조가 아니라 I/O 양 문제 후보 — 교차 판정 ②.</span>
     <span class="dim" style="font-size:12px">사용률·포화·오류 세 칸 중 둘이 기준을 넘은 자원을 ‘병목’ 으로 적는다 · 기준값은 API</span>
   </div>
 
@@ -69,7 +69,7 @@ td{padding:7px 8px;border-bottom:1px solid #1f2a40;vertical-align:top}
     <div class="card">
       <div style="display:flex;flex-wrap:wrap;align-items:baseline;gap:8px 12px"><h2 style="margin:0;font-size:15px;font-weight:700">CPU</h2><span class="chip ok">정상 — 포화 없음</span><span class="dim" style="font-size:12px;margin-left:auto">/proc/stat · /proc/loadavg · /proc/pressure/cpu</span></div>
       <div style="display:flex;gap:16px;align-items:flex-end;margin-top:10px;flex-wrap:wrap">
-        <div><div style="font-size:30px;font-weight:800;line-height:1" class="warn">62%</div><div class="dim" style="font-size:12px;margin-top:4px">사용률 (iowait 제외)</div></div>
+        <div><div style="font-size:30px;font-weight:800;line-height:1" class="warn">62%</div><div class="dim" style="font-size:12px;margin-top:4px">사용률 OS (iowait 제외) · iDRAC 58% — 차이 4%p 일치</div></div>
         <div style="flex:1 1 240px;min-width:0">
           <div style="display:flex;height:14px;border-radius:7px;overflow:hidden;background:#1a2236;gap:2px">
             <span style="width:41%;background:#3b82f6"></span><span style="width:9%;background:#22d3ee"></span><span style="width:11%;background:#f59e0b"></span><span style="width:1%;background:#a855f7"></span>
@@ -82,7 +82,7 @@ td{padding:7px 8px;border-bottom:1px solid #1f2a40;vertical-align:top}
         <div><div class="h">포화 S</div><div class="v ok">0.3</div><div class="s">loadavg 1분 9.8 ÷ 32코어 · PSI some 4% full 0%</div></div>
         <div><div class="h">오류 E</div><div class="v ok">0</div><div class="s">MCE 0 · 스로틀링 이벤트 0 (dmesg · 스냅샷 시)</div></div>
       </div>
-      <dl class="kv" style="margin:10px 0 0"><dt>컨텍스트 스위치</dt><dd>18.2k/s</dd><dt>인터럽트</dt><dd>9.1k/s</dd><dt>cpufreq governor</dt><dd>performance ✓</dd><dt>NUMA 밸런싱</dt><dd>1 (자동)</dd></dl>
+      <dl class="kv" style="margin:10px 0 0"><dt>컨텍스트 스위치</dt><dd>18.2k/s</dd><dt>인터럽트</dt><dd>9.1k/s</dd><dt>cpufreq governor</dt><dd>performance ✓</dd><dt>NUMA 밸런싱</dt><dd>1 (자동)</dd><dt>스로틀링 · 전력 cap (iDRAC)</dt><dd class="ok">없음 · 없음</dd></dl>
     </div>
 
     <div class="card">
@@ -99,7 +99,7 @@ td{padding:7px 8px;border-bottom:1px solid #1f2a40;vertical-align:top}
       <div class="use">
         <div><div class="h">사용률 U</div><div class="v ok">71%</div><div class="s">182 / 256GB · 캐시는 가용으로 센다</div></div>
         <div><div class="h">포화 S</div><div class="v ok">0/s</div><div class="s">스왑아웃 0/s · 주요 폴트 2/s · PSI some 0%</div></div>
-        <div><div class="h">오류 E</div><div class="v ok">0</div><div class="s">OOM kill 0 (vmstat oom_kill) · ECC 정정 — iDRAC</div></div>
+        <div><div class="h">오류 E</div><div class="v ok">0</div><div class="s">OOM kill 0 (OS vmstat) · ECC 정정 0 · 비정정 0 (iDRAC) — 나란히</div></div>
       </div>
       <dl class="kv" style="margin:10px 0 0"><dt>vm.swappiness</dt><dd class="warn">60 → 권장 10 (DB 역할)</dd><dt>transparent_hugepage</dt><dd class="warn">always → 권장 madvise</dd><dt>hugepages 예약</dt><dd>0 (DB 설정과 대조 필요)</dd><dt>dirty_ratio / background</dt><dd>20 / 10</dd></dl>
     </div>
@@ -121,7 +121,8 @@ td{padding:7px 8px;border-bottom:1px solid #1f2a40;vertical-align:top}
         <div><div class="h">포화 S</div><div class="v bad">9.2</div><div class="s">평균 대기열 깊이 · await 18ms · PSI io some 31% full 12%</div></div>
         <div><div class="h">오류 E</div><div class="v ok">0</div><div class="s">I/O error · SMART 경고 0 (스냅샷의 dmesg)</div></div>
       </div>
-      <div class="dim" style="font-size:12px;margin-top:10px">공간: / 41% · /data 78% · /backup 12% (df) — 공간은 별도 칸이고 busy 와 섞지 않는다.</div>
+      <div style="display:flex;flex-wrap:wrap;gap:8px 16px;font-size:12px;margin-top:10px;align-items:center"><span class="chip warn" style="font-size:11px">건강 · iDRAC</span><span>nvme1n1 SMART 예측 장애 <b class="ok">0</b> · 재할당 <b class="ok">0</b> · 디스크 온도 41℃ · 컨트롤러 정상</span><span class="dim">→ 교차 ②: 고장 전조 아님</span></div>
+      <div class="dim" style="font-size:12px;margin-top:6px">공간: / 41% · /data 78% · /backup 12% (df) — 공간은 별도 칸이고 busy 와 섞지 않는다.</div>
     </div>
 
     <div class="card">
@@ -140,9 +141,34 @@ td{padding:7px 8px;border-bottom:1px solid #1f2a40;vertical-align:top}
       <div class="use">
         <div><div class="h">사용률 U</div><div class="v ok">23%</div><div class="s">가장 높은 물리 회선 기준 · 속도 모르면 ‘—’</div></div>
         <div><div class="h">포화 S</div><div class="v ok">0</div><div class="s">드롭 0 · TCP 재전송 0.8% (snmp RetransSegs/OutSegs)</div></div>
-        <div><div class="h">오류 E</div><div class="v ok">0</div><div class="s">rx/tx errors 5분 증가분 0</div></div>
+        <div><div class="h">오류 E</div><div class="v ok">0</div><div class="s">rx/tx errors 0 (OS) · CRC 0 · 링크 플랩 0 (iDRAC NICStatistics)</div></div>
       </div>
       <dl class="kv" style="margin:10px 0 0"><dt>소켓 (ss -s · 스냅샷)</dt><dd>TCP 1,240 · TIME-WAIT 318 · estab 802</dd><dt>net.core.somaxconn</dt><dd>4096 ✓</dd><dt>conntrack</dt><dd>12k / 262k</dd></dl>
+    </div>
+  </div>
+
+  <!-- 하드웨어(iDRAC) + 교차 판정 -->
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(min(560px,100%),1fr));gap:14px;align-items:start">
+    <div class="card" style="border-color:rgba(245,158,11,.35)">
+      <div style="display:flex;flex-wrap:wrap;align-items:baseline;gap:8px 12px"><h2 style="margin:0;font-size:15px;font-weight:700">하드웨어 (iDRAC)</h2><span class="chip ok">정상 · 경고 1</span><span class="dim" style="margin-left:auto;font-size:12px">센서 컬렉션 · Power · 부품 장애 · SEL/LC</span></div>
+      <div class="use">
+        <div><div class="h">전력 U</div><div class="v ok">61%</div><div class="s">412W / cap 680W · 정격 PSU 2×1100W · cap 적용 없음</div></div>
+        <div><div class="h">열 · 스로틀 S</div><div class="v ok">24℃</div><div class="s">흡기 24 · 배기 38 · CPU 61/64℃ · 스로틀링 없음 · 팬 38%</div></div>
+        <div><div class="h">부품 · 이벤트 E</div><div class="v warn">경고 1</div><div class="s">부품 장애 0 · SEL Critical 0 · Warning 1 (PSU2 입력 순간 저하 · 11-05 03:12)</div></div>
+      </div>
+      <dl class="kv" style="margin:10px 0 0"><dt>DIMM</dt><dd>16/16 정상 · ECC 정정 0</dd><dt>물리 디스크</dt><dd>3/3 정상 · 예측 장애 0</dd><dt>PSU</dt><dd>2/2 · 이중화 정상</dd><dt>펌웨어</dt><dd>iDRAC 7.10.30 · BIOS 2.14 (파트 장애 모듈과 같은 값)</dd></dl>
+      <div class="dim" style="font-size:11.5px;margin-top:8px">온도·전력·부품은 기존 서버 센서·부품 장애 모듈의 값을 그대로 가져온다(복제 금지). 텔레메트리 리포트가 없는 장비는 이 면이 ‘리포트 없음’ 으로 비고 이유를 말한다.</div>
+    </div>
+
+    <div class="card" style="border-color:rgba(34,197,94,.35)">
+      <div style="display:flex;flex-wrap:wrap;align-items:baseline;gap:8px 12px"><h2 style="margin:0;font-size:15px;font-weight:700">교차 판정 — 두 경로가 다 있어서 할 수 있는 것</h2><span class="dim" style="margin-left:auto;font-size:12px">상관은 ‘후보’ 로만 말한다</span></div>
+      <div style="display:flex;flex-direction:column;gap:8px;margin-top:10px">
+        <div style="display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:10px;align-items:center;padding:9px 12px;border:1px solid #243049;border-radius:10px;background:#0f1626"><b>①</b><div><div>CPU 느림이 전력·열 제한 때문인가</div><div class="dim" style="font-size:12px">OS 런큐 0.3 · iDRAC cap 없음 · 스로틀 없음</div></div><span class="chip ok">해당 없음</span></div>
+        <div style="display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:10px;align-items:center;padding:9px 12px;border:1px solid rgba(239,68,68,.4);border-radius:10px;background:rgba(239,68,68,.06)"><b>②</b><div><div>디스크 await 급등이 고장 전조인가</div><div class="dim" style="font-size:12px">OS await 18ms(평소 0.4) · iDRAC SMART 예측 0 · 재할당 0 → <b style="color:#e6edf6">고장 전조 아님 · I/O 양 문제 후보 → 스냅샷의 프로세스</b></div></div><span class="chip bad">판정</span></div>
+        <div style="display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:10px;align-items:center;padding:9px 12px;border:1px solid #243049;border-radius:10px;background:#0f1626"><b>③</b><div><div>메모리 오류가 DIMM 인가</div><div class="dim" style="font-size:12px">iDRAC ECC 0 · OS MCE 0</div></div><span class="chip ok">해당 없음</span></div>
+        <div style="display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:10px;align-items:center;padding:9px 12px;border:1px solid #243049;border-radius:10px;background:#0f1626"><b>④</b><div><div>네트워크 드롭이 어느 층인가</div><div class="dim" style="font-size:12px">OS 드롭 0 · iDRAC CRC 0</div></div><span class="chip ok">해당 없음</span></div>
+      </div>
+      <div class="dim" style="font-size:11.5px;margin-top:8px">한 경로만 있는 서버는 이 패널이 “한 경로만 — 원인 특정 불가(OS 계정 또는 iDRAC 등록 필요)” 한 줄과 등록부 링크로 바뀐다.</div>
     </div>
   </div>
 
@@ -195,7 +221,7 @@ td{padding:7px 8px;border-bottom:1px solid #1f2a40;vertical-align:top}
   <!-- 진단 스냅샷 -->
   <div class="card">
     <div style="display:flex;flex-wrap:wrap;align-items:baseline;gap:8px 12px;margin-bottom:8px">
-      <h2 style="margin:0;font-size:15px;font-weight:700">진단 스냅샷 — 13:38 실행 (사람이 누름 · 엣지 KR-SEL 이 SSH 1회)</h2>
+      <h2 style="margin:0;font-size:15px;font-weight:700">진단 스냅샷 — 13:38 실행 (사람이 누름 · 엣지 KR-SEL 이 SSH 1회 + Redfish 1회)</h2>
       <span class="chip info">소요 2.3초 · 명령 묶음 1회 · 결과는 법인 엣지에 7일 보관</span>
       <span class="dim" style="font-size:12px;margin-left:auto">읽기 전용 명령만 · 주기 수집이 아니다</span>
     </div>
@@ -226,11 +252,19 @@ td{padding:7px 8px;border-bottom:1px solid #1f2a40;vertical-align:top}
 ss -s: TCP 1240 (estab 802, timewait 318) · UDP 14</div>
         <div class="dim" style="font-size:11.5px;margin-top:6px">timeout 1건은 오류 칸이 아니라 ‘경고’ 로 — 오류 카운트(/sys/block errors)는 0.</div>
       </div>
+      <div style="border:1px solid rgba(245,158,11,.35);border-radius:10px;padding:10px 12px;background:#0f1626;min-width:0">
+        <div style="font-weight:700;font-size:12.5px;margin-bottom:6px">iDRAC 순간값 · 최근 이벤트 <span class="dim" style="font-weight:500">(Redfish 1회 · SEL/LC 최근 5건)</span></div>
+        <div class="mono" style="font-size:11.5px;line-height:1.6;color:#8b9bb4;white-space:pre-wrap;overflow-wrap:anywhere">전력 418W · 흡기 24℃ · CPU1 62℃ CPU2 60℃ · 팬 38%
+[11-05 03:12] W PSU0002 입력 전압 순간 저하 (복구)
+[11-01 09:40] I LOG007 LC 로그 지움
+[10-28 14:03] I USR0030 사용자 root 로그인</div>
+        <div class="dim" style="font-size:11.5px;margin-top:6px">Critical 0 · 최근 24시간 하드웨어 이벤트 없음 → 교차 ② 의 ‘고장 전조 아님’ 을 뒷받침.</div>
+      </div>
     </div>
   </div>
 </div>
 </x-dc>
-<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1460}}'>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1900}}'>
 class Component extends DCLogic {
   renderVals() { return {}; }
 }
