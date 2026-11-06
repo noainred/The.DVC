@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { fetchJson, postJson, putJson } from '../../api.js';
 import { Loading, ErrorBox, Modal } from '../../components/ui.jsx';
 import Select from '../../components/Select.jsx';
+import { requireChanged } from '../changeResult.js';
 import { STable } from '../../components/STable.jsx';
 import './techView.css';
 import {
@@ -154,7 +155,7 @@ export default function SettingsSyncTab({ canEdit = false, compact = false, onAp
   };
   const saveAuto = async () => {
     setBusy(true); setMsg('');
-    try { const r = await putJson('/svcmon/settings-sync/options', { autoKinds: [...(autoKinds || [])] }); setAutoKinds(new Set(r.options?.autoKinds || [])); setMsg('자동 등록 설정을 저장했습니다.'); }
+    try { const r = requireChanged(await putJson('/svcmon/settings-sync/options', { autoKinds: [...(autoKinds || [])] }), '자동 등록 설정을 저장하지 못했습니다.'); setAutoKinds(new Set(r.options?.autoKinds || [])); setMsg('자동 등록 설정을 저장했습니다.'); }
     catch (e) { setMsg(e.message); } finally { setBusy(false); }
   };
 

@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { fetchJson, putJson } from '../../api.js';
 import { Loading, ErrorBox } from '../../components/ui.jsx';
 import Select from '../../components/Select.jsx';
+import { requireChanged } from '../changeResult.js';
 
 /**
  * Monitoring 설정 › **알림**(v2.915 · 개선안 ②) — 점검이 연속 N회 실패하면 포탈 알림(설정 › 알림 채널: 메일·Slack·Teams·웹훅)으로 보낸다.
@@ -31,7 +32,7 @@ export default function AlertTab({ isAdmin = false }) {
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
   const save = async () => {
     setBusy(true); setMsg('');
-    try { const r = await putJson('/svcmon/alert-settings', form); setForm(r.settings); setMsg('저장했습니다.'); load(); }
+    try { const r = requireChanged(await putJson('/svcmon/alert-settings', form), '알림 설정을 저장하지 못했습니다.'); setForm(r.settings); setMsg('저장했습니다.'); load(); }
     catch (e) { setMsg(e.message); } finally { setBusy(false); }
   };
   const st = d.stats || {};
