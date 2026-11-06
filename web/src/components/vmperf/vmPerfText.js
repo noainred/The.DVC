@@ -129,12 +129,19 @@ export function maxBackOf(rangeK, retention) {
   return Math.max(0, Math.floor(cover / lenSec) - 1);
 }
 
+/**
+ * 창(길이 ms 로) — anchorEnd 에서 back 칸 전. **공용 코어**(v2.923 — 베어메탈 추이 탭 · 확대 팝업이 같은 함수를 쓴다:
+ * 그쪽 기간은 6시간 · 24시간 · 7일 · 30일이라 RANGES 키가 아니라 길이로 부른다 — 창 계산을 두 벌 두지 않는다).
+ */
+export function windowSpan(anchorEnd, back, spanMs) {
+  const len = Math.max(1, num(spanMs) ?? 0);
+  const b = Math.max(0, Math.floor(num(back) ?? 0));
+  const end = (num(anchorEnd) ?? 0) - b * len;
+  return { start: end - len, end };
+}
 /** 창 — anchorEnd(스크롤을 시작할 때의 창 끝) 에서 back 칸 전. back 0 = 최근(창 없음). */
 export function windowOf(anchorEnd, back, rangeK) {
-  const r = rangeOf(rangeK);
-  const b = Math.max(0, Math.floor(num(back) ?? 0));
-  const end = (num(anchorEnd) ?? 0) - b * r.ms;
-  return { start: end - r.ms, end };
+  return windowSpan(anchorEnd, back, rangeOf(rangeK).ms);
 }
 export function windowLabel(back, rangeK) {
   const b = Math.max(0, Math.floor(num(back) ?? 0));
@@ -158,11 +165,15 @@ export function dateInputOf(endMs) {
   const d = new Date(n - 1);
   return `${d.getFullYear()}-${two(d.getMonth() + 1)}-${two(d.getDate())}`;
 }
+/** 창 끝 ms → back 칸(길이 ms 로 · anchorEnd 기준 · 범위 밖은 잘라낸다) — windowSpan 의 짝(공용 코어). */
+export function backForSpan(anchorEnd, endMs, spanMs, maxBack) {
+  const len = Math.max(1, num(spanMs) ?? 0);
+  const raw = Math.round(((num(anchorEnd) ?? 0) - (num(endMs) ?? 0)) / len);
+  return Math.max(0, Math.min(Math.max(0, num(maxBack) ?? 0), raw));
+}
 /** 창 끝 ms → back 칸(anchorEnd 기준 · 범위 밖은 잘라낸다). */
 export function backForEnd(anchorEnd, endMs, rangeK, maxBack) {
-  const r = rangeOf(rangeK);
-  const raw = Math.round(((num(anchorEnd) ?? 0) - (num(endMs) ?? 0)) / r.ms);
-  return Math.max(0, Math.min(Math.max(0, num(maxBack) ?? 0), raw));
+  return backForSpan(anchorEnd, endMs, rangeOf(rangeK).ms, maxBack);
 }
 
 /** % 지표는 0~100 고정 · KBps 는 최대값의 1.15배(0 이면 1)를 '보기 좋은' 수로 올린다. */

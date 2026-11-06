@@ -42,6 +42,7 @@
 - (v2.906 추가) 호스트 네트워크 탭 '분산 포트그룹' 카드(vDS 팀 구성 · LACP · VLAN) · 팀 구성 문구는 `vcd/vcInfo.js` 한 벌 · Bareos 행마다 취소 회차 표시
 - (v2.895 추가) 개체 보기 › 성능 튜닝(시안 ⑫⑬) — 판정은 기존 모듈(rightsize verdict · contention · vmcfg · hcfg · 가상화율 RATIO_LEVELS · 사용률 75/90 · DS 90/95)을 `vcd/tuning.js` 한 곳에서 모은다 · 새 서버 경로 없음 · 계획은 저장 없이 내보내기만
 - (v2.920 추가) 베어메탈 사용률(`bm-usage`) USE 매트릭스 보드 · 서버 성능 상세 — 판정은 서버 `useJudge.js`, 문구·칸 표기는 `views/tools/bmPerfText.js` 하나 · 기존 사용률 표는 토글로 유지
+- (v2.923 추가) 베어메탈 서버 상세 ‘추이’ 탭(평균 · 피크 두 패널 · 장치 토글 · 확대 팝업 · CVP 포트 절) — 창 · 해상도 · 결측 · 기준선은 서버 `trendWindow.js`, 문구 · 좌표는 `views/tools/bmTrendText.js` · 구간 이동은 공용 `vmPerfText.windowSpan`
 - (원래 5663행) v2.708 — 드롭다운은 공용 `Select`·`DataList` 하나다(자동 정렬)
 - (원래 5801행) 특수 기능 화면(v2.679) — 표시 이름·설명·개발 단계는 '덮어쓰기' 이고 키는 그대로다
 - (원래 5848행) 접속 공지 팝업 · 게시판(v2.722)
@@ -50,6 +51,16 @@
 
 ## 본문
 
+- ⚠⚠ **v2.923 — 베어메탈 서버 상세 ‘추이(평균 · 피크)’ 탭(리눅스 성능 3b · 설계 `docs/design/linux-bm-perf/PROFILES.md` §8~§12 · 아트보드 AvgPeak · Toggle · Popup)**.
+  화면 `views/tools/{BmTrendTab,BmTrendPopup,BmTrendChart}.jsx`(조립 · 그리기만) · 문구 · 좌표 · 토글 `bmTrendText.js`(순수) · 조회기 `bmTrendLoad.js` · 회귀 `bmTrendText.test.jsx`:
+  - **창 · 해상도 · 결측 · 기준선 · 포트 상태 · 대조 ⑤ 판정은 서버**(`bmusage/trendWindow.js` · `portCompare.js`) — 웹은 응답을 그리기만 한다. 선은 값이 null 이거나 **서버 `gaps` 가 두 점 사이에 걸칠 때만** 끊는다(웹이 점 간격으로 결측을 다시 판정하지 않는다 — 테스트가 서버 `gapsOf` 결과로 대조). 홀로 남은 점은 점으로 그린다(선이 없다고 값이 안 보이면 거짓).
+  - 웹 쪽 지표 표(이름 · 단위 · 피크 열 유무)는 서버 `PEAK_COLS` · `DEVICE_PEAK_COLS` · `SERVER_METRICS` · `DEVICE_METRICS` 와, 피크 출처 · 포트 상태 · 대조 판정 이름은 `PEAK_SRC` · `PORT_STATES` · `COMPARE_VERDICTS` 와 테스트가 대조한다(두 벌이면 대조).
+  - **피크 값 옆에 출처를 항상**(`peakSrcText` — ② 패널 머리 · 요약 표 각주 · 장치 표 각주 · 팝업). 창을 주기 예산으로 줄였으면(`peak_window_s` < 10) 그 사실, 0 이면 ‘꺼짐 — PSI 보조만’. 피크 점을 눌러도 **1초 표본은 펼치지 않는다**(저장하지 않는다 · B 샘플러 펼침은 배포 뒤 — 없는 기능을 그리지 않는다).
+  - 추이 API 는 지표 하나 = 요청 하나다 — 탭을 열 때 주 패널 9행 + 장치 목록 + 포트 대조만, 추천 12행은 화면에 들어올 때(IntersectionObserver · 없으면 버튼), 장치 표는 세그먼트를 고를 때 부른다. **동시 4개** · 같은 창 · 같은 계열은 한 번 · 창이 바뀌면 세대로 늦은 응답을 버린다 · 폴링 없음(`bmTrendLoad.js` — 가짜 fetcher 로 고정). ⚠ 창이 바뀔 때 비우는 효과는 조회 효과보다 **먼저** 둔다(뒤면 방금 넣은 결과를 지운다) · `cancel()` 은 끊은 신호를 물려주지 않는다(StrictMode 이중 마운트).
+  - 구간 이동(◀ · 슬라이더 · ▶ · 최신 · 날짜)은 **공용 코어** `components/vmperf/vmPerfText.js` 의 `windowSpan` · `backForSpan`(기간이 6시간 · 24시간 · 7일 · 30일이라 키가 아니라 길이로 — 기존 `windowOf` · `backForEnd` 가 이것을 부른다). 구간 요약(평균 · 최대 · 주의 이상 비율)도 공용 `seriesStats`. 보존(일)은 이 노드 대상만 안다 — 엣지 위임 서버는 슬라이더 없이 ◀ · ▶ · 날짜만(보존 밖이면 서버 `resReason` 이 말한다).
+  - 장치 토글(§12): 색은 서버가 준 처음 본 순서(`color`)로만 — 필터해도 바뀌지 않는다 · 6색 × 실선/점선 · 범례 누름 = 그 장치만(다시 누르면 모두) · Shift = 더하기/빼기 · 8개 초과면 앞 8개 + 겹침 → 행 나눔 자동. ⚠ 설계의 ‘기타(최대)’ 계열은 그리지 않았다(장치마다 요청이 하나씩 늘어난다) — 그린 수와 남은 수를 행이 말한다. 범례 · 상한 안내는 묶음 첫 행에만.
+  - 1440 에서 표 열이 가로 스크롤 뒤로 숨지 않게(v2.780 교훈) — D 절은 두 칸 대신 위아래로, NIC 표는 둘째 줄을 써서 7열로, 긴 설명 칸은 `td.bmt-wrap`(줄바꿈) · 표 칸 여백은 `table.bmt-t`. 400 은 표가 가로 스크롤 박스 · 팝업은 전체 화면.
+  - 행 문구: 값이 없으면 가운데 ‘0 으로 그리지 않습니다’, 선이 있는데 피크 열이 없으면 이름 아래 작은 줄(선 위에 글자를 겹치지 않는다 — Chromium 판독).
 - ⚠⚠ **v2.920 — 베어메탈 사용률(`#/tools/bm-usage` · 도구 키 그대로) USE 매트릭스 보드 · 서버 성능 상세(리눅스 성능 2단계 · 설계 `docs/design/linux-bm-perf/README.md` §5 ①~④)**.
   화면 `views/tools/{BmPerfBoard,BmPerfDetail}.jsx`(조립만) · 문구 `bmPerfText.js`(순수) · 회귀 `bmPerfText.test.js`(문구 · 상태 9종 · 렌더 스모크 · 소스 스윕) + `server/test/bmPerf2920.test.js`(API 보강 `psiAbsent` · 정제 · 데모 합성):
   - **판정을 웹에서 다시 하지 않는다** — 칸 색은 서버 code(`ok·warn·bad·none·missing·nopath·stale`), 판정 한 줄(`line`)은 서버 문장 그대로, 기준 숫자는 API `perfThresholds` 를 **보여 주기만**(`thresholdText`). 테스트가 ‘기준값 키 + 비교 연산’ 을 소스 스윕으로 막는다.

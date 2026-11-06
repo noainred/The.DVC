@@ -471,6 +471,7 @@ export function BmUsage() {
         <BmPerfDetail
           itemKey={perfSel} item={perfItems.find((it) => it.key === perfSel) || null}
           authStops={perfAuthStops} staleMs={edges?.staleMs ?? null}
+          keepDays={{ server: data?.settings?.dailyRetentionDays ?? null, dev: data?.settings?.store?.devHourlyDays ?? null }}
           onClose={() => setPerfSel('')}
         />
       )}
