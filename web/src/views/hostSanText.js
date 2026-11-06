@@ -1,5 +1,5 @@
 /**
- * hostSanText.js — 호스트 상세 ‘SAN 경로·트래픽’ 묶음의 문구·판정(순수, v2.915 — 시안 D-① HostSan).
+ * hostSanText.js — 호스트 상세 ‘SAN 경로·트래픽’ 묶음의 문구·판정(순수, v2.920 — 시안 D-① HostSan).
  * 서버 /hosts/:id/san-attribution 응답(sanswitch/attribution.js)을 화면 글자로 바꾼다. 값이 없으면 ‘—’(0 금지), 확정분·추정분을 합치지 않는다.
  */
 import { numOrNull } from '../numOrNull.js';

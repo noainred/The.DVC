@@ -1,4 +1,4 @@
-// 호스트 상세 ‘네트워크’ 카드의 CVP 업링크 블록(v2.915 — 시안 D-② HostNet). 매칭 포트 타일(송신·수신·에러) + 그 장비의 24h 이벤트.
+// 호스트 상세 ‘네트워크’ 카드의 CVP 업링크 블록(v2.920 — 시안 D-② HostNet). 매칭 포트 타일(송신·수신·에러) + 그 장비의 24h 이벤트.
 //   데이터는 HostDetail 이 받아 넘긴다(/hosts/:id/net-uplinks — NIC 표의 CVP 열과 같은 응답). 문구는 hostNetText.js(순수).
 import React from 'react';
 import { basisOf, bpsText, errText, speedText, portLabel, uplinkSummary, uplinkTotals, SEVERITY_BADGE, eventTimeText } from './hostNetText.js';

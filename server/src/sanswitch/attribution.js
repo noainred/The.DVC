@@ -1,5 +1,5 @@
 /**
- * sanswitch/attribution.js — 가상화 호스트 ↔ SAN 조닝·트래픽 **귀속 엔진**(순수, v2.915 — 설계 docs/design/san-cvp-traffic/README.md §4.1).
+ * sanswitch/attribution.js — 가상화 호스트 ↔ SAN 조닝·트래픽 **귀속 엔진**(순수, v2.920 — 설계 docs/design/san-cvp-traffic/README.md §4.1).
  *
  * 무엇을 하나: 호스트 HBA 의 WWN 을 SAN 스위치 스냅샷의 포트(attached)·조닝(zones)·네임서버 역할(nsRoles)에 대조해
  *   ① 이 HBA 가 어느 스위치 어느 포트에 로그인해 있고 ② 어느 zone 으로 어느 스토리지(타깃)에 허용돼 있으며
@@ -7,7 +7,7 @@
  *
  * 신뢰도 규약(화면의 ●/◐ 표기와 같다 — 조닝 그림 CONFIDENCE_LABEL 과 한 식구):
  *   · confirmed(● 확정) — 그 HBA 포트가 닿을 수 있는 스토리지가 **하나**이고 타깃 역할이 네임서버로 확정됐다. 포트 카운터 전부가 그 스토리지다.
- *       멀티패스의 경로별 타깃 WWN(hcfg.mp.targets — v2.915 수집)이 있으면 '지금 살아 있는 경로의 타깃' 으로 후보를 좁힌다(조닝 2개 → 실제 1개면 확정).
+ *       멀티패스의 경로별 타깃 WWN(hcfg.mp.targets — v2.920 수집)이 있으면 '지금 살아 있는 경로의 타깃' 으로 후보를 좁힌다(조닝 2개 → 실제 1개면 확정).
  *   · estimated(◐ 추정) — 후보 스토리지가 2개 이상이면 **같은 스위치의 타깃 포트 바이트 비율**로 나눈다(IPF 보정은 다음 단계).
  *       nsRoles 가 빈 패브릭은 타깃 역할 자체가 추정이라 후보가 하나여도 추정이다(없는 근거를 만들지 않는다).
  *   · unsplit(— 분배 불가) — 후보가 2개 이상인데 타깃 포트 바이트가 전부 없거나 0 이라 비율을 만들 수 없다. 합계에는 들어가되 어느 스토리지에도 주지 않는다.
@@ -20,7 +20,7 @@
  * 스토리지 식별: 타깃 포트의 attachedName → storageKey(벤더 심볼릭 'SYMMETRIX::시리얼') → 등록 스토리지 시리얼 일치(registered) — perfDb·storage-summary 와 같은 판정.
  *   평평한 이름(::' 없음)은 포트마다 다른 식별 키가 되어 한 어레이가 여러 행으로 나뉠 수 있다 — kind 가 'host'/'unknown' 이면 화면이 '어레이 미확인' 으로 말한다.
  *
- * 입력은 전부 순수 값이다(DB·레지스트리는 라우트가 읽어 넘긴다) — 테스트 server/test/sanAttrib2915.test.js.
+ * 입력은 전부 순수 값이다(DB·레지스트리는 라우트가 읽어 넘긴다) — 테스트 server/test/sanAttrib2920.test.js.
  */
 import { normWwn, zonesFromCompact, classifyEndpoints } from './zoning.js';
 import { storageKey, arraySerialOf, endpointKind, normSerial } from './endpointKey.js';
@@ -89,7 +89,7 @@ export function identityOf(wwn, fabric, fabrics, storageOf) {
   return { id, name, key, serial, kind, registered: registered ? { id: registered.id, name: registered.name || '', type: registered.type || '', datacenterId: registered.datacenterId || '' } : null, alias };
 }
 
-/** hcfg.mp.targets(v2.915) → 어댑터별 '살아 있는 경로의 타깃 WWN' 집합. 없으면 null(모름 — 좁히지 않는다). */
+/** hcfg.mp.targets(v2.920) → 어댑터별 '살아 있는 경로의 타깃 WWN' 집합. 없으면 null(모름 — 좁히지 않는다). */
 export function liveTargetsByAdapter(host) {
   const list = host?.hcfg?.mp?.targets;
   if (!Array.isArray(list) || !list.length) return null;
@@ -134,7 +134,7 @@ export function attributeHost(host, fabrics = [], { storageOf = null, portBytes 
     if (!hba.wwn) { rows.push({ hba: hba.name, wwn: null, status: 'no-wwn', conf: 'none', measured: false, bytes: null, basis: 'WWN 이 없는 어댑터(FC 가 아니거나 못 읽음)' }); continue; }
     const w = hba.wwn;
     // 행은 **로그인한 스위치**마다 하나다. zone 은 패브릭 전체가 같은 설정을 보고하므로(팹 A 의 스위치 A1·A2 가 같은 zone 을 갖는다) 로그인하지 않은
-    //   같은 패브릭 스위치에서 '조닝만' 을 만들면 정상 호스트가 조닝만 N건으로 부풀려진다(v2.915 Chromium 데모에서 발견 — 로그인 22 · 조닝만 64).
+    //   같은 패브릭 스위치에서 '조닝만' 을 만들면 정상 호스트가 조닝만 N건으로 부풀려진다(v2.920 Chromium 데모에서 발견 — 로그인 22 · 조닝만 64).
     //   '조닝만' 은 어느 스위치에도 로그인이 없을 때 **한 행**(zone 을 가진 첫 스위치 기준 · zone 을 가진 스위치 수를 밝힌다)이다.
     const loggedIn = fabrics.filter((f) => f.portByWwn.has(w));
     const zonedIn = loggedIn.length ? [] : fabrics.filter((f) => f.zonesOf.has(w));

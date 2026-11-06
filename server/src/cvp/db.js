@@ -631,7 +631,7 @@ export async function deviceDetail(agent, cvpId, key) {
 }
 
 /**
- * v2.915(호스트 업링크 매칭): 포트 설명(descr)에 단서가 든 포트 행 — 호스트 짧은 이름·NIC MAC(콜론·하이픈·점·붙임 표기). SQL LIKE 로 거른 뒤
+ * v2.920(호스트 업링크 매칭): 포트 설명(descr)에 단서가 든 포트 행 — 호스트 짧은 이름·NIC MAC(콜론·하이픈·점·붙임 표기). SQL LIKE 로 거른 뒤
  *   토큰 경계 판정은 cvp/hostMatch.js 가 한다(여기서는 넉넉히 뽑는다). 장비 호스트명을 붙여 준다. 단서 8개·결과 200행 상한.
  * @param {string[]} terms 소문자 단서(LIKE 의 % _ 는 이스케이프)
  */

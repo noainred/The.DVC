@@ -1,5 +1,5 @@
 /**
- * hostNetText.js — 호스트 상세 ‘네트워크’ 카드의 CVP 업링크 열·블록 문구(순수, v2.915 — 시안 D-② HostNet).
+ * hostNetText.js — 호스트 상세 ‘네트워크’ 카드의 CVP 업링크 열·블록 문구(순수, v2.920 — 시안 D-② HostNet).
  * 서버 /hosts/:id/net-uplinks(cvp/hostMatch.js) 응답을 글자로. 방향은 스위치 포트 기준 — In = 서버 송신 · Out = 서버 수신.
  * 근거 없는 매칭을 만들지 않는다 — 매칭이 없으면 ‘미매칭’ 이고 그 이유(설명에 단서 없음 · CVP 없음)를 말한다.
  */

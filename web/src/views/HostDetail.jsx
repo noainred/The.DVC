@@ -13,7 +13,7 @@ import { STable } from '../components/STable.jsx';
 import { hostUsagePct } from './vcdOverview.js';
 import { REBOOT_KIND } from './hostcfg/hostCfgText.js';
 import { secCountsOf, secText, secTone, reasonBadges, bootCell, veeamCell, hwCell, uptimeDays, gbText, kwText, ratioText, nicLinkDownOf, uplinkDownOf } from './hostChecksText.js';
-import HostNetCvp from './HostNetCvp.jsx';   // v2.915 CVP 업링크 블록(시안 D-② HostNet)
+import HostNetCvp from './HostNetCvp.jsx';   // v2.920 CVP 업링크 블록(시안 D-② HostNet)
 import { uplinksByNic, nicUplinkText, txRxText, basisOf, uplinkSummary } from './hostNetText.js';
 import { sanSubText } from './hostSanText.js';
 
@@ -22,7 +22,7 @@ const HostGpuPanel = React.lazy(() => import('../components/HostGpuPanel.jsx'));
 const HostMetricButton = React.lazy(() => import('../components/VmMetrics.jsx').then((m) => ({ default: m.HostMetricButton })));
 const IdracTrendLinkButton = React.lazy(() => import('../components/IdracTrendLinkButton.jsx'));
 const HostExportDialog = React.lazy(() => import('./HostExportDialog.jsx'));
-const HostSanSection = React.lazy(() => import('./HostSanSection.jsx'));   // v2.915 SAN 경로·트래픽 묶음(시안 D-① HostSan) — recharts 를 끌고 오므로 지연 로드
+const HostSanSection = React.lazy(() => import('./HostSanSection.jsx'));   // v2.920 SAN 경로·트래픽 묶음(시안 D-① HostSan) — recharts 를 끌고 오므로 지연 로드
 const Lazy = ({ children }) => <React.Suspense fallback={null}>{children}</React.Suspense>;
 
 const SECTIONS = [
@@ -42,8 +42,8 @@ export default function HostDetail({ id }) {
   const [st, setSt] = useState({ data: null, error: null });
   const [checks, setChecks] = useState(null);
   const [vms, setVms] = useState(null);
-  const [net, setNet] = useState(null);       // v2.915 CVP 업링크 매칭(/hosts/:id/net-uplinks) — 도구 키 cvp 가 허용될 때만 받는다
-  const [san, setSan] = useState(null);       // v2.915 SAN 귀속 응답(묶음 머리 한 줄용 — 본문은 HostSanSection 이 그린다)
+  const [net, setNet] = useState(null);       // v2.920 CVP 업링크 매칭(/hosts/:id/net-uplinks) — 도구 키 cvp 가 허용될 때만 받는다
+  const [san, setSan] = useState(null);       // v2.920 SAN 귀속 응답(묶음 머리 한 줄용 — 본문은 HostSanSection 이 그린다)
   const [showVms, setShowVms] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
   const seq = useRef(0);
@@ -90,9 +90,9 @@ export default function HostDetail({ id }) {
   const up = uptimeDays(h, now);
   const vmOn = vmList.filter((v) => v.powerState === 'POWERED_ON').length;
   const vmSum = c?.vm || null;
-  const vnet = h.hcfg?.net || null;   // 가상 스위치 구성(hcfg.net) — CVP 업링크 응답(net)과 이름이 겹쳐 v2.915 에 vnet 으로
+  const vnet = h.hcfg?.net || null;   // 가상 스위치 구성(hcfg.net) — CVP 업링크 응답(net)과 이름이 겹쳐 v2.920 에 vnet 으로
   const mp = h.hcfg?.mp || null;
-  const cvpCols = toolAllowed('cvp');   // v2.915: NIC 표의 CVP 열 3개(도구 키가 허용될 때만)
+  const cvpCols = toolAllowed('cvp');   // v2.920: NIC 표의 CVP 열 3개(도구 키가 허용될 때만)
   const byNic = uplinksByNic(net && !net.error ? net.uplinks : []);
   const cvpSum = cvpCols ? uplinkSummary(net && !net.error ? net : null, h.nics || []) : { text: '' };
   const nicDown = nicLinkDownOf(h);

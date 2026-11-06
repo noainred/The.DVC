@@ -699,10 +699,10 @@
      받는 쪽은 `useSearchHandoff`(검색 칸) · `useFocusHandoff`(상세) — **items 는 받기 전 undefined/null** 로 줄 것(빈 배열이면 '받았는데 없음' 으로 읽고 고른 장비를 잊는다 — PDU 실측).
      상세 여는 함수가 조기 return 아래에 있으면 ref 로 늦게 묶는다(SanSwitchTool `openDetailRef` — TDZ 를 만들지 않게).
   ② 단축키 글자는 `headerText.js cmdkLabel · modKeyLabel`(Mac ⌘ · 그 밖 Ctrl) — 화면에 ⌘ 를 박지 않는다.
-- **v2.915 — 호스트 상세 ‘SAN 경로·트래픽’ 묶음 · ‘네트워크’ 카드 CVP 열 · SAN 도구 ‘호스트 귀속’ 모달** — 설계 `docs/design/san-cvp-traffic/README.md`:
+- **v2.920 — 호스트 상세 ‘SAN 경로·트래픽’ 묶음 · ‘네트워크’ 카드 CVP 열 · SAN 도구 ‘호스트 귀속’ 모달** — 설계 `docs/design/san-cvp-traffic/README.md`:
   ① 묶음 `san` 은 `toolAllowed('san-switch')` 일 때만(hd-nav 도 같이) · 본문 `HostSanSection.jsx` 는 지연 로드(recharts) · 마운트 1회 + 기간 버튼(24h·7일)으로만 받는다(무거운 집계 —
      폴링 금지) · 403 은 `ErrorBox` 가 권한 안내로. 묶음 머리 한 줄은 `hostSanText.sanSubText`.
-  ② 네트워크 카드의 `hcfg.net` 변수는 `vnet` 이다(CVP 업링크 응답 `net` 과 이름이 겹쳐 v2.915 에 바꿈). CVP 열 3개(스위치·포트 / 매칭 / 지금 송신·수신)는
+  ② 네트워크 카드의 `hcfg.net` 변수는 `vnet` 이다(CVP 업링크 응답 `net` 과 이름이 겹쳐 v2.920 에 바꿈). CVP 열 3개(스위치·포트 / 매칭 / 지금 송신·수신)는
      `toolAllowed('cvp')` 일 때만 붙고, NIC 미확정(호스트 이름만 맞은) 포트는 열이 아니라 아래 블록(`HostNetCvp.jsx`)에 'NIC 미확정' 으로 둔다.
   ③ 확정(●)·추정(◐) 글리프와 배지 색은 `hostSanText.CONF` 하나(서버 `attribution.js` 신뢰도 키와 같다) — 확정분·추정분 열을 합치지 않고, 측정 없음은 '—'.
   ④ SAN 도구의 '호스트 귀속' 은 헤더 버튼 + `Modal`(폭 1240)이고 창 안에서 법인 칩을 바꾼다(`DcStoragePerf` 와 같은 이유). 표 제목 정렬은 `sanHostAttribText.sortRows`(null 뒤로).

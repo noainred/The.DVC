@@ -1,5 +1,5 @@
 /**
- * v2.915 — 호스트 ↔ SAN 조닝·트래픽 귀속 + CVP 업링크 매칭(설계 docs/design/san-cvp-traffic/README.md, 기본값 A 단계).
+ * v2.920 — 호스트 ↔ SAN 조닝·트래픽 귀속 + CVP 업링크 매칭(설계 docs/design/san-cvp-traffic/README.md, 기본값 A 단계).
  *  ① 순수 귀속 엔진 — 확정(후보 1 + 네임서버 확정) · 추정(후보 2 → 타깃 포트 바이트 비율) · 분배 불가 · 조닝만 · 미확인 · 측정 없음(null — 0 금지) ·
  *     멀티패스 살아 있는 타깃으로 좁히면 확정 승격 · nsRoles 없는 패브릭은 후보가 하나여도 추정 · 확정분과 추정분을 합치지 않는다
  *  ② 함대 집계 — 호스트 × 스토리지 행 · 조닝만 표 · 개수
@@ -14,7 +14,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-const DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'sanattrib2915-'));
+const DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'sanattrib2920-'));
 Object.assign(process.env, { CONFIG_DIR: DIR, DATA_SOURCE: 'live', AUTH_ENABLED: 'true' });
 const VC = 'vc-a'; const OUT = 'vc-out';
 fs.writeFileSync(path.join(DIR, 'runtime.json'), JSON.stringify({ dataSource: 'live' }));

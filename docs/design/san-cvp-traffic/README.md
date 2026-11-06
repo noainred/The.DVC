@@ -1,6 +1,6 @@
 # 설계: 가상화 호스트 ↔ SAN 조닝·트래픽 귀속 + CVP 업링크 매칭
 
-작성 2026-11-07 (v2.914.0 · main 작업본 기준) · 상태 **v2.915 구현(기본값 A 단계 — 2026-11-07 사용자 '기본값대로 구현해')** · 시안 캔버스: https://claude.ai/artifact/YB7ZxbXJXoLPWqNNRDfRrj
+작성 2026-11-07 (v2.914.0 · main 작업본 기준) · 상태 **v2.920 구현(기본값 A 단계 — 2026-11-07 사용자 '기본값대로 구현해')** · 시안 캔버스: https://claude.ai/artifact/YB7ZxbXJXoLPWqNNRDfRrj
 (캔버스 셋째 줄 ‘The.DVC 적용판’ D-①~④ 가 이 폴더의 `*.dc.html` 4장과 같은 내용이다. 첫째·둘째 줄 6장은 포탈 룩을 입히기 전의 일반 초안이라 참고만 한다.
 색 · 글자 · 배지 · 카드는 `web/src/styles.css` `:root` 토큰과 `.card` · `.badge` · `.ht-kpi` · `.hd-nav` · `STable` 규격 그대로이고,
 호스트 · 스위치 · 스토리지 이름과 **수치는 전부 가상값**이다. 계정의 ‘Design System’ 아티팩트는 앞 시안들과 같이 비어 있어 쓰지 않았다. 아트보드에 이모지는 없다.)
@@ -86,14 +86,14 @@ D-④ DataMap    화면 요소 ↔ 데이터(지금 있음 / 새 수집 / 계산
 - 아트보드의 수치(24h 64.2/26.8 TB · 어레이 합계 412/171 TB 등)는 화면 간 합이 맞도록 만든 **가상값**이다.
 - 시안 파일은 저장소 작업본(docs/design/san-cvp-traffic/)에만 썼고 커밋·푸시하지 않았다(읽기 전용 클론) — 구현 단계에서 브랜치에 함께 올린다.
 
-## 7. 구현 기록(v2.915 — 기본값 A 단계)
+## 7. 구현 기록(v2.920 — 기본값 A 단계)
 - §5 의 기본값으로 구현했다: ① 위치 — `#/tools/san-switch` 안(시안의 '보기 세그먼트' 는 실제 화면에 없어 **헤더 버튼 '호스트 귀속' + 모달**, 법인 칩 선택을 범위로) ·
   ② CVP 는 지금 있는 값 + **포트 설명 일치**(LLDP · MAC 테이블 · discards 수집은 B 단계로 남김) · ③ 추정 분배는 **타깃 포트 바이트 비율만**(IPF 는 다음) · ④ 호스트 상세에 **새 묶음 'SAN 경로·트래픽'**(기존 '스토리지' 카드는 그대로).
 - B 단계 가운데 **경로별 타깃 WWN** 은 같은 SOAP 경로라 비용이 없어 함께 넣었다(`hostcfg/parse.js parseMultipath` → `hcfg.mp.targets[{adapter,wwn,live,dead,luns}]` · 엣지 정제 화이트리스트).
   구버전 엣지가 보낸 `hcfg` 에는 `targets` 키가 없고 엔진은 그때 후보를 좁히지 않는다.
 - 코드: 서버 `sanswitch/attribution.js`(순수) · `sanswitch/endpointKey.js`(perfDb 의 순수 판정 분리) · `perfDb.portBytesMulti` · `cvp/hostMatch.js`(순수) · `cvp/db.js portsByDesc` ·
   `routes/api/hostSan.js`(라우트 3) · 웹 `HostSanSection.jsx`·`hostSanText.js` · `HostNetCvp.jsx`·`hostNetText.js` · `tools/SanHostAttrib.jsx`·`sanHostAttribText.js` · `HostDetail.jsx`·`SanSwitchTool.jsx` 연결.
-  회귀 `server/test/sanAttrib2915.test.js`(6) · vitest 3 파일. 규칙은 `docs/rules/sanswitch.md`·`cvp.md`·`web.md` v2.915 항목.
+  회귀 `server/test/sanAttrib2920.test.js`(6) · vitest 3 파일. 규칙은 `docs/rules/sanswitch.md`·`cvp.md`·`web.md` v2.920 항목.
 - 시안과 다른 점(정직 기록): 기간 바이트는 portperfshow 합산값이라 **읽기/쓰기로 나뉘지 않는다**(시안의 '24h 읽기 / 쓰기' KPI 는 '기간 전송 합' + '지금 읽기/쓰기' 로) ·
   포트 에러·HBA 포트 사용률 KPI 는 이번에 넣지 않았다(기존 SAN 도구 포트 상세에 있다) · 업링크 '드롭' 열은 수집 전이라 '—'.
 

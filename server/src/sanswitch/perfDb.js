@@ -25,7 +25,7 @@ import { loadPerfSettings } from './perfSettings.js';
 import { isMockMode } from '../mock/demo/flags.js';
 import { numOrNull } from '../util/numOrNull.js';
 import { isDemoPerfQuery, demoStorageMultiAsync, demoStorageOne, demoPortSeries } from './demoPerfSynth.js';   // v2.715 목업: 수식으로 만든다
-import { storageKey, arraySerialOf, endpointKind } from './endpointKey.js';   // v2.915: 순수 판정은 endpointKey.js 로(귀속 엔진과 공유)
+import { storageKey, arraySerialOf, endpointKind } from './endpointKey.js';   // v2.920: 순수 판정은 endpointKey.js 로(귀속 엔진과 공유)
 export { storageKey, arraySerialOf, endpointKind };
 import { createYielder } from '../util/timeSlice.js';   // v2.621(감사 DATA-03): 이월 한계 = 수집 주기 × 2
 import { G15, G1H, alignDown, alignUp, snapBucketMs, rollupGranularity, planSegments, rollupChunkBuckets } from './perfRollup.js';   // v2.728 SAN 2차
@@ -903,7 +903,7 @@ async function storageSeriesMultiInner(deviceIds = [], { hours = 24, points = 12
 }
 
 /**
- * v2.915(호스트 귀속): 포트별 **기간 전송 바이트 합**. aggPorts 의 버킷 평균(bytes/sec) × 버킷 폭을 **표본이 있는 버킷만** 더한다 —
+ * v2.920(호스트 귀속): 포트별 **기간 전송 바이트 합**. aggPorts 의 버킷 평균(bytes/sec) × 버킷 폭을 **표본이 있는 버킷만** 더한다 —
  *   portperfshow 합산값이라 방향이 없고, '버킷 평균 × 폭' 은 어림값(≈)이다(가장자리 버킷은 조회 구간 안쪽 폭만 센다). 표본이 하나도 없는
  *   포트는 Map 에 없다(0 이 아니다 — '측정 없음'). series=true 면 버킷별 평균(없는 버킷 null)도 준다(호스트 상세 24h 추이).
  *   live 와 데모 모두 heavyQuery(기억·합류·감시 — storageSeriesMulti 와 같은 줄)를 탄다. 데모는 demoPortSeries 수식.

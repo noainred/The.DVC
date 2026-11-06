@@ -1,5 +1,5 @@
 /**
- * sanHostAttribText.js — SAN 도구 ‘호스트 귀속’ 보기의 문구·정렬·막대 계산(순수, v2.915 — 시안 D-③ SanAttrib).
+ * sanHostAttribText.js — SAN 도구 ‘호스트 귀속’ 보기의 문구·정렬·막대 계산(순수, v2.920 — 시안 D-③ SanAttrib).
  * 서버 /tools/sanswitch/attribution(attributeFleet) 응답을 쓴다. 확정분·추정분을 한 숫자로 합치지 않고, 값 없음은 ‘—’.
  */
 import { CONF, bytesText, rwText } from '../hostSanText.js';

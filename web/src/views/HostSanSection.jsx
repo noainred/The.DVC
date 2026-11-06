@@ -1,4 +1,4 @@
-// 호스트 상세 ‘SAN 경로·트래픽’ 묶음(v2.915 — 시안 D-① HostSan · docs/design/san-cvp-traffic/README.md).
+// 호스트 상세 ‘SAN 경로·트래픽’ 묶음(v2.920 — 시안 D-① HostSan · docs/design/san-cvp-traffic/README.md).
 //   HBA ↔ 스위치 포트 ↔ zone ↔ 스토리지 귀속 + 기간 바이트(확정분/추정분 분리) + 24h 추이. 판정은 서버(sanswitch/attribution.js) 하나이고
 //   문구는 hostSanText.js(순수). 마운트 1회 + 기간 버튼으로만 다시 받는다(무거운 집계 — 15초 폴링 금지). 늦게 온 이전 응답은 버린다.
 import React, { useEffect, useState } from 'react';

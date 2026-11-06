@@ -1,4 +1,4 @@
-// v2.915 — 호스트 SAN 경로·트래픽 문구: 값 없음은 ‘—’, 확정/추정 분리, 상태 문구는 이유를 말한다.
+// v2.920 — 호스트 SAN 경로·트래픽 문구: 값 없음은 ‘—’, 확정/추정 분리, 상태 문구는 이유를 말한다.
 import { describe, it, expect } from 'vitest';
 import { CONF, bytesText, rateText, rwText, sanSubText, sanStateText, sanKpis, hbaTargetsText, storageNoteText, seriesRows, sanFootText, confText } from './hostSanText.js';
 

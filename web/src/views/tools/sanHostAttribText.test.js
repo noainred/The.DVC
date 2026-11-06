@@ -1,4 +1,4 @@
-// v2.915 — SAN 호스트 귀속 보기 문구: 확정/추정 분리 · null 은 뒤로 · 막대 폭은 전체 합 기준.
+// v2.920 — SAN 호스트 귀속 보기 문구: 확정/추정 분리 · null 은 뒤로 · 막대 폭은 전체 합 기준.
 import { describe, it, expect } from 'vitest';
 import { attribKpis, storageBars, sortRows, filterRows, rowTotalText, attribStateText } from './sanHostAttribText.js';
 

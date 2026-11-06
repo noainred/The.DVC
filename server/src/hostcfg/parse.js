@@ -121,7 +121,7 @@ export function parseCertInfo(xml) {
 
 const SHARED_TRANSPORT = /HostFibreChannelTargetTransport|HostInternetScsiTargetTransport|HostFibreChannelOverEthernetTargetTransport/;
 const MP_LUNS_MAX = 4096;
-export const MP_TARGETS_MAX = 128;   // v2.915: 어댑터 × 타깃 WWN 상한(엣지 push·중앙 정제가 같은 값)
+export const MP_TARGETS_MAX = 128;   // v2.920: 어댑터 × 타깃 WWN 상한(엣지 push·중앙 정제가 같은 값)
 /** vSphere 는 WWN 을 10진 long 으로 준다 → 콜론 16진(소문자). soapClient.parseHbas 와 같은 변환. 숫자가 아니면 null. */
 export function wwnFromDec(dec) {
   const s = String(dec ?? '').trim();
@@ -132,7 +132,7 @@ export function wwnFromDec(dec) {
  * 멀티패스 요약 — 경로 블록(<path>)만 훑는다(LU 블록 안에 <lun> 태그가 중첩돼 LU 로 자르면 틀린다).
  * shared = 경로 전송이 FC·iSCSI·FCoE 인 LUN(로컬 디스크·CD-ROM 의 단일 경로는 정상이라 세지 않는다).
  * 반환: { luns, shared, paths, dead, deadLuns:[], singlePath, singleLuns:[], policies:{psp:count}, targets:[] } | null(못 읽음)
- * v2.915 targets — 경로별 **FC 타깃 포트 WWN**(transport HostFibreChannelTargetTransport 의 portWorldWideName)을 어댑터(vmhbaN)별로 센다:
+ * v2.920 targets — 경로별 **FC 타깃 포트 WWN**(transport HostFibreChannelTargetTransport 의 portWorldWideName)을 어댑터(vmhbaN)별로 센다:
  *   [{ adapter, wwn, live, dead, luns }] (상한 MP_TARGETS_MAX, 어댑터·WWN 순). 같은 SOAP 경로(config.storageDevice.multipathInfo)라 새 vCenter 호출이 없다.
  *   호스트 귀속 엔진(sanswitch/attribution.js)이 '지금 살아 있는 경로의 타깃' 으로 조닝 후보를 좁힌다 — 없으면 좁히지 않는다(빈 배열 = FC 경로 없음).
  */
@@ -516,7 +516,7 @@ function sanitizeMp(m) {
     for (const [k, n] of Object.entries(m.policies).slice(0, 16)) if (/^[A-Za-z0-9_.-]{1,64}$/.test(k) && Number.isFinite(n)) pol[k] = Math.trunc(n);
   }
   const n = (x) => (Number.isFinite(x) && x >= 0 ? Math.trunc(x) : 0);
-  // v2.915: 경로별 타깃(어댑터 이름·WWN 표준형·수치만 — 아는 필드만, 상한). 배열이 아니면 키를 싣지 않는다(구버전 엣지 = '아직 안 읽음').
+  // v2.920: 경로별 타깃(어댑터 이름·WWN 표준형·수치만 — 아는 필드만, 상한). 배열이 아니면 키를 싣지 않는다(구버전 엣지 = '아직 안 읽음').
   const WWN_RE = /^[0-9a-f]{2}(:[0-9a-f]{2}){7}$/;
   const targets = Array.isArray(m.targets) ? m.targets.slice(0, MP_TARGETS_MAX)
     .filter((t) => t && typeof t === 'object' && !Array.isArray(t) && nicName(t.adapter) && typeof t.wwn === 'string' && WWN_RE.test(t.wwn.toLowerCase()))

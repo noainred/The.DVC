@@ -1,4 +1,4 @@
-// 호스트 ↔ SAN 조닝·트래픽 귀속 + CVP 업링크 매칭(v2.915 — 설계 docs/design/san-cvp-traffic/README.md, 시안 D-①~③).
+// 호스트 ↔ SAN 조닝·트래픽 귀속 + CVP 업링크 매칭(v2.920 — 설계 docs/design/san-cvp-traffic/README.md, 시안 D-①~③).
 //
 //   · GET /hosts/:id/san-attribution   호스트 한 대의 HBA ↔ 스위치 포트 ↔ zone ↔ 스토리지 귀속 + 기간 바이트(확정분/추정분) + 24h 추이.
 //                                      게이트: inv.hosts + tools 권한 + 도구 키 san-switch(issueFor) + 범위 밖 호스트 404(v2.207 규칙).

@@ -1,5 +1,5 @@
 /**
- * sanswitch/endpointKey.js — SAN 포트의 '연결 장비 이름' 에서 스토리지 식별 키·시리얼·종류를 뽑는 순수 함수(v2.915).
+ * sanswitch/endpointKey.js — SAN 포트의 '연결 장비 이름' 에서 스토리지 식별 키·시리얼·종류를 뽑는 순수 함수(v2.920).
  *
  * 원래 perfDb.js 안에 있던 세 함수를 옮겼다 — 호스트 귀속 엔진(attribution.js, 순수)이 DB 모듈을 import 하지 않고
  * 같은 판정을 쓰게 하기 위해서다(판정 코어는 하나 — 루트 CLAUDE.md). perfDb.js 는 같은 이름으로 다시 내보내므로

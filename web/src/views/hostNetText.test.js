@@ -1,4 +1,4 @@
-// v2.915 — 호스트 네트워크 카드 CVP 업링크 문구: 방향(In=송신) · 값 없음 — · 매칭 없음은 이유를 말한다.
+// v2.920 — 호스트 네트워크 카드 CVP 업링크 문구: 방향(In=송신) · 값 없음 — · 매칭 없음은 이유를 말한다.
 import { describe, it, expect } from 'vitest';
 import { basisOf, bpsText, txRxText, errText, speedText, uplinksByNic, hostLevelUplinks, nicUplinkText, uplinkSummary, uplinkTotals } from './hostNetText.js';
 

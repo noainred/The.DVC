@@ -1,5 +1,5 @@
 /**
- * cvp/hostMatch.js — 가상화 호스트 ↔ CVP 스위치 포트 **업링크 매칭**(순수, v2.915 — 설계 docs/design/san-cvp-traffic/README.md §4.2).
+ * cvp/hostMatch.js — 가상화 호스트 ↔ CVP 스위치 포트 **업링크 매칭**(순수, v2.920 — 설계 docs/design/san-cvp-traffic/README.md §4.2).
  *
  * 근거 우선순위: LLDP 이웃(확정) → MAC 테이블 학습(높음) → **포트 설명 일치(보통 · 지금 가능)** → 없음(미매칭).
  *   포탈 CVP 수집은 LLDP·MAC 테이블을 아직 읽지 않으므로(docs/rules/cvp.md) A 단계는 설명 일치뿐이다 — 근거 없는 매칭은 만들지 않는다.
