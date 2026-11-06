@@ -146,7 +146,9 @@ export const SCHEMA = Object.freeze({
     ${BASE_COLS.map((c) => `${c} REAL`).join(', ')}, ${PERF_COL_NAMES.map((c) => `${c} REAL`).join(', ')},
     ${PEAK_SQL_COLS.map(([c, t]) => `${c} ${t}`).join(', ')}, ${PEAK_META_COLS.map(([c, t]) => `${c} ${t}`).join(', ')},
     PRIMARY KEY (agent, key, ts));
-    CREATE INDEX IF NOT EXISTS idx_bmm_raw_ts ON usage_history(ts);`,
+    CREATE INDEX IF NOT EXISTS idx_bmm_raw_ts ON usage_history(ts);
+    CREATE TABLE IF NOT EXISTS _pend (agent TEXT NOT NULL DEFAULT '', key TEXT NOT NULL, h INTEGER NOT NULL, daily INTEGER NOT NULL DEFAULT 1, at INTEGER,
+      PRIMARY KEY (agent, key, h));`,
   h1: `CREATE TABLE IF NOT EXISTS usage_hourly (
     agent TEXT NOT NULL DEFAULT '', key TEXT NOT NULL, h INTEGER NOT NULL, name TEXT, vcenter_id TEXT,
     samples INTEGER NOT NULL DEFAULT 0, last_ts INTEGER, peak_samples INTEGER NOT NULL DEFAULT 0, peak_src TEXT,
@@ -278,13 +280,23 @@ const peakSql = (c) => `${c}_peak_at=CASE WHEN excluded.${c}_peak IS NOT NULL AN
       ${c}_peak=CASE WHEN excluded.${c}_peak IS NOT NULL AND (${c}_peak IS NULL OR excluded.${c}_peak > ${c}_peak) THEN excluded.${c}_peak ELSE ${c}_peak END`;
 const sumSql = (p) => `${p}_sum=IFNULL(${p}_sum,0)+IFNULL(excluded.${p}_sum,0), ${p}_n=${p}_n+excluded.${p}_n`;
 
+/**
+ * v2.922(반증 D9): 롤업 peak_src = **피크를 낸 행들의 출처**. 피크 값은 창(window10)·샘플러(sampler) 행에서만 나오므로(psi·none 행은 피크가 null)
+ *   피크가 있는 행이 오면 그 출처로, 서로 다르면 'mixed'. 피크 없는 행(psi·none)은 아직 아무 출처도 없을 때만 적는다(마지막 행이 덮지 않는다).
+ */
+export const PEAK_SRC_SQL = `CASE WHEN excluded.peak_samples > 0 THEN (CASE WHEN peak_src IS NULL OR peak_src NOT IN ('window10','sampler','mixed') THEN excluded.peak_src WHEN peak_src = excluded.peak_src THEN peak_src ELSE 'mixed' END) ELSE COALESCE(peak_src, excluded.peak_src) END`;
+/** 같은 규칙의 JS 판본(재집계 — aggregateRows). */
+export function mergePeakSrc(cur, src, hasPk) {
+  if (hasPk) { if (cur == null || !['window10', 'sampler', 'mixed'].includes(cur)) return src ?? cur ?? null; return cur === src ? cur : 'mixed'; }
+  return cur ?? src ?? null;
+}
 const RAW_COLS = Object.freeze(['agent', 'key', 'ts', 'name', 'vcenter_id', 'src', ...BASE_COLS, ...PERF_COL_NAMES, ...PEAK_SQL_COLS.map(([c]) => c), ...PEAK_META_COLS.map(([c]) => c)]);
 const RAW_INS = `INSERT OR IGNORE INTO usage_history (${RAW_COLS.join(',')}) VALUES (${RAW_COLS.map(() => '?').join(',')})`;
 const H1_COLS = Object.freeze(['agent', 'key', 'h', 'name', 'vcenter_id', 'samples', 'last_ts', 'peak_samples', 'peak_src',
   ...ROLL.flatMap(({ p }) => [`${p}_sum`, `${p}_n`, `${p}_max`]), ...PEAK_COLS.flatMap((c) => [`${c}_peak`, `${c}_peak_at`])]);
 const H1_UPSERT = `INSERT INTO usage_hourly (${H1_COLS.join(',')}) VALUES (${H1_COLS.map(() => '?').join(',')})
   ON CONFLICT(agent,key,h) DO UPDATE SET name=excluded.name, vcenter_id=excluded.vcenter_id, samples=samples+excluded.samples,
-    last_ts=MAX(IFNULL(last_ts,0),excluded.last_ts), peak_samples=peak_samples+excluded.peak_samples, peak_src=COALESCE(excluded.peak_src, peak_src),
+    last_ts=MAX(IFNULL(last_ts,0),excluded.last_ts), peak_samples=peak_samples+excluded.peak_samples, peak_src=${PEAK_SRC_SQL},
     ${ROLL.map(({ p }) => `${sumSql(p)}, ${maxSql(`${p}_max`)}`).join(',\n    ')},
     ${PEAK_COLS.map(peakSql).join(',\n    ')}`;
 const D1_ROLL_ALL = Object.freeze([{ col: 'cpu_pct', p: 'cpu' }, { col: 'mem_pct', p: 'mem' }, ...D1_EXTRA_ROLL]);
@@ -292,7 +304,7 @@ const D1_COLS = Object.freeze(['agent', 'key', 'day', 'name', 'vcenter_id', 'sam
   ...D1_ROLL_ALL.flatMap(({ p }) => [`${p}_sum`, `${p}_n`, `${p}_max`]), ...PEAK_COLS.flatMap((c) => [`${c}_peak`, `${c}_peak_at`])]);
 const D1_UPSERT = `INSERT INTO usage_daily (${D1_COLS.join(',')}) VALUES (${D1_COLS.map(() => '?').join(',')})
   ON CONFLICT(agent,key,day) DO UPDATE SET name=excluded.name, vcenter_id=excluded.vcenter_id, samples=samples+excluded.samples,
-    last_ts=MAX(IFNULL(last_ts,0),excluded.last_ts), peak_samples=peak_samples+excluded.peak_samples, peak_src=COALESCE(excluded.peak_src, peak_src),
+    last_ts=MAX(IFNULL(last_ts,0),excluded.last_ts), peak_samples=peak_samples+excluded.peak_samples, peak_src=${PEAK_SRC_SQL},
     ${D1_ROLL_ALL.map(({ p }) => `${sumSql(p)}, ${maxSql(`${p}_max`)}`).join(',\n    ')},
     ${PEAK_COLS.map(peakSql).join(',\n    ')}`;
 const DEV_COLS = Object.freeze(['agent', 'key', 'ts', 'kind', 'dev', ...DEVICE_COL_NAMES, 'oper', ...DEVICE_PEAK_COLS.flatMap((c) => [`${c}_peak`, `${c}_peak_at`])]);
@@ -352,16 +364,37 @@ function txn(db, fn) {
  * @param {{rollupFrom?:Set<number>}} [opt]
  * @returns {Promise<{ok:boolean, inserted:number, duplicates:number, errors:string[], insertedRows:Array}>}
  */
-export async function writeServerRows(rows = [], agent = '', { rollup = true } = {}) {
+export async function writeServerRows(rows = [], agent = '', { rollup = true, pend = 'inserted', pendDaily = true } = {}) {
+  return serial(() => writeServerRowsInner(rows, agent, { rollup, pend, pendDaily }));
+}
+/*
+ * v2.922(반증 D5 · D4): 원시(월 파일)와 롤업(1h·1d 파일)은 다른 파일이라 한 트랜잭션이 될 수 없다. 그래서 원시를 넣는 **같은 트랜잭션**에
+ *   ‘보정 대기’(_pend: agent·key·시간 버킷)를 남기고, 롤업이 모두 성공하면 이번에 새로 만든 대기만 지운다. 롤업이 실패했거나 두 커밋 사이에
+ *   프로세스가 끝나면 대기가 남고 → 다음 보정(repairPending)이 **원시에서 그 버킷을 다시 집계해 통째로 바꾼다**(원시가 진실 · 다시 해도 같은 값).
+ *   마이그레이션은 보존 안 원시를 넣으며 **모든 행**(이미 있던 행 포함)의 버킷을 대기로 남긴다(pend:'all') — 라이브가 먼저 넣은 같은 행을
+ *   두 번 세지 않고(m3) 재개해도 한 번만 센다. 쓰기·보정은 한 줄로(serial) — 보정이 다른 쓰기의 대기를 지우지 않게.
+ */
+let _chain = Promise.resolve();
+function serial(fn) {
+  const p = _chain.then(fn, fn);
+  _chain = p.catch(() => {});
+  return p;
+}
+async function writeServerRowsInner(rows, agent, { rollup, pend, pendDaily }) {
   const res = { ok: true, inserted: 0, duplicates: 0, errors: [], insertedRows: [] };
   const valid = rows.filter((r) => String(r?.key || '').trim() && Number.isFinite(Number(r?.ts)));
   if (!valid.length) return res;
+  const fresh = [];   // [rawKey, key, h] — 이번에 새로 만든 대기(롤업이 성공하면 지운다)
   for (const [k, list] of groupBy(valid, 'raw', (r) => Number(r.ts))) {
     await withPeriodFile('raw', k, { create: true }, (db) => {
       if (!db) { res.ok = false; res.errors.push(`${fileNameOf('raw', k)}: ${_failed.get(fileNameOf('raw', k))?.reason || '열기 실패'}`); return; }
       try {
         txn(db, () => {
           const st = prep(db, fileNameOf('raw', k), 'ins', RAW_INS);
+          const selP = prep(db, fileNameOf('raw', k), 'pendSel', 'SELECT daily FROM _pend WHERE agent=? AND key=? AND h=?');
+          const insP = prep(db, fileNameOf('raw', k), 'pendIns', 'INSERT INTO _pend (agent,key,h,daily,at) VALUES (?,?,?,?,?)');
+          const upP = prep(db, fileNameOf('raw', k), 'pendUp', 'UPDATE _pend SET daily=1 WHERE agent=? AND key=? AND h=?');
+          const seen = new Set();
           for (const r of list) {
             const vals = RAW_COLS.map((c) => {
               if (c === 'agent') return agent;
@@ -374,14 +407,147 @@ export async function writeServerRows(rows = [], agent = '', { rollup = true } =
               return n(r[c]);
             });
             const out = st.run(...vals);
-            if (Number(out?.changes)) { res.inserted += 1; res.insertedRows.push(r); } else res.duplicates += 1;
+            const isNew = !!Number(out?.changes);
+            if (isNew) { res.inserted += 1; res.insertedRows.push(r); } else res.duplicates += 1;
+            if (pend === 'none' || (pend === 'inserted' && !isNew)) continue;
+            const key = String(r.key).trim(); const h = hourOf(Number(r.ts));
+            const sk = `${key}|${h}`;
+            if (seen.has(sk)) continue;
+            seen.add(sk);
+            const ex = selP.get(agent, key, h);
+            if (!ex) { insP.run(agent, key, h, pendDaily ? 1 : 0, Date.now()); fresh.push([k, key, h]); }
+            else if (pendDaily && !Number(ex.daily)) upP.run(agent, key, h);
           }
         });
       } catch (e) { res.ok = false; res.errors.push(`${fileNameOf('raw', k)}: ${String(e?.message || e).slice(0, 160)}`); }
     });
   }
-  if (rollup && res.insertedRows.length) await rollupServerRows(res.insertedRows, agent, res);
+  if (rollup && res.insertedRows.length) {
+    const before = res.errors.length;
+    await rollupServerRows(res.insertedRows, agent, res);
+    // 롤업이 전부 성공했을 때만 이번 대기를 지운다(하나라도 실패하면 그 묶음 전체를 보정이 다시 집계한다 — 다시 해도 같은 값).
+    if (res.errors.length === before) await clearPend(fresh, agent);
+    else res.pendLeft = fresh.length;
+  }
   return res;
+}
+async function clearPend(list, agent) {
+  const byFile = new Map();
+  for (const [k, key, h] of list) { if (!byFile.has(k)) byFile.set(k, []); byFile.get(k).push([key, h]); }
+  for (const [k, items] of byFile) {
+    await withPeriodFile('raw', k, { create: false }, (db) => {
+      if (!db) return;
+      try { txn(db, () => { const del = prep(db, fileNameOf('raw', k), 'pendDel', 'DELETE FROM _pend WHERE agent=? AND key=? AND h=?'); for (const [key, h] of items) del.run(agent, key, h); }); } catch { /* 남으면 보정이 다시 집계한다(같은 값) */ }
+    });
+  }
+}
+
+/** 5분 행들 → 롤업 한 줄의 값(순수 — 재집계용). 열 순서는 cols(H1_COLS · D1_COLS) 그대로. */
+export function aggregateRows(rows, { agent, key, bucketCol, bucket, rolls }) {
+  const sorted = [...rows].sort((a, b) => Number(a.ts) - Number(b.ts));
+  const last = sorted.at(-1) || {};
+  const o = { agent, key, [bucketCol]: bucket, name: String(last.name || ''), vcenter_id: String(last.vcenter_id ?? last.vcenterId ?? ''), samples: sorted.length,
+    last_ts: last.ts == null ? null : Number(last.ts), peak_samples: 0, peak_src: null };
+  for (const { p } of rolls) { o[`${p}_sum`] = 0; o[`${p}_n`] = 0; o[`${p}_max`] = null; }
+  for (const c of PEAK_COLS) { o[`${c}_peak`] = null; o[`${c}_peak_at`] = null; }
+  for (const r of sorted) {
+    const hp = hasPeak(r);
+    if (hp) o.peak_samples += 1;
+    o.peak_src = mergePeakSrc(o.peak_src, r.peak_src ? String(r.peak_src) : null, hp);
+    for (const { col, p } of rolls) {
+      const v = n(r[col]);
+      if (v == null) continue;
+      o[`${p}_sum`] += v; o[`${p}_n`] += 1;
+      if (o[`${p}_max`] == null || v > o[`${p}_max`]) o[`${p}_max`] = v;
+    }
+    for (const c of PEAK_COLS) {
+      const v = n(r[`${c}_peak`]);
+      if (v != null && (o[`${c}_peak`] == null || v > o[`${c}_peak`])) { o[`${c}_peak`] = v; o[`${c}_peak_at`] = n(r[`${c}_peak_at`]); }
+    }
+  }
+  return o;
+}
+
+/**
+ * 보정 대기 처리 — 원시에서 그 시간(·하루) 버킷을 다시 집계해 롤업 행을 **바꾼다**(누적이 아니라 교체 — 다시 해도 같은 값).
+ *  · 1일 재집계는 dailyLiveAfter 보다 나중 행만 센다(마이그레이션이 옮긴 예전 원시는 1일 사본 표가 따로 갖는다 — 두 번 세지 않게).
+ *  · 하루의 원시가 보존 밖으로 일부 지워졌으면(rawKeepFrom 보다 하루 시작이 이르면) 1일은 다시 집계하지 않는다(덜 센 값으로 덮지 않게) — expiredDaily 로 센다.
+ * @returns {Promise<{buckets:number, days:number, expiredDaily:number, errors:string[]}>}
+ */
+export async function repairPending({ dailyLiveAfter = null, rawKeepFrom = null, max = 2_000 } = {}) {
+  return serial(() => repairPendingInner({ dailyLiveAfter, rawKeepFrom, max }));
+}
+async function repairPendingInner({ dailyLiveAfter, rawKeepFrom, max }) {
+  const out = { buckets: 0, days: 0, expiredDaily: 0, errors: [] };
+  for (const f of listFamilyFiles('raw')) {
+    await withPeriodFile('raw', f.key, { create: false }, async (rawDb) => {
+      if (!rawDb) return;
+      let pend = [];
+      try { pend = rawDb.prepare('SELECT agent, key, h, daily FROM _pend ORDER BY h LIMIT ?').all(max); } catch { return; }
+      if (!pend.length) return;
+      const selHour = rawDb.prepare('SELECT * FROM usage_history WHERE agent=? AND key=? AND ts>=? AND ts<?');
+      const days = new Map();
+      const done = [];
+      for (const pd of pend) {
+        const h = Number(pd.h);
+        const rows = selHour.all(pd.agent, pd.key, h, h + HOUR_MS);
+        const ok = await replaceRollup('h1', month0('h1', h), 'usage_hourly', H1_COLS, 'h', h, rows, { agent: pd.agent, key: pd.key, rolls: ROLL }, out);
+        if (!ok) continue;
+        out.buckets += 1;
+        if (Number(pd.daily)) {
+          const day = dayKey(h);
+          const dk = `${pd.agent}\u0000${pd.key}\u0000${day}`;
+          if (!days.has(dk)) days.set(dk, { agent: pd.agent, key: pd.key, day, ts: h, items: [] });
+          days.get(dk).items.push(pd);
+        } else done.push(pd);
+      }
+      for (const d of days.values()) {
+        const [ds, de] = dayRange(d.day);
+        if (rawKeepFrom != null && ds < rawKeepFrom) { out.expiredDaily += 1; done.push(...d.items); continue; }
+        const rows = rawDb.prepare('SELECT * FROM usage_history WHERE agent=? AND key=? AND ts>=? AND ts<?').all(d.agent, d.key, ds, de)
+          .filter((r) => dailyLiveAfter == null || Number(r.ts) > dailyLiveAfter);
+        const ok = await replaceRollup('d1', d.day.slice(0, 4), 'usage_daily', D1_COLS, 'day', d.day, rows, { agent: d.agent, key: d.key, rolls: D1_ROLL_ALL }, out);
+        if (!ok) continue;
+        out.days += 1; done.push(...d.items);
+      }
+      if (done.length) {
+        try { txn(rawDb, () => { const del = rawDb.prepare('DELETE FROM _pend WHERE agent=? AND key=? AND h=?'); for (const pd of done) del.run(pd.agent, pd.key, pd.h); }); }
+        catch (e) { out.errors.push(`${f.name}: ${String(e?.message || e).slice(0, 120)}`); }
+      }
+    });
+  }
+  if (out.buckets || out.days) _counts = null;
+  return out;
+}
+const month0 = (family, ts) => periodKeyOf(family, ts);
+/** 하루(포탈 시각) [시작, 끝) ms. */
+function dayRange(day) {
+  const s0 = Date.UTC(Number(day.slice(0, 4)), Number(day.slice(5, 7)) - 1, Number(day.slice(8, 10))) - OFF_MS;
+  return [s0, s0 + DAY_MS];
+}
+/** 롤업 행 하나를 원시 집계로 교체(DELETE + INSERT 한 트랜잭션). 원시가 0행이면 지우기만. */
+async function replaceRollup(family, pkey, table, cols, bucketCol, bucket, rows, { agent, key, rolls }, out) {
+  return withPeriodFile(family, pkey, { create: true }, (db) => {
+    if (!db) { out.errors.push(`${fileNameOf(family, pkey)}: 열기 실패`); return false; }
+    try {
+      txn(db, () => {
+        db.prepare(`DELETE FROM ${table} WHERE agent=? AND key=? AND ${bucketCol}=?`).run(agent, key, bucket);
+        if (!rows.length) return;
+        const o = aggregateRows(rows, { agent, key, bucketCol, bucket, rolls });
+        db.prepare(`INSERT INTO ${table} (${cols.join(',')}) VALUES (${cols.map(() => '?').join(',')})`).run(...cols.map((c) => (o[c] === undefined ? null : o[c])));
+      });
+      return true;
+    } catch (e) { out.errors.push(`${fileNameOf(family, pkey)}: ${String(e?.message || e).slice(0, 120)}`); return false; }
+  });
+}
+/** 보정 대기 수(진단 — 파일마다 집계 하나). */
+export async function pendingCount() {
+  let total = 0;
+  for (const f of listFamilyFiles('raw')) {
+    const c = await withPeriodFile('raw', f.key, { create: false }, (db) => { try { return Number(db?.prepare('SELECT COUNT(*) c FROM _pend').get()?.c ?? 0); } catch { return 0; } });
+    total += c || 0;
+  }
+  return total;
 }
 
 /**
@@ -417,6 +583,13 @@ export async function writeDailyMigRows(rows = []) {
   return res;
 }
 
+/** 1시간 롤업 samples 합(집계 하나 · h 범위) — 마이그레이션 대조용. 파일이 없으면 null. */
+export async function hourlySamplesInPeriod(key, from, to) {
+  return withPeriodFile('h1', key, { create: false }, (db) => {
+    if (!db) return null;
+    return Number(db.prepare('SELECT SUM(samples) s FROM usage_hourly WHERE h >= ? AND h < ?').get(from, to)?.s ?? 0);
+  });
+}
 /** 한 기간 파일의 표 행 수(집계 하나 · 시간 조건) — 마이그레이션 대조용. 파일이 없으면 null. */
 export async function countInPeriod(family, key, table, col, lo, hi) {
   return withPeriodFile(family, key, { create: false }, (db) => {

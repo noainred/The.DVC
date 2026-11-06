@@ -15,7 +15,7 @@
  */
 import { isMockMode } from '../../mock/demo/flags.js'; // v2.708 데모 표시
 import { requireRole, requirePerm } from '../../auth/auth.js';
-import { scopedVcenterIds, inUserWriteScope } from '../../auth/scope.js';
+import { scopedVcenterIds, inUserWriteScope, isFullReadWriteScope } from '../../auth/scope.js';
 import { mergeScopedMap, keepScopedFields, ignoredGlobalFields } from '../../auth/scopeMerge.js'; // v2.605 AUTHZ2605-01 · v2.607 AUTHZ2607-05
 import { store } from '../../store.js';
 import { logAudit } from '../../audit.js';
@@ -542,9 +542,15 @@ api.get('/tools/bm-usage/perf/:key/ports', toolsPerm, (req, res) => memoJson(req
  * v2.922 — 수동 매핑 확정/삭제(설정 소유자 = admin). 범위: 서버가 안 보이면 404 · 보이는데 매핑할 CVP 가 그 법인 것이 아니면 403(조회 밖 404 → 쓰기 밖 403).
  *   원자적 쓰기(portMap.js) · 감사 로그. body { key, nic, cvpId, deviceKey, port, remove? }.
  */
-api.put('/tools/bm-usage/port-map', adminOnly, toolsPerm, async (req, res) => {
-  const b = req.body && typeof req.body === 'object' ? req.body : {};
-  const allowed = scopedVcenterIds(req.user, store.get());
+/*
+ * v2.922(반증 D1): 쓰기 범위 검사는 **조건 없이** 한다 — 바깥 조건을 조회 범위(scopedVcenterIds)로 두면 ‘조회 무제한 + writeVcenters 제한’
+ *   계정이 통째로 검사에서 빠진다(server/CLAUDE.md v2.733 함정). 순서: 조회 밖 404 → 쓰기 밖 403 → (전체 범위가 아니면) 법인 CVP 403.
+ *   삭제는 PUT { remove:true } 와 DELETE 둘 다 받는다(같은 처리 함수 — 검사가 갈라지지 않게).
+ */
+async function portMapWrite(req, res, { remove = false } = {}) {
+  const b = { ...(req.query && typeof req.query === 'object' ? req.query : {}), ...(req.body && typeof req.body === 'object' ? req.body : {}) };
+  const snap = store.get();
+  const allowed = scopedVcenterIds(req.user, snap);
   const D = {
     currentTargets, bmAddressHosts,
     listEdgeBmUsage: async () => (await import('../../central/bmUsageEdgePull.js')).listEdgeBmUsage(),
@@ -552,15 +558,14 @@ api.put('/tools/bm-usage/port-map', adminOnly, toolsPerm, async (req, res) => {
   try {
     const found = await resolvePerfTarget(req, D, { allowed, isAdmin: true, key: t(b.key) });
     if (!found || found.denied) return res.status(404).json({ ok: false, reason: '대상 서버를 찾지 못했습니다.' });
-    // 조회 밖 404 → 쓰기 밖 403(쓰기 범위가 조회 범위보다 좁은 계정 — auth/scope inUserWriteScope).
-    if (allowed && !inUserWriteScope(req.user, store.get(), t(found.target.vcenterId))) return res.status(403).json({ ok: false, error: 'forbidden', reason: '이 서버의 법인에 쓰기 권한이 없습니다.' });
+    if (!inUserWriteScope(req.user, snap, t(found.target.vcenterId))) return res.status(403).json({ ok: false, error: 'forbidden', reason: '이 서버의 법인에 쓰기 권한이 없습니다(조회 전용).' });
     const PM = await import('../../bmusage/portMap.js');
-    if (b.remove === true) {
+    if (remove || b.remove === true) {
       const r = PM.removePortMapping({ agent: found.agent, key: found.realKey, nic: t(b.nic) });
       logAudit({ user: req.user?.username, action: 'bm-usage.port-map.remove', ip: req.ip || '', detail: JSON.stringify({ key: found.realKey, nic: t(b.nic), ok: r.ok }).slice(0, 300) });
       return res.status(r.ok ? 200 : r.notFound ? 404 : 409).json(r);
     }
-    if (allowed) {
+    if (!isFullReadWriteScope(req.user, snap)) {
       const vc = t(found.target.vcenterId);
       const corp = vc ? t((await import('../../datacenter/store.js')).datacenterOfVcenter(vc)) : '';
       const cvp = (await import('../../cvp/registry.js')).listServers().find((x) => String(x.id) === t(b.cvpId));
@@ -570,7 +575,9 @@ api.put('/tools/bm-usage/port-map', adminOnly, toolsPerm, async (req, res) => {
     logAudit({ user: req.user?.username, action: 'bm-usage.port-map.set', ip: req.ip || '', detail: JSON.stringify({ key: found.realKey, nic: t(b.nic), cvpId: t(b.cvpId), deviceKey: t(b.deviceKey), port: t(b.port), ok: r.ok, replaced: !!r.replaced }).slice(0, 300) });
     res.status(r.ok ? 200 : 400).json(r);
   } catch (e) { res.status(500).json({ ok: false, reason: String(e?.message || e).slice(0, 300) }); }
-});
+}
+api.put('/tools/bm-usage/port-map', adminOnly, toolsPerm, (req, res) => portMapWrite(req, res));
+api.delete('/tools/bm-usage/port-map', adminOnly, toolsPerm, (req, res) => portMapWrite(req, res, { remove: true }));
 
 /** 한 서버의 추이 — 원시 + 일 롤업. 상한으로 잘렸으면 밝힌다(조용한 상한 금지). */
 api.get('/tools/bm-usage/history', toolsPerm, async (req, res) => {

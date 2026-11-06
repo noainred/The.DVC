@@ -264,7 +264,7 @@ export function writeMeta(db, k, v) {
 /** 마이그레이션 상태의 응답용 요약(커서 등 내부 값은 줄인다). */
 export function migrationView(m) {
   if (!m) return null;
-  return { phase: m.phase, startedAt: m.startedAt ?? null, updatedAt: m.updatedAt ?? null, doneAt: m.doneAt ?? null, attempts: m.attempts ?? 0,
+  return { phase: m.phase, startedAt: m.startedAt ?? null, updatedAt: m.updatedAt ?? null, doneAt: m.doneAt ?? null, attempts: m.attempts ?? 0, failedAt: m.failedAt ?? null,
     legacyMaxTs: m.legacyMaxTs ?? null, copied: m.copied || null, verify: m.verify || null, deleted: m.deleted || null, error: m.error || null, failedPhase: m.failedPhase || null };
 }
 /**
@@ -285,6 +285,17 @@ export function initMigrationState(conn, now = Date.now()) {
     rawCursor: 0, dailyCursor: 0,
     copied: { raw: 0, rawDup: 0, rawOld: 0, hourly: 0, daily: 0, dailyDup: 0 },
   });
+}
+/**
+ * v2.922(반증 D5): 롤업 보정 — 원시는 들어갔는데 1시간·1일 롤업이 실패한(또는 두 커밋 사이에 끊긴) 버킷을 원시에서 다시 집계한다(monthStore.repairPending).
+ *   1일 재집계는 마이그레이션이 옮긴 예전 원시(ts ≤ legacyMaxTs)를 세지 않는다 — 그 날들은 1일 사본 표가 갖는다.
+ */
+export async function repairRollups({ rawKeepFrom = null } = {}) {
+  const db = await getDb();
+  if (!db) return { ok: false, reason: 'db-unavailable' };
+  const m = readMeta(db, MIGRATE_KEY);
+  const r = await month.repairPending({ dailyLiveAfter: m && m.phase !== 'none' ? n(m.legacyMaxTs) : null, rawKeepFrom });
+  return { ok: !r.errors.length, ...r };
 }
 /** 메인 파일 핸들(마이그레이션 모듈 전용 — 같은 연결을 쓴다: 두 연결이 같은 파일에 쓰면 SQLITE_BUSY). */
 export async function mainDbForMigration() { return getDb(); }
@@ -431,13 +442,18 @@ export async function pruneUsage({ rawDays = 90, dailyDays = 365 * 5, every = 12
   const dayCut = dayKey(Date.now() - dailyDays * 86_400_000);
   _pruning = (async () => {
     try {
-      const a = await chunkedDelete(db.prepare('DELETE FROM usage_history WHERE rowid IN (SELECT rowid FROM usage_history WHERE ts < ? LIMIT ?)'), [rawCut], { label: 'bmusage.usage_history' });
-      const b = await chunkedDelete(db.prepare('DELETE FROM usage_daily WHERE rowid IN (SELECT rowid FROM usage_daily WHERE day < ? LIMIT ?)'), [dayCut], { label: 'bmusage.usage_daily' });
+      /*
+       * v2.922(반증 D4·D6): 마이그레이션이 옮기는 중·대조 전·실패 대기 중에는 예전 표 정리와 원시·롤업 파일 보존을 **멈춘다** —
+       *   예전 표를 지우면 대조(예전 행 수 = 사본 · 1시간 표본 합)가 어긋나고, 사본 파일을 지우면 재시도 대조가 다시 실패한다.
+       */
+      const rule = readRule(readMeta(db, MIGRATE_KEY));
+      const migHold = ['copy-raw', 'copy-daily', 'verify', 'failed'].includes(rule.phase);
+      const a = migHold ? { deleted: 0, done: true } : await chunkedDelete(db.prepare('DELETE FROM usage_history WHERE rowid IN (SELECT rowid FROM usage_history WHERE ts < ? LIMIT ?)'), [rawCut], { label: 'bmusage.usage_history' });
+      const b = migHold ? { deleted: 0, done: true } : await chunkedDelete(db.prepare('DELETE FROM usage_daily WHERE rowid IN (SELECT rowid FROM usage_daily WHERE day < ? LIMIT ?)'), [dayCut], { label: 'bmusage.usage_daily' });
       if (a.deleted || b.deleted) _counts = null;
-      const out = { ok: true, rawDeleted: a.deleted, dailyDeleted: b.deleted, done: a.done && b.done };
+      const out = { ok: true, rawDeleted: a.deleted, dailyDeleted: b.deleted, done: a.done && b.done, ...(migHold ? { heldForMigration: rule.phase } : {}) };
       if (keep) {
-        const rule = readRule(readMeta(db, MIGRATE_KEY));
-        const paused = ['copy-raw', 'copy-daily', 'verify'].includes(rule.phase) ? ['raw', 'h1', 'd1'] : [];
+        const paused = migHold ? ['raw', 'h1', 'd1'] : [];
         const f = await month.pruneMonthFiles({ keepDays: keep, paused });
         out.files = { deleted: f.filesDeleted, residualDeleted: f.residualDeleted, deferred: f.deferred, ...(f.errors.length ? { errors: f.errors.slice(0, 4) } : {}) };
         if (!f.ok) out.ok = false;

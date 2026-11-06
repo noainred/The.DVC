@@ -33,7 +33,7 @@ import { collectEnterpriseUsage, SESSION_BUDGET_MS as ENT_BUDGET_MS } from './co
 import { buildUsage } from './usage.js';
 import { recordHbaBasis, pruneHbaBasis } from './hbaBasis.js'; // v2.744(감사 LEFT-08 ②): HBA 사용률 분모 근거(화면 각주)
 import { collectOsUsage, SESSION_BUDGET_MS as OS_BUDGET_MS } from './collectors/osSsh.js';
-import { insertUsage, pruneUsage } from './db.js';
+import { insertUsage, pruneUsage, repairRollups } from './db.js';
 import { ensureMonthMigration, migrationLast } from './monthMigrate.js';
 import { estimateBaseMs, planCycleWindow } from './peakPlan.js'; // v2.922: 피크 창 주기 예산 자동 맞춤
 import { recordBmUsage } from './activityLog.js';
@@ -241,6 +241,7 @@ export function bmUsageStatus({ detail = false } = {}) {
     lastPrune: _lastPrune,
     migration: migrationLast(),   // v2.922: 마지막 마이그레이션 실행(단계·실패 사유 — 개수만, 서버 이름 없음)
     peakPlan: _peakPlan,          // v2.922: 피크 창 주기 예산 결정(수집 건강 ⑫ — 개수·ms 만)
+    rollupRepair: _lastRepair,    // v2.922(반증 D5): 마지막 롤업 보정(다시 집계한 버킷 수 · 실패)
   };
   // v2.744(최종 검토 FB): 등록부 로드 오류 사유는 detail 일 때만 위치(줄·칸)까지 — 그 밖에는 분류 문구(sourceErrorsView).
   if (st.last && Array.isArray(st.last.sourceErrors)) st.last = { ...st.last, sourceErrors: sourceErrorsView(st.last.sourceErrors, { detail }) };
@@ -738,9 +739,19 @@ export async function bmUsageTimerTick() {
   try {
     if (bmUsageEnabled()) await pollBmUsageOnce({ trigger: 'auto' });
   } finally {
+    // v2.922(반증 D5): 롤업 보정 대기(원시는 들어갔는데 롤업이 실패한 버킷)를 원시에서 다시 집계 — 매 틱, 대기가 없으면 파일을 열어 보기만 한다.
+    if (fs.existsSync(BMUSAGE_DB_FILE())) {
+      try {
+        const s = loadBmUsageSettings();
+        const r = await repairRollups({ rawKeepFrom: Date.now() - effectiveRawDays(s) * 86_400_000 });
+        _lastRepair = { at: Date.now(), ...(({ errors, ...x }) => ({ ...x, errors: (errors || []).slice(0, 3) }))(r) };
+        if (r.errors?.length && _srcErrLog('repair', r.errors[0])) console.warn(`[bmusage] 롤업 보정 실패: ${r.errors[0]}`);
+      } catch (e) { _lastRepair = { at: Date.now(), ok: false, error: String(e?.message || e).slice(0, 200) }; }
+    }
     await pruneTick().catch(() => {});
   }
 }
+let _lastRepair = null;
 
 /**
  * 동시성 제한 풀 — v2.579(ARCH-01): 본체는 `util/pool.js poolSettled` 다(손으로 쓴 사본 제거).
@@ -856,6 +867,8 @@ export async function pollBmUsageOnce({ trigger = 'auto', demoOnly = false } = {
       },
       // v2.922: 피크 창 결정(창 길이·사유·예상 소요·예산 — 수집 건강 ⑫ 이 쓸 값).
       peakPlan: (({ steps: _s, ...p }) => p)(peakPlan),
+      // v2.922(반증 D6): 마이그레이션 상태(단계 · 시도 · 다음 재시도) — 수집 건강 ⑫ 이 쓸 값.
+      migration: migrationLast(),
       dbOk: !!ins.ok, dbError: ins.error || null, ...(ins.migrateError ? { dbMigrateError: { count: ins.migrateError.count, at: ins.migrateError.at } } : {}), counts, ...srcErr, trigger, ...(demo ? { demo: true } : {}),
       alerts: alerts && !alerts.skipped ? { sent: alerts.sent ?? 0, suppressed: alerts.suppressed ?? 0, capped: alerts.capped ?? 0, over: alerts.counts?.over ?? 0, error: alerts.error || null } : null,
     };
@@ -875,7 +888,7 @@ export function startBmUsagePoller() {
 }
 
 export function stopBmUsagePoller() { _timer?.stop?.(); _timer = null; }
-export function _resetForTest() { _cycleSamples = []; _peakPlan = null; _prev.clear(); _authStopped.clear(); _detail.clear(); _last = null; _running = false; _pruneTick = 0; _lastPrune = null; _fleetOverride = null; guard._resetForTest(); }
+export function _resetForTest() { _lastRepair = null; _cycleSamples = []; _peakPlan = null; _prev.clear(); _authStopped.clear(); _detail.clear(); _last = null; _running = false; _pruneTick = 0; _lastPrune = null; _fleetOverride = null; guard._resetForTest(); }
 /** 테스트 전용 — 분류 함수 대체(EDGE2628-03) · 인메모리 상태 주입(EDGE2628-02). */
 export function _setFleetForTest(fn) { _fleetOverride = typeof fn === 'function' ? fn : null; }
 export function _seedStateForTest({ prev = [], authStopped = [] } = {}) {

@@ -149,6 +149,9 @@ async function openInner() {
       // 원시 표본이 오면 그 포트의 마지막 처리량도 갱신한다(엣지는 구성이 바뀌지 않은 장비 레코드를 매번 보내지 않는다 — push.js).
       rateFromSample: conn.prepare(`UPDATE port_latest SET in_bps=?, out_bps=?, in_util=?, out_util=?, in_err=?, out_err=?, in_drop=?, out_drop=?, rate_ts=?
         WHERE agent=? AND cvp_id=? AND device_key=? AND port=? AND IFNULL(rate_ts,0) < ?`),
+      // v2.922(반증 D3): 구 엣지 10칸 표본(드롭 칸 자체가 없다)은 port_latest 의 드롭을 **덮지 않는다** — 장비 레코드가 준 값이 null 로 지워졌다.
+      rateFromSampleNoDrop: conn.prepare(`UPDATE port_latest SET in_bps=?, out_bps=?, in_util=?, out_util=?, in_err=?, out_err=?, rate_ts=?
+        WHERE agent=? AND cvp_id=? AND device_key=? AND port=? AND IFNULL(rate_ts,0) < ?`),
       // v2.611(EDGE2611-04): 행이 **있으면** 센다(ts 는 더 클 때만 오른다) — changes 가 '중앙에 그 장비 행이 있는가' 를 말해야
       //   엣지가 없는 행을 touch 로만 보내는 것을 알아채고 레코드를 다시 보낸다(예전 `AND ts < ?` 는 같은 ts 재전송을 0 으로 셌다).
       touchDevice: conn.prepare('UPDATE device_latest SET ts=MAX(ts, ?) WHERE agent=? AND cvp_id=? AND device_key=?'),
@@ -370,7 +373,7 @@ function insertSample(st, [agent, cvpId, key, port, ts, inBps, outBps, inUtil, o
 }
 
 /**
- * 중앙: 엣지 push 의 원시 표본 행 적재. rows: [[cvpId, deviceKey, port, ts, inBps, outBps, inUtil, outUtil, inErr, outErr], …]
+ * 중앙: 엣지 push 의 원시 표본 행 적재. rows: [[cvpId, deviceKey, port, ts, inBps, outBps, inUtil, outUtil, inErr, outErr(, inDrop, outDrop — v2.922 새 엣지 12칸)], …]
  * ⚠ 호출자가 소유권(cvpId ∈ serversForAgent(agent))을 먼저 걸러야 한다.
  */
 export const IMPORT_TXN_ROWS = 2_000;
@@ -392,8 +395,8 @@ export async function importSamples(agent, rows = []) {
       for (const r of part) {
         if (insertSample(db.st, [agent, r[0], r[1], r[2], r[3], r[4], r[5], r[6], r[7], r[8], r[9], r[10], r[11]])) {
           ins++;
-          const v = [r[4], r[5], r[6], r[7], r[8], r[9], r[10], r[11]].map(numOrNull);
-          db.st.rateFromSample.run(...v, r[3], agent, r[0], r[1], r[2], r[3]);
+          if (r.length >= 12) db.st.rateFromSample.run(...[r[4], r[5], r[6], r[7], r[8], r[9], r[10], r[11]].map(numOrNull), r[3], agent, r[0], r[1], r[2], r[3]);
+          else db.st.rateFromSampleNoDrop.run(...[r[4], r[5], r[6], r[7], r[8], r[9]].map(numOrNull), r[3], agent, r[0], r[1], r[2], r[3]);
         } else dup++;
       }
       db.conn.exec('COMMIT');
