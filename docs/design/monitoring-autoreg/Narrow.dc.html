@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>설정 연동 탭 — 400px</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+KR:wght@400;500;700&family=JetBrains+Mono:wght@400;500;600&display=swap">
+<style>
+body{margin:0;background:#0a0e17;color:#e6edf6;font-family:"Inter","Noto Sans KR","Apple SD Gothic Neo",sans-serif;font-size:13px;line-height:1.45}
+a{color:#7dd3fc}a:hover{color:#bae6fd}
+.mono{font-family:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,monospace}
+.card{background:#141b2d;border:1px solid #1f2a40;border-radius:12px}
+.btn{height:36px;padding:0 14px;border-radius:8px;border:1px solid #243049;background:#141b2d;color:#e6edf6;font:inherit;font-size:13px;white-space:nowrap}
+.btn.primary{border-color:#1d4ed8;background:#2563eb;color:#fff;font-weight:600}
+.tab{height:32px;padding:0 12px;border-radius:9px;border:1px solid #243049;background:#0f1626;color:#9fb4cc;font:inherit;font-size:12.5px;white-space:nowrap}
+.tab.on{background:#2563eb;border-color:#2563eb;color:#fff;font-weight:600}
+.stat{background:#141b2d;border:1px solid #1f2a40;border-radius:10px;padding:10px 12px;display:flex;flex-direction:column;gap:4px;min-width:0}
+.stat span{font-size:11.5px;color:#8b9bb4}
+.stat b{font-family:"JetBrains Mono",monospace;font-weight:600;font-size:20px}
+.stat.g b{color:#22c55e}.stat.a b{color:#f59e0b}.stat.r b{color:#ef4444}.stat.b b{color:#9fcaff}
+.chip{display:inline-flex;align-items:center;height:28px;padding:0 10px;border-radius:999px;border:1px solid #243049;background:#0f1626;font-size:12px;color:#9fb4cc;white-space:nowrap}
+.chip.on{border-color:#3b82f6;background:#13284a;color:#e6edf6}
+.sel{height:36px;padding:0 28px 0 12px;border-radius:8px;border:1px solid #243049;background:#0f1626;color:#e6edf6;font:inherit;font-size:13px;appearance:none;-webkit-appearance:none;background-image:linear-gradient(45deg,transparent 50%,#8b9bb4 50%),linear-gradient(135deg,#8b9bb4 50%,transparent 50%);background-position:calc(100% - 15px) 15px,calc(100% - 10px) 15px;background-size:5px 5px;background-repeat:no-repeat;min-width:0}
+.inp{height:36px;padding:0 12px;border-radius:8px;border:1px solid #243049;background:#0f1626;color:#e6edf6;font:inherit;font-size:13px;min-width:0}
+.inp::placeholder{color:#8b9bb4}
+.item{display:grid;grid-template-columns:24px minmax(0,1fr);gap:8px 10px;padding:10px 12px;border-bottom:1px solid #1a2236;align-items:start}
+.item .t{display:flex;align-items:center;gap:8px;min-width:0;flex-wrap:wrap}
+.item .n{color:#e6edf6;font-weight:500}
+.item .sub{font-size:11.5px;color:#8b9bb4;overflow-wrap:anywhere}
+.k{display:inline-flex;align-items:center;gap:5px;font-size:11.5px;color:#c3cfe0}
+.k i{width:8px;height:8px;border-radius:2px;display:inline-block}
+.tag{display:inline-block;padding:1px 6px;border-radius:5px;font-size:10.5px;font-family:"JetBrains Mono",monospace;border:1px solid #243049;color:#9fb4cc;background:#0f1626;margin:2px 4px 0 0}
+.tag.ok{color:#22c55e;border-color:#14532d}.tag.warn{color:#f59e0b;border-color:#5a3d07}.tag.bad{color:#ef4444;border-color:#5f1d1d}.tag.new{color:#f59e0b;border-color:#5a3d07}
+.cb{width:20px;height:20px;border-radius:5px;border:1px solid #3b4a66;background:#0f1626;display:inline-block;position:relative;margin-top:2px}
+.cb.on{background:#2563eb;border-color:#2563eb}
+.cb.on::after{content:"";position:absolute;left:6px;top:2px;width:5px;height:10px;border:solid #fff;border-width:0 2px 2px 0;transform:rotate(45deg)}
+.grp{padding:7px 12px;background:#10192b;color:#9fcaff;font-family:"JetBrains Mono",monospace;font-size:11px;letter-spacing:.04em}
+.banner{border:1px solid #243049;border-left:3px solid #3b82f6;background:#0f1626;border-radius:10px;padding:10px 12px;font-size:12px;line-height:1.55;color:#c3cfe0}
+</style>
+</helmet>
+<div style="width:400px;height:1240px;box-sizing:border-box;padding:12px 16px;display:flex;flex-direction:column;gap:12px;background:#0a0e17;overflow:hidden">
+  <div style="font-size:12px;color:#8b9bb4">← 특수 기능 · <span style="color:#e6edf6;font-weight:600">Monitoring 설정</span></div>
+  <div style="display:flex;gap:6px;overflow:auto;padding-bottom:2px" role="tablist" aria-label="Monitoring 설정 탭">
+    <button class="tab" type="button">점검 템플릿</button><button class="tab" type="button">내보내기</button><button class="tab" type="button">엣지 배정</button><button class="tab" type="button">로그 설정</button><button class="tab" type="button">로그 분석</button><button class="tab on" type="button" aria-current="page">설정 연동</button>
+  </div>
+  <div class="banner">통신 점검과 같은 카탈로그 · 자격증명 없이 주소만 · 무인증 점검(TCP · 인증서 · HTTP 상태 · 배너)만 등록</div>
+  <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px">
+    <div class="stat b"><span>설정된 시스템</span><b>278</b></div>
+    <div class="stat g"><span>등록됨</span><b>96</b></div>
+    <div class="stat a"><span>주소 변경</span><b>2</b></div>
+    <div class="stat r"><span>설정에서 사라짐</span><b>1</b></div>
+  </div>
+  <div class="card" style="padding:10px 12px;display:flex;flex-direction:column;gap:8px">
+    <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px">
+      <select class="sel" aria-label="종류"><option>전체 (25종)</option></select>
+      <select class="sel" aria-label="법인"><option>전체 법인</option></select>
+    </div>
+    <input class="inp" type="search" aria-label="검색" placeholder="이름 · 주소 · 종류 검색">
+    <div style="display:flex;gap:6px;overflow:auto" role="group" aria-label="상태 필터"><button class="chip on" type="button">전체 278</button><button class="chip" type="button">미등록 176</button><button class="chip" type="button">등록됨 96</button><button class="chip" type="button">변경 2</button><button class="chip" type="button">사라짐 1</button></div>
+  </div>
+  <div class="card" style="overflow:hidden;flex:1;min-height:0;display:flex;flex-direction:column">
+    <div style="overflow:auto;flex:1">
+      <div class="grp">가상화 — 11건</div>
+      <div class="item"><span class="cb on" role="checkbox" aria-checked="true" aria-label="vc-eu-central 선택"></span><div><div class="t"><span class="k"><i style="background:#3b82f6"></i>vCenter</span><span class="n">vc-eu-central</span><span class="tag">미등록</span></div><div class="sub mono">vcenter-eu-central-01.demo.invalid:443</div><div class="sub">PL-WRO · 엣지 mock-Edge-Frankfurt</div><div><span class="tag">TCP 443</span><span class="tag">인증서</span><span class="tag">HTTP /sdk/…</span></div></div></div>
+      <div class="item"><span class="cb" role="checkbox" aria-checked="false" aria-label="vc-ap-northeast 선택"></span><div><div class="t"><span class="k"><i style="background:#3b82f6"></i>vCenter</span><span class="n">vc-ap-northeast</span><span class="tag ok">등록됨</span></div><div class="sub mono">vcenter-ap-northeast-01.demo.invalid:443</div><div class="sub">KR-ICN · 중앙 직접</div></div></div>
+      <div class="item"><span class="cb" role="checkbox" aria-checked="false" aria-label="vc-cn-east 선택"></span><div><div class="t"><span class="k"><i style="background:#3b82f6"></i>vCenter</span><span class="n">vc-cn-east</span><span class="tag warn">주소 변경</span></div><div class="sub mono">10.30.1.5 → vcenter-cn-east-01.demo.invalid</div><div class="sub">CN-SHA · 엣지 mock-Edge-Shanghai</div></div></div>
+      <div class="grp">중앙↔엣지 — 5건</div>
+      <div class="item"><span class="cb on" role="checkbox" aria-checked="true" aria-label="mock-Edge-Frankfurt 선택"></span><div><div class="t"><span class="k"><i style="background:#22d3ee"></i>수집 서버</span><span class="n">mock-Edge-Frankfurt</span><span class="tag">미등록</span></div><div class="sub mono">edge-frankfurt.demo.invalid:443</div><div class="sub">PL-WRO · 중앙에서 점검</div><div><span class="tag">TCP 443</span><span class="tag">인증서</span><span class="tag">HTTP /api/health</span></div></div></div>
+      <div class="grp">서버 — 142건</div>
+      <div class="item"><span class="cb on" role="checkbox" aria-checked="true" aria-label="r750-fra-a01 선택"></span><div><div class="t"><span class="k"><i style="background:#f59e0b"></i>iDRAC</span><span class="n">r750-fra-a01</span><span class="tag">미등록</span></div><div class="sub mono">10.20.1.11:443 · ST 7KX2M93</div><div class="sub">PL-WRO · 엣지 mock-Edge-Frankfurt</div><div><span class="tag">TCP 443</span><span class="tag">HTTP /redfish/v1/</span></div></div></div>
+      <div class="grp">스토리지 — 9건</div>
+      <div class="item" style="opacity:.6"><span class="cb" role="checkbox" aria-checked="false" aria-label="isilon-sgp 선택"></span><div><div class="t"><span class="k"><i style="background:#34e0b4"></i>스토리지(SSH)</span><span class="n">isilon-sgp</span><span class="tag bad">설정에서 사라짐</span></div><div class="sub mono">isilon-sgp.demo.invalid:22</div><div class="sub">대상 g-9f21ab 남아 있음 — 중지 또는 삭제</div></div></div>
+      <div class="grp">백업 · 네트워크 관리 — 5건 (카탈로그 추가 제안)</div>
+      <div class="item"><span class="cb on" role="checkbox" aria-checked="true" aria-label="veeam-br-fra 선택"></span><div><div class="t"><span class="k"><i style="background:#4ade80"></i>Veeam B&amp;R</span><span class="tag new">신규</span><span class="n">veeam-br-fra</span></div><div class="sub mono">veeam-fra.demo.invalid:9419</div><div><span class="tag">TCP 9419</span><span class="tag">인증서</span></div></div></div>
+    </div>
+    <div style="display:flex;gap:8px;align-items:center;padding:10px 12px;border-top:1px solid #1f2a40;background:#141b2d">
+      <span style="font-size:12px;color:#8b9bb4">선택 12 / 278</span>
+      <button class="btn primary" type="button" style="margin-left:auto">12건 등록…</button>
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":400,"height":1240}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

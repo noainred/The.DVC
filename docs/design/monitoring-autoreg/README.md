@@ -1,0 +1,128 @@
+# 설계: Monitoring › 설정 연동 — 포탈 설정에 등록된 시스템을 골라 Monitoring 대상으로 자동 등록
+
+작성 2026-11-06 (v2.914.0 기준 · 브랜치 `claude/kind-hypatia-4li2qs`) · 상태 **시안 1차(컨펌 대기)** · 시안 캔버스: https://claude.ai/artifact/45bKr4S67wekyVt6uWvPQP
+(아트보드 6장 — 이 폴더의 `*.dc.html` 이 같은 내용의 레퍼런스. 법인명·주소·수치는 데모(mock) 데이터와 가상값이다. 색·글자는 `web/src/styles.css` `:root` 토큰과
+Monitoring 화면의 `.pc-root` 토큰 그대로. 계정의 ‘Design System’ 아티팩트는 비어 있어 쓰지 않았다 — xfer-ping·bareos-cancel 과 같다.)
+
+## 1. 요구 (사용자 요청 2026-11-06)
+
+- "이 솔루션에서 사용하는, 설정한 모든 정보에 대해서 모니터링 기능에 자동 등록하는 기능 추가해줘. 예를들면 edge, vcenter, proxy, cvp, 스토리지 등 이 서버에서 수집하는 모든 정보를
+  이 포탈에서 구현한 모니터링 기능에 사용자 선택해서 추가할 수 있는 기능 클로드 디자인으로 만들어서 시안 보여줘" + "필요하다면 모니터링 기능도 개선해줘".
+- 규칙(2026-11-03 '기억해'): 설계는 Fable + Claude Design 시안 → **컨펌 뒤** Opus 구현.
+- '모니터링 기능' = 상단 탭 **Monitoring**(`#/svcmon` · `svcmon/` 성능점검 — 대상 트리 + 점검 15종 + 엣지 배정 + CSV 로그)로 읽었다. 네트워크 › 체크(Ping 모니터 `ping/`)는
+  별개 기능이고 vCenter·엣지를 이미 자동 등록한다(§2). 사용자가 Ping 모니터 쪽을 뜻했다면 컨펌에서 바로잡는다(§9 ①).
+
+## 2. 지금 있는 것(코드 근거) — 새로 만들지 않아도 되는 것
+
+| 있는 것 | 위치 | 이번 설계에서의 쓰임 |
+|---|---|---|
+| **설정에 등록된 접속처 카탈로그** — 19개 등록부 · 25종(`SETTING_KINDS`) · 종류별 라벨·그룹·프로브(mode/path/authMode)·기본 포트·확인 깊이(identity/http/tls/ssh/smtp/tcp) · 설정 화면 딥링크(`SETTINGS_PATHS`) · 비밀 제거본만 읽음 | `server/src/linkcheck/settingsKinds.js:67` · `settingsLinks.js:80 buildSettingsTargets` · 화면 특수 기능 › 통신 점검 › 설정 전수 점검(`web/src/views/tools/SettingsCheckPanel.jsx`) | **그대로 읽는다.** 두 번째 열거기를 만들지 않는다(같은 등록부를 두 곳에서 읽으면 한쪽만 고쳐진다). 대상 id `<kind>|<ref>` 가 **출처 키**가 된다 |
+| Monitoring 대상 모델 `{id, kind, path, name, host, enabled, agent?, order, batch?, tests[]}` · 점검 필드표 `TEST_FIELDS` · 정규화 `cleanTarget/cleanTest` 하나 · SSRF 가드 · 2,000행 대량 등록(all-or-nothing · 중복 이름 skip) | `svcmon/testSchema.js` · `svcmon/store.js:248·189·543 bulkAddTargets` · `routes/svcmon/tree.js:81 /targets/bulk` | 등록은 **기존 대량 등록 경로**로 — 새 저장 경로를 만들지 않는다 |
+| 점검 템플릿 — 치환 변수 `{host} {name} {path} {kind}` · 재적용 멱등(`tpl`+`tplKey`, test.id 승계) · 내장 6종 | `svcmon/templates.js` | 종류별 기본 점검을 **내장 템플릿**으로 추가한다(§4.2) |
+| 등록 마법사(① 위치 → ② 대상 입력: 표/자유형식/파일 → ③ 템플릿 → 미리보기 → 등록) · 기본 '중지' 등록 · 엣지는 후보 목록에서만 · 배치 원장 + 되돌리기 | `web/src/views/svcmon/BulkTab.jsx` · `svcmon/batches.js` | ② 에 **네 번째 입력 모드 ‘설정된 시스템에서 선택’** 을 넣는다(시안 ②) |
+| 엣지 배정 — 대상 `agent` 가 있으면 그 엣지 전용 · `PUT /svcmon/assign/:agent {byAgent:true}` 동기화 · 중앙(`SVCMON_ROLE=central`)은 직접 점검하지 않고 엣지 ack 로 활성 | `central/svcmonAssign.js:113` · `routes/svcmon/edge.js:67` | 등록 뒤 '담당 엣지에 배정 동기화' 체크 하나로 |
+| Ping 모니터 자동 등록 선례 — `source:'vcenter'|'edge'|'vcport'` · 삭제 부활 방지 tombstone(`seededVc`·`seededEdge`) · 등록 시각만 · 갱신·삭제 없음 | `server/src/ping/store.js:153·181` | 출처 필드·tombstone 발상을 가져오되, **주소 변경·사라짐도 다룬다**(§4.3 — Ping 쪽의 한계) |
+| 통신 점검의 핵심 판정 "자격증명을 보내지 않으므로 401/403 은 정상" · Monitoring http 점검은 `expectStatus` 를 비우면 500 미만 전부 정상 | `settingsKinds.js` 머리말 · `svcmon/checker.js:169` | 종류별 기본 점검이 그대로 성립 — **새 점검 엔진은 필요 없다** |
+| 데모 seed(mock 모드 · 배치 `mock-demo`) — Chromium 검증에서 Monitoring 이 비지 않는다 | `server/src/mock/demo/svcmon.js` | 설정 연동 데모 행도 같은 규칙(네트워크 접속 없음)으로 |
+
+## 3. 정직하게 밝혀야 하는 것 (시안 문구에 반영)
+
+1. **카탈로그에 없는 종류가 6개다** — Arista CVP · Veeam B&R(9419) · Veeam Enterprise Manager(9398) · Bareos Director(9101) · Isilon 디렉터리 사용량 직접 호스트(SSH) · LLM(Ollama URL).
+   `settingsKinds.js`·`settingsLinks.js` 에 `cvp|veeam|bareos|llm|isidu` 가 0건이다(grep 확인). 사용자가 예로 든 'cvp' 가 바로 여기 들어간다 → 카탈로그에 **추가**한다(§4.1). 통신 점검 화면도 같이 넓어진다.
+2. **vCenter 의 담당 엣지가 카탈로그에서 항상 빈 값이다** — `settingsLinks.js:107` 은 `v.remoteAgent` 를 읽지만 `vcenter/registry.js normalize()`(:98~104)에 그 필드가 없다.
+   담당 엣지는 스냅샷이 관측한 push 엣지(`inventory[].agent`)로 보완한다(`commmap/build.js` 의 '등록값 → 관측값' 순서와 같게).
+3. **PDU 는 SSH 로 수집하는데 카탈로그 프로브는 https 443 이다** — `settingsKinds.js:129~133` · `pdu/registry.js:95 sshPort`. Monitoring 등록은 등록된 `sshPort` 의 SSH 배너를 기본으로 한다.
+4. **'proxy'** 는 이 저장소에서 원격접속(HAProxy Data Plane · SSH 프록시 — `proxy/registry.js`)이다. 카탈로그 `set:haproxy`·`set:remoteSsh` 로 이미 들어 있다. 사용자가 다른 뜻(수집 경유)이라면 컨펌에서 바로잡는다.
+5. **자격증명은 옮기지 않는다.** 등록되는 점검은 무인증(TCP · 인증서 D-일 · HTTP 상태코드 · SSH/SMTP 배너)뿐이다. 알림 웹훅은 URL 자체가 비밀(`secretVault.js:107`)이라 **등록 대상에서 제외**한다.
+6. **통신 점검과 중복 측정이 생긴다** — 통신 점검은 5분마다 중앙에서 도달성을 재고(`linkcheck/poller.js`), Monitoring 은 엣지에서 더 짧은 주기·세부 점검(인증서·HTTP)을 돈다.
+   질문이 다르므로 두되, 설정 연동 화면 문구에 "같은 카탈로그 · 다른 질문" 을 밝힌다. 두 기능을 합치는 것은 이번 범위가 아니다.
+7. **Ping 모니터 자동 등록(vCenter·엣지)과도 겹친다** — 그쪽은 1분 TCP 지연 추이 전용이다. 설정 연동 행에 "Ping 모니터에 이미 자동 등록됨" 을 표시만 한다.
+8. **Monitoring 에는 점검 실패 알림이 없다** — `svcmon/` 아래 `notify` 호출 0건, 있는 것은 엣지 무보고/재개(`central/svcmonSilence.js`)뿐. 개선 ② 로 제안한다(§7).
+
+## 4. 데이터 · 서버
+
+### 4.1 카탈로그 보강(`linkcheck/settingsKinds.js` · `settingsLinks.js`) — 공용 효과
+
+- `SETTING_KINDS` 에 6종 추가: `set:cvp`(https · 등록 포트 · depth tls) · `set:veeam`(tcp 9419 · tls) · `set:veeamEm`(9398) · `set:bareosDir`(tcp 9101 — 평문 · depth tcp) · `set:isiduHost`(ssh) · `set:llm`(http `/api/tags` · authMode none).
+  `SETTINGS_PATHS` 에 각 설정 화면 해시. `buildSettingsTargets` 가 각 등록부의 **비밀 제거 list 함수**(`cvp/registry.js listServers` · `veeam/registry.js listServers` · `veeam/em/registry.js listEms` · `bareos/settings.js loadSettings().directors` · `isidu/settings.js resolveTarget` · `llm/config.js loadLlmConfig`)만 읽는다.
+  export 이름을 명시하고 없으면 `sourceErrors`(머리말 규칙 그대로).
+- `set:pdu` 에 `sshPort` 를 넘기고 프로브를 ssh 로(443 웹 UI 는 `facts.httpsUi` 로 남긴다) · `set:vcenter` 의 `agent` 는 `remoteAgent` → 스냅샷 관측 엣지 순.
+- 테스트: `linkcheckSettings*.test.js` 기존 틀에 6종 열거 · 비밀 0건(`password|token|secret` 키 없음) · PDU 포트 · vCenter 관측 엣지.
+
+### 4.2 Monitoring 쪽 — 출처(origin) 와 종류별 내장 템플릿
+
+- 대상에 **`origin`** 을 둔다: `{ kind:'set:vcenter', ref:'vc-eu-central', settings:'vcenter', syncedAt, hostAtSync }` — `cleanTarget` 화이트리스트에 넣는다(빠지면 저장 때 조용히 사라져 재동기화가 매번 중복 생성 — `tpl/tplKey` 와 같은 교훈).
+  CSV 컬럼에는 **넣지 않는다**(`TARGET_FIELDS` 의 `batch` 와 같은 이유 — 사용자 입력으로 받으면 남의 출처를 달 수 있다). 내보내기 JSON 에는 싣는다.
+- 종류별 **내장 템플릿** `tpl-set-<kind>`(§표). 치환 변수는 지금의 4개로 충분하다(`{host}` 만 쓴다). 포트는 대상 호스트가 아니라 **카탈로그 target.port** 를 써야 하므로, 템플릿 실체화 때 `port` 를 출처 포트로 **채워 넣는 단계**가 하나 필요하다(`materializeForTarget(templateId, target, { port })` — 포트가 템플릿 항목에 없을 때만).
+
+| 종류 | 기본 점검 | 깊이 |
+|---|---|---|
+| vCenter | tcp <포트> · cert D-30(1일) · http `https://{host}:<포트>/sdk/vimServiceVersions.xml` expect 200 | identity |
+| 수집 서버(엣지) | tcp · cert · http `/api/health` expect 200 · keyword `status` — **중앙에서** 점검(엣지가 자기 자신을 재지 않는다) | identity |
+| iDRAC | tcp 443 · http `/redfish/v1/` expect 200 · `insecure:true`(자체서명) | identity |
+| NSX · OME · 스토리지(API) · Horizon · HAProxy | tcp · cert · http `/`(expectStatus 비움 → 500 미만 정상) | http |
+| SAN(SSH) · PDU · 베어메탈 스토리지 · 물리 GPU · 캡처 호스트 · 배포 대상 · 중계 노드 · 통합 계정 SSH | ssh 배너(등록 포트) | ssh |
+| CVP · Veeam · Veeam EM · AD/LDAP(636) | tcp · cert | tls |
+| Bareos Director · AD/LDAP(389) | tcp | tcp |
+| SMTP | smtp 배너 + EHLO | smtp |
+| 알림 웹훅 · 업그레이드 소스 · 패키지 저장소 · LLM | **제외**(비밀 URL · 외부 인터넷 · 로컬) — 컨펌 ④ | — |
+
+### 4.3 동기화 — 새 라우트 `/api/svcmon/settings-sync/*`(`routes/svcmon/settingsSync.js`)
+
+- 게이트는 형제 쓰기 라우트와 같다: `canEdit, fullScopeOnly`(조회 GET 도 — 전 법인 설정 주소가 실리므로 범위 계정에 열지 않는다. 통신 점검 `/targets` 가 adminOnly+fullScopeOnly 인 것과 같은 기준).
+- `GET /catalog` — `buildSettingsTargets()` 결과 ∩ Monitoring 대상(`origin` 으로 조인) → 행마다 `state: 'new'|'linked'|'host-changed'|'gone'|'problem'|'excluded'` + 담당 엣지(후보 목록에 있는 이름만 — 없으면 `''` 중앙) + 종류별 템플릿 id + 등록 경로.
+  memo 는 **카탈로그 세대(등록부 mtime 합) + 저장소 rev + 배정 rev** 를 키로(12초). 결과에 비밀 0건(`publicTarget` 화이트리스트 + 테스트).
+- `POST /preview {ids[], templateMode, pathTemplate, state, goneAction, syncAssign}` → `store.planBulkTargets`(저장 없음) + 변경·사라짐 계산. 전부 성공 또는 전부 거부.
+- `POST /apply` — ① 추가는 `bulkAddTargets(..., { batch: 'settings:<yyyymmdd-hhmm>' })` + `recordBatch(source:'settings')`(원장 `SOURCES` 에 `'settings'` 추가) ② 주소 변경은 `updateTarget(host)`(점검 id 승계) ③ 사라짐은 기본 `enabled:false` + `origin.gone=true`(삭제는 옵션 · 배치 되돌리기 대상 아님 — 사용자가 고른 것만) ④ `syncAssign` 이면 엣지별 `PUT /assign/:agent {byAgent:true}` 와 같은 함수 호출.
+  감사 로그(`logAudit`) 한 건에 요약(추가·변경·중지 수 · 배치 id).
+- **주기 감지**(배너): 5분마다 카탈로그를 **읽기만** 해서(네트워크 점검 아님 — `linkcheck/poller.js` 와 별개) `new·host-changed·gone` 수를 `svcmon/settingsDrift.js` 메모리에 두고 `GET /state`(`overview.js:50`)에 `settingsDrift:{new,changed,gone,at}` 로 싣는다.
+  범위 계정 판본에는 수만 싣고 이름·주소는 싣지 않는다. 손으로 호스트를 고친 대상은 다음 감지에서 `host-changed` 로 다시 뜬다(시안 ④ 모달 문구) — 이것이 의도다(설정이 진실).
+- **자동 등록 토글(종류별 · 기본 끔)**: 켜면 감지 때 `new` 를 중지 상태로 등록한다. 기본값을 끔으로 두는 이유 — 같은 저장소 교훈("서비스는 자동으로 만들지 않는다" · Ping tombstone). 사용자가 지운 연동 대상은 `origin` tombstone(`svcmon-settings-sync.json` `dismissed[]`)으로 부활을 막는다.
+- 바꾸지 않는 것: 엣지 코드 · 점검 엔진(`checker.js`) · CSV 스키마 · Ping 모니터.
+
+## 5. 화면(IA) — 시안 캔버스의 아트보드
+
+```
+① Main      특수 기능 › Monitoring 설정 › 새 탭 '설정 연동'(1440) — 안내 배너 · KPI 6 · 필터(종류·법인·상태) · 그룹별 표(☐ 종류 이름 법인 주소 점검위치 기본점검 상태) · 하단 규칙·토글 2
+② Register  Monitoring '＋ 등록' 마법사 ② 단계에 네 번째 모드 '설정된 시스템에서 선택' — 왼쪽 종류/법인 트리(미등록/전체 수) · 오른쪽 항목 표 · 안내문
+③ Apply     미리보기·적용 — 요약 5칸(추가·변경·사라짐·건너뜀·오류) · 결과 표(출처 열) · 종류별 기본 점검 표 · 적용 옵션(상태·사라짐 처리·주소 갱신·배정 동기화·자동 등록)
+④ Tree      Monitoring 화면 — 상단 '설정이 바뀌었습니다' 배너 · 트리 '설정 연동' 폴더 + 출처 배지(vCenter/NSX/주소 변경/사라짐) · 상세 모달 '출처' 상자(설정 화면 링크 · 연동 해제)
+⑤ Narrow    ① 의 400px — KPI 2열 · 필터 세로 · 행은 카드형 · 하단 고정 '등록…'
+⑥ Improve   Monitoring 개선안 3건(§7)
+```
+
+표는 구현 때 `STable`(헤더 정렬) · `BoldText` 문구 규칙(백틱 금지) · 그리드 자식 `min-width:0` · 버튼 행 `flexWrap`.
+
+## 6. 범위(scope) · 보안
+
+- 카탈로그·미리보기·적용·감지 상태의 이름·주소는 **전체 범위 쓰기 계정**에만(§4.3). 범위 계정 `GET /state` 에는 수만.
+- 응답에 비밀 0건 — `buildSettingsTargets` 가 이미 비밀 제거본만 읽고 `publicTarget` 으로 자른다. 새 6종 로더도 같은 규칙(테스트가 키 이름을 스윕).
+- `origin` 은 서버가 발급한다 — `/targets`·`/targets/bulk`·CSV 로 들어온 `origin` 은 버린다(`batch` 와 같은 처리).
+- SSRF: 카탈로그 주소도 `validateEndpoint`(store) 를 그대로 지난다 — 등록부에 있는 주소라고 가드를 건너뛰지 않는다(통신 점검은 자체 가드가 있지만 Monitoring 저장은 store 가 진실).
+- 변이 검증·반증 에이전트: 범위·비밀·엣지 수신 계약(배정 동기화)이 걸리므로 **반증 1인**을 둔다(CLAUDE.md '위험한 수정' 기준).
+
+## 7. Monitoring 개선안(사용자 "필요하다면 모니터링 기능도 개선해줘" — 시안 ⑥)
+
+| # | 무엇 | 근거(실측·코드) | 크기 |
+|---|---|---|---|
+| ① | KPI 카드 7장을 폭에 맞춰(1440 한 줄 · 400 두 열) | `.pc-cards` 가 `repeat(5,1fr)` 고정(`styles.css:1002`) — 1440 에서 5+2 두 줄, **400 에서 '경고' 카드가 글자 단위로 세로 찌그러짐**(Chromium 실측 `svcmon-400.png`) | CSS 2줄 + Chromium |
+| ② | 점검 실패 알림(연속 N회 → `notify()` · 복구 알림 · warn 은 기본 끔) | `svcmon/` 아래 notify 0건 · 있는 것은 엣지 무보고(`central/svcmonSilence.js:71`) — 점검이 실패해도 아무도 모른다 | 서버 훅 + 설정 UI 1절 + 테스트 |
+| ③-a | 빈 상태 문구 '＋ Add 로 등록하세요' → 버튼 이름 '＋ 등록' 과 맞춤 | `web/src/views/SvcMonitor.jsx:534` vs 버튼 `:547` | 문구 1건 |
+| ③-b | 통신 점검 카탈로그 보강(6종 · PDU sshPort · vCenter 관측 엣지) | §3 1~3 | §4.1 과 같은 작업 |
+
+제안하지 않은 것(검토했지만 근거 부족): 통신 점검과 Monitoring 통합 — 질문이 다르고(도달성 vs 세부 점검) 두 화면의 사용자가 다르다(adminOnly vs svcmon 권한). 다음 라운드 후보로만 남긴다.
+
+## 8. 검증 계획(구현 때)
+
+- 단위: 카탈로그 6종 열거 · 비밀 키 0건 · `origin` 화이트리스트 왕복(저장→재로드 키 집합 동일) · preview/apply all-or-nothing · 사라짐 기본 중지(삭제 아님) · 범위 계정 403 · 감지 상태 범위 판본 수만 · 템플릿 포트 채움.
+- 화면: Chromium 1440/400 — 설정 연동 탭 · 마법사 4번째 모드 · 미리보기 · 트리 배지 · 배너 · KPI 반응형(A/B).
+- 반증 1인(§6).
+
+## 9. 컨펌 질문
+
+1. '모니터링 기능' = Monitoring(svcmon) 으로 읽었다. 네트워크 › 체크(Ping 모니터)를 뜻했다면 그쪽은 이미 vCenter·엣지를 자동 등록하므로 **나머지 종류 추가**만 하면 된다(설계가 더 작아진다).
+2. 진입점 둘 다(설정 연동 탭 + 마법사 4번째 모드)로 갈지, 하나만 둘지. 권장: **둘 다**(탭은 운영 중 차이 검토 · 마법사는 첫 등록).
+3. 자동 등록 토글 기본값 **끔**(새 설정 항목은 배너로 알리고 사람이 등록). 켜 두길 원하면 중지 상태로 등록한다.
+4. 제외 종류(알림 웹훅 · 업그레이드 소스 · 패키지 저장소 · LLM)를 그대로 제외할지.
+5. 개선안 ①~③ 을 이번 구현에 함께 넣을지(①·③-a 는 작고, ② 는 설정 UI 가 하나 더 생긴다).
+6. 검증 수준: 표준(관련 테스트 + Chromium + 반증 1인) 권장.
