@@ -225,3 +225,22 @@ export function listAudit({ limit = 100, offset = 0, user = '', q = '' } = {}) {
   const off = Math.max(0, Number(offset) || 0);
   return { total, items: items.slice(off, off + lim), users: [...new Set(items.map((e) => e.user))].sort() };
 }
+
+/**
+ * 감사 로그에 남아 있는 줄 중 `action` 이 **정확히** 같은 것(오래된 것이 앞, 읽기 소독 후). v2.912: 로그인 기록
+ * (`security/loginHistory.js`)이 처음 만들어질 때 한 번 옮겨 오는 데 쓴다 — 접두 매칭이 아니다('로그인 실패' 는 들어오지 않는다).
+ */
+export function auditEntriesWithAction(action) {
+  const want = String(action ?? '');
+  if (!want) return [];
+  let lines = [];
+  try { lines = fs.readFileSync(FILE, 'utf8').split('\n').filter(Boolean); } catch { return []; }
+  const out = [];
+  for (const l of lines) {
+    let e = null;
+    try { e = JSON.parse(l); } catch { continue; }
+    if (!e || typeof e !== 'object' || auditStr(e.action) !== want) continue;
+    out.push({ at: auditStr(e.at), user: auditStr(e.user) || 'unknown', action: want, detail: auditStr(e.detail), ip: auditStr(e.ip) });
+  }
+  return out;
+}

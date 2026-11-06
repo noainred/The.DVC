@@ -21,6 +21,7 @@ import EdgeUserDeploy from './EdgeUserDeploy.jsx';
 const Diagnostics = lazy(() => import('./Diagnostics.jsx'));
 import Alerts2 from './Alerts2.jsx';
 import Audit from './Audit.jsx';
+import { RecentLogins, LoginCounts } from './LoginHistory.jsx'; // v2.912: 설정 › 로그 › 최근 로그인 · 로그인 횟수
 const MetricsSettings = lazy(() => import('./MetricsSettings.jsx'));
 import StorageIntervals from './StorageIntervals.jsx'; // 스토리지 수집 주기(중앙→엣지 배포, v2.409)
 import PowerOffCheckSettings from './PowerOffCheckSettings.jsx'; // 전원 꺼짐 점검 주기(v2.484)
@@ -122,6 +123,9 @@ const SUB = [
   { k: 'perf-monitor', label: '서버 성능 측정', C: PerfMonitor, group: 'log' },
   { k: 'log-analysis', label: '로그 분석(개선점)', C: LogAnalysis, group: 'log' },
   { k: 'audit', label: '감사 로그', C: Audit, group: 'log' },
+  // v2.912(사용자 요청 '전체 사용자가 최근에 로그인 한 정보 · 최근 1일/7일/1달/사용자 정의 기간에 몇 번 로그인했는지'): 같은 API 를 쓰는 두 화면.
+  { k: 'recent-logins', label: '최근 로그인', C: RecentLogins, group: 'log' },
+  { k: 'login-counts', label: '로그인 횟수', C: LoginCounts, group: 'log' },
   // --- 시스템 ---
   // 업그레이드: 상단 '업그레이드' 탭은 SHOW_UPGRADE_TAB로 숨겨져 있어도, 관리자 설정 안에서는
   // 항상 접근 가능하게 둔다(오프라인 업그레이드 번들 적용/원격 자동 업그레이드 설정).
@@ -140,7 +144,7 @@ const GROUPS = {
   usercontrol: { label: '사용자', desc: '사용자 계정(역할·2FA)·엣지 사용자 배포(중앙→엣지)·인증(AD/LDAP) 연동·기능 사용 현황(누가 어느 화면을 얼마나 — UI 개선 자료).' },
   security: { label: '보안', desc: '세션 보안·자격증명 저장 방식·연동 키(외부 포탈 조회 API)·이상동작 탐지·호스트 접근 제어(SSH/웹/OS 방화벽)·장비 신뢰(SSH 호스트키·TLS 인증서)·보안 자가진단.' },
   notify: { label: '알림·연동', desc: '알림 · 포탈 공용 메일(SMTP) 발송 · AI 검색 연동 · 특수 기능 카테고리.' },
-  log: { label: '로그', desc: 'vCenter 로그 보관 · 진단·로그 · 서버 성능 측정 · 로그 분석(개선점) · 감사 로그.' },
+  log: { label: '로그', desc: 'vCenter 로그 보관 · 진단·로그 · 서버 성능 측정 · 로그 분석(개선점) · 감사 로그 · 최근 로그인 · 로그인 횟수.' },
   system: { label: '시스템', desc: '업그레이드(온라인 · 오프라인 번들 · 자동 업그레이드)와 버전 정보(About).' },
 };
 /** v2.912 기능 사용 현황이 설정 하위 키의 이름 · 메뉴 경로를 쓰도록 넘기는 목록(FeatureUsage 가 Settings 를 import 하면 순환이 된다). */
