@@ -1,0 +1,226 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>서버 상세 — 튜닝 탭</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Noto+Sans+KR:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+body{margin:0;background:#0a0e17;color:#e6edf6;font-family:Inter,"Noto Sans KR","Apple SD Gothic Neo",sans-serif;font-size:13px;line-height:1.45}
+a{color:#22d3ee}a:hover{color:#67e8f9}
+.card{background:linear-gradient(180deg,#141b2d,#111726);border:1px solid #243049;border-radius:12px;padding:16px 18px;box-shadow:0 4px 24px rgba(0,0,0,.4);min-width:0}
+.mono{font-family:"JetBrains Mono",ui-monospace,Menlo,monospace}
+.dim{color:#8b9bb4}
+.chip{display:inline-flex;align-items:center;gap:6px;padding:2px 9px;border-radius:999px;font-size:11.5px;font-weight:600;border:1px solid #243049;background:#0f1626;color:#8b9bb4;white-space:nowrap}
+.chip.ok{color:#4ade80;border-color:rgba(34,197,94,.35);background:rgba(34,197,94,.1)}
+.chip.warn{color:#fbbf24;border-color:rgba(245,158,11,.35);background:rgba(245,158,11,.1)}
+.chip.bad{color:#f87171;border-color:rgba(239,68,68,.35);background:rgba(239,68,68,.1)}
+.chip.info{color:#67e8f9;border-color:rgba(34,211,238,.3);background:rgba(34,211,238,.08)}
+.tabs{display:flex;flex-wrap:wrap;gap:2px;border-bottom:1px solid #243049}
+.tabs a{padding:10px 14px;color:#8b9bb4;font-weight:600;text-decoration:none;border-bottom:2px solid transparent;min-height:40px;box-sizing:border-box;display:inline-flex;align-items:center}
+.tabs a.on{color:#e6edf6;border-bottom-color:#22d3ee}
+.btn{min-height:36px;padding:0 14px;border-radius:8px;border:1px solid #243049;background:#1a2236;color:#e6edf6;font:inherit;font-weight:600;cursor:pointer}
+table{border-collapse:separate;border-spacing:0;width:100%}
+th{font-size:11.5px;font-weight:600;color:#8b9bb4;text-align:left;padding:6px 8px;border-bottom:1px solid #243049;background:#0f1626;white-space:nowrap;cursor:pointer;vertical-align:bottom}
+td{padding:8px 8px;border-bottom:1px solid #1f2a40;vertical-align:top;font-size:12.5px;line-height:1.5}
+.ev{display:inline-block;width:14px;text-align:center;font-weight:700}
+.ev.a{color:#4ade80}.ev.b{color:#fbbf24}.ev.c{color:#8b9bb4}
+h2{margin:0;font-size:15px;font-weight:700}
+.ok{color:#4ade80}.warn{color:#fbbf24}.bad{color:#f87171}
+</style>
+</helmet>
+<div style="box-sizing:border-box;max-width:1680px;margin:0 auto;padding:18px 24px 40px;display:flex;flex-direction:column;gap:14px">
+
+  <!-- 머리 + 탭 -->
+  <div style="display:flex;flex-wrap:wrap;align-items:center;gap:12px">
+    <div style="min-width:0">
+      <div style="font-size:12px;color:#8b9bb4"><a href="Main.dc.html">리눅스 베어메탈 통합 성능</a> › KR-SEL › <b style="color:#e6edf6">bm-kr1-db01</b></div>
+      <h1 style="margin:0;font-size:20px;font-weight:700;letter-spacing:-.01em;display:flex;flex-wrap:wrap;align-items:center;gap:10px">bm-kr1-db01 <span class="chip bad">디스크 포화</span> <span class="chip ok">경로 OS + iDRAC</span></h1>
+      <div class="dim" style="font-size:12px;margin-top:4px">Rocky Linux 9.4 · 커널 5.14.0 · 32코어 (2소켓 · NUMA 2) · 256GB · NVMe×2 · bond0 10G · 역할 ‘DB’(설정) · OS 13:35 · iDRAC 13:34</div>
+    </div>
+    <div style="flex:1 1 20px"></div>
+    <button class="btn" type="button">지금 수집</button>
+    <button class="btn" type="button">CSV</button>
+  </div>
+  <nav class="tabs" aria-label="서버 상세 탭">
+    <a href="Server.dc.html">요약</a><a href="Server.dc.html">자원 (USE)</a><a href="Server.dc.html">하드웨어 (iDRAC)</a><a class="on" href="Tuning.dc.html" aria-current="page">튜닝</a><a href="Server.dc.html">진단 스냅샷</a><a href="Server.dc.html">추이</a>
+  </nav>
+
+  <!-- 요약 띠 -->
+  <div class="card" style="padding:10px 16px;display:flex;flex-wrap:wrap;align-items:center;gap:10px 18px;font-size:12.5px">
+    <span class="chip info">TuneD 활성 프로파일 <b class="mono">throughput-performance</b></span>
+    <span><b>권고 4</b> <span class="dim">· 적합 7 · 참고 5 · 확인 불가 3</span></span>
+    <span class="dim">권장값 프로파일: <b style="color:#e6edf6">DB</b> (관리자 설정 · 역할 5종) · 읽기 전용 — 적용은 담당자가</span>
+    <span style="flex:1 1 20px"></span>
+    <span class="dim">근거 등급: <span class="ev a">●</span> 공식 문서 원문 확인 · <span class="ev b">◐</span> 공식 문서 검색 발췌(원문 미열람) · <span class="ev c">○</span> 공식 문서 없음(벤더·일반 관행)</span>
+  </div>
+
+  <!-- 1. TuneD -->
+  <div class="card">
+    <div style="display:flex;flex-wrap:wrap;align-items:baseline;gap:8px 12px;margin-bottom:8px"><h2>1 · TuneD 프로파일 — 먼저 프로파일, 그다음 개별 sysctl</h2><span class="dim" style="font-size:12px">읽는 것: tuned-adm active · /etc/tuned/active_profile</span></div>
+    <div style="overflow-x:auto"><table>
+      <thead><tr><th style="width:190px">항목</th><th style="width:150px">현재</th><th style="width:170px">권장 (DB)</th><th>근거 — 문서 요지</th><th style="width:250px">출처</th><th style="width:88px">상태</th></tr></thead>
+      <tbody>
+        <tr><td class="mono">tuned-adm active</td><td>throughput-performance</td><td>throughput-performance<br><span class="dim">(저지연 DB 면 latency-performance)</span></td>
+          <td><span class="ev b">◐</span> “A server profile optimized for high throughput. It disables power savings mechanisms and enables sysctl settings that improve the throughput performance of the disk and network IO. CPU governor is set to performance.” 프로파일을 바꾸면 이전 프로파일의 변경은 원래대로 돌아간다.</td>
+          <td>RHEL 9 · Monitoring and managing system status and performance › Getting started with TuneD<br><a href="https://docs.redhat.com/en/documentation/red_hat_enterprise_linux/9/html/monitoring_and_managing_system_status_and_performance/getting-started-with-tuned_monitoring-and-managing-system-status-and-performance">docs.redhat.com</a></td><td><span class="chip ok">적합</span></td></tr>
+        <tr><td class="mono">network-throughput</td><td class="dim">—</td><td class="dim">10G 이상 대량 전송 서버만</td>
+          <td><span class="ev b">◐</span> “It is based on the throughput-performance profile. It additionally increases kernel network buffers.”</td>
+          <td>같은 문서</td><td><span class="chip">참고</span></td></tr>
+        <tr><td class="mono">virtual-host</td><td class="dim">—</td><td class="dim">KVM 호스트 역할만</td>
+          <td><span class="ev a">●</span> “virtual-host: basic tuning for virtualization hosts. Enables transparent hugepages and adjusts kernel scheduling parameters.” 활성화 후 재부팅 권고.</td>
+          <td>Rocky Linux · KVM tuning<br><a href="https://docs.rockylinux.org/guides/virtualization/kvm_tuning/">docs.rockylinux.org</a></td><td><span class="chip">참고</span></td></tr>
+      </tbody></table></div>
+  </div>
+
+  <!-- 2. CPU · 전력 · NUMA -->
+  <div class="card">
+    <div style="display:flex;flex-wrap:wrap;align-items:baseline;gap:8px 12px;margin-bottom:8px"><h2>2 · CPU · 전력 · 인터럽트 · NUMA</h2><span class="dim" style="font-size:12px">읽는 것: /sys/devices/system/cpu/cpu*/cpufreq · systemctl is-active irqbalance · /proc/interrupts · /proc/sys/kernel/numa_balancing · /proc/cmdline</span></div>
+    <div style="overflow-x:auto"><table>
+      <thead><tr><th style="width:190px">항목</th><th style="width:150px">현재</th><th style="width:170px">권장 (DB)</th><th>근거 — 문서 요지</th><th style="width:250px">출처</th><th style="width:88px">상태</th></tr></thead>
+      <tbody>
+        <tr><td class="mono">scaling_governor</td><td>performance (32/32)</td><td>performance</td>
+          <td><span class="ev b">◐</span> throughput-performance 가 governor 를 performance 로 둔다(위). powersave governor 는 “forces the CPU to use the lowest possible clock frequency … at the cost of the lowest CPU performance.” performance 는 전력·발열이 늘 수 있다(RHEL 10 문서).</td>
+          <td>RHEL 8 · Tuning CPU frequency to optimize energy consumption / RHEL 10 · Optimizing CPU frequency scaling<br><a href="https://docs.redhat.com/en/documentation/red_hat_enterprise_linux/8/html/monitoring_and_managing_system_status_and_performance/tuning-cpu-frequency-to-optimize-energy-consumption_monitoring-and-managing-system-status-and-performance">docs.redhat.com (RHEL 8)</a></td><td><span class="chip ok">적합</span></td></tr>
+        <tr><td class="mono">scaling_driver</td><td>intel_cpufreq (passive)</td><td class="dim">정보</td>
+          <td><span class="ev b">◐</span> RHEL 8.5+ 커널은 같은 장비에서 intel_pstate 대신 intel_cpufreq 가 로드된다(Red Hat 솔루션 6773531). 액티브/패시브는 scaling_driver 값으로 구분.</td>
+          <td>RHEL 9 · Managing power consumption with PowerTOP · access.redhat.com/solutions/6773531</td><td><span class="chip">참고</span></td></tr>
+        <tr><td class="mono">irqbalance</td><td>실행 중</td><td>실행</td>
+          <td><span class="ev a">●</span> “The irqbalance daemon automatically distributes hardware interrupts across CPUs. It runs by default on Rocky Linux and is usually the right starting point for interrupt management.” 격리 CPU 는 IRQBALANCE_BANNED_CPULIST 로 빼고, 너무 많이 빼면 남은 CPU 의 APIC 벡터가 고갈된다. <span class="ev b">◐</span> RHEL 10: 끄면 네트워크 처리량에 악영향, 단일 코어에서는 이득 없음.</td>
+          <td>Rocky Linux 10 · IRQs and kernel packet drops<br><a href="https://docs.rockylinux.org/10/guides/network/performance_tuning/network_performance_irq_tuning/">docs.rockylinux.org</a> · RHEL 10 · Tuning IRQ balancing</td><td><span class="chip ok">적합</span></td></tr>
+        <tr><td class="mono">NIC IRQ 분산 (eno1/eno2)</td><td>8코어 · NUMA 0 일치</td><td>같은 NUMA 노드 CPU</td>
+          <td><span class="ev a">●</span> “Assign IRQs only to CPUs on the matching NUMA node to avoid cross-node memory access during packet processing.” irqbalance 가 못 맞추면(벡터 제약) 수동 핀.</td>
+          <td>Rocky Linux 10 · IRQs and kernel packet drops</td><td><span class="chip ok">적합</span></td></tr>
+        <tr><td class="mono">numad</td><td>미실행</td><td class="dim">NUMA 2 · DB 1개 — 보통 불필요</td>
+          <td><span class="ev b">◐</span> “numad is an automatic NUMA affinity management daemon. It monitors NUMA topology and resource usage within a system in order to dynamically improve NUMA resource allocation and management.” 어느 워크로드에 켜라는 명시 권고는 못 찾았다.</td>
+          <td>RHEL 9 · Configuring an operating system to optimize CPU utilization<br><a href="https://docs.redhat.com/en/documentation/red_hat_enterprise_linux/9/html/monitoring_and_managing_system_status_and_performance/configuring-an-operating-system-to-optimize-cpu-utilization_monitoring-and-managing-system-status-and-performance">docs.redhat.com</a></td><td><span class="chip">확인 불가</span></td></tr>
+        <tr><td class="mono">kernel.numa_balancing</td><td>1</td><td class="dim">핀 고정 워크로드면 0</td>
+          <td><span class="ev c">○</span> Red Hat 공식 권고 문장을 찾지 못했다. 벤더·커뮤니티 자료는 ‘수동 핀한 DB·VM 호스트에서 끈다’ 고 적는다(Aerospike 지원 문서 등). 이 서버는 핀이 없으므로 판단 보류.</td>
+          <td class="dim">공식 문서 없음(검색 범위 내)</td><td><span class="chip">확인 불가</span></td></tr>
+        <tr><td class="mono">isolcpus · nohz_full</td><td>없음</td><td class="dim">전용 RT·VM 워크로드만</td>
+          <td><span class="ev a">●</span> “isolcpus=4-63: removes CPUs 4-63 from the general scheduler. Only explicitly pinned tasks run on them.” — 전용 VM·실시간용이고 일반 DB 서버에는 해당 없음.</td>
+          <td>Rocky Linux · KVM tuning</td><td><span class="chip">참고</span></td></tr>
+      </tbody></table></div>
+  </div>
+
+  <!-- 3. 메모리 -->
+  <div class="card">
+    <div style="display:flex;flex-wrap:wrap;align-items:baseline;gap:8px 12px;margin-bottom:8px"><h2>3 · 메모리</h2><span class="dim" style="font-size:12px">읽는 것: sysctl vm.* · /sys/kernel/mm/transparent_hugepage/{enabled,defrag} · /proc/meminfo HugePages_* · /proc/cmdline</span></div>
+    <div style="overflow-x:auto"><table>
+      <thead><tr><th style="width:190px">항목</th><th style="width:150px">현재</th><th style="width:170px">권장 (DB)</th><th>근거 — 문서 요지</th><th style="width:250px">출처</th><th style="width:88px">상태</th></tr></thead>
+      <tbody>
+        <tr><td class="mono">vm.swappiness</td><td>60 (기본)</td><td>10</td>
+          <td><span class="ev b">◐</span> 값 0~200 · 기본 60 · 익명 메모리 회수와 페이지 캐시 회수 중 무엇을 선호할지. 0 은 “increases the likelihood that the oom_killer function kills processes during memory or I/O-intensive workloads”(RHEL 10 문구). <span class="ev c">○</span> 10 은 RHEL 6 Performance Tuning Guide 의 Oracle DB 예시와 DB 벤더 관행 — RHEL 9 문서의 명시 권고는 아니다.</td>
+          <td>RHEL 9 · Configuring an operating system to optimize memory access<br><a href="https://docs.redhat.com/en/documentation/red_hat_enterprise_linux/9/html/monitoring_and_managing_system_status_and_performance/configuring-an-operating-system-to-optimize-memory-access_monitoring-and-managing-system-status-and-performance">docs.redhat.com</a> · RHEL 6 · Performance Tuning Guide 5.5</td><td><span class="chip warn">권고</span></td></tr>
+        <tr><td class="mono">transparent_hugepage/enabled</td><td>always (기본)</td><td>madvise</td>
+          <td><span class="ev b">◐</span> “THP is enabled by default in Red Hat Enterprise Linux 9.” madvise 는 요청한 앱에만 huge page 를 주며 “if the workload benefits significantly from THP, the performance decreases.” <span class="ev c">○</span> DB 벤더(MongoDB 등)는 희소 접근 패턴 때문에 끄기를 권장 — Red Hat 문서에 DB 전용 권고는 없다.</td>
+          <td>RHEL 9 · Configuring huge pages › Managing transparent hugepages<br><a href="https://docs.redhat.com/en/documentation/red_hat_enterprise_linux/9/html/monitoring_and_managing_system_status_and_performance/configuring-huge-pages_monitoring-and-managing-system-status-and-performance">docs.redhat.com</a></td><td><span class="chip warn">권고</span></td></tr>
+        <tr><td class="mono">HugePages_Total (HugeTLB)</td><td>0</td><td>DB 공유 버퍼 크기만큼 예약</td>
+          <td><span class="ev b">◐</span> 부팅 때 예약이 가장 확실(“memory is allocated during the kernel boot”), 1GB 페이지는 default_hugepagesz=1G hugepagesz=1G, hugepagesz= 뒤에 hugepages= 가 바로 와야 한다. <span class="ev a">●</span> Rocky: “Hugepages reduce TLB misses … 16384 MB / 2 MB = 8192 hugepages” 식으로 계산해 vm.nr_hugepages 로 예약.</td>
+          <td>RHEL 9 · Configuring huge pages › Configuring HugeTLB at boot time · Rocky Linux · KVM tuning › Hugepages</td><td><span class="chip">확인 불가</span><div class="dim" style="font-size:11px">DB 설정을 못 읽음</div></td></tr>
+        <tr><td class="mono">vm.min_free_kbytes</td><td>262144 (256MB)</td><td>1~2% 안 · 수백 MB 이하</td>
+          <td><span class="ev a">●</span> “A reasonable starting point is 1-2% of total physical memory, not exceeding a few hundred megabytes.” NUMA 에서는 노드별 존에 나뉘어 적용되므로 너무 크면 한 노드만 워터마크를 못 채워 OOM. <span class="ev b">◐</span> RHEL 9: 너무 낮으면 회수가 안 돼 “system crashes and failure to service interrupts”.</td>
+          <td>Rocky Linux · KVM tuning › The dangers of vm.min_free_kbytes on NUMA systems · RHEL 9 · … optimize memory access</td><td><span class="chip ok">적합</span></td></tr>
+        <tr><td class="mono">vm.dirty_ratio / background</td><td>20 / 10 (기본)</td><td>유지</td>
+          <td><span class="ev b">◐</span> dirty_ratio “a percentage of total system memory … starts writing those changes to disk. The default value is 20 percent.” background 는 백그라운드 쓰기 시작점, 기본 10. 바꿀 근거(쓰기 지연·캐시 급증)가 없으면 기본 유지.</td>
+          <td>RHEL 9 · … optimize memory access</td><td><span class="chip">참고</span></td></tr>
+        <tr><td class="mono">khugepaged (스냅샷)</td><td>CPU 0.8%</td><td class="dim">THP madvise 면 줄어듦</td>
+          <td><span class="ev c">○</span> 공식 문서의 khugepaged 튜닝 문장은 찾지 못했다 — THP 권고의 보조 관찰값으로만.</td>
+          <td class="dim">공식 문서 없음(검색 범위 내)</td><td><span class="chip">참고</span></td></tr>
+      </tbody></table></div>
+  </div>
+
+  <!-- 4. 스토리지 -->
+  <div class="card">
+    <div style="display:flex;flex-wrap:wrap;align-items:baseline;gap:8px 12px;margin-bottom:8px"><h2>4 · 스토리지 I/O</h2><span class="dim" style="font-size:12px">읽는 것: /sys/block/*/queue/{scheduler,nr_requests,read_ahead_kb,rotational} · udev 규칙 존재 여부</span></div>
+    <div style="overflow-x:auto"><table>
+      <thead><tr><th style="width:190px">항목</th><th style="width:150px">현재</th><th style="width:170px">권장 (DB)</th><th>근거 — 문서 요지</th><th style="width:250px">출처</th><th style="width:88px">상태</th></tr></thead>
+      <tbody>
+        <tr><td class="mono">nvme0n1 · nvme1n1 scheduler</td><td>none</td><td>none (바꾸지 않음)</td>
+          <td><span class="ev b">◐</span> NVMe 는 기본이 none 이고 Red Hat 은 바꾸지 말 것을 권고. 표: 고성능 SSD·빠른 스토리지의 CPU 바운드 → none(대안 kyber).</td>
+          <td>RHEL 9 · Setting the disk scheduler<br><a href="https://docs.redhat.com/en/documentation/red_hat_enterprise_linux/9/html/monitoring_and_managing_system_status_and_performance/setting-the-disk-scheduler_monitoring-and-managing-system-status-and-performance">docs.redhat.com</a></td><td><span class="chip ok">적합</span></td></tr>
+        <tr><td class="mono">sda (SAS HDD) scheduler</td><td>mq-deadline</td><td>mq-deadline 또는 bfq</td>
+          <td><span class="ev b">◐</span> “Traditional HDD with a SCSI interface — Use mq-deadline or bfq.” 가상 게스트는 mq-deadline, 멀티큐 HBA 면 none. 영구 설정은 udev 규칙 또는 TuneD 로(Red Hat 권고).</td>
+          <td>RHEL 9 · Setting the disk scheduler</td><td><span class="chip ok">적합</span></td></tr>
+        <tr><td class="mono">nr_requests (nvme1n1)</td><td>1023</td><td class="dim">—</td>
+          <td><span class="ev c">○</span> 공식 권장값 없음. 대기열 9.2 로 한계와 무관 — 포화 원인은 I/O 양(교차 ②).</td>
+          <td class="dim">공식 문서 없음(검색 범위 내)</td><td><span class="chip">참고</span></td></tr>
+        <tr><td class="mono">read_ahead_kb (nvme1n1)</td><td>128</td><td class="dim">—</td>
+          <td><span class="ev c">○</span> 공식 권장값 없음. 순차 읽기 비중이 크면 올리는 것이 관행이나 근거 문서가 없어 권고하지 않는다.</td>
+          <td class="dim">공식 문서 없음(검색 범위 내)</td><td><span class="chip">참고</span></td></tr>
+      </tbody></table></div>
+  </div>
+
+  <!-- 5. 네트워크 -->
+  <div class="card">
+    <div style="display:flex;flex-wrap:wrap;align-items:baseline;gap:8px 12px;margin-bottom:8px"><h2>5 · 네트워크</h2><span class="dim" style="font-size:12px">읽는 것: ethtool -g/-l/-S(드롭 종류) · ip -s link · /proc/net/softnet_stat · sysctl net.core.* · NM dispatcher/udev 존재 여부</span></div>
+    <div style="overflow-x:auto"><table>
+      <thead><tr><th style="width:190px">항목</th><th style="width:150px">현재</th><th style="width:170px">권장 (DB)</th><th>근거 — 문서 요지</th><th style="width:250px">출처</th><th style="width:88px">상태</th></tr></thead>
+      <tbody>
+        <tr><td class="mono">softnet_stat time_squeeze</td><td>0 (32 CPU 모두)</td><td>0 유지</td>
+          <td><span class="ev a">●</span> “A nonzero time_squeeze value (column 3) means the kernel ran out of its netdev_budget before it could process all pending packets.” 0 이 아니면 netdev_budget / netdev_budget_usecs(기본 300 / 2000) 를 올린다(예 600 / 4000).</td>
+          <td>Rocky Linux 10 · IRQs and kernel packet drops › Checking softnet statistics</td><td><span class="chip ok">적합</span></td></tr>
+        <tr><td class="mono">rx_dropped vs rx_dropped.nic</td><td>0 / 0</td><td>—</td>
+          <td><span class="ev a">●</span> “When rx_dropped.nic is zero but rx_dropped is increasing, the problem is in the kernel, not the hardware.” 케이블·SFP 교체로는 커널 드롭이 안 잡힌다 — 교차 판정 ④ 의 근거.</td>
+          <td>Rocky Linux 10 · IRQs and kernel packet drops › Interpreting drop counters</td><td><span class="chip ok">적합</span></td></tr>
+        <tr><td class="mono">ring buffer rx/tx (eno1·eno2)</td><td>512 / 512 (max 4096)</td><td>드롭이 있을 때만 최대까지</td>
+          <td><span class="ev a">●</span> “Larger ring buffers give the kernel more time to process packets before the buffer overflows and drops occur.” 상한은 ethtool -g 의 Pre-set maximums. 큐 64개 × 4096 이면 수백 MB — 단계적으로. 재부팅에 지워지므로 NM dispatcher 로 영구화.</td>
+          <td>Rocky Linux 10 · IRQs and kernel packet drops › Tuning NIC ring buffers</td><td><span class="chip">참고</span><div class="dim" style="font-size:11px">드롭 0 — 지금은 불필요</div></td></tr>
+        <tr><td class="mono">txqueuelen</td><td>1000 (기본)</td><td>1000 유지</td>
+          <td><span class="ev a">●</span> “Start with the default (1000) and increase only if monitoring confirms TX drops.” 20000 초과는 bufferbloat.</td>
+          <td>Rocky Linux 10 · IRQs and kernel packet drops › Tuning transmit queue length</td><td><span class="chip ok">적합</span></td></tr>
+        <tr><td class="mono">combined channels</td><td>8 (CPU 32)</td><td>네트워크 처리 CPU 수 이하</td>
+          <td><span class="ev a">●</span> “A common approach is to set the combined channel count equal to the number of CPUs available for network processing. Having more queues than available CPUs … offering no performance benefit.”</td>
+          <td>Rocky Linux 10 · IRQs and kernel packet drops › NIC channels</td><td><span class="chip ok">적합</span></td></tr>
+        <tr><td class="mono">net.core.rmem_max / wmem_max</td><td>212992 / 212992</td><td class="dim">WAN 복제·대량 전송만 ↑</td>
+          <td><span class="ev b">◐</span> 기본 212992 바이트(208 KiB) — setsockopt() 가 요청할 수 있는 상한. 고처리량 예시는 16 MiB(RHEL 10 문서 — RHEL 9 원문 미확인). 이 서버는 RTT 측정값이 없어 판단 불가.</td>
+          <td>RHEL 10 · Network troubleshooting and performance tuning › Tuning UDP connections<br><a href="https://docs.redhat.com/en/documentation/red_hat_enterprise_linux/10/html/network_troubleshooting_and_performance_tuning/tuning-udp-connections">docs.redhat.com (RHEL 10)</a></td><td><span class="chip">확인 불가</span></td></tr>
+        <tr><td class="mono">net.core.somaxconn</td><td>4096</td><td class="dim">—</td>
+          <td><span class="ev c">○</span> Red Hat·Rocky 공식 권장값을 찾지 못했다(커뮤니티 글은 65535 등을 제안). DB 서버 접속 수(estab 802)로는 4096 이 충분 — 권고하지 않는다.</td>
+          <td class="dim">공식 문서 없음(검색 범위 내)</td><td><span class="chip">참고</span></td></tr>
+      </tbody></table></div>
+  </div>
+
+  <!-- 근거 문서 목록 + 정직 기록 -->
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(min(560px,100%),1fr));gap:14px;align-items:start">
+    <div class="card">
+      <div style="display:flex;flex-wrap:wrap;align-items:baseline;gap:8px 12px;margin-bottom:8px"><h2>근거 문서 목록 — 이 탭이 인용한 공식 문서</h2><span class="dim" style="font-size:12px">확인일 2026-11-06 · 화면의 각 행이 이 번호를 가리킨다</span></div>
+      <div style="overflow-x:auto"><table>
+        <thead><tr><th>#</th><th>문서</th><th>확인 방법</th><th>등급</th></tr></thead>
+        <tbody>
+          <tr><td>R1</td><td>Rocky Linux · <a href="https://docs.rockylinux.org/guides/virtualization/kvm_tuning/">KVM tuning</a> (Rocky 8·9·10 공통)</td><td>원문 수신(HTTP 200) · 문장 대조</td><td><span class="ev a">●</span></td></tr>
+          <tr><td>R2</td><td>Rocky Linux 10 · <a href="https://docs.rockylinux.org/10/guides/network/performance_tuning/network_performance_irq_tuning/">IRQs and kernel packet drops</a></td><td>원문 수신(HTTP 200) · 문장 대조</td><td><span class="ev a">●</span></td></tr>
+          <tr><td>H1</td><td>RHEL 9 · Monitoring and managing system status and performance › <a href="https://docs.redhat.com/en/documentation/red_hat_enterprise_linux/9/html/monitoring_and_managing_system_status_and_performance/getting-started-with-tuned_monitoring-and-managing-system-status-and-performance">Getting started with TuneD</a></td><td>검색 발췌(docs.redhat.com 이 비브라우저 요청 403)</td><td><span class="ev b">◐</span></td></tr>
+          <tr><td>H2</td><td>RHEL 9 · 같은 문서 › <a href="https://docs.redhat.com/en/documentation/red_hat_enterprise_linux/9/html/monitoring_and_managing_system_status_and_performance/setting-the-disk-scheduler_monitoring-and-managing-system-status-and-performance">Setting the disk scheduler</a></td><td>검색 발췌</td><td><span class="ev b">◐</span></td></tr>
+          <tr><td>H3</td><td>RHEL 9 · 같은 문서 › <a href="https://docs.redhat.com/en/documentation/red_hat_enterprise_linux/9/html/monitoring_and_managing_system_status_and_performance/configuring-huge-pages_monitoring-and-managing-system-status-and-performance">Configuring huge pages</a> (THP · HugeTLB)</td><td>검색 발췌</td><td><span class="ev b">◐</span></td></tr>
+          <tr><td>H4</td><td>RHEL 9 · 같은 문서 › <a href="https://docs.redhat.com/en/documentation/red_hat_enterprise_linux/9/html/monitoring_and_managing_system_status_and_performance/configuring-an-operating-system-to-optimize-memory-access_monitoring-and-managing-system-status-and-performance">Configuring an operating system to optimize memory access</a></td><td>검색 발췌</td><td><span class="ev b">◐</span></td></tr>
+          <tr><td>H5</td><td>RHEL 9 · 같은 문서 › <a href="https://docs.redhat.com/en/documentation/red_hat_enterprise_linux/9/html/monitoring_and_managing_system_status_and_performance/configuring-an-operating-system-to-optimize-cpu-utilization_monitoring-and-managing-system-status-and-performance">Configuring an operating system to optimize CPU utilization</a> (numad · irqbalance)</td><td>검색 발췌</td><td><span class="ev b">◐</span></td></tr>
+          <tr><td>H6</td><td>RHEL 8 · <a href="https://docs.redhat.com/en/documentation/red_hat_enterprise_linux/8/html/monitoring_and_managing_system_status_and_performance/tuning-cpu-frequency-to-optimize-energy-consumption_monitoring-and-managing-system-status-and-performance">Tuning CPU frequency to optimize energy consumption</a> · RHEL 10 Optimizing CPU frequency scaling</td><td>검색 발췌 (RHEL 9 판 미확인)</td><td><span class="ev b">◐</span></td></tr>
+          <tr><td>H7</td><td>RHEL 10 · <a href="https://docs.redhat.com/en/documentation/red_hat_enterprise_linux/10/html/network_troubleshooting_and_performance_tuning/tuning-irq-balancing">Tuning IRQ balancing</a> · <a href="https://docs.redhat.com/en/documentation/red_hat_enterprise_linux/10/html/network_troubleshooting_and_performance_tuning/tuning-udp-connections">Tuning UDP connections</a></td><td>검색 발췌 (RHEL 10 — 9 와 다를 수 있음)</td><td><span class="ev b">◐</span></td></tr>
+          <tr><td>H8</td><td>RHEL 6 · <a href="https://docs.redhat.com/en/documentation/red_Hat_enterprise_linux/6/html/performance_tuning_guide/s-memory-tunables">Performance Tuning Guide 5.5 Tuning Virtual Memory</a> (swappiness 10 · Oracle 예시)</td><td>검색 발췌 · 구판</td><td><span class="ev b">◐</span></td></tr>
+        </tbody></table></div>
+    </div>
+    <div class="card">
+      <h2 style="margin-bottom:8px">정직하게 적어 둘 것</h2>
+      <ul style="margin:0;padding-left:18px;display:flex;flex-direction:column;gap:6px;font-size:12.5px" class="dim">
+        <li><b style="color:#e6edf6">Red Hat 문서는 원문을 열지 못했다.</b> docs.redhat.com 이 브라우저가 아닌 요청을 403 으로 막았고, 사용자 에이전트를 바꿔 우회하지 않았다. 인용 문장은 검색 엔진이 그 페이지에서 뽑아 보여 준 것이라 문서 안의 위치·전후 문맥은 확인하지 못했다 → 등급 ◐. 구현 때 브라우저로 한 번 더 대조한다.</li>
+        <li><b style="color:#e6edf6">Rocky 공식 문서에는 범용 ‘성능 튜닝 가이드’ 가 없다.</b> 찾은 것은 KVM 튜닝과 네트워크 IRQ 두 편이고, 둘 다 “AI contribution policy” 표지가 있는 문서다. Rocky 는 RHEL 재빌드라 RHEL 문서를 1차 근거로 쓴다.</li>
+        <li><b style="color:#e6edf6">‘DB 역할 권장값’ 중 Red Hat 이 명시한 것은 없다.</b> swappiness 10 · THP madvise 는 RHEL 6 구판 예시·DB 벤더 관행이다. 그래서 상태를 ‘권고’ 로 두되 근거 등급을 ◐/○ 로 적고, 권장값 자체는 관리자가 설정에서 바꿀 수 있게 한다.</li>
+        <li><b style="color:#e6edf6">numa_balancing · somaxconn · nr_requests · read_ahead_kb 는 공식 권고를 찾지 못했다</b> → ‘확인 불가’/‘참고’. 화면은 값을 지어내지 않는다.</li>
+        <li>이 탭은 <b style="color:#e6edf6">읽기 전용</b>이다. 적용 명령(sysctl -w · tuned-adm · ethtool -G)은 보여 주되 포탈이 실행하지 않는다.</li>
+      </ul>
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":2300}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>
