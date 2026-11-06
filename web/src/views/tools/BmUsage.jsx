@@ -37,6 +37,15 @@ import {
   licenseMark, licenseNote, enterpriseConsentNote, enterpriseStatusNote, entDetailNotes, usageDetailNote,
   unassignedNote, edgePullState, edgePullNote, blurNumber, BLANK_KEPT_TEXT, esxiCollectNote } from './bmUsageText.js';
 import Select from '../../components/Select.jsx';
+// v2.920(리눅스 성능 2단계 화면): USE 매트릭스 보드 · 서버 성능 상세 — 문구·표시 규약은 bmPerfText.js, 판정은 서버 useJudge.js.
+import BmPerfBoard from './BmPerfBoard.jsx';
+import BmPerfDetail from './BmPerfDetail.jsx';
+import { boardItems, allAuthStops } from './bmPerfText.js';
+
+/** v2.920: 보기 기억(사용자별 편의 — 실패해도 화면은 기본값으로 그린다). */
+const VIEW_KEY = 'bmUsage.view';
+function readView() { try { const v = localStorage.getItem(VIEW_KEY); return v === 'use' || v === 'util' ? v : null; } catch { return null; } }
+function writeView(v) { try { localStorage.setItem(VIEW_KEY, v); } catch { /* 저장 실패는 무시 — 다음에 기본값 */ } }
 
 /** 표의 지표 열 — 서버가 준 `metrics` 계약과 같은 순서를 쓴다. */
 const COLS = [
@@ -86,6 +95,9 @@ export function BmUsage() {
   const [pulling, setPulling] = useState('');
   // Enterprise 동의 체크 — 저장 버튼을 누르기 전 단계(서버는 ack 없이는 켜지 않는다).
   const [entAgree, setEntAgree] = useState(false);
+  // v2.920: 보기 — 'use'(USE 매트릭스 보드) | 'util'(기존 사용률 표). null 이면 자동(성능 항목이 있으면 USE).
+  const [viewSel, setViewSel] = useState(readView);
+  const [perfSel, setPerfSel] = useState('');   // 성능 상세를 연 서버(엣지 위임 서버도 — 사용률 추이는 이 노드 대상만)
 
   // v2.628 WEB2628-06: 늦게 온 이전 GET 이 방금 저장한 설정(form)을 덮지 않게 세대로 거른다(저장 성공도 세대를 올린다).
   const loadGen = React.useRef(0);
@@ -139,6 +151,24 @@ export function BmUsage() {
     hay: (r) => [r.name, r.serviceTag, r.vcenterId, r.model, r.idracHost, r.osHostName, pathTypeLabel(r.type)],
   }), [rows, dcSel, typeSel, q]);
   const shown = facets.shown;
+  /*
+   * v2.920: USE 매트릭스 보드 항목 — 이 노드 대상 + 엣지 보관분(위임 수집 환경에서 중앙 보드가 비지 않게). 법인·경로 필터와 검색은
+   *   같은 facetState 를 이 목록에 다시 건다(엣지 행도 같은 칩으로 걸러진다). 보드 보기에서는 칩도 이 목록 기준이다.
+   */
+  const perfItems = useMemo(() => boardItems(data || {}, edges), [data, edges]);
+  const perfFacets = useMemo(() => facetState({
+    rows: facetRows(perfItems.map((it) => ({ ...(it.target || {}), ...(it.row || {}), key: it.key, name: it.name, vcenterId: it.vcenterId, agent: it.agent, _it: it }))),
+    dcSel, typeSel, query: q,
+    dcName: (id) => (id ? String(id) : '(귀속 없음)'),
+    typeLabel: pathTypeLabel,
+    hay: (r) => [r.name, r.serviceTag, r.vcenterId, r.model, r.idracHost, r.osHostName, r.agent, pathTypeLabel(r.type)],
+  }), [perfItems, dcSel, typeSel, q]);
+  const perfShown = useMemo(() => perfFacets.shown.map((r) => r._it), [perfFacets]);
+  // v2.920(반증 D6): 인증 정지는 이 노드 것 + 엣지 보관분 것(엣지 위임 서버의 ‘인증 정지’ 가 빠지지 않게).
+  const perfAuthStops = useMemo(() => allAuthStops(data || {}, edges), [data, edges]);
+  const view = viewSel || ((data?.perf || []).length || perfItems.some((it) => it.entry) ? 'use' : 'util');
+  const barFacets = view === 'use' ? perfFacets : facets;
+  function chooseView(v) { setViewSel(v); writeView(v); }
   const top = useMemo(() => topBusiest(shown, { metric: topMetric, limit: 5 }), [shown, topMetric]);
   const corps = useMemo(() => corpSummary(shown, { metric: topMetric }), [shown, topMetric]);
 
@@ -189,6 +219,9 @@ export function BmUsage() {
     } finally { if (gen === detailGen.current) setDetailLoading(false); }
   }, []);
   async function openDetail(key) {
+    setPerfSel(key);
+    // 사용률 추이(history)는 이 노드가 수집하는 대상만 있다 — 엣지 위임 서버는 성능 상세만 연다(없는 추이를 404 로 보이지 않게).
+    if (!(data?.targets || []).some((x) => String(x.key) === String(key))) { setSel(''); setDetail(null); return; }
     setSel(key); setDetail(null); setRangeKey('24h');
     await loadDetail(key, '24h');
   }
@@ -331,8 +364,13 @@ export function BmUsage() {
       </div>
 
       <div className="card" style={{ minWidth: 0 }}>
+        {/* v2.920: 보기 전환 — USE 매트릭스(성능 판정) / 사용률 표(기존 다섯 지표). 400 폭에서는 전폭 · 버튼 44px(styles.css .bmp-seg). */}
+        <div className="bmp-seg bmp-seg-top" role="tablist" aria-label="보기">
+          <button role="tab" aria-selected={view === 'use'} className={view === 'use' ? 'active' : ''} onClick={() => chooseView('use')}>USE 매트릭스</button>
+          <button role="tab" aria-selected={view === 'util'} className={view === 'util' ? 'active' : ''} onClick={() => chooseView('util')}>사용률 표</button>
+        </div>
         <DeviceFacetBar
-          dcChips={facets.dcChips} typeChips={facets.typeChips} dcSel={dcSel} typeSel={typeSel}
+          dcChips={barFacets.dcChips} typeChips={barFacets.typeChips} dcSel={dcSel} typeSel={typeSel}
           onToggleDc={(v) => setDcSel((p) => toggleIn(p, v))}
           onToggleType={(v) => setTypeSel((p) => toggleIn(p, v))}
           onClear={() => { setDcSel(new Set()); setTypeSel(new Set()); setQ(''); }}
@@ -360,66 +398,85 @@ export function BmUsage() {
             {sourceErrorsNote(st.last).items.map((x, i) => <div key={i} style={{ overflowWrap: 'anywhere' }}>· {x}</div>)}
           </div>
         )}
-        {/* ⚠ 표는 **가로 스크롤 컨테이너**로 감싼다 — 지표 열이 8개라 400px 에서 페이지를 밀어낸다. */}
-        <div style={{ overflowX: 'auto', minWidth: 0 }}>
-          <STable>
-            <thead>
-              <tr>
-                <th>서버</th><th>법인</th><th>경로</th>
-                {COLS.map((c) => <th key={c.col} className="right">{c.label}</th>)}
-                <th>수집</th>
-              </tr>
-            </thead>
-            <tbody>
-              {shown.map((r) => (
-                <tr key={r.key} style={{ background: sel === r.key ? 'rgba(255,255,255,0.04)' : undefined }}>
-                  <td data-sort={r.name}>
-                    <span
-                      role="button" tabIndex={0}
-                      onClick={() => openDetail(r.key)}
-                      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openDetail(r.key); } }}
-                      style={{ cursor: 'pointer', textDecoration: 'underline dotted', textUnderlineOffset: 3, color: 'inherit' }}
-                    >{r.name}</span>
-                    {r.role === 'virt' && <span title="ESXi(가상화) 호스트 — 설정의 'ESXi 호스트도 iDRAC 로 수집' 으로 들어온 서버입니다" style={{ marginLeft: 6, fontSize: 10, padding: '0 5px', borderRadius: 4, border: '1px solid var(--border)', color: 'var(--text-dim)', whiteSpace: 'nowrap' }}>ESXi</span>}
-                    {r.serviceTag && <div style={{ fontSize: 11, color: 'var(--muted)' }}>{r.serviceTag}</div>}
-                  </td>
-                  <td data-sort={r.vcenterId || ''}>{r.vcenterId || <span style={{ color: 'var(--muted)' }}>—</span>}</td>
-                  <td data-sort={(r.paths || []).join(',')}>
-                    <span style={{ fontSize: 12 }}>{(r.paths || []).map((p) => (p === 'os' ? 'OS' : 'iDRAC')).join('·') || '—'}</span>
-                    {r.src && r.src !== (r.paths || []).join('+') && <div style={{ fontSize: 11, color: 'var(--muted)' }}>값 출처 {srcMark(r.src)}</div>}
-                    {/* ⚠ 전부 `—` 인 행이 **왜** 비었는지 행 자체가 말해야 한다 — 긴 설명은 표 아래 각주가 한 번만 한다. */}
-                    {!!(r.missing || []).length && (
-                      <div style={{ fontSize: 11, color: toneVar('warn') }}>{missingMark(r.missing)}</div>
-                    )}
-                    {/* ⚠ 라이선스는 **짧은 표지**만(v2.509) — 설명은 서버를 눌러 상세에서. 미상이면 아무것도 쓰지 않는다. */}
-                    {licenseMark(r.license) && (
-                      <div style={{ fontSize: 11, color: 'var(--muted)' }}>{licenseMark(r.license)}</div>
-                    )}
-                  </td>
-                  {COLS.map((c) => (
-                    <td key={c.col} className="right" data-sort={r[c.col] ?? ''}><Cell v={r[c.col]} kind={c.kind} /></td>
-                  ))}
-                  <td data-sort={r.ts || 0}>{r.ts ? ageText(r.ts) : <span style={{ color: 'var(--muted)' }}>—</span>}</td>
+        {view === 'util' && (<>
+          {/* ⚠ 표는 **가로 스크롤 컨테이너**로 감싼다 — 지표 열이 8개라 400px 에서 페이지를 밀어낸다. */}
+          <div style={{ overflowX: 'auto', minWidth: 0 }}>
+            <STable>
+              <thead>
+                <tr>
+                  <th>서버</th><th>법인</th><th>경로</th>
+                  {COLS.map((c) => <th key={c.col} className="right">{c.label}</th>)}
+                  <th>수집</th>
                 </tr>
-              ))}
-            </tbody>
-          </STable>
-        </div>
-        {!shown.length && <p style={{ fontSize: 12, color: 'var(--muted)' }}>표시할 서버가 없습니다.</p>}
-        {missingFootnotes(rows).map((f, i) => (
-          <p key={i} style={{ margin: '6px 0 0', fontSize: 11, color: 'var(--muted)', lineHeight: 1.6 }}><BoldText text={f} /></p>
-        ))}
-        {/* v2.744(감사 LEFT-08 ②): HBA 사용률 분모 근거 — 보이는 행 기준 각주 1회(근거가 없으면 그리지 않는다) */}
-        {hbaBasisFootnote(shown) && (
-          <p style={{ margin: '6px 0 0', fontSize: 11, color: 'var(--muted)', lineHeight: 1.6 }}><BoldText text={hbaBasisFootnote(shown)} /></p>
-        )}
-        <p style={{ margin: '8px 0 0', fontSize: 11, color: 'var(--muted)', lineHeight: 1.6 }}>
-          <BoldText text={'‘—’ 는 **못 읽은 것**이고 0% 가 아닙니다. 디스크·네트워크·HBA 의 값은 그 서버에서 **가장 높은 장치·회선** 기준입니다(평균을 쓰면 한 디스크가 가득 찬 서버가 낮게 보입니다). 네트워크·HBA 사용률(%)은 전이중이라 **방향별(수신·송신 중 큰 쪽)** ÷ 링크 속도이고, 처리량(B/s)은 두 방향의 합입니다.'.replace(/`/g, '')} />
-        </p>
+              </thead>
+              <tbody>
+                {shown.map((r) => (
+                  <tr key={r.key} style={{ background: sel === r.key ? 'rgba(255,255,255,0.04)' : undefined }}>
+                    <td data-sort={r.name}>
+                      <span
+                        role="button" tabIndex={0}
+                        onClick={() => openDetail(r.key)}
+                        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openDetail(r.key); } }}
+                        style={{ cursor: 'pointer', textDecoration: 'underline dotted', textUnderlineOffset: 3, color: 'inherit' }}
+                      >{r.name}</span>
+                      {r.role === 'virt' && <span title="ESXi(가상화) 호스트 — 설정의 'ESXi 호스트도 iDRAC 로 수집' 으로 들어온 서버입니다" style={{ marginLeft: 6, fontSize: 10, padding: '0 5px', borderRadius: 4, border: '1px solid var(--border)', color: 'var(--text-dim)', whiteSpace: 'nowrap' }}>ESXi</span>}
+                      {r.serviceTag && <div style={{ fontSize: 11, color: 'var(--muted)' }}>{r.serviceTag}</div>}
+                    </td>
+                    <td data-sort={r.vcenterId || ''}>{r.vcenterId || <span style={{ color: 'var(--muted)' }}>—</span>}</td>
+                    <td data-sort={(r.paths || []).join(',')}>
+                      <span style={{ fontSize: 12 }}>{(r.paths || []).map((p) => (p === 'os' ? 'OS' : 'iDRAC')).join('·') || '—'}</span>
+                      {r.src && r.src !== (r.paths || []).join('+') && <div style={{ fontSize: 11, color: 'var(--muted)' }}>값 출처 {srcMark(r.src)}</div>}
+                      {/* ⚠ 전부 `—` 인 행이 **왜** 비었는지 행 자체가 말해야 한다 — 긴 설명은 표 아래 각주가 한 번만 한다. */}
+                      {!!(r.missing || []).length && (
+                        <div style={{ fontSize: 11, color: toneVar('warn') }}>{missingMark(r.missing)}</div>
+                      )}
+                      {/* ⚠ 라이선스는 **짧은 표지**만(v2.509) — 설명은 서버를 눌러 상세에서. 미상이면 아무것도 쓰지 않는다. */}
+                      {licenseMark(r.license) && (
+                        <div style={{ fontSize: 11, color: 'var(--muted)' }}>{licenseMark(r.license)}</div>
+                      )}
+                    </td>
+                    {COLS.map((c) => (
+                      <td key={c.col} className="right" data-sort={r[c.col] ?? ''}><Cell v={r[c.col]} kind={c.kind} /></td>
+                    ))}
+                    <td data-sort={r.ts || 0}>{r.ts ? ageText(r.ts) : <span style={{ color: 'var(--muted)' }}>—</span>}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </STable>
+          </div>
+          {!shown.length && <p style={{ fontSize: 12, color: 'var(--muted)' }}>표시할 서버가 없습니다.</p>}
+          {missingFootnotes(rows).map((f, i) => (
+            <p key={i} style={{ margin: '6px 0 0', fontSize: 11, color: 'var(--muted)', lineHeight: 1.6 }}><BoldText text={f} /></p>
+          ))}
+          {/* v2.744(감사 LEFT-08 ②): HBA 사용률 분모 근거 — 보이는 행 기준 각주 1회(근거가 없으면 그리지 않는다) */}
+          {hbaBasisFootnote(shown) && (
+            <p style={{ margin: '6px 0 0', fontSize: 11, color: 'var(--muted)', lineHeight: 1.6 }}><BoldText text={hbaBasisFootnote(shown)} /></p>
+          )}
+          <p style={{ margin: '8px 0 0', fontSize: 11, color: 'var(--muted)', lineHeight: 1.6 }}>
+            <BoldText text={'‘—’ 는 **못 읽은 것**이고 0% 가 아닙니다. 디스크·네트워크·HBA 의 값은 그 서버에서 **가장 높은 장치·회선** 기준입니다(평균을 쓰면 한 디스크가 가득 찬 서버가 낮게 보입니다). 네트워크·HBA 사용률(%)은 전이중이라 **방향별(수신·송신 중 큰 쪽)** ÷ 링크 속도이고, 처리량(B/s)은 두 방향의 합입니다.'.replace(/`/g, '')} />
+          </p>
+        </>)}
       </div>
 
+      {/* v2.920: USE 매트릭스 보드(신뢰 띠 · KPI · 매트릭스 · 병목 Top) — 이 노드 대상 + 엣지 보관분. */}
+      {view === 'use' && (
+        <BmPerfBoard
+          items={perfShown} th={data?.perfThresholds || null} intervalMs={st.intervalMs ?? data?.settings?.intervalMs}
+          authStops={perfAuthStops} staleMs={edges?.staleMs ?? null} corpOff={data?.skippedCounts?.['corp-off'] || 0}
+          onOpen={openDetail} selKey={perfSel} perfError={data?.perfError || ''}
+        />
+      )}
+      {/* v2.920: 서버 성능 상세(머리 · 판정 띠 · 탭 요약/자원/하드웨어) — 사용률 추이는 아래 기존 상세 카드에 그대로. */}
+      {perfSel && (
+        <BmPerfDetail
+          itemKey={perfSel} item={perfItems.find((it) => it.key === perfSel) || null}
+          authStops={perfAuthStops} staleMs={edges?.staleMs ?? null}
+          onClose={() => setPerfSel('')}
+        />
+      )}
+
       {/* ── 상위 N + 법인별 집계(v2.551) ─────────────────────────────────────── */}
-      {!!shown.length && (
+      {view === 'util' && !!shown.length && (
         <div className="card" style={{ minWidth: 0 }}>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', marginBottom: 8 }}>
             <h4 style={{ margin: 0 }}>가장 바쁜 서버 · 법인별</h4>

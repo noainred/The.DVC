@@ -41,6 +41,7 @@
 - (v2.901 추가) 개체 보기 3차(NIC 팀 · DS 마운트 · 리소스 풀) · useOnce 열쇠 · 관리자 전용 버튼은 `adminToolAllowed` · Bareos 그룹 기준 시계 선택
 - (v2.906 추가) 호스트 네트워크 탭 '분산 포트그룹' 카드(vDS 팀 구성 · LACP · VLAN) · 팀 구성 문구는 `vcd/vcInfo.js` 한 벌 · Bareos 행마다 취소 회차 표시
 - (v2.895 추가) 개체 보기 › 성능 튜닝(시안 ⑫⑬) — 판정은 기존 모듈(rightsize verdict · contention · vmcfg · hcfg · 가상화율 RATIO_LEVELS · 사용률 75/90 · DS 90/95)을 `vcd/tuning.js` 한 곳에서 모은다 · 새 서버 경로 없음 · 계획은 저장 없이 내보내기만
+- (v2.920 추가) 베어메탈 사용률(`bm-usage`) USE 매트릭스 보드 · 서버 성능 상세 — 판정은 서버 `useJudge.js`, 문구·칸 표기는 `views/tools/bmPerfText.js` 하나 · 기존 사용률 표는 토글로 유지
 - (원래 5663행) v2.708 — 드롭다운은 공용 `Select`·`DataList` 하나다(자동 정렬)
 - (원래 5801행) 특수 기능 화면(v2.679) — 표시 이름·설명·개발 단계는 '덮어쓰기' 이고 키는 그대로다
 - (원래 5848행) 접속 공지 팝업 · 게시판(v2.722)
@@ -48,6 +49,20 @@
 - (원래 5868행) 상단 메뉴에서 특수 기능으로 옮긴 화면은 옛 주소를 살린다
 
 ## 본문
+
+- ⚠⚠ **v2.920 — 베어메탈 사용률(`#/tools/bm-usage` · 도구 키 그대로) USE 매트릭스 보드 · 서버 성능 상세(리눅스 성능 2단계 · 설계 `docs/design/linux-bm-perf/README.md` §5 ①~④)**.
+  화면 `views/tools/{BmPerfBoard,BmPerfDetail}.jsx`(조립만) · 문구 `bmPerfText.js`(순수) · 회귀 `bmPerfText.test.js`(문구 · 상태 9종 · 렌더 스모크 · 소스 스윕) + `server/test/bmPerf2920.test.js`(API 보강 `psiAbsent` · 정제 · 데모 합성):
+  - **판정을 웹에서 다시 하지 않는다** — 칸 색은 서버 code(`ok·warn·bad·none·missing·nopath·stale`), 판정 한 줄(`line`)은 서버 문장 그대로, 기준 숫자는 API `perfThresholds` 를 **보여 주기만**(`thresholdText`). 테스트가 ‘기준값 키 + 비교 연산’ 을 소스 스윕으로 막는다.
+  - **‘—’ 넷은 각주 기호로 구분** — `—¹` 못 읽음 · `—²` 그 커널에 없음 · `—³` 경로 없음 · `—⁴` 오래됨(`CODE_INFO` · `cellFootnotes` — 표에 나온 것만). ‘경로 없음’(등록 없음)과 ‘못 읽음’(등록은 있는데 안 읽힘)은 상태도 다르다(`pathState` · `osOnly`/`osOnlyUnread` · `idracOnly`/`idracOnlyUnread` · `noPath`/`noneRead`).
+  - **U 칸만 숫자**(입력이 하나 — 사용률), S·E 칸은 낱말(정상 · 주의 · 초과) — 여러 입력 중 가장 나쁜 것이 색을 정하는 칸에 대표값 하나를 적으면 색과 숫자가 어긋난다.
+  - 보드 항목은 이 노드 대상 + **엣지 보관분**(`boardItems` — 위임 수집 환경에서 중앙 보드가 비지 않게) · 법인/경로 칩과 검색은 같은 `facetState` 를 이 목록에 다시 건다. 기존 다섯 지표 표는 ‘사용률 표’ 토글로 그대로 두었다(보기는 localStorage 편의 — 실패해도 기본값).
+  - 서버 상세 탭은 **데이터가 있는 것만**(`DETAIL_TABS` — 요약 · 자원 · 하드웨어). 장애 기록 · 튜닝 · 용도 · 스냅샷 · 추이 탭은 그 기능이 생길 때 더한다(비활성 탭으로 그리지 않는다). 사용률 추이는 아래 기존 상세 카드 그대로(이 노드 대상만 — 엣지 위임 서버는 성능 상세만 연다).
+  - 조회는 행을 누를 때 1회 + ‘다시 읽기’(폴링 없음) · 늦게 온 다른 서버 응답은 세대로 버린다 · 403 은 ErrorBox · 404 는 ‘없거나 범위 밖’(둘을 구분하지 않는다).
+  - ⚠⚠ **매트릭스 칸은 `<td>` 를 돌려주는 함수(`perfCell`)로 넣는다 — 컴포넌트(`<PerfCell/>`)로 넣지 말 것**(2단계 반증 D1): STable 정렬(`sortableText.cellText`)은 행에 td 가 하나라도 있으면 **td/th 만 셀로 센다** — 컴포넌트 칸 15개가 빠져 열 클릭이 판정 열로 정렬되거나 아무 일도 하지 않았다. 회귀는 `matrixRows` 결과에 실제 `sortChildren` 을 건다(U 숫자 · S code · 판정 · ‘—’ 늘 뒤).
+  - 각주와 칸은 같은 함수(`cellCode` · `codesUsed`)로 — 항목이 없는 행(표본 없음)은 기호 없는 ‘—’ + 별도 각주(`NO_ENTRY_FOOTNOTE`), code 가 빠진 칸은 ‘—¹’ 이고 각주 ¹ 이 함께 나온다(반증 D3).
+  - ‘꺼짐’ 은 이 노드 `enabled === false`(데모 제외) · 엣지 `enabledOnEdge === false` 로 항목에 `off` 를 달아 신뢰 띠 안내 + 행 칩 + 상세 머리로 그린다 · 꺼진 법인 수는 `skippedCounts['corp-off']`(반증 D4). 인증 정지는 이 노드 + 엣지 보관분 합산(`allAuthStops` — 반증 D6).
+  - 상세는 상태 없는 `BmPerfDetailView` + 세대 조회기 `createDetailLoader` 로 나눴다 — 응답 뒤 화면 · 403/404 · 늦은 응답 버림을 가짜 fetcher + SSR 로 고정(반증 D8). 404·실패 때는 목록 항목의 상태 블록을 섞지 않는다.
+  - 400 폭: `.bmp-seg` 전폭 · 버튼 44px · 탭 글자는 줄바꿈 허용(nowrap 이면 세 번째 탭이 잘렸다 — Chromium 실측) · 매트릭스는 STable `minWidth` 가로 스크롤 박스. 1440 에서는 법인을 서버 칸 아래로 · 판정 배지를 판정 한 줄 칸으로 합쳐 스크롤 없이 들어간다(1차 판본은 1589px 표가 1118px 칸에서 하드웨어 · 판정 열이 잘렸다).
 
 - ⚠⚠ **상단 메뉴 2단화 — 탭 규칙은 `.topbar .tabs .tab` 으로 한정한다**(v2.556, 같은 핸드오프 §0):
   `className="tab"` 은 앱 **전역에서 일반 버튼**으로도 쓰인다(접속확인·필터 초기화·CSV 선택·

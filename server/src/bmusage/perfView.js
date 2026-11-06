@@ -53,6 +53,9 @@ export function buildPerfEntry({ row = {}, hw = null, th = {}, intervalMs = null
     mismatch: use.mismatch,
     // 첫 표본 — 누적 카운터 칸(분해·IOPS·await·스왑·드롭 …)은 다음 주기부터 나온다(그 칸은 missing 이고 ‘기다리면 된다’).
     firstSample: !!detail?.firstSample,
+    // v2.920(2단계 화면): 그 커널에 PSI 가 없다(구획은 왔는데 0줄 = absent) — 보드 신뢰 띠의 ‘PSI 없음 n’ 은 목록 응답만으로 세야 한다(목록에는 detail 이 없다).
+    //   판정이 아니라 수집 사실 한 비트다(판정은 useJudge 가 이미 그 칸을 none 으로 냈다).
+    psiAbsent: detail?.sections?.psi === 'absent',
   };
   if (!full) return base;
   return {

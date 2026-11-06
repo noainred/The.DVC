@@ -73,7 +73,81 @@ export function demoBmUsageRow(target, t) {
   };
 }
 
-/** 폴러 결과 모양(`collectOne` 과 같은 {ok, target, built:{row}}). */
+/*
+ * v2.920(리눅스 성능 2단계 화면): 데모 서버에 리눅스 성능 열(OS 경로)을 **조회 응답 단계에서만** 겹친다 — 예전 데모 행은 iDRAC 값만이고
+ *   os_at·idrac_at 도 비어 USE 매트릭스가 전 서버 ‘판정 불가’ 였다(화면을 볼 수 없었다). 시나리오는 데모 대상 키 순위로 고정(결정적)이고
+ *   상태 9종 중 데이터로 만들 수 있는 것(정상 · 포화 · 병목 · 첫 주기 · PSI 없음 · iDRAC 만 · 드롭 증가)을 고루 둔다.
+ * ⚠⚠(2단계 반증 D2) **적재 경로에 넣지 않는다** — 폴러 결과(demoBmUsageResults → insertUsage)에 섞으면 합성 런큐·PSI 가 usage_history ·
+ *   usage_daily `_max` 에 매 주기 쌓이고, 다섯 지표(cpu·mem·net)를 덮어써 ‘첫 주기’ 서버는 사용률이 영구 ‘—’ 가 됐다.
+ *   그래서 ① 최신값을 읽어 응답을 만드는 곳(라우트 주 조회 · 서버 상세 · 엣지 봉투)만 `demoPerfLatestRows` 를 부르고
+ *   ② 기존 다섯 지표 열은 **덮지 않는다**(성능 열 · os_at · idrac_at · detail_json 만 더한다). 불일치(OS↔iDRAC) 시나리오는 cpu_pct 를
+ *   바꿔야 만들 수 있어 두지 않는다(그 상태는 화면 검증에서 응답 합성으로만 봤다 — 정직 기록). 판정은 하지 않는다(useJudge 가 한다).
+ */
+export const DEMO_PERF_SCENARIOS = Object.freeze(['idrac-only', 'healthy', 'disk-sat', 'cpu-sat', 'psi-absent', 'first', 'net-drop', 'mem-sat', 'healthy2']);
+export function demoPerfOverlay(target, t, scenario, base = {}) {
+  if (scenario === 'idrac-only' || !DEMO_PERF_SCENARIOS.includes(scenario)) return { idrac_at: t };
+  const key = String(target.key || '');
+  const w = (k) => demoRand(`${key}|perf|${k}|${Math.floor(t / (15 * MIN))}`);
+  const cores = 16 + (demoHash(`cores|${key}`) % 3) * 16;
+  const cpu = base.cpu_pct ?? 30;
+  const first = scenario === 'first';
+  const psiAbsent = scenario === 'psi-absent';
+  const pick = (v) => (first ? null : v);
+  const load1 = r1((scenario === 'cpu-sat' ? 2.1 : 0.2 + w('l') * 0.4) * cores);
+  const psi = (v) => (psiAbsent ? null : v);
+  const disks = [
+    { name: 'nvme0n1', busyPct: pick(r1(scenario === 'disk-sat' ? 94 : 8 + w('d0') * 20)), iops: pick(Math.round(800 + w('i0') * 3000)), awaitMs: pick(r1(scenario === 'disk-sat' ? 18 : 0.4 + w('a0'))), aqu: pick(r1(scenario === 'disk-sat' ? 9.2 : 0.1 + w('q0') * 0.5)), inFlight: Math.round(w('f0') * 4) },
+    { name: 'sda', busyPct: pick(r1(2 + w('d1') * 5)), iops: pick(Math.round(10 + w('i1') * 30)), awaitMs: pick(r1(3 + w('a1'))), aqu: pick(0), inFlight: 0 },
+  ];
+  const nics = [
+    { iface: 'bond0', errDelta: pick(0), dropDelta: pick(scenario === 'net-drop' ? 1204 : 0), rxErrDelta: pick(0), txErrDelta: pick(0), rxDropDelta: pick(scenario === 'net-drop' ? 1204 : 0), txDropDelta: pick(0), state: 'up' },
+    { iface: 'eno1', errDelta: pick(0), dropDelta: pick(0), rxErrDelta: pick(0), txErrDelta: pick(0), rxDropDelta: pick(0), txDropDelta: pick(0), state: 'up' },
+  ];
+  const maxOf = (list, k) => { const v = list.map((x) => x[k]).filter((x) => x != null); return v.length ? Math.max(...v) : null; };
+  const cols = {
+    cpu_user_pct: pick(r1(cpu * 0.7)), cpu_sys_pct: pick(r1(cpu * 0.15)), cpu_iowait_pct: pick(r1(scenario === 'disk-sat' ? 11 : w('io') * 2)), cpu_steal_pct: pick(0),
+    cpu_core_max_pct: pick(r1(Math.min(100, cpu + 20 + w('cm') * 15))),
+    load1, load5: r1(load1 * 0.9), load15: r1(load1 * 0.8), runq_per_core: Math.round((load1 / cores) * 100) / 100,
+    ctxt_ps: pick(Math.round(8000 + w('cx') * 12000)),
+    psi_cpu_some10: psi(r1(scenario === 'cpu-sat' ? 41 : w('pc') * 4)), psi_cpu_some60: psi(r1(scenario === 'cpu-sat' ? 38 : w('pc6') * 3)),
+    swap_in_ps: pick(0), swap_out_ps: pick(scenario === 'mem-sat' ? 412 : 0), pgmajfault_ps: pick(r1(scenario === 'mem-sat' ? 180 : w('pf') * 3)),
+    psi_mem_full10: psi(r1(scenario === 'mem-sat' ? 7 : 0)), psi_mem_full60: psi(r1(scenario === 'mem-sat' ? 6 : 0)),
+    oom_kill_delta: pick(0),
+    disk_iops: maxOf(disks, 'iops'), disk_await_ms: maxOf(disks, 'awaitMs'), disk_inflight: maxOf(disks, 'inFlight'), disk_aqu: maxOf(disks, 'aqu'),
+    procs_blocked: scenario === 'disk-sat' ? 6 : 0,
+    psi_io_full10: psi(r1(scenario === 'disk-sat' ? 12 : w('pi') * 0.5)), psi_io_full60: psi(r1(scenario === 'disk-sat' ? 10 : 0)),
+    net_drop_delta: maxOf(nics, 'dropDelta'), tcp_retrans_pct: pick(r1(scenario === 'net-drop' ? 2.3 : 0.1 + w('rt') * 0.3)), net_err_delta: maxOf(nics, 'errDelta'),
+  };
+  const sec = (v) => ({ stat: v, load: v, psi: psiAbsent ? 'absent' : v, vmstat: v, snmp: v, blkq: v, sysctl: v, hugepages: v, irq: v, dfi: v });
+  const detail = {
+    v: 1, at: t, osKind: 'linux', firstSample: first, cores, coresTruncated: false, procsRunning: Math.round(load1), threads: 900 + Math.round(w('th') * 600),
+    psi: psiAbsent ? null : { cpu: { some10: cols.psi_cpu_some10, some60: cols.psi_cpu_some60, some300: cols.psi_cpu_some60 }, memory: { some10: cols.psi_mem_full10, full10: cols.psi_mem_full10, full60: cols.psi_mem_full60, full300: 0 }, io: { some10: cols.psi_io_full10, full10: cols.psi_io_full10, full60: cols.psi_io_full60, full300: 0 } },
+    disks, disksTotal: disks.length, nics, nicsTotal: nics.length, inodes: null,
+    streak: { netErr: 0, netDrop: scenario === 'net-drop' ? 1 : 0, oom: 0 }, sections: sec('ok'), truncated: false,
+  };
+  return { ...cols, src: 'os+idrac+demo', os_at: t, idrac_at: t, detail_json: JSON.stringify(detail) };
+}
+/**
+ * 최신값 행 → 데모 대상이면 성능 열을 겹친 사본(조회 응답 전용 — DB 에 쓰지 않는다). mock 이 아니면 입력 그대로.
+ * 다섯 지표 열(cpu_pct·mem_pct·disk_busy_pct·disk_used_pct·net_pct·hba_*)은 바꾸지 않는다.
+ */
+export function demoPerfLatestRows(rows = [], targets = []) {
+  if (!isMockMode() || !Array.isArray(rows) || !rows.length) return rows;
+  const demoTg = (targets || []).filter(isDemoBmTarget);
+  if (!demoTg.length) return rows;
+  const byKey = new Map(demoTg.map((tg) => [String(tg.key || ''), tg]));
+  const rank = new Map([...byKey.keys()].sort().map((k, i) => [k, i]));
+  return rows.map((r) => {
+    const k = String(r?.key ?? '');
+    const tg = byKey.get(k);
+    if (!tg || r?.ts == null) return r;
+    const sc = DEMO_PERF_SCENARIOS[rank.get(k) % DEMO_PERF_SCENARIOS.length];
+    const o = demoPerfOverlay(tg, r.ts, sc, r);
+    return { ...r, ...o, src: o.src || r.src };
+  });
+}
+
+/** 폴러 결과 모양(`collectOne` 과 같은 {ok, target, built:{row}}). ⚠ 성능 열은 여기 넣지 않는다(적재 경로 — 위 D2). */
 export function demoBmUsageResults(targets = [], now = Date.now()) {
   return targets.map((tg) => ({ ok: true, target: tg, demo: true, built: { row: demoBmUsageRow(tg, now), srcOf: { cpu: 'idrac', mem: 'idrac', io: 'idrac', net: 'idrac', hba: 'idrac' }, notes: [] } }));
 }

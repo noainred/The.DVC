@@ -3215,3 +3215,42 @@ table.svcinv-t .svcinv-stick { position: sticky; left: 0; z-index: 1; background
   .bmb-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .bmb-search { width: 100%; }
 }
+
+/* ── v2.920 리눅스 베어메탈 통합 성능 2단계 — USE 매트릭스 보드 · 서버 성능 상세(bm-usage · views/tools/BmPerf*.jsx).
+      색은 :root 토큰과 기존 강조색의 rgba 오버레이만(새 hex 금지) · uppercase 금지 · 그리드 자식 min-width:0.
+      400 폭: 세그먼트 전폭 · 터치 버튼 44px · 표는 STable minWidth(가로 스크롤 박스). ── */
+.bmp-seg { display: flex; flex-wrap: wrap; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; background: var(--panel-deep); width: max-content; max-width: 100%; margin: 0 0 8px; }
+.bmp-seg button { background: none; border: 0; color: var(--text-dim); padding: 6px 14px; font: inherit; font-size: 12.5px; cursor: pointer; white-space: nowrap; min-width: 0; }
+.bmp-seg button + button { border-left: 1px solid var(--border); }
+.bmp-seg button.active { background: rgba(103, 232, 249, 0.14); color: var(--text); font-weight: 600; }
+.bmp-cell { white-space: nowrap; font-variant-numeric: tabular-nums; }
+.bmp-matrix th, .bmp-matrix td { padding-left: 5px; padding-right: 5px; }
+.bmp-matrix th.bmp-grp { border-bottom: 1px solid var(--border); }
+.bmp-mark { font-size: 9px; color: var(--text-faint); margin-left: 1px; }
+.bmp-ue { font-size: 11px; }
+.bmp-grp { text-align: center; font-size: 12px; }
+.bmp-line { min-width: 220px; max-width: 300px; font-size: 12px; line-height: 1.5; white-space: normal; overflow-wrap: anywhere; }
+.bmp-link { cursor: pointer; text-decoration: underline dotted; text-underline-offset: 3px; color: inherit; }
+.bmp-badge { display: inline-block; font-size: 11px; padding: 0 6px; border: 1px solid; border-radius: 4px; white-space: nowrap; line-height: 18px; }
+.bmp-chips { display: flex; flex-wrap: wrap; gap: 3px; margin-top: 2px; }
+.bmp-chip { display: inline-block; font-size: 10.5px; padding: 0 5px; border: 1px solid var(--border); border-radius: 4px; white-space: nowrap; line-height: 17px; }
+.bmp-top { display: grid; gap: 4px; min-width: 0; }
+.bmp-top-item { display: grid; grid-template-columns: 72px minmax(0, 1fr) auto; gap: 10px; align-items: start; padding: 8px 0; border-top: 1px solid var(--border-soft); min-width: 0; }
+.bmp-verdict { margin: 10px 0; padding: 8px 10px; border-left: 3px solid var(--border); background: rgba(255, 255, 255, 0.03); min-width: 0; }
+.bmp-states { display: grid; gap: 6px; margin-top: 8px; min-width: 0; }
+.bmp-state { padding: 6px 10px; border-left: 3px solid var(--border); background: rgba(255, 255, 255, 0.02); min-width: 0; }
+.bmp-faces { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 420px), 1fr)); gap: 12px; min-width: 0; }
+.bmp-face { min-width: 0; padding: 10px 12px; border: 1px solid var(--border-soft); border-radius: 8px; background: var(--panel-2); }
+.bmp-use-row { display: grid; grid-template-columns: 72px minmax(0, 1fr); gap: 8px; padding: 4px 0; border-top: 1px solid var(--border-soft); min-width: 0; }
+.bmp-use-k { font-size: 12px; color: var(--muted); }
+.bmp-ev { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 170px), 1fr)); gap: 2px 12px; font-size: 12px; min-width: 0; }
+.bmp-cross { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr)); gap: 8px; min-width: 0; }
+.bmp-cross-item { min-width: 0; padding: 8px 10px; border: 1px solid var(--border-soft); border-radius: 8px; }
+.bmp-kv { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 3px 12px; font-size: 12px; line-height: 1.6; min-width: 0; }
+@media (max-width: 640px) {
+  .bmp-seg { width: 100%; }
+  .bmp-seg button { flex: 1 1 0; min-height: 44px; white-space: normal; line-height: 1.25; padding: 4px 6px; }
+  .bmp-touch { min-height: 44px; }
+  .bmp-top-item { grid-template-columns: minmax(0, 1fr); }
+  .bmp-kv { grid-template-columns: minmax(0, 1fr); }
+}
