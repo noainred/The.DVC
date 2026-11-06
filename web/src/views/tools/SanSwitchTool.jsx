@@ -10,6 +10,7 @@ import { statusText, traceText, isActive, phaseLabel, testSnapView } from './san
 import SanZoningPanel from './SanZoningPanel.jsx';
 import SanPortUsage from './SanPortUsage.jsx';   // v2.748 📊 포트 사용량(시안 A안 개정 2)
 import SanPortMap from './SanPortMap.jsx';       // v2.748 🔲 포트 배치(스위치 한 대 전체 포트)
+import SanHostAttrib from './SanHostAttrib.jsx'; // v2.915 호스트 귀속(가상화 호스트 HBA ↔ 조닝 ↔ 스토리지 트래픽 — 시안 D-③)
 import { Loading, ErrorBox, Kpi, UsageCell, Modal, SearchBox } from '../../components/ui.jsx';
 import { stateLabel, stateTone, opticalHealth, errorLevel, capacityLevel, aggregate,
   throughputText, throughputTitle, filterPorts, shortDeviceName, saturationPct, saturationLevel, bytesPerSecText,
@@ -86,6 +87,7 @@ export default function SanSwitchTool() {
   const [dcPerf, setDcPerf] = useState(null);      // 법인 단위 스토리지 사용량 분석 모달
   const [bulkOpen, setBulkOpen] = useState(false);  // 대량 등록 모달(v2.513) — 훅은 조기 return 위에
   const [healthOpen, setHealthOpen] = useState(false); // 전체 점검 모달(v2.519) — 훅은 조기 return 위에
+  const [attribOpen, setAttribOpen] = useState(false); // 호스트 귀속 모달(v2.915) — 훅은 조기 return 위에
   const [portFilter, setPortFilter] = useState('all');
   const [portQ, setPortQ] = useState('');
   const [infoOpen, setInfoOpen] = useState(false);   // 장비 일반 정보 펼침
@@ -249,6 +251,10 @@ export default function SanSwitchTool() {
           <button type="button" className="san2-btn"
             title="등록된 SAN 스위치를 월간 점검 체크리스트로 판정해 이상 유무를 요약하고, 세부 보고서를 PDF 로 내려받습니다. 스위치에 새로 접속하지 않고 마지막 수집 스냅샷을 판정합니다."
             onClick={() => setHealthOpen(true)}>전체 점검</button>
+          {/* v2.915 호스트 귀속 — 가상화 호스트의 HBA WWN 을 스위치 포트·zone·등록 스토리지에 대조해 어느 스토리지에 얼마나 트래픽이 가는지(확정/추정). 법인 칩 선택을 범위로 쓴다. */}
+          <button type="button" className="san2-btn"
+            title="가상화 호스트의 HBA WWN 을 스위치 포트 · zone · 네임서버 역할 · 등록 스토리지(시리얼)에 대조해 호스트별로 어느 스토리지에 얼마나 트래픽이 가는지 봅니다(확정/추정 분리). 법인 칩 선택을 그대로 범위로 씁니다."
+            onClick={() => setAttribOpen(true)}>호스트 귀속</button>
           <button type="button" className="san2-btn" disabled={busy}
             title="중앙이 직접 수집하는 스위치를 지금 다시 수집하고, 엣지 위임 스위치는 재수집 요청을 등록합니다(엣지는 다음 설정 pull 때 수집 후 바로 push)."
             onClick={collectAll}>전체 수집</button>
@@ -426,6 +432,11 @@ export default function SanSwitchTool() {
         </Modal>
       )}
 
+      {attribOpen && (
+        <Modal title={`호스트 귀속 — SAN 조닝 · 트래픽${dcSel.size ? ` — ${[...dcSel].join(', ')}` : ' — 전체'}`} onClose={() => setAttribOpen(false)} width={1240}>
+          <SanHostAttrib datacenterIds={[...dcSel].map(dcIdOfName).filter(Boolean)} datacenters={data.datacenters || []} dcNameOf={dcName} />
+        </Modal>
+      )}
       {canCsv() && bulkOpen && (
         <BulkDeviceIo base="/tools/sanswitch" title="SAN 스위치 대량 등록 — CSV · 자유텍스트" keyLabel="host"
           onClose={() => setBulkOpen(false)} onDone={() => { setBulkOpen(false); load(); }} />

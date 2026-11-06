@@ -630,6 +630,29 @@ export async function deviceDetail(agent, cvpId, key) {
   return { device: rowToDevice(r, pSum), ports: r.ports_read === 1 ? ports : null };
 }
 
+/**
+ * v2.915(호스트 업링크 매칭): 포트 설명(descr)에 단서가 든 포트 행 — 호스트 짧은 이름·NIC MAC(콜론·하이픈·점·붙임 표기). SQL LIKE 로 거른 뒤
+ *   토큰 경계 판정은 cvp/hostMatch.js 가 한다(여기서는 넉넉히 뽑는다). 장비 호스트명을 붙여 준다. 단서 8개·결과 200행 상한.
+ * @param {string[]} terms 소문자 단서(LIKE 의 % _ 는 이스케이프)
+ */
+export async function portsByDesc(terms = [], { limit = 200 } = {}) {
+  const db = await open();
+  if (!db) return { rows: [], unavailable: true };
+  const ts = [...new Set((Array.isArray(terms) ? terms : []).map((t) => String(t || '').trim().toLowerCase()).filter((t) => t.length >= 3))].slice(0, 8);
+  if (!ts.length) return { rows: [] };
+  const esc = (t) => t.replace(/[\\%_]/g, (c) => `\\${c}`);
+  const where = ts.map(() => "lower(p.descr) LIKE ? ESCAPE '\\'").join(' OR ');
+  const lim = Math.max(1, Math.min(1000, Math.trunc(Number(limit)) || 200));
+  const rows = db.conn.prepare(`SELECT p.*, d.hostname AS dev_hostname, d.serial AS dev_serial FROM port_latest p
+      LEFT JOIN device_latest d ON d.agent = p.agent AND d.cvp_id = p.cvp_id AND d.device_key = p.device_key
+      WHERE p.descr IS NOT NULL AND p.descr != '' AND (${where}) ORDER BY p.cvp_id, p.device_key, p.port LIMIT ?`).all(...ts.map((t) => `%${esc(t)}%`), lim + 1);
+  const out = rows.slice(0, lim).map((p) => ({ agent: p.agent, cvpId: p.cvp_id, key: p.device_key, hostname: p.dev_hostname || '', serial: p.dev_serial || '',
+    port: p.port, desc: p.descr, speedBps: p.speed_bps ?? null, oper: p.oper || 'unknown', admin: p.admin || 'unknown', vlan: p.vlan || '', lag: p.lag || '',
+    inBps: p.in_bps ?? null, outBps: p.out_bps ?? null, inUtil: p.in_util ?? null, outUtil: p.out_util ?? null, inErr: p.in_err ?? null, outErr: p.out_err ?? null,
+    rateTs: p.rate_ts == null ? null : Number(p.rate_ts), ts: Number(p.ts), mac: p.mac ?? null, mtu: p.mtu ?? null }));
+  return { rows: out, ...(rows.length > lim ? { truncated: true, limit: lim } : {}) };
+}
+
 /** 그 장비 행을 가진 agent 목록(최신 순) — 화면이 등록부 담당과 맞는 행을 고르는 데 쓴다. */
 export async function agentsForDevice(cvpId, key) {
   const db = await open();

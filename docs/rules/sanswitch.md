@@ -22,6 +22,7 @@
 - (원래 2797행) 점검 이력은 '수집 1회 = 기록 1회' 다
 - (원래 2809행) '전체 수집' 은 무엇을 했는지 나눠 말한다
 - (v2.748) 포트 사용량·포트 배치 탭 — 기간은 경계로 자르고, 빈 칸·부분 합·미래 칸을 값으로 만들지 않는다
+- (v2.915) 호스트 ↔ SAN 조닝·트래픽 귀속 — 판정 코어는 `attribution.js` 하나, 확정분과 추정분을 합치지 않는다
 
 ## 본문
 
@@ -297,3 +298,23 @@
     연결 테스트는 처리량 기준값을 건드리지 않는다(`noRates`) · 비밀번호 승계는 `sanAccessMoved` 하나(saveDevice 와 공유) · 주기 수집은 진행 중 장비를 건너뛰고 `inFlightSkipped` 로 센다.
   · v2.771(점검 R6-F1): 축약은 상한을 넘을 때 **심각도 순으로 고르고**(faulty > 링크 에러 > rx ≤ -12 > disabled > disc_c3·rx 주의) 반환은 포트 순 — 포트 번호 순 slice 는 뒤 번호 장애 포트를 잘랐다.
     중앙 ports 항목은 `portsOmitted>0` 이면 엣지 전체 집계 `ports.faulty` 를 본다. 리셋은 **포트 단위**(한 키라도 cur<base 면 그 포트의 축약 아닌 키 전부 하한 = cur, held='reset').
+- **호스트 ↔ SAN 조닝·트래픽 귀속(v2.915 — 설계 `docs/design/san-cvp-traffic/README.md`, 기본값 A 단계)** — 판정 코어는 `sanswitch/attribution.js`(순수) 하나
+  (`buildFabrics` → `attributeHost`/`attributeFleet`), 기간 바이트는 `perfDb.portBytesMulti`(heavyQuery — 기억·합류·감시 · 데모는 `demoPortSeries` 수식),
+  라우트 `routes/api/hostSan.js`(`GET /hosts/:id/san-attribution` · `GET /tools/sanswitch/attribution`), 화면 `HostSanSection.jsx`·`hostSanText.js` ·
+  `SanHostAttrib.jsx`·`sanHostAttribText.js`. 회귀 `server/test/sanAttrib2915.test.js` · 웹 `hostSanText.test.js`·`sanHostAttribText.test.js`.
+  - **신뢰도는 조닝 그림의 ●/◐ 와 한 식구다**: ● 확정 = 그 HBA 포트가 닿을 수 있는 스토리지가 **하나**이고 타깃 역할이 **네임서버 확정**(nsRoles) — 포트 카운터 전부가
+    그 스토리지. 멀티패스 경로별 타깃 WWN(`hcfg.mp.targets`, 같은 SOAP 경로 `config.storageDevice.multipathInfo` 에서 `parseMultipath` 가 어댑터별로 센다 — 새 vCenter 호출 없음)이
+    있으면 '살아 있는 경로의 타깃' 으로 후보를 좁힌다(조닝 2개 → 실제 1개면 확정). ◐ 추정 = 후보 2개 이상을 **같은 스위치의 타깃 포트 바이트 비율**로 나눈다(IPF 보정은
+    다음 단계) · nsRoles 가 빈 패브릭은 후보가 하나여도 추정(없는 근거를 만들지 않는다). 분배 불가 = 타깃 포트 바이트가 없어 못 나눔(호스트 합에는 들어가고 스토리지에는
+    주지 않는다). 조닝만 = zone 멤버인데 어느 스위치에도 로그인 없음(통계 밖 · 정리 후보 표). 미확인 = 어느 스냅샷에도 없는 WWN.
+  - **확정분과 추정분을 한 숫자로 합치지 않는다**(부분 합 규약) — 표·KPI 는 두 열이고 '합(참고)' 은 정렬용이라고 말한다. 측정 없음은 **0 이 아니라 null('—')**:
+    표본 없는 포트는 `portBytesMulti` 의 Map 에 아예 없고, 엔진은 `measured:false` + `unmeasuredPorts` 로 센다. 호스트 합계는 HBA 포트 카운터 그대로(귀속과 무관).
+  - 기간 바이트는 portperfshow 합산값이라 **방향이 없다**(읽기+쓰기 합) — 화면이 그렇게 적는다. 방향은 '지금' 값(스냅샷 델타 `inBps/outBps`)만: 호스트 F_Port 의
+    스위치 Tx(`outBps`) = 읽기 · Rx(`inBps`) = 쓰기. '버킷 평균 × 폭' 은 어림(≈)이고 가장자리 버킷은 구간 안쪽 폭만 센다.
+  - 스토리지 신원은 타깃 포트 `attachedName` → `storageKey` → `arraySerialOf` → 등록 스토리지 시리얼 일치(storage-summary 와 같은 판정 — 순수 함수는 v2.915 에
+    `sanswitch/endpointKey.js` 로 옮기고 perfDb 가 다시 내보낸다). 평평한 이름(`::` 없음)은 포트마다 다른 키가 되어 한 어레이가 여러 행이 될 수 있다 — 화면이
+    '어레이 미확인' 으로 말한다(억지로 합치지 않는다).
+  - 범위: 호스트 단건 라우트는 `inv.hosts` + `tools` + 도구 키 `san-switch`(`issueFor`) + 범위 밖 404 이고, **범위 계정은 그 호스트 법인(`datacenterOfVcenter`)의 스위치·스토리지만**
+    본다(법인 미지정 장비·법인 없는 vCenter 는 아무것도 — 'vCenter 귀속 없는 데이터 미노출'). 함대 라우트는 형제처럼 `fullScopeOnly`. 응답에 관리 주소를 싣지 않는다.
+  - 시안의 '보기 세그먼트' 는 실제 화면에 없어(912행 세그먼트는 장비 상세 안의 것) **헤더 버튼 + 모달**(전체 점검·사용량 분석과 같은 틀)로 넣었다 — 법인 칩 선택을 범위로 쓴다.
+
