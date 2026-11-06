@@ -204,11 +204,12 @@ export default function Settings({ initialSub }) {
   const searchRef = useRef(null);
   const seqRef = useRef(0);
 
-  // 상태 배지 — 마운트 1회 · 60초마다 · 항목을 옮길 때(서버가 5초 단위로 합친다). 늦게 온 이전 응답은 버린다.
-  const loadStatus = useCallback(async () => {
+  // 상태 배지 — 마운트 1회 · 60초마다 · 항목을 옮길 때(서버는 3초 single-flight · no-store — 저장 직후 옮기면 새 값). 늦게 온 이전 응답은 버린다.
+  // '다시 읽기' 버튼은 fresh=1 — 서버의 3초 합치기도 건너뛴다(설정을 막 저장한 뒤 누르는 버튼이다).
+  const loadStatus = useCallback(async (fresh = false) => {
     const seq = ++seqRef.current;
     try {
-      const r = await fetchJson('/admin/settings/status', {}, undefined, { retries: 0 });
+      const r = await fetchJson('/admin/settings/status', fresh === true ? { fresh: '1' } : {}, undefined, { retries: 0 });
       if (seq !== seqRef.current) return;
       setStatus({ items: r?.items && typeof r.items === 'object' ? r.items : null, state: r?.items ? 'ok' : 'error', at: r?.at || null });
     } catch (e) {
@@ -219,7 +220,7 @@ export default function Settings({ initialSub }) {
       else setStatus((prev) => ({ items: prev.items, state: 'error', at: prev.at }));
     }
   }, []);
-  useEffect(() => { const t = setInterval(loadStatus, STATUS_POLL_MS); return () => clearInterval(t); }, [loadStatus]);
+  useEffect(() => { const t = setInterval(() => loadStatus(), STATUS_POLL_MS); return () => clearInterval(t); }, [loadStatus]);
   useEffect(() => { loadStatus(); }, [sub, loadStatus]);   // 마운트 때 한 번 + 항목을 옮길 때
 
   // 항목을 옮기면: 그 묶음을 펼치고 · 최근에 넣고 · 좁은 화면의 펼친 목록을 닫는다.
@@ -292,7 +293,7 @@ export default function Settings({ initialSub }) {
                   onClick={() => setGradeFilter((f) => (f === g ? null : g))}>{SUMMARY_LABEL[g]} {summary[g]}</button>
               ))}
               {SUMMARY_ORDER.every((g) => !summary[g]) && <span className="stg-allok">표시할 상태 없음</span>}
-              <button type="button" className="stg-refresh" onClick={loadStatus} aria-label="상태 다시 읽기" title="상태 다시 읽기"><Icon name="refresh" size={13} /></button>
+              <button type="button" className="stg-refresh" onClick={() => loadStatus(true)} aria-label="상태 다시 읽기" title="상태 다시 읽기"><Icon name="refresh" size={13} /></button>
             </div>
           )}
         </div>
@@ -352,7 +353,7 @@ export default function Settings({ initialSub }) {
           {status.state === 'error' && (
             <div className="stg-note warn">
               {statusItems && status.at ? `상태를 다시 읽지 못했습니다 — 보이는 배지는 ${hhmm(status.at)} 기준입니다.` : '상태를 읽지 못했습니다 — 배지가 없다고 정상인 것은 아닙니다.'}
-              {' '}<button type="button" className="stg-link" onClick={loadStatus}>다시 읽기</button>
+              {' '}<button type="button" className="stg-link" onClick={() => loadStatus(true)}>다시 읽기</button>
             </div>
           )}
         </div>

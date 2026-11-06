@@ -7,6 +7,8 @@
 //   ④ sources.js 는 파일 · 메모리 값만 — 외부 호출 · SQLite · 디렉터리 훑기 · 기록을 지우는 인증 정지 판정(authStopFor)이 없다(원문 대조).
 //   ⑤ 규칙의 키는 설정 화면(Settings.jsx SUB)의 키이고, 슈퍼 전용 목록은 화면의 superOnly 와 같다.
 //   ⑥ 라우트 — viewer · 소유자 아닌 admin · 범위가 지정된 소유자는 403, 소유자(전체 범위)는 200 + items. 응답에 비밀이 실리지 않는다.
+//   ⑦ 반증(v2.916) 반영 — D1 저장 직후 반영(no-store · ETag 없음 · fresh=1) · D2 손상 보존본만 있으면 주의 · D3 중계 서버 꺼짐이 켜진다 ·
+//      D4 인증이 꺼진 설치에서 listUsers 를 부르지 않는다 · D5 자가진단 '못 함' 은 unknown · D6 GPU 게스트는 복호 없는 '켜짐' 만.
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -51,6 +53,13 @@ test('① 등급 규칙 — 미설정 · 꺼짐 · 주의 · 새 버전, 정상�
   assert.equal(one('upgrade', { available: false, remoteConfigured: false, watchDir: false }).grade, 'unset');
   assert.equal(one('upgrade', { available: false, remoteConfigured: false, watchDir: true }), null, '감시 폴더만 있어도 소스가 있다');
   assert.equal(one('host-access', { pendingOverdue: true }).grade, 'warn');
+  // D5: 점검을 못 한 항목만 있으면 '?'
+  assert.deepEqual(one('security-self-check', { risk: 0, warn: 0, unknown: 2 }), { grade: 'unknown', text: '확인하지 못한 점검 2개', count: 2 });
+  // D2: 손상 보존본만 남은 설정은 미설정 · 꺼짐이 아니라 주의(규칙이 낸 주의 문구는 그대로)
+  assert.equal(one('mail', { loadError: true, configured: false }).grade, 'warn');
+  assert.equal(one('nsx-admin', { loadError: true, count: 0 }).grade, 'warn');
+  assert.equal(one('vcenter-admin', { loadError: true, count: 0 }).text, '설정 파일을 읽지 못함(손상 보존본 확인)');
+  assert.equal(one('veeam', { loadError: true }).text, '등록부를 읽지 못함');
 });
 
 test('② 못 읽은 값은 0 이 아니다 — 던지면 unknown · null 수는 미설정이 아니다 · 다른 항목은 계속', () => {
@@ -150,4 +159,38 @@ test('⑥ 라우트 — 설정 소유자 ∧ 전체 범위만 · 항목 등급�
   assert.equal((await get('own', '/admin/settings/status')).j.items['isilon-dirusage'], undefined);
   const src = read('server/src/routes/admin/settingsStatus.js');
   assert.match(src, /adminRouter\.get\('\/settings\/status', adminOnly, requireSettingsOwner,/);
+});
+
+test('⑦ 반증 반영 — 저장 직후 반영 · 손상 보존본 · 중계 서버 · 인증 꺼짐 · GPU 게스트', async () => {
+  // D1: 캐시 응답이 아니다(no-store · ETag 없음) — 저장 직후 '다시 읽기'(fresh=1) 는 바로 새 값
+  const r1 = await fetch(`${base}/admin/settings/status`, { headers: { 'x-u': 'own' } });
+  assert.equal(r1.headers.get('cache-control'), 'no-store');
+  assert.equal((await r1.json()).items['datacenter-admin']?.grade, 'unset');
+  // ETag 가 스냅샷 세대 키가 아니라 본문에서 나온다(express 기본) — 옛 ETag 를 보내도 새로 계산한 본문은 200
+  const r1b = await fetch(`${base}/admin/settings/status?fresh=1`, { headers: { 'x-u': 'own', 'if-none-match': r1.headers.get('etag') || '' } });
+  assert.equal(r1b.status, 200, '저장해도 304 로 옛 본문이 남던 결함(memoJson 의 세대 키 ETag)');
+  const ds = await import('../src/datacenter/store.js');
+  assert.equal(ds.addDatacenter({ id: 'kr', name: '한국' }).ok, true);
+  assert.equal((await get('own', '/admin/settings/status?fresh=1')).j.items['datacenter-admin'], undefined, '법인을 등록하면 바로 미설정이 사라진다');
+  // D3: 빈 설정의 중계 서버는 '꺼짐'(기본 프록시 한 줄을 등록으로 세지 않는다)
+  assert.equal((await get('own', '/admin/settings/status?fresh=1')).j.items.proxy?.grade, 'off');
+  // D2: 파일이 없고 손상 보존본만 있으면 '등록 없음(꺼짐)' 이 아니라 주의
+  fs.writeFileSync(path.join(tmp, 'nsx.json.corrupt.1700000000000'), '{broken');
+  const d2 = (await get('own', '/admin/settings/status?fresh=1')).j.items['nsx-admin'];
+  assert.equal(d2?.grade, 'warn');
+  // D4 · D6 · 손상 판정 대상 — 원문 대조
+  const body = stripComments(read('server/src/settingsStatus/sources.js'));
+  assert.match(body, /config\.auth\.enabled \? listUsers\(\) : null/, '인증이 꺼진 설치에서 listUsers 는 초기 관리자 비밀번호 파일을 만든다');
+  assert.match(body, /gpuGuestEnabledLight\(\)/);
+  assert.doesNotMatch(body, /loadGpuGuestSettings/, '게스트 비밀번호 전부를 복호하는 로더를 배지 계산에 쓰지 않는다');
+  for (const f of ['datacenters.json', 'vcenters.json', 'nsx.json', 'horizon.json', 'backup.json', 'dirusage.json', 'guest-disk.json', 'gpu-guest.json', 'auth.json', 'alerts.json', 'mail.json', 'llm.json']) {
+    assert.ok(body.includes(`damaged('${f}')`), `로드 오류 표지가 없는 로더(${f})는 손상 보존본을 따로 본다`);
+  }
+  const gpu = await import('../src/gpu/settings.js');
+  assert.equal(gpu.gpuGuestEnabledLight(), false, '파일 없음 = 기본(꺼짐)');
+  fs.writeFileSync(path.join(tmp, 'gpu-guest.json'), JSON.stringify({ enabled: true }));
+  assert.equal(gpu.gpuGuestEnabledLight(), true);
+  fs.writeFileSync(path.join(tmp, 'gpu-guest.json'), '{bad');
+  assert.throws(() => gpu.gpuGuestEnabledLight(), '파싱 실패는 던진다(→ 배지 ?) — 0/꺼짐으로 바꾸지 않는다');
+  fs.rmSync(path.join(tmp, 'gpu-guest.json'));
 });

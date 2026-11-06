@@ -86,8 +86,9 @@ export const RULES = Object.freeze({
     return n(f.pending) > 0 ? { grade: 'warn', text: `승인 대기 ${f.pending}건${n(f.changed) > 0 ? `(변경 ${f.changed})` : ''}`, count: f.pending } : null;
   },
   'security-self-check': (f) => {
-    const risk = n(f.risk) || 0; const warn = n(f.warn) || 0;
-    if (risk + warn === 0) return null;
+    const risk = n(f.risk) || 0; const warn = n(f.warn) || 0; const unk = n(f.unknown) || 0;
+    // v2.916 반증 D5: 점검을 못 한 항목(unknown)이 있으면 '정상' 으로 숨기지 않는다.
+    if (risk + warn === 0) return unk > 0 ? { grade: 'unknown', text: `확인하지 못한 점검 ${unk}개`, count: unk } : null;
     return { grade: 'warn', text: [risk ? `위험 ${risk}` : '', warn ? `경고 ${warn}` : ''].filter(Boolean).join(' · '), count: risk + warn };
   },
   // --- 알림·메일 ---
@@ -125,6 +126,9 @@ export function buildSettingsStatus(sources = {}, { superAdmin = false } = {}) {
     if (!facts || typeof facts !== 'object') { items[k] = { grade: 'unknown', text: '상태를 읽지 못함' }; continue; }
     let out = null;
     try { out = rule(facts); } catch { out = { grade: 'unknown', text: '상태를 읽지 못함' }; }
+    // v2.916 반증 D2: 설정 파일이 손상돼 보존본만 남았으면(로더가 기본값을 돌려준다) 미설정 · 꺼짐이 아니라 주의다 —
+    //   '등록된 vCenter 없음' 을 보고 28개를 새로 등록하지 않고 보존본을 되돌리게. 규칙이 이미 주의를 냈으면 그 문구를 둔다.
+    if (facts.loadError === true && out?.grade !== 'warn') out = { grade: 'warn', text: '설정 파일을 읽지 못함(손상 보존본 확인)' };
     if (out) items[k] = out;
   }
   return { items };
