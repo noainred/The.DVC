@@ -65,6 +65,7 @@ export default function Login({ onSuccess, notice, setup }) {
     username, setUsername, password, setPassword, showPw, setShowPw, keep, setKeep,
     forgotInfo, toggleForgot: () => setForgotInfo((v) => !v),
     error, busy, submit, welcome, notice,
+    usageNotice: setup?.usageNotice || '',   // v2.913 기능 사용 기록 고지 — 테마 공용 AuthFields 가 카드 안에 그린다
     idRemembered: !!savedId, // ID 가 미리 채워졌으면 비밀번호 칸에 바로 포커스
   };
 
@@ -75,11 +76,6 @@ export default function Login({ onSuccess, notice, setup }) {
     <>
       <style>{THEMES_CSS}</style>
       <Comp f={f} />
-
-      {/* v2.913 기능 사용 기록 고지(설정 › 사용자 › 기능 사용 현황 › 수집 설정의 문구) — 서버가 켜져 있을 때만 싣는다. */}
-      {typeof setup?.usageNotice === 'string' && setup.usageNotice && (
-        <div className="lt-usage-notice" role="note">{setup.usageNotice}</div>
-      )}
 
       <button type="button" className="lt-reshuffle" onClick={reshuffle}
         title={`현재 테마: ${name} — 클릭하면 다른 로그인 화면으로 바뀝니다`}>

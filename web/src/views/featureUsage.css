@@ -79,8 +79,9 @@
 .fu-chips button.on { background: rgba(59,130,246,.18); border-color: rgba(59,130,246,.6); color: #bfdbfe; }
 .fu-chips .c { font-family: var(--mono); font-size: 11px; color: var(--text-dim); font-weight: 500; }
 .fu-top3 { display: inline-flex; gap: 4px; flex-wrap: nowrap; }
-.fu-top3 span { display: inline-flex; align-items: center; height: 20px; padding: 0 7px; border-radius: 6px; background: var(--panel-deep); border: 1px solid var(--border); font-size: 11px; color: #aebbd0; white-space: nowrap; }
+.fu-top3 span { display: inline-flex; align-items: center; height: 20px; padding: 0 6px; border-radius: 6px; background: var(--panel-deep); border: 1px solid var(--border); font-size: 11px; color: #aebbd0; white-space: nowrap; }
 .fu-top3 b { font-family: var(--mono); font-weight: 500; color: var(--text-dim); margin-left: 4px; }
+.fu-top3 i { font-style: normal; max-width: 92px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }   /* 긴 기능 이름이 표를 1440 밖으로 밀지 않게(전체 이름은 title) */
 .fu-more { display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 12px; }
 .fu-spark { display: inline-flex; align-items: flex-end; gap: 1px; height: 16px; width: 64px; vertical-align: middle; }
 .fu-spark i { flex: 1; display: block; background: var(--accent); border-radius: 1px 1px 0 0; min-height: 1px; }

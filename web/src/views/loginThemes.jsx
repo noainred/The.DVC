@@ -64,6 +64,7 @@ export function AuthFields({ f, title = 'Operator Sign In', sub = 'Authenticate 
         </button>
 
         <div className="lt-restrict">{RESTRICT}</div>
+        {typeof f.usageNotice === 'string' && f.usageNotice && <div className="lt-usage-notice" role="note">{f.usageNotice}</div>}
       </div>
     </>
   );
@@ -614,11 +615,10 @@ export const THEMES_CSS = `
   border: 1px solid rgba(255,255,255,.16); color: #cbd5e1; border-radius: 20px; padding: 7px 15px;
   font-size: 11px; letter-spacing: .1em; cursor: pointer; font-family: 'JetBrains Mono', monospace; }
 .lt-reshuffle:hover { border-color: #94a3b8; color: #fff; }
-/* v2.913 기능 사용 기록 고지 — 수집이 켜져 있을 때만(/auth/config usageNotice). 오른쪽 아래 테마 버튼 자리를 비운다. */
-.lt-usage-notice { position: fixed; z-index: 5; left: 16px; right: 170px; bottom: 12px; max-width: 760px; box-sizing: border-box;
-  background: rgba(0,0,0,.45); border: 1px solid rgba(255,255,255,.12); color: #cbd5e1; border-radius: 10px; padding: 7px 11px;
-  font-size: 11px; line-height: 1.55; }
-@media (max-width: 640px) { .lt-usage-notice { position: static; display: block; margin: 12px 16px 64px; max-width: none; } }   /* 좁은 화면은 고정하지 않는다 — 폼 아래를 가리지 않게(테마 버튼 자리 64px 비움) */
+/* v2.913 기능 사용 기록 고지 — 수집이 켜져 있을 때만(/auth/config usageNotice). 카드 안 경고 문구 아래(고정 위치 금지 — 테마 루트 .lt 가
+   position:fixed 라 바깥에 두면 좁은 화면에서 그 밑에 깔려 보이지 않고, 고정하면 폼을 가린다 — v2.913 Chromium 판독). */
+.lt-usage-notice { margin-top: 10px; padding-top: 8px; border-top: 1px dashed rgba(148,163,184,.25); font-size: 10.5px; line-height: 1.7;
+  color: var(--lt-dim,#64748b); }
 
 /* ── 1) Davinci: 좌 히어로 + 우 카드 + 도트맵 ── */
 .lt-davinci { --lt-card: rgba(13,20,28,.93); --lt-accent: #34e0b4; --lt-accent-ink: #052e25; --lt-glow: rgba(45,212,191,.15);

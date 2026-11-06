@@ -319,8 +319,8 @@ function Features({ rep, ctx }) {
       </div>
       <div className="card fu-panel">
         <div className="fu-ph"><b>기능 {shown.length}개</b><span className="muted">열람 내림차순 · 0회는 뒤 · 제목을 누르면 정렬</span></div>
-        <STable className="fu-table" minWidth={1040} limit={showAll ? 0 : FEATURE_LIMIT}>
-          <thead><tr><th>기능</th><th>종류</th><th>어디서 여나</th><th>권한</th><th className="r">열람</th><th className="r">사용자</th><th className="r">머문 시간</th><th className="r">1회 평균</th><th className="r">비중</th><th className="r">지난 기간 대비</th><th className="r">마지막 사용</th></tr></thead>
+        <STable className="fu-table" minWidth={960} limit={showAll ? 0 : FEATURE_LIMIT}>
+          <thead><tr><th>기능</th><th>종류</th><th>어디서 여나</th><th>권한</th><th className="r">열람</th><th className="r">사용자</th><th className="r">머문 시간</th><th className="r">비중</th><th className="r">지난 기간 대비</th><th className="r">마지막 사용</th></tr></thead>
           <tbody>
             {shown.map((r) => {
               const tr = trendOf(r.views, r.prevViews);
@@ -334,7 +334,6 @@ function Features({ rep, ctx }) {
                   <td className="r mono" data-sort={r.views}>{fmtInt(r.views)}</td>
                   <td className="r mono" data-sort={zero ? '' : r.users}>{zero ? '—' : fmtInt(r.users)}</td>
                   <td className="r mono" data-sort={zero ? '' : r.ms}>{zero ? '—' : fmtDur(r.ms)}</td>
-                  <td className="r mono" data-sort={zero ? '' : r.ms / r.views}>{avgPerView(r.ms, r.views)}</td>
                   <td className="r mono muted" data-sort={r.views}>{zero ? '—' : pctText(r.views, total)}</td>
                   <td className={`r fu-trend ${tr.dir}`} data-sort={r.prevViews == null ? '' : r.views - r.prevViews}>{zero && r.prevViews != null ? `직전 ${fmtInt(r.prevViews)}` : tr.text}</td>
                   <td className="r mono muted" data-sort={r.last ?? ''}>{fmtWhen(r.last)}</td>
@@ -413,7 +412,7 @@ function Users({ rep, ctx, onOpen }) {
                 <td className="r mono" data-sort={u.ms}>{fmtDur(u.ms)}</td>
                 <td className="r mono" data-sort={u.days}>{u.days} / {rep.range.days}</td>
                 <td className="r mono" data-sort={u.keys}>{fmtInt(u.keys)}</td>
-                <td><span className="fu-top3">{u.top.map((t) => <span key={t.k}>{keyMeta(t.k, ctx).label}<b>{fmtInt(t.views)}</b></span>)}</span></td>
+                <td><span className="fu-top3">{u.top.map((t) => { const lb = keyMeta(t.k, ctx).label; return <span key={t.k} title={`${lb} ${fmtInt(t.views)}회`}><i>{lb}</i><b>{fmtInt(t.views)}</b></span>; })}</span></td>
                 <td><span className="fu-spark" aria-hidden="true">{u.spark.slice(-14).map((v, i) => <i key={i} style={{ height: `${(v / maxSpark(u)) * 100}%` }} />)}</span></td>
                 <td className="r mono muted" data-sort={u.last ?? ''}>{fmtWhen(u.last)}</td>
               </tr>
