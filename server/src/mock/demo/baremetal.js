@@ -74,13 +74,16 @@ export function demoBmUsageRow(target, t) {
 }
 
 /*
- * v2.920(리눅스 성능 2단계 화면): 데모의 **현재 주기 행**에 리눅스 성능 열(OS 경로)을 합성한다 — 예전 데모 행은 iDRAC 값만이고
- *   os_at·idrac_at 도 비어 USE 매트릭스가 전 서버 ‘판정 불가’ 였다(화면을 볼 수 없었다). 시나리오는 대상 키 순위로 고정(결정적)이고
- *   상태 9종 중 데이터로 만들 수 있는 것(정상 · 포화 · 병목 · 첫 주기 · PSI 없음 · iDRAC 만 · 드롭 증가 · OS↔iDRAC 불일치)을 고루 둔다.
- * ⚠ 이력 백필(backfillBmUsage)에는 넣지 않는다 — 합성 이력이 실측처럼 쌓이지 않게(현재 주기 최신값만). 판정은 하지 않는다(useJudge 가 한다).
- * ⚠ 데모 대상(mock-)에만 쓰인다 — demoBmUsageResults 의 입력이 이미 isDemoBmTarget 으로 거른 목록이다.
+ * v2.920(리눅스 성능 2단계 화면): 데모 서버에 리눅스 성능 열(OS 경로)을 **조회 응답 단계에서만** 겹친다 — 예전 데모 행은 iDRAC 값만이고
+ *   os_at·idrac_at 도 비어 USE 매트릭스가 전 서버 ‘판정 불가’ 였다(화면을 볼 수 없었다). 시나리오는 데모 대상 키 순위로 고정(결정적)이고
+ *   상태 9종 중 데이터로 만들 수 있는 것(정상 · 포화 · 병목 · 첫 주기 · PSI 없음 · iDRAC 만 · 드롭 증가)을 고루 둔다.
+ * ⚠⚠(2단계 반증 D2) **적재 경로에 넣지 않는다** — 폴러 결과(demoBmUsageResults → insertUsage)에 섞으면 합성 런큐·PSI 가 usage_history ·
+ *   usage_daily `_max` 에 매 주기 쌓이고, 다섯 지표(cpu·mem·net)를 덮어써 ‘첫 주기’ 서버는 사용률이 영구 ‘—’ 가 됐다.
+ *   그래서 ① 최신값을 읽어 응답을 만드는 곳(라우트 주 조회 · 서버 상세 · 엣지 봉투)만 `demoPerfLatestRows` 를 부르고
+ *   ② 기존 다섯 지표 열은 **덮지 않는다**(성능 열 · os_at · idrac_at · detail_json 만 더한다). 불일치(OS↔iDRAC) 시나리오는 cpu_pct 를
+ *   바꿔야 만들 수 있어 두지 않는다(그 상태는 화면 검증에서 응답 합성으로만 봤다 — 정직 기록). 판정은 하지 않는다(useJudge 가 한다).
  */
-export const DEMO_PERF_SCENARIOS = Object.freeze(['idrac-only', 'healthy', 'disk-sat', 'cpu-sat', 'psi-absent', 'first', 'net-drop', 'mem-sat', 'mismatch']);
+export const DEMO_PERF_SCENARIOS = Object.freeze(['idrac-only', 'healthy', 'disk-sat', 'cpu-sat', 'psi-absent', 'first', 'net-drop', 'mem-sat', 'healthy2']);
 export function demoPerfOverlay(target, t, scenario, base = {}) {
   if (scenario === 'idrac-only' || !DEMO_PERF_SCENARIOS.includes(scenario)) return { idrac_at: t };
   const key = String(target.key || '');
@@ -102,10 +105,6 @@ export function demoPerfOverlay(target, t, scenario, base = {}) {
   ];
   const maxOf = (list, k) => { const v = list.map((x) => x[k]).filter((x) => x != null); return v.length ? Math.max(...v) : null; };
   const cols = {
-    cpu_pct: first ? null : (scenario === 'cpu-sat' ? 97 : scenario === 'mismatch' ? r1(Math.min(100, cpu + 31)) : cpu),
-    mem_pct: scenario === 'mem-sat' ? 96 : base.mem_pct ?? null,
-    disk_busy_pct: maxOf(disks, 'busyPct'),
-    net_pct: first ? null : base.net_pct ?? null,
     cpu_user_pct: pick(r1(cpu * 0.7)), cpu_sys_pct: pick(r1(cpu * 0.15)), cpu_iowait_pct: pick(r1(scenario === 'disk-sat' ? 11 : w('io') * 2)), cpu_steal_pct: pick(0),
     cpu_core_max_pct: pick(r1(Math.min(100, cpu + 20 + w('cm') * 15))),
     load1, load5: r1(load1 * 0.9), load15: r1(load1 * 0.8), runq_per_core: Math.round((load1 / cores) * 100) / 100,
@@ -128,16 +127,29 @@ export function demoPerfOverlay(target, t, scenario, base = {}) {
   };
   return { ...cols, src: 'os+idrac+demo', os_at: t, idrac_at: t, detail_json: JSON.stringify(detail) };
 }
-
-/** 폴러 결과 모양(`collectOne` 과 같은 {ok, target, built:{row}}). */
-export function demoBmUsageResults(targets = [], now = Date.now()) {
-  // v2.920: 시나리오는 키 순위로 — 같은 대상 목록이면 언제나 같은 서버가 같은 시나리오다.
-  const rank = new Map([...targets].map((tg) => String(tg.key || '')).sort().map((k, i) => [k, i]));
-  return targets.map((tg) => {
-    const row = demoBmUsageRow(tg, now);
-    const sc = DEMO_PERF_SCENARIOS[(rank.get(String(tg.key || '')) ?? 0) % DEMO_PERF_SCENARIOS.length];
-    return { ok: true, target: tg, demo: true, built: { row: { ...row, ...demoPerfOverlay(tg, now, sc, row) }, srcOf: { cpu: 'idrac', mem: 'idrac', io: 'idrac', net: 'idrac', hba: 'idrac' }, notes: [] } };
+/**
+ * 최신값 행 → 데모 대상이면 성능 열을 겹친 사본(조회 응답 전용 — DB 에 쓰지 않는다). mock 이 아니면 입력 그대로.
+ * 다섯 지표 열(cpu_pct·mem_pct·disk_busy_pct·disk_used_pct·net_pct·hba_*)은 바꾸지 않는다.
+ */
+export function demoPerfLatestRows(rows = [], targets = []) {
+  if (!isMockMode() || !Array.isArray(rows) || !rows.length) return rows;
+  const demoTg = (targets || []).filter(isDemoBmTarget);
+  if (!demoTg.length) return rows;
+  const byKey = new Map(demoTg.map((tg) => [String(tg.key || ''), tg]));
+  const rank = new Map([...byKey.keys()].sort().map((k, i) => [k, i]));
+  return rows.map((r) => {
+    const k = String(r?.key ?? '');
+    const tg = byKey.get(k);
+    if (!tg || r?.ts == null) return r;
+    const sc = DEMO_PERF_SCENARIOS[rank.get(k) % DEMO_PERF_SCENARIOS.length];
+    const o = demoPerfOverlay(tg, r.ts, sc, r);
+    return { ...r, ...o, src: o.src || r.src };
   });
+}
+
+/** 폴러 결과 모양(`collectOne` 과 같은 {ok, target, built:{row}}). ⚠ 성능 열은 여기 넣지 않는다(적재 경로 — 위 D2). */
+export function demoBmUsageResults(targets = [], now = Date.now()) {
+  return targets.map((tg) => ({ ok: true, target: tg, demo: true, built: { row: demoBmUsageRow(tg, now), srcOf: { cpu: 'idrac', mem: 'idrac', io: 'idrac', net: 'idrac', hba: 'idrac' }, notes: [] } }));
 }
 
 let _bmBackfill = null;

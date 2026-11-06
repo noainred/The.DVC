@@ -285,9 +285,11 @@ export function crossJudge({ use, hw = null, coverage = 'none', th = {} } = {}) 
       return { state: 'clear', code: 'io-volume', evidence: ev };
     }),
     mk(3, '메모리 오류의 위치(DIMM)', () => {
-      const bad = [...(hw.dimmBad || []), ...(hw.dimmWarn || []), ...((hw.dimmFaults || []).map((f) => f.label))].filter(Boolean);
-      const ev = [`DIMM 이상 ${hw.dimmBad == null ? '—' : bad.length}`, 'ECC 정정 —(받지 않는 값)', 'OS MCE —(이번 단계에서 읽지 않음)'];
-      if (bad.length) return { state: 'candidate', code: 'dimm-slot', evidence: ev, devices: [...new Set(bad)].slice(0, 8) };
+      // v2.920(2단계 반증 D5): 부품 장애 모듈의 DIMM label 은 인벤토리 locator 와 같은 문자열이라 같은 DIMM 이 두 번 들어온다 — 수는 중복을 뺀 개수(devices 와 같게).
+      //   인벤토리(dimmBad)를 못 읽었어도 부품 장애가 있으면 그 수를 적는다(결론은 후보인데 근거가 ‘—’ 이던 어긋남). 둘 다 못 읽었을 때만 ‘—’.
+      const bad = [...new Set([...(hw.dimmBad || []), ...(hw.dimmWarn || []), ...((hw.dimmFaults || []).map((f) => f.label))].filter(Boolean))];
+      const ev = [`DIMM 이상 ${hw.dimmBad == null && hw.dimmFaults == null ? '—' : bad.length}`, 'ECC 정정 —(받지 않는 값)', 'OS MCE —(이번 단계에서 읽지 않음)'];
+      if (bad.length) return { state: 'candidate', code: 'dimm-slot', evidence: ev, devices: bad.slice(0, 8) };
       if (hw.dimmBad == null && hw.dimmFaults == null) return { state: 'missing', code: '', evidence: ev };
       return { state: 'inactive', code: '', evidence: ev };
     }),

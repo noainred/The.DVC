@@ -207,6 +207,11 @@ function usageDetailPart(key, { admin = false, hosts = [] } = {}) {
   };
 }
 
+/** v2.920(반증 D2) — 데모(mock) 대상 최신값에 성능 열을 겹친다(응답 전용 · mock 이 아니면 그대로). */
+async function demoPerfRows(rows, targets) {
+  if (!isMockMode()) return rows;
+  return (await import('../../mock/demo/baremetal.js')).demoPerfLatestRows(rows, targets);
+}
 /** v2.919 — 성능 항목에서 목록용 필드만(본체는 perfView.compactPerfEntry 하나 — 봉투 크기 상한과 같은 함수). */
 export const compactPerf = compactPerfEntry;
 
@@ -249,7 +254,8 @@ export async function bmPerfView(req, snap, deps = {}) {
   if (target) {
     if (allowed && (!target.vcenterId || !allowed.has(target.vcenterId))) return NOT_FOUND;
     const agent = config.agent?.name || '';
-    const row = (await D.latestUsage().catch(() => [])).find((r) => t(r.key) === target.key && t(r.agent) === agent) || null;
+    const row0 = (await D.latestUsage().catch(() => [])).find((r) => t(r.key) === target.key && t(r.agent) === agent) || null;
+    const row = row0 ? (await demoPerfRows([row0], tg.targets))[0] : null;   // v2.920(반증 D2) — 데모 대상만, 응답 단계에서만
     const hwOf = await D.hwFactsReader({ agent, freshMs: freshMsFor(s.intervalMs) }).catch(() => () => null);
     const entry = row ? buildPerfEntry({ row, hw: hwOf(target) || null, th: s.perf, intervalMs: s.intervalMs, full: true }) : null;
     if (isAdmin) return { ok: true, key, via: 'local', target: publicTarget(target), entry, ...common, ...(row ? {} : { reason: 'no-sample' }) };
@@ -314,7 +320,8 @@ api.get('/tools/bm-usage', toolsPerm, async (req, res) => {
       : tg.counts;
     const keys = new Set(targets0.map((x) => x.key));
     // 최신값은 **대상 목록 안의 것만** 준다(법인을 끄거나 등록이 사라진 서버의 옛 값이 새어 나가지 않게).
-    const rowsRaw = latest.filter((r) => keys.has(t(r.key)));
+    // v2.920(반증 D2): 데모(mock) 대상의 성능 열은 응답 단계에서만 겹친다(적재하지 않는다 — mock/demo/baremetal.js demoPerfLatestRows).
+    const rowsRaw = await demoPerfRows(latest.filter((r) => keys.has(t(r.key))), tg.targets);
     // v2.919: 행에서 JSON 문자열 열(장치별·튜닝)을 뗀다 — 목록에는 판정 code 표(perf)만, 장치별은 서버 상세(/tools/bm-usage/perf/:key)에서.
     const rows0 = rowsRaw.map(stripJsonCols);
     const rows = isAdmin ? rows0 : maskBmList(rows0, match);

@@ -40,7 +40,7 @@ import Select from '../../components/Select.jsx';
 // v2.920(리눅스 성능 2단계 화면): USE 매트릭스 보드 · 서버 성능 상세 — 문구·표시 규약은 bmPerfText.js, 판정은 서버 useJudge.js.
 import BmPerfBoard from './BmPerfBoard.jsx';
 import BmPerfDetail from './BmPerfDetail.jsx';
-import { boardItems } from './bmPerfText.js';
+import { boardItems, allAuthStops } from './bmPerfText.js';
 
 /** v2.920: 보기 기억(사용자별 편의 — 실패해도 화면은 기본값으로 그린다). */
 const VIEW_KEY = 'bmUsage.view';
@@ -164,6 +164,8 @@ export function BmUsage() {
     hay: (r) => [r.name, r.serviceTag, r.vcenterId, r.model, r.idracHost, r.osHostName, r.agent, pathTypeLabel(r.type)],
   }), [perfItems, dcSel, typeSel, q]);
   const perfShown = useMemo(() => perfFacets.shown.map((r) => r._it), [perfFacets]);
+  // v2.920(반증 D6): 인증 정지는 이 노드 것 + 엣지 보관분 것(엣지 위임 서버의 ‘인증 정지’ 가 빠지지 않게).
+  const perfAuthStops = useMemo(() => allAuthStops(data || {}, edges), [data, edges]);
   const view = viewSel || ((data?.perf || []).length || perfItems.some((it) => it.entry) ? 'use' : 'util');
   const barFacets = view === 'use' ? perfFacets : facets;
   function chooseView(v) { setViewSel(v); writeView(v); }
@@ -460,7 +462,7 @@ export function BmUsage() {
       {view === 'use' && (
         <BmPerfBoard
           items={perfShown} th={data?.perfThresholds || null} intervalMs={st.intervalMs ?? data?.settings?.intervalMs}
-          authStops={data?.authStops || []} staleMs={edges?.staleMs ?? null}
+          authStops={perfAuthStops} staleMs={edges?.staleMs ?? null} corpOff={data?.skippedCounts?.['corp-off'] || 0}
           onOpen={openDetail} selKey={perfSel} perfError={data?.perfError || ''}
         />
       )}
@@ -468,7 +470,7 @@ export function BmUsage() {
       {perfSel && (
         <BmPerfDetail
           itemKey={perfSel} item={perfItems.find((it) => it.key === perfSel) || null}
-          authStops={data?.authStops || []} staleMs={edges?.staleMs ?? null}
+          authStops={perfAuthStops} staleMs={edges?.staleMs ?? null}
           onClose={() => setPerfSel('')}
         />
       )}

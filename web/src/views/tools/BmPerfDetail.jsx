@@ -16,7 +16,7 @@ import { VerdictBadge, StateChips } from './BmPerfBoard.jsx';
 import {
   RES_ORDER, RES_LABEL, USE_KEYS, USE_LABEL, HW_USE_LABEL, cellView, cellFootnotes, verdictView, coverageView, rowStates, STATE_TEXT,
   mismatchText, readText, crossView, crossBandText, thresholdText, basisText, evidenceRows, DETAIL_TABS, detailNotes, pathAtText,
-  hwFactRows, detailErrorText, numText, hwEmptyText,
+  hwFactRows, detailErrorText, numText, hwEmptyText, cellCode,
 } from './bmPerfText.js';
 
 function CodeText({ code }) {
@@ -75,55 +75,82 @@ function Face({ res, entry, th, perfCols, children }) {
   );
 }
 
-export default function BmPerfDetail({ itemKey, item = null, authStops = [], staleMs = null, onClose }) {
+/**
+ * 상세 조회기 — 세대(gen)로 **늦게 온 이전 서버 응답을 버린다**(테스트가 가짜 fetcher 로 고정 — 반증 D8).
+ * `load(key, set)` 은 'ok' | 'err' | 'stale'(버림) 을 돌려준다. set 은 부분 상태 {resp?, err?, loading?} 를 받는다.
+ */
+export function createDetailLoader(fetcher = (key) => fetchJson(`/tools/bm-usage/perf/${encodeURIComponent(key)}`)) {
+  let gen = 0;
+  return {
+    async load(key, set) {
+      const g = ++gen;
+      set({ loading: true, err: null });
+      try {
+        const d = await fetcher(key);
+        if (g !== gen) return 'stale';
+        set({ resp: d, err: null, loading: false });
+        return 'ok';
+      } catch (e) {
+        if (g !== gen) return 'stale';
+        set({ resp: null, err: e, loading: false });
+        return 'err';
+      }
+    },
+  };
+}
+
+export default function BmPerfDetail({ itemKey, item = null, authStops = [], staleMs = null, onClose, off = false }) {
   // ⚠ 훅은 전부 조기 return 위에.
-  const [resp, setResp] = useState(null);
-  const [err, setErr] = useState(null);
-  const [loading, setLoading] = useState(false);
+  const [st, setSt] = useState({ resp: null, err: null, loading: false });
   const [tab, setTab] = useState('summary');
-  const gen = useRef(0);
+  const loader = useRef(null);
+  if (!loader.current) loader.current = createDetailLoader();
   const rootRef = useRef(null);
-  const load = useCallback(async (key) => {
-    const g = ++gen.current;
-    setLoading(true); setErr(null);
-    try {
-      const d = await fetchJson(`/tools/bm-usage/perf/${encodeURIComponent(key)}`);
-      if (g === gen.current) setResp(d);
-    } catch (e) {
-      if (g === gen.current) { setResp(null); setErr(e); }
-    } finally { if (g === gen.current) setLoading(false); }
-  }, []);
+  const set = useCallback((patch) => setSt((p) => ({ ...p, ...patch })), []);
+  const load = useCallback((key) => loader.current.load(key, set), [set]);
   useEffect(() => {
     if (!itemKey) return;
-    setResp(null); setTab('summary');
+    setSt({ resp: null, err: null, loading: false }); setTab('summary');
     load(itemKey);
     try { rootRef.current?.scrollIntoView?.({ block: 'start', behavior: 'smooth' }); } catch { /* 스크롤 실패는 무시 */ }
   }, [itemKey, load]);
-
   if (!itemKey) return null;
+  return (
+    <div ref={rootRef} style={{ minWidth: 0 }}>
+      <BmPerfDetailView itemKey={itemKey} item={item} resp={st.resp} err={st.err} loading={st.loading} tab={tab} onTab={setTab}
+        onReload={() => load(itemKey)} onClose={onClose} authStops={authStops} staleMs={staleMs} off={off} />
+    </div>
+  );
+}
+
+/** 상세 화면(상태 없음 — 응답 · 오류 · 탭을 받아 그린다). 테스트가 응답 뒤 화면을 SSR 로 본다(반증 D8). */
+export function BmPerfDetailView({ itemKey, item = null, resp = null, err = null, loading = false, tab = 'summary', onTab, onReload, onClose, authStops = [], staleMs = null, off = false, now = Date.now() }) {
+  if (!itemKey) return null;
+  const setTab = onTab || (() => {});
   const sameKey = resp && (resp.key === itemKey);
   const entry = sameKey ? resp.entry : null;
   const target = (sameKey && resp.target) || item?.target || {};
   const th = (sameKey && resp.perfThresholds) || item?.th || null;
   const name = target.name || item?.name || itemKey;
-  const states = rowStates(entry || item?.entry || null, { ...target, key: item?.key || itemKey }, { authStops, snapAt: resp?.snapAt ?? item?.snapAt, staleMs });
+  // 404(없거나 범위 밖)·조회 실패 때는 목록 항목에서 온 상태 블록을 그리지 않는다(실패 사실과 섞이지 않게).
+  const states = err ? [] : rowStates(entry || item?.entry || null, { ...target, key: item?.key || itemKey }, { authStops, snapAt: resp?.snapAt ?? item?.snapAt, staleMs, off: off || !!item?.off, now });
   const cov = coverageView((entry || item?.entry)?.coverage);
   const e = entry || null;
   const errIs403 = !!err && err.status === 403;
-  const notes = sameKey ? detailNotes(resp) : [];
+  const notes = sameKey ? detailNotes(resp, { now }) : [];
   const mm = e ? mismatchText(e.mismatch, th) : '';
   const usedCodes = [];
-  if (e?.codes) for (const r of RES_ORDER) for (const k of USE_KEYS) usedCodes.push(e.codes[r]?.[k]);
+  if (e) for (const r of RES_ORDER) for (const k of USE_KEYS) usedCodes.push(cellCode(e, r, k));
 
   return (
-    <div ref={rootRef} className="card bmp-detail" style={{ minWidth: 0 }}>
+    <div className="card bmp-detail" style={{ minWidth: 0 }}>
       {/* ── 머리 ── */}
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
         <h4 style={{ margin: 0, minWidth: 0, overflowWrap: 'anywhere' }}>{name}</h4>
         {e && <VerdictBadge verdict={e.verdict} />}
         <span className="bmp-chip" style={{ color: e ? toneVar(cov.tone) : 'var(--muted)' }}>경로 {e ? cov.label : '—'}</span>
         <span style={{ flex: '1 1 auto' }} />
-        <button className="btn btn-sm bmp-touch" onClick={() => load(itemKey)} disabled={loading}>{loading ? '읽는 중…' : '다시 읽기'}</button>
+        <button className="btn btn-sm bmp-touch" onClick={onReload} disabled={loading || !onReload}>{loading ? '읽는 중…' : '다시 읽기'}</button>
         {onClose && <button className="btn btn-sm bmp-touch" onClick={onClose}>닫기</button>}
       </div>
       <div style={{ fontSize: 12, color: 'var(--muted)', lineHeight: 1.6, marginTop: 4 }}>
@@ -181,7 +208,7 @@ export default function BmPerfDetail({ itemKey, item = null, authStops = [], sta
                   {RES_ORDER.map((r) => (
                     <tr key={r}>
                       <td data-sort={r}>{RES_LABEL[r]}{r === 'hw' ? '(iDRAC)' : ''}</td>
-                      {USE_KEYS.map((k) => <td key={k} data-sort={cellView(e.codes?.[r]?.[k]).sort}>{r === 'hw' && <span style={{ fontSize: 11, color: 'var(--muted)' }}>{HW_USE_LABEL[k]} </span>}<CodeText code={e.codes?.[r]?.[k] || 'missing'} /></td>)}
+                      {USE_KEYS.map((k) => <td key={k} data-sort={cellView(cellCode(e, r, k)).sort}>{r === 'hw' && <span style={{ fontSize: 11, color: 'var(--muted)' }}>{HW_USE_LABEL[k]} </span>}<CodeText code={cellCode(e, r, k)} /></td>)}
                       <td data-sort={verdictView(e.perResource?.[r]).rank}><span style={{ color: toneVar(verdictView(e.perResource?.[r]).tone) }}>{verdictView(e.perResource?.[r]).label}</span></td>
                     </tr>
                   ))}

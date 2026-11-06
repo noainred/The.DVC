@@ -12,17 +12,21 @@ import BoldText from '../../components/boldText.jsx';
 import { toneVar } from './toneVar.js';
 import {
   RES_ORDER, RES_LABEL, USE_KEYS, HW_USE_LABEL, U_COL, cellView, cellFootnotes, codesUsed, verdictView, coverageView,
-  rowStates, STATE_TEXT, trustCounts, trustBandParts, kpiCounts, byResText, topBottlenecks, severityOrder, crossBandText,
+  rowStates, STATE_TEXT, cellCode, NO_ENTRY_CELL, NO_ENTRY_FOOTNOTE, trustCounts, trustBandParts, kpiCounts, byResText, topBottlenecks, severityOrder, crossBandText,
   thresholdText, mismatchText,
 } from './bmPerfText.js';
 
 const LIMIT = 50;
 
-/** 칸 하나 — 판정된 칸만 색, 나머지는 ‘—’ + 각주 기호. */
-export function PerfCell({ code, value, unit, extra }) {
-  const v = cellView(code, { value, unit });
+/**
+ * 칸 하나 — 판정된 칸만 색, 나머지는 ‘—’ + 각주 기호. 항목이 없는 행(entry null)은 기호 없는 ‘—’(NO_ENTRY_CELL).
+ * ⚠⚠(2단계 반증 D1) **컴포넌트가 아니라 `<td>` 를 돌려주는 함수**다 — STable 정렬(sortableText.cellText)은 행의 자식 중 td/th 만 셀로 센다.
+ *   `<PerfCell/>` 컴포넌트로 넣으면 15칸이 셀에서 빠져 열 클릭이 엉뚱한 열(판정)로 정렬되거나 아무 일도 하지 않았다.
+ */
+export function perfCell({ key, code, value = null, unit = '', extra = '', noEntry = false }) {
+  const v = noEntry ? NO_ENTRY_CELL : cellView(code, { value, unit });
   return (
-    <td className="right bmp-cell" data-sort={v.sort} title={v.title + (extra ? ` · ${extra}` : '')}>
+    <td key={key} className="right bmp-cell" data-sort={v.sort} title={v.title + (extra ? ` · ${extra}` : '')}>
       <span style={{ color: v.judged ? toneVar(v.tone) : 'var(--text-faint)' }}>{v.text}</span>
       {v.mark && <sup className="bmp-mark">{v.mark}</sup>}
       {extra && <sup className="bmp-mark" style={{ color: toneVar('warn') }}>≠</sup>}
@@ -33,6 +37,41 @@ export function PerfCell({ code, value, unit, extra }) {
 export function VerdictBadge({ verdict }) {
   const v = verdictView(verdict);
   return <span className="bmp-badge" style={{ color: toneVar(v.tone), borderColor: toneVar(v.tone) }}>{v.label}</span>;
+}
+
+/**
+ * 매트릭스 행들(tr 배열) — 보드와 정렬 회귀 테스트가 같은 함수를 쓴다(테스트는 이 결과에 실제 sortChildren 을 건다).
+ * 열 순서(마지막 머리글 줄): 0 서버 · 1 경로 · 2~16 자원 5 × U·S·E · 17 판정.
+ */
+export function matrixRows(items = [], { authStops = [], staleMs = null, now = Date.now(), th = null, selKey = '', open = () => {} } = {}) {
+  const keyOpen = (key) => (ev) => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); open(key); } };
+  return items.map((it) => {
+    const e = it.entry;
+    const cov = coverageView(e?.coverage);
+    const states = rowStates(e, it.target, { authStops, snapAt: it.snapAt, staleMs, now, off: !!it.off });
+    const mm = e?.mismatch?.cpu?.flag ? mismatchText(e.mismatch, it.th || th) : '';
+    return (
+      <tr key={`${it.agent}|${it.key}`} data-key={it.key} style={{ background: selKey === it.key ? 'rgba(103,232,249,0.06)' : undefined }}>
+        <td data-sort={it.name}>
+          <span role="button" tabIndex={0} className="bmp-link" onClick={() => open(it.key)} onKeyDown={keyOpen(it.key)}>{it.name}</span>
+          <div style={{ fontSize: 11, color: 'var(--muted)' }}>{it.vcenterId || '귀속 없음'}{it.agent ? ` · 엣지 ${it.agent}` : ''}</div>
+        </td>
+        <td data-sort={e ? cov.short : ''}>
+          <span style={{ fontSize: 12, color: e ? toneVar(cov.tone) : 'var(--muted)', whiteSpace: 'nowrap' }}>{e ? cov.short : '—'}</span>
+          <StateChips states={states.filter((s) => !['osOnly', 'idracOnly', 'noneRead', 'noPath'].includes(s))} />
+        </td>
+        {RES_ORDER.flatMap((r) => USE_KEYS.map((u) => perfCell({
+          key: `${r}${u}`, code: e ? cellCode(e, r, u) : 'missing', noEntry: !e,
+          value: u === 'U' && U_COL[r] ? it.row?.[U_COL[r]] : null, unit: u === 'U' && U_COL[r] ? '%' : '',
+          extra: r === 'cpu' && u === 'U' && mm ? mm : '',
+        })))}
+        <td className="bmp-line" data-sort={e ? verdictView(e.verdict).rank : ''}>
+          {e && <><VerdictBadge verdict={e.verdict} />{' '}</>}
+          {e?.line || <span style={{ color: 'var(--muted)' }}>판정 항목 없음 — 아직 표본이 없습니다</span>}
+        </td>
+      </tr>
+    );
+  });
 }
 
 export function StateChips({ states = [] }) {
@@ -47,9 +86,9 @@ export function StateChips({ states = [] }) {
   );
 }
 
-export default function BmPerfBoard({ items = [], th = null, intervalMs = null, authStops = [], staleMs = null, onOpen, selKey = '', perfError = '' }) {
+export default function BmPerfBoard({ items = [], th = null, intervalMs = null, authStops = [], staleMs = null, onOpen, selKey = '', perfError = '', corpOff = 0, now: nowProp = null }) {
   const [all, setAll] = useState(false);
-  const now = Date.now();
+  const now = nowProp ?? Date.now();
   const ordered = useMemo(() => severityOrder(items), [items]);
   const tc = useMemo(() => trustCounts(items, { authStops, staleMs, now }), [items, authStops, staleMs, now]);
   const k = useMemo(() => kpiCounts(items), [items]);
@@ -65,8 +104,15 @@ export default function BmPerfBoard({ items = [], th = null, intervalMs = null, 
       {/* ── 신뢰 띠 — ‘이 판정을 믿어도 되는가’ ── */}
       <div className="card bmp-band" style={{ minWidth: 0 }}>
         <div style={{ fontSize: 12, lineHeight: 1.7, display: 'flex', flexWrap: 'wrap', columnGap: 14, rowGap: 2 }}>
-          {trustBandParts(tc, { intervalMs }).map((p, i) => <span key={i} style={{ minWidth: 0 }}><BoldText text={p} /></span>)}
+          {trustBandParts(tc, { intervalMs, corpOff }).map((p, i) => <span key={i} style={{ minWidth: 0 }}><BoldText text={p} /></span>)}
         </div>
+        {/* 꺼짐(상태 9종 ①) — 보이는 서버 중 수집이 꺼진 노드의 것이 있으면 한 번 말한다(행에는 ‘꺼짐’ 칩). */}
+        {tc.off > 0 && (
+          <div className="bmp-state" style={{ borderLeftColor: toneVar(STATE_TEXT.off.tone), marginTop: 6 }}>
+            <div style={{ fontSize: 13, fontWeight: 600 }}>{STATE_TEXT.off.title}</div>
+            <div style={{ fontSize: 12, lineHeight: 1.6, color: 'var(--text-dim)' }}><BoldText text={STATE_TEXT.off.body} /></div>
+          </div>
+        )}
         {perfError && <p style={{ margin: '6px 0 0', fontSize: 12, color: toneVar('bad'), lineHeight: 1.6 }}>성능 판정을 만들지 못했습니다: {perfError}</p>}
       </div>
 
@@ -102,33 +148,7 @@ export default function BmPerfBoard({ items = [], th = null, intervalMs = null, 
               </tr>
             </thead>
             <tbody>
-              {ordered.map((it) => {
-                const e = it.entry;
-                const cov = coverageView(e?.coverage);
-                const states = rowStates(e, it.target, { authStops, snapAt: it.snapAt, staleMs, now });
-                const mm = e?.mismatch?.cpu?.flag ? mismatchText(e.mismatch, it.th || th) : '';
-                return (
-                  <tr key={`${it.agent}|${it.key}`} style={{ background: selKey === it.key ? 'rgba(103,232,249,0.06)' : undefined }}>
-                    <td data-sort={it.name}>
-                      <span role="button" tabIndex={0} className="bmp-link" onClick={() => open(it.key)} onKeyDown={keyOpen(it.key)}>{it.name}</span>
-                      <div style={{ fontSize: 11, color: 'var(--muted)' }}>{it.vcenterId || '귀속 없음'}{it.agent ? ` · 엣지 ${it.agent}` : ''}</div>
-                    </td>
-                    <td data-sort={e ? cov.short : ''}>
-                      <span style={{ fontSize: 12, color: e ? toneVar(cov.tone) : 'var(--muted)', whiteSpace: 'nowrap' }}>{e ? cov.short : '—'}</span>
-                      <StateChips states={states.filter((s) => !['osOnly', 'idracOnly', 'noneRead', 'noPath'].includes(s))} />
-                    </td>
-                    {RES_ORDER.map((r) => USE_KEYS.map((u) => (
-                      <PerfCell key={`${r}${u}`} code={e?.codes?.[r]?.[u] || 'missing'}
-                        value={u === 'U' && U_COL[r] ? it.row?.[U_COL[r]] : null} unit={u === 'U' && U_COL[r] ? '%' : ''}
-                        extra={r === 'cpu' && u === 'U' && mm ? mm : ''} />
-                    )))}
-                    <td className="bmp-line" data-sort={verdictView(e?.verdict).rank}>
-                      {e && <><VerdictBadge verdict={e.verdict} />{' '}</>}
-                      {e?.line || <span style={{ color: 'var(--muted)' }}>판정 항목 없음 — 아직 표본이 없습니다</span>}
-                    </td>
-                  </tr>
-                );
-              })}
+              {matrixRows(ordered, { authStops, staleMs, now, th, selKey, open })}
             </tbody>
           </STable>
         )}
@@ -144,6 +164,7 @@ export default function BmPerfBoard({ items = [], th = null, intervalMs = null, 
           <BoldText text={'U 칸의 숫자는 그 칸의 유일한 입력(사용률 — 가장 높은 장치·회선 기준)이고, S·E 칸은 여러 입력 중 **가장 나쁜 것**이라 낱말(정상 · 주의 · 초과)로만 적습니다. 근거 값은 서버를 눌러 상세에서 봅니다. 하드웨어 축은 iDRAC — 전력(cap 대비) · 온도(흡기) · 부품(부품 장애 · SEL). OS 의 OOM 과 iDRAC 의 DIMM 은 합산하지 않고 같은 칸의 입력으로 나란히 둡니다. 칸 색과 판정 한 줄은 **서버가 판정한 그대로**입니다.'} />
         </p>
         {thLine && <p style={{ margin: '4px 0 0', fontSize: 11, color: 'var(--muted)', lineHeight: 1.6 }}>판정 기준(설정값 — API): {thLine}</p>}
+        {items.some((it) => !it.entry) && <p style={{ margin: '4px 0 0', fontSize: 11, color: 'var(--muted)', lineHeight: 1.6 }}><BoldText text={NO_ENTRY_FOOTNOTE} /></p>}
         {foot.map((f, i) => <p key={i} style={{ margin: '4px 0 0', fontSize: 11, color: 'var(--muted)', lineHeight: 1.6 }}><BoldText text={f} /></p>)}
         {items.some((it) => it.entry?.mismatch?.cpu?.flag) && <p style={{ margin: '4px 0 0', fontSize: 11, color: 'var(--muted)', lineHeight: 1.6 }}>
           <BoldText text={'‘≠’ 는 CPU 사용률이 OS 와 iDRAC 에서 기준 이상 다르다는 표지입니다(어느 쪽이 맞는지 단정하지 않습니다 — 칸에 마우스를 올리면 두 값).'} />

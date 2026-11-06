@@ -8,10 +8,11 @@ import path from 'node:path';
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import * as T from './bmPerfText.js';
-import BmPerfBoard from './BmPerfBoard.jsx';
-import BmPerfDetail from './BmPerfDetail.jsx';
+import BmPerfBoard, { matrixRows } from './BmPerfBoard.jsx';
+import BmPerfDetail, { BmPerfDetailView, createDetailLoader } from './BmPerfDetail.jsx';
+import { sortChildren } from '../../components/sortableText.js';
 
-const NOW = Math.floor(Date.now() / 3_600_000) * 3_600_000;   // 정시 경계로 떨어뜨린 기준 시각(docs/rules/common.md)
+const NOW = Math.floor(Date.now() / 3_600_000) * 3_600_000 - 30 * 60_000;   // 정시 경계에서 30분 앞(docs/rules/common.md 권장형)
 const TH = { utilWarn: 80, utilBad: 90, runqWarn: 1, runqBad: 2, queueWarn: 2, queueBad: 4, psiFullWarn: 5, psiFullBad: 20, psiCpuSomeWarn: 20, psiCpuSomeBad: 50, swapOutWarn: 1, swapOutBad: 100, retransWarn: 1, retransBad: 5, errRepeatBad: 3, cpuMismatchPct: 15, inletWarnC: 27, inletBadC: 35, powerCapWarnPct: 90, powerCapBadPct: 98, minJudgedPct: 50 };
 const codes = (fill = 'ok', over = {}) => Object.fromEntries(T.RES_ORDER.map((r) => [r, { U: fill, S: fill, E: fill, ...(over[r] || {}) }]));
 const entry = (o = {}) => ({
@@ -298,5 +299,157 @@ describe('렌더 스모크(SSR)', () => {
     expect(html).toContain('불러오는 중');
     expect(html).toContain('하드웨어 면이 비어 있습니다');
     expect(html).not.toMatch(/\*\*/);
+  });
+});
+
+/* ───────────── 2단계 반증(review-s2) 반영 ───────────── */
+describe('반증 D1 — 매트릭스 열 클릭 정렬(실제 sortChildren)', () => {
+  // 열: 0 서버 · 1 경로 · 2~16 자원×U·S·E(cpu U=2, S=3, E=4 · mem 5~7 · disk 8~10 · net 11~13 · hw 14~16) · 17 판정
+  const items = [
+    item('a', entry({ verdict: 'warn', codes: codes('ok', { cpu: { S: 'warn' } }) }), {}, { row: { cpu_pct: 50 } }),
+    item('b', entry({ verdict: 'bottleneck', codes: codes('ok', { cpu: { S: 'bad' } }) }), {}, { row: { cpu_pct: 97 } }),
+    item('c', entry({ verdict: 'ok', codes: codes('ok', { cpu: { U: 'missing', S: 'nopath' } }) }), {}, { row: { cpu_pct: null } }),
+    item('d', null, {}, { row: {} }),
+    item('e', entry({ verdict: 'ok' }), {}, { row: { cpu_pct: 12.5 } }),
+  ];
+  const rows = matrixRows(items, { now: NOW, th: TH });
+  const order = (col, dir) => sortChildren(rows, col, dir).map((r) => r.props['data-key']);
+  it('U 숫자 열(CPU U) — 등급 → 값, ‘—’ 는 양방향 모두 뒤', () => {
+    expect(order(2, 'asc')).toEqual(['e', 'a', 'b', 'c', 'd']);
+    expect(order(2, 'desc')).toEqual(['b', 'a', 'e', 'c', 'd']);
+  });
+  it('S code 열(CPU S) — 정상 < 주의 < 초과, 못 읽음·경로 없음·항목 없음은 뒤', () => {
+    expect(order(3, 'asc').slice(0, 3)).toEqual(['e', 'a', 'b']);
+    expect(order(3, 'desc').slice(0, 3)).toEqual(['b', 'a', 'e']);
+    expect(order(3, 'desc').slice(3).sort()).toEqual(['c', 'd']);
+  });
+  it('E 열 · 판정 열 — 판정 열은 서버 판정 등급 순, 항목 없는 행은 뒤', () => {
+    expect(order(17, 'desc')[0]).toBe('b');
+    expect(order(17, 'desc')[4]).toBe('d');
+    expect(order(17, 'asc')[4]).toBe('d');
+    expect(order(4, 'asc').at(-1)).toBe('d');
+  });
+  it('행의 셀은 전부 td 다(컴포넌트 셀이면 STable 이 셀로 세지 않는다)', () => {
+    for (const r of rows) {
+      const kids = React.Children.toArray(r.props.children);
+      expect(kids.length).toBe(18);
+      expect(kids.every((k) => k.type === 'td')).toBe(true);
+    }
+  });
+});
+
+describe('반증 D3 — 각주 기호와 칸이 어긋나지 않는다', () => {
+  it('항목이 있는데 code 가 빠진 칸은 ‘못 읽음’ 으로 그리고 각주도 센다', () => {
+    const e = entry({ codes: { cpu: { U: 'ok', S: 'ok', E: 'ok' } } });   // 다른 자원 code 없음
+    expect(T.cellCode(e, 'mem', 'U')).toBe('missing');
+    expect(T.codesUsed([e])).toContain('missing');
+    expect(T.cellFootnotes(T.codesUsed([e]))[0]).toContain('못 읽음');
+  });
+  it('항목이 없는 행은 기호 없는 ‘—’ 와 별도 각주(못 읽음 각주를 붙이지 않는다)', () => {
+    expect(T.codesUsed([entry(), null])).toEqual(['ok']);
+    const html = renderToStaticMarkup(React.createElement(BmPerfBoard, { items: [item('A', entry()), item('B', null)], th: TH, now: NOW }));
+    expect(html).not.toContain('¹');
+    expect(html).toContain('판정 항목 없음');
+    expect(html).toContain('기호 없는');
+  });
+  it('상세 요약표도 같은 함수 — code 가 빠진 자원은 ‘—¹’ 이고 각주 ¹ 이 함께 나온다', () => {
+    const e = entry({ codes: { cpu: { U: 'ok', S: 'ok', E: 'ok' } }, cells: null });
+    const html = renderToStaticMarkup(React.createElement(BmPerfDetailView, { itemKey: 'K1', resp: { ok: true, key: 'K1', entry: e, target: { key: 'K1', name: 'k1', paths: ['os', 'idrac'] } }, now: NOW }));
+    expect(html).toContain('¹');
+    expect(html).toContain('못 읽음</b> — 경로는 있는데');
+  });
+});
+
+describe('반증 D4 — 꺼짐 상태를 그린다', () => {
+  it('이 노드 수집이 꺼지면(데모 아님) 항목에 off · 엣지는 enabledOnEdge === false', () => {
+    const items = T.boardItems({ enabled: false, targets: [{ key: 'A' }], perf: [entry({ key: 'A' })] }, { rows: [{ agent: 'E', snapAt: NOW, enabledOnEdge: false, targets: [{ key: 'B' }], perf: [] }, { agent: 'F', snapAt: NOW, enabledOnEdge: true, targets: [{ key: 'C' }] }] });
+    expect(items.map((x) => [x.key, x.off])).toEqual([['A', true], ['B', true], ['C', false]]);
+    expect(T.boardItems({ enabled: false, demo: true, targets: [{ key: 'A' }] })[0].off).toBe(false);
+    expect(T.rowStates(entry(), { key: 'A' }, { off: true })[0]).toBe('off');
+  });
+  it('보드는 신뢰 띠에 꺼짐 안내 · 행에 ‘꺼짐’ 칩, 상세 머리에 꺼짐 문구 · 꺼진 법인 수', () => {
+    const it0 = { ...item('A', entry()), off: true };
+    const html = renderToStaticMarkup(React.createElement(BmPerfBoard, { items: [it0], th: TH, corpOff: 3, now: NOW }));
+    expect(html).toContain(T.STATE_TEXT.off.body.slice(0, 30));   // 신뢰 띠 안내(칩 title 에는 body 가 없다)
+    expect(html).toContain('>꺼짐<');
+    expect(html).toContain('꺼진 법인의 서버 <b>3</b>대');
+    const d = renderToStaticMarkup(React.createElement(BmPerfDetailView, { itemKey: 'A', item: it0, now: NOW }));
+    expect(d).toContain(T.STATE_TEXT.off.title);
+  });
+});
+
+describe('반증 D6 — 엣지 위임 서버의 인증 정지', () => {
+  it('엣지 보관분의 authStops 를 합친다(받은 적 없는 엣지는 뺀다) · 엣지 행에 ‘인증 정지’ 칩', () => {
+    const data = { authStops: [{ key: 'A', path: 'os' }] };
+    const edges = { rows: [{ agent: 'E', snapAt: NOW, authStops: [{ key: 'B', path: 'idrac' }] }, { agent: 'F', snapAt: null, authStops: [{ key: 'X' }] }] };
+    expect(T.allAuthStops(data, edges).map((a) => a.key)).toEqual(['A', 'B']);
+    const html = renderToStaticMarkup(React.createElement(BmPerfBoard, { items: [item('B', entry(), {}, { agent: 'E', snapAt: NOW })], authStops: T.allAuthStops(data, edges), th: TH, now: NOW }));
+    expect(html).toContain('>인증 정지<');
+    expect(html).toContain('인증 정지 <b>1</b>');
+  });
+});
+
+describe('반증 D8 — 상세: 응답 뒤 화면 · 오류 · 늦은 응답 버림(가짜 fetcher + 실제 컴포넌트)', () => {
+  const full = entry({
+    verdict: 'saturated', focus: 'disk', line: '디스크 포화 — nvme0n1 평균 대기열 9.2 · 읽은 칸 13/15',
+    codes: codes('ok', { disk: { S: 'bad' } }), perResource: { cpu: 'ok', mem: 'ok', disk: 'saturated', net: 'ok', hw: 'ok' },
+    cells: Object.fromEntries(T.RES_ORDER.map((r) => [r, { U: { code: 'ok', basis: [] }, S: { code: r === 'disk' ? 'bad' : 'ok', basis: r === 'disk' ? [{ key: 'disk_aqu', label: '평균 대기열', value: 9.2, unit: '', code: 'bad', device: 'nvme0n1' }] : [] }, E: { code: 'ok', basis: [] } }])),
+    crossDetail: [{ id: 2, title: '디스크 대기 증가가 고장 전조인가', state: 'clear', code: 'io-volume', evidence: ['SMART 예측 장애 0'] }, { id: 1, title: 'CPU', state: 'inactive', code: '', evidence: [] }],
+    values: { load1: 9.8 }, detail: { cores: 32, disks: [{ name: 'nvme0n1', busyPct: 94, iops: 4000, awaitMs: 18, aqu: 9.2, inFlight: 3 }], nics: [] },
+    hw: { read: true, power: { watts: 412, capWatts: 680, capPct: 60.6 }, inletC: 24, sensorAt: NOW, cpuPct: 60, dimmBad: [], dimmWarn: [], diskPredicted: [], selCritical: 0, faultCount: 0, faults: [], inventoryAt: NOW },
+  });
+  const resp = { ok: true, key: 'K1', via: 'local', entry: full, target: { key: 'K1', name: 'db01', paths: ['os', 'idrac'] }, perfThresholds: TH, perfCols: [{ col: 'load1', res: 'cpu', use: 'S', judged: false, unit: '', label: 'load 1분' }] };
+  const view = (p) => renderToStaticMarkup(React.createElement(BmPerfDetailView, { itemKey: 'K1', now: NOW, ...p }));
+  it('조회기 — 응답을 받아 그 응답으로 그린다(판정 띠 · 요약 · 교차 판정)', async () => {
+    let st = {};
+    const r = await createDetailLoader(async (k) => ({ ...resp, key: k })).load('K1', (p) => { st = { ...st, ...p }; });
+    expect(r).toBe('ok');
+    const html = view({ resp: st.resp });
+    expect(html).toContain('디스크 포화 — nvme0n1 평균 대기열 9.2');
+    expect(html).toContain('교차 ② 고장 전조 근거가 없습니다');
+    expect(html).toContain('>다른 후보<');
+    expect(html).toContain('>해당 없음<');
+    expect(html).not.toContain('불러오는 중');
+    expect(html).not.toMatch(/\*\*/);
+  });
+  it('자원 탭 — 근거 · 기준값(API) · 근거 열 · 장치 표', () => {
+    const html = view({ resp, tab: 'res' });
+    expect(html).toContain('nvme0n1 평균 대기열 9.2');
+    expect(html).toContain('기준 주의 2 · 초과 4');
+    expect(html).toContain('load 1분');
+    expect(html).toContain('18ms');
+  });
+  it('하드웨어 탭 — 사실 표 · 받지 않는 값 · 사실이 없으면 이유', () => {
+    const html = view({ resp, tab: 'hw' });
+    expect(html).toContain('412W / cap 680W');
+    expect(html).toContain('받지 않는 값');
+    const none = view({ resp: { ...resp, target: { ...resp.target, paths: ['os'] }, entry: { ...full, coverage: 'os', hw: null } }, tab: 'hw' });
+    expect(none).toContain(T.STATE_TEXT.osOnly.body.slice(0, 20));
+    const unread = view({ resp: { ...resp, entry: { ...full, coverage: 'os', hw: null } }, tab: 'hw' });
+    expect(unread).toContain(T.STATE_TEXT.osOnlyUnread.body.slice(0, 20));
+  });
+  it('403 은 권한 안내(ErrorBox), 404 는 ‘없거나 범위 밖’ — 목록 항목의 상태 블록을 섞지 않는다', () => {
+    const e403 = Object.assign(new Error('forbidden'), { status: 403 });
+    const h403 = view({ err: e403, item: item('K1', entry({ coverage: 'os' }), { paths: ['os'] }) });
+    expect(h403).not.toContain('성능 상세를 읽지 못했습니다');
+    expect(h403).not.toContain(T.STATE_TEXT.osOnly.title);
+    const e404 = Object.assign(new Error('대상 서버를 찾지 못했습니다.'), { status: 404 });
+    const h404 = view({ err: e404, item: item('K1', entry({ coverage: 'os' }), { paths: ['os'] }) });
+    expect(h404).toContain('범위 밖');
+    expect(h404).not.toContain(T.STATE_TEXT.osOnly.title);
+  });
+  it('늦게 온 이전 서버 응답은 버린다 · 다른 키 응답은 그리지 않는다', async () => {
+    const waits = {};
+    const loader = createDetailLoader((k) => new Promise((res) => { waits[k] = res; }));
+    let st = {};
+    const set = (p) => { st = { ...st, ...p }; };
+    const pA = loader.load('A', set);
+    const pB = loader.load('B', set);
+    waits.B({ ...resp, key: 'B' });
+    expect(await pB).toBe('ok');
+    waits.A({ ...resp, key: 'A', entry: { ...full, line: '옛 응답' } });
+    expect(await pA).toBe('stale');
+    expect(st.resp.key).toBe('B');
+    expect(view({ itemKey: 'C', resp: st.resp })).not.toContain('디스크 포화');
   });
 });

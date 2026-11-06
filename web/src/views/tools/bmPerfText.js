@@ -76,12 +76,23 @@ export function cellFootnotes(codes = []) {
   const seen = new Set(codes);
   return ['missing', 'none', 'nopath', 'stale'].filter((c) => seen.has(c)).map((c) => CELL_FOOTNOTE[c]);
 }
-/** 성능 항목 목록에서 나온 칸 code 전부(각주용). */
+/**
+ * 그리는 칸 code — 항목은 있는데 그 칸 code 가 빠졌으면 ‘못 읽음’(화면 · 각주가 같은 함수를 쓴다 — 반증 D3: 칸은 ‘—¹’ 인데 각주가 없던 결함).
+ * 항목 자체가 없는 행(표본 없음)은 이 함수를 쓰지 않는다 — 그 행은 각주 없는 ‘—’ 와 행 문장(판정 항목 없음)으로 그린다.
+ */
+export function cellCode(entry, r, k) {
+  const c = entry?.codes?.[r]?.[k];
+  return typeof c === 'string' && c ? c : 'missing';
+}
+/** 성능 항목 목록에서 **실제로 그리는** 칸 code 전부(각주용). 항목이 없는 행(null)은 세지 않는다(그 행의 ‘—’ 에는 기호가 없다). */
 export function codesUsed(entries = []) {
   const out = new Set();
-  for (const e of entries) for (const r of RES_ORDER) for (const k of USE_KEYS) { const c = e?.codes?.[r]?.[k]; if (c) out.add(c); }
+  for (const e of entries) { if (!e) continue; for (const r of RES_ORDER) for (const k of USE_KEYS) out.add(cellCode(e, r, k)); }
   return [...out];
 }
+/** 표본(판정 항목)이 없는 행의 칸 — 각주 기호 없는 ‘—’(못 읽음이 아니다 — 등록 경로가 없을 수도 있다). */
+export const NO_ENTRY_CELL = Object.freeze({ text: '—', mark: '', tone: 'idle', sort: '', title: '판정 항목 없음 — 아직 표본이 없습니다', judged: false });
+export const NO_ENTRY_FOOTNOTE = '기호 없는 ‘—’ 행은 **판정 항목 없음** — 이 서버의 표본이 아직 없습니다(꺼짐 · 첫 수집 전 · 등록 경로 없음 중 무엇인지는 행의 경로 칸과 수집 상세가 말합니다).';
 
 /** 서버 판정(verdict) code → 배지. 문구는 서버 VERDICT_LABEL 과 같은 낱말이다(화면 쪽 사본은 낱말뿐 — 판정이 아니다). */
 export const VERDICT_INFO = Object.freeze({
@@ -143,16 +154,18 @@ export const STATE_TEXT = Object.freeze({
 });
 
 /** 상태 칩 순서 — 사람이 먼저 손대야 하는 것부터. */
-const STATE_ORDER = ['auth', 'noneRead', 'noPath', 'stale', 'edgeStale', 'idracOnlyUnread', 'osOnlyUnread', 'idracOnly', 'osOnly', 'mismatch', 'partial', 'first', 'psiAbsent'];
+const STATE_ORDER = ['off', 'auth', 'noneRead', 'noPath', 'stale', 'edgeStale', 'idracOnlyUnread', 'osOnlyUnread', 'idracOnly', 'osOnly', 'mismatch', 'partial', 'first', 'psiAbsent'];
 
 /**
  * 한 서버의 상태 code 목록(서버 code 를 읽기만 — 판정하지 않는다).
  * @param {object} entry   성능 항목(목록·상세 공용)
  * @param {object} target  대상(paths — 등록된 경로)
- * @param {{authStops?:Array, snapAt?:number|null, staleMs?:number|null, now?:number}} o
+ * @param {{authStops?:Array, snapAt?:number|null, staleMs?:number|null, now?:number, off?:boolean}} o
  */
-export function rowStates(entry, target = {}, { authStops = [], snapAt = null, staleMs = null, now = Date.now() } = {}) {
+export function rowStates(entry, target = {}, { authStops = [], snapAt = null, staleMs = null, now = Date.now(), off = false } = {}) {
   const out = new Set();
+  // 꺼짐(반증 D4) — 이 노드(또는 그 엣지)의 수집이 꺼져 있다. 서버 설정의 enabled 를 그대로 쓴다(화면이 판정하지 않는다).
+  if (off) out.add('off');
   const key = t(target?.key ?? entry?.key);
   if (key && (authStops || []).some((a) => t(a?.key) === key)) out.add('auth');
   if (!entry) return STATE_ORDER.filter((s) => out.has(s));
@@ -289,20 +302,29 @@ export function boardItems(data = {}, edges = null) {
       out.push({ key: k, name: t(tg.name) || k, vcenterId: t(tg.vcenterId), target: tg, row: rowBy.get(k) || null, entry: perfBy.get(k) || null, ...extra });
     }
   };
-  add(data?.targets, data?.rows, data?.perf, { agent: '', snapAt: null, th: data?.perfThresholds || null });
+  // 꺼짐(반증 D4): 이 노드 수집이 꺼졌으면(데모는 켜진 것처럼 돈다 — 기존 emptyDiag 규약) · 엣지는 그 엣지가 보고한 enabledOnEdge === false.
+  add(data?.targets, data?.rows, data?.perf, { agent: '', snapAt: null, th: data?.perfThresholds || null, off: data?.enabled === false && !data?.demo });
   for (const e of (edges?.rows || [])) {
     if (!e?.snapAt) continue;
-    add(e.targets, e.rows, e.perf, { agent: t(e.agent), snapAt: n(e.snapAt), th: e.perfThresholds || null, perfTruncated: e.perfTruncated || null });
+    add(e.targets, e.rows, e.perf, { agent: t(e.agent), snapAt: n(e.snapAt), th: e.perfThresholds || null, perfTruncated: e.perfTruncated || null, off: e.enabledOnEdge === false });
   }
+  return out;
+}
+
+/** 인증 정지 목록 — 이 노드 것 + 엣지 보관분 것(반증 D6: 엣지 위임 서버의 ‘인증 정지’ 가 빠졌다). 엣지 목록은 서버가 이미 범위로 걸렀다. */
+export function allAuthStops(data = {}, edges = null) {
+  const out = [...(Array.isArray(data?.authStops) ? data.authStops : [])];
+  for (const e of (edges?.rows || [])) if (e?.snapAt && Array.isArray(e.authStops)) out.push(...e.authStops);
   return out;
 }
 
 /** 신뢰 띠 수(보이는 항목 기준 — 전부 서버 code 를 센 것). */
 export function trustCounts(items = [], { authStops = [], staleMs = null, now = Date.now() } = {}) {
-  const c = { total: items.length, both: 0, os: 0, idrac: 0, none: 0, noEntry: 0, read: 0, first: 0, unreadOs: 0, unreadIdrac: 0, psiAbsent: 0, stale: 0, auth: 0, edge: 0 };
+  const c = { total: items.length, off: 0, both: 0, os: 0, idrac: 0, none: 0, noEntry: 0, read: 0, first: 0, unreadOs: 0, unreadIdrac: 0, psiAbsent: 0, stale: 0, auth: 0, edge: 0 };
   for (const it of items) {
     const e = it.entry;
     if (it.agent) c.edge += 1;
+    if (it.off) c.off += 1;
     if ((authStops || []).some((a) => t(a?.key) === it.key)) c.auth += 1;
     if (!e) { c.noEntry += 1; continue; }
     const cov = COVERAGE_INFO[e.coverage] ? e.coverage : 'none';
@@ -318,8 +340,9 @@ export function trustCounts(items = [], { authStops = [], staleMs = null, now = 
   return c;
 }
 /** 신뢰 띠 문장 조각 — 0 인 칸은 빼고(‘못 읽음 0’ 을 늘어놓지 않는다), 경로 분포는 늘 적는다. */
-export function trustBandParts(c = {}, { intervalMs = null } = {}) {
+export function trustBandParts(c = {}, { intervalMs = null, corpOff = 0 } = {}) {
   const parts = [];
+  if (c.off) parts.push(`꺼짐 **${c.off}** — 수집이 꺼진 노드의 서버(값은 마지막 수집 기준)`);
   parts.push(`경로 — 둘 다 **${c.both || 0}** · OS 만 **${c.os || 0}** · iDRAC 만 **${c.idrac || 0}** · 없음 **${(c.none || 0) + (c.noEntry || 0)}**`);
   const iv = n(intervalMs);
   parts.push(`읽음 **${c.read || 0}/${c.total || 0}**${iv ? ` · 주기 ${Math.round(iv / 60_000)}분` : ''}`);
@@ -330,6 +353,7 @@ export function trustBandParts(c = {}, { intervalMs = null } = {}) {
   if (c.psiAbsent) parts.push(`PSI 없음 **${c.psiAbsent}** — 그 커널에 없음(못 읽음 아님)`);
   if (c.noEntry) parts.push(`판정 항목 없음 **${c.noEntry}** — 아직 표본이 없습니다`);
   if (c.edge) parts.push(`엣지 보관분 **${c.edge}**대 포함`);
+  if (n(corpOff)) parts.push(`꺼진 법인의 서버 **${n(corpOff)}**대는 표에 없습니다(법인 단위로 켭니다)`);
   return parts;
 }
 

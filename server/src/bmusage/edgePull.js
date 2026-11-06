@@ -18,6 +18,7 @@
  * ⚠ **꺼져 있어도 응답한다** — `enabled:false` 를 그대로 실어야 중앙이 '안 켰다' 와 '못 읽었다' 를
  *   구분한다(빈 응답을 주면 중앙 화면이 '모른다' 밖에 말할 수 없다. v2.517 `sendStatusOnly` 규약).
  */
+import { isMockMode } from '../mock/demo/flags.js'; // v2.920 데모 성능 열(응답 단계)
 import { config, currentVersion } from '../config.js';
 import { loadBmUsageSettings, bmUsageEnabled, enterpriseActive } from './settings.js';
 import { publicTarget } from './targets.js';
@@ -94,7 +95,9 @@ async function buildEnvelopeRaw({ limit = DEFAULT_LIMIT } = {}) {
   const targets = all.slice(0, cap);
   const keys = new Set(targets.map((x) => t(x.key)));
   // 최신값은 **대상 목록 안의 것만**(법인을 끄거나 등록이 사라진 서버의 옛 값이 새어 나가지 않게).
-  const rows0 = (latest || []).filter((r) => keys.has(t(r.key)));
+  const rows00 = (latest || []).filter((r) => keys.has(t(r.key)));
+  // v2.920(반증 D2): 데모(mock) 엣지는 데모 대상 성능 열을 봉투 단계에서만 겹친다(적재하지 않는다).
+  const rows0 = isMockMode() ? (await import('../mock/demo/baremetal.js')).demoPerfLatestRows(rows00, tg.targets || []) : rows00;
   const { perf, perfError } = await perfForRows(rows0, tg.targets || [], s, { full: true });
   const rows = rows0.map(stripJsonCols);
   return {
