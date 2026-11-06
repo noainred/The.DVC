@@ -1,0 +1,258 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>리눅스 베어메탈 성능 — 함대 보드</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Noto+Sans+KR:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+body{margin:0;background:#0a0e17;color:#e6edf6;font-family:Inter,"Noto Sans KR","Apple SD Gothic Neo",sans-serif;font-size:13px;line-height:1.45}
+a{color:#22d3ee}a:hover{color:#67e8f9}
+.card{background:linear-gradient(180deg,#141b2d,#111726);border:1px solid #243049;border-radius:12px;padding:16px 18px;box-shadow:0 4px 24px rgba(0,0,0,.4);min-width:0}
+.mono{font-family:"JetBrains Mono",ui-monospace,Menlo,monospace}
+.dim{color:#8b9bb4}
+.chip{display:inline-flex;align-items:center;gap:6px;padding:2px 9px;border-radius:999px;font-size:11.5px;font-weight:600;border:1px solid #243049;background:#0f1626;color:#8b9bb4;white-space:nowrap}
+.chip.ok{color:#4ade80;border-color:rgba(34,197,94,.35);background:rgba(34,197,94,.1)}
+.chip.warn{color:#fbbf24;border-color:rgba(245,158,11,.35);background:rgba(245,158,11,.1)}
+.chip.bad{color:#f87171;border-color:rgba(239,68,68,.35);background:rgba(239,68,68,.1)}
+.chip.info{color:#67e8f9;border-color:rgba(34,211,238,.3);background:rgba(34,211,238,.08)}
+.seg{display:inline-flex;border:1px solid #243049;border-radius:8px;overflow:hidden;background:#0f1626}
+.seg button{min-height:34px;padding:0 14px;border:0;background:transparent;color:#8b9bb4;font:inherit;font-weight:600;cursor:pointer}
+.seg button.on{background:#1a2236;color:#e6edf6;box-shadow:inset 0 -2px 0 #22d3ee}
+.btn{min-height:36px;padding:0 14px;border-radius:8px;border:1px solid #243049;background:#1a2236;color:#e6edf6;font:inherit;font-weight:600;cursor:pointer}
+.btn.primary{background:#3b82f6;border-color:#3b82f6;color:#fff}
+.sel{min-height:36px;padding:0 12px;border-radius:8px;border:1px solid #243049;background:#0f1626;color:#e6edf6;font:inherit}
+table{border-collapse:separate;border-spacing:0;width:100%}
+th{font-size:11.5px;font-weight:600;color:#8b9bb4;text-align:left;padding:6px 8px;border-bottom:1px solid #243049;background:#0f1626;white-space:nowrap;cursor:pointer}
+td{padding:7px 8px;border-bottom:1px solid #1f2a40;vertical-align:middle;white-space:nowrap}
+.u{display:inline-block;min-width:44px;text-align:center;padding:3px 6px;border-radius:6px;font-weight:600;font-size:12px;border:1px solid transparent}
+.u.ok{background:rgba(34,197,94,.14);color:#4ade80}
+.u.warn{background:rgba(245,158,11,.16);color:#fbbf24}
+.u.bad{background:rgba(239,68,68,.18);color:#f87171}
+.u.none{background:transparent;color:#8b9bb4;border:1px dashed #243049}
+.kpi .label{color:#8b9bb4;font-size:12px;font-weight:600;letter-spacing:.5px}
+.kpi .value{font-size:30px;font-weight:800;margin-top:6px;line-height:1;text-align:center}
+.kpi .meta{font-size:12px;color:#8b9bb4;margin-top:8px}
+</style>
+</helmet>
+<div style="box-sizing:border-box;max-width:1680px;margin:0 auto;padding:18px 24px 40px;display:flex;flex-direction:column;gap:14px">
+
+  <!-- 머리: 제목 · 범위 · 보기 · 수집 -->
+  <div style="display:flex;flex-wrap:wrap;align-items:center;gap:12px">
+    <div style="display:flex;flex-direction:column;gap:2px;min-width:0">
+      <div style="font-size:12px;color:#8b9bb4">특수 기능 › 서버 분석 › <b style="color:#e6edf6">리눅스 베어메탈 성능</b></div>
+      <h1 style="margin:0;font-size:20px;font-weight:700;letter-spacing:-.01em">리눅스 베어메탈 성능 · 병목 진단</h1>
+    </div>
+    <div style="flex:1 1 20px"></div>
+    <label style="display:flex;align-items:center;gap:8px;font-size:12px;color:#8b9bb4">범위
+      <select class="sel" aria-label="법인 범위"><option>전체 법인 (켠 6곳)</option><option>KR-SEL</option><option>PL-WAW</option><option>US-EAST</option></select>
+    </label>
+    <div class="seg" role="group" aria-label="보기">
+      <button class="on" type="button">보드</button><button type="button">USE 매트릭스</button><button type="button">튜닝 점검</button><button type="button">표</button>
+    </div>
+    <div class="seg" role="group" aria-label="기간">
+      <button class="on" type="button">지금</button><button type="button">24시간</button><button type="button">7일</button><button type="button">30일</button>
+    </div>
+    <button class="btn" type="button">지금 수집</button>
+    <button class="btn" type="button">CSV</button>
+  </div>
+
+  <!-- 신뢰 띠: 이 숫자를 믿어도 되는가 -->
+  <div class="card" style="padding:10px 16px;display:flex;flex-wrap:wrap;align-items:center;gap:10px 18px;font-size:12.5px">
+    <span class="chip info">엣지 보관분 · 중앙이 방금 당겨옴</span>
+    <span><b>켠 법인 6/28</b> <span class="dim">· 대상 213대 (Linux)</span></span>
+    <span><b>이번 주기 읽음 207</b> <span class="dim">· 주기 5분 (API 값) · 가장 오래된 읽음 4분 전</span></span>
+    <span class="chip">첫 주기 3 — 다음 주기부터 값</span>
+    <span class="chip warn">못 읽음 3 — 시한 초과 2 · SSH 거부 1</span>
+    <span class="chip">PSI 없음 41 — 커널 4.20 미만</span>
+    <span style="flex:1 1 20px"></span>
+    <a href="#" style="font-weight:600">못 읽은 서버 · 이유 보기</a>
+  </div>
+
+  <!-- KPI 5 -->
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(min(200px,100%),1fr));gap:14px">
+    <div class="card kpi"><div class="label">병목 의심</div><div class="value" style="color:#f87171">7</div><div class="meta">포화 + 오류 동반 · 213대 중</div></div>
+    <div class="card kpi"><div class="label">포화 (자원별)</div><div class="value" style="color:#fbbf24">12</div><div class="meta">CPU 3 · 메모리 1 · 디스크 6 · 네트워크 2</div></div>
+    <div class="card kpi"><div class="label">오류 카운트 증가</div><div class="value" style="color:#fbbf24">4</div><div class="meta">NIC drop 2 · 디스크 I/O 오류 1 · MCE 1</div></div>
+    <div class="card kpi"><div class="label">튜닝 권고</div><div class="value">31<small style="font-size:14px;color:#8b9bb4;font-weight:600"> 건</small></div><div class="meta">58대 · swappiness 19 · THP 14 · governor 9 …</div></div>
+    <div class="card kpi"><div class="label">정상</div><div class="value" style="color:#4ade80">190</div><div class="meta">세 칸(U·S·E) 모두 기준 아래</div></div>
+  </div>
+
+  <!-- 본문 2열: USE 매트릭스 + 병목 Top -->
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(min(560px,100%),1fr));gap:14px;align-items:start">
+
+    <div class="card" style="grid-column:span 1;min-width:0">
+      <div style="display:flex;flex-wrap:wrap;align-items:baseline;gap:8px 12px;margin-bottom:10px">
+        <h2 style="margin:0;font-size:15px;font-weight:700">USE 매트릭스 — 자원 × (사용률 · 포화 · 오류)</h2>
+        <span class="dim" style="font-size:12px">심각도 순 상위 10 · 나머지 203대는 ‘표’ 보기</span>
+      </div>
+      <div style="overflow-x:auto">
+      <table>
+        <thead><tr>
+          <th rowspan="2" style="vertical-align:bottom">서버</th><th rowspan="2" style="vertical-align:bottom">법인</th>
+          <th colspan="3" style="text-align:center">CPU</th><th colspan="3" style="text-align:center">메모리</th><th colspan="3" style="text-align:center">디스크</th><th colspan="3" style="text-align:center">네트워크</th>
+          <th rowspan="2" style="vertical-align:bottom">판정 한 줄</th>
+        </tr><tr>
+          <th>U</th><th>S</th><th>E</th><th>U</th><th>S</th><th>E</th><th>U</th><th>S</th><th>E</th><th>U</th><th>S</th><th>E</th>
+        </tr></thead>
+        <tbody>
+          <tr><td><a href="Server.dc.html" style="font-weight:600">bm-kr1-db01</a></td><td class="dim">KR-SEL</td>
+            <td><span class="u warn">62%</span></td><td><span class="u ok">0.3</span></td><td><span class="u ok">0</span></td>
+            <td><span class="u ok">71%</span></td><td><span class="u ok">0/s</span></td><td><span class="u ok">0</span></td>
+            <td><span class="u bad">94%</span></td><td><span class="u bad">9.2</span></td><td><span class="u ok">0</span></td>
+            <td><span class="u ok">23%</span></td><td><span class="u ok">0</span></td><td><span class="u ok">0</span></td>
+            <td>디스크 포화 — nvme1n1 await 18ms · PSI io full 12%</td></tr>
+          <tr><td><a href="Server.dc.html" style="font-weight:600">bm-pl1-app03</a></td><td class="dim">PL-WAW</td>
+            <td><span class="u bad">97%</span></td><td><span class="u bad">2.1</span></td><td><span class="u ok">0</span></td>
+            <td><span class="u ok">44%</span></td><td><span class="u ok">0/s</span></td><td><span class="u ok">0</span></td>
+            <td><span class="u ok">12%</span></td><td><span class="u ok">0.1</span></td><td><span class="u ok">0</span></td>
+            <td><span class="u ok">8%</span></td><td><span class="u ok">0</span></td><td><span class="u ok">0</span></td>
+            <td>CPU 포화 — 런큐 34 / 16코어 · PSI cpu some 41%</td></tr>
+          <tr><td><a href="Server.dc.html" style="font-weight:600">bm-us1-cache02</a></td><td class="dim">US-EAST</td>
+            <td><span class="u ok">31%</span></td><td><span class="u ok">0.2</span></td><td><span class="u ok">0</span></td>
+            <td><span class="u bad">96%</span></td><td><span class="u bad">412/s</span></td><td><span class="u ok">0</span></td>
+            <td><span class="u warn">61%</span></td><td><span class="u ok">0.8</span></td><td><span class="u ok">0</span></td>
+            <td><span class="u ok">17%</span></td><td><span class="u ok">0</span></td><td><span class="u ok">0</span></td>
+            <td>메모리 포화 — 스왑아웃 412/s · 주요 폴트 ↑ · PSI mem full 7%</td></tr>
+          <tr><td><a href="Server.dc.html" style="font-weight:600">bm-kr1-fs02</a></td><td class="dim">KR-SEL</td>
+            <td><span class="u ok">18%</span></td><td><span class="u ok">0.1</span></td><td><span class="u ok">0</span></td>
+            <td><span class="u ok">52%</span></td><td><span class="u ok">0/s</span></td><td><span class="u ok">0</span></td>
+            <td><span class="u ok">40%</span></td><td><span class="u ok">0.6</span></td><td><span class="u ok">0</span></td>
+            <td><span class="u bad">91%</span></td><td><span class="u warn">드롭 ↑</span></td><td><span class="u bad">+1.2k</span></td>
+            <td>네트워크 포화 — bond0 9.1/10G · rx_dropped +1.2k/5분</td></tr>
+          <tr><td><a href="Server.dc.html" style="font-weight:600">bm-pl1-db02</a></td><td class="dim">PL-WAW</td>
+            <td><span class="u ok">27%</span></td><td><span class="u ok">0.2</span></td><td><span class="u bad">MCE 1</span></td>
+            <td><span class="u ok">63%</span></td><td><span class="u ok">0/s</span></td><td><span class="u ok">0</span></td>
+            <td><span class="u warn">58%</span></td><td><span class="u ok">0.4</span></td><td><span class="u ok">0</span></td>
+            <td><span class="u ok">11%</span></td><td><span class="u ok">0</span></td><td><span class="u ok">0</span></td>
+            <td>오류 — dmesg MCE 1건 (하드웨어 점검 권고)</td></tr>
+          <tr><td><a href="Server.dc.html" style="font-weight:600">bm-us1-app07</a></td><td class="dim">US-EAST</td>
+            <td><span class="u warn">78%</span></td><td><span class="u warn">1.1</span></td><td><span class="u ok">0</span></td>
+            <td><span class="u ok">49%</span></td><td><span class="u ok">0/s</span></td><td><span class="u ok">0</span></td>
+            <td><span class="u ok">9%</span></td><td><span class="u ok">0.1</span></td><td><span class="u ok">0</span></td>
+            <td><span class="u ok">21%</span></td><td><span class="u ok">0</span></td><td><span class="u ok">0</span></td>
+            <td>CPU 경계 — iowait 0% · steal 0% · governor powersave</td></tr>
+          <tr><td><a href="Server.dc.html" style="font-weight:600">bm-kr1-bk01</a></td><td class="dim">KR-SEL</td>
+            <td><span class="u ok">22%</span></td><td><span class="u ok">0.1</span></td><td><span class="u ok">0</span></td>
+            <td><span class="u ok">37%</span></td><td><span class="u ok">0/s</span></td><td><span class="u ok">0</span></td>
+            <td><span class="u bad">99%</span></td><td><span class="u warn">3.4</span></td><td><span class="u ok">0</span></td>
+            <td><span class="u warn">64%</span></td><td><span class="u ok">0</span></td><td><span class="u ok">0</span></td>
+            <td>디스크 포화 — 백업 창(02:00~05:00) 한정 · 평소 12%</td></tr>
+          <tr><td><a href="Server.dc.html" style="font-weight:600">bm-pl1-web04</a></td><td class="dim">PL-WAW</td>
+            <td><span class="u ok">35%</span></td><td><span class="u none">—</span></td><td><span class="u ok">0</span></td>
+            <td><span class="u ok">58%</span></td><td><span class="u none">—</span></td><td><span class="u ok">0</span></td>
+            <td><span class="u ok">21%</span></td><td><span class="u none">—</span></td><td><span class="u ok">0</span></td>
+            <td><span class="u ok">14%</span></td><td><span class="u ok">0</span></td><td><span class="u ok">0</span></td>
+            <td class="dim">포화 칸 없음 — 커널 4.18 (PSI 없음 · 런큐·스왑으로만 판정)</td></tr>
+          <tr><td><a href="Server.dc.html" style="font-weight:600">bm-us1-db05</a></td><td class="dim">US-EAST</td>
+            <td><span class="u none">—</span></td><td><span class="u none">—</span></td><td><span class="u none">—</span></td>
+            <td><span class="u none">—</span></td><td><span class="u none">—</span></td><td><span class="u none">—</span></td>
+            <td><span class="u none">—</span></td><td><span class="u none">—</span></td><td><span class="u none">—</span></td>
+            <td><span class="u none">—</span></td><td><span class="u none">—</span></td><td><span class="u none">—</span></td>
+            <td class="dim">첫 주기 — 누적 카운터 차이가 필요 (다음 주기부터)</td></tr>
+          <tr><td><a href="Server.dc.html" style="font-weight:600">bm-kr1-gw01</a></td><td class="dim">KR-SEL</td>
+            <td><span class="u none">—</span></td><td><span class="u none">—</span></td><td><span class="u none">—</span></td>
+            <td><span class="u none">—</span></td><td><span class="u none">—</span></td><td><span class="u none">—</span></td>
+            <td><span class="u none">—</span></td><td><span class="u none">—</span></td><td><span class="u none">—</span></td>
+            <td><span class="u none">—</span></td><td><span class="u none">—</span></td><td><span class="u none">—</span></td>
+            <td class="dim">못 읽음 — SSH 시한 초과 (50초 예산) · 직전 값 23분 전</td></tr>
+        </tbody>
+      </table>
+      </div>
+      <div class="dim" style="font-size:11.5px;margin-top:10px;line-height:1.6">
+        U = 사용률(가장 높은 장치·회선 기준) · S = 포화(CPU 런큐/코어, 메모리 스왑아웃/s, 디스크 대기열 깊이, 네트워크 드롭) · E = 오류 카운트의 5분 증가분.
+        ‘—’ 는 0 이 아니라 못 읽음·첫 주기·그 커널에 없음이다 — 행 끝 문장이 이유를 말한다. 정렬은 머리글 클릭.
+      </div>
+    </div>
+
+    <div style="display:flex;flex-direction:column;gap:14px;min-width:0">
+      <div class="card">
+        <div style="display:flex;align-items:baseline;gap:10px;margin-bottom:10px">
+          <h2 style="margin:0;font-size:15px;font-weight:700">병목 Top — 판정과 근거</h2>
+          <span class="dim" style="font-size:12px">포화 + 오류가 같이 있는 서버 먼저</span>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:8px">
+          <div style="display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:10px;align-items:center;padding:10px 12px;border:1px solid #243049;border-radius:10px;background:#0f1626">
+            <span class="chip bad">디스크</span>
+            <div style="min-width:0"><div><a href="Server.dc.html" style="font-weight:700;color:#e6edf6">bm-kr1-db01</a> <span class="dim">KR-SEL · 32코어 · NVMe×2</span></div>
+              <div class="dim" style="font-size:12px">nvme1n1 busy 94% · await 18ms · 대기열 9.2 · PSI io full 12% — 사용률과 포화가 같이 높다. CPU iowait 11%.</div></div>
+            <span class="chip">진단 스냅샷 →</span>
+          </div>
+          <div style="display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:10px;align-items:center;padding:10px 12px;border:1px solid #243049;border-radius:10px;background:#0f1626">
+            <span class="chip bad">CPU</span>
+            <div style="min-width:0"><div><a href="Server.dc.html" style="font-weight:700;color:#e6edf6">bm-pl1-app03</a> <span class="dim">PL-WAW · 16코어</span></div>
+              <div class="dim" style="font-size:12px">사용률 97% · 런큐 34 (코어 16 의 2.1배) · PSI cpu some 41% · steal 0% — 코어 부족 또는 런어웨이 프로세스.</div></div>
+            <span class="chip">진단 스냅샷 →</span>
+          </div>
+          <div style="display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:10px;align-items:center;padding:10px 12px;border:1px solid #243049;border-radius:10px;background:#0f1626">
+            <span class="chip bad">메모리</span>
+            <div style="min-width:0"><div><a href="Server.dc.html" style="font-weight:700;color:#e6edf6">bm-us1-cache02</a> <span class="dim">US-EAST · 128GB</span></div>
+              <div class="dim" style="font-size:12px">사용 96% · 스왑아웃 412/s · 주요 폴트 180/s · PSI mem full 7% — 스왑이 실제로 돌고 있다(swappiness 60).</div></div>
+            <span class="chip">진단 스냅샷 →</span>
+          </div>
+          <div style="display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:10px;align-items:center;padding:10px 12px;border:1px solid #243049;border-radius:10px;background:#0f1626">
+            <span class="chip warn">네트워크</span>
+            <div style="min-width:0"><div><a href="Server.dc.html" style="font-weight:700;color:#e6edf6">bm-kr1-fs02</a> <span class="dim">KR-SEL · bond0 10G</span></div>
+              <div class="dim" style="font-size:12px">9.1Gbps / 10G · rx_dropped +1,204 (5분) · TCP 재전송 2.3% — 회선 포화에 드롭이 따라온다.</div></div>
+            <span class="chip">진단 스냅샷 →</span>
+          </div>
+        </div>
+        <div class="dim" style="font-size:11.5px;margin-top:10px">판정 기준(사용률 90% · 런큐/코어 1.0 · 대기열 2 · PSI full 5%)은 설정값이고 API 가 내려준다 — 화면에 박지 않는다.</div>
+      </div>
+
+      <div class="card">
+        <div style="display:flex;align-items:baseline;gap:10px;margin-bottom:6px">
+          <h2 style="margin:0;font-size:15px;font-weight:700">포화 서버 수 — 24시간</h2>
+          <span class="dim" style="font-size:12px">5분 주기 · 자원별 · 엣지 보관분</span>
+        </div>
+        <svg viewBox="0 0 640 170" role="img" aria-label="24시간 동안 자원별 포화 서버 수 추이: 디스크가 새벽 2시부터 5시 사이에 6대까지 오르고 그 밖의 시간은 1~2대, CPU 는 하루 종일 2~3대" style="width:100%;height:auto;display:block">
+          <line x1="40" y1="20" x2="40" y2="140" stroke="#243049"/><line x1="40" y1="140" x2="630" y2="140" stroke="#243049"/>
+          <line x1="40" y1="100" x2="630" y2="100" stroke="#1f2a40"/><line x1="40" y1="60" x2="630" y2="60" stroke="#1f2a40"/>
+          <text x="34" y="144" fill="#8b9bb4" font-size="11" text-anchor="end">0</text><text x="34" y="104" fill="#8b9bb4" font-size="11" text-anchor="end">4</text><text x="34" y="64" fill="#8b9bb4" font-size="11" text-anchor="end">8</text>
+          <text x="40" y="160" fill="#8b9bb4" font-size="11">13:40 어제</text><text x="335" y="160" fill="#8b9bb4" font-size="11" text-anchor="middle">02:00</text><text x="630" y="160" fill="#8b9bb4" font-size="11" text-anchor="end">13:35 오늘</text>
+          <polyline fill="none" stroke="#3b82f6" stroke-width="2" stroke-linejoin="round" points="40,120 90,120 140,110 190,120 240,120 290,110 340,110 390,120 440,120 490,110 540,110 590,110 630,110"/>
+          <polyline fill="none" stroke="#f59e0b" stroke-width="2" stroke-linejoin="round" points="40,130 90,130 140,130 190,130 240,125 290,90 320,80 340,80 360,85 390,100 420,125 440,130 490,130 540,125 590,120 630,80"/>
+          <polyline fill="none" stroke="#22d3ee" stroke-width="2" stroke-linejoin="round" points="40,135 90,135 140,135 190,135 240,135 290,135 340,135 390,135 440,135 490,130 540,130 590,130 630,130"/>
+          <polyline fill="none" stroke="#a855f7" stroke-width="2" stroke-linejoin="round" points="40,135 90,135 140,130 190,135 240,135 290,135 340,135 390,135 440,135 490,135 540,130 590,120 630,120"/>
+          <line x1="630" y1="20" x2="630" y2="140" stroke="#8b9bb4" stroke-dasharray="3 3"/>
+          <text x="626" y="30" fill="#e6edf6" font-size="11" text-anchor="end">지금 · 디스크 6</text>
+        </svg>
+        <div style="display:flex;flex-wrap:wrap;gap:14px;font-size:12px;margin-top:4px">
+          <span><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:#3b82f6;vertical-align:-1px"></span> CPU</span>
+          <span><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:#f59e0b;vertical-align:-1px"></span> 디스크</span>
+          <span><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:#22d3ee;vertical-align:-1px"></span> 메모리</span>
+          <span><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:#a855f7;vertical-align:-1px"></span> 네트워크</span>
+          <span class="dim">· 못 읽은 주기는 선을 끊는다(0 으로 그리지 않음)</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 튜닝 권고 요약 띠 -->
+  <div class="card">
+    <div style="display:flex;flex-wrap:wrap;align-items:baseline;gap:8px 12px;margin-bottom:10px">
+      <h2 style="margin:0;font-size:15px;font-weight:700">튜닝 포인트 — 항목별 해당 서버 수</h2>
+      <span class="dim" style="font-size:12px">현재값은 sysctl · /sys 에서 읽은 것 · 권장값은 설정에서 역할별로 정한다 · 자동 적용 없음(읽기 전용)</span>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(min(230px,100%),1fr));gap:10px">
+      <div style="border:1px solid #243049;border-radius:10px;padding:10px 12px;background:#0f1626"><div class="mono" style="font-size:12px">vm.swappiness</div><div style="font-size:20px;font-weight:700;margin-top:2px">19<span class="dim" style="font-size:12px;font-weight:500"> 대 · 60 → 10 (DB 역할)</span></div></div>
+      <div style="border:1px solid #243049;border-radius:10px;padding:10px 12px;background:#0f1626"><div class="mono" style="font-size:12px">transparent_hugepage</div><div style="font-size:20px;font-weight:700;margin-top:2px">14<span class="dim" style="font-size:12px;font-weight:500"> 대 · always → madvise</span></div></div>
+      <div style="border:1px solid #243049;border-radius:10px;padding:10px 12px;background:#0f1626"><div class="mono" style="font-size:12px">cpufreq governor</div><div style="font-size:20px;font-weight:700;margin-top:2px">9<span class="dim" style="font-size:12px;font-weight:500"> 대 · powersave → performance</span></div></div>
+      <div style="border:1px solid #243049;border-radius:10px;padding:10px 12px;background:#0f1626"><div class="mono" style="font-size:12px">I/O scheduler (NVMe)</div><div style="font-size:20px;font-weight:700;margin-top:2px">5<span class="dim" style="font-size:12px;font-weight:500"> 대 · mq-deadline → none</span></div></div>
+      <div style="border:1px solid #243049;border-radius:10px;padding:10px 12px;background:#0f1626"><div class="mono" style="font-size:12px">irqbalance</div><div style="font-size:20px;font-weight:700;margin-top:2px">6<span class="dim" style="font-size:12px;font-weight:500"> 대 · 미실행 → 실행 (NIC 10G)</span></div></div>
+      <div style="border:1px solid #243049;border-radius:10px;padding:10px 12px;background:#0f1626"><div class="mono" style="font-size:12px">net.core.somaxconn</div><div style="font-size:20px;font-weight:700;margin-top:2px">3<span class="dim" style="font-size:12px;font-weight:500"> 대 · 128 → 4096 (웹 역할)</span></div></div>
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1180}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,177 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>서버 상세 — 400 폭</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Noto+Sans+KR:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+body{margin:0;background:#0a0e17;color:#e6edf6;font-family:Inter,"Noto Sans KR","Apple SD Gothic Neo",sans-serif;font-size:13px;line-height:1.45}
+a{color:#22d3ee}a:hover{color:#67e8f9}
+.card{background:linear-gradient(180deg,#141b2d,#111726);border:1px solid #243049;border-radius:12px;padding:12px 14px;box-shadow:0 4px 24px rgba(0,0,0,.4);min-width:0}
+.mono{font-family:"JetBrains Mono",ui-monospace,Menlo,monospace}
+.dim{color:#8b9bb4}
+.chip{display:inline-flex;align-items:center;gap:6px;padding:2px 9px;border-radius:999px;font-size:11.5px;font-weight:600;border:1px solid #243049;background:#0f1626;color:#8b9bb4;white-space:nowrap}
+.chip.ok{color:#4ade80;border-color:rgba(34,197,94,.35);background:rgba(34,197,94,.1)}
+.chip.warn{color:#fbbf24;border-color:rgba(245,158,11,.35);background:rgba(245,158,11,.1)}
+.chip.bad{color:#f87171;border-color:rgba(239,68,68,.35);background:rgba(239,68,68,.1)}
+.chip.info{color:#67e8f9;border-color:rgba(34,211,238,.3);background:rgba(34,211,238,.08)}
+.seg{display:inline-flex;border:1px solid #243049;border-radius:8px;overflow:hidden;background:#0f1626}
+.seg button{min-height:40px;padding:0 12px;border:0;background:transparent;color:#8b9bb4;font:inherit;font-weight:600;cursor:pointer}
+.seg button.on{background:#1a2236;color:#e6edf6;box-shadow:inset 0 -2px 0 #22d3ee}
+.btn{min-height:44px;padding:0 14px;border-radius:8px;border:1px solid #243049;background:#1a2236;color:#e6edf6;font:inherit;font-weight:600;cursor:pointer;flex:1 1 auto}
+.btn.primary{background:#3b82f6;border-color:#3b82f6;color:#fff}
+.use{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px;margin-top:8px}
+.use div{border:1px solid #243049;border-radius:8px;padding:6px 8px;background:#0f1626;min-width:0}
+.use .h{font-size:10.5px;color:#8b9bb4;font-weight:600;letter-spacing:.04em}
+.use .v{font-size:17px;font-weight:700;margin-top:2px;line-height:1.1}
+.use .s{font-size:11px;color:#8b9bb4;margin-top:3px;overflow-wrap:anywhere}
+.ok{color:#4ade80}.warn{color:#fbbf24}.bad{color:#f87171}
+table{border-collapse:separate;border-spacing:0;width:100%}
+th{font-size:11px;font-weight:600;color:#8b9bb4;text-align:left;padding:5px 6px;border-bottom:1px solid #243049;background:#0f1626;white-space:nowrap}
+td{padding:6px 6px;border-bottom:1px solid #1f2a40;vertical-align:top;white-space:nowrap;font-size:12px}
+</style>
+</helmet>
+<div style="box-sizing:border-box;max-width:1680px;margin:0 auto;padding:12px 16px 32px;display:flex;flex-direction:column;gap:10px">
+
+  <div style="font-size:12px;color:#8b9bb4;overflow-wrap:anywhere"><a href="Main.dc.html">베어메탈 성능</a> › KR-SEL</div>
+  <h1 style="margin:0;font-size:18px;font-weight:700;display:flex;flex-wrap:wrap;align-items:center;gap:8px">bm-kr1-db01 <span class="chip bad">디스크 포화</span></h1>
+  <div class="dim" style="font-size:12px;overflow-wrap:anywhere">Rocky 9.4 · 32코어 · 256GB · 역할 DB · 출처 OS(SSH) · 13:35 (4분 전)</div>
+
+  <div style="display:flex;flex-wrap:wrap;gap:8px">
+    <div class="seg" role="group" aria-label="기간" style="flex:1 1 100%"><button class="on" type="button" style="flex:1">24시간</button><button type="button" style="flex:1">7일</button><button type="button" style="flex:1">30일</button><button type="button" style="flex:1">1년</button></div>
+    <button class="btn primary" type="button">진단 스냅샷 실행</button>
+    <button class="btn" type="button">지금 수집</button>
+  </div>
+
+  <div class="card" style="border-color:rgba(239,68,68,.4)">
+    <span class="chip bad">판정</span>
+    <div style="margin-top:6px"><b>디스크 포화</b> — nvme1n1 busy 94% · await 18ms · 대기열 9.2 · PSI io full 12%. CPU iowait 11%.</div>
+  </div>
+
+  <div class="card">
+    <div style="display:flex;align-items:baseline;gap:8px"><h2 style="margin:0;font-size:14px;font-weight:700">CPU</h2><span class="chip ok">정상</span></div>
+    <div style="display:flex;gap:12px;align-items:flex-end;margin-top:8px">
+      <div><div style="font-size:26px;font-weight:800;line-height:1" class="warn">62%</div><div class="dim" style="font-size:11px;margin-top:3px">사용률</div></div>
+      <div style="flex:1 1 0;min-width:0">
+        <div style="display:flex;height:12px;border-radius:6px;overflow:hidden;background:#1a2236;gap:2px"><span style="width:41%;background:#3b82f6"></span><span style="width:9%;background:#22d3ee"></span><span style="width:11%;background:#f59e0b"></span><span style="width:1%;background:#a855f7"></span></div>
+        <div class="dim" style="font-size:11px;margin-top:4px;overflow-wrap:anywhere">user 41 · sys 9 · iowait 11 · irq 1 · steal 0</div>
+      </div>
+    </div>
+    <div class="use">
+      <div><div class="h">U</div><div class="v warn">62%</div><div class="s">최고 코어 97%</div></div>
+      <div><div class="h">S</div><div class="v ok">0.3</div><div class="s">load 9.8 ÷ 32 · PSI 4%</div></div>
+      <div><div class="h">E</div><div class="v ok">0</div><div class="s">MCE 0</div></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div style="display:flex;align-items:baseline;gap:8px"><h2 style="margin:0;font-size:14px;font-weight:700">메모리</h2><span class="chip ok">정상</span></div>
+    <div style="display:flex;gap:12px;align-items:flex-end;margin-top:8px">
+      <div><div style="font-size:26px;font-weight:800;line-height:1" class="ok">71%</div><div class="dim" style="font-size:11px;margin-top:3px">사용</div></div>
+      <div style="flex:1 1 0;min-width:0">
+        <div style="display:flex;height:12px;border-radius:6px;overflow:hidden;background:#1a2236;gap:2px"><span style="width:52%;background:#3b82f6"></span><span style="width:19%;background:#22d3ee"></span></div>
+        <div class="dim" style="font-size:11px;margin-top:4px;overflow-wrap:anywhere">앱 133GB · 캐시 49GB · 가용 74GB · 스왑 0.4/16GB</div>
+      </div>
+    </div>
+    <div class="use">
+      <div><div class="h">U</div><div class="v ok">71%</div><div class="s">182/256GB</div></div>
+      <div><div class="h">S</div><div class="v ok">0/s</div><div class="s">스왑아웃 0 · 폴트 2/s</div></div>
+      <div><div class="h">E</div><div class="v ok">0</div><div class="s">OOM 0</div></div>
+    </div>
+    <div class="dim" style="font-size:11.5px;margin-top:8px;overflow-wrap:anywhere">권고 2 — swappiness 60→10 · THP always→madvise</div>
+  </div>
+
+  <div class="card" style="border-color:rgba(239,68,68,.4)">
+    <div style="display:flex;align-items:baseline;gap:8px"><h2 style="margin:0;font-size:14px;font-weight:700">디스크</h2><span class="chip bad">포화 — 병목</span></div>
+    <div style="overflow-x:auto;margin-top:8px">
+      <table>
+        <thead><tr><th>장치</th><th>busy</th><th>await</th><th>IOPS</th><th>대기열</th><th>오류</th></tr></thead>
+        <tbody>
+          <tr style="background:rgba(239,68,68,.08)"><td class="mono">nvme1n1</td><td class="bad"><b>94%</b></td><td class="bad"><b>18ms</b></td><td>4.1k</td><td class="bad"><b>9.2</b></td><td class="ok">0</td></tr>
+          <tr><td class="mono">nvme0n1</td><td class="ok">21%</td><td class="ok">0.4ms</td><td>1.0k</td><td class="ok">0.3</td><td class="ok">0</td></tr>
+          <tr><td class="mono">sda</td><td class="ok">2%</td><td class="ok">3.1ms</td><td>15</td><td class="ok">0.0</td><td class="ok">0</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="use">
+      <div><div class="h">U</div><div class="v bad">94%</div><div class="s">가장 바쁜 장치</div></div>
+      <div><div class="h">S</div><div class="v bad">9.2</div><div class="s">PSI io full 12%</div></div>
+      <div><div class="h">E</div><div class="v ok">0</div><div class="s">I/O error 0</div></div>
+    </div>
+    <div class="dim" style="font-size:11.5px;margin-top:8px">공간: / 41% · /data 78% · /backup 12%</div>
+  </div>
+
+  <div class="card">
+    <div style="display:flex;align-items:baseline;gap:8px"><h2 style="margin:0;font-size:14px;font-weight:700">네트워크</h2><span class="chip ok">정상</span></div>
+    <div style="overflow-x:auto;margin-top:8px">
+      <table>
+        <thead><tr><th>인터페이스</th><th>속도</th><th>rx/tx</th><th>사용률</th><th>drop</th><th>err</th></tr></thead>
+        <tbody>
+          <tr><td class="mono">bond0</td><td>10G×2</td><td>2.3/0.9G</td><td class="ok">23%</td><td class="ok">0</td><td class="ok">0</td></tr>
+          <tr><td class="mono">eno1</td><td>10G</td><td>1.2/0.5G</td><td class="ok">12%</td><td class="ok">0</td><td class="ok">0</td></tr>
+          <tr><td class="mono">eno2</td><td>10G</td><td>1.1/0.4G</td><td class="ok">11%</td><td class="ok">0</td><td class="ok">0</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="use">
+      <div><div class="h">U</div><div class="v ok">23%</div><div class="s">물리 회선 최고</div></div>
+      <div><div class="h">S</div><div class="v ok">0</div><div class="s">드롭 0 · 재전송 0.8%</div></div>
+      <div><div class="h">E</div><div class="v ok">0</div><div class="s">errors 0</div></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2 style="margin:0;font-size:14px;font-weight:700">24시간 — 디스크 busy · PSI io full (%)</h2>
+    <svg viewBox="0 0 360 150" role="img" aria-label="24시간 nvme1n1 busy 와 PSI io full 추이 — 새벽 2~5시와 12시 이후 두 번 포화" style="width:100%;height:auto;display:block;margin-top:6px">
+      <line x1="28" y1="10" x2="28" y2="120" stroke="#243049"/><line x1="28" y1="120" x2="352" y2="120" stroke="#243049"/>
+      <line x1="28" y1="22" x2="352" y2="22" stroke="#f87171" stroke-dasharray="3 4" opacity=".6"/>
+      <text x="24" y="124" fill="#8b9bb4" font-size="10" text-anchor="end">0</text><text x="24" y="26" fill="#8b9bb4" font-size="10" text-anchor="end">90</text>
+      <text x="28" y="140" fill="#8b9bb4" font-size="10">13:40 어제</text><text x="352" y="140" fill="#8b9bb4" font-size="10" text-anchor="end">13:35</text>
+      <polyline fill="none" stroke="#f59e0b" stroke-width="2" stroke-linejoin="round" points="28,92 60,90 90,94 120,90 150,88 170,48 190,26 210,24 230,30 250,54 270,84 290,86 310,46 330,26 352,22"/>
+      <polyline fill="none" stroke="#a855f7" stroke-width="2" stroke-linejoin="round" points="28,118 60,118 90,118 120,118 150,116 170,110 190,104 210,102 230,106 250,112 270,118"/>
+      <polyline fill="none" stroke="#a855f7" stroke-width="2" stroke-linejoin="round" points="290,118 310,108 330,102 352,100"/>
+    </svg>
+    <div style="display:flex;flex-wrap:wrap;gap:10px;font-size:11.5px;margin-top:4px">
+      <span><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:#f59e0b;vertical-align:-1px"></span> busy %</span>
+      <span><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:#a855f7;vertical-align:-1px"></span> PSI io full %</span>
+      <span class="dim">· 결측은 선을 끊는다</span>
+    </div>
+  </div>
+
+  <div class="card">
+    <div style="display:flex;flex-wrap:wrap;align-items:baseline;gap:8px"><h2 style="margin:0;font-size:14px;font-weight:700">튜닝 포인트</h2><span class="dim" style="font-size:11.5px">읽기 전용 · 역할 DB</span></div>
+    <div style="display:flex;flex-direction:column;gap:6px;margin-top:8px">
+      <div style="display:flex;justify-content:space-between;gap:8px;align-items:center;border:1px solid #243049;border-radius:8px;padding:8px 10px;background:#0f1626"><span class="mono" style="font-size:12px">vm.swappiness</span><span style="font-size:12px">60 → <b>10</b></span><span class="chip warn">권고</span></div>
+      <div style="display:flex;justify-content:space-between;gap:8px;align-items:center;border:1px solid #243049;border-radius:8px;padding:8px 10px;background:#0f1626"><span class="mono" style="font-size:12px">transparent_hugepage</span><span style="font-size:12px">always → <b>madvise</b></span><span class="chip warn">권고</span></div>
+      <div style="display:flex;justify-content:space-between;gap:8px;align-items:center;border:1px solid #243049;border-radius:8px;padding:8px 10px;background:#0f1626"><span class="mono" style="font-size:12px">cpufreq governor</span><span style="font-size:12px">performance</span><span class="chip ok">적합</span></div>
+      <div style="display:flex;justify-content:space-between;gap:8px;align-items:center;border:1px solid #243049;border-radius:8px;padding:8px 10px;background:#0f1626"><span class="mono" style="font-size:12px">hugepages</span><span style="font-size:12px">0 · DB 설정 대조</span><span class="chip">확인 불가</span></div>
+    </div>
+    <a href="Server.dc.html" style="display:inline-block;margin-top:8px;font-weight:600;font-size:12.5px">근거까지 전부 보기 (8항목)</a>
+  </div>
+
+  <div class="card">
+    <div style="display:flex;flex-wrap:wrap;align-items:baseline;gap:8px"><h2 style="margin:0;font-size:14px;font-weight:700">진단 스냅샷 · 13:38</h2><span class="chip info">2.3초</span></div>
+    <div style="font-weight:700;font-size:12px;margin-top:8px">I/O 상위</div>
+    <table style="margin-top:4px"><tbody>
+      <tr><td class="mono">postgres: checkpointer</td><td class="bad" style="text-align:right"><b>388 MB/s w</b></td></tr>
+      <tr><td class="mono">pg_dump</td><td style="text-align:right">212 MB/s r</td></tr>
+      <tr><td class="mono">postgres: walwriter</td><td style="text-align:right">41 MB/s w</td></tr>
+    </tbody></table>
+    <div class="dim" style="font-size:11.5px;margin-top:6px;overflow-wrap:anywhere">읽기: 근무 시간의 pg_dump 가 checkpoint 와 겹친다.</div>
+    <div class="mono dim" style="font-size:11px;line-height:1.6;margin-top:8px;white-space:pre-wrap;overflow-wrap:anywhere">[13:02] nvme nvme1: I/O 1024 QID 7 timeout
+ss -s: TCP 1240 · estab 802 · timewait 318</div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":400,"height":1460}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

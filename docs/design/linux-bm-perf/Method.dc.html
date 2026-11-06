@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>모니터링 방식 검토</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Noto+Sans+KR:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+body{margin:0;background:#0a0e17;color:#e6edf6;font-family:Inter,"Noto Sans KR","Apple SD Gothic Neo",sans-serif;font-size:13px;line-height:1.45}
+a{color:#22d3ee}a:hover{color:#67e8f9}
+table{border-collapse:separate;border-spacing:0;width:100%}
+th{font-size:11.5px;font-weight:600;color:#8b9bb4;text-align:left;padding:7px 10px;border-bottom:1px solid #243049;background:#0f1626;vertical-align:bottom}
+td{padding:9px 10px;border-bottom:1px solid #1f2a40;vertical-align:top;font-size:12.5px;line-height:1.5}
+.ok{color:#4ade80;font-weight:700}.warn{color:#fbbf24;font-weight:700}.bad{color:#f87171;font-weight:700}
+.mono{font-family:"JetBrains Mono",ui-monospace,Menlo,monospace}
+</style>
+</helmet>
+<div style="position: relative; width: 1440px; height: 1180px; background: #0a0e17">
+
+<!-- 배경 띠 -->
+<div style="position: absolute; left: 64px; top: 120px; width: 880px; height: 420px; box-sizing: border-box; border: 1px dashed #243049; border-radius: 14px; background: rgba(20,27,45,.55)"></div>
+<div style="position: absolute; left: 1016px; top: 120px; width: 360px; height: 420px; box-sizing: border-box; border: 1px dashed #243049; border-radius: 14px; background: rgba(20,27,45,.55)"></div>
+
+<!-- 화살표 -->
+<svg width="243" height="8" viewBox="0 0 243 8" preserveAspectRatio="none" style="position: absolute; left: 316px; top: 223px; width: 243px; height: 8px; overflow: visible; fill: none; stroke: #8b9bb4; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round"><defs><marker id="dc-arrow-head-filled-1" orient="auto" markerWidth="5" markerHeight="5" refX="2" refY="2" overflow="visible"><path d="M0 0 L4 2 L0 4 Z" fill="#8b9bb4" stroke="none" style="stroke: none; fill: #8b9bb4; fill: context-stroke"/></marker></defs><path d="M 0 4 L 239 4" marker-end="url(#dc-arrow-head-filled-1)"></path></svg>
+<svg width="243" height="8" viewBox="0 0 243 8" preserveAspectRatio="none" style="position: absolute; left: 317px; top: 257px; width: 243px; height: 8px; overflow: visible; fill: none; stroke: #22d3ee; stroke-width: 2; stroke-dasharray: 6 6; stroke-linecap: round; stroke-linejoin: round"><defs><marker id="dc-arrow-head-filled-2" orient="auto" markerWidth="5" markerHeight="5" refX="2" refY="2" overflow="visible"><path d="M0 0 L4 2 L0 4 Z" fill="#22d3ee" stroke="none" style="stroke: none; fill: #22d3ee; fill: context-stroke"/></marker></defs><path d="M 243 4 L 4 4" marker-end="url(#dc-arrow-head-filled-2)"></path></svg>
+<svg width="394" height="8" viewBox="0 0 394 8" preserveAspectRatio="none" style="position: absolute; left: 316px; top: 372px; width: 394px; height: 8px; overflow: visible; fill: none; stroke: #8b9bb4; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round"><path d="M 0 4 L 394 4"></path></svg>
+<svg width="8" height="81" viewBox="0 0 8 81" preserveAspectRatio="none" style="position: absolute; left: 706px; top: 295px; width: 8px; height: 81px; overflow: visible; fill: none; stroke: #8b9bb4; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round"><defs><marker id="dc-arrow-head-filled-3" orient="auto" markerWidth="5" markerHeight="5" refX="2" refY="2" overflow="visible"><path d="M0 0 L4 2 L0 4 Z" fill="#8b9bb4" stroke="none" style="stroke: none; fill: #8b9bb4; fill: context-stroke"/></marker></defs><path d="M 4 81 L 4 4" marker-end="url(#dc-arrow-head-filled-3)"></path></svg>
+<svg width="179" height="8" viewBox="0 0 179 8" preserveAspectRatio="none" style="position: absolute; left: 860px; top: 223px; width: 179px; height: 8px; overflow: visible; fill: none; stroke: #8b9bb4; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round"><defs><marker id="dc-arrow-head-filled-4" orient="auto" markerWidth="5" markerHeight="5" refX="2" refY="2" overflow="visible"><path d="M0 0 L4 2 L0 4 Z" fill="#8b9bb4" stroke="none" style="stroke: none; fill: #8b9bb4; fill: context-stroke"/></marker></defs><path d="M 0 4 L 175 4" marker-end="url(#dc-arrow-head-filled-4)"></path></svg>
+<svg width="179" height="8" viewBox="0 0 179 8" preserveAspectRatio="none" style="position: absolute; left: 861px; top: 257px; width: 179px; height: 8px; overflow: visible; fill: none; stroke: #22d3ee; stroke-width: 2; stroke-dasharray: 6 6; stroke-linecap: round; stroke-linejoin: round"><defs><marker id="dc-arrow-head-filled-5" orient="auto" markerWidth="5" markerHeight="5" refX="2" refY="2" overflow="visible"><path d="M0 0 L4 2 L0 4 Z" fill="#22d3ee" stroke="none" style="stroke: none; fill: #22d3ee; fill: context-stroke"/></marker></defs><path d="M 179 4 L 4 4" marker-end="url(#dc-arrow-head-filled-5)"></path></svg>
+<svg width="8" height="85" viewBox="0 0 8 85" preserveAspectRatio="none" style="position: absolute; left: 1186px; top: 295px; width: 8px; height: 85px; overflow: visible; fill: none; stroke: #8b9bb4; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round"><defs><marker id="dc-arrow-head-filled-6" orient="auto" markerWidth="5" markerHeight="5" refX="2" refY="2" overflow="visible"><path d="M0 0 L4 2 L0 4 Z" fill="#8b9bb4" stroke="none" style="stroke: none; fill: #8b9bb4; fill: context-stroke"/></marker></defs><path d="M 4 85 L 4 4" marker-end="url(#dc-arrow-head-filled-6)"></path></svg>
+
+<!-- 제목 -->
+<div style="position: absolute; left: 64px; top: 44px; font-size: 22px; font-weight: 700; letter-spacing: -.01em">모니터링 방식 검토 — 권장안 D: 에이전트 없이 법인 엣지가 SSH 로 묶어 읽고, 중앙은 볼 때만 당긴다</div>
+<div style="position: absolute; left: 64px; top: 80px; font-size: 13px; color: #8b9bb4">실선 = 주기 수집(5분) · 점선 = 사람이 화면을 열거나 버튼을 누를 때만 · 기존 bmusage 경로와 같은 토큰·같은 등록부(새 포트·새 인증 없음)</div>
+<div style="position: absolute; left: 80px; top: 132px; font-size: 12px; font-weight: 700; color: #8b9bb4; letter-spacing: .04em">법인 A — 수집 · 판정 · 보관은 법인 로컬 (원시 90일 · 일 롤업 5년)</div>
+<div style="position: absolute; left: 1032px; top: 132px; font-size: 12px; font-weight: 700; color: #8b9bb4; letter-spacing: .04em">중앙(한국) — 통합 현황</div>
+
+<!-- 카드 -->
+<div style="position: absolute; left: 96px; top: 194px; width: 220px; height: 100px; box-sizing: border-box; padding: 10px; display: flex; align-items: center; justify-content: center; text-align: center; background: #141b2d; border: 1px solid #3b82f6; border-radius: 10px"><span><b>Linux 베어메탈 서버</b><br>법인당 수십~수백 대<br><span style="color:#8b9bb4">/proc · /sys · sysctl</span></span></div>
+<div style="position: absolute; left: 96px; top: 340px; width: 220px; height: 72px; box-sizing: border-box; padding: 10px; display: flex; align-items: center; justify-content: center; text-align: center; background: #141b2d; border: 1px solid #243049; border-radius: 10px"><span><b>iDRAC (BMC)</b><br><span style="color:#8b9bb4">OS 계정이 없는 서버의 대체 경로</span></span></div>
+<div style="position: absolute; left: 560px; top: 194px; width: 300px; height: 100px; box-sizing: border-box; padding: 10px; display: flex; align-items: center; justify-content: center; text-align: center; background: #141b2d; border: 1px solid #22d3ee; border-radius: 10px"><span><b>법인 엣지 포탈</b><br>수집 · 비율 환산 · USE 판정 · 보관<br><span style="color:#8b9bb4">bmusage 폴러 확장 (동시 4 · 서버당 시한)</span></span></div>
+<div style="position: absolute; left: 1040px; top: 194px; width: 300px; height: 100px; box-sizing: border-box; padding: 10px; display: flex; align-items: center; justify-content: center; text-align: center; background: #141b2d; border: 1px solid #22d3ee; border-radius: 10px"><span><b>중앙 포탈</b><br>법인별 봉투를 합쳐 보여 준다<br><span style="color:#8b9bb4">엣지 판정을 다시 판정하지 않는다</span></span></div>
+<div style="position: absolute; left: 1040px; top: 380px; width: 300px; height: 72px; box-sizing: border-box; padding: 10px; display: flex; align-items: center; justify-content: center; text-align: center; background: #141b2d; border: 1px solid #243049; border-radius: 10px"><span><b>사용자 (브라우저)</b><br><span style="color:#8b9bb4">보드 · 서버 상세 · 진단 스냅샷 버튼</span></span></div>
+
+<!-- 화살표 라벨 -->
+<div style="position: absolute; left: 326px; top: 199px; width: 224px; text-align: center; font-size: 13px; line-height: 16px; color: #e6edf6">SSH 1회 / 5분 · /proc·/sys 묶음</div>
+<div style="position: absolute; left: 322px; top: 273px; width: 232px; text-align: center; font-size: 13px; line-height: 16px; color: #67e8f9">진단 스냅샷 — 사람이 누를 때만</div>
+<div style="position: absolute; left: 363px; top: 388px; width: 300px; text-align: center; font-size: 13px; line-height: 16px; color: #8b9bb4">Redfish 텔레메트리 · CPU·MEM 대체 (라이선스 필요)</div>
+<div style="position: absolute; left: 880px; top: 199px; width: 140px; text-align: center; font-size: 13px; line-height: 16px; color: #e6edf6">요약 봉투 · 상한 명시</div>
+<div style="position: absolute; left: 900px; top: 273px; width: 100px; text-align: center; font-size: 13px; line-height: 16px; color: #67e8f9">볼 때만 pull</div>
+<div style="position: absolute; left: 1202px; top: 329px; width: 110px; font-size: 13px; line-height: 16px; color: #8b9bb4">한국 · RTT 800ms+</div>
+
+<div style="position: absolute; left: 96px; top: 470px; width: 820px; font-size: 12.5px; line-height: 1.55; color: #8b9bb4">서버 원문(수백 KB)은 법인 밖으로 나가지 않는다 — 엣지가 서버당 한 행(지표 열 20여 개 + 판정)으로 줄여 보관하고, 중앙은 열 때 법인당 봉투 1개를 받는다. 엣지가 없는 법인은 중앙이 직접 SSH 로 붙는 예외(지금 bmusage 와 같다).</div>
+
+<!-- 4안 비교 -->
+<div style="position: absolute; left: 64px; top: 576px; width: 1312px; box-sizing: border-box; background: #141b2d; border: 1px solid #243049; border-radius: 12px; padding: 14px 16px">
+  <div style="font-size: 15px; font-weight: 700; margin-bottom: 8px">네 가지 방식 비교 — 이 현장(법인 28곳 · 등록 서버 1,135대 · 법인 단위 opt-in · 한국에서 조회) 기준</div>
+  <table>
+    <thead><tr><th style="width:190px">방식</th><th>얻는 것</th><th style="width:250px">설치 · 운영 부담</th><th style="width:230px">WAN · 보안</th><th style="width:150px">판정</th></tr></thead>
+    <tbody>
+      <tr><td><b>A · 지금 그대로</b><br><span style="color:#8b9bb4">bmusage 5지표 (CPU·메모리·디스크·네트워크·HBA)</span></td>
+        <td>사용률만. 포화(런큐·스왑아웃·대기열·PSI)와 오류 카운트가 없어 <b>‘높다’ 는 보여도 ‘병목인지’ 는 못 말한다.</b> 튜닝 포인트 없음.</td>
+        <td class="ok">추가 없음</td><td class="ok">변화 없음</td><td><span class="warn">부족</span> — 진단 요구를 못 채움</td></tr>
+      <tr><td><b>B · 서버마다 에이전트</b><br><span style="color:#8b9bb4">node_exporter / Netdata + 중앙 Prometheus·Grafana</span></td>
+        <td>가장 풍부(수백 지표 · 초 단위 · Netdata 는 지표별 이상 탐지). 커뮤니티 대시보드 그대로.</td>
+        <td class="bad">서버 1,135대에 패키지 설치·버전 관리·방화벽 포트(9100 등) 개방 · 별도 저장소(TSDB) 운영 · 포탈과 화면 이원화</td>
+        <td class="warn">법인마다 Prometheus 를 두지 않으면 중앙이 WAN 너머 서버를 직접 스크레이프(28곳 × 수백 대 × 15초)</td>
+        <td><span class="bad">보류</span> — 운영 부담이 이번 범위를 넘는다. 이미 쓰는 법인이 있으면 그 값을 읽는 연동은 다음 단계</td></tr>
+      <tr><td><b>C · iDRAC 텔레메트리만</b><br><span style="color:#8b9bb4">Redfish MetricReports</span></td>
+        <td>CPU·메모리·전력·온도·NIC/FC 통계(리포트가 있을 때). <b>런큐·PSI·프로세스·sysctl 은 구조적으로 없다</b> — OS 안을 못 본다.</td>
+        <td class="ok">설치 없음</td><td class="ok">iDRAC 등록부 재사용</td><td><span class="warn">보조</span> — OS 계정이 없는 서버의 대체 경로로만</td></tr>
+      <tr style="background: rgba(34,211,238,.06)"><td><b style="color:#67e8f9">D · A 를 넓힌다 (권장)</b><br><span style="color:#8b9bb4">같은 SSH 1회에 구획 추가 + 온디맨드 진단 스냅샷</span></td>
+        <td>USE 세 칸 전부: loadavg·/proc/stat 분해(iowait·steal)·<span class="mono">/proc/pressure/*</span>·vmstat(스왑·폴트)·diskstats 14열(await·IOPS·대기열)·net/dev 오류·드롭·snmp 재전송 + sysctl·/sys 튜닝 항목. 스냅샷은 top 프로세스·ss -s·dmesg 오류.</td>
+        <td class="ok">설치 없음 · 등록부(bmstor OS 계정) 재사용 · 명령 1회 유지(왕복 불변) · 엣지 DB 열 추가</td>
+        <td class="ok">새 포트·새 인증 없음 · 원문은 법인 안 · 중앙은 봉투만 · 읽기 전용(튜닝 자동 적용 없음)</td>
+        <td><span class="ok">채택</span> — 5분 주기는 유지(초 단위는 안 한다). 모자라면 B 연동을 그때 검토</td></tr>
+    </tbody>
+  </table>
+</div>
+
+<!-- 참고 솔루션에서 가져오는 것 -->
+<div style="position: absolute; left: 64px; top: 916px; width: 1312px; box-sizing: border-box; background: #141b2d; border: 1px solid #243049; border-radius: 12px; padding: 14px 16px; display: flex; gap: 18px">
+  <div style="flex: 1 1 0; min-width: 0"><div style="font-weight:700;margin-bottom:4px">USE 방법 (Brendan Gregg)</div><div style="color:#8b9bb4;font-size:12.5px;line-height:1.55">자원마다 사용률·포화·오류 세 칸을 따로 묻는다. 보드의 매트릭스와 상세의 4면이 이 틀이다. 사용률이 높아도 포화가 없으면 병목이 아니고, 오류가 0 이 아니면 먼저 본다.</div></div>
+  <div style="flex: 1 1 0; min-width: 0"><div style="font-weight:700;margin-bottom:4px">node_exporter 수집기 목록</div><div style="color:#8b9bb4;font-size:12.5px;line-height:1.55">cpu · meminfo · diskstats · netdev · loadavg · pressure · vmstat · filesystem 이 기본 수집기다. 어느 /proc 파일을 읽을지는 이 목록을 그대로 따른다(지표 이름도 가능하면 같게 — 나중에 B 연동이 쉽다).</div></div>
+  <div style="flex: 1 1 0; min-width: 0"><div style="font-weight:700;margin-bottom:4px">Grafana ‘Node Exporter Full’ · Netdata</div><div style="color:#8b9bb4;font-size:12.5px;line-height:1.55">상세 화면의 자원별 묶음(CPU 분해 · 메모리 · 디스크 await/IOPS · 네트워크 오류)은 이 대시보드의 구성을 따른다. Netdata 의 초 단위·지표별 ML 이상 탐지는 <b>이번에 채택하지 않는다</b>(5분 주기 · 에이전트 없음).</div></div>
+  <div style="flex: 1 1 0; min-width: 0"><div style="font-weight:700;margin-bottom:4px">정직하게 밝힐 한계</div><div style="color:#8b9bb4;font-size:12.5px;line-height:1.55">PSI 는 커널 4.20+ (RHEL 8 계열은 부팅 옵션에 따라 없음) → ‘없음’ 을 따로 센다. 프로세스별 I/O 는 root 권한이 필요할 수 있다 → 못 읽으면 그렇게 말한다. 5분 주기라 초 단위 스파이크는 놓친다 — 이 사실을 화면이 말한다.</div></div>
+</div>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1180}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>
