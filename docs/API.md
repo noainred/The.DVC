@@ -763,10 +763,10 @@ Prometheus/OTel 익스포터(선택 토큰).
 | GET | `/health` | — | [server/src/routes/api/overviewNsx.js:132](../server/src/routes/api/overviewNsx.js#L132) |
 | GET | `/hosts` | 권한 `inv.hosts` | [server/src/routes/api/inventory.js:349](../server/src/routes/api/inventory.js#L349) |
 | GET | `/hosts/:id` | 권한 `inv.hosts` | [server/src/routes/api/hostChecks.js:66](../server/src/routes/api/hostChecks.js#L66) |
-| GET | `/hosts/:id/metrics` | 권한 `inv.hosts` | [server/src/routes/api/vmMetrics.js:125](../server/src/routes/api/vmMetrics.js#L125) |
+| GET | `/hosts/:id/metrics` | 권한 `inv.hosts` | [server/src/routes/api/vmMetrics.js:158](../server/src/routes/api/vmMetrics.js#L158) |
 | GET | `/hosts/checks` | 권한 `inv.hosts` | [server/src/routes/api/hostChecks.js:42](../server/src/routes/api/hostChecks.js#L42) |
 | GET | `/hosts/corp` | 권한 `inv.hosts` | [server/src/routes/api/hostCorp.js:38](../server/src/routes/api/hostCorp.js#L38) |
-| GET | `/idrac/host-power` | 권한 `inv.hosts` | [server/src/routes/api/vmMetrics.js:213](../server/src/routes/api/vmMetrics.js#L213) |
+| GET | `/idrac/host-power` | 권한 `inv.hosts` | [server/src/routes/api/vmMetrics.js:248](../server/src/routes/api/vmMetrics.js#L248) |
 | GET | `/issues` | — | [server/src/routes/api/issues.js:333](../server/src/routes/api/issues.js#L333) |
 | POST | `/issues` | `creators` | [server/src/routes/api/issues.js:436](../server/src/routes/api/issues.js#L436) |
 | DELETE | `/issues/:key` | 역할 `admin/operator` | [server/src/routes/api/issues.js:593](../server/src/routes/api/issues.js#L593) |
@@ -1401,8 +1401,8 @@ Prometheus/OTel 익스포터(선택 토큰).
 | PUT | `/veeam/vm-list/prefs` | 역할 `admin/operator` · 권한 `data.csv` · `prefsWrite` | [server/src/routes/api/veeam.js:391](../server/src/routes/api/veeam.js#L391) |
 | POST | `/veeam/vm-list/preview` | 권한 `data.csv` | [server/src/routes/api/veeam.js:362](../server/src/routes/api/veeam.js#L362) |
 | GET | `/vms` | 권한 `inv.vms` | [server/src/routes/api/inventory.js:404](../server/src/routes/api/inventory.js#L404) |
-| GET | `/vms/:id/console` | 권한 `vm.console` | [server/src/routes/api/vmMetrics.js:152](../server/src/routes/api/vmMetrics.js#L152) |
-| GET | `/vms/:id/metrics` | 권한 `inv.vms` | [server/src/routes/api/vmMetrics.js:94](../server/src/routes/api/vmMetrics.js#L94) |
+| GET | `/vms/:id/console` | 권한 `vm.console` | [server/src/routes/api/vmMetrics.js:187](../server/src/routes/api/vmMetrics.js#L187) |
+| GET | `/vms/:id/metrics` | 권한 `inv.vms` | [server/src/routes/api/vmMetrics.js:125](../server/src/routes/api/vmMetrics.js#L125) |
 | GET | `/vms/:id/partitions` | 권한 `inv.vms` | [server/src/routes/api/toolsGuestPart.js:43](../server/src/routes/api/toolsGuestPart.js#L43) |
 | GET | `/vms/by-vcenter` | 권한 `inv.vms` | [server/src/routes/api/inventory.js:458](../server/src/routes/api/inventory.js#L458) |
 | GET | `/vms/lookup` | 권한 `inv.vms` | [server/src/routes/api/inventory.js:478](../server/src/routes/api/inventory.js#L478) |

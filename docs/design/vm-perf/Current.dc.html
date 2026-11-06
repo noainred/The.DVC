@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>지금 — v2.910 목 서버 캡처</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=Noto+Sans+KR:wght@400;500;700;800&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+body{margin:0;background:#0a0e17;color:#e6edf6;font-family:"Inter","Noto Sans KR","Apple SD Gothic Neo",sans-serif;font-size:13px;line-height:1.5}
+a{color:#93c5fd}a:hover{color:#bfdbfe}
+.muted{color:#8b9bb4}
+.wrap{padding:20px 24px;display:flex;flex-direction:column;gap:16px;min-width:0}
+.row{display:grid;grid-template-columns:repeat(2, minmax(0, 1fr));gap:16px;min-width:0}
+.shot{background:#141b2d;border:1px solid #243049;border-radius:12px;overflow:hidden;display:flex;flex-direction:column;min-width:0}
+.shot img{display:block;width:100%;height:auto;border-bottom:1px solid #243049}
+.cap{padding:10px 14px;display:flex;flex-direction:column;gap:3px}
+.cap b{font-size:13.5px}
+.cap span{font-size:12px;color:#8b9bb4}
+.tag{display:inline-flex;align-items:center;height:20px;padding:0 8px;border-radius:999px;font-size:11px;font-weight:700;white-space:nowrap;margin-right:6px}
+.tag.old{background:rgba(245,158,11,.16);color:#fcd34d}.tag.new{background:rgba(34,197,94,.14);color:#86efac}.tag.bad{background:rgba(239,68,68,.16);color:#fca5a5}
+ol{margin:0;padding-left:20px;display:flex;flex-direction:column;gap:6px;font-size:12.5px}
+ol b{color:#e6edf6}
+</style>
+</helmet>
+<div class="wrap">
+  <div style="display:flex;align-items:baseline;gap:12px;flex-wrap:wrap">
+    <b style="font-size:16px">지금 모습 — main v2.910.0 · 목 서버 · Chromium 1440</b>
+    <span class="muted" style="font-size:12.5px">vCenter 트리와 가상화 서버의 VM 클릭이 서로 다른 화면을 연다 · ‘성능 그래프 보기’ 는 어디서 눌러도 같은 모달</span>
+  </div>
+  <div class="row">
+    <div class="shot">
+      <img src="/_blob/44c178536c5e26269c51b98497ab2b2d" alt="vCenter 호스트 및 클러스터 트리에서 VM 을 누르면 열리는 옛 640px 모달 ‘VM 상세 — app-us-0001’">
+      <div class="cap"><b><span class="tag old">옛 모달</span>vCenter › 호스트 및 클러스터 · VM 및 폴더 — VM 행 클릭</b><span>components/EntityDetail.jsx type='vm' (가운데 640px · 목록이 가려짐 · 이전/다음 없음). 트리 행의 ‘⤢ 개체 보기’ 는 따로.</span></div>
+    </div>
+    <div class="shot">
+      <img src="/_blob/17ec4e69e9c6426221470d64d87dd131" alt="가상화 서버 목록에서 VM 을 누르면 열리는 오른쪽 드로어 — web-ap-0131">
+      <div class="cap"><b><span class="tag new">드로어 v2.909</span>서버 › 가상화 서버 — VM 행 클릭</b><span>views/vms/VmDrawer.jsx (오른쪽 640px · 신호 · 24시간 스파크 · ‹ › 이전/다음 · 개체 보기 탭 바로가기). 시안 ① 은 이것을 vCenter 트리에도 쓴다.</span></div>
+    </div>
+  </div>
+  <div class="row">
+    <div class="shot">
+      <img src="/_blob/72b9d518f14ca4cd539426063f323ee5" alt="드로어의 성능 그래프 보기를 누르면 드로어 위에 뜨는 성능 모달">
+      <div class="cap"><b><span class="tag bad">성능 모달</span>‘📈 성능 그래프 보기’ — 드로어 · 옛 모달 · 개체 보기 머리 · 모니터 탭 모두 같은 창</b><span>components/VmMetrics.jsx MetricModal (900px · recharts AreaChart · 실시간 20초 갱신)</span></div>
+    </div>
+    <div class="shot" style="padding:14px 16px;gap:10px">
+      <b style="font-size:13.5px">성능 모달에서 잘 안 되는 것(캡처 판독 + 코드)</b>
+      <ol>
+        <li><b>버튼 10개가 한 줄</b> — 지표 4(CPU·메모리·디스크·네트워크)와 기간 5(실시간~년)가 같은 모양으로 섞여 있어 무엇이 축인지 읽기 어렵다.</li>
+        <li><b>기간 지정이 영문 로캘 datetime-local 두 칸</b>(mm/dd/yyyy, --:-- --) — 날짜를 두 번 타이핑해야 과거를 볼 수 있고 ‘이전 24시간’ 같은 이동이 없다.</li>
+        <li><b>한 번에 한 지표</b> — CPU 를 보다 메모리를 보려면 다시 조회(로그인 1회 + QueryPerf 1회) · 최대 · 최저가 언제였는지 없다.</li>
+        <li><b>실시간 180점(20초)이 톱니</b> — 평균선 · 과부하 기준선이 없어 ‘높은가’ 를 눈으로 가늠한다. 일 평균은 X 축이 ‘오후 11:01’ 식.</li>
+        <li><b>모달 위 모달</b> — 드로어 · 개체 보기 위에 또 창이 떠서 주소가 없고(새로고침 · 공유 불가) 400px 에서 차트 높이 340 고정.</li>
+        <li><b>지표마다 로그인</b> — fetchEntityMetric 이 호출마다 login → QueryPerf → logout. 드로어 스파크(2회) + 모달(1회 × 20초) 이 겹치면 분당 로그인이 늘어난다(v2.591 계정 잠금 규칙의 경계).</li>
+      </ol>
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1000}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

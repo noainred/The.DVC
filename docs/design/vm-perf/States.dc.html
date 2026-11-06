@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>성능 화면 — 상태 6종</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=Noto+Sans+KR:wght@400;500;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap">
+<style>
+body{margin:0;background:#0a0e17;color:#e6edf6;font-family:"Inter","Noto Sans KR","Apple SD Gothic Neo",sans-serif;font-size:13px;line-height:1.45}
+a{color:#93c5fd}a:hover{color:#bfdbfe}
+.mono{font-family:"JetBrains Mono",ui-monospace,monospace;font-variant-numeric:tabular-nums}
+.muted{color:#8b9bb4}
+.grid{display:grid;grid-template-columns:repeat(3, minmax(0, 1fr));gap:16px;padding:20px 24px;min-width:0}
+.st{background:#141b2d;border:1px solid #243049;border-radius:14px;padding:14px 16px;display:flex;flex-direction:column;gap:10px;min-width:0;min-height:320px}
+.st .h{display:flex;justify-content:space-between;align-items:center;gap:8px}
+.st .h b{font-size:14px}
+.st .h small{font-family:"JetBrains Mono",ui-monospace,monospace;color:#5d6b85;font-size:11px}
+.when{font-size:12px;color:#8b9bb4}
+.tiles{display:grid;grid-template-columns:repeat(2, minmax(0, 1fr));gap:8px}
+.tile{background:#0f1626;border:1px solid #1f2a40;border-radius:10px;padding:10px 12px;display:flex;flex-direction:column;gap:6px;min-width:0}
+.tile .lb{font-size:11px;color:#8b9bb4;font-weight:600}
+.tile .v{font-family:"JetBrains Mono",ui-monospace,monospace;font-size:20px;font-weight:700;line-height:1}
+.sk{height:12px;border-radius:6px;background:linear-gradient(90deg,#1a2236,#243049,#1a2236);background-size:200% 100%}
+.chart{flex:1;min-height:120px;border:1px dashed #3b4a66;border-radius:10px;display:flex;align-items:center;justify-content:center;text-align:center;padding:14px;font-size:12.5px;color:#8b9bb4;background:#0f1626;line-height:1.6}
+.err{border:1px solid rgba(239,68,68,.45);background:rgba(239,68,68,.08);border-radius:10px;padding:12px 14px;font-size:12.5px;line-height:1.6;color:#e6edf6}
+.err b{color:#fca5a5}
+.info{border:1px solid rgba(245,158,11,.4);background:rgba(245,158,11,.07);border-radius:10px;padding:12px 14px;font-size:12.5px;line-height:1.6;color:#e6edf6}
+.btn{display:inline-flex;align-items:center;height:28px;padding:0 10px;border-radius:8px;border:1px solid #243049;background:#1a2236;color:#e6edf6;font:inherit;font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap;align-self:flex-start}
+.btn:disabled{opacity:.5}
+.tag{display:inline-flex;align-items:center;height:20px;padding:0 8px;border-radius:999px;font-size:11px;font-weight:700;white-space:nowrap}
+.tag.gray{background:rgba(139,155,180,.14);color:#aebbd0}.tag.past{border:1px solid #a16207;color:#fbbf24}.tag.ok{background:rgba(34,197,94,.14);color:#86efac}
+.seg{display:inline-flex;border:1px solid #243049;border-radius:8px;overflow:hidden}
+.seg span{height:26px;padding:0 9px;border-left:1px solid #243049;color:#8b9bb4;font-size:11.5px;display:inline-flex;align-items:center}
+.seg span:first-child{border-left:0}
+.seg span.on{background:#1a2236;color:#e6edf6;font-weight:600}
+.seg span.off{opacity:.4;text-decoration:line-through}
+.note{font-size:11.5px;color:#5d6b85}
+svg text{font-family:"JetBrains Mono",ui-monospace,monospace}
+</style>
+</helmet>
+
+<div style="padding:18px 24px 0;display:flex;align-items:baseline;gap:12px;flex-wrap:wrap">
+  <b style="font-size:16px">성능 화면이 말해야 하는 상태 6종</b>
+  <span class="muted" style="font-size:12.5px">빈 차트를 그리지 않는다 · 사유 문구는 지금 모달의 vmMetricsText.js(인증 정지 · 직접 수집 대상 아님) 한 벌을 그대로 쓴다</span>
+</div>
+<div class="grid">
+
+  <div class="st">
+    <div class="h"><b>① 조회 중</b><small>loading</small></div>
+    <div class="when">탭을 열었을 때 · 구간을 옮겼을 때 · 지금 다시 조회</div>
+    <div class="tiles">
+      <div class="tile"><span class="lb">CPU 사용률</span><span class="sk" style="width:46%"></span><span class="sk" style="width:80%;height:8px"></span></div>
+      <div class="tile"><span class="lb">메모리 사용률</span><span class="sk" style="width:52%"></span><span class="sk" style="width:70%;height:8px"></span></div>
+    </div>
+    <div class="chart">vCenter 에서 불러오는 중…<br><span class="note">RTT 800ms 이상 법인은 2~4초 걸립니다 · 직전 구간의 값은 흐리게 남겨 두고 새 값이 오면 바꿉니다(늦게 온 이전 요청은 버림)</span></div>
+  </div>
+
+  <div class="st">
+    <div class="h"><b>② 꺼진 VM</b><small>powerState ≠ POWERED_ON</small></div>
+    <div class="when">기간 세그먼트의 ‘실시간’ 을 잠그고 24시간이 기본</div>
+    <div class="seg"><span class="off">실시간</span><span class="on">24시간</span><span>7일</span><span>30일</span><span>1년</span></div>
+    <div class="tiles">
+      <div class="tile"><span class="lb">CPU 사용률</span><span class="v muted">—</span><span class="note">꺼짐 · 지금 값 없음</span></div>
+      <div class="tile"><span class="lb">메모리 사용률</span><span class="v muted">—</span><span class="note">꺼짐 · 지금 값 없음</span></div>
+    </div>
+    <div class="info">꺼진 VM 은 실시간 값이 없습니다. <b>켜져 있던 동안의 과거 구간</b>은 24시간 이상 보기와 ◀ 이전 구간으로 볼 수 있습니다 — 꺼진 뒤의 표본은 0 이 아니라 결측(빈 칸)입니다.</div>
+  </div>
+
+  <div class="st">
+    <div class="h"><b>③ 인증 실패로 멈춤</b><small>409 authStopped</small></div>
+    <div class="when">그 vCenter 의 주 폴러가 인증 실패로 멈춘 상태 · 자동 갱신 중지</div>
+    <div class="err"><b>인증 실패로 멈춘 vCenter 라 자동 갱신을 멈췄습니다</b>(실패 3회). 같은 계정으로 반복 로그인하면 <b>계정이 잠깁니다</b>. 비밀번호를 고치거나 설정 › vCenter 연결 테스트가 성공하면 다시 조회합니다. 아래 ‘다시 조회’ 는 1회만 시도합니다.</div>
+    <button type="button" class="btn">다시 조회 (1회)</button>
+    <div class="note">문구 · 판정은 지금 모달과 같은 metricAuthStopText / metricErrorState — 새로 쓰지 않는다. 실시간 20초 갱신도 같은 규칙으로 멈춘다.</div>
+  </div>
+
+  <div class="st">
+    <div class="h"><b>④ 직접 수집 대상 아님</b><small>409 skipReason</small></div>
+    <div class="when">비활성 · 점검 중 · 엣지 위임 vCenter — 중앙이 vCenter 에 묻지 않는다</div>
+    <div class="chart">이 vCenter 는 엣지 포탈이 대신 수집합니다(위임) — 중앙에서 직접 조회하지 않습니다.<br><span class="note">문구는 vcAuthStopText.skipSingleText 그대로 · 자동 갱신도 멈춥니다 · ‘다시 조회’ 단추는 두지 않습니다(서버가 manual 도 막는다)</span></div>
+    <div class="note">엣지 위임 법인에서 성능을 보려면: 그 법인 엣지 포탈의 같은 화면(findRemoteServer 안내 링크 — 지금 모달에도 없는 것 · 구현 때 확인 항목).</div>
+  </div>
+
+  <div class="st">
+    <div class="h"><b>⑤ 이 구간에 표본 없음</b><small>points: []</small></div>
+    <div class="when">보관 주기 밖 · 그때 VM 이 없었음 · 카운터 미지원</div>
+    <div class="seg"><span>실시간</span><span>24시간</span><span class="on">7일</span><span>30일</span><span>1년</span></div>
+    <div class="chart">이 구간(10-02 ~ 10-09)에 vCenter 가 돌려준 표본이 없습니다.<br><span class="note">vCenter 보관 주기(이 vCenter: 1일 평균 1년)를 넘었거나 그때 이 VM 이 없었습니다 — 0 으로 그리지 않습니다. ‘최신’ 으로 돌아가거나 날짜를 바꿔 보세요.</span></div>
+    <div class="note">카운터가 없는 지표(예: 일부 호스트의 net.usage)는 그 카드만 ‘vCenter 에 카운터 없음’ 으로 — 나머지 3개는 그린다.</div>
+  </div>
+
+  <div class="st">
+    <div class="h"><b>⑥ 과거 구간 · 데모 데이터</b><small>past · mock</small></div>
+    <div class="when">◀ 이전 구간으로 간 상태 — 자동 갱신 없음 · 롤업이 거칠어진 것을 밝힘</div>
+    <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center"><b style="font-size:13px">24시간 추이 · CPU 사용률</b><span class="tag past">과거 구간</span><span class="tag gray">데모 데이터</span></div>
+    <svg viewBox="0 0 400 110" role="img" aria-label="과거 구간 예시" style="display:block;width:100%;height:auto">
+      <line x1="30" x2="394" y1="90" y2="90" stroke="#1f2a40"></line><line x1="30" x2="394" y1="50" y2="50" stroke="#1f2a40"></line><line x1="30" x2="394" y1="10" y2="10" stroke="#1f2a40"></line>
+      <text x="26" y="94" fill="#5d6b85" font-size="9" text-anchor="end">0</text><text x="26" y="54" fill="#5d6b85" font-size="9" text-anchor="end">50</text><text x="26" y="14" fill="#5d6b85" font-size="9" text-anchor="end">100</text>
+      <path d="M30 62 L45 60 L60 64 L75 58 L90 61 L105 55 L120 57 L135 52 L150 54 L165 49 L180 51 M210 47 L225 50 L240 44 L255 48 L270 41 L285 45 L300 38 L315 42 L330 36 L345 40 L360 35 L375 39 L394 37" fill="none" stroke="#3b82f6" stroke-width="1.6"></path>
+      <line x1="30" x2="394" y1="49" y2="49" stroke="#8b9bb4" stroke-dasharray="4 4" opacity=".6"></line>
+      <text x="196" y="30" fill="#5d6b85" font-size="9" text-anchor="middle">결측 2칸 — 선을 끊음</text>
+    </svg>
+    <div class="note" style="text-align:center">6칸 전 · 10-30 07:10 ~ 10-31 07:10 · <b style="color:#fbbf24">이 구간은 30분 평균(vCenter 보관 주기)</b> · 과거 구간은 자동 갱신하지 않습니다</div>
+  </div>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":760}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

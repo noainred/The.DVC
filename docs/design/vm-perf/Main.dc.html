@@ -1,0 +1,292 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>VM 개체 보기 › 모니터 › 성능 (1440)</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=Noto+Sans+KR:wght@400;500;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap">
+<style>
+body{margin:0;background:#0a0e17;color:#e6edf6;font-family:"Inter","Noto Sans KR","Apple SD Gothic Neo",sans-serif;font-size:13px;line-height:1.45}
+a{color:#93c5fd}a:hover{color:#bfdbfe}
+.mono{font-family:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,monospace;font-variant-numeric:tabular-nums}
+.muted{color:#8b9bb4}.faint{color:#5d6b85}
+.card{background:#141b2d;border:1px solid #243049;border-radius:12px}
+.btn{display:inline-flex;align-items:center;gap:6px;height:32px;padding:0 12px;border-radius:8px;border:1px solid #243049;background:#1a2236;color:#e6edf6;font:inherit;font-size:12.5px;font-weight:600;cursor:pointer;white-space:nowrap;text-decoration:none}
+.btn.primary{background:#3b82f6;border-color:#3b82f6;color:#fff}
+.btn.sm{height:28px;padding:0 10px;font-size:12px}
+.btn:disabled{opacity:.5;cursor:not-allowed}
+.seg{display:inline-flex;border:1px solid #243049;border-radius:8px;overflow:hidden}
+.seg button{height:30px;padding:0 11px;border:0;border-left:1px solid #243049;background:transparent;color:#8b9bb4;font:inherit;font-size:12px;cursor:pointer;white-space:nowrap}
+.seg button:first-child{border-left:0}
+.seg button.on{background:#1a2236;color:#e6edf6;font-weight:600}
+.tag{display:inline-flex;align-items:center;gap:5px;height:20px;padding:0 8px;border-radius:999px;font-size:11px;font-weight:700;white-space:nowrap}
+.tag.ok{background:rgba(34,197,94,.14);color:#86efac}.tag.warn{background:rgba(245,158,11,.16);color:#fcd34d}.tag.crit{background:rgba(239,68,68,.16);color:#fca5a5}.tag.gray{background:rgba(139,155,180,.14);color:#aebbd0}.tag.blue{background:rgba(59,130,246,.18);color:#93c5fd}
+.pill{display:inline-flex;align-items:center;gap:7px;height:30px;padding:0 12px;border-radius:999px;border:1px solid #243049;background:#0f1626;font-size:12px;color:#8b9bb4;white-space:nowrap}
+.pill b{color:#e6edf6;font-weight:600}
+.dot{display:inline-block;width:8px;height:8px;border-radius:50%;flex:none}
+.dot.live{background:#34e0b4;box-shadow:0 0 0 4px rgba(52,224,180,.15)}
+/* 셸(흐림) */
+.shell{display:flex;min-height:1560px}
+.side{width:236px;flex:none;background:#0f1626;border-right:1px solid #1f2a40;opacity:.45;padding:18px 16px;display:flex;flex-direction:column;gap:14px;font-size:13px;color:#8b9bb4}
+.side .on{color:#e6edf6;font-weight:700}
+.top{height:44px;background:rgba(12,17,30,.9);border-bottom:1px solid #1f2a40;opacity:.45}
+.main{flex:1;min-width:0;display:flex;flex-direction:column}
+.content{padding:14px 24px 32px;display:flex;flex-direction:column;gap:12px;min-width:0}
+/* 개체 머리(기존 v2.895) */
+.crumb{display:flex;align-items:center;gap:6px;flex-wrap:wrap;font-size:12px;color:#8b9bb4}
+.crumb b{color:#e6edf6}
+.ohead{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px 16px;padding:14px 16px}
+.tabs{display:flex;gap:6px;padding-bottom:8px;border-bottom:1px solid #243049;overflow:hidden}
+.tab{height:30px;padding:0 10px;border-radius:8px;border:1px solid transparent;background:transparent;color:#8b9bb4;font:inherit;font-size:13px;display:inline-flex;align-items:center;white-space:nowrap}
+.tab.on{background:#3b82f6;color:#fff;font-weight:600}
+.tabsep{width:1px;align-self:stretch;margin:4px 4px;background:#243049}
+/* 성능 섹션 */
+.sec-h{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:10px 14px;min-width:0}
+.sec-h h3{margin:0;font-size:16px;font-weight:700}
+.stats{display:grid;grid-template-columns:repeat(4, minmax(0, 1fr));gap:12px;min-width:0}
+.stat{background:#141b2d;border:1px solid #243049;border-radius:12px;padding:12px 14px;display:flex;flex-direction:column;gap:6px;min-width:0;text-align:left;font:inherit;color:#e6edf6;cursor:pointer}
+.stat.on{border-color:#3b82f6;box-shadow:inset 0 0 0 1px #3b82f6}
+.stat .lb{display:flex;justify-content:space-between;align-items:baseline;font-size:12px;font-weight:600;color:#8b9bb4}
+.stat .lb small{font-weight:500;color:#5d6b85;font-size:11px}
+.stat .v{font-family:"JetBrains Mono",ui-monospace,monospace;font-size:26px;font-weight:700;line-height:1.05;white-space:nowrap}
+.stat .v small{font-size:12px;font-weight:600;color:#8b9bb4;margin-left:3px}
+.stat .mm{display:flex;flex-wrap:wrap;gap:2px 10px;font-size:11.5px;color:#8b9bb4;font-variant-numeric:tabular-nums}
+.stat .mm b{color:#e6edf6;font-weight:600;font-family:"JetBrains Mono",ui-monospace,monospace}
+.spark{display:block;width:100%;height:28px}
+.chart-card{background:#141b2d;border:1px solid #243049;border-radius:14px;padding:14px 16px;display:flex;flex-direction:column;gap:10px;min-width:0}
+.chart-card h4{margin:0;font-size:14px;font-weight:700}
+.legend{display:flex;flex-wrap:wrap;align-items:center;gap:12px;font-size:12px;color:#8b9bb4}
+.legend i{display:inline-block;width:14px;height:0;border-top:2px solid #3b82f6;margin-right:6px;vertical-align:middle}
+.note{font-size:12px;color:#5d6b85;overflow-wrap:anywhere}
+.tip{position:absolute;top:10px;min-width:200px;padding:8px 10px;border-radius:8px;border:1px solid #243049;background:rgba(11,18,32,.95);box-shadow:0 6px 18px rgba(0,0,0,.35);font-size:12px;line-height:1.55;z-index:2;transform:translateX(calc(-100% - 12px))}
+.tip .h{font-family:"JetBrains Mono",ui-monospace,monospace;font-weight:600;margin-bottom:2px;white-space:nowrap}
+.tip .l{display:flex;gap:6px;align-items:baseline;font-variant-numeric:tabular-nums}
+svg text{font-family:"JetBrains Mono",ui-monospace,monospace}
+input[type=range]{accent-color:#3b82f6;flex:1 1 160px;min-width:0}
+.winrow{display:flex;align-items:center;gap:8px;flex-wrap:wrap;border-top:1px solid #1f2a40;padding-top:10px}
+.datejump{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:#8b9bb4;white-space:nowrap}
+.datejump input{height:28px;padding:0 8px;border-radius:8px;border:1px solid #243049;background:#0f1626;color:#e6edf6;font:inherit;font-size:12px;color-scheme:dark}
+table.sum{width:100%;border-collapse:collapse;font-size:12.5px}
+table.sum th{text-align:left;color:#8b9bb4;font-weight:700;font-size:11.5px;padding:8px 12px;border-bottom:1px solid #243049;background:#0f1626}
+table.sum td{padding:8px 12px;border-bottom:1px solid #1f2a40;white-space:nowrap}
+table.sum td.r,table.sum th.r{text-align:right}
+.below{display:grid;grid-template-columns:repeat(2, minmax(0, 1fr));gap:12px;opacity:.55}
+.below .card{padding:12px 14px;min-height:110px}
+.below h5{margin:0 0 6px;font-size:13px}
+</style>
+</helmet>
+
+<div class="shell">
+  <aside class="side" aria-hidden="true">
+    <div style="font-weight:800;color:#e6edf6">The Davinci</div>
+    <div>Overview</div><div>Summary</div>
+    <div class="on">서버</div>
+    <div style="padding-left:14px">가상화 서버</div><div style="padding-left:14px">ESXi 호스트</div><div class="on" style="padding-left:14px">vCenter</div><div style="padding-left:14px">물리 서버</div><div style="padding-left:14px">Backup</div><div style="padding-left:14px">알람</div>
+    <div>스토리지</div><div>네트워크</div><div>자원관리</div><div>자원 최적화</div><div>특수 기능</div><div>이슈</div><div>위키</div><div>게시판</div><div>설정</div>
+  </aside>
+  <div class="main">
+    <div class="top"></div>
+    <div class="content">
+
+      <div class="crumb" aria-label="경로">
+        <a href="VcTreeDrawer.dc.html" style="text-decoration:underline;font-size:12px">← 호스트 및 클러스터</a><span>›</span><span>VC-KR1</span><span>›</span><span>DC-KR1</span><span>›</span><span>Cluster-A</span><span>›</span><b>web-kr1-023</b>
+      </div>
+
+      <div class="card ohead">
+        <div style="min-width:0">
+          <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+            <span style="font-size:17px;font-weight:800">web-kr1-023</span>
+            <span class="tag ok">On</span><span class="tag ok">Running</span><span class="tag crit">CPU·메모리 90%↑</span><span class="tag warn">Tools 구버전</span>
+          </div>
+          <div class="muted" style="font-size:12px;margin-top:2px">Windows Server 2019 · 호스트 esx-kr1-07 · 클러스터 Cluster-A · 리소스 풀 prod · 10.12.4.23</div>
+        </div>
+        <div style="display:flex;flex-wrap:wrap;gap:8px;justify-content:flex-end">
+          <button type="button" class="btn">사양 변경</button>
+          <button type="button" class="btn">원격 콘솔</button>
+          <button type="button" class="btn">원격 접속</button>
+        </div>
+      </div>
+
+      <nav class="tabs" aria-label="VM 보기">
+        <a href="#" class="tab">요약</a><a href="#" class="tab on">모니터</a><a href="#" class="tab">구성</a><a href="#" class="tab">사용 권한</a><a href="#" class="tab">데이터스토어</a><a href="#" class="tab">네트워크</a><a href="#" class="tab">스냅샷</a><a href="#" class="tab">업데이트</a><span class="tabsep" aria-hidden="true"></span><a href="#" class="tab">성능 튜닝</a>
+      </nav>
+
+      <!-- ── 성능 섹션 — 모니터 탭 맨 위(모달 대신 이 자리) ── -->
+      <div class="sec-h">
+        <div style="display:flex;flex-direction:column;gap:2px;min-width:0">
+          <h3>성능</h3>
+          <span class="note">vCenter 성능 롤업 · 이 탭을 열 때 조회(포탈은 VM 별 시계열을 저장하지 않습니다) · 4개 지표를 한 번에 묻습니다</span>
+        </div>
+        <div style="display:flex;flex-wrap:wrap;align-items:center;gap:10px">
+          <div class="seg" role="tablist" aria-label="기간"><button type="button">실시간 1시간</button><button type="button" class="on">24시간</button><button type="button">7일</button><button type="button">30일</button><button type="button">1년</button></div>
+          <span class="pill"><span class="dot" style="background:#5d6b85"></span>5분 평균 · 288점 · 읽은 시각 <b class="mono">07:10:42</b></span>
+          <button type="button" class="btn">CSV</button>
+          <button type="button" class="btn primary">지금 다시 조회</button>
+        </div>
+      </div>
+
+      <div class="stats" role="tablist" aria-label="지표">
+        <button type="button" class="stat on" role="tab" aria-selected="true">
+          <span class="lb">CPU 사용률 <small>8 vCPU</small></span>
+          <span class="v" style="color:#93c5fd">41<small>%</small></span>
+          <svg class="spark" viewBox="0 0 100 28" preserveAspectRatio="none" aria-hidden="true"><path d="{{sp.cpu}}" fill="none" stroke="#3b82f6" stroke-width="1.4" vector-effect="non-scaling-stroke"></path></svg>
+          <span class="mm"><span>평균 <b>38.6%</b></span><span>최대 <b>97%</b> 02:05</span><span>최저 <b>12%</b></span></span>
+        </button>
+        <button type="button" class="stat" role="tab" aria-selected="false">
+          <span class="lb">메모리 사용률 <small>32 GB 할당</small></span>
+          <span class="v" style="color:#fcd34d">88<small>%</small></span>
+          <svg class="spark" viewBox="0 0 100 28" preserveAspectRatio="none" aria-hidden="true"><path d="{{sp.mem}}" fill="none" stroke="#a855f7" stroke-width="1.4" vector-effect="non-scaling-stroke"></path></svg>
+          <span class="mm"><span>평균 <b>86.1%</b></span><span>최대 <b>94%</b> 03:40</span><span>최저 <b>79%</b></span></span>
+        </button>
+        <button type="button" class="stat" role="tab" aria-selected="false">
+          <span class="lb">디스크 I/O <small>읽기+쓰기</small></span>
+          <span class="v">1.8<small>MB/s</small></span>
+          <svg class="spark" viewBox="0 0 100 28" preserveAspectRatio="none" aria-hidden="true"><path d="{{sp.dsk}}" fill="none" stroke="#22d3ee" stroke-width="1.4" vector-effect="non-scaling-stroke"></path></svg>
+          <span class="mm"><span>평균 <b>1.2 MB/s</b></span><span>최대 <b>9.4 MB/s</b> 02:10</span><span>최저 <b>0.1 MB/s</b></span></span>
+        </button>
+        <button type="button" class="stat" role="tab" aria-selected="false">
+          <span class="lb">네트워크 I/O <small>수신+송신</small></span>
+          <span class="v">640<small>KB/s</small></span>
+          <svg class="spark" viewBox="0 0 100 28" preserveAspectRatio="none" aria-hidden="true"><path d="{{sp.net}}" fill="none" stroke="#22c55e" stroke-width="1.4" vector-effect="non-scaling-stroke"></path></svg>
+          <span class="mm"><span>평균 <b>410 KB/s</b></span><span>최대 <b>3.1 MB/s</b> 02:05</span><span>최저 <b>20 KB/s</b></span></span>
+        </button>
+      </div>
+
+      <section class="chart-card" aria-label="24시간 추이">
+        <div style="display:flex;flex-wrap:wrap;justify-content:space-between;gap:10px;align-items:center">
+          <div style="display:flex;flex-wrap:wrap;align-items:center;gap:12px">
+            <h4>24시간 추이 · CPU 사용률</h4>
+            <div class="seg" role="tablist" aria-label="겹쳐 보기"><button type="button" class="on">한 지표</button><button type="button">CPU + 메모리</button><button type="button">디스크 + 네트워크</button></div>
+          </div>
+          <div class="legend">
+            <span><i style="border-top-color:#3b82f6"></i>CPU 사용률(5분 평균)</span>
+            <span><i style="border-top:1px dashed #8b9bb4"></i>기간 평균 38.6%</span>
+            <span><i style="border-top:1px dashed #ef4444"></i>과부하 기준 90% (신호 ‘과부하’ 와 같은 값)</span>
+            <span><i style="border-top:2px dotted #5d6b85"></i>결측 — 선을 끊음</span>
+          </div>
+        </div>
+        <div class="note">값은 vCenter 가 보관한 5분 평균입니다(24시간 보관). 못 읽은 표본은 0 이 아니라 결측으로 비워 둡니다 · 값 288점 · 결측 0점</div>
+
+        <div style="position:relative;width:100%;min-width:0">
+          <svg viewBox="0 0 1360 270" role="img" aria-label="CPU 사용률 24시간 추이" style="display:block;width:100%;height:auto">
+            <line x1="56" x2="1330" y1="236" y2="236" stroke="#1f2a40"></line><text x="48" y="240" fill="#5d6b85" font-size="11" text-anchor="end">0%</text>
+            <line x1="56" x2="1330" y1="181" y2="181" stroke="#1f2a40"></line><text x="48" y="185" fill="#5d6b85" font-size="11" text-anchor="end">25%</text>
+            <line x1="56" x2="1330" y1="126" y2="126" stroke="#1f2a40"></line><text x="48" y="130" fill="#5d6b85" font-size="11" text-anchor="end">50%</text>
+            <line x1="56" x2="1330" y1="71" y2="71" stroke="#1f2a40"></line><text x="48" y="75" fill="#5d6b85" font-size="11" text-anchor="end">75%</text>
+            <line x1="56" x2="1330" y1="16" y2="16" stroke="#1f2a40"></line><text x="48" y="20" fill="#5d6b85" font-size="11" text-anchor="end">100%</text>
+            <line x1="312.1" x2="312.1" y1="16" y2="236" stroke="#1a2236"></line><text x="312.1" y="256" fill="#5d6b85" font-size="11" text-anchor="middle">12:00</text>
+            <line x1="630.6" x2="630.6" y1="16" y2="236" stroke="#1a2236"></line><text x="630.6" y="256" fill="#5d6b85" font-size="11" text-anchor="middle">18:00</text>
+            <line x1="949.1" x2="949.1" y1="16" y2="236" stroke="#1a2236"></line><text x="949.1" y="256" fill="#5d6b85" font-size="11" text-anchor="middle">00:00 (11-06)</text>
+            <line x1="1267.6" x2="1267.6" y1="16" y2="236" stroke="#1a2236"></line><text x="1267.6" y="256" fill="#5d6b85" font-size="11" text-anchor="middle">06:00</text>
+            <line x1="56" x2="1330" y1="38" y2="38" stroke="#ef4444" stroke-dasharray="4 4" opacity=".6"></line>
+            <text x="1326" y="34" fill="#fca5a5" font-size="10.5" text-anchor="end">90%</text>
+            <line x1="56" x2="1330" y1="{{avgY}}" y2="{{avgY}}" stroke="#8b9bb4" stroke-dasharray="4 4" opacity=".6"></line>
+            <path d="{{area}}" fill="#3b82f6" opacity=".12"></path>
+            <path d="{{line}}" fill="none" stroke="#3b82f6" stroke-width="1.8" stroke-linejoin="round"></path>
+            <g aria-hidden="true">
+              <line x1="{{hx}}" x2="{{hx}}" y1="16" y2="236" stroke="#8b9bb4" stroke-dasharray="3 3"></line>
+              <circle cx="{{hx}}" cy="{{hy}}" r="4.5" fill="#3b82f6" stroke="#0b1220" stroke-width="1.5"></circle>
+            </g>
+          </svg>
+          <div class="tip" style="left:{{tipLeft}}" role="status">
+            <div class="h">11-06 02:05 · 5분 평균</div>
+            <div class="l"><span style="color:#93c5fd">■</span><span>CPU <b class="mono">97%</b> · 기간 평균 38.6%</span></div>
+            <div class="l"><span style="color:#d8b4fe">■</span><span>같은 시각 메모리 93% · 디스크 9.4 MB/s</span></div>
+            <div class="l" style="color:#fca5a5"><span>▲</span><span>과부하 기준 90% 초과 · 1시간 05분 지속</span></div>
+          </div>
+        </div>
+
+        <div class="winrow">
+          <button type="button" class="btn sm">◀ 이전 24시간</button>
+          <input type="range" min="0" max="30" step="1" value="30" aria-label="조회 구간 스크롤(오른쪽 끝 = 최근)">
+          <button type="button" class="btn sm" disabled>다음 24시간 ▶</button>
+          <button type="button" class="btn sm primary" disabled>최신</button>
+          <label class="datejump"><span>날짜로 이동</span><input type="date" value="2026-11-06" min="2025-11-06" max="2026-11-06"></label>
+        </div>
+        <div class="note" style="text-align:center;font-variant-numeric:tabular-nums">최근 구간 · 11-05 07:10 ~ 11-06 07:10 · 어제보다 오래된 24시간 창은 vCenter 가 30분 평균으로만 보관합니다(7일까지) · 그 뒤는 2시간 평균(30일까지) — 보관 주기는 vCenter 에서 읽은 값</div>
+      </section>
+
+      <section class="card" style="overflow:hidden;min-width:0" aria-label="구간 요약">
+        <div style="display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:10px;padding:12px 14px;border-bottom:1px solid #1f2a40">
+          <h4 style="margin:0;font-size:14px;font-weight:700">이 구간 요약 <span class="muted" style="font-weight:500;font-size:12px">· 11-05 07:10 ~ 11-06 07:10 · 지금 받은 점으로 계산(서버 호출 없음)</span></h4>
+          <span class="note">머리글 클릭 정렬 · 시각은 포탈 시각</span>
+        </div>
+        <table class="sum">
+          <thead><tr><th>지표</th><th class="r">평균</th><th class="r">최대</th><th>최대 시각</th><th class="r">최저</th><th>최저 시각</th><th class="r">90% 이상 시간</th><th class="r">결측</th></tr></thead>
+          <tbody>
+            <tr><td><b>CPU 사용률</b></td><td class="r mono">38.6%</td><td class="r mono" style="color:#fca5a5">97%</td><td class="mono">11-06 02:05</td><td class="r mono">12%</td><td class="mono">11-05 13:35</td><td class="r mono">1시간 05분</td><td class="r mono">0 / 288</td></tr>
+            <tr><td><b>메모리 사용률</b></td><td class="r mono">86.1%</td><td class="r mono" style="color:#fca5a5">94%</td><td class="mono">11-06 03:40</td><td class="r mono">79%</td><td class="mono">11-05 09:15</td><td class="r mono">4시간 20분</td><td class="r mono">0 / 288</td></tr>
+            <tr><td><b>디스크 I/O</b></td><td class="r mono">1.2 MB/s</td><td class="r mono">9.4 MB/s</td><td class="mono">11-06 02:10</td><td class="r mono">0.1 MB/s</td><td class="mono">11-05 21:50</td><td class="r muted">—</td><td class="r mono">0 / 288</td></tr>
+            <tr><td><b>네트워크 I/O</b></td><td class="r mono">410 KB/s</td><td class="r mono">3.1 MB/s</td><td class="mono">11-06 02:05</td><td class="r mono">20 KB/s</td><td class="mono">11-05 23:30</td><td class="r muted">—</td><td class="r mono">0 / 288</td></tr>
+          </tbody>
+        </table>
+      </section>
+
+      <!-- 아래는 지금 모니터 탭에 있던 카드 그대로(흐림) -->
+      <div class="below" aria-label="모니터 탭의 나머지(기존 그대로)">
+        <div class="card"><h5>이벤트 · 이동</h5><div class="muted" style="font-size:12px">이동·구성 변경 — 최근 30일 · 이동 1 · 변경 2 (기존 카드 그대로)</div></div>
+        <div class="card"><h5>vCenter 알람 0</h5><div class="muted" style="font-size:12px">읽은 시각 07:05 · 5분마다 갱신 (기존 카드 그대로)</div></div>
+        <div class="card" style="grid-column:1 / -1"><h5>최근 작업 0</h5><div class="muted" style="font-size:12px">포탈이 모아 둔 최근 24시간 작업 중 이 개체 대상 (기존 카드 그대로)</div></div>
+      </div>
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1560}}'>
+class Component extends DCLogic {
+  renderVals() {
+    var n = 288;
+    var s = 7;
+    function rnd() { s = (s * 1103515245 + 12345) % 2147483648; return s / 2147483648; }
+    var cpu = [], mem = [], dsk = [], net = [];
+    for (var i = 0; i < n; i++) {
+      var h = i / 12;
+      var c = 34 + 10 * Math.sin(i / 11) + 6 * Math.sin(i / 3.7) + (rnd() - 0.5) * 8;
+      if (h > 18.9 && h < 20.0) c = 90 + rnd() * 7;
+      if (h > 6.2 && h < 6.6) c = 12 + rnd() * 3;
+      cpu.push(Math.max(8, Math.min(97, c)));
+      var m = 84 + 4 * Math.sin(i / 40) + (rnd() - 0.5) * 3 + (h > 19 && h < 21 ? 7 : 0);
+      mem.push(Math.max(79, Math.min(94, m)));
+      var d = 1.1 + 0.5 * Math.sin(i / 9) + rnd() * 0.5 + (h > 18.9 && h < 19.3 ? 7 : 0);
+      dsk.push(Math.max(0.1, d));
+      var e = 0.4 + 0.2 * Math.sin(i / 7) + rnd() * 0.3 + (h > 18.9 && h < 19.2 ? 2.4 : 0);
+      net.push(Math.max(0.02, e));
+    }
+    var X0 = 56, X1 = 1330, Y0 = 16, Y1 = 236;
+    function path(arr, max, x0, x1, y0, y1) {
+      var out = [];
+      for (var k = 0; k < arr.length; k++) {
+        var x = x0 + (x1 - x0) * k / (arr.length - 1);
+        var y = y1 - (y1 - y0) * Math.min(arr[k], max) / max;
+        out.push((k ? 'L' : 'M') + x.toFixed(1) + ' ' + y.toFixed(1));
+      }
+      return out.join(' ');
+    }
+    var line = path(cpu, 100, X0, X1, Y0, Y1);
+    var peakIdx = 0;
+    for (var p = 0; p < n; p++) { if (cpu[p] > cpu[peakIdx]) peakIdx = p; }
+    var hx = X0 + (X1 - X0) * peakIdx / (n - 1);
+    var hy = Y1 - (Y1 - Y0) * cpu[peakIdx] / 100;
+    return {
+      line: line,
+      area: line + ' L' + X1 + ' ' + Y1 + ' L' + X0 + ' ' + Y1 + ' Z',
+      avgY: (Y1 - (Y1 - Y0) * 38.6 / 100).toFixed(1),
+      hx: hx.toFixed(1),
+      hy: hy.toFixed(1),
+      tipLeft: ((hx / 1360) * 100).toFixed(2) + '%',
+      sp: {
+        cpu: path(cpu, 100, 1, 99, 2, 26),
+        mem: path(mem, 100, 1, 99, 2, 26),
+        dsk: path(dsk, 10, 1, 99, 2, 26),
+        net: path(net, 3.2, 1, 99, 2, 26)
+      }
+    };
+  }
+}
+</script>
+</body>
+</html>

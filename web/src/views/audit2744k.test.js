@@ -341,12 +341,13 @@ describe('③ 성능 창 — 409 + skipReason 이면 사유를 말하고 20초 �
     expect(metricSkipText(null)).toBe('');
   });
 
-  it('MetricModal: skipReason 409 를 받으면 자동 새로고침 타이머를 멈추고(로그인 0 이어도 같은 409 를 20초마다 받지 않는다) 사유를 그린다', async () => {
+  // v2.911: 성능 모달(MetricModal)은 개체 보기 › 모니터의 VmPerfView 로 바뀌었다 — 같은 규칙(409 skip → 자동 갱신 정지 · 사유)을 그 화면에서 확인한다.
+  it('VmPerfView(실시간): skipReason 409 를 받으면 자동 새로고침 타이머를 멈추고(로그인 0 이어도 같은 409 를 20초마다 받지 않는다) 사유를 그린다', async () => {
     vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
     let calls = 0;
-    H.api.fetchJson = () => { calls += 1; return Promise.reject(Object.assign(new Error('엣지 위임'), { status: 409, body: { ok: false, skipReason: 'site', reason: '엣지 위임 vCenter — 담당 엣지가 수집하므로 중앙이 직접 로그인하지 않습니다' } })); };
-    const { MetricModal } = await import('../components/VmMetrics.jsx');
-    const rt = mount(MetricModal, { metricsPath: '/vms/vc-s%3Avm-1/metrics', name: 'vm-1', onClose: () => {} });
+    H.api.fetchJson = (path, params) => { calls += 1; expect(path).toBe('/vms/vc-s%3Avm-1/metrics'); expect(params.types).toBe('cpu,mem,disk,net'); return Promise.reject(Object.assign(new Error('엣지 위임'), { status: 409, body: { ok: false, skipReason: 'site', reason: '엣지 위임 vCenter — 담당 엣지가 수집하므로 중앙이 직접 로그인하지 않습니다' } })); };
+    const VmPerfView = (await import('../components/vmperf/VmPerfView.jsx')).default;
+    const rt = mount(VmPerfView, { entityType: 'vm', id: 'vc-s:vm-1', name: 'vm-1', initialRange: 'realtime' });
     await flush();
     expect(calls).toBe(1);
     await vi.advanceTimersByTimeAsync(65_000); await flush();

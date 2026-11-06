@@ -4,7 +4,8 @@ import { inUserScope, inUserWriteScope, scopedVcenterIds } from '../../auth/scop
 import { store } from '../../store.js';
 import { loadVcenterConfig } from '../../config.js';
 import { hostPower } from '../../idrac/service.js';
-import { fetchVmMetric, fetchHostMetric, PERF_INTERVALS, getVmConsole } from '../../vcenter/soapClient.js';
+import { fetchVmMetric, fetchHostMetric, fetchVmMetrics, fetchHostMetrics, pickPerfInterval, PERF_INTERVALS, PERF_RETENTION_DEFAULT, getVmConsole } from '../../vcenter/soapClient.js';
+import { OVERLOAD_PCT } from '../../inventory/vmSignals.js'; // v2.911 성능 화면 기준선 — 신호 '과부하' 와 같은 값(화면에 90 을 박지 않는다)
 import { respondIfVcAuthStopped, respondVcError } from '../../vcenter/authStopGate.js'; // v2.733(C3-01): 판정을 공용 헬퍼로
 import { isAdminReq } from '../../auth/addressMask.js';
 import { morefOf } from '../../vcenter/registry.js'; // v2.598 VC2598-06: 콜론 포함 vCenter id 안전한 moref 추출
@@ -27,6 +28,36 @@ const metricError = (res, vc, err) => respondVcError(res, vc, err);
 
 const METRIC_TYPES = ['cpu', 'mem', 'disk', 'net'];
 const METRIC_UNIT = { cpu: '%', mem: '%', disk: 'KBps', net: 'KBps' };
+
+/**
+ * v2.911 — `types=cpu,mem,disk,net`(복수) 파싱: 화이트리스트 · 중복 제거 · 순서 유지. 없거나 전부 모르는 값이면 [](단건 `type=` 경로).
+ * 배열(`types=cpu&types=mem`)도 받는다. 상한 4(지표 수) — 긴 문자열은 잘라서 본다(O(n) 분할만).
+ */
+export function parseMetricTypes(raw) {
+  const text = Array.isArray(raw) ? raw.map((x) => String(x ?? '')).join(',') : String(raw ?? '');
+  if (!text) return [];
+  const out = [];
+  for (const part of text.slice(0, 200).split(',')) {
+    const k = part.trim().toLowerCase();
+    if (METRIC_TYPES.includes(k) && !out.includes(k)) out.push(k);
+  }
+  return out;
+}
+
+/** v2.911 — 목 모드 다중 지표 응답(라이브 `fetchEntityMetrics` 와 같은 모양 — 롤업 선택도 같은 규칙으로). */
+export function synthMetrics(entity, types, interval, range = {}, now = Date.now()) {
+  const picked = pickPerfInterval({ interval, start: range.start, end: range.end, now, retention: PERF_RETENTION_DEFAULT });
+  const series = {};
+  for (const t of types) { const one = synthMetric(entity, t, picked.name, range); series[t] = { unit: one.unit, points: one.points }; }
+  const startTime = range.start ? new Date(range.start).toISOString() : null;
+  const endTime = range.end ? new Date(range.end).toISOString() : null;
+  return {
+    ok: true, types: [...types], requested: PERF_INTERVALS[interval] ? interval : 'realtime', interval: picked.name, sampleSec: picked.id,
+    start: startTime, end: endTime, past: !!(startTime || endTime), refreshSec: 20, retention: { ...PERF_RETENTION_DEFAULT }, retentionSource: 'default',
+    series, missingCounters: [], mock: true,
+  };
+}
+const withOverload = (r) => ({ ...r, overloadPct: OVERLOAD_PCT });
 
 // Synthesize a realistic series for mock mode so the viewer works out of the box.
 // Honors an explicit { start, end } date range when provided.
@@ -99,13 +130,15 @@ api.get('/vms/:id/metrics', requirePerm('inv.vms'), async (req, res) => {
   const start = req.query.start && !Number.isNaN(Date.parse(req.query.start)) ? req.query.start : null;
   const end = req.query.end && !Number.isNaN(Date.parse(req.query.end)) ? req.query.end : null;
 
+  const types = parseMetricTypes(req.query.types);   // v2.911 복수 지표 — 로그인 1회 · QueryPerf 1회
+
   const snap = store.get();
   const vm = snap.vms.find((v) => v.id === id);
   if (!vm) return res.status(404).json({ ok: false, reason: 'VM을 찾을 수 없습니다.' });
   // 사용자 scope 밖 자원은 '없음'으로 응답(존재 여부도 흘리지 않는다).
   if (!inUserScope(req.user, snap, vm.vcenterId)) return res.status(404).json({ ok: false, reason: 'VM을 찾을 수 없습니다.' });
 
-  if (snap.source === 'mock') return res.json(synthMetric(vm, type, interval, { start, end }));
+  if (snap.source === 'mock') return res.json(types.length ? withOverload(synthMetrics(vm, types, interval, { start, end })) : synthMetric(vm, type, interval, { start, end }));
 
   // v2.598 VC2598-06: vCenter id 에 콜론이 있을 수 있다(registry 가 허용) — 첫 콜론에서 자르면 `apac:vc01:vm-1`
   // 이 vCenter 'apac' 으로 읽혀 '설정을 찾을 수 없습니다' 가 됐다. 스냅샷 객체의 vcenterId 로 자른다(morefOf).
@@ -114,7 +147,7 @@ api.get('/vms/:id/metrics', requirePerm('inv.vms'), async (req, res) => {
   if (!vc) return res.status(404).json({ ok: false, reason: 'vCenter 설정을 찾을 수 없습니다.' });
   if (metricAuthStopped(req, res, vc)) return;
   try {
-    res.json(await fetchVmMetric(vc, moref, type, interval, { start, end }));
+    res.json(types.length ? withOverload(await fetchVmMetrics(vc, moref, types, interval, { start, end })) : await fetchVmMetric(vc, moref, type, interval, { start, end }));
   } catch (err) {
     metricError(res, vc, err);
   }
@@ -129,19 +162,21 @@ api.get('/hosts/:id/metrics', requirePerm('inv.hosts'), async (req, res) => {
   const start = req.query.start && !Number.isNaN(Date.parse(req.query.start)) ? req.query.start : null;
   const end = req.query.end && !Number.isNaN(Date.parse(req.query.end)) ? req.query.end : null;
 
+  const types = parseMetricTypes(req.query.types);   // v2.911
+
   const snap = store.get();
   const host = (snap.hosts || []).find((h) => h.id === id);
   if (!host) return res.status(404).json({ ok: false, reason: '호스트를 찾을 수 없습니다.' });
   if (!inUserScope(req.user, snap, host.vcenterId)) return res.status(404).json({ ok: false, reason: '호스트를 찾을 수 없습니다.' });
 
-  if (snap.source === 'mock') return res.json(synthMetric(host, type, interval, { start, end }));
+  if (snap.source === 'mock') return res.json(types.length ? withOverload(synthMetrics(host, types, interval, { start, end })) : synthMetric(host, type, interval, { start, end }));
 
   const { vcId, moref } = vcRefOf(host);   // v2.598 VC2598-06 — 콜론 포함 vCenter id 안전
   const vc = loadVcenterConfig().vcenters.find((v) => v.id === vcId);
   if (!vc) return res.status(404).json({ ok: false, reason: 'vCenter 설정을 찾을 수 없습니다.' });
   if (metricAuthStopped(req, res, vc)) return;
   try {
-    res.json(await fetchHostMetric(vc, moref, type, interval, { start, end }));
+    res.json(types.length ? withOverload(await fetchHostMetrics(vc, moref, types, interval, { start, end })) : await fetchHostMetric(vc, moref, type, interval, { start, end }));
   } catch (err) {
     metricError(res, vc, err);
   }
